@@ -780,8 +780,8 @@ async def prospeccao_base_explorium(request: Request):
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    if not ctx["gerencia"]:
-        return JSONResponse({"ok": False, "erro": "Só o dono/gestor."})
+    if not ctx["gere_campanha"]:
+        return JSONResponse({"ok": False, "erro": "Peça ao dono pra liberar campanhas pra você."})
     from finance import explorium as ex
     if not ex.tem_credenciais():
         return JSONResponse({"ok": False, "erro": "EXPLORIUM_API_KEY não configurada no Render (Environment)."})
@@ -832,8 +832,8 @@ async def prospeccao_explorium_estimar(request: Request):
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    if not ctx["gerencia"]:
-        return JSONResponse({"ok": False, "erro": "Só o dono/gestor."})
+    if not ctx["gere_campanha"]:
+        return JSONResponse({"ok": False, "erro": "Peça ao dono pra liberar campanhas pra você."})
     from finance import explorium as ex
     if not ex.tem_credenciais():
         return JSONResponse({"ok": False, "erro": "EXPLORIUM_API_KEY não configurada no Render."})
@@ -852,8 +852,8 @@ async def prospeccao_explorium_importar(request: Request):
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    if not ctx["gerencia"]:
-        return JSONResponse({"ok": False, "erro": "Só o dono/gestor."})
+    if not ctx["gere_campanha"]:
+        return JSONResponse({"ok": False, "erro": "Peça ao dono pra liberar campanhas pra você."})
     from finance import explorium as ex
     if not ex.tem_credenciais():
         return JSONResponse({"ok": False, "erro": "EXPLORIUM_API_KEY não configurada no Render."})
@@ -916,13 +916,17 @@ async def prospeccao_explorium_importar(request: Request):
                     """insert into prospeccao (conta_id, empresa, site_url, segmento, email, whatsapp,
                          decisor_nome, decisor_cargo, decisor_telefone, decisor_whatsapp,
                          decisor_telefones, decisor_em, obs, origem, temperatura, status, estagio,
-                         enriquecido_em, criado_por)
-                       values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,now(),%s,'explorium','frio','novo','base',now(),%s)""",
+                         enriquecido_em, criado_por, vendedor_id)
+                       values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,now(),%s,'explorium','frio','novo','base',now(),%s,%s)""",
                     (conta_id, empresa[:250], dominio, (b.get("google_category") or b.get("linkedin_category") or "")[:120],
                      email, fone, (p.get("full_name") or "")[:200], (p.get("job_title") or "")[:120],
                      fone, bool(ci.get("mobile_phone")),
                      _json.dumps([{"formatado": t, "provavel": (i == 0)} for i, t in enumerate(tels)]),
-                     obs[:500], ctx["membro_id"]))
+                     # vendedor_id: gerência importa pra base da empresa (None, como
+                     # sempre); vendedor liberado importa PRA SI — senão ele paga a
+                     # consulta e o lead nasce sem dono, invisível na carteira dele.
+                     obs[:500], ctx["membro_id"],
+                     None if ctx["gerencia"] else ctx["membro_id"]))
                 inseridos += 1
             except Exception:  # noqa: BLE001
                 pass
@@ -7250,16 +7254,22 @@ async def prospeccao_base_enriquecer(request: Request):
     pids = pids[:CAP]
 
     if tipo == "cnpj":
-        if not ctx["gerencia"]:
-            return JSONResponse({"ok": False, "erro": "Só o dono/gestor busca CNPJ (consulta paga)."})
+        if not ctx["gere_campanha"]:
+            return JSONResponse({"ok": False, "erro": "Peça ao dono pra liberar campanhas pra você."})
         if not fontes.tem_chave_cnpja():
             return JSONResponse({"ok": False, "erro": "Busca por nome precisa da CNPJá (CNPJA_TOKEN no "
                                  "Render). Sem ela só dá pra colar o CNPJ direto na Ficha do lead."})
         with pool.connection() as c:
+            # ESCOPO: o vendedor liberado gasta consulta paga só nos leads DELE.
+            # Sem isto ele marcaria a base inteira da empresa (tem "marcar todos"
+            # no cabeçalho da tabela) e a fatura seria da conta. Mesma trava que o
+            # caminho grátis já fazia lá embaixo.
+            _esc = "" if ctx["gerencia"] else " and vendedor_id=%s"
+            _ex = () if ctx["gerencia"] else (ctx["membro_id"],)
             sel = c.execute(
                 "select id, empresa, cidade, uf, obs from prospeccao where conta_id=%s and id = any(%s)"
-                " and coalesce(nullif(trim(empresa),''),'') <> '' and coalesce(cnpj,'')=''",
-                (conta_id, pids)).fetchall()
+                " and coalesce(nullif(trim(empresa),''),'') <> '' and coalesce(cnpj,'')=''" + _esc,
+                (conta_id, pids) + _ex).fetchall()
         _INICIO = time.monotonic()
         achou, ambiguo, sem = 0, 0, 0
         processados = 0
@@ -7293,17 +7303,20 @@ async def prospeccao_base_enriquecer(request: Request):
                              "sem_leads": sem_leads})
 
     if tipo == "decisor":
-        if not ctx["gerencia"]:
-            return JSONResponse({"ok": False, "erro": "Só o dono/gestor busca decisor (consulta paga)."})
+        if not ctx["gere_campanha"]:
+            return JSONResponse({"ok": False, "erro": "Peça ao dono pra liberar campanhas pra você."})
         from finance import credify as cf
         if not cf.tem_credenciais():
             return JSONResponse({"ok": False, "erro": "Credify não configurada (CREDIFY_CLIENT_ID/SECRET no Render)."})
         with pool.connection() as c:
+            # mesmo escopo do CNPJ acima: consulta paga só nos leads do vendedor
+            _esc = "" if ctx["gerencia"] else " and vendedor_id=%s"
+            _ex = () if ctx["gerencia"] else (ctx["membro_id"],)
             sel = [r[0] for r in c.execute(
                 "select id from prospeccao where conta_id=%s and id = any(%s) and decisor_em is null"
                 " and (length(regexp_replace(coalesce(cnpj,''),'\\D','','g'))=14"
-                "      or coalesce(nullif(trim(whatsapp),''), nullif(trim(telefone),'')) is not null)",
-                (conta_id, pids)).fetchall()]
+                "      or coalesce(nullif(trim(whatsapp),''), nullif(trim(telefone),'')) is not null)" + _esc,
+                (conta_id, pids) + _ex).fetchall()]
         achou = 0
         for pid in sel:
             try:
@@ -7913,7 +7926,7 @@ _CAPTURA_PANEL_HTML = """
   <button type="button" class="caba@@GOOGLE_ON@@" data-tab="google" onclick="capTab('google')">📍 Google Maps</button>
   <button type="button" class="caba@@CNPJ_ON@@" data-tab="manual" onclick="capTab('manual')">🏢 CNPJ / ✏️ Manual</button>
   <button type="button" class="caba@@CSV_ON@@" data-tab="csv" onclick="capTab('csv')">📄 CSV</button>
-  {% if gerencia %}<button type="button" class="caba" data-tab="explorium" onclick="capTab('explorium')">🔮 Explorium</button>{% endif %}
+  {% if gere_campanha %}<button type="button" class="caba" data-tab="explorium" onclick="capTab('explorium')">🔮 Explorium</button>{% endif %}
 </div>
 
 <div class="captab" data-tab="google"@@GOOGLE_HIDE@@>
@@ -8212,12 +8225,12 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" style="font-size:.8rem"><b style="color:var(--txt)" id="base-sel-n">0</b> marcado(s) · {{ leads|length }} na página{% if leads|length>=300 %} (máx 300){% endif %}</div>
       <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
         <button type="button" class="pbtn ghost" onclick="baseEnriquecer('canais')" title="Raspa o site dos marcados e acha e-mail / Instagram / WhatsApp (grátis)">🔎 Enriquecer canais</button>
-        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseMarcarSemCnpj()" title="Marca só os leads desta página que ainda não têm CNPJ — pra rodar o Buscar CNPJ só neles">🔎 Marcar sem CNPJ</button>{% endif %}
-        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('cnpj')" title="Acha o CNPJ dos marcados sem CNPJ ainda, por nome + cidade (CNPJá) — consulta paga. Achando mais de um candidato, mostra pra você escolher aqui mesmo">🏢 Buscar CNPJ</button>{% endif %}
-        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('decisor')" title="Acha o dono dos marcados na Credify: por CNPJ (sócio) ou pelo telefone do Google (titular/dono) — consulta paga">🎯 Buscar decisor</button>{% endif %}
-        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseExplorium()" title="Teste de conexão com a Explorium (Vibe) no lead marcado">🔮 Explorium (teste)</button>{% endif %}
+        {% if gere_campanha %}<button type="button" class="pbtn ghost" onclick="baseMarcarSemCnpj()" title="Marca só os leads desta página que ainda não têm CNPJ — pra rodar o Buscar CNPJ só neles">🔎 Marcar sem CNPJ</button>{% endif %}
+        {% if gere_campanha %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('cnpj')" title="Acha o CNPJ dos marcados sem CNPJ ainda, por nome + cidade (CNPJá) — consulta paga. Achando mais de um candidato, mostra pra você escolher aqui mesmo">🏢 Buscar CNPJ</button>{% endif %}
+        {% if gere_campanha %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('decisor')" title="Acha o dono dos marcados na Credify: por CNPJ (sócio) ou pelo telefone do Google (titular/dono) — consulta paga">🎯 Buscar decisor</button>{% endif %}
+        {% if gere_campanha %}<button type="button" class="pbtn ghost" onclick="baseExplorium()" title="Teste de conexão com a Explorium (Vibe) no lead marcado">🔮 Explorium (teste)</button>{% endif %}
         <span style="width:1px;height:24px;background:var(--borda);margin:0 .15rem"></span>
-        {% if gerencia %}
+        {% if gere_campanha %}
         {% if ver_camp %}
         <button class="pbtn ghost" formaction="/painel/prospeccao/base/tirar-campanha" onclick="return baseTirarCheck()" style="color:var(--ambar);border-color:var(--ambar-borda)" title="Tira os marcados de qualquer campanha — voltam livres pra Base">🔓 Tirar da campanha</button>
         {% else %}
@@ -11274,7 +11287,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
       <h2 class="tt">📣 Campanhas</h2>
       <div class="mut" style="font-size:.85rem">Prospecção fria multicanal · <b style="color:var(--verde-claro)">{{ elegiveis }}</b> lead(s) com e-mail ou WhatsApp prontos pra abordar</div>
     </div>
-    {% if gerencia %}<button class="hdrbtn" type="button" onclick="document.getElementById('ovlCriar').classList.add('on');document.getElementById('nomeCampanha').focus()">＋ Criar</button>{% endif %}
+    {% if gere_campanha %}<button class="hdrbtn" type="button" onclick="document.getElementById('ovlCriar').classList.add('on');document.getElementById('nomeCampanha').focus()">＋ Criar</button>{% endif %}
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
 

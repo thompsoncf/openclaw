@@ -10167,7 +10167,14 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           if(st){st.textContent=conectado?'✅ Conectado':(d.status==='aguardando_qr'?'Aguardando QR':d.status);
                  st.style.color=conectado?'var(--verde-claro)':'var(--ambar)';}
           if(sair)sair.style.display=(d.status!=='desconectado')?'inline-flex':'none';
-          if(btn){btn.textContent=conectado?'Reconectar':'📱 Gerar QR';btn.disabled=false;}
+          // mesma correção que o chip 1 recebeu: conectado não é "Reconectar". O
+          // /iniciar devolve a sessão viva sem tocar nela, então o botão prometia uma
+          // ação que não acontece. Continua clicável — é a saída de quem está
+          // "conectado" e mudo.
+          if(btn){btn.textContent=conectado?'✓ Conectado':'📱 Gerar QR';
+            btn.classList.toggle('ghost',conectado);
+            btn.title=conectado?'A sessão está de pé. Clique só se desconfiar do status — verifica sem derrubar nada.':'';
+            btn.disabled=false;}
           if(d.status==='desconectado'||conectado){if(_c2Timer){clearInterval(_c2Timer);_c2Timer=null;}}}
         function c2Poll(){fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status?chip='+encodeURIComponent(c2Chip()))
           .then(function(r){return r.json();}).then(c2Show).catch(function(){c2Show(null);});}

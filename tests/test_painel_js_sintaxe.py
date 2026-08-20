@@ -30,6 +30,7 @@ import subprocess
 import jinja2
 import pytest
 
+from finance import vendas as v
 from web import painel_prospeccao as pp
 from web import painel_servicos as _ps  # registra "servicos" no mesmo loader
 
@@ -154,6 +155,41 @@ def test_o_funil_sabe_desenhar_o_estado_da_data():
     for fn in ("marcarData", "pintarSemHora"):
         assert fn in js, f"{fn} não está no JS servido"
     assert "ev-sem-hora" in html, "o aviso da hora de início sumiu do formulário"
+
+
+def test_todo_tom_de_selo_tem_cor_na_folha_de_estilo():
+    """O selo é pintado por classe (`oc-badge pend <tom>`), e o tom vem do Python.
+
+    Um tom novo no `finance/vendas.py` sem a regra correspondente aqui não quebra
+    nada: renderiza uma caixinha transparente, sem borda e com a cor do texto ao
+    redor — o aviso continua na tela e para de ser visto. É o modo de falhar mais
+    silencioso que esta linha tem, então é o que este teste guarda."""
+    html = _render("servicos")
+    tons = set()
+    for caso in (
+        dict(status="aprovada", data_estado={"estado": v.DATA_FORA, "dica": ""}),
+        dict(status="aprovada",
+             data_estado={"estado": v.DATA_SEGURADA, "texto": "até 22/08", "dica": ""}),
+        dict(status="aprovada", plano_difere=1),
+        dict(status="aprovada", contrato_numero=5, contrato_assinado=False),
+        dict(status="rascunho"),
+        dict(status="aprovada", pagamentos={"pagas": 1, "total": 2, "sem_comprovante": 1}),
+    ):
+        tons |= {sl["tom"] for sl in v.linha_do_funil(**caso)["selos"]}
+    assert tons, "nenhum selo foi produzido — o teste parou de testar"
+    for tom in sorted(tons):
+        assert f".oc-badge.pend.{tom}" in html, f"o tom '{tom}' não tem cor no CSS"
+
+
+def test_a_linha_do_funil_desenha_pendencia_acao_e_menu():
+    """As três peças da linha nova. Se qualquer uma sumir do JS servido, a rota
+    continua respondendo `painel` e a tela continua não mostrando nada."""
+    js = "\n".join(_scripts(_render("servicos")))
+    for fn in ("abrirMenuLinha", "fecharMenuLinha", "acaoDaLinha"):
+        assert fn in js, f"{fn} não está no JS servido"
+    assert "oc-badge pend" in js, "os selos de pendência sumiram da linha"
+    assert "oc-nada" in js, "o ✓ de 'nada pendente' sumiu"
+    assert "oc-menu-btn" in js, "o botão Ações sumiu"
 
 
 def test_o_js_da_agenda_compila(tmp_path):

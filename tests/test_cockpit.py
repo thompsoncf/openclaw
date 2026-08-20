@@ -433,7 +433,11 @@ def test_assumir_pausa_o_bot(pool):
 
 def test_enviar_mensagem_grava_e_pausa(pool, monkeypatch):
     from finance import whatsapp_out as wo
-    monkeypatch.setattr(wo, "enviar", lambda c, cid, num, txt: {"ok": True, "sid": "SM1"})
+    # a assinatura do dublê segue a real: enviar(c, conta_id, numero, texto, *, chip_id).
+    # Sem o `chip_id` aqui o dublê não bate com o que finance/cockpit.py chama, e o
+    # teste morre de TypeError em vez de testar o cockpit.
+    monkeypatch.setattr(wo, "enviar",
+                        lambda c, cid, num, txt, *, chip_id=None: {"ok": True, "sid": "SM1"})
     with pool.connection() as c:
         conta = _conta(c)
         v1 = _membro(c, conta, nome="V1", email="m1@x.com")
@@ -819,7 +823,8 @@ def test_cooldown_zera_quando_o_vendedor_responde(pool, monkeypatch):
     from web import painel_prospeccao as pp
     monkeypatch.setattr(webpush, "configurado", lambda: True)
     monkeypatch.setattr(webpush, "enviar", lambda sub, dados, ttl=3600: True)
-    monkeypatch.setattr(whatsapp_out, "enviar", lambda c, ci, num, txt: {"ok": True, "sid": "SM1"})
+    monkeypatch.setattr(whatsapp_out, "enviar",
+                        lambda c, ci, num, txt, *, chip_id=None: {"ok": True, "sid": "SM1"})
     with pool.connection() as c:
         conta = _conta(c); vend = _membro(c, conta, email="resp@x.com")
         lead = _lead(c, conta, vend, "Valeria")

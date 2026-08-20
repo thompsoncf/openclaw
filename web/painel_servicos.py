@@ -946,6 +946,17 @@ def painel_servicos_lista(request: Request):
         "pgto": vendas.resumo_pagamentos(
             r[16], r[15], pagos_por_orc.get(r[0], ()), comp_por_orc.get(r[0], ())),
     } for r in rows]
+    # O QUE A LINHA DIZ — selos de pendência, a ação principal e o resumo do que
+    # já foi. Montado aqui, depois de `itens`, porque lê o que acabou de ser
+    # calculado (o estado da data, os pagamentos) em vez de recalcular.
+    for it in itens:
+        it["painel"] = vendas.linha_do_funil(
+            status=it["status"], data_estado=it["data_estado"],
+            sinal=it["sinal"], sinal_pago=it["sinal_pago"], pagamentos=it["pgto"],
+            enviado_em=it["enviado_em"], contrato_numero=it["contrato_numero"],
+            contrato_assinado=it["contrato_assinado"],
+            plano_difere=it["plano_difere"], aprovada_por=it["aprovada_por"],
+            nunca_enviada=not it["enviado_em"])
     return JSONResponse({"itens": itens})
 
 
@@ -1707,11 +1718,6 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-ic{background:var(--bg); border:1px solid var(--borda); color:var(--txt-mut); cursor:pointer; font-size:.85rem; width:30px; height:30px; padding:0; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; transition:border-color .15s,color .15s,background .15s}
 .oc-ic:hover{color:var(--txt); border-color:var(--verde); background:var(--card)}
 .oc-del:hover{color:#e0857a; border-color:#5c2a27}
-/* mandar por e-mail: destacado do 🔗 e do 📄 porque é o único dos três que AGE —
-   os outros dois preparam, este manda. */
-.oc-ic.mail{color:var(--verde-claro); border-color:var(--neon-borda); background:var(--neon-fundo)}
-.oc-badge.enviado{background:var(--azul-fundo); color:var(--azul); border:1px solid var(--azul-borda);
-  text-transform:none; letter-spacing:0}
 
 /* A TELA DE ENVIO. Modal por cima do funil: o caminho de quem só quer mandar é
    abrir e apertar Enviar — tudo já vem preenchido. */
@@ -1741,10 +1747,6 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .env-msg.ok{background:var(--neon-fundo); border:1px solid var(--neon-borda); color:var(--verde-claro)}
 
 /* PAGAMENTOS. Mesma caixa do envio — o dono já sabe como ela abre e fecha. */
-.oc-ic.pgto{color:var(--azul); border-color:var(--azul-borda); background:var(--azul-fundo)}
-.oc-badge.pgto{background:var(--azul-fundo); color:var(--azul); border:1px solid var(--azul-borda);
-  text-transform:none; letter-spacing:0}
-.oc-badge.pgto.falta{background:var(--ambar-fundo); color:var(--amar); border-color:var(--ambar-borda)}
 .pg-tot{display:flex; gap:1.1rem; flex-wrap:wrap; font-size:.8rem; color:var(--txt-mut);
   border-bottom:1px solid var(--borda); padding-bottom:.55rem}
 .pg-tot b{color:var(--txt); font-variant-numeric:tabular-nums}
@@ -1821,21 +1823,85 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-hist{display:flex; align-items:center; justify-content:space-between; gap:.6rem; padding:.7rem .8rem; border:1px solid var(--borda); border-radius:10px; margin-bottom:.5rem; flex-wrap:wrap}
 .oc-av{width:32px; height:32px; border-radius:8px; background:#13251d; color:var(--verde-claro); display:flex; align-items:center; justify-content:center; font-weight:700; flex:none; margin-right:.7rem}
 .oc-badge{font-size:.66rem; font-weight:700; padding:.12rem .5rem; border-radius:6px; letter-spacing:.03em; text-transform:uppercase}
-.oc-badge.fechado{background:#10241d; color:var(--verde-claro)}
-.oc-badge.aberto{background:#2a2212; color:#e0b25a}
-/* pré-reserva: âmbar e TRACEJADO, o mesmo par que a agenda usa pra data provisória.
-   O tracejado é o sinal — cor sozinha some pra quem não distingue. */
-.oc-badge.pre{background:#2a2212; color:#e0b25a; border:1px dashed #6b5620; text-transform:none; letter-spacing:0}
-/* sinal já recebido: verde e SÓLIDO — o oposto do tracejado de "ainda esperando" */
-.oc-badge.sinalok{background:#10241d; color:var(--verde-claro); text-transform:none; letter-spacing:0}
-/* os outros dois estados da data. Verde sólido = firme, e os dois problemas em
-   coral: SÓLIDO pra "nunca entrou" (erro), TRACEJADO pra "liberada" (a data
-   existiu e caiu) — o mesmo par sólido/tracejado que separa firme de provisório
-   no resto da tela, pra quem não distingue cor ler pela forma. */
-.oc-badge.firme{background:var(--neon-fundo); color:var(--verde-claro); border:1px solid var(--neon-borda); text-transform:none; letter-spacing:0}
-.oc-badge.fora{background:var(--coral-fundo); color:var(--verm); border:1px solid var(--coral-borda); text-transform:none; letter-spacing:0}
-.oc-badge.solta{background:var(--coral-fundo); color:var(--verm); border:1px dashed var(--coral-borda); text-transform:none; letter-spacing:0}
-.oc-fechar.marcar{background:transparent; color:var(--verm); border:1px solid var(--coral-borda)}
+
+/* ---------------------------------------------- A LINHA DO FUNIL, LADO DIREITO
+   A regra que organiza tudo aqui: SELO = PENDÊNCIA. Antes a linha pintava um
+   selo pra cada coisa que tinha acontecido — aprovada, enviada, sinal recebido,
+   data firme, contrato assinado — e uma proposta perfeitamente em dia carregava
+   cinco caixinhas verdes dizendo que estava tudo bem. No meio disso, o selo que
+   importava (a data que caiu, a parcela sem comprovante) tinha o mesmo tamanho
+   e o mesmo peso de todos os outros e simplesmente sumia.
+   O que já aconteceu foi pro subtítulo cinza, à esquerda. Aqui à direita fica
+   só o que ainda falta — e quando não falta nada, um ✓ discreto. */
+.oc-acoes{display:flex; align-items:center; gap:.4rem; flex-wrap:wrap;
+  justify-content:flex-end; margin-left:auto; position:relative; flex:0 1 auto}
+/* O NOME NÃO CEDE ESPAÇO PROS SELOS. Uma proposta com quatro pendências enchia a
+   direita e espremia "Priscila Ramos · Aniversário 50 anos" numa palavra por
+   linha. Com um piso aqui, quem quebra pra linha de baixo é a barra de selos,
+   que é o que sobra.
+   (Isto morava num style inline no JS, com min-width:0 — e inline vence folha de
+   estilo, então a regra daqui não tinha como valer. Mora aqui agora.) */
+.oc-hist .oc-hist-open{display:flex; align-items:center; cursor:pointer;
+  flex:1 1 320px; min-width:0}
+.oc-hist .oc-hist-open > div{min-width:0}
+.oc-badge.pend{display:inline-flex; align-items:center; font-size:.7rem; font-weight:600;
+  padding:.22rem .55rem; border-radius:7px; letter-spacing:0; text-transform:none;
+  white-space:nowrap; border:1px solid transparent}
+/* coral = custa dinheiro se ficar assim (data fora da agenda, data liberada,
+   parcela paga sem comprovante) */
+.oc-badge.pend.coral{background:var(--coral-fundo); color:var(--verm); border-color:var(--coral-borda)}
+/* âmbar = está de pé mas depende de alguém (contrato esperando assinatura) */
+.oc-badge.pend.ambar{background:var(--ambar-fundo); color:var(--amar); border-color:var(--ambar-borda)}
+/* âmbar TRACEJADO = provisório, e o prazo corre. É o mesmo par sólido/tracejado
+   que a agenda usa pra separar reservado de segurado — quem não distingue cor
+   lê pela forma. */
+.oc-badge.pend.pre{background:var(--ambar-fundo); color:var(--amar);
+  border:1px dashed var(--ambar-borda)}
+/* azul = falta um passo seu, sem prazo nem prejuízo (nunca enviada ao cliente) */
+.oc-badge.pend.azul{background:var(--azul-fundo); color:var(--azul); border-color:var(--azul-borda)}
+.oc-nada{font-size:.72rem; color:var(--txt-mut); white-space:nowrap}
+
+/* A AÇÃO. Uma só por linha, verde, com o nome do que falta fazer. Verde deixou
+   de ser enfeite: onde ele estiver, é ali que se clica. */
+.oc-fechar{background:var(--verde); color:var(--sobre-verde); border:0; border-radius:8px;
+  padding:.4rem .8rem; font-weight:600; cursor:pointer; font-size:.8rem; white-space:nowrap}
+.oc-fechar:disabled{opacity:.55; cursor:default}
+
+/* AÇÕES ▾ — com a palavra escrita, não um ícone. Eram oito emojis sem rótulo
+   (✏️ 🔗 📄 ✉️ 📎 📜 ↗ 🗑) encostados uns nos outros, cinco deles "abrir ou
+   mandar um documento" pra DOIS documentos diferentes, e nada dizia qual era de
+   qual. Ninguém decora fileira de emoji; todo mundo lê "Ações". */
+.oc-menu-btn{background:var(--bg); border:1px solid var(--borda); color:var(--txt-mut);
+  border-radius:8px; padding:.4rem .6rem; font-size:.78rem; font-weight:600; cursor:pointer;
+  white-space:nowrap; display:inline-flex; align-items:center; gap:.3rem;
+  transition:border-color .15s, color .15s}
+.oc-menu-btn:hover{color:var(--txt); border-color:var(--verde)}
+.oc-menu-btn .cv{font-size:.65rem; opacity:.8}
+
+/* O menu é filho do .oc-acoes (que é relative) — abre ancorado na direita da
+   própria linha, não no canto da tela. */
+.oc-menu{position:absolute; top:calc(100% + 6px); right:0; z-index:50;
+  min-width:230px; max-width:min(300px, calc(100vw - 2rem));
+  background:var(--card); border:1px solid var(--borda); border-radius:11px;
+  padding:.3rem; display:flex; flex-direction:column;
+  box-shadow:0 12px 32px rgba(0,0,0,.5)}
+/* agrupado POR DOCUMENTO: "Proposta nº 14" e "Contrato nº 5" viram os títulos, e
+   aí o link que está embaixo de cada um não precisa mais ser adivinhado. */
+.oc-mgrupo{font-size:.62rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--txt-mut); padding:.5rem .55rem .25rem}
+.oc-mgrupo:first-child{padding-top:.25rem}
+.oc-mi{display:flex; align-items:center; gap:.5rem; width:100%; text-align:left;
+  background:none; border:0; border-radius:8px; padding:.44rem .55rem; cursor:pointer;
+  font-size:.83rem; font-family:inherit; color:var(--txt)}
+.oc-mi:hover{background:var(--card-2)}
+.oc-mi .e{flex:none; width:1.15rem; text-align:center; font-size:.85rem}
+.oc-mi .t{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.oc-mi .s{flex:none; font-size:.7rem; color:var(--txt-mut)}
+/* apagar fica sozinho, atrás de uma linha e em coral: era um 🗑 do mesmo tamanho
+   e da mesma cor do 📄, encostado nele. */
+.oc-mi.sep{margin-top:.3rem; border-top:1px solid var(--borda); padding-top:.5rem; border-radius:0 0 8px 8px}
+.oc-mi.perigo{color:var(--verm)}
+.oc-mi.perigo:hover{background:var(--coral-fundo)}
 /* DESCONTO: campo + alternador %/R$. O mesmo par se repete na linha do item e no
    total, de propósito — dois controles diferentes pra mesma ideia viram duas ideias. */
 .oc-dpar{display:flex; align-items:stretch; width:100%}
@@ -1852,16 +1918,13 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-dline b{color:var(--verde-claro)}
 /* subtotal da linha: o cheio riscado por cima do líquido, quando há desconto */
 .oc-sub-risc{display:block; font-size:.72rem; color:var(--txt-mut); text-decoration:line-through}
-/* o contrato na linha do funil: âmbar enquanto espera assinatura, verde depois */
-.oc-badge.ctwait{background:#241C0F; color:#e0b25a; border:1px solid #5A4520; text-transform:none; letter-spacing:0}
-.oc-badge.ctok{background:#10241d; color:var(--verde-claro); text-transform:none; letter-spacing:0}
-.oc-fechar{background:var(--verde); color:var(--sobre-verde); border:0; border-radius:8px; padding:.4rem .8rem; font-weight:600; cursor:pointer; font-size:.8rem}
-/* "Sinal recebido" não é "Fechar contrato": mesma forma, peso menor — fechar o
-   contrato gera título a receber, confirmar o sinal só firma a data. */
-.oc-fechar.sinal{background:transparent; color:#e0b25a; border:1px solid #6b5620}
 /* mobile: cada serviço vira 2 linhas (toggle+nome+ações em cima, valores embaixo).
    Fica no FIM do bloco pra vencer a cascata das regras base acima. */
 @media(max-width:600px){
+  /* no celular a linha quebra em duas: quem/quanto em cima, pendências e ações
+     embaixo — alinhadas à ESQUERDA, embaixo do nome, senão o ✓ e o "Ações" ficam
+     pendurados sozinhos no canto direito. */
+  .oc-hist .oc-acoes{width:100%; margin-left:0; justify-content:flex-start}
   .sv-wrap{padding-left:.6rem; padding-right:.6rem}
   .sv-wrap .oc-head{display:none!important}   /* o JS seta display:grid inline; !important vence no mobile */
   .sv-wrap .oc-mod{display:flex; flex-wrap:wrap; align-items:center; gap:.4rem .5rem; padding:.7rem 0}
@@ -3336,6 +3399,87 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   document.addEventListener('keydown',function(ev){
     if(ev.key==='Escape' && ENV_ID) envFechar();});
 
+  // ------------------------------------------------------- a ação e o menu
+  //
+  // A LINHA CHEGOU A MOSTRAR QUATORZE COISAS: seis selos e oito ícones sem
+  // rótulo. Cada uma entrou por um bom motivo — e juntas viraram uma parede onde
+  // nada se destacava. Cinco ícones faziam "abrir ou mandar documento", pra dois
+  // documentos diferentes, e o 🗑 tinha o mesmo tamanho e a mesma cor do 📄.
+  //
+  // Agora: os avisos de pendência ficam à vista, uma ação principal com o nome do
+  // que falta, e o resto atrás do "Ações ▾".
+  function acaoDaLinha(it, chave, btn){
+    if(chave==='sinal')       return sinalRecebido(it.id,it.cliente,btn);
+    if(chave==='marcar')      return marcarData(it.id,btn);
+    if(chave==='resegurar')   return marcarData(it.id,btn);
+    if(chave==='comprovante') return abrirPagamentos(it.id,it.cliente);
+    if(chave==='enviar')      return abrirEnvio(it.id);
+    if(chave==='fechar')      return fechar(it.id,btn,it.plano_difere);
+  }
+
+  var _menuAberto=null;
+  function fecharMenuLinha(){
+    if(_menuAberto){_menuAberto.remove();_menuAberto=null;}
+  }
+  document.addEventListener('click',fecharMenuLinha);
+  document.addEventListener('keydown',function(ev){if(ev.key==='Escape')fecharMenuLinha();});
+
+  function _mi(texto, emoji, sufixo, aoClicar, classe){
+    var b=document.createElement('button');
+    b.className='oc-mi'+(classe?(' '+classe):'');
+    b.innerHTML='<span class="e">'+emoji+'</span><span class="t">'+esc(texto)+'</span>'
+      +(sufixo?('<span class="s">'+esc(sufixo)+'</span>'):'');
+    b.addEventListener('click',function(ev){ev.stopPropagation();fecharMenuLinha();aoClicar();});
+    return b;
+  }
+  function _mgrupo(texto){
+    var d=document.createElement('div'); d.className='oc-mgrupo'; d.textContent=texto; return d;
+  }
+
+  function abrirMenuLinha(it, ancora){
+    fecharMenuLinha();
+    var m=document.createElement('div'); m.className='oc-menu'; m.setAttribute('role','menu');
+    m.addEventListener('click',function(ev){ev.stopPropagation();});
+    var fechado=it.status==='fechado', aprovada=it.status==='aprovada';
+    var origem=window.location.origin;
+
+    // AGRUPADO POR DOCUMENTO. É o que resolve o "qual link é de qual": antes o 🔗
+    // copiava o da proposta e o 📜 o do contrato, e ninguém tinha como saber.
+    m.appendChild(_mgrupo('Proposta'+(it.numero?(' nº '+it.numero):'')));
+    if(!fechado){
+      m.appendChild(_mi('Editar','✏️','',function(){abrir(it.id);}));
+    }
+    if(it.token){
+      m.appendChild(_mi('Abrir / imprimir','📄','',function(){
+        window.open('/proposta/'+it.token,'_blank');}));
+      m.appendChild(_mi('Copiar link','🔗','',function(){
+        navigator.clipboard.writeText(origem+'/proposta/'+it.token);}));
+      m.appendChild(_mi('Mandar por e-mail','✉️',it.enviado_em?('enviada '+it.enviado_em):'',
+        function(){abrirEnvio(it.id);}));
+    }
+    if(it.contrato_token){
+      m.appendChild(_mgrupo('Contrato nº '+it.contrato_numero));
+      m.appendChild(_mi('Abrir','📜',it.contrato_assinado?'assinado':'aguardando',function(){
+        window.open('/contrato/'+it.contrato_token,'_blank');}));
+      m.appendChild(_mi('Copiar link','🔗','',function(){
+        navigator.clipboard.writeText(origem+'/contrato/'+it.contrato_token);}));
+    }
+    if(it.pgto&&it.pgto.total){
+      m.appendChild(_mgrupo('Dinheiro'));
+      m.appendChild(_mi('Pagamentos e comprovantes','📎',
+        it.pgto.pagas+' de '+it.pgto.total, function(){abrirPagamentos(it.id,it.cliente);}));
+    }
+    // APAGAR FICA SOZINHO, ATRÁS DE UMA LINHA E EM CORAL. Era um 🗑 do mesmo
+    // tamanho e da mesma cor do 📄, encostado nele.
+    if(!fechado && !aprovada){
+      m.appendChild(_mi('Apagar proposta','🗑','',function(){
+        excluir(it.id,it.cliente,ancora);},'sep perigo'));
+    }
+
+    ancora.parentNode.appendChild(m);
+    _menuAberto=m;
+  }
+
   // ------------------------------------------------ pagamentos e comprovantes
   //
   // O comprovante é da PARCELA. Um botão só na linha não saberia de qual —
@@ -3463,158 +3607,61 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       box.innerHTML='';
       d.itens.forEach(function(it){
         var el=document.createElement('div'); el.className='oc-hist';
-        var fechado=it.status==='fechado';
-        var left=document.createElement('div'); left.className='oc-hist-open';
-        left.style.cssText='display:flex;align-items:center;min-width:0;flex:1;cursor:pointer';
-        left.title='Abrir proposta';
+        var fechado=it.status==='fechado', aprovada=it.status==='aprovada';
+        var pn=it.painel||{selos:[],acao:null,resumo:''};
         var evento=it.modo==='evento';
+
+        // ESQUERDA: quem, e o que JÁ ACONTECEU. O resumo em cinza é onde mora o
+        // "aprovada · sinal recebido · data reservada" — continua visível, para de
+        // gritar. Antes cada um desses era um selo colorido próprio, e uma proposta
+        // sem pendência nenhuma carregava cinco caixinhas verdes dizendo que estava
+        // tudo bem: era esse ruído que fazia os selos de VERDADE sumirem no meio.
+        var left=document.createElement('div'); left.className='oc-hist-open';
+        left.title='Abrir proposta';
         var sub=[(it.numero?('nº '+it.numero):''),(it.data?('gerada '+esc(it.data)):''),
-                 it.mods+(evento?' itens':' módulos'),esc(evento?it.setup:it.total)]
+                 esc(evento?it.setup:it.total), esc(pn.resumo||'')]
                 .filter(Boolean).join(' · ');
         left.innerHTML='<div class="oc-av">'+esc(it.inicial)+'</div>'
-          +'<div><b>'+esc(it.cliente)+(it.empresa?' <span class="mut">· '+esc(it.empresa)+'</span>':'')+'</b>'
+          +'<div style="min-width:0"><b>'+esc(it.cliente)+(it.empresa?' <span class="mut">· '+esc(it.empresa)+'</span>':'')+'</b>'
           +'<div class="mut" style="font-size:.78rem">'+sub+'</div></div>';
         left.addEventListener('click',function(){abrir(it.id);});
         el.appendChild(left);
-        var right=document.createElement('div'); right.style.display='flex'; right.style.alignItems='center'; right.style.gap='.5rem'; right.style.flexWrap='wrap';
-        var aprovada=it.status==='aprovada';
-        var badge=document.createElement('span');
-        badge.className='oc-badge '+(fechado?'fechado':(aprovada?'fechado':'aberto'));
-        badge.textContent=fechado?'Fechado':(aprovada?('Aprovada'+(it.aprovada_por?' · '+esc(it.aprovada_por):'')):esc(it.status));
-        right.appendChild(badge);
-        // O ESTADO DA DATA — quatro possíveis, e até 19/08 a linha desenhava um só
-        // (a pré-reserva correndo). "Firme", "nunca entrou" e "liberada" ficavam
-        // com a mesma cara, e duas delas são problema. A redação inteira mora no
-        // servidor (vendas.estado_da_data); aqui só se escolhe a cor e o botão.
-        if(it.data_estado){
-          var CLS={reservada:'firme',segurada:'pre',fora:'fora',liberada:'solta'};
-          var dd=document.createElement('span');
-          dd.className='oc-badge '+(CLS[it.data_estado.estado]||'pre');
-          dd.textContent=it.data_estado.texto;
-          dd.title=it.data_estado.dica||'';
-          right.appendChild(dd);
-          if(it.data_estado.acao==='sinal'){
-            var bs=document.createElement('button'); bs.className='oc-fechar sinal';
-            bs.textContent='Sinal recebido';
-            bs.title='Confirma que o sinal caiu: a data vira compromisso firme na agenda '
-                    +'e o título dessa parcela entra como recebido, na data de hoje.';
-            bs.addEventListener('click',function(){sinalRecebido(it.id,it.cliente,bs);});
-            right.appendChild(bs);
-          }
-          else if(it.data_estado.acao==='marcar'||it.data_estado.acao==='resegurar'){
-            var bm=document.createElement('button'); bm.className='oc-fechar marcar';
-            bm.textContent=(it.data_estado.acao==='marcar')?'Marcar agora':'Segurar de novo';
-            bm.title=it.data_estado.dica||'';
-            bm.addEventListener('click',function(){marcarData(it.id,bm);});
-            right.appendChild(bm);
-          }
-        }
-        // Sinal JÁ confirmado: fica dito na linha. Sem isso, depois que o botão some
-        // não sobra nada na tela dizendo que aquele dinheiro entrou — e é ele que
-        // explica por que o título dessa parcela não aparece em aberto.
-        if(!(it.data_estado&&it.data_estado.estado==='segurada') && it.sinal_pago && it.sinal){
-          var sp=document.createElement('span'); sp.className='oc-badge sinalok';
-          sp.textContent='Sinal recebido · '+esc(it.sinal);
-          sp.title=fechado?'O título dessa parcela entrou como recebido no livro-caixa, '
-                          +'na data em que o sinal caiu.'
-                         :'Ao fechar o contrato, essa parcela já entra como recebida — '
-                          +'com a data em que o sinal caiu.';
-          right.appendChild(sp);
-        }
-        if(!fechado){
-          var be=document.createElement('button'); be.className='oc-ic'; be.title='Editar proposta'; be.textContent='✏️';
-          be.addEventListener('click',function(){abrir(it.id);});
-          right.appendChild(be);
-        }
-        // QUANTO JÁ ENTROU. O vendedor vê igual ao dono: cobrar o cliente sem saber
-        // o que já foi pago é ligar no escuro. O que ele não pode é dar baixa nem
-        // anexar — isso o servidor decide, não este selo.
-        if(it.pgto && it.pgto.pagas){
-          var pg=document.createElement('span');
-          var falta=it.pgto.sem_comprovante;
-          pg.className='oc-badge pgto'+(falta?' falta':'');
-          pg.textContent=it.pgto.pagas+' de '+it.pgto.total+' pagas'
-                       +(falta?(' · '+falta+' sem comprovante'):'');
-          pg.title=falta?'Parcela paga sem comprovante anexado.'
-                        :'Todas as parcelas pagas têm comprovante.';
-          right.appendChild(pg);
-        }
-        // JÁ FOI MANDADA? A pergunta que só se respondia abrindo o Gmail — e na
-        // dúvida se mandava de novo, pro mesmo cliente.
-        if(it.enviado_em){
-          var en=document.createElement('span'); en.className='oc-badge enviado';
-          en.textContent='✉️ enviado '+esc(it.enviado_em);
-          en.title='Último envio por e-mail que deu certo.';
-          right.appendChild(en);
-        }
-        if(it.token){
-          var lk=window.location.origin+'/proposta/'+it.token;
-          var bl=document.createElement('button'); bl.className='oc-ic'; bl.title='Copiar link da proposta'; bl.textContent='🔗';
-          bl.addEventListener('click',function(){navigator.clipboard.writeText(lk); bl.textContent='✓'; setTimeout(function(){bl.textContent='🔗';},1200);
-            /* anota que a proposta saiu por aqui — é o que faz o card do funil andar.
-               keepalive porque a pessoa costuma trocar de aba logo depois de copiar;
-               e o catch é mudo de propósito: o link JÁ foi copiado, e um erro de rede
-               não pode virar um alerta que sugere o contrário. */
-            fetch('/painel/servicos/proposta/'+it.id+'/link-copiado',{method:'POST',keepalive:true}).catch(function(){});});
-          var bp=document.createElement('button'); bp.className='oc-ic'; bp.title='Abrir / baixar PDF da proposta'; bp.textContent='📄';
-          bp.addEventListener('click',function(){window.open('/proposta/'+it.token,'_blank');});
-          var bm=document.createElement('button'); bm.className='oc-ic mail'; bm.title='Mandar por e-mail'; bm.textContent='✉️';
-          bm.addEventListener('click',function(){abrirEnvio(it.id);});
-          right.appendChild(bl); right.appendChild(bp); right.appendChild(bm);
-        }
-        // PAGAMENTOS: o sinal e as parcelas, com o comprovante de cada uma. Só
-        // aparece quando há plano de pagamento — orçamento sem parcela não tem o
-        // que mostrar.
-        if(it.pgto && it.pgto.total){
-          var pb=document.createElement('button'); pb.className='oc-ic pgto';
-          pb.title='Pagamentos e comprovantes'; pb.textContent='📎';
-          pb.addEventListener('click',function(){abrirPagamentos(it.id,it.cliente);});
-          right.appendChild(pb);
-        }
-        // O CONTRATO é outro documento, com link próprio — e por isso tem botão
-        // próprio aqui. Só aparece depois que ele nasce (na APROVAÇÃO da proposta,
-        // pra o cliente ler as cláusulas antes de pagar a entrada): antes disso
-        // não existe contrato pra mandar.
-        if(it.contrato_token){
-          var ctl=window.location.origin+'/contrato/'+it.contrato_token;
-          var cs=document.createElement('span');
-          cs.className='oc-badge '+(it.contrato_assinado?'ctok':'ctwait');
-          cs.textContent=(it.contrato_assinado?'Contrato nº '+it.contrato_numero+' assinado'
-                                              :'Contrato nº '+it.contrato_numero+' · aguardando');
-          cs.title=it.contrato_assinado?'O cliente já aceitou as cláusulas.'
-                                       :'Mande o link pro cliente ler e assinar.';
-          right.appendChild(cs);
-          var cb=document.createElement('button'); cb.className='oc-ic';
-          cb.title='Copiar link do contrato'; cb.textContent='📜';
-          cb.addEventListener('click',function(){navigator.clipboard.writeText(ctl);
-            cb.textContent='✓'; setTimeout(function(){cb.textContent='📜';},1200);});
-          var co=document.createElement('button'); co.className='oc-ic';
-          co.title='Abrir o contrato'; co.textContent='↗';
-          co.addEventListener('click',function(){window.open('/contrato/'+it.contrato_token,'_blank');});
-          right.appendChild(cb); right.appendChild(co);
-        }
-        // NO NICHO DE EVENTOS QUEM FECHA É A ASSINATURA DO CLIENTE, não este botão.
-        // Ele gerava contas a receber e lançava receita sem olhar contrato nenhum —
-        // e o nome "Fechar contrato" convidava a apertar justamente quando o
-        // contrato ainda estava sem assinatura. Nos nichos recorrentes não existe
-        // contrato pra assinar e nada muda.
-        //
-        // A ROTA continua viva e barrada pela mesma trava do servidor: se a geração
-        // do financeiro falhar na hora da assinatura, o contrato fica assinado e o
-        // fechamento é retomável. Esconder o botão não é remover o caminho.
-        if(!fechado && !evento){
-          var b=document.createElement('button'); b.className='oc-fechar'; b.textContent='Fechar contrato';
-          b.addEventListener('click',function(){fechar(it.id,b,it.plano_difere||0);});
+
+        var right=document.createElement('div'); right.className='oc-acoes';
+
+        // DIREITA: só o que está PENDENTE. Selo colorido virou sinônimo de "tem
+        // coisa a fazer" — quem não tem nada mostra um ✓ discreto, e some.
+        (pn.selos||[]).forEach(function(sl){
+          var b=document.createElement('span');
+          b.className='oc-badge pend '+esc(sl.tom||'azul');
+          b.textContent=sl.texto; b.title=sl.dica||'';
           right.appendChild(b);
+        });
+        if(!(pn.selos||[]).length){
+          var okz=document.createElement('span'); okz.className='oc-nada';
+          okz.textContent='✓ nada pendente';
+          right.appendChild(okz);
         }
-        // assinada/fechada não some: é documento com aceite do cliente (e, no
-        // fechado, título a receber). O servidor recusa de qualquer jeito — aqui o
-        // botão nem aparece, pra não oferecer o que vai dar erro.
-        if(!fechado && !aprovada){
-          var bx=document.createElement('button'); bx.className='oc-ic'; bx.title='Apagar proposta'; bx.textContent='🗑';
-          bx.addEventListener('click',function(){excluir(it.id,it.cliente,bx);});
-          right.appendChild(bx);
+
+        // A AÇÃO. Uma só, com o nome do que falta — verde deixa de ser enfeite e
+        // passa a significar "é isto". As outras pendências continuam nos selos:
+        // some o botão, não o aviso.
+        if(pn.acao){
+          var ba=document.createElement('button'); ba.className='oc-fechar';
+          ba.textContent=pn.acao.texto;
+          ba.addEventListener('click',function(){acaoDaLinha(it,pn.acao.chave,ba);});
+          right.appendChild(ba);
         }
+
+        // AÇÕES ▾ — com a palavra escrita. Eram OITO ícones sem rótulo (✏️ 🔗 📄
+        // ✉️ 📎 📜 ↗ 🗑), cinco deles "abrir ou mandar documento" pra DOIS
+        // documentos diferentes, e nada dizia qual era de qual.
+        var bmenu=document.createElement('button'); bmenu.className='oc-menu-btn';
+        bmenu.innerHTML='Ações <span class="cv">▾</span>';
+        bmenu.setAttribute('aria-haspopup','menu');
+        bmenu.addEventListener('click',function(ev){ev.stopPropagation();abrirMenuLinha(it,bmenu);});
+        right.appendChild(bmenu);
+
         el.appendChild(right);
         box.appendChild(el);
       });

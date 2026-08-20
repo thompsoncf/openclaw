@@ -25,17 +25,18 @@ import logging
 import re
 import secrets
 
-from fastapi import APIRouter, File, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse,
+                               Response)
 from psycopg.errors import UniqueViolation
 from pydantic import BaseModel
 
 from core.brain import Brain
 from db.conexao import get_pool
 from finance.cnpj_info import consultar_cnpj
-from finance import (agenda as ag, contrato as ctr, desconto as dsc, empresa as emp,
-                     icones_servico as ics, proposta_email as pmail, vendas,
-                     servicos_catalogo as scat)
+from finance import (agenda as ag, comprovantes as comprov, contrato as ctr,
+                     desconto as dsc, empresa as emp, icones_servico as ics,
+                     proposta_email as pmail, vendas, servicos_catalogo as scat)
 from web.portal import _render, _env, conta_logada, brl
 
 router = APIRouter()
@@ -132,6 +133,25 @@ def _garantir_tabela(c):
             criado_em     timestamptz not null default now());
         create index if not exists idx_orc_envios_orcamento
             on orcamento_envios (orcamento_id, criado_em desc);
+    """)
+    # comprovante de pagamento por PARCELA (migração 179). Guarda o CAMINHO no
+    # bucket privado, nunca uma URL — ver finance/comprovantes.
+    c.execute("""
+        create table if not exists orcamento_comprovantes (
+            id            bigserial primary key,
+            conta_id      bigint      not null,
+            orcamento_id  bigint      not null,
+            parcela_idx   int         not null,
+            caminho       text        not null,
+            nome          text        not null default '',
+            tipo          text        not null default '',
+            bytes         bigint      not null default 0,
+            por           text        not null default '',
+            criado_em     timestamptz not null default now());
+        create unique index if not exists uq_orc_comprovante
+            on orcamento_comprovantes (orcamento_id, parcela_idx);
+        create index if not exists idx_orc_comprovante_conta
+            on orcamento_comprovantes (conta_id, orcamento_id);
     """)
     c.commit()
 
@@ -825,6 +845,30 @@ def painel_servicos_lista(request: Request):
             rows = c.execute(
                 _cols + """ from orcamentos where conta_id=%s
                    order by criado_em desc limit 50""", (conta[0],)).fetchall()
+    # OS PAGAMENTOS DE TODAS AS LINHAS, em dois SELECTs. Por linha seriam cem
+    # consultas numa lista de cinquenta — o mesmo N+1 que já custou caro na Agenda.
+    ids = [r[0] for r in rows]
+    pagos_por_orc, comp_por_orc = {}, {}
+    if ids:
+        with get_pool().connection() as c:
+            try:
+                for oid, idx in c.execute(
+                        """select orcamento_id, parcela_idx from titulos
+                            where conta_id=%s and orcamento_id = any(%s)
+                              and parcela_idx is not null and status='pago'""",
+                        (conta[0], ids)).fetchall():
+                    pagos_por_orc.setdefault(oid, []).append(idx)
+            except Exception:  # noqa: BLE001 — conta sem o módulo financeiro
+                pagos_por_orc = {}
+            try:
+                for oid, idx in c.execute(
+                        """select orcamento_id, parcela_idx from orcamento_comprovantes
+                            where conta_id=%s and orcamento_id = any(%s)""",
+                        (conta[0], ids)).fetchall():
+                    comp_por_orc.setdefault(oid, []).append(idx)
+            except Exception:  # noqa: BLE001
+                comp_por_orc = {}
+
     itens = [{
         "id": r[0],
         "cliente": r[1] or "-",
@@ -871,6 +915,9 @@ def painel_servicos_lista(request: Request):
             status=r[8], modo=r[13] or "recorrente", evento=r[21],
             evento_status=r[22], pre_reserva_ate=r[20]),
         "enviado_em": r[23].astimezone(ag.BRT).strftime("%d/%m %H:%M") if r[23] else "",
+        # quanto já entrou, e quanto disso está sem comprovante
+        "pgto": vendas.resumo_pagamentos(
+            r[16], r[15], pagos_por_orc.get(r[0], ()), comp_por_orc.get(r[0], ())),
     } for r in rows]
     return JSONResponse({"itens": itens})
 
@@ -1127,6 +1174,125 @@ def painel_servicos_enviar_email(request: Request, dados: EnviarEmailIn):
         # pelo WhatsApp resolve o dia dele enquanto a caixa se conserta.
         return JSONResponse({"erro": r["erro"], "link": link}, status_code=502)
     return JSONResponse({"ok": True, "remetente": r["remetente"], "para": para})
+
+
+# ==================================== COMPROVANTE DE PAGAMENTO (sinal e parcelas)
+#
+# O comprovante é da PARCELA, não do orçamento — um orçamento tem o sinal e mais N.
+# A chave é `parcela_idx`, a mesma que os títulos usam.
+#
+# QUEM FAZ O QUÊ, e é de propósito que sejam gates diferentes:
+#   ver a lista e o arquivo   dono, gestor e VENDEDOR — é ele que cobra o cliente,
+#                             e cobrar sem saber o que já entrou é ligar no escuro
+#   anexar                    só dono e gestor. Papel de dinheiro é do financeiro.
+#
+# `vendas` + `financeiro` dá exatamente dono e gestor: o papel `financeiro` puro
+# não passa no gate da aba, e o vendedor não tem `financeiro`.
+
+
+def _conta_financeiro(request: Request):
+    """Gate de quem MEXE em dinheiro dentro da aba: dono e gestor."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return None, JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    from contas import equipe as _equipe
+    if not _equipe.caps_do_papel(request.session.get("papel", "dono"))["financeiro"]:
+        return None, JSONResponse(
+            {"erro": "só o dono e o gestor anexam comprovante"}, status_code=403)
+    return conta, None
+
+
+@router.get("/painel/servicos/pagamentos/{orc_id}")
+def painel_servicos_pagamentos(request: Request, orc_id: int):
+    """O sinal e as parcelas do orçamento, com o que já foi pago e o que tem
+    comprovante. Aberto pra quem vende — inclusive o vendedor."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    pool = get_pool()
+    with pool.connection() as c:
+        _garantir_tabela(c)
+    d = vendas.pagamentos_do_orcamento(pool, conta[0], int(orc_id))
+    if not d:
+        return JSONResponse({"erro": "orçamento não encontrado"}, status_code=404)
+    from contas import equipe as _equipe
+    pode = _equipe.caps_do_papel(request.session.get("papel", "dono"))["financeiro"]
+    anexos = comprov.por_orcamento(pool, conta[0], int(orc_id))
+    linhas = []
+    for p in d["parcelas"]:
+        a = anexos.get(p["idx"])
+        linhas.append({
+            "idx": p["idx"], "rotulo": p["rotulo"], "valor": brl(p["valor_centavos"]),
+            "venc": ctr.data_br(p["venc"]) if p["venc"] else "",
+            "forma": p["forma"], "pago": p["pago"],
+            "pago_em": p["pago_em"].strftime("%d/%m/%Y") if p["pago_em"] else "",
+            "vence_hoje": p["vence_hoje"],
+            "comprovante_id": (a or {}).get("id"),
+            "comprovante_nome": (a or {}).get("nome") or "",
+        })
+    return JSONResponse({
+        "parcelas": linhas, "total": brl(d["total"]), "recebido": brl(d["recebido"]),
+        "falta": brl(d["falta"]),
+        # a tela só oferece o botão quando ele tem pra onde mandar o arquivo —
+        # botão que engole comprovante é pior que botão nenhum
+        "pode_anexar": bool(pode and comprov.configurado()),
+        "sem_storage": not comprov.configurado(),
+    })
+
+
+@router.post("/painel/servicos/comprovante")
+async def painel_servicos_comprovante_subir(
+        request: Request, orcamento_id: int = Form(...), parcela_idx: int = Form(...),
+        arquivo: UploadFile = File(...)):
+    """Anexa (ou substitui) o comprovante de uma parcela."""
+    conta, redir = _conta_financeiro(request)
+    if redir is not None:
+        return redir
+    pool = get_pool()
+    d = vendas.pagamentos_do_orcamento(pool, conta[0], int(orcamento_id))
+    if not d:
+        return JSONResponse({"erro": "orçamento não encontrado"}, status_code=404)
+    if not any(p["idx"] == int(parcela_idx) for p in d["parcelas"]):
+        # parcela inventada na URL não pode criar linha órfã: o comprovante ficaria
+        # invisível na tela e ninguém saberia que subiu.
+        return JSONResponse({"erro": "essa parcela não existe no plano"}, status_code=400)
+    conteudo = await arquivo.read()
+    try:
+        caminho = comprov.subir(conteudo, arquivo.content_type or "",
+                                conta_id=conta[0], orcamento_id=int(orcamento_id),
+                                parcela_idx=int(parcela_idx))
+    except ValueError as e:
+        return JSONResponse({"erro": str(e)}, status_code=400)
+    membro_id, _papel = _ator(request)
+    r = comprov.registrar(pool, conta[0], int(orcamento_id), int(parcela_idx),
+                          caminho=caminho, nome=arquivo.filename or "",
+                          tipo=arquivo.content_type or "", bytes_=len(conteudo),
+                          por=str(membro_id or "dono"))
+    return JSONResponse({"ok": True, "id": r["id"], "trocou": r["trocou"]})
+
+
+@router.get("/painel/servicos/comprovante/{comprovante_id}")
+def painel_servicos_comprovante_ver(request: Request, comprovante_id: int):
+    """Entrega o arquivo. É ESTA ROTA que faz o bucket poder ser privado.
+
+    O `conta_id` no WHERE é o que impede uma empresa de ler o comprovante de outra
+    trocando o número na URL. E vai sem cache: documento de dinheiro não fica
+    guardado no navegador de quem usou o painel num computador emprestado."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    d = comprov.obter(get_pool(), conta[0], int(comprovante_id))
+    if not d:
+        return JSONResponse({"erro": "não encontrado"}, status_code=404)
+    try:
+        conteudo, tipo = comprov.ler(d["caminho"])
+    except ValueError as e:
+        return JSONResponse({"erro": str(e)}, status_code=502)
+    nome = (d["nome"] or "comprovante").replace('"', "")
+    return Response(conteudo, media_type=d["tipo"] or tipo, headers={
+        "Content-Disposition": f'inline; filename="{nome}"',
+        "Cache-Control": "no-store",
+    })
 
 
 class MarcarDataIn(BaseModel):
@@ -1516,6 +1682,33 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .env-msg.amb{background:var(--ambar-fundo); border:1px solid var(--ambar-borda); color:var(--amar)}
 .env-msg.cor{background:var(--coral-fundo); border:1px solid var(--coral-borda); color:var(--verm)}
 .env-msg.ok{background:var(--neon-fundo); border:1px solid var(--neon-borda); color:var(--verde-claro)}
+
+/* PAGAMENTOS. Mesma caixa do envio — o dono já sabe como ela abre e fecha. */
+.oc-ic.pgto{color:var(--azul); border-color:var(--azul-borda); background:var(--azul-fundo)}
+.oc-badge.pgto{background:var(--azul-fundo); color:var(--azul); border:1px solid var(--azul-borda);
+  text-transform:none; letter-spacing:0}
+.oc-badge.pgto.falta{background:var(--ambar-fundo); color:var(--amar); border-color:var(--ambar-borda)}
+.pg-tot{display:flex; gap:1.1rem; flex-wrap:wrap; font-size:.8rem; color:var(--txt-mut);
+  border-bottom:1px solid var(--borda); padding-bottom:.55rem}
+.pg-tot b{color:var(--txt); font-variant-numeric:tabular-nums}
+.pg-tot .ok b{color:var(--verde-claro)}
+.pg-tot .fl b{color:var(--amar)}
+.pl{display:grid; grid-template-columns:3px 1fr auto auto; gap:.7rem; align-items:center;
+  padding:.5rem 0; border-top:1px dashed var(--borda)}
+.pl:first-of-type{border-top:0}
+.pl .bar{align-self:stretch; min-height:2rem; border-radius:3px; background:var(--borda)}
+.pl.paga .bar{background:var(--verde)}
+.pl.hoje .bar{background:var(--ambar)}
+.pl .tt{font-size:.85rem; font-weight:600}
+.pl .mt{font-size:.71rem; color:var(--txt-mut)}
+.pl .vl{font-size:.83rem; font-weight:700; font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap}
+.pl .ac{white-space:nowrap}
+.pmini{font-size:.7rem; font-weight:600; border-radius:7px; padding:.24rem .5rem; cursor:pointer;
+  border:1px solid var(--borda); color:var(--txt-mut); background:transparent; font-family:inherit;
+  width:auto; margin:0; text-decoration:none; display:inline-block}
+.pmini.up{border-color:var(--azul-borda); color:var(--azul); background:var(--azul-fundo)}
+.pmini.ver{border-color:var(--neon-borda); color:var(--verde-claro); background:var(--neon-fundo)}
+.pmini:disabled{opacity:.5; cursor:default}
 .oc-svcform{background:var(--bg); border:1px solid var(--borda); border-radius:10px; padding:.8rem; margin-top:.7rem}
 .oc-empty{border:1px dashed var(--borda); border-radius:12px; padding:1.4rem; text-align:center; margin-top:.6rem}
 .oc-tog{width:42px; height:24px; border-radius:99px; border:none; cursor:pointer; position:relative; background:#2a3550; flex:none}
@@ -1978,6 +2171,22 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       <button type="button" class="oc-pill" id="env-cancelar">Cancelar</button>
       <span class="env-hist" id="env-hist"></span>
     </div>
+  </div>
+</div>
+
+{# PAGAMENTOS. Reusa a caixa do envio (.env-fundo/.env-cx): a mesma forma de abrir
+   e fechar, o mesmo Esc, o mesmo clique no fundo. Duas caixas com comportamentos
+   diferentes seriam duas coisas pra aprender. #}
+<div class="env-fundo" id="pg-fundo" role="dialog" aria-modal="true" aria-labelledby="pg-tt">
+  <div class="env-cx">
+    <div class="env-hd">
+      <h3 id="pg-tt">Pagamentos</h3>
+      <button type="button" class="env-x" id="pg-x" aria-label="Fechar">✕</button>
+    </div>
+    <div class="env-msg" id="pg-msg"></div>
+    <div class="pg-tot" id="pg-tot"></div>
+    <div id="pg-lista"><p class="mut" style="font-size:.85rem">Carregando...</p></div>
+    <input type="file" id="pg-arquivo" accept="application/pdf,image/*" style="display:none">
   </div>
 </div>
 
@@ -2941,6 +3150,12 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           alert('Sinal registrado, mas não consegui firmar o compromisso na agenda. Confira a data por lá.');
         }
         carregarHist();
+        // O MOMENTO EM QUE O COMPROVANTE ESTÁ NA MÃO. O Pix acabou de cair e o
+        // print está no celular — abrir a tela agora é o que evita o comprovante
+        // que ninguém anexa e vira pendência âmbar semana que vem.
+        abrirPagamentos(id,nome);
+        pgMsg('Sinal confirmado. Se tiver o comprovante aí, anexa agora — '
+             +'depois vira caça ao print.','ok');
       })
       .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent='Sinal recebido';});
   }
@@ -3055,6 +3270,112 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   document.addEventListener('keydown',function(ev){
     if(ev.key==='Escape' && ENV_ID) envFechar();});
 
+  // ------------------------------------------------ pagamentos e comprovantes
+  //
+  // O comprovante é da PARCELA. Um botão só na linha não saberia de qual —
+  // então o 📎 abre a lista, e o upload é por linha.
+  //
+  // O vendedor ABRE e VÊ (é ele que cobra o cliente); anexar é do dono e do
+  // gestor. Quem decide é o servidor — `pode_anexar` aqui só evita oferecer um
+  // botão que vai voltar 403.
+  var PG_ID=null, PG_IDX=null;
+  function pgMsg(txt, cls){
+    var el=document.getElementById('pg-msg');
+    el.className='env-msg'+(txt?(' on '+(cls||'amb')):'');
+    el.innerHTML=txt||'';
+  }
+  function pgFechar(){
+    document.getElementById('pg-fundo').classList.remove('on');
+    PG_ID=null; PG_IDX=null;
+  }
+  function abrirPagamentos(id,nome){
+    PG_ID=id;
+    pgMsg('');
+    document.getElementById('pg-tt').textContent='Pagamentos'+(nome?(' · '+nome):'');
+    document.getElementById('pg-tot').innerHTML='';
+    document.getElementById('pg-lista').innerHTML='<p class="mut" style="font-size:.85rem">Carregando...</p>';
+    document.getElementById('pg-fundo').classList.add('on');
+    pgCarregar();
+  }
+  function pgCarregar(){
+    fetch('/painel/servicos/pagamentos/'+PG_ID)
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(!res.ok){pgMsg(esc((res.d&&res.d.erro)||'Não consegui abrir.'),'cor'); return;}
+        var d=res.d;
+        document.getElementById('pg-tot').innerHTML=
+          '<span class="ok">Recebido <b>'+esc(d.recebido)+'</b></span>'
+         +'<span class="fl">Falta <b>'+esc(d.falta)+'</b></span>'
+         +'<span>Total <b>'+esc(d.total)+'</b></span>';
+        var box=document.getElementById('pg-lista');
+        box.innerHTML='';
+        (d.parcelas||[]).forEach(function(p){
+          var el=document.createElement('div');
+          el.className='pl'+(p.pago?' paga':(p.vence_hoje?' hoje':''));
+          var quando = p.pago ? ('pago em '+esc(p.pago_em||'—')) :
+                       (p.venc?('vence '+esc(p.venc)):'sem vencimento');
+          var falta = p.pago && !p.comprovante_id;
+          var meta = quando + (p.forma?(' · '+esc(p.forma)):'')
+                   + (falta?' · <b style="color:var(--amar)">sem comprovante</b>':'');
+          el.innerHTML='<div class="bar"></div>'
+            +'<div><div class="tt">'+esc(p.rotulo)+'</div><div class="mt">'+meta+'</div></div>'
+            +'<div class="vl">'+esc(p.valor)+'</div>';
+          var ac=document.createElement('div'); ac.className='ac';
+          if(p.comprovante_id){
+            var a=document.createElement('a'); a.className='pmini ver';
+            a.href='/painel/servicos/comprovante/'+p.comprovante_id;
+            a.target='_blank'; a.rel='noopener'; a.textContent='📎 ver';
+            a.title=p.comprovante_nome||'Abrir o comprovante';
+            ac.appendChild(a);
+          }
+          if(d.pode_anexar){
+            var b=document.createElement('button');
+            b.className='pmini'+(p.comprovante_id?'':' up');
+            b.textContent=p.comprovante_id?'trocar':'📎 anexar';
+            b.addEventListener('click',function(){pgEscolher(p.idx);});
+            ac.appendChild(b);
+          }
+          el.appendChild(ac);
+          box.appendChild(el);
+        });
+        if(!(d.parcelas||[]).length){
+          box.innerHTML='<p class="mut" style="font-size:.85rem">Este orçamento não tem plano de pagamento.</p>';
+        }
+        if(d.sem_storage){
+          pgMsg('O guardador de arquivos não está configurado nesta instalação, '
+               +'então não dá pra anexar comprovante ainda.','amb');
+        }
+      })
+      .catch(function(){pgMsg('Erro de conexão.','cor');});
+  }
+  function pgEscolher(idx){
+    PG_IDX=idx;
+    var inp=document.getElementById('pg-arquivo');
+    inp.value='';            // escolher o MESMO arquivo de novo tem que disparar
+    inp.click();
+  }
+  document.getElementById('pg-arquivo').addEventListener('change',function(){
+    var f=this.files&&this.files[0];
+    if(!f||PG_ID===null||PG_IDX===null) return;
+    pgMsg('Enviando '+esc(f.name)+'...','amb');
+    var fd=new FormData();
+    fd.append('orcamento_id',PG_ID); fd.append('parcela_idx',PG_IDX); fd.append('arquivo',f);
+    fetch('/painel/servicos/comprovante',{method:'POST',body:fd})
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(!res.ok){pgMsg(esc((res.d&&res.d.erro)||'Não consegui anexar.'),'cor'); return;}
+        pgMsg('✓ Comprovante anexado.','ok');
+        pgCarregar();       // a linha vira "ver" sozinha
+        carregarHist();     // e o selo do funil acompanha
+      })
+      .catch(function(){pgMsg('Erro de conexão.','cor');});
+  });
+  document.getElementById('pg-x').addEventListener('click',pgFechar);
+  document.getElementById('pg-fundo').addEventListener('click',function(ev){
+    if(ev.target===this) pgFechar();});
+  document.addEventListener('keydown',function(ev){
+    if(ev.key==='Escape' && PG_ID!==null) pgFechar();});
+
   // Apagar proposta do funil. Confirma sempre e nomeia o cliente na pergunta: a
   // lista é densa e o 🗑 fica ao lado do 📄, então "tem certeza?" sozinho não diz
   // qual das cinco linhas vai embora.
@@ -3139,6 +3460,19 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           be.addEventListener('click',function(){abrir(it.id);});
           right.appendChild(be);
         }
+        // QUANTO JÁ ENTROU. O vendedor vê igual ao dono: cobrar o cliente sem saber
+        // o que já foi pago é ligar no escuro. O que ele não pode é dar baixa nem
+        // anexar — isso o servidor decide, não este selo.
+        if(it.pgto && it.pgto.pagas){
+          var pg=document.createElement('span');
+          var falta=it.pgto.sem_comprovante;
+          pg.className='oc-badge pgto'+(falta?' falta':'');
+          pg.textContent=it.pgto.pagas+' de '+it.pgto.total+' pagas'
+                       +(falta?(' · '+falta+' sem comprovante'):'');
+          pg.title=falta?'Parcela paga sem comprovante anexado.'
+                        :'Todas as parcelas pagas têm comprovante.';
+          right.appendChild(pg);
+        }
         // JÁ FOI MANDADA? A pergunta que só se respondia abrindo o Gmail — e na
         // dúvida se mandava de novo, pro mesmo cliente.
         if(it.enviado_em){
@@ -3156,6 +3490,15 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           var bm=document.createElement('button'); bm.className='oc-ic mail'; bm.title='Mandar por e-mail'; bm.textContent='✉️';
           bm.addEventListener('click',function(){abrirEnvio(it.id);});
           right.appendChild(bl); right.appendChild(bp); right.appendChild(bm);
+        }
+        // PAGAMENTOS: o sinal e as parcelas, com o comprovante de cada uma. Só
+        // aparece quando há plano de pagamento — orçamento sem parcela não tem o
+        // que mostrar.
+        if(it.pgto && it.pgto.total){
+          var pb=document.createElement('button'); pb.className='oc-ic pgto';
+          pb.title='Pagamentos e comprovantes'; pb.textContent='📎';
+          pb.addEventListener('click',function(){abrirPagamentos(it.id,it.cliente);});
+          right.appendChild(pb);
         }
         // O CONTRATO é outro documento, com link próprio — e por isso tem botão
         // próprio aqui. Só aparece depois que ele nasce (na APROVAÇÃO da proposta,

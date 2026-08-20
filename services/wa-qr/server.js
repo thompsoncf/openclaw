@@ -767,6 +767,30 @@ async function contaPareada (contaId) {
   return r.rowCount > 0
 }
 
+// `pareada` PRA QUEM CONSOME O HTTP, e não `status`.
+//
+// O painel escondia o "Desconectar" sempre que o status era 'desconectado' — regra que
+// funcionou enquanto 'desconectado' significava, na prática, "não tem credencial". O
+// disjuntor (ver disjuntorDecifragem) criou um estado que não existia: a conta é
+// ESTACIONADA de propósito, fica 'desconectado' e continua PAREADA. Nesse estado o botão
+// que apaga a credencial é justamente o que se precisa, e era onde ele sumia — a conta 35
+// ficou sem saída nenhuma pelo painel.
+//
+// Devolve null (e não false) quando o banco não responde: quem lê distingue "não tem
+// credencial" de "não deu pra saber", e o painel cai no comportamento antigo em vez de
+// esconder ou mostrar botão com base num palpite.
+async function pareadaPraResposta (contaId, s) {
+  // conectada é pareada por definição — não gasta consulta no caso comum, que é o do
+  // polling de 3 em 3 segundos do painel aberto.
+  if (s && s.status === 'conectado') return true
+  try {
+    return await contaPareada(contaId)
+  } catch (e) {
+    log.warn({ contaId, e: String(e) }, 'pareada: banco não respondeu — devolvendo indefinido')
+    return null
+  }
+}
+
 // Costura só pro teste: o resgate da órfã chama iniciarSessao, que abre socket de
 // verdade e fala com o WhatsApp — coisa que teste nenhum pode fazer. Passando por
 // aqui, o teste troca a função e confere QUANDO o vigia decide retomar, que é a
@@ -2479,6 +2503,7 @@ const servidor = http.createServer(async (req, res) => {
         }
         const s = await iniciarSessao(contaId)
         return json(res, 200, { ok: true, status: s.status, qr: s.qr,
+          pareada: await pareadaPraResposta(contaId, s),
           sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0 })
       }
       if (req.method === 'GET' && acao === 'status') {
@@ -2486,6 +2511,7 @@ const servidor = http.createServer(async (req, res) => {
         // `mudoMs` é o que separa "conectado" de "conectado no papel": quem consome
         // consegue ver há quanto tempo aquele socket não entrega nada.
         return json(res, 200, { ok: true, status: s.status, qr: s.qr || null,
+          pareada: await pareadaPraResposta(contaId, s),
           sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0,
           mudoMs: s.ultimoEvento ? (Date.now() - s.ultimoEvento) : null })
       }

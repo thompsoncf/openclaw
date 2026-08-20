@@ -116,6 +116,25 @@ def _msg(c, conv, direcao, quando):
               (conv, direcao, quando))
 
 
+def _manual(c, lead_id, de="proposta", para="novo", quando=None):
+    """Move o card À MÃO, num instante do MESMO relógio do resto do arquivo.
+
+    POR QUE ISTO EXISTE. `registrar_movimento` grava `criado_em` com o `now()` do
+    banco — o relógio de VERDADE. Todo o resto deste arquivo mede o tempo a partir
+    de `AGORA`, que é fixo. A trava 3 compara os dois (`quando > _ultimo_manual`),
+    e comparar dois relógios diferentes dá respostas diferentes conforme a hora em
+    que o CI roda: `AGORA + 1 dia` é 20/08 12:00, então o teste passava de manhã e
+    falhava à tarde — e, a partir de 21/08, falharia para sempre.
+
+    Carimbar aqui põe os dois lados no mesmo relógio. Nada de produção muda: quem
+    chama `registrar_movimento` de verdade quer o `now()` do banco mesmo.
+    """
+    fr.registrar_movimento(c, CONTA, lead_id, de, para, "manual", membro_id=1)
+    c.execute("""update funil_movimentos set criado_em=%s
+                  where id=(select max(id) from funil_movimentos where prospeccao_id=%s)""",
+              (quando or AGORA, lead_id))
+
+
 def _ligar(c, chave, modo="ligado"):
     c.execute("update funil_etapas set gatilho_ativo=true where conta_id=%s and chave=%s", (CONTA, chave))
     c.execute("insert into funil_regua (conta_id, gatilhos_modo) values (%s,%s) "
@@ -289,7 +308,7 @@ def test_a_mao_do_vendedor_manda(pool):
                            values (%s,'enviado',%s) returning id""",
                         (CONTA, AGORA - timedelta(days=2))).fetchone()[0]
         c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, lead))
-        fr.registrar_movimento(c, CONTA, lead, "proposta", "novo", "manual", membro_id=1)
+        _manual(c, lead)
         _ligar(c, "proposta")
         c.commit()
         assert fr.aplicar_gatilhos(c, CONTA)["movidos"] == 0
@@ -306,7 +325,7 @@ def test_evento_novo_depois_do_movimento_manual_volta_a_valer(pool):
                            values (%s,'enviado',%s) returning id""",
                         (CONTA, AGORA + timedelta(days=1))).fetchone()[0]
         c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, lead))
-        fr.registrar_movimento(c, CONTA, lead, "proposta", "novo", "manual", membro_id=1)
+        _manual(c, lead)
         _ligar(c, "proposta")
         c.commit()
         assert fr.aplicar_gatilhos(c, CONTA)["movidos"] == 1
@@ -376,7 +395,7 @@ def test_o_instante_do_gatilho_e_o_do_ENVIO(pool):
         oid = _orc_rascunho(c, quando=AGORA + timedelta(days=1))   # editada hoje
         c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, lead))
         _envio(c, oid, "email", quando=AGORA - timedelta(days=3))  # enviada antes
-        fr.registrar_movimento(c, CONTA, lead, "proposta", "novo", "manual", membro_id=1)
+        _manual(c, lead)
         _ligar(c, "proposta")
         c.commit()
         assert fr.aplicar_gatilhos(c, CONTA)["movidos"] == 0, \

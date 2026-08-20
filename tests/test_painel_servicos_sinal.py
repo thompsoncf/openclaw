@@ -129,8 +129,8 @@ def cliente(monkeypatch):
     app.include_router(ps.router)
 
     @app.post("/_entrar")
-    async def _entrar(request: Request):
-        request.session["papel"] = "dono"
+    async def _entrar(request: Request, papel: str = "dono"):
+        request.session["papel"] = papel
         request.session["membro_id"] = None
         return {"ok": True}
 
@@ -1092,3 +1092,178 @@ def test_a_data_e_o_ESTADO_da_data_sao_duas_chaves_diferentes(cliente):
     assert isinstance(it["data_estado"], dict), "o estado da data sumiu da linha"
     assert it["data_estado"]["estado"] == vendas.DATA_FORA
 
+
+
+# ============================ comprovante de pagamento (sinal e parcelas), pelas ROTAS
+#
+# O módulo puro está em tests/test_comprovantes.py. Aqui prova-se o que só a rota
+# responde: a lista, os dois gates diferentes, e a porta única de leitura.
+#
+# OS GATES SÃO DIFERENTES DE PROPÓSITO:
+#   ver a lista e o arquivo   dono, gestor E VENDEDOR — é ele que cobra o cliente,
+#                             e cobrar sem saber o que já entrou é ligar no escuro
+#   anexar                    só dono e gestor. Papel de dinheiro é do financeiro.
+
+@pytest.fixture()
+def storage(monkeypatch):
+    """Supabase de mentira. Guarda o que subiu, em memória."""
+    from finance import comprovantes as cp
+    guardado = {}
+
+    def _subir(conteudo, content_type, *, conta_id, orcamento_id, parcela_idx):
+        cp.validar(conteudo, content_type)
+        caminho = f"comprovantes/{conta_id}/{orcamento_id}-{parcela_idx}"
+        guardado[caminho] = (conteudo, content_type)
+        return caminho
+
+    monkeypatch.setattr(cp, "configurado", lambda: True)
+    monkeypatch.setattr(cp, "subir", _subir)
+    monkeypatch.setattr(cp, "ler", lambda caminho: guardado[caminho])
+    monkeypatch.setattr(cp, "apagar", lambda caminho: guardado.pop(caminho, None))
+    return guardado
+
+
+def _com_parcelas(c, *, conta_id=CONTA, numero=31, sinal_pago=False):
+    """Orçamento de evento com sinal + 2 parcelas — o plano de verdade."""
+    parcelas = [{"valor_centavos": 267000, "venc": "2026-08-20", "forma": "Pix",
+                 "obs": "Sinal — confirma a reserva da data"},
+                {"valor_centavos": 311500, "venc": "2026-09-20", "forma": "Pix"},
+                {"valor_centavos": 311500, "venc": "2026-10-20", "forma": "Pix"}]
+    with c.pool.connection() as cx:
+        oid = cx.execute(
+            """insert into orcamentos (conta_id, cliente, status, criado_por,
+                 setup_centavos, primeiro_ano_centavos, modo, parcelas, numero,
+                 sinal_centavos, sinal_pago_em, token)
+               values (%s,'Maria','aprovada','',890000,890000,'evento',%s::jsonb,%s,
+                       267000, %s, %s) returning id""",
+            (conta_id, json.dumps(parcelas), numero,
+             "now()" and (None if not sinal_pago else "2026-08-14"),
+             f"tkp{numero}")).fetchone()[0]
+        cx.commit()
+    return oid
+
+
+def _pagamentos(c, oid):
+    return c.get(f"/painel/servicos/pagamentos/{oid}").json()
+
+
+def test_a_lista_traz_o_sinal_e_as_parcelas_com_o_que_falta(cliente, storage):
+    oid = _com_parcelas(cliente, sinal_pago=True)
+    d = _pagamentos(cliente, oid)
+    assert [p["rotulo"] for p in d["parcelas"]] == ["Sinal", "Parcela 1 de 2", "Parcela 2 de 2"]
+    assert d["recebido"] == "R$ 2.670,00" and d["falta"] == "R$ 6.230,00"
+    assert d["parcelas"][0]["pago"] is True and d["parcelas"][1]["pago"] is False
+
+
+def test_o_sinal_conta_como_pago_antes_de_existir_titulo(cliente, storage):
+    """Ele é confirmado ANTES de o contrato fechar, quando título nenhum existe.
+    Lendo só `titulos`, o sinal pago apareceria como em aberto."""
+    oid = _com_parcelas(cliente, numero=32, sinal_pago=True)
+    assert _pagamentos(cliente, oid)["parcelas"][0]["pago"] is True
+
+
+def test_anexar_e_depois_ver(cliente, storage):
+    oid = _com_parcelas(cliente, numero=33, sinal_pago=True)
+    r = cliente.post("/painel/servicos/comprovante",
+                     data={"orcamento_id": oid, "parcela_idx": 0},
+                     files={"arquivo": ("pix.pdf", b"%PDF-1.4", "application/pdf")})
+    assert r.status_code == 200, r.text
+    d = _pagamentos(cliente, oid)
+    cid = d["parcelas"][0]["comprovante_id"]
+    assert cid and d["parcelas"][0]["comprovante_nome"] == "pix.pdf"
+    ver = cliente.get(f"/painel/servicos/comprovante/{cid}")
+    assert ver.status_code == 200 and ver.content == b"%PDF-1.4"
+    # documento de dinheiro não fica guardado no navegador de um computador emprestado
+    assert ver.headers["cache-control"] == "no-store"
+
+
+def test_anexar_de_novo_SUBSTITUI(cliente, storage):
+    """Anexou o errado, anexa de novo. Histórico de comprovante trocado é arquivo
+    morto — ninguém audita a versão que estava errada."""
+    oid = _com_parcelas(cliente, numero=34, sinal_pago=True)
+    for corpo in (b"errado", b"certo"):
+        cliente.post("/painel/servicos/comprovante",
+                     data={"orcamento_id": oid, "parcela_idx": 0},
+                     files={"arquivo": ("p.pdf", corpo, "application/pdf")})
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select count(*) from orcamento_comprovantes where orcamento_id=%s",
+                          (oid,)).fetchone()[0] == 1
+    cid = _pagamentos(cliente, oid)["parcelas"][0]["comprovante_id"]
+    assert cliente.get(f"/painel/servicos/comprovante/{cid}").content == b"certo"
+
+
+def test_parcela_inventada_na_url_nao_cria_linha_orfa(cliente, storage):
+    """O comprovante ficaria invisível na tela e ninguém saberia que subiu."""
+    oid = _com_parcelas(cliente, numero=35)
+    r = cliente.post("/painel/servicos/comprovante",
+                     data={"orcamento_id": oid, "parcela_idx": 99},
+                     files={"arquivo": ("p.pdf", b"x", "application/pdf")})
+    assert r.status_code == 400 and "não existe" in r.json()["erro"]
+
+
+def test_arquivo_que_nao_e_documento_e_recusado(cliente, storage):
+    oid = _com_parcelas(cliente, numero=36)
+    r = cliente.post("/painel/servicos/comprovante",
+                     data={"orcamento_id": oid, "parcela_idx": 0},
+                     files={"arquivo": ("planilha.xls", b"x", "application/vnd.ms-excel")})
+    assert r.status_code == 400 and "PDF ou imagem" in r.json()["erro"]
+
+
+# ------------------------------------------------------------------- os gates
+
+def test_o_VENDEDOR_ve_a_lista_porque_e_ele_que_cobra(cliente, storage):
+    oid = _com_parcelas(cliente, numero=37, sinal_pago=True)
+    cliente.post("/_entrar?papel=vendedor")
+    d = _pagamentos(cliente, oid)
+    assert d["parcelas"][0]["pago"] is True
+    assert d["pode_anexar"] is False, "o vendedor não anexa"
+
+
+def test_o_VENDEDOR_ve_o_arquivo_mas_nao_anexa(cliente, storage):
+    oid = _com_parcelas(cliente, numero=38, sinal_pago=True)
+    cliente.post("/painel/servicos/comprovante",
+                 data={"orcamento_id": oid, "parcela_idx": 0},
+                 files={"arquivo": ("p.pdf", b"%PDF", "application/pdf")})
+    cid = _pagamentos(cliente, oid)["parcelas"][0]["comprovante_id"]
+
+    cliente.post("/_entrar?papel=vendedor")
+    assert cliente.get(f"/painel/servicos/comprovante/{cid}").status_code == 200
+    r = cliente.post("/painel/servicos/comprovante",
+                     data={"orcamento_id": oid, "parcela_idx": 1},
+                     files={"arquivo": ("p.pdf", b"x", "application/pdf")})
+    assert r.status_code == 403, "o gate de anexar é do SERVIDOR, não da tela"
+
+
+def test_o_GESTOR_anexa(cliente, storage):
+    oid = _com_parcelas(cliente, numero=39, sinal_pago=True)
+    cliente.post("/_entrar?papel=gestor")
+    assert _pagamentos(cliente, oid)["pode_anexar"] is True
+    assert cliente.post("/painel/servicos/comprovante",
+                        data={"orcamento_id": oid, "parcela_idx": 0},
+                        files={"arquivo": ("p.pdf", b"%PDF", "application/pdf")}
+                        ).status_code == 200
+
+
+def test_comprovante_de_outra_conta_nao_se_le_trocando_o_numero(cliente, storage):
+    """O `conta_id` no WHERE é o que impede isso — e é a única coisa entre uma
+    empresa e o comprovante bancário da outra."""
+    oid = _com_parcelas(cliente, numero=40, sinal_pago=True)
+    cliente.post("/painel/servicos/comprovante",
+                 data={"orcamento_id": oid, "parcela_idx": 0},
+                 files={"arquivo": ("p.pdf", b"%PDF", "application/pdf")})
+    cid = _pagamentos(cliente, oid)["parcelas"][0]["comprovante_id"]
+    with cliente.pool.connection() as cx:
+        cx.execute("update orcamento_comprovantes set conta_id=%s where id=%s", (OUTRA, cid))
+        cx.commit()
+    assert cliente.get(f"/painel/servicos/comprovante/{cid}").status_code == 404
+
+
+def test_o_selo_do_funil_conta_o_que_falta(cliente, storage):
+    """"2 de 3 pagas · 1 sem comprovante". Sem parcela paga sem comprovante ele nem
+    aparece — a lição do aviso do contrato."""
+    oid = _com_parcelas(cliente, numero=41, sinal_pago=True)
+    assert _item(cliente, oid)["pgto"] == {"pagas": 1, "total": 3, "sem_comprovante": 1}
+    cliente.post("/painel/servicos/comprovante",
+                 data={"orcamento_id": oid, "parcela_idx": 0},
+                 files={"arquivo": ("p.pdf", b"%PDF", "application/pdf")})
+    assert _item(cliente, oid)["pgto"] == {"pagas": 1, "total": 3, "sem_comprovante": 0}

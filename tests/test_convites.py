@@ -21,7 +21,7 @@ def pool():
     init_schema(p)
     migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
-        for nome in ("081_canais_config.sql", "084_canal_token.sql", "096_whatsapp_cloud.sql", "145_canal_templates_agenda.sql",
+        for nome in ("058_dados_empresa.sql", "081_canais_config.sql", "084_canal_token.sql", "096_whatsapp_cloud.sql", "145_canal_templates_agenda.sql",
                     "098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
                     "130_evento_desfecho.sql", "131_evento_link_online.sql", "132_convidado_canal_resposta.sql",
                     "139_agenda_mensagens_log.sql", "146_agenda_enviar_confirmacao.sql",
@@ -877,3 +877,56 @@ def test_remarcar_e_avisar_evento_inexistente_ou_de_outra_conta(pool, conta_id):
     ev = _evento(pool, conta_id)
     assert cv.remarcar_e_avisar(pool, outra, ev["id"], ag.agora_brt(), None,
                                 avisar=False, agora=ag.agora_brt())["ok"] is False
+
+# ---------------------------------------------------------------- nome comercial
+# O convidado vê este nome em três lugares: título da página pública, o "A {empresa}
+# quer marcar com você" e o assunto do convite por WhatsApp/e-mail. `contas.nome` é
+# quem ABRIU a conta — o convite da Prime Eventos chegava assinado "MANOEL SOARES",
+# nome que o cliente do salão não tem como reconhecer.
+
+def _conta(pool, **campos):
+    cols = ", ".join(campos)
+    marks = ", ".join(["%s"] * len(campos))
+    with pool.connection() as c:
+        cid = c.execute(f"insert into contas (tipo, {cols}) values ('pj', {marks}) returning id",
+                        tuple(campos.values())).fetchone()[0]
+        c.commit()
+    return cid
+
+
+def test_empresa_usa_nome_fantasia_e_nao_o_titular(pool):
+    cid = _conta(pool, nome="MANOEL SOARES", nome_fantasia="PRIME EVENTOS",
+                 razao_social="PRIME EVENTOS LTDA")
+    conv = cv.criar_convidado(pool, cid, _evento(pool, cid)["id"], "Jacqueline", "5586999990001")
+    assert cv.por_token(pool, conv["token"])["empresa"] == "PRIME EVENTOS"
+
+
+def test_sem_fantasia_cai_na_razao_social(pool):
+    cid = _conta(pool, nome="Rawilson Osternes", razao_social="RAMO ESTRATEGIA E CAPITAL")
+    conv = cv.criar_convidado(pool, cid, _evento(pool, cid)["id"], "Cliente", "5586999990002")
+    assert cv.por_token(pool, conv["token"])["empresa"] == "RAMO ESTRATEGIA E CAPITAL"
+
+
+def test_sem_fantasia_nem_razao_cai_no_nome(pool):
+    # conta PF, ou PJ que ainda não preencheu os dados da empresa: aí o nome da
+    # pessoa É o nome comercial, e trocar por vazio seria pior que o problema
+    cid = _conta(pool, nome="Juliana Teixeira de Oliveira")
+    conv = cv.criar_convidado(pool, cid, _evento(pool, cid)["id"], "Cliente", "5586999990003")
+    assert cv.por_token(pool, conv["token"])["empresa"] == "Juliana Teixeira de Oliveira"
+
+
+def test_fantasia_so_com_espacos_nao_apaga_o_nome(pool):
+    # o cadastro deixa salvar " " no campo; sem o nullif(btrim(...)) o convite
+    # chegaria assinado com uma string em branco
+    cid = _conta(pool, nome="Paulo Costa", nome_fantasia="   ", razao_social="")
+    conv = cv.criar_convidado(pool, cid, _evento(pool, cid)["id"], "Cliente", "5586999990004")
+    assert cv.por_token(pool, conv["token"])["empresa"] == "Paulo Costa"
+
+
+def test_titulo_do_convite_leva_o_nome_comercial(pool):
+    # o mesmo dado alimenta o assunto do WhatsApp/e-mail (_titulo_com_extras)
+    cid = _conta(pool, nome="MANOEL SOARES", nome_fantasia="PRIME EVENTOS")
+    ev = _evento(pool, cid, titulo="VISITA TÉCNICA - PEDRO")
+    conv = cv.criar_convidado(pool, cid, ev["id"], "Jacqueline", "5586999990005")
+    titulo = cv._titulo_com_extras(pool, cv.por_token(pool, conv["token"]))
+    assert "PRIME EVENTOS" in titulo and "MANOEL SOARES" not in titulo

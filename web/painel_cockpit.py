@@ -240,6 +240,10 @@ b,strong{font-weight:600}
 .swipe .front.drag{transition:none}
 .swipe .front:active{background:var(--bg-2)}
 .dica-swipe{padding:.45rem 1.1rem .6rem;color:var(--text-faint);font-size:.72rem}
+/* legenda curta embaixo de um botão de envio: pra quem toca saber ANTES pra onde vai */
+.dica{color:var(--text-dim);font-size:.74rem;line-height:1.4;margin:.35rem 0 0;
+  overflow-wrap:anywhere}
+.dica b{color:var(--text)}
 /* convite de notificação: nasce escondido e só aparece se o navegador ainda pode
    perguntar (nem concedido, nem negado) — quem já decidiu não vê nada */
 .pushcard{display:none;margin:.8rem 1.1rem;border:1px solid #3a2b52;background:#160f22;
@@ -2300,10 +2304,24 @@ def cockpit_orcamento(request: Request, orc_id: int):
     # É isto que o vendedor precisa: mandar a proposta pro cliente em um toque.
     # O link é o /proposta/<token> que o sistema já usa — o cliente abre, vê com a
     # marca da empresa e aprova online.
+    # O e-mail é a saída que NÃO tira o vendedor do Zaq: sai pelo SMTP do sistema,
+    # assinado pela empresa, e volta pra esta tela com o resultado. Fica em primeiro
+    # porque é o caminho que a gente quer ensinar.
     envio = []
+    if not gestao:
+        tem_email = "@" in (o.get("email") or "")
+        if tem_email:
+            envio.append(f"<form method=post action='{_BASE}/orcamentos/{orc_id}/email'>"
+                         "<button class=btn type=submit>Enviar por e-mail</button></form>"
+                         f"<div class=dica>para <b>{esc(o['email'])}</b></div>")
+        else:
+            # sem e-mail o botão não some sem explicação: some dizendo o que falta,
+            # senão o vendedor fica olhando pra uma tela que mudou e não sabe por quê
+            envio.append("<div class=dica style='margin:0 0 .5rem'>Esse cliente não tem "
+                         "e-mail cadastrado — dá pra mandar na conversa ou copiar o link.</div>")
     if o["zap"]:
-        envio.append(f"<a class=btn href='{esc(o['zap'])}' target=_blank rel=noopener>"
-                     f"{_ic('zap', 'ic p')} Mandar no WhatsApp</a>")
+        envio.append(f"<a class='btn ghost' style='margin-top:.5rem' href='{esc(o['zap'])}' "
+                     f"target=_blank rel=noopener>{_ic('zap', 'ic p')} Mandar no WhatsApp</a>")
     if o["lead_id"] and not gestao:
         envio.append(f"<form method=post action='{_BASE}/orcamentos/{orc_id}/enviar'>"
                      "<button class='btn ghost' style='margin-top:.5rem' type=submit>"
@@ -2477,6 +2495,20 @@ def cockpit_orcamento_enviar(request: Request, orc_id: int):
     r = ck.enviar_proposta_conversa(get_pool(), conta_id, membro_id, o["lead_id"], o["link"])
     request.session["ck_ok" if r.get("ok") else "ck_err"] = (
         "Proposta enviada na conversa ✓" if r.get("ok") else r.get("erro", "Não consegui enviar."))
+    return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+
+
+@router.post("/cockpit/orcamentos/{orc_id}/email")
+def cockpit_orcamento_email(request: Request, orc_id: int):
+    """Manda o link da proposta pro e-mail do cliente, assinado pela empresa."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    r = ck.enviar_proposta_email(get_pool(), conta_id, orc_id, membro_id=membro_id)
+    request.session["ck_ok" if r.get("ok") else "ck_err"] = (
+        f"Proposta enviada para {r.get('destino','')} ✓" if r.get("ok")
+        else r.get("erro", "Não consegui enviar."))
     return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
 
 

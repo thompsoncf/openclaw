@@ -1188,7 +1188,16 @@ def orcamento(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None)
         "token": r[11] or "", "link": link, "criado_em": r[12],
         "aprovada_por": r[13] or "", "aprovada_em": r[14], "aprovada_doc": r[15] or "",
         "lead_id": r[16], "vendedor": r[17], "cidade": r[18] or "", "uf": r[19] or "",
-        "zap": _zap_link_texto(r[5], f"Olá! Segue sua proposta 👋\n{link}") if (r[5] and link) else "",
+        # Mesmo portão que criar_orcamento já usa (ver `entrega_sempre`): onde o Zaq
+        # entrega a qualquer hora — o canal QR — o wa.me some, porque mandar por fora
+        # tira a conversa de dentro do sistema e o histórico do lead fica pela metade.
+        # O detalhe da proposta era o único lugar que ainda oferecia a saída, e por
+        # isso o botão continuava aparecendo pra quem está no QR. Onde a entrega NÃO é
+        # garantida (Twilio/Cloud fora da janela de 24h) o atalho fica: fechar a porta
+        # ali deixaria o vendedor sem nenhuma saída num horário morto.
+        "zap": ("" if entrega_sempre(pool, conta_id)
+                else (_zap_link_texto(r[5], f"Olá! Segue sua proposta 👋\n{link}")
+                      if (r[5] and link) else "")),
     }
 
 
@@ -1413,6 +1422,63 @@ def _registrar_envio_proposta(pool, conta_id: int, link: str, *, canal: str,
     except Exception as ex:  # noqa: BLE001 — anotação não derruba envio
         _log.warning("proposta: não registrei o envio por %s: %s: %s",
                      canal, type(ex).__name__, ex)
+
+
+def enviar_proposta_email(pool, conta_id: int, orc_id: int, membro_id: int | None = None) -> dict:
+    """Manda a proposta pro e-mail do cliente, do app do vendedor.
+
+    A regra de POR ONDE sai já foi decidida em `finance/proposta_email`: caixa da
+    empresa primeiro, remetente do Zaq como reserva com Reply-To. Aqui não se decide
+    nada disso de novo — o cockpit só junta o que a tela dele tem e chama. Ter dois
+    caminhos de envio seria ter duas respostas pra "de quem é esse e-mail", e a
+    resposta do cliente cairia numa caixa diferente dependendo de onde o vendedor
+    apertou o botão.
+
+    Registra a tentativa (inclusive a que falhou) na mesma tabela que o painel usa —
+    é dela que o gatilho `orcamento_enviado` lê pra saber que a proposta saiu.
+    """
+    from finance import empresa as _emp
+    from finance import proposta_email as _pe
+
+    o = orcamento(pool, conta_id, orc_id, membro_id=membro_id)
+    if not o:
+        return {"ok": False, "erro": "Proposta não encontrada."}
+    destino = (o.get("email") or "").strip()
+    if "@" not in destino or "." not in destino.split("@")[-1]:
+        return {"ok": False, "erro": "Esse cliente não tem e-mail cadastrado."}
+    if not o.get("link"):
+        return {"ok": False, "erro": "Essa proposta ainda não tem link público."}
+
+    with pool.connection() as c:
+        r = c.execute("select numero, coalesce(modo,'recorrente') from orcamentos "
+                      "where id=%s and conta_id=%s", (orc_id, conta_id)).fetchone()
+        # `obter_dados_empresa` não traz `contas.nome`, e ele é o último degrau: a
+        # conta que ainda não preencheu razão/fantasia precisa assinar com ALGUMA
+        # coisa — um e-mail com o topo em branco é pior que um assinado pela pessoa
+        titular = (c.execute("select coalesce(nome,'') from contas where id=%s",
+                             (conta_id,)).fetchone() or [""])[0]
+    numero, modo = (r[0], r[1]) if r else (None, "recorrente")
+
+    d_emp = _emp.obter_dados_empresa(pool, conta_id) or {}
+    # nome COMERCIAL: quem recebe é o cliente do salão, e `contas.nome` é o nome de
+    # quem abriu a conta — a proposta da Prime Eventos sairia assinada "MANOEL SOARES"
+    nome_emp = ((d_emp.get("nome_fantasia") or "").strip()
+                or (d_emp.get("razao_social") or "").strip()
+                or (titular or "").strip())
+    assunto = _pe.assunto_padrao(numero, nome_emp, modo)
+    mensagem = _pe.texto_padrao(o.get("cliente") or o.get("empresa"), modo)
+    html, texto = _pe.montar(mensagem=mensagem, link=o["link"], numero=numero,
+                             empresa=nome_emp, telefone=d_emp.get("telefone") or "",
+                             email_empresa=d_emp.get("email_empresa") or "", modo=modo)
+    env = _pe.enviar(pool, conta_id, destino=destino, assunto=assunto, html=html,
+                     texto=texto, empresa=nome_emp,
+                     reply_to=d_emp.get("email_empresa") or "")
+    _pe.registrar(pool, conta_id, orc_id, destino=destino,
+                  remetente_usado=env.get("remetente", ""), ok=env.get("ok", False),
+                  erro=env.get("erro", ""), por=str(membro_id or ""))
+    if env.get("ok"):
+        return {"ok": True, "destino": destino, "remetente": env.get("remetente", "")}
+    return {"ok": False, "erro": env.get("erro") or "Não consegui enviar."}
 
 
 # ----------------------------------------------------------------- agendar visita

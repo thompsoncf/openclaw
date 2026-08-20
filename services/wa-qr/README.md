@@ -171,6 +171,9 @@ WA_LOCK_TEST_URL=postgresql://postgres@localhost:5432/wa_lock_test node teste-tr
 # guerra de sessão: disjuntor da enxurrada de decifragem + espera que sobrevive ao restart
 createdb wa_guerra_test
 WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_guerra_test node teste-guerra-sessao.js
+
+# filtro pré-decifragem (status/canal) + retentativa: não precisa de banco
+node teste-ignorar-jid.js
 ```
 
 ## CPU: a guerra de sessão derrubava a instância (20/08/2026)
@@ -231,6 +234,37 @@ select date_trunc('hour', criado_em) hora,
 ```
 
 Fora de deploy, `boots` e `travas` têm que ser zero.
+
+### Cortar a enxurrada na origem (os três padrões do Baileys)
+
+O disjuntor acima trata o **efeito**: quando a decifragem começa a falhar em série, a conta
+sai de cena e espera. Faltava atacar o **volume** — e três padrões do Baileys 6.7.9
+trabalhavam contra (`Defaults/index.ts`):
+
+| Padrão | Era | Ficou | Por quê |
+|---|---|---|---|
+| `shouldIgnoreJid` | `() => false` | `deveIgnorarNoBaileys` | não pagar decifragem por status de contato |
+| `maxMsgRetryCount` | `5` | `2` | o que não decifra na 2ª não decifra na 5ª |
+| `retryRequestDelayMs` | `250` | `2000` | 250ms vira laço apertado que não devolve o event loop |
+
+A conta da amplificação com os padrões antigos: 1119 falhas/hora × 5 retentativas a cada
+250ms = até **5.600 ciclos/hora**, cada um com criptografia, ida à rede e **uma consulta ao
+Postgres** (o `getMessage` chama `buscarEnviada`).
+
+**O `shouldIgnoreJid` é a maior das três.** O `ehConversaValida` já descartava
+`status@broadcast`, mas só **depois** de decifrar — a CPU já tinha sido paga. O Baileys
+checa o `shouldIgnoreJid` no topo do `handleMessage`, **antes** do `decryptMessageNode`
+(`Socket/messages-recv.ts:727` na v6.7.9): confirma o recebimento e sai. Com ~10 mil
+contatos mapeados, cada status que qualquer um deles posta deixa de custar.
+
+**Grupo NÃO entra na lista, de propósito.** Mensagem de grupo também não vira lead, mas
+alimenta o aprendizado de contato (`repassarContatos`); ignorá-la no Baileys perderia isso.
+Status e canal não têm esse valor. O `teste-ignorar-jid.js` trava esse invariante: nada que
+o `ehConversaValida` aproveitaria pode ser cortado antes de chegar.
+
+**O que se perde:** o status de um contato desconhecido não vai mais ensinar o nome dele.
+Na prática o contato já vem da agenda ou de conversa real — e o preço de manter era a
+instância morrer.
 
 ## Trava de sessão única por conta
 

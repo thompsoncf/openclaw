@@ -1259,6 +1259,44 @@ function ehConversaValida (jid) {
   return !!jid && !jid.endsWith('@g.us') && !jid.endsWith('@newsletter') && jid !== 'status@broadcast'
 }
 
+// O MESMO descarte, só que ANTES de decifrar — é onde mora a economia de CPU.
+//
+// O `ehConversaValida` acima roda no nosso código, depois que o Baileys já pagou
+// a decifragem. Pra status de contato isso é caríssimo: cada um que qualquer um
+// dos 10 mil contatos posta chega aqui, é decifrado, e só então jogado fora.
+//
+// Pior: quando a sessão Signal está quebrada (guerra de 440), a decifragem FALHA,
+// o Baileys pede reenvio, o WhatsApp reentrega e falha de novo — 5 vezes, de 250
+// em 250ms, cada uma com uma consulta ao Postgres no getMessage. Em 20/08 foram
+// 1119 'failed to decrypt message' numa hora (normal: 50-150 por DIA), a única
+// CPU do contêiner saturou, o event loop travou 25-73s e o /saude (que desiste em
+// 5s) não respondeu — o Render matou a instância 7 vezes numa hora.
+//
+// O `shouldIgnoreJid` do Baileys é checado no TOPO do handleMessage, antes do
+// decryptMessageNode (Socket/messages-recv.ts:727 na v6.7.9): ele só confirma o
+// recebimento e sai. Nada de decifrar, nada de retry, nada de ida ao banco.
+//
+// GRUPO NÃO ENTRA AQUI, de propósito. O `ehConversaValida` também descarta grupo
+// como conversa, mas a mensagem de grupo ainda alimenta o aprendizado de contato
+// (repassarContatos) — ignorá-la no Baileys perderia isso. Status e canal não têm
+// esse valor: canal é propaganda, e o contato que aparece num status já vem da
+// agenda ou de conversa real.
+function deveIgnorarNoBaileys (jid) {
+  return jid === 'status@broadcast' || (typeof jid === 'string' && jid.endsWith('@newsletter'))
+}
+
+// Quantas vezes reenviar uma mensagem que a outra ponta não conseguiu decifrar.
+// O padrão do Baileys é 5 (Defaults/index.ts). Cinco faz sentido pra falha
+// passageira de rede; não faz nenhum pra sessão quebrada — o que não decifra na
+// segunda não vai decifrar na quinta, e cada tentativa custa cripto + Postgres.
+// Baixar pra 2 corta a amplificação em 2,5x sem perder o caso legítimo.
+const MAX_RETRY_DECIFRAR = 2
+// E o intervalo entre elas: 250ms (o padrão) transforma uma rajada de falhas num
+// laço apertado que não devolve o event loop. 2s dá respiro pro /saude responder
+// entre uma tentativa e outra — que é literalmente a diferença entre o Render
+// matar a instância ou não.
+const RETRY_DELAY_MS = 2000
+
 // Áudio RECEBIDO vira texto, pro vendedor responder digitando sem precisar ouvir.
 // Só entrada ao vivo: histórico não passa por aqui de propósito — um pareamento
 // novo despejaria centenas de áudios de uma vez e viraria uma conta inesperada.
@@ -1910,6 +1948,12 @@ async function iniciarSessao (contaId) {
         return aceita
       },
       markOnlineOnConnect: false,
+      // Corta status de contato e canal ANTES de decifrar — ver deveIgnorarNoBaileys.
+      // É a maior das três alavancas contra a saturação de CPU de 20/08.
+      shouldIgnoreJid: deveIgnorarNoBaileys,
+      // ...e as outras duas: menos retentativas, mais espaçadas (ver as constantes).
+      maxMsgRetryCount: MAX_RETRY_DECIFRAR,
+      retryRequestDelayMs: RETRY_DELAY_MS,
       // ver comentário do cache `enviadas`: é isto que permite reenviar quando o
       // aparelho do vendedor (ou do cliente) não consegue decifrar e pede retry.
       getMessage: async (key) => {
@@ -2806,4 +2850,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

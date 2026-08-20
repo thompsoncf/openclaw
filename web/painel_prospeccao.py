@@ -2373,6 +2373,9 @@ def comunicacao_whatsapp_qr_iniciar(request: Request, chip: str = Form("")):
     _qr_relogio_retencao(alvo, r.get("status"))
     return JSONResponse({"ok": bool(r.get("ok", True) and not r.get("erro")),
                          "status": r.get("status"), "qr": r.get("qr"),
+                         # passa reto, INCLUSIVE o None: a tela precisa distinguir
+                         # "não tem credencial" de "não deu pra saber" (ver qrShow).
+                         "pareada": r.get("pareada"),
                          "sincronizando": bool(r.get("sincronizando")), "sync_progress": r.get("syncProgress") or 0,
                          "msg": _QR_ROT.get(r.get("status"), "") if r.get("status") else (r.get("erro") or "")})
 
@@ -2395,6 +2398,7 @@ def comunicacao_whatsapp_qr_status(request: Request, chip: str = ""):
     st = r.get("status") or "desconectado"
     _qr_relogio_retencao(alvo, st)
     return JSONResponse({"ok": True, "status": st, "qr": r.get("qr"),
+                         "pareada": r.get("pareada"),
                          "sincronizando": bool(r.get("sincronizando")), "sync_progress": r.get("syncProgress") or 0,
                          "msg": _QR_ROT.get(st, "")})
 
@@ -10089,8 +10093,9 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                se a consulta falhar, o qrPoll devolve o botão ao estado usável. -->
           <button type="button" class="pbtn" id="qr-btn" onclick="qrIniciar()" disabled>Verificando…</button>
           <button type="button" class="pbtn ghost" id="qr-sair" onclick="qrSair()" style="display:none">Desconectar</button>
-          <!-- só aparece DESCONECTADO: com a sessão de pé o celular continua
-               sincronizando e reescreveria parte do que foi apagado. -->
+          <!-- só aparece com a sessão fora do ar E SEM CREDENCIAL: com a sessão de pé
+               (ou com a conta apenas estacionada pelo disjuntor, que volta sozinha) o
+               celular ressincroniza e reescreveria parte do que foi apagado. -->
           <button type="button" class="pbtn ghost" id="qr-apagar" onclick="qrApagar()"
                   style="display:none;border-color:var(--ambar-borda);color:var(--ambar)">🗑️ Apagar histórico</button>
         </div>
@@ -10219,13 +10224,30 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           if(syncBar)syncBar.style.width=(d.sync_progress||0)+'%';
           if(syncPct)syncPct.textContent=(d.sync_progress||0)+'%';
           if(msg)msg.textContent=(conectado&&d.sincronizando)?'':(d.msg||'');
-          if(sair)sair.style.display=(d.status&&d.status!=='desconectado')?'inline-flex':'none';
-          // apagar e desconectar são exclusivos: um só faz sentido quando o outro
-          // não cabe. `=== 'desconectado'` e não `!conectado` de propósito — em
-          // 'reconectando'/'sincronizando' a sessão está viva e apagar faria estrago.
+          // QUEM MANDA AQUI É A CREDENCIAL, NÃO O STATUS DA SESSÃO.
+          //
+          // Os dois botões liam `status==='desconectado'`, e funcionou enquanto
+          // 'desconectado' significava na prática "não tem credencial". O disjuntor da
+          // guerra de sessão (#520) criou um estado que não existia: a conta é
+          // ESTACIONADA de propósito — fica 'desconectado' e continua PAREADA, e o vigia
+          // a retoma sozinho em minutos. Isso quebrava os dois lados:
+          //   • "Desconectar" (que APAGA a credencial) sumia justo em quem tem credencial
+          //     pra apagar — a conta 35 ficou sem saída nenhuma pela tela;
+          //   • "Apagar histórico" APARECIA numa conta que vai voltar sozinha, que é
+          //     exatamente o resultado pela metade que a barreira existe pra impedir
+          //     (o celular ressincroniza e reescreve parte do que foi apagado).
+          // `pareada` responde a pergunta certa, e os dois voltam a ser exclusivos.
+          //
+          // null = o serviço não soube dizer (banco fora do ar, ou versão antiga que
+          // ainda não manda o campo): cai no comportamento antigo em vez de apostar.
+          var pareada=(d.pareada===undefined||d.pareada===null)?(d.status!=='desconectado'):!!d.pareada;
+          if(sair)sair.style.display=pareada?'inline-flex':'none';
           var apg=document.getElementById('qr-apagar'),ret=document.getElementById('qr-retencao');
-          if(apg)apg.style.display=(d.status==='desconectado')?'inline-flex':'none';
-          if(ret)ret.style.display=(d.status==='desconectado')?'block':'none';
+          // continua exigindo sessão fora do ar — com ela de pé o celular sincroniza e
+          // reescreve o que foi apagado — E AGORA também credencial nenhuma.
+          var podeApagar=(d.status==='desconectado')&&!pareada;
+          if(apg)apg.style.display=podeApagar?'inline-flex':'none';
+          if(ret)ret.style.display=podeApagar?'block':'none';
           // chegou resposta: desarma o cão de guarda, o botão sai do "Verificando…"
           // e volta a ser clicável
           if(_qrEspera){clearTimeout(_qrEspera);_qrEspera=null;}
@@ -10281,7 +10303,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           if(msg)msg.textContent=d.msg||'';
           if(st){st.textContent=conectado?'✅ Conectado':(d.status==='aguardando_qr'?'Aguardando QR':d.status);
                  st.style.color=conectado?'var(--verde-claro)':'var(--ambar)';}
-          if(sair)sair.style.display=(d.status!=='desconectado')?'inline-flex':'none';
+          // mesma regra do chip 1: quem manda é a CREDENCIAL, não o status. Uma conta
+          // estacionada pelo disjuntor fica 'desconectado' e pareada, e é justo nela que
+          // o botão precisa aparecer. `null` cai no comportamento antigo.
+          var c2Pareada=(d.pareada===undefined||d.pareada===null)?(d.status!=='desconectado'):!!d.pareada;
+          if(sair)sair.style.display=c2Pareada?'inline-flex':'none';
           // mesma correção que o chip 1 recebeu: conectado não é "Reconectar". O
           // /iniciar devolve a sessão viva sem tocar nela, então o botão prometia uma
           // ação que não acontece. Continua clicável — é a saída de quem está

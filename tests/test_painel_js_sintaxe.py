@@ -399,3 +399,45 @@ def test_abrir_o_chat_e_abrir_o_resumo_do_lead_se_excluem():
     assert "kbFecharLead()" in fonte_chat, "abrir o chat não fecha o resumo do lead"
     fonte_lead = fonte.split("function kbAbrirLead")[1][:400]
     assert "kbFecharChat()" in fonte_lead, "abrir o resumo do lead não fecha o chat"
+
+
+def test_dados_do_balao_tem_o_cadastro_todo_nao_so_4_campos():
+    """21/08, 2ª rodada: o usuário aprovou um mockup com contato, telefone,
+    WhatsApp, e-mail, Instagram, site, valor e observação — a 1ª versão só
+    tinha telefone/e-mail/valor/documento. Essa é a guarda de fidelidade."""
+    fonte = inspect.getsource(pp).split("function kbLeadDadosHtml")[1]
+    fonte = fonte[:fonte.index("function kbLeadHistHtml")]
+    for campo in ("d.contato", "d.whatsapp", "d.instagram", "d.site_url", "d.obs", "d.valor_fmt"):
+        assert campo in fonte, f"{campo} sumiu do 'Dados' do balão"
+
+
+def test_secao_de_atividades_chama_historico_igual_a_ficha_completa():
+    fonte = inspect.getsource(pp).split("function kbLeadHistHtml")[1][:300]
+    assert "Histórico" in fonte
+    assert "Últimas atividades" not in fonte, "nome antigo não bate mais com a ficha completa"
+
+
+def test_editar_o_lead_vira_formulario_no_proprio_balao():
+    """O pedido: um botão de editar que salva rápido, sem abrir a ficha
+    inteira de novo (senão volta ao problema original). `kbLeadEditar` só
+    troca a visibilidade de dois <div> que já estão no balão — não navega."""
+    fonte = inspect.getsource(pp)
+    assert "kbLeadEditar" in fonte and "kbLeadCancelarEdicao" in fonte and "kbLeadSalvar" in fonte
+    fonte_editar = fonte.split("function kbLeadEditar()")[1][:300]
+    assert "lp-view" in fonte_editar and "lp-edit" in fonte_editar
+    fonte_salvar = fonte.split("function kbLeadSalvar")[1][:900]
+    assert "/editar-rapido" in fonte_salvar, "não salva na rota de edição rápida"
+    assert "location.href" not in fonte_salvar and "location.reload" not in fonte_salvar, (
+        "salvar não pode navegar/recarregar a página — o balão fecharia sozinho")
+
+
+def test_edicao_rapida_do_balao_nao_toca_documento_nem_dados_de_empresa():
+    """Documento (CNPJ/CPF), tipo PF/PJ, segmento, cidade/UF, sócio, regime e
+    porte ficam só na ficha completa — a ficha tem verificação própria de
+    CNPJ e esses dados não são pra digitar livre num balão rápido."""
+    fonte_edit = inspect.getsource(pp).split("function kbLeadEditHtml")[1]
+    fonte_edit = fonte_edit[:fonte_edit.index("function kbLeadEditar")]
+    for proibido in ("lp-ed-cnpj", "lp-ed-cpf", "lp-ed-documento", "lp-ed-tipo",
+                      "lp-ed-segmento", "lp-ed-cidade", "lp-ed-uf", "lp-ed-socio",
+                      "lp-ed-regime", "lp-ed-porte"):
+        assert proibido not in fonte_edit, f"{proibido} não devia estar editável no balão"

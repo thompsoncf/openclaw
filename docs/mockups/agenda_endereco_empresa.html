@@ -1,0 +1,285 @@
+<title>Endereço da Empresa em Um Toque</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --ground:#f4f6f7; --surface:#ffffff; --sunken:#eceff1;
+  --borda:#d5dbde; --borda-forte:#b9c2c7;
+  --txt:#12171a; --txt-mut:#5d686e; --txt-fraco:#8a949a;
+  --verde:#128a3e; --verde-bg:rgba(18,138,62,.10); --verde-bd:rgba(18,138,62,.32);
+  --cinza:#6b757a; --cinza-bg:rgba(107,117,122,.10); --cinza-bd:rgba(107,117,122,.28);
+  --ambar:#a06a05; --ambar-bg:rgba(160,106,5,.12); --ambar-bd:rgba(160,106,5,.36);
+  --roxo:#6d3fb5; --roxo-bg:rgba(109,63,181,.10); --roxo-bd:rgba(109,63,181,.30);
+  --sombra:0 1px 2px rgba(16,24,28,.06),0 8px 24px -12px rgba(16,24,28,.18);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#0e1113; --surface:#171b1e; --sunken:#121618;
+  --borda:#272d31; --borda-forte:#394247;
+  --txt:#e6e9ea; --txt-mut:#8b9499; --txt-fraco:#69737a;
+  --verde:#35d06d; --verde-bg:rgba(34,197,94,.13); --verde-bd:rgba(34,197,94,.34);
+  --cinza:#79848a; --cinza-bg:rgba(121,132,138,.12); --cinza-bd:rgba(121,132,138,.26);
+  --ambar:#e0a534; --ambar-bg:rgba(224,165,52,.14); --ambar-bd:rgba(224,165,52,.34);
+  --roxo:#b092e8; --roxo-bg:rgba(176,146,232,.13); --roxo-bd:rgba(176,146,232,.30);
+  --sombra:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+}}
+:root[data-theme="dark"]{
+  --ground:#0e1113; --surface:#171b1e; --sunken:#121618;
+  --borda:#272d31; --borda-forte:#394247;
+  --txt:#e6e9ea; --txt-mut:#8b9499; --txt-fraco:#69737a;
+  --verde:#35d06d; --verde-bg:rgba(34,197,94,.13); --verde-bd:rgba(34,197,94,.34);
+  --cinza:#79848a; --cinza-bg:rgba(121,132,138,.12); --cinza-bd:rgba(121,132,138,.26);
+  --ambar:#e0a534; --ambar-bg:rgba(224,165,52,.14); --ambar-bd:rgba(224,165,52,.34);
+  --roxo:#b092e8; --roxo-bg:rgba(176,146,232,.13); --roxo-bd:rgba(176,146,232,.30);
+  --sombra:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--txt);
+  font-family:"IBM Plex Sans",-apple-system,sans-serif;font-size:15px;line-height:1.55;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1020px;margin:0 auto;padding:2.5rem 1.25rem 4rem;display:flex;flex-direction:column;gap:2.75rem}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+.eyebrow{font-size:.7rem;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-fraco);font-weight:600}
+h1{margin:0;font-size:clamp(1.6rem,3.6vw,2.15rem);line-height:1.15;font-weight:700;letter-spacing:-.02em;text-wrap:balance}
+h2{margin:0;font-size:1.05rem;font-weight:600;letter-spacing:-.01em}
+h3{margin:0;font-size:.8rem;font-weight:600;color:var(--txt-fraco);letter-spacing:.06em;text-transform:uppercase}
+.lede{margin:0;color:var(--txt-mut);max-width:64ch}.lede b{color:var(--txt);font-weight:600}
+.nota{margin:0;color:var(--txt-mut);font-size:.9rem;max-width:72ch}
+.nota b{color:var(--txt);font-weight:600}
+ul.nota{padding-left:1.1rem;display:flex;flex-direction:column;gap:.4rem}
+section{display:flex;flex-direction:column;gap:1rem}
+.top{display:flex;flex-direction:column;gap:.85rem}
+
+/* ---- painel que imita o formulário real ---- */
+.par{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.painel{background:var(--surface);border:1px solid var(--borda);border-radius:10px;
+  box-shadow:var(--sombra);overflow:hidden;display:flex;flex-direction:column}
+.painel-topo{padding:.5rem .85rem;border-bottom:1px solid var(--borda);background:var(--sunken);
+  font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--txt-mut);
+  display:flex;justify-content:space-between;align-items:center;gap:.5rem}
+.painel-topo .tag{letter-spacing:0;text-transform:none;font-size:.68rem;padding:.1rem .45rem;
+  border-radius:999px;border:1px solid}
+.tag-hoje{color:var(--cinza);border-color:var(--cinza-bd);background:var(--cinza-bg)}
+.tag-novo{color:var(--verde);border-color:var(--verde-bd);background:var(--verde-bg)}
+.painel-corpo{padding:.9rem .85rem;display:flex;flex-direction:column;gap:.55rem;flex:1}
+
+.campo-rot{font-size:.74rem;font-weight:600;color:var(--txt-mut)}
+.busca{display:flex;align-items:center;gap:.5rem;border:1px solid var(--borda-forte);border-radius:8px;
+  padding:.5rem .6rem;background:var(--ground);font-size:.84rem;color:var(--txt-fraco)}
+.busca .lupa{flex:none;opacity:.7}
+.dica{font-size:.72rem;color:var(--txt-fraco)}
+.alt{display:flex;flex-wrap:wrap;gap:.15rem 1rem;font-size:.74rem;color:var(--txt-fraco)}
+.alt span{text-decoration:underline;text-decoration-color:var(--borda);text-underline-offset:3px}
+
+/* o botão novo — o assunto da página */
+.btn-empresa{display:flex;align-items:center;gap:.55rem;width:100%;text-align:left;
+  border:1px solid var(--verde-bd);background:var(--verde-bg);color:var(--txt);
+  border-radius:8px;padding:.55rem .65rem;font:inherit;font-size:.84rem;cursor:default}
+.btn-empresa .ic{flex:none;font-size:.95rem}
+.btn-empresa .tt{font-weight:600}
+.btn-empresa .sb{display:block;font-size:.72rem;color:var(--txt-mut);font-weight:400;margin-top:1px}
+.ou{display:flex;align-items:center;gap:.6rem;font-size:.68rem;color:var(--txt-fraco);
+  text-transform:uppercase;letter-spacing:.08em}
+.ou::before,.ou::after{content:"";flex:1;height:1px;background:var(--borda)}
+
+/* cartão verde de endereço escolhido (o que já existe hoje) */
+.escolhido{display:flex;gap:.55rem;align-items:flex-start;border:1px solid var(--verde-bd);
+  background:var(--verde-bg);border-radius:8px;padding:.55rem .6rem}
+.escolhido .chk{flex:none;color:var(--verde)}
+.escolhido .nm{font-size:.84rem;font-weight:700}
+.escolhido .ed{font-size:.74rem;color:var(--txt-mut);margin-top:1px}
+.escolhido .lk{font-size:.74rem;color:var(--verde);text-decoration:underline;display:inline-block;margin-top:.2rem}
+.escolhido .x{margin-left:auto;flex:none;color:var(--txt-fraco);font-size:.8rem}
+.enviar{align-self:flex-end;font-size:.72rem;font-weight:700;border-radius:7px;padding:.3rem .55rem;
+  background:var(--verde);color:var(--surface);border:1px solid var(--verde)}
+
+.faixa-ambar{display:flex;gap:.5rem;align-items:flex-start;border:1px solid var(--ambar-bd);
+  background:var(--ambar-bg);border-radius:8px;padding:.5rem .6rem;font-size:.78rem;color:var(--ambar)}
+.faixa-ambar a{color:var(--ambar);text-decoration:underline;white-space:nowrap;font-weight:600}
+.faixa-ambar .corpo{color:var(--txt-mut)}
+.faixa-ambar .corpo b{color:var(--txt)}
+
+.tab-env{overflow-x:auto;border:1px solid var(--borda);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.85rem;min-width:520px}
+th{text-align:left;font-size:.66rem;letter-spacing:.09em;text-transform:uppercase;color:var(--txt-fraco);
+  font-weight:600;padding:.55rem .8rem;border-bottom:1px solid var(--borda);background:var(--sunken)}
+td{padding:.58rem .8rem;border-bottom:1px solid var(--borda);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;font-family:"IBM Plex Mono",monospace;
+  white-space:nowrap;font-weight:600}
+td .sub{display:block;color:var(--txt-mut);font-size:.77rem;margin-top:.1rem}
+.ok{color:var(--verde);font-weight:600}
+.nao{color:var(--cinza);font-weight:600}
+.destaque td{background:var(--ambar-bg)}
+.destaque td:first-child{box-shadow:inset 3px 0 0 var(--ambar)}
+
+pre{margin:0;background:var(--sunken);border:1px solid var(--borda);border-radius:7px;
+  padding:.7rem .8rem;overflow-x:auto;font-size:.78rem;line-height:1.6}
+pre .g{color:var(--cinza)} pre .v{color:var(--verde);font-weight:600}
+.perg{border:1px solid var(--roxo-bd);background:var(--roxo-bg);border-radius:10px;padding:1rem 1.1rem;
+  display:flex;flex-direction:column;gap:.6rem}
+.perg h2{color:var(--roxo)}
+.opc{display:flex;gap:.55rem;align-items:flex-start;font-size:.88rem}
+.opc .letra{flex:none;font-family:"IBM Plex Mono",monospace;font-weight:600;color:var(--roxo);
+  border:1px solid var(--roxo-bd);border-radius:5px;padding:0 .35rem;font-size:.76rem;margin-top:.1rem}
+.opc .txt{color:var(--txt-mut)}.opc .txt b{color:var(--txt)}
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <span class="eyebrow">Agenda · novo compromisso · campo "Onde vai ser"</span>
+  <h1>O endereço da própria empresa, num toque</h1>
+  <p class="lede">Hoje, marcar um evento <b>no próprio salão</b> exige buscar o endereço do próprio salão. A proposta é um botão que preenche isso sozinho, lendo o endereço que a empresa já cadastrou — a busca continua ali, intacta, pra quando o compromisso for em outro lugar.</p>
+</header>
+
+<section>
+  <h2>Por que isso importa: o campo está sendo abandonado</h2>
+  <p class="nota">Os 42 compromissos da Prime Eventos, por endereço gravado:</p>
+  <div class="tab-env">
+    <table>
+      <thead><tr><th>O que ficou gravado em <code>local</code></th><th style="text-align:right">Eventos</th></tr></thead>
+      <tbody>
+        <tr><td><span class="nao">— em branco —</span><span class="sub">Ninguém preencheu. O convidado recebe a mensagem sem endereço e sem link de mapa.</span></td><td class="num">37</td></tr>
+        <tr><td><code>Prime Eventos</code><span class="sub">Digitado à mão, sem endereço por trás — não vira link de mapa.</span></td><td class="num">3</td></tr>
+        <tr class="destaque"><td><code>Pri,</code><span class="sub">Começou a digitar "Prime", a busca não ajudou, desistiu no meio. É o retrato do problema.</span></td><td class="num">1</td></tr>
+        <tr><td><code>DEOCLECIO BRITO, 3399 — PLANALTO — TERESINA PI</code><span class="sub">O único feito direito, hoje às 11:32. Deu trabalho — e é o endereço da casa.</span></td><td class="num">1</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="nota">A Prime é um espaço de eventos: <b>quase todo compromisso acontece lá dentro</b> — locação, visita técnica, casamento, aniversário. O sistema pede pra procurar no Google o endereço que ele já tem guardado.</p>
+</section>
+
+<section>
+  <h2>Antes e depois</h2>
+  <div class="par">
+
+    <div class="painel">
+      <div class="painel-topo"><span>Como é hoje</span><span class="tag tag-hoje">4 passos</span></div>
+      <div class="painel-corpo">
+        <div class="campo-rot">Onde vai ser</div>
+        <div class="busca"><span class="lupa">🔍</span><span>Buscar endereço ou nome do lugar…</span></div>
+        <div class="dica">Digite pra buscar — ex: nome do lugar ou endereço.</div>
+        <div class="alt"><span>✍️ Não achei o lugar — digitar manualmente</span><span>🌐 É uma reunião online</span></div>
+        <div style="flex:1"></div>
+        <p class="nota" style="font-size:.78rem;border-top:1px dashed var(--borda);padding-top:.6rem">
+          Digitar → esperar o Google → achar entre os resultados → clicar. Toda vez, pro mesmo endereço.</p>
+      </div>
+    </div>
+
+    <div class="painel">
+      <div class="painel-topo"><span>Proposta</span><span class="tag tag-novo">1 toque</span></div>
+      <div class="painel-corpo">
+        <div class="campo-rot">Onde vai ser</div>
+        <div class="btn-empresa">
+          <span class="ic">🏠</span>
+          <span><span class="tt">Aqui na PRIME EVENTOS</span>
+          <span class="sb mono">DEOCLECIO BRITO, 3399 — PLANALTO, TERESINA/PI</span></span>
+        </div>
+        <div class="ou">ou</div>
+        <div class="busca"><span class="lupa">🔍</span><span>Buscar endereço ou nome do lugar…</span></div>
+        <div class="dica">Digite pra buscar — ex: nome do lugar ou endereço.</div>
+        <div class="alt"><span>✍️ Não achei o lugar — digitar manualmente</span><span>🌐 É uma reunião online</span></div>
+      </div>
+    </div>
+
+  </div>
+  <p class="nota">O botão mostra o endereço inteiro na própria etiqueta. Não é "usar endereço da empresa" (que obrigaria a lembrar qual é) — é o endereço à vista, pra conferir antes de clicar.</p>
+</section>
+
+<section>
+  <h2>Depois do clique: nada de novo</h2>
+  <div class="par">
+    <div class="painel">
+      <div class="painel-topo"><span>Estado escolhido</span></div>
+      <div class="painel-corpo">
+        <div class="campo-rot">Onde vai ser</div>
+        <div class="escolhido">
+          <span class="chk">✅</span>
+          <span><span class="nm">PRIME EVENTOS</span>
+            <span class="ed mono">DEOCLECIO BRITO, 3399 — PLANALTO, TERESINA/PI</span>
+            <span class="lk">🔗 Ver no Google Maps</span></span>
+          <span class="x">✕</span>
+        </div>
+        <button class="enviar" type="button">💬 Enviar pro cliente</button>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:.7rem;justify-content:center">
+      <p class="nota">É <b>exatamente</b> o cartão que a busca do Google já produz hoje — mesmo visual, mesmo link de mapa, mesmo botão de mandar pro cliente.</p>
+      <p class="nota">O motivo é que a função que desenha esse cartão (<code>escolherLocal</code>) recebe só um nome e um endereço. O botão entrega esses dois campos vindos de <code>contas</code> em vez do Google. Nenhum encanamento novo.</p>
+      <pre><span class="g">// hoje — vem do Google Places</span>
+escolherLocal({nome, endereco})
+
+<span class="g">// proposta — os mesmos dois campos, da própria empresa</span>
+escolherLocal({
+  nome:     <span class="v">"PRIME EVENTOS"</span>,        <span class="g">// nome_fantasia</span>
+  endereco: <span class="v">"DEOCLECIO BRITO, 3399 …"</span> <span class="g">// endereco+bairro+cidade/uf</span>
+})</pre>
+      <p class="nota">Só uma coisa muda de texto: a linha de dica embaixo. Hoje ela diz <i>"Endereço confirmado pelo Google"</i>; vindo da empresa, ela precisa dizer que o endereço é o cadastrado — senão afirma uma coisa que não aconteceu.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>E quem não tem endereço cadastrado?</h2>
+  <p class="nota">Das 22 contas, <b>8 têm endereço completo</b> e 14 não têm (a maioria é conta pessoal, que nunca vai ter). Botão que não faz nada é pior que botão nenhum — foi a lição do "Abrir →" do PR passado. Então:</p>
+  <div class="par">
+    <div class="painel">
+      <div class="painel-topo"><span>Empresa sem endereço · quem pode cadastrar</span></div>
+      <div class="painel-corpo">
+        <div class="campo-rot">Onde vai ser</div>
+        <div class="faixa-ambar">
+          <span>📍</span>
+          <span class="corpo">Cadastre o <b>endereço da empresa</b> e ele passa a aparecer aqui num toque. <a href="#">Cadastrar →</a></span>
+        </div>
+        <div class="ou">ou</div>
+        <div class="busca"><span class="lupa">🔍</span><span>Buscar endereço ou nome do lugar…</span></div>
+      </div>
+    </div>
+    <div class="painel">
+      <div class="painel-topo"><span>Conta pessoal · sem permissão de empresa</span></div>
+      <div class="painel-corpo">
+        <div class="campo-rot">Onde vai ser</div>
+        <div class="busca"><span class="lupa">🔍</span><span>Buscar endereço ou nome do lugar…</span></div>
+        <div class="dica">Digite pra buscar — ex: nome do lugar ou endereço.</div>
+        <div class="alt"><span>✍️ Não achei o lugar — digitar manualmente</span><span>🌐 É uma reunião online</span></div>
+        <div style="flex:1"></div>
+        <p class="nota" style="font-size:.78rem;border-top:1px dashed var(--borda);padding-top:.6rem">
+          Idêntica à tela de hoje. Quem não pode mexer nos dados da empresa não recebe um convite pra fazer o que não pode.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>O que este botão resolve de quebra</h2>
+  <div class="tab-env">
+    <table>
+      <thead><tr><th>Situação</th><th>Hoje</th><th>Com o botão</th></tr></thead>
+      <tbody>
+        <tr><td>Chave do Google Places fora do ar ou não configurada</td>
+            <td><span class="nao">a busca não devolve nada</span></td>
+            <td><span class="ok">o botão não depende dela</span></td></tr>
+        <tr><td>Endereço escrito à mão (<code>Prime Eventos</code>)</td>
+            <td><span class="nao">sem link de mapa pro convidado</span></td>
+            <td><span class="ok">link do Maps sempre junto</span></td></tr>
+        <tr><td>Grafia do mesmo lugar variando entre eventos</td>
+            <td><span class="nao">4 escritas diferentes em 42 eventos</span></td>
+            <td><span class="ok">uma só, a cadastrada</span></td></tr>
+        <tr><td>Convite enviado ao cliente</td>
+            <td><span class="nao">37 saíram sem endereço nenhum</span></td>
+            <td><span class="ok">um toque e vai completo</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="nota">Nada disso muda o banco: <code>eventos_agenda.local</code> continua sendo o mesmo texto de sempre. Sem migração.</p>
+</section>
+
+<section class="perg">
+  <h2>Duas escolhas que são suas</h2>
+  <div class="opc"><span class="letra">1</span><span class="txt"><b>Onde fica o botão.</b> Desenhei acima da busca, porque na Prime o caso comum é o próprio salão. Se preferir a busca em primeiro e o botão logo abaixo, é uma linha trocada — só me diga qual.</span></div>
+  <div class="opc"><span class="letra">2</span><span class="txt"><b>A faixa "cadastre o endereço".</b> Ela aparece só pra quem pode mexer nos dados da empresa. Se achar que polui, tiro e a tela fica igual à de hoje pra quem não tem endereço.</span></div>
+  <p class="nota" style="margin-top:.2rem">E falta o <b>item 2</b> que você mencionou — me conta qual é que eu junto tudo no mesmo PR.</p>
+</section>
+
+</div>

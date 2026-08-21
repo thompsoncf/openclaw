@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from db.conexao import get_pool
 from web import estaticos as _estaticos
 from web import tema as _tema
+from contas import equipe as _equipe
 from finance import agenda as ag
 from finance import convites as cv
 from web.portal import _env, _render, conta_logada
@@ -37,9 +38,54 @@ def _acesso(request: Request):
     conta = conta_logada(request)
     if conta is None:
         return None, RedirectResponse("/login", status_code=303)
+    # `papel` vem junto porque a tela decide coisas por ele (hoje: quem é convidado a
+    # cadastrar o endereço da empresa). Sem dono explícito o login é o titular — é o
+    # mesmo padrão do resto do painel (`session.get("papel", "dono")`).
     ctx = {"conta": conta, "conta_id": conta[0],
-           "membro_id": request.session.get("membro_id")}
+           "membro_id": request.session.get("membro_id"),
+           "papel": request.session.get("papel", "dono")}
     return ctx, None
+
+
+def _endereco_da_empresa(pool, conta_id: int) -> dict | None:
+    """O endereço que a empresa já cadastrou, no formato que o campo Local consome:
+    `{"nome", "endereco"}` — os MESMOS dois campos que a busca do Google devolve.
+
+    Existe porque quase todo compromisso de quem tem espaço próprio acontece no
+    espaço próprio, e o sistema pedia pra procurar no Google um endereço que ele já
+    tinha guardado. Medido na Prime (conta 34) em 21/08/2026: de 42 compromissos, 37
+    ficaram SEM local nenhum, três com "Prime Eventos" digitado à mão (texto solto
+    não vira link de mapa) e um com "Pri," — alguém começou a digitar e desistiu no
+    meio. Um só tinha o endereço completo.
+
+    Exige CIDADE além da rua, e não é preciosismo: o cartão do local vira um link do
+    Google Maps, e "DEOCLECIO BRITO, 3399" sem cidade aponta pra rua de mesmo nome em
+    qualquer lugar do país. Sem os dois, devolve None e o botão não aparece — botão
+    que não faz nada é pior que botão nenhum.
+
+    `bairro` e `uf` entram quando existem: metade das contas preencheu só rua e
+    cidade (e várias gravaram a UF dentro da cidade, "teresina-pi"), então grudar
+    "/" num campo vazio produziria "teresina-pi/"."""
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                """select coalesce(nullif(btrim(nome_fantasia),''), nullif(btrim(nome),''), ''),
+                          coalesce(btrim(endereco),''), coalesce(btrim(bairro),''),
+                          coalesce(btrim(cidade),''), coalesce(btrim(uf),'')
+                     from contas where id=%s""", (conta_id,)).fetchone()
+    except Exception:  # noqa: BLE001
+        # o campo Local funciona sem isto (a busca continua lá). O que não pode é a
+        # agenda inteira deixar de abrir por causa de um atalho.
+        _log_ag.warning("endereço da empresa %s não pôde ser lido", conta_id, exc_info=True)
+        return None
+    if not r:
+        return None
+    nome, rua, bairro, cidade, uf = r
+    if not rua or not cidade:
+        return None
+    local = cidade + ("/" + uf.upper() if uf else "")
+    return {"nome": nome or cidade,
+            "endereco": rua + (" — " + bairro if bairro else "") + " — " + local}
 
 
 def _mes_ref(m: str) -> tuple[int, int]:
@@ -597,6 +643,14 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    cfg=cfg, feed_url=feed_url, share=share, seguradas=seguradas,
                    confirmadas=confirmadas, pend=pend,
                    vende_data=vende_data, pessoas=pessoas, p_id=p_id,
+                   # atalho do campo Local: o endereço da própria empresa, num toque.
+                   # `pode_cadastrar` decide quem vê o convite pra preencher quando
+                   # ainda não há endereço — só quem mexe nos dados da empresa. Pra
+                   # quem não pode, o campo fica idêntico ao de hoje: ninguém ganha
+                   # um convite pra fazer o que não pode fazer.
+                   emp_end=_endereco_da_empresa(pool, conta_id),
+                   pode_cadastrar=_equipe.caps_do_papel(
+                       ctx.get("papel") or "dono").get("financeiro", False),
                    rot=(_ROT_EVENTO if vende_data else _ROT_PADRAO),
                    aviso=request.session.pop("agenda_aviso", None))
 
@@ -1391,6 +1445,24 @@ _CSS_CRU = """
 .manual-box .mlabel{font-size:.72rem;color:var(--txt-mut);margin-bottom:5px}
 .manual-cancel{display:inline-flex;align-items:center;gap:4px;background:transparent;border:0;color:var(--txt-mut);cursor:pointer;font-size:.72rem;padding:6px 0 0;text-decoration:underline;text-decoration-color:var(--borda);text-underline-offset:3px}
 .manual-cancel:hover{color:var(--verde-claro);text-decoration-color:var(--verde-claro)}
+/* atalho do endereço da empresa — fica ACIMA da busca porque, pra quem tem espaço
+   próprio, esse é o caso comum e não a exceção. O endereço vai na etiqueta, à vista:
+   "usar o endereço da empresa" obrigaria a pessoa a lembrar qual é. */
+.end-emp{display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+  border:1px solid var(--verde);background:var(--neon-fraco);color:var(--txt);
+  border-radius:9px;padding:.55rem .65rem;font:inherit;font-size:.86rem;cursor:pointer}
+.end-emp:hover{background:var(--neon-fundo)}
+.end-emp .ic{flex:0 0 auto;font-size:.95rem}
+.end-emp .tx{min-width:0}
+.end-emp .tx b{display:block;font-weight:700}
+.end-emp .tx small{display:block;font-size:.73rem;color:var(--txt-mut);margin-top:1px}
+.end-falta{display:flex;gap:7px;align-items:flex-start;border:1px solid var(--ambar-borda);
+  background:var(--ambar-fundo);border-radius:9px;padding:.5rem .6rem;font-size:.78rem;color:var(--txt-mut)}
+.end-falta b{color:var(--txt)}
+.end-falta a{color:var(--ambar);text-decoration:underline;white-space:nowrap;font-weight:600}
+.end-ou{display:flex;align-items:center;gap:9px;margin:7px 0 3px;font-size:.68rem;
+  color:var(--txt-mut);text-transform:uppercase;letter-spacing:.08em}
+.end-ou:before,.end-ou:after{content:"";flex:1;height:1px;background:var(--borda)}
 .local-alt-row{display:flex;flex-wrap:wrap;gap:2px 16px}
 .online-toggle{display:inline-flex;align-items:center;gap:5px;background:transparent;border:0;color:var(--txt-mut);cursor:pointer;font-size:.74rem;padding:5px 0;margin-top:2px;text-decoration:underline;text-decoration-color:var(--borda);text-underline-offset:3px}
 .online-toggle:hover{color:var(--verde-claro);text-decoration-color:var(--verde-claro)}
@@ -2099,7 +2171,26 @@ function histReenviar(id, btn){
   var onlineBox = document.getElementById('onlineBox');
   var onlineCancel = document.getElementById('onlineCancel');
   var linkOnline = document.getElementById('linkOnline');
+  var endEmpBtn = document.getElementById('endEmpBtn');
+  var endFalta = document.querySelector('.end-falta');
+  // o "ou" some junto com o que ele separa — sozinho ele separa nada
+  var endOu = document.querySelector('.end-ou');
   if(!addrInput) return;
+
+  // Um toque no endereço da própria empresa. Cai no MESMO escolherLocal da busca:
+  // mesmo cartão verde, mesmo link do Maps, mesmo "Enviar pro cliente". O atalho não
+  // é um segundo caminho, é uma entrada mais curta pro caminho que já existia.
+  function mostrarAtalho(sim){
+    [endEmpBtn, endFalta, endOu].forEach(function(el){
+      if(el) el.style.display = sim ? '' : 'none';
+    });
+  }
+  if(endEmpBtn){
+    endEmpBtn.addEventListener('click', function(){
+      escolherLocal({nome: endEmpBtn.dataset.nome,
+                     endereco: endEmpBtn.dataset.endereco}, true);
+    });
+  }
 
   function nomesEnvolvidos(){
     var nomes = [];
@@ -2169,11 +2260,16 @@ function histReenviar(id, btn){
       .catch(function(){ addrDrop.classList.remove('show'); });
   }
 
-  function escolherLocal(p){
+  // `daEmpresa` só troca a frase da dica. Dizer "confirmado pelo Google" num endereço
+  // que veio do cadastro da própria empresa seria afirmar uma conferência que não
+  // houve — e é justamente o endereço que ninguém confere de novo.
+  function escolherLocal(p, daEmpresa){
     addrInput.value = p.nome;
     localHidden.value = p.nome;
     addrDrop.classList.remove('show');
-    hintLine.textContent = 'Endereço confirmado pelo Google — o link do mapa vai junto nas mensagens.';
+    hintLine.textContent = daEmpresa
+      ? 'Endereço da sua empresa — o link do mapa vai junto nas mensagens.'
+      : 'Endereço confirmado pelo Google — o link do mapa vai junto nas mensagens.';
     var mapa = linkMapa(p.endereco);
     var card = document.createElement('div');
     card.className = 'addr-picked';
@@ -2189,8 +2285,10 @@ function histReenviar(id, btn){
     x.addEventListener('click', function(){
       addrInput.value = ''; localHidden.value = ''; addrPicked.innerHTML = '';
       hintLine.textContent = 'Digite pra buscar — ex: nome do lugar ou endereço.';
+      mostrarAtalho(true);
       addrInput.focus();
     });
+    mostrarAtalho(false);   // já tem endereço escolhido — o atalho vira ruído
     var actions = document.createElement('div'); actions.className = 'addr-actions';
     var send = document.createElement('button'); send.type = 'button'; send.className = 'send-btn';
     send.textContent = '💬 Enviar pro cliente';
@@ -2217,6 +2315,7 @@ function histReenviar(id, btn){
 
   function voltarBusca(){
     searchRow.style.display = ''; hintLine.style.display = ''; altRow.style.display = '';
+    mostrarAtalho(true);
     addrInput.value = ''; localHidden.value = ''; linkOnline.value = '';
   }
 
@@ -2226,6 +2325,7 @@ function histReenviar(id, btn){
     addrPicked.innerHTML = '';
     hintLine.style.display = 'none';
     altRow.style.display = 'none';
+    mostrarAtalho(false);
     manualBox.classList.add('show');
     addrInput.value = ''; localHidden.value = ''; linkOnline.value = '';
     manualInput.focus();
@@ -2246,6 +2346,7 @@ function histReenviar(id, btn){
     addrPicked.innerHTML = '';
     hintLine.style.display = 'none';
     altRow.style.display = 'none';
+    mostrarAtalho(false);
     onlineBox.classList.add('show');
     addrInput.value = ''; localHidden.value = 'Online';
   });
@@ -2709,6 +2810,26 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <textarea name="descricao" placeholder="{{ rot.desc_ph }}"></textarea>
           <label>{{ rot.local }} <span style="font-weight:400">(opcional)</span></label>
           <input type="hidden" name="local" id="localHidden">
+          {#- atalho do próprio endereço, ACIMA da busca: quem tem espaço próprio marca
+              quase tudo lá dentro, e procurar no Google o endereço da própria casa é
+              o passo que fazia o campo ser abandonado (37 de 42 eventos sem local). -#}
+          {#- `|e` na mão porque o autoescape deste template está DESLIGADO: o
+              _env usa select_autoescape(), que liga por extensão, e a agenda é
+              registrada como "agenda", sem .html. O endereço é texto que a empresa
+              digita — sem escapar, uma aspa fecha o atributo. -#}
+          {% if emp_end %}
+          <button type="button" class="end-emp" id="endEmpBtn"
+                  data-nome="{{ emp_end.nome|e }}" data-endereco="{{ emp_end.endereco|e }}">
+            <span class="ic">🏠</span>
+            <span class="tx"><b>Aqui na {{ emp_end.nome|e }}</b>
+              <small>{{ emp_end.endereco|e }}</small></span>
+          </button>
+          <div class="end-ou"><span>ou</span></div>
+          {% elif pode_cadastrar %}
+          <div class="end-falta">📍 <span>Cadastre o <b>endereço da empresa</b> e ele passa a
+            aparecer aqui num toque. <a href="/painel/empresa">Cadastrar →</a></span></div>
+          <div class="end-ou"><span>ou</span></div>
+          {% endif %}
           <div class="addr-wrap" id="addrWrap">
             <div class="addr-input-row">
               <input type="text" id="addrInput" placeholder="Buscar endereço ou nome do lugar…" autocomplete="off">

@@ -72,6 +72,29 @@ No **web** (app Python), configure também:
 5. No **web**, adicione `WA_QR_SERVICE_URL` + `WA_QR_SHARED_SECRET` e redeploy.
 6. No painel: Canais → WhatsApp → **QR Code** → **Gerar QR** → escaneie no celular.
 
+## A conta é a MESMA vindo do banco ou da rota
+
+`conta_id` chega por dois caminhos com tipos diferentes: as rotas fazem `parseInt`
+(número) e o `restaurarSessoes` lê do Postgres, que devolve `bigint` como **string**.
+Todo mapa indexado por conta tem que normalizar — é o que a classe `MapaPorConta`
+faz, e o que `sessao-lock.js` já fazia com o `num()` dele.
+
+Sem isso o serviço mente sobre si mesmo. Medido em 21/08/2026: o painel da Prime
+mostrava o chip 2 (conta 36) como **desconectado** enquanto ele recebia 25 mensagens
+em 3 horas. `GET /session/36/status` respondia `desconectado` e a `wa_qr_sessao_estado`,
+escrita pelo mesmo processo percorrendo o mesmo mapa no mesmo minuto, dizia
+`conectado`. A sessão tinha sido religada como `'36'` e a rota procurava `36`.
+
+E o `/enviar` erra igual — só que ele religa em vez de desistir, criando uma segunda
+entrada com um **segundo socket na mesma credencial**, sem fechar o primeiro. Dois
+sockets no mesmo número é o que faz o WhatsApp derrubar um com 440: a guerra de
+sessão fabricada pelo próprio serviço.
+
+Mapa de chave COMPOSTA (`enviadas`, `jidsResolvidos`, `lidsPendentes`) não precisa:
+`contaId + ':' + x` já vira texto nos dois casos.
+
+`teste-mapa-por-conta.js` tranca isso.
+
 ## Memória (o serviço já morreu por isso)
 
 O Render matou a instância com `Ran out of memory (used over 512MB)` — quem mata é o
@@ -172,6 +195,8 @@ WA_AUTH_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_test node teste-auth
 WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_test node teste-lidmap.js
 # histórico: gate das ondas + peneira mensagem a mensagem (não precisa de banco)
 node teste-historico.js
+# a conta é a mesma vindo do banco ('36') ou da rota (36) — não precisa de banco
+node teste-mapa-por-conta.js
 # trava de sessão única por conta: disputa, prazo vencendo, batimento, SIGTERM
 createdb wa_lock_test
 WA_LOCK_TEST_URL=postgresql://postgres@localhost:5432/wa_lock_test node teste-sessao-lock.js

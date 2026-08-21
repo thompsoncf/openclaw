@@ -1466,9 +1466,39 @@ def _agente_conhecimento(c, conta_id: int) -> dict:
     return {"instrucoes": instr, "faqs": faqs}
 
 
-def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=""):
-    """Lista de conversas (topo por última msg) — usada na página e no polling.
-    escopo: 'email' = só e-mail (aba E-mails); 'msg' = só mensageiros (aba Conversas)."""
+# Dobra de acento feita na MÃO, dos dois lados da comparação.
+#
+# O projeto não tem a extensão `unaccent` ligada no Postgres — está escrito em
+# finance/livro_caixa.py, e é o mesmo motivo pelo qual o casamento de produto de
+# cupom também dobra na mão. Sem isto, quem digita "jacque" no celular (ninguém põe
+# acento no celular) não acha "Jacqueline", e quem digita "joao" não acha "João" —
+# que é justamente o nome que veio do perfil do WhatsApp, onde acento tem de sobra.
+_ACENTOS = "áàâãäéèêëíìîïóòôõöúùûüçñ"
+_SEM_ACENTO = "aaaaaeeeeiiiiooooouuuucn"
+
+
+def _dobrar(col: str) -> str:
+    """A expressão SQL que devolve a coluna em minúscula e sem acento."""
+    return f"translate(lower(coalesce({col},'')), '{_ACENTOS}', '{_SEM_ACENTO}')"
+
+
+def _termo_dobrado(termo: str) -> str:
+    return (termo or "").lower().translate(str.maketrans(_ACENTOS, _SEM_ACENTO))
+
+
+# Quantos dígitos um termo precisa ter pra valer como busca de NÚMERO. Abaixo disso
+# é ruído: "ana 2" tem um dígito e continua sendo busca de nome.
+_MIN_DIGITOS = 4
+
+
+def _conversas_onde(conta_id, gerencia, membro_id, canal="", vend="", escopo="",
+                    busca=""):
+    """O recorte da caixa, em uma função só — a lista e a CONTAGEM têm que enxergar
+    exatamente o mesmo conjunto.
+
+    Separado porque a contagem "100 de 264" só é verdade se os dois lados aplicarem
+    o mesmo where; duas cópias da regra viram dois números que se contradizem na
+    mesma linha da tela."""
     where = ["cv.conta_id=%s"]
     params = [conta_id]
     if not gerencia:
@@ -1490,6 +1520,63 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
         params.append(canal)
     elif escopo == "msg":
         where.append("cv.canal <> 'email'")
+    # --------------------------------------------------------------- a busca
+    #
+    # POR QUE ELA VEM PRO SERVIDOR, e não filtra o que já está na tela: a lista sai
+    # ordenada por `ultima_msg_em desc limit 100`. A Prime tem 264 conversas e o
+    # Rawilson 254 — filtrar as 100 carregadas acharia só o que já dava pra ver
+    # rolando, e as 164 que faltam são justamente as que se procura. Metade delas
+    # (139 na Prime) nem tem lead vinculado: aparecem pelo nome do perfil do
+    # WhatsApp, ou pelo número cru quando nem isso veio.
+    termo = (busca or "").strip()[:60]
+    if termo:
+        dig = re.sub(r"\D", "", termo)
+        alvos = []
+        # NÚMERO. A mesma pessoa é gravada de quatro jeitos — 86995167171,
+        # 5586995167171, com e sem o nono dígito — e o painel já resolveu isto uma
+        # vez: casa pelos 8 ÚLTIMOS dígitos (ver _conversa_wa_do_contato). A partir
+        # de 8 dígitos a comparação é de igualdade, que é o que o índice
+        # idx_conversas_num8 (conta_id, canal, right(regexp_replace(...), 8))
+        # enxerga; abaixo disso vira sufixo, que varre — e varrer 264 linhas de uma
+        # conta é barato, varrer com LIKE '%x%' no lugar errado é que não seria.
+        if len(dig) >= _MIN_DIGITOS:
+            fim = dig[-8:]
+            comp = "= %s" if len(dig) >= 8 else "like %s"
+            valor = fim if len(dig) >= 8 else "%" + fim
+            for col in ("cv.contato_ref", "p.whatsapp", "p.telefone"):
+                alvos.append(
+                    f"right(regexp_replace(coalesce({col},''), '\\D', '', 'g'), 8) {comp}")
+                params.append(valor)
+        # NOME. Três campos porque é em três lugares que o nome pode estar: a ficha
+        # do lead, o nome do perfil do WhatsApp (conversa sem lead) e o contato da
+        # ficha. Procurar em só um deixa metade da caixa inalcançável.
+        alvo = "%" + _termo_dobrado(termo) + "%"
+        for col in ("p.empresa", "cv.contato_nome", "p.contato"):
+            alvos.append(f"{_dobrar(col)} like %s")
+            params.append(alvo)
+        where.append("(" + " or ".join(alvos) + ")")
+    return where, params
+
+
+def _conversas_total(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=""):
+    """Quantas conversas o recorte tem AO TODO — sem busca e sem o limite de 100.
+
+    É a segunda metade de "100 de 264". Sem ela a tela dizia só "100 conversa(s)", o
+    que é verdade e esconde o que importa: que existem 164 fora do alcance."""
+    where, params = _conversas_onde(conta_id, gerencia, membro_id, canal, vend, escopo)
+    return int(c.execute(
+        f"""select count(*) from conversas cv
+              left join prospeccao p on p.id = cv.prospeccao_id
+             where {' and '.join(where)}""", tuple(params)).fetchone()[0])
+
+
+def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo="",
+                    busca=""):
+    """Lista de conversas (topo por última msg) — usada na página e no polling.
+    escopo: 'email' = só e-mail (aba E-mails); 'msg' = só mensageiros (aba Conversas).
+    busca: nome ou número; vazio = a caixa inteira, como sempre foi."""
+    where, params = _conversas_onde(conta_id, gerencia, membro_id, canal, vend, escopo,
+                                    busca)
     rows = c.execute(f"""
         select cv.id, cv.canal, cv.status, cv.ultima_msg_em, cv.prospeccao_id,
                -- sem lead vinculado, mostra o nome do perfil do WhatsApp em vez do
@@ -1504,7 +1591,11 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
                -- por qual CHIP a conversa entrou. Nulo = o chip principal, que é todo
                -- o histórico; aí vale o apelido gravado no canal da própria empresa.
                cv.chip_id,
-               coalesce(nullif(btrim(chp.nome),''), nullif(btrim(cc1.rotulo),''), '')
+               coalesce(nullif(btrim(chp.nome),''), nullif(btrim(cc1.rotulo),''), ''),
+               -- o número CRU: a etiqueta que explica por que a linha apareceu numa
+               -- busca por número. Só a busca por número a mostra — fora dela seria
+               -- a mesma informação repetida em 100 linhas.
+               coalesce(nullif(cv.contato_ref,''), p.whatsapp, p.telefone, '')
           from conversas cv
           left join contas chp on chp.id = cv.chip_id
           left join canais_config cc1 on cv.chip_id is null and cc1.conta_id = cv.conta_id
@@ -1542,7 +1633,8 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
                     "dono_id": r[14], "dono": r[15] or "",
                     # etiqueta do chip: só é preenchida quando a empresa TEM dois.
                     # Numa empresa de um chip só seria a mesma palavra em 100 linhas.
-                    "chip_id": r[16], "chip_rot": (r[17] or "") if dois_chips else ""})
+                    "chip_id": r[16], "chip_rot": (r[17] or "") if dois_chips else "",
+                    "numero": _so_digitos(r[18] or "")})
     return out
 
 
@@ -1793,15 +1885,32 @@ def _wa_chip2(conta_id) -> dict | None:
 
 
 @router.get("/painel/prospeccao/comunicacao/lista")
-def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: str = "", escopo: str = ""):
-    """Lista de conversas em JSON (pro polling em tempo real)."""
+def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: str = "",
+                                 escopo: str = "", q: str = ""):
+    """Lista de conversas em JSON (pro polling em tempo real).
+
+    `q` é a busca por nome ou número. Ela entra AQUI, na rota que a caixa já chama de
+    4 em 4 segundos, e não numa rota nova: assim o resultado da busca continua vivo
+    enquanto a pessoa lê — mensagem que chega numa conversa que casou com o termo
+    aparece sozinha, do mesmo jeito que aparece na caixa sem busca."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False}, status_code=401)
     escopo = escopo if escopo in ("email", "msg") else "msg"
     with get_pool().connection() as c:
         convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
-                                canal=canal, vend=vendedor, escopo=escopo)
+                                canal=canal, vend=vendedor, escopo=escopo, busca=q)
+        # o TOTAL é sempre do recorte SEM busca: é ele que dá o "de 264" e que diz,
+        # no vazio, quantas conversas foram varridas de verdade
+        total = _conversas_total(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
+                                 canal=canal, vend=vendedor, escopo=escopo)
+        # ...e sem NENHUM filtro de canal, pra o vazio poder oferecer "buscar em todos
+        # os mensageiros" com um número em vez de um palpite
+        fora = 0
+        if q and canal:
+            fora = len(_conversas_list(c, ctx["conta_id"], ctx["gerencia"],
+                                       ctx["membro_id"], canal="", vend=vendedor,
+                                       escopo=escopo, busca=q))
         # a contagem é da CAIXA, não da página: com o filtro ligado a lista mostra só
         # os órfãos, e a faixa continuaria dizendo o mesmo número — o que esconderia
         # que ainda há outros fora do filtro atual.
@@ -1809,11 +1918,13 @@ def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: st
     for cv in convs:
         cv["quando"] = _hora_br(cv["quando"])
     return JSONResponse({"ok": True, "convs": convs, "sem_dono": orfaos,
+                         "total": total, "fora_do_filtro": fora,
                          "sincronizando": _wa_qr_sincronizando(ctx["conta_id"])})
 
 
 @router.get("/painel/prospeccao/comunicacao", response_class=HTMLResponse)
-def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str = "", vendedor: str = ""):
+def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str = "",
+                           vendedor: str = "", q: str = ""):
     """Hub omnichannel: Conversas · E-mails · Agente · Canais (lê de conversas/mensagens)."""
     ctx, redir = _acesso(request)
     if redir is not None:
@@ -1823,9 +1934,18 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
     filtro_vend = (vendedor or "").strip() if ctx["gerencia"] else ""
     escopo = "email" if aba == "emails" else "msg"
     convs = []
+    busca = (q or "").strip()[:60]
     with pool.connection() as c:
         convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
-                                canal=canal, vend=filtro_vend, escopo=escopo)
+                                canal=canal, vend=filtro_vend, escopo=escopo,
+                                busca=busca)
+        # A busca é do JS (campo digitado, sem recarregar). O `q` aqui serve pro
+        # RECARREGAR não perder o termo — F5, voltar do navegador, link colado no
+        # grupo. Sem ele a página voltava com a lista inteira e o campo cheio,
+        # dizendo uma coisa e mostrando outra.
+        total_convs = _conversas_total(c, ctx["conta_id"], ctx["gerencia"],
+                                       ctx["membro_id"], canal=canal, vend=filtro_vend,
+                                       escopo=escopo)
         ag_cfg, ag_conhec = None, None
         dist_cfg, dist_membros = None, []
         perfil = {"instagram": "", "cargo": "", "material": "", "material_tipo": "link"}
@@ -1848,6 +1968,7 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                    secao_ativa="prospeccao", aba=aba, convs=convs, escopo=escopo, canal=canal,
                    canais=_canais_status(pool, ctx["conta_id"]), canal_rot=CANAL_ROT,
                    gerencia=ctx["gerencia"], vendedores=vends, filtro_vend=filtro_vend,
+                   busca=busca, total_convs=total_convs,
                    pode_atribuir=ctx["pode_atribuir"], chip=_wa_chip(ctx["conta_id"]), chip2=_wa_chip2(ctx["conta_id"]),
                    remetente=_ein_remetente(pool, ctx["conta_id"]), tem_ia=_tem_ia(),
                    ag_cfg=ag_cfg, ag_conhec=ag_conhec, perfil=perfil,
@@ -9648,6 +9769,24 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-chip-faixa a{color:var(--verde-claro)}
 .cx-chip-faixa .pt{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .cx-filtros{display:flex;gap:.5rem;flex-wrap:wrap;margin:.8rem 0}
+/* busca da caixa: ocupa a sobra da linha e encolhe até 180px antes de quebrar */
+.cx-busca{display:flex;align-items:center;gap:.35rem;background:var(--card-2);
+  border:1px solid var(--borda);border-radius:9px;padding:.2rem .5rem;flex:1 1 180px;
+  min-width:150px;max-width:340px}
+.cx-busca:focus-within{border-color:var(--neon);box-shadow:0 0 0 2px var(--neon-fundo)}
+.cx-lupa{color:var(--txt-mut);font-size:.95rem;line-height:1;flex:none}
+.cx-busca-in{flex:1;min-width:0;background:none;border:0;outline:none;color:var(--txt);
+  font-family:inherit;font-size:.82rem;padding:.24rem 0}
+.cx-busca-in::placeholder{color:var(--txt-mut)}
+.cx-busca-in::-webkit-search-cancel-button{display:none}
+.cx-busca-x{background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:.85rem;
+  line-height:1;padding:.1rem .15rem}
+.cx-busca-x:hover{color:var(--txt)}
+/* o pedaço que casou com o termo, na linha da conversa */
+.cx-conv mark{background:var(--neon-fundo);color:var(--txt);border-radius:2px;padding:0 1px}
+.cx-num{font-size:.62rem;font-family:ui-monospace,monospace;letter-spacing:.03em;
+  padding:0 5px;border-radius:4px;border:1px solid var(--borda);color:var(--azul);
+  line-height:1.6;white-space:nowrap}
 /* 2 colunas (lista + conversa) enquanto nada está aberto; vira 3 (com contexto)
    só ao abrir uma conversa — evita os 2 quadros vazios e dá mais respiro. */
 .cx-grid{display:grid;grid-template-columns:minmax(280px,330px) minmax(0,1fr);gap:.8rem;align-items:start}
@@ -9894,7 +10033,19 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if pode_atribuir %}<option value="sem" {% if filtro_vend=='sem' %}selected{% endif %}>— sem responsável —</option>{% endif %}
       {% for v in vendedores %}<option value="{{ v.id }}" {% if filtro_vend==(v.id|string) %}selected{% endif %}>{{ v.nome }}</option>{% endfor %}
     </select>{% endif %}
-    <span class="mut" style="align-self:center;font-size:.8rem">{{ convs|length }} conversa(s)</span>
+    {# A BUSCA. Fica DENTRO do form pra herdar a linha (e pra o Enter ainda funcionar
+       com o JS desligado), mas quem manda é o JS: o Enter é barrado e a lista se
+       refaz pela mesma rota do polling, sem recarregar a página. #}
+    <span class="cx-busca">
+      <span class="cx-lupa">⌕</span>
+      <input class="cx-busca-in" type="search" name="q" id="cx-busca" autocomplete="off"
+             placeholder="Buscar por nome ou número" value="{{ busca or '' }}"
+             oninput="cxBuscaDigitou()"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();cxBuscaJa();}">
+      <button type="button" class="cx-busca-x" id="cx-busca-x" title="Limpar"
+              onclick="cxBuscaLimpar()" style="display:none">✕</button>
+    </span>
+    <span class="mut" id="cx-conta" style="align-self:center;font-size:.8rem;white-space:nowrap">{{ convs|length }}{% if total_convs and total_convs > convs|length %} de {{ total_convs }}{% endif %} conversa(s)</span>
   </form>
 
   <!-- Importação em andamento. Sem isso o vendedor abria o painel no meio do sync,
@@ -11052,18 +11203,64 @@ function cxPollThread(){
     }
   }).catch(function(){});
 }
-function cxParams(){var q=new URLSearchParams(location.search);return 'canal='+(q.get('canal')||'')+'&vendedor='+(q.get('vendedor')||'')+'&escopo='+encodeURIComponent(_cxEscopo||'msg');}
+function cxParams(){var q=new URLSearchParams(location.search);return 'canal='+(q.get('canal')||'')+'&vendedor='+(q.get('vendedor')||'')+'&escopo='+encodeURIComponent(_cxEscopo||'msg')+'&q='+encodeURIComponent(cxTermo());}
+// ------------------------------------------------------------------ a busca
+//
+// O termo mora no CAMPO, não na URL: a busca não recarrega a página, então guardar
+// na URL obrigaria a reescrever o histórico do navegador a cada tecla. Quem lê o
+// termo é o cxParams, que já é chamado pelo polling de 4 em 4 segundos — é isso que
+// mantém o resultado da busca VIVO enquanto a pessoa lê.
+var _cxBuscaT=null;
+function cxTermo(){var el=document.getElementById('cx-busca');return el?(el.value||'').trim():'';}
+// 300ms depois da ÚLTIMA tecla. Uma consulta por tecla seriam sete pra escrever
+// "jacque", e a lista piscaria no meio da palavra.
+function cxBuscaDigitou(){
+  var x=document.getElementById('cx-busca-x');if(x)x.style.display=cxTermo()?'':'none';
+  clearTimeout(_cxBuscaT);_cxBuscaT=setTimeout(cxBuscaJa,300);
+}
+function cxBuscaJa(){clearTimeout(_cxBuscaT);_cxListHtml='';cxPollList();}
+// O X nasce visível quando a página veio com termo (recarregou com ?q=)
+document.addEventListener('DOMContentLoaded',function(){if(cxTermo())cxBuscaDigitou();});
+function cxBuscaLimpar(){
+  var el=document.getElementById('cx-busca');if(el){el.value='';el.focus();}
+  cxBuscaDigitou();cxBuscaJa();
+}
+// Realça o pedaço que casou. Sem isso, numa lista de nomes parecidos ninguém sabe
+// por que aquela linha apareceu. Compara sem acento e sem caixa — do mesmo jeito que
+// o servidor comparou (ver _dobrar) —, mas recorta e devolve o texto ORIGINAL: o
+// nome tem que continuar aparecendo como a pessoa escreveu.
+var _CX_ACC='áàâãäéèêëíìîïóòôõöúùûüçñ',_CX_SEM='aaaaaeeeeiiiiooooouuuucn';
+function cxDobra(t){t=(t||'').toLowerCase();var o='';
+  for(var i=0;i<t.length;i++){var j=_CX_ACC.indexOf(t[i]);o+=(j<0?t[i]:_CX_SEM[j]);}
+  return o;}
+function cxRealce(txt,termo){
+  txt=txt||'';if(!termo)return cxEsc(txt);
+  var i=cxDobra(txt).indexOf(cxDobra(termo));
+  if(i<0)return cxEsc(txt);
+  return cxEsc(txt.substring(0,i))+'<mark>'+cxEsc(txt.substring(i,i+termo.length))
+    +'</mark>'+cxEsc(txt.substring(i+termo.length));
+}
+// O número só vira etiqueta quando a busca FOI por número — fora disso seria a
+// mesma informação repetida em cem linhas. A regra dos 4 dígitos é a mesma do
+// servidor (_MIN_DIGITOS): abaixo disso "ana 2" continua sendo busca de nome.
+function cxNumEtiqueta(c,termo){
+  var d=(termo||'').replace(/[^0-9]/g,'');
+  if(d.length<4||!c.numero)return '';
+  return '<span class="cx-num">'+cxRealce(c.numero,d)+'</span>';
+}
 function cxListItem(c){
   var cnc={whatsapp:'cn-wpp',email:'cn-mail',messenger:'cn-msg',instagram:'cn-ig'}[c.canal]||'cn-mail';
   var unread=(c.id!==_cxConv)&&(c.ult_autor==='lead'||c.ult_autor==='bot')&&((c.ult_msg_id||0)>(_cxSeen[c.id]||0));
   var av=(c.empresa||'?').substring(0,2).toUpperCase();
+  var termo=cxTermo();
   return '<button type="button" class="cx-conv'+(c.id===_cxConv?' on':'')+'" id="cxc-'+c.id+'" onclick="cxOpen(this,'+c.id+')">'
     +'<span class="av">'+cxEsc(av)+'</span><span class="mid">'
-    +'<span class="nm"><b>'+cxEsc(c.empresa)+'</b><span class="t">'+cxEsc(c.quando||'')+(unread?' <span class="cx-undot"></span>':'')+'</span></span>'
+    +'<span class="nm"><b>'+cxRealce(c.empresa,termo)+'</b><span class="t">'+cxEsc(c.quando||'')+(unread?' <span class="cx-undot"></span>':'')+'</span></span>'
     +'<span class="pre">'+cxEsc(c.quem)+': '+cxEsc(c.preview)+'</span>'
     +cxDonoLinha(c)
     +'<span class="cx-cn '+cnc+'">'+cxEsc(c.canal_rot)+(c.n>1?(' · '+c.n):'')+'</span>'
     +(c.chip_rot?('<span class="cx-chip '+(c.chip_id?'dois':'um')+'">'+cxEsc(c.chip_rot)+'</span>'):'')
+    +cxNumEtiqueta(c,termo)
     +'</span></button>';
 }
 // O dono do lead, em linha própria. Só pra conversa que JÁ é lead: a maior parte da
@@ -11179,9 +11376,29 @@ function cxPollList(){
       if(d.sincronizando&&tx)tx.textContent='📥 Importando conversas do WhatsApp… '
         +d.convs.length+' até agora. Pode ir usando, elas vão aparecendo sozinhas.';}
     cxSemDono(d.sem_dono||0);
-    var h='';var novo={};
+    var h='';var novo={};var termo=cxTermo();
     d.convs.forEach(function(c){novo[c.id]=c;h+=cxListItem(c);});
-    h=h||'<div class="cx-empty">Nenhuma conversa ainda.</div>';
+    // A CONTAGEM diz de quantas. "100 conversa(s)" é verdade e esconde o que
+    // importa: que existem outras fora do alcance da tela.
+    var ct=document.getElementById('cx-conta');
+    if(ct){var t=d.total||d.convs.length;
+      ct.textContent=d.convs.length+((t>d.convs.length)?(' de '+t):'')+' conversa(s)'
+        +(termo?(' · buscando'):'');}
+    if(!h){
+      if(termo){
+        // Dizer ONDE procurou. "Nada encontrado" sozinho deixa a dúvida de se a
+        // busca chegou a rodar — e o número prova que rodou na caixa inteira.
+        h='<div class="cx-empty">Nenhuma conversa com <b>&ldquo;'+cxEsc(termo)+'&rdquo;</b>.'
+          +'<br><span style="font-size:.82rem">Procurei no nome do lead, no nome do perfil '
+          +'do WhatsApp e no número — nas <b>'+(d.total||0)+'</b> conversas desta caixa.</span>';
+        // Busca e filtro se somam, e é aí que some resultado sem explicação: o vazio
+        // conta quantos existem fora do filtro de canal e oferece o caminho.
+        if(d.fora_do_filtro>0)h+='<br><a href="#" style="font-size:.82rem" '
+          +'onclick="cxTodosOsCanais();return false">Buscar em todos os mensageiros</a>'
+          +'<span style="font-size:.82rem"> — tem '+d.fora_do_filtro+' lá.</span>';
+        h+='</div>';
+      }else{h='<div class="cx-empty">Nenhuma conversa ainda.</div>';}
+    }
     // sem isso, todo poll (4s) trocava o innerHTML inteiro mesmo sem nada mudar,
     // e sempre zerava o scroll pro topo — na sincronização de histórico (lista
     // reordenando toda hora) isso parecia a tela "subindo e descendo" sozinha.
@@ -11191,6 +11408,14 @@ function cxPollList(){
     box.innerHTML=h;
     box.scrollTop=perto?0:st;
   }).catch(function(){});
+}
+// Tirar o filtro de canal SEM perder o termo. O filtro mora na URL (é um form GET
+// de sempre) e o termo mora no campo — então recarrega com o canal vazio e leva o
+// termo no `q`, que a rota da página sabe ler.
+function cxTodosOsCanais(){
+  var q=new URLSearchParams(location.search);q.delete('canal');
+  q.set('aba','conversas');q.set('q',cxTermo());
+  location.search=q.toString();
 }
 function cxAgente(convId,on){
   var fd=new FormData();fd.append('conversa_id',convId);fd.append('ativar',on?'1':'0');

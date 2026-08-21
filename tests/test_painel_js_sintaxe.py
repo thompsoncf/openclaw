@@ -24,6 +24,7 @@ travar quem não tem Node instalado.
 from __future__ import annotations
 
 import inspect
+import json
 import re
 import shutil
 import subprocess
@@ -338,3 +339,63 @@ def test_rolar_a_pagina_fecha_o_balao_mas_o_auto_scroll_interno_nao():
         "sem checar se o scroll veio de DENTRO do próprio balão, o auto-scroll "
         "interno das mensagens (pra mostrar a última) fecha o balão sozinho "
         "assim que elas chegam")
+
+
+def test_clicar_no_card_abre_o_resumo_nao_a_ficha_inteira_numa_gaveta():
+    """21/08: clicar no card abria uma gaveta de 1080px com um iframe carregando
+    a página INTEIRA da ficha (edição de cadastro, IA, decisor, orçamento) — só
+    pra decidir a próxima ação. Virou um balão resumido, mesma engenharia do
+    balão de chat: sem iframe, sem gaveta de tela cheia."""
+    html = _render("prospeccao")
+    js = "\n".join(_scripts(html))
+    assert "kbAbrirLead(event,1,this)" in html, (
+        "o clique no card não está mais ligado a kbAbrirLead")
+    assert "kbAbrir(" not in js.replace("kbAbrirLead(", "").replace("kbAbrirChat(", ""), (
+        "a função antiga (iframe/gaveta) voltou a existir")
+    assert "kb-dframe" not in js and "kb-drawer" not in js and "kb-dtit" not in js, (
+        "a gaveta de 1080px com iframe da ficha inteira voltou"
+    )
+    for fn in ("kbFecharLead", "kbLeadHtml", "kbLeadStatus"):
+        assert fn in js, f"{fn} não está no JS servido"
+
+
+def test_o_balao_do_lead_segue_as_etapas_reais_do_funil():
+    """Pedido explícito: a situação trocada no balão tem que seguir as etapas de
+    verdade configuradas pela conta (as mesmas do board), não uma lista fixa
+    inventada no JS — cada conta pode ter etapas diferentes."""
+    js = "\n".join(_scripts(_render("prospeccao")))
+    m = re.search(r"var _KB_STATUS=(\[.*?\]);", js)
+    assert m, "_KB_STATUS não foi embutido no JS servido"
+    assert json.loads(m.group(1)) == [["novo", "Novo"], ["contatado", "Contatado"]], (
+        "as etapas embutidas no JS não batem com as da conta (contexto `status`)")
+    corpo_kbleadhtml = js.split("function kbLeadHtml")[1].split("function kbLeadStatus")[0]
+    assert "_KB_STATUS" in corpo_kbleadhtml, (
+        "o <select> de situação do balão não usa a lista real de etapas")
+
+
+def test_trocar_situacao_no_balao_move_o_card_e_fecha_o_balao():
+    """Sem mover o card, quem troca a situação no balão vê o board "mentindo"
+    até recarregar a página — o mesmo problema que o drag-and-drop já resolve
+    (kbDrop). Reaproveita a mesma varredura de contagem (_kbAposMoverStatus)
+    em vez de duplicá-la, e fecha o balão: como ele é `fixed` (não acompanha o
+    card), deixá-lo aberto depois do card se mudar de coluna reproduziria o
+    mesmo "balão desgrudado do lead" que motivou o fechar-ao-rolar do chat."""
+    fonte = inspect.getsource(pp)
+    fonte_status = fonte.split("function kbLeadStatus")[1][:900]
+    assert "/status'" in fonte_status, "não usa a rota de status que já existe"
+    assert "_kbAposMoverStatus(d)" in fonte_status, (
+        "não reaproveita a mesma atualização de contagem do drag-and-drop")
+    assert "colNova.appendChild(card)" in fonte_status, (
+        "não move o card pra coluna nova depois de trocar a situação")
+    assert "kbFecharLead()" in fonte_status.split("colNova.appendChild(card)")[1], (
+        "não fecha o balão depois de mover o card — ficaria flutuando desgrudado do lead")
+
+
+def test_abrir_o_chat_e_abrir_o_resumo_do_lead_se_excluem():
+    """Só um balão por vez, do tipo que for — chat e resumo do lead não podem
+    ficar abertos ao mesmo tempo (se sobrepõem e nenhum fica legível)."""
+    fonte = inspect.getsource(pp)
+    fonte_chat = fonte.split("function kbAbrirChat")[1][:400]
+    assert "kbFecharLead()" in fonte_chat, "abrir o chat não fecha o resumo do lead"
+    fonte_lead = fonte.split("function kbAbrirLead")[1][:400]
+    assert "kbFecharChat()" in fonte_lead, "abrir o resumo do lead não fecha o chat"

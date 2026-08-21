@@ -34,7 +34,7 @@ from finance import prospeccao_fontes as fontes
 from finance import servicos_catalogo as scat
 from finance import validadoc as _validadoc
 from finance.email_sender import remetente_configurado
-from web.portal import _render, _env, conta_logada
+from web.portal import _render, _env, conta_logada, brl
 
 router = APIRouter()
 
@@ -6783,28 +6783,36 @@ def regua_ritmo(request: Request, dias: int = 21):
 
 
 
-@router.get("/painel/prospeccao/{alvo_id}", response_class=HTMLResponse)
-def prospeccao_ficha(request: Request, alvo_id: int):
-    ctx, redir = _acesso(request)
-    if redir is not None:
-        return redir
-    pool = get_pool()
-    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
-    if not alvo or not _pode_ver(alvo, ctx):
-        return RedirectResponse("/painel/prospeccao", status_code=303)
+_CANAL_META_LEAD = {"whatsapp": ("💬", "WhatsApp"), "email": ("✉️", "E-mail"),
+                     "email2": ("✉️", "E-mail"), "instagram": ("📷", "Instagram"),
+                     "messenger": ("💬", "Messenger")}
+
+
+def _timeline_lead(pool, alvo_id: int, limite: int | None = None):
+    """Histórico de atividades do lead, mais recente primeiro. Usado na ficha
+    completa (sem limite) e no resumo do balão do funil (últimas 2)."""
+    sql = """select a.tipo, a.resultado, a.descricao, a.agendado_para, a.criado_em, m.nome
+               from prospeccao_atividades a
+               left join membros m on m.id = a.membro_id
+              where a.prospeccao_id=%s order by a.criado_em desc"""
+    params: list = [alvo_id]
+    if limite:
+        sql += " limit %s"
+        params.append(limite)
     with pool.connection() as c:
-        ativs = c.execute(
-            """select a.tipo, a.resultado, a.descricao, a.agendado_para, a.criado_em, m.nome
-                 from prospeccao_atividades a
-                 left join membros m on m.id = a.membro_id
-                where a.prospeccao_id=%s order by a.criado_em desc""", (alvo_id,)).fetchall()
+        ativs = c.execute(sql, tuple(params)).fetchall()
     timeline = []
     for (t, rr, d, ag, cr, nome) in ativs:
         cor = "#3ee0a6" if rr in _RES_VERDE else "var(--ambar)" if rr in _RES_AMBAR else "#7a7a7a"
         timeline.append({"tipo_rot": TIPO_ROT.get(t, t), "resultado_rot": RESULTADO_ROT.get(rr or "", ""),
                          "descricao": d, "agendado_para": ag, "criado_em": cr, "quem": nome, "cor": cor})
-    # canais por onde o lead se comunicou (das conversas/mensagens) — pra mostrar
-    # as "caixinhas" no topo da ficha e o "entrou por X" no histórico.
+    return timeline
+
+
+def _canais_contato_lead(pool, alvo_id: int):
+    """Canais por onde o lead se comunicou (das conversas/mensagens) — as
+    'caixinhas' no topo da ficha e no resumo do balão do funil. Ordenado por
+    quem respondeu primeiro; os só-enviados (sem resposta) vêm depois."""
     with pool.connection() as c:
         canais_ct = c.execute(
             """select cv.canal,
@@ -6814,19 +6822,68 @@ def prospeccao_ficha(request: Request, alvo_id: int):
                  from conversas cv join mensagens m on m.conversa_id=cv.id
                 where cv.prospeccao_id=%s
                 group by cv.canal""", (alvo_id,)).fetchall()
-    _CANAL_META = {"whatsapp": ("💬", "WhatsApp"), "email": ("✉️", "E-mail"),
-                   "email2": ("✉️", "E-mail"), "instagram": ("📷", "Instagram"),
-                   "messenger": ("💬", "Messenger")}
-    canais_contato, origem_ch = [], None
+    canais_contato = []
     for (canal, ins, primeiro_in, ultimo) in canais_ct:
-        ic, lb = _CANAL_META.get(canal, ("•", (canal or "canal").title()))
-        item = {"canal": canal, "ic": ic, "label": lb, "ins": ins or 0,
-                "respondeu": (ins or 0) > 0, "primeiro_in": primeiro_in, "ultimo": ultimo}
-        canais_contato.append(item)
-        if primeiro_in and (origem_ch is None or primeiro_in < origem_ch["em"]):
-            origem_ch = {"ic": ic, "label": lb, "em": primeiro_in}
-    # quem o lead usou pra falar (respondeu) primeiro; depois os só-enviados
+        ic, lb = _CANAL_META_LEAD.get(canal, ("•", (canal or "canal").title()))
+        canais_contato.append({"canal": canal, "ic": ic, "label": lb, "ins": ins or 0,
+                                "respondeu": (ins or 0) > 0, "primeiro_in": primeiro_in, "ultimo": ultimo})
     canais_contato.sort(key=lambda x: (not x["respondeu"], x["primeiro_in"] or x["ultimo"]))
+    return canais_contato
+
+
+@router.get("/painel/prospeccao/{alvo_id}/resumo")
+def prospeccao_resumo(request: Request, alvo_id: int):
+    """Resumo enxuto do lead pro balão do funil — só o que ajuda a decidir a
+    próxima ação (contato, valor, situação, últimas atividades). Edição de
+    cadastro, IA de primeiro contato, decisor e orçamento ficam só na ficha
+    completa, atrás do link 'Ver ficha completa'."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    canais_contato = _canais_contato_lead(pool, alvo_id)
+    atividades = _timeline_lead(pool, alvo_id, limite=2)
+    temp_pill = TEMP_PILL.get(alvo["temperatura"]) or ("", "")
+    return JSONResponse({
+        "ok": True,
+        "empresa": alvo["empresa"], "temperatura": alvo["temperatura"],
+        "temp_cor": TEMP_COR.get(alvo["temperatura"]), "temp_pill": list(temp_pill),
+        "segmento": alvo["segmento"], "cidade": alvo["cidade"], "uf": alvo["uf"],
+        "vendedor_nome": alvo["vendedor_nome"], "status": alvo["status"],
+        "telefone": alvo["telefone"], "email": alvo["email"],
+        "valor_fmt": brl(alvo["valor"]) if alvo["valor"] else "",
+        "doc_fmt": alvo["doc_fmt"], "doc_rot": alvo["doc_rot"],
+        "tel_link": alvo["tel_link"], "zap_link": alvo["zap_link"],
+        "insta_url": alvo["insta_url"], "maps_url": alvo["maps_url"],
+        "canais_contato": [{"ic": x["ic"], "label": x["label"], "respondeu": x["respondeu"]}
+                            for x in canais_contato],
+        "atividades": [{"tipo_rot": x["tipo_rot"], "resultado_rot": x["resultado_rot"],
+                         "descricao": x["descricao"], "cor": x["cor"],
+                         "quando": x["criado_em"].strftime("%d/%m %H:%M") if x["criado_em"] else ""}
+                        for x in atividades],
+    })
+
+
+@router.get("/painel/prospeccao/{alvo_id}", response_class=HTMLResponse)
+def prospeccao_ficha(request: Request, alvo_id: int):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    timeline = _timeline_lead(pool, alvo_id)
+    canais_contato = _canais_contato_lead(pool, alvo_id)
+    # quem o lead usou pra falar (respondeu) primeiro é o [0] depois de ordenado —
+    # é o mesmo item que vira "entrou por X" no topo do histórico.
+    origem_ch = None
+    if canais_contato and canais_contato[0]["respondeu"]:
+        ch0 = canais_contato[0]
+        origem_ch = {"ic": ch0["ic"], "label": ch0["label"], "em": ch0["primeiro_in"]}
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
     with pool.connection() as c:
         status_ficha = [(e["chave"], e["rotulo"]) for e in _etapas(c, ctx["conta_id"])]
@@ -9092,7 +9149,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="kbdrop">
         {% for c in colunas[s] %}
         <div class="kbcard" draggable="true" data-id="{{ c.id }}" ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"
-             onclick="if(!window._kbMoved)kbAbrir({{ c.id }})">
+             onclick="if(!window._kbMoved)kbAbrirLead(event,{{ c.id }},this)">
           <div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" title="{{ c.temperatura }}" style="background:{{ temp_cor[c.temperatura] }}"></span><span class="emp">{{ c.empresa }}</span><span style="flex:1"></span><button type="button" class="kbx" title="Excluir lead" onclick="kbExcluir(event,{{ c.id }})">✕</button></div>
           {% if c.segmento or c.cidade %}<div class="sub">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
           {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido %}<div class="kbch">{% if c.tem_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="Abrir a conversa de WhatsApp">💬</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
@@ -9156,33 +9213,46 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   background:#241634;color:#c9a3e0;border:1px solid #4a3163;margin-left:.3rem}
 .kbx{background:none;border:0;color:#6b6b6b;cursor:pointer;font-size:.82rem;line-height:1;padding:.1rem .25rem;border-radius:6px;opacity:.55}
 .kbx:hover{opacity:1;color:var(--coral);background:rgba(224,87,79,.12)}
-#kb-drawer{position:fixed;inset:0;z-index:80;display:none}
-#kb-drawer.on{display:block}
-#kb-drawer .bd{position:absolute;inset:0;background:rgba(0,0,0,.55)}
-#kb-drawer .pnl{position:absolute;top:0;right:0;bottom:0;width:min(1080px,96vw);background:var(--bg);border-left:1px solid var(--borda);box-shadow:-12px 0 40px rgba(0,0,0,.45);transform:translateX(100%);transition:transform .22s ease;display:flex;flex-direction:column}
-#kb-drawer.on .pnl{transform:translateX(0)}
-#kb-drawer .dh{display:flex;align-items:center;gap:.6rem;padding:.55rem .8rem;border-bottom:1px solid var(--borda);background:#0b0b0c}
-#kb-drawer .dh b{font-size:.9rem}
-#kb-drawer .dh .x{margin-left:auto;background:none;border:1px solid var(--borda);color:var(--txt);border-radius:8px;padding:.3rem .6rem;cursor:pointer}
-#kb-drawer iframe{flex:1;border:0;width:100%;background:var(--bg)}
+/* o balão do LEAD — resumo pra decidir a próxima ação (contato, valor, situação,
+   últimas atividades). Mesma engenharia do balão de chat: nasce fixed, medido
+   do próprio card, sem carregar a ficha inteira num iframe. Edição de cadastro,
+   IA, decisor e orçamento continuam só na ficha completa (link no rodapé). */
+.leadpop{position:fixed;z-index:90;width:378px;max-width:calc(100vw - 16px);max-height:70vh;
+  background:var(--card);border:1px solid var(--borda);border-radius:14px;overflow:hidden;
+  box-shadow:0 18px 46px rgba(0,0,0,.5);display:flex;flex-direction:column}
+.lp-h{padding:.75rem .85rem .65rem;border-bottom:1px solid var(--borda);flex:none}
+.lp-h .top{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap}
+.lp-h h3{font-size:1rem;margin:0}
+.lp-h .sub{color:var(--txt-mut);font-size:.78rem;margin-top:.2rem}
+.lp-h .x{margin-left:auto;background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:.85rem;padding:.2rem .3rem;border-radius:6px;width:auto}
+.lp-h .x:hover{color:var(--txt);background:var(--card-2)}
+.lp-canais{display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.5rem}
+.lp-canal{display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;padding:.14rem .5rem;border-radius:999px;
+  border:1px solid var(--verde);background:rgba(62,224,166,.10);color:var(--verde-claro)}
+.lp-acoes{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;padding:.65rem .85rem;border-bottom:1px solid var(--borda);flex:none}
+.lp-ab{background:var(--neon-fundo);border:1px solid var(--neon-borda);border-radius:8px;padding:.32rem .65rem;
+  font-size:.78rem;color:var(--txt);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:.3rem}
+.lp-ab:hover{border-color:var(--verde)}
+.lp-status{margin-left:auto}
+.lp-status select{background:var(--bg);border:1px solid var(--borda);color:var(--txt);border-radius:999px;
+  padding:.28rem .6rem;font-size:.76rem;width:auto;margin:0}
+.lp-body{padding:.7rem .85rem;overflow-y:auto;flex:1}
+.lp-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem .8rem;font-size:.8rem}
+.lp-grid .k{color:var(--txt-mut);font-size:.68rem;text-transform:uppercase;letter-spacing:.04em}
+.lp-grid .v{margin-top:.1rem;color:var(--txt)}
+.lp-sec2{margin-top:.9rem}
+.lp-sec2 .lbl3{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-mut);margin-bottom:.4rem}
+.lp-ativ{display:flex;gap:.5rem;padding:.4rem 0;border-top:1px solid var(--borda);font-size:.8rem}
+.lp-ativ:first-child{border-top:0}
+.lp-ativ .dot2{width:7px;height:7px;border-radius:50%;margin-top:.4rem;flex-shrink:0}
+.lp-ativ .qd{color:var(--txt-mut);font-size:.72rem}
+.lp-mais{display:block;text-align:center;padding:.55rem;font-size:.76rem;color:var(--txt-mut);
+  border-top:1px solid var(--borda);text-decoration:none;flex:none}
+.lp-mais:hover{color:var(--verde-claro)}
 </style>
-<div id="kb-drawer">
-  <div class="bd" onclick="kbFechar()"></div>
-  <div class="pnl">
-    <div class="dh"><b id="kb-dtit">Lead</b>
-      <a class="x" id="kb-dfull" href="#" title="Abrir em página cheia">⤢</a>
-      <button class="x" onclick="kbFechar()">✕ Fechar</button></div>
-    <iframe id="kb-dframe" title="Ficha do lead"></iframe>
-  </div>
-</div>
 
 <script>
-function kbAbrir(id){var dr=document.getElementById('kb-drawer');
-  document.getElementById('kb-dframe').src='/painel/prospeccao/'+id+'?embed=1';
-  document.getElementById('kb-dfull').href='/painel/prospeccao/'+id;
-  var card=document.querySelector('.kbcard[data-id="'+id+'"]');
-  var nm=card?(card.querySelector('.emp')||{}).textContent:'';document.getElementById('kb-dtit').textContent=nm||'Lead';
-  dr.classList.add('on');document.body.style.overflow='hidden';}
+var _KB_STATUS={{ status|tojson }};
 // SÓ AS MENSAGENS — não a tela de Comunicação inteira. O selo do canal só chama
 // isto quando já existe conversa (ver conv_whatsapp/email/instagram no card).
 // `event.stopPropagation()` evita abrir a ficha JUNTO (o card inteiro tem
@@ -9231,6 +9301,7 @@ function kbMsgsHtml(d){
 function kbAbrirChat(ev,convId,aba,btn){
   ev.stopPropagation();
   kbFecharChat();
+  kbFecharLead();   // só um balão por vez — chat e resumo do lead se excluem
   var card=btn.closest('.kbcard');
   var nm=card?(card.querySelector('.emp')||{}).textContent:'';
   var r=btn.getBoundingClientRect();
@@ -9303,9 +9374,107 @@ function kbResponderChat(convId){
     });
   }).catch(function(){if(ta)ta.disabled=false;alert('Erro de conexão.');});
 }
-function kbFechar(){var dr=document.getElementById('kb-drawer');dr.classList.remove('on');document.body.style.overflow='';
-  setTimeout(function(){document.getElementById('kb-dframe').src='about:blank';},250);}
-document.addEventListener('keydown',function(e){if(e.key==='Escape')kbFechar();});
+// O balão do LEAD — resumo pra decidir a próxima ação (ligar, chamar no
+// WhatsApp, mudar a situação, ver o que aconteceu por último). Antes o clique
+// no card abria uma gaveta de 1080px com a ficha INTEIRA num iframe (edição de
+// cadastro, IA de primeiro contato, decisor Credify, orçamento) — pesado pra
+// só decidir o que fazer agora. Isso fica só na ficha completa, atrás do link
+// "Ver ficha completa". Mesmo mecanismo de posicionamento/fechar do balão de
+// chat (ver comentário em kbAbrirChat) — duplicado de propósito, não
+// compartilhado: são popovers independentes, cada um fecha só o que é seu.
+var _leadPop=null;
+function kbFecharLead(){
+  if(_leadPop){_leadPop.remove();_leadPop=null;}
+  document.removeEventListener('click',_leadPopFora,true);
+  document.removeEventListener('keydown',_leadPopEsc,true);
+  window.removeEventListener('scroll',_leadPopRolou,true);
+}
+function _leadPopFora(e){if(_leadPop&&!_leadPop.contains(e.target))kbFecharLead();}
+function _leadPopEsc(e){if(e.key==='Escape')kbFecharLead();}
+function _leadPopRolou(e){if(_leadPop&&_leadPop.contains(e.target))return;kbFecharLead();}
+function kbAbrirLead(ev,id,cardEl){
+  if(ev)ev.stopPropagation();
+  kbFecharChat();
+  kbFecharLead();
+  var r=cardEl.getBoundingClientRect();
+  var pop=document.createElement('div');
+  pop.className='leadpop';
+  var MARG=8, GAP=6, LARG=378;
+  var abaixo=window.innerHeight-r.bottom-GAP-MARG, acima=r.top-GAP-MARG;
+  if(abaixo>=260||abaixo>=acima){
+    pop.style.top=(r.bottom+GAP)+'px';
+    pop.style.maxHeight=Math.max(200,Math.min(560,abaixo))+'px';
+  }else{
+    pop.style.bottom=(window.innerHeight-r.top+GAP)+'px';
+    pop.style.maxHeight=Math.max(200,Math.min(560,acima))+'px';
+  }
+  pop.style.left=Math.max(MARG,Math.min(r.left,window.innerWidth-LARG-MARG))+'px';
+  pop.innerHTML='<div class="cx-empty">Carregando…</div>';
+  document.body.appendChild(pop);
+  _leadPop=pop;
+  setTimeout(function(){document.addEventListener('click',_leadPopFora,true);document.addEventListener('keydown',_leadPopEsc,true);
+    window.addEventListener('scroll',_leadPopRolou,true);},0);
+  fetch('/painel/prospeccao/'+id+'/resumo').then(function(r){return r.json();}).then(function(d){
+    if(_leadPop!==pop)return;
+    pop.innerHTML=d.ok?kbLeadHtml(d,id):'<div class="cx-empty">Não consegui abrir.</div>';
+  }).catch(function(){if(_leadPop===pop)pop.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
+}
+function kbLeadHtml(d,id){
+  var h='<div class="lp-h"><div class="top">'
+    +'<span class="tdot" style="width:12px;height:12px;background:'+cxEscK(d.temp_cor||'#7a7a7a')+'"></span>'
+    +'<h3>'+cxEscK(d.empresa||'Lead')+'</h3>';
+  if(d.temperatura)h+='<span class="tpill" style="background:'+cxEscK(d.temp_pill[0])+';color:'+cxEscK(d.temp_pill[1])+'">'+cxEscK(d.temperatura)+'</span>';
+  h+='<button type="button" class="x" onclick="kbFecharLead()">✕</button></div>';
+  var sub=[d.segmento,(d.cidade?(d.cidade+(d.uf?('/'+d.uf):'')):'')].filter(Boolean).join(' · ');
+  if(d.vendedor_nome)sub+=(sub?' · ':'')+'👤 '+d.vendedor_nome;
+  if(sub)h+='<div class="sub">'+cxEscK(sub)+'</div>';
+  if(d.canais_contato&&d.canais_contato.length){
+    h+='<div class="lp-canais">';
+    d.canais_contato.forEach(function(ch){h+='<span class="lp-canal">'+cxEscK(ch.ic)+' '+cxEscK(ch.label)+(ch.respondeu?' ✓':'')+'</span>';});
+    h+='</div>';
+  }
+  h+='</div><div class="lp-acoes">';
+  if(d.tel_link)h+='<a class="lp-ab" href="'+cxEscK(d.tel_link)+'">📞 Ligar</a>';
+  if(d.zap_link)h+='<a class="lp-ab" href="'+cxEscK(d.zap_link)+'" target="_blank" rel="noopener">💬 WhatsApp</a>';
+  if(d.insta_url)h+='<a class="lp-ab" href="'+cxEscK(d.insta_url)+'" target="_blank" rel="noopener">📷 Instagram</a>';
+  if(d.maps_url)h+='<a class="lp-ab" href="'+cxEscK(d.maps_url)+'" target="_blank" rel="noopener">🗺️ Mapa</a>';
+  h+='<div class="lp-status"><select onchange="kbLeadStatus(this,'+id+')" data-prev="'+cxEscK(d.status||'')+'">';
+  (_KB_STATUS||[]).forEach(function(s){h+='<option value="'+cxEscK(s[0])+'"'+(s[0]===d.status?' selected':'')+'>'+cxEscK(s[1])+'</option>';});
+  h+='</select></div></div><div class="lp-body"><div class="lp-grid">';
+  if(d.telefone)h+='<div><div class="k">Telefone</div><div class="v">'+cxEscK(d.telefone)+'</div></div>';
+  if(d.email)h+='<div><div class="k">E-mail</div><div class="v">'+cxEscK(d.email)+'</div></div>';
+  if(d.valor_fmt)h+='<div><div class="k">Valor estimado</div><div class="v">'+cxEscK(d.valor_fmt)+'</div></div>';
+  if(d.doc_fmt)h+='<div><div class="k">'+cxEscK(d.doc_rot||'Documento')+'</div><div class="v">'+cxEscK(d.doc_fmt)+'</div></div>';
+  h+='</div>';
+  if(d.atividades&&d.atividades.length){
+    h+='<div class="lp-sec2"><div class="lbl3">Últimas atividades</div>';
+    d.atividades.forEach(function(a){
+      h+='<div class="lp-ativ"><span class="dot2" style="background:'+cxEscK(a.cor||'#7a7a7a')+'"></span><div>'
+        +'<div>'+cxEscK(a.tipo_rot||'')+(a.resultado_rot?' — '+cxEscK(a.resultado_rot):'')+(a.descricao?': '+cxEscK(a.descricao):'')+'</div>'
+        +'<div class="qd">'+cxEscK(a.quando||'')+'</div></div></div>';
+    });
+    h+='</div>';
+  }
+  h+='</div><a class="lp-mais" target="_blank" href="/painel/prospeccao/'+id+'">Ver ficha completa ↗</a>';
+  return h;
+}
+// A mesma rota da ficha completa (fichaStatus lá dentro) — só troca a situação
+// e, se deu certo, move o card pra coluna nova no board por trás (mesma
+// varredura de contagem do drag-and-drop) e fecha o balão: o resultado
+// (card na coluna nova) já fica visível sem o balão flutuando desalinhado.
+function kbLeadStatus(sel,id){
+  var novo=sel.value, prev=sel.getAttribute('data-prev')||'';
+  var body=new URLSearchParams();body.append('status',novo);
+  fetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){alert('Não consegui mudar a situação.');sel.value=prev;return;}
+      var card=document.querySelector('.kbcard[data-id="'+id+'"]');
+      var colNova=document.querySelector('.kbcol[data-status="'+novo+'"] .kbdrop');
+      if(card&&colNova){var vazio=colNova.querySelector('.kbempty');if(vazio)vazio.remove();colNova.appendChild(card);}
+      _kbAposMoverStatus(d);
+      kbFecharLead();
+    }).catch(function(){alert('Falha de rede.');sel.value=prev;});
+}
 function kbTab(s){document.querySelectorAll('.kbcol').forEach(function(c){c.classList.toggle('show',c.getAttribute('data-status')===s);});
   document.querySelectorAll('.kbtab').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===s);});}
 (function(){var cols=document.querySelectorAll('#kbrow .kbcol');var alvo='novo';
@@ -9316,23 +9485,28 @@ function kbDrag(ev,id){ev.dataTransfer.setData('text/plain',id);ev.dataTransfer.
 function kbEnd(ev){ev.currentTarget.style.opacity='';setTimeout(function(){window._kbMoved=false;},60);}
 function kbOver(ev){ev.preventDefault();ev.currentTarget.classList.add('dragover');}
 function kbLeave(ev){ev.currentTarget.classList.remove('dragover');}
+// Contagens das colunas + placeholder "vazio" depois que um card muda de status —
+// usado tanto pelo drag-and-drop (kbDrop) quanto pela troca de situação no balão
+// resumo do lead (kbLeadStatus), pra não duplicar a mesma varredura duas vezes.
+function _kbAposMoverStatus(d){
+  if(!d.ok){location.reload();return;}
+  document.querySelectorAll('.kbcol').forEach(function(col){var n=col.querySelectorAll('.kbcard').length;
+    var chip=col.querySelector('.kbcnt');if(chip)chip.textContent=n;
+    var tabc=document.querySelector('.kbtab[data-tab="'+col.getAttribute('data-status')+'"] .c');if(tabc)tabc.textContent=n;
+    var dp=col.querySelector('.kbdrop');if(n===0&&!dp.querySelector('.kbempty')){var e=document.createElement('div');e.className='kbempty';e.textContent='vazio';dp.appendChild(e);}});
+}
 function kbDrop(ev,status){ev.preventDefault();ev.currentTarget.classList.remove('dragover');
   var id=ev.dataTransfer.getData('text/plain');var card=window._kbDragEl;if(!id||!card)return;window._kbMoved=true;
   var drop=ev.currentTarget.querySelector('.kbdrop');var emp=drop.querySelector('.kbempty');if(emp)emp.remove();drop.appendChild(card);
   var body=new URLSearchParams();body.append('status',status);
   fetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
-    .then(function(r){return r.json();}).then(function(d){if(!d.ok){location.reload();return;}
-      document.querySelectorAll('.kbcol').forEach(function(col){var n=col.querySelectorAll('.kbcard').length;
-        var chip=col.querySelector('.kbcnt');if(chip)chip.textContent=n;
-        var tabc=document.querySelector('.kbtab[data-tab="'+col.getAttribute('data-status')+'"] .c');if(tabc)tabc.textContent=n;
-        var dp=col.querySelector('.kbdrop');if(n===0&&!dp.querySelector('.kbempty')){var e=document.createElement('div');e.className='kbempty';e.textContent='vazio';dp.appendChild(e);}});
-    }).catch(function(){location.reload();});}
+    .then(function(r){return r.json();}).then(_kbAposMoverStatus).catch(function(){location.reload();});}
 
 // ---- captação inline (sem reload) ----
 var TEMPCOR={frio:'#5b9bd5',morno:'var(--ambar)',quente:'var(--coral)'};
 function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
 function jsBrl(c){c=c||0;var s=(c/100).toFixed(2).split('.');var i=s[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');return 'R$ '+i+','+s[1];}
-function cardGo(id){if(!window._kbMoved)kbAbrir(id);}
+function cardGo(ev,id,el){if(!window._kbMoved)kbAbrirLead(ev,id,el);}
 function enrqLote(){var b=document.getElementById('enrq-btn'),m=document.getElementById('enrq-msg');if(!b)return;b.disabled=true;var t=b.textContent;b.textContent='Verificando…';m.textContent='';
   fetch('/painel/prospeccao/enriquecer-lote',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
     if(!d.ok){m.textContent=d.erro||'Não consegui.';return;}
@@ -9349,7 +9523,7 @@ function addCard(l){var col=document.querySelector('.kbcol[data-status="novo"]')
   var sub=(l.segmento||l.cidade)?('<div class="sub">'+(l.segmento?jsEsc(l.segmento):'')+(l.cidade?(' · '+jsEsc(l.cidade)+(l.uf?('/'+jsEsc(l.uf)):'')):'')+'</div>'):'';
   var ft='<div class="ft">'+(l.valor?('<span style="font-size:.76rem;color:var(--verde-claro)">'+jsBrl(l.valor)+'</span>'):'<span></span>')+'<span></span></div>';
   var vd=l.vendedor?('<div class="mut" style="font-size:.72rem;margin-top:.28rem">👤 '+jsEsc(l.vendedor)+'</div>'):'';
-  var html='<div class="kbcard" draggable="true" data-id="'+l.id+'" ondragstart="kbDrag(event,'+l.id+')" ondragend="kbEnd(event)" onclick="cardGo('+l.id+')"><div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" style="background:'+cor+'"></span><span class="emp">'+jsEsc(l.empresa)+'</span><span style="flex:1"></span><button type="button" class="kbx" title="Excluir lead" onclick="kbExcluir(event,'+l.id+')">✕</button></div>'+sub+ft+vd+'</div>';
+  var html='<div class="kbcard" draggable="true" data-id="'+l.id+'" ondragstart="kbDrag(event,'+l.id+')" ondragend="kbEnd(event)" onclick="cardGo(event,'+l.id+',this)"><div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" style="background:'+cor+'"></span><span class="emp">'+jsEsc(l.empresa)+'</span><span style="flex:1"></span><button type="button" class="kbx" title="Excluir lead" onclick="kbExcluir(event,'+l.id+')">✕</button></div>'+sub+ft+vd+'</div>';
   drop.insertAdjacentHTML('afterbegin',html);updCounts();}
 function capToggle(){var e=document.getElementById('captar');var vis=e.style.display!=='none';e.style.display=vis?'none':'block';if(!vis){var i=e.querySelector('.captab[data-tab=manual] input[name=empresa]');if(i)i.focus();e.scrollIntoView({behavior:'smooth',block:'nearest'});}}
 function capTab(t){document.querySelectorAll('#captar .caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('#captar .captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}

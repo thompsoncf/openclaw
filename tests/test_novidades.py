@@ -112,6 +112,12 @@ def pool():
                      nicho_id bigint references nichos(id),
                      criado_em timestamptz not null default now(), chip_de bigint)""")
         c.execute((BASE / "174_novidades.sql").read_text(encoding="utf-8"))
+        # 184 amplia o check de `publico` com o primeiro portão de CONTA
+        # (`canal_proprio`). Sem ela aqui, o schema do teste fica com a lista
+        # antiga e a paridade banco × Python falha — que é o teste fazendo
+        # o trabalho dele.
+        c.execute((BASE / "184_novidade_voz_e_porta_fechada.sql"
+                   ).read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values
@@ -279,7 +285,12 @@ def test_reaplicar_a_175_nao_duplica_nem_desmarca_quem_leu(pool):
     depois = _publicados(pool)
     with pool.connection() as c:
         assert dict(c.execute("select chave, id from novidades").fetchall()) == ids
-    assert antes == depois and len(ids) == 3
+    # as TRÊS chaves da 175, e não a contagem da tabela: o schema deste fixture
+    # carrega outras migrações de aviso, e contar linhas fazia o teste quebrar toda
+    # vez que um aviso novo entrasse — sem nada a ver com a idempotência que ele mede.
+    assert antes == depois
+    assert {"contrato-assinatura-fecha", "agenda-de-eventos",
+            "desconto-por-item"} <= set(ids)
 
 
 def test_o_aviso_do_desconto_no_cockpit_segue_o_portao_do_montador(pool):

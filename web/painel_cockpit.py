@@ -526,6 +526,27 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .seg-ag a{flex:1;text-align:center;padding:.45rem .3rem;border-radius:8px;
   font-size:.82rem;color:var(--text-dim);text-decoration:none}
 .seg-ag a.on{background:var(--bg);color:var(--text);font-weight:600}
+/* a fileira de ESTADO usa a cor do próprio estado quando ligada — é o que faz
+   "estou vendo só pré-reserva" ser óbvio sem ler o rótulo. */
+.seg-ag a .c{font-family:var(--mono);font-size:.68rem;opacity:.75;margin-left:.22rem}
+.seg-ag.estado a.on.res{background:var(--neon-fundo);color:var(--neon);border:1px solid var(--neon-borda)}
+.seg-ag.estado a.on.pre{background:var(--ambar-fundo);color:var(--ambar);border:1px solid var(--ambar-borda)}
+/* LINHA DO MÊS: é ela que faz 29 compromissos caberem no celular. */
+.mes{display:flex;align-items:center;gap:.6rem;padding:.75rem 1.1rem;
+  border-bottom:1px solid var(--line);background:var(--bg-2);text-decoration:none;color:var(--text)}
+.mes.on{background:var(--surface)}
+.mes b{font-size:.84rem;font-weight:600;flex:1}
+.mes .n{font-family:var(--mono);font-size:.72rem;color:var(--text-dim);font-variant-numeric:tabular-nums}
+.mes .pts{display:flex;gap:3px;flex-wrap:wrap;max-width:82px;justify-content:flex-end}
+.mes .pt{width:6px;height:6px;border-radius:50%;background:var(--neon);display:block}
+.mes .pt.a{background:var(--ambar)}
+.mes .cho{font-size:.6rem;font-weight:700;padding:.08rem .4rem;border-radius:10px;
+  border:1px solid var(--coral-borda);background:var(--coral-fundo);color:var(--coral);white-space:nowrap}
+.mes .seta{color:var(--text-faint);font-size:.8rem}
+.eyebrow .cnt{margin-left:auto;letter-spacing:0;font-size:.68rem;color:var(--text-dim)}
+/* hora CHUTADA pelo sistema: sublinhada, nunca com a mesma cara de hora escolhida */
+.vis .quando .h.sug{color:var(--coral);border-bottom:1px dotted var(--coral);font-size:.82rem}
+.vis.pre{background:linear-gradient(90deg,rgba(224,163,46,.07),transparent 60%)}
 /* botão de novo lead: flutua acima das abas. Fixo e não no cabeçalho porque lá o
    `direita` já é o selo da conta — e o polegar alcança melhor embaixo à direita. */
 .fab{position:fixed;right:16px;bottom:84px;z-index:40;width:52px;height:52px;
@@ -1360,16 +1381,30 @@ def _sinal_js(sig: str) -> str:
             "})();</script>")
 
 
-@router.get("/cockpit/agenda", response_class=HTMLResponse)
-def cockpit_agenda(request: Request, t: str = ""):
-    """A agenda da CONTA, pros três papéis. Era só a do vendedor (as visitas que ELE
-    marcou), dono e gestor não tinham aba nenhuma, e a data SEGURADA não aparecia
-    pra ninguém no app — a informação que evita prometer a mesma data duas vezes.
+_MESES_EXT = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",
+              "agosto", "setembro", "outubro", "novembro", "dezembro"]
 
-    `t` é o seletor Meus × Todos. O padrão diz quem é: o vendedor abre em MEUS —
-    a agenda dele é a rota do dia, e abrir com o time inteiro empurraria a próxima
-    visita pra baixo da dobra; dono e gestor abrem em TODOS, que é o trabalho deles.
-    O dono titular não tem membro_id, então pra ele o seletor nem aparece."""
+
+@router.get("/cockpit/agenda", response_class=HTMLResponse)
+def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
+    """A agenda da CONTA, pros três papéis, DAQUI PRA FRENTE.
+
+    O TETO DE 14 DIAS CAIU. Ele bastava quando a agenda tinha três visitas técnicas;
+    com as 31 datas reais da Prime dentro, mostrava 4 de 35 compromissos e NENHUMA
+    das 6 pré-reservas. O vendedor que promete data na rua não via uma única data
+    segurada — o oposto do motivo desta aba existir.
+
+    Mas tirar o teto sem dar estrutura vira um rolo de 35 linhas no celular. Então:
+    os 30 primeiros dias vêm abertos (a rota da semana) e o resto vira UMA LINHA POR
+    MÊS, com a contagem e uma bolinha por evento. `m=AAAA-MM` abre um mês.
+
+    `t` é o seletor Meus × Todos — de QUEM. `e` é o seletor Tudo × Reservado ×
+    Pré-reserva — O QUÊ. Duas perguntas diferentes, duas fileiras: a combinação que
+    interessa a quem negocia é "minhas pré-reservas", e ela só existe com as duas.
+
+    O padrão do `t` diz quem é: o vendedor abre em MEUS — a agenda dele é a rota do
+    dia; dono e gestor abrem em TODOS, que é o trabalho deles. O dono titular não tem
+    membro_id, então pra ele o seletor nem aparece."""
     sess = _sessao(request)
     g = _gerencia(request)
     if not sess and not g:
@@ -1379,12 +1414,15 @@ def cockpit_agenda(request: Request, t: str = ""):
     so_meus = (t == "meus") if t in ("meus", "todos") else (not gestao)
     if not membro_id:
         so_meus = False       # dono titular: "meus" não aponta pra ninguém
-    eventos = ck.agenda_da_conta(get_pool(), conta_id, membro_id, so_meus=so_meus)
+    estado = e if e in ("reservado", "pre") else "tudo"
+    pool = get_pool()
+    eventos = ck.agenda_da_conta(pool, conta_id, membro_id, so_meus=so_meus, estado=estado)
+    cont = ck.contagem_agenda(pool, conta_id, membro_id, so_meus=so_meus)
     hoje = [v for v in eventos if v["hoje"]]
 
     _TAG = {"visita": ("visita", "var(--azul)", "var(--azul-borda)", "#0d1b23"),
-            "segurada": ("segurada", "var(--ambar)", "#5a4520", "#241c0f"),
-            "compromisso": ("compromisso", "var(--neon)", "#1e4a3a", "#10241a")}
+            "pre": ("pré-reserva", "var(--ambar)", "#5a4520", "#241c0f"),
+            "reservado": ("reservado", "var(--neon)", "#1e4a3a", "#10241a")}
 
     def bloco(v):
         acoes = []
@@ -1399,30 +1437,93 @@ def cockpit_agenda(request: Request, t: str = ""):
         rot, cor, borda, fundo = _TAG[v["tipo_ev"]]
         tag = (f"<span style='font-size:.62rem;font-weight:700;padding:.08rem .42rem;"
                f"border-radius:10px;border:1px solid {borda};background:{fundo};color:{cor}'>{rot}</span>")
-        # quem marcou: 'você' quando é o próprio; vazio quando foi o dono titular
-        # (que não tem membro) — aí a linha simplesmente não aparece.
         quem = "você" if v["minha"] else v["autor"]
         prazo = (f" <span style='color:var(--ambar)'>· sinal vence em {esc(v['prazo'])}</span>"
                  if v["prazo"] and v["prazo"] != "vencido"
                  else " <span style='color:var(--coral)'>· prazo vencido</span>" if v["prazo"] else "")
-        return (f"<div class='vis{' hoje' if v['hoje'] else ''}'>"
-                f"<div class=quando><div class=h>{esc(v['hora'])}</div><div class=d>{esc(v['dia'])}</div></div>"
+        # a hora CHUTADA pelo sistema vem sublinhada, igual ao painel: palpite não
+        # pode ter a mesma cara de horário que alguém escolheu.
+        cls_h = " sug" if v["hora_sugerida"] else ""
+        extras = []
+        if v["hora_sugerida"]:
+            extras.append("horário a conferir")
+        if v["choque"]:
+            extras.append("<span style='color:var(--coral)'>⚠ outra festa nesta data</span>")
+        linha2 = (f"<div class=loc>{' · '.join(extras)}</div>" if extras else "")
+        return (f"<div class='vis{' hoje' if v['hoje'] else ''}{' pre' if v['tipo_ev'] == 'pre' else ''}'>"
+                f"<div class=quando><div class='h{cls_h}'>{esc(v['hora'])}</div>"
+                f"<div class=d>{esc(v['dia'])}</div></div>"
                 f"<div class=mid><b>{esc(v['titulo'])}</b>"
                 + (f"<div class=loc>{esc(v['local'])}</div>" if v["local"] else "")
                 + f"<div class=loc>{tag}{prazo}" + (f" · {esc(quem)}" if quem else "") + "</div>"
+                + linha2
                 + (f"<div class=acoes>{''.join(acoes)}</div>" if acoes else "")
                 + "</div></div>")
 
-    if eventos:
+    def _q(**kw):
+        """A URL preservando os outros filtros — trocar de estado não pode jogar
+        fora o Meus/Todos que a pessoa escolheu."""
+        d = {"t": "meus" if so_meus else "todos", "e": estado, "m": m}
+        d.update(kw)
+        return f"{_BASE}/agenda?" + "&".join(f"{k}={v}" for k, v in d.items() if v)
+
+    miolo = ""
+    if not eventos:
+        vazio = {"reservado": "Nenhuma data reservada pra frente.",
+                 "pre": "Nenhuma data segurada no momento.",
+                 "tudo": "Marque uma visita pelo lead, ou toque no + pra criar um compromisso."}
+        miolo = ("<div class=vazio><div class=big>◷</div><b>Nada na agenda</b>"
+                 + esc(vazio[estado]) + "</div>")
+    else:
+        from datetime import datetime as _dt, timedelta as _td
+
+        from finance import agenda as _ag
+        # ONDE O ABERTO VIRA DOBRADO.
+        #
+        # O corte parte de HOJE, e não do primeiro evento: numa agenda cuja próxima
+        # festa é daqui a seis meses, "primeiro + 30 dias" põe tudo em aberto e o
+        # agrupamento por mês nunca aparece — que é justamente a agenda da Prime.
+        #
+        # E ele cai no FIM DO MÊS, não no trigésimo dia. Cortar no dia 30 parte o mês
+        # no meio: quatro festas de setembro apareciam abertas em cima e uma linha
+        # "setembro — 2" logo abaixo, que se lê como "setembro tem duas". O mesmo mês
+        # em dois lugares diferentes é pior que uma lista um pouco mais longa.
+        hoje_zero = _dt.now(_ag.BRT).replace(hour=0, minute=0, second=0, microsecond=0)
+        trinta = hoje_zero + _td(days=30)
+        limite = (trinta.replace(year=trinta.year + 1, month=1, day=1) if trinta.month == 12
+                  else trinta.replace(month=trinta.month + 1, day=1))
+        perto = [v for v in eventos if not v["hoje"] and v["inicio"] < limite]
+        longe = [v for v in eventos if not v["hoje"] and v["inicio"] >= limite]
+
         miolo = ("<div class=eyebrow>Hoje</div>"
                  + ("".join(bloco(v) for v in hoje) if hoje
-                    else "<div class=fonte>Nada marcado pra hoje.</div>"))
-        depois = [v for v in eventos if not v["hoje"]]
-        if depois:
-            miolo += "<div class=eyebrow>Próximos dias</div>" + "".join(bloco(v) for v in depois)
-    else:
-        miolo = ("<div class=vazio><div class=big>◷</div><b>Nada na agenda</b>"
-                 "Marque uma visita pelo lead, ou toque no + pra criar um compromisso.</div>")
+                    else "<div class=fonte style='padding:.6rem 1.1rem'>Nada marcado pra hoje.</div>"))
+        if perto:
+            miolo += (f"<div class='eyebrow frio'>Próximas semanas"
+                      f"<span class=cnt>{len(perto)}</span></div>"
+                      + "".join(bloco(v) for v in perto))
+        if longe:
+            # UMA LINHA POR MÊS. O mês aberto (`m`) mostra os eventos; os outros
+            # mostram a contagem e uma bolinha por evento — âmbar quando é
+            # pré-reserva. É o que faz 29 compromissos caberem numa tela de celular.
+            miolo += f"<div class='eyebrow frio'>Mais pra frente<span class=cnt>{len(longe)}</span></div>"
+            por_mes: dict[str, list] = {}
+            for v in longe:
+                por_mes.setdefault(v["mes"], []).append(v)
+            for chave, evs in por_mes.items():
+                ano, mes_n = chave.split("-")
+                nome = f"{_MESES_EXT[int(mes_n)]} de {ano}"
+                aberto = (m == chave)
+                pts = "".join(
+                    f"<i class='pt{' a' if x['tipo_ev'] == 'pre' else ''}'></i>" for x in evs[:8])
+                marca = ("<span class=cho>choque de data</span>"
+                         if any(x["choque"] for x in evs) else f"<span class=pts>{pts}</span>")
+                miolo += (f"<a class='mes{' on' if aberto else ''}' "
+                          f"href='{_q(m='' if aberto else chave)}#{chave}' id='{chave}'>"
+                          f"<b>{nome}</b>{marca}<span class=n>{len(evs)}</span>"
+                          f"<span class=seta>{'⌄' if aberto else '›'}</span></a>")
+                if aberto:
+                    miolo += "".join(bloco(v) for v in evs)
 
     # o seletor só existe pra quem TEM agenda própria (membro_id) — pro dono
     # titular "meus" seria um filtro que devolve sempre vazio.
@@ -1430,12 +1531,24 @@ def cockpit_agenda(request: Request, t: str = ""):
     if membro_id:
         seletor = (
             "<div class=bloco style='margin-top:.9rem'><div class=seg-ag>"
-            + (f"<a href='{_BASE}/agenda?t=meus'" + (" class=on" if so_meus else "") + ">Meus</a>")
-            + (f"<a href='{_BASE}/agenda?t=todos'" + ("" if so_meus else " class=on") + ">Todos</a>")
+            + (f"<a href='{_q(t='meus', m='')}'" + (" class=on" if so_meus else "") + ">Meus</a>")
+            + (f"<a href='{_q(t='todos', m='')}'" + ("" if so_meus else " class=on") + ">Todos</a>")
             + "</div></div>")
+    seletor += (
+        "<div class=bloco" + (" style='margin-top:-.35rem'" if membro_id else " style='margin-top:.9rem'")
+        + "><div class='seg-ag estado'>"
+        + (f"<a href='{_q(e='', m='')}'" + (" class=on" if estado == 'tudo' else "")
+           + f">Tudo <span class=c>{cont['tudo']}</span></a>")
+        + (f"<a href='{_q(e='reservado', m='')}'"
+           + (" class='on res'" if estado == 'reservado' else "")
+           + f">Reservado <span class=c>{cont['reservado']}</span></a>")
+        + (f"<a href='{_q(e='pre', m='')}'" + (" class='on pre'" if estado == 'pre' else "")
+           + f">Pré-reserva <span class=c>{cont['pre']}</span></a>")
+        + "</div></div>")
 
     abas = _abas_dono("agenda") if gestao else _abas_vend("agenda", _pend_vend(conta_id, membro_id))
-    corpo = (_hdr("Agenda", f"{len(hoje)} hoje · {len(eventos)} nos próximos 14 dias")
+    fonte = f"{len(hoje)} hoje · {cont['reservado']} reservadas · {cont['pre']} pré-reservas"
+    corpo = (_hdr("Agenda", fonte)
              + _flash(request)
              + f"<div class=scroll>{seletor}{miolo}</div>"
              + f"<a class=fab href='{_BASE}/agenda/novo' aria-label='Novo compromisso'>+</a>"

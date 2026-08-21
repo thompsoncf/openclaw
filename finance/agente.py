@@ -366,8 +366,30 @@ def _atender(pool, conta_id, conversa_id):
             f"INSTRUÇÕES DA EMPRESA:\n{instr or '(nenhuma)'}\n\n"
             f"PERGUNTAS FREQUENTES:\n{faqs or '(nenhuma)'}\n\n"
             f"CATÁLOGO DE SERVIÇOS:\n{cat_txt}")
+        # MESMO NÚMERO NO OUTRO CHIP. Numa empresa de dois números o mesmo cliente
+        # pode estar em duas campanhas, e cada chip tem a SUA conversa — de propósito,
+        # pra resposta sair pelo número que recebeu. O agente só enxerga a thread
+        # daqui, então sem este aviso ele fala como se fosse o primeiro contato com
+        # alguém que já está negociando do outro lado. Ele não deve puxar o assunto
+        # (não é dele, e o cliente pode nem saber que são dois números da mesma casa);
+        # deve parar de prometer sozinho e passar pra gente.
+        #
+        # `_gemeos_de_outro_chip` já engole o próprio erro (num SAVEPOINT, pra não
+        # abortar esta transação) e devolve vazio — o aviso é enfeite, a resposta ao
+        # cliente não é. Por isso aqui não há try: falhar de vez seria outra coisa.
+        gemeo_nota = ""
+        from web.painel_prospeccao import _gemeos_de_outro_chip, _aviso_gemeo
+        _g = _gemeos_de_outro_chip(c, conta_id, [conv[1]]).get(conv[1]) if conv[1] else None
+        if _g:
+            gemeo_nota = (
+                "\n\nATENÇÃO: " + _aviso_gemeo(_g) + " É a mesma pessoa falando "
+                "com outro número desta empresa, numa conversa que você NÃO vê. "
+                "Não cite isso ao cliente e não repita oferta: se ele falar de "
+                "preço, prazo ou de algo já combinado, diga que vai confirmar "
+                "com a equipe e NÃO feche nada por conta própria.")
+
         pedir = (
-            f"Conversa com {lead_empresa}:\n{historico}\n\n"
+            f"Conversa com {lead_empresa}:\n{historico}{gemeo_nota}\n\n"
             "Responda a última mensagem do cliente. Retorne APENAS JSON:\n"
             '{"acao":"responder|orcamento","resposta":"texto pra mandar ao cliente",'
             '"servicos":[{"slug":"...","qtd":1}],"temperatura":"frio|morno|quente",'

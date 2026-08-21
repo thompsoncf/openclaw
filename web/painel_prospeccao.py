@@ -203,10 +203,19 @@ def _acesso(request: Request):
         return None, RedirectResponse("/painel", status_code=303)
     if not conta[11]:  # prospecção é ferramenta de EMPRESA (módulo PJ) — não de conta PF
         return None, RedirectResponse("/painel", status_code=303)
+    _membro_id = request.session.get("membro_id")
+    _gerencia = papel in ("dono", "gestor")
     ctx = {"conta": conta, "conta_id": conta[0], "papel": papel,
-           "membro_id": request.session.get("membro_id"),
-           "gerencia": papel in ("dono", "gestor"),  # vê a carteira toda + filtra
-           "pode_atribuir": papel == "dono"}          # só o dono atribui/reatribui
+           "membro_id": _membro_id,
+           "gerencia": _gerencia,                     # vê a carteira toda + filtra
+           "pode_atribuir": papel == "dono",          # só o dono atribui/reatribui
+           # Campanha liberada individualmente pelo dono (migração 183). Só se
+           # consulta pra quem NÃO é gerência: dono e gestor já passam pelo gate
+           # antigo, e assim a tela deles não paga uma consulta por request.
+           "pode_campanha": (not _gerencia) and eq.pode_campanha(
+               get_pool(), conta[0], _membro_id)}
+    # Atalho usado nos gates de campanha/enriquecimento: gerência OU liberado.
+    ctx["gere_campanha"] = ctx["gerencia"] or ctx["pode_campanha"]
     return ctx, None
 
 
@@ -490,6 +499,9 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                       and canal in ('whatsapp','email','instagram')""",
                 (conta_id, lead_ids)).fetchall():
                 conv_por_lead.setdefault(pid, {})[canal] = cid
+        # o mesmo número atendido pelo OUTRO chip — uma consulta pro funil inteiro, e
+        # nenhuma numa empresa de um chip só (que é o caso de quase todas)
+        gemeos = _gemeos_de_outro_chip(c, conta_id, [r[0] for r in rows])
     colunas = {e["chave"]: [] for e in etapas}
     primeira = etapas[0]["chave"] if etapas else "novo"
     total_valor = 0
@@ -502,7 +514,10 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                 "tem_email": bool(r[13]), "tem_whatsapp": bool(r[10]),
                 "tem_instagram": bool(r[14]), "enriquecido": bool(r[15]),
                 "conv_whatsapp": conv.get("whatsapp"), "conv_email": conv.get("email"),
-                "conv_instagram": conv.get("instagram")}
+                "conv_instagram": conv.get("instagram"),
+                "gemeo": _aviso_gemeo(gemeos.get(r[0])),
+                "gemeo_lead": ((gemeos.get(r[0]) or {}).get("lead_id")
+                               if _gemeo_abre(gemeos.get(r[0]), ctx) else None)}
         colunas.get(r[5], colunas[primeira]).append(card)
         if r[5] != "perdido":
             total_valor += int(r[7] or 0)
@@ -657,7 +672,7 @@ async def prospeccao_base_add_campanha(request: Request):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"]:
+    if not ctx["gere_campanha"]:
         request.session["prosp_aviso"] = "Só o dono/gestor gerencia campanhas."
         return RedirectResponse("/painel/prospeccao/base", status_code=303)
     form = await request.form()
@@ -721,7 +736,7 @@ def prospeccao_base_tirar_campanha(request: Request, ids: list[str] = Form([])):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"]:
+    if not ctx["gere_campanha"]:
         request.session["prosp_aviso"] = "Só o dono/gestor gerencia campanhas."
         return RedirectResponse("/painel/prospeccao/base?ver_camp=1", status_code=303)
     pids = [int(i) for i in ids if str(i).isdigit()]
@@ -787,8 +802,8 @@ async def prospeccao_base_explorium(request: Request):
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    if not ctx["gerencia"]:
-        return JSONResponse({"ok": False, "erro": "Só o dono/gestor."})
+    if not ctx["gere_campanha"]:
+        return JSONResponse({"ok": False, "erro": "Peça ao dono pra liberar campanhas pra você."})
     from finance import explorium as ex
     if not ex.tem_credenciais():
         return JSONResponse({"ok": False, "erro": "EXPLORIUM_API_KEY não configurada no Render (Environment)."})
@@ -839,8 +854,8 @@ async def prospeccao_explorium_estimar(request: Request):
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    if not ctx["gerencia"]:
-        return JSONResponse({"ok": False, "erro": "Só o dono/gestor."})
+    if not ctx["gere_campanha"]:
+        return JSONResponse({"ok": False, "erro": "Peça ao dono pra liberar campanhas pra você."})
     from finance import explorium as ex
     if not ex.tem_credenciais():
         return JSONResponse({"ok": False, "erro": "EXPLORIUM_API_KEY não configurada no Render."})
@@ -859,8 +874,8 @@ async def prospeccao_explorium_importar(request: Request):
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    if not ctx["gerencia"]:
-        return JSONResponse({"ok": False, "erro": "Só o dono/gestor."})
+    if not ctx["gere_campanha"]:
+        return JSONResponse({"ok": False, "erro": "Peça ao dono pra liberar campanhas pra você."})
     from finance import explorium as ex
     if not ex.tem_credenciais():
         return JSONResponse({"ok": False, "erro": "EXPLORIUM_API_KEY não configurada no Render."})
@@ -923,13 +938,17 @@ async def prospeccao_explorium_importar(request: Request):
                     """insert into prospeccao (conta_id, empresa, site_url, segmento, email, whatsapp,
                          decisor_nome, decisor_cargo, decisor_telefone, decisor_whatsapp,
                          decisor_telefones, decisor_em, obs, origem, temperatura, status, estagio,
-                         enriquecido_em, criado_por)
-                       values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,now(),%s,'explorium','frio','novo','base',now(),%s)""",
+                         enriquecido_em, criado_por, vendedor_id)
+                       values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,now(),%s,'explorium','frio','novo','base',now(),%s,%s)""",
                     (conta_id, empresa[:250], dominio, (b.get("google_category") or b.get("linkedin_category") or "")[:120],
                      email, fone, (p.get("full_name") or "")[:200], (p.get("job_title") or "")[:120],
                      fone, bool(ci.get("mobile_phone")),
                      _json.dumps([{"formatado": t, "provavel": (i == 0)} for i, t in enumerate(tels)]),
-                     obs[:500], ctx["membro_id"]))
+                     # vendedor_id: gerência importa pra base da empresa (None, como
+                     # sempre); vendedor liberado importa PRA SI — senão ele paga a
+                     # consulta e o lead nasce sem dono, invisível na carteira dele.
+                     obs[:500], ctx["membro_id"],
+                     None if ctx["gerencia"] else ctx["membro_id"]))
                 inseridos += 1
             except Exception:  # noqa: BLE001
                 pass
@@ -1463,9 +1482,39 @@ def _agente_conhecimento(c, conta_id: int) -> dict:
     return {"instrucoes": instr, "faqs": faqs}
 
 
-def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=""):
-    """Lista de conversas (topo por última msg) — usada na página e no polling.
-    escopo: 'email' = só e-mail (aba E-mails); 'msg' = só mensageiros (aba Conversas)."""
+# Dobra de acento feita na MÃO, dos dois lados da comparação.
+#
+# O projeto não tem a extensão `unaccent` ligada no Postgres — está escrito em
+# finance/livro_caixa.py, e é o mesmo motivo pelo qual o casamento de produto de
+# cupom também dobra na mão. Sem isto, quem digita "jacque" no celular (ninguém põe
+# acento no celular) não acha "Jacqueline", e quem digita "joao" não acha "João" —
+# que é justamente o nome que veio do perfil do WhatsApp, onde acento tem de sobra.
+_ACENTOS = "áàâãäéèêëíìîïóòôõöúùûüçñ"
+_SEM_ACENTO = "aaaaaeeeeiiiiooooouuuucn"
+
+
+def _dobrar(col: str) -> str:
+    """A expressão SQL que devolve a coluna em minúscula e sem acento."""
+    return f"translate(lower(coalesce({col},'')), '{_ACENTOS}', '{_SEM_ACENTO}')"
+
+
+def _termo_dobrado(termo: str) -> str:
+    return (termo or "").lower().translate(str.maketrans(_ACENTOS, _SEM_ACENTO))
+
+
+# Quantos dígitos um termo precisa ter pra valer como busca de NÚMERO. Abaixo disso
+# é ruído: "ana 2" tem um dígito e continua sendo busca de nome.
+_MIN_DIGITOS = 4
+
+
+def _conversas_onde(conta_id, gerencia, membro_id, canal="", vend="", escopo="",
+                    busca=""):
+    """O recorte da caixa, em uma função só — a lista e a CONTAGEM têm que enxergar
+    exatamente o mesmo conjunto.
+
+    Separado porque a contagem "100 de 264" só é verdade se os dois lados aplicarem
+    o mesmo where; duas cópias da regra viram dois números que se contradizem na
+    mesma linha da tela."""
     where = ["cv.conta_id=%s"]
     params = [conta_id]
     if not gerencia:
@@ -1487,6 +1536,63 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
         params.append(canal)
     elif escopo == "msg":
         where.append("cv.canal <> 'email'")
+    # --------------------------------------------------------------- a busca
+    #
+    # POR QUE ELA VEM PRO SERVIDOR, e não filtra o que já está na tela: a lista sai
+    # ordenada por `ultima_msg_em desc limit 100`. A Prime tem 264 conversas e o
+    # Rawilson 254 — filtrar as 100 carregadas acharia só o que já dava pra ver
+    # rolando, e as 164 que faltam são justamente as que se procura. Metade delas
+    # (139 na Prime) nem tem lead vinculado: aparecem pelo nome do perfil do
+    # WhatsApp, ou pelo número cru quando nem isso veio.
+    termo = (busca or "").strip()[:60]
+    if termo:
+        dig = re.sub(r"\D", "", termo)
+        alvos = []
+        # NÚMERO. A mesma pessoa é gravada de quatro jeitos — 86995167171,
+        # 5586995167171, com e sem o nono dígito — e o painel já resolveu isto uma
+        # vez: casa pelos 8 ÚLTIMOS dígitos (ver _conversa_wa_do_contato). A partir
+        # de 8 dígitos a comparação é de igualdade, que é o que o índice
+        # idx_conversas_num8 (conta_id, canal, right(regexp_replace(...), 8))
+        # enxerga; abaixo disso vira sufixo, que varre — e varrer 264 linhas de uma
+        # conta é barato, varrer com LIKE '%x%' no lugar errado é que não seria.
+        if len(dig) >= _MIN_DIGITOS:
+            fim = dig[-8:]
+            comp = "= %s" if len(dig) >= 8 else "like %s"
+            valor = fim if len(dig) >= 8 else "%" + fim
+            for col in ("cv.contato_ref", "p.whatsapp", "p.telefone"):
+                alvos.append(
+                    f"right(regexp_replace(coalesce({col},''), '\\D', '', 'g'), 8) {comp}")
+                params.append(valor)
+        # NOME. Três campos porque é em três lugares que o nome pode estar: a ficha
+        # do lead, o nome do perfil do WhatsApp (conversa sem lead) e o contato da
+        # ficha. Procurar em só um deixa metade da caixa inalcançável.
+        alvo = "%" + _termo_dobrado(termo) + "%"
+        for col in ("p.empresa", "cv.contato_nome", "p.contato"):
+            alvos.append(f"{_dobrar(col)} like %s")
+            params.append(alvo)
+        where.append("(" + " or ".join(alvos) + ")")
+    return where, params
+
+
+def _conversas_total(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=""):
+    """Quantas conversas o recorte tem AO TODO — sem busca e sem o limite de 100.
+
+    É a segunda metade de "100 de 264". Sem ela a tela dizia só "100 conversa(s)", o
+    que é verdade e esconde o que importa: que existem 164 fora do alcance."""
+    where, params = _conversas_onde(conta_id, gerencia, membro_id, canal, vend, escopo)
+    return int(c.execute(
+        f"""select count(*) from conversas cv
+              left join prospeccao p on p.id = cv.prospeccao_id
+             where {' and '.join(where)}""", tuple(params)).fetchone()[0])
+
+
+def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo="",
+                    busca=""):
+    """Lista de conversas (topo por última msg) — usada na página e no polling.
+    escopo: 'email' = só e-mail (aba E-mails); 'msg' = só mensageiros (aba Conversas).
+    busca: nome ou número; vazio = a caixa inteira, como sempre foi."""
+    where, params = _conversas_onde(conta_id, gerencia, membro_id, canal, vend, escopo,
+                                    busca)
     rows = c.execute(f"""
         select cv.id, cv.canal, cv.status, cv.ultima_msg_em, cv.prospeccao_id,
                -- sem lead vinculado, mostra o nome do perfil do WhatsApp em vez do
@@ -1501,7 +1607,11 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
                -- por qual CHIP a conversa entrou. Nulo = o chip principal, que é todo
                -- o histórico; aí vale o apelido gravado no canal da própria empresa.
                cv.chip_id,
-               coalesce(nullif(btrim(chp.nome),''), nullif(btrim(cc1.rotulo),''), '')
+               coalesce(nullif(btrim(chp.nome),''), nullif(btrim(cc1.rotulo),''), ''),
+               -- o número CRU: a etiqueta que explica por que a linha apareceu numa
+               -- busca por número. Só a busca por número a mostra — fora dela seria
+               -- a mesma informação repetida em 100 linhas.
+               coalesce(nullif(cv.contato_ref,''), p.whatsapp, p.telefone, '')
           from conversas cv
           left join contas chp on chp.id = cv.chip_id
           left join canais_config cc1 on cv.chip_id is null and cc1.conta_id = cv.conta_id
@@ -1516,8 +1626,7 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
          order by cv.ultima_msg_em desc limit 100""", tuple(params)).fetchall()
     # a empresa tem mais de um chip? decide se a etiqueta aparece — uma consulta só,
     # fora do laço
-    dois_chips = bool(c.execute("select 1 from contas where chip_de=%s limit 1",
-                                (conta_id,)).fetchone())
+    dois_chips = _tem_dois_chips(c, conta_id)
     out = []
     for r in rows:
         if r[9] == "bot":
@@ -1540,7 +1649,8 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
                     "dono_id": r[14], "dono": r[15] or "",
                     # etiqueta do chip: só é preenchida quando a empresa TEM dois.
                     # Numa empresa de um chip só seria a mesma palavra em 100 linhas.
-                    "chip_id": r[16], "chip_rot": (r[17] or "") if dois_chips else ""})
+                    "chip_id": r[16], "chip_rot": (r[17] or "") if dois_chips else "",
+                    "numero": _so_digitos(r[18] or "")})
     return out
 
 
@@ -1636,6 +1746,19 @@ def _wa_minutos_sem_receber(conta_id) -> int | None:
                 where cv.conta_id=%s and cv.canal='whatsapp' and m.direcao='in'""",
             (conta_id,)).fetchone()
     return int(r[0]) if r and r[0] is not None else None
+
+
+def _minutos_desde(quando) -> int | None:
+    """Minutos entre `quando` e agora — o par de `_ha_quanto`, que espera minutos.
+
+    Tolera data ingênua (sem fuso) tratando-a como UTC: as colunas do banco são
+    timestamptz e chegam com fuso, mas teste e importação às vezes passam datetime
+    solto, e comparar aware com naive levanta TypeError no meio da tela."""
+    if quando is None:
+        return None
+    if quando.tzinfo is None:
+        quando = quando.replace(tzinfo=timezone.utc)
+    return max(0, int((datetime.now(timezone.utc) - quando).total_seconds() // 60))
 
 
 def _ha_quanto(minutos) -> str:
@@ -1778,15 +1901,32 @@ def _wa_chip2(conta_id) -> dict | None:
 
 
 @router.get("/painel/prospeccao/comunicacao/lista")
-def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: str = "", escopo: str = ""):
-    """Lista de conversas em JSON (pro polling em tempo real)."""
+def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: str = "",
+                                 escopo: str = "", q: str = ""):
+    """Lista de conversas em JSON (pro polling em tempo real).
+
+    `q` é a busca por nome ou número. Ela entra AQUI, na rota que a caixa já chama de
+    4 em 4 segundos, e não numa rota nova: assim o resultado da busca continua vivo
+    enquanto a pessoa lê — mensagem que chega numa conversa que casou com o termo
+    aparece sozinha, do mesmo jeito que aparece na caixa sem busca."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False}, status_code=401)
     escopo = escopo if escopo in ("email", "msg") else "msg"
     with get_pool().connection() as c:
         convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
-                                canal=canal, vend=vendedor, escopo=escopo)
+                                canal=canal, vend=vendedor, escopo=escopo, busca=q)
+        # o TOTAL é sempre do recorte SEM busca: é ele que dá o "de 264" e que diz,
+        # no vazio, quantas conversas foram varridas de verdade
+        total = _conversas_total(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
+                                 canal=canal, vend=vendedor, escopo=escopo)
+        # ...e sem NENHUM filtro de canal, pra o vazio poder oferecer "buscar em todos
+        # os mensageiros" com um número em vez de um palpite
+        fora = 0
+        if q and canal:
+            fora = len(_conversas_list(c, ctx["conta_id"], ctx["gerencia"],
+                                       ctx["membro_id"], canal="", vend=vendedor,
+                                       escopo=escopo, busca=q))
         # a contagem é da CAIXA, não da página: com o filtro ligado a lista mostra só
         # os órfãos, e a faixa continuaria dizendo o mesmo número — o que esconderia
         # que ainda há outros fora do filtro atual.
@@ -1794,12 +1934,13 @@ def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: st
     for cv in convs:
         cv["quando"] = _hora_br(cv["quando"])
     return JSONResponse({"ok": True, "convs": convs, "sem_dono": orfaos,
+                         "total": total, "fora_do_filtro": fora,
                          "sincronizando": _wa_qr_sincronizando(ctx["conta_id"])})
 
 
 @router.get("/painel/prospeccao/comunicacao", response_class=HTMLResponse)
 def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str = "",
-                           vendedor: str = "", abrir: str = ""):
+                           vendedor: str = "", abrir: str = "", q: str = ""):
     """Hub omnichannel: Conversas · E-mails · Agente · Canais (lê de conversas/mensagens)."""
     ctx, redir = _acesso(request)
     if redir is not None:
@@ -1809,9 +1950,18 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
     filtro_vend = (vendedor or "").strip() if ctx["gerencia"] else ""
     escopo = "email" if aba == "emails" else "msg"
     convs = []
+    busca = (q or "").strip()[:60]
     with pool.connection() as c:
         convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
-                                canal=canal, vend=filtro_vend, escopo=escopo)
+                                canal=canal, vend=filtro_vend, escopo=escopo,
+                                busca=busca)
+        # A busca é do JS (campo digitado, sem recarregar). O `q` aqui serve pro
+        # RECARREGAR não perder o termo — F5, voltar do navegador, link colado no
+        # grupo. Sem ele a página voltava com a lista inteira e o campo cheio,
+        # dizendo uma coisa e mostrando outra.
+        total_convs = _conversas_total(c, ctx["conta_id"], ctx["gerencia"],
+                                       ctx["membro_id"], canal=canal, vend=filtro_vend,
+                                       escopo=escopo)
         ag_cfg, ag_conhec = None, None
         dist_cfg, dist_membros = None, []
         perfil = {"instagram": "", "cargo": "", "material": "", "material_tipo": "link"}
@@ -1834,6 +1984,7 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                    secao_ativa="prospeccao", aba=aba, convs=convs, escopo=escopo, canal=canal,
                    canais=_canais_status(pool, ctx["conta_id"]), canal_rot=CANAL_ROT,
                    gerencia=ctx["gerencia"], vendedores=vends, filtro_vend=filtro_vend,
+                   busca=busca, total_convs=total_convs,
                    pode_atribuir=ctx["pode_atribuir"], chip=_wa_chip(ctx["conta_id"]), chip2=_wa_chip2(ctx["conta_id"]),
                    remetente=_ein_remetente(pool, ctx["conta_id"]), tem_ia=_tem_ia(),
                    ag_cfg=ag_cfg, ag_conhec=ag_conhec, perfil=perfil,
@@ -1878,6 +2029,9 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
                         where msg.conversa_id=%s
                         order by msg.criado_em desc, msg.id desc limit 100) ult
                 order by criado_em asc, mid asc""", (conversa_id,)).fetchall()
+        # o mesmo número em atendimento pelo OUTRO chip. Conversa sem lead não tem
+        # gêmeo pra procurar — o casamento é entre fichas, não entre números soltos.
+        gemeo = _gemeos_de_outro_chip(c, ctx["conta_id"], [cv[2]]).get(cv[2]) if cv[2] else None
     # Quem mandou, quando saiu do celular e não do Zaq: a mensagem chega pelo eco
     # do Baileys (ou vem do histórico importado) e não tem membro_id — o inbox
     # mostrava só "—". O nome do perfil do WhatsApp conectado é exatamente quem
@@ -1937,7 +2091,18 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
     vends = ([{"id": v["id"], "nome": v["nome"]}
               for v in _vendedores(pool, ctx["conta_id"])]
              if (ctx["pode_atribuir"] and cv[2]) else [])
+    # o aviso do chat é a MESMA frase do funil, com "quando foi a última" no fim: no
+    # chat a pergunta prática é se a outra conversa está viva agora ou parada há uma
+    # semana. `conversa_id` do gêmeo vai junto pro botão abrir direto lá.
+    gemeo_txt = _aviso_gemeo(gemeo)
+    if gemeo_txt and gemeo.get("quando"):
+        gemeo_txt = gemeo_txt.rstrip(".") + " · última mensagem " + (
+            _ha_quanto(_minutos_desde(gemeo["quando"])) or "agora há pouco") + "."
     return JSONResponse({"ok": True, "lead": lead, "msgs": msgs,
+                         "gemeo": ({"texto": gemeo_txt,
+                                    "conversa_id": (gemeo["conversa_id"]
+                                                    if _gemeo_abre(gemeo, ctx) else None)}
+                                   if gemeo_txt else None),
                          "conversa_id": conversa_id, "pode_responder": pode_wa,
                          "agente_ativo": bool(cv[14]),
                          "pode_atribuir": bool(ctx["pode_atribuir"] and cv[2]),
@@ -2269,6 +2434,122 @@ def chips_da_conta(c, conta_id: int) -> list[dict]:
     return saida
 
 
+def _tem_dois_chips(c, conta_id: int) -> bool:
+    """A empresa tem um segundo chip? Uma linha, por chave estrangeira indexada.
+
+    Vale a chamada porque TODO o aviso cruzado depende dela: com um chip só não existe
+    "o mesmo número na outra campanha", e a consulta cara nem chega a rodar. Hoje isso
+    é verdade em 21 das 22 contas."""
+    return bool(c.execute("select 1 from contas where chip_de=%s limit 1",
+                          (conta_id,)).fetchone())
+
+
+def _gemeos_de_outro_chip(c, conta_id: int, lead_ids) -> dict:
+    """O MESMO número sendo atendido por OUTRO chip: `{lead_id: {...}}`.
+
+    Numa empresa de dois números, o mesmo telefone pode estar em duas campanhas — uma
+    por chip — e aí são dois leads e duas conversas, de propósito: o que entra pelo
+    chip 1 sai pelo chip 1 e o que entra pelo 2 sai pelo 2 (ver a busca de lead em
+    `_wa_inbound_conversa`). Separar é o certo; o que faltava era AVISAR, senão dois
+    vendedores negociam com a mesma pessoa sem saber um do outro, cada um com um preço.
+
+    Devolve, pra cada lead pedido, o gêmeo MAIS RECENTE do outro chip:
+    `{"lead_id", "nome", "conversa_id", "quando", "campanha", "dono", "chip_rot",
+    "vendedor_id"}`. O `vendedor_id` é do GÊMEO, e serve pra decidir se o link abre: o
+    vendedor comum não enxerga ficha dos outros (`_pode_ver`), então pra ele o aviso
+    aparece sem link em vez de com um link que só redireciona.
+    Lead sem gêmeo simplesmente não aparece no dicionário — quem chama itera o que veio.
+
+    Empresa de um chip só sai na primeira linha, sem tocar em `prospeccao`: não existe
+    "outro chip" pra comparar e a consulta seria varredura à toa em toda tela do funil.
+
+    O casamento é pelos 8 dígitos finais, o mesmo de todo o resto do arquivo (o nono
+    dígito aparece ou não conforme quem digitou — ver `_wa_equivalentes`). Aqui ele é
+    o final SOZINHO, sem a igualdade exata que a busca de conversa faz por cima: um
+    falso positivo aqui custa um aviso a mais numa tela, não uma mensagem no lugar
+    errado, e o número aparece no aviso pra pessoa conferir."""
+    ids = [int(i) for i in (lead_ids or []) if i]
+    if not ids or not _tem_dois_chips(c, conta_id):
+        return {}
+    try:
+        linhas = _gemeos_consulta(c, conta_id, ids)
+    except Exception:  # noqa: BLE001
+        # o aviso é um extra; o funil, o chat e a resposta do agente não são. Mesmo
+        # tratamento do `_chips_para_tela`: registra e devolve vazio, que é a tela de
+        # ontem. O SAVEPOINT está lá dentro — sem ele o erro abortaria a transação
+        # inteira e derrubaria junto o que vem DEPOIS desta chamada.
+        import logging
+        logging.getLogger("prospeccao.chips").warning(
+            "aviso de chip gêmeo falhou na conta %s", conta_id, exc_info=True)
+        return {}
+    return {r[0]: {"lead_id": r[1], "nome": r[2], "conversa_id": r[3], "quando": r[4],
+                   "campanha": r[5], "dono": r[6], "chip_rot": r[7],
+                   "vendedor_id": r[8]} for r in linhas}
+
+
+def _gemeos_consulta(c, conta_id: int, ids: list):
+    """Só a consulta do `_gemeos_de_outro_chip`, num SAVEPOINT. Separada pra deixar a
+    função de cima legível — o try/except em volta de 30 linhas de SQL esconde o SQL."""
+    with c.transaction():
+        return c.execute(
+            r"""with meu as (
+                  select p.id,
+                         right(regexp_replace(coalesce(p.whatsapp, p.telefone, ''), '\D', '', 'g'), 8) as n8,
+                         cv.chip_id as chip
+                    from prospeccao p
+                    left join conversas cv on cv.conta_id = p.conta_id
+                                          and cv.prospeccao_id = p.id and cv.canal='whatsapp'
+                   where p.conta_id = %s and p.id = any(%s))
+                select distinct on (meu.id)
+                       meu.id, o.id,
+                       coalesce(nullif(btrim(o.contato),''), nullif(btrim(o.empresa),''), ''),
+                       cvo.id, cvo.ultima_msg_em,
+                       coalesce(cp.nome,''), coalesce(vm.nome,''),
+                       coalesce(nullif(btrim(chp.nome),''), nullif(btrim(cc1.rotulo),''), ''),
+                       o.vendedor_id
+                  from meu
+                  join prospeccao o
+                    on o.conta_id = %s and o.id <> meu.id and length(meu.n8) = 8
+                   and right(regexp_replace(coalesce(o.whatsapp, o.telefone, ''), '\D', '', 'g'), 8) = meu.n8
+                  join conversas cvo
+                    on cvo.conta_id = o.conta_id and cvo.prospeccao_id = o.id
+                   and cvo.canal = 'whatsapp' and cvo.chip_id is distinct from meu.chip
+                  left join contas chp on chp.id = cvo.chip_id
+                  left join canais_config cc1 on cvo.chip_id is null and cc1.conta_id = cvo.conta_id
+                                             and cc1.canal = 'whatsapp'
+                  left join membros vm on vm.id = o.vendedor_id
+                  left join lateral (
+                        select camp.nome from campanha_alvos a
+                          join campanhas camp on camp.id = a.campanha_id
+                         where a.prospeccao_id = o.id order by a.id desc limit 1) cp on true
+                 order by meu.id, cvo.ultima_msg_em desc nulls last, cvo.id desc""",
+            (conta_id, ids, conta_id)).fetchall()
+
+
+def _gemeo_abre(g, ctx) -> bool:
+    """Este usuário consegue abrir a ficha/conversa do gêmeo? Mesma régua do
+    `_pode_ver`: gerência vê tudo, vendedor vê o que é dele. Sem isto o aviso oferecia
+    um "Abrir →" que só redirecionava de volta — pior que não ter link nenhum."""
+    if not g:
+        return False
+    return bool(ctx.get("gerencia")) or (
+        g.get("vendedor_id") is not None and g["vendedor_id"] == ctx.get("membro_id"))
+
+
+def _aviso_gemeo(g: dict) -> str:
+    """A frase do aviso, uma só pras três telas (funil, chat e agente).
+
+    Um texto só porque três textos diferentes pra mesma coisa é como o vendedor
+    aprende que são coisas diferentes."""
+    if not g:
+        return ""
+    onde = g.get("campanha") or (("chip " + g["chip_rot"]) if g.get("chip_rot") else "outro chip")
+    frase = "Este número também está em atendimento na " + onde
+    if g.get("dono"):
+        frase += " — com " + g["dono"]
+    return frase + "."
+
+
 def _chip_da_conta(c, conta_id: int, chip_id) -> int | None:
     """Valida que `chip_id` é desta empresa e devolve o id — ou None.
 
@@ -2391,6 +2672,9 @@ def comunicacao_whatsapp_qr_iniciar(request: Request, chip: str = Form("")):
     _qr_relogio_retencao(alvo, r.get("status"))
     return JSONResponse({"ok": bool(r.get("ok", True) and not r.get("erro")),
                          "status": r.get("status"), "qr": r.get("qr"),
+                         # passa reto, INCLUSIVE o None: a tela precisa distinguir
+                         # "não tem credencial" de "não deu pra saber" (ver qrShow).
+                         "pareada": r.get("pareada"),
                          "sincronizando": bool(r.get("sincronizando")), "sync_progress": r.get("syncProgress") or 0,
                          "msg": _QR_ROT.get(r.get("status"), "") if r.get("status") else (r.get("erro") or "")})
 
@@ -2413,6 +2697,7 @@ def comunicacao_whatsapp_qr_status(request: Request, chip: str = ""):
     st = r.get("status") or "desconectado"
     _qr_relogio_retencao(alvo, st)
     return JSONResponse({"ok": True, "status": st, "qr": r.get("qr"),
+                         "pareada": r.get("pareada"),
                          "sincronizando": bool(r.get("sincronizando")), "sync_progress": r.get("syncProgress") or 0,
                          "msg": _QR_ROT.get(st, "")})
 
@@ -3222,11 +3507,37 @@ def _batiza_lead_pendente(c, conta_id: int, conv_id: int | None = None) -> int:
         return 0
 
 
-def _conversa_wa_do_contato(c, conta_id, lead_id, numero):
+# "não filtre por chip" — diferente de `chip_id=None`, que é o chip PRINCIPAL (ver
+# _chip_gravavel). Sem este sentinela não dá pra dizer as duas coisas num parâmetro
+# só, e quem não sabe o chip (o botão "Agora não", que vem da tela) acabaria pedindo
+# o principal por engano — perdendo a conversa do chip 2.
+_QUALQUER_CHIP = object()
+
+
+def _sql_filtro_chip(chip_id, empresa_id):
+    """`(pedaço de SQL, params)` pro filtro de chip de uma consulta em `conversas`.
+
+    `is not distinct from` e não `=`: o chip principal é gravado como NULO (todo o
+    histórico e toda empresa de um chip só), e `chip_id = NULL` não casa com nada —
+    a busca voltaria vazia e cada mensagem abriria uma conversa nova."""
+    if chip_id is _QUALQUER_CHIP:
+        return "", []
+    return " and chip_id is not distinct from %s", [_chip_gravavel(chip_id, empresa_id)]
+
+
+def _conversa_wa_do_contato(c, conta_id, lead_id, numero, *, chip_id=_QUALQUER_CHIP):
     """A conversa de WhatsApp deste contato: a do LEAD, se ele já tiver uma; senão a
     do NÚMERO, nas duas grafias (ver _wa_equivalentes). Devolve (id, prospeccao_id)
     ou None. Usada pelos três caminhos que gravam conversa — entrada, eco de saída e
     o botão "Agora não" — que antes repetiam a mesma busca com diferenças sutis.
+
+    `chip_id` limita a busca ao chip por onde a mensagem entrou. Numa empresa de DOIS
+    números o mesmo contato tem duas conversas — uma por chip — e casar pelo número
+    sem olhar o chip devolvia a do OUTRO: a resposta saía pelo número errado e as duas
+    campanhas se misturavam numa thread só. Medido na conta 34 em 21/08/2026, com a
+    Prime rodando "Zarb" no chip principal e "Thiago" no chip 36. Sem o argumento a
+    busca é de QUALQUER chip, que é o comportamento de sempre (e o certo pra quem
+    chega pelo lead, não pelo número).
 
     DUAS CONSULTAS, e não uma com OR, porque o OR custa a tabela inteira. Medido
     com 60 mil conversas: a versão com `prospeccao_id=%s or right(...)=%s` fazia
@@ -3246,21 +3557,25 @@ def _conversa_wa_do_contato(c, conta_id, lead_id, numero):
     outro DDD que termine igual."""
     d = _so_digitos(numero)
     alvo8 = d[-8:] if len(d) >= 8 else d
+    filtro, par_chip = _sql_filtro_chip(chip_id, conta_id)
     if lead_id:
-        # UNIQUE (conta_id, prospeccao_id, canal): é uma linha ou nenhuma
+        # UNIQUE (conta_id, prospeccao_id, canal): é uma linha ou nenhuma. O filtro de
+        # chip aqui é redundante por construção (quem escolheu o lead já descartou os
+        # que são de outro chip) e fica de cinto: uma linha vinda de outro chip é bug,
+        # e é melhor ela não voltar do que voltar e mandar resposta pelo número errado.
         r = c.execute(
             """select id, prospeccao_id from conversas
-                where conta_id=%s and canal='whatsapp' and prospeccao_id=%s""",
-            (conta_id, lead_id)).fetchone()
+                where conta_id=%s and canal='whatsapp' and prospeccao_id=%s""" + filtro,
+            (conta_id, lead_id, *par_chip)).fetchone()
         if r:
             return r
     return c.execute(
         r"""select id, prospeccao_id from conversas
              where conta_id=%s and canal='whatsapp'
                and right(regexp_replace(contato_ref, '\D', '', 'g'), 8) = %s
-               and regexp_replace(contato_ref, '\D', '', 'g') = any(%s)
+               and regexp_replace(contato_ref, '\D', '', 'g') = any(%s)""" + filtro + """
              order by (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
-        (conta_id, alvo8, _wa_equivalentes(d) or [d])).fetchone()
+        (conta_id, alvo8, _wa_equivalentes(d) or [d], *par_chip)).fetchone()
 
 
 def _ja_conversou(c, conta_id, lead_id) -> bool:
@@ -3316,10 +3631,34 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     # as duas grafias do número (com e sem o nono dígito) — o mesmo contato chega das
     # duas formas, e casar por igualdade crua criava uma conversa nova a cada troca
     equivalentes = _wa_equivalentes(remetente) or [remetente]
+    # O lead deste número — mas NÃO um que já seja de OUTRO chip.
+    #
+    # Numa empresa de dois números o mesmo telefone pode estar em duas campanhas, uma
+    # por chip, e aí são DOIS leads e DUAS conversas: o que entra pelo chip 1 sai pelo
+    # chip 1, o que entra pelo 2 sai pelo 2. Sem o `not exists`, a mensagem que chegava
+    # no chip 2 encontrava o lead do chip 1 e ia parar na conversa dele — a resposta
+    # saía pelo número errado e as duas campanhas viravam uma thread só (conta 34,
+    # 21/08/2026: a "Thiago" no chip 36 respondeu como se fosse a "Zarb").
+    #
+    # Quem marca o chip do lead é a CONVERSA dele (prospeccao não tem coluna de chip, e
+    # não precisa ter): lead sem conversa de WhatsApp ainda não é de ninguém e o
+    # primeiro chip que falar com ele fica com ele. Numa empresa de um chip só, todas
+    # as conversas têm `chip_id` nulo e o chip que chega também é nulo — `is distinct
+    # from` dá falso em todas, o `not exists` é sempre verdadeiro, e a consulta é
+    # exatamente a de antes.
+    #
+    # O aviso cruzado (o gêmeo na outra campanha) é o `_gemeos_de_outro_chip`,
+    # que é só leitura de tela — aqui a regra é apenas: não roubar o lead do outro chip.
     lead = c.execute(
-        r"""select id, coalesce(origem,'') from prospeccao
-             where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
-             order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
+        r"""select p.id, coalesce(p.origem,'') from prospeccao p
+             where p.conta_id=%s
+               and right(regexp_replace(coalesce(p.whatsapp, p.telefone, ''), '\D', '', 'g'), 8) = %s
+               and not exists (select 1 from conversas cv
+                                where cv.conta_id=p.conta_id and cv.prospeccao_id=p.id
+                                  and cv.canal='whatsapp'
+                                  and cv.chip_id is distinct from %s)
+             order by p.atualizado_em desc limit 1""",
+        (conta_id, alvo8, _chip_gravavel(chip_id, conta_id))).fetchone()
     lead_id = lead[0] if lead else None
     de_prospeccao = bool(lead) and lead[1] not in ("whatsapp_inbound", "email_inbound")
     lead_novo = False
@@ -3334,13 +3673,16 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         # Agora a conversa órfã só serve pra herdar o NOME (melhor que o pushName) e
         # o fluxo segue pra criar o lead. O vínculo da conversa existente com o lead
         # novo é feito logo abaixo, junto com as mensagens que ela já tinha.
+        # do MESMO chip: uma órfã do chip 2 não pode ser adotada pelo lead que nasce
+        # no chip 1 — ela é a thread do outro número, com o outro histórico.
         orfa = c.execute(
             r"""select id, coalesce(nullif(contato_nome,''),'') from conversas
                  where conta_id=%s and canal='whatsapp' and prospeccao_id is null
                    and right(regexp_replace(contato_ref, '\D', '', 'g'), 8) = %s
                    and regexp_replace(contato_ref, '\D', '', 'g') = any(%s)
+                   and chip_id is not distinct from %s
                  order by ultima_msg_em desc limit 1""",
-            (conta_id, alvo8, equivalentes)).fetchone()
+            (conta_id, alvo8, equivalentes, _chip_gravavel(chip_id, conta_id))).fetchone()
         nome_orfa = orfa[1] if orfa else ""
         # contato NOVO de verdade (landing/WhatsApp) → vira lead QUENTE, não atribuído (o dono distribui).
         # Nome: primeiro o da AGENDA do vendedor (o melhor que existe), depois o do
@@ -3384,7 +3726,7 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     # por último a mais recente. Exigir `prospeccao_id is null` pra casar por número,
     # como era antes, deixava de fora a conversa pendurada em OUTRA ficha do mesmo
     # telefone — e o inbox ganhava uma segunda thread do mesmo cliente.
-    conv = _conversa_wa_do_contato(c, conta_id, lead_id, remetente)
+    conv = _conversa_wa_do_contato(c, conta_id, lead_id, remetente, chip_id=chip_id)
     if conv:
         conv_id = conv[0]
         if conv[1] is None:
@@ -4223,7 +4565,7 @@ def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=Fa
     antigo, e casando cru ele virava uma segunda conversa do mesmo contato."""
     remetente = _so_digitos(remetente)
     alvo8 = remetente[-8:] if len(remetente) >= 8 else remetente
-    conv = _conversa_wa_do_contato(c, conta_id, None, remetente)
+    conv = _conversa_wa_do_contato(c, conta_id, None, remetente, chip_id=chip_id)
     if conv:
         conv_id = conv[0]
     else:
@@ -4326,12 +4668,21 @@ def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid, *, chip_id=None):
     encontrada e a mensagem sumir."""
     destinatario = _so_digitos(destinatario)
     alvo8 = destinatario[-8:] if len(destinatario) >= 8 else destinatario
+    # sem roubar o lead do OUTRO chip, pela mesma razão do inbound: numa empresa de
+    # dois números o vendedor que escreve pelo celular do chip 2 não pode pendurar a
+    # mensagem na ficha que pertence ao chip 1.
     lead = c.execute(
-        r"""select id from prospeccao
-             where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
-             order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
+        r"""select p.id from prospeccao p
+             where p.conta_id=%s
+               and right(regexp_replace(coalesce(p.whatsapp, p.telefone, ''), '\D', '', 'g'), 8) = %s
+               and not exists (select 1 from conversas cv
+                                where cv.conta_id=p.conta_id and cv.prospeccao_id=p.id
+                                  and cv.canal='whatsapp'
+                                  and cv.chip_id is distinct from %s)
+             order by p.atualizado_em desc limit 1""",
+        (conta_id, alvo8, _chip_gravavel(chip_id, conta_id))).fetchone()
     lead_id = lead[0] if lead else None
-    conv = _conversa_wa_do_contato(c, conta_id, lead_id, destinatario)
+    conv = _conversa_wa_do_contato(c, conta_id, lead_id, destinatario, chip_id=chip_id)
     if conv:
         conv_id = conv[0]
     else:
@@ -5488,7 +5839,7 @@ def prospeccao_campanha_nova(request: Request, nome: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"]:
+    if not ctx["gere_campanha"]:
         return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
     nome = (nome or "").strip() or "Nova campanha"
     with get_pool().connection() as c:
@@ -5496,9 +5847,15 @@ def prospeccao_campanha_nova(request: Request, nome: str = Form("")):
         # Sem isso a campanha nasce sem dizer que mensagem está usando, e depois não
         # há como comparar um texto com outro — 7 das 8 campanhas desta base ficaram
         # órfãs assim, e o resultado delas virou um número sem causa.
-        cid = c.execute("""insert into campanhas (conta_id, nome, criado_por, modelo_codigo)
-                           values (%s,%s,%s,'generico') returning id""",
-                        (ctx["conta_id"], nome[:120], ctx["membro_id"])).fetchone()[0]
+        # responsavel_id: sem isto o vendedor cria a campanha e NÃO CONSEGUE ABRIR
+        # o que acabou de criar — o _pode_campanha exige gerência ou ser o
+        # responsável, e `criado_por` sozinho não conta. Pra gerência fica NULL
+        # como sempre foi (campanha da empresa, sem dono individual).
+        _resp = None if ctx["gerencia"] else ctx["membro_id"]
+        cid = c.execute("""insert into campanhas (conta_id, nome, criado_por, modelo_codigo,
+                                                  responsavel_id)
+                           values (%s,%s,%s,'generico',%s) returning id""",
+                        (ctx["conta_id"], nome[:120], ctx["membro_id"], _resp)).fetchone()[0]
         for (ordem, dias, assunto, corpo, ia) in _PASSOS_PADRAO:
             c.execute("""insert into campanha_passos (campanha_id, ordem, dias_apos, assunto, corpo, usar_ia)
                          values (%s,%s,%s,%s,%s,%s)""", (cid, ordem, dias, assunto, corpo, ia))
@@ -6473,7 +6830,13 @@ def prospeccao_ficha(request: Request, alvo_id: int):
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
     with pool.connection() as c:
         status_ficha = [(e["chave"], e["rotulo"]) for e in _etapas(c, ctx["conta_id"])]
+        # o mesmo número atendido pelo outro chip. O aviso está no card do funil, mas o
+        # card some assim que o vendedor abre a ficha (é a ficha que abre na gaveta) —
+        # e é aqui, com o telefone na mão pra ligar, que saber disso muda o que ele faz.
+        gemeo = _gemeos_de_outro_chip(c, ctx["conta_id"], [alvo_id]).get(alvo_id)
     return _render("prospeccao_ficha", request, titulo=alvo["empresa"], secao_ativa="prospeccao",
+                   gemeo=gemeo, gemeo_aviso=_aviso_gemeo(gemeo),
+                   gemeo_abre=_gemeo_abre(gemeo, ctx),
                    canais_contato=canais_contato, origem_ch=origem_ch,
                    a=alvo, timeline=timeline, status=status_ficha, temperaturas=TEMPERATURAS,
                    tipos=TIPOS, resultados=RESULTADOS, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
@@ -7249,16 +7612,22 @@ async def prospeccao_base_enriquecer(request: Request):
     pids = pids[:CAP]
 
     if tipo == "cnpj":
-        if not ctx["gerencia"]:
-            return JSONResponse({"ok": False, "erro": "Só o dono/gestor busca CNPJ (consulta paga)."})
+        if not ctx["gere_campanha"]:
+            return JSONResponse({"ok": False, "erro": "Peça ao dono pra liberar campanhas pra você."})
         if not fontes.tem_chave_cnpja():
             return JSONResponse({"ok": False, "erro": "Busca por nome precisa da CNPJá (CNPJA_TOKEN no "
                                  "Render). Sem ela só dá pra colar o CNPJ direto na Ficha do lead."})
         with pool.connection() as c:
+            # ESCOPO: o vendedor liberado gasta consulta paga só nos leads DELE.
+            # Sem isto ele marcaria a base inteira da empresa (tem "marcar todos"
+            # no cabeçalho da tabela) e a fatura seria da conta. Mesma trava que o
+            # caminho grátis já fazia lá embaixo.
+            _esc = "" if ctx["gerencia"] else " and vendedor_id=%s"
+            _ex = () if ctx["gerencia"] else (ctx["membro_id"],)
             sel = c.execute(
                 "select id, empresa, cidade, uf, obs from prospeccao where conta_id=%s and id = any(%s)"
-                " and coalesce(nullif(trim(empresa),''),'') <> '' and coalesce(cnpj,'')=''",
-                (conta_id, pids)).fetchall()
+                " and coalesce(nullif(trim(empresa),''),'') <> '' and coalesce(cnpj,'')=''" + _esc,
+                (conta_id, pids) + _ex).fetchall()
         _INICIO = time.monotonic()
         achou, ambiguo, sem = 0, 0, 0
         processados = 0
@@ -7292,17 +7661,20 @@ async def prospeccao_base_enriquecer(request: Request):
                              "sem_leads": sem_leads})
 
     if tipo == "decisor":
-        if not ctx["gerencia"]:
-            return JSONResponse({"ok": False, "erro": "Só o dono/gestor busca decisor (consulta paga)."})
+        if not ctx["gere_campanha"]:
+            return JSONResponse({"ok": False, "erro": "Peça ao dono pra liberar campanhas pra você."})
         from finance import credify as cf
         if not cf.tem_credenciais():
             return JSONResponse({"ok": False, "erro": "Credify não configurada (CREDIFY_CLIENT_ID/SECRET no Render)."})
         with pool.connection() as c:
+            # mesmo escopo do CNPJ acima: consulta paga só nos leads do vendedor
+            _esc = "" if ctx["gerencia"] else " and vendedor_id=%s"
+            _ex = () if ctx["gerencia"] else (ctx["membro_id"],)
             sel = [r[0] for r in c.execute(
                 "select id from prospeccao where conta_id=%s and id = any(%s) and decisor_em is null"
                 " and (length(regexp_replace(coalesce(cnpj,''),'\\D','','g'))=14"
-                "      or coalesce(nullif(trim(whatsapp),''), nullif(trim(telefone),'')) is not null)",
-                (conta_id, pids)).fetchall()]
+                "      or coalesce(nullif(trim(whatsapp),''), nullif(trim(telefone),'')) is not null)" + _esc,
+                (conta_id, pids) + _ex).fetchall()]
         achou = 0
         for pid in sel:
             try:
@@ -7765,6 +8137,14 @@ _CSS = """<style>
 .tgl:before{content:'';position:absolute;left:3px;top:3px;width:18px;height:18px;background:#fff;border-radius:50%;transition:.2s}
 .toggle input:checked+.tgl{background:var(--verde)}
 .toggle input:checked+.tgl:before{transform:translateX(20px)}
+/* ---- mesmo número, outro chip (aviso cruzado) ----
+   Âmbar, e não vermelho: não é erro. Ter dois leads é o desenho — cada chip responde
+   pelo seu número. O que o aviso pede é cuidado, não conserto. */
+.gemeo-faixa{margin-top:.8rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+  font-size:.84rem;line-height:1.4;color:var(--ambar);background:#2a2113;
+  border:1px solid var(--ambar-borda);border-radius:10px;padding:.55rem .75rem}
+.gemeo-faixa a{color:var(--ambar);text-decoration:underline;white-space:nowrap}
+.gemeo-faixa .mut{color:var(--txt-mut)}
 </style>"""
 
 # ---- barra de navegação do módulo + agilidade no front (prefetch no hover + barra
@@ -7912,7 +8292,7 @@ _CAPTURA_PANEL_HTML = """
   <button type="button" class="caba@@GOOGLE_ON@@" data-tab="google" onclick="capTab('google')">📍 Google Maps</button>
   <button type="button" class="caba@@CNPJ_ON@@" data-tab="manual" onclick="capTab('manual')">🏢 CNPJ / ✏️ Manual</button>
   <button type="button" class="caba@@CSV_ON@@" data-tab="csv" onclick="capTab('csv')">📄 CSV</button>
-  {% if gerencia %}<button type="button" class="caba" data-tab="explorium" onclick="capTab('explorium')">🔮 Explorium</button>{% endif %}
+  {% if gere_campanha %}<button type="button" class="caba" data-tab="explorium" onclick="capTab('explorium')">🔮 Explorium</button>{% endif %}
 </div>
 
 <div class="captab" data-tab="google"@@GOOGLE_HIDE@@>
@@ -8211,12 +8591,12 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" style="font-size:.8rem"><b style="color:var(--txt)" id="base-sel-n">0</b> marcado(s) · {{ leads|length }} na página{% if leads|length>=300 %} (máx 300){% endif %}</div>
       <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
         <button type="button" class="pbtn ghost" onclick="baseEnriquecer('canais')" title="Raspa o site dos marcados e acha e-mail / Instagram / WhatsApp (grátis)">🔎 Enriquecer canais</button>
-        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseMarcarSemCnpj()" title="Marca só os leads desta página que ainda não têm CNPJ — pra rodar o Buscar CNPJ só neles">🔎 Marcar sem CNPJ</button>{% endif %}
-        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('cnpj')" title="Acha o CNPJ dos marcados sem CNPJ ainda, por nome + cidade (CNPJá) — consulta paga. Achando mais de um candidato, mostra pra você escolher aqui mesmo">🏢 Buscar CNPJ</button>{% endif %}
-        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('decisor')" title="Acha o dono dos marcados na Credify: por CNPJ (sócio) ou pelo telefone do Google (titular/dono) — consulta paga">🎯 Buscar decisor</button>{% endif %}
-        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseExplorium()" title="Teste de conexão com a Explorium (Vibe) no lead marcado">🔮 Explorium (teste)</button>{% endif %}
+        {% if gere_campanha %}<button type="button" class="pbtn ghost" onclick="baseMarcarSemCnpj()" title="Marca só os leads desta página que ainda não têm CNPJ — pra rodar o Buscar CNPJ só neles">🔎 Marcar sem CNPJ</button>{% endif %}
+        {% if gere_campanha %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('cnpj')" title="Acha o CNPJ dos marcados sem CNPJ ainda, por nome + cidade (CNPJá) — consulta paga. Achando mais de um candidato, mostra pra você escolher aqui mesmo">🏢 Buscar CNPJ</button>{% endif %}
+        {% if gere_campanha %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('decisor')" title="Acha o dono dos marcados na Credify: por CNPJ (sócio) ou pelo telefone do Google (titular/dono) — consulta paga">🎯 Buscar decisor</button>{% endif %}
+        {% if gere_campanha %}<button type="button" class="pbtn ghost" onclick="baseExplorium()" title="Teste de conexão com a Explorium (Vibe) no lead marcado">🔮 Explorium (teste)</button>{% endif %}
         <span style="width:1px;height:24px;background:var(--borda);margin:0 .15rem"></span>
-        {% if gerencia %}
+        {% if gere_campanha %}
         {% if ver_camp %}
         <button class="pbtn ghost" formaction="/painel/prospeccao/base/tirar-campanha" onclick="return baseTirarCheck()" style="color:var(--ambar);border-color:var(--ambar-borda)" title="Tira os marcados de qualquer campanha — voltam livres pra Base">🔓 Tirar da campanha</button>
         {% else %}
@@ -8718,6 +9098,10 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido %}<div class="kbch">{% if c.tem_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="Abrir a conversa de WhatsApp">💬</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
           <div class="ft">{% if c.valor %}<span style="font-size:.76rem;color:var(--verde-claro)">{{ brl(c.valor) }}</span>{% else %}<span></span>{% endif %}{% if c.proximo %}<span class="mut" style="font-size:.72rem">📅 {{ c.proximo.strftime('%d/%m') }}</span>{% endif %}</div>
           {% if gerencia and c.vendedor %}<div class="mut" style="font-size:.72rem;margin-top:.28rem">👤 {{ c.vendedor }}</div>{% endif %}
+          {# mesmo telefone, outro chip: são dois leads de propósito (cada chip responde
+             pelo seu número), mas quem olha o funil precisa saber — senão dois
+             vendedores negociam com a mesma pessoa, cada um com um preço. #}
+          {% if c.gemeo %}<div class="kbgem" onclick="event.stopPropagation()">⚠️ {{ c.gemeo }}{% if c.gemeo_lead %} <a href="/painel/prospeccao/{{ c.gemeo_lead }}">Abrir →</a>{% endif %}</div>{% endif %}
         </div>
         {% else %}<div class="kbempty">vazio</div>{% endfor %}
       </div>
@@ -8727,6 +9111,9 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 </div>
 
 <style>
+.kbgem{margin-top:.4rem;font-size:.7rem;line-height:1.35;color:#e0b45f;background:rgba(224,180,95,.10);
+  border:1px solid rgba(224,180,95,.32);border-radius:8px;padding:.3rem .42rem;cursor:default}
+.kbgem a{color:#e0b45f;text-decoration:underline;white-space:nowrap}
 .kbch{display:flex;gap:.35rem;margin-top:.3rem;font-size:.82rem;align-items:center}
 .kbch .mut{font-size:.7rem}
 /* o selo vira BOTÃO só quando existe conversa de verdade (não só telefone/e-mail
@@ -9073,6 +9460,11 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if a.email %}<button type="button" class="pbtn ghost" id="cvz-btn" onclick="convidarZaq({{ a.id }})" title="Manda um e-mail com link pro cliente criar a conta no Zaq">🎟️ Convidar pro Zaq</button>{% endif %}
     </div>
     <div class="mut" id="enrqf-msg" style="font-size:.82rem;margin-top:.5rem"></div>
+    {# mesmo telefone, outro chip: dois leads de propósito, um por número — mas quem
+       vai ligar precisa saber que a outra campanha já está falando com essa pessoa. #}
+    {% if gemeo_aviso %}<div class="gemeo-faixa">⚠️ {{ gemeo_aviso }}
+      {% if gemeo.nome %}<span class="mut">({{ gemeo.nome }})</span>{% endif %}
+      {% if gemeo_abre %}<a href="/painel/prospeccao/{{ gemeo.lead_id }}">Abrir o outro lead →</a>{% endif %}</div>{% endif %}
     {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
     <script>
     function fichaStatus(sel,id){
@@ -9413,6 +9805,24 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-chip-faixa a{color:var(--verde-claro)}
 .cx-chip-faixa .pt{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .cx-filtros{display:flex;gap:.5rem;flex-wrap:wrap;margin:.8rem 0}
+/* busca da caixa: ocupa a sobra da linha e encolhe até 180px antes de quebrar */
+.cx-busca{display:flex;align-items:center;gap:.35rem;background:var(--card-2);
+  border:1px solid var(--borda);border-radius:9px;padding:.2rem .5rem;flex:1 1 180px;
+  min-width:150px;max-width:340px}
+.cx-busca:focus-within{border-color:var(--neon);box-shadow:0 0 0 2px var(--neon-fundo)}
+.cx-lupa{color:var(--txt-mut);font-size:.95rem;line-height:1;flex:none}
+.cx-busca-in{flex:1;min-width:0;background:none;border:0;outline:none;color:var(--txt);
+  font-family:inherit;font-size:.82rem;padding:.24rem 0}
+.cx-busca-in::placeholder{color:var(--txt-mut)}
+.cx-busca-in::-webkit-search-cancel-button{display:none}
+.cx-busca-x{background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:.85rem;
+  line-height:1;padding:.1rem .15rem}
+.cx-busca-x:hover{color:var(--txt)}
+/* o pedaço que casou com o termo, na linha da conversa */
+.cx-conv mark{background:var(--neon-fundo);color:var(--txt);border-radius:2px;padding:0 1px}
+.cx-num{font-size:.62rem;font-family:ui-monospace,monospace;letter-spacing:.03em;
+  padding:0 5px;border-radius:4px;border:1px solid var(--borda);color:var(--azul);
+  line-height:1.6;white-space:nowrap}
 /* 2 colunas (lista + conversa) enquanto nada está aberto; vira 3 (com contexto)
    só ao abrir uma conversa — evita os 2 quadros vazios e dá mais respiro. */
 .cx-grid{display:grid;grid-template-columns:minmax(280px,330px) minmax(0,1fr);gap:.8rem;align-items:start}
@@ -9476,6 +9886,12 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-empty{padding:2.4rem 1rem;text-align:center;color:var(--txt-mut);font-size:.9rem}
 .cx-trunc{padding:.35rem 0;text-align:center;color:var(--txt-mut);font-size:.72rem}
 .cx-th{display:flex;align-items:center;gap:.6rem;padding:.7rem .85rem;border-bottom:1px solid var(--borda)}
+/* aviso de mesmo número no outro chip — colado embaixo do cabeçalho, antes das
+   mensagens: é o que a pessoa lê ANTES de escrever, que é o ponto. */
+.cx-gemeo{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;font-size:.78rem;
+  line-height:1.4;color:var(--ambar);background:#2a2113;border-bottom:1px solid var(--ambar-borda);
+  padding:.45rem .85rem}
+.cx-gemeo a{color:var(--ambar);text-decoration:underline;white-space:nowrap}
 .cx-th b{font-size:.92rem}
 .cx-th small{display:block;color:var(--txt-mut);font-size:.75rem}
 .cx-msgs{flex:1;overflow-y:auto;padding:.9rem;display:flex;flex-direction:column;gap:.6rem}
@@ -9653,7 +10069,19 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if pode_atribuir %}<option value="sem" {% if filtro_vend=='sem' %}selected{% endif %}>— sem responsável —</option>{% endif %}
       {% for v in vendedores %}<option value="{{ v.id }}" {% if filtro_vend==(v.id|string) %}selected{% endif %}>{{ v.nome }}</option>{% endfor %}
     </select>{% endif %}
-    <span class="mut" style="align-self:center;font-size:.8rem">{{ convs|length }} conversa(s)</span>
+    {# A BUSCA. Fica DENTRO do form pra herdar a linha (e pra o Enter ainda funcionar
+       com o JS desligado), mas quem manda é o JS: o Enter é barrado e a lista se
+       refaz pela mesma rota do polling, sem recarregar a página. #}
+    <span class="cx-busca">
+      <span class="cx-lupa">⌕</span>
+      <input class="cx-busca-in" type="search" name="q" id="cx-busca" autocomplete="off"
+             placeholder="Buscar por nome ou número" value="{{ busca or '' }}"
+             oninput="cxBuscaDigitou()"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();cxBuscaJa();}">
+      <button type="button" class="cx-busca-x" id="cx-busca-x" title="Limpar"
+              onclick="cxBuscaLimpar()" style="display:none">✕</button>
+    </span>
+    <span class="mut" id="cx-conta" style="align-self:center;font-size:.8rem;white-space:nowrap">{{ convs|length }}{% if total_convs and total_convs > convs|length %} de {{ total_convs }}{% endif %} conversa(s)</span>
   </form>
 
   <!-- Importação em andamento. Sem isso o vendedor abria o painel no meio do sync,
@@ -10126,8 +10554,9 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                se a consulta falhar, o qrPoll devolve o botão ao estado usável. -->
           <button type="button" class="pbtn" id="qr-btn" onclick="qrIniciar()" disabled>Verificando…</button>
           <button type="button" class="pbtn ghost" id="qr-sair" onclick="qrSair()" style="display:none">Desconectar</button>
-          <!-- só aparece DESCONECTADO: com a sessão de pé o celular continua
-               sincronizando e reescreveria parte do que foi apagado. -->
+          <!-- só aparece com a sessão fora do ar E SEM CREDENCIAL: com a sessão de pé
+               (ou com a conta apenas estacionada pelo disjuntor, que volta sozinha) o
+               celular ressincroniza e reescreveria parte do que foi apagado. -->
           <button type="button" class="pbtn ghost" id="qr-apagar" onclick="qrApagar()"
                   style="display:none;border-color:var(--ambar-borda);color:var(--ambar)">🗑️ Apagar histórico</button>
         </div>
@@ -10256,13 +10685,30 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           if(syncBar)syncBar.style.width=(d.sync_progress||0)+'%';
           if(syncPct)syncPct.textContent=(d.sync_progress||0)+'%';
           if(msg)msg.textContent=(conectado&&d.sincronizando)?'':(d.msg||'');
-          if(sair)sair.style.display=(d.status&&d.status!=='desconectado')?'inline-flex':'none';
-          // apagar e desconectar são exclusivos: um só faz sentido quando o outro
-          // não cabe. `=== 'desconectado'` e não `!conectado` de propósito — em
-          // 'reconectando'/'sincronizando' a sessão está viva e apagar faria estrago.
+          // QUEM MANDA AQUI É A CREDENCIAL, NÃO O STATUS DA SESSÃO.
+          //
+          // Os dois botões liam `status==='desconectado'`, e funcionou enquanto
+          // 'desconectado' significava na prática "não tem credencial". O disjuntor da
+          // guerra de sessão (#520) criou um estado que não existia: a conta é
+          // ESTACIONADA de propósito — fica 'desconectado' e continua PAREADA, e o vigia
+          // a retoma sozinho em minutos. Isso quebrava os dois lados:
+          //   • "Desconectar" (que APAGA a credencial) sumia justo em quem tem credencial
+          //     pra apagar — a conta 35 ficou sem saída nenhuma pela tela;
+          //   • "Apagar histórico" APARECIA numa conta que vai voltar sozinha, que é
+          //     exatamente o resultado pela metade que a barreira existe pra impedir
+          //     (o celular ressincroniza e reescreve parte do que foi apagado).
+          // `pareada` responde a pergunta certa, e os dois voltam a ser exclusivos.
+          //
+          // null = o serviço não soube dizer (banco fora do ar, ou versão antiga que
+          // ainda não manda o campo): cai no comportamento antigo em vez de apostar.
+          var pareada=(d.pareada===undefined||d.pareada===null)?(d.status!=='desconectado'):!!d.pareada;
+          if(sair)sair.style.display=pareada?'inline-flex':'none';
           var apg=document.getElementById('qr-apagar'),ret=document.getElementById('qr-retencao');
-          if(apg)apg.style.display=(d.status==='desconectado')?'inline-flex':'none';
-          if(ret)ret.style.display=(d.status==='desconectado')?'block':'none';
+          // continua exigindo sessão fora do ar — com ela de pé o celular sincroniza e
+          // reescreve o que foi apagado — E AGORA também credencial nenhuma.
+          var podeApagar=(d.status==='desconectado')&&!pareada;
+          if(apg)apg.style.display=podeApagar?'inline-flex':'none';
+          if(ret)ret.style.display=podeApagar?'block':'none';
           // chegou resposta: desarma o cão de guarda, o botão sai do "Verificando…"
           // e volta a ser clicável
           if(_qrEspera){clearTimeout(_qrEspera);_qrEspera=null;}
@@ -10318,7 +10764,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           if(msg)msg.textContent=d.msg||'';
           if(st){st.textContent=conectado?'✅ Conectado':(d.status==='aguardando_qr'?'Aguardando QR':d.status);
                  st.style.color=conectado?'var(--verde-claro)':'var(--ambar)';}
-          if(sair)sair.style.display=(d.status!=='desconectado')?'inline-flex':'none';
+          // mesma regra do chip 1: quem manda é a CREDENCIAL, não o status. Uma conta
+          // estacionada pelo disjuntor fica 'desconectado' e pareada, e é justo nela que
+          // o botão precisa aparecer. `null` cai no comportamento antigo.
+          var c2Pareada=(d.pareada===undefined||d.pareada===null)?(d.status!=='desconectado'):!!d.pareada;
+          if(sair)sair.style.display=c2Pareada?'inline-flex':'none';
           // mesma correção que o chip 1 recebeu: conectado não é "Reconectar". O
           // /iniciar devolve a sessão viva sem tocar nela, então o botão prometia uma
           // ação que não acontece. Continua clicável — é a saída de quem está
@@ -10740,6 +11190,10 @@ function cxOpen(el,id){
       // a conversa sem abrir o painel do lado nem a ficha
       +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+cxEsc(L.canal_rot||'')+(L.cidade?(' · '+cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):'')):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+(L.id?(L.vendedor?(' · 👤 '+cxEsc(L.vendedor)):' · <span style=\\'color:#e0b45f\\'>👤 sem responsável</span>'):'')+(d.agente_ativo?' · <span style=\\'color:#c9a3e0\\'>🤖 no automático</span>':'')+'</small></div>'
       +'<span style="flex:1"></span>'+agBtn+(L.id?(' <a class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" href="/painel/prospeccao/'+L.id+'">Abrir ficha</a>'):(' <button class="pbtn" style="padding:.35rem .7rem;font-size:.78rem" onclick="cxVirarLead('+d.conversa_id+')" title="Criar um lead a partir deste contato">➕ Levar para o lead</button>'))+'</div>'
+      // mesmo número, outro chip: as duas conversas são separadas de propósito (cada
+      // chip responde pelo seu número). O aviso é pra quem digita aqui não repetir —
+      // ou contradizer — o que a outra campanha já combinou com a mesma pessoa.
+      +(d.gemeo?('<div class="cx-gemeo">⚠️ '+cxEsc(d.gemeo.texto)+(d.gemeo.conversa_id?(' <a href="#" onclick="cxOpen(null,'+d.gemeo.conversa_id+');return false">Ver conversa →</a>'):'')+'</div>'):'')
       +'<div class="cx-msgs" id="cx-msgs">'+cxMsgsHtml(d)+'</div>'+rodape;
     cxScroll(true);
     var kv=function(k,v){return v?('<div class="cx-kv"><span>'+k+'</span><b>'+cxEsc(v)+'</b></div>'):'';};
@@ -10785,18 +11239,64 @@ function cxPollThread(){
     }
   }).catch(function(){});
 }
-function cxParams(){var q=new URLSearchParams(location.search);return 'canal='+(q.get('canal')||'')+'&vendedor='+(q.get('vendedor')||'')+'&escopo='+encodeURIComponent(_cxEscopo||'msg');}
+function cxParams(){var q=new URLSearchParams(location.search);return 'canal='+(q.get('canal')||'')+'&vendedor='+(q.get('vendedor')||'')+'&escopo='+encodeURIComponent(_cxEscopo||'msg')+'&q='+encodeURIComponent(cxTermo());}
+// ------------------------------------------------------------------ a busca
+//
+// O termo mora no CAMPO, não na URL: a busca não recarrega a página, então guardar
+// na URL obrigaria a reescrever o histórico do navegador a cada tecla. Quem lê o
+// termo é o cxParams, que já é chamado pelo polling de 4 em 4 segundos — é isso que
+// mantém o resultado da busca VIVO enquanto a pessoa lê.
+var _cxBuscaT=null;
+function cxTermo(){var el=document.getElementById('cx-busca');return el?(el.value||'').trim():'';}
+// 300ms depois da ÚLTIMA tecla. Uma consulta por tecla seriam sete pra escrever
+// "jacque", e a lista piscaria no meio da palavra.
+function cxBuscaDigitou(){
+  var x=document.getElementById('cx-busca-x');if(x)x.style.display=cxTermo()?'':'none';
+  clearTimeout(_cxBuscaT);_cxBuscaT=setTimeout(cxBuscaJa,300);
+}
+function cxBuscaJa(){clearTimeout(_cxBuscaT);_cxListHtml='';cxPollList();}
+// O X nasce visível quando a página veio com termo (recarregou com ?q=)
+document.addEventListener('DOMContentLoaded',function(){if(cxTermo())cxBuscaDigitou();});
+function cxBuscaLimpar(){
+  var el=document.getElementById('cx-busca');if(el){el.value='';el.focus();}
+  cxBuscaDigitou();cxBuscaJa();
+}
+// Realça o pedaço que casou. Sem isso, numa lista de nomes parecidos ninguém sabe
+// por que aquela linha apareceu. Compara sem acento e sem caixa — do mesmo jeito que
+// o servidor comparou (ver _dobrar) —, mas recorta e devolve o texto ORIGINAL: o
+// nome tem que continuar aparecendo como a pessoa escreveu.
+var _CX_ACC='áàâãäéèêëíìîïóòôõöúùûüçñ',_CX_SEM='aaaaaeeeeiiiiooooouuuucn';
+function cxDobra(t){t=(t||'').toLowerCase();var o='';
+  for(var i=0;i<t.length;i++){var j=_CX_ACC.indexOf(t[i]);o+=(j<0?t[i]:_CX_SEM[j]);}
+  return o;}
+function cxRealce(txt,termo){
+  txt=txt||'';if(!termo)return cxEsc(txt);
+  var i=cxDobra(txt).indexOf(cxDobra(termo));
+  if(i<0)return cxEsc(txt);
+  return cxEsc(txt.substring(0,i))+'<mark>'+cxEsc(txt.substring(i,i+termo.length))
+    +'</mark>'+cxEsc(txt.substring(i+termo.length));
+}
+// O número só vira etiqueta quando a busca FOI por número — fora disso seria a
+// mesma informação repetida em cem linhas. A regra dos 4 dígitos é a mesma do
+// servidor (_MIN_DIGITOS): abaixo disso "ana 2" continua sendo busca de nome.
+function cxNumEtiqueta(c,termo){
+  var d=(termo||'').replace(/[^0-9]/g,'');
+  if(d.length<4||!c.numero)return '';
+  return '<span class="cx-num">'+cxRealce(c.numero,d)+'</span>';
+}
 function cxListItem(c){
   var cnc={whatsapp:'cn-wpp',email:'cn-mail',messenger:'cn-msg',instagram:'cn-ig'}[c.canal]||'cn-mail';
   var unread=(c.id!==_cxConv)&&(c.ult_autor==='lead'||c.ult_autor==='bot')&&((c.ult_msg_id||0)>(_cxSeen[c.id]||0));
   var av=(c.empresa||'?').substring(0,2).toUpperCase();
+  var termo=cxTermo();
   return '<button type="button" class="cx-conv'+(c.id===_cxConv?' on':'')+'" id="cxc-'+c.id+'" onclick="cxOpen(this,'+c.id+')">'
     +'<span class="av">'+cxEsc(av)+'</span><span class="mid">'
-    +'<span class="nm"><b>'+cxEsc(c.empresa)+'</b><span class="t">'+cxEsc(c.quando||'')+(unread?' <span class="cx-undot"></span>':'')+'</span></span>'
+    +'<span class="nm"><b>'+cxRealce(c.empresa,termo)+'</b><span class="t">'+cxEsc(c.quando||'')+(unread?' <span class="cx-undot"></span>':'')+'</span></span>'
     +'<span class="pre">'+cxEsc(c.quem)+': '+cxEsc(c.preview)+'</span>'
     +cxDonoLinha(c)
     +'<span class="cx-cn '+cnc+'">'+cxEsc(c.canal_rot)+(c.n>1?(' · '+c.n):'')+'</span>'
     +(c.chip_rot?('<span class="cx-chip '+(c.chip_id?'dois':'um')+'">'+cxEsc(c.chip_rot)+'</span>'):'')
+    +cxNumEtiqueta(c,termo)
     +'</span></button>';
 }
 // O dono do lead, em linha própria. Só pra conversa que JÁ é lead: a maior parte da
@@ -10912,9 +11412,29 @@ function cxPollList(){
       if(d.sincronizando&&tx)tx.textContent='📥 Importando conversas do WhatsApp… '
         +d.convs.length+' até agora. Pode ir usando, elas vão aparecendo sozinhas.';}
     cxSemDono(d.sem_dono||0);
-    var h='';var novo={};
+    var h='';var novo={};var termo=cxTermo();
     d.convs.forEach(function(c){novo[c.id]=c;h+=cxListItem(c);});
-    h=h||'<div class="cx-empty">Nenhuma conversa ainda.</div>';
+    // A CONTAGEM diz de quantas. "100 conversa(s)" é verdade e esconde o que
+    // importa: que existem outras fora do alcance da tela.
+    var ct=document.getElementById('cx-conta');
+    if(ct){var t=d.total||d.convs.length;
+      ct.textContent=d.convs.length+((t>d.convs.length)?(' de '+t):'')+' conversa(s)'
+        +(termo?(' · buscando'):'');}
+    if(!h){
+      if(termo){
+        // Dizer ONDE procurou. "Nada encontrado" sozinho deixa a dúvida de se a
+        // busca chegou a rodar — e o número prova que rodou na caixa inteira.
+        h='<div class="cx-empty">Nenhuma conversa com <b>&ldquo;'+cxEsc(termo)+'&rdquo;</b>.'
+          +'<br><span style="font-size:.82rem">Procurei no nome do lead, no nome do perfil '
+          +'do WhatsApp e no número — nas <b>'+(d.total||0)+'</b> conversas desta caixa.</span>';
+        // Busca e filtro se somam, e é aí que some resultado sem explicação: o vazio
+        // conta quantos existem fora do filtro de canal e oferece o caminho.
+        if(d.fora_do_filtro>0)h+='<br><a href="#" style="font-size:.82rem" '
+          +'onclick="cxTodosOsCanais();return false">Buscar em todos os mensageiros</a>'
+          +'<span style="font-size:.82rem"> — tem '+d.fora_do_filtro+' lá.</span>';
+        h+='</div>';
+      }else{h='<div class="cx-empty">Nenhuma conversa ainda.</div>';}
+    }
     // sem isso, todo poll (4s) trocava o innerHTML inteiro mesmo sem nada mudar,
     // e sempre zerava o scroll pro topo — na sincronização de histórico (lista
     // reordenando toda hora) isso parecia a tela "subindo e descendo" sozinha.
@@ -10924,6 +11444,14 @@ function cxPollList(){
     box.innerHTML=h;
     box.scrollTop=perto?0:st;
   }).catch(function(){});
+}
+// Tirar o filtro de canal SEM perder o termo. O filtro mora na URL (é um form GET
+// de sempre) e o termo mora no campo — então recarrega com o canal vazio e leva o
+// termo no `q`, que a rota da página sabe ler.
+function cxTodosOsCanais(){
+  var q=new URLSearchParams(location.search);q.delete('canal');
+  q.set('aba','conversas');q.set('q',cxTermo());
+  location.search=q.toString();
 }
 function cxAgente(convId,on){
   var fd=new FormData();fd.append('conversa_id',convId);fd.append('ativar',on?'1':'0');
@@ -11276,7 +11804,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
       <h2 class="tt">📣 Campanhas</h2>
       <div class="mut" style="font-size:.85rem">Prospecção fria multicanal · <b style="color:var(--verde-claro)">{{ elegiveis }}</b> lead(s) com e-mail ou WhatsApp prontos pra abordar</div>
     </div>
-    {% if gerencia %}<button class="hdrbtn" type="button" onclick="document.getElementById('ovlCriar').classList.add('on');document.getElementById('nomeCampanha').focus()">＋ Criar</button>{% endif %}
+    {% if gere_campanha %}<button class="hdrbtn" type="button" onclick="document.getElementById('ovlCriar').classList.add('on');document.getElementById('nomeCampanha').focus()">＋ Criar</button>{% endif %}
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
 

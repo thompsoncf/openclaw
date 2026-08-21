@@ -24,9 +24,11 @@ CONTA = 7
 _SQL = """
 -- a lista junta `contas` pra saber o apelido do chip por onde a conversa entrou
 create table contas (id bigserial primary key, tipo text, nome text, chip_de bigint);
+-- whatsapp/telefone/contato entram porque a lista carrega o NÚMERO da conversa
+-- (etiqueta da busca por número) e o busca também na ficha, não só na conversa
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
-  empresa text, cidade text, uf text, estagio text default 'lead',
-  atualizado_em timestamptz default now());
+  empresa text, contato text, whatsapp text, telefone text, cidade text, uf text,
+  estagio text default 'lead', atualizado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text default 'whatsapp', contato_ref text, contato_nome text,
   status text default 'aberta', responsavel_membro_id bigint,

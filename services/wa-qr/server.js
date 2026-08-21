@@ -102,6 +102,16 @@ const ESPERA_POS_440_MS = parseInt(process.env.WA_QR_ESPERA_POS_440_MS || '30000
 // dobro da volta desse laço: quem passa disso está de pé de verdade.
 const SESSAO_FIRME_MS = parseInt(process.env.WA_QR_SESSAO_FIRME_MS || '900000', 10)
 
+// Teto de falhas de decifragem que o disjuntor tolera numa janela — ver
+// contarFalhaDeDecifrar e abrirDisjuntor. 60 em 60s é ~40× o normal: o dia inteiro
+// de 19/08, com o serviço saudável, deu 50 a 150 falhas POR HORA somando todas as
+// contas. O episódio de 20/08 fez 1119 numa hora só.
+const DECIFRAR_TETO = parseInt(process.env.WA_QR_DECIFRAR_TETO || '60', 10)
+const DECIFRAR_JANELA_MS = parseInt(process.env.WA_QR_DECIFRAR_JANELA_MS || '60000', 10)
+// A partir de quantas aberturas do disjuntor na mesma sessão o log passa a dizer que
+// o chip precisa de pareamento novo — ver abrirDisjuntor.
+const DISJUNTOR_AVISA_EM = parseInt(process.env.WA_QR_DISJUNTOR_AVISA_EM || '3', 10)
+
 if (!process.env.DATABASE_URL) { logBase.error('Falta DATABASE_URL'); process.exit(1) }
 if (!SEGREDO) { logBase.error('Falta WA_QR_SHARED_SECRET'); process.exit(1) }
 
@@ -300,9 +310,96 @@ function comEspelhoNoBanco (base, opcoes) {
 }
 
 const log = comEspelhoNoBanco(logBase)
-// Do Baileys, só erro. O filtro de ruído fica POR FORA: o que ele rebaixa pra
-// debug (408 de init queries, retry de mensagem nossa) não chega ao espelho.
-const logBaileys = comFiltroDeRuido(comEspelhoNoBanco(logBase, { soErro: true }))
+
+// ------------------------------------------- disjuntor da guerra de sessão
+//
+// Depois que outro aparelho assume a credencial, as sessões Signal desta ponta
+// viram lixo: cada eco de mensagem que chega não decifra, o Baileys pede reenvio,
+// o WhatsApp reentrega, e falha de novo. Em 20/08 isso encheu uma hora com 1119
+// 'failed to decrypt message' (o normal é 50-150 por hora), saturou a única CPU do
+// contêiner e travou o event loop por 25 a 73 SEGUNDOS de cada vez. Como o /saude
+// do health check do Render desiste em 5s, a instância foi morta e reiniciada 7
+// vezes na mesma hora — e cada reinício religava a conta na hora e recomeçava.
+//
+// O 440 nem sempre chega pra avisar: dá pra ficar com o socket de pé sem conseguir
+// decifrar nada. Então a enxurrada é o sinal. Passando do teto, esta ponta larga o
+// socket e entra na MESMA espera do 440 (esperaPos440), que é a resposta certa pra
+// guerra de sessão e já existe pronta.
+const falhasDeDecifrar = new Map()      // contaId -> [instantes das falhas]
+
+// Estourou o teto NESTA falha? Janela deslizante, aritmética pura — sem socket
+// nenhum, que é o que deixa isso conferível no teste.
+function contarFalhaDeDecifrar (contaId, agora, teto, janelaMs) {
+  const marcas = (falhasDeDecifrar.get(contaId) || []).filter((t) => agora - t < janelaMs)
+  marcas.push(agora)
+  falhasDeDecifrar.set(contaId, marcas)
+  if (marcas.length < teto) return false
+  // Zera ao disparar. Sem isso o teto segue estourado a cada nova falha da mesma
+  // janela e o disjuntor abre em rajada, uma vez por mensagem.
+  falhasDeDecifrar.delete(contaId)
+  return true
+}
+
+// O logger que vai pro Baileys é POR CONTA, por dois motivos.
+//
+// O primeiro é diagnóstico: o logger era um só pra todas as contas, então o
+// 'failed to decrypt message' chegava no wa_qr_log com a coluna conta_id VAZIA.
+// Numa tempestade dessas, "qual conta está sofrendo" é a primeira pergunta, e ela
+// não tinha resposta — a apuração de 20/08 teve que inferir a conta pelas linhas
+// vizinhas.
+//
+// O segundo é este: a contagem do disjuntor entra aqui, e não espalhada por dentro
+// do Baileys.
+function comContaDoBaileys (contaId, base) {
+  const nivel = (n) => (a, b) => {
+    const obj = (a && typeof a === 'object') ? a : null
+    const msg = typeof a === 'string' ? a : b
+    if (obj && msg === 'failed to decrypt message') {
+      const agora = Date.now()
+      // Carimba a falha na sessão ANTES de qualquer decisão. É este carimbo que
+      // impede `sessaoFirme` de dar a sessão como firme só porque o socket está de
+      // pé — ver o comentário lá. Sem ele a dobra da espera nunca saía do primeiro
+      // degrau, e o mesmo chip quebrado voltava de 5 em 5 minutos.
+      const s = sessoes.get(contaId)
+      if (s) s.ultimaFalhaDecifrar = agora
+      if (contarFalhaDeDecifrar(contaId, agora, DECIFRAR_TETO, DECIFRAR_JANELA_MS)) {
+        // não dá await: quem chama é o logger, no meio do processamento da mensagem
+        abrirDisjuntor(contaId).catch((e) =>
+          log.error({ contaId, e: String(e) }, 'disjuntor: falhou ao abrir'))
+      }
+    }
+    // o contaId entra no objeto (vira coluna no espelho, ver _contaDoLog) sem
+    // sobrescrever um que o próprio Baileys já tenha posto
+    return obj ? base[n](Object.assign({ contaId }, obj), b) : base[n](a, b)
+  }
+  const comConta = {
+    fatal: nivel('fatal'),
+    error: nivel('error'),
+    warn: nivel('warn'),
+    info: nivel('info'),
+    debug: nivel('debug'),
+    trace: nivel('trace'),
+    child: (bindings) => comContaDoBaileys(contaId, base.child(bindings || {}))
+  }
+  Object.defineProperty(comConta, 'level', {
+    get: () => base.level,
+    set: (v) => { base.level = v }
+  })
+  return comConta
+}
+
+// O logger do Baileys, montado por conta. Dele só vai erro pro espelho no banco: o
+// firehose do resto entope a tabela e o que interessa dele é erro mesmo.
+//
+// A ORDEM das três camadas importa. O filtro de ruído fica POR FORA, então o que ele
+// rebaixa pra debug (408 de 'init queries', 'Key used already' da mensagem nossa
+// reentregue depois de um restart) não chega nem à contagem do disjuntor nem ao
+// espelho. Contar aquilo faria o disjuntor abrir justamente no arranque, que é quando
+// ele mais atrapalha.
+function logBaileysDaConta (contaId) {
+  return comFiltroDeRuido(
+    comContaDoBaileys(contaId, comEspelhoNoBanco(logBase, { soErro: true })))
+}
 
 // Sem isso, um erro assíncrono que escapa de um try/catch (ex.: dentro de um
 // listener de evento do Baileys) só aparecia no Render como um stack trace cru
@@ -453,9 +550,25 @@ function marcarVivo (contaId) {
 // restaurada por um deploy antes deste campo existir) a resposta é não: na dúvida a
 // espera continua crescendo, que é o lado seguro. Religar de menos atrasa uma conta;
 // religar de mais é o que faz o WhatsApp achar que é abuso.
+//
+// E "de pé" não é só o socket aberto. Uma sessão do Signal quebrada deixa o socket
+// PERFEITO — conecta, responde ping, entrega recibo — e não decifra mensagem
+// nenhuma. Foi o caso da conta 35 em 20/08: o disjuntor abriu ONZE vezes entre
+// 17:30 e 19:03, sempre no teto exato de 60 falhas, e a espera nunca saiu dos 5
+// minutos iniciais. Porque entre uma abertura e outra o socket ficava de pé mais de
+// 15 minutos, `sessaoFirme` dizia sim, `tentativasPos440` voltava a zero e a dobra
+// (5, 10, 20, 40, 80) recomeçava do começo pra sempre. O chip voltava, gastava mais
+// 60 decifragens perdidas, derrubava a instância inteira no health check e repetia —
+// enquanto a caixa da cliente estava muda desde 17/08 sem ninguém saber.
+//
+// Então o relógio conta dos DOIS: da abertura do socket e da última falha ao
+// decifrar. Um chip que falha de 5 em 5 minutos nunca fica firme, a espera dobra até
+// os 80 minutos e o estrago para de se repetir de hora em hora.
 function sessaoFirme (s, agora, firme) {
   if (!s || !s.abertoEm) return false
-  return (agora - s.abertoEm) >= firme
+  if ((agora - s.abertoEm) < firme) return false
+  if (s.ultimaFalhaDecifrar && (agora - s.ultimaFalhaDecifrar) < firme) return false
+  return true
 }
 
 // Este evento vem do socket que a sessão está usando AGORA?
@@ -544,6 +657,49 @@ function sessaoOrfa (s, agora, base) {
   return (agora - s.substituidaEm) >= esperaPos440(s, base)
 }
 
+// Abre o disjuntor: para esta conta, sem apagar nada, e a põe na mesma espera do
+// 440. Chamado quando a contagem de falhas ao decifrar estoura o teto — ver
+// contarFalhaDeDecifrar pra o porquê de a enxurrada valer como sinal.
+async function abrirDisjuntor (contaId) {
+  const s = sessoes.get(contaId)
+  if (!s || !s.sock) return          // já caiu por outro caminho (440, vigia, deploy)
+  // Quantas vezes JÁ paramos esta conta pelo mesmo motivo. Uma abertura é briga de
+  // sessão passageira; a terceira quer dizer que a sessão do Signal não se conserta
+  // sozinha e o chip precisa ser pareado de novo no celular. A diferença tem que
+  // aparecer no log: em 20/08 a conta 35 abriu o disjuntor onze vezes e as onze
+  // linhas eram idênticas — nada distinguia "aconteceu" de "não para de acontecer".
+  s.aberturasDoDisjuntor = (s.aberturasDoDisjuntor || 0) + 1
+  log.error({ contaId, teto: DECIFRAR_TETO, aberturas: s.aberturasDoDisjuntor,
+    janelaS: Math.round(DECIFRAR_JANELA_MS / 1000), seguraATrava: trava.segura(contaId) },
+  'disjuntor: enxurrada de falhas ao decifrar — parando esta conta pra não brigar por ela')
+  if (s.aberturasDoDisjuntor >= DISJUNTOR_AVISA_EM) {
+    log.error({ contaId, aberturas: s.aberturasDoDisjuntor },
+      'disjuntor: este chip não decifra o que chega há várias rodadas — a sessão do ' +
+      'Signal não vai se consertar sozinha, ele precisa ser pareado de novo no celular')
+  }
+  // Mesmo desmonte do 440 (ver o ramo do connectionReplaced): esta encarnação
+  // acabou e não pode deixar nada dela para trás — inclusive os laços da agenda,
+  // que continuavam batendo no Postgres por uma sessão morta.
+  descartarSocket(s.sock, contaId, 'disjuntor_guerra_de_sessao')
+  pararTimersDaAgenda(s)
+  s.sock = null
+  s.abertoEm = null                  // ver sessaoFirme: o relógio é por encarnação
+  s.status = 'desconectado'
+  s.qr = null
+  // é isto que põe a conta na fila do vigia, com a espera dobrando a cada retomada
+  // que não segurar (sessaoOrfa + esperaPos440)
+  s.substituidaEm = Date.now()
+  // A trava NÃO é solta, ao contrário do 440. Lá a conta já era de outra sessão e
+  // segurar o aluguel só impediria outra instância nossa de assumir. Aqui quem
+  // decidiu parar fomos nós: soltar deixaria uma instância irmã pegar a conta e
+  // reconectar na hora, furando a espera que acabou de começar. O `trava.pegar` é
+  // reentrante pro mesmo dono, então a retomada não sofre com isso.
+  //
+  // E grava JÁ: se a instância morrer logo depois (que é exatamente o que vinha
+  // acontecendo), a espera precisa estar no banco pra valer no processo seguinte.
+  await registrarSessoes()
+}
+
 // A sessão está MUDA a ponto de merecer um ping? Separado numa função pura porque é
 // a regra que decide religar uma sessão de produção — e religar à toa é justamente o
 // que faz o WhatsApp achar que é abuso.
@@ -613,13 +769,19 @@ async function registrarSessoes () {
     const mudoS = s.ultimoEvento ? Math.round((agora - s.ultimoEvento) / 1000) : null
     try {
       await pool.query(
-        `insert into wa_qr_sessao_estado (conta_id, status, ultimo_evento, mudo_s, religamentos, detalhe, atualizado)
-         values ($1,$2,$3,$4,$5,$6::jsonb,now())
+        `insert into wa_qr_sessao_estado (conta_id, status, ultimo_evento, mudo_s, religamentos,
+                                          substituida_em, tentativas_440, detalhe, atualizado)
+         values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,now())
          on conflict (conta_id) do update set
            status=excluded.status, ultimo_evento=excluded.ultimo_evento, mudo_s=excluded.mudo_s,
-           religamentos=excluded.religamentos, detalhe=excluded.detalhe, atualizado=now()`,
+           religamentos=excluded.religamentos, substituida_em=excluded.substituida_em,
+           tentativas_440=excluded.tentativas_440, detalhe=excluded.detalhe, atualizado=now()`,
         [contaId, s.status || '', s.ultimoEvento ? new Date(s.ultimoEvento) : null, mudoS,
           s.reconexoesMudas || 0,
+          // a espera anti-guerra (migração 182): vive aqui pra sobreviver ao
+          // restart — ver restaurarSessoes
+          s.substituidaEm ? new Date(s.substituidaEm) : null,
+          s.tentativasPos440 || 0,
           JSON.stringify({ temSock: !!s.sock, iniciando: !!s.iniciando,
             sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0,
             // quem está com a conta: sem isso, "calada" numa instância que nem
@@ -641,6 +803,30 @@ async function contaPareada (contaId) {
       where conta_id=$1 and arquivo='creds' and conteudo::json->'me'->>'id' is not null`,
     [contaId])
   return r.rowCount > 0
+}
+
+// `pareada` PRA QUEM CONSOME O HTTP, e não `status`.
+//
+// O painel escondia o "Desconectar" sempre que o status era 'desconectado' — regra que
+// funcionou enquanto 'desconectado' significava, na prática, "não tem credencial". O
+// disjuntor (ver disjuntorDecifragem) criou um estado que não existia: a conta é
+// ESTACIONADA de propósito, fica 'desconectado' e continua PAREADA. Nesse estado o botão
+// que apaga a credencial é justamente o que se precisa, e era onde ele sumia — a conta 35
+// ficou sem saída nenhuma pelo painel.
+//
+// Devolve null (e não false) quando o banco não responde: quem lê distingue "não tem
+// credencial" de "não deu pra saber", e o painel cai no comportamento antigo em vez de
+// esconder ou mostrar botão com base num palpite.
+async function pareadaPraResposta (contaId, s) {
+  // conectada é pareada por definição — não gasta consulta no caso comum, que é o do
+  // polling de 3 em 3 segundos do painel aberto.
+  if (s && s.status === 'conectado') return true
+  try {
+    return await contaPareada(contaId)
+  } catch (e) {
+    log.warn({ contaId, e: String(e) }, 'pareada: banco não respondeu — devolvendo indefinido')
+    return null
+  }
 }
 
 // Costura só pro teste: o resgate da órfã chama iniciarSessao, que abre socket de
@@ -997,6 +1183,7 @@ function lembrarJid (chave, valor) {
 // separador (':' / ' ') impede que a conta 2 case com as chaves da conta 23.
 function esquecerConta (contaId) {
   lidMaps.delete(contaId)
+  ondasDeHistorico.delete(contaId)
   const prefixo = contaId + ':'
   for (const k of jidsResolvidos.keys()) if (k.startsWith(prefixo)) jidsResolvidos.delete(k)
   for (const k of enviadas.keys()) if (k.startsWith(prefixo)) enviadas.delete(k)
@@ -1134,6 +1321,44 @@ function semNumeroReal (resolvido, contaId, origem) {
 function ehConversaValida (jid) {
   return !!jid && !jid.endsWith('@g.us') && !jid.endsWith('@newsletter') && jid !== 'status@broadcast'
 }
+
+// O MESMO descarte, só que ANTES de decifrar — é onde mora a economia de CPU.
+//
+// O `ehConversaValida` acima roda no nosso código, depois que o Baileys já pagou
+// a decifragem. Pra status de contato isso é caríssimo: cada um que qualquer um
+// dos 10 mil contatos posta chega aqui, é decifrado, e só então jogado fora.
+//
+// Pior: quando a sessão Signal está quebrada (guerra de 440), a decifragem FALHA,
+// o Baileys pede reenvio, o WhatsApp reentrega e falha de novo — 5 vezes, de 250
+// em 250ms, cada uma com uma consulta ao Postgres no getMessage. Em 20/08 foram
+// 1119 'failed to decrypt message' numa hora (normal: 50-150 por DIA), a única
+// CPU do contêiner saturou, o event loop travou 25-73s e o /saude (que desiste em
+// 5s) não respondeu — o Render matou a instância 7 vezes numa hora.
+//
+// O `shouldIgnoreJid` do Baileys é checado no TOPO do handleMessage, antes do
+// decryptMessageNode (Socket/messages-recv.ts:727 na v6.7.9): ele só confirma o
+// recebimento e sai. Nada de decifrar, nada de retry, nada de ida ao banco.
+//
+// GRUPO NÃO ENTRA AQUI, de propósito. O `ehConversaValida` também descarta grupo
+// como conversa, mas a mensagem de grupo ainda alimenta o aprendizado de contato
+// (repassarContatos) — ignorá-la no Baileys perderia isso. Status e canal não têm
+// esse valor: canal é propaganda, e o contato que aparece num status já vem da
+// agenda ou de conversa real.
+function deveIgnorarNoBaileys (jid) {
+  return jid === 'status@broadcast' || (typeof jid === 'string' && jid.endsWith('@newsletter'))
+}
+
+// Quantas vezes reenviar uma mensagem que a outra ponta não conseguiu decifrar.
+// O padrão do Baileys é 5 (Defaults/index.ts). Cinco faz sentido pra falha
+// passageira de rede; não faz nenhum pra sessão quebrada — o que não decifra na
+// segunda não vai decifrar na quinta, e cada tentativa custa cripto + Postgres.
+// Baixar pra 2 corta a amplificação em 2,5x sem perder o caso legítimo.
+const MAX_RETRY_DECIFRAR = 2
+// E o intervalo entre elas: 250ms (o padrão) transforma uma rajada de falhas num
+// laço apertado que não devolve o event loop. 2s dá respiro pro /saude responder
+// entre uma tentativa e outra — que é literalmente a diferença entre o Render
+// matar a instância ou não.
+const RETRY_DELAY_MS = 2000
 
 // Áudio RECEBIDO vira texto, pro vendedor responder digitando sem precisar ouvir.
 // Só entrada ao vivo: histórico não passa por aqui de propósito — um pareamento
@@ -1615,6 +1840,44 @@ function deveSincronizarHistorico (syncType) {
   return syncType === TIPO_HIST.RECENT || syncType === TIPO_HIST.PUSH_NAME
 }
 
+// ------------------------------------------- teto de ondas do histórico
+//
+// Aceitar o RECENT não quer dizer aceitar RECENT SEM FIM. Medido na conta 7 em
+// 20/08: 63 ondas de ~5.000 mensagens em 8 minutos — 315 mil mensagens — e a
+// peneira devolvendo `descartadas: 4995` em TODAS elas (grupo, sem texto, fora dos
+// 30 dias, canal). Trezentas mil mensagens baixadas, descompactadas e decodificadas
+// pra guardar zero. O heap subiu de 47MB pra 314MB contra um teto de 320 e morreu
+// com `FATAL ERROR: JavaScript heap out of memory` no meio da onda 40.
+//
+// Quem baixa e descompacta é o Baileys, por dentro, antes de a gente ver a onda — o
+// único ponto onde dá pra dizer não é o `shouldSyncHistoryMessage`, que roda ANTES
+// do download (Utils/process-message.js). Então a regra tem que ser decidida com o
+// que já se sabe das ondas anteriores, e é isso que estas duas medidas são:
+//
+//   * passou de HIST_ONDAS_SEM_NADA ondas sem UMA mensagem aproveitada -> chega. Um
+//     histórico que não serviu cinco vezes seguidas não vai servir na sexta.
+//   * passou de HIST_ONDAS_MAX ondas -> chega, aproveitando ou não. É o freio de
+//     mão: qualquer conta que precise de 40 ondas está importando mais do que a
+//     janela de 30 dias que a gente quer.
+//
+// O que se perde: numa conta gigante, a parte mais antiga da janela de 30 dias pode
+// não ser importada. É conversa ÓRFÃ (nunca vira lead sozinha) e o preço de manter
+// era a instância morrer no meio do pareamento — levando junto todos os outros chips.
+const HIST_ONDAS_SEM_NADA = parseInt(process.env.WA_QR_HIST_ONDAS_SEM_NADA || '5', 10)
+const HIST_ONDAS_MAX = parseInt(process.env.WA_QR_HIST_ONDAS_MAX || '40', 10)
+
+// contaId -> { ondas, aproveitadas }. Por ENCARNAÇÃO: o iniciarSessao zera, senão um
+// pareamento novo nasceria com o teto do anterior já estourado.
+const ondasDeHistorico = new Map()
+
+// Aritmética pura, sem socket nem mapa — é o que deixa a regra conferível no teste.
+function deveSeguirNoHistorico (h, semNada, max) {
+  if (!h || !h.ondas) return true
+  if (h.ondas >= max) return false
+  if (h.ondas >= semNada && !h.aproveitadas) return false
+  return true
+}
+
 const HISTORICO_JANELA_SEGUNDOS = 30 * 24 * 3600 // só os últimos 30 dias — ver README (risco QR)
 
 // Histórico importado (evento messaging-history.set, só dispara logo após conectar/parear).
@@ -1768,7 +2031,7 @@ async function iniciarSessao (contaId) {
       auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, log) },
       printQRInTerminal: false,
       browser: ['ZAQ', 'Chrome', '1.0.0'],
-      logger: logBaileys,
+      logger: logBaileysDaConta(contaId),
       // syncFullHistory:true PEDE pro WhatsApp o histórico INTEIRO da conta (meses/
       // anos) — numa conta movimentada são dezenas de milhares de mensagens que
       // represam o tempo real e fazem parecer que "parou de funcionar do nada".
@@ -1778,14 +2041,28 @@ async function iniciarSessao (contaId) {
       // ...e aqui a gente escolhe QUAIS ondas processar — ver deveSincronizarHistorico
       shouldSyncHistoryMessage: (msg) => {
         const t = msg && msg.syncType
-        const aceita = deveSincronizarHistorico(t)
-        if (!aceita) {
+        if (!deveSincronizarHistorico(t)) {
           log.info({ contaId, syncType: t },
             'histórico recusado pelo gate — o blob não vai ser baixado')
+          return false
         }
-        return aceita
+        // ...e mesmo o tipo aceito tem teto de ondas — ver deveSeguirNoHistorico
+        const h = ondasDeHistorico.get(contaId)
+        if (!deveSeguirNoHistorico(h, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX)) {
+          log.warn({ contaId, syncType: t, ondas: h.ondas, aproveitadas: h.aproveitadas,
+            semNada: HIST_ONDAS_SEM_NADA, max: HIST_ONDAS_MAX },
+          'histórico: teto de ondas atingido — o blob não vai ser baixado')
+          return false
+        }
+        return true
       },
       markOnlineOnConnect: false,
+      // Corta status de contato e canal ANTES de decifrar — ver deveIgnorarNoBaileys.
+      // É a maior das três alavancas contra a saturação de CPU de 20/08.
+      shouldIgnoreJid: deveIgnorarNoBaileys,
+      // ...e as outras duas: menos retentativas, mais espaçadas (ver as constantes).
+      maxMsgRetryCount: MAX_RETRY_DECIFRAR,
+      retryRequestDelayMs: RETRY_DELAY_MS,
       // ver comentário do cache `enviadas`: é isto que permite reenviar quando o
       // aparelho do vendedor (ou do cliente) não consegue decifrar e pede retry.
       getMessage: async (key) => {
@@ -1797,6 +2074,9 @@ async function iniciarSessao (contaId) {
       }
     })
     s.sock = sock
+    // Teto de ondas do histórico é por ENCARNAÇÃO (ver deveSeguirNoHistorico): quem
+    // pareia de novo tem direito à janela inteira outra vez.
+    ondasDeHistorico.delete(contaId)
     log.info({ contaId }, 'iniciarSessao: socket criado, registrando listeners')
 
     sock.ev.on('creds.update', saveCreds)
@@ -2111,7 +2391,14 @@ async function iniciarSessao (contaId) {
       if (!grupo) { grupo = []; porChat.set(pronta.chat, grupo) }
       grupo.push(pronta.corpo)
     }
+    // Alimenta o teto de ondas (ver deveSeguirNoHistorico): é o resultado DESTA onda
+    // que decide se vale baixar a próxima.
+    const _h = ondasDeHistorico.get(contaId) || { ondas: 0, aproveitadas: 0 }
+    _h.ondas += 1
+    _h.aproveitadas += (messages.length - descartadas)
+    ondasDeHistorico.set(contaId, _h)
     log.info({ contaId, syncType, chats: porChat.size, descartadas, motivos,
+      ondas: _h.ondas, aproveitadasNoTotal: _h.aproveitadas,
       lidsPerdidos: lidsPerdidos.size, exemplosLid: [...lidsPerdidos].slice(0, 5) },
     'histórico peneirado, repassando')
     await comLimiteDeConcorrencia([...porChat.values()], 8, async (grupo) => {
@@ -2144,6 +2431,29 @@ async function iniciarSessao (contaId) {
 // trabalho e não conseguia enviar nada. Aqui a gente religa sozinho todas as
 // contas que já estavam pareadas — sem QR novo, sem ninguém precisar abrir tela
 // nenhuma. Best-effort: se falhar, o fluxo manual pela aba Canais continua igual.
+// A espera gravada por conta (migração 182), pra quem está subindo saber que não
+// pode religar já. Chave em texto: o driver devolve bigint como STRING, e é assim
+// que o contaId circula no restaurarSessoes inteiro.
+async function backoffGravado () {
+  const m = new Map()
+  try {
+    const r = await pool.query(
+      `select conta_id, substituida_em, tentativas_440 from wa_qr_sessao_estado
+        where substituida_em is not null`)
+    for (const l of r.rows) {
+      m.set(String(l.conta_id), { substituidaEm: new Date(l.substituida_em).getTime(),
+        tentativas: l.tentativas_440 || 0 })
+    }
+  } catch (e) {
+    // migração ainda não aplicada, banco fora do ar: religar é o comportamento de
+    // sempre e não pode depender disto. Sem a espera o serviço volta ao que era —
+    // com ela quebrando o arranque, ninguém recebe mensagem nenhuma.
+    log.warn({ e: String(e) },
+      'restaurarSessoes: não consegui ler a espera gravada — sigo religando')
+  }
+  return m
+}
+
 async function restaurarSessoes () {
   limparEnviadasAntigas().catch(() => {})
   try {
@@ -2163,9 +2473,31 @@ async function restaurarSessoes () {
     }
     log.info({ n: contas.length, contas, espacoMs: ESPACO_CONTAS_MS },
       'restaurarSessoes: religando contas já pareadas')
+    // A espera anti-guerra vive no banco (migração 182) justamente por causa deste
+    // ponto. Ela existe desde sempre, mas o contador morava só na memória — e como
+    // é a própria enxurrada de falhas ao decifrar que derruba a instância (ver
+    // abrirDisjuntor), cada morte zerava a espera e o arranque religava a conta na
+    // hora, pegava o mesmo lote indecifrável e recomeçava. Quanto pior a briga,
+    // mais rápido a gente voltava pra ela.
+    const castigo = await backoffGravado()
+    const agora = Date.now()
     for (const contaId of contas) {
+      const c = castigo.get(String(contaId))
+      // sessaoOrfa responde "já pode retomar?" — se ainda não, esta conta não abre
+      // socket nenhum agora. O estado é recriado em memória pro vigia (que roda de
+      // minuto em minuto) resgatar na hora certa, pelo caminho que já existe.
+      if (c && !sessaoOrfa({ substituidaEm: c.substituidaEm, tentativasPos440: c.tentativas },
+        agora, ESPERA_POS_440_MS)) {
+        sessoes.set(contaId, { status: 'desconectado', qr: null,
+          substituidaEm: c.substituidaEm, tentativasPos440: c.tentativas })
+        log.warn({ contaId, tentativas: c.tentativas,
+          faltamMin: Math.round((esperaPos440({ tentativasPos440: c.tentativas },
+            ESPERA_POS_440_MS) - (agora - c.substituidaEm)) / 60000) },
+        'restaurarSessoes: conta em espera pós-substituição — o vigia retoma na hora certa')
+        continue
+      }
       try {
-        await iniciarSessao(contaId)
+        await _ganchos.iniciarSessao(contaId)
       } catch (e) {
         log.error({ contaId, e: String(e && e.stack || e) }, 'restaurarSessoes: falhou nessa conta')
       }
@@ -2203,7 +2535,7 @@ function lerBody (req) {
 
 // Teto do áudio de voz que o vendedor grava. 90s a 24 kbps dão ~270 KB; 1 MB é
 // folga larga. O motivo do teto é o mesmo do LIMITE_AUDIO_BYTES da entrada: este
-// processo roda com --max-old-space-size=320 e áudio vira várias cópias.
+// processo roda com --max-old-space-size=1024 e áudio vira várias cópias.
 const LIMITE_VOZ_BYTES = 1024 * 1024
 
 // O áudio chega como BINÁRIO puro, não em JSON com base64 — base64 custa +33% de
@@ -2266,6 +2598,7 @@ const servidor = http.createServer(async (req, res) => {
         }
         const s = await iniciarSessao(contaId)
         return json(res, 200, { ok: true, status: s.status, qr: s.qr,
+          pareada: await pareadaPraResposta(contaId, s),
           sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0 })
       }
       if (req.method === 'GET' && acao === 'status') {
@@ -2273,6 +2606,7 @@ const servidor = http.createServer(async (req, res) => {
         // `mudoMs` é o que separa "conectado" de "conectado no papel": quem consome
         // consegue ver há quanto tempo aquele socket não entrega nada.
         return json(res, 200, { ok: true, status: s.status, qr: s.qr || null,
+          pareada: await pareadaPraResposta(contaId, s),
           sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0,
           mudoMs: s.ultimoEvento ? (Date.now() - s.ultimoEvento) : null })
       }
@@ -2637,4 +2971,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

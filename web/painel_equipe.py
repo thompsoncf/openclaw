@@ -122,6 +122,21 @@ def painel_equipe_ativo(request: Request, membro_id: int = Form(...), ativo: str
     return RedirectResponse("/painel/equipe", status_code=303)
 
 
+@router.post("/painel/equipe/campanha")
+def painel_equipe_campanha(request: Request, membro_id: int = Form(...),
+                           pode: str = Form("1")):
+    """Liga/desliga a criação de campanhas pra um membro (migração 183).
+
+    Só o dono chega aqui — o _dono() acima já barra o resto. É de propósito:
+    campanha dispara mensagem em massa pelo número da empresa, e quem responde
+    por um número queimado é o titular."""
+    conta, redir = _dono(request)
+    if redir is not None:
+        return redir
+    eq.definir_pode_campanha(get_pool(), conta[0], membro_id, pode == "1")
+    return RedirectResponse("/painel/equipe", status_code=303)
+
+
 @router.post("/painel/equipe/renomear")
 def painel_equipe_renomear(request: Request, membro_id: int = Form(...), nome: str = Form(""),
                            whatsapp: str = Form("")):
@@ -363,6 +378,15 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
                  style="width:58px;background:var(--bg);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:.42rem .4rem;font-size:.82rem;margin:0">
           <button title="Salvar % de comissão">% comis.</button>
         </form>
+        {% endif %}
+        {% if m.papel == 'vendedor' %}
+        <form method="post" action="/painel/equipe/campanha" style="margin:0"
+              {% if not m.pode_campanha %}onsubmit="return confirm('Liberar campanhas para “{{ m.nome or m.email }}”?\n\nEle vai poder criar campanhas e disparar mensagem em massa pelo número da empresa. Só as campanhas dele — não vê nem mexe nas dos outros.')"{% endif %}>
+          <input type="hidden" name="membro_id" value="{{ m.id }}">
+          <input type="hidden" name="pode" value="{{ '0' if m.pode_campanha else '1' }}">
+          <button title="{{ 'Tirar a permissão de criar campanhas' if m.pode_campanha else 'Deixar este vendedor criar as próprias campanhas e enriquecer leads' }}"
+                  {% if m.pode_campanha %}style="border-color:var(--ok,#2ea043);color:var(--ok,#2ea043)"{% endif %}>
+            {{ '📣 Campanhas ✓' if m.pode_campanha else '📣 Liberar campanhas' }}</button></form>
         {% endif %}
         <form method="post" action="/painel/equipe/reconvite" style="margin:0"><input type="hidden" name="membro_id" value="{{ m.id }}">
           <button title="Gerar e reenviar o link de convite">↻ Novo link</button></form>

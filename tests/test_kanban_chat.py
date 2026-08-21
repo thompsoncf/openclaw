@@ -20,6 +20,7 @@ from web import painel_prospeccao as pp
 CONTA = 11
 
 _SQL = """
+create table contas (id bigserial primary key, chip_de bigint);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text not null, segmento text, cidade text, uf text, telefone text, whatsapp text,
   email text, instagram text, temperatura text default 'frio',

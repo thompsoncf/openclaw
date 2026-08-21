@@ -28,7 +28,9 @@
 // Precisa de Postgres (grava de verdade). Manual:
 //
 //     cd services/wa-qr && npm install
-//     createdb wa_qr_test && psql wa_qr_test -f ../../db/migracoes/158_wa_qr_log.sql
+//     createdb wa_qr_test
+//     psql wa_qr_test -f ../../db/migracoes/158_wa_qr_log.sql
+//     psql wa_qr_test -f ../../db/migracoes/182_wa_qr_backoff_persistente.sql
 //     WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_test node teste-log-banco.js
 
 const URL = process.env.WA_QR_TEST_URL
@@ -187,6 +189,21 @@ async function testeSessoes () {
     'status=' + muda.status + ' mudo_s=' + muda.mudo_s)
   conferir(muda.religamentos === 2, 'e quantas vezes o vigia já tentou religar sem sucesso')
   conferir(muda.detalhe && muda.detalhe.temSock === true, 'o detalhe diz se ainda há socket')
+
+  // A espera anti-guerra de sessão (migração 182) mora AQUI de propósito: era só
+  // memória, e o reinício que a própria guerra provocava zerava a espera. Ver
+  // teste-guerra-sessao.js pro caso completo — este confere que o retrato leva os
+  // dois campos junto, que é a única forma de eles chegarem no processo seguinte.
+  const quando = agora - 7 * 60 * 1000
+  s.sessoes.set(CONTA, { status: 'desconectado', substituidaEm: quando, tentativasPos440: 2 })
+  await s.registrarSessoes()
+  const r3 = await s.pool.query(
+    'select substituida_em, tentativas_440 from wa_qr_sessao_estado where conta_id=$1', [CONTA])
+  conferir(r3.rows[0] && r3.rows[0].substituida_em &&
+    Math.abs(new Date(r3.rows[0].substituida_em).getTime() - quando) < 1000,
+  'a hora da substituição vai pro retrato')
+  conferir(r3.rows[0] && r3.rows[0].tentativas_440 === 2,
+    'e o contador de tentativas também — é ele que dobra a espera')
   // segunda rodada não pode empilhar linha
   s.sessoes.get(CONTA).status = 'reconectando'
   await s.registrarSessoes()

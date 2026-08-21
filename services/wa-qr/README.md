@@ -31,6 +31,8 @@ Todas as rotas (menos `GET /saude`) exigem o header `x-wa-secret` = `WA_QR_SHARE
 | `PORT` | porta HTTP (o Render injeta) |
 | `WA_QR_LOG_DB` | `0` desliga o espelho do log no Postgres (padrão ligado) |
 | `WA_QR_MUDO_LIMITE_MS` · `WA_QR_MUDO_TETO_MS` | vigia da sessão muda: quando pingar (10min) e quando religar mesmo com ping voltando (45min) |
+| `WA_QR_DECIFRAR_TETO` · `WA_QR_DECIFRAR_JANELA_MS` | disjuntor da guerra de sessão: quantas falhas ao decifrar numa janela derrubam a conta (60 em 60s) |
+| `WA_QR_ESPERA_POS_440_MS` | base da espera pra retomar conta substituída — dobra a cada tentativa (5, 10, 20, 40, 80min) |
 
 ## Diagnóstico sem abrir o dashboard
 
@@ -76,12 +78,20 @@ O Render matou a instância com `Ran out of memory (used over 512MB)` — quem m
 kernel (cgroup), então **não sobra stack trace nenhum no log**. Duas coisas mudaram por
 causa disso:
 
-- **`npm start` roda com `--max-old-space-size=320`.** Sem o limite, o V8 dimensiona o
+- **`npm start` roda com `--max-old-space-size=1024`.** Sem o limite, o V8 dimensiona o
   heap pela memória da MÁQUINA e não pelo limite do container: ele se acha dono de
   vários GB, faz GC preguiçoso e o cgroup mata antes de ele sentir qualquer pressão.
-  320 e não 512 porque o RSS é heap + `external`/`arrayBuffers` (os Buffers de áudio e
-  do socket) + nativo. Com o teto, um estouro vira `JavaScript heap out of memory` COM
-  stack trace, em vez de morte silenciosa.
+  O teto é menor que a RAM do plano porque o RSS é heap + `external`/`arrayBuffers`
+  (os Buffers de áudio e do socket) + nativo. Com o teto, um estouro vira
+  `JavaScript heap out of memory` COM stack trace, em vez de morte silenciosa.
+
+  **O número acompanha o plano — e uma vez não acompanhou.** 320 foi escolhido no
+  plano de 512MB e ficou pra trás quando o serviço subiu pro standard, de 2GB. Em
+  20/08 uma onda de histórico levou o heap a 314MB e o Node abortou com
+  `FATAL ERROR: Ineffective mark-compacts near heap limit` — com 1,7GB de RAM parada
+  ao lado, e levando junto os quatro chips que a instância segurava. Quem mudar de
+  plano muda este número no mesmo passo: **no painel do Render**, campo *Start
+  Command*, porque o `render.yaml` aqui é só documentação.
 - **O serviço loga a memória de minuto em minuto** (`msg: "memória"`): `rssMB`,
   `heapMB`, `externalMB`, o tamanho de cada cache em memória e `pgFila` (consultas
   esperando uma das 4 conexões do pool). É o que separa "pico legítimo de sincronização"
@@ -166,7 +176,103 @@ node teste-historico.js
 createdb wa_lock_test
 WA_LOCK_TEST_URL=postgresql://postgres@localhost:5432/wa_lock_test node teste-sessao-lock.js
 WA_LOCK_TEST_URL=postgresql://postgres@localhost:5432/wa_lock_test node teste-trava-integrada.js
+# guerra de sessão: disjuntor da enxurrada de decifragem + espera que sobrevive ao restart
+createdb wa_guerra_test
+WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_guerra_test node teste-guerra-sessao.js
+
+# filtro pré-decifragem (status/canal) + retentativa: não precisa de banco
+node teste-ignorar-jid.js
 ```
+
+## CPU: a guerra de sessão derrubava a instância (20/08/2026)
+
+Depois da memória, veio a CPU — e a leitura errada custa tempo, porque o sintoma no Render
+é o mesmo ("Instance failed"). **Como separar:** se o gráfico de memória está no chão e o
+de CPU encosta no teto de `1 CPU`, não é OOM. O log da aplicação dá o veredito:
+`event loop travou — nesse intervalo /saude não respondia`.
+
+**O que aconteceu.** A conta 34 foi substituída por outra sessão (o 440 de
+`connectionReplaced`) pela enésima vez no dia — 59 substituições em 24h. A substituição
+invalida as sessões Signal desta ponta, e a partir daí cada eco de mensagem chega
+indecifrável: **1119 `failed to decrypt message` numa hora**, contra 50-150 num dia
+inteiro normal. Cada falha faz o Baileys pedir reenvio, o WhatsApp reentregar e falhar de
+novo — criptografia em rajada num contêiner de 1 CPU.
+
+O event loop travou por 25, 34, 40, 66, 71 e **73 segundos**. O health check do Render bate
+em `/saude` e desiste em **5s**: a instância foi morta e reiniciada **7 vezes na mesma
+hora** (13:19, 13:22, 13:26, 13:29, 13:33...).
+
+**Por que virava um laço fechado.** A defesa contra guerra de sessão já existia e estava
+certa: depois de um 440 a retomada espera 5, 10, 20, 40, 80 minutos (`esperaPos440`). Só
+que o contador vivia na **memória do processo**. Cada morte zerava a espera, o
+`restaurarSessoes` religava a conta na hora, pegava o mesmo lote indecifrável e recomeçava.
+A proteção era desarmada justamente pelo reinício que a briga provocava — quanto pior a
+briga, mais rápido a gente voltava pra ela.
+
+Duas coisas mudaram:
+
+- **A espera passou pro banco** (`wa_qr_sessao_estado.substituida_em` e `tentativas_440`,
+  migração 182). O arranque lê antes de religar: conta em castigo não abre socket, o estado
+  é recriado em memória e o vigia resgata na hora certa, pelo caminho que já existia.
+- **Disjuntor da enxurrada** (`abrirDisjuntor`): passando de `WA_QR_DECIFRAR_TETO` falhas
+  na janela, a conta para sozinha e entra na mesma espera do 440. O 440 nem sempre chega
+  pra avisar — dá pra ficar com o socket de pé sem conseguir decifrar coisa alguma. O teto
+  é por conta: a vizinha continua trabalhando.
+
+O logger que vai pro Baileys também passou a ser **por conta**: até aqui o
+`failed to decrypt message` chegava no `wa_qr_log` com `conta_id` VAZIO, e "qual conta está
+sofrendo" é a primeira pergunta numa tempestade dessas.
+
+**O que isto NÃO conserta.** A causa raiz é outro aparelho disputando a credencial —
+WhatsApp Web aberto num computador, outro celular, outra ferramenta. O disjuntor evita que
+isso derrube o serviço; ele não tira o rival de lá. A primeira ação continua sendo no
+celular: **WhatsApp → Aparelhos conectados**, remover o que não for a sessão do ZAQ.
+
+Pra ver se está acontecendo agora:
+
+```sql
+select date_trunc('hour', criado_em) hora,
+       count(*) filter (where msg = 'failed to decrypt message')  falhas,
+       count(*) filter (where msg ilike '%substituída%')          substituicoes,
+       count(*) filter (where msg ilike '%event loop%')           travas,
+       count(*) filter (where msg ilike '%wa-qr no ar%')          boots
+  from wa_qr_log
+ where criado_em > now() - interval '24 hours'
+ group by 1 order by 1;
+```
+
+Fora de deploy, `boots` e `travas` têm que ser zero.
+
+### Cortar a enxurrada na origem (os três padrões do Baileys)
+
+O disjuntor acima trata o **efeito**: quando a decifragem começa a falhar em série, a conta
+sai de cena e espera. Faltava atacar o **volume** — e três padrões do Baileys 6.7.9
+trabalhavam contra (`Defaults/index.ts`):
+
+| Padrão | Era | Ficou | Por quê |
+|---|---|---|---|
+| `shouldIgnoreJid` | `() => false` | `deveIgnorarNoBaileys` | não pagar decifragem por status de contato |
+| `maxMsgRetryCount` | `5` | `2` | o que não decifra na 2ª não decifra na 5ª |
+| `retryRequestDelayMs` | `250` | `2000` | 250ms vira laço apertado que não devolve o event loop |
+
+A conta da amplificação com os padrões antigos: 1119 falhas/hora × 5 retentativas a cada
+250ms = até **5.600 ciclos/hora**, cada um com criptografia, ida à rede e **uma consulta ao
+Postgres** (o `getMessage` chama `buscarEnviada`).
+
+**O `shouldIgnoreJid` é a maior das três.** O `ehConversaValida` já descartava
+`status@broadcast`, mas só **depois** de decifrar — a CPU já tinha sido paga. O Baileys
+checa o `shouldIgnoreJid` no topo do `handleMessage`, **antes** do `decryptMessageNode`
+(`Socket/messages-recv.ts:727` na v6.7.9): confirma o recebimento e sai. Com ~10 mil
+contatos mapeados, cada status que qualquer um deles posta deixa de custar.
+
+**Grupo NÃO entra na lista, de propósito.** Mensagem de grupo também não vira lead, mas
+alimenta o aprendizado de contato (`repassarContatos`); ignorá-la no Baileys perderia isso.
+Status e canal não têm esse valor. O `teste-ignorar-jid.js` trava esse invariante: nada que
+o `ehConversaValida` aproveitaria pode ser cortado antes de chegar.
+
+**O que se perde:** o status de um contato desconhecido não vai mais ensinar o nome dele.
+Na prática o contato já vem da agenda ou de conversa real — e o preço de manter era a
+instância morrer.
 
 ## Trava de sessão única por conta
 

@@ -133,7 +133,7 @@ services:
   # prazo — ~70s de conta parada a cada deploy, esperando o TTL. Por isso o
   # start chama o node DIRETO (mesma linha do "start" do package.json).
   #   Root Directory: services/wa-qr · Build: npm install
-  #   Start: node --max-old-space-size=320 server.js
+  #   Start: node --max-old-space-size=1024 server.js
   #   Health check path: /saude
   # ATENÇÃO: este arquivo é documentação (o serviço é gerenciado manual no
   # Render). Mudar o startCommand AQUI não muda nada lá — tem que editar o campo
@@ -149,8 +149,15 @@ services:
     rootDir: services/wa-qr
     buildCommand: npm install
     # node direto, sem o npm no meio: é o que faz o SIGTERM chegar no processo
-    # que sabe soltar as travas (ver o bloco de comentário acima)
-    startCommand: node --max-old-space-size=320 server.js
+    # que sabe soltar as travas (ver o bloco de comentário acima).
+    #
+    # 1024 e não 320: o teto de 320 foi escolhido quando o serviço rodava num plano
+    # de 512MB (ver services/wa-qr/README.md), e ficou pra trás na subida pro
+    # standard, que tem 2GB. Em 20/08 uma onda de histórico levou o heap a 314MB e o
+    # Node abortou com `JavaScript heap out of memory` — com 1,7GB de RAM parada ao
+    # lado. Com 1024 sobra folga pro `external` (os Buffers do socket e do áudio, que
+    # este teto NÃO limita) e pro nativo dentro dos 2GB do plano.
+    startCommand: node --max-old-space-size=1024 server.js
     healthCheckPath: /saude
     envVars:
       - key: DATABASE_URL

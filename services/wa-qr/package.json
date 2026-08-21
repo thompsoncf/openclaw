@@ -9,7 +9,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node --max-old-space-size=320 server.js"
+    "start": "node --max-old-space-size=1024 server.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.9",

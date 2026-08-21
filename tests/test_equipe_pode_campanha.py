@@ -37,6 +37,17 @@ def pool():
         c.execute("truncate contas cascade")
         c.commit()
     yield p
+    # limpa na SAÍDA também, e não só na entrada. Este arquivo cria a mesma pessoa
+    # ("vend-camp@exemplo.com") em DUAS empresas de propósito — é o teste 4, o
+    # multi-empresa da migração 073. Deixando as linhas pra trás, a rodada SEGUINTE
+    # do pytest quebra em outro arquivo: `test_cadastro_membro_familia` replaya a
+    # migração 072, que ainda cria o índice único GLOBAL em lower(email) (a 073 é
+    # quem o troca pelo por-conta), e ele não nasce com o e-mail repetido no banco.
+    # Produção não tem esse índice; o que não pode é a suíte só passar em banco
+    # virgem, porque aí "rodei duas vezes" vira 28 erros sem relação com a mudança.
+    with p.connection() as c:
+        c.execute("truncate contas cascade")
+        c.commit()
     p.close()
 
 

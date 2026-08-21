@@ -1,0 +1,205 @@
+<title>Dois Chips, Dois Leads</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --ground:#f4f6f7; --surface:#ffffff; --sunken:#eceff1;
+  --borda:#d5dbde; --borda-forte:#b9c2c7;
+  --txt:#12171a; --txt-mut:#5d686e; --txt-fraco:#8a949a;
+  --verde:#128a3e; --verde-bg:rgba(18,138,62,.10); --verde-bd:rgba(18,138,62,.32);
+  --cinza:#6b757a; --cinza-bg:rgba(107,117,122,.10); --cinza-bd:rgba(107,117,122,.28);
+  --ambar:#a06a05; --ambar-bg:rgba(160,106,5,.12); --ambar-bd:rgba(160,106,5,.36);
+  --roxo:#6d3fb5; --roxo-bg:rgba(109,63,181,.10); --roxo-bd:rgba(109,63,181,.30);
+  --sombra:0 1px 2px rgba(16,24,28,.06),0 8px 24px -12px rgba(16,24,28,.18);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#0e1113; --surface:#171b1e; --sunken:#121618;
+  --borda:#272d31; --borda-forte:#394247;
+  --txt:#e6e9ea; --txt-mut:#8b9499; --txt-fraco:#69737a;
+  --verde:#35d06d; --verde-bg:rgba(34,197,94,.13); --verde-bd:rgba(34,197,94,.34);
+  --cinza:#79848a; --cinza-bg:rgba(121,132,138,.12); --cinza-bd:rgba(121,132,138,.26);
+  --ambar:#e0a534; --ambar-bg:rgba(224,165,52,.14); --ambar-bd:rgba(224,165,52,.34);
+  --roxo:#b092e8; --roxo-bg:rgba(176,146,232,.13); --roxo-bd:rgba(176,146,232,.30);
+  --sombra:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+}}
+:root[data-theme="dark"]{
+  --ground:#0e1113; --surface:#171b1e; --sunken:#121618;
+  --borda:#272d31; --borda-forte:#394247;
+  --txt:#e6e9ea; --txt-mut:#8b9499; --txt-fraco:#69737a;
+  --verde:#35d06d; --verde-bg:rgba(34,197,94,.13); --verde-bd:rgba(34,197,94,.34);
+  --cinza:#79848a; --cinza-bg:rgba(121,132,138,.12); --cinza-bd:rgba(121,132,138,.26);
+  --ambar:#e0a534; --ambar-bg:rgba(224,165,52,.14); --ambar-bd:rgba(224,165,52,.34);
+  --roxo:#b092e8; --roxo-bg:rgba(176,146,232,.13); --roxo-bd:rgba(176,146,232,.30);
+  --sombra:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--txt);
+  font-family:"IBM Plex Sans",-apple-system,sans-serif;font-size:15px;line-height:1.55;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1020px;margin:0 auto;padding:2.5rem 1.25rem 4rem;display:flex;flex-direction:column;gap:2.75rem}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+.eyebrow{font-size:.7rem;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-fraco);font-weight:600}
+h1{margin:0;font-size:clamp(1.6rem,3.6vw,2.15rem);line-height:1.15;font-weight:700;letter-spacing:-.02em;text-wrap:balance}
+h2{margin:0;font-size:1.05rem;font-weight:600;letter-spacing:-.01em}
+h3{margin:0;font-size:.8rem;font-weight:600;color:var(--txt-fraco);letter-spacing:.06em;text-transform:uppercase}
+.lede{margin:0;color:var(--txt-mut);max-width:64ch}.lede b{color:var(--txt);font-weight:600}
+.nota{margin:0;color:var(--txt-mut);font-size:.9rem;max-width:72ch}
+section{display:flex;flex-direction:column;gap:1rem}
+.top{display:flex;flex-direction:column;gap:.85rem}
+
+.chip{display:inline-flex;align-items:center;gap:.35rem;white-space:nowrap;font-size:.68rem;
+  font-weight:600;padding:.2rem .5rem;border-radius:999px;border:1px solid}
+.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.c-thi{color:var(--roxo);background:var(--roxo-bg);border-color:var(--roxo-bd)}
+.c-zar{color:var(--verde);background:var(--verde-bg);border-color:var(--verde-bd)}
+
+/* aviso — o elemento central deste desenho */
+.aviso{border:1px solid var(--ambar-bd);background:var(--ambar-bg);border-radius:7px;
+  padding:.5rem .6rem;display:flex;gap:.5rem;align-items:flex-start;font-size:.78rem}
+.aviso .ic{line-height:1.35;flex:none}
+.aviso b{font-weight:600}
+.aviso a{color:var(--ambar);font-weight:600;text-decoration:none;border-bottom:1px solid var(--ambar-bd);white-space:nowrap}
+
+.par{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.painel{background:var(--surface);border:1px solid var(--borda);border-radius:10px;
+  box-shadow:var(--sombra);overflow:hidden}
+.painel-topo{padding:.5rem .85rem;border-bottom:1px solid var(--borda);background:var(--sunken);
+  font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--txt-mut)}
+.painel-corpo{padding:.8rem .85rem;display:flex;flex-direction:column;gap:.7rem}
+
+/* card de lead no funil */
+.lead{border:1px solid var(--borda);border-radius:8px;padding:.6rem .7rem;background:var(--ground);
+  display:flex;flex-direction:column;gap:.4rem}
+.lead-topo{display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap}
+.lead-nome{font-weight:600;font-size:.9rem}
+.lead-meta{font-size:.72rem;color:var(--txt-fraco)}
+.lead-linha{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;font-size:.76rem;color:var(--txt-mut)}
+
+/* bolhas de chat */
+.chat{display:flex;flex-direction:column;gap:.35rem}
+.bolha{max-width:82%;padding:.4rem .6rem;border-radius:9px;font-size:.8rem;line-height:1.45}
+.b-in{align-self:flex-start;background:var(--sunken);border:1px solid var(--borda)}
+.b-out{align-self:flex-end;background:var(--verde-bg);border:1px solid var(--verde-bd)}
+.hora{font-size:.66rem;color:var(--txt-fraco);margin-left:.3rem}
+
+pre{margin:0;background:var(--sunken);border:1px solid var(--borda);border-radius:7px;
+  padding:.7rem .8rem;overflow-x:auto;font-size:.78rem;line-height:1.6}
+pre .g{color:var(--cinza)} pre .v{color:var(--verde);font-weight:600} pre .r{color:var(--ambar);font-weight:600}
+
+.tab-env{overflow-x:auto;border:1px solid var(--borda);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.85rem;min-width:540px}
+th{text-align:left;font-size:.66rem;letter-spacing:.09em;text-transform:uppercase;color:var(--txt-fraco);
+  font-weight:600;padding:.55rem .8rem;border-bottom:1px solid var(--borda);background:var(--sunken)}
+td{padding:.58rem .8rem;border-bottom:1px solid var(--borda);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td .sub{display:block;color:var(--txt-mut);font-size:.77rem;margin-top:.1rem}
+.ok{color:var(--verde);font-weight:600}
+.nao{color:var(--cinza);font-weight:600}
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <span class="eyebrow">WhatsApp por QR · Prime Eventos</span>
+  <h1>Dois chips, dois leads, dois chats</h1>
+  <p class="lede">Nada se mistura. Quem escreve pro <b>4095516</b> é um lead da <b>Campanha Zarb</b>; quem escreve pro <b>4436805</b> é um lead da <b>Campanha Thiago</b>. Cada um com sua conversa, respondido pelo próprio número. O que liga os dois é só um <b>aviso</b> — no card do funil e no topo do chat.</p>
+</header>
+
+<section>
+  <h2>O aviso, nos dois lugares</h2>
+  <div class="par">
+
+    <div class="painel">
+      <div class="painel-topo">Funil · card do lead</div>
+      <div class="painel-corpo">
+        <div class="lead">
+          <div class="lead-topo">
+            <span class="lead-nome">Thompson</span>
+            <span class="chip c-thi">Campanha Thiago</span>
+          </div>
+          <span class="lead-meta mono">(86) 98188-5930 · lead · quente</span>
+          <div class="aviso">
+            <span class="ic">⚠️</span>
+            <span>Este número também é lead na <b>Campanha Zarb</b> — em negociação com Manoel. <a href="#">Abrir →</a></span>
+          </div>
+          <div class="lead-linha">Vendedor: Thiago · criado hoje 12:11</div>
+        </div>
+        <p class="nota" style="font-size:.8rem">O mesmo aviso aparece no card do lead da Zarb, apontando pra este.</p>
+      </div>
+    </div>
+
+    <div class="painel">
+      <div class="painel-topo">Comunicação · topo do chat</div>
+      <div class="painel-corpo">
+        <div class="lead-topo">
+          <span class="lead-nome">Thompson</span>
+          <span class="chip c-thi">Campanha Thiago</span>
+        </div>
+        <div class="aviso">
+          <span class="ic">⚠️</span>
+          <span>Mesmo número em atendimento na <b>Campanha Zarb</b> · última mensagem há 2h. <a href="#">Ver conversa →</a></span>
+        </div>
+        <div class="chat">
+          <div class="bolha b-in">Campanha <span class="hora">12:11</span></div>
+          <div class="bolha b-out">Oi Thompson! Como posso ajudar? <span class="hora">12:11</span></div>
+        </div>
+        <p class="nota" style="font-size:.8rem">Sai pelo 4436805 — o mesmo por onde entrou.</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <h2>E o agente também sabe</h2>
+  <p class="nota">Você pediu aviso pro vendedor <b>e</b> pro agente. O do agente não é visual: entra no contexto dele, antes de responder — senão ele atende em dobro sem saber, e pode prometer coisas diferentes nos dois números.</p>
+  <pre><span class="g">// contexto do agente, na conversa do chip Thiago</span>
+<span class="r">ATENÇÃO:</span> este mesmo número (86 98188-5930) também está em
+atendimento pela campanha <span class="v">"Campanha Zarb"</span>, com o vendedor Manoel.
+Você NÃO enxerga o que foi dito lá. Se o cliente mencionar algo
+que você não viu, provavelmente foi combinado na outra conversa —
+pergunte em vez de supor, e não prometa preço ou data sem confirmar.</pre>
+</section>
+
+<section>
+  <h2>Como o sistema decide</h2>
+  <pre><span class="g">-- entrada: acha a conversa pelo telefone E pelo chip</span>
+select id from conversas
+ where conta_id = 34
+   and right(digits(contato_ref), 8) = '81885930'
+   <span class="v">and chip_id is not distinct from 36</span>
+
+<span class="g">-- não achou? nasce lead novo + conversa nova, com chip_id = 36</span>
+<span class="g">-- e o aviso aparece nos dois, porque o telefone bate</span></pre>
+  <p class="nota"><code>is not distinct from</code> e não <code>=</code>: o <code>chip_id</code> é <b>nulo</b> no chip da empresa (a Zarb), e em SQL <code>null = null</code> não é verdadeiro. Com <code>=</code>, a Zarb nunca acharia a própria conversa e criaria uma nova a cada mensagem.</p>
+</section>
+
+<section>
+  <h2>O que NÃO muda</h2>
+  <div class="tab-env">
+    <table>
+      <thead><tr><th>Peça</th><th></th></tr></thead>
+      <tbody>
+        <tr><td>Índice único <code>(conta, lead, canal)</code></td><td><span class="nao">intacto</span><span class="sub">Cada lead tem UMA conversa. É por isso que 2 leads resolve sem tocar no índice — foi a sua correção.</span></td></tr>
+        <tr><td>Rodízio</td><td><span class="nao">igual</span><span class="sub">O lead novo entra na fila como qualquer outro.</span></td></tr>
+        <tr><td>Conversa 2540 (a misturada)</td><td><span class="nao">fica</span><span class="sub">Vira a conversa da Zarb. A da Thiago nasce vazia na próxima mensagem.</span></td></tr>
+        <tr><td>Saída pelo chip certo</td><td><span class="ok">já pronto</span><span class="sub">whatsapp_out já lê o chip_id da conversa.</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>O detalhe do custo — resolvido</h2>
+  <p class="nota">A dúvida era: o aviso precisa achar "o mesmo número em outro chip", e o funil mostra dezenas de cards de uma vez. Uma consulta por card repetiria a varredura por linha que derrubou o app em 15/08 (2.446 respostas 502).</p>
+  <p class="nota">Ficou assim, e não custa nada:</p>
+  <ul class="nota">
+    <li><b>Uma consulta só pro funil inteiro</b> — <code>_gemeos_de_outro_chip</code> recebe a lista de leads e devolve um dicionário. Nada roda dentro do laço de cards.</li>
+    <li><b>Empresa de um chip nem consulta</b> — a primeira linha é <code>select 1 from contas where chip_de=$1 limit 1</code> (chave estrangeira, uma linha). Sem segundo chip não existe "outra campanha" pra avisar, e a consulta cara nem começa. Hoje isso vale pra 21 das 22 contas.</li>
+    <li><b>Falha do aviso não derruba a tela</b> — a consulta roda num SAVEPOINT e, se der erro, registra no log e devolve vazio. O funil, o chat e a resposta do agente continuam.</li>
+  </ul>
+  <p class="nota">Fora isso, um ajuste que o desenho não previa: o link <span class="mono">Abrir →</span> só aparece pra quem consegue abrir o outro lead (gerência, ou o vendedor que é dono dele). O vendedor comum vê o aviso sem link — melhor que um link que só devolve pro funil.</p>
+</section>
+
+</div>

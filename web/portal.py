@@ -356,7 +356,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   <div class="side-logo"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span></div>
   {% set _dono = (papel == 'dono') %}
   {% if _dono and (vende_produto or _tem_app) %}<div class="side-grp">Principal</div>{% endif %}
-  {% if _dono and vende_produto %}{{ navi('caixa','/painel/pdv','caixa','Caixa') }}{{ navi('produtos','/painel/produtos','produtos','Produtos') }}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
+  {% if _dono and vende_produto %}{{ navi('caixa','/painel/pdv','caixa','Caixa') }}{{ navi('produtos','/painel/produtos','produtos','Produtos') }}{{ navi('clientes','/painel/clientes','clientes','Clientes/Fornecedores') }}{% endif %}
   {% if _dono and _tem_app %}{{ navi('financeiro','/painel/financeiro','financeiro','Financeiro') }}{% endif %}
   {% if caps.vendas or (tem_pj and caps.financeiro) or caps.gerir or (_dono and (vende_produto or _forn)) %}<div class="side-grp">{{ 'Loja' if _dono else 'Minha área' }}</div>{% endif %}
   {% if _dono and vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
@@ -371,7 +371,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _tem_app and (caps.vendas or caps.financeiro) %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
-  {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
+  {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes/Fornecedores') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
@@ -410,7 +410,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _tem_app and (caps.vendas or caps.financeiro) %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
-  {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
+  {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes/Fornecedores') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
@@ -3025,6 +3025,7 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
   .cli-head[aria-expanded="true"] .chev{transform:rotate(180deg);color:var(--verde-claro)}
   .tbadge{font-size:.62rem;font-weight:700;letter-spacing:.03em;padding:.08rem .4rem;border-radius:5px;vertical-align:1px;margin-left:.3rem}
   .tbadge.pf{background:#22303f;color:#7fb2e6}.tbadge.pj{background:#1f3a2b;color:#69cf9a}
+  .tbadge.cli{background:#233026;color:#9fcf9a}.tbadge.forn{background:#2a1f3a;color:#c9a3e0}
   .wa{position:relative;flex:none;font-size:.76rem;font-weight:600;cursor:pointer;color:#128c4b;
       background:rgba(37,211,102,.16);border:1px solid rgba(37,211,102,.34);padding:.35rem .7rem;border-radius:999px;white-space:nowrap}
   .wa:hover{background:rgba(37,211,102,.28)}
@@ -3059,14 +3060,29 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
 </style>
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
-    <h2 style="margin:0">👥 Clientes <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· {{ total }} na base</span></h2>
+    <h2 style="margin:0">👥 Clientes/Fornecedores <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· {{ total }} na base</span></h2>
     <button type="button" onclick="var e=document.getElementById('cli-novo');e.style.display=e.style.display==='block'?'none':'block'" style="background:var(--verde);color:var(--sobre-verde);padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;width:auto">+ novo cliente</button>
   </div>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
   {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
   <form method="get" action="/painel/clientes" style="margin:1rem 0">
+    {% if busca %}{# preserva o filtro de papel ao buscar #}<input type="hidden" name="papel" value="{{ papel_filtro }}">{% endif %}
     <input name="busca" value="{{ busca }}" placeholder="🔍 buscar por nome, telefone, CPF ou CNPJ..." style="width:100%">
   </form>
+  {# filtro por papel: Todos/Clientes/Fornecedores nao sao exclusivos no cadastro,
+     mas o FILTRO precisa ser (senao "Fornecedores" mostraria quem tambem e' cliente,
+     que e' o caso mais comum, e o filtro nao filtraria nada).
+     NOME DO CONTEXTO: `papel_filtro`, nunca `papel` — `papel` ja e' o papel do
+     OPERADOR logado (dono/gestor/vendedor), setado global em `_render` com
+     `ctx.setdefault`. Passar `papel=` aqui pisaria nele: como setdefault so' entra
+     se a chave nao existir, a pagina inteira passaria a achar que o operador
+     logado tem o papel "cliente" ou "fornecedor" — e o menu (que confere
+     `_dono = papel=='dono'`) sumiria pra todo mundo nesta tela. #}
+  <div style="display:flex;gap:.4rem;margin:0 0 .9rem">
+    <a href="/painel/clientes{{ '?busca='+busca if busca else '' }}" style="text-decoration:none;background:{{ 'var(--verde)' if not papel_filtro else 'var(--card-2)' }};color:{{ 'var(--sobre-verde)' if not papel_filtro else 'var(--txt-mut)' }};border:1px solid {{ 'var(--verde)' if not papel_filtro else 'var(--borda)' }};border-radius:20px;padding:.35rem .9rem;font-size:.78rem;font-weight:600">Todos</a>
+    <a href="/painel/clientes?papel=cliente{{ '&busca='+busca if busca else '' }}" style="text-decoration:none;background:{{ 'var(--verde)' if papel_filtro=='cliente' else 'var(--card-2)' }};color:{{ 'var(--sobre-verde)' if papel_filtro=='cliente' else 'var(--txt-mut)' }};border:1px solid {{ 'var(--verde)' if papel_filtro=='cliente' else 'var(--borda)' }};border-radius:20px;padding:.35rem .9rem;font-size:.78rem;font-weight:600">Clientes</a>
+    <a href="/painel/clientes?papel=fornecedor{{ '&busca='+busca if busca else '' }}" style="text-decoration:none;background:{{ 'var(--verde)' if papel_filtro=='fornecedor' else 'var(--card-2)' }};color:{{ 'var(--sobre-verde)' if papel_filtro=='fornecedor' else 'var(--txt-mut)' }};border:1px solid {{ 'var(--verde)' if papel_filtro=='fornecedor' else 'var(--borda)' }};border-radius:20px;padding:.35rem .9rem;font-size:.78rem;font-weight:600">Fornecedores</a>
+  </div>
 
   <div id="cli-novo" style="display:none;background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:1rem;margin-bottom:1rem">
     <h4 style="margin-top:0">Novo cliente</h4>
@@ -3081,6 +3097,21 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
           <span id="nc-badge" class="doc-badge"></span>
         </div>
         <div class="col-2"><label>Nome / Razão social *</label><input id="nc-nome" name="nome" required></div>
+        {# nao e' escolha unica: a mesma pessoa/empresa pode comprar de voce E vender
+           pra voce ao mesmo tempo — mesmo padrao de vende_produto/vende_servico,
+           ja independentes na conta. Cliente vem marcado, e' o caso mais comum. #}
+        <div class="col-2" style="display:flex;gap:.7rem;flex-wrap:wrap;padding:.7rem .8rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;margin:.15rem 0 .2rem">
+          <label style="display:flex;align-items:center;gap:.5rem;flex:1 1 200px;cursor:pointer">
+            <input type="checkbox" name="eh_cliente" value="1" checked style="width:auto;accent-color:var(--verde)">
+            <span><span style="font-size:.85rem;font-weight:600;color:var(--txt)">Cliente</span>
+            <span style="display:block;font-size:.7rem;color:var(--txt-mut);margin-top:1px">compra de você, ou pode vir a comprar</span></span>
+          </label>
+          <label style="display:flex;align-items:center;gap:.5rem;flex:1 1 200px;cursor:pointer">
+            <input type="checkbox" name="eh_fornecedor" value="1" style="width:auto;accent-color:var(--verde)">
+            <span><span style="font-size:.85rem;font-weight:600;color:var(--txt)">Fornecedor</span>
+            <span style="display:block;font-size:.7rem;color:var(--txt-mut);margin-top:1px">você compra dele, ou paga por serviço</span></span>
+          </label>
+        </div>
         <div><label>Telefone / celular</label><input id="nc-tel" name="telefone"></div>
         <div><label>E-mail</label><input id="nc-email" name="email" type="email"></div>
         <div><label>Aniversário</label><input type="date" name="aniversario"></div>
@@ -3103,7 +3134,7 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
       <div class="cli-item">
         <div class="cli-head" role="button" tabindex="0" aria-expanded="false" onclick="toggleCli(this)">
           <div style="flex:1;min-width:0">
-            <div style="color:var(--txt);font-weight:600">{{ c.nome }}<span class="tbadge {{ 'pj' if c.tipo=='pj' else 'pf' }}">{{ 'PJ' if c.tipo=='pj' else 'PF' }}</span></div>
+            <div style="color:var(--txt);font-weight:600">{{ c.nome }}<span class="tbadge {{ 'pj' if c.tipo=='pj' else 'pf' }}">{{ 'PJ' if c.tipo=='pj' else 'PF' }}</span>{% if c.eh_cliente %}<span class="tbadge cli">CLIENTE</span>{% endif %}{% if c.eh_fornecedor %}<span class="tbadge forn">FORNECEDOR</span>{% endif %}</div>
             <div class="mut" style="font-size:.8rem">{% if c.telefone %}📱 {{ c.telefone }}{% endif %}{% if c.documento_fmt %} · {{ 'CNPJ' if c.tipo=='pj' else 'CPF' }} {{ c.documento_fmt }}{% endif %}</div>
           </div>
           {% if c.telefone %}
@@ -3125,6 +3156,16 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
             <form method="post" action="/painel/clientes/{{ c.id }}/editar">
               <div class="mini-grid">
                 <div class="col-2"><label>Nome / Razão social</label><input name="nome" value="{{ c.nome or '' }}"></div>
+                <div class="col-2" style="display:flex;gap:.7rem;flex-wrap:wrap;padding:.7rem .8rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;margin:.15rem 0 .2rem">
+                  <label style="display:flex;align-items:center;gap:.5rem;flex:1 1 200px;cursor:pointer">
+                    <input type="checkbox" name="eh_cliente" value="1" {% if c.eh_cliente %}checked{% endif %} style="width:auto;accent-color:var(--verde)">
+                    <span style="font-size:.85rem;font-weight:600;color:var(--txt)">Cliente</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:.5rem;flex:1 1 200px;cursor:pointer">
+                    <input type="checkbox" name="eh_fornecedor" value="1" {% if c.eh_fornecedor %}checked{% endif %} style="width:auto;accent-color:var(--verde)">
+                    <span style="font-size:.85rem;font-weight:600;color:var(--txt)">Fornecedor</span>
+                  </label>
+                </div>
                 <div><label>Telefone</label><input name="telefone" value="{{ c.telefone or '' }}"></div>
                 <div><label>{{ 'CNPJ' if c.tipo=='pj' else 'CPF' }}</label><input name="documento" value="{{ c.documento_fmt or '' }}"></div>
                 <div><label>E-mail</label><input name="email" value="{{ c.email or '' }}"></div>
@@ -3652,16 +3693,30 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center"><strong>Títulos a pagar e receber</strong></div>
   <form method="post" action="/painel/empresa/titulo" class="emp-form" style="display:grid;grid-template-columns:1fr 2fr 1fr 1fr 1.4fr auto;gap:.5rem;margin:.7rem 0;align-items:end">
-    <label style="font-size:.72rem;color:#8a938a">Tipo<select name="tipo" style="width:100%">
+    <label style="font-size:.72rem;color:#8a938a">Tipo<select name="tipo" onchange="titTipoTroca(this)" style="width:100%">
       <option value="pagar">A pagar</option><option value="receber">A receber</option></select></label>
     <label style="font-size:.72rem;color:#8a938a">Descrição<input name="descricao" required placeholder="Ex: Aluguel do ponto" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Valor R$<input name="valor" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Vencimento<input name="vencimento" type="date" required style="width:100%"></label>
-    <label style="font-size:.72rem;color:#8a938a" title="opcional — liga o título à ficha do cliente (honorário/venda a prazo)">Cliente<input name="cliente" list="tit-cli-dl" placeholder="opcional" style="width:100%"></label>
+    {# o campo troca de rótulo com o Tipo: "A pagar" pede FORNECEDOR, "A receber" pede
+       CLIENTE — cada datalist sugere só quem tem aquele papel marcado no cadastro.
+       Antes o campo dizia sempre "Cliente", mesmo numa dívida a pagar, e o nome
+       digitado ali nem chegava a ser salvo (só ligava em título a receber). #}
+    <label id="tit-cli-lbl" style="font-size:.72rem;color:#8a938a" title="opcional — liga o título à ficha do fornecedor">Fornecedor<input name="cliente" id="tit-cli-input" list="tit-forn-dl" placeholder="opcional" style="width:100%"></label>
     <button type="submit" style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
   </form>
   <datalist id="tit-cli-dl">{% for c in clientes_lista or [] %}<option value="{{ c.nome }}">{% endfor %}</datalist>
-  <label style="font-size:.72rem;color:#8a938a;display:flex;gap:.4rem;align-items:center;margin-bottom:.6rem"><input type="checkbox" form="_nada" disabled style="width:auto"> <span class="mut">Vincule um cliente pra o título aparecer na ficha dele (carteira). Contraparte/recorrência aparecem ao detalhar.</span></label>
+  <datalist id="tit-forn-dl">{% for c in fornecedores_lista or [] %}<option value="{{ c.nome }}">{% endfor %}</datalist>
+  <script>
+  function titTipoTroca(sel){
+    var pagar = sel.value === 'pagar';
+    var lbl = document.getElementById('tit-cli-lbl'), inp = document.getElementById('tit-cli-input');
+    lbl.firstChild.textContent = pagar ? 'Fornecedor' : 'Cliente';
+    lbl.title = pagar ? 'opcional — liga o título à ficha do fornecedor' : 'opcional — liga o título à ficha do cliente (honorário/venda a prazo)';
+    inp.setAttribute('list', pagar ? 'tit-forn-dl' : 'tit-cli-dl');
+  }
+  </script>
+  <label style="font-size:.72rem;color:#8a938a;display:flex;gap:.4rem;align-items:center;margin-bottom:.6rem"><input type="checkbox" form="_nada" disabled style="width:auto"> <span class="mut">Vincule um cliente ou fornecedor pra o título aparecer na ficha dele. Contraparte/recorrência aparecem ao detalhar.</span></label>
   {% if titulos %}
   <style>
     .tit-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .9rem;padding:.7rem 0;border-top:1px solid var(--card-2)}
@@ -8645,7 +8700,7 @@ async def painel_produtos_vender(request: Request):
 
 
 @router.get("/painel/clientes", response_class=HTMLResponse)
-def painel_clientes(request: Request, busca: str = ""):
+def painel_clientes(request: Request, busca: str = "", papel: str = ""):
     from finance import empresa as emp, clientes as cli
     conta = conta_logada(request)
     if conta is None:
@@ -8653,10 +8708,15 @@ def painel_clientes(request: Request, busca: str = ""):
     pool = get_pool()
     if not emp.acesso_pj(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
-    lista = cli.listar_clientes(pool, conta[0], busca=busca or None)
+    papel_filtro = papel if papel in ("cliente", "fornecedor") else ""
+    lista = cli.listar_clientes(pool, conta[0], busca=busca or None, papel=papel_filtro or None)
     total = cli.contar_clientes(pool, conta[0])
+    # context key `papel_filtro`, NUNCA `papel`: o template ja usa `papel` pro
+    # papel do OPERADOR logado (ver comentario no template, na aba Clientes) —
+    # setar `papel=` aqui via ctx pisaria nele e o menu sumiria pra quem entrar
+    # com filtro na URL.
     return _render("clientes", request, conta=conta, clientes=lista, total=total,
-                   busca=busca or "",
+                   busca=busca or "", papel_filtro=papel_filtro,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
 
@@ -8668,7 +8728,8 @@ def painel_clientes_novo(request: Request, nome: str = Form(...),
                          email: str = Form(""), aniversario: str = Form(""),
                          obs: str = Form(""), cidade: str = Form(""),
                          uf: str = Form(""), endereco: str = Form(""),
-                         cep: str = Form("")):
+                         cep: str = Form(""),
+                         eh_cliente: str = Form(""), eh_fornecedor: str = Form("")):
     from finance import empresa as emp, clientes as cli, validadoc
     conta = conta_logada(request)
     if conta is None:
@@ -8690,7 +8751,8 @@ def painel_clientes_novo(request: Request, nome: str = Form(...),
                           email=(email or None), aniversario=(aniversario or None),
                           obs=(obs or None), cidade=(cidade or None),
                           uf=(uf or None), endereco=(endereco or None),
-                          cep=(cep or None), **kw)
+                          cep=(cep or None), eh_cliente=bool(eh_cliente),
+                          eh_fornecedor=bool(eh_fornecedor), **kw)
         request.session["aviso"] = "Cliente cadastrado."
     except ValueError as e:
         request.session["erro"] = str(e)
@@ -8802,7 +8864,8 @@ def painel_cliente_editar(request: Request, cliente_id: int, nome: str = Form(""
                           email: str = Form(""), aniversario: str = Form(""),
                           obs: str = Form(""), cidade: str = Form(""),
                           uf: str = Form(""), endereco: str = Form(""),
-                          cep: str = Form("")):
+                          cep: str = Form(""),
+                          eh_cliente: str = Form(""), eh_fornecedor: str = Form("")):
     from finance import empresa as emp, clientes as cli, validadoc
     conta = conta_logada(request)
     if conta is None:
@@ -8812,7 +8875,8 @@ def painel_cliente_editar(request: Request, cliente_id: int, nome: str = Form(""
         return RedirectResponse("/painel", status_code=303)
     campos = {"telefone": telefone, "email": email,
               "aniversario": aniversario, "obs": obs,
-              "cidade": cidade, "uf": uf, "endereco": endereco, "cep": cep}
+              "cidade": cidade, "uf": uf, "endereco": endereco, "cep": cep,
+              "eh_cliente": bool(eh_cliente), "eh_fornecedor": bool(eh_fornecedor)}
     if (nome or "").strip():
         campos["nome"] = nome
     tipo, d = validadoc.classificar(documento or cpf)
@@ -9110,7 +9174,9 @@ def painel_empresa(request: Request):
     for _it in folha["itens"]:
         _it["eventos"] = _evs.get(_it["id"], [])
     from finance import clientes as _cli   # _nichos já é import de módulo (topo)
-    clientes_lista = _cli.listar_clientes(pool, conta[0])
+    # os dois papéis não são exclusivos — quem é as duas coisas aparece nas duas listas.
+    clientes_lista = _cli.listar_clientes(pool, conta[0], papel="cliente")
+    fornecedores_lista = _cli.listar_clientes(pool, conta[0], papel="fornecedor")
     carteira = emp.resumo_carteira(pool, conta[0])
     with pool.connection() as c:
         _r = c.execute("select coalesce(n.slug,'') from contas ct left join nichos n "
@@ -9118,7 +9184,8 @@ def painel_empresa(request: Request):
     rotulo_receber = _nichos.rotulo_receber(_r[0] if _r else "")
     return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
                    dre=dre, titulos=titulos, titulos_pagos=titulos_pagos,
-                   folha=folha, clientes_lista=clientes_lista, carteira=carteira,
+                   folha=folha, clientes_lista=clientes_lista,
+                   fornecedores_lista=fornecedores_lista, carteira=carteira,
                    rotulo_receber=rotulo_receber, tem_pj=True,
                    plano_arvore=plano_arvore, centros=centros, dre_centro=dre_centro,
                    a_classificar=a_classificar, plano_opcoes=plano_opcoes,
@@ -9549,22 +9616,34 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
     cent = _reais_para_centavos(valor)
     tipo_ok = tipo if tipo in ("pagar", "receber") else "pagar"
     if cent > 0 and descricao.strip() and vencimento:
-        # Cliente só faz sentido em título A RECEBER (honorário/venda a prazo).
-        # Liga a um existente pelo nome; se não achar, CRIA na hora (o campo é
-        # intenção explícita do dono). Em título a pagar, ignora (é fornecedor).
+        # O campo "cliente" do formulário liga a ficha de quem quer que seja —
+        # CLIENTE em título a receber (honorário/venda a prazo), FORNECEDOR em
+        # título a pagar (é o mesmo cadastro, só um papel diferente marcado nele:
+        # ver finance/clientes.eh_cliente/eh_fornecedor). Se não achar um já
+        # cadastrado com aquele papel, CRIA na hora (o campo é intenção explícita
+        # do dono) — já nascendo com o papel certo.
+        #
+        # ANTES: em título a pagar o nome digitado aqui nem chegava a ser salvo —
+        # só virava contraparte se um cliente_id tivesse sido resolvido, e a busca
+        # só rodava pra "receber". Agora contraparte SEMPRE guarda o nome digitado,
+        # ligado ou não: perder o "quem" de uma dívida é pior que não achar o cadastro.
         cli_id = None
         nome_cli = cliente.strip()
-        if tipo_ok == "receber" and nome_cli:
-            cli_id = cli.achar_cliente_por_nome(pool, conta[0], nome_cli)
+        papel = "cliente" if tipo_ok == "receber" else "fornecedor"
+        if nome_cli:
+            cli_id = cli.achar_cliente_por_nome(pool, conta[0], nome_cli, papel=papel)
             if cli_id is None:
                 try:
-                    cli_id = cli.criar_cliente(pool, conta[0], nome_cli)
+                    cli_id = cli.criar_cliente(
+                        pool, conta[0], nome_cli,
+                        eh_cliente=(papel == "cliente"),
+                        eh_fornecedor=(papel == "fornecedor"))
                 except Exception:
                     cli_id = None
         try:
             emp.criar_titulo(pool, conta[0], tipo_ok,
                              descricao, cent, _date.fromisoformat(vencimento),
-                             contraparte=contraparte or (nome_cli if cli_id else ""),
+                             contraparte=contraparte or nome_cli,
                              recorrente=bool(recorrente), criado_por=None,
                              cliente_id=cli_id)
         except Exception:

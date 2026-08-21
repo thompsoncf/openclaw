@@ -1618,52 +1618,79 @@ def visita_ics(pool, token: str) -> str | None:
 
 # ------------------------------------------------------------------ agenda do vendedor
 def agenda_da_conta(pool, conta_id: int, membro_id: int | None = None,
-                    so_meus: bool = False, dias: int = 14) -> list[dict]:
-    """A agenda dos próximos `dias` — visitas, compromissos e datas SEGURADAS — da
-    conta inteira, com quem marcou. Substitui a antiga `visitas_do_vendedor`, que
-    filtrava por `membro_id` e `status='ativo'`: o vendedor via só as visitas dele,
-    e a data segurada (pré-reserva aguardando sinal) não aparecia pra ninguém no
-    app. É exatamente a informação que evita prometer a mesma data duas vezes, e
-    quem corre esse risco é o vendedor, na rua.
+                    so_meus: bool = False, dias: int | None = None,
+                    estado: str = "tudo") -> list[dict]:
+    """A agenda da CONTA daqui pra frente — visitas, datas reservadas e pré-reservas.
 
-    `so_meus=True` devolve só os eventos de `membro_id` — o filtro "Meus × Todos"
-    da tela. Fica no SQL (e não na tela) porque a tela corta em `dias`; filtrar
-    depois faria "Meus" perder eventos quando o time lota a janela.
+    POR QUE O TETO DE DIAS CAIU
+    Nasceu com `dias=14`, e isso bastava quando a agenda tinha três visitas técnicas.
+    Medido na conta 34 em 20/08/2026, depois que as 31 datas reais entraram: 35
+    compromissos futuros, e a janela de 14 dias mostrava QUATRO. As seis pré-reservas
+    estavam todas fora — o vendedor não via uma única data segurada.
 
-    Cada item traz `tipo_ev` ('visita' | 'segurada' | 'compromisso'), `autor` (nome
-    de quem marcou; '' quando foi o dono titular, que não tem membro) e `minha`
-    (o evento é de quem está olhando). O prazo do sinal vai em `prazo` ('2d', '5h',
-    'vencido') — no card ele é a diferença entre "data ocupada" e "urgência".
+    Isso contradiz o motivo desta função existir. Quem aluga espaço vende com um ano
+    de antecedência, e é o vendedor, na rua, que promete data. Cortar em duas semanas
+    esconde justamente o que ele precisa consultar na frente do cliente.
+
+    `dias=None` (o padrão agora) traz tudo o que está pela frente. O parâmetro
+    continua aceito porque quem quiser uma janela curta ainda pode pedir.
+
+    `estado` é o filtro NOVO da tela: 'tudo' | 'reservado' | 'pre'. Fica no SQL, e
+    não na tela, pelo mesmo motivo do `so_meus`: filtrar depois de cortar devolveria
+    listas incompletas.
+
+    Cada item traz `tipo_ev` ('visita' | 'pre' | 'reservado'), `autor`, `minha`,
+    `prazo` ('2d', '5h', 'vencido') e `hora_sugerida` — a marca de que o horário foi
+    chutado pelo sistema e ninguém confirmou (migração 179).
     """
     from finance import agenda as ag
     from web.painel_prospeccao import _zap_link
     hoje = datetime.now(ag.BRT).replace(hour=0, minute=0, second=0, microsecond=0)
+
     cond = "and e.membro_id=%s " if (so_meus and membro_id) else ""
-    args = [conta_id] + ([membro_id] if (so_meus and membro_id) else []) \
-        + [hoje, hoje + timedelta(days=max(1, int(dias or 14)))]
+    args: list = [conta_id] + ([membro_id] if (so_meus and membro_id) else []) + [hoje]
+    if estado == "reservado":
+        cond += "and e.status='ativo' "
+    elif estado == "pre":
+        cond += "and e.status='pre_reservado' "
+    janela = ""
+    if dias:
+        janela = "and e.inicio < %s "
+        args.append(hoje + timedelta(days=max(1, int(dias))))
+
     with pool.connection() as c:
         rows = c.execute(
             f"""select e.id, e.titulo, e.inicio, e.local, e.ics_token,
                       e.prospeccao_id, p.empresa, coalesce(p.whatsapp, p.telefone, ''),
                       e.status, e.pre_reserva_ate, e.membro_id,
-                      coalesce(nullif(m.nome,''), '')
+                      coalesce(nullif(m.nome,''), ''),
+                      coalesce(e.hora_sugerida, false), e.convidados, e.sinal_centavos
                  from eventos_agenda e
                  left join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
                  left join membros m on m.id = e.membro_id
                 where e.conta_id=%s {cond}and e.status in ('ativo','pre_reservado')
-                  and e.inicio >= %s and e.inicio < %s
+                  and e.inicio >= %s {janela}
                 order by e.inicio""",
             args).fetchall()
+
+    # OS DIAS QUE TÊM MAIS DE UM COMPROMISSO. Pra quem aluga espaço, duas festas no
+    # mesmo sábado é o alerta — mesmo em horários que não se cruzam. A conta é feita
+    # sobre a agenda INTEIRA (não só sobre o que o filtro deixou passar): filtrando
+    # por "pré-reserva", a data reservada que choca some da lista e o choque sumiria
+    # junto — exatamente quando ele mais importa, que é na hora de negociar.
+    choques = _dias_com_mais_de_um(pool, conta_id, hoje)
+
     agora = datetime.now(ag.BRT)
     out = []
     for r in rows:
         ini = r[2].astimezone(ag.BRT) if r[2] else None
-        segurada = (r[8] == "pre_reservado")
-        # o rótulo do card: visita é o que tem lead pendurado; segurada é a data
-        # esperando sinal; o resto (festa confirmada, reunião) é compromisso firme.
-        tipo_ev = "segurada" if segurada else ("visita" if r[5] else "compromisso")
+        pre = (r[8] == "pre_reservado")
+        # o rótulo do card. As palavras são as do dono: no painel e na boca dele a
+        # data firme é RESERVADA e a segurada é PRÉ-RESERVA. "visita" continua
+        # visita, porque é outra coisa — é o cliente indo conhecer o espaço.
+        tipo_ev = "pre" if pre else ("visita" if r[5] else "reservado")
         prazo = ""
-        if segurada and r[9]:
+        if pre and r[9]:
             horas = (r[9] - agora).total_seconds() / 3600
             prazo = ("vencido" if horas <= 0
                      else f"{max(1, int(horas))}h" if horas < 24
@@ -1672,13 +1699,61 @@ def agenda_da_conta(pool, conta_id: int, membro_id: int | None = None,
             "id": r[0], "titulo": r[1] or "Visita", "inicio": ini,
             "dia": ini.strftime("%d/%m") if ini else "", "hora": ini.strftime("%H:%M") if ini else "",
             "hoje": bool(ini and ini.date() == hoje.date()),
+            "mes": ini.strftime("%Y-%m") if ini else "",
             "local": r[3] or "", "maps": _maps_link(r[3] or ""),
             "ics_url": f"/visita/{r[4]}.ics" if r[4] else "",
             "lead_id": r[5], "empresa": r[6] or "", "zap": _zap_link(r[7]) if r[7] else "",
             "tipo_ev": tipo_ev, "prazo": prazo,
             "autor": r[11] or "", "minha": bool(membro_id and r[10] == membro_id),
+            "hora_sugerida": bool(r[12]), "convidados": r[13],
+            "sinal_centavos": r[14],
+            "choque": bool(ini and ini.date() in choques),
         })
     return out
+
+
+def _dias_com_mais_de_um(pool, conta_id: int, de) -> set:
+    """Os dias, daqui pra frente, com mais de um compromisso na conta.
+
+    Tolerante: se falhar, devolve vazio e a agenda abre sem a marca de choque. A
+    agenda é o que o vendedor veio ver; o aviso é o extra que evita a promessa
+    errada — e perder o extra é muito melhor que perder a tela."""
+    try:
+        with pool.connection() as c:
+            rows = c.execute(
+                "select (inicio at time zone interval '-03:00')::date "
+                "  from eventos_agenda "
+                " where conta_id=%s and status in ('ativo','pre_reservado') and inicio >= %s "
+                " group by 1 having count(*) > 1", (conta_id, de)).fetchall()
+        return {r[0] for r in rows}
+    except Exception as ex:  # noqa: BLE001 — a marca é extra, a agenda não
+        _log.warning("agenda do app: não consegui medir os choques da conta %s: %s",
+                     conta_id, ex)
+        return set()
+
+
+def contagem_agenda(pool, conta_id: int, membro_id: int | None = None,
+                    so_meus: bool = False) -> dict:
+    """{'tudo': n, 'reservado': n, 'pre': n} — o número que vai DENTRO da pílula.
+
+    Sem o número ninguém toca em "Pré-reserva" pra descobrir que existem seis: a
+    pílula vazia parece um filtro que não leva a lugar nenhum."""
+    from finance import agenda as ag
+    hoje = datetime.now(ag.BRT).replace(hour=0, minute=0, second=0, microsecond=0)
+    cond = "and membro_id=%s " if (so_meus and membro_id) else ""
+    args = [conta_id] + ([membro_id] if (so_meus and membro_id) else []) + [hoje]
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                f"""select count(*),
+                           count(*) filter (where status='ativo'),
+                           count(*) filter (where status='pre_reservado')
+                      from eventos_agenda
+                     where conta_id=%s {cond}and status in ('ativo','pre_reservado')
+                       and inicio >= %s""", args).fetchone()
+    except Exception:  # noqa: BLE001
+        return {"tudo": 0, "reservado": 0, "pre": 0}
+    return {"tudo": r[0], "reservado": r[1], "pre": r[2]}
 
 
 # ------------------------------------------------------------------ o resultado DELE

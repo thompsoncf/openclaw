@@ -35,7 +35,10 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_i
   titulo text, inicio timestamptz, fim timestamptz, local text, descricao text,
   lembrete_min int, tipo text default 'pessoal', link_online text, desfecho text,
   status text default 'ativo', criado_em timestamptz default now(), prospeccao_id bigint,
-  ics_token text, pre_reserva_ate timestamptz, sinal_centavos int);
+  ics_token text, pre_reserva_ate timestamptz, sinal_centavos int,
+  -- 179: a agenda do app mostra o tipo da festa e marca o horário que o sistema
+  -- chutou; sem as colunas a consulta estoura com UndefinedColumn
+  tipo_evento text, convidados int, hora_sugerida boolean default false);
 """
 
 
@@ -105,8 +108,10 @@ def test_todos_veem_tudo_inclusive_a_data_segurada(pool):
         "a agenda do app tem que trazer visita, festa, SEGURADA e o evento do dono"
     por_id = {e["id"]: e for e in evs}
     assert por_id[cx["visita"]]["tipo_ev"] == "visita"
-    assert por_id[cx["festa"]]["tipo_ev"] == "compromisso"
-    assert por_id[cx["segurada"]]["tipo_ev"] == "segurada"
+    # as palavras são as do dono: no painel e na boca dele a data firme é RESERVADA
+    # e a segurada é PRÉ-RESERVA. "visita" continua visita, que é outra coisa.
+    assert por_id[cx["festa"]]["tipo_ev"] == "reservado"
+    assert por_id[cx["segurada"]]["tipo_ev"] == "pre"
     assert por_id[cx["segurada"]]["prazo"].endswith("d"), "o prazo do sinal vai no card"
 
 
@@ -165,7 +170,11 @@ def test_a_tela_do_app_atende_os_dois_guards_e_tem_o_seletor():
     fonte = inspect.getsource(pc.cockpit_agenda)
     assert "_gerencia(request)" in fonte, "o dono titular (sem membro_id) precisa entrar"
     assert "agenda_da_conta" in fonte, "a consulta nova é a fonte da tela"
-    assert "t=meus" in fonte and "t=todos" in fonte, "o seletor Meus × Todos"
+    # o seletor virou URL montada por `_q()`, que preserva os outros filtros —
+    # trocar de estado não pode jogar fora o Meus/Todos que a pessoa escolheu
+    assert "t='meus'" in fonte and "t='todos'" in fonte, "o seletor Meus × Todos"
+    assert "e='pre'" in fonte and "e='reservado'" in fonte, \
+        "o seletor de ESTADO: Tudo × Reservado × Pré-reserva"
     assert "not gestao" in fonte, \
         "o PADRÃO diz quem é: vendedor abre em Meus, dono/gestor em Todos"
 

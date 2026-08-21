@@ -31,7 +31,7 @@ _COLS_GARANTIDAS = False
 
 
 def _garantir_cols(pool) -> None:
-    """Garante cidade/uf em `clientes` (migracao 149) em runtime.
+    """Garante cidade/uf/papel em `clientes` (migracoes 149 e 182) em runtime.
 
     O deploy nao roda migracao sozinho e a tela de Clientes LE essas colunas —
     sem isso a aba inteira quebraria ate a migracao rodar. Uma vez por processo;
@@ -46,6 +46,10 @@ def _garantir_cols(pool) -> None:
             c.execute("alter table clientes add column if not exists uf varchar(2)")
             c.execute("alter table clientes add column if not exists endereco text")
             c.execute("alter table clientes add column if not exists cep text")
+            c.execute("alter table clientes add column if not exists "
+                      "eh_cliente boolean not null default true")
+            c.execute("alter table clientes add column if not exists "
+                      "eh_fornecedor boolean not null default false")
             c.commit()
     except Exception:  # noqa: BLE001 — sem permissao de DDL, segue o jogo
         pass
@@ -142,11 +146,14 @@ def puxar_ou_criar_cliente(pool, dono_id: int, *, cpf: str | None = None,
                            email: str | None = None, pessoa_id: int | None = None,
                            aniversario=None, obs: str | None = None,
                            cidade: str | None = None, uf: str | None = None,
-                           endereco: str | None = None, cep: str | None = None) -> int:
+                           endereco: str | None = None, cep: str | None = None,
+                           eh_cliente: bool = True, eh_fornecedor: bool = False) -> int:
     """Fluxo de cadastro/venda: resolve a PESSOA (por cpf/cnpj, ou pessoa_id dado) e
     garante a RELACAO (clientes) deste lojista com ela. Retorna cliente_id.
 
-    Se o lojista ja tem uma relacao ativa com essa pessoa, reusa (nao duplica).
+    Se o lojista ja tem uma relacao ativa com essa pessoa, reusa (nao duplica) —
+    e o papel (eh_cliente/eh_fornecedor) so' vale na CRIACAO; reusar uma relacao
+    existente nao muda o papel que ja estava marcado (use atualizar_cliente pra isso).
     """
     if pessoa_id is None:
         pessoa_id = resolver_pessoa(pool, cpf=cpf, cnpj=cnpj, celular=celular,
@@ -168,12 +175,13 @@ def puxar_ou_criar_cliente(pool, dono_id: int, *, cpf: str | None = None,
         row = c.execute(
             """insert into clientes
                  (dono_id, pessoa_id, nome, telefone, email, aniversario, obs,
-                  cidade, uf, endereco, cep)
-               values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) returning id""",
+                  cidade, uf, endereco, cep, eh_cliente, eh_fornecedor)
+               values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) returning id""",
             (dono_id, pessoa_id, pn, pc, pe, _parse_data(aniversario),
              (obs or "").strip() or None, (cidade or "").strip() or None,
              (uf or "").strip()[:2].upper() or None,
-             (endereco or "").strip() or None, _cep(cep)),
+             (endereco or "").strip() or None, _cep(cep),
+             bool(eh_cliente), bool(eh_fornecedor)),
         ).fetchone()
         c.commit()
         return int(row[0])
@@ -184,10 +192,16 @@ def criar_cliente(pool, dono_id: int, nome: str, *, telefone: str | None = None,
                   conta_zaq_id: int | None = None, obs: str | None = None,
                   cpf: str | None = None, cnpj: str | None = None,
                   cidade: str | None = None, uf: str | None = None,
-                  endereco: str | None = None, cep: str | None = None) -> int:
+                  endereco: str | None = None, cep: str | None = None,
+                  eh_cliente: bool = True, eh_fornecedor: bool = False) -> int:
     """Cadastra um cliente (identidade + relacao). Retorna o cliente_id. nome
     obrigatorio. Compat: mesma assinatura de antes, agora com `cpf`/`cnpj`
-    opcionais; o telefone entra como `celular` da pessoa."""
+    opcionais; o telefone entra como `celular` da pessoa.
+
+    `eh_cliente`/`eh_fornecedor` sao o PAPEL da relacao — nao sao exclusivos (uma
+    mesma pessoa pode comprar de voce E vender pra voce). Default preserva o
+    comportamento de sempre: todo cadastro novo e' cliente, a nao ser que quem
+    chamou diga o contrario."""
     nome = (nome or "").strip()
     if not nome:
         raise ValueError("nome do cliente e' obrigatorio")
@@ -195,7 +209,8 @@ def criar_cliente(pool, dono_id: int, nome: str, *, telefone: str | None = None,
                                 email=email, conta_zaq_id=conta_zaq_id)
     return puxar_ou_criar_cliente(pool, dono_id, pessoa_id=pessoa_id, nome=nome,
                                   email=email, aniversario=aniversario, obs=obs,
-                                  cidade=cidade, uf=uf, endereco=endereco, cep=cep)
+                                  cidade=cidade, uf=uf, endereco=endereco, cep=cep,
+                                  eh_cliente=eh_cliente, eh_fornecedor=eh_fornecedor)
 
 
 _SEL = """select c.id,
@@ -212,17 +227,26 @@ _SEL = """select c.id,
                  c.cidade,
                  c.uf,
                  c.endereco,
-                 c.cep
+                 c.cep,
+                 c.eh_cliente,
+                 c.eh_fornecedor
             from clientes c
             left join pessoas p on p.id = c.pessoa_id"""
 
 
 def listar_clientes(pool, dono_id: int, busca: str | None = None,
-                    limite: int = 200) -> list[dict]:
-    """Lista os clientes do lojista. Se `busca`, filtra por nome, telefone ou cpf."""
+                    limite: int = 200, papel: str | None = None) -> list[dict]:
+    """Lista os clientes do lojista. Se `busca`, filtra por nome, telefone ou cpf.
+
+    `papel='cliente'` ou `papel='fornecedor'` filtra pelo papel marcado no
+    cadastro — os dois nao sao exclusivos, uma pessoa pode ter os dois marcados."""
     _garantir_cols(pool)
     sql = _SEL + " where c.dono_id=%s and c.ativo"
     params: list = [dono_id]
+    if papel == "cliente":
+        sql += " and c.eh_cliente"
+    elif papel == "fornecedor":
+        sql += " and c.eh_fornecedor"
     if busca and busca.strip():
         termo = f"%{busca.strip()}%"
         dig = _so_digitos(busca) or ""
@@ -248,18 +272,28 @@ def obter_cliente(pool, dono_id: int, cliente_id: int) -> dict | None:
     return _row_para_dict(r) if r else None
 
 
-def achar_cliente_por_nome(pool, dono_id: int, nome: str) -> int | None:
+def achar_cliente_por_nome(pool, dono_id: int, nome: str,
+                          papel: str | None = None) -> int | None:
     """Acha o cliente do lojista pelo NOME (sem criar). Prioriza match EXATO;
     senao, um unico match parcial. Retorna o id, ou None se nao achar OU se for
     ambiguo (dois com o mesmo nome — nao chuta). Usado pra LIGAR um titulo/
-    honorario ao cliente sem duplicar cadastro."""
+    honorario ao cliente sem duplicar cadastro.
+
+    `papel='cliente'` ou `papel='fornecedor'` restringe a busca a quem tem
+    aquele papel marcado — um titulo A PAGAR nao deve casar com alguem que e'
+    so' cliente (nunca marcado como fornecedor), e vice-versa."""
     n = (nome or "").strip()
     if not n:
         return None
+    filtro = ""
+    if papel == "cliente":
+        filtro = " and c.eh_cliente"
+    elif papel == "fornecedor":
+        filtro = " and c.eh_fornecedor"
     with pool.connection() as c:
         exato = c.execute(
             "select c.id from clientes c left join pessoas p on p.id=c.pessoa_id "
-            "where c.dono_id=%s and c.ativo "
+            "where c.dono_id=%s and c.ativo" + filtro + " "
             "and lower(coalesce(p.nome,c.nome))=lower(%s) order by c.id limit 2",
             (dono_id, n)).fetchall()
         if len(exato) == 1:
@@ -268,7 +302,8 @@ def achar_cliente_por_nome(pool, dono_id: int, nome: str) -> int | None:
             return None  # ambiguo: nao arrisca ligar no errado
         parcial = c.execute(
             "select c.id from clientes c left join pessoas p on p.id=c.pessoa_id "
-            "where c.dono_id=%s and c.ativo and coalesce(p.nome,c.nome) ilike %s limit 2",
+            "where c.dono_id=%s and c.ativo" + filtro + " "
+            "and coalesce(p.nome,c.nome) ilike %s limit 2",
             (dono_id, f"%{n}%")).fetchall()
         return parcial[0][0] if len(parcial) == 1 else None
 
@@ -295,7 +330,8 @@ def atualizar_cliente(pool, dono_id: int, cliente_id: int, **campos) -> bool:
     cliente for do lojista. Retorna True se algo mudou."""
     id_map = {"nome": "nome", "telefone": "celular", "email": "email",
               "cpf": "cpf", "cnpj": "cnpj", "conta_zaq_id": "conta_zaq_id"}
-    rel_permit = {"aniversario", "obs", "cidade", "uf", "endereco", "cep"}
+    rel_permit = {"aniversario", "obs", "cidade", "uf", "endereco", "cep",
+                  "eh_cliente", "eh_fornecedor"}
     mudou = False
     _garantir_cols(pool)
     with pool.connection() as c:
@@ -368,6 +404,8 @@ def atualizar_cliente(pool, dono_id: int, cliente_id: int, **campos) -> bool:
                 v = (v or "").strip()[:2].upper() or None
             elif k == "cep":
                 v = _cep(v)
+            elif k in ("eh_cliente", "eh_fornecedor"):
+                v = bool(v)
             else:                       # obs, cidade, endereco
                 v = (v or "").strip() or None
             rsets.append(f"{k}=%s")
@@ -469,4 +507,6 @@ def _row_para_dict(r) -> dict:
         "uf": r[12] if len(r) > 12 else None,
         "endereco": r[13] if len(r) > 13 else None,
         "cep": r[14] if len(r) > 14 else None,
+        "eh_cliente": bool(r[15]) if len(r) > 15 and r[15] is not None else True,
+        "eh_fornecedor": bool(r[16]) if len(r) > 16 and r[16] is not None else False,
     }

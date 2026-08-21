@@ -387,14 +387,32 @@ def sugerir_por_titulo(pool, conta_id: int, termo: str, limite: int = 4) -> list
 
 def remarcar_evento(pool, conta_id: int, evento_id: int, inicio: datetime,
                     fim: datetime | None = None) -> bool:
-    """Muda a data — e SEMPRE deixa o evento ativo de novo (reativa se estava
-    cancelado/marcado como não realizado) e limpa o desfecho: remarcar significa
-    'isso vai acontecer nessa data', não importa o que era antes. É o mesmo
-    caminho tanto pra remarcar um ativo quanto pra reaproveitar um cancelado."""
+    """Muda a data, PRESERVANDO o que o compromisso é. Limpa o desfecho — remarcar
+    significa 'isso vai acontecer nessa data', não importa o que era antes.
+
+    A DATA SEGURADA CONTINUA SEGURADA, e isto é um conserto.
+
+    A versão anterior forçava `status='ativo'` sem exceção, e estava certa quando foi
+    escrita: o mundo era ativo × cancelado, e reativar era a intenção. A pré-reserva
+    chegou depois (migração 160) e esta função nunca foi revisitada — então mudar a
+    data de uma negociação a transformava em RESERVA FIRME, calada. Reproduzido em
+    21/08/2026: uma pré-reserva de R$ 6.000 cujo sinal ninguém pagou passava a
+    parecer vendida só por mudar de sábado.
+
+    E com prazo ficava pior: `ativo` com `pre_reserva_ate` pendurado, que
+    `expirar_pre_reservas` nunca recolhe porque ela só olha `pre_reservado`. A data
+    ficava num estado que nenhuma parte do sistema sabia ler.
+
+    Agora só o CANCELADO é reativado, que era o ponto do 'ativo' original — é este o
+    caminho de reaproveitar um compromisso que não aconteceu."""
     with pool.connection() as c:
         cur = c.execute(
-            "update eventos_agenda set inicio=%s, fim=%s, status='ativo', desfecho=null "
-            "where id=%s and conta_id=%s",
+            "update eventos_agenda "
+            "   set inicio=%s, fim=%s, desfecho=null, "
+            # case, e não um 'ativo' cru: pré-reserva continua pré-reserva (com o
+            # prazo intacto), ativo continua ativo, e cancelado volta à vida.
+            "       status = case when status='cancelado' then 'ativo' else status end "
+            " where id=%s and conta_id=%s",
             (inicio, fim, evento_id, conta_id),
         )
         c.commit()

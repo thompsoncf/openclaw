@@ -1594,6 +1594,170 @@ def agendar_visita(pool, conta_id: int, membro_id: int, lead_id: int, *, data: s
             "zap": (_zap_link_texto(numero, msg) if (numero and sobra_saida) else "")}
 
 
+def remarcar_visita(pool, conta_id: int, membro_id: int | None, evento_id: int, *,
+                    data: str, hora: str, avisar_cliente: bool = True,
+                    gestao: bool = False) -> dict:
+    """Muda a data de uma VISITA e (opcional) avisa o cliente pela conversa.
+
+    SÓ VISITA, de propósito. Visita é o cliente indo conhecer o espaço: remarcar é
+    rotina, o cliente pede na conversa, e errar custa uma nova mensagem. Mudar a data
+    de uma FESTA — reservada ou segurada — é outra conversa: mexe em contrato, em
+    sinal e às vezes na data que outro cliente queria. Fica no painel, com o dono.
+    Por isso o portão aqui é `prospeccao_id is not null and status='ativo'`, e não a
+    posse do evento: é a definição de visita no app.
+
+    POSSE. O vendedor remarca a visita do lead DELE; dono e gestor remarcam qualquer
+    uma. Mesmo desenho que o app já usa nos leads — e revalidado aqui, porque o id do
+    evento vem da barra de endereço.
+
+    O AVISO SAI PELA CONVERSA DA EMPRESA, não pelo WhatsApp pessoal do vendedor: é o
+    canal que fica no histórico do lead, e é a porta que a gente fechou de propósito.
+    Falhar em avisar NÃO desfaz o remarcar — a data nova já é a verdade, e o vendedor
+    prefere saber que precisa avisar na mão a descobrir que a visita não mudou.
+    """
+    import secrets as _secrets
+    from datetime import datetime, timedelta
+    from finance import agenda as ag
+    from finance.email_sender import _app_url
+    try:
+        ini = datetime.fromisoformat(f"{data}T{hora}").replace(tzinfo=ag.BRT)
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "erro": "Data ou hora inválida."}
+
+    with pool.connection() as c:
+        ev = c.execute(
+            """select e.id, e.titulo, e.inicio, e.fim, e.local, e.prospeccao_id,
+                      e.ics_token, e.membro_id, e.status,
+                      coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'Cliente'),
+                      coalesce(p.whatsapp, p.telefone, '')
+                 from eventos_agenda e
+                 join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
+                where e.id=%s and e.conta_id=%s and e.status='ativo'""",
+            (evento_id, conta_id)).fetchone()
+    if not ev:
+        return {"ok": False, "erro": "Essa visita não existe mais."}
+    lead_id, token, dono_ev = ev[5], ev[6], ev[7]
+    quem, numero = ev[9], ev[10]
+    if not gestao and membro_id and dono_ev and dono_ev != membro_id:
+        return {"ok": False, "erro": "escopo"}
+
+    # a duração de antes é preservada: quem marcou 1h30 não quer virar 1h só porque
+    # mudou de dia. Sem `fim` gravado, cai na hora cheia — a mesma convenção do .ics.
+    dur = ((ev[3] - ev[2]).total_seconds() / 60) if (ev[3] and ev[2]) else 60
+    fim = ini + timedelta(minutes=max(15, int(dur)))
+
+    if not ag.remarcar_evento(pool, conta_id, evento_id, ini, fim):
+        return {"ok": False, "erro": "Não consegui remarcar."}
+
+    esp = endereco_empresa(pool, conta_id)
+    local = (ev[4] or "").strip() or esp["endereco"] or esp["nome"]
+    quando = ini.strftime("%d/%m às %H:%M")
+    # o .ics é reemitido com TOKEN NOVO: o link antigo já está no celular do cliente
+    # e apontaria pra data velha. Token novo é convite novo.
+    novo_token = _secrets.token_urlsafe(12)
+    with pool.connection() as c:
+        c.execute("update eventos_agenda set ics_token=%s where id=%s and conta_id=%s",
+                  (novo_token, evento_id, conta_id))
+        try:
+            c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo,
+                           resultado, descricao) values (%s,%s,'visita','remarcado',%s)""",
+                      (lead_id, membro_id, f"Visita remarcada para {quando} — {local}"[:400]))
+        except Exception:  # noqa: BLE001 — a anotação não derruba o remarcar
+            pass
+        c.commit()
+
+    ics_url = f"{_app_url()}/visita/{novo_token}.ics"
+    msg = (f"Olá! 👋 Sua visita ao {esp['nome']} mudou de data:\n📅 {quando}\n📍 {local}"
+           + (f"\n🗺️ {esp['maps']}" if esp["maps"] else "")
+           + f"\n📎 Atualize no seu calendário: {ics_url}\nAté lá! 😊")
+    avisado = False
+    if avisar_cliente and numero:
+        try:
+            from finance import whatsapp_out as wo
+            from web.painel_prospeccao import _registrar_msg
+            with pool.connection() as c:
+                res = wo.enviar(c, conta_id, numero, msg)
+                if res.get("ok"):
+                    _registrar_msg(c, conta_id, lead_id, "whatsapp", "out", "humano",
+                                   msg, membro_id, res.get("sid"))
+                    c.commit()
+                    avisado = True
+        except Exception:  # noqa: BLE001 — avisar falhou, mas a data JÁ mudou
+            avisado = False
+
+    from web.painel_prospeccao import _zap_link_texto
+    sobra_saida = not (avisado and entrega_sempre(pool, conta_id))
+    return {"ok": True, "evento_id": evento_id, "quando": quando, "local": local,
+            "ics_url": ics_url, "avisado": avisado, "tinha_numero": bool(numero),
+            "quem": quem, "titulo": ev[1], "lead_id": lead_id,
+            "zap": (_zap_link_texto(numero, msg) if (numero and sobra_saida) else "")}
+
+
+def visita_para_remarcar(pool, conta_id: int, membro_id: int | None, evento_id: int,
+                         gestao: bool = False) -> dict | None:
+    """O que a tela de remarcar precisa mostrar ANTES de mudar nada.
+
+    Devolve None quando não é visita, não é desta conta, ou não é deste vendedor —
+    um só "não existe" pra tela, porque distinguir "existe mas não é seu" de "não
+    existe" só serviria pra alguém mapear a agenda alheia pela barra de endereço."""
+    from finance import agenda as ag
+    with pool.connection() as c:
+        r = c.execute(
+            """select e.id, e.titulo, e.inicio, e.local, e.membro_id, e.prospeccao_id,
+                      coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'Cliente'),
+                      coalesce(p.whatsapp, p.telefone, '')
+                 from eventos_agenda e
+                 join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
+                where e.id=%s and e.conta_id=%s and e.status='ativo'""",
+            (evento_id, conta_id)).fetchone()
+    if not r:
+        return None
+    if not gestao and membro_id and r[4] and r[4] != membro_id:
+        return None
+    ini = r[2].astimezone(ag.BRT) if r[2] else None
+    return {"id": r[0], "titulo": r[1], "inicio": ini,
+            "data": ini.strftime("%Y-%m-%d") if ini else "",
+            "hora": ini.strftime("%H:%M") if ini else "",
+            "quando": ini.strftime("%d/%m/%Y · %H:%M") if ini else "",
+            "dia_sem": _DIA_SEM_EXT[ini.weekday()] if ini else "",
+            "local": r[3] or "", "lead_id": r[5], "quem": r[6],
+            "tem_numero": bool(r[7])}
+
+
+_DIA_SEM_EXT = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
+
+
+def ocupado_no_dia(pool, conta_id: int, quando, ignorar_id: int | None = None) -> list[dict]:
+    """O que JÁ existe no dia da data nova — pra tela avisar antes de remarcar.
+
+    Por DIA, e não por horário: quem aluga espaço não tem duas festas no mesmo sábado
+    ainda que os horários não se cruzem. Mesma conta que a lista e o calendário já
+    fazem.
+
+    Avisa e não bloqueia — dois salões cabem duas festas, e quem sabe é o dono."""
+    from finance import agenda as ag
+    if not quando:
+        return []
+    dia = quando.astimezone(ag.BRT).date()
+    try:
+        with pool.connection() as c:
+            rows = c.execute(
+                """select e.titulo, e.inicio, e.status,
+                          coalesce(nullif(m.nome,''), '')
+                     from eventos_agenda e
+                     left join membros m on m.id = e.membro_id
+                    where e.conta_id=%s and e.status in ('ativo','pre_reservado')
+                      and (%s::bigint is null or e.id <> %s)
+                      and (e.inicio at time zone interval '-03:00')::date = %s
+                    order by e.inicio""",
+                (conta_id, ignorar_id, ignorar_id, dia)).fetchall()
+    except Exception as ex:  # noqa: BLE001 — o aviso é extra, a tela não
+        _log.warning("remarcar: não consegui olhar o dia %s: %s", dia, ex)
+        return []
+    return [{"titulo": r[0], "hora": r[1].astimezone(ag.BRT).strftime("%H:%M"),
+             "pre": r[2] == "pre_reservado", "quem": r[3]} for r in rows]
+
+
 def visita_ics(pool, token: str) -> str | None:
     """.ics público da visita (o cliente abre o link e salva no calendário DELE). Inclui
     VALARM (1 dia e 2h antes) — é o lembrete do cliente. None se o token não existe."""

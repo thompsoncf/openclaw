@@ -357,6 +357,21 @@ b,strong{font-weight:600}
 .acoes a{font-size:.74rem;padding:.3rem .65rem;border-radius:9px;border:1px solid var(--line);
   background:var(--bg-2);color:var(--text-dim)}
 .acoes a:active{border-color:var(--neon)}
+.acoes a.acao-forte{border-color:var(--neon-borda);background:var(--neon-fundo);
+  color:var(--neon);font-weight:600}
+/* "hoje está marcada pra" — o de-para tem que estar à vista na hora de escolher a
+   data nova, senão a pessoa remarca sem lembrar de quando era. */
+.agora-e{background:var(--bg-2);border:1px solid var(--line);border-radius:11px;
+  padding:.7rem .85rem;margin-bottom:1rem}
+.agora-e .r{font-size:.66rem;color:var(--text-faint);letter-spacing:.1em;
+  text-transform:uppercase;font-weight:700;margin-bottom:.25rem}
+.agora-e b{font-size:.92rem;display:block}
+.agora-e .q{font-family:var(--mono);font-size:.8rem;color:var(--text-dim);margin-top:.2rem}
+.fic-ck{display:flex;align-items:flex-start;gap:.6rem;padding:.7rem .8rem;
+  border:1px solid var(--line);border-radius:11px;background:var(--surface);
+  margin-bottom:.9rem;font-size:.85rem}
+.fic-ck input{width:20px;height:20px;accent-color:var(--neon);flex:0 0 auto;margin-top:.05rem}
+.fic-ck small{display:block;color:var(--text-dim);font-size:.73rem;margin-top:.1rem}
 
 /* ---------- botões ---------- */
 .btn{display:flex;align-items:center;justify-content:center;gap:.5rem;width:100%;
@@ -1432,6 +1447,12 @@ def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
             acoes.append(f"<a href='{esc(v['maps'])}' target=_blank rel=noopener>{_ic('mapa', 'ic p')} Mapa</a>")
         if v["zap"]:
             acoes.append(f"<a href='{esc(v['zap'])}' target=_blank rel=noopener>{_ic('zap', 'ic p')} Avisar</a>")
+        # REMARCAR só em visita, e de propósito: mudar a data de uma festa mexe em
+        # contrato, em sinal e às vezes na data que outro cliente queria. Fica no
+        # painel, com o dono.
+        if v["tipo_ev"] == "visita":
+            acoes.append(f"<a class=acao-forte href='{_BASE}/agenda/{v['id']}/remarcar'>"
+                         "Remarcar</a>")
         if v["ics_url"]:
             acoes.append(f"<a href='{esc(v['ics_url'])}'>{_ic('agenda', 'ic p')} Calendário</a>")
         rot, cor, borda, fundo = _TAG[v["tipo_ev"]]
@@ -1600,6 +1621,108 @@ def cockpit_agenda_novo(request: Request, titulo: str = Form(""), data: str = Fo
     ag.criar_evento(get_pool(), conta_id, (titulo or "").strip()[:200], inicio,
                     membro_id=membro_id, local=(local or "").strip() or None)
     request.session["ck_ok"] = "Compromisso marcado ✓"
+    return RedirectResponse(f"{_BASE}/agenda", status_code=303)
+
+
+@router.get("/cockpit/agenda/{ev_id}/remarcar", response_class=HTMLResponse)
+def cockpit_remarcar_tela(request: Request, ev_id: int):
+    """Remarcar a VISITA pelo celular — a ação que o app não tinha.
+
+    O app só sabia CRIAR compromisso; mudar um que já existe exigia abrir o desktop.
+    E é o cliente que pede pra mudar, na conversa, com o vendedor na rua.
+
+    SÓ VISITA por ora. Mudar a data de uma festa — reservada ou segurada — mexe em
+    contrato, em sinal e às vezes na data que outro cliente queria; isso fica no
+    painel, com o dono. `visita_para_remarcar` devolve None pra qualquer coisa que
+    não seja visita, e a tela trata igual a "não existe"."""
+    sess = _sessao(request)
+    g = _gerencia(request)
+    if not sess and not g:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess if sess else g
+    v = ck.visita_para_remarcar(get_pool(), conta_id, membro_id, ev_id, gestao=bool(g))
+    if not v:
+        request.session["ck_err"] = "Essa visita não está disponível pra remarcar."
+        return RedirectResponse(f"{_BASE}/agenda", status_code=303)
+
+    aviso = ""
+    if v["tem_numero"]:
+        aviso = ("<label class=fic-ck><input type=checkbox name=avisar value=1 checked>"
+                 f"<span><b>Avisar {esc(v['quem'])} no WhatsApp</b>"
+                 "<small>a data nova sai pela conversa do Zaq e fica no histórico</small>"
+                 "</span></label>")
+    else:
+        # sem número não há o que prometer. Uma caixinha marcada que não manda nada é
+        # pior que caixinha nenhuma: o vendedor sai achando que o cliente foi avisado.
+        aviso = ("<div class=fonte>Esse lead não tem WhatsApp cadastrado — vou remarcar, "
+                 "mas o aviso você dá na mão.</div>")
+
+    corpo = (_hdr("Remarcar visita", voltar=f"{_BASE}/agenda")
+             + _flash(request)
+             + f"<form class=telaform method=post action='{_BASE}/agenda/{ev_id}/remarcar'>"
+             + "<div class=scroll><div class=secao>"
+             + "<div class=agora-e><div class=r>Hoje está marcada pra</div>"
+             + f"<b>{esc(v['titulo'])}</b>"
+             + f"<div class=q>{esc(v['dia_sem'])}, {esc(v['quando'])}</div>"
+             + (f"<div class=q>{esc(v['local'])}</div>" if v["local"] else "")
+             + "</div>"
+             + "<div class='fic'>"
+             + "<label class='fic-c meia'><span>Nova data</span>"
+               f"<input name=data type=date required value='{esc(v['data'])}'></label>"
+             + "<label class='fic-c meia'><span>Hora</span>"
+               f"<input name=hora type=time required value='{esc(v['hora'])}'></label>"
+             + "</div>"
+             + aviso
+             + "<div class=fonte>A duração continua a mesma, e o convite de calendário é "
+               "reemitido — o link antigo apontava pra data velha.</div>"
+             + "</div></div>"
+             + "<div class=rodape-b><button class=btn type=submit>Remarcar</button></div>"
+             + "</form>")
+    return _page("Remarcar visita", corpo)
+
+
+@router.post("/cockpit/agenda/{ev_id}/remarcar")
+def cockpit_remarcar(request: Request, ev_id: int, data: str = Form(""),
+                     hora: str = Form(""), avisar: str = Form("")):
+    """Remarca e avisa.
+
+    O CHOQUE DE DATA vira aviso DEPOIS, e não trava antes: dois salões cabem duas
+    festas e quem sabe é o dono — a mesma regra do calendário e da lista. O que não
+    pode é o vendedor descobrir depois, pelo cliente."""
+    sess = _sessao(request)
+    g = _gerencia(request)
+    if not sess and not g:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess if sess else g
+    r = ck.remarcar_visita(get_pool(), conta_id, membro_id, ev_id,
+                           data=(data or "").strip(), hora=(hora or "").strip(),
+                           avisar_cliente=(avisar == "1"), gestao=bool(g))
+    if not r.get("ok"):
+        request.session["ck_err"] = (
+            "Essa visita não é sua." if r.get("erro") == "escopo"
+            else r.get("erro") or "Não consegui remarcar.")
+        return RedirectResponse(f"{_BASE}/agenda/{ev_id}/remarcar", status_code=303)
+
+    msg = f"Visita remarcada pra {r['quando']} ✓"
+    if r.get("avisado"):
+        msg += f" — {r['quem']} foi avisado"
+    elif r.get("tinha_numero"):
+        msg += " — mas o aviso não saiu, fale com o cliente"
+
+    from finance import agenda as _ag
+    from datetime import datetime as _dt
+    try:
+        quando = _dt.fromisoformat(f"{data}T{hora}").replace(tzinfo=_ag.BRT)
+        outros = ck.ocupado_no_dia(get_pool(), conta_id, quando, ignorar_id=ev_id)
+    except Exception:  # noqa: BLE001 — o aviso é extra; a visita já foi remarcada
+        outros = []
+    if outros:
+        quais = " · ".join(
+            f"{o['hora']} {o['titulo']}" + (" (segurado)" if o["pre"] else "")
+            for o in outros[:3])
+        msg += f" ⚠ Esse dia já tinha: {quais}"
+
+    request.session["ck_ok"] = msg
     return RedirectResponse(f"{_BASE}/agenda", status_code=303)
 
 

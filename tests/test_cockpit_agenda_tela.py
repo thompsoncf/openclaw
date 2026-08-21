@@ -30,13 +30,18 @@ from web import painel_cockpit as pc
 CONTA, VEND, OUTRO = 1, 10, 11
 
 _SQL = """
-create table contas (id bigserial primary key, nome text);
+create table contas (id bigserial primary key, nome text, nome_fantasia text,
+  razao_social text, endereco text, bairro text, cidade text, uf text);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true,
   cockpit_push_ativo boolean default true, cockpit_pausado boolean default false);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
-  empresa text, whatsapp text, telefone text, status text default 'novo',
-  estagio text default 'lead', orcamento_id bigint, atualizado_em timestamptz default now());
+  empresa text, contato text, whatsapp text, telefone text, status text default 'novo',
+  estagio text default 'lead', orcamento_id bigint, ultimo_contato_em timestamptz,
+  atualizado_em timestamptz default now());
+create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint,
+  membro_id bigint, tipo text, resultado text, descricao text,
+  criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   status text default 'aberta', agente_ativo boolean default true,
   responsavel_membro_id bigint, ultima_msg_em timestamptz default now());
@@ -273,3 +278,76 @@ def test_nenhum_mes_aparece_em_dois_lugares(cli):
     assert html.count(perto.strftime("%Y-%m")) == 0, \
         "o mês que já está aberto em cima não pode ter linha dobrada embaixo"
     assert fim_do_mes
+
+
+# ═══════════════ remarcar: só em visita ═══════════════
+
+def _visita(cli, *, dias=5, titulo="Visita — Camila"):
+    """Uma visita de verdade: evento ativo COM lead pendurado."""
+    quando = (datetime.now(ag.BRT) + timedelta(days=dias)).replace(
+        hour=15, minute=0, second=0, microsecond=0)
+    with cli.pool.connection() as c:
+        lead = c.execute("insert into prospeccao (conta_id, vendedor_id, empresa, whatsapp) "
+                         "values (%s,%s,'Camila','5586999990000') returning id",
+                         (CONTA, VEND)).fetchone()[0]
+        eid = c.execute(
+            """insert into eventos_agenda (conta_id, membro_id, titulo, inicio, fim,
+                 prospeccao_id, ics_token) values (%s,%s,%s,%s,%s,%s,'tk') returning id""",
+            (CONTA, VEND, titulo, quando, quando + timedelta(hours=1), lead)).fetchone()[0]
+        c.commit()
+    return eid
+
+
+def test_a_visita_ganha_o_botao_de_remarcar(cli):
+    eid = _visita(cli)
+    html = _html(cli, t="todos")
+    assert f"/agenda/{eid}/remarcar" in html, "a visita não tem como ser remarcada"
+
+
+def test_a_festa_reservada_nao_ganha_o_botao(cli):
+    """Mudar a data de uma festa mexe em contrato e em sinal — fica no painel."""
+    _ev(cli, dias=5, titulo="Locação — Jonas")
+    assert "/remarcar" not in _html(cli, t="todos")
+
+
+def test_a_pre_reserva_nao_ganha_o_botao(cli):
+    _ev(cli, dias=6, status="pre_reservado", titulo="Casamento — Denise")
+    assert "/remarcar" not in _html(cli, t="todos")
+
+
+def test_a_tela_de_remarcar_mostra_de_onde_pra_onde(cli):
+    """Sem o "hoje está marcada pra", a pessoa escolhe a data nova sem lembrar da
+    velha — e é a comparação que faz ela conferir."""
+    eid = _visita(cli)
+    r = cli.get(f"/cockpit/agenda/{eid}/remarcar")
+    assert r.status_code == 200
+    assert "Hoje está marcada pra" in r.text
+    assert "Visita — Camila" in r.text
+    assert "Avisar Camila no WhatsApp" in r.text
+
+
+def test_remarcar_uma_festa_pela_barra_de_endereco_nao_abre(cli):
+    """O id vem da URL: o portão tem que estar no servidor, não só no botão."""
+    _ev(cli, dias=5, titulo="Locação — Jonas")
+    with cli.pool.connection() as c:
+        eid = c.execute("select id from eventos_agenda where titulo='Locação — Jonas'"
+                        ).fetchone()[0]
+    r = cli.get(f"/cockpit/agenda/{eid}/remarcar")
+    assert r.status_code == 303, "abriu a tela de remarcar pra uma festa"
+
+
+def test_lead_sem_whatsapp_nao_oferece_aviso(cli):
+    """Caixinha marcada que não manda nada é pior que caixinha nenhuma: o vendedor
+    sai achando que o cliente foi avisado."""
+    quando = (datetime.now(ag.BRT) + timedelta(days=5)).replace(hour=15, minute=0,
+                                                                second=0, microsecond=0)
+    with cli.pool.connection() as c:
+        lead = c.execute("insert into prospeccao (conta_id, vendedor_id, empresa, whatsapp) "
+                         "values (%s,%s,'Sem Zap','') returning id", (CONTA, VEND)).fetchone()[0]
+        eid = c.execute("""insert into eventos_agenda (conta_id, membro_id, titulo, inicio,
+                             prospeccao_id) values (%s,%s,'Visita — Sem Zap',%s,%s)
+                           returning id""", (CONTA, VEND, quando, lead)).fetchone()[0]
+        c.commit()
+    r = cli.get(f"/cockpit/agenda/{eid}/remarcar")
+    assert "name=avisar" not in r.text
+    assert "o aviso você dá na mão" in r.text

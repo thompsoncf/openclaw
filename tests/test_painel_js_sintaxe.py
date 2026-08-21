@@ -23,6 +23,7 @@ travar quem não tem Node instalado.
 """
 from __future__ import annotations
 
+import inspect
 import re
 import shutil
 import subprocess
@@ -47,6 +48,23 @@ PAGINAS = {
         gerencia=True,
         canais={"whatsapp": True, "wa_provedor": "qr",
                 "numeros": {"whatsapp": "+5586999999999"}, "tokens_set": {}}),
+    # o kanban: um card com conv_whatsapp/conv_email preenchidos é o que abre o
+    # ramo do selo virando BOTÃO (kbAbrirChat) — sem isso o {% if %} escondia
+    # justamente o JS que o teste existe pra proteger.
+    "prospeccao": dict(
+        status=[("novo", "Novo"), ("contatado", "Contatado")],
+        colunas={
+            "novo": [{"id": 1, "empresa": "Padaria Bom Pão", "segmento": "Varejo",
+                      "cidade": "Teresina", "uf": "PI", "temperatura": "quente",
+                      "valor": 420000, "proximo": None, "vendedor": None,
+                      "tem_whatsapp": True, "tem_email": True, "tem_instagram": False,
+                      "enriquecido": True,
+                      "conv_whatsapp": 501, "conv_email": None, "conv_instagram": None}],
+            "contatado": []},
+        temp_cor={"quente": "#e0574f"}, temp_pill={"quente": "Quente"},
+        gerencia=False, pode_atribuir=False, vendedores=[], filtro_vend="",
+        total_valor=420000, total_alvos=1, tem_places=False, tem_maps_js=False,
+        maps_js_key=""),
     # 'pode_contrato': o card do contrato, que só existe pro dono de conta de
     # eventos — e é onde vive o JS do modelo, da prévia e do aviso de ajustes.
     # `icones_paleta` entra porque a página o serializa com |tojson, e `_Mudo`
@@ -226,3 +244,22 @@ def test_nenhuma_string_js_quebrada_por_newline_literal(pagina):
                     f"linha {n} deixa uma string JS aberta: {linha.strip()[:90]!r}\n"
                     "Se era pra ser uma quebra de linha no texto, escreva \\\\n — "
                     "o template é string Python comum e um \\n vira newline literal.")
+
+
+def test_selo_de_conversa_vira_botao_so_com_conversa_de_verdade():
+    """O card usava ter um só ramo de badge (span apagado, sem clique). Agora tem
+    dois: BOTÃO quando existe conversa de verdade (`conv_whatsapp`/etc.), span
+    inerte quando só tem o telefone/e-mail cadastrado. Perder esse if seria
+    voltar a abrir o chat de quem nunca conversou — ou pior, nunca abrir nada."""
+    html = _render("prospeccao")
+    js = "\n".join(_scripts(html))
+    assert "kbAbrirChat" in js, "a função que abre o chat sumiu do JS servido"
+    assert "kbAbrirChat(event,501,'conversas',this)" in html, (
+        "o card com conv_whatsapp preenchido não virou botão")
+
+
+def test_o_clique_no_selo_nao_propaga_pro_card():
+    """O card inteiro tem onclick pra abrir a FICHA. Sem stopPropagation, clicar
+    no selo abriria os dois drawers ao mesmo tempo (ficha por baixo do chat)."""
+    fonte = inspect.getsource(pp).split("function kbAbrirChat")[1][:400]
+    assert "ev.stopPropagation()" in fonte

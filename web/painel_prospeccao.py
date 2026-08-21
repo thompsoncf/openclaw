@@ -477,16 +477,32 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                  where {' and '.join(where)}
                  order by p.proximo_contato_em asc nulls last, p.atualizado_em desc""",
             tuple(params)).fetchall()
+        # O selo do canal só vira BOTÃO (abre o chat) quando existe conversa de
+        # verdade — não quando só tem telefone/e-mail cadastrado. Uma query em
+        # lote pra todo o board (= any), não uma por card: o índice único
+        # (conta_id, prospeccao_id, canal) da 080 garante no máximo 1 linha por par.
+        conv_por_lead: dict[int, dict[str, int]] = {}
+        lead_ids = [r[0] for r in rows]
+        if lead_ids:
+            for pid, canal, cid in c.execute(
+                """select prospeccao_id, canal, id from conversas
+                    where conta_id=%s and prospeccao_id = any(%s)
+                      and canal in ('whatsapp','email','instagram')""",
+                (conta_id, lead_ids)).fetchall():
+                conv_por_lead.setdefault(pid, {})[canal] = cid
     colunas = {e["chave"]: [] for e in etapas}
     primeira = etapas[0]["chave"] if etapas else "novo"
     total_valor = 0
     for r in rows:
+        conv = conv_por_lead.get(r[0], {})
         card = {"id": r[0], "empresa": r[1], "segmento": r[2], "cidade": r[3],
                 "uf": r[4], "status": r[5], "temperatura": r[6], "valor": r[7],
                 "proximo": r[8], "telefone": r[9], "whatsapp": r[10],
                 "vendedor_id": r[11], "vendedor": r[12],
                 "tem_email": bool(r[13]), "tem_whatsapp": bool(r[10]),
-                "tem_instagram": bool(r[14]), "enriquecido": bool(r[15])}
+                "tem_instagram": bool(r[14]), "enriquecido": bool(r[15]),
+                "conv_whatsapp": conv.get("whatsapp"), "conv_email": conv.get("email"),
+                "conv_instagram": conv.get("instagram")}
         colunas.get(r[5], colunas[primeira]).append(card)
         if r[5] != "perdido":
             total_valor += int(r[7] or 0)
@@ -1782,7 +1798,8 @@ def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: st
 
 
 @router.get("/painel/prospeccao/comunicacao", response_class=HTMLResponse)
-def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str = "", vendedor: str = ""):
+def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str = "",
+                           vendedor: str = "", abrir: str = ""):
     """Hub omnichannel: Conversas · E-mails · Agente · Canais (lê de conversas/mensagens)."""
     ctx, redir = _acesso(request)
     if redir is not None:
@@ -1821,6 +1838,7 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                    remetente=_ein_remetente(pool, ctx["conta_id"]), tem_ia=_tem_ia(),
                    ag_cfg=ag_cfg, ag_conhec=ag_conhec, perfil=perfil,
                    dist_cfg=dist_cfg, dist_membros=dist_membros,
+                   abrir=abrir, embed=request.query_params.get("embed") == "1",
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -8697,7 +8715,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
              onclick="if(!window._kbMoved)kbAbrir({{ c.id }})">
           <div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" title="{{ c.temperatura }}" style="background:{{ temp_cor[c.temperatura] }}"></span><span class="emp">{{ c.empresa }}</span><span style="flex:1"></span><button type="button" class="kbx" title="Excluir lead" onclick="kbExcluir(event,{{ c.id }})">✕</button></div>
           {% if c.segmento or c.cidade %}<div class="sub">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
-          {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido %}<div class="kbch">{% if c.tem_whatsapp %}<span title="WhatsApp">💬</span>{% endif %}{% if c.tem_email %}<span title="E-mail">✉️</span>{% endif %}{% if c.tem_instagram %}<span title="Instagram">📸</span>{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
+          {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido %}<div class="kbch">{% if c.tem_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="Abrir a conversa de WhatsApp">💬</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
           <div class="ft">{% if c.valor %}<span style="font-size:.76rem;color:var(--verde-claro)">{{ brl(c.valor) }}</span>{% else %}<span></span>{% endif %}{% if c.proximo %}<span class="mut" style="font-size:.72rem">📅 {{ c.proximo.strftime('%d/%m') }}</span>{% endif %}</div>
           {% if gerencia and c.vendedor %}<div class="mut" style="font-size:.72rem;margin-top:.28rem">👤 {{ c.vendedor }}</div>{% endif %}
         </div>
@@ -8711,6 +8729,12 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <style>
 .kbch{display:flex;gap:.35rem;margin-top:.3rem;font-size:.82rem;align-items:center}
 .kbch .mut{font-size:.7rem}
+/* o selo vira BOTÃO só quando existe conversa de verdade (não só telefone/e-mail
+   cadastrado): halo verde sutil + cursor de clique é a única diferença visual —
+   quem nunca conversou continua com o span apagado de sempre, sem clique. */
+.kbch .kbb{background:var(--neon-fundo);border:1px solid var(--neon-borda);border-radius:7px;
+  padding:.04rem .3rem;line-height:1.3;cursor:pointer;font-size:1em;width:auto;margin:0}
+.kbch .kbb:hover{border-color:var(--verde)}
 .kbx{background:none;border:0;color:#6b6b6b;cursor:pointer;font-size:.82rem;line-height:1;padding:.1rem .25rem;border-radius:6px;opacity:.55}
 .kbx:hover{opacity:1;color:var(--coral);background:rgba(224,87,79,.12)}
 #kb-drawer{position:fixed;inset:0;z-index:80;display:none}
@@ -8739,6 +8763,19 @@ function kbAbrir(id){var dr=document.getElementById('kb-drawer');
   document.getElementById('kb-dfull').href='/painel/prospeccao/'+id;
   var card=document.querySelector('.kbcard[data-id="'+id+'"]');
   var nm=card?(card.querySelector('.emp')||{}).textContent:'';document.getElementById('kb-dtit').textContent=nm||'Lead';
+  dr.classList.add('on');document.body.style.overflow='hidden';}
+// Mesmo drawer do kbAbrir, só que apontado pro CHAT em vez da ficha — o selo do
+// canal só chama isto quando já existe conversa (ver conv_whatsapp/email/
+// instagram no card). `event.stopPropagation()` é o que evita abrir a ficha
+// JUNTO (o card inteiro tem onclick pra isso), mesmo padrão do ✕ de excluir.
+function kbAbrirChat(ev,convId,aba,btn){
+  ev.stopPropagation();
+  var dr=document.getElementById('kb-drawer');
+  document.getElementById('kb-dframe').src='/painel/prospeccao/comunicacao?aba='+aba+'&abrir='+convId+'&embed=1';
+  document.getElementById('kb-dfull').href='/painel/prospeccao/comunicacao?aba='+aba+'&abrir='+convId;
+  var card=btn.closest('.kbcard');
+  var nm=card?(card.querySelector('.emp')||{}).textContent:'';
+  document.getElementById('kb-dtit').textContent=(btn.textContent||'💬')+' '+(nm||'Conversa');
   dr.classList.add('on');document.body.style.overflow='hidden';}
 function kbFechar(){var dr=document.getElementById('kb-drawer');dr.classList.remove('on');document.body.style.overflow='';
   setTimeout(function(){document.getElementById('kb-dframe').src='about:blank';},250);}
@@ -11041,6 +11078,12 @@ function cxPoll(){cxPollList();cxPollThread();}
   // roda já na abertura: esperar 4s pro primeiro poll significa abrir a página no
   // meio de uma importação e não ver aviso nenhum logo de cara.
   cxPollList();
+  // deep-link ?abrir=<conversa_id>: o drawer do funil (kbAbrirChat) manda pra cá
+  // já sabendo qual conversa quer — abre direto, sem o clique extra na lista.
+  // cxOpen tolera 'el' nulo (só pula a marcação de lida da lista, que ainda nem
+  // carregou de verdade nesse instante).
+  var _abrirQ={{ (abrir or '')|tojson }};
+  if(_abrirQ)cxOpen(null,parseInt(_abrirQ,10));
   _cxTimer=setInterval(cxPoll,4000);
   // o navegador congela o timer quando a aba fica em segundo plano — ao voltar o
   // foco/visibilidade, atualiza na hora pra conversa subir e mostrar as msgs novas.

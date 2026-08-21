@@ -302,3 +302,39 @@ def test_responder_pelo_balao_usa_a_rota_que_ja_existe():
     fonte = inspect.getsource(pp).split("function kbResponderChat")[1][:600]
     assert "/painel/prospeccao/comunicacao/responder" in fonte
     assert "conversa_id" in fonte and "texto" in fonte
+
+
+def test_o_balao_sempre_cabe_na_tela_mesmo_perto_da_borda():
+    """21/08: `top: botão+6px` sem olhar o espaço disponível deixava o balão
+    nascer cortado quando o card ficava perto do fim da janela — e por ser
+    `position:fixed`, rolar a página não revelava o resto (fixed não se move
+    com a rolagem). `kbAbrirChat` tem que medir o espaço acima/abaixo do botão
+    e escolher o lado com folga, prendendo a altura a esse espaço."""
+    fonte_chat = inspect.getsource(pp).split("function kbAbrirChat")[1]
+    fonte_chat = fonte_chat[:fonte_chat.index("function kbResponderChat")]
+    assert "innerHeight" in fonte_chat, (
+        "não mede mais o espaço disponível na janela — pode voltar a nascer fora da tela")
+    assert "pop.style.bottom" in fonte_chat, (
+        "perdeu o lado 'abre pra cima' quando não cabe embaixo do botão")
+    assert "maxHeight" in fonte_chat, (
+        "sem altura presa ao espaço disponível o balão pode ultrapassar a tela de novo")
+
+
+def test_rolar_a_pagina_fecha_o_balao_mas_o_auto_scroll_interno_nao():
+    """21/08: balão `fixed` não acompanha a rolagem da página, então deixá-lo
+    aberto longe do card que o abriu ('desvinculado do lead') era pior que só
+    fechar — fecha e reabre certinho no próximo clique. MAS a lista de
+    mensagens rola sozinha pra mostrar a última assim que abre
+    (`box.scrollTop=box.scrollHeight`), e isso dispara um scroll capturado no
+    window também — sem o guard de `contains`, o balão se fechava sozinho no
+    instante em que as mensagens chegavam, ANTES do usuário conseguir ler
+    qualquer coisa (era exatamente o sintoma relatado: abre e não dá pra ver
+    as mensagens)."""
+    fonte = inspect.getsource(pp)
+    assert "window.addEventListener('scroll',_chatPopRolou,true)" in fonte, (
+        "balão não fecha mais quando a página rola de verdade")
+    fonte_guard = fonte.split("function _chatPopRolou")[1][:200]
+    assert "_chatPop.contains(e.target)" in fonte_guard, (
+        "sem checar se o scroll veio de DENTRO do próprio balão, o auto-scroll "
+        "interno das mensagens (pra mostrar a última) fecha o balão sozinho "
+        "assim que elas chegam")

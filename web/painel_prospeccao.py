@@ -9198,9 +9198,23 @@ function kbFecharChat(){
   if(_chatPop){_chatPop.remove();_chatPop=null;}
   document.removeEventListener('click',_chatPopFora,true);
   document.removeEventListener('keydown',_chatPopEsc,true);
+  window.removeEventListener('scroll',_chatPopRolou,true);
 }
 function _chatPopFora(e){if(_chatPop&&!_chatPop.contains(e.target))kbFecharChat();}
 function _chatPopEsc(e){if(e.key==='Escape')kbFecharChat();}
+// Rolar a página SOME com o balão, em vez de deixá-lo pra trás flutuando longe
+// do card que ele veio. É `fixed` (não anda com a rolagem por design — foge do
+// corte de overflow-x:auto da coluna), então "ficar pendurado no lugar errado"
+// era pior que só fechar: fechado, o próximo clique abre de novo já no lugar
+// certo. `capture:true` pega rolagem de QUALQUER contêiner (a coluna do
+// kanban rola sozinha), não só da janela — scroll não borbulha por padrão.
+//
+// MAS: a lista de mensagens rola SOZINHA assim que abre, pra mostrar a
+// última (`box.scrollTop=box.scrollHeight`, logo abaixo) — e rolar dentro dela
+// pra ler o histórico é uso normal do balão, não um "saiu daqui". Sem o
+// `contains` abaixo, o balão se fechava sozinho no instante em que as
+// mensagens chegavam: o auto-scroll interno disparava este mesmo listener.
+function _chatPopRolou(e){if(_chatPop&&_chatPop.contains(e.target))return;kbFecharChat();}
 function cxEscK(s){var d=document.createElement('div');d.textContent=(s==null?'':s);return d.innerHTML;}
 // Igual ao cxMsgsHtml do hub, só que enxuto: sem selo de entrega, sem cabeçalho
 // de campanha — o balão é pra LER a conversa, não pra operar ela.
@@ -9222,8 +9236,25 @@ function kbAbrirChat(ev,convId,aba,btn){
   var r=btn.getBoundingClientRect();
   var pop=document.createElement('div');
   pop.className='chatpop';
-  pop.style.top=(r.bottom+6)+'px';
-  pop.style.left=Math.max(8,Math.min(r.left,window.innerWidth-348))+'px';
+  // Cabe na tela SEMPRE — é o bug que motivou isto: nascendo fixo em
+  // `top:botão+6` sem olhar o que sobrava embaixo, um card perto do fim da
+  // janela abria o balão parcialmente fora da tela. E como é `position:fixed`,
+  // rolar a PÁGINA não revela o que ficou cortado (fixed não se move com a
+  // rolagem) — por fora parecia "trava e não deixa ver as mensagens". Aqui
+  // mede o espaço disponível pra cima e pra baixo do botão e escolhe o lado
+  // com mais folga, com a altura do balão presa a esse espaço (a lista de
+  // mensagens rola por dentro, `.cx-msgs{overflow-y:auto}` — o balão inteiro
+  // continua sempre visível de ponta a ponta).
+  var MARG=8, GAP=6, LARG=336;
+  var abaixo=window.innerHeight-r.bottom-GAP-MARG, acima=r.top-GAP-MARG;
+  if(abaixo>=220||abaixo>=acima){
+    pop.style.top=(r.bottom+GAP)+'px';
+    pop.style.maxHeight=Math.max(160,Math.min(460,abaixo))+'px';
+  }else{
+    pop.style.bottom=(window.innerHeight-r.top+GAP)+'px';
+    pop.style.maxHeight=Math.max(160,Math.min(460,acima))+'px';
+  }
+  pop.style.left=Math.max(MARG,Math.min(r.left,window.innerWidth-LARG-MARG))+'px';
   pop.innerHTML='<div class="cp-h"><span class="av">'+cxEscK((nm||'?').trim().slice(0,2).toUpperCase())+'</span>'
     +'<div><b>'+cxEscK(nm||'Conversa')+'</b><small>'+cxEscK(btn.title||'')+'</small></div>'
     +'<button type="button" class="x" onclick="kbFecharChat()">✕</button></div>'
@@ -9234,7 +9265,8 @@ function kbAbrirChat(ev,convId,aba,btn){
   _chatPop=pop;
   // no mesmo clique que abriu, senão o próprio clique do botão já contaria como
   // "fora" e fecharia o balão antes de ele aparecer.
-  setTimeout(function(){document.addEventListener('click',_chatPopFora,true);document.addEventListener('keydown',_chatPopEsc,true);},0);
+  setTimeout(function(){document.addEventListener('click',_chatPopFora,true);document.addEventListener('keydown',_chatPopEsc,true);
+    window.addEventListener('scroll',_chatPopRolou,true);},0);
   fetch('/painel/prospeccao/comunicacao/thread/'+convId).then(function(r){return r.json();}).then(function(d){
     if(_chatPop!==pop)return;   // o popover foi trocado/fechado antes da resposta chegar
     var box=pop.querySelector('#cp-msgs');

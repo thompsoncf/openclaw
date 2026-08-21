@@ -9122,6 +9122,38 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .kbch .kbb{background:var(--neon-fundo);border:1px solid var(--neon-borda);border-radius:7px;
   padding:.04rem .3rem;line-height:1.3;cursor:pointer;font-size:1em;width:auto;margin:0}
 .kbch .kbb:hover{border-color:var(--verde)}
+/* o balão do chat — SÓ mensagens, nada do resto do hub de Comunicação. Nasce em
+   fixed (calculado em JS a partir do botão), então o CSS aqui não precisa
+   posicionar nada em relação ao card — só desenhar o balão em si. */
+.chatpop{position:fixed;z-index:90;width:336px;max-width:calc(100vw - 16px);max-height:70vh;
+  background:var(--card);border:1px solid var(--borda);border-radius:14px;overflow:hidden;
+  box-shadow:0 18px 46px rgba(0,0,0,.5);display:flex;flex-direction:column}
+.cp-h{display:flex;align-items:center;gap:.5rem;padding:.55rem .7rem;border-bottom:1px solid var(--borda);flex:none}
+.cp-h .av{width:26px;height:26px;border-radius:8px;background:#13251d;color:var(--verde-claro);
+  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.68rem;flex:none}
+.cp-h b{font-size:.85rem}
+.cp-h small{display:block;color:var(--txt-mut);font-size:.68rem}
+.cp-h .x{margin-left:auto;background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:.85rem;
+  padding:.2rem .35rem;border-radius:6px;width:auto}
+.cp-h .x:hover{color:var(--txt);background:var(--card-2)}
+.cp-mais{display:block;text-align:center;padding:.42rem;font-size:.72rem;color:var(--txt-mut);
+  border-top:1px solid var(--borda);text-decoration:none;flex:none}
+.cp-mais:hover{color:var(--verde-claro)}
+.cx-empty{padding:1.6rem 1rem;text-align:center;color:var(--txt-mut);font-size:.84rem}
+.cx-msgs{flex:1;overflow-y:auto;padding:.7rem;display:flex;flex-direction:column;gap:.45rem;min-height:120px}
+.cx-m{max-width:85%;align-self:flex-end;background:#123028;border:1px solid #1d5741;border-radius:12px;
+  border-bottom-right-radius:4px;padding:.42rem .6rem;font-size:.82rem;line-height:1.42}
+.cx-m .meta{display:block;color:var(--txt-mut);font-size:.64rem;margin-top:.25rem;text-align:right}
+.cx-m.cin{align-self:flex-start;background:var(--card-2);border-color:var(--borda)}
+.cx-m.cbot{align-self:flex-start;background:#1c1428;border-color:#4a3163}
+.cx-comp{border-top:1px solid var(--borda);padding:.5rem .6rem;display:flex;gap:.4rem;align-items:flex-end;flex:none}
+.cx-comp textarea{flex:1;resize:none;background:var(--bg);border:1px solid var(--borda);color:var(--txt);
+  border-radius:9px;padding:.4rem .55rem;font:inherit;font-size:.8rem;height:2.1rem;margin:0;width:auto}
+.cx-comp button{background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;
+  padding:0 .8rem;font-weight:600;cursor:pointer;font-size:.8rem;width:auto;margin:0;flex:none}
+.cx-stub{border-top:1px solid var(--borda);padding:.55rem .7rem;color:var(--txt-mut);font-size:.76rem;flex:none}
+.cx-stub .lbl2{display:inline-block;font-size:.6rem;padding:.04rem .38rem;border-radius:999px;
+  background:#241634;color:#c9a3e0;border:1px solid #4a3163;margin-left:.3rem}
 .kbx{background:none;border:0;color:#6b6b6b;cursor:pointer;font-size:.82rem;line-height:1;padding:.1rem .25rem;border-radius:6px;opacity:.55}
 .kbx:hover{opacity:1;color:var(--coral);background:rgba(224,87,79,.12)}
 #kb-drawer{position:fixed;inset:0;z-index:80;display:none}
@@ -9151,19 +9183,94 @@ function kbAbrir(id){var dr=document.getElementById('kb-drawer');
   var card=document.querySelector('.kbcard[data-id="'+id+'"]');
   var nm=card?(card.querySelector('.emp')||{}).textContent:'';document.getElementById('kb-dtit').textContent=nm||'Lead';
   dr.classList.add('on');document.body.style.overflow='hidden';}
-// Mesmo drawer do kbAbrir, só que apontado pro CHAT em vez da ficha — o selo do
-// canal só chama isto quando já existe conversa (ver conv_whatsapp/email/
-// instagram no card). `event.stopPropagation()` é o que evita abrir a ficha
-// JUNTO (o card inteiro tem onclick pra isso), mesmo padrão do ✕ de excluir.
+// SÓ AS MENSAGENS — não a tela de Comunicação inteira. O selo do canal só chama
+// isto quando já existe conversa (ver conv_whatsapp/email/instagram no card).
+// `event.stopPropagation()` evita abrir a ficha JUNTO (o card inteiro tem
+// onclick pra isso), mesmo padrão do ✕ de excluir.
+//
+// Nasce em `position:fixed`, calculado do próprio botão — não em `position:
+// absolute` dentro do card. O kanban é `.kbrow{overflow-x:auto}` no desktop, e
+// overflow-x diferente de visible faz overflow-y virar auto por baixo dos panos
+// (regra do CSS, não bug); um popover absoluto vazando pra baixo do card seria
+// cortado pela própria coluna que rola. Fixed escapa disso de vez.
+var _chatPop=null;
+function kbFecharChat(){
+  if(_chatPop){_chatPop.remove();_chatPop=null;}
+  document.removeEventListener('click',_chatPopFora,true);
+  document.removeEventListener('keydown',_chatPopEsc,true);
+}
+function _chatPopFora(e){if(_chatPop&&!_chatPop.contains(e.target))kbFecharChat();}
+function _chatPopEsc(e){if(e.key==='Escape')kbFecharChat();}
+function cxEscK(s){var d=document.createElement('div');d.textContent=(s==null?'':s);return d.innerHTML;}
+// Igual ao cxMsgsHtml do hub, só que enxuto: sem selo de entrega, sem cabeçalho
+// de campanha — o balão é pra LER a conversa, não pra operar ela.
+function kbMsgsHtml(d){
+  if(!d.msgs||!d.msgs.length)return '<div class="cx-empty">Sem mensagens.</div>';
+  var h='';
+  d.msgs.forEach(function(m){
+    var cls=(m.direcao==='in')?'cx-m cin':((m.autor==='bot')?'cx-m cbot':'cx-m');
+    var corpo=cxEscK(m.corpo||m.cabecalho||'').replace(/\\n/g,'<br>');
+    h+='<div class="'+cls+'">'+corpo+'<span class="meta">'+cxEscK(m.quem||'')+' · '+cxEscK(m.quando||'')+'</span></div>';
+  });
+  return h;
+}
 function kbAbrirChat(ev,convId,aba,btn){
   ev.stopPropagation();
-  var dr=document.getElementById('kb-drawer');
-  document.getElementById('kb-dframe').src='/painel/prospeccao/comunicacao?aba='+aba+'&abrir='+convId+'&embed=1';
-  document.getElementById('kb-dfull').href='/painel/prospeccao/comunicacao?aba='+aba+'&abrir='+convId;
+  kbFecharChat();
   var card=btn.closest('.kbcard');
   var nm=card?(card.querySelector('.emp')||{}).textContent:'';
-  document.getElementById('kb-dtit').textContent=(btn.textContent||'💬')+' '+(nm||'Conversa');
-  dr.classList.add('on');document.body.style.overflow='hidden';}
+  var r=btn.getBoundingClientRect();
+  var pop=document.createElement('div');
+  pop.className='chatpop';
+  pop.style.top=(r.bottom+6)+'px';
+  pop.style.left=Math.max(8,Math.min(r.left,window.innerWidth-348))+'px';
+  pop.innerHTML='<div class="cp-h"><span class="av">'+cxEscK((nm||'?').trim().slice(0,2).toUpperCase())+'</span>'
+    +'<div><b>'+cxEscK(nm||'Conversa')+'</b><small>'+cxEscK(btn.title||'')+'</small></div>'
+    +'<button type="button" class="x" onclick="kbFecharChat()">✕</button></div>'
+    +'<div class="cx-msgs" id="cp-msgs"><div class="cx-empty">Carregando…</div></div>'
+    +'<div id="cp-comp"></div>'
+    +'<a class="cp-mais" target="_blank" href="/painel/prospeccao/comunicacao?aba='+aba+'&abrir='+convId+'">Ver conversa completa ↗</a>';
+  document.body.appendChild(pop);
+  _chatPop=pop;
+  // no mesmo clique que abriu, senão o próprio clique do botão já contaria como
+  // "fora" e fecharia o balão antes de ele aparecer.
+  setTimeout(function(){document.addEventListener('click',_chatPopFora,true);document.addEventListener('keydown',_chatPopEsc,true);},0);
+  fetch('/painel/prospeccao/comunicacao/thread/'+convId).then(function(r){return r.json();}).then(function(d){
+    if(_chatPop!==pop)return;   // o popover foi trocado/fechado antes da resposta chegar
+    var box=pop.querySelector('#cp-msgs');
+    box.innerHTML=d.ok?kbMsgsHtml(d):'<div class="cx-empty">Não consegui abrir.</div>';
+    box.scrollTop=box.scrollHeight;
+    var comp=pop.querySelector('#cp-comp');
+    if(d.pode_responder){
+      comp.innerHTML='<div class="cx-comp"><textarea id="cp-input" rows="1" placeholder="Escreva uma resposta…"'
+        +' onkeydown="if(event.key===\\'Enter\\'&&!event.shiftKey){event.preventDefault();kbResponderChat('+convId+');}"></textarea>'
+        +'<button type="button" onclick="kbResponderChat('+convId+')">Enviar</button></div>';
+    }else if(d.ok){
+      comp.innerHTML='<div class="cx-stub">Responder por aqui <span class="lbl2">em breve</span></div>';
+    }
+  }).catch(function(){
+    if(_chatPop===pop)pop.querySelector('#cp-msgs').innerHTML='<div class="cx-empty">Falha de rede.</div>';
+  });
+}
+function kbResponderChat(convId){
+  if(!_chatPop)return;
+  var ta=_chatPop.querySelector('#cp-input');
+  var texto=(ta.value||'').trim();
+  if(!texto)return;
+  ta.disabled=true;
+  var body=new URLSearchParams();body.append('conversa_id',convId);body.append('texto',texto);
+  fetch('/painel/prospeccao/comunicacao/responder',{method:'POST',body:body}).then(function(r){return r.json();}).then(function(d){
+    if(!_chatPop)return;
+    ta.disabled=false;
+    if(!d.ok){alert(d.erro||'Não consegui enviar.');return;}
+    ta.value='';
+    fetch('/painel/prospeccao/comunicacao/thread/'+convId).then(function(r){return r.json();}).then(function(d2){
+      if(!_chatPop)return;
+      var box=_chatPop.querySelector('#cp-msgs');
+      if(box&&d2.ok){box.innerHTML=kbMsgsHtml(d2);box.scrollTop=box.scrollHeight;}
+    });
+  }).catch(function(){if(ta)ta.disabled=false;alert('Erro de conexão.');});
+}
 function kbFechar(){var dr=document.getElementById('kb-drawer');dr.classList.remove('on');document.body.style.overflow='';
   setTimeout(function(){document.getElementById('kb-dframe').src='about:blank';},250);}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')kbFechar();});

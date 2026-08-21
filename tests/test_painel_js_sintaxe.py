@@ -263,3 +263,42 @@ def test_o_clique_no_selo_nao_propaga_pro_card():
     no selo abriria os dois drawers ao mesmo tempo (ficha por baixo do chat)."""
     fonte = inspect.getsource(pp).split("function kbAbrirChat")[1][:400]
     assert "ev.stopPropagation()" in fonte
+
+
+def test_o_balao_do_chat_e_so_mensagens_nao_a_tela_inteira():
+    """20/08: o primeiro formato abria o hub de Comunicação inteiro (lista de
+    conversas + ficha do lead + abas) dentro do drawer da ficha, via iframe — só
+    pra ler o que a pessoa escreveu. Pedido do dono: só o balão, sem essa janela
+    toda. `kbAbrirChat` não pode voltar a tocar no #kb-drawer/#kb-dframe da
+    ficha — ele cria o próprio elemento (`.chatpop`), busca o thread direto
+    (fetch), e desenha só as bolhas."""
+    js = "\n".join(_scripts(_render("prospeccao")))
+    for fn in ("kbFecharChat", "kbMsgsHtml", "kbResponderChat", "cxEscK"):
+        assert fn in js, f"{fn} não está no JS servido"
+    fonte_chat = inspect.getsource(pp).split("function kbAbrirChat")[1]
+    fonte_chat = fonte_chat[:fonte_chat.index("function kbResponderChat")]
+    assert "kb-dframe" not in fonte_chat, "voltou a carregar o hub inteiro num iframe"
+    assert "kb-drawer" not in fonte_chat, "voltou a usar o drawer da ficha pro chat"
+    assert "/painel/prospeccao/comunicacao/thread/" in fonte_chat, (
+        "o balão não busca a conversa pelo endpoint que já existe")
+
+
+def test_o_balao_so_deixa_um_aberto_por_vez():
+    """Abrir o chat de um segundo lead tem que fechar o balão do primeiro —
+    dois balões abertos ao mesmo tempo se sobrepõem e nenhum fica legível."""
+    fonte = inspect.getsource(pp).split("function kbAbrirChat")[1][:200]
+    assert "kbFecharChat()" in fonte, "kbAbrirChat não fecha o balão anterior antes de abrir o novo"
+
+
+def test_o_balao_fecha_clicando_fora_e_com_esc():
+    fonte = inspect.getsource(pp)
+    assert "_chatPopFora" in fonte and "e.target" in fonte
+    assert "_chatPopEsc" in fonte and "'Escape'" in fonte
+
+
+def test_responder_pelo_balao_usa_a_rota_que_ja_existe():
+    """A caixa de responder do balão não é feature nova no backend — é a mesma
+    rota que o hub de Comunicação já usa pra enviar."""
+    fonte = inspect.getsource(pp).split("function kbResponderChat")[1][:600]
+    assert "/painel/prospeccao/comunicacao/responder" in fonte
+    assert "conversa_id" in fonte and "texto" in fonte

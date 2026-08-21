@@ -6853,8 +6853,11 @@ def prospeccao_resumo(request: Request, alvo_id: int):
         "temp_cor": TEMP_COR.get(alvo["temperatura"]), "temp_pill": list(temp_pill),
         "segmento": alvo["segmento"], "cidade": alvo["cidade"], "uf": alvo["uf"],
         "vendedor_nome": alvo["vendedor_nome"], "status": alvo["status"],
-        "telefone": alvo["telefone"], "email": alvo["email"],
-        "valor_fmt": brl(alvo["valor"]) if alvo["valor"] else "",
+        "contato": alvo["contato"], "cargo": alvo["cargo"],
+        "telefone": alvo["telefone"], "whatsapp": alvo["whatsapp"], "email": alvo["email"],
+        "instagram": alvo["instagram"], "site_url": alvo["site_url"], "site_dominio": alvo["site_dominio"],
+        "obs": alvo["obs"], "valor_fmt": brl(alvo["valor"]) if alvo["valor"] else "",
+        "valor_edit": (f"{alvo['valor'] / 100:.2f}".replace(".", ",")) if alvo["valor"] else "",
         "doc_fmt": alvo["doc_fmt"], "doc_rot": alvo["doc_rot"],
         "tel_link": alvo["tel_link"], "zap_link": alvo["zap_link"],
         "insta_url": alvo["insta_url"], "maps_url": alvo["maps_url"],
@@ -6865,6 +6868,41 @@ def prospeccao_resumo(request: Request, alvo_id: int):
                          "quando": x["criado_em"].strftime("%d/%m %H:%M") if x["criado_em"] else ""}
                         for x in atividades],
     })
+
+
+@router.post("/painel/prospeccao/{alvo_id}/editar-rapido")
+def prospeccao_editar_rapido(request: Request, alvo_id: int, contato: str = Form(""),
+                             cargo: str = Form(""), telefone: str = Form(""), whatsapp: str = Form(""),
+                             email: str = Form(""), instagram: str = Form(""),
+                             site_url: str = Form(""), valor: str = Form(""), obs: str = Form("")):
+    """Edição rápida pelo balão do funil — só os campos de contato/valor, sem
+    tocar documento/tipo/segmento/cidade/uf/sócio/regime/porte (esses ficam só
+    na ficha completa, que tem a verificação própria de CNPJ/CPF). Por isso é
+    uma rota PRÓPRIA e não reaproveita `/editar`: aquela faz um UPDATE de TODOS
+    os campos de uma vez — chamá-la só com o subconjunto do balão apagaria os
+    campos que o balão nem mostra."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    site_link = (site_url or "").strip()
+    if site_link and "://" not in site_link:
+        site_link = "https://" + site_link
+    with pool.connection() as c:
+        c.execute(
+            """update prospeccao set contato=%s, cargo=%s, telefone=%s, whatsapp=%s,
+                   email=%s, instagram=%s, site_url=%s, valor_estimado_centavos=%s,
+                   obs=%s, atualizado_em=now()
+                 where id=%s and conta_id=%s""",
+            (contato.strip() or None, cargo.strip() or None, telefone.strip() or None,
+             whatsapp.strip() or None, email.strip().lower() or None, instagram.strip() or None,
+             site_link or None, _reais_para_centavos(valor), obs.strip() or None,
+             alvo_id, ctx["conta_id"]))
+        c.commit()
+    return JSONResponse({"ok": True})
 
 
 @router.get("/painel/prospeccao/{alvo_id}", response_class=HTMLResponse)
@@ -9237,11 +9275,16 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .lp-status select{background:var(--bg);border:1px solid var(--borda);color:var(--txt);border-radius:999px;
   padding:.28rem .6rem;font-size:.76rem;width:auto;margin:0}
 .lp-body{padding:.7rem .85rem;overflow-y:auto;flex:1}
+.lp-sh{display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem}
+.lp-sh b{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-mut)}
+.lp-edit-btn{margin-left:auto;background:none;border:1px solid var(--borda);color:var(--txt-mut);border-radius:7px;
+  padding:.15rem .5rem;font-size:.7rem;cursor:pointer;width:auto}
+.lp-edit-btn:hover{color:var(--txt);border-color:var(--verde)}
 .lp-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem .8rem;font-size:.8rem}
 .lp-grid .k{color:var(--txt-mut);font-size:.68rem;text-transform:uppercase;letter-spacing:.04em}
 .lp-grid .v{margin-top:.1rem;color:var(--txt)}
+.lp-grid .full{grid-column:1 / -1}
 .lp-sec2{margin-top:.9rem}
-.lp-sec2 .lbl3{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-mut);margin-bottom:.4rem}
 .lp-ativ{display:flex;gap:.5rem;padding:.4rem 0;border-top:1px solid var(--borda);font-size:.8rem}
 .lp-ativ:first-child{border-top:0}
 .lp-ativ .dot2{width:7px;height:7px;border-radius:50%;margin-top:.4rem;flex-shrink:0}
@@ -9249,6 +9292,16 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .lp-mais{display:block;text-align:center;padding:.55rem;font-size:.76rem;color:var(--txt-mut);
   border-top:1px solid var(--borda);text-decoration:none;flex:none}
 .lp-mais:hover{color:var(--verde-claro)}
+.lp-ed-grid{display:grid;grid-template-columns:1fr 1fr;gap:.55rem .7rem}
+.lp-ed-grid .full{grid-column:1 / -1}
+.lp-ed-grid label{display:block;font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;color:var(--txt-mut);margin-bottom:.2rem}
+.lp-ed-grid input,.lp-ed-grid textarea{width:100%;background:var(--bg);border:1px solid var(--borda);color:var(--txt);
+  border-radius:8px;padding:.35rem .55rem;font:inherit;font-size:.8rem;box-sizing:border-box;margin:0}
+.lp-ed-grid textarea{resize:vertical;min-height:2.2rem}
+.lp-ed-acoes{display:flex;gap:.5rem;margin-top:.8rem}
+.lp-ed-acoes button{width:auto;margin:0;font-size:.8rem;cursor:pointer}
+.lp-ed-salvar{background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.4rem .9rem;font-weight:600}
+.lp-ed-cancelar{background:none;border:1px solid var(--borda);color:var(--txt-mut);border-radius:8px;padding:.4rem .9rem}
 </style>
 
 <script>
@@ -9416,7 +9469,9 @@ function kbAbrirLead(ev,id,cardEl){
     window.addEventListener('scroll',_leadPopRolou,true);},0);
   fetch('/painel/prospeccao/'+id+'/resumo').then(function(r){return r.json();}).then(function(d){
     if(_leadPop!==pop)return;
-    pop.innerHTML=d.ok?kbLeadHtml(d,id):'<div class="cx-empty">Não consegui abrir.</div>';
+    if(!d.ok){pop.innerHTML='<div class="cx-empty">Não consegui abrir.</div>';return;}
+    pop._d=d;
+    pop.innerHTML=kbLeadHtml(d,id);
   }).catch(function(){if(_leadPop===pop)pop.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
 }
 function kbLeadHtml(d,id){
@@ -9440,23 +9495,92 @@ function kbLeadHtml(d,id){
   if(d.maps_url)h+='<a class="lp-ab" href="'+cxEscK(d.maps_url)+'" target="_blank" rel="noopener">🗺️ Mapa</a>';
   h+='<div class="lp-status"><select onchange="kbLeadStatus(this,'+id+')" data-prev="'+cxEscK(d.status||'')+'">';
   (_KB_STATUS||[]).forEach(function(s){h+='<option value="'+cxEscK(s[0])+'"'+(s[0]===d.status?' selected':'')+'>'+cxEscK(s[1])+'</option>';});
-  h+='</select></div></div><div class="lp-body"><div class="lp-grid">';
-  if(d.telefone)h+='<div><div class="k">Telefone</div><div class="v">'+cxEscK(d.telefone)+'</div></div>';
-  if(d.email)h+='<div><div class="k">E-mail</div><div class="v">'+cxEscK(d.email)+'</div></div>';
-  if(d.valor_fmt)h+='<div><div class="k">Valor estimado</div><div class="v">'+cxEscK(d.valor_fmt)+'</div></div>';
-  if(d.doc_fmt)h+='<div><div class="k">'+cxEscK(d.doc_rot||'Documento')+'</div><div class="v">'+cxEscK(d.doc_fmt)+'</div></div>';
-  h+='</div>';
-  if(d.atividades&&d.atividades.length){
-    h+='<div class="lp-sec2"><div class="lbl3">Últimas atividades</div>';
-    d.atividades.forEach(function(a){
-      h+='<div class="lp-ativ"><span class="dot2" style="background:'+cxEscK(a.cor||'#7a7a7a')+'"></span><div>'
-        +'<div>'+cxEscK(a.tipo_rot||'')+(a.resultado_rot?' — '+cxEscK(a.resultado_rot):'')+(a.descricao?': '+cxEscK(a.descricao):'')+'</div>'
-        +'<div class="qd">'+cxEscK(a.quando||'')+'</div></div></div>';
-    });
-    h+='</div>';
-  }
-  h+='</div><a class="lp-mais" target="_blank" href="/painel/prospeccao/'+id+'">Ver ficha completa ↗</a>';
+  h+='</select></div></div><div class="lp-body">'
+    +'<div id="lp-view">'+kbLeadDadosHtml(d)+kbLeadHistHtml(d)+'</div>'
+    +'<div id="lp-edit" style="display:none">'+kbLeadEditHtml(d,id)+'</div>'
+    +'</div>'
+    +'<a class="lp-mais" target="_blank" href="/painel/prospeccao/'+id+'">Ver ficha completa ↗</a>';
   return h;
+}
+// "Dados" no resumo do balão: os mesmos campos que a seção "Dados" da ficha
+// completa mostra, MENOS o que é enriquecimento automático (sócio, regime,
+// porte, Receita) — aquilo não é algo que se corrige rápido, fica só na ficha.
+function kbLeadDadosHtml(d){
+  var h='<div class="lp-sh"><b>Dados</b><button type="button" class="lp-edit-btn" onclick="kbLeadEditar()">✎ Editar</button></div><div class="lp-grid">';
+  if(d.contato)h+='<div><div class="k">Contato</div><div class="v">'+cxEscK(d.contato)+(d.cargo?(' · '+cxEscK(d.cargo)):'')+'</div></div>';
+  if(d.doc_fmt)h+='<div><div class="k">'+cxEscK(d.doc_rot||'Documento')+'</div><div class="v">'+cxEscK(d.doc_fmt)+'</div></div>';
+  if(d.telefone)h+='<div><div class="k">Telefone</div><div class="v">'+cxEscK(d.telefone)+'</div></div>';
+  if(d.whatsapp)h+='<div><div class="k">WhatsApp</div><div class="v">'+cxEscK(d.whatsapp)+'</div></div>';
+  if(d.email)h+='<div><div class="k">E-mail</div><div class="v">'+cxEscK(d.email)+'</div></div>';
+  if(d.instagram)h+='<div><div class="k">Instagram</div><div class="v">'+cxEscK(d.instagram)+'</div></div>';
+  if(d.site_url)h+='<div><div class="k">Site</div><div class="v"><a href="'+cxEscK(d.site_url)+'" target="_blank" rel="noopener" style="color:var(--verde-claro)">'+cxEscK(d.site_dominio||d.site_url)+'</a></div></div>';
+  if(d.valor_fmt)h+='<div><div class="k">Valor estimado</div><div class="v">'+cxEscK(d.valor_fmt)+'</div></div>';
+  if(d.obs)h+='<div class="full"><div class="k">Observação</div><div class="v">'+cxEscK(d.obs)+'</div></div>';
+  return h+'</div>';
+}
+function kbLeadHistHtml(d){
+  if(!d.atividades||!d.atividades.length)return '';
+  var h='<div class="lp-sec2"><div class="lp-sh"><b>Histórico</b></div>';
+  d.atividades.forEach(function(a){
+    h+='<div class="lp-ativ"><span class="dot2" style="background:'+cxEscK(a.cor||'#7a7a7a')+'"></span><div>'
+      +'<div>'+cxEscK(a.tipo_rot||'')+(a.resultado_rot?' — '+cxEscK(a.resultado_rot):'')+(a.descricao?': '+cxEscK(a.descricao):'')+'</div>'
+      +'<div class="qd">'+cxEscK(a.quando||'')+'</div></div></div>';
+  });
+  return h+'</div>';
+}
+function _lpVal(v){return cxEscK(v==null?'':v);}
+function kbLeadEditHtml(d,id){
+  return '<div class="lp-sh"><b>Editando os dados</b></div><div class="lp-ed-grid">'
+    +'<div><label>Contato</label><input id="lp-ed-contato" value="'+_lpVal(d.contato)+'"></div>'
+    +'<div><label>Cargo</label><input id="lp-ed-cargo" value="'+_lpVal(d.cargo)+'"></div>'
+    +'<div><label>Telefone</label><input id="lp-ed-telefone" value="'+_lpVal(d.telefone)+'"></div>'
+    +'<div><label>WhatsApp</label><input id="lp-ed-whatsapp" value="'+_lpVal(d.whatsapp)+'"></div>'
+    +'<div><label>E-mail</label><input id="lp-ed-email" value="'+_lpVal(d.email)+'"></div>'
+    +'<div><label>Instagram</label><input id="lp-ed-instagram" value="'+_lpVal(d.instagram)+'"></div>'
+    +'<div class="full"><label>Site</label><input id="lp-ed-site" value="'+_lpVal(d.site_url)+'"></div>'
+    +'<div class="full"><label>Valor estimado</label><input id="lp-ed-valor" value="'+_lpVal(d.valor_edit)+'"></div>'
+    +'<div class="full"><label>Observação</label><textarea id="lp-ed-obs">'+_lpVal(d.obs)+'</textarea></div>'
+    +'</div><div class="lp-ed-acoes">'
+    +'<button type="button" class="lp-ed-salvar" onclick="kbLeadSalvar('+id+')">Salvar</button>'
+    +'<button type="button" class="lp-ed-cancelar" onclick="kbLeadCancelarEdicao()">Cancelar</button></div>';
+}
+function kbLeadEditar(){
+  var v=document.getElementById('lp-view'), e=document.getElementById('lp-edit');
+  if(v)v.style.display='none';
+  if(e)e.style.display='block';
+}
+function kbLeadCancelarEdicao(){
+  var v=document.getElementById('lp-view'), e=document.getElementById('lp-edit');
+  if(e)e.style.display='none';
+  if(v)v.style.display='block';
+}
+// Rota PRÓPRIA (não a /editar da ficha completa — ver comentário na rota):
+// só os campos que o balão mostra. Depois de salvar, busca o /resumo de novo
+// e redesenha (mesma função que abriu o balão), voltando pro modo leitura já
+// com o dado novo.
+function kbLeadSalvar(id){
+  var btn=_leadPop&&_leadPop.querySelector('.lp-ed-salvar');
+  if(btn){btn.disabled=true;btn.textContent='Salvando…';}
+  var body=new URLSearchParams();
+  body.append('contato',document.getElementById('lp-ed-contato').value);
+  body.append('cargo',document.getElementById('lp-ed-cargo').value);
+  body.append('telefone',document.getElementById('lp-ed-telefone').value);
+  body.append('whatsapp',document.getElementById('lp-ed-whatsapp').value);
+  body.append('email',document.getElementById('lp-ed-email').value);
+  body.append('instagram',document.getElementById('lp-ed-instagram').value);
+  body.append('site_url',document.getElementById('lp-ed-site').value);
+  body.append('valor',document.getElementById('lp-ed-valor').value);
+  body.append('obs',document.getElementById('lp-ed-obs').value);
+  fetch('/painel/prospeccao/'+id+'/editar-rapido',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!_leadPop)return;
+      if(!d.ok){if(btn){btn.disabled=false;btn.textContent='Salvar';}alert('Não consegui salvar.');return;}
+      return fetch('/painel/prospeccao/'+id+'/resumo').then(function(r){return r.json();}).then(function(d2){
+        if(!_leadPop||!d2.ok)return;
+        _leadPop._d=d2;
+        _leadPop.innerHTML=kbLeadHtml(d2,id);
+      });
+    }).catch(function(){if(btn){btn.disabled=false;btn.textContent='Salvar';}alert('Falha de rede.');});
 }
 // A mesma rota da ficha completa (fichaStatus lá dentro) — só troca a situação
 // e, se deu certo, move o card pra coluna nova no board por trás (mesma

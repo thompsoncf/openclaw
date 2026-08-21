@@ -114,6 +114,18 @@ def _resumo(monkeypatch, pool, alvo_id, *, gerencia=True, membro_id=1):
     return pp.prospeccao_resumo(req, alvo_id)
 
 
+def _editar_rapido(monkeypatch, pool, alvo_id, *, gerencia=True, membro_id=1, **campos):
+    monkeypatch.setattr(pp, "get_pool", lambda: pool)
+    monkeypatch.setattr(pp, "_acesso", lambda req: (
+        {"conta_id": CONTA, "membro_id": membro_id, "gerencia": gerencia,
+         "pode_atribuir": gerencia}, None))
+    req = SimpleNamespace(session={}, query_params=QueryParams(""))
+    kw = dict(contato="", cargo="", telefone="", whatsapp="", email="",
+              instagram="", site_url="", valor="", obs="")
+    kw.update(campos)
+    return pp.prospeccao_editar_rapido(req, alvo_id, **kw)
+
+
 def test_resumo_traz_contato_valor_e_temperatura(monkeypatch, pool):
     lid = _lead(pool)
     r = _resumo(monkeypatch, pool, lid)
@@ -126,6 +138,26 @@ def test_resumo_traz_contato_valor_e_temperatura(monkeypatch, pool):
     assert d["valor_fmt"] == "R$ 4.200,00"
     assert d["temperatura"] == "quente"
     assert d["doc_fmt"], "CNPJ devia vir formatado (doc_fmt)"
+
+
+def test_resumo_traz_os_campos_de_cadastro_que_a_v1_deixou_de_fora(monkeypatch, pool):
+    """21/08, 2ª rodada: a v1 do balão só tinha telefone/e-mail/valor/documento
+    — o usuário apontou que faltava o resto do cadastro (contato, WhatsApp,
+    Instagram, site, observação) e que sem isso não dava pra editar rápido."""
+    lid = _lead(pool, contato="Marcos Silva", cargo="sócio", whatsapp="86988887777",
+               instagram="@padariabompao", site_url="https://bompao.com.br",
+               obs="Fecha pedido toda 2ª feira")
+    r = _resumo(monkeypatch, pool, lid)
+    d = json.loads(bytes(r.body))
+    assert d["contato"] == "Marcos Silva"
+    assert d["cargo"] == "sócio"
+    assert d["whatsapp"] == "86988887777"
+    assert d["instagram"] == "@padariabompao"
+    assert d["site_url"] == "https://bompao.com.br"
+    assert d["site_dominio"] == "bompao.com.br"
+    assert d["obs"] == "Fecha pedido toda 2ª feira"
+    assert d["valor_edit"] == "4200,00", (
+        "valor_edit tem que vir num formato que o próprio parser do backend aceita de volta")
 
 
 def test_resumo_traz_so_as_2_atividades_mais_recentes(monkeypatch, pool):
@@ -195,3 +227,53 @@ def test_ficha_completa_continua_de_pe_depois_do_refactor(monkeypatch, pool):
     assert "ligou e ficou de retornar" in html
     assert "Entrou por 💬 WhatsApp" in html, (
         "origem_ch sumiu — a extração do canais_contato quebrou esse cálculo")
+
+
+def test_editar_rapido_grava_os_campos_do_balao(monkeypatch, pool):
+    lid = _lead(pool)
+    r = _editar_rapido(monkeypatch, pool, lid, contato="Marcos Silva", cargo="sócio",
+                        telefone="86977776666", whatsapp="86988887777",
+                        email="novo@bompao.com", instagram="@padariabompao",
+                        site_url="bompao.com.br", valor="5000,00", obs="Prefere ligação")
+    assert r.status_code == 200
+    d = json.loads(bytes(r.body))
+    assert d["ok"] is True
+    with pool.connection() as c:
+        row = c.execute(
+            """select contato, cargo, telefone, whatsapp, email, instagram, site_url,
+                      valor_estimado_centavos, obs
+                 from prospeccao where id=%s""", (lid,)).fetchone()
+    assert row == ("Marcos Silva", "sócio", "86977776666", "86988887777", "novo@bompao.com",
+                    "@padariabompao", "https://bompao.com.br", 500000, "Prefere ligação"), (
+        "site_url sem protocolo tem que ganhar https:// automaticamente, igual a /editar")
+
+
+def test_editar_rapido_nao_mexe_em_documento_tipo_ou_segmento(monkeypatch, pool):
+    """O pedido explícito: documento/tipo/segmento/cidade/uf/sócio/regime/porte
+    ficam só na ficha completa — a edição rápida do balão NUNCA pode tocar
+    nesses campos, mesmo que o form não os envie (a rota faz um UPDATE parcial,
+    não o UPDATE de tudo-de-uma-vez que a /editar da ficha completa faz)."""
+    lid = _lead(pool, cnpj="12345678000190", segmento="Varejo", cidade="Teresina", uf="PI")
+    _editar_rapido(monkeypatch, pool, lid, contato="Novo Nome")
+    with pool.connection() as c:
+        row = c.execute(
+            "select cnpj, tipo, segmento, cidade, uf from prospeccao where id=%s", (lid,)).fetchone()
+    assert row == ("12345678000190", "pj", "Varejo", "Teresina", "PI")
+
+
+def test_editar_rapido_nega_pra_vendedor_que_nao_e_dono_do_lead(monkeypatch, pool):
+    lid = _lead(pool, vendedor_id=99)
+    r = _editar_rapido(monkeypatch, pool, lid, gerencia=False, membro_id=1, contato="X")
+    assert r.status_code == 403
+    with pool.connection() as c:
+        contato = c.execute("select contato from prospeccao where id=%s", (lid,)).fetchone()[0]
+    assert contato != "X", "negou o acesso mas gravou o dado mesmo assim"
+
+
+def test_editar_rapido_sem_login_devolve_401(monkeypatch, pool):
+    monkeypatch.setattr(pp, "get_pool", lambda: pool)
+    monkeypatch.setattr(pp, "_acesso", lambda req: (None, "redirecionar"))
+    req = SimpleNamespace(session={}, query_params=QueryParams(""))
+    r = pp.prospeccao_editar_rapido(req, 1, contato="", cargo="", telefone="", whatsapp="",
+                                    email="", instagram="", site_url="", valor="", obs="")
+    assert r.status_code == 401

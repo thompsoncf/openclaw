@@ -154,13 +154,17 @@ def construir_ferramentas_pj(pool, conta_id: int,
         cent = int(round(float(valor) * 100))
         venc = _parse_data_pj(e.get("vencimento"))
         contraparte = (e.get("contraparte") or "").strip()
-        # LIGA ao cliente da base pelo nome (contraparte), sem criar duplicado.
-        # Assim o honorário/venda a prazo aparece na ficha do cliente (carteira).
+        # LIGA ao cadastro da base pelo nome (contraparte), sem criar duplicado.
+        # Assim o honorário/venda a prazo (a receber) ou a dívida (a pagar) aparece
+        # na ficha certa. O papel filtra a busca — "a pagar" não deve casar com
+        # alguém marcado só como cliente, e vice-versa (mesmo cadastro, papéis
+        # diferentes: ver finance/clientes.eh_cliente/eh_fornecedor).
         cli_id = None
         if contraparte:
             try:
                 from . import clientes as _cli
-                cli_id = _cli.achar_cliente_por_nome(pool, conta_id, contraparte)
+                papel = "cliente" if tipo == "receber" else "fornecedor"
+                cli_id = _cli.achar_cliente_por_nome(pool, conta_id, contraparte, papel=papel)
             except Exception:
                 cli_id = None
         t = emp.criar_titulo(pool, conta_id, tipo, desc, cent, venc,

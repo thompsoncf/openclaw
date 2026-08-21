@@ -325,7 +325,43 @@ const log = comEspelhoNoBanco(logBase)
 // decifrar nada. Então a enxurrada é o sinal. Passando do teto, esta ponta larga o
 // socket e entra na MESMA espera do 440 (esperaPos440), que é a resposta certa pra
 // guerra de sessão e já existe pronta.
-const falhasDeDecifrar = new Map()      // contaId -> [instantes das falhas]
+// ---------------------------------------------- mapa indexado por conta
+//
+// O MESMO problema que a trava já tinha resolvido, e que estes mapas não tinham.
+// Palavra por palavra do comentário em sessao-lock.js:
+//
+//   "conta_id chega de dois lugares com tipos diferentes: as rotas fazem parseInt
+//    (número) e o restaurarSessoes lê do Postgres, que devolve bigint como STRING.
+//    Sem normalizar, a mesma conta viraria duas entradas no Set e o `segura()`
+//    mentiria dependendo de quem perguntou."
+//
+// Era o que estava acontecendo com `sessoes`, medido em produção em 21/08: o painel
+// da Prime mostrava o chip 2 (conta 36) como DESCONECTADO enquanto ele recebia 25
+// mensagens em 3 horas. O `restaurarSessoes` religou a conta como '36' (texto, do
+// banco) e a rota GET /session/36/status procurou por 36 (número) — não achou, e o
+// `|| { status: 'desconectado' }` respondeu o que a rota inventou, não o que o
+// serviço sabia. A tabela wa_qr_sessao_estado, escrita percorrendo o mapa, dizia
+// "conectado" no mesmo minuto.
+//
+// E o /enviar erra igual — mas ele não desiste: religa. Isso criava uma SEGUNDA
+// entrada, com um SEGUNDO socket na mesma credencial, sem fechar o primeiro (o
+// descartarSocket lá dentro age no objeto novo, que está vazio). Dois sockets no
+// mesmo número é o que faz o WhatsApp derrubar um com 440 — a guerra de sessão que
+// o serviço causava contra si mesmo.
+//
+// A correção é a chave, e SÓ a chave: normalizar na porta do mapa, com o mesmo
+// `Number` que a trava usa, pra os dois módulos concordarem. Nenhuma regra de
+// conexão muda — as rotas passam a ACHAR a sessão que já existe, em vez de abrir
+// outra por cima. Feito por subclasse e não call site a call site de propósito:
+// são 25 chamadas, e a que escapasse traria o bug de volta sem aviso.
+class MapaPorConta extends Map {
+  get (k) { return super.get(Number(k)) }
+  set (k, v) { return super.set(Number(k), v) }
+  has (k) { return super.has(Number(k)) }
+  delete (k) { return super.delete(Number(k)) }
+}
+
+const falhasDeDecifrar = new MapaPorConta()   // contaId -> [instantes das falhas]
 
 // Estourou o teto NESTA falha? Janela deslizante, aritmética pura — sem socket
 // nenhum, que é o que deixa isso conferível no teste.
@@ -452,13 +488,13 @@ const pool = new Pool({
 })
 
 // contaId -> { sock, status, qr, iniciando }
-const sessoes = new Map()
+const sessoes = new MapaPorConta()
 
 // Quanto esperar antes de tentar pegar a trava de novo. Precisa ser MENOR que o
 // TTL do aluguel: assim, quando a instância dona sai, esta assume no próximo
 // ciclo em vez de esperar o prazo inteiro vencer.
 const RETENTAR_TRAVA_MS = parseInt(process.env.WA_QR_RETENTAR_TRAVA_MS || '15000', 10)
-const tentativasDeTrava = new Map()   // contaId -> timer
+const tentativasDeTrava = new MapaPorConta()   // contaId -> timer
 
 // Reagenda UMA tentativa por conta (o timer anterior é cancelado). Sem isso, cada
 // caminho que falha em pegar a trava — /iniciar, /enviar, restaurarSessoes, o
@@ -961,7 +997,7 @@ async function vigiarSessoes () {
 // juntos). Persistido no Postgres (arquivo 'lidmap-...' na wa_qr_auth) porque a
 // memória zera a cada deploy — e era justamente após deploy que o eco de mensagem
 // mandada pelo celular pra um chat @lid se perdia por falta do mapa.
-const lidMaps = new Map()
+const lidMaps = new MapaPorConta()
 
 // Teto por conta. O mapa era alimentado pela agenda INTEIRA (milhares de contatos) e
 // ainda por todo frame que chega no CB:message, sem nunca encolher — só sumia no
@@ -1868,7 +1904,7 @@ const HIST_ONDAS_MAX = parseInt(process.env.WA_QR_HIST_ONDAS_MAX || '40', 10)
 
 // contaId -> { ondas, aproveitadas }. Por ENCARNAÇÃO: o iniciarSessao zera, senão um
 // pareamento novo nasceria com o teto do anterior já estourado.
-const ondasDeHistorico = new Map()
+const ondasDeHistorico = new MapaPorConta()
 
 // Aritmética pura, sem socket nem mapa — é o que deixa a regra conferível no teste.
 function deveSeguirNoHistorico (h, semNada, max) {

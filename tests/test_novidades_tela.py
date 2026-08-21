@@ -61,6 +61,12 @@ def cliente(monkeypatch):
                      nicho_id bigint references nichos(id),
                      criado_em timestamptz not null default now(), chip_de bigint)""")
         c.execute((BASE / "174_novidades.sql").read_text(encoding="utf-8"))
+        # 184 amplia o check de `publico` com o primeiro portão de CONTA
+        # (`canal_proprio`). Sem ela aqui, o schema do teste fica com a lista
+        # antiga e a paridade banco × Python falha — que é o teste fazendo
+        # o trabalho dele.
+        c.execute((BASE / "184_novidade_voz_e_porta_fechada.sql"
+                   ).read_text(encoding="utf-8"))
         c.execute("insert into nichos (nome, slug) values ('Eventos','eventos'),"
                   "('Consultoria','consultoria')")
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values

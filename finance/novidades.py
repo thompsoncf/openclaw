@@ -67,10 +67,45 @@ def _eventos(slug) -> bool:
     return tem_contrato(slug)
 
 
+def _canal_proprio(pool, conta_id: int) -> bool:
+    """A conta fala pelo WhatsApp DELA, conectado por QR code.
+
+    POR QUE ISTO NÃO É UM NICHO. Duas mudanças de agosto — o microfone no app do
+    vendedor e o sumiço do atalho "Mandar no WhatsApp" — não valem por ramo de
+    negócio: valem por CANAL. Quem está na API oficial (Twilio, Cloud) só fala com o
+    cliente dentro da janela de 24h, então lá o atalho continua e o microfone não
+    aparece.
+
+    Mandar esses avisos por nicho seria errar dos dois lados: prometer microfone pra
+    quem não tem, e calar sobre um botão que sumiu pra quem perdeu. Na base de hoje,
+    'eventos' até acertaria — mas por coincidência, não por regra: a conta 34 tem
+    canal QR e Twilio configurados ao mesmo tempo.
+
+    Falha fechada: sem saber o canal, o aviso não sai. Melhor um aviso que não sai
+    do que um que sai pra quem não devia — a mesma escolha do público desconhecido.
+    """
+    try:
+        from finance import whatsapp_out as wo
+        with pool.connection() as c:
+            return wo.provedor_da_conta(c, conta_id) == "qr"
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra ver o canal da conta %s: %s: %s",
+                     conta_id, type(e).__name__, e)
+        return False
+
+
 # O REGISTRO. Cada chave aponta pro portão que já decide quem vê a funcionalidade.
 # Acrescentar um público aqui EXIGE mexer no check da migração — e um teste
 # compara as duas listas, pra deriva virar falha em vez de surpresa.
-PUBLICOS = {
+#
+# São DOIS registros porque são duas perguntas diferentes. A esmagadora maioria dos
+# portões é sobre o RAMO, e ramo é o slug: a regra vale pra qualquer conta daquele
+# nicho, hoje e no ano que vem. Uns poucos são sobre a CONTA — o canal de WhatsApp
+# que ela usa, por exemplo — e esses precisam ir ao banco perguntar.
+#
+# Manter os dois separados é o que preserva `nichos_alcancados`, que é como se
+# testa a mira sem depender de quem está cadastrado hoje.
+PUBLICOS_NICHO = {
     "todos": lambda slug: True,
     "produto": _produto_declarado,
     "servico": _n.vende_servico,
@@ -78,15 +113,31 @@ PUBLICOS = {
     "recorrente": _recorrente,
 }
 
+PUBLICOS_CONTA = {
+    "canal_proprio": _canal_proprio,
+}
 
-def alcanca(publico: str, slug: str | None) -> bool:
-    """Este aviso alcança uma conta com este nicho?
+# A lista completa — é ela que o check da migração espelha.
+PUBLICOS = {**PUBLICOS_NICHO, **PUBLICOS_CONTA}
+
+
+def alcanca(publico: str, slug: str | None, pool=None, conta_id: int | None = None) -> bool:
+    """Este aviso alcança esta conta?
+
+    `pool`/`conta_id` só são usados pelos portões de CONTA. Sem eles, um público de
+    conta devolve False — e isso é de propósito: quem chamar sem o banco não pode
+    receber um "sim" por engano. `nichos_alcancados` depende disso pra continuar
+    respondendo sobre slugs sem inventar contas.
 
     Público desconhecido devolve False e LOGA: melhor um aviso que não sai do que
     um aviso que sai pra quem não devia — e o log é o que impede a falha de ficar
     silenciosa. (Na prática não acontece: o check da tabela recusa o valor antes.)
     """
-    p = PUBLICOS.get(publico)
+    if publico in PUBLICOS_CONTA:
+        if pool is None or conta_id is None:
+            return False
+        return bool(PUBLICOS_CONTA[publico](pool, conta_id))
+    p = PUBLICOS_NICHO.get(publico)
     if p is None:
         _log.warning("novidade com publico desconhecido: %r — ninguém será avisado", publico)
         return False
@@ -98,7 +149,16 @@ def alcanca(publico: str, slug: str | None) -> bool:
 def nichos_alcancados(publico: str) -> set[str]:
     """Quais SLUGS este público alcança. É sobre slugs e não sobre contas de
     propósito: a base muda toda semana, a regra não. Teste que conta contas passa
-    por sorte e quebra quando alguém se cadastra."""
+    por sorte e quebra quando alguém se cadastra.
+
+    PORTÃO DE CONTA devolve vazio, e isso é a resposta certa: a mesma padaria pode
+    estar no QR ou na API oficial, então "que slugs `canal_proprio` alcança" é uma
+    pergunta que não se responde aqui. Vazio é a verdade; um conjunto seria invenção.
+
+    Sai de graça, sem `if`: `alcanca` sem pool recusa qualquer portão de conta, e a
+    compreensão abaixo não junta nada. Um `if` explícito aqui seria código que nunca
+    muda o resultado — e um ramo que nenhuma mutação consegue matar é um ramo que
+    ninguém precisa ler."""
     return {s for s in _n.NICHOS if alcanca(publico, s)}
 
 
@@ -142,7 +202,7 @@ def listar(pool, conta_id: int, membro_id=None) -> list[dict]:
                  where publicado_em > %s
                  order by publicado_em desc, id desc""",
             (conta_id, membro_id, criada_em)).fetchall()
-    return [_fmt(r, r[7]) for r in rows if alcanca(r[3], slug)]
+    return [_fmt(r, r[7]) for r in rows if alcanca(r[3], slug, pool, conta_id)]
 
 
 def nao_lidas(pool, conta_id: int, membro_id=None) -> int:
@@ -187,4 +247,4 @@ def contas_alcancadas(pool, publico: str) -> list[dict]:
                  left join nichos n on n.id = ct.nicho_id
                 order by ct.id""").fetchall()
     return [{"id": r[0], "nome": r[1], "nicho": r[2] or "(sem nicho)"}
-            for r in rows if alcanca(publico, r[2])]
+            for r in rows if alcanca(publico, r[2], pool, r[0])]

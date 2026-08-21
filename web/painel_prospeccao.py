@@ -486,6 +486,9 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                  where {' and '.join(where)}
                  order by p.proximo_contato_em asc nulls last, p.atualizado_em desc""",
             tuple(params)).fetchall()
+        # o mesmo número atendido pelo OUTRO chip — uma consulta pro funil inteiro, e
+        # nenhuma numa empresa de um chip só (que é o caso de quase todas)
+        gemeos = _gemeos_de_outro_chip(c, conta_id, [r[0] for r in rows])
     colunas = {e["chave"]: [] for e in etapas}
     primeira = etapas[0]["chave"] if etapas else "novo"
     total_valor = 0
@@ -495,7 +498,10 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                 "proximo": r[8], "telefone": r[9], "whatsapp": r[10],
                 "vendedor_id": r[11], "vendedor": r[12],
                 "tem_email": bool(r[13]), "tem_whatsapp": bool(r[10]),
-                "tem_instagram": bool(r[14]), "enriquecido": bool(r[15])}
+                "tem_instagram": bool(r[14]), "enriquecido": bool(r[15]),
+                "gemeo": _aviso_gemeo(gemeos.get(r[0])),
+                "gemeo_lead": ((gemeos.get(r[0]) or {}).get("lead_id")
+                               if _gemeo_abre(gemeos.get(r[0]), ctx) else None)}
         colunas.get(r[5], colunas[primeira]).append(card)
         if r[5] != "perdido":
             total_valor += int(r[7] or 0)
@@ -1513,8 +1519,7 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
          order by cv.ultima_msg_em desc limit 100""", tuple(params)).fetchall()
     # a empresa tem mais de um chip? decide se a etiqueta aparece — uma consulta só,
     # fora do laço
-    dois_chips = bool(c.execute("select 1 from contas where chip_de=%s limit 1",
-                                (conta_id,)).fetchone())
+    dois_chips = _tem_dois_chips(c, conta_id)
     out = []
     for r in rows:
         if r[9] == "bot":
@@ -1633,6 +1638,19 @@ def _wa_minutos_sem_receber(conta_id) -> int | None:
                 where cv.conta_id=%s and cv.canal='whatsapp' and m.direcao='in'""",
             (conta_id,)).fetchone()
     return int(r[0]) if r and r[0] is not None else None
+
+
+def _minutos_desde(quando) -> int | None:
+    """Minutos entre `quando` e agora — o par de `_ha_quanto`, que espera minutos.
+
+    Tolera data ingênua (sem fuso) tratando-a como UTC: as colunas do banco são
+    timestamptz e chegam com fuso, mas teste e importação às vezes passam datetime
+    solto, e comparar aware com naive levanta TypeError no meio da tela."""
+    if quando is None:
+        return None
+    if quando.tzinfo is None:
+        quando = quando.replace(tzinfo=timezone.utc)
+    return max(0, int((datetime.now(timezone.utc) - quando).total_seconds() // 60))
 
 
 def _ha_quanto(minutos) -> str:
@@ -1873,6 +1891,9 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
                         where msg.conversa_id=%s
                         order by msg.criado_em desc, msg.id desc limit 100) ult
                 order by criado_em asc, mid asc""", (conversa_id,)).fetchall()
+        # o mesmo número em atendimento pelo OUTRO chip. Conversa sem lead não tem
+        # gêmeo pra procurar — o casamento é entre fichas, não entre números soltos.
+        gemeo = _gemeos_de_outro_chip(c, ctx["conta_id"], [cv[2]]).get(cv[2]) if cv[2] else None
     # Quem mandou, quando saiu do celular e não do Zaq: a mensagem chega pelo eco
     # do Baileys (ou vem do histórico importado) e não tem membro_id — o inbox
     # mostrava só "—". O nome do perfil do WhatsApp conectado é exatamente quem
@@ -1932,7 +1953,18 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
     vends = ([{"id": v["id"], "nome": v["nome"]}
               for v in _vendedores(pool, ctx["conta_id"])]
              if (ctx["pode_atribuir"] and cv[2]) else [])
+    # o aviso do chat é a MESMA frase do funil, com "quando foi a última" no fim: no
+    # chat a pergunta prática é se a outra conversa está viva agora ou parada há uma
+    # semana. `conversa_id` do gêmeo vai junto pro botão abrir direto lá.
+    gemeo_txt = _aviso_gemeo(gemeo)
+    if gemeo_txt and gemeo.get("quando"):
+        gemeo_txt = gemeo_txt.rstrip(".") + " · última mensagem " + (
+            _ha_quanto(_minutos_desde(gemeo["quando"])) or "agora há pouco") + "."
     return JSONResponse({"ok": True, "lead": lead, "msgs": msgs,
+                         "gemeo": ({"texto": gemeo_txt,
+                                    "conversa_id": (gemeo["conversa_id"]
+                                                    if _gemeo_abre(gemeo, ctx) else None)}
+                                   if gemeo_txt else None),
                          "conversa_id": conversa_id, "pode_responder": pode_wa,
                          "agente_ativo": bool(cv[14]),
                          "pode_atribuir": bool(ctx["pode_atribuir"] and cv[2]),
@@ -2262,6 +2294,122 @@ def chips_da_conta(c, conta_id: int) -> list[dict]:
                       "ultima": ultima or "",
                       "sem_receber": _ha_quanto(int(min_sem) if min_sem is not None else None)})
     return saida
+
+
+def _tem_dois_chips(c, conta_id: int) -> bool:
+    """A empresa tem um segundo chip? Uma linha, por chave estrangeira indexada.
+
+    Vale a chamada porque TODO o aviso cruzado depende dela: com um chip só não existe
+    "o mesmo número na outra campanha", e a consulta cara nem chega a rodar. Hoje isso
+    é verdade em 21 das 22 contas."""
+    return bool(c.execute("select 1 from contas where chip_de=%s limit 1",
+                          (conta_id,)).fetchone())
+
+
+def _gemeos_de_outro_chip(c, conta_id: int, lead_ids) -> dict:
+    """O MESMO número sendo atendido por OUTRO chip: `{lead_id: {...}}`.
+
+    Numa empresa de dois números, o mesmo telefone pode estar em duas campanhas — uma
+    por chip — e aí são dois leads e duas conversas, de propósito: o que entra pelo
+    chip 1 sai pelo chip 1 e o que entra pelo 2 sai pelo 2 (ver a busca de lead em
+    `_wa_inbound_conversa`). Separar é o certo; o que faltava era AVISAR, senão dois
+    vendedores negociam com a mesma pessoa sem saber um do outro, cada um com um preço.
+
+    Devolve, pra cada lead pedido, o gêmeo MAIS RECENTE do outro chip:
+    `{"lead_id", "nome", "conversa_id", "quando", "campanha", "dono", "chip_rot",
+    "vendedor_id"}`. O `vendedor_id` é do GÊMEO, e serve pra decidir se o link abre: o
+    vendedor comum não enxerga ficha dos outros (`_pode_ver`), então pra ele o aviso
+    aparece sem link em vez de com um link que só redireciona.
+    Lead sem gêmeo simplesmente não aparece no dicionário — quem chama itera o que veio.
+
+    Empresa de um chip só sai na primeira linha, sem tocar em `prospeccao`: não existe
+    "outro chip" pra comparar e a consulta seria varredura à toa em toda tela do funil.
+
+    O casamento é pelos 8 dígitos finais, o mesmo de todo o resto do arquivo (o nono
+    dígito aparece ou não conforme quem digitou — ver `_wa_equivalentes`). Aqui ele é
+    o final SOZINHO, sem a igualdade exata que a busca de conversa faz por cima: um
+    falso positivo aqui custa um aviso a mais numa tela, não uma mensagem no lugar
+    errado, e o número aparece no aviso pra pessoa conferir."""
+    ids = [int(i) for i in (lead_ids or []) if i]
+    if not ids or not _tem_dois_chips(c, conta_id):
+        return {}
+    try:
+        linhas = _gemeos_consulta(c, conta_id, ids)
+    except Exception:  # noqa: BLE001
+        # o aviso é um extra; o funil, o chat e a resposta do agente não são. Mesmo
+        # tratamento do `_chips_para_tela`: registra e devolve vazio, que é a tela de
+        # ontem. O SAVEPOINT está lá dentro — sem ele o erro abortaria a transação
+        # inteira e derrubaria junto o que vem DEPOIS desta chamada.
+        import logging
+        logging.getLogger("prospeccao.chips").warning(
+            "aviso de chip gêmeo falhou na conta %s", conta_id, exc_info=True)
+        return {}
+    return {r[0]: {"lead_id": r[1], "nome": r[2], "conversa_id": r[3], "quando": r[4],
+                   "campanha": r[5], "dono": r[6], "chip_rot": r[7],
+                   "vendedor_id": r[8]} for r in linhas}
+
+
+def _gemeos_consulta(c, conta_id: int, ids: list):
+    """Só a consulta do `_gemeos_de_outro_chip`, num SAVEPOINT. Separada pra deixar a
+    função de cima legível — o try/except em volta de 30 linhas de SQL esconde o SQL."""
+    with c.transaction():
+        return c.execute(
+            r"""with meu as (
+                  select p.id,
+                         right(regexp_replace(coalesce(p.whatsapp, p.telefone, ''), '\D', '', 'g'), 8) as n8,
+                         cv.chip_id as chip
+                    from prospeccao p
+                    left join conversas cv on cv.conta_id = p.conta_id
+                                          and cv.prospeccao_id = p.id and cv.canal='whatsapp'
+                   where p.conta_id = %s and p.id = any(%s))
+                select distinct on (meu.id)
+                       meu.id, o.id,
+                       coalesce(nullif(btrim(o.contato),''), nullif(btrim(o.empresa),''), ''),
+                       cvo.id, cvo.ultima_msg_em,
+                       coalesce(cp.nome,''), coalesce(vm.nome,''),
+                       coalesce(nullif(btrim(chp.nome),''), nullif(btrim(cc1.rotulo),''), ''),
+                       o.vendedor_id
+                  from meu
+                  join prospeccao o
+                    on o.conta_id = %s and o.id <> meu.id and length(meu.n8) = 8
+                   and right(regexp_replace(coalesce(o.whatsapp, o.telefone, ''), '\D', '', 'g'), 8) = meu.n8
+                  join conversas cvo
+                    on cvo.conta_id = o.conta_id and cvo.prospeccao_id = o.id
+                   and cvo.canal = 'whatsapp' and cvo.chip_id is distinct from meu.chip
+                  left join contas chp on chp.id = cvo.chip_id
+                  left join canais_config cc1 on cvo.chip_id is null and cc1.conta_id = cvo.conta_id
+                                             and cc1.canal = 'whatsapp'
+                  left join membros vm on vm.id = o.vendedor_id
+                  left join lateral (
+                        select camp.nome from campanha_alvos a
+                          join campanhas camp on camp.id = a.campanha_id
+                         where a.prospeccao_id = o.id order by a.id desc limit 1) cp on true
+                 order by meu.id, cvo.ultima_msg_em desc nulls last, cvo.id desc""",
+            (conta_id, ids, conta_id)).fetchall()
+
+
+def _gemeo_abre(g, ctx) -> bool:
+    """Este usuário consegue abrir a ficha/conversa do gêmeo? Mesma régua do
+    `_pode_ver`: gerência vê tudo, vendedor vê o que é dele. Sem isto o aviso oferecia
+    um "Abrir →" que só redirecionava de volta — pior que não ter link nenhum."""
+    if not g:
+        return False
+    return bool(ctx.get("gerencia")) or (
+        g.get("vendedor_id") is not None and g["vendedor_id"] == ctx.get("membro_id"))
+
+
+def _aviso_gemeo(g: dict) -> str:
+    """A frase do aviso, uma só pras três telas (funil, chat e agente).
+
+    Um texto só porque três textos diferentes pra mesma coisa é como o vendedor
+    aprende que são coisas diferentes."""
+    if not g:
+        return ""
+    onde = g.get("campanha") or (("chip " + g["chip_rot"]) if g.get("chip_rot") else "outro chip")
+    frase = "Este número também está em atendimento na " + onde
+    if g.get("dono"):
+        frase += " — com " + g["dono"]
+    return frase + "."
 
 
 def _chip_da_conta(c, conta_id: int, chip_id) -> int | None:
@@ -3221,11 +3369,37 @@ def _batiza_lead_pendente(c, conta_id: int, conv_id: int | None = None) -> int:
         return 0
 
 
-def _conversa_wa_do_contato(c, conta_id, lead_id, numero):
+# "não filtre por chip" — diferente de `chip_id=None`, que é o chip PRINCIPAL (ver
+# _chip_gravavel). Sem este sentinela não dá pra dizer as duas coisas num parâmetro
+# só, e quem não sabe o chip (o botão "Agora não", que vem da tela) acabaria pedindo
+# o principal por engano — perdendo a conversa do chip 2.
+_QUALQUER_CHIP = object()
+
+
+def _sql_filtro_chip(chip_id, empresa_id):
+    """`(pedaço de SQL, params)` pro filtro de chip de uma consulta em `conversas`.
+
+    `is not distinct from` e não `=`: o chip principal é gravado como NULO (todo o
+    histórico e toda empresa de um chip só), e `chip_id = NULL` não casa com nada —
+    a busca voltaria vazia e cada mensagem abriria uma conversa nova."""
+    if chip_id is _QUALQUER_CHIP:
+        return "", []
+    return " and chip_id is not distinct from %s", [_chip_gravavel(chip_id, empresa_id)]
+
+
+def _conversa_wa_do_contato(c, conta_id, lead_id, numero, *, chip_id=_QUALQUER_CHIP):
     """A conversa de WhatsApp deste contato: a do LEAD, se ele já tiver uma; senão a
     do NÚMERO, nas duas grafias (ver _wa_equivalentes). Devolve (id, prospeccao_id)
     ou None. Usada pelos três caminhos que gravam conversa — entrada, eco de saída e
     o botão "Agora não" — que antes repetiam a mesma busca com diferenças sutis.
+
+    `chip_id` limita a busca ao chip por onde a mensagem entrou. Numa empresa de DOIS
+    números o mesmo contato tem duas conversas — uma por chip — e casar pelo número
+    sem olhar o chip devolvia a do OUTRO: a resposta saía pelo número errado e as duas
+    campanhas se misturavam numa thread só. Medido na conta 34 em 21/08/2026, com a
+    Prime rodando "Zarb" no chip principal e "Thiago" no chip 36. Sem o argumento a
+    busca é de QUALQUER chip, que é o comportamento de sempre (e o certo pra quem
+    chega pelo lead, não pelo número).
 
     DUAS CONSULTAS, e não uma com OR, porque o OR custa a tabela inteira. Medido
     com 60 mil conversas: a versão com `prospeccao_id=%s or right(...)=%s` fazia
@@ -3245,21 +3419,25 @@ def _conversa_wa_do_contato(c, conta_id, lead_id, numero):
     outro DDD que termine igual."""
     d = _so_digitos(numero)
     alvo8 = d[-8:] if len(d) >= 8 else d
+    filtro, par_chip = _sql_filtro_chip(chip_id, conta_id)
     if lead_id:
-        # UNIQUE (conta_id, prospeccao_id, canal): é uma linha ou nenhuma
+        # UNIQUE (conta_id, prospeccao_id, canal): é uma linha ou nenhuma. O filtro de
+        # chip aqui é redundante por construção (quem escolheu o lead já descartou os
+        # que são de outro chip) e fica de cinto: uma linha vinda de outro chip é bug,
+        # e é melhor ela não voltar do que voltar e mandar resposta pelo número errado.
         r = c.execute(
             """select id, prospeccao_id from conversas
-                where conta_id=%s and canal='whatsapp' and prospeccao_id=%s""",
-            (conta_id, lead_id)).fetchone()
+                where conta_id=%s and canal='whatsapp' and prospeccao_id=%s""" + filtro,
+            (conta_id, lead_id, *par_chip)).fetchone()
         if r:
             return r
     return c.execute(
         r"""select id, prospeccao_id from conversas
              where conta_id=%s and canal='whatsapp'
                and right(regexp_replace(contato_ref, '\D', '', 'g'), 8) = %s
-               and regexp_replace(contato_ref, '\D', '', 'g') = any(%s)
+               and regexp_replace(contato_ref, '\D', '', 'g') = any(%s)""" + filtro + """
              order by (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
-        (conta_id, alvo8, _wa_equivalentes(d) or [d])).fetchone()
+        (conta_id, alvo8, _wa_equivalentes(d) or [d], *par_chip)).fetchone()
 
 
 def _ja_conversou(c, conta_id, lead_id) -> bool:
@@ -3315,10 +3493,34 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     # as duas grafias do número (com e sem o nono dígito) — o mesmo contato chega das
     # duas formas, e casar por igualdade crua criava uma conversa nova a cada troca
     equivalentes = _wa_equivalentes(remetente) or [remetente]
+    # O lead deste número — mas NÃO um que já seja de OUTRO chip.
+    #
+    # Numa empresa de dois números o mesmo telefone pode estar em duas campanhas, uma
+    # por chip, e aí são DOIS leads e DUAS conversas: o que entra pelo chip 1 sai pelo
+    # chip 1, o que entra pelo 2 sai pelo 2. Sem o `not exists`, a mensagem que chegava
+    # no chip 2 encontrava o lead do chip 1 e ia parar na conversa dele — a resposta
+    # saía pelo número errado e as duas campanhas viravam uma thread só (conta 34,
+    # 21/08/2026: a "Thiago" no chip 36 respondeu como se fosse a "Zarb").
+    #
+    # Quem marca o chip do lead é a CONVERSA dele (prospeccao não tem coluna de chip, e
+    # não precisa ter): lead sem conversa de WhatsApp ainda não é de ninguém e o
+    # primeiro chip que falar com ele fica com ele. Numa empresa de um chip só, todas
+    # as conversas têm `chip_id` nulo e o chip que chega também é nulo — `is distinct
+    # from` dá falso em todas, o `not exists` é sempre verdadeiro, e a consulta é
+    # exatamente a de antes.
+    #
+    # O aviso cruzado (o gêmeo na outra campanha) é o `_gemeos_de_outro_chip`,
+    # que é só leitura de tela — aqui a regra é apenas: não roubar o lead do outro chip.
     lead = c.execute(
-        r"""select id, coalesce(origem,'') from prospeccao
-             where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
-             order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
+        r"""select p.id, coalesce(p.origem,'') from prospeccao p
+             where p.conta_id=%s
+               and right(regexp_replace(coalesce(p.whatsapp, p.telefone, ''), '\D', '', 'g'), 8) = %s
+               and not exists (select 1 from conversas cv
+                                where cv.conta_id=p.conta_id and cv.prospeccao_id=p.id
+                                  and cv.canal='whatsapp'
+                                  and cv.chip_id is distinct from %s)
+             order by p.atualizado_em desc limit 1""",
+        (conta_id, alvo8, _chip_gravavel(chip_id, conta_id))).fetchone()
     lead_id = lead[0] if lead else None
     de_prospeccao = bool(lead) and lead[1] not in ("whatsapp_inbound", "email_inbound")
     lead_novo = False
@@ -3333,13 +3535,16 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         # Agora a conversa órfã só serve pra herdar o NOME (melhor que o pushName) e
         # o fluxo segue pra criar o lead. O vínculo da conversa existente com o lead
         # novo é feito logo abaixo, junto com as mensagens que ela já tinha.
+        # do MESMO chip: uma órfã do chip 2 não pode ser adotada pelo lead que nasce
+        # no chip 1 — ela é a thread do outro número, com o outro histórico.
         orfa = c.execute(
             r"""select id, coalesce(nullif(contato_nome,''),'') from conversas
                  where conta_id=%s and canal='whatsapp' and prospeccao_id is null
                    and right(regexp_replace(contato_ref, '\D', '', 'g'), 8) = %s
                    and regexp_replace(contato_ref, '\D', '', 'g') = any(%s)
+                   and chip_id is not distinct from %s
                  order by ultima_msg_em desc limit 1""",
-            (conta_id, alvo8, equivalentes)).fetchone()
+            (conta_id, alvo8, equivalentes, _chip_gravavel(chip_id, conta_id))).fetchone()
         nome_orfa = orfa[1] if orfa else ""
         # contato NOVO de verdade (landing/WhatsApp) → vira lead QUENTE, não atribuído (o dono distribui).
         # Nome: primeiro o da AGENDA do vendedor (o melhor que existe), depois o do
@@ -3383,7 +3588,7 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     # por último a mais recente. Exigir `prospeccao_id is null` pra casar por número,
     # como era antes, deixava de fora a conversa pendurada em OUTRA ficha do mesmo
     # telefone — e o inbox ganhava uma segunda thread do mesmo cliente.
-    conv = _conversa_wa_do_contato(c, conta_id, lead_id, remetente)
+    conv = _conversa_wa_do_contato(c, conta_id, lead_id, remetente, chip_id=chip_id)
     if conv:
         conv_id = conv[0]
         if conv[1] is None:
@@ -4222,7 +4427,7 @@ def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=Fa
     antigo, e casando cru ele virava uma segunda conversa do mesmo contato."""
     remetente = _so_digitos(remetente)
     alvo8 = remetente[-8:] if len(remetente) >= 8 else remetente
-    conv = _conversa_wa_do_contato(c, conta_id, None, remetente)
+    conv = _conversa_wa_do_contato(c, conta_id, None, remetente, chip_id=chip_id)
     if conv:
         conv_id = conv[0]
     else:
@@ -4325,12 +4530,21 @@ def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid, *, chip_id=None):
     encontrada e a mensagem sumir."""
     destinatario = _so_digitos(destinatario)
     alvo8 = destinatario[-8:] if len(destinatario) >= 8 else destinatario
+    # sem roubar o lead do OUTRO chip, pela mesma razão do inbound: numa empresa de
+    # dois números o vendedor que escreve pelo celular do chip 2 não pode pendurar a
+    # mensagem na ficha que pertence ao chip 1.
     lead = c.execute(
-        r"""select id from prospeccao
-             where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
-             order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
+        r"""select p.id from prospeccao p
+             where p.conta_id=%s
+               and right(regexp_replace(coalesce(p.whatsapp, p.telefone, ''), '\D', '', 'g'), 8) = %s
+               and not exists (select 1 from conversas cv
+                                where cv.conta_id=p.conta_id and cv.prospeccao_id=p.id
+                                  and cv.canal='whatsapp'
+                                  and cv.chip_id is distinct from %s)
+             order by p.atualizado_em desc limit 1""",
+        (conta_id, alvo8, _chip_gravavel(chip_id, conta_id))).fetchone()
     lead_id = lead[0] if lead else None
-    conv = _conversa_wa_do_contato(c, conta_id, lead_id, destinatario)
+    conv = _conversa_wa_do_contato(c, conta_id, lead_id, destinatario, chip_id=chip_id)
     if conv:
         conv_id = conv[0]
     else:
@@ -6478,7 +6692,13 @@ def prospeccao_ficha(request: Request, alvo_id: int):
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
     with pool.connection() as c:
         status_ficha = [(e["chave"], e["rotulo"]) for e in _etapas(c, ctx["conta_id"])]
+        # o mesmo número atendido pelo outro chip. O aviso está no card do funil, mas o
+        # card some assim que o vendedor abre a ficha (é a ficha que abre na gaveta) —
+        # e é aqui, com o telefone na mão pra ligar, que saber disso muda o que ele faz.
+        gemeo = _gemeos_de_outro_chip(c, ctx["conta_id"], [alvo_id]).get(alvo_id)
     return _render("prospeccao_ficha", request, titulo=alvo["empresa"], secao_ativa="prospeccao",
+                   gemeo=gemeo, gemeo_aviso=_aviso_gemeo(gemeo),
+                   gemeo_abre=_gemeo_abre(gemeo, ctx),
                    canais_contato=canais_contato, origem_ch=origem_ch,
                    a=alvo, timeline=timeline, status=status_ficha, temperaturas=TEMPERATURAS,
                    tipos=TIPOS, resultados=RESULTADOS, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
@@ -7779,6 +7999,14 @@ _CSS = """<style>
 .tgl:before{content:'';position:absolute;left:3px;top:3px;width:18px;height:18px;background:#fff;border-radius:50%;transition:.2s}
 .toggle input:checked+.tgl{background:var(--verde)}
 .toggle input:checked+.tgl:before{transform:translateX(20px)}
+/* ---- mesmo número, outro chip (aviso cruzado) ----
+   Âmbar, e não vermelho: não é erro. Ter dois leads é o desenho — cada chip responde
+   pelo seu número. O que o aviso pede é cuidado, não conserto. */
+.gemeo-faixa{margin-top:.8rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+  font-size:.84rem;line-height:1.4;color:var(--ambar);background:#2a2113;
+  border:1px solid var(--ambar-borda);border-radius:10px;padding:.55rem .75rem}
+.gemeo-faixa a{color:var(--ambar);text-decoration:underline;white-space:nowrap}
+.gemeo-faixa .mut{color:var(--txt-mut)}
 </style>"""
 
 # ---- barra de navegação do módulo + agilidade no front (prefetch no hover + barra
@@ -8732,6 +8960,10 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido %}<div class="kbch">{% if c.tem_whatsapp %}<span title="WhatsApp">💬</span>{% endif %}{% if c.tem_email %}<span title="E-mail">✉️</span>{% endif %}{% if c.tem_instagram %}<span title="Instagram">📸</span>{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
           <div class="ft">{% if c.valor %}<span style="font-size:.76rem;color:var(--verde-claro)">{{ brl(c.valor) }}</span>{% else %}<span></span>{% endif %}{% if c.proximo %}<span class="mut" style="font-size:.72rem">📅 {{ c.proximo.strftime('%d/%m') }}</span>{% endif %}</div>
           {% if gerencia and c.vendedor %}<div class="mut" style="font-size:.72rem;margin-top:.28rem">👤 {{ c.vendedor }}</div>{% endif %}
+          {# mesmo telefone, outro chip: são dois leads de propósito (cada chip responde
+             pelo seu número), mas quem olha o funil precisa saber — senão dois
+             vendedores negociam com a mesma pessoa, cada um com um preço. #}
+          {% if c.gemeo %}<div class="kbgem" onclick="event.stopPropagation()">⚠️ {{ c.gemeo }}{% if c.gemeo_lead %} <a href="/painel/prospeccao/{{ c.gemeo_lead }}">Abrir →</a>{% endif %}</div>{% endif %}
         </div>
         {% else %}<div class="kbempty">vazio</div>{% endfor %}
       </div>
@@ -8741,6 +8973,9 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 </div>
 
 <style>
+.kbgem{margin-top:.4rem;font-size:.7rem;line-height:1.35;color:#e0b45f;background:rgba(224,180,95,.10);
+  border:1px solid rgba(224,180,95,.32);border-radius:8px;padding:.3rem .42rem;cursor:default}
+.kbgem a{color:#e0b45f;text-decoration:underline;white-space:nowrap}
 .kbch{display:flex;gap:.35rem;margin-top:.3rem;font-size:.82rem;align-items:center}
 .kbch .mut{font-size:.7rem}
 .kbx{background:none;border:0;color:#6b6b6b;cursor:pointer;font-size:.82rem;line-height:1;padding:.1rem .25rem;border-radius:6px;opacity:.55}
@@ -9068,6 +9303,11 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if a.email %}<button type="button" class="pbtn ghost" id="cvz-btn" onclick="convidarZaq({{ a.id }})" title="Manda um e-mail com link pro cliente criar a conta no Zaq">🎟️ Convidar pro Zaq</button>{% endif %}
     </div>
     <div class="mut" id="enrqf-msg" style="font-size:.82rem;margin-top:.5rem"></div>
+    {# mesmo telefone, outro chip: dois leads de propósito, um por número — mas quem
+       vai ligar precisa saber que a outra campanha já está falando com essa pessoa. #}
+    {% if gemeo_aviso %}<div class="gemeo-faixa">⚠️ {{ gemeo_aviso }}
+      {% if gemeo.nome %}<span class="mut">({{ gemeo.nome }})</span>{% endif %}
+      {% if gemeo_abre %}<a href="/painel/prospeccao/{{ gemeo.lead_id }}">Abrir o outro lead →</a>{% endif %}</div>{% endif %}
     {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
     <script>
     function fichaStatus(sel,id){
@@ -9471,6 +9711,12 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-empty{padding:2.4rem 1rem;text-align:center;color:var(--txt-mut);font-size:.9rem}
 .cx-trunc{padding:.35rem 0;text-align:center;color:var(--txt-mut);font-size:.72rem}
 .cx-th{display:flex;align-items:center;gap:.6rem;padding:.7rem .85rem;border-bottom:1px solid var(--borda)}
+/* aviso de mesmo número no outro chip — colado embaixo do cabeçalho, antes das
+   mensagens: é o que a pessoa lê ANTES de escrever, que é o ponto. */
+.cx-gemeo{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;font-size:.78rem;
+  line-height:1.4;color:var(--ambar);background:#2a2113;border-bottom:1px solid var(--ambar-borda);
+  padding:.45rem .85rem}
+.cx-gemeo a{color:var(--ambar);text-decoration:underline;white-space:nowrap}
 .cx-th b{font-size:.92rem}
 .cx-th small{display:block;color:var(--txt-mut);font-size:.75rem}
 .cx-msgs{flex:1;overflow-y:auto;padding:.9rem;display:flex;flex-direction:column;gap:.6rem}
@@ -10757,6 +11003,10 @@ function cxOpen(el,id){
       // a conversa sem abrir o painel do lado nem a ficha
       +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+cxEsc(L.canal_rot||'')+(L.cidade?(' · '+cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):'')):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+(L.id?(L.vendedor?(' · 👤 '+cxEsc(L.vendedor)):' · <span style=\\'color:#e0b45f\\'>👤 sem responsável</span>'):'')+(d.agente_ativo?' · <span style=\\'color:#c9a3e0\\'>🤖 no automático</span>':'')+'</small></div>'
       +'<span style="flex:1"></span>'+agBtn+(L.id?(' <a class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" href="/painel/prospeccao/'+L.id+'">Abrir ficha</a>'):(' <button class="pbtn" style="padding:.35rem .7rem;font-size:.78rem" onclick="cxVirarLead('+d.conversa_id+')" title="Criar um lead a partir deste contato">➕ Levar para o lead</button>'))+'</div>'
+      // mesmo número, outro chip: as duas conversas são separadas de propósito (cada
+      // chip responde pelo seu número). O aviso é pra quem digita aqui não repetir —
+      // ou contradizer — o que a outra campanha já combinou com a mesma pessoa.
+      +(d.gemeo?('<div class="cx-gemeo">⚠️ '+cxEsc(d.gemeo.texto)+(d.gemeo.conversa_id?(' <a href="#" onclick="cxOpen(null,'+d.gemeo.conversa_id+');return false">Ver conversa →</a>'):'')+'</div>'):'')
       +'<div class="cx-msgs" id="cx-msgs">'+cxMsgsHtml(d)+'</div>'+rodape;
     cxScroll(true);
     var kv=function(k,v){return v?('<div class="cx-kv"><span>'+k+'</span><b>'+cxEsc(v)+'</b></div>'):'';};

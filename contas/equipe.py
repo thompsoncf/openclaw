@@ -11,8 +11,8 @@ Papéis = presets de 3 capacidades (vendas · financeiro · gerir):
     financeiro -> vendas ✗  financeiro ✓  gerir ✗
 
 Reusa a tabela `membros` (multi-tenant por conta_id). As colunas de login web
-(email/senha_hash/convite_token) são garantidas em runtime — o deploy não roda
-migração sozinho.
+(email/senha_hash/convite_token) são garantidas em runtime, UMA VEZ POR PROCESSO
+(ver core/esquema_runtime) — a migração de verdade roda no preDeployCommand.
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from . import senha as _senha
+from core import esquema_runtime
 
 # capacidade por papel — fonte única da verdade do que cada um acessa.
 CAPS = {
@@ -113,8 +114,19 @@ def _agora() -> datetime:
 
 
 def garantir_tabela(pool):
-    """Colunas de login web em membros (idempotente). Relaxa o check de papel pra
-    aceitar os papéis de equipe."""
+    """Colunas de login web em membros (idempotente) — UMA VEZ POR PROCESSO.
+
+    Chamada no GET /painel/equipe. São 13 comandos DDL, com drop constraint e
+    drop index, em `contas` e `membros` — as duas tabelas que TODA requisição
+    autenticada lê. O ACCESS EXCLUSIVE do ALTER enfileira os leitores que chegam
+    depois, então rodar isso a cada abertura da tela travava o painel inteiro
+    (22/08/2026). Ver core/esquema_runtime."""
+    esquema_runtime.garantir(esquema_runtime.chave(pool, "membros_login"),
+                             lambda: _aplicar_login_web(pool))
+
+
+def _aplicar_login_web(pool):
+    """O DDL em si. Chamado uma vez por processo, via garantir_tabela."""
     with pool.connection() as c:
         c.execute("alter table contas  add column if not exists senha_hash     text")
         c.execute("alter table membros add column if not exists email          text")

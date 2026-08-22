@@ -16,6 +16,7 @@ Valores sempre em CENTAVOS aqui dentro (a tela converte de/para reais).
 from __future__ import annotations
 
 import re
+from core import esquema_runtime
 
 # Categorias do serviço no nicho EVENTOS. Servem pra agrupar os itens e mostrar
 # o SUBTOTAL POR CATEGORIA na folha do orçamento — e são o mesmo vocabulário das
@@ -65,7 +66,17 @@ STARTER_TECNOLOGIA = [
 
 
 def garantir_tabela(pool):
-    """Cria a tabela em runtime (o deploy não roda migração sozinho)."""
+    """Cria a tabela em runtime — UMA VEZ POR PROCESSO.
+
+    O "o deploy não roda migração sozinho" do comentário antigo deixou de valer
+    quando o Render ganhou o preDeployCommand. São 5 comandos DDL por chamada, em
+    duas rotas do painel de serviços. Ver core/esquema_runtime."""
+    esquema_runtime.garantir(esquema_runtime.chave(pool, "servicos_catalogo"),
+                             lambda: _criar_catalogo(pool))
+
+
+def _criar_catalogo(pool):
+    """O DDL em si. Chamado uma vez por processo, via garantir_tabela."""
     with pool.connection() as c:
         c.execute("""
             create table if not exists servicos_catalogo (

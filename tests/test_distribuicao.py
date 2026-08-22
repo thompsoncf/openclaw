@@ -171,3 +171,67 @@ def test_membros_fila_ui_ordem(pool):
     na_fila = [m["id"] for m in ui if m["na_fila"]]
     assert na_fila == [ids[1], ids[0]]           # respeita a ordem salva
     assert ids[2] in [m["id"] for m in ui if not m["na_fila"]]   # o de fora aparece depois
+
+
+# ------------------------------- o texto do aviso: lead novo × cliente que voltou
+
+@pytest.fixture()
+def espiao(monkeypatch):
+    """O que sairia por e-mail e por push, sem mandar nada.
+
+    `enviar_push` é trocado de propósito: o webpush deste container quebra com
+    PanicException do `pyo3`, que NÃO é Exception e escapa do try/except de dentro do
+    avisar_vendedor."""
+    from finance import cockpit as ck
+    from finance import email_sender as es
+
+    visto = {}
+    monkeypatch.setattr(es, "enviar_aviso",
+                        lambda email, titulo, corpo, **k: visto.update(
+                            titulo=titulo, corpo=corpo) or True)
+    monkeypatch.setattr(ck, "enviar_push",
+                        lambda pool, cid, mid, t, sub, link: visto.update(
+                            push_titulo=t, push_sub=sub))
+    return visto
+
+
+def test_lead_novo_continua_com_o_texto_de_sempre(pool, espiao):
+    with pool.connection() as c:
+        conta, ids = _setup(c, "TxtNovo", 1)
+    dist.avisar_vendedor(pool, conta, ids[0], "Padaria Estrela")
+    assert espiao["titulo"] == "🔥 Novo lead pra você: Padaria Estrela"
+    assert "rodízio de leads" in espiao["corpo"]
+
+
+def test_retomada_diz_que_o_cliente_voltou(pool, espiao):
+    """Chamar de "novo lead" quem a empresa atende há meses foi o que motivou isto:
+    depois de um re-pareamento, dez clientes antigos da Doce Mell foram anunciados
+    assim no mesmo dia."""
+    with pool.connection() as c:
+        conta, ids = _setup(c, "TxtVolta", 1)
+    dist.avisar_vendedor(pool, conta, ids[0], "Ateliê Festas", retomada=True)
+    assert espiao["titulo"] == "💬 Cliente voltou a falar: Ateliê Festas"
+    assert "Novo lead" not in espiao["titulo"]
+    assert "rodízio" not in espiao["corpo"], "não caiu no rodízio agora, já era dela"
+    assert "histórico" in espiao["corpo"]
+
+
+def test_o_push_nao_contradiz_o_email(pool, espiao):
+    """Dois avisos da mesma mensagem dizendo coisas diferentes é pior que um só."""
+    with pool.connection() as c:
+        conta, ids = _setup(c, "TxtPush", 1)
+    dist.avisar_vendedor(pool, conta, ids[0], "Ateliê Festas", retomada=True)
+    assert "Voltou a falar" in espiao["push_titulo"]
+    assert "Novo lead" not in espiao["push_titulo"]
+    espiao.clear()
+    dist.avisar_vendedor(pool, conta, ids[0], "Padaria Estrela")
+    assert espiao["push_titulo"] == "🔥 Novo lead: Padaria Estrela"
+
+
+def test_retomada_e_parametro_so_por_nome(pool, espiao):
+    """Keyword-only de propósito: `avisar_vendedor(pool, conta, membro, empresa, True)`
+    posicional passaria despercebido numa revisão e mudaria o texto sem querer."""
+    with pool.connection() as c:
+        conta, ids = _setup(c, "TxtKw", 1)
+    with pytest.raises(TypeError):
+        dist.avisar_vendedor(pool, conta, ids[0], "X", True)

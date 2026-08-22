@@ -3664,6 +3664,9 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     de_prospeccao = bool(lead) and lead[1] not in ("whatsapp_inbound", "email_inbound")
     lead_novo = False
     nome_lead_novo = None
+    # Cliente de casa cuja conversa foi REIMPORTADA, e não contato novo — ver o bloco
+    # da órfã logo abaixo. Nasce falso e só o caminho da órfã liga.
+    retomada = False
     if not lead_id:
         # Conversa ÓRFÃ desse número (importada do histórico do WhatsApp por QR, de
         # ANTES de conectar — ver _wa_historico_conversa). ANTES isso era um beco sem
@@ -3685,6 +3688,21 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
                  order by ultima_msg_em desc limit 1""",
             (conta_id, alvo8, equivalentes, _chip_gravavel(chip_id, conta_id))).fetchone()
         nome_orfa = orfa[1] if orfa else ""
+        # ...e a órfã diz TAMBÉM se este contato é novo ou velho, que é coisa diferente.
+        #
+        # Um re-pareamento reimporta o histórico inteiro, e TODA conversa volta órfã. Aí
+        # a primeira mensagem de cada cliente antigo caía aqui e era anunciada como lead
+        # novo: em 22/08, depois de repartear a Doce Mell, a vendedora recebeu 21 e-mails
+        # "🔥 Novo lead pra você" em duas horas — dez deles de gente que ela atende desde
+        # julho, incluindo uma conversa com 918 mensagens ENVIADAS por ela mesma.
+        #
+        # Virar lead continua certo (o pedido não pode ficar sem dono, que é a razão
+        # deste bloco existir). O que estava errado era a ETIQUETA. Órfã que já tem
+        # mensagem é cliente voltando; órfã sem mensagem nenhuma — ou órfã nenhuma — é
+        # contato novo de verdade. A conta é feita ANTES de gravar a mensagem desta
+        # chamada, senão todo mundo pareceria ter histórico.
+        retomada = bool(orfa) and c.execute(
+            "select 1 from mensagens where conversa_id=%s limit 1", (orfa[0],)).fetchone() is not None
         # contato NOVO de verdade (landing/WhatsApp) → vira lead QUENTE, não atribuído (o dono distribui).
         # Nome: primeiro o da AGENDA do vendedor (o melhor que existe), depois o do
         # perfil do WhatsApp (pushName) quando o contato deixa público; sem nenhum
@@ -3701,7 +3719,10 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
                  tipo, origem, temperatura, status, estagio)
                values (%s, null, %s, %s, %s, 'pf', 'whatsapp_inbound', 'quente', 'novo', 'lead') returning id""",
             (conta_id, nome[:250], nome[:250], "+" + remetente)).fetchone()[0]
-        lead_novo = True
+        # `lead_novo` governa o "Retornar contato: X" agendado pra daqui a 2h (mais
+        # abaixo). Numa retomada isso é tarefa inventada: ninguém deixou de responder
+        # esse cliente — a conversa é que voltou a existir do zero pro sistema.
+        lead_novo = not retomada
         nome_lead_novo = nome
     else:
         # lead da BASE respondeu/topou no WhatsApp → promove pro funil (Novo + Quente).
@@ -3790,8 +3811,11 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
                 _emp = (c.execute("select coalesce(empresa,'') from prospeccao where id=%s",
                                   (lead_id,)).fetchone() or [""])[0]
                 import threading
+                # `retomada` muda só o TEXTO do aviso — a distribuição é a mesma, porque
+                # cliente que voltou também precisa de dono. Ver o bloco da órfã.
                 threading.Thread(target=_dist.avisar_vendedor,
-                                 args=(get_pool(), conta_id, _mid, _emp), daemon=True).start()
+                                 args=(get_pool(), conta_id, _mid, _emp),
+                                 kwargs={"retomada": retomada}, daemon=True).start()
     except Exception:  # noqa: BLE001
         import logging
         _mid = None

@@ -110,10 +110,19 @@ def atribuir_se_sem_dono(c, conta_id: int, prospeccao_id: int) -> int | None:
     return mid
 
 
-def avisar_vendedor(pool, conta_id: int, membro_id: int, empresa: str) -> None:
+def avisar_vendedor(pool, conta_id: int, membro_id: int, empresa: str,
+                    *, retomada: bool = False) -> None:
     """Best-effort: avisa o vendedor que caiu um lead. E-mail sempre (o membro tem
     e-mail); WhatsApp quando houver número (best-effort). Nunca levanta exceção —
-    pensado pra rodar numa thread solta, sem travar o webhook."""
+    pensado pra rodar numa thread solta, sem travar o webhook.
+
+    `retomada` = a conversa já existia com histórico e o cliente voltou a falar; o lead
+    é novo pro FUNIL, não pra empresa. Muda só o texto — quem volta também precisa de
+    dono, então a distribuição é a mesma. Sem isso o vendedor lia "🔥 Novo lead" pra
+    cliente que ele atende há meses: aconteceu 10 vezes numa tarde depois de um
+    re-pareamento (ver o bloco da órfã em _wa_inbound_conversa). Fica com padrão False
+    porque os outros dois chamadores — o botão "Levar para o lead" e o inbound de
+    campanha — tratam de lead novo mesmo."""
     try:
         with pool.connection() as c:
             cfg = config(c, conta_id)
@@ -125,21 +134,30 @@ def avisar_vendedor(pool, conta_id: int, membro_id: int, empresa: str) -> None:
             return
         nome, email, wa = m
         emp = (empresa or "").strip() or "Um lead"
-        titulo = f"🔥 Novo lead pra você: {emp}"
+        titulo = (f"💬 Cliente voltou a falar: {emp}" if retomada
+                  else f"🔥 Novo lead pra você: {emp}")
         try:
             from finance.email_sender import _app_url
             _cockpit = f"{_app_url()}/cockpit/login"
         except Exception:  # noqa: BLE001
             _cockpit = ""
-        corpo = (f"{emp} caiu pra você no rodízio de leads. O agente já iniciou o "
-                 "atendimento e você assume quando quiser."
+        _abertura = (f"{emp} mandou mensagem de novo e ficou com você. A conversa é "
+                     "antiga e o histórico está todo lá no inbox."
+                     if retomada else
+                     f"{emp} caiu pra você no rodízio de leads. O agente já iniciou o "
+                     "atendimento e você assume quando quiser.")
+        corpo = (_abertura
                  + (f" Atenda pelo app: {_cockpit}" if _cockpit else " Abra o Zaq pra acompanhar."))
         # PUSH no app do vendedor (Cockpit/PWA) — chega na hora, mesmo com o app
         # fechado. Best-effort; respeita o toggle de push do próprio vendedor.
         try:
             from finance import cockpit as _ck
+            # o push tem que dizer a MESMA coisa que o e-mail: dois avisos da mesma
+            # mensagem se contradizendo é pior que um só.
             _ck.enviar_push(pool, conta_id, membro_id,
-                            f"🔥 Novo lead: {emp}", "Caiu no rodízio · toque pra atender", "/cockpit")
+                            f"💬 Voltou a falar: {emp}" if retomada else f"🔥 Novo lead: {emp}",
+                            "Conversa antiga · toque pra ver" if retomada
+                            else "Caiu no rodízio · toque pra atender", "/cockpit")
         except Exception:  # noqa: BLE001
             pass
         if email and "@" in email:

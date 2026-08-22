@@ -9192,7 +9192,10 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {% if c.segmento or c.cidade %}<div class="sub">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
           {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido %}<div class="kbch">{% if c.tem_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="Abrir a conversa de WhatsApp">💬</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
           <div class="ft">{% if c.valor %}<span style="font-size:.76rem;color:var(--verde-claro)">{{ brl(c.valor) }}</span>{% else %}<span></span>{% endif %}{% if c.proximo %}<span class="mut" style="font-size:.72rem">📅 {{ c.proximo.strftime('%d/%m') }}</span>{% endif %}</div>
-          {% if gerencia and c.vendedor %}<div class="mut" style="font-size:.72rem;margin-top:.28rem">👤 {{ c.vendedor }}</div>{% endif %}
+          {% if pode_atribuir %}<select class="kbvend" onclick="event.stopPropagation()" onchange="kbAtribuirVendedor(this,{{ c.id }})" data-prev="{{ c.vendedor_id or '' }}">
+            <option value=""{% if not c.vendedor_id %} selected{% endif %}>— sem responsável —</option>
+            {% for v in vendedores %}<option value="{{ v.id }}"{% if c.vendedor_id==v.id %} selected{% endif %}>👤 {{ v.nome }}</option>{% endfor %}
+          </select>{% elif gerencia and c.vendedor %}<div class="mut" style="font-size:.72rem;margin-top:.28rem">👤 {{ c.vendedor }}</div>{% endif %}
           {# mesmo telefone, outro chip: são dois leads de propósito (cada chip responde
              pelo seu número), mas quem olha o funil precisa saber — senão dois
              vendedores negociam com a mesma pessoa, cada um com um preço. #}
@@ -9223,14 +9226,23 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .chatpop{position:fixed;z-index:90;width:336px;max-width:calc(100vw - 16px);max-height:70vh;
   background:var(--card);border:1px solid var(--borda);border-radius:14px;overflow:hidden;
   box-shadow:0 18px 46px rgba(0,0,0,.5);display:flex;flex-direction:column}
-.cp-h{display:flex;align-items:center;gap:.5rem;padding:.55rem .7rem;border-bottom:1px solid var(--borda);flex:none}
+/* ✕ de fechar — fora do fluxo do cabeçalho, cravado no canto (não empurrado por
+   flex): o título nunca o empurra pra baixo/quebra de linha, e fica no mesmo
+   lugar sempre, em qualquer balão (chat ou resumo do lead). `margin:0` vence o
+   `button{width:100%;margin-top:1.4rem}` global (pros botões de formulário de
+   login/cadastro) — sem isso o botão herdava 1.4rem de margem e nascia ~22px
+   mais abaixo do canto. Mesma causa da busca da Comunicação (✕ que esmagava
+   o campo) — dessa vez pegou ANTES de virar bug visível. */
+.pop-close{position:absolute;top:.5rem;right:.5rem;z-index:2;width:24px;height:24px;
+  margin:0;display:flex;align-items:center;justify-content:center;padding:0;
+  background:var(--card-2);border:1px solid var(--borda);border-radius:50%;
+  color:var(--txt-mut);cursor:pointer;font-size:.72rem;line-height:1}
+.pop-close:hover{color:var(--txt);border-color:var(--coral);background:rgba(224,87,79,.14)}
+.cp-h{display:flex;align-items:center;gap:.5rem;padding:.55rem 2.1rem .55rem .7rem;border-bottom:1px solid var(--borda);flex:none}
 .cp-h .av{width:26px;height:26px;border-radius:8px;background:#13251d;color:var(--verde-claro);
   display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.68rem;flex:none}
 .cp-h b{font-size:.85rem}
 .cp-h small{display:block;color:var(--txt-mut);font-size:.68rem}
-.cp-h .x{margin-left:auto;background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:.85rem;
-  padding:.2rem .35rem;border-radius:6px;width:auto}
-.cp-h .x:hover{color:var(--txt);background:var(--card-2)}
 .cp-mais{display:block;text-align:center;padding:.42rem;font-size:.72rem;color:var(--txt-mut);
   border-top:1px solid var(--borda);text-decoration:none;flex:none}
 .cp-mais:hover{color:var(--verde-claro)}
@@ -9251,6 +9263,14 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   background:#241634;color:#c9a3e0;border:1px solid #4a3163;margin-left:.3rem}
 .kbx{background:none;border:0;color:#6b6b6b;cursor:pointer;font-size:.82rem;line-height:1;padding:.1rem .25rem;border-radius:6px;opacity:.55}
 .kbx:hover{opacity:1;color:var(--coral);background:rgba(224,87,79,.12)}
+/* trocar/atribuir vendedor direto no card — só o dono vê (mesma regra de
+   pode_atribuir da ficha completa); quem só tem gerência continua vendo o
+   nome como texto, igual sempre foi. */
+.kbvend{width:100%;margin-top:.3rem;background:var(--bg);border:1px solid var(--borda);
+  color:var(--txt-mut);border-radius:6px;padding:.2rem .35rem;font-size:.72rem;font-family:inherit;
+  cursor:pointer}
+.kbvend:hover{border-color:var(--neon-borda);color:var(--txt)}
+.kbvend:focus{outline:none;border-color:var(--verde)}
 /* o balão do LEAD — resumo pra decidir a próxima ação (contato, valor, situação,
    últimas atividades). Mesma engenharia do balão de chat: nasce fixed, medido
    do próprio card, sem carregar a ficha inteira num iframe. Edição de cadastro,
@@ -9258,12 +9278,10 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .leadpop{position:fixed;z-index:90;width:378px;max-width:calc(100vw - 16px);max-height:70vh;
   background:var(--card);border:1px solid var(--borda);border-radius:14px;overflow:hidden;
   box-shadow:0 18px 46px rgba(0,0,0,.5);display:flex;flex-direction:column}
-.lp-h{padding:.75rem .85rem .65rem;border-bottom:1px solid var(--borda);flex:none}
+.lp-h{padding:.75rem 2.1rem .65rem .85rem;border-bottom:1px solid var(--borda);flex:none}
 .lp-h .top{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap}
 .lp-h h3{font-size:1rem;margin:0}
 .lp-h .sub{color:var(--txt-mut);font-size:.78rem;margin-top:.2rem}
-.lp-h .x{margin-left:auto;background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:.85rem;padding:.2rem .3rem;border-radius:6px;width:auto}
-.lp-h .x:hover{color:var(--txt);background:var(--card-2)}
 .lp-canais{display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.5rem}
 .lp-canal{display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;padding:.14rem .5rem;border-radius:999px;
   border:1px solid var(--verde);background:rgba(62,224,166,.10);color:var(--verde-claro)}
@@ -9379,9 +9397,9 @@ function kbAbrirChat(ev,convId,aba,btn){
     pop.style.maxHeight=Math.max(160,Math.min(460,acima))+'px';
   }
   pop.style.left=Math.max(MARG,Math.min(r.left,window.innerWidth-LARG-MARG))+'px';
-  pop.innerHTML='<div class="cp-h"><span class="av">'+cxEscK((nm||'?').trim().slice(0,2).toUpperCase())+'</span>'
-    +'<div><b>'+cxEscK(nm||'Conversa')+'</b><small>'+cxEscK(btn.title||'')+'</small></div>'
-    +'<button type="button" class="x" onclick="kbFecharChat()">✕</button></div>'
+  pop.innerHTML='<button type="button" class="pop-close" title="Fechar" onclick="kbFecharChat()">✕</button>'
+    +'<div class="cp-h"><span class="av">'+cxEscK((nm||'?').trim().slice(0,2).toUpperCase())+'</span>'
+    +'<div><b>'+cxEscK(nm||'Conversa')+'</b><small>'+cxEscK(btn.title||'')+'</small></div></div>'
     +'<div class="cx-msgs" id="cp-msgs"><div class="cx-empty">Carregando…</div></div>'
     +'<div id="cp-comp"></div>'
     +'<a class="cp-mais" target="_blank" href="/painel/prospeccao/comunicacao?aba='+aba+'&abrir='+convId+'">Ver conversa completa ↗</a>';
@@ -9462,7 +9480,7 @@ function kbAbrirLead(ev,id,cardEl){
     pop.style.maxHeight=Math.max(200,Math.min(560,acima))+'px';
   }
   pop.style.left=Math.max(MARG,Math.min(r.left,window.innerWidth-LARG-MARG))+'px';
-  pop.innerHTML='<div class="cx-empty">Carregando…</div>';
+  pop.innerHTML='<button type="button" class="pop-close" title="Fechar" onclick="kbFecharLead()">✕</button><div class="cx-empty">Carregando…</div>';
   document.body.appendChild(pop);
   _leadPop=pop;
   setTimeout(function(){document.addEventListener('click',_leadPopFora,true);document.addEventListener('keydown',_leadPopEsc,true);
@@ -9475,11 +9493,12 @@ function kbAbrirLead(ev,id,cardEl){
   }).catch(function(){if(_leadPop===pop)pop.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
 }
 function kbLeadHtml(d,id){
-  var h='<div class="lp-h"><div class="top">'
+  var h='<button type="button" class="pop-close" title="Fechar" onclick="kbFecharLead()">✕</button>'
+    +'<div class="lp-h"><div class="top">'
     +'<span class="tdot" style="width:12px;height:12px;background:'+cxEscK(d.temp_cor||'#7a7a7a')+'"></span>'
     +'<h3>'+cxEscK(d.empresa||'Lead')+'</h3>';
   if(d.temperatura)h+='<span class="tpill" style="background:'+cxEscK(d.temp_pill[0])+';color:'+cxEscK(d.temp_pill[1])+'">'+cxEscK(d.temperatura)+'</span>';
-  h+='<button type="button" class="x" onclick="kbFecharLead()">✕</button></div>';
+  h+='</div>';
   var sub=[d.segmento,(d.cidade?(d.cidade+(d.uf?('/'+d.uf):'')):'')].filter(Boolean).join(' · ');
   if(d.vendedor_nome)sub+=(sub?' · ':'')+'👤 '+d.vendedor_nome;
   if(sub)h+='<div class="sub">'+cxEscK(sub)+'</div>';
@@ -9642,6 +9661,18 @@ function kbExcluir(ev,id){ev.stopPropagation();ev.preventDefault();
       var card=document.querySelector('.kbcard[data-id="'+id+'"]');if(card&&card.parentNode)card.parentNode.removeChild(card);
       updCounts();}).catch(function(){alert('Falha de rede.');});}
 function updCounts(){var tot=0;document.querySelectorAll('.kbcol').forEach(function(col){var n=col.querySelectorAll('.kbcard').length;tot+=n;var chip=col.querySelector('.kbcnt');if(chip)chip.textContent=n;var tc=document.querySelector('.kbtab[data-tab="'+col.getAttribute('data-status')+'"] .c');if(tc)tc.textContent=n;});var tn=document.getElementById('kb-total-n');if(tn)tn.textContent=tot;}
+// Mesma rota que a ficha completa já usa pra atribuir — só chamada direto do
+// card, sem sair do funil. Guarda o valor anterior em data-prev pra voltar
+// se der erro (o próprio <select> já mudou visualmente antes do fetch responder).
+function kbAtribuirVendedor(sel,id){
+  var novo=sel.value, prev=sel.getAttribute('data-prev')||'';
+  var fd=new FormData();fd.append('vendedor_id',novo);
+  fetch('/painel/prospeccao/'+id+'/atribuir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){alert(d.erro||'Não consegui trocar o vendedor.');sel.value=prev;return;}
+      sel.setAttribute('data-prev',novo);
+    }).catch(function(){alert('Falha de rede.');sel.value=prev;});
+}
 function addCard(l){var col=document.querySelector('.kbcol[data-status="novo"]');if(!col)return;var drop=col.querySelector('.kbdrop');var e=drop.querySelector('.kbempty');if(e)e.remove();
   var cor=TEMPCOR[l.temperatura]||'#5b9bd5';
   var sub=(l.segmento||l.cidade)?('<div class="sub">'+(l.segmento?jsEsc(l.segmento):'')+(l.cidade?(' · '+jsEsc(l.cidade)+(l.uf?('/'+jsEsc(l.uf)):'')):'')+'</div>'):'';

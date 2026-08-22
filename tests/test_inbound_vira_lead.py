@@ -304,3 +304,120 @@ def test_numero_cru_no_lugar_do_nome_tambem_e_corrigido(pool):
         c.commit()
         assert c.execute("select empresa from prospeccao where id=%s",
                          (lead,)).fetchone()[0] == "Joaquim"
+
+
+# ------------------------------------- 4. cliente de casa não é lead novo
+
+@pytest.fixture()
+def aviso(monkeypatch, pool):
+    """Captura o que o rodízio avisaria, com fila e agenda de mentira.
+
+    `atribuir_se_sem_dono` precisa devolver alguém: sem as tabelas de `distribuicao`
+    neste schema mínimo ele falharia calado (o SAVEPOINT engole), e o aviso — que é o
+    objeto do teste — nunca sairia.
+
+    O aviso sai numa thread solta, então o espião avisa por `Event` e o teste espera
+    (ver `_esperar_aviso`). Trocar `threading.Thread` por uma que roda na hora seria
+    mais direto e foi a primeira tentativa: quebra o pool do psycopg, que cria as
+    próprias threads e passa `name=`."""
+    import threading
+
+    from finance import agenda as ag
+    from finance import distribuicao as dist
+
+    visto = {"avisos": [], "eventos": [], "saiu": threading.Event()}
+
+    def _espiao(pool, cid, mid, emp, **kw):
+        visto["avisos"].append({"empresa": emp, "retomada": kw.get("retomada")})
+        visto["saiu"].set()
+
+    # o rodízio passa `get_pool()` pro aviso, e nenhum teste anterior chegava nessa
+    # linha (todos param antes, sem dono). Sem isto ela levanta "DATABASE_URL nao
+    # configurada" e o SAVEPOINT engole — o teste esperaria um aviso que nunca sai.
+    monkeypatch.setattr(pp, "get_pool", lambda: pool)
+    monkeypatch.setattr(dist, "atribuir_se_sem_dono", lambda c, cid, lid: 77)
+    monkeypatch.setattr(dist, "avisar_vendedor", _espiao)
+    monkeypatch.setattr(ag, "criar_evento",
+                        lambda *a, **k: visto["eventos"].append(a[2] if len(a) > 2 else ""))
+    return visto
+
+
+def _esperar_aviso(aviso):
+    assert aviso["saiu"].wait(10), "o aviso do rodízio não saiu"
+
+
+def test_cliente_com_historico_nao_e_anunciado_como_lead_novo(aviso, pool):
+    """O caso de 22/08: depois de repartear a Doce Mell, o histórico voltou inteiro como
+    conversa órfã e a vendedora recebeu 21 "🔥 Novo lead pra você" em duas horas — dez
+    de gente que ela atende desde julho. O lead continua nascendo e ganhando dono; o que
+    não pode é chamar de novo quem já estava sendo atendido."""
+    with pool.connection() as c:
+        _conversa_importada(c, msgs=40)
+        _recebe(c, "chegou o bolo?", sid="s9", continuidade=False)
+        c.commit()
+    _esperar_aviso(aviso)
+    assert aviso["avisos"] == [{"empresa": "Mariêh Louise", "retomada": True}]
+
+
+def test_cliente_com_historico_nao_ganha_tarefa_de_retornar_contato(aviso, pool):
+    """A outra metade do incômodo: cada um desses leads ganhava um "Retornar contato"
+    pra 2h depois, na agenda do vendedor. Ninguém deixou de responder esse cliente."""
+    with pool.connection() as c:
+        _conversa_importada(c, msgs=40)
+        _recebe(c, "chegou o bolo?", sid="s9", continuidade=False)
+        c.commit()
+    _esperar_aviso(aviso)
+    assert aviso["eventos"] == [], "tarefa de retorno inventada pra cliente ativo"
+
+
+def test_contato_novo_de_verdade_continua_sendo_lead_novo(aviso, pool):
+    """A trava do conserto: sem conversa nenhuma antes, nada muda — aviso de lead novo
+    e o "Retornar contato" de sempre. É o caminho que paga a conta da padaria."""
+    with pool.connection() as c:
+        _recebe(c, "oi, faz bolo de pote?", sid="s9", continuidade=False)
+        c.commit()
+    _esperar_aviso(aviso)
+    # "Perfil" é o pushName que `_recebe` manda — sem agenda nem órfã, é o nome que sobra
+    assert aviso["avisos"] == [{"empresa": "Perfil", "retomada": False}]
+    assert aviso["eventos"] == ["Retornar contato: Perfil"]
+
+
+def test_conversa_orfa_VAZIA_conta_como_contato_novo(aviso, pool):
+    """Órfã sem mensagem nenhuma não é cliente de casa: é conversa que alguém abriu e
+    não usou. Sem esta distinção o critério viraria "existe órfã?", e aí o contato novo
+    que já tivesse uma conversa vazia deixaria de ser anunciado."""
+    with pool.connection() as c:
+        _conversa_importada(c, msgs=0)
+        _recebe(c, "oi", sid="s9", continuidade=False)
+        c.commit()
+    _esperar_aviso(aviso)
+    assert aviso["avisos"] == [{"empresa": "Mariêh Louise", "retomada": False}]
+    assert aviso["eventos"], "contato novo continua ganhando o retorno agendado"
+
+
+def test_a_mensagem_desta_chamada_nao_conta_como_historico(aviso, pool):
+    """A conta das mensagens é feita ANTES de gravar a que acabou de chegar. Se fosse
+    depois, TODO contato novo teria 'histórico' de uma mensagem e ninguém mais seria
+    anunciado como lead novo — o conserto viraria o bug oposto."""
+    with pool.connection() as c:
+        conv = _conversa_importada(c, msgs=0)
+        _recebe(c, "primeira mensagem", sid="s9", continuidade=False)
+        c.commit()
+        n = c.execute("select count(*) from mensagens where conversa_id=%s", (conv,)).fetchone()[0]
+    _esperar_aviso(aviso)
+    assert n == 1, "a mensagem entrou na conversa órfã"
+    assert aviso["avisos"][0]["retomada"] is False
+
+
+def test_o_lead_da_retomada_continua_ganhando_dono(aviso, pool):
+    """O que NÃO muda, e é o mais importante: cliente que volta também precisa de dono,
+    senão o pedido fica invisível pra fila — que é a razão de este bloco existir."""
+    with pool.connection() as c:
+        _conversa_importada(c, msgs=40)
+        _recebe(c, "chegou o bolo?", sid="s9", continuidade=False)
+        c.commit()
+        lead = c.execute("select id, estagio, temperatura from prospeccao where conta_id=%s",
+                         (CONTA,)).fetchone()
+    _esperar_aviso(aviso)
+    assert lead and lead[1:] == ("lead", "quente")
+    assert len(aviso["avisos"]) == 1, "o rodízio tem que ter rodado igual"

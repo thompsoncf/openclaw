@@ -20,6 +20,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
+from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, Request, Form, UploadFile, File, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from psycopg.errors import UniqueViolation
@@ -4194,7 +4195,7 @@ def descadastrar_do(request: Request, t: str = Form("")):
 
 
 @router.post("/descadastrar-oc")
-async def descadastrar_oneclick(t: str = ""):
+def descadastrar_oneclick(t: str = ""):
     """Descadastro em 1 clique (List-Unsubscribe-Post, RFC 8058). O Gmail/Yahoo faz
     POST aqui com o corpo 'List-Unsubscribe=One-Click'; a gente lê o token da URL,
     registra e devolve 200. Sem login, idempotente."""
@@ -4496,15 +4497,31 @@ async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
     Logado em cada ponto de saída silenciosa (webhook_wa_qr:...) — o serviço Node
     só responde "ok" mesmo quando descarta, então sem log aqui não dava pra saber
     ONDE uma mensagem se perdia (segredo errado, payload incompleto, canal não
-    configurado como 'qr', etc.)."""
+    configurado como 'qr', etc.).
+
+    O trabalho de banco roda na THREADPOOL. O corpo deste handler e' psycopg
+    SINCRONO; deixado no event loop ele congela o worker inteiro -- painel
+    incluso -- a cada mensagem que entra. Com dois workers no Render bastava os
+    dois estarem numa chamada dessas pra fila toda parar: em 22/08/2026 a
+    resposta saiu de 527 ms pra ~50 s com a CPU em 0,7%, ou seja, esperando e
+    nao trabalhando. Mesmo motivo do webhook_wa_qr_contatos, que ja' fazia assim.
+    """
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
     if not _qr_segredo_ok(request):
         log.warning("webhook_wa_qr: segredo ausente ou não confere (WA_QR_SHARED_SECRET "
                     "configurado=%s)", bool(os.environ.get("WA_QR_SHARED_SECRET")))
         return Response(status_code=403)
+    corpo = await request.body()
+    return await run_in_threadpool(_webhook_wa_qr_sync, corpo, background_tasks)
+
+
+def _webhook_wa_qr_sync(corpo: bytes, background_tasks: BackgroundTasks):
+    """O trabalho de verdade — sincrono, fora do event loop."""
+    import logging
+    log = logging.getLogger("prospeccao.wa_qr")
     try:
-        payload = json.loads((await request.body()).decode("utf-8") or "{}")
+        payload = json.loads(corpo.decode("utf-8") or "{}")
     except Exception:  # noqa: BLE001
         log.warning("webhook_wa_qr: corpo não é JSON válido")
         return Response("ok", media_type="text/plain")
@@ -4600,14 +4617,30 @@ async def webhook_wa_qr_historico(request: Request):
     messaging-history.set do Baileys — só dispara logo depois de conectar/parear,
     limitado aos últimos 30 dias no lado do Node). Mensagens antigas viram conversa
     ÓRFÃ (sem lead automático) — ver _wa_historico_conversa. Só o vendedor decide
-    se vale virar lead pra um número antigo."""
+    se vale virar lead pra um número antigo.
+
+    O trabalho de banco roda na THREADPOOL. O corpo deste handler e' psycopg
+    SINCRONO; deixado no event loop ele congela o worker inteiro -- painel
+    incluso -- a cada mensagem que entra. Com dois workers no Render bastava os
+    dois estarem numa chamada dessas pra fila toda parar: em 22/08/2026 a
+    resposta saiu de 527 ms pra ~50 s com a CPU em 0,7%, ou seja, esperando e
+    nao trabalhando. Mesmo motivo do webhook_wa_qr_contatos, que ja' fazia assim.
+    """
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
     if not _qr_segredo_ok(request):
         log.warning("webhook_wa_qr_historico: segredo ausente ou não confere")
         return Response(status_code=403)
+    corpo = await request.body()
+    return await run_in_threadpool(_webhook_wa_qr_historico_sync, corpo)
+
+
+def _webhook_wa_qr_historico_sync(corpo: bytes):
+    """O trabalho de verdade — sincrono, fora do event loop."""
+    import logging
+    log = logging.getLogger("prospeccao.wa_qr")
     try:
-        payload = json.loads((await request.body()).decode("utf-8") or "{}")
+        payload = json.loads(corpo.decode("utf-8") or "{}")
     except Exception:  # noqa: BLE001
         log.warning("webhook_wa_qr_historico: corpo não é JSON válido")
         return Response("ok", media_type="text/plain")
@@ -4709,13 +4742,29 @@ async def webhook_wa_qr_saida(request: Request):
     """Eco de mensagem que o vendedor mandou DIRETO pelo WhatsApp do celular
     (sem passar pelo Zaq) — pra não ficar cego do que já foi respondido. Abre a
     conversa quando ela ainda não existe (o vendedor escrevendo primeiro é o caso
-    normal); lead, nunca — ver _wa_saida_conversa."""
+    normal); lead, nunca — ver _wa_saida_conversa.
+
+    O trabalho de banco roda na THREADPOOL. O corpo deste handler e' psycopg
+    SINCRONO; deixado no event loop ele congela o worker inteiro -- painel
+    incluso -- a cada mensagem que entra. Com dois workers no Render bastava os
+    dois estarem numa chamada dessas pra fila toda parar: em 22/08/2026 a
+    resposta saiu de 527 ms pra ~50 s com a CPU em 0,7%, ou seja, esperando e
+    nao trabalhando. Mesmo motivo do webhook_wa_qr_contatos, que ja' fazia assim.
+    """
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
     if not _qr_segredo_ok(request):
         return Response(status_code=403)
+    corpo = await request.body()
+    return await run_in_threadpool(_webhook_wa_qr_saida_sync, corpo)
+
+
+def _webhook_wa_qr_saida_sync(corpo: bytes):
+    """O trabalho de verdade — sincrono, fora do event loop."""
+    import logging
+    log = logging.getLogger("prospeccao.wa_qr")
     try:
-        payload = json.loads((await request.body()).decode("utf-8") or "{}")
+        payload = json.loads(corpo.decode("utf-8") or "{}")
     except Exception:  # noqa: BLE001
         return Response("ok", media_type="text/plain")
     try:
@@ -4960,13 +5009,29 @@ async def webhook_wa_qr_status(request: Request):
 
     Nunca REGRIDE: os recibos chegam fora de ordem com frequência, e sem essa
     trava uma mensagem já lida voltava pra "entregue" na tela. 'erro' passa por
-    cima de qualquer um — se falhou, é isso que o vendedor precisa ver."""
+    cima de qualquer um — se falhou, é isso que o vendedor precisa ver.
+
+    O trabalho de banco roda na THREADPOOL. O corpo deste handler e' psycopg
+    SINCRONO; deixado no event loop ele congela o worker inteiro -- painel
+    incluso -- a cada mensagem que entra. Com dois workers no Render bastava os
+    dois estarem numa chamada dessas pra fila toda parar: em 22/08/2026 a
+    resposta saiu de 527 ms pra ~50 s com a CPU em 0,7%, ou seja, esperando e
+    nao trabalhando. Mesmo motivo do webhook_wa_qr_contatos, que ja' fazia assim.
+    """
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
     if not _qr_segredo_ok(request):
         return Response(status_code=403)
+    corpo = await request.body()
+    return await run_in_threadpool(_webhook_wa_qr_status_sync, corpo)
+
+
+def _webhook_wa_qr_status_sync(corpo: bytes):
+    """O trabalho de verdade — sincrono, fora do event loop."""
+    import logging
+    log = logging.getLogger("prospeccao.wa_qr")
     try:
-        payload = json.loads((await request.body()).decode("utf-8") or "{}")
+        payload = json.loads(corpo.decode("utf-8") or "{}")
     except Exception:  # noqa: BLE001
         return Response("ok", media_type="text/plain")
     try:
@@ -5021,13 +5086,29 @@ async def webhook_wa_qr_deslogado(request: Request):
     o pareamento caiu, alguém apertou "sair" no aparelho). O histórico de conversa
     com os leads é o ativo comercial da empresa; ele não pode depender de um
     pareamento de WhatsApp. Reconectar o QR volta a funcionar em cima do que já
-    está aqui."""
+    está aqui.
+
+    O trabalho de banco roda na THREADPOOL. O corpo deste handler e' psycopg
+    SINCRONO; deixado no event loop ele congela o worker inteiro -- painel
+    incluso -- a cada mensagem que entra. Com dois workers no Render bastava os
+    dois estarem numa chamada dessas pra fila toda parar: em 22/08/2026 a
+    resposta saiu de 527 ms pra ~50 s com a CPU em 0,7%, ou seja, esperando e
+    nao trabalhando. Mesmo motivo do webhook_wa_qr_contatos, que ja' fazia assim.
+    """
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
     if not _qr_segredo_ok(request):
         return Response(status_code=403)
+    corpo = await request.body()
+    return await run_in_threadpool(_webhook_wa_qr_deslogado_sync, corpo)
+
+
+def _webhook_wa_qr_deslogado_sync(corpo: bytes):
+    """O trabalho de verdade — sincrono, fora do event loop."""
+    import logging
+    log = logging.getLogger("prospeccao.wa_qr")
     try:
-        payload = json.loads((await request.body()).decode("utf-8") or "{}")
+        payload = json.loads(corpo.decode("utf-8") or "{}")
     except Exception:  # noqa: BLE001
         return Response("ok", media_type="text/plain")
     try:

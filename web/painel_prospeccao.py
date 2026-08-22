@@ -9261,7 +9261,11 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-stub{border-top:1px solid var(--borda);padding:.55rem .7rem;color:var(--txt-mut);font-size:.76rem;flex:none}
 .cx-stub .lbl2{display:inline-block;font-size:.6rem;padding:.04rem .38rem;border-radius:999px;
   background:#241634;color:#c9a3e0;border:1px solid #4a3163;margin-left:.3rem}
-.kbx{background:none;border:0;color:#6b6b6b;cursor:pointer;font-size:.82rem;line-height:1;padding:.1rem .25rem;border-radius:6px;opacity:.55}
+/* width:auto + margin:0 vencem o `button{width:100%;margin-top:1.4rem}` global
+   (mesma causa raiz já corrigida no ✕ da busca e no ✕ de fechar os balões):
+   sem isso o ✕ de excluir nascia ~22px mais abaixo da linha do nome, flutuando
+   solto perto do rodapé do card em vez de ficar ao lado do nome. */
+.kbx{width:auto;margin:0;background:none;border:0;color:#6b6b6b;cursor:pointer;font-size:.82rem;line-height:1;padding:.1rem .25rem;border-radius:6px;opacity:.55}
 .kbx:hover{opacity:1;color:var(--coral);background:rgba(224,87,79,.12)}
 /* trocar/atribuir vendedor direto no card — só o dono vê (mesma regra de
    pode_atribuir da ficha completa); quem só tem gerência continua vendo o
@@ -9295,7 +9299,10 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .lp-body{padding:.7rem .85rem;overflow-y:auto;flex:1}
 .lp-sh{display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem}
 .lp-sh b{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-mut)}
-.lp-edit-btn{margin-left:auto;background:none;border:1px solid var(--borda);color:var(--txt-mut);border-radius:7px;
+/* margin:0 0 0 auto (não só margin-left:auto) — sem zerar o topo/baixo, o
+   `button{margin-top:1.4rem}` global vazava e empurrava o botão ~22px pra
+   baixo dentro de ".lp-sh" (mesma causa do ✕ de excluir e dos ✕ dos balões). */
+.lp-edit-btn{margin:0 0 0 auto;background:none;border:1px solid var(--borda);color:var(--txt-mut);border-radius:7px;
   padding:.15rem .5rem;font-size:.7rem;cursor:pointer;width:auto}
 .lp-edit-btn:hover{color:var(--txt);border-color:var(--verde)}
 .lp-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem .8rem;font-size:.8rem}

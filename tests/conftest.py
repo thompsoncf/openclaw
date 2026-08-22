@@ -142,3 +142,19 @@ def pytest_configure(config):
 @pytest.fixture()
 def test_db_url():
     return os.environ["TEST_DATABASE_URL"]
+
+
+@pytest.fixture(autouse=True)
+def _esquema_runtime_limpo():
+    """Zera a marca do core/esquema_runtime antes de cada teste.
+
+    Em produção o DDL de runtime roda uma vez por processo. Na suíte, cada teste
+    monta o próprio esquema chamando garantir_tabela/_garantir_tabela na fixture
+    — se a marca sobrevivesse entre testes, o segundo a rodar pularia o DDL e
+    encontraria tabela faltando. Limpando aqui, a suíte se comporta exatamente
+    como antes da otimização, e só produção ganha o corte.
+    """
+    from core import esquema_runtime
+    esquema_runtime.esquecer()
+    yield
+    esquema_runtime.esquecer()

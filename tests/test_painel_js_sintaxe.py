@@ -57,7 +57,7 @@ PAGINAS = {
         colunas={
             "novo": [{"id": 1, "empresa": "Padaria Bom Pão", "segmento": "Varejo",
                       "cidade": "Teresina", "uf": "PI", "temperatura": "quente",
-                      "valor": 420000, "proximo": None, "vendedor": None,
+                      "valor": 420000, "proximo": None, "vendedor": None, "vendedor_id": None,
                       "tem_whatsapp": True, "tem_email": True, "tem_instagram": False,
                       "enriquecido": True,
                       "conv_whatsapp": 501, "conv_email": None, "conv_instagram": None}],
@@ -108,7 +108,7 @@ class _Mudo(jinja2.Undefined):
         return 0
 
 
-def _render(nome: str) -> str:
+def _render(nome: str, **over) -> str:
     env = jinja2.Environment(
         loader=jinja2.DictLoader(dict(pp._env.loader.mapping)),
         undefined=_Mudo, autoescape=True)
@@ -116,7 +116,7 @@ def _render(nome: str) -> str:
         env.filters.setdefault(k, v)
     for k, v in pp._env.globals.items():
         env.globals.setdefault(k, v)
-    return env.get_template(nome).render(**PAGINAS[nome])
+    return env.get_template(nome).render(**{**PAGINAS[nome], **over})
 
 
 def _scripts(html: str) -> list[str]:
@@ -465,3 +465,53 @@ def test_x_de_limpar_a_busca_nao_esmaga_o_campo_de_texto():
     assert "width:auto" in regra, (
         "sem width:auto, o ✕ herda o button{width:100%} global e esmaga o campo de busca "
         "assim que aparece (ao digitar algo) — a busca funciona, mas o texto digitado some")
+
+
+def test_trocar_vendedor_no_card_so_aparece_pra_quem_pode_atribuir():
+    """22/08: pedido pra organizar leads na fase inicial sem sair do funil —
+    o card ganha um <select> de vendedor. Só pra quem `pode_atribuir` (dono),
+    igual a regra que já existe hoje pra atribuir lead na ficha/Comunicação;
+    quem só tem gerência (gestor) continua vendo o nome como texto fixo."""
+    html_dono = _render("prospeccao", pode_atribuir=True,
+                         vendedores=[{"id": 9, "nome": "Jacqueline Prime", "papel": "vendedor"},
+                                     {"id": 11, "nome": "Thiago Pinheiro", "papel": "vendedor"}])
+    assert 'class="kbvend"' in html_dono, "o seletor de vendedor não apareceu pro dono"
+    assert 'onchange="kbAtribuirVendedor(this,1)"' in html_dono
+    assert "Jacqueline Prime" in html_dono and "Thiago Pinheiro" in html_dono
+    assert "— sem responsável —" in html_dono
+
+    html_gestor = _render("prospeccao", gerencia=True, pode_atribuir=False,
+                          vendedores=[{"id": 9, "nome": "Jacqueline Prime", "papel": "vendedor"}])
+    assert 'class="kbvend"' not in html_gestor, (
+        "gestor sem pode_atribuir não devia ver o seletor — só o dono atribui, hoje")
+
+
+def test_trocar_vendedor_usa_a_mesma_rota_que_a_ficha_ja_usa():
+    """Sem rota nova: reaproveita POST /painel/prospeccao/<id>/atribuir, que já
+    existe e já é chamada por fetch em outro lugar deste mesmo arquivo (o menu
+    de responsável da Comunicação) — mesma regra de permissão nos dois."""
+    fonte = inspect.getsource(pp).split("function kbAtribuirVendedor")[1][:700]
+    assert "/atribuir'" in fonte
+    assert "'X-Requested-With':'fetch'" in fonte, (
+        "sem esse header a rota devolve redirect (não JSON) — /atribuir só responde "
+        "JSON quando reconhece o pedido como ajax")
+    assert "sel.value=prev" in fonte, (
+        "sem reverter o <select> num erro, a tela mostra um vendedor que não foi salvo")
+
+
+def test_botao_de_fechar_o_balao_fica_cravado_no_canto_nao_no_fluxo_do_cabecalho():
+    """22/08: pedido de polish — o ✕ vira um círculo `position:absolute` colado
+    no canto superior direito do balão inteiro (não mais dentro da linha
+    flex do cabeçalho), pra nunca ser empurrado por um título comprido nem
+    quebrar de linha junto com o resto. Mesmo botão nos dois balões (chat e
+    resumo do lead) — `.pop-close` é compartilhada de propósito aqui: é
+    estilo puramente visual, sem estado, sem risco de um balão fechar o
+    outro por engano."""
+    fonte = inspect.getsource(pp)
+    regra = fonte.split(".pop-close{")[1].split("}")[0]
+    assert "position:absolute" in regra and "top:" in regra and "right:" in regra
+    assert "border-radius:50%" in regra, "botão de fechar não virou um círculo"
+    js = "\n".join(_scripts(_render("prospeccao")))
+    assert 'class="pop-close"' in js, "o balão de chat/lead não usa mais o botão novo de fechar"
+    assert 'class="x" onclick="kbFecharChat()"' not in js, "sobrou o botão antigo no balão de chat"
+    assert 'class="x" onclick="kbFecharLead()"' not in js, "sobrou o botão antigo no balão do lead"

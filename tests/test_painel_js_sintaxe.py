@@ -515,3 +515,35 @@ def test_botao_de_fechar_o_balao_fica_cravado_no_canto_nao_no_fluxo_do_cabecalho
     assert 'class="pop-close"' in js, "o balão de chat/lead não usa mais o botão novo de fechar"
     assert 'class="x" onclick="kbFecharChat()"' not in js, "sobrou o botão antigo no balão de chat"
     assert 'class="x" onclick="kbFecharLead()"' not in js, "sobrou o botão antigo no balão do lead"
+
+
+def test_x_de_excluir_lead_no_card_nao_esmaga_igual_o_da_busca_ja_esmagou():
+    """22/08, 3ª rodada: MESMO bug do ✕ da busca da Comunicação (#537) e quase
+    do ✕ de fechar os balões (#538) — achado agora no ✕ de EXCLUIR lead do
+    card do funil, reportado com print mostrando o ✕ (vermelho, hover)
+    flutuando solto perto do rodapé do card em vez de ficar ao lado do nome.
+
+    Comprovado com Playwright: `.kbx` tinha `margin-top` computado de
+    22.4px (o `button{margin-top:1.4rem}` global, pros formulários de
+    login/cadastro, vazando por falta de `margin:0` na classe) — o botão
+    ficava ~22px mais abaixo da linha do nome. `width:auto` sozinho (que
+    `.kbx` também não tinha) não bastava; era o `margin-top` que empurrava."""
+    fonte = inspect.getsource(pp)
+    regra = fonte.split(".kbx{")[1].split("}")[0]
+    assert "margin:0" in regra, (
+        "sem margin:0, o ✕ de excluir lead herda margin-top:1.4rem do button{} global "
+        "e nasce empurrado pra baixo, longe do nome do lead")
+    assert "width:auto" in regra
+
+
+def test_botao_editar_do_balao_tambem_tinha_o_mesmo_vazamento_de_margem():
+    """Achado ao investigar o ✕ de excluir: `.lp-edit-btn` só zerava
+    `margin-left` (pra empurrar pra direita) — o `margin-top` do `button{}`
+    global continuava vazando, e o botão "✎ Editar" nascia ~22px mais baixo
+    dentro de ".lp-sh" (mascarado por `align-items:center`, por isso não foi
+    percebido na primeira verificação). `margin:0 0 0 auto` zera tudo e
+    mantém só o empurrão pra direita."""
+    fonte = inspect.getsource(pp)
+    regra = fonte.split(".lp-edit-btn{")[1].split("}")[0]
+    assert "margin:0 0 0 auto" in regra or ("margin-top:0" in regra and "margin-left:auto" in regra), (
+        "margin-left:auto sozinho não zera margin-top — o button{} global ainda vaza")

@@ -363,6 +363,60 @@ class MapaPorConta extends Map {
 
 const falhasDeDecifrar = new MapaPorConta()   // contaId -> [instantes das falhas]
 
+// ------------------------------- falha que o retry conserta não é perda
+//
+// `failed to decrypt message` sai em VERMELHO mesmo quando o próprio Baileys
+// conserta segundos depois. Medido na conta 23 em 22/08/2026, logo após um
+// pareamento novo:
+//
+//   12:18:14.824  ✗ SessionError: No session record
+//   12:18:19.945  → sent retry receipt (retryCount 1)
+//   12:18:20.299  ✗ mesma mensagem, mesmo erro
+//   12:18:21.946  → sent retry receipt (retryCount 2)
+//   12:18:23.120  ✓ saída repassada ao webhook
+//
+// Oito segundos, mensagem gravada, nada perdido — e duas linhas vermelhas no log.
+// O cofre tinha acabado de ser recriado do zero, então a sessão Signal com cada
+// aparelho ainda não existia; "No session record" ali quer dizer "primeira vez que
+// falo com esse dispositivo", e o retry receipt é exatamente o pedido de reenvio
+// que resolve. É o caminho normal, não defeito.
+//
+// Vermelho que não pede ação treina a gente a ignorar o log — e foi o que
+// aconteceu: na manhã de 22/08 esse ruído me fez diagnosticar uma conta saudável
+// como quebrada e mandar parear de novo à toa (ver CLAUDE.md).
+//
+// A REGRA. O Baileys tenta no máximo MAX_RETRY_DECIFRAR vezes. Então:
+//   falha 1..MAX_RETRY_DECIFRAR  → warn, e NÃO conta pro disjuntor (é o retry
+//                                  trabalhando; ainda pode dar certo)
+//   falha MAX_RETRY_DECIFRAR+1…  → error, e CONTA (o orçamento de reenvio acabou;
+//                                  esta mensagem não vai chegar)
+//
+// POR QUE ISSO NÃO ENFRAQUECE O DISJUNTOR. Na enxurrada, o mesmo id volta MUITAS
+// vezes — o WhatsApp reentrega a cada reconexão. Medido na Prime em 21/08: 413
+// falhas para 38 mensagens distintas, ~11 por mensagem. Com esta regra, 9 das 11
+// continuam contando (só as 2 primeiras de cada id saem da conta): 342 de 413. O
+// teto é 60 em 60s — continua estourando com folga. Já no dia saudável, em que
+// cada mensagem falha uma ou duas vezes e chega, a conta fica em ZERO, que é o
+// número honesto.
+//
+// Nada aqui encosta em conexão, socket, trava ou credencial: muda só o nível do
+// log e se aquela ocorrência entra numa soma.
+const falhasPorMsg = new MapaPorConta()   // contaId -> Map(idDaMensagem -> {n, visto})
+
+// Quantas vezes ESTA mensagem já falhou, contando a de agora. Janela deslizante
+// própria, podada na mesma chamada: sem isso o mapa cresceria com um id por
+// mensagem que já foi entregue faz tempo.
+function contarFalhaDaMensagem (contaId, msgId, agora, janelaMs) {
+  if (!msgId) return 1        // sem id não dá pra agrupar; trata como primeira
+  let porId = falhasPorMsg.get(contaId)
+  if (!porId) { porId = new Map(); falhasPorMsg.set(contaId, porId) }
+  for (const [k, v] of porId) if (agora - v.visto >= janelaMs) porId.delete(k)
+  const atual = porId.get(msgId)
+  const n = (atual ? atual.n : 0) + 1
+  porId.set(msgId, { n, visto: agora })
+  return n
+}
+
 // Estourou o teto NESTA falha? Janela deslizante, aritmética pura — sem socket
 // nenhum, que é o que deixa isso conferível no teste.
 function contarFalhaDeDecifrar (contaId, agora, teto, janelaMs) {
@@ -388,17 +442,32 @@ function contarFalhaDeDecifrar (contaId, agora, teto, janelaMs) {
 // do Baileys.
 function comContaDoBaileys (contaId, base) {
   const nivel = (n) => (a, b) => {
-    const obj = (a && typeof a === 'object') ? a : null
+    let obj = (a && typeof a === 'object') ? a : null
     const msg = typeof a === 'string' ? a : b
+    let nivelFinal = n
     if (obj && msg === 'failed to decrypt message') {
       const agora = Date.now()
       // Carimba a falha na sessão ANTES de qualquer decisão. É este carimbo que
       // impede `sessaoFirme` de dar a sessão como firme só porque o socket está de
       // pé — ver o comentário lá. Sem ele a dobra da espera nunca saía do primeiro
       // degrau, e o mesmo chip quebrado voltava de 5 em 5 minutos.
+      //
+      // Fica ANTES do desconto do retry de propósito: a sessão não é firme enquanto
+      // houver falha, mesmo transitória. Aqui a regra é sobre RUÍDO no log e na
+      // contagem, e não sobre afrouxar a espera de quem está brigando por sessão.
       const s = sessoes.get(contaId)
       if (s) s.ultimaFalhaDecifrar = agora
-      if (contarFalhaDeDecifrar(contaId, agora, DECIFRAR_TETO, DECIFRAR_JANELA_MS)) {
+      // O retry ainda pode salvar esta mensagem? Ver o bloco de falhasPorMsg.
+      const tent = contarFalhaDaMensagem(
+        contaId, obj.key && obj.key.id, agora, DECIFRAR_JANELA_MS)
+      const aindaTemRetry = tent <= MAX_RETRY_DECIFRAR
+      // o número de tentativas vai no log: sem ele, "warn" vira mistério
+      obj = Object.assign({ tentativa: tent }, obj)
+      // só REBAIXA. Se o Baileys já tivesse logado isso em debug/trace, forçar
+      // 'warn' seria SUBIR o nível — o oposto do que este bloco existe pra fazer.
+      if (aindaTemRetry && (n === 'error' || n === 'fatal')) nivelFinal = 'warn'
+      if (!aindaTemRetry &&
+          contarFalhaDeDecifrar(contaId, agora, DECIFRAR_TETO, DECIFRAR_JANELA_MS)) {
         // não dá await: quem chama é o logger, no meio do processamento da mensagem
         abrirDisjuntor(contaId).catch((e) =>
           log.error({ contaId, e: String(e) }, 'disjuntor: falhou ao abrir'))
@@ -406,7 +475,7 @@ function comContaDoBaileys (contaId, base) {
     }
     // o contaId entra no objeto (vira coluna no espelho, ver _contaDoLog) sem
     // sobrescrever um que o próprio Baileys já tenha posto
-    return obj ? base[n](Object.assign({ contaId }, obj), b) : base[n](a, b)
+    return obj ? base[nivelFinal](Object.assign({ contaId }, obj), b) : base[n](a, b)
   }
   const comConta = {
     fatal: nivel('fatal'),
@@ -1220,6 +1289,10 @@ function lembrarJid (chave, valor) {
 function esquecerConta (contaId) {
   lidMaps.delete(contaId)
   ondasDeHistorico.delete(contaId)
+  // o mapa de falhas por mensagem se poda sozinho pela janela, mas só quando a
+  // conta falha DE NOVO — uma conta esquecida deixaria o último punhado de ids
+  // preso pra sempre. Aqui é o lugar onde isso se resolve, junto com os outros.
+  falhasPorMsg.delete(contaId)
   const prefixo = contaId + ':'
   for (const k of jidsResolvidos.keys()) if (k.startsWith(prefixo)) jidsResolvidos.delete(k)
   for (const k of enviadas.keys()) if (k.startsWith(prefixo)) enviadas.delete(k)
@@ -3007,4 +3080,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

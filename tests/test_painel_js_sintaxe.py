@@ -441,3 +441,27 @@ def test_edicao_rapida_do_balao_nao_toca_documento_nem_dados_de_empresa():
                       "lp-ed-segmento", "lp-ed-cidade", "lp-ed-uf", "lp-ed-socio",
                       "lp-ed-regime", "lp-ed-porte"):
         assert proibido not in fonte_edit, f"{proibido} não devia estar editável no balão"
+
+
+def test_x_de_limpar_a_busca_nao_esmaga_o_campo_de_texto():
+    """22/08: o texto digitado na busca da Comunicação sumia — a caixa
+    filtrava direitinho (a busca É funcional), mas ficava visualmente vazia.
+
+    Causa: `button{width:100%}` é regra GLOBAL do template base (pros botões
+    de formulário de login/cadastro) e `.cx-busca-x` (o ✕ de limpar) não tinha
+    `width` própria pra vencer essa herança. O ✕ nasce `display:none` — some
+    junto com a caixa vazia — e só aparece quando existe texto (JS liga o
+    display em `cxBuscaDigitou`). No instante em que aparece, ele vira um
+    flex-item pedindo 100% da largura da barra como flex-basis, e o campo de
+    texto (que tem `min-width:0`, exatamente pra poder encolher) é espremido
+    até ~0px — a caixa continua com o valor certo por dentro, só não sobra
+    pixel nenhum pra desenhar as letras. Comprovado com Playwright: media a
+    largura real do campo antes/depois do ✕ aparecer.
+
+    `width:auto` (+ `flex:none`, no mesmo padrão já usado em `.cx-lupa` do
+    outro lado do campo) tira o ✕ da disputa por espaço."""
+    fonte = inspect.getsource(pp)
+    regra = fonte.split(".cx-busca-x{")[1].split("}")[0]
+    assert "width:auto" in regra, (
+        "sem width:auto, o ✕ herda o button{width:100%} global e esmaga o campo de busca "
+        "assim que aparece (ao digitar algo) — a busca funciona, mas o texto digitado some")

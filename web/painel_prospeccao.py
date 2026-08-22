@@ -10252,8 +10252,13 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   font-family:inherit;font-size:.82rem;padding:.24rem 0}
 .cx-busca-in::placeholder{color:var(--txt-mut)}
 .cx-busca-in::-webkit-search-cancel-button{display:none}
+/* width:auto + flex:none derrubam o `button{width:100%}` global (pensado pros
+   botões de formulário de login/cadastro) — sem isso, assim que o ✕ aparece
+   (ao digitar algo), ele vira flex-basis:100% da barra de busca e espreme o
+   próprio campo de texto até ~0px: some a caixa inteira, mesmo com o valor
+   certo por dentro (a busca funciona, só não dá pra VER o que foi digitado). */
 .cx-busca-x{background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:.85rem;
-  line-height:1;padding:.1rem .15rem}
+  line-height:1;padding:.1rem .15rem;width:auto;flex:none}
 .cx-busca-x:hover{color:var(--txt)}
 /* o pedaço que casou com o termo, na linha da conversa */
 .cx-conv mark{background:var(--neon-fundo);color:var(--txt);border-radius:2px;padding:0 1px}

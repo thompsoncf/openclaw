@@ -547,3 +547,31 @@ def test_botao_editar_do_balao_tambem_tinha_o_mesmo_vazamento_de_margem():
     regra = fonte.split(".lp-edit-btn{")[1].split("}")[0]
     assert "margin:0 0 0 auto" in regra or ("margin-top:0" in regra and "margin-left:auto" in regra), (
         "margin-left:auto sozinho não zera margin-top — o button{} global ainda vaza")
+
+
+def test_nome_de_empresa_longo_nao_empurra_o_x_de_excluir_pra_fora_do_card():
+    """22/08, 4ª rodada: bug DIFERENTE do vazamento de margem — reportado com
+    print mostrando dois cards lado a lado ("Bruna", nome curto, com o ✕
+    visível; "Jacque/Verônica", nome mais longo e sem espaço pra quebrar,
+    sem ✕ nenhum aparecendo). "quando o nome não quebra o X vai pra fora e
+    não consigo apagar o lead".
+
+    Causa: a linha `<div style="display:flex;align-items:center;gap:.4rem">`
+    do card tem `.tdot` + `.emp` (nome) + `.kbx` (✕). `.emp` não tinha
+    `min-width:0`, então um nome sem espaço pra quebrar vira min-content e
+    empurra o ✕ inteiro pra fora da largura fixa do card — e como nem
+    `.kbcard` nem a linha têm `overflow:hidden`, o ✕ não é cortado, some de
+    vez (renderiza fora da área visível).
+
+    Comprovado com Playwright: card com nome curto ficava com o botão dentro
+    da borda do card; card com nome longo sem espaços tinha o botão inteiro
+    fora da largura do card. Com `min-width:0;overflow:hidden;text-overflow:
+    ellipsis;white-space:nowrap;flex:1` no `.emp`, o nome trunca com "…" e o
+    ✕ (com `flex:none`) sempre sobra visível dentro do card."""
+    fonte = inspect.getsource(pp)
+    regra = fonte.split(".kbcard .emp{")[1].split("}")[0]
+    assert "min-width:0" in regra, (
+        "sem min-width:0, um nome de empresa sem espaço pra quebrar vira "
+        "min-content e empurra o ✕ pra fora do card")
+    assert "overflow:hidden" in regra and "text-overflow:ellipsis" in regra and "white-space:nowrap" in regra, (
+        "sem truncar o nome com ellipsis, ele estoura a largura do card")

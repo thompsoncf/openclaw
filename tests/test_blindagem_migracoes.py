@@ -38,6 +38,14 @@ create table titulos (id bigserial primary key, conta_id bigint references conta
 -- tabela aqui, não fazer a 181 recriar o que o baseline garante que existe.
 create table app_config (chave text primary key, valor text not null,
   atualizado_em timestamptz not null default now());
+-- tokens_reset_senha vem da 041 (dentro do baseline). A 185 a altera pra o token
+-- poder apontar pra um MEMBRO — sem ela declarada aqui, a 185 quebraria só neste
+-- teste. Na forma exata da 041: conta_id NOT NULL e sem membro_id, que é o estado
+-- de onde a 185 parte em produção.
+create table tokens_reset_senha (token text primary key,
+  conta_id bigint not null references contas(id),
+  criado_em timestamptz not null default now(),
+  expira_em timestamptz not null, usado boolean not null default false);
 create table funcionarios (id bigserial primary key, conta_id bigint references contas(id),
   nome text, salario_centavos int default 0, pro_labore boolean default false,
   ativo boolean default true, admitido_em date);

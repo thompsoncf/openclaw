@@ -611,6 +611,20 @@ def test_quadro_do_funil_avisa_quando_da_pra_rolar_pro_lado():
     assert "scrollWidth" in fonte.split("function kbCheckScroll")[1].split("}")[0]
 
 
+def test_nome_do_chip_nao_quebra_no_meio_mesmo_com_o_selo_em_2_linhas():
+    """Relato em produção depois do clamp de 2 linhas (PR #551): um apelido de
+    chip CURTO ("CP Zarb") ainda quebrava no meio — "CP" numa linha, "Zarb" na
+    outra — porque o clamp vale pro <div class="camp"> inteiro, e sem
+    white-space:nowrap o navegador quebra em qualquer espaço que não coube.
+    O clamp de 2 linhas é pro nome da CAMPANHA, que pode ser grande; o chip é
+    sempre curto e não devia quebrar sozinho — só o span inteiro pode pular
+    pra linha 2, nunca partir no meio da palavra."""
+    fonte = inspect.getsource(pp)
+    regra = fonte.split(".kbcard .camp .chip{")[1].split("}")[0]
+    assert "white-space:nowrap" in regra, (
+        "sem nowrap no span do chip, um apelido curto pode quebrar no meio")
+
+
 def test_selo_de_campanha_so_aparece_no_template_quando_tem_campanha_ou_chip():
     """O selo não pode ser incondicional — boa parte dos leads vem da Base
     manual, sem campanha nenhuma associada (ver docs/mockups/, seção 2).

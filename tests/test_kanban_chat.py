@@ -277,3 +277,23 @@ def test_lead_sem_conversa_de_whatsapp_nao_ganha_sufixo_do_chip_principal(monkey
     trecho = _trecho_card(_kanban_html(monkeypatch, pool), "Sapataria Central")
     assert '<div class="camp">📣 Black Friday Padarias</div>' in trecho
     assert "📱" not in trecho, "mostrou o chip principal pra lead sem nenhuma conversa de WhatsApp"
+
+
+def test_apelido_do_chip_aparece_mesmo_sem_campanha_interna_nenhuma(monkeypatch, pool):
+    """Relato em produção (conta Prime, 22/08): leads de tráfego pago (Meta/Google
+    Ads apontando pra um número específico) chegam direto pelo WhatsApp — nunca
+    passam por `campanha_alvos`, porque não é uma campanha DISPARADA pelo Zaq.
+    O selo antigo só nascia atrás de `{% if c.campanha %}`, e como esses leads
+    não tinham campanha nenhuma, o apelido do chip nunca tinha chance de
+    aparecer, mesmo resolvendo certo no Python. Selo de campanha e apelido de
+    chip precisam ser independentes: qualquer um dos dois liga o selo."""
+    lid = _lead(pool, empresa="Empório Sabor Norte")
+    with pool.connection() as c:
+        chip2 = c.execute("insert into contas (chip_de, nome) values (%s,'Chip 2 - Ads') returning id",
+                          (CONTA,)).fetchone()[0]
+        c.execute("insert into conversas (conta_id, prospeccao_id, canal, chip_id, ultima_msg_em) "
+                  "values (%s,%s,'whatsapp',%s,now())", (CONTA, lid, chip2))
+        c.commit()
+    trecho = _trecho_card(_kanban_html(monkeypatch, pool), "Empório Sabor Norte")
+    assert "📱 Chip 2 - Ads" in trecho, "apelido do chip não apareceu pra lead sem campanha interna"
+    assert "📣" not in trecho, "não tem campanha_alvos nenhuma, não devia ter selo de campanha"

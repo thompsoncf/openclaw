@@ -593,11 +593,19 @@ def test_selo_de_campanha_de_origem_trunca_igual_ao_nome_da_empresa():
     assert "max-width:100%" in regra
 
 
-def test_selo_de_campanha_so_aparece_no_template_quando_o_lead_tem_campanha():
+def test_selo_de_campanha_so_aparece_no_template_quando_tem_campanha_ou_chip():
     """O selo não pode ser incondicional — boa parte dos leads vem da Base
-    manual, sem campanha nenhuma associada (ver docs/mockups/, seção 2)."""
+    manual, sem campanha nenhuma associada (ver docs/mockups/, seção 2).
+
+    22/08, relato em produção (conta Prime): leads que chegam via campanha de
+    TRÁFEGO PAGO (Meta/Google Ads apontando pra um número específico) nunca
+    passam por `campanha_alvos` — não existe "campanha interna" nenhuma pra
+    esses leads, só o chip que recebeu. O selo original só nascia atrás de
+    `{% if c.campanha %}`, então pra esses leads o apelido do chip nunca
+    tinha chance de aparecer, mesmo resolvendo certo no Python. Selo e chip
+    viraram independentes: aparece com qualquer um dos dois, ou os dois."""
     fonte = inspect.getsource(pp)
-    assert '{% if c.campanha %}<div class="camp">' in fonte, (
-        "o selo de campanha no card Jinja precisa estar atrás de um {% if c.campanha %}")
-    assert "l.campanha?('<div class=\"camp\">" in fonte, (
+    assert '{% if c.campanha or c.chip_apelido %}<div class="camp">' in fonte, (
+        "o selo no card Jinja precisa aparecer com campanha OU chip, não só com campanha")
+    assert '(l.campanha||l.chip_apelido)?(\'<div class="camp">\'' in fonte, (
         "o addCard() em JS (lead capturado sem recarregar a página) precisa da mesma condição")

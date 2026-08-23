@@ -210,6 +210,37 @@ async function testeSessoes () {
   const r2 = await s.pool.query('select status from wa_qr_sessao_estado where conta_id=$1', [CONTA])
   conferir(r2.rows.length === 1 && r2.rows[0].status === 'reconectando',
     'a linha é sobrescrita, não duplicada')
+
+  // O RETRATO DA CONTA QUE SAIU TEM QUE SUMIR.
+  //
+  // registrarSessoes percorre o mapa `sessoes`. Quem sai do mapa — os dois logouts,
+  // o 401 do celular e o botão Desconectar — para de ser sobrescrito e a linha
+  // CONGELA no último estado, que é sempre 'conectado'. A conta 7 ficou assim:
+  // 'conectado' carimbado em 21/08 00:05, cofre zerado, sem aluguel, ainda lá três
+  // dias depois. Não chega ao painel (nenhum Python lê esta tabela), mas engana quem
+  // depura — e enganou, duas vezes, na madrugada de 23/08.
+  s.sessoes.set(CONTA, { status: 'conectado', sock: {}, ultimoEvento: Date.now() })
+  await s.registrarSessoes()
+  const antes = await s.pool.query(
+    'select count(*)::int n from wa_qr_sessao_estado where conta_id=$1', [CONTA])
+  conferir(antes.rows[0].n === 1, 'antes do logout a conta tem retrato')
+
+  s.sessoes.delete(CONTA)
+  await s.apagarRetratoDaSessao(CONTA)
+  const depois = await s.pool.query(
+    'select count(*)::int n from wa_qr_sessao_estado where conta_id=$1', [CONTA])
+  conferir(depois.rows[0].n === 0, 'depois do logout o retrato some — não congela em "conectado"')
+
+  // ...e sem levar a vizinha junto: o delete é por conta_id, não uma faxina.
+  const vizinha = await s.pool.query(
+    'select count(*)::int n from wa_qr_sessao_estado where conta_id=23', [])
+  conferir(vizinha.rows[0].n === 1, 'e a conta vizinha, que não deslogou, continua no retrato')
+
+  // Apagar de novo (ou de uma conta que nunca teve linha) não pode estourar: o
+  // logout chama isto sem saber se a linha existe.
+  let explodiu = false
+  try { await s.apagarRetratoDaSessao(CONTA); await s.apagarRetratoDaSessao(999) } catch (_) { explodiu = true }
+  conferir(!explodiu, 'apagar retrato inexistente é no-op, não erro')
 }
 
 async function testeFalhaNaoSobe () {

@@ -32,6 +32,7 @@ from psycopg.errors import UniqueViolation
 from pydantic import BaseModel
 
 from core.brain import Brain
+from core import esquema_runtime
 from db.conexao import get_pool
 from finance.cnpj_info import consultar_cnpj
 from finance import (agenda as ag, comprovantes as comprov, contrato as ctr,
@@ -43,9 +44,24 @@ router = APIRouter()
 
 
 def _garantir_tabela(c):
-    """Cria/atualiza a tabela orcamentos em runtime (deploy nao roda migracao
-    sozinho; add-if-not-exists e' idempotente e barato). Espelha as migracoes
-    068/069/070."""
+    """Cria/atualiza a tabela orcamentos em runtime — UMA VEZ POR PROCESSO.
+
+    Espelha as migracoes 068/069/070/147/160/178/179, que o preDeployCommand do
+    Render ja' roda no deploy. O comentario antigo dizia "deploy nao roda migracao
+    sozinho; add-if-not-exists e' idempotente e barato": a primeira parte deixou
+    de valer quando o preDeploy entrou, e a segunda nunca foi verdade. Sao 57
+    comandos DDL, dois deles DROP/ADD CONSTRAINT, e ALTER TABLE pega ACCESS
+    EXCLUSIVE — que enfileira ate' SELECT. Rodando isso a cada requisicao, em 12
+    rotas, o painel inteiro ficou lento pra todo mundo em 22/08/2026.
+
+    Ver core/esquema_runtime: a marca so' e' gravada se o DDL passar, e a chave
+    inclui o banco, entao processo que fala com dois bancos garante os dois."""
+    esquema_runtime.garantir(esquema_runtime.chave(c, "orcamentos"),
+                             lambda: _criar_orcamentos(c))
+
+
+def _criar_orcamentos(c):
+    """O DDL em si. Chamado uma vez por processo, via _garantir_tabela."""
     c.execute("""
         create table if not exists orcamentos (
             id                     bigserial primary key,

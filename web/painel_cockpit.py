@@ -2097,7 +2097,7 @@ def cockpit_orcamento_montar(request: Request, lead_id: int):
 
 
 @router.post("/cockpit/lead/{lead_id}/orcamento")
-async def cockpit_orcamento_criar(request: Request, lead_id: int, payload: dict = Body(...)):
+def cockpit_orcamento_criar(request: Request, lead_id: int, payload: dict = Body(...)):
     sess = _sessao(request)
     if not sess:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
@@ -2108,7 +2108,7 @@ async def cockpit_orcamento_criar(request: Request, lead_id: int, payload: dict 
 
 
 @router.post("/cockpit/lead/{lead_id}/orcamento/enviar")
-async def cockpit_orcamento_enviar_conversa(request: Request, lead_id: int, payload: dict = Body(...)):
+def cockpit_orcamento_enviar_conversa(request: Request, lead_id: int, payload: dict = Body(...)):
     sess = _sessao(request)
     if not sess:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
@@ -2262,7 +2262,7 @@ def cockpit_visita_marcar(request: Request, lead_id: int):
 
 
 @router.post("/cockpit/lead/{lead_id}/visita")
-async def cockpit_visita_criar(request: Request, lead_id: int, payload: dict = Body(...)):
+def cockpit_visita_criar(request: Request, lead_id: int, payload: dict = Body(...)):
     sess = _sessao(request)
     if not sess:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
@@ -3963,7 +3963,7 @@ def cockpit_push_chave(request: Request):
 
 
 @router.post("/cockpit/push/assinar")
-async def cockpit_push_assinar(request: Request, sub: dict = Body(...)):
+def cockpit_push_assinar(request: Request, sub: dict = Body(...)):
     sess = _sessao(request)
     if not sess:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
@@ -3972,7 +3972,7 @@ async def cockpit_push_assinar(request: Request, sub: dict = Body(...)):
 
 
 @router.post("/cockpit/push/remover")
-async def cockpit_push_remover(request: Request, sub: dict = Body(...)):
+def cockpit_push_remover(request: Request, sub: dict = Body(...)):
     if not _sessao(request):
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     ck.remover_assinatura(get_pool(), (sub or {}).get("endpoint", ""))

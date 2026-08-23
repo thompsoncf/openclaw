@@ -1,5 +1,24 @@
 # Regras desta base
 
+## 0. Nada do cliente pode se perder
+
+Regra do dono, dada em 22/08/2026:
+
+> "não pode perder conexão ou perder nada, os clientes, tipo zaq-waqr, nem canal,
+> nem informação, nem nada pode ser [perdido]"
+
+Vale pra **tudo que é do cliente**, não só pra sessão de WhatsApp:
+
+* **Conexão** — o socket do `zaq-waqr`, o pareamento, o cofre `wa_qr_auth`.
+* **Canal** — a linha em `canais_config`, o chip, o número.
+* **Informação** — `conversas`, `mensagens`, `prospeccao`, `contas`, `membros`,
+  `clientes`, `eventos_agenda`, `orcamentos`, `titulos`, `lancamentos`.
+
+Não existe "só pra testar", "depois recria" ou "é rápido". Se uma ação pode
+apagar, sobrescrever, truncar ou derrubar qualquer uma dessas coisas, ela **não é
+feita** — nem pra diagnosticar, nem pra validar hipótese. As duas seções abaixo
+são os dois jeitos concretos pelos quais isso já quase aconteceu.
+
 ## 1. Não encoste em sessão, canal ou conexão que está saudável
 
 Regra do dono, dada em 22/08/2026 e válida pra sempre:
@@ -54,7 +73,44 @@ necessidade nenhuma.
    `mensagens.provider_sid` — em 21/08 as 38 da Prime chegaram todas.
 4. Só depois de 1, 2 e 3 apontarem perda real é que se fala em parear de novo.
 
-## 2. Este repositório
+## 2. O banco de produção não é banco de teste
+
+Em 22/08/2026, das 17:07 às 19:41 UTC, a suíte de testes e os replays de migração
+rodaram **contra o banco de produção**. Efeito: cada replay toma `ACCESS
+EXCLUSIVE` em `contas`, `membros`, `clientes`, `conversas`, `orcamentos` — e o
+painel inteiro ficou lento pra todos os clientes ao mesmo tempo. O teardown
+chegou a tentar **apagar `membros` de produção**; só não apagou porque a foreign
+key `prospeccao_vendedor_id_fkey` barrou.
+
+O buraco era a trava do `tests/conftest.py`: a checagem de produção era
+`if prod_url and _host(test) == _host(prod)` — só valia **quando `DATABASE_URL`
+existia**. Em máquina sem `DATABASE_URL` (container de dev, sessão de agente),
+`TEST_DATABASE_URL` podia apontar pro banco vivo e nada disparava.
+
+A trava agora falha fechada, em quatro portões (ver o docstring do conftest):
+
+1. Sem `TEST_DATABASE_URL` → aborta.
+2. Mesmo host de `DATABASE_URL` → aborta.
+3. Qualquer referência de projeto de produção na URL de teste (`REFS_PRODUCAO`,
+   no host **ou** no usuário do pooler) → aborta **sempre**, com ou sem
+   `DATABASE_URL`. **Este portão não tem escape.**
+4. Banco remoto sem marca de teste no nome → aborta; escape explícito em
+   `PERMITIR_BANCO_NAO_MARCADO=SIM`, que **não** libera o portão 3.
+
+`tests/test_trava_banco_producao.py` fixa esse comportamento — inclusive o caso
+exato do incidente (produção sem `DATABASE_URL` setada).
+
+Na prática, pra quem for rodar qualquer coisa contra um banco:
+
+* Teste roda em Postgres descartável. O CI sobe `postgres:16` em `localhost` com
+  o banco `openclaw_test` — copie isso.
+* `python -m db.aplicar_migracoes` em produção é do `preDeployCommand` do Render.
+  Não se roda na mão "pra conferir": as migrações são DDL e travam as tabelas
+  vivas.
+* Ao adicionar um projeto Supabase novo, a referência dele entra em
+  `REFS_PRODUCAO` no conftest **antes** de qualquer teste rodar.
+
+## 3. Este repositório
 
 `render.yaml` é **documentação**, não Blueprint — os serviços do Render são
 gerenciados na mão. Mudar o arquivo não muda o Render.

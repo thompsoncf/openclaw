@@ -1444,6 +1444,31 @@ function esquecerConta (contaId) {
   for (const k of lidsPendentes.keys()) if (k.startsWith(prefixoLid)) lidsPendentes.delete(k)
 }
 
+// Apaga o retrato da sessão que deixou de existir.
+//
+// O `registrarSessoes` percorre o mapa `sessoes` e sobrescreve uma linha por conta.
+// Quando a conta sai do mapa — os dois logouts: o 401 do celular e o botão
+// Desconectar — a linha para de ser atualizada e NUNCA é apagada. Ela congela no
+// último estado, que é sempre `conectado`, e passa a mentir pra sempre.
+//
+// A conta 7 é o exemplo: `status: conectado` carimbado em 21/08 00:05, com o cofre
+// zerado e sem aluguel nenhum, ainda lá três dias depois. Isso não chega ao painel
+// (nenhum código Python lê esta tabela; a tela pergunta ao serviço por HTTP), mas
+// engana quem depura — me enganou duas vezes na madrugada de 23/08, e cada vez custou
+// uma investigação inteira atrás de um problema que não existia.
+//
+// Só o caminho de logout apaga. Conta que apenas caiu não entra aqui de propósito: o
+// retrato de uma sessão que ainda vai voltar é justamente o que se quer ler.
+async function apagarRetratoDaSessao (contaId) {
+  try {
+    await pool.query('delete from wa_qr_sessao_estado where conta_id=$1', [contaId])
+  } catch (e) {
+    // Retrato é diagnóstico, não operação: falhar aqui não pode atrapalhar um logout.
+    log.warn({ contaId, e: String((e && e.message) || e) },
+      'não consegui apagar o retrato da sessão (segue o logout)')
+  }
+}
+
 async function jidRealDe (sock, contaId, numero) {
   const base = jidDe(numero)
   if (!base) return { jid: null, erro: 'numero_invalido' }
@@ -2522,6 +2547,9 @@ async function iniciarSessao (contaId) {
         try { await limparTudo() } catch (e) { log.warn({ contaId, e: String(e) }, 'limparTudo falhou') }
         sessoes.delete(contaId)
         esquecerConta(contaId)
+        // ...e o retrato vai junto: sem isso a linha congela em 'conectado' — ver
+        // apagarRetratoDaSessao
+        await apagarRetratoDaSessao(contaId)
         // Sem credencial não há sessão pra proteger; segurar o aluguel só
         // atrasaria o próximo pareamento (que pode cair noutra instância).
         clearTimeout(tentativasDeTrava.get(contaId)); tentativasDeTrava.delete(contaId)
@@ -3100,6 +3128,9 @@ const servidor = http.createServer(async (req, res) => {
         if (s) { s.substituidaEm = null; s.tentativasPos440 = 0 }
         sessoes.delete(contaId)
         esquecerConta(contaId)
+        // ...e o retrato vai junto: sem isso a linha congela em 'conectado' — ver
+        // apagarRetratoDaSessao
+        await apagarRetratoDaSessao(contaId)
         // Desconectou de propósito: solta o aluguel e cancela a tentativa de
         // retomada, senão o timer religaria a conta que o vendedor acabou de
         // mandar desligar.
@@ -3251,4 +3282,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

@@ -6,6 +6,8 @@ pra nunca ter erro de arredondamento de float.
 """
 from dataclasses import dataclass, field
 from datetime import date
+
+from finance.relogio import hoje
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
 import unicodedata
@@ -213,7 +215,9 @@ class Lancamento:
     valor_centavos: int
     categoria: str
     descricao: str = ""
-    data: date = field(default_factory=date.today)
+    # `hoje`, não `date.today`: o servidor roda em UTC e das 21h às 23h59 de
+    # Brasília o date.today() já é o dia seguinte — ver finance/relogio.py
+    data: date = field(default_factory=hoje)
     pagamento: str = ""
     forma_pagamento: str = ""  # canonica: pix|debito|credito|especie|... (ou '')
     origem: str = "manual"
@@ -236,7 +240,7 @@ class Lancamento:
             valor_centavos=reais_para_centavos(valor_reais),
             categoria=normalizar_categoria(tipo, categoria),
             descricao=descricao,
-            data=data or date.today(),
+            data=data or hoje(),
             pagamento=pagamento,
             forma_pagamento=canonizar_forma_pagamento(forma_pagamento),
             origem=origem,

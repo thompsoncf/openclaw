@@ -86,6 +86,16 @@ services:
         sync: false
       - key: TELEGRAM_WEBHOOK_URL
         sync: false
+      # TZ: o fuso do PROCESSO. Sem ela o contêiner roda em UTC e todo
+      #   `date.today()` devolve o dia seguinte das 21h às 23h59 de Brasília —
+      #   foi assim que 12 lançamentos nasceram com a data errada (o 733, "Casa
+      #   do Churrasco", criado 22/08 21:21 BRT e gravado em 23/08).
+      #   ATENÇÃO: `TZ` só vale se o contêiner tiver /usr/share/zoneinfo; sem a
+      #   base de fusos ela é ignorada EM SILÊNCIO e o processo segue em UTC. Por
+      #   isso ela NÃO é a única defesa — o caminho do lançamento usa
+      #   finance/relogio.py, que faz a conta na mão. Ver tests/test_relogio.py.
+      - key: TZ
+        value: America/Sao_Paulo
       # --- WhatsApp por QR Code (serviço Node à parte, services/wa-qr) ---
       # WA_QR_SERVICE_URL: URL pública do serviço wa-qr (ex.:
       #   https://zaq-waqr.onrender.com). Sem ela, a via QR fica inerte.

@@ -476,13 +476,32 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
     where.append("p.estagio = 'lead'")   # funil = só quem engajou; o resto fica na aba Base
     with pool.connection() as c:
         etapas = _etapas(c, conta_id)
+        # dois_chips decide se o apelido do chip aparece no selo de campanha — com um
+        # chip só não existe "de qual chip" pra confundir (mesma regra do Inbox).
+        dois_chips = _tem_dois_chips(c, conta_id)
         rows = c.execute(
             f"""select p.id, p.empresa, p.segmento, p.cidade, p.uf, p.status,
                        p.temperatura, p.valor_estimado_centavos, p.proximo_contato_em,
                        p.telefone, p.whatsapp, p.vendedor_id, m.nome,
-                       p.email, p.instagram, p.enriquecido_em
+                       p.email, p.instagram, p.enriquecido_em, ca.cnome,
+                       coalesce(nullif(btrim(chp.nome),''), nullif(btrim(cc1.rotulo),''), '')
                   from prospeccao p
                   left join membros m on m.id = p.vendedor_id
+                  left join lateral (
+                     select cp.nome as cnome
+                       from campanha_alvos a join campanhas cp on cp.id=a.campanha_id
+                      where a.prospeccao_id=p.id
+                      order by a.ultima_msg_em desc nulls last, a.id desc limit 1
+                  ) ca on true
+                  left join lateral (
+                     select cv.chip_id
+                       from conversas cv
+                      where cv.prospeccao_id=p.id and cv.canal='whatsapp'
+                      order by cv.ultima_msg_em desc nulls last, cv.id desc limit 1
+                  ) wc on true
+                  left join contas chp on chp.id = wc.chip_id
+                  left join canais_config cc1 on wc.chip_id is null and cc1.conta_id = p.conta_id
+                                             and cc1.canal='whatsapp'
                  where {' and '.join(where)}
                  order by p.proximo_contato_em asc nulls last, p.atualizado_em desc""",
             tuple(params)).fetchall()
@@ -515,6 +534,8 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                 "tem_instagram": bool(r[14]), "enriquecido": bool(r[15]),
                 "conv_whatsapp": conv.get("whatsapp"), "conv_email": conv.get("email"),
                 "conv_instagram": conv.get("instagram"),
+                "campanha": r[16] or None,
+                "chip_apelido": (r[17] or None) if dois_chips else None,
                 "gemeo": _aviso_gemeo(gemeos.get(r[0])),
                 "gemeo_lead": ((gemeos.get(r[0]) or {}).get("lead_id")
                                if _gemeo_abre(gemeos.get(r[0]), ctx) else None)}
@@ -8186,6 +8207,18 @@ _CSS = """<style>
 .kbcard .emp{font-size:.88rem;font-weight:600;line-height:1.2;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .kbcard .sub{color:var(--txt-mut);font-size:.74rem;margin-top:.22rem}
 .kbcard .ft{display:flex;align-items:center;justify-content:space-between;gap:.3rem;margin-top:.42rem;flex-wrap:wrap}
+/* selo de campanha de origem — só aparece quando o lead veio de uma campanha
+   (campanha_alvos); o "· 📱 apelido" só entra quando a conta tem 2+ chips
+   (senão "de qual chip" não diz nada a ninguém). min-width:0 não é necessário
+   aqui porque não é item de um flex row — trunca sozinho com max-width:100%.
+   box-sizing:border-box é obrigatório: sem ele, padding+border somam POR CIMA
+   do max-width:100% (que já é a largura inteira do card), e o selo vaza pra
+   fora — medido com Playwright: borda direita ~8px além da borda do card. */
+.kbcard .camp{display:inline-flex;align-items:center;gap:.3rem;background:var(--neon-fundo);
+  border:1px solid var(--neon-borda);border-radius:999px;padding:.1rem .55rem;
+  font-size:.7rem;color:var(--verde-claro);margin-top:.34rem;max-width:100%;
+  box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kbcard .camp .chip{opacity:.72;font-weight:600}
 @media(min-width:900px){
   .kbtabs{display:none}
   /* Uma coluna por ETAPA, e as etapas são configuráveis desde a régua: o
@@ -9190,6 +9223,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
              onclick="if(!window._kbMoved)kbAbrirLead(event,{{ c.id }},this)">
           <div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" title="{{ c.temperatura }}" style="background:{{ temp_cor[c.temperatura] }}"></span><span class="emp">{{ c.empresa }}</span><button type="button" class="kbx" style="flex:none" title="Excluir lead" onclick="kbExcluir(event,{{ c.id }})">✕</button></div>
           {% if c.segmento or c.cidade %}<div class="sub">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
+          {% if c.campanha %}<div class="camp">📣 {{ c.campanha }}{% if c.chip_apelido %} <span class="chip">· 📱 {{ c.chip_apelido }}</span>{% endif %}</div>{% endif %}
           {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido %}<div class="kbch">{% if c.tem_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="Abrir a conversa de WhatsApp">💬</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
           <div class="ft">{% if c.valor %}<span style="font-size:.76rem;color:var(--verde-claro)">{{ brl(c.valor) }}</span>{% else %}<span></span>{% endif %}{% if c.proximo %}<span class="mut" style="font-size:.72rem">📅 {{ c.proximo.strftime('%d/%m') }}</span>{% endif %}</div>
           {% if pode_atribuir %}<select class="kbvend" onclick="event.stopPropagation()" onchange="kbAtribuirVendedor(this,{{ c.id }})" data-prev="{{ c.vendedor_id or '' }}">
@@ -9683,9 +9717,10 @@ function kbAtribuirVendedor(sel,id){
 function addCard(l){var col=document.querySelector('.kbcol[data-status="novo"]');if(!col)return;var drop=col.querySelector('.kbdrop');var e=drop.querySelector('.kbempty');if(e)e.remove();
   var cor=TEMPCOR[l.temperatura]||'#5b9bd5';
   var sub=(l.segmento||l.cidade)?('<div class="sub">'+(l.segmento?jsEsc(l.segmento):'')+(l.cidade?(' · '+jsEsc(l.cidade)+(l.uf?('/'+jsEsc(l.uf)):'')):'')+'</div>'):'';
+  var camp=l.campanha?('<div class="camp">📣 '+jsEsc(l.campanha)+(l.chip_apelido?(' <span class="chip">· 📱 '+jsEsc(l.chip_apelido)+'</span>'):'')+'</div>'):'';
   var ft='<div class="ft">'+(l.valor?('<span style="font-size:.76rem;color:var(--verde-claro)">'+jsBrl(l.valor)+'</span>'):'<span></span>')+'<span></span></div>';
   var vd=l.vendedor?('<div class="mut" style="font-size:.72rem;margin-top:.28rem">👤 '+jsEsc(l.vendedor)+'</div>'):'';
-  var html='<div class="kbcard" draggable="true" data-id="'+l.id+'" ondragstart="kbDrag(event,'+l.id+')" ondragend="kbEnd(event)" onclick="cardGo(event,'+l.id+',this)"><div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" style="background:'+cor+'"></span><span class="emp">'+jsEsc(l.empresa)+'</span><button type="button" class="kbx" style="flex:none" title="Excluir lead" onclick="kbExcluir(event,'+l.id+')">✕</button></div>'+sub+ft+vd+'</div>';
+  var html='<div class="kbcard" draggable="true" data-id="'+l.id+'" ondragstart="kbDrag(event,'+l.id+')" ondragend="kbEnd(event)" onclick="cardGo(event,'+l.id+',this)"><div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" style="background:'+cor+'"></span><span class="emp">'+jsEsc(l.empresa)+'</span><button type="button" class="kbx" style="flex:none" title="Excluir lead" onclick="kbExcluir(event,'+l.id+')">✕</button></div>'+sub+camp+ft+vd+'</div>';
   drop.insertAdjacentHTML('afterbegin',html);updCounts();}
 function capToggle(){var e=document.getElementById('captar');var vis=e.style.display!=='none';e.style.display=vis?'none':'block';if(!vis){var i=e.querySelector('.captab[data-tab=manual] input[name=empresa]');if(i)i.focus();e.scrollIntoView({behavior:'smooth',block:'nearest'});}}
 function capTab(t){document.querySelectorAll('#captar .caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('#captar .captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}

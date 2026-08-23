@@ -20,7 +20,7 @@ from web import painel_prospeccao as pp
 CONTA = 11
 
 _SQL = """
-create table contas (id bigserial primary key, chip_de bigint);
+create table contas (id bigserial primary key, chip_de bigint, nome text);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text not null, segmento text, cidade text, uf text, telefone text, whatsapp text,
   email text, instagram text, temperatura text default 'frio',
@@ -33,8 +33,13 @@ create table funil_etapas (id bigserial primary key, conta_id bigint, chave text
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text, ativo boolean default true);
 create table conversas (id bigserial primary key, conta_id bigint,
-  prospeccao_id bigint references prospeccao(id), canal text,
-  criado_em timestamptz default now());
+  prospeccao_id bigint references prospeccao(id), canal text, chip_id bigint,
+  ultima_msg_em timestamptz, criado_em timestamptz default now());
+create table campanhas (id bigserial primary key, conta_id bigint, nome text);
+create table campanha_alvos (id bigserial primary key, campanha_id bigint,
+  prospeccao_id bigint references prospeccao(id), ultima_msg_em timestamptz);
+create table canais_config (id bigserial primary key, conta_id bigint,
+  canal text, rotulo text);
 """
 
 
@@ -76,6 +81,21 @@ def _conversa(pool, lead_id, canal):
             (CONTA, lead_id, canal)).fetchone()[0]
         c.commit()
     return cid
+
+
+def _campanha(pool, nome="Black Friday Padarias"):
+    with pool.connection() as c:
+        cid = c.execute("insert into campanhas (conta_id, nome) values (%s,%s) returning id",
+                        (CONTA, nome)).fetchone()[0]
+        c.commit()
+    return cid
+
+
+def _alvo(pool, campanha_id, lead_id):
+    with pool.connection() as c:
+        c.execute("insert into campanha_alvos (campanha_id, prospeccao_id, ultima_msg_em) "
+                  "values (%s,%s,now())", (campanha_id, lead_id))
+        c.commit()
 
 
 def _kanban_html(monkeypatch, pool) -> str:
@@ -133,7 +153,13 @@ def test_conversa_de_outra_conta_nao_vaza_pro_selo(monkeypatch, pool):
 
 def test_uma_unica_query_de_conversas_pro_board_inteiro(monkeypatch, pool):
     """N+1: 20 leads não podem virar 20 idas ao banco só pra saber quem tem chat.
-    Conta as chamadas de `execute` que mencionam a tabela `conversas`."""
+    Conta as chamadas de `execute` que mencionam a tabela `conversas`.
+
+    São 2, não 1: a query principal do board tem uma lateral em `conversas`
+    (pega o chip que disparou a campanha, pro selo "de qual campanha veio") e
+    o selo de canal usa outra, em lote (`= any(%s)`). As duas rodam UMA vez
+    pro board inteiro — nenhuma escala com o nº de leads, o que é o que este
+    teste realmente garante."""
     for i in range(20):
         lid = _lead(pool, empresa=f"Lead {i}", whatsapp=f"8690000{i:04d}")
         if i % 2 == 0:
@@ -156,4 +182,75 @@ def test_uma_unica_query_de_conversas_pro_board_inteiro(monkeypatch, pool):
             return self._conn.__exit__(*a)
     monkeypatch.setattr(pool, "connection", lambda: _ConnSpy(real_connection()))
     _kanban_html(monkeypatch, pool)
-    assert len(chamadas) == 1, f"esperava 1 query em lote, teve {len(chamadas)}: {chamadas}"
+    assert len(chamadas) == 2, f"esperava 2 queries em lote (não por lead), teve {len(chamadas)}: {chamadas}"
+
+
+def _trecho_card(html, empresa):
+    """Isola o miolo de um card (cabeçalho + sub + selo de campanha + kbch),
+    até a linha `.ft` — que sempre renderiza, sem `{% if %}` em volta do
+    próprio <div>, o que torna esse ponto um limite seguro pra cortar."""
+    return html.split(empresa)[1].split('<div class="ft">')[0]
+
+
+def test_selo_de_campanha_aparece_quando_lead_veio_de_campanha(monkeypatch, pool):
+    lid = _lead(pool, empresa="Padaria Bom Pão")
+    camp = _campanha(pool)
+    _alvo(pool, camp, lid)
+    html = _kanban_html(monkeypatch, pool)
+    assert '<div class="camp">📣 Black Friday Padarias</div>' in _trecho_card(html, "Padaria Bom Pão"), (
+        "o selo de campanha não apareceu pro lead que veio dela")
+
+
+def test_sem_campanha_nao_mostra_selo_nem_vazio(monkeypatch, pool):
+    """Nem todo lead veio de campanha — sem dado, o card não pode ter selo vazio."""
+    _lead(pool, empresa="Sem Vendedor Ltda")
+    html = _kanban_html(monkeypatch, pool)
+    assert 'class="camp"' not in _trecho_card(html, "Sem Vendedor Ltda")
+
+
+def test_apelido_do_chip_so_aparece_com_dois_chips_na_conta(monkeypatch, pool):
+    """Mesma regra do Inbox (_tem_dois_chips): com um chip só não existe "de qual
+    chip" pra confundir ninguém — o sufixo "· 📱 apelido" fica de fora."""
+    lid = _lead(pool, empresa="Padaria Bom Pão")
+    camp = _campanha(pool)
+    _alvo(pool, camp, lid)
+    with pool.connection() as c:
+        c.execute("insert into canais_config (conta_id, canal, rotulo) values (%s,'whatsapp','Chip Principal')",
+                  (CONTA,))
+        c.execute("insert into conversas (conta_id, prospeccao_id, canal, ultima_msg_em) "
+                  "values (%s,%s,'whatsapp',now())", (CONTA, lid))
+        c.commit()
+    trecho = _trecho_card(_kanban_html(monkeypatch, pool), "Padaria Bom Pão")
+    assert '<div class="camp">📣 Black Friday Padarias</div>' in trecho
+    assert "Chip Principal" not in trecho, "mostrou o apelido do chip com um chip só na conta"
+
+
+def test_apelido_do_chip_aparece_com_dois_chips_na_conta(monkeypatch, pool):
+    lid = _lead(pool, empresa="Doce & Cia")
+    camp = _campanha(pool)
+    _alvo(pool, camp, lid)
+    with pool.connection() as c:
+        chip2 = c.execute("insert into contas (chip_de, nome) values (%s,'Chip Vendas') returning id",
+                          (CONTA,)).fetchone()[0]
+        c.execute("insert into conversas (conta_id, prospeccao_id, canal, chip_id, ultima_msg_em) "
+                  "values (%s,%s,'whatsapp',%s,now())", (CONTA, lid, chip2))
+        c.commit()
+    trecho = _trecho_card(_kanban_html(monkeypatch, pool), "Doce & Cia")
+    assert "📣 Black Friday Padarias" in trecho
+    assert "· 📱 Chip Vendas" in trecho
+
+
+def test_chip_sem_apelido_batizado_nao_vira_sufixo_vazio(monkeypatch, pool):
+    """Dois chips na conta, mas ninguém batizou o principal ainda — o rótulo
+    resolve pra string vazia; o selo não pode virar "Black Friday · 📱 "."""
+    lid = _lead(pool, empresa="Empório Sabor Norte")
+    camp = _campanha(pool)
+    _alvo(pool, camp, lid)
+    with pool.connection() as c:
+        c.execute("insert into contas (chip_de, nome) values (%s,'Chip Vendas')", (CONTA,))
+        c.execute("insert into conversas (conta_id, prospeccao_id, canal, ultima_msg_em) "
+                  "values (%s,%s,'whatsapp',now())", (CONTA, lid))
+        c.commit()
+    trecho = _trecho_card(_kanban_html(monkeypatch, pool), "Empório Sabor Norte")
+    assert '<div class="camp">📣 Black Friday Padarias</div>' in trecho
+    assert "📱" not in trecho, "sufixo de chip apareceu vazio (apelido não batizado)"

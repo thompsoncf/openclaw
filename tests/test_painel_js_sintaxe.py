@@ -575,3 +575,29 @@ def test_nome_de_empresa_longo_nao_empurra_o_x_de_excluir_pra_fora_do_card():
         "min-content e empurra o ✕ pra fora do card")
     assert "overflow:hidden" in regra and "text-overflow:ellipsis" in regra and "white-space:nowrap" in regra, (
         "sem truncar o nome com ellipsis, ele estoura a largura do card")
+
+
+def test_selo_de_campanha_de_origem_trunca_igual_ao_nome_da_empresa():
+    """Mockup aprovado (docs/mockups/funil_campanha_origem.html, opção B): o card
+    do lead ganha um selo "📣 <campanha>" quando o lead veio de uma campanha de
+    prospecção, com "· 📱 <apelido do chip>" quando a conta tem 2+ chips.
+
+    O selo não é item de um flex row (é um <div> de linha inteira, como `.sub`),
+    então não precisa de `min-width:0` — mas precisa da MESMA lição do `.emp` da
+    3ª rodada: sem truncar, um nome de campanha comprido estoura a largura fixa
+    do card."""
+    fonte = inspect.getsource(pp)
+    regra = fonte.split(".kbcard .camp{")[1].split("}")[0]
+    assert "overflow:hidden" in regra and "text-overflow:ellipsis" in regra and "white-space:nowrap" in regra, (
+        "sem truncar, um nome de campanha comprido estoura a largura do card")
+    assert "max-width:100%" in regra
+
+
+def test_selo_de_campanha_so_aparece_no_template_quando_o_lead_tem_campanha():
+    """O selo não pode ser incondicional — boa parte dos leads vem da Base
+    manual, sem campanha nenhuma associada (ver docs/mockups/, seção 2)."""
+    fonte = inspect.getsource(pp)
+    assert '{% if c.campanha %}<div class="camp">' in fonte, (
+        "o selo de campanha no card Jinja precisa estar atrás de um {% if c.campanha %}")
+    assert "l.campanha?('<div class=\"camp\">" in fonte, (
+        "o addCard() em JS (lead capturado sem recarregar a página) precisa da mesma condição")

@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — Campanha de origem no card do lead</title>
+<style>
+/* ============================================================================
+   TOKENS — cópia fiel de web/tema.py (_TOKENS), mesma base do
+   prospeccao_abas.html. NÃO copiar de orcamento_eventos.html (paleta antiga).
+   ============================================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-fundo:#10241A; --neon-borda:#1E4A3A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --card:var(--surface); --card-2:var(--bg-2);
+  --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1180px;margin:0 auto;padding:34px 18px 100px;line-height:1.5;
+  -webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.7rem;font-weight:700}
+h2{font-size:1.18rem;font-weight:700;margin:0 0 .2rem}
+h3{font-size:.92rem;font-weight:600;margin-bottom:.4rem}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
+  padding:.1rem .35rem;border-radius:4px;color:var(--txt-mut)}
+.sec{margin-top:44px}
+.sec>.num{font-family:var(--mono);font-size:.72rem;color:var(--verde);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:78ch;margin-top:.5rem}
+.nota{border-left:2px solid var(--neon-borda);background:rgba(37,211,102,.08);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.86rem;margin-top:1rem;
+  color:var(--txt-mut);max-width:84ch}
+.nota b{color:var(--txt)}
+.alerta{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.alerta b{color:var(--ambar)}
+
+.quadro{border:1px solid var(--borda);border-radius:12px;overflow:hidden;
+  background:var(--card);margin-top:.8rem}
+.quadro>.cap{background:var(--bg-2);padding:.42rem .8rem;font-size:.72rem;
+  color:var(--txt-mut);border-bottom:1px solid var(--borda);font-family:var(--mono);
+  display:flex;justify-content:space-between;gap:.6rem;flex-wrap:wrap}
+.quadro>.miolo{padding:16px;background:var(--bg)}
+
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:900px){.grid3{grid-template-columns:1fr}}
+.rot{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;
+  margin-bottom:.5rem;color:var(--txt-mut)}
+.rot.on{color:var(--verde)}
+.recom{border:1px solid var(--neon-borda);border-radius:8px;padding:.3rem .55rem;
+  font-size:.7rem;color:var(--verde);display:inline-block;margin-top:.5rem}
+
+/* ---------- réplica fiel do .kbcard real (web/painel_prospeccao.py) ---------- */
+.kbcard{background:var(--card);border:1px solid var(--borda);border-radius:11px;
+  padding:.6rem .65rem;max-width:230px}
+.kbcard .tdot{width:11px;height:11px;border-radius:50%;flex-shrink:0;display:inline-block}
+.kbcard .emp{font-size:.88rem;font-weight:600;line-height:1.2;flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kbcard .sub{color:var(--txt-mut);font-size:.74rem;margin-top:.22rem}
+.kbcard .kbx{width:auto;margin:0;flex:none;background:none;border:0;color:#6b6b6b;
+  cursor:pointer;font-size:.82rem;line-height:1;padding:.1rem .25rem;border-radius:6px;opacity:.55}
+.kbcard .ft{display:flex;align-items:center;justify-content:space-between;gap:.3rem;
+  margin-top:.42rem;flex-wrap:wrap}
+
+/* ---------- as 3 opções de selo de campanha ---------- */
+.camp-inline{color:var(--verde-claro)}
+.camp-pill{display:inline-flex;align-items:center;gap:.3rem;background:var(--neon-fundo);
+  border:1px solid var(--neon-borda);border-radius:999px;padding:.1rem .55rem;
+  font-size:.7rem;color:var(--verde-claro);margin-top:.34rem;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.camp-selo{flex:none;font-size:.78rem;opacity:.85;cursor:default}
+.camp-chip{opacity:.72;font-weight:600}
+
+.compare-lbl{font-size:.68rem;color:var(--text-faint);text-align:center;margin-top:.5rem}
+ul.lista{margin:.6rem 0 0 1.1rem;font-size:.88rem;color:var(--txt-mut)}
+ul.lista li{margin-bottom:.35rem}
+ul.lista b{color:var(--txt)}
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.5rem .7rem;border-bottom:1px solid var(--borda);
+  text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.74rem;
+  text-transform:uppercase;letter-spacing:.05em}
+.rodape{margin-top:56px;padding-top:18px;border-top:1px solid var(--borda);
+  font-size:.8rem;color:var(--text-faint)}
+</style>
+</head>
+<body>
+
+<h1>Campanha de origem no card do lead</h1>
+<p class="lede">Hoje o card do Funil não mostra de qual campanha de prospecção o lead veio —
+só dá pra ver isso abrindo o balão do lead (e mesmo lá, não aparece). A informação já existe
+no banco (<code>campanha_alvos</code>), só falta chegar ao card. <b>Opção B aprovada</b> — e
+com o pedido novo de mostrar também o apelido do chip WhatsApp que disparou (seção 4), antes
+de mexer no código real.</p>
+
+<!-- ================================================== 1 -->
+<section class="sec">
+  <div class="num">1 · como é hoje</div>
+  <h2>O card não diz de onde o lead veio</h2>
+  <div class="quadro">
+    <div class="cap"><span>/painel/prospeccao — coluna "sem responsável"</span><span>hoje</span></div>
+    <div class="miolo">
+      <div class="kbcard">
+        <div style="display:flex;align-items:center;gap:.4rem">
+          <span class="tdot" style="background:#5b9bd5"></span>
+          <span class="emp">Padaria Bom Pão</span>
+          <button type="button" class="kbx">✕</button>
+        </div>
+        <div class="sub">Varejo · Teresina/PI</div>
+        <div class="ft"><span style="font-size:.76rem;color:var(--verde-claro)">R$ 4.200,00</span></div>
+      </div>
+    </div>
+  </div>
+  <p class="lede">Esse lead entrou no funil através da campanha <b>"Black Friday Padarias"</b>
+  — mas isso só está numa tabela, nunca aparece pra quem está olhando o quadro.</p>
+</section>
+
+<!-- ================================================== 2 -->
+<section class="sec">
+  <div class="num">2 · de onde vem o dado</div>
+  <h2>Já existe — é o mesmo dado que a aba Base já mostra</h2>
+  <p class="lede">A aba <b>Base</b> já junta <code>campanha_alvos</code> +
+  <code>campanhas</code> pra saber por qual campanha um contato passou (usa o contato mais
+  recente, com <code>order by ultima_msg_em desc, id desc limit 1</code>). A mudança é levar
+  essa mesma consulta pra query do Funil — hoje ela nem participa dessa junção.</p>
+  <table class="diag">
+    <tr><th>Tabela</th><th>O que guarda</th><th>Já usada em</th></tr>
+    <tr><td><code>campanha_alvos</code></td><td>vínculo contato ↔ campanha, com data do último contato</td><td>aba Base (coluna "última campanha")</td></tr>
+    <tr><td><code>campanhas</code></td><td>nome da campanha</td><td>aba Base, aba Campanhas</td></tr>
+  </table>
+  <div class="nota">
+    <b>Sem lead pra nenhuma campanha:</b> nem todo lead veio de campanha (alguns entram
+    direto pela Base, manual). Nesse caso o card simplesmente <b>não mostra nada</b> — não
+    existe selo vazio ou "sem campanha".
+  </div>
+</section>
+
+<!-- ================================================== 3 -->
+<section class="sec">
+  <div class="num">3 · três formas de mostrar</div>
+  <h2>Escolha o formato antes de eu implementar</h2>
+  <div class="grid3">
+
+    <div>
+      <div class="rot">Opção A — na linha do segmento</div>
+      <div class="quadro">
+        <div class="miolo">
+          <div class="kbcard">
+            <div style="display:flex;align-items:center;gap:.4rem">
+              <span class="tdot" style="background:#5b9bd5"></span>
+              <span class="emp">Padaria Bom Pão</span>
+              <button type="button" class="kbx">✕</button>
+            </div>
+            <div class="sub">Varejo · Teresina/PI · <span class="camp-inline">📣 Black Friday Padarias</span></div>
+            <div class="ft"><span style="font-size:.76rem;color:var(--verde-claro)">R$ 4.200,00</span></div>
+          </div>
+        </div>
+      </div>
+      <p class="compare-lbl">mais discreto — some junto com segmento/cidade se o nome for grande</p>
+    </div>
+
+    <div>
+      <div class="rot on">Opção B — selo próprio (✓ aprovada)</div>
+      <div class="quadro">
+        <div class="miolo">
+          <div class="kbcard">
+            <div style="display:flex;align-items:center;gap:.4rem">
+              <span class="tdot" style="background:#5b9bd5"></span>
+              <span class="emp">Padaria Bom Pão</span>
+              <button type="button" class="kbx">✕</button>
+            </div>
+            <div class="sub">Varejo · Teresina/PI</div>
+            <div class="camp-pill">📣 Black Friday Padarias <span class="camp-chip">· 📱 Chip Vendas</span></div>
+            <div class="ft"><span style="font-size:.76rem;color:var(--verde-claro)">R$ 4.200,00</span></div>
+          </div>
+        </div>
+      </div>
+      <p class="compare-lbl">separado, com a mesma cor do tema (verde) — agora com o chip que disparou</p>
+      <div class="recom">✓ escolhida — ver seção 4 pro apelido do chip</div>
+    </div>
+
+    <div>
+      <div class="rot">Opção C — só o ícone, com tooltip</div>
+      <div class="quadro">
+        <div class="miolo">
+          <div class="kbcard">
+            <div style="display:flex;align-items:center;gap:.4rem">
+              <span class="tdot" style="background:#5b9bd5"></span>
+              <span class="emp">Padaria Bom Pão</span>
+              <span class="camp-selo" title="Veio da campanha: Black Friday Padarias">📣</span>
+              <button type="button" class="kbx">✕</button>
+            </div>
+            <div class="sub">Varejo · Teresina/PI</div>
+            <div class="ft"><span style="font-size:.76rem;color:var(--verde-claro)">R$ 4.200,00</span></div>
+          </div>
+        </div>
+      </div>
+      <p class="compare-lbl">mais compacto — mas esconde o nome da campanha até passar o mouse</p>
+    </div>
+
+  </div>
+</section>
+
+<!-- ================================================== 4 -->
+<section class="sec">
+  <div class="num">4 · de onde vem o apelido do chip</div>
+  <h2>Mesma junção que já existe no Inbox — não é dado novo</h2>
+  <p class="lede">Quem entrou pelo WhatsApp já carrega isso: <code>conversas.chip_id</code>
+  aponta pra qual número recebeu, e o apelido vem de <code>contas.nome</code> (chip
+  secundário) ou de <code>canais_config.rotulo</code> (chip principal, quando
+  <code>chip_id</code> é nulo) — o mesmo <code>coalesce</code> que a lista de Conversas
+  já usa pra rotular a linha "veio pelo Chip X". Pra chegar no card do Funil, junto pela
+  conversa de WhatsApp ligada ao lead.</p>
+  <table class="diag">
+    <tr><th>Campo</th><th>De onde vem</th><th>Quando é nulo</th></tr>
+    <tr><td><code>conversas.chip_id</code></td><td>qual número recebeu a conversa</td><td>chip principal (o de sempre)</td></tr>
+    <tr><td><code>contas.nome</code></td><td>apelido do chip secundário</td><td>usa o rótulo do canal principal</td></tr>
+    <tr><td><code>canais_config.rotulo</code></td><td>apelido do chip principal</td><td>ninguém batizou ainda → string vazia</td></tr>
+  </table>
+  <div class="grid3" style="margin-top:.9rem">
+    <div>
+      <div class="rot">Conta com 2 chips — mostra o apelido</div>
+      <div class="quadro">
+        <div class="miolo">
+          <div class="kbcard">
+            <div style="display:flex;align-items:center;gap:.4rem">
+              <span class="tdot" style="background:#5b9bd5"></span>
+              <span class="emp">Padaria Bom Pão</span>
+              <button type="button" class="kbx">✕</button>
+            </div>
+            <div class="sub">Varejo · Teresina/PI</div>
+            <div class="camp-pill">📣 Black Friday Padarias <span class="camp-chip">· 📱 Chip Vendas</span></div>
+            <div class="ft"><span style="font-size:.76rem;color:var(--verde-claro)">R$ 4.200,00</span></div>
+          </div>
+        </div>
+      </div>
+      <p class="compare-lbl">"Chip Vendas" é o apelido batizado em Canais</p>
+    </div>
+    <div>
+      <div class="rot">Conta com 1 chip só — sem sufixo</div>
+      <div class="quadro">
+        <div class="miolo">
+          <div class="kbcard">
+            <div style="display:flex;align-items:center;gap:.4rem">
+              <span class="tdot" style="background:var(--coral)"></span>
+              <span class="emp">Empório Sabor Norte</span>
+              <button type="button" class="kbx">✕</button>
+            </div>
+            <div class="sub">Alimentação · Teresina/PI</div>
+            <div class="camp-pill">📣 Reativação 2º Semestre</div>
+            <div class="ft"><span></span></div>
+          </div>
+        </div>
+      </div>
+      <p class="compare-lbl">mesma regra do Inbox: <code>_tem_dois_chips()</code> — só existe "de qual chip" quando há mais de um pra confundir</p>
+    </div>
+    <div>
+      <div class="rot">Chip sem apelido batizado</div>
+      <div class="quadro">
+        <div class="miolo">
+          <div class="kbcard">
+            <div style="display:flex;align-items:center;gap:.4rem">
+              <span class="tdot" style="background:#5b9bd5"></span>
+              <span class="emp">Doce & Cia</span>
+              <button type="button" class="kbx">✕</button>
+            </div>
+            <div class="sub">Varejo · Teresina/PI</div>
+            <div class="camp-pill">📣 Indicação via Instagram</div>
+            <div class="ft"><span></span></div>
+          </div>
+        </div>
+      </div>
+      <p class="compare-lbl">rótulo do chip veio vazio (ninguém batizou) → cai pro mesmo caso de "conta com 1 chip", omite o sufixo em vez de mostrar "· 📱 "</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================== 5 -->
+<section class="sec">
+  <div class="num">5 · casos de borda</div>
+  <h2>Sem campanha, e com nomes grandes dos dois lados</h2>
+  <div class="grid3">
+    <div>
+      <div class="rot">Lead sem campanha (veio da Base manual)</div>
+      <div class="quadro">
+        <div class="miolo">
+          <div class="kbcard">
+            <div style="display:flex;align-items:center;gap:.4rem">
+              <span class="tdot" style="background:var(--ambar)"></span>
+              <span class="emp">Sem Vendedor Ltda</span>
+              <button type="button" class="kbx">✕</button>
+            </div>
+            <div class="sub">Serviços · Teresina/PI</div>
+            <div class="ft"><span></span></div>
+          </div>
+        </div>
+      </div>
+      <p class="compare-lbl">nenhum selo — não força nada onde não tem dado</p>
+    </div>
+
+    <div>
+      <div class="rot">Nome de campanha comprido (opção B)</div>
+      <div class="quadro">
+        <div class="miolo">
+          <div class="kbcard">
+            <div style="display:flex;align-items:center;gap:.4rem">
+              <span class="tdot" style="background:var(--coral)"></span>
+              <span class="emp">Jacqueline/VeronicaAssessoriaContabilEmpresarial</span>
+              <button type="button" class="kbx">✕</button>
+            </div>
+            <div class="sub">Contabilidade · Teresina/PI</div>
+            <div class="camp-pill">📣 Reativação de Clientes Inativos do 2º Semestre</div>
+            <div class="ft"><span></span></div>
+          </div>
+        </div>
+      </div>
+      <p class="compare-lbl">nome trunca com "…" igual ao <code>.emp</code> (mesma correção da PR #541) — nunca estoura o card</p>
+    </div>
+
+    <div>
+      <div class="rot">Sem valor nem próximo contato</div>
+      <div class="quadro">
+        <div class="miolo">
+          <div class="kbcard">
+            <div style="display:flex;align-items:center;gap:.4rem">
+              <span class="tdot" style="background:#5b9bd5"></span>
+              <span class="emp">Bruna</span>
+              <button type="button" class="kbx">✕</button>
+            </div>
+            <div class="camp-pill">📣 Indicação via Instagram</div>
+          </div>
+        </div>
+      </div>
+      <p class="compare-lbl">card sem segmento/cidade cadastrados — o selo aparece sozinho, sem quebrar o espaçamento</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================== 6 -->
+<section class="sec">
+  <div class="num">6 · resumo</div>
+  <h2>O que muda no código (depois de aprovado)</h2>
+  <ul class="lista">
+    <li>Query do <code>/painel/prospeccao</code> (kanban) ganha o mesmo <code>left join
+      lateral</code> em <code>campanha_alvos</code>+<code>campanhas</code> que a aba Base já
+      usa — sem tabela nova, sem migração.</li>
+    <li>Junta também a conversa de WhatsApp do lead pra pegar <code>chip_id</code> →
+      <code>contas.nome</code>/<code>canais_config.rotulo</code>, igual ao Inbox — e só
+      mostra o sufixo "· 📱 apelido" quando <code>_tem_dois_chips()</code> for verdadeiro
+      e o apelido não vier vazio.</li>
+    <li>O card ganha uma linha <code>.camp-pill</code> (opção B), só quando o lead tem
+      campanha associada — sem alterar os outros elementos do card.</li>
+    <li>Reaproveita <code>min-width:0/overflow:hidden/text-overflow:ellipsis</code> do
+      conserto da PR #541 pra truncar nome de campanha (e chip) grande, com o mesmo
+      cuidado.</li>
+    <li>Teste de regressão novo garantindo que o selo só aparece com dado, que o sufixo do
+      chip só aparece com 2+ chips, e que a cor bate com o tema (mesmo padrão dos testes de
+      inspeção de fonte já existentes no arquivo).</li>
+  </ul>
+  <div class="nota alerta">
+    <b>Aguardando aprovação final:</b> o selo (opção B) + o apelido do chip como mostrado na
+    seção 4 está bom pra eu implementar de verdade?
+  </div>
+</section>
+
+<p class="rodape">Mockup estático — cores e medidas copiadas de <code>web/tema.py</code> e do
+CSS real do módulo (<code>.kbcard</code> em <code>web/painel_prospeccao.py</code>). Os cards
+acima reproduzem o componente real, não desenho solto.</p>
+
+</body>
+</html>

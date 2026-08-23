@@ -14,16 +14,18 @@ from psycopg_pool import ConnectionPool
 from finance import distribuicao as dist
 
 _BASE_SQL = """
-create table contas (id bigserial primary key, nome text, chip_de bigint);
+create table contas (id bigserial primary key, nome text, nome_fantasia text, chip_de bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
-  ativo boolean default true, whatsapp text, cockpit_pausado boolean default false);
+  ativo boolean default true, whatsapp text, cockpit_pausado boolean default false,
+  aviso_zap_em timestamptz);
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
   vendedor_id bigint, atualizado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   responsavel_membro_id bigint, chip_id bigint);
 create table distribuicao (conta_id bigint primary key, ativo boolean not null default false,
   ponteiro int not null default 0, avisar boolean not null default true,
-  aviso_template_sid text, atualizado_em timestamptz not null default now());
+  aviso_template_sid text, atualizado_em timestamptz not null default now(),
+  aviso_zap boolean not null default false, aviso_zap_chip_id bigint, aviso_zap_texto text);
 create table distribuicao_fila (conta_id bigint, membro_id bigint, ordem int not null default 0,
   primary key (conta_id, membro_id));
 """
@@ -235,3 +237,205 @@ def test_retomada_e_parametro_so_por_nome(pool, espiao):
         conta, ids = _setup(c, "TxtKw", 1)
     with pytest.raises(TypeError):
         dist.avisar_vendedor(pool, conta, ids[0], "X", True)
+
+
+# ------------------------------- aviso de lead por WhatsApp (migração 185)
+
+@pytest.fixture()
+def zap(monkeypatch):
+    """Espia o envio por WhatsApp sem mandar nada, e neutraliza e-mail e push.
+
+    `enviar_push` é trocado porque o webpush deste container quebra com
+    PanicException do `pyo3`, que não é Exception e escapa do try/except interno."""
+    from finance import cockpit as ck
+    from finance import email_sender as es
+    from finance import whatsapp_out as wo
+
+    visto = {"enviados": [], "templates": []}
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 0)
+    monkeypatch.setattr(wo, "enviar",
+                        lambda c, cid, num, txt, **kw: visto["enviados"].append(
+                            {"numero": num, "texto": txt, "chip": kw.get("chip_id")}) or {"ok": True})
+    monkeypatch.setattr(wo, "enviar_template",
+                        lambda c, cid, num, sid, var, **k: visto["templates"].append(sid) or {"ok": True})
+    return visto
+
+
+def _conta_com_zap(c, nome, *, texto=None, chip=None, ligado=True):
+    """Uma conta com o rodízio e o aviso por WhatsApp ligados, e um vendedor com número."""
+    conta, ids = _setup(c, nome, 1)
+    c.execute("update contas set nome_fantasia=%s where id=%s", ("Doce Mell", conta))
+    c.execute("update membros set whatsapp='5586999990001' where id=%s", (ids[0],))
+    dist.salvar(c, conta, True, True, ids, aviso_zap=ligado,
+                aviso_zap_chip_id=chip or 0, aviso_zap_texto=texto)
+    c.commit()
+    return conta, ids[0]
+
+
+def test_o_aviso_sai_pelo_chip_escolhido(pool, zap):
+    """O ponto do pedido: o aviso interno não precisa sair pelo número que atende
+    cliente o dia inteiro. `whatsapp_out.enviar` já aceitava `chip_id` — faltava alguém
+    passar."""
+    with pool.connection() as c:
+        conta, mid = _conta_com_zap(c, "ZapChip", chip=4242)
+    dist.avisar_vendedor(pool, conta, mid, "Melry", lead_id=9)
+    assert len(zap["enviados"]) == 1
+    assert zap["enviados"][0]["chip"] == 4242
+
+
+def test_sem_chip_escolhido_sai_pelo_principal(pool, zap):
+    """Nulo = chip da própria empresa, que é o comportamento de sempre."""
+    with pool.connection() as c:
+        conta, mid = _conta_com_zap(c, "ZapPrinc")
+    dist.avisar_vendedor(pool, conta, mid, "Melry", lead_id=9)
+    assert zap["enviados"][0]["chip"] is None
+
+
+def test_as_variaveis_viram_o_texto_de_verdade(pool, zap):
+    with pool.connection() as c:
+        conta, mid = _conta_com_zap(
+            c, "ZapVars",
+            texto="{vendedor}: {lead} chamou a {empresa}. \"{primeira_mensagem}\" -> {link}")
+    dist.avisar_vendedor(pool, conta, mid, "Melry", lead_id=9,
+                         primeira="Boa tarde, faz bolo de pote?")
+    t = zap["enviados"][0]["texto"]
+    assert "V1" in t and "Melry" in t and "Doce Mell" in t
+    assert "Boa tarde, faz bolo de pote?" in t
+    assert "/cockpit/lead/9" in t
+    assert "{" not in t, f"sobrou variável sem trocar: {t}"
+
+
+def test_a_mensagem_do_cliente_entra_cortada(pool, zap):
+    """120 caracteres: o suficiente pra decidir se corre, sem virar paredão no
+    WhatsApp de quem só quer o resumo."""
+    with pool.connection() as c:
+        conta, mid = _conta_com_zap(c, "ZapCorte", texto="{primeira_mensagem}")
+    dist.avisar_vendedor(pool, conta, mid, "Melry", lead_id=9, primeira="x" * 500)
+    assert zap["enviados"][0]["texto"] == "x" * dist.PRIMEIRA_MAX
+
+
+def test_chave_solta_no_texto_nao_derruba_o_aviso(pool, zap):
+    """O texto é digitado por gente. `str.format` levantaria KeyError num '{' solto e
+    o vendedor ficaria sem aviso nenhum — dentro de uma thread, calado."""
+    with pool.connection() as c:
+        conta, mid = _conta_com_zap(c, "ZapChave", texto="50% de desconto { hoje {lead}")
+    dist.avisar_vendedor(pool, conta, mid, "Melry", lead_id=9)
+    assert zap["enviados"][0]["texto"] == "50% de desconto { hoje Melry"
+
+
+def test_variavel_desconhecida_fica_a_vista(pool, zap):
+    """Sumir com ela seria pior: quem escreveu {nome} em vez de {lead} precisa ver
+    que não funcionou."""
+    with pool.connection() as c:
+        conta, mid = _conta_com_zap(c, "ZapDesc", texto="oi {nome}")
+    dist.avisar_vendedor(pool, conta, mid, "Melry", lead_id=9)
+    assert zap["enviados"][0]["texto"] == "oi {nome}"
+
+
+def test_desligado_nao_manda_whatsapp(pool, zap):
+    """Padrão da migração: mandar no WhatsApp de alguém não começa ligado."""
+    with pool.connection() as c:
+        conta, mid = _conta_com_zap(c, "ZapOff", ligado=False)
+    dist.avisar_vendedor(pool, conta, mid, "Melry", lead_id=9)
+    assert zap["enviados"] == []
+
+
+def test_retomada_nao_manda_whatsapp(pool, zap):
+    """Decidido com o dono: quem volta a falar já está no inbox do vendedor — e é
+    justamente o caso que virou enxurrada na reimportação de 22/08."""
+    with pool.connection() as c:
+        conta, mid = _conta_com_zap(c, "ZapVolta")
+    dist.avisar_vendedor(pool, conta, mid, "Ateliê Festas", lead_id=9, retomada=True)
+    assert zap["enviados"] == []
+
+
+def test_o_freio_segura_o_segundo_aviso_do_mesmo_vendedor(pool, zap):
+    with pool.connection() as c:
+        conta, mid = _conta_com_zap(c, "ZapFreio")
+    dist.avisar_vendedor(pool, conta, mid, "Lead 1", lead_id=1)
+    dist.avisar_vendedor(pool, conta, mid, "Lead 2", lead_id=2)
+    assert len(zap["enviados"]) == 1, "dois WhatsApps seguidos no celular do vendedor"
+
+
+def test_o_freio_e_por_vendedor_nao_por_conta(pool, zap):
+    """Teto por conta calaria o aviso de quem ainda não tinha recebido nada — e a fila
+    do rodízio existe justamente pra repartir entre vários."""
+    with pool.connection() as c:
+        conta, ids = _setup(c, "ZapDois", 2)
+        c.execute("update contas set nome_fantasia='X' where id=%s", (conta,))
+        c.execute("update membros set whatsapp='5586999990002' where conta_id=%s", (conta,))
+        dist.salvar(c, conta, True, True, ids, aviso_zap=True, aviso_zap_texto="oi")
+        c.commit()
+    dist.avisar_vendedor(pool, conta, ids[0], "Lead 1", lead_id=1)
+    dist.avisar_vendedor(pool, conta, ids[1], "Lead 2", lead_id=2)
+    assert len(zap["enviados"]) == 2
+
+
+def test_freio_nao_carimba_quem_nao_ia_receber(pool, zap):
+    """Com o aviso desligado o carimbo não pode ser gravado: se fosse, ligar o recurso
+    calaria o primeiro aviso de verdade por 2 minutos, sem motivo nenhum."""
+    with pool.connection() as c:
+        conta, mid = _conta_com_zap(c, "ZapCarimbo", ligado=False)
+    dist.avisar_vendedor(pool, conta, mid, "Lead 1", lead_id=1)
+    with pool.connection() as c:
+        marca = c.execute("select aviso_zap_em from membros where id=%s", (mid,)).fetchone()[0]
+    assert marca is None
+
+
+def test_vendedor_sem_numero_nao_quebra_nem_carimba(pool, zap):
+    with pool.connection() as c:
+        conta, ids = _setup(c, "ZapSemNum", 1)
+        dist.salvar(c, conta, True, True, ids, aviso_zap=True, aviso_zap_texto="oi")
+        c.commit()
+    dist.avisar_vendedor(pool, conta, ids[0], "Melry", lead_id=9)
+    assert zap["enviados"] == []
+    with pool.connection() as c:
+        assert c.execute("select aviso_zap_em from membros where id=%s",
+                         (ids[0],)).fetchone()[0] is None
+
+
+def test_o_texto_padrao_vale_pra_quem_nunca_editou(pool, zap):
+    """O padrão entra na LEITURA, não na coluna — assim melhorar o texto de fábrica
+    alcança quem nunca mexeu, sem migração de dados."""
+    with pool.connection() as c:
+        conta, mid = _conta_com_zap(c, "ZapPadrao", texto="")
+        assert dist.config(c, conta)["aviso_zap_texto"] == dist.TEXTO_ZAP_PADRAO
+    dist.avisar_vendedor(pool, conta, mid, "Melry", lead_id=9, primeira="oi")
+    assert "Melry" in zap["enviados"][0]["texto"]
+
+
+def test_template_ainda_manda_por_template(pool, zap):
+    """Twilio/Meta não têm chip pra escolher e a janela de 24h obriga template — esse
+    caminho não pode ter sido trocado pelo texto livre."""
+    with pool.connection() as c:
+        conta, mid = _conta_com_zap(c, "ZapTpl", texto="ignorado")
+        dist.salvar(c, conta, True, True, [mid], aviso_template_sid="HXzap")
+        c.commit()
+    dist.avisar_vendedor(pool, conta, mid, "Melry", lead_id=9)
+    assert zap["templates"] == ["HXzap"] and zap["enviados"] == []
+
+
+def test_o_link_do_aviso_aponta_pra_ficha_do_lead(pool, zap):
+    """O defeito que o próprio código já apontava em finance/cockpit.py: o aviso do
+    rodízio mandava pro login e o vendedor tinha que caçar de quem era."""
+    with pool.connection() as c:
+        conta, mid = _conta_com_zap(c, "ZapLink", texto="{link}")
+    dist.avisar_vendedor(pool, conta, mid, "Melry", lead_id=77)
+    assert zap["enviados"][0]["texto"].endswith("/cockpit/lead/77")
+
+
+def test_o_email_sai_mesmo_se_a_parte_do_whatsapp_quebrar(pool, zap, monkeypatch):
+    """O aviso que não pode faltar é o e-mail. Tudo que só serve ao WhatsApp — nome da
+    empresa, freio — roda dentro da condição do WhatsApp, senão uma falha ali derruba
+    os três avisos de uma vez, calado, dentro da thread."""
+    from finance import email_sender as es
+
+    saiu = []
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: saiu.append(a[1]) or True)
+    monkeypatch.setattr(dist, "_pode_zap_agora",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("freio quebrou")))
+    with pool.connection() as c:
+        conta, mid = _conta_com_zap(c, "ZapBlinda")
+    dist.avisar_vendedor(pool, conta, mid, "Melry", lead_id=9)
+    assert saiu == ["🔥 Novo lead pra você: Melry"], "o e-mail foi junto com o WhatsApp"

@@ -2005,7 +2005,7 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                                        ctx["membro_id"], canal=canal, vend=filtro_vend,
                                        escopo=escopo)
         ag_cfg, ag_conhec = None, None
-        dist_cfg, dist_membros = None, []
+        dist_cfg, dist_membros, dist_chips, dist_qr = None, [], [], False
         perfil = {"instagram": "", "cargo": "", "material": "", "material_tipo": "link"}
         if aba == "agente":
             ag_cfg = _agente_config(c, ctx["conta_id"])
@@ -2013,6 +2013,18 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
             from finance import distribuicao as _dist
             dist_cfg = _dist.config(c, ctx["conta_id"])
             dist_membros = _dist.membros_fila_ui(c, ctx["conta_id"])
+            # pra escolher por qual número o aviso sai. Reusa a mesma listagem dos
+            # cartões de QR — inclusive o estado, que é o que faz a escolha informada.
+            dist_chips = chips_da_conta(c, ctx["conta_id"])
+            # QR x Twilio/Meta decide QUAL tela mostrar: no QR o aviso é texto livre e
+            # há chip pra escolher; em Twilio/Meta a janela de 24h obriga template e não
+            # existe chip nenhum. Pedir template pra quem está no QR — como esta tela
+            # fazia — esconde um recurso que já funciona atrás de uma exigência que não
+            # é dele.
+            dist_qr = (c.execute(
+                "select coalesce(provedor,'twilio') from canais_config "
+                "where conta_id=%s and canal='whatsapp'", (ctx["conta_id"],)).fetchone()
+                or ("twilio",))[0] == "qr"
             c.commit()   # o config() semeia a linha de distribuicao na 1ª vez
             prow = c.execute(
                 "select coalesce(prospec_instagram,''), coalesce(prospec_cargo,''), "
@@ -2030,7 +2042,8 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                    pode_atribuir=ctx["pode_atribuir"], chip=_wa_chip(ctx["conta_id"]), chip2=_wa_chip2(ctx["conta_id"]),
                    remetente=_ein_remetente(pool, ctx["conta_id"]), tem_ia=_tem_ia(),
                    ag_cfg=ag_cfg, ag_conhec=ag_conhec, perfil=perfil,
-                   dist_cfg=dist_cfg, dist_membros=dist_membros,
+                   dist_cfg=dist_cfg, dist_membros=dist_membros, dist_chips=dist_chips,
+                   dist_qr=dist_qr,
                    abrir=abrir, embed=request.query_params.get("embed") == "1",
                    aviso=request.session.pop("prosp_aviso", None))
 
@@ -3093,9 +3106,11 @@ def comunicacao_virar_lead(request: Request, conversa_id: int = Form(...),
                     _mid = _dist.atribuir_se_sem_dono(c, ctx["conta_id"], lead_id)
                 if _mid:
                     import threading
+                    # sem `primeira`: aqui o lead nasce de cadastro, não de mensagem —
+                    # não existe texto de cliente pra citar. O link, sim, vale igual.
                     threading.Thread(target=_dist.avisar_vendedor,
                                      args=(pool, ctx["conta_id"], _mid, empresa_final[:250]),
-                                     daemon=True).start()
+                                     kwargs={"lead_id": lead_id}, daemon=True).start()
             except Exception:  # noqa: BLE001
                 import logging          # local, como no resto do arquivo
                 logging.getLogger("prospeccao.rodizio").warning(
@@ -3375,13 +3390,24 @@ async def comunicacao_distribuicao(request: Request):
     ativo = str(f.get("ativo") or "").lower() in ("1", "on", "true", "sim")
     avisar = str(f.get("avisar") or "").lower() in ("1", "on", "true", "sim")
     template_sid = (f.get("aviso_template_sid") or "").strip()
+    aviso_zap = str(f.get("aviso_zap") or "").lower() in ("1", "on", "true", "sim")
+    zap_chip = (f.get("aviso_zap_chip_id") or "").strip()
+    zap_texto = (f.get("aviso_zap_texto") or "").strip()
     ids = [int(x) for x in f.getlist("vend") if str(x).isdigit()]
     from finance import distribuicao as _dist
     with get_pool().connection() as c:
         validos = {r[0] for r in c.execute(
             "select id from membros where conta_id=%s and ativo", (ctx["conta_id"],)).fetchall()}
         ids = [i for i in ids if i in validos]
-        _dist.salvar(c, ctx["conta_id"], ativo, avisar, ids, aviso_template_sid=template_sid)
+        # o chip vem da tela, e a tela é editável: sem esta volta, um id na mão faria
+        # o aviso de uma empresa sair pelo número de OUTRA. Mesmo cuidado do `_posse`.
+        chip_ok = _chip_da_conta(c, ctx["conta_id"], zap_chip) if zap_chip else None
+        _dist.salvar(c, ctx["conta_id"], ativo, avisar, ids, aviso_template_sid=template_sid,
+                     aviso_zap=aviso_zap,
+                     # "" (chip principal) tem que CHEGAR no salvar pra apagar a escolha
+                     # anterior — por isso 0, e não None, que significa "não mexe".
+                     aviso_zap_chip_id=(chip_ok if chip_ok and chip_ok != ctx["conta_id"] else 0),
+                     aviso_zap_texto=zap_texto)
         c.commit()
     request.session["prosp_aviso"] = "Distribuição de leads salva ✓"
     return RedirectResponse(_AG_DESTINO, status_code=303)
@@ -3854,9 +3880,12 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
                 import threading
                 # `retomada` muda só o TEXTO do aviso — a distribuição é a mesma, porque
                 # cliente que voltou também precisa de dono. Ver o bloco da órfã.
+                # `lead_id` monta o link direto pra ficha (antes caía no login) e `corpo`
+                # é a mensagem do cliente, que o aviso por WhatsApp cita cortada.
                 threading.Thread(target=_dist.avisar_vendedor,
                                  args=(get_pool(), conta_id, _mid, _emp),
-                                 kwargs={"retomada": retomada}, daemon=True).start()
+                                 kwargs={"retomada": retomada, "lead_id": lead_id,
+                                         "primeira": corpo or ""}, daemon=True).start()
     except Exception:  # noqa: BLE001
         import logging
         _mid = None
@@ -10867,6 +10896,25 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   .distalerta{font-size:.84rem;color:#f7d9a8;background:#2a1d0c;border:1px solid #6b4d17;
     border-radius:10px;padding:.65rem .8rem;margin:.7rem 0;line-height:1.6}
   .distalerta b{color:#ffc86b}
+  /* --- aviso de lead por WhatsApp (migração 185) --- */
+  .zapdobra{border-left:2px solid var(--verde);margin:.2rem 0 0 .15rem;padding:.1rem 0 .1rem 1rem}
+  .zapdobra[hidden]{display:none}
+  .zapchips{display:flex;flex-direction:column;gap:.45rem}
+  .zapchip{display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;border:1px solid var(--borda);
+    border-radius:10px;background:var(--bg);cursor:pointer}
+  .zapchip:has(input:checked){border-color:var(--verde);background:rgba(37,211,102,.07)}
+  .zapchip input[type=radio]{accent-color:var(--verde);flex-shrink:0}
+  .zapchip .nm{flex:1;min-width:0}
+  .zapchip .nm b{display:block;font-size:.86rem}
+  .zapchip .nm span{font-size:.74rem;color:var(--txt-mut)}
+  .zappill{font-size:.66rem;font-weight:600;padding:.14rem .45rem;border-radius:99px;
+    border:1px solid;white-space:nowrap}
+  .zappill.ok{color:var(--verde);border-color:#1E4A3A;background:#10241A}
+  .zappill.off{color:var(--coral);border-color:#5A2B2B;background:#241313}
+  .zapvars{display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.4rem}
+  .zapvar{font-family:var(--mono,monospace);font-size:.72rem;padding:.18rem .42rem;border-radius:6px;
+    border:1px dashed var(--borda);background:var(--bg);color:var(--verde);cursor:pointer}
+  .zapvar:hover{border-color:var(--verde)}
   </style>
   <div class="cx-card">
     <form method="post" action="/painel/prospeccao/comunicacao/distribuicao">
@@ -10887,13 +10935,57 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="distnote">🤖 O agente dá o 1º toque e qualifica. O <b>vendedor da vez</b> é avisado, observa e
         <b>assume quando quiser</b>. Vale pra toda entrada nova que cai no chip da empresa — anúncio (tráfego pago),
         resposta de campanha e contato orgânico.</div>
-      <div class="agrow"><div class="lab"><b>Avisar o vendedor</b><div>E-mail sempre; WhatsApp quando tiver número + template aprovado</div></div>
+      <div class="agrow"><div class="lab"><b>Avisar por e-mail e push</b><div>Chega na hora no app do vendedor, com link direto pra ficha do lead</div></div>
         <label class="sw"><input type="checkbox" name="avisar" {% if not dist_cfg or dist_cfg.avisar %}checked{% endif %}><span></span></label></div>
-      <div class="agfield" style="margin-top:.6rem">
-        <label>Template do aviso no WhatsApp <span style="font-weight:400;color:var(--txt-mut)">(opcional — Content SID do Twilio “HX…” ou o nome do template aprovado na Meta)</span></label>
-        <input class="fld" name="aviso_template_sid" value="{{ dist_cfg.aviso_template_sid if dist_cfg else '' }}" placeholder="HX… ou nome_do_template">
-        <small class="mut" style="font-size:.72rem">Vazio = avisa só por e-mail. Com o template, o WhatsApp do vendedor sai mesmo fora da janela de 24h (variável {{ '{{1}}' }} = a empresa do lead).</small>
+
+      {# WhatsApp em interruptor PRÓPRIO. Antes o `avisar` governava e-mail, push e zap
+         de uma vez, e quem queria push sem tocar o celular do vendedor não tinha saída. #}
+      <div class="agrow"><div class="lab"><b>Avisar no WhatsApp <span class="tag-new">novo</span></b>
+          <div>Uma mensagem no número que o vendedor tem cadastrado na aba <b>Equipe</b></div></div>
+        <label class="sw"><input type="checkbox" name="aviso_zap" id="zapsw"
+          {% if dist_cfg and dist_cfg.aviso_zap %}checked{% endif %}><span></span></label></div>
+
+      <div id="zapbox" class="zapdobra" {% if not (dist_cfg and dist_cfg.aviso_zap) %}hidden{% endif %}>
+        {% if dist_qr and dist_chips | length > 1 %}
+        <div class="agfield">
+          <label>Enviar por qual chip</label>
+          <div class="zapchips">
+            {% for ch in dist_chips %}
+            <label class="zapchip">
+              <input type="radio" name="aviso_zap_chip_id" value="{{ '' if ch.principal else ch.id }}"
+                {% if (ch.principal and not dist_cfg.aviso_zap_chip_id) or (not ch.principal and dist_cfg.aviso_zap_chip_id == ch.id) %}checked{% endif %}>
+              <span class="nm"><b>{{ ch.rotulo }}{% if ch.principal %} · principal{% endif %}</b>
+                <span>{{ ch.numero or 'sem número pareado' }}</span></span>
+              <span class="zappill {{ 'ok' if ch.ativo else 'off' }}">{{ 'conectado' if ch.ativo else 'fora do ar' }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          <small class="mut" style="font-size:.72rem">O chip da campanha costuma ser a melhor escolha: o principal é o que fala com cliente o dia inteiro.</small>
+        </div>
+        {% endif %}
+        {% if dist_qr %}
+        <div class="agfield" style="margin-top:.7rem">
+          <label>Mensagem</label>
+          <div class="zapvars">
+            {% for v in ['{lead}','{vendedor}','{empresa}','{link}','{primeira_mensagem}'] %}
+            <button type="button" class="zapvar" data-v="{{ v }}">{{ v }}</button>
+            {% endfor %}
+          </div>
+          <textarea class="fld" name="aviso_zap_texto" id="zaptexto" rows="6">{{ dist_cfg.aviso_zap_texto if dist_cfg else '' }}</textarea>
+          <small class="mut" style="font-size:.72rem">Toque numa variável pra inserir onde o cursor estiver. <b>*asterisco*</b> vira negrito no WhatsApp. A mensagem do cliente entra cortada em 120 caracteres.</small>
+        </div>
+        <div class="distnote" style="margin-top:.6rem">Sem template e sem janela de 24h — o chip por QR entrega a qualquer hora. Se o chip escolhido cair, o vendedor <b>continua</b> recebendo por e-mail e push, e o lead continua sendo distribuído. No máximo um WhatsApp a cada 2 minutos por vendedor.</div>
+        {# Twilio/Meta não têm chip pra escolher nem aceitam texto livre fora das 24h:
+           lá o template é obrigatório, e é a única coisa que faz sentido pedir. #}
+        {% else %}
+        <div class="agfield" style="margin-top:.7rem">
+          <label>Template do aviso <span style="font-weight:400;color:var(--txt-mut)">(Content SID “HX…” do Twilio ou o nome do template aprovado na Meta)</span></label>
+          <input class="fld" name="aviso_template_sid" value="{{ dist_cfg.aviso_template_sid if dist_cfg else '' }}" placeholder="HX… ou nome_do_template">
+          <small class="mut" style="font-size:.72rem">Seu WhatsApp é Twilio/Meta, então a janela de 24h obriga template — a variável {{ '{{1}}' }} é a empresa do lead. Num chip por QR isto não seria necessário.</small>
+        </div>
+        {% endif %}
       </div>
+      {% if dist_qr %}<input type="hidden" name="aviso_template_sid" value="{{ dist_cfg.aviso_template_sid if dist_cfg else '' }}">{% endif %}
       <div class="agfield" style="margin-top:.7rem"><label>Vendedores na fila — marque quem participa e arraste ⠿ pra ordenar</label></div>
       <div id="distfila" style="display:flex;flex-direction:column;gap:.4rem;margin-top:.3rem">
         {% for m in dist_membros %}
@@ -10912,6 +11004,22 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </form>
   </div>
   <script>
+  (function(){
+    // dobra do aviso por WhatsApp: some quando o interruptor apaga, mas os campos
+    // continuam no formulário — quem desliga e liga de novo não perde o texto.
+    var sw=document.getElementById('zapsw'),cx=document.getElementById('zapbox');
+    if(sw&&cx)sw.addEventListener('change',function(){cx.hidden=!sw.checked;});
+    // inserir variável ONDE O CURSOR ESTÁ, não no fim: quem clica com o cursor no
+    // meio da frase espera que caia ali.
+    var ta=document.getElementById('zaptexto');
+    document.querySelectorAll('.zapvar').forEach(function(b){
+      b.addEventListener('click',function(){
+        if(!ta)return; var v=b.dataset.v, i=ta.selectionStart||0, f=ta.selectionEnd||0;
+        ta.value=ta.value.slice(0,i)+v+ta.value.slice(f);
+        ta.focus(); ta.selectionStart=ta.selectionEnd=i+v.length;
+      });
+    });
+  })();
   (function(){
     var box=document.getElementById('distfila'); if(!box) return; var drag=null;
     box.querySelectorAll('.distrow').forEach(function(row){

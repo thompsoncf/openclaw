@@ -417,6 +417,71 @@ def remover_membro(pool, conta_id: int, membro_id: int) -> dict:
         return {"ok": False, "erro": "vinculado"}
 
 
+# ------------------------------------------------------- recuperação de senha
+
+def alvo_do_reset(pool, email: str) -> dict | None:
+    """QUEM este e-mail reseta — a conta própria, ou o vínculo de membro.
+
+    A ordem não é preferência, é a MESMA autoridade de `autenticar`: quem tem
+    conta no Zaq entra com a senha DELA em qualquer empresa onde seja membro.
+    Resetar a linha de membro nesse caso criaria uma segunda senha, as duas
+    passariam a valer, e trocar uma não mexeria na outra — é o bug que
+    `finance.cockpit.definir_senha` já se recusa a criar. Aqui vale igual.
+
+    Só membro ATIVO. Quem está suspenso não volta sozinho por um formulário
+    público, e quem está com convite pendente (`regerar_convite` deixa
+    `ativo=false`) tem o link do convite como caminho — que é justamente pra isso.
+
+    Devolve None quando o e-mail não é de ninguém. O chamador NÃO revela isso: a
+    tela responde a mesma coisa achando ou não, senão o formulário vira consulta
+    de quem é cliente do Zaq.
+    """
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    with pool.connection() as c:
+        conta = c.execute(
+            "select id, nome from contas where lower(email)=%s", (email,)).fetchone()
+        if conta:
+            return {"tipo": "conta", "conta_id": conta[0], "membro_id": None,
+                    "nome": conta[1], "email": email}
+        m = c.execute(
+            """select id, nome from membros
+                where lower(email)=%s and ativo
+                order by id limit 1""", (email,)).fetchone()
+    if not m:
+        return None
+    return {"tipo": "membro", "conta_id": None, "membro_id": m[0],
+            "nome": m[1], "email": email}
+
+
+def gravar_senha_do_reset(pool, conta_id: int | None, membro_id: int | None,
+                          senha_txt: str) -> bool:
+    """Grava a senha nova no alvo do token. Exatamente um dos dois vem preenchido
+    (o check da migração 185 garante isso na origem).
+
+    NO CASO DE MEMBRO, escreve em TODAS as linhas de membro com aquele e-mail —
+    não só na que o token apontou. A pessoa é uma só, e as duas portas de login
+    escolhem a linha SEM critério: `contextos_de_login` faz `limit 1` sem
+    `order by`, e `autenticar` faz `fetchone()` numa consulta igualmente sem
+    ordem. Com dois vínculos e hashes diferentes, entrar viraria sorteio — e o
+    suporte ficaria com um "às vezes funciona" impossível de reproduzir.
+    """
+    h = _senha.hash_senha(senha_txt)
+    with pool.connection() as c:
+        if conta_id is not None:
+            n = c.execute("update contas set senha_hash=%s where id=%s",
+                          (h, conta_id)).rowcount
+        else:
+            n = c.execute(
+                """update membros set senha_hash=%s
+                    where lower(email) = (select lower(email) from membros where id=%s)
+                      and email is not null""",
+                (h, membro_id)).rowcount
+        c.commit()
+    return bool(n)
+
+
 def regerar_convite(pool, conta_id: int, membro_id: int) -> dict:
     """Novo link de convite (membro esqueceu a senha ou o convite venceu)."""
     token = secrets.token_urlsafe(24)

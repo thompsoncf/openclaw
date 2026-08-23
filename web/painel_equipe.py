@@ -73,6 +73,7 @@ def painel_equipe(request: Request):
                    papeis=[(p, eq.rotulo(p)) for p in eq.PAPEIS_PJ],
                    novo_link=request.session.pop("equipe_link", None),
                    novo_link_cap=request.session.pop("equipe_link_cap", None),
+                   senha_temp=request.session.pop("equipe_senha_temp", None),
                    aviso=request.session.pop("equipe_aviso", None),
                    erro=request.session.pop("equipe_erro", None))
 
@@ -183,6 +184,40 @@ def painel_equipe_excluir(request: Request, membro_id: int = Form(...)):
                                           "desative-o (botão “desativar”) ou reatribua os leads antes de excluir.")
     else:
         request.session["equipe_erro"] = "Não consegui excluir (o dono não pode ser removido)."
+    return RedirectResponse("/painel/equipe", status_code=303)
+
+
+@router.post("/painel/equipe/senha-temp")
+def painel_equipe_senha_temp(request: Request, membro_id: int = Form(...)):
+    """Senha provisória pra destravar alguém da equipe SEM tirar do ar.
+
+    POR QUE ISTO EXISTE, e não só o "↻ Novo link". O reconvite resolve o acesso mas
+    faz `ativo=false` até a pessoa aceitar — e membro inativo sai de `fila_ids`. Na
+    Doce Mell (conta 35) a vendedora travada era a ÚNICA da fila do rodízio: o
+    reconvite teria esvaziado a fila e todo lead novo nasceria sem dono, que é
+    exatamente o buraco dos 14 leads órfãos da conta 34. Aqui só a senha muda.
+
+    Reusa `cockpit.definir_senha`, que já recusa criar uma segunda senha pra quem
+    tem conta própria — nesse caso a saída certa é "Esqueci minha senha", agora que
+    ela enxerga membro.
+    """
+    conta, redir = _dono(request)
+    if redir is not None:
+        return redir
+    from contas.senha import gerar_temporaria
+    from finance import cockpit as ck
+    senha = gerar_temporaria()
+    r = ck.definir_senha(get_pool(), conta[0], membro_id, senha)
+    if r.get("ok"):
+        # Vai pra TELA, não por e-mail: quem está trancado do lado de fora
+        # costuma estar trancado justamente porque o e-mail não chega nele.
+        # O dono lê e manda pelo canal que já usa com a pessoa.
+        request.session["equipe_senha_temp"] = senha
+        request.session["equipe_aviso"] = (
+            "Senha provisória criada. Mande pra pessoa e peça pra ela trocar "
+            "em Perfil assim que entrar — esta senha vale até ela mudar.")
+    else:
+        request.session["equipe_erro"] = r.get("erro") or "Não consegui criar a senha provisória."
     return RedirectResponse("/painel/equipe", status_code=303)
 
 
@@ -313,6 +348,17 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
     </div>
   </div>
   {% endif %}
+  {% if senha_temp %}
+  <div style="margin-top:1rem;padding:.8rem;border:1px solid var(--verde);border-radius:10px;background:#10241d">
+    <div class="mut" style="font-size:.8rem">Senha provisória — mande pra pessoa e peça pra trocar em Perfil. Ela aparece <b>só desta vez</b>:</div>
+    <div style="display:flex;gap:.5rem;margin-top:.4rem">
+      <input id="sqt" value="{{ senha_temp }}" readonly onclick="this.select()"
+             style="flex:1;min-width:0;background:var(--bg);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:.5rem .6rem;font-size:1rem;font-family:ui-monospace,monospace;letter-spacing:.06em">
+      <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('sqt').value);this.textContent='Copiado!'"
+              style="width:auto;flex:none;margin:0;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.5rem .9rem;font-weight:600;cursor:pointer;white-space:nowrap">Copiar</button>
+    </div>
+  </div>
+  {% endif %}
   {% if aviso %}<div style="margin-top:.8rem;padding:.7rem .8rem;border:1px solid var(--verde);border-radius:10px;background:#10241d;font-size:.85rem;color:var(--verde-claro)">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="mut" style="margin-top:.8rem;color:#e07a5f">{{ erro }}</div>{% endif %}
 
@@ -381,15 +427,23 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
         {% endif %}
         {% if m.papel == 'vendedor' %}
         <form method="post" action="/painel/equipe/campanha" style="margin:0"
-              {% if not m.pode_campanha %}onsubmit="return confirm('Liberar campanhas para “{{ m.nome or m.email }}”?\n\nEle vai poder criar campanhas e disparar mensagem em massa pelo número da empresa. Só as campanhas dele — não vê nem mexe nas dos outros.')"{% endif %}>
+              {% if not m.pode_campanha %}onsubmit="return confirm('Liberar campanhas para “{{ m.nome or m.email }}”?\\n\\nEle vai poder criar campanhas e disparar mensagem em massa pelo número da empresa. Só as campanhas dele — não vê nem mexe nas dos outros.')"{% endif %}>
           <input type="hidden" name="membro_id" value="{{ m.id }}">
           <input type="hidden" name="pode" value="{{ '0' if m.pode_campanha else '1' }}">
           <button title="{{ 'Tirar a permissão de criar campanhas' if m.pode_campanha else 'Deixar este vendedor criar as próprias campanhas e enriquecer leads' }}"
                   {% if m.pode_campanha %}style="border-color:var(--ok,#2ea043);color:var(--ok,#2ea043)"{% endif %}>
             {{ '📣 Campanhas ✓' if m.pode_campanha else '📣 Liberar campanhas' }}</button></form>
         {% endif %}
-        <form method="post" action="/painel/equipe/reconvite" style="margin:0"><input type="hidden" name="membro_id" value="{{ m.id }}">
-          <button title="Gerar e reenviar o link de convite">↻ Novo link</button></form>
+        {% if not m.pendente and m.papel != 'dono' %}
+        <form method="post" action="/painel/equipe/senha-temp" style="margin:0"
+              onsubmit="return confirm('Criar uma senha provisória para “{{ m.nome or m.email }}”?\\n\\nA senha atual dela para de valer na hora. O acesso e a fila de leads continuam como estão.')">
+          <input type="hidden" name="membro_id" value="{{ m.id }}">
+          <button title="Destravar o acesso sem tirar a pessoa do ar — ela continua ativa e na fila de leads">🔑 Senha provisória</button></form>
+        {% endif %}
+        <form method="post" action="/painel/equipe/reconvite" style="margin:0"
+              onsubmit="return confirm('Gerar link novo para “{{ m.nome or m.email }}”?\\n\\nAtenção: ela fica DESATIVADA até abrir o link — e sai da fila de leads enquanto isso. Só pra destravar a senha, use “Senha provisória”.')">
+          <input type="hidden" name="membro_id" value="{{ m.id }}">
+          <button title="Gerar e reenviar o link de convite (desativa até a pessoa aceitar)">↻ Novo link</button></form>
         {% if m.papel in ('vendedor','gestor','dono') and not m.pendente %}
         <form method="post" action="/painel/equipe/cockpit-link" style="margin:0"><input type="hidden" name="membro_id" value="{{ m.id }}">
           <button title="Gerar o link do app do vendedor (Cockpit) e mandar por e-mail">📱 Cockpit</button></form>

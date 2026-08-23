@@ -6667,18 +6667,26 @@ def esqueci_senha_envia(request: Request, background: BackgroundTasks,
         return _render("esqueci_senha", request, enviado=False,
                        erro="No momento não conseguimos enviar o e-mail de recuperação. "
                             "Fale com o suporte pelo WhatsApp que a gente libera seu acesso.")
+    from contas import equipe as _eq
     pool = get_pool()
     email = email.strip().lower()
-    with pool.connection() as c:
-        row = c.execute("select id from contas where lower(email)=%s", (email,)).fetchone()
-        if row:
-            token = secrets.token_urlsafe(32)
-            expira = datetime.now(timezone.utc) + timedelta(hours=1)
-            c.execute("""insert into tokens_reset_senha (token, conta_id, expira_em)
-                         values (%s, %s, %s)""", (token, row[0], expira))
+    # CONTA **ou** MEMBRO. Só olhar `contas` deixava vendedor, gestor e financeiro
+    # sem caminho de volta: a consulta não achava, nenhum token nascia, e a tela
+    # dizia "enviamos" assim mesmo. `alvo_do_reset` decide qual dos dois manda.
+    alvo = _eq.alvo_do_reset(pool, email)
+    if alvo:
+        token = secrets.token_urlsafe(32)
+        expira = datetime.now(timezone.utc) + timedelta(hours=1)
+        with pool.connection() as c:
+            c.execute("""insert into tokens_reset_senha (token, conta_id, membro_id, expira_em)
+                         values (%s, %s, %s, %s)""",
+                      (token, alvo["conta_id"], alvo["membro_id"], expira))
             c.commit()
-            link = f"{os.environ.get('APP_URL', 'https://app.zaq-ia.com')}/redefinir-senha?token={token}"
-            background.add_task(enviar_recuperacao_senha, email, link)
+        link = f"{os.environ.get('APP_URL', 'https://app.zaq-ia.com')}/redefinir-senha?token={token}"
+        background.add_task(enviar_recuperacao_senha, email, link, alvo.get("nome"))
+    # A resposta é a MESMA achando ou não — é o que impede o formulário de virar
+    # consulta de quem é cliente do Zaq. Antes ela era genérica e falsa pra metade
+    # das pessoas; agora é genérica e verdadeira.
     return _render("esqueci_senha", request, enviado=True, erro=None)
 
 
@@ -6687,7 +6695,10 @@ def redefinir_senha_form(request: Request, token: str = ""):
     pool = get_pool()
     from datetime import datetime, timezone
     with pool.connection() as c:
-        row = c.execute("""select conta_id from tokens_reset_senha
+        # `select 1` de propósito: o alvo pode ser conta OU membro, e um
+        # `select conta_id` devolveria a tupla (None,) pro token de membro —
+        # verdadeira por acidente, não por intenção. Aqui só se pergunta se vale.
+        row = c.execute("""select 1 from tokens_reset_senha
                            where token=%s and not usado and expira_em > now()""",
                         (token,)).fetchone()
     if not row:
@@ -6698,18 +6709,25 @@ def redefinir_senha_form(request: Request, token: str = ""):
 @router.post("/redefinir-senha", response_class=HTMLResponse)
 def redefinir_senha_envia(request: Request, token: str = Form(...),
                           senha: str = Form(...)):
+    from contas import equipe as _eq
     pool = get_pool()
     with pool.connection() as c:
-        row = c.execute("""select conta_id from tokens_reset_senha
+        row = c.execute("""select conta_id, membro_id from tokens_reset_senha
                            where token=%s and not usado and expira_em > now()""",
                         (token,)).fetchone()
-        if not row:
-            return _render("redefinir_senha", request, token=token, valido=False, erro="Link inválido ou expirado.")
-        if len(senha) < 8:
-            return _render("redefinir_senha", request, token=token, valido=True,
-                           erro="A senha precisa de ao menos 8 caracteres.")
-        c.execute("update contas set senha_hash=%s where id=%s",
-                  (hash_senha(senha), row[0]))
+    if not row:
+        return _render("redefinir_senha", request, token=token, valido=False, erro="Link inválido ou expirado.")
+    if len(senha) < 8:
+        return _render("redefinir_senha", request, token=token, valido=True,
+                       erro="A senha precisa de ao menos 8 caracteres.")
+    # O token diz em QUAL dos dois escrever. Escrever sempre em `contas` era o
+    # outro lado do mesmo defeito: mesmo com token, a senha do membro não mudava.
+    if not _eq.gravar_senha_do_reset(pool, row[0], row[1], senha):
+        return _render("redefinir_senha", request, token=token, valido=True,
+                       erro="Não consegui salvar a senha. Peça um link novo.")
+    # Só QUEIMA o token depois de a senha entrar. Marcar antes deixaria a pessoa
+    # sem senha nova e sem link — o pior dos dois mundos.
+    with pool.connection() as c:
         c.execute("update tokens_reset_senha set usado=true where token=%s", (token,))
         c.commit()
     request.session["aviso"] = "Senha redefinida! Faça login."

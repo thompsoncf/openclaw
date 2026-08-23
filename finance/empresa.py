@@ -1142,6 +1142,73 @@ def fluxo_projetado(pool, conta_id: int, semanas: int = 4) -> dict:
             "saldo_projetado_centavos": acumulado}
 
 
+def insight_clientes(pool, conta_id: int, dias: int = 30, risco_dias: int = 45) -> dict:
+    """Clientes pro dashboard: quem é novo, quem repete e quem sumiu.
+
+    Base é a MESMA de vendas/comissão (`lancamentos` receita/empresa com
+    `cliente_id`) — sem tabela nova, sem número que não bate com o resto do
+    painel. Só entra quem foi vinculado a um cliente (venda de balcão/PDV); venda
+    solta sem cliente não aparece aqui (já aparece nos KPIs financeiros normais).
+
+    "Em risco" é heurística simples e explicável, não modelo: cliente que já
+    comprou 2+ vezes (então tinha hábito) e não aparece há mais de `risco_dias`
+    — não é sobre quem comprou uma vez só e nunca mais (não dá pra saber se
+    aquilo era recorrência ou venda avulsa)."""
+    hoje = date.today()
+    ini = hoje - timedelta(days=dias)
+    with pool.connection() as c:
+        historico = c.execute(
+            """select cliente_id, min(data), max(data), count(*), sum(valor_centavos)
+                 from lancamentos
+                where conta_id=%s and tipo='receita' and natureza='empresa'
+                  and cliente_id is not null
+                group by cliente_id""",
+            (conta_id,),
+        ).fetchall()
+        no_periodo = c.execute(
+            """select cliente_id, sum(valor_centavos), count(*)
+                 from lancamentos
+                where conta_id=%s and tipo='receita' and natureza='empresa'
+                  and cliente_id is not null and data >= %s and data <= %s
+                group by cliente_id""",
+            (conta_id, ini, hoje),
+        ).fetchall()
+        ids = {r[0] for r in historico}
+        nomes = {}
+        if ids:
+            for cid_, nome in c.execute(
+                "select id, nome from clientes where dono_id=%s and id = any(%s)",
+                (conta_id, list(ids)),
+            ).fetchall():
+                nomes[cid_] = nome or "Cliente"
+
+    hist = {r[0]: {"primeira": r[1], "ultima": r[2], "n": int(r[3] or 0),
+                   "total_centavos": int(r[4] or 0)} for r in historico}
+    periodo = {r[0]: {"total_centavos": int(r[1] or 0), "n": int(r[2] or 0)} for r in no_periodo}
+
+    novos = sum(1 for cid_ in periodo if hist[cid_]["primeira"] >= ini)
+    recorrentes = sum(1 for cid_ in periodo if hist[cid_]["primeira"] < ini)
+
+    top_clientes = sorted(
+        ({"nome": nomes.get(cid_, "Cliente"),
+          "total_centavos": v["total_centavos"], "n_compras": v["n"],
+          "novo": hist[cid_]["primeira"] >= ini}
+         for cid_, v in periodo.items()),
+        key=lambda r: -r["total_centavos"])[:5]
+
+    em_risco = sorted(
+        ({"nome": nomes.get(cid_, "Cliente"),
+          "total_historico_centavos": h["total_centavos"], "n_compras": h["n"],
+          "dias_sem_comprar": (hoje - h["ultima"]).days}
+         for cid_, h in hist.items()
+         if h["n"] >= 2 and cid_ not in periodo and (hoje - h["ultima"]).days > risco_dias),
+        key=lambda r: -r["total_historico_centavos"])[:5]
+
+    return {"dias": dias, "risco_dias": risco_dias,
+            "novos": novos, "recorrentes": recorrentes,
+            "top_clientes": top_clientes, "em_risco": em_risco}
+
+
 def dre_mes(pool, conta_id: int, ano: int, mes: int, top: int = 5) -> dict:
     """DRE simplificado do mês a partir do livro-caixa (fonte única).
 

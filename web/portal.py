@@ -6811,6 +6811,26 @@ def _painel_dashboard(pool, conta, vende_servico=False):
                          for s in _FUNIL_ORDEM if s != "perdido")
     novo_recorrente = mensal["fechado"]
 
+    # Clientes (novos/recorrentes/em risco) — tolerante como o resto do dash.
+    try:
+        clientes_insight = emp.insight_clientes(pool, conta[0])
+    except Exception:
+        clientes_insight = None
+
+    # Vendedores — só ganha destaque no dash quando tem MAIS DE UM vendedor
+    # com venda no mês (ranking de um só não diz nada, e ainda duplicaria o
+    # que /painel/relatorios?tipo=comissao já mostra em detalhe).
+    vendedores = []
+    try:
+        from finance import comissao as _com
+        mes_ini = hoje.replace(day=1)
+        ranking = [r for r in _com.por_vendedor(pool, conta[0], mes_ini, hoje)
+                   if not r["sem_vendedor"]]
+        if len(ranking) >= 2:
+            vendedores = ranking[:5]
+    except Exception:
+        vendedores = []
+
     # Legenda (só status presentes) + conic-gradient com fresta de 1.2° na superfície.
     ativos = [s for s in _FUNIL_ORDEM if contagem[s] > 0]
     legenda = [{"rotulo": _FUNIL_ROTULO[s], "n": contagem[s], "cor": _FUNIL_COR[s],
@@ -6847,6 +6867,8 @@ def _painel_dashboard(pool, conta, vende_servico=False):
         "funil_legenda": legenda, "funil_gradiente": gradiente,
         "fluxo_poly": poly, "fluxo_area": area,
         "fluxo_end_x": xs[-1], "fluxo_end_y": ys[-1],
+        "clientes": clientes_insight,
+        "vendedores": vendedores,
     }
 
 

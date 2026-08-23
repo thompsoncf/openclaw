@@ -1302,15 +1302,25 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     pool = get_pool()
     leads = ck.leads_do_vendedor(pool, conta_id, membro_id)
     p = ck.perfil(pool, conta_id, membro_id)
-    vez = sum(1 for l in leads if not l["ia"])
+    vez = sum(1 for l in leads if l["sua_vez"])
 
     # a fila já tem os leads em mão: soma daqui, sem uma consulta a mais só pra aba
     total_pend = sum(int(l.get("pend") or 0) for l in leads)
 
     cartoes = []
     for l in leads:
+        # "sua vez" = bot pausado E tem mensagem nova pra responder — não só o
+        # bot estar pausado. Sem o "e tem mensagem nova", o selo ficava preso
+        # em "sua vez" pra sempre depois da 1ª resposta manual (pelo app OU
+        # direto no WhatsApp do celular): devolver o bot é uma ação separada
+        # que ninguém clica só pra tirar o selo da tela. Quando já respondeu,
+        # o selo não some — muda pra "respondido" (verde, .chip.neon), que
+        # conta a história de que alguém já cuidou disso em vez de deixar o
+        # card mudo.
         chip = ("<span class='chip ia'>IA</span>" if l["ia"]
-                else "<span class='chip voce'>sua vez</span>")
+                else "<span class='chip voce'>sua vez</span>" if l["sua_vez"]
+                else "<span class='chip neon'>respondido</span>" if l["respondido"]
+                else "")
         # Quantas o cliente mandou e ninguém respondeu. O push é aviso que passa —
         # chega uma vez, e se o vendedor estiver dirigindo ou com o foco ligado,
         # passou. A bolinha fica até a conversa ser respondida, que é o que faz o

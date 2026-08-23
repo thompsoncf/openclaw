@@ -8324,7 +8324,11 @@ _CSS = """<style>
   border:1px solid var(--neon-borda);border-radius:8px;padding:.22rem .5rem;
   font-size:.7rem;line-height:1.3;color:var(--verde-claro);margin-top:.34rem;
   max-width:100%;box-sizing:border-box}
-.kbcard .camp .chip{opacity:.72;font-weight:600}
+/* nowrap só no NOME DO CHIP: sem isso, um apelido curto ("CP Zarb") ainda
+   quebrava no meio ("CP" numa linha, "Zarb" na outra) — o clamp de 2 linhas
+   do .camp é pro texto da campanha, que pode ser grande; o chip é sempre
+   curto e não devia quebrar sozinho. */
+.kbcard .camp .chip{opacity:.72;font-weight:600;white-space:nowrap}
 @media(min-width:900px){
   .kbtabs{display:none}
   /* Uma coluna por ETAPA, e as etapas são configuráveis desde a régua: o

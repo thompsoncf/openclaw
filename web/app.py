@@ -1045,12 +1045,46 @@ def home():
     return _PAGINA
 
 
+def _fuso_do_processo() -> dict:
+    """Como este processo enxerga as horas. Existe pra uma pergunta que não tinha
+    resposta: "o TZ pegou?".
+
+    `TZ=America/Sao_Paulo` só vale se o contêiner tiver /usr/share/zoneinfo. Sem a
+    base de fusos o valor é ignorado EM SILÊNCIO e o processo segue em UTC — e o
+    sintoma só aparece das 21h às 23h59, quando `date.today()` vira o dia seguinte
+    e o lançamento do cliente cai na data errada (foi o lançamento 733, em 22/08).
+
+    Antes disto não havia como saber sem esperar dar 21h em produção. Repare que
+    comparar só a DATA não serve: nas outras 21 horas do dia UTC e Brasília
+    concordam, e um teste de data passaria com o fuso errado. Por isso vai a HORA.
+
+    `hoje_app` é o que o lançamento usa (finance/relogio.py, que faz a conta na mão
+    e não depende da variável). `hoje_processo` é o que os outros ~60 pontos ainda
+    usam via date.today(). Os dois diferentes = TZ não pegou E já passou das 21h.
+    """
+    from datetime import date as _date, datetime as _dt
+    import time as _time
+
+    from finance import relogio
+
+    local = _dt.now()
+    return {
+        "agora_local": local.strftime("%d/%m %H:%M"),
+        "agora_brasilia": relogio.agora().strftime("%d/%m %H:%M"),
+        "hoje_app": relogio.hoje().isoformat(),
+        "hoje_processo": _date.today().isoformat(),
+        "tz_env": os.getenv("TZ", "(não definida)"),
+        "tz_processo": _time.tzname[0],
+        "confere": _date.today() == relogio.hoje(),
+    }
+
+
 @app.get("/health")
 def health():
     try:
         with get_pool().connection() as conn:
             conn.execute("select 1")
-        return {"status": "ok", "db": "ok"}
+        return {"status": "ok", "db": "ok", "fuso": _fuso_do_processo()}
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"status": "degraded", "db": str(e)}, status_code=503)
 

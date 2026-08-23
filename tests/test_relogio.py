@@ -86,3 +86,21 @@ def test_ninguem_voltou_a_usar_date_today_no_caminho_do_lancamento():
         # o comentário explicativo cita o nome; conta só as CHAMADAS
         assert "date.today()" not in texto.replace("o date.today() já é", ""), (
             f"{arq} voltou a usar date.today() — use finance.relogio.hoje()")
+
+
+def test_health_denuncia_o_fuso_pela_HORA_nao_pela_data(monkeypatch):
+    """O /health existe pra responder "o TZ pegou?" sem esperar dar 21h.
+
+    Conferido em 23/08 às 13h56: com TZ=UTC e com TZ=America/Sao_Paulo os campos
+    `hoje_processo` e `confere` saem IDÊNTICOS — nas outras 21 horas do dia UTC e
+    Brasília concordam. Quem separa é a HORA. Um diagnóstico baseado em data
+    passaria com o fuso errado, que é exatamente a armadilha deste bug.
+    """
+    from web.app import _fuso_do_processo
+
+    monkeypatch.setenv("TZ", "UTC")
+    d = _fuso_do_processo()
+    assert d["agora_brasilia"] == relogio.agora().strftime("%d/%m %H:%M")
+    assert d["hoje_app"] == relogio.hoje().isoformat()
+    # o campo que denuncia: a hora local do processo contra a de Brasília
+    assert "agora_local" in d and "tz_processo" in d

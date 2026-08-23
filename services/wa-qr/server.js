@@ -112,6 +112,13 @@ const DECIFRAR_JANELA_MS = parseInt(process.env.WA_QR_DECIFRAR_JANELA_MS || '600
 // o chip precisa de pareamento novo — ver abrirDisjuntor.
 const DISJUNTOR_AVISA_EM = parseInt(process.env.WA_QR_DISJUNTOR_AVISA_EM || '3', 10)
 
+// Por quanto tempo um socket recém-criado conta como "em handshake" e barra uma
+// segunda chamada de iniciarSessao — ver emHandshake. Medido em produção: entre
+// 'socket criado' e 'WhatsApp conectado' deu 1,7s no arranque limpo e 3,8s no pior
+// caso observado. 20s é folga larga por cima disso e continua MUITO abaixo da volta
+// do vigia (5min), então um handshake que trave de verdade não prende a conta.
+const HANDSHAKE_MS = parseInt(process.env.WA_QR_HANDSHAKE_MS || '20000', 10)
+
 if (!process.env.DATABASE_URL) { logBase.error('Falta DATABASE_URL'); process.exit(1) }
 if (!SEGREDO) { logBase.error('Falta WA_QR_SHARED_SECRET'); process.exit(1) }
 
@@ -690,6 +697,42 @@ function sessaoFirme (s, agora, firme) {
 //   mensagem do cliente, que não havia socket nenhum.
 function socketAtual (s, sock) {
   return !!sock && !sock._descartado && !!s && s.sock === sock
+}
+
+// Este socket já existe mas AINDA NÃO ABRIU — quem chegar agora tem que esperar.
+//
+// O guarda do iniciarSessao olhava só `s.iniciando` e `status === 'conectado'`, e
+// entre os dois existe um vão: o `iniciando` cai no `finally`, que roda quando a
+// função RETORNA — logo depois de registrar os listeners e ANTES de o WhatsApp
+// responder o login. Nesses segundos a sessão não estava protegida por nada.
+//
+// Foi o que matou a conta 35 em 22/08. Um stream:error às 21:12:18.953 fechou a
+// conexão; o handler do 'close' agendou a volta pra 2,5s e alguma outra chamada
+// (o /enviar religa sob demanda) entrou 0,95s depois:
+//
+//   21:12:20.703  socket criado, registrando listeners   ← socket A
+//   21:12:21.453  iniciarSessao: começando               ← o timer dos 2,5s
+//   21:12:21.808  socket descartado {motivo: substituido} ← mata o A no meio do login
+//   21:12:24.508  WhatsApp conectado                     ← socket B
+//
+// Dali em diante a conta enviava normalmente e não recebia mais NADA — nem o eco das
+// próprias mensagens. Dois logins na mesma credencial com 1,1s de intervalo tiram o
+// aparelho da lista de dispositivos da conta, e isso mora no servidor do WhatsApp:
+// não volta com religamento, nem com socket novo, nem reiniciando o processo. Custou
+// um pareamento novo, com o celular do cliente na mão.
+//
+// Não dá pra simplesmente segurar `iniciando` até o 'open': `deveSoltarTravaNo440` lê
+// esse mesmo campo pra decidir se um 440 é da nossa encarnação, e alargar o sentido
+// dele mudaria aquele julgamento junto. Daí um carimbo próprio.
+//
+// As três saídas são o que impede a trava eterna: socket descartado não protege nada,
+// socket que abriu já é assunto do `abertoEm` (e do guarda de 'conectado'), e o teto
+// de tempo cobre o handshake que pendura sem nunca falhar.
+function emHandshake (s, agora, teto) {
+  if (!s || !s.sock || s.sock._descartado) return false
+  if (s.abertoEm) return false
+  if (!s.handshakeDesde) return false
+  return (agora - s.handshakeDesde) < teto
 }
 
 // Sessão de pé com o aluguel de outro (ou de ninguém).
@@ -2065,7 +2108,15 @@ async function iniciarSessao (contaId) {
   // entra na lista porque a página chama /iniciar sozinha ao carregar: sem isso,
   // recarregar a página (ou abrir numa segunda aba) no meio de um pareamento
   // derrubava o socket do QR que a pessoa estava escaneando e gerava outro QR.
-  if (s && (s.iniciando || ((s.status === 'conectado' || s.status === 'aguardando_qr') && s.sock))) return s
+  // `emHandshake` fecha o vão entre "socket criado" e "WhatsApp conectado", onde
+  // `iniciando` já é false e `status` ainda não é 'conectado' — ver a função.
+  if (s && (s.iniciando ||
+            ((s.status === 'conectado' || s.status === 'aguardando_qr') && s.sock) ||
+            emHandshake(s, Date.now(), HANDSHAKE_MS))) {
+    log.info({ contaId, status: s.status, iniciando: !!s.iniciando, temSock: !!s.sock },
+      'iniciarSessao: já tem sessão de pé ou subindo — devolvendo a que existe')
+    return s
+  }
   s = s || { status: 'desconectado', qr: null }
   s.iniciando = true
   sessoes.set(contaId, s)
@@ -2183,6 +2234,18 @@ async function iniciarSessao (contaId) {
       }
     })
     s.sock = sock
+    // Começa o relógio do handshake AQUI, junto com o socket: é a partir deste
+    // instante que uma segunda chamada de iniciarSessao seria a que mata o login em
+    // curso. Quem fecha a janela é o 'open' (que carimba abertoEm) — ver emHandshake.
+    //
+    // E o abertoEm da encarnação ANTERIOR sai da frente na mesma linha. Ele é zerado
+    // no handler de 'close', mas nem todo descarte passa por lá (o /sair e o
+    // 'substituido' do próprio iniciarSessao marcam _descartado e seguem). Sobrando
+    // preenchido, o emHandshake devolveria false pro socket novo e o vão continuaria
+    // aberto justamente no caso que mais importa: a reconexão em cima de outra. O
+    // sentido do campo é "quando ESTA encarnação subiu", e esta ainda não subiu.
+    s.abertoEm = null
+    s.handshakeDesde = Date.now()
     // Teto de ondas do histórico é por ENCARNAÇÃO (ver deveSeguirNoHistorico): quem
     // pareia de novo tem direito à janela inteira outra vez.
     ondasDeHistorico.delete(contaId)
@@ -3080,4 +3143,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

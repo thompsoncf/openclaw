@@ -84,11 +84,20 @@ conferir(tetoMudo({ reconexoesMudas: 0 }, TETO) === TETO,
 console.log('\nmarcarVivo carimba a sessão certa')
 sessoes.set(35, { status: 'conectado', sock: SOCK, ultimoEvento: AGORA - 3 * LIMITE, reconexoesMudas: 3 })
 sessoes.set(23, { status: 'conectado', sock: SOCK, ultimoEvento: AGORA - 3 * LIMITE, reconexoesMudas: 3 })
+// Dois sinais, não um. Este teste exigia que QUALQUER evento zerasse a desconfiança
+// acumulada, e era isso que mantinha o teto preso em 45min pra sempre: depois de cada
+// religamento o serviço pede a agenda de novo, os frames da agenda chegam, e a conta
+// se absolvia com tráfego que ela mesma provocou. Medido no wa_qr_log: 19 religamentos
+// seguidos da conta 23 entre 21/08 20:36 e 22/08 09:39, todos com `religamentos: 0`.
+// Agora só entrega de conversa (messages.upsert, o `true`) absolve — ver marcarVivo.
 marcarVivo(35)
 conferir(sessaoMuda(sessoes.get(35), Date.now(), LIMITE) === false,
   'a conta que recebeu evento sai da mira do vigia')
+conferir(tetoMudo(sessoes.get(35), TETO) === 8 * TETO,
+  'mas o frame sozinho NÃO perdoa a desconfiança acumulada (era o auto-absolvimento)')
+marcarVivo(35, true)
 conferir(tetoMudo(sessoes.get(35), TETO) === TETO,
-  'e volta pro teto normal — a desconfiança acumulada zera junto')
+  'entrega de conversa de verdade: aí sim volta pro teto normal')
 conferir(sessaoMuda(sessoes.get(23), Date.now(), LIMITE) === true,
   'a conta vizinha NÃO é carimbada junto')
 let explodiu = false

@@ -21,6 +21,19 @@ alter table public.distribuicao
   add column if not exists aviso_zap_chip_id bigint,
   add column if not exists aviso_zap_texto   text;
 
+-- ...com UMA exceção, e ela é o oposto de ligar sozinho: quem JÁ configurou um
+-- template de aviso já disse que quer o WhatsApp. Antes desta migração, template
+-- preenchido era o próprio interruptor — o envio só dependia de `avisar`. Agora que
+-- existe um interruptor de verdade, deixar essas contas em FALSE seria DESLIGAR em
+-- silêncio um aviso que estava funcionando, num deploy que ninguém pediu.
+--
+-- Hoje não pega ninguém (zero contas com template em produção, conferido antes de
+-- escrever isto). Está aqui pelo princípio: migração não tira recurso de quem tem.
+update public.distribuicao
+   set aviso_zap = true
+ where coalesce(trim(aviso_template_sid), '') <> ''
+   and aviso_zap is not true;
+
 -- Sem FK pro chip de propósito. O chip é uma linha de `contas` (ver `chip_de`), e
 -- uma FK com o default `no action` impediria apagar a conta do chip enquanto esta
 -- config existisse. O código já valida a posse do chip a cada envio — mesma volta

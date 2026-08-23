@@ -137,26 +137,41 @@ def test_salvar_guarda_template_sid(pool):
 
 def test_avisar_usa_template_quando_sid(pool, monkeypatch):
     """Com SID → enviar_template ({{1}}=empresa); sem SID → texto livre."""
+    from finance import cockpit as ck
     from finance import distribuicao as d
     from finance import whatsapp_out as wo
     from finance import email_sender as es
     monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    # o push tem que ser trocado, e não é conveniência: sem isso o webpush levanta
+    # PanicException do `pyo3` — que NÃO é Exception e escapa do try/except interno —
+    # em qualquer máquina sem `_cffi_backend`. O teste então só rodava no CI, e foi
+    # por isso que uma regressão de verdade (o portão do aviso_zap barrando o
+    # template) passou batida aqui e só apareceu lá.
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 0)
     chamado = {}
     monkeypatch.setattr(wo, "enviar_template",
                         lambda c, cid, num, sid, var, **k: chamado.update(tipo="template", sid=sid, var=var) or {"ok": True})
     monkeypatch.setattr(wo, "enviar",
-                        lambda c, cid, num, txt: chamado.update(tipo="texto") or {"ok": True})
+                        lambda c, cid, num, txt, **k: chamado.update(tipo="texto", chip=k.get("chip_id")) or {"ok": True})
     with pool.connection() as c:
         conta, ids = _setup(c, "Av", 1)
         c.execute("update membros set whatsapp='5586999' where id=%s", (ids[0],))
-        dist.salvar(c, conta, True, True, ids, aviso_template_sid="HXzap")
+        # `aviso_zap` explícito: desde a migração 185 UM interruptor governa todo o
+        # WhatsApp, template incluído. Quem já tinha template ligado é migrado pra
+        # true na própria 185 — este teste é sobre o ROTEAMENTO (template x texto
+        # livre), não sobre o portão.
+        dist.salvar(c, conta, True, True, ids, aviso_template_sid="HXzap", aviso_zap=True)
         c.commit()
     d.avisar_vendedor(pool, conta, ids[0], "Padaria Estrela")
     assert chamado.get("tipo") == "template"
     assert chamado.get("sid") == "HXzap" and chamado.get("var") == {"1": "Padaria Estrela"}
     # agora sem template → texto livre
     with pool.connection() as c:
-        dist.salvar(c, conta, True, True, ids, aviso_template_sid="")
+        dist.salvar(c, conta, True, True, ids, aviso_template_sid="", aviso_zap=True)
+        # o freio da 185 é de 2 min POR VENDEDOR, e este teste avisa o mesmo vendedor
+        # duas vezes seguidas de propósito — são dois cenários, não uma rajada. Zerar
+        # o carimbo é o equivalente a "dois minutos depois".
+        c.execute("update membros set aviso_zap_em=null where id=%s", (ids[0],))
         c.commit()
     chamado.clear()
     d.avisar_vendedor(pool, conta, ids[0], "Padaria Estrela")
@@ -439,3 +454,22 @@ def test_o_email_sai_mesmo_se_a_parte_do_whatsapp_quebrar(pool, zap, monkeypatch
         conta, mid = _conta_com_zap(c, "ZapBlinda")
     dist.avisar_vendedor(pool, conta, mid, "Melry", lead_id=9)
     assert saiu == ["🔥 Novo lead pra você: Melry"], "o e-mail foi junto com o WhatsApp"
+
+
+def test_quem_ja_tinha_template_nao_perde_o_aviso_na_migracao():
+    """A 185 LIGA o `aviso_zap` de quem já tinha template configurado.
+
+    Antes dela, template preenchido era o próprio interruptor: o envio só dependia
+    de `avisar`. Ao criar um interruptor de verdade, deixar essas contas em `false`
+    desligaria em silêncio um aviso que funcionava — num deploy que ninguém pediu.
+
+    Foi o CI que pegou isso: o `test_avisar_usa_template_quando_sid` reprovou lá
+    (`{}.get('tipo') is None` — o template nem chegou a ser chamado), enquanto aqui
+    ele morre antes, no `pyo3` do cryptography. Este teste lê o SQL da migração pra
+    a intenção não depender de um teste que o ambiente local não consegue rodar."""
+    sql = open("db/migracoes/185_aviso_lead_whatsapp.sql", encoding="utf-8").read()
+    corpo = sql[sql.index("update public.distribuicao"):]
+    assert "set aviso_zap = true" in corpo
+    assert "aviso_template_sid" in corpo, "o backfill tem que olhar o template"
+    assert "aviso_zap is not true" in corpo, \
+        "sem esta guarda o update reescreve quem já estava ligado"

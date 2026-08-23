@@ -577,20 +577,38 @@ def test_nome_de_empresa_longo_nao_empurra_o_x_de_excluir_pra_fora_do_card():
         "sem truncar o nome com ellipsis, ele estoura a largura do card")
 
 
-def test_selo_de_campanha_de_origem_trunca_igual_ao_nome_da_empresa():
+def test_selo_de_campanha_de_origem_trunca_em_duas_linhas_nao_uma():
     """Mockup aprovado (docs/mockups/funil_campanha_origem.html, opção B): o card
     do lead ganha um selo "📣 <campanha>" quando o lead veio de uma campanha de
-    prospecção, com "· 📱 <apelido do chip>" quando a conta tem 2+ chips.
+    prospecção, com "📱 <apelido do chip>" quando a conta tem 2+ chips.
 
-    O selo não é item de um flex row (é um <div> de linha inteira, como `.sub`),
-    então não precisa de `min-width:0` — mas precisa da MESMA lição do `.emp` da
-    3ª rodada: sem truncar, um nome de campanha comprido estoura a largura fixa
-    do card."""
+    22/08, relato em produção depois do selo no ar: num card de 150px, truncar
+    em 1 linha com "…" corta tão cedo que "📣 Camp…" não identifica campanha
+    nenhuma — a informação inteira do selo é justamente essa. Mockup novo
+    aprovado (opção A): quebra em até 2 linhas em vez de 1 com reticências —
+    a largura do card ainda não pode estourar, mas a lição do `.emp` da 3ª
+    rodada agora é "não corte a única informação que o selo existe pra dar"."""
     fonte = inspect.getsource(pp)
     regra = fonte.split(".kbcard .camp{")[1].split("}")[0]
-    assert "overflow:hidden" in regra and "text-overflow:ellipsis" in regra and "white-space:nowrap" in regra, (
-        "sem truncar, um nome de campanha comprido estoura a largura do card")
-    assert "max-width:100%" in regra
+    assert "-webkit-line-clamp:2" in regra, (
+        "sem o clamp de 2 linhas, ou trunca cedo demais (1 linha) ou estoura o card")
+    assert "overflow:hidden" in regra
+    assert "max-width:100%" in regra and "box-sizing:border-box" in regra, (
+        "sem box-sizing:border-box, padding soma por cima do max-width:100% e o selo vaza do card")
+
+
+def test_quadro_do_funil_avisa_quando_da_pra_rolar_pro_lado():
+    """Relato em produção: a última coluna do funil (ex.: "Perdido") cortava na
+    borda da tela sem nenhum aviso — o quadro já rolava (`.kbrow{overflow-x:
+    auto}`), só ninguém sabia disso. Mockup aprovado: esfumado na borda direita
+    (.transborda), ligado por JS só quando sobra conteúdo pra rolar — mesma
+    ideia da barra de abas do topo, mas condicionada de verdade (JS mede
+    scrollWidth/clientWidth, não é uma classe sempre ligada)."""
+    fonte = inspect.getsource(pp)
+    regra = fonte.split(".kbrow.transborda{")[1].split("}")[0]
+    assert "mask-image" in regra and "-webkit-mask-image" in regra
+    assert "function kbCheckScroll" in fonte, "falta a função que liga/desliga o esfumado"
+    assert "scrollWidth" in fonte.split("function kbCheckScroll")[1].split("}")[0]
 
 
 def test_selo_de_campanha_so_aparece_no_template_quando_tem_campanha_ou_chip():

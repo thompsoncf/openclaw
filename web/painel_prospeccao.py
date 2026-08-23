@@ -8309,16 +8309,21 @@ _CSS = """<style>
 .kbcard .sub{color:var(--txt-mut);font-size:.74rem;margin-top:.22rem}
 .kbcard .ft{display:flex;align-items:center;justify-content:space-between;gap:.3rem;margin-top:.42rem;flex-wrap:wrap}
 /* selo de campanha de origem — só aparece quando o lead veio de uma campanha
-   (campanha_alvos); o "· 📱 apelido" só entra quando a conta tem 2+ chips
-   (senão "de qual chip" não diz nada a ninguém). min-width:0 não é necessário
-   aqui porque não é item de um flex row — trunca sozinho com max-width:100%.
-   box-sizing:border-box é obrigatório: sem ele, padding+border somam POR CIMA
-   do max-width:100% (que já é a largura inteira do card), e o selo vaza pra
-   fora — medido com Playwright: borda direita ~8px além da borda do card. */
-.kbcard .camp{display:inline-flex;align-items:center;gap:.3rem;background:var(--neon-fundo);
-  border:1px solid var(--neon-borda);border-radius:999px;padding:.1rem .55rem;
-  font-size:.7rem;color:var(--verde-claro);margin-top:.34rem;max-width:100%;
-  box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+   (campanha_alvos) e/ou dá pra saber o chip que recebeu (mais comum: tráfego
+   pago apontando direto pro número, sem passar por campanha_alvos nenhuma).
+   O "📱 apelido" só entra quando a conta tem 2+ chips (senão "de qual chip"
+   não diz nada a ninguém). box-sizing:border-box é obrigatório: sem ele,
+   padding+border somam POR CIMA do max-width:100% (que já é a largura
+   inteira do card), e o selo vaza pra fora — medido com Playwright: borda
+   direita ~8px além da borda do card.
+   Trunca em até 2 LINHAS (-webkit-line-clamp), não 1 com "…": um card de
+   150px corta o texto tão cedo que "📣 Camp…" não identifica campanha
+   nenhuma — a informação inteira do selo é justamente essa. */
+.kbcard .camp{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
+  overflow:hidden;overflow-wrap:break-word;background:var(--neon-fundo);
+  border:1px solid var(--neon-borda);border-radius:8px;padding:.22rem .5rem;
+  font-size:.7rem;line-height:1.3;color:var(--verde-claro);margin-top:.34rem;
+  max-width:100%;box-sizing:border-box}
 .kbcard .camp .chip{opacity:.72;font-weight:600}
 @media(min-width:900px){
   .kbtabs{display:none}
@@ -8328,6 +8333,12 @@ _CSS = """<style>
      linha única e faz o quadro rolar quando não couber, como a barra de abas. */
   .kbrow{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(150px,1fr);
     gap:.55rem;overflow-x:auto;scrollbar-width:thin}
+  /* esfumado na borda direita quando tem coluna cortada — sem isso a última
+     coluna (ex.: "Perdido") só some na borda da tela, sem nenhum aviso de que
+     dá pra arrastar pro lado; .transborda é ligado/desligado por JS
+     (kbCheckScroll) só quando sobra conteúdo além do que já apareceu. */
+  .kbrow.transborda{mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent 100%);
+    -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent 100%)}
   .kbcol{display:flex !important;min-height:180px}
 }
 /* ---- ficha ---- */
@@ -9803,6 +9814,17 @@ function kbExcluir(ev,id){ev.stopPropagation();ev.preventDefault();
       var card=document.querySelector('.kbcard[data-id="'+id+'"]');if(card&&card.parentNode)card.parentNode.removeChild(card);
       updCounts();}).catch(function(){alert('Falha de rede.');});}
 function updCounts(){var tot=0;document.querySelectorAll('.kbcol').forEach(function(col){var n=col.querySelectorAll('.kbcard').length;tot+=n;var chip=col.querySelector('.kbcnt');if(chip)chip.textContent=n;var tc=document.querySelector('.kbtab[data-tab="'+col.getAttribute('data-status')+'"] .c');if(tc)tc.textContent=n;});var tn=document.getElementById('kb-total-n');if(tn)tn.textContent=tot;}
+// esfumado da borda direita do quadro (.transborda) — só liga quando sobra
+// coluna pra rolar E ainda não chegou no fim; sem isso a última coluna
+// (ex.: "Perdido") corta na borda da tela sem nenhum aviso de que dá pra
+// arrastar. Roda no load, no scroll/resize, e depois de inserir card novo.
+function kbCheckScroll(){var el=document.getElementById('kbrow');if(!el)return;
+  var temMais=(el.scrollWidth-el.clientWidth-el.scrollLeft)>4;
+  el.classList.toggle('transborda',temMais);}
+(function(){var el=document.getElementById('kbrow');if(!el)return;
+  el.addEventListener('scroll',kbCheckScroll);
+  window.addEventListener('resize',kbCheckScroll);
+  kbCheckScroll();})();
 // Mesma rota que a ficha completa já usa pra atribuir — só chamada direto do
 // card, sem sair do funil. Guarda o valor anterior em data-prev pra voltar
 // se der erro (o próprio <select> já mudou visualmente antes do fetch responder).

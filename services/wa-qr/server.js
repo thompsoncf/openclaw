@@ -639,12 +639,32 @@ function pararTimersDaAgenda (s) {
 // Carimbo de VIDA da sessão: a última vez que este socket entregou alguma coisa
 // (mensagem, recibo, contato, onda de histórico, conexão abrindo). É o único jeito de
 // distinguir "conta parada" de "socket morto que ninguém percebeu" — ver vigiarSessoes.
-function marcarVivo (contaId) {
+//
+// `entregouMensagem` separa DOIS sinais que estavam colados num só:
+//
+//   * o cano está aberto (qualquer frame)          -> ultimoEvento
+//   * o WhatsApp está ENTREGANDO conversa (upsert)  -> zera a desconfiança do vigia
+//
+// Colados, o segundo era falsificado pelo primeiro. Depois de cada religamento o
+// próprio serviço pede a agenda de novo (agendarResyncAgenda), a agenda responde com
+// frames, o marcarVivo zerava `reconexoesMudas` — e a dobra do tetoMudo nunca saía do
+// lugar. Medido no wa_qr_log: a conta 23 religou 19 vezes seguidas entre 21/08 20:36 e
+// 22/08 09:39, de 46 em 46 minutos a noite inteira, e as 19 linhas registraram
+// `religamentos: 0` e `mudoMin: 46`. A conta 35 fez o mesmo cinco vezes na noite de
+// 22/08 — enquanto estava, de fato, morta pra entrada.
+//
+// A conta 36 é o contraprova de que o mecanismo funciona quando o contador sobe:
+// 0 -> 1 -> 2 em 22/08, com o teto indo de 46 pra 90 e pra 181 minutos.
+//
+// Agora só `messages.upsert` zera. É o evento que existe na conta viva e falta na
+// conta morta — inclusive o eco das mensagens que nós mesmos mandamos, que é o
+// primeiro a sumir quando o aparelho sai da lista de dispositivos da conta.
+function marcarVivo (contaId, entregouMensagem) {
   const s = sessoes.get(contaId)
   if (!s) return
   s.ultimoEvento = Date.now()
-  // entregou de verdade = a desconfiança do vigia zera junto (ver tetoMudo)
-  s.reconexoesMudas = 0
+  // entregou CONVERSA de verdade = a desconfiança do vigia zera junto (ver tetoMudo)
+  if (entregouMensagem) s.reconexoesMudas = 0
   // ...e a conta deixa de ser órfã de 440: quem entrega está vivo e é nosso
   s.substituidaEm = null
   // Mas o contador de retomadas NÃO se apaga aqui. Entregar um evento prova que o
@@ -653,6 +673,84 @@ function marcarVivo (contaId) {
   // levar 440 de novo, então o contador voltava a zero toda volta e a espera ficava
   // presa nos 5 minutos iniciais pra sempre. Quem zera é o tempo de pé (sessaoFirme).
   if (sessaoFirme(s, Date.now(), SESSAO_FIRME_MS)) s.tentativasPos440 = 0
+}
+
+// ---------------------------------------------- o eco: a prova de que a entrada vive
+//
+// Toda mensagem que sai volta pra nós como `messages.upsert` com `fromMe: true` —
+// é o WhatsApp sincronizando a conversa com os outros aparelhos da conta. Medido na
+// conta 23: o eco chega 0,5 a 1,5s depois do `enviar: sucesso ✓`.
+//
+// Esse eco é o ÚNICO teste de entrada que não depende de cliente nenhum escrever. E é
+// o primeiro sinal a sumir quando o aparelho sai da lista de dispositivos da conta:
+// em 22/08 a conta 35 enviou normalmente às 21:07, 22:35, 22:37, 23:55 — e não recebeu
+// o eco de nenhuma delas. Estava morta pra entrada desde as 21:12, e o serviço passou
+// SEIS horas religando de 46 em 46 minutos sem nunca dizer isso a ninguém. O cliente
+// descobriu sozinho, e foi a terceira vez que ele teve que parear o chip na mão.
+//
+// Silêncio de entrada não prova nada — a loja pode estar fechada (a conta 35 não
+// recebe uma mensagem sequer depois das 21h em dia nenhum). Envio sem eco prova.
+const ECO_LIMITE_MS = parseInt(process.env.WA_QR_ECO_LIMITE_MS || '90000', 10)
+// Quantos envios sem eco seguidos antes de dizer que o chip precisa parear de novo.
+// Dois, e não um: um envio pode perder o eco numa reconexão que aconteça bem no meio.
+const ECO_AVISA_EM = parseInt(process.env.WA_QR_ECO_AVISA_EM || '2', 10)
+// Teto de ids esperando eco por conta. Estouro só acontece se o eco parar de vir, que
+// é justamente quando `cobrarEcos` está limpando — o teto é só cinto de segurança.
+const ECO_MAX_PENDENTES = 50
+const ecosPendentes = new MapaPorConta()   // contaId -> Map(msgId -> instante do envio)
+
+// Guarda um envio à espera do eco. Chamado no sucesso do /enviar.
+function esperarEco (contaId, msgId, agora) {
+  if (!msgId) return
+  let pend = ecosPendentes.get(contaId)
+  if (!pend) { pend = new Map(); ecosPendentes.set(contaId, pend) }
+  pend.set(msgId, agora)
+  // descarta o mais velho primeiro (Map preserva ordem de inserção)
+  while (pend.size > ECO_MAX_PENDENTES) pend.delete(pend.keys().next().value)
+}
+
+// O eco chegou? Zera a suspeita da conta.
+function confirmarEco (contaId, mensagens) {
+  const pend = ecosPendentes.get(contaId)
+  if (!pend || !pend.size || !Array.isArray(mensagens)) return
+  for (const m of mensagens) {
+    const id = m && m.key && m.key.fromMe && m.key.id
+    if (!id || !pend.has(id)) continue
+    pend.delete(id)
+    const s = sessoes.get(contaId)
+    if (s && s.enviosSemEco) {
+      log.info({ contaId, semEcoAntes: s.enviosSemEco }, 'eco: a entrada voltou ✓')
+      s.enviosSemEco = 0
+    }
+  }
+}
+
+// Cobra os ecos vencidos. Roda junto do vigia — ver vigiarSessoes.
+//
+// Não derruba nem religa nada de propósito: religar já é o que o vigia faz, e no caso
+// da conta 35 religar seis vezes não resolveu. O que faltava era ALGUÉM SABER.
+function cobrarEcos (agora, limite, avisaEm) {
+  for (const [contaId, pend] of ecosPendentes) {
+    let venceram = 0
+    for (const [id, quando] of pend) {
+      if ((agora - quando) < limite) continue     // ainda no prazo
+      pend.delete(id); venceram++
+    }
+    if (!venceram) continue
+    const s = sessoes.get(contaId)
+    if (!s) continue
+    s.enviosSemEco = (s.enviosSemEco || 0) + venceram
+    log.error({ contaId, venceram, semEco: s.enviosSemEco,
+      limiteS: Math.round(limite / 1000) },
+    'eco: mandamos e o WhatsApp não devolveu o eco — a ENTRADA desta conta não está viva')
+    if (s.enviosSemEco >= avisaEm) {
+      // A frase que faltava em 22/08. Ela é o gatilho do aviso ao dono — o
+      // finance/wa_silencio.py lê o wa_qr_log e é quem manda Telegram/e-mail.
+      log.error({ contaId, semEco: s.enviosSemEco },
+        'eco: este chip envia e não recebe há vários envios — sai da lista de ' +
+        'dispositivos da conta e NÃO volta com religamento; precisa parear de novo no celular')
+    }
+  }
 }
 
 // A sessão está de pé há tempo suficiente pra a retomada ter dado certo?
@@ -986,6 +1084,9 @@ const _ganchos = { iniciarSessao, contaPareada }
 
 async function vigiarSessoes () {
   const agora = Date.now()
+  // Antes de olhar silêncio: envio sem eco é a prova que o silêncio não dá. Fica
+  // fora do laço porque vale pra conta que o laço nem alcança.
+  cobrarEcos(agora, ECO_LIMITE_MS, ECO_AVISA_EM)
   for (const [contaId, s] of sessoes) {
     // ÓRFÃ DE 440 primeiro: ela não tem socket, então nem chegaria no teste de
     // silêncio abaixo (que exige um). É a conta que soltou a trava depois de ser
@@ -2448,7 +2549,11 @@ async function iniciarSessao (contaId) {
     // log sempre que o evento disparar, mesmo filtrado — sem isso não dava pra saber
     // se o socket estava recebendo mensagem nenhuma ou só descartando pelo filtro.
     log.info({ contaId, type, n: messages.length }, 'messages.upsert recebido')
-    marcarVivo(contaId)
+    // o `true` é o que separa este evento dos outros cinco: aqui o WhatsApp ENTREGOU
+    // conversa, e só isso zera a desconfiança do vigia — ver marcarVivo
+    marcarVivo(contaId, true)
+    // ...e é a prova de vida que o vigia do eco espera depois de cada envio
+    confirmarEco(contaId, messages)
     // MessageUpsertType só tem 'notify' (ao vivo) e 'append' (mensagem legítima que
     // chegou enquanto a conexão teve uma variação breve — "estava offline, aqui está
     // o que você perdeu", node.attrs.offline no Baileys). NÃO é o histórico em massa
@@ -2837,6 +2942,9 @@ const servidor = http.createServer(async (req, res) => {
         try {
           const r = await s.sock.sendMessage(alvo.jid, { text: String(body.texto || '').slice(0, 4000) })
           guardarEnviada(contaId, r)
+          // ...e fica no aguardo do eco: se ele não voltar, a entrada desta conta
+          // está morta e ninguém descobriria pelo silêncio — ver cobrarEcos
+          esperarEco(contaId, r && r.key && r.key.id, Date.now())
           log.info({ contaId, id: r && r.key && r.key.id }, 'enviar: sucesso ✓')
           return json(res, 200, { ok: true, id: (r && r.key && r.key.id) || '' })
         } catch (e) {
@@ -3143,4 +3251,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

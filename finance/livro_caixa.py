@@ -5,6 +5,7 @@ Todo metodo e' escopado por conta_id: a conta so' enxerga e mexe no que e' dela
 """
 import logging
 from datetime import date, timedelta
+from finance.relogio import hoje as hoje_br
 
 from . import ofx_import as _ofx
 from .models import (
@@ -349,7 +350,8 @@ class LivroCaixa:
         total = int(valor_total_centavos)
         if total < 0:
             raise ValueError("valor_total_centavos nao pode ser negativo")
-        data_compra = data_compra or date.today()
+        # hoje_br e não date.today: servidor em UTC vira o dia às 21h BRT
+        data_compra = data_compra or hoje_br()
         categoria = normalizar_categoria(Tipo.DESPESA, categoria)
         base = total // parcelas
         resto = total - base * parcelas
@@ -402,7 +404,7 @@ class LivroCaixa:
         (competencia <= 1o dia do mes atual). Idempotente: so' mexe em 'previsto'.
         Roda barato a cada interacao/relatorio pra manter 'quanto gastei' honesto
         mes a mes, sem depender de agendador. Retorna quantas materializou."""
-        hoje = hoje or date.today()
+        hoje = hoje or hoje_br()
         comp_atual = hoje.replace(day=1)
         _ins = """insert into lancamentos
                     (conta_id, membro_id, tipo, valor_centavos, categoria,
@@ -440,7 +442,7 @@ class LivroCaixa:
         """Previsao da FATURA do cartao: soma das parcelas 'previsto' por mes de
         competencia, dos proximos `meses` meses (a partir do mes atual). NAO
         materializa nada - so' olha o futuro. Retorna total e pontos por mes."""
-        hoje = hoje or date.today()
+        hoje = hoje or hoje_br()
         ini = hoje.replace(day=1)
         fim = _somar_meses(ini, max(1, int(meses)))  # exclusivo
         with self.pool.connection() as conn:
@@ -1050,7 +1052,7 @@ class LivroCaixa:
         norm = normalizar_descricao(descricao)
         if not norm:
             return (None, None)
-        corte = date.today() - timedelta(days=dias)
+        corte = hoje_br() - timedelta(days=dias)
         with self.pool.connection() as conn:
             # 1) tenta na mesma cidade (regiao comeca com a cidade)
             row = None
@@ -1286,7 +1288,7 @@ class LivroCaixa:
 
         Retorna (lista_de_itens, total_centavos).
         """
-        corte = date.today() - timedelta(days=dias)
+        corte = hoje_br() - timedelta(days=dias)
         with self.pool.connection() as conn:
             rows = conn.execute(
                 """select i.descricao, i.quantidade, i.valor_total_centavos, l.data, i.criado_em
@@ -1302,7 +1304,7 @@ class LivroCaixa:
 
     def listar_itens(self, dias: int = 60, limite: int = 200) -> list[dict]:
         """Lista os itens dos ultimos N dias (pra perguntas por grupo, ex: 'frutas')."""
-        corte = date.today() - timedelta(days=dias)
+        corte = hoje_br() - timedelta(days=dias)
         with self.pool.connection() as conn:
             rows = conn.execute(
                 """select i.descricao, i.quantidade, i.valor_total_centavos, l.data, i.criado_em

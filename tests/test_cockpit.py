@@ -568,6 +568,94 @@ def test_pendentes_conversa_nunca_respondida_conta_tudo(pool):
     assert por_id[sem_conversa] == 0      # lead sem conversa não inventa pendência
 
 
+def test_sua_vez_e_bot_pausado_MAIS_mensagem_nova_nao_so_bot_pausado(pool):
+    """Relato em produção (conta Prime, Thiago): o selo "sua vez" ficava preso
+    pra sempre depois da 1ª resposta manual — pelo app OU direto no WhatsApp do
+    celular —, porque `agente_ativo` só volta a `true` com um clique explícito
+    em "Devolver ao agente", e ninguém clica nisso só pra tirar o selo da tela.
+
+    "sua vez" tem que significar "bot pausado E tem mensagem nova pra
+    responder" — não só "bot pausado". Assumiu e respondeu = sua_vez some,
+    mesmo com o bot ainda desligado; chega mensagem nova do cliente = volta.
+
+    Mockup aprovado (opção A): quando não é "sua vez" nem "IA", o selo não
+    fica mudo — vira "respondido" (verde), contando que alguém já cuidou."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="sv@x.com")
+        lead = _lead(c, conta, vend, "Sapataria Central")
+        conv = c.execute("insert into conversas (conta_id, prospeccao_id, canal, agente_ativo) "
+                         "values (%s,%s,'whatsapp',true) returning id", (conta, lead)).fetchone()[0]
+
+        def msg(direcao, autor, texto):
+            c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                      "values (%s,'whatsapp',%s,%s,%s)", (conv, direcao, autor, texto))
+        c.commit()
+
+    def estado():
+        l = {x["id"]: x for x in ck.leads_do_vendedor(pool, conta, vend)}[lead]
+        return l["ia"], l["sua_vez"], l["respondido"]
+
+    assert estado() == (True, False, False)   # bot ligado: nem "sua vez" nem "respondido"
+
+    with pool.connection() as c:
+        msg("in", "lead", "Oi, tem sapato 42?")
+        c.commit()
+    assert estado() == (True, False, False)   # cliente escreveu, mas o bot ainda tá no comando
+
+    with pool.connection() as c:          # vendedor assume (pelo app OU pelo celular — mesmo efeito)
+        c.execute("update conversas set agente_ativo=false where id=%s", (conv,))
+        c.commit()
+    assert estado() == (False, True, False)   # bot pausado + mensagem sem resposta = sua vez de verdade
+
+    with pool.connection() as c:          # vendedor responde — bot CONTINUA pausado (não volta sozinho)
+        msg("out", "humano", "Temos sim! Qual cor?")
+        c.commit()
+    assert estado() == (False, False, True)   # respondeu: vira "respondido", não fica mudo
+
+    with pool.connection() as c:          # cliente escreve de novo: volta a ser a vez dele
+        msg("in", "lead", "Prefiro preto")
+        c.commit()
+    assert estado() == (False, True, False)
+
+
+def test_respondido_nao_confunde_lead_assumido_sem_conversa_nenhuma(pool):
+    """Um vendedor pode clicar "Assumir" num lead que ainda não trocou mensagem
+    nenhuma (`agente_ativo=false`, zero linhas em `mensagens`). Isso não é
+    "respondido" — não tem o que comemorar, ninguém respondeu nada ainda —
+    nem "sua vez", porque não há mensagem pendente pra responder."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="assumido-vazio@x.com")
+        lead = _lead(c, conta, vend, "Lead Assumido Vazio")
+        c.execute("insert into conversas (conta_id, prospeccao_id, canal, agente_ativo) "
+                  "values (%s,%s,'whatsapp',false)", (conta, lead))
+        c.commit()
+    l = {x["id"]: x for x in ck.leads_do_vendedor(pool, conta, vend)}[lead]
+    assert (l["sua_vez"], l["respondido"]) == (False, False)
+
+
+def test_respondido_nao_depende_de_qual_mensagem_e_a_ultima_por_criado_em(pool):
+    """Achado ao verificar o mockup na tela: com a pergunta cliente + resposta
+    gravadas na MESMA transação (mesmo instante — `now()` no Postgres é o
+    início da transação, não o momento de cada INSERT), a mensagem do cliente
+    podia "ganhar" o desempate de `order by criado_em desc limit 1` e aparecer
+    como se fosse a última — fazendo "respondido" nunca ligar. `n_pend` já
+    evitava exatamente essa armadilha usando `id`, não `criado_em`; a checagem
+    de "respondido" tinha que evitar a mesma coisa."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="empate@x.com")
+        lead = _lead(c, conta, vend, "Empate de Timestamp")
+        conv = c.execute("insert into conversas (conta_id, prospeccao_id, canal, agente_ativo) "
+                         "values (%s,%s,'whatsapp',false) returning id", (conta, lead)).fetchone()[0]
+        # as DUAS na MESMA transação/commit — mesmo criado_em, de propósito
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                  "values (%s,'whatsapp','in','lead','oi, tudo bem?')", (conv,))
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                  "values (%s,'whatsapp','out','humano','tudo sim, e você?')", (conv,))
+        c.commit()
+    l = {x["id"]: x for x in ck.leads_do_vendedor(pool, conta, vend)}[lead]
+    assert (l["sua_vez"], l["respondido"]) == (False, True)
+
+
 def test_shell_leva_o_retorno_visual_de_espera():
     """O app é form + redirect: todo toque é uma navegação inteira. O que faltava era
     ele CONTAR isso. Estas peças precisam existir no shell de toda tela."""

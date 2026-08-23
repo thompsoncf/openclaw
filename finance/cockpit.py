@@ -283,7 +283,15 @@ def _base_leads_sql() -> str:
                  where mm.conversa_id=cv.id and mm.direcao='in'
                    and mm.id > coalesce(
                          (select max(m2.id) from mensagens m2
-                           where m2.conversa_id=cv.id and m2.direcao='out'), 0)) as n_pend
+                           where m2.conversa_id=cv.id and m2.direcao='out'), 0)) as n_pend,
+               -- pro selo "respondido" (bot pausado + em dia): PRECISA ser uma
+               -- pergunta EXISTS, não "autor da última mensagem" — esse último
+               -- usa `lm`, que ordena por criado_em (a mesma armadilha do
+               -- n_pend acima: duas mensagens na mesma transação nascem com o
+               -- mesmo instante, e a "última" vira sorte de desempate).
+               exists(select 1 from mensagens mm3
+                       where mm3.conversa_id=cv.id and mm3.direcao='out'
+                         and mm3.autor='humano') as tem_resposta_humana
           from prospeccao p
           left join conversas cv on cv.prospeccao_id=p.id and cv.conta_id=p.conta_id
           left join lateral (select texto, autor from mensagens
@@ -344,6 +352,7 @@ def leads_do_vendedor(pool, conta_id: int, membro_id: int) -> list[dict]:
         rows = c.execute(_base_leads_sql(), (conta_id, membro_id)).fetchall()
     for r in rows:
         ia = bool(r[10])                 # agente_ativo → IA ainda atende
+        pend = int(r[14] or 0)
         ult = (r[12] or "").strip().replace("\n", " ")
         autor = r[13] or ""
         if ult:
@@ -358,7 +367,21 @@ def leads_do_vendedor(pool, conta_id: int, membro_id: int) -> list[dict]:
             "status": r[6] or "novo",
             "zap": _zap_link(r[7] or r[8] or ""),
             "conversa_id": r[9], "ia": ia, "snip": snip,
-            "pend": int(r[14] or 0),
+            "pend": pend,
+            # "sua vez" é ter algo NOVO pra responder, não só o bot estar
+            # pausado — bot pausado + tudo respondido não é "sua vez", é
+            # "em dia". Sem isso o selo ficava preso em "sua vez" pra sempre
+            # depois da primeira resposta manual, porque devolver o bot é uma
+            # ação separada (botão "Devolver ao agente") que ninguém clica só
+            # pra tirar o selo da tela.
+            "sua_vez": (not ia) and pend > 0,
+            # "respondido": bot pausado, nada pendente, e HOUVE uma resposta
+            # humana em algum momento — não só "em dia" (que também vale pra
+            # quem assumiu um lead vazio, sem conversa nenhuma, e aí não tem o
+            # que "respondido" comemorar). `tem_resposta_humana` é EXISTS, não
+            # "autor da última mensagem" (isso seria a mesma armadilha do
+            # `lm`/criado_em que o n_pend já evita usando id).
+            "respondido": (not ia) and pend == 0 and bool(r[15]),
         })
     return out
 

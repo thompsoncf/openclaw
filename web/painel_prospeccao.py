@@ -10557,13 +10557,25 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           · <a href="/painel/prospeccao/comunicacao?aba=canais">conferir o chip</a>
           {# "conectado + sem receber" é o estado que engana: ninguém desconfia de um
              chip verde. Dizer o TESTE aqui vale mais que o alerta — mandar mensagem
-             de outro celular resolve a dúvida em 10 segundos, e sem isso a reação
-             comum era clicar em Desconectar, que só piora (apaga o cofre de chaves e
-             deixa a conta horas sem receber). O dono também leva este aviso no
-             Telegram/e-mail — ver finance/wa_silencio.py. #}
+             de outro celular resolve a dúvida em 10 segundos. O dono também leva este
+             aviso no Telegram/e-mail — ver finance/wa_silencio.py.
+
+             Este texto dizia "reconecte o chip em Canais — NÃO use o Desconectar",
+             porque desconectar apagaria o histórico. Isso deixou de ser verdade no
+             PR #404, que tirou a limpeza de dentro do /sair (o log de lá hoje diz
+             "sair: sessão encerrada (histórico preservado)", e apagar virou duas
+             portas explícitas: o botão "Apagar histórico" e a faxina dos 30 dias).
+
+             O aviso obsoleto era pior que inútil: quando a sessão emudece de verdade
+             — o chip sai da lista de dispositivos da conta e não recebe nem o eco das
+             próprias mensagens — parear de novo é a ÚNICA saída, e a tela mandava não
+             fazer justamente isso. Aconteceu com a conta 35 em 22/08: quatro horas
+             calada, religamento forçado e restart do processo sem resolver. #}
           <div style="font-size:.72rem;color:var(--txt-mut);margin-top:.2rem">
             Teste: mande uma mensagem de <b>outro celular</b> pro número. Se ela não
-            aparecer aqui, reconecte o chip em Canais — <b>não</b> use o Desconectar.
+            aparecer aqui, reconecte o chip em Canais. Se depois de reconectar ela
+            ainda não aparecer, pareie de novo lendo o QR — o histórico de conversas
+            <b>não</b> se perde nisso.
           </div>{% endif %}
         {% elif chip.estado == 'sincronizando' %}
           <span class="pt" style="background:var(--ambar)"></span>Chip

@@ -110,7 +110,7 @@ class _PoolFalso:
 def test_aviso_de_lead_que_nao_sai_aparece_no_log(monkeypatch, caplog):
     import finance.whatsapp_out as wo
     monkeypatch.setattr(wo, "enviar",
-                        lambda c, conta_id, numero, texto: {"ok": False,
+                        lambda c, conta_id, numero, texto, **kw: {"ok": False,
                                                             "erro": "fora_da_janela"})
     with caplog.at_level(logging.WARNING, logger=dist.__name__):
         dist._avisar_whatsapp(_PoolFalso(), 7, "5586990001111", "", "Padaria", "Lead novo")
@@ -121,7 +121,7 @@ def test_aviso_de_lead_que_nao_sai_aparece_no_log(monkeypatch, caplog):
 def test_aviso_de_lead_que_sai_nao_polui_o_log(monkeypatch, caplog):
     import finance.whatsapp_out as wo
     monkeypatch.setattr(wo, "enviar",
-                        lambda c, conta_id, numero, texto: {"ok": True, "sid": "x"})
+                        lambda c, conta_id, numero, texto, **kw: {"ok": True, "sid": "x"})
     with caplog.at_level(logging.WARNING, logger=dist.__name__):
         dist._avisar_whatsapp(_PoolFalso(), 7, "5586990001111", "", "Padaria", "Lead novo")
     assert caplog.records == []

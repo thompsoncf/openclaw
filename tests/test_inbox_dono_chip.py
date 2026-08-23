@@ -35,6 +35,8 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   ultima_msg_em timestamptz default now(), chip_id bigint);
 create table distribuicao (conta_id bigint primary key, ativo boolean default false,
   ponteiro int default 0, avisar boolean default true, aviso_template_sid text,
+  -- migração 185: o aviso por WhatsApp é lido pelo config() em toda distribuição
+  aviso_zap boolean not null default false, aviso_zap_chip_id bigint, aviso_zap_texto text,
   atualizado_em timestamptz default now());
 create table distribuicao_fila (conta_id bigint, membro_id bigint, ordem int,
   primary key (conta_id, membro_id));

@@ -484,8 +484,7 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
             f"""select p.id, p.empresa, p.segmento, p.cidade, p.uf, p.status,
                        p.temperatura, p.valor_estimado_centavos, p.proximo_contato_em,
                        p.telefone, p.whatsapp, p.vendedor_id, m.nome,
-                       p.email, p.instagram, p.enriquecido_em, ca.cnome,
-                       coalesce(nullif(btrim(chp.nome),''), nullif(btrim(cc1.rotulo),''), '')
+                       p.email, p.instagram, p.enriquecido_em, ca.cnome
                   from prospeccao p
                   left join membros m on m.id = p.vendedor_id
                   left join lateral (
@@ -494,15 +493,6 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                       where a.prospeccao_id=p.id
                       order by a.ultima_msg_em desc nulls last, a.id desc limit 1
                   ) ca on true
-                  left join lateral (
-                     select cv.chip_id
-                       from conversas cv
-                      where cv.prospeccao_id=p.id and cv.canal='whatsapp'
-                      order by cv.ultima_msg_em desc nulls last, cv.id desc limit 1
-                  ) wc on true
-                  left join contas chp on chp.id = wc.chip_id
-                  left join canais_config cc1 on wc.chip_id is null and cc1.conta_id = p.conta_id
-                                             and cc1.canal='whatsapp'
                  where {' and '.join(where)}
                  order by p.proximo_contato_em asc nulls last, p.atualizado_em desc""",
             tuple(params)).fetchall()
@@ -510,15 +500,37 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
         # verdade — não quando só tem telefone/e-mail cadastrado. Uma query em
         # lote pra todo o board (= any), não uma por card: o índice único
         # (conta_id, prospeccao_id, canal) da 080 garante no máximo 1 linha por par.
+        # `chip_id` vem JUNTO — é a mesma conversa que abre o 💬, então é ela (e só
+        # ela) que decide "de qual chip" pro selo de campanha. Nasceu como uma
+        # lateral separada (correlacionada por prospeccao_id) e foi trocada por
+        # isso: mesma fonte que o Inbox usa, sem chance de escolher outra conversa.
         conv_por_lead: dict[int, dict[str, int]] = {}
+        chip_por_lead: dict[int, int] = {}
         lead_ids = [r[0] for r in rows]
         if lead_ids:
-            for pid, canal, cid in c.execute(
-                """select prospeccao_id, canal, id from conversas
+            for pid, canal, cid, chip_id in c.execute(
+                """select prospeccao_id, canal, id, chip_id from conversas
                     where conta_id=%s and prospeccao_id = any(%s)
                       and canal in ('whatsapp','email','instagram')""",
                 (conta_id, lead_ids)).fetchall():
                 conv_por_lead.setdefault(pid, {})[canal] = cid
+                if canal == "whatsapp":
+                    chip_por_lead[pid] = chip_id
+        # apelido de cada chip usado no board + o do chip principal (mesmo par de
+        # colunas que o Inbox lê: contas.nome pro secundário, canais_config.rotulo
+        # pro principal — ver comunicacao_chip_apelido).
+        chip_nomes: dict[int, str] = {}
+        rotulo_principal = ""
+        if dois_chips and chip_por_lead:
+            ids_chip = [v for v in set(chip_por_lead.values()) if v]
+            if ids_chip:
+                chip_nomes = dict(c.execute(
+                    "select id, coalesce(nullif(btrim(nome),''),'') from contas where id = any(%s)",
+                    (ids_chip,)).fetchall())
+            r = c.execute(
+                "select coalesce(nullif(btrim(rotulo),''),'') from canais_config "
+                "where conta_id=%s and canal='whatsapp'", (conta_id,)).fetchone()
+            rotulo_principal = (r[0] if r else "") or ""
         # o mesmo número atendido pelo OUTRO chip — uma consulta pro funil inteiro, e
         # nenhuma numa empresa de um chip só (que é o caso de quase todas)
         gemeos = _gemeos_de_outro_chip(c, conta_id, [r[0] for r in rows])
@@ -527,6 +539,14 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
     total_valor = 0
     for r in rows:
         conv = conv_por_lead.get(r[0], {})
+        chip_apelido = None
+        # só resolve apelido quando o lead TEM conversa de WhatsApp de verdade — sem
+        # isso, "sem chip nenhum" e "chip principal" ficavam indistinguíveis e o selo
+        # mostrava "· 📱 <rótulo do principal>" até pra quem nunca trocou mensagem.
+        if dois_chips and r[0] in chip_por_lead:
+            chip_id_lead = chip_por_lead[r[0]]
+            chip_apelido = (chip_nomes.get(chip_id_lead) if chip_id_lead
+                            else rotulo_principal) or None
         card = {"id": r[0], "empresa": r[1], "segmento": r[2], "cidade": r[3],
                 "uf": r[4], "status": r[5], "temperatura": r[6], "valor": r[7],
                 "proximo": r[8], "telefone": r[9], "whatsapp": r[10],
@@ -536,7 +556,7 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                 "conv_whatsapp": conv.get("whatsapp"), "conv_email": conv.get("email"),
                 "conv_instagram": conv.get("instagram"),
                 "campanha": r[16] or None,
-                "chip_apelido": (r[17] or None) if dois_chips else None,
+                "chip_apelido": chip_apelido,
                 "gemeo": _aviso_gemeo(gemeos.get(r[0])),
                 "gemeo_lead": ((gemeos.get(r[0]) or {}).get("lead_id")
                                if _gemeo_abre(gemeos.get(r[0]), ctx) else None)}

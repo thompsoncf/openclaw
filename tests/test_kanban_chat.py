@@ -155,11 +155,14 @@ def test_uma_unica_query_de_conversas_pro_board_inteiro(monkeypatch, pool):
     """N+1: 20 leads não podem virar 20 idas ao banco só pra saber quem tem chat.
     Conta as chamadas de `execute` que mencionam a tabela `conversas`.
 
-    São 2, não 1: a query principal do board tem uma lateral em `conversas`
-    (pega o chip que disparou a campanha, pro selo "de qual campanha veio") e
-    o selo de canal usa outra, em lote (`= any(%s)`). As duas rodam UMA vez
-    pro board inteiro — nenhuma escala com o nº de leads, o que é o que este
-    teste realmente garante."""
+    Uma query em lote (`= any(%s)`) resolve tanto o selo de canal (💬 vira botão)
+    quanto o chip que entrega o "· 📱 apelido" no selo de campanha — a MESMA
+    conversa, lida uma vez só. Chegou a ser uma lateral separada, correlacionada
+    por `prospeccao_id`; virou batch depois de um relato em produção (conta com
+    2 chips batizados, campanha aparecendo mas o apelido do chip nunca) sem dado
+    de banco pra confirmar a causa exata — a troca elimina qualquer chance de a
+    lateral escolher uma conversa diferente da que o Inbox usa pro mesmo lead,
+    o que a torna uma correção segura mesmo sem a causa raiz 100% confirmada."""
     for i in range(20):
         lid = _lead(pool, empresa=f"Lead {i}", whatsapp=f"8690000{i:04d}")
         if i % 2 == 0:
@@ -182,7 +185,7 @@ def test_uma_unica_query_de_conversas_pro_board_inteiro(monkeypatch, pool):
             return self._conn.__exit__(*a)
     monkeypatch.setattr(pool, "connection", lambda: _ConnSpy(real_connection()))
     _kanban_html(monkeypatch, pool)
-    assert len(chamadas) == 2, f"esperava 2 queries em lote (não por lead), teve {len(chamadas)}: {chamadas}"
+    assert len(chamadas) == 1, f"esperava 1 query em lote (não por lead), teve {len(chamadas)}: {chamadas}"
 
 
 def _trecho_card(html, empresa):
@@ -254,3 +257,23 @@ def test_chip_sem_apelido_batizado_nao_vira_sufixo_vazio(monkeypatch, pool):
     trecho = _trecho_card(_kanban_html(monkeypatch, pool), "Empório Sabor Norte")
     assert '<div class="camp">📣 Black Friday Padarias</div>' in trecho
     assert "📱" not in trecho, "sufixo de chip apareceu vazio (apelido não batizado)"
+
+
+def test_lead_sem_conversa_de_whatsapp_nao_ganha_sufixo_do_chip_principal(monkeypatch, pool):
+    """Achado após um relato em produção (campanha aparecia, apelido do chip
+    nunca — mesmo com 2 chips batizados). Um dos casos que a lateral antiga
+    fazia diferente do Inbox: "sem conversa nenhuma" e "conversa pelo chip
+    principal" viravam a MESMA coisa (chip_id nulo), e o selo mostrava o
+    apelido do principal pra quem nunca trocou mensagem alguma. Precisa
+    distinguir "não sei" (sem conversa) de "sei que é o principal"."""
+    lid = _lead(pool, empresa="Sapataria Central")
+    camp = _campanha(pool)
+    _alvo(pool, camp, lid)
+    with pool.connection() as c:
+        c.execute("insert into contas (chip_de, nome) values (%s,'Chip Vendas')", (CONTA,))
+        c.execute("insert into canais_config (conta_id, canal, rotulo) values (%s,'whatsapp','Chip Principal')",
+                  (CONTA,))
+        c.commit()
+    trecho = _trecho_card(_kanban_html(monkeypatch, pool), "Sapataria Central")
+    assert '<div class="camp">📣 Black Friday Padarias</div>' in trecho
+    assert "📱" not in trecho, "mostrou o chip principal pra lead sem nenhuma conversa de WhatsApp"

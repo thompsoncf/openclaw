@@ -295,7 +295,18 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
 
     "Fechado em" é `atualizado_em`: a mesma coluna que `fechar_orcamento`
     (finance/vendas.py) grava junto com o status, e que trava a edição do
-    orçamento a partir daí — não muda depois."""
+    orçamento a partir daí — não muda depois. "Aprovada em" é `aprovada_em`:
+    o instante em que o CLIENTE assinou a proposta pública (web/proposta.py)
+    — acontece antes de "fechado", e um orçamento pode ficar parado em
+    "aprovada" por dias até o vendedor fechar de fato.
+
+    Cliente é UM nome só, não dois campos: o formulário troca o rótulo de
+    `empresa` pra "Nome completo" quando o cliente é pessoa física, mas
+    continua gravando na mesma coluna — então pra pessoa física o nome de
+    verdade mora em `empresa`, e `cliente` (pensado como "Contato/responsável"
+    de uma empresa) fica vazio a maior parte do tempo. Mesma regra que
+    `_espelhar_cliente` (web/painel_servicos.py) já usa: `empresa or
+    cliente`."""
     ini, fim = _intervalo(periodo)
     where = ["o.conta_id=%s"]
     params: list = [conta_id]
@@ -306,8 +317,8 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
         where.append("o.criado_por = %s")
         params.append(str(vendedor_sel))
     if busca:
-        where.append("o.cliente ilike %s")
-        params.append(f"%{busca}%")
+        where.append("(o.empresa ilike %s or o.cliente ilike %s)")
+        params += [f"%{busca}%", f"%{busca}%"]
     base_sql = " and ".join(where)
 
     with pool.connection() as c:
@@ -334,6 +345,7 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
     with pool.connection() as c:
         rows = c.execute(
             f"""select o.numero, o.cliente, o.empresa, o.status, o.criado_em,
+                       o.aprovada_em,
                        case when o.status='fechado' then o.atualizado_em end,
                        -- criado_por guarda o id do membro OU a palavra 'dono' (quem
                        -- abriu a conta, sem vendedor específico — mesma leitura de
@@ -352,18 +364,19 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
     for r in rows:
         rotulo, cor = ORC_STATUS_TAG.get(r[3], (r[3] or "—", "neutro"))
         linhas.append({
-            "numero": r[0], "cliente": r[1] or "—", "empresa": r[2] or "—",
+            "numero": r[0], "cliente": r[2] or r[1] or "—",
             "status": rotulo, "status_cor": cor,
-            "criado_em": _fmt(r[4]), "fechado_em": _fmt(r[5]),
-            "vendedor": r[6], "valor_centavos": int(r[7] or 0),
-            "acao_href": f"/proposta/{r[8]}" if r[8] else None,
+            "criado_em": _fmt(r[4]), "aprovada_em": _fmt(r[5]), "fechado_em": _fmt(r[6]),
+            "vendedor": r[7], "valor_centavos": int(r[8] or 0),
+            "acao_href": f"/proposta/{r[9]}" if r[9] else None,
         })
     return {
         "label": "Orçamentos", "mock": False, "acao": True,
         "acao_rotulo": "Ver / imprimir proposta",
-        "colunas": [_col("numero", "Nº"), _col("cliente", "Cliente"), _col("empresa", "Empresa"),
+        "colunas": [_col("numero", "Nº"), _col("cliente", "Cliente"),
                     _col("status", "Status", tag=True), _col("criado_em", "Criado em"),
-                    _col("fechado_em", "Fechado em"), _col("vendedor", "Vendedor"),
+                    _col("aprovada_em", "Aprovada em"), _col("fechado_em", "Fechado em"),
+                    _col("vendedor", "Vendedor"),
                     _col("valor_centavos", "Valor", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": _soma(linhas, "valor_centavos"),
         "metricas": [("Total geral", _brl(v_fechado + v_aberto + v_perdido)),
@@ -381,7 +394,9 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
 def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> dict:
     """TODOS os contratos vivos (sem os substituídos por aditivo — mesma trava de
     `finance/contrato.por_orcamento`). Vendedor vem do orçamento de origem: o
-    contrato quase nunca grava `criado_por` (ver finance/contrato.py)."""
+    contrato quase nunca grava `criado_por` (ver finance/contrato.py). Cliente
+    também vem do orçamento de origem, com a mesma regra `empresa or cliente`
+    de `_dados_orcamentos` — mesmo formulário, mesma confusão de campo."""
     ini, fim = _intervalo(periodo)
     where = ["c.conta_id=%s", "c.substitui_id is null"]
     params: list = [conta_id]
@@ -392,8 +407,8 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -
         where.append("o.criado_por = %s")
         params.append(str(vendedor_sel))
     if busca:
-        where.append("o.cliente ilike %s")
-        params.append(f"%{busca}%")
+        where.append("(o.empresa ilike %s or o.cliente ilike %s)")
+        params += [f"%{busca}%", f"%{busca}%"]
     base_sql = " and ".join(where)
     join_sql = "left join orcamentos o on o.id = c.orcamento_id"
 
@@ -421,7 +436,7 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -
 
     with pool.connection() as c:
         rows = c.execute(
-            f"""select c.numero, coalesce(o.cliente, '—'), c.status, c.criado_em,
+            f"""select c.numero, coalesce(o.empresa, o.cliente, '—'), c.status, c.criado_em,
                        c.assinado_em,
                        -- mesma leitura de _dados_orcamentos: criado_por é o id do
                        -- membro OU a palavra 'dono'.

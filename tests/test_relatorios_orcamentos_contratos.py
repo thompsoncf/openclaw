@@ -22,7 +22,7 @@ create table membros (id bigserial primary key, conta_id bigint, nome text);
 create table orcamentos (id bigserial primary key, conta_id bigint, numero int,
   cliente text, empresa text, token text, setup_centavos bigint default 0,
   mensal_centavos bigint default 0, primeiro_ano_centavos bigint,
-  status text default 'rascunho', criado_por text,
+  status text default 'rascunho', criado_por text, aprovada_em timestamptz,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table contratos (id bigserial primary key, conta_id bigint, numero int,
   orcamento_id bigint, status text default 'enviado', valor_centavos bigint,
@@ -65,15 +65,16 @@ def cen(pool):
 
 
 def _orc(pool, conta, *, cliente="Cliente X", status="rascunho", criado_por=None,
-        valor=100000, token="tok-orc", empresa=None):
+        valor=100000, token="tok-orc", empresa=None, aprovada_em=None):
     with pool.connection() as c:
         numero = c.execute("select coalesce(max(numero),0)+1 from orcamentos where conta_id=%s",
                            (conta,)).fetchone()[0]
         oid = c.execute(
             """insert into orcamentos (conta_id, numero, cliente, empresa, status, criado_por,
-                 primeiro_ano_centavos, token) values (%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                 primeiro_ano_centavos, token, aprovada_em)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
             (conta, numero, cliente, empresa, status, str(criado_por) if criado_por else None,
-             valor, token),
+             valor, token, aprovada_em),
         ).fetchone()[0]
         c.commit()
     return oid
@@ -145,6 +146,48 @@ def test_busca_por_cliente(pool, cen):
     _orc(pool, cen["conta"], cliente="Rafael Mendes")
     dados = rel._dados_orcamentos(pool, cen["conta"], "todos", "", "", "talila")
     assert len(dados["linhas"]) == 1 and dados["linhas"][0]["cliente"] == "Talila Arrais"
+
+
+def test_coluna_cliente_prioriza_empresa_sobre_cliente(pool, cen):
+    """Relato em produção (print real da Prime): "Cliente" aparecia vazio na
+    maioria das linhas e o nome de verdade estava em "Empresa" — o formulário
+    de criar orçamento troca o RÓTULO do campo `empresa` pra "Nome completo"
+    quando o cliente é pessoa física, mas continua gravando na mesma coluna.
+    Vira uma coluna só: `empresa or cliente`, mesma regra que
+    `_espelhar_cliente` (web/painel_servicos.py) já usa."""
+    _orc(pool, cen["conta"], cliente=None, empresa="Isabela Silva Mendes")
+    dados = rel._dados_orcamentos(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["cliente"] == "Isabela Silva Mendes"
+    assert "empresa" not in dados["linhas"][0]
+    assert not any(c["chave"] == "empresa" for c in dados["colunas"])
+
+
+def test_coluna_cliente_cai_pro_cliente_quando_empresa_vazia(pool, cen):
+    _orc(pool, cen["conta"], cliente="86994160050", empresa=None)
+    dados = rel._dados_orcamentos(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["cliente"] == "86994160050"
+
+
+def test_busca_acha_nome_que_so_esta_em_empresa(pool, cen):
+    """Antes a busca só olhava `cliente` — pra pessoa física (nome em
+    `empresa`) buscar pelo próprio nome não achava nada."""
+    _orc(pool, cen["conta"], cliente=None, empresa="Larissa Rakel Almeida Rodrigues")
+    dados = rel._dados_orcamentos(pool, cen["conta"], "todos", "", "", "larissa")
+    assert len(dados["linhas"]) == 1
+
+
+def test_aprovada_em_aparece_quando_o_cliente_assinou(pool, cen):
+    """"Aprovada em" (`aprovada_em`) é o instante em que o CLIENTE assinou a
+    proposta pública (web/proposta.py) — diferente de "Fechado em"
+    (`atualizado_em` quando `status='fechado'`), que é quando o VENDEDOR fecha
+    o negócio de fato. Um orçamento pode ficar dias em "aprovada" sem fechar."""
+    assinado = HOJE - timedelta(days=1)
+    _orc(pool, cen["conta"], status="aprovada", aprovada_em=assinado)
+    _orc(pool, cen["conta"], status="rascunho")
+    dados = rel._dados_orcamentos(pool, cen["conta"], "todos", "", "", "")
+    por_status = {l["status"]: l["aprovada_em"] for l in dados["linhas"]}
+    assert por_status["Aprovada"] != "—"
+    assert por_status["Rascunho"] == "—"
 
 
 def test_vendedor_dono_mostra_o_nome_da_conta_nao_travessao(pool, cen):
@@ -232,6 +275,13 @@ def test_contratos_vendedor_vem_do_orcamento_de_origem(pool, cen):
     _contrato(pool, cen["conta"], o1, status="assinado")
     dados = rel._dados_contratos(pool, cen["conta"], "todos", "", "", "")
     assert dados["linhas"][0]["vendedor"] == "Pedro"
+
+
+def test_contratos_cliente_tambem_prioriza_empresa_do_orcamento_de_origem(pool, cen):
+    o1 = _orc(pool, cen["conta"], cliente=None, empresa="Isabela Silva Mendes")
+    _contrato(pool, cen["conta"], o1, status="assinado")
+    dados = rel._dados_contratos(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["cliente"] == "Isabela Silva Mendes"
 
 
 def test_contratos_filtro_por_vendedor_via_orcamento(pool, cen):

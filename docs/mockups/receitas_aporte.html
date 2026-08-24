@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — Aporte não é receita (Receitas por categoria)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+/* ────────────────────────────────────────────────────────────────────────────
+   TOKENS — cópia fiel de web/tema.py (_TOKENS), a mesma base dos mockups
+   irmãos (funil_campanha_origem.html, prospeccao_abas.html).
+   O sistema da casa é comprometido com o escuro: color-scheme dark, fundo e
+   cor pintados explicitamente, sem media query de tema.
+   ──────────────────────────────────────────────────────────────────────── */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-fundo:#10241A; --neon-borda:#1E4A3A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--text); font-family:var(--body);
+  max-width:1100px; margin:0 auto; padding:40px 20px 110px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-family:var(--display); letter-spacing:-.02em; text-wrap:balance}
+h1{font-size:2rem; font-weight:700; line-height:1.12}
+h2{font-size:1.22rem; font-weight:700}
+h3{font-size:.94rem; font-weight:600}
+code{font-family:var(--mono); font-size:.85em; background:var(--bg-2);
+  padding:.1rem .38rem; border-radius:4px; color:var(--text-dim)}
+b,strong{color:var(--text); font-weight:600}
+
+.lede{color:var(--text-dim); font-size:1rem; max-width:70ch; margin-top:.7rem}
+.sec{margin-top:52px}
+.eyebrow{font-family:var(--mono); font-size:.7rem; color:var(--neon);
+  letter-spacing:.12em; text-transform:uppercase; margin-bottom:.4rem}
+.sec p{color:var(--text-dim); font-size:.92rem; max-width:72ch; margin-top:.7rem}
+
+/* ── a tela, reproduzida ───────────────────────────────────────────────── */
+.tela{background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  padding:20px 22px; margin-top:1.1rem}
+.tela-tit{font-family:var(--display); font-size:1.02rem; font-weight:700;
+  margin-bottom:.9rem; display:flex; align-items:center; gap:.5rem}
+.linha{margin:.55rem 0 .1rem}
+.linha-topo{display:flex; justify-content:space-between; align-items:baseline;
+  gap:1rem; font-size:.9rem}
+.linha-nome{display:flex; align-items:center; gap:.4rem; min-width:0}
+.seta{color:var(--text-faint); font-size:.75rem}
+.valor{font-family:var(--mono); font-variant-numeric:tabular-nums;
+  font-weight:500; white-space:nowrap}
+.barra{height:6px; background:var(--bg-2); border-radius:99px; overflow:hidden; margin-top:.3rem}
+.barra i{display:block; height:100%; border-radius:99px; background:var(--neon)}
+.barra.amb i{background:var(--ambar)}
+.barra.cor i{background:var(--coral)}
+
+.flag{font-family:var(--mono); font-size:.62rem; letter-spacing:.04em;
+  padding:.1rem .4rem; border-radius:4px; white-space:nowrap;
+  background:var(--coral-fundo); color:var(--coral); border:1px solid var(--coral-borda)}
+.flag.amb{background:var(--ambar-fundo); color:var(--ambar); border-color:var(--ambar-borda)}
+.flag.ok{background:var(--neon-fundo); color:var(--neon-bright); border-color:var(--neon-borda)}
+
+/* ── o achado ──────────────────────────────────────────────────────────── */
+.achado{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:1.1rem}
+.cartao{background:var(--coral-fundo); border:1px solid var(--coral-borda);
+  border-radius:10px; padding:14px 15px}
+.cartao .cat{font-family:var(--mono); font-size:.7rem; color:var(--coral);
+  letter-spacing:.06em; text-transform:uppercase}
+.cartao .desc{font-size:.86rem; margin-top:.45rem; color:var(--text)}
+.cartao .val{font-family:var(--mono); font-size:1.15rem; font-weight:500;
+  margin-top:.5rem; font-variant-numeric:tabular-nums}
+
+.nota{border-left:2px solid var(--neon-borda); background:rgba(37,211,102,.07);
+  padding:.85rem 1rem; border-radius:0 8px 8px 0; font-size:.88rem;
+  margin-top:1.2rem; color:var(--text-dim); max-width:80ch}
+.nota.aviso{border-left-color:var(--ambar-borda); background:rgba(224,163,46,.07)}
+.nota b{color:var(--text)}
+
+/* ── proposta: dois blocos ─────────────────────────────────────────────── */
+.dois{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:1.1rem}
+.bloco{background:var(--surface); border:1px solid var(--line);
+  border-radius:12px; padding:18px 20px}
+.bloco.op{border-top:3px solid var(--neon)}
+.bloco.nao{border-top:3px solid var(--ambar)}
+.bloco-cab{display:flex; justify-content:space-between; align-items:baseline;
+  gap:.8rem; margin-bottom:.25rem}
+.bloco-tit{font-family:var(--display); font-size:.98rem; font-weight:700}
+.bloco-tot{font-family:var(--mono); font-size:1.05rem; font-weight:500;
+  font-variant-numeric:tabular-nums}
+.op .bloco-tot{color:var(--neon-bright)}
+.nao .bloco-tot{color:var(--ambar)}
+.bloco-sub{font-size:.76rem; color:var(--text-faint); margin-bottom:1rem}
+
+/* ── tabelas ───────────────────────────────────────────────────────────── */
+.rolar{overflow-x:auto; margin-top:1.1rem}
+table{border-collapse:collapse; width:100%; font-size:.86rem; min-width:520px}
+th{text-align:left; font-family:var(--mono); font-size:.68rem; font-weight:500;
+  color:var(--text-faint); letter-spacing:.08em; text-transform:uppercase;
+  padding:0 .8rem .5rem 0; border-bottom:1px solid var(--line)}
+td{padding:.55rem .8rem .55rem 0; border-bottom:1px solid var(--line);
+  vertical-align:top; color:var(--text-dim)}
+td:first-child{color:var(--text)}
+td.num{font-family:var(--mono); font-variant-numeric:tabular-nums;
+  text-align:right; padding-right:0; white-space:nowrap}
+tr:last-child td{border-bottom:0}
+
+.chip{display:inline-block; font-family:var(--mono); font-size:.68rem;
+  padding:.14rem .45rem; border-radius:5px; background:var(--bg-2);
+  border:1px solid var(--line); color:var(--text-dim); margin:.15rem .25rem .15rem 0}
+.chip.novo{background:var(--neon-fundo); border-color:var(--neon-borda); color:var(--neon-bright)}
+
+.passo{display:flex; gap:.9rem; padding:.85rem 0; border-bottom:1px solid var(--line)}
+.passo:last-child{border-bottom:0}
+.passo .n{font-family:var(--mono); font-size:.72rem; color:var(--neon);
+  border:1px solid var(--neon-borda); border-radius:5px; padding:.1rem .4rem;
+  height:fit-content; flex-shrink:0}
+.passo .txt{font-size:.89rem; color:var(--text-dim)}
+.passo .txt b{display:block; color:var(--text); font-weight:600; margin-bottom:.15rem}
+
+hr{border:0; border-top:1px solid var(--line); margin:0}
+.rodape{margin-top:56px; padding-top:20px; border-top:1px solid var(--line);
+  font-size:.78rem; color:var(--text-faint)}
+
+@media(max-width:860px){
+  .dois,.achado{grid-template-columns:1fr}
+  h1{font-size:1.6rem}
+  body{padding:28px 16px 80px}
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Painel financeiro · Receitas por categoria</p>
+<h1>Aporte não é receita</h1>
+<p class="lede">
+  Hoje o painel soma tudo que entra numa lista só. Dinheiro que o sócio põe do
+  bolso aparece lado a lado com venda — e, em um dos casos, dentro de
+  <b>“Presentes”</b>. Este mockup mostra o que existe, onde está errado, e o
+  desenho proposto.
+</p>
+
+<!-- ───────────────────────────── 1 ───────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">Hoje</p>
+  <h2>Uma lista só, ordenada por valor</h2>
+  <p>
+    São 11 categorias fixas em <code>CATEGORIAS_RECEITA</code>. O que não bate com
+    nenhuma cai em <b>Outros</b> — <code>canonizar_categoria</code> nunca cria
+    categoria nova. Abaixo, o dado real de produção, todas as contas.
+  </p>
+
+  <div class="tela">
+    <div class="tela-tit">Receitas por categoria</div>
+
+    <div class="linha">
+      <div class="linha-topo"><span class="linha-nome"><span class="seta">▸</span> Vendas</span>
+        <span class="valor">R$ 139.485,75</span></div>
+      <div class="barra"><i style="width:100%"></i></div>
+    </div>
+
+    <div class="linha">
+      <div class="linha-topo"><span class="linha-nome"><span class="seta">▸</span> Investimentos
+        <span class="flag amb">contém aporte</span></span>
+        <span class="valor">R$ 65.042,68</span></div>
+      <div class="barra amb"><i style="width:47%"></i></div>
+    </div>
+
+    <div class="linha">
+      <div class="linha-topo"><span class="linha-nome"><span class="seta">▸</span> Outros
+        <span class="flag amb">contém aporte</span></span>
+        <span class="valor">R$ 24.582,49</span></div>
+      <div class="barra amb"><i style="width:18%"></i></div>
+    </div>
+
+    <div class="linha">
+      <div class="linha-topo"><span class="linha-nome"><span class="seta">▸</span> Honorários</span>
+        <span class="valor">R$ 15.000,00</span></div>
+      <div class="barra"><i style="width:11%"></i></div>
+    </div>
+
+    <div class="linha">
+      <div class="linha-topo"><span class="linha-nome"><span class="seta">▸</span> Freela</span>
+        <span class="valor">R$ 3.700,00</span></div>
+      <div class="barra"><i style="width:3%"></i></div>
+    </div>
+
+    <div class="linha">
+      <div class="linha-topo"><span class="linha-nome"><span class="seta">▸</span> Reembolso</span>
+        <span class="valor">R$ 1.097,38</span></div>
+      <div class="barra"><i style="width:1%"></i></div>
+    </div>
+
+    <div class="linha">
+      <div class="linha-topo"><span class="linha-nome"><span class="seta">▸</span> Presentes
+        <span class="flag">é um aporte</span></span>
+        <span class="valor">R$ 200,00</span></div>
+      <div class="barra cor"><i style="width:1%"></i></div>
+    </div>
+
+    <div class="linha">
+      <div class="linha-topo"><span class="linha-nome"><span class="seta">▸</span> Consultoria</span>
+        <span class="valor">R$ 100,00</span></div>
+      <div class="barra"><i style="width:1%"></i></div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────────── 2 ───────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">O achado</p>
+  <h2>O mesmo conceito em três baldes</h2>
+  <p>
+    Procurando “aporte” na descrição dos lançamentos de receita, aparecem três —
+    e cada um caiu numa categoria diferente. Nenhum deles é venda.
+  </p>
+
+  <div class="achado">
+    <div class="cartao">
+      <div class="cat">Outros</div>
+      <div class="desc">Aporte sócio</div>
+      <div class="val">R$ 2.500,00</div>
+    </div>
+    <div class="cartao">
+      <div class="cat">Investimentos</div>
+      <div class="desc">Aporte da conta pessoal — T C Fernandes Ltda</div>
+      <div class="val">R$ 500,00</div>
+    </div>
+    <div class="cartao">
+      <div class="cat">Presentes</div>
+      <div class="desc">Aporte de sócio — Espaço Pelle Clínica Dermatológica</div>
+      <div class="val">R$ 200,00</div>
+    </div>
+  </div>
+
+  <div class="nota aviso">
+    <b>E há uma pergunta de R$ 64.542,68.</b> A categoria “Investimentos” é
+    ambígua: pode significar <i>rendimento que eu ganhei</i> ou <i>dinheiro que
+    alguém pôs na empresa</i>. As descrições — “Investimento&nbsp;— Marquinhos”,
+    “Investimento&nbsp;— Wesley” — sugerem a segunda, que também não é receita.
+    Não dá pra decidir isso pela descrição; é uma pergunta pra você.
+  </div>
+</section>
+
+<!-- ───────────────────────────── 3 ───────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">Proposta</p>
+  <h2>Dois blocos, não uma lista</h2>
+  <p>
+    O problema não é falta de uma categoria “Aporte”. É que a tela mistura duas
+    perguntas diferentes: <b>quanto o negócio faturou</b> e <b>quanto dinheiro
+    entrou na conta</b>. As duas importam, e a segunda não pode contaminar a
+    primeira.
+  </p>
+
+  <div class="dois">
+    <div class="bloco op">
+      <div class="bloco-cab">
+        <span class="bloco-tit">Receita do negócio</span>
+        <span class="bloco-tot">R$ 158.285,75</span>
+      </div>
+      <div class="bloco-sub">o que a empresa faturou — entra no resultado</div>
+
+      <div class="linha">
+        <div class="linha-topo"><span class="linha-nome">Vendas</span>
+          <span class="valor">R$ 139.485,75</span></div>
+        <div class="barra"><i style="width:100%"></i></div>
+      </div>
+      <div class="linha">
+        <div class="linha-topo"><span class="linha-nome">Honorários</span>
+          <span class="valor">R$ 15.000,00</span></div>
+        <div class="barra"><i style="width:11%"></i></div>
+      </div>
+      <div class="linha">
+        <div class="linha-topo"><span class="linha-nome">Freela</span>
+          <span class="valor">R$ 3.700,00</span></div>
+        <div class="barra"><i style="width:3%"></i></div>
+      </div>
+      <div class="linha">
+        <div class="linha-topo"><span class="linha-nome">Consultoria</span>
+          <span class="valor">R$ 100,00</span></div>
+        <div class="barra"><i style="width:1%"></i></div>
+      </div>
+    </div>
+
+    <div class="bloco nao">
+      <div class="bloco-cab">
+        <span class="bloco-tit">Entrou, mas não é receita</span>
+        <span class="bloco-tot">R$ 4.297,38</span>
+      </div>
+      <div class="bloco-sub">movimenta o caixa — fica fora do resultado</div>
+
+      <div class="linha">
+        <div class="linha-topo"><span class="linha-nome">Aporte de sócio
+          <span class="flag ok">novo</span></span>
+          <span class="valor">R$ 3.200,00</span></div>
+        <div class="barra amb"><i style="width:100%"></i></div>
+      </div>
+      <div class="linha">
+        <div class="linha-topo"><span class="linha-nome">Estorno / devolução</span>
+          <span class="valor">R$ 1.097,38</span></div>
+        <div class="barra amb"><i style="width:34%"></i></div>
+      </div>
+      <div class="linha">
+        <div class="linha-topo"><span class="linha-nome">Empréstimo recebido
+          <span class="flag ok">novo</span></span>
+          <span class="valor">—</span></div>
+        <div class="barra amb"><i style="width:0%"></i></div>
+      </div>
+      <div class="linha">
+        <div class="linha-topo"><span class="linha-nome">Transferência entre contas
+          <span class="flag ok">novo</span></span>
+          <span class="valor">—</span></div>
+        <div class="barra amb"><i style="width:0%"></i></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota">
+    <b>O ganho é o número de cima.</b> Hoje, olhando a tela, a leitura natural é
+    “entraram R$ 249 mil”. Com a separação, a resposta pra “quanto o negócio
+    fez?” fica isolada e comparável mês a mês — sem subir e descer conforme o
+    sócio precisou cobrir caixa.
+  </div>
+</section>
+
+<!-- ───────────────────────────── 4 ───────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">O que muda no código</p>
+  <h2>Três mudanças, em camadas diferentes</h2>
+
+  <div class="passo">
+    <span class="n">1</span>
+    <span class="txt">
+      <b>As categorias novas</b>
+      Em <code>CATEGORIAS_RECEITA</code> (<code>finance/models.py</code>), acrescentar:
+      <span class="chip novo">Aporte</span><span class="chip novo">Emprestimo</span><span class="chip novo">Transferencia</span>
+      — e uma lista <code>RECEITA_NAO_OPERACIONAL</code> dizendo quais delas ficam
+      no segundo bloco. As 11 existentes não mudam de nome, então nada no
+      histórico se reclassifica sozinho.
+    </span>
+  </div>
+
+  <div class="passo">
+    <span class="n">2</span>
+    <span class="txt">
+      <b>A tela</b>
+      <code>receitas_por_categoria</code> passa a devolver dois grupos em vez de
+      uma lista. O template já tem tudo o que precisa — é o mesmo bloco de barras,
+      repetido, com um total no cabeçalho de cada um.
+    </span>
+  </div>
+
+  <div class="passo">
+    <span class="n">3</span>
+    <span class="txt">
+      <b>O plano de contas — e um bug de sinal</b>
+      O grupo 7 (“Não Operacional / Investimentos”) já tem
+      <code>7.1.02 Distribuição de Lucros</code>, o sócio <i>tirando</i>. Falta o
+      contrário. Mas <code>GRUPOS_DRE[7]["papel"]</code> é <code>"despesa"</code>, e
+      a DRE faz <code>sinal = 1 if papel == "receita" else -1</code> — um aporte
+      entraria <b>negativo</b>. O sinal precisa seguir a
+      <code>natureza da conta</code>, não o papel do grupo.
+    </span>
+  </div>
+
+  <div class="rolar">
+    <table>
+      <thead><tr><th>Código</th><th>Conta</th><th>Natureza</th><th class="num">Sinal na DRE</th></tr></thead>
+      <tbody>
+        <tr><td>7.1.02</td><td>Distribuição de Lucros</td><td>despesa</td><td class="num">−</td></tr>
+        <tr><td>7.1.03</td><td>Empréstimos e Financiamentos</td><td>despesa</td><td class="num">−</td></tr>
+        <tr><td><b>7.1.05</b></td><td><b>Aporte de Sócios</b> <span class="flag ok">novo</span></td><td>receita</td><td class="num">+</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ───────────────────────────── 5 ───────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">Antes de implementar</p>
+  <h2>Três decisões que são suas</h2>
+
+  <div class="passo">
+    <span class="n">?</span>
+    <span class="txt">
+      <b>Os R$ 64.542 em “Investimentos” são o quê?</b>
+      Rendimento que a empresa ganhou, ou dinheiro que terceiros puseram nela? A
+      resposta move esse valor inteiro de um bloco pro outro.
+    </span>
+  </div>
+  <div class="passo">
+    <span class="n">?</span>
+    <span class="txt">
+      <b>Reclassificar o histórico?</b>
+      Os três aportes já lançados podem ser corrigidos com um <code>update</code>,
+      como fizemos com as datas. Ou ficam como estão e a regra só vale daqui pra
+      frente.
+    </span>
+  </div>
+  <div class="passo">
+    <span class="n">?</span>
+    <span class="txt">
+      <b>“Estorno” fica onde?</b>
+      Coloquei no segundo bloco porque devolução de dinheiro não é faturamento —
+      mas dá pra argumentar que é redutor de despesa, o que seria um terceiro
+      tratamento.
+    </span>
+  </div>
+</section>
+
+<p class="rodape">
+  Mockup · dados reais de produção lidos em 24/08/2026, todas as contas ·
+  tokens de <code>web/tema.py</code>
+</p>
+</body>
+</html>

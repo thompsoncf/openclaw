@@ -130,6 +130,18 @@ def _gerencia(request: Request):
 # layout deste app (app shell, abas, folha de ações), que não existe em outro lugar.
 _CSS = _tema.FONTES + """<style>""" + _tema.variaveis(com_base=False) + """
 *{box-sizing:border-box}html,body{margin:0}
+/* A FAIXA DE BAIXO QUE NÃO DÁ PRA USAR.
+   `viewport-fit=cover` (ver _page) manda desenhar por baixo das barras do sistema —
+   é o que tira a tarja preta do topo no app instalado. Quem faz isso tem que devolver
+   o espaço embaixo também, e até aqui a conta era só `env(safe-area-inset-bottom)`.
+   Medido num Chromium com o CSS real: quando o `env()` não reporta nada, o rodapé
+   reservava 12,8px e o botão ficava a 13px do fim da tela. A barra de navegação do
+   Android (os três botões) come ~48px — o "Marcar" nascia atrás dela, e o vendedor
+   via só a borda verde de cima. É o print que o dono mandou em 23/08.
+   O piso resolve porque `max()` deixa o `env()` vencer onde ele funciona (iPhone
+   reporta ~34px) e só entra quando ele volta zero. Generoso de propósito: sobra vira
+   espaço em branco, falta vira botão que ninguém alcança. */
+:root{--fundo-seguro:max(env(safe-area-inset-bottom,0px),3rem)}
 body{background:var(--bg);color:var(--text);font-family:var(--body);line-height:1.5;
   -webkit-font-smoothing:antialiased;overflow:hidden}
 a{color:inherit;text-decoration:none}
@@ -452,7 +464,7 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .aviso{margin:.2rem 0;padding:.55rem .7rem;border-radius:11px;font-size:.78rem;text-align:center;
   background:var(--surface);border:1px solid var(--line);color:var(--text-dim)}
 .rodape{flex-shrink:0;border-top:1px solid var(--line);background:var(--bg);padding:.7rem 1.1rem;
-  padding-bottom:calc(.7rem + env(safe-area-inset-bottom,0px));position:relative;z-index:2}
+  padding-bottom:calc(.7rem + var(--fundo-seguro));position:relative;z-index:2}
 .composer{display:flex;gap:.5rem;align-items:center}
 .composer input{flex:1;min-width:0;background:var(--surface);border:1px solid var(--line);
   border-radius:999px;color:var(--text);padding:.65rem .95rem;font-family:inherit;font-size:.9rem}
@@ -463,7 +475,7 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
    e empurrava a conversa (a superfície de trabalho real) pra fora da tela */
 .folha{position:absolute;left:0;right:0;bottom:0;z-index:20;background:var(--bg-2);
   border-top:1px solid var(--line);border-radius:18px 18px 0 0;padding:.5rem 1.1rem 1.2rem;
-  padding-bottom:calc(1.2rem + env(safe-area-inset-bottom,0px));
+  padding-bottom:calc(1.2rem + var(--fundo-seguro));
   max-height:84%;overflow-y:auto;overscroll-behavior:contain;
   transform:translateY(101%);transition:transform .22s ease}
 .folha:target{transform:translateY(0)}
@@ -508,10 +520,22 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   padding:.55rem .7rem;font-family:inherit;font-size:.88rem;resize:none}
 .fic-c input:focus,.fic-c textarea:focus{outline:none;border-color:var(--neon)}
 .fic .btn{margin-top:.25rem}
+/* retorno do CEP. `min-height` reservado: sem isso a linha nasce e some, e o
+   formulário inteiro pula pra cima e pra baixo a cada consulta. */
+.cepmsg{font-size:.7rem;line-height:1.3;min-height:1.1em;color:var(--text-dim)}
+.cepmsg.bom{color:var(--neon)}
+.cepmsg.ruim{color:var(--ambar)}
+/* o campo que o CEP trocou pisca em verde — é o que prova pro vendedor que a busca
+   funcionou, principalmente quando o valor antigo já estava lá e mudou pouco. */
+@keyframes fic-trocou{from{background:rgba(37,211,102,.30)}to{background:var(--bg-2)}}
+.fic-c input.trocou{animation:fic-trocou 2s ease-out}
+@media (prefers-reduced-motion:reduce){
+  .fic-c input.trocou{animation:none;border-color:var(--neon)}
+}
 
 /* ---------- abas de baixo ---------- */
 .tabs{display:flex;flex-shrink:0;border-top:1px solid var(--line);background:rgba(10,15,12,.92);
-  backdrop-filter:blur(12px);padding-bottom:env(safe-area-inset-bottom,0px);position:relative;z-index:2}
+  backdrop-filter:blur(12px);padding-bottom:var(--fundo-seguro);position:relative;z-index:2}
 .tabs a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:.5rem 0 .45rem;
   color:var(--text-faint);font-size:.62rem;position:relative}
 .tabs a.on{color:var(--neon)}
@@ -614,7 +638,7 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   background:var(--surface);color:var(--text-dim);font:inherit;font-size:1rem;line-height:1;cursor:pointer}
 /* rodapé fixo do construtor: total à esquerda, ação à direita */
 .rodape-b{flex-shrink:0;border-top:1px solid var(--line);background:var(--bg);padding:.8rem 1.1rem;
-  padding-bottom:calc(.8rem + env(safe-area-inset-bottom,0px));position:relative;z-index:2}
+  padding-bottom:calc(.8rem + var(--fundo-seguro));position:relative;z-index:2}
 .rodape-b .tot{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;margin-bottom:.6rem;
   font-size:.85rem;color:var(--text-dim)}
 .rodape-b .tot b{font-family:var(--mono);font-size:1rem;color:var(--neon)}
@@ -2303,16 +2327,40 @@ def _iso(d) -> str:
 #     {"ok": false}; aqui o que resta é não estourar no console e seguir na mão.
 _CEP_JS = """<script>(function(){
   var cep=document.getElementById('fic-cep'); if(!cep) return;
-  function po(id,v){var e=document.getElementById(id); if(e&&!e.value.trim()&&v) e.value=v;}
+  var msg=document.getElementById('cep-msg'), ultimo='';
+  function diz(t,cor){ if(msg){ msg.textContent=t||''; msg.className='cepmsg'+(cor?' '+cor:''); } }
+  // Preenche E MOSTRA que preencheu. A versão anterior só tocava campo vazio, e
+  // metade dos leads chega com `cidade` já preenchida da prospecção (321 de 644,
+  // medido) — então o sinal mais visível de que o CEP funcionou nunca aparecia.
+  // O CEP é a fonte mais confiável de cidade/UF; quem não concordar digita por cima.
+  function po(id,v){
+    var e=document.getElementById(id); if(!e||!v) return;
+    if(e.value.trim()===v) return;                       // já era isso: nada a piscar
+    e.value=v;
+    e.classList.remove('trocou'); void e.offsetWidth;    // reinicia a animação
+    e.classList.add('trocou');
+  }
   cep.addEventListener('input',function(){
     var d=(cep.value||'').replace(/[^0-9]/g,'');
-    if(d.length!==8) return;
+    if(d.length!==8){ ultimo=''; diz(''); return; }
+    if(d===ultimo) return;                               // não repete a consulta
+    ultimo=d;
+    diz('buscando…');
     fetch('/api/cep/'+d).then(function(r){return r.json();}).then(function(j){
-      if(!j||!j.ok) return;
+      if(!j||!j.ok){ ultimo=''; diz('CEP não encontrado — confira ou preencha à mão','ruim'); return; }
       po('fic-endereco',j.rua); po('fic-bairro',j.bairro);
       po('fic-cidade',j.cidade); po('fic-uf',j.uf);
+      // CEP amplo (cidade pequena, ou CEP único de bairro grande) vem SEM rua e sem
+      // bairro. Sem dizer isso, a tela parecia quebrada quando a cidade já estava lá.
+      diz((!j.rua && !j.bairro)
+          ? j.cidade+'/'+j.uf+' — CEP amplo, complete a rua'
+          : j.cidade+'/'+j.uf+' ✓', 'bom');
       var n=document.getElementById('fic-numero'); if(n&&!n.value.trim()) n.focus();
-    }).catch(function(){});
+    }).catch(function(){
+      // `ultimo` volta pro vazio pra dar pra tentar de novo: engolir o erro em
+      // silêncio, como era antes, é o que fazia falha e sucesso serem idênticos.
+      ultimo=''; diz('não deu pra buscar agora — toque no CEP pra tentar de novo','ruim');
+    });
   });
 })();</script>"""
 
@@ -2334,13 +2382,14 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
     if not d:
         return RedirectResponse(_BASE, status_code=303)
 
-    def campo(nome, rot, valor, *, tipo="text", modo="", meia=False):
+    def campo(nome, rot, valor, *, tipo="text", modo="", meia=False, dica=""):
         # id=fic-<nome> porque o autopreenchimento do CEP precisa achar rua, bairro,
         # cidade e UF pra completar; sem id o JS teria que caçar por name= no form.
+        # `dica` é HTML pronto (não passa por esc): hoje só o retorno do CEP usa.
         extra = f" inputmode={modo}" if modo else ""
         return (f"<label class='fic-c{' meia' if meia else ''}'><span>{esc(rot)}</span>"
                 f"<input id=fic-{nome} name={nome} type={tipo}{extra} value='{esc(valor or '')}'"
-                f" autocomplete=off></label>")
+                f" autocomplete=off>{dica}</label>")
 
     # Rótulo único: quem digita não escolhe a coluna — o tamanho do documento decide
     # (11 = CPF, 14 = CNPJ) lá no _doc_lead. Pedir "CNPJ" pra uma cliente pessoa
@@ -2362,7 +2411,10 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
         + campo("email", "E-mail", d.get("email"), tipo="email", modo="email")
         # O CEP vem ANTES do endereço de propósito: digitou os 8 dígitos, rua/bairro/
         # cidade/UF se preenchem sozinhos (ver _CEP_JS) e sobra o número pra digitar.
-        + campo("cep", "CEP", d.get("cep"), modo="numeric", meia=True)
+        # a linha de retorno do CEP mora DENTRO do campo dele: em cima do teclado
+        # aberto, um aviso no rodapé da tela não seria visto por ninguém.
+        + campo("cep", "CEP", d.get("cep"), modo="numeric", meia=True,
+                dica="<span class=cepmsg id=cep-msg></span>")
         + campo("numero", "Número", d.get("numero"), meia=True)
         + campo("endereco", "Endereço", d.get("endereco"))
         + campo("bairro", "Bairro", d.get("bairro"), meia=True)

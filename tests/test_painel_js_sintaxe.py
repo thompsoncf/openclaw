@@ -224,6 +224,24 @@ def test_o_js_da_agenda_compila(tmp_path):
     assert r.returncode == 0, r.stderr.strip()[:600]
 
 
+def test_o_js_do_cep_no_app_do_vendedor_compila(tmp_path):
+    """O `_CEP_JS` é string Python solta em painel_cockpit — nenhum render do painel
+    passa por ele, então ficava fora de todo teste de sintaxe deste arquivo.
+
+    É justamente o tipo que quebra calado: erro aqui não aparece em lugar nenhum, o
+    campo do CEP simplesmente para de puxar endereço, e o vendedor acha que a API é
+    que está fora. Foi assim que o dono relatou o problema em 23/08."""
+    if not shutil.which("node"):
+        pytest.skip("sem node no ambiente")
+    from web import painel_cockpit as pc
+    corpo = "\n".join(_scripts(pc._CEP_JS))
+    assert corpo.strip(), "o _CEP_JS deixou de ter <script> — o teste ficaria vazio"
+    alvo = tmp_path / "cep.js"
+    alvo.write_text(corpo, encoding="utf-8")
+    r = subprocess.run(["node", "--check", str(alvo)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr.strip()[:600]
+
+
 def test_o_bloco_do_qr_esta_mesmo_na_pagina():
     """Guarda do teste acima: se o bloco do QR sumir do render, o teste de sintaxe
     fica verde sem ter olhado o código que já quebrou uma vez."""

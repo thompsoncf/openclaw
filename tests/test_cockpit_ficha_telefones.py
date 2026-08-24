@@ -99,14 +99,43 @@ def test_a_ficha_tem_endereco_e_aniversario():
 
 
 def test_o_cep_puxa_o_endereco_pela_rota_que_ja_existe():
-    """Nada de rota nova: /api/cep/{cep} já existe no portal e usa a BrasilAPI por
-    dentro. E o preenchimento não pode SOBRESCREVER — CEP amplo devolve outra rua, e
-    quem já digitou o endereço não pode vê-lo trocar sozinho."""
+    """Nada de rota nova: /api/cep/{cep} já existe no portal e usa a BrasilAPI."""
     assert "fetch('/api/cep/'+d)" in pc._CEP_JS
-    assert "!e.value.trim()" in pc._CEP_JS, "só preenche campo vazio"
     assert ".catch(" in pc._CEP_JS, "API fora do ar não pode travar a ficha"
     for alvo in ("fic-endereco", "fic-bairro", "fic-cidade", "fic-uf"):
         assert alvo in pc._CEP_JS
+
+
+def test_o_cep_preenche_mesmo_o_campo_que_ja_tem_valor():
+    """Mudou de propósito, e o motivo veio de produção: `po()` só tocava campo vazio,
+    e 321 dos 644 leads dos últimos 30 dias já chegam com `cidade` preenchida da
+    prospecção. O sinal mais visível de que o CEP funcionou — cidade e UF mudando —
+    nunca aparecia, e o dono relatou "não tá vindo os dados".
+
+    O CEP é a fonte mais confiável de cidade/UF; quem discordar digita por cima."""
+    assert "!e.value.trim()" not in pc._CEP_JS, \
+        "voltou a trava que só preenchia campo vazio"
+    assert "e.value.trim()===v" in pc._CEP_JS, \
+        "campo que já tem o MESMO valor não deve piscar — não mudou nada"
+    assert "classList.add('trocou')" in pc._CEP_JS
+
+
+def test_o_cep_diz_o_que_aconteceu_em_todos_os_desfechos():
+    """A causa real da queixa: `.catch(function(){})` engolia o erro e não havia
+    nenhum aviso de sucesso. Falha e acerto ficavam visualmente IDÊNTICOS, e não
+    dava pra saber se era bug ou se o CEP não tinha dado."""
+    for pedaco in ("buscando", "não encontrado", "CEP amplo", "tentar de novo"):
+        assert pedaco in pc._CEP_JS, f"faltou dizer ao vendedor: {pedaco}"
+    assert 'id=cep-msg' in inspect.getsource(pc.cockpit_ficha_tela), \
+        "a linha de retorno tem que estar no campo do CEP, não no rodapé"
+    assert ".cepmsg{" in pc._CSS
+
+
+def test_erro_de_rede_permite_tentar_de_novo():
+    """`ultimo` evita repetir a consulta do mesmo CEP. Se ele não voltasse a zero na
+    falha, o vendedor ficaria preso: digitar o mesmo CEP não tentaria mais nada."""
+    trecho = pc._CEP_JS[pc._CEP_JS.index(".catch("):]
+    assert "ultimo=''" in trecho, "erro de rede tem que liberar nova tentativa"
 
 
 def test_a_rota_de_salvar_aceita_os_campos_novos():

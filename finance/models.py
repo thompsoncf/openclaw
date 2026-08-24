@@ -100,8 +100,38 @@ CATEGORIAS_DESPESA = [
 
 CATEGORIAS_RECEITA = [
     "Salario", "Honorarios", "Freela", "Consultoria", "Investimentos",
-    "Vendas", "Aluguel", "Beneficio", "Presentes", "Reembolso", "Outros",
+    "Vendas", "Aluguel", "Beneficio", "Presentes", "Reembolso",
+    # ── entrou no caixa, mas NAO e' faturamento (ver RECEITA_NAO_OPERACIONAL)
+    "Aporte", "Emprestimo", "Transferencia",
+    "Outros",
 ]
+
+# Entradas que movimentam o caixa e NAO sao receita do negocio.
+#
+# Sem esta separacao a tela responde "entraram R$ 249 mil" somando venda com
+# dinheiro que o socio pos do bolso pra cobrir caixa — e o numero que o dono usa
+# pra julgar o negocio sobe e desce por um motivo que nao e' o negocio.
+#
+# O estrago era visivel no dado (producao, 24/08/2026): os tres lancamentos com
+# "aporte" na descricao caiiram em TRES categorias diferentes — "Outros"
+# (R$ 2.500), "Investimentos" (R$ 500) e "Presentes" (R$ 200). Nao havia
+# categoria certa pra eles, e o canonizar_categoria nunca cria uma nova.
+#
+# "Reembolso" entra aqui porque estorno e' dinheiro voltando, nao venda. Ja'
+# "Investimentos" fica FORA de proposito: o nome e' ambiguo (rendimento que a
+# empresa ganhou vs. dinheiro que puseram nela) e mover uma categoria antiga
+# reclassificaria historico sozinho. Quem decide isso e' a empresa, na mao.
+RECEITA_NAO_OPERACIONAL = frozenset({
+    "Aporte", "Emprestimo", "Transferencia", "Reembolso",
+})
+
+
+def receita_e_operacional(categoria: str) -> bool:
+    """A categoria conta como faturamento do negocio?
+
+    Recebe categoria ja' canonizada (ou nao — canoniza por dentro), porque quem
+    chama vem tanto da tela quanto do banco, onde a grafia varia."""
+    return canonizar_categoria(categoria, "receita") not in RECEITA_NAO_OPERACIONAL
 
 # Departamentos que APARECEM no raio-x do consumo (LISTA BRANCA). So' faz sentido
 # detalhar item de cupom nesses. Tudo que nao estiver aqui fica fora do raio-x -

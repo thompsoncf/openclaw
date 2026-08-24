@@ -562,6 +562,34 @@ class LivroCaixa:
                                natureza: str | None = None) -> list[tuple[str, int]]:
         return self._por_categoria("receita", ano, mes, membro_id, natureza)
 
+    def receitas_em_dois_blocos(self, ano: int, mes: int, membro_id: int | None = None,
+                                natureza: str | None = None) -> dict:
+        """As receitas separadas em DUAS perguntas, que a lista unica misturava:
+
+          operacional     -> quanto o NEGOCIO faturou (entra no resultado)
+          nao_operacional -> quanto ENTROU no caixa sem ser faturamento
+                             (aporte de socio, emprestimo, estorno, transferencia)
+
+        Somar as duas coisas fazia o numero que o dono usa pra julgar o negocio
+        subir e descer conforme ele precisou cobrir caixa. Em producao, 24/08/2026:
+        de R$ 249 mil "de receita", R$ 3.200 eram aporte de socio espalhado por
+        tres categorias — uma delas "Presentes".
+
+        Devolve os dois totais junto porque a tela mostra os dois no cabecalho, e
+        recalcular somando na view e' onde os dois numeros comecam a divergir.
+        """
+        from .models import receita_e_operacional
+        op: list[tuple[str, int]] = []
+        nao: list[tuple[str, int]] = []
+        for cat, val in self._por_categoria("receita", ano, mes, membro_id, natureza):
+            (op if receita_e_operacional(cat) else nao).append((cat, val))
+        return {
+            "operacional": op,
+            "nao_operacional": nao,
+            "total_operacional": sum(v for _, v in op),
+            "total_nao_operacional": sum(v for _, v in nao),
+        }
+
     def _por_categoria(self, tipo: str, ano: int, mes: int,
                        membro_id: int | None = None,
                        natureza: str | None = None) -> list[tuple[str, int]]:

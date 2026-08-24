@@ -21,6 +21,7 @@ passando o teste sem ter olhado pra nada.
 """
 from __future__ import annotations
 
+import inspect
 import re
 import shutil
 import subprocess
@@ -102,3 +103,51 @@ def test_a_pagina_de_clientes_desenha_o_papel():
     html = _render("clientes")
     assert "eh_cliente" in html and "eh_fornecedor" in html
     assert "Clientes/Fornecedores" in html
+
+
+# ---------------------------------------------------- layout: Relatórios (24/08)
+# Relato em produção depois de Orçamentos/Contratos entrarem em Relatórios: com
+# 8 abas (Vendas, Contas a pagar/receber, Contas pagas/recebidas, Comissão,
+# Orçamentos, Contratos) o trilho de abas quebrava em 2 linhas, e o KPI "Em
+# aberto" (valor tipo "10 · R$ 68.590,00", mais longo que o KPI comum do app)
+# estourava a caixa em telas médias.
+
+def test_trilho_de_abas_nunca_quebra_linha_rola_de_lado():
+    fonte = inspect.getsource(pt)
+    regra_abas = fonte.split(".abas{")[1].split("}")[0]
+    assert "flex-wrap:nowrap" in regra_abas, (
+        "com flex-wrap:wrap, muitas abas (caso de Relatórios) quebram em 2ª linha")
+    assert "overflow-x:auto" in regra_abas, "sem isso não tem como rolar pra ver as abas escondidas"
+    regra_aba = fonte.split(".aba{")[1].split("}")[0]
+    assert "flex-shrink:0" in regra_aba, "sem isso o navegador espreme as abas em vez de rolar"
+
+
+def test_aba_ativa_de_relatorios_rola_pra_ficar_visivel():
+    """Com o trilho rolável, a aba ativa podia nascer fora da área visível (ex.:
+    abrir em "Orçamentos" e a tela mostrar só as 6 primeiras abas, sem indicar
+    onde se está) — sem isso o scroll-de-lado sozinho não bastava."""
+    fonte = inspect.getsource(pt)
+    assert '#rel-abas .aba.ativa' in fonte
+    assert "scrollIntoView" in fonte.split("#rel-abas .aba.ativa")[1].split("</script>")[0]
+
+
+def test_kpi_de_relatorio_nao_estoura_a_caixa():
+    fonte = inspect.getsource(pt)
+    regra_metric = fonte.split(".metric{")[1].split("}")[0]
+    assert "min-width:0" in regra_metric, (
+        "grid-item sem min-width:0 usa o tamanho do CONTEÚDO como mínimo — "
+        "o valor mais longo do que o track do grid estoura a caixa")
+    regra_metric_b = fonte.split(".metric b{")[1].split("}")[0]
+    assert "overflow-wrap:break-word" in regra_metric_b or "word-break" in regra_metric_b
+    # Relatórios tem valores mais longos ("10 · R$ 68.590,00") que o KPI comum
+    # do app — precisa de uma fonte menor que o 1.4rem padrão do .metric b.
+    assert ".rel-metricas .metric b{" in fonte
+
+
+def test_linhas_da_tabela_de_relatorio_ficam_em_uma_linha_so():
+    """Nome de cliente/empresa longo virando 3 linhas desalinhava a tabela
+    inteira — a rolagem lateral do .rel-tbl-wrap já existe pra isso, então a
+    célula não precisa (e não deve) quebrar por conta própria."""
+    fonte = inspect.getsource(pt)
+    regra = fonte.split(".rel-tbl-wrap table td,.rel-tbl-wrap table th{")[1].split("}")[0]
+    assert "white-space:nowrap" in regra

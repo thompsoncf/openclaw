@@ -335,9 +335,15 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
         rows = c.execute(
             f"""select o.numero, o.cliente, o.empresa, o.status, o.criado_em,
                        case when o.status='fechado' then o.atualizado_em end,
-                       coalesce(m.nome, '—'), {_VALOR_ORC}, o.token
+                       -- criado_por guarda o id do membro OU a palavra 'dono' (quem
+                       -- abriu a conta, sem vendedor específico — mesma leitura de
+                       -- web/proposta.py). Sem o 2º ramo, esses ficavam "—", como se
+                       -- não tivessem dono nenhum.
+                       coalesce(m.nome, case when o.criado_por = 'dono' then ct.nome end, '—'),
+                       {_VALOR_ORC}, o.token
                   from orcamentos o
                   left join membros m on m.id::text = o.criado_por and m.conta_id = o.conta_id
+                  left join contas ct on ct.id = o.conta_id
                  where {where2_sql}
                  order by o.criado_em desc limit 300""",
             params2).fetchall()
@@ -416,10 +422,14 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -
     with pool.connection() as c:
         rows = c.execute(
             f"""select c.numero, coalesce(o.cliente, '—'), c.status, c.criado_em,
-                       c.assinado_em, coalesce(m.nome, '—'),
+                       c.assinado_em,
+                       -- mesma leitura de _dados_orcamentos: criado_por é o id do
+                       -- membro OU a palavra 'dono'.
+                       coalesce(m.nome, case when o.criado_por = 'dono' then ct.nome end, '—'),
                        coalesce(c.valor_centavos, 0), c.token
                   from contratos c {join_sql}
                   left join membros m on m.id::text = o.criado_por and m.conta_id = c.conta_id
+                  left join contas ct on ct.id = c.conta_id
                  where {where2_sql}
                  order by c.criado_em desc limit 300""",
             params2).fetchall()

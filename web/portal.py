@@ -222,9 +222,9 @@ table{width:100%;border-collapse:collapse;margin-top:.8rem}
 td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;font-size:.92rem}
 .tag{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.78rem;
  border:1px solid var(--verde);color:var(--verde-claro)}
-.metric{background:var(--bg);border:1px solid var(--borda);border-radius:8px;padding:1rem}
+.metric{background:var(--bg);border:1px solid var(--borda);border-radius:8px;padding:1rem;min-width:0}
 .metric span{display:block;font-size:.8rem;color:var(--txt-mut);margin-bottom:.3rem}
-.metric b{font-size:1.4rem;font-weight:500}
+.metric b{font-size:1.4rem;font-weight:500;overflow-wrap:break-word;word-break:break-word}
 .barra{height:8px;background:var(--bg);border-radius:4px;overflow:hidden}
 .barra-fill{height:8px;background:var(--verde);border-radius:4px}
 .chip{border:1px solid var(--borda);padding:.25rem .6rem;border-radius:999px;font-size:.8rem;color:#ccc}
@@ -264,9 +264,11 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
 .conv-links{display:flex;gap:4px;flex-wrap:wrap;margin-top:.3rem}
 /* Trilho de abas/chips — mesmo padrão do grupo "Ver lançamentos de" (pessoal/
    empresa): fundo --card, cantos 9px, itens 6px. align-items:center e o margin:0
-   do .aba evitam a "barriga" que o margin-top do button base causava. */
-.abas{display:inline-flex;align-items:center;flex-wrap:wrap;gap:2px;background:var(--card);padding:3px;border-radius:9px;border:1px solid var(--borda);margin:.6rem 0 .9rem}
-.aba{width:auto;margin:0;display:inline-flex;align-items:center;line-height:1;background:transparent;color:#b4b2a9;border:none;padding:.35rem .8rem;border-radius:6px;font-size:.8rem;cursor:pointer;transition:background .18s,color .18s}
+   do .aba evitam a "barriga" que o margin-top do button base causava.
+   NUNCA quebra linha: com muitas abas (caso de Relatórios, 8 no total) o trilho
+   rola de lado — max-width:100% + overflow-x:auto no lugar de flex-wrap. */
+.abas{display:flex;align-items:center;flex-wrap:nowrap;gap:2px;background:var(--card);padding:3px;border-radius:9px;border:1px solid var(--borda);margin:.6rem 0 .9rem;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.aba{width:auto;flex-shrink:0;margin:0;display:inline-flex;align-items:center;line-height:1;background:transparent;color:#b4b2a9;border:none;padding:.35rem .8rem;border-radius:6px;font-size:.8rem;cursor:pointer;transition:background .18s,color .18s}
 .aba:hover{color:var(--txt)}
 .aba.on,.aba.ativa{background:var(--verde);color:var(--sobre-verde);font-weight:600}
 .dica-toque{font-size:.78rem;color:#7a7a78;margin:0 0 .6rem}
@@ -6005,12 +6007,20 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   .rel-print:hover{border-color:var(--verde)}
   .rel-tbl-wrap{overflow-x:auto;max-width:100%}
   .rel-tbl-wrap table{min-width:640px}
+  /* Linha única sempre — nome de cliente/empresa longo não vira 3 linhas
+     desalinhando a tabela toda; quem estoura a largura já tem a rolagem
+     lateral do .rel-tbl-wrap (e a dica de "arraste pros lados" abaixo). */
+  .rel-tbl-wrap table td,.rel-tbl-wrap table th{white-space:nowrap}
   .rel-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   .rel-tot td{border-top:2px solid var(--borda);font-weight:700}
   .rel-metricas{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:1.2rem 0}
+  /* Os valores aqui ("10 · R$ 68.590,00") são mais longos que o KPI comum do
+     app — a fonte padrão (1.4rem) estourava a caixa em telas médias. */
+  .rel-metricas .metric b{font-size:1.05rem;line-height:1.3}
   .rel-scroll-dica{display:none}
   @media (max-width:600px){.rel-filtros{align-items:stretch}.rel-filtros select{flex:1 1 auto}
-   .rel-metricas{grid-template-columns:repeat(2,1fr)}}
+   .rel-metricas{grid-template-columns:repeat(2,1fr)}
+   .rel-metricas .metric b{font-size:.95rem}}
   @media (max-width:700px){.rel-scroll-dica{display:block}}
 </style>
 <div class="card larga">
@@ -6022,10 +6032,19 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   <div class="rel-aviso">⚠️ {{ dados.aviso_config }}</div>
   {% endif %}
 
-  <div class="abas">
+  <div class="abas" id="rel-abas">
     {% for k, r in tipos.items() %}<a class="aba{% if k==tipo %} ativa{% endif %}"
      href="/painel/relatorios?tipo={{ k }}&periodo={{ periodo }}" style="text-decoration:none">{{ r.label }}</a>{% endfor %}
   </div>
+  <script>
+    // com 8 abas o trilho rola de lado (ver .abas) — sem isto a aba ativa podia
+    // nascer fora da área visível, e quem abrisse a tela não veria em qual
+    // relatório está.
+    (function () {
+      var ativa = document.querySelector("#rel-abas .aba.ativa");
+      if (ativa) ativa.scrollIntoView({inline: "center", block: "nearest"});
+    })();
+  </script>
 
   <form method="get" action="/painel/relatorios" class="rel-filtros">
     <input type="hidden" name="tipo" value="{{ tipo }}">

@@ -76,6 +76,8 @@ REGRAS_PADRAO = {
     "reagenda_prazo":    180,     # prazo da nova data (cláusula 11.5)
     "retirada_horas":     48,     # retirada de materiais (cláusula 13.3)
     "acesso_montagem":  "10h00",  # entrada de fornecedores (cláusula 2.9)
+    "multa_atraso_pct":    2,     # % sobre a parcela vencida, no boleto (cláusula 3.4)
+    "juros_mora_pct_mes":  1,     # % ao mês, proporcional aos dias de atraso (cláusula 3.4)
 }
 
 
@@ -180,6 +182,8 @@ def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None) -> dic
             "reagenda_prazo": str(reg["reagenda_prazo"]),
             "retirada_horas": str(reg["retirada_horas"]),
             "acesso_montagem": str(reg["acesso_montagem"]),
+            "multa_atraso_pct": pct(reg["multa_atraso_pct"]),
+            "juros_mora_pct_mes": pct(reg["juros_mora_pct_mes"]),
         },
         "empresa": {
             "razao": emp.get("razao_social") or emp.get("nome_fantasia") or "",
@@ -448,7 +452,11 @@ def modelo_padrao() -> list[dict]:
                   "3.2. Para confirmação da reserva será exigida entrada de {regra.sinal_pct} "
                   "do valor total, correspondente a {valor.entrada}.\n"
                   "3.3. O saldo de {valor.saldo} deverá estar integralmente quitado até "
-                  "{regra.quitacao_dias} dias corridos antes da realização do evento."},
+                  "{regra.quitacao_dias} dias corridos antes da realização do evento.\n"
+                  "3.4. Na opção do plano para pagamento no boleto, o atraso no pagamento de "
+                  "qualquer parcela sujeitará o(a) LOCATÁRIO(A) à multa de "
+                  "{regra.multa_atraso_pct} sobre a parcela vencida, acrescida de juros de "
+                  "mora de {regra.juros_mora_pct_mes} ao mês."},
         {"titulo": "Cláusula 4 — Da reserva da data",
          "corpo": "4.1. A data somente será considerada definitivamente reservada após a "
                   "confirmação do pagamento da entrada prevista na Cláusula 3.\n"

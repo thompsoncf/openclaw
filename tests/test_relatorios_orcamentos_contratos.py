@@ -147,6 +147,16 @@ def test_busca_por_cliente(pool, cen):
     assert len(dados["linhas"]) == 1 and dados["linhas"][0]["cliente"] == "Talila Arrais"
 
 
+def test_vendedor_dono_mostra_o_nome_da_conta_nao_travessao(pool, cen):
+    """Relato em produção: 2 orçamentos apareciam "sem vendedor" (—). Causa:
+    `criado_por` guarda o id do membro OU a palavra 'dono' (quem abriu a conta,
+    sem vendedor específico — mesma leitura de web/proposta.py) — e "dono" não
+    bate com id de membro nenhum, então o join simplesmente não achava nada."""
+    _orc(pool, cen["conta"], criado_por="dono")
+    dados = rel._dados_orcamentos(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["vendedor"] == "Prime Eventos"
+
+
 def test_fechado_em_so_aparece_pra_orcamento_fechado(pool, cen):
     _orc(pool, cen["conta"], status="fechado")
     _orc(pool, cen["conta"], status="negociando")
@@ -231,6 +241,13 @@ def test_contratos_filtro_por_vendedor_via_orcamento(pool, cen):
     _contrato(pool, cen["conta"], o2, status="assinado")
     dados = rel._dados_contratos(pool, cen["conta"], "todos", "", str(cen["pedro"]), "")
     assert len(dados["linhas"]) == 1 and dados["linhas"][0]["vendedor"] == "Pedro"
+
+
+def test_contratos_vendedor_dono_mostra_o_nome_da_conta_nao_travessao(pool, cen):
+    o1 = _orc(pool, cen["conta"], criado_por="dono")
+    _contrato(pool, cen["conta"], o1, status="assinado")
+    dados = rel._dados_contratos(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["vendedor"] == "Prime Eventos"
 
 
 def test_contratos_acao_href_usa_o_token_do_contrato(pool, cen):

@@ -5962,8 +5962,12 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   .rel-aviso{background:#1a2233;border:1px solid #29354d;color:#9db3d6;border-radius:8px;
    padding:.6rem .85rem;font-size:.82rem;margin:.9rem 0 1rem;line-height:1.5}
   .rel-filtros{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.9rem 0 1.1rem}
-  .rel-filtros select{width:auto;margin:0}
+  .rel-filtros select,.rel-filtros input[type=search]{width:auto;margin:0}
+  .rel-filtros input[type=search]{min-width:170px}
   .rel-filtros .mut{font-size:.8rem}
+  .rel-filtrar{width:auto;margin:0;padding:.5rem .9rem;background:var(--card);color:var(--txt);
+   border:1px solid var(--borda);border-radius:8px;font-size:.85rem;cursor:pointer}
+  .rel-filtrar:hover{border-color:var(--verde)}
   .rel-pdf{width:auto;margin:0;display:inline-flex;align-items:center;gap:.4rem;padding:.6rem 1rem;
    background:#1d6e9e;color:#fff;text-decoration:none;border-radius:8px;font-size:.9rem;font-weight:600}
   .rel-pdf:hover{background:#2480b5}
@@ -5971,6 +5975,12 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   .rel-tag.ok{background:#15301f;color:#9fe8c9;border:1px solid var(--verde)}
   .rel-tag.aviso{background:#332a12;color:#f0dca6;border:1px solid #6e5a22}
   .rel-tag.erro{background:#3a1d1d;color:#f0b8b8;border:1px solid #6e2b2b}
+  .rel-tag.neutro{background:#20242a;color:#c7ccd6;border:1px solid #3a4048}
+  .rel-tag.info{background:#0f2836;color:#8fd0ea;border:1px solid #1d5570}
+  .rel-act{width:1%;white-space:nowrap;text-align:center}
+  .rel-print{display:inline-flex;align-items:center;justify-content:center;width:1.8rem;height:1.8rem;
+   border:1px solid var(--borda);background:var(--bg);border-radius:6px;text-decoration:none;font-size:.85rem}
+  .rel-print:hover{border-color:var(--verde)}
   .rel-tbl-wrap{overflow-x:auto;max-width:100%}
   .rel-tbl-wrap table{min-width:640px}
   .rel-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -6000,10 +6010,23 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     <select name="periodo" onchange="this.form.submit()">
       {% for v, rot in periodos %}<option value="{{ v }}" {% if v==periodo %}selected{% endif %}>{{ rot }}</option>{% endfor %}
     </select>
+    {% if dados.filtro_extra %}
+    <select name="status" onchange="this.form.submit()">
+      {% for v, rot in dados.filtro_extra.status_opcoes %}<option value="{{ v }}"
+        {% if v==dados.filtro_extra.status_sel %}selected{% endif %}>{{ rot }}</option>{% endfor %}
+    </select>
+    <select name="vendedor" onchange="this.form.submit()">
+      <option value="">Vendedor: todos</option>
+      {% for vid, vnome in dados.filtro_extra.vendedores %}<option value="{{ vid }}"
+        {% if vid|string==dados.filtro_extra.vendedor_sel %}selected{% endif %}>{{ vnome }}</option>{% endfor %}
+    </select>
+    <input type="search" name="q" value="{{ dados.filtro_extra.busca_sel }}" placeholder="🔎 buscar cliente…">
+    <button type="submit" class="rel-filtrar">Filtrar</button>
+    {% endif %}
     {% if dados.sem_periodo %}<span class="mut">mostra tudo que está em aberto — o período aqui não filtra</span>
     {% else %}<span class="mut">período: {{ periodo_rotulo }}</span>{% endif %}
     <span style="flex:1"></span>
-    <a class="rel-pdf" href="/painel/relatorios/pdf?tipo={{ tipo }}&periodo={{ periodo }}" target="_blank" rel="noopener">🖨️ Exportar PDF</a>
+    <a class="rel-pdf" href="/painel/relatorios/pdf?tipo={{ tipo }}&periodo={{ periodo }}{% if dados.filtro_extra %}&status={{ dados.filtro_extra.status_sel }}&vendedor={{ dados.filtro_extra.vendedor_sel }}&q={{ dados.filtro_extra.busca_sel|urlencode }}{% endif %}" target="_blank" rel="noopener">🖨️ Exportar PDF</a>
   </form>
 
   <div class="rel-metricas">
@@ -6013,16 +6036,17 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   <p class="dica-toque rel-scroll-dica">👉 arraste a tabela pros lados pra ver todas as colunas</p>
   <div class="rel-tbl-wrap">
   <table>
-    <tr>{% for col in dados.colunas %}<th{% if col.num %} class="rel-num"{% endif %}>{{ col.rotulo }}</th>{% endfor %}</tr>
+    <tr>{% for col in dados.colunas %}<th{% if col.num %} class="rel-num"{% endif %}>{{ col.rotulo }}</th>{% endfor %}{% if dados.acao %}<th></th>{% endif %}</tr>
     {% for row in dados.linhas %}
     <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% endif %}>{% if col.tag %}<span
       class="rel-tag {{ row[col.chave ~ '_cor'] }}">{{ row[col.chave] }}</span>{% elif col.brl %}{{ row[col.chave]|brl
-      }}{% else %}{{ row[col.chave] }}{% endif %}</td>{% endfor %}</tr>
+      }}{% else %}{{ row[col.chave] }}{% endif %}</td>{% endfor %}{% if dados.acao %}<td class="rel-act">{% if row.acao_href
+      %}<a class="rel-print" href="{{ row.acao_href }}" target="_blank" rel="noopener" title="{{ dados.acao_rotulo }}">🖨️</a>{% endif %}</td>{% endif %}</tr>
     {% else %}
-    <tr><td colspan="{{ dados.colunas|length }}" class="mut" style="text-align:center;padding:1.4rem 0">Nenhum registro encontrado{% if not dados.sem_periodo %} em {{ periodo_rotulo|lower }}{% endif %}.</td></tr>
+    <tr><td colspan="{{ dados.colunas|length + (1 if dados.acao else 0) }}" class="mut" style="text-align:center;padding:1.4rem 0">Nenhum registro encontrado{% if not dados.sem_periodo %} em {{ periodo_rotulo|lower }}{% endif %}.</td></tr>
     {% endfor %}
     <tr class="rel-tot">{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% endif %}>{% if loop.first
-      %}Total{% elif col.chave == dados.col_total %}{{ dados.total_centavos|brl }}{% endif %}</td>{% endfor %}</tr>
+      %}Total{% elif col.chave == dados.col_total %}{{ dados.total_centavos|brl }}{% endif %}</td>{% endfor %}{% if dados.acao %}<td></td>{% endif %}</tr>
   </table>
   </div>
   <p class="mut" style="margin-top:.6rem">{{ dados.linhas|length }} registro(s){% if not dados.mock %} · {{ periodo_rotulo }}{% endif %}</p>

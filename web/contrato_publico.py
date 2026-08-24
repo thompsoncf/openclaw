@@ -95,7 +95,14 @@ def carregar(token: str, pool=None) -> dict | None:
                "endereco": c_end or "", "bairro": c_bairro or "", "cep": c_cep or "",
                "cidade": c_cid or "", "uf": c_uf or "", "telefone": c_tel or "",
                "email_empresa": c_email or "", "logo_url": c_logo or ""}
-    orcamento = {"cliente": cli or emp_nome or "", "empresa": emp_nome or "",
+    # nome: `empresa` primeiro — mesma regra de `_espelhar_cliente`
+    # (web/painel_servicos.py) e de `contrato.contexto()`. O formulário troca o
+    # RÓTULO de `empresa` pra "Nome completo" quando o cliente é pessoa física,
+    # mas grava na mesma coluna; `cliente` vira "Contato/responsável" (pensado
+    # pra PJ) e às vezes chega com um telefone que o agente de IA capturou
+    # antes do nome — relato em produção: o LOCATÁRIO saiu identificado como
+    # "86998192489" na folha do contrato.
+    orcamento = {"cliente": emp_nome or cli or "", "empresa": emp_nome or "",
                  "cnpj": cli_doc or "", "whatsapp": whats or "", "email": cli_email or "",
                  "telefone": cli_tel or "", "endereco": cli_end or "", "cep": cli_cep or "",
                  "cidade": cli_cid or "", "uf": cli_uf or "", "numero": numero,

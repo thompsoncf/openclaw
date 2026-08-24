@@ -301,6 +301,25 @@ def test_os_campos_do_cliente_saem_do_orcamento():
     assert c["telefone"] == "86988887777"
 
 
+def test_nome_do_cliente_prioriza_empresa_sobre_cliente():
+    """Relato em produção: um contrato saiu com "86998192489" (telefone) como
+    nome do LOCATÁRIO na cláusula 1.1. Causa: o formulário troca o rótulo de
+    `empresa` pra "Nome completo" quando o cliente é pessoa física, mas grava
+    na mesma coluna de sempre — e `cliente` (pensado como "Contato/
+    responsável", pra PJ) às vezes vem com um telefone que o agente de IA
+    capturou antes do nome. Mesma regra de `_espelhar_cliente`
+    (web/painel_servicos.py): `empresa` é o nome de verdade, `cliente` é
+    reserva."""
+    c = _ctx(orcamento={**ORCAMENTO, "cliente": "86998192489",
+                        "empresa": "Josiany Rayra Soares dos Santos"})["cliente"]
+    assert c["nome"] == "Josiany Rayra Soares dos Santos"
+
+
+def test_nome_do_cliente_cai_pro_cliente_quando_empresa_vazia():
+    c = _ctx(orcamento={**ORCAMENTO, "cliente": "Talila Arrais", "empresa": ""})["cliente"]
+    assert c["nome"] == "Talila Arrais"
+
+
 def test_campo_novo_da_empresa_esta_na_paleta_que_o_dono_ve():
     """Campo que existe no contexto e não na paleta é campo que ninguém usa."""
     campos = {c["campo"] for c in ct.campos_disponiveis(CATALOGO)}

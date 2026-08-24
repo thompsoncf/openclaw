@@ -154,8 +154,17 @@ def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None) -> dic
         # o CLIENTE inteiro, não só o nome. O orçamento já guarda endereço, cidade,
         # e-mail e telefone — um contrato que qualifica as partes precisa disso, e
         # deixar de fora obrigava a empresa a completar na mão depois de imprimir.
+        #
+        # NOME: `empresa` primeiro, `cliente` depois — mesma regra de
+        # `_espelhar_cliente` (web/painel_servicos.py). O formulário troca o
+        # RÓTULO do campo `empresa` pra "Nome completo" quando o cliente é
+        # pessoa física, mas grava na mesma coluna de sempre; `cliente` vira
+        # "Contato/responsável" (pra PJ) e passa a maior parte do tempo vazio —
+        # ou, pior, com um telefone que o agente de IA capturou antes do nome.
+        # Relato em produção: contrato saiu com "86998192489" como nome do
+        # LOCATÁRIO porque a ordem antiga preferia `cliente` (o telefone).
         "cliente": {
-            "nome": o.get("cliente") or o.get("empresa") or "",
+            "nome": o.get("empresa") or o.get("cliente") or "",
             "doc": o.get("cnpj") or "",
             "whatsapp": o.get("whatsapp") or "",
             "email": o.get("email") or "",

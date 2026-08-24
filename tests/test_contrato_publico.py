@@ -372,6 +372,36 @@ def test_assinado_do_orcamento_e_a_pergunta_que_trava_a_edicao(pool):
     assert st == "assinado"
 
 
+def test_nome_do_contratante_prioriza_empresa_sobre_cliente(pool):
+    """Relato em produção: um contrato saiu com "86998192489" (telefone) como
+    nome do LOCATÁRIO, tanto na folha de identificação quanto no
+    {cliente.nome} da cláusula 1. Causa: o formulário troca o RÓTULO do
+    campo `empresa` pra "Nome completo" quando o cliente é pessoa física, mas
+    grava na mesma coluna de sempre; `cliente` (pensado como "Contato/
+    responsável", pra PJ) às vezes chega com um telefone que o agente de IA
+    capturou antes do nome. Mesma regra de `_espelhar_cliente`
+    (web/painel_servicos.py): `empresa` é o nome de verdade."""
+    with pool.connection() as c:
+        c.execute("delete from contratos")
+        c.execute("delete from orcamentos")
+        oid = c.execute(
+            """insert into orcamentos (conta_id, cliente, empresa, token, status,
+                 setup_centavos, numero, evento, modo, parcelas)
+               values (%s,'86998192489','Josiany Rayra Soares dos Santos',%s,'aprovada',
+                 709000,8,'{"data":"2026-12-31","inicio":"21:00","convidados":50}'::jsonb,
+                 'evento','[]'::jsonb) returning id""",
+            (CONTA, TOKEN)).fetchone()[0]
+        c.execute(
+            """insert into contratos (conta_id, numero, orcamento_id, status, token)
+               values (%s,1,%s,'enviado','CTTOKEN')""",
+            (CONTA, oid))
+        c.commit()
+    d = _ct(pool)
+    assert d["contratante"]["nome"] == "Josiany Rayra Soares dos Santos"
+    assert "Josiany Rayra Soares dos Santos" in d["clausulas"][0]["corpo"]
+    assert "86998192489" not in d["clausulas"][0]["corpo"]
+
+
 def test_contrato_de_outra_conta_nao_aparece(pool):
     """Escopo multi-tenant: a busca é por (conta, orçamento)."""
     from finance import contrato as ctr

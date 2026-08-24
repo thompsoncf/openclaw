@@ -200,13 +200,14 @@ def test_vendedor_dono_mostra_o_nome_da_conta_nao_travessao(pool, cen):
     assert dados["linhas"][0]["vendedor"] == "Prime Eventos"
 
 
-def test_fechado_em_so_aparece_pra_orcamento_fechado(pool, cen):
+def test_nao_tem_coluna_fechado_em(pool, cen):
+    """Relato do dono: a coluna "Fechado em" não fazia sentido — o status
+    "Fechado" já aparece na etiqueta, e a data ficava vazia pra quase toda
+    linha num relatório onde a maioria ainda está em aberto."""
     _orc(pool, cen["conta"], status="fechado")
-    _orc(pool, cen["conta"], status="negociando")
     dados = rel._dados_orcamentos(pool, cen["conta"], "todos", "", "", "")
-    por_status = {l["status"]: l["fechado_em"] for l in dados["linhas"]}
-    assert por_status["Fechado"] != "—"
-    assert por_status["Negociando"] == "—"
+    assert not any(c["chave"] == "fechado_em" for c in dados["colunas"])
+    assert "fechado_em" not in dados["linhas"][0]
 
 
 def test_acao_href_usa_o_token_do_orcamento(pool, cen):

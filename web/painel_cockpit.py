@@ -508,6 +508,18 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   padding:.55rem .7rem;font-family:inherit;font-size:.88rem;resize:none}
 .fic-c input:focus,.fic-c textarea:focus{outline:none;border-color:var(--neon)}
 .fic .btn{margin-top:.25rem}
+/* retorno do CEP. `min-height` reservado: sem isso a linha nasce e some, e o
+   formulário inteiro pula pra cima e pra baixo a cada consulta. */
+.cepmsg{font-size:.7rem;line-height:1.3;min-height:1.1em;color:var(--text-dim)}
+.cepmsg.bom{color:var(--neon)}
+.cepmsg.ruim{color:var(--ambar)}
+/* o campo que o CEP trocou pisca em verde — é o que prova pro vendedor que a busca
+   funcionou, principalmente quando o valor antigo já estava lá e mudou pouco. */
+@keyframes fic-trocou{from{background:rgba(37,211,102,.30)}to{background:var(--bg-2)}}
+.fic-c input.trocou{animation:fic-trocou 2s ease-out}
+@media (prefers-reduced-motion:reduce){
+  .fic-c input.trocou{animation:none;border-color:var(--neon)}
+}
 
 /* ---------- abas de baixo ---------- */
 .tabs{display:flex;flex-shrink:0;border-top:1px solid var(--line);background:rgba(10,15,12,.92);
@@ -2303,16 +2315,40 @@ def _iso(d) -> str:
 #     {"ok": false}; aqui o que resta é não estourar no console e seguir na mão.
 _CEP_JS = """<script>(function(){
   var cep=document.getElementById('fic-cep'); if(!cep) return;
-  function po(id,v){var e=document.getElementById(id); if(e&&!e.value.trim()&&v) e.value=v;}
+  var msg=document.getElementById('cep-msg'), ultimo='';
+  function diz(t,cor){ if(msg){ msg.textContent=t||''; msg.className='cepmsg'+(cor?' '+cor:''); } }
+  // Preenche E MOSTRA que preencheu. A versão anterior só tocava campo vazio, e
+  // metade dos leads chega com `cidade` já preenchida da prospecção (321 de 644,
+  // medido) — então o sinal mais visível de que o CEP funcionou nunca aparecia.
+  // O CEP é a fonte mais confiável de cidade/UF; quem não concordar digita por cima.
+  function po(id,v){
+    var e=document.getElementById(id); if(!e||!v) return;
+    if(e.value.trim()===v) return;                       // já era isso: nada a piscar
+    e.value=v;
+    e.classList.remove('trocou'); void e.offsetWidth;    // reinicia a animação
+    e.classList.add('trocou');
+  }
   cep.addEventListener('input',function(){
     var d=(cep.value||'').replace(/[^0-9]/g,'');
-    if(d.length!==8) return;
+    if(d.length!==8){ ultimo=''; diz(''); return; }
+    if(d===ultimo) return;                               // não repete a consulta
+    ultimo=d;
+    diz('buscando…');
     fetch('/api/cep/'+d).then(function(r){return r.json();}).then(function(j){
-      if(!j||!j.ok) return;
+      if(!j||!j.ok){ ultimo=''; diz('CEP não encontrado — confira ou preencha à mão','ruim'); return; }
       po('fic-endereco',j.rua); po('fic-bairro',j.bairro);
       po('fic-cidade',j.cidade); po('fic-uf',j.uf);
+      // CEP amplo (cidade pequena, ou CEP único de bairro grande) vem SEM rua e sem
+      // bairro. Sem dizer isso, a tela parecia quebrada quando a cidade já estava lá.
+      diz((!j.rua && !j.bairro)
+          ? j.cidade+'/'+j.uf+' — CEP amplo, complete a rua'
+          : j.cidade+'/'+j.uf+' ✓', 'bom');
       var n=document.getElementById('fic-numero'); if(n&&!n.value.trim()) n.focus();
-    }).catch(function(){});
+    }).catch(function(){
+      // `ultimo` volta pro vazio pra dar pra tentar de novo: engolir o erro em
+      // silêncio, como era antes, é o que fazia falha e sucesso serem idênticos.
+      ultimo=''; diz('não deu pra buscar agora — toque no CEP pra tentar de novo','ruim');
+    });
   });
 })();</script>"""
 
@@ -2334,13 +2370,14 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
     if not d:
         return RedirectResponse(_BASE, status_code=303)
 
-    def campo(nome, rot, valor, *, tipo="text", modo="", meia=False):
+    def campo(nome, rot, valor, *, tipo="text", modo="", meia=False, dica=""):
         # id=fic-<nome> porque o autopreenchimento do CEP precisa achar rua, bairro,
         # cidade e UF pra completar; sem id o JS teria que caçar por name= no form.
+        # `dica` é HTML pronto (não passa por esc): hoje só o retorno do CEP usa.
         extra = f" inputmode={modo}" if modo else ""
         return (f"<label class='fic-c{' meia' if meia else ''}'><span>{esc(rot)}</span>"
                 f"<input id=fic-{nome} name={nome} type={tipo}{extra} value='{esc(valor or '')}'"
-                f" autocomplete=off></label>")
+                f" autocomplete=off>{dica}</label>")
 
     # Rótulo único: quem digita não escolhe a coluna — o tamanho do documento decide
     # (11 = CPF, 14 = CNPJ) lá no _doc_lead. Pedir "CNPJ" pra uma cliente pessoa
@@ -2362,7 +2399,10 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
         + campo("email", "E-mail", d.get("email"), tipo="email", modo="email")
         # O CEP vem ANTES do endereço de propósito: digitou os 8 dígitos, rua/bairro/
         # cidade/UF se preenchem sozinhos (ver _CEP_JS) e sobra o número pra digitar.
-        + campo("cep", "CEP", d.get("cep"), modo="numeric", meia=True)
+        # a linha de retorno do CEP mora DENTRO do campo dele: em cima do teclado
+        # aberto, um aviso no rodapé da tela não seria visto por ninguém.
+        + campo("cep", "CEP", d.get("cep"), modo="numeric", meia=True,
+                dica="<span class=cepmsg id=cep-msg></span>")
         + campo("numero", "Número", d.get("numero"), meia=True)
         + campo("endereco", "Endereço", d.get("endereco"))
         + campo("bairro", "Bairro", d.get("bairro"), meia=True)

@@ -150,6 +150,51 @@ async function testeNivelEFila () {
     perda.length ? JSON.stringify(perda[0].dados) : 'nenhuma linha de aviso')
 }
 
+async function testeSuprimidasDoBaileys () {
+  console.log('\no filtro do Baileys engole a linha, mas NÃO engole o número')
+  //
+  // O `soErro` existe pra o Baileys não encher a tabela, e continua valendo. Só que
+  // as decifragens falhas que o retry conserta saem em `warn` — e warn, vindo dele,
+  // não era espelhado. Resultado medido em 24/08/2026: o log cru do Render mostrava
+  // 592 `Bad MAC` por hora e o wa_qr_log respondia ZERO decifragem falha. Um
+  // diagnóstico feito pela tabela concluiu "acabou" olhando um zero que era do
+  // filtro, não da realidade — e deu o serviço por curado 15 minutos depois de ele
+  // ter morrido de novo.
+  //
+  // Não dá pra espelhar tudo (volta o problema que o soErro resolve). Então conta.
+  await limpar()
+  s._logSuprimidas.clear()
+  for (let i = 0; i < 118; i++) s.contarSuprimida('warn', { contaId: CONTA }, 'failed to decrypt message')
+  for (let i = 0; i < 10; i++) s.contarSuprimida('info', { contaId: CONTA }, 'sent retry receipt')
+  conferir(s._logFila.length === 0, 'as 128 linhas NÃO viram 128 linhas no banco')
+
+  await s.gravarLogsPendentes()
+  const ag = await linhas("where msg like 'log: linhas do Baileys suprimidas%'")
+  conferir(ag.length === 1, 'sai UMA linha de agregado', 'linhas=' + ag.length)
+  conferir(ag.length === 1 && ag[0].dados.total === 128,
+    'com o total certo (128)', ag.length ? JSON.stringify(ag[0].dados.total) : '-')
+  conferir(ag.length === 1 && ag[0].dados.por['warn|failed to decrypt message'] === 118,
+    'e discriminado por nível+mensagem — 118 decifragens falhas em warn',
+    ag.length ? JSON.stringify(ag[0].dados.por) : '-')
+
+  console.log('\no contador não pode virar parte da enxurrada')
+  await limpar()
+  s._logSuprimidas.clear()
+  for (let i = 0; i < 400; i++) s.contarSuprimida('warn', { contaId: CONTA }, 'msg unica ' + i)
+  conferir(s._logSuprimidas.size <= 26,
+    'chave distinta tem teto — mensagem com id embutido não estoura a memória',
+    'chaves=' + s._logSuprimidas.size)
+  const balde = s._logSuprimidas.get('warn|(outras)') || 0
+  conferir(balde > 0, 'e o excedente cai num balde em vez de sumir', 'balde=' + balde)
+
+  console.log('\nsem nada suprimido, nenhuma linha de agregado aparece')
+  await limpar()
+  s._logSuprimidas.clear()
+  await s.gravarLogsPendentes()
+  const vazio = await linhas("where msg like 'log: linhas do Baileys suprimidas%'")
+  conferir(vazio.length === 0, 'silêncio quando não há o que contar')
+}
+
 async function testeDadosEstranhos () {
   console.log('\nobjeto estranho não pode derrubar nem virar linha gigante')
   await limpar()
@@ -266,6 +311,7 @@ async function testeFalhaNaoSobe () {
     await testeContaComoTexto()
     await testeHoraDoEvento()
     await testeNivelEFila()
+    await testeSuprimidasDoBaileys()
     await testeDadosEstranhos()
     await testeSessoes()
     await testeFalhaNaoSobe()

@@ -29,9 +29,9 @@
 // (renovação) ou se o prazo do outro tiver vencido. É atômico: duas instâncias
 // tentando ao mesmo tempo, uma ganha e a outra recebe zero linha.
 //
-// O prazo é curto (60s) e renovado por um batimento (20s). Se o processo morre —
-// SIGKILL, OOM, queda da máquina — ninguém renova, o prazo vence e a próxima
-// instância assume em no máximo um TTL. Não existe trava presa pra sempre.
+// O prazo é renovado por um batimento. Se o processo morre — SIGKILL, OOM, queda
+// da máquina — ninguém renova, o prazo vence e a próxima instância assume em no
+// máximo um TTL. Não existe trava presa pra sempre.
 //
 // E o inverso importa igual: se o batimento NÃO conseguir renovar, perdemos a
 // exclusividade e temos que largar o socket na hora, senão viram dois de novo —
@@ -39,11 +39,34 @@
 
 const os = require('os')
 
-// 60s de prazo com batimento a cada 20s dá três tentativas antes de vencer: uma
-// lentidão do banco não derruba a sessão, mas uma instância morta libera a conta
-// em no máximo um minuto.
-const TTL_MS = 60000
-const RENOVA_MS = 20000
+// O PRAZO TEM QUE SER MAIOR QUE A PIOR TRAVADA DO EVENT LOOP, não menor.
+//
+// Era 60s com batimento de 20s. O raciocínio ("três tentativas antes de vencer")
+// só vale se o batimento CHEGAR a rodar — e ele roda no mesmo event loop de tudo o
+// mais. Quando a CPU satura (enxurrada de `Bad MAC` do libsignal), o loop congela e
+// o batimento não roda: o prazo corre no relógio do Postgres, que não sabe que a
+// gente parou.
+//
+// Medido no wa_qr_log em 24/08/2026, doze horas: 128 travadas do event loop, 11
+// instâncias mortas pelo health check, 2 batimentos falhos — e a PIOR TRAVADA FOI
+// DE 59.915ms, contra um TTL de 60.000ms. Oitenta e cinco milésimos de segundo. Se
+// tivesse passado, o aluguel venceria com o socket ainda vivo, outra instância
+// pegaria a mesma credencial, e o aparelho sairia da lista de dispositivos do
+// WhatsApp — que é o que matou a conta 35 e obrigou o cliente a parear na mão pela
+// terceira vez.
+//
+// 180s com batimento de 30s dá seis tentativas e, mais importante, deixa o prazo
+// TRÊS VEZES maior que a pior travada já observada.
+//
+// O custo é só na queda DURA: uma conta pode ficar até 180s esperando outra
+// instância assumir. Na prática isso quase não acontece — o SIGTERM solta as travas
+// explicitamente (`soltarTudo`), e é por SIGTERM que passam o deploy e até as
+// mortes por health check (conferido nos logs de 00:43:13 e 00:45:43). O TTL só é
+// consultado quando o processo some sem avisar: SIGKILL, OOM, máquina caindo.
+//
+// Trocar 180s de espera numa queda rara por um pareamento na mão é troca fácil.
+const TTL_MS = parseInt(process.env.WA_QR_TRAVA_TTL_MS || '180000', 10)
+const RENOVA_MS = parseInt(process.env.WA_QR_TRAVA_RENOVA_MS || '30000', 10)
 
 // host:pid:boot. O boot entra porque o Render reusa nome de host entre deploys, e
 // sem ele uma instância nova poderia se confundir com a antiga e renovar a trava

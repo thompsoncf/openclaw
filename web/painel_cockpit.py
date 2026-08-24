@@ -130,6 +130,18 @@ def _gerencia(request: Request):
 # layout deste app (app shell, abas, folha de ações), que não existe em outro lugar.
 _CSS = _tema.FONTES + """<style>""" + _tema.variaveis(com_base=False) + """
 *{box-sizing:border-box}html,body{margin:0}
+/* A FAIXA DE BAIXO QUE NÃO DÁ PRA USAR.
+   `viewport-fit=cover` (ver _page) manda desenhar por baixo das barras do sistema —
+   é o que tira a tarja preta do topo no app instalado. Quem faz isso tem que devolver
+   o espaço embaixo também, e até aqui a conta era só `env(safe-area-inset-bottom)`.
+   Medido num Chromium com o CSS real: quando o `env()` não reporta nada, o rodapé
+   reservava 12,8px e o botão ficava a 13px do fim da tela. A barra de navegação do
+   Android (os três botões) come ~48px — o "Marcar" nascia atrás dela, e o vendedor
+   via só a borda verde de cima. É o print que o dono mandou em 23/08.
+   O piso resolve porque `max()` deixa o `env()` vencer onde ele funciona (iPhone
+   reporta ~34px) e só entra quando ele volta zero. Generoso de propósito: sobra vira
+   espaço em branco, falta vira botão que ninguém alcança. */
+:root{--fundo-seguro:max(env(safe-area-inset-bottom,0px),3rem)}
 body{background:var(--bg);color:var(--text);font-family:var(--body);line-height:1.5;
   -webkit-font-smoothing:antialiased;overflow:hidden}
 a{color:inherit;text-decoration:none}
@@ -452,7 +464,7 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .aviso{margin:.2rem 0;padding:.55rem .7rem;border-radius:11px;font-size:.78rem;text-align:center;
   background:var(--surface);border:1px solid var(--line);color:var(--text-dim)}
 .rodape{flex-shrink:0;border-top:1px solid var(--line);background:var(--bg);padding:.7rem 1.1rem;
-  padding-bottom:calc(.7rem + env(safe-area-inset-bottom,0px));position:relative;z-index:2}
+  padding-bottom:calc(.7rem + var(--fundo-seguro));position:relative;z-index:2}
 .composer{display:flex;gap:.5rem;align-items:center}
 .composer input{flex:1;min-width:0;background:var(--surface);border:1px solid var(--line);
   border-radius:999px;color:var(--text);padding:.65rem .95rem;font-family:inherit;font-size:.9rem}
@@ -463,7 +475,7 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
    e empurrava a conversa (a superfície de trabalho real) pra fora da tela */
 .folha{position:absolute;left:0;right:0;bottom:0;z-index:20;background:var(--bg-2);
   border-top:1px solid var(--line);border-radius:18px 18px 0 0;padding:.5rem 1.1rem 1.2rem;
-  padding-bottom:calc(1.2rem + env(safe-area-inset-bottom,0px));
+  padding-bottom:calc(1.2rem + var(--fundo-seguro));
   max-height:84%;overflow-y:auto;overscroll-behavior:contain;
   transform:translateY(101%);transition:transform .22s ease}
 .folha:target{transform:translateY(0)}
@@ -523,7 +535,7 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 
 /* ---------- abas de baixo ---------- */
 .tabs{display:flex;flex-shrink:0;border-top:1px solid var(--line);background:rgba(10,15,12,.92);
-  backdrop-filter:blur(12px);padding-bottom:env(safe-area-inset-bottom,0px);position:relative;z-index:2}
+  backdrop-filter:blur(12px);padding-bottom:var(--fundo-seguro);position:relative;z-index:2}
 .tabs a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:.5rem 0 .45rem;
   color:var(--text-faint);font-size:.62rem;position:relative}
 .tabs a.on{color:var(--neon)}
@@ -626,7 +638,7 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   background:var(--surface);color:var(--text-dim);font:inherit;font-size:1rem;line-height:1;cursor:pointer}
 /* rodapé fixo do construtor: total à esquerda, ação à direita */
 .rodape-b{flex-shrink:0;border-top:1px solid var(--line);background:var(--bg);padding:.8rem 1.1rem;
-  padding-bottom:calc(.8rem + env(safe-area-inset-bottom,0px));position:relative;z-index:2}
+  padding-bottom:calc(.8rem + var(--fundo-seguro));position:relative;z-index:2}
 .rodape-b .tot{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;margin-bottom:.6rem;
   font-size:.85rem;color:var(--text-dim)}
 .rodape-b .tot b{font-family:var(--mono);font-size:1rem;color:var(--neon)}

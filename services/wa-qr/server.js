@@ -199,6 +199,19 @@ const LOG_DB_RETENCAO_H = parseInt(process.env.WA_QR_LOG_RETENCAO_H || '48', 10)
 const _logFila = []
 let _logDescartadas = 0
 let _logAvisouFalha = false
+// Quantas linhas o filtro `soErro` engoliu, por nível+mensagem. O `soErro` existe
+// pra o Baileys não encher a tabela (ver comEspelhoNoBanco) e continua valendo — o
+// que faltava era o VOLUME aparecer em algum lugar.
+//
+// Em 24/08 isso me custou um diagnóstico errado: o log cru do Render mostrava 592
+// `Bad MAC` por hora e o wa_qr_log mostrava ZERO decifragem falha, porque as
+// tentativas que o retry conserta saem em `warn` — e warn, vindo do Baileys, não
+// era espelhado. Reportei "acabou o Bad MAC" olhando um zero que era do filtro, não
+// da realidade. Um agregado de 2 em 2s custa uma linha e desfaz o engano.
+const _logSuprimidas = new Map()
+// teto de chaves distintas: mensagem do Baileys com id embutido poderia crescer sem
+// fim. Estourando, o excedente entra num balde só, que ainda é melhor que sumir.
+const LOG_SUPRIMIDAS_CHAVES_MAX = 25
 
 // O objeto logado vira `dados` jsonb, menos o contaId, que vira coluna (é por ele
 // que todo diagnóstico filtra). Cap de tamanho: um payload gigante logado por
@@ -250,11 +263,27 @@ function _contaDoLog (obj) {
   return Number.isFinite(n) ? n : null
 }
 
+// Soma uma linha engolida pelo `soErro`. Só conta — não guarda payload, não aloca
+// por linha: é isto que permite contar uma enxurrada sem virar parte dela.
+function contarSuprimida (nivel, a, b) {
+  if (!LOG_DB) return
+  const msg = typeof a === 'string' ? a : (typeof b === 'string' ? b : '')
+  const chave = nivel + '|' + String(msg).slice(0, 80)
+  if (!_logSuprimidas.has(chave) && _logSuprimidas.size >= LOG_SUPRIMIDAS_CHAVES_MAX) {
+    const balde = nivel + '|(outras)'
+    _logSuprimidas.set(balde, (_logSuprimidas.get(balde) || 0) + 1)
+    return
+  }
+  _logSuprimidas.set(chave, (_logSuprimidas.get(chave) || 0) + 1)
+}
+
 async function gravarLogsPendentes () {
-  if (!_logFila.length && !_logDescartadas) return
+  if (!_logFila.length && !_logDescartadas && !_logSuprimidas.size) return
   const lote = _logFila.splice(0, LOG_DB_LOTE)
   const perdidas = _logDescartadas
   _logDescartadas = 0
+  const suprimidas = new Map(_logSuprimidas)
+  _logSuprimidas.clear()
   const partes = []
   const params = []
   lote.forEach((l, i) => {
@@ -275,6 +304,18 @@ async function gravarLogsPendentes () {
         `insert into wa_qr_log (nivel, msg, dados) values
          ('warn','log: fila cheia, linhas descartadas',$1::jsonb)`,
         [JSON.stringify({ perdidas })])
+    }
+    // ...e o volume que o filtro do Baileys engoliu, numa linha só. Sem isto o
+    // wa_qr_log responde ZERO a "quantas decifragens falharam agora", que é
+    // justamente a pergunta de quem está investigando saturação de CPU.
+    if (suprimidas.size) {
+      const por = {}
+      let total = 0
+      for (const [k, v] of suprimidas) { por[k] = v; total += v }
+      await pool.query(
+        `insert into wa_qr_log (nivel, msg, dados) values
+         ('info','log: linhas do Baileys suprimidas (só o agregado vem pro banco)',$1::jsonb)`,
+        [JSON.stringify({ total, janelaMs: LOG_DB_FLUSH_MS, por })])
     }
     _logAvisouFalha = false
   } catch (e) {
@@ -298,6 +339,7 @@ function comEspelhoNoBanco (base, opcoes) {
   const soErro = !!(opcoes && opcoes.soErro)
   const nivel = (n) => (a, b) => {
     if (!soErro || n === 'error' || n === 'fatal') enfileirarLog(n, a, b)
+    else contarSuprimida(n, a, b)
     return base[n](a, b)
   }
   const espelhado = {
@@ -3282,4 +3324,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

@@ -31,6 +31,7 @@ PERIODOS = [
     ("mes_passado", "Mês passado"),
     ("90d", "Últimos 90 dias"),
     ("ano", "Este ano"),
+    ("todos", "Todo o período"),
 ]
 _PERIODO_ROTULO = dict(PERIODOS)
 
@@ -51,6 +52,8 @@ def _pode_ver(request: Request):
 
 def _intervalo(periodo: str) -> tuple[date, date]:
     hoje = date.today()
+    if periodo == "todos":
+        return date(2000, 1, 1), hoje
     if periodo == "mes_passado":
         fim = hoje.replace(day=1) - timedelta(days=1)
         return fim.replace(day=1), fim
@@ -233,40 +236,263 @@ def _dados_comissao(pool, conta_id, periodo):
     return dados
 
 
+# ---- Orçamentos e Contratos: uma aba por tabela, tudo visível, filtro corta ----
+#
+# Status em grupo ("fechados"/"abertos"/"assinados") ou específico — a mesma
+# lista dá as opções do <select> e a tradução pra `status = any(%s)` na query.
+# "" (todos) não entra no dict de propósito: ausência = sem filtro de status.
+ORC_STATUS_TAG = {
+    "rascunho": ("Rascunho", "aviso"), "enviado": ("Enviado", "aviso"),
+    "negociando": ("Negociando", "aviso"), "aprovada": ("Aprovada", "ok"),
+    "fechado": ("Fechado", "neutro"), "perdido": ("Perdido", "erro"),
+}
+ORC_STATUS_OPCOES = [
+    ("", "Status: todos"), ("fechados", "— Fechados —"), ("abertos", "— Em aberto —"),
+    ("rascunho", "Rascunho"), ("enviado", "Enviado"), ("negociando", "Negociando"),
+    ("aprovada", "Aprovada"), ("perdido", "Perdido"),
+]
+ORC_STATUS_FILTROS = {
+    "fechados": ["fechado"],
+    # "perdido" fica de fora de propósito: é o próprio bucket "Perdidos" das
+    # métricas, separado de "Em aberto" — juntar os dois faria o filtro mentir
+    # sobre o que a métrica já mostra ao lado.
+    "abertos": ["rascunho", "enviado", "negociando", "aprovada"],
+    "rascunho": ["rascunho"], "enviado": ["enviado"], "negociando": ["negociando"],
+    "aprovada": ["aprovada"], "perdido": ["perdido"],
+}
+
+CT_STATUS_TAG = {
+    "rascunho": ("Rascunho", "aviso"), "enviado": ("Enviado", "aviso"),
+    "assinado": ("Assinado", "ok"), "cumprido": ("Cumprido", "info"),
+    "rescindido": ("Rescindido", "erro"),
+}
+CT_STATUS_OPCOES = [
+    ("", "Status: todos"), ("assinados", "— Assinados —"),
+    ("rascunho", "Rascunho"), ("enviado", "Enviado"), ("assinado", "Assinado"),
+    ("cumprido", "Cumprido"), ("rescindido", "Rescindido"),
+]
+CT_STATUS_FILTROS = {
+    "assinados": ["assinado", "cumprido"],
+    "rascunho": ["rascunho"], "enviado": ["enviado"], "assinado": ["assinado"],
+    "cumprido": ["cumprido"], "rescindido": ["rescindido"],
+}
+
+_VALOR_ORC = "coalesce(o.primeiro_ano_centavos, o.setup_centavos, 0)"
+
+
+def _vendedores_da_conta(pool, conta_id: int) -> list[tuple[int, str]]:
+    with pool.connection() as c:
+        rows = c.execute("select id, nome from membros where conta_id=%s order by nome",
+                          (conta_id,)).fetchall()
+    return [(r[0], r[1]) for r in rows]
+
+
+def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> dict:
+    """TODOS os orçamentos, sem fatiar por aba — Status corta em grupo (fechados/
+    em aberto) ou específico, Vendedor e busca por cliente cortam junto. As
+    métricas do topo ignoram o filtro de Status de propósito (mostram a
+    distribuição inteira do período); o total da tabela é só do que está na tela.
+
+    "Fechado em" é `atualizado_em`: a mesma coluna que `fechar_orcamento`
+    (finance/vendas.py) grava junto com o status, e que trava a edição do
+    orçamento a partir daí — não muda depois."""
+    ini, fim = _intervalo(periodo)
+    where = ["o.conta_id=%s"]
+    params: list = [conta_id]
+    if periodo != "todos":
+        where.append("o.criado_em::date >= %s and o.criado_em::date <= %s")
+        params += [ini, fim]
+    if vendedor_sel:
+        where.append("o.criado_por = %s")
+        params.append(str(vendedor_sel))
+    if busca:
+        where.append("o.cliente ilike %s")
+        params.append(f"%{busca}%")
+    base_sql = " and ".join(where)
+
+    with pool.connection() as c:
+        por_status = c.execute(
+            f"select o.status, count(*), sum({_VALOR_ORC}) from orcamentos o "
+            f"where {base_sql} group by o.status", params).fetchall()
+
+    def _grupo(quais):
+        n = sum(int(r[1]) for r in por_status if r[0] in quais)
+        v = sum(int(r[2] or 0) for r in por_status if r[0] in quais)
+        return n, v
+
+    n_fechado, v_fechado = _grupo({"fechado"})
+    n_perdido, v_perdido = _grupo({"perdido"})
+    n_aberto, v_aberto = _grupo({"rascunho", "enviado", "negociando", "aprovada"})
+
+    where2, params2 = list(where), list(params)
+    quais = ORC_STATUS_FILTROS.get(status_sel)
+    if quais:
+        where2.append("o.status = any(%s)")
+        params2.append(quais)
+    where2_sql = " and ".join(where2)
+
+    with pool.connection() as c:
+        rows = c.execute(
+            f"""select o.numero, o.cliente, o.empresa, o.status, o.criado_em,
+                       case when o.status='fechado' then o.atualizado_em end,
+                       coalesce(m.nome, '—'), {_VALOR_ORC}, o.token
+                  from orcamentos o
+                  left join membros m on m.id::text = o.criado_por and m.conta_id = o.conta_id
+                 where {where2_sql}
+                 order by o.criado_em desc limit 300""",
+            params2).fetchall()
+
+    linhas = []
+    for r in rows:
+        rotulo, cor = ORC_STATUS_TAG.get(r[3], (r[3] or "—", "neutro"))
+        linhas.append({
+            "numero": r[0], "cliente": r[1] or "—", "empresa": r[2] or "—",
+            "status": rotulo, "status_cor": cor,
+            "criado_em": _fmt(r[4]), "fechado_em": _fmt(r[5]),
+            "vendedor": r[6], "valor_centavos": int(r[7] or 0),
+            "acao_href": f"/proposta/{r[8]}" if r[8] else None,
+        })
+    return {
+        "label": "Orçamentos", "mock": False, "acao": True,
+        "acao_rotulo": "Ver / imprimir proposta",
+        "colunas": [_col("numero", "Nº"), _col("cliente", "Cliente"), _col("empresa", "Empresa"),
+                    _col("status", "Status", tag=True), _col("criado_em", "Criado em"),
+                    _col("fechado_em", "Fechado em"), _col("vendedor", "Vendedor"),
+                    _col("valor_centavos", "Valor", num=True, brl=True)],
+        "linhas": linhas, "col_total": "valor_centavos", "total_centavos": _soma(linhas, "valor_centavos"),
+        "metricas": [("Total geral", _brl(v_fechado + v_aberto + v_perdido)),
+                     ("Fechados", f"{n_fechado} · {_brl(v_fechado)}"),
+                     ("Em aberto", f"{n_aberto} · {_brl(v_aberto)}"),
+                     ("Perdidos", f"{n_perdido} · {_brl(v_perdido)}")],
+        "filtro_extra": {
+            "status_opcoes": ORC_STATUS_OPCOES, "status_sel": status_sel,
+            "vendedores": _vendedores_da_conta(pool, conta_id),
+            "vendedor_sel": str(vendedor_sel or ""), "busca_sel": busca or "",
+        },
+    }
+
+
+def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> dict:
+    """TODOS os contratos vivos (sem os substituídos por aditivo — mesma trava de
+    `finance/contrato.por_orcamento`). Vendedor vem do orçamento de origem: o
+    contrato quase nunca grava `criado_por` (ver finance/contrato.py)."""
+    ini, fim = _intervalo(periodo)
+    where = ["c.conta_id=%s", "c.substitui_id is null"]
+    params: list = [conta_id]
+    if periodo != "todos":
+        where.append("c.criado_em::date >= %s and c.criado_em::date <= %s")
+        params += [ini, fim]
+    if vendedor_sel:
+        where.append("o.criado_por = %s")
+        params.append(str(vendedor_sel))
+    if busca:
+        where.append("o.cliente ilike %s")
+        params.append(f"%{busca}%")
+    base_sql = " and ".join(where)
+    join_sql = "left join orcamentos o on o.id = c.orcamento_id"
+
+    with pool.connection() as c:
+        por_status = c.execute(
+            f"select c.status, count(*), sum(coalesce(c.valor_centavos,0)) "
+            f"from contratos c {join_sql} where {base_sql} group by c.status",
+            params).fetchall()
+
+    def _grupo(quais):
+        n = sum(int(r[1]) for r in por_status if r[0] in quais)
+        v = sum(int(r[2] or 0) for r in por_status if r[0] in quais)
+        return n, v
+
+    n_assinado, v_assinado = _grupo({"assinado", "cumprido"})
+    n_aguardando, v_aguardando = _grupo({"rascunho", "enviado"})
+    n_rescindido, v_rescindido = _grupo({"rescindido"})
+
+    where2, params2 = list(where), list(params)
+    quais = CT_STATUS_FILTROS.get(status_sel)
+    if quais:
+        where2.append("c.status = any(%s)")
+        params2.append(quais)
+    where2_sql = " and ".join(where2)
+
+    with pool.connection() as c:
+        rows = c.execute(
+            f"""select c.numero, coalesce(o.cliente, '—'), c.status, c.criado_em,
+                       c.assinado_em, coalesce(m.nome, '—'),
+                       coalesce(c.valor_centavos, 0), c.token
+                  from contratos c {join_sql}
+                  left join membros m on m.id::text = o.criado_por and m.conta_id = c.conta_id
+                 where {where2_sql}
+                 order by c.criado_em desc limit 300""",
+            params2).fetchall()
+
+    linhas = []
+    for r in rows:
+        rotulo, cor = CT_STATUS_TAG.get(r[2], (r[2] or "—", "neutro"))
+        linhas.append({
+            "numero": r[0], "cliente": r[1], "status": rotulo, "status_cor": cor,
+            "criado_em": _fmt(r[3]), "assinado_em": _fmt(r[4]),
+            "vendedor": r[5], "valor_centavos": int(r[6] or 0),
+            "acao_href": f"/contrato/{r[7]}" if r[7] else None,
+        })
+    return {
+        "label": "Contratos", "mock": False, "acao": True,
+        "acao_rotulo": "Ver / imprimir contrato",
+        "colunas": [_col("numero", "Nº"), _col("cliente", "Cliente"),
+                    _col("status", "Status", tag=True), _col("criado_em", "Criado em"),
+                    _col("assinado_em", "Assinado em"), _col("vendedor", "Vendedor"),
+                    _col("valor_centavos", "Valor", num=True, brl=True)],
+        "linhas": linhas, "col_total": "valor_centavos", "total_centavos": _soma(linhas, "valor_centavos"),
+        "metricas": [("Total geral", _brl(v_assinado + v_aguardando + v_rescindido)),
+                     ("Assinados", f"{n_assinado} · {_brl(v_assinado)}"),
+                     ("Aguardando assinatura", f"{n_aguardando} · {_brl(v_aguardando)}"),
+                     ("Rescindidos", f"{n_rescindido} · {_brl(v_rescindido)}")],
+        "filtro_extra": {
+            "status_opcoes": CT_STATUS_OPCOES, "status_sel": status_sel,
+            "vendedores": _vendedores_da_conta(pool, conta_id),
+            "vendedor_sel": str(vendedor_sel or ""), "busca_sel": busca or "",
+        },
+    }
+
+
 TIPOS = {
-    "vendas": {"label": "Vendas", "montar": lambda pool, cid, per: _dados_vendas(pool, cid, per)},
-    "contas_pagar": {"label": "Contas a pagar", "montar": lambda pool, cid, per: _dados_titulos_abertos(pool, cid, "pagar")},
-    "contas_receber": {"label": "Contas a receber", "montar": lambda pool, cid, per: _dados_titulos_abertos(pool, cid, "receber")},
-    "pagas": {"label": "Contas pagas", "montar": lambda pool, cid, per: _dados_titulos_pagos(pool, cid, "pagar", per)},
-    "comissao": {"label": "Comissão", "montar": lambda pool, cid, per: _dados_comissao(pool, cid, per)},
-    "recebidas": {"label": "Contas recebidas", "montar": lambda pool, cid, per: _dados_titulos_pagos(pool, cid, "receber", per)},
+    "vendas": {"label": "Vendas", "montar": lambda pool, cid, per, **f: _dados_vendas(pool, cid, per)},
+    "contas_pagar": {"label": "Contas a pagar", "montar": lambda pool, cid, per, **f: _dados_titulos_abertos(pool, cid, "pagar")},
+    "contas_receber": {"label": "Contas a receber", "montar": lambda pool, cid, per, **f: _dados_titulos_abertos(pool, cid, "receber")},
+    "pagas": {"label": "Contas pagas", "montar": lambda pool, cid, per, **f: _dados_titulos_pagos(pool, cid, "pagar", per)},
+    "comissao": {"label": "Comissão", "montar": lambda pool, cid, per, **f: _dados_comissao(pool, cid, per)},
+    "recebidas": {"label": "Contas recebidas", "montar": lambda pool, cid, per, **f: _dados_titulos_pagos(pool, cid, "receber", per)},
+    "orcamentos": {"label": "Orçamentos", "montar": lambda pool, cid, per, **f: _dados_orcamentos(
+        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
+    "contratos": {"label": "Contratos", "montar": lambda pool, cid, per, **f: _dados_contratos(
+        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
 }
 
 
-def _contexto(conta_id: int, tipo: str, periodo: str):
+def _contexto(conta_id: int, tipo: str, periodo: str, status: str = "", vendedor: str = "", q: str = ""):
     tipo = tipo if tipo in TIPOS else "vendas"
     periodo = periodo if periodo in _PERIODO_ROTULO else "mes"
-    dados = TIPOS[tipo]["montar"](get_pool(), conta_id, periodo)
+    dados = TIPOS[tipo]["montar"](get_pool(), conta_id, periodo, status=status, vendedor=vendedor, q=q)
     return tipo, periodo, dados
 
 
 @router.get("/painel/relatorios", response_class=HTMLResponse)
-def painel_relatorios(request: Request, tipo: str = "vendas", periodo: str = "mes"):
+def painel_relatorios(request: Request, tipo: str = "vendas", periodo: str = "mes",
+                      status: str = "", vendedor: str = "", q: str = ""):
     conta, redir = _pode_ver(request)
     if redir is not None:
         return redir
-    tipo, periodo, dados = _contexto(conta[0], tipo, periodo)
+    tipo, periodo, dados = _contexto(conta[0], tipo, periodo, status, vendedor, q)
     return _render("relatorios", request, tipos=TIPOS, tipo=tipo, periodo=periodo, periodos=PERIODOS,
                    periodo_rotulo=_PERIODO_ROTULO[periodo], dados=dados)
 
 
 @router.get("/painel/relatorios/pdf", response_class=HTMLResponse)
-def painel_relatorios_pdf(request: Request, tipo: str = "vendas", periodo: str = "mes"):
+def painel_relatorios_pdf(request: Request, tipo: str = "vendas", periodo: str = "mes",
+                          status: str = "", vendedor: str = "", q: str = ""):
     conta, redir = _pode_ver(request)
     if redir is not None:
         return redir
     pool = get_pool()
-    tipo, periodo, dados = _contexto(conta[0], tipo, periodo)
+    tipo, periodo, dados = _contexto(conta[0], tipo, periodo, status, vendedor, q)
     from datetime import datetime
     return HTMLResponse(_env.get_template("relatorio_pdf").render(
         dados=dados, tipo=tipo, periodo=periodo, periodo_rotulo=_PERIODO_ROTULO[periodo],

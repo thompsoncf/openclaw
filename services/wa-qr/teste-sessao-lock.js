@@ -17,7 +17,7 @@
 const fs = require('fs')
 const path = require('path')
 const { Pool } = require('pg')
-const { criarTrava } = require('./sessao-lock')
+const { criarTrava, TTL_MS, RENOVA_MS } = require('./sessao-lock')
 
 const URL = process.env.WA_LOCK_TEST_URL
 if (!URL) {
@@ -178,6 +178,23 @@ const dormir = (ms) => new Promise((r) => setTimeout(r, ms))
   const poolMorto = { query: async () => { throw new Error('connection refused') } }
   const semBanco = criarTrava(poolMorto, mudo, { dono: 'instancia-sem-banco' })
   t('sem banco, recusa abrir socket', (await semBanco.pegar(CONTA)) === false)
+
+  // ---- 13. o prazo tem que sobreviver à pior travada do event loop
+  //
+  // O batimento roda no MESMO event loop de tudo o mais. Quando a CPU satura, ele
+  // não roda — e o prazo corre no relógio do Postgres, que não sabe que a gente
+  // parou. Medido no wa_qr_log em 24/08/2026, doze horas: 128 travadas, 11
+  // instâncias mortas pelo health check, e a pior travada de 59.915ms contra um
+  // TTL de 60.000ms. Faltaram 85 milésimos pro aluguel vencer com o socket vivo —
+  // e dois sockets na mesma credencial é o que tira o aparelho da lista de
+  // dispositivos do WhatsApp (foi o que matou a conta 35).
+  const PIOR_TRAVADA_MEDIDA_MS = 59915
+  t('o prazo cobre a pior travada já medida, com folga de 2x',
+    TTL_MS >= PIOR_TRAVADA_MEDIDA_MS * 2)
+  t('e o batimento cabe várias vezes dentro do prazo (uma falha não derruba)',
+    TTL_MS / RENOVA_MS >= 4)
+  t('mas o prazo não é tão longo a ponto de prender a conta numa queda dura',
+    TTL_MS <= 300000)
 
   ok.forEach((n) => console.log('  ok   ' + n))
   bad.forEach((n) => console.log('  FALHOU  ' + n))

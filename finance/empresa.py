@@ -1211,12 +1211,12 @@ def _dre_estrutura(pool, conta_id: int, ini, fim, tot_receita: int,
     try:
         with pool.connection() as c:
             rows = c.execute(
-                """select p.grupo, p.codigo, p.nome, sum(l.valor_centavos)
+                """select p.grupo, p.codigo, p.nome, p.natureza, sum(l.valor_centavos)
                      from lancamentos l
                      join plano_contas p on p.id = l.plano_conta_id
                     where l.conta_id=%s and l.data >= %s and l.data < %s
                       and l.natureza='empresa'
-                    group by p.grupo, p.codigo, p.nome
+                    group by p.grupo, p.codigo, p.nome, p.natureza
                     order by p.grupo, p.codigo""",
                 (conta_id, ini, fim)).fetchall()
             sc = c.execute(
@@ -1228,9 +1228,21 @@ def _dre_estrutura(pool, conta_id: int, ini, fim, tot_receita: int,
         return {"linhas": [], "resultado_centavos": resultado_legado,
                 "sem_conta_centavos": 0, "sem_conta_n": 0, "disponivel": False}
     sem_conta_n = int(sc[0] or 0) if sc else 0
-    for grupo, codigo, nome, val in rows:
+    tem_receita = {gr: False for gr in GRUPOS_DRE}
+    for grupo, codigo, nome, cta_natureza, val in rows:
         val = int(val or 0)
-        sinal = 1 if GRUPOS_DRE[grupo]["papel"] == "receita" else -1
+        # O SINAL VEM DA CONTA, NAO DO GRUPO.
+        #
+        # Era `GRUPOS_DRE[grupo]["papel"]`, e com isso o grupo 7 ("Nao Operacional")
+        # subtraia tudo — porque so' tinha despesa: Distribuicao de Lucros,
+        # Emprestimos, Imobilizado. Um aporte de socio (7.1.05, dinheiro ENTRANDO)
+        # cairia negativo. Grupo nao operacional de verdade tem os dois lados.
+        #
+        # Preservador pro que ja' existe: nos grupos 1 a 6 a natureza de cada conta
+        # ja' casa com o papel do grupo, entao nenhum sinal antigo muda.
+        sinal = 1 if cta_natureza == "receita" else -1
+        if sinal > 0:
+            tem_receita[grupo] = True
         g[grupo] += sinal * val
         contas[grupo].append({"codigo": codigo, "nome": nome,
                               "valor_centavos": sinal * val})
@@ -1243,7 +1255,10 @@ def _dre_estrutura(pool, conta_id: int, ini, fim, tot_receita: int,
 
     def _grupo(gr):
         meta = GRUPOS_DRE[gr]
-        nome = meta["nome"] if meta["papel"] == "receita" else "(–) " + meta["nome"]
+        # o "(–)" so' vale pra grupo de mao unica. O 7 passa a ter conta dos dois
+        # lados (aporte entra, distribuicao sai) — prefixar seria mentir na metade.
+        um_lado_so = meta["papel"] != "receita" and not tem_receita[gr]
+        nome = "(–) " + meta["nome"] if um_lado_so else meta["nome"]
         return {"tipo": "grupo", "grupo": gr, "chave": "grupo_%d" % gr,
                 "nome": nome, "valor_centavos": g[gr], "contas": contas[gr]}
 
@@ -1284,12 +1299,12 @@ def dre_por_centro(pool, conta_id: int, ano: int, mes: int) -> dict:
     try:
         with pool.connection() as c:
             rows = c.execute(
-                """select p.grupo, l.centro_custo_id, sum(l.valor_centavos)
+                """select p.grupo, l.centro_custo_id, p.natureza, sum(l.valor_centavos)
                      from lancamentos l
                      join plano_contas p on p.id = l.plano_conta_id
                     where l.conta_id=%s and l.data >= %s and l.data < %s
                       and l.natureza='empresa'
-                    group by p.grupo, l.centro_custo_id""",
+                    group by p.grupo, l.centro_custo_id, p.natureza""",
                 (conta_id, ini, fim)).fetchall()
     except Exception:
         return {"ano": ano, "mes": mes, "centros": [], "linhas": [],
@@ -1301,9 +1316,13 @@ def dre_por_centro(pool, conta_id: int, ano: int, mes: int) -> dict:
     # acumula por (grupo, coluna); coluna = id do centro ou 'sem'
     g = {gr: {} for gr in GRUPOS_DRE}
     presentes, tem_sem = [], False
-    for grupo, centro_id, val in rows:
+    for grupo, centro_id, cta_natureza, val in rows:
         val = int(val or 0)
-        sinal = 1 if GRUPOS_DRE[grupo]["papel"] == "receita" else -1
+        # mesmo motivo do dre_do_mes: o sinal e' da CONTA. Este ponto ficou pra
+        # tras na primeira passada e o teste pegou — sem ele o aporte apareceria
+        # certo na DRE e negativo no detalhamento por centro de custo, que e' o
+        # tipo de divergencia que ninguem cruza ate' alguem reclamar do numero.
+        sinal = 1 if cta_natureza == "receita" else -1
         col = centro_id if centro_id is not None else "sem"
         g[grupo][col] = g[grupo].get(col, 0) + sinal * val
         if centro_id is None:

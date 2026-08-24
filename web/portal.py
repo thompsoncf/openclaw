@@ -949,7 +949,13 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <div class="cat-lancamentos" style="display:none; padding:.2rem 0 .6rem 1.2rem"></div>
 {% endfor %}{% else %}<p class="mut">Sem despesas neste mês.</p>{% endif %}
 
-<h1 style="font-size:1.05rem; margin-top:1.6rem">Receitas por categoria</h1>
+{# DOIS BLOCOS, nao uma lista. A lista unica respondia "quanto entrou" quando a
+   pergunta do dono e' "quanto o negocio fez" — e aporte de socio entrava somando.
+   Ver RECEITA_NAO_OPERACIONAL em finance/models.py. #}
+<div style="display:flex;justify-content:space-between;align-items:baseline;gap:.8rem;margin-top:1.6rem">
+  <h1 style="font-size:1.05rem;margin:0">Receita do negócio</h1>
+  <b style="color:var(--verde-claro);white-space:nowrap">{{ brl(total_rec_op) }}</b>
+</div>
 {% if receitas_cat %}{% for cat,val in receitas_cat %}
 <div class="cat-linha" onclick="abrirCat(this)" data-cat="{{ cat }}" data-tipo="receita" style="cursor:pointer">
   <div style="display:flex; justify-content:space-between; font-size:.9rem; margin:.4rem 0 .2rem">
@@ -958,7 +964,23 @@ _DASH = """{% extends "base" %}{% block conteudo %}
   <div class="barra"><div class="barra-fill" style="width:{{ (val*100//maior_rec) if maior_rec else 0 }}%; background:var(--verde-claro)"></div></div>
 </div>
 <div class="cat-lancamentos" style="display:none; padding:.2rem 0 .6rem 1.2rem"></div>
-{% endfor %}{% else %}<p class="mut">Sem receitas neste mês.</p>{% endif %}
+{% endfor %}{% else %}<p class="mut">Sem receita do negócio neste mês.</p>{% endif %}
+
+{% if receitas_nao_op %}
+<div style="display:flex;justify-content:space-between;align-items:baseline;gap:.8rem;margin-top:1.4rem">
+  <h1 style="font-size:1.05rem;margin:0">Entrou, mas não é receita</h1>
+  <b style="color:#f0c05a;white-space:nowrap">{{ brl(total_rec_nao_op) }}</b>
+</div>
+<div class="mut" style="font-size:.72rem;margin:.15rem 0 .2rem">movimenta o caixa e fica fora do resultado do negócio</div>
+{% for cat,val in receitas_nao_op %}
+<div class="cat-linha" onclick="abrirCat(this)" data-cat="{{ cat }}" data-tipo="receita" style="cursor:pointer">
+  <div style="display:flex; justify-content:space-between; font-size:.9rem; margin:.4rem 0 .2rem">
+    <span><span class="seta">▸</span> {{ cat }}</span><b>{{ brl(val) }}</b>
+  </div>
+  <div class="barra"><div class="barra-fill" style="width:{{ (val*100//maior_rec_nao_op) if maior_rec_nao_op else 0 }}%; background:#f0c05a"></div></div>
+</div>
+<div class="cat-lancamentos" style="display:none; padding:.2rem 0 .6rem 1.2rem"></div>
+{% endfor %}{% endif %}
 
 {% if not q_search and prev_cartao and prev_cartao.pontos %}
 <div class="card" style="margin-top:1.4rem;border:1px solid #2a3a33">
@@ -10105,6 +10127,10 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         resumo = {"saldo": _rec - _desp, "receitas": _rec, "despesas": _desp, "anterior": 0}
         categorias = []
         receitas_cat = []
+        receitas_nao_op = []
+        total_rec_op = 0
+        total_rec_nao_op = 0
+        maior_rec_nao_op = 0
         maior_cat = 0
         maior_rec = 0
         n_a_definir = 0
@@ -10127,8 +10153,16 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
             resumo = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza=nat)
         categorias = livro.despesas_por_categoria(ano_sel, mes_num, membro_sel, natureza=nat)
         maior_cat = max((v for _, v in categorias), default=0)
-        receitas_cat = livro.receitas_por_categoria(ano_sel, mes_num, membro_sel, natureza=nat)
+        _rec = livro.receitas_em_dois_blocos(ano_sel, mes_num, membro_sel, natureza=nat)
+        receitas_cat = _rec["operacional"]
+        receitas_nao_op = _rec["nao_operacional"]
+        total_rec_op = _rec["total_operacional"]
+        total_rec_nao_op = _rec["total_nao_operacional"]
+        # a barra de cada bloco e' relativa ao MAIOR DELE. Uma escala unica faria
+        # o bloco pequeno virar um tracinho invisivel, e ele e' justamente o que
+        # a separacao veio tornar visivel.
         maior_rec = max((v for _, v in receitas_cat), default=0)
+        maior_rec_nao_op = max((v for _, v in receitas_nao_op), default=0)
         lancamentos = livro.lancamentos_recentes(ano_sel, mes_num, membro_sel,
                                                  tipo if tipo in ("despesa", "receita") else None,
                                                  limite=1000, natureza=nat)
@@ -10186,6 +10220,8 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
                    lancamentos=lancamentos, dias=dias, raiox=raiox, pessoas=pessoas,
                    meses=meses, mes_sel=mes_sel, membro_sel=membro_sel, tipo_sel=tipo,
                    receitas_cat=receitas_cat, maior_rec=maior_rec, categorias_lista=categorias_lista,
+                   receitas_nao_op=receitas_nao_op, maior_rec_nao_op=maior_rec_nao_op,
+                   total_rec_op=total_rec_op, total_rec_nao_op=total_rec_nao_op,
                    q_search=q, n_resultados=len(lancamentos) if q else 0,
                    natureza_sel=(natureza if eh_pj else ""),
                    sem_conta_sel=_sem_conta, n_sem_conta=n_sem_conta,

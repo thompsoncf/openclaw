@@ -134,6 +134,8 @@ def test_conta_nova_usa_os_numeros_do_contrato_vigente():
     assert ctx["regra"]["multa_cancelamento"] == "30%"
     assert ctx["regra"]["duracao_horas"] == "5"
     assert ctx["regra"]["tolerancia_min"] == "30"
+    assert ctx["regra"]["multa_atraso_pct"] == "2%"
+    assert ctx["regra"]["juros_mora_pct_mes"] == "1%"
 
 
 def test_a_conta_manda_no_que_configurou():
@@ -141,6 +143,12 @@ def test_a_conta_manda_no_que_configurou():
     assert ctx["regra"]["multa_cancelamento"] == "20%"
     assert ctx["regra"]["duracao_horas"] == "6"
     assert ctx["regra"]["sinal_pct"] == "30%"          # o que não mexeu continua padrão
+
+
+def test_a_conta_manda_na_multa_de_atraso_e_nos_juros_de_mora():
+    ctx = _ctx(modelo={"regras": {"multa_atraso_pct": 3, "juros_mora_pct_mes": 2}})
+    assert ctx["regra"]["multa_atraso_pct"] == "3%"
+    assert ctx["regra"]["juros_mora_pct_mes"] == "2%"
 
 
 def test_regra_apagada_na_tela_nao_zera_o_contrato():
@@ -202,6 +210,7 @@ def test_o_modelo_padrao_cobre_o_essencial():
     campos = ct.campos_usados(ct.modelo_padrao())
     for obrigatorio in ("cliente.nome", "evento.data", "valor.total",
                         "regra.sinal_pct", "regra.multa_cancelamento",
+                        "regra.multa_atraso_pct", "regra.juros_mora_pct_mes",
                         "preco.hora-extra", "preco.taxa-de-limpeza"):
         assert obrigatorio in campos
 

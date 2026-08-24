@@ -293,12 +293,11 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
     métricas do topo ignoram o filtro de Status de propósito (mostram a
     distribuição inteira do período); o total da tabela é só do que está na tela.
 
-    "Fechado em" é `atualizado_em`: a mesma coluna que `fechar_orcamento`
-    (finance/vendas.py) grava junto com o status, e que trava a edição do
-    orçamento a partir daí — não muda depois. "Aprovada em" é `aprovada_em`:
-    o instante em que o CLIENTE assinou a proposta pública (web/proposta.py)
-    — acontece antes de "fechado", e um orçamento pode ficar parado em
-    "aprovada" por dias até o vendedor fechar de fato.
+    "Aprovada em" é `aprovada_em`: o instante em que o CLIENTE assinou a
+    proposta pública (web/proposta.py). Não tem coluna "Fechado em" — o
+    status "Fechado" já aparece na etiqueta de Status, e a data
+    (`atualizado_em`) some quase toda vazia num relatório onde a maioria dos
+    orçamentos ainda está em aberto (relato do dono: "não tem sentido").
 
     Cliente é UM nome só, não dois campos: o formulário troca o rótulo de
     `empresa` pra "Nome completo" quando o cliente é pessoa física, mas
@@ -346,7 +345,6 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
         rows = c.execute(
             f"""select o.numero, o.cliente, o.empresa, o.status, o.criado_em,
                        o.aprovada_em,
-                       case when o.status='fechado' then o.atualizado_em end,
                        -- criado_por guarda o id do membro OU a palavra 'dono' (quem
                        -- abriu a conta, sem vendedor específico — mesma leitura de
                        -- web/proposta.py). Sem o 2º ramo, esses ficavam "—", como se
@@ -366,16 +364,16 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
         linhas.append({
             "numero": r[0], "cliente": r[2] or r[1] or "—",
             "status": rotulo, "status_cor": cor,
-            "criado_em": _fmt(r[4]), "aprovada_em": _fmt(r[5]), "fechado_em": _fmt(r[6]),
-            "vendedor": r[7], "valor_centavos": int(r[8] or 0),
-            "acao_href": f"/proposta/{r[9]}" if r[9] else None,
+            "criado_em": _fmt(r[4]), "aprovada_em": _fmt(r[5]),
+            "vendedor": r[6], "valor_centavos": int(r[7] or 0),
+            "acao_href": f"/proposta/{r[8]}" if r[8] else None,
         })
     return {
         "label": "Orçamentos", "mock": False, "acao": True,
         "acao_rotulo": "Ver / imprimir proposta",
         "colunas": [_col("numero", "Nº"), _col("cliente", "Cliente"),
                     _col("status", "Status", tag=True), _col("criado_em", "Criado em"),
-                    _col("aprovada_em", "Aprovada em"), _col("fechado_em", "Fechado em"),
+                    _col("aprovada_em", "Aprovada em"),
                     _col("vendedor", "Vendedor"),
                     _col("valor_centavos", "Valor", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": _soma(linhas, "valor_centavos"),

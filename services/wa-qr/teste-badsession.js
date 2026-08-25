@@ -145,6 +145,20 @@ const contar = async (contaId, like) => (await pool.query(
   t('limpar uma conta não encosta no cofre da outra',
     (await contar(OUTRA, 'creds')) === 1 && (await contar(CONTA, 'creds')) === 1)
 
+  // ── a espera não pode sobreviver ao logout ───────────────────────────────
+  // Uma hora é muito tempo. Se a conta deslogar e parear de novo dentro dela, a
+  // marca velha engoliria o primeiro badSession da credencial NOVA — sessão podre
+  // logo na estreia, que é o pior momento possível.
+  await semear(CONTA)
+  await limparSessoesSignal(CONTA, 'antes-do-logout')
+  t('a marca da espera existe depois de limpar', ultimaLimpezaDeSessao.has(CONTA))
+  srv.esquecerConta(CONTA)
+  t('esquecerConta apaga a espera junto com o resto da conta',
+    !ultimaLimpezaDeSessao.has(CONTA))
+  await semear(CONTA)
+  t('e por isso a conta repareada limpa de primeira',
+    (await limparSessoesSignal(CONTA, 'depois-do-repareamento')) === 5)
+
   // ── falha de banco não pode subir ────────────────────────────────────────
   ultimaLimpezaDeSessao.clear()
   await pool.query('alter table wa_qr_auth rename to wa_qr_auth_escondida')

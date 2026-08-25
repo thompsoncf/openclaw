@@ -1484,6 +1484,11 @@ function esquecerConta (contaId) {
   for (const k of enviadas.keys()) if (k.startsWith(prefixo)) enviadas.delete(k)
   const prefixoLid = contaId + ' '
   for (const k of lidsPendentes.keys()) if (k.startsWith(prefixoLid)) lidsPendentes.delete(k)
+  // A espera da limpeza de sessão é de uma HORA. Deixar a marca da conta velha aqui
+  // não é só sujeira: se ela parear de novo dentro dessa hora, o primeiro
+  // badSession legítimo da credencial NOVA seria engolido pela espera da antiga —
+  // e a conta ficaria com sessão podre justamente na estreia.
+  ultimaLimpezaDeSessao.delete(contaId)
 }
 
 // Apaga o retrato da sessão que deixou de existir.

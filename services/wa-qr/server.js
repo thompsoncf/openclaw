@@ -1511,6 +1511,57 @@ async function apagarRetratoDaSessao (contaId) {
   }
 }
 
+// 500 = DisconnectReason.badSession: o WhatsApp está dizendo, na cara, que os
+// registros de sessão do libsignal não servem mais. Reconectar com os MESMOS
+// registros só recompra o mesmo 500 — e era exatamente isso que acontecia, porque
+// o handler de 'close' só tratava 440 e 401 e o 500 caía no religa-genérico.
+//
+// Medido na conta 23 em 24/08–25/08:
+//   - 24 fechamentos com code 500 em 24h (a 34 teve 6, a 36 teve 2);
+//   - 2.242 'Bad MAC' por hora, 100% do ciframento que entrava falhando;
+//   - ZERO messages.upsert em 4 dias — a entrada morta, enquanto o envio funcionava;
+//   - a curva de entrada caiu 235/dia → 76 → 62 → 0 em três dias.
+// Apagar à mão os 187 'session-*' e religar levou o Bad MAC a 0/h e os fechamentos
+// a 0 na primeira meia hora. É esse conserto que esta função automatiza.
+//
+// O que ela apaga é SÓ 'session-*'. `creds` fica — por isso o pareamento sobrevive
+// e ninguém precisa pegar o celular. Pre-key, app-state, lidmap e a chave da agenda
+// também ficam: o libsignal reconstrói sessão sozinho a partir do pre-key, mas sem
+// `creds` seria pareamento novo, que é justamente o que a regra da casa proíbe.
+const LIMPAR_SESSAO_ESPERA_MS = parseInt(
+  process.env.WA_QR_LIMPAR_SESSAO_ESPERA_MS || '3600000', 10)
+const ultimaLimpezaDeSessao = new Map()
+
+async function limparSessoesSignal (contaId, motivo) {
+  // Trava de frequência: num flapping de 500 o religamento vem de 2,5 em 2,5s, e
+  // sem isto a gente apagaria as sessões a cada volta — cada limpeza obriga TODOS
+  // os contatos a refazer sessão de uma vez, e cada refazimento come um pre-key do
+  // servidor. Uma limpeza por hora conserta sessão podre; uma por ciclo vira a
+  // própria tempestade que se queria evitar.
+  const agora = Date.now()
+  const ultima = ultimaLimpezaDeSessao.get(contaId) || 0
+  if (agora - ultima < LIMPAR_SESSAO_ESPERA_MS) {
+    log.warn({ contaId, motivo, faltamS: Math.round((LIMPAR_SESSAO_ESPERA_MS - (agora - ultima)) / 1000) },
+      'badSession de novo, mas a limpeza de sessão ainda está de molho — só religando')
+    return 0
+  }
+  ultimaLimpezaDeSessao.set(contaId, agora)
+  try {
+    const r = await pool.query(
+      "delete from wa_qr_auth where conta_id=$1 and arquivo like 'session-%'", [contaId])
+    log.warn({ contaId, motivo, apagadas: r.rowCount },
+      'badSession: registros de sessão do libsignal apagados — creds PRESERVADA, ' +
+      'o pareamento continua de pé')
+    return r.rowCount
+  } catch (e) {
+    // Falhar aqui não pode impedir a reconexão: sem a limpeza ela volta ao
+    // comportamento antigo (religa com sessão podre), que é ruim mas não é pior.
+    log.error({ contaId, motivo, e: String((e && e.message) || e) },
+      'não consegui apagar os registros de sessão (segue a reconexão)')
+    return 0
+  }
+}
+
 async function jidRealDe (sock, contaId, numero) {
   const base = jidDe(numero)
   if (!base) return { jid: null, erro: 'numero_invalido' }
@@ -2608,6 +2659,13 @@ async function iniciarSessao (contaId) {
         // do próximo 'open' arma os dele.
         descartarSocket(sock, contaId, 'reconectando')
         pararTimersDaAgenda(s)
+        // O 500 tem que ser tratado ANTES da reconexão, não depois: o
+        // makeCacheableSignalKeyStore guarda chave em memória por 5min, então
+        // apagar o banco com o socket ainda de pé não adianta — a encarnação
+        // seguinte é que abre um store novo, que vai ler o banco já limpo.
+        if (code === DisconnectReason.badSession) {
+          await limparSessoesSignal(contaId, 'badSession(500)')
+        }
         setTimeout(() => {
           iniciarSessao(contaId).catch((e) => log.error({ contaId, e: String(e) }, 'reconexão automática falhou'))
         }, 2500)
@@ -3324,4 +3382,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

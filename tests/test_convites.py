@@ -930,3 +930,63 @@ def test_titulo_do_convite_leva_o_nome_comercial(pool):
     conv = cv.criar_convidado(pool, cid, ev["id"], "Jacqueline", "5586999990005")
     titulo = cv._titulo_com_extras(pool, cv.por_token(pool, conv["token"]))
     assert "PRIME EVENTOS" in titulo and "MANOEL SOARES" not in titulo
+
+
+# ------------------------------- o RSVP não pode ser desfeito pelo que vem depois
+
+def _bloco_rsvp() -> str:
+    """O trecho do webhook do Twilio que intercepta a resposta do convidado."""
+    import inspect
+    from web import painel_prospeccao as pp
+    fonte = inspect.getsource(pp.webhook_twilio)
+    i = fonte.index("RSVP de convite")
+    return fonte[i:fonte.index("Botões do template de 1º contato")]
+
+
+def test_o_pos_resposta_nao_derruba_a_rota():
+    """O que quebrou em 23/08. `responder()` grava o RSVP; o que vem depois é
+    cortesia — avisar o dono e agradecer ao convidado. Uma exceção ali devolvia 500
+    pro Twilio, que REENTREGA a mensagem; na reentrega o convite já não estava
+    'pendente', `pendentes_por_numero` voltava vazio, o fluxo caía no inbox e a IA
+    respondia "não tenho nada registrado aqui sobre um evento" — pra quem tinha
+    acabado de confirmar."""
+    bloco = _bloco_rsvp()
+    assert "try:" in bloco, "o pós-resposta precisa estar protegido"
+    assert "except Exception" in bloco
+
+    # O return fica FORA do try, e quem prova isso é a INDENTAÇÃO — não a ordem no
+    # texto. Um `return` dentro do `except` também aparece depois dele e passaria
+    # numa comparação de posição, mas aí o caminho FELIZ não retorna: cai no bloco
+    # da prospecção e depois no inbox, que é a IA respondendo de novo.
+    def _recuo(linha: str) -> int:
+        return len(linha) - len(linha.lstrip())
+
+    linhas = [l for l in bloco.splitlines() if l.strip()]
+    recuo_try = next(_recuo(l) for l in linhas if l.strip() == "try:")
+    recuo_ret = next(_recuo(l) for l in linhas if l.strip().startswith("return Response"))
+    assert recuo_ret == recuo_try, (
+        f"o return está recuado {recuo_ret} e o try {recuo_try}: ele precisa estar no "
+        "MESMO nível do try, senão o caminho feliz não retorna e a IA responde depois")
+
+
+def test_o_rsvp_nao_usa_a_conversa_do_inbox():
+    """`conv_id` é do inbox, atribuído bem mais abaixo. Usá-lo aqui era o
+    UnboundLocalError que derrubava a rota — e o convidado não é necessariamente um
+    lead, então a conversa dele pode nem existir."""
+    bloco = _bloco_rsvp()
+    assert "conta_id, conv_id)" not in bloco, "voltou a usar o conv_id do inbox"
+    assert "_conversa_wa_do_contato" in bloco, \
+        "o chip tem que sair da conversa DO CONTATO, quando ela existir"
+
+
+def test_confirmar_presenca_e_reconhecido_como_rsvp():
+    """O rótulo exato do botão do template, como ele volta do WhatsApp."""
+    assert cv.rsvp_por_texto("Confirmar Presença") == "confirmado"
+    assert cv.rsvp_por_texto("Não vou poder") == "recusado"
+    assert cv.rsvp_por_texto("Remarcar") == "remarcar"
+
+
+def test_texto_qualquer_nao_vira_rsvp():
+    """Se virasse, uma conversa comum seria engolida pelo caminho do convite."""
+    for t in ("oi", "quanto custa?", "bom dia", ""):
+        assert cv.rsvp_por_texto(t) is None

@@ -6142,16 +6142,27 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
       {% for v, rot in periodos %}<option value="{{ v }}" {% if v==periodo %}selected{% endif %}>{{ rot }}</option>{% endfor %}
     </select>
     {% if dados.filtro_extra %}
+    {# O MESMO parâmetro `status` serve os dois: nas abas de orçamento/contrato ele
+       corta por situação; em Leads do chip, por chip. Quem manda é a aba, que
+       devolve `status_opcoes` ou `chips` — e a de chip só aparece quando a conta
+       tem mais de um, senão seria uma pergunta de resposta única. #}
+    {% if dados.filtro_extra.chips %}
+    <select name="status" onchange="this.form.submit()">
+      {% for v, rot in dados.filtro_extra.chips %}<option value="{{ v }}"
+        {% if v==dados.filtro_extra.chip_sel %}selected{% endif %}>{{ rot }}</option>{% endfor %}
+    </select>
+    {% elif dados.filtro_extra.status_opcoes %}
     <select name="status" onchange="this.form.submit()">
       {% for v, rot in dados.filtro_extra.status_opcoes %}<option value="{{ v }}"
         {% if v==dados.filtro_extra.status_sel %}selected{% endif %}>{{ rot }}</option>{% endfor %}
     </select>
+    {% endif %}
     <select name="vendedor" onchange="this.form.submit()">
       <option value="">Vendedor: todos</option>
       {% for vid, vnome in dados.filtro_extra.vendedores %}<option value="{{ vid }}"
         {% if vid|string==dados.filtro_extra.vendedor_sel %}selected{% endif %}>{{ vnome }}</option>{% endfor %}
     </select>
-    <input type="search" name="q" value="{{ dados.filtro_extra.busca_sel }}" placeholder="🔎 buscar cliente…">
+    <input type="search" name="q" value="{{ dados.filtro_extra.busca_sel }}" placeholder="🔎 buscar {{ 'lead' if dados.filtro_extra.chips is defined and dados.filtro_extra.chips else 'cliente' }}…">
     <button type="submit" class="rel-filtrar">Filtrar</button>
     {% endif %}
     {% if not dados.filtro_extra %}
@@ -6166,7 +6177,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     {% if dados.sem_periodo %}<span class="mut">mostra tudo que está em aberto — o período aqui não filtra</span>
     {% else %}<span class="mut">período: {{ periodo_rotulo }}</span>{% endif %}
     <span style="flex:1"></span>
-    <a class="rel-pdf" href="/painel/relatorios/pdf?tipo={{ tipo }}&periodo={{ periodo }}{% if dados.filtro_extra %}&status={{ dados.filtro_extra.status_sel }}&vendedor={{ dados.filtro_extra.vendedor_sel }}&q={{ dados.filtro_extra.busca_sel|urlencode }}{% endif %}" target="_blank" rel="noopener">🖨️ Exportar PDF</a>
+    <a class="rel-pdf" href="/painel/relatorios/pdf?tipo={{ tipo }}&periodo={{ periodo }}{% if dados.filtro_extra %}&status={{ dados.filtro_extra.chip_sel if dados.filtro_extra.chips else dados.filtro_extra.status_sel }}&vendedor={{ dados.filtro_extra.vendedor_sel }}&q={{ dados.filtro_extra.busca_sel|urlencode }}{% endif %}" target="_blank" rel="noopener">🖨️ Exportar PDF</a>
   </form>
 
   <div class="rel-metricas">
@@ -6189,10 +6200,17 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     <tr><td colspan="{{ dados.colunas|length + (1 if dados.acao else 0) }}" class="mut" style="text-align:center;padding:1.4rem 0">Nenhum registro encontrado{% if not dados.sem_periodo %} em {{ periodo_rotulo|lower }}{% endif %}.</td></tr>
     {% endfor %}
     </tbody>
+    {# SÓ QUANDO HÁ O QUE SOMAR. "Leads do chip" não tem coluna de dinheiro —
+       `valor_estimado_centavos` é zero na base inteira — e sem esta guarda a
+       tabela terminava num rodapé "Total" com todas as células vazias. O
+       `<tfoot>` inteiro fica de fora: rodapé vazio ainda desenha a borda
+       grossa do `.rel-tot td`, e sobraria um traço solto embaixo da tabela. #}
+    {% if dados.col_total %}
     <tfoot>
     <tr class="rel-tot" id="rel-tot">{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% endif %}>{% if loop.first
       %}Total{% elif col.chave == dados.col_total %}{{ dados.total_centavos|brl }}{% endif %}</td>{% endfor %}{% if dados.acao %}<td></td>{% endif %}</tr>
     </tfoot>
+    {% endif %}
   </table>
   </div>
   <script>
@@ -6318,8 +6336,11 @@ _RELATORIO_PDF = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8
     <tr><td colspan="{{ dados.colunas|length }}" style="text-align:center;color:#777">Nenhum registro encontrado.</td></tr>
     {% endfor %}
     </tbody>
+    {# mesma guarda da tela: sem coluna de dinheiro, sem linha de Total #}
+    {% if dados.col_total %}
     <tfoot><tr>{% for col in dados.colunas %}<td{% if col.num %} class="num"{% endif %}>{% if loop.first %}Total{%
       elif col.chave == dados.col_total %}{{ dados.total_centavos|brl }}{% endif %}</td>{% endfor %}</tr></tfoot>
+    {% endif %}
   </table>
 </div>
 <p class="aviso">{% if dados.mock %}🧪 Dados de exemplo — este relatório ainda não está ligado à base real.

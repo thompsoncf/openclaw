@@ -513,6 +513,103 @@ def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
 #     fora       nunca entrou na agenda                 PARECIA tudo certo
 #     liberada   entrou e o prazo do sinal venceu       PARECIA tudo certo
 #
+# ---------------------------------------------------------------- LEAD DO CHIP
+#
+# O que a empresa quer saber do lead que chamou pelo WhatsApp não é o mesmo que
+# ela quer saber do orçamento: é QUANTO ELE ESPEROU. O painel sempre soube quantas
+# mensagens chegaram; nunca soube quanto tempo alguém ficou sem resposta. Em
+# 26/08, na conta 34, sete pessoas tinham chamado e ninguém tinha respondido —
+# e nenhuma tela dizia isso.
+#
+# A redação mora aqui, longe do banco, pelo mesmo motivo de `titulo_do_funil`:
+# decidir o texto é uma regra de negócio, e regra de negócio se testa sem subir
+# Postgres.
+
+#: acima disto o tom vira âmbar na linha — uma hora é o limite que o dono usa
+#: pra dizer "isso já é demora". Não é lei da física; é a régua combinada, e
+#: fica num nome pra quem quiser mudar não ter que caçar número solto.
+ESPERA_ALERTA_MIN = 60
+
+
+def espera_do_lead(primeira_entrada, primeira_resposta) -> dict:
+    """Quanto o lead esperou pela PRIMEIRA resposta humana → {texto, tom, minutos}.
+
+    Cinco desfechos, e cada um existe por um caso real da conta 34:
+
+    * **sem mensagem** — a conversa existe e não tem mensagem nenhuma (1 lead).
+      Não é abandono: é conversa que nasceu vazia. Chamar isso de "nunca
+      respondido" acusaria o vendedor de algo que não aconteceu.
+    * **nunca respondido** — o lead falou e ninguém respondeu (7 leads). É o
+      achado que motivou o relatório, e vai em coral.
+    * **já falava** — a resposta é ANTERIOR à primeira entrada (11 leads): a
+      conversa foi o vendedor quem começou. Sem este ramo viraria espera
+      negativa, e uma espera negativa na tabela é o tipo de número que faz o
+      dono desconfiar do relatório inteiro — com razão.
+    * **na hora** — respondeu dentro do mesmo minuto.
+    * o tempo em si, curto e legível: "37 min", "3h10".
+
+    `minutos` sai junto pra quem precisa ordenar ou tirar mediana sem reparsear
+    o texto. É None nos três primeiros casos, que não são duração.
+    """
+    if primeira_entrada is None:
+        return {"texto": "sem mensagem", "tom": "neutro", "minutos": None}
+    if primeira_resposta is None:
+        return {"texto": "nunca respondido", "tom": "coral", "minutos": None}
+    if primeira_resposta < primeira_entrada:
+        return {"texto": "já falava", "tom": "neutro", "minutos": None}
+    mins = int((primeira_resposta - primeira_entrada).total_seconds() // 60)
+    tom = "ambar" if mins > ESPERA_ALERTA_MIN else "ok"
+    return {"texto": duracao_curta(mins), "tom": tom, "minutos": mins}
+
+
+def duracao_curta(minutos) -> str:
+    """Minutos → "na hora" | "37 min" | "3h10" | "2d 4h".
+
+    Some o zero à esquerda de propósito ("3h10", não "3h10min"): a coluna é
+    estreita e o leitor lê isso como hora, não como código.
+    """
+    if minutos is None:
+        return "—"
+    m = int(minutos)
+    if m <= 0:
+        return "na hora"
+    if m < 60:
+        return f"{m} min"
+    if m < 60 * 24:
+        return f"{m // 60}h{m % 60:02d}"
+    return f"{m // (60 * 24)}d {(m % (60 * 24)) // 60}h"
+
+
+def rotulo_do_chip(chip_id, *, rotulos=None, nome_principal="") -> str:
+    """O nome que a pessoa reconhece, a partir do `conversas.chip_id`.
+
+    **`chip_id` nulo é o chip PRINCIPAL, não é dado faltando.** O chip secundário
+    é uma conta própria (`contas.chip_de`) e a conversa dele guarda o id dessa
+    conta; a do chip principal não guarda nada. Tratar o nulo como "sem chip"
+    esconderia 174 dos 186 leads da conta 34 — justamente o chip que mais recebe.
+    """
+    mapa = rotulos or {}
+    if chip_id is None:
+        return (nome_principal or "").strip() or "Chip principal"
+    return (mapa.get(chip_id) or "").strip() or f"Chip {chip_id}"
+
+
+def mediana(valores) -> int | None:
+    """Mediana inteira de uma lista de minutos — None quando não há amostra.
+
+    Mediana e não média: uma conversa esquecida por cinco dias puxa a média pra
+    12h49 enquanto metade dos leads foi atendida em até 3h10. A média descreveria
+    um atendimento que ninguém teve.
+    """
+    xs = sorted(v for v in valores if v is not None)
+    if not xs:
+        return None
+    meio = len(xs) // 2
+    if len(xs) % 2:
+        return int(xs[meio])
+    return int((xs[meio - 1] + xs[meio]) / 2)
+
+
 # E "fora" não é hipótese: a reserva nasce num lugar só (o cliente assinando o
 # link público) e sai calada por quatro portas — orçamento sem hora de início,
 # exceção engolida, processo reiniciado antes da tarefa de segundo plano rodar,

@@ -21,7 +21,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from contas import equipe as eq
 from db.conexao import get_pool
+from finance import agenda as _ag
 from finance import empresa as emp
+from finance import vendas
 from web.portal import _render, _env, conta_logada, brl as _brl, _mascara_cnpj
 
 router = APIRouter()
@@ -635,6 +637,184 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> d
     }
 
 
+# ------------------------------------------------------------- LEADS DO CHIP
+#
+# O lead que chega pelo QR não tem número pra somar — tem TEMPO DE ESPERA. Este
+# relatório existe porque o painel sabia quantas mensagens chegaram e não sabia
+# quanto tempo alguém ficou sem resposta: em 26/08, na conta 34, sete pessoas
+# tinham chamado o chip principal e ninguém tinha respondido. Nenhuma tela dizia.
+#
+# A redação (o texto da espera, o rótulo do chip, a mediana) mora em
+# `finance/vendas.py`, testável sem banco. Aqui fica só a consulta.
+
+#: os valores do filtro de chip que NÃO são um id. "" é todos; "principal" é o
+#: chip da própria conta, que na conversa aparece como `chip_id` NULO.
+CHIP_TODOS, CHIP_PRINCIPAL = "", "principal"
+
+#: tom da função pura → classe do selo no template (.rel-tag.ok/.aviso/.erro/.neutro)
+_TOM_TAG = {"ok": "ok", "ambar": "aviso", "coral": "erro", "neutro": "neutro"}
+
+
+def _chips_da_conta(pool, conta_id: int) -> tuple[str, dict[int, str]]:
+    """(nome do chip principal, {id_da_conta_chip: nome}) — pra dar nome ao número.
+
+    Duas fontes porque são duas coisas diferentes: o chip PRINCIPAL é um canal
+    (`canais_config`, identificador `qr:<conta>`), e o chip SECUNDÁRIO é uma conta
+    inteira, ligada por `contas.chip_de`. Uma consulta só não daria conta, e
+    inventar um mapa novo daria uma terceira versão da verdade pra divergir.
+    """
+    with pool.connection() as c:
+        prin = c.execute(
+            """select rotulo from canais_config
+                where conta_id=%s and canal='whatsapp' and identificador=%s
+                order by id desc limit 1""",
+            (conta_id, f"qr:{conta_id}")).fetchone()
+        secs = c.execute("select id, nome from contas where chip_de=%s order by id",
+                         (conta_id,)).fetchall()
+    return (prin[0] if prin and prin[0] else ""), {r[0]: r[1] or "" for r in secs}
+
+
+def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) -> dict:
+    """Os leads que entraram por um chip de WhatsApp, e quanto cada um esperou.
+
+    UMA LINHA POR LEAD, não por conversa: o mesmo lead pode ter mais de uma
+    conversa, e contá-las duas vezes inflaria "leads recebidos" e a mediana.
+
+    Três decisões que a consulta carrega, cada uma medida em produção:
+
+    1. **`chip_id` NULO é o chip principal**, não é dado faltando (ver
+       `vendas.rotulo_do_chip`). Filtrar por `chip_id = %s` esconderia 174 dos
+       186 leads da conta 34.
+    2. **Resposta é `out` de HUMANO.** Havia 18 mensagens de bot na conta 34;
+       contá-las zeraria a espera de quem, na prática, continuou esperando gente.
+    3. **"Última msg" vem da conversa, não de `prospeccao.ultimo_contato_em`.**
+       Esse campo está vazio em 158 dos 174 leads do chip principal — que têm
+       2.772 mensagens trocadas. Lido dali, o relatório anunciaria que quase
+       ninguém foi atendido.
+    """
+    ini, fim = _intervalo(periodo)
+    where = ["cv.conta_id=%s", "cv.prospeccao_id is not null"]
+    params: list = [conta_id]
+    if periodo != "todos":
+        where.append("p.criado_em::date >= %s and p.criado_em::date <= %s")
+        params += [ini, fim]
+    if chip_sel == CHIP_PRINCIPAL:
+        where.append("cv.chip_id is null")
+    elif chip_sel:
+        where.append("cv.chip_id = %s")
+        params.append(int(chip_sel))
+    if vendedor_sel:
+        where.append("cv.responsavel_membro_id = %s")
+        params.append(int(vendedor_sel))
+    if busca:
+        where.append("p.empresa ilike %s")
+        params.append(f"%{busca}%")
+
+    sql = f"""
+    with conv as (
+      select cv.id, cv.prospeccao_id, cv.chip_id, cv.criado_em, cv.ultima_msg_em,
+             cv.responsavel_membro_id,
+             (select min(m.criado_em) from mensagens m
+               where m.conversa_id=cv.id and m.direcao='in') as prim_in,
+             -- só HUMANO: o bot respondendo não é a empresa respondendo
+             (select min(m.criado_em) from mensagens m
+               where m.conversa_id=cv.id and m.direcao='out'
+                 and m.autor='humano') as prim_resp,
+             (select count(*) from mensagens m where m.conversa_id=cv.id) as msgs
+        from conversas cv join prospeccao p on p.id = cv.prospeccao_id
+       where {" and ".join(where)}
+    ), por_lead as (
+      select prospeccao_id as lead_id,
+             -- o chip da PRIMEIRA conversa: é por ele que o lead entrou.
+             -- `array_agg` e não `min` porque o nulo aqui tem significado (chip
+             -- principal) e `min` o descartaria em favor de um id qualquer.
+             (array_agg(chip_id order by criado_em))[1] as chip_id,
+             min(prim_in) as prim_in, min(prim_resp) as prim_resp,
+             sum(msgs) as msgs, max(ultima_msg_em) as ultima_msg,
+             (array_agg(responsavel_membro_id
+                        order by ultima_msg_em desc nulls last))[1] as memb
+        from conv group by prospeccao_id
+    )
+    select p.id, p.empresa, l.chip_id, l.prim_in, l.prim_resp, l.msgs,
+           l.ultima_msg, coalesce(mb.nome, '—'), o.numero
+      from por_lead l
+      join prospeccao p on p.id = l.lead_id
+      left join membros mb on mb.id = l.memb
+      left join orcamentos o on o.id = p.orcamento_id
+     order by l.prim_in desc nulls last, p.id desc
+     limit 300"""
+    with pool.connection() as c:
+        rows = c.execute(sql, params).fetchall()
+
+    nome_prin, rot_secs = _chips_da_conta(pool, conta_id)
+    linhas, esperas = [], []
+    n_nunca = n_orc = 0
+    for r in rows:
+        esp = vendas.espera_do_lead(r[3], r[4])
+        if esp["minutos"] is not None:
+            esperas.append(esp["minutos"])
+        if esp["texto"] == "nunca respondido":
+            n_nunca += 1
+        if r[8]:
+            n_orc += 1
+        linhas.append({
+            "lead": r[1] or "—",
+            "chip": vendas.rotulo_do_chip(r[2], rotulos=rot_secs,
+                                          nome_principal=nome_prin),
+            "entrou": _fmt_hora(r[3]),
+            "esperou": esp["texto"], "esperou_cor": _TOM_TAG[esp["tom"]],
+            "msgs": int(r[5] or 0),
+            "vendedor": r[7],
+            "ultima": _fmt_hora(r[6]),
+            "orcamento": f"nº {r[8]}" if r[8] else "—",
+        })
+
+    med = vendas.mediana(esperas)
+    return {
+        "label": "Leads do chip", "mock": False,
+        # o NOME DO LEAD é a coluna elástica: é a única de texto livre aqui, e as
+        # outras (chip, hora, espera, contagem) têm largura previsível. Sem uma
+        # marcada, a tabela volta a rolar pro lado e engole o começo do nome.
+        "colunas": [_col("lead", "Lead", flex=True), _col("chip", "Chip"),
+                    _col("entrou", "Entrou em"),
+                    _col("esperou", "Esperou", tag=True),
+                    _col("msgs", "Msgs", num=True),
+                    _col("vendedor", "Vendedor"), _col("ultima", "Última msg"),
+                    _col("orcamento", "Orçamento")],
+        "linhas": linhas,
+        # SEM total: `valor_estimado_centavos` é zero nos 675 leads da base, e uma
+        # linha "Total R$ 0,00" seria exatamente o ruído que o funil acabou de
+        # tirar. O template pula a linha quando `col_total` é nulo.
+        "col_total": None, "total_centavos": 0,
+        "metricas": [("Leads recebidos", str(len(linhas))),
+                     ("Nunca respondidos", str(n_nunca)),
+                     ("Espera (mediana)", vendas.duracao_curta(med)),
+                     ("Viraram orçamento", str(n_orc))],
+        "filtro_extra": {
+            "chips": _opcoes_de_chip(nome_prin, rot_secs),
+            "chip_sel": str(chip_sel or ""),
+            "vendedores": _vendedores_da_conta(pool, conta_id),
+            "vendedor_sel": str(vendedor_sel or ""), "busca_sel": busca or "",
+        },
+    }
+
+
+def _opcoes_de_chip(nome_prin: str, rot_secs: dict[int, str]) -> list[tuple[str, str]]:
+    """As opções do filtro. Só oferece escolha quando há mais de um chip — numa
+    conta com chip único o seletor seria uma pergunta de resposta única."""
+    if not rot_secs:
+        return []
+    return ([(CHIP_TODOS, "Chip: todos"),
+             (CHIP_PRINCIPAL, nome_prin or "Chip principal")]
+            + [(str(i), n or f"Chip {i}") for i, n in sorted(rot_secs.items())])
+
+
+def _fmt_hora(d) -> str:
+    """dd/mm HH:MM no fuso de Brasília — a hora importa aqui (a espera é medida em
+    minutos), e `_fmt` só mostra a data."""
+    return d.astimezone(_ag.BRT).strftime("%d/%m %H:%M") if d else "—"
+
+
 TIPOS = {
     "vendas": {"label": "Vendas", "montar": lambda pool, cid, per, **f: _dados_vendas(pool, cid, per)},
     "contas_pagar": {"label": "Contas a pagar", "montar": lambda pool, cid, per, **f: _dados_titulos_abertos(pool, cid, "pagar")},
@@ -647,6 +827,11 @@ TIPOS = {
     "contratos": {"label": "Contratos", "montar": lambda pool, cid, per, **f: _dados_contratos(
         pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
     "agenda": {"label": "Agenda", "montar": lambda pool, cid, per, **f: _dados_agenda(
+        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
+    # o filtro de chip viaja no MESMO parâmetro `status` das outras abas, de
+    # propósito: o template já tem esse select e a rota já o repassa. Um
+    # parâmetro novo obrigaria a mexer nos dois pra não ganhar nada.
+    "leads_chip": {"label": "Leads do chip", "montar": lambda pool, cid, per, **f: _dados_leads_chip(
         pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
 }
 

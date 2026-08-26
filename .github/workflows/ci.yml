@@ -76,6 +76,26 @@ jobs:
 
       # O resumo do job aparece na PRÓPRIA página do run, sem baixar nada — é o
       # caminho mais curto entre "ficou vermelho" e "foi este teste".
+      # ANOTAÇÕES, e não só o resumo. O resumo aparece na página do run pra quem
+      # abre o navegador; a anotação vem pela API REST (/check-runs/{id}/annotations),
+      # que é o único canal que se mostrou legível de fora — a API de logs devolve o
+      # log do contêiner do Postgres, e o download de artefato é bloqueado por proxy.
+      # Sem isto, "ficou vermelho" não chega a virar "foi este teste".
+      - name: Falhas como anotação
+        if: failure()
+        run: |
+          echo "::error title=Resumo::$(tail -1 pytest-saida.txt | tr -d '\r')"
+          grep -E '^(FAILED|ERROR)' pytest-saida.txt | head -40 | while read -r l; do
+            echo "::error title=Teste::${l}"
+          done || true
+          # a suíte pode morrer ANTES de qualquer linha FAILED (erro de coleta,
+          # processo derrubado). Aí o que importa é o rabo da saída, não a ausência.
+          if ! grep -qE '^(FAILED|ERROR)' pytest-saida.txt; then
+            tail -12 pytest-saida.txt | while read -r l; do
+              echo "::error title=Fim da saida::${l}"
+            done
+          fi
+
       - name: Resumo na página do run
         if: failure()
         run: |

@@ -198,6 +198,11 @@ def criar_cliente(pool, dono_id: int, nome: str, *, telefone: str | None = None,
     obrigatorio. Compat: mesma assinatura de antes, agora com `cpf`/`cnpj`
     opcionais; o telefone entra como `celular` da pessoa.
 
+    Sem CPF/CNPJ, `resolver_pessoa` nao tem chave forte pra casar — por isso,
+    nesse caso, primeiro tenta reusar um cliente do MESMO lojista com o mesmo
+    telefone (igual `achar_ou_criar` ja faz no PDV), senao todo orcamento sem
+    documento (o lead tipico do WhatsApp) criaria um cliente novo a cada save.
+
     `eh_cliente`/`eh_fornecedor` sao o PAPEL da relacao — nao sao exclusivos (uma
     mesma pessoa pode comprar de voce E vender pra voce). Default preserva o
     comportamento de sempre: todo cadastro novo e' cliente, a nao ser que quem
@@ -205,6 +210,11 @@ def criar_cliente(pool, dono_id: int, nome: str, *, telefone: str | None = None,
     nome = (nome or "").strip()
     if not nome:
         raise ValueError("nome do cliente e' obrigatorio")
+    tem_doc = bool(_so_digitos(cpf) or _so_digitos(cnpj))
+    if not tem_doc and telefone:
+        existente = buscar_por_telefone(pool, dono_id, telefone)
+        if existente:
+            return existente["id"]
     pessoa_id = resolver_pessoa(pool, cpf=cpf, cnpj=cnpj, celular=telefone, nome=nome,
                                 email=email, conta_zaq_id=conta_zaq_id)
     return puxar_ou_criar_cliente(pool, dono_id, pessoa_id=pessoa_id, nome=nome,

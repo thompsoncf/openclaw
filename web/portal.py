@@ -3251,6 +3251,23 @@ function ncBuscar(){
   }).catch(function(){btn.disabled=false;btn.textContent='🔎 Buscar CNPJ';toast('Erro na consulta.');});
 }
 
+function maskCep(v){v=(v||'').replace(/[^0-9]/g,'').slice(0,8);return v.length>5?v.slice(0,5)+'-'+v.slice(5):v;}
+function wireCep(inp){
+  inp.addEventListener('input',function(){
+    inp.value=maskCep(inp.value);
+    var digs=inp.value.replace(/[^0-9]/g,'');
+    if(digs.length<8)return;
+    var form=inp.closest('form');if(!form)return;
+    fetch('/api/cep/'+digs).then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok)return;
+      var end=form.querySelector('[name="endereco"]'),cid=form.querySelector('[name="cidade"]'),uf=form.querySelector('[name="uf"]');
+      if(end&&d.rua)end.value=d.rua+(d.bairro?(' · '+d.bairro):'');
+      if(cid&&d.cidade)cid.value=d.cidade;
+      if(uf&&d.uf)uf.value=d.uf;
+    }).catch(function(){});
+  });
+}
+document.querySelectorAll('input[name="cep"]').forEach(wireCep);
 function toggleCli(el){var o=el.getAttribute('aria-expanded')==='true';el.setAttribute('aria-expanded',!o);el.parentElement.querySelector('.cli-panel').classList.toggle('on',!o);}
 function ptab(btn,id){var t=btn.parentElement;t.querySelectorAll('.ptab').forEach(function(x){x.classList.toggle('on',x===btn);});var p=t.parentElement;p.querySelectorAll('.pane').forEach(function(x){x.classList.toggle('on',x.id===id);});if(btn.dataset.load){loadHist(btn.dataset.load);btn.removeAttribute('data-load');}}
 function loadHist(id){var box=document.getElementById('hi-'+id);
@@ -3337,6 +3354,26 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
     <button style="background:transparent;border:1px solid #3a2a2a;color:#d98a8a;padding:.4rem .8rem;border-radius:6px;cursor:pointer;font-size:.85rem;width:auto">Arquivar cliente</button>
   </form>
 </div>
+<script>
+(function(){
+  function maskCep(v){v=(v||'').replace(/[^0-9]/g,'').slice(0,8);return v.length>5?v.slice(0,5)+'-'+v.slice(5):v;}
+  var inp=document.querySelector('input[name="cep"]');
+  if(!inp)return;
+  inp.addEventListener('input',function(){
+    inp.value=maskCep(inp.value);
+    var digs=inp.value.replace(/[^0-9]/g,'');
+    if(digs.length<8)return;
+    var form=inp.closest('form');if(!form)return;
+    fetch('/api/cep/'+digs).then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok)return;
+      var end=form.querySelector('[name="endereco"]'),cid=form.querySelector('[name="cidade"]'),uf=form.querySelector('[name="uf"]');
+      if(end&&d.rua)end.value=d.rua+(d.bairro?(' · '+d.bairro):'');
+      if(cid&&d.cidade)cid.value=d.cidade;
+      if(uf&&d.uf)uf.value=d.uf;
+    }).catch(function(){});
+  });
+})();
+</script>
 {% endblock %}"""
 
 

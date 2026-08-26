@@ -1,0 +1,269 @@
+<title>Nome do Cliente no Funil</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Tokens de web/tema.py — o mockup só serve pra decidir se parecer com a tela real.
+   Escuro único de propósito: o painel não tem tema claro. */
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+.wrap{max-width:940px;margin:0 auto;padding:2.6rem 1.25rem 5rem;
+  display:flex;flex-direction:column;gap:2.6rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;
+  color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.6rem,4vw,2.15rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:66ch}
+.head .marca{color:var(--neon)}
+
+/* ---- placar ---- */
+.placar{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.8rem}
+.kpi{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem 1rem}
+.kpi b{display:block;font-family:var(--mono);font-size:1.7rem;line-height:1.1;
+  font-variant-numeric:tabular-nums}
+.kpi span{font-size:.76rem;color:var(--text-dim);display:block;margin-top:.2rem}
+.kpi.ruim b{color:var(--coral)} .kpi.bom b{color:var(--neon)}
+.kpi.neutro b{color:var(--text)}
+
+/* ---- linhas do funil ---- */
+.sec > h2{font-size:1.15rem;margin-bottom:.15rem}
+.sec > p{color:var(--text-dim);margin:.3rem 0 1.1rem;max-width:68ch}
+.par{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media (max-width:760px){.par{grid-template-columns:1fr}}
+.col > h3{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--text-faint);margin-bottom:.55rem}
+.col.depois > h3{color:var(--neon)}
+.pilha{display:flex;flex-direction:column;gap:.5rem}
+.linha{border:1px solid var(--line);border-radius:11px;background:var(--surface);
+  padding:.7rem .85rem;display:flex;gap:.7rem;align-items:flex-start}
+.col.antes .linha{border-style:dashed}
+.num{font-family:var(--mono);font-size:.7rem;color:var(--text-faint);flex:none;
+  padding-top:.15rem;min-width:2.2em}
+.corpo{flex:1;min-width:0}
+.tit{font-weight:600;font-size:.93rem;line-height:1.3;word-break:break-word}
+.sub{font-size:.78rem;color:var(--text-dim);margin-top:.12rem}
+.val{font-family:var(--mono);font-size:.78rem;color:var(--text-dim);flex:none;
+  font-variant-numeric:tabular-nums;padding-top:.15rem}
+.mau{color:var(--coral)}
+.mau-tag{font-family:var(--mono);font-size:.64rem;color:var(--coral);
+  border:1px solid var(--coral-borda);background:var(--coral-fundo);
+  border-radius:5px;padding:.05rem .3rem;margin-left:.35rem;white-space:nowrap}
+.selo{font-size:.64rem;font-weight:600;padding:.1rem .42rem;border-radius:99px;
+  border:1px solid;white-space:nowrap;margin-left:.35rem}
+.selo.ap{color:var(--neon);border-color:var(--neon-borda);background:var(--neon-fundo)}
+
+/* ---- regra ---- */
+.regra{border:1px solid var(--line);border-radius:12px;background:var(--surface);
+  overflow:hidden}
+.regra-tit{padding:.7rem 1rem;border-bottom:1px solid var(--line);background:var(--bg-2);
+  font-weight:600;font-size:.9rem;display:flex;align-items:center;gap:.5rem}
+.regra-tit .modo{font-family:var(--mono);font-size:.7rem;color:var(--roxo);
+  border:1px solid #3a2b52;background:#1a1226;border-radius:5px;padding:.08rem .38rem}
+.regra-corpo{padding:.85rem 1rem;display:flex;flex-direction:column;gap:.6rem}
+.rl{display:flex;gap:.7rem;align-items:baseline;font-size:.86rem}
+.rl .qual{font-family:var(--mono);font-size:.7rem;color:var(--text-faint);
+  min-width:5.2em;flex:none;text-transform:uppercase;letter-spacing:.05em}
+.cadeia{font-family:var(--mono);font-size:.78rem;color:var(--text-dim);
+  background:var(--bg-2);border:1px solid var(--line);border-radius:8px;
+  padding:.5rem .65rem;overflow-x:auto;white-space:nowrap}
+.cadeia b{color:var(--neon);font-weight:500}
+.nunca{display:flex;gap:.6rem;padding:.6rem .8rem;border-radius:10px;font-size:.82rem;
+  border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:#F0D9A8;
+  line-height:1.5}
+.nunca b{color:var(--ambar)}
+
+/* ---- decisões ---- */
+.dec{border:1px solid var(--line);border-radius:12px;background:var(--surface);
+  display:flex;flex-direction:column}
+.dec-item{padding:.9rem 1.05rem;border-top:1px solid var(--line)}
+.dec-item:first-child{border-top:none}
+.dec-item b{font-size:.9rem;display:block;margin-bottom:.2rem}
+.dec-item p{margin:0;font-size:.83rem;color:var(--text-dim)}
+.dec-item .rec{color:var(--neon);font-weight:600}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
+  border:1px solid var(--line);border-radius:5px;padding:.06rem .3rem;color:var(--neon)}
+.rodape{color:var(--text-faint);font-size:.78rem;border-top:1px solid var(--line);
+  padding-top:1rem}
+</style>
+
+<div class="wrap">
+
+  <header class="head">
+    <div class="eyebrow">Mockup para aprovação · Serviços › Funil</div>
+    <h1>O funil mostra <span class="marca">telefone, traço e nome repetido</span> no lugar do cliente</h1>
+    <p>A linha do funil monta o título com dois campos livres — <code>cliente</code> e
+      <code>empresa</code> — que guardam a mesma coisa e divergem. O nome certo já está
+      no banco; só não é ele que aparece.</p>
+  </header>
+
+  <!-- ------------------------------------------------ placar -->
+  <section class="placar">
+    <div class="kpi neutro"><b>26</b><span>orçamentos hoje</span></div>
+    <div class="kpi ruim"><b>19</b><span>aparecem como “−”</span></div>
+    <div class="kpi ruim"><b>2</b><span>aparecem como telefone</span></div>
+    <div class="kpi bom"><b>26</b><span>resolvem com o dado que já existe</span></div>
+  </section>
+
+  <!-- ------------------------------------------------ eventos -->
+  <section class="sec">
+    <h2>Buffet e festas <span style="font-weight:400;color:var(--text-faint);font-size:.9rem">— modo evento</span></h2>
+    <p>Aqui o cliente é uma pessoa, não uma empresa. O campo <code>empresa</code> acabou
+      virando o nome dela, e <code>cliente</code> recebeu o que sobrou — às vezes o
+      telefone. Enquanto isso, <b>tipo, data e nº de convidados já estão salvos</b> e não
+      aparecem em lugar nenhum.</p>
+    <div class="par">
+      <div class="col antes">
+        <h3>Hoje</h3>
+        <div class="pilha">
+          <div class="linha"><span class="num">#12</span><span class="corpo">
+            <div class="tit">Clara Marques <span class="mut" style="color:var(--text-dim);font-weight:400">· Ana Clara Marques</span><span class="mau-tag">nome cortado</span></div>
+            <div class="sub">rascunho</div></span><span class="val">12.925</span></div>
+          <div class="linha"><span class="num">#11</span><span class="corpo">
+            <div class="tit mau">− <span style="color:var(--text-dim);font-weight:400">· Isabela Silva Mendes</span><span class="mau-tag">sem título</span></div>
+            <div class="sub">rascunho</div></span><span class="val">6.675</span></div>
+          <div class="linha"><span class="num">#9</span><span class="corpo">
+            <div class="tit mau">86994160050 <span style="color:var(--text-dim);font-weight:400">· Larissa Rakel Almeida Rodriges</span><span class="mau-tag">telefone</span></div>
+            <div class="sub">rascunho</div></span><span class="val">8.600</span></div>
+          <div class="linha"><span class="num">#8</span><span class="corpo">
+            <div class="tit mau">86998192489 <span style="color:var(--text-dim);font-weight:400">· Josiany Rayra Soares dos Santos</span><span class="mau-tag">telefone</span></div>
+            <div class="sub">aprovada</div></span><span class="val">7.090</span></div>
+        </div>
+      </div>
+      <div class="col depois">
+        <h3>Proposto</h3>
+        <div class="pilha">
+          <div class="linha"><span class="num">#12</span><span class="corpo">
+            <div class="tit">Ana Clara Marques</div>
+            <div class="sub">🎓 Formatura · 24/02/2027 · 150 convidados</div></span><span class="val">12.925</span></div>
+          <div class="linha"><span class="num">#11</span><span class="corpo">
+            <div class="tit">Isabela Silva Mendes</div>
+            <div class="sub">💍 Casamento · 19/12/2026 · 150 convidados</div></span><span class="val">6.675</span></div>
+          <div class="linha"><span class="num">#9</span><span class="corpo">
+            <div class="tit">Larissa Rakel Almeida Rodriges</div>
+            <div class="sub">🎂 Aniversário · 06/02/2028 · 100 convidados</div></span><span class="val">8.600</span></div>
+          <div class="linha"><span class="num">#8</span><span class="corpo">
+            <div class="tit">Josiany Rayra Soares dos Santos<span class="selo ap">aprovada</span></div>
+            <div class="sub">💍 Casamento · 19/12/2026 · 100 convidados</div></span><span class="val">7.090</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ recorrente -->
+  <section class="sec">
+    <h2>Contratos de serviço <span style="font-weight:400;color:var(--text-faint);font-size:.9rem">— modo recorrente</span></h2>
+    <p>Aqui os dois campos <b>têm razão de existir</b>: <code>empresa</code> é a empresa e
+      <code>cliente</code> é quem fala com você. O erro é a ordem — hoje a pessoa vira
+      título e a empresa vira nota de rodapé, quando 19 de 26 nem têm contato preenchido
+      e o título fica vazio.</p>
+    <div class="par">
+      <div class="col antes">
+        <h3>Hoje</h3>
+        <div class="pilha">
+          <div class="linha"><span class="num">#2</span><span class="corpo">
+            <div class="tit">Renata Cachorrinha <span style="color:var(--text-dim);font-weight:400">· Renatas Digital</span><span class="mau-tag">invertido</span></div>
+            <div class="sub">aprovada</div></span><span class="val">—</span></div>
+          <div class="linha"><span class="num">#14</span><span class="corpo">
+            <div class="tit mau">− <span style="color:var(--text-dim);font-weight:400">· BELEZA HAIR</span><span class="mau-tag">sem título</span></div>
+            <div class="sub">rascunho</div></span><span class="val">—</span></div>
+          <div class="linha"><span class="num">#8</span><span class="corpo">
+            <div class="tit">Aladdin Consultoria e Tecnologia <span style="color:var(--text-dim);font-weight:400">· Aladdin Consultoria e Tecnologia</span><span class="mau-tag">repetido</span></div>
+            <div class="sub">rascunho</div></span><span class="val">—</span></div>
+        </div>
+      </div>
+      <div class="col depois">
+        <h3>Proposto</h3>
+        <div class="pilha">
+          <div class="linha"><span class="num">#2</span><span class="corpo">
+            <div class="tit">Renatas Digital<span class="selo ap">aprovada</span></div>
+            <div class="sub">👤 Renata Cachorrinha</div></span><span class="val">—</span></div>
+          <div class="linha"><span class="num">#14</span><span class="corpo">
+            <div class="tit">BELEZA HAIR</div>
+            <div class="sub">rascunho</div></span><span class="val">—</span></div>
+          <div class="linha"><span class="num">#8</span><span class="corpo">
+            <div class="tit">Aladdin Consultoria e Tecnologia</div>
+            <div class="sub">rascunho</div></span><span class="val">—</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ a regra -->
+  <section class="sec">
+    <h2>A regra</h2>
+    <p>Uma fonte de verdade para o título, com o cadastro do cliente na frente — ele é o
+      único dos três que está certo em <b>todas</b> as 26 linhas.</p>
+
+    <div class="regra" style="margin-bottom:1rem">
+      <div class="regra-tit">Título da linha <span class="modo">os dois modos</span></div>
+      <div class="regra-corpo">
+        <div class="cadeia"><b>clientes.nome</b> (pelo cliente_id) → <b>empresa</b> → <b>cliente</b> → “Orçamento nº N”</div>
+        <div class="nunca"><span>⚠️</span><div><b>Nunca</b> um telefone e <b>nunca</b> um traço.
+          Valor que só tem dígitos e pontuação é pulado na cadeia — vira contato, não nome.
+          Hoje nenhuma das 26 linhas precisa chegar no “Orçamento nº N”.</div></div>
+      </div>
+    </div>
+
+    <div class="par">
+      <div class="regra">
+        <div class="regra-tit">Subtítulo <span class="modo">modo evento</span></div>
+        <div class="regra-corpo">
+          <div class="rl"><span class="qual">mostra</span><span>tipo do evento · data · nº de convidados</span></div>
+          <div class="rl"><span class="qual">por quê</span><span style="color:var(--text-dim)">É o que distingue duas propostas do mesmo mês — e já está salvo em <code>evento</code>, sem aparecer.</span></div>
+        </div>
+      </div>
+      <div class="regra">
+        <div class="regra-tit">Subtítulo <span class="modo">modo recorrente</span></div>
+        <div class="regra-corpo">
+          <div class="rl"><span class="qual">mostra</span><span>a pessoa de contato</span></div>
+          <div class="rl"><span class="qual">some se</span><span style="color:var(--text-dim)">for igual ao título, for telefone, ou não existir. Nada de “Aladdin · Aladdin”.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ decisões -->
+  <section class="sec">
+    <h2>Três decisões pra você</h2>
+    <p>Só o que muda o que eu construo. O resto eu resolvo.</p>
+    <div class="dec">
+      <div class="dec-item">
+        <b>1. Só a tela, ou arrumo o dado também?</b>
+        <p>A regra conserta a exibição sem tocar em nada. Dá pra ir além e gravar o nome
+          certo no orçamento — mas isso é escrever em 26 linhas de produção.
+          <span class="rec">Recomendo só a tela agora</span>: resolve 100% do que você vê,
+          com risco zero.</p>
+      </div>
+      <div class="dec-item">
+        <b>2. Os dois campos continuam na tela de edição?</b>
+        <p>No modo evento, pedir “empresa” e “cliente” pra uma noiva é o que gerou a
+          bagunça. <span class="rec">Recomendo um campo só</span> — “Nome do cliente” —
+          quando o modo é evento, mantendo os dois no recorrente, onde fazem sentido.</p>
+      </div>
+      <div class="dec-item">
+        <b>3. O telefone aparece na linha?</b>
+        <p>Ele existe em quase todas e some do título pela regra.
+          <span class="rec">Recomendo mostrá-lo como atalho</span> — um ícone de WhatsApp
+          no fim da linha, que abre a conversa — em vez de sumir de vez.</p>
+      </div>
+    </div>
+  </section>
+
+  <p class="rodape">Mockup estático — nada aqui está ligado. Todos os nomes, valores,
+    datas e números de orçamento são <b>dados reais</b> das contas 3 e 34, lidos do banco
+    em 25/08. Cores e tipografia são as do painel (<code>web/tema.py</code>).</p>
+
+</div>

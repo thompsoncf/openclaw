@@ -242,3 +242,41 @@ def test_limpar_devolve_o_total_do_servidor(rodado):
     ORIGINAL garante que nenhum arredondamento nosso se meta no meio."""
     e = rodado["limpou"]
     assert e["n"] == 3 and e["total"] == "R$ 2.950,00" and e["rotulo"] == "Total"
+
+
+# ── o formatador do JS tem que ser o mesmo do servidor ───────────────────────
+def test_o_brl_do_js_bate_com_o_do_servidor():
+    """Duas razões pra isto existir.
+
+    A primeira: limpar o filtro devolve o total do SERVIDOR e filtrar mostra o
+    total do JS. Se os dois formatarem diferente, o número muda de cara na frente
+    do dono sem o valor ter mudado.
+
+    A segunda é a que quebrou o CI em 26/08: a versão anterior usava
+    `toLocaleString('pt-BR')`, que depende do ICU do runtime. Onde o ICU é
+    completo dá "R$ 2.700,00"; num Node de ICU reduzido cai no padrão americano
+    e dá "R$ 2,700.00". Passava aqui e falhava lá — e passaria pro cliente
+    conforme o navegador dele.
+    """
+    if not shutil.which("node"):
+        pytest.skip("sem node no ambiente")
+    m = re.search(r"(function brl\(c\)\{.*?\n    \})", _TPL, re.S)
+    assert m, "não achei o formatador no template"
+    valores = [0, 1, 99, 100, 250, 20000, 250000, 100000, 999999, 123456789,
+               -2500, -100000]
+    js = m.group(1) + "\nconsole.log(JSON.stringify(%s.map(brl)));" % json.dumps(valores)
+    r = subprocess.run(["node", "-e", js], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr[:600]
+    do_js = json.loads(r.stdout.strip().splitlines()[-1])
+    do_servidor = [pt.brl(v) for v in valores]
+    assert do_js == do_servidor, (
+        "JS e servidor formatam diferente:\n  js=%s\n  py=%s" % (do_js, do_servidor))
+
+
+def test_o_formatador_nao_depende_de_locale():
+    """toLocaleString/Intl no caminho do dinheiro é justamente o que muda de
+    resultado conforme onde o código roda."""
+    m = re.search(r"function brl\(c\)\{.*?\n    \}", _TPL, re.S)
+    corpo = m.group(0)
+    assert "toLocaleString" not in corpo and "Intl" not in corpo, \
+        "o formatador voltou a depender do ICU do runtime"

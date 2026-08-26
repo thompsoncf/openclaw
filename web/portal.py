@@ -6196,8 +6196,26 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     });
     var celTot = rodape ? rodape.querySelector('.rel-num:last-child') : null;
     var totOriginal = celTot ? celTot.textContent : '';
+    // Formatação À MÃO, e não toLocaleString('pt-BR'). Dois motivos:
+    //   1. toLocaleString depende do ICU do runtime. Num Node/navegador com ICU
+    //      reduzido o 'pt-BR' cai no padrão americano e R$ 2.700,00 vira
+    //      R$ 2,700.00 — o total mudaria de cara conforme onde roda;
+    //   2. tem que bater EXATAMENTE com o filtro `brl` do servidor (portal.py),
+    //      senão limpar o filtro trocaria a formatação do número na cara do dono.
+    // Sem regex de propósito: este template é string Python comum (não raw), e
+    // uma classe de caractere tipo barra-d num literal JS vira escape inválido do
+    // Python — foi assim que um bloco <script> inteiro já morreu por SyntaxError
+    // aqui (ver o docstring de tests/test_painel_js_sintaxe.py).
     function brl(c){
-      return 'R$ ' + (c/100).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+      var neg = c < 0; c = Math.abs(c);
+      var i = String(Math.floor(c / 100)), d = String(c % 100);
+      if (d.length < 2) d = '0' + d;
+      var mil = '';
+      while (i.length > 3){ mil = '.' + i.slice(-3) + mil; i = i.slice(0, -3); }
+      // o sinal vem DEPOIS do "R$ ", como no servidor ("R$ -25,00"), não antes.
+      // Total negativo não aparece nestes relatórios hoje, mas divergir aqui é
+      // divergir em silêncio até o dia em que aparecer.
+      return 'R$ ' + (neg ? '-' : '') + i + mil + ',' + d;
     }
     function aplicar(){
       var q = (cx.value || '').trim().toLowerCase();

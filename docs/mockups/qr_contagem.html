@@ -1,0 +1,441 @@
+<title>Relógio do QR</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+/* Tokens da casa — copiados de web/tema.py, não inventados aqui.
+   O painel é dark-only por decisão de produto (color-scheme: dark no _TOKENS),
+   então este mockup assume o mesmo mundo visual e pinta tudo explicitamente. */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:var(--body); font-size:16px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1140px;margin:0 auto;padding:56px 24px 96px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0}
+h1{font-size:clamp(30px,4.4vw,46px);font-weight:700;letter-spacing:-.02em;line-height:1.1}
+h2{font-size:26px;font-weight:600;letter-spacing:-.01em}
+h3{font-size:17px;font-weight:600}
+p{margin:0}
+.olho{
+  font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--neon);margin-bottom:14px;
+}
+.sub{color:var(--text-dim);max-width:64ch;margin-top:16px;font-size:17px}
+section{margin-top:64px}
+.cab{display:flex;flex-direction:column;gap:10px;margin-bottom:26px}
+.cab p{color:var(--text-dim);max-width:70ch}
+hr{border:0;border-top:1px solid var(--line);margin:0}
+
+/* ---------- a linha do tempo do QR: o mecanismo real ---------- */
+.vida{
+  display:flex;gap:3px;align-items:stretch;margin-top:8px;
+  overflow-x:auto;padding-bottom:6px;
+}
+.fatia{
+  border-radius:5px;padding:12px 10px;min-width:74px;flex:0 0 auto;
+  border:1px solid var(--line);background:var(--bg-2);
+}
+.fatia.primeiro{flex:0 0 190px;background:var(--neon-fundo);border-color:var(--neon-borda)}
+.fatia.vao{flex:0 0 165px;background:var(--ambar-fundo);border-color:var(--ambar-borda)}
+.fatia b{display:block;font-family:var(--mono);font-size:15px;font-weight:600;
+  font-variant-numeric:tabular-nums}
+.fatia.primeiro b{color:var(--neon-bright)}
+.fatia.vao b{color:var(--ambar)}
+.fatia span{display:block;font-size:11.5px;color:var(--text-dim);margin-top:3px;line-height:1.35}
+.regua{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;
+  color:var(--text-faint);margin-top:8px;font-variant-numeric:tabular-nums}
+
+/* ---------- telas ---------- */
+.telas{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:20px;margin-top:8px}
+.tela{
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  padding:22px;display:flex;flex-direction:column;gap:14px;
+}
+.tela.hoje{opacity:.96}
+.rot{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text-faint);display:flex;justify-content:space-between;align-items:center;gap:8px;
+}
+.pill{
+  font-family:var(--mono);font-size:10px;letter-spacing:.08em;padding:3px 8px;border-radius:99px;
+  border:1px solid var(--line);color:var(--text-dim);text-transform:uppercase;white-space:nowrap;
+}
+.pill.mau{color:var(--coral);border-color:var(--coral-borda);background:var(--coral-fundo)}
+.pill.bom{color:var(--neon);border-color:var(--neon-borda);background:var(--neon-fundo)}
+.pill.at{color:var(--ambar);border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+
+.qrbox{
+  background:var(--bg);border:1px solid var(--line);border-radius:10px;
+  display:flex;align-items:center;justify-content:center;padding:18px;position:relative;
+}
+.qrfalso{width:132px;height:132px;border-radius:4px;background:
+  repeating-conic-gradient(var(--text) 0 25%, var(--bg) 0 50%) 0 0/13px 13px;
+  opacity:.86}
+.qrfalso.apagado{opacity:.13;filter:grayscale(1)}
+.selo{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:8px;background:rgba(10,15,12,.9);border-radius:10px;
+}
+.selo b{font-family:var(--display);font-size:17px;color:var(--ambar)}
+.selo span{font-size:12.5px;color:var(--text-dim);text-align:center;max-width:22ch}
+
+.msg{font-size:14px;color:var(--text-dim);line-height:1.5}
+.msg strong{color:var(--text);font-weight:600}
+.passos{margin:0;padding-left:18px;font-size:13.5px;color:var(--text-dim);line-height:1.75}
+.passos b{color:var(--text);font-weight:600}
+.btn{
+  font-family:var(--body);font-size:14px;font-weight:600;padding:10px 16px;border-radius:8px;
+  border:1px solid var(--neon-borda);background:var(--neon);color:var(--sobre-verde);
+  text-align:center;cursor:pointer;
+}
+.btn.quieto{background:transparent;color:var(--text-dim);border-color:var(--line)}
+
+/* ---------- o relógio ---------- */
+.relogio{display:flex;align-items:center;gap:14px}
+.anel{
+  width:56px;height:56px;border-radius:50%;flex:0 0 auto;display:grid;place-items:center;
+  background:conic-gradient(var(--cor,var(--neon)) calc(var(--p,1)*360deg), var(--line) 0);
+  position:relative;
+}
+.anel::after{content:"";position:absolute;inset:5px;border-radius:50%;background:var(--surface)}
+.anel b{
+  position:relative;z-index:1;font-family:var(--mono);font-size:17px;font-weight:600;
+  color:var(--cor,var(--neon));font-variant-numeric:tabular-nums;
+}
+.relogio .txt b{display:block;font-size:14.5px;color:var(--text);font-weight:600}
+.relogio .txt span{font-size:12.5px;color:var(--text-dim)}
+
+.aviso{
+  border-radius:8px;padding:11px 13px;font-size:13px;line-height:1.5;
+  border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:#F2D08A;
+}
+.aviso.grave{border-color:var(--coral-borda);background:var(--coral-fundo);color:#F0A9A4}
+.aviso.calmo{border-color:var(--neon-borda);background:var(--neon-fundo);color:#9FE7BC}
+
+/* ---------- demo ao vivo ---------- */
+.demo{
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;
+  display:grid;grid-template-columns:minmax(260px,320px) 1fr;gap:26px;align-items:start;
+}
+@media(max-width:760px){.demo{grid-template-columns:1fr}}
+.ctrl{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.ctrl button{
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.04em;padding:7px 11px;border-radius:7px;
+  border:1px solid var(--line);background:var(--bg-2);color:var(--text-dim);cursor:pointer;
+}
+.ctrl button:hover{border-color:var(--neon-borda);color:var(--text)}
+.ctrl button:focus-visible{outline:2px solid var(--neon);outline-offset:2px}
+.legenda{font-size:13px;color:var(--text-dim);margin-top:12px}
+
+/* ---------- tabela de análise ---------- */
+.tab{width:100%;border-collapse:collapse;font-size:14.5px;margin-top:6px}
+.tab th,.tab td{text-align:left;padding:13px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.tab th{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--text-faint);font-weight:400;
+}
+.tab td:first-child{color:var(--text);font-weight:600;width:26%}
+.tab td:last-child{color:var(--text-dim)}
+.tab .ganho{color:var(--neon);font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+.tab .custo{color:var(--text-faint);font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+.rodape{margin-top:72px;padding-top:22px;border-top:1px solid var(--line);
+  font-size:13px;color:var(--text-faint);line-height:1.7}
+.rodape code{font-family:var(--mono);font-size:12px;color:var(--text-dim)}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+
+  <p class="olho">Painel · Conectar WhatsApp</p>
+  <h1>O relógio do QR</h1>
+  <p class="sub">
+    Hoje a tela mostra o código e a frase “escaneie no celular”. Não diz que ele morre em
+    60 segundos, não diz que vai ser trocado, e não avisa quando acaba de vez. Quem está
+    do outro lado é o dono de uma empresa com o celular na mão, sem saber se tem pressa.
+  </p>
+
+  <!-- ══ 1. o mecanismo ═══════════════════════════════════════════════════ -->
+  <section>
+    <div class="cab">
+      <h2>Quanto tempo, de verdade</h2>
+      <p>
+        Os números não são estimativa: saem do Baileys, em <code>Socket/socket.js</code>,
+        linhas 464 e 478. O WhatsApp manda um punhado de códigos de uma vez; a biblioteca
+        gasta um por vez. Quando acabam, o Baileys derruba a conexão com 408 — e o nosso
+        handler de <code>close</code> religa em 2,5 s e pede um lote novo. Não expira pra
+        sempre: <b>some da tela por alguns segundos e volta</b>. Era esse sumiço calado que
+        parecia defeito.
+      </p>
+    </div>
+
+    <div class="vida">
+      <div class="fatia primeiro"><b>60 s</b><span>1º código — a janela confortável</span></div>
+      <div class="fatia"><b>20 s</b><span>2º</span></div>
+      <div class="fatia"><b>20 s</b><span>3º</span></div>
+      <div class="fatia"><b>20 s</b><span>4º</span></div>
+      <div class="fatia"><b>20 s</b><span>5º</span></div>
+      <div class="fatia vao"><b>~3 s</b><span>vão — o serviço religa e pede um lote novo</span></div>
+      <div class="fatia primeiro"><b>60 s</b><span>1º código do lote seguinte — recomeça</span></div>
+    </div>
+    <div class="regua"><span>0 s</span><span>60 s</span><span>≈ 2 min 20 s por lote, e recomeça</span></div>
+
+    <p class="legenda">
+      O Rawilson pareou hoje às 11:17 e levou <b style="color:var(--text)">42 segundos</b> —
+      passou com 18 de folga, no primeiro código. Quem não estiver com o celular já aberto
+      em <i>Aparelhos conectados</i> não passa.
+    </p>
+  </section>
+
+  <!-- ══ 2. antes e depois ════════════════════════════════════════════════ -->
+  <section>
+    <div class="cab">
+      <h2>A tela hoje, e a proposta</h2>
+      <p>Mesmo momento — código no ar, esperando o celular.</p>
+    </div>
+
+    <div class="telas">
+
+      <div class="tela hoje">
+        <div class="rot"><span>Hoje</span><span class="pill mau">sem relógio</span></div>
+        <div class="qrbox"><div class="qrfalso"></div></div>
+        <p class="msg">📱 Escaneie o QR no WhatsApp do celular (Aparelhos conectados › Conectar aparelho).</p>
+        <div class="btn quieto">📱 Gerar QR</div>
+        <p class="msg" style="color:var(--text-faint);font-size:12.5px">
+          O texto é o mesmo do primeiro ao último segundo. Se o código trocar na tela,
+          parece defeito. Se morrer, a tela simplesmente para.
+        </p>
+      </div>
+
+      <div class="tela">
+        <div class="rot"><span>Proposta · código no ar</span><span class="pill bom">37 s</span></div>
+        <div class="qrbox"><div class="qrfalso"></div></div>
+        <div class="relogio" style="--p:.61;--cor:var(--neon)">
+          <div class="anel"><b>37</b></div>
+          <div class="txt">
+            <b>Escaneie agora</b>
+            <span>Este código vale por mais 37 segundos</span>
+          </div>
+        </div>
+        <ol class="passos">
+          <li>No celular, abra o <b>WhatsApp</b></li>
+          <li>Toque em <b>Aparelhos conectados</b></li>
+          <li>Toque em <b>Conectar aparelho</b> e aponte para a tela</li>
+        </ol>
+      </div>
+
+      <div class="tela">
+        <div class="rot"><span>Proposta · renovando</span><span class="pill at">novo código</span></div>
+        <div class="qrbox"><div class="qrfalso"></div></div>
+        <div class="relogio" style="--p:.85;--cor:var(--ambar)">
+          <div class="anel"><b>17</b></div>
+          <div class="txt">
+            <b>Código renovado</b>
+            <span>O anterior venceu — aponte para este</span>
+          </div>
+        </div>
+        <div class="aviso">
+          Trocar de código é normal e não é erro. A partir do segundo, cada um dura
+          <b>20 segundos</b>.
+        </div>
+      </div>
+
+      <div class="tela">
+        <div class="rot"><span>Proposta · vão entre lotes</span><span class="pill at">buscando</span></div>
+        <div class="qrbox">
+          <div class="qrfalso apagado"></div>
+          <div class="selo">
+            <b>Buscando um código novo</b>
+            <span>Aguarde alguns segundos</span>
+          </div>
+        </div>
+        <div class="aviso">
+          O tempo deste código acabou e estamos buscando um novo — <b>nada foi perdido</b>.
+          Deixe o WhatsApp aberto em <b>Aparelhos conectados</b> que ele aparece em instantes.
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ══ 3. demo ══════════════════════════════════════════════════════════ -->
+  <section>
+    <div class="cab">
+      <h2>Como se sente na mão</h2>
+      <p>
+        O relógio rodando de verdade, com os tempos reais. Vale ver se os últimos
+        segundos apertam ou tranquilizam — é a única parte que não dá para julgar parada.
+      </p>
+    </div>
+
+    <div class="demo">
+      <div>
+        <div class="qrbox" style="margin-bottom:16px">
+          <div class="qrfalso" id="qr"></div>
+          <div class="selo" id="selo" style="display:none">
+            <b>Buscando um código novo</b>
+            <span>Nada foi perdido — aguarde alguns segundos</span>
+          </div>
+        </div>
+        <div class="relogio">
+          <div class="anel" id="anel" style="--p:.95;--cor:var(--neon)"><b id="seg">57</b></div>
+          <div class="txt">
+            <b id="titulo">Escaneie agora</b>
+            <span id="detalhe">Este código vale por mais 57 segundos</span>
+          </div>
+        </div>
+        <div class="ctrl">
+          <button id="play">▶ rodar do início</button>
+          <button id="pula">⏭ pular pro fim</button>
+          <button id="parar">■ parar</button>
+        </div>
+      </div>
+
+      <div>
+        <h3 style="margin-bottom:10px">O que muda em cada faixa</h3>
+        <table class="tab">
+          <tr><td>57 → 21 s</td><td>Verde, calmo. Só o passo a passo e a contagem.</td></tr>
+          <tr><td>20 → 11 s</td><td>Segue verde. Nada de alarme cedo demais — ansiedade não faz ninguém escanear mais rápido.</td></tr>
+          <tr><td>10 → 1 s</td><td>Âmbar: “vai trocar de código em X”. Prepara para a troca em vez de deixá-la surpreender.</td></tr>
+          <tr><td>troca</td><td>O anel reinicia em 20 s e o texto explica que é normal.</td></tr>
+          <tr><td>fim do lote</td><td>Âmbar, QR apagado, e a frase que tira o medo: <b>nada foi perdido</b>. Uns 3 s depois chega um lote novo e o relógio recomeça em 57.</td></tr>
+        </table>
+        <p class="legenda" id="estado">—</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 4. análise ═══════════════════════════════════════════════════════ -->
+  <section>
+    <div class="cab">
+      <h2>O que melhorar, e o que cada coisa custa</h2>
+      <p>Em ordem de quanto resolve por quanto custa. As três primeiras são de tela; as duas últimas mexem no serviço.</p>
+    </div>
+
+    <table class="tab">
+      <tr>
+        <th>mudança</th><th>por quê</th><th>custo</th>
+      </tr>
+      <tr>
+        <td>Contagem regressiva</td>
+        <td>O cliente passa a saber se tem pressa. Hoje ele descobre que era urgente quando já falhou.</td>
+        <td class="ganho">só front</td>
+      </tr>
+      <tr>
+        <td>Passo a passo numerado</td>
+        <td>A frase atual põe o caminho entre parênteses, no fim. Vira três linhas que ele segue enquanto o relógio corre.</td>
+        <td class="ganho">só front</td>
+      </tr>
+      <tr>
+        <td>Explicar o vão entre lotes</td>
+        <td>Hoje a caixa some calada por alguns segundos e parece travamento. A pior parte nunca foi ficar sem código — é não saber se quebrou alguma coisa na conta. A frase “nada foi perdido” é o conteúdo, não enfeite.</td>
+        <td class="ganho">só front</td>
+      </tr>
+      <tr>
+        <td>Avisar antes de desconectar</td>
+        <td>Quem clica em Desconectar não sabe que vai precisar do celular em 2 minutos. Um passo de confirmação — “o celular está com você agora?” — evita a conta ficar fora do ar esperando alguém achar o aparelho.</td>
+        <td class="custo">front + 1 rota</td>
+      </tr>
+      <tr>
+        <td>Esticar o primeiro código</td>
+        <td>O <code>qrTimeout</code> é configurável e nós não passamos nenhum — por isso valem os 60 s do padrão. Dá para pedir mais folga na primeira janela, que é onde quase todo mundo pareia.</td>
+        <td class="custo">1 linha no serviço</td>
+      </tr>
+    </table>
+
+    <div class="aviso calmo" style="margin-top:22px">
+      <b>Correção do que eu tinha desenhado antes:</b> a primeira versão deste mockup dizia
+      que o código “expira e acabou”, e propunha um botão de gerar de novo. Ao conferir o
+      handler de <code>close</code> antes de implementar, descobri que não é isso: o 408 cai
+      no religa-genérico, o serviço pede um lote novo em 2,5 s e o ciclo recomeça sozinho.
+      O botão seria inútil e o texto seria mentira — por isso a tela agora explica o vão em
+      vez de anunciar um fim que não acontece.
+    </div>
+  </section>
+
+  <p class="rodape">
+    Tempos conferidos em <code>node_modules/@whiskeysockets/baileys/lib/Socket/socket.js:464,478</code> —
+    <code>qrMs = qrTimeout || 60000</code> no primeiro e <code>|| 20000</code> nos seguintes;
+    quando os <code>ref</code> acabam, <code>end(Boom('QR refs attempts ended'))</code>.
+    Tela atual em <code>web/painel_prospeccao.py</code> (<code>_QR_ROT</code>, e o polling de 3 s do <code>c2Poll</code>).
+    Cores e fontes dos tokens de <code>web/tema.py</code>. Pareamento de referência: conta 23, 26/08, 42 s.
+  </p>
+</div>
+
+<script>
+(function(){
+  var FASES=[60,20,20,20,20], ATRASO=3;   // tempos do Baileys; ATRASO = o polling de 3s
+  var anel=document.getElementById('anel'), seg=document.getElementById('seg'),
+      tit=document.getElementById('titulo'), det=document.getElementById('detalhe'),
+      selo=document.getElementById('selo'), qr=document.getElementById('qr'),
+      est=document.getElementById('estado');
+  var t=null, fase=0, resta=FASES[0]-ATRASO, vao=false;
+
+  function pinta(){
+    var total=(FASES[fase]||20)-ATRASO;
+    var p=Math.max(0,resta)/total;
+    var cor = resta<=10 ? 'var(--ambar)' : 'var(--neon)';
+    anel.style.setProperty('--p',p);
+    anel.style.setProperty('--cor',cor);
+    seg.textContent=Math.max(0,resta);
+    if(resta<=10){
+      tit.textContent = fase<FASES.length-1 ? 'Vai trocar de código' : 'Último código';
+      det.textContent = fase<FASES.length-1
+        ? 'Um novo aparece em '+Math.max(0,resta)+' s — pode esperar'
+        : 'Depois deste, é preciso gerar outro';
+    } else if(fase===0){
+      tit.textContent='Escaneie agora';
+      det.textContent='Este código vale por mais '+resta+' segundos';
+    } else {
+      tit.textContent='Código renovado';
+      det.textContent='O anterior venceu — aponte para este';
+    }
+    est.textContent='código '+(fase+1)+' de '+FASES.length+' · '+Math.max(0,resta)+' s restantes';
+  }
+  // Fim do lote: o serviço religa e pede outro. NÃO é morte — foi por isso que o
+  // texto mudou depois de eu conferir o handler de close.
+  function entraNoVao(){
+    clearInterval(t); t=null; vao=true;
+    selo.style.display='flex'; qr.classList.add('apagado');
+    anel.style.setProperty('--p',0); anel.style.setProperty('--cor','var(--ambar)');
+    seg.textContent='0'; tit.textContent='Buscando um código novo';
+    det.textContent='Nada foi perdido — aguarde alguns segundos';
+    est.textContent='fim do lote · o serviço religa e pede outro (~3 s)';
+    setTimeout(function(){ if(vao) comeca(true); }, 3000);
+  }
+  function tick(){
+    resta--;
+    if(resta<0){
+      fase++;
+      if(fase>=FASES.length){ entraNoVao(); return; }
+      resta=FASES[fase]-ATRASO; qr.style.opacity=.35;
+      setTimeout(function(){qr.style.opacity=.86;},180);
+    }
+    pinta();
+  }
+  function comeca(loteNovo){
+    clearInterval(t); fase=0; resta=FASES[0]-ATRASO; vao=false;
+    if(loteNovo) est.textContent='lote novo · o primeiro código volta a valer 60 s';
+    selo.style.display='none'; qr.classList.remove('apagado'); qr.style.opacity=.86;
+    pinta(); t=setInterval(tick,1000);
+  }
+  document.getElementById('play').onclick=function(){comeca(false);};
+  document.getElementById('parar').onclick=function(){clearInterval(t);t=null;vao=false;est.textContent='parado';};
+  document.getElementById('pula').onclick=function(){clearInterval(t);t=null;vao=false;fase=FASES.length-1;resta=3;pinta();t=setInterval(tick,1000);};
+  pinta();
+})();
+</script>

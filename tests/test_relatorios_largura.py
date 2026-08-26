@@ -88,7 +88,11 @@ def test_todo_relatorio_tem_exatamente_uma_coluna_elastica():
     assert len(blocos) >= 6, f"esperava ao menos 6 relatórios, achei {len(blocos)}"
     for i, b in enumerate(blocos):
         n = b.count("flex=True")
-        assert n == 1, f"relatório #{i + 1} tem {n} colunas elásticas (tem que ser 1): {b[:90]}"
+        assert n == 1, (
+            f"relatório #{i + 1} tem {n} colunas elásticas (tem que ser exatamente 1).\n"
+            f"Marque a coluna de nome livre com flex=True em _col(...): sem ela a\n"
+            f"tabela volta a rolar pro lado e engole a primeira coluna.\n"
+            f"Colunas: {b.strip()[:140]}")
 
 
 def test_a_elastica_e_sempre_de_nome_livre():
@@ -96,7 +100,8 @@ def test_a_elastica_e_sempre_de_nome_livre():
     que tem tamanho previsível — e deixaria o nome, que é o longo, fixo."""
     fonte = open(pr.__file__, encoding="utf-8").read()
     for m in re.finditer(r'_col\("(\w+)",[^)]*flex=True', fonte):
-        assert m.group(1) in {"descricao", "contraparte", "cliente", "vendedor"}, \
+        assert m.group(1) in {"descricao", "contraparte", "cliente", "vendedor",
+                              "evento"}, \
             f"coluna elástica inesperada: {m.group(1)}"
 
 

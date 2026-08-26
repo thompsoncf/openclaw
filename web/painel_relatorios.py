@@ -593,7 +593,13 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> d
         })
     return {
         "label": "Agenda", "mock": False,
-        "colunas": [_col("inicio", "Data"), _col("evento", "Evento"),
+        # A elástica aqui é o EVENTO, não o cliente: o título é digitado à mão e
+        # não tem teto ("Reunião de alinhamento sobre o contrato da Prefeitura"),
+        # enquanto nome de cliente tem tamanho previsível. E este é o relatório
+        # mais largo dos sete — oito colunas —, então é onde faltar a elástica
+        # dói mais: sem ela a tabela rola pro lado e engole a Data e o começo do
+        # título, que foi o defeito do print de 26/08.
+        "colunas": [_col("inicio", "Data"), _col("evento", "Evento", flex=True),
                     _col("cliente", "Cliente"), _col("tipo", "Tipo"),
                     _col("status", "Status", tag=True),
                     _col("desfecho", "Desfecho", tag=True),

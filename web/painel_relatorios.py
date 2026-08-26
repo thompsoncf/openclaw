@@ -510,13 +510,26 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> d
     (realizado/não realizado) já existem desde as migrações 098-179; nenhuma
     coluna nova.
 
-    Cliente vem de `orcamentos.evento_agenda_id` quando o compromisso nasceu de
-    um orçamento aprovado, com a mesma regra `empresa or cliente` de
-    `_dados_orcamentos` — visita e compromisso pessoal não têm orçamento,
-    aparecem com "—". "Sinal" é `eventos_agenda.sinal_centavos`, o valor que
-    segura a DATA na própria agenda (163_evento_sinal_esperado) — não é receita
-    fechada, essa mora no orçamento e exigiria o mesmo join que a aba
-    Orçamentos já faz (`_VALOR_ORC`).
+    Cliente tem DUAS fontes, nenhuma delas nova: `orcamentos.evento_agenda_id`
+    quando o compromisso nasceu de um orçamento aprovado (mesma regra `empresa
+    or cliente` de `_dados_orcamentos`), e `eventos_agenda.prospeccao_id`
+    quando nasceu de um lead — `finance.cockpit.agendar_visita` liga os dois
+    assim que marca a visita, e é de onde vêm a maioria das linhas "Visita —
+    Fulano"/"VISITA TÉCNICA..." que apareciam com Cliente vazio antes desta
+    junção. O orçamento manda quando os dois existem (é o registro mais firme
+    — o lead pode ter sido reatribuído, o orçamento não). Reunião interna e
+    compromisso pessoal criados à mão (`finance.agenda_tools.marcar_evento`)
+    não têm nenhum dos dois — o nome, se existe, está só no título digitado à
+    mão, sem onde puxar; continuam "—", e é o esperado, não bug.
+
+    "Sinal" é `eventos_agenda.sinal_centavos`, o valor que segura a DATA na
+    própria agenda (163_evento_sinal_esperado) — só é gravado no "Só segurar a
+    data" do formulário de novo compromisso (web/painel_agenda.py, checkbox
+    `segurar`) ou na pré-reserva por orçamento (web/proposta._reservar_na_agenda).
+    `agendar_visita` nunca passa esse campo — visita não segura data, então
+    R$ 0,00 nessas linhas é o valor certo, não dado faltando. Receita cheia do
+    orçamento (não só o sinal) exigiria o mesmo join que a aba Orçamentos já
+    faz (`_VALOR_ORC`) e fica pra depois, se fizer falta.
 
     As métricas do topo ignoram o filtro de Status de propósito, igual em
     Orçamentos: mostram a distribuição inteira do período; o total da tabela é
@@ -539,9 +552,10 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> d
                       from orcamentos o
                      where o.evento_agenda_id = e.id
                      order by o.id desc limit 1
-                  ) oc on true"""
+                  ) oc on true
+                  left join prospeccao p on p.id = e.prospeccao_id"""
     if busca:
-        where.append("oc.nome ilike %s")
+        where.append("coalesce(oc.nome, p.contato, p.empresa) ilike %s")
         params.append(f"%{busca}%")
     base_sql = " and ".join(where)
 
@@ -570,7 +584,8 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> d
 
     with pool.connection() as c:
         rows = c.execute(
-            f"""select e.inicio, coalesce(e.tipo_evento, e.titulo), oc.nome,
+            f"""select e.inicio, coalesce(e.tipo_evento, e.titulo),
+                       coalesce(oc.nome, p.contato, p.empresa),
                        e.tipo, e.status, e.desfecho, e.convidados, e.sinal_centavos
                   from eventos_agenda e
                   {join_orc}

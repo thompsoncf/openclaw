@@ -1794,7 +1794,7 @@ function _fichaHtml(f){
   var linhas = '';
   if(f.cliente) linhas += cel('cliente', _esc(f.cliente), true);
   if(f.contato){
-    var so = String(f.contato).replace(/\D/g,'');
+    var so = String(f.contato).replace(/\\D/g,'');
     var num = so.length>=10 && so.slice(0,2)!=='55' ? '55'+so : so;
     linhas += '<div class="fic-c"><div class="k">whatsapp</div>'
             + '<a class="v sm" href="https://wa.me/'+num+'" target="_blank" rel="noopener">'

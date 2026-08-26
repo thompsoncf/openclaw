@@ -48,4 +48,45 @@ jobs:
       - name: Roda a suíte
         env:
           TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/openclaw_test
-        run: pytest -q
+        # `tee` pra saída aparecer no log DO PASSO e também virar arquivo. O `-o
+        # pipefail` é o que faz o passo continuar falhando quando o pytest falha:
+        # sem ele quem decide o código de saída é o `tee`, que sempre dá zero — e
+        # o CI passaria a mentir "verde" com teste quebrado, que é bem pior do que
+        # o problema que este bloco veio resolver.
+        run: |
+          set -o pipefail
+          pytest -q -rf --tb=short --color=no 2>&1 | tee pytest-saida.txt
+
+      # POR QUE ISTO EXISTE. Em 26/08 o CI reprovou três vezes seguidas e não houve
+      # jeito de saber QUAL teste caiu: a API de logs devolve o log do contêiner do
+      # Postgres (milhares de linhas de checkpoint) e as anotações do check run
+      # trazem só "Process completed with exit code 1". Cada tentativa de conserto
+      # virou palpite, e cada palpite custou um ciclo inteiro de CI.
+      #
+      # `if: always()` porque o valor está justamente na execução que FALHOU — só
+      # no sucesso seria inútil.
+      - name: Publica a saída do pytest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-saida
+          path: pytest-saida.txt
+          retention-days: 14
+          if-no-files-found: warn
+
+      # O resumo do job aparece na PRÓPRIA página do run, sem baixar nada — é o
+      # caminho mais curto entre "ficou vermelho" e "foi este teste".
+      - name: Resumo na página do run
+        if: failure()
+        run: |
+          echo '## Testes que falharam' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -E '^(FAILED|ERROR)' pytest-saida.txt >> $GITHUB_STEP_SUMMARY || \
+            echo '(nenhuma linha FAILED/ERROR — a suíte pode ter morrido antes de rodar)' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo '<details><summary>Últimas 120 linhas</summary>' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -120 pytest-saida.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo '</details>' >> $GITHUB_STEP_SUMMARY

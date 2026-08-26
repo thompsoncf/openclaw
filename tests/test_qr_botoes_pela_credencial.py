@@ -65,6 +65,16 @@ var clearInterval=function(){}, setInterval=function(){return 0;},
 var _qrTimer=null,_c2Timer=null,_qrEspera=null;
 function qrIndefinido(){ _els['qr-sair'].style.display='INDEFINIDO';
                          _els['qr-apagar'].style.display='INDEFINIDO'; }
+// DUBLÊS do relógio do QR. O qrShow/c2Show passou a chamá-lo, e recortar só a
+// função pelo nome (ver _funcao) deixa a dependência de fora — foi assim que
+// este arquivo quebrou inteiro quando o relógio entrou.
+//
+// Dublê e não a função de verdade porque o assunto AQUI é qual BOTÃO aparece por
+// credencial, e puxar meia dúzia de funções do relógio pra dentro acoplaria este
+// teste a código que não é dele. O relógio tem os seus: test_qr_relogio.py (31
+// asserções, roda o comportamento em Node), e test_painel_js_sintaxe garante que
+// o bloco inteiro compila com os dois juntos.
+function qrRelogio(){} function c2Relogio(){}
 %s
 %s
 // '' e não undefined: JSON.stringify some com a chave, e o teste leria KeyError

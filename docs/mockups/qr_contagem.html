@@ -51,11 +51,11 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
   border:1px solid var(--line);background:var(--bg-2);
 }
 .fatia.primeiro{flex:0 0 190px;background:var(--neon-fundo);border-color:var(--neon-borda)}
-.fatia.morte{flex:0 0 150px;background:var(--coral-fundo);border-color:var(--coral-borda)}
+.fatia.vao{flex:0 0 165px;background:var(--ambar-fundo);border-color:var(--ambar-borda)}
 .fatia b{display:block;font-family:var(--mono);font-size:15px;font-weight:600;
   font-variant-numeric:tabular-nums}
 .fatia.primeiro b{color:var(--neon-bright)}
-.fatia.morte b{color:var(--coral)}
+.fatia.vao b{color:var(--ambar)}
 .fatia span{display:block;font-size:11.5px;color:var(--text-dim);margin-top:3px;line-height:1.35}
 .regua{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;
   color:var(--text-faint);margin-top:8px;font-variant-numeric:tabular-nums}
@@ -91,7 +91,7 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
   position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:8px;background:rgba(10,15,12,.9);border-radius:10px;
 }
-.selo b{font-family:var(--display);font-size:17px;color:var(--coral)}
+.selo b{font-family:var(--display);font-size:17px;color:var(--ambar)}
 .selo span{font-size:12.5px;color:var(--text-dim);text-align:center;max-width:22ch}
 
 .msg{font-size:14px;color:var(--text-dim);line-height:1.5}
@@ -176,8 +176,10 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
       <p>
         Os números não são estimativa: saem do Baileys, em <code>Socket/socket.js</code>,
         linhas 464 e 478. O WhatsApp manda um punhado de códigos de uma vez; a biblioteca
-        gasta um por vez. Quando acabam, a conexão morre e é preciso clicar em Gerar QR
-        outra vez.
+        gasta um por vez. Quando acabam, o Baileys derruba a conexão com 408 — e o nosso
+        handler de <code>close</code> religa em 2,5 s e pede um lote novo. Não expira pra
+        sempre: <b>some da tela por alguns segundos e volta</b>. Era esse sumiço calado que
+        parecia defeito.
       </p>
     </div>
 
@@ -187,9 +189,10 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
       <div class="fatia"><b>20 s</b><span>3º</span></div>
       <div class="fatia"><b>20 s</b><span>4º</span></div>
       <div class="fatia"><b>20 s</b><span>5º</span></div>
-      <div class="fatia morte"><b>acabou</b><span>conexão cai — tem que gerar de novo</span></div>
+      <div class="fatia vao"><b>~3 s</b><span>vão — o serviço religa e pede um lote novo</span></div>
+      <div class="fatia primeiro"><b>60 s</b><span>1º código do lote seguinte — recomeça</span></div>
     </div>
-    <div class="regua"><span>0 s</span><span>60 s</span><span>≈ 2 min 20 s no total</span></div>
+    <div class="regua"><span>0 s</span><span>60 s</span><span>≈ 2 min 20 s por lote, e recomeça</span></div>
 
     <p class="legenda">
       O Rawilson pareou hoje às 11:17 e levou <b style="color:var(--text)">42 segundos</b> —
@@ -219,13 +222,13 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
       </div>
 
       <div class="tela">
-        <div class="rot"><span>Proposta · código no ar</span><span class="pill bom">40 s</span></div>
+        <div class="rot"><span>Proposta · código no ar</span><span class="pill bom">37 s</span></div>
         <div class="qrbox"><div class="qrfalso"></div></div>
-        <div class="relogio" style="--p:.66;--cor:var(--neon)">
-          <div class="anel"><b>40</b></div>
+        <div class="relogio" style="--p:.61;--cor:var(--neon)">
+          <div class="anel"><b>37</b></div>
           <div class="txt">
             <b>Escaneie agora</b>
-            <span>Este código vale por mais 40 segundos</span>
+            <span>Este código vale por mais 37 segundos</span>
           </div>
         </div>
         <ol class="passos">
@@ -252,19 +255,18 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
       </div>
 
       <div class="tela">
-        <div class="rot"><span>Proposta · acabou</span><span class="pill mau">expirado</span></div>
+        <div class="rot"><span>Proposta · vão entre lotes</span><span class="pill at">buscando</span></div>
         <div class="qrbox">
           <div class="qrfalso apagado"></div>
           <div class="selo">
-            <b>O tempo acabou</b>
-            <span>Ninguém escaneou em 2 minutos</span>
+            <b>Buscando um código novo</b>
+            <span>Aguarde alguns segundos</span>
           </div>
         </div>
-        <div class="aviso grave">
-          Nada foi perdido — a conta continua como estava. Deixe o WhatsApp já aberto em
-          <b>Aparelhos conectados</b> e gere um código novo.
+        <div class="aviso">
+          O tempo deste código acabou e estamos buscando um novo — <b>nada foi perdido</b>.
+          Deixe o WhatsApp aberto em <b>Aparelhos conectados</b> que ele aparece em instantes.
         </div>
-        <div class="btn">Gerar novo código</div>
       </div>
 
     </div>
@@ -285,15 +287,15 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
         <div class="qrbox" style="margin-bottom:16px">
           <div class="qrfalso" id="qr"></div>
           <div class="selo" id="selo" style="display:none">
-            <b>O tempo acabou</b>
-            <span>Ninguém escaneou em 2 minutos</span>
+            <b>Buscando um código novo</b>
+            <span>Nada foi perdido — aguarde alguns segundos</span>
           </div>
         </div>
         <div class="relogio">
-          <div class="anel" id="anel" style="--p:1;--cor:var(--neon)"><b id="seg">60</b></div>
+          <div class="anel" id="anel" style="--p:.95;--cor:var(--neon)"><b id="seg">57</b></div>
           <div class="txt">
             <b id="titulo">Escaneie agora</b>
-            <span id="detalhe">Este código vale por mais 60 segundos</span>
+            <span id="detalhe">Este código vale por mais 57 segundos</span>
           </div>
         </div>
         <div class="ctrl">
@@ -306,11 +308,11 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
       <div>
         <h3 style="margin-bottom:10px">O que muda em cada faixa</h3>
         <table class="tab">
-          <tr><td>60 → 21 s</td><td>Verde, calmo. Só o passo a passo e a contagem.</td></tr>
+          <tr><td>57 → 21 s</td><td>Verde, calmo. Só o passo a passo e a contagem.</td></tr>
           <tr><td>20 → 11 s</td><td>Segue verde. Nada de alarme cedo demais — ansiedade não faz ninguém escanear mais rápido.</td></tr>
           <tr><td>10 → 1 s</td><td>Âmbar: “vai trocar de código em X”. Prepara para a troca em vez de deixá-la surpreender.</td></tr>
           <tr><td>troca</td><td>O anel reinicia em 20 s e o texto explica que é normal.</td></tr>
-          <tr><td>fim dos códigos</td><td>Coral, QR apagado, e uma frase que tira o medo: <b>nada foi perdido</b>.</td></tr>
+          <tr><td>fim do lote</td><td>Âmbar, QR apagado, e a frase que tira o medo: <b>nada foi perdido</b>. Uns 3 s depois chega um lote novo e o relógio recomeça em 57.</td></tr>
         </table>
         <p class="legenda" id="estado">—</p>
       </div>
@@ -339,8 +341,8 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
         <td class="ganho">só front</td>
       </tr>
       <tr>
-        <td>Tela de expirado com saída</td>
-        <td>Hoje a tela só para. A pior parte não é expirar — é não saber se quebrou alguma coisa. A frase “nada foi perdido” é o conteúdo, não enfeite.</td>
+        <td>Explicar o vão entre lotes</td>
+        <td>Hoje a caixa some calada por alguns segundos e parece travamento. A pior parte nunca foi ficar sem código — é não saber se quebrou alguma coisa na conta. A frase “nada foi perdido” é o conteúdo, não enfeite.</td>
         <td class="ganho">só front</td>
       </tr>
       <tr>
@@ -356,9 +358,12 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
     </table>
 
     <div class="aviso calmo" style="margin-top:22px">
-      <b>O que eu não faria:</b> renovar o código sozinho para sempre. O ciclo tem fim por
-      desenho do WhatsApp, e uma tela que promete tentar “até dar certo” esconde do cliente
-      o momento em que ele precisa agir. Melhor terminar com clareza do que empurrar sem fim.
+      <b>Correção do que eu tinha desenhado antes:</b> a primeira versão deste mockup dizia
+      que o código “expira e acabou”, e propunha um botão de gerar de novo. Ao conferir o
+      handler de <code>close</code> antes de implementar, descobri que não é isso: o 408 cai
+      no religa-genérico, o serviço pede um lote novo em 2,5 s e o ciclo recomeça sozinho.
+      O botão seria inútil e o texto seria mentira — por isso a tela agora explica o vão em
+      vez de anunciar um fim que não acontece.
     </div>
   </section>
 
@@ -373,15 +378,15 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
 
 <script>
 (function(){
-  var FASES=[60,20,20,20,20];      // os tempos reais do Baileys
+  var FASES=[60,20,20,20,20], ATRASO=3;   // tempos do Baileys; ATRASO = o polling de 3s
   var anel=document.getElementById('anel'), seg=document.getElementById('seg'),
       tit=document.getElementById('titulo'), det=document.getElementById('detalhe'),
       selo=document.getElementById('selo'), qr=document.getElementById('qr'),
       est=document.getElementById('estado');
-  var t=null, fase=0, resta=FASES[0];
+  var t=null, fase=0, resta=FASES[0]-ATRASO, vao=false;
 
   function pinta(){
-    var total=FASES[fase]||20;
+    var total=(FASES[fase]||20)-ATRASO;
     var p=Math.max(0,resta)/total;
     var cor = resta<=10 ? 'var(--ambar)' : 'var(--neon)';
     anel.style.setProperty('--p',p);
@@ -401,32 +406,36 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
     }
     est.textContent='código '+(fase+1)+' de '+FASES.length+' · '+Math.max(0,resta)+' s restantes';
   }
-  function morreu(){
-    clearInterval(t); t=null;
+  // Fim do lote: o serviço religa e pede outro. NÃO é morte — foi por isso que o
+  // texto mudou depois de eu conferir o handler de close.
+  function entraNoVao(){
+    clearInterval(t); t=null; vao=true;
     selo.style.display='flex'; qr.classList.add('apagado');
-    anel.style.setProperty('--p',0); anel.style.setProperty('--cor','var(--coral)');
-    seg.textContent='0'; tit.textContent='O tempo acabou';
-    det.textContent='Nada foi perdido — gere um código novo';
-    est.textContent='fim dos 5 códigos · a conexão caiu';
+    anel.style.setProperty('--p',0); anel.style.setProperty('--cor','var(--ambar)');
+    seg.textContent='0'; tit.textContent='Buscando um código novo';
+    det.textContent='Nada foi perdido — aguarde alguns segundos';
+    est.textContent='fim do lote · o serviço religa e pede outro (~3 s)';
+    setTimeout(function(){ if(vao) comeca(true); }, 3000);
   }
   function tick(){
     resta--;
     if(resta<0){
       fase++;
-      if(fase>=FASES.length){ morreu(); return; }
-      resta=FASES[fase]; qr.style.opacity=.35;
+      if(fase>=FASES.length){ entraNoVao(); return; }
+      resta=FASES[fase]-ATRASO; qr.style.opacity=.35;
       setTimeout(function(){qr.style.opacity=.86;},180);
     }
     pinta();
   }
-  function comeca(){
-    clearInterval(t); fase=0; resta=FASES[0];
+  function comeca(loteNovo){
+    clearInterval(t); fase=0; resta=FASES[0]-ATRASO; vao=false;
+    if(loteNovo) est.textContent='lote novo · o primeiro código volta a valer 60 s';
     selo.style.display='none'; qr.classList.remove('apagado'); qr.style.opacity=.86;
     pinta(); t=setInterval(tick,1000);
   }
-  document.getElementById('play').onclick=comeca;
-  document.getElementById('parar').onclick=function(){clearInterval(t);t=null;est.textContent='parado';};
-  document.getElementById('pula').onclick=function(){clearInterval(t);t=null;fase=FASES.length-1;resta=3;pinta();t=setInterval(tick,1000);};
+  document.getElementById('play').onclick=function(){comeca(false);};
+  document.getElementById('parar').onclick=function(){clearInterval(t);t=null;vao=false;est.textContent='parado';};
+  document.getElementById('pula').onclick=function(){clearInterval(t);t=null;vao=false;fase=FASES.length-1;resta=3;pinta();t=setInterval(tick,1000);};
   pinta();
 })();
 </script>

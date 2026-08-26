@@ -11540,7 +11540,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         // Dizer 57 quando são 60 é chato; dizer 60 quando são 57 é mentir pro
         // cliente bem na hora em que ele está com o celular na mão.
         var QR_1O=60, QR_SEG=20, QR_ATRASO=3;
-        var _qrSrc=null, _qrN=0, _qrResta=0, _qrTick=null;
+        var _qrSrc=null, _qrN=0, _qrResta=0, _qrTick=null, _qrVao=false;
         function qrRelPinta(){
           var anel=document.getElementById('qr-anel'), seg=document.getElementById('qr-seg'),
               tit=document.getElementById('qr-rel-tit'), det=document.getElementById('qr-rel-det');
@@ -11570,22 +11570,40 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         function qrFimMostra(v){var f=document.getElementById('qr-fim');if(f)f.style.display=v?'block':'none';}
         function qrRelPara(){
           if(_qrTick){clearInterval(_qrTick);_qrTick=null;}
-          _qrSrc=null; _qrN=0;
+          _qrSrc=null; _qrN=0; _qrVao=false;
           var r=document.getElementById('qr-relogio'), p=document.getElementById('qr-passos');
           if(r)r.style.display='none'; if(p)p.style.display='none'; qrFimMostra(false);
+        }
+        // O vão entre um lote de códigos e o seguinte. Fica aqui porque o estado
+        // que o serviço reporta nesse intervalo NÃO é 'aguardando_qr': quando os
+        // `ref` acabam o Baileys derruba com 408, o handler de close marca
+        // 'reconectando' e só 2,5s depois nasce o socket com o lote novo. Tratar
+        // isso como "não é hora do relógio" desmontaria a tela bem no vão — que é
+        // exatamente o sumiço calado que este bloco existe pra consertar.
+        function qrVaoEntra(){
+          if(_qrTick){clearInterval(_qrTick);_qrTick=null;}
+          _qrSrc=null;      // o código do lote velho não vale mais
+          _qrN=0;           // o próximo é o PRIMEIRO do lote novo: 60s, não 20s
+          _qrVao=true;
+          var r=document.getElementById('qr-relogio'), p=document.getElementById('qr-passos');
+          if(r)r.style.display='none'; if(p)p.style.display='none';
+          qrFimMostra(true);
         }
         // Chamada de dentro do qrShow, com a resposta do serviço já na mão.
         function qrRelogio(d){
           var rel=document.getElementById('qr-relogio'), pas=document.getElementById('qr-passos');
-          if(!d||d.status!=='aguardando_qr'){qrRelPara();return;}
-          if(rel)rel.style.display='flex'; if(pas)pas.style.display='block';
+          if(!d){qrRelPara();return;}
+          if(d.status==='reconectando'&&(_qrN>0||_qrVao)){qrVaoEntra();return;}
+          if(d.status!=='aguardando_qr'){qrRelPara();return;}
           if(d.qr){
             // o serviço manda o QR como data-URL; mudou a string = código novo
-            if(d.qr!==_qrSrc){_qrSrc=d.qr;_qrN++;qrRelNovo();}
+            if(d.qr!==_qrSrc){_qrVao=false;_qrSrc=d.qr;_qrN++;
+              if(rel)rel.style.display='flex'; if(pas)pas.style.display='block';
+              qrRelNovo();}
           }else{
-            // 'aguardando_qr' sem imagem é o vão entre um lote e outro — antes a
-            // caixa sumia calada e parecia que a tela tinha travado
-            qrFimMostra(true);
+            // 'aguardando_qr' sem imagem também é vão — o socket subiu e o código
+            // ainda não chegou
+            qrVaoEntra();
           }
         }
         function qrShow(d){var box=document.getElementById('qr-box'),img=document.getElementById('qr-img'),
@@ -11677,7 +11695,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         // Cópia deliberada do chip 1, pelo mesmo motivo que o resto deste cartão é
         // copiado: um parâmetro compartilhado erraria de chip e mexeria na sessão
         // do outro. As constantes QR_1O/QR_SEG/QR_ATRASO são as mesmas, do chip 1.
-        var _c2Src=null, _c2N=0, _c2Resta=0, _c2Tick=null;
+        var _c2Src=null, _c2N=0, _c2Resta=0, _c2Tick=null, _c2Vao=false;
         function c2RelPinta(){
           var anel=document.getElementById('c2-anel'), seg=document.getElementById('c2-seg'),
               tit=document.getElementById('c2-rel-tit'), det=document.getElementById('c2-rel-det');
@@ -11705,16 +11723,28 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         function c2FimMostra(v){var f=document.getElementById('c2-fim');if(f)f.style.display=v?'block':'none';}
         function c2RelPara(){
           if(_c2Tick){clearInterval(_c2Tick);_c2Tick=null;}
-          _c2Src=null; _c2N=0;
+          _c2Src=null; _c2N=0; _c2Vao=false;
           var r=document.getElementById('c2-relogio'), p=document.getElementById('c2-passos');
           if(r)r.style.display='none'; if(p)p.style.display='none'; c2FimMostra(false);
         }
+        // mesmo vão do chip 1: entre lotes o serviço reporta 'reconectando', e
+        // desmontar a tela ali deixaria o cliente sem explicação bem no sumiço
+        function c2VaoEntra(){
+          if(_c2Tick){clearInterval(_c2Tick);_c2Tick=null;}
+          _c2Src=null; _c2N=0; _c2Vao=true;
+          var r=document.getElementById('c2-relogio'), p=document.getElementById('c2-passos');
+          if(r)r.style.display='none'; if(p)p.style.display='none';
+          c2FimMostra(true);
+        }
         function c2Relogio(d){
           var rel=document.getElementById('c2-relogio'), pas=document.getElementById('c2-passos');
-          if(!d||d.status!=='aguardando_qr'){c2RelPara();return;}
-          if(rel)rel.style.display='flex'; if(pas)pas.style.display='block';
-          if(d.qr){ if(d.qr!==_c2Src){_c2Src=d.qr;_c2N++;c2RelNovo();} }
-          else{ c2FimMostra(true); }
+          if(!d){c2RelPara();return;}
+          if(d.status==='reconectando'&&(_c2N>0||_c2Vao)){c2VaoEntra();return;}
+          if(d.status!=='aguardando_qr'){c2RelPara();return;}
+          if(d.qr){ if(d.qr!==_c2Src){_c2Vao=false;_c2Src=d.qr;_c2N++;
+            if(rel)rel.style.display='flex'; if(pas)pas.style.display='block';
+            c2RelNovo();} }
+          else{ c2VaoEntra(); }
         }
         function c2Show(d){
           var box=document.getElementById('c2-box'),img=document.getElementById('c2-img'),

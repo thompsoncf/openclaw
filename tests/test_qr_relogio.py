@@ -192,9 +192,22 @@ out.push(['repolling',{seg:_els['qr-seg'].textContent,antes:antes}]);
 // 6) 'aguardando_qr' SEM imagem = vão entre lotes
 qrRelogio({status:'aguardando_qr'});
 out.push(['sem_imagem',saida()]);
-// 7) conectou -> o relógio some
+// 7) o VÃO DE VERDADE: quando os ref acabam o serviço reporta 'reconectando'
+//    por ~2,5s. O aviso tem que CONTINUAR na tela nessa janela.
+qrRelogio({status:'aguardando_qr',qr:'data:img,CCC'});   // volta pro fluxo
+qrRelogio({status:'reconectando'});
+out.push(['reconectando_1',saida()]);
+qrRelogio({status:'reconectando'});                      // segunda volta do polling
+out.push(['reconectando_2',saida()]);
+// 8) o lote novo chega: o primeiro código dele vale 60s de novo, não 20
+qrRelogio({status:'aguardando_qr',qr:'data:img,DDD'});
+out.push(['lote_novo',saida()]);
+// 9) conectou -> o relógio some
 qrRelogio({status:'conectado'});
 out.push(['conectado',saida()]);
+// 10) 'reconectando' FORA de um fluxo de QR não pode acender nada
+qrRelogio({status:'reconectando'});
+out.push(['reconectando_solto',saida()]);
 console.log(JSON.stringify(out));
 """
 
@@ -255,6 +268,35 @@ def test_o_mesmo_codigo_no_polling_nao_reinicia_a_conta(rodado):
 
 def test_aguardando_sem_imagem_e_o_vao(rodado):
     assert rodado["sem_imagem"]["fim"] == "block"
+
+
+# ── o vão de verdade passa por 'reconectando' ────────────────────────────────
+def test_o_aviso_do_vao_sobrevive_ao_reconectando(rodado):
+    """O caso que quase passou batido. Quando os `ref` acabam, o serviço NÃO
+    reporta 'aguardando_qr' — reporta 'reconectando' pelos ~2,5 s até o socket
+    novo. A primeira versão deste código desmontava a tela nesse estado, e o
+    aviso do vão aparecia e sumia: o cliente ficava sem explicação bem no sumiço
+    que o aviso existe pra explicar."""
+    for volta in ("reconectando_1", "reconectando_2"):
+        p = rodado[volta]
+        assert p["fim"] == "block", f"{volta}: o aviso do vão sumiu"
+        assert p["relogio"] == "none", f"{volta}: anel de código morto na tela"
+
+
+def test_o_lote_novo_volta_a_valer_sessenta(rodado):
+    """Depois do vão vem um lote NOVO, e o primeiro código dele dura 60 s. Se o
+    contador não zerasse, a tela mostraria 17 onde valem 57."""
+    p = rodado["lote_novo"]
+    assert p["seg"] == 57, "o primeiro código do lote novo tem que valer 60-3"
+    assert p["tit"] == "Escaneie agora"
+    assert p["fim"] == "none"
+
+
+def test_reconectando_fora_do_fluxo_nao_acende_nada(rodado):
+    """Uma queda comum de sessão conectada também passa por 'reconectando'. Ali
+    não há pareamento em curso, e acender o aviso do QR seria ruído puro."""
+    p = rodado["reconectando_solto"]
+    assert p["fim"] == "none" and p["relogio"] == "none" and p["passos"] == "none"
 
 
 def test_conectado_tira_o_relogio_da_tela(rodado):

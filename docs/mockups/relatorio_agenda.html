@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — Relatório de Agenda</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   TOKENS — cópia fiel de web/tema.py (_TOKENS). A fonte da verdade é o tema.py.
+   ============================================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9; --roxo:#C9A3E0;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A;  --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --card:var(--surface); --card-2:var(--bg-2);
+  --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1180px;margin:0 auto;padding:34px 18px 100px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.7rem;font-weight:700}
+h2{font-size:1.18rem;font-weight:700;margin:0 0 .2rem}
+h3{font-size:.95rem;font-weight:600}
+a{color:var(--verde)}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
+  padding:.1rem .35rem;border-radius:4px;color:var(--text-dim)}
+
+.sec{margin-top:44px}
+.sec>.num{font-family:var(--mono);font-size:.72rem;color:var(--verde);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:78ch;margin-top:.5rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.86rem;margin-top:1rem;
+  color:var(--txt-mut);max-width:82ch}
+.nota b{color:var(--txt)}
+.alerta{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.alerta b{color:var(--ambar)}
+
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);
+  text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.76rem;
+  text-transform:uppercase;letter-spacing:.05em}
+.sim{color:var(--verde)} .nao{color:var(--coral)} .meio{color:var(--ambar)}
+
+/* ---------- moldura de tela ---------- */
+.telas{display:grid;grid-template-columns:1fr 320px;gap:26px;margin-top:1.2rem;align-items:start}
+@media (max-width:960px){.telas{grid-template-columns:1fr}}
+.quadro{background:var(--card);border:1px solid var(--borda);border-radius:14px;
+  overflow:hidden}
+.quadro>.cap{background:var(--bg-2);padding:.5rem .85rem;font-size:.72rem;
+  color:var(--txt-mut);border-bottom:1px solid var(--borda);
+  font-family:var(--mono);display:flex;justify-content:space-between;gap:.5rem}
+.quadro>.miolo{padding:16px}
+
+/* ---------- réplica exata das classes de web/portal.py (_RELATORIOS) ---------- */
+.abas{display:flex;align-items:center;flex-wrap:nowrap;gap:2px;background:var(--card);
+  padding:3px;border-radius:9px;border:1px solid var(--borda);margin:0 0 .9rem;
+  max-width:100%;overflow-x:auto}
+.aba{width:auto;flex-shrink:0;margin:0;display:inline-flex;align-items:center;line-height:1;
+  background:transparent;color:#b4b2a9;border:none;padding:.35rem .8rem;border-radius:6px;
+  font-size:.8rem;text-decoration:none;white-space:nowrap}
+.aba.ativa{background:var(--verde);color:var(--sobre-verde);font-weight:600}
+.rel-filtros{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:0 0 1.1rem}
+.rel-filtros select,.rel-filtros input[type=search]{background:var(--bg-2);color:var(--txt);
+  border:1px solid var(--borda);border-radius:6px;padding:.4rem .6rem;font:inherit;font-size:.8rem}
+.rel-filtros .mut{font-size:.78rem;color:var(--txt-mut)}
+.rel-pdf{display:inline-flex;align-items:center;gap:.4rem;padding:.45rem .85rem;
+  background:var(--azul);color:#04222f;border-radius:6px;text-decoration:none;
+  font-size:.8rem;font-weight:600}
+.rel-metricas{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:10px;margin:0 0 1.1rem}
+.rel-metricas .metric{background:var(--bg);border:1px solid var(--borda);border-radius:8px;
+  padding:.8rem;min-width:0}
+.rel-metricas .metric span{display:block;font-size:.72rem;color:var(--txt-mut);margin-bottom:.25rem}
+.rel-metricas .metric b{font-size:1rem;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.rel-tbl-wrap{overflow-x:auto;max-width:100%}
+.rel-tbl-wrap table{width:100%;border-collapse:collapse;min-width:680px;font-size:.84rem}
+.rel-tbl-wrap th,.rel-tbl-wrap td{padding:.5rem .55rem;border-bottom:1px solid var(--borda);
+  text-align:left;white-space:nowrap}
+.rel-tbl-wrap th{color:var(--txt-mut);font-weight:600;font-size:.72rem;
+  text-transform:uppercase;letter-spacing:.04em}
+.rel-num{text-align:right;font-variant-numeric:tabular-nums}
+.rel-tot td{border-top:2px solid var(--borda);font-weight:700}
+.rel-tag{display:inline-block;padding:.15rem .6rem;border-radius:999px;font-size:.72rem;font-weight:600}
+.rel-tag.ok{background:#15301f;color:#9fe8c9;border:1px solid var(--verde)}
+.rel-tag.aviso{background:#332a12;color:#f0dca6;border:1px solid #6e5a22}
+.rel-tag.erro{background:#3a1d1d;color:#f0b8b8;border:1px solid #6e2b2b}
+.rel-tag.neutro{background:#20242a;color:#c7ccd6;border:1px solid #3a4048}
+.rel-act{width:1%;text-align:center}
+.rel-print{display:inline-flex;align-items:center;justify-content:center;width:1.7rem;height:1.7rem;
+  border:1px solid var(--borda);border-radius:6px;text-decoration:none}
+
+.legenda-lat{font-size:.78rem;color:var(--txt-mut);margin-top:.8rem}
+ul.lista{margin:.6rem 0 0 1.1rem;font-size:.87rem;color:var(--txt-mut)}
+ul.lista li{margin-bottom:.5rem}
+ul.lista b{color:var(--txt)}
+.rodape{margin-top:56px;padding-top:18px;border-top:1px solid var(--borda);
+  font-size:.8rem;color:var(--text-faint)}
+</style>
+</head>
+<body>
+
+<h1>Relatório de Agenda</h1>
+<p class="lede">Hoje "Relatórios" tem oito abas — Vendas, Contas a pagar/receber, Contas
+pagas/recebidas, Comissão, Orçamentos e Contratos — e nenhuma delas fecha o que já
+aconteceu na Agenda. Este mockup propõe a nona aba: <b>quantos eventos, quantos viraram
+presença, quantos não aconteceram e quantos foram cancelados</b>, no período.</p>
+
+<!-- ====================================================== 1 -->
+<section class="sec">
+  <div class="num">1 · o que existe hoje</div>
+  <h2>A Agenda só olha pra frente. Nunca fecha o período.</h2>
+  <p class="lede">A tela de Agenda (<code>web/painel_agenda.py</code>) mostra o mês corrente e
+  os próximos compromissos — é uma ferramenta de "o que vem". Ela já guarda, eventos a
+  eventos, tudo que um relatório precisaria: <code>status</code>
+  (ativo/cancelado/pré-reservado), <code>desfecho</code> (realizado/não realizado),
+  <code>tipo</code>, <code>tipo_evento</code>, <code>convidados</code> e
+  <code>sinal_centavos</code> — só que isso nunca é somado nem mostrado como histórico.</p>
+
+  <table class="diag">
+    <tr><th>Aba</th><th>Existe hoje</th></tr>
+    <tr><td><b>Orçamentos</b></td><td class="sim">✓ KPIs (fechado/aberto/perdido) + tabela + filtro + PDF</td></tr>
+    <tr><td><b>Contratos</b></td><td class="sim">✓ mesmo padrão</td></tr>
+    <tr><td><b>Vendas / Comissão / Contas</b></td><td class="sim">✓ mesmo padrão</td></tr>
+    <tr><td><b>Agenda</b></td><td class="nao">✕ não existe — só o calendário do mês e "os próximos 8"</td></tr>
+  </table>
+
+  <div class="nota alerta">
+    <b>O número que mais falta:</b> a taxa de <b>não comparecimento</b>. Hoje, saber quantas
+    visitas ou datas marcadas viraram "não realizado" no mês exige abrir evento por evento —
+    e é exatamente o número que mostra se o problema é agenda cheia ou agenda furada.
+  </div>
+</section>
+
+<!-- ====================================================== 2 -->
+<section class="sec">
+  <div class="num">2 · a proposta</div>
+  <h2>Nona aba, mesmo template — só entra uma função nova</h2>
+  <p class="lede">Todo relatório de <code>painel_relatorios.py</code> devolve o mesmo formato
+  (<code>colunas, linhas, métricas, total</code>) pro mesmo template genérico. A Agenda entra
+  do mesmo jeito, sem tela nova pra desenhar.</p>
+
+  <div class="telas">
+    <div class="quadro">
+      <div class="cap"><span>/painel/relatorios?tipo=agenda</span><span>desktop</span></div>
+      <div class="miolo">
+        <div class="abas">
+          <span class="aba">Vendas</span><span class="aba">Contas a pagar</span>
+          <span class="aba">Comissão</span><span class="aba">Orçamentos</span>
+          <span class="aba">Contratos</span><span class="aba ativa">Agenda</span>
+        </div>
+
+        <form class="rel-filtros">
+          <select><option>Este mês</option></select>
+          <select><option>Status: todos</option><option>Confirmado</option><option>Pré-reserva</option><option>Cancelado</option></select>
+          <select><option>Tipo: todos</option><option>Empresa</option><option>Pessoal</option><option>Fornecedor</option></select>
+          <span class="mut">período: Este mês</span>
+          <span style="flex:1"></span>
+          <a class="rel-pdf" href="#">🖨️ Exportar PDF</a>
+        </form>
+
+        <div class="rel-metricas">
+          <div class="metric"><span>Eventos no período</span><b>34</b></div>
+          <div class="metric"><span>Realizados</span><b style="color:var(--neon)">26 · 76%</b></div>
+          <div class="metric"><span>Não realizados</span><b style="color:var(--coral)">4 · 12%</b></div>
+          <div class="metric"><span>Cancelados</span><b style="color:var(--ambar)">4 · 12%</b></div>
+          <div class="metric"><span>Sinal no período</span><b>R$ 8.400,00</b></div>
+        </div>
+
+        <div class="rel-tbl-wrap">
+        <table>
+          <tr><th>Data</th><th>Evento</th><th>Cliente</th><th>Tipo</th><th>Status</th><th>Desfecho</th><th class="rel-num">Convid.</th><th class="rel-num">Sinal</th><th></th></tr>
+          <tr><td>02/09 14:00</td><td>Casamento</td><td>Júlia Andrade</td><td>Empresa</td><td><span class="rel-tag ok">Confirmado</span></td><td><span class="rel-tag ok">Realizado</span></td><td class="rel-num">120</td><td class="rel-num">R$ 1.200,00</td><td class="rel-act"><a class="rel-print" href="#">🖨️</a></td></tr>
+          <tr><td>05/09 —</td><td>Formatura</td><td>Marina Reis</td><td>Empresa</td><td><span class="rel-tag aviso">Pré-reserva</span></td><td><span class="rel-tag neutro">—</span></td><td class="rel-num">80</td><td class="rel-num">R$ 600,00</td><td class="rel-act"><a class="rel-print" href="#">🖨️</a></td></tr>
+          <tr><td>08/09 10:00</td><td>Visita</td><td>—</td><td>Pessoal</td><td><span class="rel-tag ok">Confirmado</span></td><td><span class="rel-tag erro">Não realizado</span></td><td class="rel-num">—</td><td class="rel-num">—</td><td class="rel-act"><a class="rel-print" href="#">🖨️</a></td></tr>
+          <tr><td>11/09 19:00</td><td>15 anos</td><td>Beatriz Lima</td><td>Empresa</td><td><span class="rel-tag erro">Cancelado</span></td><td><span class="rel-tag neutro">—</span></td><td class="rel-num">200</td><td class="rel-num">R$ 0,00</td><td class="rel-act"><a class="rel-print" href="#">🖨️</a></td></tr>
+          <tr class="rel-tot"><td>Total</td><td></td><td></td><td></td><td></td><td></td><td></td><td class="rel-num">R$ 8.400,00</td><td></td></tr>
+        </table>
+        </div>
+        <p class="mut" style="margin-top:.6rem;font-size:.78rem">34 registro(s) · Este mês</p>
+      </div>
+    </div>
+
+    <div>
+      <div class="quadro">
+        <div class="cap"><span>o que cada número mostra</span></div>
+        <div class="miolo">
+          <ul class="lista">
+            <li><b>Eventos no período</b> filtra por <code>inicio</code> (a data do
+              compromisso), não por <code>criado_em</code> — é "o que aconteceu em
+              setembro", não "o que foi marcado em setembro".</li>
+            <li><b>Realizado / Não realizado</b> vem direto de <code>desfecho</code>, que já
+              existe desde a migração 130. Zero coluna nova.</li>
+            <li><b>Cancelados</b> é <code>status='cancelado'</code> — junto com o desfecho,
+              dá a taxa de não-comparecimento que hoje não existe em lugar nenhum.</li>
+            <li><b>Cliente e Sinal</b> só aparecem quando o evento nasceu de um orçamento
+              (<code>evento_agenda_id</code>). Visita e compromisso pessoal não têm — a
+              coluna mostra "—", igual "Vendedor" já mostra "—" em Orçamentos sem dono.</li>
+            <li><b>Ação (🖨️)</b> abre o evento na Agenda — mesmo padrão do ícone que
+              Orçamentos usa pra abrir a proposta.</li>
+          </ul>
+          <div class="nota alerta" style="margin-top:1rem">
+            <b>O que "Sinal" não é:</b> receita fechada. É o valor que está segurando a data
+            (<code>sinal_centavos</code> do evento). O valor cheio do evento mora no
+            orçamento vinculado — dá pra somar junto, mas exige o mesmo join que a aba
+            Orçamentos já faz (<code>_VALOR_ORC</code>).
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== 3 -->
+<section class="sec">
+  <div class="num">3 · resumo do que muda no código</div>
+  <h2>Uma função nova. Zero coluna nova. Zero mudança de template.</h2>
+  <table class="diag">
+    <tr><th>Onde</th><th>O quê</th></tr>
+    <tr><td><code>web/painel_relatorios.py</code></td>
+        <td>Nova <code>_dados_agenda(pool, conta_id, periodo, status="", tipo="")</code>:
+        agrega <code>eventos_agenda</code> por <code>inicio</code> no período, com
+        <code>left join orcamentos</code> via <code>evento_agenda_id</code> pra puxar
+        cliente/valor quando existir. Devolve o mesmo formato que toda <code>_dados_*</code>
+        já devolve (<code>colunas</code>/<code>linhas</code>/<code>metricas</code>/<code>col_total</code>).</td></tr>
+    <tr><td><code>TIPOS</code> (mesmo arquivo)</td>
+        <td>Uma linha: <code>"agenda": {"label": "Agenda", "montar": ...}</code>. A aba
+        aparece sozinha — o template já desenha <code>{% for k, r in tipos.items() %}</code>,
+        nenhum HTML novo em <code>web/portal.py</code>.</td></tr>
+    <tr><td>Banco</td>
+        <td class="sim">✓ nada de migração. <code>status</code>, <code>desfecho</code>,
+        <code>tipo</code>, <code>tipo_evento</code>, <code>convidados</code> e
+        <code>sinal_centavos</code> já existem desde as migrações 098–179.</td></tr>
+  </table>
+
+  <div class="nota">
+    <b>O que ficaria pra depois, se quiser ir além:</b> "receita real do evento" juntando o
+    valor completo do orçamento (não só o sinal), e uma quebra por
+    <code>membro_id</code> (quem marcou) no estilo da aba Comissão — nenhum dos dois exige
+    coluna nova, só mais uma junção na mesma consulta.
+  </div>
+</section>
+
+<p class="rodape">Mockup estático — cores, tipografia e classes copiadas de
+<code>web/tema.py</code> e do template real de <code>web/portal.py</code> (<code>_RELATORIOS</code>).
+Números e nomes são ilustrativos.</p>
+
+</body>
+</html>

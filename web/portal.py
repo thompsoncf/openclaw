@@ -6042,12 +6042,38 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   .rel-print{display:inline-flex;align-items:center;justify-content:center;width:1.8rem;height:1.8rem;
    border:1px solid var(--borda);background:var(--bg);border-radius:6px;text-decoration:none;font-size:.85rem}
   .rel-print:hover{border-color:var(--verde)}
+  /* LARGURA DESTA TELA, e só dela.
+     O `.card.larga` vale 720px e é usado por Equipe, Fornecedor, Portal e mais
+     cinco telas — várias delas formulário, onde largura demais PIORA (o olho
+     percorre a linha inteira entre o rótulo e o campo). Alargar aquela classe
+     consertaria o relatório e estragaria as outras, então a largura extra vive
+     aqui, numa classe que só o relatório usa.
+     O teto de 1500px é escolha, não preguiça: sem ele, numa tela de 3440px a
+     linha atravessa a tela e separa o nome do cliente do valor por meio metro. */
+  .card.rel-full{max-width:1500px}
   .rel-tbl-wrap{overflow-x:auto;max-width:100%}
-  .rel-tbl-wrap table{min-width:640px}
+  .rel-tbl-wrap table{min-width:640px;width:100%}
   /* Linha única sempre — nome de cliente/empresa longo não vira 3 linhas
-     desalinhando a tabela toda; quem estoura a largura já tem a rolagem
-     lateral do .rel-tbl-wrap (e a dica de "arraste pros lados" abaixo). */
+     desalinhando a tabela toda. */
   .rel-tbl-wrap table td,.rel-tbl-wrap table th{white-space:nowrap}
+  /* ...MENOS a coluna elástica (uma por relatório, marcada com flex=True em
+     _col). Ela absorve a sobra e, quando falta espaço, corta no FIM com
+     reticências. Antes o `nowrap` valia pra tudo e a tabela rolava pro lado: o
+     que sumia era a PRIMEIRA coluna e o começo do nome — em 26/08 o print
+     mostrava "ço Pelle Clínica" e "erson Venici", com o cliente lendo o meio da
+     tabela sem saber. Cortar no fim mantém visível a parte que identifica.
+     `max-width:0` é o truque que faz o text-overflow valer dentro de <table>:
+     sem ele a célula cresce com o conteúdo e a reticência nunca aparece. */
+  .rel-tbl-wrap table td.rel-flex{white-space:nowrap;overflow:hidden;
+   text-overflow:ellipsis;max-width:0;width:99%}
+  /* São até 300 linhas. Rolar 200 e não lembrar qual coluna é qual faz a pessoa
+     rolar de volta só pra conferir o cabeçalho. */
+  .rel-tbl-wrap{max-height:70vh;overflow-y:auto}
+  .rel-tbl-wrap thead th{position:sticky;top:0;background:var(--card);z-index:1}
+  /* Numa tabela larga o olho perde a linha justamente entre o nome e o valor,
+     que é o par que se lê junto. */
+  .rel-tbl-wrap tbody tr:nth-child(even){background:rgba(255,255,255,.014)}
+  .rel-tbl-wrap tbody tr:hover{background:var(--neon-fraco)}
   .rel-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   .rel-tot td{border-top:2px solid var(--borda);font-weight:700}
   .rel-metricas{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:1.2rem 0}
@@ -6060,7 +6086,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
    .rel-metricas .metric b{font-size:.95rem}}
   @media (max-width:700px){.rel-scroll-dica{display:block}}
 </style>
-<div class="card larga">
+<div class="card larga rel-full">
   <h1 style="margin:0">📊 Relatórios <span class="mut" style="font-weight:400;font-size:.85rem">· {{ dados.label }}</span></h1>
   {% if dados.mock %}
   <div class="rel-aviso">🧪 <b>Dados de exemplo</b> — este relatório ainda não está ligado à base. Os demais
@@ -6101,6 +6127,15 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     <input type="search" name="q" value="{{ dados.filtro_extra.busca_sel }}" placeholder="🔎 buscar cliente…">
     <button type="submit" class="rel-filtrar">Filtrar</button>
     {% endif %}
+    {% if not dados.filtro_extra %}
+    {# Busca NA TELA, e só nas abas que ainda não têm a do servidor — duas caixas
+       de busca na mesma tela é pergunta sem resposta óbvia ("qual das duas?").
+       Aqui ela é client-side de propósito: as linhas já vieram todas (teto de 300
+       na consulta), então filtrar é instantâneo e não custa uma ida ao servidor
+       a cada tecla. #}
+    <input type="search" id="rel-q" placeholder="🔎 filtrar na tela…"
+           aria-label="Filtrar as linhas mostradas" autocomplete="off">
+    {% endif %}
     {% if dados.sem_periodo %}<span class="mut">mostra tudo que está em aberto — o período aqui não filtra</span>
     {% else %}<span class="mut">período: {{ periodo_rotulo }}</span>{% endif %}
     <span style="flex:1"></span>
@@ -6114,20 +6149,95 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   <p class="dica-toque rel-scroll-dica">👉 arraste a tabela pros lados pra ver todas as colunas</p>
   <div class="rel-tbl-wrap">
   <table>
+    <thead>
     <tr>{% for col in dados.colunas %}<th{% if col.num %} class="rel-num"{% endif %}>{{ col.rotulo }}</th>{% endfor %}{% if dados.acao %}<th></th>{% endif %}</tr>
+    </thead>
+    <tbody>
     {% for row in dados.linhas %}
-    <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% endif %}>{% if col.tag %}<span
+    <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% elif col.flex %} class="rel-flex" title="{{ row[col.chave] }}"{% endif %}{% if col.chave == dados.col_total %} data-c="{{ row[col.chave] }}"{% endif %}>{% if col.tag %}<span
       class="rel-tag {{ row[col.chave ~ '_cor'] }}">{{ row[col.chave] }}</span>{% elif col.brl %}{{ row[col.chave]|brl
       }}{% else %}{{ row[col.chave] }}{% endif %}</td>{% endfor %}{% if dados.acao %}<td class="rel-act">{% if row.acao_href
       %}<a class="rel-print" href="{{ row.acao_href }}" target="_blank" rel="noopener" title="{{ dados.acao_rotulo }}">🖨️</a>{% endif %}</td>{% endif %}</tr>
     {% else %}
     <tr><td colspan="{{ dados.colunas|length + (1 if dados.acao else 0) }}" class="mut" style="text-align:center;padding:1.4rem 0">Nenhum registro encontrado{% if not dados.sem_periodo %} em {{ periodo_rotulo|lower }}{% endif %}.</td></tr>
     {% endfor %}
-    <tr class="rel-tot">{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% endif %}>{% if loop.first
+    </tbody>
+    <tfoot>
+    <tr class="rel-tot" id="rel-tot">{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% endif %}>{% if loop.first
       %}Total{% elif col.chave == dados.col_total %}{{ dados.total_centavos|brl }}{% endif %}</td>{% endfor %}{% if dados.acao %}<td></td>{% endif %}</tr>
+    </tfoot>
   </table>
   </div>
-  <p class="mut" style="margin-top:.6rem">{{ dados.linhas|length }} registro(s){% if not dados.mock %} · {{ periodo_rotulo }}{% endif %}</p>
+  <script>
+  // Filtro NA TELA. As linhas já estão todas no HTML (a consulta tem teto de 300),
+  // então não há ida ao servidor: filtrar é instantâneo.
+  //
+  // O TOTAL É RECALCULADO, e isso não é enfeite. Filtrar por um cliente e deixar o
+  // rodapé mostrando o total de todo mundo é a tela MENTINDO no número que o dono
+  // usa pra decidir. Os centavos vêm de `data-c` na própria célula — nada de fazer
+  // parse de "R$ 2.182,90", que quebraria no primeiro valor com milhar.
+  (function(){
+    var cx = document.getElementById('rel-q');
+    if (!cx) return;
+    var tbl = document.querySelector('.rel-tbl-wrap table');
+    if (!tbl) return;
+    var corpo = tbl.tBodies[0], conta = document.getElementById('rel-conta'),
+        rodape = document.getElementById('rel-tot');
+    if (!corpo) return;
+    var linhas = Array.prototype.slice.call(corpo.rows).filter(function(tr){
+      return !tr.querySelector('td[colspan]');   // a linha de "nenhum registro"
+    });
+    // guarda o texto e o valor de cada linha uma vez só, em vez de reler o DOM
+    // a cada tecla
+    var base = linhas.map(function(tr){
+      var c = tr.querySelector('td[data-c]');
+      return {tr: tr, txt: (tr.textContent || '').toLowerCase(),
+              cents: c ? parseInt(c.getAttribute('data-c'), 10) || 0 : 0};
+    });
+    var celTot = rodape ? rodape.querySelector('.rel-num:last-child') : null;
+    var totOriginal = celTot ? celTot.textContent : '';
+    // Formatação À MÃO, e não toLocaleString('pt-BR'). Dois motivos:
+    //   1. toLocaleString depende do ICU do runtime. Num Node/navegador com ICU
+    //      reduzido o 'pt-BR' cai no padrão americano e R$ 2.700,00 vira
+    //      R$ 2,700.00 — o total mudaria de cara conforme onde roda;
+    //   2. tem que bater EXATAMENTE com o filtro `brl` do servidor (portal.py),
+    //      senão limpar o filtro trocaria a formatação do número na cara do dono.
+    // Sem regex de propósito: este template é string Python comum (não raw), e
+    // uma classe de caractere tipo barra-d num literal JS vira escape inválido do
+    // Python — foi assim que um bloco <script> inteiro já morreu por SyntaxError
+    // aqui (ver o docstring de tests/test_painel_js_sintaxe.py).
+    function brl(c){
+      var neg = c < 0; c = Math.abs(c);
+      var i = String(Math.floor(c / 100)), d = String(c % 100);
+      if (d.length < 2) d = '0' + d;
+      var mil = '';
+      while (i.length > 3){ mil = '.' + i.slice(-3) + mil; i = i.slice(0, -3); }
+      // o sinal vem DEPOIS do "R$ ", como no servidor ("R$ -25,00"), não antes.
+      // Total negativo não aparece nestes relatórios hoje, mas divergir aqui é
+      // divergir em silêncio até o dia em que aparecer.
+      return 'R$ ' + (neg ? '-' : '') + i + mil + ',' + d;
+    }
+    function aplicar(){
+      var q = (cx.value || '').trim().toLowerCase();
+      var n = 0, soma = 0;
+      for (var i = 0; i < base.length; i++){
+        var bate = !q || base[i].txt.indexOf(q) !== -1;
+        base[i].tr.style.display = bate ? '' : 'none';
+        if (bate){ n++; soma += base[i].cents; }
+      }
+      if (conta) conta.textContent = n;
+      if (celTot) celTot.textContent = q ? brl(soma) : totOriginal;
+      var rot = rodape ? rodape.cells[0] : null;
+      if (rot) rot.textContent = q ? ('Total do filtro · ' + n) : 'Total';
+    }
+    cx.addEventListener('input', aplicar);
+    // Esc limpa — o caminho de volta pra tabela inteira sem ter que apagar à mão
+    cx.addEventListener('keydown', function(e){
+      if (e.key === 'Escape'){ cx.value = ''; aplicar(); }
+    });
+  })();
+  </script>
+  <p class="mut" style="margin-top:.6rem"><span id="rel-conta">{{ dados.linhas|length }}</span> registro(s){% if not dados.mock %} · {{ periodo_rotulo }}{% endif %}</p>
 </div>
 {% endblock %}"""
 

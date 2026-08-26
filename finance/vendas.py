@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date, datetime, timedelta
 
 from .empresa import _mes_seguinte
@@ -270,13 +271,118 @@ def resumo_pagamentos(parcelas, sinal_pago_em, titulos_pagos=(), com_comprovante
 
 # tom do selo: 'pre' (segurada, tracejado), 'coral' (perde dinheiro),
 # 'ambar' (espera algo), 'azul' (informação de andamento).
-_ORDEM_ACAO = ("marcar", "resegurar", "sinal", "comprovante", "fechar", "enviar")
+# ---- QUEM É O CLIENTE DESTA LINHA -------------------------------------------
+#
+# O funil montava o título com dois campos livres — `cliente` e `empresa` — que
+# guardam a MESMA coisa e divergem. Medido em produção em 25/08: de 26 orçamentos,
+# 19 apareciam como "−" (cliente vazio), 2 apareciam como TELEFONE e 2 com o nome
+# repetido duas vezes. 23 de 26 degradados.
+#
+# O nome certo já existia: `clientes.nome`, pelo cliente_id — correto nas 26.
+#
+# Aqui é só EXIBIÇÃO: nada é gravado. Decisão do dono em 25/08, e é a escolha
+# segura — a mesma regra serve pro histórico inteiro sem escrever uma linha.
+
+def _parece_telefone(txt: str) -> bool:
+    """Isto é um número de telefone travestido de nome?
+
+    O critério é conservador: 8+ dígitos E nenhuma letra. Oito é o telefone
+    brasileiro sem DDD. Na dúvida a resposta é NÃO — perder um nome de verdade é
+    pior que deixar passar um número esquisito, porque o nome some da tela e o
+    número pelo menos identifica alguém.
+    """
+    t = (txt or "").strip()
+    if not t or re.search(r"[A-Za-zÀ-ÿ]", t):
+        return False
+    return len(re.sub(r"\D", "", t)) >= 8
+
+
+def _nome_util(txt) -> str:
+    """O texto quando ele serve de NOME — senão vazio, pro coalesce seguir."""
+    t = (txt or "").strip()
+    return "" if _parece_telefone(t) else t
+
+
+def _data_br(iso: str) -> str:
+    """'2026-12-19' -> '19/12/2026'. Devolve como veio se não for uma data ISO."""
+    try:
+        return datetime.strptime((iso or "")[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+    except (ValueError, TypeError):
+        return (iso or "").strip()
+
+
+def _dias_desde(quando, hoje=None) -> int | None:
+    """Dias corridos desde `quando` — ou None quando não dá pra saber.
+
+    `hoje` é parâmetro pra o teste não depender do relógio: a redação que fala em
+    dias tem que ser verificável sem esperar amanhecer.
+    """
+    if not quando:
+        return None
+    d = quando.date() if isinstance(quando, datetime) else quando
+    if not isinstance(d, date):
+        return None
+    base = hoje or date.today()
+    base = base.date() if isinstance(base, datetime) else base
+    return max(0, (base - d).days)
+
+
+def _ha(dias: int) -> str:
+    """'hoje' | '1 dia' | 'N dias' — o texto que entra depois de 'há'."""
+    if dias <= 0:
+        return "hoje"
+    return "1 dia" if dias == 1 else f"{dias} dias"
+
+
+def titulo_do_funil(*, cadastro="", empresa="", cliente="", modo="recorrente",
+                    evento=None, numero=None) -> dict:
+    """{titulo, sub} de uma linha — a redação do NOME, testável sem tela.
+
+    O título vem do cadastro do cliente primeiro: dos três campos, é o único que
+    estava certo em todas as linhas de produção. Depois `empresa`, depois
+    `cliente`, e só então "Orçamento nº N" — degrau que hoje nenhuma linha alcança.
+
+    O SUBTÍTULO muda com o modo, e é aí que os dois campos param de brigar:
+
+      evento      a pessoa é o cliente, e o sub descreve a FESTA (tipo, data,
+                  convidados). Isso já estava salvo em `orcamentos.evento` e não
+                  aparecia em tela nenhuma — é o que distingue duas propostas do
+                  mesmo mês.
+      recorrente  `empresa` e `cliente` têm sentidos DIFERENTES e legítimos: a
+                  empresa e quem fala com você. O erro era a ordem — a pessoa
+                  virava título e a empresa, rodapé. Agora a empresa manda e o
+                  contato desce; ele some quando repete o título, pra não sair
+                  "Aladdin · Aladdin".
+    """
+    titulo = (_nome_util(cadastro) or _nome_util(empresa) or _nome_util(cliente)
+              or (f"Orçamento nº {numero}" if numero else "Orçamento sem nome"))
+    sub = ""
+    if (modo or "") == "evento":
+        ev = evento if isinstance(evento, dict) else {}
+        partes = [str(ev.get("tipo") or "").strip(),
+                  _data_br(str(ev.get("data") or "")),
+                  (f"{ev['convidados']} convidados" if str(ev.get("convidados") or "").strip() else "")]
+        sub = " · ".join(p for p in partes if p)
+    else:
+        contato = _nome_util(cliente)
+        # `casefold` e não `lower`: "JOSÉ" e "josé" são a mesma pessoa, e o título
+        # vem do cadastro enquanto o contato vem da digitação — a caixa difere.
+        if contato and contato.casefold() != titulo.casefold():
+            sub = contato
+    return {"titulo": titulo, "sub": sub}
+
+
+# `assinar` vem antes de `fechar` de propósito: enquanto o papel não volta
+# assinado, "Fechar negócio" é um passo que ainda não pode ser dado.
+_ORDEM_ACAO = ("marcar", "resegurar", "sinal", "comprovante", "assinar",
+               "fechar", "enviar")
 
 
 def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
                    pagamentos=None, enviado_em="", contrato_numero=None,
                    contrato_assinado=False, plano_difere=0, aprovada_por="",
-                   nunca_enviada=True) -> dict:
+                   nunca_enviada=True, contrato_em=None, tem_contrato=True,
+                   hoje=None) -> dict:
     """{selos, acao, resumo} de uma linha — a redação inteira, testável sem tela.
 
     `selos` são só PENDÊNCIAS. `resumo` é o que já aconteceu, pro subtítulo.
@@ -321,12 +427,42 @@ def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
                     "a receber saem pelo valor das PARCELAS."})
 
     # ---- o contrato
+    #
+    # "Contrato" era UMA palavra pra DUAS coisas. No nicho de eventos existe um
+    # documento de verdade, numerado, com link de assinatura — ele nasce em
+    # `contrato.criar_para_orcamento`, quando o SINAL é confirmado. No recorrente
+    # não existe documento nenhum: "Fechar contrato" só mudava o status pra
+    # 'fechado'. A mesma frase aparecia nos dois casos, e o resumo chegava a dizer
+    # "contrato fechado" pra uma proposta sem contrato nenhum (a #1 em produção).
+    #
+    # `tem_contrato` é quem separa os dois mundos. Nasce True pra não mudar o texto
+    # de quem já tem documento — quem chama é que sabe do nicho.
     if contrato_numero and not contrato_assinado:
-        selos.append({"texto": "Contrato aguardando assinatura", "tom": "ambar",
-                      "dica": "Mande o link pro cliente ler e assinar."})
+        dias = _dias_desde(contrato_em, hoje)
+        # o TEMPO PARADO é o dado que faltava: 3 dias e 30 dias pedem reações
+        # diferentes, e o selo dizia a mesma coisa nos dois casos.
+        selos.append({"texto": "Aguardando assinatura" + (f" há {_ha(dias)}" if dias is not None else ""),
+                      "tom": "ambar",
+                      "dica": "O cliente ainda não assinou o contrato nº "
+                              f"{contrato_numero}."})
+        # ...e agora existe BOTÃO. Antes a dica mandava "mande o link pro cliente"
+        # e não havia nada pra clicar: o link ficava escondido no menu de três
+        # pontos, junto de "abrir" e "copiar".
+        acoes.append(("assinar", "Mandar pra assinar"))
     elif contrato_numero and contrato_assinado:
         if status != "fechado":
-            acoes.append(("fechar", "Fechar contrato"))
+            acoes.append(("fechar", "Fechar negócio"))
+    elif status == "aprovada" and not contrato_numero and not tem_contrato:
+        # Aprovada, sem documento, e sem documento PRA VIR: aqui fechar o negócio é
+        # o passo seguinte, e ele não estava sendo oferecido. Em produção a #2
+        # estava assim havia 37 dias, sem ação nenhuma na linha.
+        #
+        # E NADA DE SELO. A primeira versão punha um selo azul "Sem contrato ainda"
+        # em toda proposta aprovada — e onze testes deste arquivo caíram, com razão:
+        # a regra que ele guarda é SELO É PENDÊNCIA, e "ainda não tem contrato" é o
+        # estado normal de quem acabou de aprovar. Quando o contrato depende do
+        # sinal, quem avisa é o selo do sinal, que já existe e já diz o que fazer.
+        acoes.append(("fechar", "Fechar negócio"))
 
     # ---- o começo do caminho
     if status in ("rascunho", "enviado", "negociando") and nunca_enviada:
@@ -351,7 +487,9 @@ def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
     if contrato_numero and contrato_assinado:
         feito.append(f"contrato nº {contrato_numero} assinado")
     if status == "fechado":
-        feito.append("contrato fechado")
+        # sem documento, o que fechou foi o NEGÓCIO. Dizer "contrato fechado" pra
+        # uma proposta sem contrato descreve mudança de status como papel assinado.
+        feito.append("contrato fechado" if contrato_numero else "negócio fechado")
 
     # a ação é UMA: a primeira da ordem que o dono escolheu. As outras pendências
     # continuam visíveis nos selos — some o botão, não o aviso.

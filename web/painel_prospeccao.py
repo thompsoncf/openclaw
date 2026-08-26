@@ -11794,6 +11794,14 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           + 'O chip 1 não é afetado.\\n\\n'
           + 'Se você só quer RECONECTAR, não use: o sistema reconecta sozinho.\\n\\n'
           + 'Apagar a sessão do chip 2 mesmo assim?'))return;
+          // mesma segunda pergunta do chip 1 — ver o comentário lá: a primeira é
+          // sobre consequência, esta é sobre prontidão, e o QR dura ~1min
+          if(!confirm('📱 O celular do chip 2 está com você agora?\\n\\n'
+            + 'Assim que desconectar, o QR aparece e o primeiro código dura cerca de '
+            + '1 minuto. Se o celular não estiver por perto, este chip fica sem '
+            + 'WhatsApp até alguém escanear.\\n\\n'
+            + 'Deixe o WhatsApp já aberto em Aparelhos conectados › Conectar aparelho.\\n\\n'
+            + 'Pode desconectar agora?'))return;
           var fd=new FormData();fd.append('chip',c2Chip());
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
             .then(function(r){return r.json();}).then(function(d){
@@ -11872,6 +11880,26 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           + 'Se você só quer RECONECTAR, não use este botão: o sistema reconecta sozinho.\\n\\n'
           + 'Use só para trocar o número desta empresa, ou se o suporte pediu.\\n\\n'
           + 'Apagar a sessão mesmo assim?'))return;
+          // SEGUNDA PERGUNTA, curta e separada de propósito.
+          //
+          // A de cima é sobre CONSEQUÊNCIA (apaga credencial e chaves). Esta é sobre
+          // PRONTIDÃO, que é outra decisão — e é a que determina se a empresa fica
+          // fora do ar. Quem clica ali já aceitou o custo; o que ninguém pergunta é
+          // se a pessoa do celular está por perto AGORA.
+          //
+          // O prazo não é chute: o primeiro QR do lote dura 60s (Baileys,
+          // Socket/socket.js:464) e os seguintes 20s. Em 26/08 o dono da conta 23
+          // pareou em 42s COM O CELULAR JÁ NA MÃO — quem tiver que ir buscar o
+          // aparelho não passa, e a conta fica fora do ar até alguém escanear.
+          //
+          // Curta E depois da longa: no fim de um parágrafo grande, uma linha curta
+          // ainda é lida. Enfiada no meio daquele texto, ela sumiria.
+          if(!confirm('📱 O celular está com você agora?\\n\\n'
+            + 'Assim que desconectar, o QR aparece e o primeiro código dura cerca de '
+            + '1 minuto. Se o celular não estiver por perto, a empresa fica sem '
+            + 'WhatsApp até alguém escanear.\\n\\n'
+            + 'Deixe o WhatsApp já aberto em Aparelhos conectados › Conectar aparelho.\\n\\n'
+            + 'Pode desconectar agora?'))return;
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
             // só declara desconectado se REALMENTE desconectou — senão o usuário ia
             // escanear um QR novo achando que a sessão antiga tinha caído

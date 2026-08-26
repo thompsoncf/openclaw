@@ -4081,14 +4081,39 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
             if _pend:
                 _conv = _cv.responder(pool, _pend[0]["token"], _st, canal="whatsapp")
                 if _conv:
-                    if _conv.get("mudou"):                             # só avisa se mudou
-                        _cv.pos_resposta(pool, _conv)                  # aviso ao DONO: sempre
-                    # a resposta ao CONVIDADO é opt-out por conta (Agenda › Lembrete)
-                    from finance import agenda as _ag
-                    if _ag.get_config(pool, _conv["conta_id"]).get("enviar_confirmacao", True):
-                        _wout.enviar(c, conta_id, remetente, _cv.confirmacao_texto(_conv),
-                                     chip_id=_wout.chip_da_conversa(c, conta_id, conv_id))
-                    c.commit()
+                    # DEPOIS de `responder` o RSVP já está gravado, e daqui pra baixo é
+                    # só cortesia: avisar o dono e agradecer ao convidado. Levantar aqui
+                    # devolvia 500 pro Twilio, que reentrega a mesma mensagem — e na
+                    # reentrega o convite já não está mais 'pendente', então
+                    # `pendentes_por_numero` volta vazio, o fluxo cai no inbox e é a IA
+                    # que responde. Foi o que o convidado leu em 23/08, logo após
+                    # confirmar: "Confirmar presença em quê? Não tenho nada registrado
+                    # aqui sobre um evento". O status estava certo no banco; quem errou
+                    # foi a resposta. Por isso o try é largo e o `return` fica fora dele:
+                    # confirmou, acabou — o resto não pode desfazer isso aos olhos de
+                    # quem respondeu.
+                    try:
+                        if _conv.get("mudou"):                         # só avisa se mudou
+                            _cv.pos_resposta(pool, _conv)              # aviso ao DONO: sempre
+                        # a resposta ao CONVIDADO é opt-out por conta (Agenda › Lembrete)
+                        from finance import agenda as _ag
+                        if _ag.get_config(pool, _conv["conta_id"]).get("enviar_confirmacao", True):
+                            # a conversa deste contato pode nem existir (convidado não é
+                            # lead): sem ela o chip é o da própria empresa, que é o certo
+                            # — e no Twilio, que é por onde o convite com botões sai,
+                            # `chip_id` nem é lido. `conv_id` NÃO serve aqui: ele só é
+                            # atribuído lá embaixo, no inbox, e usá-lo antes era
+                            # exatamente o UnboundLocalError que derrubava esta rota.
+                            _cvv = _conversa_wa_do_contato(c, conta_id, None, remetente)
+                            _wout.enviar(c, conta_id, remetente, _cv.confirmacao_texto(_conv),
+                                         chip_id=_wout.chip_da_conversa(
+                                             c, conta_id, _cvv[0] if _cvv else None))
+                        c.commit()
+                    except Exception:  # noqa: BLE001
+                        import logging
+                        logging.getLogger("prospeccao.convites").warning(
+                            "RSVP gravado, mas o pós-resposta falhou (conta=%s, token=%s)",
+                            conta_id, _pend[0]["token"], exc_info=True)
                     return Response("<Response></Response>", media_type="application/xml")
         # --- Botões do template de 1º contato da prospecção (quick reply) ---
         # O convite frio sai com 3 botões; o clique volta PRA CÁ. Respondemos

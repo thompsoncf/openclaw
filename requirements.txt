@@ -4,6 +4,10 @@ psycopg_pool>=3.2
 python-telegram-bot>=21.0
 python-dotenv>=1.0
 pytest>=8.0
+# pega 'undefined name' — uso de variável antes de existir, que o Python só
+# denuncia em tempo de execução. Ver tests/test_nome_indefinido.py: um erro desses
+# derrubou o RSVP de convite em produção (23/08).
+pyflakes>=3.2
 fastapi>=0.110
 uvicorn[standard]>=0.29
 openai>=1.40

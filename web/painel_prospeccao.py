@@ -11382,8 +11382,56 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <b>Desconectar</b> apaga a sessão e exige QR novo; depois dele a conta fica
           um tempo conectada <b>sem receber</b>. Use só pra trocar de número.
         </div>
+        <!-- ═══ O RELÓGIO DO QR ══════════════════════════════════════════════
+             O código não vive pra sempre e a tela nunca disse isso. Medido na
+             fonte do Baileys (Socket/socket.js:464 e :478): o PRIMEIRO código
+             dura 60s, cada um dos seguintes dura 20s. Quando os `ref` do lote
+             acabam, o Baileys derruba a conexão com 'QR refs attempts ended'
+             (408) — e o nosso handler de close religa em 2,5s e pega um LOTE
+             NOVO. Ou seja: não expira pra sempre, mas some da tela por alguns
+             segundos, e era isso que parecia defeito.
+
+             Referência real: a conta 23 pareou em 26/08 às 11:17 e levou 42s —
+             passou com 18 de folga, no primeiro código. Quem não estiver com o
+             celular já aberto em Aparelhos conectados não passa.
+
+             Classes com prefixo `zqr-` e compartilhadas pelos DOIS chips; os ids
+             continuam separados, como manda a regra do cartão do chip 2. -->
+        <style>
+          .zqr-relogio{display:flex;align-items:center;gap:.7rem;margin-top:.6rem}
+          .zqr-anel{width:52px;height:52px;border-radius:50%;flex:0 0 auto;display:grid;
+            place-items:center;position:relative;
+            background:conic-gradient(var(--zqr-cor,var(--verde)) calc(var(--zqr-p,1)*360deg),var(--borda) 0)}
+          .zqr-anel::after{content:"";position:absolute;inset:5px;border-radius:50%;background:var(--card)}
+          .zqr-anel b{position:relative;z-index:1;font-size:1rem;font-weight:600;
+            color:var(--zqr-cor,var(--verde));font-variant-numeric:tabular-nums}
+          .zqr-txt b{display:block;font-size:.85rem;color:var(--txt)}
+          .zqr-txt span{font-size:.76rem;color:var(--txt-mut)}
+          .zqr-passos{margin:.55rem 0 0;padding-left:1.15rem;font-size:.78rem;
+            color:var(--txt-mut);line-height:1.75}
+          .zqr-passos b{color:var(--txt)}
+          .zqr-fim{border-radius:8px;padding:.55rem .7rem;font-size:.78rem;line-height:1.5;
+            margin-top:.6rem;border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:#F2D08A}
+          @media(prefers-reduced-motion:reduce){.zqr-anel{transition:none}}
+        </style>
         <div id="qr-box" style="margin-top:.6rem;text-align:center;display:none">
           <img id="qr-img" alt="QR do WhatsApp" style="width:220px;max-width:100%;border-radius:10px;background:#fff;padding:.4rem">
+        </div>
+        <div id="qr-relogio" class="zqr-relogio" style="display:none">
+          <div id="qr-anel" class="zqr-anel"><b id="qr-seg">60</b></div>
+          <div class="zqr-txt">
+            <b id="qr-rel-tit">Escaneie agora</b>
+            <span id="qr-rel-det">Este código vale por mais 60 segundos</span>
+          </div>
+        </div>
+        <ol id="qr-passos" class="zqr-passos" style="display:none">
+          <li>No celular, abra o <b>WhatsApp</b></li>
+          <li>Toque em <b>Aparelhos conectados</b></li>
+          <li>Toque em <b>Conectar aparelho</b> e aponte para esta tela</li>
+        </ol>
+        <div id="qr-fim" class="zqr-fim" style="display:none">
+          O tempo deste código acabou e estamos buscando um novo — <b>nada foi perdido</b>.
+          Deixe o WhatsApp aberto em <b>Aparelhos conectados</b> que ele aparece em instantes.
         </div>
         <div id="qr-sync" style="margin-top:.6rem;display:none">
           <div style="font-size:.78rem;margin-bottom:.3rem">📥 Sincronizando conversas dos últimos 30 dias… <b id="qr-sync-pct">0%</b></div>
@@ -11481,6 +11529,83 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             .then(function(r){return r.json();}).then(apsPinta).catch(function(){});
         });
         var _qrTimer=null;
+        // ═══ RELÓGIO DO QR — chip 1 ════════════════════════════════════════════
+        // Os tempos são os do Baileys (Socket/socket.js:464 e :478): 60s no
+        // primeiro código do lote, 20s em cada um dos seguintes.
+        //
+        // A conta do tempo é do LADO DE CÁ porque o serviço não manda quando o
+        // código nasceu — e por isso ela é conservadora: o polling é de 3s, então
+        // a gente pode descobrir um código novo até 3s depois de ele existir.
+        // Descontar esses 3s faz o número na tela ser um piso, não uma promessa.
+        // Dizer 57 quando são 60 é chato; dizer 60 quando são 57 é mentir pro
+        // cliente bem na hora em que ele está com o celular na mão.
+        var QR_1O=60, QR_SEG=20, QR_ATRASO=3;
+        var _qrSrc=null, _qrN=0, _qrResta=0, _qrTick=null, _qrVao=false;
+        function qrRelPinta(){
+          var anel=document.getElementById('qr-anel'), seg=document.getElementById('qr-seg'),
+              tit=document.getElementById('qr-rel-tit'), det=document.getElementById('qr-rel-det');
+          if(!anel)return;
+          var total=(_qrN<=1?QR_1O:QR_SEG), r=Math.max(0,_qrResta);
+          anel.style.setProperty('--zqr-p', total?r/total:0);
+          anel.style.setProperty('--zqr-cor', r<=10?'var(--ambar)':'var(--verde)');
+          if(seg)seg.textContent=r;
+          if(!tit||!det)return;
+          if(r<=0){tit.textContent='Buscando um código novo';det.textContent='Aguarde alguns segundos';}
+          else if(r<=10){tit.textContent='Vai trocar de código';
+            det.textContent='Um novo aparece em '+r+' s — pode esperar';}
+          else if(_qrN<=1){tit.textContent='Escaneie agora';
+            det.textContent='Este código vale por mais '+r+' segundos';}
+          else{tit.textContent='Código renovado';
+            det.textContent='O anterior venceu — aponte para este ('+r+' s)';}
+        }
+        // Um código novo entrou na tela: reinicia a conta. `primeiro` distingue os
+        // 60s iniciais dos 20s dos seguintes.
+        function qrRelNovo(){
+          _qrResta=Math.max(1,(_qrN<=1?QR_1O:QR_SEG)-QR_ATRASO);
+          if(_qrTick)clearInterval(_qrTick);
+          _qrTick=setInterval(function(){_qrResta--;qrRelPinta();
+            if(_qrResta<=0){qrFimMostra(true);}},1000);
+          qrFimMostra(false); qrRelPinta();
+        }
+        function qrFimMostra(v){var f=document.getElementById('qr-fim');if(f)f.style.display=v?'block':'none';}
+        function qrRelPara(){
+          if(_qrTick){clearInterval(_qrTick);_qrTick=null;}
+          _qrSrc=null; _qrN=0; _qrVao=false;
+          var r=document.getElementById('qr-relogio'), p=document.getElementById('qr-passos');
+          if(r)r.style.display='none'; if(p)p.style.display='none'; qrFimMostra(false);
+        }
+        // O vão entre um lote de códigos e o seguinte. Fica aqui porque o estado
+        // que o serviço reporta nesse intervalo NÃO é 'aguardando_qr': quando os
+        // `ref` acabam o Baileys derruba com 408, o handler de close marca
+        // 'reconectando' e só 2,5s depois nasce o socket com o lote novo. Tratar
+        // isso como "não é hora do relógio" desmontaria a tela bem no vão — que é
+        // exatamente o sumiço calado que este bloco existe pra consertar.
+        function qrVaoEntra(){
+          if(_qrTick){clearInterval(_qrTick);_qrTick=null;}
+          _qrSrc=null;      // o código do lote velho não vale mais
+          _qrN=0;           // o próximo é o PRIMEIRO do lote novo: 60s, não 20s
+          _qrVao=true;
+          var r=document.getElementById('qr-relogio'), p=document.getElementById('qr-passos');
+          if(r)r.style.display='none'; if(p)p.style.display='none';
+          qrFimMostra(true);
+        }
+        // Chamada de dentro do qrShow, com a resposta do serviço já na mão.
+        function qrRelogio(d){
+          var rel=document.getElementById('qr-relogio'), pas=document.getElementById('qr-passos');
+          if(!d){qrRelPara();return;}
+          if(d.status==='reconectando'&&(_qrN>0||_qrVao)){qrVaoEntra();return;}
+          if(d.status!=='aguardando_qr'){qrRelPara();return;}
+          if(d.qr){
+            // o serviço manda o QR como data-URL; mudou a string = código novo
+            if(d.qr!==_qrSrc){_qrVao=false;_qrSrc=d.qr;_qrN++;
+              if(rel)rel.style.display='flex'; if(pas)pas.style.display='block';
+              qrRelNovo();}
+          }else{
+            // 'aguardando_qr' sem imagem também é vão — o socket subiu e o código
+            // ainda não chegou
+            qrVaoEntra();
+          }
+        }
         function qrShow(d){var box=document.getElementById('qr-box'),img=document.getElementById('qr-img'),
             msg=document.getElementById('qr-msg'),sair=document.getElementById('qr-sair'),btn=document.getElementById('qr-btn'),
             sync=document.getElementById('qr-sync'),syncBar=document.getElementById('qr-sync-bar'),syncPct=document.getElementById('qr-sync-pct');
@@ -11493,6 +11618,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           // conectado tira o QR da tela na hora — nada de deixar a imagem velha
           // parada aí sem dizer nada (era exatamente essa a queixa).
           if(d.qr&&!conectado){img.src=d.qr;box.style.display='block';}else{box.style.display='none';}
+          qrRelogio(d);   // relógio, passo a passo e o aviso do vão entre lotes
           if(sync)sync.style.display=(conectado&&d.sincronizando)?'block':'none';
           if(syncBar)syncBar.style.width=(d.sync_progress||0)+'%';
           if(syncPct)syncPct.textContent=(d.sync_progress||0)+'%';
@@ -11565,6 +11691,61 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         // sessão do outro. Duplicar cem linhas custa menos que essa chance.
         var _c2Timer=null;
         function c2Chip(){var el=document.getElementById('c2-card');return el?el.dataset.chip:'';}
+        // ═══ RELÓGIO DO QR — chip 2 ════════════════════════════════════════════
+        // Cópia deliberada do chip 1, pelo mesmo motivo que o resto deste cartão é
+        // copiado: um parâmetro compartilhado erraria de chip e mexeria na sessão
+        // do outro. As constantes QR_1O/QR_SEG/QR_ATRASO são as mesmas, do chip 1.
+        var _c2Src=null, _c2N=0, _c2Resta=0, _c2Tick=null, _c2Vao=false;
+        function c2RelPinta(){
+          var anel=document.getElementById('c2-anel'), seg=document.getElementById('c2-seg'),
+              tit=document.getElementById('c2-rel-tit'), det=document.getElementById('c2-rel-det');
+          if(!anel)return;
+          var total=(_c2N<=1?QR_1O:QR_SEG), r=Math.max(0,_c2Resta);
+          anel.style.setProperty('--zqr-p', total?r/total:0);
+          anel.style.setProperty('--zqr-cor', r<=10?'var(--ambar)':'var(--verde)');
+          if(seg)seg.textContent=r;
+          if(!tit||!det)return;
+          if(r<=0){tit.textContent='Buscando um código novo';det.textContent='Aguarde alguns segundos';}
+          else if(r<=10){tit.textContent='Vai trocar de código';
+            det.textContent='Um novo aparece em '+r+' s — pode esperar';}
+          else if(_c2N<=1){tit.textContent='Escaneie agora';
+            det.textContent='Este código vale por mais '+r+' segundos';}
+          else{tit.textContent='Código renovado';
+            det.textContent='O anterior venceu — aponte para este ('+r+' s)';}
+        }
+        function c2RelNovo(){
+          _c2Resta=Math.max(1,(_c2N<=1?QR_1O:QR_SEG)-QR_ATRASO);
+          if(_c2Tick)clearInterval(_c2Tick);
+          _c2Tick=setInterval(function(){_c2Resta--;c2RelPinta();
+            if(_c2Resta<=0){c2FimMostra(true);}},1000);
+          c2FimMostra(false); c2RelPinta();
+        }
+        function c2FimMostra(v){var f=document.getElementById('c2-fim');if(f)f.style.display=v?'block':'none';}
+        function c2RelPara(){
+          if(_c2Tick){clearInterval(_c2Tick);_c2Tick=null;}
+          _c2Src=null; _c2N=0; _c2Vao=false;
+          var r=document.getElementById('c2-relogio'), p=document.getElementById('c2-passos');
+          if(r)r.style.display='none'; if(p)p.style.display='none'; c2FimMostra(false);
+        }
+        // mesmo vão do chip 1: entre lotes o serviço reporta 'reconectando', e
+        // desmontar a tela ali deixaria o cliente sem explicação bem no sumiço
+        function c2VaoEntra(){
+          if(_c2Tick){clearInterval(_c2Tick);_c2Tick=null;}
+          _c2Src=null; _c2N=0; _c2Vao=true;
+          var r=document.getElementById('c2-relogio'), p=document.getElementById('c2-passos');
+          if(r)r.style.display='none'; if(p)p.style.display='none';
+          c2FimMostra(true);
+        }
+        function c2Relogio(d){
+          var rel=document.getElementById('c2-relogio'), pas=document.getElementById('c2-passos');
+          if(!d){c2RelPara();return;}
+          if(d.status==='reconectando'&&(_c2N>0||_c2Vao)){c2VaoEntra();return;}
+          if(d.status!=='aguardando_qr'){c2RelPara();return;}
+          if(d.qr){ if(d.qr!==_c2Src){_c2Vao=false;_c2Src=d.qr;_c2N++;
+            if(rel)rel.style.display='flex'; if(pas)pas.style.display='block';
+            c2RelNovo();} }
+          else{ c2VaoEntra(); }
+        }
         function c2Show(d){
           var box=document.getElementById('c2-box'),img=document.getElementById('c2-img'),
               msg=document.getElementById('c2-msg'),sair=document.getElementById('c2-sair'),
@@ -11573,6 +11754,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             if(st){st.textContent='não deu pra checar';st.style.color='var(--ambar)';}return;}
           var conectado=d.status==='conectado';
           if(d.qr&&!conectado){img.src=d.qr;box.style.display='block';}else{box.style.display='none';}
+          c2Relogio(d);   // mesmo relógio do chip 1, ids próprios
           if(msg)msg.textContent=d.msg||'';
           if(st){st.textContent=conectado?'✅ Conectado':(d.status==='aguardando_qr'?'Aguardando QR':d.status);
                  st.style.color=conectado?'var(--verde-claro)':'var(--ambar)';}
@@ -11594,6 +11776,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           .then(function(r){return r.json();}).then(c2Show).catch(function(){c2Show(null);});}
         function c2Iniciar(){var btn=document.getElementById('c2-btn'),msg=document.getElementById('c2-msg');
           btn.disabled=true;btn.textContent='Gerando…';if(msg)msg.textContent='';
+          c2RelPara();   // lote novo: o próximo QR volta a valer 60s, não 20s
           var fd=new FormData();fd.append('chip',c2Chip());
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
             .then(function(r){return r.json();}).then(function(d){
@@ -11665,6 +11848,9 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             .then(qrShow).catch(qrIndefinido);}
         function qrIniciar(){var btn=document.getElementById('qr-btn'),msg=document.getElementById('qr-msg');
           btn.disabled=true;var t=btn.textContent;btn.textContent='Gerando…';if(msg)msg.textContent='';
+          // pedido novo = lote novo de códigos: o próximo QR volta a ser o "primeiro"
+          // (60s), senão ele herdaria os 20s do fim da tentativa anterior
+          qrRelPara();
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
             btn.disabled=false;btn.textContent=t;qrShow(d);
             if(!d.ok&&msg){msg.textContent=d.msg||d.erro||'Falha.';msg.style.color='var(--ambar)';return;}
@@ -11780,6 +11966,23 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </div>
           <div id="c2-box" style="margin-top:.6rem;text-align:center;display:none">
             <img id="c2-img" alt="QR do chip 2" style="width:220px;max-width:100%;border-radius:10px;background:#fff;padding:.4rem">
+          </div>
+          <!-- mesmo relógio do chip 1, ids próprios (as classes zqr-* são compartilhadas) -->
+          <div id="c2-relogio" class="zqr-relogio" style="display:none">
+            <div id="c2-anel" class="zqr-anel"><b id="c2-seg">60</b></div>
+            <div class="zqr-txt">
+              <b id="c2-rel-tit">Escaneie agora</b>
+              <span id="c2-rel-det">Este código vale por mais 60 segundos</span>
+            </div>
+          </div>
+          <ol id="c2-passos" class="zqr-passos" style="display:none">
+            <li>No celular, abra o <b>WhatsApp</b></li>
+            <li>Toque em <b>Aparelhos conectados</b></li>
+            <li>Toque em <b>Conectar aparelho</b> e aponte para esta tela</li>
+          </ol>
+          <div id="c2-fim" class="zqr-fim" style="display:none">
+            O tempo deste código acabou e estamos buscando um novo — <b>nada foi perdido</b>.
+            Deixe o WhatsApp aberto em <b>Aparelhos conectados</b> que ele aparece em instantes.
           </div>
           <div class="mut" id="c2-msg" style="font-size:.78rem;margin-top:.45rem"></div>
 

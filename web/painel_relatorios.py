@@ -89,8 +89,20 @@ def _soma(linhas, chave):
     return sum(int(r[chave]) for r in linhas)
 
 
-def _col(chave, rotulo, num=False, brl=False, tag=False):
-    return {"chave": chave, "rotulo": rotulo, "num": num, "brl": brl, "tag": tag}
+def _col(chave, rotulo, num=False, brl=False, tag=False, flex=False):
+    """`flex=True` marca a coluna ELÁSTICA da tabela — a que pode encolher quando
+    falta largura. Só uma por relatório, e é sempre a de nome livre (descrição,
+    cliente, contraparte).
+
+    Existe porque o oposto quebrava a tela. A tabela tinha `nowrap` em TODA célula
+    e `min-width:640px`: com seis colunas de nome longo nada cabia nos 720px do
+    cartão, a tabela rolava pro lado e o que aparecia era o MEIO dela. No print de
+    26/08 o cliente lia "ço Pelle Clínica" e "erson Venici" — não era truncagem, era
+    a coluna Data e o começo do nome fora da área visível. Uma coluna elástica, que
+    corta no FIM com reticências, mantém todas as outras no lugar e o começo do nome
+    sempre visível — que é a parte que identifica o cliente."""
+    return {"chave": chave, "rotulo": rotulo, "num": num, "brl": brl, "tag": tag,
+            "flex": flex}
 
 
 def _dados_vendas(pool, conta_id, periodo):
@@ -114,7 +126,7 @@ def _dados_vendas(pool, conta_id, periodo):
     vendido_hoje = _soma([r for r in linhas if r["data"] == hoje_str], "valor_centavos")
     return {
         "label": "Vendas", "mock": False,
-        "colunas": [_col("data", "Data"), _col("descricao", "Descrição"), _col("categoria", "Categoria"),
+        "colunas": [_col("data", "Data"), _col("descricao", "Descrição", flex=True), _col("categoria", "Categoria"),
                     _col("forma", "Forma"), _col("vendedor", "Vendedor"),
                     _col("valor_centavos", "Valor", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
@@ -148,7 +160,7 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
     label = "Contas a pagar" if tipo == "pagar" else "Contas a receber"
     return {
         "label": label, "mock": False, "sem_periodo": True,
-        "colunas": [_col("vencimento", "Vencimento"), _col("contraparte", rotulo_col),
+        "colunas": [_col("vencimento", "Vencimento"), _col("contraparte", rotulo_col, flex=True),
                     _col("categoria", "Categoria"), _col("status", "Status", tag=True),
                     _col("valor_centavos", "Valor", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
@@ -178,7 +190,7 @@ def _dados_titulos_pagos(pool, conta_id, tipo, periodo):
     return {
         "label": label, "mock": False,
         "colunas": [_col("data", "Pagamento" if tipo == "pagar" else "Recebimento"),
-                    _col("contraparte", rotulo_col), _col("categoria", "Categoria"),
+                    _col("contraparte", rotulo_col, flex=True), _col("categoria", "Categoria"),
                     _col("valor_centavos", f"Valor {verbo}", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
         "metricas": [(f"Total {verbo} no período", _brl(total)), ("Nº de registros", str(len(linhas))),
@@ -213,7 +225,7 @@ def _dados_comissao(pool, conta_id, periodo):
     destaque = max(linhas, key=lambda r: r["comissao_centavos"])["vendedor"] if linhas else "—"
     dados = {
         "label": "Comissão", "mock": False,
-        "colunas": [_col("vendedor", "Vendedor"), _col("vendas_centavos", "Recebido no período", num=True, brl=True),
+        "colunas": [_col("vendedor", "Vendedor", flex=True), _col("vendas_centavos", "Recebido no período", num=True, brl=True),
                     _col("percentual", "% comissão", num=True), _col("comissao_centavos", "Comissão a pagar", num=True, brl=True)],
         "linhas": linhas, "col_total": "comissao_centavos", "total_centavos": total,
         "metricas": [("Total de comissões", _brl(total)), ("Vendedor destaque", destaque),
@@ -371,7 +383,7 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
     return {
         "label": "Orçamentos", "mock": False, "acao": True,
         "acao_rotulo": "Ver / imprimir proposta",
-        "colunas": [_col("numero", "Nº"), _col("cliente", "Cliente"),
+        "colunas": [_col("numero", "Nº"), _col("cliente", "Cliente", flex=True),
                     _col("status", "Status", tag=True), _col("criado_em", "Criado em"),
                     _col("aprovada_em", "Aprovada em"),
                     _col("vendedor", "Vendedor"),
@@ -459,7 +471,7 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -
     return {
         "label": "Contratos", "mock": False, "acao": True,
         "acao_rotulo": "Ver / imprimir contrato",
-        "colunas": [_col("numero", "Nº"), _col("cliente", "Cliente"),
+        "colunas": [_col("numero", "Nº"), _col("cliente", "Cliente", flex=True),
                     _col("status", "Status", tag=True), _col("criado_em", "Criado em"),
                     _col("assinado_em", "Assinado em"), _col("vendedor", "Vendedor"),
                     _col("valor_centavos", "Valor", num=True, brl=True)],

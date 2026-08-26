@@ -1,0 +1,335 @@
+<title>Relatórios em tela cheia</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+
+<style>
+/* Tokens da casa (web/tema.py). O painel é dark-only por decisão de produto. */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A; --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.pag{max-width:1500px;margin:0 auto;padding:40px 20px 80px}
+h1,h2{font-family:var(--display);margin:0;text-wrap:balance}
+h1{font-size:clamp(26px,3.4vw,38px);font-weight:700;letter-spacing:-.02em;line-height:1.12}
+h2{font-size:21px;font-weight:600;letter-spacing:-.01em}
+p{margin:0}
+.olho{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--neon);margin-bottom:12px}
+.sub{color:var(--text-dim);max-width:66ch;margin-top:14px;font-size:16px}
+section{margin-top:52px}
+.cab{margin-bottom:20px}
+.cab p{color:var(--text-dim);max-width:74ch;margin-top:8px}
+
+/* ── a moldura que imita o painel ────────────────────────────────────── */
+.tela{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg-2);
+  display:grid;grid-template-columns:200px 1fr}
+.tela.estreita .conteudo-mock{max-width:720px}
+.menu{background:var(--bg);border-right:1px solid var(--line);padding:18px 0;font-size:13px}
+.menu .grupo{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--text-faint);padding:14px 18px 6px}
+.menu a{display:block;padding:8px 18px;color:var(--text-dim);text-decoration:none}
+.menu a.on{background:var(--neon-fundo);color:var(--neon);border-left:2px solid var(--neon);
+  padding-left:16px;font-weight:600}
+.palco{padding:22px;overflow-x:auto}
+.sobra{background:repeating-linear-gradient(135deg,transparent 0 9px,rgba(224,87,79,.10) 9px 18px);
+  border-left:1px dashed var(--coral-borda);display:flex;align-items:flex-start;justify-content:center;
+  padding-top:26px}
+.sobra span{font-family:var(--mono);font-size:10.5px;color:var(--coral);letter-spacing:.1em;
+  text-transform:uppercase;writing-mode:vertical-rl;transform:rotate(180deg)}
+
+/* ── o cartão do relatório ───────────────────────────────────────────── */
+.conteudo-mock{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px}
+.titulo{display:flex;align-items:baseline;gap:8px;margin-bottom:14px}
+.titulo b{font-family:var(--display);font-size:19px;font-weight:600}
+.titulo span{color:var(--text-dim);font-size:13px}
+
+.abas{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:0}
+.abas a{padding:7px 13px;font-size:13px;color:var(--text-dim);text-decoration:none;border-radius:7px 7px 0 0;
+  border:1px solid transparent;border-bottom:none;white-space:nowrap}
+.abas a.on{background:var(--neon);color:var(--sobre-verde);font-weight:600}
+
+.barra{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:13px 0}
+.barra .cresce{flex:1 1 auto}
+.sel{background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;
+  padding:7px 11px;font-size:13px;font-family:var(--body)}
+.busca{background:var(--bg);border:1px solid var(--line);color:var(--text-dim);border-radius:8px;
+  padding:7px 11px;font-size:13px;min-width:210px}
+.pdf{background:#1d6e9e;color:#fff;border:0;border-radius:8px;padding:8px 14px;font-size:13px;
+  font-weight:600;display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+
+/* ── KPIs ────────────────────────────────────────────────────────────── */
+.kpis{display:grid;gap:9px;margin:13px 0}
+.kpi{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:10px 13px}
+.kpi small{display:block;font-size:11px;color:var(--text-dim);letter-spacing:.02em}
+.kpi b{display:block;font-family:var(--mono);font-size:18px;font-weight:600;margin-top:2px;
+  font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.kpi.destaque{background:var(--neon-fundo);border-color:var(--neon-borda)}
+.kpi.destaque b{color:var(--neon-bright)}
+
+/* ── tabela ──────────────────────────────────────────────────────────── */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--text-faint);font-weight:400;text-align:left;padding:8px 10px;
+  border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface)}
+.tbl td{padding:8px 10px;border-bottom:1px solid rgba(30,42,35,.55);vertical-align:middle}
+.tbl tbody tr:nth-child(even){background:rgba(255,255,255,.014)}
+.tbl tbody tr:hover{background:var(--neon-fraco)}
+.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.data{font-family:var(--mono);color:var(--text-dim);white-space:nowrap;font-size:12px}
+/* A descrição é a ÚNICA que pode encolher — as outras têm largura previsível.
+   Ellipsis no FIM, que é onde a informação importa menos. */
+.desc{max-width:0;width:99%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:600;
+  border:1px solid var(--line);color:var(--text-dim);white-space:nowrap}
+.tag.aporte{background:var(--azul-fundo);border-color:var(--azul-borda);color:#8FD0EA}
+.vazio{color:var(--text-faint)}
+.rodape-tbl td{border-top:2px solid var(--line);font-weight:700;padding-top:11px}
+.rolagem{max-height:400px;overflow:auto;border-radius:9px;border:1px solid var(--line);margin-top:4px}
+
+/* ── comparativo e notas ─────────────────────────────────────────────── */
+.par{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:1000px){.par{grid-template-columns:1fr}}
+.rot{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text-faint);margin-bottom:9px;display:flex;justify-content:space-between;gap:8px}
+.pill{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid var(--line)}
+.pill.mau{color:var(--coral);border-color:var(--coral-borda);background:var(--coral-fundo)}
+.pill.bom{color:var(--neon);border-color:var(--neon-borda);background:var(--neon-fundo)}
+.lista{width:100%;border-collapse:collapse;font-size:14.5px;margin-top:4px}
+.lista td{padding:12px 11px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--text-dim)}
+.lista td:first-child{color:var(--text);font-weight:600;width:27%}
+.lista td:last-child{width:14%;font-family:var(--mono);font-size:12px;color:var(--neon);white-space:nowrap}
+.nota{border-radius:9px;padding:12px 14px;font-size:13.5px;line-height:1.55;margin-top:20px;
+  border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:#F2D08A}
+.nota.calmo{border-color:var(--neon-borda);background:var(--neon-fundo);color:#9FE7BC}
+.pe{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);
+  font-size:12.5px;color:var(--text-faint);line-height:1.7}
+.pe code{font-family:var(--mono);font-size:11.5px;color:var(--text-dim)}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="pag">
+
+  <p class="olho">Painel · Relatórios</p>
+  <h1>Relatórios em tela cheia</h1>
+  <p class="sub">
+    A tela tem 2000&nbsp;px e o relatório usa 720. O resto é fundo preto — e, pior,
+    a tabela não cabe nesses 720 e rola pro lado, escondendo a Data e o começo do nome
+    do cliente. Não é um nome truncado: é um nome que ficou fora da área visível.
+  </p>
+
+  <!-- ══ 1. o que acontece hoje ═════════════════════════════════════════ -->
+  <section>
+    <div class="cab">
+      <h2>Hoje</h2>
+      <p>
+        O cartão herda <code style="font-family:var(--mono);font-size:12px">.card.larga</code>,
+        que vale 720&nbsp;px. A tabela tem <code style="font-family:var(--mono);font-size:12px">min-width:640px</code>
+        com <code style="font-family:var(--mono);font-size:12px">nowrap</code> em toda célula: seis colunas
+        de nome longo não cabem, e o que sobra some pela esquerda.
+      </p>
+    </div>
+
+    <div class="tela estreita">
+      <div class="menu">
+        <div class="grupo">Principal</div><a>Financeiro</a>
+        <div class="grupo">Loja</div><a>Serviços</a><a>Prospecção</a><a>Agenda</a><a>Empresa</a>
+        <a class="on">Relatórios</a><a>Clientes/Fornecedores</a><a>Equipe</a>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr">
+        <div class="palco">
+          <div class="conteudo-mock">
+            <div class="titulo"><b>📊 Relatórios</b><span>· Vendas</span></div>
+            <div class="abas"><a class="on">Vendas</a><a>Contas a pagar</a><a>Contas a receber</a></div>
+            <div class="barra"><select class="sel"><option>Este mês</option></select>
+              <span class="cresce"></span><button class="pdf">🖨 Exportar PDF</button></div>
+            <div class="kpis" style="grid-template-columns:repeat(2,1fr)">
+              <div class="kpi"><small>Total vendido</small><b>R$ 24.170,05</b></div>
+              <div class="kpi"><small>Nº de vendas</small><b>14</b></div>
+            </div>
+            <table class="tbl">
+              <tr><th>Categoria</th><th>Forma</th><th class="num">Valor</th></tr>
+              <tr><td>ço Pelle Clínica Derma</td><td>Aporte</td><td class="num">R$ 200,00</td></tr>
+              <tr><td>CO PELLE CLI</td><td>Outros</td><td class="num">R$ 2.182,90</td></tr>
+              <tr><td>erson Venici</td><td>Outros</td><td class="num">R$ 250,00</td></tr>
+              <tr><td>UELINE DUART</td><td>Outros</td><td class="num">R$ 1.500,00</td></tr>
+            </table>
+            <p style="font-size:11.5px;color:var(--coral);margin-top:10px">
+              ↤ Data e o começo do nome ficaram fora da tela</p>
+          </div>
+        </div>
+        <div class="sobra"><span>tela desperdiçada</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 2. a proposta ══════════════════════════════════════════════════ -->
+  <section>
+    <div class="cab">
+      <h2>A proposta</h2>
+      <p>
+        O relatório passa a ocupar a largura da janela (com teto, pra não virar linha
+        de 2&nbsp;m em monitor ultrawide). Com espaço, toda coluna cabe: some a rolagem
+        lateral, volta a Data, e o nome do cliente aparece do começo.
+      </p>
+    </div>
+
+    <div class="tela">
+      <div class="menu">
+        <div class="grupo">Principal</div><a>Financeiro</a>
+        <div class="grupo">Loja</div><a>Serviços</a><a>Prospecção</a><a>Agenda</a><a>Empresa</a>
+        <a class="on">Relatórios</a><a>Clientes/Fornecedores</a><a>Equipe</a>
+      </div>
+      <div class="palco">
+        <div class="conteudo-mock">
+          <div class="titulo"><b>📊 Relatórios</b><span>· Vendas · período: Este mês</span></div>
+
+          <div class="abas">
+            <a class="on">Vendas</a><a>Contas a pagar</a><a>Contas a receber</a>
+            <a>Contas pagas</a><a>Comissão</a><a>Contas recebidas</a>
+          </div>
+
+          <div class="barra">
+            <select class="sel"><option>Este mês</option></select>
+            <div class="busca">🔎 filtrar por cliente, categoria…</div>
+            <span class="cresce"></span>
+            <button class="pdf">🖨 Exportar PDF</button>
+          </div>
+
+          <div class="kpis" style="grid-template-columns:repeat(4,1fr)">
+            <div class="kpi destaque"><small>Total vendido</small><b>R$ 24.170,05</b></div>
+            <div class="kpi"><small>Nº de vendas</small><b>14</b></div>
+            <div class="kpi"><small>Ticket médio</small><b>R$ 1.726,43</b></div>
+            <div class="kpi"><small>Vendido hoje</small><b>R$ 0,00</b></div>
+          </div>
+
+          <div class="rolagem">
+            <table class="tbl">
+              <thead><tr>
+                <th style="width:88px">Data</th>
+                <th>Descrição</th>
+                <th style="width:110px">Categoria</th>
+                <th style="width:120px">Forma</th>
+                <th style="width:160px">Vendedor</th>
+                <th class="num" style="width:130px">Valor</th>
+              </tr></thead>
+              <tbody>
+                <tr><td class="data">26/08</td><td class="desc">Espaço Pelle Clínica Dermatológica</td>
+                    <td><span class="tag aporte">Aporte</span></td><td>transferência</td>
+                    <td>MANOEL SOARES</td><td class="num">R$ 200,00</td></tr>
+                <tr><td class="data">25/08</td><td class="desc">Espaço Pelle Clínica Dermatológica</td>
+                    <td><span class="tag">Outros</span></td><td>pix</td>
+                    <td>MANOEL SOARES</td><td class="num">R$ 2.500,00</td></tr>
+                <tr><td class="data">25/08</td><td class="desc">ESPAÇO PELLE CLINICA DERMATOLOGICA LTDA</td>
+                    <td><span class="tag">Outros</span></td><td class="vazio">—</td>
+                    <td class="vazio">—</td><td class="num">R$ 2.182,90</td></tr>
+                <tr><td class="data">24/08</td><td class="desc">ESPAÇO PELLE CLINICA DERMATOLOGICA</td>
+                    <td><span class="tag">Outros</span></td><td class="vazio">—</td>
+                    <td class="vazio">—</td><td class="num">R$ 800,00</td></tr>
+                <tr><td class="data">23/08</td><td class="desc">Anderson Venici</td>
+                    <td><span class="tag">Outros</span></td><td class="vazio">—</td>
+                    <td class="vazio">—</td><td class="num">R$ 250,00</td></tr>
+                <tr><td class="data">22/08</td><td class="desc">JAQUELINE DUARTE</td>
+                    <td><span class="tag">Outros</span></td><td class="vazio">—</td>
+                    <td class="vazio">—</td><td class="num">R$ 1.500,00</td></tr>
+                <tr><td class="data">21/08</td><td class="desc">Marcos Ribeiro de Sousa</td>
+                    <td><span class="tag">Outros</span></td><td class="vazio">—</td>
+                    <td class="vazio">—</td><td class="num">R$ 2.010,00</td></tr>
+                <tr><td class="data">20/08</td><td class="desc">Alice Sousa</td>
+                    <td><span class="tag">Outros</span></td><td class="vazio">—</td>
+                    <td class="vazio">—</td><td class="num">R$ 1.500,00</td></tr>
+                <tr><td class="data">19/08</td><td class="desc">MARIA MADALENA SANTOS</td>
+                    <td><span class="tag">Outros</span></td><td class="vazio">—</td>
+                    <td class="vazio">—</td><td class="num">R$ 800,00</td></tr>
+                <tr><td class="data">18/08</td><td class="desc">Barros Castro</td>
+                    <td><span class="tag">Outros</span></td><td class="vazio">—</td>
+                    <td class="vazio">—</td><td class="num">R$ 5.000,00</td></tr>
+                <tr><td class="data">17/08</td><td class="desc">Madalena Santos</td>
+                    <td><span class="tag">Outros</span></td><td class="vazio">—</td>
+                    <td class="vazio">—</td><td class="num">R$ 1.200,00</td></tr>
+                <tr><td class="data">16/08</td><td class="desc">Francisca Nilda</td>
+                    <td><span class="tag">Outros</span></td><td class="vazio">—</td>
+                    <td class="vazio">—</td><td class="num">R$ 2.160,00</td></tr>
+              </tbody>
+              <tfoot><tr class="rodape-tbl">
+                <td colspan="5">Total · 14 vendas</td><td class="num">R$ 24.170,05</td>
+              </tr></tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 3. o que muda ══════════════════════════════════════════════════ -->
+  <section>
+    <div class="cab"><h2>O que muda, e por quê</h2></div>
+    <table class="lista">
+      <tr>
+        <td>Largura só do Relatórios</td>
+        <td>Uma classe nova, não um <code style="font-family:var(--mono);font-size:12px">.card.larga</code> mais largo — essa classe é usada por Equipe, Fornecedor e mais seis telas, e alargar todas seria outra mudança, não esta.</td>
+        <td>1 classe</td>
+      </tr>
+      <tr>
+        <td>A Descrição encolhe, as outras não</td>
+        <td>Data, Categoria, Forma e Valor têm tamanho previsível e ficam fixas. Só a Descrição estica e, se faltar espaço, corta no FIM com reticências — que é onde a informação importa menos. Hoje o corte é no começo, que é onde está o nome.</td>
+        <td>CSS</td>
+      </tr>
+      <tr>
+        <td>Cabeçalho que não some</td>
+        <td>São até 300 linhas. Rolar 200 e não saber mais qual coluna é qual é o que faz alguém rolar de volta pra conferir.</td>
+        <td>CSS</td>
+      </tr>
+      <tr>
+        <td>Zebra e realce na linha</td>
+        <td>Numa tabela larga o olho perde a linha entre a Descrição e o Valor — que é exatamente o par que se lê junto.</td>
+        <td>CSS</td>
+      </tr>
+      <tr>
+        <td>Total no rodapé da tabela</td>
+        <td>O total já existe no KPI lá em cima; repetir no fim da lista poupa a rolagem de volta quando se está conferindo linha a linha.</td>
+        <td>1 linha</td>
+      </tr>
+      <tr>
+        <td>Busca no cabeçalho</td>
+        <td>Com 300 linhas e a tela cheia, procurar um cliente vira o uso mais comum. <b>Só se você aprovar</b> — é a única aqui que não é puro layout.</td>
+        <td>opcional</td>
+      </tr>
+    </table>
+
+    <div class="nota">
+      <b>Uma coisa que eu não faria sem você mandar:</b> mexer no <code style="font-family:var(--mono);font-size:12px">.card.larga</code>.
+      Ele vale 720&nbsp;px pra oito telas, e várias são formulário — formulário largo demais
+      fica pior de usar, não melhor. Alargar tudo de uma vez consertaria os Relatórios e
+      pioraria Equipe, Fornecedor e companhia.
+    </div>
+
+    <div class="nota calmo">
+      <b>Sobre o teto:</b> deixei 1500&nbsp;px de limite em vez de 100% puro. Numa TV de
+      3440&nbsp;px, uma linha de tabela atravessando a tela inteira obriga o olho a
+      percorrer meio metro entre o nome e o valor — mais largura passa a atrapalhar.
+      Se você preferir sem teto nenhum, é um número só pra trocar.
+    </div>
+  </section>
+
+  <p class="pe">
+    Medido no código: <code>web/portal.py:186</code> — <code>.card.larga{max-width:720px}</code>,
+    usada por Equipe, Fornecedor, Portal e outras. Tabela em <code>web/portal.py</code>
+    (<code>_RELATORIOS</code>): <code>.rel-tbl-wrap{overflow-x:auto}</code> +
+    <code>table{min-width:640px}</code> + <code>td,th{white-space:nowrap}</code> — a combinação
+    que produz a rolagem lateral do print. Dados e nomes vindos do relatório real de Vendas
+    deste mês. Cores e fontes de <code>web/tema.py</code>.
+  </p>
+</div>

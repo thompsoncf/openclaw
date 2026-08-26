@@ -99,9 +99,14 @@ def test_a_elastica_e_sempre_de_nome_livre():
     """Marcar a coluna de Valor ou de Data como elástica encolheria justamente o
     que tem tamanho previsível — e deixaria o nome, que é o longo, fixo."""
     fonte = open(pr.__file__, encoding="utf-8").read()
+    # A lista é de colunas de NOME LIVRE — a que não tem largura previsível. Um
+    # relatório novo com outro nome pra mesma coisa entra aqui; `valor`, `data` ou
+    # qualquer coisa medida em dígitos, não. `lead` entrou com a aba "Leads do
+    # chip": lá a coluna do nome se chama lead, e as vizinhas (chip, hora, espera,
+    # contagem de mensagens) todas têm tamanho fixo.
     for m in re.finditer(r'_col\("(\w+)",[^)]*flex=True', fonte):
         assert m.group(1) in {"descricao", "contraparte", "cliente", "vendedor",
-                              "evento"}, \
+                              "evento", "lead"}, \
             f"coluna elástica inesperada: {m.group(1)}"
 
 

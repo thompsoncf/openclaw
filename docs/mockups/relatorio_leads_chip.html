@@ -1,0 +1,380 @@
+<title>Leads do Chip</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Tokens de web/tema.py — o mockup só serve pra decidir se parecer com a tela real.
+   Escuro único de propósito: o painel não tem tema claro. */
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+a{color:var(--neon)}
+.wrap{max-width:980px;margin:0 auto;padding:2.6rem 1.25rem 5rem;
+  display:flex;flex-direction:column;gap:2.8rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;
+  color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.6rem,4vw,2.15rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:66ch}
+.head .marca{color:var(--neon)}
+
+.sec > h2{font-size:1.15rem;margin-bottom:.15rem}
+.sec > p.leg{color:var(--text-dim);margin:.3rem 0 1.15rem;max-width:70ch;font-size:.9rem}
+
+/* ---- a manchete ---- */
+.manchete{border:1px solid var(--coral-borda);background:var(--coral-fundo);
+  border-radius:14px;padding:1.15rem 1.3rem;display:flex;gap:1.1rem;align-items:flex-start}
+.manchete .ic{font-size:1.5rem;line-height:1;flex:none}
+.manchete h2{font-size:1.05rem;color:#F2BDB9;margin-bottom:.3rem}
+.manchete p{margin:0;color:#D9AEAA;font-size:.9rem;max-width:70ch}
+.manchete b{font-family:var(--mono);font-variant-numeric:tabular-nums;color:#F6D3D0}
+
+/* ---- comparação dos chips ---- */
+.chips{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media (max-width:760px){.chips{grid-template-columns:1fr}}
+.chip{border:1px solid var(--line);border-radius:14px;background:var(--surface);
+  padding:1.05rem 1.15rem;display:flex;flex-direction:column;gap:.85rem}
+.chip.destaque{border-color:var(--neon-borda)}
+.chip-top{display:flex;align-items:baseline;justify-content:space-between;gap:.6rem}
+.chip-nome{font-family:var(--display);font-weight:700;font-size:1.05rem}
+.chip-id{font-family:var(--mono);font-size:.7rem;color:var(--text-faint)}
+.chip-per{font-size:.74rem;color:var(--text-faint);margin-top:-.5rem}
+.espera{display:flex;align-items:baseline;gap:.5rem}
+.espera b{font-family:var(--mono);font-size:2.1rem;line-height:1;font-weight:600;
+  font-variant-numeric:tabular-nums}
+.espera .rot{font-size:.76rem;color:var(--text-dim)}
+.chip.bom .espera b{color:var(--neon-bright)}
+.chip.ruim .espera b{color:var(--coral)}
+/* barra de distribuição da espera — a proporção que passou de 1h */
+.barra{height:8px;border-radius:99px;background:var(--neon-borda);overflow:hidden;display:flex}
+.barra i{display:block;height:100%}
+.barra .lento{background:var(--coral)}
+.barra .rapido{background:var(--neon)}
+.barra-leg{display:flex;justify-content:space-between;font-size:.72rem;
+  color:var(--text-dim);font-family:var(--mono);font-variant-numeric:tabular-nums}
+.mini{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;
+  border-top:1px solid var(--line);padding-top:.8rem}
+.mini div{min-width:0}
+.mini b{display:block;font-family:var(--mono);font-size:1.15rem;line-height:1.1;
+  font-variant-numeric:tabular-nums}
+.mini span{font-size:.7rem;color:var(--text-dim);display:block;margin-top:.15rem}
+.mini .mau b{color:var(--coral)} .mini .ok b{color:var(--neon)}
+
+/* ---- a tela ---- */
+.tela{border:1px solid var(--line);border-radius:14px;background:var(--bg-2);overflow:hidden}
+.tela-topo{padding:.9rem 1.1rem;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+.tela-topo h3{font-size:.95rem}
+.abas{display:flex;gap:.35rem;overflow-x:auto;padding:.7rem 1.1rem 0;
+  border-bottom:1px solid var(--line);scrollbar-width:none}
+.abas::-webkit-scrollbar{display:none}
+.aba{font-size:.79rem;padding:.42rem .7rem;border-radius:8px 8px 0 0;white-space:nowrap;
+  color:var(--text-dim);border:1px solid transparent;border-bottom:none}
+.aba.ativa{background:var(--surface);border-color:var(--line);color:var(--text);font-weight:600}
+.filtros{display:flex;gap:.5rem;flex-wrap:wrap;padding:.85rem 1.1rem;align-items:center}
+.sel{font-size:.78rem;padding:.4rem .65rem;border:1px solid var(--line);border-radius:8px;
+  background:var(--surface);color:var(--text-dim)}
+.sel.on{border-color:var(--neon-borda);color:var(--text)}
+.pdf{margin-left:auto;font-size:.78rem;padding:.42rem .8rem;border-radius:8px;
+  background:#1d6e9e;color:#fff;font-weight:600}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.7rem;
+  padding:0 1.1rem 1rem}
+.kpi{border:1px solid var(--line);border-radius:11px;background:var(--surface);
+  padding:.75rem .9rem}
+.kpi b{display:block;font-family:var(--mono);font-size:1.45rem;line-height:1.1;
+  font-variant-numeric:tabular-nums}
+.kpi span{font-size:.72rem;color:var(--text-dim);display:block;margin-top:.2rem}
+.kpi.mau b{color:var(--coral)} .kpi.bom b{color:var(--neon)}
+
+.rolagem{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:720px;font-size:.83rem}
+th{text-align:left;font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--text-faint);font-weight:600;padding:.55rem .7rem;
+  border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:.6rem .7rem;border-bottom:1px solid var(--line);white-space:nowrap}
+tr:last-child td{border-bottom:none}
+.nome{font-weight:600;max-width:19ch;overflow:hidden;text-overflow:ellipsis}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+.tag{display:inline-block;padding:.13rem .5rem;border-radius:99px;font-size:.7rem;
+  font-weight:600;white-space:nowrap;font-family:var(--body)}
+.tag.ok{background:var(--neon-fundo);color:var(--neon-bright);border:1px solid var(--neon-borda)}
+.tag.avi{background:var(--ambar-fundo);color:#F0DCA6;border:1px solid var(--ambar-borda)}
+.tag.err{background:var(--coral-fundo);color:#F0B8B8;border:1px solid var(--coral-borda)}
+.tag.neu{background:#20242A;color:#C7CCD6;border:1px solid #3A4048}
+.zap{color:var(--neon)}
+
+/* ---- vendedores ---- */
+.vend{display:flex;flex-direction:column;gap:.5rem}
+.vlinha{display:grid;grid-template-columns:minmax(0,1fr) 62px 1fr 68px;gap:.75rem;
+  align-items:center;border:1px solid var(--line);border-radius:11px;
+  background:var(--surface);padding:.7rem .9rem}
+@media (max-width:640px){.vlinha{grid-template-columns:minmax(0,1fr) 60px;
+  grid-template-areas:"n l" "b b" }
+  .vlinha .vn{grid-area:n}.vlinha .vl{grid-area:l}.vlinha .vb{grid-area:b}
+  .vlinha .vt{display:none}}
+.vn{font-weight:600;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vl{font-family:var(--mono);font-size:.78rem;color:var(--text-dim);text-align:right;
+  font-variant-numeric:tabular-nums}
+.vb{height:9px;border-radius:99px;background:#1A231D;overflow:hidden}
+.vb i{display:block;height:100%;border-radius:99px}
+.vt{font-family:var(--mono);font-size:.78rem;text-align:right;
+  font-variant-numeric:tabular-nums}
+
+/* ---- notas ---- */
+.notas{display:flex;flex-direction:column;gap:.7rem}
+.nota{border:1px solid var(--line);border-left:3px solid var(--ambar);
+  border-radius:0 11px 11px 0;background:var(--surface);padding:.8rem 1rem}
+.nota h4{margin:0 0 .25rem;font-size:.85rem;font-family:var(--display);font-weight:600}
+.nota p{margin:0;font-size:.84rem;color:var(--text-dim);max-width:72ch}
+.nota code{font-family:var(--mono);font-size:.79rem;color:var(--roxo)}
+.nota.fora{border-left-color:var(--text-faint)}
+.nota.achado{border-left-color:var(--coral)}
+
+.rodape{border-top:1px solid var(--line);padding-top:1.2rem;color:var(--text-faint);
+  font-size:.8rem;max-width:72ch}
+</style>
+
+<div class="wrap">
+
+  <header class="head">
+    <div class="eyebrow">Mockup · Relatórios</div>
+    <h1>Leads do chip <span class="marca">·</span> quem chamou e quanto esperou</h1>
+    <p>Uma aba nova em <b>Relatórios</b> pra os leads que entram pelo QR. Todos os
+    números desta página são <b>reais</b>, medidos na conta 34 (MANOEL SOARES) em
+    26/08 — nada aqui é dado de exemplo.</p>
+  </header>
+
+  <section class="manchete">
+    <div class="ic">🔥</div>
+    <div>
+      <h2>Sete pessoas chamaram o chip 1 e nunca foram respondidas</h2>
+      <p>E quase dois terços de quem foi atendido esperaram mais de uma hora — <b>104 de 161</b>.
+      A mediana do chip 1 é <b>3h10</b>; a do chip 2, <b>54 min</b>. Hoje nenhuma
+      tela do Zaq mostra isso: o painel sabe quantas mensagens chegaram, mas não
+      quanto tempo alguém ficou esperando resposta.</p>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Os dois chips, lado a lado</h2>
+    <p class="leg">É a comparação que dá a notícia. Conta com um chip só vê um bloco,
+    sem ruído — as outras quatro contas que recebem lead por QR (23, 3, 35 e 7) estão
+    nesse caso.</p>
+
+    <div class="chips">
+      <article class="chip ruim">
+        <div class="chip-top">
+          <span class="chip-nome">CP Zarb</span>
+          <span class="chip-id">chip 1 · qr:34</span>
+        </div>
+        <div class="chip-per">13/08 a 26/08 · 174 leads · 2.772 mensagens</div>
+        <div class="espera">
+          <b>3h10</b><span class="rot">de espera até a 1ª resposta <em>(mediana)</em></span>
+        </div>
+        <div class="barra">
+          <i class="rapido" style="width:35.4%"></i><i class="lento" style="width:64.6%"></i>
+        </div>
+        <div class="barra-leg"><span>57 em até 1h</span><span>104 acima de 1h</span></div>
+        <div class="mini">
+          <div class="mau"><b>7</b><span>nunca respondidos</span></div>
+          <div><b>9</b><span>viraram orçamento</span></div>
+          <div><b>12h49</b><span>média</span></div>
+        </div>
+      </article>
+
+      <article class="chip bom destaque">
+        <div class="chip-top">
+          <span class="chip-nome">CP Thiago</span>
+          <span class="chip-id">chip 2 · qr:36</span>
+        </div>
+        <div class="chip-per">20/08 a 24/08 · 12 leads · 243 mensagens</div>
+        <div class="espera">
+          <b>54 min</b><span class="rot">de espera até a 1ª resposta <em>(mediana)</em></span>
+        </div>
+        <div class="barra">
+          <i class="rapido" style="width:50%"></i><i class="lento" style="width:50%"></i>
+        </div>
+        <div class="barra-leg"><span>3 em até 1h</span><span>3 acima de 1h</span></div>
+        <div class="mini">
+          <div class="ok"><b>0</b><span>nunca respondidos</span></div>
+          <div><b>0</b><span>viraram orçamento</span></div>
+          <div><b>1h33</b><span>média</span></div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>A tela, do jeito que ficaria</h2>
+    <p class="leg">Mesmo esqueleto das abas Orçamentos e Contratos que já existem —
+    período, filtros, placar e tabela, com o mesmo botão de exportar PDF. O que muda
+    é o filtro novo de <b>chip</b> e a coluna <b>Esperou</b>.</p>
+
+    <div class="tela">
+      <div class="tela-topo"><h3>📊 Relatórios <span style="color:var(--text-faint);font-weight:400">· Leads do chip</span></h3></div>
+      <nav class="abas">
+        <span class="aba">Vendas</span><span class="aba">Contas a pagar</span>
+        <span class="aba">Contas a receber</span><span class="aba">Comissão</span>
+        <span class="aba">Orçamentos</span><span class="aba">Contratos</span>
+        <span class="aba ativa">Leads do chip</span>
+      </nav>
+      <div class="filtros">
+        <span class="sel on">Últimos 90 dias</span>
+        <span class="sel on">Chip: todos</span>
+        <span class="sel">Vendedor: todos</span>
+        <span class="sel">🔎 buscar lead…</span>
+        <span class="pdf">🖨️ Exportar PDF</span>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><b>186</b><span>Leads recebidos</span></div>
+        <div class="kpi mau"><b>7</b><span>Nunca respondidos</span></div>
+        <div class="kpi"><b>2h32</b><span>Espera (mediana)</span></div>
+        <div class="kpi bom"><b>9</b><span>Viraram orçamento</span></div>
+      </div>
+      <div class="rolagem">
+        <table>
+          <thead>
+            <tr>
+              <th>Lead</th><th>Chip</th><th>Entrou em</th><th>Esperou</th>
+              <th class="num">Msgs</th><th>Vendedor</th><th>Última msg</th><th>Orçamento</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="nome">Jamile Karen</td><td><span class="tag neu">CP Zarb</span></td>
+              <td>26/08 14:51</td><td><span class="tag err">nunca respondido</span></td>
+              <td class="num">2</td><td>THIAGO PINHEIRO</td><td>26/08 14:53</td><td>—</td></tr>
+            <tr><td class="nome">Geiza</td><td><span class="tag neu">CP Zarb</span></td>
+              <td>26/08 14:49</td><td><span class="tag err">nunca respondido</span></td>
+              <td class="num">1</td><td>PEDRO YAN PRIME</td><td>26/08 14:49</td><td>—</td></tr>
+            <tr><td class="nome">Duda</td><td><span class="tag neu">CP Zarb</span></td>
+              <td>26/08 14:20</td><td><span class="tag err">nunca respondido</span></td>
+              <td class="num">1</td><td>JACQUELINE PRIME</td><td>26/08 14:20</td><td>—</td></tr>
+            <tr><td class="nome">Dinamara Anjos</td><td><span class="tag neu">CP Zarb</span></td>
+              <td>26/08 13:41</td><td><span class="tag ok">37 min</span></td>
+              <td class="num">9</td><td>THIAGO PINHEIRO</td><td>26/08 14:29</td><td>—</td></tr>
+            <tr><td class="nome">Elaine 🌹Daniela</td><td><span class="tag neu">CP Zarb</span></td>
+              <td>26/08 13:13</td><td><span class="tag neu">já falava</span></td>
+              <td class="num">4</td><td>JACQUELINE PRIME</td><td>26/08 14:30</td><td>—</td></tr>
+            <tr><td class="nome">Josipio Júnior</td><td><span class="tag neu">CP Zarb</span></td>
+              <td>26/08 12:34</td><td><span class="tag ok">na hora</span></td>
+              <td class="num">7</td><td>THIAGO PINHEIRO</td><td>26/08 12:43</td><td>—</td></tr>
+            <tr><td class="nome">Josielle</td><td><span class="tag neu">CP Zarb</span></td>
+              <td>26/08 10:24</td><td><span class="tag avi">1h56</span></td>
+              <td class="num">3</td><td>PEDRO YAN PRIME</td><td>26/08 14:32</td><td>—</td></tr>
+            <tr><td class="nome">Yannie Terto</td><td><span class="tag neu">CP Zarb</span></td>
+              <td>26/08 10:04</td><td><span class="tag ok">3 min</span></td>
+              <td class="num">16</td><td>JACQUELINE PRIME</td><td>26/08 10:23</td><td>—</td></tr>
+            <tr><td class="nome">Natália Costa</td><td><span class="tag neu">CP Zarb</span></td>
+              <td>26/08 08:12</td><td><span class="tag ok">26 min</span></td>
+              <td class="num">2</td><td>THIAGO PINHEIRO</td><td>26/08 08:38</td><td>—</td></tr>
+            <tr><td class="nome">Beatriz do Carmo Brito</td><td><span class="tag neu">CP Zarb</span></td>
+              <td>—</td><td><span class="tag neu">sem mensagem</span></td>
+              <td class="num">0</td><td>PEDRO YAN PRIME</td><td>21/08 14:46</td>
+              <td><span class="tag ok">nº 7</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="padding:.75rem 1.1rem;color:var(--text-faint);font-size:.78rem">
+        186 registro(s) · Últimos 90 dias — <b>sem linha de Total</b>, porque aqui não há valor a somar
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Por vendedor</h2>
+    <p class="leg">O mesmo dado, cortado por quem atendeu — é o filtro de Vendedor que
+    a aba já vai ter. A barra é a espera mediana; quanto mais curta, melhor.</p>
+    <div class="vend">
+      <div class="vlinha"><span class="vn">PEDRO YAN PRIME</span>
+        <span class="vl">99 leads</span>
+        <span class="vb"><i style="width:13%;background:var(--neon)"></i></span>
+        <span class="vt" style="color:var(--neon-bright)">1h36</span></div>
+      <div class="vlinha"><span class="vn">THIAGO PINHEIRO</span>
+        <span class="vl">26 leads</span>
+        <span class="vb"><i style="width:52%;background:var(--ambar)"></i></span>
+        <span class="vt" style="color:var(--ambar)">6h29</span></div>
+      <div class="vlinha"><span class="vn">JACQUELINE PRIME</span>
+        <span class="vl">54 leads</span>
+        <span class="vb"><i style="width:100%;background:var(--coral)"></i></span>
+        <span class="vt" style="color:var(--coral)">12h24</span></div>
+    </div>
+    <p class="leg" style="margin-top:.9rem;margin-bottom:0">Pedro atende quase o dobro
+    de leads da Jacqueline e responde <b>oito vezes mais rápido</b> — e é dele que saem
+    7 dos 9 orçamentos. Deixei a conta <code style="font-family:var(--mono);color:var(--roxo)">zaq
+    teste</code> (3 leads) fora do gráfico de propósito; ela distorce a escala e não é
+    vendedor de verdade.</p>
+  </section>
+
+  <section class="sec">
+    <h2>Três decisões que estão embutidas aí em cima</h2>
+    <div class="notas">
+      <div class="nota achado">
+        <h4>O chip 1 é o <code>chip_id</code> vazio — e isso não é dado faltando</h4>
+        <p>O chip secundário é uma conta própria (<code>contas.chip_de</code>), e a
+        conversa dele guarda <code>chip_id = 36</code>. A do chip principal guarda
+        <code>NULL</code>. Um relatório que filtrasse por <code>chip_id = alguma
+        coisa</code> perderia <b>174 dos 186 leads</b> — some justamente o chip que
+        mais recebe.</p>
+      </div>
+      <div class="nota">
+        <h4>"Última msg" vem da conversa, não de <code>ultimo_contato_em</code></h4>
+        <p>Esse campo está vazio em <b>158 dos 174</b> leads do chip 1 — que têm 2.772
+        mensagens trocadas. Ele não é alimentado pela conversa. Se o relatório lesse
+        dali, anunciaria que quase ninguém foi atendido, o que é falso. Não vou
+        consertar o campo neste trabalho: alimentá-lo é mudança de escrita no fluxo de
+        mensagem, outro pedido e outro risco.</p>
+      </div>
+      <div class="nota">
+        <h4>Resposta do bot não conta como resposta</h4>
+        <p>A espera é da primeira entrada até a primeira saída de <b>humano</b>. Há 18
+        mensagens de bot na conta 34; contá-las zeraria a espera de quem, na prática,
+        continuou esperando gente. E resposta que veio <em>antes</em> da primeira
+        entrada (11 casos, conversa que o vendedor começou) vira <b>"já falava"</b>, não
+        espera negativa.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O que esta aba não faz</h2>
+    <div class="notas">
+      <div class="nota fora">
+        <h4>Não tem coluna de valor</h4>
+        <p><code>valor_estimado_centavos</code> é zero nos 675 leads da base inteira.
+        Uma coluna somando R$ 0,00 seria o mesmo erro que o funil acabou de corrigir —
+        por isso a tabela também não tem linha de Total.</p>
+      </div>
+      <div class="nota fora">
+        <h4>Não pesquisa na web ao abrir</h4>
+        <p>Lead de chip chega com nome e telefone: dos 353 leads que entraram por
+        WhatsApp, <b>1 tem e-mail e nenhum tem CNPJ</b>. A rotina de pesquisa já existe
+        no Zaq (Receita Federal e raspagem do site), e fica num botão que roda em
+        segundo plano — não durante a carga da tela, onde quase toda busca voltaria
+        vazia mesmo.</p>
+      </div>
+      <div class="nota fora">
+        <h4>Não encosta em chip nem em conexão</h4>
+        <p>É relatório: só leitura. Regra 1 da casa, e aqui não há motivo nenhum pra
+        encostar.</p>
+      </div>
+    </div>
+  </section>
+
+  <p class="rodape">Medido em 26/08/2026 na conta 34 (MANOEL SOARES), que é a única
+  com dois chips. As outras quatro contas que recebem lead por QR — 23 (123 leads),
+  3 (117), 35 (21) e 7 (10) — têm um chip só e veriam a mesma aba com um bloco.
+  Diga o que muda e eu ajusto antes de escrever código.</p>
+
+</div>

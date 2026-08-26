@@ -17,6 +17,8 @@ A regra que enxuga sem esconder nada, e que este arquivo guarda:
 `linha_do_funil` é pura de propósito — a redação que o dono lê está testada aqui,
 sem banco e sem tela.
 """
+from datetime import date
+
 from finance import vendas as v
 
 
@@ -141,19 +143,25 @@ def test_plano_que_nao_fecha_com_o_total_sobe_pra_linha():
     assert "PARCELAS" in r["selos"][0]["dica"]
 
 
-def test_contrato_aguardando_assinatura_e_ambar_e_nao_oferece_fechar():
+def test_contrato_aguardando_assinatura_e_ambar_e_pede_mandar_pra_assinar():
+    """O selo mandava "mande o link pro cliente" e NÃO HAVIA BOTÃO: o link ficava
+    escondido no menu de três pontos. Agora a ação existe — e vem antes de fechar,
+    porque enquanto o papel não volta assinado não há negócio pra fechar."""
     r = v.linha_do_funil(status="aprovada", nunca_enviada=False, enviado_em="19/08",
                          contrato_numero=5, contrato_assinado=False)
-    assert textos(r) == ["Contrato aguardando assinatura"]
+    assert textos(r) == ["Aguardando assinatura"]
+    assert r["acao"] == {"chave": "assinar", "texto": "Mandar pra assinar"}
     assert tons(r) == ["ambar"]
-    assert r["acao"] is None
 
 
-def test_contrato_assinado_vira_fechar_contrato_e_nao_selo():
+def test_contrato_assinado_vira_fechar_negocio_e_nao_selo():
     r = v.linha_do_funil(status="aprovada", nunca_enviada=False, enviado_em="19/08",
                          contrato_numero=5, contrato_assinado=True)
     assert r["selos"] == []
-    assert r["acao"] == {"chave": "fechar", "texto": "Fechar contrato"}
+    # "Fechar NEGÓCIO", não "Fechar contrato": a ação faz a mesma coisa nos dois
+    # mundos (muda o status e gera os títulos a receber), e o contrato assinado já
+    # está fechado — prometer fechá-lo de novo é o que confundia.
+    assert r["acao"] == {"chave": "fechar", "texto": "Fechar negócio"}
     assert "contrato nº 5 assinado" in r["resumo"]
 
 
@@ -189,7 +197,7 @@ def test_todas_as_pendencias_ficam_na_barra_mesmo_com_uma_acao_so():
         enviado_em="19/08", nunca_enviada=False, plano_difere=1,
         contrato_numero=5, contrato_assinado=False)
     assert textos(r) == ["Data liberada", "1 parcela sem comprovante",
-                         "Plano não fecha com o total", "Contrato aguardando assinatura"]
+                         "Plano não fecha com o total", "Aguardando assinatura"]
     assert chave(r) == "resegurar"
 
 
@@ -219,7 +227,7 @@ def test_o_comprovante_ganha_do_fechar_contrato():
 def test_a_ordem_declarada_e_a_ordem_aplicada():
     """Guarda a lista contra reordenação sem querer — ela É a regra de negócio."""
     assert v._ORDEM_ACAO == ("marcar", "resegurar", "sinal", "comprovante",
-                             "fechar", "enviar")
+                             "assinar", "fechar", "enviar")
 
 
 # ---------------------------------------------------- bordas
@@ -247,3 +255,157 @@ def test_todo_selo_tem_texto_tom_e_dica():
     for s in r["selos"]:
         assert set(s) == {"texto", "tom", "dica"}
         assert s["texto"] and s["tom"] in ("coral", "ambar", "pre", "azul")
+
+
+# ================================================== QUEM É O CLIENTE DA LINHA
+#
+# O funil montava o título com `cliente` e `empresa` — dois campos livres pra mesma
+# coisa. Medido em produção em 25/08, nos 26 orçamentos existentes: 19 apareciam
+# como "−", 2 apareciam como TELEFONE, 2 com o nome repetido. 23 de 26 degradados.
+
+def test_o_cadastro_do_cliente_ganha_dos_campos_livres():
+    """Dos três campos, `clientes.nome` era o único certo nas 26 linhas. O #12 é o
+    caso real: o cadastro diz "Ana Clara Marques", o campo livre diz "Clara"."""
+    r = v.titulo_do_funil(cadastro="Ana Clara Marques", empresa="Ana Clara Marques",
+                          cliente="Clara Marques", modo="evento", numero=12)
+    assert r["titulo"] == "Ana Clara Marques"
+
+
+def test_telefone_nunca_vira_titulo():
+    """Os #8 e #9 de produção tinham o telefone no campo `cliente` e apareciam
+    assim na tela. Número identifica, mas não é nome — a cadeia pula e segue."""
+    r = v.titulo_do_funil(cadastro="", empresa="Larissa Rakel Almeida Rodriges",
+                          cliente="86994160050", modo="evento", numero=9)
+    assert r["titulo"] == "Larissa Rakel Almeida Rodriges"
+
+
+def test_telefone_em_todos_os_degraus_cai_no_numero_do_orcamento():
+    """Se os TRÊS forem telefone, ainda assim não se mostra um número como nome."""
+    r = v.titulo_do_funil(cadastro="86999990000", empresa="(86) 9 9999-0000",
+                          cliente="+5586999990000", modo="evento", numero=7)
+    assert r["titulo"] == "Orçamento nº 7"
+
+
+def test_nome_curto_com_digito_continua_sendo_nome():
+    """A trava do teste acima: o critério é 8+ dígitos E nenhuma letra. Na dúvida a
+    resposta é NÃO — perder um nome de verdade é pior que deixar passar um número."""
+    for nome in ("Loja 24h", "Bar do Zé 2", "A3", "3M do Brasil"):
+        assert v.titulo_do_funil(empresa=nome, numero=1)["titulo"] == nome
+
+
+def test_no_evento_o_subtitulo_descreve_a_festa():
+    """`orcamentos.evento` já guardava tipo, data e convidados — e isso não aparecia
+    em tela nenhuma. É o que distingue duas propostas do mesmo mês."""
+    r = v.titulo_do_funil(cadastro="Isabela Silva Mendes", modo="evento", numero=11,
+                          evento={"tipo": "Casamento", "data": "2026-12-19",
+                                  "convidados": 150})
+    assert r["sub"] == "Casamento · 19/12/2026 · 150 convidados"
+
+
+def test_evento_sem_dados_nao_inventa_subtitulo():
+    r = v.titulo_do_funil(cadastro="Fulana", modo="evento", evento={}, numero=3)
+    assert r["sub"] == ""
+
+
+def test_no_recorrente_a_empresa_manda_e_o_contato_desce():
+    """Aqui os dois campos TÊM sentidos diferentes e legítimos: a empresa e quem
+    fala com você. O erro era a ordem — a pessoa virava título, a empresa, rodapé.
+    O #2 de produção: "Renata Cachorrinha" no título, "Renatas Digital" embaixo."""
+    r = v.titulo_do_funil(empresa="Renatas Digital", cliente="Renata Cachorrinha",
+                          modo="recorrente", numero=2)
+    assert r["titulo"] == "Renatas Digital"
+    assert r["sub"] == "Renata Cachorrinha"
+
+
+def test_contato_igual_ao_titulo_nao_repete():
+    """O #8 de produção mostrava "Aladdin Consultoria · Aladdin Consultoria"."""
+    r = v.titulo_do_funil(empresa="Aladdin Consultoria", cliente="aladdin consultoria",
+                          modo="recorrente", numero=8)
+    assert r["sub"] == "", "o mesmo nome não pode aparecer duas vezes na linha"
+
+
+def test_contato_que_e_telefone_nao_vira_subtitulo():
+    r = v.titulo_do_funil(empresa="Flash Car", cliente="86994160050",
+                          modo="recorrente", numero=9)
+    assert r["sub"] == ""
+
+
+# As linhas REAIS de produção (25/08). Antes: 19 traços e 2 telefones. Depois:
+# 26 nomes de verdade e zero "Orçamento nº N" — foi assim que a proposta foi
+# aprovada, e é isso que este caso trava.
+_REAIS = [
+    # (cadastro, empresa, cliente, modo, esperado)
+    ("Ana Clara Marques", "Ana Clara Marques", "Clara Marques", "evento", "Ana Clara Marques"),
+    ("Isabela Silva Mendes", "Isabela Silva Mendes", "", "evento", "Isabela Silva Mendes"),
+    ("Larissa Rakel Almeida Rodriges", "Larissa Rakel Almeida Rodriges", "86994160050",
+     "evento", "Larissa Rakel Almeida Rodriges"),
+    ("Josiany Rayra Soares dos Santos", "Josiany Rayra Soares dos Santos", "86998192489",
+     "evento", "Josiany Rayra Soares dos Santos"),
+    ("Camila Damasceno", "Camila Damasceno Rodrigues", "", "evento", "Camila Damasceno"),
+    ("", "BELEZA HAIR", "", "recorrente", "BELEZA HAIR"),
+    ("", "MedClin", "", "recorrente", "MedClin"),
+    ("", "Renatas Digital", "Renata Cachorrinha", "recorrente", "Renatas Digital"),
+    ("", "H Pernas", "Jose Carlos", "recorrente", "H Pernas"),
+]
+
+
+def test_as_linhas_de_producao_todas_resolvem_pra_um_nome():
+    for cadastro, empresa, cliente, modo, esperado in _REAIS:
+        r = v.titulo_do_funil(cadastro=cadastro, empresa=empresa, cliente=cliente,
+                              modo=modo, numero=99)
+        assert r["titulo"] == esperado, f"{empresa!r} virou {r['titulo']!r}"
+        assert not r["titulo"].startswith("Orçamento nº"), \
+            f"{empresa!r} caiu no último degrau — nenhuma linha real precisa dele"
+
+
+# ================================================== O CONTRATO, QUE ERA DUAS COISAS
+
+def test_aguardando_assinatura_conta_os_dias():
+    """3 dias e 30 dias pedem reações diferentes, e o selo dizia a mesma coisa nos
+    dois casos. `hoje` é parâmetro pra este teste não depender do relógio."""
+    r = v.linha_do_funil(status="aprovada", nunca_enviada=False, contrato_numero=2,
+                         contrato_assinado=False, contrato_em=date(2026, 8, 22),
+                         hoje=date(2026, 8, 25))
+    assert textos(r) == ["Aguardando assinatura há 3 dias"]
+
+
+def test_um_dia_no_singular_e_hoje_por_extenso():
+    def sel(d):
+        return textos(v.linha_do_funil(
+            status="aprovada", nunca_enviada=False, contrato_numero=2,
+            contrato_assinado=False, contrato_em=d, hoje=date(2026, 8, 25)))[0]
+    assert sel(date(2026, 8, 24)).endswith("há 1 dia")
+    assert sel(date(2026, 8, 25)).endswith("há hoje")
+
+
+def test_sem_a_data_do_contrato_o_selo_nao_mente():
+    """Contrato antigo, salvo antes de a data existir: some o "há N dias", fica o
+    selo. Inventar "há 0 dias" seria pior que não dizer."""
+    r = v.linha_do_funil(status="aprovada", nunca_enviada=False, contrato_numero=2,
+                         contrato_assinado=False)
+    assert textos(r) == ["Aguardando assinatura"]
+
+
+def test_aprovada_sem_contrato_a_haver_oferece_fechar_negocio():
+    """O #2 de produção estava aprovado havia 37 dias, no recorrente, SEM ação
+    nenhuma na linha — e ali contrato nenhum ia nascer."""
+    r = v.linha_do_funil(status="aprovada", nunca_enviada=False, tem_contrato=False)
+    assert r["acao"] == {"chave": "fechar", "texto": "Fechar negócio"}
+
+
+def test_aprovada_no_nicho_de_contrato_nao_ganha_selo_nem_acao_de_fechar():
+    """Onde o contrato AINDA VEM (nasce com o sinal), fechar não é o passo seguinte
+    — e "ainda não tem contrato" é o estado normal de quem acabou de aprovar, não
+    uma pendência. Quem cobra o passo que falta é o selo do sinal."""
+    r = v.linha_do_funil(status="aprovada", nunca_enviada=False, tem_contrato=True)
+    assert r["selos"] == []
+    assert r["acao"] is None
+
+
+def test_fechado_sem_documento_fala_em_negocio_e_nao_em_contrato():
+    """O #1 de produção está `fechado` com contrato NULL, e o resumo dizia
+    "contrato fechado" — descrevendo mudança de status como papel assinado."""
+    assert "negócio fechado" in v.linha_do_funil(status="fechado", nunca_enviada=False)["resumo"]
+    assert "contrato fechado" in v.linha_do_funil(
+        status="fechado", nunca_enviada=False, contrato_numero=4,
+        contrato_assinado=True)["resumo"]

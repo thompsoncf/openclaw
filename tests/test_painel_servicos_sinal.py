@@ -103,6 +103,11 @@ def cliente(monkeypatch):
         c.execute("create unique index ux_ct_cn on contratos (conta_id, numero)")
         c.commit()
     with pool.connection() as c:
+        # `clientes` é tabela central (o cadastro do cliente) e a lista do funil
+        # passou a lê-la: é dela que sai o NOME do título, o único dos três campos
+        # que estava certo nas 26 linhas de produção.
+        c.execute("create table clientes (id bigserial primary key, conta_id bigint, "
+                  "nome text)")
         ps._garantir_tabela(c)          # cria orcamentos como em produção
     with pool.connection() as c:
         for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "130_evento_desfecho.sql",

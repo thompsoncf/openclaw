@@ -239,6 +239,64 @@ def test_rota_de_listagem_aceita_o_filtro_de_papel():
     assert 'papel=papel_filtro or None' in fonte
 
 
+# ---------------------------------------------------- dedup sem documento (26/08)
+#
+# `resolver_pessoa` so' funde por CPF/CNPJ exato — sem documento (o caso comum
+# de um lead de WhatsApp: so' nome e telefone), toda chamada criava uma PESSOA
+# nova, e como `puxar_ou_criar_cliente` casa a relacao por pessoa_id, um
+# `pessoa_id` novo garantia um `clientes` novo tambem. Salvar o mesmo orcamento
+# (`_espelhar_cliente`) ou o mesmo cadastro do formulario dez vezes sem CPF
+# duplicava o cliente dez vezes. A correcao reusa, dentro do MESMO lojista, o
+# padrao que `achar_ou_criar` (fluxo do PDV) ja usava: sem documento, telefone
+# igual dentro da propria loja reusa a relacao em vez de criar outra.
+
+def test_criar_cliente_sem_documento_reusa_pelo_telefone_na_mesma_loja(pool, dono_id):
+    cid = cli.criar_cliente(pool, dono_id, "Josiany Rayra Soares dos Santos",
+                            telefone="86998192489")
+    de_novo = cli.criar_cliente(pool, dono_id, "Josiany Rayra Soares dos Santos",
+                                telefone="(86) 99819-2489")
+    assert de_novo == cid, "salvar o mesmo lead sem CPF de novo duplicou o cliente"
+    assert cli.contar_clientes(pool, dono_id) == 1
+
+
+def test_criar_cliente_sem_documento_e_sem_telefone_nao_tem_como_casar(pool, dono_id):
+    """Sem CPF/CNPJ e sem telefone nao existe chave nenhuma pra reusar — os dois
+    continuam virando cadastros distintos, como sempre foi."""
+    c1 = cli.criar_cliente(pool, dono_id, "Sem Contato Nenhum P")
+    c2 = cli.criar_cliente(pool, dono_id, "Sem Contato Nenhum P")
+    assert c1 != c2
+
+
+def test_criar_cliente_com_documento_nao_muda_pra_dedup_por_telefone(pool, dono_id):
+    """Com CPF/CNPJ, quem manda e' o documento (chave forte) — dois clientes
+    diferentes que por acaso compartilham telefone (familia) nao podem ser
+    fundidos so' porque o numero bate."""
+    c1 = cli.criar_cliente(pool, dono_id, "Irmã Uma Q", telefone="86988887777",
+                           cpf="52998224725")
+    c2 = cli.criar_cliente(pool, dono_id, "Irmã Duas Q", telefone="86988887777",
+                           cpf="11144477735")
+    assert c1 != c2
+
+
+def test_dedup_por_telefone_sem_documento_nao_vaza_pra_outro_lojista(pool):
+    """O dedup e' `buscar_por_telefone(dono_id, ...)` — isolado por loja. O
+    mesmo telefone em duas lojas diferentes tem que continuar sendo dois
+    cadastros, um em cada base."""
+    with pool.connection() as c:
+        loja_a = c.execute(
+            "insert into contas (tipo, nome) values ('pj', 'Loja A Dedup') returning id"
+        ).fetchone()[0]
+        loja_b = c.execute(
+            "insert into contas (tipo, nome) values ('pj', 'Loja B Dedup') returning id"
+        ).fetchone()[0]
+        c.commit()
+    ca = cli.criar_cliente(pool, loja_a, "Cliente Das Duas Lojas R", telefone="86977776666")
+    cb = cli.criar_cliente(pool, loja_b, "Cliente Das Duas Lojas R", telefone="86977776666")
+    assert ca != cb
+    assert cli.obter_cliente(pool, loja_a, ca) is not None
+    assert cli.obter_cliente(pool, loja_b, cb) is not None
+
+
 def test_render_nao_pisa_no_papel_do_operador_logado():
     """A colisão de nome que quase aconteceu: `_render` seta `ctx["papel"]` como
     o papel do OPERADOR logado (dono/gestor/vendedor) via `ctx.setdefault`, e o

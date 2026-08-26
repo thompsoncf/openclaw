@@ -48,6 +48,12 @@ PAGINAS = {
          "telefone": "86999999999", "documento_fmt": "111.111.111-11", "email": "",
          "aniversario": "", "cidade": "", "uf": "", "endereco": "", "cep": "", "obs": ""},
     ], total=1, busca="", papel_filtro=""),
+    "cliente_detalhe": dict(secao_ativa="clientes",
+        cliente={"id": 1, "nome": "Ana", "telefone": "86999999999", "cpf": "",
+                 "email": "", "aniversario": "", "endereco": "", "cidade": "",
+                 "uf": "", "cep": "", "obs": ""},
+        compras=[], resumo={"n": 0, "total_centavos": 0, "ultima": None, "ticket_centavos": 0},
+        fiados=[], fiado_total=0, rotulo_receber="Fiado"),
     "empresa": dict(secao_ativa="empresa", tem_pj=True,
         clientes_lista=[{"nome": "Ana"}], fornecedores_lista=[{"nome": "Rio Poti"}],
         titulos=[], titulos_pagos=[],
@@ -103,6 +109,26 @@ def test_a_pagina_de_clientes_desenha_o_papel():
     html = _render("clientes")
     assert "eh_cliente" in html and "eh_fornecedor" in html
     assert "Clientes/Fornecedores" in html
+
+
+# ---------------------------------------------------- CEP autopreenche (26/08)
+# O input de CEP do cadastro de Clientes/Fornecedores (novo, edição inline e a
+# página de detalhe) não tinha NENHUM listener — só existia como <input> solto.
+# `/api/cep/{cep}` já funcionava (mesmo endpoint usado em loja/checkout e em
+# empresa_dados), faltava só ligar o fio.
+
+def test_cep_do_cadastro_de_clientes_chama_o_endpoint_de_autopreenchimento():
+    html = _render("clientes")
+    js = "\n".join(_scripts(html))
+    assert "input[name=\"cep\"]" in js
+    assert "/api/cep/" in js
+
+
+def test_cep_da_pagina_de_detalhe_do_cliente_tambem_autopreenche():
+    html = _render("cliente_detalhe")
+    js = "\n".join(_scripts(html))
+    assert "/api/cep/" in js
+    assert 'input[name="cep"]' in js
 
 
 # ---------------------------------------------------- layout: Relatórios (24/08)

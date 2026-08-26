@@ -1,0 +1,1292 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — Sinal de rolagem nas abas de Relatórios</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9; --roxo:#C9A3E0;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A;  --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --card:var(--surface); --card-2:var(--bg-2);
+  --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1180px;margin:0 auto;padding:34px 18px 100px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.7rem;font-weight:700}
+h2{font-size:1.18rem;font-weight:700;margin:0 0 .2rem}
+h3{font-size:.95rem;font-weight:600}
+a{color:var(--verde)}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
+  padding:.1rem .35rem;border-radius:4px;color:var(--text-dim)}
+
+.sec{margin-top:44px}
+.sec>.num{font-family:var(--mono);font-size:.72rem;color:var(--verde);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:78ch;margin-top:.5rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.86rem;margin-top:1rem;
+  color:var(--txt-mut);max-width:82ch}
+.nota b{color:var(--txt)}
+.alerta{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.alerta b{color:var(--ambar)}
+.bom{border-left-color:var(--neon-borda);background:var(--neon-fundo)}
+
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);
+  text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.76rem;
+  text-transform:uppercase;letter-spacing:.05em}
+.sim{color:var(--verde)} .nao{color:var(--coral)} .meio{color:var(--ambar)}
+
+.quadro{background:var(--card);border:1px solid var(--borda);border-radius:14px;
+  overflow:hidden;margin-top:1rem}
+.quadro>.cap{background:var(--bg-2);padding:.5rem .85rem;font-size:.72rem;
+  color:var(--txt-mut);border-bottom:1px solid var(--borda);
+  font-family:var(--mono);display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap}
+.quadro>.cap .tag-antes{color:var(--coral)}
+.quadro>.cap .tag-depois{color:var(--verde)}
+.quadro iframe{display:block;width:100%;border:0;background:var(--bg)}
+.dica-viva{font-size:.76rem;color:var(--txt-mut);padding:.5rem .85rem;
+  border-top:1px solid var(--borda);background:var(--bg-2)}
+
+ul.lista{margin:.6rem 0 0 1.1rem;font-size:.87rem;color:var(--txt-mut)}
+ul.lista li{margin-bottom:.5rem}
+ul.lista b{color:var(--txt)}
+.rodape{margin-top:56px;padding-top:18px;border-top:1px solid var(--borda);
+  font-size:.8rem;color:var(--text-faint)}
+</style>
+</head>
+<body>
+
+<h1>Sinal de rolagem nas abas de Relatórios</h1>
+<p class="lede">Atualização importante antes de olhar isto: entre eu te mandar o mockup
+anterior e agora, entrou na <code>main</code> o PR <a href="#">#571</a> (do próprio dono) —
+<b>"Relatórios em tela cheia"</b>. Ele já resolveu a metade "aproveitar a tela" do que eu
+tinha proposto (cartão de 720px → 1500px, coluna elástica pra nome longo não cortar no meio)
+— e melhor do que a minha sugestão. Não vou propor de novo o que já foi feito. Este mockup
+ficou menor: só o que ainda falta depois do #571.</p>
+
+<!-- ====================================================== 1 -->
+<section class="sec">
+  <div class="num">1 · o que o #571 já resolveu</div>
+  <h2>Em monitor e a maioria dos notebooks, já cabe tudo</h2>
+  <p class="lede">Testei a tela ATUAL (já com o #571) em várias larguras. Com o cartão a
+  1500px, as 9 abas e a tabela de 8 colunas da Agenda cabem inteiras, sem rolar nada, até
+  1280px de viewport — a maioria das telas hoje.</p>
+  <table class="diag">
+    <tr><th>Largura testada</th><th>Faixa de abas</th><th>Tabela (Agenda, 8 colunas)</th></tr>
+    <tr><td>1920px</td><td class="sim">✓ cabe tudo</td><td class="sim">✓ cabe tudo</td></tr>
+    <tr><td>1440px</td><td class="sim">✓ cabe tudo</td><td class="sim">✓ cabe tudo</td></tr>
+    <tr><td>1280px</td><td class="sim">✓ cabe tudo</td><td class="sim">✓ cabe tudo</td></tr>
+    <tr><td>1024px (notebook 13", comum)</td><td class="nao">✕ 2-3 abas somem, sem aviso</td><td class="meio">~ cabe, mas raspando na última coluna</td></tr>
+  </table>
+  <div class="nota bom">
+    <b>O que isso significa:</b> o #571 fechou o caso comum. O que sobra é notebook pequeno
+    ou janela não maximizada — ainda assim, real: foi o que te aconteceu, e sem aviso
+    nenhum a pessoa nem sabe que tem 2 abas escondidas.
+  </div>
+</section>
+
+<!-- ====================================================== 2 -->
+<section class="sec">
+  <div class="num">2 · o que ainda falta, reproduzido</div>
+  <h2>1024px de largura, tela atual (já com o #571)</h2>
+  <p class="lede">Simulando um notebook 13" — o quadro abaixo é a tela REAL de hoje, já com
+  o cartão de 1500px do #571. Arraste a faixa de abas: "Orçamentos", "Contratos" e "Agenda"
+  ainda ficam fora da vista, sem gradiente, sem seta, sem barra — igual antes.</p>
+
+  <div class="quadro">
+    <div class="cap"><span class="tag-antes">● hoje, já com o #571</span><span>simulando notebook 13" (1024px)</span></div>
+    <iframe srcdoc="&lt;!doctype html&gt;&lt;html lang=&quot;pt-br&quot;&gt;&lt;head&gt;&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1, viewport-fit=cover&quot;&gt;
+&lt;title&gt; - Zaq&lt;/title&gt;
+&lt;link rel=&quot;icon&quot; href=&quot;/favicon.svg&quot; type=&quot;image/svg+xml&quot;&gt;
+&lt;style&gt;@font-face{font-family:&#x27;Bricolage Grotesque&#x27;;font-style:normal;font-weight:200 800;font-stretch:100%;font-display:swap;src:url(/estatico/fontes/bricolage.woff2) format(&#x27;woff2&#x27;)}@font-face{font-family:&#x27;Inter&#x27;;font-style:normal;font-weight:100 900;font-display:swap;src:url(/estatico/fontes/inter.woff2) format(&#x27;woff2&#x27;)}@font-face{font-family:&#x27;JetBrains Mono&#x27;;font-style:normal;font-weight:100 800;font-display:swap;src:url(/estatico/fontes/jetbrains.woff2) format(&#x27;woff2&#x27;)}&lt;/style&gt;&lt;style&gt;
+:root{
+  color-scheme: dark;
+
+  /* ---- superfícies ---- */
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+
+  /* ---- texto ---- */
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+
+  /* ---- verde da marca ----
+     Um verde só, como no site. A separação verde/verde-claro existia porque o
+     verde antigo (#1d9e75) era escuro demais pra ler como texto; este não é. */
+  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+
+  /* Tinta sobre o verde cheio. Branco sobre #25D366 dá 1,98 de contraste — some.
+     Esta tinta dá 9,47. É o token que os botões verdes usam. */
+  --sobre-verde:#04150C;
+
+  /* ---- semânticos ---- */
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9; --roxo:#C9A3E0; --zap:#25D366;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A;  --azul-fundo:#0D1B23;
+
+  /* ---- tipografia ---- */
+  --display:&quot;Bricolage Grotesque&quot;,system-ui,-apple-system,&quot;Segoe UI&quot;,Roboto,sans-serif;
+  --body:&quot;Inter&quot;,system-ui,-apple-system,&quot;Segoe UI&quot;,Roboto,sans-serif;
+  --mono:&quot;JetBrains Mono&quot;,ui-monospace,&quot;SF Mono&quot;,Menlo,Consolas,monospace;
+
+  /* ---- apelidos: o vocabulário que o código já usa ---- */
+  --card:var(--surface); --card-2:var(--bg-2); --card2:var(--bg-2);
+  --borda:var(--line); --bord:var(--line);
+  --txt:var(--text); --txt-mut:var(--text-dim); --mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon); --verde-cl:var(--neon);
+  --verde2:var(--neon-bright); --verde-hover:var(--neon-bright);
+  --amar:var(--ambar); --amber:var(--ambar); --verm:var(--coral);
+  --fonte:var(--body); --ink:var(--sobre-verde);
+}
+  body{font-family:var(--body);background:var(--bg);color:var(--txt);
+       -webkit-font-smoothing:antialiased}
+  h1,h2,h3,h4,.logo,.side-logo{font-family:var(--display);letter-spacing:-.02em}
+  code,kbd,samp{font-family:var(--mono)}
+
+body{margin:0;min-height:100vh;font-family:var(--body);
+ background:var(--bg);color:var(--txt);display:flex;flex-direction:column;align-items:center}
+.topo{width:100%;max-width:960px;display:flex;justify-content:space-between;
+ align-items:center;padding:1.2rem 1rem;box-sizing:border-box}
+.topo a{color:var(--verde-claro);text-decoration:none;margin-left:1rem;white-space:nowrap}
+#menu-links{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.fin-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:1.2rem 0;align-items:stretch}
+@media (max-width:600px){
+  #menu-btn{display:inline-flex !important;order:-1}
+  .topo .logo{margin-left:auto}
+  #menu-links{display:none;position:absolute;top:100%;right:12px;left:12px;z-index:50;margin-top:4px;
+    flex-direction:column;align-items:stretch;background:#141416;border:1px solid var(--borda);
+    border-radius:12px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+  #menu-links.aberto{display:flex}
+  #menu-links a{margin-left:0;padding:.7rem .9rem;border-radius:8px;border-bottom:1px solid #1e1e20}
+  #menu-links a:last-child{border-bottom:0}
+  .topo{position:relative;padding:1.1rem 1rem 1.3rem}
+}
+.logo{font-weight:600;color:var(--txt);font-size:1.1rem}
+.card{width:100%;max-width:430px;background:var(--card);border:1px solid var(--borda);
+ border-radius:14px;padding:2rem;margin:1.5rem 1rem;box-sizing:border-box}
+.card.larga{max-width:720px}
+h1{font-size:1.35rem;font-weight:500;margin:0 0 1.2rem}
+label{display:block;font-size:.85rem;color:var(--txt-mut);margin:.9rem 0 .3rem}
+input,select{width:100%;padding:.65rem .8rem;border-radius:8px;border:1px solid #333;
+ background:var(--bg);color:var(--txt);box-sizing:border-box;font-size:.95rem}
+button{width:100%;margin-top:1.4rem;padding:.75rem;border:0;border-radius:8px;
+ background:var(--verde);color:var(--sobre-verde);font-size:1rem;cursor:pointer}
+button:hover{background:var(--verde-hover)}
+.erro{background:#3a1d1d;border:1px solid #6e2b2b;color:#f0b8b8;border-radius:8px;
+ padding:.6rem .8rem;font-size:.88rem;margin-bottom:.6rem}
+.ok{background:#15301f;border:1px solid var(--verde);color:#9fe8c9;border-radius:8px;
+ padding:.6rem .8rem;font-size:.88rem;margin-bottom:.6rem}
+.nowrap{white-space:nowrap}
+.mut{color:var(--txt-mut);font-size:.85rem}
+.plano-banner{width:100%;max-width:720px;box-sizing:border-box;margin:1rem 1rem 0;
+ display:flex;align-items:center;gap:.9rem;flex-wrap:wrap;
+ border-radius:12px;padding:.8rem 1rem;font-size:.9rem;line-height:1.4}
+.plano-banner .pb-txt{flex:1 1 260px;min-width:0}
+.plano-banner .pb-btn{flex:0 0 auto;width:auto;margin:0;padding:.55rem 1.1rem;border-radius:8px;
+ font-size:.9rem;font-weight:600;text-decoration:none;white-space:nowrap;color:var(--sobre-verde);background:var(--verde)}
+.plano-banner .pb-btn:hover{background:var(--verde-hover)}
+.pb-vencido{background:#3a1d1d;border:1px solid #6e2b2b;color:#f0c2c2}
+.pb-avencer{background:#332a12;border:1px solid #6e5a22;color:#f0dca6}
+.pb-avencer .pb-btn{background:#c99a2e}.pb-avencer .pb-btn:hover{background:#d9a832}
+/* faixa &quot;tem versão nova&quot; — só aparece via JS, nunca no HTML servido */
+#ver-nova{display:none;width:100%;max-width:720px;box-sizing:border-box;margin:1rem 1rem 0;
+ align-items:center;gap:.9rem;flex-wrap:wrap;background:#12302a;border:1px solid #1d6e57;
+ color:#bfe9d8;border-radius:12px;padding:.8rem 1rem;font-size:.9rem;line-height:1.4}
+#ver-nova.on{display:flex}
+#ver-nova .vn-txt{flex:1 1 260px;min-width:0}
+#ver-nova .vn-txt small{display:block;color:#8fbfae;font-size:.8rem;margin-top:.15rem}
+#ver-nova button{flex:0 0 auto;width:auto;margin:0;padding:.55rem 1.1rem;border-radius:8px;
+ font-size:.9rem;font-weight:600;white-space:nowrap}
+#ver-nova .vn-depois{background:transparent;border:1px solid #2f6b59;color:#9fd3c0;font-weight:500}
+#ver-nova .vn-depois:hover{background:#173a33}
+table{width:100%;border-collapse:collapse;margin-top:.8rem}
+td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;font-size:.92rem}
+.tag{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.78rem;
+ border:1px solid var(--verde);color:var(--verde-claro)}
+.metric{background:var(--bg);border:1px solid var(--borda);border-radius:8px;padding:1rem;min-width:0}
+.metric span{display:block;font-size:.8rem;color:var(--txt-mut);margin-bottom:.3rem}
+.metric b{font-size:1.4rem;font-weight:500;overflow-wrap:break-word;word-break:break-word}
+.barra{height:8px;background:var(--bg);border-radius:4px;overflow:hidden}
+.barra-fill{height:8px;background:var(--verde);border-radius:4px}
+.chip{border:1px solid var(--borda);padding:.25rem .6rem;border-radius:999px;font-size:.8rem;color:#ccc}
+.membros{display:flex;flex-direction:column;gap:6px;margin-top:.6rem}
+.membro-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:.7rem .8rem;background:var(--bg);border:1px solid var(--borda);border-radius:10px}
+.membro-id{display:flex;align-items:center;gap:10px;flex:1 1 180px;min-width:0}
+.avatar{width:34px;height:34px;border-radius:50%;background:#1d3a30;color:var(--verde-claro);display:flex;align-items:center;justify-content:center;font-weight:600;flex-shrink:0}
+.membro-nome{font-size:.95rem}
+.membro-papel{font-size:.78rem;color:var(--txt-mut)}
+.membro-contato{flex:1 1 200px;font-size:.84rem;color:#c5c5c0;min-width:0}
+.membro-contato .conv code{background:var(--card);border:1px solid var(--borda);border-radius:6px;padding:.1rem .4rem;font-size:.82rem;color:var(--verde-claro)}
+.membro-acoes{display:flex;gap:6px;flex:0 0 auto}
+.membro-acoes form{margin:0}
+.membro-acoes button{margin:0;padding:.35rem .7rem;font-size:.78rem;width:auto}
+.btn-conv{background:#1d6e9e}.btn-conv:hover{background:#2480b5}
+.btn-off{background:#6e2b2b}.btn-off:hover{background:#8a3636}
+.btn-on{background:var(--verde)}
+
+.dep{border:1px solid var(--borda);border-radius:8px;margin-bottom:8px;overflow:hidden}
+.dep-cab{display:flex;justify-content:space-between;align-items:center;padding:.7rem .9rem;background:var(--card);cursor:pointer;font-size:.92rem}
+.dep-cab:hover{background:#1c1c1d}
+.seta{color:var(--verde-claro);margin-right:.3rem}
+.dep-corpo{display:none;padding:.7rem .9rem;flex-wrap:wrap;gap:8px}
+.dep.aberto .dep-corpo{display:flex}
+.subdia{border-top:1px solid #232324}
+.subdia-cab{display:flex;justify-content:space-between;align-items:center;padding:.55rem .2rem;cursor:pointer;font-size:.88rem}
+.subdia-cab:hover{color:#fff}
+.seta2{color:var(--verde-claro);margin-right:.3rem;font-size:.8rem}
+.subdia-corpo{display:none;flex-wrap:wrap;gap:8px;padding:.2rem 0 .7rem}
+.subdia.aberto .subdia-corpo{display:flex}
+.conv-links{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.lk-tg,.lk-copy,.lk-wpp{padding:.35rem .6rem;border-radius:6px;font-size:.75rem;border:1px solid #243049;text-decoration:none;display:inline-block;line-height:1.2}
+.lk-tg{background:#2AABEE;color:#fff;border-color:#2AABEE}
+.lk-copy{background:#1a2233;color:#e7ecf3;cursor:pointer;border-color:var(--borda)}
+.lk-wpp{background:#25D366;color:#fff;border-color:#25D366}
+.conv-invite{margin:.3rem 0;font-size:.82rem}
+.conv-links{display:flex;gap:4px;flex-wrap:wrap;margin-top:.3rem}
+/* Trilho de abas/chips — mesmo padrão do grupo &quot;Ver lançamentos de&quot; (pessoal/
+   empresa): fundo --card, cantos 9px, itens 6px. align-items:center e o margin:0
+   do .aba evitam a &quot;barriga&quot; que o margin-top do button base causava.
+   NUNCA quebra linha: com muitas abas (caso de Relatórios, 8 no total) o trilho
+   rola de lado — max-width:100% + overflow-x:auto no lugar de flex-wrap. */
+.abas{display:flex;align-items:center;flex-wrap:nowrap;gap:2px;background:var(--card);padding:3px;border-radius:9px;border:1px solid var(--borda);margin:.6rem 0 .9rem;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.aba{width:auto;flex-shrink:0;margin:0;display:inline-flex;align-items:center;line-height:1;background:transparent;color:#b4b2a9;border:none;padding:.35rem .8rem;border-radius:6px;font-size:.8rem;cursor:pointer;transition:background .18s,color .18s}
+.aba:hover{color:var(--txt)}
+.aba.on,.aba.ativa{background:var(--verde);color:var(--sobre-verde);font-weight:600}
+.dica-toque{font-size:.78rem;color:#7a7a78;margin:0 0 .6rem}
+.dephead{font-size:.72rem;font-weight:600;color:#cfcfca;margin:.6rem 0 .3rem .2rem}
+.litem{display:flex;align-items:center;gap:.6rem;padding:.7rem .5rem .7rem .6rem;margin-bottom:.4rem;background:var(--card-2);border-radius:10px;transition:transform .15s,background .2s,opacity .35s,max-height .35s;position:relative;overflow:hidden}
+.litem .toque{display:flex;align-items:center;gap:.7rem;flex:1;cursor:pointer}
+.litem:active{transform:scale(.985)}
+.litem .bol{width:26px;height:26px;border:2px solid var(--verde-claro);border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;transition:background .2s,border-color .2s}
+.litem .nome{flex:1;color:var(--txt);font-size:15px;transition:color .2s;word-break:break-word}
+.litem .rem{width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#7a4a4a;font-size:1.1rem;border-radius:8px;cursor:pointer;border:0;background:transparent}
+.litem .rem:hover{background:rgba(180,60,60,.15);color:#c66}
+.litem.done{background:#15241d}
+.litem.done .bol{background:var(--verde);border-color:var(--verde)}
+.litem.done .nome{color:#7a8a82;text-decoration:line-through}
+.litem.flash-v::after{content:&#x27;&#x27;;position:absolute;inset:0;background:var(--verde);opacity:.35;animation:cfade .5s ease-out forwards;pointer-events:none}
+.litem.flash-r::after{content:&#x27;&#x27;;position:absolute;inset:0;background:#a33;opacity:.3;animation:cfade .4s ease-out forwards;pointer-events:none}
+@keyframes cfade{to{opacity:0}}
+.litem.saindo{opacity:0;transform:translateX(40px);max-height:0;padding-top:0;padding-bottom:0;margin-bottom:0}
+.cart-head{margin:1rem 0 .3rem;font-size:.88rem;color:var(--verde-claro);cursor:pointer;user-select:none;font-weight:500}
+.btn-finalizar{width:100%;margin-top:.8rem;background:var(--verde);color:var(--sobre-verde);border:none;padding:.7rem;border-radius:10px;font-size:15px;font-weight:500;cursor:pointer;transition:background .2s}
+.btn-finalizar:hover{background:var(--verde-hover)}
+.btn-finalizar:active{transform:scale(.99)}
+.hist-dia{border-bottom:1px solid var(--borda)}
+.hist-head{display:flex;align-items:center;justify-content:space-between;padding:.6rem .2rem;cursor:pointer;color:var(--txt);font-size:14px;user-select:none}
+.hist-head:hover{background:var(--card-2);border-radius:8px}
+.hist-itens{padding:.2rem .2rem .6rem 1rem;font-size:13px;color:var(--txt-mut);line-height:1.7}
+.wa-suporte{position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:var(--verde);border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.35);z-index:9999;transition:transform .2s,box-shadow .2s;text-decoration:none}
+.wa-suporte:hover{transform:scale(1.08);box-shadow:0 6px 18px rgba(37,211,102,.45)}
+.wa-suporte:active{transform:scale(.96)}
+.wa-tooltip{position:absolute;right:68px;background:var(--card-2);color:var(--txt);padding:.45rem .8rem;border-radius:6px;font-size:.85rem;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s;border:1px solid var(--borda)}
+.wa-suporte:hover .wa-tooltip{opacity:1}
+@media (max-width:600px){.wa-suporte{bottom:16px;right:16px;width:52px;height:52px}.wa-tooltip{display:none}.fin-cards{grid-template-columns:1fr}.fin-cards&gt;div:first-child{display:grid !important;grid-template-columns:1fr 1fr;gap:.6rem}.fin-cards&gt;div:first-child&gt;div:last-child{margin-top:0 !important;padding-top:0 !important;border-top:0 !important;border-left:1px solid #1e1e20;padding-left:.6rem !important}}
+
+#navprog{position:fixed;top:0;left:0;height:3px;width:0;background:var(--verde-claro);z-index:100;transition:width .35s ease;opacity:0}
+#navprog.run{width:92%;opacity:1;transition:width 9s cubic-bezier(.1,.7,.2,1)}
+.nav-ic{width:20px;height:20px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.side,.btmnav,.mais-sheet,.mais-bg{display:none}
+.side-grp{font-size:.66rem;text-transform:uppercase;letter-spacing:.5px;color:#6a6a66;padding:.7rem .6rem .25rem}
+.nav-i{display:flex;align-items:center;gap:.65rem;padding:.55rem .6rem;border-radius:8px;color:var(--txt-mut);text-decoration:none;font-size:.9rem;margin:0}
+.nav-i:hover{background:var(--card-2);color:var(--txt)}
+.nav-i.on{background:rgba(29,158,117,.16);color:var(--verde-claro)}
+.nav-i .nvb{margin-left:auto;background:var(--verde);color:var(--sobre-verde);border-radius:999px;
+ min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;font-size:.7rem;font-weight:600;
+ display:inline-flex;align-items:center;justify-content:center;line-height:1}
+.topo-mob{display:none}
+@media(min-width:768px){
+  body{padding-left:216px}
+  .topo-mob{display:none !important}
+  .side{display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0;width:216px;background:var(--card);border-right:1px solid var(--borda);padding:1rem .7rem;box-sizing:border-box;overflow-y:auto;z-index:40}
+  .side-logo{font-weight:600;color:var(--txt);font-size:1.1rem;padding:.2rem .6rem 1rem;display:flex;align-items:center;gap:.5rem}
+}
+@media(max-width:767px){
+  /* env(safe-area-inset-*) — só existe com viewport-fit=cover; some com fallback 0px
+     nos outros navegadores. Evita o topo colidir com a status bar (modo tela de
+     início do iOS, sem a barra do Safari) e o rodapé com o home indicator. */
+  body{padding-bottom:calc(66px + env(safe-area-inset-bottom, 0px));padding-top:env(safe-area-inset-top, 0px)}
+  .topo-mob{display:flex}
+  .wa-suporte{bottom:80px !important}
+  .btmnav{display:flex;position:fixed;left:0;right:0;bottom:0;height:60px;padding-bottom:env(safe-area-inset-bottom, 0px);box-sizing:content-box;background:var(--card);border-top:1px solid var(--borda);z-index:60}
+  .btmnav a,.btmnav button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--txt-mut);text-decoration:none;background:none;border:0;font-size:.6rem;cursor:pointer;margin:0;padding:0;width:auto}
+  .btmnav .on{color:var(--verde-claro)}
+  .btmnav .nav-ic{width:22px;height:22px}
+  .mais-bg{display:block;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:70;opacity:0;pointer-events:none;transition:opacity .25s}
+  .mais-bg.open{opacity:1;pointer-events:auto}
+  .mais-sheet{display:block;position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--borda);border-radius:16px 16px 0 0;padding:.4rem 1rem 1.4rem;z-index:71;transform:translateY(100%);transition:transform .25s;max-height:80vh;overflow-y:auto}
+  .mais-sheet.open{transform:translateY(0)}
+  .mais-grab{width:34px;height:4px;background:var(--borda);border-radius:2px;margin:.4rem auto .5rem}
+}
+&lt;/style&gt;&lt;/head&gt;&lt;body&gt;
+&lt;svg width=&quot;0&quot; height=&quot;0&quot; style=&quot;position:absolute&quot; aria-hidden=&quot;true&quot;&gt;&lt;defs&gt;&lt;symbol id=&quot;ic-caixa&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M6 3h12v18l-3-2-3 2-3-2-3 2z&quot;/&gt;&lt;path d=&quot;M9 8h6M9 12h6&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-produtos&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M3 8l9-5 9 5v8l-9 5-9-5z&quot;/&gt;&lt;path d=&quot;M3 8l9 5 9-5M12 13v8&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-clientes&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;9&quot; cy=&quot;8&quot; r=&quot;3&quot;/&gt;&lt;path d=&quot;M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5&quot;/&gt;&lt;path d=&quot;M16 6a3 3 0 010 6&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-financeiro&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 4v16h16&quot;/&gt;&lt;path d=&quot;M8 15l3-4 3 2 4-6&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-mais&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 7h16M4 12h16M4 17h16&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-abastecimento&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M3 6h11v9H3zM14 9h4l3 3v3h-7z&quot;/&gt;&lt;circle cx=&quot;7&quot; cy=&quot;18&quot; r=&quot;1.6&quot;/&gt;&lt;circle cx=&quot;17&quot; cy=&quot;18&quot; r=&quot;1.6&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-empresa&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-fornecedor&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M12 21v-8M12 13c0-3 2-5.5 5.5-5.5C17.5 11 15.5 13 12 13zM12 15c0-2.5-1.6-4.5-4.5-4.5C7.5 13 9 15 12 15z&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-compras&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;9&quot; cy=&quot;20&quot; r=&quot;1.5&quot;/&gt;&lt;circle cx=&quot;17&quot; cy=&quot;20&quot; r=&quot;1.5&quot;/&gt;&lt;path d=&quot;M2 4h2.2l2.3 11h11l1.8-8H6&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-cesta&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M5 9h14l-1.4 10H6.4zM9 9l1.2-5M15 9l-1.2-5&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-painel&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-sair&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-prospeccao&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;8&quot;/&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;3.4&quot;/&gt;&lt;path d=&quot;M12 2v3M12 19v3M2 12h3M19 12h3&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-agenda&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3.5&quot; y=&quot;5&quot; width=&quot;17&quot; height=&quot;15&quot; rx=&quot;2&quot;/&gt;&lt;path d=&quot;M3.5 9.5h17M8 3v4M16 3v4&quot;/&gt;&lt;path d=&quot;M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-relatorios&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3.5&quot; y=&quot;3.5&quot; width=&quot;17&quot; height=&quot;17&quot; rx=&quot;2&quot;/&gt;&lt;path d=&quot;M8 17v-5M12.5 17V7M17 17v-8&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-novidades&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M18 8.5a6 6 0 10-12 0c0 6.5-2.5 6.5-2.5 8.5h17c0-2-2.5-2-2.5-8.5&quot;/&gt;&lt;path d=&quot;M10.2 20.5a2.2 2.2 0 003.6 0&quot;/&gt;&lt;/symbol&gt;&lt;/defs&gt;&lt;/svg&gt;
+&lt;div id=&quot;navprog&quot;&gt;&lt;/div&gt;
+
+
+
+
+
+
+
+&lt;div class=&quot;topo topo-mob&quot;&gt;&lt;span class=&quot;logo&quot; style=&quot;display:inline-flex;align-items:center;gap:7px&quot;&gt;&lt;svg width=&quot;20&quot; height=&quot;20&quot; viewBox=&quot;0 0 64 64&quot; fill=&quot;none&quot;&gt;&lt;path d=&quot;M16 18 H44 L18 46 H46&quot; stroke=&quot;#3ee0a6&quot; stroke-width=&quot;6&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot; fill=&quot;none&quot;/&gt;&lt;path d=&quot;M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z&quot; fill=&quot;#3ee0a6&quot;/&gt;&lt;/svg&gt;zaq&lt;/span&gt;&lt;/div&gt;
+&lt;nav class=&quot;side&quot;&gt;
+  &lt;div class=&quot;side-logo&quot;&gt;&lt;span class=&quot;logo&quot; style=&quot;display:inline-flex;align-items:center;gap:7px&quot;&gt;&lt;svg width=&quot;20&quot; height=&quot;20&quot; viewBox=&quot;0 0 64 64&quot; fill=&quot;none&quot;&gt;&lt;path d=&quot;M16 18 H44 L18 46 H46&quot; stroke=&quot;#3ee0a6&quot; stroke-width=&quot;6&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot; fill=&quot;none&quot;/&gt;&lt;path d=&quot;M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z&quot; fill=&quot;#3ee0a6&quot;/&gt;&lt;/svg&gt;zaq&lt;/span&gt;&lt;/div&gt;
+  
+  &lt;div class=&quot;side-grp&quot;&gt;Principal&lt;/div&gt;
+  
+  &lt;a href=&quot;/painel/financeiro&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-financeiro&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Financeiro&lt;/span&gt;&lt;/a&gt;
+  &lt;div class=&quot;side-grp&quot;&gt;Loja&lt;/div&gt;
+  
+  &lt;a href=&quot;/painel/servicos&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-financeiro&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Serviços&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/prospeccao&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-prospeccao&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Prospecção&lt;/span&gt;&lt;/a&gt;
+  
+  &lt;a href=&quot;/painel/agenda&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-agenda&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Agenda&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/empresa&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-empresa&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Empresa&lt;/span&gt;&lt;/a&gt;&lt;a href=&quot;/painel/relatorios&quot; class=&quot;nav-i on&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-relatorios&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Relatórios&lt;/span&gt;&lt;/a&gt;
+  
+  &lt;a href=&quot;/painel/clientes&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-clientes&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Clientes/Fornecedores&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/equipe&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-clientes&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Equipe&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/fornecedor&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-fornecedor&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Fornecedor&lt;/span&gt;&lt;/a&gt;
+  &lt;div class=&quot;side-grp&quot;&gt;Pessoal&lt;/div&gt;
+  &lt;a href=&quot;/painel&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-painel&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Painel&lt;/span&gt;&lt;/a&gt;&lt;a href=&quot;/painel/compras&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-compras&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Lista de compras&lt;/span&gt;&lt;/a&gt;
+  
+  
+  
+  
+  &lt;div style=&quot;flex:1&quot;&gt;&lt;/div&gt;
+  &lt;a href=&quot;/sair&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-sair&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Sair&lt;/span&gt;&lt;/a&gt;
+&lt;/nav&gt;
+&lt;nav class=&quot;btmnav&quot;&gt;
+  
+  &lt;a href=&quot;/painel/financeiro&quot; class=&quot;&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-financeiro&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Financeiro&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel&quot; class=&quot;&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-painel&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Painel&lt;/span&gt;&lt;/a&gt;
+  
+  
+  
+  &lt;button type=&quot;button&quot; onclick=&quot;maisToggle(true)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-mais&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Mais&lt;/span&gt;&lt;/button&gt;
+&lt;/nav&gt;
+&lt;div class=&quot;mais-bg&quot; onclick=&quot;maisToggle(false)&quot;&gt;&lt;/div&gt;
+&lt;div class=&quot;mais-sheet&quot; id=&quot;mais-sheet&quot;&gt;
+  &lt;div class=&quot;mais-grab&quot;&gt;&lt;/div&gt;
+  &lt;div class=&quot;side-grp&quot;&gt;Loja&lt;/div&gt;
+  
+  &lt;a href=&quot;/painel/servicos&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-financeiro&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Serviços&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/prospeccao&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-prospeccao&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Prospecção&lt;/span&gt;&lt;/a&gt;
+  
+  &lt;a href=&quot;/painel/agenda&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-agenda&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Agenda&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/empresa&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-empresa&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Empresa&lt;/span&gt;&lt;/a&gt;&lt;a href=&quot;/painel/relatorios&quot; class=&quot;nav-i on&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-relatorios&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Relatórios&lt;/span&gt;&lt;/a&gt;
+  
+  &lt;a href=&quot;/painel/clientes&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-clientes&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Clientes/Fornecedores&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/equipe&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-clientes&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Equipe&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/fornecedor&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-fornecedor&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Fornecedor&lt;/span&gt;&lt;/a&gt;
+  &lt;div class=&quot;side-grp&quot;&gt;Pessoal&lt;/div&gt;
+  &lt;a href=&quot;/painel&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-painel&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Painel&lt;/span&gt;&lt;/a&gt;&lt;a href=&quot;/painel/compras&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-compras&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Lista de compras&lt;/span&gt;&lt;/a&gt;
+  
+  
+  
+  &lt;a href=&quot;/sair&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-sair&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Sair&lt;/span&gt;&lt;/a&gt;
+&lt;/div&gt;
+&lt;script&gt;
+function navTap(el){var p=el.closest(&#x27;nav&#x27;);if(p){var A=p.querySelectorAll(&#x27;a&#x27;);for(var i=0;i&lt;A.length;i++)A[i].classList.remove(&#x27;on&#x27;);}el.classList.add(&#x27;on&#x27;);var b=document.getElementById(&#x27;navprog&#x27;);if(b)b.classList.add(&#x27;run&#x27;);}
+function maisToggle(v){var sh=document.getElementById(&#x27;mais-sheet&#x27;),bg=document.querySelector(&#x27;.mais-bg&#x27;);if(sh)sh.classList.toggle(&#x27;open&#x27;,v);if(bg)bg.classList.toggle(&#x27;open&#x27;,v);}
+&lt;/script&gt;
+
+
+
+
+&lt;div id=&quot;ver-nova&quot; aria-live=&quot;polite&quot;&gt;
+  &lt;div class=&quot;vn-txt&quot;&gt;&lt;b&gt;Tem uma versão nova do Zaq.&lt;/b&gt;
+    &lt;small&gt;Recarregue pra usar a tela atualizada — nada do que você já salvou se perde.&lt;/small&gt;&lt;/div&gt;
+  &lt;button type=&quot;button&quot; id=&quot;vn-recarregar&quot;&gt;Recarregar&lt;/button&gt;
+  &lt;button type=&quot;button&quot; id=&quot;vn-depois&quot; class=&quot;vn-depois&quot;&gt;Depois&lt;/button&gt;
+&lt;/div&gt;
+&lt;script&gt;
+(function(){
+  var atual = &quot;1&quot;, box = document.getElementById(&#x27;ver-nova&#x27;);
+  if(!box || !atual) return;
+  var vista = &#x27;&#x27;, dispensada = &#x27;&#x27;, ultimo = 0;
+  function olhar(){
+    // Nunca recarrega sozinho: a pessoa pode estar no meio de um formulário.
+    // A faixa pergunta; quem decide é ela.
+    var agora = Date.now();
+    if(agora - ultimo &lt; 60000) return;
+    ultimo = agora;
+    fetch(&#x27;/painel/versao&#x27;, {headers:{&#x27;Accept&#x27;:&#x27;application/json&#x27;}, cache:&#x27;no-store&#x27;})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        if(!d || !d.v || d.v === atual || d.v === dispensada) return;
+        vista = d.v; box.classList.add(&#x27;on&#x27;);
+      })
+      .catch(function(){});   // rede caiu: silêncio, a faixa é enfeite
+  }
+  document.getElementById(&#x27;vn-recarregar&#x27;).onclick = function(){ location.reload(); };
+  document.getElementById(&#x27;vn-depois&#x27;).onclick = function(){
+    dispensada = vista; box.classList.remove(&#x27;on&#x27;);   // não insiste NESTA versão
+  };
+  setInterval(olhar, 300000);
+  // O caso real é a aba esquecida: a pessoa volta pra ela horas depois.
+  document.addEventListener(&#x27;visibilitychange&#x27;, function(){
+    if(!document.hidden) olhar();
+  });
+})();
+&lt;/script&gt;
+
+
+&lt;style&gt;
+  .rel-aviso{background:#1a2233;border:1px solid #29354d;color:#9db3d6;border-radius:8px;
+   padding:.6rem .85rem;font-size:.82rem;margin:.9rem 0 1rem;line-height:1.5}
+  .rel-filtros{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.9rem 0 1.1rem}
+  .rel-filtros select,.rel-filtros input[type=search]{width:auto;margin:0}
+  .rel-filtros input[type=search]{min-width:170px}
+  .rel-filtros .mut{font-size:.8rem}
+  .rel-filtrar{width:auto;margin:0;padding:.5rem .9rem;background:var(--card);color:var(--txt);
+   border:1px solid var(--borda);border-radius:8px;font-size:.85rem;cursor:pointer}
+  .rel-filtrar:hover{border-color:var(--verde)}
+  .rel-pdf{width:auto;margin:0;display:inline-flex;align-items:center;gap:.4rem;padding:.6rem 1rem;
+   background:#1d6e9e;color:#fff;text-decoration:none;border-radius:8px;font-size:.9rem;font-weight:600}
+  .rel-pdf:hover{background:#2480b5}
+  .rel-tag{display:inline-block;padding:.15rem .6rem;border-radius:999px;font-size:.74rem;font-weight:600;white-space:nowrap}
+  .rel-tag.ok{background:#15301f;color:#9fe8c9;border:1px solid var(--verde)}
+  .rel-tag.aviso{background:#332a12;color:#f0dca6;border:1px solid #6e5a22}
+  .rel-tag.erro{background:#3a1d1d;color:#f0b8b8;border:1px solid #6e2b2b}
+  .rel-tag.neutro{background:#20242a;color:#c7ccd6;border:1px solid #3a4048}
+  .rel-tag.info{background:#0f2836;color:#8fd0ea;border:1px solid #1d5570}
+  .rel-act{width:1%;white-space:nowrap;text-align:center}
+  .rel-print{display:inline-flex;align-items:center;justify-content:center;width:1.8rem;height:1.8rem;
+   border:1px solid var(--borda);background:var(--bg);border-radius:6px;text-decoration:none;font-size:.85rem}
+  .rel-print:hover{border-color:var(--verde)}
+  /* LARGURA DESTA TELA, e só dela.
+     O `.card.larga` vale 720px e é usado por Equipe, Fornecedor, Portal e mais
+     cinco telas — várias delas formulário, onde largura demais PIORA (o olho
+     percorre a linha inteira entre o rótulo e o campo). Alargar aquela classe
+     consertaria o relatório e estragaria as outras, então a largura extra vive
+     aqui, numa classe que só o relatório usa.
+     O teto de 1500px é escolha, não preguiça: sem ele, numa tela de 3440px a
+     linha atravessa a tela e separa o nome do cliente do valor por meio metro. */
+  .card.rel-full{max-width:1500px}
+  .rel-tbl-wrap{overflow-x:auto;max-width:100%}
+  .rel-tbl-wrap table{min-width:640px;width:100%}
+  /* Linha única sempre — nome de cliente/empresa longo não vira 3 linhas
+     desalinhando a tabela toda. */
+  .rel-tbl-wrap table td,.rel-tbl-wrap table th{white-space:nowrap}
+  /* ...MENOS a coluna elástica (uma por relatório, marcada com flex=True em
+     _col). Ela absorve a sobra e, quando falta espaço, corta no FIM com
+     reticências. Antes o `nowrap` valia pra tudo e a tabela rolava pro lado: o
+     que sumia era a PRIMEIRA coluna e o começo do nome — em 26/08 o print
+     mostrava &quot;ço Pelle Clínica&quot; e &quot;erson Venici&quot;, com o cliente lendo o meio da
+     tabela sem saber. Cortar no fim mantém visível a parte que identifica.
+     `max-width:0` é o truque que faz o text-overflow valer dentro de &lt;table&gt;:
+     sem ele a célula cresce com o conteúdo e a reticência nunca aparece. */
+  .rel-tbl-wrap table td.rel-flex{white-space:nowrap;overflow:hidden;
+   text-overflow:ellipsis;max-width:0;width:99%}
+  /* São até 300 linhas. Rolar 200 e não lembrar qual coluna é qual faz a pessoa
+     rolar de volta só pra conferir o cabeçalho. */
+  .rel-tbl-wrap{max-height:70vh;overflow-y:auto}
+  .rel-tbl-wrap thead th{position:sticky;top:0;background:var(--card);z-index:1}
+  /* Numa tabela larga o olho perde a linha justamente entre o nome e o valor,
+     que é o par que se lê junto. */
+  .rel-tbl-wrap tbody tr:nth-child(even){background:rgba(255,255,255,.014)}
+  .rel-tbl-wrap tbody tr:hover{background:var(--neon-fraco)}
+  .rel-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .rel-tot td{border-top:2px solid var(--borda);font-weight:700}
+  .rel-metricas{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:1.2rem 0}
+  /* Os valores aqui (&quot;10 · R$ 68.590,00&quot;) são mais longos que o KPI comum do
+     app — a fonte padrão (1.4rem) estourava a caixa em telas médias. */
+  .rel-metricas .metric b{font-size:1.05rem;line-height:1.3}
+  .rel-scroll-dica{display:none}
+  @media (max-width:600px){.rel-filtros{align-items:stretch}.rel-filtros select{flex:1 1 auto}
+   .rel-metricas{grid-template-columns:repeat(2,1fr)}
+   .rel-metricas .metric b{font-size:.95rem}}
+  @media (max-width:700px){.rel-scroll-dica{display:block}}
+&lt;/style&gt;
+&lt;div class=&quot;card larga rel-full&quot;&gt;
+  &lt;h1 style=&quot;margin:0&quot;&gt;📊 Relatórios &lt;span class=&quot;mut&quot; style=&quot;font-weight:400;font-size:.85rem&quot;&gt;· Vendas&lt;/span&gt;&lt;/h1&gt;
+  
+
+  &lt;div class=&quot;abas&quot; id=&quot;rel-abas&quot;&gt;
+    &lt;a class=&quot;aba ativa&quot;
+     href=&quot;/painel/relatorios?tipo=vendas&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Vendas&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=contas_pagar&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Contas a pagar&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=contas_receber&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Contas a receber&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=pagas&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Contas pagas&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=comissao&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Comissão&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=recebidas&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Contas recebidas&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=orcamentos&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Orçamentos&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=contratos&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Contratos&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=agenda&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Agenda&lt;/a&gt;
+  &lt;/div&gt;
+  &lt;script&gt;
+    // com 8 abas o trilho rola de lado (ver .abas) — sem isto a aba ativa podia
+    // nascer fora da área visível, e quem abrisse a tela não veria em qual
+    // relatório está.
+    (function () {
+      var ativa = document.querySelector(&quot;#rel-abas .aba.ativa&quot;);
+      if (ativa) ativa.scrollIntoView({inline: &quot;center&quot;, block: &quot;nearest&quot;});
+    })();
+  &lt;/script&gt;
+
+  &lt;form method=&quot;get&quot; action=&quot;/painel/relatorios&quot; class=&quot;rel-filtros&quot;&gt;
+    &lt;input type=&quot;hidden&quot; name=&quot;tipo&quot; value=&quot;vendas&quot;&gt;
+    &lt;select name=&quot;periodo&quot; onchange=&quot;this.form.submit()&quot;&gt;
+      &lt;option value=&quot;mes&quot; selected&gt;Este mês&lt;/option&gt;&lt;option value=&quot;mes_passado&quot; &gt;Mês passado&lt;/option&gt;&lt;option value=&quot;90d&quot; &gt;Últimos 90 dias&lt;/option&gt;&lt;option value=&quot;ano&quot; &gt;Este ano&lt;/option&gt;&lt;option value=&quot;todos&quot; &gt;Todo o período&lt;/option&gt;
+    &lt;/select&gt;
+    
+    
+    
+    &lt;input type=&quot;search&quot; id=&quot;rel-q&quot; placeholder=&quot;🔎 filtrar na tela…&quot;
+           aria-label=&quot;Filtrar as linhas mostradas&quot; autocomplete=&quot;off&quot;&gt;
+    
+    &lt;span class=&quot;mut&quot;&gt;período: Este mês&lt;/span&gt;
+    &lt;span style=&quot;flex:1&quot;&gt;&lt;/span&gt;
+    &lt;a class=&quot;rel-pdf&quot; href=&quot;/painel/relatorios/pdf?tipo=vendas&amp;periodo=mes&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot;&gt;🖨️ Exportar PDF&lt;/a&gt;
+  &lt;/form&gt;
+
+  &lt;div class=&quot;rel-metricas&quot;&gt;
+    &lt;div class=&quot;metric&quot;&gt;&lt;span&gt;Total vendido&lt;/span&gt;&lt;b class=&quot;nowrap&quot;&gt;R$ 150,00&lt;/b&gt;&lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;p class=&quot;dica-toque rel-scroll-dica&quot;&gt;👉 arraste a tabela pros lados pra ver todas as colunas&lt;/p&gt;
+  &lt;div class=&quot;rel-tbl-wrap&quot;&gt;
+  &lt;table&gt;
+    &lt;thead&gt;
+    &lt;tr&gt;&lt;th&gt;Data&lt;/th&gt;&lt;th&gt;Descrição&lt;/th&gt;&lt;th class=&quot;rel-num&quot;&gt;Valor&lt;/th&gt;&lt;/tr&gt;
+    &lt;/thead&gt;
+    &lt;tbody&gt;
+    
+    &lt;tr&gt;&lt;td&gt;20/08/2026&lt;/td&gt;&lt;td&gt;Venda balcão&lt;/td&gt;&lt;td class=&quot;rel-num&quot; data-c=&quot;15000&quot;&gt;R$ 150,00&lt;/td&gt;&lt;/tr&gt;
+    
+    &lt;/tbody&gt;
+    &lt;tfoot&gt;
+    &lt;tr class=&quot;rel-tot&quot; id=&quot;rel-tot&quot;&gt;&lt;td&gt;Total&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;td class=&quot;rel-num&quot;&gt;R$ 150,00&lt;/td&gt;&lt;/tr&gt;
+    &lt;/tfoot&gt;
+  &lt;/table&gt;
+  &lt;/div&gt;
+  &lt;script&gt;
+  // Filtro NA TELA. As linhas já estão todas no HTML (a consulta tem teto de 300),
+  // então não há ida ao servidor: filtrar é instantâneo.
+  //
+  // O TOTAL É RECALCULADO, e isso não é enfeite. Filtrar por um cliente e deixar o
+  // rodapé mostrando o total de todo mundo é a tela MENTINDO no número que o dono
+  // usa pra decidir. Os centavos vêm de `data-c` na própria célula — nada de fazer
+  // parse de &quot;R$ 2.182,90&quot;, que quebraria no primeiro valor com milhar.
+  (function(){
+    var cx = document.getElementById(&#x27;rel-q&#x27;);
+    if (!cx) return;
+    var tbl = document.querySelector(&#x27;.rel-tbl-wrap table&#x27;);
+    if (!tbl) return;
+    var corpo = tbl.tBodies[0], conta = document.getElementById(&#x27;rel-conta&#x27;),
+        rodape = document.getElementById(&#x27;rel-tot&#x27;);
+    if (!corpo) return;
+    var linhas = Array.prototype.slice.call(corpo.rows).filter(function(tr){
+      return !tr.querySelector(&#x27;td[colspan]&#x27;);   // a linha de &quot;nenhum registro&quot;
+    });
+    // guarda o texto e o valor de cada linha uma vez só, em vez de reler o DOM
+    // a cada tecla
+    var base = linhas.map(function(tr){
+      var c = tr.querySelector(&#x27;td[data-c]&#x27;);
+      return {tr: tr, txt: (tr.textContent || &#x27;&#x27;).toLowerCase(),
+              cents: c ? parseInt(c.getAttribute(&#x27;data-c&#x27;), 10) || 0 : 0};
+    });
+    var celTot = rodape ? rodape.querySelector(&#x27;.rel-num:last-child&#x27;) : null;
+    var totOriginal = celTot ? celTot.textContent : &#x27;&#x27;;
+    // Formatação À MÃO, e não toLocaleString(&#x27;pt-BR&#x27;). Dois motivos:
+    //   1. toLocaleString depende do ICU do runtime. Num Node/navegador com ICU
+    //      reduzido o &#x27;pt-BR&#x27; cai no padrão americano e R$ 2.700,00 vira
+    //      R$ 2,700.00 — o total mudaria de cara conforme onde roda;
+    //   2. tem que bater EXATAMENTE com o filtro `brl` do servidor (portal.py),
+    //      senão limpar o filtro trocaria a formatação do número na cara do dono.
+    // Sem regex de propósito: este template é string Python comum (não raw), e
+    // uma classe de caractere tipo barra-d num literal JS vira escape inválido do
+    // Python — foi assim que um bloco &lt;script&gt; inteiro já morreu por SyntaxError
+    // aqui (ver o docstring de tests/test_painel_js_sintaxe.py).
+    function brl(c){
+      var neg = c &lt; 0; c = Math.abs(c);
+      var i = String(Math.floor(c / 100)), d = String(c % 100);
+      if (d.length &lt; 2) d = &#x27;0&#x27; + d;
+      var mil = &#x27;&#x27;;
+      while (i.length &gt; 3){ mil = &#x27;.&#x27; + i.slice(-3) + mil; i = i.slice(0, -3); }
+      // o sinal vem DEPOIS do &quot;R$ &quot;, como no servidor (&quot;R$ -25,00&quot;), não antes.
+      // Total negativo não aparece nestes relatórios hoje, mas divergir aqui é
+      // divergir em silêncio até o dia em que aparecer.
+      return &#x27;R$ &#x27; + (neg ? &#x27;-&#x27; : &#x27;&#x27;) + i + mil + &#x27;,&#x27; + d;
+    }
+    function aplicar(){
+      var q = (cx.value || &#x27;&#x27;).trim().toLowerCase();
+      var n = 0, soma = 0;
+      for (var i = 0; i &lt; base.length; i++){
+        var bate = !q || base[i].txt.indexOf(q) !== -1;
+        base[i].tr.style.display = bate ? &#x27;&#x27; : &#x27;none&#x27;;
+        if (bate){ n++; soma += base[i].cents; }
+      }
+      if (conta) conta.textContent = n;
+      if (celTot) celTot.textContent = q ? brl(soma) : totOriginal;
+      var rot = rodape ? rodape.cells[0] : null;
+      if (rot) rot.textContent = q ? (&#x27;Total do filtro · &#x27; + n) : &#x27;Total&#x27;;
+    }
+    cx.addEventListener(&#x27;input&#x27;, aplicar);
+    // Esc limpa — o caminho de volta pra tabela inteira sem ter que apagar à mão
+    cx.addEventListener(&#x27;keydown&#x27;, function(e){
+      if (e.key === &#x27;Escape&#x27;){ cx.value = &#x27;&#x27;; aplicar(); }
+    });
+  })();
+  &lt;/script&gt;
+  &lt;p class=&quot;mut&quot; style=&quot;margin-top:.6rem&quot;&gt;&lt;span id=&quot;rel-conta&quot;&gt;1&lt;/span&gt; registro(s) · Este mês&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;a href=&quot;https://wa.me/5586981885930?text=Oi%20Thompson%21%20Estou%20no%20Zaq%20%28conta%20%231%29%20e%20preciso%20de%20ajuda%20com%3A%20&quot;
+   target=&quot;_blank&quot; rel=&quot;noopener&quot; class=&quot;wa-suporte&quot; aria-label=&quot;Falar com Thompson no WhatsApp&quot;&gt;
+  &lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 24 24&quot; width=&quot;28&quot; height=&quot;28&quot; fill=&quot;#fff&quot; aria-hidden=&quot;true&quot;&gt;
+    &lt;path d=&quot;M.057 24l1.687-6.163a11.867 11.867 0 01-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 018.413 3.488 11.824 11.824 0 013.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 01-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 001.51 5.26l-.999 3.648 3.978-1.607zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413z&quot;/&gt;
+  &lt;/svg&gt;
+  &lt;span class=&quot;wa-tooltip&quot;&gt;Falar com Thompson&lt;/span&gt;
+&lt;/a&gt;
+&lt;/body&gt;&lt;/html&gt;" style="width:100%;height:460px;background:#0A0F0C;max-width:1024px;margin:0 auto;display:block;" loading="lazy"></iframe>
+    <div class="dica-viva">👉 arraste o conteúdo do quadro — "Orçamentos", "Contratos" e "Agenda" estão à direita, fora da vista.</div>
+  </div>
+</section>
+
+<!-- ====================================================== 3 -->
+<section class="sec">
+  <div class="num">3 · a proposta — sinal de rolagem</div>
+  <h2>Um gradiente na borda, só quando tem mais pra ver</h2>
+  <p class="lede">Mesmo padrão que app de celular, catálogo de produto e navegador usam pra
+  lista horizontal: uma sombra sutil na borda de quem tem conteúdo escondido, que some
+  sozinha quando chega no fim. CSS + um pedacinho de JS pra saber se chegou na ponta —
+  nenhuma mudança de comportamento, só o aviso que faltava. Escopo só na <b>faixa de
+  abas</b>: a tabela, depois do #571, só raspa por poucos pixels em 1024px — não vale o
+  código extra por enquanto.</p>
+
+  <div class="quadro">
+    <div class="cap"><span class="tag-depois">● proposto</span><span>mesma simulação (1024px), com o gradiente nas duas pontas</span></div>
+    <iframe srcdoc="&lt;!doctype html&gt;&lt;html lang=&quot;pt-br&quot;&gt;&lt;head&gt;&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1, viewport-fit=cover&quot;&gt;
+&lt;title&gt; - Zaq&lt;/title&gt;
+&lt;link rel=&quot;icon&quot; href=&quot;/favicon.svg&quot; type=&quot;image/svg+xml&quot;&gt;
+&lt;style&gt;@font-face{font-family:&#x27;Bricolage Grotesque&#x27;;font-style:normal;font-weight:200 800;font-stretch:100%;font-display:swap;src:url(/estatico/fontes/bricolage.woff2) format(&#x27;woff2&#x27;)}@font-face{font-family:&#x27;Inter&#x27;;font-style:normal;font-weight:100 900;font-display:swap;src:url(/estatico/fontes/inter.woff2) format(&#x27;woff2&#x27;)}@font-face{font-family:&#x27;JetBrains Mono&#x27;;font-style:normal;font-weight:100 800;font-display:swap;src:url(/estatico/fontes/jetbrains.woff2) format(&#x27;woff2&#x27;)}&lt;/style&gt;&lt;style&gt;
+:root{
+  color-scheme: dark;
+
+  /* ---- superfícies ---- */
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+
+  /* ---- texto ---- */
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+
+  /* ---- verde da marca ----
+     Um verde só, como no site. A separação verde/verde-claro existia porque o
+     verde antigo (#1d9e75) era escuro demais pra ler como texto; este não é. */
+  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+
+  /* Tinta sobre o verde cheio. Branco sobre #25D366 dá 1,98 de contraste — some.
+     Esta tinta dá 9,47. É o token que os botões verdes usam. */
+  --sobre-verde:#04150C;
+
+  /* ---- semânticos ---- */
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9; --roxo:#C9A3E0; --zap:#25D366;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A;  --azul-fundo:#0D1B23;
+
+  /* ---- tipografia ---- */
+  --display:&quot;Bricolage Grotesque&quot;,system-ui,-apple-system,&quot;Segoe UI&quot;,Roboto,sans-serif;
+  --body:&quot;Inter&quot;,system-ui,-apple-system,&quot;Segoe UI&quot;,Roboto,sans-serif;
+  --mono:&quot;JetBrains Mono&quot;,ui-monospace,&quot;SF Mono&quot;,Menlo,Consolas,monospace;
+
+  /* ---- apelidos: o vocabulário que o código já usa ---- */
+  --card:var(--surface); --card-2:var(--bg-2); --card2:var(--bg-2);
+  --borda:var(--line); --bord:var(--line);
+  --txt:var(--text); --txt-mut:var(--text-dim); --mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon); --verde-cl:var(--neon);
+  --verde2:var(--neon-bright); --verde-hover:var(--neon-bright);
+  --amar:var(--ambar); --amber:var(--ambar); --verm:var(--coral);
+  --fonte:var(--body); --ink:var(--sobre-verde);
+}
+  body{font-family:var(--body);background:var(--bg);color:var(--txt);
+       -webkit-font-smoothing:antialiased}
+  h1,h2,h3,h4,.logo,.side-logo{font-family:var(--display);letter-spacing:-.02em}
+  code,kbd,samp{font-family:var(--mono)}
+
+body{margin:0;min-height:100vh;font-family:var(--body);
+ background:var(--bg);color:var(--txt);display:flex;flex-direction:column;align-items:center}
+.topo{width:100%;max-width:960px;display:flex;justify-content:space-between;
+ align-items:center;padding:1.2rem 1rem;box-sizing:border-box}
+.topo a{color:var(--verde-claro);text-decoration:none;margin-left:1rem;white-space:nowrap}
+#menu-links{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.fin-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:1.2rem 0;align-items:stretch}
+@media (max-width:600px){
+  #menu-btn{display:inline-flex !important;order:-1}
+  .topo .logo{margin-left:auto}
+  #menu-links{display:none;position:absolute;top:100%;right:12px;left:12px;z-index:50;margin-top:4px;
+    flex-direction:column;align-items:stretch;background:#141416;border:1px solid var(--borda);
+    border-radius:12px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+  #menu-links.aberto{display:flex}
+  #menu-links a{margin-left:0;padding:.7rem .9rem;border-radius:8px;border-bottom:1px solid #1e1e20}
+  #menu-links a:last-child{border-bottom:0}
+  .topo{position:relative;padding:1.1rem 1rem 1.3rem}
+}
+.logo{font-weight:600;color:var(--txt);font-size:1.1rem}
+.card{width:100%;max-width:430px;background:var(--card);border:1px solid var(--borda);
+ border-radius:14px;padding:2rem;margin:1.5rem 1rem;box-sizing:border-box}
+.card.larga{max-width:720px}
+h1{font-size:1.35rem;font-weight:500;margin:0 0 1.2rem}
+label{display:block;font-size:.85rem;color:var(--txt-mut);margin:.9rem 0 .3rem}
+input,select{width:100%;padding:.65rem .8rem;border-radius:8px;border:1px solid #333;
+ background:var(--bg);color:var(--txt);box-sizing:border-box;font-size:.95rem}
+button{width:100%;margin-top:1.4rem;padding:.75rem;border:0;border-radius:8px;
+ background:var(--verde);color:var(--sobre-verde);font-size:1rem;cursor:pointer}
+button:hover{background:var(--verde-hover)}
+.erro{background:#3a1d1d;border:1px solid #6e2b2b;color:#f0b8b8;border-radius:8px;
+ padding:.6rem .8rem;font-size:.88rem;margin-bottom:.6rem}
+.ok{background:#15301f;border:1px solid var(--verde);color:#9fe8c9;border-radius:8px;
+ padding:.6rem .8rem;font-size:.88rem;margin-bottom:.6rem}
+.nowrap{white-space:nowrap}
+.mut{color:var(--txt-mut);font-size:.85rem}
+.plano-banner{width:100%;max-width:720px;box-sizing:border-box;margin:1rem 1rem 0;
+ display:flex;align-items:center;gap:.9rem;flex-wrap:wrap;
+ border-radius:12px;padding:.8rem 1rem;font-size:.9rem;line-height:1.4}
+.plano-banner .pb-txt{flex:1 1 260px;min-width:0}
+.plano-banner .pb-btn{flex:0 0 auto;width:auto;margin:0;padding:.55rem 1.1rem;border-radius:8px;
+ font-size:.9rem;font-weight:600;text-decoration:none;white-space:nowrap;color:var(--sobre-verde);background:var(--verde)}
+.plano-banner .pb-btn:hover{background:var(--verde-hover)}
+.pb-vencido{background:#3a1d1d;border:1px solid #6e2b2b;color:#f0c2c2}
+.pb-avencer{background:#332a12;border:1px solid #6e5a22;color:#f0dca6}
+.pb-avencer .pb-btn{background:#c99a2e}.pb-avencer .pb-btn:hover{background:#d9a832}
+/* faixa &quot;tem versão nova&quot; — só aparece via JS, nunca no HTML servido */
+#ver-nova{display:none;width:100%;max-width:720px;box-sizing:border-box;margin:1rem 1rem 0;
+ align-items:center;gap:.9rem;flex-wrap:wrap;background:#12302a;border:1px solid #1d6e57;
+ color:#bfe9d8;border-radius:12px;padding:.8rem 1rem;font-size:.9rem;line-height:1.4}
+#ver-nova.on{display:flex}
+#ver-nova .vn-txt{flex:1 1 260px;min-width:0}
+#ver-nova .vn-txt small{display:block;color:#8fbfae;font-size:.8rem;margin-top:.15rem}
+#ver-nova button{flex:0 0 auto;width:auto;margin:0;padding:.55rem 1.1rem;border-radius:8px;
+ font-size:.9rem;font-weight:600;white-space:nowrap}
+#ver-nova .vn-depois{background:transparent;border:1px solid #2f6b59;color:#9fd3c0;font-weight:500}
+#ver-nova .vn-depois:hover{background:#173a33}
+table{width:100%;border-collapse:collapse;margin-top:.8rem}
+td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;font-size:.92rem}
+.tag{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.78rem;
+ border:1px solid var(--verde);color:var(--verde-claro)}
+.metric{background:var(--bg);border:1px solid var(--borda);border-radius:8px;padding:1rem;min-width:0}
+.metric span{display:block;font-size:.8rem;color:var(--txt-mut);margin-bottom:.3rem}
+.metric b{font-size:1.4rem;font-weight:500;overflow-wrap:break-word;word-break:break-word}
+.barra{height:8px;background:var(--bg);border-radius:4px;overflow:hidden}
+.barra-fill{height:8px;background:var(--verde);border-radius:4px}
+.chip{border:1px solid var(--borda);padding:.25rem .6rem;border-radius:999px;font-size:.8rem;color:#ccc}
+.membros{display:flex;flex-direction:column;gap:6px;margin-top:.6rem}
+.membro-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:.7rem .8rem;background:var(--bg);border:1px solid var(--borda);border-radius:10px}
+.membro-id{display:flex;align-items:center;gap:10px;flex:1 1 180px;min-width:0}
+.avatar{width:34px;height:34px;border-radius:50%;background:#1d3a30;color:var(--verde-claro);display:flex;align-items:center;justify-content:center;font-weight:600;flex-shrink:0}
+.membro-nome{font-size:.95rem}
+.membro-papel{font-size:.78rem;color:var(--txt-mut)}
+.membro-contato{flex:1 1 200px;font-size:.84rem;color:#c5c5c0;min-width:0}
+.membro-contato .conv code{background:var(--card);border:1px solid var(--borda);border-radius:6px;padding:.1rem .4rem;font-size:.82rem;color:var(--verde-claro)}
+.membro-acoes{display:flex;gap:6px;flex:0 0 auto}
+.membro-acoes form{margin:0}
+.membro-acoes button{margin:0;padding:.35rem .7rem;font-size:.78rem;width:auto}
+.btn-conv{background:#1d6e9e}.btn-conv:hover{background:#2480b5}
+.btn-off{background:#6e2b2b}.btn-off:hover{background:#8a3636}
+.btn-on{background:var(--verde)}
+
+.dep{border:1px solid var(--borda);border-radius:8px;margin-bottom:8px;overflow:hidden}
+.dep-cab{display:flex;justify-content:space-between;align-items:center;padding:.7rem .9rem;background:var(--card);cursor:pointer;font-size:.92rem}
+.dep-cab:hover{background:#1c1c1d}
+.seta{color:var(--verde-claro);margin-right:.3rem}
+.dep-corpo{display:none;padding:.7rem .9rem;flex-wrap:wrap;gap:8px}
+.dep.aberto .dep-corpo{display:flex}
+.subdia{border-top:1px solid #232324}
+.subdia-cab{display:flex;justify-content:space-between;align-items:center;padding:.55rem .2rem;cursor:pointer;font-size:.88rem}
+.subdia-cab:hover{color:#fff}
+.seta2{color:var(--verde-claro);margin-right:.3rem;font-size:.8rem}
+.subdia-corpo{display:none;flex-wrap:wrap;gap:8px;padding:.2rem 0 .7rem}
+.subdia.aberto .subdia-corpo{display:flex}
+.conv-links{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.lk-tg,.lk-copy,.lk-wpp{padding:.35rem .6rem;border-radius:6px;font-size:.75rem;border:1px solid #243049;text-decoration:none;display:inline-block;line-height:1.2}
+.lk-tg{background:#2AABEE;color:#fff;border-color:#2AABEE}
+.lk-copy{background:#1a2233;color:#e7ecf3;cursor:pointer;border-color:var(--borda)}
+.lk-wpp{background:#25D366;color:#fff;border-color:#25D366}
+.conv-invite{margin:.3rem 0;font-size:.82rem}
+.conv-links{display:flex;gap:4px;flex-wrap:wrap;margin-top:.3rem}
+/* Trilho de abas/chips — mesmo padrão do grupo &quot;Ver lançamentos de&quot; (pessoal/
+   empresa): fundo --card, cantos 9px, itens 6px. align-items:center e o margin:0
+   do .aba evitam a &quot;barriga&quot; que o margin-top do button base causava.
+   NUNCA quebra linha: com muitas abas (caso de Relatórios, 8 no total) o trilho
+   rola de lado — max-width:100% + overflow-x:auto no lugar de flex-wrap. */
+.abas{display:flex;align-items:center;flex-wrap:nowrap;gap:2px;background:var(--card);padding:3px;border-radius:9px;border:1px solid var(--borda);margin:.6rem 0 .9rem;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.aba{width:auto;flex-shrink:0;margin:0;display:inline-flex;align-items:center;line-height:1;background:transparent;color:#b4b2a9;border:none;padding:.35rem .8rem;border-radius:6px;font-size:.8rem;cursor:pointer;transition:background .18s,color .18s}
+.aba:hover{color:var(--txt)}
+.aba.on,.aba.ativa{background:var(--verde);color:var(--sobre-verde);font-weight:600}
+.dica-toque{font-size:.78rem;color:#7a7a78;margin:0 0 .6rem}
+.dephead{font-size:.72rem;font-weight:600;color:#cfcfca;margin:.6rem 0 .3rem .2rem}
+.litem{display:flex;align-items:center;gap:.6rem;padding:.7rem .5rem .7rem .6rem;margin-bottom:.4rem;background:var(--card-2);border-radius:10px;transition:transform .15s,background .2s,opacity .35s,max-height .35s;position:relative;overflow:hidden}
+.litem .toque{display:flex;align-items:center;gap:.7rem;flex:1;cursor:pointer}
+.litem:active{transform:scale(.985)}
+.litem .bol{width:26px;height:26px;border:2px solid var(--verde-claro);border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;transition:background .2s,border-color .2s}
+.litem .nome{flex:1;color:var(--txt);font-size:15px;transition:color .2s;word-break:break-word}
+.litem .rem{width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#7a4a4a;font-size:1.1rem;border-radius:8px;cursor:pointer;border:0;background:transparent}
+.litem .rem:hover{background:rgba(180,60,60,.15);color:#c66}
+.litem.done{background:#15241d}
+.litem.done .bol{background:var(--verde);border-color:var(--verde)}
+.litem.done .nome{color:#7a8a82;text-decoration:line-through}
+.litem.flash-v::after{content:&#x27;&#x27;;position:absolute;inset:0;background:var(--verde);opacity:.35;animation:cfade .5s ease-out forwards;pointer-events:none}
+.litem.flash-r::after{content:&#x27;&#x27;;position:absolute;inset:0;background:#a33;opacity:.3;animation:cfade .4s ease-out forwards;pointer-events:none}
+@keyframes cfade{to{opacity:0}}
+.litem.saindo{opacity:0;transform:translateX(40px);max-height:0;padding-top:0;padding-bottom:0;margin-bottom:0}
+.cart-head{margin:1rem 0 .3rem;font-size:.88rem;color:var(--verde-claro);cursor:pointer;user-select:none;font-weight:500}
+.btn-finalizar{width:100%;margin-top:.8rem;background:var(--verde);color:var(--sobre-verde);border:none;padding:.7rem;border-radius:10px;font-size:15px;font-weight:500;cursor:pointer;transition:background .2s}
+.btn-finalizar:hover{background:var(--verde-hover)}
+.btn-finalizar:active{transform:scale(.99)}
+.hist-dia{border-bottom:1px solid var(--borda)}
+.hist-head{display:flex;align-items:center;justify-content:space-between;padding:.6rem .2rem;cursor:pointer;color:var(--txt);font-size:14px;user-select:none}
+.hist-head:hover{background:var(--card-2);border-radius:8px}
+.hist-itens{padding:.2rem .2rem .6rem 1rem;font-size:13px;color:var(--txt-mut);line-height:1.7}
+.wa-suporte{position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:var(--verde);border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.35);z-index:9999;transition:transform .2s,box-shadow .2s;text-decoration:none}
+.wa-suporte:hover{transform:scale(1.08);box-shadow:0 6px 18px rgba(37,211,102,.45)}
+.wa-suporte:active{transform:scale(.96)}
+.wa-tooltip{position:absolute;right:68px;background:var(--card-2);color:var(--txt);padding:.45rem .8rem;border-radius:6px;font-size:.85rem;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s;border:1px solid var(--borda)}
+.wa-suporte:hover .wa-tooltip{opacity:1}
+@media (max-width:600px){.wa-suporte{bottom:16px;right:16px;width:52px;height:52px}.wa-tooltip{display:none}.fin-cards{grid-template-columns:1fr}.fin-cards&gt;div:first-child{display:grid !important;grid-template-columns:1fr 1fr;gap:.6rem}.fin-cards&gt;div:first-child&gt;div:last-child{margin-top:0 !important;padding-top:0 !important;border-top:0 !important;border-left:1px solid #1e1e20;padding-left:.6rem !important}}
+
+#navprog{position:fixed;top:0;left:0;height:3px;width:0;background:var(--verde-claro);z-index:100;transition:width .35s ease;opacity:0}
+#navprog.run{width:92%;opacity:1;transition:width 9s cubic-bezier(.1,.7,.2,1)}
+.nav-ic{width:20px;height:20px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.side,.btmnav,.mais-sheet,.mais-bg{display:none}
+.side-grp{font-size:.66rem;text-transform:uppercase;letter-spacing:.5px;color:#6a6a66;padding:.7rem .6rem .25rem}
+.nav-i{display:flex;align-items:center;gap:.65rem;padding:.55rem .6rem;border-radius:8px;color:var(--txt-mut);text-decoration:none;font-size:.9rem;margin:0}
+.nav-i:hover{background:var(--card-2);color:var(--txt)}
+.nav-i.on{background:rgba(29,158,117,.16);color:var(--verde-claro)}
+.nav-i .nvb{margin-left:auto;background:var(--verde);color:var(--sobre-verde);border-radius:999px;
+ min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;font-size:.7rem;font-weight:600;
+ display:inline-flex;align-items:center;justify-content:center;line-height:1}
+.topo-mob{display:none}
+@media(min-width:768px){
+  body{padding-left:216px}
+  .topo-mob{display:none !important}
+  .side{display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0;width:216px;background:var(--card);border-right:1px solid var(--borda);padding:1rem .7rem;box-sizing:border-box;overflow-y:auto;z-index:40}
+  .side-logo{font-weight:600;color:var(--txt);font-size:1.1rem;padding:.2rem .6rem 1rem;display:flex;align-items:center;gap:.5rem}
+}
+@media(max-width:767px){
+  /* env(safe-area-inset-*) — só existe com viewport-fit=cover; some com fallback 0px
+     nos outros navegadores. Evita o topo colidir com a status bar (modo tela de
+     início do iOS, sem a barra do Safari) e o rodapé com o home indicator. */
+  body{padding-bottom:calc(66px + env(safe-area-inset-bottom, 0px));padding-top:env(safe-area-inset-top, 0px)}
+  .topo-mob{display:flex}
+  .wa-suporte{bottom:80px !important}
+  .btmnav{display:flex;position:fixed;left:0;right:0;bottom:0;height:60px;padding-bottom:env(safe-area-inset-bottom, 0px);box-sizing:content-box;background:var(--card);border-top:1px solid var(--borda);z-index:60}
+  .btmnav a,.btmnav button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--txt-mut);text-decoration:none;background:none;border:0;font-size:.6rem;cursor:pointer;margin:0;padding:0;width:auto}
+  .btmnav .on{color:var(--verde-claro)}
+  .btmnav .nav-ic{width:22px;height:22px}
+  .mais-bg{display:block;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:70;opacity:0;pointer-events:none;transition:opacity .25s}
+  .mais-bg.open{opacity:1;pointer-events:auto}
+  .mais-sheet{display:block;position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--borda);border-radius:16px 16px 0 0;padding:.4rem 1rem 1.4rem;z-index:71;transform:translateY(100%);transition:transform .25s;max-height:80vh;overflow-y:auto}
+  .mais-sheet.open{transform:translateY(0)}
+  .mais-grab{width:34px;height:4px;background:var(--borda);border-radius:2px;margin:.4rem auto .5rem}
+}
+&lt;/style&gt;
+&lt;style&gt;
+#rel-abas{position:relative}
+#rel-abas.rel-fade::before,#rel-abas.rel-fade::after{
+  content:&quot;&quot;;position:absolute;top:0;bottom:0;width:30px;pointer-events:none;
+  z-index:2;transition:opacity .15s}
+#rel-abas.rel-fade::before{left:0;background:linear-gradient(90deg,var(--card),transparent)}
+#rel-abas.rel-fade::after{right:0;background:linear-gradient(270deg,var(--card),transparent)}
+.no-left::before{opacity:0 !important}
+.no-right::after{opacity:0 !important}
+&lt;/style&gt;
+&lt;/head&gt;&lt;body&gt;
+&lt;svg width=&quot;0&quot; height=&quot;0&quot; style=&quot;position:absolute&quot; aria-hidden=&quot;true&quot;&gt;&lt;defs&gt;&lt;symbol id=&quot;ic-caixa&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M6 3h12v18l-3-2-3 2-3-2-3 2z&quot;/&gt;&lt;path d=&quot;M9 8h6M9 12h6&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-produtos&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M3 8l9-5 9 5v8l-9 5-9-5z&quot;/&gt;&lt;path d=&quot;M3 8l9 5 9-5M12 13v8&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-clientes&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;9&quot; cy=&quot;8&quot; r=&quot;3&quot;/&gt;&lt;path d=&quot;M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5&quot;/&gt;&lt;path d=&quot;M16 6a3 3 0 010 6&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-financeiro&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 4v16h16&quot;/&gt;&lt;path d=&quot;M8 15l3-4 3 2 4-6&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-mais&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 7h16M4 12h16M4 17h16&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-abastecimento&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M3 6h11v9H3zM14 9h4l3 3v3h-7z&quot;/&gt;&lt;circle cx=&quot;7&quot; cy=&quot;18&quot; r=&quot;1.6&quot;/&gt;&lt;circle cx=&quot;17&quot; cy=&quot;18&quot; r=&quot;1.6&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-empresa&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-fornecedor&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M12 21v-8M12 13c0-3 2-5.5 5.5-5.5C17.5 11 15.5 13 12 13zM12 15c0-2.5-1.6-4.5-4.5-4.5C7.5 13 9 15 12 15z&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-compras&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;9&quot; cy=&quot;20&quot; r=&quot;1.5&quot;/&gt;&lt;circle cx=&quot;17&quot; cy=&quot;20&quot; r=&quot;1.5&quot;/&gt;&lt;path d=&quot;M2 4h2.2l2.3 11h11l1.8-8H6&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-cesta&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M5 9h14l-1.4 10H6.4zM9 9l1.2-5M15 9l-1.2-5&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-painel&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-sair&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-prospeccao&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;8&quot;/&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;3.4&quot;/&gt;&lt;path d=&quot;M12 2v3M12 19v3M2 12h3M19 12h3&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-agenda&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3.5&quot; y=&quot;5&quot; width=&quot;17&quot; height=&quot;15&quot; rx=&quot;2&quot;/&gt;&lt;path d=&quot;M3.5 9.5h17M8 3v4M16 3v4&quot;/&gt;&lt;path d=&quot;M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-relatorios&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3.5&quot; y=&quot;3.5&quot; width=&quot;17&quot; height=&quot;17&quot; rx=&quot;2&quot;/&gt;&lt;path d=&quot;M8 17v-5M12.5 17V7M17 17v-8&quot;/&gt;&lt;/symbol&gt;&lt;symbol id=&quot;ic-novidades&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M18 8.5a6 6 0 10-12 0c0 6.5-2.5 6.5-2.5 8.5h17c0-2-2.5-2-2.5-8.5&quot;/&gt;&lt;path d=&quot;M10.2 20.5a2.2 2.2 0 003.6 0&quot;/&gt;&lt;/symbol&gt;&lt;/defs&gt;&lt;/svg&gt;
+&lt;div id=&quot;navprog&quot;&gt;&lt;/div&gt;
+
+
+
+
+
+
+
+&lt;div class=&quot;topo topo-mob&quot;&gt;&lt;span class=&quot;logo&quot; style=&quot;display:inline-flex;align-items:center;gap:7px&quot;&gt;&lt;svg width=&quot;20&quot; height=&quot;20&quot; viewBox=&quot;0 0 64 64&quot; fill=&quot;none&quot;&gt;&lt;path d=&quot;M16 18 H44 L18 46 H46&quot; stroke=&quot;#3ee0a6&quot; stroke-width=&quot;6&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot; fill=&quot;none&quot;/&gt;&lt;path d=&quot;M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z&quot; fill=&quot;#3ee0a6&quot;/&gt;&lt;/svg&gt;zaq&lt;/span&gt;&lt;/div&gt;
+&lt;nav class=&quot;side&quot;&gt;
+  &lt;div class=&quot;side-logo&quot;&gt;&lt;span class=&quot;logo&quot; style=&quot;display:inline-flex;align-items:center;gap:7px&quot;&gt;&lt;svg width=&quot;20&quot; height=&quot;20&quot; viewBox=&quot;0 0 64 64&quot; fill=&quot;none&quot;&gt;&lt;path d=&quot;M16 18 H44 L18 46 H46&quot; stroke=&quot;#3ee0a6&quot; stroke-width=&quot;6&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot; fill=&quot;none&quot;/&gt;&lt;path d=&quot;M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z&quot; fill=&quot;#3ee0a6&quot;/&gt;&lt;/svg&gt;zaq&lt;/span&gt;&lt;/div&gt;
+  
+  &lt;div class=&quot;side-grp&quot;&gt;Principal&lt;/div&gt;
+  
+  &lt;a href=&quot;/painel/financeiro&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-financeiro&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Financeiro&lt;/span&gt;&lt;/a&gt;
+  &lt;div class=&quot;side-grp&quot;&gt;Loja&lt;/div&gt;
+  
+  &lt;a href=&quot;/painel/servicos&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-financeiro&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Serviços&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/prospeccao&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-prospeccao&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Prospecção&lt;/span&gt;&lt;/a&gt;
+  
+  &lt;a href=&quot;/painel/agenda&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-agenda&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Agenda&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/empresa&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-empresa&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Empresa&lt;/span&gt;&lt;/a&gt;&lt;a href=&quot;/painel/relatorios&quot; class=&quot;nav-i on&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-relatorios&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Relatórios&lt;/span&gt;&lt;/a&gt;
+  
+  &lt;a href=&quot;/painel/clientes&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-clientes&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Clientes/Fornecedores&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/equipe&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-clientes&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Equipe&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/fornecedor&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-fornecedor&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Fornecedor&lt;/span&gt;&lt;/a&gt;
+  &lt;div class=&quot;side-grp&quot;&gt;Pessoal&lt;/div&gt;
+  &lt;a href=&quot;/painel&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-painel&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Painel&lt;/span&gt;&lt;/a&gt;&lt;a href=&quot;/painel/compras&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-compras&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Lista de compras&lt;/span&gt;&lt;/a&gt;
+  
+  
+  
+  
+  &lt;div style=&quot;flex:1&quot;&gt;&lt;/div&gt;
+  &lt;a href=&quot;/sair&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-sair&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Sair&lt;/span&gt;&lt;/a&gt;
+&lt;/nav&gt;
+&lt;nav class=&quot;btmnav&quot;&gt;
+  
+  &lt;a href=&quot;/painel/financeiro&quot; class=&quot;&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-financeiro&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Financeiro&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel&quot; class=&quot;&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-painel&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Painel&lt;/span&gt;&lt;/a&gt;
+  
+  
+  
+  &lt;button type=&quot;button&quot; onclick=&quot;maisToggle(true)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-mais&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Mais&lt;/span&gt;&lt;/button&gt;
+&lt;/nav&gt;
+&lt;div class=&quot;mais-bg&quot; onclick=&quot;maisToggle(false)&quot;&gt;&lt;/div&gt;
+&lt;div class=&quot;mais-sheet&quot; id=&quot;mais-sheet&quot;&gt;
+  &lt;div class=&quot;mais-grab&quot;&gt;&lt;/div&gt;
+  &lt;div class=&quot;side-grp&quot;&gt;Loja&lt;/div&gt;
+  
+  &lt;a href=&quot;/painel/servicos&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-financeiro&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Serviços&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/prospeccao&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-prospeccao&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Prospecção&lt;/span&gt;&lt;/a&gt;
+  
+  &lt;a href=&quot;/painel/agenda&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-agenda&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Agenda&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/empresa&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-empresa&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Empresa&lt;/span&gt;&lt;/a&gt;&lt;a href=&quot;/painel/relatorios&quot; class=&quot;nav-i on&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-relatorios&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Relatórios&lt;/span&gt;&lt;/a&gt;
+  
+  &lt;a href=&quot;/painel/clientes&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-clientes&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Clientes/Fornecedores&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/equipe&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-clientes&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Equipe&lt;/span&gt;&lt;/a&gt;
+  &lt;a href=&quot;/painel/fornecedor&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-fornecedor&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Fornecedor&lt;/span&gt;&lt;/a&gt;
+  &lt;div class=&quot;side-grp&quot;&gt;Pessoal&lt;/div&gt;
+  &lt;a href=&quot;/painel&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-painel&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Painel&lt;/span&gt;&lt;/a&gt;&lt;a href=&quot;/painel/compras&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-compras&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Lista de compras&lt;/span&gt;&lt;/a&gt;
+  
+  
+  
+  &lt;a href=&quot;/sair&quot; class=&quot;nav-i&quot; onclick=&quot;navTap(this)&quot;&gt;&lt;svg class=&quot;nav-ic&quot;&gt;&lt;use href=&quot;#ic-sair&quot;/&gt;&lt;/svg&gt;&lt;span&gt;Sair&lt;/span&gt;&lt;/a&gt;
+&lt;/div&gt;
+&lt;script&gt;
+function navTap(el){var p=el.closest(&#x27;nav&#x27;);if(p){var A=p.querySelectorAll(&#x27;a&#x27;);for(var i=0;i&lt;A.length;i++)A[i].classList.remove(&#x27;on&#x27;);}el.classList.add(&#x27;on&#x27;);var b=document.getElementById(&#x27;navprog&#x27;);if(b)b.classList.add(&#x27;run&#x27;);}
+function maisToggle(v){var sh=document.getElementById(&#x27;mais-sheet&#x27;),bg=document.querySelector(&#x27;.mais-bg&#x27;);if(sh)sh.classList.toggle(&#x27;open&#x27;,v);if(bg)bg.classList.toggle(&#x27;open&#x27;,v);}
+&lt;/script&gt;
+
+
+
+
+&lt;div id=&quot;ver-nova&quot; aria-live=&quot;polite&quot;&gt;
+  &lt;div class=&quot;vn-txt&quot;&gt;&lt;b&gt;Tem uma versão nova do Zaq.&lt;/b&gt;
+    &lt;small&gt;Recarregue pra usar a tela atualizada — nada do que você já salvou se perde.&lt;/small&gt;&lt;/div&gt;
+  &lt;button type=&quot;button&quot; id=&quot;vn-recarregar&quot;&gt;Recarregar&lt;/button&gt;
+  &lt;button type=&quot;button&quot; id=&quot;vn-depois&quot; class=&quot;vn-depois&quot;&gt;Depois&lt;/button&gt;
+&lt;/div&gt;
+&lt;script&gt;
+(function(){
+  var atual = &quot;1&quot;, box = document.getElementById(&#x27;ver-nova&#x27;);
+  if(!box || !atual) return;
+  var vista = &#x27;&#x27;, dispensada = &#x27;&#x27;, ultimo = 0;
+  function olhar(){
+    // Nunca recarrega sozinho: a pessoa pode estar no meio de um formulário.
+    // A faixa pergunta; quem decide é ela.
+    var agora = Date.now();
+    if(agora - ultimo &lt; 60000) return;
+    ultimo = agora;
+    fetch(&#x27;/painel/versao&#x27;, {headers:{&#x27;Accept&#x27;:&#x27;application/json&#x27;}, cache:&#x27;no-store&#x27;})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        if(!d || !d.v || d.v === atual || d.v === dispensada) return;
+        vista = d.v; box.classList.add(&#x27;on&#x27;);
+      })
+      .catch(function(){});   // rede caiu: silêncio, a faixa é enfeite
+  }
+  document.getElementById(&#x27;vn-recarregar&#x27;).onclick = function(){ location.reload(); };
+  document.getElementById(&#x27;vn-depois&#x27;).onclick = function(){
+    dispensada = vista; box.classList.remove(&#x27;on&#x27;);   // não insiste NESTA versão
+  };
+  setInterval(olhar, 300000);
+  // O caso real é a aba esquecida: a pessoa volta pra ela horas depois.
+  document.addEventListener(&#x27;visibilitychange&#x27;, function(){
+    if(!document.hidden) olhar();
+  });
+})();
+&lt;/script&gt;
+
+
+&lt;style&gt;
+  .rel-aviso{background:#1a2233;border:1px solid #29354d;color:#9db3d6;border-radius:8px;
+   padding:.6rem .85rem;font-size:.82rem;margin:.9rem 0 1rem;line-height:1.5}
+  .rel-filtros{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.9rem 0 1.1rem}
+  .rel-filtros select,.rel-filtros input[type=search]{width:auto;margin:0}
+  .rel-filtros input[type=search]{min-width:170px}
+  .rel-filtros .mut{font-size:.8rem}
+  .rel-filtrar{width:auto;margin:0;padding:.5rem .9rem;background:var(--card);color:var(--txt);
+   border:1px solid var(--borda);border-radius:8px;font-size:.85rem;cursor:pointer}
+  .rel-filtrar:hover{border-color:var(--verde)}
+  .rel-pdf{width:auto;margin:0;display:inline-flex;align-items:center;gap:.4rem;padding:.6rem 1rem;
+   background:#1d6e9e;color:#fff;text-decoration:none;border-radius:8px;font-size:.9rem;font-weight:600}
+  .rel-pdf:hover{background:#2480b5}
+  .rel-tag{display:inline-block;padding:.15rem .6rem;border-radius:999px;font-size:.74rem;font-weight:600;white-space:nowrap}
+  .rel-tag.ok{background:#15301f;color:#9fe8c9;border:1px solid var(--verde)}
+  .rel-tag.aviso{background:#332a12;color:#f0dca6;border:1px solid #6e5a22}
+  .rel-tag.erro{background:#3a1d1d;color:#f0b8b8;border:1px solid #6e2b2b}
+  .rel-tag.neutro{background:#20242a;color:#c7ccd6;border:1px solid #3a4048}
+  .rel-tag.info{background:#0f2836;color:#8fd0ea;border:1px solid #1d5570}
+  .rel-act{width:1%;white-space:nowrap;text-align:center}
+  .rel-print{display:inline-flex;align-items:center;justify-content:center;width:1.8rem;height:1.8rem;
+   border:1px solid var(--borda);background:var(--bg);border-radius:6px;text-decoration:none;font-size:.85rem}
+  .rel-print:hover{border-color:var(--verde)}
+  /* LARGURA DESTA TELA, e só dela.
+     O `.card.larga` vale 720px e é usado por Equipe, Fornecedor, Portal e mais
+     cinco telas — várias delas formulário, onde largura demais PIORA (o olho
+     percorre a linha inteira entre o rótulo e o campo). Alargar aquela classe
+     consertaria o relatório e estragaria as outras, então a largura extra vive
+     aqui, numa classe que só o relatório usa.
+     O teto de 1500px é escolha, não preguiça: sem ele, numa tela de 3440px a
+     linha atravessa a tela e separa o nome do cliente do valor por meio metro. */
+  .card.rel-full{max-width:1500px}
+  .rel-tbl-wrap{overflow-x:auto;max-width:100%}
+  .rel-tbl-wrap table{min-width:640px;width:100%}
+  /* Linha única sempre — nome de cliente/empresa longo não vira 3 linhas
+     desalinhando a tabela toda. */
+  .rel-tbl-wrap table td,.rel-tbl-wrap table th{white-space:nowrap}
+  /* ...MENOS a coluna elástica (uma por relatório, marcada com flex=True em
+     _col). Ela absorve a sobra e, quando falta espaço, corta no FIM com
+     reticências. Antes o `nowrap` valia pra tudo e a tabela rolava pro lado: o
+     que sumia era a PRIMEIRA coluna e o começo do nome — em 26/08 o print
+     mostrava &quot;ço Pelle Clínica&quot; e &quot;erson Venici&quot;, com o cliente lendo o meio da
+     tabela sem saber. Cortar no fim mantém visível a parte que identifica.
+     `max-width:0` é o truque que faz o text-overflow valer dentro de &lt;table&gt;:
+     sem ele a célula cresce com o conteúdo e a reticência nunca aparece. */
+  .rel-tbl-wrap table td.rel-flex{white-space:nowrap;overflow:hidden;
+   text-overflow:ellipsis;max-width:0;width:99%}
+  /* São até 300 linhas. Rolar 200 e não lembrar qual coluna é qual faz a pessoa
+     rolar de volta só pra conferir o cabeçalho. */
+  .rel-tbl-wrap{max-height:70vh;overflow-y:auto}
+  .rel-tbl-wrap thead th{position:sticky;top:0;background:var(--card);z-index:1}
+  /* Numa tabela larga o olho perde a linha justamente entre o nome e o valor,
+     que é o par que se lê junto. */
+  .rel-tbl-wrap tbody tr:nth-child(even){background:rgba(255,255,255,.014)}
+  .rel-tbl-wrap tbody tr:hover{background:var(--neon-fraco)}
+  .rel-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .rel-tot td{border-top:2px solid var(--borda);font-weight:700}
+  .rel-metricas{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:1.2rem 0}
+  /* Os valores aqui (&quot;10 · R$ 68.590,00&quot;) são mais longos que o KPI comum do
+     app — a fonte padrão (1.4rem) estourava a caixa em telas médias. */
+  .rel-metricas .metric b{font-size:1.05rem;line-height:1.3}
+  .rel-scroll-dica{display:none}
+  @media (max-width:600px){.rel-filtros{align-items:stretch}.rel-filtros select{flex:1 1 auto}
+   .rel-metricas{grid-template-columns:repeat(2,1fr)}
+   .rel-metricas .metric b{font-size:.95rem}}
+  @media (max-width:700px){.rel-scroll-dica{display:block}}
+&lt;/style&gt;
+&lt;div class=&quot;card larga rel-full&quot;&gt;
+  &lt;h1 style=&quot;margin:0&quot;&gt;📊 Relatórios &lt;span class=&quot;mut&quot; style=&quot;font-weight:400;font-size:.85rem&quot;&gt;· Vendas&lt;/span&gt;&lt;/h1&gt;
+  
+
+  &lt;div class=&quot;abas&quot; id=&quot;rel-abas&quot;&gt;
+    &lt;a class=&quot;aba ativa&quot;
+     href=&quot;/painel/relatorios?tipo=vendas&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Vendas&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=contas_pagar&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Contas a pagar&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=contas_receber&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Contas a receber&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=pagas&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Contas pagas&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=comissao&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Comissão&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=recebidas&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Contas recebidas&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=orcamentos&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Orçamentos&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=contratos&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Contratos&lt;/a&gt;&lt;a class=&quot;aba&quot;
+     href=&quot;/painel/relatorios?tipo=agenda&amp;periodo=mes&quot; style=&quot;text-decoration:none&quot;&gt;Agenda&lt;/a&gt;
+  &lt;/div&gt;
+  &lt;script&gt;
+    // com 8 abas o trilho rola de lado (ver .abas) — sem isto a aba ativa podia
+    // nascer fora da área visível, e quem abrisse a tela não veria em qual
+    // relatório está.
+    (function () {
+      var ativa = document.querySelector(&quot;#rel-abas .aba.ativa&quot;);
+      if (ativa) ativa.scrollIntoView({inline: &quot;center&quot;, block: &quot;nearest&quot;});
+    })();
+  &lt;/script&gt;
+
+  &lt;form method=&quot;get&quot; action=&quot;/painel/relatorios&quot; class=&quot;rel-filtros&quot;&gt;
+    &lt;input type=&quot;hidden&quot; name=&quot;tipo&quot; value=&quot;vendas&quot;&gt;
+    &lt;select name=&quot;periodo&quot; onchange=&quot;this.form.submit()&quot;&gt;
+      &lt;option value=&quot;mes&quot; selected&gt;Este mês&lt;/option&gt;&lt;option value=&quot;mes_passado&quot; &gt;Mês passado&lt;/option&gt;&lt;option value=&quot;90d&quot; &gt;Últimos 90 dias&lt;/option&gt;&lt;option value=&quot;ano&quot; &gt;Este ano&lt;/option&gt;&lt;option value=&quot;todos&quot; &gt;Todo o período&lt;/option&gt;
+    &lt;/select&gt;
+    
+    
+    
+    &lt;input type=&quot;search&quot; id=&quot;rel-q&quot; placeholder=&quot;🔎 filtrar na tela…&quot;
+           aria-label=&quot;Filtrar as linhas mostradas&quot; autocomplete=&quot;off&quot;&gt;
+    
+    &lt;span class=&quot;mut&quot;&gt;período: Este mês&lt;/span&gt;
+    &lt;span style=&quot;flex:1&quot;&gt;&lt;/span&gt;
+    &lt;a class=&quot;rel-pdf&quot; href=&quot;/painel/relatorios/pdf?tipo=vendas&amp;periodo=mes&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot;&gt;🖨️ Exportar PDF&lt;/a&gt;
+  &lt;/form&gt;
+
+  &lt;div class=&quot;rel-metricas&quot;&gt;
+    &lt;div class=&quot;metric&quot;&gt;&lt;span&gt;Total vendido&lt;/span&gt;&lt;b class=&quot;nowrap&quot;&gt;R$ 150,00&lt;/b&gt;&lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;p class=&quot;dica-toque rel-scroll-dica&quot;&gt;👉 arraste a tabela pros lados pra ver todas as colunas&lt;/p&gt;
+  &lt;div class=&quot;rel-tbl-wrap&quot;&gt;
+  &lt;table&gt;
+    &lt;thead&gt;
+    &lt;tr&gt;&lt;th&gt;Data&lt;/th&gt;&lt;th&gt;Descrição&lt;/th&gt;&lt;th class=&quot;rel-num&quot;&gt;Valor&lt;/th&gt;&lt;/tr&gt;
+    &lt;/thead&gt;
+    &lt;tbody&gt;
+    
+    &lt;tr&gt;&lt;td&gt;20/08/2026&lt;/td&gt;&lt;td&gt;Venda balcão&lt;/td&gt;&lt;td class=&quot;rel-num&quot; data-c=&quot;15000&quot;&gt;R$ 150,00&lt;/td&gt;&lt;/tr&gt;
+    
+    &lt;/tbody&gt;
+    &lt;tfoot&gt;
+    &lt;tr class=&quot;rel-tot&quot; id=&quot;rel-tot&quot;&gt;&lt;td&gt;Total&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;td class=&quot;rel-num&quot;&gt;R$ 150,00&lt;/td&gt;&lt;/tr&gt;
+    &lt;/tfoot&gt;
+  &lt;/table&gt;
+  &lt;/div&gt;
+  &lt;script&gt;
+  // Filtro NA TELA. As linhas já estão todas no HTML (a consulta tem teto de 300),
+  // então não há ida ao servidor: filtrar é instantâneo.
+  //
+  // O TOTAL É RECALCULADO, e isso não é enfeite. Filtrar por um cliente e deixar o
+  // rodapé mostrando o total de todo mundo é a tela MENTINDO no número que o dono
+  // usa pra decidir. Os centavos vêm de `data-c` na própria célula — nada de fazer
+  // parse de &quot;R$ 2.182,90&quot;, que quebraria no primeiro valor com milhar.
+  (function(){
+    var cx = document.getElementById(&#x27;rel-q&#x27;);
+    if (!cx) return;
+    var tbl = document.querySelector(&#x27;.rel-tbl-wrap table&#x27;);
+    if (!tbl) return;
+    var corpo = tbl.tBodies[0], conta = document.getElementById(&#x27;rel-conta&#x27;),
+        rodape = document.getElementById(&#x27;rel-tot&#x27;);
+    if (!corpo) return;
+    var linhas = Array.prototype.slice.call(corpo.rows).filter(function(tr){
+      return !tr.querySelector(&#x27;td[colspan]&#x27;);   // a linha de &quot;nenhum registro&quot;
+    });
+    // guarda o texto e o valor de cada linha uma vez só, em vez de reler o DOM
+    // a cada tecla
+    var base = linhas.map(function(tr){
+      var c = tr.querySelector(&#x27;td[data-c]&#x27;);
+      return {tr: tr, txt: (tr.textContent || &#x27;&#x27;).toLowerCase(),
+              cents: c ? parseInt(c.getAttribute(&#x27;data-c&#x27;), 10) || 0 : 0};
+    });
+    var celTot = rodape ? rodape.querySelector(&#x27;.rel-num:last-child&#x27;) : null;
+    var totOriginal = celTot ? celTot.textContent : &#x27;&#x27;;
+    // Formatação À MÃO, e não toLocaleString(&#x27;pt-BR&#x27;). Dois motivos:
+    //   1. toLocaleString depende do ICU do runtime. Num Node/navegador com ICU
+    //      reduzido o &#x27;pt-BR&#x27; cai no padrão americano e R$ 2.700,00 vira
+    //      R$ 2,700.00 — o total mudaria de cara conforme onde roda;
+    //   2. tem que bater EXATAMENTE com o filtro `brl` do servidor (portal.py),
+    //      senão limpar o filtro trocaria a formatação do número na cara do dono.
+    // Sem regex de propósito: este template é string Python comum (não raw), e
+    // uma classe de caractere tipo barra-d num literal JS vira escape inválido do
+    // Python — foi assim que um bloco &lt;script&gt; inteiro já morreu por SyntaxError
+    // aqui (ver o docstring de tests/test_painel_js_sintaxe.py).
+    function brl(c){
+      var neg = c &lt; 0; c = Math.abs(c);
+      var i = String(Math.floor(c / 100)), d = String(c % 100);
+      if (d.length &lt; 2) d = &#x27;0&#x27; + d;
+      var mil = &#x27;&#x27;;
+      while (i.length &gt; 3){ mil = &#x27;.&#x27; + i.slice(-3) + mil; i = i.slice(0, -3); }
+      // o sinal vem DEPOIS do &quot;R$ &quot;, como no servidor (&quot;R$ -25,00&quot;), não antes.
+      // Total negativo não aparece nestes relatórios hoje, mas divergir aqui é
+      // divergir em silêncio até o dia em que aparecer.
+      return &#x27;R$ &#x27; + (neg ? &#x27;-&#x27; : &#x27;&#x27;) + i + mil + &#x27;,&#x27; + d;
+    }
+    function aplicar(){
+      var q = (cx.value || &#x27;&#x27;).trim().toLowerCase();
+      var n = 0, soma = 0;
+      for (var i = 0; i &lt; base.length; i++){
+        var bate = !q || base[i].txt.indexOf(q) !== -1;
+        base[i].tr.style.display = bate ? &#x27;&#x27; : &#x27;none&#x27;;
+        if (bate){ n++; soma += base[i].cents; }
+      }
+      if (conta) conta.textContent = n;
+      if (celTot) celTot.textContent = q ? brl(soma) : totOriginal;
+      var rot = rodape ? rodape.cells[0] : null;
+      if (rot) rot.textContent = q ? (&#x27;Total do filtro · &#x27; + n) : &#x27;Total&#x27;;
+    }
+    cx.addEventListener(&#x27;input&#x27;, aplicar);
+    // Esc limpa — o caminho de volta pra tabela inteira sem ter que apagar à mão
+    cx.addEventListener(&#x27;keydown&#x27;, function(e){
+      if (e.key === &#x27;Escape&#x27;){ cx.value = &#x27;&#x27;; aplicar(); }
+    });
+  })();
+  &lt;/script&gt;
+  &lt;p class=&quot;mut&quot; style=&quot;margin-top:.6rem&quot;&gt;&lt;span id=&quot;rel-conta&quot;&gt;1&lt;/span&gt; registro(s) · Este mês&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;a href=&quot;https://wa.me/5586981885930?text=Oi%20Thompson%21%20Estou%20no%20Zaq%20%28conta%20%231%29%20e%20preciso%20de%20ajuda%20com%3A%20&quot;
+   target=&quot;_blank&quot; rel=&quot;noopener&quot; class=&quot;wa-suporte&quot; aria-label=&quot;Falar com Thompson no WhatsApp&quot;&gt;
+  &lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 24 24&quot; width=&quot;28&quot; height=&quot;28&quot; fill=&quot;#fff&quot; aria-hidden=&quot;true&quot;&gt;
+    &lt;path d=&quot;M.057 24l1.687-6.163a11.867 11.867 0 01-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 018.413 3.488 11.824 11.824 0 013.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 01-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 001.51 5.26l-.999 3.648 3.978-1.607zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413z&quot;/&gt;
+  &lt;/svg&gt;
+  &lt;span class=&quot;wa-tooltip&quot;&gt;Falar com Thompson&lt;/span&gt;
+&lt;/a&gt;
+
+&lt;script&gt;
+(function(){
+  var el = document.querySelector(&quot;#rel-abas&quot;);
+  if(!el) return;
+  el.classList.add(&quot;rel-fade&quot;);
+  function upd(){
+    el.classList.toggle(&quot;no-left&quot;, el.scrollLeft &lt;= 1);
+    el.classList.toggle(&quot;no-right&quot;, el.scrollLeft + el.clientWidth &gt;= el.scrollWidth - 1);
+  }
+  el.addEventListener(&quot;scroll&quot;, upd);
+  window.addEventListener(&quot;resize&quot;, upd);
+  upd();
+})();
+&lt;/script&gt;
+&lt;/body&gt;&lt;/html&gt;" style="width:100%;height:460px;background:#0A0F0C;max-width:1024px;margin:0 auto;display:block;" loading="lazy"></iframe>
+    <div class="dica-viva">👉 arraste de novo — repara a sombra sumindo na ponta que você já rolou até o fim, e aparecendo na ponta que ainda tem mais.</div>
+  </div>
+
+  <div class="nota">
+    <b>De propósito, sutil:</b> combina com o visual discreto do app — mas é bem sutil
+    mesmo. Se preferir algo mais chamativo (uma setinha, por exemplo), eu troco antes de
+    fazer — é só dizer.
+  </div>
+</section>
+
+<!-- ====================================================== 4 -->
+<section class="sec">
+  <div class="num">4 · resumo do que muda no código</div>
+  <h2>Só CSS + um pedacinho de JS, num arquivo só</h2>
+  <table class="diag">
+    <tr><th>Onde</th><th>O quê</th></tr>
+    <tr><td><code>web/portal.py</code> (<code>_RELATORIOS</code>, bloco de estilo)</td>
+        <td>Gradiente nas bordas de <code>#rel-abas</code>, escondido por padrão (classes
+        <code>.no-left</code>/<code>.no-right</code>) e mostrado via JS quando há mais
+        conteúdo pra rolar naquela direção.</td></tr>
+    <tr><td><code>web/portal.py</code> (mesmo template, <code>&lt;script&gt;</code>)</td>
+        <td>~12 linhas: um listener de <code>scroll</code>/<code>resize</code> comparando
+        <code>scrollLeft</code>/<code>clientWidth</code>/<code>scrollWidth</code> — mesmo
+        padrão que o <code>scrollIntoView</code> da aba ativa já usa nesta mesma tela.</td></tr>
+  </table>
+
+  <div class="nota">
+    <b>O que NÃO muda:</b> nenhum dado, nenhuma rota, nenhum <code>_dados_*</code>, nada do
+    que o #571 já fez (largura do cartão, coluna elástica, zebra, filtro na tela). É só o
+    aviso que ainda faltava pra quem está numa tela menor.
+  </div>
+</section>
+
+<p class="rodape">Mockup ao vivo — os quadros acima são a tela real de
+<code>/painel/relatorios</code> (já com o PR #571) renderizada com dados de exemplo, com o
+CSS/JS proposto aplicado direto. Cores e tipografia de <code>web/tema.py</code>.</p>
+
+</body>
+</html>

@@ -18,10 +18,12 @@ create table contas (id bigserial primary key, nome text);
 create table membros (id bigserial primary key, conta_id bigint, nome text);
 create table orcamentos (id bigserial primary key, conta_id bigint,
   cliente text, empresa text, evento_agenda_id bigint);
+create table prospeccao (id bigserial primary key, conta_id bigint,
+  contato text, empresa text not null default 'Empresa');
 create table eventos_agenda (id bigserial primary key, conta_id bigint,
   membro_id bigint, titulo text not null, inicio timestamptz not null,
   tipo text default 'pessoal', tipo_evento text, status text default 'ativo',
-  desfecho text, convidados int, sinal_centavos int,
+  desfecho text, convidados int, sinal_centavos int, prospeccao_id bigint,
   criado_em timestamptz default now());
 """
 
@@ -49,7 +51,7 @@ def pool():
 @pytest.fixture
 def cen(pool):
     with pool.connection() as c:
-        c.execute("truncate contas, membros, orcamentos, eventos_agenda restart identity")
+        c.execute("truncate contas, membros, orcamentos, prospeccao, eventos_agenda restart identity")
         conta = c.execute("insert into contas (nome) values ('Prime Eventos') returning id").fetchone()[0]
         jacqueline = c.execute("insert into membros (conta_id, nome) values (%s,'Jacqueline') "
                                "returning id", (conta,)).fetchone()[0]
@@ -61,15 +63,15 @@ def cen(pool):
 
 def _evento(pool, conta, *, titulo="Compromisso", inicio=None, tipo="pessoal",
            tipo_evento=None, status="ativo", desfecho=None, convidados=None,
-           sinal=None, membro_id=None):
+           sinal=None, membro_id=None, prospeccao_id=None):
     inicio = inicio or datetime.now(timezone.utc)
     with pool.connection() as c:
         eid = c.execute(
             """insert into eventos_agenda (conta_id, membro_id, titulo, inicio, tipo,
-                 tipo_evento, status, desfecho, convidados, sinal_centavos)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                 tipo_evento, status, desfecho, convidados, sinal_centavos, prospeccao_id)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
             (conta, membro_id, titulo, inicio, tipo, tipo_evento, status, desfecho,
-             convidados, sinal),
+             convidados, sinal, prospeccao_id),
         ).fetchone()[0]
         c.commit()
     return eid
@@ -82,6 +84,16 @@ def _orc(pool, conta, evento_id, *, cliente=None, empresa=None):
             "values (%s,%s,%s,%s)", (conta, cliente, empresa, evento_id),
         )
         c.commit()
+
+
+def _lead(pool, conta, *, contato=None, empresa="Empresa Lead"):
+    with pool.connection() as c:
+        lid = c.execute(
+            "insert into prospeccao (conta_id, contato, empresa) values (%s,%s,%s) returning id",
+            (conta, contato, empresa),
+        ).fetchone()[0]
+        c.commit()
+    return lid
 
 
 # --------------------------------------------------------------------- lista
@@ -177,6 +189,50 @@ def test_cliente_do_orcamento_prioriza_empresa_sobre_cliente(pool, cen):
     _orc(pool, cen["conta"], eid, cliente="86994160050", empresa="Rafael Mendes")
     dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
     assert dados["linhas"][0]["cliente"] == "Rafael Mendes"
+
+
+def test_cliente_vem_do_lead_quando_a_visita_nasceu_de_prospeccao(pool, cen):
+    """finance.cockpit.agendar_visita liga prospeccao_id na visita assim que
+    marca — sem este join a maioria das "Visita — Fulano" ficava com Cliente
+    vazio em produção (relato do dono, 26/08)."""
+    lead = _lead(pool, cen["conta"], contato="Fulano de Tal")
+    _evento(pool, cen["conta"], titulo="Visita — Fulano de Tal", prospeccao_id=lead)
+    dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["cliente"] == "Fulano de Tal"
+
+
+def test_cliente_do_lead_cai_pra_empresa_quando_sem_contato(pool, cen):
+    lead = _lead(pool, cen["conta"], contato=None, empresa="Buffet da Praça")
+    _evento(pool, cen["conta"], prospeccao_id=lead)
+    dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["cliente"] == "Buffet da Praça"
+
+
+def test_orcamento_manda_quando_o_evento_tem_os_dois(pool, cen):
+    """O orçamento é o registro mais firme — o lead pode ter sido reatribuído
+    ou desqualificado depois, o orçamento aprovado não."""
+    lead = _lead(pool, cen["conta"], contato="Nome do Lead")
+    eid = _evento(pool, cen["conta"], prospeccao_id=lead)
+    _orc(pool, cen["conta"], eid, empresa="Nome do Orçamento")
+    dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["cliente"] == "Nome do Orçamento"
+
+
+def test_reuniao_marcada_a_mao_sem_lead_e_sem_orcamento_continua_travessao(pool, cen):
+    """finance.agenda_tools.marcar_evento (o "REUNIÃO COM ENGENHEIRA" típico)
+    não liga prospeccao_id nenhum — o nome, se existe, está só no título
+    digitado à mão, sem onde puxar. "—" aqui é o esperado, não bug."""
+    _evento(pool, cen["conta"], titulo="Reunião com engenheira")
+    dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["cliente"] == "—"
+
+
+def test_busca_acha_pelo_nome_do_lead_quando_nao_tem_orcamento(pool, cen):
+    lead = _lead(pool, cen["conta"], contato="Talila Arrais")
+    _evento(pool, cen["conta"], prospeccao_id=lead)
+    _evento(pool, cen["conta"])  # sem lead nenhum, não pode aparecer na busca
+    dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "talila")
+    assert len(dados["linhas"]) == 1 and dados["linhas"][0]["cliente"] == "Talila Arrais"
 
 
 # -------------------------------------------------------------------- filtros

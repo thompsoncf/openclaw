@@ -6085,6 +6085,19 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
    .rel-metricas{grid-template-columns:repeat(2,1fr)}
    .rel-metricas .metric b{font-size:.95rem}}
   @media (max-width:700px){.rel-scroll-dica{display:block}}
+  /* Com 9 abas, a faixa (.abas, escondida a barra de scroll de propósito) some
+     por baixo de 1280px — e nada avisava. Notebook de 13" (~1024px) é comum o
+     bastante pra isso ter confundido o dono a achar a aba Agenda (26/08). A
+     sombra aparece só do lado que ainda tem conteúdo escondido (JS abaixo
+     alterna .no-left/.no-right conforme rola) e some sozinha quando chega na
+     ponta — mesma pista visual que lista horizontal de app/catálogo usa. */
+  #rel-abas{position:relative}
+  #rel-abas.rel-fade::before,#rel-abas.rel-fade::after{content:'';position:absolute;
+   top:0;bottom:0;width:30px;pointer-events:none;transition:opacity .15s}
+  #rel-abas.rel-fade::before{left:0;background:linear-gradient(90deg,var(--card),transparent)}
+  #rel-abas.rel-fade::after{right:0;background:linear-gradient(270deg,var(--card),transparent)}
+  #rel-abas.no-left::before{opacity:0}
+  #rel-abas.no-right::after{opacity:0}
 </style>
 <div class="card larga rel-full">
   <h1 style="margin:0">📊 Relatórios <span class="mut" style="font-weight:400;font-size:.85rem">· {{ dados.label }}</span></h1>
@@ -6104,8 +6117,22 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     // nascer fora da área visível, e quem abrisse a tela não veria em qual
     // relatório está.
     (function () {
+      var trilho = document.getElementById("rel-abas");
       var ativa = document.querySelector("#rel-abas .aba.ativa");
       if (ativa) ativa.scrollIntoView({inline: "center", block: "nearest"});
+      // Sombra nas pontas: avisa que ainda tem aba escondida naquele lado —
+      // sem isso rolar o trilho é um gesto que ninguém sabe que existe (foi o
+      // que aconteceu com a aba Agenda em notebook de 13", 26/08).
+      if (!trilho) return;
+      trilho.classList.add("rel-fade");
+      function marcarPontas() {
+        trilho.classList.toggle("no-left", trilho.scrollLeft <= 1);
+        trilho.classList.toggle("no-right",
+          trilho.scrollLeft + trilho.clientWidth >= trilho.scrollWidth - 1);
+      }
+      trilho.addEventListener("scroll", marcarPontas);
+      window.addEventListener("resize", marcarPontas);
+      marcarPontas();
     })();
   </script>
 

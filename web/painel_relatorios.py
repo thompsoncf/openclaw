@@ -488,6 +488,132 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -
     }
 
 
+AGENDA_STATUS_TAG = {
+    "ativo": ("Confirmado", "ok"), "pre_reservado": ("Pré-reserva", "aviso"),
+    "cancelado": ("Cancelado", "erro"),
+}
+AGENDA_STATUS_OPCOES = [
+    ("", "Status: todos"), ("ativo", "Confirmado"),
+    ("pre_reservado", "Pré-reserva"), ("cancelado", "Cancelado"),
+]
+AGENDA_DESFECHO_TAG = {
+    "realizado": ("Realizado", "ok"), "nao_realizado": ("Não realizado", "erro"),
+}
+AGENDA_TIPO_ROTULO = {"pessoal": "Pessoal", "empresa": "Empresa", "fornecedor": "Fornecedor"}
+
+
+def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> dict:
+    """A Agenda (web/painel_agenda.py) só mostra o que vem — mês corrente e os
+    próximos compromissos. Este relatório fecha o período: quantos eventos,
+    quantos viraram presença, quantos não aconteceram e quantos foram
+    cancelados. `status` (ativo/pré-reserva/cancelado) e `desfecho`
+    (realizado/não realizado) já existem desde as migrações 098-179; nenhuma
+    coluna nova.
+
+    Cliente vem de `orcamentos.evento_agenda_id` quando o compromisso nasceu de
+    um orçamento aprovado, com a mesma regra `empresa or cliente` de
+    `_dados_orcamentos` — visita e compromisso pessoal não têm orçamento,
+    aparecem com "—". "Sinal" é `eventos_agenda.sinal_centavos`, o valor que
+    segura a DATA na própria agenda (163_evento_sinal_esperado) — não é receita
+    fechada, essa mora no orçamento e exigiria o mesmo join que a aba
+    Orçamentos já faz (`_VALOR_ORC`).
+
+    As métricas do topo ignoram o filtro de Status de propósito, igual em
+    Orçamentos: mostram a distribuição inteira do período; o total da tabela é
+    só do que está na tela. "Vendedor" no filtro é quem marcou o compromisso
+    (`membro_id`), reaproveitando o mesmo seletor de membros da conta."""
+    ini, fim = _intervalo(periodo)
+    where = ["e.conta_id=%s"]
+    params: list = [conta_id]
+    if periodo != "todos":
+        where.append("e.inicio::date >= %s and e.inicio::date <= %s")
+        params += [ini, fim]
+    if vendedor_sel:
+        try:
+            where.append("e.membro_id = %s")
+            params.append(int(vendedor_sel))
+        except (TypeError, ValueError):
+            where.pop()
+    join_orc = """left join lateral (
+                    select coalesce(o.empresa, o.cliente) as nome
+                      from orcamentos o
+                     where o.evento_agenda_id = e.id
+                     order by o.id desc limit 1
+                  ) oc on true"""
+    if busca:
+        where.append("oc.nome ilike %s")
+        params.append(f"%{busca}%")
+    base_sql = " and ".join(where)
+
+    with pool.connection() as c:
+        agg = c.execute(
+            f"""select count(*),
+                       count(*) filter (where e.desfecho='realizado'),
+                       count(*) filter (where e.desfecho='nao_realizado'),
+                       count(*) filter (where e.status='cancelado'),
+                       coalesce(sum(e.sinal_centavos), 0)
+                  from eventos_agenda e
+                  {join_orc}
+                 where {base_sql}""", params).fetchone()
+    n_total = agg[0] or 0
+    n_realizado, n_nao_realizado, n_cancelado = agg[1] or 0, agg[2] or 0, agg[3] or 0
+    sinal_total = int(agg[4] or 0)
+
+    def _pct(n):
+        return f"{n} · {round(n * 100 / n_total)}%" if n_total else f"{n} · 0%"
+
+    where2, params2 = list(where), list(params)
+    if status_sel in AGENDA_STATUS_TAG:
+        where2.append("e.status = %s")
+        params2.append(status_sel)
+    where2_sql = " and ".join(where2)
+
+    with pool.connection() as c:
+        rows = c.execute(
+            f"""select e.inicio, coalesce(e.tipo_evento, e.titulo), oc.nome,
+                       e.tipo, e.status, e.desfecho, e.convidados, e.sinal_centavos
+                  from eventos_agenda e
+                  {join_orc}
+                 where {where2_sql}
+                 order by e.inicio asc limit 300""",
+            params2).fetchall()
+
+    linhas = []
+    for r in rows:
+        st_rotulo, st_cor = AGENDA_STATUS_TAG.get(r[4], (r[4] or "—", "neutro"))
+        df_rotulo, df_cor = AGENDA_DESFECHO_TAG.get(r[5], ("—", "neutro"))
+        linhas.append({
+            "inicio": r[0].strftime("%d/%m %H:%M") if r[0] else "—",
+            "evento": r[1] or "—", "cliente": r[2] or "—",
+            "tipo": AGENDA_TIPO_ROTULO.get(r[3], r[3] or "—"),
+            "status": st_rotulo, "status_cor": st_cor,
+            "desfecho": df_rotulo, "desfecho_cor": df_cor,
+            "convidados": r[6] if r[6] is not None else "—",
+            "sinal_centavos": int(r[7] or 0),
+        })
+    return {
+        "label": "Agenda", "mock": False,
+        "colunas": [_col("inicio", "Data"), _col("evento", "Evento"),
+                    _col("cliente", "Cliente"), _col("tipo", "Tipo"),
+                    _col("status", "Status", tag=True),
+                    _col("desfecho", "Desfecho", tag=True),
+                    _col("convidados", "Convid.", num=True),
+                    _col("sinal_centavos", "Sinal", num=True, brl=True)],
+        "linhas": linhas, "col_total": "sinal_centavos",
+        "total_centavos": _soma(linhas, "sinal_centavos"),
+        "metricas": [("Eventos no período", str(n_total)),
+                     ("Realizados", _pct(n_realizado)),
+                     ("Não realizados", _pct(n_nao_realizado)),
+                     ("Cancelados", _pct(n_cancelado)),
+                     ("Sinal no período", _brl(sinal_total))],
+        "filtro_extra": {
+            "status_opcoes": AGENDA_STATUS_OPCOES, "status_sel": status_sel,
+            "vendedores": _vendedores_da_conta(pool, conta_id),
+            "vendedor_sel": str(vendedor_sel or ""), "busca_sel": busca or "",
+        },
+    }
+
+
 TIPOS = {
     "vendas": {"label": "Vendas", "montar": lambda pool, cid, per, **f: _dados_vendas(pool, cid, per)},
     "contas_pagar": {"label": "Contas a pagar", "montar": lambda pool, cid, per, **f: _dados_titulos_abertos(pool, cid, "pagar")},
@@ -498,6 +624,8 @@ TIPOS = {
     "orcamentos": {"label": "Orçamentos", "montar": lambda pool, cid, per, **f: _dados_orcamentos(
         pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
     "contratos": {"label": "Contratos", "montar": lambda pool, cid, per, **f: _dados_contratos(
+        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
+    "agenda": {"label": "Agenda", "montar": lambda pool, cid, per, **f: _dados_agenda(
         pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
 }
 

@@ -832,6 +832,11 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
 
 @router.get("/painel/servicos/lista")
 def painel_servicos_lista(request: Request):
+    # importado AQUI dentro, e não no topo: `painel_prospeccao` importa deste
+    # módulo (`_garantir_tabela`), então um import de topo fecharia o ciclo.
+    # A regra do número mora lá porque é lá que ela nasceu — copiar seria criar
+    # uma segunda versão pra divergir depois.
+    from web.painel_prospeccao import _zap_link
     conta, redir = _conta_servico(request)
     if redir is not None:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
@@ -878,7 +883,21 @@ def painel_servicos_lista(request: Request):
                           -- inteira do funil devolvia 500.
                           (select ev.criado_em from orcamento_envios ev
                             where ev.orcamento_id = orcamentos.id and ev.ok
-                            order by ev.criado_em desc limit 1) as enviado_em"""
+                            order by ev.criado_em desc limit 1) as enviado_em,
+                          -- O NOME DO CADASTRO. `cliente` e `empresa` são dois
+                          -- campos livres pra mesma coisa e divergiram: em 25/08,
+                          -- de 26 orçamentos, 19 apareciam como "−" e 2 como
+                          -- TELEFONE. Este é o único que estava certo nas 26.
+                          (select cl.nome from clientes cl
+                            where cl.id = orcamentos.cliente_id) as cadastro_nome,
+                          coalesce(whatsapp, telefone, '') as zap,
+                          -- desde quando o contrato espera assinatura. O APELIDO
+                          -- aqui é pela mesma razão do `enviado_em` acima: sem ele
+                          -- esta coluna também se chama `criado_em` e derruba o
+                          -- `order by` de baixo com ORDER BY ... is ambiguous.
+                          (select ct.criado_em from contratos ct
+                            where ct.orcamento_id = orcamentos.id and ct.substitui_id is null
+                            order by ct.id desc limit 1) as contrato_em"""
         if papel == "vendedor" and membro_id:
             rows = c.execute(
                 _cols + """ from orcamentos where conta_id=%s and criado_por=%s
@@ -914,6 +933,8 @@ def painel_servicos_lista(request: Request):
 
     itens = [{
         "id": r[0],
+        # `cliente`/`empresa` continuam indo crus porque o editor e os diálogos de
+        # confirmação ainda os usam. Quem manda na LINHA é o titulo/sub de baixo.
         "cliente": r[1] or "-",
         "empresa": r[2] or "",
         "setup": brl(r[3]),
@@ -930,7 +951,7 @@ def painel_servicos_lista(request: Request):
         "aprovada_por": r[10] or "",
         "aprovada_em": r[11].strftime("%d/%m/%Y") if r[11] else "",
         "numero": r[12], "modo": r[13] or "recorrente",
-        "inicial": (r[1] or r[2] or "?").strip()[:1].upper(),
+        "inicial": (r[24] or r[2] or r[1] or "?").strip()[:1].upper(),
         "sinal": brl(r[14]) if r[14] else "",
         "sinal_pago": bool(r[15]),
         # o quanto o plano de pagamento DIVERGE do total, em centavos (0 = fecha).
@@ -958,10 +979,33 @@ def painel_servicos_lista(request: Request):
             status=r[8], modo=r[13] or "recorrente", evento=r[21],
             evento_status=r[22], pre_reserva_ate=r[20]),
         "enviado_em": r[23].astimezone(ag.BRT).strftime("%d/%m %H:%M") if r[23] else "",
+        # os três abaixo são MATÉRIA-PRIMA do servidor: viram titulo/sub e a faixa
+        # do contrato logo depois, e os que começam com _ saem do dict antes do JSON.
+        "_cadastro": r[24] or "",
+        # o LINK, não o número: `_zap_link` sabe que 86981885930 sem DDI vira
+        # China no wa.me e que celular antigo de 10 dígitos precisa do 9. Reescrever
+        # isso aqui em JS (`replace(/\D/g,'')`) dava um atalho que abre no vazio.
+        "zap_link": _zap_link(r[25] or ""),
+        "_contrato_em": r[26],
+        "evento": r[21] if isinstance(r[21], dict) else None,
         # quanto já entrou, e quanto disso está sem comprovante
         "pgto": vendas.resumo_pagamentos(
             r[16], r[15], pagos_por_orc.get(r[0], ()), comp_por_orc.get(r[0], ())),
     } for r in rows]
+    # UMA vez por requisição, não por linha: o nicho é da conta, e `tem_contrato`
+    # abre o banco pra descobrir. Dentro do laço seriam cinquenta consultas iguais
+    # — o mesmo N+1 que já custou caro na Agenda.
+    from finance import contrato as _ctr
+    try:
+        # `exige_assinatura` é a porta que já existe pra esta pergunta — e é a MESMA
+        # que decide o modo do orçamento. Uma regra nova e paralela poderia divergir,
+        # e aí a linha ofereceria "Fechar negócio" numa conta que precisa de papel.
+        _nicho_tem_contrato = _ctr.exige_assinatura(get_pool(), conta[0])
+    except Exception:  # noqa: BLE001
+        # na dúvida, o comportamento de antes: assume que o contrato existe e não
+        # oferece "Fechar negócio" sozinho. Errar pra menos aqui só deixa a linha
+        # como estava; errar pra mais oferece fechar negócio onde falta papel.
+        _nicho_tem_contrato = True
     # O QUE A LINHA DIZ — selos de pendência, a ação principal e o resumo do que
     # já foi. Montado aqui, depois de `itens`, porque lê o que acabou de ser
     # calculado (o estado da data, os pagamentos) em vez de recalcular.
@@ -972,7 +1016,15 @@ def painel_servicos_lista(request: Request):
             enviado_em=it["enviado_em"], contrato_numero=it["contrato_numero"],
             contrato_assinado=it["contrato_assinado"],
             plano_difere=it["plano_difere"], aprovada_por=it["aprovada_por"],
-            nunca_enviada=not it["enviado_em"])
+            nunca_enviada=not it["enviado_em"],
+            contrato_em=it["_contrato_em"], tem_contrato=_nicho_tem_contrato)
+        # o NOME, resolvido no servidor pela mesma função pura que os testes cobrem.
+        # A tela não decide mais quem é o cliente desta linha.
+        it.update(vendas.titulo_do_funil(
+            cadastro=it["_cadastro"], empresa=it["empresa"], cliente=it["cliente"],
+            modo=it["modo"], evento=it.get("evento"), numero=it["numero"]))
+        for _k in ("_cadastro", "_contrato_em"):
+            it.pop(_k, None)
     return JSONResponse({"itens": itens})
 
 
@@ -1132,7 +1184,7 @@ def _resumo_do_envio(d: dict) -> str:
 
 
 @router.get("/painel/servicos/email/{orc_id}")
-def painel_servicos_email(request: Request, orc_id: int):
+def painel_servicos_email(request: Request, orc_id: int, alvo: str = "proposta"):
     """O que a tela de envio abre preenchido — e por qual caixa vai sair.
 
     O remetente é resolvido AQUI, antes de mandar, porque o mesmo botão se
@@ -1151,12 +1203,30 @@ def painel_servicos_email(request: Request, orc_id: int):
                 or conta[2] or "")
     rem = pmail.remetente(pool, conta[0], dados_emp.get("email_empresa") or "")
     envios = pmail.historico(pool, conta[0], int(orc_id))
+    _base = f"{request.base_url.scheme}://{request.base_url.netloc}"
+    _quem = d["cliente"] or d["empresa_cli"]
+    _assunto = pmail.assunto_padrao(d["numero"], nome_emp, d["modo"])
+    _msg = pmail.texto_padrao(_quem, d["modo"])
+    _link = f"{_base}/proposta/{d['token']}"
+    # MESMO CAMINHO, outro documento. O contrato tinha link e não tinha envio: o
+    # selo mandava "mande o link pro cliente" e o link ficava escondido no menu de
+    # três pontos. Aqui ele reusa a tela de envio, o remetente resolvido e o
+    # registro em `orcamento_envios` — nada de fluxo paralelo pra manter.
+    if (alvo or "") == "contrato":
+        from finance import contrato as _ctr
+        _ct = _ctr.por_orcamento(pool, conta[0], int(orc_id))
+        if not _ct or not _ct.get("token"):
+            return JSONResponse({"erro": "esta proposta ainda não tem contrato"},
+                                status_code=404)
+        _link = f"{_base}/contrato/{_ct['token']}"
+        _assunto = f"Contrato nº {_ct.get('numero') or ''} — {nome_emp}".strip()
+        _msg = (f"Olá{(', ' + _quem) if _quem else ''}! Segue o contrato para "
+                "leitura e assinatura. É só abrir o link e assinar por lá — "
+                "qualquer dúvida, me chame.")
     return JSONResponse({
         "para": d["email"],
         "cliente": d["cliente"] or d["empresa_cli"],
-        "assunto": pmail.assunto_padrao(d["numero"], nome_emp, d["modo"]),
-        "mensagem": pmail.texto_padrao(d["cliente"] or d["empresa_cli"], d["modo"]),
-        "link": f"{request.base_url.scheme}://{request.base_url.netloc}/proposta/{d['token']}",
+        "assunto": _assunto, "mensagem": _msg, "link": _link,
         "resumo": _resumo_do_envio(d),
         "empresa": nome_emp,
         "remetente": rem,
@@ -1849,6 +1919,11 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
    e o mesmo peso de todos os outros e simplesmente sumia.
    O que já aconteceu foi pro subtítulo cinza, à esquerda. Aqui à direita fica
    só o que ainda falta — e quando não falta nada, um ✓ discreto. */
+/* atalho de WhatsApp da linha: discreto, mas alcançável com o polegar */
+.oc-zap{display:inline-flex; align-items:center; justify-content:center;
+  width:30px; height:30px; border-radius:8px; text-decoration:none;
+  border:1px solid var(--borda); background:var(--bg); font-size:.95rem; line-height:1}
+.oc-zap:hover{border-color:var(--verde)}
 .oc-acoes{display:flex; align-items:center; gap:.4rem; flex-wrap:wrap;
   justify-content:flex-end; margin-left:auto; position:relative; flex:0 1 auto}
 /* O NOME NÃO CEDE ESPAÇO PROS SELOS. Uma proposta com quatro pendências enchia a
@@ -2082,7 +2157,11 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     </div>
     <div style="display:grid; grid-template-columns:{{ '1fr 1fr 1fr' if servico_avulso else '1fr 1fr' }}; gap:.8rem">
       <div class="oc-field"><label id="oc-empresa-label">Empresa</label><input id="oc-empresa" class="oc-inp" placeholder="Nome da empresa"></div>
-      <div class="oc-field"><label>Contato</label><input id="oc-contato" class="oc-inp" placeholder="Responsável"></div>
+      {# UM CAMPO SÓ NO EVENTO. Pedir "Empresa" e "Contato" pra uma noiva foi a
+         origem da bagunça: `empresa` recebia o nome e `contato` recebia o que
+         sobrasse — em produção, telefone e nome pela metade. No recorrente os dois
+         seguem, porque ali são coisas diferentes: a empresa e quem fala com você. #}
+      <div class="oc-field" id="campo-oc-contato"{% if servico_avulso %} style="display:none"{% endif %}><label>Contato</label><input id="oc-contato" class="oc-inp" placeholder="Responsável"></div>
       <div class="oc-field" id="campo-oc-cargo"{% if servico_avulso %} style="display:none"{% endif %}><label>Cargo</label><input id="oc-cargo" class="oc-inp" placeholder="Cargo do contato"></div>
       <div class="oc-field" id="campo-oc-socio"{% if servico_avulso %} style="display:none"{% endif %}><label>Sócio</label><input id="oc-socio" class="oc-inp" placeholder="Sócio / dono"></div>
       <div class="oc-field"><label>WhatsApp</label><input id="oc-whats" class="oc-inp" placeholder="(86) 9 9999-9999"></div>
@@ -3323,7 +3402,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   // abre PREENCHIDA — quem só quer mandar abre e aperta Enviar. Por qual caixa vai
   // sair é dito antes, porque o mesmo botão se comporta diferente na empresa que
   // tem caixa configurada e na que não tem (ver finance/proposta_email).
-  var ENV_ID = null, ENV_LINK = '';
+  var ENV_ID = null, ENV_LINK = '', ENV_ALVO = 'proposta';
   function envMsg(txt, cls){
     var el=document.getElementById('env-msg');
     el.className='env-msg'+(txt?(' on '+(cls||'amb')):'');
@@ -3331,10 +3410,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   }
   function envFechar(){
     document.getElementById('env-fundo').classList.remove('on');
-    ENV_ID=null; ENV_LINK='';
+    ENV_ID=null; ENV_LINK=''; ENV_ALVO='proposta';
   }
-  function abrirEnvio(id){
-    ENV_ID=id;
+  function abrirEnvio(id,alvo){
+    ENV_ID=id; ENV_ALVO=alvo||'proposta';
     var fundo=document.getElementById('env-fundo');
     envMsg('');
     document.getElementById('env-hist').textContent='';
@@ -3342,13 +3421,14 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     ['env-para','env-assunto','env-texto'].forEach(function(k){
       document.getElementById(k).value='';});
     fundo.classList.add('on');
-    fetch('/painel/servicos/email/'+id)
+    fetch('/painel/servicos/email/'+id+'?alvo='+encodeURIComponent(ENV_ALVO))
       .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
       .then(function(res){
         if(!res.ok){envMsg(esc((res.d&&res.d.erro)||'Não consegui abrir.'),'cor'); return;}
         var d=res.d;
         ENV_LINK=d.link||'';
-        document.getElementById('env-tt').textContent='Mandar '+esc(d.assunto||'a proposta');
+        document.getElementById('env-tt').textContent=
+          (ENV_ALVO==='contrato'?'Mandar pra assinar — ':'Mandar ')+esc(d.assunto||'a proposta');
         document.getElementById('env-para').value=d.para||'';
         document.getElementById('env-assunto').value=d.assunto||'';
         document.getElementById('env-texto').value=d.mensagem||'';
@@ -3431,6 +3511,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     if(chave==='comprovante') return abrirPagamentos(it.id,it.cliente);
     if(chave==='enviar')      return abrirEnvio(it.id);
     if(chave==='fechar')      return fechar(it.id,btn,it.plano_difere);
+    // mesma tela de envio da proposta, só que com o link do contrato
+    if(chave==='assinar')     return abrirEnvio(it.id,'contrato');
   }
 
   var _menuAberto=null;
@@ -3634,16 +3716,34 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         // tudo bem: era esse ruído que fazia os selos de VERDADE sumirem no meio.
         var left=document.createElement('div'); left.className='oc-hist-open';
         left.title='Abrir proposta';
-        var sub=[(it.numero?('nº '+it.numero):''),(it.data?('gerada '+esc(it.data)):''),
+        // O TÍTULO vem PRONTO do servidor (vendas.titulo_do_funil). Aqui ficava
+        // `it.cliente + " · " + it.empresa` — dois campos livres pra mesma coisa,
+        // que davam "−", telefone cru e nome repetido em 23 dos 26 orçamentos.
+        // `it.sub` é a festa (modo evento) ou o contato (recorrente).
+        var sub=[esc(it.sub||''), (it.numero?('nº '+it.numero):''),
+                 (it.data?('gerada '+esc(it.data)):''),
                  esc(evento?it.setup:it.total), esc(pn.resumo||'')]
                 .filter(Boolean).join(' · ');
         left.innerHTML='<div class="oc-av">'+esc(it.inicial)+'</div>'
-          +'<div style="min-width:0"><b>'+esc(it.cliente)+(it.empresa?' <span class="mut">· '+esc(it.empresa)+'</span>':'')+'</b>'
+          +'<div style="min-width:0"><b>'+esc(it.titulo)+'</b>'
           +'<div class="mut" style="font-size:.78rem">'+sub+'</div></div>';
         left.addEventListener('click',function(){abrir(it.id);});
         el.appendChild(left);
 
         var right=document.createElement('div'); right.className='oc-acoes';
+
+        // O TELEFONE saiu do título (era ele que aparecia como nome em 2 das 26
+        // linhas) e virou atalho: abre a conversa no WhatsApp. Sumir de vez seria
+        // perder o caminho mais curto pro cliente que está ali na linha.
+        if(it.zap_link){
+          var zap=document.createElement('a');
+          zap.className='oc-zap'; zap.target='_blank'; zap.rel='noopener';
+          zap.href=it.zap_link;
+          zap.title='Falar no WhatsApp'; zap.setAttribute('aria-label','Falar no WhatsApp');
+          zap.textContent='💬';
+          zap.addEventListener('click',function(e){e.stopPropagation();});
+          right.appendChild(zap);
+        }
 
         // DIREITA: só o que está PENDENTE. Selo colorido virou sinônimo de "tem
         // coisa a fazer" — quem não tem nada mostra um ✓ discreto, e some.

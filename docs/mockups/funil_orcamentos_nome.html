@@ -106,7 +106,8 @@ code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
     <h1>O funil mostra <span class="marca">telefone, traço e nome repetido</span> no lugar do cliente</h1>
     <p>A linha do funil monta o título com dois campos livres — <code>cliente</code> e
       <code>empresa</code> — que guardam a mesma coisa e divergem. O nome certo já está
-      no banco; só não é ele que aparece.</p>
+      no banco; só não é ele que aparece. E o <b>contrato</b> tem um problema próprio:
+      a mesma palavra descreve um documento assinável e uma simples mudança de status.</p>
   </header>
 
   <!-- ------------------------------------------------ placar -->
@@ -235,15 +236,77 @@ code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
     </div>
   </section>
 
+  <!-- ------------------------------------------------ contrato -->
+  <section class="sec">
+    <h2>O contrato</h2>
+    <p>Aqui o problema é outro, e é mais fundo: <b>a palavra “contrato” significa duas
+      coisas diferentes na mesma tela</b>. No nicho de eventos existe um documento de
+      verdade — numerado, com link de assinatura. No recorrente <b>não existe documento
+      nenhum</b>: “Fechar contrato” só muda o status da proposta pra fechado.</p>
+
+    <div class="regra" style="margin-bottom:1.2rem">
+      <div class="regra-tit">Onde o contrato nasce hoje</div>
+      <div class="regra-corpo">
+        <div class="cadeia">sinal confirmado + nicho = eventos → <b>criar_para_orcamento()</b> → contrato nº N</div>
+        <div class="rl"><span class="qual">ou seja</span><span style="color:var(--text-dim)">Sem sinal confirmado, o contrato não existe — e a tela não diz isso em lugar nenhum. Quem aprovou a proposta fica esperando um documento que não vem.</span></div>
+      </div>
+    </div>
+
+    <div class="par">
+      <div class="col antes">
+        <h3>Hoje</h3>
+        <div class="pilha">
+          <div class="linha"><span class="num">#8</span><span class="corpo">
+            <div class="tit">Josiany Rayra Soares dos Santos</div>
+            <div class="sub" style="color:var(--ambar)">⬤ Contrato aguardando assinatura</div>
+            <div class="sub" style="font-size:.73rem">“Mande o link pro cliente ler e assinar.”<span class="mau-tag">sem botão pra isso</span></div>
+            </span><span class="val">7.090</span></div>
+          <div class="linha"><span class="num">#2</span><span class="corpo">
+            <div class="tit">Renatas Digital</div>
+            <div class="sub">aprovada por Renata · <span class="mau">nada mais</span><span class="mau-tag">parada há 37 dias</span></div>
+            </span><span class="val">—</span></div>
+          <div class="linha"><span class="num">#1</span><span class="corpo">
+            <div class="tit">H Pernas</div>
+            <div class="sub mau">“contrato fechado”<span class="mau-tag">não existe contrato</span></div>
+            </span><span class="val">—</span></div>
+        </div>
+      </div>
+      <div class="col depois">
+        <h3>Proposto</h3>
+        <div class="pilha">
+          <div class="linha"><span class="num">#8</span><span class="corpo">
+            <div class="tit">Josiany Rayra Soares dos Santos</div>
+            <div class="sub">📜 Contrato nº 2 · <b style="color:var(--ambar)">aguardando assinatura há 3 dias</b></div>
+            <div class="sub" style="margin-top:.35rem"><span style="border:1px solid var(--neon-borda);background:var(--neon-fundo);color:var(--neon);border-radius:7px;padding:.15rem .5rem;font-size:.75rem;font-weight:600">Mandar pra assinar</span> <span style="color:var(--text-faint);font-size:.72rem">· abrir · copiar link</span></div>
+            </span><span class="val">7.090</span></div>
+          <div class="linha"><span class="num">#2</span><span class="corpo">
+            <div class="tit">Renatas Digital</div>
+            <div class="sub">aprovada por Renata há <b style="color:var(--ambar)">37 dias</b></div>
+            <div class="sub" style="margin-top:.35rem"><span style="border:1px solid var(--neon-borda);background:var(--neon-fundo);color:var(--neon);border-radius:7px;padding:.15rem .5rem;font-size:.75rem;font-weight:600">Fechar negócio</span> <span style="color:var(--text-faint);font-size:.72rem">· gera os títulos a receber</span></div>
+            </span><span class="val">—</span></div>
+          <div class="linha"><span class="num">#1</span><span class="corpo">
+            <div class="tit">H Pernas</div>
+            <div class="sub">negócio fechado · sem contrato de locação <span style="color:var(--text-faint)">(serviço recorrente)</span></div>
+            </span><span class="val">—</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nunca" style="margin-top:1rem"><span>⚠️</span><div>
+      <b>“Fechar contrato” vira “Fechar negócio”</b> onde não há documento. Hoje a mesma
+      frase aparece pra quem tem um contrato numerado esperando assinatura e pra quem só
+      vai mudar um status — e as duas coisas exigem decisões diferentes do dono.</div></div>
+  </section>
+
   <!-- ------------------------------------------------ decisões -->
   <section class="sec">
-    <h2>Três decisões pra você</h2>
+    <h2>Decisões pra você</h2>
     <p>Só o que muda o que eu construo. O resto eu resolvo.</p>
     <div class="dec">
       <div class="dec-item">
         <b>1. Só a tela, ou arrumo o dado também?</b>
-        <p>A regra conserta a exibição sem tocar em nada. Dá pra ir além e gravar o nome
-          certo no orçamento — mas isso é escrever em 26 linhas de produção.
+        <p>A regra do nome conserta a exibição sem tocar em nada. Dá pra ir além e gravar
+          o nome certo no orçamento — mas isso é escrever em 26 linhas de produção.
           <span class="rec">Recomendo só a tela agora</span>: resolve 100% do que você vê,
           com risco zero.</p>
       </div>
@@ -258,6 +321,19 @@ code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
         <p>Ele existe em quase todas e some do título pela regra.
           <span class="rec">Recomendo mostrá-lo como atalho</span> — um ícone de WhatsApp
           no fim da linha, que abre a conversa — em vez de sumir de vez.</p>
+      </div>
+      <div class="dec-item">
+        <b>4. “Fechar contrato” pode virar “Fechar negócio” no recorrente?</b>
+        <p>É mudança de palavra numa ação que o dono já conhece — some a confusão, mas
+          muda o texto de um botão em uso.
+          <span class="rec">Recomendo trocar</span>: hoje ela promete um documento que
+          não existe.</p>
+      </div>
+      <div class="dec-item">
+        <b>5. O “Mandar pra assinar” reusa o caminho da proposta?</b>
+        <p>Mandar proposta já existe e funciona (WhatsApp e e-mail).
+          <span class="rec">Recomendo reusar</span> — mesmo botão, mesmo registro de
+          envio, só trocando o link. Nada de caminho novo pra manter.</p>
       </div>
     </div>
   </section>

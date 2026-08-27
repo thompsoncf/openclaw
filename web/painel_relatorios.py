@@ -815,6 +815,167 @@ def _fmt_hora(d) -> str:
     return d.astimezone(_ag.BRT).strftime("%d/%m %H:%M") if d else "—"
 
 
+# ----------------------------------------------------------- FUNIL COMERCIAL
+#
+# Os quatro indicadores que o consultor da Prime pediu, cada um com a COBERTURA
+# do dado ao lado. A régua está em `finance/vendas.py`; aqui fica só a consulta.
+#
+# A visita é identificada por três coisas juntas, e nenhuma delas é palpite:
+#   * `titulo ilike 'visita%'` — é como o Cockpit batiza (`finance/cockpit.py`,
+#     "Visita — {quem}") e como o time batiza na mão ("VISITA TÉCNICA - PEDRO");
+#   * `status <> 'cancelado'` — visita cancelada não foi agendada pra valer, e
+#     contá-la inflaria o degrau de cima sem inflar nenhum de baixo;
+#   * `tipo_evento is null` — quando esse campo vem preenchido (Casamento,
+#     Locação...) o compromisso é a FESTA do cliente, não a visita dele ao espaço.
+
+#: o degrau "leads" do funil sai da mesma fonte da aba Leads do chip: quem chegou
+#: por uma conversa de WhatsApp. Somar a base garimpada no Maps aqui misturaria
+#: duas espécies de lead e faria a taxa de conversão despencar por artifício.
+_SQL_VISITAS = """
+    select e.id,
+           coalesce(p.empresa, replace(e.titulo, 'Visita — ', '')) as lead,
+           (e.prospeccao_id is not null) as ligado,
+           coalesce(mb.nome, '—') as vendedor,
+           e.inicio, (e.inicio < now()) as passou, e.desfecho,
+           -- quanto o lead esperou da primeira mensagem dele até a visita ser
+           -- marcada. Só existe pra visita ligada a um lead — nas soltas não há
+           -- de quem medir.
+           case when p.id is null then null else
+             (select min(m.criado_em) from mensagens m
+                join conversas cv on cv.id = m.conversa_id
+               where cv.prospeccao_id = p.id and m.direcao='in') end as lead_chegou,
+           e.criado_em
+      from eventos_agenda e
+      left join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
+      left join membros mb on mb.id = e.membro_id
+     where e.conta_id = %s
+       and e.titulo ilike 'visita%%'
+       and coalesce(e.status,'') <> 'cancelado'
+       and e.tipo_evento is null
+"""
+
+
+def _dados_funil(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> dict:
+    """O funil comercial: lead → visita agendada → aconteceu → respondida → sinal.
+
+    Cada taxa vem com a cobertura porque, sem ela, o relatório mente por omissão:
+    em 26/08, na conta 34, "2 de 3 apareceram" pareceria 67% de comparecimento —
+    mas 8 visitas já tinham acontecido e 5 estavam sem resposta nenhuma.
+    """
+    ini, fim = _intervalo(periodo)
+    where, params = "", [conta_id]
+    if periodo != "todos":
+        where += " and e.inicio::date >= %s and e.inicio::date <= %s"
+        params += [ini, fim]
+    if vendedor_sel:
+        where += " and e.membro_id = %s"
+        params.append(int(vendedor_sel))
+    if busca:
+        where += " and (p.empresa ilike %s or e.titulo ilike %s)"
+        params += [f"%{busca}%", f"%{busca}%"]
+    if status_sel == "sem_resposta":
+        where += " and e.inicio < now() and e.desfecho is null"
+    elif status_sel == "respondidas":
+        where += " and e.desfecho is not null"
+    elif status_sel == "sem_lead":
+        where += " and e.prospeccao_id is null"
+
+    with pool.connection() as c:
+        rows = c.execute(_SQL_VISITAS + where + " order by e.inicio desc limit 300",
+                         params).fetchall()
+        # os leads que entraram por conversa — o topo do funil. Fora do filtro de
+        # vendedor de propósito: o lead chega antes de ter dono, e recortar por
+        # vendedor aqui daria uma taxa de conversão sobre um universo que o
+        # vendedor nunca teve a chance de atender.
+        p2: list = [conta_id]
+        sql_leads = ("select count(distinct cv.prospeccao_id) from conversas cv "
+                     "where cv.conta_id=%s and cv.prospeccao_id is not null")
+        if periodo != "todos":
+            sql_leads += " and cv.criado_em::date >= %s and cv.criado_em::date <= %s"
+            p2 += [ini, fim]
+        n_leads = c.execute(sql_leads, p2).fetchone()[0] or 0
+        n_sinal = c.execute(
+            "select count(*) from orcamentos where conta_id=%s and sinal_pago_em is not null",
+            (conta_id,)).fetchone()[0] or 0
+        n_orc = c.execute("select count(*) from orcamentos where conta_id=%s",
+                          (conta_id,)).fetchone()[0] or 0
+
+    linhas, esperas = [], []
+    n_agendadas = n_ligadas = n_passou = n_respondidas = n_apareceu = 0
+    for r in rows:
+        n_agendadas += 1
+        if r[2]:
+            n_ligadas += 1
+        d = vendas.desfecho_da_visita(r[6], bool(r[5]))
+        if r[5]:
+            n_passou += 1
+        if d["conta_no_comparecimento"]:
+            n_respondidas += 1
+            if r[6] == vendas.VISITA_APARECEU:
+                n_apareceu += 1
+        espera = None
+        if r[7] and r[8]:
+            espera = max(0, int((r[8] - r[7]).total_seconds() // 60))
+            esperas.append(espera)
+        linhas.append({
+            "lead": r[1] or "—",
+            "vendedor": r[3],
+            "marcada": _fmt_hora(r[4]),
+            "esperou": vendas.duracao_curta(espera) if espera is not None else "sem lead",
+            "desfecho": d["texto"], "desfecho_cor": _TOM_TAG[d["tom"]],
+        })
+
+    # AS TAXAS. `base` é o que revela o buraco — ver vendas.taxa_com_cobertura.
+    t_agendou = vendas.taxa_com_cobertura(n_agendadas, n_leads) if n_leads else \
+        vendas.taxa_com_cobertura(0, 0)
+    t_compareceu = vendas.taxa_com_cobertura(n_apareceu, n_respondidas, base=n_passou)
+    t_sinal = vendas.taxa_com_cobertura(n_sinal, n_orc) if n_orc else \
+        vendas.taxa_com_cobertura(0, 0)
+    med = vendas.mediana(esperas)
+
+    return {
+        "label": "Funil", "mock": False,
+        "colunas": [_col("lead", "Lead", flex=True), _col("vendedor", "Vendedor"),
+                    _col("marcada", "Visita marcada"),
+                    _col("esperou", "Esperou p/ agendar"),
+                    _col("desfecho", "O cliente apareceu?", tag=True)],
+        "linhas": linhas,
+        # sem dinheiro nesta aba — mesma razão da aba Leads do chip
+        "col_total": None, "total_centavos": 0,
+        "metricas": [
+            ("Leads → visita agendada",
+             f"{t_agendou['texto']} · {n_agendadas} de {n_leads}"),
+            ("Compareceram",
+             f"{t_compareceu['texto']} · "
+             + vendas.texto_da_cobertura(n_respondidas, n_passou, o_que="respondidas")),
+            ("Viraram sinal pago",
+             f"{t_sinal['texto']} · {n_sinal} de {n_orc} orçamentos"),
+            ("Lead → agendamento (mediana)", vendas.duracao_curta(med)),
+        ],
+        # o AVISO é o achado, não rodapé: enquanto a maior parte das visitas que já
+        # aconteceram estiver sem resposta, a taxa de comparecimento acima não
+        # sustenta decisão nenhuma, e a tela tem que dizer isso antes da tabela.
+        "aviso_config": (
+            f"{n_passou - n_respondidas} das {n_passou} visitas que já aconteceram "
+            "estão sem resposta — ninguém marcou se o cliente apareceu. Enquanto "
+            "isso, a taxa de comparecimento sai de uma amostra pequena demais pra "
+            "decidir. O vendedor responde pelo Cockpit, no bloco “Precisa de "
+            "resposta”."
+        ) if (n_passou - n_respondidas) > 0 else "",
+        "filtro_extra": {
+            "status_opcoes": FUNIL_OPCOES, "status_sel": status_sel,
+            "vendedores": _vendedores_da_conta(pool, conta_id),
+            "vendedor_sel": str(vendedor_sel or ""), "busca_sel": busca or "",
+        },
+    }
+
+
+FUNIL_OPCOES = [
+    ("", "Todas as visitas"), ("sem_resposta", "— Sem resposta —"),
+    ("respondidas", "Respondidas"), ("sem_lead", "Sem lead ligado"),
+]
+
+
 TIPOS = {
     "vendas": {"label": "Vendas", "montar": lambda pool, cid, per, **f: _dados_vendas(pool, cid, per)},
     "contas_pagar": {"label": "Contas a pagar", "montar": lambda pool, cid, per, **f: _dados_titulos_abertos(pool, cid, "pagar")},
@@ -832,6 +993,8 @@ TIPOS = {
     # propósito: o template já tem esse select e a rota já o repassa. Um
     # parâmetro novo obrigaria a mexer nos dois pra não ganhar nada.
     "leads_chip": {"label": "Leads do chip", "montar": lambda pool, cid, per, **f: _dados_leads_chip(
+        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
+    "funil": {"label": "Funil", "montar": lambda pool, cid, per, **f: _dados_funil(
         pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
 }
 

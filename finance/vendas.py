@@ -594,6 +594,85 @@ def rotulo_do_chip(chip_id, *, rotulos=None, nome_principal="") -> str:
     return (mapa.get(chip_id) or "").strip() or f"Chip {chip_id}"
 
 
+# ------------------------------------------------------------- FUNIL COMERCIAL
+#
+# O consultor da Prime pediu quatro indicadores semanais: lead → visita agendada,
+# agendada → realizada, realizada → sinal pago, e o tempo entre a entrada do lead e
+# o agendamento. Medindo em 26/08 apareceu o problema de verdade: das 8 visitas que
+# já tinham acontecido na conta 34, **5 estavam sem resposta**. Uma taxa de
+# comparecimento tirada de 3 visitas não é métrica — é anedota que vira decisão.
+#
+# Por isso toda taxa daqui sai ACOMPANHADA da cobertura. É a diferença entre um
+# relatório que informa e um que engana.
+
+#: abaixo disto a taxa é marcada como pouco confiável na tela. Metade é a régua
+#: escolhida por ser fácil de defender em voz alta ("mais da metade das visitas
+#: respondeu"), não por rigor estatístico — com amostra deste tamanho, nenhum
+#: limiar seria rigoroso, e um número redondo que o dono entende vale mais.
+COBERTURA_MINIMA = 0.5
+
+#: os desfechos que o banco guarda (`eventos_agenda.desfecho`), traduzidos.
+VISITA_APARECEU = "realizado"
+VISITA_NAO_APARECEU = "nao_realizado"
+
+
+def desfecho_da_visita(desfecho, passou: bool) -> dict:
+    """O que a linha diz sobre a visita → {texto, tom, conta_no_comparecimento}.
+
+    A regra que este módulo existe pra guardar: **desfecho ausente NUNCA é "não
+    apareceu"**. São coisas diferentes — uma é o cliente que faltou, a outra é o
+    vendedor que não respondeu — e confundi-las inventaria um no-show que não
+    houve, justamente no número que a gestão vai usar pra decidir.
+
+    `conta_no_comparecimento` diz se a linha entra no denominador da taxa. Só
+    entram as respondidas: silêncio não é meio-comparecimento.
+    """
+    if not passou:
+        return {"texto": "ainda vai acontecer", "tom": "neutro",
+                "conta_no_comparecimento": False}
+    if desfecho == VISITA_APARECEU:
+        return {"texto": "apareceu", "tom": "ok", "conta_no_comparecimento": True}
+    if desfecho == VISITA_NAO_APARECEU:
+        return {"texto": "não apareceu", "tom": "ambar", "conta_no_comparecimento": True}
+    return {"texto": "ninguém respondeu", "tom": "coral",
+            "conta_no_comparecimento": False}
+
+
+def taxa_com_cobertura(quantos, de_quantos, *, base=None) -> dict:
+    """Uma taxa e o quanto dela se pode confiar → {texto, tom, cobertura, confiavel}.
+
+    `quantos`/`de_quantos` são o numerador e o denominador da taxa. `base`, quando
+    vem, é o universo que DEVERIA ter respondido — é ela que revela o buraco: 2 de
+    3 visitas com presença confirmada parece 67%, mas se 8 já aconteceram, a
+    resposta honesta é "2 de 3 responderam, e 5 ninguém sabe".
+
+    Sem `base`, cobertura é 1 e a taxa sai limpa — é o caso de uma proporção que
+    não depende de ninguém preencher nada.
+    """
+    de_quantos = int(de_quantos or 0)
+    universo = int(base if base is not None else de_quantos)
+    if de_quantos <= 0:
+        return {"texto": "sem dado", "tom": "coral", "cobertura": 0.0,
+                "confiavel": False}
+    pct = round(100 * int(quantos or 0) / de_quantos)
+    cob = (de_quantos / universo) if universo > 0 else 0.0
+    confiavel = cob >= COBERTURA_MINIMA
+    return {"texto": f"{pct}%", "tom": "ok" if confiavel else "ambar",
+            "cobertura": round(cob, 3), "confiavel": confiavel}
+
+
+def texto_da_cobertura(respondidas, total, *, o_que="responderam") -> str:
+    """A frase que acompanha a taxa. Escrita em gente, não em porcentagem: quem lê
+    "5 de 8 sem resposta" sabe o que fazer; quem lê "cobertura 37,5%" não."""
+    respondidas, total = int(respondidas or 0), int(total or 0)
+    if total <= 0:
+        return "sem nenhuma visita no período"
+    faltam = total - respondidas
+    if faltam <= 0:
+        return f"todas as {total} {o_que}"
+    return f"{respondidas} de {total} {o_que} — faltam {faltam}"
+
+
 def mediana(valores) -> int | None:
     """Mediana inteira de uma lista de minutos — None quando não há amostra.
 

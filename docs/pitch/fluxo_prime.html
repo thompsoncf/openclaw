@@ -1,0 +1,331 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<title>Do "oi" ao contrato assinado</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* PAPEL, não tela. O app é escuro; isto é pra imprimir e passar de mão em mão,
+   então o verde do WhatsApp — que é por onde o cliente chega — vira o acento
+   sobre papel quente. */
+:root{
+  --papel:#FBFAF7; --papel-2:#F2F0EA; --tinta:#12211B; --tinta-2:#4A5A52;
+  --tinta-3:#8A9691; --linha:#DDD9CF;
+  --verde:#128C4A; --verde-claro:#E4F2E9; --verde-borda:#B4DCC4;
+  --tijolo:#A8442F; --tijolo-claro:#F6E7E3; --tijolo-borda:#E3BFB6;
+  --ocre:#B07A16; --ocre-claro:#FBF0D9;
+  --disp:"Bricolage Grotesque",Georgia,serif;
+  --corpo:"Inter",-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@page{size:A4;margin:14mm 15mm}
+*{box-sizing:border-box}
+body{margin:0;background:var(--papel);color:var(--tinta);font-family:var(--corpo);
+  font-size:10.5pt;line-height:1.5;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+h1,h2,h3{font-family:var(--disp);margin:0;letter-spacing:-.015em}
+.pg{page-break-after:always}
+.pg:last-child{page-break-after:auto}
+strong{font-weight:600}
+
+/* ---- capa ---- */
+.capa{padding-top:6mm}
+.selo{font-size:8pt;text-transform:uppercase;letter-spacing:.14em;color:var(--verde);
+  font-weight:700}
+.capa h1{font-size:30pt;line-height:1.05;font-weight:800;margin:5mm 0 4mm;max-width:15cm}
+.capa .sub{font-size:12pt;color:var(--tinta-2);max-width:14cm;line-height:1.45}
+.capa .quem{margin-top:7mm;padding-top:4mm;border-top:2px solid var(--tinta);
+  font-size:9pt;color:var(--tinta-2);display:flex;justify-content:space-between}
+.capa .quem b{color:var(--tinta)}
+
+/* ---- o mapa do fluxo ---- */
+.mapa{margin-top:8mm;border:1px solid var(--linha);border-radius:4mm;overflow:hidden}
+.mapa-tit{background:var(--tinta);color:var(--papel);padding:3mm 5mm;font-family:var(--disp);
+  font-weight:600;font-size:11pt}
+.passos{padding:2mm 0}
+.p{display:grid;grid-template-columns:11mm 1fr;gap:4mm;padding:3.2mm 5mm;align-items:start}
+.p + .p{border-top:1px solid var(--linha)}
+.p .n{font-family:var(--mono);font-weight:700;font-size:13pt;color:var(--verde);
+  text-align:right;line-height:1.15}
+.p b{display:block;font-size:10.5pt;font-weight:600;line-height:1.3}
+.p .q{font-size:9pt;color:var(--tinta-2);margin-top:.6mm}
+.p .auto{font-size:8.5pt;color:var(--verde);margin-top:1.2mm;font-weight:500}
+.p.chave{background:var(--verde-claro)}
+.p.chave .n{color:var(--verde)}
+.p.falha{background:var(--tijolo-claro)}
+.p.falha .n{color:var(--tijolo)}
+.p .alerta{font-size:8.5pt;color:var(--tijolo);margin-top:1.2mm;font-weight:600}
+
+/* ---- seções ---- */
+h2.sec{font-size:17pt;font-weight:800;margin:0 0 2mm;line-height:1.15}
+p.lead{font-size:10.5pt;color:var(--tinta-2);max-width:15cm;margin:0 0 6mm}
+
+/* ---- placar ---- */
+.placar{display:grid;grid-template-columns:repeat(4,1fr);gap:3mm;margin:0 0 6mm}
+.kp{border:1px solid var(--linha);border-radius:3mm;padding:3.5mm;background:#fff}
+.kp .v{font-family:var(--mono);font-size:18pt;font-weight:700;line-height:1}
+.kp .r{font-size:8pt;color:var(--tinta-2);margin-top:1.5mm;line-height:1.3}
+.kp.mau{border-color:var(--tijolo-borda);background:var(--tijolo-claro)}
+.kp.mau .v{color:var(--tijolo)}
+.kp.bom{border-color:var(--verde-borda);background:var(--verde-claro)}
+.kp.bom .v{color:var(--verde)}
+
+/* ---- funil ---- */
+.funil{margin:0 0 6mm}
+.fl{display:grid;grid-template-columns:1fr auto;align-items:center;gap:4mm;
+  border:1px solid var(--linha);background:#fff;border-radius:2.5mm;padding:2.8mm 4mm;
+  margin-bottom:1.6mm;position:relative;overflow:hidden}
+.fl .barra{position:absolute;inset:0 auto 0 0;background:var(--verde-claro);z-index:0}
+.fl.vazio .barra{background:var(--tijolo-claro)}
+.fl > *{position:relative;z-index:1}
+.fl .txt b{font-size:10pt;font-weight:600}
+.fl .txt span{display:block;font-size:8.5pt;color:var(--tinta-2);margin-top:.4mm}
+.fl .n{font-family:var(--mono);font-size:15pt;font-weight:700}
+.fl.vazio .n{color:var(--tijolo)}
+.queda{font-size:8.5pt;color:var(--tijolo);font-weight:600;text-align:center;
+  margin:-.6mm 0 1mm;font-family:var(--mono)}
+
+/* ---- as duas mudanças ---- */
+.duas{display:grid;grid-template-columns:1fr 1fr;gap:4mm;margin:0 0 6mm}
+.card{border:1.5px solid var(--tinta);border-radius:3mm;padding:4.5mm;background:#fff}
+.card .tag{font-size:7.5pt;text-transform:uppercase;letter-spacing:.1em;font-weight:700;
+  color:var(--verde)}
+.card h3{font-size:12pt;font-weight:700;margin:1.5mm 0 2mm;line-height:1.2}
+.card p{margin:0;font-size:9.5pt;color:var(--tinta-2);line-height:1.45}
+.card .porque{margin-top:3mm;padding-top:2.5mm;border-top:1px solid var(--linha);
+  font-size:9pt;color:var(--tinta)}
+.card .porque b{color:var(--verde)}
+
+/* ---- tela ---- */
+.tela{display:grid;grid-template-columns:auto 1fr;gap:6mm;align-items:start;
+  border:1px solid var(--linha);border-radius:3mm;padding:5mm;background:var(--papel-2)}
+.fone{width:58mm;border:1.5px solid var(--tinta);border-radius:4mm;background:#fff;
+  padding:3mm;font-size:8.5pt}
+.fone .tt{font-family:var(--disp);font-weight:600;font-size:9pt;padding-bottom:2mm;
+  border-bottom:1px solid var(--linha);margin-bottom:2.5mm}
+.fone .av{font-size:7.5pt;text-transform:uppercase;letter-spacing:.07em;color:var(--tijolo);
+  font-weight:700;margin-bottom:1.8mm}
+.cv{border:1px solid var(--tijolo-borda);background:var(--tijolo-claro);border-radius:2.5mm;
+  padding:2.5mm}
+.cv .l1{display:flex;justify-content:space-between;font-weight:700;font-size:8.5pt}
+.cv .l1 span{font-family:var(--mono);font-weight:500;color:var(--tinta-2)}
+.cv .l2{font-size:8pt;color:var(--tinta-2);margin:1.5mm 0 2mm}
+.cv .bts{display:grid;grid-template-columns:1fr 1fr;gap:1.5mm}
+.cv .b{text-align:center;padding:1.8mm;border-radius:1.8mm;font-size:8pt;font-weight:700;
+  border:1px solid}
+.cv .b.s{background:var(--verde-claro);color:var(--verde);border-color:var(--verde-borda)}
+.cv .b.n{background:#fff;color:var(--tijolo);border-color:var(--tijolo-borda)}
+.tela ol{margin:0;padding-left:5mm;font-size:9.5pt;color:var(--tinta-2);line-height:1.6}
+.tela ol b{color:var(--tinta)}
+.tela h3{font-size:12pt;margin:0 0 3mm}
+
+/* ---- os quatro números ---- */
+.quatro{display:grid;grid-template-columns:1fr 1fr;gap:3mm}
+.q4{border:1px solid var(--linha);border-radius:3mm;padding:4mm;background:#fff}
+.q4 .cab{display:flex;justify-content:space-between;align-items:baseline;gap:3mm}
+.q4 b{font-size:10pt;font-weight:600}
+.q4 .ag{font-family:var(--mono);font-size:11pt;font-weight:700;color:var(--tinta-3)}
+.q4 p{margin:1.5mm 0 0;font-size:8.5pt;color:var(--tinta-2);line-height:1.4}
+
+.fecho{margin-top:7mm;border-left:3px solid var(--verde);padding:1mm 0 1mm 5mm}
+.fecho h3{font-size:13pt;margin-bottom:2mm}
+.fecho p{margin:0;font-size:10pt;color:var(--tinta-2);max-width:15cm}
+.rodape{margin-top:6mm;padding-top:3mm;border-top:1px solid var(--linha);
+  font-size:8pt;color:var(--tinta-3)}
+</style></head><body>
+
+<!-- ======================= PÁGINA 1 ======================= -->
+<section class="pg capa">
+  <div class="selo">Prime Eventos · como o Zaq trabalha pra você</div>
+  <h1>Do “oi” no WhatsApp ao contrato assinado</h1>
+  <p class="sub">Todo cliente que chama a Prime passa pelo mesmo caminho. Este
+  documento mostra esse caminho inteiro, o que o sistema já faz sozinho, e as
+  <strong>duas coisas</strong> que dependem de você — e que hoje estão fazendo a
+  gente perder cliente sem perceber.</p>
+  <div class="quem"><span>Feito pra <b>o time comercial da Prime</b></span>
+    <span>Dados reais de <b>13 a 27 de agosto</b></span></div>
+
+  <div class="mapa">
+    <div class="mapa-tit">O caminho, do começo ao fim</div>
+    <div class="passos">
+      <div class="p"><div class="n">1</div><div>
+        <b>O cliente manda mensagem no WhatsApp</b>
+        <div class="q">Pode ser do Instagram, de indicação, de quem passou na frente.</div>
+        <div class="auto">✓ O Zaq cria o lead sozinho e avisa o vendedor</div></div></div>
+
+      <div class="p"><div class="n">2</div><div>
+        <b>Alguém responde</b>
+        <div class="q">Quanto mais rápido, mais chance. Cliente de festa está pedindo
+        orçamento pra três lugares ao mesmo tempo.</div>
+        <div class="alerta">⚠ 7 pessoas chamaram e ninguém respondeu</div></div></div>
+
+      <div class="p chave"><div class="n">3</div><div>
+        <b>Marca a visita — pelo aplicativo, no lead</b>
+        <div class="q">Abre o lead no celular e toca em “Agendar visita”.</div>
+        <div class="auto">✓ Manda o WhatsApp com endereço, mapa e convite de calendário<br>
+        ✓ Guarda de qual cliente é a visita</div></div></div>
+
+      <div class="p"><div class="n">4</div><div>
+        <b>O cliente vem conhecer o espaço</b>
+        <div class="q">A visita é onde a festa deixa de ser preço e vira lugar.</div></div></div>
+
+      <div class="p falha"><div class="n">5</div><div>
+        <b>Você diz se ele apareceu</b>
+        <div class="q">No dia seguinte o aplicativo pergunta. Dois botões.</div>
+        <div class="alerta">⚠ É o passo que ninguém está fazendo — e sem ele
+        não dá pra saber quantos faltam</div></div></div>
+
+      <div class="p"><div class="n">6</div><div>
+        <b>Monta o orçamento e manda</b>
+        <div class="q">O cliente abre o link, vê tudo e aprova pelo celular.</div>
+        <div class="auto">✓ Fica registrado quando ele abriu e quando aprovou</div></div></div>
+
+      <div class="p"><div class="n">7</div><div>
+        <b>Sinal pago → contrato → data reservada</b>
+        <div class="q">O contrato nasce quando o sinal entra, e vai pra assinatura.</div>
+        <div class="auto">✓ Vira título a receber no financeiro</div></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PÁGINA 2 ======================= -->
+<section class="pg">
+  <h2 class="sec">Onde a gente está perdendo</h2>
+  <p class="lead">Estes números são da Prime, dos últimos quinze dias. Não é chute
+  nem exemplo — é o que está no sistema agora.</p>
+
+  <div class="placar">
+    <div class="kp"><div class="v">190</div><div class="r">pessoas chamaram no WhatsApp</div></div>
+    <div class="kp mau"><div class="v">14</div><div class="r">viraram visita marcada</div></div>
+    <div class="kp mau"><div class="v">5</div><div class="r">visitas sem ninguém dizer se o cliente veio</div></div>
+    <div class="kp mau"><div class="v">0</div><div class="r">sinais registrados no sistema</div></div>
+  </div>
+
+  <div class="funil">
+    <div class="fl"><div class="barra" style="width:100%"></div>
+      <div class="txt"><b>Chamaram no WhatsApp</b><span>o topo de tudo</span></div>
+      <div class="n">190</div></div>
+    <div class="queda">↓ só 7 em cada 100 viram visita</div>
+
+    <div class="fl"><div class="barra" style="width:8%"></div>
+      <div class="txt"><b>Visitas marcadas</b><span>e só 6 delas foram marcadas pelo aplicativo — as outras 8 o sistema não sabe de quem são</span></div>
+      <div class="n">14</div></div>
+    <div class="queda">↓ 6 ainda vão acontecer</div>
+
+    <div class="fl"><div class="barra" style="width:57%"></div>
+      <div class="txt"><b>Visitas que já aconteceram</b><span>a data já passou</span></div>
+      <div class="n">8</div></div>
+    <div class="queda">↓ 5 sem ninguém responder se o cliente veio</div>
+
+    <div class="fl"><div class="barra" style="width:37%"></div>
+      <div class="txt"><b>Sabemos o que aconteceu</b><span>2 vieram · 1 não veio</span></div>
+      <div class="n">3</div></div>
+    <div class="queda">↓</div>
+
+    <div class="fl vazio"><div class="barra" style="width:3%"></div>
+      <div class="txt"><b>Sinal pago</b><span>de 11 orçamentos montados, nenhum tem o sinal registrado</span></div>
+      <div class="n">0</div></div>
+  </div>
+
+  <div class="fecho">
+    <h3>O que isso quer dizer, sem rodeio</h3>
+    <p>A Prime <strong>não tem problema de cliente chegando</strong> — chegaram 190 em
+    quinze dias. O aperto está no meio do caminho: transformar quem chamou em visita
+    marcada, e fazer a visita acontecer. Corrigir isso não custa mais anúncio, custa
+    hábito.</p>
+  </div>
+</section>
+
+<!-- ======================= PÁGINA 3 ======================= -->
+<section class="pg">
+  <h2 class="sec">As duas coisas que dependem de você</h2>
+  <p class="lead">O resto o sistema faz sozinho. Estas duas não dá pra automatizar —
+  e são justamente as que estão faltando.</p>
+
+  <div class="duas">
+    <div class="card">
+      <div class="tag">Hábito 1</div>
+      <h3>Marque a visita pelo aplicativo, dentro do lead</h3>
+      <p>Não pela agenda do computador. Abre o lead no celular, “Agendar visita”,
+      escolhe dia e hora. Pronto.</p>
+      <div class="porque">Fazendo assim, o Zaq <b>manda sozinho</b> o WhatsApp com
+      endereço, mapa e convite pro calendário do cliente — e guarda de quem é a
+      visita. Marcando na mão pela agenda, nada disso acontece: hoje são
+      <b>8 das 14 visitas</b> que o sistema não sabe a qual cliente pertencem.</div>
+    </div>
+
+    <div class="card">
+      <div class="tag">Hábito 2</div>
+      <h3>Responda se o cliente apareceu</h3>
+      <p>No dia seguinte à visita, o aplicativo pergunta. São dois botões, leva dois
+      segundos.</p>
+      <div class="porque">É o que revela o <b>maior vazamento</b> de qualquer empresa
+      de eventos: gente que marca e não vem. Sem essa resposta ninguém sabe o tamanho
+      do problema — e quem não veio some da lista em vez de ser chamado de novo.</div>
+    </div>
+  </div>
+
+  <div class="tela">
+    <div class="fone">
+      <div class="tt">Minha agenda</div>
+      <div class="av">⚠ Precisa de resposta</div>
+      <div class="cv">
+        <div class="l1">Beatriz <span>25/08 16:00</span></div>
+        <div class="l2">A visita era anteontem. O cliente apareceu?</div>
+        <div class="bts"><div class="b s">✓ Apareceu</div><div class="b n">✕ Não apareceu</div></div>
+      </div>
+    </div>
+    <div>
+      <h3>O que muda na sua tela</h3>
+      <ol>
+        <li>A visita que já passou <b>volta pro topo da agenda</b> e fica lá até você
+        responder. Antes ela sumia no dia seguinte e não tinha onde dizer nada.</li>
+        <li>Você toca em <b>Apareceu</b> ou <b>Não apareceu</b>. O cartão some na hora.</li>
+        <li>Se não apareceu, aparece <b>Remarcar visita</b> ali mesmo — pra chamar o
+        cliente de volta no mesmo dia, enquanto ele ainda lembra.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PÁGINA 4 ======================= -->
+<section class="pg">
+  <h2 class="sec">Os quatro números da semana</h2>
+  <p class="lead">É o que o dono vai olhar toda segunda. Nenhum deles precisa de
+  planilha — saem prontos na tela de Relatórios.</p>
+
+  <div class="quatro">
+    <div class="q4"><div class="cab"><b>De quem chama, quantos viram visita</b>
+      <span class="ag">7%</span></div>
+      <p>Hoje: 14 de 190. É o número com mais espaço pra crescer — cada ponto aqui
+      vale mais que qualquer anúncio novo.</p></div>
+
+    <div class="q4"><div class="cab"><b>De quem marca, quantos aparecem</b>
+      <span class="ag">?</span></div>
+      <p>Só sabemos de 3 visitas em 8. Este número só passa a existir quando o time
+      responder o botão — é o hábito 2.</p></div>
+
+    <div class="q4"><div class="cab"><b>De quem visita, quantos pagam sinal</b>
+      <span class="ag">?</span></div>
+      <p>Zero sinal registrado hoje. Enquanto o sinal não é lançado, não dá pra dizer
+      o que é venda fechada e o que é promessa.</p></div>
+
+    <div class="q4"><div class="cab"><b>Quanto tempo até marcar a visita</b>
+      <span class="ag">3d</span></div>
+      <p>Da mensagem do cliente até a visita marcada. Três dias e meio na média —
+      tempo de sobra pro concorrente marcar antes.</p></div>
+  </div>
+
+  <div class="fecho">
+    <h3>A conta que interessa</h3>
+    <p>Com os mesmos 190 clientes chegando, sem gastar um real a mais: se em vez de
+    14 a gente marcar <strong>30 visitas</strong>, e das visitas marcadas
+    <strong>8 em cada 10 aparecerem</strong> — coisa que confirmação no dia anterior
+    resolve —, são 24 clientes dentro do espaço em vez de 8. O funil não precisa de
+    mais gente entrando. Precisa parar de vazar no meio.</p>
+  </div>
+
+  <p class="rodape">Documento gerado pelo Zaq com dados da conta da Prime Eventos em
+  27/08/2026. Os números mudam sozinhos conforme o time usa o sistema — este retrato
+  é do dia em que foi feito.</p>
+</section>
+
+</body></html>

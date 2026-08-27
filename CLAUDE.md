@@ -150,5 +150,29 @@ da main nova — nunca descartado:
 git rebase --onto origin/main <ultimo-commit-ja-mesclado>
 ```
 
+**E falta um passo, que só apareceu ao fazer isso pela primeira vez:** recomeçar
+a branch mexe só no local. A branch REMOTA continua apontando pro estado
+pré-merge — e é ela que a próxima sessão vai buscar. Sem fechar o ciclo, o
+problema volta na rodada seguinte.
+
+```
+git push --force-with-lease -u origin <branch>
+```
+
+O `--force-with-lease` aqui é seguro porque a remota carrega **só história já
+mesclada** — o squash levou tudo pra main. Confira antes, e o comando é este; diff
+vazio quer dizer que o conteúdo está inteiro na main e nada se perde:
+
+```
+git diff origin/<branch> origin/main
+```
+
+Se esse diff NÃO vier vazio, pare: há trabalho na remota que não entrou na main.
+Aí é `rebase --onto` (acima) pra salvar o que sobrou, nunca force.
+
 E o sinal de que se caiu nisso, pra reconhecer rápido: o PR mostra **mais arquivos
 e mais commits do que a mudança tem**, porque está remontando o que já entrou.
+
+Um segundo sinal, mais tardio: o CI fica “rodando” e nunca termina, ou o check do
+pytest simplesmente não aparece na lista. Antes de esperar mais, confira o
+`mergeable_state` do PR — `dirty` é isto aqui, não lentidão.

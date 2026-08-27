@@ -118,3 +118,37 @@ gerenciados na mão. Mudar o arquivo não muda o Render.
 Os testes exigem `TEST_DATABASE_URL` (trava do `tests/conftest.py`, nascida de um
 incidente em que o pytest apagou produção). Os testes do serviço Node são arquivos
 `teste-*.js` soltos em `services/wa-qr`, rodados na mão com `node`.
+
+## 4. Depois de mesclar, a branch recomeça da main
+
+Regra do dono, dada em 27/08/2026, depois de tropeçar duas vezes seguidas na mesma
+pedra:
+
+> "sim, faz assim por padrão"
+
+Os PRs deste repositório são mesclados com **squash**. O squash cria na `main` um
+commit NOVO com o mesmo conteúdo — e a branch continua com os commits originais.
+Pro git isso é história divergente.
+
+O sintoma é traiçoeiro porque **não é um erro**: o PR seguinte nasce em conflito
+(`mergeable_state: dirty`), e **o GitHub não roda CI em PR conflitado**. Nenhuma
+mensagem, nenhum check vermelho — o `pytest` simplesmente nunca aparece, e quem
+está olhando acha que é lentidão. Aconteceu no #576 e de novo no #577, nos dois
+casos custando um ciclo até alguém desconfiar.
+
+**Então, ao começar trabalho novo depois de um merge:**
+
+```
+git fetch origin main && git checkout -B <branch> origin/main
+```
+
+O nome da branch continua o mesmo (é o que as instruções da sessão exigem); o que
+muda é a base. Se a branch já tiver commit NÃO mesclado, ele é rebaseado por cima
+da main nova — nunca descartado:
+
+```
+git rebase --onto origin/main <ultimo-commit-ja-mesclado>
+```
+
+E o sinal de que se caiu nisso, pra reconhecer rápido: o PR mostra **mais arquivos
+e mais commits do que a mudança tem**, porque está remontando o que já entrou.

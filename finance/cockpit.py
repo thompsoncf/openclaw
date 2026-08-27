@@ -1844,6 +1844,18 @@ def agenda_da_conta(pool, conta_id: int, membro_id: int | None = None,
     if dias:
         janela = "and e.inicio < %s "
         args.append(hoje + timedelta(days=max(1, int(dias))))
+    # A VISITA QUE JÁ PASSOU E NINGUÉM RESPONDEU volta pra lista. Sem isto ela
+    # sumia da tela do vendedor no dia seguinte e não havia onde dizer se o cliente
+    # apareceu — por isso, em 26/08, 5 das 8 visitas já realizadas da conta 34
+    # estavam sem desfecho, e a taxa de comparecimento (o indicador que o dono quer
+    # acompanhar) saía de uma amostra de 3.
+    #
+    # O filtro é estreito de propósito: só VISITA (o compromisso que tem um cliente
+    # do outro lado), nunca a festa do cliente — `tipo_evento` preenchido é a festa,
+    # e perguntar "apareceu?" pra um casamento não faz sentido.
+    args.append(hoje)
+    volta = ("or (e.inicio < %s and e.desfecho is null and e.status='ativo' "
+             "    and e.titulo ilike 'visita%%' and e.tipo_evento is null) ")
 
     with pool.connection() as c:
         rows = c.execute(
@@ -1851,12 +1863,13 @@ def agenda_da_conta(pool, conta_id: int, membro_id: int | None = None,
                       e.prospeccao_id, p.empresa, coalesce(p.whatsapp, p.telefone, ''),
                       e.status, e.pre_reserva_ate, e.membro_id,
                       coalesce(nullif(m.nome,''), ''),
-                      coalesce(e.hora_sugerida, false), e.convidados, e.sinal_centavos
+                      coalesce(e.hora_sugerida, false), e.convidados, e.sinal_centavos,
+                      e.desfecho, e.tipo_evento
                  from eventos_agenda e
                  left join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
                  left join membros m on m.id = e.membro_id
                 where e.conta_id=%s {cond}and e.status in ('ativo','pre_reservado')
-                  and e.inicio >= %s {janela}
+                  and ((e.inicio >= %s {janela}) {volta})
                 order by e.inicio""",
             args).fetchall()
 
@@ -1895,6 +1908,13 @@ def agenda_da_conta(pool, conta_id: int, membro_id: int | None = None,
             "hora_sugerida": bool(r[12]), "convidados": r[13],
             "sinal_centavos": r[14],
             "choque": bool(ini and ini.date() in choques),
+            # PRECISA DE RESPOSTA: visita cuja hora já passou e que ninguém marcou.
+            # É o que a tela sobe pro topo, e o que some no instante em que for
+            # respondida — o vendedor não fica com um lembrete morto na mão.
+            "desfecho": r[15],
+            "precisa_resposta": bool(ini and ini < agora and r[15] is None
+                                     and (r[16] is None)
+                                     and (r[1] or "").lower().startswith("visita")),
         })
     return out
 

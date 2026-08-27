@@ -242,6 +242,33 @@ def test_o_js_do_cep_no_app_do_vendedor_compila(tmp_path):
     assert r.returncode == 0, r.stderr.strip()[:600]
 
 
+def test_o_js_de_responder_a_visita_compila(tmp_path):
+    """`_JS_DESFECHO` é string Python solta em painel_cockpit, igual ao `_CEP_JS` —
+    e falha do mesmo jeito calado: erro de sintaxe aqui e os botões "Apareceu / Não
+    apareceu" viram enfeite, o vendedor toca e nada acontece.
+
+    E é justamente o botão que faz o dado existir: sem ele o desfecho continua
+    vazio e a taxa de comparecimento do relatório não sai do lugar."""
+    if not shutil.which("node"):
+        pytest.skip("sem node no ambiente")
+    from web import painel_cockpit as pc
+    corpo = "\n".join(_scripts(pc._JS_DESFECHO))
+    assert corpo.strip(), "o _JS_DESFECHO deixou de ter <script> — o teste ficaria vazio"
+    alvo = tmp_path / "desfecho.js"
+    alvo.write_text(corpo, encoding="utf-8")
+    r = subprocess.run(["node", "--check", str(alvo)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr.strip()[:600]
+
+
+def test_responder_a_visita_usa_a_rota_que_ja_existe():
+    """Nada de endpoint novo: `marcar_desfecho` já é servido por
+    POST /painel/agenda/desfecho, e o portão de papel deixa o vendedor passar
+    (`/painel/agenda` está em rotas_do_papel, e o gate casa por prefixo)."""
+    from web import painel_cockpit as pc
+    assert "/painel/agenda/desfecho" in pc._JS_DESFECHO
+    assert "realizado" in pc._JS_DESFECHO and "nao_realizado" in pc._JS_DESFECHO
+
+
 def test_o_bloco_do_qr_esta_mesmo_na_pagina():
     """Guarda do teste acima: se o bloco do QR sumir do render, o teste de sintaxe
     fica verde sem ter olhado o código que já quebrou uma vez."""

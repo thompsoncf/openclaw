@@ -397,6 +397,31 @@ b,strong{font-weight:600}
 select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;
   color:var(--text);padding:.55rem .6rem;font-family:inherit;font-size:.85rem}
 
+/* ---------- visita esperando resposta ----------
+   Coral e no topo de propósito: é a única coisa na agenda que o vendedor precisa
+   RESOLVER, não consultar. Some no instante em que ele responde. */
+.pend-tit{display:flex;align-items:center;gap:.4rem;font-size:.7rem;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--coral);font-weight:700;padding:.2rem .2rem .55rem}
+.pend-tit .cnt{font-family:var(--mono);background:var(--coral-fundo);color:#F0B8B8;
+  border:1px solid var(--coral-borda);border-radius:99px;padding:0 .38rem;font-size:.7rem}
+.pend{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:12px;
+  padding:.7rem .8rem;display:flex;flex-direction:column;gap:.55rem;margin-bottom:.5rem}
+.pend-top{display:flex;align-items:baseline;justify-content:space-between;gap:.5rem}
+.pend-top b{font-size:.9rem;color:#F6D3D0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pend-top span{font-family:var(--mono);font-size:.7rem;color:#D9AEAA;flex-shrink:0}
+.pend-q{font-size:.82rem;color:#E8C4C1}
+.pend-bts{display:grid;grid-template-columns:1fr 1fr;gap:.45rem}
+.pb{padding:.55rem;border-radius:9px;font-size:.82rem;font-weight:600;border:1px solid;
+  font-family:inherit;cursor:pointer}
+.pb.sim{background:var(--neon-fundo);color:var(--neon-bright);border-color:var(--neon-borda)}
+.pb.nao{background:#241313;color:#F0B8B8;border-color:var(--coral-borda)}
+.pb:disabled{opacity:.5}
+.pend.feito{border-color:var(--line);background:var(--surface)}
+.pend.feito .pend-top b,.pend.feito .pend-q{color:var(--text-dim)}
+.pend .rea{grid-column:1/-1;background:var(--ambar-fundo);color:#F0DCA6;
+  border-color:var(--ambar-borda);text-align:center;display:block;text-decoration:none;
+  padding:.55rem;border-radius:9px;font-size:.82rem;font-weight:600;border:1px solid}
+
 /* ---------- chat (tela do lead) ---------- */
 .chat{flex:1;overflow-y:auto;padding:.9rem 1.1rem;display:flex;flex-direction:column;gap:.5rem;
   background:#0B141A;position:relative;z-index:1}
@@ -1434,6 +1459,69 @@ _MESES_EXT = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho", "j
               "agosto", "setembro", "outubro", "novembro", "dezembro"]
 
 
+# O JS dos dois botões. Sem regex e sem barra invertida de propósito: este arquivo
+# é string Python comum (não raw), e uma classe de caractere tipo barra-d num literal
+# JS vira escape inválido do Python — foi assim que um bloco <script> inteiro já
+# morreu por SyntaxError aqui (ver tests/test_painel_js_sintaxe.py).
+_JS_DESFECHO = """<script>
+(function(){
+  var caixas = document.querySelectorAll('.pend-bts');
+  if(!caixas.length) return;
+  Array.prototype.forEach.call(caixas, function(box){
+    var id = box.getAttribute('data-ev');
+    Array.prototype.forEach.call(box.querySelectorAll('.pb'), function(bt){
+      bt.addEventListener('click', function(){
+        var d = bt.getAttribute('data-d');
+        Array.prototype.forEach.call(box.querySelectorAll('.pb'), function(b){
+          b.disabled = true;
+        });
+        bt.textContent = 'salvando...';
+        fetch('/painel/agenda/desfecho', {
+          method: 'POST', credentials: 'same-origin',
+          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+          body: 'evento_id=' + encodeURIComponent(id) + '&desfecho=' + encodeURIComponent(d)
+        }).then(function(r){ return r.json(); }).then(function(j){
+          if(!j || !j.ok) throw new Error('falhou');
+          var cartao = box.parentNode;
+          cartao.className = 'pend feito';
+          if(d === 'nao_realizado'){
+            // NÃO APARECEU ABRE O REAGENDAMENTO NA HORA. O no-show que volta pra
+            // lista geral é o que o dono queria parar de perder; aqui ele já sai
+            // com o próximo passo na mão.
+            cartao.querySelector('.pend-q').textContent = 'Marcado: nao apareceu. Reagendar?';
+            box.innerHTML = '';
+            var a = document.createElement('a');
+            a.className = 'rea';
+            a.href = AG_BASE + '/agenda/' + id + '/remarcar';
+            a.textContent = 'Remarcar visita';
+            box.appendChild(a);
+          } else {
+            cartao.querySelector('.pend-q').textContent = 'Marcado: o cliente apareceu.';
+            box.innerHTML = '';
+            // some sozinho — o vendedor ja respondeu, e cartao respondido em cima
+            // da tela vira ruido no dia seguinte.
+            window.setTimeout(function(){
+              if(cartao.parentNode) cartao.parentNode.removeChild(cartao);
+            }, 1200);
+          }
+        }).catch(function(){
+          Array.prototype.forEach.call(box.querySelectorAll('.pb'), function(b){
+            b.disabled = false;
+          });
+          bt.textContent = (d === 'realizado') ? 'Apareceu' : 'Nao apareceu';
+          cartaoAviso(box);
+        });
+      });
+    });
+  });
+  function cartaoAviso(box){
+    var q = box.parentNode.querySelector('.pend-q');
+    if(q) q.textContent = 'Nao consegui salvar. Tente de novo.';
+  }
+})();
+</script>"""
+
+
 @router.get("/cockpit/agenda", response_class=HTMLResponse)
 def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
     """A agenda da CONTA, pros três papéis, DAQUI PRA FRENTE.
@@ -1466,6 +1554,13 @@ def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
     estado = e if e in ("reservado", "pre") else "tudo"
     pool = get_pool()
     eventos = ck.agenda_da_conta(pool, conta_id, membro_id, so_meus=so_meus, estado=estado)
+    # A VISITA QUE JÁ PASSOU E NINGUÉM RESPONDEU sobe pro topo, num bloco próprio, e
+    # sai da lista normal. Antes ela simplesmente não existia aqui: a consulta cortava
+    # em `inicio >= hoje` e a visita sumia da tela do vendedor no dia seguinte — por
+    # isso, em 26/08, 5 das 8 visitas já realizadas da conta 34 estavam sem desfecho.
+    # Sem saber quem apareceu, não há taxa de comparecimento pra gerir.
+    pendentes = [v for v in eventos if v.get("precisa_resposta")]
+    eventos = [v for v in eventos if not v.get("precisa_resposta")]
     cont = ck.contagem_agenda(pool, conta_id, membro_id, so_meus=so_meus)
     hoje = [v for v in eventos if v["hoje"]]
 
@@ -1580,6 +1675,27 @@ def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
                 if aberto:
                     miolo += "".join(bloco(v) for v in evs)
 
+    def _cartao_pendente(v):
+        """Uma visita esperando resposta. Duas escolhas e nada mais: quanto menos
+        houver pra ler, mais gente responde — e responder é o ponto."""
+        quando = f"{esc(v['dia'])} às {esc(v['hora'])}"
+        return (
+            "<div class=pend>"
+            f"<div class=pend-top><b>{esc(v['titulo'])}</b><span>{quando}</span></div>"
+            "<div class=pend-q>O cliente apareceu?</div>"
+            f"<div class=pend-bts data-ev='{v['id']}'>"
+            "<button type=button class='pb sim' data-d='realizado'>✅ Apareceu</button>"
+            "<button type=button class='pb nao' data-d='nao_realizado'>❌ Não apareceu</button>"
+            "</div></div>")
+
+    bloco_pend = ""
+    if pendentes:
+        bloco_pend = (
+            "<div class=bloco style='margin-top:.9rem'>"
+            f"<div class=pend-tit>⚠ Precisa de resposta <span class=cnt>{len(pendentes)}</span></div>"
+            + "".join(_cartao_pendente(v) for v in pendentes)
+            + "</div>")
+
     # o seletor só existe pra quem TEM agenda própria (membro_id) — pro dono
     # titular "meus" seria um filtro que devolve sempre vazio.
     seletor = ""
@@ -1605,7 +1721,8 @@ def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
     fonte = f"{len(hoje)} hoje · {cont['reservado']} reservadas · {cont['pre']} pré-reservas"
     corpo = (_hdr("Agenda", fonte)
              + _flash(request)
-             + f"<div class=scroll>{seletor}{miolo}</div>"
+             + f"<div class=scroll>{bloco_pend}{seletor}{miolo}</div>"
+             + (f"<script>var AG_BASE={_BASE!r};</script>" + _JS_DESFECHO if pendentes else "")
              + f"<a class=fab href='{_BASE}/agenda/novo' aria-label='Novo compromisso'>+</a>"
              + abas)
     return _page("Agenda", corpo)

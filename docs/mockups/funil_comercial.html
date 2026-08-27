@@ -1,0 +1,380 @@
+<title>Funil Comercial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Tokens de web/tema.py — o mockup só serve pra decidir se parecer com a tela real.
+   Escuro único de propósito: o painel não tem tema claro. */
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.86em;color:var(--roxo)}
+.wrap{max-width:1000px;margin:0 auto;padding:2.6rem 1.25rem 5rem;
+  display:flex;flex-direction:column;gap:2.8rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;
+  color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.6rem,4vw,2.15rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:68ch}
+.head .marca{color:var(--neon)}
+.sec > h2{font-size:1.15rem;margin-bottom:.15rem}
+.sec > p.leg{color:var(--text-dim);margin:.3rem 0 1.15rem;max-width:72ch;font-size:.9rem}
+
+/* ---- manchete ---- */
+.manchete{border:1px solid var(--coral-borda);background:var(--coral-fundo);
+  border-radius:14px;padding:1.15rem 1.3rem;display:flex;gap:1.1rem;align-items:flex-start}
+.manchete .ic{font-size:1.5rem;line-height:1;flex:none}
+.manchete h2{font-size:1.05rem;color:#F2BDB9;margin-bottom:.3rem}
+.manchete p{margin:0 0 .5rem;color:#D9AEAA;font-size:.9rem;max-width:72ch}
+.manchete p:last-child{margin-bottom:0}
+.manchete b{font-family:var(--mono);font-variant-numeric:tabular-nums;color:#F6D3D0}
+.manchete code{color:#F0C3BF}
+
+/* ---- o funil ---- */
+.funil{display:flex;flex-direction:column;gap:.5rem}
+.deg{border:1px solid var(--line);border-radius:12px;background:var(--surface);
+  padding:.8rem 1rem;display:grid;grid-template-columns:1fr auto;gap:.15rem .9rem;
+  align-items:center;position:relative;overflow:hidden}
+.deg .fill{position:absolute;inset:0 auto 0 0;background:var(--neon-fundo);
+  border-right:2px solid var(--neon-borda);z-index:0}
+.deg.vazio .fill{background:var(--coral-fundo);border-right-color:var(--coral-borda)}
+.deg > *{position:relative;z-index:1}
+.deg-nome{font-weight:600;font-size:.95rem}
+.deg-n{font-family:var(--mono);font-size:1.5rem;font-weight:600;line-height:1;
+  font-variant-numeric:tabular-nums;text-align:right}
+.deg.vazio .deg-n{color:var(--coral)}
+.deg-sub{font-size:.78rem;color:var(--text-dim);grid-column:1}
+.deg-taxa{font-family:var(--mono);font-size:.74rem;color:var(--text-dim);
+  text-align:right;font-variant-numeric:tabular-nums}
+.seta{text-align:center;color:var(--text-faint);font-size:.78rem;
+  font-family:var(--mono);margin:-.15rem 0}
+.seta b{color:var(--coral);font-family:var(--mono)}
+
+/* ---- indicadores ---- */
+.inds{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}
+@media (max-width:760px){.inds{grid-template-columns:1fr}}
+.ind{border:1px solid var(--line);border-radius:12px;background:var(--surface);
+  padding:.9rem 1rem;display:flex;flex-direction:column;gap:.45rem}
+.ind h4{margin:0;font-size:.82rem;font-family:var(--body);font-weight:600;
+  color:var(--text-dim)}
+.ind .v{font-family:var(--mono);font-size:1.6rem;line-height:1;font-weight:600;
+  font-variant-numeric:tabular-nums}
+.ind.ok .v{color:var(--neon-bright)} .ind.fraco .v{color:var(--ambar)}
+.ind.sem .v{color:var(--coral);font-size:1.15rem}
+.cob{font-size:.74rem;display:flex;align-items:center;gap:.4rem}
+.cob .pill{font-size:.66rem;font-weight:700;padding:.1rem .45rem;border-radius:99px;
+  text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
+.cob.boa{color:var(--text-dim)}
+.cob.boa .pill{background:var(--neon-fundo);color:var(--neon-bright);border:1px solid var(--neon-borda)}
+.cob.ruim{color:#D9AEAA}
+.cob.ruim .pill{background:var(--coral-fundo);color:#F0B8B8;border:1px solid var(--coral-borda)}
+
+/* ---- tela ---- */
+.tela{border:1px solid var(--line);border-radius:14px;background:var(--bg-2);overflow:hidden}
+.abas{display:flex;gap:.35rem;overflow-x:auto;padding:.7rem 1.1rem 0;
+  border-bottom:1px solid var(--line);scrollbar-width:none}
+.abas::-webkit-scrollbar{display:none}
+.aba{font-size:.79rem;padding:.42rem .7rem;border-radius:8px 8px 0 0;white-space:nowrap;
+  color:var(--text-dim);border:1px solid transparent;border-bottom:none}
+.aba.ativa{background:var(--surface);border-color:var(--line);color:var(--text);font-weight:600}
+.rolagem{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:.83rem}
+th{text-align:left;font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--text-faint);font-weight:600;padding:.55rem .7rem;
+  border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:.6rem .7rem;border-bottom:1px solid var(--line);white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+.nome{font-weight:600;max-width:24ch;overflow:hidden;text-overflow:ellipsis}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+.tag{display:inline-block;padding:.13rem .5rem;border-radius:99px;font-size:.7rem;
+  font-weight:600;white-space:nowrap}
+.tag.ok{background:var(--neon-fundo);color:var(--neon-bright);border:1px solid var(--neon-borda)}
+.tag.avi{background:var(--ambar-fundo);color:#F0DCA6;border:1px solid var(--ambar-borda)}
+.tag.err{background:var(--coral-fundo);color:#F0B8B8;border:1px solid var(--coral-borda)}
+.tag.neu{background:#20242A;color:#C7CCD6;border:1px solid #3A4048}
+.solto{color:var(--text-faint);font-style:italic}
+
+/* ---- cockpit ---- */
+.fone{max-width:360px;margin:0 auto;border:1px solid var(--line);border-radius:22px;
+  background:var(--bg-2);padding:.9rem;display:flex;flex-direction:column;gap:.7rem}
+.fone-topo{display:flex;align-items:center;justify-content:space-between;
+  padding:.1rem .3rem .4rem;border-bottom:1px solid var(--line)}
+.fone-topo b{font-family:var(--display);font-size:.95rem}
+.fone-topo span{font-size:.72rem;color:var(--text-faint)}
+.bloco-tit{display:flex;align-items:center;gap:.45rem;font-size:.74rem;
+  text-transform:uppercase;letter-spacing:.07em;color:var(--coral);font-weight:700}
+.bloco-tit .cnt{font-family:var(--mono);background:var(--coral-fundo);color:#F0B8B8;
+  border:1px solid var(--coral-borda);border-radius:99px;padding:0 .4rem;font-size:.72rem}
+.cv{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:12px;
+  padding:.75rem .85rem;display:flex;flex-direction:column;gap:.6rem}
+.cv-lin{display:flex;align-items:baseline;justify-content:space-between;gap:.5rem}
+.cv-nome{font-weight:700;font-size:.92rem;color:#F6D3D0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.cv-quando{font-family:var(--mono);font-size:.72rem;color:#D9AEAA;flex:none}
+.cv-perg{font-size:.83rem;color:#E8C4C1}
+.cv-bts{display:grid;grid-template-columns:1fr 1fr;gap:.45rem}
+.bt{text-align:center;padding:.5rem;border-radius:9px;font-size:.83rem;font-weight:600;
+  border:1px solid}
+.bt.sim{background:var(--neon-fundo);color:var(--neon-bright);border-color:var(--neon-borda)}
+.bt.nao{background:#241313;color:#F0B8B8;border-color:var(--coral-borda)}
+.depois{border:1px dashed var(--line);border-radius:12px;padding:.7rem .85rem;
+  display:flex;flex-direction:column;gap:.5rem;background:var(--surface)}
+.depois .cv-perg{color:var(--text-dim)}
+.depois .bt.rea{grid-column:1/-1;background:var(--ambar-fundo);color:#F0DCA6;
+  border-color:var(--ambar-borda)}
+.normal{border:1px solid var(--line);background:var(--surface);border-radius:12px;
+  padding:.65rem .85rem;display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
+.normal b{font-size:.88rem;font-weight:600}
+.normal span{font-family:var(--mono);font-size:.72rem;color:var(--text-dim)}
+.legenda{font-size:.78rem;color:var(--text-faint);text-align:center;max-width:44ch;
+  margin:.2rem auto 0}
+
+/* ---- notas ---- */
+.notas{display:flex;flex-direction:column;gap:.7rem}
+.nota{border:1px solid var(--line);border-left:3px solid var(--ambar);
+  border-radius:0 11px 11px 0;background:var(--surface);padding:.8rem 1rem}
+.nota h4{margin:0 0 .25rem;font-size:.85rem;font-family:var(--display);font-weight:600}
+.nota p{margin:0;font-size:.84rem;color:var(--text-dim);max-width:74ch}
+.nota.achado{border-left-color:var(--coral)}
+.nota.fora{border-left-color:var(--text-faint)}
+.nota.bom{border-left-color:var(--neon)}
+.rodape{border-top:1px solid var(--line);padding-top:1.2rem;color:var(--text-faint);
+  font-size:.8rem;max-width:74ch}
+</style>
+
+<div class="wrap">
+
+  <header class="head">
+    <div class="eyebrow">Mockup · Relatórios + Cockpit</div>
+    <h1>Funil comercial <span class="marca">·</span> e o buraco que impede de medi-lo</h1>
+    <p>A orientação que você mandou pede quatro indicadores semanais. Medi os
+    quatro contra o que o ZAQ tem gravado hoje na conta 34 (Prime): <b>a estrutura
+    existe inteira, o preenchimento não</b>. Todos os números desta página são reais.</p>
+  </header>
+
+  <section class="manchete">
+    <div class="ic">🚪</div>
+    <div>
+      <h2>Cinco visitas já aconteceram e ninguém disse se o cliente apareceu</h2>
+      <p>É o indicador que a orientação chama de <b>ponto mais crítico</b> — e ele
+      não tem dado. De 8 visitas que já passaram, 3 foram respondidas. Uma taxa de
+      comparecimento tirada daí não é métrica, é anedota.</p>
+      <p><b>E a causa não é desleixo do vendedor.</b> O Cockpit lista a agenda com
+      <code>e.inicio &gt;= hoje</code>: a visita <b>some da tela dele no dia
+      seguinte</b>. O botão de marcar existe, mas mora na Agenda do desktop, que o
+      vendedor não abre. Nunca há um momento em que o app pergunte "e aí, apareceu?".</p>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O funil, como está hoje</h2>
+    <p class="leg">Conta 34, todo o período. A largura de cada faixa é proporcional
+    ao degrau anterior — o estreitamento é a perda.</p>
+
+    <div class="funil">
+      <div class="deg">
+        <div class="fill" style="width:100%"></div>
+        <span class="deg-nome">Leads recebidos</span>
+        <span class="deg-n">192</span>
+        <span class="deg-sub">entraram pelo chip do WhatsApp</span>
+        <span class="deg-taxa">—</span>
+      </div>
+      <div class="seta">↓ <b>7,3%</b> viram visita</div>
+      <div class="deg">
+        <div class="fill" style="width:7.3%"></div>
+        <span class="deg-nome">Visitas agendadas</span>
+        <span class="deg-n">14</span>
+        <span class="deg-sub">só <b>6</b> estão ligadas a um lead — 8 são soltas</span>
+        <span class="deg-taxa">14 / 192</span>
+      </div>
+      <div class="seta">↓ 6 ainda vão acontecer</div>
+      <div class="deg">
+        <div class="fill" style="width:57%"></div>
+        <span class="deg-nome">Já aconteceram</span>
+        <span class="deg-n">8</span>
+        <span class="deg-sub">a data já passou</span>
+        <span class="deg-taxa">8 / 14</span>
+      </div>
+      <div class="seta">↓ <b>5 sem resposta</b></div>
+      <div class="deg">
+        <div class="fill" style="width:37.5%"></div>
+        <span class="deg-nome">Respondidas</span>
+        <span class="deg-n">3</span>
+        <span class="deg-sub"><b>2 apareceram</b> · 1 não apareceu</span>
+        <span class="deg-taxa">3 / 8</span>
+      </div>
+      <div class="seta">↓</div>
+      <div class="deg vazio">
+        <div class="fill" style="width:2%"></div>
+        <span class="deg-nome">Sinal pago</span>
+        <span class="deg-n">0</span>
+        <span class="deg-sub">nenhum orçamento com sinal registrado — em conta nenhuma</span>
+        <span class="deg-taxa">0 / 11 orçamentos</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Os quatro indicadores semanais</h2>
+    <p class="leg">Cada um sai com a <b>cobertura do dado</b> ao lado. Taxa apurada
+    em menos da metade da amostra sai marcada — é o que separa um relatório que
+    informa de um que engana.</p>
+
+    <div class="inds">
+      <div class="ind fraco">
+        <h4>Lead → visita agendada</h4>
+        <span class="v">7,3%</span>
+        <span class="cob ruim"><span class="pill">parcial</span> 8 das 14 visitas não têm lead ligado</span>
+      </div>
+      <div class="ind fraco">
+        <h4>Agendada → realizada</h4>
+        <span class="v">2 de 3</span>
+        <span class="cob ruim"><span class="pill">amostra de 3</span> 5 das 8 sem resposta</span>
+      </div>
+      <div class="ind sem">
+        <h4>Realizada → sinal pago</h4>
+        <span class="v">sem dado</span>
+        <span class="cob ruim"><span class="pill">zerado</span> nenhum sinal registrado na base</span>
+      </div>
+      <div class="ind ok">
+        <h4>Entrada do lead → agendamento</h4>
+        <span class="v">3d 13h</span>
+        <span class="cob boa"><span class="pill">confiável</span> mediana das 6 ligadas · de 6 min a 7,9 dias</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>A tabela, na aba nova</h2>
+    <p class="leg">Uma linha por visita. Mesmo esqueleto das outras abas de
+    Relatórios — período, filtros e exportar PDF.</p>
+    <div class="tela">
+      <nav class="abas">
+        <span class="aba">Orçamentos</span><span class="aba">Contratos</span>
+        <span class="aba">Agenda</span><span class="aba">Leads do chip</span>
+        <span class="aba ativa">Funil</span>
+      </nav>
+      <div class="rolagem">
+        <table>
+          <thead><tr>
+            <th>Lead</th><th>Vendedor</th><th>Visita marcada</th>
+            <th class="num">Esperou p/ agendar</th><th>O cliente apareceu?</th>
+          </tr></thead>
+          <tbody>
+            <tr><td class="nome">Juliana</td><td>JACQUELINE PRIME</td><td>22/08 08:30</td>
+              <td class="num">1d 22h</td><td><span class="tag err">ninguém respondeu</span></td></tr>
+            <tr><td class="nome">Auria❣</td><td>JACQUELINE PRIME</td><td>25/08 15:00</td>
+              <td class="num">6 min</td><td><span class="tag err">ninguém respondeu</span></td></tr>
+            <tr><td class="nome">Beatriz</td><td>PEDRO YAN PRIME</td><td>25/08 16:00</td>
+              <td class="num">7d 22h</td><td><span class="tag err">ninguém respondeu</span></td></tr>
+            <tr><td class="nome solto">VISITA TÉCNICA - PEDRO/JACQUE</td><td>PEDRO YAN PRIME</td>
+              <td>25/08 17:30</td><td class="num solto">sem lead</td>
+              <td><span class="tag avi">não apareceu</span></td></tr>
+            <tr><td class="nome solto">VISITA TÉCNICA - PEDRO</td><td>PEDRO YAN PRIME</td>
+              <td>24/08 10:00</td><td class="num solto">sem lead</td>
+              <td><span class="tag ok">apareceu</span></td></tr>
+            <tr><td class="nome solto">VISITA THIAGO PINHEIRO</td><td>—</td>
+              <td>21/08 18:00</td><td class="num solto">sem lead</td>
+              <td><span class="tag err">ninguém respondeu</span></td></tr>
+            <tr><td class="nome">Lêda Lopes</td><td>JACQUELINE PRIME</td><td>28/08 16:00</td>
+              <td class="num">5d 5h</td><td><span class="tag neu">ainda vai acontecer</span></td></tr>
+            <tr><td class="nome">Erys</td><td>JACQUELINE PRIME</td><td>01/09 13:00</td>
+              <td class="num">5d 8h</td><td><span class="tag neu">ainda vai acontecer</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="padding:.75rem 1.1rem;color:var(--text-faint);font-size:.78rem">
+        14 visitas · <b>8 soltas</b> aparecem em itálico: nasceram na Agenda, sem lead ligado
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Parte 2 — o Cockpit passa a perguntar</h2>
+    <p class="leg">Sem isto o relatório acima mede o vazio. A visita que já passou
+    <b>volta</b> pra tela do vendedor, num bloco no topo, e fica lá até ser
+    respondida. É a parte que faz o dado existir.</p>
+
+    <div class="fone">
+      <div class="fone-topo"><b>Minha agenda</b><span>PEDRO YAN · 27/08</span></div>
+
+      <div class="bloco-tit">⚠ Precisa de resposta <span class="cnt">2</span></div>
+
+      <div class="cv">
+        <div class="cv-lin"><span class="cv-nome">Beatriz</span>
+          <span class="cv-quando">25/08 16:00</span></div>
+        <div class="cv-perg">A visita era anteontem. O cliente apareceu?</div>
+        <div class="cv-bts">
+          <span class="bt sim">✅ Apareceu</span>
+          <span class="bt nao">❌ Não apareceu</span>
+        </div>
+      </div>
+
+      <div class="depois">
+        <div class="cv-lin"><span class="cv-nome" style="color:var(--text)">Juliana</span>
+          <span class="cv-quando" style="color:var(--text-dim)">22/08 08:30</span></div>
+        <div class="cv-perg">Marcado: <b style="color:#F0B8B8">não apareceu</b>.
+          Reagendar hoje mesmo?</div>
+        <div class="cv-bts"><span class="bt rea">📅 Remarcar visita</span></div>
+      </div>
+
+      <div class="bloco-tit" style="color:var(--text-faint);margin-top:.3rem">Próximas</div>
+      <div class="normal"><b>Lêda Lopes</b><span>28/08 16:00</span></div>
+      <div class="normal"><b>Erys</b><span>01/09 13:00</span></div>
+
+      <p class="legenda">Some do bloco no instante em que for respondida. Chama a
+      rota que já existe — <code>POST /painel/agenda/desfecho</code>.</p>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O que está por trás disso</h2>
+    <div class="notas">
+      <div class="nota bom">
+        <h4>Metade do caminho já funciona — não vou reescrever</h4>
+        <p>Visita agendada <b>pelo Cockpit</b> já faz tudo certo: cria o compromisso
+        ligado ao lead, registra a atividade, move o lead pra <code>qualificado</code>
+        e manda o WhatsApp com o convite de calendário. As 8 soltas nasceram na
+        Agenda do desktop, na mão — e vêm batizadas com o nome do <b>vendedor</b>
+        ("VISITA TÉCNICA - PEDRO"), então nem dá pra saber de que cliente são.</p>
+      </div>
+      <div class="nota achado">
+        <h4>"Ninguém respondeu" nunca vira "não apareceu"</h4>
+        <p>São coisas diferentes, e confundi-las inventaria um no-show que não
+        houve — justamente o número que a orientação quer usar pra decidir. Silêncio
+        tem cor própria na tela e fica de fora das taxas.</p>
+      </div>
+      <div class="nota">
+        <h4>No ZAQ, "qualificado" quer dizer "visita agendada"</h4>
+        <p>É o Cockpit que move o lead pra esse status ao marcar a visita. Por isso
+        são 7 e não 68 como no exemplo: não é sub-registro, é outra régua. Você
+        escolheu manter o status como está, então o relatório diz isso na cara em
+        vez de inventar uma definição própria.</p>
+      </div>
+      <div class="nota fora">
+        <h4>Fora do escopo: como o sinal é registrado</h4>
+        <p><code>sinal_pago_em</code> zerado em toda a base é problema real, mas é do
+        fluxo de cobrança — outro pedido e outro risco. O relatório mostra o buraco
+        sem tentar tapá-lo.</p>
+      </div>
+    </div>
+  </section>
+
+  <p class="rodape">Medido em 26/08/2026 na conta 34 (Prime), a que mais usa visita.
+  A conta 3 tem o oposto: 31 compromissos com desfecho marcado em 16 deles, e
+  <b>nenhum</b> ligado a um lead — o mesmo funil quebra do outro lado. Diga o que
+  muda e eu ajusto antes de escrever código.</p>
+
+</div>

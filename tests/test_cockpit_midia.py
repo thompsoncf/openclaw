@@ -23,6 +23,9 @@ foto do cliente de outro é a combinação: a mensagem tem que pertencer à conv
 DAQUELE lead, e o lead tem que ser DAQUELE vendedor.
 """
 import inspect
+from pathlib import Path
+
+RAIZ_WAQR = Path(__file__).resolve().parent.parent / "services" / "wa-qr"
 
 from finance import cockpit as ck
 from web import painel_cockpit as pc
@@ -354,7 +357,8 @@ def test_a_tela_confere_o_tamanho_antes_de_subir():
     assert "TETO" in js and "f.size>TETO[t]" in js
     from finance import cockpit as ck2
     assert ck2._ANEXO_TETO["imagem"] == 5 * 1048576, "os dois lados têm que combinar"
-    assert "5*MB" in js and "16*MB" in js
+    assert ck2._ANEXO_TETO["video"] == 32 * 1048576
+    assert "5*MB" in js and "32*MB" in js and "16*MB" in js
 
 
 def test_a_legenda_sai_da_caixa_de_resposta():
@@ -490,3 +494,71 @@ def test_a_rota_devolve_o_id_da_mensagem():
     fonte = inspect.getsource(ck2.enviar_anexo)
     assert "returning id" in fonte
     assert '"id": msg_id' in fonte
+
+
+# --------------------------------------------- o teto do vídeo, e o que ele é
+#
+# O QUE ACONTECEU (28/08/2026): o dono mandou um `IMG_4600.mov` do iPhone e viu
+# "não enviado — passa de 16 MB". O código fez o certo; o problema era o número.
+#
+# E ERA PIOR QUE UM NÚMERO BAIXO: o comentário ao lado dele dizia que 16 MB era "o
+# teto do próprio WhatsApp". Não é — a conferência no Baileys não achou limite de
+# bytes nenhum, nem constante nem checagem. O teto sempre foi NOSSO, escolhido pela
+# memória do processo que segura as sessões. Vestido de restrição externa, ele
+# parecia inegociável; sabendo que é nosso, dá pra medir e mudar.
+
+def test_o_teto_do_video_cobre_video_de_celular():
+    """16 MB não cobria: um `.mov` de iPhone passa disso com poucos segundos."""
+    from finance import cockpit as ck2
+    assert ck2._ANEXO_TETO["video"] == 32 * 1048576
+
+
+def test_os_tres_lugares_combinam():
+    """Node, Python e tela. Divergindo, o vendedor ouve um número da tela e outro
+    do servidor — ou pior, sobe 30 MB pra ser recusado no fim."""
+    import re
+    from finance import cockpit as ck2
+    node = (RAIZ_WAQR / "server.js").read_text(encoding="utf-8")
+    m = re.search(r"const LIMITE_MIDIA = \{([^}]+)\}", node)
+    assert m, "LIMITE_MIDIA sumiu do server.js"
+    for tipo, mb in (("imagem", 5), ("video", 32), ("documento", 16)):
+        assert f"{tipo}: {mb} * 1024 * 1024" in m.group(1), f"{tipo} divergiu no Node"
+        assert ck2._ANEXO_TETO[tipo] == mb * 1048576, f"{tipo} divergiu no Python"
+        assert f"{tipo}:{mb}*MB" in pc._ANEXO_JS.replace(" ", ""), f"{tipo} divergiu na tela"
+
+
+def test_o_comentario_diz_de_quem_e_o_teto():
+    """A afirmação errada custou uma decisão: enquanto o limite parecia do WhatsApp,
+    subir nem era considerado.
+
+    O teste checa o que o comentário AFIRMA, não a ausência de uma frase — o texto
+    novo cita a afirmação velha justamente pra registrar o erro, e um teste que
+    procurasse a frase solta acusaria a correção como se fosse o defeito. (Foi o
+    que aconteceu na primeira versão deste teste.)"""
+    import re
+    node = (RAIZ_WAQR / "server.js").read_text(encoding="utf-8")
+    i = node.index("const LIMITE_MIDIA")
+    # junta as linhas do comentário numa só: a frase que importa atravessa a quebra,
+    # e procurar texto cru num comentário quebrado testa a largura da linha, não o
+    # que está escrito
+    trecho = re.sub(r"\s*\n\s*//\s*", " ", node[max(0, i - 2200):i])
+    assert "O TETO É NOSSO, NÃO DO WHATSAPP" in trecho
+    assert "não achou limite de bytes nenhum" in trecho, "e diz como se sabe disso"
+
+
+def test_a_recusa_diz_o_tamanho_do_arquivo_e_nao_so_o_limite():
+    """"passa de 16 MB" não deixa decidir nada: passou por pouco ou pelo dobro?
+    Com os dois números dá pra saber se vale mandar um trecho menor."""
+    js = _js_do_anexo()
+    i = js.index("f.size>TETO[t]")
+    trecho = js[i:i + 500]
+    assert "tam(f.size)" in trecho, "o tamanho real do arquivo"
+    assert "o limite é" in trecho
+
+
+def test_o_nome_do_arquivo_nao_gruda_no_recado():
+    """No print de 28/08 apareceu 'IMG_4600.movnão enviado'."""
+    js = _js_do_anexo()
+    i = js.index("f.size>TETO[t]")
+    trecho = js[i:i + 500]
+    assert "esc(f.name)+'</b>'" in trecho, "o nome fecha num <b> antes do recado"

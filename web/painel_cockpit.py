@@ -443,6 +443,19 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .bub.out{align-self:flex-end;background:#0A5C49;border-bottom-right-radius:4px}
 .bub.ia{align-self:flex-end;background:#1a1226;border:1px solid #3a2b52;border-bottom-right-radius:4px}
 .bub .who{font-size:.64rem;color:var(--text-faint);margin-bottom:.15rem}
+/* A HORA, como no WhatsApp: pequena, no rodapé da bolha, alinhada à direita.
+   `float:right` e não flex porque a bolha é `white-space:pre-wrap` com texto
+   corrido — flutuando, a hora se encaixa na última linha quando cabe e desce
+   sozinha quando não cabe, que é exatamente o comportamento do WhatsApp.
+   O `margin-left` impede que ela encoste na última palavra. */
+.bub .hora{float:right;font-size:.6rem;line-height:1.9;opacity:.55;
+  margin:0 0 -.15rem .5rem;font-family:var(--mono);white-space:nowrap}
+/* A TARJA DO DIA. Fica fora das bolhas, centralizada, e é o que impede a conversa
+   de virar uma fila sem tempo: sem ela "20:28" pode ser hoje ou de três semanas
+   atrás, e o vendedor abriria o WhatsApp do celular só pra saber. */
+.diadia{align-self:center;font-size:.62rem;letter-spacing:.06em;color:var(--text-faint);
+  background:var(--bg-2);border:1px solid var(--line);border-radius:999px;
+  padding:.12rem .6rem;margin:.35rem 0}
 /* A mídia dentro da bolha. O arquivo NÃO está no nosso disco: o src aponta pra
    /cockpit/lead/<lead>/midia/<msg>, que busca no CDN do WhatsApp e decifra na hora. */
 .bub .mid{display:block;margin:.15rem 0 .3rem;border-radius:9px;overflow:hidden;
@@ -3126,7 +3139,7 @@ _ANEXO_JS = r"""
   // wa-qr). Repetidos aqui pra barrar ANTES do upload: mandar 40 MB pela rede do
   // celular pra ouvir "grande demais" no fim gasta o pacote de dados do vendedor
   // e um minuto da vida dele. O servidor barra de novo — tela não é fonte confiável.
-  var TETO={imagem:5*MB, video:16*MB, documento:16*MB};
+  var TETO={imagem:5*MB, video:32*MB, documento:16*MB};
   function $(id){return document.getElementById(id);}
   var clipe=$("clipe"), arq=$("arq"), comp=$("comp");
   var chat=document.querySelector(".chat");
@@ -3243,11 +3256,17 @@ _ANEXO_JS = r"""
     var t=tipoDe(f.type);
     if(f.size>TETO[t]){
       // recado NA CONVERSA, não em janela: `alert` é modal, trava a página e o
-      // vendedor não consegue nem digitar enquanto ela está aberta
+      // vendedor não consegue nem digitar enquanto ela está aberta.
+      //
+      // E o recado diz O TAMANHO DO ARQUIVO, não só o limite. A primeira versão
+      // dizia "passa de 16 MB" e pronto: quem lia não sabia se tinha passado por
+      // pouco ou pelo dobro, nem o que fazer. Sabendo os dois números, dá pra
+      // decidir na hora se vale mandar um trecho menor.
       var e=document.createElement("div");
       e.className="bub out ruim";
-      e.innerHTML='<div class=who>Você</div>'+esc(f.name)
-        +'<span class=subiu>não enviado — passa de '+(TETO[t]/MB)+' MB</span>';
+      e.innerHTML='<div class=who>Você</div><b>'+esc(f.name)+'</b>'
+        +'<span class=subiu>não enviado · '+tam(f.size)
+        +' — o limite é '+(TETO[t]/MB)+' MB</span>';
       if(chat){ chat.appendChild(e); fim(); }
       return;
     }
@@ -3492,18 +3511,66 @@ def _midia_html(lead_id: int, m: dict) -> str:
             f"carregar</span>'\"></span>")
 
 
+def _hora_br(dt) -> str:
+    """HH:MM em horário de Brasília — a hora que vai na bolha, como no WhatsApp.
+
+    Sem fuso a mensagem das 20:28 apareceria como 23:28: o banco guarda em UTC, e
+    é o vendedor de Teresina que lê isso no meio de um atendimento.
+    """
+    if not hasattr(dt, "strftime"):
+        return ""
+    from finance import agenda as ag
+    try:
+        return dt.astimezone(ag.BRT).strftime("%H:%M")
+    except (ValueError, TypeError):
+        return dt.strftime("%H:%M")
+
+
+def _dia_br(dt) -> str:
+    """A tarja que separa os dias: HOJE, ONTEM ou a data.
+
+    O WhatsApp tem isso e a gente não tinha, e é o que impede a conversa de virar
+    uma fila sem tempo — sem a tarja, "20:28" pode ser hoje ou de três semanas
+    atrás, e o vendedor não tem como saber sem abrir o WhatsApp do celular.
+    """
+    if not hasattr(dt, "strftime"):
+        return ""
+    from datetime import datetime
+    from finance import agenda as ag
+    try:
+        d = dt.astimezone(ag.BRT).date()
+        hoje = datetime.now(ag.BRT).date()
+    except (ValueError, TypeError):
+        return ""
+    if d == hoje:
+        return "HOJE"
+    if (hoje - d).days == 1:
+        return "ONTEM"
+    return d.strftime("%d/%m/%Y")
+
+
 def _lead_vendedor(request: Request, lead_id: int, d: dict,
                    pode_voz: bool = False, saida_wa: bool = True) -> HTMLResponse:
     sub = " · ".join(x for x in [d.get("cidade") or "", d.get("uf") or ""] if x) or (d.get("doc_fmt") or "")
 
     bolhas = []
     # (o _midia_html mora fora daqui pra o polling do JS desenhar igual — ver cxMid)
+    dia_atual = ""
     for m in d["mensagens"]:
         who = m["who"]
         rot = ("<div class=who>Agente</div>" if who == "ia"
                else "<div class=who>Você</div>" if who == "out" else "")
+        # A TARJA DO DIA, igual à do WhatsApp: só entra quando o dia VIRA. Repetida
+        # em toda bolha ela viraria ruído; sem ela, "20:28" pode ser hoje ou de três
+        # semanas atrás e não há como saber sem abrir o celular.
+        dia = _dia_br(m.get("quando"))
+        if dia and dia != dia_atual:
+            bolhas.append(f"<div class=diadia>{esc(dia)}</div>")
+            dia_atual = dia
+        hora = _hora_br(m.get("quando"))
+        selo = f"<span class=hora>{esc(hora)}</span>" if hora else ""
         bolhas.append(f"<div class='bub {esc(who)}' data-id='{m.get('id') or 0}'>"
-                      f"{rot}{_midia_html(lead_id, m)}{esc(m['texto'])}</div>")
+                      f"{rot}{_midia_html(lead_id, m)}{esc(m['texto'])}{selo}</div>")
     if d["ia"]:
         bolhas.insert(0, "<div class=aviso>O agente está atendendo. Toque em "
                          "<b>Assumir</b> pra responder você.</div>")
@@ -3624,6 +3691,10 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "fim();document.addEventListener('DOMContentLoaded',fim);"
            f"var ultimo={d['mensagens'][-1].get('id') or 0 if d['mensagens'] else 0},"
            f"ia={'true' if d['ia'] else 'false'},ocupado=false;"
+           # a última tarja JÁ desenhada pelo servidor — sem ler ela daqui, a
+           # primeira mensagem do polling repetiria "HOJE" logo abaixo de um "HOJE"
+           "var tarjas=chat.querySelectorAll('.diadia');"
+           "var diaAtual=tarjas.length?tarjas[tarjas.length-1].textContent:'';"
            "function rot(w){return w==='ia'?'<div class=who>Agente</div>':"
            "w==='out'?'<div class=who>Você</div>':'';}"
            "function txt(s){var e=document.createElement('div');e.textContent=s;return e.innerHTML;}"
@@ -3675,8 +3746,14 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            # se o vendedor subiu pra ler o histórico, a posição dele é preservada
            "var perto=(chat.scrollHeight-chat.scrollTop-chat.clientHeight)<80;"
            "j.msgs.forEach(function(m){"
+           # a tarja do dia também no polling: quem deixa a conversa aberta e vira
+           # a meia-noite veria as duas datas coladas sem isto
+           "if(m.dia&&m.dia!==diaAtual){var sep=document.createElement('div');"
+           "sep.className='diadia';sep.textContent=m.dia;chat.appendChild(sep);"
+           "diaAtual=m.dia;}"
            "var d=document.createElement('div');d.className='bub '+m.who;"
-           "d.setAttribute('data-id',m.id);d.innerHTML=rot(m.who)+mid(m)+txt(m.texto);"
+           "d.setAttribute('data-id',m.id);d.innerHTML=rot(m.who)+mid(m)+txt(m.texto)"
+           "+(m.hora?('<span class=hora>'+txt(m.hora)+'</span>'):'');"
            "chat.appendChild(d);ultimo=m.id;});"
            "if(perto)fim();"
            "}).catch(function(){ocupado=false;});}"
@@ -4126,7 +4203,11 @@ def cockpit_lead_mensagens(request: Request, lead_id: int, desde: int = 0):
     d = ck.lead_do_vendedor(get_pool(), sess[0], sess[1], lead_id)
     if not d:
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
+    # `hora` e `dia` vão prontos do servidor: o fuso é resolvido AQUI, e não no
+    # navegador. O celular do vendedor pode estar em qualquer fuso (ou com a hora
+    # errada), e a conversa tem que mostrar o mesmo horário pra todo mundo.
     novas = [{"id": m["id"], "who": m["who"], "texto": m["texto"],
+              "hora": _hora_br(m.get("quando")), "dia": _dia_br(m.get("quando")),
               **({"midia": m["midia"]} if m.get("midia") else {})}
              for m in d["mensagens"] if (m.get("id") or 0) > desde]
     return JSONResponse({"ok": True, "ia": bool(d["ia"]), "msgs": novas})

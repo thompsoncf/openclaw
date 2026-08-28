@@ -71,6 +71,26 @@ def test_o_email_leva_o_LINK_e_nao_um_anexo():
     assert "Ver o orçamento" in html
 
 
+def test_doc_rotulo_manda_sobre_o_modo():
+    """"Mandar pra assinar" pede o e-mail do CONTRATO, documento que não tem
+    nicho — `doc_rotulo` sobrepõe `modo` pra dizer "contrato" no botão e no
+    título, mesmo numa conta de evento (que sem isso diria "orçamento")."""
+    html, texto = pe.montar(mensagem="Oi!", link="https://app.zaq-ia.com/contrato/abc",
+                            numero=6, empresa="Prime Eventos", modo="evento",
+                            doc_rotulo="contrato")
+    assert "Ver o contrato" in html
+    assert "Contrato nº 6" in html
+    assert "Ver o contrato: https://app.zaq-ia.com/contrato/abc" in texto
+    assert "orçamento" not in html.lower()
+
+
+def test_doc_rotulo_ausente_nao_muda_nada_do_que_ja_existia():
+    """Sem `doc_rotulo`, o comportamento é exatamente o de antes — regressão."""
+    html, _ = pe.montar(mensagem="Oi!", link="https://app.zaq-ia.com/proposta/abc",
+                        numero=14, empresa="Prime", modo="evento")
+    assert "Ver o orçamento" in html
+
+
 def test_o_layout_e_da_empresa_e_nao_do_zaq():
     """O layout de sistema diz "você recebeu porque tem uma conta no Zaq" e põe
     Zaq no topo. O cliente do buffet não tem conta — pra ele quem manda é a Prime.

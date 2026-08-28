@@ -2605,6 +2605,74 @@ def _aviso_gemeo(g: dict) -> str:
     return frase + "."
 
 
+# O que a ficha recebe quando não há aviso — e também quando o aviso falha. Uma
+# constante só pra que os dois caminhos não divirjam: template que recebe chave a
+# menos quebra a página, que é justamente o que estes avisos não podem fazer.
+_SEM_AVISO = {"gemeo": None, "gemeo_aviso": "", "gemeo_abre": False,
+              "partida": None, "partida_aviso": "", "partida_defeito": False,
+              "partida_abre": False}
+
+
+def avisos_do_numero_da_ficha(c, ctx, alvo, alvo_id) -> dict:
+    """Os DOIS avisos de "esse número já está com outra pessoa", prontos pro template.
+
+    São dois porque cobrem coisas diferentes, e um não enxerga o outro:
+
+      * `gemeo` — o mesmo número atendido pelo OUTRO chip. Só existe em empresa de
+        dois chips, e a consulta dele exige `chip_id is distinct from` o meu
+        (`_gemeos_de_outro_chip`). É de propósito: cada chip fala pelo seu número.
+      * `partida` — a ficha DUPLICADA, que a corrida criava dentro do MESMO chip.
+        Foi o caso da Dinamara (26/08) e o da Geovanna (27/08). O aviso do gêmeo,
+        por definição, não a via — e era esse o buraco do desktop.
+
+    O RECORTE É O TRABALHO DESTA FUNÇÃO, e é o motivo de ela existir separada da
+    rota: `excluir` tira do segundo aviso a conversa que o PRIMEIRO já está
+    contando. Sem isso a ficha mostra duas faixas pra mesma conversa, uma embaixo
+    da outra — que é como alguém aprende a não ler nenhuma das duas.
+    `excluir_lead` tira as conversas da própria ficha, que as caixinhas de canal já
+    somam (`_canais_contato_lead`).
+
+    Extraída da rota pra que esse recorte seja TESTÁVEL. A versão anterior morava
+    solta dentro de `prospeccao_ficha`, e a única checagem possível era procurar
+    texto no código-fonte — que não pega trocar `excluir=[...]` por `excluir=None`,
+    exatamente a mutação que reintroduz o aviso em dobro.
+
+        SEM AVISO A FICHA AINDA ABRE. Os dois avisos são extras; a ficha do cliente não
+    é. Tudo aqui roda dentro de um try/except que devolve `_SEM_AVISO`, e a consulta
+    do chip roda em SAVEPOINT — sem ele um erro nela abortaria a transação inteira e
+    levaria junto o que a rota faz DEPOIS. Foi assim que a primeira versão desta
+    função derrubou a ficha num banco sem a coluna `chip_id`."""
+    conta_id = ctx["conta_id"]
+    try:
+        gemeo = _gemeos_de_outro_chip(c, conta_id, [alvo_id]).get(alvo_id)
+        partida = outras_conversas_do_numero(
+            c, conta_id, alvo.get("whatsapp") or alvo.get("telefone") or "",
+            excluir=[gemeo["conversa_id"]] if gemeo else None, excluir_lead=alvo_id)
+        # o chip DESTA ficha decide o tom: mesmo chip é defeito (âmbar), chip
+        # diferente é a empresa falando por dois números (neutro).
+        with c.transaction():
+            meu_chip = c.execute(
+                "select chip_id from conversas where conta_id=%s and prospeccao_id=%s "
+                "and canal='whatsapp' order by ultima_msg_em desc limit 1",
+                (conta_id, alvo_id)).fetchone()
+        from finance.cockpit import aviso_outra_conversa
+        aviso = aviso_outra_conversa(partida, membro_id=ctx.get("membro_id"),
+                                     chip_id=(meu_chip[0] if meu_chip else None))
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger("prospeccao.conversas").warning(
+            "avisos da ficha falharam na conta %s (lead %s)", conta_id, alvo_id,
+            exc_info=True)
+        return dict(_SEM_AVISO)
+    return {"gemeo": gemeo, "gemeo_aviso": _aviso_gemeo(gemeo),
+            "gemeo_abre": _gemeo_abre(gemeo, ctx),
+            "partida": (partida[0] if partida else None),
+            "partida_aviso": aviso.get("texto") or "",
+            "partida_defeito": bool(aviso.get("defeito")),
+            # mesma régua do gêmeo: gerência vê tudo, vendedor vê o que é dele
+            "partida_abre": _gemeo_abre(partida[0] if partida else None, ctx)}
+
+
 def _chip_da_conta(c, conta_id: int, chip_id) -> int | None:
     """Valida que `chip_id` é desta empresa e devolve o id — ou None.
 
@@ -3646,7 +3714,8 @@ def _conversa_wa_do_contato(c, conta_id, lead_id, numero, *, chip_id=_QUALQUER_C
         (conta_id, alvo8, _wa_equivalentes(d) or [d], *par_chip)).fetchone()
 
 
-def outras_conversas_do_numero(c, conta_id, numero, excluir=None, *, limite=3):
+def outras_conversas_do_numero(c, conta_id, numero, excluir=None, *,
+                               excluir_lead=None, limite=3):
     """As OUTRAS conversas de WhatsApp deste mesmo número — fora a que está aberta.
 
     Nasceu da corrida que `_trava_numero` passou a fechar: até 27/08/2026, duas
@@ -3678,6 +3747,17 @@ def outras_conversas_do_numero(c, conta_id, numero, excluir=None, *, limite=3):
 
     LEITURA PURA. Devolve no máximo `limite` linhas, da mais recente pra trás.
 
+    DUAS TELAS, DOIS JEITOS DE DIZER A MESMA COISA. O Cockpit passa `excluir` com o
+    id da conversa aberta; a ficha do desktop passa `excluir_lead`, porque ali o que
+    está à mão é o lead, não a conversa — e buscar o id da conversa só pra excluí-la
+    seria uma ida ao banco à toa.
+
+    Os dois recortes coincidem, e isso é garantido por índice, não por convenção:
+    `idx_conversas_lead_canal` é UNIQUE (conta_id, prospeccao_id, canal), então um
+    lead tem NO MÁXIMO uma conversa de WhatsApp. Se um dia esse índice cair, os dois
+    deixam de ser equivalentes e este comentário vira mentira — o teste
+    `test_um_lead_so_pode_ter_uma_conversa_de_whatsapp` existe pra avisar.
+
     `excluir` é a conversa que a tela JÁ está mostrando. Aceita um id ou uma lista —
     a lista existe pra quem já avisa de outra coisa na mesma tela (o `_aviso_gemeo`
     do desktop conta o gêmeo do OUTRO chip): dois avisos pra mesma conversa, um
@@ -3702,7 +3782,8 @@ def outras_conversas_do_numero(c, conta_id, numero, excluir=None, *, limite=3):
     fora = [int(i) for i in fora if i]
     try:
         rows = _outras_conversas_consulta(c, conta_id, alvo8,
-                                          _wa_equivalentes(d) or [d], fora, limite)
+                                          _wa_equivalentes(d) or [d], fora,
+                                          excluir_lead, limite)
     except Exception:  # noqa: BLE001
         import logging
         logging.getLogger("prospeccao.conversas").warning(
@@ -3714,7 +3795,7 @@ def outras_conversas_do_numero(c, conta_id, numero, excluir=None, *, limite=3):
              "chip_id": r[7], "chip_nome": r[8]} for r in rows]
 
 
-def _outras_conversas_consulta(c, conta_id, alvo8, equivalentes, fora, limite):
+def _outras_conversas_consulta(c, conta_id, alvo8, equivalentes, fora, sem_lead, limite):
     """Só a consulta do `outras_conversas_do_numero`, num SAVEPOINT (ver o porquê lá)."""
     with c.transaction():
         return c.execute(
@@ -3738,8 +3819,9 @@ def _outras_conversas_consulta(c, conta_id, alvo8, equivalentes, fora, limite):
                and right(regexp_replace(cv.contato_ref, '\D', '', 'g'), 8) = %s
                and regexp_replace(cv.contato_ref, '\D', '', 'g') = any(%s)
                and not (cv.id = any(%s))
+               and (%s::bigint is null or cv.prospeccao_id is distinct from %s)
              order by cv.ultima_msg_em desc nulls last limit %s""",
-            (conta_id, alvo8, equivalentes, fora, limite)).fetchall()
+            (conta_id, alvo8, equivalentes, fora, sem_lead, sem_lead, limite)).fetchall()
 
 
 def _ja_conversou(c, conta_id, lead_id) -> bool:
@@ -7293,10 +7375,9 @@ def prospeccao_ficha(request: Request, alvo_id: int):
         # o mesmo número atendido pelo outro chip. O aviso está no card do funil, mas o
         # card some assim que o vendedor abre a ficha (é a ficha que abre na gaveta) —
         # e é aqui, com o telefone na mão pra ligar, que saber disso muda o que ele faz.
-        gemeo = _gemeos_de_outro_chip(c, ctx["conta_id"], [alvo_id]).get(alvo_id)
+        avisos = avisos_do_numero_da_ficha(c, ctx, alvo, alvo_id)
     return _render("prospeccao_ficha", request, titulo=alvo["empresa"], secao_ativa="prospeccao",
-                   gemeo=gemeo, gemeo_aviso=_aviso_gemeo(gemeo),
-                   gemeo_abre=_gemeo_abre(gemeo, ctx),
+                   **avisos,
                    canais_contato=canais_contato, origem_ch=origem_ch,
                    a=alvo, timeline=timeline, status=status_ficha, temperaturas=TEMPERATURAS,
                    tipos=TIPOS, resultados=RESULTADOS, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
@@ -8632,6 +8713,12 @@ _CSS = """<style>
   border:1px solid var(--ambar-borda);border-radius:10px;padding:.55rem .75rem}
 .gemeo-faixa a{color:var(--ambar);text-decoration:underline;white-space:nowrap}
 .gemeo-faixa .mut{color:var(--txt-mut)}
+/* A MESMA faixa, tom neutro: quando a outra conversa está no OUTRO chip não há
+   defeito nenhum pra consertar — a empresa tem dois números e o cliente escreveu
+   pros dois. Pintar isso de âmbar mandaria o vendedor caçar problema que não
+   existe. Ver `aviso_outra_conversa`. */
+.gemeo-faixa.info{color:var(--txt-mut);background:var(--card-2);border-color:var(--borda)}
+.gemeo-faixa.info a{color:var(--verde)}
 </style>"""
 
 # ---- barra de navegação do módulo + agilidade no front (prefetch no hover + barra
@@ -10346,6 +10433,8 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     {% if gemeo_aviso %}<div class="gemeo-faixa">⚠️ {{ gemeo_aviso }}
       {% if gemeo.nome %}<span class="mut">({{ gemeo.nome }})</span>{% endif %}
       {% if gemeo_abre %}<a href="/painel/prospeccao/{{ gemeo.lead_id }}">Abrir o outro lead →</a>{% endif %}</div>{% endif %}
+    {% if partida_aviso %}<div class="gemeo-faixa{{ '' if partida_defeito else ' info' }}">{{ '⚠️' if partida_defeito else 'ℹ️' }} {{ partida_aviso }}
+      {% if partida_abre and partida.lead_id %}<a href="/painel/prospeccao/{{ partida.lead_id }}">Abrir a outra ficha →</a>{% endif %}</div>{% endif %}
     {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
     <script>
     function fichaStatus(sel,id){

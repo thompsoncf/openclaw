@@ -22,7 +22,8 @@ from urllib.parse import quote
 
 from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, Request, Form, UploadFile, File, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
+from fastapi.responses import (HTMLResponse, RedirectResponse, JSONResponse, Response,
+                               StreamingResponse)
 from psycopg.errors import UniqueViolation
 
 from db.conexao import get_pool
@@ -4815,6 +4816,89 @@ def _midia_do_payload(m):
     return {"tipo": tipo, "meta": limpa,
             "ref": {"directPath": caminho, "mediaKey": chave,
                     "mimetype": str(ref.get("mimetype") or "")[:100]}}
+
+
+# ---------------------------------------------------------------- a mídia na tela
+#
+# O arquivo NÃO está no nosso disco: `mensagens.midia_ref` guarda só o endereço no
+# CDN do WhatsApp e a chave que decifra (migração 187). Esta rota busca lá, decifra
+# em fluxo e repassa — o arquivo nunca existe inteiro na memória, e some assim que
+# o último pedaço sai.
+#
+# `content-disposition: inline` de propósito: foto e vídeo abrem na conversa. Só
+# documento vira download, e aí com o nome que o cliente mandou.
+_MIDIA_TIPO_HTTP = {
+    "imagem": "image/jpeg", "figurinha": "image/webp",
+    "video": "video/mp4", "documento": "application/octet-stream",
+}
+
+
+@router.get("/painel/prospeccao/midia/{mensagem_id}")
+def prospeccao_midia(request: Request, mensagem_id: int):
+    """A mídia de uma mensagem, buscada no CDN do WhatsApp na hora.
+
+    O ESCOPO É A PARTE SÉRIA. O id da mensagem é sequencial e adivinhável, então a
+    consulta casa `mensagens -> conversas -> conta_id` com a conta logada, e quem
+    não é gerência ainda passa pelo dono do lead — o mesmo recorte da caixa. Sem
+    isso, trocar um número na URL leria a foto do cliente de outra empresa.
+    """
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    with get_pool().connection() as c:
+        r = c.execute(
+            """select m.midia_ref, m.midia_tipo, coalesce(m.midia_meta,'{}'::jsonb)
+                 from mensagens m
+                 join conversas cv on cv.id = m.conversa_id
+                 left join prospeccao p on p.id = cv.prospeccao_id
+                where m.id=%s and cv.conta_id=%s and m.midia_ref is not null
+                  and (%s or p.vendedor_id is null or p.vendedor_id=%s)""",
+            (mensagem_id, ctx["conta_id"], bool(ctx["gerencia"]),
+             ctx["membro_id"])).fetchone()
+    if not r:
+        return Response(status_code=404)
+    ref, tipo, meta = r[0], r[1], (r[2] or {})
+    from finance import wa_midia as _wm
+    try:
+        fluxo = _wm.buscar(ref, tipo)
+        primeiro = next(fluxo, b"")
+    except _wm.Expirou:
+        # 410 e não 404: a tela usa a diferença pra dizer "não está mais no servidor
+        # do WhatsApp" em vez de "não consegui carregar agora" — são recados
+        # diferentes, e o segundo faz o vendedor tentar de novo à toa.
+        return Response(status_code=410)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger("prospeccao.midia").warning(
+            "midia %s falhou: %s: %s", mensagem_id, type(e).__name__, e)
+        return Response(status_code=502)
+
+    def _corpo():
+        yield primeiro
+        yield from fluxo
+
+    ct = (ref.get("mimetype") or "").split(";")[0].strip() or \
+        _MIDIA_TIPO_HTTP.get(tipo, "application/octet-stream")
+    cab = {
+        # `private` porque é conversa de cliente: cacheia no navegador de quem
+        # abriu, nunca num proxy compartilhado. É este cabeçalho que faz a segunda
+        # vez que a foto aparece não chegar no servidor.
+        "cache-control": "private, max-age=86400",
+        "content-disposition": ("attachment; filename=\"%s\"" % _nome_seguro(meta.get("nome"))
+                                if tipo == "documento" else "inline"),
+    }
+    if meta.get("bytes"):
+        # o tamanho do arquivo CLARO não é o do cifrado, então isto é dica pro
+        # navegador desenhar a barra — não `content-length`, que seria mentira
+        cab["x-midia-bytes"] = str(int(meta["bytes"]))
+    return StreamingResponse(_corpo(), media_type=ct, headers=cab)
+
+
+def _nome_seguro(nome) -> str:
+    """O nome do arquivo vai num cabeçalho HTTP — aspas e quebra de linha fora."""
+    limpo = "".join(ch for ch in str(nome or "arquivo") if ch.isprintable()
+                    and ch not in '"\\\r\n')
+    return (limpo.strip() or "arquivo")[:120]
 
 
 @router.post("/webhooks/wa-qr")

@@ -137,6 +137,51 @@ def enviar_audio(conta_id: int, numero: str, dados: bytes, mimetype: str,
     return {"ok": False, "erro": resp.get("erro") or "falha"}
 
 
+def enviar_midia(conta_id: int, numero: str, dados: bytes, tipo: str, mimetype: str,
+                 nome: str = "", legenda: str = "") -> dict:
+    """Manda foto, vídeo ou documento que o vendedor anexou no Zaq.
+
+    Mesmo formato do áudio — binário puro com os metadados na query — pelo mesmo
+    motivo: base64 custaria +33% de memória e de rede, e do outro lado está o
+    processo que segura as sessões de WhatsApp.
+
+    `conta_id` aqui é a SESSÃO por onde isto sai, não a empresa. Numa empresa de
+    dois chips quem chama tem que passar o chip da conversa (`chip_id or conta_id`,
+    como o texto já faz) — mandar pelo chip errado faz o cliente receber de um
+    número que não é o daquela conversa, e o eco da mensagem volta pra ficha do
+    colega. Isso não é hipótese: aconteceu com o áudio até 28/08/2026.
+    """
+    from urllib.parse import urlencode
+    if not configurado():
+        return {"ok": False, "erro": "qr_indisponivel"}
+    if not dados:
+        return {"ok": False, "erro": "vazio_ou_grande"}
+    q = urlencode({"numero": numero, "tipo": tipo, "mime": mimetype or "",
+                   "nome": (nome or "")[:160], "legenda": (legenda or "")[:1000]})
+    url = f"{_base()}/session/{conta_id}/enviar-midia?{q}"
+    headers = {"x-wa-secret": _segredo(), "content-type": "application/octet-stream"}
+    try:
+        req = urllib.request.Request(url, data=dados, headers=headers, method="POST")
+        # 90s, e não os 45 do áudio: aqui pode ser um vídeo de 16 MB, e o Baileys
+        # ainda cifra e SOBE o arquivo pro WhatsApp antes de responder. Prazo curto
+        # faria o vendedor ver "falhou" numa mensagem que na verdade saiu.
+        with urllib.request.urlopen(req, timeout=90) as r:
+            resp = json.loads(r.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as e:  # noqa: BLE001
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(f"http_{e.code}", servico="WhatsApp (QR)", canal="whatsapp")
+        return {"ok": False, "erro": f"http_{e.code}"}
+    except Exception as e:  # noqa: BLE001
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(e, servico="WhatsApp (QR)", canal="whatsapp")
+        return {"ok": False, "erro": str(e)[:180]}
+    if resp.get("ok"):
+        # `midia` é o ponteiro do arquivo que o Baileys acabou de subir — o mesmo
+        # formato da entrada. É ele que faz a foto enviada APARECER na conversa.
+        return {"ok": True, "sid": resp.get("id") or "", "midia": resp.get("midia")}
+    return {"ok": False, "erro": resp.get("erro") or "falha"}
+
+
 def sair(conta_id: int) -> dict:
     """Desconecta e apaga a sessão daquela empresa.
 

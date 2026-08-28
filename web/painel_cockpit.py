@@ -45,6 +45,7 @@ import logging as _logging
 import os as _os
 
 from fastapi import APIRouter, Body, Form, Request
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse, Response,
                                StreamingResponse)
 
@@ -3098,6 +3099,78 @@ def _perfil_dono(conta_id: int, membro_id: int | None) -> HTMLResponse:
 
 
 # ------------------------------------------------------------------ lead
+# O CLIPE: escolher o arquivo, mandar, e a bolha aparecer. Raw string pela mesma
+# razão do _VOZ_JS — este arquivo é template Python, e um `\n` sem a barra dobrada
+# chega na página como quebra de linha de verdade e mata o script inteiro.
+_ANEXO_JS = r"""
+<script>
+(function(){
+  var BASE="__BASE__", LEAD=__LEAD__;
+  var MB=1048576;
+  // os MESMOS tetos do servidor (finance/cockpit._ANEXO_TETO e LIMITE_MIDIA no
+  // wa-qr). Repetidos aqui pra barrar ANTES do upload: mandar 40 MB pela rede do
+  // celular do vendedor pra ouvir "grande demais" no fim gasta o pacote de dados
+  // dele e um minuto da vida. O servidor barra de novo — a tela não é confiável.
+  var TETO={imagem:5*MB, video:16*MB, documento:16*MB};
+  function $(id){return document.getElementById(id);}
+  var clipe=$("clipe"), arq=$("arq"), comp=$("comp");
+  if(!clipe||!arq) return;
+
+  function tipoDe(m){
+    m=(m||"").split(";")[0].toLowerCase();
+    if(m.indexOf("image/")===0) return "imagem";
+    if(m.indexOf("video/")===0) return "video";
+    return "documento";
+  }
+  function b64(txt){
+    // btoa só engole latin-1, e nome de arquivo brasileiro tem acento
+    return btoa(String.fromCharCode.apply(null, new TextEncoder().encode(txt||"")));
+  }
+  function aviso(m){ if(window.toast) window.toast(m); else alert(m); }
+
+  clipe.onclick=function(){ arq.value=""; arq.click(); };
+
+  arq.onchange=function(){
+    var f=arq.files && arq.files[0];
+    if(!f) return;
+    var t=tipoDe(f.type);
+    if(f.size>TETO[t]){
+      aviso("Arquivo passa de "+(TETO[t]/MB)+" MB.");
+      arq.value=""; return;
+    }
+    // a legenda é o que já estiver escrito na caixa de resposta: no WhatsApp ela
+    // chega colada na foto, que é como as pessoas mandam de verdade
+    var cx=comp && comp.querySelector("input[name=texto]");
+    var legenda=(cx && cx.value || "").trim();
+    clipe.disabled=true;
+    aviso("Enviando "+(t==="documento"?"arquivo":t)+"…");
+    f.arrayBuffer().then(function(buf){
+      return fetch(BASE+"/lead/"+LEAD+"/anexo",{
+        method:"POST",
+        headers:{"Content-Type": f.type || "application/octet-stream",
+                 "X-Nome": b64(f.name), "X-Legenda": b64(legenda)},
+        body: buf
+      });
+    }).then(function(r){ return r.json(); }).then(function(j){
+      clipe.disabled=false; arq.value="";
+      if(j && j.ok){
+        if(cx) cx.value="";
+        // mesma escolha do áudio: a conversa se atualiza sozinha, e recarregar a
+        // página custaria ~1s de tela branca logo depois de enviar
+        if(window.__puxa) window.__puxa();
+        return;
+      }
+      aviso((j && j.erro) || "Não consegui enviar o arquivo.");
+    }).catch(function(){
+      clipe.disabled=false; arq.value="";
+      aviso("Falha de conexão ao enviar o arquivo.");
+    });
+  };
+})();
+</script>
+"""
+
+
 _VOZ_JS = r"""
 <script>
 (function(){
@@ -3372,13 +3445,25 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                  "<button type=button class=cancela id=cancela>Cancelar</button>"
                  "<button type=button class=manda id=manda aria-label='Enviar áudio'>&#10148;</button>"
                  "</div>") if pode_voz else ""
+        # O CLIPE. Mesmo portão do microfone (`pode_voz` = canal QR): é a mesma
+        # rota do serviço Node por baixo, e oferecer o botão numa conta que não
+        # manda faria o vendedor escolher o arquivo, esperar, e receber erro.
+        # `accept` aberto de propósito — PDF, planilha e comprovante são o que ele
+        # mais precisa mandar, e uma lista de tipos envelhece contra o vendedor.
+        clipe = ("<button type=button class=mic id=clipe aria-label='Anexar arquivo'>"
+                 "<svg width=20 height=20 viewBox='0 0 24 24' fill=none stroke=currentColor "
+                 "stroke-width=1.8 stroke-linecap=round stroke-linejoin=round>"
+                 "<path d='M21.4 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.2-9.19a4 4 0 "
+                 "015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48'/></svg></button>"
+                 "<input type=file id=arq hidden>") if pode_voz else ""
         acao = (f"<form class=composer id=comp method=post action='{_BASE}/lead/{lead_id}/mensagem'>"
                 "<input name=texto placeholder='Responder…' required autocomplete=off>"
-                + mic +
+                + clipe + mic +
                 "<button type=submit aria-label=Enviar>&#10148;</button>"
                 + barra + "</form>")
         if pode_voz:
             acao += _VOZ_JS.replace("__BASE__", _BASE).replace("__LEAD__", str(lead_id))
+            acao += _ANEXO_JS.replace("__BASE__", _BASE).replace("__LEAD__", str(lead_id))
 
     # Quatro atalhos, e não cinco: o `.grade` é de DUAS colunas, então o quinto nascia
     # sozinho na terceira linha, meia largura, com um buraco do lado. Saiu o "Ligar" —
@@ -3865,6 +3950,62 @@ async def cockpit_lead_audio(request: Request, lead_id: int, seg: int = 0):
             onda = None
     tipo = (request.headers.get("content-type") or "audio/webm").split(",")[0].strip()
     r = ck.enviar_audio(get_pool(), sess[0], sess[1], lead_id, dados, tipo, seg, onda)
+    return JSONResponse(r)
+
+
+def _anexo_sync(conta_id, membro_id, lead_id, dados, nome, mime, legenda):
+    """O trabalho de verdade do anexo — síncrono, fora do event loop.
+
+    Mora aqui fora e não dentro do handler de propósito: o `get_pool()` no corpo de
+    um `async def` é justamente o que `tests/test_event_loop_nao_trava.py` procura,
+    e a busca dele é textual porque a alternativa — adivinhar o que é bloqueante —
+    erraria. Mesmo desenho do `_webhook_wa_qr_saida_sync`.
+    """
+    return ck.enviar_anexo(get_pool(), conta_id, membro_id, lead_id, dados,
+                           nome=nome, mimetype=mime, legenda=legenda)
+
+
+@router.post("/cockpit/lead/{lead_id}/anexo")
+async def cockpit_anexo(request: Request, lead_id: int):
+    """O vendedor mandando foto, vídeo ou documento de dentro do Zaq (passo 4).
+
+    CORPO BINÁRIO, não multipart. O arquivo já vem do `<input type=file>` e não há
+    mais nada pra empacotar junto; multipart custaria uma cópia a mais dos dois
+    lados e é a cópia que importa quando o arquivo tem 16 MB. É o mesmo desenho da
+    rota de voz, pelo mesmo motivo.
+
+    O NOME VIAJA EM BASE64 no cabeçalho `x-nome`. Cabeçalho HTTP é latin-1 por
+    especificação, e nome de arquivo brasileiro tem acento — mandar cru dá erro de
+    codificação no meio do caminho, ou pior, chega trocado e o cliente recebe um
+    PDF chamado "OrÃ§amento".
+
+    O TRABALHO VAI PRA THREADPOOL, e só a leitura do corpo fica no async. Aqui isto
+    é mais sério que nos webhooks: o envio espera o Baileys CIFRAR e SUBIR até 16 MB
+    pro WhatsApp — dezenas de segundos. Rodando no event loop, congelaria o worker
+    inteiro (painel incluso) o tempo todo, e agora são DOIS workers, não quatro. É o
+    mesmo defeito que em 22/08/2026 levou a resposta de 527 ms pra ~50 s com a CPU
+    em 0,7%: esperando, não trabalhando. `tests/test_event_loop_nao_trava.py` cobra.
+    """
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    dados = await request.body()
+    if not dados:
+        return JSONResponse({"ok": False, "erro": "Arquivo vazio."})
+
+    def _texto(cab: str) -> str:
+        """Cabeçalho base64 → str. Sem nome o documento ainda vai, como 'arquivo':
+        um acento estranho não pode impedir o vendedor de mandar o orçamento."""
+        try:
+            import base64
+            return base64.b64decode(request.headers.get(cab) or "").decode("utf-8", "replace")
+        except Exception:  # noqa: BLE001
+            return ""
+
+    nome, legenda = _texto("x-nome"), _texto("x-legenda")
+    mime = (request.headers.get("content-type") or "").split(";")[0].strip()
+    r = await run_in_threadpool(_anexo_sync, sess[0], sess[1], lead_id,
+                                dados, nome, mime, legenda)
     return JSONResponse(r)
 
 

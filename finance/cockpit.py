@@ -716,6 +716,108 @@ def pode_gravar_audio(pool, conta_id: int) -> bool:
         return False
 
 
+# O que o vendedor pode anexar, e como cada coisa se chama na conversa. A marca
+# é a MESMA que a entrada escreve (ver MIDIA_DE no wa-qr): mandada e recebida têm
+# que ficar iguais na thread, senão a tela conta duas histórias.
+_ANEXO_TIPOS = {
+    "image/jpeg": ("imagem", "📷 Foto"), "image/png": ("imagem", "📷 Foto"),
+    "image/webp": ("imagem", "📷 Foto"), "image/gif": ("imagem", "📷 Foto"),
+    "video/mp4": ("video", "🎬 Vídeo"), "video/quicktime": ("video", "🎬 Vídeo"),
+    "video/3gpp": ("video", "🎬 Vídeo"),
+}
+# Teto por tipo, o MESMO do serviço Node (LIMITE_MIDIA). Repetido aqui de
+# propósito: barrando deste lado, o arquivo grande nem chega a atravessar a rede
+# até o processo que segura as sessões — e o vendedor recebe um recado que explica
+# em vez de um erro de rede.
+_ANEXO_TETO = {"imagem": 5 * 1024 * 1024, "video": 16 * 1024 * 1024,
+               "documento": 16 * 1024 * 1024}
+
+
+def tipo_do_anexo(mimetype: str) -> tuple[str, str]:
+    """(tipo, marca) do que foi anexado. O que não é foto nem vídeo é DOCUMENTO —
+    não uma recusa: PDF de orçamento, comprovante de PIX e planilha são justamente
+    o que o vendedor mais precisa mandar, e cair no documento faz todos passarem
+    sem uma lista de mimetypes que envelhece."""
+    m = (mimetype or "").split(";")[0].strip().lower()
+    return _ANEXO_TIPOS.get(m, ("documento", "📄 Documento"))
+
+
+def enviar_anexo(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes,
+                 nome: str, mimetype: str, legenda: str = "") -> dict:
+    """Manda foto, vídeo ou documento que o vendedor anexou NO ZAQ (passo 4).
+
+    É a metade que faltava. O vendedor já recebia mídia dentro do app; pra MANDAR
+    a foto do salão ou o PDF do orçamento ele ainda pegava o celular — e o que sai
+    do celular chega sem nome, não entra no histórico e mantém viva a conexão
+    paralela que este trabalho veio fechar.
+
+    DUAS COISAS QUE ESTA FUNÇÃO NÃO PODE ERRAR, as duas aprendidas doendo:
+
+    1. SAI PELO CHIP DA CONVERSA. Numa empresa de dois números, mandar pelo chip
+       principal faz o cliente receber de um número que não é o daquela conversa —
+       e o eco volta pra ficha do colega. Foi o defeito do áudio até 28/08/2026.
+    2. A MENSAGEM NASCE COM `membro_id` E COM O PONTEIRO. O `membro_id` é o que dá
+       nome a quem falou; o ponteiro (devolvido pelo Baileys) é o que faz a foto
+       APARECER na conversa em vez de virar um "📷 Foto" cego.
+    """
+    import json as _json
+    from finance import whatsapp_out
+    from web.painel_prospeccao import _conversa_id, _midia_do_payload
+    from finance import whatsapp_qr as _qr
+
+    if not dados:
+        return {"ok": False, "erro": "Arquivo vazio."}
+    tipo, marca = tipo_do_anexo(mimetype)
+    teto = _ANEXO_TETO[tipo]
+    if len(dados) > teto:
+        return {"ok": False, "erro": f"Arquivo passa de {teto // (1024 * 1024)} MB."}
+    if not pode_gravar_audio(pool, conta_id):
+        # o portão é o mesmo do áudio: só o canal QR manda mídia por este caminho.
+        # Twilio (URL pública) e Cloud API (media-id) são outros dois caminhos, e
+        # nenhum está construído — oferecer o clipe numa conta dessas faria o
+        # vendedor anexar e o envio falhar depois, que é pior que não ter o botão.
+        return {"ok": False, "erro": "Esta conta não manda arquivo pelo Zaq."}
+
+    with pool.connection() as c:
+        if not _posse(c, conta_id, membro_id, lead_id):
+            return {"ok": False, "erro": "escopo"}
+        p = c.execute("select whatsapp, telefone from prospeccao where id=%s and conta_id=%s",
+                      (lead_id, conta_id)).fetchone()
+        conv = _conversa_id(c, conta_id, lead_id, "whatsapp")
+        chip_id = whatsapp_out.chip_da_conversa(c, conta_id, conv)
+        c.commit()
+    numero = (p[0] or p[1] or "") if p else ""
+    if not numero:
+        return {"ok": False, "erro": "Lead sem número de WhatsApp."}
+
+    res = _qr.enviar_midia(chip_id or conta_id, numero, dados, tipo,
+                           mimetype, nome=nome, legenda=legenda)
+    if not res.get("ok"):
+        erros = {"desconectado": "WhatsApp desconectado. Reconecte na aba Canais.",
+                 "numero_invalido": "Número do lead inválido.",
+                 "qr_indisponivel": "O serviço de WhatsApp está fora do ar.",
+                 "tipo_invalido": "Tipo de arquivo não suportado.",
+                 "vazio_ou_grande": "Arquivo grande demais."}
+        return {"ok": False, "erro": erros.get(res.get("erro"), "Não consegui enviar o arquivo.")}
+
+    # a legenda vira o texto da bolha quando existe; senão a marca, igual à entrada
+    texto = (legenda or "").strip() or marca
+    midia = _midia_do_payload(res.get("midia"))
+    with pool.connection() as c:
+        c.execute(
+            """insert into mensagens (conversa_id, canal, direcao, autor, membro_id,
+                                      texto, provider_sid, midia_ref, midia_tipo, midia_meta)
+               values (%s,'whatsapp','out','humano',%s,%s,%s,%s,%s,%s)""",
+            (conv, membro_id, texto[:8000], res.get("sid"),
+             _json.dumps(midia["ref"]) if midia else None,
+             midia["tipo"] if midia else None,
+             _json.dumps(midia["meta"]) if midia else None))
+        c.execute("update conversas set ultima_msg_em=now(), status='pendente', "
+                  "agente_ativo=false, push_avisado_em=null where id=%s", (conv,))
+        c.commit()
+    return {"ok": True, "tipo": tipo, "conversa_id": conv}
+
+
 def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes,
                  mimetype: str, segundos: int, onda: bytes | None = None) -> dict:
     """Manda o áudio que o vendedor gravou DENTRO do Zaq, e o transcreve.

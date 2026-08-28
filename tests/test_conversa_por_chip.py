@@ -58,7 +58,8 @@ create unique index idx_conversas_lead_canal on conversas (conta_id, prospeccao_
   where prospeccao_id is not null;
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, membro_id bigint, texto text, provider_sid text,
-  status text, criado_em timestamptz default now());
+  status text, criado_em timestamptz default now(),
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
 create unique index on mensagens (conversa_id, provider_sid) where provider_sid is not null;
 create table wa_contatos (conta_id bigint, numero8 text, nome text,
   da_agenda boolean default false, atualizado timestamptz default now(),

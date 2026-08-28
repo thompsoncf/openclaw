@@ -46,7 +46,8 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   chip_id bigint, responsavel_membro_id bigint, ultima_msg_em timestamptz,
   criado_em timestamptz not null default now());
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
-  autor text, criado_em timestamptz not null default now());
+  autor text, criado_em timestamptz not null default now(),
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
 """
 
 #: base de tempo fixa — a espera é medida em minutos, e um teste que lê o relógio

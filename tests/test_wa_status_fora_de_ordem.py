@@ -44,7 +44,8 @@ create table mensagens (id bigserial primary key, conversa_id bigint, canal text
   -- é gravado (o código do provedor, a mensagem dele). Faltava aqui, e o
   -- update caía com UndefinedColumn — schema mínimo que esqueceu uma coluna
   -- que a produção tem.
-  provider_sid text, status text, texto text, meta jsonb);
+  provider_sid text, status text, texto text, meta jsonb,
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
 """
 
 

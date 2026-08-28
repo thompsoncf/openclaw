@@ -891,13 +891,14 @@ def painel_servicos_lista(request: Request):
                           (select cl.nome from clientes cl
                             where cl.id = orcamentos.cliente_id) as cadastro_nome,
                           coalesce(whatsapp, telefone, '') as zap,
-                          -- desde quando o contrato espera assinatura. O APELIDO
-                          -- aqui é pela mesma razão do `enviado_em` acima: sem ele
-                          -- esta coluna também se chama `criado_em` e derruba o
-                          -- `order by` de baixo com ORDER BY ... is ambiguous.
-                          (select ct.criado_em from contratos ct
+                          -- desde quando o contrato está na mão do cliente
+                          -- esperando assinatura — não desde quando foi CRIADO.
+                          -- O APELIDO aqui é pela mesma razão do `enviado_em`
+                          -- acima: sem ele esta coluna também se chama `enviado_em`
+                          -- e derruba o `order by` de baixo com ORDER BY ambíguo.
+                          (select ct.enviado_em from contratos ct
                             where ct.orcamento_id = orcamentos.id and ct.substitui_id is null
-                            order by ct.id desc limit 1) as contrato_em"""
+                            order by ct.id desc limit 1) as contrato_enviado_em"""
         if papel == "vendedor" and membro_id:
             rows = c.execute(
                 _cols + """ from orcamentos where conta_id=%s and criado_por=%s
@@ -986,7 +987,7 @@ def painel_servicos_lista(request: Request):
         # China no wa.me e que celular antigo de 10 dígitos precisa do 9. Reescrever
         # isso aqui em JS (`replace(/\D/g,'')`) dava um atalho que abre no vazio.
         "zap_link": _zap_link(r[25] or ""),
-        "_contrato_em": r[26],
+        "_contrato_enviado_em": r[26],
         "evento": r[21] if isinstance(r[21], dict) else None,
         # quanto já entrou, e quanto disso está sem comprovante
         "pgto": vendas.resumo_pagamentos(
@@ -1017,13 +1018,13 @@ def painel_servicos_lista(request: Request):
             contrato_assinado=it["contrato_assinado"],
             plano_difere=it["plano_difere"], aprovada_por=it["aprovada_por"],
             nunca_enviada=not it["enviado_em"],
-            contrato_em=it["_contrato_em"], tem_contrato=_nicho_tem_contrato)
+            contrato_enviado_em=it["_contrato_enviado_em"], tem_contrato=_nicho_tem_contrato)
         # o NOME, resolvido no servidor pela mesma função pura que os testes cobrem.
         # A tela não decide mais quem é o cliente desta linha.
         it.update(vendas.titulo_do_funil(
             cadastro=it["_cadastro"], empresa=it["empresa"], cliente=it["cliente"],
             modo=it["modo"], evento=it.get("evento"), numero=it["numero"]))
-        for _k in ("_cadastro", "_contrato_em"):
+        for _k in ("_cadastro", "_contrato_enviado_em"):
             it.pop(_k, None)
     return JSONResponse({"itens": itens})
 
@@ -1356,6 +1357,15 @@ def painel_servicos_enviar_email(request: Request, dados: EnviarEmailIn):
         # o link vai junto do erro: o vendedor tem um cliente esperando, e mandar
         # pelo WhatsApp resolve o dia dele enquanto a caixa se conserta.
         return JSONResponse({"erro": r["erro"], "link": link}, status_code=502)
+    if doc_rotulo == "contrato":
+        # É AQUI que a linha do funil aprende que o contrato saiu de casa: sem
+        # isto o card ficava com o botão "Mandar pra assinar" pra sempre, porque
+        # nada distinguia "pronto" de "já na mão do cliente" (relato de produção,
+        # conta Prime Eventos/Bianca, 28/08).
+        with pool.connection() as c:
+            c.execute("update contratos set enviado_em=now() where id=%s",
+                     (_ct["id"],))
+            c.commit()
     return JSONResponse({"ok": True, "remetente": r["remetente"], "para": para})
 
 

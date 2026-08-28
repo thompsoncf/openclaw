@@ -98,7 +98,7 @@ def cliente(monkeypatch):
             texto jsonb, valor_centavos bigint, assinado_em timestamptz, assinado_por text,
             assinado_doc text, assinado_ip text, rescindido_em timestamptz,
             rescisao_motivo text, substitui_id bigint, token text,
-            criado_em timestamptz default now(),
+            criado_em timestamptz default now(), enviado_em timestamptz,
             criado_por text default '')""")
         c.execute("create unique index ux_ct_cn on contratos (conta_id, numero)")
         c.commit()
@@ -1082,6 +1082,34 @@ def test_mandar_pra_assinar_sem_contrato_ainda_nao_manda_nada(cliente, correio):
     assert r.status_code == 404
     assert "contrato" in r.json()["erro"]
     assert not correio
+
+
+def test_mandar_pra_assinar_muda_o_selo_de_azul_pra_ambar(cliente, correio):
+    """A OUTRA METADE do bug de produção: mesmo depois de o link certo sair, o
+    card continuava com o botão "Mandar pra assinar" — nada na tela dizia que o
+    contrato já tinha saído de casa. Este teste trava a marca que resolve isso:
+    `contratos.enviado_em` grava no envio, e é ela que muda o selo e o botão."""
+    oid = _orcamento_pra_mandar(cliente, email="bianca@x.com", numero=54)
+    _contrato_do(cliente, oid, numero=8, token="tokct54")
+
+    def selo_do_contrato(painel):
+        return next(s["texto"] for s in painel["selos"] if "ontrato" in s["texto"]
+                    or "ssinatura" in s["texto"])
+
+    antes = _item(cliente, oid)["painel"]
+    assert selo_do_contrato(antes) == "Contrato pronto — ainda não mandou pra assinar"
+    assert antes["acao"] == {"chave": "assinar", "texto": "Mandar pra assinar"}
+
+    r = cliente.post("/painel/servicos/enviar-email",
+                     json={"id": oid, "alvo": "contrato"})
+    assert r.status_code == 200, r.text
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select enviado_em is not null from contratos where orcamento_id=%s",
+                          (oid,)).fetchone()[0]
+
+    depois = _item(cliente, oid)["painel"]
+    assert selo_do_contrato(depois).startswith("Aguardando assinatura")
+    assert depois["acao"] == {"chave": "assinar", "texto": "Reenviar pra assinar"}
 
 
 def test_enviar_a_proposta_normal_continua_mandando_o_link_da_proposta(cliente, correio):

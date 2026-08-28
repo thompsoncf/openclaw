@@ -804,18 +804,22 @@ def enviar_anexo(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes
     texto = (legenda or "").strip() or marca
     midia = _midia_do_payload(res.get("midia"))
     with pool.connection() as c:
-        c.execute(
+        # o `returning id` não é enfeite: a tela mostra a bolha ANTES de o servidor
+        # responder (com a foto que o vendedor acabou de escolher), e é este id que
+        # deixa ela virar a definitiva sem o polling trazer uma segunda cópia
+        msg_id = c.execute(
             """insert into mensagens (conversa_id, canal, direcao, autor, membro_id,
                                       texto, provider_sid, midia_ref, midia_tipo, midia_meta)
-               values (%s,'whatsapp','out','humano',%s,%s,%s,%s,%s,%s)""",
+               values (%s,'whatsapp','out','humano',%s,%s,%s,%s,%s,%s) returning id""",
             (conv, membro_id, texto[:8000], res.get("sid"),
              _json.dumps(midia["ref"]) if midia else None,
              midia["tipo"] if midia else None,
-             _json.dumps(midia["meta"]) if midia else None))
+             _json.dumps(midia["meta"]) if midia else None)).fetchone()[0]
         c.execute("update conversas set ultima_msg_em=now(), status='pendente', "
                   "agente_ativo=false, push_avisado_em=null where id=%s", (conv,))
         c.commit()
-    return {"ok": True, "tipo": tipo, "conversa_id": conv}
+    return {"ok": True, "tipo": tipo, "conversa_id": conv, "id": msg_id,
+            "tem_midia": bool(midia)}
 
 
 def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes,

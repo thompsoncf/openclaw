@@ -475,6 +475,21 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   left:50%;transform:translateX(-50%);font-size:.78rem;color:#fff;opacity:.85;
   text-decoration:underline;text-underline-offset:3px}
 /* a mensagem que já está na tela mas ainda não voltou do servidor */
+/* A BOLHA QUE ESTÁ SUBINDO. Não é `.voando` (aquela é do texto, que recarrega a
+   página): esta fica minutos na tela num vídeo de 16 MB, então precisa mostrar
+   PROGRESSO em vez de só desbotar — barra parada e barra andando são a diferença
+   entre "está indo" e "travou". */
+.bub.subindo .mid img,.bub.subindo .mid video{opacity:.6}
+.bub .barra{display:block;height:3px;border-radius:2px;background:var(--line);
+  margin:.35rem 0 .1rem;overflow:hidden}
+.bub .barra i{display:block;height:100%;width:0;background:var(--neon);
+  transition:width .2s linear}
+.bub .subiu{font-size:.62rem;opacity:.7;font-family:var(--mono)}
+/* falhou: o arquivo continua no aparelho, então dá pra tentar de novo sem
+   escolher tudo outra vez */
+.bub.ruim{border:1px solid var(--coral-borda)}
+.bub .repetir{background:none;border:0;color:var(--coral);font-size:.7rem;
+  text-decoration:underline;padding:.2rem 0;width:auto;cursor:pointer}
 .bub.voando{opacity:.55}
 .bub.voando .tick{display:block;font-family:var(--mono);font-size:.6rem;
   color:var(--text-faint);margin-top:.2rem}
@@ -3109,11 +3124,12 @@ _ANEXO_JS = r"""
   var MB=1048576;
   // os MESMOS tetos do servidor (finance/cockpit._ANEXO_TETO e LIMITE_MIDIA no
   // wa-qr). Repetidos aqui pra barrar ANTES do upload: mandar 40 MB pela rede do
-  // celular do vendedor pra ouvir "grande demais" no fim gasta o pacote de dados
-  // dele e um minuto da vida. O servidor barra de novo — a tela não é confiável.
+  // celular pra ouvir "grande demais" no fim gasta o pacote de dados do vendedor
+  // e um minuto da vida dele. O servidor barra de novo — tela não é fonte confiável.
   var TETO={imagem:5*MB, video:16*MB, documento:16*MB};
   function $(id){return document.getElementById(id);}
   var clipe=$("clipe"), arq=$("arq"), comp=$("comp");
+  var chat=document.querySelector(".chat");
   if(!clipe||!arq) return;
 
   function tipoDe(m){
@@ -3126,45 +3142,123 @@ _ANEXO_JS = r"""
     // btoa só engole latin-1, e nome de arquivo brasileiro tem acento
     return btoa(String.fromCharCode.apply(null, new TextEncoder().encode(txt||"")));
   }
-  function aviso(m){ if(window.toast) window.toast(m); else alert(m); }
+  function esc(t){var e=document.createElement("div");e.textContent=t||"";return e.innerHTML;}
+  function tam(b){
+    if(b>=MB) return (b/MB).toFixed(1).replace(".",",")+" MB";
+    if(b>=1024) return Math.round(b/1024)+" KB";
+    return b+" B";
+  }
+  function fim(){ if(chat) chat.scrollTop=chat.scrollHeight; }
+
+  // ---------------------------------------------------------------- a bolha
+  // Ela nasce ANTES do upload começar, já com a imagem que o vendedor escolheu.
+  // O `createObjectURL` aponta pro arquivo no APARELHO: aparece instantâneo, não
+  // custa download nenhum, e continua servindo depois que o envio termina — a foto
+  // que ele mandou nunca precisa ser baixada de volta.
+  function bolha(f, tipo, legenda){
+    var d=document.createElement("div");
+    d.className="bub out subindo";
+    var url=(tipo==="documento")?null:URL.createObjectURL(f);
+    var corpo="";
+    if(tipo==="imagem") corpo='<span class=mid><img src="'+url+'" alt=""></span>';
+    else if(tipo==="video") corpo='<span class=mid><video src="'+url+'" muted playsinline></video></span>';
+    else corpo='<span class="mid doc"><span>📄</span><span><span class=nm>'+esc(f.name)
+               +'</span><br><span class=pz>'+tam(f.size)+'</span></span></span>';
+    d.innerHTML='<div class=who>Você</div>'+corpo+(legenda?esc(legenda):"")
+      +'<span class=barra><i></i></span><span class=subiu>enviando… 0%</span>';
+    if(chat){ chat.appendChild(d); fim(); }
+    d.__url=url;
+    return d;
+  }
+  function soltar(d){
+    // devolve a memória do preview. Num vídeo de 16 MB isso não é detalhe.
+    if(d && d.__url){ try{ URL.revokeObjectURL(d.__url); }catch(e){} d.__url=null; }
+  }
+
+  // ---------------------------------------------------------------- o envio
+  function subir(f, tipo, legenda, d){
+    var barra=d.querySelector(".barra i"), rot=d.querySelector(".subiu");
+    var xhr=new XMLHttpRequest();
+    xhr.open("POST", BASE+"/lead/"+LEAD+"/anexo");
+    xhr.setRequestHeader("Content-Type", f.type || "application/octet-stream");
+    xhr.setRequestHeader("X-Nome", b64(f.name));
+    xhr.setRequestHeader("X-Legenda", b64(legenda));
+    xhr.upload.onprogress=function(e){
+      if(!e.lengthComputable) return;
+      var pct=Math.round(e.loaded*100/e.total);
+      if(barra) barra.style.width=pct+"%";
+      // 100% do UPLOAD não é fim: o servidor ainda espera o WhatsApp cifrar e
+      // receber o arquivo. Dizer "100%" e ficar parado parece travado — daí o
+      // "quase lá", que é honesto sobre o que está acontecendo.
+      if(rot) rot.textContent = pct>=100 ? "quase lá…" : ("enviando… "+pct+"%");
+    };
+    xhr.onload=function(){
+      var j=null;
+      try{ j=JSON.parse(xhr.responseText||"{}"); }catch(e){ j=null; }
+      if(j && j.ok){
+        d.classList.remove("subindo");
+        var b=d.querySelector(".barra"); if(b) b.remove();
+        if(rot) rot.remove();
+        d.setAttribute("data-id", j.id);
+        // avisa o polling que esta mensagem já está na tela, senão ela voltaria
+        // pela outra ponta e o vendedor veria a mesma foto duas vezes
+        if(window.__viu) window.__viu(j.id);
+        return;
+      }
+      falhou(d, f, tipo, legenda, (j && j.erro) || "Não consegui enviar.");
+    };
+    xhr.onerror=function(){ falhou(d, f, tipo, legenda, "Falha de conexão."); };
+    // O ARQUIVO VAI DIRETO, sem `arrayBuffer()`. Lendo antes, os 16 MB inteiros
+    // iam pra memória do navegador — no celular do vendedor isso é o que trava a
+    // tela. Passando o File, o navegador lê do disco enquanto sobe.
+    xhr.send(f);
+  }
+
+  function falhou(d, f, tipo, legenda, msg){
+    d.classList.remove("subindo"); d.classList.add("ruim");
+    var b=d.querySelector(".barra"); if(b) b.remove();
+    var rot=d.querySelector(".subiu");
+    if(rot){ rot.textContent=msg+" "; }
+    var bt=document.createElement("button");
+    bt.type="button"; bt.className="repetir"; bt.textContent="tentar de novo";
+    bt.onclick=function(){
+      // o arquivo continua no aparelho: dá pra repetir sem escolher tudo de novo
+      bt.remove();
+      d.classList.remove("ruim"); d.classList.add("subindo");
+      if(rot) rot.textContent="enviando… 0%";
+      var nb=document.createElement("span"); nb.className="barra";
+      nb.innerHTML="<i></i>";
+      d.insertBefore(nb, rot);
+      subir(f, tipo, legenda, d);
+    };
+    if(rot) rot.appendChild(bt); else d.appendChild(bt);
+  }
 
   clipe.onclick=function(){ arq.value=""; arq.click(); };
 
   arq.onchange=function(){
     var f=arq.files && arq.files[0];
+    arq.value="";                       // já libera pra escolher o próximo
     if(!f) return;
     var t=tipoDe(f.type);
     if(f.size>TETO[t]){
-      aviso("Arquivo passa de "+(TETO[t]/MB)+" MB.");
-      arq.value=""; return;
+      // recado NA CONVERSA, não em janela: `alert` é modal, trava a página e o
+      // vendedor não consegue nem digitar enquanto ela está aberta
+      var e=document.createElement("div");
+      e.className="bub out ruim";
+      e.innerHTML='<div class=who>Você</div>'+esc(f.name)
+        +'<span class=subiu>não enviado — passa de '+(TETO[t]/MB)+' MB</span>';
+      if(chat){ chat.appendChild(e); fim(); }
+      return;
     }
-    // a legenda é o que já estiver escrito na caixa de resposta: no WhatsApp ela
-    // chega colada na foto, que é como as pessoas mandam de verdade
+    // a legenda é o que já estiver escrito na caixa: no WhatsApp ela chega colada
+    // na foto, que é como as pessoas mandam de verdade
     var cx=comp && comp.querySelector("input[name=texto]");
     var legenda=(cx && cx.value || "").trim();
-    clipe.disabled=true;
-    aviso("Enviando "+(t==="documento"?"arquivo":t)+"…");
-    f.arrayBuffer().then(function(buf){
-      return fetch(BASE+"/lead/"+LEAD+"/anexo",{
-        method:"POST",
-        headers:{"Content-Type": f.type || "application/octet-stream",
-                 "X-Nome": b64(f.name), "X-Legenda": b64(legenda)},
-        body: buf
-      });
-    }).then(function(r){ return r.json(); }).then(function(j){
-      clipe.disabled=false; arq.value="";
-      if(j && j.ok){
-        if(cx) cx.value="";
-        // mesma escolha do áudio: a conversa se atualiza sozinha, e recarregar a
-        // página custaria ~1s de tela branca logo depois de enviar
-        if(window.__puxa) window.__puxa();
-        return;
-      }
-      aviso((j && j.erro) || "Não consegui enviar o arquivo.");
-    }).catch(function(){
-      clipe.disabled=false; arq.value="";
-      aviso("Falha de conexão ao enviar o arquivo.");
-    });
+    if(cx) cx.value="";
+    // O CLIPE NÃO É DESABILITADO e a caixa de texto segue livre: o upload corre por
+    // baixo, e o vendedor continua conversando. Era isto que a janela impedia.
+    subir(f, t, legenda, bolha(f, t, legenda));
   };
 })();
 </script>
@@ -3589,6 +3683,11 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            # exposto pra quem manda áudio puxar na hora: recarregar a página inteira
            # depois de enviar dá ~1s de tela branca num aparelho de vendedor
            "window.__puxa=puxa;setInterval(puxa,8000);"
+           # quem já pôs a mensagem na tela por conta própria (o anexo, que desenha
+           # a bolha com a foto local antes mesmo de o upload acabar) avisa aqui.
+           # Sem isso o polling traria a MESMA mensagem de novo, e o vendedor veria
+           # a foto que acabou de mandar duas vezes.
+           "window.__viu=function(id){id=Number(id)||0;if(id>ultimo)ultimo=id;};"
            "document.addEventListener('visibilitychange',function(){"
            "if(document.visibilityState==='visible')puxa();});"
            "})();</script>")

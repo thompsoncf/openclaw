@@ -495,6 +495,9 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:#F0DCA6}
 .dupla b{color:var(--text)}
 .dupla a{color:var(--ambar);text-decoration:underline}
+/* a campanha rodando nos dois chips não é defeito: mesma faixa, tom neutro */
+.dupla.info{background:var(--surface);border-color:var(--line);color:var(--text-dim)}
+.dupla.info a{color:var(--neon)}
 .rodape{flex-shrink:0;border-top:1px solid var(--line);background:var(--bg);padding:.7rem 1.1rem;
   padding-bottom:calc(.7rem + var(--fundo-seguro));position:relative;z-index:2}
 .composer{display:flex;gap:.5rem;align-items:center}
@@ -3337,12 +3340,17 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
     # O mesmo número com conversa em outra ficha. Sai ANTES do chat porque a conversa
     # nasce rolada no fim; e sai como faixa, não como bolha, pra não parecer mensagem
     # de ninguém. Ver `aviso_outra_conversa` e `outras_conversas_do_numero`.
+    # E o TOM muda conforme o caso: mesmo chip é a entrega dupla (defeito, âmbar);
+    # chip diferente é a campanha rodando nos dois números da empresa, que é de
+    # propósito — ali o vendedor precisa saber, não se assustar.
     av = d.get("aviso_conversa") or {}
     dupla = ""
     if av.get("texto"):
         link = (f" <a href='{_BASE}/lead/{av['lead_id']}'>abrir</a>"
                 if av.get("lead_id") else "")
-        dupla = (f"<div class=dupla><b>Atenção:</b> {esc(av['texto'])}"
+        rot = "<b>Atenção:</b> " if av.get("defeito") else ""
+        cls = "dupla" if av.get("defeito") else "dupla info"
+        dupla = (f"<div class='{cls}'>{rot}{esc(av['texto'])}"
                  f" O histórico dela não aparece aqui.{link}</div>")
 
     chip = ("<span class='chip ia'>IA</span>" if d["ia"] else "<span class='chip voce'>você</span>")

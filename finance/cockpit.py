@@ -393,16 +393,26 @@ def _conta_membro(c, conta_id, membro_id):
                      (membro_id, conta_id)).fetchone()
 
 
-def aviso_outra_conversa(outras, *, membro_id=None) -> dict:
+def aviso_outra_conversa(outras, *, membro_id=None, chip_id=None) -> dict:
     """A frase do aviso "este número tem outra conversa" — sem banco, pra poder testar.
 
     Recebe o que `outras_conversas_do_numero` devolveu e diz ao vendedor o que ele
     NÃO está vendo. Devolve {} quando não há nada a avisar, e senão
-    {"texto", "lead_id"}. `lead_id` só vem quando a outra ficha é DELE: `/cockpit/lead`
-    revalida a posse e devolveria o vendedor pro começo — link que não abre é pior que
-    link nenhum. Quando a conversa é de um colega, o aviso diz o NOME dele, que é a
-    informação que resolve: foi assim que o Thiago descobriu que o "lead repetido"
-    dele era a mesma pessoa que o Pedro estava atendendo.
+    {"texto", "lead_id", "defeito"}.
+
+    DUAS COISAS DIFERENTES, DUAS FRASES. Uma empresa de dois chips roda a MESMA
+    campanha nos dois, e aí o mesmo contato ter duas conversas é o desenho, não o
+    defeito: cada chip fala pelo seu número (ver `_gemeos_de_outro_chip`). Já duas
+    conversas no MESMO chip são a entrega dupla — o caso da Geovanna. Medido em
+    28/08/2026: dos 15 números com conversa repetida, 6 eram os dois chips e 9 o
+    mesmo chip. Chamar os 6 de erro seria mandar o vendedor caçar problema que não
+    existe; `defeito` diz qual dos dois é, pra tela poder pintar diferente.
+
+    `lead_id` só vem quando a outra ficha é DELE: `/cockpit/lead` revalida a posse e
+    devolveria o vendedor pro começo — link que não abre é pior que link nenhum.
+    Quando a conversa é de um colega, o aviso diz o NOME dele, que é a informação que
+    resolve: foi assim que o Thiago descobriu que o "lead repetido" dele era a mesma
+    pessoa que o Pedro estava atendendo.
 
     Uma linha só, mesmo com três conversas: isto mora em cima do chat de um celular.
     O que passa da primeira vira "e mais N"."""
@@ -413,16 +423,22 @@ def aviso_outra_conversa(outras, *, membro_id=None) -> dict:
     trecho = (f" ({quantas} mensagem{'s' if quantas != 1 else ''})" if quantas else "")
     dono = (o.get("vendedor_nome") or "").strip()
     minha = membro_id is not None and o.get("vendedor_id") == membro_id
-    if minha:
-        texto = f"Este número tem outra ficha sua{trecho}."
-    elif dono:
-        texto = f"Este número também está com {dono}{trecho}."
+    # `is not distinct from` em Python: os dois podem ser None (o chip principal), e
+    # None == None já é o que queremos — mesmo chip.
+    mesmo_chip = o.get("chip_id") == chip_id
+    quem = ("na sua outra ficha" if minha else f"com {dono}" if dono else "sem dono")
+    if mesmo_chip:
+        texto = f"Este número tem outra conversa neste mesmo chip, {quem}{trecho}."
     else:
-        texto = f"Este número tem outra conversa sem dono{trecho}."
+        onde = (o.get("chip_nome") or "").strip()
+        texto = (f"Este número também está sendo atendido pelo "
+                 f"{('chip ' + onde) if onde else 'outro chip'} da empresa, {quem}"
+                 f"{trecho}.")
     resto = len(outras) - 1
     if resto:
         texto += f" E mais {resto}."
-    return {"texto": texto, "lead_id": o.get("lead_id") if minha else None}
+    return {"texto": texto, "lead_id": o.get("lead_id") if minha else None,
+            "defeito": mesmo_chip}
 
 
 def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
@@ -446,7 +462,10 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
         return None
     with pool.connection() as c:
         etapas = [e for e in _etapas(c, conta_id) if e["chave"] not in ("ganho", "perdido")]
-        cv = c.execute("select id, coalesce(agente_ativo,true) from conversas "
+        # `chip_id` vem junto pro aviso de conversa repetida saber se a outra está no
+        # MESMO chip (entrega dupla, defeito) ou no outro (a campanha nos dois números,
+        # que é de propósito). Ver `aviso_outra_conversa`.
+        cv = c.execute("select id, coalesce(agente_ativo,true), chip_id from conversas "
                        "where prospeccao_id=%s and conta_id=%s order by ultima_msg_em desc limit 1",
                        (lead_id, conta_id)).fetchone()
         if cv and pos_visto:
@@ -479,7 +498,8 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
     alvo["ia"] = bool(cv[1]) if cv else True
     alvo["mensagens"] = msgs
     alvo["outras_conversas"] = outras
-    alvo["aviso_conversa"] = aviso_outra_conversa(outras, membro_id=membro_id)
+    alvo["aviso_conversa"] = aviso_outra_conversa(
+        outras, membro_id=membro_id, chip_id=(cv[2] if cv else None))
     return alvo
 
 

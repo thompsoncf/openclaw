@@ -3655,13 +3655,25 @@ def outras_conversas_do_numero(c, conta_id, numero, excluir=None, *, limite=3):
     existia. Foi o caso da Geovanna na conta 34 — Pedro com a primeira entrega,
     Thiago com a segunda, e o Thiago reclamando de lead repetido.
 
-    A trava resolve daqui pra frente. As 62 conversas partidas que já existem (17
-    números) continuam como estão: juntá-las seria apagar e reescrever `conversas` e
-    `mensagens`, coisa que esta casa não faz. Então a tela AVISA em vez de mexer.
+    A trava resolve daqui pra frente. As conversas partidas que já existem continuam
+    como estão: juntá-las seria apagar e reescrever `conversas` e `mensagens`, coisa
+    que esta casa não faz. Então a tela AVISA em vez de mexer.
 
-    E nem toda duplicata é da corrida: 11 dos 17 números estão separados no tempo —
-    histórico legítimo de quem repareou o chip. O aviso serve pros dois casos, porque
-    o sintoma é o mesmo: falta metade da conversa na tela.
+    E A MAIORIA NÃO É DEFEITO. Medido em 28/08/2026, 15 números têm mais de uma
+    conversa de WhatsApp (30 conversas ao todo):
+
+        6 números (12 conversas)  chips DIFERENTES  -> de propósito, é a mesma
+                                                       campanha rodando nos dois
+                                                       chips; ver `_gemeos_de_outro_chip`
+        9 números (18 conversas)  MESMO chip        -> destes, 6 nasceram com menos
+                                                       de 2 s de diferença (a corrida);
+                                                       um está separado por 12 dias
+                                                       (cliente que voltou) e dois não
+                                                       têm lead nem mensagem
+
+    Por isso o aviso diz de QUAL chip veio a outra conversa, em vez de tratar tudo
+    como erro: no caso dos dois chips não há nada pra consertar — há o que saber, que
+    é outro vendedor falando com a mesma pessoa por outro número da empresa.
 
     LEITURA PURA. Devolve no máximo `limite` linhas, da mais recente pra trás.
 
@@ -3697,7 +3709,8 @@ def outras_conversas_do_numero(c, conta_id, numero, excluir=None, *, limite=3):
         return []
     return [{"conversa_id": r[0], "lead_id": r[1], "empresa": r[2],
              "vendedor_id": r[3], "vendedor_nome": r[4],
-             "quando": r[5], "mensagens": r[6] or 0} for r in rows]
+             "quando": r[5], "mensagens": r[6] or 0,
+             "chip_id": r[7], "chip_nome": r[8]} for r in rows]
 
 
 def _outras_conversas_consulta(c, conta_id, alvo8, equivalentes, fora, limite):
@@ -3708,10 +3721,18 @@ def _outras_conversas_consulta(c, conta_id, alvo8, equivalentes, fora, limite):
                    coalesce(nullif(p.empresa, ''), nullif(p.contato, ''), ''),
                    p.vendedor_id, coalesce(nullif(m.nome, ''), ''),
                    cv.ultima_msg_em,
-                   (select count(*) from mensagens ms where ms.conversa_id = cv.id)
+                   (select count(*) from mensagens ms where ms.conversa_id = cv.id),
+                   cv.chip_id,
+                   -- o rótulo do chip sai das MESMAS duas fontes do `_gemeos_consulta`:
+                   -- chip secundário é uma conta própria (`contas.chip_de`), o principal
+                   -- só tem nome em `canais_config.rotulo`
+                   coalesce(nullif(btrim(chp.nome), ''), nullif(btrim(cc1.rotulo), ''), '')
               from conversas cv
               left join prospeccao p on p.id = cv.prospeccao_id
               left join membros m on m.id = p.vendedor_id
+              left join contas chp on chp.id = cv.chip_id
+              left join canais_config cc1 on cv.chip_id is null and cc1.conta_id = cv.conta_id
+                                         and cc1.canal = 'whatsapp'
              where cv.conta_id=%s and cv.canal='whatsapp'
                and right(regexp_replace(cv.contato_ref, '\D', '', 'g'), 8) = %s
                and regexp_replace(cv.contato_ref, '\D', '', 'g') = any(%s)

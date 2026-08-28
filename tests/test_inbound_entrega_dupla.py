@@ -58,6 +58,11 @@ create table wa_contatos (conta_id bigint, numero8 text, nome text,
   da_agenda boolean default false, primary key (conta_id, numero8));
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text, ativo boolean default true, cockpit_pausado boolean default false);
+-- o chip secundário é uma CONTA própria (contas.chip_de); o principal só tem nome
+-- em canais_config.rotulo. As duas fontes entram porque o aviso diz de qual chip
+-- veio a outra conversa — e é isso que separa "defeito" de "campanha nos dois".
+create table contas (id bigserial primary key, nome text, chip_de bigint);
+create table canais_config (conta_id bigint, canal text, rotulo text);
 
 -- O RODÍZIO entra no esquema de propósito. Sem ele o teste ainda pegaria a
 -- duplicata, mas não mostraria o SINTOMA que o vendedor relatou: os dois leads
@@ -372,7 +377,7 @@ def test_excluir_aceita_lista_pra_nao_repetir_aviso_que_ja_existe(pool):
 def test_frase_diz_o_nome_do_colega():
     from finance.cockpit import aviso_outra_conversa
     a = aviso_outra_conversa([{"lead_id": 871, "vendedor_id": 9, "vendedor_nome": "Pedro",
-                               "mensagens": 3}], membro_id=5)
+                               "mensagens": 3, "chip_id": None}], membro_id=5, chip_id=None)
     assert "Pedro" in a["texto"]
     assert a["lead_id"] is None, \
         "ficha de colega não abre pro vendedor (`lead_do_vendedor` revalida a posse) " \
@@ -382,7 +387,7 @@ def test_frase_diz_o_nome_do_colega():
 def test_frase_da_ficha_do_proprio_vendedor_abre():
     from finance.cockpit import aviso_outra_conversa
     a = aviso_outra_conversa([{"lead_id": 871, "vendedor_id": 5, "vendedor_nome": "Thiago",
-                               "mensagens": 1}], membro_id=5)
+                               "mensagens": 1, "chip_id": None}], membro_id=5, chip_id=None)
     assert a["lead_id"] == 871, "a outra ficha é DELE: aí o link abre"
     assert "1 mensagem" in a["texto"] and "mensagens" not in a["texto"]
 
@@ -396,8 +401,9 @@ def test_frase_vazia_quando_nao_ha_outra_conversa():
 def test_frase_resume_quando_ha_mais_de_uma():
     """Uma linha só: isto mora em cima do chat de um celular."""
     from finance.cockpit import aviso_outra_conversa
-    a = aviso_outra_conversa([{"vendedor_nome": "Pedro", "mensagens": 2},
-                              {"vendedor_nome": "Ana", "mensagens": 9}], membro_id=5)
+    a = aviso_outra_conversa([{"vendedor_nome": "Pedro", "mensagens": 2, "chip_id": None},
+                              {"vendedor_nome": "Ana", "mensagens": 9, "chip_id": None}],
+                             membro_id=5, chip_id=None)
     assert "Pedro" in a["texto"] and "E mais 1." in a["texto"]
     assert "Ana" not in a["texto"]
 
@@ -444,20 +450,93 @@ def _tela(aviso):
 def test_a_faixa_aparece_na_tela_do_vendedor():
     """O aviso tem que sair FORA do `.chat`: a conversa nasce rolada no fim (ver o
     script do rodapé), então um aviso dentro do histórico ninguém veria."""
-    html = _tela({"texto": "Este número também está com Pedro (1 mensagem).",
-                  "lead_id": None})
-    assert "class=dupla" in html and "Pedro" in html
-    assert html.index("class=dupla") < html.index("class=chat"), \
+    html = _tela({"texto": "Este número tem outra conversa neste mesmo chip, com Pedro"
+                           " (1 mensagem).", "lead_id": None, "defeito": True})
+    assert "'dupla'" in html and "Pedro" in html
+    assert html.index("'dupla'") < html.index("class=chat"), \
         "a faixa saiu dentro/depois do chat — ficaria fora da vista"
     assert "/lead/None" not in html, "conversa de colega não pode virar link"
 
 
 def test_sem_aviso_a_tela_nao_muda():
-    assert "class=dupla" not in _tela({})
-    assert "class=dupla" not in _tela(None)
+    assert "dupla" not in _tela({})
+    assert "dupla" not in _tela(None)
+
+
+def test_a_campanha_nos_dois_chips_nao_e_pintada_como_defeito():
+    """A observação do dono: dois chips ativos com a MESMA campanha geram duas
+    conversas de propósito. Ali não há o que consertar — e uma faixa âmbar com
+    "Atenção" mandaria o vendedor caçar problema que não existe."""
+    defeito = _tela({"texto": "x", "lead_id": None, "defeito": True})
+    normal = _tela({"texto": "x", "lead_id": None, "defeito": False})
+    assert "Atenção" in defeito and "Atenção" not in normal
+    assert "dupla info" in normal and "dupla info" not in defeito
 
 
 def test_a_faixa_da_ficha_propria_traz_o_link():
     html = _tela({"texto": "Este número tem outra ficha sua (2 mensagens).",
                   "lead_id": 871})
     assert "/cockpit/lead/871" in html, "a outra ficha é dele: o link tem que abrir"
+
+
+# ------------------------------------------ os DOIS CHIPS: parecido, e não é bug
+
+CHIP2 = 991          # o chip secundário é uma conta própria (contas.chip_de)
+
+
+def _com_dois_chips(pool):
+    """A Prime de verdade: um chip principal e um segundo, com a mesma campanha."""
+    with pool.connection() as c:
+        c.execute("insert into contas (id, nome, chip_de) values (%s,'Thiago',%s) "
+                  "on conflict do nothing", (CHIP2, CONTA))
+        c.execute("insert into canais_config (conta_id, canal, rotulo) "
+                  "values (%s,'whatsapp','Zarb')", (CONTA,))
+        c.commit()
+
+
+def test_conversa_do_outro_chip_aparece_mas_nao_como_defeito(pool):
+    """A hipótese do dono, virada teste: a mesma campanha nos dois chips gera duas
+    conversas do mesmo contato — de propósito, cada chip fala pelo seu número.
+
+    O aviso ainda tem que APARECER (o vendedor precisa saber que um colega está
+    falando com a mesma pessoa por outro número), mas marcado como `defeito=False`:
+    não há entrega dupla nenhuma pra consertar. Medido em 28/08/2026, 6 dos 15
+    números com conversa repetida eram exatamente este caso."""
+    from finance.cockpit import aviso_outra_conversa
+    _com_dois_chips(pool)
+    with pool.connection() as c:
+        minha, _ = _entrega(c)          # entra pelo chip principal (chip_id NULL)
+        c.commit()
+    lead2, conv2 = _conversa_irma(pool)
+    with pool.connection() as c:
+        c.execute("update conversas set chip_id=%s where id=%s", (CHIP2, conv2))
+        c.commit()
+
+    with pool.connection() as c:
+        achadas = pp.outras_conversas_do_numero(c, CONTA, NUM, minha)
+    assert len(achadas) == 1, "a conversa do outro chip sumiu do aviso"
+    assert achadas[0]["chip_id"] == CHIP2
+    assert achadas[0]["chip_nome"] == "Thiago", \
+        "sem o nome do chip o aviso não diz por qual número o colega está falando"
+
+    av = aviso_outra_conversa(achadas, membro_id=None, chip_id=None)
+    assert av["defeito"] is False, \
+        "campanha nos dois chips é o desenho do produto, não a entrega dupla"
+    assert "Thiago" in av["texto"] and "mesmo chip" not in av["texto"]
+
+
+def test_conversa_do_mesmo_chip_e_marcada_como_defeito(pool):
+    """A metade que separa os dois casos: mesmo chip é a corrida — o caso da
+    Geovanna, onde as duas conversas tinham `chip_id` NULL e o MESMO provider_sid."""
+    from finance.cockpit import aviso_outra_conversa
+    _com_dois_chips(pool)
+    with pool.connection() as c:
+        minha, _ = _entrega(c)
+        c.commit()
+    _conversa_irma(pool)                # fica no chip principal, como a 3392/3393
+
+    with pool.connection() as c:
+        achadas = pp.outras_conversas_do_numero(c, CONTA, NUM, minha)
+    av = aviso_outra_conversa(achadas, membro_id=None, chip_id=None)
+    assert av["defeito"] is True
+    assert "mesmo chip" in av["texto"]

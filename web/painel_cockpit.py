@@ -416,6 +416,13 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .pb.sim{background:var(--neon-fundo);color:var(--neon-bright);border-color:var(--neon-borda)}
 .pb.nao{background:#241313;color:#F0B8B8;border-color:var(--coral-borda)}
 .pb:disabled{opacity:.5}
+/* O par de APOIO (Remarcar / Abrir o lead). Sem preenchimento de propósito: o cartão
+   existe pra arrancar a RESPOSTA, e o comparecimento é o número que o relatório do
+   funil usa. Dar a estes dois o mesmo peso dos de cima seria oferecer uma saída tão
+   convidativa quanto responder. */
+.pb2{padding:.5rem;border-radius:9px;font-size:.78rem;font-weight:500;
+  border:1px solid var(--line);background:transparent;color:var(--text-dim);
+  text-align:center;text-decoration:none;display:block;font-family:inherit}
 .pend.feito{border-color:var(--line);background:var(--surface)}
 .pend.feito .pend-top b,.pend.feito .pend-q{color:var(--text-dim)}
 .pend .rea{grid-column:1/-1;background:var(--ambar-fundo);color:#F0DCA6;
@@ -1686,9 +1693,36 @@ def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
                     miolo += "".join(bloco(v) for v in evs)
 
     def _cartao_pendente(v):
-        """Uma visita esperando resposta. Duas escolhas e nada mais: quanto menos
-        houver pra ler, mais gente responde — e responder é o ponto."""
+        """Uma visita esperando resposta: a pergunta em cima, o apoio embaixo.
+
+        A RESPOSTA VEM PRIMEIRO, e cheia de cor — quanto menos houver pra ler, mais
+        gente responde, e responder é o ponto. Mas a versão que só tinha os dois
+        botões cobrava um preço escondido: ao virar pendência, a visita SAI da lista
+        normal (logo acima) e leva junto os atalhos que o cartão comum tem. Quem
+        quisesse remarcar precisava marcar "não apareceu" primeiro pra o botão nascer,
+        e quem quisesse olhar o cliente não tinha por onde. O dono perguntou onde
+        estava o remarcar olhando exatamente esta tela.
+
+        Então entra uma segunda linha, DISCRETA (`.pb2`, sem preenchimento): ela está
+        lá quando precisa e não disputa o toque com a resposta.
+
+        As duas guardas são as mesmas do cartão normal, não regra nova:
+
+        * `tipo_ev == "visita"` — remarcar festa mexe em contrato, em sinal e às vezes
+          na data que outro cliente queria; isso fica no painel, com o dono. Na
+          prática `precisa_resposta` já exige título de visita e `tipo_evento` vazio,
+          mas a trava fica explícita pra não depender de invariante de outro arquivo.
+        * `lead_id` — visita sem lead existe, e link que não abre é pior que link
+          nenhum.
+        """
         quando = f"{esc(v['dia'])} às {esc(v['hora'])}"
+        apoio = ""
+        if v["tipo_ev"] == "visita":
+            apoio += (f"<a class=pb2 href='{_BASE}/agenda/{v['id']}/remarcar'>"
+                      "🔁 Remarcar</a>")
+        if v["lead_id"]:
+            apoio += (f"<a class=pb2 href='{_BASE}/lead/{v['lead_id']}'>"
+                      "👤 Abrir o lead</a>")
         return (
             "<div class=pend>"
             f"<div class=pend-top><b>{esc(v['titulo'])}</b><span>{quando}</span></div>"
@@ -1696,6 +1730,7 @@ def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
             f"<div class=pend-bts data-ev='{v['id']}'>"
             "<button type=button class='pb sim' data-d='realizado'>✅ Apareceu</button>"
             "<button type=button class='pb nao' data-d='nao_realizado'>❌ Não apareceu</button>"
+            + apoio +
             "</div></div>")
 
     bloco_pend = ""

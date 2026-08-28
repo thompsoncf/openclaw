@@ -20,6 +20,13 @@ justamente uma conversa nova, então não há conflito nenhum pra detectar. O
 Na base inteira eram 10 entregas duplicadas, 8 delas viraram leads separados (9 na
 conta 23 entre 13 e 21/08).
 
+ESTE ARQUIVO É METADE DA HISTÓRIA. A entrega duplicada é só UM dos jeitos de dois
+inserts correrem juntos — o outro, mais comum, é a pessoa mandando duas mensagens
+diferentes em sequência (a Dinamara, 26/08: "Olá! Quero mais informações por favor."
+às 16:41:47 e "Oiii" às 16:41:49, sids distintos). E a corrida também acontece entre
+CAMINHOS diferentes, não só no webhook de entrada: isso mora em
+`test_conversa_eco_x_entrada.py`.
+
 COMO ESTE TESTE FORÇA A CORRIDA. Duas entregas separadas por 1,45 s não colidem
 sozinhas num teste — `criado_em` usa `now()`, que é o INÍCIO da transação, e em
 produção a primeira demorou mais que isso pra commitar. Então aqui a corrida é
@@ -83,18 +90,42 @@ create unique index if not exists idx_conversas_lead_canal
 """
 
 
+def _com_limite(conn):
+    """Toda conexão destes testes aborta em vez de PENDURAR ao esperar trava.
+
+    Sem isto, uma trava que não solta (a mutação `pg_advisory_xact_lock` →
+    `pg_advisory_lock`, que é de SESSÃO e sobrevive ao commit) deixa a conexão
+    envenenada no pool: o teste seguinte espera pra sempre, o `drop database` da
+    fixture espera por ele, e a suíte inteira morre no timeout do runner sem dizer
+    onde. Suíte pendurada é pior que suíte vermelha — ninguém sabe o que aconteceu.
+    5 s é folga larga: nestes testes quem espera, espera menos de 1 s.
+
+    O `commit()` no fim NÃO é enfeite, e me custou meia hora: o pool não é
+    autocommit, então este `SET` ABRE transação, e a conexão volta pro pool "idle in
+    transaction". O `drop database` da fixture seguinte então espera por ela pra
+    sempre — a suíte pendura sem dizer uma palavra. `SET` sem `LOCAL` sobrevive ao
+    commit e vale pela sessão inteira, que é exatamente o que se quer aqui."""
+    conn.execute("set lock_timeout = '5s'")
+    conn.commit()
+
+
 @pytest.fixture()
 def pool():
     admin = ConnectionPool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=1, open=True)
     dbname = "zaq_inbound_entrega_dupla_test"
     with admin.connection() as c:
         c.autocommit = True
-        c.execute(f"drop database if exists {dbname}")
+        # `with (force)` derruba conexão pendurada de um run anterior morto no meio.
+        # Sem isso, um único teste que trava deixa a conexão aberta, este `drop`
+        # espera por ela pra sempre — e todo run seguinte herda o problema, mesmo
+        # com o código já consertado. Foi o que aconteceu ao testar a mutação da
+        # trava de SESSÃO: um run morto envenenou os quatro seguintes.
+        c.execute(f"drop database if exists {dbname} with (force)")
         c.execute(f"create database {dbname}")
     admin.close()
     url = os.environ["TEST_DATABASE_URL"].rsplit("/", 1)[0] + "/" + dbname
     p = ConnectionPool(url, min_size=2, max_size=4, open=True,
-                       kwargs={"prepare_threshold": None})
+                       configure=_com_limite, kwargs={"prepare_threshold": None})
     with p.connection() as c:
         c.execute(_SQL)
         # dois vendedores no rodízio, como na Prime: é o que faz a entrega dupla
@@ -239,7 +270,11 @@ def test_a_trava_e_por_numero_e_nao_por_conta(pool):
     assert a8 != b8, "os dois números do teste têm o mesmo final — o cenário não vale"
 
     with pool.connection() as ca:
-        ca.execute("select pg_advisory_xact_lock(%s, hashtext(%s))", (CONTA, a8))
+        # pela FUNÇÃO, não pelo SQL na mão: depois que a trava virou `_trava_numero`,
+        # repetir o `pg_advisory_xact_lock` aqui testaria o Postgres, não o nosso
+        # código — e trocar a chave lá dentro passaria despercebido.
+        assert pp._trava_numero(ca, CONTA, NUM) == a8, \
+            "a trava deixou de devolver os 8 finais — a chave da busca vai junto"
         with pool.connection() as cb:
             # o MESMO número: tem que estar tomado
             tomado = cb.execute("select pg_try_advisory_xact_lock(%s, hashtext(%s))",
@@ -253,6 +288,16 @@ def test_a_trava_e_por_numero_e_nao_por_conta(pool):
                 "um número diferente ficou preso na trava de outro — a chave engrossou"
             cb.rollback()
         ca.rollback()
+
+
+def test_a_trava_normaliza_o_numero_antes_de_derivar_a_chave(pool):
+    """O mesmo número chega cru de um provedor e com máscara de outro. Se a chave
+    saísse do texto sem normalizar, "+55 86 9445-5743" e "558694455743" pegariam
+    travas diferentes — e os dois provedores correriam soltos um do outro."""
+    with pool.connection() as c:
+        assert pp._trava_numero(c, CONTA, "+55 86 9445-5743") == "94455743"
+        assert pp._trava_numero(c, CONTA, NUM) == "94455743"
+        c.rollback()
 
 
 def test_mensagem_nova_do_mesmo_numero_continua_entrando(pool):

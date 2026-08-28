@@ -488,8 +488,8 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
                 msgs.append({"id": mid, "who": who, "texto": texto or "", "quando": quando})
         # O mesmo número com conversa em OUTRA ficha — o vendedor precisa saber que
         # está lendo metade do histórico. Ver `outras_conversas_do_numero`: é o
-        # rastro da corrida de entrega dupla (caso Geovanna, 27/08) e do
-        # re-pareamento de chip. Leitura pura; não junta nem apaga nada.
+        # rastro da corrida fechada por `_trava_numero` (Dinamara 26/08, Geovanna
+        # 27/08) e do atendimento pelo outro chip. Leitura pura; não junta nem apaga.
         outras = outras_conversas_do_numero(
             c, conta_id, alvo.get("whatsapp") or alvo.get("telefone") or "",
             cv[0] if cv else None)

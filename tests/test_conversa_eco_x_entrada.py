@@ -70,6 +70,17 @@ create table distribuicao_fila (conta_id bigint, membro_id bigint, ordem int def
   primary key (conta_id, membro_id));
 create table campanha_alvos (id bigserial primary key, campanha_id bigint,
   prospeccao_id bigint, status text, wa_status text, proximo_envio_em timestamptz);
+-- O rótulo do chip sai destas duas: chip secundário é conta própria (contas.chip_de),
+-- principal só tem nome em canais_config.rotulo. Elas entram porque `outras_conversas_
+-- do_numero` faz join nelas — e a função FALHA CALADA, então sem as tabelas ela
+-- devolveria [] e o teste passaria protegendo nada. Já aconteceu aqui.
+create table contas (id bigserial primary key, nome text, chip_de bigint);
+create table canais_config (conta_id bigint, canal text, rotulo text);
+-- `campanhas` entra pelo aviso do GÊMEO (`_gemeos_consulta` faz lateral join nela
+-- pra dizer de qual campanha o outro lead veio). Ela também falha calada, então sem
+-- a tabela o gêmeo some e o teste do aviso em dobro passaria sem gêmeo nenhum —
+-- ou seja, sem testar nada. Foi o que aconteceu na primeira tentativa.
+create table campanhas (id bigserial primary key, conta_id bigint, nome text);
 
 -- as travas que JÁ existiam em produção: é preciso ver que, mesmo com elas, dois
 -- caminhos concorrentes abriam conversa em dobro
@@ -321,3 +332,281 @@ def test_a_conversa_do_eco_ainda_nasce_com_o_nome_da_agenda(pool):
     assert nome == "Auria da Agenda", \
         f"a conversa do eco nasceu sem o nome da agenda (veio {nome!r}) — confira se " \
         "`_trava_numero` ainda devolve os 8 finais"
+
+
+
+def _conversa_irma(pool, numero=NUM, nome="Geovanna Vitoria", vendedor="PEDRO YAN"):
+    """Uma segunda ficha do MESMO número — o rastro que a produção já carrega."""
+    with pool.connection() as c:
+        lead = c.execute(
+            "insert into prospeccao (conta_id, empresa, whatsapp, vendedor_id) values "
+            "(%s,%s,%s,(select id from membros where conta_id=%s and nome=%s)) returning id",
+            (CONTA, nome, numero, CONTA, vendedor)).fetchone()[0]
+        conv = c.execute("insert into conversas (conta_id, prospeccao_id, canal, contato_ref) "
+                         "values (%s,%s,'whatsapp',%s) returning id",
+                         (CONTA, lead, numero)).fetchone()[0]
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                  "values (%s,'whatsapp','in','cliente','oi')", (conv,))
+        c.commit()
+    return lead, conv
+
+# ------------------------------------------ a ficha do desktop mostra os dois avisos
+
+def test_a_ficha_do_desktop_desenha_a_faixa_da_conversa_partida():
+    """Dado calculado que a tela não desenha é dado que não existe.
+
+    O desktop já tinha a faixa do gêmeo (`_aviso_gemeo`), que só olha o OUTRO chip.
+    A corrida duplicava DENTRO do mesmo chip — Dinamara e Geovanna — então esse era
+    o buraco: o gestor abria a ficha e não via nada."""
+    assert "partida_aviso" in pp._FICHA_TPL, "a ficha não renderiza o aviso"
+    assert "partida_abre" in pp._FICHA_TPL, "o link não respeita quem pode abrir"
+    assert ".gemeo-faixa.info{" in pp._CSS, \
+        "falta o tom neutro: sem ele o caso dos dois chips vira alarme falso"
+
+
+CHIP2 = 991          # o chip secundário é uma conta própria (contas.chip_de)
+
+
+def _dois_chips(pool):
+    with pool.connection() as c:
+        c.execute("insert into contas (id, nome, chip_de) values (%s,'CP Thiago',%s) "
+                  "on conflict do nothing", (CHIP2, CONTA))
+        c.execute("insert into canais_config (conta_id, canal, rotulo) "
+                  "values (%s,'whatsapp','Zarb')", (CONTA,))
+        c.commit()
+
+
+def _ctx(conta_id=CONTA, gerencia=True, membro_id=None):
+    return {"conta_id": conta_id, "gerencia": gerencia, "membro_id": membro_id,
+            "pode_atribuir": gerencia}
+
+
+def test_a_ficha_nao_mostra_duas_faixas_pra_mesma_conversa(pool):
+    """O motivo de o desktop ter ficado de fora na primeira rodada.
+
+    A ficha já tinha a faixa do gêmeo (chip diferente). Somar a faixa nova sem
+    descontar o que a primeira conta faria as DUAS apontarem a mesma conversa, uma
+    embaixo da outra — que é como alguém aprende a não ler nenhuma.
+
+    Cenário: a ficha A (chip principal) tem um gêmeo no chip 2. Não há mais nada.
+    O aviso do gêmeo deve aparecer, e o da ficha partida deve ficar VAZIO."""
+    _dois_chips(pool)
+    with pool.connection() as c:
+        minha, _ = _entrada(c)
+        c.commit()
+    with pool.connection() as c:
+        meu_lead = c.execute("select prospeccao_id from conversas where id=%s",
+                             (minha,)).fetchone()[0]
+        c.commit()
+    # o gêmeo: mesmo número, ficha própria, no OUTRO chip
+    gemeo_lead, gemeo_conv = _conversa_irma(pool)
+    with pool.connection() as c:
+        c.execute("update conversas set chip_id=%s where id=%s", (CHIP2, gemeo_conv))
+        c.commit()
+
+    with pool.connection() as c:
+        alvo = {"whatsapp": NUM, "telefone": None}
+        av = pp.avisos_do_numero_da_ficha(c, _ctx(), alvo, meu_lead)
+
+    assert av["gemeo"] is not None and av["gemeo_aviso"], \
+        "o aviso do chip gêmeo, que já existia, parou de aparecer"
+    assert av["gemeo"]["conversa_id"] == gemeo_conv
+    assert av["partida_aviso"] == "", (
+        "a MESMA conversa saiu nas duas faixas — o aviso do gêmeo já a conta. "
+        f"partida apontou {av['partida']}")
+
+
+def test_a_ficha_avisa_da_conversa_partida_do_mesmo_chip(pool):
+    """E a metade que justifica o trabalho: a duplicata do MESMO chip, que o aviso do
+    gêmeo nunca viu, tem que aparecer — e em tom de defeito."""
+    _dois_chips(pool)
+    with pool.connection() as c:
+        minha, _ = _entrada(c)
+        c.commit()
+    with pool.connection() as c:
+        meu_lead = c.execute("select prospeccao_id from conversas where id=%s",
+                             (minha,)).fetchone()[0]
+        c.commit()
+    outro_lead, outra_conv = _conversa_irma(pool)   # fica no chip principal
+
+    with pool.connection() as c:
+        av = pp.avisos_do_numero_da_ficha(
+            c, _ctx(), {"whatsapp": NUM, "telefone": None}, meu_lead)
+
+    assert av["gemeo"] is None, "não há gêmeo neste cenário — os dois estão no mesmo chip"
+    assert av["partida"] is not None and av["partida"]["conversa_id"] == outra_conv
+    assert av["partida_defeito"] is True, "mesmo chip é defeito: a faixa tem que ser âmbar"
+    assert "PEDRO YAN" in av["partida_aviso"], \
+        "sem o nome do colega o aviso não resolve a queixa"
+    assert av["partida_abre"] is True, "gerência abre qualquer ficha"
+
+
+def test_a_ficha_nao_aponta_pra_si_mesma(pool):
+    """Sem `excluir_lead`, a conversa da própria ficha vira 'outra conversa'."""
+    with pool.connection() as c:
+        minha, _ = _entrada(c)
+        c.commit()
+    with pool.connection() as c:
+        meu_lead = c.execute("select prospeccao_id from conversas where id=%s",
+                             (minha,)).fetchone()[0]
+        av = pp.avisos_do_numero_da_ficha(
+            c, _ctx(), {"whatsapp": NUM, "telefone": None}, meu_lead)
+    assert av["partida_aviso"] == "", \
+        f"a ficha avisou da própria conversa: {av['partida']}"
+
+
+def test_o_vendedor_que_nao_e_dono_nao_ganha_link(pool):
+    """Mesma régua do gêmeo: link que só redireciona é pior que link nenhum."""
+    with pool.connection() as c:
+        minha, _ = _entrada(c)
+        c.commit()
+    with pool.connection() as c:
+        meu_lead = c.execute("select prospeccao_id from conversas where id=%s",
+                             (minha,)).fetchone()[0]
+        c.commit()
+    _conversa_irma(pool)
+    with pool.connection() as c:
+        av = pp.avisos_do_numero_da_ficha(
+            c, _ctx(gerencia=False, membro_id=99999),
+            {"whatsapp": NUM, "telefone": None}, meu_lead)
+    assert av["partida_aviso"], "o aviso em si continua aparecendo"
+    assert av["partida_abre"] is False, "vendedor não abre ficha que não é dele"
+
+
+def test_um_lead_so_pode_ter_uma_conversa_de_whatsapp(pool):
+    """O invariante que faz `excluir` e `excluir_lead` serem a mesma coisa.
+
+    Escrevi antes um teste montando duas conversas de WhatsApp do mesmo lead, pra
+    provar que os dois recortes diferiam. O banco recusou: `idx_conversas_lead_canal`
+    é UNIQUE (conta_id, prospeccao_id, canal). O cenário não existe — nem aqui nem em
+    produção — e o comentário que eu tinha escrito alegando diferença semântica entre
+    as duas telas estava errado.
+
+    Fica este no lugar: se algum dia o índice cair, ele acusa, e aí os dois recortes
+    passam a divergir de verdade."""
+    import psycopg
+    with pool.connection() as c:
+        minha, _ = _entrada(c)
+        c.commit()
+    with pool.connection() as c:
+        lead = c.execute("select prospeccao_id from conversas where id=%s",
+                         (minha,)).fetchone()[0]
+        c.commit()
+    with pool.connection() as c:
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            c.execute("insert into conversas (conta_id, prospeccao_id, canal, contato_ref) "
+                      "values (%s,%s,'whatsapp',%s)", (CONTA, lead, NUM))
+        c.rollback()
+
+
+def test_excluir_lead_tira_a_conversa_da_propria_ficha(pool):
+    """O recorte do desktop: a conversa do próprio lead não é "outra conversa" ali."""
+    with pool.connection() as c:
+        minha, _ = _entrada(c)
+        c.commit()
+    with pool.connection() as c:
+        lead = c.execute("select prospeccao_id from conversas where id=%s",
+                         (minha,)).fetchone()[0]
+        # sem recorte nenhum a ficha se apontaria
+        assert [a["conversa_id"] for a in
+                pp.outras_conversas_do_numero(c, CONTA, NUM)] == [minha]
+        # pelo lead, e pela conversa, dão no mesmo — é o que o índice único garante
+        assert pp.outras_conversas_do_numero(c, CONTA, NUM, excluir_lead=lead) == []
+        assert pp.outras_conversas_do_numero(c, CONTA, NUM, excluir=minha) == []
+
+
+def test_excluir_lead_nao_esconde_a_ficha_do_colega(pool):
+    """E o recorte não pode ir longe demais: a conversa de OUTRA ficha é exatamente
+    o que o aviso existe pra mostrar."""
+    with pool.connection() as c:
+        minha, _ = _entrada(c)
+        c.commit()
+    with pool.connection() as c:
+        meu_lead = c.execute("select prospeccao_id from conversas where id=%s",
+                             (minha,)).fetchone()[0]
+        c.commit()
+    outro_lead, outra_conv = _conversa_irma(pool)
+    with pool.connection() as c:
+        achadas = pp.outras_conversas_do_numero(c, CONTA, NUM, excluir_lead=meu_lead)
+    assert [a["conversa_id"] for a in achadas] == [outra_conv]
+    assert achadas[0]["lead_id"] == outro_lead
+
+
+def test_a_terceira_conversa_em_outro_chip_sai_em_tom_neutro(pool):
+    """O único caminho, no DESKTOP, em que a faixa nova sai neutra — e ele existe.
+
+    O aviso do gêmeo devolve UM gêmeo só (`distinct on (meu.id)`, o mais recente).
+    Com duas conversas em outros chips, a segunda não é coberta por ele e cai na
+    faixa nova. Ali não há defeito nenhum pra consertar: é a empresa falando por
+    mais de um número, e pintar isso de âmbar mandaria o gestor caçar problema que
+    não existe.
+
+    Vale dizer o que este teste também revela: no desktop o tom neutro é RARO, porque
+    o caso comum de chip diferente é justamente o que a faixa do gêmeo já conta. Quem
+    vê os dois tons no dia a dia é o Cockpit, onde não existe faixa de gêmeo."""
+    _dois_chips(pool)
+    with pool.connection() as c:
+        c.execute("insert into contas (id, nome, chip_de) values (992,'CP Ana',%s) "
+                  "on conflict do nothing", (CONTA,))
+        c.commit()
+    with pool.connection() as c:
+        minha, _ = _entrada(c)
+        c.commit()
+    with pool.connection() as c:
+        meu_lead = c.execute("select prospeccao_id from conversas where id=%s",
+                             (minha,)).fetchone()[0]
+        c.commit()
+    _, conv_a = _conversa_irma(pool, nome="Cópia no chip 2")
+    _, conv_b = _conversa_irma(pool, nome="Cópia no chip 3")
+    with pool.connection() as c:
+        c.execute("update conversas set chip_id=%s, ultima_msg_em=now() where id=%s",
+                  (CHIP2, conv_a))
+        c.execute("update conversas set chip_id=992, "
+                  "ultima_msg_em=now() - interval '1 hour' where id=%s", (conv_b,))
+        c.commit()
+
+    with pool.connection() as c:
+        av = pp.avisos_do_numero_da_ficha(
+            c, _ctx(), {"whatsapp": NUM, "telefone": None}, meu_lead)
+
+    assert av["gemeo"]["conversa_id"] == conv_a, "o gêmeo é o mais recente dos outros chips"
+    assert av["partida"]["conversa_id"] == conv_b, "a segunda tinha que sobrar pra faixa nova"
+    assert av["partida_defeito"] is False, (
+        "conversa em OUTRO chip não é defeito — pintar de âmbar manda o gestor caçar "
+        "problema que não existe")
+    assert "CP Ana" in av["partida_aviso"], "o aviso tem que dizer de qual chip veio"
+
+
+def test_a_ficha_abre_mesmo_se_o_aviso_quebrar(pool):
+    """O aviso é um extra; a ficha do cliente não é.
+
+    A primeira versão desta função fazia a consulta do chip solta, sem proteção: num
+    banco sem a coluna `chip_id` ela estourava e a ficha inteira deixava de abrir —
+    o oposto da regra. E sem SAVEPOINT o erro ainda abortava a transação, levando
+    junto o que a rota faz depois."""
+    with pool.connection() as c:
+        minha, _ = _entrada(c)
+        c.commit()
+    with pool.connection() as c:
+        meu_lead = c.execute("select prospeccao_id from conversas where id=%s",
+                             (minha,)).fetchone()[0]
+        c.commit()
+    with pool.connection() as c:
+        c.execute("alter table conversas rename column chip_id to chip_id_x")
+        try:
+            av = pp.avisos_do_numero_da_ficha(
+                c, _ctx(), {"whatsapp": NUM, "telefone": None}, meu_lead)
+            assert av == pp._SEM_AVISO, "devia devolver o estado sem aviso, não estourar"
+            assert c.execute("select 1").fetchone()[0] == 1, \
+                "o erro abortou a transação inteira — falta o SAVEPOINT"
+        finally:
+            c.execute("alter table conversas rename column chip_id_x to chip_id")
+            c.commit()
+
+
+def test_sem_aviso_tem_todas_as_chaves_que_o_template_usa():
+    """Template que recebe chave a menos quebra a página — e a página é justamente
+    o que estes avisos não podem derrubar."""
+    for chave in ("gemeo", "gemeo_aviso", "gemeo_abre",
+                  "partida", "partida_aviso", "partida_defeito", "partida_abre"):
+        assert chave in pp._SEM_AVISO, f"_SEM_AVISO não traz {chave}"

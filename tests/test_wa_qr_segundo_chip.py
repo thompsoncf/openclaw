@@ -49,7 +49,7 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   agente_ativo boolean default false, responsavel_membro_id bigint,
   janela_expira_em timestamptz, push_avisado_em timestamptz,
   ultima_msg_em timestamptz default now(), criado_em timestamptz default now(),
-  chip_id bigint references contas(id) on delete set null);
+  chip_id bigint references contas(id) on delete set null, visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, membro_id bigint, texto text, provider_sid text,
   status text, criado_em timestamptz default now(),

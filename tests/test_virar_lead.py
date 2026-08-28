@@ -24,7 +24,7 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text, contato_ref text, contato_nome text, status text default 'aberta',
-  responsavel_membro_id bigint, ultima_msg_em timestamptz default now(), chip_id bigint);
+  responsavel_membro_id bigint, ultima_msg_em timestamptz default now(), chip_id bigint, visto_ate_id bigint);
 create table wa_contatos (conta_id bigint, numero8 text, nome text,
   da_agenda boolean default false, primary key (conta_id, numero8));
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,

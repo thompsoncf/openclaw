@@ -230,6 +230,9 @@ b,strong{font-weight:600}
 .chip.ia{color:var(--roxo);border-color:#3a2b52;background:#1a1226}
 .chip.voce{color:var(--ambar);border-color:#5a4520;background:#241c0f}
 .chip.neon{color:var(--neon);border-color:#1e4a3a;background:rgba(37,211,102,.10)}
+/* "aberto, sem resposta": entre o âmbar de "sua vez" e o verde de "respondido".
+   Apagado de propósito — ele informa, não cobra; quem cobra é a bolinha. */
+.chip.aberto{color:var(--txt-mut);border-color:var(--line);background:transparent}
 .chip.err{color:var(--coral);border-color:#5a2b2b;background:#241313}
 
 /* ---------- deslizar o card pra revelar ação ----------
@@ -1417,6 +1420,13 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
         # card mudo.
         chip = ("<span class='chip ia'>IA</span>" if l["ia"]
                 else "<span class='chip voce'>sua vez</span>" if l["sua_vez"]
+                # ABERTO, SEM RESPOSTA. Pedido do dono em 28/08: ele abriu a
+                # conversa, leu, e o card ficou idêntico ao de antes de abrir —
+                # "sua vez" e bolinha vermelha. Selo que não muda com o que você
+                # faz deixa de ser lido. Este mora entre os dois: a bolinha já
+                # baixou (ele viu), mas a conversa NÃO sai da fila, porque o
+                # cliente continua esperando. Vira "respondido" quando responder.
+                else "<span class='chip aberto'>aberto</span>" if l["aberto"]
                 else "<span class='chip neon'>respondido</span>" if l["respondido"]
                 else "")
         # Quantas o cliente mandou e ninguém respondeu. O push é aviso que passa —

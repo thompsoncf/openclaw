@@ -38,7 +38,7 @@ create table campanha_alvos (id bigserial primary key, campanha_id bigint, prosp
   wa_tentados jsonb not null default '[]'::jsonb, wa_tentativas int not null default 0);
 create table campanha_eventos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
   canal text, evento text, detalhe text, quando timestamptz default now());
-create table conversas (id bigserial primary key, conta_id bigint, canal text, chip_id bigint);
+create table conversas (id bigserial primary key, conta_id bigint, canal text, chip_id bigint, visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   -- `meta` existe em produção desde a migração 080 e é onde o MOTIVO da falha
   -- é gravado (o código do provedor, a mensagem dele). Faltava aqui, e o

@@ -283,7 +283,18 @@ def _base_leads_sql() -> str:
                  where mm.conversa_id=cv.id and mm.direcao='in'
                    and mm.id > coalesce(
                          (select max(m2.id) from mensagens m2
-                           where m2.conversa_id=cv.id and m2.direcao='out'), 0)) as n_pend,
+                           where m2.conversa_id=cv.id and m2.direcao='out'), 0)) as n_esperando,
+               -- ...e destas, quantas ele AINDA NÃO VIU. É a bolinha vermelha e o
+               -- selo "sua vez". Abrir a conversa grava `visto_ate_id` (migração
+               -- 188) e zera esta conta sem zerar a de cima — que é a diferença
+               -- entre "já vi, vou pensar" e "o cliente está esperando".
+               -- `coalesce(...,0)` faz conversa nunca aberta valer o de sempre.
+               (select count(*) from mensagens mm
+                 where mm.conversa_id=cv.id and mm.direcao='in'
+                   and mm.id > greatest(
+                         coalesce((select max(m2.id) from mensagens m2
+                                    where m2.conversa_id=cv.id and m2.direcao='out'), 0),
+                         coalesce(cv.visto_ate_id, 0))) as n_novas,
                -- pro selo "respondido" (bot pausado + em dia): PRECISA ser uma
                -- pergunta EXISTS, não "autor da última mensagem" — esse último
                -- usa `lm`, que ordena por criado_em (a mesma armadilha do
@@ -304,10 +315,15 @@ def _base_leads_sql() -> str:
 
 
 def total_pendentes(pool, conta_id: int, membro_id: int) -> int:
-    """Quantas mensagens de cliente estão sem resposta na carteira INTEIRA do
-    vendedor. É o número da bolinha no ícone do app — a mesma conta do selo do card
-    (ver `_base_leads_sql`), somada. Vale pro push conseguir marcar o ícone com o app
-    fechado, que é quando o vendedor mais precisa ser lembrado."""
+    """Quantas mensagens de cliente o vendedor AINDA NÃO VIU na carteira inteira.
+    É o número da bolinha no ícone do app — a mesma conta do `n_novas` do card (ver
+    `_base_leads_sql`), somada. Vale pro push conseguir marcar o ícone com o app
+    fechado, que é quando o vendedor mais precisa ser lembrado.
+
+    Conta o NÃO VISTO, e não o não respondido, pelo mesmo motivo do selo: um ícone
+    que continua marcado depois de o vendedor abrir e ler tudo vira ruído, e ícone
+    que é ruído deixa de ser olhado. Quem guarda "o cliente ainda espera" é o selo
+    do card, que continua na tela."""
     with pool.connection() as c:
         r = c.execute(
             """select coalesce(sum(x.n), 0) from prospeccao p
@@ -315,8 +331,10 @@ def total_pendentes(pool, conta_id: int, membro_id: int) -> int:
                  join lateral (
                    select count(*) n from mensagens mm
                     where mm.conversa_id=cv.id and mm.direcao='in'
-                      and mm.id > coalesce((select max(m2.id) from mensagens m2
-                                             where m2.conversa_id=cv.id and m2.direcao='out'), 0)
+                      and mm.id > greatest(
+                            coalesce((select max(m2.id) from mensagens m2
+                                       where m2.conversa_id=cv.id and m2.direcao='out'), 0),
+                            coalesce(cv.visto_ate_id, 0))
                  ) x on true
                 where p.conta_id=%s and p.vendedor_id=%s
                   and coalesce(p.estagio,'lead')='lead'
@@ -326,15 +344,17 @@ def total_pendentes(pool, conta_id: int, membro_id: int) -> int:
 
 
 def sinal_fila(pool, conta_id: int, membro_id: int) -> str:
-    """Assinatura barata da fila do vendedor: quantos leads e qual a mensagem mais
-    recente entre eles. A tela compara com o que tem na mão e só recarrega quando
+    """Assinatura barata da fila do vendedor: quantos leads, qual a mensagem mais
+    recente entre eles e até onde ele já viu. A tela compara com o que tem na mão e só recarrega quando
     mudou — em vez de re-renderizar a lista no cliente, que seria muito mais código
     pra um app que é todo form + redirect."""
     with pool.connection() as c:
         r = c.execute(
-            """select count(*), coalesce(max(ult.mid), 0) from prospeccao p
+            """select count(*), coalesce(max(ult.mid), 0), coalesce(max(ult.visto), 0)
+                 from prospeccao p
                  left join lateral (
-                   select max(m.id) mid from conversas cv
+                   select max(m.id) mid, max(coalesce(cv.visto_ate_id, 0)) visto
+                     from conversas cv
                      join mensagens m on m.conversa_id = cv.id
                     where cv.conta_id = p.conta_id and cv.prospeccao_id = p.id
                  ) ult on true
@@ -342,7 +362,10 @@ def sinal_fila(pool, conta_id: int, membro_id: int) -> str:
                   and coalesce(p.estagio,'lead')='lead'
                   and """ + _ABERTO_P + """""",
             (conta_id, membro_id)).fetchone()
-    return f"{r[0]}:{r[1]}" if r else "0:0"
+    # o visto entra na assinatura porque abrir uma conversa MUDA a fila (a bolinha
+    # baixa, o selo vira "aberto") sem criar mensagem nenhuma — sem ele a lista
+    # ficaria mostrando o estado velho até a próxima mensagem chegar.
+    return f"{r[0]}:{r[1]}:{r[2]}" if r else "0:0:0"
 
 
 def leads_do_vendedor(pool, conta_id: int, membro_id: int) -> list[dict]:
@@ -352,7 +375,8 @@ def leads_do_vendedor(pool, conta_id: int, membro_id: int) -> list[dict]:
         rows = c.execute(_base_leads_sql(), (conta_id, membro_id)).fetchall()
     for r in rows:
         ia = bool(r[10])                 # agente_ativo → IA ainda atende
-        pend = int(r[14] or 0)
+        esperando = int(r[14] or 0)      # o cliente falou e ninguém respondeu
+        pend = int(r[15] or 0)           # ...e disto, o que ele ainda não viu
         ult = (r[12] or "").strip().replace("\n", " ")
         autor = r[13] or ""
         if ult:
@@ -375,13 +399,20 @@ def leads_do_vendedor(pool, conta_id: int, membro_id: int) -> list[dict]:
             # ação separada (botão "Devolver ao agente") que ninguém clica só
             # pra tirar o selo da tela.
             "sua_vez": (not ia) and pend > 0,
+            # ABRIU E NÃO RESPONDEU. O selo que faltava: sem ele, quem abria a
+            # conversa pra ler via o card voltar ao estado de antes de abrir, e um
+            # selo que não muda com o que você faz deixa de ser lido. Aqui ele
+            # muda — de "sua vez" (vermelho) pra este — sem deixar a conversa
+            # sumir da fila, que é o que "respondido" faria cedo demais.
+            "aberto": (not ia) and pend == 0 and esperando > 0,
+            "esperando": esperando,
             # "respondido": bot pausado, nada pendente, e HOUVE uma resposta
             # humana em algum momento — não só "em dia" (que também vale pra
             # quem assumiu um lead vazio, sem conversa nenhuma, e aí não tem o
             # que "respondido" comemorar). `tem_resposta_humana` é EXISTS, não
             # "autor da última mensagem" (isso seria a mesma armadilha do
             # `lm`/criado_em que o n_pend já evita usando id).
-            "respondido": (not ia) and pend == 0 and bool(r[15]),
+            "respondido": (not ia) and esperando == 0 and bool(r[16]),
         })
     return out
 
@@ -469,7 +500,23 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
                        "where prospeccao_id=%s and conta_id=%s order by ultima_msg_em desc limit 1",
                        (lead_id, conta_id)).fetchone()
         if cv and pos_visto:
-            c.execute("update conversas set push_avisado_em=null where id=%s", (cv[0],))
+            # ABRIU = VIU. Duas anotações, uma transação:
+            #   push_avisado_em=null  → o cooldown do push zera (ver acima);
+            #   visto_ate_id          → o que está na tela agora deixa de ser
+            #                           "novo", e a bolinha vermelha do card baixa
+            #                           sem que a conversa saia da fila (migração
+            #                           188). É este o pedido de 28/08: abrir pra
+            #                           ler deixava o card exatamente como antes.
+            # `greatest` porque isto não pode ANDAR PRA TRÁS: dois toques quase
+            # juntos podem chegar fora de ordem, e o segundo — com um max lido
+            # antes da mensagem nova — ressuscitaria a bolinha já baixada.
+            c.execute(
+                """update conversas cv set push_avisado_em=null,
+                        visto_ate_id = greatest(
+                          coalesce(cv.visto_ate_id, 0),
+                          coalesce((select max(m.id) from mensagens m
+                                     where m.conversa_id = cv.id), 0))
+                    where cv.id=%s""", (cv[0],))
             c.commit()
         msgs = []
         if cv:
@@ -681,7 +728,7 @@ def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes
     E a mensagem nasce com `membro_id`. É o ganho que sobrevive a tudo: hoje 98%
     do que a Prime manda ao cliente chega sem nome, porque sai do celular.
     """
-    from finance import audio_voz as av
+    from finance import audio_voz as av, whatsapp_out
     from web.painel_prospeccao import _add_msg, _conversa_id
     if not dados:
         return {"ok": False, "erro": "Áudio vazio."}
@@ -698,6 +745,16 @@ def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes
             return {"ok": False, "erro": "escopo"}
         p = c.execute("select whatsapp, telefone from prospeccao where id=%s and conta_id=%s",
                       (lead_id, conta_id)).fetchone()
+        # POR QUAL NÚMERO ISTO SAI. Numa empresa de dois chips, o áudio tem que
+        # sair pelo mesmo número que recebeu a conversa — exatamente como o texto
+        # já faz em `responder`. Sem isto ele saía SEMPRE pelo chip principal:
+        # medido na Prime em 28/08/2026, os 5 áudios de conversas do chip 36
+        # (Thiago) foram entregues pelo número do Zarb. Do lado do cliente isso é
+        # outra empresa falando; e o eco `fromMe` volta pela sessão que de fato
+        # enviou, gravando a mesma mensagem numa segunda conversa.
+        chip_id = whatsapp_out.chip_da_conversa(
+            c, conta_id, _conversa_id(c, conta_id, lead_id, "whatsapp"))
+        c.commit()
     numero = (p[0] or p[1] or "") if p else ""
     if not numero:
         return {"ok": False, "erro": "Lead sem número de WhatsApp."}
@@ -720,7 +777,9 @@ def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes
         _log.warning("não deu pra transcrever o áudio da conta %s: %s", conta_id, e)
 
     from finance import whatsapp_qr as _qr
-    res = _qr.enviar_audio(conta_id, numero, pronto["bytes"], pronto["mimetype"],
+    # `chip_id or conta_id` é a mesma escolha do texto (whatsapp_out.enviar): o
+    # chip quando a conversa tem um, o da própria empresa quando não tem.
+    res = _qr.enviar_audio(chip_id or conta_id, numero, pronto["bytes"], pronto["mimetype"],
                            segundos, onda)
     if not res.get("ok"):
         erros = {"desconectado": "WhatsApp desconectado. Reconecte na aba Canais.",

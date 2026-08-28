@@ -51,7 +51,7 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   agente_ativo boolean default false, responsavel_membro_id bigint,
   janela_expira_em timestamptz, push_avisado_em timestamptz,
   ultima_msg_em timestamptz default now(), criado_em timestamptz default now(),
-  chip_id bigint references contas(id) on delete set null);
+  chip_id bigint references contas(id) on delete set null, visto_ate_id bigint);
 -- o índice de produção: é ele que torna "1 lead com 2 conversas" impossível, e por isso
 -- a saída certa é DOIS leads (foi a correção do dono sobre a primeira proposta)
 create unique index idx_conversas_lead_canal on conversas (conta_id, prospeccao_id, canal)

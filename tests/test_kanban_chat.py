@@ -34,7 +34,7 @@ create table membros (id bigserial primary key, conta_id bigint, nome text, emai
   papel text, ativo boolean default true);
 create table conversas (id bigserial primary key, conta_id bigint,
   prospeccao_id bigint references prospeccao(id), canal text, chip_id bigint,
-  ultima_msg_em timestamptz, criado_em timestamptz default now());
+  ultima_msg_em timestamptz, criado_em timestamptz default now(), visto_ate_id bigint);
 create table campanhas (id bigserial primary key, conta_id bigint, nome text);
 create table campanha_alvos (id bigserial primary key, campanha_id bigint,
   prospeccao_id bigint references prospeccao(id), ultima_msg_em timestamptz);

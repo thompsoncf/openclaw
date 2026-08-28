@@ -42,7 +42,7 @@ create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigi
   agendado_para timestamptz, criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint,
   prospeccao_id bigint references prospeccao(id), canal text,
-  criado_em timestamptz default now());
+  criado_em timestamptz default now(), visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint,
   direcao text, criado_em timestamptz default now(),
   midia_ref jsonb, midia_tipo text, midia_meta jsonb);

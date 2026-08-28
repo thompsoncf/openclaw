@@ -43,7 +43,7 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text default 'whatsapp', contato_ref text, contato_nome text,
   status text default 'aberta', agente_ativo boolean default true,
-  ultima_msg_em timestamptz default now(), criado_em timestamptz default now(), chip_id bigint);
+  ultima_msg_em timestamptz default now(), criado_em timestamptz default now(), chip_id bigint, visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, texto text, membro_id bigint, provider_sid text,
   status text, criado_em timestamptz default now(),

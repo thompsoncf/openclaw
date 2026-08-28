@@ -15,7 +15,7 @@ _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text not null,
   contato text, whatsapp text, telefone text, atualizado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
-  canal text, contato_nome text, chip_id bigint);
+  canal text, contato_nome text, chip_id bigint, visto_ate_id bigint);
 create table wa_contatos (conta_id bigint, numero8 text, nome text,
   primary key (conta_id, numero8));
 """

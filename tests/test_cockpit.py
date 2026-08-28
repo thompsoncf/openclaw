@@ -49,7 +49,7 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   -- passaria sem nunca exercitar a consulta.
   contato_ref text,
   responsavel_membro_id bigint, ultima_msg_em timestamptz default now(),
-  push_avisado_em timestamptz, criado_em timestamptz default now(), chip_id bigint);
+  push_avisado_em timestamptz, criado_em timestamptz default now(), chip_id bigint, visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text, direcao text,
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now(),

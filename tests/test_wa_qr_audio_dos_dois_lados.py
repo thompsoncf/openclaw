@@ -35,7 +35,7 @@ _SEGREDO = "segredo-de-teste"
 _SQL = """
 create table contas (id bigserial primary key, tipo text, nome text, chip_de bigint);
 create table conversas (id bigserial primary key, conta_id bigint, canal text,
-  contato_ref text, status text, chip_id bigint);
+  contato_ref text, status text, chip_id bigint, visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, texto text, provider_sid text, status text,
   midia_ref jsonb, midia_tipo text, midia_meta jsonb);

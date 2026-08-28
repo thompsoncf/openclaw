@@ -26,7 +26,7 @@ CONTA = 13
 _SQL = """
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text default 'whatsapp', contato_ref text, contato_nome text,
-  status text default 'aberta', ultima_msg_em timestamptz default now(), chip_id bigint);
+  status text default 'aberta', ultima_msg_em timestamptz default now(), chip_id bigint, visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, texto text, provider_sid text,
   criado_em timestamptz default now(),

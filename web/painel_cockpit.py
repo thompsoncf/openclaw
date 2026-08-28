@@ -1708,10 +1708,15 @@ def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
 
         As duas guardas são as mesmas do cartão normal, não regra nova:
 
-        * `tipo_ev == "visita"` — remarcar festa mexe em contrato, em sinal e às vezes
-          na data que outro cliente queria; isso fica no painel, com o dono. Na
-          prática `precisa_resposta` já exige título de visita e `tipo_evento` vazio,
-          mas a trava fica explícita pra não depender de invariante de outro arquivo.
+        * `tipo_ev == "visita"` — e ela NÃO é redundante, ao contrário do que parece.
+          `tipo_ev` sai de `prospeccao_id` ("visita" if r[5] else "reservado", em
+          `agenda_da_conta`), enquanto `precisa_resposta` só olha o TÍTULO. Logo uma
+          visita ativa, passada e SEM lead pede resposta com `tipo_ev` valendo
+          "reservado" — e aí não pode oferecer remarcar, porque o cartão comum
+          também não oferece. Duas telas dizendo coisas diferentes do mesmo
+          compromisso é pior que as duas dizendo não. (E o motivo de a regra existir
+          continua o mesmo: remarcar festa mexe em contrato, em sinal e às vezes na
+          data que outro cliente queria — isso fica no painel, com o dono.)
         * `lead_id` — visita sem lead existe, e link que não abre é pior que link
           nenhum.
         """

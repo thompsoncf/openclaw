@@ -162,7 +162,7 @@ def test_a_lupa_existe_nas_duas_telas():
     import inspect
     from web import painel_prospeccao as pp
     assert "class=lupa id=lupa" in inspect.getsource(pc), "Cockpit"
-    assert "function cxLupa(" in inspect.getsource(pp), "painel"
+    assert "function cxZoom(" in inspect.getsource(pp), "painel"
 
 
 def test_a_lupa_fica_fora_do_container_que_empilha():
@@ -208,7 +208,7 @@ def test_o_link_do_original_nao_e_engolido_pelo_clique_que_fecha():
     import inspect
     from web import painel_prospeccao as pp
     assert "id==='lupaAbrir'" in inspect.getsource(pc)
-    assert "id!=='cx-lupa-abrir'" in inspect.getsource(pp)
+    assert "id!=='cx-zoom-abrir'" in inspect.getsource(pp)
 
 
 def test_a_lupa_nasce_vazia():
@@ -223,3 +223,74 @@ def test_lupa_fecha_e_global_no_cockpit():
     """Quem chama é o onclick do HTML, que está fora do IIFE do script."""
     import inspect
     assert "window.lupaFecha=function" in inspect.getsource(pc)
+
+
+# ------------------------------------------------- a cortina não pode pegar carona
+#
+# O QUE ACONTECEU (28/08/2026, meia hora depois de a lupa subir)
+# A aba Comunicação ficou preta. Não a foto: a ABA inteira, com um ⌕ solto no meio.
+# Só ali, e só no desktop.
+#
+# A causa é de uma banalidade constrangedora: `.cx-lupa` JÁ EXISTIA — é o ícone ⌕ do
+# campo de busca, criado dias antes nesta mesma tela. Ao batizar a foto ampliada com
+# o mesmo nome, e mais abaixo na folha, o ícone da busca herdou
+# `position:fixed;inset:0;background:rgba(0,0,0,.93)` e virou uma cortina em cima de
+# tudo. O ⌕ no meio da tela era o próprio glifo, centralizado pelo `display:flex`.
+#
+# Por isso o Cockpit passou ileso: lá a classe se chama `.lupa` e não colide com
+# nada. E por isso nenhum teste pegou: todos olhavam a lupa nova, que estava certa.
+# O defeito não estava nela — estava no VIZINHO que ela atropelou.
+#
+# O teste abaixo é genérico de propósito. Travar o nome `cx-zoom` só protegeria
+# contra repetir este caso exato; o que se quer impedir é a FORMA do erro — uma
+# classe existente ganhar `position:fixed` de uma regra posterior, que é como um
+# elemento pequeno vira cortina de tela cheia.
+
+def _classes_repetidas_virando_cortina(css: str) -> list[str]:
+    """Classes definidas em regra base mais de uma vez, onde só ALGUMAS trazem
+    `position:fixed` — o que quer dizer que uma regra posterior transformou um
+    elemento comum em camada de tela cheia."""
+    import re
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    regras: dict[str, list[str]] = {}
+    for sel, corpo in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+        for parte in sel.split(","):
+            m = re.fullmatch(r"\.([A-Za-z0-9_-]+)", parte.strip())
+            if m:
+                regras.setdefault(m.group(1), []).append(corpo.replace(" ", ""))
+    return sorted(nome for nome, corpos in regras.items()
+                  if len(corpos) > 1
+                  and any("position:fixed" in c for c in corpos)
+                  and not all("position:fixed" in c for c in corpos))
+
+
+def _css_da_comunicacao() -> str:
+    import re
+    from web import painel_prospeccao as pp
+    return "\n".join(re.findall(r"<style>(.*?)</style>", pp._COMUNICACAO_TPL, re.S))
+
+
+def test_nenhuma_classe_da_comunicacao_vira_cortina_sem_querer():
+    assert _classes_repetidas_virando_cortina(_css_da_comunicacao()) == []
+
+
+def test_o_detector_pegaria_o_incidente_de_verdade():
+    """Sem esta prova o teste acima passa até quando está cego — e um teste cego é
+    pior que nenhum, porque dá a impressão de que a área está coberta."""
+    css = _css_da_comunicacao().replace("cx-zoom", "cx-lupa")
+    assert _classes_repetidas_virando_cortina(css) == ["cx-lupa"], \
+        "o detector precisa acusar exatamente o caso que derrubou a aba"
+
+
+def test_o_icone_da_busca_continua_sendo_so_um_icone():
+    """O sintoma, dito na língua do que se vê: o ⌕ do campo de busca não pode ter
+    virado camada de tela cheia."""
+    import re
+    css = re.sub(r"/\*.*?\*/", "", _css_da_comunicacao(), flags=re.S)
+    for corpo in re.findall(r"\.cx-lupa\s*\{([^{}]*)\}", css):
+        assert "position:fixed" not in corpo.replace(" ", "")
+        assert "inset:0" not in corpo.replace(" ", "")
+
+
+def test_o_cockpit_tambem_esta_limpo():
+    assert _classes_repetidas_virando_cortina(pc._CSS_TEXTO) == []

@@ -381,8 +381,8 @@ _ORDEM_ACAO = ("marcar", "resegurar", "sinal", "comprovante", "assinar",
 def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
                    pagamentos=None, enviado_em="", contrato_numero=None,
                    contrato_assinado=False, plano_difere=0, aprovada_por="",
-                   nunca_enviada=True, contrato_em=None, tem_contrato=True,
-                   hoje=None) -> dict:
+                   nunca_enviada=True, contrato_enviado_em=None,
+                   tem_contrato=True, hoje=None) -> dict:
     """{selos, acao, resumo} de uma linha — a redação inteira, testável sem tela.
 
     `selos` são só PENDÊNCIAS. `resumo` é o que já aconteceu, pro subtítulo.
@@ -437,10 +437,22 @@ def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
     #
     # `tem_contrato` é quem separa os dois mundos. Nasce True pra não mudar o texto
     # de quem já tem documento — quem chama é que sabe do nicho.
-    if contrato_numero and not contrato_assinado:
-        dias = _dias_desde(contrato_em, hoje)
+    if contrato_numero and not contrato_assinado and not contrato_enviado_em:
+        # Pronto, mas ainda dentro de casa: quem olha a linha não pode ler isto
+        # como "já mandei" — era exatamente essa confusão que fazia o botão
+        # "Mandar pra assinar" continuar na tela depois de mandado de verdade, sem
+        # nada que dissesse a diferença entre os dois estados.
+        selos.append({"texto": "Contrato pronto — ainda não mandou pra assinar",
+                      "tom": "azul",
+                      "dica": f"O contrato nº {contrato_numero} está pronto, mas "
+                              "ainda não foi mandado pro cliente."})
+        acoes.append(("assinar", "Mandar pra assinar"))
+    elif contrato_numero and not contrato_assinado:
+        dias = _dias_desde(contrato_enviado_em, hoje)
         # o TEMPO PARADO é o dado que faltava: 3 dias e 30 dias pedem reações
-        # diferentes, e o selo dizia a mesma coisa nos dois casos.
+        # diferentes, e o selo dizia a mesma coisa nos dois casos. Conta do ENVIO,
+        # não da criação do contrato — o cliente só começou a esperar quando o link
+        # chegou na mão dele.
         selos.append({"texto": "Aguardando assinatura" + (f" há {_ha(dias)}" if dias is not None else ""),
                       "tom": "ambar",
                       "dica": "O cliente ainda não assinou o contrato nº "
@@ -448,7 +460,7 @@ def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
         # ...e agora existe BOTÃO. Antes a dica mandava "mande o link pro cliente"
         # e não havia nada pra clicar: o link ficava escondido no menu de três
         # pontos, junto de "abrir" e "copiar".
-        acoes.append(("assinar", "Mandar pra assinar"))
+        acoes.append(("assinar", "Reenviar pra assinar"))
     elif contrato_numero and contrato_assinado:
         if status != "fechado":
             acoes.append(("fechar", "Fechar negócio"))

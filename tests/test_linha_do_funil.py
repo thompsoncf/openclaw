@@ -143,14 +143,30 @@ def test_plano_que_nao_fecha_com_o_total_sobe_pra_linha():
     assert "PARCELAS" in r["selos"][0]["dica"]
 
 
-def test_contrato_aguardando_assinatura_e_ambar_e_pede_mandar_pra_assinar():
-    """O selo mandava "mande o link pro cliente" e NÃO HAVIA BOTÃO: o link ficava
-    escondido no menu de três pontos. Agora a ação existe — e vem antes de fechar,
-    porque enquanto o papel não volta assinado não há negócio pra fechar."""
+def test_contrato_pronto_mas_nunca_enviado_e_azul_e_pede_mandar_pra_assinar():
+    """O contrato nasce quando o sinal cai — antes de qualquer clique em "mandar".
+    Enquanto ninguém apertou o botão, isto não é uma pendência com prazo correndo
+    (por isso azul, não âmbar): é só o passo seguinte do fluxo normal."""
     r = v.linha_do_funil(status="aprovada", nunca_enviada=False, enviado_em="19/08",
                          contrato_numero=5, contrato_assinado=False)
-    assert textos(r) == ["Aguardando assinatura"]
+    assert textos(r) == ["Contrato pronto — ainda não mandou pra assinar"]
     assert r["acao"] == {"chave": "assinar", "texto": "Mandar pra assinar"}
+    assert tons(r) == ["azul"]
+
+
+def test_contrato_enviado_e_ambar_e_pede_reenviar_pra_assinar():
+    """O selo mandava "mande o link pro cliente" e NÃO HAVIA BOTÃO: o link ficava
+    escondido no menu de três pontos. Agora a ação existe — e vem antes de fechar,
+    porque enquanto o papel não volta assinado não há negócio pra fechar.
+
+    E O BOTÃO MUDA DE NOME depois do primeiro envio: "Mandar" vira "Reenviar" —
+    era exatamente a falta dessa distinção que fazia o card de um contrato JÁ
+    mandado (conta Prime Eventos/Bianca, 28/08) parecer que nada tinha saído."""
+    r = v.linha_do_funil(status="aprovada", nunca_enviada=False, enviado_em="19/08",
+                         contrato_numero=5, contrato_assinado=False,
+                         contrato_enviado_em=date(2026, 8, 19), hoje=date(2026, 8, 19))
+    assert textos(r) == ["Aguardando assinatura há hoje"]
+    assert r["acao"] == {"chave": "assinar", "texto": "Reenviar pra assinar"}
     assert tons(r) == ["ambar"]
 
 
@@ -197,7 +213,8 @@ def test_todas_as_pendencias_ficam_na_barra_mesmo_com_uma_acao_so():
         enviado_em="19/08", nunca_enviada=False, plano_difere=1,
         contrato_numero=5, contrato_assinado=False)
     assert textos(r) == ["Data liberada", "1 parcela sem comprovante",
-                         "Plano não fecha com o total", "Aguardando assinatura"]
+                         "Plano não fecha com o total",
+                         "Contrato pronto — ainda não mandou pra assinar"]
     assert chave(r) == "resegurar"
 
 
@@ -362,9 +379,12 @@ def test_as_linhas_de_producao_todas_resolvem_pra_um_nome():
 
 def test_aguardando_assinatura_conta_os_dias():
     """3 dias e 30 dias pedem reações diferentes, e o selo dizia a mesma coisa nos
-    dois casos. `hoje` é parâmetro pra este teste não depender do relógio."""
+    dois casos. `hoje` é parâmetro pra este teste não depender do relógio.
+
+    Conta do ENVIO, não da criação: o cliente só começou a esperar quando o link
+    chegou na mão dele, não quando o contrato nasceu na conta."""
     r = v.linha_do_funil(status="aprovada", nunca_enviada=False, contrato_numero=2,
-                         contrato_assinado=False, contrato_em=date(2026, 8, 22),
+                         contrato_assinado=False, contrato_enviado_em=date(2026, 8, 22),
                          hoje=date(2026, 8, 25))
     assert textos(r) == ["Aguardando assinatura há 3 dias"]
 
@@ -373,16 +393,17 @@ def test_um_dia_no_singular_e_hoje_por_extenso():
     def sel(d):
         return textos(v.linha_do_funil(
             status="aprovada", nunca_enviada=False, contrato_numero=2,
-            contrato_assinado=False, contrato_em=d, hoje=date(2026, 8, 25)))[0]
+            contrato_assinado=False, contrato_enviado_em=d, hoje=date(2026, 8, 25)))[0]
     assert sel(date(2026, 8, 24)).endswith("há 1 dia")
     assert sel(date(2026, 8, 25)).endswith("há hoje")
 
 
-def test_sem_a_data_do_contrato_o_selo_nao_mente():
-    """Contrato antigo, salvo antes de a data existir: some o "há N dias", fica o
-    selo. Inventar "há 0 dias" seria pior que não dizer."""
+def test_marcado_como_enviado_sem_data_util_nao_inventa_dias():
+    """Defensivo: se por algum motivo `contrato_enviado_em` chegar preenchido mas
+    não for uma data de verdade, some o "há N dias", fica o selo. Inventar
+    "há 0 dias" seria pior que não dizer."""
     r = v.linha_do_funil(status="aprovada", nunca_enviada=False, contrato_numero=2,
-                         contrato_assinado=False)
+                         contrato_assinado=False, contrato_enviado_em=True)
     assert textos(r) == ["Aguardando assinatura"]
 
 

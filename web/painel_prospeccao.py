@@ -2078,9 +2078,16 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
         # passa fácil de 500 msgs — carregar tudo (e re-carregar a cada poll de 4s)
         # deixava o painel segundos no "Carregando…" e pesava a renderização.
         rows = c.execute(
-            """select canal, direcao, autor, criado_em, texto, membro_id, nome, status, meta
+            """select canal, direcao, autor, criado_em, texto, membro_id, nome, status, meta,
+                      mid, midia_tipo, midia_meta
                  from (select msg.canal, msg.direcao, msg.autor, msg.criado_em, msg.texto,
-                              msg.membro_id, mm.nome as nome, msg.status, msg.meta, msg.id as mid
+                              msg.membro_id, mm.nome as nome, msg.status, msg.meta, msg.id as mid,
+                              -- o PONTEIRO não vem: a tela só precisa saber QUE tem mídia e de
+                              -- que tipo. O endereço e a chave ficam no servidor, e quem busca é
+                              -- /painel/prospeccao/midia/<id> (ver migração 187 e finance/wa_midia)
+                              msg.midia_tipo,
+                              case when msg.midia_ref is null then null
+                                   else coalesce(msg.midia_meta, '{}'::jsonb) end as midia_meta
                          from mensagens msg left join membros mm on mm.id = msg.membro_id
                         where msg.conversa_id=%s
                         order by msg.criado_em desc, msg.id desc limit 100) ult
@@ -2094,7 +2101,8 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
     # apertou enviar, então é ele que entra nesse lugar.
     nome_celular = _wa_nome_conectado(ctx["conta_id"]) if cv[0] == "whatsapp" else ""
     msgs = []
-    for (cn, direcao, autor, quando, texto, mid, nome, mstatus, mmeta) in rows:
+    for (cn, direcao, autor, quando, texto, mid, nome, mstatus, mmeta,
+         msg_id, midia_tipo, midia_meta) in rows:
         # só e-mail separa assunto (cabeçalho) do corpo; os outros canais são texto puro
         if cn == "email" and "\n\n" in (texto or ""):
             cab, _, corpo = (texto or "").partition("\n\n")
@@ -2117,10 +2125,16 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
         if mstatus == "erro" and isinstance(mmeta, dict):
             from finance.prospec_convite import rotulo_erro_alvo
             erro_rot = rotulo_erro_alvo(mmeta.get("erro_codigo"), mmeta.get("erro_msg"))
-        msgs.append({"canal": cn, "direcao": direcao, "autor": autor,
-                     "quando": _hora_br(quando),
-                     "quem": quem, "cabecalho": cab.strip(), "corpo": corpo.strip(),
-                     "status": mstatus or "", "erro": erro_rot})
+        item = {"canal": cn, "direcao": direcao, "autor": autor,
+                "quando": _hora_br(quando),
+                "quem": quem, "cabecalho": cab.strip(), "corpo": corpo.strip(),
+                "status": mstatus or "", "erro": erro_rot}
+        # `midia_meta` só vem preenchido quando existe ponteiro (ver o case da
+        # consulta): é ele que diz pra tela desenhar bolha de imagem em vez de texto.
+        if midia_tipo and midia_meta is not None:
+            item["id"] = msg_id
+            item["midia"] = {"tipo": midia_tipo, **(midia_meta or {})}
+        msgs.append(item)
     destino = cv[7] or cv[8] or cv[13]     # telefone do lead OU contato_ref (conversa sem lead)
     pode_wa = False
     if cv[0] == "whatsapp" and bool(destino):
@@ -10908,6 +10922,28 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-thread,.cx-ctx{border:1px solid var(--borda);border-radius:12px;background:var(--card);min-height:40vh}
 .cx-thread{display:flex;flex-direction:column;max-height:72vh}
 .cx-empty{padding:2.4rem 1rem;text-align:center;color:var(--txt-mut);font-size:.9rem}
+/* a mídia dentro da bolha. O arquivo NÃO está no nosso disco: o src aponta pra
+   /painel/prospeccao/midia/<id>, que busca no CDN do WhatsApp e decifra na hora. */
+.cx-mid{display:block;margin:.1rem 0 .35rem;border-radius:9px;overflow:hidden;
+  border:1px solid var(--borda);background:var(--bg-2);max-width:260px}
+.cx-mid img,.cx-mid video{display:block;width:100%;height:auto;max-height:300px;
+  object-fit:cover;background:var(--bg-2)}
+.cx-mid.fig{max-width:130px;border:0;background:none}
+.cx-mid.fig img{max-height:130px;object-fit:contain}
+.cx-doc{display:flex;align-items:center;gap:.5rem;padding:.5rem .6rem;text-decoration:none;
+  color:var(--txt)}
+.cx-doc .ic{font-size:1.2rem;flex:none}
+.cx-doc .nm{font-size:.8rem;font-weight:600;word-break:break-word;line-height:1.3}
+.cx-doc .pz{font-size:.68rem;color:var(--txt-mut);font-family:ui-monospace,monospace}
+.cx-mid-aviso{padding:.5rem .6rem;font-size:.75rem;color:var(--ambar);line-height:1.45}
+.cx-mid-aviso.ruim{color:var(--coral)}
+.cx-mid-aviso a{color:inherit}
+.cx-play{position:relative;display:block;cursor:pointer}
+.cx-play .bt{position:absolute;inset:0;display:grid;place-items:center;
+  background:rgba(0,0,0,.35);color:#fff;font-size:1.4rem}
+.cx-play .dur{position:absolute;right:.3rem;bottom:.3rem;font-size:.64rem;
+  font-family:ui-monospace,monospace;background:rgba(0,0,0,.6);color:#fff;
+  padding:.05rem .3rem;border-radius:4px}
 .cx-trunc{padding:.35rem 0;text-align:center;color:var(--txt-mut);font-size:.72rem}
 .cx-th{display:flex;align-items:center;gap:.6rem;padding:.7rem .85rem;border-bottom:1px solid var(--borda)}
 /* aviso de mesmo número no outro chip — colado embaixo do cabeçalho, antes das
@@ -12491,9 +12527,72 @@ function cxMsgsHtml(d){
     var cls=(m.direcao==='in')?'cx-m cin':((m.autor==='bot')?'cx-m cbot':'cx-m');
     var cab=m.cabecalho?('<div class="cab">'+cxEsc(m.cabecalho)+'</div>'):'';
     var corpo=cxEsc(m.corpo||m.cabecalho).replace(/\\n/g,'<br>');
-    h+='<div class="'+cls+'">'+cab+corpo+'<span class="meta">'+cxEsc(m.quem)+' · '+cxEsc(m.quando)+cxTick(m)+'</span></div>';
+    h+='<div class="'+cls+'">'+cab+cxMidiaHtml(m)+corpo+'<span class="meta">'+cxEsc(m.quem)+' · '+cxEsc(m.quando)+cxTick(m)+'</span></div>';
   });
   return h+cxPendHtml();
+}
+// A MÍDIA DA MENSAGEM.
+//
+// O arquivo não está no nosso disco: `src` aponta pra /painel/prospeccao/midia/<id>,
+// que busca no CDN do WhatsApp e decifra em fluxo (ver finance/wa_midia.py). Guardar
+// daria ~110 GB por ano numa conta só, contra 22 MB de ponteiro.
+//
+// `loading=lazy` não é enfeite: é o que faz o custo ser ZERO para a foto que ninguém
+// abre. O navegador só pede quando a bolha entra na tela, e a maioria nunca entra —
+// numa conversa de 300 mensagens ele carrega as 3 ou 4 visíveis.
+function cxMidiaHtml(m){
+  var d=m.midia;
+  if(!d||!m.id)return '';
+  var src='/painel/prospeccao/midia/'+m.id;
+  if(d.tipo==='documento'){
+    var nome=d.nome||'arquivo';
+    return '<a class="cx-mid cx-doc" href="'+src+'" target="_blank" rel="noopener">'
+      +'<span class="ic">📄</span><span><span class="nm">'+cxEsc(nome)+'</span>'
+      +(d.bytes?('<br><span class="pz">'+cxTam(d.bytes)+'</span>'):'')+'</span></a>';
+  }
+  if(d.tipo==='video'){
+    // preload=none e sem autoplay: vídeo que carrega sozinho gasta o pacote de dados
+    // de quem está na rua, e a maioria nem é assistida. O cartaz é o primeiro quadro,
+    // que o próprio navegador busca quando a pessoa toca.
+    return '<span class="cx-mid"><video controls preload="none" playsinline src="'+src+'"'
+      +' onerror="cxMidiaErro(this)"></video></span>';
+  }
+  var fig=(d.tipo==='figurinha')?' fig':'';
+  return '<span class="cx-mid'+fig+'"><img loading="lazy" src="'+src+'" alt="'
+    +(d.tipo==='figurinha'?'Figurinha':'Foto')+'" onerror="cxMidiaErro(this)"></span>';
+}
+function cxTam(b){
+  b=Number(b)||0;
+  if(b>=1048576)return (b/1048576).toFixed(1).replace('.',',')+' MB';
+  if(b>=1024)return Math.round(b/1024)+' KB';
+  return b+' B';
+}
+// Quando não carrega, a bolha DIZ o que houve — e diz coisas diferentes, porque as
+// ações são diferentes: arquivo que o WhatsApp apagou se pede de novo ao cliente;
+// falha de rede se tenta de novo. O 410 vem da rota justamente pra isso.
+function cxMidiaErro(el){
+  var pai=el.parentNode; if(!pai)return;
+  var src=(el.getAttribute('src')||'').split('?')[0];
+  // O endereço vai num data-, não dentro do onclick. Aspa escapada em atributo é a
+  // MESMA armadilha do \\n neste arquivo: o template é string Python não-raw, e o
+  // \\' que o JS precisa chega na página como ' — quebrando o script inteiro. O
+  // tests/test_painel_js_sintaxe.py pega, mas custa uma rodada.
+  var tentar='<a href="#" class="cx-mid-retry" data-src="'+src
+    +'" onclick="cxMidiaDeNovo(this);return false">tentar de novo</a>';
+  fetch(src,{method:'HEAD'}).then(function(r){
+    pai.innerHTML=(r.status===410)
+      ? '<span class="cx-mid-aviso">🖼 Este arquivo não está mais no servidor do WhatsApp</span>'
+      : '<span class="cx-mid-aviso ruim">🖼 Não consegui carregar agora — '+tentar+'</span>';
+  }).catch(function(){
+    pai.innerHTML='<span class="cx-mid-aviso ruim">🖼 Não consegui carregar agora — '+tentar+'</span>';
+  });
+}
+function cxMidiaDeNovo(a){
+  var box=a.closest('.cx-mid'); if(!box)return;
+  // cache-buster: sem ele o navegador devolve o próprio erro cacheado e o botão
+  // "tentar de novo" não tenta nada
+  box.innerHTML='<img loading="lazy" src="'+(a.getAttribute('data-src')||'')
+    +'?r='+Date.now()+'" onerror="cxMidiaErro(this)">';
 }
 // selo de entrega só nas mensagens que SAÍRAM (WhatsApp): ✓ enviado · ✓✓ entregue · 👀 lido · ⚠ erro
 function cxTick(m){

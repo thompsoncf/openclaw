@@ -33,7 +33,8 @@ create table campanha_eventos (id bigserial primary key, campanha_id bigint, pro
 -- os contadores de botão não pegam. Sem as tabelas aqui, _campanhas_dados quebra.
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint, chip_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
-  autor text, texto text, criado_em timestamptz default now());
+  autor text, texto text, criado_em timestamptz default now(),
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
 create table canais_config (
   id bigserial primary key, conta_id bigint, canal text, identificador text,
   ativo boolean not null default true, token text, provedor text not null default 'twilio',

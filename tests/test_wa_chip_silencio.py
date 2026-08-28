@@ -29,7 +29,8 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   status text default 'aberta', ultima_msg_em timestamptz default now(), chip_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, texto text, provider_sid text,
-  criado_em timestamptz default now());
+  criado_em timestamptz default now(),
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
 
 -- unicidade por CONVERSA, não global: o id do WhatsApp é o mesmo nas duas pontas
 -- da mensagem, e global fazia a conta que recebe perder a dela (migração 159)

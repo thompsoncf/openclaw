@@ -22,7 +22,8 @@ from urllib.parse import quote
 
 from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, Request, Form, UploadFile, File, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
+from fastapi.responses import (HTMLResponse, RedirectResponse, JSONResponse, Response,
+                               StreamingResponse)
 from psycopg.errors import UniqueViolation
 
 from db.conexao import get_pool
@@ -2077,9 +2078,16 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
         # passa fácil de 500 msgs — carregar tudo (e re-carregar a cada poll de 4s)
         # deixava o painel segundos no "Carregando…" e pesava a renderização.
         rows = c.execute(
-            """select canal, direcao, autor, criado_em, texto, membro_id, nome, status, meta
+            """select canal, direcao, autor, criado_em, texto, membro_id, nome, status, meta,
+                      mid, midia_tipo, midia_meta
                  from (select msg.canal, msg.direcao, msg.autor, msg.criado_em, msg.texto,
-                              msg.membro_id, mm.nome as nome, msg.status, msg.meta, msg.id as mid
+                              msg.membro_id, mm.nome as nome, msg.status, msg.meta, msg.id as mid,
+                              -- o PONTEIRO não vem: a tela só precisa saber QUE tem mídia e de
+                              -- que tipo. O endereço e a chave ficam no servidor, e quem busca é
+                              -- /painel/prospeccao/midia/<id> (ver migração 187 e finance/wa_midia)
+                              msg.midia_tipo,
+                              case when msg.midia_ref is null then null
+                                   else coalesce(msg.midia_meta, '{}'::jsonb) end as midia_meta
                          from mensagens msg left join membros mm on mm.id = msg.membro_id
                         where msg.conversa_id=%s
                         order by msg.criado_em desc, msg.id desc limit 100) ult
@@ -2093,7 +2101,8 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
     # apertou enviar, então é ele que entra nesse lugar.
     nome_celular = _wa_nome_conectado(ctx["conta_id"]) if cv[0] == "whatsapp" else ""
     msgs = []
-    for (cn, direcao, autor, quando, texto, mid, nome, mstatus, mmeta) in rows:
+    for (cn, direcao, autor, quando, texto, mid, nome, mstatus, mmeta,
+         msg_id, midia_tipo, midia_meta) in rows:
         # só e-mail separa assunto (cabeçalho) do corpo; os outros canais são texto puro
         if cn == "email" and "\n\n" in (texto or ""):
             cab, _, corpo = (texto or "").partition("\n\n")
@@ -2116,10 +2125,16 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
         if mstatus == "erro" and isinstance(mmeta, dict):
             from finance.prospec_convite import rotulo_erro_alvo
             erro_rot = rotulo_erro_alvo(mmeta.get("erro_codigo"), mmeta.get("erro_msg"))
-        msgs.append({"canal": cn, "direcao": direcao, "autor": autor,
-                     "quando": _hora_br(quando),
-                     "quem": quem, "cabecalho": cab.strip(), "corpo": corpo.strip(),
-                     "status": mstatus or "", "erro": erro_rot})
+        item = {"canal": cn, "direcao": direcao, "autor": autor,
+                "quando": _hora_br(quando),
+                "quem": quem, "cabecalho": cab.strip(), "corpo": corpo.strip(),
+                "status": mstatus or "", "erro": erro_rot}
+        # `midia_meta` só vem preenchido quando existe ponteiro (ver o case da
+        # consulta): é ele que diz pra tela desenhar bolha de imagem em vez de texto.
+        if midia_tipo and midia_meta is not None:
+            item["id"] = msg_id
+            item["midia"] = {"tipo": midia_tipo, **(midia_meta or {})}
+        msgs.append(item)
     destino = cv[7] or cv[8] or cv[13]     # telefone do lead OU contato_ref (conversa sem lead)
     pode_wa = False
     if cv[0] == "whatsapp" and bool(destino):
@@ -3899,7 +3914,7 @@ def _trava_numero(c, conta_id, numero) -> str:
 
 
 def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente_on,
-                         *, exigir_continuidade=False, chip_id=None):
+                         *, exigir_continuidade=False, chip_id=None, midia=None):
     """WhatsApp de ENTRADA (Twilio OU Cloud API): resolve lead+conversa pelo telefone,
     grava a mensagem e reabre a janela/reativa o agente. Devolve (conv_id, nova) — se
     a mensagem entrou agora ou já estava lá. Um humano que 'assumiu'
@@ -4061,10 +4076,20 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
                returning id""",
             (conta_id, lead_id, remetente, agente_on, conta_id, alvo8,
              _chip_gravavel(chip_id, conta_id))).fetchone()[0]
-    cur = c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
-                 values (%s,'whatsapp','in','lead',%s,%s)
+    # O PONTEIRO da mídia, não o arquivo. `midia_ref` guarda {directPath, mediaKey,
+    # mimetype} — ~200 bytes que dizem onde o WhatsApp guarda o arquivo cifrado e
+    # como decifrá-lo. Quem busca é o serviço web, sob demanda, quando alguém abre a
+    # conversa. Guardar o arquivo seriam ~110 GB por ano só nesta conta, contra 22 MB
+    # de ponteiro — e ainda pediria retenção, disco e limpeza (migração 187).
+    mid = midia if isinstance(midia, dict) else None
+    cur = c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto,
+                     provider_sid, midia_ref, midia_tipo, midia_meta)
+                 values (%s,'whatsapp','in','lead',%s,%s,%s::jsonb,%s,%s::jsonb)
                  on conflict (conversa_id, provider_sid) where provider_sid is not null do nothing""",
-                    (conv_id, (corpo or "")[:8000], sid))
+                    (conv_id, (corpo or "")[:8000], sid,
+                     json.dumps(mid["ref"]) if mid and mid.get("ref") else None,
+                     (mid.get("tipo") or None) if mid else None,
+                     json.dumps(mid.get("meta") or {}) if mid else None))
     # entrou agora, ou é a mesma mensagem chegando de novo? Ver o `nova` no docstring:
     # sem esta resposta o dedup era silencioso e o agente respondia uma vez por entrega.
     nova = cur.rowcount > 0
@@ -4846,6 +4871,132 @@ def _chip_gravavel(chip_id, empresa_id):
     return None if (chip_id is None or int(chip_id) == int(empresa_id)) else int(chip_id)
 
 
+# Os tipos de mídia que o Zaq sabe desenhar. Um tipo que a gente não conhece não
+# vira ponteiro: a bolha ficaria prometendo uma coisa que a tela não sabe mostrar, e
+# o texto da marca já conta o que chegou.
+_MIDIA_TIPOS = ("imagem", "video", "documento", "figurinha")
+
+
+def _midia_do_payload(m):
+    """O ponteiro que veio do wa-qr, peneirado — ou None.
+
+    Peneira porque isto é entrada de rede e vai pra uma coluna jsonb: sem teto de
+    tamanho, um `directPath` de megabytes forjado viraria linha de megabytes no
+    banco. E sem `mediaKey` não há como decifrar depois, então prometer a bolha
+    seria mentir.
+    """
+    if not isinstance(m, dict):
+        return None
+    tipo = str(m.get("tipo") or "").strip()
+    ref = m.get("ref") if isinstance(m.get("ref"), dict) else {}
+    caminho = str(ref.get("directPath") or "").strip()
+    chave = str(ref.get("mediaKey") or "").strip()
+    if tipo not in _MIDIA_TIPOS or not caminho or not chave:
+        return None
+    if len(caminho) > 500 or len(chave) > 200:
+        return None
+    meta = m.get("meta") if isinstance(m.get("meta"), dict) else {}
+    limpa = {}
+    for k in ("bytes", "segundos", "largura", "altura"):
+        try:
+            v = int(meta.get(k) or 0)
+        except (TypeError, ValueError):
+            v = 0
+        if v > 0:
+            limpa[k] = v
+    if meta.get("nome"):
+        limpa["nome"] = str(meta["nome"])[:160]
+    for k in ("gif", "animada"):
+        if meta.get(k):
+            limpa[k] = True
+    return {"tipo": tipo, "meta": limpa,
+            "ref": {"directPath": caminho, "mediaKey": chave,
+                    "mimetype": str(ref.get("mimetype") or "")[:100]}}
+
+
+# ---------------------------------------------------------------- a mídia na tela
+#
+# O arquivo NÃO está no nosso disco: `mensagens.midia_ref` guarda só o endereço no
+# CDN do WhatsApp e a chave que decifra (migração 187). Esta rota busca lá, decifra
+# em fluxo e repassa — o arquivo nunca existe inteiro na memória, e some assim que
+# o último pedaço sai.
+#
+# `content-disposition: inline` de propósito: foto e vídeo abrem na conversa. Só
+# documento vira download, e aí com o nome que o cliente mandou.
+_MIDIA_TIPO_HTTP = {
+    "imagem": "image/jpeg", "figurinha": "image/webp",
+    "video": "video/mp4", "documento": "application/octet-stream",
+}
+
+
+@router.get("/painel/prospeccao/midia/{mensagem_id}")
+def prospeccao_midia(request: Request, mensagem_id: int):
+    """A mídia de uma mensagem, buscada no CDN do WhatsApp na hora.
+
+    O ESCOPO É A PARTE SÉRIA. O id da mensagem é sequencial e adivinhável, então a
+    consulta casa `mensagens -> conversas -> conta_id` com a conta logada, e quem
+    não é gerência ainda passa pelo dono do lead — o mesmo recorte da caixa. Sem
+    isso, trocar um número na URL leria a foto do cliente de outra empresa.
+    """
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    with get_pool().connection() as c:
+        r = c.execute(
+            """select m.midia_ref, m.midia_tipo, coalesce(m.midia_meta,'{}'::jsonb)
+                 from mensagens m
+                 join conversas cv on cv.id = m.conversa_id
+                 left join prospeccao p on p.id = cv.prospeccao_id
+                where m.id=%s and cv.conta_id=%s and m.midia_ref is not null
+                  and (%s or p.vendedor_id is null or p.vendedor_id=%s)""",
+            (mensagem_id, ctx["conta_id"], bool(ctx["gerencia"]),
+             ctx["membro_id"])).fetchone()
+    if not r:
+        return Response(status_code=404)
+    ref, tipo, meta = r[0], r[1], (r[2] or {})
+    from finance import wa_midia as _wm
+    try:
+        fluxo = _wm.buscar(ref, tipo)
+        primeiro = next(fluxo, b"")
+    except _wm.Expirou:
+        # 410 e não 404: a tela usa a diferença pra dizer "não está mais no servidor
+        # do WhatsApp" em vez de "não consegui carregar agora" — são recados
+        # diferentes, e o segundo faz o vendedor tentar de novo à toa.
+        return Response(status_code=410)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger("prospeccao.midia").warning(
+            "midia %s falhou: %s: %s", mensagem_id, type(e).__name__, e)
+        return Response(status_code=502)
+
+    def _corpo():
+        yield primeiro
+        yield from fluxo
+
+    ct = (ref.get("mimetype") or "").split(";")[0].strip() or \
+        _MIDIA_TIPO_HTTP.get(tipo, "application/octet-stream")
+    cab = {
+        # `private` porque é conversa de cliente: cacheia no navegador de quem
+        # abriu, nunca num proxy compartilhado. É este cabeçalho que faz a segunda
+        # vez que a foto aparece não chegar no servidor.
+        "cache-control": "private, max-age=86400",
+        "content-disposition": ("attachment; filename=\"%s\"" % _nome_seguro(meta.get("nome"))
+                                if tipo == "documento" else "inline"),
+    }
+    if meta.get("bytes"):
+        # o tamanho do arquivo CLARO não é o do cifrado, então isto é dica pro
+        # navegador desenhar a barra — não `content-length`, que seria mentira
+        cab["x-midia-bytes"] = str(int(meta["bytes"]))
+    return StreamingResponse(_corpo(), media_type=ct, headers=cab)
+
+
+def _nome_seguro(nome) -> str:
+    """O nome do arquivo vai num cabeçalho HTTP — aspas e quebra de linha fora."""
+    limpo = "".join(ch for ch in str(nome or "arquivo") if ch.isprintable()
+                    and ch not in '"\\\r\n')
+    return (limpo.strip() or "arquivo")[:120]
+
+
 @router.post("/webhooks/wa-qr")
 async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
     """Entrada do WhatsApp por QR (serviço Node services/wa-qr). Autentica pelo
@@ -4910,7 +5061,8 @@ def _webhook_wa_qr_sync(corpo: bytes, background_tasks: BackgroundTasks):
         agente_on = bool(m and m[0])
         conv_id, nova = _wa_inbound_conversa(c, empresa_id, sender, texto,
                                             payload.get("id") or None, payload.get("nome"),
-                                            agente_on, chip_id=chip_id)
+                                            agente_on, chip_id=chip_id,
+                                            midia=_midia_do_payload(payload.get("midia")))
         # lê DENTRO da transação: o update acima já valeu, então a conversa ligada à
         # mão aparece aqui mesmo com o agente-mestre desligado (ver _agente_atende).
         # `nova` corta a reentrega: o wa-qr manda a mesma mensagem de novo quando a
@@ -10859,6 +11011,28 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-thread,.cx-ctx{border:1px solid var(--borda);border-radius:12px;background:var(--card);min-height:40vh}
 .cx-thread{display:flex;flex-direction:column;max-height:72vh}
 .cx-empty{padding:2.4rem 1rem;text-align:center;color:var(--txt-mut);font-size:.9rem}
+/* a mídia dentro da bolha. O arquivo NÃO está no nosso disco: o src aponta pra
+   /painel/prospeccao/midia/<id>, que busca no CDN do WhatsApp e decifra na hora. */
+.cx-mid{display:block;margin:.1rem 0 .35rem;border-radius:9px;overflow:hidden;
+  border:1px solid var(--borda);background:var(--bg-2);max-width:260px}
+.cx-mid img,.cx-mid video{display:block;width:100%;height:auto;max-height:300px;
+  object-fit:cover;background:var(--bg-2)}
+.cx-mid.fig{max-width:130px;border:0;background:none}
+.cx-mid.fig img{max-height:130px;object-fit:contain}
+.cx-doc{display:flex;align-items:center;gap:.5rem;padding:.5rem .6rem;text-decoration:none;
+  color:var(--txt)}
+.cx-doc .ic{font-size:1.2rem;flex:none}
+.cx-doc .nm{font-size:.8rem;font-weight:600;word-break:break-word;line-height:1.3}
+.cx-doc .pz{font-size:.68rem;color:var(--txt-mut);font-family:ui-monospace,monospace}
+.cx-mid-aviso{padding:.5rem .6rem;font-size:.75rem;color:var(--ambar);line-height:1.45}
+.cx-mid-aviso.ruim{color:var(--coral)}
+.cx-mid-aviso a{color:inherit}
+.cx-play{position:relative;display:block;cursor:pointer}
+.cx-play .bt{position:absolute;inset:0;display:grid;place-items:center;
+  background:rgba(0,0,0,.35);color:#fff;font-size:1.4rem}
+.cx-play .dur{position:absolute;right:.3rem;bottom:.3rem;font-size:.64rem;
+  font-family:ui-monospace,monospace;background:rgba(0,0,0,.6);color:#fff;
+  padding:.05rem .3rem;border-radius:4px}
 .cx-trunc{padding:.35rem 0;text-align:center;color:var(--txt-mut);font-size:.72rem}
 .cx-th{display:flex;align-items:center;gap:.6rem;padding:.7rem .85rem;border-bottom:1px solid var(--borda)}
 /* aviso de mesmo número no outro chip — colado embaixo do cabeçalho, antes das
@@ -12442,9 +12616,72 @@ function cxMsgsHtml(d){
     var cls=(m.direcao==='in')?'cx-m cin':((m.autor==='bot')?'cx-m cbot':'cx-m');
     var cab=m.cabecalho?('<div class="cab">'+cxEsc(m.cabecalho)+'</div>'):'';
     var corpo=cxEsc(m.corpo||m.cabecalho).replace(/\\n/g,'<br>');
-    h+='<div class="'+cls+'">'+cab+corpo+'<span class="meta">'+cxEsc(m.quem)+' · '+cxEsc(m.quando)+cxTick(m)+'</span></div>';
+    h+='<div class="'+cls+'">'+cab+cxMidiaHtml(m)+corpo+'<span class="meta">'+cxEsc(m.quem)+' · '+cxEsc(m.quando)+cxTick(m)+'</span></div>';
   });
   return h+cxPendHtml();
+}
+// A MÍDIA DA MENSAGEM.
+//
+// O arquivo não está no nosso disco: `src` aponta pra /painel/prospeccao/midia/<id>,
+// que busca no CDN do WhatsApp e decifra em fluxo (ver finance/wa_midia.py). Guardar
+// daria ~110 GB por ano numa conta só, contra 22 MB de ponteiro.
+//
+// `loading=lazy` não é enfeite: é o que faz o custo ser ZERO para a foto que ninguém
+// abre. O navegador só pede quando a bolha entra na tela, e a maioria nunca entra —
+// numa conversa de 300 mensagens ele carrega as 3 ou 4 visíveis.
+function cxMidiaHtml(m){
+  var d=m.midia;
+  if(!d||!m.id)return '';
+  var src='/painel/prospeccao/midia/'+m.id;
+  if(d.tipo==='documento'){
+    var nome=d.nome||'arquivo';
+    return '<a class="cx-mid cx-doc" href="'+src+'" target="_blank" rel="noopener">'
+      +'<span class="ic">📄</span><span><span class="nm">'+cxEsc(nome)+'</span>'
+      +(d.bytes?('<br><span class="pz">'+cxTam(d.bytes)+'</span>'):'')+'</span></a>';
+  }
+  if(d.tipo==='video'){
+    // preload=none e sem autoplay: vídeo que carrega sozinho gasta o pacote de dados
+    // de quem está na rua, e a maioria nem é assistida. O cartaz é o primeiro quadro,
+    // que o próprio navegador busca quando a pessoa toca.
+    return '<span class="cx-mid"><video controls preload="none" playsinline src="'+src+'"'
+      +' onerror="cxMidiaErro(this)"></video></span>';
+  }
+  var fig=(d.tipo==='figurinha')?' fig':'';
+  return '<span class="cx-mid'+fig+'"><img loading="lazy" src="'+src+'" alt="'
+    +(d.tipo==='figurinha'?'Figurinha':'Foto')+'" onerror="cxMidiaErro(this)"></span>';
+}
+function cxTam(b){
+  b=Number(b)||0;
+  if(b>=1048576)return (b/1048576).toFixed(1).replace('.',',')+' MB';
+  if(b>=1024)return Math.round(b/1024)+' KB';
+  return b+' B';
+}
+// Quando não carrega, a bolha DIZ o que houve — e diz coisas diferentes, porque as
+// ações são diferentes: arquivo que o WhatsApp apagou se pede de novo ao cliente;
+// falha de rede se tenta de novo. O 410 vem da rota justamente pra isso.
+function cxMidiaErro(el){
+  var pai=el.parentNode; if(!pai)return;
+  var src=(el.getAttribute('src')||'').split('?')[0];
+  // O endereço vai num data-, não dentro do onclick. Aspa escapada em atributo é a
+  // MESMA armadilha do \\n neste arquivo: o template é string Python não-raw, e o
+  // \\' que o JS precisa chega na página como ' — quebrando o script inteiro. O
+  // tests/test_painel_js_sintaxe.py pega, mas custa uma rodada.
+  var tentar='<a href="#" class="cx-mid-retry" data-src="'+src
+    +'" onclick="cxMidiaDeNovo(this);return false">tentar de novo</a>';
+  fetch(src,{method:'HEAD'}).then(function(r){
+    pai.innerHTML=(r.status===410)
+      ? '<span class="cx-mid-aviso">🖼 Este arquivo não está mais no servidor do WhatsApp</span>'
+      : '<span class="cx-mid-aviso ruim">🖼 Não consegui carregar agora — '+tentar+'</span>';
+  }).catch(function(){
+    pai.innerHTML='<span class="cx-mid-aviso ruim">🖼 Não consegui carregar agora — '+tentar+'</span>';
+  });
+}
+function cxMidiaDeNovo(a){
+  var box=a.closest('.cx-mid'); if(!box)return;
+  // cache-buster: sem ele o navegador devolve o próprio erro cacheado e o botão
+  // "tentar de novo" não tenta nada
+  box.innerHTML='<img loading="lazy" src="'+(a.getAttribute('data-src')||'')
+    +'?r='+Date.now()+'" onerror="cxMidiaErro(this)">';
 }
 // selo de entrega só nas mensagens que SAÍRAM (WhatsApp): ✓ enviado · ✓✓ entregue · 👀 lido · ⚠ erro
 function cxTick(m){

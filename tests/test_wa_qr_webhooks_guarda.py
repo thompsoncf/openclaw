@@ -37,7 +37,8 @@ create table contas (id bigserial primary key, tipo text, nome text,
 create table conversas (id bigserial primary key, conta_id bigint, canal text,
   contato text, status text, chip_id bigint references contas(id) on delete set null);
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
-  direcao text, autor text, texto text, provider_sid text, status text);
+  direcao text, autor text, texto text, provider_sid text, status text,
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
 create table wa_contatos (id bigserial primary key, conta_id bigint, numero text, nome text);
 create table canais_config (
   id bigserial primary key, conta_id bigint, canal text, identificador text,

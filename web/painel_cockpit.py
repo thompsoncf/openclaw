@@ -45,7 +45,8 @@ import logging as _logging
 import os as _os
 
 from fastapi import APIRouter, Body, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse, Response,
+                               StreamingResponse)
 
 from db.conexao import get_pool
 from web import tema as _tema
@@ -438,6 +439,19 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .bub.out{align-self:flex-end;background:#0A5C49;border-bottom-right-radius:4px}
 .bub.ia{align-self:flex-end;background:#1a1226;border:1px solid #3a2b52;border-bottom-right-radius:4px}
 .bub .who{font-size:.64rem;color:var(--text-faint);margin-bottom:.15rem}
+/* A mídia dentro da bolha. O arquivo NÃO está no nosso disco: o src aponta pra
+   /cockpit/lead/<lead>/midia/<msg>, que busca no CDN do WhatsApp e decifra na hora. */
+.bub .mid{display:block;margin:.15rem 0 .3rem;border-radius:9px;overflow:hidden;
+  border:1px solid rgba(255,255,255,.09);background:rgba(0,0,0,.2);max-width:220px}
+.bub .mid img,.bub .mid video{display:block;width:100%;height:auto;max-height:260px;
+  object-fit:cover}
+.bub .mid.fig{max-width:110px;border:0;background:none}
+.bub .mid.fig img{max-height:110px;object-fit:contain}
+.bub .doc{display:flex;align-items:center;gap:.45rem;padding:.45rem .55rem;
+  text-decoration:none;color:inherit}
+.bub .doc .nm{font-size:.78rem;font-weight:600;word-break:break-word;line-height:1.25}
+.bub .doc .pz{font-size:.65rem;opacity:.65;font-family:var(--mono)}
+.bub .mid-aviso{padding:.45rem .55rem;font-size:.73rem;line-height:1.4;opacity:.9}
 /* a mensagem que já está na tela mas ainda não voltou do servidor */
 .bub.voando{opacity:.55}
 .bub.voando .tick{display:block;font-family:var(--mono);font-size:.6rem;
@@ -3241,17 +3255,60 @@ def cockpit_lead(request: Request, lead_id: int):
     return RedirectResponse("/cockpit/login", status_code=303)
 
 
+
+def _tam_br(b) -> str:
+    b = int(b or 0)
+    if b >= 1048576:
+        return ("%.1f" % (b / 1048576)).replace(".", ",") + " MB"
+    if b >= 1024:
+        return "%d KB" % round(b / 1024)
+    return "%d B" % b
+
+
+def _midia_html(lead_id: int, m: dict) -> str:
+    """A bolha de mídia, montada no SERVIDOR pra primeira carga.
+
+    O arquivo não está no nosso disco: o `src` aponta pra rota que busca no CDN do
+    WhatsApp e decifra na hora (finance/wa_midia.py). `loading=lazy` e
+    `preload=none` são o que faz o custo ser zero pra foto que ninguém abre — numa
+    conversa de 200 mensagens o navegador carrega as poucas que aparecem na tela.
+
+    Existe em DUAS cópias, esta e a `mid()` do JS, porque o Cockpit desenha a
+    conversa duas vezes: aqui na primeira carga e lá no polling que traz o que
+    chegou depois. As duas têm que produzir o mesmo HTML.
+    """
+    d = m.get("midia") or {}
+    tipo = d.get("tipo") or ""
+    mid = m.get("id") or 0
+    if not tipo or not mid:
+        return ""
+    src = f"{_BASE}/lead/{lead_id}/midia/{mid}"
+    if tipo == "documento":
+        peso = f"<br><span class=pz>{esc(_tam_br(d.get('bytes')))}</span>" if d.get("bytes") else ""
+        return (f"<a class='mid doc' href='{esc(src)}' target=_blank rel=noopener>"
+                f"<span>📄</span><span><span class=nm>{esc(d.get('nome') or 'arquivo')}"
+                f"</span>{peso}</span></a>")
+    if tipo == "video":
+        return (f"<span class=mid><video controls preload=none playsinline "
+                f"src='{esc(src)}'></video></span>")
+    fig = " fig" if tipo == "figurinha" else ""
+    return (f"<span class='mid{fig}'><img loading=lazy src='{esc(src)}' alt='' "
+            f"onerror=\"this.parentNode.innerHTML='<span class=mid-aviso>🖼 não consegui "
+            f"carregar</span>'\"></span>")
+
+
 def _lead_vendedor(request: Request, lead_id: int, d: dict,
                    pode_voz: bool = False, saida_wa: bool = True) -> HTMLResponse:
     sub = " · ".join(x for x in [d.get("cidade") or "", d.get("uf") or ""] if x) or (d.get("doc_fmt") or "")
 
     bolhas = []
+    # (o _midia_html mora fora daqui pra o polling do JS desenhar igual — ver cxMid)
     for m in d["mensagens"]:
         who = m["who"]
         rot = ("<div class=who>Agente</div>" if who == "ia"
                else "<div class=who>Você</div>" if who == "out" else "")
         bolhas.append(f"<div class='bub {esc(who)}' data-id='{m.get('id') or 0}'>"
-                      f"{rot}{esc(m['texto'])}</div>")
+                      f"{rot}{_midia_html(lead_id, m)}{esc(m['texto'])}</div>")
     if d["ia"]:
         bolhas.insert(0, "<div class=aviso>O agente está atendendo. Toque em "
                          "<b>Assumir</b> pra responder você.</div>")
@@ -3352,6 +3409,21 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "function rot(w){return w==='ia'?'<div class=who>Agente</div>':"
            "w==='out'?'<div class=who>Você</div>':'';}"
            "function txt(s){var e=document.createElement('div');e.textContent=s;return e.innerHTML;}"
+           # A MESMA bolha de mídia do _midia_html, pro que chega pelo polling. O
+           # arquivo não está no nosso disco: o src busca no CDN e decifra na hora, e
+           # o loading=lazy faz a foto que ninguém abre não custar nada.
+           "function tam(b){b=Number(b)||0;"
+           "if(b>=1048576)return (b/1048576).toFixed(1).replace('.',',')+' MB';"
+           "if(b>=1024)return Math.round(b/1024)+' KB';return b+' B';}"
+           "function mid(m){var d=m.midia;if(!d||!d.tipo||!m.id)return '';"
+           f"var s='{_BASE}/lead/{lead_id}/midia/'+m.id;"
+           "if(d.tipo==='documento')return '<a class=\"mid doc\" href=\"'+s+'\" target=_blank "
+           "rel=noopener><span>📄</span><span><span class=nm>'+txt(d.nome||'arquivo')+'</span>'"
+           "+(d.bytes?('<br><span class=pz>'+tam(d.bytes)+'</span>'):'')+'</span></a>';"
+           "if(d.tipo==='video')return '<span class=mid><video controls preload=none "
+           "playsinline src=\"'+s+'\"></video></span>';"
+           "return '<span class=\"mid'+(d.tipo==='figurinha'?' fig':'')+'\">"
+           "<img loading=lazy src=\"'+s+'\" alt=\"\"></span>';}"
            "function puxa(){"
            "if(ocupado||document.visibilityState!=='visible')return;ocupado=true;"
            f"fetch('{_BASE}/lead/{lead_id}/mensagens?desde='+ultimo)"
@@ -3366,7 +3438,7 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "var perto=(chat.scrollHeight-chat.scrollTop-chat.clientHeight)<80;"
            "j.msgs.forEach(function(m){"
            "var d=document.createElement('div');d.className='bub '+m.who;"
-           "d.setAttribute('data-id',m.id);d.innerHTML=rot(m.who)+txt(m.texto);"
+           "d.setAttribute('data-id',m.id);d.innerHTML=rot(m.who)+mid(m)+txt(m.texto);"
            "chat.appendChild(d);ultimo=m.id;});"
            "if(perto)fim();"
            "}).catch(function(){ocupado=false;});}"
@@ -3755,9 +3827,69 @@ def cockpit_lead_mensagens(request: Request, lead_id: int, desde: int = 0):
     d = ck.lead_do_vendedor(get_pool(), sess[0], sess[1], lead_id)
     if not d:
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
-    novas = [{"id": m["id"], "who": m["who"], "texto": m["texto"]}
+    novas = [{"id": m["id"], "who": m["who"], "texto": m["texto"],
+              **({"midia": m["midia"]} if m.get("midia") else {})}
              for m in d["mensagens"] if (m.get("id") or 0) > desde]
     return JSONResponse({"ok": True, "ia": bool(d["ia"]), "msgs": novas})
+
+
+@router.get("/cockpit/lead/{lead_id}/midia/{mensagem_id}")
+def cockpit_midia(request: Request, lead_id: int, mensagem_id: int):
+    """A mídia de uma mensagem da conversa deste lead.
+
+    ROTA PRÓPRIA, e não a do painel de prospecção, por causa do PORTÃO: lá quem
+    autoriza é o `_acesso` (sessão do painel, papel com 'vendas'); aqui é o
+    `lead_do_vendedor`, que revalida a posse do lead. São dois mundos de permissão
+    diferentes, e o vendedor no celular só existe neste.
+
+    O id do lead entra no caminho de propósito: é ele que amarra a mensagem a uma
+    conversa que o `lead_do_vendedor` já disse ser deste vendedor. Sem isso, o id da
+    mensagem — que é sequencial e adivinhável — seria a única coisa entre um
+    vendedor e a foto do cliente de outro.
+    """
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    conta_id, membro_id = sess[0], sess[1]
+    with get_pool().connection() as c:
+        r = c.execute(
+            """select m.midia_ref, m.midia_tipo, coalesce(m.midia_meta,'{}'::jsonb)
+                 from mensagens m
+                 join conversas cv on cv.id = m.conversa_id
+                where m.id=%s and cv.conta_id=%s and cv.prospeccao_id=%s
+                  and m.midia_ref is not null""",
+            (mensagem_id, conta_id, lead_id)).fetchone()
+    if not r:
+        return Response(status_code=404)
+    # ...e só agora a posse: a consulta acima diz que a mensagem é DESTE lead, o
+    # lead_do_vendedor diz que o lead é DESTE vendedor.
+    if not ck.lead_do_vendedor(get_pool(), conta_id, membro_id, lead_id):
+        return Response(status_code=404)
+    ref, tipo, meta = r[0], r[1], (r[2] or {})
+    from finance import wa_midia as _wm
+    try:
+        fluxo = _wm.buscar(ref, tipo)
+        primeiro = next(fluxo, b"")
+    except _wm.Expirou:
+        return Response(status_code=410)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger("cockpit.midia").warning(
+            "midia %s falhou: %s: %s", mensagem_id, type(e).__name__, e)
+        return Response(status_code=502)
+
+    def _corpo():
+        yield primeiro
+        yield from fluxo
+
+    nome = "".join(ch for ch in str(meta.get("nome") or "arquivo")
+                   if ch.isprintable() and ch not in '"\\\r\n')[:120] or "arquivo"
+    cab = {"cache-control": "private, max-age=86400",
+           "content-disposition": ('attachment; filename="%s"' % nome
+                                   if tipo == "documento" else "inline")}
+    return StreamingResponse(_corpo(),
+                             media_type=(ref.get("mimetype") or "").split(";")[0].strip()
+                             or "application/octet-stream", headers=cab)
 
 
 @router.get("/cockpit/fila/sinal")

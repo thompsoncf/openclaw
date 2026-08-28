@@ -3054,6 +3054,18 @@ function lerBinario (req, limite) {
   })
 }
 
+// Teto por tipo do que o vendedor MANDA pelo Zaq (passo 4 da mídia). Medido em
+// produção antes de escolher: este processo opera em ~110 MB com heap de 1024 e
+// contêiner de 2 GB, então um arquivo de 16 MB — que vira ~4 cópias entre buffer
+// bruto, cifrado e upload — cabe com folga larga. O que garante o "UM de cada
+// vez" é a fila abaixo, e é ela que faz o teto valer: sem a fila, N vendedores
+// mandando junto multiplicariam isto por N e aí sim o número ficaria perigoso.
+//
+// 16 MB é o teto do próprio WhatsApp pra mídia; documento aceita mais no app
+// oficial, mas subir daqui só aumentaria o risco pra um caso que quase não
+// aparece — PDF de orçamento e comprovante vivem na casa das centenas de KB.
+const LIMITE_MIDIA = { imagem: 5 * 1024 * 1024, video: 16 * 1024 * 1024, documento: 16 * 1024 * 1024 }
+
 // Uma fila de concorrência 1 pro ENVIO de voz, pelo mesmo motivo da fila da
 // transcrição: N vendedores mandando junto multiplicariam o buffer por N.
 let _filaVoz = Promise.resolve()
@@ -3225,6 +3237,85 @@ const servidor = http.createServer(async (req, res) => {
             return json(res, 200, { ok: true, id: (r && r.key && r.key.id) || '' })
           } catch (e) {
             log.warn({ contaId, e: String(e) }, 'enviar-audio: sendMessage falhou')
+            return json(res, 200, { ok: false, erro: String(e).slice(0, 180) })
+          }
+        })
+      }
+
+      // O VENDEDOR MANDANDO FOTO, VÍDEO OU DOCUMENTO pelo Zaq (passo 4).
+      //
+      // POR QUE ISTO EXISTE: hoje ele recebe tudo dentro do Zaq mas, pra MANDAR
+      // uma foto do salão ou o PDF do orçamento, ainda precisa pegar o celular —
+      // e o que sai do celular chega sem nome, some do histórico e mantém viva a
+      // conexão paralela que este trabalho todo veio fechar.
+      //
+      // Espelha `enviar-audio` de propósito: binário puro (base64 custaria +33%
+      // de memória e rede, os dois escassos aqui), metadados na query, e a MESMA
+      // fila de concorrência 1. Dividir a fila com a voz é decisão: o recurso que
+      // se está protegendo é um só — a memória do processo que segura as sessões.
+      if (req.method === 'POST' && acao === 'enviar-midia') {
+        const tipo = String(url.searchParams.get('tipo') || '')
+        const teto = LIMITE_MIDIA[tipo]
+        if (!teto) return json(res, 200, { ok: false, erro: 'tipo_invalido' })
+        const bytes = await lerBinario(req, teto)
+        if (!bytes) return json(res, 200, { ok: false, erro: 'vazio_ou_grande' })
+        const numero = url.searchParams.get('numero') || ''
+        const mime = url.searchParams.get('mime') || ''
+        // nome e legenda vêm do vendedor: cortados aqui porque daqui eles entram
+        // no protocolo, e campo sem teto é como se faz um servidor engasgar
+        const nome = String(url.searchParams.get('nome') || '').slice(0, 160)
+        const legenda = String(url.searchParams.get('legenda') || '').slice(0, 1000)
+
+        let s = sessoes.get(contaId)
+        log.info({ contaId, status: s && s.status, tipo, kb: Math.round(bytes.length / 1024) },
+          'enviar-midia: tentativa')
+        if (!s || s.status !== 'conectado' || !s.sock) {
+          try { await iniciarSessao(contaId) } catch (e) {
+            log.warn({ contaId, e: String(e) }, 'enviar-midia: religar falhou')
+          }
+          const limite = Date.now() + 12000
+          while (Date.now() < limite) {
+            s = sessoes.get(contaId)
+            if (s && s.status === 'conectado' && s.sock) break
+            if (s && s.status === 'aguardando_qr') break
+            await new Promise((r2) => setTimeout(r2, 400))
+          }
+          s = sessoes.get(contaId)
+        }
+        if (!s || s.status !== 'conectado' || !s.sock) return json(res, 200, { ok: false, erro: 'desconectado' })
+        if (!jidDe(numero)) return json(res, 200, { ok: false, erro: 'numero_invalido' })
+        const alvoM = await jidRealDe(s.sock, contaId, numero)
+        if (!alvoM.jid) return json(res, 200, { ok: false, erro: alvoM.erro || 'numero_invalido' })
+        return enfileirarVoz(async () => {
+          try {
+            let conteudo
+            if (tipo === 'imagem') conteudo = { image: bytes, mimetype: mime || 'image/jpeg' }
+            else if (tipo === 'video') conteudo = { video: bytes, mimetype: mime || 'video/mp4' }
+            else conteudo = { document: bytes, mimetype: mime || 'application/octet-stream', fileName: nome || 'arquivo' }
+            // a legenda vai JUNTO da mídia, e não como mensagem separada: no
+            // WhatsApp ela aparece colada na foto, e duas mensagens chegariam
+            // fora de ordem quando a rede oscila
+            if (legenda) conteudo.caption = legenda
+            const r = await s.sock.sendMessage(alvoM.jid, conteudo)
+            guardarEnviada(contaId, r)
+            // O PONTEIRO DE VOLTA. O Baileys devolve a mensagem já montada, com o
+            // directPath e a mediaKey do arquivo que ele acabou de subir — os
+            // mesmos ~200 bytes que a ENTRADA guarda. Devolvendo aqui, a foto que
+            // o vendedor mandou aparece na conversa dele igual à que ele recebe,
+            // pela mesma rota e sem guardar arquivo nenhum. Sem isto ele veria só
+            // "📷 Foto" escrito, e teria que abrir o celular pra conferir o que
+            // mandou — que é exatamente o hábito que este passo veio quebrar.
+            // `midiaDaMsg` é a MESMA função da entrada de propósito: um formato só.
+            const ponteiro = midiaDaMsg(r)
+            log.info({ contaId, id: r && r.key && r.key.id, tipo, ponteiro: !!ponteiro },
+              'enviar-midia: sucesso ✓')
+            return json(res, 200, {
+              ok: true,
+              id: (r && r.key && r.key.id) || '',
+              midia: ponteiro || null
+            })
+          } catch (e) {
+            log.warn({ contaId, tipo, e: String(e) }, 'enviar-midia: sendMessage falhou')
             return json(res, 200, { ok: false, erro: String(e).slice(0, 180) })
           }
         })
@@ -3476,4 +3567,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { midiaDaMsg, textoDaMsg, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

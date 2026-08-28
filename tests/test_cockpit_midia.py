@@ -294,3 +294,84 @@ def test_o_icone_da_busca_continua_sendo_so_um_icone():
 
 def test_o_cockpit_tambem_esta_limpo():
     assert _classes_repetidas_virando_cortina(pc._CSS_TEXTO) == []
+
+
+# ------------------------------------------------- PASSO 4: mandar pelo Zaq
+#
+# A metade que faltava. Receber já funcionava; pra MANDAR a foto do salão ou o PDF
+# do orçamento o vendedor ainda pegava o celular — e o que sai do celular chega sem
+# nome, não entra no histórico e mantém viva a conexão paralela que o trabalho todo
+# veio fechar.
+
+def test_a_rota_de_anexo_existe_e_e_do_cockpit():
+    rotas = [r.path for r in pc.router.routes if "anexo" in r.path]
+    assert rotas == ["/cockpit/lead/{lead_id}/anexo"]
+
+
+def test_sem_sessao_nao_anexa():
+    fonte = inspect.getsource(pc.cockpit_anexo)
+    assert "_sessao(request)" in fonte and "status_code=401" in fonte
+
+
+def test_o_corpo_e_binario_e_nao_multipart():
+    """Multipart custaria uma cópia a mais dos dois lados — e é a cópia que importa
+    quando o arquivo tem 16 MB. Mesmo desenho da rota de voz."""
+    fonte = inspect.getsource(pc.cockpit_anexo)
+    assert "await request.body()" in fonte
+    assert "UploadFile" not in fonte and "File(" not in fonte
+
+
+def test_o_nome_do_arquivo_viaja_em_base64():
+    """Cabeçalho HTTP é latin-1 por especificação, e nome de arquivo brasileiro tem
+    acento: cru, ou dá erro no meio do caminho, ou o cliente recebe um PDF chamado
+    'OrÃ§amento'."""
+    fonte = inspect.getsource(pc.cockpit_anexo)
+    assert "x-nome" in fonte and "b64decode" in fonte
+
+
+def test_o_clipe_so_aparece_onde_o_zaq_manda():
+    """Mesmo portão do microfone. Twilio e Cloud API mandam mídia por outros
+    caminhos, e nenhum está construído — oferecer o botão faria o vendedor escolher
+    o arquivo, esperar, e receber erro."""
+    fonte = inspect.getsource(pc)
+    i = fonte.index('id=clipe')
+    assert 'if pode_voz else ""' in fonte[i:i + 700]
+
+
+def test_o_anexo_nao_lista_tipos_permitidos():
+    """`accept` fechado envelhece contra o vendedor: PDF, planilha e comprovante
+    são justamente o que ele mais precisa mandar."""
+    fonte = inspect.getsource(pc)
+    i = fonte.index("<input type=file id=arq")
+    assert "accept=" not in fonte[i:i + 120]
+
+
+def test_a_tela_confere_o_tamanho_antes_de_subir():
+    """Mandar 40 MB pela rede do celular pra ouvir 'grande demais' no fim gasta o
+    pacote de dados do vendedor à toa. O servidor confere de novo — tela não é
+    fonte confiável."""
+    js = pc._ANEXO_JS
+    assert "TETO" in js and "f.size>TETO[t]" in js
+    from finance import cockpit as ck2
+    assert ck2._ANEXO_TETO["imagem"] == 5 * 1048576, "os dois lados têm que combinar"
+    assert "5*MB" in js and "16*MB" in js
+
+
+def test_a_legenda_sai_da_caixa_de_resposta():
+    """No WhatsApp a legenda chega colada na foto — é assim que as pessoas mandam."""
+    assert 'input[name=texto]' in pc._ANEXO_JS
+    assert "legenda" in pc._ANEXO_JS
+
+
+def test_depois_de_enviar_a_conversa_se_atualiza_sem_recarregar():
+    """Mesma escolha do áudio: recarregar custava ~1s de tela branca logo depois
+    de enviar."""
+    assert "window.__puxa" in pc._ANEXO_JS
+
+
+def test_o_js_do_anexo_e_raw_string():
+    """A armadilha desta base: template Python não-raw come a barra do `\\n` e o
+    script chega quebrado na página. O _VOZ_JS já é raw pela mesma razão."""
+    fonte = inspect.getsource(pc)
+    i = fonte.index("_ANEXO_JS = ")
+    assert fonte[i:i + 20].startswith('_ANEXO_JS = r"""')

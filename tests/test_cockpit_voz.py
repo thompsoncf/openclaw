@@ -73,7 +73,8 @@ def pool(monkeypatch):
         c.execute("""create table mensagens (id bigserial primary key, conversa_id bigint,
                      canal text, direcao text, autor text, membro_id bigint, texto text,
                      meta jsonb, provider_sid text, status text,
-                     criado_em timestamptz default now())""")
+                     criado_em timestamptz default now(),
+                     midia_ref jsonb, midia_tipo text, midia_meta jsonb)""")
         # `ck.orcamento` (a tela de DETALHE) junta membros pra mostrar o vendedor e
         # pra saber pra quem o cliente responde no e-mail — os testes antigos só
         # passavam por `criar_orcamento`, que não junta
@@ -539,3 +540,204 @@ def test_a_mensagem_continua_sendo_gravada_na_conversa_do_lead(pool, envios, sem
     with pool.connection() as c:
         r = c.execute("select conversa_id from mensagens order by id desc limit 1").fetchone()
     assert r[0] == conv
+
+
+# =================================================================== PASSO 4
+# O VENDEDOR MANDANDO foto, vídeo e documento de dentro do Zaq.
+#
+# É a metade que faltava do trabalho de mídia. Os passos 1-3 fizeram ele RECEBER
+# tudo no app; pra MANDAR a foto do salão ou o PDF do orçamento ele ainda pegava o
+# celular — e o que sai do celular chega sem nome, não entra no histórico e mantém
+# viva a conexão paralela que o trabalho inteiro veio fechar.
+#
+# O QUE ESTES TESTES PRENDEM, e por quê:
+#  1. SAI PELO CHIP DA CONVERSA. O mesmo defeito que o áudio teve até 28/08/2026 —
+#     mandar pelo chip principal faz o cliente receber de um número que não é o
+#     daquela conversa, e o eco volta pra ficha do colega;
+#  2. A MENSAGEM NASCE COM AUTOR E COM O PONTEIRO. Sem `membro_id` a mensagem chega
+#     anônima; sem o ponteiro devolvido pelo Baileys a bolha vira um "📷 Foto"
+#     cego, e o vendedor abre o celular pra conferir o que mandou — o hábito que
+#     este passo veio quebrar;
+#  3. O ARQUIVO NÃO É GUARDADO. Mesma escolha da entrada: ~200 bytes de ponteiro,
+#     não megabytes de arquivo.
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"x" * 400
+PDF = b"%PDF-1.7" + b"y" * 900
+
+
+@pytest.fixture()
+def envios_midia(monkeypatch):
+    """Intercepta o cliente do QR: guarda o que teria ido pro WhatsApp."""
+    caixa = []
+
+    def _falso(conta_id, numero, dados, tipo, mimetype, nome="", legenda=""):
+        caixa.append({"conta": conta_id, "numero": numero, "bytes": dados, "tipo": tipo,
+                      "mime": mimetype, "nome": nome, "legenda": legenda})
+        return {"ok": True, "sid": "MID%d" % len(caixa),
+                "midia": {"tipo": tipo,
+                          "ref": {"directPath": "/v/t62.7118-24/abc_n.enc",
+                                  "mediaKey": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+                                  "mimetype": mimetype},
+                          "meta": {"bytes": len(dados)}}}
+
+    from finance import whatsapp_qr as qr
+    monkeypatch.setattr(qr, "enviar_midia", _falso)
+    return caixa
+
+
+def _ultima(pool):
+    with pool.connection() as c:
+        return c.execute(
+            """select direcao, autor, membro_id, texto, provider_sid,
+                      midia_tipo, midia_ref, midia_meta
+                 from mensagens order by id desc limit 1""").fetchone()
+
+
+# ------------------------------------------------------------- o que é cada coisa
+
+def test_o_tipo_sai_do_mimetype():
+    assert ck.tipo_do_anexo("image/jpeg") == ("imagem", "📷 Foto")
+    assert ck.tipo_do_anexo("video/mp4") == ("video", "🎬 Vídeo")
+    assert ck.tipo_do_anexo("application/pdf") == ("documento", "📄 Documento")
+
+
+def test_o_que_nao_e_foto_nem_video_vira_DOCUMENTO_e_nao_recusa():
+    """PDF de orçamento, comprovante de PIX e planilha são o que ele mais manda.
+    Uma lista de mimetypes permitidos envelheceria contra o vendedor."""
+    for m in ("application/vnd.ms-excel", "text/csv", "", "coisa/estranha", None):
+        assert ck.tipo_do_anexo(m)[0] == "documento"
+
+
+def test_a_marca_e_a_MESMA_da_entrada():
+    """Mandada e recebida têm que ficar iguais na thread — senão a tela conta duas
+    histórias pro mesmo tipo de arquivo."""
+    from web.painel_prospeccao import _MIDIA_TIPOS
+    for mime in ("image/png", "video/mp4", "application/pdf"):
+        tipo, marca = ck.tipo_do_anexo(mime)
+        assert tipo in _MIDIA_TIPOS
+        assert marca.split()[0] in ("📷", "🎬", "📄")
+
+
+# ----------------------------------------------------------- por qual número sai
+
+def test_o_anexo_sai_pelo_chip_da_conversa(pool, envios_midia):
+    """A MESMA lição do áudio, que custou 5 mensagens entregues pelo número errado
+    e 6 gravadas em duas fichas."""
+    _com_chip(pool, CHIP)
+    r = ck.enviar_anexo(pool, CONTA_QR, 7, LEAD, PNG, "salao.png", "image/png")
+    assert r["ok"] is True
+    assert envios_midia[0]["conta"] == CHIP, "saiu pelo chip principal — número errado pro cliente"
+
+
+def test_sem_chip_na_conversa_sai_pela_empresa(pool, envios_midia):
+    _com_chip(pool, None)
+    ck.enviar_anexo(pool, CONTA_QR, 7, LEAD, PNG, "salao.png", "image/png")
+    assert envios_midia[0]["conta"] == CONTA_QR
+
+
+# ------------------------------------------------------------- a bolha que nasce
+
+def test_a_mensagem_nasce_com_autor_e_com_o_ponteiro(pool, envios_midia):
+    """As duas coisas juntas: o autor dá nome a quem falou, o ponteiro faz a foto
+    APARECER em vez de virar um '📷 Foto' cego."""
+    ck.enviar_anexo(pool, CONTA_QR, 7, LEAD, PNG, "salao.png", "image/png")
+    direcao, autor, membro, texto, sid, tipo, ref, meta = _ultima(pool)
+    assert (direcao, autor, membro) == ("out", "humano", 7)
+    assert texto == "📷 Foto" and sid == "MID1"
+    assert tipo == "imagem"
+    assert ref["directPath"] == "/v/t62.7118-24/abc_n.enc" and ref["mediaKey"]
+    assert meta["bytes"] == len(PNG)
+
+
+def test_a_legenda_vira_o_texto_da_bolha(pool, envios_midia):
+    """No WhatsApp a legenda chega colada na foto — e é assim que as pessoas
+    mandam. Duas mensagens separadas chegariam fora de ordem quando a rede oscila."""
+    ck.enviar_anexo(pool, CONTA_QR, 7, LEAD, PNG, "salao.png", "image/png",
+                    legenda="olha o salão montado")
+    assert envios_midia[0]["legenda"] == "olha o salão montado"
+    assert _ultima(pool)[3] == "olha o salão montado"
+
+
+def test_o_documento_leva_o_nome_do_arquivo(pool, envios_midia):
+    """Um PDF sem nome chega como 'arquivo' do lado do cliente — e o orçamento
+    da empresa não pode chegar assim."""
+    ck.enviar_anexo(pool, CONTA_QR, 7, LEAD, PDF, "Orçamento Nº 13.pdf", "application/pdf")
+    assert envios_midia[0]["nome"] == "Orçamento Nº 13.pdf"
+    assert envios_midia[0]["tipo"] == "documento"
+
+
+def test_o_arquivo_nao_entra_no_banco(pool, envios_midia):
+    """Mesma escolha da entrada: ponteiro, não arquivo."""
+    ck.enviar_anexo(pool, CONTA_QR, 7, LEAD, PDF, "contrato.pdf", "application/pdf")
+    with pool.connection() as c:
+        n = c.execute("""select length(coalesce(midia_ref::text,''))
+                              + length(coalesce(midia_meta::text,''))
+                           from mensagens order by id desc limit 1""").fetchone()[0]
+    assert n < 600, f"o ponteiro cresceu pra {n} bytes — tem arquivo entrando aqui"
+
+
+def test_a_conversa_sai_do_automatico_ao_mandar_anexo(pool, envios_midia):
+    """Quem mandou um arquivo assumiu a conversa — igual ao texto e ao áudio."""
+    ck.enviar_anexo(pool, CONTA_QR, 7, LEAD, PNG, "f.png", "image/png")
+    with pool.connection() as c:
+        st, ia = c.execute("select status, agente_ativo from conversas where prospeccao_id=%s",
+                           (LEAD,)).fetchone()
+    assert st == "pendente" and ia is False
+
+
+# ------------------------------------------------------------------- os tetos
+
+def test_arquivo_grande_demais_e_recusado_com_recado(pool, envios_midia):
+    """Barrado ANTES do upload: mandar 40 MB pela rede do celular pra ouvir
+    'grande demais' no fim gasta o pacote de dados do vendedor à toa."""
+    r = ck.enviar_anexo(pool, CONTA_QR, 7, LEAD, b"z" * (6 * 1024 * 1024), "f.png", "image/png")
+    assert r["ok"] is False and "MB" in r["erro"]
+    assert envios_midia == [], "nem deve ter tentado enviar"
+
+
+def test_o_teto_do_video_e_maior_que_o_da_foto(pool, envios_midia):
+    """5 MB derrubaria vídeo de poucos segundos; 16 MB é o teto do próprio WhatsApp."""
+    assert ck._ANEXO_TETO["video"] > ck._ANEXO_TETO["imagem"]
+    r = ck.enviar_anexo(pool, CONTA_QR, 7, LEAD, b"z" * (6 * 1024 * 1024), "v.mp4", "video/mp4")
+    assert r["ok"] is True
+
+
+def test_arquivo_vazio_nao_vira_mensagem(pool, envios_midia):
+    assert ck.enviar_anexo(pool, CONTA_QR, 7, LEAD, b"", "f.png", "image/png")["ok"] is False
+    assert envios_midia == []
+
+
+def test_conta_que_nao_e_QR_nao_manda_anexo(pool, envios_midia):
+    """Twilio manda mídia por URL pública; a Cloud API por media-id. São outros
+    caminhos, e nenhum está construído — o portão é o mesmo do microfone."""
+    r = ck.enviar_anexo(pool, CONTA_TW, 7, LEAD, PNG, "f.png", "image/png")
+    assert r["ok"] is False
+    assert envios_midia == []
+
+
+def test_o_envio_falhando_nao_grava_mensagem(pool, monkeypatch):
+    """Mensagem gravada sem ter saído faz o vendedor achar que mandou — e o cliente
+    nunca recebeu."""
+    from finance import whatsapp_qr as qr
+    monkeypatch.setattr(qr, "enviar_midia",
+                        lambda *a, **k: {"ok": False, "erro": "desconectado"})
+    antes = _ultima(pool)
+    r = ck.enviar_anexo(pool, CONTA_QR, 7, LEAD, PNG, "f.png", "image/png")
+    assert r["ok"] is False
+    # o recado é pra pessoa, não o código cru do serviço: diz o que fazer
+    assert r["erro"] == "WhatsApp desconectado. Reconecte na aba Canais."
+    assert _ultima(pool) == antes
+
+
+def test_sem_ponteiro_de_volta_a_mensagem_ainda_e_gravada(pool, monkeypatch):
+    """O ponteiro é o que faz a bolha mostrar a foto. Se ele não vier, o arquivo
+    JÁ FOI pro cliente — perder a mensagem por causa disso seria trocar um
+    problema de tela por um buraco no histórico."""
+    from finance import whatsapp_qr as qr
+    monkeypatch.setattr(qr, "enviar_midia",
+                        lambda *a, **k: {"ok": True, "sid": "SEMPTR", "midia": None})
+    r = ck.enviar_anexo(pool, CONTA_QR, 7, LEAD, PNG, "f.png", "image/png")
+    assert r["ok"] is True
+    _, _, membro, texto, sid, tipo, ref, _ = _ultima(pool)
+    assert sid == "SEMPTR" and membro == 7 and texto == "📷 Foto"
+    assert tipo is None and ref is None

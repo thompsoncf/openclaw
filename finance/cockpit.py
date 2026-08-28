@@ -477,15 +477,25 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
             # mensagens o vendedor abria a tela e nunca via o que acabou de chegar.
             # Corta pelas últimas e devolve em ordem de leitura.
             rows = c.execute(
-                """select id, direcao, autor, texto, criado_em from (
-                     select id, direcao, autor, texto, criado_em from mensagens
+                """select id, direcao, autor, texto, criado_em, midia_tipo, midia_meta from (
+                     select id, direcao, autor, texto, criado_em, midia_tipo,
+                            -- só quando HÁ ponteiro: é ele que diz pra tela desenhar
+                            -- bolha de imagem em vez de texto (migração 187)
+                            case when midia_ref is null then null
+                                 else coalesce(midia_meta, '{}'::jsonb) end as midia_meta
+                       from mensagens
                       where conversa_id=%s order by criado_em desc limit 200
                    ) t order by criado_em asc""", (cv[0],)).fetchall()
-            for mid, d, autor, texto, quando in rows:
+            for mid, d, autor, texto, quando, midia_tipo, midia_meta in rows:
                 who = "ia" if autor == "bot" else ("out" if d == "out" else "in")
                 # o id vai junto porque a tela do lead se atualiza sozinha e precisa
                 # saber a partir de onde pedir o que é novo
-                msgs.append({"id": mid, "who": who, "texto": texto or "", "quando": quando})
+                item = {"id": mid, "who": who, "texto": texto or "", "quando": quando}
+                # O PONTEIRO NÃO VAI PRA TELA: só o tipo e o tamanho. O endereço no
+                # CDN e a chave ficam no servidor, e quem busca é a rota de mídia.
+                if midia_tipo and midia_meta is not None:
+                    item["midia"] = {"tipo": midia_tipo, **(midia_meta or {})}
+                msgs.append(item)
         # O mesmo número com conversa em OUTRA ficha — o vendedor precisa saber que
         # está lendo metade do histórico. Ver `outras_conversas_do_numero`: é o
         # rastro da corrida fechada por `_trava_numero` (Dinamara 26/08, Geovanna

@@ -11025,6 +11025,19 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-doc .nm{font-size:.8rem;font-weight:600;word-break:break-word;line-height:1.3}
 .cx-doc .pz{font-size:.68rem;color:var(--txt-mut);font-family:ui-monospace,monospace}
 .cx-mid-aviso{padding:.5rem .6rem;font-size:.75rem;color:var(--ambar);line-height:1.45}
+.cx-mid img{cursor:zoom-in}
+/* A LUPA: a foto grande por cima de tudo. Fica em <body>, fora do grid da caixa —
+   dentro dele qualquer painel com z-index a esconderia. */
+.cx-lupa{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.93);display:flex;
+  align-items:center;justify-content:center;padding:20px}
+.cx-lupa[hidden]{display:none}
+.cx-lupa img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
+.cx-lupa .fechar{position:absolute;top:14px;right:18px;width:38px;height:38px;
+  border-radius:50%;background:rgba(255,255,255,.14);color:#fff;border:0;
+  font-size:1.15rem;line-height:1;cursor:pointer}
+.cx-lupa .abrir{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);
+  font-size:.82rem;color:#fff;opacity:.85;text-decoration:underline;
+  text-underline-offset:3px}
 .cx-mid-aviso.ruim{color:var(--coral)}
 .cx-mid-aviso a{color:inherit}
 .cx-play{position:relative;display:block;cursor:pointer}
@@ -12650,6 +12663,37 @@ function cxMidiaHtml(m){
   return '<span class="cx-mid'+fig+'"><img loading="lazy" src="'+src+'" alt="'
     +(d.tipo==='figurinha'?'Figurinha':'Foto')+'" onerror="cxMidiaErro(this)"></span>';
 }
+// A LUPA. Criada sob demanda e uma vez só, direto no <body>: dentro do grid da
+// caixa qualquer painel com z-index próprio a esconderia.
+function cxLupa(src){
+  var l=document.getElementById('cx-lupa');
+  if(!l){
+    l=document.createElement('div');l.id='cx-lupa';l.className='cx-lupa';
+    l.innerHTML='<button type="button" class="fechar" aria-label="Fechar">✕</button>'
+      +'<img id="cx-lupa-img" alt=""><a class="abrir" id="cx-lupa-abrir" target="_blank"'
+      +' rel="noopener">abrir original ↗</a>';
+    // clicar em qualquer lugar fecha, MENOS no link de abrir o original — ele está
+    // por cima do fundo e seria engolido pelo mesmo clique
+    l.onclick=function(e){if(e.target.id!=='cx-lupa-abrir')cxLupaFecha();};
+    document.body.appendChild(l);
+  }
+  document.getElementById('cx-lupa-img').src=src;
+  document.getElementById('cx-lupa-abrir').href=src;
+  l.hidden=false;
+}
+function cxLupaFecha(){
+  var l=document.getElementById('cx-lupa');if(!l)return;
+  l.hidden=true;document.getElementById('cx-lupa-img').removeAttribute('src');
+}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')cxLupaFecha();});
+// Delegação no documento, e não um onclick por imagem: a bolha é redesenhada a cada
+// poll de 4s, e handler amarrado na criação morre junto com o innerHTML.
+document.addEventListener('click',function(e){
+  var im=e.target;
+  if(im&&im.tagName==='IMG'&&im.closest('.cx-mid')&&!im.closest('.cx-lupa')){
+    cxLupa(im.getAttribute('src'));
+  }
+});
 function cxTam(b){
   b=Number(b)||0;
   if(b>=1048576)return (b/1048576).toFixed(1).replace('.',',')+' MB';

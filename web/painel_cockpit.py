@@ -445,6 +445,24 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .bub .doc .nm{font-size:.78rem;font-weight:600;word-break:break-word;line-height:1.25}
 .bub .doc .pz{font-size:.65rem;opacity:.65;font-family:var(--mono)}
 .bub .mid-aviso{padding:.45rem .55rem;font-size:.73rem;line-height:1.4;opacity:.9}
+.bub .mid img{cursor:zoom-in}
+/* A LUPA: a foto em tela cheia por cima da conversa.
+   `inset:0` + `position:fixed` cobre tudo, inclusive as barras do sistema (o _page
+   pede viewport-fit=cover). Tocar em qualquer lugar fecha — num celular o alvo tem
+   que ser a tela inteira, não um X de 20 pixels. */
+.lupa{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.94);display:flex;
+  align-items:center;justify-content:center;padding:env(safe-area-inset-top) 8px
+  calc(env(safe-area-inset-bottom) + 8px)}
+.lupa[hidden]{display:none}
+.lupa img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
+.lupa .fechar{position:absolute;top:calc(env(safe-area-inset-top) + 10px);right:14px;
+  width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.14);color:#fff;
+  border:0;font-size:1.1rem;line-height:1;display:grid;place-items:center}
+/* o original abre no visualizador do próprio celular — é lá que existe pinça pra
+   ampliar de verdade e "salvar imagem", que a gente não vai reimplementar */
+.lupa .abrir{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 14px);
+  left:50%;transform:translateX(-50%);font-size:.78rem;color:#fff;opacity:.85;
+  text-decoration:underline;text-underline-offset:3px}
 /* a mensagem que já está na tela mas ainda não voltou do servidor */
 .bub.voando{opacity:.55}
 .bub.voando .tick{display:block;font-family:var(--mono);font-size:.6rem;
@@ -3273,6 +3291,17 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
         bolhas.insert(0, "<div class=aviso>O agente está atendendo. Toque em "
                          "<b>Assumir</b> pra responder você.</div>")
     chat = "".join(bolhas) or "<div class=aviso>Sem mensagens ainda.</div>"
+    # A lupa nasce escondida e vazia: o `src` só é preenchido quando alguém toca numa
+    # foto, então ela não custa um download a mais só por existir na página.
+    #
+    # FORA do `.chat` de propósito. O `.chat` tem `position:relative;z-index:1`, e
+    # isso cria contexto de empilhamento: um `position:fixed` lá dentro fica preso
+    # nele e pode ser pintado por baixo dos irmãos, por mais alto que seja o z-index.
+    lupa_html = ("<div class=lupa id=lupa hidden onclick='lupaFecha(event)'>"
+                 "<button type=button class=fechar aria-label=Fechar>✕</button>"
+                 "<img id=lupaImg alt=''>"
+                 "<a class=abrir id=lupaAbrir target=_blank rel=noopener>abrir original ↗</a>"
+                 "</div>")
 
     if d["ia"]:
         acao = (f"<form method=post action='{_BASE}/lead/{lead_id}/assumir'>"
@@ -3369,6 +3398,26 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "function rot(w){return w==='ia'?'<div class=who>Agente</div>':"
            "w==='out'?'<div class=who>Você</div>':'';}"
            "function txt(s){var e=document.createElement('div');e.textContent=s;return e.innerHTML;}"
+           # A LUPA. Delegação no chat inteiro, e não um onclick por imagem: as fotos
+           # que chegam pelo polling nascem depois desta linha rodar, e um handler
+           # amarrado na criação não pegaria elas.
+           "var lupa=document.getElementById('lupa');"
+           "if(chat&&lupa){chat.addEventListener('click',function(e){"
+           "var im=e.target;"
+           "if(!im||im.tagName!=='IMG'||!im.closest('.mid'))return;"
+           "document.getElementById('lupaImg').src=im.getAttribute('src');"
+           "document.getElementById('lupaAbrir').href=im.getAttribute('src');"
+           "lupa.hidden=false;});}"
+           # tocar em qualquer lugar fecha, MENOS no link de abrir o original — que
+           # está por cima do fundo e seria engolido pelo mesmo clique
+           # no `window` porque quem chama é o onclick do HTML, que está FORA
+           # deste IIFE — declarada só aqui dentro, ela não existiria pra ele
+           "window.lupaFecha=function(e){"
+           "if(e&&e.target&&e.target.id==='lupaAbrir')return;"
+           "var l=document.getElementById('lupa');if(!l)return;"
+           "l.hidden=true;document.getElementById('lupaImg').removeAttribute('src');};"
+           "document.addEventListener('keydown',function(e){"
+           "if(e.key==='Escape')lupaFecha();});"
            # A MESMA bolha de mídia do _midia_html, pro que chega pelo polling. O
            # arquivo não está no nosso disco: o src busca no CDN e decifra na hora, e
            # o loading=lazy faz a foto que ninguém abre não custar nada.
@@ -3430,7 +3479,7 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                _hdr(d["empresa"], sub, voltar=_BASE, direita=chip)
              + _flash(request)
              + dupla
-             + f"<div class=chat>{chat}</div>"
+             + f"<div class=chat>{chat}</div>{lupa_html}"
              + f"<div class=rodape>{acao}"
              + "<a class='btn ghost' style='margin-top:.5rem' href='#acoes'>Ficha, funil e fechamento</a>"
              + "</div>" + folha + fim)

@@ -148,3 +148,78 @@ def test_nome_de_arquivo_nao_escapa_do_html():
         "tipo": "documento", "nome": '<img src=x onerror=alert(1)>'}})
     assert "<img src=x" not in h
     assert "&lt;img" in h
+
+
+# ---------------------------------------------------------------- a lupa
+#
+# "Apareceu, show de bola — agora quando clico na foto ela não amplia." A foto na
+# bolha é pequena de propósito (a conversa não pode virar um álbum), então ver
+# direito precisa de tela cheia. E ampliar DE VERDADE, com pinça e "salvar imagem",
+# é coisa que o visualizador do próprio celular já faz melhor do que qualquer coisa
+# que a gente reimplementasse — por isso o "abrir original".
+
+def test_a_lupa_existe_nas_duas_telas():
+    import inspect
+    from web import painel_prospeccao as pp
+    assert "class=lupa id=lupa" in inspect.getsource(pc), "Cockpit"
+    assert "function cxLupa(" in inspect.getsource(pp), "painel"
+
+
+def test_a_lupa_fica_fora_do_container_que_empilha():
+    """`.chat` tem `position:relative;z-index:1` — um `position:fixed` lá dentro fica
+    preso nesse contexto e pode ser pintado por baixo dos irmãos. Mesma razão de a
+    lupa do painel nascer direto no <body>."""
+    import inspect
+    from web import painel_prospeccao as pp
+    fonte = inspect.getsource(pc)
+    assert '<div class=chat>{chat}</div>{lupa_html}' in fonte, \
+        "no Cockpit a lupa é irmã do .chat, não filha"
+    assert "document.body.appendChild(l)" in inspect.getsource(pp), \
+        "no painel ela vai pro body"
+
+
+def test_o_clique_e_delegado_e_nao_amarrado_na_imagem():
+    """A bolha é redesenhada a cada poll: handler amarrado na criação morre junto com
+    o innerHTML, e a foto que chega depois não abriria."""
+    import inspect
+    from web import painel_prospeccao as pp
+    assert "chat.addEventListener('click'" in inspect.getsource(pc)
+    assert "document.addEventListener('click'" in inspect.getsource(pp)
+
+
+def test_so_foto_abre_a_lupa():
+    """Vídeo tem controles próprios; abrir a lupa em cima deles atrapalharia."""
+    import inspect
+    from web import painel_prospeccao as pp
+    assert "im.tagName!=='IMG'" in inspect.getsource(pc)
+    assert "im.tagName==='IMG'" in inspect.getsource(pp)
+
+
+def test_fecha_por_toque_e_por_esc():
+    import inspect
+    from web import painel_prospeccao as pp
+    for fonte in (inspect.getsource(pc), inspect.getsource(pp)):
+        assert "Escape" in fonte
+
+
+def test_o_link_do_original_nao_e_engolido_pelo_clique_que_fecha():
+    """Ele fica POR CIMA do fundo que fecha. Sem a exceção, tocar nele fecharia a
+    lupa sem abrir nada — e é justamente ele que dá pinça e 'salvar imagem'."""
+    import inspect
+    from web import painel_prospeccao as pp
+    assert "id==='lupaAbrir'" in inspect.getsource(pc)
+    assert "id!=='cx-lupa-abrir'" in inspect.getsource(pp)
+
+
+def test_a_lupa_nasce_vazia():
+    """Sem `src` até alguém tocar: existir na página não pode custar um download."""
+    import inspect
+    fonte = inspect.getsource(pc)
+    assert "<img id=lupaImg alt=''>" in fonte, "sem src no HTML"
+    assert "removeAttribute('src')" in fonte, "e solta a imagem ao fechar"
+
+
+def test_lupa_fecha_e_global_no_cockpit():
+    """Quem chama é o onclick do HTML, que está fora do IIFE do script."""
+    import inspect
+    assert "window.lupaFecha=function" in inspect.getsource(pc)

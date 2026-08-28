@@ -1030,6 +1030,72 @@ def test_orcamento_de_outra_conta_nao_se_manda_daqui(cliente, correio):
     assert not correio
 
 
+# ------------------------- "Mandar pra assinar" manda o link do CONTRATO
+#
+# Bug de produção (conta Prime Eventos, cliente Bianca, relatado 28/08/2026): a
+# tela de pré-visualização (`GET .../email/{id}?alvo=contrato`) já mostrava o
+# assunto/mensagem certos do contrato, mas o ENVIO de verdade (`POST
+# .../enviar-email`) não recebia `alvo` nenhum e sempre montava o e-mail com o
+# link da PROPOSTA e o botão "Ver a proposta" — o cliente nunca recebia como
+# assinar, o contrato nunca ficava assinado, e por isso o botão "Mandar pra
+# assinar" nunca sumia: não por falta de lembrar que já mandou, mas porque na
+# prática nunca chegou link de assinatura nenhum.
+
+def _contrato_do(c, oid, *, numero=5, token="tokct", conta_id=CONTA):
+    with c.pool.connection() as cx:
+        cx.execute(
+            """insert into contratos (conta_id, numero, orcamento_id, status, token)
+               values (%s,%s,%s,'enviado',%s)""",
+            (conta_id, numero, oid, token))
+        cx.commit()
+
+
+def test_mandar_pra_assinar_leva_o_link_do_contrato_nao_o_da_proposta(cliente, correio):
+    oid = _orcamento_pra_mandar(cliente, email="bianca@x.com", numero=50)
+    _contrato_do(cliente, oid, numero=5, token="tokct50")
+    r = cliente.post("/painel/servicos/enviar-email",
+                     json={"id": oid, "alvo": "contrato"})
+    assert r.status_code == 200, r.text
+    html = correio[0]["html"]
+    assert "/contrato/tokct50" in html
+    assert "/proposta/tk50" + str(CONTA) not in html
+    assert "Ver o contrato" in html
+    assert "Ver o orçamento" not in html  # modo='evento' chamaria assim se ainda fosse a proposta
+
+
+def test_mandar_pra_assinar_usa_assunto_e_mensagem_do_contrato_por_padrao(cliente, correio):
+    """Sem o operador tocar em nada — o mesmo texto que a pré-visualização já
+    mostrava tem que ser o que sai, não o padrão da proposta."""
+    oid = _orcamento_pra_mandar(cliente, email="bianca@x.com", numero=51)
+    _contrato_do(cliente, oid, numero=6, token="tokct51")
+    cliente.post("/painel/servicos/enviar-email", json={"id": oid, "alvo": "contrato"})
+    assert correio[0]["assunto"] == "Contrato nº 6 — Buffet Teste"
+    assert "assinatura" in correio[0]["html"].lower()
+
+
+def test_mandar_pra_assinar_sem_contrato_ainda_nao_manda_nada(cliente, correio):
+    """Sem contrato criado, "assinar" não pode virar silenciosamente um envio de
+    proposta — a rota tem que recusar, igual a pré-visualização já recusa."""
+    oid = _orcamento_pra_mandar(cliente, email="bianca@x.com", numero=52)
+    r = cliente.post("/painel/servicos/enviar-email",
+                     json={"id": oid, "alvo": "contrato"})
+    assert r.status_code == 404
+    assert "contrato" in r.json()["erro"]
+    assert not correio
+
+
+def test_enviar_a_proposta_normal_continua_mandando_o_link_da_proposta(cliente, correio):
+    """Regressão: sem `alvo` (ou `alvo="proposta"`), nada muda — é o padrão que
+    já existia antes desta correção."""
+    oid = _orcamento_pra_mandar(cliente, email="bianca@x.com", numero=53)
+    _contrato_do(cliente, oid, numero=7, token="tokct53")  # existe, mas não é o alvo
+    cliente.post("/painel/servicos/enviar-email", json={"id": oid})
+    html = correio[0]["html"]
+    assert "/proposta/tk53" + str(CONTA) in html
+    assert "/contrato/tokct53" not in html
+    assert "Ver o orçamento" in html
+
+
 def test_proposta_antiga_sem_token_ganha_um_na_hora(cliente, correio):
     """O botão não pode depender de a pessoa ter carregado a lista antes — é ela
     que preenchia o token das propostas de antes de ele existir."""

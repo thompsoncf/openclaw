@@ -74,18 +74,30 @@ def assunto_padrao(numero, empresa: str | None, modo: str | None = None) -> str:
     emp = (empresa or "").strip()
     return f"{n} — {emp}" if emp else n
 
+# Artigo e possessivo de cada documento — "contrato" entra aqui, não em `_DOC`
+# (`_DOC` é só orçamento/proposta, por NICHO; contrato não depende de nicho,
+# é outro documento inteiro, ver `doc_rotulo` em `montar`).
+_GENERO = {"orçamento": ("o", "Seu"), "proposta": ("a", "Sua"), "contrato": ("o", "Seu")}
+
 
 def montar(*, mensagem: str, link: str, numero, empresa: str, telefone: str = "",
-           email_empresa: str = "", resumo: str = "", modo: str | None = None) -> tuple[str, str]:
+           email_empresa: str = "", resumo: str = "", modo: str | None = None,
+           doc_rotulo: str | None = None) -> tuple[str, str]:
     """(html, texto) do e-mail. `resumo` é a linha discreta embaixo do botão —
     tipo do evento, data, valor — pra quem só bate o olho na caixa de entrada
-    saber do que se trata sem abrir o link."""
+    saber do que se trata sem abrir o link.
+
+    `doc_rotulo`, quando dado, MANDA sobre `modo` — é como "Mandar pra assinar"
+    (o contrato) pede o mesmo e-mail que a proposta, com botão e assunto que
+    dizem "contrato", não "proposta"/"orçamento"."""
     e = _html.escape
     corpo = "".join(
         f'<p style="margin:0 0 10px">{e(p)}</p>'
         for p in (mensagem or "").split("\n") if p.strip())
-    rot = doc(modo).capitalize()
-    titulo = f"{rot} nº {numero}" if numero else f"Sua {doc(modo)}".replace("Sua orçamento", "Seu orçamento")
+    rot_doc = doc_rotulo or doc(modo)
+    artigo, possessivo = _GENERO.get(rot_doc, ("a", "Sua"))
+    rot = rot_doc.capitalize()
+    titulo = f"{rot} nº {numero}" if numero else f"{possessivo} {rot_doc}"
     rodape = " · ".join(x for x in (empresa, telefone, email_empresa) if x)
     html = f"""\
 <!DOCTYPE html>
@@ -105,7 +117,7 @@ def montar(*, mensagem: str, link: str, numero, empresa: str, telefone: str = ""
           <p style="margin:18px 0 4px">
             <a href="{e(link)}" style="display:inline-block;background:#0f766e;color:#fff;
                border-radius:8px;padding:12px 22px;font-size:15px;font-weight:bold;
-               text-decoration:none;">Ver {'o' if doc(modo) == 'orçamento' else 'a'} {e(doc(modo))}</a>
+               text-decoration:none;">Ver {artigo} {e(rot_doc)}</a>
           </p>
           {f'<p style="margin:8px 0 0;font-size:13px;color:#777;">{e(resumo)}</p>' if resumo else ''}
           <p style="margin:16px 0 0;font-size:12px;color:#999;word-break:break-all;">
@@ -118,7 +130,7 @@ def montar(*, mensagem: str, link: str, numero, empresa: str, telefone: str = ""
     </td></tr>
   </table>
 </body></html>"""
-    texto = (mensagem or "").strip() + f"\n\nVer {'o' if doc(modo) == 'orçamento' else 'a'} {doc(modo)}: {link}"
+    texto = (mensagem or "").strip() + f"\n\nVer {artigo} {rot_doc}: {link}"
     if resumo:
         texto += f"\n{resumo}"
     if rodape:

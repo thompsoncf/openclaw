@@ -1240,6 +1240,7 @@ class EnviarEmailIn(BaseModel):
     para: str = ""
     assunto: str = ""
     mensagem: str = ""
+    alvo: str = "proposta"
 
 
 @router.post("/painel/servicos/proposta/{orc_id}/link-copiado")
@@ -1283,7 +1284,16 @@ def painel_servicos_enviar_email(request: Request, dados: EnviarEmailIn):
     O E-MAIL DIGITADO FICA SALVO no orçamento quando ele não tinha nenhum. Sem
     isso, a mesma pessoa redigitaria o endereço a cada envio, e o orçamento
     seguiria sem o dado que o contrato depois vai precisar.
-    """
+
+    `alvo="contrato"` é o "Mandar pra assinar": manda o LINK DO CONTRATO, não o
+    da proposta. Antes deste campo existir, a tela de pré-visualização (rota
+    GET, `?alvo=contrato`) já mostrava o assunto/mensagem certos — mas o envio
+    de verdade ignorava isso e mandava sempre o link da proposta com o botão
+    "Ver a proposta". O cliente recebia um e-mail com jeito de contrato e um
+    link que não assinava nada; o contrato nunca ficava assinado_em preenchido,
+    e o botão "Mandar pra assinar" continuava aparecendo pra sempre — não por
+    falta de lembrar que já mandou, mas porque na prática nunca chegou link de
+    assinatura nenhum (relato de produção, conta Prime Eventos/Bianca, 28/08)."""
     conta, redir = _conta_servico(request)
     if redir is not None:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
@@ -1301,16 +1311,35 @@ def painel_servicos_enviar_email(request: Request, dados: EnviarEmailIn):
     dados_emp = emp.obter_dados_empresa(pool, conta[0]) or {}
     nome_emp = (dados_emp.get("nome_fantasia") or dados_emp.get("razao_social")
                 or conta[2] or "")
-    link = f"{request.base_url.scheme}://{request.base_url.netloc}/proposta/{d['token']}"
-    assunto = (dados.assunto or "").strip() or pmail.assunto_padrao(
-        d["numero"], nome_emp, d["modo"])
-    mensagem = (dados.mensagem or "").strip() or pmail.texto_padrao(
-        d["cliente"] or d["empresa_cli"], d["modo"])
+    quem = d["cliente"] or d["empresa_cli"]
+    _base = f"{request.base_url.scheme}://{request.base_url.netloc}"
+    doc_rotulo = None
+    # MESMO RAMO da rota GET (linha ~1215) — tem que dar o mesmo link/assunto/
+    # mensagem que a pré-visualização já mostrou, senão o que sai no e-mail
+    # trai o que a tela prometeu.
+    if (dados.alvo or "") == "contrato":
+        from finance import contrato as _ctr
+        _ct = _ctr.por_orcamento(pool, conta[0], int(dados.id))
+        if not _ct or not _ct.get("token"):
+            return JSONResponse({"erro": "esta proposta ainda não tem contrato"},
+                                status_code=404)
+        link = f"{_base}/contrato/{_ct['token']}"
+        assunto_padrao_ = f"Contrato nº {_ct.get('numero') or ''} — {nome_emp}".strip()
+        mensagem_padrao_ = (f"Olá{(', ' + quem) if quem else ''}! Segue o contrato para "
+                           "leitura e assinatura. É só abrir o link e assinar por lá — "
+                           "qualquer dúvida, me chame.")
+        doc_rotulo = "contrato"
+    else:
+        link = f"{_base}/proposta/{d['token']}"
+        assunto_padrao_ = pmail.assunto_padrao(d["numero"], nome_emp, d["modo"])
+        mensagem_padrao_ = pmail.texto_padrao(quem, d["modo"])
+    assunto = (dados.assunto or "").strip() or assunto_padrao_
+    mensagem = (dados.mensagem or "").strip() or mensagem_padrao_
     html, texto = pmail.montar(
         mensagem=mensagem, link=link, numero=d["numero"], empresa=nome_emp,
         telefone=dados_emp.get("telefone") or "",
         email_empresa=dados_emp.get("email_empresa") or "",
-        resumo=_resumo_do_envio(d), modo=d["modo"])
+        resumo=_resumo_do_envio(d), modo=d["modo"], doc_rotulo=doc_rotulo)
     r = pmail.enviar(pool, conta[0], destino=para, assunto=assunto, html=html,
                      texto=texto, empresa=nome_emp,
                      reply_to=dados_emp.get("email_empresa") or "")
@@ -3461,7 +3490,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     b.disabled=true; b.textContent='Enviando...';
     fetch('/painel/servicos/enviar-email',{method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({id:ENV_ID,
+      body:JSON.stringify({id:ENV_ID, alvo:ENV_ALVO,
         para:document.getElementById('env-para').value,
         assunto:document.getElementById('env-assunto').value,
         mensagem:document.getElementById('env-texto').value})})

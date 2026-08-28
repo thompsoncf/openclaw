@@ -352,3 +352,118 @@ def test_lead_sem_whatsapp_nao_oferece_aviso(cli):
     r = cli.get(f"/cockpit/agenda/{eid}/remarcar")
     assert "name=avisar" not in r.text
     assert "o aviso você dá na mão" in r.text
+
+
+# ═══════════════ o cartão "Precisa de resposta" ═══════════════
+#
+# A visita PASSADA e sem desfecho sai da lista normal e sobe pro bloco vermelho do
+# topo. Isso custava caro sem ninguém notar: junto com a linha comum iam embora os
+# atalhos dela — Remarcar, Lead, Mapa, Calendário. O dono abriu a Agenda no celular e
+# perguntou onde estava o botão de remarcar; estava atrás de "Não apareceu", que é
+# resposta que ele ainda não quis dar.
+
+def _visita_pendente(cli, *, dias=-3, titulo="Visita — Beatriz", com_lead=True):
+    """Visita cuja hora JÁ PASSOU e que ninguém marcou como realizada ou não."""
+    quando = (datetime.now(ag.BRT) + timedelta(days=dias)).replace(
+        hour=15, minute=0, second=0, microsecond=0)
+    with cli.pool.connection() as c:
+        lead = None
+        if com_lead:
+            lead = c.execute(
+                "insert into prospeccao (conta_id, vendedor_id, empresa, whatsapp) "
+                "values (%s,%s,'Beatriz','5586999991111') returning id",
+                (CONTA, VEND)).fetchone()[0]
+        eid = c.execute(
+            """insert into eventos_agenda (conta_id, membro_id, titulo, inicio, fim,
+                 prospeccao_id, ics_token) values (%s,%s,%s,%s,%s,%s,'tk2') returning id""",
+            (CONTA, VEND, titulo, quando, quando + timedelta(hours=1), lead)).fetchone()[0]
+        c.commit()
+    return eid, lead
+
+
+def test_o_cartao_de_pendencia_tem_remarcar_sem_precisar_responder(cli):
+    """A queixa do dono, virada teste: o botão tem que estar à vista ao abrir a tela,
+    não só depois de marcar "não apareceu"."""
+    eid, _ = _visita_pendente(cli)
+    html = _html(cli, t="todos")
+    assert "Precisa de resposta" in html, "a visita passada não subiu pro bloco"
+    assert f"{pc._BASE}/agenda/{eid}/remarcar" in html, \
+        "o cartão de pendência não oferece Remarcar — é a queixa que gerou isto"
+
+
+def test_o_cartao_de_pendencia_leva_ao_lead(cli):
+    """Sem isto o vendedor não tem por onde descobrir o que houve antes de responder."""
+    _eid, lead = _visita_pendente(cli)
+    assert f"{pc._BASE}/lead/{lead}" in _html(cli, t="todos")
+
+
+def test_a_resposta_vem_antes_do_apoio(cli):
+    """A hierarquia é o ponto. O cartão existe pra arrancar a RESPOSTA — se o apoio
+    subir pra cima, ele vira a saída mais fácil, e comparecimento é o número que o
+    relatório do funil usa."""
+    eid, _ = _visita_pendente(cli)
+    html = _html(cli, t="todos")
+    resposta = max(html.index("data-d='realizado'"), html.index("data-d='nao_realizado'"))
+    apoio = min(html.index(f"{pc._BASE}/agenda/{eid}/remarcar"),
+                html.index("Abrir o lead"))
+    assert resposta < apoio, "o apoio subiu na frente da resposta"
+
+
+def test_o_apoio_nao_tem_o_peso_da_resposta(cli):
+    """`.pb2` é a classe sem preenchimento. Se alguém trocar por `.pb`, os quatro
+    botões ficam iguais e a pergunta some no meio deles."""
+    _visita_pendente(cli)
+    html = _html(cli, t="todos")
+    assert "class=pb2" in html, "o apoio perdeu a classe discreta"
+    # a folha do Cockpit é servida como ARQUIVO (/cockpit/app.css), não inline —
+    # procurar o seletor no HTML da página não acha nada e o teste passa à toa
+    assert ".pb2{" in pc._CSS_TEXTO, "falta a folha de estilo do apoio"
+    assert "background:transparent" in pc._CSS_TEXTO.split(".pb2{", 1)[1][:200], \
+        "o apoio ganhou preenchimento e passou a competir com a resposta"
+
+
+def test_visita_pendente_sem_lead_nao_ganha_link_quebrado(cli):
+    """Visita sem cliente ligado existe. Link que não abre é pior que link nenhum."""
+    _visita_pendente(cli, com_lead=False)
+    html = _html(cli, t="todos")
+    assert "Precisa de resposta" in html
+    assert "Abrir o lead" not in html
+    assert f"{pc._BASE}/lead/None" not in html
+
+
+def test_festa_passada_nao_vira_pendencia_nem_ganha_remarcar(cli):
+    """Só visita pede desfecho, e só visita se remarca pelo celular — mudar a data de
+    uma festa mexe em contrato e em sinal."""
+    _ev(cli, dias=-4, titulo="Locação — Jonas")
+    html = _html(cli, t="todos")
+    assert "Precisa de resposta" not in html
+    assert "/remarcar" not in html
+
+
+def test_sem_pendencia_o_bloco_nao_existe(cli):
+    """Bloco vermelho fixo no topo, sempre, vira moldura — ninguém mais lê."""
+    _visita(cli, dias=5)          # visita FUTURA: ainda não deve nada
+    html = _html(cli, t="todos")
+    assert "Precisa de resposta" not in html
+
+
+def test_visita_pendente_sem_lead_nao_oferece_remarcar(cli):
+    """O caso que faz a guarda de `tipo_ev` valer a pena — e ele é alcançável.
+
+    Escrevi antes um teste com pré-reserva passada achando que era esse o caminho;
+    ela nem chega ao bloco, porque a cláusula que traz visita passada de volta exige
+    `status='ativo'`. O caminho real é outro: `tipo_ev` vem de `prospeccao_id`
+    (`"visita" if r[5] else "reservado"`, finance/cockpit.py), enquanto
+    `precisa_resposta` só olha o TÍTULO. Então uma visita ativa, passada e SEM lead
+    pede resposta com `tipo_ev == "reservado"`.
+
+    Sem a guarda, ela ofereceria remarcar — e o cartão comum não oferece, pela mesma
+    regra. Duas telas dizendo coisas diferentes sobre o mesmo compromisso é pior que
+    as duas dizendo não."""
+    eid, lead = _visita_pendente(cli, com_lead=False)
+    assert lead is None
+    html = _html(cli, t="todos")
+    assert "Precisa de resposta" in html, "a visita passada devia pedir resposta"
+    assert f"/agenda/{eid}/remarcar" not in html, (
+        "visita sem lead ganhou Remarcar no cartão de pendência, mas não ganha no "
+        "cartão comum — as duas telas têm que dizer a mesma coisa")

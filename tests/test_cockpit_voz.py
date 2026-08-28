@@ -69,7 +69,7 @@ def pool(monkeypatch):
         c.execute("""create table conversas (id bigserial primary key, conta_id bigint,
                      prospeccao_id bigint, canal text, status text, agente_ativo boolean,
                      responsavel_membro_id bigint, push_avisado_em timestamptz,
-                     ultima_msg_em timestamptz, criado_em timestamptz default now(), chip_id bigint)""")
+                     ultima_msg_em timestamptz, criado_em timestamptz default now(), chip_id bigint, visto_ate_id bigint)""")
         c.execute("""create table mensagens (id bigserial primary key, conversa_id bigint,
                      canal text, direcao text, autor text, membro_id bigint, texto text,
                      meta jsonb, provider_sid text, status text,
@@ -468,3 +468,74 @@ def test_sem_email_no_cadastro_o_envio_explica_em_vez_de_falhar_calado(pool, env
     r = ck.enviar_proposta_email(pool, CONTA_QR, _proposta(pool, CONTA_QR, email=""),
                                  membro_id=7)
     assert r["ok"] is False and "e-mail" in r["erro"]
+
+
+# ------------------------------------------------- por qual NÚMERO o áudio sai
+#
+# O INCIDENTE (28/08/2026, Prime Eventos)
+# O dono gravou um áudio na ficha atendida pelo chip "CP Thiago" e o cliente
+# recebeu pelo número do "CP Zarb". O log do wa-qr não deixa dúvida — `enviar-audio:
+# tentativa conta_id=34`, que é o chip principal, numa conversa cujo `chip_id` é 36.
+#
+# A causa era esta linha, e só ela: `_qr.enviar_audio(conta_id, ...)`. O envio de
+# TEXTO já resolvia o chip (`whatsapp_out.enviar(..., chip_id=chip_da_conversa(...))`
+# → `_qr.enviar_texto(chip_id or conta_id, ...)`); o de áudio ficou pra trás e saía
+# sempre pela sessão da empresa. O docstring de `whatsapp_out.enviar` já avisava do
+# preço: "o lead escreve pra um número e é respondido por outro, que do lado dele
+# parece outra empresa".
+#
+# E há um segundo estrago, menos visível: o Baileys ecoa a mensagem enviada de volta
+# pela sessão que DE FATO enviou. Saindo pelo chip errado, o eco casa com a conversa
+# do chip errado e a mesma mensagem fica gravada duas vezes, em duas fichas. Medido:
+# 6 mensagens em 7 dias, nas contas 34 e 23.
+
+CHIP = 36
+
+
+def _com_chip(pool, chip_id):
+    """Põe a conversa do LEAD num chip específico — como fica uma empresa de dois
+    números depois que a mensagem entra pelo segundo."""
+    from web.painel_prospeccao import _conversa_id
+    with pool.connection() as c:
+        conv = _conversa_id(c, CONTA_QR, LEAD, "whatsapp")
+        c.execute("update conversas set chip_id=%s where id=%s", (chip_id, conv))
+        c.commit()
+    return conv
+
+
+def test_o_audio_sai_pelo_chip_da_conversa(pool, envios, sem_stt):
+    """O caso do incidente: conversa do chip 36 tem que sair pela SESSÃO 36."""
+    _com_chip(pool, CHIP)
+    ck.enviar_audio(pool, CONTA_QR, 7, LEAD, WEBM, "audio/webm", 8)
+    assert envios[0]["conta"] == CHIP, \
+        "saiu pelo chip principal — é o cliente recebendo de um número que não é o da conversa"
+
+
+def test_sem_chip_na_conversa_sai_pela_empresa(pool, envios, sem_stt):
+    """`chip_id` nulo é o estado de quase toda conversa (empresa de um número só).
+    O conserto não pode ter mudado esse caminho."""
+    _com_chip(pool, None)
+    ck.enviar_audio(pool, CONTA_QR, 7, LEAD, WEBM, "audio/webm", 8)
+    assert envios[0]["conta"] == CONTA_QR
+
+
+def test_o_audio_escolhe_o_numero_igual_ao_texto(pool, envios, sem_stt):
+    """As duas rotas têm que responder a MESMA pergunta do mesmo jeito. Enquanto
+    divergirem, o vendedor manda texto por um número e áudio por outro na mesma
+    conversa — e nem ele nem o cliente têm como perceber."""
+    from finance import whatsapp_out
+    conv = _com_chip(pool, CHIP)
+    with pool.connection() as c:
+        assert whatsapp_out.chip_da_conversa(c, CONTA_QR, conv) == CHIP
+    ck.enviar_audio(pool, CONTA_QR, 7, LEAD, WEBM, "audio/webm", 8)
+    assert envios[0]["conta"] == CHIP
+
+
+def test_a_mensagem_continua_sendo_gravada_na_conversa_do_lead(pool, envios, sem_stt):
+    """O chip muda por onde SAI, não onde se grava. Se a gravação tivesse migrado
+    junto, o áudio sumiria da ficha em que o vendedor o mandou."""
+    conv = _com_chip(pool, CHIP)
+    ck.enviar_audio(pool, CONTA_QR, 7, LEAD, WEBM, "audio/webm", 8)
+    with pool.connection() as c:
+        r = c.execute("select conversa_id from mensagens order by id desc limit 1").fetchone()
+    assert r[0] == conv

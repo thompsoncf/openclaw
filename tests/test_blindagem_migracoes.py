@@ -89,7 +89,7 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   canal text, contato_ref text, status text default 'aberta',
   agente_ativo boolean default false, responsavel_membro_id bigint,
   janela_expira_em timestamptz, ultima_msg_em timestamptz default now(),
-  criado_em timestamptz default now(), chip_id bigint);
+  criado_em timestamptz default now(), chip_id bigint, visto_ate_id bigint);
 -- orcamentos vem da 045 (marcada como aplicada); a 147 dá a ela o modo evento
 -- (colunas do evento/parcelas, numeração por conta e o backfill do número).
 create table orcamentos (id bigserial primary key, conta_id bigint references contas(id));

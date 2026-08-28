@@ -32,7 +32,7 @@ create table orcamentos (id bigserial primary key, conta_id bigint, numero int,
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
   whatsapp text, telefone text, criado_em timestamptz not null default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
-  criado_em timestamptz not null default now());
+  criado_em timestamptz not null default now(), visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   autor text, criado_em timestamptz not null default now(),
   midia_ref jsonb, midia_tipo text, midia_meta jsonb);

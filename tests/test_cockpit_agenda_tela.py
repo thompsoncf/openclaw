@@ -44,7 +44,7 @@ create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigi
   criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   status text default 'aberta', agente_ativo boolean default true,
-  responsavel_membro_id bigint, ultima_msg_em timestamptz default now());
+  responsavel_membro_id bigint, ultima_msg_em timestamptz default now(), visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   autor text default 'humano', membro_id bigint, criado_em timestamptz default now(),
   midia_ref jsonb, midia_tipo text, midia_meta jsonb);

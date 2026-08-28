@@ -393,6 +393,38 @@ def _conta_membro(c, conta_id, membro_id):
                      (membro_id, conta_id)).fetchone()
 
 
+def aviso_outra_conversa(outras, *, membro_id=None) -> dict:
+    """A frase do aviso "este número tem outra conversa" — sem banco, pra poder testar.
+
+    Recebe o que `outras_conversas_do_numero` devolveu e diz ao vendedor o que ele
+    NÃO está vendo. Devolve {} quando não há nada a avisar, e senão
+    {"texto", "lead_id"}. `lead_id` só vem quando a outra ficha é DELE: `/cockpit/lead`
+    revalida a posse e devolveria o vendedor pro começo — link que não abre é pior que
+    link nenhum. Quando a conversa é de um colega, o aviso diz o NOME dele, que é a
+    informação que resolve: foi assim que o Thiago descobriu que o "lead repetido"
+    dele era a mesma pessoa que o Pedro estava atendendo.
+
+    Uma linha só, mesmo com três conversas: isto mora em cima do chat de um celular.
+    O que passa da primeira vira "e mais N"."""
+    if not outras:
+        return {}
+    o = outras[0]
+    quantas = o.get("mensagens") or 0
+    trecho = (f" ({quantas} mensagem{'s' if quantas != 1 else ''})" if quantas else "")
+    dono = (o.get("vendedor_nome") or "").strip()
+    minha = membro_id is not None and o.get("vendedor_id") == membro_id
+    if minha:
+        texto = f"Este número tem outra ficha sua{trecho}."
+    elif dono:
+        texto = f"Este número também está com {dono}{trecho}."
+    else:
+        texto = f"Este número tem outra conversa sem dono{trecho}."
+    resto = len(outras) - 1
+    if resto:
+        texto += f" E mais {resto}."
+    return {"texto": texto, "lead_id": o.get("lead_id") if minha else None}
+
+
 def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
                      *, pos_visto: bool = False) -> dict | None:
     """Detalhe de UM lead do vendedor (revalida a posse). Traz a ficha, as etapas do
@@ -408,7 +440,7 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
     ficaria zerando o cooldown a cada tique. Resposta da IA também não zera: ela
     responde ao cliente, não põe o vendedor em dia (é de propósito que difere da
     bolinha vermelha, que pergunta 'precisa de gente?' em vez de 'a gente viu?')."""
-    from web.painel_prospeccao import _carrega_alvo, _etapas
+    from web.painel_prospeccao import _carrega_alvo, _etapas, outras_conversas_do_numero
     alvo = _carrega_alvo(pool, conta_id, lead_id)
     if not alvo or alvo.get("vendedor_id") != membro_id:
         return None
@@ -435,10 +467,19 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
                 # o id vai junto porque a tela do lead se atualiza sozinha e precisa
                 # saber a partir de onde pedir o que é novo
                 msgs.append({"id": mid, "who": who, "texto": texto or "", "quando": quando})
+        # O mesmo número com conversa em OUTRA ficha — o vendedor precisa saber que
+        # está lendo metade do histórico. Ver `outras_conversas_do_numero`: é o
+        # rastro da corrida de entrega dupla (caso Geovanna, 27/08) e do
+        # re-pareamento de chip. Leitura pura; não junta nem apaga nada.
+        outras = outras_conversas_do_numero(
+            c, conta_id, alvo.get("whatsapp") or alvo.get("telefone") or "",
+            cv[0] if cv else None)
     alvo["etapas"] = etapas
     alvo["conversa_id"] = cv[0] if cv else None
     alvo["ia"] = bool(cv[1]) if cv else True
     alvo["mensagens"] = msgs
+    alvo["outras_conversas"] = outras
+    alvo["aviso_conversa"] = aviso_outra_conversa(outras, membro_id=membro_id)
     return alvo
 
 

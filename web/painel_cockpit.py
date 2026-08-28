@@ -488,6 +488,13 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 }
 .aviso{margin:.2rem 0;padding:.55rem .7rem;border-radius:11px;font-size:.78rem;text-align:center;
   background:var(--surface);border:1px solid var(--line);color:var(--text-dim)}
+/* "este número tem outra conversa". Fica FORA do .chat de propósito: a conversa
+   nasce rolada no fim (ver o script do rodapé), então um aviso no topo do
+   histórico nunca seria lido por ninguém. */
+.dupla{margin:.35rem 1.1rem 0;padding:.5rem .7rem;border-radius:11px;font-size:.76rem;
+  background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:#F0DCA6}
+.dupla b{color:var(--text)}
+.dupla a{color:var(--ambar);text-decoration:underline}
 .rodape{flex-shrink:0;border-top:1px solid var(--line);background:var(--bg);padding:.7rem 1.1rem;
   padding-bottom:calc(.7rem + var(--fundo-seguro));position:relative;z-index:2}
 .composer{display:flex;gap:.5rem;align-items:center}
@@ -3327,10 +3334,22 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "if(document.visibilityState==='visible')puxa();});"
            "})();</script>")
 
+    # O mesmo número com conversa em outra ficha. Sai ANTES do chat porque a conversa
+    # nasce rolada no fim; e sai como faixa, não como bolha, pra não parecer mensagem
+    # de ninguém. Ver `aviso_outra_conversa` e `outras_conversas_do_numero`.
+    av = d.get("aviso_conversa") or {}
+    dupla = ""
+    if av.get("texto"):
+        link = (f" <a href='{_BASE}/lead/{av['lead_id']}'>abrir</a>"
+                if av.get("lead_id") else "")
+        dupla = (f"<div class=dupla><b>Atenção:</b> {esc(av['texto'])}"
+                 f" O histórico dela não aparece aqui.{link}</div>")
+
     chip = ("<span class='chip ia'>IA</span>" if d["ia"] else "<span class='chip voce'>você</span>")
     corpo = (
                _hdr(d["empresa"], sub, voltar=_BASE, direita=chip)
              + _flash(request)
+             + dupla
              + f"<div class=chat>{chat}</div>"
              + f"<div class=rodape>{acao}"
              + "<a class='btn ghost' style='margin-top:.5rem' href='#acoes'>Ficha, funil e fechamento</a>"

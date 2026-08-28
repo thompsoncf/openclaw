@@ -3646,6 +3646,80 @@ def _conversa_wa_do_contato(c, conta_id, lead_id, numero, *, chip_id=_QUALQUER_C
         (conta_id, alvo8, _wa_equivalentes(d) or [d], *par_chip)).fetchone()
 
 
+def outras_conversas_do_numero(c, conta_id, numero, excluir=None, *, limite=3):
+    """As OUTRAS conversas de WhatsApp deste mesmo número — fora a que está aberta.
+
+    Nasceu da corrida que `_wa_inbound_conversa` passou a fechar com trava: até
+    27/08/2026, duas entregas da MESMA mensagem criavam dois leads e duas conversas,
+    e cada vendedor ficava com metade do histórico sem saber que a outra metade
+    existia. Foi o caso da Geovanna na conta 34 — Pedro com a primeira entrega,
+    Thiago com a segunda, e o Thiago reclamando de lead repetido.
+
+    A trava resolve daqui pra frente. As 62 conversas partidas que já existem (17
+    números) continuam como estão: juntá-las seria apagar e reescrever `conversas` e
+    `mensagens`, coisa que esta casa não faz. Então a tela AVISA em vez de mexer.
+
+    E nem toda duplicata é da corrida: 11 dos 17 números estão separados no tempo —
+    histórico legítimo de quem repareou o chip. O aviso serve pros dois casos, porque
+    o sintoma é o mesmo: falta metade da conversa na tela.
+
+    LEITURA PURA. Devolve no máximo `limite` linhas, da mais recente pra trás.
+
+    `excluir` é a conversa que a tela JÁ está mostrando. Aceita um id ou uma lista —
+    a lista existe pra quem já avisa de outra coisa na mesma tela (o `_aviso_gemeo`
+    do desktop conta o gêmeo do OUTRO chip): dois avisos pra mesma conversa, um
+    embaixo do outro, é como o vendedor aprende a não ler nenhum.
+
+    A consulta tem a forma exigida pelo `idx_conversas_num8` (ver `_wa_equivalentes`):
+    os 8 finais pro índice achar rápido, a igualdade exata pra não confundir com um
+    celular de outro DDD que termine igual. Sem filtro de chip de propósito: numa
+    empresa de dois números a conversa do OUTRO chip é exatamente o histórico que o
+    vendedor não está vendo.
+
+    FALHA CALADA, DE PROPÓSITO — mesma regra do `_gemeos_de_outro_chip`, que é o aviso
+    irmão deste: o aviso é um extra, a conversa do vendedor não é. Se a consulta
+    estourar, a tela volta a ser a de ontem em vez de não abrir. O SAVEPOINT está em
+    `_outras_conversas_consulta`: sem ele o erro abortaria a transação inteira e
+    levaria junto o que vem DEPOIS desta chamada."""
+    d = _so_digitos(numero)
+    if not d:
+        return []
+    alvo8 = d[-8:] if len(d) >= 8 else d
+    fora = ([excluir] if isinstance(excluir, int) else list(excluir or []))
+    fora = [int(i) for i in fora if i]
+    try:
+        rows = _outras_conversas_consulta(c, conta_id, alvo8,
+                                          _wa_equivalentes(d) or [d], fora, limite)
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger("prospeccao.conversas").warning(
+            "aviso de conversa partida falhou na conta %s", conta_id, exc_info=True)
+        return []
+    return [{"conversa_id": r[0], "lead_id": r[1], "empresa": r[2],
+             "vendedor_id": r[3], "vendedor_nome": r[4],
+             "quando": r[5], "mensagens": r[6] or 0} for r in rows]
+
+
+def _outras_conversas_consulta(c, conta_id, alvo8, equivalentes, fora, limite):
+    """Só a consulta do `outras_conversas_do_numero`, num SAVEPOINT (ver o porquê lá)."""
+    with c.transaction():
+        return c.execute(
+            r"""select cv.id, cv.prospeccao_id,
+                   coalesce(nullif(p.empresa, ''), nullif(p.contato, ''), ''),
+                   p.vendedor_id, coalesce(nullif(m.nome, ''), ''),
+                   cv.ultima_msg_em,
+                   (select count(*) from mensagens ms where ms.conversa_id = cv.id)
+              from conversas cv
+              left join prospeccao p on p.id = cv.prospeccao_id
+              left join membros m on m.id = p.vendedor_id
+             where cv.conta_id=%s and cv.canal='whatsapp'
+               and right(regexp_replace(cv.contato_ref, '\D', '', 'g'), 8) = %s
+               and regexp_replace(cv.contato_ref, '\D', '', 'g') = any(%s)
+               and not (cv.id = any(%s))
+             order by cv.ultima_msg_em desc nulls last limit %s""",
+            (conta_id, alvo8, equivalentes, fora, limite)).fetchall()
+
+
 def _ja_conversou(c, conta_id, lead_id) -> bool:
     """Já houve troca de verdade com esse lead — ou seja, a mensagem que está chegando
     agora não é a primeira coisa que acontece.
@@ -3696,6 +3770,32 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     segue como sempre foi."""
     remetente = _so_digitos(remetente)
     alvo8 = remetente[-8:] if len(remetente) >= 8 else remetente
+    # UMA ENTREGA POR VEZ, POR NÚMERO.
+    #
+    # Daqui pra baixo é tudo "procura e, se não achar, cria" — o lead primeiro, a
+    # conversa depois. Duas entregas da MESMA mensagem chegando juntas passavam as
+    # duas pela procura antes de qualquer uma gravar, e cada uma criava seu próprio
+    # lead e sua própria conversa. O rodízio então distribuía os dois pra vendedores
+    # diferentes, e o cliente aparecia como se fossem duas pessoas.
+    #
+    # Foi o que houve com a Geovanna em 27/08 na conta 34: mesmo `provider_sid`,
+    # entregue às 11:18:15 e de novo às 11:18:17 — 1,45 s depois. Lead 871 pro Pedro,
+    # 872 pro Thiago. Na base inteira são 10 entregas duplicadas, 8 delas viraram
+    # leads separados.
+    #
+    # O dedup que já existia não pegava: `on conflict (conversa_id, provider_sid)` é
+    # por CONVERSA, e a corrida cria justamente uma conversa nova. Com a trava, a
+    # segunda entrega espera, acha a conversa da primeira, e aí sim o `on conflict`
+    # faz o que sempre quis fazer.
+    #
+    # `xact` e não `pg_advisory_lock`: solta sozinha no commit E no rollback. Trava
+    # manual que vaza numa exceção prende aquele número pra sempre.
+    #
+    # A chave é (conta, últimos 8 dígitos) — a MESMA granularidade que a busca usa
+    # logo abaixo. Travar por conta serializaria clientes que não têm nada a ver um
+    # com o outro; travar pelo número cru deixaria escapar as duas grafias do nono
+    # dígito, que é o caso que `_wa_equivalentes` existe pra cobrir.
+    c.execute("select pg_advisory_xact_lock(%s, hashtext(%s))", (conta_id, alvo8))
     # as duas grafias do número (com e sem o nono dígito) — o mesmo contato chega das
     # duas formas, e casar por igualdade crua criava uma conversa nova a cada troca
     equivalentes = _wa_equivalentes(remetente) or [remetente]

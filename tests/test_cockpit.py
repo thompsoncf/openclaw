@@ -44,6 +44,10 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text, status text default 'aberta', agente_ativo boolean default true,
+  -- `contato_ref` entrou aqui pro aviso "este número tem outra conversa" rodar de
+  -- verdade nestes testes: sem a coluna ele cai no `except` e a tela do vendedor
+  -- passaria sem nunca exercitar a consulta.
+  contato_ref text,
   responsavel_membro_id bigint, ultima_msg_em timestamptz default now(),
   push_avisado_em timestamptz, criado_em timestamptz default now(), chip_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text, direcao text,

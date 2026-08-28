@@ -3817,7 +3817,7 @@ def _trava_numero(c, conta_id, numero) -> str:
 
 
 def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente_on,
-                         *, exigir_continuidade=False, chip_id=None):
+                         *, exigir_continuidade=False, chip_id=None, midia=None):
     """WhatsApp de ENTRADA (Twilio OU Cloud API): resolve lead+conversa pelo telefone,
     grava a mensagem e reabre a janela/reativa o agente. Devolve (conv_id, nova) — se
     a mensagem entrou agora ou já estava lá. Um humano que 'assumiu'
@@ -3979,10 +3979,20 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
                returning id""",
             (conta_id, lead_id, remetente, agente_on, conta_id, alvo8,
              _chip_gravavel(chip_id, conta_id))).fetchone()[0]
-    cur = c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
-                 values (%s,'whatsapp','in','lead',%s,%s)
+    # O PONTEIRO da mídia, não o arquivo. `midia_ref` guarda {directPath, mediaKey,
+    # mimetype} — ~200 bytes que dizem onde o WhatsApp guarda o arquivo cifrado e
+    # como decifrá-lo. Quem busca é o serviço web, sob demanda, quando alguém abre a
+    # conversa. Guardar o arquivo seriam ~110 GB por ano só nesta conta, contra 22 MB
+    # de ponteiro — e ainda pediria retenção, disco e limpeza (migração 187).
+    mid = midia if isinstance(midia, dict) else None
+    cur = c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto,
+                     provider_sid, midia_ref, midia_tipo, midia_meta)
+                 values (%s,'whatsapp','in','lead',%s,%s,%s::jsonb,%s,%s::jsonb)
                  on conflict (conversa_id, provider_sid) where provider_sid is not null do nothing""",
-                    (conv_id, (corpo or "")[:8000], sid))
+                    (conv_id, (corpo or "")[:8000], sid,
+                     json.dumps(mid["ref"]) if mid and mid.get("ref") else None,
+                     (mid.get("tipo") or None) if mid else None,
+                     json.dumps(mid.get("meta") or {}) if mid else None))
     # entrou agora, ou é a mesma mensagem chegando de novo? Ver o `nova` no docstring:
     # sem esta resposta o dedup era silencioso e o agente respondia uma vez por entrega.
     nova = cur.rowcount > 0
@@ -4764,6 +4774,49 @@ def _chip_gravavel(chip_id, empresa_id):
     return None if (chip_id is None or int(chip_id) == int(empresa_id)) else int(chip_id)
 
 
+# Os tipos de mídia que o Zaq sabe desenhar. Um tipo que a gente não conhece não
+# vira ponteiro: a bolha ficaria prometendo uma coisa que a tela não sabe mostrar, e
+# o texto da marca já conta o que chegou.
+_MIDIA_TIPOS = ("imagem", "video", "documento", "figurinha")
+
+
+def _midia_do_payload(m):
+    """O ponteiro que veio do wa-qr, peneirado — ou None.
+
+    Peneira porque isto é entrada de rede e vai pra uma coluna jsonb: sem teto de
+    tamanho, um `directPath` de megabytes forjado viraria linha de megabytes no
+    banco. E sem `mediaKey` não há como decifrar depois, então prometer a bolha
+    seria mentir.
+    """
+    if not isinstance(m, dict):
+        return None
+    tipo = str(m.get("tipo") or "").strip()
+    ref = m.get("ref") if isinstance(m.get("ref"), dict) else {}
+    caminho = str(ref.get("directPath") or "").strip()
+    chave = str(ref.get("mediaKey") or "").strip()
+    if tipo not in _MIDIA_TIPOS or not caminho or not chave:
+        return None
+    if len(caminho) > 500 or len(chave) > 200:
+        return None
+    meta = m.get("meta") if isinstance(m.get("meta"), dict) else {}
+    limpa = {}
+    for k in ("bytes", "segundos", "largura", "altura"):
+        try:
+            v = int(meta.get(k) or 0)
+        except (TypeError, ValueError):
+            v = 0
+        if v > 0:
+            limpa[k] = v
+    if meta.get("nome"):
+        limpa["nome"] = str(meta["nome"])[:160]
+    for k in ("gif", "animada"):
+        if meta.get(k):
+            limpa[k] = True
+    return {"tipo": tipo, "meta": limpa,
+            "ref": {"directPath": caminho, "mediaKey": chave,
+                    "mimetype": str(ref.get("mimetype") or "")[:100]}}
+
+
 @router.post("/webhooks/wa-qr")
 async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
     """Entrada do WhatsApp por QR (serviço Node services/wa-qr). Autentica pelo
@@ -4828,7 +4881,8 @@ def _webhook_wa_qr_sync(corpo: bytes, background_tasks: BackgroundTasks):
         agente_on = bool(m and m[0])
         conv_id, nova = _wa_inbound_conversa(c, empresa_id, sender, texto,
                                             payload.get("id") or None, payload.get("nome"),
-                                            agente_on, chip_id=chip_id)
+                                            agente_on, chip_id=chip_id,
+                                            midia=_midia_do_payload(payload.get("midia")))
         # lê DENTRO da transação: o update acima já valeu, então a conversa ligada à
         # mão aparece aqui mesmo com o agente-mestre desligado (ver _agente_atende).
         # `nova` corta a reentrega: o wa-qr manda a mesma mensagem de novo quando a

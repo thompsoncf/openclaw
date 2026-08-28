@@ -46,7 +46,8 @@ create table funil_movimentos (id bigserial primary key, conta_id bigint,
   criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint, chip_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
-  criado_em timestamptz default now());
+  criado_em timestamptz default now(),
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
 create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   inicio timestamptz, fim timestamptz, status text default 'ativo', desfecho text,
   criado_em timestamptz default now());

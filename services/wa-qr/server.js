@@ -1625,6 +1625,63 @@ function duracao (segundos) {
 // em si continua só no celular — aqui é pra ninguém perder o fio da conversa.
 // normalizeMessageContent desembrulha efêmera/viewOnce, senão o áudio mandado
 // em conversa com mensagens temporárias continuaria invisível.
+// ------------------------------------------------------- a mídia que chega
+//
+// O ARQUIVO NÃO É BAIXADO AQUI, e é o ponto todo do desenho. O WhatsApp já guarda a
+// mídia cifrada no CDN dele; a mensagem traz o endereço (`directPath`) e a chave que
+// decifra (`mediaKey`). Guardamos esses ~200 bytes e quem busca é o serviço web, sob
+// demanda, quando alguém abre a conversa — em stream, sem juntar o arquivo.
+//
+// Por que não baixar aqui: este processo tem 1 CPU e segura TODAS as sessões de
+// WhatsApp. Um vídeo de 16 MB baixado e repassado em base64 são quatro cópias vivas
+// (~70 MB de pico), e foi assim que a instância caiu 20 vezes em 20/08. A maioria das
+// fotos ninguém abre; baixar todas seria pagar 100% da banda pelos 10% que se olha.
+//
+// `downloadContentFromMessage({ mediaKey, directPath }, tipo)` não pede o objeto da
+// mensagem nem o socket — só estes dois campos. É o que deixa a busca acontecer
+// noutro serviço, noutra hora.
+const MIDIA_DE = [
+  ['imageMessage', 'imagem', '📷 Foto'],
+  ['videoMessage', 'video', '🎬 Vídeo'],
+  ['documentMessage', 'documento', '📄 Documento'],
+  ['stickerMessage', 'figurinha', '🩷 Figurinha']
+]
+
+function _b64 (v) {
+  if (!v) return ''
+  try { return Buffer.from(v).toString('base64') } catch (_) { return '' }
+}
+
+// O ponteiro + o que a bolha mostra ANTES de carregar (e o que sobra quando o CDN já
+// apagou o arquivo). Devolve null pra mensagem que não é mídia de arquivo.
+function midiaDaMsg (m) {
+  const msg = normalizeMessageContent(m.message) || {}
+  for (const [campo, tipo, marca] of MIDIA_DE) {
+    const md = msg[campo]
+    // sem directPath ou sem mediaKey não há como buscar depois — melhor não
+    // prometer uma bolha que nunca vai carregar
+    if (!md || !md.directPath || !md.mediaKey) continue
+    const meta = {}
+    if (md.fileLength) meta.bytes = Number(md.fileLength) || 0
+    if (md.seconds) meta.segundos = Math.round(Number(md.seconds) || 0)
+    if (md.fileName) meta.nome = String(md.fileName).slice(0, 160)
+    if (md.width) meta.largura = Number(md.width) || 0
+    if (md.height) meta.altura = Number(md.height) || 0
+    if (md.gifPlayback) meta.gif = true
+    if (md.isAnimated) meta.animada = true
+    return {
+      tipo,
+      marca: tipo === 'video' && meta.segundos
+        ? marca + ' (' + duracao(meta.segundos) + ')'
+        : marca,
+      ref: { directPath: md.directPath, mediaKey: _b64(md.mediaKey),
+        mimetype: md.mimetype || '' },
+      meta
+    }
+  }
+  return null
+}
+
 function textoDaMsg (m) {
   const msg = normalizeMessageContent(m.message) || {}
   const texto = (msg.conversation ||
@@ -1636,6 +1693,23 @@ function textoDaMsg (m) {
   if (audio) {
     // ptt = gravado na hora (o "áudio do WhatsApp"); sem ptt é arquivo de música
     return (audio.ptt ? '🎤 Áudio' : '🎵 Áudio') + ' (' + duracao(audio.seconds) + ')'
+  }
+  // Localização e contato NÃO são arquivo: o conteúdo inteiro cabe no texto e não
+  // custa byte nenhum de armazenamento nem de banda. Viram linha legível e acabou.
+  const loc = msg.locationMessage || msg.liveLocationMessage
+  if (loc && (loc.degreesLatitude || loc.degreesLongitude)) {
+    const nome = (loc.name || loc.address || '').trim().slice(0, 80)
+    return '📍 Localização' + (nome ? ': ' + nome : '') +
+      ' (' + Number(loc.degreesLatitude).toFixed(5) + ', ' +
+      Number(loc.degreesLongitude).toFixed(5) + ')'
+  }
+  const ct = msg.contactMessage
+  if (ct) return '👤 Contato: ' + String(ct.displayName || '').trim().slice(0, 80)
+  const cts = msg.contactsArrayMessage
+  if (cts && Array.isArray(cts.contacts) && cts.contacts.length) {
+    return '👤 ' + cts.contacts.length + ' contato(s): ' +
+      cts.contacts.map((x) => String((x && x.displayName) || '').trim())
+        .filter(Boolean).join(', ').slice(0, 120)
   }
   return ''
 }
@@ -1793,7 +1867,19 @@ async function transcreverAudio (contaId, m, sender) {
 
 async function repassarEntrada (contaId, m) {
   if (!APP_URL) { log.warn({ contaId }, 'APP_URL vazio — não repassa entrada'); return }
-  const texto = textoDaMsg(m)
+  let texto = textoDaMsg(m)
+  // A MÍDIA ENTRA AQUI, e é o que muda o "sem texto" de descarte pra mensagem.
+  //
+  // Foto com legenda já chegava — como texto, perdendo a foto. Foto SEM legenda era
+  // jogada fora inteira: 598 mensagens de um-para-um em 48h na Prime (299 por dia),
+  // que é o cliente mandando referência de decoração, print de orçamento, vídeo do
+  // salão e comprovante. O vendedor via tudo — no celular dele, e é por isso que ele
+  // não larga o aparelho.
+  //
+  // Sem legenda, a marca ('📷 Foto') vira o texto: a mensagem precisa de um corpo pra
+  // aparecer na lista e no chat, do mesmo jeito que o áudio já faz.
+  const midia = midiaDaMsg(m)
+  if (!texto && midia) texto = midia.marca
   const jid = (m.key && m.key.remoteJid) || ''
   if (!texto || !ehConversaValida(jid)) {
     log.info({ contaId, temTexto: !!texto, jid }, 'entrada ignorada (sem texto, grupo, canal ou status)')
@@ -1804,7 +1890,9 @@ async function repassarEntrada (contaId, m) {
   const sender = resolvido.split('@')[0]
   const corpo = JSON.stringify({
     conta_id: contaId, sender, texto,
-    nome: m.pushName || '', id: (m.key && m.key.id) || ''
+    nome: m.pushName || '', id: (m.key && m.key.id) || '',
+    // o ponteiro, não o arquivo — ver midiaDaMsg
+    midia: midia || undefined
   })
   try {
     const r = await fetch(APP_URL + '/webhooks/wa-qr', {
@@ -1813,7 +1901,8 @@ async function repassarEntrada (contaId, m) {
       body: corpo
     })
     if (!r.ok) log.warn({ contaId, status: r.status }, 'webhook wa-qr respondeu não-ok')
-    else log.info({ contaId, sender: sender.slice(0, 6) + '…' }, 'entrada repassada ao webhook ✓')
+    else log.info({ contaId, sender: sender.slice(0, 6) + '…', midia: midia && midia.tipo },
+      'entrada repassada ao webhook ✓')
   } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao repassar entrada') }
   // depois de a mensagem já estar no painel: assim ela aparece na hora com a
   // marca "🎤 Áudio (0:18)" e o texto entra por cima quando ficar pronto, em vez
@@ -3387,4 +3476,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { midiaDaMsg, textoDaMsg, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

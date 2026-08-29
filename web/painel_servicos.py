@@ -76,6 +76,7 @@ def _criar_orcamentos(c):
         )""")
     c.execute("""
         alter table orcamentos add column if not exists cnpj          text;
+        alter table orcamentos add column if not exists cpf           text;
         alter table orcamentos add column if not exists whatsapp      text;
         alter table orcamentos add column if not exists email         text;
         alter table orcamentos add column if not exists modulos       jsonb;
@@ -347,9 +348,13 @@ def painel_servicos(request: Request):
     from contas import equipe as _equipe
     pode_contrato = servico_avulso and _equipe.caps_do_papel(
         request.session.get("papel", "dono"))["gerir"]
+    # A tela abre no tipo que ESTA empresa mais cadastra, em vez de sempre em PJ.
+    # Ver clientes.tipo_predominante: na Prime, 23 de 23 clientes são PF.
+    from finance import clientes as _cli
+    tipo_padrao = _cli.tipo_predominante(pool, conta[0]) if servico_avulso else "pj"
     return _render("servicos", request, empresa_nome=conta[2],
                    tem_pj=True, vende_servico=True, servico_avulso=servico_avulso,
-                   pode_contrato=pode_contrato,
+                   pode_contrato=pode_contrato, tipo_padrao=tipo_padrao,
                    tipos_evento=scat.TIPOS_EVENTO, tipos_contrato=scat.TIPOS_CONTRATO,
                    local_padrao=_local_padrao(dados_emp) if servico_avulso else "",
                    icones_paleta=ics.paleta())
@@ -674,8 +679,17 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
         extra_setup=max(0, bruto_setup - itens_setup),
         extra_mensal=max(0, bruto_mensal - itens_mensal),
     )
+    # O documento chega num campo só (a tela tem um input) e é roteado por TAMANHO:
+    # 11 dígitos é CPF, 14 é CNPJ — a mesma régua que `criar_cliente` já usa pra
+    # gravar em `pessoas`. Até 29/08/2026 tudo caía na coluna `cnpj`, e por isso os
+    # 12 orçamentos com documento da Prime guardavam CPF num campo chamado cnpj.
+    # Documento com tamanho estranho continua indo pra `cnpj`, como antes: melhor
+    # guardar no lugar antigo do que descartar o que o vendedor digitou.
+    _doc = "".join(ch for ch in (dados.cnpj or "") if ch.isdigit())
+    _cpf_val = (dados.cnpj or "").strip() if len(_doc) == 11 else None
+    _cnpj_val = None if len(_doc) == 11 else ((dados.cnpj or "").strip() or None)
     vals = (dados.cliente or None, dados.empresa or None,
-            (dados.cnpj or "").strip() or None, dados.segmento or None,
+            _cpf_val, _cnpj_val, dados.segmento or None,
             (dados.whatsapp or "").strip() or None, (dados.email or "").strip() or None,
             (dados.telefone or "").strip() or None, (dados.cidade or "").strip() or None,
             (dados.uf or "").strip()[:2].upper() or None, (dados.site or "").strip() or None,
@@ -719,7 +733,7 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
                 reabriu = {"evento_agenda_id": antes[1], "sinal_pago_em": antes[2]}
             # atualiza a proposta reaberta (nunca mexe em uma já 'fechado')
             r = _com_retry_numero(c, lambda: c.execute(
-                """update orcamentos set cliente=%s, empresa=%s, cnpj=%s, segmento=%s,
+                """update orcamentos set cliente=%s, empresa=%s, cpf=%s, cnpj=%s, segmento=%s,
                        whatsapp=%s, email=%s, telefone=%s, cidade=%s, uf=%s, site=%s,
                        cargo=%s, socio=%s, endereco=%s, cep=%s,
                        modulos=%s::jsonb, itens=%s::jsonb, escopo=%s, canal=%s,
@@ -753,14 +767,14 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
             # único (conta_id, numero) é quem garante a série — se dois salvarem
             # ao mesmo tempo, o perdedor tenta de novo e pega o próximo.
             sql_ins = """insert into orcamentos
-                   (conta_id, cliente, empresa, cnpj, segmento, whatsapp, email,
+                   (conta_id, cliente, empresa, cpf, cnpj, segmento, whatsapp, email,
                     telefone, cidade, uf, site, cargo, socio, endereco, cep,
                     modulos, itens, escopo, canal, modo, evento, parcelas,
                     setup_centavos, mensal_centavos,
                     primeiro_ano_centavos, n_modulos,
                     desconto_tipo, desconto_pct, desconto_centavos,
                     criado_por, token, numero)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                            %s::jsonb,%s::jsonb,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,
                            %s,%s,%s,%s,%s,
                            (select coalesce(max(numero),0)+1 from orcamentos where conta_id=%s))
@@ -2187,7 +2201,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     </div>
     {% endif %}
     <div class="oc-field" style="margin-bottom:.7rem">
-      <label id="oc-cnpj-label">{{ 'CNPJ / CPF' if servico_avulso else 'CNPJ' }} <span style="color:var(--txt-mut);font-size:.78rem">— preenche empresa, segmento e contato automaticamente</span></label>
+      <label id="oc-cnpj-label">CNPJ <span id="oc-cnpj-dica" style="color:var(--txt-mut);font-size:.78rem">— preenche empresa, segmento e contato automaticamente</span></label>
       <div style="display:flex; gap:.5rem; align-items:center">
         <input id="oc-cnpj" class="oc-inp" placeholder="00.000.000/0000-00" inputmode="numeric" style="flex:1">
         <button id="oc-cnpj-btn" type="button" style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.55rem 1.1rem;font-weight:600;cursor:pointer;white-space:nowrap">Buscar</button>
@@ -3159,6 +3173,13 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     btnPj.classList.toggle('on',pj); btnPf.classList.toggle('on',!pj);
     document.getElementById('oc-cnpj').placeholder=pj?'00.000.000/0000-00':'000.000.000-00';
     document.getElementById('oc-cnpj-btn').style.display=pj?'inline-block':'none';
+    // Rótulo diz UM documento, não os dois. E a dica do preenchimento automático
+    // some no CPF: a consulta só existe pra CNPJ, então prometer isso pra pessoa
+    // física era promessa vazia.
+    var lbl=document.getElementById('oc-cnpj-label');
+    if(lbl)lbl.childNodes[0].nodeValue=pj?'CNPJ ':'CPF ';
+    var dica=document.getElementById('oc-cnpj-dica');
+    if(dica)dica.style.display=pj?'inline':'none';
     document.getElementById('oc-empresa-label').textContent=pj?'Empresa':'Nome completo';
     document.getElementById('oc-empresa').placeholder=pj?'Nome da empresa':'Nome completo';
     // Cargo/Sócio/Telefone/Site/Segmento ficam ocultos sempre pra eventos (não é
@@ -3168,6 +3189,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   var btnTipoPj=document.getElementById('btn-tipo-pj'), btnTipoPf=document.getElementById('btn-tipo-pf');
   if(btnTipoPj)btnTipoPj.addEventListener('click',function(){aplicaTipoCliente('pj');});
   if(btnTipoPf)btnTipoPf.addEventListener('click',function(){aplicaTipoCliente('pf');});
+  // abre no tipo que esta empresa mais cadastra (ver clientes.tipo_predominante)
+  aplicaTipoCliente('{{ tipo_padrao|default("pj") }}');
 
   function atualizarChip(){
     var chip=document.getElementById('cli-chip');

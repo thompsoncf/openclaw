@@ -1,0 +1,18 @@
+-- Orçamento passa a guardar CPF separado do CNPJ.
+--
+-- Até aqui `orcamentos` tinha só a coluna `cnpj`, e o documento do cliente ia
+-- todo pra ela — fosse CPF ou CNPJ. Medido na Prime Eventos em 29/08/2026: os
+-- 12 orçamentos com documento tinham 11 DÍGITOS. São todos CPF, numa coluna
+-- chamada cnpj. E não é acidente do cliente: os 23 clientes da conta são
+-- tipo='pf', nenhum tem CNPJ — quem aluga salão pra casamento e formatura é
+-- pessoa, não empresa.
+--
+-- O efeito prático é o contrato de pessoa física, que sai lendo um campo com o
+-- nome errado. Em `pessoas` já está certo (o código roteia por tamanho: 11 ->
+-- cpf, 14 -> cnpj); o buraco era só aqui.
+--
+-- A migração NÃO move os dados existentes. Mover exigiria decidir sozinho o que
+-- é CPF e o que é CNPJ em cima de dado de cliente, e a leitura continua
+-- funcionando por `coalesce(cpf, cnpj)`. Quem quiser normalizar depois faz com
+-- o dono confirmando.
+alter table orcamentos add column if not exists cpf text;

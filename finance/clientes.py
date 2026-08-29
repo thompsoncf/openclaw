@@ -56,6 +56,23 @@ def _garantir_cols(pool) -> None:
     _COLS_GARANTIDAS = True
 
 
+# Casar telefone pelos ULTIMOS 8 DIGITOS, nao pelo texto inteiro. O mesmo numero
+# chega em formatos diferentes conforme a porta de entrada: digitado a mao vem
+# "86998280472" (11 digitos) e vindo do WhatsApp vem "558698280472" (12, com o
+# 55). Medido na Prime em 29/08/2026: 13 registros num formato e 6 no outro —
+# comparando texto exato eles NUNCA se encontram, e a mesma pessoa duplica.
+# Os 8 finais sao estaveis: nao carregam pais, DDD nem o nono digito. E' a mesma
+# regua que o WhatsApp ja usa em wa_contatos.numero8.
+_MIN_DIGITOS_TEL = 8
+
+
+def _n8(v: str | None) -> str | None:
+    """Os ultimos 8 digitos do telefone. None se nao der 8 — comparar menos que
+    isso casaria gente diferente, e duplicar e' menos grave que fundir errado."""
+    d = _so_digitos(v)
+    return d[-8:] if d and len(d) >= _MIN_DIGITOS_TEL else None
+
+
 def _cep(v: str | None) -> str | None:
     """CEP guardado só em dígitos quando vier completo (a folha é quem põe a
     máscara). O que não tiver 8 dígitos fica como o lojista digitou — melhor um
@@ -207,20 +224,89 @@ def criar_cliente(pool, dono_id: int, nome: str, *, telefone: str | None = None,
     mesma pessoa pode comprar de voce E vender pra voce). Default preserva o
     comportamento de sempre: todo cadastro novo e' cliente, a nao ser que quem
     chamou diga o contrario."""
+    r = salvar_cliente(pool, dono_id, nome, telefone=telefone, email=email,
+                       aniversario=aniversario, conta_zaq_id=conta_zaq_id, obs=obs,
+                       cpf=cpf, cnpj=cnpj, cidade=cidade, uf=uf, endereco=endereco,
+                       cep=cep, eh_cliente=eh_cliente, eh_fornecedor=eh_fornecedor)
+    return r["id"]
+
+
+# Campos que o REUSO pode preencher. Regra: so' preenche o que esta VAZIO —
+# nunca sobrescreve, e nunca apaga. Salvar de novo com o campo em branco tem que
+# ser inofensivo, senao um segundo salvamento incompleto destruiria o cadastro
+# bom feito no primeiro (regra 0 do CLAUDE.md).
+_ENRIQUECIVEIS = ("email", "cidade", "uf", "endereco", "cep", "obs")
+
+
+def salvar_cliente(pool, dono_id: int, nome: str, *, telefone: str | None = None,
+                   email: str | None = None, aniversario=None,
+                   conta_zaq_id: int | None = None, obs: str | None = None,
+                   cpf: str | None = None, cnpj: str | None = None,
+                   cidade: str | None = None, uf: str | None = None,
+                   endereco: str | None = None, cep: str | None = None,
+                   eh_cliente: bool = True, eh_fornecedor: bool = False) -> dict:
+    """Cadastra OU atualiza — e diz qual dos dois fez.
+
+    Devolve {"id", "acao", "papel_mudou", "nome"}, com acao em:
+        criado      nasceu agora
+        atualizado  ja' existia e algum campo vazio foi preenchido
+        inalterado  ja' existia e nada mudou
+
+    Por que existe: `criar_cliente` devolvia so' o id, e a tela dizia "Cliente
+    cadastrado." nos tres casos. Sem saber se salvou, a vendedora salvava de
+    novo — e como o reuso NAO aplicava nada, cada tentativa cunhava um registro.
+    Foi assim que a Ana Clara virou tres cadastros em cinco minutos (25/08/2026)
+    e o Gilvan virou dois, um como cliente e outro como fornecedor vazio.
+
+    Reusar agora ENRIQUECE (preenche o que esta vazio, nunca sobrescreve) e
+    APLICA O PAPEL: marcar "fornecedor" numa pessoa que ja' e' cliente liga a
+    marca na linha que existe, em vez de criar outra. Papel so' e' LIGADO aqui;
+    desligar e' explicito, pelo atualizar_cliente.
+    """
     nome = (nome or "").strip()
     if not nome:
         raise ValueError("nome do cliente e' obrigatorio")
     tem_doc = bool(_so_digitos(cpf) or _so_digitos(cnpj))
+    existente = None
     if not tem_doc and telefone:
         existente = buscar_por_telefone(pool, dono_id, telefone)
-        if existente:
-            return existente["id"]
-    pessoa_id = resolver_pessoa(pool, cpf=cpf, cnpj=cnpj, celular=telefone, nome=nome,
-                                email=email, conta_zaq_id=conta_zaq_id)
-    return puxar_ou_criar_cliente(pool, dono_id, pessoa_id=pessoa_id, nome=nome,
-                                  email=email, aniversario=aniversario, obs=obs,
-                                  cidade=cidade, uf=uf, endereco=endereco, cep=cep,
-                                  eh_cliente=eh_cliente, eh_fornecedor=eh_fornecedor)
+    if existente is None:
+        pessoa_id = resolver_pessoa(pool, cpf=cpf, cnpj=cnpj, celular=telefone,
+                                    nome=nome, email=email, conta_zaq_id=conta_zaq_id)
+        _garantir_cols(pool)
+        with pool.connection() as c:
+            achado = c.execute(
+                "select id from clientes where dono_id=%s and pessoa_id=%s and ativo limit 1",
+                (dono_id, pessoa_id)).fetchone()
+        if achado:
+            existente = obter_cliente(pool, dono_id, int(achado[0]))
+        else:
+            novo_id = puxar_ou_criar_cliente(
+                pool, dono_id, pessoa_id=pessoa_id, nome=nome, email=email,
+                aniversario=aniversario, obs=obs, cidade=cidade, uf=uf,
+                endereco=endereco, cep=cep, eh_cliente=eh_cliente,
+                eh_fornecedor=eh_fornecedor)
+            return {"id": novo_id, "acao": "criado", "papel_mudou": False, "nome": nome}
+
+    # --- daqui pra baixo: JA' EXISTE. Enriquece e aplica o papel. ---
+    entrando = {"email": email, "cidade": cidade, "uf": uf,
+                "endereco": endereco, "cep": cep, "obs": obs}
+    mudar = {k: v for k, v in entrando.items()
+             if k in _ENRIQUECIVEIS and (v or "").strip()
+             and not (existente.get(k) or "").strip()}
+    papel_mudou = False
+    if eh_cliente and not existente.get("eh_cliente"):
+        mudar["eh_cliente"] = True
+        papel_mudou = True
+    if eh_fornecedor and not existente.get("eh_fornecedor"):
+        mudar["eh_fornecedor"] = True
+        papel_mudou = True
+    if mudar:
+        atualizar_cliente(pool, dono_id, existente["id"], **mudar)
+    return {"id": existente["id"],
+            "acao": "atualizado" if mudar else "inalterado",
+            "papel_mudou": papel_mudou,
+            "nome": existente.get("nome") or nome}
 
 
 _SEL = """select c.id,
@@ -321,15 +407,17 @@ def achar_cliente_por_nome(pool, dono_id: int, nome: str,
 def buscar_por_telefone(pool, dono_id: int, telefone: str) -> dict | None:
     """Acha um cliente do lojista pelo telefone (so digitos). None se nao achar.
     Util pra nao duplicar na hora de vender (dedup dentro da propria loja)."""
-    tel = _so_digitos(telefone)
-    if not tel:
+    n8 = _n8(telefone)
+    if not n8:
         return None
     _garantir_cols(pool)
     with pool.connection() as c:
         r = c.execute(
-            _SEL + " where c.dono_id=%s and coalesce(p.celular, c.telefone)=%s"
-                   " and c.ativo limit 1",
-            (dono_id, tel),
+            _SEL + " where c.dono_id=%s and c.ativo"
+                   "   and right(regexp_replace(coalesce(p.celular, c.telefone),"
+                   "                            '[^0-9]', '', 'g'), 8) = %s"
+                   " order by c.id limit 1",
+            (dono_id, n8),
         ).fetchone()
     return _row_para_dict(r) if r else None
 
@@ -460,6 +548,25 @@ def achar_ou_criar(pool, dono_id: int, nome: str,
         if existente:
             return existente["id"]
     return criar_cliente(pool, dono_id, nome, telefone=telefone)
+
+
+def tipo_predominante(pool, dono_id: int) -> str:
+    """'pf' ou 'pj' — o que esta empresa mais cadastra. Serve pra tela ja' abrir
+    no caso comum dela.
+
+    Motivo: a tela de orcamento abria sempre em Pessoa Juridica, com mascara de
+    CNPJ. Na Prime Eventos isso e' 100% errado — os 23 clientes sao tipo='pf' e
+    nenhum tem CNPJ, porque quem aluga salao pra casamento e' pessoa. A vendedora
+    trocava o botao TODA vez. Empatou ou nao ha' cadastro: 'pj', que era o padrao
+    de antes."""
+    with pool.connection() as c:
+        r = c.execute(
+            """select p.tipo, count(*) n
+                 from clientes c join pessoas p on p.id = c.pessoa_id
+                where c.dono_id=%s and c.ativo and p.tipo in ('pf','pj')
+                group by p.tipo order by n desc, p.tipo limit 1""",
+            (dono_id,)).fetchone()
+    return (r[0] if r else None) or "pj"
 
 
 def contar_clientes(pool, dono_id: int) -> int:

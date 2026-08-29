@@ -446,21 +446,25 @@ def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
                       "tom": "azul",
                       "dica": f"O contrato nº {contrato_numero} está pronto, mas "
                               "ainda não foi mandado pro cliente."})
-        acoes.append(("assinar", "Mandar pra assinar"))
+        # NOMEADO, não só "pra assinar": o funil tem DOIS documentos correndo em
+        # paralelo (orçamento e contrato), cada um com seu próprio mandar/reenviar
+        # — sem dizer qual, o vendedor não sabe qual dos dois está pendente.
+        acoes.append(("assinar", "Mandar o contrato pra assinar"))
     elif contrato_numero and not contrato_assinado:
         dias = _dias_desde(contrato_enviado_em, hoje)
         # o TEMPO PARADO é o dado que faltava: 3 dias e 30 dias pedem reações
         # diferentes, e o selo dizia a mesma coisa nos dois casos. Conta do ENVIO,
         # não da criação do contrato — o cliente só começou a esperar quando o link
         # chegou na mão dele.
-        selos.append({"texto": "Aguardando assinatura" + (f" há {_ha(dias)}" if dias is not None else ""),
+        selos.append({"texto": "Contrato aguardando assinatura"
+                              + (f" há {_ha(dias)}" if dias is not None else ""),
                       "tom": "ambar",
                       "dica": "O cliente ainda não assinou o contrato nº "
                               f"{contrato_numero}."})
         # ...e agora existe BOTÃO. Antes a dica mandava "mande o link pro cliente"
         # e não havia nada pra clicar: o link ficava escondido no menu de três
         # pontos, junto de "abrir" e "copiar".
-        acoes.append(("assinar", "Reenviar pra assinar"))
+        acoes.append(("assinar", "Reenviar o contrato pra assinar"))
     elif contrato_numero and contrato_assinado:
         if status != "fechado":
             acoes.append(("fechar", "Fechar negócio"))
@@ -477,10 +481,14 @@ def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
         acoes.append(("fechar", "Fechar negócio"))
 
     # ---- o começo do caminho
+    #
+    # NOMEADO, pelo mesmo motivo do contrato acima: "Mandar pro cliente" sozinho
+    # não diz SE É o orçamento ou o contrato, e um card pode ter os dois pendentes
+    # ao mesmo tempo — dono, 29/08.
     if status in ("rascunho", "enviado", "negociando") and nunca_enviada:
-        selos.append({"texto": "Nunca enviada ao cliente", "tom": "azul",
+        selos.append({"texto": "Orçamento nunca enviado ao cliente", "tom": "azul",
                       "dica": "O cliente ainda não recebeu esta proposta."})
-        acoes.append(("enviar", "Mandar pro cliente"))
+        acoes.append(("enviar", "Mandar o orçamento pro cliente"))
 
     # O RESUMO, na ordem em que a empresa conta a história: fechou o negócio,
     # o dinheiro entrou, a data está de pé, o papel foi assinado. Montado aqui e

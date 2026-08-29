@@ -729,7 +729,7 @@ _ANEXO_TIPOS = {
 # propósito: barrando deste lado, o arquivo grande nem chega a atravessar a rede
 # até o processo que segura as sessões — e o vendedor recebe um recado que explica
 # em vez de um erro de rede.
-_ANEXO_TETO = {"imagem": 5 * 1024 * 1024, "video": 16 * 1024 * 1024,
+_ANEXO_TETO = {"imagem": 5 * 1024 * 1024, "video": 32 * 1024 * 1024,
                "documento": 16 * 1024 * 1024}
 
 

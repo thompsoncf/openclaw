@@ -96,7 +96,10 @@ conferir(midiaDaMsg(enviada({ imageMessage: { mimetype: 'image/jpeg' } })) === n
 
 console.log('\nos tetos, que existem por causa da memória deste processo')
 conferir(LIMITE_MIDIA.imagem === 5 * 1024 * 1024, 'foto: 5 MB')
-conferir(LIMITE_MIDIA.video === 16 * 1024 * 1024, 'vídeo: 16 MB (o teto do WhatsApp)')
+// 32 e não 16: o `.mov` de iPhone que o dono tentou mandar em 28/08 passava de 16,
+// e vídeo de celular passa disso com poucos segundos. O teto é NOSSO (memória deste
+// processo), não do WhatsApp — o Baileys não impõe limite de bytes nenhum.
+conferir(LIMITE_MIDIA.video === 32 * 1024 * 1024, 'vídeo: 32 MB')
 conferir(LIMITE_MIDIA.documento === 16 * 1024 * 1024, 'documento: 16 MB')
 conferir(LIMITE_MIDIA.video >= LIMITE_MIDIA.imagem,
   'vídeo não pode ter teto menor que foto — derrubaria vídeo de poucos segundos')

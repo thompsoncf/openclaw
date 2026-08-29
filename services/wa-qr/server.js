@@ -3054,17 +3054,26 @@ function lerBinario (req, limite) {
   })
 }
 
-// Teto por tipo do que o vendedor MANDA pelo Zaq (passo 4 da mídia). Medido em
-// produção antes de escolher: este processo opera em ~110 MB com heap de 1024 e
-// contêiner de 2 GB, então um arquivo de 16 MB — que vira ~4 cópias entre buffer
-// bruto, cifrado e upload — cabe com folga larga. O que garante o "UM de cada
-// vez" é a fila abaixo, e é ela que faz o teto valer: sem a fila, N vendedores
-// mandando junto multiplicariam isto por N e aí sim o número ficaria perigoso.
+// Teto por tipo do que o vendedor MANDA pelo Zaq (passo 4 da mídia).
 //
-// 16 MB é o teto do próprio WhatsApp pra mídia; documento aceita mais no app
-// oficial, mas subir daqui só aumentaria o risco pra um caso que quase não
-// aparece — PDF de orçamento e comprovante vivem na casa das centenas de KB.
-const LIMITE_MIDIA = { imagem: 5 * 1024 * 1024, video: 16 * 1024 * 1024, documento: 16 * 1024 * 1024 }
+// O TETO É NOSSO, NÃO DO WHATSAPP. A primeira versão deste comentário dizia que
+// 16 MB era "o teto do próprio WhatsApp" — não é, e a conferência no Baileys não
+// achou limite de bytes nenhum (nem constante, nem checagem). O número saiu da
+// memória DESTE processo, que é quem segura todas as sessões; vestir isso de
+// restrição externa escondeu que era uma escolha nossa, e escolha nossa se muda.
+//
+// Medido em produção antes de escolher: opera em ~110 MB com heap de 1024 e
+// contêiner de 2 GB. Um vídeo de 32 MB vira ~4 cópias entre buffer bruto, cifrado
+// e upload — ~128 MB de pico, ~240 MB no total. Folga larga. O que garante o "UM
+// de cada vez" é a fila abaixo, e é ela que faz o teto valer: sem a fila, N
+// vendedores mandando junto multiplicariam isto por N.
+//
+// 32 e não mais: vídeo de celular passa de 16 MB com facilidade (o `.mov` de um
+// iPhone que motivou a subida tinha mais que isso), e 32 cobre a grande maioria
+// dos vídeos curtos. Acima disso o caminho certo é COMPRIMIR antes de mandar,
+// como o app do WhatsApp faz — e isso pede ffmpeg, que nenhum dos dois serviços
+// tem hoje. Subir o número sem comprimir só empurra o problema pra frente.
+const LIMITE_MIDIA = { imagem: 5 * 1024 * 1024, video: 32 * 1024 * 1024, documento: 16 * 1024 * 1024 }
 
 // Uma fila de concorrência 1 pro ENVIO de voz, pelo mesmo motivo da fila da
 // transcrição: N vendedores mandando junto multiplicariam o buffer por N.

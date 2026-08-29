@@ -1,0 +1,324 @@
+<title>Cliente e Fornecedor: Um Cadastro Só</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --ground:#f4f6f7; --surface:#ffffff; --sunken:#eceff1;
+  --borda:#d5dbde; --borda-forte:#b9c2c7;
+  --txt:#12171a; --txt-mut:#5d686e; --txt-fraco:#8a949a;
+  --verde:#128a3e; --verde-bg:rgba(18,138,62,.10); --verde-bd:rgba(18,138,62,.32);
+  --cinza:#6b757a; --cinza-bg:rgba(107,117,122,.10); --cinza-bd:rgba(107,117,122,.28);
+  --ambar:#a06a05; --ambar-bg:rgba(160,106,5,.12); --ambar-bd:rgba(160,106,5,.36);
+  --roxo:#6d3fb5; --roxo-bg:rgba(109,63,181,.10); --roxo-bd:rgba(109,63,181,.30);
+  --sombra:0 1px 2px rgba(16,24,28,.06),0 8px 24px -12px rgba(16,24,28,.18);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#0e1113; --surface:#171b1e; --sunken:#121618;
+  --borda:#272d31; --borda-forte:#394247;
+  --txt:#e6e9ea; --txt-mut:#8b9499; --txt-fraco:#69737a;
+  --verde:#35d06d; --verde-bg:rgba(34,197,94,.13); --verde-bd:rgba(34,197,94,.34);
+  --cinza:#79848a; --cinza-bg:rgba(121,132,138,.12); --cinza-bd:rgba(121,132,138,.26);
+  --ambar:#e0a534; --ambar-bg:rgba(224,165,52,.14); --ambar-bd:rgba(224,165,52,.34);
+  --roxo:#b092e8; --roxo-bg:rgba(176,146,232,.13); --roxo-bd:rgba(176,146,232,.30);
+  --sombra:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+}}
+:root[data-theme="dark"]{
+  --ground:#0e1113; --surface:#171b1e; --sunken:#121618;
+  --borda:#272d31; --borda-forte:#394247;
+  --txt:#e6e9ea; --txt-mut:#8b9499; --txt-fraco:#69737a;
+  --verde:#35d06d; --verde-bg:rgba(34,197,94,.13); --verde-bd:rgba(34,197,94,.34);
+  --cinza:#79848a; --cinza-bg:rgba(121,132,138,.12); --cinza-bd:rgba(121,132,138,.26);
+  --ambar:#e0a534; --ambar-bg:rgba(224,165,52,.14); --ambar-bd:rgba(224,165,52,.34);
+  --roxo:#b092e8; --roxo-bg:rgba(176,146,232,.13); --roxo-bd:rgba(176,146,232,.30);
+  --sombra:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--txt);
+  font-family:"IBM Plex Sans",-apple-system,sans-serif;font-size:15px;line-height:1.55;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1020px;margin:0 auto;padding:2.5rem 1.25rem 4rem;display:flex;flex-direction:column;gap:2.75rem}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+.eyebrow{font-size:.7rem;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-fraco);font-weight:600}
+h1{margin:0;font-size:clamp(1.6rem,3.6vw,2.15rem);line-height:1.15;font-weight:700;letter-spacing:-.02em;text-wrap:balance}
+h2{margin:0;font-size:1.05rem;font-weight:600;letter-spacing:-.01em}
+h3{margin:0;font-size:.8rem;font-weight:600;color:var(--txt-fraco);letter-spacing:.06em;text-transform:uppercase}
+.lede{margin:0;color:var(--txt-mut);max-width:64ch}.lede b{color:var(--txt);font-weight:600}
+.nota{margin:0;color:var(--txt-mut);font-size:.9rem;max-width:72ch}
+.nota b{color:var(--txt);font-weight:600}
+ul.nota{padding-left:1.1rem;display:flex;flex-direction:column;gap:.4rem}
+section{display:flex;flex-direction:column;gap:1rem}
+.top{display:flex;flex-direction:column;gap:.85rem}
+
+/* ---- painel que imita o formulário real ---- */
+.par{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.painel{background:var(--surface);border:1px solid var(--borda);border-radius:10px;
+  box-shadow:var(--sombra);overflow:hidden;display:flex;flex-direction:column}
+.painel-topo{padding:.5rem .85rem;border-bottom:1px solid var(--borda);background:var(--sunken);
+  font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--txt-mut);
+  display:flex;justify-content:space-between;align-items:center;gap:.5rem}
+.painel-topo .tag{letter-spacing:0;text-transform:none;font-size:.68rem;padding:.1rem .45rem;
+  border-radius:999px;border:1px solid}
+.tag-hoje{color:var(--cinza);border-color:var(--cinza-bd);background:var(--cinza-bg)}
+.tag-novo{color:var(--verde);border-color:var(--verde-bd);background:var(--verde-bg)}
+.painel-corpo{padding:.9rem .85rem;display:flex;flex-direction:column;gap:.55rem;flex:1}
+
+.campo-rot{font-size:.74rem;font-weight:600;color:var(--txt-mut)}
+.busca{display:flex;align-items:center;gap:.5rem;border:1px solid var(--borda-forte);border-radius:8px;
+  padding:.5rem .6rem;background:var(--ground);font-size:.84rem;color:var(--txt-fraco)}
+.busca .lupa{flex:none;opacity:.7}
+.dica{font-size:.72rem;color:var(--txt-fraco)}
+.alt{display:flex;flex-wrap:wrap;gap:.15rem 1rem;font-size:.74rem;color:var(--txt-fraco)}
+.alt span{text-decoration:underline;text-decoration-color:var(--borda);text-underline-offset:3px}
+
+/* o botão novo — o assunto da página */
+.btn-empresa{display:flex;align-items:center;gap:.55rem;width:100%;text-align:left;
+  border:1px solid var(--verde-bd);background:var(--verde-bg);color:var(--txt);
+  border-radius:8px;padding:.55rem .65rem;font:inherit;font-size:.84rem;cursor:default}
+.btn-empresa .ic{flex:none;font-size:.95rem}
+.btn-empresa .tt{font-weight:600}
+.btn-empresa .sb{display:block;font-size:.72rem;color:var(--txt-mut);font-weight:400;margin-top:1px}
+.ou{display:flex;align-items:center;gap:.6rem;font-size:.68rem;color:var(--txt-fraco);
+  text-transform:uppercase;letter-spacing:.08em}
+.ou::before,.ou::after{content:"";flex:1;height:1px;background:var(--borda)}
+
+/* cartão verde de endereço escolhido (o que já existe hoje) */
+.escolhido{display:flex;gap:.55rem;align-items:flex-start;border:1px solid var(--verde-bd);
+  background:var(--verde-bg);border-radius:8px;padding:.55rem .6rem}
+.escolhido .chk{flex:none;color:var(--verde)}
+.escolhido .nm{font-size:.84rem;font-weight:700}
+.escolhido .ed{font-size:.74rem;color:var(--txt-mut);margin-top:1px}
+.escolhido .lk{font-size:.74rem;color:var(--verde);text-decoration:underline;display:inline-block;margin-top:.2rem}
+.escolhido .x{margin-left:auto;flex:none;color:var(--txt-fraco);font-size:.8rem}
+.enviar{align-self:flex-end;font-size:.72rem;font-weight:700;border-radius:7px;padding:.3rem .55rem;
+  background:var(--verde);color:var(--surface);border:1px solid var(--verde)}
+
+.faixa-ambar{display:flex;gap:.5rem;align-items:flex-start;border:1px solid var(--ambar-bd);
+  background:var(--ambar-bg);border-radius:8px;padding:.5rem .6rem;font-size:.78rem;color:var(--ambar)}
+.faixa-ambar a{color:var(--ambar);text-decoration:underline;white-space:nowrap;font-weight:600}
+.faixa-ambar .corpo{color:var(--txt-mut)}
+.faixa-ambar .corpo b{color:var(--txt)}
+
+.tab-env{overflow-x:auto;border:1px solid var(--borda);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.85rem;min-width:520px}
+th{text-align:left;font-size:.66rem;letter-spacing:.09em;text-transform:uppercase;color:var(--txt-fraco);
+  font-weight:600;padding:.55rem .8rem;border-bottom:1px solid var(--borda);background:var(--sunken)}
+td{padding:.58rem .8rem;border-bottom:1px solid var(--borda);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;font-family:"IBM Plex Mono",monospace;
+  white-space:nowrap;font-weight:600}
+td .sub{display:block;color:var(--txt-mut);font-size:.77rem;margin-top:.1rem}
+.ok{color:var(--verde);font-weight:600}
+.nao{color:var(--cinza);font-weight:600}
+.destaque td{background:var(--ambar-bg)}
+.destaque td:first-child{box-shadow:inset 3px 0 0 var(--ambar)}
+
+pre{margin:0;background:var(--sunken);border:1px solid var(--borda);border-radius:7px;
+  padding:.7rem .8rem;overflow-x:auto;font-size:.78rem;line-height:1.6}
+pre .g{color:var(--cinza)} pre .v{color:var(--verde);font-weight:600}
+.perg{border:1px solid var(--roxo-bd);background:var(--roxo-bg);border-radius:10px;padding:1rem 1.1rem;
+  display:flex;flex-direction:column;gap:.6rem}
+.perg h2{color:var(--roxo)}
+.opc{display:flex;gap:.55rem;align-items:flex-start;font-size:.88rem}
+.opc .letra{flex:none;font-family:"IBM Plex Mono",monospace;font-weight:600;color:var(--roxo);
+  border:1px solid var(--roxo-bd);border-radius:5px;padding:0 .35rem;font-size:.76rem;margin-top:.1rem}
+.opc .txt{color:var(--txt-mut)}.opc .txt b{color:var(--txt)}
+</style>
+<style>
+/* ---- específicos desta página ---- */
+.grid2{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
+.tag-ruim{color:var(--ambar);border-color:var(--ambar-bd);background:var(--ambar-bg)}
+.linha{display:flex;gap:.5rem;align-items:center;font-size:.82rem}
+.inp{border:1px solid var(--borda-forte);border-radius:8px;padding:.42rem .55rem;background:var(--ground);
+  font-size:.82rem;color:var(--txt-mut);flex:1}
+.inp.cheio{color:var(--txt)}
+.par2{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+.chk{display:flex;gap:.45rem;align-items:center;font-size:.8rem;color:var(--txt-mut)}
+.cx{width:15px;height:15px;border:1px solid var(--borda-forte);border-radius:4px;flex:none;
+  display:grid;place-items:center;font-size:.62rem;background:var(--ground)}
+.cx.on{background:var(--verde);border-color:var(--verde);color:#fff}
+.salvar{align-self:flex-end;font-size:.76rem;font-weight:700;border-radius:7px;padding:.35rem .7rem;
+  background:var(--verde);color:#fff;border:1px solid var(--verde)}
+.toast{border-radius:8px;padding:.45rem .6rem;font-size:.78rem;border:1px solid}
+.toast.mau{color:var(--ambar);border-color:var(--ambar-bd);background:var(--ambar-bg)}
+.toast.bom{color:var(--verde);border-color:var(--verde-bd);background:var(--verde-bg)}
+.achado{border:1px solid var(--roxo-bd);background:var(--roxo-bg);border-radius:8px;padding:.6rem .65rem;
+  display:flex;flex-direction:column;gap:.45rem}
+.achado .tit{font-size:.72rem;font-weight:700;color:var(--roxo);letter-spacing:.04em;text-transform:uppercase}
+.pess{display:flex;gap:.55rem;align-items:flex-start;background:var(--surface);border:1px solid var(--borda);
+  border-radius:7px;padding:.5rem .55rem}
+.pess .av{flex:none;width:26px;height:26px;border-radius:50%;background:var(--sunken);border:1px solid var(--borda);
+  display:grid;place-items:center;font-size:.7rem;font-weight:700;color:var(--txt-mut)}
+.pess .nm{font-size:.82rem;font-weight:600;line-height:1.3}
+.pess .dt{font-size:.72rem;color:var(--txt-mut)}
+.pess .papeis{display:flex;gap:.3rem;margin-top:.25rem;flex-wrap:wrap}
+.mini{font-size:.65rem;padding:.05rem .35rem;border-radius:999px;border:1px solid;font-weight:600}
+.mini.cli{color:var(--verde);border-color:var(--verde-bd);background:var(--verde-bg)}
+.mini.forn{color:var(--roxo);border-color:var(--roxo-bd);background:var(--roxo-bg)}
+.mini.off{color:var(--txt-fraco);border-color:var(--borda);background:var(--sunken)}
+.acoes{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.1rem}
+.bt{font-size:.72rem;font-weight:600;border-radius:6px;padding:.28rem .55rem;border:1px solid var(--borda-forte);
+  background:var(--surface);color:var(--txt)}
+.bt.pri{background:var(--roxo);border-color:var(--roxo);color:#fff}
+.passos{counter-reset:p;display:flex;flex-direction:column;gap:.55rem;padding:0;margin:0;list-style:none}
+.passos li{counter-increment:p;display:flex;gap:.6rem;font-size:.88rem;color:var(--txt-mut)}
+.passos li b{color:var(--txt)}
+.passos li::before{content:counter(p);flex:none;width:20px;height:20px;border-radius:50%;
+  background:var(--sunken);border:1px solid var(--borda);display:grid;place-items:center;
+  font-size:.7rem;font-weight:700;color:var(--txt-mut);margin-top:.1rem}
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <span class="eyebrow">Prime Eventos · Cadastro de Clientes e Fornecedores</span>
+  <h1>A mesma pessoa, um cadastro só</h1>
+  <p class="lede">O cadastro da Prime tem <b>23 registros para 20 pessoas</b>. Fui atrás dos 3 repetidos: são <b>dois problemas diferentes</b>, com causas diferentes — e só um deles já foi consertado.</p>
+</header>
+
+<section>
+  <h2>Os dois duplicados, como estão no banco</h2>
+  <div class="tab-env">
+    <table>
+      <thead><tr><th>Quem</th><th>Quando</th><th>O que difere</th></tr></thead>
+      <tbody>
+        <tr class="destaque">
+          <td><b>Ana Clara Marques</b><span class="sub">3 registros — ids 25, 26, 27</span></td>
+          <td class="mono" style="white-space:nowrap">25/08<span class="sub">17:52 · 17:54 · 17:57</span></td>
+          <td><span class="nao">Nada.</span> Mesmo telefone, mesmo e-mail, mesma cidade.<span class="sub">Três cliques em "Salvar" com 2 e 3 minutos de intervalo. A tela não disse que já tinha salvado.</span></td>
+        </tr>
+        <tr>
+          <td><b>Gilvan Pereira de Carvalho</b><span class="sub">2 registros — ids 17 e 20</span></td>
+          <td class="mono" style="white-space:nowrap">21/08<span class="sub">12:47 · 13:58</span></td>
+          <td>Um é <span class="ok">cliente</span>, o outro é <span class="ok">fornecedor</span>.<span class="sub">O cliente tem telefone, CEP e endereço. O fornecedor está vazio — só o nome.</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="nota">O caso da <b>Ana Clara</b> já foi fechado no dia 26/08. O caso do <b>Gilvan</b> não — e é o mais interessante, porque revela como o sistema pensa.</p>
+</section>
+
+<section>
+  <h2>De onde vem: o sistema separa identidade de relação</h2>
+  <p class="nota">São duas tabelas, e a ideia é boa:</p>
+  <pre><span class="g">pessoas </span>  quem a pessoa é no mundo  <span class="g">→</span> CPF, CNPJ, nome, celular
+<span class="g">clientes</span>  a relação da SUA loja com ela <span class="g">→</span> <span class="v">eh_cliente</span> · <span class="v">eh_fornecedor</span></pre>
+  <p class="nota">Repare: <b><code>eh_cliente</code> e <code>eh_fornecedor</code> convivem na mesma linha</b>. O desenho já previu que a mesma pessoa compre de você <i>e</i> venda pra você. O Gilvan deveria ser <b>uma linha com as duas marcas</b> — não duas linhas.</p>
+  <p class="nota">O que decide se funde ou duplica é uma regra só, escrita no código:</p>
+  <div class="faixa-ambar">
+    <span>⚠</span>
+    <span class="corpo"><b>Só CPF e CNPJ fundem.</b> Celular apenas <i>sugere</i>, nunca funde. Sem documento, cada cadastro cria uma pessoa nova — e uma relação nova junto.</span>
+  </div>
+  <p class="nota">Nem Ana Clara nem Gilvan têm CPF cadastrado. Por isso os dois viraram pessoas diferentes.</p>
+</section>
+
+<section>
+  <h2>O que o conserto de 26/08 pegou — e o que deixou passar</h2>
+  <p class="nota">O PR #568 acrescentou: sem documento, procura um cliente do mesmo lojista com o <b>mesmo telefone</b> antes de criar. Isso mata o caso da Ana Clara. Mas sobraram três frestas:</p>
+  <div class="tab-env">
+    <table>
+      <thead><tr><th>Fresta</th><th>Por quê</th><th style="text-align:right">Risco hoje</th></tr></thead>
+      <tbody>
+        <tr class="destaque">
+          <td><b>O papel não é aplicado ao reusar</b></td>
+          <td>Ao reencontrar a pessoa, o código devolve o registro existente <b>sem ligar</b> <code>eh_fornecedor</code>. A tela diz "Cliente cadastrado." e nada mudou.<span class="sub">É exatamente o caso do Gilvan.</span></td>
+          <td class="num">Alto</td>
+        </tr>
+        <tr>
+          <td><b>Telefone casa por texto exato</b></td>
+          <td>Na Prime convivem <b>13 registros com 11 dígitos</b> (<code>8699…</code>, digitados à mão) e <b>6 com 12</b> (<code>5586…</code>, vindos do WhatsApp). <code>8699…</code> ≠ <code>5586…</code> — não casa.</td>
+          <td class="num">Alto</td>
+        </tr>
+        <tr>
+          <td><b>Sem telefone, sem rede</b></td>
+          <td>4 registros não têm telefone nenhum. Sem documento e sem telefone, nada segura a duplicata.</td>
+          <td class="num">Médio</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="nota">A boa notícia: <b>o próprio projeto já resolveu o problema do telefone em outro lugar.</b> O WhatsApp casa contatos pelos <b>últimos 8 dígitos</b> (<code>wa_contatos.numero8</code>), justamente porque 55, DDD e o nono dígito variam. É só usar a mesma régua aqui.</p>
+</section>
+
+<section>
+  <h2>A proposta, na tela</h2>
+  <p class="nota">Duas mudanças. A primeira: quando o sistema reconhecer a pessoa, <b>ele mostra e pergunta</b>, em vez de decidir calado.</p>
+  <div class="grid2">
+
+    <div class="painel">
+      <div class="painel-topo"><span>Hoje</span><span class="tag tag-ruim">duplica calado</span></div>
+      <div class="painel-corpo">
+        <span class="campo-rot">Nome</span>
+        <div class="inp cheio">GILVAN PEREIRA DE CARVALHO</div>
+        <span class="campo-rot">Telefone</span>
+        <div class="inp">— em branco —</div>
+        <div class="par2">
+          <div class="chk"><span class="cx">✓</span> Cliente</div>
+          <div class="chk"><span class="cx on">✓</span> Fornecedor</div>
+        </div>
+        <button class="salvar">Salvar</button>
+        <div class="toast mau">✓ "Cliente cadastrado." — e nasceu o <b>segundo</b> Gilvan.</div>
+      </div>
+    </div>
+
+    <div class="painel">
+      <div class="painel-topo"><span>Proposta</span><span class="tag tag-novo">reconhece e pergunta</span></div>
+      <div class="painel-corpo">
+        <span class="campo-rot">Nome</span>
+        <div class="inp cheio">GILVAN PEREIRA DE CARVALHO</div>
+        <div class="achado">
+          <span class="tit">Já existe alguém assim</span>
+          <div class="pess">
+            <span class="av">GP</span>
+            <div>
+              <div class="nm">GILVAN PEREIRA DE CARVALHO</div>
+              <div class="dt">(86) 99828-0472 · Rua Ulisses Marques, 2790</div>
+              <div class="papeis"><span class="mini cli">Cliente</span><span class="mini off">Fornecedor</span></div>
+            </div>
+          </div>
+          <div class="acoes">
+            <button class="bt pri">É essa pessoa — marcar também como fornecedor</button>
+            <button class="bt">É outra pessoa, cadastrar separado</button>
+          </div>
+        </div>
+        <div class="toast bom">✓ "Gilvan agora é <b>cliente e fornecedor</b>." — uma linha só.</div>
+      </div>
+    </div>
+
+  </div>
+  <p class="nota">O botão da direita continua existindo: <b>homônimo é real</b>. Quem decide é a pessoa, não o sistema — e é isso que evita tanto o duplicado quanto a fusão errada de dois Josés diferentes.</p>
+</section>
+
+<section>
+  <h2>A segunda mudança: o aviso tem que ser honesto</h2>
+  <p class="nota">Hoje a tela diz <b>"Cliente cadastrado."</b> em três situações diferentes: quando criou, quando reusou em silêncio, e quando não fez nada. Foi por isso que a Ana Clara virou três — a vendedora não tinha como saber que já tinha dado certo.</p>
+  <div class="tab-env">
+    <table>
+      <thead><tr><th>O que aconteceu</th><th>Diz hoje</th><th>Deveria dizer</th></tr></thead>
+      <tbody>
+        <tr><td>Criou uma pessoa nova</td><td class="mono">Cliente cadastrado.</td><td class="ok">Ana Clara cadastrada.</td></tr>
+        <tr class="destaque"><td>Reusou uma que já existia</td><td class="mono">Cliente cadastrado.</td><td class="ok">Ana Clara <b>já estava cadastrada</b> — abri a ficha dela.</td></tr>
+        <tr class="destaque"><td>Reusou e mudou o papel</td><td class="mono">Cliente cadastrado.</td><td class="ok">Gilvan agora é <b>cliente e fornecedor</b>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>Resumo do que eu faria</h2>
+  <ol class="passos">
+    <li><b>Aplicar o papel ao reusar.</b> Se a pessoa já existe e você marcou "fornecedor", liga a marca na linha que existe. É o conserto do Gilvan e o de maior impacto.</li>
+    <li><b>Casar telefone pelos últimos 8 dígitos</b>, como o WhatsApp já faz. Fecha a fresta entre <code>8699…</code> e <code>5586…</code>.</li>
+    <li><b>Mostrar o candidato antes de salvar</b>, com as duas saídas: "é essa" ou "é outra".</li>
+    <li><b>Mensagem honesta</b> — criou, reusou ou mudou o papel.</li>
+    <li><b>Juntar os 3 duplicados que já existem</b> — passo à parte, com você confirmando um a um. Não faço isso sozinho: fundir cadastro é irreversível.</li>
+  </ol>
+  <div class="perg">
+    <h2>Decisão</h2>
+    <div class="opc"><span class="letra">A</span><span class="txt">Faço os <b>4 primeiros</b> (código + testes) e deixo a junção dos existentes pra depois.</span></div>
+    <div class="opc"><span class="letra">B</span><span class="txt">Só o item 1 e 2 agora — o mínimo que para a duplicação — e o resto depois.</span></div>
+    <div class="opc"><span class="letra">C</span><span class="txt">Ajustar algo neste desenho antes.</span></div>
+  </div>
+</section>
+
+</div>

@@ -469,6 +469,18 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .bub .doc .nm{font-size:.78rem;font-weight:600;word-break:break-word;line-height:1.25}
 .bub .doc .pz{font-size:.65rem;opacity:.65;font-family:var(--mono)}
 .bub .mid-aviso{padding:.45rem .55rem;font-size:.73rem;line-height:1.4;opacity:.9}
+/* GUARDAR: discreto de propósito. Aparece em TODA bolha de mídia, e a esmagadora
+   maioria é foto que ninguém vai guardar — chamativo e repetido 200 vezes vira
+   ruído, e ruído deixa de ser visto no dia do comprovante que importa. */
+.bub .guardar{display:block;width:auto;margin:.3rem 0 0;padding:.1rem 0;background:none;
+  border:0;color:var(--text-faint);font-size:.65rem;text-decoration:underline;
+  text-underline-offset:2px;cursor:pointer;font-family:inherit}
+.bub .guardar:disabled{opacity:.5;text-decoration:none;cursor:default}
+.bub .guardar.ruim{color:var(--coral)}
+/* o estado guardado é SELO, não botão: desguardar não existe de propósito — o
+   ponto de guardar é não depender mais de ninguém, e um desfazer ao lado do
+   contrato assinado é um acidente esperando data */
+.bub .guardado{display:block;margin:.3rem 0 0;font-size:.65rem;color:var(--neon);opacity:.8}
 .bub .mid img{cursor:zoom-in}
 /* A LUPA: a foto em tela cheia por cima da conversa.
    `inset:0` + `position:fixed` cobre tudo, inclusive as barras do sistema (o _page
@@ -3497,18 +3509,39 @@ def _midia_html(lead_id: int, m: dict) -> str:
     if not tipo or not mid:
         return ""
     src = f"{_BASE}/lead/{lead_id}/midia/{mid}"
+    guardar = _guardar_html(mid, d)
     if tipo == "documento":
         peso = f"<br><span class=pz>{esc(_tam_br(d.get('bytes')))}</span>" if d.get("bytes") else ""
         return (f"<a class='mid doc' href='{esc(src)}' target=_blank rel=noopener>"
                 f"<span>📄</span><span><span class=nm>{esc(d.get('nome') or 'arquivo')}"
-                f"</span>{peso}</span></a>")
+                f"</span>{peso}</span></a>{guardar}")
     if tipo == "video":
         return (f"<span class=mid><video controls preload=none playsinline "
-                f"src='{esc(src)}'></video></span>")
+                f"src='{esc(src)}'></video></span>{guardar}")
     fig = " fig" if tipo == "figurinha" else ""
     return (f"<span class='mid{fig}'><img loading=lazy src='{esc(src)}' alt='' "
             f"onerror=\"this.parentNode.innerHTML='<span class=mid-aviso>🖼 não consegui "
-            f"carregar</span>'\"></span>")
+            f"carregar</span>'\"></span>{guardar}")
+
+
+def _guardar_html(mensagem_id: int, d: dict) -> str:
+    """O botão Guardar da bolha — ou o selo, quando já está guardado.
+
+    DISCRETO DE PROPÓSITO. Ele aparece em TODA bolha de mídia, e a esmagadora
+    maioria delas é foto que ninguém vai guardar. Um botão chamativo repetido 200
+    vezes numa conversa vira ruído, e ruído deixa de ser visto justamente no dia em
+    que chega o comprovante que importa.
+
+    O estado guardado NÃO é um botão: é um selo, sem ação. Desguardar não existe de
+    propósito — o ponto de guardar é o arquivo não depender mais de ninguém, e um
+    botão de desfazer ao lado do contrato assinado é um acidente esperando data.
+    """
+    if not mensagem_id:
+        return ""
+    if d.get("guardada"):
+        return "<span class=guardado title='Guardado no Zaq'>🔒 guardado</span>"
+    return (f"<button type=button class=guardar data-msg='{mensagem_id}'>"
+            f"guardar</button>")
 
 
 def _hora_br(dt) -> str:
@@ -3726,13 +3759,30 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "if(b>=1024)return Math.round(b/1024)+' KB';return b+' B';}"
            "function mid(m){var d=m.midia;if(!d||!d.tipo||!m.id)return '';"
            f"var s='{_BASE}/lead/{lead_id}/midia/'+m.id;"
+           # o mesmo botão do _guardar_html — as duas cópias têm que dar o mesmo HTML
+           "var g=d.guardada?'<span class=guardado>🔒 guardado</span>':"
+           "('<button type=button class=guardar data-msg=\"'+m.id+'\">guardar</button>');"
            "if(d.tipo==='documento')return '<a class=\"mid doc\" href=\"'+s+'\" target=_blank "
            "rel=noopener><span>📄</span><span><span class=nm>'+txt(d.nome||'arquivo')+'</span>'"
-           "+(d.bytes?('<br><span class=pz>'+tam(d.bytes)+'</span>'):'')+'</span></a>';"
+           "+(d.bytes?('<br><span class=pz>'+tam(d.bytes)+'</span>'):'')+'</span></a>'+g;"
            "if(d.tipo==='video')return '<span class=mid><video controls preload=none "
-           "playsinline src=\"'+s+'\"></video></span>';"
+           "playsinline src=\"'+s+'\"></video></span>'+g;"
            "return '<span class=\"mid'+(d.tipo==='figurinha'?' fig':'')+'\">"
-           "<img loading=lazy src=\"'+s+'\" alt=\"\"></span>';}"
+           "<img loading=lazy src=\"'+s+'\" alt=\"\"></span>'+g;}"
+           # GUARDAR: delegação no chat, como a lupa — as bolhas do polling nascem
+           # depois desta linha rodar, e handler amarrado na criação não pegaria elas.
+           "chat.addEventListener('click',function(e){"
+           "var b=e.target.closest&&e.target.closest('.guardar');if(!b)return;"
+           "var id=b.getAttribute('data-msg');if(!id||b.disabled)return;"
+           "b.disabled=true;b.textContent='guardando…';"
+           f"fetch('{_BASE}/lead/{lead_id}/guardar/'+id,{{method:'POST'}})"
+           ".then(function(r){return r.json();}).then(function(j){"
+           # vira SELO, não volta a ser botão: guardado é estado final
+           "if(j&&j.ok){var s2=document.createElement('span');s2.className='guardado';"
+           "s2.textContent='🔒 guardado';b.parentNode.replaceChild(s2,b);return;}"
+           "b.disabled=false;b.textContent='guardar';"
+           "b.classList.add('ruim');b.title=(j&&j.erro)||'não consegui guardar';"
+           "}).catch(function(){b.disabled=false;b.textContent='guardar';});});"
            "function puxa(){"
            "if(ocupado||document.visibilityState!=='visible')return;ocupado=true;"
            f"fetch('{_BASE}/lead/{lead_id}/mensagens?desde='+ultimo)"
@@ -4141,6 +4191,31 @@ def _anexo_sync(conta_id, membro_id, lead_id, dados, nome, mime, legenda):
                            nome=nome, mimetype=mime, legenda=legenda)
 
 
+def _guardar_sync(conta_id, membro_id, lead_id, mensagem_id):
+    """O trabalho do Guardar, fora do event loop.
+
+    Mora aqui fora pelo mesmo motivo do `_anexo_sync`: `get_pool()` no corpo de um
+    `async def` é o que o tests/test_event_loop_nao_trava.py procura. E aqui pesa
+    mais — guardar BAIXA do CDN e SOBE pro bucket, dois saltos de rede em série."""
+    return ck.guardar_midia(get_pool(), conta_id, membro_id, lead_id, mensagem_id)
+
+
+@router.post("/cockpit/lead/{lead_id}/guardar/{mensagem_id}")
+async def cockpit_guardar(request: Request, lead_id: int, mensagem_id: int):
+    """Guardar este arquivo de vez (passo 5).
+
+    O CDN do WhatsApp expira. Para foto de decoração tudo bem — pede de novo. Para
+    o comprovante do sinal e o contrato assinado, não: o dia em que se precisa
+    deles é o dia da discussão, meses depois. Este botão copia o arquivo pro nosso
+    bucket privado, e a partir daí a bolha serve de lá.
+    """
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    r = await run_in_threadpool(_guardar_sync, sess[0], sess[1], lead_id, mensagem_id)
+    return JSONResponse(r)
+
+
 @router.post("/cockpit/lead/{lead_id}/anexo")
 async def cockpit_anexo(request: Request, lead_id: int):
     """O vendedor mandando foto, vídeo ou documento de dentro do Zaq (passo 4).
@@ -4233,7 +4308,8 @@ def cockpit_midia(request: Request, lead_id: int, mensagem_id: int):
     conta_id, membro_id = sess[0], sess[1]
     with get_pool().connection() as c:
         r = c.execute(
-            """select m.midia_ref, m.midia_tipo, coalesce(m.midia_meta,'{}'::jsonb)
+            """select m.midia_ref, m.midia_tipo, coalesce(m.midia_meta,'{}'::jsonb),
+                      m.midia_arquivo
                  from mensagens m
                  join conversas cv on cv.id = m.conversa_id
                 where m.id=%s and cv.conta_id=%s and cv.prospeccao_id=%s
@@ -4245,7 +4321,30 @@ def cockpit_midia(request: Request, lead_id: int, mensagem_id: int):
     # lead_do_vendedor diz que o lead é DESTE vendedor.
     if not ck.lead_do_vendedor(get_pool(), conta_id, membro_id, lead_id):
         return Response(status_code=404)
-    ref, tipo, meta = r[0], r[1], (r[2] or {})
+    ref, tipo, meta, arquivo = r[0], r[1], (r[2] or {}), r[3]
+
+    # O QUE FOI GUARDADO VEM DO NOSSO BUCKET (passo 5), e o CDN vira o plano B.
+    # É a ordem que dá sentido ao botão: guardar tem que significar "não depende
+    # mais do WhatsApp". Se continuássemos buscando no CDN primeiro, o arquivo
+    # guardado só apareceria no dia em que o CDN já tivesse expirado — ou seja,
+    # o caminho novo estrearia justamente quando ninguém pode testá-lo.
+    if arquivo:
+        from finance import midia_cofre as _mc
+        try:
+            dados, ct = _mc.ler(arquivo)
+            nome_g = "".join(ch for ch in str(meta.get("nome") or "arquivo")
+                             if ch.isprintable() and ch not in '"\\\r\n')[:120] or "arquivo"
+            return Response(dados, media_type=ct, headers={
+                "cache-control": "private, max-age=86400",
+                "content-disposition": ('attachment; filename="%s"' % nome_g
+                                        if tipo == "documento" else "inline")})
+        except Exception as e:  # noqa: BLE001
+            # cai pro CDN em vez de falhar: enquanto o WhatsApp ainda tiver o
+            # arquivo, um problema no bucket não pode tirar a foto da tela
+            import logging
+            logging.getLogger("cockpit.midia").warning(
+                "guardada %s ilegível (%s) — tentando o CDN", mensagem_id, e)
+
     from finance import wa_midia as _wm
     try:
         fluxo = _wm.buscar(ref, tipo)

@@ -38,7 +38,7 @@ create table conversas (id bigserial primary key, conta_id bigint, canal text,
   contato_ref text, status text, chip_id bigint, visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, texto text, provider_sid text, status text,
-  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 create table canais_config (id bigserial primary key, conta_id bigint, canal text,
   identificador text, ativo boolean not null default true, token text,
   provedor text not null default 'twilio', wa_phone_id text);

@@ -43,7 +43,7 @@ create table distribuicao_fila (conta_id bigint, membro_id bigint, ordem int,
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, texto text, membro_id bigint,
   criado_em timestamptz default now(),
-  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text, ativo boolean default true, cockpit_pausado boolean default false);
 create table canais_config (conta_id bigint, canal text, provedor text, rotulo text,

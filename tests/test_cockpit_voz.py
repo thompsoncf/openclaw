@@ -74,7 +74,7 @@ def pool(monkeypatch):
                      canal text, direcao text, autor text, membro_id bigint, texto text,
                      meta jsonb, provider_sid text, status text,
                      criado_em timestamptz default now(),
-                     midia_ref jsonb, midia_tipo text, midia_meta jsonb)""")
+                     midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint)""")
         # `ck.orcamento` (a tela de DETALHE) junta membros pra mostrar o vendedor e
         # pra saber pra quem o cliente responde no e-mail — os testes antigos só
         # passavam por `criar_orcamento`, que não junta

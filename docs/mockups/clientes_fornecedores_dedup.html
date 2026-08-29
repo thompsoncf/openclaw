@@ -233,7 +233,7 @@ pre .g{color:var(--cinza)} pre .v{color:var(--verde);font-weight:600}
       </tbody>
     </table>
   </div>
-  <p class="nota">Faz sentido e é onde tem que ser: <b>12 dos 14 orçamentos têm CNPJ e 8 têm endereço</b>, porque ali vira contrato. O lead, antes disso, tem só o apelido do WhatsApp e o telefone. <b>Esse momento não precisa ser construído.</b></p>
+  <p class="nota">Faz sentido e é onde tem que ser: <b>12 dos 14 orçamentos têm documento e 8 têm endereço</b>, porque ali vira contrato. O lead, antes disso, tem só o apelido do WhatsApp e o telefone. <b>Esse momento não precisa ser construído.</b> <span style='color:var(--ambar)'>(Correção do que eu disse antes: eu chamei esses 12 de CNPJ. São CPF — ver a seção do documento adiante.)</span></p>
 </section>
 
 <section>
@@ -344,6 +344,64 @@ pre .g{color:var(--cinza)} pre .v{color:var(--verde);font-weight:600}
 </section>
 
 <section>
+  <h2>O documento: CPF <i>ou</i> CNPJ — e a Prime é 100% CPF</h2>
+  <p class="nota">Você perguntou pelo campo do documento e ele guarda a maior surpresa do levantamento:</p>
+  <div class="tab-env">
+    <table>
+      <thead><tr><th>Os 23 clientes da Prime</th><th style="text-align:right">Quantos</th></tr></thead>
+      <tbody>
+        <tr><td><b>Pessoa física</b> (<code>tipo='pf'</code>)<span class="sub">Casamento, aniversário, formatura — quem aluga salão é gente, não empresa.</span></td><td class="num">23</td></tr>
+        <tr><td>Com <b>CPF</b> preenchido</td><td class="num">14</td></tr>
+        <tr class="destaque"><td>Com <b>CNPJ</b> preenchido</td><td class="num">0</td></tr>
+        <tr><td>Sem documento nenhum</td><td class="num">9</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="faixa-ambar">
+    <span>⚠</span>
+    <span class="corpo">A tabela <code>orcamentos</code> tem coluna <code>cnpj</code> e <b>não tem coluna <code>cpf</code></b>. Os 12 documentos gravados lá têm <b>11 dígitos</b> — são todos CPF, guardados numa coluna com nome errado.</span>
+  </div>
+  <p class="nota">Na identidade está certo: o código roteia por tamanho — <code>cpf=doc se 11 dígitos</code>, <code>cnpj=doc se 14</code> — e por isso as 14 pessoas têm o CPF no campo certo em <code>pessoas</code>. <b>O erro é só no orçamento</b>, que tem uma gaveta só e o nome dela é "cnpj".</p>
+
+  <h3 style="margin-top:.4rem">O que a tela mostra hoje</h3>
+  <div class="grid2">
+    <div class="painel">
+      <div class="painel-topo"><span>Hoje</span><span class="tag tag-ruim">promete o que não cumpre</span></div>
+      <div class="painel-corpo">
+        <div style="display:flex;gap:.4rem">
+          <span class="bt" style="background:var(--sunken)">🏢 Pessoa Jurídica</span>
+          <span class="bt">🧑 Pessoa Física</span>
+        </div>
+        <span class="campo-rot">CNPJ / CPF <span style="color:var(--txt-fraco)">— preenche empresa, segmento e contato automaticamente</span></span>
+        <div style="display:flex;gap:.4rem">
+          <div class="inp" style="flex:1">00.000.000/0000-00</div>
+          <span class="bt" style="background:var(--verde);color:#fff;border-color:var(--verde)">Buscar</span>
+        </div>
+        <div class="toast mau">Três problemas: o botão já vem em <b>Pessoa Jurídica</b>, que é o caso que <b>nunca</b> acontece na Prime; a máscara mostra CNPJ; e o "preenche automaticamente" <b>só funciona pra CNPJ</b> — pra CPF é promessa vazia.</div>
+      </div>
+    </div>
+    <div class="painel">
+      <div class="painel-topo"><span>Proposta</span><span class="tag tag-novo">um ou outro, explícito</span></div>
+      <div class="painel-corpo">
+        <div style="display:flex;gap:.4rem">
+          <span class="bt">🏢 Pessoa Jurídica</span>
+          <span class="bt pri" style="background:var(--verde);border-color:var(--verde)">🧑 Pessoa Física</span>
+        </div>
+        <span class="campo-rot">CPF <span style="color:var(--txt-fraco)">— opcional agora, obrigatório no contrato</span></span>
+        <div class="inp">000.000.000-00</div>
+        <div class="toast bom">O tipo <b>mais usado por esta empresa</b> já vem escolhido. O rótulo vira <b>só CPF</b> ou <b>só CNPJ</b> — nunca os dois juntos. O botão "Buscar" só aparece no CNPJ, que é onde ele funciona.</div>
+      </div>
+    </div>
+  </div>
+  <p class="nota">Duas regras que eu manteria como estão, porque já estão certas:</p>
+  <ul class="nota">
+    <li><b>Um ou outro, decidido pelo tamanho</b> — 11 dígitos é CPF, 14 é CNPJ. Não precisa o usuário declarar; o toggle serve pra <i>rotular</i> a tela, não pra decidir o dado.</li>
+    <li><b>Documento inválido não trava a venda.</b> Hoje, dígito verificador errado grava o orçamento assim mesmo e o cliente entra sem documento. Está certo — o pedido é mais importante que o cadastro. Só falta <b>avisar</b> que ficou sem.</li>
+  </ul>
+  <p class="nota">E o conserto de banco que isso pede: <b><code>orcamentos</code> precisa guardar CPF e CNPJ separados</b> (ou um <code>documento</code> + <code>tipo</code>), senão o contrato de pessoa física sai lendo um campo chamado "cnpj".</p>
+</section>
+
+<section>
   <h2>Tela 2 — papel é marca na ficha, não cadastro novo</h2>
   <div class="painel" style="max-width:460px">
     <div class="painel-topo"><span>Ficha · GILVAN PEREIRA DE CARVALHO</span><span class="tag tag-novo">uma linha só</span></div>
@@ -393,6 +451,7 @@ pre .g{color:var(--cinza)} pre .v{color:var(--verde);font-weight:600}
     <li><b>Papel vira marca na ficha existente</b>, com botão de ligar/desligar. Resolve Gilvan e Ronaldo — os outros 2.</li>
     <li><b>Casar telefone pelos últimos 8 dígitos</b>, como <code>wa_contatos.numero8</code> já faz. Hoje 13 registros estão em <code>8699…</code> e 6 em <code>5586…</code> — nunca se encontram.</li>
     <li><b>Mensagem honesta</b>: criou, atualizou, ou mudou o papel.</li>
+    <li><b>Separar CPF de CNPJ no orçamento</b> e rotular a tela conforme o tipo, com o padrão da empresa já escolhido. Hoje 12 CPFs estão gravados numa coluna <code>cnpj</code>.</li>
   </ol>
   <p class="nota"><b>Etapa 2 — unificar</b> (maior, merece PR próprio):</p>
   <ol class="passos">

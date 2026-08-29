@@ -150,7 +150,7 @@ def test_contrato_pronto_mas_nunca_enviado_e_azul_e_pede_mandar_pra_assinar():
     r = v.linha_do_funil(status="aprovada", nunca_enviada=False, enviado_em="19/08",
                          contrato_numero=5, contrato_assinado=False)
     assert textos(r) == ["Contrato pronto — ainda não mandou pra assinar"]
-    assert r["acao"] == {"chave": "assinar", "texto": "Mandar pra assinar"}
+    assert r["acao"] == {"chave": "assinar", "texto": "Mandar o contrato pra assinar"}
     assert tons(r) == ["azul"]
 
 
@@ -161,12 +161,16 @@ def test_contrato_enviado_e_ambar_e_pede_reenviar_pra_assinar():
 
     E O BOTÃO MUDA DE NOME depois do primeiro envio: "Mandar" vira "Reenviar" —
     era exatamente a falta dessa distinção que fazia o card de um contrato JÁ
-    mandado (conta Prime Eventos/Bianca, 28/08) parecer que nada tinha saído."""
+    mandado (conta Prime Eventos/Bianca, 28/08) parecer que nada tinha saído.
+
+    E OS DOIS NOMEIAM O DOCUMENTO. Sem "contrato" no texto, "Reenviar pra
+    assinar" não diz SE É o orçamento ou o contrato — e o card pode ter os dois
+    pendentes ao mesmo tempo (dono, 29/08)."""
     r = v.linha_do_funil(status="aprovada", nunca_enviada=False, enviado_em="19/08",
                          contrato_numero=5, contrato_assinado=False,
                          contrato_enviado_em=date(2026, 8, 19), hoje=date(2026, 8, 19))
-    assert textos(r) == ["Aguardando assinatura há hoje"]
-    assert r["acao"] == {"chave": "assinar", "texto": "Reenviar pra assinar"}
+    assert textos(r) == ["Contrato aguardando assinatura há hoje"]
+    assert r["acao"] == {"chave": "assinar", "texto": "Reenviar o contrato pra assinar"}
     assert tons(r) == ["ambar"]
 
 
@@ -190,9 +194,9 @@ def test_ja_fechado_nao_oferece_fechar_de_novo():
 def test_rascunho_nunca_enviada_e_azul_e_pede_mandar():
     """Azul: falta um passo, mas não corre prazo nem se perde dinheiro."""
     r = v.linha_do_funil(status="rascunho")
-    assert textos(r) == ["Nunca enviada ao cliente"]
+    assert textos(r) == ["Orçamento nunca enviado ao cliente"]
     assert tons(r) == ["azul"]
-    assert r["acao"] == {"chave": "enviar", "texto": "Mandar pro cliente"}
+    assert r["acao"] == {"chave": "enviar", "texto": "Mandar o orçamento pro cliente"}
     assert r["resumo"] == ""
 
 
@@ -386,7 +390,7 @@ def test_aguardando_assinatura_conta_os_dias():
     r = v.linha_do_funil(status="aprovada", nunca_enviada=False, contrato_numero=2,
                          contrato_assinado=False, contrato_enviado_em=date(2026, 8, 22),
                          hoje=date(2026, 8, 25))
-    assert textos(r) == ["Aguardando assinatura há 3 dias"]
+    assert textos(r) == ["Contrato aguardando assinatura há 3 dias"]
 
 
 def test_um_dia_no_singular_e_hoje_por_extenso():
@@ -404,7 +408,7 @@ def test_marcado_como_enviado_sem_data_util_nao_inventa_dias():
     "há 0 dias" seria pior que não dizer."""
     r = v.linha_do_funil(status="aprovada", nunca_enviada=False, contrato_numero=2,
                          contrato_assinado=False, contrato_enviado_em=True)
-    assert textos(r) == ["Aguardando assinatura"]
+    assert textos(r) == ["Contrato aguardando assinatura"]
 
 
 def test_aprovada_sem_contrato_a_haver_oferece_fechar_negocio():

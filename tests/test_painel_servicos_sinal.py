@@ -1098,7 +1098,7 @@ def test_mandar_pra_assinar_muda_o_selo_de_azul_pra_ambar(cliente, correio):
 
     antes = _item(cliente, oid)["painel"]
     assert selo_do_contrato(antes) == "Contrato pronto — ainda não mandou pra assinar"
-    assert antes["acao"] == {"chave": "assinar", "texto": "Mandar pra assinar"}
+    assert antes["acao"] == {"chave": "assinar", "texto": "Mandar o contrato pra assinar"}
 
     r = cliente.post("/painel/servicos/enviar-email",
                      json={"id": oid, "alvo": "contrato"})
@@ -1108,8 +1108,8 @@ def test_mandar_pra_assinar_muda_o_selo_de_azul_pra_ambar(cliente, correio):
                           (oid,)).fetchone()[0]
 
     depois = _item(cliente, oid)["painel"]
-    assert selo_do_contrato(depois).startswith("Aguardando assinatura")
-    assert depois["acao"] == {"chave": "assinar", "texto": "Reenviar pra assinar"}
+    assert selo_do_contrato(depois).startswith("Contrato aguardando assinatura")
+    assert depois["acao"] == {"chave": "assinar", "texto": "Reenviar o contrato pra assinar"}
 
 
 def test_enviar_a_proposta_normal_continua_mandando_o_link_da_proposta(cliente, correio):

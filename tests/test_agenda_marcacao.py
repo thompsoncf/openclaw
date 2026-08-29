@@ -165,12 +165,19 @@ def test_ficha_do_evento_so_e_buscada_pra_quem_vende_data(cliente):
     orig = _pa._vendas
     _pa._vendas = lambda: fake
     try:
-        ag.criar_evento(cliente.pool, CONTA, "Festa", ag.agora_brt() + timedelta(days=3))
+        quando = ag.agora_brt() + timedelta(days=3)
+        ag.criar_evento(cliente.pool, CONTA, "Festa", quando)
+        # `?m=` prende o teste no mês do evento criado — sem isso, "hoje + 3 dias"
+        # perto do fim do mês cai no mês seguinte, a página abre no mês ERRADO (o
+        # padrão sem `m` é sempre "hoje"), `eventos` vem vazio e a ficha nunca é
+        # pedida. Já aconteceu de verdade: rodando em 29/08, o evento nascia em
+        # 01/09 e o teste falhava sem nenhuma mudança de código.
+        mes_do_evento = f"{quando.year:04d}-{quando.month:02d}"
         cliente.estado_nicho["vende"] = True
-        cliente.get("/painel/agenda")
+        cliente.get(f"/painel/agenda?m={mes_do_evento}")
         assert len(chamou) == 1 and chamou[0]          # perguntou, com os ids do mês
         cliente.estado_nicho["vende"] = False
-        cliente.get("/painel/agenda")
+        cliente.get(f"/painel/agenda?m={mes_do_evento}")
         assert len(chamou) == 1                        # não perguntou de novo
     finally:
         _pa._vendas = orig

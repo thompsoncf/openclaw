@@ -26,7 +26,7 @@ create table orcamentos (id bigserial primary key, conta_id bigint, numero int,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table contratos (id bigserial primary key, conta_id bigint, numero int,
   orcamento_id bigint, status text default 'enviado', valor_centavos bigint,
-  assinado_em timestamptz, substitui_id bigint, token text,
+  assinado_em timestamptz, enviado_em timestamptz, substitui_id bigint, token text,
   criado_em timestamptz default now());
 """
 
@@ -81,14 +81,15 @@ def _orc(pool, conta, *, cliente="Cliente X", status="rascunho", criado_por=None
 
 
 def _contrato(pool, conta, orcamento_id, *, status="enviado", valor=100000,
-             substitui_id=None, token="tok-ct", assinado_em=None):
+             substitui_id=None, token="tok-ct", assinado_em=None, enviado_em=None):
     with pool.connection() as c:
         numero = c.execute("select coalesce(max(numero),0)+1 from contratos where conta_id=%s",
                            (conta,)).fetchone()[0]
         cid = c.execute(
             """insert into contratos (conta_id, numero, orcamento_id, status, valor_centavos,
-                 substitui_id, token, assinado_em) values (%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
-            (conta, numero, orcamento_id, status, valor, substitui_id, token, assinado_em),
+                 substitui_id, token, assinado_em, enviado_em)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+            (conta, numero, orcamento_id, status, valor, substitui_id, token, assinado_em, enviado_em),
         ).fetchone()[0]
         c.commit()
     return cid
@@ -306,3 +307,95 @@ def test_contratos_acao_href_usa_o_token_do_contrato(pool, cen):
     _contrato(pool, cen["conta"], o1, status="assinado", token="xyz789")
     dados = rel._dados_contratos(pool, cen["conta"], "todos", "", "", "")
     assert dados["linhas"][0]["acao_href"] == "/contrato/xyz789"
+
+
+# ---------------------------------------------- as duas abas ganham uma janela
+#
+# Pedido do dono, 29/08/2026: "as abas Orçamentos e Contratos não se falam" — pra
+# ver que um orçamento aprovado já tem um contrato parado esperando assinatura,
+# tinha que trocar de aba e cruzar pelo nome na mão. Mockup aprovado: a coluna
+# CONTRATO reaparece na aba Orçamentos (mesmos 4 estados do funil), e a aba
+# Contratos ganha ORÇAMENTO (nº de origem) e ENVIADO EM.
+
+def test_orcamento_sem_contrato_mostra_travessao(pool, cen):
+    _orc(pool, cen["conta"])
+    dados = rel._dados_orcamentos(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["contrato"] == "—"
+    assert dados["linhas"][0]["contrato_cor"] == "neutro"
+    assert any(c["chave"] == "contrato" for c in dados["colunas"])
+
+
+def test_orcamento_com_contrato_pronto_mas_nao_enviado(pool, cen):
+    """O caso que motivou o pedido: nasceu, ninguém mandou ainda. `status='enviado'`
+    sozinho MENTE aqui — nasce assim na criação do contrato (finance.contrato.
+    criar_para_orcamento), não no clique de mandar."""
+    o1 = _orc(pool, cen["conta"])
+    _contrato(pool, cen["conta"], o1, status="enviado", enviado_em=None)
+    dados = rel._dados_orcamentos(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["contrato"] == "Pronto p/ enviar"
+    assert dados["linhas"][0]["contrato_cor"] == "info"
+
+
+def test_orcamento_com_contrato_enviado_mostra_aguardando(pool, cen):
+    o1 = _orc(pool, cen["conta"])
+    _contrato(pool, cen["conta"], o1, status="enviado", enviado_em=HOJE - timedelta(days=3))
+    dados = rel._dados_orcamentos(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["contrato"] == "Aguardando assinatura"
+    assert dados["linhas"][0]["contrato_cor"] == "aviso"
+
+
+def test_orcamento_com_contrato_assinado(pool, cen):
+    o1 = _orc(pool, cen["conta"])
+    _contrato(pool, cen["conta"], o1, status="assinado",
+             enviado_em=HOJE - timedelta(days=3), assinado_em=HOJE)
+    dados = rel._dados_orcamentos(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["contrato"] == "Assinado"
+    assert dados["linhas"][0]["contrato_cor"] == "ok"
+
+
+def test_orcamento_com_contrato_rescindido(pool, cen):
+    o1 = _orc(pool, cen["conta"])
+    _contrato(pool, cen["conta"], o1, status="rescindido", enviado_em=HOJE, assinado_em=HOJE)
+    dados = rel._dados_orcamentos(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["contrato"] == "Rescindido"
+    assert dados["linhas"][0]["contrato_cor"] == "erro"
+
+
+def test_contratos_mostra_o_numero_do_orcamento_de_origem(pool, cen):
+    o1 = _orc(pool, cen["conta"], valor=100000)
+    with pool.connection() as c:
+        numero_orc = c.execute("select numero from orcamentos where id=%s", (o1,)).fetchone()[0]
+    _contrato(pool, cen["conta"], o1, status="assinado")
+    dados = rel._dados_contratos(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["orcamento"] == f"nº {numero_orc}"
+
+
+def test_contratos_mostra_quando_foi_enviado(pool, cen):
+    o1 = _orc(pool, cen["conta"])
+    _contrato(pool, cen["conta"], o1, status="enviado", enviado_em=HOJE - timedelta(days=2))
+    dados = rel._dados_contratos(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["enviado_em"] != "—"
+
+
+def test_contratos_sem_envio_mostra_travessao(pool, cen):
+    o1 = _orc(pool, cen["conta"])
+    _contrato(pool, cen["conta"], o1, status="enviado", enviado_em=None)
+    dados = rel._dados_contratos(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["enviado_em"] == "—"
+
+
+def test_contratos_metrica_separa_pronto_de_aguardando(pool, cen):
+    """"Aguardando assinatura" virava UM balde só com contrato recém-nascido
+    (`status='enviado'`, mas nunca mandado) e contrato de verdade na mão do
+    cliente. `enviado_em` é quem separa — mesma correção do funil (PR #590)."""
+    o1, o2, o3 = (_orc(pool, cen["conta"], valor=100000) for _ in range(3))
+    _contrato(pool, cen["conta"], o1, status="enviado", enviado_em=None)          # pronto
+    _contrato(pool, cen["conta"], o2, status="enviado", enviado_em=HOJE)          # aguardando
+    _contrato(pool, cen["conta"], o3, status="assinado", enviado_em=HOJE, assinado_em=HOJE)
+    dados = rel._dados_contratos(pool, cen["conta"], "todos", "", "", "")
+    metricas = dict(dados["metricas"])
+    assert metricas["Prontos, não enviados"].startswith("1 ")
+    assert metricas["Aguardando assinatura"].startswith("1 ")
+    assert metricas["Assinados"].startswith("1 ")
+    # o total geral continua somando os quatro grupos — nada se perde na separação
+    assert metricas["Total geral"] == "R$ 3.000,00"

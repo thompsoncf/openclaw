@@ -291,6 +291,27 @@ CT_STATUS_FILTROS = {
     "cumprido": ["cumprido"], "rescindido": ["rescindido"],
 }
 
+
+def _contrato_tag(numero, status, enviado_em, assinado_em) -> tuple[str, str]:
+    """O selo do CONTRATO pra quem está olhando o ORÇAMENTO — os mesmos quatro
+    estados que o funil usa (finance.vendas.linha_do_funil), num formato que cabe
+    numa coluna de tabela em vez de selo+botão.
+
+    `status='enviado'` nasce assim na CRIAÇÃO do contrato (ver
+    finance/contrato.criar_para_orcamento) — não significa "mandado pro
+    cliente". Quem decide "mandado" é `enviado_em`, pela mesma razão que já
+    corrigiu o funil (PR #590): sem isso, todo contrato recém-criado apareceria
+    como "esperando assinatura" antes de qualquer clique em "mandar"."""
+    if not numero:
+        return "—", "neutro"
+    if status == "rescindido":
+        return "Rescindido", "erro"
+    if assinado_em or status in ("assinado", "cumprido"):
+        return "Assinado", "ok"
+    if enviado_em:
+        return "Aguardando assinatura", "aviso"
+    return "Pronto p/ enviar", "info"
+
 _VALOR_ORC = "coalesce(o.primeiro_ano_centavos, o.setup_centavos, 0)"
 
 
@@ -364,7 +385,23 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
                        -- web/proposta.py). Sem o 2º ramo, esses ficavam "—", como se
                        -- não tivessem dono nenhum.
                        coalesce(m.nome, case when o.criado_por = 'dono' then ct.nome end, '—'),
-                       {_VALOR_ORC}, o.token
+                       {_VALOR_ORC}, o.token,
+                       -- o contrato deste orçamento, se existir — mesma trava de
+                       -- `finance.contrato.por_orcamento` (o vivo, não substituído).
+                       -- APELIDO em cada subconsulta pra não repetir "criado_em"/
+                       -- "status" da tabela de fora e derrubar o ORDER BY.
+                       (select x.numero from contratos x
+                         where x.orcamento_id = o.id and x.substitui_id is null
+                         order by x.id desc limit 1) as ct_numero,
+                       (select x.status from contratos x
+                         where x.orcamento_id = o.id and x.substitui_id is null
+                         order by x.id desc limit 1) as ct_status,
+                       (select x.enviado_em from contratos x
+                         where x.orcamento_id = o.id and x.substitui_id is null
+                         order by x.id desc limit 1) as ct_enviado_em,
+                       (select x.assinado_em from contratos x
+                         where x.orcamento_id = o.id and x.substitui_id is null
+                         order by x.id desc limit 1) as ct_assinado_em
                   from orcamentos o
                   left join membros m on m.id::text = o.criado_por and m.conta_id = o.conta_id
                   left join contas ct on ct.id = o.conta_id
@@ -375,11 +412,13 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
     linhas = []
     for r in rows:
         rotulo, cor = ORC_STATUS_TAG.get(r[3], (r[3] or "—", "neutro"))
+        contrato_rot, contrato_cor = _contrato_tag(r[9], r[10], r[11], r[12])
         linhas.append({
             "numero": r[0], "cliente": r[2] or r[1] or "—",
             "status": rotulo, "status_cor": cor,
             "criado_em": _fmt(r[4]), "aprovada_em": _fmt(r[5]),
             "vendedor": r[6], "valor_centavos": int(r[7] or 0),
+            "contrato": contrato_rot, "contrato_cor": contrato_cor,
             "acao_href": f"/proposta/{r[8]}" if r[8] else None,
         })
     return {
@@ -389,7 +428,8 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
                     _col("status", "Status", tag=True), _col("criado_em", "Criado em"),
                     _col("aprovada_em", "Aprovada em"),
                     _col("vendedor", "Vendedor"),
-                    _col("valor_centavos", "Valor", num=True, brl=True)],
+                    _col("valor_centavos", "Valor", num=True, brl=True),
+                    _col("contrato", "Contrato", tag=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": _soma(linhas, "valor_centavos"),
         "metricas": [("Total geral", _brl(v_fechado + v_aberto + v_perdido)),
                      ("Fechados", f"{n_fechado} · {_brl(v_fechado)}"),
@@ -429,14 +469,28 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -
             f"select c.status, count(*), sum(coalesce(c.valor_centavos,0)) "
             f"from contratos c {join_sql} where {base_sql} group by c.status",
             params).fetchall()
+        # `status in (rascunho, enviado)` sozinho não diz se o contrato JÁ SAIU de
+        # casa — 'enviado' nasce na criação (finance.contrato.criar_para_orcamento),
+        # não no clique de "mandar" (PR #590). Quem sabe é `enviado_em`.
+        por_envio = c.execute(
+            f"select (c.enviado_em is not null), count(*), sum(coalesce(c.valor_centavos,0)) "
+            f"from contratos c {join_sql} where {base_sql} "
+            f"and c.status in ('rascunho','enviado') group by (c.enviado_em is not null)",
+            params).fetchall()
 
     def _grupo(quais):
         n = sum(int(r[1]) for r in por_status if r[0] in quais)
         v = sum(int(r[2] or 0) for r in por_status if r[0] in quais)
         return n, v
 
+    def _grupo_envio(enviado: bool):
+        n = sum(int(r[1]) for r in por_envio if bool(r[0]) == enviado)
+        v = sum(int(r[2] or 0) for r in por_envio if bool(r[0]) == enviado)
+        return n, v
+
     n_assinado, v_assinado = _grupo({"assinado", "cumprido"})
-    n_aguardando, v_aguardando = _grupo({"rascunho", "enviado"})
+    n_aguardando, v_aguardando = _grupo_envio(True)
+    n_pronto, v_pronto = _grupo_envio(False)
     n_rescindido, v_rescindido = _grupo({"rescindido"})
 
     where2, params2 = list(where), list(params)
@@ -453,7 +507,8 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -
                        -- mesma leitura de _dados_orcamentos: criado_por é o id do
                        -- membro OU a palavra 'dono'.
                        coalesce(m.nome, case when o.criado_por = 'dono' then ct.nome end, '—'),
-                       coalesce(c.valor_centavos, 0), c.token
+                       coalesce(c.valor_centavos, 0), c.token,
+                       c.enviado_em, o.numero
                   from contratos c {join_sql}
                   left join membros m on m.id::text = o.criado_por and m.conta_id = c.conta_id
                   left join contas ct on ct.id = c.conta_id
@@ -468,19 +523,24 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -
             "numero": r[0], "cliente": r[1], "status": rotulo, "status_cor": cor,
             "criado_em": _fmt(r[3]), "assinado_em": _fmt(r[4]),
             "vendedor": r[5], "valor_centavos": int(r[6] or 0),
+            "enviado_em": _fmt(r[8]),
+            "orcamento": f"nº {r[9]}" if r[9] else "—",
             "acao_href": f"/contrato/{r[7]}" if r[7] else None,
         })
     return {
         "label": "Contratos", "mock": False, "acao": True,
         "acao_rotulo": "Ver / imprimir contrato",
-        "colunas": [_col("numero", "Nº"), _col("cliente", "Cliente", flex=True),
+        "colunas": [_col("numero", "Nº"), _col("orcamento", "Orçamento"),
+                    _col("cliente", "Cliente", flex=True),
                     _col("status", "Status", tag=True), _col("criado_em", "Criado em"),
+                    _col("enviado_em", "Enviado em"),
                     _col("assinado_em", "Assinado em"), _col("vendedor", "Vendedor"),
                     _col("valor_centavos", "Valor", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": _soma(linhas, "valor_centavos"),
-        "metricas": [("Total geral", _brl(v_assinado + v_aguardando + v_rescindido)),
+        "metricas": [("Total geral", _brl(v_assinado + v_aguardando + v_pronto + v_rescindido)),
                      ("Assinados", f"{n_assinado} · {_brl(v_assinado)}"),
                      ("Aguardando assinatura", f"{n_aguardando} · {_brl(v_aguardando)}"),
+                     ("Prontos, não enviados", f"{n_pronto} · {_brl(v_pronto)}"),
                      ("Rescindidos", f"{n_rescindido} · {_brl(v_rescindido)}")],
         "filtro_extra": {
             "status_opcoes": CT_STATUS_OPCOES, "status_sel": status_sel,

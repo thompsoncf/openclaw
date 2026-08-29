@@ -1,4 +1,4 @@
-<title>Cliente e Fornecedor: Um Cadastro Só</title>
+<title>Uma Pessoa, Um Cadastro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
@@ -125,14 +125,11 @@ pre .g{color:var(--cinza)} pre .v{color:var(--verde);font-weight:600}
 .opc .txt{color:var(--txt-mut)}.opc .txt b{color:var(--txt)}
 </style>
 <style>
-/* ---- específicos desta página ---- */
 .grid2{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
 .tag-ruim{color:var(--ambar);border-color:var(--ambar-bd);background:var(--ambar-bg)}
-.linha{display:flex;gap:.5rem;align-items:center;font-size:.82rem}
 .inp{border:1px solid var(--borda-forte);border-radius:8px;padding:.42rem .55rem;background:var(--ground);
-  font-size:.82rem;color:var(--txt-mut);flex:1}
+  font-size:.82rem;color:var(--txt-mut)}
 .inp.cheio{color:var(--txt)}
-.par2{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
 .chk{display:flex;gap:.45rem;align-items:center;font-size:.8rem;color:var(--txt-mut)}
 .cx{width:15px;height:15px;border:1px solid var(--borda-forte);border-radius:4px;flex:none;
   display:grid;place-items:center;font-size:.62rem;background:var(--ground)}
@@ -155,8 +152,9 @@ pre .g{color:var(--cinza)} pre .v{color:var(--verde);font-weight:600}
 .mini{font-size:.65rem;padding:.05rem .35rem;border-radius:999px;border:1px solid;font-weight:600}
 .mini.cli{color:var(--verde);border-color:var(--verde-bd);background:var(--verde-bg)}
 .mini.forn{color:var(--roxo);border-color:var(--roxo-bd);background:var(--roxo-bg)}
+.mini.lead{color:var(--ambar);border-color:var(--ambar-bd);background:var(--ambar-bg)}
 .mini.off{color:var(--txt-fraco);border-color:var(--borda);background:var(--sunken)}
-.acoes{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.1rem}
+.acoes{display:flex;gap:.4rem;flex-wrap:wrap}
 .bt{font-size:.72rem;font-weight:600;border-radius:6px;padding:.28rem .55rem;border:1px solid var(--borda-forte);
   background:var(--surface);color:var(--txt)}
 .bt.pri{background:var(--roxo);border-color:var(--roxo);color:#fff}
@@ -166,93 +164,108 @@ pre .g{color:var(--cinza)} pre .v{color:var(--verde);font-weight:600}
 .passos li::before{content:counter(p);flex:none;width:20px;height:20px;border-radius:50%;
   background:var(--sunken);border:1px solid var(--borda);display:grid;place-items:center;
   font-size:.7rem;font-weight:700;color:var(--txt-mut);margin-top:.1rem}
+/* espinha */
+.espinha{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem;text-align:center}
+.cx4{border:1px solid var(--borda);border-radius:9px;background:var(--surface);padding:.6rem .5rem}
+.cx4 .q{font-family:"IBM Plex Mono",monospace;font-size:1.25rem;font-weight:700}
+.cx4 .l{font-size:.72rem;color:var(--txt-mut);margin-top:.1rem}
+.cx4 .t{font-size:.64rem;color:var(--txt-fraco);text-transform:uppercase;letter-spacing:.07em;margin-top:.3rem}
+.fusao{border:1px solid var(--borda);border-radius:10px;background:var(--surface);overflow:hidden}
+.fusao .cab{padding:.55rem .8rem;background:var(--sunken);border-bottom:1px solid var(--borda);
+  font-size:.74rem;font-weight:600;color:var(--txt-mut);display:flex;justify-content:space-between}
+.fusao .corpo{padding:.75rem .8rem;display:flex;flex-direction:column;gap:.6rem}
+.dois{display:grid;grid-template-columns:1fr auto 1fr;gap:.6rem;align-items:center}
+.lado{border:1px solid var(--borda);border-radius:8px;padding:.5rem .55rem;background:var(--ground)}
+.lado.vence{border-color:var(--verde-bd);background:var(--verde-bg)}
+.lado .rot{font-size:.64rem;text-transform:uppercase;letter-spacing:.07em;color:var(--txt-fraco);font-weight:600}
+.lado .v{font-size:.8rem;margin-top:.15rem}
+.seta{color:var(--txt-fraco);font-size:1.1rem}
+@media print{
+  body{background:#fff}
+  .wrap{max-width:none;padding:0 0 1rem}
+  section{break-inside:avoid-page}
+  .painel,.fusao,.tab-env,.perg{break-inside:avoid}
+  h1{font-size:1.7rem}
+}
 </style>
 
 <div class="wrap">
 
 <header class="top">
-  <span class="eyebrow">Prime Eventos · Cadastro de Clientes e Fornecedores</span>
-  <h1>A mesma pessoa, um cadastro só</h1>
-  <p class="lede">O cadastro da Prime tem <b>23 registros para 20 pessoas</b>. Fui atrás dos 3 repetidos: são <b>dois problemas diferentes</b>, com causas diferentes — e só um deles já foi consertado.</p>
+  <span class="eyebrow">Prime Eventos · Cadastro de Clientes e Fornecedores · v2</span>
+  <h1>Uma pessoa, um cadastro — em todo o sistema</h1>
+  <p class="lede">Você pediu pra pensar melhor e unificar. Fui atrás dos números e <b>o problema é bem maior do que os 3 duplicados</b> que eu tinha reportado: a mesma pessoa vive hoje em até quatro lugares do sistema, sem nenhuma ligação entre eles.</p>
 </header>
 
 <section>
-  <h2>Os dois duplicados, como estão no banco</h2>
-  <div class="tab-env">
-    <table>
-      <thead><tr><th>Quem</th><th>Quando</th><th>O que difere</th></tr></thead>
-      <tbody>
-        <tr class="destaque">
-          <td><b>Ana Clara Marques</b><span class="sub">3 registros — ids 25, 26, 27</span></td>
-          <td class="mono" style="white-space:nowrap">25/08<span class="sub">17:52 · 17:54 · 17:57</span></td>
-          <td><span class="nao">Nada.</span> Mesmo telefone, mesmo e-mail, mesma cidade.<span class="sub">Três cliques em "Salvar" com 2 e 3 minutos de intervalo. A tela não disse que já tinha salvado.</span></td>
-        </tr>
-        <tr>
-          <td><b>Gilvan Pereira de Carvalho</b><span class="sub">2 registros — ids 17 e 20</span></td>
-          <td class="mono" style="white-space:nowrap">21/08<span class="sub">12:47 · 13:58</span></td>
-          <td>Um é <span class="ok">cliente</span>, o outro é <span class="ok">fornecedor</span>.<span class="sub">O cliente tem telefone, CEP e endereço. O fornecedor está vazio — só o nome.</span></td>
-        </tr>
-      </tbody>
-    </table>
+  <h2>O que eu tinha visto — e o que os dados mostraram depois</h2>
+  <div class="espinha">
+    <div class="cx4"><div class="q">23</div><div class="l">no cadastro</div><div class="t">clientes</div></div>
+    <div class="cx4"><div class="q">231</div><div class="l">no funil</div><div class="t">prospeccao</div></div>
+    <div class="cx4"><div class="q">376</div><div class="l">no inbox</div><div class="t">conversas</div></div>
+    <div class="cx4"><div class="q">412</div><div class="l">na agenda</div><div class="t">wa_contatos</div></div>
   </div>
-  <p class="nota">O caso da <b>Ana Clara</b> já foi fechado no dia 26/08. O caso do <b>Gilvan</b> não — e é o mais interessante, porque revela como o sistema pensa.</p>
-</section>
-
-<section>
-  <h2>De onde vem: o sistema separa identidade de relação</h2>
-  <p class="nota">São duas tabelas, e a ideia é boa:</p>
-  <pre><span class="g">pessoas </span>  quem a pessoa é no mundo  <span class="g">→</span> CPF, CNPJ, nome, celular
-<span class="g">clientes</span>  a relação da SUA loja com ela <span class="g">→</span> <span class="v">eh_cliente</span> · <span class="v">eh_fornecedor</span></pre>
-  <p class="nota">Repare: <b><code>eh_cliente</code> e <code>eh_fornecedor</code> convivem na mesma linha</b>. O desenho já previu que a mesma pessoa compre de você <i>e</i> venda pra você. O Gilvan deveria ser <b>uma linha com as duas marcas</b> — não duas linhas.</p>
-  <p class="nota">O que decide se funde ou duplica é uma regra só, escrita no código:</p>
   <div class="faixa-ambar">
     <span>⚠</span>
-    <span class="corpo"><b>Só CPF e CNPJ fundem.</b> Celular apenas <i>sugere</i>, nunca funde. Sem documento, cada cadastro cria uma pessoa nova — e uma relação nova junto.</span>
+    <span class="corpo"><b>16 dos 23 clientes (70%) já existiam como lead</b> — mesma pessoa, mesmo telefone, registro digitado de novo do zero. Nenhum campo liga um ao outro.</span>
   </div>
-  <p class="nota">Nem Ana Clara nem Gilvan têm CPF cadastrado. Por isso os dois viraram pessoas diferentes.</p>
-</section>
-
-<section>
-  <h2>O que o conserto de 26/08 pegou — e o que deixou passar</h2>
-  <p class="nota">O PR #568 acrescentou: sem documento, procura um cliente do mesmo lojista com o <b>mesmo telefone</b> antes de criar. Isso mata o caso da Ana Clara. Mas sobraram três frestas:</p>
+  <p class="nota">E é a mesma pessoa mesmo. Repare como o nome muda conforme a porta de entrada:</p>
   <div class="tab-env">
     <table>
-      <thead><tr><th>Fresta</th><th>Por quê</th><th style="text-align:right">Risco hoje</th></tr></thead>
+      <thead><tr><th>No cadastro de clientes</th><th>No funil (veio do WhatsApp)</th><th>Telefone</th></tr></thead>
       <tbody>
-        <tr class="destaque">
-          <td><b>O papel não é aplicado ao reusar</b></td>
-          <td>Ao reencontrar a pessoa, o código devolve o registro existente <b>sem ligar</b> <code>eh_fornecedor</code>. A tela diz "Cliente cadastrado." e nada mudou.<span class="sub">É exatamente o caso do Gilvan.</span></td>
-          <td class="num">Alto</td>
-        </tr>
-        <tr>
-          <td><b>Telefone casa por texto exato</b></td>
-          <td>Na Prime convivem <b>13 registros com 11 dígitos</b> (<code>8699…</code>, digitados à mão) e <b>6 com 12</b> (<code>5586…</code>, vindos do WhatsApp). <code>8699…</code> ≠ <code>5586…</code> — não casa.</td>
-          <td class="num">Alto</td>
-        </tr>
-        <tr>
-          <td><b>Sem telefone, sem rede</b></td>
-          <td>4 registros não têm telefone nenhum. Sem documento e sem telefone, nada segura a duplicata.</td>
-          <td class="num">Médio</td>
-        </tr>
+        <tr><td>João José Barbosa Neto</td><td class="mono">J.Neto</td><td class="mono">…95167171</td></tr>
+        <tr><td>Flávia Eldane Campleo de Oliveira</td><td class="mono">🌻</td><td class="mono">…98497225</td></tr>
+        <tr><td>Ana Clara Marques</td><td class="mono">Clara Marques</td><td class="mono">…99994650</td></tr>
+        <tr><td>Isadora Carvalho Sales</td><td class="mono">Isadora Carvalho</td><td class="mono">…99792263</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="nota">A boa notícia: <b>o próprio projeto já resolveu o problema do telefone em outro lugar.</b> O WhatsApp casa contatos pelos <b>últimos 8 dígitos</b> (<code>wa_contatos.numero8</code>), justamente porque 55, DDD e o nono dígito variam. É só usar a mesma régua aqui.</p>
+  <p class="nota">O nome do funil é o <b>pushName do WhatsApp</b> — apelido, emoji, o que a pessoa pôs no perfil. O do cadastro é o nome civil, digitado pela vendedora. Por isso casar por nome nunca vai funcionar: <b>o telefone é a única âncora confiável</b>.</p>
 </section>
 
 <section>
-  <h2>A proposta, na tela</h2>
-  <p class="nota">Duas mudanças. A primeira: quando o sistema reconhecer a pessoa, <b>ele mostra e pergunta</b>, em vez de decidir calado.</p>
-  <div class="grid2">
+  <h2>Correção do que eu te disse: são 4 registros a mais, não 3</h2>
+  <p class="nota">Eu tinha agrupado por nome. Agrupando pelos <b>últimos 8 dígitos do telefone</b> apareceu um duplicado que eu não tinha visto — e cada um dos três casos só é pego por uma regra diferente:</p>
+  <div class="tab-env">
+    <table>
+      <thead><tr><th>Caso</th><th>Telefone</th><th>Nome</th><th>Quem pega</th></tr></thead>
+      <tbody>
+        <tr><td><b>Ana Clara Marques</b> ×3<span class="sub">ids 25, 26, 27</span></td><td class="ok">igual</td><td class="ok">igual</td><td>as duas regras</td></tr>
+        <tr class="destaque"><td><b>Victoria Caroline</b> ×2<span class="sub">ids 10 e 11 — "Vis<b>c</b>toria" e "Victoria"</span></td><td class="ok">igual</td><td class="nao">typo</td><td><b>só o telefone</b></td></tr>
+        <tr class="destaque"><td><b>Gilvan Pereira</b> ×2<span class="sub">ids 17 e 20 — cliente e fornecedor</span></td><td class="nao">um sem</td><td class="ok">igual</td><td><b>só o nome</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="nota"><b>Nenhuma regra sozinha pega os três.</b> É por isso que a solução não pode ser "escolher a regra certa" — tem que ser <i>procurar por várias e deixar a pessoa confirmar</i>.</p>
+</section>
 
+<section>
+  <h2>A raiz: a identidade já existe, mas ninguém aponta pra ela</h2>
+  <p class="nota">O sistema já tem a tabela certa. Ela só não está sendo usada como espinha:</p>
+  <pre><span class="g">HOJE</span>
+  prospeccao  <span class="g">(lead)</span>      → telefone solto
+  conversas   <span class="g">(inbox)</span>     → telefone solto
+  wa_contatos <span class="g">(agenda)</span>    → telefone solto
+  clientes    <span class="g">(cadastro)</span>  → <span class="v">pessoa_id</span> ✓   <span class="g">← só este aponta pra identidade</span>
+
+<span class="g">PROPOSTA</span>
+  prospeccao  ─┐
+  conversas   ─┼─→ <span class="v">pessoas</span>  <span class="g">a mesma pessoa, um id só</span>
+  wa_contatos ─┤
+  clientes    ─┘</pre>
+  <p class="nota">Com isso, "virar cliente" deixa de ser <b>digitar tudo de novo</b> e passa a ser <b>um clique no lead que já existe</b> — e a ficha do cliente passa a mostrar a conversa inteira, o orçamento e o histórico, porque tudo pendura no mesmo id.</p>
+</section>
+
+<section>
+  <h2>Tela 1 — reconhecer antes de salvar</h2>
+  <div class="grid2">
     <div class="painel">
       <div class="painel-topo"><span>Hoje</span><span class="tag tag-ruim">duplica calado</span></div>
       <div class="painel-corpo">
-        <span class="campo-rot">Nome</span>
-        <div class="inp cheio">GILVAN PEREIRA DE CARVALHO</div>
-        <span class="campo-rot">Telefone</span>
-        <div class="inp">— em branco —</div>
-        <div class="par2">
+        <span class="campo-rot">Nome</span><div class="inp cheio">GILVAN PEREIRA DE CARVALHO</div>
+        <span class="campo-rot">Telefone</span><div class="inp">— em branco —</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
           <div class="chk"><span class="cx">✓</span> Cliente</div>
           <div class="chk"><span class="cx on">✓</span> Fornecedor</div>
         </div>
@@ -260,12 +273,10 @@ pre .g{color:var(--cinza)} pre .v{color:var(--verde);font-weight:600}
         <div class="toast mau">✓ "Cliente cadastrado." — e nasceu o <b>segundo</b> Gilvan.</div>
       </div>
     </div>
-
     <div class="painel">
       <div class="painel-topo"><span>Proposta</span><span class="tag tag-novo">reconhece e pergunta</span></div>
       <div class="painel-corpo">
-        <span class="campo-rot">Nome</span>
-        <div class="inp cheio">GILVAN PEREIRA DE CARVALHO</div>
+        <span class="campo-rot">Nome</span><div class="inp cheio">GILVAN PEREIRA DE CARVALHO</div>
         <div class="achado">
           <span class="tit">Já existe alguém assim</span>
           <div class="pess">
@@ -278,47 +289,61 @@ pre .g{color:var(--cinza)} pre .v{color:var(--verde);font-weight:600}
           </div>
           <div class="acoes">
             <button class="bt pri">É essa pessoa — marcar também como fornecedor</button>
-            <button class="bt">É outra pessoa, cadastrar separado</button>
+            <button class="bt">É outra pessoa</button>
           </div>
         </div>
         <div class="toast bom">✓ "Gilvan agora é <b>cliente e fornecedor</b>." — uma linha só.</div>
       </div>
     </div>
-
   </div>
-  <p class="nota">O botão da direita continua existindo: <b>homônimo é real</b>. Quem decide é a pessoa, não o sistema — e é isso que evita tanto o duplicado quanto a fusão errada de dois Josés diferentes.</p>
+  <p class="nota">O botão "É outra pessoa" continua ali: <b>homônimo é real</b>, e fundir dois Josés diferentes é pior que duplicar. Quem decide é a vendedora.</p>
 </section>
 
 <section>
-  <h2>A segunda mudança: o aviso tem que ser honesto</h2>
-  <p class="nota">Hoje a tela diz <b>"Cliente cadastrado."</b> em três situações diferentes: quando criou, quando reusou em silêncio, e quando não fez nada. Foi por isso que a Ana Clara virou três — a vendedora não tinha como saber que já tinha dado certo.</p>
-  <div class="tab-env">
-    <table>
-      <thead><tr><th>O que aconteceu</th><th>Diz hoje</th><th>Deveria dizer</th></tr></thead>
-      <tbody>
-        <tr><td>Criou uma pessoa nova</td><td class="mono">Cliente cadastrado.</td><td class="ok">Ana Clara cadastrada.</td></tr>
-        <tr class="destaque"><td>Reusou uma que já existia</td><td class="mono">Cliente cadastrado.</td><td class="ok">Ana Clara <b>já estava cadastrada</b> — abri a ficha dela.</td></tr>
-        <tr class="destaque"><td>Reusou e mudou o papel</td><td class="mono">Cliente cadastrado.</td><td class="ok">Gilvan agora é <b>cliente e fornecedor</b>.</td></tr>
-      </tbody>
-    </table>
+  <h2>Tela 2 — juntar o que já está duplicado</h2>
+  <p class="nota">Prevenir não conserta os 4 que já existem. Falta uma tela de fusão — e ela precisa mostrar <b>o que ganha e o que perde</b> antes de confirmar:</p>
+  <div class="fusao">
+    <div class="cab"><span>Juntar cadastros duplicados</span><span>1 de 3</span></div>
+    <div class="corpo">
+      <div class="pess">
+        <span class="av">AC</span>
+        <div><div class="nm">Ana Clara Marques</div>
+        <div class="dt">3 registros com o mesmo telefone · (86) 99999-4650</div>
+        <div class="papeis"><span class="mini lead">Lead #579 desde 17/08</span><span class="mini cli">Cliente</span></div></div>
+      </div>
+      <div class="dois">
+        <div class="lado vence"><div class="rot">Fica</div><div class="v"><b>id 25</b> — o mais antigo<br><span class="dt">criado 25/08 17:52 · tem e-mail e cidade</span></div></div>
+        <div class="seta">←</div>
+        <div class="lado"><div class="rot">Somem</div><div class="v"><b>ids 26 e 27</b><br><span class="dt">nenhum dado exclusivo — nada se perde</span></div></div>
+      </div>
+      <div class="toast bom">Nada exclusivo nos que somem. Orçamentos, títulos e conversas migram para o id 25.</div>
+      <div class="acoes"><button class="bt pri">Juntar os 3</button><button class="bt">Pular</button><button class="bt">Não são a mesma pessoa</button></div>
+    </div>
   </div>
+  <p class="nota">Um a um, com você confirmando. <b>Eu não faço isso sozinho</b> — fundir cadastro é irreversível, e vale a regra 0.</p>
 </section>
 
 <section>
-  <h2>Resumo do que eu faria</h2>
+  <h2>O plano, em duas etapas</h2>
+  <p class="nota"><b>Etapa 1 — parar a sangria</b> (pequena, isolada, sem tocar no funil):</p>
   <ol class="passos">
-    <li><b>Aplicar o papel ao reusar.</b> Se a pessoa já existe e você marcou "fornecedor", liga a marca na linha que existe. É o conserto do Gilvan e o de maior impacto.</li>
-    <li><b>Casar telefone pelos últimos 8 dígitos</b>, como o WhatsApp já faz. Fecha a fresta entre <code>8699…</code> e <code>5586…</code>.</li>
-    <li><b>Mostrar o candidato antes de salvar</b>, com as duas saídas: "é essa" ou "é outra".</li>
-    <li><b>Mensagem honesta</b> — criou, reusou ou mudou o papel.</li>
-    <li><b>Juntar os 3 duplicados que já existem</b> — passo à parte, com você confirmando um a um. Não faço isso sozinho: fundir cadastro é irreversível.</li>
+    <li><b>Aplicar o papel ao reusar.</b> Hoje, reencontrar a pessoa devolve o registro sem ligar <code>eh_fornecedor</code>. É o caso do Gilvan.</li>
+    <li><b>Casar telefone pelos últimos 8 dígitos</b>, como o WhatsApp já faz em <code>wa_contatos.numero8</code>. Fecha a fresta entre <code>8699…</code> e <code>5586…</code> — hoje 13 registros num formato e 6 no outro.</li>
+    <li><b>Mostrar o candidato antes de salvar</b>, com as duas saídas.</li>
+    <li><b>Mensagem honesta</b> — criou, reusou, ou mudou o papel.</li>
+  </ol>
+  <p class="nota"><b>Etapa 2 — unificar</b> (maior, mexe no funil, merece PR e conversa própria):</p>
+  <ol class="passos">
+    <li><b>Tela de fusão</b> pros 4 registros que já existem.</li>
+    <li><b>Ligar lead → pessoa</b> na entrada do WhatsApp, para o cadastro nascer já ligado ao lead e "virar cliente" ser um clique.</li>
   </ol>
   <div class="perg">
     <h2>Decisão</h2>
-    <div class="opc"><span class="letra">A</span><span class="txt">Faço os <b>4 primeiros</b> (código + testes) e deixo a junção dos existentes pra depois.</span></div>
-    <div class="opc"><span class="letra">B</span><span class="txt">Só o item 1 e 2 agora — o mínimo que para a duplicação — e o resto depois.</span></div>
-    <div class="opc"><span class="letra">C</span><span class="txt">Ajustar algo neste desenho antes.</span></div>
+    <div class="opc"><span class="letra">A</span><span class="txt">Faço a <b>Etapa 1 inteira</b> agora, com testes. É a que para a duplicação e não encosta no funil.</span></div>
+    <div class="opc"><span class="letra">B</span><span class="txt">Etapa 1 + a <b>tela de fusão</b>, pra já limpar os 4 que existem.</span></div>
+    <div class="opc"><span class="letra">C</span><span class="txt">Tudo, incluindo ligar o lead à pessoa — sabendo que mexe no caminho do WhatsApp, que é receita entrando.</span></div>
   </div>
+  <p class="nota">Minha recomendação é a <b>A</b>. Ela resolve o que dói hoje, é testável isolada, e não põe risco no caminho que traz lead. A fusão vem em seguida, com você do lado.</p>
 </section>
 
 </div>

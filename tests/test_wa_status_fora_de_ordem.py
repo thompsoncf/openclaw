@@ -45,7 +45,7 @@ create table mensagens (id bigserial primary key, conversa_id bigint, canal text
   -- update caía com UndefinedColumn — schema mínimo que esqueceu uma coluna
   -- que a produção tem.
   provider_sid text, status text, texto text, meta jsonb,
-  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 """
 
 

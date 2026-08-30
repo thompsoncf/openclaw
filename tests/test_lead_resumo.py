@@ -45,7 +45,7 @@ create table conversas (id bigserial primary key, conta_id bigint,
   criado_em timestamptz default now(), visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint,
   direcao text, criado_em timestamptz default now(),
-  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
   rotulo text, ordem int default 0, fixa boolean default false,
   criado_em timestamptz default now(), constraint uq_funil_etapa unique (conta_id, chave));

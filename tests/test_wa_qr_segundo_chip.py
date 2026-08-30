@@ -53,7 +53,7 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, membro_id bigint, texto text, provider_sid text,
   status text, criado_em timestamptz default now(),
-  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 create unique index on mensagens (conversa_id, provider_sid) where provider_sid is not null;
 create table wa_contatos (conta_id bigint, numero8 text, nome text,
   da_agenda boolean default false, atualizado timestamptz default now(),

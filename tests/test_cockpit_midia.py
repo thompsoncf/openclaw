@@ -69,10 +69,25 @@ def test_expirado_e_falha_continuam_separados():
 # ------------------------------------------------------ o ponteiro fica no servidor
 
 def test_o_cockpit_manda_tipo_e_tamanho_mas_nunca_o_ponteiro():
+    """A tela recebe o que precisa pra DESENHAR (tipo, tamanho, e se está guardado)
+    e nada do que serve pra BUSCAR. O endereço no CDN e a chave que decifra ficam no
+    servidor: mandar pro navegador seria entregar a chave do arquivo do cliente."""
     fonte = inspect.getsource(ck.lead_do_vendedor)
-    assert 'item["midia"] = {"tipo": midia_tipo, **(midia_meta or {})}' in fonte
+    assert 'item["midia"] = {"tipo": midia_tipo, **(midia_meta or {}),' in fonte
     depois = fonte.split('item["midia"]')[1][:250]
     assert "directPath" not in depois and "mediaKey" not in depois
+    assert "midia_ref" not in depois
+
+
+def test_a_tela_recebe_se_esta_guardado_mas_nao_o_caminho_no_bucket():
+    """`guardada` é booleano de propósito. O caminho no bucket privado não tem por
+    que sair do servidor — quem entrega o arquivo é a rota, que confere sessão,
+    conta e dono do lead antes de ler."""
+    fonte = inspect.getsource(ck.lead_do_vendedor)
+    assert '"guardada": bool(guardada)' in fonte
+    assert "(midia_arquivo is not null) as guardada" in fonte
+    depois = fonte.split('item["midia"]')[1][:250]
+    assert "midia_arquivo" not in depois
 
 
 def test_o_polling_repassa_a_midia():

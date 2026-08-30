@@ -47,7 +47,7 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   responsavel_membro_id bigint, ultima_msg_em timestamptz default now(), visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   autor text default 'humano', membro_id bigint, criado_em timestamptz default now(),
-  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_id bigint,
   titulo text, inicio timestamptz, fim timestamptz, local text, descricao text,
   lembrete_min int, tipo text default 'pessoal', link_online text, desfecho text,

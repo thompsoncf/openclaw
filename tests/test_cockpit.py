@@ -53,7 +53,7 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text, direcao text,
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now(),
-  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
   -- `fase` (migração 177) é o que os painéis leem pra saber o que conta como venda
   -- ganha; sem a coluna aqui, toda consulta do cockpit estoura com UndefinedColumn

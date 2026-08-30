@@ -85,16 +85,31 @@ def subir(conteudo: bytes, content_type: str, *, conta_id: int,
     é da conta que pediu (defesa em profundidade, além do WHERE do banco), e um
     dia dá pra apagar tudo de uma conta por prefixo."""
     ct = validar(conteudo, content_type)
-    url, key, bucket = _config()
     ext = _EXT.get(ct, "bin")
     caminho = (f"comprovantes/{conta_id}/{orcamento_id}-{parcela_idx}"
                f"-{int(time.time())}-{uuid.uuid4().hex[:8]}.{ext}")
+    return subir_em(caminho, conteudo, ct)
+
+
+def subir_em(caminho: str, conteudo: bytes, content_type: str) -> str:
+    """Põe `conteudo` NAQUELE caminho do bucket privado. Devolve o caminho.
+
+    A parte de baixo do `subir`, separada quando a mídia guardada da conversa
+    (passo 5) precisou do mesmo bucket com outro caminho e outras regras de tipo.
+    UM caminho só até o Storage é a razão de existir: as regras de tamanho e de
+    formato mudam conforme o assunto — comprovante de banco não é vídeo de salão —
+    mas a chave de serviço, o bucket privado e o tratamento de erro têm que ser os
+    mesmos, senão um dia um deles vira público sem ninguém notar.
+
+    NÃO VALIDA: quem chama já validou com as regras DELE. Esta função é o cano.
+    """
+    url, key, bucket = _config()
     try:
         with httpx.Client(timeout=_TIMEOUT) as c:
             r = c.post(f"{url}/storage/v1/object/{bucket}/{caminho}",
                        content=conteudo,
                        headers={"Authorization": f"Bearer {key}",
-                                "Content-Type": ct, "x-upsert": "true"})
+                                "Content-Type": content_type, "x-upsert": "true"})
     except Exception as e:  # noqa: BLE001
         raise ValueError(f"Falha no upload: {e}")
     if r.status_code >= 300:
@@ -103,7 +118,7 @@ def subir(conteudo: bytes, content_type: str, *, conta_id: int,
                                servico="Supabase Storage")
         # o 404 do bucket é o erro de instalação, e vale dizer qual é
         if r.status_code == 404:
-            raise ValueError(f"O bucket privado '{bucket}' não existe no Supabase.")
+            raise ValueError(f"O bucket privado \'{bucket}\' não existe no Supabase.")
         raise ValueError(f"Falha no upload (HTTP {r.status_code}).")
     return caminho
 

@@ -524,16 +524,21 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
             # mensagens o vendedor abria a tela e nunca via o que acabou de chegar.
             # Corta pelas últimas e devolve em ordem de leitura.
             rows = c.execute(
-                """select id, direcao, autor, texto, criado_em, midia_tipo, midia_meta from (
+                """select id, direcao, autor, texto, criado_em, midia_tipo, midia_meta,
+                          guardada from (
                      select id, direcao, autor, texto, criado_em, midia_tipo,
                             -- só quando HÁ ponteiro: é ele que diz pra tela desenhar
                             -- bolha de imagem em vez de texto (migração 187)
                             case when midia_ref is null then null
-                                 else coalesce(midia_meta, '{}'::jsonb) end as midia_meta
+                                 else coalesce(midia_meta, '{}'::jsonb) end as midia_meta,
+                            -- o BOOLEANO, nunca o caminho: a tela precisa saber se
+                            -- já está guardado pra trocar o botão, e o caminho no
+                            -- bucket não tem por que sair do servidor (migração 190)
+                            (midia_arquivo is not null) as guardada
                        from mensagens
                       where conversa_id=%s order by criado_em desc limit 200
                    ) t order by criado_em asc""", (cv[0],)).fetchall()
-            for mid, d, autor, texto, quando, midia_tipo, midia_meta in rows:
+            for mid, d, autor, texto, quando, midia_tipo, midia_meta, guardada in rows:
                 who = "ia" if autor == "bot" else ("out" if d == "out" else "in")
                 # o id vai junto porque a tela do lead se atualiza sozinha e precisa
                 # saber a partir de onde pedir o que é novo
@@ -541,7 +546,8 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
                 # O PONTEIRO NÃO VAI PRA TELA: só o tipo e o tamanho. O endereço no
                 # CDN e a chave ficam no servidor, e quem busca é a rota de mídia.
                 if midia_tipo and midia_meta is not None:
-                    item["midia"] = {"tipo": midia_tipo, **(midia_meta or {})}
+                    item["midia"] = {"tipo": midia_tipo, **(midia_meta or {}),
+                                     "guardada": bool(guardada)}
                 msgs.append(item)
         # O mesmo número com conversa em OUTRA ficha — o vendedor precisa saber que
         # está lendo metade do histórico. Ver `outras_conversas_do_numero`: é o
@@ -820,6 +826,81 @@ def enviar_anexo(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes
         c.commit()
     return {"ok": True, "tipo": tipo, "conversa_id": conv, "id": msg_id,
             "tem_midia": bool(midia)}
+
+
+def pode_guardar(pool, conta_id: int) -> bool:
+    """Esta instalação sabe guardar arquivo? Sem bucket configurado o botão não
+    aparece — botão que engole o comprovante do cliente é pior que botão nenhum."""
+    from finance import midia_cofre as _mc
+    try:
+        return _mc.configurado()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def guardar_midia(pool, conta_id: int, membro_id: int, lead_id: int,
+                  mensagem_id: int) -> dict:
+    """Copia a mídia de uma mensagem do CDN do WhatsApp pro nosso bucket privado.
+
+    É o passo 5, e o motivo é um só: o CDN EXPIRA. Foto de referência de decoração
+    pode expirar — pede de novo ao cliente. Comprovante do sinal e contrato
+    assinado não podem: são o registro do negócio, e o dia em que se precisa deles
+    é o dia da discussão, meses depois.
+
+    O PORTÃO É O MESMO DA MÍDIA, e tem que ser: a mensagem precisa pertencer à
+    conversa DAQUELE lead, e o lead precisa ser DAQUELE vendedor. Sem as duas
+    coisas, o id da mensagem — sequencial e adivinhável — seria a única barreira
+    entre um vendedor e o comprovante do cliente de outro.
+
+    IDEMPOTENTE: guardar de novo o que já está guardado devolve o que existe, sem
+    baixar nem subir nada. O vendedor toca duas vezes sem querer, ou dois aparelhos
+    dele fazem a mesma coisa — e o resultado é o mesmo arquivo, não dois.
+    """
+    from finance import midia_cofre as _mc, wa_midia as _wm
+
+    with pool.connection() as c:
+        r = c.execute(
+            """select m.midia_ref, m.midia_tipo, coalesce(m.midia_meta,'{}'::jsonb),
+                      m.midia_arquivo
+                 from mensagens m
+                 join conversas cv on cv.id = m.conversa_id
+                where m.id=%s and cv.conta_id=%s and cv.prospeccao_id=%s
+                  and m.midia_ref is not null""",
+            (mensagem_id, conta_id, lead_id)).fetchone()
+    if not r:
+        return {"ok": False, "erro": "Mensagem não encontrada."}
+    # a posse vem do mesmo lugar que a tela usa — revalida o dono do lead
+    if not lead_do_vendedor(pool, conta_id, membro_id, lead_id):
+        return {"ok": False, "erro": "escopo"}
+    ref, tipo, meta, ja = r[0], r[1], (r[2] or {}), r[3]
+    if ja:
+        return {"ok": True, "ja_estava": True}
+    if not _mc.configurado():
+        return {"ok": False, "erro": "Guardar arquivo não está configurado aqui."}
+
+    try:
+        caminho, tam = _mc.guardar(
+            _wm.buscar(ref, tipo), conta_id=conta_id, mensagem_id=mensagem_id,
+            tipo=tipo, mimetype=(ref or {}).get("mimetype") or "",
+            nome=str(meta.get("nome") or ""))
+    except _wm.Expirou:
+        # o recado exato importa: este é o caso em que guardar chegou TARDE, e o
+        # vendedor precisa saber que a saída agora é pedir o arquivo de novo
+        return {"ok": False, "erro": "O WhatsApp já apagou este arquivo. Peça de novo ao cliente."}
+    except ValueError as e:
+        return {"ok": False, "erro": str(e)}
+    except Exception as e:  # noqa: BLE001
+        _log.warning("guardar mídia %s falhou: %s: %s", mensagem_id, type(e).__name__, e)
+        return {"ok": False, "erro": "Não consegui guardar agora."}
+
+    with pool.connection() as c:
+        c.execute(
+            """update mensagens set midia_arquivo=%s, midia_guardada_em=now(),
+                                    midia_guardada_por=%s
+                where id=%s and midia_arquivo is null""",
+            (caminho, membro_id, mensagem_id))
+        c.commit()
+    return {"ok": True, "bytes": tam}
 
 
 def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes,

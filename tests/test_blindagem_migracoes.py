@@ -83,7 +83,7 @@ create table campanha_alvos (id bigserial primary key, campanha_id bigint, prosp
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, texto text, provider_sid text, membro_id bigint,
   criado_em timestamptz default now(),
-  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 -- conversas vem da 080 também (marcada como aplicada); a 140 adiciona contato_nome.
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text, contato_ref text, status text default 'aberta',

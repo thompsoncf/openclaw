@@ -3089,6 +3089,14 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
   </div>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
   {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+  {% if dup_n %}
+  <a href="/painel/clientes/duplicados" style="display:flex;justify-content:space-between;
+     align-items:center;gap:.6rem;text-decoration:none;margin-top:.8rem;padding:.6rem .8rem;
+     border:1px solid #5a4a2a;border-radius:9px;background:rgba(201,162,39,.07)">
+    <span style="color:#c9a227;font-size:.82rem">🔗 {{ dup_n }} cadastro{{ 's' if dup_n != 1 }} parece{{ 'm' if dup_n != 1 }} estar repetido{{ 's' if dup_n != 1 }} na base.</span>
+    <span style="color:var(--verde-claro);font-size:.8rem;white-space:nowrap">revisar →</span>
+  </a>
+  {% endif %}
   <form method="get" action="/painel/clientes" style="margin:1rem 0">
     {% if busca %}{# preserva o filtro de papel ao buscar #}<input type="hidden" name="papel" value="{{ papel_filtro }}">{% endif %}
     <input name="busca" value="{{ busca }}" placeholder="🔍 buscar por nome, telefone, CPF ou CNPJ..." style="width:100%">
@@ -3290,6 +3298,181 @@ var _tt;function toast(m){var t=document.getElementById('zaq-toast');t.textConte
 </script>
 {% endblock %}"""
 
+
+# A tela dos repetidos. Duas páginas de propósito: a lista NUNCA funde — ela só
+# leva pra revisão, e é lá, com os dois cadastros abertos lado a lado e a
+# contagem do que vai se mover, que existe o botão de confirmar. Um par por vez,
+# como o dono pediu: "um a um com você confirmando".
+_CLIENTES_DUP = """{% extends "base" %}{% block conteudo %}
+<style>
+  .dup-grp{border:1px solid var(--borda);border-radius:12px;padding:.9rem;margin-bottom:1rem;background:var(--card-2)}
+  .dup-por{font-size:.72rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:#c9a227}
+  .dup-lin{display:flex;gap:.7rem;align-items:flex-start;padding:.6rem 0;border-top:1px solid var(--borda)}
+  .dup-lin:first-of-type{border-top:0}
+  .dup-dados{flex:1;min-width:0}
+  .dup-nome{color:var(--txt);font-weight:600;font-size:.9rem}
+  .dup-campo{color:#8a938a;font-size:.75rem;margin-top:.15rem}
+  .dup-fica{background:var(--verde);color:var(--sobre-verde);font-size:.66rem;font-weight:700;
+      border-radius:5px;padding:.1rem .4rem;margin-left:.4rem;letter-spacing:.03em}
+  .dup-btn{background:transparent;border:1px solid var(--verde);color:var(--verde-claro);
+      border-radius:7px;padding:.35rem .7rem;font-size:.76rem;cursor:pointer;width:auto;white-space:nowrap}
+  .dup-hist{font-size:.78rem;color:#8a938a;padding:.4rem 0;border-bottom:1px solid var(--card-2)}
+</style>
+<div class="card larga">
+  <a href="/painel/clientes" style="color:var(--verde-claro);text-decoration:none;font-size:.85rem">← Clientes/Fornecedores</a>
+  <h2 style="margin:.4rem 0">🔗 Cadastros repetidos</h2>
+  {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+  {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+
+  <p class="mut" style="font-size:.82rem;line-height:1.5">
+    Nada é apagado. O cadastro absorvido é <b>arquivado</b> — sai da lista, mas continua
+    no banco inteiro. Os títulos, lançamentos e orçamentos dele passam pro que ficar, e
+    campo vazio no que fica pode ser preenchido pelo que sai (nunca o contrário).
+    Se errar, tem <b>desfazer</b> logo abaixo.
+  </p>
+
+  {% if grupos %}
+    {% for g in grupos %}
+    <form method="get" action="/painel/clientes/duplicados/revisar" class="dup-grp">
+      <div class="dup-por">{{ g.rotulo }}</div>
+      {% for c in g.clientes %}
+      <div class="dup-lin">
+        <input type="radio" name="fica" value="{{ c.id }}" {% if c.id == g.sugerido %}checked{% endif %}
+               style="width:auto;margin-top:.25rem;accent-color:var(--verde)" title="quem fica">
+        <div class="dup-dados">
+          <div class="dup-nome">{{ c.nome }}
+            {% if c.id == g.sugerido %}<span class="dup-fica">sugerido</span>{% endif %}
+            {% if c.eh_cliente %}<span class="tbadge cli">CLIENTE</span>{% endif %}
+            {% if c.eh_fornecedor %}<span class="tbadge forn">FORNECEDOR</span>{% endif %}
+          </div>
+          <div class="dup-campo">
+            #{{ c.id }}
+            {%- if c.documento_fmt %} · {{ 'CNPJ' if c.tipo == 'pj' else 'CPF' }} {{ c.documento_fmt }}{% endif %}
+            {%- if c.telefone %} · {{ c.telefone }}{% endif %}
+            {%- if c.email %} · {{ c.email }}{% endif %}
+          </div>
+          <div class="dup-campo">
+            {%- if c.endereco %}{{ c.endereco }}{% endif %}
+            {%- if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}
+            {%- if not c.endereco and not c.cidade %}<i>sem endereço</i>{% endif %}
+          </div>
+        </div>
+        <button class="dup-btn" name="sai" value="{{ c.id }}"
+                title="revisar antes de juntar">juntar este →</button>
+      </div>
+      {% endfor %}
+      <div class="mut" style="font-size:.72rem;margin-top:.4rem">
+        Marque no ✓ quem <b>fica</b> e clique em <b>juntar este</b> na linha que deve sair.
+      </div>
+    </form>
+    {% endfor %}
+  {% else %}
+    <p class="mut">Nenhum cadastro repetido à vista. 🎉</p>
+  {% endif %}
+
+  {% if historico %}
+  <h3 style="margin:1.6rem 0 .4rem;font-size:.95rem">Fusões feitas</h3>
+  {% for h in historico %}
+  <div class="dup-hist" style="display:flex;justify-content:space-between;align-items:center;gap:.6rem">
+    <span>
+      {{ h.criado_em.strftime('%d/%m %H:%M') if h.criado_em else '' }} ·
+      <b>{{ h.perdedor_nome }}</b> (#{{ h.perdedor_id }}) → <b>{{ h.vencedor_nome }}</b> (#{{ h.vencedor_id }})
+      {% if h.desfeita_em %}<span style="color:#d98a8a"> · desfeita</span>{% endif %}
+    </span>
+    {% if not h.desfeita_em %}
+    <form method="post" action="/painel/clientes/duplicados/desfazer" style="margin:0"
+          onsubmit="return confirm('Separar de novo os dois cadastros?')">
+      <input type="hidden" name="fusao_id" value="{{ h.id }}">
+      <button class="dup-btn" style="border-color:#5a4a2a;color:#c9a227">desfazer</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}"""
+
+
+_CLIENTES_DUP_REVISAR = """{% extends "base" %}{% block conteudo %}
+<style>
+  .rev-col{border:1px solid var(--borda);border-radius:10px;padding:.8rem;background:var(--card-2)}
+  .rev-tit{font-size:.7rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin-bottom:.3rem}
+  .rev-l{font-size:.78rem;color:#8a938a;padding:.12rem 0}
+  .rev-l b{color:var(--txt);font-weight:600}
+  .rev-par{display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin:.8rem 0}
+  /* no celular os dois cadastros empilham: lado a lado em 360px vira duas
+     colunas de uma palavra, e é justamente aqui que o dono precisa LER antes
+     de confirmar. */
+  @media (max-width:560px){ .rev-par{grid-template-columns:1fr} }
+</style>
+<div class="card larga">
+  <a href="/painel/clientes/duplicados" style="color:var(--verde-claro);text-decoration:none;font-size:.85rem">← Repetidos</a>
+  <h2 style="margin:.4rem 0">Juntar dois cadastros</h2>
+
+  <div class="rev-par">
+    <div class="rev-col" style="border-color:var(--verde)">
+      <div class="rev-tit" style="color:var(--verde-claro)">✓ fica</div>
+      <div class="rev-l"><b>{{ p.vencedor.nome }}</b> · #{{ p.vencedor.id }}</div>
+      <div class="rev-l">{{ p.vencedor.documento_fmt or 'sem documento' }}</div>
+      <div class="rev-l">{{ p.vencedor.telefone or 'sem telefone' }}</div>
+      <div class="rev-l">{{ p.vencedor.email or 'sem e-mail' }}</div>
+    </div>
+    <div class="rev-col">
+      <div class="rev-tit" style="color:#c9a227">→ vai ser arquivado</div>
+      <div class="rev-l"><b>{{ p.perdedor.nome }}</b> · #{{ p.perdedor.id }}</div>
+      <div class="rev-l">{{ p.perdedor.documento_fmt or 'sem documento' }}</div>
+      <div class="rev-l">{{ p.perdedor.telefone or 'sem telefone' }}</div>
+      <div class="rev-l">{{ p.perdedor.email or 'sem e-mail' }}</div>
+    </div>
+  </div>
+
+  {% if p.impedimento %}
+    <div class="erro">{{ p.impedimento }}</div>
+    <div style="display:flex;gap:.9rem;align-items:center;flex-wrap:wrap">
+      <a href="/painel/clientes/duplicados/revisar?fica={{ p.perdedor.id }}&sai={{ p.vencedor.id }}"
+         style="color:var(--verde-claro);font-size:.85rem;text-decoration:none">↔ inverter: deixar o outro ficar</a>
+      <a href="/painel/clientes/duplicados"
+         style="color:#8a938a;font-size:.82rem;text-decoration:none">voltar</a>
+    </div>
+  {% else %}
+    <h3 style="font-size:.9rem;margin:.9rem 0 .3rem">O que vai acontecer</h3>
+    <ul style="font-size:.82rem;color:#b4b2a9;line-height:1.7;padding-left:1.1rem;margin:0">
+      {% for t, n in p.refs_resumo %}
+        <li>{{ n }} {{ t }} pass{{ 'a' if n == 1 else 'am' }} pra <b>{{ p.vencedor.nome }}</b></li>
+      {% endfor %}
+      {% for k, v in p.campos.items() %}
+        <li>{{ p.rotulos[k] }} de <b>{{ p.vencedor.nome }}</b> estava vazio — vai ficar “{{ v }}”</li>
+      {% endfor %}
+      {% for k, v in p.campos_pessoa.items() %}
+        <li>{{ p.rotulos[k] }} de <b>{{ p.vencedor.nome }}</b> estava vazio — vai ficar “{{ v }}”</li>
+      {% endfor %}
+      {% for k in p.papeis %}
+        <li><b>{{ p.vencedor.nome }}</b> passa a ser marcado também como
+            {{ 'FORNECEDOR' if k == 'eh_fornecedor' else 'CLIENTE' }}</li>
+      {% endfor %}
+      <li><b>{{ p.perdedor.nome }}</b> (#{{ p.perdedor.id }}) é <b>arquivado</b> — sai da lista,
+          continua no banco, e dá pra desfazer.</li>
+    </ul>
+    {% if not p.refs_resumo and not p.campos and not p.campos_pessoa and not p.papeis %}
+      <p class="mut" style="font-size:.8rem">O cadastro que sai está vazio e não tem nada
+        ligado a ele — juntar só tira a linha repetida da lista.</p>
+    {% endif %}
+
+    <div style="display:flex;gap:.6rem;margin-top:1.1rem;flex-wrap:wrap;align-items:center">
+      <form method="post" action="/painel/clientes/duplicados/fundir" style="margin:0">
+        <input type="hidden" name="fica" value="{{ p.vencedor.id }}">
+        <input type="hidden" name="sai" value="{{ p.perdedor.id }}">
+        <input type="hidden" name="motivo" value="{{ motivo or '' }}">
+        <button style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;
+                       padding:.55rem 1.1rem;font-weight:600;cursor:pointer;width:auto">Juntar</button>
+      </form>
+      <a href="/painel/clientes/duplicados/revisar?fica={{ p.perdedor.id }}&sai={{ p.vencedor.id }}"
+         style="color:var(--verde-claro);font-size:.82rem;text-decoration:none">↔ inverter</a>
+      <a href="/painel/clientes/duplicados" style="color:#8a938a;font-size:.82rem;text-decoration:none">cancelar</a>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}"""
 
 _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
@@ -6350,7 +6533,7 @@ _RELATORIO_PDF = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8
 
 _env = Environment(loader=DictLoader({
     "holerite": _HOLERITE,
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "dash_bloco": _DASH_BLOCO, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "pagar_aviso": _PAGAR_AVISO, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE, "relatorios": _RELATORIOS, "relatorio_pdf": _RELATORIO_PDF, "novidades.html": _NOVIDADES,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "dash_bloco": _DASH_BLOCO, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "pagar_aviso": _PAGAR_AVISO, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "clientes_dup": _CLIENTES_DUP, "clientes_dup_revisar": _CLIENTES_DUP_REVISAR, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE, "relatorios": _RELATORIOS, "relatorio_pdf": _RELATORIO_PDF, "novidades.html": _NOVIDADES,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -8989,12 +9172,23 @@ def painel_clientes(request: Request, busca: str = "", papel: str = ""):
     papel_filtro = papel if papel in ("cliente", "fornecedor") else ""
     lista = cli.listar_clientes(pool, conta[0], busca=busca or None, papel=papel_filtro or None)
     total = cli.contar_clientes(pool, conta[0])
+    # Quantos cadastros estão em algum grupo de repetidos — vira o aviso do topo.
+    # Só pro dono (é quem tem a tela) e dentro de try: um palpite de duplicata
+    # nunca pode ser o motivo de a aba Clientes não abrir. Custo medido em
+    # `dedup_clientes`: 7 ms numa base de 500, 79 ms no teto de 2.000.
+    dup_n = 0
+    if request.session.get("papel", "dono") == "dono":
+        try:
+            from finance import dedup_clientes as _dd
+            dup_n = sum(len(g["clientes"]) for g in _dd.candidatos(pool, conta[0]))
+        except Exception:                                          # noqa: BLE001
+            dup_n = 0
     # context key `papel_filtro`, NUNCA `papel`: o template ja usa `papel` pro
     # papel do OPERADOR logado (ver comentario no template, na aba Clientes) —
     # setar `papel=` aqui via ctx pisaria nele e o menu sumiria pra quem entrar
     # com filtro na URL.
     return _render("clientes", request, conta=conta, clientes=lista, total=total,
-                   busca=busca or "", papel_filtro=papel_filtro,
+                   busca=busca or "", papel_filtro=papel_filtro, dup_n=dup_n,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
 
@@ -9093,6 +9287,114 @@ def painel_clientes_consulta_cnpj(request: Request, doc: str = ""):
                          "telefone": info.get("telefone"), "email": info.get("email"),
                          "cidade": info.get("cidade"), "uf": info.get("uf"),
                          "cnae": info.get("cnae")})
+
+
+# --------------------------------------------------------------------------
+# Cadastros repetidos: achar, revisar, juntar, desfazer.
+#
+# As rotas ficam ANTES de /painel/clientes/{cliente_id} de propósito — o FastAPI
+# casa na ordem de registro, e depois dela "duplicados" viraria um cliente_id
+# inválido (422). Mesmo motivo de /buscar e /consulta-cnpj estarem acima.
+#
+# Só o DONO entra. Não é zelo excessivo: juntar cadastro é a única operação da
+# aba que mexe em título e lançamento de outra ficha, e a aba inteira já só
+# aparece no menu pra papel == 'dono'.
+# --------------------------------------------------------------------------
+_ROTULO_CAMPO = {"cidade": "Cidade", "uf": "UF", "endereco": "Endereço",
+                 "cep": "CEP", "obs": "Observação", "celular": "Telefone",
+                 "email": "E-mail"}
+_ROTULO_TABELA = {"titulos": "título", "lancamentos": "lançamento",
+                  "orcamentos": "orçamento"}
+
+
+def _dono_pj(request: Request):
+    """Conta logada, com acesso PJ e no papel de dono. Devolve (conta, resposta):
+    exatamente um dos dois vem preenchido."""
+    from finance import empresa as emp
+    conta = conta_logada(request)
+    if conta is None:
+        return None, RedirectResponse("/login", status_code=303)
+    if not emp.acesso_pj(get_pool(), conta[0]):
+        return None, RedirectResponse("/painel", status_code=303)
+    if request.session.get("papel", "dono") != "dono":
+        request.session["erro"] = "Só o dono da conta junta cadastros repetidos."
+        return None, RedirectResponse("/painel/clientes", status_code=303)
+    return conta, None
+
+
+def _preparar_previa(pv: dict) -> dict:
+    """Enfeita a prévia pro template: rótulos em português e a contagem de
+    referências já no plural certo."""
+    pv = dict(pv)
+    pv["rotulos"] = _ROTULO_CAMPO
+    pv["refs_resumo"] = [
+        (_ROTULO_TABELA.get(t, t) + ("s" if len(ids) != 1 else ""), len(ids))
+        for t, ids in (pv.get("refs") or {}).items() if ids]
+    return pv
+
+
+@router.get("/painel/clientes/duplicados", response_class=HTMLResponse)
+def painel_clientes_duplicados(request: Request):
+    from finance import dedup_clientes as dd
+    conta, resp = _dono_pj(request)
+    if resp is not None:
+        return resp
+    pool = get_pool()
+    grupos = []
+    for g in dd.candidatos(pool, conta[0]):
+        motivos = sorted({m for m in g["motivos"].values()})
+        grupos.append({**g, "rotulo": " · ".join(motivos) or "parecidos"})
+    return _render("clientes_dup", request, conta=conta, grupos=grupos,
+                   historico=dd.historico(pool, conta[0]),
+                   erro=request.session.pop("erro", None),
+                   aviso=request.session.pop("aviso", None))
+
+
+@router.get("/painel/clientes/duplicados/revisar", response_class=HTMLResponse)
+def painel_clientes_dup_revisar(request: Request, fica: int = 0, sai: int = 0):
+    from finance import dedup_clientes as dd
+    conta, resp = _dono_pj(request)
+    if resp is not None:
+        return resp
+    pv = dd.previa(get_pool(), conta[0], fica, sai)
+    if pv["vencedor"] is None or pv["perdedor"] is None:
+        request.session["erro"] = "Um dos cadastros não existe mais."
+        return RedirectResponse("/painel/clientes/duplicados", status_code=303)
+    return _render("clientes_dup_revisar", request, conta=conta,
+                   p=_preparar_previa(pv), motivo=request.query_params.get("motivo", ""))
+
+
+@router.post("/painel/clientes/duplicados/fundir")
+def painel_clientes_dup_fundir(request: Request, fica: int = Form(...),
+                               sai: int = Form(...), motivo: str = Form("")):
+    from finance import dedup_clientes as dd
+    conta, resp = _dono_pj(request)
+    if resp is not None:
+        return resp
+    try:
+        r = dd.fundir(get_pool(), conta[0], fica, sai, motivo=(motivo or None),
+                      feita_por=request.session.get("membro_id"))
+        request.session["aviso"] = (
+            f"Juntado em {r['nome']}. O cadastro #{sai} foi arquivado — "
+            f"dá pra desfazer aqui embaixo.")
+    except ValueError as e:
+        request.session["erro"] = str(e)
+    return RedirectResponse("/painel/clientes/duplicados", status_code=303)
+
+
+@router.post("/painel/clientes/duplicados/desfazer")
+def painel_clientes_dup_desfazer(request: Request, fusao_id: int = Form(...)):
+    from finance import dedup_clientes as dd
+    conta, resp = _dono_pj(request)
+    if resp is not None:
+        return resp
+    try:
+        dd.desfazer(get_pool(), conta[0], fusao_id,
+                    desfeita_por=request.session.get("membro_id"))
+        request.session["aviso"] = "Fusão desfeita — os dois cadastros voltaram."
+    except ValueError as e:
+        request.session["erro"] = str(e)
+    return RedirectResponse("/painel/clientes/duplicados", status_code=303)
 
 
 @router.get("/painel/clientes/{cliente_id}", response_class=HTMLResponse)

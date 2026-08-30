@@ -332,10 +332,19 @@ def test_a_tela_pede_o_prazo_em_campo_livre_e_nao_em_lista():
 def _com_orcamento(pool, conta_id, evento_id, *, numero, sinal=None, total=None):
     """Vincula um orçamento ao compromisso, como a aprovação da proposta faz."""
     with pool.connection() as c:
+        # `create if not exists` sozinho não bastava: se outro módulo da suíte
+        # tiver criado `orcamentos` antes, com outras colunas, o create vira
+        # no-op e o insert abaixo estoura em "column numero does not exist".
+        # Os alters garantem as colunas independentemente de quem chegou primeiro.
         c.execute("""create table if not exists orcamentos (
                        id bigserial primary key, conta_id bigint, numero int,
                        evento_agenda_id bigint, sinal_centavos bigint,
                        setup_centavos bigint, primeiro_ano_centavos bigint)""")
+        for _col, _tipo in (("conta_id", "bigint"), ("numero", "int"),
+                            ("evento_agenda_id", "bigint"),
+                            ("sinal_centavos", "bigint"),
+                            ("primeiro_ano_centavos", "bigint")):
+            c.execute(f"alter table orcamentos add column if not exists {_col} {_tipo}")
         c.execute("""insert into orcamentos (conta_id, numero, evento_agenda_id,
                        sinal_centavos, primeiro_ano_centavos) values (%s,%s,%s,%s,%s)""",
                   (conta_id, numero, evento_id, sinal, total))

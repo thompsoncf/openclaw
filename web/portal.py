@@ -8999,6 +8999,18 @@ def painel_clientes(request: Request, busca: str = "", papel: str = ""):
                    aviso=request.session.pop("aviso", None))
 
 
+def _aviso_do_cadastro(r: dict) -> str:
+    """Traduz o retorno de clientes.salvar_cliente numa frase que diz a verdade."""
+    nome = (r.get("nome") or "Cliente").strip()
+    if r.get("acao") == "criado":
+        return f"{nome} cadastrado."
+    if r.get("papel_mudou"):
+        return f"{nome} já estava cadastrado — atualizei o papel."
+    if r.get("acao") == "atualizado":
+        return f"{nome} já estava cadastrado — completei os dados que faltavam."
+    return f"{nome} já estava cadastrado. Nada mudou."
+
+
 @router.post("/painel/clientes/novo")
 def painel_clientes_novo(request: Request, nome: str = Form(...),
                          telefone: str = Form(""), documento: str = Form(""),
@@ -9025,13 +9037,17 @@ def painel_clientes_novo(request: Request, nome: str = Form(...),
         request.session["erro"] = "Documento deve ter 11 (CPF) ou 14 (CNPJ) digitos."
         return RedirectResponse("/painel/clientes", status_code=303)
     try:
-        cli.criar_cliente(pool, conta[0], nome, telefone=(telefone or None),
-                          email=(email or None), aniversario=(aniversario or None),
-                          obs=(obs or None), cidade=(cidade or None),
-                          uf=(uf or None), endereco=(endereco or None),
-                          cep=(cep or None), eh_cliente=bool(eh_cliente),
-                          eh_fornecedor=bool(eh_fornecedor), **kw)
-        request.session["aviso"] = "Cliente cadastrado."
+        r = cli.salvar_cliente(pool, conta[0], nome, telefone=(telefone or None),
+                               email=(email or None), aniversario=(aniversario or None),
+                               obs=(obs or None), cidade=(cidade or None),
+                               uf=(uf or None), endereco=(endereco or None),
+                               cep=(cep or None), eh_cliente=bool(eh_cliente),
+                               eh_fornecedor=bool(eh_fornecedor), **kw)
+        # Aviso HONESTO. Antes saía "Cliente cadastrado." nos três casos — criou,
+        # reusou em silêncio, ou não fez nada. Sem saber se pegou, a vendedora
+        # salvava de novo, e foi assim que a Ana Clara virou três cadastros em
+        # cinco minutos (25/08/2026). Dizer o que aconteceu é metade do conserto.
+        request.session["aviso"] = _aviso_do_cadastro(r)
     except ValueError as e:
         request.session["erro"] = str(e)
     return RedirectResponse("/painel/clientes", status_code=303)

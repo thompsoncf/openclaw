@@ -1,0 +1,470 @@
+<title>A Pessoa Nasce na Chegada</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --ground:#f4f6f7; --surface:#ffffff; --sunken:#eceff1;
+  --borda:#d5dbde; --borda-forte:#b9c2c7;
+  --txt:#12171a; --txt-mut:#5d686e; --txt-fraco:#8a949a;
+  --verde:#128a3e; --verde-bg:rgba(18,138,62,.10); --verde-bd:rgba(18,138,62,.32);
+  --cinza:#6b757a; --cinza-bg:rgba(107,117,122,.10); --cinza-bd:rgba(107,117,122,.28);
+  --ambar:#a06a05; --ambar-bg:rgba(160,106,5,.12); --ambar-bd:rgba(160,106,5,.36);
+  --roxo:#6d3fb5; --roxo-bg:rgba(109,63,181,.10); --roxo-bd:rgba(109,63,181,.30);
+  --sombra:0 1px 2px rgba(16,24,28,.06),0 8px 24px -12px rgba(16,24,28,.18);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#0e1113; --surface:#171b1e; --sunken:#121618;
+  --borda:#272d31; --borda-forte:#394247;
+  --txt:#e6e9ea; --txt-mut:#8b9499; --txt-fraco:#69737a;
+  --verde:#35d06d; --verde-bg:rgba(34,197,94,.13); --verde-bd:rgba(34,197,94,.34);
+  --cinza:#79848a; --cinza-bg:rgba(121,132,138,.12); --cinza-bd:rgba(121,132,138,.26);
+  --ambar:#e0a534; --ambar-bg:rgba(224,165,52,.14); --ambar-bd:rgba(224,165,52,.34);
+  --roxo:#b092e8; --roxo-bg:rgba(176,146,232,.13); --roxo-bd:rgba(176,146,232,.30);
+  --sombra:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+}}
+:root[data-theme="dark"]{
+  --ground:#0e1113; --surface:#171b1e; --sunken:#121618;
+  --borda:#272d31; --borda-forte:#394247;
+  --txt:#e6e9ea; --txt-mut:#8b9499; --txt-fraco:#69737a;
+  --verde:#35d06d; --verde-bg:rgba(34,197,94,.13); --verde-bd:rgba(34,197,94,.34);
+  --cinza:#79848a; --cinza-bg:rgba(121,132,138,.12); --cinza-bd:rgba(121,132,138,.26);
+  --ambar:#e0a534; --ambar-bg:rgba(224,165,52,.14); --ambar-bd:rgba(224,165,52,.34);
+  --roxo:#b092e8; --roxo-bg:rgba(176,146,232,.13); --roxo-bd:rgba(176,146,232,.30);
+  --sombra:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--txt);
+  font-family:"IBM Plex Sans",-apple-system,sans-serif;font-size:15px;line-height:1.55;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1020px;margin:0 auto;padding:2.5rem 1.25rem 4rem;display:flex;flex-direction:column;gap:2.75rem}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+.eyebrow{font-size:.7rem;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-fraco);font-weight:600}
+h1{margin:0;font-size:clamp(1.6rem,3.6vw,2.15rem);line-height:1.15;font-weight:700;letter-spacing:-.02em;text-wrap:balance}
+h2{margin:0;font-size:1.05rem;font-weight:600;letter-spacing:-.01em}
+h3{margin:0;font-size:.8rem;font-weight:600;color:var(--txt-fraco);letter-spacing:.06em;text-transform:uppercase}
+.lede{margin:0;color:var(--txt-mut);max-width:64ch}.lede b{color:var(--txt);font-weight:600}
+.nota{margin:0;color:var(--txt-mut);font-size:.9rem;max-width:72ch}
+.nota b{color:var(--txt);font-weight:600}
+ul.nota{padding-left:1.1rem;display:flex;flex-direction:column;gap:.4rem}
+section{display:flex;flex-direction:column;gap:1rem}
+.top{display:flex;flex-direction:column;gap:.85rem}
+
+/* ---- painel que imita o formulário real ---- */
+.par{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.painel{background:var(--surface);border:1px solid var(--borda);border-radius:10px;
+  box-shadow:var(--sombra);overflow:hidden;display:flex;flex-direction:column}
+.painel-topo{padding:.5rem .85rem;border-bottom:1px solid var(--borda);background:var(--sunken);
+  font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--txt-mut);
+  display:flex;justify-content:space-between;align-items:center;gap:.5rem}
+.painel-topo .tag{letter-spacing:0;text-transform:none;font-size:.68rem;padding:.1rem .45rem;
+  border-radius:999px;border:1px solid}
+.tag-hoje{color:var(--cinza);border-color:var(--cinza-bd);background:var(--cinza-bg)}
+.tag-novo{color:var(--verde);border-color:var(--verde-bd);background:var(--verde-bg)}
+.painel-corpo{padding:.9rem .85rem;display:flex;flex-direction:column;gap:.55rem;flex:1}
+
+.campo-rot{font-size:.74rem;font-weight:600;color:var(--txt-mut)}
+.busca{display:flex;align-items:center;gap:.5rem;border:1px solid var(--borda-forte);border-radius:8px;
+  padding:.5rem .6rem;background:var(--ground);font-size:.84rem;color:var(--txt-fraco)}
+.busca .lupa{flex:none;opacity:.7}
+.dica{font-size:.72rem;color:var(--txt-fraco)}
+.alt{display:flex;flex-wrap:wrap;gap:.15rem 1rem;font-size:.74rem;color:var(--txt-fraco)}
+.alt span{text-decoration:underline;text-decoration-color:var(--borda);text-underline-offset:3px}
+
+/* o botão novo — o assunto da página */
+.btn-empresa{display:flex;align-items:center;gap:.55rem;width:100%;text-align:left;
+  border:1px solid var(--verde-bd);background:var(--verde-bg);color:var(--txt);
+  border-radius:8px;padding:.55rem .65rem;font:inherit;font-size:.84rem;cursor:default}
+.btn-empresa .ic{flex:none;font-size:.95rem}
+.btn-empresa .tt{font-weight:600}
+.btn-empresa .sb{display:block;font-size:.72rem;color:var(--txt-mut);font-weight:400;margin-top:1px}
+.ou{display:flex;align-items:center;gap:.6rem;font-size:.68rem;color:var(--txt-fraco);
+  text-transform:uppercase;letter-spacing:.08em}
+.ou::before,.ou::after{content:"";flex:1;height:1px;background:var(--borda)}
+
+/* cartão verde de endereço escolhido (o que já existe hoje) */
+.escolhido{display:flex;gap:.55rem;align-items:flex-start;border:1px solid var(--verde-bd);
+  background:var(--verde-bg);border-radius:8px;padding:.55rem .6rem}
+.escolhido .chk{flex:none;color:var(--verde)}
+.escolhido .nm{font-size:.84rem;font-weight:700}
+.escolhido .ed{font-size:.74rem;color:var(--txt-mut);margin-top:1px}
+.escolhido .lk{font-size:.74rem;color:var(--verde);text-decoration:underline;display:inline-block;margin-top:.2rem}
+.escolhido .x{margin-left:auto;flex:none;color:var(--txt-fraco);font-size:.8rem}
+.enviar{align-self:flex-end;font-size:.72rem;font-weight:700;border-radius:7px;padding:.3rem .55rem;
+  background:var(--verde);color:var(--surface);border:1px solid var(--verde)}
+
+.faixa-ambar{display:flex;gap:.5rem;align-items:flex-start;border:1px solid var(--ambar-bd);
+  background:var(--ambar-bg);border-radius:8px;padding:.5rem .6rem;font-size:.78rem;color:var(--ambar)}
+.faixa-ambar a{color:var(--ambar);text-decoration:underline;white-space:nowrap;font-weight:600}
+.faixa-ambar .corpo{color:var(--txt-mut)}
+.faixa-ambar .corpo b{color:var(--txt)}
+
+.tab-env{overflow-x:auto;border:1px solid var(--borda);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.85rem;min-width:520px}
+th{text-align:left;font-size:.66rem;letter-spacing:.09em;text-transform:uppercase;color:var(--txt-fraco);
+  font-weight:600;padding:.55rem .8rem;border-bottom:1px solid var(--borda);background:var(--sunken)}
+td{padding:.58rem .8rem;border-bottom:1px solid var(--borda);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;font-family:"IBM Plex Mono",monospace;
+  white-space:nowrap;font-weight:600}
+td .sub{display:block;color:var(--txt-mut);font-size:.77rem;margin-top:.1rem}
+.ok{color:var(--verde);font-weight:600}
+.nao{color:var(--cinza);font-weight:600}
+.destaque td{background:var(--ambar-bg)}
+.destaque td:first-child{box-shadow:inset 3px 0 0 var(--ambar)}
+
+pre{margin:0;background:var(--sunken);border:1px solid var(--borda);border-radius:7px;
+  padding:.7rem .8rem;overflow-x:auto;font-size:.78rem;line-height:1.6}
+pre .g{color:var(--cinza)} pre .v{color:var(--verde);font-weight:600}
+.perg{border:1px solid var(--roxo-bd);background:var(--roxo-bg);border-radius:10px;padding:1rem 1.1rem;
+  display:flex;flex-direction:column;gap:.6rem}
+.perg h2{color:var(--roxo)}
+.opc{display:flex;gap:.55rem;align-items:flex-start;font-size:.88rem}
+.opc .letra{flex:none;font-family:"IBM Plex Mono",monospace;font-weight:600;color:var(--roxo);
+  border:1px solid var(--roxo-bd);border-radius:5px;padding:0 .35rem;font-size:.76rem;margin-top:.1rem}
+.opc .txt{color:var(--txt-mut)}.opc .txt b{color:var(--txt)}
+</style>
+<style>
+.grid2{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
+.tag-ruim{color:var(--ambar);border-color:var(--ambar-bd);background:var(--ambar-bg)}
+.inp{border:1px solid var(--borda-forte);border-radius:8px;padding:.42rem .55rem;background:var(--ground);
+  font-size:.82rem;color:var(--txt-mut)}
+.inp.cheio{color:var(--txt)}
+.inp.pronto{border-color:var(--verde-bd);background:var(--verde-bg);color:var(--txt)}
+.chk{display:flex;gap:.45rem;align-items:center;font-size:.8rem;color:var(--txt-mut)}
+.cx{width:15px;height:15px;border:1px solid var(--borda-forte);border-radius:4px;flex:none;
+  display:grid;place-items:center;font-size:.62rem;background:var(--ground)}
+.cx.on{background:var(--verde);border-color:var(--verde);color:#fff}
+.salvar{align-self:flex-end;font-size:.76rem;font-weight:700;border-radius:7px;padding:.35rem .7rem;
+  background:var(--verde);color:#fff;border:1px solid var(--verde)}
+.toast{border-radius:8px;padding:.45rem .6rem;font-size:.78rem;border:1px solid}
+.toast.mau{color:var(--ambar);border-color:var(--ambar-bd);background:var(--ambar-bg)}
+.toast.bom{color:var(--verde);border-color:var(--verde-bd);background:var(--verde-bg)}
+.pess{display:flex;gap:.55rem;align-items:flex-start;background:var(--surface);border:1px solid var(--borda);
+  border-radius:7px;padding:.5rem .55rem}
+.pess .av{flex:none;width:26px;height:26px;border-radius:50%;background:var(--sunken);border:1px solid var(--borda);
+  display:grid;place-items:center;font-size:.7rem;font-weight:700;color:var(--txt-mut)}
+.pess .nm{font-size:.82rem;font-weight:600;line-height:1.3}
+.pess .dt{font-size:.72rem;color:var(--txt-mut)}
+.papeis{display:flex;gap:.3rem;margin-top:.25rem;flex-wrap:wrap}
+.mini{font-size:.65rem;padding:.05rem .35rem;border-radius:999px;border:1px solid;font-weight:600}
+.mini.cli{color:var(--verde);border-color:var(--verde-bd);background:var(--verde-bg)}
+.mini.forn{color:var(--roxo);border-color:var(--roxo-bd);background:var(--roxo-bg)}
+.mini.lead{color:var(--ambar);border-color:var(--ambar-bd);background:var(--ambar-bg)}
+.mini.off{color:var(--txt-fraco);border-color:var(--borda);background:var(--sunken)}
+.acoes{display:flex;gap:.4rem;flex-wrap:wrap}
+.bt{font-size:.72rem;font-weight:600;border-radius:6px;padding:.28rem .55rem;border:1px solid var(--borda-forte);
+  background:var(--surface);color:var(--txt)}
+.bt.pri{background:var(--roxo);border-color:var(--roxo);color:#fff}
+.passos{counter-reset:p;display:flex;flex-direction:column;gap:.55rem;padding:0;margin:0;list-style:none}
+.passos li{counter-increment:p;display:flex;gap:.6rem;font-size:.88rem;color:var(--txt-mut)}
+.passos li b{color:var(--txt)}
+.passos li::before{content:counter(p);flex:none;width:20px;height:20px;border-radius:50%;
+  background:var(--sunken);border:1px solid var(--borda);display:grid;place-items:center;
+  font-size:.7rem;font-weight:700;color:var(--txt-mut);margin-top:.1rem}
+
+/* ---- LINHA DO TEMPO — a peça central ---- */
+.linha{display:grid;grid-template-columns:repeat(3,1fr);gap:0;position:relative;margin-top:.4rem}
+.etapa{border:1px solid var(--borda);background:var(--surface);padding:.8rem .75rem;
+  display:flex;flex-direction:column;gap:.5rem;position:relative}
+.etapa:first-child{border-radius:10px 0 0 10px}
+.etapa:last-child{border-radius:0 10px 10px 0}
+.etapa+.etapa{border-left:0}
+.etapa .quando{font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:var(--txt-fraco)}
+.etapa .oque{font-size:.95rem;font-weight:700;letter-spacing:-.01em}
+.etapa .sub2{font-size:.75rem;color:var(--txt-mut)}
+.etapa.agora{border-color:var(--verde-bd);background:var(--verde-bg)}
+.etapa.agora .quando{color:var(--verde)}
+.dados{display:flex;flex-direction:column;gap:.22rem;margin-top:.1rem}
+.d{display:flex;gap:.4rem;align-items:baseline;font-size:.74rem}
+.d .ic{flex:none;width:12px;font-weight:700}
+.d.tem .ic{color:var(--verde)} .d.tem{color:var(--txt)}
+.d.falta .ic{color:var(--txt-fraco)} .d.falta{color:var(--txt-fraco)}
+.d.novo .ic{color:var(--roxo)} .d.novo{color:var(--txt)}
+.idfaixa{margin-top:.5rem;border:1px dashed var(--roxo-bd);background:var(--roxo-bg);border-radius:8px;
+  padding:.5rem .7rem;font-size:.78rem;color:var(--txt-mut);display:flex;gap:.5rem;align-items:center}
+.idfaixa b{color:var(--roxo)}
+.setinha{position:absolute;right:-9px;top:50%;transform:translateY(-50%);z-index:2;
+  width:16px;height:16px;border-radius:50%;background:var(--surface);border:1px solid var(--borda);
+  display:grid;place-items:center;font-size:.62rem;color:var(--txt-fraco)}
+.fusao{border:1px solid var(--borda);border-radius:10px;background:var(--surface);overflow:hidden}
+.fusao .cab{padding:.55rem .8rem;background:var(--sunken);border-bottom:1px solid var(--borda);
+  font-size:.74rem;font-weight:600;color:var(--txt-mut);display:flex;justify-content:space-between}
+.fusao .corpo{padding:.75rem .8rem;display:flex;flex-direction:column;gap:.6rem}
+.dois{display:grid;grid-template-columns:1fr auto 1fr;gap:.6rem;align-items:center}
+.lado{border:1px solid var(--borda);border-radius:8px;padding:.5rem .55rem;background:var(--ground)}
+.lado.vence{border-color:var(--verde-bd);background:var(--verde-bg)}
+.lado .rot{font-size:.64rem;text-transform:uppercase;letter-spacing:.07em;color:var(--txt-fraco);font-weight:600}
+.lado .v{font-size:.8rem;margin-top:.15rem}
+.seta{color:var(--txt-fraco);font-size:1.1rem}
+@media print{
+  body{background:#fff}
+  .wrap{max-width:none;padding:0 0 1rem;gap:2rem}
+  section{break-inside:avoid-page}
+  .painel,.fusao,.tab-env,.perg,.linha{break-inside:avoid}
+  h1{font-size:1.65rem}
+}
+@media (max-width:720px){.linha{grid-template-columns:1fr}
+  .etapa{border-radius:0!important;border-left:1px solid var(--borda)!important;border-top:0}
+  .etapa:first-child{border-radius:10px 10px 0 0!important;border-top:1px solid var(--borda)}
+  .etapa:last-child{border-radius:0 0 10px 10px!important}
+  .setinha{display:none}}
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <span class="eyebrow">Prime Eventos · Identidade do cliente · v3</span>
+  <h1>A pessoa nasce na chegada, a ficha completa no orçamento</h1>
+  <p class="lede">Fui medir antes de redesenhar e descobri que <b>metade do que você propôs já existe</b>: o orçamento já cria e amarra o cliente. O que falta é bem menor e bem mais preciso — <b>salvar de novo tem que atualizar, nunca criar outro</b>.</p>
+</header>
+
+<section>
+  <h2>O que já funciona: o orçamento é o momento da ficha</h2>
+  <p class="nota">Os 14 orçamentos da Prime têm <code>cliente_id</code> preenchido — <b>100%</b>. E o cliente nasce no mesmo minuto do orçamento:</p>
+  <div class="tab-env">
+    <table>
+      <thead><tr><th>Orçamento criado</th><th>Cliente criado</th><th>Quem</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">19/08 12:42</td><td class="mono">12:42</td><td>Flávia Eldane</td></tr>
+        <tr><td class="mono">19/08 16:31</td><td class="mono">16:31</td><td>Camila Damasceno</td></tr>
+        <tr><td class="mono">21/08 22:00</td><td class="mono">22:00</td><td>Josiany Rayra</td></tr>
+        <tr><td class="mono">29/08 12:42</td><td class="mono">12:42</td><td>Fernanda Castelo Branco</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="nota">Faz sentido e é onde tem que ser: <b>12 dos 14 orçamentos têm documento e 8 têm endereço</b>, porque ali vira contrato. O lead, antes disso, tem só o apelido do WhatsApp e o telefone. <b>Esse momento não precisa ser construído.</b> <span style='color:var(--ambar)'>(Correção do que eu disse antes: eu chamei esses 12 de CNPJ. São CPF — ver a seção do documento adiante.)</span></p>
+</section>
+
+<section>
+  <h2>Onde cada dado entra — e onde a identidade deveria nascer</h2>
+  <div class="linha">
+    <div class="etapa">
+      <span class="quando">1 · chega a mensagem</span>
+      <span class="oque">Lead</span>
+      <span class="sub2">Automático, sem ninguém digitar.</span>
+      <div class="dados">
+        <div class="d tem"><span class="ic">✓</span><span>Telefone</span></div>
+        <div class="d tem"><span class="ic">✓</span><span>Apelido do WhatsApp <span style="color:var(--txt-fraco)">("J.Neto", "🌻")</span></span></div>
+        <div class="d falta"><span class="ic">·</span><span>Nome civil</span></div>
+        <div class="d falta"><span class="ic">·</span><span>CPF / CNPJ</span></div>
+        <div class="d falta"><span class="ic">·</span><span>Endereço</span></div>
+      </div>
+      <span class="setinha">→</span>
+    </div>
+    <div class="etapa agora">
+      <span class="quando">2 · vira negócio</span>
+      <span class="oque">Orçamento</span>
+      <span class="sub2">A vendedora completa o que falta.</span>
+      <div class="dados">
+        <div class="d tem"><span class="ic">✓</span><span>Telefone <span style="color:var(--txt-fraco)">— já veio</span></span></div>
+        <div class="d novo"><span class="ic">+</span><span>Nome civil</span></div>
+        <div class="d novo"><span class="ic">+</span><span>CPF / CNPJ</span></div>
+        <div class="d novo"><span class="ic">+</span><span>Endereço e CEP</span></div>
+      </div>
+      <span class="setinha">→</span>
+    </div>
+    <div class="etapa">
+      <span class="quando">3 · fecha</span>
+      <span class="oque">Contrato</span>
+      <span class="sub2">Só usa o que já está lá.</span>
+      <div class="dados">
+        <div class="d tem"><span class="ic">✓</span><span>Tudo do passo 2</span></div>
+        <div class="d falta"><span class="ic">·</span><span>Nada novo a digitar</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="idfaixa">
+    <span>◆</span>
+    <span>A <b>identidade</b> (a <code>pessoa</code>) nasce no <b>passo 1</b>, a partir do telefone — não no passo 2. Assim ela existe mesmo quando ninguém preencheu nada, e a ficha vai só <b>enriquecendo</b> em cima dela. Preencher deixa de ser criar.</span>
+  </div>
+  <p class="nota">É essa a inversão. Hoje a identidade nasce no passo 2 — e por isso cada tentativa de salvar no passo 2 fabrica uma pessoa nova.</p>
+</section>
+
+<section>
+  <h2>Os dois jeitos de duplicar (5 registros a mais, 4 pessoas)</h2>
+  <div class="grid2">
+    <div class="painel">
+      <div class="painel-topo"><span>Padrão A — tentativa repetida no orçamento</span><span class="tag tag-ruim">3 registros</span></div>
+      <div class="painel-corpo">
+        <p class="nota" style="font-size:.82rem">O orçamento da <b>Ana Clara</b> começou <b>17:52</b> e aponta pro cliente <b>id 27</b>, criado <b>17:57</b>. Os ids <b>25 e 26 estão órfãos</b> — nenhum orçamento aponta pra eles.</p>
+        <p class="nota" style="font-size:.82rem">A <b>Victoria</b> igual: o orçamento das 13:19 aponta pro id 11. O id 10, <b>"Vis<u>c</u>toria"</b>, ficou órfão — foi a tentativa com typo.</p>
+        <div class="toast mau">Cada correção de digitação cunhou um cliente novo. O último ganhou o vínculo; os outros viraram lixo.</div>
+      </div>
+    </div>
+    <div class="painel">
+      <div class="painel-topo"><span>Padrão B — "quero marcar como fornecedor"</span><span class="tag tag-ruim">2 registros</span></div>
+      <div class="painel-corpo">
+        <p class="nota" style="font-size:.82rem">Em <b>21/08</b> alguém cadastrou três pessoas como cliente e, uma hora depois, voltou pra marcar duas como fornecedor:</p>
+        <div class="tab-env"><table><tbody>
+          <tr><td>id 17 <b>GILVAN … CARVALHO</b><span class="sub">cliente · tel + CEP + endereço · 12:47</span></td></tr>
+          <tr class="destaque"><td>id 20 <b>GILVAN … CARVALHO</b><span class="sub">fornecedor · <b>tudo vazio</b> · 13:58</span></td></tr>
+          <tr><td>id 16 <b>RONALDO V<u>A</u>Z DA SILVA</b><span class="sub">cliente · tel + endereço · 12:10</span></td></tr>
+          <tr class="destaque"><td>id 19 <b>RONALDO V<u>E</u>Z DA SILVA</b><span class="sub">fornecedor · <b>tudo vazio</b> · 13:56</span></td></tr>
+        </tbody></table></div>
+        <div class="toast mau">A tela não deixou <b>marcar</b> — só deixou cadastrar de novo. Por isso os registros de fornecedor estão vazios: só o nome, digitado torto.</div>
+      </div>
+    </div>
+  </div>
+  <p class="nota"><b>Dois padrões, uma causa só:</b> em nenhum dos dois a tela permite dizer <i>"essa pessoa já existe, atualiza ela"</i>.</p>
+</section>
+
+<section>
+  <h2>Tela 1 — o orçamento reconhece e enriquece</h2>
+  <div class="grid2">
+    <div class="painel">
+      <div class="painel-topo"><span>Hoje</span><span class="tag tag-ruim">cada save, um cliente</span></div>
+      <div class="painel-corpo">
+        <span class="campo-rot">Cliente</span><div class="inp cheio">Ana Clara Marques</div>
+        <span class="campo-rot">WhatsApp</span><div class="inp cheio">(86) 99999-4650</div>
+        <span class="campo-rot">CNPJ</span><div class="inp">—</div>
+        <button class="salvar">Salvar orçamento</button>
+        <div class="toast mau">✓ Salvo. <b>3º cliente</b> criado com o mesmo telefone.</div>
+      </div>
+    </div>
+    <div class="painel">
+      <div class="painel-topo"><span>Proposta</span><span class="tag tag-novo">a mesma ficha, enriquecida</span></div>
+      <div class="painel-corpo">
+        <div class="pess">
+          <span class="av">AC</span>
+          <div><div class="nm">Ana Clara Marques</div>
+          <div class="dt">(86) 99999-4650</div>
+          <div class="papeis"><span class="mini lead">Lead #579 · 17/08</span><span class="mini cli">Cliente</span></div></div>
+        </div>
+        <span class="campo-rot">Nome civil <span style="color:var(--txt-fraco)">— veio do lead, confirme</span></span>
+        <div class="inp pronto">Ana Clara Marques</div>
+        <span class="campo-rot">CNPJ <span style="color:var(--txt-fraco)">— falta pro contrato</span></span>
+        <div class="inp">—</div>
+        <button class="salvar">Salvar orçamento</button>
+        <div class="toast bom">✓ Orçamento salvo. Ficha da Ana Clara <b>atualizada</b> — segue sendo uma só.</div>
+      </div>
+    </div>
+  </div>
+  <p class="nota">O CNPJ continua <b>opcional pra salvar</b> — travar o orçamento por falta de documento atrapalharia a venda. Ele é cobrado quando o contrato for gerado, que é onde faz falta de verdade.</p>
+</section>
+
+<section>
+  <h2>O documento: CPF <i>ou</i> CNPJ — e a Prime é 100% CPF</h2>
+  <p class="nota">Você perguntou pelo campo do documento e ele guarda a maior surpresa do levantamento:</p>
+  <div class="tab-env">
+    <table>
+      <thead><tr><th>Os 23 clientes da Prime</th><th style="text-align:right">Quantos</th></tr></thead>
+      <tbody>
+        <tr><td><b>Pessoa física</b> (<code>tipo='pf'</code>)<span class="sub">Casamento, aniversário, formatura — quem aluga salão é gente, não empresa.</span></td><td class="num">23</td></tr>
+        <tr><td>Com <b>CPF</b> preenchido</td><td class="num">14</td></tr>
+        <tr class="destaque"><td>Com <b>CNPJ</b> preenchido</td><td class="num">0</td></tr>
+        <tr><td>Sem documento nenhum</td><td class="num">9</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="faixa-ambar">
+    <span>⚠</span>
+    <span class="corpo">A tabela <code>orcamentos</code> tem coluna <code>cnpj</code> e <b>não tem coluna <code>cpf</code></b>. Os 12 documentos gravados lá têm <b>11 dígitos</b> — são todos CPF, guardados numa coluna com nome errado.</span>
+  </div>
+  <p class="nota">Na identidade está certo: o código roteia por tamanho — <code>cpf=doc se 11 dígitos</code>, <code>cnpj=doc se 14</code> — e por isso as 14 pessoas têm o CPF no campo certo em <code>pessoas</code>. <b>O erro é só no orçamento</b>, que tem uma gaveta só e o nome dela é "cnpj".</p>
+
+  <h3 style="margin-top:.4rem">O que a tela mostra hoje</h3>
+  <div class="grid2">
+    <div class="painel">
+      <div class="painel-topo"><span>Hoje</span><span class="tag tag-ruim">promete o que não cumpre</span></div>
+      <div class="painel-corpo">
+        <div style="display:flex;gap:.4rem">
+          <span class="bt" style="background:var(--sunken)">🏢 Pessoa Jurídica</span>
+          <span class="bt">🧑 Pessoa Física</span>
+        </div>
+        <span class="campo-rot">CNPJ / CPF <span style="color:var(--txt-fraco)">— preenche empresa, segmento e contato automaticamente</span></span>
+        <div style="display:flex;gap:.4rem">
+          <div class="inp" style="flex:1">00.000.000/0000-00</div>
+          <span class="bt" style="background:var(--verde);color:#fff;border-color:var(--verde)">Buscar</span>
+        </div>
+        <div class="toast mau">Três problemas: o botão já vem em <b>Pessoa Jurídica</b>, que é o caso que <b>nunca</b> acontece na Prime; a máscara mostra CNPJ; e o "preenche automaticamente" <b>só funciona pra CNPJ</b> — pra CPF é promessa vazia.</div>
+      </div>
+    </div>
+    <div class="painel">
+      <div class="painel-topo"><span>Proposta</span><span class="tag tag-novo">um ou outro, explícito</span></div>
+      <div class="painel-corpo">
+        <div style="display:flex;gap:.4rem">
+          <span class="bt">🏢 Pessoa Jurídica</span>
+          <span class="bt pri" style="background:var(--verde);border-color:var(--verde)">🧑 Pessoa Física</span>
+        </div>
+        <span class="campo-rot">CPF <span style="color:var(--txt-fraco)">— opcional agora, obrigatório no contrato</span></span>
+        <div class="inp">000.000.000-00</div>
+        <div class="toast bom">O tipo <b>mais usado por esta empresa</b> já vem escolhido. O rótulo vira <b>só CPF</b> ou <b>só CNPJ</b> — nunca os dois juntos. O botão "Buscar" só aparece no CNPJ, que é onde ele funciona.</div>
+      </div>
+    </div>
+  </div>
+  <p class="nota">Duas regras que eu manteria como estão, porque já estão certas:</p>
+  <ul class="nota">
+    <li><b>Um ou outro, decidido pelo tamanho</b> — 11 dígitos é CPF, 14 é CNPJ. Não precisa o usuário declarar; o toggle serve pra <i>rotular</i> a tela, não pra decidir o dado.</li>
+    <li><b>Documento inválido não trava a venda.</b> Hoje, dígito verificador errado grava o orçamento assim mesmo e o cliente entra sem documento. Está certo — o pedido é mais importante que o cadastro. Só falta <b>avisar</b> que ficou sem.</li>
+  </ul>
+  <p class="nota">E o conserto de banco que isso pede: <b><code>orcamentos</code> precisa guardar CPF e CNPJ separados</b> (ou um <code>documento</code> + <code>tipo</code>), senão o contrato de pessoa física sai lendo um campo chamado "cnpj".</p>
+</section>
+
+<section>
+  <h2>Tela 2 — papel é marca na ficha, não cadastro novo</h2>
+  <div class="painel" style="max-width:460px">
+    <div class="painel-topo"><span>Ficha · GILVAN PEREIRA DE CARVALHO</span><span class="tag tag-novo">uma linha só</span></div>
+    <div class="painel-corpo">
+      <div class="pess">
+        <span class="av">GP</span>
+        <div><div class="nm">GILVAN PEREIRA DE CARVALHO</div>
+        <div class="dt">(86) 99828-0472 · Rua Ulisses Marques, 2790</div></div>
+      </div>
+      <span class="campo-rot">Papel</span>
+      <div style="display:flex;gap:1.2rem">
+        <div class="chk"><span class="cx on">✓</span> Cliente</div>
+        <div class="chk"><span class="cx on">✓</span> Fornecedor</div>
+      </div>
+      <div class="toast bom">✓ "Gilvan agora é <b>cliente e fornecedor</b>." Um clique, sem redigitar nada.</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Tela 3 — juntar os 5 que já existem</h2>
+  <div class="fusao">
+    <div class="cab"><span>Juntar cadastros duplicados</span><span>1 de 4</span></div>
+    <div class="corpo">
+      <div class="pess">
+        <span class="av">AC</span>
+        <div><div class="nm">Ana Clara Marques</div>
+        <div class="dt">3 registros, mesmo telefone · (86) 99999-4650</div></div>
+      </div>
+      <div class="dois">
+        <div class="lado vence"><div class="rot">Fica</div><div class="v"><b>id 27</b><br><span class="dt">é o que o orçamento aponta</span></div></div>
+        <div class="seta">←</div>
+        <div class="lado"><div class="rot">Somem</div><div class="v"><b>ids 25 e 26</b><br><span class="dt">órfãos · nada exclusivo neles</span></div></div>
+      </div>
+      <div class="toast bom">Nenhum dado se perde: os órfãos não têm orçamento, título nem conversa própria.</div>
+      <div class="acoes"><button class="bt pri">Juntar</button><button class="bt">Pular</button><button class="bt">Não são a mesma pessoa</button></div>
+    </div>
+  </div>
+  <p class="nota">Repare que o critério de "quem fica" não é o mais antigo — é <b>o que tem vínculo</b>. Na Ana Clara o mais novo é que vale. Um a um, com você confirmando: <b>fundir é irreversível</b> (regra 0).</p>
+</section>
+
+<section>
+  <h2>O plano</h2>
+  <p class="nota"><b>Etapa 1 — parar de duplicar</b> (não encosta no caminho do WhatsApp):</p>
+  <ol class="passos">
+    <li><b>Salvar de novo atualiza.</b> No orçamento, resolver a pessoa uma vez e daí em diante atualizar. Resolve Ana Clara e Victoria — 3 dos 5.</li>
+    <li><b>Papel vira marca na ficha existente</b>, com botão de ligar/desligar. Resolve Gilvan e Ronaldo — os outros 2.</li>
+    <li><b>Casar telefone pelos últimos 8 dígitos</b>, como <code>wa_contatos.numero8</code> já faz. Hoje 13 registros estão em <code>8699…</code> e 6 em <code>5586…</code> — nunca se encontram.</li>
+    <li><b>Mensagem honesta</b>: criou, atualizou, ou mudou o papel.</li>
+    <li><b>Separar CPF de CNPJ no orçamento</b> e rotular a tela conforme o tipo, com o padrão da empresa já escolhido. Hoje 12 CPFs estão gravados numa coluna <code>cnpj</code>.</li>
+  </ol>
+  <p class="nota"><b>Etapa 2 — unificar</b> (maior, merece PR próprio):</p>
+  <ol class="passos">
+    <li><b>Tela de fusão</b> pros 5 que já existem.</li>
+    <li><b>Identidade nascendo no lead</b> — a inversão da linha do tempo. É o que faz "virar cliente" ser um clique em vez de redigitação, e o que liga a conversa à ficha.</li>
+  </ol>
+  <div class="perg">
+    <h2>Decisão</h2>
+    <div class="opc"><span class="letra">A</span><span class="txt"><b>Etapa 1 inteira</b>, com testes. Para a duplicação nos dois padrões e não põe risco no funil.</span></div>
+    <div class="opc"><span class="letra">B</span><span class="txt">Etapa 1 + <b>tela de fusão</b>, pra já limpar os 5.</span></div>
+    <div class="opc"><span class="letra">C</span><span class="txt">Tudo, incluindo a identidade nascer no lead — sabendo que mexe no caminho que traz receita.</span></div>
+  </div>
+  <p class="nota">Recomendo a <b>A</b>: os itens 1 e 2 sozinhos resolvem os 5 duplicados de origem, são testáveis isolados e não tocam no WhatsApp. A fusão e a inversão vêm em seguida, com você do lado.</p>
+</section>
+
+</div>

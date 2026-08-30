@@ -11984,7 +11984,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         // Descontar esses 3s faz o número na tela ser um piso, não uma promessa.
         // Dizer 57 quando são 60 é chato; dizer 60 quando são 57 é mentir pro
         // cliente bem na hora em que ele está com o celular na mão.
-        var QR_1O=60, QR_SEG=20, QR_ATRASO=3;
+        // 60 nos DOIS porque o serviço passa qrTimeout=60000, e esse parâmetro do
+        // Baileys vale pro primeiro código E pros seguintes — antes eram 60 e 20,
+        // que é o padrão de quem não passa nada. Se o WA_QR_QRTIMEOUT_MS mudar lá,
+        // muda aqui: tem teste amarrando os dois valores.
+        var QR_1O=60, QR_SEG=60, QR_ATRASO=3;
         var _qrSrc=null, _qrN=0, _qrResta=0, _qrTick=null, _qrVao=false;
         function qrRelPinta(){
           var anel=document.getElementById('qr-anel'), seg=document.getElementById('qr-seg'),

@@ -93,6 +93,26 @@ const MUDO_TETO_MS = parseInt(process.env.WA_QR_MUDO_TETO_MS || '2700000', 10)  
 // Espera antes de tentar retomar uma conta que levou 440 e ficou sem dono. Dobra a
 // cada tentativa (5min, 10, 20, 40, 80) — ver esperaPos440.
 const ESPERA_POS_440_MS = parseInt(process.env.WA_QR_ESPERA_POS_440_MS || '300000', 10)
+
+// Quanto cada QR fica de pé. O padrão do Baileys é 60s no PRIMEIRO código do lote
+// e 20s em cada um dos seguintes (Socket/socket.js:464 e :478) — e `qrTimeout`
+// vale pros DOIS, não dá pra esticar só o primeiro.
+//
+// 60s uniforme, então, e o valor não é arbitrário: é o único prazo com prova de
+// produção. O dono da conta 23 pareou em 26/08 levando 42s no primeiro código,
+// dentro dos 60 — ou seja, um ref de 60s o WhatsApp honra. Acima disso é chute, e
+// chutar pra cima aqui tem custo assimétrico: se o servidor invalidar o ref antes
+// do nosso relógio, a tela mostra um código MORTO e quem escaneia não recebe erro
+// nenhum — só não acontece nada. É pior que o código trocar.
+//
+// O ganho vem dos seguintes, que sobem de 20s pra 60s: o lote inteiro passa de
+// 140s (60+20×4) pra 300s, e quem demora a pegar o celular vê o código trocar 4x
+// menos. Nenhum código fica na tela além dos 60s comprovados.
+//
+// Env var pra poder ajustar sem deploy se a medição futura disser outra coisa.
+// Se mudar aqui, TEM que mudar o QR_1O/QR_SEG do painel junto — o relógio da tela
+// é contado do lado de lá, e tem teste amarrando os dois.
+const QR_TIMEOUT_MS = parseInt(process.env.WA_QR_QRTIMEOUT_MS || '60000', 10)
 // Quanto tempo DE PÉ uma sessão precisa ficar pra a retomada valer como resolvida —
 // ver sessaoFirme. Existe porque a dobra do esperaPos440 não estava dobrando: quem
 // zerava o contador era o marcarVivo, e uma sessão que sobe, entrega dois recibos e
@@ -2503,6 +2523,7 @@ async function iniciarSessao (contaId) {
       version,
       auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, log) },
       printQRInTerminal: false,
+      qrTimeout: QR_TIMEOUT_MS,   // ver QR_TIMEOUT_MS: vale pro 1º e pros seguintes
       browser: ['ZAQ', 'Chrome', '1.0.0'],
       logger: logBaileysDaConta(contaId),
       // syncFullHistory:true PEDE pro WhatsApp o histórico INTEIRO da conta (meses/
@@ -3576,4 +3597,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

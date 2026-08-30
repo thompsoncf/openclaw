@@ -15,6 +15,10 @@ Os tempos NÃO são estimativa. Saem do Baileys, em
     linha 464   let qrMs = qrTimeout || 60000;   // primeiro código do lote
     linha 478   qrMs = qrTimeout || 20000;       // os seguintes
 
+Esses são os PADRÕES, de quem não configura nada. Desde 30/08 o serviço passa
+`qrTimeout: 60000`, que vale pros dois — o lote inteiro sai de 140s (60+20x4) pra
+300s. Não dá pra esticar só o primeiro: a opção é única.
+
 e quando os `ref` do lote acabam:
 
     end(new Boom('QR refs attempts ended', { statusCode: DisconnectReason.timedOut }))
@@ -41,8 +45,11 @@ O que este teste protege:
     que ser piso, não promessa: dizer 60 quando faltam 57 é enganar o cliente bem
     na hora em que ele está com o celular na mão;
   * o relógio some quando não é hora dele (conectado, desconectado);
-  * pedir QR novo REINICIA a contagem — senão o próximo código herdaria os 20 s do
-    fim da tentativa anterior e mostraria 20 onde valem 60.
+  * pedir QR novo REINICIA a contagem;
+  * e os dois lados contam o MESMO prazo. O relógio roda no navegador sem o
+    serviço mandar o número, então uma constante solta em cada lugar faz a tela
+    mentir com cara de certeza — o teste que amarra os dois é a única coisa
+    segurando isso.
 """
 from __future__ import annotations
 
@@ -84,27 +91,51 @@ def js(html) -> str:
 
 
 # ── os tempos vêm do Baileys, não da nossa cabeça ────────────────────────────
-def test_os_tempos_batem_com_o_baileys_instalado():
-    """Trava contra upgrade da lib. Se o Baileys mudar os padrões e a gente não
-    mudar a tela, o cliente passa a ver um número que não é o dele."""
+def test_o_qrTimeout_do_baileys_continua_valendo_pros_dois():
+    """Trava contra upgrade da lib.
+
+    O `qrTimeout` sobrescreve o prazo do PRIMEIRO código e o dos SEGUINTES — é o
+    que torna impossível esticar só o primeiro, e é a razão de o serviço passar um
+    valor único. Se um upgrade separar os dois, ou trocar o nome da opção, o nosso
+    60 uniforme deixa de ser o que a tela está contando."""
     if not SOCKET_JS.exists():
         pytest.skip("baileys não instalado neste ambiente (npm install em services/wa-qr)")
     src = SOCKET_JS.read_text(encoding="utf-8")
-    assert "qrTimeout || 60000" in src, "o primeiro QR não dura mais 60s no Baileys"
-    assert "qrTimeout || 20000" in src, "os QR seguintes não duram mais 20s no Baileys"
+    assert "qrTimeout || 60000" in src, "mudou o padrão do primeiro QR no Baileys"
+    assert "qrTimeout || 20000" in src, "mudou o padrão dos QR seguintes no Baileys"
 
 
-def test_o_painel_usa_esses_mesmos_tempos(js):
-    assert "QR_1O=60" in js.replace(" ", ""), "o primeiro código tem que valer 60s"
-    assert "QR_SEG=20" in js.replace(" ", ""), "os seguintes têm que valer 20s"
+def test_o_servico_estica_os_seguintes_pra_60():
+    """O ganho de 30/08: o lote inteiro passa de 140s (60+20x4) pra 300s, e quem
+    demora a pegar o celular vê o código trocar 4x menos.
 
-
-def test_o_servico_nao_passa_qrTimeout():
-    """Se um dia passarmos, os 60/20 acima deixam de valer e o teste de cima não
-    pega — porque ele olha o PADRÃO da lib, não o nosso override."""
+    60 e não mais: é o único prazo com prova de produção (a conta 23 pareou em
+    26/08 levando 42s no primeiro código). Acima disso é chute, e chutar pra cima
+    aqui tem custo assimétrico — se o servidor invalidar o ref antes do nosso
+    relógio, a tela mostra código MORTO e quem escaneia não recebe erro nenhum."""
     srv = (RAIZ / "services" / "wa-qr" / "server.js").read_text(encoding="utf-8")
-    assert "qrTimeout" not in srv, \
-        "o serviço passou a configurar qrTimeout — os tempos do painel têm que acompanhar"
+    assert "qrTimeout: QR_TIMEOUT_MS" in srv, "o serviço parou de passar o qrTimeout"
+    m = re.search(r"WA_QR_QRTIMEOUT_MS \|\| '(\d+)'", srv)
+    assert m, "sumiu o default do WA_QR_QRTIMEOUT_MS"
+    ms = int(m.group(1))
+    assert ms == 60000, f"prazo do QR em {ms}ms — só 60000 tem prova de produção"
+
+
+def test_o_painel_conta_o_MESMO_prazo_que_o_servico_manda():
+    """Os dois lados TÊM que bater. O relógio da tela é contado no navegador, sem
+    o serviço mandar o prazo — então um número solto aqui e outro lá faz a tela
+    mentir com cara de certeza. Este teste é a única coisa ligando os dois."""
+    srv = (RAIZ / "services" / "wa-qr" / "server.js").read_text(encoding="utf-8")
+    ms = int(re.search(r"WA_QR_QRTIMEOUT_MS \|\| '(\d+)'", srv).group(1))
+    seg = ms // 1000
+    tpl = (RAIZ / "web" / "painel_prospeccao.py").read_text(encoding="utf-8")
+    m = re.search(r"var QR_1O=(\d+), QR_SEG=(\d+)", tpl)
+    assert m, "não achei as constantes do relógio no painel"
+    assert int(m.group(1)) == seg, (
+        f"o painel conta {m.group(1)}s no primeiro código, o serviço manda {seg}s")
+    assert int(m.group(2)) == seg, (
+        f"o painel conta {m.group(2)}s nos seguintes, o serviço manda {seg}s.\n"
+        f"qrTimeout vale pros DOIS — não existe primeiro diferente do resto.")
 
 
 # ── a conta é conservadora ───────────────────────────────────────────────────
@@ -252,9 +283,12 @@ def test_quando_o_prazo_acaba_a_tela_explica_o_vao(rodado):
     assert p["seg"] == 0
 
 
-def test_codigo_novo_reinicia_com_o_prazo_curto(rodado):
+def test_codigo_novo_reinicia_a_contagem(rodado):
+    """Desde 30/08 o segundo código vale os mesmos 60s do primeiro: o serviço passa
+    qrTimeout=60000, e esse parâmetro do Baileys não distingue um do outro. Antes
+    eram 20s aqui, que era o padrão de quem não configura nada."""
     p = rodado["segundo"]
-    assert p["seg"] == 17, "20 do segundo código menos o atraso de 3s"
+    assert p["seg"] == 57, "60 do segundo código menos o atraso de 3s do polling"
     assert p["tit"] == "Código renovado"
     assert p["fim"] == "none", "o aviso do vão tem que sumir quando o código chega"
 

@@ -34,8 +34,34 @@ PERIODOS = [
     ("90d", "Últimos 90 dias"),
     ("ano", "Este ano"),
     ("todos", "Todo o período"),
+    # "Período específico" NÃO entra aqui, e não é esquecimento: as outras oito
+    # abas chamam `_intervalo(periodo)` sem `de`/`ate`, então escolher datas ali
+    # cairia calado no mês corrente — filtro que mente é pior que filtro que não
+    # existe. Quando alguma delas precisar, é só passar os dois argumentos.
 ]
-_PERIODO_ROTULO = dict(PERIODOS)
+
+# A pílula Agenda tem a sua própria lista, e o motivo é que ela olha pro outro
+# lado do tempo. Os presets acima terminam todos em HOJE porque nasceram pra
+# Vendas e Contas pagas, que são histórico. A agenda de um salão é o contrário:
+# medido na Prime em 31/08/2026, 38 dos 60 compromissos estavam no FUTURO, 13
+# deles em 2027 — e "Este mês" e "Este ano" mostravam os mesmos 22. Dezembro
+# tinha 8 festas e não existia jeito de pedir dezembro: ou 22, ou os 60 de
+# "Todo o período".
+PERIODOS_AGENDA = [
+    ("mes", "Este mês"),
+    ("mes_passado", "Mês passado"),
+    ("prox30", "Próximos 30 dias"),
+    ("prox90", "Próximos 90 dias"),
+    ("ano", "Este ano"),
+    ("todos", "Todo o período"),
+    ("personalizado", "Período específico…"),
+]
+_PERIODO_ROTULO = dict(PERIODOS) | dict(PERIODOS_AGENDA)
+
+
+def periodos_da_aba(tipo: str) -> list[tuple[str, str]]:
+    """As opções de período que a aba oferece. Só a Agenda difere."""
+    return PERIODOS_AGENDA if tipo == "agenda" else PERIODOS
 
 
 def _pode_ver(request: Request):
@@ -52,8 +78,46 @@ def _pode_ver(request: Request):
     return conta, None
 
 
-def _intervalo(periodo: str) -> tuple[date, date]:
+def _dia(s) -> date | None:
+    """A data que vem do `<input type="date">`: sempre AAAA-MM-DD, nunca o texto
+    que o usuário vê. O navegador mostra dd/mm/aaaa em aparelho brasileiro e
+    manda ISO no formulário — quem formata é ele, não nós."""
+    if isinstance(s, date):
+        return s
+    try:
+        return date.fromisoformat((s or "").strip())
+    except ValueError:
+        return None
+
+
+def _fim_do_mes(d: date) -> date:
+    return (d.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+
+
+def _intervalo(periodo: str, de=None, ate=None,
+               ate_o_fim: bool = False) -> tuple[date, date]:
+    """O par (início, fim) do período pedido.
+
+    `ate_o_fim` estica "este mês"/"este ano" até o ÚLTIMO dia em vez de parar
+    hoje. Só a pílula Agenda liga isso (decisão do dono em 31/08/2026): num
+    relatório de histórico, "este mês" que vai além de hoje mostraria linha
+    nenhuma; numa agenda, parar em hoje esconde justamente a festa que ainda vai
+    acontecer.
+
+    `de`/`ate` só valem com `periodo='personalizado'`. Data faltando ou torta cai
+    no mês corrente — filtro quebrado não pode virar tela vazia sem explicação.
+    Invertidas (de > ate), são trocadas: é engano de digitação, não pedido.
+    """
     hoje = date.today()
+    if periodo == "personalizado":
+        d, a = _dia(de), _dia(ate)
+        if d and a:
+            return (a, d) if d > a else (d, a)
+        if d:
+            return d, _fim_do_mes(d)
+        if a:
+            return a.replace(day=1), a
+        return hoje.replace(day=1), _fim_do_mes(hoje) if ate_o_fim else hoje
     if periodo == "todos":
         return date(2000, 1, 1), hoje
     if periodo == "mes_passado":
@@ -61,9 +125,13 @@ def _intervalo(periodo: str) -> tuple[date, date]:
         return fim.replace(day=1), fim
     if periodo == "90d":
         return hoje - timedelta(days=90), hoje
+    if periodo == "prox30":
+        return hoje, hoje + timedelta(days=30)
+    if periodo == "prox90":
+        return hoje, hoje + timedelta(days=90)
     if periodo == "ano":
-        return date(hoje.year, 1, 1), hoje
-    return hoje.replace(day=1), hoje  # "mes"
+        return date(hoje.year, 1, 1), date(hoje.year, 12, 31) if ate_o_fim else hoje
+    return hoje.replace(day=1), _fim_do_mes(hoje) if ate_o_fim else hoje  # "mes"
 
 
 def _fmt(d) -> str:
@@ -563,8 +631,27 @@ AGENDA_DESFECHO_TAG = {
 }
 AGENDA_TIPO_ROTULO = {"pessoal": "Pessoal", "empresa": "Empresa", "fornecedor": "Fornecedor"}
 
+# A régua da VISITA, escrita UMA vez. O Funil (`_SQL_VISITAS`) e o filtro de
+# espécie desta aba leem daqui: duas cópias da mesma pergunta acertam no primeiro
+# dia e divergem no terceiro.
+#
+# Título começando com "Visita" é como o Cockpit batiza ("Visita — {quem}") e
+# como o time batiza na mão ("VISITA TÉCNICA - PEDRO"). `tipo_evento` vazio
+# desempata: quando esse campo vem preenchido (Casamento, Locação...) o
+# compromisso é a FESTA do cliente, não a visita dele ao espaço.
+_E_VISITA = "(e.titulo ilike 'visita%%' and e.tipo_evento is null)"
 
-def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> dict:
+#: EVENTO é o COMPLEMENTO da visita, e não `tipo_evento is not null`. A régua
+#: óbvia apagaria festa: medido na Prime em 31/08/2026, 12 das 43 festas estavam
+#: com `tipo_evento` vazio porque foram digitadas direto no título ("aniversario
+#: Leda L.", "Formatura - Beatriz", "15 Anos — Fernanda"). Com a régua óbvia essas
+#: 12 sumiriam dos DOIS filtros — nem visita, nem evento. Sendo o complemento,
+#: visitas + eventos é sempre igual ao total, em qualquer base.
+AGENDA_ESPECIES = [("", "Todos"), ("visita", "Visitas"), ("evento", "Eventos")]
+
+
+def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
+                  especie="", de=None, ate=None) -> dict:
     """A Agenda (web/painel_agenda.py) só mostra o que vem — mês corrente e os
     próximos compromissos. Este relatório fecha o período: quantos eventos,
     quantos viraram presença, quantos não aconteceram e quantos foram
@@ -572,37 +659,49 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> d
     (realizado/não realizado) já existem desde as migrações 098-179; nenhuma
     coluna nova.
 
+    ESPÉCIE (31/08/2026). Visita e festa viviam na mesma lista sem como separar —
+    na Prime são 17 visitas e 43 festas, perguntas de negócio diferentes. O filtro
+    usa `_E_VISITA`, a mesma régua do Funil, e define EVENTO como o complemento
+    (o porquê está no comentário de `AGENDA_ESPECIES`).
+
+    A espécie muda as COLUNAS e as MÉTRICAS, não só as linhas, e é de propósito:
+    visita nunca tem sinal (não segura data) nem convidados, e tem vendedor e
+    comparecimento; festa tem convidados, sinal e tipo. Mostrar as oito colunas
+    fixas obrigava a ler R$ 0,00 e "—" em metade da tela. Já `status` e
+    `vendedor` continuam sendo só recorte: as métricas os ignoram, como sempre
+    ignoraram — recorte não muda o que está sendo contado, espécie muda.
+
+    PERÍODO. Esta é a única aba que pede `ate_o_fim`: "este mês" aqui vai até o
+    último dia, não até hoje (decisão do dono em 31/08/2026). Numa agenda, parar
+    em hoje escondia justamente a festa que ainda vai acontecer — eram 38 dos 60
+    compromissos da Prime.
+
     Cliente tem DUAS fontes, nenhuma delas nova: `orcamentos.evento_agenda_id`
     quando o compromisso nasceu de um orçamento aprovado (mesma regra `empresa
     or cliente` de `_dados_orcamentos`), e `eventos_agenda.prospeccao_id`
     quando nasceu de um lead — `finance.cockpit.agendar_visita` liga os dois
-    assim que marca a visita, e é de onde vêm a maioria das linhas "Visita —
-    Fulano"/"VISITA TÉCNICA..." que apareciam com Cliente vazio antes desta
-    junção. O orçamento manda quando os dois existem (é o registro mais firme
-    — o lead pode ter sido reatribuído, o orçamento não). Reunião interna e
-    compromisso pessoal criados à mão (`finance.agenda_tools.marcar_evento`)
-    não têm nenhum dos dois — o nome, se existe, está só no título digitado à
-    mão, sem onde puxar; continuam "—", e é o esperado, não bug.
+    assim que marca a visita. O orçamento manda quando os dois existem (é o
+    registro mais firme — o lead pode ter sido reatribuído, o orçamento não).
+    Reunião interna e compromisso pessoal criados à mão
+    (`finance.agenda_tools.marcar_evento`) não têm nenhum dos dois; continuam
+    "—", e é o esperado, não bug.
 
-    "Sinal" é `eventos_agenda.sinal_centavos`, o valor que segura a DATA na
-    própria agenda (163_evento_sinal_esperado) — só é gravado no "Só segurar a
-    data" do formulário de novo compromisso (web/painel_agenda.py, checkbox
-    `segurar`) ou na pré-reserva por orçamento (web/proposta._reservar_na_agenda).
-    `agendar_visita` nunca passa esse campo — visita não segura data, então
-    R$ 0,00 nessas linhas é o valor certo, não dado faltando. Receita cheia do
-    orçamento (não só o sinal) exigiria o mesmo join que a aba Orçamentos já
-    faz (`_VALOR_ORC`) e fica pra depois, se fizer falta.
-
-    As métricas do topo ignoram o filtro de Status de propósito, igual em
-    Orçamentos: mostram a distribuição inteira do período; o total da tabela é
-    só do que está na tela. "Vendedor" no filtro é quem marcou o compromisso
-    (`membro_id`), reaproveitando o mesmo seletor de membros da conta."""
-    ini, fim = _intervalo(periodo)
+    "Sinal" é `eventos_agenda.sinal_centavos`, o valor que segura a DATA
+    (163_evento_sinal_esperado) — só é gravado no "Só segurar a data" do
+    formulário de novo compromisso (web/painel_agenda.py, checkbox `segurar`) ou
+    na pré-reserva por orçamento (web/proposta._reservar_na_agenda).
+    """
+    especie = especie if especie in ("visita", "evento") else ""
+    ini, fim = _intervalo(periodo, de, ate, ate_o_fim=True)
     where = ["e.conta_id=%s"]
     params: list = [conta_id]
     if periodo != "todos":
         where.append("e.inicio::date >= %s and e.inicio::date <= %s")
         params += [ini, fim]
+    if especie == "visita":
+        where.append(_E_VISITA)
+    elif especie == "evento":
+        where.append("not " + _E_VISITA)
     if vendedor_sel:
         try:
             where.append("e.membro_id = %s")
@@ -615,7 +714,8 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> d
                      where o.evento_agenda_id = e.id
                      order by o.id desc limit 1
                   ) oc on true
-                  left join prospeccao p on p.id = e.prospeccao_id"""
+                  left join prospeccao p on p.id = e.prospeccao_id
+                  left join membros mb on mb.id = e.membro_id"""
     if busca:
         where.append("coalesce(oc.nome, p.contato, p.empresa) ilike %s")
         params.append(f"%{busca}%")
@@ -627,13 +727,19 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> d
                        count(*) filter (where e.desfecho='realizado'),
                        count(*) filter (where e.desfecho='nao_realizado'),
                        count(*) filter (where e.status='cancelado'),
-                       coalesce(sum(e.sinal_centavos), 0)
+                       coalesce(sum(e.sinal_centavos), 0),
+                       count(*) filter (where e.status='ativo'),
+                       count(*) filter (where e.status='pre_reservado'),
+                       count(*) filter (where e.inicio < now() and e.desfecho is null),
+                       count(*) filter (where e.prospeccao_id is not null),
+                       coalesce(sum(e.convidados), 0),
+                       count(*) filter (where e.tipo_evento is null)
                   from eventos_agenda e
                   {join_orc}
                  where {base_sql}""", params).fetchone()
-    n_total = agg[0] or 0
-    n_realizado, n_nao_realizado, n_cancelado = agg[1] or 0, agg[2] or 0, agg[3] or 0
-    sinal_total = int(agg[4] or 0)
+    (n_total, n_realizado, n_nao_realizado, n_cancelado, sinal_total,
+     n_ativo, n_pre, n_sem_resposta, n_com_lead, n_convidados,
+     n_sem_tipo) = (int(x or 0) for x in agg)
 
     def _pct(n):
         return f"{n} · {round(n * 100 / n_total)}%" if n_total else f"{n} · 0%"
@@ -648,7 +754,8 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> d
         rows = c.execute(
             f"""select e.inicio, coalesce(e.tipo_evento, e.titulo),
                        coalesce(oc.nome, p.contato, p.empresa),
-                       e.tipo, e.status, e.desfecho, e.convidados, e.sinal_centavos
+                       e.tipo, e.status, e.desfecho, e.convidados, e.sinal_centavos,
+                       mb.nome, e.tipo_evento
                   from eventos_agenda e
                   {join_orc}
                  where {where2_sql}
@@ -659,40 +766,86 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> d
     for r in rows:
         st_rotulo, st_cor = AGENDA_STATUS_TAG.get(r[4], (r[4] or "—", "neutro"))
         df_rotulo, df_cor = AGENDA_DESFECHO_TAG.get(r[5], ("—", "neutro"))
+        # "sem resposta" só existe pra visita que JÁ passou: antes da data não há
+        # o que responder, e pintar de âmbar o que ainda vai acontecer viraria um
+        # alerta que não pede nada de ninguém.
+        if especie == "visita" and r[5] is None and r[0] and r[0] < _ag.agora_brt():
+            df_rotulo, df_cor = "Sem resposta", "aviso"
         linhas.append({
-            "inicio": r[0].strftime("%d/%m %H:%M") if r[0] else "—",
+            "inicio": _fmt_hora(r[0]),
             "evento": r[1] or "—", "cliente": r[2] or "—",
             "tipo": AGENDA_TIPO_ROTULO.get(r[3], r[3] or "—"),
+            "tipo_evento": r[9] or "sem tipo",
+            "tipo_evento_cor": "neutro" if r[9] else "aviso",
             "status": st_rotulo, "status_cor": st_cor,
             "desfecho": df_rotulo, "desfecho_cor": df_cor,
+            "vendedor": r[8] or "—",
             "convidados": r[6] if r[6] is not None else "—",
             "sinal_centavos": int(r[7] or 0),
         })
+
+    if especie == "visita":
+        # Sem Sinal (visita não segura data — era sempre R$ 0,00) e sem
+        # Convidados; entram Vendedor e o comparecimento, que é o que se pergunta
+        # de uma visita.
+        colunas = [_col("inicio", "Data"), _col("evento", "Visita", flex=True),
+                   _col("cliente", "Cliente"), _col("vendedor", "Vendedor"),
+                   _col("status", "Status", tag=True),
+                   _col("desfecho", "Desfecho", tag=True)]
+        col_total, total_centavos = None, 0
+        metricas = [("Visitas no período", str(n_total)),
+                    ("Aconteceram", _pct(n_realizado)),
+                    ("Não apareceram", _pct(n_nao_realizado)),
+                    ("Sem resposta", _pct(n_sem_resposta)),
+                    ("Vindas de lead", _pct(n_com_lead))]
+    elif especie == "evento":
+        colunas = [_col("inicio", "Data"), _col("evento", "Evento", flex=True),
+                   _col("cliente", "Cliente"),
+                   _col("tipo_evento", "Tipo", tag=True),
+                   _col("status", "Status", tag=True),
+                   _col("convidados", "Convid.", num=True),
+                   _col("sinal_centavos", "Sinal", num=True, brl=True)]
+        col_total, total_centavos = "sinal_centavos", _soma(linhas, "sinal_centavos")
+        metricas = [("Eventos no período", str(n_total)),
+                    ("Confirmados", _pct(n_ativo)),
+                    ("Pré-reserva", _pct(n_pre)),
+                    ("Cancelados", _pct(n_cancelado)),
+                    ("Convidados", str(n_convidados)),
+                    ("Sinal no período", _brl(sinal_total))]
+    else:
+        # "Todos" continua EXATAMENTE como era antes da espécie existir — quem
+        # abre a aba sem escolher nada tem que ver a tela de sempre.
+        colunas = [_col("inicio", "Data"), _col("evento", "Evento", flex=True),
+                   _col("cliente", "Cliente"), _col("tipo", "Tipo"),
+                   _col("status", "Status", tag=True),
+                   _col("desfecho", "Desfecho", tag=True),
+                   _col("convidados", "Convid.", num=True),
+                   _col("sinal_centavos", "Sinal", num=True, brl=True)]
+        col_total, total_centavos = "sinal_centavos", _soma(linhas, "sinal_centavos")
+        metricas = [("Eventos no período", str(n_total)),
+                    ("Realizados", _pct(n_realizado)),
+                    ("Não realizados", _pct(n_nao_realizado)),
+                    ("Cancelados", _pct(n_cancelado)),
+                    ("Sinal no período", _brl(sinal_total))]
+
+    rotulos = {"visita": "Visitas", "evento": "Eventos"}
     return {
-        "label": "Agenda", "mock": False,
-        # A elástica aqui é o EVENTO, não o cliente: o título é digitado à mão e
-        # não tem teto ("Reunião de alinhamento sobre o contrato da Prefeitura"),
-        # enquanto nome de cliente tem tamanho previsível. E este é o relatório
-        # mais largo dos sete — oito colunas —, então é onde faltar a elástica
-        # dói mais: sem ela a tabela rola pro lado e engole a Data e o começo do
-        # título, que foi o defeito do print de 26/08.
-        "colunas": [_col("inicio", "Data"), _col("evento", "Evento", flex=True),
-                    _col("cliente", "Cliente"), _col("tipo", "Tipo"),
-                    _col("status", "Status", tag=True),
-                    _col("desfecho", "Desfecho", tag=True),
-                    _col("convidados", "Convid.", num=True),
-                    _col("sinal_centavos", "Sinal", num=True, brl=True)],
-        "linhas": linhas, "col_total": "sinal_centavos",
-        "total_centavos": _soma(linhas, "sinal_centavos"),
-        "metricas": [("Eventos no período", str(n_total)),
-                     ("Realizados", _pct(n_realizado)),
-                     ("Não realizados", _pct(n_nao_realizado)),
-                     ("Cancelados", _pct(n_cancelado)),
-                     ("Sinal no período", _brl(sinal_total))],
+        "label": "Agenda" + (f" · {rotulos[especie]}" if especie else ""),
+        "mock": False,
+        # A elástica é o EVENTO, não o cliente: o título é digitado à mão e não
+        # tem teto ("Reunião de alinhamento sobre o contrato da Prefeitura"),
+        # enquanto nome de cliente tem tamanho previsível.
+        "colunas": colunas, "linhas": linhas,
+        "col_total": col_total, "total_centavos": total_centavos,
+        "metricas": metricas,
         "filtro_extra": {
             "status_opcoes": AGENDA_STATUS_OPCOES, "status_sel": status_sel,
             "vendedores": _vendedores_da_conta(pool, conta_id),
             "vendedor_sel": str(vendedor_sel or ""), "busca_sel": busca or "",
+            "especies": AGENDA_ESPECIES, "especie_sel": especie,
+            # quantas festas estão sem o tipo preenchido — não bloqueia nada, só
+            # avisa que essas não entram em "quantas locações tenho em dezembro".
+            "sem_tipo": n_sem_tipo if especie == "evento" else 0,
         },
     }
 
@@ -870,9 +1023,12 @@ def _opcoes_de_chip(nome_prin: str, rot_secs: dict[int, str]) -> list[tuple[str,
 
 
 def _fmt_hora(d) -> str:
-    """dd/mm HH:MM no fuso de Brasília — a hora importa aqui (a espera é medida em
-    minutos), e `_fmt` só mostra a data."""
-    return d.astimezone(_ag.BRT).strftime("%d/%m %H:%M") if d else "—"
+    """dd/mm/aaaa HH:MM no fuso de Brasília — a hora importa aqui (a espera é
+    medida em minutos), e `_fmt` só mostra a data.
+
+    O ano entrou em 31/08/2026: a Prime tem compromisso até outubro/2027, e
+    "16/01 19:00" não diz de qual ano é."""
+    return d.astimezone(_ag.BRT).strftime("%d/%m/%Y %H:%M") if d else "—"
 
 
 # ----------------------------------------------------------- FUNIL COMERCIAL
@@ -909,9 +1065,8 @@ _SQL_VISITAS = """
       left join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
       left join membros mb on mb.id = e.membro_id
      where e.conta_id = %s
-       and e.titulo ilike 'visita%%'
+       and """ + _E_VISITA + """
        and coalesce(e.status,'') <> 'cancelado'
-       and e.tipo_evento is null
 """
 
 
@@ -1048,7 +1203,8 @@ TIPOS = {
     "contratos": {"label": "Contratos", "montar": lambda pool, cid, per, **f: _dados_contratos(
         pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
     "agenda": {"label": "Agenda", "montar": lambda pool, cid, per, **f: _dados_agenda(
-        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
+        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""),
+        especie=f.get("especie", ""), de=f.get("de"), ate=f.get("ate"))},
     # o filtro de chip viaja no MESMO parâmetro `status` das outras abas, de
     # propósito: o template já tem esse select e a rota já o repassa. Um
     # parâmetro novo obrigaria a mexer nos dois pra não ganhar nada.
@@ -1059,35 +1215,59 @@ TIPOS = {
 }
 
 
-def _contexto(conta_id: int, tipo: str, periodo: str, status: str = "", vendedor: str = "", q: str = ""):
+def _rotulo_periodo(tipo: str, periodo: str, de, ate) -> str:
+    """O que aparece como "período: ..." no topo e no PDF. Em período específico
+    o rótulo genérico não serve de nada — quem escolheu 01/12 a 31/12 quer ver
+    isso escrito, não "Período específico…"."""
+    if periodo == "personalizado":
+        i, f = _intervalo(periodo, de, ate, ate_o_fim=(tipo == "agenda"))
+        return f"{_fmt(i)} a {_fmt(f)}"
+    return _PERIODO_ROTULO.get(periodo, periodo)
+
+
+def _contexto(conta_id: int, tipo: str, periodo: str, status: str = "",
+              vendedor: str = "", q: str = "", especie: str = "", de: str = "",
+              ate: str = ""):
     tipo = tipo if tipo in TIPOS else "vendas"
-    periodo = periodo if periodo in _PERIODO_ROTULO else "mes"
-    dados = TIPOS[tipo]["montar"](get_pool(), conta_id, periodo, status=status, vendedor=vendedor, q=q)
+    validos = {v for v, _ in periodos_da_aba(tipo)}
+    periodo = periodo if periodo in validos else "mes"
+    dados = TIPOS[tipo]["montar"](get_pool(), conta_id, periodo, status=status,
+                                  vendedor=vendedor, q=q, especie=especie,
+                                  de=de, ate=ate)
     return tipo, periodo, dados
 
 
 @router.get("/painel/relatorios", response_class=HTMLResponse)
 def painel_relatorios(request: Request, tipo: str = "vendas", periodo: str = "mes",
-                      status: str = "", vendedor: str = "", q: str = ""):
+                      status: str = "", vendedor: str = "", q: str = "",
+                      especie: str = "", de: str = "", ate: str = ""):
     conta, redir = _pode_ver(request)
     if redir is not None:
         return redir
-    tipo, periodo, dados = _contexto(conta[0], tipo, periodo, status, vendedor, q)
-    return _render("relatorios", request, tipos=TIPOS, tipo=tipo, periodo=periodo, periodos=PERIODOS,
-                   periodo_rotulo=_PERIODO_ROTULO[periodo], dados=dados)
+    tipo, periodo, dados = _contexto(conta[0], tipo, periodo, status, vendedor, q,
+                                     especie, de, ate)
+    return _render("relatorios", request, tipos=TIPOS, tipo=tipo, periodo=periodo,
+                   periodos=periodos_da_aba(tipo),
+                   periodo_rotulo=_rotulo_periodo(tipo, periodo, de, ate),
+                   tem_periodo_livre=any(v == "personalizado"
+                                         for v, _ in periodos_da_aba(tipo)),
+                   de=de or "", ate=ate or "", dados=dados)
 
 
 @router.get("/painel/relatorios/pdf", response_class=HTMLResponse)
 def painel_relatorios_pdf(request: Request, tipo: str = "vendas", periodo: str = "mes",
-                          status: str = "", vendedor: str = "", q: str = ""):
+                          status: str = "", vendedor: str = "", q: str = "",
+                          especie: str = "", de: str = "", ate: str = ""):
     conta, redir = _pode_ver(request)
     if redir is not None:
         return redir
     pool = get_pool()
-    tipo, periodo, dados = _contexto(conta[0], tipo, periodo, status, vendedor, q)
+    tipo, periodo, dados = _contexto(conta[0], tipo, periodo, status, vendedor, q,
+                                     especie, de, ate)
     from datetime import datetime
     return HTMLResponse(_env.get_template("relatorio_pdf").render(
-        dados=dados, tipo=tipo, periodo=periodo, periodo_rotulo=_PERIODO_ROTULO[periodo],
+        dados=dados, tipo=tipo, periodo=periodo,
+        periodo_rotulo=_rotulo_periodo(tipo, periodo, de, ate),
         gerado_em=datetime.now().strftime("%d/%m/%Y %H:%M"),
         **_letterhead(pool, conta),
     ))

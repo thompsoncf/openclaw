@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — Filtros do Relatório de Agenda</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   TOKENS — cópia fiel de web/tema.py (_TOKENS). A fonte da verdade é o tema.py.
+   ============================================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9; --roxo:#C9A3E0;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A;  --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --card:var(--surface); --card-2:var(--bg-2);
+  --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1180px;margin:0 auto;padding:34px 18px 100px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.7rem;font-weight:700}
+h2{font-size:1.18rem;font-weight:700;margin:0 0 .2rem}
+h3{font-size:.95rem;font-weight:600}
+a{color:var(--verde)}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
+  padding:.1rem .35rem;border-radius:4px;color:var(--text-dim)}
+
+.sec{margin-top:44px}
+.sec>.num{font-family:var(--mono);font-size:.72rem;color:var(--verde);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:78ch;margin-top:.5rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.86rem;margin-top:1rem;
+  color:var(--txt-mut);max-width:82ch}
+.nota b{color:var(--txt)}
+.alerta{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.alerta b{color:var(--ambar)}
+
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);
+  text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.76rem;
+  text-transform:uppercase;letter-spacing:.05em}
+.sim{color:var(--verde)} .nao{color:var(--coral)} .meio{color:var(--ambar)}
+
+/* ---------- moldura de tela ---------- */
+.telas{display:grid;grid-template-columns:1fr 320px;gap:26px;margin-top:1.2rem;align-items:start}
+@media (max-width:960px){.telas{grid-template-columns:1fr}}
+.quadro{background:var(--card);border:1px solid var(--borda);border-radius:14px;
+  overflow:hidden}
+.quadro>.cap{background:var(--bg-2);padding:.5rem .85rem;font-size:.72rem;
+  color:var(--txt-mut);border-bottom:1px solid var(--borda);
+  font-family:var(--mono);display:flex;justify-content:space-between;gap:.5rem}
+.quadro>.miolo{padding:16px}
+
+/* ---------- réplica exata das classes de web/portal.py (_RELATORIOS) ---------- */
+.abas{display:flex;align-items:center;flex-wrap:nowrap;gap:2px;background:var(--card);
+  padding:3px;border-radius:9px;border:1px solid var(--borda);margin:0 0 .9rem;
+  max-width:100%;overflow-x:auto}
+.aba{width:auto;flex-shrink:0;margin:0;display:inline-flex;align-items:center;line-height:1;
+  background:transparent;color:#b4b2a9;border:none;padding:.35rem .8rem;border-radius:6px;
+  font-size:.8rem;text-decoration:none;white-space:nowrap}
+.aba.ativa{background:var(--verde);color:var(--sobre-verde);font-weight:600}
+.rel-filtros{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:0 0 1.1rem}
+.rel-filtros select,.rel-filtros input[type=search]{background:var(--bg-2);color:var(--txt);
+  border:1px solid var(--borda);border-radius:6px;padding:.4rem .6rem;font:inherit;font-size:.8rem}
+.rel-filtros .mut{font-size:.78rem;color:var(--txt-mut)}
+.rel-pdf{display:inline-flex;align-items:center;gap:.4rem;padding:.45rem .85rem;
+  background:var(--azul);color:#04222f;border-radius:6px;text-decoration:none;
+  font-size:.8rem;font-weight:600}
+.rel-metricas{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:10px;margin:0 0 1.1rem}
+.rel-metricas .metric{background:var(--bg);border:1px solid var(--borda);border-radius:8px;
+  padding:.8rem;min-width:0}
+.rel-metricas .metric span{display:block;font-size:.72rem;color:var(--txt-mut);margin-bottom:.25rem}
+.rel-metricas .metric b{font-size:1rem;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.rel-tbl-wrap{overflow-x:auto;max-width:100%}
+.rel-tbl-wrap table{width:100%;border-collapse:collapse;min-width:680px;font-size:.84rem}
+.rel-tbl-wrap th,.rel-tbl-wrap td{padding:.5rem .55rem;border-bottom:1px solid var(--borda);
+  text-align:left;white-space:nowrap}
+.rel-tbl-wrap th{color:var(--txt-mut);font-weight:600;font-size:.72rem;
+  text-transform:uppercase;letter-spacing:.04em}
+.rel-num{text-align:right;font-variant-numeric:tabular-nums}
+.rel-tot td{border-top:2px solid var(--borda);font-weight:700}
+.rel-tag{display:inline-block;padding:.15rem .6rem;border-radius:999px;font-size:.72rem;font-weight:600}
+.rel-tag.ok{background:#15301f;color:#9fe8c9;border:1px solid var(--verde)}
+.rel-tag.aviso{background:#332a12;color:#f0dca6;border:1px solid #6e5a22}
+.rel-tag.erro{background:#3a1d1d;color:#f0b8b8;border:1px solid #6e2b2b}
+.rel-tag.neutro{background:#20242a;color:#c7ccd6;border:1px solid #3a4048}
+.rel-act{width:1%;text-align:center}
+.rel-print{display:inline-flex;align-items:center;justify-content:center;width:1.7rem;height:1.7rem;
+  border:1px solid var(--borda);border-radius:6px;text-decoration:none}
+
+.legenda-lat{font-size:.78rem;color:var(--txt-mut);margin-top:.8rem}
+ul.lista{margin:.6rem 0 0 1.1rem;font-size:.87rem;color:var(--txt-mut)}
+ul.lista li{margin-bottom:.5rem}
+ul.lista b{color:var(--txt)}
+.rodape{margin-top:56px;padding-top:18px;border-top:1px solid var(--borda);
+  font-size:.8rem;color:var(--text-faint)}
+
+/* ---------- acréscimos deste mockup ---------- */
+.rel-filtros input[type=date]{background:var(--bg-2);color:var(--txt);
+  border:1px solid var(--borda);border-radius:6px;padding:.38rem .5rem;font:inherit;
+  font-size:.8rem;color-scheme:dark}
+.rel-filtros .grupo{display:inline-flex;align-items:center;gap:.35rem;
+  background:var(--bg-2);border:1px solid var(--borda);border-radius:6px;padding:.18rem .3rem}
+.rel-filtros .grupo span{font-size:.74rem;color:var(--txt-mut);padding-left:.3rem}
+.rel-filtros .grupo input.dt{border:0;background:transparent;padding:.22rem .3rem;
+  color:var(--txt);font:inherit;font-size:.8rem;font-family:var(--mono);width:6.4rem}
+.rel-filtrar{background:var(--verde);color:var(--sobre-verde);border:0;border-radius:6px;
+  padding:.42rem .9rem;font:inherit;font-size:.8rem;font-weight:600;cursor:pointer;width:auto}
+.seg{display:inline-flex;background:var(--bg-2);border:1px solid var(--borda);
+  border-radius:7px;padding:2px;gap:2px}
+.seg a{padding:.32rem .7rem;border-radius:5px;font-size:.78rem;text-decoration:none;
+  color:var(--txt-mut);white-space:nowrap}
+.seg a.on{background:var(--verde);color:var(--sobre-verde);font-weight:600}
+.antes-depois{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:1rem}
+@media (max-width:860px){.antes-depois{grid-template-columns:1fr}}
+.ad{border:1px solid var(--borda);border-radius:10px;overflow:hidden;background:var(--card)}
+.ad>.t{padding:.45rem .8rem;font-size:.72rem;font-family:var(--mono);
+  border-bottom:1px solid var(--borda);letter-spacing:.04em}
+.ad.ruim>.t{background:var(--coral-fundo);color:var(--coral);border-bottom-color:var(--coral-borda)}
+.ad.bom>.t{background:var(--neon-fundo);color:var(--neon);border-bottom-color:var(--neon-borda)}
+.ad>.c{padding:.9rem}
+.big{font-family:var(--mono);font-size:1.6rem;font-weight:700;display:block;margin-bottom:.15rem}
+.big.ruim{color:var(--coral)} .big.bom{color:var(--verde)}
+.barras{margin-top:1.1rem}
+.barra{display:grid;grid-template-columns:5rem minmax(0,1fr) 3rem;align-items:center;gap:.6rem;
+  font-size:.8rem;margin-bottom:.3rem;color:var(--txt-mut)}
+.barra .trilho{background:var(--bg);border:1px solid var(--borda);border-radius:5px;
+  height:1.15rem;overflow:hidden;display:flex;justify-self:start}
+.barra i{display:block;height:100%}
+.barra i.v{background:var(--azul)} .barra i.f{background:var(--verde)}
+.barra .n{font-family:var(--mono);text-align:right;font-size:.76rem}
+.barra.fora{opacity:.4}
+.legenda-cores{display:flex;gap:1.2rem;font-size:.76rem;color:var(--txt-mut);margin-top:.7rem}
+.legenda-cores b{display:inline-block;width:.7rem;height:.7rem;border-radius:2px;
+  margin-right:.35rem;vertical-align:middle}
+.corte{border-top:1px dashed var(--coral);position:relative;margin:.5rem 0 .9rem}
+.corte span{position:absolute;top:-.62rem;left:0;background:var(--bg);padding:0 .4rem;
+  font-size:.7rem;color:var(--coral);font-family:var(--mono)}
+</style>
+</head>
+<body>
+<h1>Filtros do Relatório de Agenda</h1>
+<p class="lede">Quatro ajustes pedidos: <b>período específico</b>, <b>data em
+dia/mês/ano</b>, <b>ver só as visitas</b> e <b>ver só os eventos</b>. Fui olhar como está
+e os quatro se sustentam — mas dois deles escondem um problema maior do que o pedido
+sugere. Este mockup mostra o que encontrei, o que proponho, e o que muda de comportamento
+(que é o que precisa da sua aprovação).</p>
+<p class="lede" style="font-size:.82rem">Números medidos na conta da Prime Eventos em
+31/08/2026: <b>60 compromissos</b> cadastrados. Os nomes nas telas de exemplo foram
+trocados.</p>
+
+<!-- ====================================================== 1 -->
+<section class="sec">
+  <div class="num">1 · como está hoje</div>
+  <h2>Uma barra com três filtros, nenhum deles de espécie ou de data livre</h2>
+  <p class="lede">A aba Agenda usa a mesma barra das outras oito abas: um seletor de
+  período com cinco opções fixas, um de status, um de vendedor e uma busca por cliente.</p>
+
+  <div class="quadro" style="margin-top:1rem">
+    <div class="cap"><span>/painel/relatorios?tipo=agenda</span><span>hoje</span></div>
+    <div class="miolo">
+      <form class="rel-filtros" onsubmit="return false">
+        <select><option>Este mês</option><option>Mês passado</option>
+          <option>Últimos 90 dias</option><option>Este ano</option>
+          <option>Todo o período</option></select>
+        <select><option>Status: todos</option><option>Confirmado</option>
+          <option>Pré-reserva</option><option>Cancelado</option></select>
+        <select><option>Vendedor: todos</option></select>
+        <input type="search" placeholder="🔎 buscar cliente…">
+        <button class="rel-filtrar">Filtrar</button>
+      </form>
+      <div class="rel-metricas">
+        <div class="metric"><span>Eventos no período</span><b>22</b></div>
+        <div class="metric"><span>Realizados</span><b>3 · 14%</b></div>
+        <div class="metric"><span>Não realizados</span><b>1 · 5%</b></div>
+        <div class="metric"><span>Cancelados</span><b>2 · 9%</b></div>
+        <div class="metric"><span>Sinal no período</span><b>R$ 1.900,00</b></div>
+      </div>
+      <div class="rel-tbl-wrap"><table>
+        <tr><th>Data</th><th>Evento</th><th>Cliente</th><th>Tipo</th><th>Status</th>
+            <th>Desfecho</th><th class="rel-num">Convid.</th><th class="rel-num">Sinal</th></tr>
+        <tr><td>31/08 20:30</td><td>Visita técnica Nayara</td><td>—</td><td>Empresa</td>
+            <td><span class="rel-tag ok">Confirmado</span></td><td><span class="rel-tag neutro">—</span></td>
+            <td class="rel-num">—</td><td class="rel-num">R$ 0,00</td></tr>
+        <tr><td>31/08 23:30</td><td>Corporativo — Bianca P.</td><td>Bianca P.</td><td>Empresa</td>
+            <td><span class="rel-tag ok">Confirmado</span></td><td><span class="rel-tag neutro">—</span></td>
+            <td class="rel-num">—</td><td class="rel-num">R$ 0,00</td></tr>
+        <tr><td>01/09 16:00</td><td>Visita — Erys</td><td>Erys</td><td>Empresa</td>
+            <td><span class="rel-tag ok">Confirmado</span></td><td><span class="rel-tag neutro">—</span></td>
+            <td class="rel-num">—</td><td class="rel-num">R$ 0,00</td></tr>
+      </table></div>
+      <p class="legenda-lat">↑ três defeitos visíveis nesta tela mesmo: a data não tem ano,
+      a hora está 3h adiantada, e visita e festa estão na mesma lista sem como separar.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== 2 -->
+<section class="sec">
+  <div class="num">2 · o problema por trás do pedido "período específico"</div>
+  <h2>Os cinco períodos olham pra trás. A agenda de um salão olha pra frente.</h2>
+  <p class="lede">Todos os presets terminam em <b>hoje</b>: "Este mês" é do dia 1º até hoje,
+  "Este ano" é de 1º de janeiro até hoje. Isso serve pra Vendas e Contas pagas — que são
+  histórico. Só que na Agenda o que interessa é a festa que <b>ainda vai acontecer</b>.</p>
+
+  <div class="antes-depois">
+    <div class="ad ruim"><div class="t">HOJE · o que "Este mês" e "Este ano" mostram</div>
+      <div class="c"><span class="big ruim">22</span>
+      <span style="font-size:.84rem;color:var(--txt-mut)">de 60 compromissos</span></div></div>
+    <div class="ad ruim"><div class="t">HOJE · o que fica invisível</div>
+      <div class="c"><span class="big ruim">38</span>
+      <span style="font-size:.84rem;color:var(--txt-mut)">estão no futuro — 13 deles em 2027</span></div></div>
+  </div>
+
+  <div class="barras">
+    <div class="barra"><span>ago/26</span>
+      <span class="trilho" style="width:100%"><i class="v" style="width:68%"></i><i class="f" style="width:32%"></i></span>
+      <span class="n">22</span></div>
+    <div class="corte"><span>← até aqui chega qualquer filtro de hoje</span></div>
+    <div class="barra fora"><span>set/26</span>
+      <span class="trilho" style="width:41%"><i class="v" style="width:22%"></i><i class="f" style="width:78%"></i></span>
+      <span class="n">9</span></div>
+    <div class="barra fora"><span>out/26</span><span class="trilho" style="width:18%"><i class="f" style="width:100%"></i></span><span class="n">4</span></div>
+    <div class="barra fora"><span>nov/26</span><span class="trilho" style="width:18%"><i class="f" style="width:100%"></i></span><span class="n">4</span></div>
+    <div class="barra fora"><span>dez/26</span><span class="trilho" style="width:36%"><i class="f" style="width:100%"></i></span><span class="n">8</span></div>
+    <div class="barra fora"><span>2027</span><span class="trilho" style="width:59%"><i class="f" style="width:100%"></i></span><span class="n">13</span></div>
+    <div class="legenda-cores"><span><b style="background:var(--azul)"></b>visitas</span>
+      <span><b style="background:var(--verde)"></b>festas</span></div>
+  </div>
+
+  <div class="nota alerta"><b>Dezembro tem 8 festas e não existe jeito de pedir dezembro.</b>
+  A única opção que alcança o futuro é "Todo o período" — que traz os 60 de uma vez, de
+  agosto/26 a outubro/27. Ou você vê 22, ou vê tudo. Não há meio-termo.</div>
+</section>
+
+<!-- ====================================================== 3 -->
+<section class="sec">
+  <div class="num">3 · o problema por trás do pedido "data dia/mês/ano"</div>
+  <h2>Falta o ano — e, junto com ele, achei a hora errada em 3 horas</h2>
+  <p class="lede">A coluna Data desta aba imprime <code>%d/%m %H:%M</code>. Duas coisas
+  saem disso: o ano some (com 13 compromissos em 2027, "16/01 19:00" não diz de qual ano
+  é) e a hora sai <b>em UTC</b>, sem converter pro horário de Brasília — que todas as
+  outras telas da agenda fazem.</p>
+
+  <div class="antes-depois">
+    <div class="ad ruim"><div class="t">RELATÓRIO hoje</div><div class="c">
+      <table class="diag" style="margin:0">
+        <tr><td style="font-family:var(--mono)">07/09 19:00</td><td>Casamento — Eva F.</td></tr>
+        <tr><td style="font-family:var(--mono)">31/08 23:30</td><td>Corporativo — Bianca P.</td></tr>
+        <tr><td style="font-family:var(--mono)">01/09 16:00</td><td>Visita — Erys</td></tr>
+      </table></div></div>
+    <div class="ad bom"><div class="t">AGENDA (a mesma festa, na tela do dia a dia)</div><div class="c">
+      <table class="diag" style="margin:0">
+        <tr><td style="font-family:var(--mono)">07/09 <b class="sim">16:00</b></td><td>Casamento — Eva F.</td></tr>
+        <tr><td style="font-family:var(--mono)">31/08 <b class="sim">20:30</b></td><td>Corporativo — Bianca P.</td></tr>
+        <tr><td style="font-family:var(--mono)">01/09 <b class="sim">13:00</b></td><td>Visita — Erys</td></tr>
+      </table></div></div>
+  </div>
+
+  <div class="nota alerta"><b>Não é só o horário: 2 dos 60 aparecem no DIA ERRADO.</b>
+  Festa marcada para 21h30 de um sábado vira 00h30 de domingo em UTC — o relatório mostra
+  o dia seguinte. Formatar a data sem corrigir o fuso deixaria a data errada bem escrita.
+  Por isso os dois andam juntos aqui.</div>
+
+  <p class="lede">Onde está: <code>web/painel_relatorios.py</code> linha 663 (aba Agenda) e
+  linha 875 (<code>_fmt_hora</code>, usada por Leads do chip e Funil). As outras seis abas
+  já usam <code>%d/%m/%Y</code> pelo helper <code>_fmt</code> — estas duas nasceram fora dele.</p>
+</section>
+
+<!-- ====================================================== 4 -->
+<section class="sec">
+  <div class="num">4 · "só visitas" e "só eventos" — e a armadilha</div>
+  <h2>Separar é fácil. Escolher a régua errada apaga 12 festas.</h2>
+  <p class="lede">O sistema já sabe o que é uma visita, e a régua está escrita e testada no
+  Funil (<code>_SQL_VISITAS</code>): título começando com "Visita" <b>e</b>
+  <code>tipo_evento</code> vazio. Reaproveito ela — inventar uma segunda régua pra mesma
+  pergunta é como duas listas paralelas, acertam no primeiro dia e divergem no terceiro.</p>
+
+  <table class="diag">
+    <tr><th>Espécie</th><th>Régua</th><th>Quantos na Prime</th></tr>
+    <tr><td><b>Visita</b></td><td><code>titulo ilike 'visita%'</code> e <code>tipo_evento is null</code></td><td class="sim">17</td></tr>
+    <tr><td><b>Evento (festa)</b></td><td>tudo que <b>não</b> é visita</td><td class="sim">43</td></tr>
+  </table>
+
+  <div class="nota alerta"><b>A armadilha:</b> o caminho óbvio para "evento" seria
+  <code>tipo_evento is not null</code> — o campo que guarda Casamento, Locação, Formatura.
+  Mas <b>12 das 43 festas da Prime estão com esse campo vazio</b>, porque foram digitadas
+  direto no título: "aniversario Leda L.", "Casamento — Josiany S.", "Formatura - Beatriz",
+  "15 Anos — Fernanda", "RESERVA MANOEL N.". Com a régua óbvia, essas 12 sumiriam dos dois
+  filtros — não apareceriam nem em visitas nem em eventos. Definir evento como
+  <b>o complemento da visita</b> garante que a soma dos dois filtros seja sempre o total.</div>
+
+  <p class="lede">Como consequência boa, o relatório passa a saber contar uma coisa que
+  ninguém contava: <b>12 festas sem o tipo preenchido</b>. Proponho mostrar isso como um
+  aviso discreto no filtro de eventos — não bloqueia nada, só avisa que aquelas 12 não
+  entram em "quantas locações tenho em dezembro".</p>
+</section>
+
+<!-- ====================================================== 5 -->
+<section class="sec">
+  <div class="num">5 · a proposta</div>
+  <h2>A barra nova</h2>
+  <p class="lede">Um botão de espécie à esquerda (é o corte mais grosso, vem primeiro),
+  o período com uma opção nova, e o resto igual ao que já existe.</p>
+
+  <div class="quadro" style="margin-top:1rem">
+    <div class="cap"><span>/painel/relatorios?tipo=agenda&amp;especie=&amp;periodo=mes</span><span>proposto · TODOS</span></div>
+    <div class="miolo">
+      <form class="rel-filtros" onsubmit="return false">
+        <span class="seg"><a class="on" href="#">Todos</a><a href="#">Visitas</a><a href="#">Eventos</a></span>
+        <select><option>Este mês</option><option>Mês passado</option>
+          <option>Próximos 30 dias</option><option>Próximos 90 dias</option>
+          <option>Este ano</option><option>Todo o período</option>
+          <option selected>Período específico…</option></select>
+        <span class="grupo"><span>de</span><input class="dt" value="01/12/2026" size="10">
+          <span>até</span><input class="dt" value="31/12/2026" size="10"></span>
+        <select><option>Status: todos</option><option>Confirmado</option>
+          <option>Pré-reserva</option><option>Cancelado</option></select>
+        <select><option>Vendedor: todos</option></select>
+        <input type="search" placeholder="🔎 buscar cliente…">
+        <button class="rel-filtrar">Filtrar</button>
+      </form>
+      <p class="legenda-lat">As duas caixas de data só aparecem quando o período é
+      "Período específico…" — nas outras opções ficam escondidas, pra barra não crescer à toa.</p>
+      <div class="nota alerta" style="margin-top:.8rem"><b>Um detalhe que o pedido do
+      dia/mês/ano encosta:</b> o campo de data nativo do navegador
+      (<code>&lt;input type="date"&gt;</code>) mostra a data no idioma DO NAVEGADOR, não no
+      do sistema. Em máquina brasileira sai <code>31/12/2026</code>; num celular configurado
+      em inglês sai <code>12/31/2026</code>. Duas saídas: <b>(a)</b> usar o campo nativo e
+      aceitar isso — ganha o calendário do celular de graça; <b>(b)</b> caixa de texto com
+      máscara <code>dd/mm/aaaa</code>, sempre igual pra todo mundo, sem calendário.
+      <b>Minha sugestão é (a)</b>: quem usa o painel está em português, e o calendário do
+      celular vale mais que a garantia. Mas é sua escolha.</div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:1.6rem">Só visitas</h3>
+  <div class="quadro" style="margin-top:.6rem">
+    <div class="cap"><span>…&amp;especie=visita&amp;periodo=mes</span><span>proposto</span></div>
+    <div class="miolo">
+      <form class="rel-filtros" onsubmit="return false">
+        <span class="seg"><a href="#">Todos</a><a class="on" href="#">Visitas</a><a href="#">Eventos</a></span>
+        <select><option selected>Este mês</option></select>
+        <select><option>Status: todos</option></select>
+        <select><option>Vendedor: todos</option></select>
+        <button class="rel-filtrar">Filtrar</button>
+      </form>
+      <div class="rel-metricas">
+        <div class="metric"><span>Visitas no período</span><b>15</b></div>
+        <div class="metric"><span>Aconteceram</span><b>3 · 20%</b></div>
+        <div class="metric"><span>Não apareceram</span><b>1 · 7%</b></div>
+        <div class="metric"><span>Sem resposta</span><b>9 · 60%</b></div>
+        <div class="metric"><span>Vindas de lead</span><b>11 · 73%</b></div>
+      </div>
+      <div class="rel-tbl-wrap"><table>
+        <tr><th>Data</th><th>Visita</th><th>Cliente</th><th>Vendedor</th><th>Status</th><th>Desfecho</th></tr>
+        <tr><td>31/08/2026 17:30</td><td>Visita técnica Nayara</td><td>Nayara G.</td><td>Pedro</td>
+            <td><span class="rel-tag ok">Confirmado</span></td><td><span class="rel-tag neutro">—</span></td></tr>
+        <tr><td>01/09/2026 13:00</td><td>Visita — Erys</td><td>Erys M.</td><td>Bianca</td>
+            <td><span class="rel-tag ok">Confirmado</span></td><td><span class="rel-tag neutro">—</span></td></tr>
+        <tr><td>01/09/2026 17:00</td><td>Visita — Maysa Cerimonial</td><td>Maysa C.</td><td>Pedro</td>
+            <td><span class="rel-tag ok">Confirmado</span></td><td><span class="rel-tag ok">Realizado</span></td></tr>
+      </table></div>
+      <p class="legenda-lat">Some a coluna <b>Sinal</b> (visita nunca segura data — era
+      sempre R$ 0,00) e a coluna <b>Convid.</b>; entram <b>Vendedor</b> e as métricas do
+      funil de visita. As colunas seguem a espécie.</p>
+    </div>
+  </div>
+
+  <h3 style="margin-top:1.6rem">Só eventos</h3>
+  <div class="quadro" style="margin-top:.6rem">
+    <div class="cap"><span>…&amp;especie=evento&amp;periodo=personalizado&amp;de=2026-12-01&amp;ate=2026-12-31</span><span>proposto</span></div>
+    <div class="miolo">
+      <form class="rel-filtros" onsubmit="return false">
+        <span class="seg"><a href="#">Todos</a><a href="#">Visitas</a><a class="on" href="#">Eventos</a></span>
+        <select><option selected>Período específico…</option></select>
+        <span class="grupo"><span>de</span><input class="dt" value="01/12/2026" size="10">
+          <span>até</span><input class="dt" value="31/12/2026" size="10"></span>
+        <select><option>Status: todos</option></select>
+        <button class="rel-filtrar">Filtrar</button>
+      </form>
+      <div class="rel-metricas">
+        <div class="metric"><span>Eventos no período</span><b>8</b></div>
+        <div class="metric"><span>Confirmados</span><b>6 · 75%</b></div>
+        <div class="metric"><span>Pré-reserva</span><b>1 · 13%</b></div>
+        <div class="metric"><span>Cancelados</span><b>1 · 13%</b></div>
+        <div class="metric"><span>Convidados</span><b>640</b></div>
+        <div class="metric"><span>Sinal no período</span><b>R$ 4.300,00</b></div>
+      </div>
+      <div class="rel-tbl-wrap"><table>
+        <tr><th>Data</th><th>Evento</th><th>Cliente</th><th>Tipo</th><th>Status</th>
+            <th class="rel-num">Convid.</th><th class="rel-num">Sinal</th></tr>
+        <tr><td>05/12/2026 20:00</td><td>Formatura</td><td>Turma Enfermagem</td><td>Formatura</td>
+            <td><span class="rel-tag ok">Confirmado</span></td><td class="rel-num">180</td><td class="rel-num">R$ 1.500,00</td></tr>
+        <tr><td>11/12/2026 21:00</td><td>Formatura</td><td>Colégio Aliança</td><td>Formatura</td>
+            <td><span class="rel-tag ok">Confirmado</span></td><td class="rel-num">220</td><td class="rel-num">R$ 1.800,00</td></tr>
+        <tr><td>19/12/2026 19:00</td><td>Casamento — Josiany S.</td><td>Josiany S.</td>
+            <td><span class="rel-tag aviso">sem tipo</span></td>
+            <td><span class="rel-tag ok">Confirmado</span></td><td class="rel-num">—</td><td class="rel-num">R$ 0,00</td></tr>
+        <tr class="rel-tot"><td colspan="5">Total</td><td class="rel-num">640</td><td class="rel-num">R$ 4.300,00</td></tr>
+      </table></div>
+      <p class="legenda-lat">Dezembro inteiro, num pedido só — hoje impossível. O selo
+      <span class="rel-tag aviso">sem tipo</span> marca as festas digitadas no título:
+      elas contam no total, mas não entram na conta por tipo.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== 6 -->
+<section class="sec">
+  <div class="num">6 · o que muda de comportamento</div>
+  <h2>Três decisões que são suas, não minhas</h2>
+  <table class="diag">
+    <tr><th>Decisão</th><th>Hoje</th><th>Proposto</th></tr>
+    <tr><td><b>"Este mês" na aba Agenda</b></td>
+        <td>dia 1º até <b>hoje</b> — esconde o resto do mês</td>
+        <td class="sim">o <b>mês inteiro</b>, 1º ao último dia. Só nesta aba; as outras oito continuam iguais</td></tr>
+    <tr><td><b>Métricas do topo</b></td>
+        <td>contam tudo, ignoram os filtros</td>
+        <td class="sim">passam a seguir a <b>espécie</b> (contar visita como evento é errado),
+        e continuam ignorando status e vendedor, como já fazem</td></tr>
+    <tr><td><b>Colunas da tabela</b></td>
+        <td>as mesmas oito sempre</td>
+        <td class="sim">mudam com a espécie: visita não mostra Sinal nem Convidados, mostra Vendedor</td></tr>
+  </table>
+  <div class="nota">Se preferir, dá pra manter "Este mês" como está (até hoje) e resolver
+  o futuro só com os presets novos "Próximos 30/90 dias" + o período específico. Fica menos
+  cômodo e não muda nada do que já existe — é a opção conservadora, e é uma escolha legítima.</div>
+</section>
+
+<!-- ====================================================== 7 -->
+<section class="sec">
+  <div class="num">7 · tamanho da obra</div>
+  <h2>Um arquivo e meio, sem migração e sem tabela nova</h2>
+  <table class="diag">
+    <tr><th>Onde</th><th>O quê</th></tr>
+    <tr><td><code>painel_relatorios.py</code> · <code>_intervalo</code></td>
+        <td>aceitar <code>de</code>/<code>ate</code> e os presets "Próximos 30/90 dias"</td></tr>
+    <tr><td><code>painel_relatorios.py</code> · <code>_dados_agenda</code></td>
+        <td>filtro de espécie reusando a régua do <code>_SQL_VISITAS</code>; colunas e métricas por espécie</td></tr>
+    <tr><td><code>painel_relatorios.py</code> · linhas 663 e 875</td>
+        <td><code>.astimezone(BRT)</code> + <code>%d/%m/%Y %H:%M</code> — o conserto do ano e do fuso</td></tr>
+    <tr><td>rota <code>/painel/relatorios</code> e o PDF</td>
+        <td>dois parâmetros novos (<code>especie</code>, <code>de</code>/<code>ate</code>), repassados ao PDF</td></tr>
+    <tr><td><code>portal.py</code> · <code>_RELATORIOS</code></td>
+        <td>o botão de espécie e as duas caixas de data</td></tr>
+    <tr><td>testes</td>
+        <td>a régua de espécie (as 12 festas sem tipo não podem sumir), o intervalo livre, e o fuso das duas datas</td></tr>
+  </table>
+  <div class="nota"><b>Nenhuma coluna nova no banco, nenhuma migração.</b> Tudo já está em
+  <code>eventos_agenda</code> desde as migrações 098–179.</div>
+</section>
+
+<div class="rodape">Mockup para aprovação · 31/08/2026 · dados medidos na conta 34 (Prime
+Eventos), nomes trocados · nada foi alterado no sistema.</div>
+</body>
+</html>

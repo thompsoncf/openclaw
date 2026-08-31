@@ -241,8 +241,10 @@ def test_ultima_msg_vem_da_conversa_e_nao_de_ultimo_contato_em(pool, cen):
           ultimo_contato_em=None, ultima_msg_min=120)
     l = _por_nome(_rel(pool, cen["conta"]), "Natalia")
     assert l["ultima"] != "—", "leu ultimo_contato_em (vazio) em vez da conversa"
+    # com o ANO desde 31/08/2026: a Prime tem compromisso até outubro/2027, e
+    # "26/08 11:00" não diz de qual ano é
     assert l["ultima"] == (T0 + timedelta(minutes=120)).astimezone(
-        rel._ag.BRT).strftime("%d/%m %H:%M")
+        rel._ag.BRT).strftime("%d/%m/%Y %H:%M")
 
 
 # ------------------------------------------------------------- as métricas

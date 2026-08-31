@@ -264,14 +264,23 @@ def test_nenhum_mes_aparece_em_dois_lugares(cli):
     Cortando no dia 30, quatro festas de setembro apareciam abertas em cima e uma
     linha "setembro — 2" logo abaixo — que se lê como "setembro tem duas". Foi um
     defeito que só apareceu ao renderizar a agenda real da Prime."""
-    perto = _ev(cli, dias=3, titulo="Festa do começo do mês")
-    # um evento no MESMO mês, mas depois do trigésimo dia
-    fim_do_mes = perto.replace(day=28) + timedelta(days=32)
+    # Ancorado no PRIMEIRO e no ÚLTIMO dia do mês que vem, e não em "hoje+3" e
+    # "hoje+32". O par antigo só caía no mesmo mês quando a suíte rodava no começo
+    # do mês: em 31/08/2026, hoje+3 é 03/09 e hoje+32 é 02/10 — meses diferentes,
+    # e o teste passava a medir outra coisa (falhava sem nada estar quebrado).
+    hoje = datetime.now(ag.BRT)
+    primeiro = (hoje.replace(day=1) + timedelta(days=32)).replace(day=1)
+    ultimo = (primeiro.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    perto = _ev(cli, dias=(primeiro.date() - hoje.date()).days,
+                titulo="Festa do começo do mês")
+    # o segundo no MESMO mês, mas muito depois do trigésimo dia contado de hoje
     with cli.pool.connection() as c:
         c.execute("insert into eventos_agenda (conta_id, membro_id, titulo, inicio) "
                   "values (%s,%s,'Festa do fim do mês',%s)",
-                  (CONTA, VEND, perto + timedelta(days=29)))
+                  (CONTA, VEND, ultimo.replace(hour=19, minute=0, second=0, microsecond=0)))
         c.commit()
+    assert perto.strftime("%Y-%m") == ultimo.strftime("%Y-%m")
+    fim_do_mes = ultimo
     html = _html(cli, t="todos")
     assert "Festa do começo do mês" in html
     assert "Festa do fim do mês" in html, \

@@ -6207,6 +6207,19 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
    padding:.6rem .85rem;font-size:.82rem;margin:.9rem 0 1rem;line-height:1.5}
   .rel-filtros{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.9rem 0 1.1rem}
   .rel-filtros select,.rel-filtros input[type=search]{width:auto;margin:0}
+  /* Espécie é o corte mais grosso da aba Agenda (visita ou festa são perguntas
+     de negócio diferentes), então vem antes de tudo e como botão, não select:
+     três opções que trocam a tela inteira merecem ser lidas de uma vez. */
+  .rel-esp{display:inline-flex;background:var(--card-2);border:1px solid var(--borda);
+      border-radius:7px;padding:2px;gap:2px}
+  .rel-esp a{padding:.32rem .72rem;border-radius:5px;font-size:.78rem;text-decoration:none;
+      color:var(--txt-mut);white-space:nowrap}
+  .rel-esp a.on{background:var(--verde);color:var(--sobre-verde);font-weight:600}
+  .rel-datas{display:inline-flex;align-items:center;gap:.3rem;background:var(--card-2);
+      border:1px solid var(--borda);border-radius:6px;padding:.14rem .3rem}
+  .rel-datas span{font-size:.74rem;color:var(--txt-mut);padding-left:.25rem}
+  .rel-datas input[type=date]{width:auto;margin:0;border:0;background:transparent;
+      color:var(--txt);font:inherit;font-size:.8rem;padding:.24rem .2rem;color-scheme:dark}
   .rel-filtros input[type=search]{min-width:170px}
   .rel-filtros .mut{font-size:.8rem}
   .rel-filtrar{width:auto;margin:0;padding:.5rem .9rem;background:var(--card);color:var(--txt);
@@ -6321,9 +6334,32 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
 
   <form method="get" action="/painel/relatorios" class="rel-filtros">
     <input type="hidden" name="tipo" value="{{ tipo }}">
-    <select name="periodo" onchange="this.form.submit()">
+    {% if dados.filtro_extra and dados.filtro_extra.especies %}
+    {# Links, e não radio: cada espécie é uma URL própria, que o dono pode salvar
+       nos favoritos ("as visitas deste mês") e mandar por WhatsApp pra equipe. #}
+    <span class="rel-esp">{% for v, rot in dados.filtro_extra.especies %}<a
+      href="/painel/relatorios?tipo={{ tipo }}&periodo={{ periodo }}&especie={{ v }}{% if de %}&de={{ de }}{% endif %}{% if ate %}&ate={{ ate }}{% endif %}"
+      class="{{ 'on' if v==dados.filtro_extra.especie_sel }}">{{ rot }}</a>{% endfor %}</span>
+    <input type="hidden" name="especie" value="{{ dados.filtro_extra.especie_sel }}">
+    {% endif %}
+    {# Escolher "Período específico" NÃO envia o formulário: enviaria com as
+       duas datas vazias e o resultado voltaria como mês corrente, parecendo que
+       o filtro não funciona. Nesse caso só revela as caixas e espera o Filtrar. #}
+    <select name="periodo" onchange="var p=this.value==='personalizado',
+      c=document.getElementById('rel-datas');
+      if(c)c.style.display=p?'':'none';
+      if(!p)this.form.submit();">
       {% for v, rot in periodos %}<option value="{{ v }}" {% if v==periodo %}selected{% endif %}>{{ rot }}</option>{% endfor %}
     </select>
+    {# As duas caixas só existem no período específico — escondidas, a barra não
+       cresce à toa nas outras seis opções. O navegador mostra dd/mm/aaaa em
+       aparelho brasileiro e manda AAAA-MM-DD no formulário; quem formata é ele. #}
+    {% if tem_periodo_livre %}
+    <span class="rel-datas" id="rel-datas" {% if periodo != 'personalizado' %}style="display:none"{% endif %}>
+      <span>de</span><input type="date" name="de" value="{{ de }}">
+      <span>até</span><input type="date" name="ate" value="{{ ate }}">
+    </span>
+    {% endif %}
     {% if dados.filtro_extra %}
     {# O MESMO parâmetro `status` serve os dois: nas abas de orçamento/contrato ele
        corta por situação; em Leads do chip, por chip. Quem manda é a aba, que
@@ -6347,6 +6383,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     </select>
     <input type="search" name="q" value="{{ dados.filtro_extra.busca_sel }}" placeholder="🔎 buscar {{ 'lead' if dados.filtro_extra.chips is defined and dados.filtro_extra.chips else 'cliente' }}…">
     <button type="submit" class="rel-filtrar">Filtrar</button>
+    {% if dados.filtro_extra.sem_tipo %}<span class="mut" title="Festa cadastrada sem escolher o tipo — conta no total, mas fica de fora da conta por tipo">⚠ {{ dados.filtro_extra.sem_tipo }} sem tipo</span>{% endif %}
     {% endif %}
     {% if not dados.filtro_extra %}
     {# Busca NA TELA, e só nas abas que ainda não têm a do servidor — duas caixas
@@ -6360,7 +6397,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     {% if dados.sem_periodo %}<span class="mut">mostra tudo que está em aberto — o período aqui não filtra</span>
     {% else %}<span class="mut">período: {{ periodo_rotulo }}</span>{% endif %}
     <span style="flex:1"></span>
-    <a class="rel-pdf" href="/painel/relatorios/pdf?tipo={{ tipo }}&periodo={{ periodo }}{% if dados.filtro_extra %}&status={{ dados.filtro_extra.chip_sel if dados.filtro_extra.chips else dados.filtro_extra.status_sel }}&vendedor={{ dados.filtro_extra.vendedor_sel }}&q={{ dados.filtro_extra.busca_sel|urlencode }}{% endif %}" target="_blank" rel="noopener">🖨️ Exportar PDF</a>
+    <a class="rel-pdf" href="/painel/relatorios/pdf?tipo={{ tipo }}&periodo={{ periodo }}{% if dados.filtro_extra %}&status={{ dados.filtro_extra.chip_sel if dados.filtro_extra.chips else dados.filtro_extra.status_sel }}&vendedor={{ dados.filtro_extra.vendedor_sel }}&q={{ dados.filtro_extra.busca_sel|urlencode }}{% if dados.filtro_extra.especies %}&especie={{ dados.filtro_extra.especie_sel }}{% endif %}{% endif %}{% if de %}&de={{ de }}{% endif %}{% if ate %}&ate={{ ate }}{% endif %}" target="_blank" rel="noopener">🖨️ Exportar PDF</a>
   </form>
 
   <div class="rel-metricas">

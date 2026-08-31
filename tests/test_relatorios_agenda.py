@@ -281,3 +281,278 @@ def test_outra_conta_nao_vaza_no_relatorio(pool, cen):
 def test_aba_agenda_esta_registrada_em_tipos():
     assert "agenda" in rel.TIPOS
     assert rel.TIPOS["agenda"]["label"] == "Agenda"
+
+
+# =========================================================================
+# OS FILTROS DE 31/08/2026 — espécie, período específico e a data completa
+#
+# Quatro ajustes pedidos pelo dono. Dois deles carregavam problema maior que o
+# pedido: o período nunca alcançava o futuro (38 dos 60 compromissos da Prime
+# estavam lá) e a data saía sem ano E em UTC, três horas à frente do que a tela
+# de Agenda mostra pra mesma festa.
+# =========================================================================
+
+def _daqui(dias, hora=20):
+    """Um instante no futuro, no fuso de Brasília — que é como o salão pensa."""
+    return datetime.combine(HOJE + timedelta(days=dias),
+                            datetime.min.time()).replace(tzinfo=rel._ag.BRT) \
+        + timedelta(hours=hora)
+
+
+# ------------------------------------------------------------------ espécie
+
+def test_visita_e_evento_somados_dao_sempre_o_total(pool, cen):
+    """A garantia que sustenta a régua escolhida. Se um dia alguém trocar
+    "complemento da visita" por `tipo_evento is not null`, este teste cai."""
+    _evento(pool, cen["conta"], titulo="Visita — Erys")
+    _evento(pool, cen["conta"], titulo="VISITA TÉCNICA - PEDRO")
+    _evento(pool, cen["conta"], titulo="Casamento", tipo_evento="Casamento")
+    _evento(pool, cen["conta"], titulo="aniversario Leda")      # festa SEM tipo
+    _evento(pool, cen["conta"], titulo="REUNIÃO COM ENGENHEIRA")
+    n = lambda esp: len(rel._dados_agenda(  # noqa: E731
+        pool, cen["conta"], "todos", "", "", "", especie=esp)["linhas"])
+    assert n("visita") == 2
+    assert n("evento") == 3
+    assert n("visita") + n("evento") == n("") == 5
+
+
+def test_festa_sem_tipo_preenchido_continua_sendo_evento(pool, cen):
+    """O caso que motivou a régua: 12 das 43 festas da Prime foram digitadas no
+    título e estão com `tipo_evento` vazio. Pela régua óbvia
+    (`tipo_evento is not null`) elas sumiriam dos DOIS filtros."""
+    _evento(pool, cen["conta"], titulo="15 Anos - Fernanda")
+    _evento(pool, cen["conta"], titulo="Formatura - Beatriz")
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="evento")
+    assert len(d["linhas"]) == 2
+    assert rel._dados_agenda(pool, cen["conta"], "todos", "", "", "",
+                             especie="visita")["linhas"] == []
+
+
+def test_compromisso_chamado_visita_mas_com_tipo_de_festa_e_evento(pool, cen):
+    """`tipo_evento` preenchido desempata: é a FESTA do cliente, não a visita
+    dele ao espaço — mesmo que alguém tenha escrito "Visita" no título."""
+    _evento(pool, cen["conta"], titulo="Visita de formatura", tipo_evento="Formatura")
+    assert rel._dados_agenda(pool, cen["conta"], "todos", "", "", "",
+                             especie="visita")["linhas"] == []
+    assert len(rel._dados_agenda(pool, cen["conta"], "todos", "", "", "",
+                                 especie="evento")["linhas"]) == 1
+
+
+def test_visita_cancelada_continua_aparecendo_na_especie_visita(pool, cen):
+    """O Funil exclui visita cancelada de propósito (não foi agendada pra valer).
+    Aqui NÃO: o relatório fecha o período, e quem quiser cortar tem o filtro de
+    Status. Somar as duas regras num lugar só faria a soma parar de bater."""
+    _evento(pool, cen["conta"], titulo="Visita — Ana", status="cancelado")
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="visita")
+    assert len(d["linhas"]) == 1
+
+
+def test_especie_invalida_cai_em_todos(pool, cen):
+    _evento(pool, cen["conta"], titulo="Visita — Ana")
+    _evento(pool, cen["conta"], titulo="Casamento", tipo_evento="Casamento")
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="banana")
+    assert len(d["linhas"]) == 2
+    assert d["filtro_extra"]["especie_sel"] == ""
+
+
+# --------------------------------------------------- colunas e métricas por espécie
+
+def test_sem_especie_a_tela_continua_a_de_sempre(pool, cen):
+    """Quem abre a aba sem escolher nada tem que ver exatamente o que via antes
+    de a espécie existir — mesmas oito colunas, mesmas cinco métricas."""
+    _evento(pool, cen["conta"], sinal=50000)
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert [c["chave"] for c in d["colunas"]] == [
+        "inicio", "evento", "cliente", "tipo", "status", "desfecho",
+        "convidados", "sinal_centavos"]
+    assert [m[0] for m in d["metricas"]] == [
+        "Eventos no período", "Realizados", "Não realizados", "Cancelados",
+        "Sinal no período"]
+    assert d["col_total"] == "sinal_centavos"
+
+
+def test_visita_nao_mostra_sinal_nem_convidados_e_mostra_vendedor(pool, cen):
+    """Visita nunca segura data (`agendar_visita` não passa sinal), então a
+    coluna era sempre R$ 0,00 — metade da tela para ler nada."""
+    _evento(pool, cen["conta"], titulo="Visita — Erys", membro_id=cen["pedro"])
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="visita")
+    chaves = [c["chave"] for c in d["colunas"]]
+    assert "sinal_centavos" not in chaves and "convidados" not in chaves
+    assert "vendedor" in chaves
+    assert d["col_total"] is None, "sem coluna de dinheiro, não há linha de total"
+    assert d["linhas"][0]["vendedor"] == "Pedro"
+    assert [m[0] for m in d["metricas"]] == [
+        "Visitas no período", "Aconteceram", "Não apareceram", "Sem resposta",
+        "Vindas de lead"]
+
+
+def test_metricas_de_visita_contam_comparecimento_e_origem(pool, cen):
+    lead = _lead(pool, cen["conta"], contato="Nayara")
+    _evento(pool, cen["conta"], titulo="Visita — Nayara", desfecho="realizado",
+            prospeccao_id=lead, inicio=_daqui(-3))
+    _evento(pool, cen["conta"], titulo="Visita — Erys", desfecho="nao_realizado",
+            inicio=_daqui(-2))
+    _evento(pool, cen["conta"], titulo="Visita — Maysa", inicio=_daqui(-1))  # passou, sem resposta
+    _evento(pool, cen["conta"], titulo="Visita — Rita", inicio=_daqui(+5))   # ainda vem
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="visita")
+    m = dict(d["metricas"])
+    assert m["Visitas no período"] == "4"
+    assert m["Aconteceram"].startswith("1 ")
+    assert m["Não apareceram"].startswith("1 ")
+    assert m["Sem resposta"].startswith("1 "), "a que ainda vem não está sem resposta"
+    assert m["Vindas de lead"].startswith("1 ")
+
+
+def test_visita_futura_nao_e_marcada_como_sem_resposta(pool, cen):
+    """Antes da data não há o que responder. Pintar de âmbar o que ainda vai
+    acontecer seria um alerta que não pede nada de ninguém."""
+    _evento(pool, cen["conta"], titulo="Visita — Rita", inicio=_daqui(+5))
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="visita")
+    assert d["linhas"][0]["desfecho"] == "—"
+    _evento(pool, cen["conta"], titulo="Visita — Ana", inicio=_daqui(-5))
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="visita")
+    passada = [l for l in d["linhas"] if "Ana" in l["evento"]][0]
+    assert passada["desfecho"] == "Sem resposta"
+
+
+def test_evento_mostra_o_tipo_da_festa_e_marca_quem_esta_sem(pool, cen):
+    _evento(pool, cen["conta"], titulo="Casamento", tipo_evento="Casamento",
+            convidados=200, sinal=150000)
+    _evento(pool, cen["conta"], titulo="aniversario Leda", convidados=60)
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="evento")
+    porta = {l["evento"]: l for l in d["linhas"]}
+    assert porta["Casamento"]["tipo_evento"] == "Casamento"
+    assert porta["Casamento"]["tipo_evento_cor"] == "neutro"
+    assert porta["aniversario Leda"]["tipo_evento"] == "sem tipo"
+    assert porta["aniversario Leda"]["tipo_evento_cor"] == "aviso"
+    assert d["filtro_extra"]["sem_tipo"] == 1
+    m = dict(d["metricas"])
+    assert m["Convidados"] == "260"
+    assert m["Eventos no período"] == "2"
+
+
+def test_aviso_de_sem_tipo_so_aparece_na_especie_evento(pool, cen):
+    """Na aba "Todos" ele diria respeito a linhas que nem são festa."""
+    _evento(pool, cen["conta"], titulo="aniversario Leda")
+    for esp in ("", "visita"):
+        d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie=esp)
+        assert d["filtro_extra"]["sem_tipo"] == 0
+
+
+def test_status_e_vendedor_continuam_sendo_so_recorte(pool, cen):
+    """Espécie muda O QUE se conta; status e vendedor só recortam a tabela. Foi
+    assim que a aba nasceu e continua sendo."""
+    _evento(pool, cen["conta"], titulo="Casamento", tipo_evento="Casamento",
+            status="ativo")
+    _evento(pool, cen["conta"], titulo="Formatura", tipo_evento="Formatura",
+            status="cancelado")
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "cancelado", "", "",
+                          especie="evento")
+    assert len(d["linhas"]) == 1
+    assert dict(d["metricas"])["Eventos no período"] == "2"
+
+
+# -------------------------------------------------------------------- período
+
+def test_este_mes_vai_ate_o_fim_do_mes_so_com_ate_o_fim():
+    """A decisão do dono em 31/08/2026, medida direto no cálculo do intervalo —
+    sem depender do dia em que a suíte roda. Numa agenda, parar em hoje esconde
+    justamente a festa que ainda vai acontecer; num relatório de histórico, ir
+    além de hoje não mostraria linha nenhuma."""
+    assert rel._intervalo("mes")[1] == HOJE
+    assert rel._intervalo("mes", ate_o_fim=True)[1] == rel._fim_do_mes(HOJE)
+    assert rel._intervalo("ano")[1] == HOJE
+    assert rel._intervalo("ano", ate_o_fim=True)[1] == date(HOJE.year, 12, 31)
+
+
+def test_so_a_pilula_agenda_oferece_o_periodo_livre(pool, cen):
+    """As outras oito abas chamam `_intervalo(periodo)` sem `de`/`ate`: oferecer
+    "Período específico" nelas devolveria o mês corrente calado."""
+    assert "personalizado" in dict(rel.periodos_da_aba("agenda"))
+    assert "prox30" in dict(rel.periodos_da_aba("agenda"))
+    for aba in ("vendas", "orcamentos", "contratos", "comissao"):
+        assert "personalizado" not in dict(rel.periodos_da_aba(aba)), aba
+        assert "prox30" not in dict(rel.periodos_da_aba(aba)), aba
+
+
+def test_a_agenda_pede_o_mes_inteiro_de_verdade(pool, cen):
+    """E o `ate_o_fim` chega mesmo até a consulta — o teste acima mede o cálculo,
+    este mede a aba. Só roda quando ainda sobra mês."""
+    fim_do_mes = rel._fim_do_mes(HOJE)
+    if fim_do_mes == HOJE:                 # rodando no último dia do mês
+        pytest.skip("hoje já é o último dia do mês — não há 'resto do mês'")
+    _evento(pool, cen["conta"], titulo="Festa no fim do mês",
+            inicio=datetime.combine(fim_do_mes, datetime.min.time())
+            .replace(tzinfo=rel._ag.BRT) + timedelta(hours=20))
+    d = rel._dados_agenda(pool, cen["conta"], "mes", "", "", "")
+    assert len(d["linhas"]) == 1, "o resto do mês tem que aparecer"
+
+
+def test_periodo_especifico_recorta_exatamente_o_pedido(pool, cen):
+    _evento(pool, cen["conta"], titulo="Antes", inicio=_daqui(+10))
+    _evento(pool, cen["conta"], titulo="Dentro", inicio=_daqui(+40))
+    _evento(pool, cen["conta"], titulo="Depois", inicio=_daqui(+80))
+    de = (HOJE + timedelta(days=30)).isoformat()
+    ate = (HOJE + timedelta(days=50)).isoformat()
+    d = rel._dados_agenda(pool, cen["conta"], "personalizado", "", "", "",
+                          de=de, ate=ate)
+    assert [l["evento"] for l in d["linhas"]] == ["Dentro"]
+
+
+def test_periodo_especifico_alcanca_o_ano_que_vem(pool, cen):
+    """O que nenhum preset alcançava: dezembro do ano que vem, sozinho."""
+    _evento(pool, cen["conta"], titulo="Formatura 2027", inicio=_daqui(+400))
+    _evento(pool, cen["conta"], titulo="Festa de agora", inicio=_daqui(+1))
+    de = (HOJE + timedelta(days=390)).isoformat()
+    ate = (HOJE + timedelta(days=410)).isoformat()
+    d = rel._dados_agenda(pool, cen["conta"], "personalizado", "", "", "",
+                          de=de, ate=ate)
+    assert [l["evento"] for l in d["linhas"]] == ["Formatura 2027"]
+
+
+def test_datas_invertidas_sao_trocadas_em_vez_de_zerar(pool, cen):
+    """De 31/12 até 01/12 é engano de digitação, não pedido de lista vazia."""
+    _evento(pool, cen["conta"], titulo="Dentro", inicio=_daqui(+40))
+    de = (HOJE + timedelta(days=50)).isoformat()
+    ate = (HOJE + timedelta(days=30)).isoformat()
+    d = rel._dados_agenda(pool, cen["conta"], "personalizado", "", "", "",
+                          de=de, ate=ate)
+    assert len(d["linhas"]) == 1
+
+
+def test_data_torta_cai_no_mes_corrente_e_nao_quebra(pool, cen):
+    _evento(pool, cen["conta"], titulo="Deste mês",
+            inicio=datetime.combine(HOJE, datetime.min.time())
+            .replace(tzinfo=rel._ag.BRT) + timedelta(hours=10))
+    d = rel._dados_agenda(pool, cen["conta"], "personalizado", "", "", "",
+                          de="banana", ate="")
+    assert len(d["linhas"]) == 1
+
+
+def test_proximos_30_dias_nao_traz_o_passado(pool, cen):
+    _evento(pool, cen["conta"], titulo="Semana passada", inicio=_daqui(-7))
+    _evento(pool, cen["conta"], titulo="Semana que vem", inicio=_daqui(+7))
+    d = rel._dados_agenda(pool, cen["conta"], "prox30", "", "", "")
+    assert [l["evento"] for l in d["linhas"]] == ["Semana que vem"]
+
+
+# ----------------------------------------------------------------------- data
+
+def test_a_data_tem_ano_e_esta_no_fuso_de_brasilia(pool, cen):
+    """Os dois defeitos que andavam juntos: sem o ano, "16/01 19:00" não diz de
+    qual ano é (a Prime tem festa até outubro/2027); e sem converter o fuso, o
+    casamento que a Agenda mostra às 16:00 saía 19:00 aqui — três horas à frente,
+    com 2 dos 60 caindo no DIA seguinte."""
+    quando = datetime(2026, 12, 19, 21, 30, tzinfo=rel._ag.BRT)
+    _evento(pool, cen["conta"], titulo="Casamento", inicio=quando)
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert d["linhas"][0]["inicio"] == "19/12/2026 21:30"
+
+
+def test_festa_da_noite_nao_pula_pro_dia_seguinte(pool, cen):
+    """21h30 de sábado é 00h30 de domingo em UTC. Formatar a data sem corrigir o
+    fuso deixaria a data errada bem escrita."""
+    _evento(pool, cen["conta"], titulo="Formatura",
+            inicio=datetime(2026, 12, 5, 22, 0, tzinfo=rel._ag.BRT))
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert d["linhas"][0]["inicio"].startswith("05/12/2026"), "virou o dia"

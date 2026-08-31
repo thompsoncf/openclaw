@@ -58,10 +58,15 @@ def http(monkeypatch):
         c.execute("create table membros (id bigserial primary key, conta_id bigint, "
                   "nome text, papel text, ativo boolean default true)")
         c.execute("create table lancamentos (id bigserial primary key, conta_id bigint)")
+        # a tela lê o lead pra preencher nome e WhatsApp quando a visita veio do
+        # funil (31/08/2026) — sem a tabela, o left join derruba a rota inteira.
+        c.execute("create table prospeccao (id bigserial primary key, conta_id bigint, "
+                  "contato text, empresa text, whatsapp text, telefone text)")
         for nome in _MIGRACOES:
             c.execute((BASE / nome).read_text(encoding="utf-8"))
         c.execute("alter table clientes add column if not exists endereco text")
         c.execute("alter table clientes add column if not exists cep text")
+        c.execute("alter table eventos_agenda add column if not exists prospeccao_id bigint")
         c.execute("insert into contas (id, tipo, nome) values (%s,'pj','Prime')", (CONTA,))
         c.execute("insert into contas (id, tipo, nome) values (%s,'pj','Vizinha')", (OUTRA,))
         c.execute("insert into membros (conta_id, nome, papel) values (%s,'PEDRO YAN PRIME','vendedor')",

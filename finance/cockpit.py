@@ -1862,12 +1862,49 @@ def endereco_empresa(pool, conta_id: int) -> dict:
     return {"nome": nome, "endereco": endereco, "maps": _maps_link(endereco or nome)}
 
 
+def _cliente_do_lead(pool, conta_id: int, numero: str) -> int | None:
+    """O cadastro que JÁ existe pro número do lead — ou None, e aí não se cria nada.
+
+    A visita marcada pelo funil trazia nome e número e não deixava cliente nenhum
+    atrás de si: medido na Prime em 31/08/2026, das 7 visitas vindas de lead, 7
+    tinham nome e WhatsApp no lead e ZERO tinham cliente ligado. O número se
+    perdia exatamente aqui.
+
+    A régua é a dos 8 dígitos finais (`clientes.buscar_unico_por_telefone`), a
+    mesma da aba Clientes — o número do lead chega do WhatsApp com o 55 e o
+    digitado à mão chega sem, e comparar texto exato nunca casa.
+
+    NÃO CRIA CLIENTE. É a decisão do dono em 31/08/2026, e o motivo é o que está
+    escrito no campo: nome de lead é anotação de vendedora, não é nome de pessoa
+    ("Jacque/Elisangela 15 Anos 25/11"). Cadastrar automático poria isso na base
+    que alimenta contrato, orçamento e cobrança, sem ninguém olhar. Quando não
+    acha, o relatório oferece o "ligar ao cadastro" com nome e número já
+    preenchidos — o dono confere e confirma.
+
+    Falhar aqui NUNCA derruba a visita: a conta pode nem ter o módulo de
+    clientes, e uma visita não marcada por causa de uma busca é perda de verdade,
+    enquanto o vínculo que faltou o botão resolve depois.
+    """
+    if not (numero or "").strip():
+        return None
+    try:
+        from finance import clientes as cli
+        achado = cli.buscar_unico_por_telefone(pool, conta_id, numero)
+    except Exception:  # noqa: BLE001
+        return None
+    return achado["id"] if achado else None
+
+
 def agendar_visita(pool, conta_id: int, membro_id: int, lead_id: int, *, data: str, hora: str,
                    dur_min: int = 60, local: str = "", lembrete_min: int | None = 60,
                    avisar_cliente: bool = True) -> dict:
     """Marca a visita do lead ao espaço: cria o evento na agenda, liga no lead, move o
     lead pra 'qualificado' e (opcional) manda a confirmação com o endereço + o convite
-    .ics pro cliente. Revalida a posse do lead."""
+    .ics pro cliente. Revalida a posse do lead.
+
+    Liga também o CADASTRO, quando o número do lead já é de um cliente da conta
+    (`_cliente_do_lead`, régua dos 8 dígitos finais). Nunca cria cadastro novo — o
+    porquê está lá."""
     import secrets as _secrets
     from datetime import datetime, timedelta
     from finance import agenda as ag
@@ -1891,7 +1928,8 @@ def agendar_visita(pool, conta_id: int, membro_id: int, lead_id: int, *, data: s
                  + (f"\nMapa: {esp['maps']}" if esp["maps"] else ""))
     lembrete = int(lembrete_min) if lembrete_min else None
     ev = ag.criar_evento(pool, conta_id, f"Visita — {quem}", ini, membro_id=membro_id, fim=fim,
-                         local=local, descricao=descricao, lembrete_min=lembrete, tipo="empresa")
+                         local=local, descricao=descricao, lembrete_min=lembrete, tipo="empresa",
+                         cliente_id=_cliente_do_lead(pool, conta_id, numero))
     token = _secrets.token_urlsafe(12)
     quando = ini.astimezone(ag.BRT).strftime("%d/%m às %H:%M")
     with pool.connection() as c:

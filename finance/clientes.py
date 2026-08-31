@@ -13,7 +13,8 @@ DESENHO (pos-migracao 066):
 Compatibilidade: todas as funcoes publicas antigas seguem existindo com a mesma
 assinatura (criar_cliente, listar_clientes, obter_cliente, buscar_por_telefone,
 atualizar_cliente, arquivar_cliente, achar_ou_criar, contar_clientes). Novas:
-resolver_pessoa, puxar_ou_criar_cliente, sugerir_pessoas_por_celular.
+resolver_pessoa, puxar_ou_criar_cliente, sugerir_pessoas_por_celular,
+buscar_unico_por_telefone.
 """
 from __future__ import annotations
 
@@ -426,6 +427,33 @@ def buscar_por_telefone(pool, dono_id: int, telefone: str) -> dict | None:
             (dono_id, n8),
         ).fetchone()
     return _row_para_dict(r) if r else None
+
+
+def buscar_unico_por_telefone(pool, dono_id: int, telefone: str) -> dict | None:
+    """Como `buscar_por_telefone`, mas devolve None tambem quando ha MAIS DE UM
+    cadastro com o mesmo numero.
+
+    A diferenca importa porque as duas funcoes servem a momentos diferentes. O
+    `buscar_por_telefone` responde a quem esta com a tela aberta e vai conferir o
+    que veio; esta aqui responde a codigo que grava sozinho, sem ninguem olhando
+    (o `agendar_visita` liga o cliente na visita do lead). Dois cadastros com o
+    mesmo numero sao um duplicado esperando a fusao — escolher um dos dois no
+    escuro grava vinculo em metade do historico e a fusao depois tem que
+    descobrir isso. Empatou, nao liga: a linha continua oferecendo o botao, e
+    quem resolve e' o dono."""
+    n8 = _n8(telefone)
+    if not n8:
+        return None
+    _garantir_cols(pool)
+    with pool.connection() as c:
+        rs = c.execute(
+            _SEL + " where c.dono_id=%s and c.ativo"
+                   "   and right(regexp_replace(coalesce(p.celular, c.telefone),"
+                   "                            '[^0-9]', '', 'g'), 8) = %s"
+                   " order by c.id limit 2",
+            (dono_id, n8),
+        ).fetchall()
+    return _row_para_dict(rs[0]) if len(rs) == 1 else None
 
 
 def atualizar_cliente(pool, dono_id: int, cliente_id: int, **campos) -> bool:

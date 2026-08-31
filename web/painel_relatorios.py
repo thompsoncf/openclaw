@@ -16,7 +16,7 @@ Dados reais, reaproveitando o que já existe:
 """
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from contas import equipe as eq
@@ -159,7 +159,7 @@ def _soma(linhas, chave):
     return sum(int(r[chave]) for r in linhas)
 
 
-def _col(chave, rotulo, num=False, brl=False, tag=False, flex=False):
+def _col(chave, rotulo, num=False, brl=False, tag=False, flex=False, cli=False):
     """`flex=True` marca a coluna ELÁSTICA da tabela — a que pode encolher quando
     falta largura. Só uma por relatório, e é sempre a de nome livre (descrição,
     cliente, contraparte).
@@ -172,7 +172,12 @@ def _col(chave, rotulo, num=False, brl=False, tag=False, flex=False):
     corta no FIM com reticências, mantém todas as outras no lugar e o começo do nome
     sempre visível — que é a parte que identifica o cliente."""
     return {"chave": chave, "rotulo": rotulo, "num": num, "brl": brl, "tag": tag,
-            "flex": flex}
+            "flex": flex,
+            # `cli=True` é a coluna Cliente da Agenda, que precisa de marcação
+            # própria: nome lido do TÍTULO sai apagado e com selo, e a célula vira
+            # link pra ligar ao cadastro. Um flag e não `|safe`: a escapagem
+            # continua valendo, o template é que sabe montar esta célula.
+            "cli": cli}
 
 
 def _dados_vendas(pool, conta_id, periodo):
@@ -771,12 +776,17 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
             f"""select e.inicio, coalesce(e.tipo_evento, e.titulo),
                        coalesce(pe.nome, cl.nome, oc.nome, p.contato, p.empresa),
                        e.tipo, e.status, e.desfecho, e.convidados, e.sinal_centavos,
-                       mb.nome, e.tipo_evento
+                       mb.nome, e.tipo_evento, e.id,
+                       coalesce(e.sem_cliente, false), e.titulo
                   from eventos_agenda e
                   {join_orc}
                  where {where2_sql}
                  order by e.inicio asc limit 300""",
             params2).fetchall()
+
+    # nomes da equipe: sem eles a leitura do título devolveria o VENDEDOR na
+    # coluna Cliente ("VISITA TÉCNICA - PEDRO"). Uma consulta por relatório.
+    equipe = [n for _i, n in _vendedores_da_conta(pool, conta_id) if n]
 
     linhas = []
     for r in rows:
@@ -787,9 +797,22 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
         # alerta que não pede nada de ninguém.
         if especie == "visita" and r[5] is None and r[0] and r[0] < _ag.agora_brt():
             df_rotulo, df_cor = "Sem resposta", "aviso"
+        # CLIENTE: o vínculo primeiro; sem ele, o nome lido do título — marcado
+        # como palpite, porque é o que ele é. Nunca se grava daqui: `do_titulo`
+        # vira `cliente_id` só quando o dono confirma na tela de ligar.
+        #  r[8]=vendedor  r[9]=tipo_evento  r[10]=id  r[11]=sem_cliente  r[12]=titulo
+        nome, do_titulo = r[2], False
+        if not nome:
+            nome = _ag.nome_no_titulo(r[12], r[9], equipe)
+            do_titulo = bool(nome)
         linhas.append({
             "inicio": _fmt_hora(r[0]),
-            "evento": r[1] or "—", "cliente": r[2] or "—",
+            "evento": r[1] or "—", "cliente": nome or "—",
+            "cliente_do_titulo": do_titulo,
+            # a célula só vira link enquanto houver pergunta a fazer: com vínculo
+            # de verdade, ou com "não tem cliente" já dito, ela para de cobrar.
+            "cliente_link": (None if (r[2] or r[11])
+                             else f"/painel/relatorios/agenda/{r[10]}/cliente"),
             "tipo": AGENDA_TIPO_ROTULO.get(r[3], r[3] or "—"),
             "tipo_evento": r[9] or "sem tipo",
             "tipo_evento_cor": "neutro" if r[9] else "aviso",
@@ -805,7 +828,7 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
         # Convidados; entram Vendedor e o comparecimento, que é o que se pergunta
         # de uma visita.
         colunas = [_col("inicio", "Data"), _col("evento", "Visita", flex=True),
-                   _col("cliente", "Cliente"), _col("vendedor", "Vendedor"),
+                   _col("cliente", "Cliente", cli=True), _col("vendedor", "Vendedor"),
                    _col("status", "Status", tag=True),
                    _col("desfecho", "Desfecho", tag=True)]
         col_total, total_centavos = None, 0
@@ -816,7 +839,7 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                     ("Vindas de lead", _pct(n_com_lead))]
     elif especie == "evento":
         colunas = [_col("inicio", "Data"), _col("evento", "Evento", flex=True),
-                   _col("cliente", "Cliente"),
+                   _col("cliente", "Cliente", cli=True),
                    _col("tipo_evento", "Tipo", tag=True),
                    _col("status", "Status", tag=True),
                    _col("convidados", "Convid.", num=True),
@@ -832,7 +855,7 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
         # "Todos" continua EXATAMENTE como era antes da espécie existir — quem
         # abre a aba sem escolher nada tem que ver a tela de sempre.
         colunas = [_col("inicio", "Data"), _col("evento", "Evento", flex=True),
-                   _col("cliente", "Cliente"), _col("tipo", "Tipo"),
+                   _col("cliente", "Cliente", cli=True), _col("tipo", "Tipo"),
                    _col("status", "Status", tag=True),
                    _col("desfecho", "Desfecho", tag=True),
                    _col("convidados", "Convid.", num=True),
@@ -1251,6 +1274,100 @@ def _contexto(conta_id: int, tipo: str, periodo: str, status: str = "",
                                   vendedor=vendedor, q=q, especie=especie,
                                   de=de, ate=ate)
     return tipo, periodo, dados
+
+
+# ---------------------------------------------------------------------------
+# Ligar o compromisso a um cadastro
+#
+# A outra metade do conserto de 31/08/2026. A leitura do título tira 51 linhas do
+# "—", mas ela é PALPITE — e palpite que fica pra sempre vira dado de mentira. Aqui
+# o dono confirma, e o palpite vira `cliente_id`; ou diz que não há cliente, e a
+# linha para de perguntar. É isso que faz a camada da leitura se esgotar com o uso
+# em vez de virar moradia permanente.
+# ---------------------------------------------------------------------------
+def _evento_da_conta(pool, conta_id: int, evento_id: int):
+    """(titulo, tipo_evento, inicio, cliente_id, sem_cliente) — ou None se o
+    compromisso não for desta conta. O isolamento é aqui, e não na rota."""
+    with pool.connection() as c:
+        return c.execute(
+            "select titulo, tipo_evento, inicio, cliente_id, "
+            "       coalesce(sem_cliente,false) "
+            "  from eventos_agenda where id=%s and conta_id=%s",
+            (evento_id, conta_id)).fetchone()
+
+
+@router.get("/painel/relatorios/agenda/{evento_id}/cliente",
+            response_class=HTMLResponse)
+def painel_agenda_cliente(request: Request, evento_id: int):
+    conta, redir = _pode_ver(request)
+    if redir is not None:
+        return redir
+    pool = get_pool()
+    ev = _evento_da_conta(pool, conta[0], evento_id)
+    if ev is None:
+        return RedirectResponse("/painel/relatorios?tipo=agenda", status_code=303)
+    equipe = [n for _i, n in _vendedores_da_conta(pool, conta[0]) if n]
+    return _render("agenda_cliente", request, conta=conta, evento_id=evento_id,
+                   titulo_ev=ev[0], quando=_fmt_hora(ev[2]),
+                   # a caixa já vem preenchida com o palpite: quase sempre é só
+                   # conferir e clicar, e redigitar o que a tela acabou de mostrar
+                   # é o tipo de trabalho que faz ninguém usar a ferramenta.
+                   sugerido=_ag.nome_no_titulo(ev[0], ev[1], equipe) or "",
+                   erro=request.session.pop("erro", None))
+
+
+@router.post("/painel/relatorios/agenda/{evento_id}/cliente")
+def painel_agenda_cliente_salvar(request: Request, evento_id: int,
+                                 cliente_id: str = Form(""),
+                                 cliente_nome: str = Form(""),
+                                 sem_cliente: str = Form("")):
+    from finance import clientes as cli
+    conta, redir = _pode_ver(request)
+    if redir is not None:
+        return redir
+    pool = get_pool()
+    volta = "/painel/relatorios?tipo=agenda"
+    if _evento_da_conta(pool, conta[0], evento_id) is None:
+        return RedirectResponse(volta, status_code=303)
+
+    if sem_cliente == "1":
+        _ag.marcar_sem_cliente(pool, conta[0], evento_id, True)
+        request.session["aviso"] = "Marcado como sem cliente."
+        return RedirectResponse(volta, status_code=303)
+
+    # Mesma régua de três respostas da tela da Agenda, e pelo mesmo motivo:
+    # `salvar_cliente` só reaproveita ficha por documento ou telefone, e aqui só
+    # chega o nome — sem isto, confirmar o palpite cunharia uma ficha repetida a
+    # cada compromisso, que é exatamente o problema que este trabalho veio fechar.
+    alvo = None
+    cid = (cliente_id or "").strip()
+    if cid.isdigit() and cli.obter_cliente(pool, conta[0], int(cid)):
+        alvo = int(cid)
+    else:
+        nome = (cliente_nome or "").strip()
+        if not nome:
+            request.session["erro"] = "Escolha um cliente ou diga que não há um."
+            return RedirectResponse(f"/painel/relatorios/agenda/{evento_id}/cliente",
+                                    status_code=303)
+        iguais = [c for c in cli.listar_clientes(pool, conta[0], busca=nome, limite=5)
+                  if (c["nome"] or "").strip().casefold() == nome.casefold()]
+        if len(iguais) == 1:
+            alvo = iguais[0]["id"]
+        elif len(iguais) > 1:
+            request.session["erro"] = (
+                f"Há mais de um cadastro chamado “{nome}”. Escolha na lista qual é.")
+            return RedirectResponse(f"/painel/relatorios/agenda/{evento_id}/cliente",
+                                    status_code=303)
+        else:
+            try:
+                alvo = cli.salvar_cliente(pool, conta[0], nome)["id"]
+            except ValueError as e:
+                request.session["erro"] = str(e)
+                return RedirectResponse(
+                    f"/painel/relatorios/agenda/{evento_id}/cliente", status_code=303)
+    _ag.ligar_cliente(pool, conta[0], evento_id, alvo)
+    request.session["aviso"] = "Compromisso ligado ao cadastro."
+    return RedirectResponse(volta, status_code=303)
 
 
 @router.get("/painel/relatorios", response_class=HTMLResponse)

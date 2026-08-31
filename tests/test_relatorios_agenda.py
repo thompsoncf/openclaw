@@ -24,7 +24,8 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint,
   membro_id bigint, titulo text not null, inicio timestamptz not null,
   tipo text default 'pessoal', tipo_evento text, status text default 'ativo',
   desfecho text, convidados int, sinal_centavos int, prospeccao_id bigint,
-  cliente_id bigint, criado_em timestamptz default now());
+  cliente_id bigint, sem_cliente boolean not null default false,
+  criado_em timestamptz default now());
 create table pessoas (id bigserial primary key, nome text, celular text, cpf text);
 create table clientes (id bigserial primary key, dono_id bigint, pessoa_id bigint,
   nome text, ativo boolean not null default true);
@@ -656,3 +657,64 @@ def test_a_busca_do_relatorio_acha_pelo_cliente_ligado(pool, cen):
     d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "Zenilda")
     assert [l["evento"] for l in d["linhas"]] == ["Locação"]
     assert d["linhas"][0]["cliente"] == "Zenilda Rosa"
+
+
+# =========================================================================
+# CAMADA 2 — o nome que ficou preso no título
+#
+# A régua em si está fixada em tests/test_agenda_nome_no_titulo.py (função pura,
+# 51 títulos reais). Aqui se mede o que o RELATÓRIO faz com ela: mostra como
+# palpite, nunca como dado, e só enquanto houver pergunta a fazer.
+# =========================================================================
+
+def test_sem_vinculo_o_nome_vem_do_titulo_marcado_como_palpite(pool, cen):
+    _evento(pool, cen["conta"], titulo="Locação — Jonas Barreto Castro Neto",
+            tipo_evento="Locação")
+    l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")["linhas"][0]
+    assert l["cliente"] == "Jonas Barreto Castro Neto"
+    assert l["cliente_do_titulo"] is True
+    assert l["cliente_link"], "sem vínculo, a célula tem que levar pra resolver"
+
+
+def test_com_vinculo_o_nome_nao_e_palpite_e_a_celula_nao_cobra(pool, cen):
+    ev = _evento(pool, cen["conta"], titulo="Locação — Jonas Barreto Castro Neto",
+                 tipo_evento="Locação")
+    _com_cliente(pool, ev, _cliente(pool, cen["conta"], "Jonas Barreto Castro Neto"))
+    l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")["linhas"][0]
+    assert l["cliente"] == "Jonas Barreto Castro Neto"
+    assert l["cliente_do_titulo"] is False
+    assert l["cliente_link"] is None, "com dono, a linha para de perguntar"
+
+
+def test_o_nome_do_vendedor_nao_vira_cliente(pool, cen):
+    """A armadilha: "VISITA TÉCNICA - PEDRO" é o vendedor. O relatório consulta os
+    membros da conta antes de ler os títulos justamente por isto."""
+    _evento(pool, cen["conta"], titulo="VISITA TÉCNICA - Pedro")
+    l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")["linhas"][0]
+    assert l["cliente"] == "—"
+    assert l["cliente_do_titulo"] is False
+
+
+def test_sem_cliente_marcado_cala_a_linha(pool, cen):
+    """Reunião interna não tem dono. Depois de dito, a linha para de cobrar — sem
+    isso ela pediria atenção pra sempre, e lista que nunca esvazia ninguém olha."""
+    ev = _evento(pool, cen["conta"], titulo="REUNIÃO COM ENGENHEIRA")
+    l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")["linhas"][0]
+    assert l["cliente_link"], "antes de marcar, ainda há pergunta"
+    with pool.connection() as c:
+        c.execute("update eventos_agenda set sem_cliente=true where id=%s", (ev,))
+        c.commit()
+    l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")["linhas"][0]
+    assert l["cliente_link"] is None
+    assert l["cliente"] == "—"
+
+
+def test_o_palpite_nao_e_gravado_em_lugar_nenhum(pool, cen):
+    """Ler não é escrever. O `cliente_id` só nasce quando o dono confirma."""
+    ev = _evento(pool, cen["conta"], titulo="Casamento — Eva da Silva Fontoura",
+                 tipo_evento="Casamento")
+    rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    with pool.connection() as c:
+        cid, sem = c.execute("select cliente_id, sem_cliente from eventos_agenda "
+                             "where id=%s", (ev,)).fetchone()
+    assert cid is None and sem is False

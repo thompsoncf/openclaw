@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — Nome do cliente na Agenda</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   TOKENS — cópia fiel de web/tema.py (_TOKENS). A fonte da verdade é o tema.py.
+   ============================================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9; --roxo:#C9A3E0;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A;  --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --card:var(--surface); --card-2:var(--bg-2);
+  --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1180px;margin:0 auto;padding:34px 18px 100px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.7rem;font-weight:700}
+h2{font-size:1.18rem;font-weight:700;margin:0 0 .2rem}
+h3{font-size:.95rem;font-weight:600}
+a{color:var(--verde)}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
+  padding:.1rem .35rem;border-radius:4px;color:var(--text-dim)}
+
+.sec{margin-top:44px}
+.sec>.num{font-family:var(--mono);font-size:.72rem;color:var(--verde);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:78ch;margin-top:.5rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.86rem;margin-top:1rem;
+  color:var(--txt-mut);max-width:82ch}
+.nota b{color:var(--txt)}
+.alerta{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.alerta b{color:var(--ambar)}
+
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);
+  text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.76rem;
+  text-transform:uppercase;letter-spacing:.05em}
+.sim{color:var(--verde)} .nao{color:var(--coral)} .meio{color:var(--ambar)}
+
+/* ---------- moldura de tela ---------- */
+.telas{display:grid;grid-template-columns:1fr 320px;gap:26px;margin-top:1.2rem;align-items:start}
+@media (max-width:960px){.telas{grid-template-columns:1fr}}
+.quadro{background:var(--card);border:1px solid var(--borda);border-radius:14px;
+  overflow:hidden}
+.quadro>.cap{background:var(--bg-2);padding:.5rem .85rem;font-size:.72rem;
+  color:var(--txt-mut);border-bottom:1px solid var(--borda);
+  font-family:var(--mono);display:flex;justify-content:space-between;gap:.5rem}
+.quadro>.miolo{padding:16px}
+
+/* ---------- réplica exata das classes de web/portal.py (_RELATORIOS) ---------- */
+.abas{display:flex;align-items:center;flex-wrap:nowrap;gap:2px;background:var(--card);
+  padding:3px;border-radius:9px;border:1px solid var(--borda);margin:0 0 .9rem;
+  max-width:100%;overflow-x:auto}
+.aba{width:auto;flex-shrink:0;margin:0;display:inline-flex;align-items:center;line-height:1;
+  background:transparent;color:#b4b2a9;border:none;padding:.35rem .8rem;border-radius:6px;
+  font-size:.8rem;text-decoration:none;white-space:nowrap}
+.aba.ativa{background:var(--verde);color:var(--sobre-verde);font-weight:600}
+.rel-filtros{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:0 0 1.1rem}
+.rel-filtros select,.rel-filtros input[type=search]{background:var(--bg-2);color:var(--txt);
+  border:1px solid var(--borda);border-radius:6px;padding:.4rem .6rem;font:inherit;font-size:.8rem}
+.rel-filtros .mut{font-size:.78rem;color:var(--txt-mut)}
+.rel-pdf{display:inline-flex;align-items:center;gap:.4rem;padding:.45rem .85rem;
+  background:var(--azul);color:#04222f;border-radius:6px;text-decoration:none;
+  font-size:.8rem;font-weight:600}
+.rel-metricas{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:10px;margin:0 0 1.1rem}
+.rel-metricas .metric{background:var(--bg);border:1px solid var(--borda);border-radius:8px;
+  padding:.8rem;min-width:0}
+.rel-metricas .metric span{display:block;font-size:.72rem;color:var(--txt-mut);margin-bottom:.25rem}
+.rel-metricas .metric b{font-size:1rem;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.rel-tbl-wrap{overflow-x:auto;max-width:100%}
+.rel-tbl-wrap table{width:100%;border-collapse:collapse;min-width:680px;font-size:.84rem}
+.rel-tbl-wrap th,.rel-tbl-wrap td{padding:.5rem .55rem;border-bottom:1px solid var(--borda);
+  text-align:left;white-space:nowrap}
+.rel-tbl-wrap th{color:var(--txt-mut);font-weight:600;font-size:.72rem;
+  text-transform:uppercase;letter-spacing:.04em}
+.rel-num{text-align:right;font-variant-numeric:tabular-nums}
+.rel-tot td{border-top:2px solid var(--borda);font-weight:700}
+.rel-tag{display:inline-block;padding:.15rem .6rem;border-radius:999px;font-size:.72rem;font-weight:600}
+.rel-tag.ok{background:#15301f;color:#9fe8c9;border:1px solid var(--verde)}
+.rel-tag.aviso{background:#332a12;color:#f0dca6;border:1px solid #6e5a22}
+.rel-tag.erro{background:#3a1d1d;color:#f0b8b8;border:1px solid #6e2b2b}
+.rel-tag.neutro{background:#20242a;color:#c7ccd6;border:1px solid #3a4048}
+.rel-act{width:1%;text-align:center}
+.rel-print{display:inline-flex;align-items:center;justify-content:center;width:1.7rem;height:1.7rem;
+  border:1px solid var(--borda);border-radius:6px;text-decoration:none}
+
+.legenda-lat{font-size:.78rem;color:var(--txt-mut);margin-top:.8rem}
+ul.lista{margin:.6rem 0 0 1.1rem;font-size:.87rem;color:var(--txt-mut)}
+ul.lista li{margin-bottom:.5rem}
+ul.lista b{color:var(--txt)}
+.rodape{margin-top:56px;padding-top:18px;border-top:1px solid var(--borda);
+  font-size:.8rem;color:var(--text-faint)}
+
+/* ---------- acréscimos deste mockup ---------- */
+.rel-filtros input[type=date]{background:var(--bg-2);color:var(--txt);
+  border:1px solid var(--borda);border-radius:6px;padding:.38rem .5rem;font:inherit;
+  font-size:.8rem;color-scheme:dark}
+.rel-filtros .grupo{display:inline-flex;align-items:center;gap:.35rem;
+  background:var(--bg-2);border:1px solid var(--borda);border-radius:6px;padding:.18rem .3rem}
+.rel-filtros .grupo span{font-size:.74rem;color:var(--txt-mut);padding-left:.3rem}
+.rel-filtros .grupo input.dt{border:0;background:transparent;padding:.22rem .3rem;
+  color:var(--txt);font:inherit;font-size:.8rem;font-family:var(--mono);width:6.4rem}
+.rel-filtrar{background:var(--verde);color:var(--sobre-verde);border:0;border-radius:6px;
+  padding:.42rem .9rem;font:inherit;font-size:.8rem;font-weight:600;cursor:pointer;width:auto}
+.seg{display:inline-flex;background:var(--bg-2);border:1px solid var(--borda);
+  border-radius:7px;padding:2px;gap:2px}
+.seg a{padding:.32rem .7rem;border-radius:5px;font-size:.78rem;text-decoration:none;
+  color:var(--txt-mut);white-space:nowrap}
+.seg a.on{background:var(--verde);color:var(--sobre-verde);font-weight:600}
+.antes-depois{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:1rem}
+@media (max-width:860px){.antes-depois{grid-template-columns:1fr}}
+.ad{border:1px solid var(--borda);border-radius:10px;overflow:hidden;background:var(--card)}
+.ad>.t{padding:.45rem .8rem;font-size:.72rem;font-family:var(--mono);
+  border-bottom:1px solid var(--borda);letter-spacing:.04em}
+.ad.ruim>.t{background:var(--coral-fundo);color:var(--coral);border-bottom-color:var(--coral-borda)}
+.ad.bom>.t{background:var(--neon-fundo);color:var(--neon);border-bottom-color:var(--neon-borda)}
+.ad>.c{padding:.9rem}
+.big{font-family:var(--mono);font-size:1.6rem;font-weight:700;display:block;margin-bottom:.15rem}
+.big.ruim{color:var(--coral)} .big.bom{color:var(--verde)}
+.barras{margin-top:1.1rem}
+.barra{display:grid;grid-template-columns:5rem minmax(0,1fr) 3rem;align-items:center;gap:.6rem;
+  font-size:.8rem;margin-bottom:.3rem;color:var(--txt-mut)}
+.barra .trilho{background:var(--bg);border:1px solid var(--borda);border-radius:5px;
+  height:1.15rem;overflow:hidden;display:flex;justify-self:start}
+.barra i{display:block;height:100%}
+.barra i.v{background:var(--azul)} .barra i.f{background:var(--verde)}
+.barra .n{font-family:var(--mono);text-align:right;font-size:.76rem}
+.barra.fora{opacity:.4}
+.legenda-cores{display:flex;gap:1.2rem;font-size:.76rem;color:var(--txt-mut);margin-top:.7rem}
+.legenda-cores b{display:inline-block;width:.7rem;height:.7rem;border-radius:2px;
+  margin-right:.35rem;vertical-align:middle}
+.corte{border-top:1px dashed var(--coral);position:relative;margin:.5rem 0 .9rem}
+.corte span{position:absolute;top:-.62rem;left:0;background:var(--bg);padding:0 .4rem;
+  font-size:.7rem;color:var(--coral);font-family:var(--mono)}
+
+/* ---------- acréscimos deste mockup ---------- */
+.frm label{display:block;font-size:.78rem;color:var(--txt-mut);margin:.7rem 0 .25rem;font-weight:600}
+.frm input,.frm select,.frm textarea{width:100%;background:var(--bg-2);color:var(--txt);
+  border:1px solid var(--borda);border-radius:7px;padding:.5rem .6rem;font:inherit;font-size:.86rem}
+.frm .row2{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.frm input.dt{font-family:var(--mono)}
+@media (max-width:560px){.frm .row2{grid-template-columns:1fr}}
+.frm .novo{background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;
+  padding:.6rem 1.1rem;font-weight:600;cursor:pointer;margin-top:1rem;font-size:.88rem}
+.sug{border:1px solid var(--borda);border-top:0;border-radius:0 0 7px 7px;background:var(--bg-2);
+  overflow:hidden}
+.sug div{padding:.45rem .6rem;font-size:.82rem;color:var(--txt);border-top:1px solid var(--card-2)}
+.sug div:first-child{border-top:0}
+.sug div.on{background:var(--neon-fundo)}
+.sug .leg{color:#6a8a7a;font-size:.74rem}
+.sug .novo-cli{color:var(--verde)}
+.pill-cli{display:inline-flex;align-items:center;gap:.45rem;background:var(--neon-fundo);
+  border:1px solid var(--neon-borda);border-radius:999px;padding:.28rem .7rem;font-size:.82rem;
+  color:var(--txt)}
+.pill-cli b{font-weight:600}
+.pill-cli .x{color:var(--txt-mut);cursor:pointer;font-size:.9rem}
+.novo-tit{font-size:.74rem;color:var(--txt-mut);margin-top:.35rem}
+.novo-tit code{background:var(--card-2)}
+.derivado{color:var(--txt-mut);font-style:italic}
+.selo-tit{display:inline-block;font-size:.64rem;font-weight:700;letter-spacing:.03em;
+  border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar);
+  border-radius:4px;padding:.02rem .3rem;margin-left:.35rem;font-style:normal}
+.btn-ligar{background:transparent;border:1px solid var(--borda);color:var(--verde-claro);
+  border-radius:6px;padding:.18rem .5rem;font-size:.7rem;cursor:pointer;white-space:nowrap}
+.placar{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:1.1rem 0}
+.placar div{background:var(--bg-2);border:1px solid var(--borda);border-radius:9px;padding:.75rem}
+.placar span{display:block;font-size:.72rem;color:var(--txt-mut);margin-bottom:.2rem}
+.placar b{font-family:var(--mono);font-size:1.35rem}
+.placar b.bom{color:var(--verde)} .placar b.ruim{color:var(--coral)} .placar b.meia{color:var(--ambar)}
+.antes-depois{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:1rem}
+@media (max-width:860px){.antes-depois{grid-template-columns:1fr}}
+.ad{border:1px solid var(--borda);border-radius:10px;overflow:hidden;background:var(--card)}
+.ad>.t{padding:.45rem .8rem;font-size:.72rem;font-family:var(--mono);
+  border-bottom:1px solid var(--borda);letter-spacing:.04em}
+.ad.ruim>.t{background:var(--coral-fundo);color:var(--coral);border-bottom-color:var(--coral-borda)}
+.ad.bom>.t{background:var(--neon-fundo);color:var(--neon);border-bottom-color:var(--neon-borda)}
+.ad>.c{padding:.9rem}
+</style>
+</head>
+<body>
+<h1>O nome do cliente na Agenda</h1>
+<p class="lede">O relatório de Agenda mostra <b>"—"</b> na coluna Cliente em 51 dos 60
+compromissos da Prime. A causa não é o relatório: <b>o nome nunca foi guardado</b>. Este
+mockup mostra as duas telas que resolvem — a que impede o problema de crescer, e a que
+recupera o que já está gravado.</p>
+<p class="lede" style="font-size:.82rem">Números medidos na conta da Prime Eventos em
+31/08/2026. Os nomes de cliente foram trocados; os da equipe são os de verdade, porque a
+armadilha da seção 3 depende justamente deles.</p>
+
+<!-- ====================================================== 1 -->
+<section class="sec">
+  <div class="num">1 · a causa</div>
+  <h2>O formulário de novo compromisso não tem campo de cliente</h2>
+  <p class="lede">Ele tem título, data, hora, encerramento, "só segurar a data", descrição,
+  local, tipo (Interno/Festa/Fornecedor), participantes e avisos. Não tem onde dizer
+  <b>de quem</b> é a festa. Então o nome vai parar dentro do texto do título — que é o
+  único lugar onde cabe — e ali ele é texto, não dado.</p>
+
+  <div class="placar">
+    <div><span>compromissos</span><b>60</b></div>
+    <div><span>com nome hoje</span><b class="ruim">9</b></div>
+    <div><span>vieram de lead</span><b>7</b></div>
+    <div><span>vieram de orçamento</span><b>2</b></div>
+    <div><span>sem vínculo nenhum</span><b class="ruim">51</b></div>
+  </div>
+
+  <table class="diag">
+    <tr><th>Espécie</th><th>Total</th><th>Com <code>prospeccao_id</code></th><th>Com orçamento</th><th>Sem nome</th></tr>
+    <tr><td><b>Visitas</b></td><td>17</td><td class="sim">7</td><td>0</td><td class="nao">10</td></tr>
+    <tr><td><b>Eventos</b> (locação, casamento, formatura…)</td><td>43</td><td class="nao">0</td><td>2</td><td class="nao">41</td></tr>
+  </table>
+
+  <div class="nota"><b>Repare no zero.</b> Nenhum dos 43 eventos tem lead ligado, e é
+  esperado: locação não nasce de lead do WhatsApp, nasce de alguém digitando
+  "Locação — Fulano" na agenda. As 7 visitas que têm nome são as que o Cockpit marcou
+  (<code>agendar_visita</code> grava o <code>prospeccao_id</code>). Fora desse caminho,
+  não existe caminho.</div>
+
+  <div class="nota alerta"><b>E faltam mais dois campos.</b> O mesmo formulário também não
+  pergunta o <b>tipo do evento</b> nem o número de <b>convidados</b> — as duas colunas que
+  a 179 criou justamente pra isso. É daí que vêm as <b>12 festas "sem tipo"</b> que o
+  filtro de Eventos já acusa. Quem preenche são a importação e a aprovação de orçamento,
+  não a tela.</div>
+</section>
+
+<!-- ====================================================== 2 -->
+<section class="sec">
+  <div class="num">2 · camada 1 — a origem</div>
+  <h2>Novo evento, agora com dono</h2>
+  <p class="lede">Um campo de cliente com busca, reusando exatamente o que já existe: o
+  mesmo <code>/painel/clientes/buscar</code> que o PDV usa, e o <code>salvar_cliente</code>
+  que acabou de ganhar o não-duplica. Mais o tipo e os convidados, que já têm coluna
+  esperando.</p>
+
+  <div class="telas">
+  <div class="quadro">
+    <div class="cap"><span>/painel/agenda · Novo evento</span><span>proposto</span></div>
+    <div class="miolo">
+      <form class="frm" onsubmit="return false">
+        <label>Cliente</label>
+        <input value="jonas" placeholder="Buscar por nome, telefone ou CPF…">
+        <div class="sug">
+          <div class="on">Jonas Barreto Castro Neto <span class="leg">· 86 9xxxx-1234 · CPF 0xx.xxx.xxx-xx</span></div>
+          <div>Jonas Peixoto Lima <span class="leg">· 86 9xxxx-5678</span></div>
+          <div class="novo-cli">＋ cadastrar "jonas" como cliente novo</div>
+        </div>
+
+        <label>O que é</label>
+        <select><option>Locação</option><option>Aniversário</option><option>Buffet</option>
+          <option>Casamento</option><option>Confraternização</option><option>Corporativo</option>
+          <option>Formatura</option><option>Infantil</option><option>Suítes</option></select>
+
+        <label>Evento</label>
+        <input value="Locação — Jonas Barreto Castro Neto">
+        <div class="novo-tit">Montado sozinho a partir do tipo e do cliente. Dá pra
+          reescrever — o vínculo não depende do texto.</div>
+
+        <div class="row2">
+          <div><label>Data da festa</label><input class="dt" value="19/12/2026"></div>
+          <div><label>Convidados</label><input value="180" inputmode="numeric"></div>
+        </div>
+        <div class="row2">
+          <div><label>Começa</label><input class="dt" value="19:00"></div>
+          <div><label>Encerra</label><input class="dt" value="23:00"></div>
+        </div>
+        <button class="novo">Marcar evento</button>
+      </form>
+    </div>
+  </div>
+  <div>
+    <h3>Por que assim</h3>
+    <ul class="lista">
+      <li><b>O cliente vem primeiro</b>, antes do título. É a pergunta que estava faltando,
+        e pôr no fim é convidar a pular.</li>
+      <li><b>O título se monta sozinho</b> — "Locação — Jonas Barreto Castro Neto" — no
+        mesmo formato que a equipe já digita hoje. Ninguém precisa mudar de hábito, e o
+        campo continua editável. O vínculo fica no <code>cliente_id</code>, não no texto.</li>
+      <li><b>Cadastrar dali</b> passa pelo <code>salvar_cliente</code>, então o cliente
+        novo já entra sem duplicar e já aparece na aba Clientes.</li>
+      <li><b>Tipo e convidados</b> preenchem as colunas que existem desde a 179 e hoje só
+        são preenchidas pela importação. Resolve as 12 "sem tipo" daqui pra frente.</li>
+      <li><b>Opcional.</b> Reunião interna e compromisso pessoal não têm cliente, e forçar
+        transformaria o campo em ruído. Sem cliente, segue como hoje.</li>
+    </ul>
+    <div class="nota"><b>Uma coluna nova só:</b> <code>eventos_agenda.cliente_id</code>.
+    O <code>prospeccao_id</code> continua como está — ele é o LEAD do WhatsApp, e a maioria
+    das locações nunca foi lead.</div>
+  </div>
+  </div>
+</section>
+
+<!-- ====================================================== 3 -->
+<section class="sec">
+  <div class="num">3 · camada 2 — os 51 que já estão no banco</div>
+  <h2>Ler o nome do título, dizendo que é palpite</h2>
+  <p class="lede">O Funil já faz isso há tempos (<code>replace(titulo, 'Visita — ', '')</code>).
+  Aqui a régua é a mesma ideia, medida contra os 51 títulos reais:</p>
+
+  <div class="placar">
+    <div><span>nome recuperado</span><b class="bom">36</b></div>
+    <div><span>barrado: é da equipe</span><b class="meia">6</b></div>
+    <div><span>sem nome no título</span><b>9</b></div>
+  </div>
+
+  <div class="nota alerta"><b>A armadilha, e é séria.</b> Metade das visitas se chama
+  <code>VISITA TÉCNICA - PEDRO</code> — e Pedro é <b>vendedor</b> (PEDRO YAN PRIME), não
+  cliente. Um parse ingênuo põe o nome do vendedor na coluna Cliente: isso é pior que
+  "—", porque é errado com confiança. A régua descarta quando <b>toda</b> palavra
+  extraída já é nome de alguém da equipe — e precisa olhar a equipe <b>inteira junta</b>,
+  senão <code>PEDRO/JACQUE</code> escapa (nenhum vendedor sozinho tem as duas palavras).</div>
+
+  <div class="nota"><b>E ela não pode ser cega ao contrário.</b> Dois clientes de verdade
+  encostam no nome do time e precisam continuar aparecendo:
+  <code>Locação — Pedro Ribamar de Sousa Santos Júnior</code> e
+  <code>Confraternização — Manoel Soares Vilanova Jr</code> (o dono chama-se MANOEL SOARES).
+  Basta uma palavra de fora pra ser cliente.</div>
+
+  <div class="quadro" style="margin-top:1.2rem">
+    <div class="cap"><span>/painel/relatorios?tipo=agenda&amp;especie=evento</span><span>proposto</span></div>
+    <div class="miolo">
+      <div class="rel-tbl-wrap"><table>
+        <tr><th>Data</th><th>Evento</th><th>Cliente</th><th>Tipo</th><th>Status</th><th></th></tr>
+        <tr><td>19/12/2026 19:00</td><td>Locação</td>
+            <td>Jonas Barreto Castro Neto</td>
+            <td><span class="rel-tag neutro">Locação</span></td>
+            <td><span class="rel-tag ok">Confirmado</span></td><td></td></tr>
+        <tr><td>05/12/2026 20:00</td><td>Casamento</td>
+            <td class="derivado">Eva da Silva Fontoura<span class="selo-tit">do título</span></td>
+            <td><span class="rel-tag neutro">Casamento</span></td>
+            <td><span class="rel-tag ok">Confirmado</span></td>
+            <td><button class="btn-ligar">ligar ao cadastro</button></td></tr>
+        <tr><td>11/12/2026 21:00</td><td>Formatura - Beatriz</td>
+            <td class="derivado">Beatriz<span class="selo-tit">do título</span></td>
+            <td><span class="rel-tag aviso">sem tipo</span></td>
+            <td><span class="rel-tag ok">Confirmado</span></td>
+            <td><button class="btn-ligar">ligar ao cadastro</button></td></tr>
+        <tr><td>22/12/2026 14:00</td><td>VISITA TÉCNICA - PEDRO</td>
+            <td class="mut">—</td>
+            <td><span class="rel-tag aviso">sem tipo</span></td>
+            <td><span class="rel-tag ok">Confirmado</span></td>
+            <td><button class="btn-ligar">ligar ao cadastro</button></td></tr>
+      </table></div>
+      <p class="legenda-lat">A linha 1 tem vínculo de verdade: nome limpo, sem botão. As
+      linhas 2 e 3 são <b>palpite lido do título</b> — apagado, em itálico, com o selo. A
+      linha 4 é a visita cujo título só tem o nome do vendedor: fica <b>"—"</b> de
+      propósito. Todas as três oferecem <b>ligar ao cadastro</b>.</p>
+    </div>
+  </div>
+
+  <div class="antes-depois">
+    <div class="ad ruim"><div class="t">HOJE</div><div class="c">
+      <div style="font-family:var(--mono);font-size:1.6rem;color:var(--coral)">9 / 60</div>
+      <div style="font-size:.84rem;color:var(--txt-mut)">compromissos com nome</div></div></div>
+    <div class="ad bom"><div class="t">COM AS DUAS CAMADAS</div><div class="c">
+      <div style="font-family:var(--mono);font-size:1.6rem;color:var(--verde)">45 / 60</div>
+      <div style="font-size:.84rem;color:var(--txt-mut)">e caminhando pros 60 conforme a
+      equipe usar a tela nova</div></div></div>
+  </div>
+</section>
+
+<!-- ====================================================== 4 -->
+<section class="sec">
+  <div class="num">4 · o botão "ligar ao cadastro"</div>
+  <h2>O palpite vira dado com um clique</h2>
+  <p class="lede">É a peça que faz a camada 2 se esgotar sozinha em vez de virar
+  permanente. Abre a mesma busca de clientes, já preenchida com o nome lido do título.</p>
+  <div class="telas">
+  <div class="quadro">
+    <div class="cap"><span>ligar ao cadastro · Casamento — Eva da Silva Fontoura</span><span>proposto</span></div>
+    <div class="miolo">
+      <form class="frm" onsubmit="return false">
+        <label>Quem é o cliente deste evento?</label>
+        <input value="Eva da Silva Fontoura">
+        <div class="sug">
+          <div class="on">Eva da Silva Fontoura <span class="leg">· já cadastrada · 86 9xxxx-4321</span></div>
+          <div class="novo-cli">＋ cadastrar "Eva da Silva Fontoura" como cliente novo</div>
+        </div>
+        <div style="display:flex;gap:.6rem;margin-top:1rem;align-items:center">
+          <button class="novo" style="margin:0">Ligar</button>
+          <span class="mut" style="font-size:.8rem">ou <a href="#">este evento não tem cliente</a></span>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div>
+    <h3>O que ele faz</h3>
+    <ul class="lista">
+      <li>Grava <code>cliente_id</code> no compromisso. O selo <span class="selo-tit"
+        style="margin:0">do título</span> some e o nome passa a ser dado, não leitura.</li>
+      <li>Se o cliente não existe, cadastra pelo <code>salvar_cliente</code> — mesma porta
+        da aba Clientes, mesmo não-duplica.</li>
+      <li><b>"Este evento não tem cliente"</b> marca a linha como resolvida sem inventar
+        vínculo: é o caso da reunião interna e da visita batizada com o nome do vendedor.
+        Sem isso, essas linhas cobrariam atenção pra sempre.</li>
+      <li>Nada é apagado: ligar só acrescenta o vínculo, e o título fica como está.</li>
+    </ul>
+  </div>
+  </div>
+</section>
+
+<!-- ====================================================== 5 -->
+<section class="sec">
+  <div class="num">5 · tamanho da obra</div>
+  <h2>Uma coluna, e o resto é reuso</h2>
+  <table class="diag">
+    <tr><th>Onde</th><th>O quê</th></tr>
+    <tr><td>migração</td><td><code>eventos_agenda.cliente_id bigint</code> — aditiva, sem backfill</td></tr>
+    <tr><td><code>painel_agenda.py</code></td><td>campo de cliente (busca já existe), tipo do evento, convidados, e o título sugerido</td></tr>
+    <tr><td><code>finance/agenda.py</code></td><td><code>marcar_evento</code> aceita e grava o <code>cliente_id</code></td></tr>
+    <tr><td><code>painel_relatorios.py</code></td><td>Cliente passa a ler <code>cliente_id</code> primeiro; a régua do título entra como último recurso, marcada</td></tr>
+    <tr><td>rota nova</td><td><code>POST /painel/agenda/{id}/cliente</code> — o botão "ligar"</td></tr>
+    <tr><td>testes</td><td>a régua do título caso a caso (os 51 reais), o descarte de nome de vendedor, e o cliente que encosta no nome do time e precisa passar</td></tr>
+  </table>
+  <div class="nota"><b>Ordem sugerida:</b> camada 1 primeiro. Ela para o sangramento — todo
+  compromisso novo nasce com dono. A camada 2 é o curativo do que já está gravado, e o
+  botão "ligar" faz ela se esgotar com o uso, em vez de virar moradia permanente.</div>
+</section>
+
+<div class="rodape">Mockup para aprovação · 31/08/2026 · dados medidos na conta 34 (Prime
+Eventos) · nada foi alterado no sistema.</div>
+</body>
+</html>

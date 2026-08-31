@@ -13,6 +13,8 @@ Tudo escopado por conta_id (multi-tenant sagrado).
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 
 _log = logging.getLogger(__name__)
@@ -164,6 +166,100 @@ PRE_RESERVA_DIAS = 3
 _ATIVO_OU_PRE = ("ativo", PRE_RESERVADO)
 
 
+# ---------------------------------------------------------------------------
+# O nome do cliente escondido dentro do título
+# ---------------------------------------------------------------------------
+#
+# Até a migração 192 não havia campo de cliente no formulário, e o nome ia parar
+# no texto do título. Medido na Prime em 31/08/2026: 51 dos 60 compromissos sem
+# vínculo nenhum, e a esmagadora maioria com o nome ali, em "Locação — Fulano".
+#
+# Isto aqui LÊ esse nome pra mostrar; não grava nada. É palpite, e a tela mostra
+# como palpite — o vínculo só nasce quando o dono confirma. Contra os 51 títulos
+# reais: 36 nomes recuperados, 6 descartados por serem da equipe, 9 sem nome.
+
+#: Onde o título separa o tipo do nome. O travessão é o que o sistema usa quando
+#: monta sozinho ("Locação — Fulano"); o hífen cercado de espaço é como a equipe
+#: digita na mão ("Formatura - Beatriz"). Hífen COLADO não conta: "Ana-Maria" é
+#: um nome só.
+_SEPARADORES = ("—", " - ", " – ")
+
+#: Piso pra chamar de nome. Dois caracteres é sobra de digitação, não gente.
+_MIN_NOME_TITULO = 3
+
+
+def _sem_acento(s: str) -> str:
+    t = unicodedata.normalize("NFKD", (s or "").strip())
+    return "".join(c for c in t if not unicodedata.combining(c)).lower()
+
+
+def _palavras(s: str) -> set:
+    """Palavras de um nome, partindo por QUALQUER não-letra.
+
+    A barra importa: "PEDRO/JACQUE" são dois nomes, não um — e partindo só por
+    espaço a dupla de vendedores passava batida pela checagem de equipe."""
+    return set(re.findall(r"[a-zà-ÿ]+", _sem_acento(s)))
+
+
+#: Ligações de nome português. Não identificam ninguém, então não contam como
+#: "palavra de fora" na checagem de equipe — sem isto, "Pedro e Jacqueline"
+#: escapava por causa do "e", e o nome de dois vendedores ia pra coluna Cliente.
+_LIGACOES = frozenset(("e", "de", "da", "do", "das", "dos"))
+
+
+def _e_da_equipe(nome: str, equipe) -> bool:
+    """O nome extraído não acrescenta NENHUMA palavra que já não seja de alguém
+    da equipe? Então é o vendedor, não o cliente.
+
+    Por que a união de todos, e não membro a membro: metade das visitas da Prime
+    se chama "VISITA TÉCNICA - PEDRO", e há "- PEDRO/JACQUE" — dois vendedores
+    diferentes, que nenhum membro sozinho explica. Testando um de cada vez, esse
+    par escapava e o nome do VENDEDOR ia parar na coluna Cliente. Isso é pior que
+    deixar em branco, porque erra com confiança.
+
+    E não pode ser cega ao contrário: basta UMA palavra de fora pra ser cliente
+    de verdade. Na Prime isso preserva "Pedro Ribamar de Sousa Santos Júnior" e
+    "Manoel Soares Vilanova Jr" — o dono chama-se MANOEL SOARES. Ligações ("e",
+    "de", "da"...) não valem como palavra de fora: elas não identificam ninguém."""
+    palavras = _palavras(nome) - _LIGACOES
+    if not palavras:
+        return False
+    da_equipe = set()
+    for m in (equipe or ()):
+        da_equipe |= _palavras(m)
+    if not da_equipe:
+        return False
+    return all(any(x == y or (len(x) >= 4 and y.startswith(x)) for y in da_equipe)
+               for x in palavras)
+
+
+def nome_no_titulo(titulo: str, tipo_evento: str | None = None,
+                   equipe=()) -> str | None:
+    """O nome do cliente lido do título, ou None quando não dá pra afirmar.
+
+    `equipe` são os nomes dos membros da conta — sem eles a leitura devolveria o
+    nome do vendedor nas visitas. Passe sempre; a lista vazia desliga a proteção.
+    """
+    t = (titulo or "").strip()
+    if not t:
+        return None
+    cauda = None
+    for sep in _SEPARADORES:
+        if sep in t:
+            cauda = t.split(sep, 1)[1].strip()
+            break
+    if cauda is None and tipo_evento:
+        # "Locação Fulano", sem separador nenhum, mas com o tipo na frente
+        tp = _sem_acento(tipo_evento)
+        if tp and _sem_acento(t).startswith(tp + " "):
+            cauda = t[len(tipo_evento):].strip()
+    if not cauda or len(cauda) < _MIN_NOME_TITULO:
+        return None
+    if _e_da_equipe(cauda, equipe):
+        return None
+    return cauda
+
+
 def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
                  membro_id: int | None = None, fim: datetime | None = None,
                  local: str | None = None, descricao: str | None = None,
@@ -175,7 +271,8 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
                  segurar: bool = False,
                  tipo_evento: str | None = None,
                  convidados: int | None = None,
-                 hora_sugerida: bool = False) -> dict:
+                 hora_sugerida: bool = False,
+                 cliente_id: int | None = None) -> dict:
     """prospeccao_id liga o evento a um lead (ex.: retorno de contato) — some da
     Agenda pro cliente, mas fica clicável a partir da ficha do lead (migração 136).
 
@@ -195,7 +292,13 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
     ver migração 163.
 
     `tipo_evento`, `convidados` e `hora_sugerida` são do nicho eventos (migração
-    179) — que festa é, quanta gente, e se a hora foi chutada pelo sistema."""
+    179) — que festa é, quanta gente, e se a hora foi chutada pelo sistema.
+
+    `cliente_id` é DE QUEM é o compromisso (migração 192): a relação em `clientes`,
+    não o lead. Até 31/08/2026 não havia onde guardar isso, e o nome do cliente
+    vivia dentro do texto do título — onde ele é texto, não dado. `prospeccao_id`
+    continua existindo e é outra coisa: quem chegou pelo WhatsApp e ainda está no
+    funil. Um compromisso pode ter os dois, um, ou nenhum."""
     tipo = tipo if tipo in TIPOS else "pessoal"
     # prospeccao_id só entra no INSERT quando informado — mantém compatível com
     # bancos/testes que ainda não rodaram a migração 136 (que criou a coluna).
@@ -223,6 +326,14 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
     if hora_sugerida:
         colunas += ", hora_sugerida"
         valores.append(True)
+    # condicional pelo mesmo motivo de `prospeccao_id` logo acima: banco que ainda
+    # não rodou a 192 continua marcando compromisso. E `cliente_id` de propósito
+    # NÃO entra em `_COLS`: acrescentar coluna ao SELECT é dependência dura da
+    # migração, e dez arquivos de teste montam `eventos_agenda` na mão. Quem
+    # precisa ler o vínculo (hoje só o relatório) faz o join na própria consulta.
+    if cliente_id:
+        colunas += ", cliente_id"
+        valores.append(int(cliente_id))
     with pool.connection() as c:
         row = c.execute(
             f"""insert into eventos_agenda ({colunas})
@@ -232,6 +343,35 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
         ).fetchone()
         c.commit()
     return _fmt_evento(row)
+
+
+def ligar_cliente(pool, conta_id: int, evento_id: int,
+                  cliente_id: int | None) -> bool:
+    """Liga (ou desliga) o compromisso a um cadastro. Devolve True se mudou algo.
+
+    Ligar SEMPRE limpa o `sem_cliente`: dizer quem é o dono responde a pergunta
+    que o "não tem cliente" tinha silenciado, e deixar as duas marcas de pé faria
+    a linha mentir dos dois jeitos ao mesmo tempo."""
+    with pool.connection() as c:
+        cur = c.execute(
+            "update eventos_agenda set cliente_id=%s, sem_cliente=false "
+            "where id=%s and conta_id=%s",
+            (int(cliente_id) if cliente_id else None, evento_id, conta_id))
+        c.commit()
+        return cur.rowcount > 0
+
+
+def marcar_sem_cliente(pool, conta_id: int, evento_id: int,
+                       sem: bool = True) -> bool:
+    """"Este compromisso não tem cliente" (migração 193). Não apaga vínculo que
+    exista — só declara que não há um a procurar, e é isso que tira a linha da
+    lista de pendências sem inventar dado."""
+    with pool.connection() as c:
+        cur = c.execute(
+            "update eventos_agenda set sem_cliente=%s where id=%s and conta_id=%s",
+            (bool(sem), evento_id, conta_id))
+        c.commit()
+        return cur.rowcount > 0
 
 
 def evento_por_id(pool, conta_id: int, evento_id: int) -> dict | None:

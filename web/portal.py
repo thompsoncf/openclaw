@@ -6233,6 +6233,14 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   .rel-tag.aviso{background:#332a12;color:#f0dca6;border:1px solid #6e5a22}
   .rel-tag.erro{background:#3a1d1d;color:#f0b8b8;border:1px solid #6e2b2b}
   .rel-tag.neutro{background:#20242a;color:#c7ccd6;border:1px solid #3a4048}
+  /* nome lido do título: apagado e em itálico, pra ler como palpite mesmo de
+     longe. O selo diz de onde veio; o link diz que dá pra resolver. */
+  .rel-cli{text-decoration:none;color:inherit;border-bottom:1px dotted var(--borda)}
+  .rel-cli:hover{border-bottom-color:var(--verde)}
+  .rel-deriv{color:var(--txt-mut);font-style:italic}
+  .rel-selo{display:inline-block;margin-left:.35rem;font-size:.62rem;font-weight:700;
+      letter-spacing:.03em;font-style:normal;border-radius:4px;padding:.02rem .3rem;
+      border:1px solid #5a4a2a;background:rgba(201,162,39,.10);color:#c9a227}
   .rel-tag.info{background:#0f2836;color:#8fd0ea;border:1px solid #1d5570}
   .rel-act{width:1%;white-space:nowrap;text-align:center}
   .rel-print{display:inline-flex;align-items:center;justify-content:center;width:1.8rem;height:1.8rem;
@@ -6414,7 +6422,15 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     {% for row in dados.linhas %}
     <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% elif col.flex %} class="rel-flex" title="{{ row[col.chave] }}"{% endif %}{% if col.chave == dados.col_total %} data-c="{{ row[col.chave] }}"{% endif %}>{% if col.tag %}<span
       class="rel-tag {{ row[col.chave ~ '_cor'] }}">{{ row[col.chave] }}</span>{% elif col.brl %}{{ row[col.chave]|brl
-      }}{% else %}{{ row[col.chave] }}{% endif %}</td>{% endfor %}{% if dados.acao %}<td class="rel-act">{% if row.acao_href
+      }}{% elif col.cli %}{#- a célula Cliente da Agenda. Nome vindo do VÍNCULO sai
+      limpo; nome lido do TÍTULO sai apagado e com selo, porque é palpite e a tela
+      não pode fingir que é dado. Enquanto a pergunta estiver aberta a célula é um
+      link pra respondê-la. Sem `|safe` em lugar nenhum: quem monta é o template,
+      a escapagem continua valendo. -#}{% if row.cliente_link %}<a class="rel-cli"
+      href="{{ row.cliente_link }}" title="Dizer de quem é este compromisso">{% endif
+      %}<span{% if row.cliente_do_titulo %} class="rel-deriv"{% endif %}>{{ row[col.chave] }}</span>{%
+      if row.cliente_do_titulo %}<span class="rel-selo" title="Lido do título do compromisso — ainda não é um cadastro ligado">do título</span>{%
+      endif %}{% if row.cliente_link %}</a>{% endif %}{% else %}{{ row[col.chave] }}{% endif %}</td>{% endfor %}{% if dados.acao %}<td class="rel-act">{% if row.acao_href
       %}<a class="rel-print" href="{{ row.acao_href }}" target="_blank" rel="noopener" title="{{ dados.acao_rotulo }}">🖨️</a>{% endif %}</td>{% endif %}</tr>
     {% else %}
     <tr><td colspan="{{ dados.colunas|length + (1 if dados.acao else 0) }}" class="mut" style="text-align:center;padding:1.4rem 0">Nenhum registro encontrado{% if not dados.sem_periodo %} em {{ periodo_rotulo|lower }}{% endif %}.</td></tr>
@@ -6506,6 +6522,91 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
+# A tela de dizer DE QUEM é um compromisso. Página própria, e não um modal na
+# tabela: a decisão merece a linha inteira à vista (o título, a data, o palpite),
+# e um modal dentro de uma tabela que rola no celular é o lugar errado pra
+# escolher a ficha de um cliente.
+_AGENDA_CLIENTE = """{% extends "base" %}{% block conteudo %}
+<style>
+  .ac-cx{max-width:560px}
+  .ac-ev{background:var(--card-2);border:1px solid var(--borda);border-radius:10px;
+      padding:.7rem .85rem;margin:.9rem 0}
+  .ac-ev b{color:var(--txt)}
+  .ac-ev .q{display:block;font-size:.76rem;color:var(--txt-mut);margin-top:.15rem}
+  .ac-sug{border:1px solid var(--borda);border-top:0;border-radius:0 0 8px 8px;
+      background:var(--card-2);overflow:hidden;margin-top:-1px}
+  .ac-sug div{padding:.45rem .6rem;font-size:.85rem;color:var(--txt);cursor:pointer;
+      border-top:1px solid var(--borda)}
+  .ac-sug div:first-child{border-top:0}
+  .ac-sug div:hover{background:var(--card)}
+  .ac-sug .leg{color:#6a8a7a;font-size:.75rem}
+  .ac-sug .novo{color:var(--verde-claro)}
+  .ac-acoes{display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:1.1rem}
+  .ac-ligar{background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;
+      padding:.55rem 1.15rem;font-weight:600;cursor:pointer;width:auto;font:inherit;
+      font-weight:600;font-size:.88rem}
+  .ac-nao{background:none;border:0;color:var(--txt-mut);font-size:.82rem;cursor:pointer;
+      text-decoration:underline;width:auto;padding:0;font-family:inherit}
+</style>
+<div class="card larga ac-cx">
+  <a href="/painel/relatorios?tipo=agenda" style="color:var(--verde-claro);text-decoration:none;font-size:.85rem">← Relatório de Agenda</a>
+  <h2 style="margin:.4rem 0">De quem é este compromisso?</h2>
+  {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+
+  <div class="ac-ev"><b>{{ titulo_ev }}</b><span class="q">{{ quando }}</span></div>
+
+  <form method="post" action="/painel/relatorios/agenda/{{ evento_id }}/cliente">
+    <label style="font-size:.78rem;color:var(--txt-mut);font-weight:600">Cliente</label>
+    {#- já vem preenchido com o nome lido do título: quase sempre é só conferir. -#}
+    <input name="cliente_nome" id="acNome" value="{{ sugerido }}" autocomplete="off"
+           placeholder="Buscar por nome, telefone ou CPF…"
+           oninput="acBusca(this.value)" style="width:100%">
+    <input type="hidden" name="cliente_id" id="acId">
+    <div id="acSug" class="ac-sug" style="display:none"></div>
+    <div class="ac-acoes">
+      <button class="ac-ligar">Ligar</button>
+      {#- A saída pros que não têm dono nenhum: reunião interna, e a visita
+          batizada com o nome do vendedor. Sem ela essas linhas cobrariam atenção
+          pra sempre, e lista que nunca esvazia é lista que ninguém olha. -#}
+      <span class="mut" style="font-size:.82rem">ou
+        <button class="ac-nao" name="sem_cliente" value="1">este compromisso não tem cliente</button></span>
+    </div>
+  </form>
+</div>
+<script>
+var AC_T=null, AC_RES=[];
+function acEsc(x){ return String(x==null?'':x).replace(/[&<>"']/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function acBusca(q){
+  document.getElementById('acId').value='';
+  q=(q||'').trim();
+  if(AC_T) clearTimeout(AC_T);
+  var sug=document.getElementById('acSug');
+  if(q.length<2){ sug.style.display='none'; return; }
+  AC_T=setTimeout(function(){
+    fetch('/painel/clientes/buscar?q='+encodeURIComponent(q))
+      .then(function(r){return r.json();}).then(function(d){
+        AC_RES=d.clientes||[]; var h='';
+        AC_RES.forEach(function(c,i){
+          var det=(c.telefone?' · '+c.telefone:'')+(c.documento?' · '+c.documento:'');
+          h+='<div onclick="acPick('+i+')">'+acEsc(c.nome)+'<span class="leg">'+acEsc(det)+'</span></div>';
+        });
+        h+='<div class="novo" onclick="document.getElementById(\'acSug\').style.display=\'none\'">＋ cadastrar “'+acEsc(q)+'” como cliente novo</div>';
+        sug.innerHTML=h; sug.style.display='block';
+      }).catch(function(){});
+  },250);
+}
+function acPick(i){
+  var c=AC_RES[i]; if(!c) return;
+  document.getElementById('acNome').value=c.nome;
+  document.getElementById('acId').value=c.id;
+  document.getElementById('acSug').style.display='none';
+}
+</script>
+{% endblock %}"""
+
+
+
 _RELATORIO_PDF = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ dados.label }} · {{ periodo_rotulo }} - Zaq</title>
@@ -6570,7 +6671,7 @@ _RELATORIO_PDF = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8
 
 _env = Environment(loader=DictLoader({
     "holerite": _HOLERITE,
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "dash_bloco": _DASH_BLOCO, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "pagar_aviso": _PAGAR_AVISO, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "clientes_dup": _CLIENTES_DUP, "clientes_dup_revisar": _CLIENTES_DUP_REVISAR, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE, "relatorios": _RELATORIOS, "relatorio_pdf": _RELATORIO_PDF, "novidades.html": _NOVIDADES,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "dash_bloco": _DASH_BLOCO, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "pagar_aviso": _PAGAR_AVISO, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "agenda_cliente": _AGENDA_CLIENTE, "clientes": _CLIENTES, "clientes_dup": _CLIENTES_DUP, "clientes_dup_revisar": _CLIENTES_DUP_REVISAR, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE, "relatorios": _RELATORIOS, "relatorio_pdf": _RELATORIO_PDF, "novidades.html": _NOVIDADES,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl

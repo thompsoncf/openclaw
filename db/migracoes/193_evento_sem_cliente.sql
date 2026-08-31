@@ -1,0 +1,22 @@
+-- 193_evento_sem_cliente.sql
+-- "Este compromisso não tem cliente" — dito de propósito, não por omissão.
+--
+-- POR QUE. A 192 deu ao compromisso um `cliente_id`, e o relatório passou a ler
+-- o nome do TÍTULO quando o vínculo não existe, marcando na tela que aquilo é
+-- palpite e oferecendo "ligar ao cadastro". Isso resolve os 51 compromissos
+-- antigos da Prime — menos os que legitimamente não têm dono nenhum.
+--
+-- São dois grupos, e nos dois o "ligar" nunca vai ser clicado:
+--   * reunião interna e compromisso pessoal ("REUNIÃO COM ENGENHEIRA");
+--   * visita batizada com o nome do VENDEDOR ("VISITA TÉCNICA - PEDRO"), onde a
+--     régua do título descarta o nome de propósito, porque Pedro é do time.
+--
+-- Sem esta coluna essas linhas ficariam para sempre pedindo uma atenção que não
+-- têm como receber — e uma lista de pendências que nunca esvazia é uma lista que
+-- ninguém mais olha. Marcar cala a linha SEM inventar vínculo, que é a diferença
+-- entre "não tem" e "ainda não sei".
+--
+-- Nasce `false` em todo mundo: nenhuma linha existente muda de comportamento.
+-- Aditiva e idempotente.
+alter table public.eventos_agenda
+    add column if not exists sem_cliente boolean not null default false;

@@ -21,6 +21,8 @@ from web import tema as _tema
 from contas import equipe as _equipe
 from finance import agenda as ag
 from finance import convites as cv
+from finance import empresa as _emp
+from finance import servicos_catalogo as _cat
 from web.portal import _env, _render, conta_logada
 
 router = APIRouter()
@@ -408,6 +410,43 @@ def _centavos(txt: str) -> int | None:
     return int(round(v * 100)) or None
 
 
+def _txt(v) -> str:
+    """Texto de campo de formulário, tolerante a quem chama o handler DIRETO.
+
+    Quando `agenda_novo` é chamado como função — vários testes fazem isso —, os
+    parâmetros não informados chegam como o sentinela `Form(...)` do FastAPI, e
+    não como string. Os campos antigos escapavam por sorte (`segurar == "1"`
+    apenas dá False contra um objeto), mas `.strip()` num deles estoura. Em vez
+    de exigir que todo chamador passe todos os campos opcionais, o handler
+    aceita a ausência — que é o que "opcional" quer dizer."""
+    return v if isinstance(v, str) else ""
+
+
+def _tem_clientes(pool, conta_id: int) -> bool:
+    """A conta tem base de clientes? — é o que decide se o campo de cliente
+    aparece no formulário.
+
+    Dentro de try porque a AGENDA NÃO PODE DEPENDER DISSO PRA ABRIR. `acesso_pj`
+    consulta `planos` e `conta_modulos`, tabelas que a agenda nunca precisou; ao
+    ligar essa checagem direto no contexto, trinta testes de tela caíram com
+    "relation planos does not exist" — e o que eles diziam é o que aconteceria com
+    qualquer instalação onde essas tabelas faltem: o calendário inteiro fora do ar
+    por causa de um campo opcional. Sem resposta, o campo simplesmente não
+    aparece, e a agenda abre igual a ontem."""
+    try:
+        return bool(_emp.acesso_pj(pool, conta_id))
+    except Exception:  # noqa: BLE001 — ver docstring
+        return False
+
+
+def _inteiro(txt: str) -> int | None:
+    """"180", "180 pessoas", " " -> 180, 180, None. Quantidade de convidados
+    digitada como o dono fala; qualquer coisa sem número vira None em vez de zero,
+    porque zero convidado é uma afirmação e "não sei" não é."""
+    d = "".join(ch for ch in (txt or "") if ch.isdigit())
+    return int(d) if d else None
+
+
 def _brl(centavos) -> str:
     """R$ 1.810,00 — vazio quando não há valor. O sinal esperado aparece na caixa
     do dia e no card das datas seguradas; sem valor, a linha simplesmente não fala
@@ -643,6 +682,11 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    cfg=cfg, feed_url=feed_url, share=share, seguradas=seguradas,
                    confirmadas=confirmadas, pend=pend,
                    vende_data=vende_data, pessoas=pessoas, p_id=p_id,
+                   # A lista canônica das festas mora em finance.servicos_catalogo
+                   # (a 179 fez questão de NÃO virar check no banco pra não haver
+                   # duas listas divergindo).
+                   tipos_evento=_cat.TIPOS_EVENTO,
+                   tem_clientes=_tem_clientes(pool, conta_id),
                    # atalho do campo Local: o endereço da própria empresa, num toque.
                    # `pode_cadastrar` decide quem vê o convite pra preencher quando
                    # ainda não há endereço — só quem mexe nos dados da empresa. Pra
@@ -738,6 +782,49 @@ def agenda_historico_reenviar(request: Request, log_id: int = Form(...)):
 
 
 # ================================================================ NOVO
+def _resolver_cliente(pool, conta_id: int, cliente_id: str, cliente_nome: str):
+    """De quem é o compromisso. Devolve (cliente_id ou None, nome ou None).
+
+    Dois caminhos, e é por isso que a tela manda os dois campos: o id vem quando o
+    dono escolheu alguém da lista; o nome vem quando ele digitou e não escolheu —
+    aí o cliente é cadastrado na hora. O cadastro passa por `salvar_cliente`, o
+    mesmo da aba Clientes, então ele já entra sem duplicar: digitar de novo um nome
+    que já existe reusa a ficha em vez de cunhar outra (é o conserto de 29/08).
+
+    Nunca levanta: marcar o compromisso é o que importa, e um tropeço no cadastro
+    não pode impedir a data de entrar na agenda. Sem cliente, segue como sempre foi.
+    """
+    from finance import clientes as cli
+    cid = _txt(cliente_id).strip()
+    if cid.isdigit():
+        c = cli.obter_cliente(pool, conta_id, int(cid))
+        if c:                                   # confere que é MESMO desta conta
+            return c["id"], c["nome"]
+    nome = _txt(cliente_nome).strip()
+    if not nome:
+        return None, None
+    try:
+        # ANTES de cadastrar, procura pelo nome — e são TRÊS respostas possíveis,
+        # não duas. Sem isto a tela viraria uma fábrica de duplicados:
+        # `salvar_cliente` só reaproveita ficha por documento ou telefone, e aqui
+        # só chega o nome, então "Zenilda Rosa Silva" digitada duas vezes cunharia
+        # duas fichas — exatamente o defeito que a aba Clientes fechou em 29/08.
+        iguais = [c for c in cli.listar_clientes(pool, conta_id, busca=nome, limite=5)
+                  if (c["nome"] or "").strip().casefold() == nome.casefold()]
+        if len(iguais) == 1:
+            return iguais[0]["id"], iguais[0]["nome"]     # já existe: liga nela
+        if len(iguais) > 1:
+            # DOIS homônimos. Não se chuta qual: o compromisso entra sem vínculo,
+            # que é honesto, e quem desempata é o dono escolhendo na lista da
+            # busca. Cadastrar um terceiro aqui seria o pior dos três caminhos —
+            # e era o que acontecia antes deste ramo existir.
+            return None, nome
+        r = cli.salvar_cliente(pool, conta_id, nome)      # não existe: cadastra
+        return r["id"], r["nome"]
+    except Exception:      # noqa: BLE001 — cadastro é acessório; a data não é
+        return None, nome
+
+
 @router.post("/painel/agenda/novo")
 def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
                 hora: str = Form(""), hora_fim: str = Form(""),
@@ -747,6 +834,8 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
                 convidado_contato: list[str] = Form(default=[]),
                 segurar: str = Form(""), segurar_ate: str = Form(""),
                 sinal_esperado: str = Form(""),
+                cliente_id: str = Form(""), cliente_nome: str = Form(""),
+                tipo_evento: str = Form(""), convidados: str = Form(""),
                 m: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
@@ -788,13 +877,24 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
         else:
             ate = ate.replace(hour=23, minute=59)   # a data digitada vale até o fim do dia
         sinal_cent = _centavos(sinal_esperado)
+    # DE QUEM é (migração 192). O cliente é opcional de propósito: reunião interna
+    # e compromisso pessoal não têm dono, e exigir um transformaria o campo em ruído.
+    cli_id, _cli_nome = _resolver_cliente(pool, ctx["conta_id"], cliente_id, cliente_nome)
+    # Tipo da festa e quantidade de gente só valem no nicho que vende data — é a
+    # mesma regra da migração 179, e o gate está aqui no SERVIDOR porque o form vem
+    # do navegador, e navegador não é fonte confiável.
+    tp_ev, n_conv = None, None
+    if _vendas().vende_data(pool, ctx["conta_id"]):
+        tp_ev = _txt(tipo_evento).strip() or None
+        n_conv = _inteiro(_txt(convidados))
     ev = ag.criar_evento(pool=pool, conta_id=ctx["conta_id"], titulo=titulo,
                          inicio=inicio, fim=fim, membro_id=ctx["membro_id"],
                          local=local,
                          descricao=(descricao or "").strip() or None,
                          tipo=tipo if tipo in ag.TIPOS else "pessoal",
                          link_online=(link_online or "").strip() or None if ag.eh_online(local) else None,
-                         pre_reserva_ate=ate, sinal_centavos=sinal_cent)
+                         pre_reserva_ate=ate, sinal_centavos=sinal_cent,
+                         cliente_id=cli_id, tipo_evento=tp_ev, convidados=n_conv)
     destino = f"/painel/agenda?m={inicio.year:04d}-{inicio.month:02d}"
     if ate is not None:
         request.session["agenda_aviso"] = (
@@ -1413,6 +1513,19 @@ _CSS_CRU = """
 .frm input,.frm select,.frm textarea{width:100%;background:var(--card-2);border:1px solid var(--borda);border-radius:9px;color:var(--txt);padding:.55rem .6rem;font-size:.92rem;font-family:inherit}
 .frm textarea{resize:vertical;min-height:58px;line-height:1.4}
 .frm input:focus,.frm select:focus,.frm textarea:focus{outline:0;border-color:var(--verde)}
+/* busca de cliente: mesma cara da sugestão do PDV, que é onde a equipe já viu isso */
+.cli-sug{border:1px solid var(--borda);border-top:0;border-radius:0 0 9px 9px;
+  background:var(--card-2);overflow:hidden;margin-top:-1px}
+.cli-sug div{padding:.45rem .6rem;font-size:.85rem;color:var(--txt);cursor:pointer;
+  border-top:1px solid var(--borda)}
+.cli-sug div:first-child{border-top:0}
+.cli-sug div:hover,.cli-sug div:focus{background:var(--card)}
+.cli-sug .leg{color:#6a8a7a;font-size:.75rem}
+.cli-sug .novo{color:var(--verde-claro)}
+.cli-dica{font-size:.72rem;color:var(--txt-mut);margin-top:4px}
+.cli-esc{display:flex;align-items:center;gap:.4rem;background:var(--card-2);
+  border:1px solid var(--verde);border-radius:9px;padding:.45rem .6rem;font-size:.88rem}
+.cli-esc .x{margin-left:auto;color:var(--txt-mut);cursor:pointer;padding:0 .2rem}
 /* busca de endereço (campo Local) */
 .addr-wrap{position:relative}
 .addr-input-row{position:relative}
@@ -2011,6 +2124,61 @@ document.addEventListener('keydown', function(ev){ if(ev.key==='Escape') fecharD
 function agNovo(v){var n=document.getElementById('novo');if(n){n.style.display='';n.scrollIntoView({behavior:'smooth',block:'center'});var i=n.querySelector('input[name=titulo]');if(i)setTimeout(function(){i.focus()},300);}return false;}
 function agCopiar(){var i=document.getElementById('feedUrl');if(!i)return;i.select();try{document.execCommand('copy');}catch(e){}if(navigator.clipboard)navigator.clipboard.writeText(i.value);var b=event.target;var t=b.textContent;b.textContent='Copiado ✓';setTimeout(function(){b.textContent=t},1600);}
 function cpRow(b){var row=b.closest('.share-row');if(!row)return;var txt=row.getAttribute('data-link')||'';if(navigator.clipboard)navigator.clipboard.writeText(txt);var t=b.textContent;b.textContent='✓';setTimeout(function(){b.textContent=t},1400);}
+// ── cliente do compromisso ──────────────────────────────────────────────
+// A busca é a MESMA do PDV (/painel/clientes/buscar): um endpoint só, um
+// comportamento só. Dois campos viajam no form — `cliente_id` quando o dono
+// escolheu da lista, `cliente_nome` quando ele só digitou. O servidor decide:
+// com id, liga; com nome, cadastra pelo salvar_cliente (que não duplica).
+var TIT_MEXIDO = false, CLI_T = null, CLI_RES = [];
+function cliSug(){ return document.getElementById('fCliSug'); }
+function cliBusca(q){
+  var el = document.getElementById('fCliId'); if(el) el.value = '';
+  montaTitulo();
+  q = (q||'').trim();
+  if(CLI_T) clearTimeout(CLI_T);
+  var sug = cliSug(); if(!sug) return;
+  if(q.length < 2){ sug.style.display='none'; return; }
+  CLI_T = setTimeout(function(){
+    fetch('/painel/clientes/buscar?q='+encodeURIComponent(q))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        CLI_RES = d.clientes || [];
+        var h = '';
+        CLI_RES.forEach(function(c, i){
+          var det = (c.telefone ? ' · '+c.telefone : '') + (c.documento ? ' · '+c.documento : '');
+          h += '<div onclick="cliPick('+i+')">'+_esc(c.nome)+'<span class="leg">'+_esc(det)+'</span></div>';
+        });
+        // Cadastrar dali é o caminho normal, não a exceção: quem marca uma locação
+        // de alguém novo não devia ter que sair da tela pra cadastrar antes.
+        h += '<div class="novo" onclick="cliNovo()">＋ cadastrar “'+_esc(q)+'” como cliente novo</div>';
+        sug.innerHTML = h; sug.style.display='block';
+      }).catch(function(){});
+  }, 250);
+}
+function cliPick(i){
+  var c = CLI_RES[i]; if(!c) return;
+  document.getElementById('fCli').value = c.nome;
+  document.getElementById('fCliId').value = c.id;
+  cliSug().style.display = 'none';
+  montaTitulo();
+}
+function cliNovo(){ cliSug().style.display='none'; montaTitulo(); }
+// O título se monta sozinho no formato que a equipe JÁ digita hoje
+// ("Locação — Fulano"), e para de se montar assim que alguém o reescreve: o
+// vínculo mora no cliente_id, o texto é só o nome que a festa tem no grupo.
+function montaTitulo(){
+  var t = document.getElementById('fTitulo'); if(!t || TIT_MEXIDO) return;
+  var tp = document.getElementById('fTipoEv'), cl = document.getElementById('fCli');
+  var tipo = tp ? (tp.value||'').trim() : '', nome = cl ? (cl.value||'').trim() : '';
+  var novo = tipo && nome ? (tipo + ' — ' + nome) : (tipo || nome || '');
+  t.value = novo;
+  var d = document.getElementById('fTitDica');
+  if(d) d.style.display = novo ? 'block' : 'none';
+}
+document.addEventListener('click', function(ev){
+  var s = cliSug(), i = document.getElementById('fCli');
+  if(s && i && ev.target !== i && !s.contains(ev.target)) s.style.display='none';
+});
 function addGuest(){var box=document.getElementById('guests');var d=document.createElement('div');d.className='guest-row';d.innerHTML='<div><input class="gnome" name="convidado_nome" placeholder="Nome" autocomplete="off"></div><div><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div><button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>';box.appendChild(d);var i=d.querySelector('input');if(i)i.focus();}
 function rmGuest(b){var box=document.getElementById('guests');var row=b.closest('.guest-row');if(box&&box.children.length>1){row.remove();}else{row.querySelectorAll('input').forEach(function(x){x.value='';});}}
 function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.classList.toggle('show');}
@@ -2770,8 +2938,32 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <h2>{{ rot.novo }}</h2>
         <form class="frm" method="post" action="/painel/agenda/novo">
           <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+          {% if tem_clientes %}
+          {#- DE QUEM É, e vem ANTES do título: era a pergunta que faltava, e pôr no
+              fim é convidar a pular. Até 31/08/2026 não havia este campo, e o nome
+              do cliente acabava dentro do texto do título — onde é texto, não dado:
+              51 dos 60 compromissos da Prime apareciam sem cliente no relatório.
+              Opcional de propósito; reunião interna não tem dono. -#}
+          <label>Cliente <span style="font-weight:400">(opcional)</span></label>
+          <input name="cliente_nome" id="fCli" placeholder="Buscar por nome, telefone ou CPF…"
+                 autocomplete="off" oninput="cliBusca(this.value)">
+          <input type="hidden" name="cliente_id" id="fCliId">
+          <div id="fCliSug" class="cli-sug" style="display:none"></div>
+          {% endif %}
+          {% if vende_data %}
+          <label>{{ rot.tipo }}</label>
+          <select name="tipo_evento" id="fTipoEv" onchange="montaTitulo()">
+            <option value="">— escolher —</option>
+            {% for t in tipos_evento %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+          </select>
+          {% endif %}
           <label>{{ rot.titulo }}</label>
-          <input name="titulo" id="fTitulo" placeholder="{{ rot.titulo_ph }}" required autocomplete="off">
+          <input name="titulo" id="fTitulo" placeholder="{{ rot.titulo_ph }}" required autocomplete="off"
+                 oninput="TIT_MEXIDO=true">
+          {% if vende_data and tem_clientes %}
+          <div class="cli-dica" id="fTitDica" style="display:none">Montado a partir do tipo e do
+            cliente — pode reescrever, o vínculo não depende do texto.</div>
+          {% endif %}
           <div class="row2">
             <div><label>{{ rot.data }}</label><input name="data" id="fData" type="date" value="{{ hoje_iso }}" required></div>
             <div><label>{{ rot.hora }}</label><input name="hora" id="fHora" type="time" value="{% if vende_data %}19:00{% else %}09:00{% endif %}"></div>
@@ -2783,7 +2975,11 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
              não acusavam nada. Aceita 24:00 e vira a noite (ver agenda.janela_evento). #}
           <div class="row2">
             <div><label>{{ rot.fim }}</label><input name="hora_fim" id="fFim" type="time" value="23:00"></div>
-            <div></div>
+            {#- Quantos convidados. A coluna existe desde a 179 e até aqui só era
+                preenchida pela importação e pela aprovação de orçamento — a tela
+                nunca perguntou. É o número que dimensiona o buffet. -#}
+            <div><label>Convidados <span style="font-weight:400">(opcional)</span></label>
+              <input name="convidados" id="fConv" inputmode="numeric" placeholder="ex: 180" autocomplete="off"></div>
           </div>
           {% endif %}
           <!-- choque de horário: aparece na TELA, na hora de marcar. Não bloqueia —

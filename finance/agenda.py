@@ -175,7 +175,8 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
                  segurar: bool = False,
                  tipo_evento: str | None = None,
                  convidados: int | None = None,
-                 hora_sugerida: bool = False) -> dict:
+                 hora_sugerida: bool = False,
+                 cliente_id: int | None = None) -> dict:
     """prospeccao_id liga o evento a um lead (ex.: retorno de contato) — some da
     Agenda pro cliente, mas fica clicável a partir da ficha do lead (migração 136).
 
@@ -195,7 +196,13 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
     ver migração 163.
 
     `tipo_evento`, `convidados` e `hora_sugerida` são do nicho eventos (migração
-    179) — que festa é, quanta gente, e se a hora foi chutada pelo sistema."""
+    179) — que festa é, quanta gente, e se a hora foi chutada pelo sistema.
+
+    `cliente_id` é DE QUEM é o compromisso (migração 192): a relação em `clientes`,
+    não o lead. Até 31/08/2026 não havia onde guardar isso, e o nome do cliente
+    vivia dentro do texto do título — onde ele é texto, não dado. `prospeccao_id`
+    continua existindo e é outra coisa: quem chegou pelo WhatsApp e ainda está no
+    funil. Um compromisso pode ter os dois, um, ou nenhum."""
     tipo = tipo if tipo in TIPOS else "pessoal"
     # prospeccao_id só entra no INSERT quando informado — mantém compatível com
     # bancos/testes que ainda não rodaram a migração 136 (que criou a coluna).
@@ -223,6 +230,14 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
     if hora_sugerida:
         colunas += ", hora_sugerida"
         valores.append(True)
+    # condicional pelo mesmo motivo de `prospeccao_id` logo acima: banco que ainda
+    # não rodou a 192 continua marcando compromisso. E `cliente_id` de propósito
+    # NÃO entra em `_COLS`: acrescentar coluna ao SELECT é dependência dura da
+    # migração, e dez arquivos de teste montam `eventos_agenda` na mão. Quem
+    # precisa ler o vínculo (hoje só o relatório) faz o join na própria consulta.
+    if cliente_id:
+        colunas += ", cliente_id"
+        valores.append(int(cliente_id))
     with pool.connection() as c:
         row = c.execute(
             f"""insert into eventos_agenda ({colunas})

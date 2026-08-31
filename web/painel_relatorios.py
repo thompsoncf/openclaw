@@ -676,15 +676,22 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
     em hoje escondia justamente a festa que ainda vai acontecer — eram 38 dos 60
     compromissos da Prime.
 
-    Cliente tem DUAS fontes, nenhuma delas nova: `orcamentos.evento_agenda_id`
-    quando o compromisso nasceu de um orçamento aprovado (mesma regra `empresa
-    or cliente` de `_dados_orcamentos`), e `eventos_agenda.prospeccao_id`
-    quando nasceu de um lead — `finance.cockpit.agendar_visita` liga os dois
-    assim que marca a visita. O orçamento manda quando os dois existem (é o
-    registro mais firme — o lead pode ter sido reatribuído, o orçamento não).
-    Reunião interna e compromisso pessoal criados à mão
-    (`finance.agenda_tools.marcar_evento`) não têm nenhum dos dois; continuam
-    "—", e é o esperado, não bug.
+    CLIENTE tem TRÊS fontes, em ordem de firmeza. `eventos_agenda.cliente_id`
+    (migração 192) é o vínculo que alguém escolheu no formulário e manda em
+    todos: os outros dois são deduções. `orcamentos.evento_agenda_id` vale quando
+    a festa nasceu de proposta aprovada (mesma regra `empresa or cliente` de
+    `_dados_orcamentos`), e `prospeccao_id` quando a visita foi marcada pelo
+    Cockpit (`agendar_visita` liga os dois na hora).
+
+    Por que a terceira precisou existir: até 31/08/2026 só havia as deduções, e
+    51 dos 60 compromissos da Prime apareciam com "—". Não era falha de leitura —
+    o formulário de novo compromisso não tinha campo de cliente, e o nome acabava
+    dentro do texto do título, onde é texto e não dado. Dos 43 eventos (locação,
+    casamento, formatura) NENHUM tinha lead, e é esperado: locação não nasce de
+    lead de WhatsApp, nasce de telefonema.
+
+    Reunião interna e compromisso pessoal seguem sem nenhuma das três e continuam
+    "—" — é o esperado, não bug.
 
     "Sinal" é `eventos_agenda.sinal_centavos`, o valor que segura a DATA
     (163_evento_sinal_esperado) — só é gravado no "Só segurar a data" do
@@ -708,7 +715,16 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
             params.append(int(vendedor_sel))
         except (TypeError, ValueError):
             where.pop()
-    join_orc = """left join lateral (
+    # O nome do cliente tem TRÊS fontes, e a ordem importa. `cliente_id` (migração
+    # 192) vem primeiro porque é o vínculo que alguém escolheu na tela — os outros
+    # dois são deduções: o orçamento vale quando a festa nasceu de uma proposta
+    # aprovada, e o lead quando a visita foi marcada pelo Cockpit. Antes da 192 só
+    # existiam esses dois, e por isso 51 dos 60 compromissos da Prime apareciam
+    # sem cliente: locação não nasce de proposta nem de lead, nasce de telefonema.
+    join_orc = """left join clientes cl
+                    on cl.id = e.cliente_id and cl.dono_id = e.conta_id
+                  left join pessoas pe on pe.id = cl.pessoa_id
+                  left join lateral (
                     select coalesce(o.empresa, o.cliente) as nome
                       from orcamentos o
                      where o.evento_agenda_id = e.id
@@ -717,7 +733,7 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                   left join prospeccao p on p.id = e.prospeccao_id
                   left join membros mb on mb.id = e.membro_id"""
     if busca:
-        where.append("coalesce(oc.nome, p.contato, p.empresa) ilike %s")
+        where.append("coalesce(pe.nome, cl.nome, oc.nome, p.contato, p.empresa) ilike %s")
         params.append(f"%{busca}%")
     base_sql = " and ".join(where)
 
@@ -753,7 +769,7 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
     with pool.connection() as c:
         rows = c.execute(
             f"""select e.inicio, coalesce(e.tipo_evento, e.titulo),
-                       coalesce(oc.nome, p.contato, p.empresa),
+                       coalesce(pe.nome, cl.nome, oc.nome, p.contato, p.empresa),
                        e.tipo, e.status, e.desfecho, e.convidados, e.sinal_centavos,
                        mb.nome, e.tipo_evento
                   from eventos_agenda e

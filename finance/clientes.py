@@ -27,33 +27,39 @@ def _so_digitos(s: str | None) -> str | None:
     return d or None
 
 
-_COLS_GARANTIDAS = False
-
-
 def _garantir_cols(pool) -> None:
-    """Garante cidade/uf/papel em `clientes` (migracoes 149 e 182) em runtime.
+    """Garante cidade/uf/endereco/cep/papel em `clientes` (migracoes 149, 152 e
+    182) em runtime, UMA VEZ POR PROCESSO E POR BANCO.
 
-    O deploy nao roda migracao sozinho e a tela de Clientes LE essas colunas —
-    sem isso a aba inteira quebraria ate a migracao rodar. Uma vez por processo;
-    add-if-not-exists e' idempotente e barato. Mesmo remendo do orcamento
-    (_garantir_tabela do painel de servicos)."""
-    global _COLS_GARANTIDAS
-    if _COLS_GARANTIDAS:
-        return
-    try:
-        with pool.connection() as c:
-            c.execute("alter table clientes add column if not exists cidade text")
-            c.execute("alter table clientes add column if not exists uf varchar(2)")
-            c.execute("alter table clientes add column if not exists endereco text")
-            c.execute("alter table clientes add column if not exists cep text")
-            c.execute("alter table clientes add column if not exists "
-                      "eh_cliente boolean not null default true")
-            c.execute("alter table clientes add column if not exists "
-                      "eh_fornecedor boolean not null default false")
-            c.commit()
-    except Exception:  # noqa: BLE001 — sem permissao de DDL, segue o jogo
-        pass
-    _COLS_GARANTIDAS = True
+    O "e por banco" nao e' detalhe. Ate 31/08/2026 a marca era um booleano solto
+    (`_COLS_GARANTIDAS`), e o primeiro banco que passasse por aqui marcava pra
+    todos: num processo que fala com dois bancos — o caso da suite, onde varios
+    modulos criam banco proprio — o segundo nunca recebia os ALTER e quebrava com
+    "column endereco does not exist". Sessenta e um testes cairam assim de uma
+    vez, e nenhum deles tinha nada a ver com o assunto.
+
+    `core.esquema_runtime` existe pra isso: a chave carrega host/porta/nome do
+    banco, a marca so' e' gravada depois do sucesso, e os testes a limpam entre
+    si (fixture autouse do conftest). Mesmo mecanismo que `contas.equipe` e o
+    painel de servicos ja' usam desde a lentidao de 22/08."""
+    from core import esquema_runtime
+
+    def _aplicar():
+        try:
+            with pool.connection() as c:
+                c.execute("alter table clientes add column if not exists cidade text")
+                c.execute("alter table clientes add column if not exists uf varchar(2)")
+                c.execute("alter table clientes add column if not exists endereco text")
+                c.execute("alter table clientes add column if not exists cep text")
+                c.execute("alter table clientes add column if not exists "
+                          "eh_cliente boolean not null default true")
+                c.execute("alter table clientes add column if not exists "
+                          "eh_fornecedor boolean not null default false")
+                c.commit()
+        except Exception:  # noqa: BLE001 — sem permissao de DDL, segue o jogo
+            pass
+
+    esquema_runtime.garantir(esquema_runtime.chave(pool, "clientes_cols"), _aplicar)
 
 
 # Casar telefone pelos ULTIMOS 8 DIGITOS, nao pelo texto inteiro. O mesmo numero

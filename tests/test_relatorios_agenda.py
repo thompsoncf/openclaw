@@ -24,7 +24,10 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint,
   membro_id bigint, titulo text not null, inicio timestamptz not null,
   tipo text default 'pessoal', tipo_evento text, status text default 'ativo',
   desfecho text, convidados int, sinal_centavos int, prospeccao_id bigint,
-  criado_em timestamptz default now());
+  cliente_id bigint, criado_em timestamptz default now());
+create table pessoas (id bigserial primary key, nome text, celular text, cpf text);
+create table clientes (id bigserial primary key, dono_id bigint, pessoa_id bigint,
+  nome text, ativo boolean not null default true);
 """
 
 HOJE = date.today()
@@ -51,7 +54,7 @@ def pool():
 @pytest.fixture
 def cen(pool):
     with pool.connection() as c:
-        c.execute("truncate contas, membros, orcamentos, prospeccao, eventos_agenda restart identity")
+        c.execute("truncate contas, membros, orcamentos, prospeccao, eventos_agenda, clientes, pessoas restart identity")
         conta = c.execute("insert into contas (nome) values ('Prime Eventos') returning id").fetchone()[0]
         jacqueline = c.execute("insert into membros (conta_id, nome) values (%s,'Jacqueline') "
                                "returning id", (conta,)).fetchone()[0]
@@ -556,3 +559,100 @@ def test_festa_da_noite_nao_pula_pro_dia_seguinte(pool, cen):
             inicio=datetime(2026, 12, 5, 22, 0, tzinfo=rel._ag.BRT))
     d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
     assert d["linhas"][0]["inicio"].startswith("05/12/2026"), "virou o dia"
+
+
+# =========================================================================
+# CAMADA 1 (31/08/2026) — o compromisso passa a saber DE QUEM é
+#
+# O relatório mostrava "—" em 51 dos 60 compromissos da Prime, e a causa não era
+# o relatório: o formulário de novo compromisso não tinha campo de cliente, e o
+# nome acabava dentro do texto do título. `eventos_agenda.cliente_id` (192) é o
+# vínculo que faltava, e aqui se mede que ele MANDA sobre as duas deduções que já
+# existiam (orçamento e lead).
+# =========================================================================
+
+def _cliente(pool, dono, nome, *, pessoa_nome=None):
+    """Uma relação em `clientes`, com a identidade em `pessoas` — o modelo da 066.
+    `pessoa_nome` diferente do cache é de propósito num dos testes: a leitura tem
+    que preferir a identidade."""
+    with pool.connection() as c:
+        pid = c.execute("insert into pessoas (nome) values (%s) returning id",
+                        (pessoa_nome or nome,)).fetchone()[0]
+        cid = c.execute("insert into clientes (dono_id, pessoa_id, nome) "
+                        "values (%s,%s,%s) returning id", (dono, pid, nome)).fetchone()[0]
+        c.commit()
+    return cid
+
+
+def _com_cliente(pool, evento_id, cliente_id):
+    with pool.connection() as c:
+        c.execute("update eventos_agenda set cliente_id=%s where id=%s",
+                  (cliente_id, evento_id))
+        c.commit()
+
+
+def test_cliente_ligado_aparece_no_relatorio(pool, cen):
+    """O caso que não existia antes: locação de telefonema, sem orçamento e sem
+    lead — exatamente as 41 linhas que apareciam vazias."""
+    ev = _evento(pool, cen["conta"], titulo="Locação", tipo_evento="Locação")
+    _com_cliente(pool, ev, _cliente(pool, cen["conta"], "Jonas Barreto Castro Neto"))
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert d["linhas"][0]["cliente"] == "Jonas Barreto Castro Neto"
+
+
+def test_o_vinculo_manda_sobre_o_orcamento_e_sobre_o_lead(pool, cen):
+    """As outras duas fontes são DEDUÇÃO; o cliente_id é escolha de alguém. Com as
+    três presentes, quem aparece é o escolhido."""
+    lead = _lead(pool, cen["conta"], contato="Nome do lead")
+    ev = _evento(pool, cen["conta"], titulo="Casamento", tipo_evento="Casamento",
+                 prospeccao_id=lead)
+    _orc(pool, cen["conta"], ev, empresa="Nome do orçamento")
+    _com_cliente(pool, ev, _cliente(pool, cen["conta"], "Nome escolhido na tela"))
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert d["linhas"][0]["cliente"] == "Nome escolhido na tela"
+
+
+def test_sem_vinculo_o_orcamento_e_o_lead_seguem_valendo(pool, cen):
+    """A 192 acrescenta uma fonte, não substitui as que já funcionavam."""
+    ev1 = _evento(pool, cen["conta"], titulo="Formatura", inicio=_daqui(+1))
+    _orc(pool, cen["conta"], ev1, empresa="Colégio Aliança")
+    lead = _lead(pool, cen["conta"], contato="Nayara")
+    _evento(pool, cen["conta"], titulo="Visita — Nayara", prospeccao_id=lead,
+            inicio=_daqui(+2))
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    nomes = [l["cliente"] for l in d["linhas"]]
+    assert nomes == ["Colégio Aliança", "Nayara"]
+
+
+def test_le_a_identidade_e_nao_o_cache_do_nome(pool, cen):
+    """`clientes.nome` é CACHE; a verdade está em `pessoas`. Corrigir o nome na
+    ficha tem que aparecer aqui sem tocar no compromisso."""
+    cid = _cliente(pool, cen["conta"], "Nome antigo", pessoa_nome="Nome corrigido")
+    ev = _evento(pool, cen["conta"], titulo="Locação", tipo_evento="Locação")
+    _com_cliente(pool, ev, cid)
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert d["linhas"][0]["cliente"] == "Nome corrigido"
+
+
+def test_cliente_de_outra_loja_nao_vaza(pool, cen):
+    """`cliente_id` não tem FK (a relação pode ser arquivada por uma fusão), então
+    o isolamento é do JOIN: `cl.dono_id = e.conta_id`."""
+    with pool.connection() as c:
+        outra = c.execute("insert into contas (nome) values ('Vizinha') "
+                          "returning id").fetchone()[0]
+        c.commit()
+    ev = _evento(pool, cen["conta"], titulo="Locação", tipo_evento="Locação")
+    _com_cliente(pool, ev, _cliente(pool, outra, "Cliente da vizinha"))
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert d["linhas"][0]["cliente"] == "—", "puxou cliente de outra conta"
+
+
+def test_a_busca_do_relatorio_acha_pelo_cliente_ligado(pool, cen):
+    _evento(pool, cen["conta"], titulo="Locação A", tipo_evento="Locação",
+            inicio=_daqui(+1))
+    ev = _evento(pool, cen["conta"], titulo="Locação B", tipo_evento="Locação",
+                 inicio=_daqui(+2))
+    _com_cliente(pool, ev, _cliente(pool, cen["conta"], "Zenilda Rosa"))
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "Zenilda")
+    assert [l["evento"] for l in d["linhas"]] == ["Locação"]
+    assert d["linhas"][0]["cliente"] == "Zenilda Rosa"

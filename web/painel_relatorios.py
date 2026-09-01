@@ -29,6 +29,7 @@ from contas import equipe as eq
 from db.conexao import get_pool
 from finance import agenda as _ag
 from finance import empresa as emp
+from finance import models as mod
 from finance import vendas
 from web.portal import _render, _env, conta_logada, brl as _brl, _mascara_cnpj
 
@@ -186,34 +187,177 @@ def _col(chave, rotulo, num=False, brl=False, tag=False, flex=False, cli=False):
             "cli": cli}
 
 
+# Grupo do plano de contas que NÃO é operação: 7 é onde mora "Aporte de Sócios"
+# (7.1.05, migração 186) e a distribuição de lucros. Dinheiro que atravessa a
+# empresa sem ser negócio dela.
+_GRUPO_NAO_OPERACIONAL = 7
+
+# O que denuncia aporte/empréstimo quando NEM a categoria NEM o plano de contas
+# pegam. Não é firula: em produção o aporte de R$ 2.500 da Prime está com
+# categoria "Outros" (que é operacional) e plano "1.2.03 Outras Receitas" (grupo
+# 1, também operacional) — os dois portões anteriores passam batido nele. Casar
+# no texto é o último recurso, e por isso a linha vai pro bloco "fora de Vendas"
+# EXPLICANDO o motivo, nunca some calada: se o casamento estiver errado, o dono
+# vê e corrige o lançamento na origem.
+_TEXTO_NAO_VENDA = ("aporte", "emprestimo", "empréstimo", "transferencia entre",
+                    "transferência entre")
+
+# Como a venda chegou. Só três portas existem, e a tela diz qual foi.
+_CANAL_VENDA = {"titulo": ("Funil", "ok"), "balcao": ("Balcão", "ok")}
+
+
+def _fora_de_vendas(origem, categoria, descricao, grupo_plano):
+    """Esta linha de receita é uma VENDA de produto/serviço? Se não, por quê?
+
+    Devolve None pra venda, ou a chave do motivo. Três portões, nesta ordem:
+
+    1. **extrato** — a importação do OFX traz todo crédito que caiu na conta. Um
+       Pix que entrou é o PAGAMENTO de uma venda, não uma venda nova, e a mesma
+       venda costuma já estar registrada pelo funil ou pela foto do comprovante.
+       Deixar entrar é contar duas vezes por construção. Na Prime esse canal
+       sozinho respondia por R$ 21.470,05 — 69% do que a aba somava.
+    2. **não é receita do negócio** — aporte de sócio, empréstimo, transferência.
+       Usa `receita_e_operacional()`, a MESMA régua que a tela de Financeiro já
+       aplica desde 24/08 ("Entrou, mas não é receita"), mais o grupo 7 do plano
+       de contas, mais o texto. Três sinais porque nenhum é completo sozinho: os
+       dois aportes da Prime caíram em categorias e planos diferentes, e só o
+       texto pegou os dois.
+    3. o terceiro motivo — a linha repetida — não mora aqui: depende de olhar o
+       conjunto, e é resolvido em `_dados_vendas`.
+    """
+    if (origem or "") == "extrato":
+        return "extrato"
+    if not mod.receita_e_operacional(categoria or ""):
+        return "nao_venda"
+    if grupo_plano == _GRUPO_NAO_OPERACIONAL:
+        return "nao_venda"
+    texto = (descricao or "").lower()
+    if any(t in texto for t in _TEXTO_NAO_VENDA):
+        return "nao_venda"
+    return None
+
+
 def _dados_vendas(pool, conta_id, periodo):
+    """Vendas: o que o negócio VENDEU — produto ou serviço.
+
+    Antes esta aba somava todo lançamento de receita da empresa, viesse de onde
+    viesse. Na Prime (conta 34) isso fazia a tela dizer R$ 31.020,05 onde a
+    empresa tinha vendido R$ 6.100,00 — cinco vezes mais. Conferido em 01/09/2026,
+    o que inflava eram três coisas diferentes:
+
+        R$ 21.470,05  12 recebimentos importados do extrato do banco
+        R$  2.700,00   2 aportes de sócio
+        R$    750,00   1 sinal contado duas vezes (o mesmo dinheiro entrou pela
+                       baixa do título E pela foto do comprovante)
+
+    A causa de fundo era o desenho das abas, não esta consulta: Vendas era a única
+    aba que lia o caixa, então tudo que se mexia caía nela. Com Contas
+    pagas/recebidas lendo `lancamentos` (ver `_dados_caixa`), o que sai daqui tem
+    para onde ir — e é por isso que os dois passos andam juntos.
+
+    Nada some calado: o que não é venda vai pro bloco `fora`, com quantidade,
+    valor e motivo, apontando pra aba que agora mostra aquele dinheiro. A regra 0
+    do CLAUDE.md vale pra tela — dinheiro do cliente não desaparece de uma
+    contagem sem explicação.
+    """
     ini, fim = _intervalo(periodo)
     with pool.connection() as c:
         rows = c.execute(
-            """select l.data, l.descricao, l.categoria, l.forma_pagamento,
-                      coalesce(m.nome, '-') as vendedor, l.valor_centavos
-                 from lancamentos l left join membros m on m.id = l.membro_id
+            """select l.data, l.descricao, l.categoria, l.origem,
+                      coalesce(m.nome, '-') as vendedor, l.valor_centavos,
+                      p.grupo, coalesce(t.contraparte, cl.nome, '') as cliente
+                 from lancamentos l
+                 left join membros m on m.id = l.membro_id
+                 left join plano_contas p on p.id = l.plano_conta_id
+                 left join clientes cl on cl.id = l.cliente_id
+                 left join titulos t on t.lancamento_id = l.id and t.conta_id = l.conta_id
                 where l.conta_id=%s and l.tipo='receita' and l.natureza='empresa'
                   and l.data >= %s and l.data <= %s
                 order by l.data desc, l.id desc limit 300""",
             (conta_id, ini, fim),
         ).fetchall()
-    linhas = [{"data": _fmt(r[0]), "descricao": r[1] or "—", "categoria": r[2] or "—",
-               "forma": r[3] or "—", "vendedor": r[4], "valor_centavos": int(r[5] or 0)}
-              for r in rows]
+
+    # o dinheiro que entrou pela baixa do título é o registro BOM da venda (ele
+    # sabe o cliente e o orçamento). Quando a mesma quantia, no mesmo dia, também
+    # entrou por outra porta, a outra é eco do mesmo Pix — foi o caso da Bianca
+    # Oliveira em 28/08: um sinal de R$ 750, duas linhas, R$ 1.500 na soma.
+    do_titulo = {(r[0], int(r[5] or 0)) for r in rows if (r[3] or "") == "titulo"}
+
+    linhas, fora = [], {}
+
+    def _fora(chave, valor):
+        d = fora.setdefault(chave, {"n": 0, "centavos": 0})
+        d["n"] += 1
+        d["centavos"] += valor
+
+    for r in rows:
+        valor = int(r[5] or 0)
+        origem = r[3] or ""
+        motivo = _fora_de_vendas(origem, r[2], r[1], r[6])
+        if motivo is None and origem != "titulo" and (r[0], valor) in do_titulo:
+            motivo = "repetida"
+        if motivo:
+            _fora(motivo, valor)
+            continue
+        canal, cor = _CANAL_VENDA.get(origem, ("Manual", "neutro"))
+        linhas.append({
+            "data": _fmt(r[0]), "descricao": (r[1] or "").strip() or "—",
+            "cliente": (r[7] or "").strip() or "—",
+            "canal": canal, "canal_cor": cor,
+            "vendedor": r[4], "valor_centavos": valor,
+        })
+
     total = _soma(linhas, "valor_centavos")
     n = len(linhas)
     hoje_str = _fmt(date.today())
     vendido_hoje = _soma([r for r in linhas if r["data"] == hoje_str], "valor_centavos")
-    return {
+    dados = {
         "label": "Vendas", "mock": False,
-        "colunas": [_col("data", "Data"), _col("descricao", "Descrição", flex=True), _col("categoria", "Categoria"),
-                    _col("forma", "Forma"), _col("vendedor", "Vendedor"),
+        "colunas": [_col("data", "Data"), _col("descricao", "O que foi vendido", flex=True),
+                    _col("cliente", "Cliente"), _col("canal", "Origem", tag=True),
+                    _col("vendedor", "Vendedor"),
                     _col("valor_centavos", "Valor", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
         "metricas": [("Total vendido", _brl(total)), ("Nº de vendas", str(n)),
                      ("Ticket médio", _brl(total // n if n else 0)), ("Vendido hoje", _brl(vendido_hoje))],
     }
+    if fora:
+        dados["fora"] = _bloco_fora(fora)
+    return dados
+
+
+# Cada motivo com o texto que o dono entende e a aba pra onde aquele dinheiro
+# foi. O "onde está" é a parte que faz o bloco ser informação e não desculpa.
+_MOTIVO_FORA = {
+    "extrato": ("recebimento{s} importado{s} do extrato do banco",
+                "é a perna bancária do dinheiro, não uma venda nova",
+                "recebidas"),
+    "nao_venda": ("aporte{s}, empréstimo{s} ou transferência{s}",
+                  "entrou no caixa, mas não é faturamento do negócio",
+                  "recebidas"),
+    "repetida": ("linha{s} do mesmo dinheiro já contado no título",
+                 "o sinal entrou pelo funil e também pela foto do comprovante",
+                 "recebidas"),
+}
+
+
+def _bloco_fora(fora: dict) -> dict:
+    """O rodapé de "entrou no caixa, mas não é venda".
+
+    Existe porque tirar linha de uma tela de dinheiro sem dizer para onde ela foi
+    é a mesma família de erro que esconder o dinheiro: o dono olha o total, não
+    reconhece, e perde a confiança na tela inteira. Cada motivo sai com
+    quantidade, valor, explicação e a aba onde aquele dinheiro está agora."""
+    itens = []
+    for chave in ("extrato", "nao_venda", "repetida"):
+        d = fora.get(chave)
+        if not d:
+            continue
+        rotulo, porque, aba = _MOTIVO_FORA[chave]
+        s = "s" if d["n"] != 1 else ""
+        itens.append({"n": d["n"], "texto": rotulo.format(s=s), "porque": porque,
+                      "aba": aba, "centavos": d["centavos"]})
+    return {"itens": itens, "centavos": sum(i["centavos"] for i in itens)}
 
 
 def _dados_titulos_abertos(pool, conta_id, tipo):

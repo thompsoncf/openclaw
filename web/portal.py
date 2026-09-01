@@ -6205,6 +6205,17 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
 <style>
   .rel-aviso{background:#1a2233;border:1px solid #29354d;color:#9db3d6;border-radius:8px;
    padding:.6rem .85rem;font-size:.82rem;margin:.9rem 0 1rem;line-height:1.5}
+  /* o rodapé do dinheiro que saiu da aba. Âmbar e não vermelho de proposito:
+     não é erro, é dinheiro que existe e mora em outro lugar. */
+  .rel-fora{margin-top:1rem;border:1px solid #5a4520;background:#241c0f;
+   border-radius:10px;padding:.8rem 1rem}
+  .rel-fora-tit{font-size:.85rem;font-weight:600;color:#e0a32e;margin-bottom:.55rem}
+  .rel-fora ul{list-style:none;margin:0;padding:0;display:grid;gap:.4rem}
+  .rel-fora li{display:flex;justify-content:space-between;gap:1rem;font-size:.82rem;
+   color:#c9bda6;border-bottom:1px dashed #5a4520;padding-bottom:.4rem}
+  .rel-fora li:last-child{border-bottom:0;padding-bottom:0}
+  .rel-fora li b{color:var(--txt);font-weight:600}
+  .rel-fora-pe{font-size:.77rem;color:#8a7f6c;margin-top:.55rem}
   .rel-filtros{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.9rem 0 1.1rem}
   .rel-filtros select,.rel-filtros input[type=search]{width:auto;margin:0}
   /* Espécie é o corte mais grosso da aba Agenda (visita ou festa são perguntas
@@ -6455,6 +6466,27 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     {% endif %}
   </table>
   </div>
+  {# "Entrou no caixa, mas não é venda". Tirar linha de uma tela de dinheiro sem
+     dizer pra onde ela foi é a mesma família de erro que esconder o dinheiro: o
+     dono olha o total, não reconhece e perde a confiança na tela inteira. Cada
+     motivo sai com quantidade, valor, o porquê e um LINK pra aba onde aquele
+     dinheiro está agora. #}
+  {% if dados.fora and dados.fora.itens %}
+  <div class="rel-fora">
+    <div class="rel-fora-tit">⚠️ Entrou no caixa, mas não é venda — {{ dados.fora.centavos|brl }}</div>
+    <ul>
+      {% for i in dados.fora.itens %}
+      <li>
+        <span>{{ i.n }} {{ i.texto }} <span class="mut">· {{ i.porque }}</span></span>
+        <b class="nowrap">{{ i.centavos|brl }}</b>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="rel-fora-pe">Nada sumiu — esse dinheiro está em
+      <a href="/painel/relatorios?tipo=recebidas&amp;periodo={{ periodo }}">Contas recebidas</a>
+      e no Livro-caixa.</div>
+  </div>
+  {% endif %}
   <script>
   // Filtro NA TELA. As linhas já estão todas no HTML (a consulta tem teto de 300),
   // então não há ida ao servidor: filtrar é instantâneo.
@@ -6691,6 +6723,20 @@ _RELATORIO_PDF = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8
     {% endif %}
   </table>
 </div>
+{# o mesmo rodapé da tela. Um relatório IMPRESSO que mostra o total sem dizer o
+   que ficou de fora é pior que a tela: ele circula sozinho, sem quem explique. #}
+{% if dados.fora and dados.fora.itens %}
+<div style="margin-top:14px;border:1px solid #999;border-radius:6px;padding:8px 10px">
+  <b style="font-size:11px">Entrou no caixa, mas não é venda — {{ dados.fora.centavos|brl }}</b>
+  <table style="margin-top:6px">
+    {% for i in dados.fora.itens %}
+    <tr><td style="border:0;padding:2px 0">{{ i.n }} {{ i.texto }} — {{ i.porque }}</td>
+        <td class="num" style="border:0;padding:2px 0">{{ i.centavos|brl }}</td></tr>
+    {% endfor %}
+  </table>
+  <div style="font-size:10px;color:#555;margin-top:4px">Esse dinheiro está em Contas recebidas e no Livro-caixa.</div>
+</div>
+{% endif %}
 <p class="aviso">{% if dados.mock %}🧪 Dados de exemplo — este relatório ainda não está ligado à base real.
   {% else %}Documento gerencial gerado pelo Zaq a partir dos lançamentos da conta.{% endif %} {{ dados.linhas|length }} registro(s).</p>
 </body></html>"""

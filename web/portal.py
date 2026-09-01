@@ -6205,6 +6205,17 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
 <style>
   .rel-aviso{background:#1a2233;border:1px solid #29354d;color:#9db3d6;border-radius:8px;
    padding:.6rem .85rem;font-size:.82rem;margin:.9rem 0 1rem;line-height:1.5}
+  /* o rodapé do dinheiro que saiu da aba. Âmbar e não vermelho de proposito:
+     não é erro, é dinheiro que existe e mora em outro lugar. */
+  .rel-fora{margin-top:1rem;border:1px solid #5a4520;background:#241c0f;
+   border-radius:10px;padding:.8rem 1rem}
+  .rel-fora-tit{font-size:.85rem;font-weight:600;color:#e0a32e;margin-bottom:.55rem}
+  .rel-fora ul{list-style:none;margin:0;padding:0;display:grid;gap:.4rem}
+  .rel-fora li{display:flex;justify-content:space-between;gap:1rem;font-size:.82rem;
+   color:#c9bda6;border-bottom:1px dashed #5a4520;padding-bottom:.4rem}
+  .rel-fora li:last-child{border-bottom:0;padding-bottom:0}
+  .rel-fora li b{color:var(--txt);font-weight:600}
+  .rel-fora-pe{font-size:.77rem;color:#8a7f6c;margin-top:.55rem}
   .rel-filtros{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.9rem 0 1.1rem}
   .rel-filtros select,.rel-filtros input[type=search]{width:auto;margin:0}
   /* Espécie é o corte mais grosso da aba Agenda (visita ou festa são perguntas
@@ -6250,6 +6261,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   .rel-print{display:inline-flex;align-items:center;justify-content:center;width:1.8rem;height:1.8rem;
    border:1px solid var(--borda);background:var(--bg);border-radius:6px;text-decoration:none;font-size:.85rem}
   .rel-print:hover{border-color:var(--verde)}
+  button.rel-print{cursor:pointer;font:inherit;font-size:.9rem;line-height:1;padding:0}
   /* LARGURA DESTA TELA, e só dela.
      O `.card.larga` vale 720px e é usado por Equipe, Fornecedor, Portal e mais
      cinco telas — várias delas formulário, onde largura demais PIORA (o olho
@@ -6315,6 +6327,8 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   {% elif dados.aviso_config %}
   <div class="rel-aviso">⚠️ {{ dados.aviso_config }}</div>
   {% endif %}
+  {% if aviso %}<div class="rel-aviso" style="border-color:#2c5a3f;background:#122a1d;color:#9fe8c9">✓ {{ aviso }}</div>{% endif %}
+  {% if erro %}<div class="rel-aviso" style="border-color:#6e2b2b;background:#2a1414;color:#f0b8b8">✕ {{ erro }}</div>{% endif %}
 
   <div class="abas" id="rel-abas">
     {% for k, r in tipos.items() %}<a class="aba{% if k==tipo %} ativa{% endif %}"
@@ -6424,8 +6438,10 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     </thead>
     <tbody>
     {% for row in dados.linhas %}
-    <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% elif col.flex %} class="rel-flex" title="{{ row[col.chave] }}"{% endif %}{% if col.chave == dados.col_total %} data-c="{{ row[col.chave] }}"{% endif %}>{% if col.tag %}<span
-      class="rel-tag {{ row[col.chave ~ '_cor'] }}">{{ row[col.chave] }}</span>{% elif col.brl %}{{ row[col.chave]|brl
+    <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% elif col.flex %} class="rel-flex" title="{{ row[col.chave] }}"{% endif %}{% if col.chave == dados.col_total %} data-c="{{ row[col.chave] }}"{% endif %}>{% if col.tag %}{#- pílula SÓ quando há valor: as colunas "Quitou" e "Conferir"
+      são esparsas por desenho (o elo é raro), e uma pílula vazia em cada linha
+      vira ruído com borda. -#}{% if row[col.chave] %}<span
+      class="rel-tag {{ row[col.chave ~ '_cor'] }}">{{ row[col.chave] }}</span>{% endif %}{% elif col.brl %}{{ row[col.chave]|brl
       }}{% elif col.cli %}{#- a célula Cliente da Agenda. Nome vindo do VÍNCULO sai
       limpo; DEDUÇÃO sai apagada e com selo, porque é palpite e a tela não pode
       fingir que é dado. Dois selos, porque são duas origens: "do lead" (azul,
@@ -6437,7 +6453,23 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
       if row.cliente_do_lead %}<span class="rel-selo lead" title="Nome do lead que marcou a visita — ainda não é um cadastro ligado">do lead</span>{%
       elif row.cliente_do_titulo %}<span class="rel-selo" title="Lido do título do compromisso — ainda não é um cadastro ligado">do título</span>{%
       endif %}{% if row.cliente_link %}</a>{% endif %}{% else %}{{ row[col.chave] }}{% endif %}</td>{% endfor %}{% if dados.acao %}<td class="rel-act">{% if row.acao_href
-      %}<a class="rel-print" href="{{ row.acao_href }}" target="_blank" rel="noopener" title="{{ dados.acao_rotulo }}">🖨️</a>{% endif %}</td>{% endif %}</tr>
+      %}<a class="rel-print" href="{{ row.acao_href }}" target="_blank" rel="noopener" title="{{ dados.acao_rotulo }}">🖨️</a>{%
+      elif row.acao_post %}{#- botão que GRAVA. Form de verdade (POST + 303), não
+      link: ação que muda dinheiro não pode ser disparada por um GET que o
+      navegador pré-carrega ou o histórico repete. O confirm() diz o que vai
+      acontecer E que dá pra desfazer — a conciliação nasce de um palpite.
+
+      O texto vai por `data-confirmar` e NÃO por `onsubmit="confirm({{...|tojson}})"`:
+      o tojson do Jinja não escapa aspas, e a frase carrega a descrição do título,
+      que é texto do usuário — uma aspa no nome do fornecedor fechava o atributo.
+
+      E o `|e` é obrigatório: o `select_autoescape()` deste Environment liga o
+      escape por EXTENSÃO do nome do template, e estes se chamam "relatorios",
+      "base"… sem extensão. Ou seja, autoescape está DESLIGADO aqui. -#}<form
+      method="post" action="{{ row.acao_post.url }}" style="display:inline"
+      data-confirmar="{{ row.acao_post.confirmar|e }}">{% for k, v in row.acao_post.campos.items()
+      %}<input type="hidden" name="{{ k|e }}" value="{{ v|e }}">{% endfor %}<button type="submit"
+      class="rel-print" title="{{ row.acao_post.titulo|e }}">{{ row.acao_post.rotulo }}</button></form>{% endif %}</td>{% endif %}</tr>
     {% else %}
     <tr><td colspan="{{ dados.colunas|length + (1 if dados.acao else 0) }}" class="mut" style="text-align:center;padding:1.4rem 0">Nenhum registro encontrado{% if not dados.sem_periodo %} em {{ periodo_rotulo|lower }}{% endif %}.</td></tr>
     {% endfor %}
@@ -6455,6 +6487,37 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     {% endif %}
   </table>
   </div>
+  {# "Entrou no caixa, mas não é venda". Tirar linha de uma tela de dinheiro sem
+     dizer pra onde ela foi é a mesma família de erro que esconder o dinheiro: o
+     dono olha o total, não reconhece e perde a confiança na tela inteira. Cada
+     motivo sai com quantidade, valor, o porquê e um LINK pra aba onde aquele
+     dinheiro está agora. #}
+  {% if dados.fora and dados.fora.itens %}
+  <div class="rel-fora">
+    <div class="rel-fora-tit">⚠️ Entrou no caixa, mas não é venda — {{ dados.fora.centavos|brl }}</div>
+    <ul>
+      {% for i in dados.fora.itens %}
+      <li>
+        <span>{{ i.n }} {{ i.texto }} <span class="mut">· {{ i.porque }}</span></span>
+        <b class="nowrap">{{ i.centavos|brl }}</b>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="rel-fora-pe">Nada sumiu — esse dinheiro está em
+      <a href="/painel/relatorios?tipo=recebidas&amp;periodo={{ periodo }}">Contas recebidas</a>
+      e no Livro-caixa.</div>
+  </div>
+  {% endif %}
+  <script>
+  // Pergunta antes de gravar. Delegado no documento porque os formulários são
+  // desenhados linha a linha — e é o único lugar desta tela que escreve no banco.
+  // Em bloco PRÓPRIO de propósito: o teste do filtro extrai o <script> seguinte
+  // inteiro e roda no Node, e este handler não tem o que fazer lá.
+  document.addEventListener('submit', function (e) {
+    var f = e.target.closest && e.target.closest('form[data-confirmar]');
+    if (f && !confirm(f.getAttribute('data-confirmar'))) { e.preventDefault(); }
+  });
+  </script>
   <script>
   // Filtro NA TELA. As linhas já estão todas no HTML (a consulta tem teto de 300),
   // então não há ida ao servidor: filtrar é instantâneo.
@@ -6691,6 +6754,20 @@ _RELATORIO_PDF = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8
     {% endif %}
   </table>
 </div>
+{# o mesmo rodapé da tela. Um relatório IMPRESSO que mostra o total sem dizer o
+   que ficou de fora é pior que a tela: ele circula sozinho, sem quem explique. #}
+{% if dados.fora and dados.fora.itens %}
+<div style="margin-top:14px;border:1px solid #999;border-radius:6px;padding:8px 10px">
+  <b style="font-size:11px">Entrou no caixa, mas não é venda — {{ dados.fora.centavos|brl }}</b>
+  <table style="margin-top:6px">
+    {% for i in dados.fora.itens %}
+    <tr><td style="border:0;padding:2px 0">{{ i.n }} {{ i.texto }} — {{ i.porque }}</td>
+        <td class="num" style="border:0;padding:2px 0">{{ i.centavos|brl }}</td></tr>
+    {% endfor %}
+  </table>
+  <div style="font-size:10px;color:#555;margin-top:4px">Esse dinheiro está em Contas recebidas e no Livro-caixa.</div>
+</div>
+{% endif %}
 <p class="aviso">{% if dados.mock %}🧪 Dados de exemplo — este relatório ainda não está ligado à base real.
   {% else %}Documento gerencial gerado pelo Zaq a partir dos lançamentos da conta.{% endif %} {{ dados.linhas|length }} registro(s).</p>
 </body></html>"""

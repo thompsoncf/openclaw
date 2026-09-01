@@ -7,8 +7,14 @@ Dados reais, reaproveitando o que já existe:
   - Vendas          -> lancamentos (tipo='receita', natureza='empresa')
   - Contas a pagar   -> titulos (tipo='pagar',   status='aberto')  [finance.empresa]
   - Contas a receber -> titulos (tipo='receber', status='aberto')  [finance.empresa]
-  - Contas pagas     -> titulos (tipo='pagar',   status='pago', filtrado por pago_em)
-  - Contas recebidas -> titulos (tipo='receber', status='pago', filtrado por pago_em)
+  - Contas pagas     -> lancamentos (tipo='despesa', natureza='empresa')
+  - Contas recebidas -> lancamentos (tipo='receita', natureza='empresa')
+
+    Estas duas liam `titulos` baixados e por isso viviam VAZIAS: em 01/09/2026 a
+    produção inteira tinha 2 títulos pagos, os dois baixados pelo sistema, e
+    nenhum baixado por gente. Quem responde "quanto eu paguei" é o caixa, não o
+    compromisso — ver o docstring de `_dados_caixa`. As duas abas de compromisso
+    (a pagar / a receber) continuam lendo `titulos`, que é onde elas estão certas.
   - Comissão         -> lancamentos de vendas agrupados por membro_id, aplicando o
                         membros.comissao_pct de cada um (migração 137). Vendedor sem
                         % configurada aparece com comissão R$ 0,00 e um aviso na tela
@@ -23,6 +29,7 @@ from contas import equipe as eq
 from db.conexao import get_pool
 from finance import agenda as _ag
 from finance import empresa as emp
+from finance import models as mod
 from finance import vendas
 from web.portal import _render, _env, conta_logada, brl as _brl, _mascara_cnpj
 
@@ -180,41 +187,261 @@ def _col(chave, rotulo, num=False, brl=False, tag=False, flex=False, cli=False):
             "cli": cli}
 
 
+# Grupo do plano de contas que NÃO é operação: 7 é onde mora "Aporte de Sócios"
+# (7.1.05, migração 186) e a distribuição de lucros. Dinheiro que atravessa a
+# empresa sem ser negócio dela.
+_GRUPO_NAO_OPERACIONAL = 7
+
+# O que denuncia aporte/empréstimo quando NEM a categoria NEM o plano de contas
+# pegam. Não é firula: em produção o aporte de R$ 2.500 da Prime está com
+# categoria "Outros" (que é operacional) e plano "1.2.03 Outras Receitas" (grupo
+# 1, também operacional) — os dois portões anteriores passam batido nele. Casar
+# no texto é o último recurso, e por isso a linha vai pro bloco "fora de Vendas"
+# EXPLICANDO o motivo, nunca some calada: se o casamento estiver errado, o dono
+# vê e corrige o lançamento na origem.
+_TEXTO_NAO_VENDA = ("aporte", "emprestimo", "empréstimo", "transferencia entre",
+                    "transferência entre")
+
+# Como a venda chegou. Só três portas existem, e a tela diz qual foi.
+_CANAL_VENDA = {"titulo": ("Funil", "ok"), "balcao": ("Balcão", "ok")}
+
+
+def _fora_de_vendas(origem, categoria, descricao, grupo_plano):
+    """Esta linha de receita é uma VENDA de produto/serviço? Se não, por quê?
+
+    Devolve None pra venda, ou a chave do motivo. Três portões, nesta ordem:
+
+    1. **extrato** — a importação do OFX traz todo crédito que caiu na conta. Um
+       Pix que entrou é o PAGAMENTO de uma venda, não uma venda nova, e a mesma
+       venda costuma já estar registrada pelo funil ou pela foto do comprovante.
+       Deixar entrar é contar duas vezes por construção. Na Prime esse canal
+       sozinho respondia por R$ 21.470,05 — 69% do que a aba somava.
+    2. **não é receita do negócio** — aporte de sócio, empréstimo, transferência.
+       Usa `receita_e_operacional()`, a MESMA régua que a tela de Financeiro já
+       aplica desde 24/08 ("Entrou, mas não é receita"), mais o grupo 7 do plano
+       de contas, mais o texto. Três sinais porque nenhum é completo sozinho: os
+       dois aportes da Prime caíram em categorias e planos diferentes, e só o
+       texto pegou os dois.
+    3. o terceiro motivo — a linha repetida — não mora aqui: depende de olhar o
+       conjunto, e é resolvido em `_dados_vendas`.
+    """
+    if (origem or "") == "extrato":
+        return "extrato"
+    if not mod.receita_e_operacional(categoria or ""):
+        return "nao_venda"
+    if grupo_plano == _GRUPO_NAO_OPERACIONAL:
+        return "nao_venda"
+    texto = (descricao or "").lower()
+    if any(t in texto for t in _TEXTO_NAO_VENDA):
+        return "nao_venda"
+    return None
+
+
 def _dados_vendas(pool, conta_id, periodo):
+    """Vendas: o que o negócio VENDEU — produto ou serviço.
+
+    Antes esta aba somava todo lançamento de receita da empresa, viesse de onde
+    viesse. Na Prime (conta 34) isso fazia a tela dizer R$ 31.020,05 onde a
+    empresa tinha vendido R$ 6.100,00 — cinco vezes mais. Conferido em 01/09/2026,
+    o que inflava eram três coisas diferentes:
+
+        R$ 21.470,05  12 recebimentos importados do extrato do banco
+        R$  2.700,00   2 aportes de sócio
+        R$    750,00   1 sinal contado duas vezes (o mesmo dinheiro entrou pela
+                       baixa do título E pela foto do comprovante)
+
+    A causa de fundo era o desenho das abas, não esta consulta: Vendas era a única
+    aba que lia o caixa, então tudo que se mexia caía nela. Com Contas
+    pagas/recebidas lendo `lancamentos` (ver `_dados_caixa`), o que sai daqui tem
+    para onde ir — e é por isso que os dois passos andam juntos.
+
+    Nada some calado: o que não é venda vai pro bloco `fora`, com quantidade,
+    valor e motivo, apontando pra aba que agora mostra aquele dinheiro. A regra 0
+    do CLAUDE.md vale pra tela — dinheiro do cliente não desaparece de uma
+    contagem sem explicação.
+    """
     ini, fim = _intervalo(periodo)
     with pool.connection() as c:
         rows = c.execute(
-            """select l.data, l.descricao, l.categoria, l.forma_pagamento,
-                      coalesce(m.nome, '-') as vendedor, l.valor_centavos
-                 from lancamentos l left join membros m on m.id = l.membro_id
+            """select l.data, l.descricao, l.categoria, l.origem,
+                      coalesce(m.nome, '-') as vendedor, l.valor_centavos,
+                      p.grupo, coalesce(t.contraparte, cl.nome, '') as cliente
+                 from lancamentos l
+                 left join membros m on m.id = l.membro_id
+                 left join plano_contas p on p.id = l.plano_conta_id
+                 left join clientes cl on cl.id = l.cliente_id
+                 left join titulos t on t.lancamento_id = l.id and t.conta_id = l.conta_id
                 where l.conta_id=%s and l.tipo='receita' and l.natureza='empresa'
                   and l.data >= %s and l.data <= %s
                 order by l.data desc, l.id desc limit 300""",
             (conta_id, ini, fim),
         ).fetchall()
-    linhas = [{"data": _fmt(r[0]), "descricao": r[1] or "—", "categoria": r[2] or "—",
-               "forma": r[3] or "—", "vendedor": r[4], "valor_centavos": int(r[5] or 0)}
-              for r in rows]
+
+    # o dinheiro que entrou pela baixa do título é o registro BOM da venda (ele
+    # sabe o cliente e o orçamento). Quando a mesma quantia, no mesmo dia, também
+    # entrou por outra porta, a outra é eco do mesmo Pix — foi o caso da Bianca
+    # Oliveira em 28/08: um sinal de R$ 750, duas linhas, R$ 1.500 na soma.
+    do_titulo = {(r[0], int(r[5] or 0)) for r in rows if (r[3] or "") == "titulo"}
+
+    linhas, fora = [], {}
+
+    def _fora(chave, valor):
+        d = fora.setdefault(chave, {"n": 0, "centavos": 0})
+        d["n"] += 1
+        d["centavos"] += valor
+
+    for r in rows:
+        valor = int(r[5] or 0)
+        origem = r[3] or ""
+        motivo = _fora_de_vendas(origem, r[2], r[1], r[6])
+        if motivo is None and origem != "titulo" and (r[0], valor) in do_titulo:
+            motivo = "repetida"
+        if motivo:
+            _fora(motivo, valor)
+            continue
+        canal, cor = _CANAL_VENDA.get(origem, ("Manual", "neutro"))
+        linhas.append({
+            "data": _fmt(r[0]), "descricao": (r[1] or "").strip() or "—",
+            "cliente": (r[7] or "").strip() or "—",
+            "canal": canal, "canal_cor": cor,
+            "vendedor": r[4], "valor_centavos": valor,
+        })
+
     total = _soma(linhas, "valor_centavos")
     n = len(linhas)
     hoje_str = _fmt(date.today())
     vendido_hoje = _soma([r for r in linhas if r["data"] == hoje_str], "valor_centavos")
-    return {
+    dados = {
         "label": "Vendas", "mock": False,
-        "colunas": [_col("data", "Data"), _col("descricao", "Descrição", flex=True), _col("categoria", "Categoria"),
-                    _col("forma", "Forma"), _col("vendedor", "Vendedor"),
+        "colunas": [_col("data", "Data"), _col("descricao", "O que foi vendido", flex=True),
+                    _col("cliente", "Cliente"), _col("canal", "Origem", tag=True),
+                    _col("vendedor", "Vendedor"),
                     _col("valor_centavos", "Valor", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
         "metricas": [("Total vendido", _brl(total)), ("Nº de vendas", str(n)),
                      ("Ticket médio", _brl(total // n if n else 0)), ("Vendido hoje", _brl(vendido_hoje))],
     }
+    if fora:
+        dados["fora"] = _bloco_fora(fora)
+    return dados
+
+
+# Cada motivo com o texto que o dono entende e a aba pra onde aquele dinheiro
+# foi. O "onde está" é a parte que faz o bloco ser informação e não desculpa.
+_MOTIVO_FORA = {
+    "extrato": ("recebimento{s} importado{s} do extrato do banco",
+                "é a perna bancária do dinheiro, não uma venda nova",
+                "recebidas"),
+    "nao_venda": ("aporte{s}, empréstimo{s} ou transferência{s}",
+                  "entrou no caixa, mas não é faturamento do negócio",
+                  "recebidas"),
+    "repetida": ("linha{s} do mesmo dinheiro já contado no título",
+                 "o sinal entrou pelo funil e também pela foto do comprovante",
+                 "recebidas"),
+}
+
+
+def _bloco_fora(fora: dict) -> dict:
+    """O rodapé de "entrou no caixa, mas não é venda".
+
+    Existe porque tirar linha de uma tela de dinheiro sem dizer para onde ela foi
+    é a mesma família de erro que esconder o dinheiro: o dono olha o total, não
+    reconhece, e perde a confiança na tela inteira. Cada motivo sai com
+    quantidade, valor, explicação e a aba onde aquele dinheiro está agora."""
+    itens = []
+    for chave in ("extrato", "nao_venda", "repetida"):
+        d = fora.get(chave)
+        if not d:
+            continue
+        rotulo, porque, aba = _MOTIVO_FORA[chave]
+        s = "s" if d["n"] != 1 else ""
+        itens.append({"n": d["n"], "texto": rotulo.format(s=s), "porque": porque,
+                      "aba": aba, "centavos": d["centavos"]})
+    return {"itens": itens, "centavos": sum(i["centavos"] for i in itens)}
+
+
+# A janela mora em finance/empresa.py, junto da gravação. As duas pontas TÊM que
+# usar o mesmo número: a aba sugere com ele e `conciliar_titulo` revalida com ele.
+# Divergindo, a tela ofereceria botão que o servidor recusa — ou, pior, gravaria o
+# que a tela não sugeriu. Ver o porquê do 14 lá (foi medido, não escolhido).
+_JANELA_CANDIDATO_DIAS = emp.JANELA_CONCILIACAO_DIAS
+
+
+def _pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
+    """Pra cada título em aberto, o pagamento que TEM CARA de ser ele.
+
+    Isto é uma DICA, não uma conclusão, e a diferença é a razão da função existir
+    com este desenho. Rodando casamento por valor + janela nos 11 títulos vencidos
+    da produção em 01/09/2026 saem duas sugestões, e uma delas casaria a
+    "parcela 2/2 da Bianca Oliveira" com o dinheiro do SINAL (parcela 1) — ou
+    seja, fecharia uma dívida que a cliente ainda tem e inventaria receita que não
+    entrou. Por isso aqui não se dá baixa em nada: a tela avisa, conta quantos
+    candidatos existem e deixa a decisão com quem sabe.
+
+    Três travas contra o falso positivo:
+
+    * lançamento que JÁ é a baixa de algum título não vira candidato de outro
+      (`titulos.lancamento_id`);
+    * **nem o gêmeo dele.** Esta trava nasceu conferindo a anterior em produção: a
+      primeira versão ainda sugeria o pagamento da parcela 2/2 da Bianca, porque o
+      dinheiro do sinal está no banco DUAS vezes — a baixa do título (amarrada, e
+      barrada pela trava 1) e a foto do mesmo comprovante (solta, e passava). Um
+      lançamento de mesmo valor e mesma data de um lançamento `origem='titulo'` é
+      o eco daquele dinheiro, não dinheiro novo — é a mesma régua que
+      `_dados_vendas` usa pra não contar o sinal duas vezes;
+    * a janela é apertada de propósito (ver `_JANELA_CANDIDATO_DIAS`), porque em
+      conta recorrente o mesmo valor se repete todo mês.
+
+    Devolve {titulo_id: {"n", "data", "lancamento_id", "centavos"}}.
+    """
+    alvos = [t for t in titulos if t["vencimento"] and t["valor_centavos"]]
+    if not alvos:
+        return {}
+    lanc_tipo = "despesa" if tipo == "pagar" else "receita"
+    janela = timedelta(days=_JANELA_CANDIDATO_DIAS)
+    de = min(t["vencimento"] for t in alvos) - janela
+    ate = max(t["vencimento"] for t in alvos) + janela
+    with pool.connection() as c:
+        rows = c.execute(
+            """select l.id, l.data, l.valor_centavos from lancamentos l
+                where l.conta_id=%s and l.tipo=%s and l.data >= %s and l.data <= %s
+                  and not exists (select 1 from titulos t
+                                   where t.lancamento_id = l.id and t.conta_id = l.conta_id)
+                  and (l.origem = 'titulo' or not exists (
+                        select 1 from lancamentos g
+                         where g.conta_id = l.conta_id and g.origem = 'titulo'
+                           and g.tipo = l.tipo and g.data = l.data
+                           and g.valor_centavos = l.valor_centavos))""",
+            (conta_id, lanc_tipo, de, ate),
+        ).fetchall()
+    por_valor: dict[int, list] = {}
+    for lid, data, valor in rows:
+        por_valor.setdefault(int(valor or 0), []).append((data, lid))
+    achados = {}
+    for t in alvos:
+        perto = [p for p in por_valor.get(t["valor_centavos"], [])
+                 if abs((p[0] - t["vencimento"]).days) <= _JANELA_CANDIDATO_DIAS]
+        if perto:
+            perto.sort(key=lambda p: abs((p[0] - t["vencimento"]).days))
+            achados[t["id"]] = {"n": len(perto), "data": perto[0][0],
+                                "lancamento_id": perto[0][1],
+                                "centavos": t["valor_centavos"]}
+    return achados
 
 
 def _dados_titulos_abertos(pool, conta_id, tipo):
     """Contas a pagar/receber: SEMPRE mostra tudo que está em aberto — período não
-    se aplica aqui (uma conta aberta continua aberta até ser paga, não "expira")."""
+    se aplica aqui (uma conta aberta continua aberta até ser paga, não "expira").
+
+    A coluna "Conferir" é a metade nova: em produção o dinheiro sai pelo extrato e
+    pela foto do comprovante, e o título fica aberto pra sempre porque ninguém
+    clica em "pago" — em 01/09/2026 a produção inteira tinha 38 títulos abertos,
+    11 vencidos (R$ 27.170,85, um deles há 58 dias) e ZERO baixas feitas por
+    gente. A coluna não resolve isso; ela deixa de esconder."""
     hoje = date.today()
     tits = emp.listar_titulos(pool, conta_id, status="aberto", tipo=tipo, limite=300)
+    candidatos = _pagamentos_candidatos(pool, conta_id, tits, tipo)
+    verbo = "pago" if tipo == "pagar" else "recebido"
     linhas = []
     for t in tits:
         if t["atrasado"]:
@@ -222,55 +449,200 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
         else:
             dias = (t["vencimento"] - hoje).days if t["vencimento"] else None
             status, cor = "A vencer", ("aviso" if dias is not None and dias <= 7 else "ok")
+        c = candidatos.get(t["id"])
+        acao = None
+        if not c:
+            conferir = ""
+        elif c["n"] == 1:
+            conferir = f"parece {verbo} em {_fmt(c['data'])}"
+            # botão SÓ no candidato único. Com dois candidatos a tela conta e não
+            # escolhe (ver acima) — oferecer botão ali seria pedir pro dono
+            # confirmar um chute que a própria tela não soube fazer.
+            acao = {"url": "/painel/relatorios/conciliar",
+                    "campos": {"titulo_id": t["id"], "lancamento_id": c["lancamento_id"],
+                               "tipo": tipo},
+                    "rotulo": "✓", "titulo": f"Marcar como {verbo} em {_fmt(c['data'])}",
+                    "confirmar": (f"Marcar “{(t['descricao'] or '').strip()[:60]}” como "
+                                  f"{verbo} em {_fmt(c['data'])}?\n\n"
+                                  f"Isso liga esta conta ao pagamento de "
+                                  f"{_brl(t['valor_centavos'])} que já está no caixa. "
+                                  "Nenhum dinheiro novo é lançado, e dá pra desfazer "
+                                  f"em Contas {'pagas' if tipo == 'pagar' else 'recebidas'}.")}
+        else:
+            # dizer QUAL seria chute quando há vários do mesmo valor por perto —
+            # e chute numa tela de dinheiro é o que esta coluna existe pra evitar
+            conferir = f"{c['n']} pagamentos iguais por perto"
         linhas.append({
             "vencimento": _fmt(t["vencimento"]),
             "contraparte": t["cliente_nome"] or t["contraparte"] or "—",
             "categoria": t["categoria"] or "—", "status": status, "status_cor": cor,
+            "conferir": conferir, "conferir_cor": "aviso",
+            "acao_post": acao,
             "valor_centavos": t["valor_centavos"],
         })
     total = _soma(linhas, "valor_centavos")
     vencidas = [r for r in linhas if r["status"] == "Vencida"]
     a_vencer_7d = [r for r in linhas if r["status_cor"] == "aviso"]
+    a_conferir = [r for r in linhas if r["conferir"]]
     rotulo_col = "Fornecedor" if tipo == "pagar" else "Cliente"
     label = "Contas a pagar" if tipo == "pagar" else "Contas a receber"
-    return {
+    dados = {
         "label": label, "mock": False, "sem_periodo": True,
+        "acao": any(r["acao_post"] for r in linhas), "acao_rotulo": "Conciliar",
         "colunas": [_col("vencimento", "Vencimento"), _col("contraparte", rotulo_col, flex=True),
                     _col("categoria", "Categoria"), _col("status", "Status", tag=True),
+                    _col("conferir", "Conferir", tag=True),
                     _col("valor_centavos", "Valor", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
         "metricas": [("Total em aberto", _brl(total)),
                      ("Vencidas", f"{len(vencidas)} · {_brl(_soma(vencidas, 'valor_centavos'))}"),
-                     ("A vencer em 7 dias", _brl(_soma(a_vencer_7d, "valor_centavos")))],
+                     ("A vencer em 7 dias", _brl(_soma(a_vencer_7d, "valor_centavos"))),
+                     (f"Talvez já {verbo}", f"{len(a_conferir)} · "
+                      f"{_brl(_soma(a_conferir, 'valor_centavos'))}")],
     }
+    if a_conferir:
+        plural = "s" if len(a_conferir) != 1 else ""
+        dados["aviso_config"] = (
+            f"{len(a_conferir)} conta{plural} em aberto {'têm' if plural else 'tem'} "
+            f"um pagamento do mesmo valor por perto — pode ser que já "
+            f"{'estejam' if plural else 'esteja'} {verbo}{plural}. Confira antes de "
+            "cobrar ou pagar de novo; a baixa continua sendo sua, o Zaq só avisa."
+        )
+    return dados
 
 
-def _dados_titulos_pagos(pool, conta_id, tipo, periodo):
+# De onde o dinheiro veio, pra tela dizer isso em uma palavra. A cor separa o
+# caminho COMPLETO (nasceu de uma venda ou de um título e fechou o ciclo) do
+# caminho que só passou pelo caixa — é a diferença que a aba existe pra mostrar.
+_ORIGEM = {
+    "balcao":  ("Balcão", "ok"),
+    "titulo":  ("Título", "ok"),
+    "foto":    ("Comprovante", "neutro"),
+    "manual":  ("Manual", "neutro"),
+    "folha":   ("Folha", "neutro"),
+    "replica": ("Cópia", "neutro"),
+    "extrato": ("Extrato", "info"),
+}
+
+
+def _dados_caixa(pool, conta_id, tipo, periodo):
+    """Contas pagas / Contas recebidas: o DINHEIRO que andou, não o título baixado.
+
+    Antes estas duas abas liam `titulos` com status='pago'. O efeito, conferido em
+    produção em 01/09/2026: **Contas pagas estava vazia em TODAS as contas, desde
+    sempre**. Na Prime (conta 34) saíram R$ 34.232,86 do caixa em agosto — 53
+    pagamentos — e a tela mostrava R$ 0,00.
+
+    A causa não era bug de consulta, era desenho. Título só vira 'pago' quando
+    alguém clica no botão, e o levantamento mostrou que **ninguém nunca clicou**:
+    das 40 linhas de `titulos` da produção inteira, 2 estavam pagas, e as duas
+    foram baixadas pelo próprio sistema (o fluxo do sinal, em finance/vendas.py).
+    Enquanto isso o dinheiro real entra sozinho por dois caminhos que nascem
+    direto em `lancamentos` e nunca encostam num título: a importação do extrato
+    (OFX) e a foto do comprovante mandada no WhatsApp.
+
+    Então a aba passa a responder a PERGUNTA em vez de espelhar a tabela:
+    "quanto eu paguei/recebi, e do quê" é uma pergunta de caixa. O título continua
+    existindo e continua certo onde ele é a resposta — Contas a pagar e Contas a
+    receber, que são sobre COMPROMISSO e não mudaram de fonte.
+
+    Nada se perde na troca: título que foi baixado gerou lançamento com
+    `origem='titulo'` (dar_baixa_titulo, finance/empresa.py), então as linhas que
+    a aba mostrava antes continuam aparecendo — agora com o resto junto.
+
+    Só `natureza='empresa'`, igual à aba Vendas: relatório aqui é módulo PJ, e
+    despesa pessoal do dono não é conta paga da empresa. O que está "a definir"
+    (natureza nula) fica de fora da soma mas NÃO fica calado — vira aviso na tela,
+    porque em produção isso é dinheiro de verdade (a conta 3 tem R$ 20.901,18 de
+    despesa sem natureza definida) e sumir com ele é o erro que esta aba acabou
+    de deixar de cometer.
+    """
     ini, fim = _intervalo(periodo)
-    tits = emp.listar_titulos(pool, conta_id, status="pago", tipo=tipo, limite=500)
+    lanc_tipo = "despesa" if tipo == "pagar" else "receita"
+    with pool.connection() as c:
+        rows = c.execute(
+            """select l.data, l.descricao, l.categoria, l.origem, l.valor_centavos,
+                      coalesce(cl.nome, '') as cliente, t.descricao as titulo,
+                      t.id as titulo_id
+                 from lancamentos l
+                 left join clientes cl on cl.id = l.cliente_id
+                 left join titulos t on t.lancamento_id = l.id and t.conta_id = l.conta_id
+                where l.conta_id=%s and l.tipo=%s and l.natureza='empresa'
+                  and l.data >= %s and l.data <= %s
+                order by l.data desc, l.id desc limit 500""",
+            (conta_id, lanc_tipo, ini, fim),
+        ).fetchall()
+        # o que ainda não foi classificado como empresa ou pessoal, no MESMO
+        # período: não entra na conta, mas a tela avisa que existe
+        indef = c.execute(
+            """select count(*), coalesce(sum(valor_centavos), 0) from lancamentos
+                where conta_id=%s and tipo=%s and natureza is null
+                  and data >= %s and data <= %s""",
+            (conta_id, lanc_tipo, ini, fim),
+        ).fetchone()
     linhas = []
-    for t in tits:
-        pg = t["pago_em"]
-        if pg is None or pg < ini or pg > fim:
-            continue
+    for r in rows:
+        rotulo, cor = _ORIGEM.get(r[3] or "", ((r[3] or "—").capitalize(), "neutro"))
         linhas.append({
-            "data": _fmt(pg), "contraparte": t["cliente_nome"] or t["contraparte"] or "—",
-            "categoria": t["categoria"] or "—", "valor_centavos": t["valor_centavos"],
+            "data": _fmt(r[0]),
+            # a descrição é onde o nome está de verdade ("Serviço de pintura —
+            # Ronaldo Vaz"); o cadastro de cliente só existe em venda de balcão,
+            # e é o que salva a linha quando a descrição vem vazia
+            "descricao": (r[1] or "").strip() or r[5] or "—",
+            "categoria": r[2] or "—",
+            "origem": rotulo, "origem_cor": cor,
+            # a conta que este pagamento fechou. VAZIO quando não fechou nenhuma,
+            # e não "nenhum título": em produção a coluna é vazia em quase toda
+            # linha, e 53 pílulas dizendo "nenhum" viram ruído. Assim a pílula só
+            # aparece onde existe o elo — que é a informação rara e a que importa.
+            "quitou": (r[6] or "")[:60], "quitou_cor": "ok",
+            # desfazer mora AQUI, e não na aba de compromisso, porque lá só
+            # aparecem títulos ABERTOS: assim que a conciliação acontece o título
+            # some de vista, e o dono ficaria sem lugar pra corrigir o engano.
+            # Só oferece em conciliação: baixa comum criou o lançamento dela
+            # (origem='titulo'), e reabrir aquilo deixaria dinheiro sem dono.
+            "acao_post": ({
+                "url": "/painel/relatorios/desfazer-conciliacao",
+                "campos": {"titulo_id": r[7], "tipo": tipo},
+                "rotulo": "✕", "titulo": f"Desfazer o vínculo com “{(r[6] or '')[:40]}”",
+                "confirmar": (f"Desligar este pagamento de “{(r[6] or '')[:60]}”?\n\n"
+                              "A conta volta pra em aberto. O pagamento continua no "
+                              "caixa, do jeito que está — some só o vínculo."),
+            } if r[7] and (r[3] or "") != "titulo" else None),
+            "valor_centavos": int(r[4] or 0),
         })
     total = _soma(linhas, "valor_centavos")
     maior = max((r["valor_centavos"] for r in linhas), default=0)
-    rotulo_col = "Fornecedor" if tipo == "pagar" else "Cliente"
+    de_titulo = sum(1 for r in linhas if r["quitou"])
+    rotulo_col = "Fornecedor / descrição" if tipo == "pagar" else "Cliente / descrição"
     label = "Contas pagas" if tipo == "pagar" else "Contas recebidas"
     verbo = "pago" if tipo == "pagar" else "recebido"
-    return {
+    quantos = "Nº de pagamentos" if tipo == "pagar" else "Nº de entradas"
+    dados = {
         "label": label, "mock": False,
+        "acao": any(r["acao_post"] for r in linhas), "acao_rotulo": "Desfazer",
         "colunas": [_col("data", "Pagamento" if tipo == "pagar" else "Recebimento"),
-                    _col("contraparte", rotulo_col, flex=True), _col("categoria", "Categoria"),
+                    _col("descricao", rotulo_col, flex=True), _col("categoria", "Categoria"),
+                    _col("origem", "Entrou por", tag=True),
+                    _col("quitou", "Quitou", tag=True),
                     _col("valor_centavos", f"Valor {verbo}", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
-        "metricas": [(f"Total {verbo} no período", _brl(total)), ("Nº de registros", str(len(linhas))),
+        "metricas": [(f"Total {verbo} no período", _brl(total)), (quantos, str(len(linhas))),
+                     # o número que mostra o buraco: quantos fecharam o ciclo com
+                     # o compromisso em vez de só passarem pelo caixa
+                     ("Quitaram um título", str(de_titulo)),
                      ("Maior valor", _brl(maior))],
     }
+    n_indef, v_indef = int(indef[0] or 0), int(indef[1] or 0)
+    if n_indef:
+        plural = "s" if n_indef != 1 else ""
+        dados["aviso_config"] = (
+            f"{n_indef} lançamento{plural} somando {_brl(v_indef)} ainda "
+            f"{'estão' if n_indef != 1 else 'está'} como “a definir” e "
+            f"{'ficam' if n_indef != 1 else 'fica'} fora desta conta — diga se "
+            "são da empresa ou pessoais no Financeiro."
+        )
+    return dados
 
 
 def _dados_comissao(pool, conta_id, periodo):
@@ -1250,9 +1622,9 @@ TIPOS = {
     "vendas": {"label": "Vendas", "montar": lambda pool, cid, per, **f: _dados_vendas(pool, cid, per)},
     "contas_pagar": {"label": "Contas a pagar", "montar": lambda pool, cid, per, **f: _dados_titulos_abertos(pool, cid, "pagar")},
     "contas_receber": {"label": "Contas a receber", "montar": lambda pool, cid, per, **f: _dados_titulos_abertos(pool, cid, "receber")},
-    "pagas": {"label": "Contas pagas", "montar": lambda pool, cid, per, **f: _dados_titulos_pagos(pool, cid, "pagar", per)},
+    "pagas": {"label": "Contas pagas", "montar": lambda pool, cid, per, **f: _dados_caixa(pool, cid, "pagar", per)},
     "comissao": {"label": "Comissão", "montar": lambda pool, cid, per, **f: _dados_comissao(pool, cid, per)},
-    "recebidas": {"label": "Contas recebidas", "montar": lambda pool, cid, per, **f: _dados_titulos_pagos(pool, cid, "receber", per)},
+    "recebidas": {"label": "Contas recebidas", "montar": lambda pool, cid, per, **f: _dados_caixa(pool, cid, "receber", per)},
     "orcamentos": {"label": "Orçamentos", "montar": lambda pool, cid, per, **f: _dados_orcamentos(
         pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
     "contratos": {"label": "Contratos", "montar": lambda pool, cid, per, **f: _dados_contratos(
@@ -1429,6 +1801,11 @@ def painel_relatorios(request: Request, tipo: str = "vendas", periodo: str = "me
                    periodo_rotulo=_rotulo_periodo(tipo, periodo, de, ate),
                    tem_periodo_livre=any(v == "personalizado"
                                          for v, _ in periodos_da_aba(tipo)),
+                   # o resultado da última gravação, uma vez só. Sem isto o dono
+                   # clica em conciliar e a tela recarrega igualzinha, sem dizer se
+                   # deu certo — e numa tela de dinheiro isso é pior que o erro.
+                   aviso=request.session.pop("aviso", None),
+                   erro=request.session.pop("erro", None),
                    de=de or "", ate=ate or "", dados=dados)
 
 
@@ -1449,3 +1826,57 @@ def painel_relatorios_pdf(request: Request, tipo: str = "vendas", periodo: str =
         gerado_em=datetime.now().strftime("%d/%m/%Y %H:%M"),
         **_letterhead(pool, conta),
     ))
+
+
+# ─────────────────────────────────────────────── conciliar (o passo que grava)
+#
+# As três rotas de leitura acima não tocam no banco. Estas duas tocam — e são as
+# únicas do módulo que tocam. Por isso repetem o gate `_pode_ver` (capacidade
+# financeiro) e revalidam TUDO no servidor: o pedido vem do navegador, e navegador
+# não é fonte confiável. A régua da revalidação é a mesma que gerou o botão
+# (`emp.pagamento_serve_pro_titulo`), então não existe botão que o servidor recuse
+# por critério diferente do que a tela usou pra oferecer.
+
+def _volta_pra(tipo: str, aba: str) -> RedirectResponse:
+    return RedirectResponse(f"/painel/relatorios?tipo={aba}", status_code=303)
+
+
+@router.post("/painel/relatorios/conciliar")
+def relatorios_conciliar(request: Request, titulo_id: int = Form(...),
+                         lancamento_id: int = Form(...), tipo: str = Form("pagar")):
+    """Liga um pagamento que já está no caixa a uma conta em aberto."""
+    conta, redir = _pode_ver(request)
+    if redir is not None:
+        return redir
+    tipo = "pagar" if tipo != "receber" else "receber"
+    aba = "contas_pagar" if tipo == "pagar" else "contas_receber"
+    r = emp.conciliar_titulo(get_pool(), conta[0], titulo_id, lancamento_id)
+    if not r.get("ok"):
+        request.session["erro"] = r.get("erro") or "Não consegui ligar esse pagamento."
+    else:
+        verbo = "paga" if r["tipo"] == "pagar" else "recebida"
+        onde = "pagas" if r["tipo"] == "pagar" else "recebidas"
+        request.session["aviso"] = (
+            f"“{(r['descricao'] or '').strip()[:60]}” marcada como {verbo} em "
+            f"{_fmt(r['pago_em'])}. Nenhum dinheiro novo foi lançado — se errei, "
+            f"dá pra desfazer em Contas {onde}.")
+    return _volta_pra(tipo, aba)
+
+
+@router.post("/painel/relatorios/desfazer-conciliacao")
+def relatorios_desfazer_conciliacao(request: Request, titulo_id: int = Form(...),
+                                    tipo: str = Form("pagar")):
+    """Reabre a conta que foi ligada ao pagamento errado. O pagamento não se mexe."""
+    conta, redir = _pode_ver(request)
+    if redir is not None:
+        return redir
+    tipo = "pagar" if tipo != "receber" else "receber"
+    aba = "pagas" if tipo == "pagar" else "recebidas"
+    r = emp.desfazer_conciliacao(get_pool(), conta[0], titulo_id)
+    if not r.get("ok"):
+        request.session["erro"] = r.get("erro") or "Não consegui desfazer."
+    else:
+        request.session["aviso"] = (
+            f"“{(r['descricao'] or '').strip()[:60]}” voltou pra em aberto. "
+            "O pagamento continua no caixa, do jeito que estava.")
+    return _volta_pra(tipo, aba)

@@ -1,0 +1,505 @@
+<title>Venda ou só dinheiro entrando</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+
+<style>
+/* ────────────────────────────────────────────────────────────────────────────
+   TOKENS — cópia fiel de web/tema.py (_TOKENS), igual aos mockups irmãos
+   (receitas_aporte.html, relatorios_largura.html, qr_contagem.html).
+   O sistema da casa é comprometido com o escuro: color-scheme dark, fundo e cor
+   pintados explicitamente, sem media query de tema.
+
+   As TRÊS cores semânticas aqui carregam o veredito de cada linha, e é o que o
+   documento inteiro usa pra separar as coisas:
+     neon  = venda de verdade
+     âmbar = entrou no caixa, mas não é venda
+     coral = o mesmo dinheiro contado duas vezes
+   ──────────────────────────────────────────────────────────────────────── */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-fundo:#10241A; --neon-borda:#1E4A3A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--text); font-family:var(--body);
+  max-width:1080px; margin:0 auto; padding:44px 20px 120px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-family:var(--display); letter-spacing:-.02em; text-wrap:balance}
+h1{font-size:2.05rem; font-weight:700; line-height:1.1}
+h2{font-size:1.24rem; font-weight:700}
+h3{font-size:.95rem; font-weight:600}
+p{max-width:72ch}
+code{font-family:var(--mono); font-size:.85em; background:var(--bg-2);
+  padding:.1rem .38rem; border-radius:4px; color:var(--text-dim)}
+b,strong{color:var(--text); font-weight:600}
+a{color:var(--neon-bright)}
+
+.lede{color:var(--text-dim); font-size:1.02rem; max-width:70ch; margin-top:.8rem}
+.sec{margin-top:56px}
+.eyebrow{font-family:var(--mono); font-size:.7rem; color:var(--neon);
+  letter-spacing:.12em; text-transform:uppercase; margin-bottom:.45rem}
+.sec > p{color:var(--text-dim); font-size:.93rem; margin-top:.75rem}
+.mut{color:var(--text-dim)}
+.val{font-family:var(--mono); font-variant-numeric:tabular-nums;
+  font-weight:500; white-space:nowrap}
+
+/* ── o placar de abertura ──────────────────────────────────────────────── */
+.placar{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+  gap:14px; margin-top:2rem}
+.pl{background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  padding:16px 18px}
+.pl-rot{font-size:.72rem; color:var(--text-dim); text-transform:uppercase;
+  letter-spacing:.08em}
+.pl-num{font-family:var(--mono); font-variant-numeric:tabular-nums;
+  font-size:1.6rem; font-weight:600; margin-top:.35rem; letter-spacing:-.02em}
+.pl-pe{font-size:.75rem; color:var(--text-faint); margin-top:.3rem}
+.pl.errado{border-color:var(--coral-borda); background:var(--coral-fundo)}
+.pl.errado .pl-num{color:var(--coral)}
+.pl.certo{border-color:var(--neon-borda); background:var(--neon-fundo)}
+.pl.certo .pl-num{color:var(--neon-bright)}
+.pl.aviso .pl-num{color:var(--ambar)}
+
+/* ── o razão auditado: cada linha com seu veredito ─────────────────────── */
+.wrap{overflow-x:auto; margin-top:1.2rem; border:1px solid var(--line);
+  border-radius:12px; background:var(--surface)}
+table{width:100%; border-collapse:collapse; font-size:.855rem; min-width:660px}
+thead th{text-align:left; font-family:var(--mono); font-size:.68rem;
+  text-transform:uppercase; letter-spacing:.09em; color:var(--text-dim);
+  font-weight:500; padding:11px 12px; border-bottom:1px solid var(--line);
+  white-space:nowrap; background:var(--bg-2)}
+tbody td{padding:9px 12px; border-bottom:1px solid var(--line);
+  white-space:nowrap; vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+td.livre{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  max-width:0; width:99%}
+td.num{text-align:right; font-family:var(--mono);
+  font-variant-numeric:tabular-nums; font-weight:500}
+tfoot td{padding:11px 12px; border-top:1px solid var(--line); font-weight:600;
+  background:var(--bg-2)}
+
+/* a tarja da esquerda é o veredito — cor e estado juntos, legível de relance */
+tr.v-venda td:first-child{box-shadow:inset 3px 0 0 var(--neon)}
+tr.v-caixa td:first-child{box-shadow:inset 3px 0 0 var(--ambar)}
+tr.v-dup td:first-child{box-shadow:inset 3px 0 0 var(--coral)}
+tr.v-caixa, tr.v-dup{color:var(--text-dim)}
+tr.v-dup td.num{text-decoration:line-through; text-decoration-color:var(--coral)}
+
+.tag{display:inline-block; font-family:var(--mono); font-size:.66rem;
+  font-weight:500; padding:.16rem .45rem; border-radius:5px; white-space:nowrap;
+  border:1px solid transparent}
+.tag.venda{color:var(--neon-bright); background:var(--neon-fundo); border-color:var(--neon-borda)}
+.tag.caixa{color:var(--ambar); background:var(--ambar-fundo); border-color:var(--ambar-borda)}
+.tag.dup{color:var(--coral); background:var(--coral-fundo); border-color:var(--coral-borda)}
+.tag.canal{color:var(--text-dim); background:var(--bg-2); border-color:var(--line)}
+
+.legenda{display:flex; flex-wrap:wrap; gap:1.1rem; margin-top:.85rem;
+  font-size:.78rem; color:var(--text-dim)}
+.legenda span{display:flex; align-items:center; gap:.4rem}
+.pt{width:9px; height:9px; border-radius:2px; flex:none}
+
+/* ── blocos de motivo ──────────────────────────────────────────────────── */
+.motivos{display:grid; grid-template-columns:repeat(auto-fit,minmax(258px,1fr));
+  gap:14px; margin-top:1.3rem}
+.mv{background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  padding:16px 18px; border-top:2px solid var(--line)}
+.mv.caixa{border-top-color:var(--ambar)}
+.mv.dup{border-top-color:var(--coral)}
+.mv h3{margin-bottom:.15rem}
+.mv .quanto{font-family:var(--mono); font-variant-numeric:tabular-nums;
+  font-size:1.05rem; font-weight:600; margin:.4rem 0 .5rem}
+.mv.caixa .quanto{color:var(--ambar)}
+.mv.dup .quanto{color:var(--coral)}
+.mv p{font-size:.84rem; color:var(--text-dim); max-width:none}
+
+/* ── a tela proposta ───────────────────────────────────────────────────── */
+.tela{background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  padding:18px 20px; margin-top:1.1rem}
+.tela-tit{font-family:var(--display); font-size:1rem; font-weight:700;
+  display:flex; align-items:center; justify-content:space-between; gap:.8rem;
+  flex-wrap:wrap; margin-bottom:.9rem}
+.abas{display:flex; gap:.3rem; flex-wrap:wrap; margin-bottom:1rem}
+.aba{font-size:.76rem; padding:.32rem .6rem; border-radius:7px;
+  border:1px solid var(--line); color:var(--text-dim); background:var(--bg-2)}
+.aba.on{color:var(--bg); background:var(--neon); border-color:var(--neon);
+  font-weight:600}
+.mets{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:10px; margin-bottom:1rem}
+.met{background:var(--bg-2); border:1px solid var(--line); border-radius:9px;
+  padding:11px 13px}
+.met span{display:block; font-size:.7rem; color:var(--text-dim)}
+.met b{display:block; font-family:var(--mono); font-variant-numeric:tabular-nums;
+  font-size:1.02rem; margin-top:.25rem}
+
+/* o rodapé que devolve o dinheiro que saiu da aba — nada some calado */
+.fora{margin-top:1.1rem; border:1px solid var(--ambar-borda);
+  background:var(--ambar-fundo); border-radius:10px; padding:14px 16px}
+.fora-tit{font-size:.84rem; font-weight:600; color:var(--ambar);
+  display:flex; align-items:center; gap:.45rem; margin-bottom:.55rem}
+.fora ul{list-style:none; display:grid; gap:.4rem}
+.fora li{display:flex; justify-content:space-between; gap:1rem; font-size:.82rem;
+  color:var(--text-dim); border-bottom:1px dashed var(--ambar-borda);
+  padding-bottom:.4rem}
+.fora li:last-child{border-bottom:0; padding-bottom:0}
+.fora li b{color:var(--text); font-family:var(--mono);
+  font-variant-numeric:tabular-nums; font-weight:500; white-space:nowrap}
+.fora-pe{font-size:.76rem; color:var(--text-faint); margin-top:.6rem}
+
+/* ── caixa de decisão / nota ───────────────────────────────────────────── */
+.nota{border:1px solid var(--line); border-left:3px solid var(--neon);
+  background:var(--surface); border-radius:0 10px 10px 0; padding:15px 18px;
+  margin-top:1.2rem}
+.nota.atencao{border-left-color:var(--ambar)}
+.nota h3{margin-bottom:.4rem}
+.nota p{font-size:.88rem; color:var(--text-dim); margin-top:.5rem}
+.nota p:first-of-type{margin-top:0}
+
+.opcoes{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+  gap:14px; margin-top:1.2rem}
+.op{background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  padding:17px 19px}
+.op.rec{border-color:var(--neon-borda)}
+.op-sel{font-family:var(--mono); font-size:.66rem; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--text-faint); margin-bottom:.35rem}
+.op.rec .op-sel{color:var(--neon)}
+.op p{font-size:.85rem; color:var(--text-dim); margin-top:.55rem; max-width:none}
+.op .resultado{font-family:var(--mono); font-variant-numeric:tabular-nums;
+  font-size:.82rem; margin-top:.75rem; padding-top:.7rem;
+  border-top:1px solid var(--line); color:var(--text-dim)}
+.op .resultado b{color:var(--text)}
+
+ul.lista{list-style:none; display:grid; gap:.55rem; margin-top:.9rem;
+  font-size:.89rem; color:var(--text-dim); max-width:72ch}
+ul.lista li{display:flex; gap:.6rem}
+ul.lista li::before{content:"—"; color:var(--text-faint); flex:none}
+
+hr{border:0; border-top:1px solid var(--line); margin:56px 0 0}
+.rodape{font-size:.78rem; color:var(--text-faint); margin-top:1.4rem; max-width:74ch}
+
+@media (prefers-reduced-motion:no-preference){
+  .pl,.mv,.op{transition:border-color .15s ease}
+}
+:focus-visible{outline:2px solid var(--neon-bright); outline-offset:2px}
+</style>
+
+<p class="eyebrow">Proposta · relatórios · para aprovação</p>
+<h1>Venda ou só dinheiro entrando</h1>
+<p class="lede">
+  A aba <b>Vendas</b> hoje soma <b>todo lançamento de receita da empresa</b> —
+  não importa se veio de uma venda, do extrato do banco ou do bolso do sócio.
+  Na Prime Eventos isso faz o relatório dizer <b>R$&nbsp;31.020,05</b> onde a
+  empresa vendeu <b>R$&nbsp;6.100,00</b>.
+</p>
+
+<div class="placar">
+  <div class="pl errado">
+    <div class="pl-rot">Vendas diz hoje</div>
+    <div class="pl-num">R$ 31.020,05</div>
+    <div class="pl-pe">19 linhas · todo o período</div>
+  </div>
+  <div class="pl certo">
+    <div class="pl-rot">Venda de verdade</div>
+    <div class="pl-num">R$ 6.100,00</div>
+    <div class="pl-pe">4 linhas · produto ou serviço</div>
+  </div>
+  <div class="pl aviso">
+    <div class="pl-rot">Não era venda</div>
+    <div class="pl-num">R$ 24.920,05</div>
+    <div class="pl-pe">15 linhas · 80% do total da aba</div>
+  </div>
+</div>
+
+<!-- ─────────────────────────────────────────────────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">O razão da Prime, linha por linha</p>
+  <h2>As 19 linhas que a aba Vendas mostra hoje</h2>
+  <p>
+    Dado real da conta 34 (PRIME EVENTOS), lido em 01/09/2026. É tudo que a
+    consulta de hoje devolve: <code>lancamentos</code> com
+    <code>tipo='receita'</code> e <code>natureza='empresa'</code>. A tarja da
+    esquerda é o veredito.
+  </p>
+
+  <div class="wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Data</th><th>Descrição</th><th>Canal</th><th>Categoria</th>
+          <th>Veredito</th><th style="text-align:right">Valor</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="v-venda"><td>31/08</td><td class="livre">Evento — Beatriz do Carmo Brito · Sinal</td><td><span class="tag canal">funil</span></td><td>Serviços</td><td><span class="tag venda">venda</span></td><td class="num">2.000,00</td></tr>
+        <tr class="v-venda"><td>28/08</td><td class="livre">Evento — Bianca Oliveira · Sinal</td><td><span class="tag canal">funil</span></td><td>Serviços</td><td><span class="tag venda">venda</span></td><td class="num">750,00</td></tr>
+        <tr class="v-dup"><td>28/08</td><td class="livre">Sinal 50% locação espaço - Bianca Oliveira (31/08/2026)</td><td><span class="tag canal">foto</span></td><td>Aluguel</td><td><span class="tag dup">repetida</span></td><td class="num">750,00</td></tr>
+        <tr class="v-venda"><td>28/08</td><td class="livre">50% contrato Drinks - Evento 12/09/2026 (Eduardo Dias Junior)</td><td><span class="tag canal">foto</span></td><td>Vendas</td><td><span class="tag venda">venda</span></td><td class="num">350,00</td></tr>
+        <tr class="v-venda"><td>28/08</td><td class="livre">Locação de espaço - Pedro Ribeiro de Sousa Santos Junior (Parc. 2/3)</td><td><span class="tag canal">foto</span></td><td>Aluguel</td><td><span class="tag venda">venda</span></td><td class="num">3.000,00</td></tr>
+        <tr class="v-caixa"><td>21/08</td><td class="livre">Aporte de sócio - Espaço Pelle Clínica Dermatológica</td><td><span class="tag canal">manual</span></td><td>Aporte</td><td><span class="tag caixa">é caixa</span></td><td class="num">200,00</td></tr>
+        <tr class="v-caixa"><td>21/08</td><td class="livre">Aporte sócio</td><td><span class="tag canal">foto</span></td><td>Outros</td><td><span class="tag caixa">é caixa</span></td><td class="num">2.500,00</td></tr>
+        <tr class="v-caixa"><td>17/08</td><td class="livre">Recebimento Pix ESPACO PELLE CLI</td><td><span class="tag canal">extrato</span></td><td>Outros</td><td><span class="tag caixa">é caixa</span></td><td class="num">2.182,90</td></tr>
+        <tr class="v-caixa"><td>17/08</td><td class="livre">REM.: ESPACO PELLE CLINICA DERMA</td><td><span class="tag canal">extrato</span></td><td>Outros</td><td><span class="tag caixa">é caixa</span></td><td class="num">800,00</td></tr>
+        <tr class="v-caixa"><td>12/08</td><td class="livre">Recebimento Pix Henderson Venici</td><td><span class="tag canal">extrato</span></td><td>Outros</td><td><span class="tag caixa">é caixa</span></td><td class="num">250,00</td></tr>
+        <tr class="v-caixa"><td>11/08</td><td class="livre">Recebimento Pix JACQUELINE DUART</td><td><span class="tag canal">extrato</span></td><td>Outros</td><td><span class="tag caixa">é caixa</span></td><td class="num">1.500,00</td></tr>
+        <tr class="v-caixa"><td>10/08</td><td class="livre">Recebimento Pix Pedro Ribeiro de</td><td><span class="tag canal">extrato</span></td><td>Outros</td><td><span class="tag caixa">é caixa</span></td><td class="num">2.010,00</td></tr>
+        <tr class="v-caixa"><td>10/08</td><td class="livre">Recebimento Pix Maria Alice Sous</td><td><span class="tag canal">extrato</span></td><td>Outros</td><td><span class="tag caixa">é caixa</span></td><td class="num">1.500,00</td></tr>
+        <tr class="v-caixa"><td>06/08</td><td class="livre">Recebimento Pix MARIA MADALENA S</td><td><span class="tag canal">extrato</span></td><td>Outros</td><td><span class="tag caixa">é caixa</span></td><td class="num">800,00</td></tr>
+        <tr class="v-caixa"><td>04/08</td><td class="livre">Recebimento Pix Jonas Barros Cas</td><td><span class="tag canal">extrato</span></td><td>Outros</td><td><span class="tag caixa">é caixa</span></td><td class="num">5.000,00</td></tr>
+        <tr class="v-caixa"><td>03/08</td><td class="livre">Recebimento Pix Maria Madalena S</td><td><span class="tag canal">extrato</span></td><td>Outros</td><td><span class="tag caixa">é caixa</span></td><td class="num">1.200,00</td></tr>
+        <tr class="v-caixa"><td>03/08</td><td class="livre">Recebimento Pix Francisca Nilda</td><td><span class="tag canal">extrato</span></td><td>Outros</td><td><span class="tag caixa">é caixa</span></td><td class="num">2.160,00</td></tr>
+        <tr class="v-caixa"><td>03/08</td><td class="livre">Recebimento Pix EDLLA MACHADO TH</td><td><span class="tag canal">extrato</span></td><td>Outros</td><td><span class="tag caixa">é caixa</span></td><td class="num">567,15</td></tr>
+        <tr class="v-caixa"><td>03/08</td><td class="livre">Montanna Santiago Benevídio</td><td><span class="tag canal">extrato</span></td><td>Outros</td><td><span class="tag caixa">é caixa</span></td><td class="num">3.500,00</td></tr>
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="5">Soma que a aba Vendas mostra hoje</td>
+          <td class="num" style="color:var(--coral)">31.020,05</td>
+        </tr>
+        <tr>
+          <td colspan="5">Venda de produto ou serviço</td>
+          <td class="num" style="color:var(--neon-bright)">6.100,00</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <div class="legenda">
+    <span><i class="pt" style="background:var(--neon)"></i> venda de produto ou serviço</span>
+    <span><i class="pt" style="background:var(--ambar)"></i> entrou no caixa, mas não é venda</span>
+    <span><i class="pt" style="background:var(--coral)"></i> o mesmo dinheiro já contado em outra linha</span>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">Por que cada uma saiu</p>
+  <h2>Três coisas diferentes vinham somando como venda</h2>
+
+  <div class="motivos">
+    <div class="mv caixa">
+      <h3>O extrato do banco</h3>
+      <div class="quanto">R$ 21.470,05 · 12 linhas</div>
+      <p>
+        Importar o OFX traz <b>todo crédito que caiu na conta</b>. Um Pix que
+        entrou é o <i>pagamento</i> de uma venda, não uma venda nova — e a mesma
+        venda costuma já estar registrada no funil ou na foto do comprovante.
+        Sozinho, esse canal responde por <b>69%</b> do total da aba na Prime.
+      </p>
+    </div>
+    <div class="mv caixa">
+      <h3>Aporte de sócio</h3>
+      <div class="quanto">R$ 2.700,00 · 2 linhas</div>
+      <p>
+        Dinheiro que o dono põe do bolso pra cobrir caixa. A tela do Financeiro
+        já separa isso desde 24/08 — <b>“Entrou, mas não é receita”</b>, com a
+        conta <code>7.1.05 Aporte de Sócios</code> criada pela migração 186. A
+        aba Vendas foi a única tela que nunca recebeu essa regra.
+      </p>
+    </div>
+    <div class="mv dup">
+      <h3>O mesmo sinal, duas vezes</h3>
+      <div class="quanto">R$ 750,00 · 1 linha</div>
+      <p>
+        A Bianca Oliveira pagou <b>um</b> sinal de R$&nbsp;750,00 em 28/08. Ele
+        entrou duas vezes: pela baixa do título do orçamento <b>e</b> pela foto
+        do comprovante que o dono mandou. A aba conta R$&nbsp;1.500,00 onde
+        entraram R$&nbsp;750,00.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">A proposta</p>
+  <h2>Vendas passa a mostrar só venda — e diz onde foi parar o resto</h2>
+  <p>
+    Uma venda de produto ou de serviço nasce em <b>três lugares</b> neste
+    sistema, e só neles: o balcão (PDV), o funil (orçamento fechado que virou
+    título) e o lançamento que o dono registra à mão ou por foto do comprovante.
+    A aba passa a mostrar esses três, com uma coluna nova dizendo de qual veio.
+  </p>
+
+  <div class="tela">
+    <div class="tela-tit"><span>📊 Relatórios · Prime Eventos</span>
+      <span class="mut" style="font-family:var(--body);font-weight:400;font-size:.78rem">Todo o período</span></div>
+    <div class="abas">
+      <span class="aba on">Vendas</span><span class="aba">Contas a pagar</span>
+      <span class="aba">Contas a receber</span><span class="aba">Contas pagas</span>
+      <span class="aba">Contas recebidas</span><span class="aba">Comissão</span>
+      <span class="aba">Orçamentos</span><span class="aba">Agenda</span>
+    </div>
+
+    <div class="mets">
+      <div class="met"><span>Total vendido</span><b style="color:var(--neon-bright)">R$ 6.100,00</b></div>
+      <div class="met"><span>Nº de vendas</span><b>4</b></div>
+      <div class="met"><span>Ticket médio</span><b>R$ 1.525,00</b></div>
+      <div class="met"><span>Vendido hoje</span><b>R$ 0,00</b></div>
+    </div>
+
+    <div class="wrap" style="margin-top:0">
+      <table>
+        <thead>
+          <tr><th>Data</th><th>Cliente</th><th>O que foi vendido</th><th>Origem</th>
+              <th>Vendedor</th><th style="text-align:right">Valor</th></tr>
+        </thead>
+        <tbody>
+          <tr class="v-venda"><td>31/08</td><td>Beatriz do Carmo Brito</td><td class="livre">Evento · Sinal</td><td><span class="tag venda">Funil</span></td><td>—</td><td class="num">2.000,00</td></tr>
+          <tr class="v-venda"><td>28/08</td><td>Pedro Ribeiro de Sousa Santos Junior</td><td class="livre">Locação de espaço (Parc. 2/3)</td><td><span class="tag canal">Manual</span></td><td>Manoel</td><td class="num">3.000,00</td></tr>
+          <tr class="v-venda"><td>28/08</td><td>Bianca Oliveira</td><td class="livre">Evento · Sinal</td><td><span class="tag venda">Funil</span></td><td>—</td><td class="num">750,00</td></tr>
+          <tr class="v-venda"><td>28/08</td><td>Eduardo Dias Junior</td><td class="livre">Contrato Drinks · 50% · evento 12/09</td><td><span class="tag canal">Manual</span></td><td>Manoel</td><td class="num">350,00</td></tr>
+        </tbody>
+        <tfoot>
+          <tr><td colspan="5">Total</td><td class="num" style="color:var(--neon-bright)">6.100,00</td></tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div class="fora">
+      <div class="fora-tit">⚠ Entrou no caixa, mas não é venda — R$ 24.920,05</div>
+      <ul>
+        <li><span>12 recebimentos importados do extrato do banco</span><b>R$ 21.470,05</b></li>
+        <li><span>2 aportes de sócio</span><b>R$ 2.700,00</b></li>
+        <li><span>1 sinal já contado pelo título da Bianca Oliveira</span><b>R$ 750,00</b></li>
+      </ul>
+      <p class="fora-pe">
+        Nada sumiu: o extrato continua inteiro no <b>Livro-caixa</b>, os títulos
+        pagos em <b>Contas recebidas</b> e o aporte no bloco “Entrou, mas não é
+        receita” do <b>Financeiro</b>. Cada linha aqui abre no lançamento.
+      </p>
+    </div>
+  </div>
+
+  <div class="nota">
+    <h3>O que muda na tabela</h3>
+    <p>
+      <b>Cliente</b> ganha coluna própria — hoje o nome vem enfiado no meio da
+      descrição, e é ele que identifica a venda. <b>Origem</b> entra no lugar de
+      <b>Forma</b>, que na Prime está vazia em 15 das 19 linhas. <b>Categoria</b>
+      sai da tabela: com “Outros” em 13 linhas, ela não separava nada — vira a
+      coluna <b>O que foi vendido</b>, que é a pergunta real.
+    </p>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">A conferir antes de mexer</p>
+  <h2>Nas outras contas, a mudança quase não aparece</h2>
+  <p>
+    Rodei a regra proposta contra as quatro contas que têm receita de empresa
+    lançada. O que ela tira é exatamente o que está errado — nenhuma conta perde
+    venda de verdade, e nenhuma aba fica vazia.
+  </p>
+
+  <div class="wrap">
+    <table>
+      <thead>
+        <tr><th>Conta</th><th>Vendas hoje</th><th>Vendas na proposta</th>
+            <th class="livre">O que saiu</th><th style="text-align:right">Diferença</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>ZAQ — Sistemas IAs</td><td class="val">R$ 76.189,11 · 23</td><td class="val">R$ 75.689,11 · 22</td><td class="livre mut">1 aporte de sócio</td><td class="num" style="color:var(--ambar)">−500,00</td></tr>
+        <tr><td>Doce Mell</td><td class="val">R$ 18.102,14 · 23</td><td class="val">R$ 18.102,14 · 23</td><td class="livre mut">nada</td><td class="num">0,00</td></tr>
+        <tr><td>Conta 9 (balcão)</td><td class="val">R$ 81,00 · 4</td><td class="val">R$ 81,00 · 4</td><td class="livre mut">nada</td><td class="num">0,00</td></tr>
+        <tr><td><b>Prime Eventos</b></td><td class="val">R$ 31.020,05 · 19</td><td class="val" style="color:var(--neon-bright)">R$ 6.100,00 · 4</td><td class="livre mut">extrato, aporte e a linha repetida</td><td class="num" style="color:var(--coral)">−24.920,05</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="mut" style="font-size:.8rem;margin-top:.7rem">
+    Só a Prime carrega o problema inteiro — é a única que importa extrato. Foi
+    onde você mandou olhar, e é onde a conta estava errada.
+  </p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">A escolha é sua</p>
+  <h2>O extrato do banco entra em Vendas?</h2>
+  <p>
+    Esta é a única decisão que não posso tomar por você, porque depende de como
+    a Prime trabalha. Doze Pix caíram na conta em agosto — “Recebimento Pix
+    Jonas Barros”, “Recebimento Pix Maria Alice” — e <b>nenhum deles casa em
+    valor e data com um título ou com uma foto de comprovante</b>. Ou são
+    pagamentos de eventos que só existem no banco, ou são o dinheiro que já
+    está registrado de outro jeito.
+  </p>
+
+  <div class="opcoes">
+    <div class="op rec">
+      <div class="op-sel">Opção A · recomendada</div>
+      <h3>Extrato fica fora de Vendas</h3>
+      <p>
+        Venda é o que nasceu de uma venda: balcão, funil, ou o lançamento que
+        alguém da empresa registrou. O extrato é a perna bancária e vive no
+        Livro-caixa, com o total sempre visível no rodapé da aba.
+      </p>
+      <p>
+        <b>A favor:</b> é o único jeito de o número não contar duas vezes, e é a
+        mesma régua que o Financeiro já usa. <b>Contra:</b> se a Prime fecha
+        evento só no boca a boca e nunca registra, a venda não aparece — mas o
+        dinheiro continua no Livro-caixa e no saldo.
+      </p>
+      <div class="resultado">Prime, todo o período: <b>R$ 6.100,00</b> em 4 vendas</div>
+    </div>
+    <div class="op">
+      <div class="op-sel">Opção B</div>
+      <h3>Extrato entra quando não casa com nada</h3>
+      <p>
+        O Pix do banco entra em Vendas se não houver título nem lançamento do
+        mesmo valor por perto. Quando casar, conta uma vez só.
+      </p>
+      <p>
+        <b>A favor:</b> nenhuma venda fica de fora, mesmo a que só existe no
+        extrato. <b>Contra:</b> hoje nenhum dos 12 casa, então na prática todos
+        entrariam — inclusive os dois Pix da Espaço Pelle, que têm cara de
+        aporte. O número volta a inchar sem que a tela saiba explicar por quê.
+      </p>
+      <div class="resultado">Prime, todo o período: <b>R$ 27.570,05</b> em 16 vendas</div>
+    </div>
+  </div>
+
+  <div class="nota atencao">
+    <h3>Duas coisas que achei no caminho e não vou mexer sozinho</h3>
+    <p>
+      <b>1.</b> O lançamento “50% contrato Drinks” (R$&nbsp;350,00) está como
+      <i>receita</i>, mas classificado na conta <code>5.1.10 Serviços
+      Terceirizados</code>, que é de <b>despesa</b>. Ou o sinal está trocado, ou
+      o plano de contas. Deixei como venda no mockup e marquei pra você conferir.
+    </p>
+    <p>
+      <b>2.</b> O aporte de R$&nbsp;2.500,00 está na conta <code>1.2.03 Outras
+      Receitas</code> em vez de <code>7.1.05 Aporte de Sócios</code>. A regra o
+      pega pela descrição, mas o certo é corrigir o lançamento na origem — senão
+      ele continua contando como faturamento no DRE.
+    </p>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">Escopo</p>
+  <h2>O que este trabalho não toca</h2>
+  <ul class="lista">
+    <li><b>Nenhum dado é alterado.</b> A mudança é só na leitura do relatório. Nenhum lançamento é apagado, reclassificado ou movido de conta.</li>
+    <li><b>Contas pagas e Contas recebidas continuam como estão</b> — são títulos, e título é a conta que o cliente tem com a empresa. O que muda é que o dinheiro tirado de Vendas passa a ser apontado pra elas, em vez de sumir.</li>
+    <li><b>Livro-caixa e DRE não mudam.</b> O extrato continua lá inteiro, e o saldo da empresa continua o mesmo — venda e caixa são duas perguntas, e o sistema vai passar a responder as duas separadas.</li>
+    <li><b>Comissão fica pra depois.</b> Ela soma recebimento por vendedor e usa outro caminho (<code>finance/comissao.py</code>). Se Vendas mudar de régua, as duas telas voltam a divergir — quero olhar isso num passo só, depois que você aprovar a régua.</li>
+  </ul>
+</section>
+
+<hr>
+<p class="rodape">
+  Mockup para aprovação · dados reais da conta 34 (PRIME EVENTOS), lidos em
+  01/09/2026 · nenhuma alteração foi feita no banco. Aprovando a régua, implemento
+  em <code>web/painel_relatorios.py</code> reaproveitando o
+  <code>receita_e_operacional()</code> que o Financeiro já usa, com teste fixando
+  cada um dos três motivos de exclusão.
+</p>

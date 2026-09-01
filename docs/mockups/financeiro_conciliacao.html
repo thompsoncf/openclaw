@@ -1,0 +1,488 @@
+<title>As quatro abas que não se falam</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+
+<style>
+/* ────────────────────────────────────────────────────────────────────────────
+   TOKENS — cópia fiel de web/tema.py (_TOKENS), igual aos mockups irmãos.
+   Sistema da casa comprometido com o escuro: color-scheme dark, tudo pintado.
+
+   Semântica das cores neste documento:
+     neon  = o dinheiro que de fato andou (caixa)
+     âmbar = o compromisso ainda em aberto (título)
+     coral = onde a tela está mentindo hoje
+   ──────────────────────────────────────────────────────────────────────── */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-fundo:#10241A; --neon-borda:#1E4A3A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--text); font-family:var(--body);
+  max-width:1080px; margin:0 auto; padding:44px 20px 120px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-family:var(--display); letter-spacing:-.02em; text-wrap:balance}
+h1{font-size:2.05rem; font-weight:700; line-height:1.1}
+h2{font-size:1.24rem; font-weight:700}
+h3{font-size:.95rem; font-weight:600}
+p{max-width:72ch}
+code{font-family:var(--mono); font-size:.85em; background:var(--bg-2);
+  padding:.1rem .38rem; border-radius:4px; color:var(--text-dim)}
+b,strong{color:var(--text); font-weight:600}
+
+.lede{color:var(--text-dim); font-size:1.02rem; max-width:70ch; margin-top:.8rem}
+.sec{margin-top:56px}
+.eyebrow{font-family:var(--mono); font-size:.7rem; color:var(--neon);
+  letter-spacing:.12em; text-transform:uppercase; margin-bottom:.45rem}
+.sec > p{color:var(--text-dim); font-size:.93rem; margin-top:.75rem}
+.mut{color:var(--text-dim)}
+.val{font-family:var(--mono); font-variant-numeric:tabular-nums;
+  font-weight:500; white-space:nowrap}
+
+.placar{display:grid; grid-template-columns:repeat(auto-fit,minmax(212px,1fr));
+  gap:14px; margin-top:2rem}
+.pl{background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  padding:16px 18px}
+.pl-rot{font-size:.72rem; color:var(--text-dim); text-transform:uppercase;
+  letter-spacing:.08em}
+.pl-num{font-family:var(--mono); font-variant-numeric:tabular-nums;
+  font-size:1.55rem; font-weight:600; margin-top:.35rem; letter-spacing:-.02em}
+.pl-pe{font-size:.75rem; color:var(--text-faint); margin-top:.3rem}
+.pl.errado{border-color:var(--coral-borda); background:var(--coral-fundo)}
+.pl.errado .pl-num{color:var(--coral)}
+.pl.aviso .pl-num{color:var(--ambar)}
+.pl.certo{border-color:var(--neon-borda); background:var(--neon-fundo)}
+.pl.certo .pl-num{color:var(--neon-bright)}
+
+.wrap{overflow-x:auto; margin-top:1.2rem; border:1px solid var(--line);
+  border-radius:12px; background:var(--surface)}
+table{width:100%; border-collapse:collapse; font-size:.855rem; min-width:640px}
+thead th{text-align:left; font-family:var(--mono); font-size:.68rem;
+  text-transform:uppercase; letter-spacing:.09em; color:var(--text-dim);
+  font-weight:500; padding:11px 12px; border-bottom:1px solid var(--line);
+  white-space:nowrap; background:var(--bg-2)}
+tbody td{padding:10px 12px; border-bottom:1px solid var(--line);
+  white-space:nowrap; vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+td.livre{white-space:normal; min-width:16ch}
+td.num{text-align:right; font-family:var(--mono);
+  font-variant-numeric:tabular-nums; font-weight:500}
+
+.tag{display:inline-block; font-family:var(--mono); font-size:.66rem;
+  font-weight:500; padding:.16rem .45rem; border-radius:5px; white-space:nowrap;
+  border:1px solid transparent}
+.tag.caixa{color:var(--neon-bright); background:var(--neon-fundo); border-color:var(--neon-borda)}
+.tag.tit{color:var(--ambar); background:var(--ambar-fundo); border-color:var(--ambar-borda)}
+.tag.ruim{color:var(--coral); background:var(--coral-fundo); border-color:var(--coral-borda)}
+.tag.neutro{color:var(--text-dim); background:var(--bg-2); border-color:var(--line)}
+
+/* ── o diagrama dos dois mundos ────────────────────────────────────────── */
+.mundos{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  gap:16px; margin-top:1.4rem}
+.mundo{background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  padding:18px 20px; border-top:2px solid var(--line)}
+.mundo.caixa{border-top-color:var(--neon)}
+.mundo.tit{border-top-color:var(--ambar)}
+.mundo h3{display:flex; align-items:center; gap:.5rem}
+.mundo .oq{font-size:.82rem; color:var(--text-dim); margin:.35rem 0 .8rem}
+.mundo ul{list-style:none; display:grid; gap:.42rem; font-size:.83rem;
+  color:var(--text-dim)}
+.mundo li{display:flex; justify-content:space-between; gap:.8rem}
+.mundo li b{font-family:var(--mono); font-variant-numeric:tabular-nums;
+  font-weight:500; white-space:nowrap; color:var(--text)}
+.ponte{text-align:center; padding:14px 16px; margin-top:1.1rem;
+  border:1px dashed var(--coral-borda); background:var(--coral-fundo);
+  border-radius:10px; font-size:.87rem; color:var(--text-dim)}
+.ponte b{color:var(--coral)}
+
+/* ── a virada: pergunta -> fonte ───────────────────────────────────────── */
+tr.novo td{background:var(--neon-fundo)}
+td.seta{color:var(--text-faint); text-align:center; font-family:var(--mono)}
+
+/* ── tela ──────────────────────────────────────────────────────────────── */
+.tela{background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  padding:18px 20px; margin-top:1.1rem}
+.tela-tit{font-family:var(--display); font-size:1rem; font-weight:700;
+  display:flex; align-items:center; justify-content:space-between; gap:.8rem;
+  flex-wrap:wrap; margin-bottom:.9rem}
+.abas{display:flex; gap:.3rem; flex-wrap:wrap; margin-bottom:1rem}
+.aba{font-size:.76rem; padding:.32rem .6rem; border-radius:7px;
+  border:1px solid var(--line); color:var(--text-dim); background:var(--bg-2)}
+.aba.on{color:var(--bg); background:var(--neon); border-color:var(--neon);
+  font-weight:600}
+.mets{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:10px; margin-bottom:1rem}
+.met{background:var(--bg-2); border:1px solid var(--line); border-radius:9px;
+  padding:11px 13px}
+.met span{display:block; font-size:.7rem; color:var(--text-dim)}
+.met b{display:block; font-family:var(--mono); font-variant-numeric:tabular-nums;
+  font-size:1.02rem; margin-top:.25rem}
+
+/* ── cartão de sugestão de baixa ───────────────────────────────────────── */
+.sug{border:1px solid var(--ambar-borda); background:var(--ambar-fundo);
+  border-radius:10px; padding:14px 16px; margin-top:1.1rem}
+.sug-tit{font-size:.84rem; font-weight:600; color:var(--ambar);
+  display:flex; align-items:center; gap:.45rem; margin-bottom:.7rem}
+.par{display:grid; grid-template-columns:1fr auto 1fr; gap:.9rem;
+  align-items:center; font-size:.82rem; padding:.6rem 0;
+  border-top:1px dashed var(--ambar-borda)}
+.par:first-of-type{border-top:0}
+.par .lado{min-width:0}
+.par .lado b{display:block; font-size:.84rem}
+.par .lado span{display:block; color:var(--text-dim); font-size:.76rem;
+  margin-top:.12rem}
+.par .lig{font-family:var(--mono); color:var(--ambar); font-size:.9rem}
+.botoes{display:flex; gap:.4rem; margin-top:.75rem; flex-wrap:wrap}
+.bt{font-size:.76rem; padding:.34rem .7rem; border-radius:7px; font-weight:600;
+  border:1px solid var(--neon); background:var(--neon); color:var(--bg)}
+.bt.sec{background:transparent; color:var(--text-dim); border-color:var(--line);
+  font-weight:400}
+
+.nota{border:1px solid var(--line); border-left:3px solid var(--neon);
+  background:var(--surface); border-radius:0 10px 10px 0; padding:15px 18px;
+  margin-top:1.2rem}
+.nota.perigo{border-left-color:var(--coral)}
+.nota.atencao{border-left-color:var(--ambar)}
+.nota h3{margin-bottom:.4rem}
+.nota p{font-size:.88rem; color:var(--text-dim); margin-top:.55rem}
+.nota p:first-of-type{margin-top:0}
+
+ul.lista{list-style:none; display:grid; gap:.55rem; margin-top:.9rem;
+  font-size:.89rem; color:var(--text-dim); max-width:72ch}
+ul.lista li{display:flex; gap:.6rem}
+ul.lista li::before{content:"—"; color:var(--text-faint); flex:none}
+
+.passos{display:grid; gap:.7rem; margin-top:1.1rem; counter-reset:p}
+.passo{display:flex; gap:.85rem; background:var(--surface);
+  border:1px solid var(--line); border-radius:10px; padding:14px 16px}
+.passo::before{counter-increment:p; content:counter(p);
+  font-family:var(--mono); font-size:.78rem; font-weight:600; color:var(--neon);
+  background:var(--neon-fundo); border:1px solid var(--neon-borda);
+  border-radius:6px; width:26px; height:26px; display:flex; flex:none;
+  align-items:center; justify-content:center}
+.passo div{min-width:0}
+.passo b{display:block; font-size:.9rem}
+.passo span{display:block; font-size:.83rem; color:var(--text-dim);
+  margin-top:.22rem}
+
+hr{border:0; border-top:1px solid var(--line); margin:56px 0 0}
+.rodape{font-size:.78rem; color:var(--text-faint); margin-top:1.4rem; max-width:74ch}
+:focus-visible{outline:2px solid var(--neon-bright); outline-offset:2px}
+</style>
+
+<p class="eyebrow">Proposta · financeiro · para aprovação</p>
+<h1>As quatro abas que não se falam</h1>
+<p class="lede">
+  Você está certo: o financeiro tem que aparecer em <b>Contas pagas</b>. Hoje não
+  aparece — e não é bug de uma aba só. <b>Contas pagas está vazia em todas as
+  contas do sistema, desde que existe.</b> Na Prime saíram
+  <b>R$&nbsp;34.232,86</b> do caixa em agosto e a tela mostra zero.
+</p>
+
+<div class="placar">
+  <div class="pl errado">
+    <div class="pl-rot">Contas pagas hoje</div>
+    <div class="pl-num">R$ 0,00</div>
+    <div class="pl-pe">em todas as contas, desde julho</div>
+  </div>
+  <div class="pl certo">
+    <div class="pl-rot">Saiu do caixa da Prime</div>
+    <div class="pl-num">R$ 34.232,86</div>
+    <div class="pl-pe">53 pagamentos em agosto</div>
+  </div>
+  <div class="pl aviso">
+    <div class="pl-rot">Títulos parados em aberto</div>
+    <div class="pl-num">38 de 40</div>
+    <div class="pl-pe">11 vencidos · R$ 27.170,85</div>
+  </div>
+</div>
+
+<!-- ─────────────────────────────────────────────────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">A raiz</p>
+  <h2>O sistema tem dois mundos, e a ponte entre eles quase nunca é usada</h2>
+  <p>
+    <b>Título</b> é o compromisso: o que foi combinado, com quem e pra quando.
+    <b>Lançamento</b> é o dinheiro: o que de fato saiu ou entrou da conta. São
+    duas coisas certas e as duas precisam existir. O problema é o elo.
+  </p>
+
+  <div class="mundos">
+    <div class="mundo tit">
+      <h3>📋 Os títulos <span class="tag tit">compromisso</span></h3>
+      <p class="oq">Cadastrados na mão, na tela de Empresa. Alimentam Contas a
+        pagar, Contas a receber, Contas pagas e Contas recebidas.</p>
+      <ul>
+        <li><span>Títulos em toda a produção</span><b>40</b></li>
+        <li><span>Marcados como pagos</span><b>2</b></li>
+        <li><span>Baixados por alguém clicando</span><b>0</b></li>
+        <li><span>Vencidos e ainda abertos</span><b>11 · R$ 27.170,85</b></li>
+      </ul>
+    </div>
+    <div class="mundo caixa">
+      <h3>💸 O caixa <span class="tag caixa">dinheiro</span></h3>
+      <p class="oq">Entra sozinho: importação do extrato (OFX) e foto do
+        comprovante mandada no WhatsApp. Alimenta o Livro-caixa, o DRE — e a aba
+        Vendas.</p>
+      <ul>
+        <li><span>Pagamentos da Prime em agosto</span><b>53 · R$ 34.232,86</b></li>
+        <li><span>Entradas da Prime em agosto</span><b>19 · R$ 31.020,05</b></li>
+        <li><span>Que nasceram de um título</span><b>2 · R$ 2.750,00</b></li>
+        <li><span>Que nasceram sem título</span><b>70 de 72</b></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="ponte">
+    A ponte é o botão <b>“pago”</b> em cada título. Em dois meses de produção,
+    <b>ninguém nunca clicou nele</b> — em nenhuma conta. Os únicos 2 títulos
+    baixados foram os sinais da Prime, que o próprio sistema baixa sozinho quando
+    o contrato é assinado.
+  </div>
+
+  <div class="nota">
+    <h3>E é por isso que a aba Vendas estava errada</h3>
+    <p>
+      As abas foram divididas pela <b>tabela</b> que cada uma lê, não pela
+      <b>pergunta</b> que cada uma responde. Vendas é a única que lê o caixa —
+      então tudo que se mexeu foi parar nela: o extrato, o aporte do sócio, o
+      sinal contado duas vezes. Não é que Vendas mostrava linha errada por
+      acidente. É que Vendas era <b>o único lugar onde o dinheiro aparecia</b>.
+    </p>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">A virada</p>
+  <h2>Cada aba passa a responder a pergunta, não a tabela</h2>
+  <p>
+    A inversão é uma só, e resolve as duas reclamações de uma vez:
+    <b>Contas pagas e Contas recebidas passam a ler o caixa</b> — o dinheiro que
+    andou — e o título vira uma <i>informação</i> da linha (“isto quitou a conta
+    tal”), em vez de ser a origem dela.
+  </p>
+
+  <div class="wrap">
+    <table>
+      <thead>
+        <tr><th>Aba</th><th>A pergunta do dono</th><th>Lê hoje</th><th></th>
+            <th>Passa a ler</th></tr>
+      </thead>
+      <tbody>
+        <tr class="novo">
+          <td><b>Vendas</b></td>
+          <td class="livre">Quanto o negócio vendeu?</td>
+          <td><span class="tag ruim">todo lançamento de receita</span></td>
+          <td class="seta">→</td>
+          <td class="livre">venda de <b>produto ou serviço</b>: balcão, funil e o lançamento registrado à mão</td>
+        </tr>
+        <tr class="novo">
+          <td><b>Contas pagas</b></td>
+          <td class="livre">Quanto eu paguei, e do quê?</td>
+          <td><span class="tag ruim">títulos baixados — sempre vazio</span></td>
+          <td class="seta">→</td>
+          <td class="livre"><b>lançamentos de despesa</b>, mostrando o título quando houver</td>
+        </tr>
+        <tr class="novo">
+          <td><b>Contas recebidas</b></td>
+          <td class="livre">Quanto entrou, e de quem?</td>
+          <td><span class="tag ruim">só 2 linhas na Prime</span></td>
+          <td class="seta">→</td>
+          <td class="livre"><b>lançamentos de receita</b>, mostrando a venda ou o título quando houver</td>
+        </tr>
+        <tr>
+          <td><b>Contas a pagar</b></td>
+          <td class="livre">O que eu ainda devo?</td>
+          <td><span class="tag tit">títulos abertos</span></td>
+          <td class="seta">=</td>
+          <td class="livre">igual — <b>mais</b> o aviso de “parece já pago”</td>
+        </tr>
+        <tr>
+          <td><b>Contas a receber</b></td>
+          <td class="livre">O que ainda tenho a receber?</td>
+          <td><span class="tag tit">títulos abertos</span></td>
+          <td class="seta">=</td>
+          <td class="livre">igual — <b>mais</b> o aviso de “parece já recebido”</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="mut" style="font-size:.85rem;margin-top:.9rem">
+    Repare que as duas abas de <i>compromisso</i> não mudam de fonte. Elas estão
+    certas: título aberto é dívida em aberto. O que faltava era o outro lado.
+  </p>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">Como fica na Prime</p>
+  <h2>Contas pagas deixa de ser uma tela vazia</h2>
+
+  <div class="tela">
+    <div class="tela-tit"><span>📊 Relatórios · Prime Eventos</span>
+      <span class="mut" style="font-family:var(--body);font-weight:400;font-size:.78rem">Este mês</span></div>
+    <div class="abas">
+      <span class="aba">Vendas</span><span class="aba">Contas a pagar</span>
+      <span class="aba">Contas a receber</span><span class="aba on">Contas pagas</span>
+      <span class="aba">Contas recebidas</span><span class="aba">Comissão</span>
+      <span class="aba">Orçamentos</span><span class="aba">Agenda</span>
+    </div>
+
+    <div class="mets">
+      <div class="met"><span>Total pago no período</span><b style="color:var(--neon-bright)">R$ 34.232,86</b></div>
+      <div class="met"><span>Nº de pagamentos</span><b>53</b></div>
+      <div class="met"><span>Quitaram um título</span><b style="color:var(--ambar)">0</b></div>
+      <div class="met"><span>Maior pagamento</span><b>R$ 3.500,00</b></div>
+    </div>
+
+    <div class="wrap" style="margin-top:0">
+      <table>
+        <thead>
+          <tr><th>Pagamento</th><th>Fornecedor / descrição</th><th>Categoria</th>
+              <th>Entrou por</th><th>Quitou</th><th style="text-align:right">Valor</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>29/08</td><td class="livre">2ª quinzena — Iasmin Flor da Costa Santos</td><td>Serviços</td><td><span class="tag neutro">foto</span></td><td><span class="tag tit">nenhum título</span></td><td class="num">360,00</td></tr>
+          <tr><td>28/08</td><td class="livre">Mensalidade Security Serviços e Comércio</td><td>Assinaturas</td><td><span class="tag neutro">foto</span></td><td><span class="tag tit">nenhum título</span></td><td class="num">258,23</td></tr>
+          <tr><td>28/08</td><td class="livre">Conta de água — Águas de Teresina</td><td>Contas de casa</td><td><span class="tag neutro">foto</span></td><td><span class="tag tit">nenhum título</span></td><td class="num">126,70</td></tr>
+          <tr><td>21/08</td><td class="livre">Renovação sistema gestão Click Digital</td><td>Assinaturas</td><td><span class="tag neutro">foto</span></td><td><span class="tag tit">nenhum título</span></td><td class="num">214,11</td></tr>
+          <tr><td>20/08</td><td class="livre">INSS julho/2026 — Receita Federal</td><td>Impostos</td><td><span class="tag neutro">foto</span></td><td><span class="tag tit">nenhum título</span></td><td class="num">126,43</td></tr>
+          <tr><td>10/08</td><td class="livre">Pagamento Pix 58.608.090 0001-88</td><td>Outros</td><td><span class="tag neutro">extrato</span></td><td><span class="tag tit">1 sugestão ↓</span></td><td class="num">2.200,00</td></tr>
+          <tr><td>10/08</td><td class="livre">DÉB. PAGAMENTO DE BOLETO INTERCREDIS</td><td>Outros</td><td><span class="tag neutro">extrato</span></td><td><span class="tag tit">nenhum título</span></td><td class="num">94,90</td></tr>
+          <tr><td colspan="6" class="mut" style="text-align:center;font-size:.8rem">… mais 46 pagamentos</td></tr>
+        </tbody>
+        <tfoot>
+          <tr><td colspan="5" style="padding:11px 12px;border-top:1px solid var(--line);background:var(--bg-2);font-weight:600">Total</td>
+              <td class="num" style="padding:11px 12px;border-top:1px solid var(--line);background:var(--bg-2);color:var(--neon-bright)">34.232,86</td></tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div class="sug">
+      <div class="sug-tit">🔗 Pagamento que parece quitar uma conta em aberto</div>
+      <div class="par">
+        <div class="lado"><b>Pix de R$ 2.200,00</b><span>10/08 · extrato · 58.608.090 0001-88</span></div>
+        <div class="lig">↔</div>
+        <div class="lado"><b>ZARB CONSULTORIA</b><span>a pagar · venceu 15/08 · R$ 2.200,00</span></div>
+      </div>
+      <div class="botoes">
+        <span class="bt">Sim, foi este pagamento</span>
+        <span class="bt sec">Não é este</span>
+      </div>
+      <p class="mut" style="font-size:.76rem;margin-top:.65rem">
+        Mesmo valor, 5 dias antes do vencimento. A Prime tem <b>outro</b> título
+        ZARB de R$ 2.200,00 vencendo em 15/09 — por isso quem confirma é você,
+        não o sistema.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">O limite que eu não vou cruzar</p>
+  <h2>A conciliação sugere. Quem dá baixa é você</h2>
+  <p>
+    Rodei o casamento automático nos 11 títulos vencidos de toda a produção,
+    exigindo <b>valor exato</b> e <b>data dentro de 20 dias do vencimento</b> —
+    critério apertado. Deu <b>duas</b> sugestões. Uma está certa (a ZARB). A
+    outra mostra exatamente por que isso nunca pode rodar sozinho.
+  </p>
+
+  <div class="nota perigo">
+    <h3>O contra-exemplo da Bianca</h3>
+    <p>
+      O título <b>“Evento — Bianca Oliveira · parcela 2/2”</b>, R$&nbsp;750,00,
+      venceu em 31/08. O casamento automático acha dois candidatos de
+      R$&nbsp;750,00 na janela — e <b>os dois são o sinal, a parcela 1</b>: um é
+      a baixa que o sistema já fez, o outro é a foto do mesmo comprovante.
+    </p>
+    <p>
+      Se a máquina desse baixa sozinha, ela fecharia a parcela 2 com o dinheiro
+      da parcela 1: inventaria R$&nbsp;750,00 de receita que não entrou e
+      perdoaria uma dívida que a cliente ainda tem. Por isso a tela
+      <b>sugere e explica o porquê</b> (valor, data, contraparte), e a baixa só
+      acontece no clique de quem sabe.
+    </p>
+  </div>
+
+  <div class="nota atencao">
+    <h3>Uma correção na minha leitura anterior</h3>
+    <p>
+      Cheguei a achar que os 30 títulos a pagar da Prime já estavam pagos, porque
+      20 deles têm um lançamento do mesmo valor. Conferi a data: <b>não estão</b>.
+      Os títulos foram cadastrados hoje, com vencimento em setembro; os
+      lançamentos de mesmo valor são as contas de <b>agosto</b> — a mesma conta
+      recorrente, mês diferente. Só <b>3</b> títulos da Prime estão vencidos
+      (R$&nbsp;5.760,85), e só um deles tem pagamento candidato.
+    </p>
+    <p>
+      Isso reforça o desenho: casar só por valor produz falso positivo em conta
+      recorrente, que é justamente a maioria. A sugestão precisa de valor
+      <b>e</b> data <b>e</b> confirmação humana.
+    </p>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">Ordem de execução</p>
+  <h2>Em quatro passos, cada um entregando sozinho</h2>
+  <div class="passos">
+    <div class="passo"><div>
+      <b>Contas pagas e Contas recebidas passam a ler o caixa</b>
+      <span>A tela vazia enche com o que já existe no banco. Nenhum dado é
+        criado ou alterado — é só mudar de onde a aba lê. Contas pagas da Prime
+        sai de R$ 0,00 para R$ 34.232,86 no mesmo instante.</span>
+    </div></div>
+    <div class="passo"><div>
+      <b>Vendas passa a mostrar só produto e serviço</b>
+      <span>O que sai de Vendas não some: passa a aparecer em Contas recebidas,
+        que agora existe de verdade. Prime: R$ 31.020,05 → R$ 6.100,00, com o
+        resto visível na aba do lado.</span>
+    </div></div>
+    <div class="passo"><div>
+      <b>A coluna “Quitou” e o aviso de conta em aberto</b>
+      <span>Cada pagamento mostra qual título ele quitou. Cada título vencido
+        mostra se há um pagamento com cara de ser ele. Ainda sem botão — só
+        informação.</span>
+    </div></div>
+    <div class="passo"><div>
+      <b>O botão de confirmar a baixa</b>
+      <span>Um clique liga o pagamento ao título e fecha o compromisso, usando o
+        <code>dar_baixa_titulo</code> que já existe. É o único passo que escreve
+        no banco, e só com você confirmando.</span>
+    </div></div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────────── -->
+<section class="sec">
+  <p class="eyebrow">Escopo</p>
+  <h2>O que este trabalho não faz</h2>
+  <ul class="lista">
+    <li><b>Não dá baixa em nada automaticamente.</b> Nenhum título muda de status sem alguém confirmar — pelo contra-exemplo da Bianca, e porque fechar uma dívida por engano é perder informação do cliente.</li>
+    <li><b>Não apaga, não move e não reclassifica lançamento nenhum.</b> Tudo é mudança de leitura das telas. O banco fica como está.</li>
+    <li><b>Não mexe em Livro-caixa nem no DRE.</b> Continuam sendo a visão completa do caixa; o que muda é que os relatórios param de ser a única porta.</li>
+    <li><b>Comissão fica pro fim.</b> Ela soma recebimento por vendedor por outro caminho (<code>finance/comissao.py</code>). Se Vendas e Contas recebidas mudam de régua, ela precisa ser reconferida junto — num passo só, depois que estes estiverem de pé.</li>
+  </ul>
+</section>
+
+<hr>
+<p class="rodape">
+  Mockup para aprovação · dados reais de produção lidos em 01/09/2026 (contas 3,
+  9, 30 e 34) · nenhuma alteração foi feita no banco. O passo 1 sozinho já
+  resolve “o financeiro tem que aparecer em Contas pagas”, e é o de menor risco:
+  troca a consulta de duas abas e não escreve nada.
+</p>

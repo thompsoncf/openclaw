@@ -6261,6 +6261,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   .rel-print{display:inline-flex;align-items:center;justify-content:center;width:1.8rem;height:1.8rem;
    border:1px solid var(--borda);background:var(--bg);border-radius:6px;text-decoration:none;font-size:.85rem}
   .rel-print:hover{border-color:var(--verde)}
+  button.rel-print{cursor:pointer;font:inherit;font-size:.9rem;line-height:1;padding:0}
   /* LARGURA DESTA TELA, e só dela.
      O `.card.larga` vale 720px e é usado por Equipe, Fornecedor, Portal e mais
      cinco telas — várias delas formulário, onde largura demais PIORA (o olho
@@ -6326,6 +6327,8 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   {% elif dados.aviso_config %}
   <div class="rel-aviso">⚠️ {{ dados.aviso_config }}</div>
   {% endif %}
+  {% if aviso %}<div class="rel-aviso" style="border-color:#2c5a3f;background:#122a1d;color:#9fe8c9">✓ {{ aviso }}</div>{% endif %}
+  {% if erro %}<div class="rel-aviso" style="border-color:#6e2b2b;background:#2a1414;color:#f0b8b8">✕ {{ erro }}</div>{% endif %}
 
   <div class="abas" id="rel-abas">
     {% for k, r in tipos.items() %}<a class="aba{% if k==tipo %} ativa{% endif %}"
@@ -6450,7 +6453,23 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
       if row.cliente_do_lead %}<span class="rel-selo lead" title="Nome do lead que marcou a visita — ainda não é um cadastro ligado">do lead</span>{%
       elif row.cliente_do_titulo %}<span class="rel-selo" title="Lido do título do compromisso — ainda não é um cadastro ligado">do título</span>{%
       endif %}{% if row.cliente_link %}</a>{% endif %}{% else %}{{ row[col.chave] }}{% endif %}</td>{% endfor %}{% if dados.acao %}<td class="rel-act">{% if row.acao_href
-      %}<a class="rel-print" href="{{ row.acao_href }}" target="_blank" rel="noopener" title="{{ dados.acao_rotulo }}">🖨️</a>{% endif %}</td>{% endif %}</tr>
+      %}<a class="rel-print" href="{{ row.acao_href }}" target="_blank" rel="noopener" title="{{ dados.acao_rotulo }}">🖨️</a>{%
+      elif row.acao_post %}{#- botão que GRAVA. Form de verdade (POST + 303), não
+      link: ação que muda dinheiro não pode ser disparada por um GET que o
+      navegador pré-carrega ou o histórico repete. O confirm() diz o que vai
+      acontecer E que dá pra desfazer — a conciliação nasce de um palpite.
+
+      O texto vai por `data-confirmar` e NÃO por `onsubmit="confirm({{...|tojson}})"`:
+      o tojson do Jinja não escapa aspas, e a frase carrega a descrição do título,
+      que é texto do usuário — uma aspa no nome do fornecedor fechava o atributo.
+
+      E o `|e` é obrigatório: o `select_autoescape()` deste Environment liga o
+      escape por EXTENSÃO do nome do template, e estes se chamam "relatorios",
+      "base"… sem extensão. Ou seja, autoescape está DESLIGADO aqui. -#}<form
+      method="post" action="{{ row.acao_post.url }}" style="display:inline"
+      data-confirmar="{{ row.acao_post.confirmar|e }}">{% for k, v in row.acao_post.campos.items()
+      %}<input type="hidden" name="{{ k|e }}" value="{{ v|e }}">{% endfor %}<button type="submit"
+      class="rel-print" title="{{ row.acao_post.titulo|e }}">{{ row.acao_post.rotulo }}</button></form>{% endif %}</td>{% endif %}</tr>
     {% else %}
     <tr><td colspan="{{ dados.colunas|length + (1 if dados.acao else 0) }}" class="mut" style="text-align:center;padding:1.4rem 0">Nenhum registro encontrado{% if not dados.sem_periodo %} em {{ periodo_rotulo|lower }}{% endif %}.</td></tr>
     {% endfor %}
@@ -6489,6 +6508,16 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
       e no Livro-caixa.</div>
   </div>
   {% endif %}
+  <script>
+  // Pergunta antes de gravar. Delegado no documento porque os formulários são
+  // desenhados linha a linha — e é o único lugar desta tela que escreve no banco.
+  // Em bloco PRÓPRIO de propósito: o teste do filtro extrai o <script> seguinte
+  // inteiro e roda no Node, e este handler não tem o que fazer lá.
+  document.addEventListener('submit', function (e) {
+    var f = e.target.closest && e.target.closest('form[data-confirmar]');
+    if (f && !confirm(f.getAttribute('data-confirmar'))) { e.preventDefault(); }
+  });
+  </script>
   <script>
   // Filtro NA TELA. As linhas já estão todas no HTML (a consulta tem teto de 300),
   // então não há ida ao servidor: filtrar é instantâneo.

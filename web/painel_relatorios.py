@@ -360,20 +360,11 @@ def _bloco_fora(fora: dict) -> dict:
     return {"itens": itens, "centavos": sum(i["centavos"] for i in itens)}
 
 
-# Quantos dias em volta do vencimento um pagamento ainda pode ser DAQUELE título.
-#
-# O teto é dado pela conta de menor espaçamento que existe na base, e ela é a
-# QUINZENAL (15 dias), não a mensal. 14 é o maior número que não alcança a
-# ocorrência vizinha dela — e o número foi medido, não escolhido: com 15 a régua
-# rodada em produção devolvia 3 dicas na Prime e 2 eram falsas, porque os títulos
-# "2ª quinzena agosto" vencem em 05/09 e o pagamento da 1ª quinzena caiu em 21/08,
-# exatamente 15 dias antes. Com 14 sobra só a dica boa (ZARB: título vencendo
-# 15/08, Pix de mesmo valor em 10/08).
-#
-# Apertar mais deixaria de fora pagamento atrasado legítimo; afrouxar traz de
-# volta o vizinho. É o mesmo erro, na direção contrária, do que eu cometi lendo os
-# 30 títulos da Prime: 20 tinham lançamento de mesmo valor e NENHUM estava pago.
-_JANELA_CANDIDATO_DIAS = 14
+# A janela mora em finance/empresa.py, junto da gravação. As duas pontas TÊM que
+# usar o mesmo número: a aba sugere com ele e `conciliar_titulo` revalida com ele.
+# Divergindo, a tela ofereceria botão que o servidor recusa — ou, pior, gravaria o
+# que a tela não sugeriu. Ver o porquê do 14 lá (foi medido, não escolhido).
+_JANELA_CANDIDATO_DIAS = emp.JANELA_CONCILIACAO_DIAS
 
 
 def _pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
@@ -401,7 +392,7 @@ def _pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
     * a janela é apertada de propósito (ver `_JANELA_CANDIDATO_DIAS`), porque em
       conta recorrente o mesmo valor se repete todo mês.
 
-    Devolve {titulo_id: {"n": quantos, "data": date, "centavos": int}}.
+    Devolve {titulo_id: {"n", "data", "lancamento_id", "centavos"}}.
     """
     alvos = [t for t in titulos if t["vencimento"] and t["valor_centavos"]]
     if not alvos:
@@ -412,7 +403,7 @@ def _pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
     ate = max(t["vencimento"] for t in alvos) + janela
     with pool.connection() as c:
         rows = c.execute(
-            """select l.data, l.valor_centavos from lancamentos l
+            """select l.id, l.data, l.valor_centavos from lancamentos l
                 where l.conta_id=%s and l.tipo=%s and l.data >= %s and l.data <= %s
                   and not exists (select 1 from titulos t
                                    where t.lancamento_id = l.id and t.conta_id = l.conta_id)
@@ -424,15 +415,16 @@ def _pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
             (conta_id, lanc_tipo, de, ate),
         ).fetchall()
     por_valor: dict[int, list] = {}
-    for data, valor in rows:
-        por_valor.setdefault(int(valor or 0), []).append(data)
+    for lid, data, valor in rows:
+        por_valor.setdefault(int(valor or 0), []).append((data, lid))
     achados = {}
     for t in alvos:
-        perto = [d for d in por_valor.get(t["valor_centavos"], [])
-                 if abs((d - t["vencimento"]).days) <= _JANELA_CANDIDATO_DIAS]
+        perto = [p for p in por_valor.get(t["valor_centavos"], [])
+                 if abs((p[0] - t["vencimento"]).days) <= _JANELA_CANDIDATO_DIAS]
         if perto:
-            perto.sort(key=lambda d: abs((d - t["vencimento"]).days))
-            achados[t["id"]] = {"n": len(perto), "data": perto[0],
+            perto.sort(key=lambda p: abs((p[0] - t["vencimento"]).days))
+            achados[t["id"]] = {"n": len(perto), "data": perto[0][0],
+                                "lancamento_id": perto[0][1],
                                 "centavos": t["valor_centavos"]}
     return achados
 
@@ -458,10 +450,24 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
             dias = (t["vencimento"] - hoje).days if t["vencimento"] else None
             status, cor = "A vencer", ("aviso" if dias is not None and dias <= 7 else "ok")
         c = candidatos.get(t["id"])
+        acao = None
         if not c:
             conferir = ""
         elif c["n"] == 1:
             conferir = f"parece {verbo} em {_fmt(c['data'])}"
+            # botão SÓ no candidato único. Com dois candidatos a tela conta e não
+            # escolhe (ver acima) — oferecer botão ali seria pedir pro dono
+            # confirmar um chute que a própria tela não soube fazer.
+            acao = {"url": "/painel/relatorios/conciliar",
+                    "campos": {"titulo_id": t["id"], "lancamento_id": c["lancamento_id"],
+                               "tipo": tipo},
+                    "rotulo": "✓", "titulo": f"Marcar como {verbo} em {_fmt(c['data'])}",
+                    "confirmar": (f"Marcar “{(t['descricao'] or '').strip()[:60]}” como "
+                                  f"{verbo} em {_fmt(c['data'])}?\n\n"
+                                  f"Isso liga esta conta ao pagamento de "
+                                  f"{_brl(t['valor_centavos'])} que já está no caixa. "
+                                  "Nenhum dinheiro novo é lançado, e dá pra desfazer "
+                                  f"em Contas {'pagas' if tipo == 'pagar' else 'recebidas'}.")}
         else:
             # dizer QUAL seria chute quando há vários do mesmo valor por perto —
             # e chute numa tela de dinheiro é o que esta coluna existe pra evitar
@@ -471,6 +477,7 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
             "contraparte": t["cliente_nome"] or t["contraparte"] or "—",
             "categoria": t["categoria"] or "—", "status": status, "status_cor": cor,
             "conferir": conferir, "conferir_cor": "aviso",
+            "acao_post": acao,
             "valor_centavos": t["valor_centavos"],
         })
     total = _soma(linhas, "valor_centavos")
@@ -481,6 +488,7 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
     label = "Contas a pagar" if tipo == "pagar" else "Contas a receber"
     dados = {
         "label": label, "mock": False, "sem_periodo": True,
+        "acao": any(r["acao_post"] for r in linhas), "acao_rotulo": "Conciliar",
         "colunas": [_col("vencimento", "Vencimento"), _col("contraparte", rotulo_col, flex=True),
                     _col("categoria", "Categoria"), _col("status", "Status", tag=True),
                     _col("conferir", "Conferir", tag=True),
@@ -554,7 +562,8 @@ def _dados_caixa(pool, conta_id, tipo, periodo):
     with pool.connection() as c:
         rows = c.execute(
             """select l.data, l.descricao, l.categoria, l.origem, l.valor_centavos,
-                      coalesce(cl.nome, '') as cliente, t.descricao as titulo
+                      coalesce(cl.nome, '') as cliente, t.descricao as titulo,
+                      t.id as titulo_id
                  from lancamentos l
                  left join clientes cl on cl.id = l.cliente_id
                  left join titulos t on t.lancamento_id = l.id and t.conta_id = l.conta_id
@@ -587,6 +596,19 @@ def _dados_caixa(pool, conta_id, tipo, periodo):
             # linha, e 53 pílulas dizendo "nenhum" viram ruído. Assim a pílula só
             # aparece onde existe o elo — que é a informação rara e a que importa.
             "quitou": (r[6] or "")[:60], "quitou_cor": "ok",
+            # desfazer mora AQUI, e não na aba de compromisso, porque lá só
+            # aparecem títulos ABERTOS: assim que a conciliação acontece o título
+            # some de vista, e o dono ficaria sem lugar pra corrigir o engano.
+            # Só oferece em conciliação: baixa comum criou o lançamento dela
+            # (origem='titulo'), e reabrir aquilo deixaria dinheiro sem dono.
+            "acao_post": ({
+                "url": "/painel/relatorios/desfazer-conciliacao",
+                "campos": {"titulo_id": r[7], "tipo": tipo},
+                "rotulo": "✕", "titulo": f"Desfazer o vínculo com “{(r[6] or '')[:40]}”",
+                "confirmar": (f"Desligar este pagamento de “{(r[6] or '')[:60]}”?\n\n"
+                              "A conta volta pra em aberto. O pagamento continua no "
+                              "caixa, do jeito que está — some só o vínculo."),
+            } if r[7] and (r[3] or "") != "titulo" else None),
             "valor_centavos": int(r[4] or 0),
         })
     total = _soma(linhas, "valor_centavos")
@@ -598,6 +620,7 @@ def _dados_caixa(pool, conta_id, tipo, periodo):
     quantos = "Nº de pagamentos" if tipo == "pagar" else "Nº de entradas"
     dados = {
         "label": label, "mock": False,
+        "acao": any(r["acao_post"] for r in linhas), "acao_rotulo": "Desfazer",
         "colunas": [_col("data", "Pagamento" if tipo == "pagar" else "Recebimento"),
                     _col("descricao", rotulo_col, flex=True), _col("categoria", "Categoria"),
                     _col("origem", "Entrou por", tag=True),
@@ -1778,6 +1801,11 @@ def painel_relatorios(request: Request, tipo: str = "vendas", periodo: str = "me
                    periodo_rotulo=_rotulo_periodo(tipo, periodo, de, ate),
                    tem_periodo_livre=any(v == "personalizado"
                                          for v, _ in periodos_da_aba(tipo)),
+                   # o resultado da última gravação, uma vez só. Sem isto o dono
+                   # clica em conciliar e a tela recarrega igualzinha, sem dizer se
+                   # deu certo — e numa tela de dinheiro isso é pior que o erro.
+                   aviso=request.session.pop("aviso", None),
+                   erro=request.session.pop("erro", None),
                    de=de or "", ate=ate or "", dados=dados)
 
 
@@ -1798,3 +1826,57 @@ def painel_relatorios_pdf(request: Request, tipo: str = "vendas", periodo: str =
         gerado_em=datetime.now().strftime("%d/%m/%Y %H:%M"),
         **_letterhead(pool, conta),
     ))
+
+
+# ─────────────────────────────────────────────── conciliar (o passo que grava)
+#
+# As três rotas de leitura acima não tocam no banco. Estas duas tocam — e são as
+# únicas do módulo que tocam. Por isso repetem o gate `_pode_ver` (capacidade
+# financeiro) e revalidam TUDO no servidor: o pedido vem do navegador, e navegador
+# não é fonte confiável. A régua da revalidação é a mesma que gerou o botão
+# (`emp.pagamento_serve_pro_titulo`), então não existe botão que o servidor recuse
+# por critério diferente do que a tela usou pra oferecer.
+
+def _volta_pra(tipo: str, aba: str) -> RedirectResponse:
+    return RedirectResponse(f"/painel/relatorios?tipo={aba}", status_code=303)
+
+
+@router.post("/painel/relatorios/conciliar")
+def relatorios_conciliar(request: Request, titulo_id: int = Form(...),
+                         lancamento_id: int = Form(...), tipo: str = Form("pagar")):
+    """Liga um pagamento que já está no caixa a uma conta em aberto."""
+    conta, redir = _pode_ver(request)
+    if redir is not None:
+        return redir
+    tipo = "pagar" if tipo != "receber" else "receber"
+    aba = "contas_pagar" if tipo == "pagar" else "contas_receber"
+    r = emp.conciliar_titulo(get_pool(), conta[0], titulo_id, lancamento_id)
+    if not r.get("ok"):
+        request.session["erro"] = r.get("erro") or "Não consegui ligar esse pagamento."
+    else:
+        verbo = "paga" if r["tipo"] == "pagar" else "recebida"
+        onde = "pagas" if r["tipo"] == "pagar" else "recebidas"
+        request.session["aviso"] = (
+            f"“{(r['descricao'] or '').strip()[:60]}” marcada como {verbo} em "
+            f"{_fmt(r['pago_em'])}. Nenhum dinheiro novo foi lançado — se errei, "
+            f"dá pra desfazer em Contas {onde}.")
+    return _volta_pra(tipo, aba)
+
+
+@router.post("/painel/relatorios/desfazer-conciliacao")
+def relatorios_desfazer_conciliacao(request: Request, titulo_id: int = Form(...),
+                                    tipo: str = Form("pagar")):
+    """Reabre a conta que foi ligada ao pagamento errado. O pagamento não se mexe."""
+    conta, redir = _pode_ver(request)
+    if redir is not None:
+        return redir
+    tipo = "pagar" if tipo != "receber" else "receber"
+    aba = "pagas" if tipo == "pagar" else "recebidas"
+    r = emp.desfazer_conciliacao(get_pool(), conta[0], titulo_id)
+    if not r.get("ok"):
+        request.session["erro"] = r.get("erro") or "Não consegui desfazer."
+    else:
+        request.session["aviso"] = (
+            f"“{(r['descricao'] or '').strip()[:60]}” voltou pra em aberto. "
+            "O pagamento continua no caixa, do jeito que estava.")
+    return _volta_pra(tipo, aba)

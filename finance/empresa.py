@@ -383,6 +383,165 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
     return {"ok": True, "lancamento_id": salvo.id, "proximo_titulo_id": proximo_id}
 
 
+# Quantos dias em volta do vencimento um pagamento ainda pode ser DAQUELE título.
+# Mora aqui, e não na tela, porque as duas pontas TÊM que usar o mesmo número: a
+# aba sugere com ele e a gravação revalida com ele. Se divergirem, aparece botão
+# que o servidor recusa — ou, pior, botão que grava o que a tela não sugeriu.
+#
+# O teto é dado pela conta de menor espaçamento da base, que é a QUINZENAL (15
+# dias), não a mensal. Medido: com 15 a régua devolvia 3 dicas na Prime e 2 eram
+# falsas, porque os títulos "2ª quinzena agosto" vencem em 05/09 e o pagamento da
+# 1ª quinzena caiu em 21/08 — exatamente 15 dias antes.
+JANELA_CONCILIACAO_DIAS = 14
+
+
+def pagamento_serve_pro_titulo(titulo: dict, lanc: dict) -> str | None:
+    """O erro que impede este pagamento de quitar este título, ou None se serve.
+
+    Existe separada e sem banco porque é a régua que a tela usa pra sugerir e que
+    a gravação usa pra revalidar. O pedido vem do navegador, e navegador não é
+    fonte confiável: sem revalidar aqui, um POST forjado casaria qualquer
+    lançamento com qualquer título.
+    """
+    if titulo["status"] != "aberto":
+        return f"Essa conta já está '{titulo['status']}'."
+    esperado = "despesa" if titulo["tipo"] == "pagar" else "receita"
+    if lanc["tipo"] != esperado:
+        return "Esse lançamento é do outro lado do caixa."
+    if int(lanc["valor_centavos"]) != int(titulo["valor_centavos"]):
+        return "O valor do pagamento não bate com o da conta."
+    if not titulo["vencimento"] or not lanc["data"]:
+        return "Falta a data pra conferir se é esse pagamento."
+    if abs((lanc["data"] - titulo["vencimento"]).days) > JANELA_CONCILIACAO_DIAS:
+        return (f"O pagamento está a mais de {JANELA_CONCILIACAO_DIAS} dias do "
+                "vencimento — pode ser de outro mês.")
+    return None
+
+
+def conciliar_titulo(pool, conta_id: int, titulo_id: int, lancamento_id: int) -> dict:
+    """Amarra um pagamento QUE JÁ EXISTE a um título aberto, e fecha o título.
+
+    É a irmã de `dar_baixa_titulo`, pra um caso que ela NÃO atende. Aquela lança
+    no livro-caixa: serve pra quando o dinheiro sai no momento do clique. Aqui o
+    dinheiro já saiu — veio do extrato ou da foto do comprovante — e chamar
+    `dar_baixa_titulo` criaria um segundo lançamento, **dobrando a despesa no
+    livro-caixa e no DRE**. Por isso esta função não lança nada: só liga o que já
+    existe.
+
+    NÃO cria o título recorrente do mês seguinte, e isso é de propósito — outra
+    diferença que vem do caso de uso. `dar_baixa_titulo` roda na hora do
+    pagamento, então "criar o do mês que vem" faz sentido. Conciliação é
+    retroativa: em 01/09/2026 a Prime tem 30 títulos de setembro já cadastrados na
+    mão, e conciliar a ZARB de 15/08 criaria uma segunda ZARB de 15/09 em cima da
+    que já está lá. Conta duplicada é a mesma família de erro que a conta escondida.
+
+    Atômico e à prova de duplo-clique pelo mesmo padrão da irmã: o status vira num
+    único UPDATE ... WHERE status='aberto' RETURNING, que toma o lock da linha até
+    o commit. A segunda chamada reavalia o WHERE já com 'pago' e volta com erro,
+    sem gravar nada.
+    """
+    with pool.connection() as c:
+        l = c.execute(
+            """select id, data, valor_centavos, tipo, origem, descricao
+                 from lancamentos where id=%s and conta_id=%s""",
+            (lancamento_id, conta_id),
+        ).fetchone()
+        if not l:
+            return {"ok": False, "erro": "Pagamento não encontrado."}
+        lanc = {"id": l[0], "data": l[1], "valor_centavos": int(l[2] or 0),
+                "tipo": l[3], "origem": l[4], "descricao": l[5]}
+
+        dono = c.execute(
+            "select id from titulos where lancamento_id=%s and conta_id=%s",
+            (lancamento_id, conta_id),
+        ).fetchone()
+        if dono:
+            return {"ok": False, "erro": "Esse pagamento já está ligado a outra conta."}
+
+        # o gêmeo: pagamento de mesmo dia e valor que uma baixa de título é o ECO
+        # daquele dinheiro, não dinheiro novo. Sem esta trava, a foto do
+        # comprovante do sinal da Bianca Oliveira quitaria a parcela 2/2 — fechando
+        # com o dinheiro da parcela 1 uma dívida que a cliente ainda tem.
+        if lanc["origem"] != "titulo" and c.execute(
+                """select 1 from lancamentos
+                    where conta_id=%s and origem='titulo' and tipo=%s and data=%s
+                      and valor_centavos=%s limit 1""",
+                (conta_id, lanc["tipo"], lanc["data"], lanc["valor_centavos"]),
+        ).fetchone():
+            return {"ok": False, "erro": "Esse dinheiro já foi contado na baixa de "
+                                         "outra conta — é a mesma entrada, repetida."}
+
+        t = c.execute(
+            """select tipo, valor_centavos, vencimento, status, descricao
+                 from titulos where id=%s and conta_id=%s""",
+            (titulo_id, conta_id),
+        ).fetchone()
+        if not t:
+            return {"ok": False, "erro": "Conta não encontrada."}
+        titulo = {"tipo": t[0], "valor_centavos": int(t[1] or 0), "vencimento": t[2],
+                  "status": t[3], "descricao": t[4]}
+        erro = pagamento_serve_pro_titulo(titulo, lanc)
+        if erro:
+            return {"ok": False, "erro": erro}
+
+        # pago_em é a data em que o DINHEIRO andou, não a de hoje: é ela que decide
+        # o mês do compromisso nos relatórios
+        feito = c.execute(
+            """update titulos set status='pago', pago_em=%s, lancamento_id=%s
+                where id=%s and conta_id=%s and status='aberto' returning id""",
+            (lanc["data"], lancamento_id, titulo_id, conta_id),
+        ).fetchone()
+        if not feito:
+            return {"ok": False, "erro": "Essa conta acabou de mudar de estado. "
+                                         "Recarregue a tela."}
+        c.commit()
+    return {"ok": True, "titulo_id": titulo_id, "lancamento_id": lancamento_id,
+            "descricao": titulo["descricao"], "pago_em": lanc["data"],
+            "valor_centavos": titulo["valor_centavos"], "tipo": titulo["tipo"]}
+
+
+def desfazer_conciliacao(pool, conta_id: int, titulo_id: int) -> dict:
+    """Reabre um título que foi conciliado por engano.
+
+    Existe porque a conciliação nasce de um PALPITE — "esse Pix parece ser desta
+    conta" — e ação de um clique baseada em palpite, numa tela de dinheiro, sem
+    volta, é como se perde informação do cliente. Marcar pago o que não foi pago
+    esconde uma dívida; sem desfazer, o único jeito de corrigir seria mexer no
+    banco na mão.
+
+    Só desfaz CONCILIAÇÃO, nunca uma baixa comum, e o que separa as duas é a
+    origem do lançamento amarrado: baixa comum sempre cria o lançamento dela com
+    `origem='titulo'`, e reabrir esse caso deixaria o lançamento órfão no
+    livro-caixa (dinheiro sem dono). Aqui o lançamento é de fora — extrato, foto,
+    manual — e continua exatamente onde estava; some só o vínculo.
+    """
+    with pool.connection() as c:
+        r = c.execute(
+            """select t.status, l.origem from titulos t
+                 left join lancamentos l on l.id = t.lancamento_id
+                where t.id=%s and t.conta_id=%s""",
+            (titulo_id, conta_id),
+        ).fetchone()
+        if not r:
+            return {"ok": False, "erro": "Conta não encontrada."}
+        if r[0] != "pago":
+            return {"ok": False, "erro": f"Essa conta está '{r[0]}', não paga."}
+        if r[1] is None:
+            return {"ok": False, "erro": "Essa baixa não veio de uma conciliação."}
+        if r[1] == "titulo":
+            return {"ok": False, "erro": "Essa baixa lançou dinheiro no caixa — "
+                                         "desfazer deixaria o lançamento sem dono."}
+        feito = c.execute(
+            """update titulos set status='aberto', pago_em=null, lancamento_id=null
+                where id=%s and conta_id=%s and status='pago' returning descricao""",
+            (titulo_id, conta_id),
+        ).fetchone()
+        if not feito:
+            return {"ok": False, "erro": "Essa conta acabou de mudar de estado."}
+        c.commit()
+    return {"ok": True, "descricao": feito[0]}
+
+
 def cancelar_titulo(pool, conta_id: int, titulo_id: int) -> bool:
     with pool.connection() as c:
         r = c.execute(

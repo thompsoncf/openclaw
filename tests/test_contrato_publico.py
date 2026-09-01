@@ -203,9 +203,32 @@ def test_conta_sem_nicho_de_eventos_nao_tem_contrato(pool):
 
 # ------------------------------------------------- assinável só depois do sinal
 
-def test_sem_sinal_a_assinatura_e_recusada(pool):
-    """A trava é revalidada no POST: esconder o formulário não impede a chamada."""
+def test_aprovado_e_sem_sinal_ja_assina(pool):
+    """A REGRA NOVA (dono, 01/09/2026): o contrato é amarrado ao ORÇAMENTO APROVADO
+    e a mais nada. Antes a assinatura esperava o sinal cair — e como quem confirma o
+    sinal só existe no desktop, o contrato ficava lido e parado esperando alguém
+    sentar no computador.
+
+    A cláusula 4.1 não mudou: a data continua só ficando reservada com a entrada. O
+    que a assinatura antecipa é o compromisso, não a reserva."""
     _orcamento(pool, status="aprovada", sinal_pago=False)
+    assert _ct(pool)["pode_assinar"] is True
+    _assinar(pool)
+    assert _ct(pool)["assinado"] is True
+
+
+def test_proposta_reaberta_tranca_a_assinatura_de_novo(pool):
+    """O que SOBROU de trava, e ela é revalidada no POST: esconder o formulário não
+    impede a chamada.
+
+    O estado é real, não inventado: o contrato nasce na aprovação, e depois a
+    proposta pode voltar pro funil pra ser corrigida. Enquanto ela não estiver
+    aprovada de novo, o contrato que já existe não se assina."""
+    _orcamento(pool, status="aprovada", sinal_pago=False)   # nasce o contrato
+    with pool.connection() as c:
+        c.execute("update orcamentos set status='enviado'")
+        c.commit()
+    assert _ct(pool)["pode_assinar"] is False
     _assinar(pool)
     assert _ct(pool)["assinado"] is False
 
@@ -481,18 +504,28 @@ def test_link_colado_com_espaco_sobrando_ainda_abre(pool):
     assert ctr.por_token(pool, " CTTOKEN\n")["token"] == CT_TOKEN
 
 
-def test_le_antes_de_pagar_mas_so_assina_depois(pool):
+def test_le_o_contrato_inteiro_e_ja_assina(pool):
     """A propriedade que a folha tinha e não podia se perder na separação: ninguém
-    deve pagar pra descobrir o que aceitou."""
+    deve pagar pra descobrir o que aceitou. Agora ela vale por inteiro — lê tudo E
+    assina, sem esperar ninguém."""
     _orcamento(pool, status="aprovada")                 # aprovada, sem sinal
     html = cp.contrato_publico(_Req(), CT_TOKEN).body.decode()
     assert "Hora extra: R$ 620,00." in html             # leu o contrato inteiro
-    assert "assinatura é liberada" in html
-    assert 'action="/contrato/' not in html             # e não tem como assinar
-    # com o sinal, o formulário aparece
+    assert "Assinar o contrato" in html and 'action="/contrato/' in html
+
+
+def test_quem_assina_antes_do_sinal_e_avisado_sobre_a_data(pool):
+    """Enquanto o sinal travava o botão, a ORDEM dizia sozinha que a data vinha com
+    o pagamento. Solto o botão, quem precisa dizer é a tela — e com a régua da
+    cláusula 4.1, não com uma promessa nova."""
+    _orcamento(pool, status="aprovada", sinal_pago=False)
+    html = cp.contrato_publico(_Req(), CT_TOKEN).body.decode()
+    assert "definitivamente" in html and "cláusula 4.1" in html
+    # pago o sinal, o aviso some: não há mais o que esperar
     _orcamento(pool, status="aprovada", sinal_pago=True)
     html2 = cp.contrato_publico(_Req(), CT_TOKEN).body.decode()
-    assert "Assinar o contrato" in html2 and 'action="/contrato/' in html2
+    assert "cláusula 4.1" not in html2
+    assert "Assinar o contrato" in html2
 
 
 def test_o_contrato_saiu_da_folha_da_proposta(pool):

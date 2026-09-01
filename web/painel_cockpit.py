@@ -733,10 +733,17 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .qtd button{width:24px;height:24px;border-radius:7px;border:1px solid var(--line);background:var(--surface);
   color:var(--text);font:inherit;font-size:.9rem;cursor:pointer;line-height:1}
 .qtd span{font-family:var(--mono);font-size:.82rem;min-width:14px;text-align:center}
+/* o × e o valor unitário, colados no contador: "quantos × quanto" é uma leitura
+   só, e separar os dois obrigaria o vendedor a procurar o preço noutro canto. */
+.qtd span.u{color:var(--text-faint);min-width:0;margin-left:.15rem}
+.qtd input.un{width:64px;padding:.18rem .35rem}
 .avulso{display:flex;gap:.4rem;padding:0 1.1rem}
 .avulso input{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;
   color:var(--text);padding:.55rem .7rem;font-family:inherit;font-size:.85rem}
 .avulso input.v{flex:0 0 88px;font-family:var(--mono)}
+/* as linhas seguintes do bloco do evento: mesma faixa, só com o respiro que a
+   primeira ganha do `.secao` acima dela. */
+.avulso.ev2{padding-top:.45rem}
 .avulso button{flex-shrink:0;width:42px;border:1px solid var(--line);border-radius:10px;
   background:var(--surface);color:var(--neon);font-size:1.1rem;font-weight:700;cursor:pointer}
 .vazio-cat{padding:1rem 1.1rem;color:var(--text-dim);font-size:.86rem;line-height:1.5}
@@ -2161,8 +2168,13 @@ _ORC_JS = r"""
       +'Dá pra montar com itens avulsos aqui embaixo, ou pedir pro gestor cadastrar o catálogo no painel.</div>';return;}
     O.cat.forEach(function(s,i){
       var e=sel[i], on=e!==undefined;
+      // o unitário fica ao lado do contador, na mesma altura — é onde o vendedor
+      // olha pra conferir "quantos × quanto", e é o que o painel já mostra.
       var q=on?'<div class=qtd><button data-q="-" data-i="'+i+'" aria-label="menos">−</button>'
-        +'<span>'+e.q+'</span><button data-q="+" data-i="'+i+'" aria-label="mais">+</button></div>':'';
+        +'<span>'+e.q+'</span><button data-q="+" data-i="'+i+'" aria-label="mais">+</button>'
+        +'<span class=u>×</span><input class="cmp un" data-u="'+i+'" inputmode=numeric'
+        +' autocomplete=off aria-label="Valor unitário" value="'+(e.u==null?(s.setup||0):e.u)+'">'
+        +'</div>':'';
       var it=on?linhaDe(i):s;
       var d=document.createElement("div");d.className="srv"+(on?" on":"");d.setAttribute("data-i",i);
       d.innerHTML='<div class=ck>'+(on?'✓':'')+'</div><div class=m><b>'+esc(s.nome)+'</b>'
@@ -2175,10 +2187,16 @@ _ORC_JS = r"""
   // mesmo nos dois, e dois caminhos separados divergiriam no primeiro ajuste.
   function alvo(k){return k.charAt(0)==="c"?sel[k.slice(1)]:avulsos[k.slice(1)];}
   function itemDe(k){return k.charAt(0)==="c"?linhaDe(k.slice(1)):avulsos[k.slice(1)];}
+  // A QUANTIDADE É CAMPO, NÃO TEXTO. Até 01/09/2026 ela ia dentro do nome
+  // ("LOCAÇÃO LEDS (× 15)") porque o snapshot do app não tinha onde guardá-la — e a
+  // folha do cliente, que imprime qtd × unitário, mostrava "1 × R$ 750,00". Agora
+  // `qtd` e `unitario` viajam separados, iguais aos do painel. `setup` segue sendo o
+  // TOTAL da linha: é o que o funil soma e o que o fechamento cobra.
   function linhaDe(i){
-    var s=O.cat[i], e=sel[i];
-    return {nome:s.nome+(e.q>1?" (× "+e.q+")":""), setup:(s.setup||0)*e.q,
-            mensal:(s.mensal||0)*e.q, desc_tipo:e.desc_tipo, desc_val:e.desc_val};
+    var s=O.cat[i], e=sel[i], u=(e.u==null?(s.setup||0):e.u);
+    return {nome:s.nome, setup:u*e.q, mensal:(s.mensal||0)*e.q,
+            qtd:e.q, unitario:u, categoria:s.categoria||"",
+            desc_tipo:e.desc_tipo, desc_val:e.desc_val};
   }
   function itens(){
     var out=[];
@@ -2211,13 +2229,14 @@ _ORC_JS = r"""
       if(k){alvo(k).desc_tipo=dt.getAttribute("data-dt");
         pintaCatalogo();pintaAvulsos();soma();}
       return;}
-    if(e.target.closest(".cmp")){e.stopPropagation();return;}
+    if(e.target.closest(".cmp")){e.stopPropagation();return;}   // desconto e unitário
     var qb=e.target.closest("[data-q]");
     if(qb){e.stopPropagation();var i=qb.getAttribute("data-i");
       sel[i].q=Math.max(1,sel[i].q+(qb.getAttribute("data-q")==="+"?1:-1));pintaCatalogo();soma();return;}
     var row=e.target.closest(".srv");
     if(row){var j=row.getAttribute("data-i");
-      if(sel[j]!==undefined)delete sel[j];else sel[j]={q:1,desc_tipo:"pct",desc_val:0};
+      if(sel[j]!==undefined)delete sel[j];
+      else sel[j]={q:1,u:(O.cat[j]||{}).setup||0,desc_tipo:"pct",desc_val:0};
       pintaCatalogo();soma();}
   });
   // o rodapé é só o desconto do total — pílula própria, mesmo desenho
@@ -2231,6 +2250,19 @@ _ORC_JS = r"""
   // NÃO repinta o catálogo no input: repintar tira o foco do campo a cada tecla.
   // Só o preço da linha e o rodapé mudam.
   document.addEventListener("input",function(e){
+    // o unitário: mesma regra do desconto — NÃO repinta o catálogo, senão o campo
+    // perde o foco a cada tecla. Só o preço da linha e o rodapé mudam.
+    var fu=e.target.closest("[data-u]");
+    if(fu){
+      var iu=fu.getAttribute("data-u"), vu=parseInt((fu.value||"").replace(/\D/g,''),10);
+      if(sel[iu]){
+        sel[iu].u=Math.max(0,isNaN(vu)?0:vu);
+        var ru=$("cat").querySelector('.srv[data-i="'+iu+'"]');
+        if(ru)ru.querySelector(".pr").innerHTML=precoCel(linhaDe(iu));
+        soma();
+      }
+      return;
+    }
     var f=e.target.closest("[data-di]");
     if(f){
       var k=f.getAttribute("data-di"), v=parseInt((f.value||"").replace(/\D/g,''),10);
@@ -2281,6 +2313,58 @@ _ORC_JS = r"""
     avulsos.push({nome:n,setup:v,mensal:0,desc_tipo:"pct",desc_val:0});
     $("addnome").value="";$("addval").value="";pintaAvulsos();soma();toast("Item adicionado");
   };
+  // ---- o evento e as parcelas (só no nicho de eventos) ----
+  var parcelas=[];
+  function pintaParcelas(){
+    var box=$("parcelas");if(!box)return;
+    box.innerHTML=parcelas.map(function(p,i){
+      return '<div class=avl><b>'+esc(p.venc||"a combinar")+'</b>'
+        +'<span class=vl>'+brl(Math.round(p.valor_centavos/100))+'</span>'
+        +'<button type=button data-px="'+i+'" aria-label="Remover parcela">×</button></div>';
+    }).join("");
+  }
+  document.addEventListener("click",function(e){
+    var x=e.target.closest("[data-px]");if(!x)return;
+    parcelas.splice(parseInt(x.getAttribute("data-px"),10),1);pintaParcelas();
+  });
+  var pa=$("pcadd");
+  if(pa)pa.onclick=function(){
+    var v=parseInt(($("pcval").value||"").replace(/\D/g,''),10);
+    if(!v){toast("Informe o valor da parcela");return;}
+    parcelas.push({venc:$("pcvenc").value.trim(),valor_centavos:v*100,forma:"",obs:""});
+    $("pcvenc").value="";$("pcval").value="";pintaParcelas();
+  };
+  // ---- reabrir uma proposta: repõe o que já estava gravado ----
+  // Casar item salvo com item do catálogo é pelo NOME, que é o que o snapshot
+  // guarda — ele não guarda o id do serviço. Item que não bate (avulso, ou serviço
+  // apagado do catálogo depois) volta como avulso, e não some: perder uma linha ao
+  // reabrir seria pior do que a proposta não abrir.
+  function repor(d){
+    if(!d)return;
+    (d.itens||[]).forEach(function(it){
+      var i=-1;
+      for(var k=0;k<O.cat.length;k++){ if(O.cat[k].nome===it.nome){i=k;break;} }
+      var q=Math.max(1,parseInt(it.qtd,10)||1);
+      var u=parseInt(it.unitario,10)||Math.round((parseInt(it.setup,10)||0)/q);
+      if(i>=0) sel[i]={q:q,u:u,desc_tipo:it.desc_tipo||"pct",desc_val:parseInt(it.desc_val,10)||0};
+      else avulsos.push({nome:it.nome,setup:parseInt(it.setup,10)||0,mensal:0,
+                         desc_tipo:it.desc_tipo||"pct",desc_val:parseInt(it.desc_val,10)||0});
+    });
+    var ev=d.evento||{}, p=function(id,v){var el=$(id);if(el&&v!=null)el.value=v;};
+    p("evdata",ev.data);p("evini",ev.inicio);p("evtipo",ev.tipo);
+    p("evlocal",ev.local);p("evconv",ev.convidados);
+    (d.parcelas||[]).forEach(function(x){parcelas.push(x);});
+    var b=$("gerar");if(b)b.textContent="Salvar a proposta";
+  }
+
+  function coletarEvento(){
+    if(!O.evento)return null;
+    var v=function(id){var el=$(id);return el?el.value.trim():"";};
+    var cv=parseInt((v("evconv")||"").replace(/\D/g,''),10);
+    return {data:v("evdata"),inicio:v("evini"),fim:"",tipo:v("evtipo"),
+            local:v("evlocal"),convidados:isNaN(cv)?null:cv};
+  }
+
   var g=$("gerar");
   if(g)g.onclick=function(){
     g.disabled=true;g.textContent="Gerando…";
@@ -2288,7 +2372,9 @@ _ORC_JS = r"""
     // Mandar o já descontado faria ele descontar de novo.
     fetch(O.base+"/lead/"+O.leadId+"/orcamento",{method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({itens:itens(),desconto:{tipo:dFim.t,pct:dFim.v,valor:dFim.v}})})
+      body:JSON.stringify({itens:itens(),desconto:{tipo:dFim.t,pct:dFim.v,valor:dFim.v},
+                           evento:coletarEvento(),parcelas:parcelas,
+                           orcamento_id:O.orcId||0})})
       .then(function(r){return r.json();}).then(function(j){
         if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");g.disabled=false;
           g.textContent="Gerar proposta e link";return;}
@@ -2325,13 +2411,14 @@ _ORC_JS = r"""
   // exposto pro teste de paridade rodar a MESMA conta que a tela roda
   window.__orc={conta:conta,itens:itens,sel:sel,avulsos:avulsos,dFim:dFim,
                 set:function(s,a,d){sel=s;avulsos=a;dFim=d;}};
-  pintaCatalogo();soma();
+  repor(O.abrir);
+  pintaCatalogo();pintaAvulsos();pintaParcelas();soma();
 })();
 </script>"""
 
 
 @router.get("/cockpit/lead/{lead_id}/orcamento", response_class=HTMLResponse)
-def cockpit_orcamento_montar(request: Request, lead_id: int):
+def cockpit_orcamento_montar(request: Request, lead_id: int, orc: int = 0):
     """Montador da proposta. O motor é o mesmo de sempre (`cockpit.criar_orcamento`);
     o que mudou foi a casca. Ela precisava vir junto: montar o orçamento é o meio do
     caminho de fechar venda, e deixar essa tela pra trás faria o vendedor trocar de
@@ -2350,8 +2437,20 @@ def cockpit_orcamento_montar(request: Request, lead_id: int):
     # outra metade está no `criar_orcamento`, que descarta os campos de quem não
     # vende serviço. O form vem do navegador, e navegador não é fonte confiável.
     # `</` escapado: o catálogo é texto do usuário e fecharia o <script> antes da hora
+    # O MODO VEM DO NICHO DA CONTA, como no painel — nunca do navegador. É ele que
+    # decide se a tela pergunta data e parcelas, e o servidor descarta os dois em
+    # quem não é evento (finance.cockpit.criar_orcamento).
+    from finance import vendas as _vendas
+    evento_mode = _vendas.modo_do_orcamento(pool, conta_id) == "evento"
+    # `orc` reabre uma proposta existente: os itens e o evento voltam preenchidos e
+    # o salvar ATUALIZA em vez de cunhar a segunda. Antes de 01/09/2026 o app só
+    # sabia criar, e corrigir uma vírgula obrigava a abrir o desktop.
+    reabrindo = ck.orcamento(pool, conta_id, orc, membro_id=membro_id) if orc else None
     dados = _json.dumps({"cat": cat, "leadId": lead_id, "base": _BASE,
-                         "desc": ck.vende_servico(pool, conta_id)},
+                         "desc": ck.vende_servico(pool, conta_id),
+                         "evento": evento_mode,
+                         "orcId": (reabrindo or {}).get("id") or 0,
+                         "abrir": reabrindo or None},
                         ensure_ascii=False).replace("</", "<\\/")
     corpo = (_hdr("Orçamento", d["empresa"], voltar=f"{_BASE}/lead/{lead_id}")
              + "<div class=toast id=toast></div>"
@@ -2362,6 +2461,23 @@ def cockpit_orcamento_montar(request: Request, lead_id: int):
                "<input class=v id=addval inputmode=numeric placeholder='R$' autocomplete=off>"
                "<button type=button id=addbtn aria-label='Adicionar item'>+</button></div>"
              + "<div id=avulsos></div>"
+             # O EVENTO E AS PARCELAS. Ficam no MESMO rolo, abaixo dos itens, e não
+             # numa segunda página: o vendedor está com o cliente na frente e
+             # navegar entre telas no meio da conversa é onde ele desiste e volta
+             # pro desktop. Só existem no nicho de eventos — nos outros o servidor
+             # descarta, e mostrar campo que não grava é mentira de tela.
+             + (("<div class=secao><div class=rot>O evento</div></div>"
+                 "<div class=avulso><input id=evdata placeholder='Data (dd/mm/aaaa)' autocomplete=off>"
+                 "<input class=v id=evini placeholder='Início' autocomplete=off></div>"
+                 "<div class='avulso ev2'><input id=evtipo placeholder='Tipo (Casamento, 15 anos…)' autocomplete=off>"
+                 "<input class=v id=evconv inputmode=numeric placeholder='Convid.' autocomplete=off></div>"
+                 "<div class='avulso ev2'><input id=evlocal placeholder='Local' autocomplete=off></div>"
+                 "<div class=secao><div class=rot>Parcelas</div></div>"
+                 "<div id=parcelas></div>"
+                 "<div class='avulso ev2'><input id=pcvenc placeholder='Vencimento' autocomplete=off>"
+                 "<input class=v id=pcval inputmode=numeric placeholder='R$' autocomplete=off>"
+                 "<button type=button id=pcadd aria-label='Adicionar parcela'>+</button></div>")
+                if evento_mode else "")
              + "</div>"
              + "<div class=rodape-b id=rodape>"
                "<div class=dlin id=dfim style='display:none'><span>Desconto no total</span>"
@@ -2386,8 +2502,14 @@ def cockpit_orcamento_criar(request: Request, lead_id: int, payload: dict = Body
     if not sess:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     p = payload or {}
+    try:
+        orc_id = int(p.get("orcamento_id") or 0) or None
+    except (TypeError, ValueError):
+        orc_id = None
     r = ck.criar_orcamento(get_pool(), sess[0], sess[1], lead_id,
-                           p.get("itens"), p.get("desconto"))
+                           p.get("itens"), p.get("desconto"),
+                           evento=p.get("evento"), parcelas=p.get("parcelas"),
+                           orcamento_id=orc_id)
     return JSONResponse(r)
 
 
@@ -2925,11 +3047,41 @@ def cockpit_orcamento(request: Request, orc_id: int):
                   "<button class=btn type=submit>Confirmar e gerar os títulos</button></form>"
                   "</details></div>")
 
-    # "editar ou qualquer coisa": o editor completo já existe no painel e aceita
-    # deep link (?abrir=<id>) — não faz sentido reconstruir o formulário no celular.
-    editar = (f"<div class=bloco><a class='btn ghost' href='/painel/servicos?abrir={orc_id}' "
-              "target=_blank rel=noopener>Editar no painel (itens, valores, escopo)</a></div>"
-              if gestao else "")
+    # EDITAR. O gestor vai pro painel, que tem o formulário completo (escopo, ficha
+    # do cliente, margem). O VENDEDOR corrige no próprio app desde 01/09/2026 — antes
+    # ele só sabia criar, e mudar uma quantidade obrigava a abrir o desktop no meio
+    # da conversa com o cliente. Proposta fechada não reabre por nenhum dos dois: os
+    # títulos já existem.
+    if gestao:
+        editar = (f"<div class=bloco><a class='btn ghost' href='/painel/servicos?abrir={orc_id}' "
+                  "target=_blank rel=noopener>Editar no painel (itens, valores, escopo)</a></div>")
+    elif o["lead_id"] and not fechada:
+        editar = (f"<div class=bloco><a class='btn ghost' "
+                  f"href='{_BASE}/lead/{o['lead_id']}/orcamento?orc={orc_id}'>"
+                  "Corrigir a proposta</a></div>")
+    else:
+        editar = ""
+
+    # SINAL RECEBIDO. O comprovante chega no WhatsApp do vendedor, no celular — e
+    # até 01/09/2026 só o desktop tinha este botão. Ele NÃO é o que libera o
+    # contrato (a assinatura soltou do sinal na mesma data); é o que firma a data na
+    # agenda e lança o dinheiro. Por isso continua atrás de dois toques, como o
+    # fechar: mexe em dinheiro.
+    sinal = ""
+    if not gestao and o.get("sinal_centavos") and not o.get("sinal_pago_em"):
+        sinal = ("<div class=eyebrow>Entrada</div><div class=bloco>"
+                 "<details class=fechar><summary>Sinal recebido</summary>"
+                 f"<p>Confirma que a entrada de <b>{esc(_brl(o['sinal_centavos']))}</b> "
+                 "caiu. A data deixa de ser provisória na agenda e o valor entra "
+                 "como recebido.</p>"
+                 f"<form method=post action='{_BASE}/orcamentos/{orc_id}/sinal'>"
+                 "<button class=btn type=submit>Confirmar que a entrada caiu</button></form>"
+                 "</details></div>")
+    elif not gestao and o.get("sinal_pago_em"):
+        sinal = ("<div class=eyebrow>Entrada</div><div class=bloco><div class=card "
+                 "style='font-size:.84rem;color:var(--text-dim)'>"
+                 "<b style='color:var(--neon)'>Sinal confirmado</b> — a data está firme "
+                 "na agenda.</div></div>")
 
     aprovada = ""
     if o["aprovada_em"]:
@@ -2957,7 +3109,7 @@ def cockpit_orcamento(request: Request, orc_id: int):
              + aprovada
              + (f"<div class=eyebrow>Mandar pro cliente</div><div class=bloco>{''.join(envio)}</div>"
                 if envio else "")
-             + mover + fechar + editar
+             + mover + sinal + fechar + editar
              + (f"<div class=eyebrow>O que entra</div><div class=bloco><div class=card>{itens}</div></div>"
                 if itens else "")
              + (f"<div class=eyebrow>Cliente</div><div class=bloco><div class=card>{ficha_html}</div></div>"
@@ -2996,6 +3148,23 @@ def cockpit_orcamento_fechar(request: Request, orc_id: int):
                            membro_id=None if g else sess[1])
     request.session["ck_ok" if r.get("ok") else "ck_err"] = (
         r.get("msg", "Contrato fechado ✓") if r.get("ok") else r.get("erro", "Não deu certo."))
+    return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+
+
+@router.post("/cockpit/orcamentos/{orc_id}/sinal")
+def cockpit_orcamento_sinal(request: Request, orc_id: int):
+    """Confirma o sinal recebido, do celular. Mesmo motor do funil e da agenda
+    (vendas.confirmar_sinal, via ck.confirmar_sinal) — inclusive a idempotência,
+    que impede o duplo-toque firmar a data duas vezes."""
+    g = _gerencia(request)
+    sess = _sessao(request)
+    if not g and not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id = g[0] if g else sess[0]
+    r = ck.confirmar_sinal(get_pool(), conta_id, orc_id,
+                           membro_id=None if g else sess[1])
+    request.session["ck_ok" if r.get("ok") else "ck_err"] = (
+        r.get("msg", "Sinal confirmado ✓") if r.get("ok") else r.get("erro", "Não deu certo."))
     return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
 
 

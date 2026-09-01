@@ -360,11 +360,96 @@ def _bloco_fora(fora: dict) -> dict:
     return {"itens": itens, "centavos": sum(i["centavos"] for i in itens)}
 
 
+# Quantos dias em volta do vencimento um pagamento ainda pode ser DAQUELE título.
+#
+# O teto é dado pela conta de menor espaçamento que existe na base, e ela é a
+# QUINZENAL (15 dias), não a mensal. 14 é o maior número que não alcança a
+# ocorrência vizinha dela — e o número foi medido, não escolhido: com 15 a régua
+# rodada em produção devolvia 3 dicas na Prime e 2 eram falsas, porque os títulos
+# "2ª quinzena agosto" vencem em 05/09 e o pagamento da 1ª quinzena caiu em 21/08,
+# exatamente 15 dias antes. Com 14 sobra só a dica boa (ZARB: título vencendo
+# 15/08, Pix de mesmo valor em 10/08).
+#
+# Apertar mais deixaria de fora pagamento atrasado legítimo; afrouxar traz de
+# volta o vizinho. É o mesmo erro, na direção contrária, do que eu cometi lendo os
+# 30 títulos da Prime: 20 tinham lançamento de mesmo valor e NENHUM estava pago.
+_JANELA_CANDIDATO_DIAS = 14
+
+
+def _pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
+    """Pra cada título em aberto, o pagamento que TEM CARA de ser ele.
+
+    Isto é uma DICA, não uma conclusão, e a diferença é a razão da função existir
+    com este desenho. Rodando casamento por valor + janela nos 11 títulos vencidos
+    da produção em 01/09/2026 saem duas sugestões, e uma delas casaria a
+    "parcela 2/2 da Bianca Oliveira" com o dinheiro do SINAL (parcela 1) — ou
+    seja, fecharia uma dívida que a cliente ainda tem e inventaria receita que não
+    entrou. Por isso aqui não se dá baixa em nada: a tela avisa, conta quantos
+    candidatos existem e deixa a decisão com quem sabe.
+
+    Três travas contra o falso positivo:
+
+    * lançamento que JÁ é a baixa de algum título não vira candidato de outro
+      (`titulos.lancamento_id`);
+    * **nem o gêmeo dele.** Esta trava nasceu conferindo a anterior em produção: a
+      primeira versão ainda sugeria o pagamento da parcela 2/2 da Bianca, porque o
+      dinheiro do sinal está no banco DUAS vezes — a baixa do título (amarrada, e
+      barrada pela trava 1) e a foto do mesmo comprovante (solta, e passava). Um
+      lançamento de mesmo valor e mesma data de um lançamento `origem='titulo'` é
+      o eco daquele dinheiro, não dinheiro novo — é a mesma régua que
+      `_dados_vendas` usa pra não contar o sinal duas vezes;
+    * a janela é apertada de propósito (ver `_JANELA_CANDIDATO_DIAS`), porque em
+      conta recorrente o mesmo valor se repete todo mês.
+
+    Devolve {titulo_id: {"n": quantos, "data": date, "centavos": int}}.
+    """
+    alvos = [t for t in titulos if t["vencimento"] and t["valor_centavos"]]
+    if not alvos:
+        return {}
+    lanc_tipo = "despesa" if tipo == "pagar" else "receita"
+    janela = timedelta(days=_JANELA_CANDIDATO_DIAS)
+    de = min(t["vencimento"] for t in alvos) - janela
+    ate = max(t["vencimento"] for t in alvos) + janela
+    with pool.connection() as c:
+        rows = c.execute(
+            """select l.data, l.valor_centavos from lancamentos l
+                where l.conta_id=%s and l.tipo=%s and l.data >= %s and l.data <= %s
+                  and not exists (select 1 from titulos t
+                                   where t.lancamento_id = l.id and t.conta_id = l.conta_id)
+                  and (l.origem = 'titulo' or not exists (
+                        select 1 from lancamentos g
+                         where g.conta_id = l.conta_id and g.origem = 'titulo'
+                           and g.tipo = l.tipo and g.data = l.data
+                           and g.valor_centavos = l.valor_centavos))""",
+            (conta_id, lanc_tipo, de, ate),
+        ).fetchall()
+    por_valor: dict[int, list] = {}
+    for data, valor in rows:
+        por_valor.setdefault(int(valor or 0), []).append(data)
+    achados = {}
+    for t in alvos:
+        perto = [d for d in por_valor.get(t["valor_centavos"], [])
+                 if abs((d - t["vencimento"]).days) <= _JANELA_CANDIDATO_DIAS]
+        if perto:
+            perto.sort(key=lambda d: abs((d - t["vencimento"]).days))
+            achados[t["id"]] = {"n": len(perto), "data": perto[0],
+                                "centavos": t["valor_centavos"]}
+    return achados
+
+
 def _dados_titulos_abertos(pool, conta_id, tipo):
     """Contas a pagar/receber: SEMPRE mostra tudo que está em aberto — período não
-    se aplica aqui (uma conta aberta continua aberta até ser paga, não "expira")."""
+    se aplica aqui (uma conta aberta continua aberta até ser paga, não "expira").
+
+    A coluna "Conferir" é a metade nova: em produção o dinheiro sai pelo extrato e
+    pela foto do comprovante, e o título fica aberto pra sempre porque ninguém
+    clica em "pago" — em 01/09/2026 a produção inteira tinha 38 títulos abertos,
+    11 vencidos (R$ 27.170,85, um deles há 58 dias) e ZERO baixas feitas por
+    gente. A coluna não resolve isso; ela deixa de esconder."""
     hoje = date.today()
     tits = emp.listar_titulos(pool, conta_id, status="aberto", tipo=tipo, limite=300)
+    candidatos = _pagamentos_candidatos(pool, conta_id, tits, tipo)
+    verbo = "pago" if tipo == "pagar" else "recebido"
     linhas = []
     for t in tits:
         if t["atrasado"]:
@@ -372,27 +457,50 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
         else:
             dias = (t["vencimento"] - hoje).days if t["vencimento"] else None
             status, cor = "A vencer", ("aviso" if dias is not None and dias <= 7 else "ok")
+        c = candidatos.get(t["id"])
+        if not c:
+            conferir = ""
+        elif c["n"] == 1:
+            conferir = f"parece {verbo} em {_fmt(c['data'])}"
+        else:
+            # dizer QUAL seria chute quando há vários do mesmo valor por perto —
+            # e chute numa tela de dinheiro é o que esta coluna existe pra evitar
+            conferir = f"{c['n']} pagamentos iguais por perto"
         linhas.append({
             "vencimento": _fmt(t["vencimento"]),
             "contraparte": t["cliente_nome"] or t["contraparte"] or "—",
             "categoria": t["categoria"] or "—", "status": status, "status_cor": cor,
+            "conferir": conferir, "conferir_cor": "aviso",
             "valor_centavos": t["valor_centavos"],
         })
     total = _soma(linhas, "valor_centavos")
     vencidas = [r for r in linhas if r["status"] == "Vencida"]
     a_vencer_7d = [r for r in linhas if r["status_cor"] == "aviso"]
+    a_conferir = [r for r in linhas if r["conferir"]]
     rotulo_col = "Fornecedor" if tipo == "pagar" else "Cliente"
     label = "Contas a pagar" if tipo == "pagar" else "Contas a receber"
-    return {
+    dados = {
         "label": label, "mock": False, "sem_periodo": True,
         "colunas": [_col("vencimento", "Vencimento"), _col("contraparte", rotulo_col, flex=True),
                     _col("categoria", "Categoria"), _col("status", "Status", tag=True),
+                    _col("conferir", "Conferir", tag=True),
                     _col("valor_centavos", "Valor", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
         "metricas": [("Total em aberto", _brl(total)),
                      ("Vencidas", f"{len(vencidas)} · {_brl(_soma(vencidas, 'valor_centavos'))}"),
-                     ("A vencer em 7 dias", _brl(_soma(a_vencer_7d, "valor_centavos")))],
+                     ("A vencer em 7 dias", _brl(_soma(a_vencer_7d, "valor_centavos"))),
+                     (f"Talvez já {verbo}", f"{len(a_conferir)} · "
+                      f"{_brl(_soma(a_conferir, 'valor_centavos'))}")],
     }
+    if a_conferir:
+        plural = "s" if len(a_conferir) != 1 else ""
+        dados["aviso_config"] = (
+            f"{len(a_conferir)} conta{plural} em aberto {'têm' if plural else 'tem'} "
+            f"um pagamento do mesmo valor por perto — pode ser que já "
+            f"{'estejam' if plural else 'esteja'} {verbo}{plural}. Confira antes de "
+            "cobrar ou pagar de novo; a baixa continua sendo sua, o Zaq só avisa."
+        )
+    return dados
 
 
 # De onde o dinheiro veio, pra tela dizer isso em uma palavra. A cor separa o
@@ -446,9 +554,10 @@ def _dados_caixa(pool, conta_id, tipo, periodo):
     with pool.connection() as c:
         rows = c.execute(
             """select l.data, l.descricao, l.categoria, l.origem, l.valor_centavos,
-                      coalesce(cl.nome, '') as cliente
+                      coalesce(cl.nome, '') as cliente, t.descricao as titulo
                  from lancamentos l
                  left join clientes cl on cl.id = l.cliente_id
+                 left join titulos t on t.lancamento_id = l.id and t.conta_id = l.conta_id
                 where l.conta_id=%s and l.tipo=%s and l.natureza='empresa'
                   and l.data >= %s and l.data <= %s
                 order by l.data desc, l.id desc limit 500""",
@@ -473,11 +582,16 @@ def _dados_caixa(pool, conta_id, tipo, periodo):
             "descricao": (r[1] or "").strip() or r[5] or "—",
             "categoria": r[2] or "—",
             "origem": rotulo, "origem_cor": cor,
+            # a conta que este pagamento fechou. VAZIO quando não fechou nenhuma,
+            # e não "nenhum título": em produção a coluna é vazia em quase toda
+            # linha, e 53 pílulas dizendo "nenhum" viram ruído. Assim a pílula só
+            # aparece onde existe o elo — que é a informação rara e a que importa.
+            "quitou": (r[6] or "")[:60], "quitou_cor": "ok",
             "valor_centavos": int(r[4] or 0),
         })
     total = _soma(linhas, "valor_centavos")
     maior = max((r["valor_centavos"] for r in linhas), default=0)
-    de_titulo = sum(1 for r in linhas if r["origem"] == "Título")
+    de_titulo = sum(1 for r in linhas if r["quitou"])
     rotulo_col = "Fornecedor / descrição" if tipo == "pagar" else "Cliente / descrição"
     label = "Contas pagas" if tipo == "pagar" else "Contas recebidas"
     verbo = "pago" if tipo == "pagar" else "recebido"
@@ -487,6 +601,7 @@ def _dados_caixa(pool, conta_id, tipo, periodo):
         "colunas": [_col("data", "Pagamento" if tipo == "pagar" else "Recebimento"),
                     _col("descricao", rotulo_col, flex=True), _col("categoria", "Categoria"),
                     _col("origem", "Entrou por", tag=True),
+                    _col("quitou", "Quitou", tag=True),
                     _col("valor_centavos", f"Valor {verbo}", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
         "metricas": [(f"Total {verbo} no período", _brl(total)), (quantos, str(len(linhas))),

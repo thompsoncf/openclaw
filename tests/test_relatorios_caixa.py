@@ -51,6 +51,8 @@ create table lancamentos (
   tipo text not null, valor_centavos bigint not null, categoria text not null,
   descricao text not null default '', data date not null,
   origem text not null default 'manual', natureza text);
+create table titulos (id bigserial primary key, conta_id bigint, lancamento_id bigint,
+  descricao text, tipo text, status text);
 """
 
 HOJE = date.today()
@@ -78,7 +80,7 @@ def pool():
 @pytest.fixture
 def conta(pool):
     with pool.connection() as c:
-        c.execute("truncate contas, clientes, lancamentos restart identity")
+        c.execute("truncate contas, clientes, lancamentos, titulos restart identity")
         cid = c.execute("insert into contas (nome) values ('Prime Eventos') "
                         "returning id").fetchone()[0]
         c.commit()
@@ -102,8 +104,9 @@ def _lanc(pool, conta_id, *, tipo="despesa", valor=10000, categoria="Serviços",
 # ── o caso do incidente ──────────────────────────────────────────────────────
 def test_contas_pagas_enche_sem_titulo_nenhum(pool, conta):
     """O caso EXATO de 01/09/2026: a Prime tinha 53 pagamentos e zero títulos
-    baixados, e a tela mostrava R$ 0,00. Não existe tabela `titulos` neste banco
-    de teste de propósito — se a aba voltar a depender dela, quebra aqui."""
+    baixados, e a tela mostrava R$ 0,00. A tabela `titulos` existe e está VAZIA —
+    é a situação do incidente, e se a aba voltar a tirar as linhas de lá, some
+    tudo de novo."""
     _lanc(pool, conta, valor=36000, descricao="2ª quinzena — Iasmin Flor")
     _lanc(pool, conta, valor=25823, descricao="Mensalidade Security", origem="extrato")
     d = rel._dados_caixa(pool, conta, "pagar", "todos")
@@ -125,8 +128,18 @@ def test_o_titulo_baixado_continua_aparecendo(pool, conta):
 
 def test_a_metrica_diz_quantos_fecharam_o_ciclo(pool, conta):
     """É o número que mostra o buraco: quanto do caixa passou por um compromisso
-    em vez de só cair na conta. Na Prime real era 2 de 72."""
-    _lanc(pool, conta, tipo="receita", origem="titulo")
+    em vez de só cair na conta. Na Prime real era 2 de 72.
+
+    Conta pelo ELO (`titulos.lancamento_id`), não por `origem='titulo'`. Em
+    produção os dois andam juntos — `dar_baixa_titulo` grava o lançamento e o elo
+    na mesma transação — mas o elo é o que a coluna "Quitou" mostra, e métrica que
+    diverge da coluna ao lado é tela se contradizendo."""
+    lid = _lanc(pool, conta, tipo="receita", origem="titulo")
+    with pool.connection() as c:
+        c.execute("insert into titulos (conta_id, lancamento_id, descricao, tipo, "
+                  "status) values (%s,%s,'Evento — Sinal','receber','pago')",
+                  (conta, lid))
+        c.commit()
     _lanc(pool, conta, tipo="receita", origem="extrato")
     _lanc(pool, conta, tipo="receita", origem="foto")
     d = rel._dados_caixa(pool, conta, "receber", "todos")
@@ -299,6 +312,56 @@ def test_as_abas_de_caixa_nao_leem_mais_titulo():
     assert "listar_titulos" not in corpo, \
         "Contas pagas/recebidas voltaram a depender do título baixado — é o bug"
     assert re.search(r"from lancamentos", corpo), "tem que ler o caixa"
+    # o título entra por LEFT JOIN, só pra dizer qual conta o pagamento fechou.
+    # Se virar INNER (ou aparecer num where), a aba volta a esconder o pagamento
+    # que não tem título — que são quase todos.
+    assert "left join titulos" in corpo, "o elo com o título é opcional, e por fora"
+
+
+# ── a coluna Quitou (passo 3) ────────────────────────────────────────────────
+def _liga_titulo(pool, conta_id, lanc_id, descricao):
+    with pool.connection() as c:
+        c.execute("insert into titulos (conta_id, lancamento_id, descricao, tipo, "
+                  "status) values (%s,%s,%s,'pagar','pago')",
+                  (conta_id, lanc_id, descricao))
+        c.commit()
+
+
+def test_a_coluna_quitou_mostra_a_conta_que_o_pagamento_fechou(pool, conta):
+    lid = _lanc(pool, conta, descricao="Pagamento Pix 58.608.090")
+    _liga_titulo(pool, conta, lid, "ZARB CONSULTORIA")
+    linha = rel._dados_caixa(pool, conta, "pagar", "todos")["linhas"][0]
+    assert linha["quitou"] == "ZARB CONSULTORIA"
+    assert linha["quitou_cor"] == "ok"
+
+
+def test_pagamento_sem_titulo_deixa_a_coluna_vazia(pool, conta):
+    """Vazio e não "nenhum título": a coluna é esparsa por desenho, e 53 pílulas
+    dizendo "nenhum" viram ruído. O template só desenha a pílula quando há
+    valor."""
+    _lanc(pool, conta, descricao="Conta de água")
+    assert rel._dados_caixa(pool, conta, "pagar", "todos")["linhas"][0]["quitou"] == ""
+
+
+def test_a_metrica_conta_os_que_tem_titulo(pool, conta):
+    lid = _lanc(pool, conta)
+    _liga_titulo(pool, conta, lid, "INTERNET")
+    _lanc(pool, conta)
+    _lanc(pool, conta)
+    d = rel._dados_caixa(pool, conta, "pagar", "todos")
+    assert ("Quitaram um título", "1") in d["metricas"]
+
+
+def test_o_titulo_de_outra_conta_nao_encosta(pool, conta):
+    lid = _lanc(pool, conta)
+    with pool.connection() as c:
+        outra = c.execute("insert into contas (nome) values ('Outra') "
+                          "returning id").fetchone()[0]
+        c.execute("insert into titulos (conta_id, lancamento_id, descricao, tipo, "
+                  "status) values (%s,%s,'Da outra empresa','pagar','pago')",
+                  (outra, lid))
+        c.commit()
+    assert rel._dados_caixa(pool, conta, "pagar", "todos")["linhas"][0]["quitou"] == ""
 
 
 def test_as_duas_abas_apontam_pro_dados_caixa():

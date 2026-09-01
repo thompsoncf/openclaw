@@ -6435,8 +6435,10 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     </thead>
     <tbody>
     {% for row in dados.linhas %}
-    <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% elif col.flex %} class="rel-flex" title="{{ row[col.chave] }}"{% endif %}{% if col.chave == dados.col_total %} data-c="{{ row[col.chave] }}"{% endif %}>{% if col.tag %}<span
-      class="rel-tag {{ row[col.chave ~ '_cor'] }}">{{ row[col.chave] }}</span>{% elif col.brl %}{{ row[col.chave]|brl
+    <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% elif col.flex %} class="rel-flex" title="{{ row[col.chave] }}"{% endif %}{% if col.chave == dados.col_total %} data-c="{{ row[col.chave] }}"{% endif %}>{% if col.tag %}{#- pílula SÓ quando há valor: as colunas "Quitou" e "Conferir"
+      são esparsas por desenho (o elo é raro), e uma pílula vazia em cada linha
+      vira ruído com borda. -#}{% if row[col.chave] %}<span
+      class="rel-tag {{ row[col.chave ~ '_cor'] }}">{{ row[col.chave] }}</span>{% endif %}{% elif col.brl %}{{ row[col.chave]|brl
       }}{% elif col.cli %}{#- a célula Cliente da Agenda. Nome vindo do VÍNCULO sai
       limpo; DEDUÇÃO sai apagada e com selo, porque é palpite e a tela não pode
       fingir que é dado. Dois selos, porque são duas origens: "do lead" (azul,

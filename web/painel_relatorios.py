@@ -7,8 +7,14 @@ Dados reais, reaproveitando o que já existe:
   - Vendas          -> lancamentos (tipo='receita', natureza='empresa')
   - Contas a pagar   -> titulos (tipo='pagar',   status='aberto')  [finance.empresa]
   - Contas a receber -> titulos (tipo='receber', status='aberto')  [finance.empresa]
-  - Contas pagas     -> titulos (tipo='pagar',   status='pago', filtrado por pago_em)
-  - Contas recebidas -> titulos (tipo='receber', status='pago', filtrado por pago_em)
+  - Contas pagas     -> lancamentos (tipo='despesa', natureza='empresa')
+  - Contas recebidas -> lancamentos (tipo='receita', natureza='empresa')
+
+    Estas duas liam `titulos` baixados e por isso viviam VAZIAS: em 01/09/2026 a
+    produção inteira tinha 2 títulos pagos, os dois baixados pelo sistema, e
+    nenhum baixado por gente. Quem responde "quanto eu paguei" é o caixa, não o
+    compromisso — ver o docstring de `_dados_caixa`. As duas abas de compromisso
+    (a pagar / a receber) continuam lendo `titulos`, que é onde elas estão certas.
   - Comissão         -> lancamentos de vendas agrupados por membro_id, aplicando o
                         membros.comissao_pct de cada um (migração 137). Vendedor sem
                         % configurada aparece com comissão R$ 0,00 e um aviso na tela
@@ -245,32 +251,116 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
     }
 
 
-def _dados_titulos_pagos(pool, conta_id, tipo, periodo):
+# De onde o dinheiro veio, pra tela dizer isso em uma palavra. A cor separa o
+# caminho COMPLETO (nasceu de uma venda ou de um título e fechou o ciclo) do
+# caminho que só passou pelo caixa — é a diferença que a aba existe pra mostrar.
+_ORIGEM = {
+    "balcao":  ("Balcão", "ok"),
+    "titulo":  ("Título", "ok"),
+    "foto":    ("Comprovante", "neutro"),
+    "manual":  ("Manual", "neutro"),
+    "folha":   ("Folha", "neutro"),
+    "replica": ("Cópia", "neutro"),
+    "extrato": ("Extrato", "info"),
+}
+
+
+def _dados_caixa(pool, conta_id, tipo, periodo):
+    """Contas pagas / Contas recebidas: o DINHEIRO que andou, não o título baixado.
+
+    Antes estas duas abas liam `titulos` com status='pago'. O efeito, conferido em
+    produção em 01/09/2026: **Contas pagas estava vazia em TODAS as contas, desde
+    sempre**. Na Prime (conta 34) saíram R$ 34.232,86 do caixa em agosto — 53
+    pagamentos — e a tela mostrava R$ 0,00.
+
+    A causa não era bug de consulta, era desenho. Título só vira 'pago' quando
+    alguém clica no botão, e o levantamento mostrou que **ninguém nunca clicou**:
+    das 40 linhas de `titulos` da produção inteira, 2 estavam pagas, e as duas
+    foram baixadas pelo próprio sistema (o fluxo do sinal, em finance/vendas.py).
+    Enquanto isso o dinheiro real entra sozinho por dois caminhos que nascem
+    direto em `lancamentos` e nunca encostam num título: a importação do extrato
+    (OFX) e a foto do comprovante mandada no WhatsApp.
+
+    Então a aba passa a responder a PERGUNTA em vez de espelhar a tabela:
+    "quanto eu paguei/recebi, e do quê" é uma pergunta de caixa. O título continua
+    existindo e continua certo onde ele é a resposta — Contas a pagar e Contas a
+    receber, que são sobre COMPROMISSO e não mudaram de fonte.
+
+    Nada se perde na troca: título que foi baixado gerou lançamento com
+    `origem='titulo'` (dar_baixa_titulo, finance/empresa.py), então as linhas que
+    a aba mostrava antes continuam aparecendo — agora com o resto junto.
+
+    Só `natureza='empresa'`, igual à aba Vendas: relatório aqui é módulo PJ, e
+    despesa pessoal do dono não é conta paga da empresa. O que está "a definir"
+    (natureza nula) fica de fora da soma mas NÃO fica calado — vira aviso na tela,
+    porque em produção isso é dinheiro de verdade (a conta 3 tem R$ 20.901,18 de
+    despesa sem natureza definida) e sumir com ele é o erro que esta aba acabou
+    de deixar de cometer.
+    """
     ini, fim = _intervalo(periodo)
-    tits = emp.listar_titulos(pool, conta_id, status="pago", tipo=tipo, limite=500)
+    lanc_tipo = "despesa" if tipo == "pagar" else "receita"
+    with pool.connection() as c:
+        rows = c.execute(
+            """select l.data, l.descricao, l.categoria, l.origem, l.valor_centavos,
+                      coalesce(cl.nome, '') as cliente
+                 from lancamentos l
+                 left join clientes cl on cl.id = l.cliente_id
+                where l.conta_id=%s and l.tipo=%s and l.natureza='empresa'
+                  and l.data >= %s and l.data <= %s
+                order by l.data desc, l.id desc limit 500""",
+            (conta_id, lanc_tipo, ini, fim),
+        ).fetchall()
+        # o que ainda não foi classificado como empresa ou pessoal, no MESMO
+        # período: não entra na conta, mas a tela avisa que existe
+        indef = c.execute(
+            """select count(*), coalesce(sum(valor_centavos), 0) from lancamentos
+                where conta_id=%s and tipo=%s and natureza is null
+                  and data >= %s and data <= %s""",
+            (conta_id, lanc_tipo, ini, fim),
+        ).fetchone()
     linhas = []
-    for t in tits:
-        pg = t["pago_em"]
-        if pg is None or pg < ini or pg > fim:
-            continue
+    for r in rows:
+        rotulo, cor = _ORIGEM.get(r[3] or "", ((r[3] or "—").capitalize(), "neutro"))
         linhas.append({
-            "data": _fmt(pg), "contraparte": t["cliente_nome"] or t["contraparte"] or "—",
-            "categoria": t["categoria"] or "—", "valor_centavos": t["valor_centavos"],
+            "data": _fmt(r[0]),
+            # a descrição é onde o nome está de verdade ("Serviço de pintura —
+            # Ronaldo Vaz"); o cadastro de cliente só existe em venda de balcão,
+            # e é o que salva a linha quando a descrição vem vazia
+            "descricao": (r[1] or "").strip() or r[5] or "—",
+            "categoria": r[2] or "—",
+            "origem": rotulo, "origem_cor": cor,
+            "valor_centavos": int(r[4] or 0),
         })
     total = _soma(linhas, "valor_centavos")
     maior = max((r["valor_centavos"] for r in linhas), default=0)
-    rotulo_col = "Fornecedor" if tipo == "pagar" else "Cliente"
+    de_titulo = sum(1 for r in linhas if r["origem"] == "Título")
+    rotulo_col = "Fornecedor / descrição" if tipo == "pagar" else "Cliente / descrição"
     label = "Contas pagas" if tipo == "pagar" else "Contas recebidas"
     verbo = "pago" if tipo == "pagar" else "recebido"
-    return {
+    quantos = "Nº de pagamentos" if tipo == "pagar" else "Nº de entradas"
+    dados = {
         "label": label, "mock": False,
         "colunas": [_col("data", "Pagamento" if tipo == "pagar" else "Recebimento"),
-                    _col("contraparte", rotulo_col, flex=True), _col("categoria", "Categoria"),
+                    _col("descricao", rotulo_col, flex=True), _col("categoria", "Categoria"),
+                    _col("origem", "Entrou por", tag=True),
                     _col("valor_centavos", f"Valor {verbo}", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
-        "metricas": [(f"Total {verbo} no período", _brl(total)), ("Nº de registros", str(len(linhas))),
+        "metricas": [(f"Total {verbo} no período", _brl(total)), (quantos, str(len(linhas))),
+                     # o número que mostra o buraco: quantos fecharam o ciclo com
+                     # o compromisso em vez de só passarem pelo caixa
+                     ("Quitaram um título", str(de_titulo)),
                      ("Maior valor", _brl(maior))],
     }
+    n_indef, v_indef = int(indef[0] or 0), int(indef[1] or 0)
+    if n_indef:
+        plural = "s" if n_indef != 1 else ""
+        dados["aviso_config"] = (
+            f"{n_indef} lançamento{plural} somando {_brl(v_indef)} ainda "
+            f"{'estão' if n_indef != 1 else 'está'} como “a definir” e "
+            f"{'ficam' if n_indef != 1 else 'fica'} fora desta conta — diga se "
+            "são da empresa ou pessoais no Financeiro."
+        )
+    return dados
 
 
 def _dados_comissao(pool, conta_id, periodo):
@@ -1250,9 +1340,9 @@ TIPOS = {
     "vendas": {"label": "Vendas", "montar": lambda pool, cid, per, **f: _dados_vendas(pool, cid, per)},
     "contas_pagar": {"label": "Contas a pagar", "montar": lambda pool, cid, per, **f: _dados_titulos_abertos(pool, cid, "pagar")},
     "contas_receber": {"label": "Contas a receber", "montar": lambda pool, cid, per, **f: _dados_titulos_abertos(pool, cid, "receber")},
-    "pagas": {"label": "Contas pagas", "montar": lambda pool, cid, per, **f: _dados_titulos_pagos(pool, cid, "pagar", per)},
+    "pagas": {"label": "Contas pagas", "montar": lambda pool, cid, per, **f: _dados_caixa(pool, cid, "pagar", per)},
     "comissao": {"label": "Comissão", "montar": lambda pool, cid, per, **f: _dados_comissao(pool, cid, per)},
-    "recebidas": {"label": "Contas recebidas", "montar": lambda pool, cid, per, **f: _dados_titulos_pagos(pool, cid, "receber", per)},
+    "recebidas": {"label": "Contas recebidas", "montar": lambda pool, cid, per, **f: _dados_caixa(pool, cid, "receber", per)},
     "orcamentos": {"label": "Orçamentos", "montar": lambda pool, cid, per, **f: _dados_orcamentos(
         pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
     "contratos": {"label": "Contratos", "montar": lambda pool, cid, per, **f: _dados_contratos(

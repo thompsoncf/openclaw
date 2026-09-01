@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — App igual ao desktop, contrato solto do sinal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   TOKENS — cópia fiel de web/tema.py (_TOKENS). A fonte da verdade é o tema.py.
+   ============================================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9; --roxo:#C9A3E0;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A;  --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --card:var(--surface); --card-2:var(--bg-2);
+  --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1180px;margin:0 auto;padding:34px 18px 100px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.7rem;font-weight:700}
+h2{font-size:1.18rem;font-weight:700;margin:0 0 .2rem}
+h3{font-size:.95rem;font-weight:600}
+a{color:var(--verde)}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
+  padding:.1rem .35rem;border-radius:4px;color:var(--text-dim)}
+
+.sec{margin-top:44px}
+.sec>.num{font-family:var(--mono);font-size:.72rem;color:var(--verde);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:78ch;margin-top:.5rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.86rem;margin-top:1rem;
+  color:var(--txt-mut);max-width:82ch}
+.nota b{color:var(--txt)}
+.alerta{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.alerta b{color:var(--ambar)}
+
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);
+  text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.76rem;
+  text-transform:uppercase;letter-spacing:.05em}
+.sim{color:var(--verde)} .nao{color:var(--coral)} .meio{color:var(--ambar)}
+
+/* ==========================================================================
+   RÉPLICA DAS DUAS TELAS. As classes abaixo são cópia das reais:
+   .oc-* de web/painel_servicos.py (montador do painel, desktop)
+   .srv/.qtd/.dsc/.pil/.cmp/.rodape-b de web/painel_cockpit.py (app do vendedor)
+   Copiadas em vez de reescritas de propósito: mockup com CSS próprio mostra
+   uma tela que não existe.
+   ========================================================================== */
+:root{--linha:var(--line);--fundo-2:var(--bg-2);--ink:var(--sobre-verde);
+  --text-faint:#5E6F66;--neon-fraco:rgba(37,211,102,.10)}
+
+/* ---------- desktop: a linha do serviço ---------- */
+.oc-mod{display:grid;grid-template-columns:auto minmax(0,1fr) 56px 96px 104px 92px auto;
+  gap:.55rem;align-items:center;padding:.6rem 0;border-bottom:1px solid var(--borda)}
+.oc-mod:last-child{border-bottom:0}
+.oc-tog{width:42px;height:24px;border-radius:99px;border:none;cursor:pointer;position:relative;
+  background:#2a3550;flex:none;padding:0}
+.oc-tog.on{background:var(--verde-claro)}
+.oc-tog::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;
+  border-radius:50%;background:#fff}
+.oc-tog.on::after{left:21px}
+.oc-num{display:flex;align-items:center;gap:3px;border:1px solid var(--borda);border-radius:7px;
+  padding:.25rem .45rem;background:var(--bg);flex-direction:column;align-items:stretch}
+.oc-num span{font-size:.58rem;color:var(--txt-mut);text-transform:uppercase;
+  letter-spacing:.03em;white-space:nowrap;text-align:right}
+.oc-num input{width:100%;border:none;background:transparent;color:var(--txt);text-align:right;
+  font-size:.86rem;font-variant-numeric:tabular-nums;padding:.35rem 0;font-family:inherit}
+.oc-nome-linha{display:flex;gap:.5rem;align-items:center;min-width:0}
+.svc-thumb{width:34px;height:34px;flex:0 0 34px;border-radius:7px;border:1px solid var(--borda);
+  background:var(--bg);display:grid;place-items:center;color:var(--txt-mut);font-size:1rem}
+.oc-cat{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--txt-mut)}
+.oc-nome b{font-size:.9rem}
+.oc-desc-preview{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;
+  font-size:.78rem;color:var(--txt-mut)}
+.oc-sub{display:flex;flex-direction:column;gap:.15rem;text-align:right}
+.oc-sub span{font-size:.62rem;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-mut)}
+.oc-sub b{font-size:.9rem;color:var(--verde-claro);white-space:nowrap}
+.oc-sub-risc{display:block;font-size:.72rem;color:var(--txt-mut);text-decoration:line-through}
+.oc-dpar{display:flex;align-items:stretch;width:100%}
+.oc-dpar>input{flex:1;min-width:0;text-align:right;border-radius:8px 0 0 8px;border:1px solid var(--linha);
+  border-right:0;background:var(--bg);color:var(--txt);font:inherit;font-size:.82rem;padding:.2rem .35rem}
+.oc-dtog{display:flex;border:1px solid var(--linha);border-left:0;border-radius:0 8px 8px 0;overflow:hidden}
+.oc-dtog button{border:0;background:var(--fundo-2);color:var(--txt-mut);font-size:.72rem;
+  padding:0 .5rem;cursor:pointer;font-weight:600;min-width:2rem;font-family:inherit}
+.oc-dtog button.on{background:var(--verde);color:var(--sobre-verde)}
+.oc-rowacts{display:flex;gap:.35rem;white-space:nowrap}
+.oc-ic{background:var(--bg);border:1px solid var(--borda);color:var(--txt-mut);cursor:pointer;
+  font-size:.85rem;width:30px;height:30px;padding:0;border-radius:8px;display:inline-flex;
+  align-items:center;justify-content:center}
+.oc-head{display:grid;grid-template-columns:auto minmax(0,1fr) 56px 96px 104px 92px auto;
+  gap:.55rem;padding:0 0 .3rem;font-size:.6rem;color:var(--txt-mut);text-transform:uppercase;
+  letter-spacing:.05em;font-weight:600}
+.oc-head i{font-style:normal;text-align:right}
+
+/* ---------- app do vendedor (cockpit) ---------- */
+.fone{max-width:352px;border:1px solid var(--borda);border-radius:22px;overflow:hidden;
+  background:var(--bg);display:flex;flex-direction:column}
+.fone .hdr{background:var(--surface);padding:.7rem 1.1rem;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:.6rem;font-size:.9rem;font-weight:600}
+.fone .hdr .v{color:var(--text-dim);font-weight:400}
+.secao{padding:.9rem 1.1rem 0}
+.secao .rot{font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--text-faint);margin-bottom:.5rem}
+.srv{display:flex;align-items:center;gap:.75rem;padding:.7rem 1.1rem;
+  border-bottom:1px solid var(--line)}
+.srv .ck{width:22px;height:22px;flex-shrink:0;border-radius:7px;border:1.5px solid var(--line);
+  display:grid;place-items:center;font-size:.8rem;color:var(--sobre-verde)}
+.srv.on .ck{background:var(--neon);border-color:var(--neon)}
+.srv .m{flex:1;min-width:0}
+.srv .m b{font-size:.92rem;font-weight:600}
+.srv .m small{display:block;color:var(--text-faint);font-size:.76rem}
+.srv .pr{flex-shrink:0;font-family:var(--mono);font-size:.8rem;color:var(--text-dim);text-align:right}
+.srv.on .pr{color:var(--neon)}
+.srv .pr s{display:block;color:var(--text-faint);font-size:.72rem;text-decoration:line-through}
+.qtd{display:inline-flex;align-items:center;gap:.45rem;margin-top:.4rem}
+.qtd button{width:24px;height:24px;border-radius:7px;border:1px solid var(--line);
+  background:var(--surface);color:var(--text);font:inherit;font-size:.9rem;cursor:pointer;
+  line-height:1;padding:0}
+.qtd span{font-family:var(--mono);font-size:.82rem;min-width:14px;text-align:center}
+.qtd .u{font-family:var(--mono);font-size:.76rem;color:var(--text-faint);margin-left:.2rem}
+.dsc{display:inline-flex;align-items:center;gap:.4rem;margin-top:.42rem}
+.pil{display:inline-flex;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;
+  overflow:hidden;flex-shrink:0}
+.pil button{border:0;background:none;font-family:var(--mono);font-size:.74rem;
+  padding:.22rem .48rem;color:var(--text-faint);cursor:pointer;line-height:1.2}
+.pil button.on{background:var(--neon);color:var(--ink);font-weight:700}
+.cmp{font-family:var(--mono);font-size:.8rem;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:8px;padding:.2rem .42rem;width:60px;min-width:0;color:var(--text)}
+.dsc .tag{font-family:var(--mono);font-size:.7rem;color:var(--neon);white-space:nowrap}
+.rodape-b{border-top:1px solid var(--line);background:var(--bg);padding:.8rem 1.1rem}
+.rodape-b .dlin{display:flex;justify-content:space-between;align-items:center;gap:.7rem;
+  font-size:.82rem;color:var(--text-dim);padding:.1rem 0}
+.rodape-b .dlin b{font-family:var(--mono);font-weight:400;color:var(--text)}
+.rodape-b .tot{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;
+  margin-bottom:.6rem;font-size:.85rem;color:var(--text-dim)}
+.rodape-b .tot b{font-family:var(--mono);font-size:1rem;color:var(--neon)}
+.btn{width:100%;background:var(--neon);color:var(--sobre-verde);border:0;border-radius:12px;
+  padding:.75rem;font:inherit;font-weight:700;font-size:.9rem;cursor:pointer}
+.vazio-cat{padding:1rem 1.1rem;color:var(--text-dim);font-size:.86rem;line-height:1.5}
+.avulso{display:flex;gap:.4rem;padding:0 1.1rem .9rem}
+.avulso input{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:10px;color:var(--text);padding:.55rem .7rem;font-family:inherit;font-size:.85rem}
+.avulso input.v{flex:0 0 88px;font-family:var(--mono)}
+.avulso button{flex-shrink:0;width:42px;border:1px solid var(--line);border-radius:10px;
+  background:var(--surface);color:var(--neon);font-size:1.1rem;font-weight:700;cursor:pointer}
+
+/* ---------- o par de telas ---------- */
+.par{display:grid;grid-template-columns:minmax(0,1fr) 352px;gap:22px;margin-top:1.1rem;
+  align-items:start}
+@media (max-width:1000px){.par{grid-template-columns:minmax(0,1fr)}}
+.quadro{background:var(--card);border:1px solid var(--borda);border-radius:14px;overflow:hidden}
+.quadro>.cap{background:var(--bg-2);padding:.5rem .85rem;font-size:.72rem;color:var(--txt-mut);
+  border-bottom:1px solid var(--borda);font-family:var(--mono);display:flex;
+  justify-content:space-between;gap:.5rem}
+.quadro>.miolo{padding:14px 16px}
+.rot-tela{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--txt-mut);margin-bottom:.45rem}
+.rot-tela.hoje{color:var(--coral)} .rot-tela.novo{color:var(--verde)}
+
+/* ---------- selos e apoio ---------- */
+.selo{display:inline-block;font-size:.62rem;font-weight:700;letter-spacing:.03em;border-radius:4px;
+  padding:.05rem .35rem;vertical-align:middle;margin-left:.35rem;font-family:var(--body)}
+.selo.inc{border:1px solid var(--azul-borda);background:rgba(34,158,217,.10);color:var(--azul)}
+.selo.cem{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:var(--coral)}
+.inc-v{color:var(--azul);font-weight:600;font-size:.86rem}
+.pacotes{display:flex;gap:.5rem;flex-wrap:wrap;margin:.1rem 0 .9rem}
+.pk{display:flex;flex-direction:column;gap:.15rem;background:var(--bg-2);border:1px solid var(--borda);
+  border-radius:9px;padding:.45rem .7rem;cursor:pointer}
+.pk.on{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.pk b{font-size:.8rem;font-weight:600;white-space:nowrap}
+.pk small{font-size:.68rem;color:var(--txt-mut);font-family:var(--mono)}
+.pk-app{display:flex;gap:.4rem;overflow-x:auto;padding:0 1.1rem .2rem}
+.pk-app .pk{flex:0 0 auto}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:1rem}
+.card{background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.85rem}
+.card .r{display:block;font-size:.72rem;color:var(--txt-mut);margin-bottom:.3rem}
+.card p{font-size:.82rem;color:var(--txt-mut);margin-top:.35rem}
+.big{font-family:var(--mono);font-size:1.55rem;font-weight:700;display:block}
+.big.ruim{color:var(--coral)} .big.bom{color:var(--verde)}
+.prio{display:grid;grid-template-columns:2.2rem minmax(0,1fr) 7rem;gap:.7rem;align-items:start;
+  padding:.7rem 0;border-bottom:1px solid var(--borda);font-size:.86rem}
+.prio:last-child{border-bottom:0}
+.prio .n{font-family:var(--mono);font-size:1.25rem;font-weight:700;color:var(--verde);line-height:1}
+.prio .q{color:var(--txt-mut);font-size:.82rem;margin-top:.2rem}
+.prio .t{font-size:.72rem;text-align:right;color:var(--txt-mut);font-family:var(--mono)}
+.prio b{color:var(--txt)}
+
+/* ---------- acréscimos: o fluxo ---------- */
+.fluxo{display:flex;align-items:stretch;gap:.4rem;flex-wrap:wrap;margin-top:1rem}
+.et{flex:1 1 130px;min-width:0;background:var(--card);border:1px solid var(--borda);
+  border-radius:10px;padding:.6rem .7rem}
+.et b{display:block;font-size:.82rem;font-weight:600;margin-bottom:.15rem}
+.et small{font-size:.72rem;color:var(--txt-mut);display:block;line-height:1.35}
+.et.trava{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.et.trava b{color:var(--coral)}
+.et.solto{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.et.solto b{color:var(--neon)}
+.seta{align-self:center;color:var(--text-faint);font-size:1rem;flex:0 0 auto}
+.carimbo{border:1px dashed var(--ambar-borda);background:var(--ambar-fundo);color:#f0dca6;
+  border-radius:9px;padding:.7rem .85rem;font-size:.84rem}
+.assinar{border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:9px;
+  padding:.8rem .85rem}
+.assinar h3{margin-bottom:.5rem;font-size:.9rem}
+.assinar input{width:100%;background:var(--bg);border:1px solid var(--borda);border-radius:7px;
+  color:var(--txt);padding:.45rem .55rem;font:inherit;font-size:.84rem;margin-bottom:.45rem}
+.assinar .ok{width:100%;background:var(--neon);color:var(--sobre-verde);border:0;
+  border-radius:9px;padding:.55rem;font:inherit;font-weight:700;font-size:.86rem;cursor:pointer}
+.assinar label{font-size:.76rem;color:var(--txt-mut);display:block;margin-bottom:.5rem}
+code.diff{display:block;background:var(--bg-2);border:1px solid var(--borda);border-radius:8px;
+  padding:.7rem .85rem;font-size:.78rem;line-height:1.6;white-space:pre;overflow-x:auto;
+  color:var(--txt-mut);margin-top:.9rem}
+code.diff .out{color:var(--coral);text-decoration:line-through}
+code.diff .keep{color:var(--txt)}
+</style>
+</head>
+<body>
+
+<h1>O app faz o que o desktop faz — e o contrato solta do sinal</h1>
+<p class="lede">Refiz entendendo o pedido: <b>não é pra inventar melhoria</b>. É pra o
+vendedor fazer no app a mesma coisa que já funciona no desktop, e mudar <b>um</b> ponto do
+fluxo — tirar o sinal da frente do contrato. Aprovou o orçamento, o contrato vale; o sinal
+segue depois, no lugar dele.</p>
+<p class="lede" style="font-size:.82rem;color:var(--text-faint);margin-top:.6rem">
+Medido na conta 34 (Prime) em 01/09/2026. Nada foi alterado no sistema. As classes de
+estilo são cópia das reais (<code>.oc-*</code> do painel, <code>.srv</code> do cockpit).</p>
+
+<!-- ============================================================ 1 -->
+<div class="sec">
+  <div class="num">1 · a mudança de fluxo</div>
+  <h2>O contrato já nasce na aprovação. O que trava é a assinatura.</h2>
+  <p class="lede">Fui conferir antes de desenhar, e achei uma coisa boa: o contrato
+  <b>já</b> é criado quando o cliente aprova o orçamento — não no sinal. Isso foi feito em
+  <code>web/proposta.py</code>. O que continua amarrado ao sinal é o <b>botão de
+  assinar</b>.</p>
+
+  <div class="rot-tela hoje" style="margin-top:1.2rem">Hoje</div>
+  <div class="fluxo">
+    <div class="et"><b>Orçamento enviado</b><small>o cliente recebe o link</small></div>
+    <span class="seta">→</span>
+    <div class="et"><b>Cliente aprova</b><small>o contrato nasce aqui, com número<br>e o cliente já pode <i>ler</i></small></div>
+    <span class="seta">→</span>
+    <div class="et trava"><b>Sinal confirmado</b><small>só o desktop tem esse botão<br>(funil e agenda)</small></div>
+    <span class="seta">→</span>
+    <div class="et trava"><b>Assinatura liberada</b><small>presa ao passo anterior</small></div>
+  </div>
+
+  <div class="rot-tela novo" style="margin-top:1.4rem">Proposto</div>
+  <div class="fluxo">
+    <div class="et"><b>Orçamento enviado</b><small>igual</small></div>
+    <span class="seta">→</span>
+    <div class="et solto"><b>Cliente aprova</b><small>o contrato nasce <b>e já pode ser assinado</b></small></div>
+    <span class="seta">→</span>
+    <div class="et solto"><b>Cliente assina</b><small>sem esperar ninguém</small></div>
+    <span class="seta">→</span>
+    <div class="et"><b>Sinal confirmado</b><small>segue o fluxo, no lugar dele:<br>firma a data e lança o dinheiro</small></div>
+  </div>
+
+  <p class="lede" style="margin-top:1.2rem">Na prática é uma condição a menos em
+  <code>web/contrato_publico.py</code>:</p>
+  <code class="diff"><span class="keep">"pode_assinar": (</span>
+<span class="keep">    (orc_status or "") in ("aprovada", "fechado")</span>
+<span class="out">    and (bool(sinal_pago_em) or not tem_sinal)</span>
+<span class="keep">    and not assinado),</span></code>
+
+  <div class="nota">Nada mais muda de lugar. O sinal continua fazendo <b>tudo</b> o que
+  faz hoje quando for confirmado: firma a pré-reserva na agenda, lança o título já baixado
+  e move o negócio. Ele só deixa de ser porteiro da assinatura.</div>
+</div>
+
+<!-- ============================================================ 2 -->
+<div class="sec">
+  <div class="num">2 · o que o cliente vê mudar</div>
+  <h2>A mesma página, com o botão liberado</h2>
+
+  <div class="par" style="grid-template-columns:1fr 1fr">
+    <div>
+      <div class="rot-tela hoje">Página do contrato · hoje</div>
+      <div class="quadro"><div class="cap"><span>/contrato/&lt;token&gt;</span><span>orçamento aprovado, sinal não pago</span></div>
+      <div class="miolo">
+        <p style="font-size:.84rem;color:var(--txt-mut);margin-bottom:.8rem">
+        Cláusula 1 — Do objeto … Cláusula 7 — Da alteração de data</p>
+        <div class="carimbo">Você já pode ler o contrato inteiro.
+        <b>A assinatura é liberada</b> assim que o pagamento da entrada for confirmado
+        pela Prime Eventus.</div>
+      </div></div>
+      <p class="legenda-lat">O cliente lê tudo e não pode assinar. Quem destrava é alguém
+      da empresa, no desktop, depois que o dinheiro cai.</p>
+    </div>
+    <div>
+      <div class="rot-tela novo">Página do contrato · proposto</div>
+      <div class="quadro"><div class="cap"><span>/contrato/&lt;token&gt;</span><span>orçamento aprovado</span></div>
+      <div class="miolo">
+        <p style="font-size:.84rem;color:var(--txt-mut);margin-bottom:.8rem">
+        Cláusula 1 — Do objeto … Cláusula 7 — Da alteração de data</p>
+        <div class="assinar"><h3>✍️ Assinar o contrato</h3>
+          <input value="Elisangela Moreira" placeholder="Seu nome completo">
+          <input value="000.000.000-00" placeholder="CPF ou CNPJ">
+          <label>☑ Li e aceito as cláusulas acima.</label>
+          <button class="ok">Assinar</button></div>
+      </div></div>
+      <p class="legenda-lat">Aprovou, assina. A data continua só ficando reservada com a
+      entrada — quem diz isso é a <b>cláusula 4.1</b>, que não muda uma palavra.</p>
+    </div>
+  </div>
+
+  <div class="nota alerta"><b>O que você está aceitando ao tirar a trava, dito uma vez:</b>
+  o contrato passa a poder ser assinado antes de a entrada cair. A cláusula 4.1 continua
+  dizendo que <i>"a data somente será considerada definitivamente reservada após a
+  confirmação do pagamento da entrada"</i>, então assinar cedo não garante data nenhuma —
+  garante o compromisso. Você já disse que é isso que quer; está aqui só pra ficar
+  escrito, e sigo com o desenho.</div>
+</div>
+
+<!-- ============================================================ 3 -->
+<div class="sec">
+  <div class="num">3 · a paridade</div>
+  <h2>Tudo o que o desktop manda e o app não</h2>
+  <p class="lede">Comparei campo a campo o que as duas telas gravam. O motor é o mesmo
+  (<code>orcamentos</code>, mesma tabela, mesmo token, mesma folha pro cliente) — a
+  diferença está só no que cada tela envia.</p>
+
+  <table class="diag">
+    <thead><tr><th>O que o vendedor faz</th><th>Desktop</th><th>App hoje</th><th>App proposto</th></tr></thead>
+    <tbody>
+      <tr><td>Escolher serviços do catálogo</td><td class="sim">sim</td><td class="sim">sim</td><td class="sim">igual</td></tr>
+      <tr><td>Item avulso, digitado na hora</td><td class="sim">sim</td><td class="sim">sim</td><td class="sim">igual</td></tr>
+      <tr><td>Desconto por linha e no total</td><td class="sim">sim</td><td class="sim">sim</td><td class="sim">igual</td></tr>
+      <tr><td><b>Quantidade</b> em campo próprio</td><td class="sim">sim</td><td class="nao">vira texto no nome</td><td class="sim">passa a gravar</td></tr>
+      <tr><td><b>Valor unitário</b> editável</td><td class="sim">sim</td><td class="nao">não</td><td class="sim">passa a gravar</td></tr>
+      <tr><td><b>O evento</b>: data, hora, tipo, convidados, local</td><td class="sim">sim</td><td class="nao">grava vazio</td><td class="sim">passa a perguntar</td></tr>
+      <tr><td><b>Parcelas</b> e a parcela do sinal</td><td class="sim">sim</td><td class="nao">grava vazio</td><td class="sim">passa a montar</td></tr>
+      <tr><td>Reabrir e <b>corrigir</b> a proposta</td><td class="sim">sim</td><td class="nao">só cria nova</td><td class="sim">passa a editar</td></tr>
+      <tr><td>Mandar o link e acompanhar</td><td class="sim">sim</td><td class="sim">sim</td><td class="sim">igual</td></tr>
+      <tr><td>Fechar como contrato</td><td class="sim">sim</td><td class="sim">sim</td><td class="sim">igual</td></tr>
+      <tr><td>Confirmar o sinal recebido</td><td class="sim">sim</td><td class="nao">não</td><td class="sim">passa a ter</td></tr>
+    </tbody>
+  </table>
+
+  <div class="nota"><b>Sete linhas.</b> Nenhuma delas é ideia nova: são coisas que o
+  desktop já faz e grava. O app passa a mandar os mesmos campos pro mesmo lugar.</div>
+</div>
+
+<!-- ============================================================ 4 -->
+<div class="sec">
+  <div class="num">4 · o app, tela por tela</div>
+  <h2>Mesmo formato de celular, com o que faltava</h2>
+  <p class="lede">Como você escolheu: mesmas funções, jeito de celular — linha grande de
+  toque, botões − e +, rodapé fixo com o total. O que muda é o que a tela grava.</p>
+
+  <div class="par" style="grid-template-columns:352px 352px 352px;justify-content:start;gap:18px">
+    <div>
+      <div class="rot-tela hoje">App · hoje</div>
+      <div class="fone">
+        <div class="hdr"><span>←</span><span>Orçamento</span></div>
+        <div class="secao"><div class="rot">Serviços do catálogo</div></div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>LOCAÇÃO LEDS</b>
+            <span class="qtd"><button>−</button><span>15</span><button>+</button></span></div>
+          <div class="pr">R$ 750</div></div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>LOCAÇÃO COZINHA</b>
+            <span class="qtd"><button>−</button><span>1</span><button>+</button></span>
+            <span class="dsc"><span class="pil"><button class="on">%</button><button>R$</button></span>
+              <input class="cmp" value="100"><span class="tag">− R$ 1.500</span></span></div>
+          <div class="pr">R$ 0<s>R$ 1.500</s></div></div>
+        <div class="vazio-cat" style="border-top:1px solid var(--line)">
+          Acaba aqui. Não pergunta a data, nem monta parcela.</div>
+        <div class="rodape-b"><div class="tot"><span>Total</span><b>R$ 750</b></div>
+          <button class="btn">Gerar proposta e link</button></div>
+      </div>
+      <p class="legenda-lat">Grava <code>LOCAÇÃO LEDS (× 15)</code> — a quantidade vira
+      texto. Sem evento e sem parcelas, o vendedor precisa reabrir no desktop.</p>
+    </div>
+
+    <div>
+      <div class="rot-tela novo">App · proposto · itens</div>
+      <div class="fone">
+        <div class="hdr"><span>←</span><span>Orçamento</span><span class="v">1 de 3</span></div>
+        <div class="secao"><div class="rot">Serviços do catálogo</div></div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>LOCAÇÃO LEDS</b>
+            <span class="qtd"><button>−</button><span>15</span><button>+</button>
+              <span class="u">× R$ 50</span></span></div>
+          <div class="pr">R$ 750</div></div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>LOCAÇÃO COZINHA</b>
+            <span class="qtd"><button>−</button><span>1</span><button>+</button>
+              <span class="u">× R$ 1.500</span></span>
+            <span class="dsc"><span class="pil"><button class="on">%</button><button>R$</button></span>
+              <input class="cmp" value="100"><span class="tag">− R$ 1.500</span></span></div>
+          <div class="pr">R$ 0<s>R$ 1.500</s></div></div>
+        <div class="secao"><div class="rot">Adicionar item avulso</div></div>
+        <div class="avulso"><input placeholder="Ex.: Visita técnica"><input class="v" placeholder="R$"><button>+</button></div>
+        <div class="rodape-b"><div class="tot"><span>Total</span><b>R$ 750</b></div>
+          <button class="btn">Continuar · o evento</button></div>
+      </div>
+      <p class="legenda-lat">A linha ganha <b>× R$ 50</b> ao lado do contador: é o valor
+      unitário, que o desktop já mostra. Tocar nele abre o teclado pra mudar. O botão do
+      rodapé leva pro passo seguinte em vez de gerar direto.</p>
+    </div>
+
+    <div>
+      <div class="rot-tela novo">App · proposto · evento e parcelas</div>
+      <div class="fone">
+        <div class="hdr"><span>←</span><span>Orçamento</span><span class="v">2 de 3</span></div>
+        <div class="secao"><div class="rot">O evento</div></div>
+        <div class="avulso"><input value="18/11/2027"><input class="v" value="19:00"></div>
+        <div class="avulso" style="padding-top:.4rem"><input value="Casamento"><input class="v" value="180"></div>
+        <div class="avulso" style="padding-top:.4rem"><input value="Av. Fátima, 1200 · Teresina/PI"></div>
+        <div class="secao"><div class="rot">Parcelas</div></div>
+        <div class="srv"><div class="ck" style="border:0;background:none;color:var(--text-faint)">1</div>
+          <div class="m"><b>Entrada · sinal</b><small>18/10/2026 · PIX</small></div>
+          <div class="pr">R$ 2.340</div></div>
+        <div class="srv"><div class="ck" style="border:0;background:none;color:var(--text-faint)">2</div>
+          <div class="m"><b>Saldo</b><small>18/10/2027 · a combinar</small></div>
+          <div class="pr">R$ 5.460</div></div>
+        <div class="rodape-b">
+          <div class="dlin"><span>Total</span><b>R$ 7.800</b></div>
+          <div class="dlin"><span>Sinal (30%)</span><b>R$ 2.340</b></div>
+          <button class="btn">Gerar proposta e link</button></div>
+      </div>
+      <p class="legenda-lat">Os mesmos campos do bloco "O evento" e da grade de parcelas do
+      desktop, em duas telas de celular. Sem eles a data não é pré-reservada e o contrato
+      sai com o dia em branco.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ 5 -->
+<div class="sec">
+  <div class="num">5 · e o sinal, no app</div>
+  <h2>O botão que só existe no desktop</h2>
+  <p class="lede">Com a assinatura solta, o sinal deixa de travar o contrato — mas ele
+  continua sendo o que <b>firma a data</b> e <b>lança o dinheiro</b>. Hoje só quem está no
+  desktop consegue confirmar. Quem recebe o comprovante no WhatsApp é o vendedor, no
+  celular.</p>
+
+  <div class="par" style="grid-template-columns:352px minmax(0,1fr)">
+    <div>
+      <div class="rot-tela novo">App · proposto</div>
+      <div class="fone">
+        <div class="hdr"><span>←</span><span>Proposta nº 42</span></div>
+        <div class="srv"><div class="ck" style="background:var(--neon);border-color:var(--neon)">✓</div>
+          <div class="m"><b>Aprovada pelo cliente</b><small>01/09/2026 · Elisangela Moreira</small></div></div>
+        <div class="srv"><div class="ck" style="background:var(--neon);border-color:var(--neon)">✓</div>
+          <div class="m"><b>Contrato assinado</b><small>01/09/2026 · ver documento</small></div></div>
+        <div class="srv"><div class="ck">—</div>
+          <div class="m"><b>Sinal · R$ 2.340</b><small>vence 18/10/2026</small></div></div>
+        <div class="rodape-b"><button class="btn">Confirmar sinal recebido</button></div>
+      </div>
+    </div>
+    <div>
+      <p class="lede" style="margin-top:1.6rem">O botão chama o mesmo
+      <code>vendas.confirmar_sinal</code> que o funil e a agenda já chamam no desktop —
+      não é uma segunda regra. Ele continua fazendo os três trabalhos de sempre:</p>
+      <ul class="lista">
+        <li><b>Firma a pré-reserva</b> na agenda: a data deixa de ser provisória.</li>
+        <li><b>Lança o título já baixado</b>, na data em que o dinheiro caiu.</li>
+        <li><b>Marca <code>sinal_pago_em</code></b>, que é o que o funil lê.</li>
+      </ul>
+      <div class="nota" style="margin-top:1rem">A trava de idempotência é a mesma: apertar
+      duas vezes não gera título em dobro nem firma a data duas vezes. É a função que já
+      existe, chamada de mais um lugar.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ 6 -->
+<div class="sec">
+  <div class="num">6 · tamanho e ordem</div>
+  <h2>Sem migração, sem tabela nova</h2>
+
+  <div class="prio"><div class="n">1</div>
+    <div><b>Tirar o sinal da frente da assinatura.</b>
+      <div class="q">Uma condição a menos em <code>pode_assinar</code>, mais o texto da
+      página que hoje promete "liberada quando a entrada for confirmada". É a menor
+      mudança das duas e a que você pediu primeiro.</div></div>
+    <div class="t">contrato público</div></div>
+
+  <div class="prio"><div class="n">2</div>
+    <div><b>App grava quantidade e valor unitário.</b>
+      <div class="q">Os campos já existem no snapshot do item; o app é o único que não os
+      manda. Conserta também a folha do cliente, que hoje imprime "1 × R$ 750,00".</div></div>
+    <div class="t">app</div></div>
+
+  <div class="prio"><div class="n">3</div>
+    <div><b>App pergunta o evento e monta as parcelas.</b>
+      <div class="q">Duas telas novas no mesmo formato. É o que hoje obriga o vendedor a
+      reabrir a proposta no desktop.</div></div>
+    <div class="t">app</div></div>
+
+  <div class="prio"><div class="n">4</div>
+    <div><b>App reabre a proposta e confirma o sinal.</b>
+      <div class="q">Reabrir é passar o <code>id</code> que o desktop já passa. Confirmar o
+      sinal é chamar a função que já existe.</div></div>
+    <div class="t">app</div></div>
+
+  <div class="nota" style="margin-top:1.4rem">Nada disso pede migração nem tabela nova:
+  todas as colunas existem e o desktop já grava nelas. E nada do que já foi feito é
+  reescrito — os 16 orçamentos e os contratos assinados ficam como estão.</div>
+
+  <div class="nota alerta"><b>O que eu tinha proposto antes e cai fora:</b> pacote no
+  catálogo, "incluso" no lugar do 100% de desconto, e a lista de itens no contrato. Eram
+  ideias minhas, não pedido seu. Ficam guardadas no mockup anterior se um dia interessarem;
+  não entram neste trabalho.</div>
+</div>
+
+<div class="rodape">Mockup para aprovação · 01/09/2026 · dados medidos na conta 34
+(Prime Eventos) · nada foi alterado no sistema.</div>
+
+</body>
+</html>

@@ -101,6 +101,20 @@ _SQL_TITULO = """insert into titulos
 # confirma o recebimento. web/proposta.sinal_do_orcamento delega pra cá — duas
 # leituras diferentes de "o que é o sinal" seria o começo de dois números.
 
+#: O que MARCA a primeira parcela como sinal. Era texto solto em dois lugares —
+#: o gerador de parcelas do painel (web/painel_servicos, `gerarParcelas`) escrevia
+#: a frase à mão, e `indice_do_sinal` logo abaixo procurava a palavra dentro dela.
+#: Duas cópias da mesma convenção divergem no primeiro ajuste, e quando divergirem
+#: o sintoma é mudo: o plano fica sem sinal, o botão "Sinal recebido" some do funil
+#: e a data nunca fica firme. Agora sai daqui.
+#:
+#: O gerador do painel é JavaScript dentro de um bloco `{% raw %}` — variável de
+#: template não interpola ali, e quebrar o bloco pra injetar uma constante custaria
+#: mais do que resolve. Então lá a frase segue literal, e quem garante que as duas
+#: não separem é `test_cockpit_paridade.test_a_marca_do_sinal_e_a_mesma_nas_duas_telas`.
+OBS_SINAL = "Sinal — confirma a reserva da data"
+
+
 def indice_do_sinal(parcelas) -> int | None:
     """A posição da parcela do sinal em `orcamentos.parcelas`, ou None.
 

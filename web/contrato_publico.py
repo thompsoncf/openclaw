@@ -158,20 +158,29 @@ def carregar(token: str, pool=None) -> dict | None:
         "valor": ctr.reais(int(total or 0)),
         "orcamento_numero": numero,
         "orcamento_status": orc_status or "",
-        # LÊ SEMPRE, ASSINA DEPOIS DO SINAL — QUANDO HÁ SINAL. A cláusula da reserva
-        # diz que a data só fica garantida com a entrada; assinar antes seria aceitar
-        # um contrato cuja primeira obrigação ainda não foi cumprida. Mas ler antes é
-        # o ponto: ninguém deve pagar pra descobrir o que aceitou.
+        # APROVOU, ASSINA. O contrato é amarrado ao ORÇAMENTO APROVADO e a mais nada
+        # (decisão do dono em 01/09/2026).
         #
-        # ONDE NÃO HÁ ENTRADA, A CLÁUSULA NÃO SE APLICA. Exigir o sinal sempre travava
-        # pra sempre o contrato de todo orçamento sem parcela de sinal: sem sinal não
-        # nasce pré-reserva, sem pré-reserva o botão "Sinal recebido" não aparece no
-        # funil, e `sinal_pago_em` ficava nulo até o fim dos tempos.
+        # Até aqui a assinatura esperava o sinal cair. A ideia era boa no papel — a
+        # cláusula 4.1 diz que a data só fica reservada com a entrada, então assinar
+        # antes seria aceitar um contrato cuja primeira obrigação ainda não foi
+        # cumprida. Na prática o porteiro custava mais do que guardava: quem confirma
+        # o sinal só existe no desktop (funil e agenda), enquanto quem recebe o
+        # comprovante no WhatsApp é o vendedor, no celular. O contrato ficava lido e
+        # parado esperando alguém sentar no computador.
+        #
+        # E ASSINAR CEDO NÃO GARANTE DATA. A 4.1 continua valendo, palavra por
+        # palavra: a data só é reservada depois da entrada. O que a assinatura
+        # antecipa é o COMPROMISSO, não a reserva — são coisas diferentes, e é o
+        # próprio contrato que diz isso.
+        #
+        # `sinal_pago` e `tem_sinal` seguem no dicionário: a página ainda os mostra
+        # (é o que explica ao cliente o que falta pra data ficar firme), só não
+        # mandam mais na assinatura.
         "aprovada": (orc_status or "") in ("aprovada", "fechado"),
         "sinal_pago": bool(sinal_pago_em),
         "tem_sinal": tem_sinal,
         "pode_assinar": ((orc_status or "") in ("aprovada", "fechado")
-                         and (bool(sinal_pago_em) or not tem_sinal)
                          and not assinado),
     }
 
@@ -347,14 +356,9 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
         <p>Guarde este link: ele é o seu contrato. Dá pra baixar em PDF pelo botão
         "Baixar / imprimir" no topo da página.</p>
       </div>
-      {% elif not d.pode_assinar and d.tem_sinal %}
-      <div class="carimbo">Você já pode ler o contrato inteiro.
-        <b>A assinatura é liberada</b> assim que o pagamento da entrada for
-        confirmado pela {{ d.contratada.nome }}.</div>
       {% elif not d.pode_assinar %}
-      {# sem entrada no plano, o que falta é a aprovação do orçamento — prometer
-         "assim que a entrada for confirmada" seria mandar o cliente esperar por
-         um pagamento que ninguém pediu. #}
+      {# só sobra UM motivo pra não poder assinar: o orçamento ainda não foi
+         aprovado. O sinal deixou de ser porteiro em 01/09/2026. #}
       <div class="carimbo">Você já pode ler o contrato inteiro.
         <b>A assinatura é liberada</b> quando o orçamento for aprovado.</div>
       {% else %}
@@ -363,6 +367,16 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
         <p>Ao assinar, você aceita todas as cláusulas acima — inclusive as de
         cancelamento, reagendamento e utilização excedente. Fica registrado com
         nome, CPF, data/hora e IP.</p>
+        {# A ASSINATURA NÃO É A RESERVA. Antes o sinal travava o botão, e a ordem
+           dizia isso sozinha; agora dá pra assinar antes de pagar, então quem
+           precisa dizer é a tela — com a mesma regra da cláusula 4.1, não com uma
+           promessa nova. #}
+        {% if d.tem_sinal and not d.sinal_pago %}
+        <div class="carimbo" style="margin:0 0 .9rem">A data só fica <b>definitivamente
+          reservada</b> depois que a entrada for confirmada pela
+          {{ d.contratada.nome }} (cláusula 4.1). Assinar agora firma o
+          compromisso; a reserva vem com o pagamento.</div>
+        {% endif %}
         {% if erro %}<div class="err">{{ erro }}</div>{% endif %}
         <div class="row">
           <input type="text" name="nome" placeholder="Seu nome completo" required>

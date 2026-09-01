@@ -110,6 +110,12 @@ def _criar_orcamentos(c):
         alter table orcamentos add column if not exists cep           text;
         alter table orcamentos add column if not exists evento_agenda_id bigint;
         alter table orcamentos add column if not exists cliente_id    bigint;
+        -- o sinal (migração 161): `sinal_centavos` é o valor congelado quando a
+        -- data foi pré-reservada, `sinal_pago_em` é o carimbo de quem confirmou.
+        -- Faltavam aqui — este mesmo arquivo já os LIA (ver `salvar` e a listagem
+        -- do funil), então banco criado só por este guard quebrava na leitura.
+        alter table orcamentos add column if not exists sinal_centavos int;
+        alter table orcamentos add column if not exists sinal_pago_em timestamptz;
         -- contrato de locação (migração 160): o documento congelado no momento
         -- da assinatura, e quem assinou. Fica no orçamento, e não numa tabela
         -- própria, porque é 1-para-1 com ele e nasce e morre junto.

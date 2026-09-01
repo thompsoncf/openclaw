@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — Serviços, as duas telas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   TOKENS — cópia fiel de web/tema.py (_TOKENS). A fonte da verdade é o tema.py.
+   ============================================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9; --roxo:#C9A3E0;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A;  --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --card:var(--surface); --card-2:var(--bg-2);
+  --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1180px;margin:0 auto;padding:34px 18px 100px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.7rem;font-weight:700}
+h2{font-size:1.18rem;font-weight:700;margin:0 0 .2rem}
+h3{font-size:.95rem;font-weight:600}
+a{color:var(--verde)}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
+  padding:.1rem .35rem;border-radius:4px;color:var(--text-dim)}
+
+.sec{margin-top:44px}
+.sec>.num{font-family:var(--mono);font-size:.72rem;color:var(--verde);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:78ch;margin-top:.5rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.86rem;margin-top:1rem;
+  color:var(--txt-mut);max-width:82ch}
+.nota b{color:var(--txt)}
+.alerta{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.alerta b{color:var(--ambar)}
+
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);
+  text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.76rem;
+  text-transform:uppercase;letter-spacing:.05em}
+.sim{color:var(--verde)} .nao{color:var(--coral)} .meio{color:var(--ambar)}
+
+/* ==========================================================================
+   RÉPLICA DAS DUAS TELAS. As classes abaixo são cópia das reais:
+   .oc-* de web/painel_servicos.py (montador do painel, desktop)
+   .srv/.qtd/.dsc/.pil/.cmp/.rodape-b de web/painel_cockpit.py (app do vendedor)
+   Copiadas em vez de reescritas de propósito: mockup com CSS próprio mostra
+   uma tela que não existe.
+   ========================================================================== */
+:root{--linha:var(--line);--fundo-2:var(--bg-2);--ink:var(--sobre-verde);
+  --text-faint:#5E6F66;--neon-fraco:rgba(37,211,102,.10)}
+
+/* ---------- desktop: a linha do serviço ---------- */
+.oc-mod{display:grid;grid-template-columns:auto minmax(0,1fr) 56px 96px 104px 92px auto;
+  gap:.55rem;align-items:center;padding:.6rem 0;border-bottom:1px solid var(--borda)}
+.oc-mod:last-child{border-bottom:0}
+.oc-tog{width:42px;height:24px;border-radius:99px;border:none;cursor:pointer;position:relative;
+  background:#2a3550;flex:none;padding:0}
+.oc-tog.on{background:var(--verde-claro)}
+.oc-tog::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;
+  border-radius:50%;background:#fff}
+.oc-tog.on::after{left:21px}
+.oc-num{display:flex;align-items:center;gap:3px;border:1px solid var(--borda);border-radius:7px;
+  padding:.25rem .45rem;background:var(--bg);flex-direction:column;align-items:stretch}
+.oc-num span{font-size:.58rem;color:var(--txt-mut);text-transform:uppercase;
+  letter-spacing:.03em;white-space:nowrap;text-align:right}
+.oc-num input{width:100%;border:none;background:transparent;color:var(--txt);text-align:right;
+  font-size:.86rem;font-variant-numeric:tabular-nums;padding:.35rem 0;font-family:inherit}
+.oc-nome-linha{display:flex;gap:.5rem;align-items:center;min-width:0}
+.svc-thumb{width:34px;height:34px;flex:0 0 34px;border-radius:7px;border:1px solid var(--borda);
+  background:var(--bg);display:grid;place-items:center;color:var(--txt-mut);font-size:1rem}
+.oc-cat{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--txt-mut)}
+.oc-nome b{font-size:.9rem}
+.oc-desc-preview{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;
+  font-size:.78rem;color:var(--txt-mut)}
+.oc-sub{display:flex;flex-direction:column;gap:.15rem;text-align:right}
+.oc-sub span{font-size:.62rem;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-mut)}
+.oc-sub b{font-size:.9rem;color:var(--verde-claro);white-space:nowrap}
+.oc-sub-risc{display:block;font-size:.72rem;color:var(--txt-mut);text-decoration:line-through}
+.oc-dpar{display:flex;align-items:stretch;width:100%}
+.oc-dpar>input{flex:1;min-width:0;text-align:right;border-radius:8px 0 0 8px;border:1px solid var(--linha);
+  border-right:0;background:var(--bg);color:var(--txt);font:inherit;font-size:.82rem;padding:.2rem .35rem}
+.oc-dtog{display:flex;border:1px solid var(--linha);border-left:0;border-radius:0 8px 8px 0;overflow:hidden}
+.oc-dtog button{border:0;background:var(--fundo-2);color:var(--txt-mut);font-size:.72rem;
+  padding:0 .5rem;cursor:pointer;font-weight:600;min-width:2rem;font-family:inherit}
+.oc-dtog button.on{background:var(--verde);color:var(--sobre-verde)}
+.oc-rowacts{display:flex;gap:.35rem;white-space:nowrap}
+.oc-ic{background:var(--bg);border:1px solid var(--borda);color:var(--txt-mut);cursor:pointer;
+  font-size:.85rem;width:30px;height:30px;padding:0;border-radius:8px;display:inline-flex;
+  align-items:center;justify-content:center}
+.oc-head{display:grid;grid-template-columns:auto minmax(0,1fr) 56px 96px 104px 92px auto;
+  gap:.55rem;padding:0 0 .3rem;font-size:.6rem;color:var(--txt-mut);text-transform:uppercase;
+  letter-spacing:.05em;font-weight:600}
+.oc-head i{font-style:normal;text-align:right}
+
+/* ---------- app do vendedor (cockpit) ---------- */
+.fone{max-width:352px;border:1px solid var(--borda);border-radius:22px;overflow:hidden;
+  background:var(--bg);display:flex;flex-direction:column}
+.fone .hdr{background:var(--surface);padding:.7rem 1.1rem;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:.6rem;font-size:.9rem;font-weight:600}
+.fone .hdr .v{color:var(--text-dim);font-weight:400}
+.secao{padding:.9rem 1.1rem 0}
+.secao .rot{font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--text-faint);margin-bottom:.5rem}
+.srv{display:flex;align-items:center;gap:.75rem;padding:.7rem 1.1rem;
+  border-bottom:1px solid var(--line)}
+.srv .ck{width:22px;height:22px;flex-shrink:0;border-radius:7px;border:1.5px solid var(--line);
+  display:grid;place-items:center;font-size:.8rem;color:var(--sobre-verde)}
+.srv.on .ck{background:var(--neon);border-color:var(--neon)}
+.srv .m{flex:1;min-width:0}
+.srv .m b{font-size:.92rem;font-weight:600}
+.srv .m small{display:block;color:var(--text-faint);font-size:.76rem}
+.srv .pr{flex-shrink:0;font-family:var(--mono);font-size:.8rem;color:var(--text-dim);text-align:right}
+.srv.on .pr{color:var(--neon)}
+.srv .pr s{display:block;color:var(--text-faint);font-size:.72rem;text-decoration:line-through}
+.qtd{display:inline-flex;align-items:center;gap:.45rem;margin-top:.4rem}
+.qtd button{width:24px;height:24px;border-radius:7px;border:1px solid var(--line);
+  background:var(--surface);color:var(--text);font:inherit;font-size:.9rem;cursor:pointer;
+  line-height:1;padding:0}
+.qtd span{font-family:var(--mono);font-size:.82rem;min-width:14px;text-align:center}
+.qtd .u{font-family:var(--mono);font-size:.76rem;color:var(--text-faint);margin-left:.2rem}
+.dsc{display:inline-flex;align-items:center;gap:.4rem;margin-top:.42rem}
+.pil{display:inline-flex;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;
+  overflow:hidden;flex-shrink:0}
+.pil button{border:0;background:none;font-family:var(--mono);font-size:.74rem;
+  padding:.22rem .48rem;color:var(--text-faint);cursor:pointer;line-height:1.2}
+.pil button.on{background:var(--neon);color:var(--ink);font-weight:700}
+.cmp{font-family:var(--mono);font-size:.8rem;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:8px;padding:.2rem .42rem;width:60px;min-width:0;color:var(--text)}
+.dsc .tag{font-family:var(--mono);font-size:.7rem;color:var(--neon);white-space:nowrap}
+.rodape-b{border-top:1px solid var(--line);background:var(--bg);padding:.8rem 1.1rem}
+.rodape-b .dlin{display:flex;justify-content:space-between;align-items:center;gap:.7rem;
+  font-size:.82rem;color:var(--text-dim);padding:.1rem 0}
+.rodape-b .dlin b{font-family:var(--mono);font-weight:400;color:var(--text)}
+.rodape-b .tot{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;
+  margin-bottom:.6rem;font-size:.85rem;color:var(--text-dim)}
+.rodape-b .tot b{font-family:var(--mono);font-size:1rem;color:var(--neon)}
+.btn{width:100%;background:var(--neon);color:var(--sobre-verde);border:0;border-radius:12px;
+  padding:.75rem;font:inherit;font-weight:700;font-size:.9rem;cursor:pointer}
+.vazio-cat{padding:1rem 1.1rem;color:var(--text-dim);font-size:.86rem;line-height:1.5}
+.avulso{display:flex;gap:.4rem;padding:0 1.1rem .9rem}
+.avulso input{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:10px;color:var(--text);padding:.55rem .7rem;font-family:inherit;font-size:.85rem}
+.avulso input.v{flex:0 0 88px;font-family:var(--mono)}
+.avulso button{flex-shrink:0;width:42px;border:1px solid var(--line);border-radius:10px;
+  background:var(--surface);color:var(--neon);font-size:1.1rem;font-weight:700;cursor:pointer}
+
+/* ---------- o par de telas ---------- */
+.par{display:grid;grid-template-columns:minmax(0,1fr) 352px;gap:22px;margin-top:1.1rem;
+  align-items:start}
+@media (max-width:1000px){.par{grid-template-columns:minmax(0,1fr)}}
+.quadro{background:var(--card);border:1px solid var(--borda);border-radius:14px;overflow:hidden}
+.quadro>.cap{background:var(--bg-2);padding:.5rem .85rem;font-size:.72rem;color:var(--txt-mut);
+  border-bottom:1px solid var(--borda);font-family:var(--mono);display:flex;
+  justify-content:space-between;gap:.5rem}
+.quadro>.miolo{padding:14px 16px}
+.rot-tela{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--txt-mut);margin-bottom:.45rem}
+.rot-tela.hoje{color:var(--coral)} .rot-tela.novo{color:var(--verde)}
+
+/* ---------- selos e apoio ---------- */
+.selo{display:inline-block;font-size:.62rem;font-weight:700;letter-spacing:.03em;border-radius:4px;
+  padding:.05rem .35rem;vertical-align:middle;margin-left:.35rem;font-family:var(--body)}
+.selo.inc{border:1px solid var(--azul-borda);background:rgba(34,158,217,.10);color:var(--azul)}
+.selo.cem{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:var(--coral)}
+.inc-v{color:var(--azul);font-weight:600;font-size:.86rem}
+.pacotes{display:flex;gap:.5rem;flex-wrap:wrap;margin:.1rem 0 .9rem}
+.pk{display:flex;flex-direction:column;gap:.15rem;background:var(--bg-2);border:1px solid var(--borda);
+  border-radius:9px;padding:.45rem .7rem;cursor:pointer}
+.pk.on{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.pk b{font-size:.8rem;font-weight:600;white-space:nowrap}
+.pk small{font-size:.68rem;color:var(--txt-mut);font-family:var(--mono)}
+.pk-app{display:flex;gap:.4rem;overflow-x:auto;padding:0 1.1rem .2rem}
+.pk-app .pk{flex:0 0 auto}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:1rem}
+.card{background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.85rem}
+.card .r{display:block;font-size:.72rem;color:var(--txt-mut);margin-bottom:.3rem}
+.card p{font-size:.82rem;color:var(--txt-mut);margin-top:.35rem}
+.big{font-family:var(--mono);font-size:1.55rem;font-weight:700;display:block}
+.big.ruim{color:var(--coral)} .big.bom{color:var(--verde)}
+.prio{display:grid;grid-template-columns:2.2rem minmax(0,1fr) 7rem;gap:.7rem;align-items:start;
+  padding:.7rem 0;border-bottom:1px solid var(--borda);font-size:.86rem}
+.prio:last-child{border-bottom:0}
+.prio .n{font-family:var(--mono);font-size:1.25rem;font-weight:700;color:var(--verde);line-height:1}
+.prio .q{color:var(--txt-mut);font-size:.82rem;margin-top:.2rem}
+.prio .t{font-size:.72rem;text-align:right;color:var(--txt-mut);font-family:var(--mono)}
+.prio b{color:var(--txt)}
+</style>
+</head>
+<body>
+
+<h1>Serviços: as duas telas, lado a lado</h1>
+<p class="lede">Cada melhoria desenhada nas <b>duas telas ao mesmo tempo</b> — o montador
+do painel, no desktop, e o do app do vendedor. As classes de estilo aqui são cópia das
+reais (<code>.oc-mod</code> do painel, <code>.srv</code> do cockpit), então o que você vê
+é o que a tela vira.</p>
+<p class="lede" style="font-size:.82rem;color:var(--text-faint);margin-top:.6rem">
+Combinado: o app ganha as <b>mesmas funções</b>, mas continua com jeito de celular —
+linha grande de toque, botões − e +, rodapé fixo com o total. Igual no que faz,
+diferente no formato. Medido na conta 34 (Prime) em 01/09/2026. Nada foi alterado.</p>
+
+<div class="nota alerta" style="max-width:none"><b>O achado que motiva tudo:</b> das 123
+linhas dos 16 orçamentos, <b>76 estão zeradas com 100% de desconto</b> — R$ 64.775. Não é
+desconto: é o que vem incluso no pacote. Desconto negociado de verdade, no mesmo período,
+foram R$ 15.380. E o vendedor digita esse "100" à mão, uma linha por vez.</div>
+
+<!-- ============================================================ 1 · HOJE -->
+<div class="sec">
+  <div class="num">1 · como está hoje</div>
+  <h2>A mesma linha, nas duas telas</h2>
+  <p class="lede">Um item incluso no pacote — <i>Locação cozinha</i>, R$ 1.500 — do jeito
+  que o vendedor precisa deixá-lo hoje.</p>
+
+  <div class="par">
+    <div>
+      <div class="rot-tela hoje">Desktop · /painel/servicos · hoje</div>
+      <div class="quadro"><div class="cap"><span>montador do orçamento</span><span>modo evento</span></div>
+      <div class="miolo">
+        <div class="oc-head"><span style="width:42px"></span><span>Serviço</span>
+          <i>Qtd</i><i>Vr. unit.</i><i>Desconto</i><i>Subtotal</i><span></span></div>
+
+        <div class="oc-mod">
+          <button class="oc-tog on"></button>
+          <div class="oc-nome oc-nome-linha"><div class="svc-thumb">🍳</div>
+            <div style="min-width:0"><b>LOCAÇÃO COZINHA</b>
+            <div class="oc-desc-preview">Uso exclusivo da área da cozinha.</div></div></div>
+          <div class="oc-num"><span>Qtd</span><input value="1"></div>
+          <div class="oc-num"><span>Vr. unit.</span><input value="1500"></div>
+          <div class="oc-num oc-desc-col"><span>Desconto</span>
+            <div class="oc-dpar"><input value="100">
+              <span class="oc-dtog"><button class="on">%</button><button>R$</button></span></div></div>
+          <div class="oc-sub"><span>Subtotal</span><b>R$ 0,00</b>
+            <s class="oc-sub-risc">R$ 1.500,00</s></div>
+          <div class="oc-rowacts"><button class="oc-ic">🗑</button></div>
+        </div>
+
+        <div class="oc-mod">
+          <button class="oc-tog on"></button>
+          <div class="oc-nome oc-nome-linha"><div class="svc-thumb">❄️</div>
+            <div style="min-width:0"><b>LOCAÇÃO CLIMATIZADORES</b></div></div>
+          <div class="oc-num"><span>Qtd</span><input value="4"></div>
+          <div class="oc-num"><span>Vr. unit.</span><input value="250"></div>
+          <div class="oc-num oc-desc-col"><span>Desconto</span>
+            <div class="oc-dpar"><input value="100">
+              <span class="oc-dtog"><button class="on">%</button><button>R$</button></span></div></div>
+          <div class="oc-sub"><span>Subtotal</span><b>R$ 0,00</b>
+            <s class="oc-sub-risc">R$ 1.000,00</s></div>
+          <div class="oc-rowacts"><button class="oc-ic">🗑</button></div>
+        </div>
+      </div></div>
+      <p class="legenda-lat">Cada linha dessas exigiu: achar o item na busca (a lista abre
+      vazia, com 35 serviços em ordem alfabética), digitar a quantidade e digitar
+      <b>100</b> no campo de desconto. Nove vezes por orçamento.</p>
+    </div>
+
+    <div>
+      <div class="rot-tela hoje">App do vendedor · /cockpit · hoje</div>
+      <div class="fone">
+        <div class="hdr"><span>←</span><span>Orçamento</span><span class="v">· Prime</span></div>
+        <div class="secao"><div class="rot">Serviços do catálogo</div></div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>LOCAÇÃO COZINHA</b><small>Uso exclusivo da área da cozinha.</small>
+            <span class="qtd"><button>−</button><span>1</span><button>+</button></span>
+            <span class="dsc"><span class="pil"><button class="on">%</button><button>R$</button></span>
+              <input class="cmp" value="100"><span class="tag">− R$ 1.500</span></span>
+          </div>
+          <div class="pr">R$ 0<s>R$ 1.500</s></div></div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>LOCAÇÃO CLIMATIZADORES</b>
+            <span class="qtd"><button>−</button><span>4</span><button>+</button></span>
+            <span class="dsc"><span class="pil"><button class="on">%</button><button>R$</button></span>
+              <input class="cmp" value="100"><span class="tag">− R$ 1.000</span></span>
+          </div>
+          <div class="pr">R$ 0<s>R$ 1.000</s></div></div>
+        <div class="rodape-b">
+          <div class="tot"><span>Total</span><b>R$ 0</b></div>
+          <button class="btn">Gerar proposta e link</button></div>
+      </div>
+      <p class="legenda-lat">O app <b>não tem</b> campo de valor unitário: o preço vem do
+      catálogo e só. E a quantidade que o + e o − contam vira texto no nome quando
+      grava — <code>LOCAÇÃO CLIMATIZADORES (× 4)</code>.</p>
+    </div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="num">1b · achado ao desenhar a réplica</div>
+  <h2>O campo de desconto cabe um dígito</h2>
+  <p class="lede">Não notei isso lendo o código — apareceu quando montei a linha com o
+  CSS real. A coluna de desconto tem 104 px, e a pílula <b>%/R$</b> ocupa quase tudo.
+  Medi no navegador:</p>
+
+  <div class="cards">
+    <div class="card"><span class="r">coluna de desconto</span><span class="big">104 px</span></div>
+    <div class="card"><span class="r">campo do número</span><span class="big">21,7 px</span>
+      <p>menos 11,2 px de recuo interno</p></div>
+    <div class="card"><span class="r">sobra pro texto</span><span class="big ruim">8,5 px</span>
+      <p>cerca de um dígito visível</p></div>
+    <div class="card"><span class="r">largura de "1000"</span><span class="big">33,4 px</span>
+      <p>quatro vezes o que cabe</p></div>
+  </div>
+
+  <div class="nota alerta"><b>E isso já produziu erro em produção.</b> Duas linhas dos 16
+  orçamentos estão gravadas com <code>desc_tipo: "pct"</code> e <code>desc_val: 1000</code> —
+  mil por cento. O vendedor quis dizer <i>mil reais</i> e não viu que a pílula estava em
+  <b>%</b>, porque não dá pra ver o que se digitou. O sistema limita a 100%, então nesses
+  dois casos o resultado saiu igual ao pretendido por acaso; num item que <b>não</b> fosse
+  pra ser zerado, teria virado item de graça na proposta do cliente.</div>
+
+  <p class="lede" style="margin-top:1rem">O conserto é de layout: dar largura ao campo e
+  deixar a pílula abaixo dele, como o app já faz. Entra junto com a melhoria B — quando o
+  "incluso" parar de passar por ali, o campo volta a ser só do desconto de verdade e pode
+  ocupar a coluna inteira.</p>
+</div>
+
+<!-- ============================================================ 2 · PACOTE -->
+<div class="sec">
+  <div class="num">2 · melhoria a · o pacote</div>
+  <h2>A escolha que monta a proposta inteira</h2>
+  <p class="lede">O dono monta o pacote uma vez no catálogo: quais itens entram, em que
+  quantidade, e quais são inclusos. Nas duas telas ele vira a <b>primeira coisa</b> que o
+  vendedor toca.</p>
+
+  <div class="par">
+    <div>
+      <div class="rot-tela novo">Desktop · proposto</div>
+      <div class="quadro"><div class="cap"><span>montador do orçamento</span><span>escolha o pacote</span></div>
+      <div class="miolo">
+        <div class="pacotes">
+          <span class="pk on"><b>Prime · Sex a Dom · 2027</b><small>R$ 8.800 · 9 inclusos</small></span>
+          <span class="pk"><b>Prime · Seg a Qui · 2027</b><small>R$ 7.800 · 9 inclusos</small></span>
+          <span class="pk"><b>Prime · Sex a Dom · 2026</b><small>R$ 7.200 · 9 inclusos</small></span>
+          <span class="pk"><b>Prime · Seg a Qui · 2026</b><small>R$ 5.760 · 9 inclusos</small></span>
+        </div>
+        <div class="oc-head"><span style="width:42px"></span><span>Serviço</span>
+          <i>Qtd</i><i>Vr. unit.</i><i>Desconto</i><i>Subtotal</i><span></span></div>
+        <div class="oc-mod">
+          <button class="oc-tog on"></button>
+          <div class="oc-nome oc-nome-linha"><div class="svc-thumb">🏛</div>
+            <div style="min-width:0"><div class="oc-cat">Locação de espaço</div>
+            <b>PACOTE PRIME — SEXTA A DOMINGO — 2027</b></div></div>
+          <div class="oc-num"><span>Qtd</span><input value="1"></div>
+          <div class="oc-num"><span>Vr. unit.</span><input value="8800"></div>
+          <div class="oc-num oc-desc-col"><span>Desconto</span>
+            <div class="oc-dpar"><input value="1000">
+              <span class="oc-dtog"><button>%</button><button class="on">R$</button></span></div></div>
+          <div class="oc-sub"><span>Subtotal</span><b>R$ 7.800,00</b>
+            <s class="oc-sub-risc">R$ 8.800,00</s></div>
+          <div class="oc-rowacts"><button class="oc-ic">🗑</button></div>
+        </div>
+        <div class="oc-mod">
+          <button class="oc-tog on"></button>
+          <div class="oc-nome oc-nome-linha"><div class="svc-thumb">🍳</div>
+            <div style="min-width:0"><b>LOCAÇÃO COZINHA <span class="selo inc">incluso</span></b>
+            <div class="oc-desc-preview">veio do pacote</div></div></div>
+          <div class="oc-num"><span>Qtd</span><input value="1"></div>
+          <div class="oc-num"><span>Vr. unit.</span><input value="1500"></div>
+          <div class="oc-num oc-desc-col" style="opacity:.35"><span>Desconto</span>
+            <div class="oc-dpar"><input value="0">
+              <span class="oc-dtog"><button class="on">%</button><button>R$</button></span></div></div>
+          <div class="oc-sub"><span>Subtotal</span><b class="inc-v">incluso</b>
+            <s class="oc-sub-risc">R$ 1.500,00</s></div>
+          <div class="oc-rowacts"><button class="oc-ic">🗑</button></div>
+        </div>
+        <div class="oc-mod" style="opacity:.55">
+          <button class="oc-tog on"></button>
+          <div class="oc-nome oc-nome-linha"><div class="svc-thumb">＋</div>
+            <div style="min-width:0"><b>+ 8 itens do pacote</b>
+            <div class="oc-desc-preview">climatizadores, freezer, leds, utensílios, poltronas, vasos, mesa, cadeiras</div></div></div>
+          <div class="oc-num"><span>Qtd</span><input value="—"></div>
+          <div class="oc-num"><span>Vr. unit.</span><input value="—"></div>
+          <div class="oc-num oc-desc-col" style="opacity:.35"><span>Desconto</span>
+            <div class="oc-dpar"><input value="0">
+              <span class="oc-dtog"><button class="on">%</button><button>R$</button></span></div></div>
+          <div class="oc-sub"><span>Subtotal</span><b class="inc-v">inclusos</b></div>
+          <div class="oc-rowacts"><button class="oc-ic">🗑</button></div>
+        </div>
+      </div></div>
+      <p class="legenda-lat">A linha continua editável: se neste evento forem 6
+      climatizadores em vez de 4, o vendedor muda a quantidade. Se algo do pacote não vai,
+      ele apaga a linha. O pacote monta — não prende.</p>
+    </div>
+
+    <div>
+      <div class="rot-tela novo">App do vendedor · proposto</div>
+      <div class="fone">
+        <div class="hdr"><span>←</span><span>Orçamento</span><span class="v">· Prime</span></div>
+        <div class="secao"><div class="rot">Pacote</div></div>
+        <div class="pk-app">
+          <span class="pk on"><b>Sex a Dom · 2027</b><small>R$ 8.800</small></span>
+          <span class="pk"><b>Seg a Qui · 2027</b><small>R$ 7.800</small></span>
+          <span class="pk"><b>Sex a Dom · 2026</b><small>R$ 7.200</small></span>
+        </div>
+        <div class="secao"><div class="rot">10 itens · 9 inclusos</div></div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>PACOTE PRIME — SEX A DOM — 2027</b>
+            <span class="qtd"><button>−</button><span>1</span><button>+</button>
+              <span class="u">× R$ 8.800</span></span>
+            <span class="dsc"><span class="pil"><button>%</button><button class="on">R$</button></span>
+              <input class="cmp" value="1000"><span class="tag">− R$ 1.000</span></span>
+          </div>
+          <div class="pr">R$ 7.800<s>R$ 8.800</s></div></div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>LOCAÇÃO COZINHA <span class="selo inc">incluso</span></b>
+            <span class="qtd"><button>−</button><span>1</span><button>+</button>
+              <span class="u">× R$ 1.500</span></span>
+          </div>
+          <div class="pr" style="color:var(--azul)">incluso<s>R$ 1.500</s></div></div>
+        <div class="srv on" style="opacity:.55"><div class="ck">✓</div>
+          <div class="m"><b>+ 8 itens do pacote</b><small>toque para abrir</small></div>
+          <div class="pr" style="color:var(--azul)">inclusos</div></div>
+        <div class="rodape-b">
+          <div class="dlin"><span>Itens</span><b>R$ 8.800</b></div>
+          <div class="dlin"><span>Desconto no total</span><b>− R$ 1.000</b></div>
+          <div class="tot"><span>Total</span><b>R$ 7.800</b></div>
+          <button class="btn">Gerar proposta e link</button></div>
+      </div>
+      <p class="legenda-lat">Mesma escolha, formato de celular: os pacotes numa faixa que
+      rola de lado, e a linha inclusa some do total sem virar campo de desconto. Os
+      botões <b>−</b> e <b>+</b> continuam sendo como se muda a quantidade.</p>
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><span class="r">ações repetidas hoje, por orçamento</span>
+      <span class="big ruim">19</span><p>10 buscas no catálogo + 9 vezes digitar "100"</p></div>
+    <div class="card"><span class="r">com o pacote</span><span class="big bom">1</span>
+      <p>e o vendedor só ajusta o que é diferente neste evento</p></div>
+    <div class="card"><span class="r">o preço continua num lugar só</span>
+      <span class="big">catálogo</span><p>o pacote diz quais itens vêm junto, não quanto custam</p></div>
+  </div>
+</div>
+
+<!-- ============================================================ 3 · INCLUSO -->
+<div class="sec">
+  <div class="num">3 · melhoria b · "incluso" no lugar do 100%</div>
+  <h2>O que muda na folha que o cliente recebe</h2>
+  <p class="lede">Este é o ponto que <b>depende da sua decisão</b>, porque muda o que o
+  cliente sente ao ler. Desenhei as duas saídas para você comparar:</p>
+
+  <div class="par" style="grid-template-columns:1fr 1fr">
+    <div>
+      <div class="rot-tela hoje">Folha do cliente · hoje</div>
+      <div class="quadro"><div class="cap"><span>proposta nº 42</span><span>o que o cliente lê</span></div>
+      <div class="miolo">
+        <table class="diag" style="margin:0">
+          <thead><tr><th>Item</th><th style="text-align:right">Qtd</th>
+            <th style="text-align:right">Subtotal</th></tr></thead>
+          <tbody>
+            <tr><td>Pacote Prime — sex a dom</td><td style="text-align:right">1</td>
+              <td style="text-align:right"><b>7.800,00</b><br><s style="color:var(--text-faint);font-size:.76rem">8.800,00</s></td></tr>
+            <tr><td>Locação cozinha</td><td style="text-align:right">1</td>
+              <td style="text-align:right"><b>0,00</b> <span class="selo cem">−100%</span>
+                <br><s style="color:var(--text-faint);font-size:.76rem">1.500,00</s></td></tr>
+            <tr><td>Locação climatizadores</td><td style="text-align:right">4</td>
+              <td style="text-align:right"><b>0,00</b> <span class="selo cem">−100%</span>
+                <br><s style="color:var(--text-faint);font-size:.76rem">1.000,00</s></td></tr>
+            <tr><td colspan="2"><b>Desconto concedido</b></td>
+              <td style="text-align:right;color:var(--coral)"><b>R$ 11.700,00</b></td></tr>
+          </tbody></table>
+      </div></div>
+      <p class="legenda-lat">Vende bem: o cliente vê um abatimento enorme. Mas o documento
+      afirma um desconto de R$ 11.700 que a empresa não deu — e no ano isso soma
+      R$ 64.775 nos relatórios dela.</p>
+    </div>
+
+    <div>
+      <div class="rot-tela novo">Folha do cliente · proposto</div>
+      <div class="quadro"><div class="cap"><span>proposta nº 42</span><span>o que o cliente lê</span></div>
+      <div class="miolo">
+        <table class="diag" style="margin:0">
+          <thead><tr><th>Item</th><th style="text-align:right">Qtd</th>
+            <th style="text-align:right">Subtotal</th></tr></thead>
+          <tbody>
+            <tr><td>Pacote Prime — sex a dom</td><td style="text-align:right">1</td>
+              <td style="text-align:right"><b>7.800,00</b><br><s style="color:var(--text-faint);font-size:.76rem">8.800,00</s></td></tr>
+            <tr><td>Locação cozinha <span class="selo inc">incluso</span></td><td style="text-align:right">1</td>
+              <td style="text-align:right" class="inc-v">incluso
+                <br><span style="color:var(--text-faint);font-size:.76rem">valor 1.500,00</span></td></tr>
+            <tr><td>Locação climatizadores <span class="selo inc">incluso</span></td><td style="text-align:right">4</td>
+              <td style="text-align:right" class="inc-v">incluso
+                <br><span style="color:var(--text-faint);font-size:.76rem">valor 1.000,00</span></td></tr>
+            <tr><td colspan="2"><b>Já incluso no pacote</b></td>
+              <td style="text-align:right;color:var(--azul)"><b>R$ 10.700,00</b></td></tr>
+            <tr><td colspan="2"><b>Desconto concedido</b></td>
+              <td style="text-align:right;color:var(--verde)"><b>R$ 1.000,00</b></td></tr>
+          </tbody></table>
+      </div></div>
+      <p class="legenda-lat">O cliente continua vendo os R$ 10.700 que está ganhando —
+      só que com o nome certo, e numa linha própria. O desconto passa a ser o que de
+      fato foi negociado.</p>
+    </div>
+  </div>
+
+  <div class="nota"><b>Se você achar que perde força de venda, a gente inverte:</b> mantém
+  o "−100%" e a palavra "desconto" na folha exatamente como estão hoje, e a melhoria fica
+  só em não obrigar o vendedor a digitar. Nesse caso o pacote continua valendo inteiro —
+  ele é que dá o ganho de tempo — e o número interno da empresa segue como está. É uma
+  linha de código de diferença; é decisão sua, não minha.</div>
+
+  <div class="nota alerta"><b>Nada do que já existe é reescrito.</b> Os 16 orçamentos e os
+  contratos já assinados ficam com o 100% que têm hoje. O estado novo vale do próximo
+  orçamento em diante.</div>
+</div>
+
+<!-- ============================================================ 4 · APP -->
+<div class="sec">
+  <div class="num">4 · melhoria c · o que só o app precisa</div>
+  <h2>Quantidade que é número, e o evento que ninguém pergunta</h2>
+  <p class="lede">Duas coisas que o desktop já grava e o app não. Este é o orçamento
+  nº 41, o único feito pelo app, do jeito que está gravado:</p>
+
+  <div class="par" style="grid-template-columns:352px 352px;justify-content:start">
+    <div>
+      <div class="rot-tela hoje">App · hoje</div>
+      <div class="fone">
+        <div class="hdr"><span>←</span><span>Orçamento</span></div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>LOCAÇÃO LEDS (× 15)</b></div>
+          <div class="pr">R$ 750</div></div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>LOCAÇÃO CLIMATIZADORES (× 4)</b></div>
+          <div class="pr">R$ 1.000</div></div>
+        <div class="vazio-cat" style="border-top:1px solid var(--line)">
+          Não existe pergunta sobre a data, os convidados nem o horário.</div>
+        <div class="rodape-b"><div class="tot"><span>Total</span><b>R$ 9.650</b></div>
+          <button class="btn">Gerar proposta e link</button></div>
+      </div>
+      <p class="legenda-lat">A quantidade virou texto no nome. Na folha do cliente essa
+      linha sai como <b>"1 × R$ 750,00"</b> — o desktop, na mesma linha, mostra
+      15 × R$ 50,00. E o evento foi gravado <b>vazio</b>.</p>
+    </div>
+    <div>
+      <div class="rot-tela novo">App · proposto</div>
+      <div class="fone">
+        <div class="hdr"><span>←</span><span>Orçamento</span></div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>LOCAÇÃO LEDS</b>
+            <span class="qtd"><button>−</button><span>15</span><button>+</button>
+              <span class="u">× R$ 50</span></span></div>
+          <div class="pr">R$ 750</div></div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>LOCAÇÃO CLIMATIZADORES</b>
+            <span class="qtd"><button>−</button><span>4</span><button>+</button>
+              <span class="u">× R$ 250</span></span></div>
+          <div class="pr">R$ 1.000</div></div>
+        <div class="secao" style="border-top:1px solid var(--line);padding-top:.8rem">
+          <div class="rot">O evento</div></div>
+        <div class="avulso"><input value="18/11/2027" style="flex:1"><input class="v" value="19:00"></div>
+        <div class="avulso"><input value="Casamento" style="flex:1"><input class="v" value="180"></div>
+        <div class="rodape-b"><div class="tot"><span>Total</span><b>R$ 9.650</b></div>
+          <button class="btn">Gerar proposta e link</button></div>
+      </div>
+      <p class="legenda-lat">Quantidade e valor unitário em campo próprio — o mesmo dado
+      que o desktop grava. E quatro campos de evento: data, hora, tipo e convidados. Sem
+      eles a data não é pré-reservada na agenda e o contrato sai com o dia em branco.</p>
+    </div>
+  </div>
+
+  <table class="diag">
+    <thead><tr><th>No orçamento feito pelo app</th><th>hoje</th><th>proposto</th></tr></thead>
+    <tbody>
+      <tr><td>Quantidade em campo próprio</td><td class="nao">não — vai no nome</td><td class="sim">sim</td></tr>
+      <tr><td>Valor unitário visível e editável</td><td class="nao">não</td><td class="sim">sim</td></tr>
+      <tr><td>Escolher um pacote</td><td class="nao">não existe</td><td class="sim">sim</td></tr>
+      <tr><td>Marcar item como incluso</td><td class="nao">só via 100% de desconto</td><td class="sim">sim</td></tr>
+      <tr><td>Data, horário, tipo e convidados</td><td class="nao">gravado vazio</td><td class="sim">sim</td></tr>
+      <tr><td>Desconto por linha e no total</td><td class="sim">já tem</td><td class="sim">segue igual</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============================================================ 5 · CONTRATO -->
+<div class="sec">
+  <div class="num">5 · melhoria d · o contrato</div>
+  <h2>O documento assinado não lista o que foi contratado</h2>
+  <p class="lede">A cláusula 1.2 do modelo diz: <i>"O Orçamento nº {valor.numero}, aprovado
+  pelo(a) LOCATÁRIO(A), integra este contrato e contém as condições específicas da
+  contratação."</i> Juridicamente resolve. Mas a página que o cliente abre e assina
+  <b>nunca mostra essa lista</b> — e numa locação em que nove das dez linhas são "o que
+  está incluso", é exatamente isso que ele quer ver por escrito.</p>
+
+  <div class="quadro" style="margin-top:1rem;max-width:760px">
+    <div class="cap"><span>contrato nº 7 · proposto</span><span>bloco novo, entre as partes e as cláusulas</span></div>
+    <div class="miolo">
+      <h3 style="margin-bottom:.6rem">Do objeto contratado</h3>
+      <table class="diag" style="margin:0">
+        <tbody>
+          <tr><td>Locação do espaço — Pacote Prime — sexta a domingo</td>
+            <td style="text-align:right;width:3rem">1</td>
+            <td style="text-align:right;width:7rem"><b>R$ 7.800,00</b></td></tr>
+          <tr><td>Locação cozinha <span class="selo inc">incluso</span></td>
+            <td style="text-align:right">1</td>
+            <td style="text-align:right" class="inc-v">incluso</td></tr>
+          <tr><td>Locação climatizadores <span class="selo inc">incluso</span></td>
+            <td style="text-align:right">4</td>
+            <td style="text-align:right" class="inc-v">incluso</td></tr>
+          <tr style="opacity:.55"><td>+ 7 itens inclusos no pacote</td><td></td>
+            <td style="text-align:right" class="inc-v">inclusos</td></tr>
+          <tr><td colspan="2"><b>Total contratado</b></td>
+            <td style="text-align:right"><b>R$ 7.800,00</b></td></tr>
+          <tr><td colspan="2">Entrada de 30% para reserva da data</td>
+            <td style="text-align:right">R$ 2.340,00</td></tr>
+        </tbody></table>
+    </div>
+  </div>
+
+  <div class="nota">O <b>valor</b> do contrato já está certo hoje — a página lê o líquido do
+  orçamento, não o bruto; conferi antes de escrever isto. O que falta é só a lista, e ela
+  sai dos mesmos itens que a folha do cliente já imprime.</div>
+</div>
+
+<!-- ============================================================ 6 · ORDEM -->
+<div class="sec">
+  <div class="num">6 · o que eu faria, e em que ordem</div>
+  <h2>As quatro, mas não de uma vez</h2>
+
+  <div class="prio"><div class="n">1</div>
+    <div><b>Pacote no catálogo, um toque no orçamento — nas duas telas.</b>
+      <div class="q">É a que devolve mais tempo por dia e não muda nada do que já existe:
+      só monta rápido o que o vendedor montaria na mão. Pede tabela nova (a composição
+      do pacote).</div></div>
+    <div class="t">tabela nova<br>desktop + app</div></div>
+
+  <div class="prio"><div class="n">2</div>
+    <div><b>"Incluso" como estado da linha.</b>
+      <div class="q">Elimina 76 digitações por mês e conserta o número de desconto da
+      empresa. Depende da sua decisão sobre o que o cliente lê. Cabe num campo dentro do
+      item, sem tabela nova.</div></div>
+    <div class="t">sem migração<br>desktop + app + folha</div></div>
+
+  <div class="prio"><div class="n">2b</div>
+    <div><b>Largura do campo de desconto no desktop.</b>
+      <div class="q">Oito pixels e meio de texto visível já geraram duas linhas gravadas
+      com "1000%". Vai junto com a 2, porque é a mesma coluna.</div></div>
+    <div class="t">sem migração<br>desktop</div></div>
+
+  <div class="prio"><div class="n">3</div>
+    <div><b>Quantidade, valor unitário e dados do evento no app.</b>
+      <div class="q">É o que impede o app de ser usado de verdade em campo — hoje o
+      vendedor tem que reabrir a proposta no desktop pra completar. Sem migração: é passar
+      campos que o desktop já grava.</div></div>
+    <div class="t">sem migração<br>app</div></div>
+
+  <div class="prio"><div class="n">4</div>
+    <div><b>A lista de itens no contrato.</b>
+      <div class="q">A menor das quatro e a mais independente — entra junto com qualquer
+      uma.</div></div>
+    <div class="t">sem migração<br>contrato</div></div>
+
+  <div class="nota" style="margin-top:1.4rem"><b>O que eu não mexeria agora:</b> a categoria
+  do serviço. Ela existe pra somar subtotais por categoria na folha, mas só 8 dos 35
+  serviços têm categoria preenchida e apenas 3 das 123 linhas a carregam — o subtotal
+  nunca aparece pra ninguém. Ou vira obrigatória no cadastro, ou some. Conversa separada,
+  e eu não decidiria por você.</div>
+</div>
+
+<div class="rodape">Mockup para aprovação · 01/09/2026 · dados medidos na conta 34
+(Prime Eventos) · nada foi alterado no sistema.</div>
+
+</body>
+</html>

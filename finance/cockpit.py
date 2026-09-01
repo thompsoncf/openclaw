@@ -1388,7 +1388,11 @@ def catalogo_servicos(pool, conta_id: int) -> list[dict]:
     for s in scat.listar(pool, conta_id):
         out.append({"id": s["id"], "nome": s["nome"], "desc": s.get("descricao", ""),
                     "setup": round((s.get("setup_centavos") or 0) / 100),
-                    "mensal": round((s.get("mensal_centavos") or 0) / 100)})
+                    "mensal": round((s.get("mensal_centavos") or 0) / 100),
+                    # `categoria` viaja junto porque o snapshot do item a guarda (é
+                    # ela que agrupa a folha do cliente); sem passar por aqui, toda
+                    # proposta feita no celular nasceria sem categoria nenhuma.
+                    "categoria": s.get("categoria", "")})
     return out
 
 
@@ -1399,15 +1403,34 @@ def _sanear_itens(itens, *, com_desconto: bool = False) -> list[dict]:
     (`desc_val` e não `desc`, porque `desc` já é a DESCRIÇÃO do item logo acima).
     Quando False os campos são DESCARTADOS, não zerados: é o portão do nicho, e
     quem não vende serviço não grava desconto nem se mandar no payload.
+
+    QTD E UNITÁRIO (01/09/2026). O painel já gravava os dois; o app não, e por isso
+    escrevia a quantidade dentro do NOME — "LOCAÇÃO LEDS (× 15)". O estrago
+    aparecia na folha do cliente, que imprime `qtd × unitário` e mostrava
+    "1 × R$ 750,00" no lugar de "15 × R$ 50,00". Aqui eles passam a ser campo, com
+    os mesmos nomes do `ItemIn` do painel — um campo com dois nomes pelo caminho é
+    onde o dado se perde na tradução.
+
+    `setup` continua sendo o TOTAL da linha (qtd × unitário): é o que o funil soma
+    e o que o fechamento cobra. Quem manda no total é ele, não a multiplicação
+    refeita aqui — a tela já mandou a conta pronta e refazê-la criaria um segundo
+    número pra mesma coisa.
     """
     out = []
     for it in (itens or [])[:50]:
         nome = (str(it.get("nome") or "")).strip()[:120]
         if not nome:
             continue
+        setup = max(0, int(it.get("setup") or 0))
+        qtd = max(1, int(it.get("qtd") or 1))
         linha = {"nome": nome, "desc": (str(it.get("desc") or "")).strip()[:200],
-                 "setup": max(0, int(it.get("setup") or 0)),
-                 "mensal": max(0, int(it.get("mensal") or 0))}
+                 "setup": setup,
+                 "mensal": max(0, int(it.get("mensal") or 0)),
+                 "qtd": qtd,
+                 # sem unitário explícito, deduz do total — é a mesma conta que a
+                 # folha do cliente já fazia sozinha pra propostas antigas.
+                 "unitario": max(0, int(it.get("unitario") or 0)) or (setup // qtd),
+                 "categoria": (str(it.get("categoria") or "")).strip()[:60]}
         if com_desconto:
             linha["desc_tipo"] = "valor" if (it.get("desc_tipo") or "") == "valor" else "pct"
             linha["desc_val"] = max(0, int(it.get("desc_val") or 0))
@@ -1505,6 +1528,17 @@ def orcamentos(pool, conta_id: int, *, membro_id: int | None = None,
     return out
 
 
+def _valor_do_sinal(parcelas) -> int:
+    """Quanto é a entrada, em centavos. Delega pra `vendas.valor_do_sinal` — duas
+    leituras de "o que é o sinal" seriam o começo de dois números, e é a mesma
+    razão pela qual a folha do cliente também delega."""
+    try:
+        from finance import vendas
+        return int(vendas.valor_do_sinal(parcelas or []))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def orcamento(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None) -> dict | None:
     """Uma proposta (com os itens), no mesmo escopo de `orcamentos`."""
     import json as _json
@@ -1521,7 +1555,8 @@ def orcamento(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None)
                       coalesce(o.whatsapp, o.telefone, ''), o.email, o.itens,
                       o.setup_centavos, o.mensal_centavos, coalesce(o.status,'rascunho'),
                       o.token, o.criado_em, o.aprovada_por, o.aprovada_em, o.aprovada_doc,
-                      p.id, coalesce(nullif(m.nome,''), m.email, '—'), o.cidade, o.uf
+                      p.id, coalesce(nullif(m.nome,''), m.email, '—'), o.cidade, o.uf,
+                      o.evento, o.parcelas, o.sinal_pago_em
                  from orcamentos o
                  left join prospeccao p on p.orcamento_id = o.id and p.conta_id = o.conta_id
                  left join membros m on m.id::text = o.criado_por and m.conta_id = o.conta_id
@@ -1545,6 +1580,16 @@ def orcamento(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None)
         "token": r[11] or "", "link": link, "criado_em": r[12],
         "aprovada_por": r[13] or "", "aprovada_em": r[14], "aprovada_doc": r[15] or "",
         "lead_id": r[16], "vendedor": r[17], "cidade": r[18] or "", "uf": r[19] or "",
+        # o EVENTO e as PARCELAS voltam junto porque é com eles que o montador do
+        # app se repreenche ao reabrir a proposta. Vêm como o banco guarda (jsonb),
+        # e o que não é dicionário/lista vira vazio — proposta antiga tem nulo aqui.
+        "evento": r[20] if isinstance(r[20], dict) else {},
+        "parcelas": r[21] if isinstance(r[21], list) else [],
+        # quanto é a entrada e se ela já caiu — é o que o botão "Sinal recebido" do
+        # app precisa saber. O valor sai de `vendas.valor_do_sinal`, a MESMA régua
+        # que a folha do cliente usa pra prometer o número.
+        "sinal_pago_em": r[22],
+        "sinal_centavos": _valor_do_sinal(r[21] if isinstance(r[21], list) else []),
         # Mesmo portão que criar_orcamento já usa (ver `entrega_sempre`): onde o Zaq
         # entrega a qualquer hora — o canal QR — o wa.me some, porque mandar por fora
         # tira a conversa de dentro do sistema e o histórico do lead fica pela metade.
@@ -1593,6 +1638,37 @@ def mudar_status_orcamento(pool, conta_id: int, orc_id: int, novo: str,
             return {"ok": False, "erro": "Essa proposta já virou contrato — não dá pra reabrir."}
         return {"ok": False, "erro": "Proposta não encontrada (ou não é sua)."}
     return {"ok": True, "status": novo, "msg": f"Proposta marcada como {_ROT_ORC.get(novo, novo)} ✓"}
+
+
+def confirmar_sinal(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None) -> dict:
+    """"Sinal recebido" — a partir do celular.
+
+    Até 01/09/2026 este botão só existia no desktop (funil e agenda), embora quem
+    recebe o comprovante no WhatsApp seja o vendedor, em campo. A proposta ficava
+    aprovada e a data ficava provisória até alguém sentar no computador.
+
+    Aqui só mora o ESCOPO, igual ao `fechar_contrato` logo abaixo: quem faz o
+    trabalho é `vendas.confirmar_sinal`, o mesmo motor dos dois botões do painel —
+    e é ele que firma a pré-reserva na agenda, lança o título já baixado e marca
+    `sinal_pago_em`. Uma segunda regra aqui seria o começo de dois números.
+
+    A trava de idempotência também é dele: apertar duas vezes não firma a data
+    duas vezes nem gera título em dobro (devolve `ja_estava`).
+    """
+    with pool.connection() as c:
+        dono = c.execute("select criado_por from orcamentos where id=%s and conta_id=%s",
+                         (orc_id, conta_id)).fetchone()
+    if not dono:
+        return {"ok": False, "erro": "Proposta não encontrada."}
+    # mesma régua do fechar: o vendedor mexe na proposta DELE; gestor mexe em todas
+    if membro_id and (dono[0] or "") != str(membro_id):
+        return {"ok": False, "erro": "Proposta não encontrada (ou não é sua)."}
+    from finance import vendas
+    r = vendas.confirmar_sinal(pool, conta_id, orc_id)
+    if not r.get("ok"):
+        return r
+    return {**r, "msg": ("Sinal já estava confirmado." if r.get("ja_estava")
+                         else "Sinal confirmado ✓ — a data está firme.")}
 
 
 def fechar_contrato(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None) -> dict:
@@ -1645,8 +1721,73 @@ def vende_servico(pool, conta_id: int) -> bool:
         return False
 
 
+def _sanear_evento(ev) -> dict | None:
+    """O bloco "O evento" do orçamento, como o painel o grava (web/painel_servicos
+    `EventoIn`). Devolve None quando não veio nada — coluna vazia é diferente de
+    coluna com um dicionário de campos em branco, e quem lê (`agenda.janela_evento`,
+    o contrato) trata os dois de jeitos diferentes.
+
+    Datas e horas ficam como TEXTO, do jeito que a empresa escreve ("2026-11-18",
+    "19:00", "24:00"). Quem transforma em compromisso é `agenda.janela_evento`, que
+    sabe a regra da virada da meia-noite — converter aqui seria a segunda régua.
+
+    Até 01/09/2026 o app não perguntava nada disto e gravava a coluna nula. O
+    efeito não era cosmético: sem data não nasce pré-reserva na agenda, e o
+    contrato sai com {evento.data} em branco."""
+    ev = ev if isinstance(ev, dict) else {}
+    def _t(k, n=120):
+        return (str(ev.get(k) or "")).strip()[:n]
+    try:
+        convidados = int(ev.get("convidados") or 0) or None
+    except (TypeError, ValueError):
+        convidados = None
+    saida = {"data": _t("data", 20), "inicio": _t("inicio", 10), "fim": _t("fim", 10),
+             "tipo": _t("tipo", 60), "local": _t("local", 200),
+             "convidados": convidados}
+    # nada preenchido: não inventa o dicionário
+    return saida if any(saida.values()) else None
+
+
+def _sanear_parcelas(parcelas) -> list[dict]:
+    """As parcelas como o painel as grava: venc/valor_centavos/forma/obs.
+
+    Mesmo teto de 60 e mesmo descarte de parcela zerada do painel — parcela sem
+    valor não é plano de pagamento, é linha esquecida no formulário. É desta lista
+    que `vendas.valor_do_sinal` tira quanto é a entrada, e é por isso que o app
+    precisava passar a montá-la: sem parcelas não há sinal, e sem sinal a data
+    nunca fica firme."""
+    out = []
+    for p in (parcelas or [])[:60]:
+        p = p if isinstance(p, dict) else {}
+        try:
+            centavos = max(0, int(p.get("valor_centavos") or 0))
+        except (TypeError, ValueError):
+            centavos = 0
+        if centavos <= 0:
+            continue
+        out.append({"venc": (str(p.get("venc") or "")).strip()[:20],
+                    "valor_centavos": centavos,
+                    "forma": (str(p.get("forma") or "")).strip()[:40],
+                    "obs": (str(p.get("obs") or "")).strip()[:200]})
+    # A PRIMEIRA PARCELA É O SINAL, e quem carimba isso é o servidor.
+    #
+    # `vendas.indice_do_sinal` reconhece o sinal pela palavra na `obs` da primeira
+    # linha — é assim que o painel marca desde que o plano de pagamento existe.
+    # Sem o carimbo, um plano montado no celular ficava sem sinal nenhum: o botão
+    # "Sinal recebido" não aparecia, a pré-reserva nunca virava reserva firme e o
+    # título da entrada não nascia. O sintoma é mudo, e foi um teste que o achou.
+    #
+    # Só carimba onde NÃO há observação: o que o vendedor (ou o painel) escreveu
+    # manda, e sobrescrever seria apagar o que alguém digitou.
+    if out and not out[0]["obs"]:
+        from finance import vendas as _v
+        out[0]["obs"] = _v.OBS_SINAL
+    return out
+
+
 def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens,
-                    desconto=None) -> dict:
+                    desconto=None, *, evento=None, parcelas=None,
+                    orcamento_id: int | None = None) -> dict:
     """Cria a proposta do lead (mesma tabela/token do painel) e devolve o link público
     /proposta/<token> pro vendedor mandar. Revalida a posse do lead. Reusa a página de
     proposta que já existe (o cliente vê com a marca da empresa e aprova online).
@@ -1659,6 +1800,16 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens,
     E quem faz a conta é o SERVIDOR. O que chega da tela é o que a pessoa digitou
     (o tipo, o percentual, os reais); o total líquido é derivado aqui — senão
     bastaria editar o JSON no navegador pra fechar proposta por qualquer valor.
+
+    EVENTO E PARCELAS (01/09/2026). O painel já gravava os dois; o app não, e a
+    coluna ficava nula. Sem `evento.data` não nasce pré-reserva na agenda e o
+    contrato sai com o dia em branco; sem parcelas não existe sinal, e sem sinal a
+    data nunca fica firme. Só valem no modo evento, como no painel.
+
+    `orcamento_id` REABRE a proposta em vez de criar outra. Mesma trava do painel:
+    proposta com contrato ASSINADO não se edita por baixo — o assinado é documento
+    congelado, com aceite e IP do cliente, e mudar os itens por trás faria o papel
+    dizer uma coisa e o sistema outra. Precisou mudar? É aditivo.
     """
     import secrets as _secrets
     from web.painel_prospeccao import _zap_link_texto
@@ -1671,6 +1822,19 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens,
     dsc_final = _sanear_desconto(desconto) if pode_desconto else _sanear_desconto(None)
     import json as _json
     from finance import vendas as _vendas
+    modo = _vendas.modo_do_orcamento(pool, conta_id)
+    ev_dic = _sanear_evento(evento) if modo == "evento" else None
+    parcelas_lista = _sanear_parcelas(parcelas) if modo == "evento" else []
+    ev_json = _json.dumps(ev_dic) if ev_dic is not None else None
+    pc_json = _json.dumps(parcelas_lista) if modo == "evento" else None
+    if orcamento_id:
+        try:
+            from finance import contrato as _ctr
+            if _ctr.assinado_do_orcamento(pool, conta_id, int(orcamento_id)):
+                return {"ok": False, "erro": "Esta proposta tem contrato assinado e não "
+                                             "pode ser editada — faça um aditivo."}
+        except Exception:  # noqa: BLE001 — base sem a 164 segue o fluxo de antes
+            pass
     # setup/mensal continuam sendo o BRUTO, como no painel: eles são o preço de
     # tabela do que foi escolhido. O que o desconto muda é `primeiro_ano_centavos`.
     setup_c = sum(x["setup"] for x in linhas) * 100
@@ -1689,27 +1853,45 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens,
             _garantir_tabela(c)
         except Exception:  # noqa: BLE001 — colunas já existem em produção
             pass
-        token = _secrets.token_urlsafe(16)
         # `primeiro_ano_centavos` NÃO é enfeite e não estava aqui antes: quem gera
         # os títulos lê `coalesce(primeiro_ano_centavos, setup_centavos, 0)`
         # (finance/vendas.py), então sem ele o financeiro cai na soma BRUTA dos
         # itens. Somar desconto sem gravar o líquido faria o cliente assinar por um
         # valor e o sistema cobrar outro — as duas coisas sobem juntas.
-        oid = c.execute(
-            """insert into orcamentos
-                 (conta_id, cliente, empresa, cnpj, segmento, whatsapp, telefone, email,
-                  cidade, uf, itens, setup_centavos, mensal_centavos,
-                  primeiro_ano_centavos, desconto_tipo, desconto_pct, desconto_centavos,
-                  status, criado_por, canal, token, modo)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,
-                       %s,%s,%s,%s,'enviado',%s,'cockpit',%s,%s)
-               returning id""",
-            (conta_id, (lead[1] or None), (lead[0] or None), lead[2], lead[3], lead[4],
-             lead[5], lead[6], lead[7], (lead[8] or "")[:2] or None,
-             _json.dumps(linhas), setup_c, mensal_c,
-             tot["total"], dsc_final["tipo"], dsc_final["pct"], dsc_final["valor"] * 100,
-             str(membro_id), token,
-             _vendas.modo_do_orcamento(pool, conta_id))).fetchone()[0]
+        campos = (_json.dumps(linhas), setup_c, mensal_c, tot["total"],
+                  dsc_final["tipo"], dsc_final["pct"], dsc_final["valor"] * 100,
+                  ev_json, pc_json)
+        if orcamento_id:
+            # REABRIR. O token e o status ficam como estão: o cliente já pode ter o
+            # link na mão, e trocá-lo transformaria uma correção em proposta
+            # perdida. Escopado por conta E pelo lead — o id vem da barra de
+            # endereço.
+            r = c.execute(
+                """update orcamentos
+                      set itens=%s::jsonb, setup_centavos=%s, mensal_centavos=%s,
+                          primeiro_ano_centavos=%s, desconto_tipo=%s, desconto_pct=%s,
+                          desconto_centavos=%s, evento=%s::jsonb, parcelas=%s::jsonb
+                    where id=%s and conta_id=%s and coalesce(status,'') <> 'fechado' 
+                  returning id, token""",
+                campos + (int(orcamento_id), conta_id)).fetchone()
+            if not r:
+                return {"ok": False, "erro": "Proposta não encontrada ou já fechada."}
+            oid, token = r[0], r[1]
+        else:
+            token = _secrets.token_urlsafe(16)
+            oid = c.execute(
+                """insert into orcamentos
+                     (itens, setup_centavos, mensal_centavos, primeiro_ano_centavos,
+                      desconto_tipo, desconto_pct, desconto_centavos, evento, parcelas,
+                      conta_id, cliente, empresa, cnpj, segmento, whatsapp, telefone,
+                      email, cidade, uf, status, criado_por, canal, token, modo)
+                   values (%s::jsonb,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,
+                           %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'enviado',%s,'cockpit',%s,%s)
+                   returning id""",
+                campos + (conta_id, (lead[1] or None), (lead[0] or None), lead[2],
+                          lead[3], lead[4], lead[5], lead[6], lead[7],
+                          (lead[8] or "")[:2] or None,
+                          str(membro_id), token, modo)).fetchone()[0]
         c.execute("update prospeccao set orcamento_id=%s, atualizado_em=now() where id=%s and conta_id=%s",
                   (oid, lead_id, conta_id))
         c.commit()

@@ -777,7 +777,9 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                        coalesce(pe.nome, cl.nome, oc.nome, p.contato, p.empresa),
                        e.tipo, e.status, e.desfecho, e.convidados, e.sinal_centavos,
                        mb.nome, e.tipo_evento, e.id,
-                       coalesce(e.sem_cliente, false), e.titulo
+                       coalesce(e.sem_cliente, false), e.titulo,
+                       coalesce(pe.nome, cl.nome, oc.nome) is not null as nome_firme,
+                       coalesce(p.contato, p.empresa) as nome_lead
                   from eventos_agenda e
                   {join_orc}
                  where {where2_sql}
@@ -797,21 +799,35 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
         # alerta que não pede nada de ninguém.
         if especie == "visita" and r[5] is None and r[0] and r[0] < _ag.agora_brt():
             df_rotulo, df_cor = "Sem resposta", "aviso"
-        # CLIENTE: o vínculo primeiro; sem ele, o nome lido do título — marcado
-        # como palpite, porque é o que ele é. Nunca se grava daqui: `do_titulo`
-        # vira `cliente_id` só quando o dono confirma na tela de ligar.
-        #  r[8]=vendedor  r[9]=tipo_evento  r[10]=id  r[11]=sem_cliente  r[12]=titulo
+        # CLIENTE: o vínculo primeiro; sem ele, uma DEDUÇÃO — marcada como
+        # palpite, porque é o que ela é. Nunca se grava daqui: dedução vira
+        # `cliente_id` só quando o dono confirma na tela de ligar.
+        #  r[8]=vendedor r[9]=tipo_evento r[10]=id r[11]=sem_cliente r[12]=titulo
+        #  r[13]=nome_firme (veio de vínculo ou de orçamento)  r[14]=nome_lead
+        #
+        # O nome vindo do LEAD é dedução como o do título, e até 31/08/2026 não
+        # era tratado como uma: ele preenchia a célula, e por isso a linha
+        # PARECIA resolvida — sem selo e sem link, quando não há ficha nenhuma
+        # atrás dela. Era o pior dos dois mundos, e é o que muda aqui.
+        #
+        # (Nome vindo de ORÇAMENTO segue sem selo e sem link. Também é dedução,
+        # mas de outra natureza: ali existe proposta aprovada com cliente na
+        # ficha, e o conserto certo é ligar o vínculo na hora de reservar a data,
+        # não cobrar do dono na tela do relatório.)
         nome, do_titulo = r[2], False
+        do_lead = bool(r[14]) and not r[13]
         if not nome:
             nome = _ag.nome_no_titulo(r[12], r[9], equipe)
             do_titulo = bool(nome)
+        deduzido = do_titulo or do_lead
         linhas.append({
             "inicio": _fmt_hora(r[0]),
             "evento": r[1] or "—", "cliente": nome or "—",
-            "cliente_do_titulo": do_titulo,
+            "cliente_do_titulo": do_titulo, "cliente_do_lead": do_lead,
+            "cliente_deduzido": deduzido,
             # a célula só vira link enquanto houver pergunta a fazer: com vínculo
             # de verdade, ou com "não tem cliente" já dito, ela para de cobrar.
-            "cliente_link": (None if (r[2] or r[11])
+            "cliente_link": (None if (r[11] or (r[2] and not do_lead))
                              else f"/painel/relatorios/agenda/{r[10]}/cliente"),
             "tipo": AGENDA_TIPO_ROTULO.get(r[3], r[3] or "—"),
             "tipo_evento": r[9] or "sem tipo",
@@ -1286,13 +1302,22 @@ def _contexto(conta_id: int, tipo: str, periodo: str, status: str = "",
 # em vez de virar moradia permanente.
 # ---------------------------------------------------------------------------
 def _evento_da_conta(pool, conta_id: int, evento_id: int):
-    """(titulo, tipo_evento, inicio, cliente_id, sem_cliente) — ou None se o
-    compromisso não for desta conta. O isolamento é aqui, e não na rota."""
+    """(titulo, tipo_evento, inicio, cliente_id, sem_cliente, nome_lead, tel_lead)
+    — ou None se o compromisso não for desta conta. O isolamento é aqui, e não na
+    rota.
+
+    O lead vem junto porque é ele que enche a tela: quando a visita foi marcada
+    pelo funil, nome e número já existem em `prospeccao` e redigitá-los é o que
+    faz ninguém usar o botão."""
     with pool.connection() as c:
         return c.execute(
-            "select titulo, tipo_evento, inicio, cliente_id, "
-            "       coalesce(sem_cliente,false) "
-            "  from eventos_agenda where id=%s and conta_id=%s",
+            "select e.titulo, e.tipo_evento, e.inicio, e.cliente_id, "
+            "       coalesce(e.sem_cliente,false), "
+            "       coalesce(p.contato, p.empresa), "
+            "       coalesce(p.whatsapp, p.telefone, '') "
+            "  from eventos_agenda e "
+            "  left join prospeccao p on p.id = e.prospeccao_id "
+            " where e.id=%s and e.conta_id=%s",
             (evento_id, conta_id)).fetchone()
 
 
@@ -1307,12 +1332,15 @@ def painel_agenda_cliente(request: Request, evento_id: int):
     if ev is None:
         return RedirectResponse("/painel/relatorios?tipo=agenda", status_code=303)
     equipe = [n for _i, n in _vendedores_da_conta(pool, conta[0]) if n]
+    # a caixa já vem preenchida com o palpite: quase sempre é só conferir e
+    # clicar, e redigitar o que a tela acabou de mostrar é o tipo de trabalho que
+    # faz ninguém usar a ferramenta. O LEAD manda no preenchimento quando existe:
+    # ali o nome foi digitado por uma pessoa, enquanto o do título é leitura
+    # nossa. E é o único dos dois que traz TELEFONE junto.
     return _render("agenda_cliente", request, conta=conta, evento_id=evento_id,
                    titulo_ev=ev[0], quando=_fmt_hora(ev[2]),
-                   # a caixa já vem preenchida com o palpite: quase sempre é só
-                   # conferir e clicar, e redigitar o que a tela acabou de mostrar
-                   # é o tipo de trabalho que faz ninguém usar a ferramenta.
-                   sugerido=_ag.nome_no_titulo(ev[0], ev[1], equipe) or "",
+                   sugerido=(ev[5] or _ag.nome_no_titulo(ev[0], ev[1], equipe) or ""),
+                   tel_sugerido=ev[6] or "", do_lead=bool(ev[5]),
                    erro=request.session.pop("erro", None))
 
 
@@ -1320,6 +1348,7 @@ def painel_agenda_cliente(request: Request, evento_id: int):
 def painel_agenda_cliente_salvar(request: Request, evento_id: int,
                                  cliente_id: str = Form(""),
                                  cliente_nome: str = Form(""),
+                                 cliente_tel: str = Form(""),
                                  sem_cliente: str = Form("")):
     from finance import clientes as cli
     conta, redir = _pode_ver(request)
@@ -1335,12 +1364,20 @@ def painel_agenda_cliente_salvar(request: Request, evento_id: int,
         request.session["aviso"] = "Marcado como sem cliente."
         return RedirectResponse(volta, status_code=303)
 
-    # Mesma régua de três respostas da tela da Agenda, e pelo mesmo motivo:
-    # `salvar_cliente` só reaproveita ficha por documento ou telefone, e aqui só
-    # chega o nome — sem isto, confirmar o palpite cunharia uma ficha repetida a
-    # cada compromisso, que é exatamente o problema que este trabalho veio fechar.
+    # Régua de quatro respostas: escolhido na lista, achado pelo NÚMERO, achado
+    # pelo nome exato, ou ficha nova. `salvar_cliente` só reaproveita por
+    # documento ou telefone, e sem isto confirmar o palpite cunharia uma ficha
+    # repetida a cada compromisso — que é o problema que este trabalho veio
+    # fechar.
+    #
+    # O NÚMERO vem antes do nome de propósito: é a chave estável (a régua dos 8
+    # finais, `buscar_unico_por_telefone`), enquanto o nome do lead é anotação de
+    # vendedora e muda de um compromisso pro outro. Se o dono corrigiu
+    # "Jacque/Elisangela 15 Anos" pra "Elisangela Moreira" mas o número já tem
+    # ficha, o certo é ligar na ficha que existe, não abrir a segunda.
     alvo = None
     cid = (cliente_id or "").strip()
+    tel = (cliente_tel or "").strip()
     if cid.isdigit() and cli.obter_cliente(pool, conta[0], int(cid)):
         alvo = int(cid)
     else:
@@ -1349,22 +1386,30 @@ def painel_agenda_cliente_salvar(request: Request, evento_id: int,
             request.session["erro"] = "Escolha um cliente ou diga que não há um."
             return RedirectResponse(f"/painel/relatorios/agenda/{evento_id}/cliente",
                                     status_code=303)
-        iguais = [c for c in cli.listar_clientes(pool, conta[0], busca=nome, limite=5)
-                  if (c["nome"] or "").strip().casefold() == nome.casefold()]
-        if len(iguais) == 1:
-            alvo = iguais[0]["id"]
-        elif len(iguais) > 1:
-            request.session["erro"] = (
-                f"Há mais de um cadastro chamado “{nome}”. Escolha na lista qual é.")
-            return RedirectResponse(f"/painel/relatorios/agenda/{evento_id}/cliente",
-                                    status_code=303)
+        pelo_tel = cli.buscar_unico_por_telefone(pool, conta[0], tel) if tel else None
+        if pelo_tel:
+            alvo = pelo_tel["id"]
         else:
-            try:
-                alvo = cli.salvar_cliente(pool, conta[0], nome)["id"]
-            except ValueError as e:
-                request.session["erro"] = str(e)
-                return RedirectResponse(
-                    f"/painel/relatorios/agenda/{evento_id}/cliente", status_code=303)
+            iguais = [c for c in cli.listar_clientes(pool, conta[0], busca=nome, limite=5)
+                      if (c["nome"] or "").strip().casefold() == nome.casefold()]
+            if len(iguais) == 1:
+                alvo = iguais[0]["id"]
+            elif len(iguais) > 1:
+                request.session["erro"] = (
+                    f"Há mais de um cadastro chamado “{nome}”. Escolha na lista qual é.")
+                return RedirectResponse(f"/painel/relatorios/agenda/{evento_id}/cliente",
+                                        status_code=303)
+            else:
+                # o TELEFONE entra na ficha nova. Sem ele, confirmar um lead
+                # criaria cadastro sem número — exatamente o dado que a corrente
+                # do funil estava perdendo, agora perdido no conserto dela.
+                try:
+                    alvo = cli.salvar_cliente(pool, conta[0], nome,
+                                              telefone=(tel or None))["id"]
+                except ValueError as e:
+                    request.session["erro"] = str(e)
+                    return RedirectResponse(
+                        f"/painel/relatorios/agenda/{evento_id}/cliente", status_code=303)
     _ag.ligar_cliente(pool, conta[0], evento_id, alvo)
     request.session["aviso"] = "Compromisso ligado ao cadastro."
     return RedirectResponse(volta, status_code=303)

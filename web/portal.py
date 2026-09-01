@@ -6241,6 +6241,10 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   .rel-selo{display:inline-block;margin-left:.35rem;font-size:.62rem;font-weight:700;
       letter-spacing:.03em;font-style:normal;border-radius:4px;padding:.02rem .3rem;
       border:1px solid #5a4a2a;background:rgba(201,162,39,.10);color:#c9a227}
+  /* dedução vinda do LEAD: azul, pra distinguir da leitura do título. As duas
+     são palpite (por isso o itálico apagado é o mesmo), mas vêm de lugares
+     diferentes e se resolvem diferente — e o dono precisa ver qual é qual. */
+  .rel-selo.lead{border-color:#1d5570;background:rgba(143,208,234,.10);color:#8fd0ea}
   .rel-tag.info{background:#0f2836;color:#8fd0ea;border:1px solid #1d5570}
   .rel-act{width:1%;white-space:nowrap;text-align:center}
   .rel-print{display:inline-flex;align-items:center;justify-content:center;width:1.8rem;height:1.8rem;
@@ -6423,13 +6427,15 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% elif col.flex %} class="rel-flex" title="{{ row[col.chave] }}"{% endif %}{% if col.chave == dados.col_total %} data-c="{{ row[col.chave] }}"{% endif %}>{% if col.tag %}<span
       class="rel-tag {{ row[col.chave ~ '_cor'] }}">{{ row[col.chave] }}</span>{% elif col.brl %}{{ row[col.chave]|brl
       }}{% elif col.cli %}{#- a célula Cliente da Agenda. Nome vindo do VÍNCULO sai
-      limpo; nome lido do TÍTULO sai apagado e com selo, porque é palpite e a tela
-      não pode fingir que é dado. Enquanto a pergunta estiver aberta a célula é um
+      limpo; DEDUÇÃO sai apagada e com selo, porque é palpite e a tela não pode
+      fingir que é dado. Dois selos, porque são duas origens: "do lead" (azul,
+      o nome que o funil trouxe) e "do título" (âmbar, lido do texto). Enquanto a pergunta estiver aberta a célula é um
       link pra respondê-la. Sem `|safe` em lugar nenhum: quem monta é o template,
       a escapagem continua valendo. -#}{% if row.cliente_link %}<a class="rel-cli"
       href="{{ row.cliente_link }}" title="Dizer de quem é este compromisso">{% endif
-      %}<span{% if row.cliente_do_titulo %} class="rel-deriv"{% endif %}>{{ row[col.chave] }}</span>{%
-      if row.cliente_do_titulo %}<span class="rel-selo" title="Lido do título do compromisso — ainda não é um cadastro ligado">do título</span>{%
+      %}<span{% if row.cliente_deduzido %} class="rel-deriv"{% endif %}>{{ row[col.chave] }}</span>{%
+      if row.cliente_do_lead %}<span class="rel-selo lead" title="Nome do lead que marcou a visita — ainda não é um cadastro ligado">do lead</span>{%
+      elif row.cliente_do_titulo %}<span class="rel-selo" title="Lido do título do compromisso — ainda não é um cadastro ligado">do título</span>{%
       endif %}{% if row.cliente_link %}</a>{% endif %}{% else %}{{ row[col.chave] }}{% endif %}</td>{% endfor %}{% if dados.acao %}<td class="rel-act">{% if row.acao_href
       %}<a class="rel-print" href="{{ row.acao_href }}" target="_blank" rel="noopener" title="{{ dados.acao_rotulo }}">🖨️</a>{% endif %}</td>{% endif %}</tr>
     {% else %}
@@ -6533,8 +6539,12 @@ _AGENDA_CLIENTE = """{% extends "base" %}{% block conteudo %}
       padding:.7rem .85rem;margin:.9rem 0}
   .ac-ev b{color:var(--txt)}
   .ac-ev .q{display:block;font-size:.76rem;color:var(--txt-mut);margin-top:.15rem}
-  .ac-sug{border:1px solid var(--borda);border-top:0;border-radius:0 0 8px 8px;
-      background:var(--card-2);overflow:hidden;margin-top:-1px}
+  .ac-par{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+  @media (max-width:520px){ .ac-par{grid-template-columns:1fr} }
+  /* a lista deixou de ficar colada no campo quando o WhatsApp entrou ao lado:
+     agora é caixa própria, logo abaixo do par. */
+  .ac-sug{border:1px solid var(--borda);border-radius:8px;
+      background:var(--card-2);overflow:hidden;margin-top:.4rem}
   .ac-sug div{padding:.45rem .6rem;font-size:.85rem;color:var(--txt);cursor:pointer;
       border-top:1px solid var(--borda)}
   .ac-sug div:first-child{border-top:0}
@@ -6553,14 +6563,28 @@ _AGENDA_CLIENTE = """{% extends "base" %}{% block conteudo %}
   <h2 style="margin:.4rem 0">De quem é este compromisso?</h2>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 
-  <div class="ac-ev"><b>{{ titulo_ev }}</b><span class="q">{{ quando }}</span></div>
+  <div class="ac-ev"><b>{{ titulo_ev }}</b><span class="q">{{ quando }}{% if do_lead %} · veio do funil{% endif %}</span></div>
 
   <form method="post" action="/painel/relatorios/agenda/{{ evento_id }}/cliente">
-    <label style="font-size:.78rem;color:var(--txt-mut);font-weight:600">Cliente</label>
-    {#- já vem preenchido com o nome lido do título: quase sempre é só conferir. -#}
-    <input name="cliente_nome" id="acNome" value="{{ sugerido }}" autocomplete="off"
-           placeholder="Buscar por nome, telefone ou CPF…"
-           oninput="acBusca(this.value)" style="width:100%">
+    <div class="ac-par">
+      <div>
+        <label style="font-size:.78rem;color:var(--txt-mut);font-weight:600">Cliente</label>
+        {#- já vem preenchido: do lead quando a visita veio do funil, senão do
+            nome lido no título. Quase sempre é só conferir. -#}
+        <input name="cliente_nome" id="acNome" value="{{ sugerido }}" autocomplete="off"
+               placeholder="Buscar por nome, telefone ou CPF…"
+               oninput="acBusca(this.value)" style="width:100%">
+      </div>
+      <div>
+        <label style="font-size:.78rem;color:var(--txt-mut);font-weight:600">WhatsApp</label>
+        {#- O CAMPO QUE FALTAVA. Sem ele, confirmar um lead criava ficha SEM
+            número — o mesmo dado que a corrente do funil já perdia, perdido de
+            novo no conserto. Quando o número já tem ficha, ele manda: liga na
+            que existe em vez de abrir a segunda. -#}
+        <input name="cliente_tel" id="acTel" value="{{ tel_sugerido }}"
+               autocomplete="off" placeholder="(00) 00000-0000" style="width:100%">
+      </div>
+    </div>
     <input type="hidden" name="cliente_id" id="acId">
     <div id="acSug" class="ac-sug" style="display:none"></div>
     <div class="ac-acoes">
@@ -6599,6 +6623,9 @@ function acBusca(q){
 function acPick(i){
   var c=AC_RES[i]; if(!c) return;
   document.getElementById('acNome').value=c.nome;
+  /* escolheu ficha da lista: o telefone mostrado passa a ser o DELA, e não o do
+     lead — senão a tela diria um número e ligaria noutro cadastro. */
+  document.getElementById('acTel').value=c.telefone||'';
   document.getElementById('acId').value=c.id;
   document.getElementById('acSug').style.display='none';
 }

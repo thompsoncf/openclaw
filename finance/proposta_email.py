@@ -74,6 +74,35 @@ def assunto_padrao(numero, empresa: str | None, modo: str | None = None) -> str:
     emp = (empresa or "").strip()
     return f"{n} — {emp}" if emp else n
 
+
+def assunto_contrato(numero, empresa: str | None) -> str:
+    """Assunto do e-mail do CONTRATO — outro documento, com numeração própria.
+
+    Fica aqui junto do `assunto_padrao` porque a tela de prévia e a rota de envio
+    precisam dizer exatamente a mesma coisa: a prévia mostrava o assunto certo e
+    o envio mandava outro, e o cliente recebia um e-mail com cara de contrato e
+    link de proposta (produção, Prime Eventos, 28/08). Duas cópias do texto era o
+    que permitia elas divergirem."""
+    emp = (empresa or "").strip()
+    n = f"Contrato nº {numero}" if numero else "Contrato"
+    return f"{n} — {emp}" if emp else n
+
+
+def texto_contrato(cliente: str | None, assinado: bool = False) -> str:
+    """A mensagem sugerida do contrato.
+
+    DUAS REDAÇÕES, porque são dois pedidos diferentes. Enquanto falta assinatura,
+    o e-mail pede pra assinar. Depois de assinado o pedido acabou — o que o
+    cliente quer é a VIA dele, e mandar "abra e assine" num contrato já assinado
+    faz o cliente achar que a assinatura não valeu."""
+    nome = (cliente or "").strip().split(" ")[0]
+    ola = f"Olá, {nome}!" if nome else "Olá!"
+    if assinado:
+        return (f"{ola} Segue o contrato assinado, para o seu arquivo. "
+                "É só abrir o link — qualquer dúvida, me chame.")
+    return (f"{ola} Segue o contrato para leitura e assinatura. "
+            "É só abrir o link e assinar por lá — qualquer dúvida, me chame.")
+
 # Artigo e possessivo de cada documento — "contrato" entra aqui, não em `_DOC`
 # (`_DOC` é só orçamento/proposta, por NICHO; contrato não depende de nicho,
 # é outro documento inteiro, ver `doc_rotulo` em `montar`).

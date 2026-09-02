@@ -985,6 +985,13 @@ def painel_servicos_lista(request: Request):
         "contrato_token": r[17] or "",
         "contrato_numero": r[18],
         "contrato_assinado": bool(r[19]),
+        # QUANDO o contrato foi mandado — o mesmo dado que a proposta já mostra em
+        # `enviado_em`. Sem ele o menu ofereceria "Mandar por e-mail" sem dizer se
+        # já foi mandado, e é justamente essa dúvida que faz o vendedor mandar de
+        # novo "por via das dúvidas". O cru continua em `_contrato_enviado_em`
+        # (o motor de pendências conta dias com ele); aqui vai o formatado.
+        "contrato_enviado_em": (r[26].astimezone(ag.BRT).strftime("%d/%m %H:%M")
+                                if r[26] else ""),
         # só vem preenchido enquanto a data está SEGURADA esperando o sinal
         "pre_reserva_ate": r[20].astimezone(ag.BRT).strftime("%d/%m %H:%M") if r[20] else "",
         # O ESTADO DA DATA, resolvido no servidor. A linha do funil mostrava só a
@@ -1229,6 +1236,7 @@ def painel_servicos_email(request: Request, orc_id: int, alvo: str = "proposta")
     _assunto = pmail.assunto_padrao(d["numero"], nome_emp, d["modo"])
     _msg = pmail.texto_padrao(_quem, d["modo"])
     _link = f"{_base}/proposta/{d['token']}"
+    _assinado = False
     # MESMO CAMINHO, outro documento. O contrato tinha link e não tinha envio: o
     # selo mandava "mande o link pro cliente" e o link ficava escondido no menu de
     # três pontos. Aqui ele reusa a tela de envio, o remetente resolvido e o
@@ -1240,14 +1248,18 @@ def painel_servicos_email(request: Request, orc_id: int, alvo: str = "proposta")
             return JSONResponse({"erro": "esta proposta ainda não tem contrato"},
                                 status_code=404)
         _link = f"{_base}/contrato/{_ct['token']}"
-        _assunto = f"Contrato nº {_ct.get('numero') or ''} — {nome_emp}".strip()
-        _msg = (f"Olá{(', ' + _quem) if _quem else ''}! Segue o contrato para "
-                "leitura e assinatura. É só abrir o link e assinar por lá — "
-                "qualquer dúvida, me chame.")
+        _assinado = bool(_ct.get("assinado_em"))
+        _assunto = pmail.assunto_contrato(_ct.get("numero"), nome_emp)
+        _msg = pmail.texto_contrato(_quem, assinado=_assinado)
     return JSONResponse({
         "para": d["email"],
         "cliente": d["cliente"] or d["empresa_cli"],
         "assunto": _assunto, "mensagem": _msg, "link": _link,
+        # QUEM DECIDE É O SERVIDOR, aqui também. É ele que já escolheu a redação
+        # da mensagem (pedir assinatura × mandar a via); deixar a tela adivinhar
+        # o título por conta própria seria a segunda leitura do mesmo fato, e é
+        # assim que o título passa a dizer uma coisa e o corpo do e-mail outra.
+        "assinado": _assinado,
         "resumo": _resumo_do_envio(d),
         "empresa": nome_emp,
         "remetente": rem,
@@ -1345,10 +1357,8 @@ def painel_servicos_enviar_email(request: Request, dados: EnviarEmailIn):
             return JSONResponse({"erro": "esta proposta ainda não tem contrato"},
                                 status_code=404)
         link = f"{_base}/contrato/{_ct['token']}"
-        assunto_padrao_ = f"Contrato nº {_ct.get('numero') or ''} — {nome_emp}".strip()
-        mensagem_padrao_ = (f"Olá{(', ' + quem) if quem else ''}! Segue o contrato para "
-                           "leitura e assinatura. É só abrir o link e assinar por lá — "
-                           "qualquer dúvida, me chame.")
+        assunto_padrao_ = pmail.assunto_contrato(_ct.get("numero"), nome_emp)
+        mensagem_padrao_ = pmail.texto_contrato(quem, assinado=bool(_ct.get("assinado_em")))
         doc_rotulo = "contrato"
     else:
         link = f"{_base}/proposta/{d['token']}"
@@ -3530,7 +3540,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         var d=res.d;
         ENV_LINK=d.link||'';
         document.getElementById('env-tt').textContent=
-          (ENV_ALVO==='contrato'?'Mandar pra assinar — ':'Mandar ')+esc(d.assunto||'a proposta');
+          (ENV_ALVO==='contrato'
+             ? (d.assinado?'Mandar a via assinada — ':'Mandar pra assinar — ')
+             : 'Mandar ')+esc(d.assunto||'a proposta');
         document.getElementById('env-para').value=d.para||'';
         document.getElementById('env-assunto').value=d.assunto||'';
         document.getElementById('env-texto').value=d.mensagem||'';
@@ -3663,6 +3675,19 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         window.open('/contrato/'+it.contrato_token,'_blank');}));
       m.appendChild(_mi('Copiar link','🔗','',function(){
         navigator.clipboard.writeText(origem+'/contrato/'+it.contrato_token);}));
+      // MANDAR O CONTRATO ESTAVA SÓ NO BOTÃO VERDE, e o botão verde é UM só: quando
+      // a linha tem pendência de prioridade maior (marcar, resegurar, sinal,
+      // comprovante — ver `_ORDEM_ACAO`), ele mostra a outra e o e-mail do contrato
+      // some da tela. Depois de ASSINADO some de vez: a ação vira "Fechar negócio"
+      // e, com o negócio fechado, não há ação nenhuma — justamente quando o cliente
+      // liga pedindo a via dele. O grupo Contrato tinha Abrir e Copiar link, e o de
+      // Proposta logo acima tinha o "Mandar por e-mail" que faltava aqui.
+      //
+      // Depois de assinado o pedido é OUTRO — a via, não a assinatura —, e o texto
+      // do e-mail acompanha (`pmail.texto_contrato`).
+      m.appendChild(_mi(it.contrato_assinado?'Mandar a via assinada':'Mandar pra assinar','✉️',
+        it.contrato_enviado_em?('mandado '+it.contrato_enviado_em):'nunca mandado',
+        function(){abrirEnvio(it.id,'contrato');}));
     }
     if(it.pgto&&it.pgto.total){
       m.appendChild(_mgrupo('Dinheiro'));

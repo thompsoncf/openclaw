@@ -124,6 +124,66 @@ def _regras(modelo) -> dict:
     return r
 
 
+def completar_do_cadastro(pool, conta_id: int, orcamento: dict, cliente_id) -> dict:
+    """Completa o cliente do orçamento com o que a aba Clientes já sabe.
+
+    POR QUE ISTO PRECISA EXISTIR
+    O contrato lia SÓ a linha do orçamento. Quando o vendedor não digitou o CPF
+    ali, a folha do cliente saía com "⚠️ Campos sem valor neste contrato:
+    cliente.doc" — mesmo com o CPF cadastrado e o orçamento apontando pro
+    cadastro. Medido na conta 34 em 02/09/2026: 12 orçamentos sem documento, e em
+    4 deles o documento estava no cadastro; dois já tinham virado contrato
+    emitido, com o aviso na cara do cliente.
+
+    O vínculo já era pra ser lido — `web/painel_servicos` grava `cliente_id` ao
+    salvar e diz o motivo em comentário: "o VÍNCULO é o que faz a folha reler o
+    cadastro depois: sem ele, o texto copiado aqui congelaria pra sempre e
+    corrigir na aba Clientes não mudaria nada". Faltava alguém consumir.
+
+    O ORÇAMENTO VENCE, sempre. Só buraco é preenchido. Quem digitou um documento
+    diferente no orçamento tinha razão pra isso — contrato no nome do cônjuge, do
+    pai da noiva, da empresa que paga — e o cadastro não pode desautorizar.
+
+    O ENDEREÇO VEM EM BLOCO, não campo a campo. Rua de um endereço com cidade de
+    outro é um endereço que não existe, e num contrato isso é pior que a falta.
+    Então: se o orçamento tem logradouro, o endereço é o dele, inteiro; se não
+    tem, é o do cadastro, inteiro.
+
+    Tolerante: sem `cliente_id`, sem cadastro ou com o banco fora, devolve o
+    orçamento como veio. O contrato continua saindo — com o aviso de sempre, que
+    é exatamente o que ele já fazia antes desta função existir.
+    """
+    o = dict(orcamento or {})
+    if not cliente_id:
+        return o
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                """select coalesce(nullif(p.cpf,''), nullif(p.cnpj,'')),
+                          cl.endereco, cl.cep, cl.cidade, cl.uf
+                     from clientes cl
+                     left join pessoas p on p.id = cl.pessoa_id
+                    where cl.id=%s and cl.dono_id=%s""",
+                (int(cliente_id), int(conta_id))).fetchone()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra ler o cadastro do cliente %s: %s: %s",
+                     cliente_id, type(e).__name__, e)
+        return o
+    if not r:
+        return o
+    doc, endereco, cep, cidade, uf = r
+    if not (o.get("cnpj") or "").strip():
+        o["cnpj"] = doc or ""
+    # o logradouro é a CHAVE do bloco: é ele que diz se existe endereço no
+    # orçamento. Cidade/UF sozinhas costumam vir do lead, não de um endereço.
+    if not (o.get("endereco") or "").strip():
+        o["endereco"] = endereco or ""
+        o["cep"] = cep or ""
+        o["cidade"] = cidade or o.get("cidade") or ""
+        o["uf"] = uf or o.get("uf") or ""
+    return o
+
+
 def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None) -> dict:
     """Monta o que `preencher` vai consultar, um dicionário por grupo.
 

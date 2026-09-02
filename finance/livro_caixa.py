@@ -219,14 +219,37 @@ class LivroCaixa:
         return {"lancamento_id": novo_id, "n_itens": int(n),
                 "descricao": descricao, "valor": int(valor)}
 
+
     def _lancamento_recente_igual(self, lanc: Lancamento, janela_min: int = 10) -> dict | None:
         """Procura um lancamento IDENTICO criado ha' pouco NESTA conta: mesmo tipo,
-        valor EXATO e mesma data, dentro dos ultimos `janela_min` minutos. E' a
-        assinatura do re-registro acidental (varios comprovantes na mesma rajada;
-        o modelo, numa msg de resumo, chama lancar de novo pro mesmo valor). NAO
-        casa por descricao de proposito - o agente as vezes muda o sufixo (ex: com/
-        sem 'Banco do Brasil'), e o que importa pra dinheiro e' tipo+valor+data.
-        Retorna o dict do existente ou None."""
+        valor EXATO, mesma data e MESMA DESCRICAO, dentro dos ultimos `janela_min`
+        minutos. E' a assinatura do re-registro acidental (varios comprovantes na
+        mesma rajada; o modelo, numa msg de resumo, chama lancar de novo pro mesmo
+        valor). Retorna o dict do existente ou None.
+
+        A DESCRICAO ENTROU NA REGUA EM 02/09/2026, e o motivo e' folha de prestador.
+        Antes a regra era so' tipo+valor+data, ignorando a descricao de proposito
+        (o agente as vezes muda o sufixo). Em 01/09 a Prime pagou dois prestadores
+        de R$ 1.500 com 38 SEGUNDOS de diferenca — Pedro Yan as 17:07:30 e Thiago
+        logo em seguida — e o segundo foi tratado como re-registro do primeiro. O
+        dinheiro sumiu, e o agente ainda respondeu "Registrado ✅".
+
+        Isso nao e' caso raro: os titulos da conta dizem 1a/2a QUINZENA THIAGO e
+        1a/2a QUINZENA PEDRO YAN, R$ 1.500 cada, mesmo vencimento. Pagar varios
+        prestadores o mesmo valor no mesmo dia E' a folha; a regra antiga chamava
+        isso de duplicata.
+
+        A comparacao e' por CONTINENCIA e nao por igualdade exata, pra nao perder o
+        caso que a regra antiga protegia: "Almoco no Assai" e "Almoco no Assai Banco
+        do Brasil" — um contem o outro, continua sendo duplicata. "…Pedro Yan…" e
+        "…Thiago…" nao se contem, entao sao dois pagamentos.
+
+        Descricao vazia dos dois lados cai no comportamento antigo (bloqueia): sem
+        texto nao da pra distinguir, e barrar de menos duplicaria dinheiro. O que
+        sobra de falso positivo — dois pagamentos diferentes com a MESMA descricao —
+        deixou de ser silencioso: quem chama avisa em vez de confirmar (ver o
+        `duplicado` no `adicionar` e o uso dele em finance/tools.py).
+        """
         with self.pool.connection() as conn:
             row = conn.execute(
                 """select id, descricao, valor_centavos, data, criado_em
@@ -237,6 +260,8 @@ class LivroCaixa:
                    order by criado_em desc limit 1""",
                 (self.conta_id, lanc.tipo.value, lanc.valor_centavos, lanc.data, janela_min),
             ).fetchone()
+        if row and not descricoes_sao_a_mesma(row[1], lanc.descricao):
+            return None
         if not row:
             return None
         return {"id": row[0], "descricao": row[1], "valor_centavos": int(row[2]),
@@ -1343,3 +1368,31 @@ class LivroCaixa:
             ).fetchall()
         return [{"descricao": r[0], "quantidade": float(r[1]),
                  "valor_total_centavos": int(r[2]), "data": r[3], "criado_em": r[4]} for r in rows]
+
+def descricoes_sao_a_mesma(a, b) -> bool:
+    """Duas descricoes falam do MESMO lancamento?
+
+    Continencia, nao igualdade: o agente as vezes reescreve o sufixo do mesmo
+    comprovante ("Almoco no Assai" vira "Almoco no Assai Banco do Brasil"), e
+    exigir igualdade exata deixaria isso passar como pagamento novo — que e' o
+    caso que a trava anti-duplicidade nasceu pra pegar.
+
+    Nomes diferentes nao se contem, e e' o que separa folha de duplicata:
+    "…Pedro Yan Mendes…" e "…Thiago Cesar Borges…" tem o mesmo prefixo e o mesmo
+    sufixo, mas nenhuma contem a outra.
+
+    Vazio dos dois lados: nao da pra distinguir, entao trata como a mesma —
+    bloquear de menos duplicaria dinheiro, e o chamador avisa em vez de confirmar.
+    """
+    ta, tb = _texto_chave(a), _texto_chave(b)
+    if not ta or not tb:
+        return True
+    return ta in tb or tb in ta
+
+
+def _texto_chave(t) -> str:
+    """Minusculo, sem acento e sem pontuacao — pra 'Servico' e 'Serviço' baterem."""
+    import unicodedata
+    bruto = unicodedata.normalize("NFD", str(t or ""))
+    limpo = "".join(c for c in bruto if unicodedata.category(c) != "Mn").lower()
+    return " ".join("".join(c if c.isalnum() else " " for c in limpo).split())

@@ -84,7 +84,31 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             plano_conta_id=plano_conta_id,
             centro_custo_id=centro_custo_id,
         )
-        salvo = livro.adicionar(lanc)
+        # `forcar` vem do agente quando o usuario CONFIRMOU que sao dois pagamentos
+        # diferentes. Sem ele ligado aqui, a mensagem logo abaixo mandaria o agente
+        # chamar de novo com um parametro que ninguem le — e o segundo pagamento
+        # bateria na trava pra sempre. A porta de saida tem que existir de verdade.
+        forcar = bool(entrada.get("forcar"))
+        salvo = livro.adicionar(lanc, forcar=forcar)
+        # A TRAVA ANTI-DUPLICIDADE PRECISA APARECER. Quando ela dispara, `adicionar`
+        # devolve o lancamento que JA' EXISTIA e marca `duplicado` — e ate' 02/09/2026
+        # esta funcao ignorava o flag e respondia "registrada" com os dados do OUTRO
+        # lancamento. Em 01/09 a Prime pagou Pedro Yan e Thiago, R$ 1.500 cada, com 38
+        # segundos de diferenca: o segundo foi engolido e o agente ainda mandou
+        # "Registrado ✅" pro vendedor. O dono so' descobriu quando o prestador cobrou.
+        #
+        # Agora o agente PERGUNTA em vez de confirmar. O texto diz o que ja' existe
+        # (descricao e id) pra ele reconhecer, e diz como forcar — `forcar: true` no
+        # mesmo lancar, que e' o caminho que finance/agente_financeiro.py ja' instrui.
+        # Nunca grava sozinho por cima da trava: duplicar dinheiro e' o erro simetrico,
+        # e quem sabe se sao dois pagamentos e' quem mandou os dois comprovantes.
+        if getattr(salvo, "duplicado", False):
+            return (f"NAO registrei — ja' existe um lancamento igual de "
+                    f"{formatar_brl(salvo.valor_centavos)} em {salvo.data.strftime('%d/%m/%Y')} "
+                    f"(\"{salvo.descricao}\", id={salvo.id}), criado ha' poucos minutos. "
+                    f"Se este comprovante for de OUTRO pagamento, pergunte ao usuario "
+                    f"e chame de novo com forcar: true. Se for o mesmo, avise que ja' "
+                    f"estava registrado.")
         rotulo = "Despesa" if tipo == Tipo.DESPESA else "Receita"
         forma_txt = f", {forma}" if forma else ""
         cc_txt = ""
@@ -414,6 +438,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     "natureza": {"type": "string", "enum": ["pessoal", "empresa"], "description": "só para conta PJ que mistura pessoal e empresa: se a pessoa já disse que foi pessoal ou da empresa, passe aqui na hora do registro (evita 2º passo)"},
                     "plano_conta": {"type": "string", "description": "SÓ quando natureza=empresa: código da conta contábil do plano (ex: '5.1.03'). Escolha a mais adequada à categoria/descrição pra já entrar na DRE certa. Se não souber os códigos habilitados desta conta, chame a ferramenta plano_de_contas. Se não tiver certeza, deixe vazio (a pessoa classifica depois)."},
                     "centro_custo": {"type": "string", "description": "SÓ quando natureza=empresa: nome do centro de custo (ex: 'Unidade Centro'), se a pessoa disser de qual unidade/projeto foi. Opcional."},
+                    "forcar": {"type": "boolean", "description": "SÓ depois de a ferramenta ter respondido 'NAO registrei — ja existe um lancamento igual' E de a pessoa CONFIRMAR que é outro pagamento. Aí sim mande forcar: true pra registrar os dois. Nunca mande por conta própria: é assim que o mesmo dinheiro entra duas vezes."},
                 },
                 "required": ["valor", "categoria"],
             },
@@ -434,6 +459,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     "natureza": {"type": "string", "enum": ["pessoal", "empresa"], "description": "só para conta PJ que mistura pessoal e empresa: se a pessoa já disse que foi pessoal ou da empresa, passe aqui na hora do registro (evita 2º passo)"},
                     "plano_conta": {"type": "string", "description": "SÓ quando natureza=empresa: código da conta contábil do plano (ex: '5.1.03'). Escolha a mais adequada à categoria/descrição pra já entrar na DRE certa. Se não souber os códigos habilitados desta conta, chame a ferramenta plano_de_contas. Se não tiver certeza, deixe vazio (a pessoa classifica depois)."},
                     "centro_custo": {"type": "string", "description": "SÓ quando natureza=empresa: nome do centro de custo (ex: 'Unidade Centro'), se a pessoa disser de qual unidade/projeto foi. Opcional."},
+                    "forcar": {"type": "boolean", "description": "SÓ depois de a ferramenta ter respondido 'NAO registrei — ja existe um lancamento igual' E de a pessoa CONFIRMAR que é outro pagamento. Aí sim mande forcar: true pra registrar os dois. Nunca mande por conta própria: é assim que o mesmo dinheiro entra duas vezes."},
                 },
                 "required": ["valor", "categoria"],
             },

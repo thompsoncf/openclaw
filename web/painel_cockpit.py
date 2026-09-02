@@ -744,6 +744,10 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 /* as linhas seguintes do bloco do evento: mesma faixa, só com o respiro que a
    primeira ganha do `.secao` acima dela. */
 .avulso.ev2{padding-top:.45rem}
+.avulso input.hr{flex:1;font-family:var(--mono)}
+.evaviso{margin:.45rem 1.1rem 0;padding:.45rem .6rem;border-radius:10px;font-size:.78rem;
+ line-height:1.45;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:var(--ambar)}
+.evaviso b{display:block}
 .avulso button{flex-shrink:0;width:42px;border:1px solid var(--line);border-radius:10px;
   background:var(--surface);color:var(--neon);font-size:1.1rem;font-weight:700;cursor:pointer}
 .vazio-cat{padding:1rem 1.1rem;color:var(--text-dim);font-size:.86rem;line-height:1.5}
@@ -2351,17 +2355,83 @@ _ORC_JS = r"""
                          desc_tipo:it.desc_tipo||"pct",desc_val:parseInt(it.desc_val,10)||0});
     });
     var ev=d.evento||{}, p=function(id,v){var el=$(id);if(el&&v!=null)el.value=v;};
-    p("evdata",ev.data);p("evini",ev.inicio);p("evtipo",ev.tipo);
+    // `evfim` entra aqui junto com os outros: sem ele, abrir no app um orçamento
+    // que o desktop gravou com encerramento e salvar APAGAVA o encerramento — o
+    // campo voltava vazio e o coletarEvento mandava vazio por cima.
+    p("evdata",ev.data);p("evini",ev.inicio);p("evfim",ev.fim);p("evtipo",ev.tipo);
     p("evlocal",ev.local);p("evconv",ev.convidados);
     (d.parcelas||[]).forEach(function(x){parcelas.push(x);});
     var b=$("gerar");if(b)b.textContent="Salvar a proposta";
   }
 
+  // A HORA QUE O SERVIDOR ENTENDE — espelho de finance/agenda._minutos, que é
+  // quem transforma o orçamento em compromisso. Aceita "19", "19:00", "19h",
+  // "19h30", "24:00". O que ele NÃO entende vale o mesmo que campo vazio: a data
+  // não fica segurada. Só que na tela parece preenchido, e é aí que se perde a
+  // data sem ninguém ver.
+  // tests/test_evento_hora.py cruza esta função com a do Python.
+  function horaOk(h){
+    var s=String(h==null?'':h).trim().toLowerCase().replace(/h/g,':').replace(/:+$/,'');
+    if(!s)return false;
+    var p=s.split(':');
+    if(!/^[+-]?\d+$/.test(p[0]))return false;
+    if(p.length>1&&p[1]!==''&&!/^[+-]?\d+$/.test(p[1]))return false;
+    var hh=parseInt(p[0],10), mm=(p.length>1&&p[1]!=='')?parseInt(p[1],10):0;
+    return hh>=0&&hh<=24&&mm>=0&&mm<60;
+  }
+  // Duas horas escritas no mesmo campo ("18:00/23:40", "18:00 às 23:40") — o
+  // improviso de quem não achou onde pôr o fim. Só age quando o Encerramento está
+  // VAZIO, e o resultado aparece nos dois campos pro vendedor conferir: não é
+  // adivinhação calada, é o formulário terminando de arrumar o que ele digitou.
+  function horasNoTexto(t){
+    var achou=String(t==null?'':t).match(/\d{1,2}\s*[:h]\s*\d{0,2}|\d{1,2}\s*h/gi)||[];
+    return achou.map(function(x){return x.replace(/\s+/g,'');}).filter(horaOk);
+  }
+  function partirHoras(){
+    var a=$("evini"), b=$("evfim");
+    if(!a||!b||b.value.trim())return;
+    var hs=horasNoTexto(a.value);
+    if(hs.length===2&&!horaOk(a.value)){a.value=hs[0];b.value=hs[1];avisoHora();}
+  }
+  // AVISA, NÃO BLOQUEIA — mesma régua do desktop (web/painel_servicos): às vezes
+  // se fecha a proposta com a hora ainda a combinar, e travar o botão travaria a
+  // venda. O que muda aqui é que o aviso cobre os DOIS jeitos de não ter hora: em
+  // branco, e escrita de um jeito que o sistema não lê.
+  function avisoHora(){
+    var el=$("evsemhora");if(!el)return;
+    var temData=!!(($("evdata")||{}).value||'').trim();
+    var ini=(($("evini")||{}).value||'').trim();
+    var fim=(($("evfim")||{}).value||'').trim();
+    var msg='';
+    if(temData&&!ini)
+      msg='<b>Sem a hora de início, esta data não entra na agenda.</b>'
+        +'Pode salvar assim — mas a data só fica segurada quando você preencher o Início.';
+    else if(ini&&!horaOk(ini))
+      msg='<b>Não entendi o horário de início.</b>Escreva só a hora — 19:00, 19h '
+        +'ou 19h30. Do jeito que está, a data não fica segurada na agenda.';
+    else if(fim&&!horaOk(fim))
+      msg='<b>Não entendi o horário de encerramento.</b>Escreva só a hora — 24:00, '
+        +'02h ou 23h30.';
+    el.innerHTML=msg;
+    el.style.display=msg?'block':'none';
+  }
+  // Delegado no document, como o resto deste script: os campos podem nem existir
+  // (fora do nicho de eventos) e amarrar ouvinte em cada um é o que o arquivo
+  // evitou desde o começo.
+  function _ehCampoHora(t){return t&&/^ev(data|ini|fim)$/.test(t.id||"");}
+  document.addEventListener("input",function(e){if(_ehCampoHora(e.target))avisoHora();});
+  document.addEventListener("change",function(e){if(_ehCampoHora(e.target))avisoHora();});
+  // blur não borbulha: só chega ao document na fase de CAPTURA (o true no fim).
+  document.addEventListener("blur",function(e){
+    if(e.target&&e.target.id==="evini")partirHoras();
+  },true);
+  avisoHora();
+
   function coletarEvento(){
     if(!O.evento)return null;
     var v=function(id){var el=$(id);return el?el.value.trim():"";};
     var cv=parseInt((v("evconv")||"").replace(/\D/g,''),10);
-    return {data:v("evdata"),inicio:v("evini"),fim:"",tipo:v("evtipo"),
+    return {data:v("evdata"),inicio:v("evini"),fim:v("evfim"),tipo:v("evtipo"),
             local:v("evlocal"),convidados:isNaN(cv)?null:cv};
   }
 
@@ -2467,8 +2537,17 @@ def cockpit_orcamento_montar(request: Request, lead_id: int, orc: int = 0):
              # pro desktop. Só existem no nicho de eventos — nos outros o servidor
              # descarta, e mostrar campo que não grava é mentira de tela.
              + (("<div class=secao><div class=rot>O evento</div></div>"
-                 "<div class=avulso><input id=evdata placeholder='Data (dd/mm/aaaa)' autocomplete=off>"
-                 "<input class=v id=evini placeholder='Início' autocomplete=off></div>"
+                 "<div class=avulso><input id=evdata placeholder='Data (dd/mm/aaaa)' autocomplete=off></div>"
+                 # INÍCIO E ENCERRAMENTO NA MESMA LINHA, e com o formato no
+                 # placeholder. Antes só existia o Início, espremido em 88px ao lado
+                 # da data — e em 01/09/2026 o vendedor da Prime, sem achar onde pôr
+                 # o fim, escreveu "18:00/23:40" no Início. Três tentativas, três
+                 # orçamentos (44, 45, 46), e a hora chegou no banco cortada em 10
+                 # caracteres: "18:00 e en", "18:00/23:4". Um campo que não existe
+                 # não faz o vendedor desistir — faz ele improvisar no campo do lado.
+                 "<div class='avulso ev2'><input class=hr id=evini placeholder='Início (19:00)' autocomplete=off>"
+                 "<input class=hr id=evfim placeholder='Encerramento (24:00)' autocomplete=off></div>"
+                 "<div class=evaviso id=evsemhora style='display:none'></div>"
                  "<div class='avulso ev2'><input id=evtipo placeholder='Tipo (Casamento, 15 anos…)' autocomplete=off>"
                  "<input class=v id=evconv inputmode=numeric placeholder='Convid.' autocomplete=off></div>"
                  "<div class='avulso ev2'><input id=evlocal placeholder='Local' autocomplete=off></div>"

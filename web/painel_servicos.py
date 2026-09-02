@@ -2158,8 +2158,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div id="ev-sem-hora" style="display:none;margin-top:.6rem;font-size:.8rem;line-height:1.5;
        background:var(--ambar-fundo);border:1px solid var(--ambar-borda);
        border-radius:8px;padding:.45rem .6rem;color:var(--amar)">
-    <b>Sem a hora de início, esta data não entra na agenda.</b>
-    <div style="opacity:.85;margin-top:.15rem">Pode salvar assim — mas a data só fica
+    <b id="ev-sem-hora-t">Sem a hora de início, esta data não entra na agenda.</b>
+    <div style="opacity:.85;margin-top:.15rem" id="ev-sem-hora-d">Pode salvar assim — mas a data só fica
       segurada quando você preencher o Início.</div>
   </div>
   <div class="oc-field"><label>Tipo de evento</label>
@@ -2692,17 +2692,51 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
             local:document.getElementById('ev-local').value||'',
             desconto:Math.max(0,Math.min(100,num(document.getElementById('oc-desconto'))))};
   }
-  // O aviso da hora que falta. Aparece só quando há DATA e não há hora: orçamento
-  // sem data nenhuma não prometeu nada e não tem o que avisar.
+  // A HORA QUE O SERVIDOR ENTENDE — espelho de finance/agenda._minutos, que é quem
+  // transforma o orçamento em compromisso. tests/test_evento_hora.py cruza as duas.
+  function horaOk(h){
+    var s=String(h==null?'':h).trim().toLowerCase().replace(/h/g,':').replace(/:+$/,'');
+    if(!s)return false;
+    var p=s.split(':');
+    if(!/^[+-]?\d+$/.test(p[0]))return false;
+    if(p.length>1&&p[1]!==''&&!/^[+-]?\d+$/.test(p[1]))return false;
+    var hh=parseInt(p[0],10), mm=(p.length>1&&p[1]!=='')?parseInt(p[1],10):0;
+    return hh>=0&&hh<=24&&mm>=0&&mm<60;
+  }
+  // O aviso da hora que falta. Aparece só quando há DATA: orçamento sem data
+  // nenhuma não prometeu nada e não tem o que avisar.
+  //
+  // Cobre DOIS casos, e o segundo entrou em 01/09/2026: hora em branco, e hora
+  // escrita de um jeito que o sistema não lê. O segundo é o pior dos dois porque na
+  // tela parece preenchido — o vendedor da Prime escreveu "18:00/23:40" no Início,
+  // `janela_evento` devolveu (None, None), e a data do casamento não ficou segurada
+  // sem nenhum aviso em lugar nenhum.
   function pintarSemHora(){
     var el=document.getElementById('ev-sem-hora');
     if(!el)return;
+    var t=document.getElementById('ev-sem-hora-t');
+    var d=document.getElementById('ev-sem-hora-d');
     var temData=!!(document.getElementById('ev-data')||{}).value;
-    var temHora=!!((document.getElementById('ev-ini')||{}).value||'').trim();
-    el.style.display=(temData&&!temHora)?'block':'none';
+    var ini=((document.getElementById('ev-ini')||{}).value||'').trim();
+    var fim=((document.getElementById('ev-fim')||{}).value||'').trim();
+    var tit='', txt='';
+    if(temData&&!ini){
+      tit='Sem a hora de início, esta data não entra na agenda.';
+      txt='Pode salvar assim — mas a data só fica segurada quando você preencher o Início.';
+    }else if(ini&&!horaOk(ini)){
+      tit='Não entendi o horário de início.';
+      txt='Escreva só a hora — 19:00, 19h ou 19h30. Do jeito que está, a data não fica '
+        +'segurada na agenda.';
+    }else if(fim&&!horaOk(fim)){
+      tit='Não entendi o horário de encerramento.';
+      txt='Escreva só a hora — 24:00, 02h ou 23h30.';
+    }
+    if(t)t.textContent=tit;
+    if(d)d.textContent=txt;
+    el.style.display=tit?'block':'none';
   }
   if(SERVICO_AVULSO){
-    ['ev-data','ev-ini'].forEach(function(id){
+    ['ev-data','ev-ini','ev-fim'].forEach(function(id){
       var el=document.getElementById(id);
       if(el){el.addEventListener('input',pintarSemHora); el.addEventListener('change',pintarSemHora);}
     });

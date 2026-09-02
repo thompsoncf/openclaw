@@ -657,6 +657,16 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
         ev["convidados"] = convidados.get(ev["id"], [])
         ev["conv_resumo"] = cv.resumo(ev["convidados"]) if ev["convidados"] else None
         ev["autor"] = nomes.get(ev.get("membro_id")) or ""
+    # EXCLUIR: quais linhas podem sumir de verdade. Em lote e tolerante — banco
+    # sem `agenda_mensagens_log`, ou qualquer tropeço aqui, esconde o botão em
+    # todas em vez de derrubar a agenda. Errar pro lado de não apagar.
+    try:
+        _apagaveis = ag.excluiveis(pool, conta_id, [e["id"] for e in proximos])
+    except Exception:  # noqa: BLE001
+        _log_ag.warning("agenda: não deu pra saber o que é apagável", exc_info=True)
+        _apagaveis = set()
+    for ev in proximos:
+        ev["pode_excluir"] = ev["id"] in _apagaveis
     cfg = ag.get_config(pool, conta_id)
     feed_url = _feed_url(request, cfg["feed_token"]) if cfg.get("feed_token") else ""
     # Card de compartilhar os convites de um evento (?convite_ev=<id>; aceita também
@@ -695,6 +705,10 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    emp_end=_endereco_da_empresa(pool, conta_id),
                    pode_cadastrar=_equipe.caps_do_papel(
                        ctx.get("papel") or "dono").get("financeiro", False),
+                   # SÓ O DONO APAGA. Cancelar qualquer um do time pode — é um fato
+                   # do negócio e fica no histórico. Apagar tira a linha do banco,
+                   # e essa não é decisão de quem está vendendo.
+                   pode_apagar=((ctx.get("papel") or "dono") == "dono"),
                    rot=(_ROT_EVENTO if vende_data else _ROT_PADRAO),
                    aviso=request.session.pop("agenda_aviso", None))
 
@@ -1004,6 +1018,64 @@ def agenda_desfecho(request: Request, evento_id: int = Form(...), desfecho: str 
         return JSONResponse({"ok": False, "erro": "auth"}, status_code=401)
     ok = ag.marcar_desfecho(get_pool(), ctx["conta_id"], evento_id, desfecho, ag.agora_brt())
     return JSONResponse({"ok": ok})
+
+
+# ================================================================ EXCLUIR
+@router.post("/painel/agenda/excluir")
+def agenda_excluir(request: Request, evento_id: int = Form(...), m: str = Form("")):
+    """Apaga o compromisso de vez. Não é o cancelar — ver `ag.excluir_evento`.
+
+    Dois portões, e os dois recusam calados pro cliente: só o DONO chega aqui, e
+    a trava do módulo decide se aquela linha pode sumir. A tela já esconde o botão
+    onde não pode; esta é a checagem que vale, porque a outra é desenho."""
+    ajax = bool(request.headers.get("x-zaq-ajax"))
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "auth"}, status_code=401) if ajax else redir
+    voltar = f"/painel/agenda?m={m}" if m else "/painel/agenda"
+    if (ctx.get("papel") or "dono") != "dono":
+        msg = "Só o dono apaga compromisso. Pra tirar da agenda, use o cancelar."
+        if ajax:
+            return JSONResponse({"ok": False, "msg": msg}, status_code=403)
+        request.session["agenda_aviso"] = msg
+        return RedirectResponse(voltar, status_code=303)
+    r = ag.excluir_evento(get_pool(), ctx["conta_id"], evento_id)
+    if r["ok"]:
+        msg = "Compromisso apagado."
+    elif r["motivo"] == "sumiu":
+        msg = "Esse compromisso não está mais aqui."
+    else:
+        msg = ("Não dá pra apagar: " + ag.MOTIVOS_NAO_EXCLUI.get(r["motivo"], "tem coisa ligada a ele")
+               + ". Se a data não vai acontecer, o certo é cancelar.")
+    if ajax:
+        return JSONResponse({"ok": r["ok"], "msg": msg})
+    request.session["agenda_aviso"] = msg
+    return RedirectResponse(voltar, status_code=303)
+
+
+# ================================================================ DIA CONFERIDO
+@router.post("/painel/agenda/dia-conferido")
+def agenda_dia_conferido(request: Request, dia: str = Form(...), m: str = Form("")):
+    """"Está certo": encerra a pergunta do choque naquele dia.
+
+    Não apaga, não cancela e não move compromisso nenhum — grava uma marca ao
+    lado, com os ids que estavam lá. Cair uma festa nova no dia traz o alerta de
+    volta sozinho (ver `ag.marcar_dia_conferido`)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    voltar = f"/painel/agenda?m={m}" if m else "/painel/agenda"
+    try:
+        d = date.fromisoformat((dia or "").strip())
+    except ValueError:
+        request.session["agenda_aviso"] = "Não entendi o dia."
+        return RedirectResponse(voltar, status_code=303)
+    n = ag.marcar_dia_conferido(get_pool(), ctx["conta_id"], d,
+                                por=str(ctx.get("membro_id") or ""))
+    request.session["agenda_aviso"] = (
+        f"{d:%d/%m} conferido — os {n} compromissos do dia param de perguntar."
+        if n else f"{d:%d/%m} conferido.")
+    return RedirectResponse(voltar, status_code=303)
 
 
 # ================================================================ CONVIDADO (adicionar depois)
@@ -1484,6 +1556,10 @@ _CSS_CRU = """
 .d-pessoal{background:var(--verde-claro)}.d-empresa{background:#3987e5}.d-fornecedor{background:var(--ambar)}
 .px-x{width:auto;margin:0;background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:1rem;line-height:1;padding:2px 4px;border-radius:6px}
 .px-x:hover{color:#f0917f;background:rgba(224,87,79,.12)}
+/* o lixo é VERMELHO só no hover: em repouso ele não pode gritar mais que o ✕,
+   que é a ação certa em quase todo caso. */
+.px-del{width:auto;margin:0;background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:.95rem;line-height:1;padding:2px 4px;border-radius:6px}
+.px-del:hover{color:var(--coral);background:var(--coral-fundo,#241313)}
 .px-actions{display:flex;gap:2px;flex:0 0 auto}
 .px-rm{width:auto;margin:0;background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:1rem;line-height:1;padding:2px 4px;border-radius:6px}
 .px-rm:hover{color:var(--verde-claro);background:rgba(29,158,117,.12)}
@@ -1646,6 +1722,11 @@ _CSS_CRU = """
 .pend-b{flex:0 0 auto;border:1px solid var(--borda);background:var(--card2);color:var(--txt);border-radius:8px;padding:5px 12px;font-size:.78rem;font-weight:600;text-decoration:none;white-space:nowrap}
 .pend-b.forte{background:var(--verde);color:var(--ink);border-color:var(--verde)}
 .pend-b:hover{border-color:var(--verde)}
+/* o "Está certo" fica DISCRETO de propósito: quando há mesmo um choque, quem
+   deve chamar a atenção é "Abrir o dia". Dois botões com o mesmo peso e um
+   deles calando o alerta é convite pra calar sem olhar. */
+.pend-b.quieto{background:none;color:var(--txt-mut);font-weight:500}
+.pend-b.quieto:hover{color:var(--txt)}
 @media(max-width:560px){.pend-t small{white-space:normal}}
 .share{background:linear-gradient(180deg,rgba(29,158,117,.10),var(--card));border:1px solid var(--verde);border-radius:14px;padding:16px 18px;margin-bottom:18px}
 .share h2{font-size:.95rem;margin:0 0 4px;color:var(--txt)}
@@ -2711,7 +2792,16 @@ document.addEventListener('submit', function(ev){
   fetch(f.action, {method:'POST', headers:{'X-Zaq-Ajax':'1'}, body:new FormData(f)})
     .then(function(r){ return r.json(); })
     .then(function(d){
-      if(tipo==='cancelar'){
+      if(tipo==='excluir'){
+        // some a linha igual ao cancelar. A diferença está no servidor: aqui a
+        // linha não volta, e por isso o erro DIZ O MOTIVO em vez de "não deu".
+        if(d && d.ok){
+          var xid=(f.querySelector('[name=evento_id]')||{}).value;
+          var xrow=f.closest('.px-row'); if(xrow){ xrow.classList.add('saindo'); setTimeout(function(){ xrow.remove(); zaqVazioProximos(); },200); }
+          if(xid) removerEventoDoCalendario(xid);
+          zaqToast('Compromisso apagado.');
+        } else { restore(); zaqToast((d && d.msg) || 'Não consegui apagar.', false); }
+      } else if(tipo==='cancelar'){
         if(d && d.ok){
           var id=(f.querySelector('[name=evento_id]')||{}).value;
           var row=f.closest('.px-row'); if(row){ row.classList.add('saindo'); setTimeout(function(){ row.remove(); zaqVazioProximos(); },200); }
@@ -2774,6 +2864,16 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <small>{% for e in c.eventos %}{{ e.hora }} {{ e.titulo }}{% if e.pre %} (segurado){% endif %}{% if e.quem %} · {{ e.quem }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</small>
       </div>
       <a class="pend-b forte" href="/painel/agenda?m={{ c.mes }}#d{{ c.dia_iso }}">Abrir o dia</a>
+      {# A OUTRA METADE DO ALERTA. "Abrir o dia" serve pra quando há o que
+         resolver; quando não há — visita de manhã e festa à noite, que é a
+         rotina da casa — não havia saída nenhuma, e a linha ficava vermelha pra
+         sempre contra a promessa do próprio cabeçalho. Ver a 194. #}
+      <form method="post" action="/painel/agenda/dia-conferido" style="margin:0"
+            onsubmit="return confirm('Marcar {{ c.dia_rot }} como conferido? Os {{ c.quantos }} compromissos continuam na agenda — só param de aparecer aqui.')">
+        <input type="hidden" name="dia" value="{{ c.dia_iso }}">
+        <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+        <button type="submit" class="pend-b quieto">Está certo</button>
+      </form>
     </div>
     {% endfor %}
     {% if pend.horas %}
@@ -2924,6 +3024,20 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                 <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
                 <button class="px-x" type="submit" title="Cancelar">✕</button>
               </form>
+              {# EXCLUIR ≠ CANCELAR, e por isso são dois botões. Cancelar é um fato do
+                 negócio (a festa não vai acontecer) e a linha fica no histórico;
+                 excluir diz que aquela linha nunca deveria ter existido, e apaga.
+                 Só aparece pro DONO e só onde a trava deixa (ver ag.excluiveis) —
+                 nunca em compromisso com orçamento, sinal, convidado ou mensagem
+                 já enviada. #}
+              {% if e.pode_excluir and pode_apagar %}
+              <form method="post" action="/painel/agenda/excluir" data-ajax="excluir"
+                    onsubmit="return confirm('Apagar “{{ e.titulo }}” de vez? Isso não é cancelar — a linha some da agenda e não volta.')">
+                <input type="hidden" name="evento_id" value="{{ e.id }}">
+                <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+                <button class="px-del" type="submit" title="Excluir de vez">🗑</button>
+              </form>
+              {% endif %}
             </div>
           </div>
           {% else %}
@@ -3237,6 +3351,20 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                 <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
                 <button class="px-x" type="submit" title="Cancelar">✕</button>
               </form>
+              {# EXCLUIR ≠ CANCELAR, e por isso são dois botões. Cancelar é um fato do
+                 negócio (a festa não vai acontecer) e a linha fica no histórico;
+                 excluir diz que aquela linha nunca deveria ter existido, e apaga.
+                 Só aparece pro DONO e só onde a trava deixa (ver ag.excluiveis) —
+                 nunca em compromisso com orçamento, sinal, convidado ou mensagem
+                 já enviada. #}
+              {% if e.pode_excluir and pode_apagar %}
+              <form method="post" action="/painel/agenda/excluir" data-ajax="excluir"
+                    onsubmit="return confirm('Apagar “{{ e.titulo }}” de vez? Isso não é cancelar — a linha some da agenda e não volta.')">
+                <input type="hidden" name="evento_id" value="{{ e.id }}">
+                <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+                <button class="px-del" type="submit" title="Excluir de vez">🗑</button>
+              </form>
+              {% endif %}
             </div>
           </div>
           {% else %}

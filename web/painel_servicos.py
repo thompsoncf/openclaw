@@ -1629,14 +1629,25 @@ def _contexto_de_exemplo(pool, conta_id: int):
     with pool.connection() as c:
         _garantir_tabela(c)
         r = c.execute(
-            """select cliente, cnpj, whatsapp, setup_centavos, numero, evento
+            """select cliente, cnpj, whatsapp, setup_centavos, numero, evento,
+                      empresa, endereco, cep, cidade, uf, cliente_id
                  from orcamentos
                 where conta_id=%s and coalesce(evento->>'data','') <> ''
                 order by id desc limit 1""", (conta_id,)).fetchone()
     if not r:
         return None, ""
     orcamento = {"cliente": r[0], "cnpj": r[1], "whatsapp": r[2],
-                 "setup_centavos": r[3], "numero": r[4], "evento": r[5] or {}}
+                 "setup_centavos": r[3], "numero": r[4], "evento": r[5] or {},
+                 # os cinco abaixo faltavam, e a falta MENTIA: a prévia acusava
+                 # `cliente.endereco` sem valor num orçamento que tinha endereço,
+                 # só porque a consulta não o trazia. Aviso que erra é aviso que
+                 # o dono aprende a ignorar.
+                 "empresa": r[6], "endereco": r[7], "cep": r[8],
+                 "cidade": r[9], "uf": r[10]}
+    # o MESMO completar da folha do cliente: a prévia existe pra antecipar o que
+    # ele vai ver, e uma prévia mais pessimista que o documento real ensina o dono
+    # a desconfiar dela.
+    orcamento = ctr.completar_do_cadastro(pool, conta_id, orcamento, r[11])
     return orcamento, f"orçamento nº {r[4] or '—'} · {r[0] or ''}"
 
 

@@ -79,7 +79,8 @@ def carregar(token: str, pool=None) -> dict | None:
                       o.parcelas, o.status, o.sinal_pago_em,
                       ct.nome, ct.razao_social, ct.nome_fantasia, ct.documento,
                       ct.endereco, ct.bairro, ct.cep, ct.cidade, ct.uf,
-                      ct.telefone, ct.email_empresa, ct.logo_url
+                      ct.telefone, ct.email_empresa, ct.logo_url,
+                      o.cliente_id
                  from orcamentos o join contas ct on ct.id = o.conta_id
                 where o.id=%s and o.conta_id=%s""",
             (ct["orcamento_id"], ct["conta_id"])).fetchone()
@@ -88,7 +89,7 @@ def carregar(token: str, pool=None) -> dict | None:
     (cli, emp_nome, cli_doc, whats, cli_email, cli_tel, cli_end, cli_cep, cli_cid,
      cli_uf, numero, evento, total, parcelas, orc_status, sinal_pago_em,
      c_nome, c_razao, c_fantasia, c_doc, c_end, c_bairro, c_cep, c_cid, c_uf,
-     c_tel, c_email, c_logo) = r
+     c_tel, c_email, c_logo, cliente_id) = r
     evento = evento if isinstance(evento, dict) else {}
     empresa = {"razao_social": c_razao or c_fantasia or c_nome or "",
                "nome_fantasia": c_fantasia or "", "documento": c_doc or "",
@@ -107,6 +108,14 @@ def carregar(token: str, pool=None) -> dict | None:
                  "telefone": cli_tel or "", "endereco": cli_end or "", "cep": cli_cep or "",
                  "cidade": cli_cid or "", "uf": cli_uf or "", "numero": numero,
                  "setup_centavos": int(total or 0), "evento": evento}
+    # O CADASTRO COMPLETA O QUE O ORÇAMENTO NÃO TEM — documento e endereço. É o
+    # que o `cliente_id` sempre prometeu ("a folha relê o cadastro depois", em
+    # web/painel_servicos) e ninguém consumia: a Prime tinha contrato emitido
+    # avisando "campo sem valor: cliente.doc" com o CPF guardado na aba Clientes.
+    # Aqui, ANTES do contexto, pra as cláusulas e o quadro das partes lerem a
+    # mesma coisa — foi de duas leituras do mesmo dado que nasceu o bug do e-mail
+    # que mostrava contrato e mandava proposta.
+    orcamento = ctr.completar_do_cadastro(pool, ct["conta_id"], orcamento, cliente_id)
 
     # "este orçamento pede entrada?" sai do mesmo lugar que a folha do cliente usa
     # pra prometer o valor do sinal — duas leituras diferentes seriam dois números.

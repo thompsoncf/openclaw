@@ -61,6 +61,13 @@ create table orcamentos (id bigserial primary key, conta_id bigint, cliente text
   desconto_centavos bigint not null default 0,
   contrato_texto jsonb, contrato_assinado_em timestamptz,
   contrato_assinado_por text, contrato_assinado_doc text, contrato_assinado_ip text);
+-- a aba Clientes. A folha do contrato completa o documento e o endereço daqui
+-- quando o orçamento não os tem — é o que o `cliente_id` acima sempre prometeu.
+-- Sem estas duas tabelas o `completar_do_cadastro` cai no próprio try/except e o
+-- teste passaria sem ter exercitado nada.
+create table pessoas (id bigserial primary key, nome text, cpf text, cnpj text);
+create table clientes (id bigserial primary key, dono_id bigint, pessoa_id bigint,
+  nome text, endereco text, cep text, cidade text, uf text);
 create table contrato_modelo (conta_id bigint primary key, clausulas jsonb not null
   default '[]'::jsonb, regras jsonb not null default '{}'::jsonb,
   atualizado_em timestamptz default now(), atualizado_por text default '');
@@ -616,3 +623,92 @@ def test_a_pagina_avisa_quando_um_campo_ficou_sem_valor(pool):
     _orcamento(pool, status="aprovada")
     html = cp.contrato_publico(_Req(), CT_TOKEN).body.decode()
     assert "Campos sem valor neste contrato" in html and "preco.nao-existe" in html
+
+
+# ─────────────────────── o cadastro completa o que falta no orçamento
+
+def _com_cadastro(pool, *, cpf="07714809388", endereco="RUA DAS FLORES, 100",
+                  cidade="Teresina", uf="PI", dono=CONTA):
+    """Vincula o orçamento a um cliente cadastrado — como a produção faz ao salvar
+    (`_espelhar_cliente` grava `cliente_id`)."""
+    with pool.connection() as c:
+        pid = c.execute("insert into pessoas (nome, cpf) values ('Claudia',%s) returning id",
+                        (cpf,)).fetchone()[0]
+        cid = c.execute(
+            """insert into clientes (dono_id, pessoa_id, nome, endereco, cep, cidade, uf)
+               values (%s,%s,'Claudia',%s,'64000000',%s,%s) returning id""",
+            (dono, pid, endereco, cidade, uf)).fetchone()[0]
+        c.execute("update orcamentos set cliente_id=%s where conta_id=%s", (cid, CONTA))
+        c.commit()
+    return cid
+
+
+def _so_com_doc(pool):
+    with pool.connection() as c:
+        c.execute("update contrato_modelo set clausulas=%s::jsonb where conta_id=%s",
+                  (json.dumps([{"titulo": "C1",
+                                "corpo": "{cliente.nome}, CPF/CNPJ {cliente.doc}, "
+                                         "em {cliente.endereco}."}]), CONTA))
+        c.commit()
+
+
+def test_a_folha_completa_o_documento_e_o_endereco_do_cadastro(pool):
+    """O CASO DA PRODUÇÃO (Prime, orçamento 18): o contrato avisava "campo sem
+    valor: cliente.doc" com o CPF guardado na aba Clientes, e o orçamento já
+    apontava pro cadastro. A função certa não bastava — faltava a folha chamá-la."""
+    _so_com_doc(pool)
+    _orcamento(pool, status="aprovada")
+    _com_cadastro(pool)
+
+    d = _ct(pool)
+
+    assert d["faltas"] == [], f"ainda acusa falta: {d['faltas']}"
+    assert "07714809388" in d["clausulas"][0]["corpo"]
+    assert "RUA DAS FLORES, 100" in d["clausulas"][0]["corpo"]
+    # e o quadro das PARTES lê o mesmo dado — duas leituras divergentes do mesmo
+    # fato já produziram o e-mail que mostrava contrato e mandava proposta
+    assert "077" in d["contratante"]["doc"]
+    assert "RUA DAS FLORES, 100" in d["contratante"]["endereco"]
+
+
+def test_sem_cadastro_a_folha_continua_avisando(pool):
+    """Trilho: o aviso não pode ter sumido por completar com nada."""
+    _so_com_doc(pool)
+    _orcamento(pool, status="aprovada")
+
+    d = _ct(pool)
+    assert "cliente.doc" in d["faltas"]
+
+
+def test_a_folha_nao_puxa_cadastro_de_outra_conta(pool):
+    _so_com_doc(pool)
+    _orcamento(pool, status="aprovada")
+    _com_cadastro(pool, dono=CONTA + 777)
+
+    d = _ct(pool)
+    assert "cliente.doc" in d["faltas"], "trouxe o cadastro de outra empresa"
+
+
+def test_documento_do_orcamento_continua_vencendo_na_folha(pool):
+    _so_com_doc(pool)
+    _orcamento(pool, status="aprovada")
+    _com_cadastro(pool, cpf="07714809388")
+    with pool.connection() as c:
+        c.execute("update orcamentos set cnpj='111.222.333-44' where conta_id=%s", (CONTA,))
+        c.commit()
+
+    d = _ct(pool)
+    assert "111.222.333-44" in d["clausulas"][0]["corpo"]
+    assert "07714809388" not in d["clausulas"][0]["corpo"]
+
+
+def test_contrato_assinado_nao_e_reescrito_pelo_cadastro(pool):
+    """O texto de um contrato assinado é CONGELADO. Completar do cadastro depois
+    da assinatura mudaria um documento que já tem assinatura em cima."""
+    _so_com_doc(pool)
+    _orcamento(pool, status="aprovada", assinado=True)
+    _com_cadastro(pool)
+
+    d = _ct(pool)
+    assert d["clausulas"] == [{"titulo": "CONGELADA", "corpo": "texto de ontem"}]
+    assert d["faltas"] == []

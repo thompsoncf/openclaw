@@ -535,11 +535,24 @@ function comContaDoBaileys (contaId, base) {
       // só REBAIXA. Se o Baileys já tivesse logado isso em debug/trace, forçar
       // 'warn' seria SUBIR o nível — o oposto do que este bloco existe pra fazer.
       if (aindaTemRetry && (n === 'error' || n === 'fatal')) nivelFinal = 'warn'
-      if (!aindaTemRetry &&
-          contarFalhaDeDecifrar(contaId, agora, DECIFRAR_TETO, DECIFRAR_JANELA_MS)) {
-        // não dá await: quem chama é o logger, no meio do processamento da mensagem
-        abrirDisjuntor(contaId).catch((e) =>
-          log.error({ contaId, e: String(e) }, 'disjuntor: falhou ao abrir'))
+      if (!aindaTemRetry) {
+        // O RETRY DAQUELA MENSAGEM ACABOU. O Baileys já pediu reenvio
+        // MAX_RETRY_DECIFRAR vezes e as três falharam: a sessão com ESTE contato
+        // não serve mais, e agora se sabe qual é — coisa que o 500 nunca disse.
+        // Sem await de propósito, igual ao disjuntor logo abaixo: quem chama é o
+        // logger, no meio do processamento da mensagem.
+        // `participant` primeiro: em grupo o remoteJid é o GRUPO, e quem não
+        // decifra é o membro que mandou. Mirar o grupo não consertaria contato
+        // nenhum. Em conversa de um pra um o participant não vem, e o remoteJid
+        // já é a pessoa.
+        limparSessaoDoPeer(contaId,
+          (obj.key && (obj.key.participant || obj.key.remoteJid)), 'retry esgotado')
+          .catch((e) => log.error({ contaId, e: String(e) },
+            'limpeza cirúrgica de sessão falhou'))
+        if (contarFalhaDeDecifrar(contaId, agora, DECIFRAR_TETO, DECIFRAR_JANELA_MS)) {
+          abrirDisjuntor(contaId).catch((e) =>
+            log.error({ contaId, e: String(e) }, 'disjuntor: falhou ao abrir'))
+        }
       }
     }
     // o contaId entra no objeto (vira coluna no espelho, ver _contaDoLog) sem
@@ -1553,9 +1566,93 @@ async function apagarRetratoDaSessao (contaId) {
 // e ninguém precisa pegar o celular. Pre-key, app-state, lidmap e a chave da agenda
 // também ficam: o libsignal reconstrói sessão sozinho a partir do pre-key, mas sem
 // `creds` seria pareamento novo, que é justamente o que a regra da casa proíbe.
+//
+// ── E POR QUE ELA NÃO É MAIS AUTOMÁTICA (02/09/2026) ────────────────────────
+//
+// O conserto manual de 24/08 funcionou. Automatizá-lo no 500 foi o erro, e o
+// dado de produção é este:
+//
+//   26/08 10:47Z  o conserto automático vai ao ar
+//   26/08 11:18Z  o Rawilson pareia a conta 23 (o TERCEIRO pareamento)
+//   26/08 14:35Z  última mensagem. Durou 3h18. Sete dias de silêncio desde então.
+//
+// Em 02/09, nas 48h de log: 65 conexões (mais que a 34, saudável), ZERO
+// messages.upsert, ZERO entradas repassadas, e a limpeza rodando 27 vezes — mais
+// 20 barradas pela trava de frequência. Sete dias apagando sessão de hora em hora
+// não trouxeram a conta de volta.
+//
+// O erro é de CATEGORIA. O 500 é evento de CONEXÃO: o WhatsApp diz que a sessão do
+// stream não presta. Ele não diz — não tem como dizer — que a sessão com CADA UM
+// dos interlocutores está podre. Apagar todas por causa dele é responder a um
+// sintoma do stream destruindo o estado de centenas de conversas: a conta 23 tem
+// 153 sender-keys (é cheia de grupo), e cada limpeza rasga o ratchet com todos eles
+// de uma vez. Quem está do outro lado não fica sabendo e continua cifrando com o
+// ratchet velho.
+//
+// O sinal que REALMENTE aponta um interlocutor é a falha de decifragem, que vem
+// com o remoteJid. É nela que a limpeza cirúrgica se pendura — ver
+// `limparSessaoDoPeer`. Esta função aqui continua existindo porque como ferramenta
+// MANUAL ela é boa (foi ela que salvou a conta em 24/08); o que mudou é que ela
+// não dispara mais sozinha. Pra religar o comportamento antigo:
+// WA_QR_LIMPAR_SESSAO_TUDO=SIM.
 const LIMPAR_SESSAO_ESPERA_MS = parseInt(
   process.env.WA_QR_LIMPAR_SESSAO_ESPERA_MS || '3600000', 10)
 const ultimaLimpezaDeSessao = new Map()
+
+// Desligado por padrão desde 02/09/2026 — ver o bloco acima.
+const LIMPAR_TUDO_NO_500 = (process.env.WA_QR_LIMPAR_SESSAO_TUDO || '') === 'SIM'
+
+// A limpeza CIRÚRGICA: só a sessão do interlocutor cuja mensagem esgotou o retry.
+//
+// Aqui existe interlocutor identificado, o que no 500 não existia. E o gatilho é
+// prova, não palpite: o Baileys já pediu reenvio MAX_RETRY_DECIFRAR vezes e as três
+// tentativas falharam — aquela sessão específica não serve mais, e é a única que se
+// apaga. Quem estava conversando bem continua conversando.
+const ultimaLimpezaDePeer = new Map()
+
+// "5586...@s.whatsapp.net", "1013...@lid", "5586...:33@s.whatsapp.net" -> "5586..."
+// O nome do registro é `session-<usuario>.<dispositivo>` (ver auth-db.js), então é o
+// usuário que casa a família toda de dispositivos daquele contato.
+function usuarioDoJid (jid) {
+  const s = String(jid || '')
+  const arroba = s.indexOf('@')
+  if (arroba < 0) return ''
+  // GRUPO NÃO TEM SESSÃO DE CONTATO. O que o libsignal guarda pra grupo é
+  // sender-key, com outro nome; e o número à esquerda do @g.us é o do grupo, que
+  // por acaso também é só dígito. Sem este corte, a limpeza miraria
+  // 'session-<id do grupo>.%' — não conserta ninguém e ainda dá a impressão de
+  // ter agido. Em grupo, quem falha é o `participant`, e é ele que chega aqui.
+  if (s.endsWith('@g.us') || s.endsWith('@broadcast') || s.endsWith('@newsletter')) return ''
+  let u = s.slice(0, arroba)
+  const doisPontos = u.indexOf(':')
+  if (doisPontos >= 0) u = u.slice(0, doisPontos)
+  // só dígitos: além de ser o formato real, fecha a porta pra '%' e '_' entrarem
+  // no LIKE e a limpeza cirúrgica virar limpeza geral por acidente
+  return /^[0-9]+$/.test(u) ? u : ''
+}
+
+async function limparSessaoDoPeer (contaId, jid, motivo) {
+  const usuario = usuarioDoJid(jid)
+  if (!usuario) return 0
+  const chave = contaId + ':' + usuario
+  const agora = Date.now()
+  const ultima = ultimaLimpezaDePeer.get(chave) || 0
+  if (agora - ultima < LIMPAR_SESSAO_ESPERA_MS) return 0
+  ultimaLimpezaDePeer.set(chave, agora)
+  try {
+    const r = await pool.query(
+      "delete from wa_qr_auth where conta_id=$1 and arquivo like 'session-' || $2 || '.%'",
+      [contaId, usuario])
+    log.warn({ contaId, jid, motivo, apagadas: r.rowCount },
+      'sessão deste contato não decifra mais — apagada só a dele, pra ela ser ' +
+      'refeita no próximo contato (as outras conversas ficam intactas)')
+    return r.rowCount
+  } catch (e) {
+    log.error({ contaId, jid, motivo, e: String((e && e.message) || e) },
+      'não consegui apagar a sessão deste contato (segue normal)')
+    return 0
+  }
+}
 
 async function limparSessoesSignal (contaId, motivo) {
   // Trava de frequência: num flapping de 500 o religamento vem de 2,5 em 2,5s, e
@@ -2779,7 +2876,23 @@ async function iniciarSessao (contaId) {
         // apagar o banco com o socket ainda de pé não adianta — a encarnação
         // seguinte é que abre um store novo, que vai ler o banco já limpo.
         if (code === DisconnectReason.badSession) {
-          await limparSessoesSignal(contaId, 'badSession(500)')
+          // NÃO apaga mais as sessões aqui — ver o bloco de limparSessoesSignal.
+          // O 500 é do STREAM e não aponta interlocutor; quem aponta é a falha de
+          // decifragem, e é lá que a limpeza cirúrgica mora agora. O log fica,
+          // porque perder o sinal seria trocar um erro por uma cegueira.
+          //
+          // Sem `else` de propósito: o teste do fechamento de socket
+          // (tests/test_wa_qr_logout_fecha_socket.py) acha o começo do ramo de
+          // reconexão procurando a última abertura de else antes do religamento. Um
+          // else aninhado aqui puxaria essa marca pra dentro deste bloco e esconderia
+          // dela o descartarSocket. E o comentário não pode ESCREVER a marca: a
+          // primeira versão dele escrevia, e a busca casou no comentário.
+          log.warn({ contaId, limparTudo: LIMPAR_TUDO_NO_500 },
+            'badSession(500): religando sem apagar sessão — a limpeza agora é por ' +
+            'contato, no esgotamento do retry (WA_QR_LIMPAR_SESSAO_TUDO=SIM volta o antigo)')
+          if (LIMPAR_TUDO_NO_500) {
+            await limparSessoesSignal(contaId, 'badSession(500)')
+          }
         }
         setTimeout(() => {
           iniciarSessao(contaId).catch((e) => log.error({ contaId, e: String(e) }, 'reconexão automática falhou'))
@@ -3597,4 +3710,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

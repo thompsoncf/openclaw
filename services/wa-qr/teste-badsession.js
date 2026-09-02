@@ -14,7 +14,23 @@
 //     entrada por dia: 235 → 76 → 62 → 0   (três dias até morrer de vez)
 //
 // Apagar à mão os 187 'session-*' e religar levou o Bad MAC a 0/h e os fechamentos
-// a 0. É esse conserto que o limparSessoesSignal automatiza.
+// a 0. É esse conserto que o limparSessoesSignal automatizou.
+//
+// ── 02/09/2026: A AUTOMAÇÃO FOI DESLIGADA, e este teste virou a prova disso ──
+//
+// O conserto manual foi bom; automatizá-lo no 500 foi o erro. A conta 23 foi
+// pareada 31 minutos DEPOIS do deploy da automação e morreu 3h18 depois — e
+// continuou morta por sete dias, com a limpeza rodando 27 vezes em 48h.
+//
+// O 500 é evento de CONEXÃO e não aponta interlocutor nenhum; apagar a sessão de
+// todos por causa dele rasga o ratchet de centenas de conversas de uma vez (a
+// conta 23 tem 153 sender-keys). Quem aponta interlocutor é a falha de decifragem,
+// e é lá que a limpeza mora agora — cirúrgica, uma sessão só. Ver
+// teste-sessao-cirurgica.js.
+//
+// A função geral continua existindo como ferramenta MANUAL, e os testes dela
+// continuam valendo: o que este arquivo passa a fixar é que ela NÃO dispara mais
+// sozinha no 500.
 //
 // O que o teste protege, que é onde isso vira desastre se quebrar:
 //
@@ -170,11 +186,22 @@ const contar = async (contaId, like) => (await pool.query(
 
   // ── trava de leitura do fonte: o handler tem que chamar isso ─────────────
   const src = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8')
-  t('o close handler trata badSession',
-    /if \(code === DisconnectReason\.badSession\)\s*\{\s*await limparSessoesSignal/.test(src))
+  t('o close handler continua reconhecendo o badSession',
+    src.indexOf('code === DisconnectReason.badSession') > 0)
+  t('mas NÃO apaga mais tudo sozinho no 500 (o erro de 26/08)',
+    !/if \(code === DisconnectReason\.badSession\)\s*\{\s*await limparSessoesSignal/.test(src))
+  t('a limpeza geral só volta por escape explícito',
+    /if \(LIMPAR_TUDO_NO_500\)\s*\{\s*await limparSessoesSignal/.test(src) &&
+    /WA_QR_LIMPAR_SESSAO_TUDO \|\| ''\) === 'SIM'/.test(src))
+  // Sem else aninhado: o teste do fechamento de socket ancora o ramo de reconexão
+  // no ÚLTIMO '} else {' antes do religamento, e um else aqui roubaria a âncora.
+  t('o ramo do 500 não usa else (não rouba a âncora do teste do socket)',
+    !/DisconnectReason\.badSession[\s\S]{0,900}\} else \{[\s\S]{0,200}setTimeout/.test(src))
+  t('o 500 continua aparecendo no log (desligar não pode virar cegueira)',
+    /badSession\(500\): religando sem apagar sessão/.test(src))
   const iBad = src.indexOf('code === DisconnectReason.badSession')
   const iRelig = src.indexOf('iniciarSessao(contaId).catch', iBad)
-  t('a limpeza vem ANTES do religamento (o cache do store é por socket)',
+  t('o escape, quando ligado, vem ANTES do religamento (o cache do store é por socket)',
     iBad > 0 && iRelig > iBad)
   t('a limpeza mira só session- (nunca creds)',
     /delete from wa_qr_auth where conta_id=\$1 and arquivo like 'session-%'/.test(src))

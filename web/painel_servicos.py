@@ -1034,6 +1034,10 @@ def painel_servicos_lista(request: Request):
         # oferece "Fechar negócio" sozinho. Errar pra menos aqui só deixa a linha
         # como estava; errar pra mais oferece fechar negócio onde falta papel.
         _nicho_tem_contrato = True
+    # A ORDEM QUE ESTA EMPRESA ESCOLHEU (migração 194). Lido UMA vez, fora do laço:
+    # é parâmetro da conta, não da linha — dentro daria o mesmo N+1 que já custou
+    # caro na Agenda. `assina_antes_do_sinal` falha fechada na ordem de hoje.
+    _assina_antes = _ctr.assina_antes_do_sinal(get_pool(), conta[0])
     # O QUE A LINHA DIZ — selos de pendência, a ação principal e o resumo do que
     # já foi. Montado aqui, depois de `itens`, porque lê o que acabou de ser
     # calculado (o estado da data, os pagamentos) em vez de recalcular.
@@ -1045,7 +1049,8 @@ def painel_servicos_lista(request: Request):
             contrato_assinado=it["contrato_assinado"],
             plano_difere=it["plano_difere"], aprovada_por=it["aprovada_por"],
             nunca_enviada=not it["enviado_em"],
-            contrato_enviado_em=it["_contrato_enviado_em"], tem_contrato=_nicho_tem_contrato)
+            contrato_enviado_em=it["_contrato_enviado_em"], tem_contrato=_nicho_tem_contrato,
+            assinar_antes_do_sinal=_assina_antes)
         # o NOME, resolvido no servidor pela mesma função pura que os testes cobrem.
         # A tela não decide mais quem é o cliente desta linha.
         it.update(vendas.titulo_do_funil(
@@ -1682,6 +1687,9 @@ def painel_servicos_contrato(request: Request, padrao: int = 0):
     return JSONResponse({
         "clausulas": modelo["clausulas"], "regras": modelo["regras"],
         "novo": modelo["novo"], "campos": ctr.campos_disponiveis(catalogo),
+        # `padrao=1` é o botão "restaurar", e ele mexe só nas CLÁUSULAS — a ordem
+        # que a empresa escolheu não é texto de contrato e não se restaura junto.
+        "assinar_antes_do_sinal": ctr.assina_antes_do_sinal(pool, conta[0]),
         "resumo": {
             "n": len(modelo["clausulas"]),
             "em": modelo["atualizado_em"].strftime("%d/%m") if modelo.get("atualizado_em") else "",
@@ -1697,6 +1705,10 @@ def painel_servicos_contrato(request: Request, padrao: int = 0):
 class ContratoIn(BaseModel):
     clausulas: list[dict] = []
     regras: dict = {}
+    # a ordem que a empresa escolhe (194). Default False = a ordem de hoje, então
+    # uma porta antiga que não mande o campo não desliga o que o dono ligou... e é
+    # por isso que a tela SEMPRE manda o valor atual, nunca só quando muda.
+    assinar_antes_do_sinal: bool = False
 
 
 @router.post("/painel/servicos/contrato/salvar")
@@ -1706,7 +1718,8 @@ def painel_servicos_contrato_salvar(request: Request, dados: ContratoIn):
         return erro
     membro_id, _papel = _ator(request)
     r = ctr.salvar_modelo(get_pool(), conta[0], dados.clausulas, dados.regras,
-                          por=str(membro_id or "dono"))
+                          por=str(membro_id or "dono"),
+                          assinar_antes_do_sinal=dados.assinar_antes_do_sinal)
     return JSONResponse(r)
 
 
@@ -3946,7 +3959,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   // ausência do #ct-box é a checagem.
   var ctBox=document.getElementById('ct-box');
   if(ctBox){ (function(){
-    var CAMPOS=[], REGRAS={}, ultimo=null;   // ultimo = textarea que teve foco
+    var CAMPOS=[], REGRAS={}, ANTES=false, ultimo=null;   // ultimo = textarea que teve foco
     var corpo=document.getElementById('ct-corpo'), seta=document.getElementById('ct-seta');
     var LEMBRA='zaq_ct_aberto';
 
@@ -4061,7 +4074,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     }
 
     function desenhar(d){
-      CAMPOS=d.campos||[]; REGRAS=d.regras||{};
+      CAMPOS=d.campos||[]; REGRAS=d.regras||{}; ANTES=!!d.assinar_antes_do_sinal;
       resumir(d);
       ctBox.innerHTML=
         (d.novo?'<p class="mut" style="font-size:.84rem;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:.5rem .7rem">Este é um modelo inicial de contrato de locação. Ajuste ao que a sua empresa pratica e salve.</p>':'')
@@ -4073,6 +4086,19 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         +'<div style="background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.8rem">'
         +'<div class="mut" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.5rem">Números da casa — é daqui que os campos {regra.*} saem</div>'
         +'<div id="ct-regras" class="mini-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.5rem"></div></div>'
+        // A ORDEM (194) fica FORA do bloco dos números: aquilo é o que preenche
+        // {regra.*} nas cláusulas, isto muda o que o funil pede primeiro. Junto,
+        // pareceria mais um campo de texto do contrato.
+        +'<div style="background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.8rem">'
+        +'<div class="mut" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.5rem">Ordem de cobrança</div>'
+        +'<label style="display:flex;gap:.5rem;align-items:flex-start;cursor:pointer">'
+        +'<input type="checkbox" id="ct-antes" style="margin-top:.25rem"'+(ANTES?' checked':'')+'>'
+        +'<span style="font-size:.85rem">Pedir a <b>assinatura do contrato antes</b> da entrada'
+        +'<span class="mut" style="display:block;font-size:.76rem;margin-top:.15rem">'
+        +'O funil passa a mostrar “Mandar o contrato pra assinar” antes de “Sinal recebido”, '
+        +'e a folha do cliente diz que a entrada vem depois de assinar. '
+        +'A data continua só ficando reservada com a entrada (cláusula 4.1), e o prazo da '
+        +'pré-reserva segue contando da aprovação.</span></span></label></div>'
         +'<div style="display:flex;gap:.45rem;flex-wrap:wrap"><button type="button" id="ct-salvar" class="oc-btn oc-btn-g" style="width:auto">Salvar contrato</button>'
         +'<button type="button" id="ct-previa" class="oc-pill">Pré-visualizar</button>'
         +'<button type="button" id="ct-padrao" class="oc-pill">Restaurar modelo padrão</button></div>'
@@ -4117,7 +4143,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       var b=document.getElementById('ct-salvar'), t=b.textContent; b.textContent='Salvando...';
       fetch('/painel/servicos/contrato/salvar',{method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({clausulas:clausulas(),regras:regras()})})
+        // o valor VAI SEMPRE, mesmo sem ter sido tocado: o servidor tem default
+        // false, e omitir o campo desligaria a ordem que o dono ligou ontem.
+        body:JSON.stringify({clausulas:clausulas(),regras:regras(),
+          assinar_antes_do_sinal:!!(document.getElementById('ct-antes')||{}).checked})})
         .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
         .then(function(res){
           b.textContent=t;
@@ -4139,7 +4168,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       var b=document.getElementById('ct-previa'), t=b.textContent; b.textContent='Montando...';
       fetch('/painel/servicos/contrato/previa',{method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({clausulas:clausulas(),regras:regras()})})
+        // o valor VAI SEMPRE, mesmo sem ter sido tocado: o servidor tem default
+        // false, e omitir o campo desligaria a ordem que o dono ligou ontem.
+        body:JSON.stringify({clausulas:clausulas(),regras:regras(),
+          assinar_antes_do_sinal:!!(document.getElementById('ct-antes')||{}).checked})})
         .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
         .then(function(res){
           b.textContent=t;

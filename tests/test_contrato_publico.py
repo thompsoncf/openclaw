@@ -70,7 +70,11 @@ create table clientes (id bigserial primary key, dono_id bigint, pessoa_id bigin
   nome text, endereco text, cep text, cidade text, uf text);
 create table contrato_modelo (conta_id bigint primary key, clausulas jsonb not null
   default '[]'::jsonb, regras jsonb not null default '{}'::jsonb,
-  atualizado_em timestamptz default now(), atualizado_por text default '');
+  atualizado_em timestamptz default now(), atualizado_por text default '',
+  -- 194: a ordem entre o sinal e a assinatura, escolhida por conta. Muda o que
+  -- esta folha promete ao cliente DEPOIS de assinar (a cláusula 4.1 é a mesma
+  -- nas duas ordens).
+  assinar_antes_do_sinal boolean not null default false);
 -- 164: o contrato virou documento próprio. As colunas velhas em `orcamentos`
 -- continuam acima só pra provar que ninguém as lê mais.
 create table contratos (id bigserial primary key, conta_id bigint not null,
@@ -712,3 +716,50 @@ def test_contrato_assinado_nao_e_reescrito_pelo_cadastro(pool):
     d = _ct(pool)
     assert d["clausulas"] == [{"titulo": "CONGELADA", "corpo": "texto de ontem"}]
     assert d["faltas"] == []
+
+
+# ───────────── a ordem que a empresa escolheu (194) muda o que a folha promete
+
+def _ordem_nova(pool, ligado=True):
+    with pool.connection() as c:
+        c.execute("update contrato_modelo set assinar_antes_do_sinal=%s where conta_id=%s",
+                  (ligado, CONTA))
+        c.commit()
+
+
+def test_por_padrao_a_folha_diz_que_a_reserva_vem_com_o_pagamento(pool):
+    _orcamento(pool, status="aprovada")
+    html = cp.contrato_publico(_Req(), CT_TOKEN).body.decode()
+    assert "a reserva vem com o pagamento" in html
+    assert "manda os dados da entrada" not in html
+
+
+def test_com_a_ordem_nova_a_folha_diz_o_que_vem_DEPOIS_de_assinar(pool):
+    """O cliente que assina primeiro precisa saber qual é o passo seguinte. Dizer
+    só "a reserva vem com o pagamento" o deixaria sem saber o que fazer."""
+    _orcamento(pool, status="aprovada")
+    _ordem_nova(pool)
+    html = cp.contrato_publico(_Req(), CT_TOKEN).body.decode()
+    assert "manda os dados da entrada" in html
+    assert "a reserva vem com o pagamento" not in html
+
+
+def test_a_clausula_4_1_e_citada_nas_duas_ordens(pool):
+    """A REGRA NÃO MUDA — a data firma com o dinheiro nos dois casos. O que muda é
+    a ordem em que a empresa pede as duas coisas."""
+    _orcamento(pool, status="aprovada")
+    for ligado in (False, True):
+        _ordem_nova(pool, ligado)
+        html = cp.contrato_publico(_Req(), CT_TOKEN).body.decode()
+        assert "4.1" in html
+        assert "definitivamente reservada" in html
+
+
+def test_com_o_sinal_ja_pago_nenhuma_das_duas_frases_aparece(pool):
+    """O aviso é sobre o que FALTA. Pago, não falta nada — em qualquer ordem."""
+    _orcamento(pool, status="aprovada", sinal_pago=True)
+    for ligado in (False, True):
+        _ordem_nova(pool, ligado)
+        html = cp.contrato_publico(_Req(), CT_TOKEN).body.decode()
+        assert "a reserva vem com o pagamento" not in html
+        assert "manda os dados da entrada" not in html

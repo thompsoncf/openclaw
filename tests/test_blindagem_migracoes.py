@@ -42,6 +42,15 @@ create table app_config (chave text primary key, valor text not null,
 -- poder apontar pra um MEMBRO — sem ela declarada aqui, a 185 quebraria só neste
 -- teste. Na forma exata da 041: conta_id NOT NULL e sem membro_id, que é o estado
 -- de onde a 185 parte em produção.
+-- contrato_modelo vem da 163 (dentro do baseline). A 194 acrescenta a ela a
+-- coluna da ordem entre sinal e assinatura — sem a tabela declarada aqui, a 194
+-- quebraria só neste teste. Na forma anterior à 194, que é de onde ela parte em
+-- produção.
+create table contrato_modelo (conta_id bigint primary key references contas(id),
+  clausulas jsonb not null default '[]'::jsonb,
+  regras jsonb not null default '{}'::jsonb,
+  atualizado_em timestamptz not null default now(),
+  atualizado_por text not null default '');
 create table tokens_reset_senha (token text primary key,
   conta_id bigint not null references contas(id),
   criado_em timestamptz not null default now(),

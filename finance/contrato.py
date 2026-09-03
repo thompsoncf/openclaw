@@ -468,28 +468,65 @@ def carregar_modelo(pool, conta_id: int) -> dict:
                                  where mb.id = case when m.atualizado_por ~ '^[0-9]+$'
                                                     then m.atualizado_por::bigint end),
                                (select ct.nome from contas ct where ct.id = m.conta_id), '')
+                      , m.assinar_antes_do_sinal
                  from contrato_modelo m where m.conta_id=%s""", (conta_id,)).fetchone()
+    # o PARÂMETRO sobrevive ao modelo em branco: quem ligou a ordem nova e ainda não
+    # escreveu cláusula nenhuma continua com a ordem que escolheu.
+    antes = bool(r[4]) if r else False
     if not r or not r[0]:
         return {"clausulas": modelo_padrao(), "regras": dict(REGRAS_PADRAO), "novo": True,
-                "atualizado_em": None, "atualizado_por": ""}
+                "atualizado_em": None, "atualizado_por": "",
+                "assinar_antes_do_sinal": antes}
     return {"clausulas": r[0], "regras": _regras({"regras": r[1]}), "novo": False,
-            "atualizado_em": r[2], "atualizado_por": r[3] or ""}
+            "atualizado_em": r[2], "atualizado_por": r[3] or "",
+            "assinar_antes_do_sinal": antes}
 
 
-def salvar_modelo(pool, conta_id: int, clausulas, regras, por: str = "") -> dict:
+def assina_antes_do_sinal(pool, conta_id: int) -> bool:
+    """Esta conta pede a assinatura do contrato ANTES do sinal? (migração 194)
+
+    POR QUE UMA FUNÇÃO SÓ PRA ISSO. O funil precisa do parâmetro a cada renderização
+    da lista e não quer o modelo inteiro — cláusulas e regras — só pra saber a
+    ordem de dois botões. E a tela do contrato precisa dele junto do modelo. Uma
+    leitura, dois chamadores, nenhuma cópia da regra.
+
+    FALHA FECHADA: sem a coluna, sem linha ou com o banco fora, devolve False — a
+    ordem de hoje. Um parâmetro que não pôde ser lido não pode mudar o fluxo de
+    ninguém, e menos ainda inverter a ordem em que a empresa cobra o cliente.
+    """
+    try:
+        with pool.connection() as c:
+            r = c.execute("select assinar_antes_do_sinal from contrato_modelo "
+                          "where conta_id=%s", (conta_id,)).fetchone()
+    except Exception as e:  # noqa: BLE001 — base sem a 194 ainda
+        _log.warning("não deu pra ler assinar_antes_do_sinal da conta %s: %s: %s",
+                     conta_id, type(e).__name__, e)
+        return False
+    return bool(r and r[0])
+
+
+def salvar_modelo(pool, conta_id: int, clausulas, regras, por: str = "",
+                  assinar_antes_do_sinal: bool = False) -> dict:
     """Grava o modelo inteiro. Não versiona de propósito: o histórico que importa
-    é o dos contratos ASSINADOS, e esse mora congelado em cada orçamento."""
+    é o dos contratos ASSINADOS, e esse mora congelado em cada orçamento.
+
+    `assinar_antes_do_sinal` é a ORDEM que a empresa escolheu (194) e vem junto
+    porque é o mesmo botão Salvar da mesma tela — pedir um segundo clique pra ela
+    faria o dono ligar a ordem nova e sair achando que ligou, quando não salvou."""
     limpas = [{"titulo": str((c or {}).get("titulo") or "")[:200],
                "corpo": str((c or {}).get("corpo") or "")[:20000]}
               for c in (clausulas or []) if (c or {}).get("titulo") or (c or {}).get("corpo")]
     with pool.connection() as c:
         c.execute(
-            """insert into contrato_modelo (conta_id, clausulas, regras, atualizado_por)
-               values (%s,%s::jsonb,%s::jsonb,%s)
+            """insert into contrato_modelo (conta_id, clausulas, regras, atualizado_por,
+                                            assinar_antes_do_sinal)
+               values (%s,%s::jsonb,%s::jsonb,%s,%s)
                on conflict (conta_id) do update
                   set clausulas=excluded.clausulas, regras=excluded.regras,
-                      atualizado_em=now(), atualizado_por=excluded.atualizado_por""",
-            (conta_id, json.dumps(limpas), json.dumps(regras or {}), (por or "")[:120]))
+                      atualizado_em=now(), atualizado_por=excluded.atualizado_por,
+                      assinar_antes_do_sinal=excluded.assinar_antes_do_sinal""",
+            (conta_id, json.dumps(limpas), json.dumps(regras or {}), (por or "")[:120],
+             bool(assinar_antes_do_sinal)))
         c.commit()
     return {"ok": True, "clausulas": len(limpas)}
 

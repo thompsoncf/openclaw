@@ -62,7 +62,10 @@ def cliente(monkeypatch):
                        clausulas jsonb not null default '[]'::jsonb,
                        regras jsonb not null default '{}'::jsonb,
                        atualizado_em timestamptz not null default now(),
-                       atualizado_por text not null default '')""")
+                       atualizado_por text not null default '',
+                       -- 194: a ordem entre o sinal e a assinatura do contrato,
+                       -- escolhida por conta. Sai desta mesma tela, no Salvar.
+                       assinar_antes_do_sinal boolean not null default false)""")
         c.execute("""create table servicos_catalogo (id bigserial primary key, conta_id bigint,
                        slug text, nome text, descricao text,
                        setup_centavos bigint default 0, mensal_centavos bigint default 0,
@@ -429,3 +432,48 @@ def test_a_previa_explica_o_campo_de_proposta_em_vez_de_esconder(cliente):
     assert d["ajustes"] == []
     assert d["da_proposta"] == ["cliente.nome"]
     assert "{cliente.nome}" in d["clausulas"][0]["corpo"]
+
+
+# ────────────── a ordem entre sinal e assinatura, ligada nesta mesma tela (194)
+
+def test_a_tela_abre_com_a_ordem_de_hoje(cliente):
+    assert cliente.get("/painel/servicos/contrato").json()["assinar_antes_do_sinal"] is False
+
+
+def test_o_dono_liga_a_ordem_nova_no_mesmo_salvar(cliente):
+    """Vem junto das cláusulas de propósito: é o mesmo botão Salvar da mesma tela.
+    Um segundo clique faria o dono ligar a ordem e sair achando que ligou."""
+    cliente.post("/painel/servicos/contrato/salvar",
+                 json={"clausulas": _clausulas(), "regras": {},
+                       "assinar_antes_do_sinal": True})
+    assert cliente.get("/painel/servicos/contrato").json()["assinar_antes_do_sinal"] is True
+
+
+def test_e_desliga_pelo_mesmo_caminho(cliente):
+    cliente.post("/painel/servicos/contrato/salvar",
+                 json={"clausulas": _clausulas(), "regras": {},
+                       "assinar_antes_do_sinal": True})
+    cliente.post("/painel/servicos/contrato/salvar",
+                 json={"clausulas": _clausulas(), "regras": {},
+                       "assinar_antes_do_sinal": False})
+    assert cliente.get("/painel/servicos/contrato").json()["assinar_antes_do_sinal"] is False
+
+
+def test_restaurar_o_modelo_padrao_nao_mexe_na_ordem(cliente):
+    """`padrao=1` é o botão "restaurar" e ele mexe nas CLÁUSULAS. A ordem que a
+    empresa escolheu não é texto de contrato e não se restaura junto."""
+    cliente.post("/painel/servicos/contrato/salvar",
+                 json={"clausulas": _clausulas(), "regras": {},
+                       "assinar_antes_do_sinal": True})
+    d = cliente.get("/painel/servicos/contrato?padrao=1").json()
+    assert d["assinar_antes_do_sinal"] is True
+
+
+def test_o_vendedor_nao_muda_a_ordem_de_cobranca(cliente):
+    """Trilho: quem escolhe como a empresa cobra é o dono. O gate é o mesmo da
+    tela do contrato, revalidado no POST."""
+    cliente.post("/_entrar", params={"papel": "vendedor"})
+    r = cliente.post("/painel/servicos/contrato/salvar",
+                     json={"clausulas": _clausulas(), "regras": {},
+                           "assinar_antes_do_sinal": True})
+    assert r.status_code in (403, 404)

@@ -391,12 +391,28 @@ def titulo_do_funil(*, cadastro="", empresa="", cliente="", modo="recorrente",
 _ORDEM_ACAO = ("marcar", "resegurar", "sinal", "comprovante", "assinar",
                "fechar", "enviar")
 
+# A MESMA FILA COM `sinal` E `assinar` TROCADOS DE LUGAR — e só eles.
+#
+# POR QUE ISTO EXISTE. O botão verde é um só por linha. Com a data pré-reservada,
+# a fila de cima faz ele mostrar "Sinal recebido", e mandar o contrato antes vira
+# um caminho que ninguém vê — foi o que o cliente da Prime sentiu em 02/09 ao
+# pedir pra ler o contrato antes de pagar. O produto já permitia ler e assinar
+# antes; o funil é que empurrava para a outra ordem.
+#
+# É UMA TROCA POSICIONAL, não uma fila nova. `assinar` ocupa a vaga que era do
+# `sinal` e vice-versa; todo o resto — inclusive `comprovante`, entre os dois —
+# fica exatamente onde estava. Reordenar mais coisas aqui seria embutir uma
+# segunda mudança de comportamento num parâmetro que promete uma só, e o teste
+# `test_a_troca_e_posicional` cobra isso comparando as duas filas.
+_ORDEM_ACAO_ASSINA_ANTES = ("marcar", "resegurar", "assinar", "comprovante",
+                            "sinal", "fechar", "enviar")
+
 
 def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
                    pagamentos=None, enviado_em="", contrato_numero=None,
                    contrato_assinado=False, plano_difere=0, aprovada_por="",
                    nunca_enviada=True, contrato_enviado_em=None,
-                   tem_contrato=True, hoje=None) -> dict:
+                   tem_contrato=True, assinar_antes_do_sinal=False, hoje=None) -> dict:
     """{selos, acao, resumo} de uma linha — a redação inteira, testável sem tela.
 
     `selos` são só PENDÊNCIAS. `resumo` é o que já aconteceu, pro subtítulo.
@@ -528,7 +544,7 @@ def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
     # a ação é UMA: a primeira da ordem que o dono escolheu. As outras pendências
     # continuam visíveis nos selos — some o botão, não o aviso.
     escolhida = None
-    for chave in _ORDEM_ACAO:
+    for chave in (_ORDEM_ACAO_ASSINA_ANTES if assinar_antes_do_sinal else _ORDEM_ACAO):
         achou = next((a for a in acoes if a[0] == chave), None)
         if achou:
             escolhida = {"chave": achou[0], "texto": achou[1]}

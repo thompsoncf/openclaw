@@ -189,6 +189,9 @@ def carregar(token: str, pool=None) -> dict | None:
         "aprovada": (orc_status or "") in ("aprovada", "fechado"),
         "sinal_pago": bool(sinal_pago_em),
         "tem_sinal": tem_sinal,
+        # a ordem que a empresa escolheu (194) — muda o que a folha promete DEPOIS
+        # da assinatura, não a cláusula 4.1, que é a mesma nos dois casos
+        "assinar_antes": ctr.assina_antes_do_sinal(pool, ct["conta_id"]),
         "pode_assinar": ((orc_status or "") in ("aprovada", "fechado")
                          and not assinado),
     }
@@ -381,10 +384,20 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
            precisa dizer é a tela — com a mesma regra da cláusula 4.1, não com uma
            promessa nova. #}
         {% if d.tem_sinal and not d.sinal_pago %}
-        <div class="carimbo" style="margin:0 0 .9rem">A data só fica <b>definitivamente
-          reservada</b> depois que a entrada for confirmada pela
-          {{ d.contratada.nome }} (cláusula 4.1). Assinar agora firma o
-          compromisso; a reserva vem com o pagamento.</div>
+        {# A CLÁUSULA 4.1 É A MESMA NOS DOIS CASOS — a data firma com o dinheiro.
+           O que muda é a ORDEM que a empresa escolheu pedir (migração 194), e por
+           isso muda também o que o cliente espera depois de assinar: onde a
+           assinatura vem primeiro, o passo seguinte é a empresa mandar o PIX, e
+           dizer só "a reserva vem com o pagamento" o deixaria sem saber o que
+           fazer em seguida. #}
+        <div class="carimbo" style="margin:0 0 .9rem">
+          {% if d.assinar_antes %}Leia e assine. Depois de assinado, a
+          {{ d.contratada.nome }} manda os dados da entrada — e é ela que deixa a data
+          <b>definitivamente reservada</b> (cláusula 4.1).
+          {% else %}A data só fica <b>definitivamente reservada</b> depois que a
+          entrada for confirmada pela {{ d.contratada.nome }} (cláusula 4.1).
+          Assinar agora firma o compromisso; a reserva vem com o pagamento.
+          {% endif %}</div>
         {% endif %}
         {% if erro %}<div class="err">{{ erro }}</div>{% endif %}
         <div class="row">

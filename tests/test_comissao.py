@@ -44,7 +44,10 @@ create table titulos (id bigserial primary key, conta_id bigint, tipo text not n
   recorrente boolean default false, categoria text default '', lancamento_id bigint,
   cliente_id bigint, cobranca_link_url text, pago_em date, criado_por bigint,
   criado_em timestamptz default now(),
-  orcamento_id bigint, parcela_idx int);   -- 162: liga o título à parcela do orçamento
+  orcamento_id bigint, parcela_idx int,   -- 162: liga o título à parcela do orçamento
+  aprovacao text not null default 'autorizado', aprovado_por bigint,
+  aprovado_em timestamptz, aprovacao_motivo text,
+  pago_sem_autorizacao boolean not null default false);   -- 195: liberação do dono
 create table orcamentos (id bigserial primary key, conta_id bigint, cliente text,
   empresa text, itens jsonb, token text, setup_centavos bigint default 0,
   mensal_centavos bigint default 0, primeiro_ano_centavos bigint default 0,

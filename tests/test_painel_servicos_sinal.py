@@ -59,6 +59,9 @@ def cliente(monkeypatch):
             vencimento date, status text default 'aberto', recorrente boolean default false,
             categoria text default '', lancamento_id bigint, pago_em date,
             criado_por bigint, orcamento_id bigint, parcela_idx int,
+            aprovacao text not null default 'autorizado', aprovado_por bigint,
+            aprovado_em timestamptz, aprovacao_motivo text,
+            pago_sem_autorizacao boolean not null default false,
             criado_em timestamptz default now())""")
         # lancamentos existe pelo MESMO motivo que titulos: o sinal agora entra no
         # livro-caixa na hora em que cai, e `dar_baixa_titulo` escreve aqui. Sem a

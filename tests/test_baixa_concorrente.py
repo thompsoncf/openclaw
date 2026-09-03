@@ -27,6 +27,7 @@ from finance.livro_caixa import LivroCaixa
 # natureza em lancamentos (057). schema.sql cria contas/membros/lancamentos.
 _MIGRACOES = ("018_chave_nfce_lancamentos.sql",
               "053_modulo_pj.sql",
+              "195_titulo_aprovacao.sql",
               "057_natureza_lancamento.sql")
 
 

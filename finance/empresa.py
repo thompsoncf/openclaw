@@ -168,34 +168,48 @@ def acesso_pj(pool, conta_id: int) -> bool:
 # ─────────────────────────────────────────────────────────────────────────
 # Títulos (contas a pagar e a receber)
 # ─────────────────────────────────────────────────────────────────────────
+#: Os três estados da liberação do dono. Ver o cabeçalho da migração 195 pra por
+#: que isto NÃO é mais um valor de `status`.
+APROVACOES = ("aguardando", "autorizado", "recusado")
+
+
 def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
                  valor_centavos: int, vencimento: date,
                  contraparte: str = "", categoria: str = "",
                  recorrente: bool = False,
                  criado_por: int | None = None,
-                 cliente_id: int | None = None) -> dict:
+                 cliente_id: int | None = None,
+                 precisa_aprovacao: bool = False) -> dict:
     """Cria um título aberto. tipo: 'pagar' | 'receber'. cliente_id LIGA o título
-    a um cliente da base (honorário/venda a prazo aparece na ficha dele)."""
+    a um cliente da base (honorário/venda a prazo aparece na ficha dele).
+
+    `precisa_aprovacao` nasce False e quem decide é QUEM CHAMA, não este módulo: a
+    regra de quem precisa de liberação é de tela (o dono libera o que os outros
+    lançam) e depende da sessão, que aqui não existe. Falhar para False é
+    deliberado — título que nasce liberado por engano é ruído; título que nasce
+    preso por engano é uma conta que ninguém paga."""
     if tipo not in ("pagar", "receber"):
         raise ValueError("tipo deve ser 'pagar' ou 'receber'")
     if not categoria:
         categoria = CAT_FORNECEDORES if tipo == "pagar" else CAT_VENDAS
     cli_id = int(cliente_id) if cliente_id else None
+    aprov = "aguardando" if precisa_aprovacao else "autorizado"
     with pool.connection() as c:
         r = c.execute(
             """insert into titulos
                  (conta_id, tipo, descricao, contraparte, valor_centavos,
-                  vencimento, categoria, recorrente, criado_por, cliente_id)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                  vencimento, categoria, recorrente, criado_por, cliente_id,
+                  aprovacao)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
             (conta_id, tipo, (descricao or "").strip(), (contraparte or "").strip(),
              int(valor_centavos), vencimento, categoria, bool(recorrente),
-             criado_por, cli_id),
+             criado_por, cli_id, aprov),
         ).fetchone()
         c.commit()
     return {"id": r[0], "tipo": tipo, "descricao": descricao,
             "valor_centavos": int(valor_centavos), "vencimento": vencimento,
             "status": "aberto", "recorrente": bool(recorrente),
-            "cliente_id": cli_id}
+            "cliente_id": cli_id, "aprovacao": aprov}
 
 
 def listar_titulos(pool, conta_id: int, status: str = "aberto",
@@ -212,10 +226,16 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
             f"""select t.id, t.tipo, t.descricao, t.contraparte, t.valor_centavos,
                        t.vencimento, t.status, t.recorrente, t.categoria,
                        t.cobranca_link_url, t.pago_em, t.lancamento_id,
-                       t.cliente_id, coalesce(p.nome, cl.nome) as cliente_nome
+                       t.cliente_id, coalesce(p.nome, cl.nome) as cliente_nome,
+                       t.aprovacao, t.aprovacao_motivo, t.pago_sem_autorizacao,
+                       coalesce(nullif(quem.nome,''), quem.email, '') as criado_nome,
+                       coalesce(nullif(dono.nome,''), dono.email, '') as aprovado_nome,
+                       t.aprovado_em
                   from titulos t
                   left join clientes cl on cl.id = t.cliente_id
                   left join pessoas p on p.id = cl.pessoa_id
+                  left join membros quem on quem.id = t.criado_por
+                  left join membros dono on dono.id = t.aprovado_por
                  where {cond}
                  order by {ordem} limit %s""",
             (*args, limite),
@@ -231,6 +251,19 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
             "cobranca_link_url": r[9], "pago_em": r[10], "lancamento_id": r[11],
             "cliente_id": r[12], "cliente_nome": r[13],
             "atrasado": (r[6] == "aberto" and venc is not None and venc < hoje),
+            # A LIBERAÇÃO DO DONO — ver migração 195. Vem junto do resto porque a
+            # tela precisa das três coisas na mesma linha (dinheiro, prazo,
+            # decisão) pra escrever UM selo; buscar em separado seria três
+            # verdades chegando em momentos diferentes.
+            "aprovacao": r[14] or "autorizado",
+            "aprovacao_motivo": r[15],
+            "pago_sem_autorizacao": bool(r[16]),
+            "criado_nome": r[17], "aprovado_nome": r[18], "aprovado_em": r[19],
+            # `sem_fornecedor` é o selo da frente 1: nem texto nem ficha ligada.
+            # Sai daqui, e não de um `{% if %}` na tela, pra que o relatório e a
+            # tela concordem sobre o que é "sem fornecedor".
+            "sem_fornecedor": (r[1] == "pagar" and not (r[3] or "").strip()
+                               and not r[12]),
         })
     return out
 
@@ -327,11 +360,19 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
     # volta vazia, sem lançar.
     proximo_id = None
     with pool.connection() as c:
+        # `pago_sem_autorizacao` é carimbado no MESMO update da baixa, e é a única
+        # consequência de a conta não estar liberada: o dono escolheu "só avisa,
+        # não trava" em 03/09/2026. Sem esta marca a escolha não valeria nada — o
+        # aviso na tela seria um clique a mais e ninguém saberia depois o que
+        # passou por fora. No mesmo update, e não num segundo, porque uma marca de
+        # auditoria que pode falhar sozinha depois do fato não é auditoria.
         t = c.execute(
-            """update titulos set status='pago', pago_em=%s
+            """update titulos
+                  set status='pago', pago_em=%s,
+                      pago_sem_autorizacao = (aprovacao <> 'autorizado')
                 where id=%s and conta_id=%s and status='aberto'
              returning tipo, descricao, contraparte, valor_centavos, categoria,
-                       recorrente, vencimento, criado_por""",
+                       recorrente, vencimento, criado_por, pago_sem_autorizacao""",
             (data_pagto, titulo_id, conta_id),
         ).fetchone()
         if not t:
@@ -380,7 +421,8 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
             ).fetchone()
             proximo_id = r[0]
         c.commit()
-    return {"ok": True, "lancamento_id": salvo.id, "proximo_titulo_id": proximo_id}
+    return {"ok": True, "lancamento_id": salvo.id, "proximo_titulo_id": proximo_id,
+            "sem_autorizacao": bool(t[8])}
 
 
 # Quantos dias em volta do vencimento um pagamento ainda pode ser DAQUELE título.
@@ -561,11 +603,25 @@ def editar_descricao_titulo(pool, conta_id: int, titulo_id: int,
 
 def editar_titulo(pool, conta_id: int, titulo_id: int,
                   descricao: str | None = None,
-                  valor_centavos: int | None = None) -> bool:
-    """Corrige descrição e/ou valor de um título (o dono digitou errado). NÃO mexe
-    em vencimento nem tipo. Multi-tenant: só o título DESTA conta. Passa só o que
+                  valor_centavos: int | None = None,
+                  contraparte: str | None = None,
+                  cliente_id: int | None = None) -> bool:
+    """Corrige descrição, valor e/ou FORNECEDOR de um título. NÃO mexe em
+    vencimento nem tipo. Multi-tenant: só o título DESTA conta. Passa só o que
     quer mudar; campo None é ignorado. Descrição vazia é ignorada (não apaga);
-    valor negativo é rejeitado. Retorna True se algo mudou."""
+    valor negativo é rejeitado. Retorna True se algo mudou.
+
+    O FORNECEDOR entrou aqui em 03/09/2026, e a falta dele era o buraco: quem
+    salvasse um título sem fornecedor não tinha mais onde colocar — nem digitando
+    nem escolhendo. Medido na Prime no mesmo dia: **30 de 30 títulos a pagar sem
+    fornecedor**, com o nome enfiado na descrição ("ZARB CONSULTORIA",
+    "EQUATORIAL", "BANCO DO NORDESTE"). Não era descuido de quem lança; era a
+    tela não tendo o campo.
+
+    `contraparte` vazia AGORA APAGA, ao contrário da descrição: limpar o
+    fornecedor é uma correção legítima (foi ligado no errado), e nome de
+    fornecedor errado é pior que nome nenhum. `cliente_id=0` desliga a ficha pelo
+    mesmo motivo — None continua sendo "não mexe"."""
     sets, args = [], []
     if descricao is not None:
         desc = descricao.strip()[:200]
@@ -573,6 +629,10 @@ def editar_titulo(pool, conta_id: int, titulo_id: int,
             sets.append("descricao=%s"); args.append(desc)
     if valor_centavos is not None and int(valor_centavos) >= 0:
         sets.append("valor_centavos=%s"); args.append(int(valor_centavos))
+    if contraparte is not None:
+        sets.append("contraparte=%s"); args.append(contraparte.strip()[:200])
+    if cliente_id is not None:
+        sets.append("cliente_id=%s"); args.append(int(cliente_id) or None)
     if not sets:
         return False
     with pool.connection() as c:
@@ -582,6 +642,55 @@ def editar_titulo(pool, conta_id: int, titulo_id: int,
         )
         c.commit()
         return cur.rowcount > 0
+
+
+def decidir_aprovacao(pool, conta_id: int, ids, decisao: str,
+                      membro_id: int | None = None, motivo: str = "") -> int:
+    """O dono libera (ou recusa) contas a pagar. Devolve quantas mudaram.
+
+    Aceita um id ou uma lista — o lote não é conveniência: quando o controle é
+    ligado numa empresa que já tem 30 títulos, decidir de um em um é o que faz
+    alguém desligar o controle na semana seguinte.
+
+    SÓ MEXE EM TÍTULO ABERTO. Reabrir a discussão de algo já pago não muda o
+    dinheiro que saiu e só embaralharia o histórico; o que ficou pago sem
+    liberação tem marca própria (`pago_sem_autorizacao`).
+
+    Não valida PAPEL de propósito — quem sabe quem está logado é a tela, e é lá
+    que o portão fica. Este módulo não tem sessão."""
+    if decisao not in APROVACOES:
+        raise ValueError(f"decisão inválida: {decisao}")
+    lista = [int(i) for i in (ids if isinstance(ids, (list, tuple, set)) else [ids])]
+    if not lista:
+        return 0
+    with pool.connection() as c:
+        cur = c.execute(
+            """update titulos
+                  set aprovacao=%s, aprovado_por=%s, aprovado_em=now(),
+                      aprovacao_motivo=%s
+                where conta_id=%s and id = any(%s) and status='aberto'""",
+            (decisao, membro_id, (motivo or "").strip()[:300] or None,
+             conta_id, lista))
+        c.commit()
+    return cur.rowcount
+
+
+def aguardando_aprovacao(pool, conta_id: int, tipo: str = "pagar") -> list[dict]:
+    """A fila do dono: o que foi lançado e espera liberação. Só `aberto`."""
+    with pool.connection() as c:
+        rows = c.execute(
+            """select t.id, t.descricao, t.contraparte, t.valor_centavos,
+                      t.vencimento, t.criado_em,
+                      coalesce(nullif(m.nome,''), m.email, '') as quem
+                 from titulos t
+                 left join membros m on m.id = t.criado_por
+                where t.conta_id=%s and t.tipo=%s and t.status='aberto'
+                  and t.aprovacao='aguardando'
+                order by t.vencimento asc, t.id asc""",
+            (conta_id, tipo)).fetchall()
+    return [{"id": r[0], "descricao": r[1], "contraparte": r[2],
+             "valor_centavos": int(r[3] or 0), "vencimento": r[4],
+             "criado_em": r[5], "quem": r[6]} for r in rows]
 
 
 def apagar_titulo(pool, conta_id: int, titulo_id: int) -> bool:

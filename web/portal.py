@@ -3935,7 +3935,28 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
 </div>
 
 <div class="card larga">
-  <div style="display:flex;justify-content:space-between;align-items:center"><strong>Títulos a pagar e receber</strong></div>
+  <div style="display:flex;justify-content:space-between;align-items:center" id="titulos"><strong>Títulos a pagar e receber</strong>
+    {% if n_aguardando %}<span class="selo esp">{{ n_aguardando }} esperando liberação</span>{% endif %}</div>
+  {% if emp_aviso %}<div class="ok" style="margin:.5rem 0">{{ emp_aviso }}</div>{% endif %}
+  <style>
+    /* Selos da linha do título. Eles são LIDOS das três perguntas (dinheiro,
+       prazo, liberação do dono — ver migração 195), nunca escolhidos: por isso
+       podem aparecer dois na mesma linha, e a mais urgente da lista é
+       justamente a soma "autorizado + atrasado". */
+    .selo{display:inline-block;font-size:.66rem;font-weight:700;border-radius:5px;
+      padding:.08rem .4rem;letter-spacing:.02em;white-space:nowrap;vertical-align:.05em}
+    .selo.esp{border:1px solid #5A4520;background:#241C0F;color:#E0A32E}
+    .selo.rec{border:1px solid #5A2B2B;background:#241313;color:#E0574F}
+    .selo.falta{border:1px solid #5A4520;background:#241C0F;color:#E0A32E}
+    .selo.furo{border:1px solid #5A2B2B;background:#241313;color:#E0574F}
+    .tit-lote{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;
+      margin:.6rem 0 .2rem;padding:.6rem .7rem;border:1px solid #5A4520;
+      background:#241C0F;border-radius:10px;font-size:.8rem}
+    .tit-lote button{background:var(--verde);color:var(--sobre-verde);border:0;
+      border-radius:7px;padding:.34rem .8rem;font-size:.78rem;font-weight:600;
+      cursor:pointer;width:auto}
+    .tit-ck{width:auto;margin:0 .3rem 0 0;accent-color:var(--verde)}
+  </style>
   <form method="post" action="/painel/empresa/titulo" class="emp-form" style="display:grid;grid-template-columns:1fr 2fr 1fr 1fr 1.4fr auto;gap:.5rem;margin:.7rem 0;align-items:end">
     <label style="font-size:.72rem;color:#8a938a">Tipo<select name="tipo" onchange="titTipoTroca(this)" style="width:100%">
       <option value="pagar">A pagar</option><option value="receber">A receber</option></select></label>
@@ -3976,22 +3997,64 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .tit-edit button{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
   </style>
   <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid var(--card-2)"><span>Título</span><span>Valor</span></div>
+  {% if pode_liberar and n_aguardando %}
+  {# LOTE. Não é conveniência: ligar a liberação numa empresa que já tem 30
+     títulos custaria 30 cliques no primeiro dia, e controle que dá trabalho no
+     dia 1 é controle que alguém desliga no dia 2. #}
+  <form method="post" action="/painel/empresa/titulo/aprovacao" id="tit-lote-form">
+    <input type="hidden" name="decisao" value="autorizado">
+    <div class="tit-lote">⏳ <b>{{ n_aguardando }}</b> conta{{ 's' if n_aguardando != 1 }}
+      esperando você. Marque na lista e libere de uma vez:
+      <button type="submit">✓ liberar as marcadas</button></div>
+  </form>
+  {% endif %}
   {% for t in titulos %}<div class="tit-lin">
     <div class="tit-id">
-      <div class="tit-desc">{{ t.descricao }}{% if t.contraparte %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}</div>
-      <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span> · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}</div>
+      <div class="tit-desc">{% if pode_liberar and t.aprovacao=='aguardando' %}<input class="tit-ck" type="checkbox" name="ids" value="{{ t.id }}" form="tit-lote-form">{% endif %}{{ t.descricao }}{% if t.contraparte %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}
+        {% if t.aprovacao=='aguardando' %} <span class="selo esp">aguardando {{ 'você' if pode_liberar else 'o dono' }}</span>{% elif t.aprovacao=='recusado' %} <span class="selo rec">recusado</span>{% endif %}
+        {% if t.sem_fornecedor %} <span class="selo falta">sem fornecedor</span>{% endif %}</div>
+      <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span> · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}{% if t.criado_nome %} · lançado por {{ t.criado_nome }}{% endif %}{% if t.aprovacao=='autorizado' and t.aprovado_nome %} · liberado por {{ t.aprovado_nome }}{% endif %}{% if t.aprovacao_motivo %} · <span style="color:#e07a5f">"{{ t.aprovacao_motivo }}"</span>{% endif %}</div>
     </div>
     <div class="tit-val" style="color:{{ '#e07a5f' if t.tipo=='pagar' else 'var(--verde-claro)' }}">{{ t.valor_centavos|brl }}</div>
     <div class="tit-acoes">
-      <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa"><button style="color:var(--verde-claro)">dar baixa ✓</button></form>
+      {# A BAIXA NÃO TRAVA — decisão do dono em 03/09/2026 ("só avisa, não
+         trava"). O confirm é o aviso, e o que dá peso a ele é a marca
+         `pago_sem_autorizacao`, gravada no mesmo update da baixa: sem ela a
+         escolha viraria um clique a mais e nada mais. #}
+      <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa"
+        {%- if t.tipo=='pagar' and t.aprovacao!='autorizado' %} onsubmit="return confirm('Esta conta {{ 'foi RECUSADA' if t.aprovacao=='recusado' else 'ainda não foi liberada' }} pelo dono. Dar baixa mesmo assim? Fica registrado que ela foi paga sem autorização.')"{% endif %}><button style="color:var(--verde-claro)">dar baixa ✓</button></form>
+      {% if pode_liberar and t.tipo=='pagar' and t.aprovacao!='autorizado' %}
+      <form method="post" action="/painel/empresa/titulo/aprovacao">
+        <input type="hidden" name="titulo_id" value="{{ t.id }}">
+        <input type="hidden" name="decisao" value="autorizado">
+        <button style="color:var(--verde-claro);border-color:#1E4A3A">✓ liberar</button></form>
+      {% endif %}
+      {% if pode_liberar and t.tipo=='pagar' and t.aprovacao=='aguardando' %}
+      <form method="post" action="/painel/empresa/titulo/aprovacao"
+            onsubmit="var m=prompt('Por que está recusando? (o motivo vai pra quem lançou)');
+                      if(m===null)return false; this.motivo.value=m; return true">
+        <input type="hidden" name="titulo_id" value="{{ t.id }}">
+        <input type="hidden" name="decisao" value="recusado">
+        <input type="hidden" name="motivo" value="">
+        <button style="color:#c98080">✕ recusar</button></form>
+      {% endif %}
       {% if t.tipo=='receber' %}{% if t.cobranca_link_url %}<a href="{{ t.cobranca_link_url }}" target="_blank" style="color:#c99536">link Pix ↗</a>{% else %}<form method="post" action="/painel/empresa/titulo/{{ t.id }}/cobrar"><button style="color:#c99536">cobrar via Pix →</button></form>{% endif %}{% endif %}
       <button type="button" onclick="titEditToggle(this)" title="editar descrição e/ou valor" style="color:#8a938a">editar ✎</button>
       <form method="post" action="/painel/empresa/titulo/{{ t.id }}/apagar" onsubmit="return confirm('Apagar este título? (só some da lista; não mexe em nada já pago)')"><button title="apagar título" style="color:#c98080">apagar ✕</button></form>
     </div>
     {# edição INLINE (descrição + valor juntos, cada um independente) — evita o vaivém de prompts #}
     <form method="post" action="/painel/empresa/titulo/{{ t.id }}/descricao" class="tit-edit" style="display:none">
-      <input name="descricao" value="{{ t.descricao }}" placeholder="descrição" style="flex:2 1 150px;min-width:0">
-      <input name="valor" value="{{ (t.valor_centavos/100)|n2 }}" inputmode="decimal" placeholder="valor R$" style="flex:1 1 90px;min-width:0">
+      <input name="descricao" value="{{ t.descricao }}" placeholder="descrição" style="flex:2 1 140px;min-width:0">
+      <input name="valor" value="{{ (t.valor_centavos/100)|n2 }}" inputmode="decimal" placeholder="valor R$" style="flex:1 1 80px;min-width:0">
+      {# O FORNECEDOR, que faltava. Antes daqui o editar tinha dois campos e quem
+         salvasse sem fornecedor não colocava mais — 30 de 30 títulos a pagar da
+         Prime estavam assim, com o nome do fornecedor enfiado na descrição.
+         `tem_cliente` separa "apaguei o campo" de "o campo nem veio". #}
+      <input type="hidden" name="tem_cliente" value="1">
+      <input name="cliente" value="{{ t.contraparte or '' }}"
+             list="{{ 'tit-forn-dl' if t.tipo=='pagar' else 'tit-cli-dl' }}"
+             placeholder="{{ 'fornecedor' if t.tipo=='pagar' else 'cliente' }}"
+             style="flex:1.4 1 120px;min-width:0">
       <button style="background:var(--verde);color:var(--sobre-verde);border:0">salvar</button>
       <button type="button" onclick="titEditToggle(this)" style="color:#8a938a">cancelar</button>
     </form>
@@ -10034,7 +10097,15 @@ def painel_empresa(request: Request):
                    # a recusa do excluir precisa chegar na tela: sem isto a rota
                    # gravava na sessão e ninguém mostrava (o erro vazaria pra
                    # outra página que faz pop)
-                   erro=request.session.pop("erro", None))
+                   erro=request.session.pop("erro", None),
+                   # SÓ O DONO LIBERA conta a pagar (capacidade `gerir`). Até
+                   # 03/09/2026 esta tela não olhava papel nenhum: quem entrava,
+                   # lançava e dava baixa em tudo.
+                   pode_liberar=_so_o_dono(request, conta[0]),
+                   n_aguardando=sum(1 for t in titulos
+                                    if t["tipo"] == "pagar"
+                                    and t.get("aprovacao") == "aguardando"),
+                   emp_aviso=request.session.pop("emp_aviso", None))
 
 
 @router.get("/painel/produtos")
@@ -10478,12 +10549,25 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
                         eh_fornecedor=(papel == "fornecedor"))
                 except Exception:
                     cli_id = None
+        # QUEM LANÇOU. Ia `criado_por=None` cravado, e por isso os 30 títulos a
+        # pagar da Prime tinham autor nulo — não é que ninguém preenchesse, é que
+        # o campo nunca era gravado. Sem ele a liberação do dono (195) aprovaria
+        # sem saber de quem, e o lançamento no caixa já dependia disto pra achar
+        # o vendedor da comissão (ver dar_baixa_titulo).
+        membro_id = request.session.get("membro_id")
+        # QUEM PRECISA DE LIBERAÇÃO: conta a PAGAR lançada por quem não é o dono.
+        # A pagar só — título a receber é dinheiro entrando, e ninguém precisa
+        # autorizar dinheiro entrando. O dono lançando não espera por si mesmo.
+        from contas import equipe as _equipe
+        papel = _papel_logado(request, conta[0])
+        precisa = (tipo_ok == "pagar"
+                   and not _equipe.caps_do_papel(papel).get("gerir", False))
         try:
             emp.criar_titulo(pool, conta[0], tipo_ok,
                              descricao, cent, _date.fromisoformat(vencimento),
                              contraparte=contraparte or nome_cli,
-                             recorrente=bool(recorrente), criado_por=None,
-                             cliente_id=cli_id)
+                             recorrente=bool(recorrente), criado_por=membro_id,
+                             cliente_id=cli_id, precisa_aprovacao=precisa)
         except Exception:
             pass
     return RedirectResponse("/painel/empresa", status_code=303)
@@ -10577,19 +10661,87 @@ def empresa_titulo_cobrar(request: Request, titulo_id: int):
 
 @router.post("/painel/empresa/titulo/{titulo_id}/descricao")
 def empresa_titulo_descricao(request: Request, titulo_id: int,
-                             descricao: str = Form(""), valor: str = Form("")):
-    """Edita descrição e/ou valor de um título. valor vazio = não mexe no valor."""
-    from finance import empresa as emp
+                             descricao: str = Form(""), valor: str = Form(""),
+                             cliente: str = Form(""), tem_cliente: str = Form("")):
+    """Edita descrição, valor e/ou FORNECEDOR. valor vazio = não mexe no valor.
+
+    O FORNECEDOR só entrou aqui em 03/09/2026, e a falta dele era o buraco que o
+    dono relatou: salvou sem fornecedor, não colocava mais. Na Prime eram 30 de
+    30 títulos a pagar sem fornecedor, com o nome enfiado na descrição.
+
+    `tem_cliente` distingue "o campo veio vazio porque a pessoa apagou" de "o
+    campo nem estava no formulário" — sem ele, qualquer form antigo apagaria o
+    fornecedor de quem já tem. Mesma regra do formulário de criar: nome que não
+    existe vira ficha na hora, já marcada como fornecedor."""
+    from finance import empresa as emp, clientes as cli
     g = _guard_pj(request)
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
     nova_desc = descricao.strip() or None
     novo_val = _reais_para_centavos(valor) if valor.strip() else None
-    if nova_desc is not None or novo_val is not None:
+    nova_cp = cli_id = None
+    if tem_cliente in ("1", "on", "true"):
+        nome_cli = cliente.strip()
+        nova_cp = nome_cli                      # "" APAGA de propósito
+        cli_id = 0                              # 0 desliga a ficha; None seria "não mexe"
+        if nome_cli:
+            achado = cli.achar_cliente_por_nome(pool, conta[0], nome_cli,
+                                                papel="fornecedor")
+            if achado is None:
+                try:
+                    achado = cli.criar_cliente(pool, conta[0], nome_cli,
+                                               eh_cliente=False, eh_fornecedor=True)
+                except Exception:  # noqa: BLE001 — sem ficha o nome ainda fica salvo
+                    achado = None
+            cli_id = achado or 0
+    if nova_desc is not None or novo_val is not None or nova_cp is not None:
         emp.editar_titulo(pool, conta[0], titulo_id,
-                          descricao=nova_desc, valor_centavos=novo_val)
+                          descricao=nova_desc, valor_centavos=novo_val,
+                          contraparte=nova_cp, cliente_id=cli_id)
     return RedirectResponse("/painel/empresa", status_code=303)
+
+
+def _so_o_dono(request: Request, conta_id: int) -> bool:
+    """Quem libera conta a pagar. A capacidade `gerir` JÁ é exclusiva do dono no
+    modelo de papéis (contas/equipe.CAPS) — não foi preciso inventar permissão
+    nova, só passar a usar a que já estava escrita. A tela de Empresa não olhava
+    papel nenhum até 03/09/2026: o portão era só "a conta tem o módulo PJ?"."""
+    from contas import equipe as _equipe
+    return _equipe.caps_do_papel(_papel_logado(request, conta_id)).get("gerir", False)
+
+
+@router.post("/painel/empresa/titulo/aprovacao")
+def empresa_titulo_aprovacao(request: Request, decisao: str = Form("autorizado"),
+                             motivo: str = Form(""), ids: list[str] = Form([]),
+                             titulo_id: str = Form("")):
+    """O dono libera ou recusa contas a pagar — uma ou várias.
+
+    UMA ROTA SÓ pra um e pra muitos: o botão da linha manda `titulo_id` e o lote
+    manda `ids`. Dois caminhos separados seriam duas chances de a regra de quem
+    pode decidir divergir, e é justamente essa regra que não pode ter duas
+    versões."""
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    if not _so_o_dono(request, conta[0]):
+        request.session["emp_aviso"] = ("Só o dono libera conta a pagar. "
+                                        "Você pode lançar e dar baixa.")
+        return RedirectResponse("/painel/empresa#titulos", status_code=303)
+    alvos = [int(i) for i in list(ids) + [titulo_id] if str(i).strip().isdigit()]
+    if not alvos or decisao not in emp.APROVACOES:
+        return RedirectResponse("/painel/empresa#titulos", status_code=303)
+    n = emp.decidir_aprovacao(pool, conta[0], alvos, decisao,
+                              membro_id=request.session.get("membro_id"),
+                              motivo=motivo)
+    rot = {"autorizado": "liberada", "recusado": "recusada",
+           "aguardando": "devolvida pra liberação"}[decisao]
+    request.session["emp_aviso"] = (
+        f"{n} conta{'s' if n != 1 else ''} {rot}{'s' if n != 1 and rot.endswith('a') else ''}."
+        if n else "Nada mudou — essas contas já saíram do aberto.")
+    return RedirectResponse("/painel/empresa#titulos", status_code=303)
 
 
 @router.post("/painel/empresa/titulo/{titulo_id}/apagar")

@@ -1404,25 +1404,24 @@ def painel_servicos_enviar_email(request: Request, dados: EnviarEmailIn):
 # O comprovante é da PARCELA, não do orçamento — um orçamento tem o sinal e mais N.
 # A chave é `parcela_idx`, a mesma que os títulos usam.
 #
-# QUEM FAZ O QUÊ, e é de propósito que sejam gates diferentes:
+# QUEM FAZ O QUÊ:
 #   ver a lista e o arquivo   dono, gestor e VENDEDOR — é ele que cobra o cliente,
 #                             e cobrar sem saber o que já entrou é ligar no escuro
-#   anexar                    só dono e gestor. Papel de dinheiro é do financeiro.
+#   anexar                    os mesmos três, desde 03/09/2026
 #
-# `vendas` + `financeiro` dá exatamente dono e gestor: o papel `financeiro` puro
-# não passa no gate da aba, e o vendedor não tem `financeiro`.
-
-
-def _conta_financeiro(request: Request):
-    """Gate de quem MEXE em dinheiro dentro da aba: dono e gestor."""
-    conta, redir = _conta_servico(request)
-    if redir is not None:
-        return None, JSONResponse({"erro": "nao autorizado"}, status_code=403)
-    from contas import equipe as _equipe
-    if not _equipe.caps_do_papel(request.session.get("papel", "dono"))["financeiro"]:
-        return None, JSONResponse(
-            {"erro": "só o dono e o gestor anexam comprovante"}, status_code=403)
-    return conta, None
+# POR QUE O VENDEDOR PASSOU A ANEXAR. Era gate de `financeiro` (dono e gestor), com
+# a régua "papel de dinheiro é do financeiro". A régua continua certa e o
+# enquadramento é que estava errado: ANEXAR NÃO É MEXER EM DINHEIRO. Quem marca a
+# parcela como paga é o "Sinal recebido" — e isso o vendedor já faz do celular
+# desde 01/09. Anexar é juntar a prova do que ele mesmo acabou de registrar, e ele
+# é quem tem o arquivo na mão, porque o PIX chega no WhatsApp dele.
+#
+# O efeito de manter fechado era este: o vendedor confirmava o sinal em campo e
+# deixava para trás um selo coral "1 parcela sem comprovante" que só o dono limpava,
+# sentado no computador.
+#
+# O QUE NÃO MUDOU: editar valor, dar baixa e fechar contrato seguem com dono e
+# gestor. A trava que importa é a que mexe no número, não a que junta o papel.
 
 
 @router.get("/painel/servicos/pagamentos/{orc_id}")
@@ -1438,8 +1437,6 @@ def painel_servicos_pagamentos(request: Request, orc_id: int):
     d = vendas.pagamentos_do_orcamento(pool, conta[0], int(orc_id))
     if not d:
         return JSONResponse({"erro": "orçamento não encontrado"}, status_code=404)
-    from contas import equipe as _equipe
-    pode = _equipe.caps_do_papel(request.session.get("papel", "dono"))["financeiro"]
     anexos = comprov.por_orcamento(pool, conta[0], int(orc_id))
     linhas = []
     for p in d["parcelas"]:
@@ -1457,8 +1454,9 @@ def painel_servicos_pagamentos(request: Request, orc_id: int):
         "parcelas": linhas, "total": brl(d["total"]), "recebido": brl(d["recebido"]),
         "falta": brl(d["falta"]),
         # a tela só oferece o botão quando ele tem pra onde mandar o arquivo —
-        # botão que engole comprovante é pior que botão nenhum
-        "pode_anexar": bool(pode and comprov.configurado()),
+        # botão que engole comprovante é pior que botão nenhum. O PAPEL saiu da
+        # conta em 03/09: quem abre esta tela (dono, gestor, vendedor) anexa.
+        "pode_anexar": comprov.configurado(),
         "sem_storage": not comprov.configurado(),
     })
 
@@ -1467,10 +1465,13 @@ def painel_servicos_pagamentos(request: Request, orc_id: int):
 async def painel_servicos_comprovante_subir(
         request: Request, orcamento_id: int = Form(...), parcela_idx: int = Form(...),
         arquivo: UploadFile = File(...)):
-    """Anexa (ou substitui) o comprovante de uma parcela."""
-    conta, redir = _conta_financeiro(request)
+    """Anexa (ou substitui) o comprovante de uma parcela.
+
+    Mesmo gate de quem ABRE a tela — dono, gestor e vendedor. Ver a nota longa
+    acima: anexar é juntar prova, não mexer em dinheiro."""
+    conta, redir = _conta_servico(request)
     if redir is not None:
-        return redir
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
     pool = get_pool()
     d = vendas.pagamentos_do_orcamento(pool, conta[0], int(orcamento_id))
     if not d:

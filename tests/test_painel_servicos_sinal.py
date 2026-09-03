@@ -1354,10 +1354,19 @@ def test_o_VENDEDOR_ve_a_lista_porque_e_ele_que_cobra(cliente, storage):
     cliente.post("/_entrar?papel=vendedor")
     d = _pagamentos(cliente, oid)
     assert d["parcelas"][0]["pago"] is True
-    assert d["pode_anexar"] is False, "o vendedor não anexa"
+    assert d["pode_anexar"] is True, "desde 03/09 o vendedor também anexa"
 
 
-def test_o_VENDEDOR_ve_o_arquivo_mas_nao_anexa(cliente, storage):
+def test_o_VENDEDOR_ve_o_arquivo_E_anexa(cliente, storage):
+    """A REGRA MUDOU EM 03/09, por decisão do dono. Era gate de `financeiro`, com a
+    régua "papel de dinheiro é do financeiro" — a régua continua certa e o
+    enquadramento é que estava errado: ANEXAR NÃO É MEXER EM DINHEIRO.
+
+    Quem marca a parcela como paga é o "Sinal recebido", e isso o vendedor já fazia
+    do celular desde 01/09. Anexar é juntar a prova do que ele mesmo registrou — e
+    ele é quem tem o arquivo, porque o PIX chega no WhatsApp dele. Fechado, o efeito
+    era este: ele confirmava o sinal em campo e deixava um selo coral "1 parcela sem
+    comprovante" que só o dono limpava, no computador."""
     oid = _com_parcelas(cliente, numero=38, sinal_pago=True)
     cliente.post("/painel/servicos/comprovante",
                  data={"orcamento_id": oid, "parcela_idx": 0},
@@ -1368,8 +1377,21 @@ def test_o_VENDEDOR_ve_o_arquivo_mas_nao_anexa(cliente, storage):
     assert cliente.get(f"/painel/servicos/comprovante/{cid}").status_code == 200
     r = cliente.post("/painel/servicos/comprovante",
                      data={"orcamento_id": oid, "parcela_idx": 1},
-                     files={"arquivo": ("p.pdf", b"x", "application/pdf")})
-    assert r.status_code == 403, "o gate de anexar é do SERVIDOR, não da tela"
+                     files={"arquivo": ("p.pdf", b"%PDF", "application/pdf")})
+    assert r.status_code == 200
+    assert _pagamentos(cliente, oid)["parcelas"][1]["comprovante_id"], "não gravou"
+
+
+def test_quem_nao_vende_continua_de_fora(cliente, storage):
+    """O TRILHO da mudança: abriu pra quem vende, não pra todo mundo. O papel
+    `financeiro` puro não passa no gate da ABA — e é o gate da aba que agora manda
+    também no anexar, então ele continua sem alcançar o comprovante."""
+    oid = _com_parcelas(cliente, numero=44, sinal_pago=True)
+    cliente.post("/_entrar?papel=financeiro")
+    r = cliente.post("/painel/servicos/comprovante",
+                     data={"orcamento_id": oid, "parcela_idx": 0},
+                     files={"arquivo": ("p.pdf", b"%PDF", "application/pdf")})
+    assert r.status_code == 403
 
 
 def test_o_GESTOR_anexa(cliente, storage):

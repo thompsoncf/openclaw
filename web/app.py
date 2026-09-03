@@ -206,6 +206,14 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — wa_silencio falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
+                from finance import aprovacao_aviso as _ap
+                # A fila de liberação do dono só existe pra quem abre a tela de
+                # Empresa — e quem abre a tela todo dia é quem LANÇA, não quem
+                # libera. Um aviso por LOTE (ver o módulo pro dedup por conjunto).
+                _ap.rodar(pool)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — aprovacao_aviso falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
                 from finance import lembretes as _lb
                 _lb.rodar(pool)                  # resumo do dia + aviso antes (agenda)
             except Exception as e:  # noqa: BLE001

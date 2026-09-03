@@ -47,7 +47,14 @@ create table titulos (
   id bigserial primary key, conta_id bigint, tipo text, descricao text,
   contraparte text, valor_centavos bigint, vencimento date, status text,
   recorrente boolean default false, categoria text, cobranca_link_url text,
-  pago_em date, lancamento_id bigint, cliente_id bigint);
+  pago_em date, lancamento_id bigint, cliente_id bigint, criado_por bigint,
+  aprovacao text not null default 'autorizado', aprovado_por bigint,
+  aprovado_em timestamptz, aprovacao_motivo text,
+  pago_sem_autorizacao boolean not null default false);   -- 195
+-- `membros` entra porque `listar_titulos` passou a dizer QUEM lançou e QUEM
+-- liberou o título (195). Duas colunas de nome, dois left joins.
+create table membros (id bigserial primary key, conta_id bigint,
+  nome text, email text);
 """
 
 HOJE = date.today()

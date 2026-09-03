@@ -14,6 +14,13 @@ jobs:
   test:
     name: pytest (Postgres 16)
     runs-on: ubuntu-latest
+    # TETO DO JOB. Sem isto o padrão é SEIS HORAS, e em 03/09/2026 um run ficou
+    # pendurado no passo do pytest — 35 minutos contra os 3~4 de sempre — sem
+    # nenhum sinal de vida: os logs não saem enquanto o job corre, então "travado"
+    # e "lento" ficam indistinguíveis justamente na hora em que a diferença
+    # importa. Vinte minutos é cinco vezes a duração normal: quem passar disso
+    # está travado, não lento.
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -53,9 +60,18 @@ jobs:
         # sem ele quem decide o código de saída é o `tee`, que sempre dá zero — e
         # o CI passaria a mentir "verde" com teste quebrado, que é bem pior do que
         # o problema que este bloco veio resolver.
+        #
+        # `--timeout` pelo MESMO motivo, um degrau acima: teste que trava não
+        # falha, e o que não falha não passa pelas anotações logo abaixo — o job
+        # só morre no teto do runner, horas depois, sem dizer nada. Com o teto por
+        # teste, travar vira FAILED com traceback do ponto exato, e a máquina de
+        # diagnóstico que já existe aqui passa a valer também pra esse caso.
+        # 120s é folgado: o teste mais lento da suíte não chega a 10s, e a suíte
+        # inteira roda em ~3min.
         run: |
           set -o pipefail
-          pytest -q -rf --tb=short --color=no 2>&1 | tee pytest-saida.txt
+          pytest -q -rf --tb=short --color=no \
+                 --timeout=120 --timeout-method=thread 2>&1 | tee pytest-saida.txt
 
       # POR QUE ISTO EXISTE. Em 26/08 o CI reprovou três vezes seguidas e não houve
       # jeito de saber QUAL teste caiu: a API de logs devolve o log do contêiner do

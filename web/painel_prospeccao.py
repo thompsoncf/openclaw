@@ -507,6 +507,7 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
         # isso: mesma fonte que o Inbox usa, sem chance de escolher outra conversa.
         conv_por_lead: dict[int, dict[str, int]] = {}
         chip_por_lead: dict[int, int] = {}
+        ult_por_lead: dict[int, dict] = {}
         lead_ids = [r[0] for r in rows]
         if lead_ids:
             for pid, canal, cid, chip_id in c.execute(
@@ -517,6 +518,55 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                 conv_por_lead.setdefault(pid, {})[canal] = cid
                 if canal == "whatsapp":
                     chip_por_lead[pid] = chip_id
+            # A ÚLTIMA MENSAGEM DE CADA LEAD. Consulta PRÓPRIA e tolerante, e não
+            # um join na de cima, por dois motivos que puxam pro mesmo lado:
+            # instalação sem a tabela `mensagens` (ou sem a 188) perderia o funil
+            # inteiro por causa de um enfeite — mesma decisão do `_com_orcamento`
+            # na agenda; e o board precisa abrir igual mesmo quando isto falhar.
+            #
+            # A lateral é `limit 1` sobre (conversa_id, criado_em), o índice da
+            # 080: uma linha por conversa, não uma consulta por card. Na Prime, em
+            # 02/09/2026, o card tinha o botão 💬 e não dizia nada do que havia
+            # dentro — 253 leads com conversa, 192 com mensagem não vista, todos
+            # com a mesma cara de quem nunca falou.
+            #
+            # SAVEPOINT (`c.transaction()` dentro de uma transação aberta) e não
+            # só try/except: no Postgres um erro ABORTA a transação inteira, e
+            # sem o ponto de retorno as consultas seguintes desta mesma conexão
+            # morreriam todas com "current transaction is aborted" — o funil cairia
+            # do mesmo jeito que cairia sem o try. Foi o que os testes pegaram.
+            try:
+                with c.transaction():
+                    for pid, visto, mid, dire, txt, quando in c.execute(
+                        """select cv.prospeccao_id, cv.visto_ate_id,
+                                  m.id, m.direcao, m.texto, m.criado_em
+                             from conversas cv
+                             join lateral (
+                                 select id, direcao, texto, criado_em from mensagens
+                                  where conversa_id = cv.id
+                                  order by criado_em desc, id desc limit 1
+                             ) m on true
+                            where cv.conta_id=%s and cv.prospeccao_id = any(%s)
+                              and cv.canal in ('whatsapp','email','instagram')""",
+                        (conta_id, lead_ids)).fetchall():
+                        # o lead pode ter conversa em mais de um canal; vale a mais nova.
+                        atual = ult_por_lead.get(pid)
+                        if atual and atual["em"] >= quando:
+                            continue
+                        ult_por_lead[pid] = {
+                            "em": quando, "texto": _resumo_msg(txt),
+                            "quando": _quando_curto(quando),
+                            # NÃO VISTA = entrada mais nova que o ponto lido pelo
+                            # vendedor. `visto_ate_id` nulo é "nunca abriu" (188), e
+                            # aí toda entrada conta — o estado de todos antes da 188.
+                            "nova": (dire == "in" and (visto is None or (mid or 0) > visto)),
+                            "minha": dire == "out",
+                        }
+            except Exception:  # noqa: BLE001 — o funil abre sem a prévia
+                import logging
+                logging.getLogger("prospeccao.funil").warning(
+                    "não deu pra ler a última mensagem dos cards", exc_info=True)
+                ult_por_lead = {}
         # apelido de cada chip usado no board + o do chip principal (mesmo par de
         # colunas que o Inbox lê: contas.nome pro secundário, canais_config.rotulo
         # pro principal — ver comunicacao_chip_apelido).
@@ -558,6 +608,7 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                 "conv_instagram": conv.get("instagram"),
                 "campanha": r[16] or None,
                 "chip_apelido": chip_apelido,
+                "ult": ult_por_lead.get(r[0]),
                 "gemeo": _aviso_gemeo(gemeos.get(r[0])),
                 "gemeo_lead": ((gemeos.get(r[0]) or {}).get("lead_id")
                                if _gemeo_abre(gemeos.get(r[0]), ctx) else None)}
@@ -1814,6 +1865,42 @@ def _ha_quanto(minutos) -> str:
     if minutos < 48 * 60:
         return f"há {int(minutos // 60)}h"
     return f"há {int(minutos // 1440)} dias"
+
+
+_BRT = timezone(timedelta(hours=-3))
+
+
+def _quando_curto(quando, agora=None) -> str:
+    """'agora' · '40min' · '3h' · 'ontem' · '12/08'. Cabe no canto de um card.
+
+    Sem o "há": no card do funil a palavra ocuparia um quinto da linha e não
+    acrescenta nada — a coluna inteira é de tempo decorrido. Da metade do dia pra
+    trás vira data, porque "há 9 dias" não ajuda ninguém a lembrar de qual
+    conversa era."""
+    if not quando:
+        return ""
+    agora = agora or datetime.now(timezone.utc)
+    if quando.tzinfo is None:
+        quando = quando.replace(tzinfo=timezone.utc)
+    seg = (agora - quando).total_seconds()
+    if seg < 60:
+        return "agora"
+    if seg < 3600:
+        return f"{int(seg // 60)}min"
+    if seg < 86400:
+        return f"{int(seg // 3600)}h"
+    d_msg = quando.astimezone(_BRT).date()
+    dias = (agora.astimezone(_BRT).date() - d_msg).days
+    if dias == 1:
+        return "ontem"
+    return d_msg.strftime("%d/%m")
+
+
+def _resumo_msg(texto: str, limite: int = 58) -> str:
+    """Uma linha só da última mensagem. Quebra de linha vira espaço — senão o
+    corte no card sairia no meio de um parágrafo e o texto some sem aviso."""
+    t = " ".join((texto or "").split())
+    return t if len(t) <= limite else t[:limite - 1].rstrip() + "…"
 
 
 def _wa_chip(conta_id) -> dict:
@@ -9823,6 +9910,11 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {% if c.segmento or c.cidade %}<div class="sub">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
           {% if c.campanha or c.chip_apelido %}<div class="camp">{% if c.campanha %}📣 {{ c.campanha }}{% endif %}{% if c.chip_apelido %}<span class="chip">{% if c.campanha %} · {% endif %}📱 {{ c.chip_apelido }}</span>{% endif %}</div>{% endif %}
           {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido %}<div class="kbch">{% if c.tem_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="Abrir a conversa de WhatsApp">💬</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
+          {# A ÚLTIMA MENSAGEM. Fica DEPOIS dos selos de canal e antes do valor
+             porque é a informação que decide se vale abrir o card. A bolinha
+             verde só acende no que ainda não foi visto e veio do cliente — o que
+             o próprio vendedor mandou nunca é novidade pra ele. #}
+          {% if c.ult %}<div class="kbmsg{% if c.ult.nova %} nova{% endif %}">{% if c.ult.nova %}<span class="bolha" aria-hidden="true"></span>{% elif c.ult.minha %}<span class="eu" aria-hidden="true">↩</span>{% endif %}<span class="txt">{{ c.ult.texto }}</span><span class="qdo">{{ c.ult.quando }}</span></div>{% endif %}
           <div class="ft">{% if c.valor %}<span style="font-size:.76rem;color:var(--verde-claro)">{{ brl(c.valor) }}</span>{% else %}<span></span>{% endif %}{% if c.proximo %}<span class="mut" style="font-size:.72rem">📅 {{ c.proximo.strftime('%d/%m') }}</span>{% endif %}</div>
           {% if pode_atribuir %}<select class="kbvend" onclick="event.stopPropagation()" onchange="kbAtribuirVendedor(this,{{ c.id }})" data-prev="{{ c.vendedor_id or '' }}">
             <option value=""{% if not c.vendedor_id %} selected{% endif %}>— sem responsável —</option>
@@ -9845,6 +9937,16 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   border:1px solid rgba(224,180,95,.32);border-radius:8px;padding:.3rem .42rem;cursor:default}
 .kbgem a{color:#e0b45f;text-decoration:underline;white-space:nowrap}
 .kbch{display:flex;gap:.35rem;margin-top:.3rem;font-size:.82rem;align-items:center}
+/* a última mensagem no card. `min-width:0` no .txt é o que faz o ellipsis
+   funcionar dentro do flex — sem isso o texto empurra a hora pra fora do card. */
+.kbmsg{display:flex;gap:.4rem;align-items:flex-start;margin-top:.4rem;padding-top:.4rem;
+  border-top:1px solid var(--borda);font-size:.74rem;color:var(--txt-mut);line-height:1.35}
+.kbmsg .bolha{flex:0 0 auto;width:.5rem;height:.5rem;border-radius:50%;background:var(--verde);margin-top:.3rem}
+.kbmsg .eu{flex:0 0 auto;color:var(--txt-faint,#5E6F66);font-size:.8em;margin-top:.1rem}
+.kbmsg .txt{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kbmsg .qdo{flex:0 0 auto;color:var(--txt-faint,#5E6F66);font-size:.68rem}
+.kbcard:has(.kbmsg.nova){border-color:var(--neon-borda,#1E4A3A)}
+.kbmsg.nova .txt{color:var(--txt)}
 .kbch .mut{font-size:.7rem}
 /* o selo vira BOTÃO só quando existe conversa de verdade (não só telefone/e-mail
    cadastrado): halo verde sutil + cursor de clique é a única diferença visual —
@@ -10264,7 +10366,7 @@ function kbTab(s){document.querySelectorAll('.kbcol').forEach(function(c){c.clas
   kbTab(alvo);})();
 window._kbMoved=false;
 function kbDrag(ev,id){ev.dataTransfer.setData('text/plain',id);ev.dataTransfer.effectAllowed='move';window._kbDragEl=ev.currentTarget;setTimeout(function(){ev.currentTarget.style.opacity='.35';},0);}
-function kbEnd(ev){ev.currentTarget.style.opacity='';setTimeout(function(){window._kbMoved=false;},60);}
+function kbEnd(ev){ev.currentTarget.style.opacity='';window._kbDragEl=null;setTimeout(function(){window._kbMoved=false;},60);}
 function kbOver(ev){ev.preventDefault();ev.currentTarget.classList.add('dragover');}
 function kbLeave(ev){ev.currentTarget.classList.remove('dragover');}
 // Contagens das colunas + placeholder "vazio" depois que um card muda de status —
@@ -10418,6 +10520,33 @@ function capToast(msg,link){var t=document.getElementById('cap-toast');if(!t){t=
   t.style.opacity='1';clearTimeout(window._captoastT);window._captoastT=setTimeout(function(){t.style.opacity='0';},link&&link.url?7000:2600);}
 // vindo de "Captar Lead" de outra página (?captar=1) → já abre o painel embutido
 if(location.search.indexOf('captar=1')>=0){try{capToggle();}catch(e){}}
+
+// ATUALIZAR SOZINHO. O funil era a única tela de atendimento que não se mexia:
+// o poller do Radar recarrega a cada 60s e a Caixa de Comunicação busca a cada
+// 4s, mas quem ficava no funil via o mesmo card de meia hora atrás. Agora que o
+// card mostra a última mensagem, uma tela parada MENTE — mostra "3h" em conversa
+// que acabou de responder.
+//
+// 60s é cópia do Radar de propósito: mesma cadência, mesma justificativa (o
+// webhook escreve na hora; o atraso da tela é menor que a granularidade do dado).
+//
+// O QUE SEGURA O RELOAD. Recarregar por baixo de quem está no meio de uma ação
+// perde trabalho, e essa é a parte que o Radar não precisava ter: ele é uma
+// lista, o funil é uma mesa. Não recarrega com a aba escondida, com o balão do
+// chat aberto, com o painel de captar aberto, arrastando card, nem com o foco
+// dentro de qualquer campo (o <select> de vendedor incluído). Perdeu a janela,
+// tenta de novo em 60s — nada se acumula.
+setInterval(function(){
+  if(document.hidden) return;
+  if(document.querySelector('.chatpop')) return;
+  if(window._kbDragEl || window._kbMoved) return;
+  var cap=document.getElementById('captar');
+  if(cap && cap.style.display !== 'none') return;
+  var a=document.activeElement;
+  if(a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return;
+  if(a && a.isContentEditable) return;
+  location.reload();
+}, 60000);
 </script>
 {% endblock %}"""
 
@@ -11432,6 +11561,16 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="distnote">🤖 O agente dá o 1º toque e qualifica. O <b>vendedor da vez</b> é avisado, observa e
         <b>assume quando quiser</b>. Vale pra toda entrada nova que cai no chip da empresa — anúncio (tráfego pago),
         resposta de campanha e contato orgânico.</div>
+      {# O ESPELHO do alerta de cima, e nasceu do mesmo jeito: na conta 34 a
+         distribuição ficou LIGADA e o aviso DESLIGADO de 31/08 a 02/09/2026. O
+         rodízio repartiu 68 leads em 7 dias, certinho, e nenhum vendedor foi
+         avisado de nenhum — cada um só descobria o lead abrindo o painel.
+         Estado silencioso não se denuncia sozinho: por isso a tela denuncia. #}
+      {% if dist_cfg and dist_cfg.ativo and not dist_cfg.avisar %}
+      <div class="distalerta">⚠️ <b>Os leads estão sendo repartidos, mas ninguém é avisado.</b>
+        A distribuição está ligada e o aviso abaixo está apagado — o lead cai na fila do
+        vendedor e ele só descobre <b>abrindo o painel</b>. Ligue o aviso e salve.</div>
+      {% endif %}
       <div class="agrow"><div class="lab"><b>Avisar por e-mail e push</b><div>Chega na hora no app do vendedor, com link direto pra ficha do lead</div></div>
         <label class="sw"><input type="checkbox" name="avisar" {% if not dist_cfg or dist_cfg.avisar %}checked{% endif %}><span></span></label></div>
 

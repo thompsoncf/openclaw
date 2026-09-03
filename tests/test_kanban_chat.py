@@ -162,7 +162,14 @@ def test_uma_unica_query_de_conversas_pro_board_inteiro(monkeypatch, pool):
     2 chips batizados, campanha aparecendo mas o apelido do chip nunca) sem dado
     de banco pra confirmar a causa exata — a troca elimina qualquer chance de a
     lateral escolher uma conversa diferente da que o Inbox usa pro mesmo lead,
-    o que a torna uma correção segura mesmo sem a causa raiz 100% confirmada."""
+    o que a torna uma correção segura mesmo sem a causa raiz 100% confirmada.
+
+    São DUAS em lote desde 02/09/2026, não uma: a segunda traz a última mensagem
+    de cada lead pro card. Ela é separada de propósito — roda em savepoint e cai
+    calada em instalação sem `mensagens`, coisa que um join na primeira não
+    permitiria sem levar o funil junto. O que este teste protege continua sendo o
+    mesmo: o número não pode CRESCER com a quantidade de leads. Por isso o
+    assert é sobre duas consultas em 20 leads, e não sobre um número bonito."""
     for i in range(20):
         lid = _lead(pool, empresa=f"Lead {i}", whatsapp=f"8690000{i:04d}")
         if i % 2 == 0:
@@ -185,7 +192,11 @@ def test_uma_unica_query_de_conversas_pro_board_inteiro(monkeypatch, pool):
             return self._conn.__exit__(*a)
     monkeypatch.setattr(pool, "connection", lambda: _ConnSpy(real_connection()))
     _kanban_html(monkeypatch, pool)
-    assert len(chamadas) == 1, f"esperava 1 query em lote (não por lead), teve {len(chamadas)}: {chamadas}"
+    assert len(chamadas) == 2, (
+        f"esperava 2 queries em lote (conversas + última mensagem), não uma por "
+        f"lead; teve {len(chamadas)}: {chamadas}")
+    assert all("= any(" in q for q in chamadas), (
+        "alguma das consultas não é em lote — é o N+1 voltando pela porta dos fundos")
 
 
 def _trecho_card(html, empresa):
@@ -297,3 +308,109 @@ def test_apelido_do_chip_aparece_mesmo_sem_campanha_interna_nenhuma(monkeypatch,
     trecho = _trecho_card(_kanban_html(monkeypatch, pool), "Empório Sabor Norte")
     assert "📱 Chip 2 - Ads" in trecho, "apelido do chip não apareceu pra lead sem campanha interna"
     assert "📣" not in trecho, "não tem campanha_alvos nenhuma, não devia ter selo de campanha"
+
+
+# ===================================================================== 02/09/2026
+# A ÚLTIMA MENSAGEM NO CARD
+#
+# `mensagens` NÃO está no _SQL deste arquivo de propósito — é o que faz os testes
+# de cima exercitarem o caminho tolerante (savepoint + funil abre sem a prévia).
+# Quem precisa da tabela cria ela dentro do próprio teste.
+
+_MSG_SQL = """
+create table mensagens (id bigserial primary key, conversa_id bigint not null,
+  canal text not null default 'whatsapp',
+  direcao text not null check (direcao in ('in','out')),
+  texto text not null default '', criado_em timestamptz not null default now());
+"""
+
+
+def _com_mensagens(pool):
+    with pool.connection() as c:
+        c.execute(_MSG_SQL)
+        c.commit()
+
+
+def _msg(pool, conversa_id, direcao, texto, *, minutos=0):
+    with pool.connection() as c:
+        mid = c.execute(
+            "insert into mensagens (conversa_id, direcao, texto, criado_em) "
+            "values (%s,%s,%s, now() - make_interval(mins => %s)) returning id",
+            (conversa_id, direcao, texto, minutos)).fetchone()[0]
+        c.commit()
+    return mid
+
+
+def test_a_ultima_mensagem_do_cliente_aparece_no_card(monkeypatch, pool):
+    """O item 2 dos cinco ajustes: o card tinha o 💬 e não dizia o que havia
+    dentro. Na Prime eram 192 leads com mensagem não vista, todos com a mesma
+    cara de quem nunca falou."""
+    _com_mensagens(pool)
+    lid = _lead(pool, empresa="Padaria Bom Pão", whatsapp="86999998888")
+    cid = _conversa(pool, lid, "whatsapp")
+    _msg(pool, cid, "in", "queria saber o valor pra casamento em novembro")
+    html = _kanban_html(monkeypatch, pool)
+    card = _trecho_card(html, "Padaria Bom Pão")
+    assert "queria saber o valor pra casamento" in card
+    assert 'class="bolha"' in card, "mensagem do cliente nunca vista tem que acender a bolinha"
+
+
+def test_mensagem_que_o_vendedor_ja_viu_nao_acende_bolinha(monkeypatch, pool):
+    """`visto_ate_id` (188) é o que separa VI de RESPONDI. A mensagem continua no
+    card — o que muda é o alarme."""
+    _com_mensagens(pool)
+    lid = _lead(pool, empresa="Distribuidora Rio Poti", whatsapp="86988887777")
+    cid = _conversa(pool, lid, "whatsapp")
+    mid = _msg(pool, cid, "in", "bom dia, ainda tem data em outubro?")
+    with pool.connection() as c:
+        c.execute("update conversas set visto_ate_id=%s where id=%s", (mid, cid))
+        c.commit()
+    card = _trecho_card(_kanban_html(monkeypatch, pool), "Distribuidora Rio Poti")
+    assert "ainda tem data em outubro" in card
+    assert 'class="bolha"' not in card
+
+
+def test_o_que_o_vendedor_mandou_nunca_e_novidade_pra_ele(monkeypatch, pool):
+    _com_mensagens(pool)
+    lid = _lead(pool, empresa="Grupo Cerrado", whatsapp="86977776666")
+    cid = _conversa(pool, lid, "whatsapp")
+    _msg(pool, cid, "out", "mandei a proposta no seu e-mail")
+    card = _trecho_card(_kanban_html(monkeypatch, pool), "Grupo Cerrado")
+    assert "mandei a proposta" in card
+    assert 'class="bolha"' not in card
+    assert 'class="eu"' in card, "a mensagem do próprio vendedor tem que se identificar"
+
+
+def test_entre_dois_canais_vale_a_mensagem_mais_nova(monkeypatch, pool):
+    """O lead pode ter WhatsApp e e-mail. O card tem uma linha só — a mais nova."""
+    _com_mensagens(pool)
+    lid = _lead(pool, empresa="Papelaria Central", whatsapp="86966665555",
+                email="contato@central.com")
+    c_wa = _conversa(pool, lid, "whatsapp")
+    c_em = _conversa(pool, lid, "email")
+    _msg(pool, c_wa, "in", "falei no zap ontem", minutos=600)
+    _msg(pool, c_em, "in", "respondi por e-mail agora", minutos=1)
+    card = _trecho_card(_kanban_html(monkeypatch, pool), "Papelaria Central")
+    assert "respondi por e-mail agora" in card
+    assert "falei no zap ontem" not in card
+
+
+def test_lead_sem_mensagem_nenhuma_nao_ganha_linha_vazia(monkeypatch, pool):
+    _com_mensagens(pool)
+    lid = _lead(pool, empresa="Sem Conversa Ltda", whatsapp="86955554444")
+    _conversa(pool, lid, "whatsapp")
+    card = _trecho_card(_kanban_html(monkeypatch, pool), "Sem Conversa Ltda")
+    assert "kbmsg" not in card
+
+
+def test_mensagem_de_conversa_de_outra_conta_nao_vaza(monkeypatch, pool):
+    """Mesmo isolamento do selo: a prévia lê por conta_id, não por prospeccao_id."""
+    _com_mensagens(pool)
+    lid = _lead(pool, empresa="Vizinha Ltda", whatsapp="86944443333")
+    with pool.connection() as c:
+        cid = c.execute("insert into conversas (conta_id, prospeccao_id, canal) "
+                        "values (999,%s,'whatsapp') returning id", (lid,)).fetchone()[0]
+        c.commit()
+    _msg(pool, cid, "in", "segredo da conta vizinha")
+    card = _trecho_card(_kanban_html(monkeypatch, pool), "Vizinha Ltda")
+    assert "segredo da conta vizinha" not in card

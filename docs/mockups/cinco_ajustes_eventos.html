@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — Cinco ajustes do nicho eventos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   TOKENS — cópia fiel de web/tema.py (_TOKENS). A fonte da verdade é o tema.py.
+   ============================================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9; --roxo:#C9A3E0;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A;  --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --card:var(--surface); --card-2:var(--bg-2);
+  --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1180px;margin:0 auto;padding:34px 18px 100px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.7rem;font-weight:700}
+h2{font-size:1.18rem;font-weight:700;margin:0 0 .2rem}
+h3{font-size:.95rem;font-weight:600}
+a{color:var(--verde)}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
+  padding:.1rem .35rem;border-radius:4px;color:var(--text-dim)}
+
+.sec{margin-top:44px}
+.sec>.num{font-family:var(--mono);font-size:.72rem;color:var(--verde);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:78ch;margin-top:.5rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.86rem;margin-top:1rem;
+  color:var(--txt-mut);max-width:82ch}
+.nota b{color:var(--txt)}
+.alerta{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.alerta b{color:var(--ambar)}
+
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);
+  text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.76rem;
+  text-transform:uppercase;letter-spacing:.05em}
+.sim{color:var(--verde)} .nao{color:var(--coral)} .meio{color:var(--ambar)}
+
+/* ==========================================================================
+   RÉPLICAS. Classes copiadas das telas reais:
+   .kbcard  — o card do funil (web/painel_prospeccao.py)
+   .pend-*  — o painel "coisas pra conferir" (web/painel_agenda.py)
+   ========================================================================== */
+:root{--mut:var(--text-dim);--card2:var(--bg-2);--ink:var(--sobre-verde);
+  --text-faint:#5E6F66;--neon-fraco:rgba(37,211,102,.10)}
+
+.kbcol{display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--borda);
+  border-radius:14px;padding:.7rem;gap:.5rem;max-width:290px}
+.kbcol h4{margin:0 0 .2rem;font-size:.85rem;display:flex;align-items:center;
+  justify-content:space-between}
+.kbcnt{background:var(--card-2);border:1px solid var(--borda);border-radius:999px;
+  padding:.02rem .5rem;font-size:.72rem;color:var(--txt-mut)}
+.kbcard{background:var(--card);border:1px solid var(--borda);border-radius:11px;
+  padding:.6rem .65rem}
+.kbcard .emp{font-size:.88rem;font-weight:600;line-height:1.2;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.kbcard .sub{color:var(--txt-mut);font-size:.74rem;margin-top:.22rem}
+.kbcard .ft{display:flex;align-items:center;justify-content:space-between;gap:.3rem;
+  margin-top:.42rem;flex-wrap:wrap}
+.kbcard .camp{background:var(--neon-fundo);border:1px solid var(--neon-borda);
+  border-radius:8px;padding:.22rem .5rem;font-size:.7rem;line-height:1.3;
+  color:var(--verde-claro);margin-top:.34rem}
+/* o que este mockup propõe acrescentar ao card */
+.kbcard .msg{display:flex;gap:.4rem;align-items:flex-start;margin-top:.4rem;
+  padding-top:.4rem;border-top:1px solid var(--borda);font-size:.74rem;
+  color:var(--txt-mut);line-height:1.35}
+.kbcard .msg .bolha{flex:0 0 auto;width:.5rem;height:.5rem;border-radius:50%;
+  background:var(--neon);margin-top:.3rem}
+.kbcard .msg .txt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kbcard .msg .qdo{flex:0 0 auto;color:var(--text-faint);font-family:var(--mono);
+  font-size:.68rem}
+.kbcard.nova{border-color:var(--neon-borda)}
+.kbcard.nova .msg .txt{color:var(--txt)}
+
+.pend{background:linear-gradient(180deg,var(--coral-fundo),var(--card));
+  border:1px solid var(--coral-borda);border-radius:14px;padding:14px 16px 6px}
+.pend.calmo{background:linear-gradient(180deg,var(--neon-fundo),var(--card));
+  border-color:var(--neon-borda)}
+.pend-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.pend-h h2{font-size:1rem;margin:0;color:var(--coral)}
+.pend.calmo .pend-h h2{color:var(--neon)}
+.pend-sub{font-size:.74rem;color:var(--mut)}
+.pend-l{display:flex;align-items:center;gap:10px;padding:11px 0;
+  border-top:1px solid var(--borda)}
+.pend-ic{flex:0 0 auto;font-size:.95rem}
+.pend-t{min-width:0;flex:1}
+.pend-t b{display:block;font-size:.88rem;line-height:1.35}
+.pend-t small{display:block;font-size:.75rem;color:var(--mut);margin-top:2px}
+.pend-b{flex:0 0 auto;border:1px solid var(--borda);background:var(--card2);
+  color:var(--txt);border-radius:8px;padding:5px 12px;font-size:.78rem;font-weight:600;
+  text-decoration:none;white-space:nowrap}
+.pend-b.forte{background:var(--verde);color:var(--ink);border-color:var(--verde)}
+.pend-b.quieto{background:none;color:var(--txt-mut);font-weight:500}
+
+/* linha de evento da agenda (item 3) */
+.evrow{display:flex;align-items:center;gap:.6rem;padding:.6rem .7rem;
+  border:1px solid var(--borda);border-radius:11px;background:var(--card);
+  margin-bottom:.5rem}
+.evrow .h{font-family:var(--mono);font-size:.8rem;color:var(--txt-mut);flex:0 0 auto}
+.evrow .t{flex:1;min-width:0;font-size:.88rem;font-weight:600}
+.evrow .t small{display:block;font-weight:400;font-size:.74rem;color:var(--txt-mut)}
+.evb{border:1px solid var(--borda);background:var(--bg);color:var(--txt-mut);
+  border-radius:8px;padding:.3rem .6rem;font-size:.76rem;cursor:pointer;
+  white-space:nowrap;font-family:inherit}
+.evb.perigo{border-color:var(--coral-borda);color:var(--coral)}
+.evb:hover{border-color:var(--verde)}
+
+/* interruptor (item 1) */
+.sw{display:flex;align-items:center;gap:.6rem;padding:.6rem 0;
+  border-bottom:1px solid var(--borda)}
+.sw:last-child{border-bottom:0}
+.sw .tog{width:42px;height:24px;border-radius:99px;background:#2a3550;position:relative;
+  flex:0 0 auto}
+.sw .tog.on{background:var(--verde)}
+.sw .tog::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;
+  border-radius:50%;background:#fff}
+.sw .tog.on::after{left:21px}
+.sw .rot{flex:1;font-size:.86rem}
+.sw .rot small{display:block;color:var(--txt-mut);font-size:.75rem}
+
+/* documento (item 4) */
+.doc{border:1px solid var(--borda);border-radius:12px;background:var(--card);
+  overflow:hidden}
+.doc .h{background:var(--bg-2);padding:.5rem .8rem;font-size:.75rem;
+  color:var(--txt-mut);border-bottom:1px solid var(--borda);display:flex;
+  justify-content:space-between;font-family:var(--mono)}
+.doc .b{padding:.85rem}
+.tag{display:inline-block;font-size:.66rem;font-weight:700;border-radius:5px;
+  padding:.08rem .4rem;letter-spacing:.02em}
+.tag.viva{border:1px solid var(--neon-borda);background:var(--neon-fundo);color:var(--neon)}
+.tag.velha{border:1px solid var(--borda);background:var(--bg-2);color:var(--text-faint)}
+.tag.nova{border:1px solid var(--azul-borda);background:rgba(34,158,217,.10);color:var(--azul)}
+
+.par{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:1rem;align-items:start}
+@media (max-width:900px){.par{grid-template-columns:1fr}}
+.rot-tela{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--txt-mut);margin-bottom:.45rem}
+.rot-tela.hoje{color:var(--coral)} .rot-tela.novo{color:var(--verde)}
+.quadro{background:var(--card);border:1px solid var(--borda);border-radius:14px;
+  overflow:hidden}
+.quadro>.cap{background:var(--bg-2);padding:.5rem .85rem;font-size:.72rem;
+  color:var(--txt-mut);border-bottom:1px solid var(--borda);font-family:var(--mono);
+  display:flex;justify-content:space-between}
+.quadro>.miolo{padding:14px 16px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;
+  margin-top:1rem}
+.card{background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.85rem}
+.card .r{display:block;font-size:.72rem;color:var(--txt-mut);margin-bottom:.3rem}
+.card p{font-size:.8rem;color:var(--txt-mut);margin-top:.35rem}
+.big{font-family:var(--mono);font-size:1.5rem;font-weight:700;display:block}
+.big.ruim{color:var(--coral)} .big.bom{color:var(--verde)} .big.azul{color:var(--azul)}
+.prio{display:grid;grid-template-columns:2.2rem minmax(0,1fr) 7rem;gap:.7rem;
+  align-items:start;padding:.7rem 0;border-bottom:1px solid var(--borda);font-size:.86rem}
+.prio:last-child{border-bottom:0}
+.prio .n{font-family:var(--mono);font-size:1.2rem;font-weight:700;color:var(--verde)}
+.prio .q{color:var(--txt-mut);font-size:.82rem;margin-top:.2rem}
+.prio .t{font-size:.72rem;text-align:right;color:var(--txt-mut);font-family:var(--mono)}
+.prio b{color:var(--txt)}
+
+/* impressão: nada de bloco cortado no meio da página */
+@media print{
+  body{max-width:none;padding:22px 20px}
+  .sec{margin-top:34px}
+  .quadro,.card,.nota,.pend,.doc,.prio,.kbcol,.evrow,.sw,
+  table.diag tr{break-inside:avoid}
+  h1,h2,h3,.sec>.num,.rot-tela{break-after:avoid}
+  .par{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+
+<h1>Cinco ajustes no nicho eventos</h1>
+<p class="lede">Olhei os cinco na conta da Prime. Três deles são a mesma doença:
+<b>a coisa existe e não fala</b> — o rodízio distribui e não avisa, o funil tem a
+conversa e não mostra, o alerta de agenda detecta e não silencia. Os outros dois são
+portas que faltam.</p>
+<p class="lede" style="font-size:.82rem;color:var(--text-faint);margin-top:.6rem">
+Medido na conta 34 (Prime Eventos) em 02/09/2026. Nada foi alterado. As classes de
+estilo são cópia das reais (<code>.kbcard</code> do funil, <code>.pend-*</code> da agenda).</p>
+
+<!-- ================================================================ 1 -->
+<div class="sec">
+  <div class="num">1 · distribuição de leads</div>
+  <h2>O rodízio funciona. Ninguém avisa o vendedor.</h2>
+  <p class="lede">Primeiro a boa notícia, porque ela muda o que precisa ser feito:
+  <b>a distribuição está certa</b>. Nos últimos 7 dias foram 23, 24 e 21 leads para
+  Pedro, Jacqueline e Thiago.</p>
+
+  <div class="cards">
+    <div class="card"><span class="r">Pedro · 7 dias</span><span class="big">23</span></div>
+    <div class="card"><span class="r">Jacqueline · 7 dias</span><span class="big">24</span></div>
+    <div class="card"><span class="r">Thiago · 7 dias</span><span class="big">21</span></div>
+    <div class="card"><span class="r">leads sem dono</span><span class="big bom">4</span>
+      <p>de 255 — o rodízio pega quase tudo</p></div>
+  </div>
+
+  <div class="nota alerta"><b>O que está desligado é o aviso.</b> Na configuração da
+  conta, <code>avisar = false</code> e <code>aviso_zap = false</code>. O lead cai na
+  fila do vendedor e ele só descobre abrindo o painel — não chega e-mail nem WhatsApp.
+  Existe até um texto de fábrica pronto, escrito para esse aviso, que nunca foi usado.</div>
+
+  <div class="par">
+    <div>
+      <div class="rot-tela hoje">Configuração · hoje</div>
+      <div class="quadro"><div class="cap"><span>distribuição de leads</span><span>conta 34</span></div>
+      <div class="miolo">
+        <div class="sw"><span class="tog on"></span>
+          <span class="rot">Distribuir automaticamente<small>3 vendedores na fila</small></span></div>
+        <div class="sw"><span class="tog"></span>
+          <span class="rot">Avisar o vendedor por e-mail<small>desligado</small></span></div>
+        <div class="sw"><span class="tog"></span>
+          <span class="rot">Avisar por WhatsApp<small>desligado</small></span></div>
+      </div></div>
+    </div>
+    <div>
+      <div class="rot-tela novo">O que o vendedor passa a receber</div>
+      <div class="quadro"><div class="cap"><span>WhatsApp do vendedor</span><span>texto de fábrica</span></div>
+      <div class="miolo" style="font-size:.86rem;line-height:1.6">
+        🔥 <b>Jacqueline, caiu um lead pra você!</b><br><br>
+        <b>Maysa Carneiro</b> acabou de chamar no WhatsApp da Prime Eventos.<br>
+        <i>"Oi, queria saber o valor pra casamento em novembro"</i><br><br>
+        <span style="color:var(--verde)">Atenda por aqui: zaq.app/cockpit/…</span>
+      </div></div>
+      <p class="legenda-lat">O texto já está no código como padrão e é editável. Ligar
+      o interruptor é o trabalho inteiro — não há nada para construir aqui.</p>
+    </div>
+  </div>
+
+  <div class="nota"><b>Uma pergunta que eu não decido:</b> ligar o WhatsApp usa o chip
+  da empresa para falar com o time. Se preferir só e-mail no começo, é um interruptor
+  a menos e não muda mais nada.</div>
+</div>
+
+<!-- ================================================================ 2 -->
+<div class="sec">
+  <div class="num">2 · mensagens no funil</div>
+  <h2>O cliente respondeu e o card não conta</h2>
+  <p class="lede">O card do funil mostra nome, cidade, valor e o botão 💬 — mas
+  <b>não mostra a última mensagem</b>, nem quando ela chegou, nem se há algo não lido.
+  E a página <b>não se atualiza sozinha</b>: o polling de 4 s é da Caixa de Comunicação,
+  o reload de 60 s é do Radar. O funil não tem nenhum dos dois.</p>
+
+  <div class="cards">
+    <div class="card"><span class="r">leads no funil com conversa</span><span class="big">253</span></div>
+    <div class="card"><span class="r">com mensagem não vista</span><span class="big ruim">192</span></div>
+    <div class="card"><span class="r">responderam nas últimas 48h</span><span class="big azul">3</span>
+      <p>são estes que importam — e estão invisíveis</p></div>
+  </div>
+
+  <div class="par">
+    <div>
+      <div class="rot-tela hoje">Card do funil · hoje</div>
+      <div class="kbcol">
+        <h4>Em negociação <span class="kbcnt">12</span></h4>
+        <div class="kbcard">
+          <div class="emp">Maysa Carneiro</div>
+          <div class="sub">Teresina/PI · R$ 9.650</div>
+          <div class="camp">📣 Tráfego pago <span class="chip">· CP Thiago</span></div>
+          <div class="ft"><span class="mut" style="font-size:.72rem">💬 ✉️</span>
+            <span class="mut" style="font-size:.72rem">Jacqueline</span></div>
+        </div>
+        <div class="kbcard">
+          <div class="emp">Agna Luíza</div>
+          <div class="sub">Teresina/PI · R$ 7.800</div>
+          <div class="ft"><span class="mut" style="font-size:.72rem">💬</span>
+            <span class="mut" style="font-size:.72rem">Pedro</span></div>
+        </div>
+      </div>
+      <p class="legenda-lat">Nada aqui diz que a Maysa respondeu hoje de manhã. Para
+      descobrir, o vendedor abre um card por vez.</p>
+    </div>
+    <div>
+      <div class="rot-tela novo">Card do funil · proposto</div>
+      <div class="kbcol">
+        <h4>Em negociação <span class="kbcnt">12</span></h4>
+        <div class="kbcard nova">
+          <div class="emp">Maysa Carneiro</div>
+          <div class="sub">Teresina/PI · R$ 9.650</div>
+          <div class="camp">📣 Tráfego pago <span class="chip">· CP Thiago</span></div>
+          <div class="msg"><span class="bolha"></span>
+            <span class="txt">"Consigo fechar essa semana?"</span>
+            <span class="qdo">09:14</span></div>
+          <div class="ft"><span class="mut" style="font-size:.72rem">💬 ✉️</span>
+            <span class="mut" style="font-size:.72rem">Jacqueline</span></div>
+        </div>
+        <div class="kbcard">
+          <div class="emp">Agna Luíza</div>
+          <div class="sub">Teresina/PI · R$ 7.800</div>
+          <div class="msg" style="opacity:.6">
+            <span class="txt">você: "Segue a proposta 👋"</span>
+            <span class="qdo">ontem</span></div>
+          <div class="ft"><span class="mut" style="font-size:.72rem">💬</span>
+            <span class="mut" style="font-size:.72rem">Pedro</span></div>
+        </div>
+      </div>
+      <p class="legenda-lat">A <b>bolinha verde</b> e o texto em branco marcam o que
+      chegou e ninguém viu. Mensagem que você mesmo mandou fica apagada, com o "você:"
+      na frente — não é pendência.</p>
+    </div>
+  </div>
+
+  <div class="nota"><b>E a tela passa a se atualizar sozinha</b>, do mesmo jeito que o
+  Radar já faz: recarrega a cada 60 s, e só quando a aba está visível — para não
+  competir com quem está atendendo. Os webhooks escrevem na hora, então 60 s de atraso
+  é menos que a granularidade do dado.</div>
+</div>
+
+<!-- ================================================================ 3 -->
+<div class="sec">
+  <div class="num">3 · excluir na agenda</div>
+  <h2>Cancelar guarda história. Excluir apaga engano.</h2>
+  <p class="lede">Você pediu os dois separados, e concordo — são coisas diferentes.
+  O botão que existe hoje chama <b>Cancelar</b> e marca <code>status='cancelado'</code>:
+  a festa existiu, o cliente desistiu, e isso é história que a empresa quer manter.
+  Falta a saída para o que <b>nunca deveria ter existido</b>: o teste, o duplicado, o
+  dedo errado.</p>
+
+  <div class="par">
+    <div>
+      <div class="rot-tela hoje">Hoje</div>
+      <div class="evrow"><span class="h">19:00</span>
+        <span class="t">Aniversário — Francisca Nilda<small>Aniversário · 120 convidados</small></span>
+        <button class="evb">Remarcar</button><button class="evb">Cancelar</button></div>
+      <p class="legenda-lat">Um caminho só. O evento criado por engano fica na lista
+      de cancelados para sempre, misturado com as desistências de verdade — e a Prime
+      já tem 7 cancelados.</p>
+    </div>
+    <div>
+      <div class="rot-tela novo">Proposto</div>
+      <div class="evrow"><span class="h">19:00</span>
+        <span class="t">Aniversário — Francisca Nilda<small>Aniversário · 120 convidados</small></span>
+        <button class="evb">Remarcar</button><button class="evb">Cancelar</button>
+        <button class="evb perigo">Excluir</button></div>
+      <p class="legenda-lat">O <b>Excluir</b> some com a linha de vez, e pergunta antes
+      com um texto que diz o que se perde.</p>
+    </div>
+  </div>
+
+  <div class="nota alerta"><b>Com trava, porque isto apaga de verdade.</b> O Excluir
+  <b>não aparece</b> quando o compromisso tem orçamento ligado, contrato, sinal pago ou
+  pré-reserva confirmada — nesses casos há dinheiro e documento apontando para ele, e
+  apagar deixaria o sistema falando sozinho. Nesses o caminho continua sendo Cancelar.
+  E é ação de <b>dono</b>, não de vendedor.</div>
+
+  <div class="nota">Na Prime isso alcançaria poucos: dos 66 compromissos, 3 vieram de
+  orçamento e 10 de lead. O resto foi digitado à mão — que é justamente onde o engano
+  mora.</div>
+</div>
+
+<!-- ================================================================ 4 -->
+<div class="sec">
+  <div class="num">4 · termo aditivo</div>
+  <h2>O banco está pronto. Falta a porta.</h2>
+  <p class="lede">Este é o mais curioso dos cinco. A tabela <code>contratos</code> já
+  tem a coluna <code>substitui_id</code>, e o índice único que garante "um contrato
+  vivo por orçamento" <b>já foi desenhado para deixar o aditivo caber</b>
+  (<code>where substitui_id is null</code>). Duas telas já mandam o vendedor
+  <i>"fazer um aditivo"</i> quando ele tenta editar proposta com contrato assinado.</p>
+
+  <div class="nota alerta"><b>E nenhuma linha de código cria um aditivo.</b> Não há
+  rota, não há botão, não há tela. O sistema oferece uma saída que não existe — quem
+  segue a instrução chega num lugar sem porta.</div>
+
+  <div class="par">
+    <div>
+      <div class="rot-tela hoje">Contrato assinado · hoje</div>
+      <div class="doc"><div class="h"><span>contrato nº 7</span><span>assinado</span></div>
+      <div class="b">
+        <div style="font-size:.86rem;margin-bottom:.5rem"><b>Locação — Francisca Nilda</b>
+          <span class="tag viva">assinado</span></div>
+        <div style="font-size:.8rem;color:var(--txt-mut)">R$ 7.800,00 · assinado em
+          01/09/2026 por Francisca N. Carvalho</div>
+        <div style="margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--borda);
+          font-size:.8rem;color:var(--coral)">
+          ⚠️ Esta proposta tem contrato assinado e não pode ser editada — faça um aditivo.</div>
+      </div></div>
+      <p class="legenda-lat">A mensagem aparece. O botão não.</p>
+    </div>
+    <div>
+      <div class="rot-tela novo">Proposto</div>
+      <div class="doc"><div class="h"><span>contrato nº 7</span><span>histórico</span></div>
+      <div class="b">
+        <div style="font-size:.86rem;margin-bottom:.35rem"><b>Aditivo nº 8</b>
+          <span class="tag nova">vigente</span></div>
+        <div style="font-size:.78rem;color:var(--txt-mut);margin-bottom:.7rem">
+          R$ 9.200,00 · aguardando assinatura · <i>"acréscimo de 40 convidados"</i></div>
+        <div style="font-size:.86rem;margin-bottom:.35rem;opacity:.6">Contrato nº 7
+          <span class="tag velha">substituído</span></div>
+        <div style="font-size:.78rem;color:var(--text-faint)">R$ 7.800,00 · assinado em
+          01/09/2026 — continua no histórico</div>
+        <button class="evb" style="margin-top:.9rem;border-color:var(--neon-borda);
+          color:var(--neon)">＋ Fazer aditivo</button>
+      </div></div>
+      <p class="legenda-lat">O aditivo é um <b>contrato novo</b> que aponta para o
+      anterior. Os dois ficam: o velho não é apagado nem reescrito — ele só deixa de
+      ser o vigente.</p>
+    </div>
+  </div>
+
+  <div class="nota"><b>Sem migração.</b> A coluna, o índice e a numeração por conta já
+  existem desde a migração 164. O que entra é a rota que cria o aditivo (copiando o
+  texto do anterior para o dono editar), o botão e o bloco de histórico.</div>
+</div>
+
+<!-- ================================================================ 5 -->
+<div class="sec">
+  <div class="num">5 · choques de data</div>
+  <h2>Precisei te corrigir num número</h2>
+  <p class="lede">Eu disse "10 dias com mais de um compromisso". O total estava certo,
+  mas <b>9 desses dias já passaram</b>. O painel só olha o futuro — e no futuro existe
+  <b>um</b> dia.</p>
+
+  <div class="cards">
+    <div class="card"><span class="r">dias com choque · passado</span><span class="big">9</span>
+      <p>não têm o que resolver</p></div>
+    <div class="card"><span class="r">dias com choque · futuro</span><span class="big azul">1</span></div>
+    <div class="card"><span class="r">e esse 1 é</span><span class="big bom">falso</span>
+      <p>visita 10:00 + festa 19:00</p></div>
+  </div>
+
+  <div class="nota alerta"><b>O item se inverte:</b> não falta detectar choque — sobra
+  alarme. O único dia marcado em vermelho é 12/09, com uma <b>visita às 10:00</b> e um
+  <b>aniversário às 19:00</b>. Isso não é conflito: é a rotina da casa. E não existe
+  jeito de dizer "conferi, está tudo certo" — então a bandeira vermelha fica lá para
+  sempre, e lista que nunca esvazia é lista que ninguém abre.</div>
+
+  <p class="lede" style="margin-top:1rem">A detecção em si é boa e eu não mexeria nela.
+  Ela compara o <b>dia</b>, não o horário, de propósito — duas festas no mesmo salão às
+  17h e às 20h não se sobrepõem por hora nenhuma e ainda assim são duas festas. O que
+  falta é o botão de encerrar a pergunta.</p>
+
+  <div class="par">
+    <div>
+      <div class="rot-tela hoje">Agenda · hoje</div>
+      <div class="pend">
+        <div class="pend-h"><h2>⚠️ 1 coisa pra conferir</h2>
+          <span class="pend-sub">some daqui sozinho quando você resolver</span></div>
+        <div class="pend-l">
+          <span class="pend-ic">🔴</span>
+          <div class="pend-t"><b>sáb, 12/09 — 2 eventos no mesmo dia</b>
+            <small>10:00 Visita — Agna Luíza · 19:00 Aniversário — Francisca Nilda</small></div>
+          <a class="pend-b forte">Abrir o dia</a></div>
+      </div>
+      <p class="legenda-lat">"Some daqui sozinho quando você resolver" — mas não há o
+      que resolver, e por isso ele não some. A promessa da própria tela não se cumpre.</p>
+    </div>
+    <div>
+      <div class="rot-tela novo">Proposto</div>
+      <div class="pend">
+        <div class="pend-h"><h2>⚠️ 1 coisa pra conferir</h2>
+          <span class="pend-sub">some daqui sozinho quando você resolver</span></div>
+        <div class="pend-l">
+          <span class="pend-ic">🔴</span>
+          <div class="pend-t"><b>sáb, 12/09 — 2 eventos no mesmo dia</b>
+            <small>10:00 Visita — Agna Luíza · 19:00 Aniversário — Francisca Nilda</small></div>
+          <a class="pend-b forte">Abrir o dia</a>
+          <button class="evb">Está certo</button></div>
+      </div>
+      <div style="margin-top:1rem"></div>
+      <div class="rot-tela novo">Depois de conferir</div>
+      <div class="pend calmo">
+        <div class="pend-h"><h2>✓ Nada pra conferir</h2>
+          <span class="pend-sub">a agenda está em dia</span></div>
+      </div>
+      <p class="legenda-lat">Um toque em <b>Está certo</b> e aquele dia para de
+      perguntar. Se um compromisso <b>novo</b> cair no mesmo dia depois disso, o alerta
+      volta — a resposta valia para os dois que estavam ali, não para o dia inteiro
+      até o fim dos tempos.</p>
+    </div>
+  </div>
+
+  <div class="nota"><b>Isto não some com nada.</b> "Está certo" é uma marca no dia, não
+  apagar evento. E o botão <b>Abrir o dia</b> continua ali, para quando o choque for de
+  verdade.</div>
+</div>
+
+<!-- ================================================================ ordem -->
+<div class="sec">
+  <div class="num">6 · o que eu faria, e em que ordem</div>
+  <h2>Do mais barato para o mais caro</h2>
+
+  <div class="prio"><div class="n">1</div>
+    <div><b>Ligar o aviso ao vendedor.</b>
+      <div class="q">Não é código: é interruptor. O rodízio, o texto e o envio já
+      existem, prontos e sem uso. É a única dos cinco que dá para fazer hoje e sentir
+      amanhã.</div></div>
+    <div class="t">configuração<br>zero código</div></div>
+
+  <div class="prio"><div class="n">2</div>
+    <div><b>"Está certo" no choque de data.</b>
+      <div class="q">Um campo e um botão. Conserta a promessa que a tela já faz e tira
+      a bandeira vermelha do dia normal — hoje ela está errada em 1 de 1.</div></div>
+    <div class="t">campo novo<br>agenda</div></div>
+
+  <div class="prio"><div class="n">3</div>
+    <div><b>Última mensagem no card do funil + atualização automática.</b>
+      <div class="q">A consulta que traz a última mensagem por lead é uma só, em lote,
+      igual à que o card já faz para o botão 💬. O reload de 60 s é cópia do Radar.</div></div>
+    <div class="t">sem migração<br>funil</div></div>
+
+  <div class="prio"><div class="n">4</div>
+    <div><b>Excluir na agenda, ao lado de Cancelar.</b>
+      <div class="q">Pequeno, mas apaga de verdade — então a maior parte do trabalho é
+      a trava: nada com orçamento, contrato ou sinal, e só o dono.</div></div>
+    <div class="t">sem migração<br>agenda</div></div>
+
+  <div class="prio"><div class="n">5</div>
+    <div><b>A tela do aditivo.</b>
+      <div class="q">A maior das cinco, e a única que mexe em documento assinado — por
+      isso é a última. O banco já está pronto desde a 164; falta a rota, o botão e o
+      histórico dos dois contratos.</div></div>
+    <div class="t">sem migração<br>contrato</div></div>
+
+  <div class="nota" style="margin-top:1.4rem"><b>Nenhuma das cinco pede migração.</b>
+  A do choque precisa de uma coluna nova em <code>eventos_agenda</code> (ou uma tabela
+  minúscula de "dias conferidos") — decido isso na implementação e digo qual foi.</div>
+
+  <div class="nota alerta"><b>Uma coisa que não está aqui e talvez devesse.</b> Os 66
+  compromissos da Prime seguem sem cliente ligado, e o botão que resolve isso subiu em
+  31/08 e não foi usado nenhuma vez. Não entrou nesta lista porque você não pediu — mas
+  se aquilo não está sendo achado na tela, é sintoma de outra coisa, e eu olharia.</div>
+</div>
+
+<div class="rodape">Mockup para aprovação · 02/09/2026 · dados medidos na conta 34
+(Prime Eventos) · nada foi alterado no sistema.</div>
+
+</body>
+</html>

@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Passo a passo — orçamento pelo celular</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   TOKENS — cópia fiel de web/tema.py (_TOKENS). A fonte da verdade é o tema.py.
+   ============================================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9; --roxo:#C9A3E0;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A;  --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --card:var(--surface); --card-2:var(--bg-2);
+  --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1180px;margin:0 auto;padding:34px 18px 100px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.7rem;font-weight:700}
+h2{font-size:1.18rem;font-weight:700;margin:0 0 .2rem}
+h3{font-size:.95rem;font-weight:600}
+a{color:var(--verde)}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
+  padding:.1rem .35rem;border-radius:4px;color:var(--text-dim)}
+
+.sec{margin-top:44px}
+.sec>.num{font-family:var(--mono);font-size:.72rem;color:var(--verde);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:78ch;margin-top:.5rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.86rem;margin-top:1rem;
+  color:var(--txt-mut);max-width:82ch}
+.nota b{color:var(--txt)}
+.alerta{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.alerta b{color:var(--ambar)}
+
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);
+  text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.76rem;
+  text-transform:uppercase;letter-spacing:.05em}
+.sim{color:var(--verde)} .nao{color:var(--coral)} .meio{color:var(--ambar)}
+
+/* ==========================================================================
+   RÉPLICA DAS DUAS TELAS. As classes abaixo são cópia das reais:
+   .oc-* de web/painel_servicos.py (montador do painel, desktop)
+   .srv/.qtd/.dsc/.pil/.cmp/.rodape-b de web/painel_cockpit.py (app do vendedor)
+   Copiadas em vez de reescritas de propósito: mockup com CSS próprio mostra
+   uma tela que não existe.
+   ========================================================================== */
+:root{--linha:var(--line);--fundo-2:var(--bg-2);--ink:var(--sobre-verde);
+  --text-faint:#5E6F66;--neon-fraco:rgba(37,211,102,.10)}
+
+/* ---------- desktop: a linha do serviço ---------- */
+.oc-mod{display:grid;grid-template-columns:auto minmax(0,1fr) 56px 96px 104px 92px auto;
+  gap:.55rem;align-items:center;padding:.6rem 0;border-bottom:1px solid var(--borda)}
+.oc-mod:last-child{border-bottom:0}
+.oc-tog{width:42px;height:24px;border-radius:99px;border:none;cursor:pointer;position:relative;
+  background:#2a3550;flex:none;padding:0}
+.oc-tog.on{background:var(--verde-claro)}
+.oc-tog::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;
+  border-radius:50%;background:#fff}
+.oc-tog.on::after{left:21px}
+.oc-num{display:flex;align-items:center;gap:3px;border:1px solid var(--borda);border-radius:7px;
+  padding:.25rem .45rem;background:var(--bg);flex-direction:column;align-items:stretch}
+.oc-num span{font-size:.58rem;color:var(--txt-mut);text-transform:uppercase;
+  letter-spacing:.03em;white-space:nowrap;text-align:right}
+.oc-num input{width:100%;border:none;background:transparent;color:var(--txt);text-align:right;
+  font-size:.86rem;font-variant-numeric:tabular-nums;padding:.35rem 0;font-family:inherit}
+.oc-nome-linha{display:flex;gap:.5rem;align-items:center;min-width:0}
+.svc-thumb{width:34px;height:34px;flex:0 0 34px;border-radius:7px;border:1px solid var(--borda);
+  background:var(--bg);display:grid;place-items:center;color:var(--txt-mut);font-size:1rem}
+.oc-cat{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--txt-mut)}
+.oc-nome b{font-size:.9rem}
+.oc-desc-preview{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;
+  font-size:.78rem;color:var(--txt-mut)}
+.oc-sub{display:flex;flex-direction:column;gap:.15rem;text-align:right}
+.oc-sub span{font-size:.62rem;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-mut)}
+.oc-sub b{font-size:.9rem;color:var(--verde-claro);white-space:nowrap}
+.oc-sub-risc{display:block;font-size:.72rem;color:var(--txt-mut);text-decoration:line-through}
+.oc-dpar{display:flex;align-items:stretch;width:100%}
+.oc-dpar>input{flex:1;min-width:0;text-align:right;border-radius:8px 0 0 8px;border:1px solid var(--linha);
+  border-right:0;background:var(--bg);color:var(--txt);font:inherit;font-size:.82rem;padding:.2rem .35rem}
+.oc-dtog{display:flex;border:1px solid var(--linha);border-left:0;border-radius:0 8px 8px 0;overflow:hidden}
+.oc-dtog button{border:0;background:var(--fundo-2);color:var(--txt-mut);font-size:.72rem;
+  padding:0 .5rem;cursor:pointer;font-weight:600;min-width:2rem;font-family:inherit}
+.oc-dtog button.on{background:var(--verde);color:var(--sobre-verde)}
+.oc-rowacts{display:flex;gap:.35rem;white-space:nowrap}
+.oc-ic{background:var(--bg);border:1px solid var(--borda);color:var(--txt-mut);cursor:pointer;
+  font-size:.85rem;width:30px;height:30px;padding:0;border-radius:8px;display:inline-flex;
+  align-items:center;justify-content:center}
+.oc-head{display:grid;grid-template-columns:auto minmax(0,1fr) 56px 96px 104px 92px auto;
+  gap:.55rem;padding:0 0 .3rem;font-size:.6rem;color:var(--txt-mut);text-transform:uppercase;
+  letter-spacing:.05em;font-weight:600}
+.oc-head i{font-style:normal;text-align:right}
+
+/* ---------- app do vendedor (cockpit) ---------- */
+.fone{max-width:352px;border:1px solid var(--borda);border-radius:22px;overflow:hidden;
+  background:var(--bg);display:flex;flex-direction:column}
+.fone .hdr{background:var(--surface);padding:.7rem 1.1rem;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:.6rem;font-size:.9rem;font-weight:600}
+.fone .hdr .v{color:var(--text-dim);font-weight:400}
+.secao{padding:.9rem 1.1rem 0}
+.secao .rot{font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--text-faint);margin-bottom:.5rem}
+.srv{display:flex;align-items:center;gap:.75rem;padding:.7rem 1.1rem;
+  border-bottom:1px solid var(--line)}
+.srv .ck{width:22px;height:22px;flex-shrink:0;border-radius:7px;border:1.5px solid var(--line);
+  display:grid;place-items:center;font-size:.8rem;color:var(--sobre-verde)}
+.srv.on .ck{background:var(--neon);border-color:var(--neon)}
+.srv .m{flex:1;min-width:0}
+.srv .m b{font-size:.92rem;font-weight:600}
+.srv .m small{display:block;color:var(--text-faint);font-size:.76rem}
+.srv .pr{flex-shrink:0;font-family:var(--mono);font-size:.8rem;color:var(--text-dim);text-align:right}
+.srv.on .pr{color:var(--neon)}
+.srv .pr s{display:block;color:var(--text-faint);font-size:.72rem;text-decoration:line-through}
+.qtd{display:inline-flex;align-items:center;gap:.45rem;margin-top:.4rem}
+.qtd button{width:24px;height:24px;border-radius:7px;border:1px solid var(--line);
+  background:var(--surface);color:var(--text);font:inherit;font-size:.9rem;cursor:pointer;
+  line-height:1;padding:0}
+.qtd span{font-family:var(--mono);font-size:.82rem;min-width:14px;text-align:center}
+.qtd .u{font-family:var(--mono);font-size:.76rem;color:var(--text-faint);margin-left:.2rem}
+.dsc{display:inline-flex;align-items:center;gap:.4rem;margin-top:.42rem}
+.pil{display:inline-flex;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;
+  overflow:hidden;flex-shrink:0}
+.pil button{border:0;background:none;font-family:var(--mono);font-size:.74rem;
+  padding:.22rem .48rem;color:var(--text-faint);cursor:pointer;line-height:1.2}
+.pil button.on{background:var(--neon);color:var(--ink);font-weight:700}
+.cmp{font-family:var(--mono);font-size:.8rem;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:8px;padding:.2rem .42rem;width:60px;min-width:0;color:var(--text)}
+.dsc .tag{font-family:var(--mono);font-size:.7rem;color:var(--neon);white-space:nowrap}
+.rodape-b{border-top:1px solid var(--line);background:var(--bg);padding:.8rem 1.1rem}
+.rodape-b .dlin{display:flex;justify-content:space-between;align-items:center;gap:.7rem;
+  font-size:.82rem;color:var(--text-dim);padding:.1rem 0}
+.rodape-b .dlin b{font-family:var(--mono);font-weight:400;color:var(--text)}
+.rodape-b .tot{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;
+  margin-bottom:.6rem;font-size:.85rem;color:var(--text-dim)}
+.rodape-b .tot b{font-family:var(--mono);font-size:1rem;color:var(--neon)}
+.btn{width:100%;background:var(--neon);color:var(--sobre-verde);border:0;border-radius:12px;
+  padding:.75rem;font:inherit;font-weight:700;font-size:.9rem;cursor:pointer}
+.vazio-cat{padding:1rem 1.1rem;color:var(--text-dim);font-size:.86rem;line-height:1.5}
+.avulso{display:flex;gap:.4rem;padding:0 1.1rem .9rem}
+.avulso input{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:10px;color:var(--text);padding:.55rem .7rem;font-family:inherit;font-size:.85rem}
+.avulso input.v{flex:0 0 88px;font-family:var(--mono)}
+.avulso button{flex-shrink:0;width:42px;border:1px solid var(--line);border-radius:10px;
+  background:var(--surface);color:var(--neon);font-size:1.1rem;font-weight:700;cursor:pointer}
+
+/* ---------- o par de telas ---------- */
+.par{display:grid;grid-template-columns:minmax(0,1fr) 352px;gap:22px;margin-top:1.1rem;
+  align-items:start}
+@media (max-width:1000px){.par{grid-template-columns:minmax(0,1fr)}}
+.quadro{background:var(--card);border:1px solid var(--borda);border-radius:14px;overflow:hidden}
+.quadro>.cap{background:var(--bg-2);padding:.5rem .85rem;font-size:.72rem;color:var(--txt-mut);
+  border-bottom:1px solid var(--borda);font-family:var(--mono);display:flex;
+  justify-content:space-between;gap:.5rem}
+.quadro>.miolo{padding:14px 16px}
+.rot-tela{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--txt-mut);margin-bottom:.45rem}
+.rot-tela.hoje{color:var(--coral)} .rot-tela.novo{color:var(--verde)}
+
+/* ---------- selos e apoio ---------- */
+.selo{display:inline-block;font-size:.62rem;font-weight:700;letter-spacing:.03em;border-radius:4px;
+  padding:.05rem .35rem;vertical-align:middle;margin-left:.35rem;font-family:var(--body)}
+.selo.inc{border:1px solid var(--azul-borda);background:rgba(34,158,217,.10);color:var(--azul)}
+.selo.cem{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:var(--coral)}
+.inc-v{color:var(--azul);font-weight:600;font-size:.86rem}
+.pacotes{display:flex;gap:.5rem;flex-wrap:wrap;margin:.1rem 0 .9rem}
+.pk{display:flex;flex-direction:column;gap:.15rem;background:var(--bg-2);border:1px solid var(--borda);
+  border-radius:9px;padding:.45rem .7rem;cursor:pointer}
+.pk.on{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.pk b{font-size:.8rem;font-weight:600;white-space:nowrap}
+.pk small{font-size:.68rem;color:var(--txt-mut);font-family:var(--mono)}
+.pk-app{display:flex;gap:.4rem;overflow-x:auto;padding:0 1.1rem .2rem}
+.pk-app .pk{flex:0 0 auto}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:1rem}
+.card{background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.85rem}
+.card .r{display:block;font-size:.72rem;color:var(--txt-mut);margin-bottom:.3rem}
+.card p{font-size:.82rem;color:var(--txt-mut);margin-top:.35rem}
+.big{font-family:var(--mono);font-size:1.55rem;font-weight:700;display:block}
+.big.ruim{color:var(--coral)} .big.bom{color:var(--verde)}
+.prio{display:grid;grid-template-columns:2.2rem minmax(0,1fr) 7rem;gap:.7rem;align-items:start;
+  padding:.7rem 0;border-bottom:1px solid var(--borda);font-size:.86rem}
+.prio:last-child{border-bottom:0}
+.prio .n{font-family:var(--mono);font-size:1.25rem;font-weight:700;color:var(--verde);line-height:1}
+.prio .q{color:var(--txt-mut);font-size:.82rem;margin-top:.2rem}
+.prio .t{font-size:.72rem;text-align:right;color:var(--txt-mut);font-family:var(--mono)}
+.prio b{color:var(--txt)}
+
+/* ================== folha A4, pra virar PDF de ler no celular ============== */
+@page{ size:A4; margin:0 }
+body{max-width:none;width:210mm;margin:0;padding:0;line-height:1.45;
+  font-size:10.5pt}
+.pag{width:210mm;min-height:297mm;padding:16mm 15mm 14mm;
+  display:flex;flex-direction:column;break-after:page;page-break-after:always}
+.pag:last-child{break-after:auto;page-break-after:auto}
+.capa{justify-content:center;background:linear-gradient(165deg,var(--neon-fundo),var(--bg) 60%)}
+.selo-novo{display:inline-block;font-family:var(--mono);font-size:8pt;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--neon);
+  border:1px solid var(--neon-borda);background:var(--neon-fraco);
+  border-radius:999px;padding:.25rem .8rem;margin-bottom:1rem;align-self:flex-start}
+.capa h1{font-size:30pt;line-height:1.08;letter-spacing:-.025em}
+.capa .sub{color:var(--txt-mut);font-size:12pt;margin-top:1rem;max-width:52ch}
+.sumario{margin-top:2.2rem;border-top:1px solid var(--borda);padding-top:1.2rem}
+.sumario div{display:grid;grid-template-columns:2rem 1fr;gap:.7rem;padding:.4rem 0;
+  font-size:10.5pt;color:var(--txt-mut)}
+.sumario div b{color:var(--txt);font-weight:600}
+.sumario .n{font-family:var(--mono);color:var(--neon);font-size:9.5pt}
+.cab-pag{display:flex;justify-content:space-between;align-items:baseline;
+  border-bottom:1px solid var(--borda);padding-bottom:.5rem;margin-bottom:1.3rem;
+  font-family:var(--mono);font-size:8pt;color:var(--text-faint);
+  letter-spacing:.08em;text-transform:uppercase}
+.passo{break-inside:avoid;page-break-inside:avoid;margin-bottom:1.5rem}
+.passo:last-child{margin-bottom:0}
+.passo .cabeca{display:grid;grid-template-columns:2.3rem 1fr;gap:.85rem;align-items:start}
+.passo .n{width:2.1rem;height:2.1rem;border-radius:10px;background:var(--neon-fundo);
+  border:1px solid var(--neon-borda);color:var(--neon);display:grid;place-items:center;
+  font-family:var(--mono);font-weight:700;font-size:11pt}
+.passo h2{font-size:14pt;margin-bottom:.25rem;letter-spacing:-.015em}
+.passo p{font-size:10.5pt;color:var(--txt-mut)}
+.passo .corpo{margin-left:3.15rem;margin-top:.7rem}
+.passo .antes{font-size:9.5pt;color:var(--text-faint);margin-top:.6rem}
+.passo .antes b{color:#a08585;font-weight:600}
+.tela{border:1px solid var(--borda);border-radius:11px;overflow:hidden;
+  background:var(--card);max-width:82mm}
+.tela.larga{max-width:none}
+.tela .cap{background:var(--bg-2);padding:.35rem .7rem;font-size:8pt;color:var(--txt-mut);
+  font-family:var(--mono);border-bottom:1px solid var(--borda)}
+.tela .srv{padding:.5rem .7rem}
+.tela .srv:last-child{border-bottom:0}
+.tela .srv .m b{font-size:10pt}
+.tela .srv .m small{font-size:8.5pt}
+.tela .srv .pr{font-size:9pt}
+.tela .avulso{padding:.4rem .7rem}
+.tela .avulso input{font-size:9pt;padding:.4rem .5rem}
+.tela .rodape-b{padding:.6rem .7rem}
+.tela .btn{padding:.6rem;font-size:9.5pt}
+.tela .secao{padding:.7rem .7rem 0}
+.duas{display:grid;grid-template-columns:1fr 1fr;gap:10mm;align-items:start}
+.atencao{border-left:3px solid var(--ambar-borda);background:var(--ambar-fundo);
+  border-radius:0 9px 9px 0;padding:.75rem .85rem;font-size:10pt;color:#e8dcc0;
+  break-inside:avoid}
+.atencao b{color:var(--ambar)}
+.dica{border-left:3px solid var(--neon-borda);background:var(--neon-fraco);
+  border-radius:0 9px 9px 0;padding:.75rem .85rem;font-size:10pt;color:var(--txt-mut);
+  break-inside:avoid;margin-top:.8rem}
+.dica b{color:var(--txt)}
+.fluxo{display:flex;align-items:stretch;gap:.35rem;margin:1rem 0}
+.et{flex:1 1 0;min-width:0;background:var(--card);border:1px solid var(--borda);
+  border-radius:9px;padding:.55rem .6rem;text-align:center}
+.et b{display:block;font-size:10pt;font-weight:600}
+.et small{font-size:8.5pt;color:var(--txt-mut)}
+.et.on{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.et.on b{color:var(--neon)}
+.st{align-self:center;color:var(--text-faint);flex:0 0 auto}
+.pe{margin-top:auto;padding-top:1.2rem;border-top:1px solid var(--borda);
+  font-size:9pt;color:var(--text-faint);display:flex;justify-content:space-between}
+</style>
+</head>
+<body>
+
+<!-- ======================================================== CAPA -->
+<div class="pag capa">
+  <span class="selo-novo">Novidade · 01/09/2026</span>
+  <h1>Do lead ao contrato<br>assinado, pelo celular</h1>
+  <p class="sub">O app do vendedor passou a fazer o mesmo que o painel do computador.
+  Este é o caminho inteiro, passo a passo, com as telas de verdade.</p>
+
+  <div class="sumario">
+    <div><span class="n">1</span><span><b>Abrir o orçamento</b> do lead</span></div>
+    <div><span class="n">2</span><span><b>Escolher os serviços</b> — quantidade e valor por unidade</span></div>
+    <div><span class="n">3</span><span><b>Item avulso</b>, o que não está no catálogo</span></div>
+    <div><span class="n">4</span><span><b>Desconto</b> — na linha e no total</span></div>
+    <div><span class="n">5</span><span><b>O evento</b> — data, hora, tipo, convidados, local</span></div>
+    <div><span class="n">6</span><span><b>As parcelas</b> — a primeira é a entrada</span></div>
+    <div><span class="n">7</span><span><b>Gerar e mandar</b> pro cliente</span></div>
+    <div><span class="n">8</span><span><b>Cliente aprova</b> — e já pode assinar o contrato</span></div>
+    <div><span class="n">9</span><span><b>Corrigir</b> a proposta, se precisar</span></div>
+    <div><span class="n">10</span><span><b>Sinal recebido</b> — confirma no app</span></div>
+    <div><span class="n">11</span><span><b>Fechar contrato</b></span></div>
+  </div>
+
+  <div class="pe"><span>Prime Eventos · guia do vendedor</span><span>1 / 5</span></div>
+</div>
+
+<!-- ======================================================== 1 a 3 -->
+<div class="pag">
+  <div class="cab-pag"><span>Montando o orçamento</span><span>passos 1 a 3</span></div>
+
+  <div class="passo">
+    <div class="cabeca"><div class="n">1</div>
+      <div><h2>Abrir o orçamento do lead</h2>
+        <p>Na sua lista de leads, abra o cliente e toque em <b>Orçamento</b>. A proposta
+        já nasce ligada a ele — nome, WhatsApp e cidade vêm juntos.</p></div></div>
+  </div>
+
+  <div class="passo">
+    <div class="cabeca"><div class="n">2</div>
+      <div><h2>Escolher os serviços</h2>
+        <p>Toque na linha pra marcar. Use o <b>−</b> e o <b>+</b> pra quantidade, e o
+        campo depois do <b>×</b> pra mudar o valor da unidade nesse orçamento.</p></div></div>
+    <div class="corpo">
+      <div class="tela">
+        <div class="cap">app · serviços do catálogo</div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>LOCAÇÃO LEDS</b>
+            <span class="qtd"><button>−</button><span>15</span><button>+</button>
+              <span class="u">×</span><span class="cmp" style="display:inline-block">50</span></span>
+          </div><div class="pr">R$ 750</div></div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>LOCAÇÃO COZINHA</b><small>Uso exclusivo da área da cozinha.</small>
+            <span class="qtd"><button>−</button><span>1</span><button>+</button>
+              <span class="u">×</span><span class="cmp" style="display:inline-block">1500</span></span>
+          </div><div class="pr">R$ 1.500</div></div>
+        <div class="srv"><div class="ck"></div>
+          <div class="m"><b>LOCAÇÃO FREEZER</b></div><div class="pr">R$ 250</div></div>
+      </div>
+      <div class="antes">Antes: não dava pra mudar o valor da unidade, e a quantidade
+      virava texto no nome — a proposta do cliente saía como <b>“1 × R$ 750,00”</b>
+      em vez de “15 × R$ 50,00”.</div>
+    </div>
+  </div>
+
+  <div class="passo">
+    <div class="cabeca"><div class="n">3</div>
+      <div><h2>Item avulso</h2>
+        <p>O que não está no catálogo você digita na hora: nome, valor e o <b>+</b>.</p></div></div>
+    <div class="corpo">
+      <div class="tela">
+        <div class="cap">app · adicionar item avulso</div>
+        <div class="avulso"><input value="Buffet de doces"><input class="v" value="1200"><button>+</button></div>
+      </div>
+      <div class="dica"><b>Dica:</b> ponha o preço cheio e depois dê o desconto. Assim o
+      cliente vê o valor riscado na proposta — desconto que ele não vê não ajuda a vender.</div>
+    </div>
+  </div>
+
+  <div class="pe"><span>Prime Eventos · guia do vendedor</span><span>2 / 5</span></div>
+</div>
+
+<!-- ======================================================== 4 a 6 -->
+<div class="pag">
+  <div class="cab-pag"><span>Desconto, evento e parcelas</span><span>passos 4 a 6</span></div>
+
+  <div class="passo">
+    <div class="cabeca"><div class="n">4</div>
+      <div><h2>Desconto</h2>
+        <p>Na linha marcada aparece a pílula <b>% / R$</b>. Escolha o jeito e digite —
+        o app mostra na hora quanto saiu. No rodapé tem o desconto do total.</p></div></div>
+    <div class="corpo">
+      <div class="tela">
+        <div class="cap">app · desconto na linha</div>
+        <div class="srv on"><div class="ck">✓</div>
+          <div class="m"><b>LOCAÇÃO COZINHA</b>
+            <span class="qtd"><button>−</button><span>1</span><button>+</button>
+              <span class="u">×</span><span class="cmp" style="display:inline-block">1500</span></span>
+            <span class="dsc"><span class="pil"><button>%</button><button class="on">R$</button></span>
+              <span class="cmp" style="display:inline-block">200</span>
+              <span class="tag">− R$ 200</span></span>
+          </div><div class="pr">R$ 1.300<s>R$ 1.500</s></div></div>
+      </div>
+      <div class="dica"><b>A conta é do sistema.</b> Você digita o desconto; o total
+      quem calcula é o servidor.</div>
+    </div>
+  </div>
+
+  <div class="passo">
+    <div class="cabeca"><div class="n">5</div>
+      <div><h2>O evento</h2>
+        <p>Descendo a tela: <b>data, horário, tipo da festa, convidados e local</b>.
+        É isso que segura a data na agenda e o que entra no contrato.</p></div></div>
+    <div class="corpo">
+      <div class="tela">
+        <div class="cap">app · o evento</div>
+        <div class="avulso"><input value="18/11/2027"><input class="v" value="19:00"></div>
+        <div class="avulso ev2"><input value="Casamento"><input class="v" value="180"></div>
+        <div class="avulso ev2"><input value="Av. Fátima, 1200"></div>
+      </div>
+      <div class="antes">Antes: o app não perguntava nada disso, e a data tinha que ser
+      preenchida depois <b>no computador</b> — senão a agenda não segurava o dia e o
+      contrato saía com a data em branco.</div>
+    </div>
+  </div>
+
+  <div class="passo">
+    <div class="cabeca"><div class="n">6</div>
+      <div><h2>As parcelas</h2>
+        <p>Vencimento, valor e o <b>+</b>. A <b>primeira parcela é sempre a entrada</b> —
+        é ela que reserva a data.</p></div></div>
+    <div class="corpo">
+      <div class="tela">
+        <div class="cap">app · parcelas</div>
+        <div class="srv"><div class="ck" style="border:0;background:none;color:var(--text-faint)">1</div>
+          <div class="m"><b>Entrada</b><small>18/10/2026</small></div>
+          <div class="pr">R$ 2.340</div></div>
+        <div class="srv"><div class="ck" style="border:0;background:none;color:var(--text-faint)">2</div>
+          <div class="m"><b>Saldo</b><small>18/10/2027</small></div>
+          <div class="pr">R$ 5.460</div></div>
+      </div>
+      <div class="atencao" style="margin-top:.8rem"><b>Sem parcela não existe entrada.</b>
+      Proposta sem parcelas o sistema entende como sem sinal — e o botão de confirmar
+      a entrada não aparece.</div>
+    </div>
+  </div>
+
+  <div class="pe"><span>Prime Eventos · guia do vendedor</span><span>3 / 5</span></div>
+</div>
+
+<!-- ======================================================== 7 a 9 -->
+<div class="pag">
+  <div class="cab-pag"><span>Mandar, aprovar e corrigir</span><span>passos 7 a 9</span></div>
+
+  <div class="passo">
+    <div class="cabeca"><div class="n">7</div>
+      <div><h2>Gerar e mandar pro cliente</h2>
+        <p>Toque em <b>Gerar proposta e link</b>. Depois, <b>Enviar na conversa do
+        lead</b> — assim a proposta fica no histórico dele, dentro do sistema.</p></div></div>
+    <div class="corpo">
+      <div class="tela">
+        <div class="cap">app · proposta pronta</div>
+        <div class="rodape-b">
+          <div class="dlin"><span>Itens</span><b>R$ 9.850</b></div>
+          <div class="dlin"><span>Desconto</span><b>− R$ 200</b></div>
+          <div class="tot"><span>Total</span><b>R$ 9.650</b></div>
+          <button class="btn">Gerar proposta e link</button></div>
+      </div>
+      <div class="dica"><b>Prefira "Enviar na conversa".</b> O link também pode ser
+      copiado, mas mandando pela conversa a proposta fica registrada — e o card do
+      cliente anda sozinho no funil.</div>
+    </div>
+  </div>
+
+  <div class="passo">
+    <div class="cabeca"><div class="n">8</div>
+      <div><h2>O cliente aprova — e já assina</h2>
+        <p>Ele abre o link, vê a proposta com a marca da empresa e aprova. <b>Nesse
+        momento o contrato já pode ser assinado</b>, sem esperar a entrada cair.</p></div></div>
+    <div class="corpo">
+      <div class="fluxo">
+        <div class="et"><b>Cliente aprova</b><small>o orçamento</small></div>
+        <span class="st">→</span>
+        <div class="et on"><b>Já assina</b><small>o contrato</small></div>
+        <span class="st">→</span>
+        <div class="et"><b>Entrada</b><small>reserva a data</small></div>
+      </div>
+      <div class="atencao"><b>Atenção — isto não mudou:</b> a data só fica reservada de
+      verdade depois que a entrada é paga. Assinar antes vale o <b>compromisso</b>, não a
+      reserva. É o que a cláusula 4 do contrato sempre disse, e o cliente lê esse aviso
+      na hora de assinar. <b>Não prometa data garantida antes do pagamento.</b></div>
+      <div class="antes">Antes: o cliente lia o contrato inteiro e não conseguia assinar
+      até alguém confirmar o pagamento <b>no computador</b>.</div>
+    </div>
+  </div>
+
+  <div class="passo">
+    <div class="cabeca"><div class="n">9</div>
+      <div><h2>Errou? Corrige a proposta</h2>
+        <p>Abra a proposta e toque em <b>Corrigir a proposta</b>. Ela reabre com tudo
+        preenchido; ajuste e gere de novo.</p></div></div>
+    <div class="corpo">
+      <div class="dica"><b>O link continua o mesmo.</b> Não precisa mandar outro pro
+      cliente — o que ele já tem passa a mostrar a versão corrigida.<br>
+      Proposta que já virou contrato fechado <b>não</b> reabre: os títulos já existem.</div>
+    </div>
+  </div>
+
+  <div class="pe"><span>Prime Eventos · guia do vendedor</span><span>4 / 5</span></div>
+</div>
+
+<!-- ======================================================== 10 e 11 -->
+<div class="pag">
+  <div class="cab-pag"><span>Entrada e fechamento</span><span>passos 10 e 11</span></div>
+
+  <div class="passo">
+    <div class="cabeca"><div class="n">10</div>
+      <div><h2>Sinal recebido</h2>
+        <p>Chegou o comprovante no seu WhatsApp? Abra a proposta e toque em
+        <b>Sinal recebido → Confirmar que a entrada caiu</b>.</p></div></div>
+    <div class="corpo">
+      <div class="tela">
+        <div class="cap">app · proposta nº 42</div>
+        <div class="srv"><div class="ck" style="background:var(--neon);border-color:var(--neon)">✓</div>
+          <div class="m"><b>Aprovada pelo cliente</b><small>01/09/2026</small></div></div>
+        <div class="srv"><div class="ck">—</div>
+          <div class="m"><b>Entrada · R$ 2.340</b><small>vence 18/10/2026</small></div></div>
+        <div class="rodape-b"><button class="btn">Confirmar que a entrada caiu</button></div>
+      </div>
+      <p style="font-size:10.5pt;color:var(--txt-mut);margin-top:.8rem">Ao confirmar,
+      três coisas acontecem de uma vez:</p>
+      <ul class="lista" style="font-size:10pt">
+        <li><b>A data deixa de ser provisória</b> na agenda — vira reserva firme.</li>
+        <li><b>O valor entra como recebido</b> no financeiro, na data em que caiu.</li>
+        <li>A proposta passa a mostrar o sinal como pago.</li>
+      </ul>
+      <div class="antes">Antes: esse botão <b>só existia no computador</b> — quem recebe
+      o comprovante é você, no celular.</div>
+      <div class="dica"><b>Pode tocar sem medo de repetir.</b> Se apertar duas vezes, o
+      sistema entende e não lança o valor duas vezes.</div>
+    </div>
+  </div>
+
+  <div class="passo">
+    <div class="cabeca"><div class="n">11</div>
+      <div><h2>Fechar contrato</h2>
+        <p>Quando o negócio está fechado, <b>Fechar contrato</b> gera as contas a
+        receber no módulo Empresa.</p></div></div>
+    <div class="corpo">
+      <div class="atencao"><b>Depois de fechar, não volta atrás pelo app.</b> Os títulos
+      já foram criados. Se precisar mexer no valor, fale com o gestor.</div>
+    </div>
+  </div>
+
+  <div class="dica" style="margin-top:1.6rem;border-left-color:var(--neon)">
+    <b>Deu algo estranho?</b> Tire um print da tela e mande no grupo, dizendo o que você
+    tinha acabado de tocar. Print com a tela inteira ajuda mais do que descrever.</div>
+
+  <div class="pe"><span>Prime Eventos · guia do vendedor</span><span>5 / 5</span></div>
+</div>
+
+</body>
+</html>

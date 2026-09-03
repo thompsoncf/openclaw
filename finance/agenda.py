@@ -572,6 +572,96 @@ def cancelar_evento(pool, conta_id: int, evento_id: int) -> bool:
         return cur.rowcount > 0
 
 
+#: Por que um compromisso NÃO pode ser apagado. A chave é o que a tela mostra;
+#: o texto é o que ela diz. Ordem = ordem de checagem, do mais grave pro menos.
+MOTIVOS_NAO_EXCLUI = {
+    "orcamento": "tem orçamento ligado a ele",
+    "sinal":     "tem sinal registrado",
+    "convidado": "tem convidado na lista",
+    "mensagem":  "já teve convite ou lembrete enviado pro cliente",
+}
+
+
+def por_que_nao_exclui(c, conta_id: int, evento_id: int) -> str:
+    """A chave do motivo, ou "" quando dá pra apagar. Recebe a CONEXÃO, não o
+    pool, pra rodar dentro da mesma transação do delete — checar fora e apagar
+    depois abriria a janela pra o orçamento nascer no meio.
+
+    Os dois últimos motivos existem por causa do `on delete cascade`:
+    `evento_convidados` e `agenda_mensagens_log` apontam pra cá e somem JUNTO com
+    o evento. Quem confirmou presença e que convite saiu pra qual cliente é
+    informação do cliente — some com o compromisso e não volta."""
+    if c.execute("select 1 from orcamentos where conta_id=%s and evento_agenda_id=%s limit 1",
+                 (conta_id, evento_id)).fetchone():
+        return "orcamento"
+    if c.execute("select 1 from eventos_agenda where id=%s and conta_id=%s"
+                 "   and coalesce(sinal_centavos,0) > 0",
+                 (evento_id, conta_id)).fetchone():
+        return "sinal"
+    if c.execute("select 1 from evento_convidados where evento_id=%s limit 1",
+                 (evento_id,)).fetchone():
+        return "convidado"
+    if c.execute("select 1 from agenda_mensagens_log where evento_id=%s limit 1",
+                 (evento_id,)).fetchone():
+        return "mensagem"
+    return ""
+
+
+def excluir_evento(pool, conta_id: int, evento_id: int) -> dict:
+    """APAGA de verdade — e por isso é a única coisa desta base que tira uma linha
+    de cliente do banco. Devolve {"ok": bool, "motivo": chave}.
+
+    Existe porque `cancelar_evento` nunca resolveu o caso do lixo: agenda tem
+    duplicata, teste e título errado, e "cancelado" deixa tudo isso na tela pra
+    sempre. Cancelar e excluir são coisas DIFERENTES e continuam separados —
+    cancelar é um fato do negócio (a festa não vai acontecer), excluir é dizer
+    que aquela linha nunca deveria ter existido.
+
+    A trava é o que faz isto caber na regra 0 (nada do cliente se perde). Só
+    passa compromisso SEM orçamento, SEM sinal, SEM convidado e SEM mensagem
+    enviada — ou seja, linha que nenhum cliente jamais viu. Medido na Prime em
+    02/09/2026: 52 dos 66 compromissos passam, então a trava não engessa o botão,
+    e os 14 que ela barra são exatamente os que doeriam.
+
+    Falha fechada: motivo desconhecido (evento de outra conta, id que não existe)
+    devolve ok=False sem apagar nada."""
+    with pool.connection() as c:
+        motivo = por_que_nao_exclui(c, conta_id, evento_id)
+        if motivo:
+            return {"ok": False, "motivo": motivo}
+        cur = c.execute("delete from eventos_agenda where id=%s and conta_id=%s",
+                        (evento_id, conta_id))
+        c.commit()
+    if not cur.rowcount:
+        return {"ok": False, "motivo": "sumiu"}
+    _log.info("agenda: evento %s da conta %s excluído", evento_id, conta_id)
+    return {"ok": True, "motivo": ""}
+
+
+def excluiveis(pool, conta_id: int, ids: list) -> set:
+    """Quais desses compromissos o botão de excluir pode oferecer — uma consulta
+    só, com os mesmos quatro motivos de `por_que_nao_exclui`.
+
+    Existe pra que o botão NÃO apareça onde ele vai recusar. Botão que some é
+    honesto; botão que aparece e dá erro ensina a pessoa a não confiar na tela. A
+    trava de verdade continua sendo a do delete — esta é a versão em lote, pra
+    desenhar; se as duas discordarem, quem manda é a de lá."""
+    ids = [int(i) for i in (ids or [])]
+    if not ids:
+        return set()
+    with pool.connection() as c:
+        rows = c.execute(
+            """select e.id from eventos_agenda e
+                where e.conta_id=%s and e.id = any(%s)
+                  and coalesce(e.sinal_centavos,0) = 0
+                  and not exists (select 1 from orcamentos o
+                                   where o.conta_id=e.conta_id and o.evento_agenda_id=e.id)
+                  and not exists (select 1 from evento_convidados g where g.evento_id=e.id)
+                  and not exists (select 1 from agenda_mensagens_log l where l.evento_id=e.id)""",
+            (conta_id, ids)).fetchall()
+    return {r[0] for r in rows}
+
+
 def confirmar_pre_reserva(pool, conta_id: int, evento_id: int) -> bool:
     """O sinal caiu: a data segurada vira compromisso de verdade.
 
@@ -781,7 +871,64 @@ def choques_de_data(pool, conta_id: int, de: datetime | None = None) -> list[dic
     for r in rows:
         ev = _fmt_evento(r)
         por_dia.setdefault(ev["inicio"].astimezone(BRT).date(), []).append(ev)
-    return [{"dia": d, "eventos": evs} for d, evs in sorted(por_dia.items())]
+    # O DIA QUE JÁ FOI OLHADO SAI DAQUI. Ver `marcar_dia_conferido` pro porquê de
+    # a marca guardar os ids e não só a data. Tolerante: banco sem a 194 devolve a
+    # lista inteira, como era antes — perder o alerta seria pior que repeti-lo.
+    try:
+        conferidos = _dias_conferidos(pool, conta_id, list(por_dia))
+    except Exception as e:  # noqa: BLE001
+        _log.warning("choques_de_data: marca de conferido indisponível (conta=%s): %s",
+                     conta_id, e)
+        conferidos = {}
+    return [{"dia": d, "eventos": evs} for d, evs in sorted(por_dia.items())
+            if not {e["id"] for e in evs} <= conferidos.get(d, set())]
+
+
+def _dias_conferidos(pool, conta_id: int, dias: list) -> dict:
+    """{dia: {ids conferidos}} pros dias pedidos. Consulta uma só, em lote."""
+    if not dias:
+        return {}
+    with pool.connection() as c:
+        rows = c.execute(
+            "select dia, eventos from agenda_dia_conferido "
+            " where conta_id=%s and dia = any(%s)",
+            (conta_id, list(dias))).fetchall()
+    return {r[0]: set(r[1] or ()) for r in rows}
+
+
+def marcar_dia_conferido(pool, conta_id: int, dia, por: str = "") -> int:
+    """"Está certo": aquele dia foi olhado e os compromissos que estão nele podem
+    conviver. Devolve quantos compromissos a marca cobriu.
+
+    A marca guarda OS IDS, não só a data, e essa é a decisão que importa. Se
+    guardasse só o dia, a data mais perigosa da agenda — a que já tem gente
+    marcada — ficaria calada pra sempre, e uma festa nova caindo em cima não
+    avisaria ninguém. Guardando os ids, o alerta volta sozinho no instante em que
+    aparece um compromisso que a resposta não cobria.
+
+    Tirar compromisso do dia não faz o alerta voltar (o conjunto atual continua
+    cabendo no conferido): menos gente no mesmo dia nunca é notícia pior.
+
+    Não apaga, não cancela, não move nada — é uma marca ao lado da agenda. Um
+    "Está certo" num dia sem nenhum compromisso ativo grava a marca vazia e não
+    tem efeito nenhum, que é o certo pra um clique repetido."""
+    if isinstance(dia, datetime):
+        dia = dia.astimezone(BRT).date()
+    with pool.connection() as c:
+        ids = [r[0] for r in c.execute(
+            "select id from eventos_agenda"
+            " where conta_id=%s and status = any(%s)"
+            "   and (inicio at time zone interval '-03:00')::date = %s",
+            (conta_id, list(_ATIVO_OU_PRE), dia)).fetchall()]
+        c.execute(
+            """insert into agenda_dia_conferido (conta_id, dia, eventos, marcado_por)
+               values (%s,%s,%s,%s)
+               on conflict (conta_id, dia) do update
+                  set eventos=excluded.eventos, marcado_em=now(),
+                      marcado_por=excluded.marcado_por""",
+            (conta_id, dia, ids, (por or "")[:120]))
+        c.commit()
+    return len(ids)
 
 
 def horas_a_conferir(pool, conta_id: int, de: datetime | None = None) -> list[dict]:

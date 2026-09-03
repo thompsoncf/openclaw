@@ -1671,6 +1671,106 @@ def confirmar_sinal(pool, conta_id: int, orc_id: int, *, membro_id: int | None =
                          else "Sinal confirmado ✓ — a data está firme.")}
 
 
+def _minha_proposta(pool, conta_id: int, orc_id: int, membro_id: int | None):
+    """A régua de escopo que `confirmar_sinal` e `fechar_contrato` já usam, num
+    lugar só: o vendedor mexe na proposta DELE, gestor mexe em todas.
+
+    Devolve (ok, erro). Sem isto, cada rota nova de comprovante repetiria a régua —
+    e é o tipo de repetição que um dia acerta em quatro lugares e erra no quinto,
+    deixando um id chutado na barra de endereço alcançar a proposta de outro."""
+    with pool.connection() as c:
+        dono = c.execute("select criado_por from orcamentos where id=%s and conta_id=%s",
+                         (int(orc_id), conta_id)).fetchone()
+    if not dono:
+        return False, "Proposta não encontrada."
+    if membro_id and (dono[0] or "") != str(membro_id):
+        return False, "Proposta não encontrada (ou não é sua)."
+    return True, ""
+
+
+def pagamentos(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None) -> dict | None:
+    """O plano de pagamento da proposta, com o que já entrou e o que falta papel.
+
+    POR QUE ISTO EXISTE NO CELULAR. Quem recebe o PIX no WhatsApp é o vendedor, em
+    campo — e desde 01/09 ele já confirma o "Sinal recebido" daqui. Só que anexar o
+    comprovante era do desktop e só do dono, então ele fazia a parte difícil e
+    deixava para trás um selo coral "1 parcela sem comprovante" que ninguém em campo
+    conseguia limpar.
+
+    Mesmo motor do funil (`vendas.pagamentos_do_orcamento`) e mesma tabela de
+    anexos: duas leituras do que já foi pago seriam dois números.
+    """
+    ok, _erro = _minha_proposta(pool, conta_id, orc_id, membro_id)
+    if not ok:
+        return None
+    from finance import vendas, comprovantes as _cp
+    d = vendas.pagamentos_do_orcamento(pool, conta_id, int(orc_id))
+    if not d:
+        return None
+    anexos = _cp.por_orcamento(pool, conta_id, int(orc_id))
+    linhas = []
+    for p in d["parcelas"]:
+        a = anexos.get(p["idx"]) or {}
+        linhas.append({
+            "idx": p["idx"], "rotulo": p["rotulo"],
+            "valor_centavos": p["valor_centavos"], "venc": p["venc"],
+            "forma": p["forma"], "pago": bool(p["pago"]), "pago_em": p["pago_em"],
+            "comprovante_id": a.get("id"), "comprovante_nome": a.get("nome") or "",
+        })
+    return {"parcelas": linhas, "total": d["total"], "recebido": d["recebido"],
+            "falta": d["falta"],
+            # botão que engole o comprovante do cliente é pior que botão nenhum —
+            # mesma regra do painel
+            "pode_anexar": _cp.configurado()}
+
+
+def anexar_comprovante(pool, conta_id: int, orc_id: int, parcela_idx: int,
+                       conteudo: bytes, content_type: str, nome: str, *,
+                       membro_id: int | None = None) -> dict:
+    """Anexa (ou substitui) o comprovante de uma parcela, a partir do celular.
+
+    QUEM PODE, e por quê o vendedor entra. Anexar não é mexer em dinheiro: quem
+    marca a parcela como paga é o "Sinal recebido", e isso o vendedor já faz desde
+    01/09. Anexar é juntar a prova do que ele mesmo acabou de registrar — e ele é
+    quem tem o arquivo na mão. Editar valor e dar baixa seguem com dono e gestor.
+
+    A PARCELA É CONFERIDA CONTRA O PLANO antes de subir arquivo nenhum: índice
+    inventado criaria uma linha órfã, invisível na tela, e ninguém saberia que o
+    comprovante do cliente foi parar num canto que ninguém lê.
+    """
+    ok, erro = _minha_proposta(pool, conta_id, orc_id, membro_id)
+    if not ok:
+        return {"ok": False, "erro": erro}
+    from finance import vendas, comprovantes as _cp
+    # arquivo vazio, grande demais e tipo errado NÃO são conferidos aqui: quem
+    # recusa é `_cp.validar`, dentro do `subir` logo abaixo, e a mensagem dele já
+    # vem em português pronta pra tela. Repetir a checagem daria um ramo que
+    # nenhuma mutação mata — código que ninguém precisa ler.
+    if not _cp.configurado():
+        # ESTA continua, e não é redundante: sem ela o `subir` real falha com um
+        # erro de transporte, e o vendedor lê "tente de novo" pra uma coisa que
+        # nunca vai funcionar por tentativa.
+        return {"ok": False, "erro": "Guardar arquivo não está configurado nesta conta."}
+    d = vendas.pagamentos_do_orcamento(pool, conta_id, int(orc_id))
+    if not d or not any(p["idx"] == int(parcela_idx) for p in d["parcelas"]):
+        return {"ok": False, "erro": "Essa parcela não existe no plano."}
+    try:
+        caminho = _cp.subir(conteudo, content_type or "", conta_id=conta_id,
+                            orcamento_id=int(orc_id), parcela_idx=int(parcela_idx))
+    except ValueError as e:
+        # a mensagem de `validar` já vem em português e vai direto pra tela
+        return {"ok": False, "erro": str(e)}
+    except Exception as e:  # noqa: BLE001
+        _log.warning("comprovante %s/%s: falhou ao subir: %s: %s",
+                     orc_id, parcela_idx, type(e).__name__, e)
+        return {"ok": False, "erro": "Não deu pra guardar o arquivo. Tente de novo."}
+    r = _cp.registrar(pool, conta_id, int(orc_id), int(parcela_idx), caminho=caminho,
+                      nome=nome or "comprovante", tipo=content_type or "",
+                      bytes_=len(conteudo), por=str(membro_id or "dono"))
+    return {"ok": True, "id": r["id"], "trocou": r["trocou"],
+            "msg": "Comprovante trocado ✓" if r["trocou"] else "Comprovante anexado ✓"}
+
+
 def fechar_contrato(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None) -> dict:
     """Fecha a proposta como CONTRATO: gera os títulos a receber (entrada + a
     mensalidade recorrente) no módulo Empresa.

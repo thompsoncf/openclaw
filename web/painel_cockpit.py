@@ -398,6 +398,17 @@ b,strong{font-weight:600}
 .btn:active{transform:translateY(1px)}
 .btn.ghost{background:transparent;color:var(--text-dim);border:1px solid var(--line);box-shadow:none;font-weight:600}
 .btn.perigo{background:transparent;color:var(--coral);border:1px solid #5a2b2b;box-shadow:none}
+/* tela de Pagamentos: o estado de cada parcela, e o anexo.
+   `.arq` é um <label> vestido de botão porque o <input type=file> não se estiliza
+   — o input fica escondido dentro dele e o toque no label é que o abre. */
+.pill{align-self:flex-start;font-family:var(--mono);font-size:.68rem;letter-spacing:.04em;
+  text-transform:uppercase;padding:.16rem .5rem;border-radius:999px;border:1px solid}
+.pill.ok{color:var(--neon);border-color:var(--neon-borda);background:var(--neon-fraco)}
+.pill.falta{color:var(--coral);border-color:#5a2b2b;background:rgba(224,122,95,.1)}
+.pill.esp{color:var(--text-faint);border-color:var(--line);background:transparent}
+.btn.arq{font-size:.86rem;padding:.6rem;box-shadow:none}
+.btn.arq.on{opacity:.6}
+.vlr{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .linhaform{display:flex;gap:.45rem;align-items:center}
 select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;
   color:var(--text);padding:.55rem .6rem;font-family:inherit;font-size:.85rem}
@@ -3188,7 +3199,13 @@ def cockpit_orcamento(request: Request, orc_id: int):
              + aprovada
              + (f"<div class=eyebrow>Mandar pro cliente</div><div class=bloco>{''.join(envio)}</div>"
                 if envio else "")
-             + mover + sinal + fechar + editar
+             + mover + sinal
+             # PAGAMENTOS fica logo abaixo do sinal, e não no fim: é a pergunta
+             # seguinte à que o vendedor acabou de responder ("a entrada caiu?").
+             + ("<div class=eyebrow>Dinheiro</div><div class=bloco>"
+                f"<a class='btn ghost' href='{_BASE}/orcamentos/{orc_id}/pagamentos'>"
+                "💰 Pagamentos e comprovantes</a></div>")
+             + fechar + editar
              + (f"<div class=eyebrow>O que entra</div><div class=bloco><div class=card>{itens}</div></div>"
                 if itens else "")
              + (f"<div class=eyebrow>Cliente</div><div class=bloco><div class=card>{ficha_html}</div></div>"
@@ -3197,6 +3214,147 @@ def cockpit_orcamento(request: Request, orc_id: int):
              + (_abas_dono("orcamentos") if gestao
                 else _abas_vend("orcamentos", _pend_vend(conta_id, sess[1]))))
     return _page(o["titulo"], corpo)
+
+
+@router.get("/cockpit/orcamentos/{orc_id}/pagamentos", response_class=HTMLResponse)
+def cockpit_pagamentos(request: Request, orc_id: int):
+    """O plano de pagamento no celular — e o comprovante de cada parcela.
+
+    O BURACO QUE ISTO FECHA. Quem recebe o PIX no WhatsApp é o vendedor, em campo, e
+    desde 01/09 ele já confirma o "Sinal recebido" daqui. Anexar o comprovante, não:
+    era do desktop e só do dono. Ele fazia a parte difícil e deixava para trás um
+    selo coral "1 parcela sem comprovante" que ninguém em campo conseguia limpar.
+
+    SÓ O QUE JÁ FOI PAGO cobra papel — mesma régua do funil. Pedir comprovante de
+    parcela que nem venceu encheria a tela de vermelho que ninguém pode resolver.
+    """
+    g = _gerencia(request)
+    sess = _sessao(request)
+    if not g and not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id = g[0] if g else sess[0]
+    d = ck.pagamentos(get_pool(), conta_id, orc_id, membro_id=None if g else sess[1])
+    if not d:
+        request.session["ck_err"] = "Proposta não encontrada."
+        return RedirectResponse(f"{_BASE}/orcamentos", status_code=303)
+
+    linhas = []
+    for p in d["parcelas"]:
+        quando = _data(p["pago_em"]) if p["pago_em"] else ""
+        if p["comprovante_id"]:
+            selo = "<span class='pill ok'>comprovante ✓</span>"
+        elif p["pago"]:
+            selo = "<span class='pill falta'>sem comprovante</span>"
+        else:
+            selo = "<span class='pill esp'>a vencer</span>"
+        sub = (f"{esc(p['forma'])} · pago {esc(quando)}" if p["pago"]
+               else (f"vence {esc(_data(p['venc']))}" if p["venc"] else ""))
+        # o BOTÃO SÓ NO QUE FOI PAGO, e com o rótulo dizendo qual dos dois é:
+        # "trocar" num comprovante que existe evita o vendedor achar que vai
+        # anexar um segundo e ficar com dois papéis pra mesma parcela.
+        botao = ""
+        if p["pago"] and d["pode_anexar"]:
+            rot = "Trocar comprovante" if p["comprovante_id"] else "📎 Anexar comprovante"
+            botao = (f"<label class='btn arq'>{rot}"
+                     f"<input type=file accept='image/*,application/pdf' hidden "
+                     f"data-px='{p['idx']}'></label>")
+        linhas.append(
+            "<div class=card style='display:flex;flex-direction:column;gap:.4rem'>"
+            "<div style='display:flex;justify-content:space-between;gap:.6rem'>"
+            f"<b>{esc(p['rotulo'])}</b>"
+            f"<span class=vlr>{esc(_brl(p['valor_centavos']))}</span></div>"
+            + (f"<div class=mut style='font-size:.78rem'>{sub}</div>" if sub else "")
+            + selo + botao + "</div>")
+
+    resumo = ("<div class=kpis style='margin-top:.9rem'>"
+              f"<div class='kpi hero'><div class=v>{esc(_brl(d['recebido']))}</div>"
+              f"<div class=l>Recebido</div>"
+              f"<div class=d>de {esc(_brl(d['total']))} · falta {esc(_brl(d['falta']))}</div>"
+              "</div></div>")
+    aviso = ("" if d["pode_anexar"] else
+             "<div class=bloco><div class=card style='font-size:.82rem'>"
+             "Guardar arquivo não está configurado nesta conta — por isso não há "
+             "botão de anexar.</div></div>")
+
+    corpo = (_hdr("Pagamentos", "", voltar=f"{_BASE}/orcamentos/{orc_id}")
+             + _flash(request) + "<div class=scroll>" + resumo + aviso
+             + "<div class=eyebrow>Parcelas</div><div class=bloco>"
+             + "".join(linhas) + "</div></div>"
+             + _js_comprovante(orc_id)
+             + (_abas_dono("orcamentos") if g
+                else _abas_vend("orcamentos", _pend_vend(conta_id, sess[1]))))
+    return _page("Pagamentos", corpo)
+
+
+def _js_comprovante(orc_id: int) -> str:
+    """O upload. CORPO BINÁRIO e nome em base64 no cabeçalho — mesmo desenho da
+    rota de anexo do lead, e pelos mesmos dois motivos: multipart custa uma cópia a
+    mais do arquivo, e cabeçalho HTTP é latin-1, então nome com acento tem que
+    viajar codificado ou chega trocado."""
+    return (
+      "<script>(function(){"
+      "var BASE=window.CKBASE||'/cockpit',ORC=" + str(int(orc_id)) + ";"
+      "document.querySelectorAll(\"input[type=file][data-px]\").forEach(function(inp){"
+      "  inp.addEventListener('change',function(){"
+      "    var f=inp.files&&inp.files[0]; if(!f)return;"
+      "    var lb=inp.parentNode, t0=lb.textContent;"
+      "    lb.textContent='Enviando...'; lb.classList.add('on');"
+      "    fetch(BASE+'/orcamentos/'+ORC+'/comprovante/'+inp.getAttribute('data-px'),{"
+      "      method:'POST',body:f,"
+      "      headers:{'x-nome':btoa(unescape(encodeURIComponent(f.name||'comprovante'))),"
+      "               'content-type':f.type||'application/octet-stream'}})"
+      "    .then(function(r){return r.json();})"
+      "    .then(function(d){"
+      "      if(d&&d.ok){location.reload();}"
+      "      else{lb.textContent=t0;lb.classList.remove('on');"
+      "           alert((d&&d.erro)||'Não deu pra anexar.');}})"
+      "    .catch(function(){lb.textContent=t0;lb.classList.remove('on');"
+      "           alert('Sem conexão. Tente de novo.');});"
+      "  });});"
+      "})();</script>")
+
+
+@router.post("/cockpit/orcamentos/{orc_id}/comprovante/{parcela_idx}")
+async def cockpit_comprovante(request: Request, orc_id: int, parcela_idx: int):
+    """Recebe o comprovante do celular. Corpo binário; nome em base64 no cabeçalho.
+
+    Async só pra LER o corpo — o resto (validar, subir pro bucket, registrar) vai
+    pra threadpool, porque é I/O de rede que congelaria o event loop e com ele o
+    painel inteiro. É o mesmo cuidado da rota de anexo, e `test_event_loop_nao_trava`
+    cobra."""
+    g = _gerencia(request)
+    sess = _sessao(request)
+    if not g and not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    conta_id = g[0] if g else sess[0]
+    membro_id = None if g else sess[1]
+    dados = await request.body()
+
+    def _nome() -> str:
+        import base64
+        try:
+            return base64.b64decode(request.headers.get("x-nome", "")).decode("utf-8")
+        except Exception:  # noqa: BLE001 — acento estranho não impede o anexo
+            return "comprovante"
+
+    from starlette.concurrency import run_in_threadpool
+    r = await run_in_threadpool(_comprovante_sync, conta_id, membro_id, orc_id,
+                                parcela_idx, dados,
+                                request.headers.get("content-type", ""), _nome())
+    if r.get("ok"):
+        request.session["ck_ok"] = r.get("msg", "Comprovante anexado ✓")
+    return JSONResponse(r, status_code=200 if r.get("ok") else 400)
+
+
+def _comprovante_sync(conta_id, membro_id, orc_id, parcela_idx, dados, tipo, nome):
+    """O trabalho todo fora do event loop — INCLUSIVE o `get_pool()`.
+
+    Não é preciosismo: `tests/test_event_loop_nao_trava` procura `get_pool()` no
+    corpo do handler async, e procura por texto de propósito. Deixá-lo lá, mesmo
+    como argumento de `run_in_threadpool`, o avaliaria no loop — e a próxima pessoa
+    a copiar esta rota copiaria o hábito junto."""
+    return ck.anexar_comprovante(get_pool(), conta_id, orc_id, parcela_idx,
+                                 dados, tipo, nome, membro_id=membro_id)
 
 
 @router.post("/cockpit/orcamentos/{orc_id}/status")
@@ -3242,9 +3400,20 @@ def cockpit_orcamento_sinal(request: Request, orc_id: int):
     conta_id = g[0] if g else sess[0]
     r = ck.confirmar_sinal(get_pool(), conta_id, orc_id,
                            membro_id=None if g else sess[1])
-    request.session["ck_ok" if r.get("ok") else "ck_err"] = (
-        r.get("msg", "Sinal confirmado ✓") if r.get("ok") else r.get("erro", "Não deu certo."))
-    return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+    if not r.get("ok"):
+        request.session["ck_err"] = r.get("erro", "Não deu certo.")
+        return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+    # O POUSO É NA TELA DO COMPROVANTE, e é o miolo da mudança de 03/09. O
+    # comprovante está na mão dele AGORA — é a mensagem de PIX que ele acabou de
+    # ler no WhatsApp. Mandar de volta pra proposta o obrigaria a procurar o
+    # caminho, e o funil ficava com "1 parcela sem comprovante" até alguém sentar
+    # no computador. É a mesma frase que o desktop já diz depois de confirmar.
+    if r.get("ja_estava"):
+        request.session["ck_ok"] = r.get("msg", "Sinal já estava confirmado.")
+        return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+    request.session["ck_ok"] = ("Sinal confirmado ✓ — se tiver o comprovante aí, "
+                                "anexa agora.")
+    return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}/pagamentos", status_code=303)
 
 
 @router.post("/cockpit/orcamentos/{orc_id}/link-copiado")

@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — Contas a pagar: fornecedor e aprovação do dono</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   TOKENS — cópia de web/tema.py. A fonte da verdade é o tema.py.
+   ============================================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9; --roxo:#C9A3E0;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A;  --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --card:var(--surface); --card-2:var(--bg-2);
+  --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1180px;margin:0 auto;padding:34px 18px 100px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.7rem;font-weight:700}
+h2{font-size:1.18rem;font-weight:700;margin:0 0 .2rem}
+h3{font-size:.95rem;font-weight:600}
+a{color:var(--verde)}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
+  padding:.1rem .35rem;border-radius:4px;color:var(--text-dim)}
+.sec{margin-top:44px}
+.sec>.num{font-family:var(--mono);font-size:.72rem;color:var(--verde);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:78ch;margin-top:.5rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.86rem;margin-top:1rem;
+  color:var(--txt-mut);max-width:82ch}
+.nota b{color:var(--txt)}
+.alerta{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.alerta b{color:var(--ambar)}
+.grave{border-left-color:var(--coral-borda);background:var(--coral-fundo)}
+.grave b{color:var(--coral)}
+
+/* ==========================================================================
+   RÉPLICAS — classes copiadas de web/portal.py (bloco "Títulos a pagar e
+   receber"): .tit-lin .tit-id .tit-desc .tit-meta .tit-val .tit-acoes .tit-edit
+   ========================================================================== */
+.titbox{background:var(--card);border:1px solid var(--borda);border-radius:14px;
+  overflow:hidden}
+.titbox>.cap{background:var(--bg-2);padding:.5rem .85rem;font-size:.72rem;
+  color:var(--txt-mut);border-bottom:1px solid var(--borda);font-family:var(--mono);
+  display:flex;justify-content:space-between;gap:.5rem}
+.titbox>.miolo{padding:10px 16px 14px}
+.tit-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .9rem;
+  padding:.7rem 0;border-top:1px solid var(--card-2)}
+.tit-lin:first-of-type{border-top:0}
+.tit-id{flex:1 1 200px;min-width:0}
+.tit-desc{font-size:.9rem}
+.tit-meta{font-size:.7rem;margin-top:3px;color:var(--txt-mut)}
+.tit-val{flex:0 0 auto;margin-left:auto;text-align:right;white-space:nowrap;
+  font-weight:600;font-variant-numeric:tabular-nums}
+.tit-acoes{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.15rem}
+.tit-acoes button,.tit-acoes a{background:none;border:1px solid #2f2f31;
+  border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;
+  width:auto;text-decoration:none;color:var(--txt);font-family:inherit}
+.tit-edit{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.3rem;
+  align-items:center}
+.tit-edit input{font-size:.8rem;padding:.35rem .5rem;border-radius:7px;
+  border:1px solid #333;background:var(--bg);color:var(--txt);font-family:inherit}
+.tit-edit button{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;
+  font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt);
+  font-family:inherit}
+.tit-cab{display:flex;justify-content:space-between;font-size:.72rem;
+  color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid var(--card-2)}
+.mut{color:var(--txt-mut)}
+
+/* selos de estado */
+.selo{display:inline-block;font-size:.66rem;font-weight:700;border-radius:5px;
+  padding:.1rem .42rem;letter-spacing:.02em;white-space:nowrap;vertical-align:.05em}
+.selo.esp{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
+.selo.aut{border:1px solid var(--neon-borda);background:var(--neon-fundo);color:var(--neon)}
+.selo.rec{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:var(--coral)}
+.selo.atr{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:var(--coral)}
+.selo.pago{border:1px solid var(--borda);background:var(--bg-2);color:var(--text-faint)}
+.selo.falta{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
+.b-ok{border-color:var(--neon-borda)!important;color:var(--neon)!important}
+.b-nao{border-color:var(--coral-borda)!important;color:var(--coral)!important}
+.b-forte{background:var(--verde)!important;color:var(--sobre-verde)!important;
+  border-color:var(--verde)!important;font-weight:600}
+.b-off{opacity:.4;cursor:not-allowed!important}
+
+.par{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:1rem;align-items:start}
+@media (max-width:900px){.par{grid-template-columns:1fr}}
+.rot-tela{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--txt-mut);margin-bottom:.45rem}
+.rot-tela.hoje{color:var(--coral)} .rot-tela.novo{color:var(--verde)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:1rem}
+.card{background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.85rem}
+.card .r{display:block;font-size:.72rem;color:var(--txt-mut);margin-bottom:.3rem}
+.card p{font-size:.8rem;color:var(--txt-mut);margin-top:.35rem}
+.big{font-family:var(--mono);font-size:1.5rem;font-weight:700;display:block}
+.big.ruim{color:var(--coral)} .big.bom{color:var(--verde)} .big.azul{color:var(--azul)}
+.big.am{color:var(--ambar)}
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);
+  text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.76rem;
+  text-transform:uppercase;letter-spacing:.05em}
+.prio{display:grid;grid-template-columns:2.2rem minmax(0,1fr) 7rem;gap:.7rem;
+  align-items:start;padding:.7rem 0;border-bottom:1px solid var(--borda);font-size:.86rem}
+.prio:last-child{border-bottom:0}
+.prio .n{font-family:var(--mono);font-size:1.2rem;font-weight:700;color:var(--verde)}
+.prio .q{color:var(--txt-mut);font-size:.82rem;margin-top:.2rem}
+.prio .t{font-size:.72rem;text-align:right;color:var(--txt-mut);font-family:var(--mono)}
+.prio b{color:var(--txt)}
+/* impressão: nada de bloco cortado no meio da página */
+@media print{
+  body{max-width:none;padding:22px 20px}
+  .sec{margin-top:34px}
+  .titbox,.card,.nota,.prio,.tit-lin,table.diag tr{break-inside:avoid}
+  h1,h2,h3,.sec>.num,.rot-tela{break-after:avoid}
+  .par{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+
+<h1>Contas a pagar: o fornecedor e a aprovação do dono</h1>
+<p class="lede">As duas frentes que você pediu. A primeira é um buraco que já está
+doendo: <b>na Prime, 30 dos 30 títulos a pagar estão sem fornecedor</b>, e não é
+descuido — é que depois de salvar não existe mais onde colocar. A segunda é
+desenho novo, e a única decisão difícil dela é uma só: <b>a aprovação trava o
+pagamento ou só avisa?</b></p>
+<p class="lede" style="font-size:.82rem;color:var(--text-faint)">Medido na conta 34
+(Prime Eventos) em 03/09/2026. Nada foi alterado. As classes de estilo
+(<code>.tit-lin</code>, <code>.tit-acoes</code>, <code>.tit-edit</code>) são cópia
+do bloco real de <code>web/portal.py</code>.</p>
+
+<div class="cards">
+  <div class="card"><span class="r">títulos a pagar em aberto</span>
+    <span class="big">30</span><p>R$ 28.090,42 no total</p></div>
+  <div class="card"><span class="r">sem fornecedor</span>
+    <span class="big ruim">30</span><p>de 30 — nenhum tem</p></div>
+  <div class="card"><span class="r">atrasados</span>
+    <span class="big am">3</span><p>R$ 5.760,85</p></div>
+  <div class="card"><span class="r">vencem em 7 dias</span>
+    <span class="big azul">7</span><p>R$ 6.354,25</p></div>
+  <div class="card"><span class="r">com autor conhecido</span>
+    <span class="big ruim">0</span><p>ninguém sabe quem lançou</p></div>
+</div>
+
+<!-- ==================================================================== 1 -->
+<div class="sec">
+  <div class="num">1 · o fornecedor</div>
+  <h2>Salvou sem fornecedor? Acabou.</h2>
+  <p class="lede">O formulário de cima tem o campo <b>Fornecedor</b>, e ele funciona.
+  O problema é o <b>editar ✎</b> da linha: ele abre com <b>dois campos só</b> —
+  descrição e valor. Não é que o fornecedor esteja escondido; ele não existe ali.
+  A rota <code>/titulo/{id}/descricao</code> aceita <code>descricao</code> e
+  <code>valor</code>, e a função <code>editar_titulo</code> também. Depois de
+  salvar, o "quem" de uma dívida vira definitivo.</p>
+
+  <div class="nota grave"><b>E por isso ninguém preenche mais.</b> Os 30 títulos da
+  Prime têm o nome do fornecedor <b>enfiado na descrição</b>: "ZARB CONSULTORIA",
+  "BANCO DO NORDESTE", "EQUATORIAL", "MENSALIDADE PISCINEIRO". A pessoa achou o
+  jeito de não perder o dado — só que assim ele não liga na ficha, não soma por
+  fornecedor e não aparece no cadastro de ninguém.</div>
+
+  <div class="par">
+    <div>
+      <div class="rot-tela hoje">editar ✎ · hoje</div>
+      <div class="titbox"><div class="cap"><span>título nº 25</span><span>2 campos</span></div>
+      <div class="miolo">
+        <div class="tit-lin">
+          <div class="tit-id">
+            <div class="tit-desc">ENERGIA SOLAR</div>
+            <div class="tit-meta">vence 05/09 · <span style="color:#e07a5f">a pagar</span></div>
+          </div>
+          <div class="tit-val" style="color:#e07a5f">R$ 2.877,77</div>
+          <div class="tit-edit">
+            <input value="ENERGIA SOLAR" style="flex:2 1 150px;min-width:0">
+            <input value="2877,77" style="flex:1 1 90px;min-width:0">
+            <button class="b-forte">salvar</button>
+            <button style="color:#8a938a">cancelar</button>
+          </div>
+        </div>
+      </div></div>
+      <p class="lede" style="font-size:.85rem">Não tem onde escrever o fornecedor.
+      Nem digitando, nem escolhendo da lista.</p>
+    </div>
+    <div>
+      <div class="rot-tela novo">proposto</div>
+      <div class="titbox"><div class="cap"><span>título nº 25</span><span>3 campos</span></div>
+      <div class="miolo">
+        <div class="tit-lin">
+          <div class="tit-id">
+            <div class="tit-desc">ENERGIA SOLAR <span class="selo falta">sem fornecedor</span></div>
+            <div class="tit-meta">vence 05/09 · <span style="color:#e07a5f">a pagar</span></div>
+          </div>
+          <div class="tit-val" style="color:#e07a5f">R$ 2.877,77</div>
+          <div class="tit-edit">
+            <input value="ENERGIA SOLAR" style="flex:2 1 140px;min-width:0">
+            <input value="2877,77" style="flex:1 1 80px;min-width:0">
+            <input value="" placeholder="fornecedor" style="flex:1.4 1 120px;min-width:0;border-color:var(--neon-borda)">
+            <button class="b-forte">salvar</button>
+            <button style="color:#8a938a">cancelar</button>
+          </div>
+        </div>
+      </div></div>
+      <p class="lede" style="font-size:.85rem">O mesmo campo do formulário de cima,
+      com a mesma lista de sugestão de fornecedores — e a mesma regra: se o nome
+      digitado não existe, a ficha nasce ali, já marcada como fornecedor.</p>
+    </div>
+  </div>
+
+  <div class="nota"><b>O selo "sem fornecedor" é metade do conserto.</b> Só abrir o
+  campo não resolve os 30 que já estão lá: ninguém vai abrir um por um pra
+  descobrir quais faltam. O selo mostra na lista quem está sem, e some sozinho
+  quando o campo é preenchido.</div>
+
+  <div class="nota alerta"><b>Um segundo buraco, no mesmo lugar, e ele importa pra
+  frente 2.</b> A rota que cria o título passa <code>criado_por=None</code>
+  cravado no código — não é que ninguém tenha preenchido, é que o campo nunca é
+  gravado. Por isso os 30 títulos da Prime têm autor <b>nulo</b>. Uma aprovação
+  que não sabe <b>quem lançou</b> aprova no escuro, então isso entra junto:
+  carimbar quem lançou é pré-requisito da frente 2, não item separado.</div>
+</div>
+
+<!-- ==================================================================== 2 -->
+<div class="sec">
+  <div class="num">2 · a aprovação do dono</div>
+  <h2>Os quatro estados que você listou são três coisas diferentes</h2>
+  <p class="lede">Você escreveu <b>PAGO / PENDENTE / ATENÇÃO ATRASADO / AUTORIZADO A
+  PAGAR</b> como se fosse uma lista só. Se virar uma lista só, ela se contradiz na
+  primeira semana — porque esses quatro nomes respondem a <b>três perguntas
+  diferentes</b>, e uma conta tem resposta pras três ao mesmo tempo.</p>
+
+  <table class="diag">
+    <tr><th>a pergunta</th><th>as respostas</th><th>quem decide</th><th>hoje</th></tr>
+    <tr>
+      <td><b>O dinheiro saiu?</b></td>
+      <td>em aberto · pago · cancelado</td>
+      <td>quem dá a baixa</td>
+      <td>✅ já existe (<code>titulos.status</code>)</td>
+    </tr>
+    <tr>
+      <td><b>Está no prazo?</b></td>
+      <td>no prazo · vence hoje · atrasado</td>
+      <td><b>ninguém</b> — é o calendário</td>
+      <td>✅ já é calculado do <code>vencimento</code></td>
+    </tr>
+    <tr>
+      <td><b>O dono liberou?</b></td>
+      <td>aguardando · autorizado · recusado</td>
+      <td>o dono</td>
+      <td>❌ é isto que não existe</td>
+    </tr>
+  </table>
+
+  <div class="nota grave"><b>O caso que a lista única não sabe escrever:</b> uma
+  conta <b>autorizada</b> pelo dono e que <b>venceu</b> sem ninguém pagar. É a
+  combinação mais urgente que existe no financeiro — está liberada, era pra ter
+  saído, e não saiu. Num campo só você é obrigado a escolher entre chamá-la de
+  "autorizado" ou de "atrasado", e perde exatamente a metade que ia fazer alguém
+  agir. Com as três perguntas separadas ela se escreve sozinha:
+  <span class="selo aut">autorizado</span> <span class="selo atr">atrasado 4 d</span>.</div>
+
+  <p class="lede">Então o desenho é: <b>o <code>status</code> não muda</b> (aberto /
+  pago / cancelado, como já é), <b>"atrasado" continua sendo conta de data</b>
+  (nada pra ninguém marcar, nada pra desatualizar), e entra <b>uma coluna nova
+  só pra decisão</b> — com quem decidiu, quando, e o motivo quando é recusa.
+  A tela junta as três e escreve uma frase só.</p>
+
+  <div class="par">
+    <div>
+      <div class="rot-tela hoje">a lista hoje</div>
+      <div class="titbox"><div class="cap"><span>títulos a pagar</span><span>30 abertos</span></div>
+      <div class="miolo">
+        <div class="tit-cab"><span>Título</span><span>Valor</span></div>
+        <div class="tit-lin">
+          <div class="tit-id"><div class="tit-desc">ZARB CONSULTORIA</div>
+            <div class="tit-meta"><span style="color:#f0c05a">vence 15/08 ⚠ atrasado</span> · <span style="color:#e07a5f">a pagar</span></div></div>
+          <div class="tit-val" style="color:#e07a5f">R$ 2.200,00</div>
+          <div class="tit-acoes">
+            <button style="color:var(--verde-claro)">dar baixa ✓</button>
+            <button style="color:#8a938a">editar ✎</button>
+            <button style="color:#c98080">apagar ✕</button>
+          </div>
+        </div>
+        <div class="tit-lin">
+          <div class="tit-id"><div class="tit-desc">1 QUINZENA SETEMBRO/26 THIAGO</div>
+            <div class="tit-meta">vence 15/09 · <span style="color:#e07a5f">a pagar</span></div></div>
+          <div class="tit-val" style="color:#e07a5f">R$ 1.500,00</div>
+          <div class="tit-acoes">
+            <button style="color:var(--verde-claro)">dar baixa ✓</button>
+            <button style="color:#8a938a">editar ✎</button>
+            <button style="color:#c98080">apagar ✕</button>
+          </div>
+        </div>
+      </div></div>
+      <p class="lede" style="font-size:.85rem"><b>Qualquer um</b> que abre a tela dá
+      baixa em qualquer coisa. Não há o que aprovar, e não fica registro de quem
+      lançou nem de quem liberou.</p>
+    </div>
+    <div>
+      <div class="rot-tela novo">proposto</div>
+      <div class="titbox"><div class="cap"><span>títulos a pagar</span><span>4 aguardando você</span></div>
+      <div class="miolo">
+        <div class="tit-cab"><span>Título</span><span>Valor</span></div>
+        <div class="tit-lin">
+          <div class="tit-id"><div class="tit-desc">ZARB CONSULTORIA · <span class="mut">Zarb Consultoria Ltda</span></div>
+            <div class="tit-meta"><span class="selo aut">autorizado</span> <span class="selo atr">atrasado 19 d</span> · vence 15/08 · lançado por <b>Jacqueline</b> · liberado por você em 20/08</div></div>
+          <div class="tit-val" style="color:#e07a5f">R$ 2.200,00</div>
+          <div class="tit-acoes">
+            <button class="b-forte">dar baixa ✓</button>
+            <button style="color:#8a938a">editar ✎</button>
+            <button style="color:#c98080">apagar ✕</button>
+          </div>
+        </div>
+        <div class="tit-lin">
+          <div class="tit-id"><div class="tit-desc">1 QUINZENA SETEMBRO/26 THIAGO</div>
+            <div class="tit-meta"><span class="selo esp">aguardando você</span> · vence 15/09 · lançado por <b>Jacqueline</b> hoje 09:12</div></div>
+          <div class="tit-val" style="color:#e07a5f">R$ 1.500,00</div>
+          <div class="tit-acoes">
+            <button class="b-ok">✓ autorizar</button>
+            <button class="b-nao">✕ recusar</button>
+            <button style="color:#8a938a">editar ✎</button>
+            <button class="b-off" title="autorize antes de pagar">dar baixa ✓</button>
+          </div>
+        </div>
+        <div class="tit-lin">
+          <div class="tit-id"><div class="tit-desc">ENERGIA SOLAR · <span class="mut">Equatorial</span></div>
+            <div class="tit-meta"><span class="selo rec">recusado</span> · "conferir a leitura antes" — você, ontem</div></div>
+          <div class="tit-val" style="color:#e07a5f">R$ 2.877,77</div>
+          <div class="tit-acoes">
+            <button class="b-ok">✓ autorizar</button>
+            <button style="color:#8a938a">editar ✎</button>
+            <button class="b-off">dar baixa ✓</button>
+          </div>
+        </div>
+      </div></div>
+      <p class="lede" style="font-size:.85rem">O selo é lido, não escolhido: quem o
+      escreve são as três perguntas juntas. A recusa <b>não apaga nada</b> — ela
+      guarda o motivo e devolve o título pra quem lançou.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ==================================================================== 3 -->
+<div class="sec">
+  <div class="num">3 · quem aprova, e como ele fica sabendo</div>
+  <h2>A permissão já existe — não precisa inventar cargo novo</h2>
+  <p class="lede">Os papéis do sistema já separam exatamente o que você quer, e a
+  capacidade <code>gerir</code> <b>já é só do dono</b>:</p>
+
+  <table class="diag">
+    <tr><th>papel</th><th>lança conta</th><th>autoriza</th><th>dá baixa</th></tr>
+    <tr><td><b>Dono</b></td><td>✓</td><td class="selo aut" style="display:table-cell;background:none;border:0;color:var(--neon)">✓ só ele</td><td>✓</td></tr>
+    <tr><td>Gestor</td><td>✓</td><td>—</td><td>só o autorizado</td></tr>
+    <tr><td>Financeiro</td><td>✓</td><td>—</td><td>só o autorizado</td></tr>
+    <tr><td>Vendedor</td><td>—</td><td>—</td><td>—</td></tr>
+  </table>
+
+  <p class="lede">Hoje a tela de Empresa <b>não olha papel nenhum</b>: o portão é só
+  "a conta tem o módulo PJ ligado?". Quem entra, lança e baixa. Então a mudança
+  aqui não é criar permissão — é <b>passar a usar a que já está escrita</b>.</p>
+
+  <div class="par">
+    <div>
+      <div class="rot-tela novo">aviso pro dono</div>
+      <div class="titbox"><div class="cap"><span>e-mail + push</span><span>na hora</span></div>
+      <div class="miolo" style="font-size:.86rem;line-height:1.6">
+        <b>💸 3 contas esperando sua liberação</b><br>
+        <span class="mut">Jacqueline lançou hoje:</span><br>
+        <span class="mut">· 1ª quinzena setembro/26 Thiago — R$ 1.500,00, vence 15/09</span><br>
+        <span class="mut">· Mensalidade piscineiro — R$ 270,00, vence 15/09</span><br>
+        <span class="mut">· Internet — R$ 94,90, vence 10/09</span><br><br>
+        <span style="color:var(--verde)">Autorizar pelo painel →</span>
+      </div></div>
+      <p class="lede" style="font-size:.85rem">Mesmo caminho do aviso de lead que a
+      gente ligou ontem (e-mail + push do PWA). <b>Uma mensagem por lote, não uma
+      por conta</b> — três avisos seguidos viram ruído e ninguém abre o quarto.</p>
+    </div>
+    <div>
+      <div class="rot-tela novo">autorizar em lote</div>
+      <div class="titbox"><div class="cap"><span>aguardando você</span><span>3 · R$ 1.864,90</span></div>
+      <div class="miolo">
+        <div class="tit-lin">
+          <div class="tit-id"><div class="tit-desc"><input type="checkbox" checked style="width:auto;accent-color:var(--verde)"> 1 QUINZENA SETEMBRO/26 THIAGO</div>
+          <div class="tit-meta">vence 15/09 · Jacqueline</div></div>
+          <div class="tit-val" style="color:#e07a5f">R$ 1.500,00</div></div>
+        <div class="tit-lin">
+          <div class="tit-id"><div class="tit-desc"><input type="checkbox" checked style="width:auto;accent-color:var(--verde)"> MENSALIDADE PISCINEIRO</div>
+          <div class="tit-meta">vence 15/09 · Jacqueline</div></div>
+          <div class="tit-val" style="color:#e07a5f">R$ 270,00</div></div>
+        <div class="tit-lin">
+          <div class="tit-id"><div class="tit-desc"><input type="checkbox" style="width:auto;accent-color:var(--verde)"> INTERNET</div>
+          <div class="tit-meta">vence 10/09 · Jacqueline</div></div>
+          <div class="tit-val" style="color:#e07a5f">R$ 94,90</div></div>
+        <div class="tit-acoes" style="margin-top:.7rem">
+          <button class="b-forte">✓ autorizar os 2 marcados · R$ 1.770,00</button>
+        </div>
+      </div></div>
+      <p class="lede" style="font-size:.85rem">Sem isso, ligar a aprovação nas 30
+      contas que já existem seria 30 cliques no primeiro dia — e aprovação que dá
+      trabalho no dia 1 é aprovação que alguém desliga no dia 2.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ==================================================================== 4 -->
+<div class="sec">
+  <div class="num">4 · a única decisão que é sua</div>
+  <h2>A aprovação tranca o pagamento, ou só avisa?</h2>
+  <p class="lede">Tudo acima funciona dos dois jeitos. Isto muda o que acontece
+  quando alguém clica em <b>dar baixa</b> num título que você ainda não liberou —
+  e é decisão de dono, não minha.</p>
+
+  <div class="par">
+    <div>
+      <div class="rot-tela novo">A · trava <span style="color:var(--txt-mut)">(minha recomendação)</span></div>
+      <div class="titbox"><div class="miolo">
+        <div class="tit-lin"><div class="tit-id">
+          <div class="tit-desc">INTERNET <span class="selo esp">aguardando você</span></div>
+          <div class="tit-meta">o botão de baixa fica apagado até você autorizar</div></div>
+          <div class="tit-val mut">R$ 94,90</div>
+          <div class="tit-acoes"><button class="b-off">dar baixa ✓</button>
+            <button class="b-ok">✓ autorizar</button></div>
+        </div>
+      </div></div>
+      <p class="lede" style="font-size:.85rem"><b>A favor:</b> é o que faz a
+      aprovação valer alguma coisa. Sem trava, ela vira etiqueta — e o dinheiro
+      sai do mesmo jeito.<br><b>Contra:</b> se você viajar sem sinal, a conta de
+      luz espera. (Você continua podendo autorizar e baixar no mesmo clique.)</p>
+    </div>
+    <div>
+      <div class="rot-tela novo">B · só avisa</div>
+      <div class="titbox"><div class="miolo">
+        <div class="tit-lin"><div class="tit-id">
+          <div class="tit-desc">INTERNET <span class="selo esp">aguardando você</span></div>
+          <div class="tit-meta">a baixa sai, com um "tem certeza? não foi autorizado"</div></div>
+          <div class="tit-val mut">R$ 94,90</div>
+          <div class="tit-acoes"><button style="color:var(--verde-claro)">dar baixa ✓</button>
+            <button class="b-ok">✓ autorizar</button></div>
+        </div>
+      </div></div>
+      <p class="lede" style="font-size:.85rem"><b>A favor:</b> nada trava, e fica
+      registrado quem pagou sem autorização.<br><b>Contra:</b> em três semanas todo
+      mundo aprende a clicar em "sim" no aviso, e você tem o controle no papel e
+      não na prática.</p>
+    </div>
+  </div>
+
+  <div class="nota"><b>Eu iria de A</b>, com duas saídas que tiram o risco de
+  travar o caixa: o <b>dono baixa direto</b> (autorizar e pagar é o mesmo clique
+  pra ele), e existe <b>autorizar em lote</b>. Mas é a sua empresa e o seu caixa —
+  se preferir B, o resto do desenho não muda uma linha.</div>
+</div>
+
+<!-- ==================================================================== 5 -->
+<div class="sec">
+  <div class="num">5 · o que eu faria, e em que ordem</div>
+  <h2>O conserto primeiro, o controle depois</h2>
+  <div class="prio">
+    <div class="n">1</div>
+    <div><b>O fornecedor no editar.</b>
+      <div class="q">Campo no editar ✎ + selo "sem fornecedor" na lista. É o que já
+      está doendo — 30 de 30 — e não depende de nenhuma decisão sua.</div></div>
+    <div class="t">sem migração<br>títulos</div>
+  </div>
+  <div class="prio">
+    <div class="n">2</div>
+    <div><b>Carimbar quem lançou.</b>
+      <div class="q">Tirar o <code>criado_por=None</code> cravado na rota. Uma linha,
+      e sem ela a frente 2 aprova sem saber de quem. Não conserta os 30 velhos —
+      esses ficam sem autor mesmo, e a tela vai dizer isso.</div></div>
+    <div class="t">sem migração<br>títulos</div>
+  </div>
+  <div class="prio">
+    <div class="n">3</div>
+    <div><b>A coluna da decisão.</b>
+      <div class="q">Migração com <code>aprovacao</code> (aguardando/autorizado/recusado),
+      quem, quando e motivo. Todos nascem <b>autorizado</b> — ligar o controle não
+      pode transformar 30 contas em pendência de uma vez.</div></div>
+    <div class="t">migração<br>títulos</div>
+  </div>
+  <div class="prio">
+    <div class="n">4</div>
+    <div><b>A tela: selo, autorizar, recusar, lote.</b>
+      <div class="q">Mais o filtro "aguardando você". A tela passa a olhar o papel —
+      hoje ela não olha nenhum.</div></div>
+    <div class="t">sem migração<br>empresa</div>
+  </div>
+  <div class="prio">
+    <div class="n">5</div>
+    <div><b>O aviso pro dono.</b>
+      <div class="q">E-mail + push, um por lote. Mesmo caminho do aviso de lead.</div></div>
+    <div class="t">sem migração<br>avisos</div>
+  </div>
+
+  <div class="nota alerta"><b>Uma coisa que eu preciso perguntar antes de mexer:</b>
+  a aprovação vale pra <b>toda conta a pagar</b>, ou só acima de um valor? Numa
+  empresa que lança internet de R$ 94,90 e consultoria de R$ 2.200,00 na mesma
+  lista, um piso ("só o que passar de R$ 500 precisa de mim") costuma ser a
+  diferença entre um controle que dura e um que cansa. Dá pra começar sem piso e
+  acrescentar depois — só não dá pra adivinhar.</div>
+</div>
+
+<p class="lede" style="margin-top:2.5rem;font-size:.8rem;color:var(--text-faint);
+   border-top:1px solid var(--borda);padding-top:1rem">
+Mockup para aprovação · 03/09/2026 · dados medidos na conta 34 (Prime Eventos) ·
+nada foi alterado no sistema.</p>
+
+</body>
+</html>

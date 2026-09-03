@@ -4,6 +4,7 @@ psycopg_pool>=3.2
 python-telegram-bot>=21.0
 python-dotenv>=1.0
 pytest>=8.0
+pytest-timeout>=2.3   # teto por teste no CI — ver .github/workflows/ci.yml
 # pega 'undefined name' — uso de variável antes de existir, que o Python só
 # denuncia em tempo de execução. Ver tests/test_nome_indefinido.py: um erro desses
 # derrubou o RSVP de convite em produção (23/08).

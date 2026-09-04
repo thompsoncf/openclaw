@@ -271,3 +271,66 @@ def test_o_dinheiro_da_barra_bate_com_o_do_python(centavos, texto):
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == texto == rel._brl(centavos)
+
+
+# ═══════════════ o bloco tem que RODAR, não só existir ═══════════════
+def _scripts_do_template() -> dict:
+    """Os <script> da tela que dá pra analisar crus (sem Jinja no meio)."""
+    fora = {}
+    for bloco in re.findall(r"<script>(.*?)</script>", pt._RELATORIOS, re.S):
+        if "{{" in bloco or "{%" in bloco:
+            continue          # tem Jinja: só faz sentido depois de renderizar
+        chave = "barra" if "function caixas()" in bloco else f"outro{len(fora)}"
+        fora[chave] = bloco
+    return fora
+
+
+def test_todo_javascript_da_tela_e_valido():
+    """**Este teste nasceu de um bug que os outros deixaram passar pro ar — duas
+    vezes.**
+
+    O bloco vive dentro de uma string Python. Um `\\n` cru na fonte vira quebra de
+    linha DE VERDADE no HTML, e string JavaScript não atravessa linha: em
+    04/09/2026 o `confirm` tinha `'?\\n\\n'`, o navegador levantou
+    `Uncaught SyntaxError` e o bloco INTEIRO morreu antes de definir nada. O dono
+    marcou duas contas e a barra continuou dizendo "0 marcadas · R$ 0,00".
+
+    A primeira versão deste teste recortava o bloco por `"(function () {"` — e
+    casava com OUTRO IIFE do template, que sempre esteve válido. Ele passava
+    verde enquanto o bug seguia no ar. Por isso agora checa TODOS os blocos, e
+    exige que o da barra esteja entre eles: teste que recorta tem que provar que
+    recortou a coisa certa.
+    """
+    import shutil
+    import subprocess
+    if not shutil.which("node"):
+        pytest.skip("sem node no ambiente")
+    scripts = _scripts_do_template()
+    assert "barra" in scripts, \
+        "não achei o bloco da barra — o recorte está olhando pra outro lugar"
+    for nome, js in scripts.items():
+        r = subprocess.run(["node", "--check", "-"], input=js,
+                           capture_output=True, text=True)
+        assert r.returncode == 0, (
+            f"o bloco <script> '{nome}' não é JavaScript válido — no navegador ele "
+            f"morre inteiro e calado:\n{r.stderr}")
+
+
+def test_nao_ha_quebra_de_linha_crua_dentro_de_string_no_bloco():
+    """A causa exata, fixada por si — pra quem editar o bloco ver o porquê antes
+    de repetir. Roda sem node, então vale também onde o de cima é pulado."""
+    js = _scripts_do_template()["barra"]
+    for n, linha in enumerate(js.split("\n"), 1):
+        assert linha.count("'") % 2 == 0, (
+            f"linha {n} do bloco abre aspas e não fecha — provável `\\n` cru "
+            f"que virou quebra de linha:\n  {linha.strip()}")
+
+
+def test_a_barra_some_quando_nada_esta_marcado():
+    """O atributo `hidden` sozinho PERDE pro `display:flex` da classe — a folha do
+    navegador tem menos peso que uma regra de classe. Sem a regra explícita, a
+    barra fica visível com "0 marcadas" pra sempre, que foi o que o dono viu."""
+    assert ".rel-lote-barra[hidden]{display:none}" in pt._RELATORIOS
+    css = pt._RELATORIOS[pt._RELATORIOS.index(".rel-lote-barra[hidden]"):]
+    assert css.index("[hidden]") < css.index("position:sticky"), \
+        "a regra do hidden tem que vir antes da que dá display à barra"

@@ -1,0 +1,268 @@
+<title>O botão ✓ do relatório</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-fundo:#10241A; --neon-borda:#1E4A3A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,sans-serif;
+  --body:"Inter",system-ui,-apple-system,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  --lede:68ch;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;
+  line-height:1.62;-webkit-font-smoothing:antialiased}
+.pagina{display:flex;flex-direction:column;gap:3rem;padding:3rem 1.5rem 6rem;
+  max-width:1400px;margin:0 auto}
+.lede{max-width:var(--lede);margin:0 auto;width:100%;display:flex;flex-direction:column;gap:1rem}
+h1,h2{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:clamp(1.9rem,4vw,2.9rem);font-weight:700;letter-spacing:-.022em}
+h2{font-size:1.5rem;font-weight:700;letter-spacing:-.014em}
+p{margin:0}
+strong{color:var(--neon-bright);font-weight:600}
+em{color:var(--text);font-style:normal;border-bottom:1px dotted var(--text-faint)}
+code{font-family:var(--mono);font-size:.86em;color:var(--text-dim);background:var(--bg-2);
+  border:1px solid var(--line);border-radius:5px;padding:.08em .38em}
+.olho{font-family:var(--mono);font-size:.7rem;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--text-faint)}
+.dim{color:var(--text-dim)}
+hr{border:0;border-top:1px solid var(--line);margin:0}
+.pedido{border-left:2px solid var(--neon);padding:.1rem 0 .1rem 1.1rem;
+  color:var(--text-dim);font-size:1.02rem}
+.pedido b{color:var(--text);font-weight:500}
+
+.tela{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tela-cab{display:flex;align-items:baseline;gap:.7rem;flex-wrap:wrap;padding:.8rem 1.1rem;
+  border-bottom:1px solid var(--line);background:var(--bg-2)}
+.tela-cab .t{font-family:var(--display);font-weight:600;font-size:.96rem}
+.tela-cab .s{font-size:.79rem;color:var(--text-dim)}
+.tw{overflow-x:auto}
+.tw table{width:100%;min-width:700px;border-collapse:collapse}
+.tw th,.tw td{padding:.5rem .7rem;border-bottom:1px solid var(--line);text-align:left;
+  font-size:.855rem;white-space:nowrap}
+.tw th{font-size:.72rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--text-faint);background:var(--bg-2)}
+.tw tbody tr:last-child td{border-bottom:0}
+.tw tbody tr:nth-child(even){background:rgba(255,255,255,.014)}
+.tw td.flex{overflow:hidden;text-overflow:ellipsis;max-width:0}
+.tw td.flex:nth-child(3){width:55%}
+.tw td.flex:nth-child(4){width:45%}
+.tw td.num,.tw th.num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.tw th.sel,.tw td.sel{width:1%;padding-right:0}
+.tw .sel input{accent-color:var(--neon);cursor:default}
+.tw td.act{width:1%;padding-left:0}
+.tw td.venc{font-family:var(--mono);font-size:.8rem}
+.tw td.venc .pz{color:var(--text-dim)}
+.tw td.venc.erro,.tw td.venc.erro .pz{color:var(--coral)}
+.tw td.venc.aviso .pz{color:var(--ambar)}
+.tw td .res{display:block;font-size:.75rem;color:#f0dca6;font-weight:500}
+.btn-ok{background:var(--neon);color:var(--sobre-verde);border:0;border-radius:7px;
+  padding:.1rem .5rem;font-weight:700;font-size:.82rem;font-family:var(--body)}
+.barra{display:flex;gap:.8rem;align-items:center;padding:.6rem .9rem;
+  border-top:1px solid var(--neon-borda);background:var(--neon-fundo);font-size:.84rem}
+.barra b{color:var(--neon-bright)}
+.barra .bt{margin-left:auto;background:var(--neon);color:var(--sobre-verde);border:0;
+  border-radius:7px;padding:.4rem .9rem;font-size:.8rem;font-weight:600;font-family:var(--body)}
+.legenda{padding:.6rem 1.1rem;border-top:1px solid var(--line);background:var(--bg-2);
+  font-size:.78rem;color:var(--text-dim)}
+
+.bug{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:14px;
+  padding:1.3rem 1.4rem;display:flex;flex-direction:column;gap:.85rem;
+  max-width:var(--lede);margin:0 auto;width:100%}
+.bug h2{font-size:1.15rem;color:#f0b8b8}
+.bug p{font-size:.92rem;color:#e8ccc9}
+.bug strong{color:#fff}
+.bug code{background:rgba(0,0,0,.32);color:#e8ccc9;border-color:var(--coral-borda)}
+.bug pre{margin:0;font-family:var(--mono);font-size:.76rem;background:rgba(0,0,0,.32);
+  border-radius:8px;padding:.8rem .9rem;overflow-x:auto;color:#e8ccc9;line-height:1.6}
+.ok{border:1px solid var(--neon-borda);background:var(--neon-fundo)}
+.ok h2{color:#9fe8c9}.ok p{color:#cfe9da}.ok pre{color:#cfe9da}
+
+.perda{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:14px;
+  padding:1.3rem 1.4rem;display:flex;flex-direction:column;gap:.85rem;
+  max-width:var(--lede);margin:0 auto;width:100%}
+.perda h2{font-size:1.15rem;color:#f0dca6}
+.perda p{font-size:.92rem;color:#e6d9bb}
+.perda strong{color:#fff0cf}
+.perda code{background:rgba(0,0,0,.28);color:#e6d9bb;border-color:var(--ambar-borda)}
+
+.ops{display:flex;flex-direction:column;gap:1.3rem;max-width:var(--lede);margin:0 auto;width:100%}
+.op{border:1px solid var(--line);border-radius:13px;overflow:hidden;background:var(--surface)}
+.op.rec{border-color:var(--neon-borda);box-shadow:0 0 0 1px var(--neon-borda)}
+.op-cab{display:flex;align-items:flex-start;gap:.9rem;padding:1rem 1.1rem;
+  background:var(--bg-2);border-bottom:1px solid var(--line)}
+.op-letra{font-family:var(--display);font-size:1.35rem;font-weight:700;line-height:1;
+  width:2rem;height:2rem;flex:none;display:flex;align-items:center;justify-content:center;
+  border-radius:8px;background:var(--bg);border:1px solid var(--line);color:var(--text-dim)}
+.op.rec .op-letra{background:var(--neon);color:var(--sobre-verde);border-color:var(--neon)}
+.op-tit{display:flex;flex-direction:column;gap:.15rem;min-width:0}
+.op-tit .n{font-family:var(--display);font-weight:600;font-size:1.02rem}
+.op-tit .d{font-size:.86rem;color:var(--text-dim)}
+.selo{font-family:var(--mono);font-size:.65rem;font-weight:600;letter-spacing:.12em;
+  text-transform:uppercase;padding:.2rem .5rem;border-radius:5px;margin-left:auto;flex:none;
+  background:var(--neon-fundo);color:var(--neon-bright);border:1px solid var(--neon-borda)}
+.selo.frio{background:var(--bg);color:var(--text-faint);border-color:var(--line)}
+.op-corpo{padding:1rem 1.1rem;font-size:.9rem;color:var(--text-dim);
+  display:flex;flex-direction:column;gap:.7rem}
+.linha-emp{font-family:var(--mono);font-size:.78rem;background:var(--bg);
+  border:1px solid var(--line);border-radius:8px;padding:.75rem .85rem;overflow-x:auto;
+  white-space:nowrap;color:var(--text)}
+.linha-emp .mut{color:var(--text-faint)}
+.linha-emp .bt{color:var(--neon-bright)}
+
+.rodape{max-width:var(--lede);margin:0 auto;width:100%;font-size:.82rem;
+  color:var(--text-faint);display:flex;flex-direction:column;gap:.4rem}
+:focus-visible{outline:2px solid var(--neon-bright);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="pagina">
+
+<header class="lede">
+  <div class="olho">Relatório · Contas a pagar · 04/09/2026</div>
+  <h1>O contador parado e o botão que sobra</h1>
+  <div class="pedido"><b>“Eu clico na caixa, marco as contas e o valor não reflete
+  abaixo. E a caixa que fica no final pra marcar a conta como paga pode remover,
+  pois tudo vai ficar lá dentro da Empresa como combinado.”</b></div>
+</header>
+
+<section class="bug">
+  <div class="olho" style="color:#c99">O bug — meu, e já corrigido</div>
+  <h2>O bloco inteiro morria antes de rodar</h2>
+  <p>O JavaScript da tela mora dentro de uma string Python. Eu escrevi
+  <code>'?\n\n'</code> com uma barra invertida só — e o <b>Python</b> transformou
+  isso em quebra de linha de verdade antes de o navegador ver. String JavaScript
+  não atravessa linha:</p>
+  <pre>Uncaught SyntaxError: Invalid or unexpected token</pre>
+  <p>Com o erro, <strong>nada do bloco chega a existir</strong> — nem o contador,
+  nem a soma, nem o texto do botão. Por isso a barra ficava parada em
+  “0 marcadas · R$ 0,00” com duas contas marcadas na sua frente.</p>
+  <p>Junto vinha um segundo: a barra tem <code>display:flex</code> na classe, que
+  <b>vence</b> o atributo <code>hidden</code>. Então ela aparecia mesmo sem nada
+  marcado — e era isso que você via ali embaixo o tempo todo.</p>
+</section>
+
+<section class="bug ok">
+  <div class="olho" style="color:#7fc7a4">Depois</div>
+  <h2>Medido no navegador, não deduzido</h2>
+  <pre>antes do clique   barra escondida: sim   display: none
+depois de 2 cliques
+  marcadas ........ 2
+  contador ........ 2
+  soma ............ R$ 4.600,00
+  botão ........... ✓ liberar o pagamento das 2 — R$ 4.600,00
+  erros de JS ..... nenhum</pre>
+  <p>Escrevi três testes que pegam isso: um manda <b>todos</b> os blocos
+  <code>&lt;script&gt;</code> da tela pro parser do Node, outro procura aspas sem
+  par linha a linha, e o terceiro exige a regra de CSS que faz a barra sumir.
+  Conferi que os três <b>falham</b> com o bug de volta — teste que não reprova o
+  erro não guarda nada.</p>
+</section>
+
+<section class="lede">
+  <div class="olho">Agora o que você pediu</div>
+  <h2>Tirar o ✓ da linha</h2>
+  <p class="dim">É o botão no fim da linha que marca a conta como paga. Ele
+  aparece só quando existe um pagamento parecido no caixa — hoje, uma linha em 31.
+  Abaixo, a mesma tela com e sem ele.</p>
+</section>
+
+<section>
+  <div class="tela" style="margin-bottom:1.6rem">
+    <div class="tela-cab"><span class="t">Hoje</span>
+      <span class="s">com o ✓ no fim da linha da ZARB</span></div>
+    <div class='tw'><table><thead><tr><th class=sel></th><th>Vencimento</th><th>Descrição</th><th>Fornecedor</th><th class=num>Valor</th><th></th></tr></thead><tbody>
+<tr><td class=sel><input type=checkbox checked tabindex=-1 aria-hidden=true></td><td class='venc erro'>15/08/2026 <span class=pz>· há 20 dias</span></td><td class=flex><b>ZARB CONSULTORIA</b><span class=res>⏳ Talvez paga · 10/08/2026</span></td><td class=flex>ZARB ASSESSORIA</td><td class=num>R$ 2.200,00</td><td class=act><button class=btn-ok type=button tabindex=-1 aria-hidden=true>✓</button></td></tr>
+<tr><td class=sel><input type=checkbox checked tabindex=-1 aria-hidden=true></td><td class='venc erro'>15/08/2026 <span class=pz>· há 20 dias</span></td><td class=flex><b>BANCO DO NORDESTE</b></td><td class=flex>BANCO DO NORDESTE</td><td class=num>R$ 2.400,00</td><td class=act></td></tr>
+<tr><td class=sel><input type=checkbox tabindex=-1 aria-hidden=true></td><td class='venc erro'>31/08/2026 <span class=pz>· há 4 dias</span></td><td class=flex><b>IPTU 2026 3/6</b></td><td class=flex>PREFEITURA DE TERESINA</td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+<tr><td class=sel><input type=checkbox tabindex=-1 aria-hidden=true></td><td class='venc aviso'>05/09/2026 <span class=pz>· amanhã</span></td><td class=flex><b>2 QUINZENA AGOSTO/26 BETO</b></td><td class=flex>ROBERTO LOPES</td><td class=num>R$ 721,07</td><td class=act></td></tr>
+<tr><td class=sel><input type=checkbox tabindex=-1 aria-hidden=true></td><td class='venc aviso'>05/09/2026 <span class=pz>· amanhã</span></td><td class=flex><b>2 QUINZENA AGOSTO/26 JAQUELINE</b></td><td class=flex>JAQUELINE DUARTE</td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+</tbody></table></div>
+    <div class="barra"><span><b>2</b> marcadas · <b>R$ 4.600,00</b></span>
+      <span class="bt">✓ liberar o pagamento das 2 — R$ 4.600,00</span></div>
+  </div>
+
+  <div class="tela">
+    <div class="tela-cab"><span class="t">Como ficaria</span>
+      <span class="s">sem o ✓ — o relatório só libera</span></div>
+    <div class='tw'><table><thead><tr><th class=sel></th><th>Vencimento</th><th>Descrição</th><th>Fornecedor</th><th class=num>Valor</th></tr></thead><tbody>
+<tr><td class=sel><input type=checkbox checked tabindex=-1 aria-hidden=true></td><td class='venc erro'>15/08/2026 <span class=pz>· há 20 dias</span></td><td class=flex><b>ZARB CONSULTORIA</b><span class=res>⏳ Talvez paga · 10/08/2026</span></td><td class=flex>ZARB ASSESSORIA</td><td class=num>R$ 2.200,00</td></tr>
+<tr><td class=sel><input type=checkbox checked tabindex=-1 aria-hidden=true></td><td class='venc erro'>15/08/2026 <span class=pz>· há 20 dias</span></td><td class=flex><b>BANCO DO NORDESTE</b></td><td class=flex>BANCO DO NORDESTE</td><td class=num>R$ 2.400,00</td></tr>
+<tr><td class=sel><input type=checkbox tabindex=-1 aria-hidden=true></td><td class='venc erro'>31/08/2026 <span class=pz>· há 4 dias</span></td><td class=flex><b>IPTU 2026 3/6</b></td><td class=flex>PREFEITURA DE TERESINA</td><td class=num>R$ 1.160,85</td></tr>
+<tr><td class=sel><input type=checkbox tabindex=-1 aria-hidden=true></td><td class='venc aviso'>05/09/2026 <span class=pz>· amanhã</span></td><td class=flex><b>2 QUINZENA AGOSTO/26 BETO</b></td><td class=flex>ROBERTO LOPES</td><td class=num>R$ 721,07</td></tr>
+<tr><td class=sel><input type=checkbox tabindex=-1 aria-hidden=true></td><td class='venc aviso'>05/09/2026 <span class=pz>· amanhã</span></td><td class=flex><b>2 QUINZENA AGOSTO/26 JAQUELINE</b></td><td class=flex>JAQUELINE DUARTE</td><td class=num>R$ 1.500,00</td></tr>
+</tbody></table></div>
+    <div class="barra"><span><b>2</b> marcadas · <b>R$ 4.600,00</b></span>
+      <span class="bt">✓ liberar o pagamento das 2 — R$ 4.600,00</span></div>
+    <div class="legenda">O aviso <b>⏳ Talvez paga · 10/08/2026</b> continua na
+      linha: ele é informação, não ação. Some só o botão.</div>
+  </div>
+</section>
+
+<section class="perda">
+  <div class="olho" style="color:#c9a86a">O que se perde, e eu preciso dizer antes</div>
+  <h2>“Dar baixa” e o ✓ não fazem a mesma coisa</h2>
+  <p>O <b>✓</b> LIGA a conta a um pagamento que <b>já está</b> no caixa. O
+  <b>“dar baixa”</b> da aba Empresa <strong>cria um lançamento novo</strong>.</p>
+  <p>Na ZARB isso é concreto: o título de R$ 2.200,00 está aberto, e o Pix de
+  R$ 2.200,00 de 10/08 já está no caixa (veio do extrato). Fechar essa conta pelo
+  “dar baixa” lançaria um <b>segundo</b> R$ 2.200,00 — a despesa contada duas
+  vezes no livro-caixa e no DRE.</p>
+  <p>Ou seja: tirar o ✓ sem levar essa função pra Empresa deixa a ZARB — e toda
+  conta paga por Pix ou comprovante — <strong>sem jeito certo de ser fechada</strong>.</p>
+</section>
+
+<section class="ops">
+  <article class="op rec">
+    <div class="op-cab"><div class="op-letra">A</div>
+      <div class="op-tit"><span class="n">Tira o ✓ e leva a função pra Empresa</span>
+        <span class="d">É o “tudo vai ficar lá dentro da Empresa” de verdade.</span></div>
+      <span class="selo">Recomendo</span></div>
+    <div class="op-corpo">
+      <p>Na aba Empresa, a linha que tem pagamento parecido ganha o botão ao lado
+      do “dar baixa”, dizendo qual pagamento é:</p>
+      <div class="linha-emp">ZARB CONSULTORIA <span class="mut">· ZARB ASSESSORIA</span><br>
+        <span class="mut">vence 15/08 · há 20 dias · a pagar</span><br>
+        <span class="bt">[✓ já foi paga — Pix de 10/08, R$ 2.200,00]</span>
+        <span class="mut">[dar baixa ✓] [editar ✎] [apagar ✕]</span></div>
+      <p>O relatório fica só com liberar, como você quis, e nenhuma conta perde o
+      caminho de ser fechada sem dobrar despesa.</p>
+    </div>
+  </article>
+
+  <article class="op">
+    <div class="op-cab"><div class="op-letra">B</div>
+      <div class="op-tit"><span class="n">Só tira o ✓</span>
+        <span class="d">O aviso “Talvez paga” fica; a ação some.</span></div>
+      <span class="selo frio">Mais rápido</span></div>
+    <div class="op-corpo">
+      <p>Menos código hoje. O custo: a ZARB continua aberta e a única saída vira o
+      “dar baixa”, que dobra a despesa — ou apagar o título, que sume com o
+      compromisso do histórico.</p>
+    </div>
+  </article>
+</section>
+
+<section class="lede">
+  <div class="olho">O que preciso de você</div>
+  <h2 style="font-size:1.2rem">A ou B</h2>
+  <p class="dim">A correção do contador eu já fiz — é bug, não é opção, e sobe no
+  próximo PR de qualquer jeito. A pergunta é só o destino do ✓.</p>
+</section>
+
+<div class="rodape">
+  <hr>
+  <p>Diagnóstico feito renderizando a tela real no Chromium e clicando nas caixas
+  com o apanhador de erro registrado ANTES do bloco — na primeira tentativa ele
+  estava depois, e o <code>SyntaxError</code> passou despercebido.</p>
+  <p>Dados: os títulos em aberto da conta 34 (Prime Eventos), lidos da produção em
+  04/09/2026. Só leitura.</p>
+</div>
+
+</div>

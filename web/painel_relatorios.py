@@ -405,7 +405,15 @@ def _pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
       o eco daquele dinheiro, não dinheiro novo — é a mesma régua que
       `_dados_vendas` usa pra não contar o sinal duas vezes;
     * a janela é apertada de propósito (ver `_JANELA_CANDIDATO_DIAS`), porque em
-      conta recorrente o mesmo valor se repete todo mês.
+      conta recorrente o mesmo valor se repete todo mês;
+    * **e o TEXTO, que faltava.** As três acima olham só valor e data, e isso não
+      basta: em 04/09/2026 a aba avisava 5 contas da Prime e DUAS estavam
+      erradas — as duas da Jaqueline Duarte, R$ 3.000,00 de dívida real, marcadas
+      por causa de pagamentos ao Pedro Yan, ao Thiago e de um reembolso ao
+      cliente Jonas Barros. A régua está em `emp.texto_contradiz` e recusa só por
+      CONTRADIÇÃO (período diferente, ou nome de outra pessoa num comprovante que
+      nomeia gente) — nunca por falta de parecença, porque deixar de avisar custa
+      pagar duas vezes.
 
     Devolve {titulo_id: {"n", "data", "lancamento_id", "centavos"}}.
     """
@@ -418,7 +426,8 @@ def _pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
     ate = max(t["vencimento"] for t in alvos) + janela
     with pool.connection() as c:
         rows = c.execute(
-            """select l.id, l.data, l.valor_centavos from lancamentos l
+            """select l.id, l.data, l.valor_centavos, l.descricao, l.origem
+                 from lancamentos l
                 where l.conta_id=%s and l.tipo=%s and l.data >= %s and l.data <= %s
                   and not exists (select 1 from titulos t
                                    where t.lancamento_id = l.id and t.conta_id = l.conta_id)
@@ -430,16 +439,24 @@ def _pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
             (conta_id, lanc_tipo, de, ate),
         ).fetchall()
     por_valor: dict[int, list] = {}
-    for lid, data, valor in rows:
-        por_valor.setdefault(int(valor or 0), []).append((data, lid))
+    for lid, data, valor, desc, origem in rows:
+        por_valor.setdefault(int(valor or 0), []).append(
+            {"id": lid, "data": data, "descricao": desc, "origem": origem})
     achados = {}
     for t in alvos:
         perto = [p for p in por_valor.get(t["valor_centavos"], [])
-                 if abs((p[0] - t["vencimento"]).days) <= _JANELA_CANDIDATO_DIAS]
+                 if abs((p["data"] - t["vencimento"]).days) <= _JANELA_CANDIDATO_DIAS
+                 # e a quarta trava, a do TEXTO (ver `emp.texto_contradiz`): valor
+                 # e data iguais não bastam. Na Prime as duas contas da Jaqueline
+                 # eram avisadas por causa de pagamentos ao Pedro Yan, ao Thiago e
+                 # de um reembolso a cliente — R$ 3.000,00 de dívida real marcada
+                 # como talvez paga. A régua recusa por contradição, nunca por
+                 # falta de parecença: na dúvida o aviso fica de pé.
+                 and not emp.texto_contradiz(t, p)]
         if perto:
-            perto.sort(key=lambda p: abs((p[0] - t["vencimento"]).days))
-            achados[t["id"]] = {"n": len(perto), "data": perto[0][0],
-                                "lancamento_id": perto[0][1],
+            perto.sort(key=lambda p: abs((p["data"] - t["vencimento"]).days))
+            achados[t["id"]] = {"n": len(perto), "data": perto[0]["data"],
+                                "lancamento_id": perto[0]["id"],
                                 "centavos": t["valor_centavos"]}
     return achados
 

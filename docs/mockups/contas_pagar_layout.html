@@ -1,0 +1,336 @@
+<title>Onde a largura da tabela está indo</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Os tokens são os de web/tema.py — o mockup tem que ser a cara do que vai no ar. */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-fundo:#10241A; --neon-borda:#1E4A3A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,sans-serif;
+  --body:"Inter",system-ui,-apple-system,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  --lede:68ch;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;
+  line-height:1.62;-webkit-font-smoothing:antialiased}
+.pagina{display:flex;flex-direction:column;gap:3.2rem;padding:3rem 1.5rem 6rem;
+  max-width:1560px;margin:0 auto}
+.lede{max-width:var(--lede);margin:0 auto;width:100%;display:flex;flex-direction:column;gap:1rem}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:clamp(2rem,4.4vw,3.1rem);font-weight:700;letter-spacing:-.022em}
+h2{font-size:1.62rem;font-weight:700;letter-spacing:-.014em}
+p{margin:0}
+strong{color:var(--neon-bright);font-weight:600}
+em{color:var(--text);font-style:normal;border-bottom:1px dotted var(--text-faint)}
+code{font-family:var(--mono);font-size:.86em;color:var(--text-dim);background:var(--bg-2);
+  border:1px solid var(--line);border-radius:5px;padding:.08em .38em}
+.olho{font-family:var(--mono);font-size:.7rem;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--text-faint)}
+.dim{color:var(--text-dim)}
+hr{border:0;border-top:1px solid var(--line);margin:0}
+.pedido{border-left:2px solid var(--neon);padding:.1rem 0 .1rem 1.1rem;
+  color:var(--text-dim);font-size:1.02rem}
+.pedido b{color:var(--text);font-weight:500}
+
+/* ── a régua: a barra que mostra pra onde a largura vai ── */
+.regua{display:flex;flex-direction:column;gap:.55rem;max-width:var(--lede);margin:0 auto;
+  width:100%}
+.regua .faixa{display:flex;height:34px;border-radius:7px;overflow:hidden;
+  border:1px solid var(--line);font-family:var(--mono);font-size:.68rem;font-weight:600}
+.regua .faixa span{display:flex;align-items:center;justify-content:center;
+  overflow:hidden;white-space:nowrap;color:var(--bg)}
+.regua .rot{display:flex;justify-content:space-between;font-size:.78rem;
+  color:var(--text-dim);gap:1rem}
+.regua .rot b{color:var(--text);font-weight:600;font-family:var(--display)}
+.s-fixa{background:#2b3a33;color:var(--text-dim)!important}
+.s-desc{background:var(--neon-bright)}
+.s-forn{background:#7fd8a8}
+.s-forn.mal{background:var(--coral);color:#fff!important}
+.s-stat{background:var(--ambar)}
+
+/* ── a tabela, com a régua real de web/portal.py ── */
+.tela{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tela-cab{display:flex;align-items:baseline;gap:.7rem;flex-wrap:wrap;padding:.85rem 1.1rem;
+  border-bottom:1px solid var(--line);background:var(--bg-2)}
+.tela-cab .t{font-family:var(--display);font-weight:600;font-size:.98rem}
+.tela-cab .s{font-size:.8rem;color:var(--text-dim)}
+.tw{overflow-x:auto}
+.tw table{width:100%;min-width:660px;border-collapse:collapse}
+.tw th,.tw td{padding:.5rem .7rem;border-bottom:1px solid var(--line);text-align:left;
+  font-size:.855rem;white-space:nowrap}
+.tw th{font-size:.72rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--text-faint);background:var(--bg-2)}
+.tw tbody tr:last-child td{border-bottom:0}
+.tw tbody tr:nth-child(even){background:rgba(255,255,255,.014)}
+.tw td.flex{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;width:99%}
+.tw td.dt{font-family:var(--mono);font-size:.8rem;color:var(--text-dim)}
+.tw td.num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.tw th.num{text-align:right}
+.tw td.act{width:1%;padding-left:0}
+.tw td b{font-weight:600}
+/* HOJE: é assim que está no ar — a primeira elástica come tudo e o fornecedor
+   fica no piso de ~107px, cortado em toda linha. */
+.tw.hoje td.flex:nth-child(3){width:1%;max-width:105px}
+/* CONSERTO: cada elástica pede a sua parte, e aí o navegador reparte. */
+.tw.conserto td.flex:nth-child(2){width:60%}
+.tw.conserto td.flex:nth-child(3){width:40%}
+/* PROPOSTA */
+.tw.proposta td.flex:nth-child(2){width:55%}
+.tw.proposta td.flex:nth-child(3){width:45%}
+.tw td.venc{white-space:nowrap;font-family:var(--mono);font-size:.8rem}
+.tw td.venc .pz{color:var(--text-dim)}
+.tw td.venc.erro,.tw td.venc.erro .pz{color:var(--coral)}
+.tw td.venc.aviso .pz{color:var(--ambar)}
+.tw td.flex .res{display:block;font-size:.75rem;color:#f0dca6;font-weight:500;
+  overflow:hidden;text-overflow:ellipsis}
+.pill{display:inline-block;padding:.13rem .55rem;border-radius:999px;font-size:.72rem;
+  font-weight:600;white-space:nowrap}
+.pill.ok{background:var(--neon-fundo);color:#9fe8c9;border:1px solid var(--neon-borda)}
+.pill.aviso{background:var(--ambar-fundo);color:#f0dca6;border:1px solid var(--ambar-borda)}
+.pill.erro{background:var(--coral-fundo);color:#f0b8b8;border:1px solid var(--coral-borda)}
+.btn-ok{background:var(--neon);color:var(--sobre-verde);border:0;border-radius:7px;
+  padding:.1rem .5rem;font-weight:700;font-size:.82rem;cursor:default;font-family:var(--body)}
+.legenda{padding:.6rem 1.1rem;border-top:1px solid var(--line);background:var(--bg-2);
+  font-size:.78rem;color:var(--text-dim)}
+
+/* ── a medição ── */
+.medida{width:100%;overflow-x:auto}
+.medida table{border-collapse:collapse;width:100%;min-width:620px}
+.medida th,.medida td{padding:.55rem .8rem;border-bottom:1px solid var(--line);
+  font-size:.86rem;text-align:right;font-variant-numeric:tabular-nums}
+.medida th:first-child,.medida td:first-child{text-align:left;white-space:nowrap}
+.medida thead th{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--text-faint);font-weight:600}
+.medida tbody tr.rec td{background:var(--neon-fundo)}
+.medida tbody tr.mal td{color:var(--coral)}
+.medida td b{font-family:var(--display);font-size:1rem}
+
+.erro-meu{border:1px solid var(--coral-borda);background:var(--coral-fundo);
+  border-radius:14px;padding:1.3rem 1.4rem;display:flex;flex-direction:column;gap:.85rem;
+  max-width:var(--lede);margin:0 auto;width:100%}
+.erro-meu h2{font-size:1.18rem;color:#f0b8b8}
+.erro-meu p{font-size:.92rem;color:#e8ccc9}
+.erro-meu strong{color:#fff}
+.erro-meu code{background:rgba(0,0,0,.3);color:#e8ccc9;border-color:var(--coral-borda)}
+
+.rodape{max-width:var(--lede);margin:0 auto;width:100%;font-size:.82rem;
+  color:var(--text-faint);display:flex;flex-direction:column;gap:.4rem}
+:focus-visible{outline:2px solid var(--neon-bright);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="pagina">
+
+<header class="lede">
+  <div class="olho">Painel · Contas a pagar · medido em 04/09/2026</div>
+  <h1>Onde a largura da tabela está indo</h1>
+  <div class="pedido"><b>“Só não ficou legal a coluna do fornecedor. Vamos pensar
+  em melhorar esse relatório, o layout!”</b></div>
+  <p class="dim">Você está certo, e não era questão de gosto: <strong>a coluna
+  Fornecedor recebe 107 pixels — em qualquer tamanho de tela</strong> — e sai
+  cortada em todas as linhas. Fui medir no navegador de verdade em vez de deduzir,
+  porque foi deduzindo que eu errei da primeira vez.</p>
+</header>
+
+<section class="erro-meu">
+  <div class="olho" style="color:#c99">O que eu errei</div>
+  <h2>Duas colunas elásticas não dividem a sobra pela metade</h2>
+  <p>Quando montei a aba nova eu escrevi, no código e no PR, que
+  <code>width:99%</code> nas duas colunas de nome faria o navegador repartir a
+  sobra em partes iguais — “repartimento do algoritmo da tabela, não sorte”.
+  <strong>Está errado.</strong> Numa tabela de largura automática, dois pedidos
+  iguais que não cabem não viram duas fatias iguais: <strong>a primeira coluna
+  leva tudo e a segunda desce pro piso dela</strong>, que é o tanto que a
+  reticência precisa. Daí os 107px, iguais em 900px de janela e em 1500px.</p>
+  <p>O teste que eu escrevi junto (“as duas pedem a mesma largura”) passava — e
+  passava dizendo a verdade. Ele só não media a coisa que importava, que é quanto
+  cada uma <em>recebe</em>. É o tipo de teste que confirma a intenção em vez do
+  resultado.</p>
+</section>
+
+<section class="lede">
+  <div class="olho">Hoje</div>
+  <h2>1.500px de tela, e o fornecedor com 107</h2>
+</section>
+<section class="regua">
+  <div class="faixa">
+    <span class="s-fixa" style="flex:111">Venc 111</span>
+    <span class="s-desc" style="flex:842">Descrição 842px</span>
+    <span class="s-forn mal" style="flex:107">107</span>
+    <span class="s-stat" style="flex:278">Status 278px</span>
+    <span class="s-fixa" style="flex:116">Valor</span>
+  </div>
+  <div class="rot"><span><b>Numa janela de 1500px.</b> O fornecedor é cortado em
+    8 de 8 linhas — e continua 107px numa janela de 900.</span></div>
+</section>
+<section class="larga">
+  <div class="tela">
+    <div class="tela-cab"><span class="t">Como está no ar</span>
+      <span class="s">Prime Eventos · amostra de 5 linhas</span></div>
+    <div class='tw hoje'><table><thead><tr><th>Vencimento</th><th>Descrição</th><th>Fornecedor</th><th>Status</th><th class=num>Valor</th><th></th></tr></thead><tbody>
+<tr><td class=dt>15/08/2026</td><td class=flex title='ZARB CONSULTORIA'><b>ZARB CONSULTORIA</b></td><td class=flex title='ZARB ASSESSORIA'>ZARB ASSESSORIA</td><td class=stat><span class="pill erro">Vencida</span> <span class="pill aviso">Talvez paga · 10/08 /2026</span></td><td class=num>R$ 2.200,00</td><td class=act><button class="btn-ok" type="button" tabindex="-1" aria-hidden="true">✓</button></td></tr>
+<tr><td class=dt>31/08/2026</td><td class=flex title='IPTU 2026 3/6'><b>IPTU 2026 3/6</b></td><td class=flex title='PREFEITURA DE TERESINA'>PREFEITURA DE TERESINA</td><td class=stat><span class="pill erro">Vencida</span></td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+<tr><td class=dt>05/09/2026</td><td class=flex title='2 QUINZENA AGOSTO/26 INSIGHT'><b>2 QUINZENA AGOSTO/26 INSIGHT</b></td><td class=flex title='INSIGHT ASSESSORIA  ADMINISTRATIVA'>INSIGHT ASSESSORIA  ADMINISTRATIVA</td><td class=stat><span class="pill aviso">A vencer</span></td><td class=num>R$ 810,50</td><td class=act></td></tr>
+<tr><td class=dt>10/09/2026</td><td class=flex title='CONTABILIDADE'><b>CONTABILIDADE</b></td><td class=flex title='ESCONTAB ASSESSORIA E CONSULTORIA CONTABIL'>ESCONTAB ASSESSORIA E CONSULTORIA CONTABIL</td><td class=stat><span class="pill aviso">A vencer</span></td><td class=num>R$ 1.000,00</td><td class=act></td></tr>
+<tr><td class=dt>15/09/2026</td><td class=flex title='1 QUINZENA SETEMBRO/26 PEDRO YAN'><b>1 QUINZENA SETEMBRO/26 PEDRO YAN</b></td><td class=flex title='PEDRO YAN MENDES VALENÇA XIMENES'>PEDRO YAN MENDES VALENÇA XIMENES</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+</tbody></table></div>
+    <div class="legenda">O nome inteiro está no <em>title</em> (aparece ao passar o
+      mouse) — foi o balãozinho do seu print. Mas ninguém lê tabela de 30 linhas
+      passando o mouse em cada uma.</div>
+  </div>
+</section>
+
+<section class="lede">
+  <div class="olho">A segunda coisa que a medição mostrou</div>
+  <h2>A coluna Status custa 278px pra repetir o que a data já diz</h2>
+  <p class="dim">“Vencida” é <em>vencimento &lt; hoje</em>. “A vencer” é o
+  contrário. A pílula não acrescenta nenhum fato — ela destaca um fato que está na
+  coluna do lado. E cobra por isso a segunda maior largura da tabela, porque a
+  pílula “Talvez paga · 10/08/2026” é larga e a largura de uma coluna é a da
+  linha mais larga, mesmo que ela apareça em <strong>1 linha de 30</strong>.</p>
+  <p class="dim">É exatamente o argumento que tirou a Categoria daqui na semana
+  passada: coisa que ocupa 100% das linhas pra servir a poucas.</p>
+</section>
+
+<section class="lede">
+  <div class="olho">As duas saídas</div>
+  <h2>Consertar, ou consertar e enxugar</h2>
+</section>
+
+<section class="larga">
+  <div class="tela" style="margin-bottom:2rem">
+    <div class="tela-cab"><span class="t">A · Conserto só</span>
+      <span class="s">cada elástica pede a sua parte — 60% e 40%</span></div>
+    <div class='tw conserto'><table><thead><tr><th>Vencimento</th><th>Descrição</th><th>Fornecedor</th><th>Status</th><th class=num>Valor</th><th></th></tr></thead><tbody>
+<tr><td class=dt>15/08/2026</td><td class=flex title='ZARB CONSULTORIA'><b>ZARB CONSULTORIA</b></td><td class=flex title='ZARB ASSESSORIA'>ZARB ASSESSORIA</td><td class=stat><span class="pill erro">Vencida</span> <span class="pill aviso">Talvez paga · 10/08 /2026</span></td><td class=num>R$ 2.200,00</td><td class=act><button class="btn-ok" type="button" tabindex="-1" aria-hidden="true">✓</button></td></tr>
+<tr><td class=dt>31/08/2026</td><td class=flex title='IPTU 2026 3/6'><b>IPTU 2026 3/6</b></td><td class=flex title='PREFEITURA DE TERESINA'>PREFEITURA DE TERESINA</td><td class=stat><span class="pill erro">Vencida</span></td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+<tr><td class=dt>05/09/2026</td><td class=flex title='2 QUINZENA AGOSTO/26 INSIGHT'><b>2 QUINZENA AGOSTO/26 INSIGHT</b></td><td class=flex title='INSIGHT ASSESSORIA  ADMINISTRATIVA'>INSIGHT ASSESSORIA  ADMINISTRATIVA</td><td class=stat><span class="pill aviso">A vencer</span></td><td class=num>R$ 810,50</td><td class=act></td></tr>
+<tr><td class=dt>10/09/2026</td><td class=flex title='CONTABILIDADE'><b>CONTABILIDADE</b></td><td class=flex title='ESCONTAB ASSESSORIA E CONSULTORIA CONTABIL'>ESCONTAB ASSESSORIA E CONSULTORIA CONTABIL</td><td class=stat><span class="pill aviso">A vencer</span></td><td class=num>R$ 1.000,00</td><td class=act></td></tr>
+<tr><td class=dt>15/09/2026</td><td class=flex title='1 QUINZENA SETEMBRO/26 PEDRO YAN'><b>1 QUINZENA SETEMBRO/26 PEDRO YAN</b></td><td class=flex title='PEDRO YAN MENDES VALENÇA XIMENES'>PEDRO YAN MENDES VALENÇA XIMENES</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+</tbody></table></div>
+    <div class="legenda">Resolve o cortado: <b>985px</b> pros dois nomes em 1500px,
+      zero corte até 1280px. A coluna Status continua cobrando os 241px dela.</div>
+  </div>
+
+  <div class="tela">
+    <div class="tela-cab"><span class="t">B · O Status vira a própria data</span>
+      <span class="s">e a ressalva desce pra linha da descrição</span></div>
+    <div class='tw proposta'><table><thead><tr><th>Vencimento</th><th>Descrição</th><th>Fornecedor</th><th class=num>Valor</th><th></th></tr></thead><tbody>
+<tr><td class='venc erro'>15/08/2026 <span class=pz>· há 20 dias</span></td><td class=flex title='ZARB CONSULTORIA'><b>ZARB CONSULTORIA</b><span class=res>⏳ Talvez paga · 10/08</span></td><td class=flex title='ZARB ASSESSORIA'>ZARB ASSESSORIA</td><td class=num>R$ 2.200,00</td><td class=act><button class="btn-ok" type="button" tabindex="-1" aria-hidden="true">✓</button></td></tr>
+<tr><td class='venc erro'>31/08/2026 <span class=pz>· há 4 dias</span></td><td class=flex title='IPTU 2026 3/6'><b>IPTU 2026 3/6</b></td><td class=flex title='PREFEITURA DE TERESINA'>PREFEITURA DE TERESINA</td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+<tr><td class='venc aviso'>05/09/2026 <span class=pz>· amanhã</span></td><td class=flex title='2 QUINZENA AGOSTO/26 INSIGHT'><b>2 QUINZENA AGOSTO/26 INSIGHT</b></td><td class=flex title='INSIGHT ASSESSORIA  ADMINISTRATIVA'>INSIGHT ASSESSORIA  ADMINISTRATIVA</td><td class=num>R$ 810,50</td><td class=act></td></tr>
+<tr><td class='venc aviso'>10/09/2026 <span class=pz>· em 6 dias</span></td><td class=flex title='CONTABILIDADE'><b>CONTABILIDADE</b></td><td class=flex title='ESCONTAB ASSESSORIA E CONSULTORIA CONTABIL'>ESCONTAB ASSESSORIA E CONSULTORIA CONTABIL</td><td class=num>R$ 1.000,00</td><td class=act></td></tr>
+<tr><td class='venc ok'>15/09/2026 <span class=pz>· em 11 dias</span></td><td class=flex title='1 QUINZENA SETEMBRO/26 PEDRO YAN'><b>1 QUINZENA SETEMBRO/26 PEDRO YAN</b></td><td class=flex title='PEDRO YAN MENDES VALENÇA XIMENES'>PEDRO YAN MENDES VALENÇA XIMENES</td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+</tbody></table></div>
+    <div class="legenda"><b>1.155px</b> pros dois nomes em 1500px — 170 a mais que
+      a opção A —, e nenhum corte até 1280px.</div>
+  </div>
+</section>
+
+<section class="lede">
+  <h2 style="font-size:1.25rem">O que a opção B faz</h2>
+  <p class="dim"><b>A data passa a dizer o prazo, não só o dia:</b>
+  <span style="color:var(--coral);font-family:var(--mono);font-size:.85rem">15/08/2026 · há 20 dias</span>
+  em vez de <span class="pill erro">Vencida</span>. Isso diz <em>mais</em> que a
+  pílula — “há 20 dias” e “há 4 dias” são urgências diferentes que a palavra
+  “Vencida” achatava numa só. E não depende de enxergar cor: o prazo está escrito.</p>
+  <p class="dim"><b>A ressalva “Talvez paga” desce pra baixo da descrição</b>, e
+  só aparece na linha que tem. Em vez de alargar 30 linhas, ela engorda uma. Hoje,
+  depois do conserto da régua, é <strong>1 linha em 30</strong>.</p>
+  <p class="dim"><b>O botão ✓ fica onde está</b>, no fim da linha, com a mesma
+  trava — só aparece quando há um candidato único.</p>
+</section>
+
+<section class="larga">
+  <div class="lede" style="margin-bottom:1.2rem">
+    <div class="olho">Medido no Chromium, não estimado</div>
+    <h2>Quanto sobra pros nomes, em quatro tamanhos de tela</h2>
+    <p class="dim">A conta que importa é a soma de Descrição + Fornecedor: é dela
+    que sai se o nome cabe ou vira reticência.</p>
+  </div>
+  <div class="medida">
+    <table>
+      <thead><tr><th>Layout</th><th>1500px</th><th>1280px</th><th>1100px</th>
+        <th>900px</th><th>Linhas cortadas @1100</th><th>Altura da linha</th></tr></thead>
+      <tbody>
+        <tr class="mal"><td>Como está no ar</td><td>949</td><td>729</td><td>549</td>
+          <td>349</td><td>8 de 8</td><td>35px</td></tr>
+        <tr><td>A · conserto 60/40</td><td>985</td><td>765</td><td>586</td>
+          <td>385</td><td>3 de 8</td><td>35px</td></tr>
+        <tr class="rec"><td><b>B · data + prazo</b></td><td><b>1.155</b></td>
+          <td><b>936</b></td><td><b>756</b></td><td><b>555</b></td>
+          <td><b>1 de 8</b></td><td>33px, 47 na linha com ressalva</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="larga">
+  <div class="lede" style="margin-bottom:1.2rem">
+    <div class="olho">A opção B, inteira</div>
+    <h2>As 30 contas da Prime</h2>
+    <p class="dim">Com a régua do <em>talvez paga</em> já corrigida (PR #610): uma
+    ressalva só, na ZARB, que é a certa.</p>
+  </div>
+  <div class="tela">
+    <div class="tela-cab"><span class="t">Contas a pagar</span>
+      <span class="s">Prime Eventos · 30 em aberto · R$ 29.390,42</span></div>
+    <div class='tw proposta'><table><thead><tr><th>Vencimento</th><th>Descrição</th><th>Fornecedor</th><th class=num>Valor</th><th></th></tr></thead><tbody>
+<tr><td class='venc erro'>15/08/2026 <span class=pz>· há 20 dias</span></td><td class=flex title='ZARB CONSULTORIA'><b>ZARB CONSULTORIA</b><span class=res>⏳ Talvez paga · 10/08</span></td><td class=flex title='ZARB ASSESSORIA'>ZARB ASSESSORIA</td><td class=num>R$ 2.200,00</td><td class=act><button class="btn-ok" type="button" tabindex="-1" aria-hidden="true">✓</button></td></tr>
+<tr><td class='venc erro'>15/08/2026 <span class=pz>· há 20 dias</span></td><td class=flex title='BANCO DO NORDESTE'><b>BANCO DO NORDESTE</b></td><td class=flex title='BANCO DO NORDESTE'>BANCO DO NORDESTE</td><td class=num>R$ 2.400,00</td><td class=act></td></tr>
+<tr><td class='venc erro'>31/08/2026 <span class=pz>· há 4 dias</span></td><td class=flex title='IPTU 2026 3/6'><b>IPTU 2026 3/6</b></td><td class=flex title='PREFEITURA DE TERESINA'>PREFEITURA DE TERESINA</td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+<tr><td class='venc aviso'>05/09/2026 <span class=pz>· amanhã</span></td><td class=flex title='2 QUINZENA AGOSTO/26 BETO'><b>2 QUINZENA AGOSTO/26 BETO</b></td><td class=flex title='ROBERTO LOPES'>ROBERTO LOPES</td><td class=num>R$ 721,07</td><td class=act></td></tr>
+<tr><td class='venc aviso'>05/09/2026 <span class=pz>· amanhã</span></td><td class=flex title='2 QUINZENA AGOSTO/26 JAQUELINE'><b>2 QUINZENA AGOSTO/26 JAQUELINE</b></td><td class=flex title='JAQUELINE DUARTE'>JAQUELINE DUARTE</td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class='venc aviso'>05/09/2026 <span class=pz>· amanhã</span></td><td class=flex title='2 QUINZENA AGOSTO/26 INSIGHT'><b>2 QUINZENA AGOSTO/26 INSIGHT</b></td><td class=flex title='INSIGHT ASSESSORIA  ADMINISTRATIVA'>INSIGHT ASSESSORIA  ADMINISTRATIVA</td><td class=num>R$ 810,50</td><td class=act></td></tr>
+<tr><td class='venc aviso'>05/09/2026 <span class=pz>· amanhã</span></td><td class=flex title='ENERGIA SOLAR'><b>ENERGIA SOLAR</b></td><td class=flex title='NORDESTE ENERGIA SOLAR'>NORDESTE ENERGIA SOLAR</td><td class=num>R$ 2.877,77</td><td class=act></td></tr>
+<tr><td class='venc aviso'>10/09/2026 <span class=pz>· em 6 dias</span></td><td class=flex title='CONTABILIDADE'><b>CONTABILIDADE</b></td><td class=flex title='ESCONTAB ASSESSORIA E CONSULTORIA CONTABIL'>ESCONTAB ASSESSORIA E CONSULTORIA CONTABIL</td><td class=num>R$ 1.000,00</td><td class=act></td></tr>
+<tr><td class='venc aviso'>10/09/2026 <span class=pz>· em 6 dias</span></td><td class=flex title='INTERNET'><b>INTERNET</b></td><td class=flex title='G3 TELECON'>G3 TELECON</td><td class=num>R$ 94,90</td><td class=act></td></tr>
+<tr><td class='venc aviso'>10/09/2026 <span class=pz>· em 6 dias</span></td><td class=flex title='EQUATORIAL'><b>EQUATORIAL</b></td><td class=flex title='EQUATORIAL'>EQUATORIAL</td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class='venc ok'>15/09/2026 <span class=pz>· em 11 dias</span></td><td class=flex title='MENSALIDADE PISCINEIRO'><b>MENSALIDADE PISCINEIRO</b></td><td class=flex title='DOMINGOS PASCOAL DA SILVA FILHO'>DOMINGOS PASCOAL DA SILVA FILHO</td><td class=num>R$ 270,00</td><td class=act></td></tr>
+<tr><td class='venc ok'>15/09/2026 <span class=pz>· em 11 dias</span></td><td class=flex title='1 QUINZENA SETEMBRO/26 JAQUELINE'><b>1 QUINZENA SETEMBRO/26 JAQUELINE</b></td><td class=flex title='JAQUELINE DUARTE'>JAQUELINE DUARTE</td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class='venc ok'>15/09/2026 <span class=pz>· em 11 dias</span></td><td class=flex title='1 QUINZENA SETEMBRO/26 BETO'><b>1 QUINZENA SETEMBRO/26 BETO</b></td><td class=flex title='ROBERTO LOPES'>ROBERTO LOPES</td><td class=num>R$ 837,50</td><td class=act></td></tr>
+<tr><td class='venc ok'>15/09/2026 <span class=pz>· em 11 dias</span></td><td class=flex title='1 QUINZENA SETEMBRO/26 INSIGHT'><b>1 QUINZENA SETEMBRO/26 INSIGHT</b></td><td class=flex title='INSIGHT ASSESSORIA  ADMINISTRATIVA'>INSIGHT ASSESSORIA  ADMINISTRATIVA</td><td class=num>R$ 810,50</td><td class=act></td></tr>
+<tr><td class='venc ok'>15/09/2026 <span class=pz>· em 11 dias</span></td><td class=flex title='1 QUINZENA SETEMBRO/26 IASMIM'><b>1 QUINZENA SETEMBRO/26 IASMIM</b></td><td class=flex title='IASMIM FLOR DA COSTA SANTOS'>IASMIM FLOR DA COSTA SANTOS</td><td class=num>R$ 360,00</td><td class=act></td></tr>
+<tr><td class='venc ok'>15/09/2026 <span class=pz>· em 11 dias</span></td><td class=flex title='1 QUINZENA SETEMBRO/26 THIAGO'><b>1 QUINZENA SETEMBRO/26 THIAGO</b></td><td class=flex title='THIAGO CESAR BORGES PINHEIRO'>THIAGO CESAR BORGES PINHEIRO</td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class='venc ok'>15/09/2026 <span class=pz>· em 11 dias</span></td><td class=flex title='1 QUINZENA SETEMBRO/26 PEDRO YAN'><b>1 QUINZENA SETEMBRO/26 PEDRO YAN</b></td><td class=flex title='PEDRO YAN MENDES VALENÇA XIMENES'>PEDRO YAN MENDES VALENÇA XIMENES</td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class='venc ok'>15/09/2026 <span class=pz>· em 11 dias</span></td><td class=flex title='BANCO DO NORDESTE'><b>BANCO DO NORDESTE</b></td><td class=flex title='BANCO DO NORDESTE'>BANCO DO NORDESTE</td><td class=num>R$ 2.400,00</td><td class=act></td></tr>
+<tr><td class='venc ok'>15/09/2026 <span class=pz>· em 11 dias</span></td><td class=flex title='ZARB CONSULTORIA'><b>ZARB CONSULTORIA</b></td><td class=flex title='ZARB ASSESSORIA'>ZARB ASSESSORIA</td><td class=num>R$ 2.200,00</td><td class=act></td></tr>
+<tr><td class='venc ok'>18/09/2026 <span class=pz>· em 14 dias</span></td><td class=flex title='FGTS AGOSTO/26'><b>FGTS AGOSTO/26</b></td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=num>R$ 134,00</td><td class=act></td></tr>
+<tr><td class='venc ok'>18/09/2026 <span class=pz>· em 14 dias</span></td><td class=flex title='INSS AGOSTO/26'><b>INSS AGOSTO/26</b></td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=num>R$ 126,43</td><td class=act></td></tr>
+<tr><td class='venc ok'>18/09/2026 <span class=pz>· em 14 dias</span></td><td class=flex title='DAS AGOSTO/26'><b>DAS AGOSTO/26</b></td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class='venc ok'>20/09/2026 <span class=pz>· em 16 dias</span></td><td class=flex title='MENSALIDADE GESTÃO CLICK'><b>MENSALIDADE GESTÃO CLICK</b></td><td class=flex title='GESTÃO CLICK'>GESTÃO CLICK</td><td class=num>R$ 214,11</td><td class=act></td></tr>
+<tr><td class='venc ok'>21/09/2026 <span class=pz>· em 17 dias</span></td><td class=flex title='ÁGUAS DE TERESINA'><b>ÁGUAS DE TERESINA</b></td><td class=flex title='ÁGUAS DE TERESINA'>ÁGUAS DE TERESINA</td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class='venc ok'>22/09/2026 <span class=pz>· em 18 dias</span></td><td class=flex title='CARTÃO DE CRÉDITO'><b>CARTÃO DE CRÉDITO</b></td><td class=flex title='CARTÃO DE CRÉDITO - SICOOB'>CARTÃO DE CRÉDITO - SICOOB</td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class='venc ok'>25/09/2026 <span class=pz>· em 21 dias</span></td><td class=flex title='EMPRESA DE SEGURANÇA'><b>EMPRESA DE SEGURANÇA</b></td><td class=flex title='SECURITY'>SECURITY</td><td class=num>R$ 251,90</td><td class=act></td></tr>
+<tr><td class='venc ok'>30/09/2026 <span class=pz>· em 26 dias</span></td><td class=flex title='2 QUINZENA SETEMBRO/26 IASMIM'><b>2 QUINZENA SETEMBRO/26 IASMIM</b></td><td class=flex title='IASMIM FLOR DA COSTA SANTOS'>IASMIM FLOR DA COSTA SANTOS</td><td class=num>R$ 360,00</td><td class=act></td></tr>
+<tr><td class='venc ok'>30/09/2026 <span class=pz>· em 26 dias</span></td><td class=flex title='2 QUINZENA SETEMBRO/26 PEDRO YAN'><b>2 QUINZENA SETEMBRO/26 PEDRO YAN</b></td><td class=flex title='PEDRO YAN MENDES VALENÇA XIMENES'>PEDRO YAN MENDES VALENÇA XIMENES</td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class='venc ok'>30/09/2026 <span class=pz>· em 26 dias</span></td><td class=flex title='2 QUINZENA SETEMBRO/26 THIAGO'><b>2 QUINZENA SETEMBRO/26 THIAGO</b></td><td class=flex title='THIAGO CESAR BORGES PINHEIRO'>THIAGO CESAR BORGES PINHEIRO</td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class='venc ok'>30/09/2026 <span class=pz>· em 26 dias</span></td><td class=flex title='IPTU 2026 4/6'><b>IPTU 2026 4/6</b></td><td class=flex title='PREFEITURA DE TERESINA'>PREFEITURA DE TERESINA</td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+</tbody></table></div>
+  </div>
+</section>
+
+<section class="lede">
+  <div class="olho">O que preciso de você</div>
+  <h2 style="font-size:1.25rem">A ou B</h2>
+  <p class="dim">O conserto do fornecedor (A) eu faço de qualquer jeito — é bug, não
+  é opção. A pergunta é se vai junto o enxugamento (B): tirar a coluna Status e pôr
+  o prazo na data. Vale para <b>Contas a receber</b> também, que usa a mesma função.</p>
+</section>
+
+<div class="rodape">
+  <hr>
+  <p>Larguras medidas no Chromium headless com o CSS real de <code>web/portal.py</code>
+  e os títulos reais da Prime, em janelas de 1500, 1280, 1100 e 900px. “Linha
+  cortada” = o texto não coube e virou reticência.</p>
+  <p>As datas e valores são os 30 títulos <code>status='aberto'</code> da conta 34,
+  lidos da produção em 04/09/2026. Só leitura.</p>
+</div>
+
+</div>

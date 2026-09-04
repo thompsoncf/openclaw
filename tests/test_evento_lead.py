@@ -240,3 +240,31 @@ def test_gravar_numa_base_sem_a_migracao_nao_derruba_a_transacao(pool):
         assert ev.gravar(c, 34, lid, {"data": "2026-12-31"}) is False
         # a conexão continua usável na mesma transação
         assert c.execute("select 1").fetchone()[0] == 1
+
+
+# ------------------------------------------------------------------ vista por mês
+def test_colunas_por_mes_ordena_os_meses_e_poe_sem_data_por_ultimo():
+    jan = _card(id=1, evento_em=date(2027, 1, 16), status="contatado")
+    jan2 = _card(id=2, evento_em=date(2027, 1, 9), status="proposta")
+    nov = _card(id=3, evento_em=date(2026, 11, 14), status="contatado")
+    sem = _card(id=4, status="contatado")
+    perdido = _card(id=5, evento_em=date(2026, 11, 20), status="perdido")
+    cols, grupos = ev.colunas_por_mes([jan, jan2, nov, sem, perdido], AGORA)
+    assert cols == [("2026-11", "Nov 26"), ("2027-01", "Jan 27"), ("sem", "Sem data")]
+    assert [c["id"] for c in grupos["2027-01"][0]["cards"]] == [2, 1]     # pela data da festa
+    assert grupos["2027-01"][0]["rotulo"] == "" and grupos["2027-01"][0]["n"] == 2
+    assert [c["id"] for c in grupos["2026-11"][0]["cards"]] == [3]         # perdido fora
+    assert grupos["sem"][0]["tipo"] == "entrada" and [c["id"] for c in grupos["sem"][0]["cards"]] == [4]
+
+
+def test_colunas_por_mes_sem_lead_nenhum_so_tem_sem_data():
+    assert ev.colunas_por_mes([], AGORA) == ([("sem", "Sem data")], {"sem": []})
+
+
+def test_visita_curta_na_semana_e_fora_dela():
+    agora = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)          # sexta
+    amanha_13utc = datetime(2026, 9, 5, 13, 0, tzinfo=timezone.utc)    # sáb 10h em Brasília
+    assert ev.visita_curta(amanha_13utc, agora) == "Visita sáb 10h"
+    assert ev.visita_curta(datetime(2026, 9, 5, 13, 30, tzinfo=timezone.utc), agora) == "Visita sáb 10h30"
+    assert ev.visita_curta(datetime(2026, 11, 21, 13, 0, tzinfo=timezone.utc), agora) == "Visita 21/11"
+    assert ev.visita_curta(None, agora) == ""

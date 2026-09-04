@@ -307,3 +307,57 @@ def trilho(contagens: dict, mes_sel: str = "") -> list[dict]:
     itens.append({"chave": "sem", "rotulo": "Sem data", "n": contagens.get(None, 0),
                   "on": mes_sel == "sem", "sem": True})
     return itens
+
+
+# ------------------------------------------------------------------ vista por mês
+_DIAS = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
+
+
+def visita_curta(inicio, agora: datetime | None = None) -> str:
+    """'Visita sáb 10h' na semana; 'Visita 21/11' depois disso. Cabe num selo.
+
+    Em horário de Brasília: é o vendedor de Teresina que lê o selo, e a agenda
+    guarda em UTC."""
+    if not hasattr(inicio, "strftime"):
+        return ""
+    agora = agora or datetime.now(timezone.utc)
+    dt = _aware(inicio)
+    try:
+        from finance import agenda as _ag
+        dt_br = dt.astimezone(_ag.BRT)
+    except Exception:  # noqa: BLE001
+        dt_br = dt
+    if 0 <= (dt - agora).days < 7:
+        h = dt_br.strftime("%Hh%M").replace("h00", "h")
+        return f"Visita {_DIAS[dt_br.weekday()]} {h}"
+    return "Visita " + dt_br.strftime("%d/%m")
+
+
+def colunas_por_mes(cards: list[dict], agora: datetime | None = None):
+    """A VISTA "POR MÊS DO EVENTO": as colunas viram meses e a etapa vai pro card.
+
+    Devolve (colunas, grupos): `colunas` é [(chave, rótulo)] — um mês por coluna,
+    do mais próximo pro mais distante, e "Sem data" por último; `grupos` tem, por
+    chave, a lista de grupos no formato de `agrupar`. Nos meses a coluna é lisa
+    (um grupo só, ordenado pela data da festa); em "Sem data" vale o agrupamento
+    de sempre (mês de entrada + dobra dos parados), porque é a fila de trabalho.
+
+    Perdido fica de fora: é a visão de agenda de vendas — o que está em negociação
+    pra cada mês — e quem já perdeu não é festa a fazer."""
+    agora = agora or datetime.now(timezone.utc)
+    por_mes: dict[str, list] = {}
+    sem: list = []
+    for c in cards:
+        if c.get("status") == "perdido":
+            continue
+        if c.get("evento_em"):
+            por_mes.setdefault(mes_chave(c["evento_em"]), []).append(c)
+        else:
+            sem.append(c)
+    colunas = [(k, mes_rotulo(k)) for k in sorted(por_mes)]
+    grupos = {k: [{"tipo": "evento", "chave": k, "rotulo": "",
+                   "cards": sorted(v, key=lambda x: x["evento_em"]), "n": len(v)}]
+              for k, v in por_mes.items()}
+    colunas.append(("sem", "Sem data"))
+    grupos["sem"] = agrupar(sem, agora)
+    return colunas, grupos

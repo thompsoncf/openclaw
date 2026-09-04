@@ -2414,6 +2414,36 @@ def visita_para_remarcar(pool, conta_id: int, membro_id: int | None, evento_id: 
             "tem_numero": bool(r[7])}
 
 
+def excluir_visita(pool, conta_id: int, membro_id: int | None, evento_id: int,
+                   gestao: bool = False) -> dict:
+    """Apaga a VISITA — o vendedor corrige o próprio erro (marcou com o vendedor
+    errado) sem precisar do dono. SÓ VISITA e SÓ POSSE, mesmo desenho de
+    `remarcar_visita`: o vendedor apaga a que é DELE (mesmo que tenha nascido
+    errada — `membro_id` é quem diz que é dele), dono e gestor apagam qualquer uma.
+
+    A trava de verdade é `ag.excluir_evento`: a mesma que já protege o botão do
+    painel, sem exceção nenhuma pro app. Orçamento, sinal, convidado ou mensagem
+    enviada continuam impedindo apagar — aí quem resolve é o dono."""
+    from finance import agenda as ag
+    with pool.connection() as c:
+        ev = c.execute(
+            """select e.membro_id from eventos_agenda e
+                 join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
+                where e.id=%s and e.conta_id=%s and e.status='ativo'""",
+            (evento_id, conta_id)).fetchone()
+    if not ev:
+        return {"ok": False, "erro": "Essa visita não existe mais."}
+    if not gestao and membro_id and ev[0] and ev[0] != membro_id:
+        return {"ok": False, "erro": "escopo"}
+    r = ag.excluir_evento(pool, conta_id, evento_id)
+    if r["ok"]:
+        return {"ok": True}
+    if r["motivo"] == "sumiu":
+        return {"ok": False, "erro": "Essa visita não existe mais."}
+    return {"ok": False, "erro": "trava",
+            "msg": ag.MOTIVOS_NAO_EXCLUI.get(r["motivo"], "tem coisa ligada a ela")}
+
+
 _DIA_SEM_EXT = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
 
 

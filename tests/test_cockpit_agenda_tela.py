@@ -54,6 +54,13 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_i
   status text default 'ativo', criado_em timestamptz default now(), prospeccao_id bigint,
   ics_token text, pre_reserva_ate timestamptz, sinal_centavos int,
   tipo_evento text, convidados int, hora_sugerida boolean default false);
+create table orcamentos (id bigserial primary key, conta_id bigint,
+  evento_agenda_id bigint);
+create table evento_convidados (id bigserial primary key,
+  evento_id bigint not null references eventos_agenda(id) on delete cascade,
+  nome text);
+create table agenda_mensagens_log (id bigserial primary key,
+  evento_id bigint references eventos_agenda(id) on delete cascade, tipo text);
 """
 
 
@@ -344,6 +351,66 @@ def test_remarcar_uma_festa_pela_barra_de_endereco_nao_abre(cli):
                         ).fetchone()[0]
     r = cli.get(f"/cockpit/agenda/{eid}/remarcar")
     assert r.status_code == 303, "abriu a tela de remarcar pra uma festa"
+
+
+def test_a_visita_ganha_o_botao_de_excluir(cli):
+    """O corretivo de "marquei com o vendedor errado": o vendedor apaga e recria,
+    em vez de o dono precisar trocar quem marcou."""
+    eid = _visita(cli)
+    html = _html(cli, t="todos")
+    assert f"/agenda/{eid}/excluir" in html, "a visita não tem como ser excluída"
+
+
+def test_a_festa_reservada_nao_ganha_o_botao_de_excluir(cli):
+    """Apagar uma festa mexe em orçamento, contrato e sinal — fica no painel."""
+    _ev(cli, dias=5, titulo="Locação — Jonas")
+    assert "/excluir" not in _html(cli, t="todos")
+
+
+def test_a_tela_de_excluir_mostra_o_que_vai_apagar(cli):
+    eid = _visita(cli)
+    r = cli.get(f"/cockpit/agenda/{eid}/excluir")
+    assert r.status_code == 200
+    assert "Vai apagar de vez" in r.text
+    assert "Visita — Camila" in r.text
+
+
+def test_excluir_uma_festa_pela_barra_de_endereco_nao_abre(cli):
+    """O id vem da URL: o portão tem que estar no servidor, não só no botão."""
+    _ev(cli, dias=5, titulo="Locação — Jonas")
+    with cli.pool.connection() as c:
+        eid = c.execute("select id from eventos_agenda where titulo='Locação — Jonas'"
+                        ).fetchone()[0]
+    r = cli.get(f"/cockpit/agenda/{eid}/excluir")
+    assert r.status_code == 303, "abriu a tela de excluir pra uma festa"
+
+
+def test_o_post_de_excluir_apaga_a_visita(cli):
+    eid = _visita(cli)
+    r = cli.post(f"/cockpit/agenda/{eid}/excluir")
+    assert r.status_code == 303
+    with cli.pool.connection() as c:
+        assert c.execute("select 1 from eventos_agenda where id=%s", (eid,)).fetchone() is None
+
+
+def test_o_post_de_excluir_recusa_visita_de_outro_vendedor(cli):
+    """Escopo checado no POST, não só no link — o id vem da barra de endereço."""
+    quando = (datetime.now(ag.BRT) + timedelta(days=5)).replace(
+        hour=15, minute=0, second=0, microsecond=0)
+    with cli.pool.connection() as c:
+        lead = c.execute("insert into prospeccao (conta_id, vendedor_id, empresa, whatsapp) "
+                         "values (%s,%s,'Fabiana','5586999992222') returning id",
+                         (CONTA, OUTRO)).fetchone()[0]
+        eid = c.execute(
+            """insert into eventos_agenda (conta_id, membro_id, titulo, inicio, prospeccao_id)
+               values (%s,%s,'Visita — Fabiana',%s,%s) returning id""",
+            (CONTA, OUTRO, quando, lead)).fetchone()[0]
+        c.commit()
+    r = cli.post(f"/cockpit/agenda/{eid}/excluir")
+    assert r.status_code == 303
+    with cli.pool.connection() as c:
+        assert c.execute("select 1 from eventos_agenda where id=%s", (eid,)).fetchone() is not None, \
+            "a visita de outro vendedor foi apagada"
 
 
 def test_lead_sem_whatsapp_nao_oferece_aviso(cli):

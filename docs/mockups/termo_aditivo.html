@@ -100,10 +100,11 @@ convidados <b>ninguém consegue mexer</b> — nem no orçamento, nem no valor. A
 
 <!-- ============================================================ 1 -->
 <h2><span class="n">1</span> O que o papel é</h2>
-<div class="sub">Quatro alterações possíveis — e só as que valem entram no documento</div>
+<div class="sub">Cinco alterações possíveis — e só as que valem entram no documento</div>
 
-<p>O modelo em branco lista quatro cláusulas numeradas. Os quatro casos reais mostram que <b>nunca saem as
-quatro</b>: sai só o que mudou, renumerado de 1 em diante.</p>
+<p>O modelo em branco lista quatro cláusulas numeradas, mas a sua lista tem cinco — porque data e
+horário, que o modelo juntou num “DATA E/OU HORÁRIO”, são coisas diferentes na prática. Os quatro casos
+reais confirmam: <b>nunca saem todas</b>, sai só o que mudou, renumerado de 1 em diante.</p>
 
 <table>
 <tr><th>Cláusula do modelo</th><th>Gardênia</th><th>Grazielly</th><th>Bárbara</th><th>Ana Aline</th></tr>
@@ -112,14 +113,21 @@ quatro</b>: sai só o que mudou, renumerado de 1 em diante.</p>
 <tr><td><b>Valor</b><br><span style="color:#8A8475">novo total + a diferença a pagar</span></td>
     <td>—</td><td>—</td><td class="sim">R$ 13.505,00<br><small>a pagar R$ 5.576,43</small></td>
     <td class="sim">R$ 9.250,00<br><small>a pagar R$ 1.850,00</small></td></tr>
-<tr><td><b>Data e/ou horário</b></td>
-    <td class="sim">20:00 → 01:00<br>26–27/09/26</td><td class="sim">22:00 → 03:00<br>30–31/05/26</td><td>—</td><td>—</td></tr>
+<tr><td><b>Data</b><br><span style="color:#8A8475">a que cai na cláusula 7</span></td>
+    <td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td><b>Horário</b></td>
+    <td class="sim">20:00 → 01:00</td><td class="sim">22:00 → 03:00</td><td>—</td><td>—</td></tr>
 <tr><td><b>Serviços</b><br><span style="color:#8A8475">“os itens X do orçamento nº N passam a ser Y”</span></td>
     <td>—</td><td class="sim">souplats, vasos… → monitor kids + louças</td><td>—</td><td>—</td></tr>
 <tr><td style="background:#F6F3EC"><b>Total de cláusulas</b></td>
     <td style="background:#F6F3EC"><b>1</b></td><td style="background:#F6F3EC"><b>2</b></td>
     <td style="background:#F6F3EC"><b>2</b></td><td style="background:#F6F3EC"><b>2</b></td></tr>
 </table>
+
+<div class="alerta"><b>Nos quatro aditivos reais, nenhum mudou a DATA — só o horário.</b> E é justamente a
+data que o seu contrato trata à parte: a cláusula 7 tem três regras (uma alteração só, 30 dias de
+antecedência, 10% de taxa, nova data em até 180 dias) e <b>nenhuma delas vale pra horário</b>. Por isso o
+formulário separa as duas coisas, como você listou. Ver a seção 4.</div>
 
 <div class="nota"><b>O título da cláusula muda com o sentido.</b> O modelo diz “ALTERAÇÃO NO NÚMERO DE
 CONVIDADOS”; os dois casos reais, ambos de aumento, dizem “<b>ACRÉSCIMO</b> DE CONVIDADOS”. E “ALTERAÇÃO NA
@@ -143,8 +151,8 @@ suíte, LEDs —, onde convidado a mais pode não mudar valor nenhum. Conclusão
 <tr><td>CONTRATANTE (nome, CPF, endereço)</td><td><code>orcamentos</code> + <code>contrato.completar_do_cadastro</code></td><td class="sim">pronto — inclusive o CPF que só está no cadastro</td></tr>
 <tr><td>“contrato celebrado em DD/MM/AAAA, sob o nº N”</td><td><code>contratos.criado_em</code>, <code>contratos.numero</code></td><td class="sim">pronto</td></tr>
 <tr><td>Convidados (de → para)</td><td><code>orcamentos.evento-&gt;&gt;'convidados'</code></td><td class="sim">pronto <span style="color:#8A8475">(115 na Cláudia, 300 na Bianca)</span></td></tr>
+<tr><td>Data (de → para) + as 4 conferências da cláusula 7</td><td><code>evento-&gt;&gt;'data'</code>, <code>eventos_agenda</code>, <code>contrato_modelo.regras</code>, e o detector de choque de data que subiu no #606</td><td class="sim">tudo pronto — só falta juntar</td></tr>
 <tr><td>Horário (de → para)</td><td><code>evento-&gt;&gt;'inicio'</code> / <code>'fim'</code></td><td class="nao">existe, mas sujo — ver abaixo</td></tr>
-<tr><td>Data (de → para)</td><td><code>evento-&gt;&gt;'data'</code> + <code>eventos_agenda</code></td><td class="sim">pronto</td></tr>
 <tr><td>Itens substituídos</td><td><code>orcamentos.itens</code> (jsonb, 7 itens na Cláudia)</td><td class="sim">pronto</td></tr>
 <tr><td>“orçamento nº N”</td><td><code>orcamentos.numero</code></td><td class="sim">pronto</td></tr>
 <tr><td>Novo valor total / diferença</td><td><code>primeiro_ano_centavos</code></td><td class="sim">pronto pra ler, digitado pra mudar</td></tr>
@@ -183,63 +191,101 @@ travas de edição e os relatórios continuam intactos.</div>
 
 <!-- ============================================================ 4 -->
 <h2><span class="n">4</span> A tela do dono</h2>
-<div class="sub">Botão “Fazer aditivo”, no contrato assinado — o mesmo lugar que hoje dá o erro 409</div>
+<div class="sub">Cinco blocos, na sua ordem — clica no que mudou, o resto nem entra no documento</div>
+
+<p>Você listou <b>cinco</b> alterações habituais; o mockup anterior tinha quatro, porque eu tinha juntado
+data e horário. Separei. E ao separar apareceu o motivo de fundo: <b>a data cai na cláusula 7 do seu
+contrato, o horário não cai em cláusula nenhuma.</b></p>
 
 <div class="tela">
-  <h4>Termo aditivo ao contrato nº 5 <span style="font-weight:400;color:#8A8475">· Cláudia Maria Almeida de Carvalho · orçamento nº 18</span></h4>
+  <h4>Termo aditivo ao contrato nº 5 <span style="font-weight:400;color:#8A8475">· Cláudia Maria Almeida de Carvalho · orçamento nº 18 · casamento 15/01/2027</span></h4>
 
+  <!-- 1 DATA -->
   <div class="bloco">
-    <div class="bh"><input type="checkbox" checked> Alterar o número de convidados</div>
+    <div class="bh"><input type="checkbox" checked> <span>1 · Alterar a <b>data</b></span>
+      <span class="tag t-hoje" style="margin-left:auto">cai na cláusula 7</span></div>
+    <div class="bc" style="grid-template-columns:1fr 1fr 1fr">
+      <div class="cmp"><label>Data contratada</label><input value="15/01/2027" disabled style="background:#F6F3EC;color:#8A8475"><div class="de">sexta-feira</div></div>
+      <div class="cmp"><label>Nova data</label><input value="22/01/2027"><div class="de" style="color:#1c7a4f;font-weight:700">✓ agenda livre nesse dia</div></div>
+      <div class="cmp"><label>Motivo (opcional)</label><input placeholder="a pedido da contratante"></div>
+      <div class="calc" style="border-color:#F0DDBA;background:#FFF6E8;color:#7A4E0C">
+        <b>O que a cláusula 7 exige — conferido automaticamente:</b><br>
+        ✓ <b>7.1</b> primeira alteração de data deste contrato (é permitida 1)<br>
+        ✓ <b>7.1</b> 133 dias de antecedência — o mínimo é 30<br>
+        ✓ <b>7.2</b> disponibilidade: 22/01/2027 está livre na agenda
+           <span style="color:#8A8475">(23 e 24/01 estão ocupados — Casamento Kelma)</span><br>
+        ✓ <b>7.3</b> nova data 7 dias após a original — o limite é 180<br>
+        → <b>7.2 cobra taxa de reagendamento de 10%</b>, que entra sozinha no bloco 5. Dá pra tirar.</div>
+    </div>
+  </div>
+
+  <!-- 2 HORÁRIO -->
+  <div class="bloco">
+    <div class="bh"><input type="checkbox" checked> <span>2 · Alterar o <b>horário</b></span>
+      <span class="tag t-novo" style="margin-left:auto">sem cláusula, sem taxa</span></div>
     <div class="bc">
-      <div class="cmp"><label>Era</label><input value="115" disabled style="background:#F6F3EC;color:#8A8475">
-        <div class="de">do orçamento nº 18</div></div>
-      <div class="cmp"><label>Passa a ser</label><input value="140">
-        <div class="de">título vira <b>ACRÉSCIMO</b> (subiu)</div></div>
+      <div class="cmp"><label>Início</label><input type="time" value="19:00"><div class="de">era 18:00</div></div>
+      <div class="cmp"><label>Término</label><input type="time" value="23:40"><div class="de">sem mudança</div></div>
+      <div class="cmp"><label>Termina no dia seguinte?</label>
+        <select><option>Não — mesmo dia</option><option>Sim — vira o dia</option></select>
+        <div class="de">os aditivos da Gardênia e da Grazielly viravam a madrugada</div></div>
+      <div class="calc">Campo de <b>hora de verdade</b>, não texto livre. Hoje o orçamento guarda coisas como
+        <code>"22"</code>, <code>"17"</code> e <code>"01h"</code> — imprimir isso num documento assinado é
+        pedir discussão na entrega.</div>
+    </div>
+  </div>
+
+  <!-- 3 CONVIDADOS -->
+  <div class="bloco">
+    <div class="bh"><input type="checkbox" checked> <span>3 · Alterar a <b>quantidade de convidados</b></span></div>
+    <div class="bc">
+      <div class="cmp"><label>Era</label><input value="115" disabled style="background:#F6F3EC;color:#8A8475"><div class="de">do orçamento nº 18</div></div>
+      <div class="cmp"><label>Passa a ser</label><input value="140"><div class="de">subiu → título vira <b>ACRÉSCIMO</b></div></div>
       <div class="cmp"></div>
     </div>
   </div>
 
-  <div class="bloco">
-    <div class="bh"><input type="checkbox" checked> Ajustar o valor</div>
-    <div class="bc">
-      <div class="cmp"><label>Total de hoje</label><input value="R$ 7.750,00" disabled style="background:#F6F3EC;color:#8A8475"></div>
-      <div class="cmp"><label>Diferença a cobrar</label><input value="R$ 1.250,00"></div>
-      <div class="cmp"><label>Vencimento</label><input value="20/12/2026" ></div>
-      <div class="calc">Novo total do contrato: <b>R$ 9.000,00</b> · forma de pagamento:
-        <select style="border:1px solid #DCD5C6;border-radius:6px;padding:3px 6px"><option>PIX / transferência</option><option>Cartão de crédito</option></select>
-        <br><span style="color:#8A8475">O sistema não chuta o valor por convidado: nos quatro aditivos reais
-        a conta só fechou em um. Aqui é digitado.</span></div>
-    </div>
-  </div>
-
-  <div class="bloco">
-    <div class="bh"><input type="checkbox" checked> Alterar data e/ou horário</div>
-    <div class="bc">
-      <div class="cmp"><label>Data</label><input value="15/01/2027" disabled style="background:#F6F3EC;color:#8A8475"><div class="de">sem mudança</div></div>
-      <div class="cmp"><label>Início</label><input type="time" value="19:00"><div class="de">era 18:00</div></div>
-      <div class="cmp"><label>Término</label><input type="time" value="23:40"><div class="de">sem mudança</div></div>
-      <div class="calc">Só o horário mudou → a cláusula sai como <b>“ALTERAÇÃO NO HORÁRIO”</b>, não
-        “na data e/ou horário”. É o que os dois aditivos reais da Prime fizeram.</div>
-    </div>
-  </div>
-
+  <!-- 4 SERVIÇOS -->
   <div class="bloco off">
-    <div class="bh"><input type="checkbox"> Alterar serviços</div>
+    <div class="bh"><input type="checkbox"> <span>4 · Alterar os <b>serviços contratados</b></span></div>
     <div class="bc" style="grid-template-columns:1fr 1fr">
       <div class="cmp"><label>Itens que saem (do orçamento nº 18)</label>
-        <select multiple style="height:70px"><option>LOCAÇÃO CLIMATIZADORES (4)</option><option>LOCAÇÃO FREEZER (2)</option><option>LOCAÇÃO LEDS (15)</option><option>LOCAÇÃO SUÍTE (2)</option></select></div>
-      <div class="cmp"><label>Passam a ser</label><textarea placeholder="01 (um) monitor para área kids, e louças limitado a atender até 100 pessoas"></textarea></div>
+        <select multiple style="height:78px"><option>LOCAÇÃO CLIMATIZADORES (4)</option><option>LOCAÇÃO COZINHA (1)</option><option>LOCAÇÃO FREEZER (2)</option><option>LOCAÇÃO LEDS (15)</option><option>LOCAÇÃO SUÍTE (2)</option><option>LOCAÇÃO UTENSÍLIOS/LOUÇAS (1)</option></select>
+        <div class="de">a lista sai dos 7 itens que já estão no orçamento</div></div>
+      <div class="cmp"><label>Passam a ser</label><textarea placeholder="01 (um) monitor para área kids, e louças limitado a atender até 100 pessoas"></textarea>
+        <div class="de">texto livre — foi assim no aditivo da Grazielly</div></div>
     </div>
   </div>
 
-  <div style="display:flex;gap:9px;margin-top:14px;flex-wrap:wrap">
+  <!-- 5 VALOR -->
+  <div class="bloco">
+    <div class="bh"><input type="checkbox" checked> <span>5 · Ajustar o <b>valor</b></span>
+      <span class="tag t-novo" style="margin-left:auto">marcou sozinho: a data mudou</span></div>
+    <div class="bc" style="grid-template-columns:1fr 1fr 1fr">
+      <div class="cmp"><label>Total de hoje</label><input value="R$ 7.750,00" disabled style="background:#F6F3EC;color:#8A8475"></div>
+      <div class="cmp"><label>Diferença pelos 25 convidados</label><input value="R$ 1.250,00"><div class="de">você digita — o sistema não chuta</div></div>
+      <div class="cmp"><label>Taxa de reagendamento (10%)</label><input value="R$ 900,00"><div class="de" style="color:#7A4E0C">veio da cláusula 7.2 · <u>zerar</u></div></div>
+      <div class="cmp"><label>Vencimento da diferença</label><input value="20/12/2026"></div>
+      <div class="cmp"><label>Forma de pagamento</label><select><option>PIX / transferência</option><option>Cartão de crédito</option><option>Boleto</option></select></div>
+      <div class="cmp"></div>
+      <div class="calc">A cobrar agora: R$ 1.250,00 + R$ 900,00 = <b>R$ 2.150,00</b> ·
+        novo total do contrato: <b>R$ 9.900,00</b><br>
+        <span style="color:#8A8475">Este bloco é o único que se marca sozinho — “dependendo da alteração, há
+        alteração no valor”, como você disse. Se nada mudar de preço, é só desmarcar.</span></div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:9px;margin-top:14px;flex-wrap:wrap;align-items:center">
     <button class="btnp">Gerar aditivo e mandar pro cliente</button>
     <button class="btns">Ver prévia</button>
+    <span style="font-size:12.5px;color:#8A8475">sai um aditivo com <b>4 cláusulas</b> (serviços ficou de fora)</span>
   </div>
 </div>
 
-<div class="nota">Cláusula não marcada <b>não entra no documento</b>, e a numeração fecha nas que sobraram
-(1, 2, 3…). É exatamente o que os quatro aditivos reais fazem — nenhum tem as quatro.</div>
+<div class="nota"><b>Por que a data merece bloco próprio, em uma linha:</b> mudar o horário é digitar dois
+campos; mudar a data é conferir quatro regras do contrato, olhar a agenda e possivelmente cobrar 10%. Se
+fossem o mesmo bloco, ou a conferência apareceria em cima de quem só queria adiantar meia hora, ou não
+apareceria pra ninguém.</div>
 
 <!-- ============================================================ 5 -->
 <h2><span class="n">5</span> O documento que o cliente recebe</h2>
@@ -275,20 +321,26 @@ travas de edição e os relatórios continuam intactos.</div>
 vigor, exceto naquilo que forem alteradas pelo presente instrumento.</div>
 
     <div class="eb">Objeto do termo aditivo</div>
-    <div class="ctrc"><div class="ctrt">1. ACRÉSCIMO DE CONVIDADOS</div>
+    <div class="ctrc"><div class="ctrt">1. ALTERAÇÃO NA DATA</div>
+      <div class="ctrb">A data de realização do evento será alterada para <b>22 de janeiro de 2027</b>, em
+substituição à data originalmente contratada de <span class="antes">15 de janeiro de 2027</span>, nos termos
+da Cláusula 7 do contrato original.</div></div>
+
+    <div class="ctrc"><div class="ctrt">2. ALTERAÇÃO NO HORÁRIO</div>
+      <div class="ctrb">O horário de início será alterado para às <b>19:00h</b> do dia 22/01/2027 e término
+às <b>23:40h</b> do dia 22/01/2027.</div></div>
+
+    <div class="ctrc"><div class="ctrt">3. ACRÉSCIMO DE CONVIDADOS</div>
       <div class="ctrb">O número de convidados para prestação de serviços passa a ser <b>140 (cento e
 quarenta)</b> convidados, em substituição à quantidade originalmente estabelecida de <span class="antes">115
 (cento e quinze)</span> convidados.</div></div>
 
-    <div class="ctrc"><div class="ctrt">2. AJUSTE NO VALOR</div>
-      <div class="ctrb">O valor total do contrato será alterado para <b>R$ 9.000,00 (nove mil reais)</b>.
-Considerando as modificações realizadas, o valor de <b>R$ 1.250,00 (mil duzentos e cinquenta reais)</b> será
-pago nas condições abaixo descritas:
+    <div class="ctrc"><div class="ctrt">4. AJUSTE NO VALOR</div>
+      <div class="ctrb">O valor total do contrato será alterado para <b>R$ 9.900,00 (nove mil e novecentos
+reais)</b>. Considerando as modificações realizadas, o valor de <b>R$ 2.150,00 (dois mil, cento e cinquenta
+reais)</b> — sendo R$ 1.250,00 referentes ao acréscimo de 25 convidados e R$ 900,00 referentes à taxa de
+reagendamento prevista na Cláusula 7.2 — será pago nas condições abaixo descritas:
   ○ Pagamento via chave PIX: primeeventosthe@gmail.com, com vencimento em 20/12/2026.</div></div>
-
-    <div class="ctrc"><div class="ctrt">3. ALTERAÇÃO NO HORÁRIO</div>
-      <div class="ctrb">O horário de início será alterado para às <b>19:00h</b> do dia 15/01/2027 e término
-às <b>23:40h</b> do dia 15/01/2027.</div></div>
 
     <div class="eb">Disposições gerais</div>
     <div class="ctrb" style="font-size:12.5px">1. Permanecem inalteradas todas as demais cláusulas e condições
@@ -329,13 +381,21 @@ os R$ 1.250 não existem em lugar nenhum.</p>
 
 <table>
 <tr><th style="width:24%">Cláusula assinada</th><th style="width:38%">O que o sistema grava</th><th>Por que</th></tr>
-<tr><td>Convidados</td><td><code>orcamentos.evento.convidados</code> 115 → 140</td><td>é o número que a cozinha e o buffet leem</td></tr>
-<tr><td>Horário / data</td><td><code>orcamentos.evento</code> <b>e</b> <code>eventos_agenda</code> (evento 581)</td><td>a agenda é o que a equipe olha no dia; documento e agenda discordando é operação errada</td></tr>
-<tr><td>Valor</td><td>novo total no orçamento + <b>um título a receber</b> de R$ 1.250,00 com o vencimento digitado</td><td>senão a diferença combinada não vira cobrança</td></tr>
-<tr><td>Serviços</td><td><code>orcamentos.itens</code></td><td>é de onde sai a lista de montagem</td></tr>
+<tr><td><b>Data</b></td><td><code>orcamentos.evento.data</code> <b>e</b> <code>eventos_agenda.inicio/fim</code> (evento 581)</td><td>é o dia em que a equipe aparece. Documento dizendo 22 e agenda dizendo 15 é a pior falha possível</td></tr>
+<tr><td><b>Horário</b></td><td><code>evento.inicio</code> / <code>evento.fim</code> + a mesma linha da agenda</td><td>idem, na hora</td></tr>
+<tr><td><b>Convidados</b></td><td><code>orcamentos.evento.convidados</code> 115 → 140</td><td>é o número que a cozinha e o buffet leem</td></tr>
+<tr><td><b>Valor</b></td><td>novo total no orçamento + <b>um título a receber</b> de R$ 1.250,00 com o vencimento digitado</td><td>senão a diferença combinada não vira cobrança</td></tr>
+<tr><td><b>Serviços</b></td><td><code>orcamentos.itens</code></td><td>é de onde sai a lista de montagem</td></tr>
 <tr><td colspan="3" style="background:#F6F3EC"><b>Em todos os casos:</b> o texto do aditivo é congelado no ato
 (igual ao contrato), e o orçamento volta a ficar travado depois. A trava não some — ela passa a ter uma porta.</td></tr>
 </table>
+
+<div class="perigo"><b>Achado ao conferir a agenda pra este mockup: o casamento da Cláudia está lançado
+DUAS vezes.</b> Evento <b>581</b> (“Casamento — Claudia Maria Almeida de Carvalho”, com término 02:40) e
+evento <b>578</b> (“Casamento”, sem nome), os dois em 15/01/2027 às 21:00 UTC. O orçamento aponta pro 581.
+Se o aditivo mudar a data, ele move o 581 e <b>deixa o 578 parado no dia 15</b> — a agenda passa a mostrar
+um casamento fantasma na data velha. Isso precisa ser resolvido antes (ou junto), e não é problema do
+aditivo: é o mesmo tipo de duplicata que a tela de clientes duplicados já trata.</div>
 
 <div class="nota"><b>Escrever só na assinatura, nunca antes.</b> Mesma regra do contrato: a assinatura é o
 fato. Enquanto o cliente não assinou, o aditivo é proposta e nada muda no sistema — se ele nunca assinar, o
@@ -346,20 +406,26 @@ entrando não pede liberação do dono. Só conta a pagar espera.</div>
 
 <!-- ============================================================ 7 -->
 <h2><span class="n">7</span> O que eu preciso que você decida</h2>
-<div class="sub">Três perguntas — o resto eu toco sozinho</div>
+<div class="sub">Quatro perguntas — o resto eu toco sozinho</div>
 
 <div class="q"><div class="qt">1. O aditivo assinado muda o sistema, ou só gera o papel?</div>
 <div class="qo"><span class="rec">Minha recomendação: muda o sistema</span>, do jeito da tabela acima —
 convidados, horário, agenda, valor e título a receber. É a diferença entre resolver o problema e ter um
 gerador de documento. Se você preferir por partes (ex.: só o papel agora, o resto depois), também dá.</div></div>
 
-<div class="q"><div class="qt">2. Testemunhas e “02 vias”: mantém, tira ou adapta?</div>
+<div class="q"><div class="qt">2. A taxa de reagendamento de 10% entra marcada ou desmarcada?</div>
+<div class="qo">Ela está no seu contrato (cláusula 7.2) e nenhum dos quatro aditivos reais cobrou — porque
+nenhum mudou data. <span class="rec">Minha recomendação: entra marcada, com o valor calculado e fácil de
+zerar</span> — assim você decide caso a caso e nunca esquece que ela existe. O contrário (entrar zerada)
+faz a taxa sumir na pressa.</div></div>
+
+<div class="q"><div class="qt">3. Testemunhas e “02 vias”: mantém, tira ou adapta?</div>
 <div class="qo">Três opções: (a) tirar as duas frases, já que o registro digital é nome + CPF + data/hora +
 IP; (b) manter o texto e deixar campo pra testemunha assinar depois no papel; (c) trocar por uma frase que
 descreva o que de fato acontece. <span class="rec">Eu não decido isso sozinho</span> — é texto jurídico do
 seu contrato.</div></div>
 
-<div class="q"><div class="qt">3. Quem pode fazer aditivo?</div>
+<div class="q"><div class="qt">4. Quem pode fazer aditivo?</div>
 <div class="qo">O contrato hoje é gerado pelo sistema sem pedir papel de ninguém. O aditivo mexe em preço de
 negócio fechado. <span class="rec">Minha recomendação: só dono e gestor</span> — vendedor pede, você
 libera. Mas se na Prime é a Jacqueline quem trata o cliente, talvez trave mais do que ajude; você conhece a

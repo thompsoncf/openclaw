@@ -33,34 +33,69 @@ O que o teste protege:
 import os
 import re
 from datetime import date, timedelta
-from pathlib import Path
 
 import pytest
 from psycopg_pool import ConnectionPool
 
-from db.conexao import init_schema
 from finance import empresa as emp
 import web.painel_relatorios as rel
 from web import portal as pt
 
 HOJE = date.today()
 
-_MIGRACOES = ("018_chave_nfce_lancamentos.sql",
-              "053_modulo_pj.sql",
-              "195_titulo_aprovacao.sql",
-              "057_natureza_lancamento.sql")
+# BANCO PRÓPRIO e esquema escrito à mão, como o test_conferir_texto faz — e não o
+# `openclaw_test` compartilhado com `init_schema`. A primeira versão deste arquivo
+# escolhia quatro migrações a dedo: passava aqui, onde o banco descartável já
+# estava populado por rodadas anteriores, e quebrava no CI, que começa limpo toda
+# vez. Foi o vermelho do #616.
+#
+# `listar_titulos` faz LEFT JOIN em `clientes`, `pessoas` e `membros`, e
+# `dar_baixa_titulo` lança no livro-caixa — então `lancamentos` precisa das
+# colunas que o INSERT de verdade usa (membro_id, pagamento, forma_pagamento,
+# comprovante, chave, plano_conta_id, centro_custo_id). Estão todas aqui: um
+# esquema resumido demais daria um teste verde contra uma tabela que não existe
+# em lugar nenhum.
+_BASE_SQL = """
+create table contas (id bigserial primary key, tipo text, nome text);
+create table pessoas (id bigserial primary key, nome text);
+create table membros (id bigserial primary key, conta_id bigint, nome text,
+  email text);
+create table clientes (id bigserial primary key, dono_id bigint, pessoa_id bigint,
+  nome text);
+create table lancamentos (
+  id bigserial primary key, conta_id bigint not null, membro_id bigint,
+  tipo text not null, valor_centavos bigint not null, categoria text not null,
+  descricao text not null default '', data date not null,
+  pagamento text, forma_pagamento text, origem text not null default 'manual',
+  comprovante text, chave text, natureza text,
+  plano_conta_id bigint, centro_custo_id bigint, vendedor_id bigint);
+create table titulos (
+  id bigserial primary key, conta_id bigint, tipo text, descricao text,
+  contraparte text, valor_centavos bigint, vencimento date, status text,
+  recorrente boolean default false, categoria text, cobranca_link_url text,
+  pago_em date, lancamento_id bigint, cliente_id bigint, criado_por bigint,
+  aprovacao text not null default 'autorizado', aprovado_por bigint,
+  aprovado_em timestamptz, aprovacao_motivo text,
+  pago_sem_autorizacao boolean not null default false);
+"""
 
 
 @pytest.fixture(scope="module")
 def pool():
-    p = ConnectionPool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=4,
-                       open=True, kwargs={"prepare_threshold": None})
-    init_schema(p)
-    base = Path(__file__).resolve().parent.parent / "db" / "migracoes"
-    for m in _MIGRACOES:
-        with p.connection() as c:
-            c.execute((base / m).read_text(encoding="utf-8"))
-            c.commit()
+    admin = ConnectionPool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=1,
+                           open=True)
+    dbname = "zaq_conciliar_empresa_test"
+    with admin.connection() as c:
+        c.autocommit = True
+        c.execute(f"drop database if exists {dbname}")
+        c.execute(f"create database {dbname}")
+    admin.close()
+    url = os.environ["TEST_DATABASE_URL"].rsplit("/", 1)[0] + "/" + dbname
+    p = ConnectionPool(url, min_size=1, max_size=3, open=True,
+                       kwargs={"prepare_threshold": None})
+    with p.connection() as c:
+        c.execute(_BASE_SQL)
+        c.commit()
     yield p
     p.close()
 

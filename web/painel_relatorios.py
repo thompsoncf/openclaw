@@ -166,10 +166,11 @@ def _soma(linhas, chave):
     return sum(int(r[chave]) for r in linhas)
 
 
-def _col(chave, rotulo, num=False, brl=False, tag=False, flex=False, cli=False):
-    """`flex=True` marca a coluna ELÁSTICA da tabela — a que pode encolher quando
-    falta largura. Só uma por relatório, e é sempre a de nome livre (descrição,
-    cliente, contraparte).
+def _col(chave, rotulo, num=False, brl=False, tag=False, flex=False, cli=False,
+         extra=None):
+    """`flex=True` marca uma coluna ELÁSTICA da tabela — as que podem encolher
+    quando falta largura. São sempre as de nome livre (descrição, cliente,
+    contraparte), e todo relatório tem ao menos uma.
 
     Existe porque o oposto quebrava a tela. A tabela tinha `nowrap` em TODA célula
     e `min-width:640px`: com seis colunas de nome longo nada cabia nos 720px do
@@ -177,9 +178,23 @@ def _col(chave, rotulo, num=False, brl=False, tag=False, flex=False, cli=False):
     26/08 o cliente lia "ço Pelle Clínica" e "erson Venici" — não era truncagem, era
     a coluna Data e o começo do nome fora da área visível. Uma coluna elástica, que
     corta no FIM com reticências, mantém todas as outras no lugar e o começo do nome
-    sempre visível — que é a parte que identifica o cliente."""
+    sempre visível — que é a parte que identifica o cliente.
+
+    **Duas elásticas na mesma tabela é permitido, e é o caso de Contas a
+    pagar/receber**, que mostram Descrição E Fornecedor — dois nomes livres, os
+    dois longos. A regra antiga era "exatamente uma", com medo de que duas
+    brigassem pela sobra; não brigam, porque a sobra é dividida em partes iguais
+    entre elas (`width:99%` em ambas, no CSS do portal). O que continua proibido é
+    ZERO — aí volta a rolagem lateral do print — e marcar como elástica uma coluna
+    de tamanho previsível (valor, data), que encolheria justo o que já cabia."""
     return {"chave": chave, "rotulo": rotulo, "num": num, "brl": brl, "tag": tag,
             "flex": flex,
+            # `extra` pendura uma SEGUNDA pílula na mesma célula, opcional. Nasceu
+            # da coluna "Conferir", que ninguém entendia: ela nomeava a ação ("vá
+            # conferir") em vez do fato ("esta conta talvez já esteja paga"). Como
+            # fato, ela cabe dentro do Status — que é onde o olho já vai — em vez
+            # de gastar uma coluna inteira que fica vazia em 25 das 30 linhas.
+            "extra": extra,
             # `cli=True` é a coluna Cliente da Agenda, que precisa de marcação
             # própria: nome lido do TÍTULO sai apagado e com selo, e a célula vira
             # link pra ligar ao cadastro. Um flag e não `|safe`: a escapagem
@@ -433,15 +448,32 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
     """Contas a pagar/receber: SEMPRE mostra tudo que está em aberto — período não
     se aplica aqui (uma conta aberta continua aberta até ser paga, não "expira").
 
-    A coluna "Conferir" é a metade nova: em produção o dinheiro sai pelo extrato e
-    pela foto do comprovante, e o título fica aberto pra sempre porque ninguém
-    clica em "pago" — em 01/09/2026 a produção inteira tinha 38 títulos abertos,
-    11 vencidos (R$ 27.170,85, um deles há 58 dias) e ZERO baixas feitas por
-    gente. A coluna não resolve isso; ela deixa de esconder."""
+    O aviso de "talvez já paga" é a metade nova: em produção o dinheiro sai pelo
+    extrato e pela foto do comprovante, e o título fica aberto pra sempre porque
+    ninguém clica em "pago" — em 01/09/2026 a produção inteira tinha 38 títulos
+    abertos, 11 vencidos (R$ 27.170,85, um deles há 58 dias) e ZERO baixas feitas
+    por gente. O aviso não resolve isso; ele deixa de esconder.
+
+    **A DESCRIÇÃO é a coluna que faz a linha ser identificável**, e ela faltava.
+    Medido nos 30 títulos abertos da Prime em 04/09/2026: 16 das 30 linhas eram
+    idênticas a outra linha da mesma tela — mesmo Fornecedor e mesmo Valor.
+    "IMPOSTOS (FGTS/INSS/DAS)" aparecia três vezes no dia 18/09 sem dizer qual era
+    o FGTS, qual o INSS e qual o DAS; "JAQUELINE DUARTE" duas vezes por R$ 1.500,00
+    (2ª quinzena de agosto e 1ª de setembro); "PREFEITURA DE TERESINA" duas vezes
+    por R$ 1.160,85 (IPTU 3/6 e 4/6). Com a descrição no lugar, sobram 4. As 30 já
+    tinham descrição gravada — não havia campo a preencher, só a mostrar.
+
+    **E a CATEGORIA saiu pra abrir essa largura.** Ela escrevia a mesma palavra em
+    toda linha: em toda a produção, cada aba tem um único valor de categoria —
+    "Fornecedores" nas 34 contas a pagar, "Serviços"/"Vendas" nas a receber. Uma
+    coluna constante não informa; ocupa. (O campo continua no banco, no filtro e
+    no que a aba Empresa mostra — o que saiu é a coluna desta tabela.)"""
     hoje = date.today()
     tits = emp.listar_titulos(pool, conta_id, status="aberto", tipo=tipo, limite=300)
     candidatos = _pagamentos_candidatos(pool, conta_id, tits, tipo)
     verbo = "pago" if tipo == "pagar" else "recebido"
+    # a pílula concorda com "a conta", que é o sujeito da linha: "Talvez paga".
+    paga = "paga" if tipo == "pagar" else "recebida"
     linhas = []
     for t in tits:
         if t["atrasado"]:
@@ -452,9 +484,9 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
         c = candidatos.get(t["id"])
         acao = None
         if not c:
-            conferir = ""
+            talvez = ""
         elif c["n"] == 1:
-            conferir = f"parece {verbo} em {_fmt(c['data'])}"
+            talvez = f"Talvez {paga} · {_fmt(c['data'])}"
             # botão SÓ no candidato único. Com dois candidatos a tela conta e não
             # escolhe (ver acima) — oferecer botão ali seria pedir pro dono
             # confirmar um chute que a própria tela não soube fazer.
@@ -470,28 +502,34 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
                                   f"em Contas {'pagas' if tipo == 'pagar' else 'recebidas'}.")}
         else:
             # dizer QUAL seria chute quando há vários do mesmo valor por perto —
-            # e chute numa tela de dinheiro é o que esta coluna existe pra evitar
-            conferir = f"{c['n']} pagamentos iguais por perto"
+            # e chute numa tela de dinheiro é o que este aviso existe pra evitar
+            talvez = f"Talvez {paga} · {c['n']} iguais por perto"
         linhas.append({
             "vencimento": _fmt(t["vencimento"]),
+            "descricao": (t["descricao"] or "").strip() or "—",
             "contraparte": t["cliente_nome"] or t["contraparte"] or "—",
             "categoria": t["categoria"] or "—", "status": status, "status_cor": cor,
-            "conferir": conferir, "conferir_cor": "aviso",
+            "talvez": talvez, "talvez_cor": "aviso",
             "acao_post": acao,
             "valor_centavos": t["valor_centavos"],
         })
     total = _soma(linhas, "valor_centavos")
     vencidas = [r for r in linhas if r["status"] == "Vencida"]
     a_vencer_7d = [r for r in linhas if r["status_cor"] == "aviso"]
-    a_conferir = [r for r in linhas if r["conferir"]]
+    a_conferir = [r for r in linhas if r["talvez"]]
     rotulo_col = "Fornecedor" if tipo == "pagar" else "Cliente"
     label = "Contas a pagar" if tipo == "pagar" else "Contas a receber"
     dados = {
         "label": label, "mock": False, "sem_periodo": True,
         "acao": any(r["acao_post"] for r in linhas), "acao_rotulo": "Conciliar",
-        "colunas": [_col("vencimento", "Vencimento"), _col("contraparte", rotulo_col, flex=True),
-                    _col("categoria", "Categoria"), _col("status", "Status", tag=True),
-                    _col("conferir", "Conferir", tag=True),
+        # A descrição vem PRIMEIRO porque é ela que responde "que conta é essa" —
+        # é a mesma ordem que a aba Empresa já usa ao listar título
+        # (`{{ t.descricao }} · {{ t.contraparte }}`). Esta tabela é que estava
+        # fora do padrão da casa.
+        "colunas": [_col("vencimento", "Vencimento"),
+                    _col("descricao", "Descrição", flex=True),
+                    _col("contraparte", rotulo_col, flex=True),
+                    _col("status", "Status", tag=True, extra="talvez"),
                     _col("valor_centavos", "Valor", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
         "metricas": [("Total em aberto", _brl(total)),

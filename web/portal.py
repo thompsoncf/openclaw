@@ -6339,14 +6339,19 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   /* Linha única sempre — nome de cliente/empresa longo não vira 3 linhas
      desalinhando a tabela toda. */
   .rel-tbl-wrap table td,.rel-tbl-wrap table th{white-space:nowrap}
-  /* ...MENOS a coluna elástica (uma por relatório, marcada com flex=True em
-     _col). Ela absorve a sobra e, quando falta espaço, corta no FIM com
-     reticências. Antes o `nowrap` valia pra tudo e a tabela rolava pro lado: o
-     que sumia era a PRIMEIRA coluna e o começo do nome — em 26/08 o print
-     mostrava "ço Pelle Clínica" e "erson Venici", com o cliente lendo o meio da
-     tabela sem saber. Cortar no fim mantém visível a parte que identifica.
+  /* ...MENOS as colunas elásticas (marcadas com flex=True em _col). Elas
+     absorvem a sobra e, quando falta espaço, cortam no FIM com reticências.
+     Antes o `nowrap` valia pra tudo e a tabela rolava pro lado: o que sumia era
+     a PRIMEIRA coluna e o começo do nome — em 26/08 o print mostrava "ço Pelle
+     Clínica" e "erson Venici", com o cliente lendo o meio da tabela sem saber.
+     Cortar no fim mantém visível a parte que identifica.
      `max-width:0` é o truque que faz o text-overflow valer dentro de <table>:
-     sem ele a célula cresce com o conteúdo e a reticência nunca aparece. */
+     sem ele a célula cresce com o conteúdo e a reticência nunca aparece.
+     São DUAS em Contas a pagar/receber (Descrição e Fornecedor, os dois nomes
+     livres). Com o mesmo `width` em ambas, a sobra é dividida em partes iguais —
+     o repartimento é do próprio algoritmo da tabela, não é sorte: dois pedidos
+     iguais que não cabem viram duas fatias iguais do que existe. Cada uma corta
+     a sua no fim, e nenhuma empurra as colunas de tamanho fixo pra fora. */
   .rel-tbl-wrap table td.rel-flex{white-space:nowrap;overflow:hidden;
    text-overflow:ellipsis;max-width:0;width:99%}
   /* São até 300 linhas. Rolar 200 e não lembrar qual coluna é qual faz a pessoa
@@ -6501,10 +6506,17 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     </thead>
     <tbody>
     {% for row in dados.linhas %}
-    <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% elif col.flex %} class="rel-flex" title="{{ row[col.chave] }}"{% endif %}{% if col.chave == dados.col_total %} data-c="{{ row[col.chave] }}"{% endif %}>{% if col.tag %}{#- pílula SÓ quando há valor: as colunas "Quitou" e "Conferir"
-      são esparsas por desenho (o elo é raro), e uma pílula vazia em cada linha
-      vira ruído com borda. -#}{% if row[col.chave] %}<span
-      class="rel-tag {{ row[col.chave ~ '_cor'] }}">{{ row[col.chave] }}</span>{% endif %}{% elif col.brl %}{{ row[col.chave]|brl
+    <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% elif col.flex %} class="rel-flex" title="{{ row[col.chave] }}"{% endif %}{% if col.chave == dados.col_total %} data-c="{{ row[col.chave] }}"{% endif %}>{% if col.tag %}{#- pílula SÓ quando há valor: as colunas "Quitou" e o aviso de
+      "talvez paga" são esparsas por desenho (o elo é raro), e uma pílula vazia em
+      cada linha vira ruído com borda. -#}{% if row[col.chave] %}<span
+      class="rel-tag {{ row[col.chave ~ '_cor'] }}">{{ row[col.chave] }}</span>{% endif
+      %}{#- e a SEGUNDA pílula da mesma célula, quando a coluna declarou `extra`.
+      É o "Talvez paga · 10/08" de Contas a pagar, que antes gastava uma coluna
+      inteira chamada "Conferir" — vazia em 25 das 30 linhas, e com um nome que
+      dizia a ação em vez do fato. Ela vem DEPOIS do status porque o status é a
+      resposta principal ("Vencida") e isto é a ressalva. -#}{% if col.extra and row[col.extra]
+      %} <span class="rel-tag {{ row[col.extra ~ '_cor'] }}">{{ row[col.extra] }}</span>{% endif
+      %}{% elif col.brl %}{{ row[col.chave]|brl
       }}{% elif col.cli %}{#- a célula Cliente da Agenda. Nome vindo do VÍNCULO sai
       limpo; DEDUÇÃO sai apagada e com selo, porque é palpite e a tela não pode
       fingir que é dado. Dois selos, porque são duas origens: "do lead" (azul,
@@ -6805,7 +6817,11 @@ _RELATORIO_PDF = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8
     <tbody>
     {% for row in dados.linhas %}
     <tr>{% for col in dados.colunas %}<td{% if col.num %} class="num"{% endif %}>{% if col.brl %}{{ row[col.chave]|brl
-      }}{% else %}{{ row[col.chave] }}{% endif %}</td>{% endfor %}</tr>
+      }}{% else %}{{ row[col.chave] }}{#- o `extra` da tela (a ressalva "Talvez paga
+      · 10/08") também entra no papel, como texto. O PDF é o que vai pro contador e
+      pra reunião: se a tela avisa que uma conta talvez já esteja paga e o papel
+      cala, quem lê o papel cobra de novo. -#}{% if col.extra and row[col.extra]
+      %} · {{ row[col.extra] }}{% endif %}{% endif %}</td>{% endfor %}</tr>
     {% else %}
     <tr><td colspan="{{ dados.colunas|length }}" style="text-align:center;color:#777">Nenhum registro encontrado.</td></tr>
     {% endfor %}

@@ -3,8 +3,14 @@
 Em produção, 01/09/2026: 38 títulos abertos, 11 vencidos somando R$ 27.170,85 —
 um deles há 58 dias — e ZERO baixas feitas por gente. O dinheiro sai pelo extrato
 e pela foto do comprovante, que nascem em `lancamentos`; o título fica aberto pra
-sempre porque ninguém clica em "pago". A coluna "Conferir" não resolve isso: ela
-deixa de esconder.
+sempre porque ninguém clica em "pago". O aviso não resolve isso: ele deixa de
+esconder.
+
+**Em 04/09/2026 esse aviso saiu da coluna própria e entrou no Status.** O dono
+olhou o print e disse "tem uma coluna chamada Conferir, não sei pra que serve":
+o nome dizia a AÇÃO ("vá conferir") em vez do FATO ("esta conta talvez já esteja
+paga"). A coluna também ficava vazia em 25 das 30 linhas da Prime. A dica é a
+mesma, medida do mesmo jeito; mudou onde ela aparece e como se chama.
 
 **Esta é a metade perigosa do trabalho, e o teste existe pra manter ela
 perigosa-mente conservadora.** Rodando o casamento por valor + janela nos 11
@@ -23,7 +29,11 @@ O que este teste protege:
   * **lançamento que já é a baixa de um título não vira candidato de outro.** É a
     trava que tira o eco do sinal da Bianca da conta;
   * **com mais de um candidato a tela conta, não escolhe.** Dizer qual seria
-    chute, e chute em tela de dinheiro é o que esta coluna existe pra evitar.
+    chute, e chute em tela de dinheiro é o que este aviso existe pra evitar.
+
+Deste arquivo também saem as garantias do desenho da tabela: a DESCRIÇÃO existe e
+vem antes do fornecedor, a CATEGORIA não gasta mais uma coluna, e o aviso mora
+dentro do Status.
 """
 import os
 from datetime import date, timedelta
@@ -126,22 +136,22 @@ def test_o_caso_da_zarb(pool, conta):
     _titulo(pool, conta)
     _pag(pool, conta)
     linha = _abertos(pool, conta)["linhas"][0]
-    assert linha["conferir"].startswith("parece pago em ")
-    assert linha["conferir_cor"] == "aviso"
+    assert linha["talvez"].startswith("Talvez paga · ")
+    assert linha["talvez_cor"] == "aviso"
 
 
 def test_o_lado_de_receber_fala_recebido(pool, conta):
     _titulo(pool, conta, tipo="receber", descricao="Evento — parcela 2/2")
     _pag(pool, conta, tipo="receita")
-    assert _abertos(pool, conta, "receber")["linhas"][0]["conferir"].startswith(
-        "parece recebido em ")
+    assert _abertos(pool, conta, "receber")["linhas"][0]["talvez"].startswith(
+        "Talvez recebida · ")
 
 
 def test_titulo_sem_pagamento_por_perto_fica_limpo(pool, conta):
     """BANCO DO NORDESTE, R$ 2.400 vencido — não há pagamento nenhum desse valor.
     A coluna tem que ficar VAZIA, não inventar dúvida."""
     _titulo(pool, conta, valor=240000, descricao="BANCO DO NORDESTE")
-    assert _abertos(pool, conta)["linhas"][0]["conferir"] == ""
+    assert _abertos(pool, conta)["linhas"][0]["talvez"] == ""
     assert "aviso_config" not in _abertos(pool, conta)
 
 
@@ -153,7 +163,7 @@ def test_a_janela_nao_alcanca_o_mes_vizinho(pool, conta):
     errados. 30 dias de distância tem que passar longe."""
     _titulo(pool, conta, valor=81050, venc_em=0, descricao="2ª QUINZENA INSIGHT")
     _pag(pool, conta, valor=81050, dias=-30)
-    assert _abertos(pool, conta)["linhas"][0]["conferir"] == ""
+    assert _abertos(pool, conta)["linhas"][0]["talvez"] == ""
 
 
 @pytest.mark.parametrize("dias,tem_dica", [
@@ -162,7 +172,7 @@ def test_a_janela_nao_alcanca_o_mes_vizinho(pool, conta):
 def test_a_borda_da_janela(pool, conta, dias, tem_dica):
     _titulo(pool, conta, venc_em=0)
     _pag(pool, conta, dias=dias)
-    assert bool(_abertos(pool, conta)["linhas"][0]["conferir"]) is tem_dica
+    assert bool(_abertos(pool, conta)["linhas"][0]["talvez"]) is tem_dica
 
 
 def test_a_janela_e_de_catorze_dias(pool):
@@ -181,7 +191,7 @@ def test_a_quinzena_vizinha_nao_vira_dica(pool, conta):
             descricao="2 QUINZENA AGOSTO/26 JAQUELINE")
     _pag(pool, conta, valor=85000, dias=-15, origem="foto",
          descricao="1ª quinzena agosto/26 - Jacqueline Duarte")
-    assert _abertos(pool, conta)["linhas"][0]["conferir"] == ""
+    assert _abertos(pool, conta)["linhas"][0]["talvez"] == ""
 
 
 # ── as travas contra o falso positivo ────────────────────────────────────────
@@ -197,7 +207,7 @@ def test_pagamento_ja_amarrado_a_outro_titulo_nao_conta(pool, conta):
             descricao="Evento — Bianca · parcela 2/2")
     linhas = _abertos(pool, conta, "receber")["linhas"]
     assert len(linhas) == 1, "só a parcela 2 está em aberto"
-    assert linhas[0]["conferir"] == "", \
+    assert linhas[0]["talvez"] == "", \
         "o dinheiro do sinal não pode ser sugerido como pagamento da parcela 2"
 
 
@@ -219,7 +229,7 @@ def test_o_eco_do_sinal_tambem_nao_conta(pool, conta):
             descricao="Evento — Bianca · parcela 2/2")
     linhas = _abertos(pool, conta, "receber")["linhas"]
     assert len(linhas) == 1
-    assert linhas[0]["conferir"] == "", \
+    assert linhas[0]["talvez"] == "", \
         "a foto do sinal é eco do mesmo dinheiro, não o pagamento da parcela 2"
 
 
@@ -229,28 +239,28 @@ def test_o_gemeo_so_e_barrado_no_mesmo_dia_e_valor(pool, conta):
     _pag(pool, conta, valor=220000, dias=-25, descricao="Baixa antiga", origem="titulo")
     _pag(pool, conta, valor=220000, dias=-3, descricao="Pix de verdade")
     _titulo(pool, conta, venc_em=0)
-    assert _abertos(pool, conta)["linhas"][0]["conferir"].startswith("parece pago em ")
+    assert _abertos(pool, conta)["linhas"][0]["talvez"].startswith("Talvez paga · ")
 
 
 def test_varios_candidatos_a_tela_conta_e_nao_escolhe(pool, conta):
     _titulo(pool, conta, venc_em=0)
     _pag(pool, conta, dias=-3)
     _pag(pool, conta, dias=+4)
-    assert _abertos(pool, conta)["linhas"][0]["conferir"] == "2 pagamentos iguais por perto"
+    assert _abertos(pool, conta)["linhas"][0]["talvez"] == "Talvez paga · 2 iguais por perto"
 
 
 def test_o_candidato_mais_perto_do_vencimento_e_o_mostrado(pool, conta):
     _titulo(pool, conta, venc_em=0)
     _pag(pool, conta, dias=-12)
     d = _abertos(pool, conta)
-    assert rel._fmt(HOJE - timedelta(days=12)) in d["linhas"][0]["conferir"]
+    assert rel._fmt(HOJE - timedelta(days=12)) in d["linhas"][0]["talvez"]
 
 
 def test_o_lado_errado_do_caixa_nao_casa(pool, conta):
     """Uma conta a PAGAR não pode casar com uma receita de mesmo valor."""
     _titulo(pool, conta, tipo="pagar")
     _pag(pool, conta, tipo="receita")
-    assert _abertos(pool, conta)["linhas"][0]["conferir"] == ""
+    assert _abertos(pool, conta)["linhas"][0]["talvez"] == ""
 
 
 def test_pagamento_de_outra_conta_nao_casa(pool, conta):
@@ -260,13 +270,13 @@ def test_pagamento_de_outra_conta_nao_casa(pool, conta):
         c.commit()
     _titulo(pool, conta)
     _pag(pool, outra)
-    assert _abertos(pool, conta)["linhas"][0]["conferir"] == ""
+    assert _abertos(pool, conta)["linhas"][0]["talvez"] == ""
 
 
 def test_valor_diferente_nao_casa(pool, conta):
     _titulo(pool, conta, valor=220000)
     _pag(pool, conta, valor=219999)
-    assert _abertos(pool, conta)["linhas"][0]["conferir"] == ""
+    assert _abertos(pool, conta)["linhas"][0]["talvez"] == ""
 
 
 # ── nada é escrito ───────────────────────────────────────────────────────────
@@ -315,15 +325,50 @@ def test_titulo_sem_vencimento_nao_derruba(pool, conta):
                      values (%s,'pagar','Sem data','',1000,null,'aberto','x')""",
                   (conta,))
         c.commit()
-    assert _abertos(pool, conta)["linhas"][0]["conferir"] == ""
+    assert _abertos(pool, conta)["linhas"][0]["talvez"] == ""
 
 
-# ── a coluna na tabela ───────────────────────────────────────────────────────
-def test_a_coluna_conferir_e_tag_e_a_elastica_continua_a_contraparte(pool, conta):
+# ── as colunas na tabela ─────────────────────────────────────────────────────
+def test_o_aviso_mora_dentro_do_status_e_nao_numa_coluna_propria(pool, conta):
+    """A coluna "Conferir" foi embora, o aviso não. O dono olhou o print e disse
+    "não sei pra que serve": o nome dizia a AÇÃO ("vá conferir") e não o FATO
+    ("esta conta talvez já esteja paga"). Como fato ele cabe no Status, que é onde
+    o olho já está — e economiza uma coluna que ficava vazia em 25 das 30 linhas
+    da Prime."""
     cols = _abertos(pool, conta)["colunas"]
     por_chave = {c["chave"]: c for c in cols}
-    assert por_chave["conferir"]["tag"] is True
-    assert [c["chave"] for c in cols if c["flex"]] == ["contraparte"]
+    assert "talvez" not in por_chave, "o aviso voltou a gastar uma coluna inteira"
+    assert por_chave["status"]["extra"] == "talvez"
+    assert por_chave["status"]["tag"] is True
+
+
+def test_a_descricao_esta_na_tabela_e_vem_antes_do_fornecedor(pool, conta):
+    """O pedido do dono, em 04/09/2026: "cria por favor a coluna pra aparecer a
+    descrição também". Ela vem PRIMEIRO porque é ela que responde "que conta é
+    essa" — 16 das 30 linhas da Prime eram indistinguíveis sem ela."""
+    cols = [c["chave"] for c in _abertos(pool, conta)["colunas"]]
+    assert "descricao" in cols, "sem a descrição a linha não se identifica"
+    assert cols.index("descricao") < cols.index("contraparte")
+
+
+def test_a_categoria_saiu_da_tabela(pool, conta):
+    """Ela escrevia a mesma palavra em toda linha: em toda a produção cada aba tem
+    UM valor de categoria — "Fornecedores" nas 34 contas a pagar,
+    "Serviços"/"Vendas" nas a receber. Coluna constante não informa, ocupa. O
+    campo continua no banco e na linha (o PDF e os filtros usam)."""
+    _titulo(pool, conta)
+    dados = _abertos(pool, conta)
+    assert "categoria" not in [c["chave"] for c in dados["colunas"]]
+    assert dados["linhas"][0]["categoria"] == "Fornecedores", \
+        "o dado tem que continuar disponível — o que saiu foi a coluna"
+
+
+def test_os_dois_nomes_livres_sao_elasticos(pool, conta):
+    """Descrição e Fornecedor são os dois longos ("ESCONTAB ASSESSORIA E
+    CONSULTORIA CONTABIL" tem 42 caracteres). Um fixo e um elástico faria o fixo
+    empurrar a tabela pro lado — que é o print de 26/08 de volta."""
+    cols = _abertos(pool, conta)["colunas"]
+    assert [c["chave"] for c in cols if c["flex"]] == ["descricao", "contraparte"]
 
 
 def test_as_abas_de_compromisso_nao_mudaram_de_fonte(pool, conta):
@@ -332,3 +377,43 @@ def test_as_abas_de_compromisso_nao_mudaram_de_fonte(pool, conta):
     fonte = open(rel.__file__, encoding="utf-8").read()
     corpo = fonte.split("def _dados_titulos_abertos")[1].split("\ndef ")[0]
     assert "emp.listar_titulos" in corpo and 'status="aberto"' in corpo
+
+
+# ── as duas pílulas na mesma célula ──────────────────────────────────────────
+def _render(dados: dict) -> str:
+    """Roda a tabela do relatório pelo Jinja de verdade, como o portal roda."""
+    from jinja2 import DictLoader, Environment
+    from web import portal as pt
+    corpo = pt._RELATORIOS.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+    env = Environment(loader=DictLoader({"t": "<table><tbody>" + corpo + "</tbody></table>"}))
+    env.filters["brl"] = lambda c: f"R$ {int(c or 0) / 100:.2f}"
+    return env.get_template("t").render(dados=dados, request=None)
+
+
+def test_a_celula_de_status_sai_com_as_duas_pilulas(pool, conta):
+    """O status é a resposta principal ("Vencida") e o aviso é a ressalva
+    ("Talvez paga · 10/08") — as duas na mesma célula, nessa ordem."""
+    _titulo(pool, conta)
+    _pag(pool, conta)
+    html = _render(_abertos(pool, conta))
+    assert "Vencida" in html and "Talvez paga" in html
+    assert html.index("Vencida") < html.index("Talvez paga"), \
+        "a ressalva não pode vir antes do fato principal"
+    assert html.count("rel-tag") >= 2
+
+
+def test_sem_dica_a_celula_sai_com_uma_pilula_so(pool, conta):
+    """Pílula vazia em cada linha é ruído com borda — o aviso é esparso por
+    desenho (5 linhas em 30, na Prime)."""
+    _titulo(pool, conta, valor=240000, descricao="BANCO DO NORDESTE")
+    html = _render(_abertos(pool, conta))
+    assert "Talvez" not in html
+    assert html.count("rel-tag") == 1
+
+
+def test_o_pdf_leva_a_ressalva_junto(pool, conta):
+    """O PDF é o que vai pro contador e pra reunião. Se a tela avisa que a conta
+    talvez já esteja paga e o papel cala, quem lê o papel cobra de novo."""
+    from web import portal as pt
+    assert "col.extra and row[col.extra]" in pt._RELATORIO_PDF, \
+        "o `extra` da tela não está sendo impresso no PDF"

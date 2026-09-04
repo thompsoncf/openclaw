@@ -2950,6 +2950,12 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
         # <input type=date> abre o seletor nativo do celular — datilografar
         # dd/mm/aaaa numa mão, na rua, ninguém faz.
         + campo("nascimento", "Aniversário", _iso(d.get("nascimento")), tipo="date", meia=True)
+        # O EVENTO (migração 197) — só onde a conta vende data: numa conta de
+        # mensalidade "tipo do evento" não quer dizer nada pra ninguém.
+        + ((campo("evento_tipo", "Tipo do evento", d.get("evento_tipo"))
+            + campo("evento_em", "Data do evento", _iso(d.get("evento_em")), tipo="date", meia=True)
+            + campo("evento_convidados", "Convidados", str(d.get("evento_convidados") or ""),
+                    modo="numeric", meia=True)) if d.get("vende_data") else "")
         + campo("cidade", "Cidade", d.get("cidade"), meia=True)
         + campo("uf", "UF", d.get("uf"), meia=True)
         + "<label class=fic-c><span>Observação</span>"
@@ -4069,6 +4075,9 @@ def _dia_br(dt) -> str:
 def _lead_vendedor(request: Request, lead_id: int, d: dict,
                    pode_voz: bool = False, saida_wa: bool = True) -> HTMLResponse:
     sub = " · ".join(x for x in [d.get("cidade") or "", d.get("uf") or ""] if x) or (d.get("doc_fmt") or "")
+    # o evento na frente de tudo: é o que se precisa ver antes de responder (197)
+    if d.get("evento_fmt"):
+        sub = d["evento_fmt"] + (" · " + sub if sub else "")
 
     bolhas = []
     # (o _midia_html mora fora daqui pra o polling do JS desenhar igual — ver cxMid)
@@ -4342,6 +4351,9 @@ def _lead_gestor(request: Request, conta_id: int, lead_id: int, saida_wa: bool =
     outros = cd.vendedores_para_reatribuir(pool, conta_id, d.get("vendedor_id") or 0)
 
     sub = " · ".join(x for x in [d.get("cidade") or "", d.get("uf") or ""] if x) or (d.get("doc_fmt") or "")
+    # o evento na frente de tudo: é o que se precisa ver antes de responder (197)
+    if d.get("evento_fmt"):
+        sub = d["evento_fmt"] + (" · " + sub if sub else "")
     # mesma porta da tela do vendedor, mesmo portão: onde o Zaq entrega sempre, a
     # conversa fica por dentro — inclusive pra quem gerencia (o que o gestor manda
     # do celular chega tão sem nome quanto o do vendedor)
@@ -4870,13 +4882,17 @@ def cockpit_ficha(request: Request, lead_id: int, empresa: str = Form(""), conta
                   whatsapp: str = Form(""), documento: str = Form(""), email: str = Form(""),
                   cep: str = Form(""), endereco: str = Form(""), numero: str = Form(""),
                   bairro: str = Form(""), nascimento: str = Form(""),
-                  cidade: str = Form(""), uf: str = Form(""), obs: str = Form("")):
+                  cidade: str = Form(""), uf: str = Form(""), obs: str = Form(""),
+                  evento_tipo: str = Form(""), evento_em: str = Form(""),
+                  evento_convidados: str = Form("")):
     """Ficha do cliente preenchida pelo vendedor, de dentro da conversa."""
     dados = {"empresa": empresa, "contato": contato, "cargo": cargo, "segmento": segmento,
              "telefone": telefone, "whatsapp": whatsapp, "documento": documento, "email": email,
              "cep": cep, "endereco": endereco, "numero": numero, "bairro": bairro,
              "nascimento": nascimento,
-             "cidade": cidade, "uf": uf, "obs": obs}
+             "cidade": cidade, "uf": uf, "obs": obs,
+             "evento_tipo": evento_tipo, "evento_em": evento_em,
+             "evento_convidados": evento_convidados}
     return _agir(request, lead_id,
                  lambda p, c, m, l: {**ck.salvar_ficha(p, c, m, l, dados), "msg": "Ficha salva ✓"},
                  f"{_BASE}/lead/{lead_id}")

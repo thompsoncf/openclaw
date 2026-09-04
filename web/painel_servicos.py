@@ -792,6 +792,11 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
                 return JSONResponse({"erro": "não consegui numerar o orçamento; tente de novo"},
                                     status_code=409)
             oid, tok = r
+        # a data, o tipo e os convidados da proposta vão pro lead que já está
+        # amarrado a ela (migração 197) — tolerante por dentro, na mesma transação
+        if oid is not None:
+            from finance import evento_lead as _evl
+            _evl.sincronizar_do_orcamento(c, conta[0], oid)
         c.commit()
     if oid is None:
         return JSONResponse({"erro": "proposta não encontrada ou já fechada"}, status_code=400)

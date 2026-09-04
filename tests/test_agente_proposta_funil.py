@@ -45,6 +45,7 @@ _SCHEMA = """
 create table contas (id bigint primary key, nome text, nicho_id bigint);
 create table nichos (id bigint primary key, slug text);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
+  evento_em date, evento_tipo text, evento_convidados int,
   empresa text, contato text, cnpj text, whatsapp text, telefone text, email text,
   cidade text, uf text, segmento text, origem text, status text default 'novo',
   estagio text default 'lead', orcamento_id bigint, criado_por bigint,
@@ -219,3 +220,19 @@ def test_o_cliente_recebe_o_link(pool, sem_whatsapp):
     _rodar(pool, _conv(lead))
     assert len(sem_whatsapp) == 1
     assert "https://app.zaq-ia.com/proposta/" in sem_whatsapp[0]["texto"]
+
+
+# --------------------------------------------------------------- o evento no lead
+def test_a_data_da_festa_que_o_agente_ouviu_vai_pro_lead_junto_com_o_vinculo(pool):
+    """Migração 197. A DECISAO acima traz "31/12/2026, casamento": ao amarrar a
+    proposta, o lead ganha a data e o tipo — é isso que o trilho de meses do funil
+    lê. Antes o dado ficava só em `orcamentos.evento`, que o funil nunca abre."""
+    from datetime import date
+    lid = _lead(pool, whatsapp="558694426769")
+    with pool.connection() as c:
+        ag._orcamento(pool, c, CONTA, CONVERSA, _conv(lid), CATALOGO, DECISAO,
+                      "whatsapp", "558694426769", "Segue", ag._evento_do_json(DECISAO))
+        c.commit()
+    with pool.connection() as c:
+        assert c.execute("select evento_em, evento_tipo from prospeccao where id=%s",
+                         (lid,)).fetchone() == (date(2026, 12, 31), "casamento")

@@ -23,7 +23,7 @@ CONTA = 21
 _SQL = """
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text, ativo boolean default true);
-create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
+create table prospeccao (id bigserial primary key, evento_em date, evento_tipo text, evento_convidados int, conta_id bigint, vendedor_id bigint,
   empresa text not null, cnpj text, segmento text, cidade text, uf text,
   contato text, cargo text, telefone text, whatsapp text, email text,
   status text default 'novo', temperatura text default 'frio',

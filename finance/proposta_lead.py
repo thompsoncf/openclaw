@@ -79,6 +79,10 @@ def ligar(c, conta_id: int, lead_id: int, orcamento_id: int,
         "update prospeccao set orcamento_id=%s, status=%s, atualizado_em=now() "
         "where id=%s and conta_id=%s and orcamento_id is null",
         (orcamento_id, novo, lead_id, conta_id))
+    # a data, o tipo e os convidados da proposta vão pro lead junto com o vínculo
+    # (migração 197) — é a proposta que sabe quando é a festa; tolerante por dentro
+    from finance import evento_lead as _evl
+    _evl.sincronizar_do_orcamento(c, conta_id, orcamento_id)
     if novo != status:
         try:
             from finance import funil_regua as _fr

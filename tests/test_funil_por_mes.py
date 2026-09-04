@@ -30,7 +30,7 @@ create table prospeccao (id bigserial primary key, orcamento_id bigint, conta_id
   email text, instagram text, temperatura text default 'frio',
   valor_estimado_centavos bigint default 0, proximo_contato_em date,
   enriquecido_em timestamptz, estagio text default 'lead', status text default 'novo',
-  evento_em date, evento_tipo text, evento_convidados int, ultimo_contato_em timestamptz,
+  evento_em date, evento_tipo text, evento_convidados int, evento_origem text, evento_trecho text, evento_pista text, evento_lido_em timestamptz, ultimo_contato_em timestamptz,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
   rotulo text, ordem int default 0, fixa boolean default false,
@@ -362,3 +362,76 @@ def test_na_vista_por_mes_sem_data_continua_com_a_dobra_dos_parados_e_o_trilho_s
     assert "Parados 15+ dias <b>1</b>" in sem and "Quieto" in sem.split("kbdobra")[1]
     assert 'id="trilho"' not in html
     assert '<input type="hidden" name="vista" value="mes">' in html
+
+
+# ------------------------------------------------------------------ o card lê a conversa (198)
+def _lead_lido(pool, empresa, **kw):
+    campos = {"evento_em": date(2027, 2, 13), "tipo": "Casamento", "conv": 70}
+    campos.update({k: kw.pop(k) for k in list(kw) if k in campos})
+    lid = _lead(pool, empresa, evento_em=campos["evento_em"], tipo=campos["tipo"], conv=campos["conv"])
+    with pool.connection() as c:
+        c.execute("update prospeccao set evento_origem=%s, evento_trecho=%s, evento_pista=%s where id=%s",
+                  (kw.get("origem"), kw.get("trecho"), kw.get("pista"), lid))
+        c.commit()
+    return lid
+
+
+def test_o_card_diz_de_onde_veio_a_data(monkeypatch, pool, vende_data):
+    a = _lead_lido(pool, "Larissa", origem="conversa", trecho="seria para casamento, data 13 de fevereiro")
+    b = _lead_lido(pool, "Bruna", origem="confirmado")
+    c_ = _lead_lido(pool, "Carla", origem="agente")
+    d = _lead_lido(pool, "Dani", origem="mao")
+    html = _html(monkeypatch, pool)
+    assert '<span class="tag lido" title="seria para casamento, data 13 de fevereiro">💬 lido da conversa</span>' in _card(html, a)
+    assert '<span class="tag ok">✓ confirmado</span>' in _card(html, b)
+    assert '<span class="tag ia">🤖 lido pelo agente</span>' in _card(html, c_)
+    assert "kbsrc" not in _card(html, d)          # à mão: sem selo, é o dono da informação
+
+
+def test_a_pista_substitui_o_sem_data_e_abre_o_balao(monkeypatch, pool, vende_data):
+    a = _lead(pool, "Turma Enfermagem", whatsapp="86999990000")
+    with pool.connection() as c:
+        c.execute("update prospeccao set evento_pista='falou de março', evento_tipo='Formatura' where id=%s", (a,))
+        c.commit()
+    card = _card(_html(monkeypatch, pool), a)
+    assert "📅 falou de março" in card and ">confirmar</button>" in card
+    assert "sem data" not in card
+    # com data no lead e outra na conversa: a pista fica embaixo da linha do evento
+    b = _lead_lido(pool, "Larissa", origem="conversa", pista="falou de 20 fev 27")
+    cb = _card(_html(monkeypatch, pool), b)
+    assert "13 fev 27" in cb and '<div class="kbev pista">💬 falou de 20 fev 27</div>' in cb
+
+
+def test_o_botao_ler_as_conversas_aparece_so_com_acervo_por_ler(monkeypatch, pool, vende_data):
+    a = _lead(pool, "Sem Data")
+    assert 'id="lerconv"' not in _html(monkeypatch, pool)      # sem mensagem: nada pra ler
+    _conversa(pool, a, msg_ha_dias=0)
+    html = _html(monkeypatch, pool)
+    assert "<b>1</b> conversa de lead sem data ainda não foi lida" in html
+    assert 'onclick="kbLerConversas(this)">Ler as conversas</button>' in html
+
+
+def test_a_rota_de_ler_dispara_o_acervo_e_a_de_confirmar_marca_o_selo(monkeypatch, pool, vende_data):
+    from finance import evento_leitor as L
+    a = _lead(pool, "Sem Data"); _conversa(pool, a, msg_ha_dias=0)
+    b = _lead_lido(pool, "Larissa", origem="conversa", pista="disse 17 ou 18")
+    monkeypatch.setattr(pp, "get_pool", lambda: pool)
+    monkeypatch.setattr(pp, "_acesso", lambda req: (
+        {"conta_id": CONTA, "membro_id": 1, "gerencia": True, "pode_atribuir": True}, None))
+    # a ficha inteira não cabe neste esquema mínimo: só o que a rota precisa (posse)
+    monkeypatch.setattr(pp, "_carrega_alvo", lambda pool, conta_id, lid: (
+        {"id": lid, "vendedor_id": None} if lid in (a, b) else None))
+    lidos = []
+    monkeypatch.setattr(L, "ler_acervo", lambda pool, conta_id, ids: lidos.append((conta_id, ids)))
+    req = SimpleNamespace(session={}, query_params=QueryParams(""))
+    r = pp.prospeccao_evento_ler(req)
+    assert r.status_code == 200 and b'"n":1' in bytes(r.body)
+    import time
+    time.sleep(0.2)                       # a thread do acervo
+    assert lidos == [(CONTA, [a])]
+    r = pp.prospeccao_evento_confirmar(req, b)
+    assert r.status_code == 200
+    with pool.connection() as c:
+        assert c.execute("select evento_origem, evento_pista from prospeccao where id=%s", (b,)).fetchone() == ("confirmado", None)
+    r = pp.prospeccao_evento_confirmar(req, 999999)
+    assert r.status_code == 403

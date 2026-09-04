@@ -28,7 +28,7 @@ create table contas (id bigserial primary key, nome text, documento text, razao_
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true, whatsapp text,
   cockpit_push_ativo boolean default true, cockpit_pausado boolean default false);
-create table prospeccao (id bigserial primary key, evento_em date, evento_tipo text, evento_convidados int, conta_id bigint, vendedor_id bigint,
+create table prospeccao (id bigserial primary key, evento_em date, evento_tipo text, evento_convidados int, evento_origem text, evento_trecho text, evento_pista text, evento_lido_em timestamptz, conta_id bigint, vendedor_id bigint,
   empresa text, cnpj text, segmento text, cidade text, uf text, contato text, cargo text,
   telefone text, whatsapp text, email text, status text default 'novo', temperatura text default 'frio',
   valor_estimado_centavos bigint default 0, origem text, obs text, instagram text, socio text,

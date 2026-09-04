@@ -251,7 +251,8 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
                       p.decisor_whatsapp, p.decisor_em, p.decisor_telefones,
                       p.tipo, p.cpf,
                       p.cep, p.endereco, p.numero, p.bairro, p.nascimento,
-                      p.evento_em, p.evento_tipo, p.evento_convidados
+                      p.evento_em, p.evento_tipo, p.evento_convidados,
+                      p.evento_origem, p.evento_trecho, p.evento_pista, p.evento_lido_em
                  from prospeccao p
                  left join membros m on m.id = p.vendedor_id
                 where p.id=%s and p.conta_id=%s""", (alvo_id, conta_id)).fetchone()
@@ -265,8 +266,10 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
             "decisor_nome", "decisor_cargo", "decisor_telefone", "decisor_whatsapp", "decisor_em",
             "decisor_telefones", "tipo", "cpf",
             "cep", "endereco", "numero", "bairro", "nascimento",
-            "evento_em", "evento_tipo", "evento_convidados"]
+            "evento_em", "evento_tipo", "evento_convidados",
+            "evento_origem", "evento_trecho", "evento_pista", "evento_lido_em"]
     d = dict(zip(cols, r))
+    d["evento_lido_fmt"] = _hora_br(d["evento_lido_em"]) if d.get("evento_lido_em") else ""
     # o evento (migração 197) pronto pra tela: ISO pro <input type=date>, ícone pelo
     # tipo e uma linha só ("💍 Casamento · 14/11/2026 · 150 convidados")
     d["evento_iso"] = d["evento_em"].isoformat() if d.get("evento_em") else ""
@@ -515,7 +518,8 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                        p.telefone, p.whatsapp, p.vendedor_id, m.nome,
                        p.email, p.instagram, p.enriquecido_em, ca.cnome,
                        p.evento_em, p.evento_tipo, p.evento_convidados,
-                       p.criado_em, p.ultimo_contato_em, p.orcamento_id
+                       p.criado_em, p.ultimo_contato_em, p.orcamento_id,
+                       p.evento_origem, p.evento_trecho, p.evento_pista
                   from prospeccao p
                   left join membros m on m.id = p.vendedor_id
                   left join lateral (
@@ -663,6 +667,15 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                             (orc_ids,)).fetchall())
                 except Exception:  # noqa: BLE001
                     numero_por_orc = {}
+        # o acervo do leitor: quem ainda tem campo vazio e conversa não lida
+        por_ler = 0
+        if modo_evento:
+            try:
+                with c.transaction():
+                    from finance import evento_leitor as _leitor
+                    por_ler = len(_leitor.leads_por_ler(c, conta_id))
+            except Exception:  # noqa: BLE001
+                por_ler = 0
     colunas = {e["chave"]: [] for e in etapas}
     rotulo_etapa = {e["chave"]: e["rotulo"] for e in etapas}
     hoje = _agora().date()
@@ -712,6 +725,8 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
             "etapa_cls": ("real" if r[5] == "ganho" else "prop" if r[5] == "proposta" else ""),
             "proposta_num": numero_por_orc.get(r[22]) if r[22] else None,
             "visita_txt": _evl.visita_curta(visita_por_lead[r[0]]) if r[0] in visita_por_lead else "",
+            # o selo de origem e a pista do leitor (migração 198)
+            "evento_origem": r[23], "evento_trecho": r[24], "evento_pista": r[25],
         })
         colunas.get(r[5], colunas[primeira]).append(card)
         if r[5] != "perdido":
@@ -735,7 +750,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                     if modo_evento and (any(k for k in contagens if k) or filtro_mes) else [])
     return _render("prospeccao", request, titulo="Prospecção", secao_ativa="prospeccao",
                    grupos=grupos, trilho_itens=trilho_itens, filtro_mes=filtro_mes,
-                   vista_mes=vista_mes, vista_cols=vista_cols,
+                   vista_mes=vista_mes, vista_cols=vista_cols, por_ler=por_ler,
                    filtro_mes_rotulo=(_evl.mes_rotulo(filtro_mes) if _evl.mes_valido(filtro_mes) else ""),
                    totais_col=totais_col, modo_evento=modo_evento, pergunta_data=_evl.PERGUNTA_DATA,
                    status=status_tpl, etapas=etapas_edit, colunas=colunas, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
@@ -4690,6 +4705,9 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
     # se a mensagem entrou agora: reentrega da mesma mensagem não merece outra resposta
     if nova:
         from finance import agente as _ag
+        from finance import evento_leitor as _leitor
+        # o card lê a conversa (198): toda mensagem nova, com ou sem agente
+        background_tasks.add_task(_leitor.ler_conversa_bg, get_pool(), conta_id, conv_id)
         background_tasks.add_task(_ag.atender, get_pool(), conta_id, conv_id)
     return Response("<Response></Response>", media_type="application/xml")
 
@@ -5032,6 +5050,7 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
     eventos = meta_msg.parse_eventos(payload)
     pool = get_pool()
     disparar = []
+    ler = []          # o card lê a conversa (198): toda mensagem nova, com ou sem agente
     with pool.connection() as c:
         for ev in eventos:
             if ev["plataforma"] == "whatsapp":
@@ -5049,6 +5068,8 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
                 conv_id, nova = _wa_inbound_conversa(c, conta_id, ev["sender"], ev["texto"],
                                                      ev.get("sid"), ev.get("nome"), agente_on,
                                                      exigir_continuidade=True)
+                if nova:
+                    ler.append((conta_id, conv_id))
                 if nova and _agente_atende(c, conv_id, agente_on):
                     disparar.append((conta_id, conv_id))
                 continue
@@ -5057,6 +5078,7 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
                 continue
             conv_id = _conversa_meta(c, conta_id, ev["plataforma"], ev["sender"])
             _add_msg(c, conv_id, ev["plataforma"], "in", "lead", ev["texto"])
+            ler.append((conta_id, conv_id))
             master = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
                                (conta_id,)).fetchone()
             if master and master[0]:
@@ -5090,6 +5112,9 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
                               ent["erro_codigo"], ent["erro_msg"])
         c.commit()
     from finance import agente as _ag
+    from finance import evento_leitor as _leitor
+    for (cid, cvid) in ler:
+        background_tasks.add_task(_leitor.ler_conversa_bg, get_pool(), cid, cvid)
     for (cid, cvid) in disparar:
         background_tasks.add_task(_ag.atender, get_pool(), cid, cvid)
     return Response("ok", media_type="text/plain")
@@ -5354,6 +5379,10 @@ def _webhook_wa_qr_sync(corpo: bytes, background_tasks: BackgroundTasks):
         c.commit()
     log.info("webhook_wa_qr: chip=%s empresa=%s conv_id=%s gravado ✓ (mestre=%s nova=%s atende=%s)",
              chip_id, empresa_id, conv_id, agente_on, nova, atender)
+    if nova:
+        # o card lê a conversa (198): toda mensagem nova, com ou sem agente
+        from finance import evento_leitor as _leitor
+        background_tasks.add_task(_leitor.ler_conversa_bg, get_pool(), empresa_id, conv_id)
     if atender:
         from finance import agente as _ag
         background_tasks.add_task(_ag.atender, get_pool(), empresa_id, conv_id)
@@ -7741,6 +7770,8 @@ def prospeccao_resumo(request: Request, alvo_id: int):
         "obs": alvo["obs"], "valor_fmt": brl(alvo["valor"]) if alvo["valor"] else "",
         "evento_fmt": alvo["evento_fmt"], "evento_tipo": alvo["evento_tipo"],
         "evento_iso": alvo["evento_iso"], "evento_convidados": alvo["evento_convidados"],
+        "evento_origem": alvo["evento_origem"], "evento_trecho": alvo["evento_trecho"],
+        "evento_pista": alvo["evento_pista"], "evento_lido_fmt": alvo["evento_lido_fmt"],
         "valor_edit": (f"{alvo['valor'] / 100:.2f}".replace(".", ",")) if alvo["valor"] else "",
         "doc_fmt": alvo["doc_fmt"], "doc_rot": alvo["doc_rot"],
         "tel_link": alvo["tel_link"], "zap_link": alvo["zap_link"],
@@ -7782,14 +7813,52 @@ def prospeccao_editar_rapido(request: Request, alvo_id: int, contato: str = Form
             """update prospeccao set contato=%s, cargo=%s, telefone=%s, whatsapp=%s,
                    email=%s, instagram=%s, site_url=%s, valor_estimado_centavos=%s,
                    obs=%s, evento_tipo=%s, evento_em=%s, evento_convidados=%s,
-                   atualizado_em=now()
+                   evento_origem=%s, evento_pista=%s, atualizado_em=now()
                  where id=%s and conta_id=%s""",
             (contato.strip() or None, cargo.strip() or None, telefone.strip() or None,
              whatsapp.strip() or None, email.strip().lower() or None, instagram.strip() or None,
              site_link or None, _reais_para_centavos(valor), obs.strip() or None,
              _evl.parse_tipo(evento_tipo), _evl.parse_data(evento_em),
              _evl.parse_convidados(evento_convidados),
+             *_evl.origem_apos_edicao(alvo, evento_tipo, evento_em, evento_convidados),
              alvo_id, ctx["conta_id"]))
+        c.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/painel/prospeccao/evento/ler")
+def prospeccao_evento_ler(request: Request):
+    """O botão "Ler as conversas" (migração 198): passa o leitor pelo acervo de quem
+    já chegou e ainda tem campo vazio, em segundo plano — mesma forma do
+    enriquecer-lote. Daí em diante o leitor pega tudo na chegada da mensagem."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    from finance import evento_leitor as _leitor
+    pool = get_pool()
+    with pool.connection() as c:
+        ids = _leitor.leads_por_ler(c, ctx["conta_id"])
+    if ids:
+        import threading
+        threading.Thread(target=_leitor.ler_acervo, args=(pool, ctx["conta_id"], ids),
+                         daemon=True).start()
+    return JSONResponse({"ok": True, "n": len(ids)})
+
+
+@router.post("/painel/prospeccao/{alvo_id}/evento/confirmar")
+def prospeccao_evento_confirmar(request: Request, alvo_id: int):
+    """O vendedor bateu o olho no que o leitor (ou o agente) achou e confirmou: o
+    selo vira ✓ e a pista some. Não muda nenhum dado do evento."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    with pool.connection() as c:
+        c.execute("update prospeccao set evento_origem='confirmado', evento_pista=null, "
+                  "atualizado_em=now() where id=%s and conta_id=%s", (alvo_id, ctx["conta_id"]))
         c.commit()
     return JSONResponse({"ok": True})
 
@@ -7873,7 +7942,8 @@ def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
                        email=%s, cnpj=%s, cpf=%s, tipo=%s, empresa=%s, segmento=%s, cidade=%s, uf=%s,
                        valor_estimado_centavos=%s, socio=%s, regime_tributario=%s, porte=%s,
                        instagram=%s, tem_site=%s, site_url=%s, obs=%s,
-                       evento_tipo=%s, evento_em=%s, evento_convidados=%s, atualizado_em=now()
+                       evento_tipo=%s, evento_em=%s, evento_convidados=%s,
+                       evento_origem=%s, evento_pista=%s, atualizado_em=now()
                      where id=%s and conta_id=%s""",
                 (contato.strip() or None, cargo.strip() or None, telefone.strip() or None,
                  whatsapp.strip() or None, email.strip().lower() or None, cnpj_limpo, cpf_limpo,
@@ -7885,6 +7955,8 @@ def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
                  # na tela é o que fica (em branco limpa — é a ficha completa)
                  _evl.parse_tipo(evento_tipo), _evl.parse_data(evento_em),
                  _evl.parse_convidados(evento_convidados),
+                 # mexeu no evento à mão: origem 'mao' e a pista do leitor sai
+                 *_evl.origem_apos_edicao(alvo, evento_tipo, evento_em, evento_convidados),
                  alvo_id, ctx["conta_id"]))
             c.commit()
     except UniqueViolation:
@@ -10056,6 +10128,12 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   {# O TRILHO DE MESES: mês do EVENTO, não o mês em que o lead escreveu. Clicou em
      Jan 27, o quadro inteiro vira o funil de janeiro (todas as etapas). "Sem data"
      é a fila de trabalho — quem ainda não disse quando é a festa. #}
+  {# O ACERVO DO LEITOR (migração 198): quem já chegou e ainda não foi lido. Some
+     quando não sobra ninguém — daí em diante o leitor pega tudo na chegada. #}
+  {% if por_ler %}
+  <div class="lerconv" id="lerconv">🔎 <span><b>{{ por_ler }}</b> conversa{{ '' if por_ler == 1 else 's' }} de lead{{ '' if por_ler == 1 else 's' }} sem data ainda não {{ 'foi lida' if por_ler == 1 else 'foram lidas' }}</span>
+    <button type="button" class="pbtn" id="lerconv-btn" onclick="kbLerConversas(this)">Ler as conversas</button></div>
+  {% endif %}
   {% if trilho_itens and not vista_mes %}
   <div class="trilho" id="trilho"><span class="rot">Mês do evento</span>
     {% for t in trilho_itens %}<a class="mes{% if t.on %} on{% endif %}{% if t.sem %} semdata{% endif %}{% if not t.n and not t.on %} vazio{% endif %}" href="/painel/prospeccao?{% if filtro_vend %}vendedor={{ filtro_vend }}&amp;{% endif %}{% if t.chave %}mes={{ t.chave }}{% endif %}">{{ t.rotulo }} <b>{{ t.n }}</b></a>{% endfor %}
@@ -10136,7 +10214,13 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
              e oferece o "perguntar" (abre a conversa com a pergunta pronta). Data que
              já passou com etapa aberta fica coral: festa que aconteceu e ninguém fechou. #}
           {% if c.evento_em or c.evento_tipo or c.evento_convidados %}<div class="kbev{% if c.passou %} passou{% endif %}" title="{% if c.passou %}A data do evento já passou{% else %}Evento{% endif %}">{{ c.ev_ic }} {% if c.evento_tipo %}<b>{{ c.evento_tipo }}</b>{% endif %}{% if c.evento_em %}{% if c.evento_tipo %} · {% endif %}<span class="d">{{ c.ev_data }}</span>{% endif %}{% if c.evento_convidados %} · {{ c.evento_convidados }} conv.{% endif %}</div>
+          {% elif c.evento_pista %}<div class="kbev pista">📅 {{ c.evento_pista }}<button type="button" class="kbperg" title="Confirmar ou corrigir no balão" onclick="event.stopPropagation();kbAbrirLead(event,{{ c.id }},this.closest('.kbcard'))">confirmar</button></div>
           {% elif modo_evento %}<div class="kbev sem">📅 sem data{% if c.conv_whatsapp %}<button type="button" class="kbperg" title="Perguntar a data do evento" onclick="kbPerguntarData(event,{{ c.conv_whatsapp }},this)">perguntar</button>{% elif c.zap_pergunta %}<a class="kbperg" href="{{ c.zap_pergunta }}" target="_blank" rel="noopener" title="Abre o WhatsApp com a pergunta pronta" onclick="event.stopPropagation()">perguntar</a>{% endif %}</div>{% endif %}
+          {# DE ONDE VEIO o que está no card (migração 198): lido da conversa, pelo
+             agente, ou confirmado pelo vendedor. Com data no lead e outra na conversa,
+             a pista em âmbar — quem muda é o vendedor, no balão. #}
+          {% if c.evento_origem in ('conversa','agente','confirmado') and (c.evento_em or c.evento_tipo or c.evento_convidados) %}<div class="kbsrc">{% if c.evento_origem == 'conversa' %}<span class="tag lido" title="{{ c.evento_trecho or '' }}">💬 lido da conversa</span>{% elif c.evento_origem == 'agente' %}<span class="tag ia">🤖 lido pelo agente</span>{% else %}<span class="tag ok">✓ confirmado</span>{% endif %}</div>{% endif %}
+          {% if c.evento_pista and c.evento_em %}<div class="kbev pista">💬 {{ c.evento_pista }}</div>{% elif c.evento_pista and (c.evento_tipo or c.evento_convidados) %}<div class="kbev pista">📅 {{ c.evento_pista }}<button type="button" class="kbperg" title="Confirmar ou corrigir no balão" onclick="event.stopPropagation();kbAbrirLead(event,{{ c.id }},this.closest('.kbcard'))">confirmar</button></div>{% endif %}
           {# na vista por mês a coluna já é a data: a ETAPA vem pro card como selo,
              com o nº da proposta e a próxima visita quando existem #}
           {% if vista_mes %}<div class="kbetapas"><span class="kbetapa{% if c.etapa_cls %} {{ c.etapa_cls }}{% endif %}">{% if c.proposta_num and c.status == 'proposta' %}Proposta nº {{ c.proposta_num }}{% else %}{{ c.etapa_rot }}{% endif %}</span>{% if c.visita_txt %}<span class="kbetapa vis">{{ c.visita_txt }}</span>{% endif %}</div>{% endif %}
@@ -10249,6 +10333,21 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .kbetapa.vis{border-color:#1f3a4d;background:#122029;color:#7bb8e6}
 .kbetapa.real{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--verde-claro)}
 .kbrow.vmes .kbcard{cursor:pointer}
+/* de onde veio a data (198): o selo miúdo embaixo da linha do evento */
+.kbsrc{display:flex;align-items:center;gap:.3rem;padding:0 .1rem;margin-top:.15rem}
+.kbsrc .tag{font-size:.6rem;padding:.02rem .38rem;border-radius:999px;border:1px solid var(--borda);color:var(--txt-mut);background:var(--bg);white-space:nowrap}
+.kbsrc .tag.lido{border-color:#1f3a4d;background:#122029;color:#7bb8e6}
+.kbsrc .tag.ia{border-color:#4a3163;background:#1c1428;color:#C9A3E0}
+.kbsrc .tag.ok{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--verde-claro)}
+.kbev.pista{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .5rem;border-style:dashed;color:#e0b45f;background:rgba(224,180,95,.08);border-color:rgba(224,180,95,.32)}
+.lerconv{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:.8rem;font-size:.84rem;color:var(--txt-mut);
+  background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.5rem .75rem}
+.lerconv b{color:var(--txt)}
+.lerconv .pbtn{margin:0 0 0 auto;width:auto;padding:.4rem .8rem;font-size:.8rem}
+.lp-trecho{border-left:2px solid #1f3a4d;padding:.25rem .55rem;margin-top:.3rem;color:var(--txt-mut);font-style:italic;font-size:.78rem;background:var(--bg)}
+.lp-pista{margin-top:.3rem;font-size:.78rem;color:#e0b45f}
+.lp-evbts{display:flex;gap:.4rem;margin-top:.45rem}
+.lp-evbts .pbtn{width:auto;margin:0;padding:.35rem .7rem;font-size:.78rem}
 .kbch{display:flex;gap:.35rem;margin-top:.3rem;font-size:.82rem;align-items:center}
 /* a última mensagem no card. `min-width:0` no .txt é o que faz o ellipsis
    funcionar dentro do flex — sem isso o texto empurra a hora pra fora do card. */
@@ -10484,6 +10583,18 @@ function kbAbrirChat(ev,convId,aba,btn){
     if(_chatPop===pop)pop.querySelector('#cp-msgs').innerHTML='<div class="cx-empty">Falha de rede.</div>';
   });
 }
+// "Ler as conversas": o acervo do leitor, em 2º plano — o botão vira o aviso
+function kbLerConversas(btn){btn.disabled=true;var t=btn.textContent;btn.textContent='Lendo…';
+  fetch('/painel/prospeccao/evento/ler',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){btn.disabled=false;btn.textContent=t;alert(d.erro||'Não consegui.');return;}
+      btn.textContent=d.n?('Lendo '+d.n+' conversa'+(d.n===1?'':'s')+' em 2º plano — recarregue em ~1 min'):'Nada pra ler';
+    }).catch(function(){btn.disabled=false;btn.textContent=t;alert('Falha de rede.');});}
+// confirmar o que o leitor achou: vira "✓ confirmado" no card
+function kbLeadConfirmarEvento(id){
+  fetch('/painel/prospeccao/'+id+'/evento/confirmar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()})
+    .then(function(r){return r.json();}).then(function(d){if(!d.ok){alert(d.erro||'Não consegui confirmar.');return;}location.reload();})
+    .catch(function(){alert('Falha de rede.');});}
 var _cpPrefill='';
 window.KB_VISTA={{ ('mes' if vista_mes else '')|tojson }};
 var KB_PERGUNTA_DATA={{ (pergunta_data or '')|tojson }};
@@ -10577,7 +10688,7 @@ function kbLeadHtml(d,id){
   h+='<div class="lp-status"><select onchange="kbLeadStatus(this,'+id+')" data-prev="'+cxEscK(d.status||'')+'">';
   (_KB_STATUS||[]).forEach(function(s){h+='<option value="'+cxEscK(s[0])+'"'+(s[0]===d.status?' selected':'')+'>'+cxEscK(s[1])+'</option>';});
   h+='</select></div></div><div class="lp-body">'
-    +'<div id="lp-view">'+kbLeadDadosHtml(d)+kbLeadHistHtml(d)+'</div>'
+    +'<div id="lp-view">'+kbLeadDadosHtml(d,id)+kbLeadHistHtml(d)+'</div>'
     +'<div id="lp-edit" style="display:none">'+kbLeadEditHtml(d,id)+'</div>'
     +'</div>'
     +'<a class="lp-mais" target="_blank" href="/painel/prospeccao/'+id+'">Ver ficha completa ↗</a>';
@@ -10586,9 +10697,17 @@ function kbLeadHtml(d,id){
 // "Dados" no resumo do balão: os mesmos campos que a seção "Dados" da ficha
 // completa mostra, MENOS o que é enriquecimento automático (sócio, regime,
 // porte, Receita) — aquilo não é algo que se corrige rápido, fica só na ficha.
-function kbLeadDadosHtml(d){
+function kbLeadDadosHtml(d,id){
   var h='<div class="lp-sh"><b>Dados</b><button type="button" class="lp-edit-btn" onclick="kbLeadEditar()">✎ Editar</button></div><div class="lp-grid">';
-  if(d.evento_fmt)h+='<div class="full"><div class="k">Evento</div><div class="v">'+cxEscK(d.evento_fmt)+'</div></div>';
+  if(d.evento_fmt||d.evento_pista){
+    var org=d.evento_origem==='conversa'?'💬 lido da conversa':d.evento_origem==='agente'?'🤖 lido pelo agente':d.evento_origem==='confirmado'?'✓ confirmado':d.evento_origem==='orcamento'?'do orçamento':'';
+    h+='<div class="full"><div class="k">Evento'+(org?(' · '+org+(d.evento_lido_fmt?(' em '+cxEscK(d.evento_lido_fmt)):'')):'')+'</div>'
+      +'<div class="v">'+(d.evento_fmt?cxEscK(d.evento_fmt):'<span style="color:#e0b45f">sem data</span>')+'</div>'
+      +(d.evento_trecho?('<div class="lp-trecho">“'+cxEscK(d.evento_trecho)+'”</div>'):'')
+      +(d.evento_pista?('<div class="lp-pista">💬 '+cxEscK(d.evento_pista)+'</div>'):'')
+      +((d.evento_origem==='conversa'||d.evento_origem==='agente')?('<div class="lp-evbts"><button type="button" class="pbtn" onclick="kbLeadConfirmarEvento('+id+')">✓ Confirmar</button><button type="button" class="pbtn ghost" onclick="kbLeadEditar()">Corrigir</button></div>'):'')
+      +'</div>';
+  }
   if(d.contato)h+='<div><div class="k">Contato</div><div class="v">'+cxEscK(d.contato)+(d.cargo?(' · '+cxEscK(d.cargo)):'')+'</div></div>';
   if(d.doc_fmt)h+='<div><div class="k">'+cxEscK(d.doc_rot||'Documento')+'</div><div class="v">'+cxEscK(d.doc_fmt)+'</div></div>';
   if(d.telefone)h+='<div><div class="k">Telefone</div><div class="v">'+cxEscK(d.telefone)+'</div></div>';
@@ -11161,7 +11280,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </span>
         </div>
         {% endif %}
-        {% if a.evento_fmt %}<div class="drow"><span class="ic">{{ a.evento_ic }}</span><span class="lb">Evento</span><span>{{ a.evento_fmt }}</span></div>{% endif %}
+        {% if a.evento_fmt or a.evento_pista %}<div class="drow"><span class="ic">{{ a.evento_ic }}</span><span class="lb">Evento</span><span>{{ a.evento_fmt or '—' }}{% if a.evento_origem == 'conversa' %}<span class="badge" style="background:#122029;border-color:#1f3a4d;color:#7bb8e6" title="{{ a.evento_trecho or '' }}">💬 lido da conversa</span>{% elif a.evento_origem == 'agente' %}<span class="badge" style="background:#1c1428;border-color:#4a3163;color:#C9A3E0">🤖 lido pelo agente</span>{% elif a.evento_origem == 'confirmado' %}<span class="badge">✓ confirmado</span>{% endif %}{% if a.evento_pista %}<br><span style="color:#e0b45f;font-size:.8rem">💬 {{ a.evento_pista }}</span>{% endif %}{% if a.evento_trecho %}<br><span class="mut" style="font-size:.78rem;font-style:italic">“{{ a.evento_trecho }}”</span>{% endif %}</span></div>{% endif %}
         {% if a.contato %}<div class="drow"><span class="ic">👤</span><span class="lb">Contato</span><span>{{ a.contato }}{% if a.cargo %} · {{ a.cargo }}{% endif %}</span></div>{% endif %}
         {% if a.doc %}<div class="drow"><span class="ic">{{ '🪪' if a.eh_pf else '🏢' }}</span><span class="lb">{{ a.doc_rot }}</span><span>{{ a.doc_fmt }}</span></div>{% endif %}
         {% if a.socio %}<div class="drow"><span class="ic">🧑‍💼</span><span class="lb">Sócio</span><span>{{ a.socio }}</span></div>{% endif %}

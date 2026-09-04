@@ -108,30 +108,51 @@ def normalizar(evento: dict | None) -> dict:
 
 
 # ------------------------------------------------------------------ gravar
-def gravar(c, conta_id: int, lead_id, evento: dict | None, *, so_vazios: bool = False) -> bool:
+def gravar(c, conta_id: int, lead_id, evento: dict | None, *, so_vazios: bool = False,
+           origem: str | None = None, trecho: str | None = None) -> bool:
     """Grava no lead o que veio preenchido. NUNCA apaga: campo ausente fica como está.
 
-    `so_vazios=True` é o modo do agente: só preenche o que ainda está vazio, pra não
-    passar por cima do que o vendedor pôs à mão. O orçamento e a ficha usam o modo
-    normal (o que veio sobrescreve o que estava).
+    `so_vazios=True` é o modo do agente e do leitor da conversa: só preenche o que
+    ainda está vazio, pra não passar por cima do que o vendedor pôs à mão. O
+    orçamento e a ficha usam o modo normal (o que veio sobrescreve o que estava).
 
-    Savepoint por dentro: base sem a migração 197 (ou qualquer erro aqui) não pode
+    `origem` (conversa · agente · orcamento · mao) e `trecho` (a prova, migração
+    198) só são gravados quando ALGUMA das três colunas muda — o selo do card diz
+    de onde veio o que está lá, não quem passou por último sem mudar nada.
+    Devolve True só quando mudou algo.
+
+    Savepoint por dentro: base sem a migração (ou qualquer erro aqui) não pode
     derrubar quem chamou — o atendimento do agente, o salvamento da proposta."""
     ev = normalizar(evento)
     if not ev or not lead_id:
         return False
-    if so_vazios:
-        sets = ["evento_em=coalesce(evento_em,%s)", "evento_tipo=coalesce(evento_tipo,%s)",
-                "evento_convidados=coalesce(evento_convidados,%s)"]
-    else:
-        sets = ["evento_em=coalesce(%s,evento_em)", "evento_tipo=coalesce(%s,evento_tipo)",
-                "evento_convidados=coalesce(%s,evento_convidados)"]
     try:
         with c.transaction():
+            atual = c.execute(
+                "select evento_em, evento_tipo, evento_convidados from prospeccao "
+                "where id=%s and conta_id=%s", (int(lead_id), conta_id)).fetchone()
+            if not atual:
+                return False
+            sets, vals = [], []
+            for col, chave, cur in (("evento_em", "data", atual[0]),
+                                    ("evento_tipo", "tipo", atual[1]),
+                                    ("evento_convidados", "convidados", atual[2])):
+                novo = ev.get(chave)
+                if novo is None or novo == cur or (so_vazios and cur is not None):
+                    continue
+                sets.append(f"{col}=%s")
+                vals.append(novo)
+            if not sets:
+                return False
+            if origem:
+                sets.append("evento_origem=%s")
+                vals.append(origem)
+            if trecho is not None:
+                sets.append("evento_trecho=%s")
+                vals.append(trecho[:300] or None)
             c.execute(
                 f"update prospeccao set {', '.join(sets)}, atualizado_em=now() "  # noqa: S608
-                "where id=%s and conta_id=%s",
-                (ev.get("data"), ev.get("tipo"), ev.get("convidados"), int(lead_id), conta_id))
+                "where id=%s and conta_id=%s", (*vals, int(lead_id), conta_id))
         return True
     except Exception:  # noqa: BLE001
         _log.warning("não gravei o evento no lead %s", lead_id, exc_info=True)
@@ -161,7 +182,7 @@ def sincronizar_do_orcamento(c, conta_id: int, orcamento_id) -> int:
                 (int(orcamento_id), conta_id)).fetchall()
             n = 0
             for (lid,) in leads:
-                if gravar(c, conta_id, lid, ev):
+                if gravar(c, conta_id, lid, ev, origem="orcamento"):
                     n += 1
             return n
     except Exception:  # noqa: BLE001
@@ -361,3 +382,15 @@ def colunas_por_mes(cards: list[dict], agora: datetime | None = None):
     colunas.append(("sem", "Sem data"))
     grupos["sem"] = agrupar(sem, agora)
     return colunas, grupos
+
+
+def origem_apos_edicao(alvo: dict, tipo, data, convidados) -> tuple:
+    """(evento_origem, evento_pista) pra gravar depois de uma edição À MÃO (ficha,
+    balão): se algum dos três mudou, a origem vira 'mao' e a pista do leitor sai —
+    o vendedor acabou de decidir. Senão, fica tudo como estava."""
+    novo = (parse_tipo(tipo), parse_data(data), parse_convidados(convidados))
+    atual = (alvo.get("evento_tipo") or None, alvo.get("evento_em") or None,
+             alvo.get("evento_convidados") or None)
+    if novo != atual:
+        return ("mao", None)
+    return (alvo.get("evento_origem"), alvo.get("evento_pista"))

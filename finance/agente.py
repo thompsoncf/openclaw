@@ -426,7 +426,7 @@ def _atender(pool, conta_id, conversa_id):
         # o que está vazio: o que o vendedor pôs à mão fica.
         if conv[1]:
             from finance import evento_lead as _evl
-            _evl.gravar(c, conta_id, conv[1], _evento_do_json(d), so_vazios=True)
+            _evl.gravar(c, conta_id, conv[1], _evento_do_json(d), so_vazios=True, origem="agente")
 
         # o agente fica SEMPRE ativo e segue o painel: NUNCA se desliga sozinho (nem por
         # confiança, nem por trocas, nem por 'achar' que precisa de humano). Quem assume

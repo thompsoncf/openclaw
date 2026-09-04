@@ -1,0 +1,398 @@
+<title>Funil no Mês Atual</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Tokens de web/tema.py — o mockup serve pra decidir se parecer com a tela real.
+   Escuro único de propósito: o painel não tem tema claro. */
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --azul:#7bb8e6;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.86em;color:var(--roxo)}
+a{color:var(--neon-bright)}
+.wrap{max-width:1000px;margin:0 auto;padding:2.6rem 1.25rem 5rem;display:flex;flex-direction:column;gap:2.8rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.6rem,4vw,2.15rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:68ch}
+.head .marca{color:var(--neon)}
+.sec > h2{font-size:1.15rem;margin-bottom:.15rem}
+.sec > p.leg{color:var(--text-dim);margin:.3rem 0 1.15rem;max-width:72ch;font-size:.9rem}
+.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.manchete{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:14px;padding:1.15rem 1.3rem;display:flex;gap:1.1rem;align-items:flex-start}
+.manchete .ic{font-size:1.5rem;line-height:1;flex:none}
+.manchete h2{font-size:1.05rem;color:#F2BDB9;margin-bottom:.3rem}
+.manchete p{margin:0 0 .5rem;color:#D9AEAA;font-size:.9rem;max-width:72ch}
+.manchete p:last-child{margin-bottom:0}
+.manchete b{font-family:var(--mono);font-variant-numeric:tabular-nums;color:#F6D3D0}
+
+/* ---- antes / depois em números ---- */
+.ad{display:grid;grid-template-columns:1fr 1fr;gap:.9rem;align-items:stretch}
+@media (max-width:640px){.ad{grid-template-columns:1fr}}
+.ad .lado{border:1px solid var(--line);border-radius:12px;background:var(--bg-2);padding:.9rem 1rem;display:flex;flex-direction:column;gap:.35rem}
+.ad .lado h4{font-family:var(--body);font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint)}
+.ad .lado.dep h4{color:var(--neon)}
+.big{font-family:var(--mono);font-size:2rem;font-weight:600;line-height:1}
+.big.ruim{color:var(--coral)} .big.bom{color:var(--neon-bright)}
+.ad small{color:var(--text-dim);font-size:.8rem}
+.ad ul{margin:.4rem 0 0;padding-left:1.1rem;font-size:.8rem;color:var(--text-dim)}
+.ad li{margin:.18rem 0}
+
+.movs{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem}
+@media (max-width:760px){.movs{grid-template-columns:1fr}}
+.mov{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.95rem 1rem;display:flex;flex-direction:column;gap:.4rem}
+.mov .k{font-family:var(--mono);font-size:.7rem;color:var(--neon);letter-spacing:.06em}
+.mov h3{font-size:.98rem}
+.mov p{margin:0;font-size:.84rem;color:var(--text-dim)}
+
+/* ---- a tela ---- */
+.tela{border:1px solid var(--line);border-radius:14px;background:var(--bg-2);overflow:hidden}
+.tela-top{display:flex;align-items:center;justify-content:space-between;gap:.8rem;padding:.8rem 1rem;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tela-top h3{font-size:1.05rem}
+.tela-top .meta{font-size:.76rem;color:var(--text-dim)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;padding:3px;gap:2px;background:var(--bg)}
+.seg span{font-size:.74rem;padding:.26rem .55rem;border-radius:6px;color:var(--text-dim)}
+.seg span.on{background:var(--neon);color:#062011;font-weight:600}
+.filtros{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:.7rem 1rem;border-bottom:1px solid var(--line);font-size:.8rem;color:var(--text-dim)}
+.sel{display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:.35rem .6rem;color:var(--text);font-size:.84rem}
+.sel.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright)}
+.sel .car{color:var(--text-faint);font-size:.7rem}
+.lista{position:relative}
+.menu{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.3rem;display:flex;flex-direction:column;gap:.1rem;width:230px;box-shadow:0 12px 30px rgba(0,0,0,.45)}
+.menu div{display:flex;justify-content:space-between;gap:.6rem;padding:.35rem .55rem;border-radius:7px;font-size:.8rem;color:var(--text-dim)}
+.menu div.on{background:var(--neon-fundo);color:var(--neon-bright)}
+.menu div b{font-family:var(--mono);font-weight:500;color:var(--text)}
+.menu div.on b{color:var(--neon-bright)}
+.menu .sep{height:1px;background:var(--line);padding:0;margin:.15rem .3rem}
+.valvula{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.6rem 1rem;border-bottom:1px solid var(--line);font-size:.82rem;
+  background:var(--ambar-fundo);color:#F0DCA6}
+.valvula b{font-family:var(--mono);font-weight:600}
+.valvula .ver{margin-left:auto;font-size:.76rem;color:#F0DCA6;border:1px solid var(--ambar-borda);border-radius:999px;padding:.2rem .6rem;white-space:nowrap}
+.trilho{display:flex;gap:.35rem;padding:.6rem 1rem;overflow-x:auto;border-bottom:1px solid var(--line);align-items:center;opacity:.8}
+.trilho .rot{font-size:.66rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);font-weight:600;flex:none;margin-right:.2rem}
+.mes{flex:none;display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--line);border-radius:999px;padding:.24rem .6rem;font-size:.74rem;color:var(--text-dim);background:var(--surface)}
+.mes b{font-family:var(--mono);font-weight:500;font-size:.7rem;color:var(--text)}
+.mes.on{background:var(--neon);border-color:var(--neon);color:#062011;font-weight:600}.mes.on b{color:#062011}
+.mes.semdata{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:#F0DCA6}.mes.semdata b{color:#F0DCA6}
+
+.kb{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(186px,1fr);gap:.55rem;padding:.8rem 1rem 1rem;overflow-x:auto;align-items:start}
+.col{background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:.6rem;display:flex;flex-direction:column;gap:.45rem;min-height:110px}
+.col h4{font-family:var(--body);font-size:.82rem;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:.4rem;margin:0 .1rem .2rem}
+.col h4 .c{font-family:var(--mono);font-weight:500;font-size:.7rem;color:var(--text-dim);border:1px solid var(--line);border-radius:999px;padding:0 .45rem;background:var(--surface-2)}
+.col h4 .c i{font-style:normal;color:var(--text-faint)}
+.grupo{display:flex;align-items:center;gap:.4rem;font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint);font-weight:600;padding:.35rem .15rem .05rem;border-top:1px dashed var(--line);margin-top:.15rem}
+.grupo:first-of-type{border-top:0;margin-top:0}
+.grupo b{font-family:var(--mono);font-weight:500;color:var(--text-dim);letter-spacing:0}
+.grupo .ln{flex:1;height:1px;background:var(--line)}
+.grupo.alerta{color:#F0DCA6}.grupo.alerta b{color:#F0DCA6}
+.kc{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:.55rem .6rem;display:flex;flex-direction:column;gap:.3rem}
+.kc.nova{border-color:var(--neon-borda)}
+.kc-top{display:flex;align-items:center;gap:.4rem;min-width:0}
+.dot{width:.5rem;height:.5rem;border-radius:50%;flex:none}
+.dot.quente{background:var(--coral)} .dot.morno{background:var(--ambar)} .dot.frio{background:#5b9bd5}
+.kc-nome{font-size:.86rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kc-ev{font-size:.72rem;color:var(--text-dim);background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:.2rem .45rem;line-height:1.35}
+.kc-ev b{color:var(--text)} .kc-ev .d{font-family:var(--mono);color:var(--neon-bright)}
+.kc-ev.sem{display:flex;gap:.5rem;border-style:dashed;color:#F0DCA6;background:var(--ambar-fundo);border-color:rgba(224,180,95,.32)}
+.kc-ev.sem u{margin-left:auto;font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.kc-src{font-size:.6rem;color:var(--azul);border:1px solid #1f3a4d;background:#122029;border-radius:999px;padding:.02rem .38rem;width:max-content}
+.kc-msg{display:flex;gap:.35rem;align-items:flex-start;font-size:.72rem;color:var(--text-dim);border-top:1px solid var(--line);padding-top:.35rem;line-height:1.35}
+.kc-msg .bolha{width:.45rem;height:.45rem;border-radius:50%;background:var(--neon);flex:none;margin-top:.28rem}
+.kc-msg .eu{color:var(--text-faint);flex:none;font-size:.8em;margin-top:.05rem}
+.kc-msg .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kc.nova .kc-msg .txt{color:var(--text)}
+.kc-msg .qdo{flex:none;font-family:var(--mono);font-size:.66rem;color:var(--text-faint)}
+.dobra{border:1px dashed var(--line);border-radius:10px;padding:.5rem .6rem;font-size:.74rem;color:var(--text-dim);display:flex;justify-content:space-between;align-items:center;gap:.4rem;background:var(--bg-2)}
+.dobra b{font-family:var(--mono);font-weight:500;color:var(--text)}
+.dobra.amarela{border-color:var(--ambar-borda);color:#F0DCA6;background:var(--ambar-fundo)}.dobra.amarela b{color:#F0DCA6}
+.vazio{border:1px dashed var(--line);border-radius:10px;color:var(--text-faint);font-size:.74rem;text-align:center;padding:1rem .5rem}
+.tela-pe{padding:.65rem 1rem;color:var(--text-faint);font-size:.76rem;border-top:1px solid var(--line)}
+
+.rolagem{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+table{border-collapse:collapse;width:100%;min-width:620px;font-size:.83rem}
+th{text-align:left;font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint);font-weight:600;padding:.55rem .8rem;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:.6rem .8rem;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+
+.notas{display:flex;flex-direction:column;gap:.7rem}
+.nota{border:1px solid var(--line);border-left:3px solid var(--ambar);border-radius:0 11px 11px 0;background:var(--surface);padding:.8rem 1rem}
+.nota h4{margin:0 0 .25rem;font-size:.88rem;font-weight:600}
+.nota p{margin:0;font-size:.84rem;color:var(--text-dim);max-width:74ch}
+.nota.bom{border-left-color:var(--neon)} .nota.fora{border-left-color:var(--text-faint)}
+.passos{margin:0;padding-left:1.2rem;font-size:.86rem;color:var(--text-dim);display:flex;flex-direction:column;gap:.35rem}
+.passos b{color:var(--text)}
+.rodape{border-top:1px solid var(--line);padding-top:1.2rem;color:var(--text-faint);font-size:.8rem;max-width:74ch}
+</style>
+
+<div class="wrap">
+
+  <header class="head">
+    <div class="eyebrow">Mockup · Prospecção › Funil › o que o quadro mostra por padrão</div>
+    <h1>O funil abre no mês atual <span class="marca">·</span> e não deixa escapar o resto</h1>
+    <p>Faltou o último passo: o quadro ainda abre com todo mundo, de todos os meses, na
+    mesma coluna. Você pediu um filtro que limpe o quadro por mês, já setado no mês
+    atual, e os cards separados. Desenhei em cima dos números de hoje da
+    <b>Prime Eventos</b> (conta 34, 04/09/2026), contando com o que já entrou hoje: o
+    trilho do mês da festa, a dobra dos parados e o leitor da conversa.</p>
+  </header>
+
+  <section class="manchete">
+    <div class="ic">🧹</div>
+    <div>
+      <h2>Agosto trouxe 254 leads, setembro 21 — e o quadro abre com os 275</h2>
+      <p>A dobra dos parados tira <b>65</b> da frente e o leitor da conversa vai dar data
+      a <b>121</b>. Mesmo assim, quem abre o funil no dia 4 de setembro vê os 254 de agosto
+      empilhados por cima dos 21 que chegaram este mês. O quadro precisa de um
+      <b>padrão</b>: abrir no mês corrente.</p>
+      <p><b>Com uma válvula.</b> Dos leads de agosto, <b>37</b> estão com o cliente esperando
+      resposta agora, e <b>10</b> têm festa nos próximos 30 dias. Esconder agosto sem avisar seria trocar uma pilha por um vazamento.
+      A proposta esconde, mas conta na cara o que ficou pra trás e abre com um clique.</p>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O quadro, antes e depois</h2>
+    <div class="ad">
+      <div class="lado">
+        <h4>Hoje, ao abrir</h4>
+        <span class="big ruim">275</span>
+        <small>leads no quadro · Contatado com 224</small>
+        <ul><li>Agosto e setembro na mesma coluna, sem dizer de que mês.</li>
+            <li>O que entrou hoje fica no meio do que entrou há três semanas.</li></ul>
+      </div>
+      <div class="lado dep">
+        <h4>Proposto, ao abrir</h4>
+        <span class="big bom">21</span>
+        <small>leads de setembro · Contatado com 19</small>
+        <ul><li>Uma faixa em âmbar diz o que ficou fora: <b>37 esperando resposta</b>, 10 com festa nos próximos 30 dias.</li>
+            <li>Agosto está a um clique, e dentro dele os cards se separam por semana.</li></ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>A proposta, em três movimentos</h2>
+    <div class="movs">
+      <div class="mov">
+        <span class="k">1 · O PADRÃO</span>
+        <h3>"Entraram em: Setembro"</h3>
+        <p>Um seletor ao lado do de vendedor, já setado no <b>mês corrente</b>. As
+        opções são os meses que têm lead, com a contagem, mais "Últimos 30 dias" e
+        "Todos". A escolha fica guardada pra você (não volta ao padrão a cada clique).</p>
+      </div>
+      <div class="mov">
+        <span class="k">2 · A VÁLVULA</span>
+        <h3>O que ficou fora, na cara</h3>
+        <p>Uma faixa acima do quadro conta o que os outros meses têm de urgente:
+        <b>esperando resposta</b> (a última mensagem é do cliente) e <b>festa nos próximos
+        30 dias</b>. "Ver" traz só esses pro quadro, de qualquer mês. Nada urgente some
+        em silêncio.</p>
+      </div>
+      <div class="mov">
+        <span class="k">3 · A SEPARAÇÃO</span>
+        <h3>Semanas dentro do mês</h3>
+        <p>Com um mês escolhido, os cards sem data se separam por <b>semana de
+        entrada</b> ("Semana de 17/08 · 103") em vez de "entrou em ago", que ali não
+        separa nada. Os com data continuam por mês da festa, e a dobra dos parados
+        fica como está.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>A tela, como abre</h2>
+    <p class="leg">Setembro selecionado por padrão, a válvula com os números reais de
+    agosto, e o quadro com os 21 do mês. O trilho do mês da festa continua, agora
+    contando só o que está no quadro.</p>
+    <div class="tela">
+      <div class="tela-top">
+        <div><h3>Funil</h3><div class="meta"><b>21 de 275</b> · entraram em setembro</div></div>
+        <div class="seg"><span class="on">Por etapa</span><span>Por mês do evento</span></div>
+      </div>
+      <div class="filtros">
+        <span>Vendedor: <span class="sel">Todos <span class="car">▾</span></span></span>
+        <span>Entraram em: <span class="sel on">Setembro <b class="n">21</b> <span class="car">▾</span></span></span>
+      </div>
+      <div class="valvula">⚠️ Fora de setembro: <b>37</b> esperando resposta · <b>10</b> com festa nos próximos 30 dias
+        <span class="ver">ver esses →</span></div>
+      <div class="trilho"><span class="rot">Mês do evento</span>
+        <span class="mes on">Todos <b>21</b></span><span class="mes">Set 26 <b>1</b></span><span class="mes">Nov 26 <b>2</b></span><span class="mes">Dez 26 <b>3</b></span>
+        <span class="mes">Fev 27 <b>4</b></span><span class="mes">Mai 27 <b>1</b></span><span class="mes semdata">Sem data <b>10</b></span></div>
+      <div class="kb">
+        <div class="col">
+          <h4>Novo <span class="c">1 <i>de 1</i></span></h4>
+          <div class="kc nova">
+            <div class="kc-top"><span class="dot morno"></span><span class="kc-nome">Larissa M.</span></div>
+            <div class="kc-ev sem">📅 sem data <u>perguntar</u></div>
+            <div class="kc-msg"><span class="bolha"></span><span class="txt">Queria saber valores pra 80 pessoas</span><span class="qdo">12min</span></div>
+          </div>
+        </div>
+        <div class="col">
+          <h4>Contatado <span class="c">19 <i>de 225</i></span></h4>
+          <div class="grupo">Fev 27 <b>2</b><span class="ln"></span></div>
+          <div class="kc nova">
+            <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Gabriela</span></div>
+            <div class="kc-ev">💍 <b>Casamento</b> · <span class="d">13 fev 27</span> · 70 conv.</div>
+            <span class="kc-src">💬 lido da conversa</span>
+            <div class="kc-msg"><span class="bolha"></span><span class="txt">Média de 70 pessoas</span><span class="qdo">agora</span></div>
+          </div>
+          <div class="dobra"><span>mais 1 de fevereiro</span><span>▾</span></div>
+          <div class="grupo">Sem data · semana de 31/08 <b>8</b><span class="ln"></span></div>
+          <div class="kc nova">
+            <div class="kc-top"><span class="dot frio"></span><span class="kc-nome">Priscila N.</span></div>
+            <div class="kc-ev sem">📅 sem data <u>perguntar</u></div>
+            <div class="kc-msg"><span class="bolha"></span><span class="txt">Quanto fica só o salão?</span><span class="qdo">5h</span></div>
+          </div>
+          <div class="dobra"><span>mais 7</span><span>▾</span></div>
+        </div>
+        <div class="col">
+          <h4>Proposta <span class="c">1 <i>de 16</i></span></h4>
+          <div class="grupo">Dez 26 <b>1</b><span class="ln"></span></div>
+          <div class="kc nova">
+            <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Marina Dias</span></div>
+            <div class="kc-ev">🎂 <b>15 anos</b> · <span class="d">19 dez</span> · 130 conv.</div>
+            <div class="kc-msg"><span class="bolha"></span><span class="txt">Dá pra parcelar em 6?</span><span class="qdo">40min</span></div>
+          </div>
+        </div>
+        <div class="col">
+          <h4>Evento a Realizar <span class="c">1 <i>de 5</i></span></h4>
+          <div class="kc">
+            <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Camila</span></div>
+            <div class="kc-ev">🎂 <b>Aniversário</b> · <span class="d">20 set</span> · 60 conv.</div>
+            <div class="kc-msg"><span class="eu">↩</span><span class="txt">E também o cardápio</span><span class="qdo">21/08</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="tela-pe">Agendado Visita, Evento Realizado e Perdido seguem à direita. O "de 225" lembra que agosto existe.</div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O seletor e a válvula, de perto</h2>
+    <div class="ad">
+      <div class="lado">
+        <h4>Entraram em</h4>
+        <div class="menu">
+          <div class="on"><span>Setembro (mês atual)</span><b>21</b></div>
+          <div><span>Agosto</span><b>254</b></div>
+          <div class="sep"></div>
+          <div><span>Últimos 30 dias</span><b>260</b></div>
+          <div><span>Todos</span><b>275</b></div>
+        </div>
+        <small style="margin-top:.5rem">Um mês novo entra sozinho no dia 1º, com zero, e vira o padrão.</small>
+      </div>
+      <div class="lado">
+        <h4>"Ver esses": o quadro só com o urgente de fora</h4>
+        <div class="valvula" style="border:1px solid var(--ambar-borda);border-radius:10px">⚠️ Urgentes fora de setembro · <b>47</b> leads <span class="ver">✕ voltar</span></div>
+        <div class="kb" style="padding:.6rem 0 0;grid-auto-columns:minmax(150px,1fr)">
+          <div class="col"><h4>Contatado <span class="c">37</span></h4>
+            <div class="kc nova"><div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Rebeca</span></div>
+              <div class="kc-msg"><span class="bolha"></span><span class="txt">Vai dar certo pro dia 15?</span><span class="qdo">ontem</span></div></div>
+            <div class="dobra"><span>mais 36</span><span>▾</span></div></div>
+          <div class="col"><h4>Evento a Realizar <span class="c">10</span></h4>
+            <div class="kc"><div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Tech Norte</span></div>
+              <div class="kc-ev">🏢 <b>Corporativo</b> · <span class="d">28 set</span></div></div>
+            <div class="dobra"><span>mais 9</span><span>▾</span></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Agosto, quando você abre</h2>
+    <p class="leg">Os 254 continuam existindo. Dentro do mês, os sem data se separam por
+    semana de entrada — as quatro semanas de agosto da Prime tiveram 52, 103, 84 e 15
+    leads (a última é a semana de 31/08, que atravessa pra setembro).</p>
+    <div class="tela">
+      <div class="filtros"><span>Entraram em: <span class="sel on">Agosto <b class="n">254</b> <span class="car">▾</span></span></span>
+        <span class="meta" style="color:var(--text-faint)">254 de 275</span></div>
+      <div class="kb">
+        <div class="col">
+          <h4>Contatado <span class="c">206 <i>de 225</i></span></h4>
+          <div class="grupo">Nov 26 <b>3</b><span class="ln"></span></div>
+          <div class="dobra"><span>3 leads</span><span>▾</span></div>
+          <div class="grupo">Dez 26 <b>5</b><span class="ln"></span></div>
+          <div class="dobra"><span>5 leads</span><span>▾</span></div>
+          <div class="grupo">Jan–Ago 27 <b>17</b><span class="ln"></span></div>
+          <div class="dobra"><span>17 leads</span><span>▾</span></div>
+          <div class="grupo">Sem data · semana de 24/08 <b>41</b><span class="ln"></span></div>
+          <div class="dobra"><span>41 leads</span><span>▾</span></div>
+          <div class="grupo">Sem data · semana de 17/08 <b>52</b><span class="ln"></span></div>
+          <div class="dobra"><span>52 leads</span><span>▾</span></div>
+          <div class="grupo">Sem data · semana de 10/08 <b>29</b><span class="ln"></span></div>
+          <div class="dobra"><span>29 leads</span><span>▾</span></div>
+          <div class="grupo alerta">Parados 15+ dias <b>61</b><span class="ln"></span></div>
+          <div class="dobra amarela"><span>sem mensagem desde 20/08 ou antes</span><span>▸</span></div>
+        </div>
+        <div class="col"><h4>Agendado Visita <span class="c">10 <i>de 10</i></span></h4><div class="dobra"><span>10 leads</span><span>▾</span></div></div>
+        <div class="col"><h4>Proposta <span class="c">15 <i>de 16</i></span></h4><div class="dobra"><span>15 leads</span><span>▾</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>De onde vem cada número</h2>
+    <div class="rolagem">
+      <table>
+        <thead><tr><th>Na tela</th><th>De onde sai</th><th class="num">Hoje na Prime</th></tr></thead>
+        <tbody>
+          <tr><td><b>Entraram em setembro</b></td><td><code>criado_em</code> no mês corrente</td><td class="num">21</td></tr>
+          <tr><td><b>Esperando resposta</b> (fora do mês)</td><td>última mensagem é do cliente e ninguém respondeu</td><td class="num">37</td></tr>
+          <tr><td><b>Festa nos próximos 30 dias</b> (fora do mês)</td><td><code>evento_em</code> entre hoje e +30</td><td class="num">10</td></tr>
+          <tr><td><b>Últimos 30 dias</b></td><td><code>criado_em</code> ≥ hoje − 30</td><td class="num">260 (tudo: o chip nasceu em 13/08)</td></tr>
+          <tr><td><b>Semana de 17/08</b></td><td>a segunda-feira da semana de <code>criado_em</code></td><td class="num">103 (52 sem data em Contatado)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O que muda no código, se aprovar</h2>
+    <ol class="passos">
+      <li><b>Nenhuma migração.</b> Tudo já está no banco.</li>
+      <li><b>Filtro <code>?entrou=2026-09</code></b> (mês), <code>30d</code> ou <code>todos</code>, guardado na sessão do usuário; padrão = mês corrente. O seletor ao lado do de vendedor; a faixa "21 de 275".</li>
+      <li><b>A válvula</b>: duas contagens fora do período (esperando resposta, festa em 30 dias) e o filtro <code>?entrou=urgentes</code>.</li>
+      <li><b>Semanas</b>: com um mês escolhido, o agrupamento "sem data" usa a semana de entrada em vez do mês.</li>
+      <li>O trilho e a vista por mês do evento passam a respeitar o período. O botão "Ler as conversas" não muda.</li>
+    </ol>
+  </section>
+
+  <section class="sec">
+    <h2>Pra você decidir</h2>
+    <div class="notas">
+      <div class="nota"><h4>1. Padrão: mês corrente ou últimos 30 dias?</h4>
+        <p>Você pediu mês corrente. Só um aviso: no dia 1º o quadro abre quase vazio, e a válvula
+        é o que segura. "Últimos 30 dias" não tem esse degrau, mas não bate com "setembro" na
+        cabeça de ninguém. Sugiro <b>mês corrente</b>, com "Últimos 30 dias" no seletor pra quem preferir.</p></div>
+      <div class="nota"><h4>2. A válvula conta o quê?</h4>
+        <p>Sugiro <b>esperando resposta</b> e <b>festa em 30 dias</b>. Parados não entram (já têm a dobra).
+        Dá pra somar "visita marcada nos próximos 7 dias" se você quiser.</p></div>
+      <div class="nota"><h4>3. O vendedor vê o mesmo padrão que o dono?</h4>
+        <p>Sugiro <b>sim</b>: o padrão é da tela. Cada um pode trocar, e a escolha fica guardada
+        por pessoa.</p></div>
+      <div class="nota"><h4>4. A vista "Por mês do evento" também obedece ao período?</h4>
+        <p>Sugiro <b>sim</b>, com "Todos" a um clique — senão ela mostra 275 e a vista por etapa 21,
+        e ninguém entende a diferença.</p></div>
+    </div>
+  </section>
+
+  <p class="rodape">Números lidos em 04/09/2026 no banco de produção (só consulta), na conta 34: 275
+  leads no funil; por mês de entrada, agosto 254 e setembro 21; semanas de agosto 52, 103, 84 e
+  36 (a última atravessa pra setembro); fora de setembro, 37 leads com a última mensagem do
+  cliente sem resposta e 10 com festa nos próximos 30 dias; 65 parados há 15+ dias; 260 leads fora
+  de Perdido. Nomes de pessoas são fictícios.</p>
+
+</div>

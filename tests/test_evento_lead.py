@@ -149,6 +149,7 @@ def test_trilho_tem_todos_na_frente_meses_em_ordem_e_sem_data_no_fim():
 _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
   orcamento_id bigint, evento_em date, evento_tipo text, evento_convidados int,
+  evento_origem text, evento_trecho text, evento_pista text, evento_lido_em timestamptz,
   atualizado_em timestamptz default now());
 create table orcamentos (id bigserial primary key, conta_id bigint, evento jsonb);
 """

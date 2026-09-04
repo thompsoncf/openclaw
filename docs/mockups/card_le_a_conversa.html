@@ -1,0 +1,369 @@
+<title>O Card Lê a Conversa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Tokens de web/tema.py — o mockup serve pra decidir se parecer com a tela real.
+   Escuro único de propósito: o painel não tem tema claro. */
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --roxo-borda:#4a3163; --roxo-fundo:#1c1428; --azul:#7bb8e6;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.86em;color:var(--roxo)}
+a{color:var(--neon-bright)}
+.wrap{max-width:1000px;margin:0 auto;padding:2.6rem 1.25rem 5rem;display:flex;flex-direction:column;gap:2.8rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.6rem,4vw,2.15rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:68ch}
+.head .marca{color:var(--neon)}
+.sec > h2{font-size:1.15rem;margin-bottom:.15rem}
+.sec > p.leg{color:var(--text-dim);margin:.3rem 0 1.15rem;max-width:72ch;font-size:.9rem}
+.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.manchete{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:14px;padding:1.15rem 1.3rem;display:flex;gap:1.1rem;align-items:flex-start}
+.manchete .ic{font-size:1.5rem;line-height:1;flex:none}
+.manchete h2{font-size:1.05rem;color:#F2BDB9;margin-bottom:.3rem}
+.manchete p{margin:0 0 .5rem;color:#D9AEAA;font-size:.9rem;max-width:72ch}
+.manchete p:last-child{margin-bottom:0}
+.manchete b{font-family:var(--mono);font-variant-numeric:tabular-nums;color:#F6D3D0}
+
+/* ---- indicadores ---- */
+.inds{display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem}
+@media (max-width:760px){.inds{grid-template-columns:1fr 1fr}}
+.ind{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem .95rem;display:flex;flex-direction:column;gap:.3rem}
+.ind h4{margin:0;font-size:.78rem;font-family:var(--body);font-weight:600;color:var(--text-dim)}
+.ind .v{font-family:var(--mono);font-size:1.6rem;line-height:1;font-weight:600}
+.ind.ruim .v{color:var(--coral)} .ind.bom .v{color:var(--neon-bright)}
+.ind small{font-size:.72rem;color:var(--text-faint)}
+
+/* ---- o caso: conversa ao lado do card ---- */
+.caso{display:grid;grid-template-columns:1.2fr .8fr;gap:1rem;align-items:start;border:1px solid var(--line);border-radius:14px;background:var(--bg-2);padding:1rem}
+@media (max-width:700px){.caso{grid-template-columns:1fr}}
+.chat{display:flex;flex-direction:column;gap:.45rem}
+.chat .rot{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);font-weight:600;margin-bottom:.2rem}
+.bub{max-width:88%;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;border-bottom-left-radius:4px;padding:.5rem .7rem;font-size:.86rem;line-height:1.45}
+.bub mark{background:rgba(70,245,138,.16);color:var(--neon-bright);border-radius:4px;padding:0 .15rem}
+.bub .meta{display:block;color:var(--text-faint);font-size:.66rem;margin-top:.25rem;font-family:var(--mono)}
+.bub.eu{align-self:flex-end;background:#123028;border-color:#1d5741;border-bottom-left-radius:12px;border-bottom-right-radius:4px}
+.setinha{text-align:center;color:var(--text-faint);font-size:1.4rem;align-self:center}
+
+.kc{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:.55rem .6rem;display:flex;flex-direction:column;gap:.3rem;max-width:250px}
+.kc.nova{border-color:var(--neon-borda)}
+.kc-top{display:flex;align-items:center;gap:.4rem}
+.dot{width:.5rem;height:.5rem;border-radius:50%;flex:none}
+.dot.quente{background:var(--coral)} .dot.morno{background:var(--ambar)} .dot.frio{background:#5b9bd5}
+.kc-nome{font-size:.86rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kc-ev{font-size:.74rem;color:var(--text-dim);background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:.22rem .45rem;line-height:1.35}
+.kc-ev b{color:var(--text)}
+.kc-ev .d{font-family:var(--mono);color:var(--neon-bright)}
+.kc-ev.sem{display:flex;gap:.5rem;border-style:dashed;color:#F0DCA6;background:var(--ambar-fundo);border-color:rgba(224,180,95,.32)}
+.kc-ev.sem u{margin-left:auto;font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.kc-ev.pista{border-style:dashed;color:#F0DCA6;background:var(--ambar-fundo);border-color:rgba(224,180,95,.32)}
+.kc-ev.pista u{font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.kc-src{display:flex;align-items:center;gap:.35rem;font-size:.64rem;color:var(--text-faint);padding:0 .1rem}
+.kc-src .tag{font-size:.6rem;padding:.02rem .38rem;border-radius:999px;border:1px solid var(--line);color:var(--text-dim);background:var(--bg)}
+.kc-src .tag.lido{border-color:#1f3a4d;background:#122029;color:var(--azul)}
+.kc-src .tag.ok{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright)}
+.kc-src .tag.ia{border-color:var(--roxo-borda);background:var(--roxo-fundo);color:var(--roxo)}
+.kc-msg{display:flex;gap:.35rem;align-items:flex-start;font-size:.72rem;color:var(--text-dim);border-top:1px solid var(--line);padding-top:.35rem;line-height:1.35}
+.kc-msg .bolha{width:.45rem;height:.45rem;border-radius:50%;background:var(--neon);flex:none;margin-top:.28rem}
+.kc-msg .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.kc-msg .qdo{font-family:var(--mono);font-size:.66rem;color:var(--text-faint);flex:none}
+.antes{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--coral);font-weight:700;margin-bottom:.4rem}
+.depois{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--neon);font-weight:700;margin:.9rem 0 .4rem}
+
+.movs{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem}
+@media (max-width:760px){.movs{grid-template-columns:1fr}}
+.mov{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.95rem 1rem;display:flex;flex-direction:column;gap:.4rem}
+.mov .k{font-family:var(--mono);font-size:.7rem;color:var(--neon);letter-spacing:.06em}
+.mov h3{font-size:.98rem}
+.mov p{margin:0;font-size:.84rem;color:var(--text-dim)}
+
+/* ---- os quatro estados ---- */
+.estados{display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem}
+@media (max-width:860px){.estados{grid-template-columns:1fr 1fr}}
+@media (max-width:480px){.estados{grid-template-columns:1fr}}
+.estado{display:flex;flex-direction:column;gap:.5rem}
+.estado h4{font-family:var(--body);font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint)}
+.estado p{margin:0;font-size:.78rem;color:var(--text-dim)}
+.estado .kc{max-width:none}
+
+/* ---- tabela ---- */
+.rolagem{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:.83rem}
+th{text-align:left;font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint);font-weight:600;padding:.55rem .8rem;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:.6rem .8rem;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+td.fala{font-style:italic;color:var(--text-dim)}
+td.fala mark{background:rgba(70,245,138,.16);color:var(--neon-bright);border-radius:4px;padding:0 .15rem;font-style:normal}
+td.res{font-family:var(--mono);font-size:.78rem;white-space:nowrap}
+td.res .ok{color:var(--neon-bright)} td.res .nao{color:#F0DCA6}
+
+/* ---- balão + botão ---- */
+.duas{display:grid;grid-template-columns:1fr 1fr;gap:.9rem;align-items:start}
+@media (max-width:700px){.duas{grid-template-columns:1fr}}
+.pop{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:.9rem;display:flex;flex-direction:column;gap:.5rem;font-size:.84rem}
+.pop h4{font-family:var(--body);font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint)}
+.pop .k{font-size:.68rem;color:var(--text-faint)}
+.pop .v{font-size:.9rem}
+.pop .trecho{border-left:2px solid #1f3a4d;padding:.3rem .6rem;color:var(--text-dim);font-style:italic;font-size:.8rem;background:var(--bg)}
+.pop .trecho small{display:block;font-style:normal;font-family:var(--mono);font-size:.64rem;color:var(--text-faint);margin-top:.2rem}
+.bts{display:flex;gap:.4rem;flex-wrap:wrap}
+.bt{padding:.4rem .8rem;border-radius:9px;font-size:.8rem;font-weight:600;border:1px solid var(--line);color:var(--text-dim)}
+.bt.ok{background:var(--neon);color:#062011;border-color:var(--neon)}
+.faixa-btn{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;border:1px solid var(--line);border-radius:12px;background:var(--bg-2);padding:.7rem .9rem;font-size:.82rem;color:var(--text-dim)}
+.faixa-btn b{color:var(--text)}
+.faixa-btn .bt{margin-left:auto}
+.faixa-ok{border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:12px;padding:.6rem .9rem;font-size:.82rem;color:var(--neon-bright)}
+
+.notas{display:flex;flex-direction:column;gap:.7rem}
+.nota{border:1px solid var(--line);border-left:3px solid var(--ambar);border-radius:0 11px 11px 0;background:var(--surface);padding:.8rem 1rem}
+.nota h4{margin:0 0 .25rem;font-size:.88rem;font-weight:600}
+.nota p{margin:0;font-size:.84rem;color:var(--text-dim);max-width:74ch}
+.nota.bom{border-left-color:var(--neon)}
+.nota.fora{border-left-color:var(--text-faint)}
+.passos{margin:0;padding-left:1.2rem;font-size:.86rem;color:var(--text-dim);display:flex;flex-direction:column;gap:.35rem}
+.passos b{color:var(--text)}
+.rodape{border-top:1px solid var(--line);padding-top:1.2rem;color:var(--text-faint);font-size:.8rem;max-width:74ch}
+</style>
+
+<div class="wrap">
+
+  <header class="head">
+    <div class="eyebrow">Mockup · Prospecção › Funil › o card</div>
+    <h1>O card lê a conversa <span class="marca">·</span> e traz a data sozinho</h1>
+    <p>Você viu no funil: o cliente escreve "casamento, dia 13 de fevereiro, uns 70
+    convidados" e o card ao lado diz <b>sem data · perguntar</b>. A informação está lá,
+    ninguém lê. Esta proposta substitui a árvore mês a mês. Medi na <b>Prime Eventos</b>
+    (conta 34, em 04/09/2026) quanto do que falta já está escrito na conversa. Os
+    números são reais; os nomes são inventados; as frases são as dos clientes, de leve
+    retocadas.</p>
+  </header>
+
+  <section class="manchete">
+    <div class="ic">👀</div>
+    <div>
+      <h2>Dos 246 leads sem data, 121 já disseram a data na conversa</h2>
+      <p>E <b>83</b> disseram quantos convidados, <b>121</b> disseram que festa é, <b>72</b>
+      disseram data e convidados juntos. Metade da fila "sem data" não é de quem não
+      falou — é de quem falou e não foi ouvido.</p>
+      <p>O agente já lê isso quando é ele quem responde. Mas na Prime quem responde é
+      gente, e aí nada lê. O leitor proposto aqui roda em <b>toda mensagem que chega</b>,
+      com ou sem agente, e preenche só o que está vazio.</p>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O que a fila "sem data" já disse</h2>
+    <p class="leg">Conta 34, leads sem data do evento e fora de Perdido, lendo só as
+    mensagens do cliente.</p>
+    <div class="inds">
+      <div class="ind ruim"><h4>Sem data no card</h4><span class="v">246</span><small>de 259 no funil</small></div>
+      <div class="ind bom"><h4>Disseram a data</h4><span class="v">121</span><small>"13 de fevereiro", "14/11/2026"</small></div>
+      <div class="ind bom"><h4>Disseram convidados</h4><span class="v">83</span><small>"70 pessoas", "120 convidados"</small></div>
+      <div class="ind bom"><h4>Disseram o tipo</h4><span class="v">121</span><small>casamento, 15 anos, formatura…</small></div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O caso que você viu</h2>
+    <p class="leg">A conversa de um lead novo da Prime, e o card dele antes e depois do leitor.</p>
+    <div class="caso">
+      <div class="chat">
+        <div class="rot">A conversa</div>
+        <div class="bub">Boa tarde!! Gostaria de saber o valor da locação, como funciona.. seria
+          para <mark>casamento</mark>, data <mark>13 de fevereiro</mark><span class="meta">cliente · 04/09 17:36</span></div>
+        <div class="bub">Média de <mark>70 pessoas</mark><span class="meta">cliente · 04/09 17:36</span></div>
+        <div class="bub eu">Boa tarde! Que legal 🎉 Vou te passar os pacotes…<span class="meta">vendedora · 04/09 17:41</span></div>
+      </div>
+      <div>
+        <div class="antes">Hoje</div>
+        <div class="kc nova">
+          <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Larissa</span></div>
+          <div class="kc-ev sem">📅 sem data <u>perguntar</u></div>
+          <div class="kc-msg"><span class="bolha"></span><span class="txt">Média de 70 pessoas</span><span class="qdo">agora</span></div>
+        </div>
+        <div class="depois">Com o leitor</div>
+        <div class="kc nova">
+          <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Larissa</span></div>
+          <div class="kc-ev">💍 <b>Casamento</b> · <span class="d">13 fev 27</span> · 70 conv.</div>
+          <div class="kc-src"><span class="tag lido">💬 lido da conversa</span> confira no balão</div>
+          <div class="kc-msg"><span class="bolha"></span><span class="txt">Média de 70 pessoas</span><span class="qdo">agora</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>A proposta, em três movimentos</h2>
+    <div class="movs">
+      <div class="mov">
+        <span class="k">1 · O LEITOR</span>
+        <h3>Toda mensagem do cliente passa por ele</h3>
+        <p>No momento em que a mensagem é gravada, o leitor procura data, tipo de festa,
+        convidados e horário — por regra, sem IA, de graça e sempre igual. Áudio
+        transcrito conta como texto. Preenche <b>só o que está vazio</b> no lead: o que o
+        vendedor pôs à mão nunca é sobrescrito.</p>
+      </div>
+      <div class="mov">
+        <span class="k">2 · A PROVA NO CARD</span>
+        <h3>O card diz de onde veio</h3>
+        <p>O que foi lido ganha o selo <b>💬 lido da conversa</b>. No balão do lead aparece
+        o trecho exato e a hora, com dois botões: <b>confirmar</b> e <b>corrigir</b>. Confirmado,
+        o selo vira ✓. Se o leitor só entendeu o mês ("mais ou menos março"), o card
+        mostra a pista em âmbar em vez de inventar um dia.</p>
+      </div>
+      <div class="mov">
+        <span class="k">3 · O ACERVO</span>
+        <h3>"Ler as conversas" pra quem já chegou</h3>
+        <p>Um botão ao lado do trilho lê as 245 conversas de hoje de uma vez, em
+        segundo plano, e diz o que achou. Daí em diante não precisa mais: o leitor
+        já pega tudo na chegada. E onde o agente atende, a IA dele continua lendo o
+        que a regra não pega.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Os quatro estados do card</h2>
+    <div class="estados">
+      <div class="estado">
+        <h4>Lido</h4>
+        <div class="kc">
+          <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Larissa</span></div>
+          <div class="kc-ev">💍 <b>Casamento</b> · <span class="d">13 fev 27</span> · 70 conv.</div>
+          <div class="kc-src"><span class="tag lido">💬 lido da conversa</span></div>
+        </div>
+        <p>O leitor preencheu. Entra no trilho e na vista por mês na hora.</p>
+      </div>
+      <div class="estado">
+        <h4>Confirmado</h4>
+        <div class="kc">
+          <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Larissa</span></div>
+          <div class="kc-ev">💍 <b>Casamento</b> · <span class="d">13 fev 27</span> · 70 conv.</div>
+          <div class="kc-src"><span class="tag ok">✓ confirmado</span> Jacqueline</div>
+        </div>
+        <p>O vendedor bateu o olho e confirmou (ou corrigiu) no balão.</p>
+      </div>
+      <div class="estado">
+        <h4>Só a pista</h4>
+        <div class="kc">
+          <div class="kc-top"><span class="dot morno"></span><span class="kc-nome">Turma Enfermagem</span></div>
+          <div class="kc-ev pista">📅 falou de <b>março</b> · <u>confirmar</u></div>
+          <div class="kc-src"><span class="tag lido">💬 "até mais ou menos março"</span></div>
+        </div>
+        <p>Sem dia, não inventa data. Mostra o que ouviu e pede o resto.</p>
+      </div>
+      <div class="estado">
+        <h4>Sem nada</h4>
+        <div class="kc">
+          <div class="kc-top"><span class="dot frio"></span><span class="kc-nome">Rodrigo A.</span></div>
+          <div class="kc-ev sem">📅 sem data <u>perguntar</u></div>
+        </div>
+        <p>O cliente não disse. Fica o "perguntar" que já existe.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O que o leitor entende</h2>
+    <p class="leg">Frases reais da fila da Prime (retocadas) e o que sai delas. Ano sem
+    dizer é o próximo em que a data ainda não passou: "13 de fevereiro" dito em setembro
+    de 2026 é 2027.</p>
+    <div class="rolagem">
+      <table>
+        <thead><tr><th>O cliente escreveu</th><th>O leitor grava</th></tr></thead>
+        <tbody>
+          <tr><td class="fala">"seria para <mark>casamento</mark>, data <mark>13 de fevereiro</mark>" · "Média de <mark>70 pessoas</mark>"</td>
+            <td class="res"><span class="ok">13/02/2027 · Casamento · 70</span></td></tr>
+          <tr><td class="fala">"<mark>14/11/2026</mark> <mark>15 anos</mark> <mark>120 convidados</mark>"</td>
+            <td class="res"><span class="ok">14/11/2026 · 15 anos · 120</span></td></tr>
+          <tr><td class="fala">"<mark>31 de outubro</mark> Início às 20:00 <mark>Aniversário</mark> de 40 anos <mark>80 pessoas</mark>"</td>
+            <td class="res"><span class="ok">31/10/2026 · Aniversário · 80</span> <span class="nao">(não 40)</span></td></tr>
+          <tr><td class="fala">"o <mark>mini casamento</mark> que pretendo realizar no dia <mark>22/05/2027</mark>"</td>
+            <td class="res"><span class="ok">22/05/2027 · Casamento</span></td></tr>
+          <tr><td class="fala">"<mark>19/05/2028</mark> · festa de <mark>15 anos</mark> · 21:00horas · <mark>150 pessoas</mark>"</td>
+            <td class="res"><span class="ok">19/05/2028 · 15 anos · 150</span></td></tr>
+          <tr><td class="fala">"disponibilidade para o dia 17 ou <mark>18 de dezembro 2026</mark>? <mark>Confraternização</mark> do escritório"</td>
+            <td class="res"><span class="ok">18/12/2026 · Confraternização</span> <span class="nao">· pista "17 ou 18"</span></td></tr>
+          <tr><td class="fala">"cerimônia do jaleco… a data seria para até mais ou menos <mark>março</mark>"</td>
+            <td class="res"><span class="nao">só a pista: março</span> <span class="ok">· Formatura</span></td></tr>
+          <tr><td class="fala">"Oi! Vi o anúncio e quero mais informações sobre o local."</td>
+            <td class="res"><span class="nao">nada — fica o "perguntar"</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O balão e o botão</h2>
+    <div class="duas">
+      <div class="pop">
+        <h4>No balão do lead</h4>
+        <div><div class="k">Evento</div><div class="v">💍 Casamento · 13/02/2027 · 70 convidados</div></div>
+        <div class="trecho">"seria para casamento, data 13 de fevereiro" · "Média de 70 pessoas"
+          <small>lido da conversa em 04/09 17:36</small></div>
+        <div class="bts"><span class="bt ok">✓ Confirmar</span><span class="bt">Corrigir</span></div>
+      </div>
+      <div>
+        <div class="faixa-btn">🔎 <span><b>245 conversas</b> de leads sem data ainda não foram lidas</span><span class="bt ok">Ler as conversas</span></div>
+        <div style="height:.6rem"></div>
+        <div class="faixa-ok">✓ Li 245 conversas em 40s: <b>121 datas</b>, 83 convidados, 121 tipos preenchidos. 14 ficaram só com a pista do mês.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O que muda no código, se aprovar</h2>
+    <ol class="passos">
+      <li><b>Migração 198</b>, aditiva: <code>evento_origem</code> (conversa · agente · mão · confirmado),
+        <code>evento_pista</code> (o trecho lido) e <code>evento_lido_em</code> em <code>prospeccao</code>.</li>
+      <li><b><code>finance/evento_leitor.py</code></b>: as regras de data, tipo, convidados e horário, com teste
+        pra cada frase da tabela acima. Sem IA, sem custo, sempre igual.</li>
+      <li><b>Na chegada da mensagem</b> (os três webhooks já chamam o agente em segundo plano): o leitor
+        roda ali, antes do agente, pra todo lead que ainda tem campo vazio.</li>
+      <li><b>Card e balão</b>: o selo, o trecho, confirmar e corrigir. A ficha e o Cockpit mostram a origem.</li>
+      <li><b>Botão "Ler as conversas"</b> ao lado do trilho, em segundo plano, com o resumo do que achou.</li>
+    </ol>
+  </section>
+
+  <section class="sec">
+    <h2>Pra você decidir</h2>
+    <div class="notas">
+      <div class="nota"><h4>1. O que o leitor achou já vale, ou espera o vendedor confirmar?</h4>
+        <p>Sugiro <b>já vale</b>: entra no trilho e na vista por mês com o selo "lido da conversa",
+        e o vendedor corrige quando abrir. Esperar confirmação deixaria os 121 esperando de
+        novo, agora por um clique.</p></div>
+      <div class="nota"><h4>2. IA pra o que a regra não pega?</h4>
+        <p>"Daqui a dois meses", "no feriado de novembro", "quando minha filha fizer 15". Custa
+        uma chamada por mensagem (centavos) e não é sempre igual. Sugiro <b>não agora</b>: a regra
+        pega 121 dos 246 de graça, e onde o agente atende a IA dele já lê. Medimos o que sobra
+        e decidimos.</p></div>
+      <div class="nota"><h4>3. Quando o cliente muda a data depois?</h4>
+        <p>O leitor só preenche o vazio. Se ele disser "na verdade é 20 de fevereiro", a data nova
+        vira <b>pista</b> no card ("💬 falou de 20 fev"), e o vendedor troca no balão. Sugiro assim:
+        automático pra preencher, humano pra mudar.</p></div>
+      <div class="nota fora"><h4>Fora deste desenho</h4>
+        <p>A árvore mês a mês (descartada). Horário do evento no card — o leitor lê "21:00", mas
+        o lead não tem onde guardar; fica pra quando o orçamento precisar.</p></div>
+    </div>
+  </section>
+
+  <p class="rodape">Diagnóstico lido em 04/09/2026 no banco de produção (só consulta): conta 34, 259
+  leads fora de Perdido, 246 sem data do evento; lendo só as mensagens do cliente (texto e
+  áudio transcrito), 121 contêm uma data (dia e mês, ou dd/mm), 83 um número de pessoas ou
+  convidados, 121 um tipo de festa, 72 data e convidados juntos. Nomes de pessoas são fictícios;
+  as frases são as dos clientes, de leve retocadas.</p>
+
+</div>

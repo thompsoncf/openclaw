@@ -22,7 +22,7 @@ CNPJ_OK = "10320422000106"
 CONTA = 5
 
 _SQL = """
-create table prospeccao (id bigserial primary key, evento_em date, evento_tipo text, evento_convidados int, ultimo_contato_em timestamptz, conta_id bigint, vendedor_id bigint,
+create table prospeccao (id bigserial primary key, evento_em date, evento_tipo text, evento_convidados int, evento_origem text, evento_trecho text, evento_pista text, evento_lido_em timestamptz, ultimo_contato_em timestamptz, conta_id bigint, vendedor_id bigint,
   empresa text not null, segmento text, cidade text, uf text, contato text, cargo text,
   telefone text, whatsapp text, email text, cnpj text, cpf text, tipo text default 'pj',
   temperatura text default 'frio', valor_estimado_centavos bigint default 0, origem text,

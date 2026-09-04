@@ -1144,7 +1144,8 @@ def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict)
     with pool.connection() as c:
         if not _posse(c, conta_id, membro_id, lead_id):
             return {"ok": False, "erro": "escopo"}
-        atual = c.execute("select tipo from prospeccao where id=%s and conta_id=%s",
+        atual = c.execute("select tipo, evento_tipo, evento_em, evento_convidados, "
+                          "evento_origem, evento_pista from prospeccao where id=%s and conta_id=%s",
                           (lead_id, conta_id)).fetchone()
         tipo_atual = (atual[0] if atual else "") or "pj"
 
@@ -1185,10 +1186,16 @@ def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict)
         vals.append(nasc)
         # o evento (migração 197), com a mesma regra: em branco fica como está
         from finance import evento_lead as _evl
+        ev_novo = (_evl.parse_tipo(limpo("evento_tipo")), _evl.parse_data(limpo("evento_em")),
+                   _evl.parse_convidados(limpo("evento_convidados")))
         sets += ["evento_tipo=coalesce(%s,evento_tipo)", "evento_em=coalesce(%s,evento_em)",
                  "evento_convidados=coalesce(%s,evento_convidados)"]
-        vals += [_evl.parse_tipo(limpo("evento_tipo")), _evl.parse_data(limpo("evento_em")),
-                 _evl.parse_convidados(limpo("evento_convidados"))]
+        vals += list(ev_novo)
+        # mexeu no evento à mão (198): origem 'mao' e a pista do leitor sai. Aqui em
+        # branco mantém, então só conta o que veio preenchido E diferente.
+        if atual and any(n is not None and n != a for n, a in zip(ev_novo, atual[1:4])):
+            sets += ["evento_origem=%s", "evento_pista=%s"]
+            vals += ["mao", None]
         if doc:
             sets += ["tipo=%s", "cnpj=%s", "cpf=%s"]
             vals += [tipo, cnpj, cpf]

@@ -45,7 +45,7 @@ _SCHEMA = """
 create table contas (id bigint primary key, nome text, nicho_id bigint);
 create table nichos (id bigint primary key, slug text);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
-  evento_em date, evento_tipo text, evento_convidados int,
+  evento_em date, evento_tipo text, evento_convidados int, evento_origem text, evento_trecho text, evento_pista text, evento_lido_em timestamptz,
   empresa text, contato text, cnpj text, whatsapp text, telefone text, email text,
   cidade text, uf text, segmento text, origem text, status text default 'novo',
   estagio text default 'lead', orcamento_id bigint, criado_por bigint,

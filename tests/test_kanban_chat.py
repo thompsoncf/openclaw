@@ -21,7 +21,7 @@ CONTA = 11
 
 _SQL = """
 create table contas (id bigserial primary key, chip_de bigint, nome text);
-create table prospeccao (id bigserial primary key, orcamento_id bigint, evento_em date, evento_tipo text, evento_convidados int, ultimo_contato_em timestamptz, conta_id bigint, vendedor_id bigint,
+create table prospeccao (id bigserial primary key, orcamento_id bigint, evento_em date, evento_tipo text, evento_convidados int, evento_origem text, evento_trecho text, evento_pista text, evento_lido_em timestamptz, ultimo_contato_em timestamptz, conta_id bigint, vendedor_id bigint,
   empresa text not null, segmento text, cidade text, uf text, telefone text, whatsapp text,
   email text, instagram text, temperatura text default 'frio',
   valor_estimado_centavos bigint default 0, proximo_contato_em date,

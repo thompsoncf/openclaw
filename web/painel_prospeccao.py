@@ -464,7 +464,7 @@ def _promover_para_lead(c, conta_id, pros_id) -> None:
 
 
 @router.get("/painel/prospeccao", response_class=HTMLResponse)
-def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = ""):
+def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista: str = ""):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -515,7 +515,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = ""):
                        p.telefone, p.whatsapp, p.vendedor_id, m.nome,
                        p.email, p.instagram, p.enriquecido_em, ca.cnome,
                        p.evento_em, p.evento_tipo, p.evento_convidados,
-                       p.criado_em, p.ultimo_contato_em
+                       p.criado_em, p.ultimo_contato_em, p.orcamento_id
                   from prospeccao p
                   left join membros m on m.id = p.vendedor_id
                   left join lateral (
@@ -634,7 +634,37 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = ""):
                         tuple(params_base)).fetchall())
         except Exception:  # noqa: BLE001
             contagens, totais_col = {}, {}
+        # A VISTA POR MÊS troca a coluna pela data e põe a ETAPA no card como selo.
+        # Dois selos pedem dado de fora: a próxima visita marcada (agenda) e o nº
+        # da proposta. Uma consulta em lote cada, tolerantes: instalação sem a
+        # tabela ou sem a coluna abre a vista do mesmo jeito, só sem o enfeite.
+        vista_mes = bool(modo_evento and (vista or "").strip() == "mes")
+        visita_por_lead: dict[int, object] = {}
+        numero_por_orc: dict[int, int] = {}
+        if vista_mes and lead_ids:
+            try:
+                with c.transaction():
+                    for pid, inicio in c.execute(
+                        """select distinct on (prospeccao_id) prospeccao_id, inicio
+                             from eventos_agenda
+                            where conta_id=%s and prospeccao_id = any(%s)
+                              and status='ativo' and inicio >= now()
+                            order by prospeccao_id, inicio""",
+                        (conta_id, lead_ids)).fetchall():
+                        visita_por_lead[pid] = inicio
+            except Exception:  # noqa: BLE001
+                visita_por_lead = {}
+            orc_ids = [r[22] for r in rows if r[22]]
+            if orc_ids:
+                try:
+                    with c.transaction():
+                        numero_por_orc = dict(c.execute(
+                            "select id, numero from orcamentos where id = any(%s) and numero is not null",
+                            (orc_ids,)).fetchall())
+                except Exception:  # noqa: BLE001
+                    numero_por_orc = {}
     colunas = {e["chave"]: [] for e in etapas}
+    rotulo_etapa = {e["chave"]: e["rotulo"] for e in etapas}
     hoje = _agora().date()
     primeira = etapas[0]["chave"] if etapas else "novo"
     total_valor = 0
@@ -675,6 +705,13 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = ""):
             # sem conversa aberta o "perguntar" cai no wa.me com o texto pronto
             "zap_pergunta": (_zap_link_texto(r[10] or r[9], _evl.PERGUNTA_DATA)
                              if (r[10] or r[9]) else ""),
+            # os selos da vista por mês: a etapa (com o nº da proposta quando há)
+            # e a próxima visita marcada
+            # etapa sem linha em funil_etapas (não devia existir): a chave, legível
+            "etapa_rot": rotulo_etapa.get(r[5]) or (r[5] or "").replace("_", " ").capitalize(),
+            "etapa_cls": ("real" if r[5] == "ganho" else "prop" if r[5] == "proposta" else ""),
+            "proposta_num": numero_por_orc.get(r[22]) if r[22] else None,
+            "visita_txt": _evl.visita_curta(visita_por_lead[r[0]]) if r[0] in visita_por_lead else "",
         })
         colunas.get(r[5], colunas[primeira]).append(card)
         if r[5] != "perdido":
@@ -686,6 +723,11 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = ""):
     # a coluna separada em meses (evento → entrada → parados), ver evento_lead.agrupar
     agora = _agora()
     grupos = {chave: _evl.agrupar(cards, agora) for chave, cards in colunas.items()}
+    # a vista por mês: as colunas viram meses (e "Sem data"), a etapa vai pro card
+    vista_cols = None
+    if vista_mes:
+        todos = [c for cards in colunas.values() for c in cards]
+        vista_cols, grupos = _evl.colunas_por_mes(todos, agora)
     # o trilho só entra quando há data em algum lead (ou um filtro pra limpar):
     # numa conta onde ninguém tem data ainda ele seria "Todos · Sem data", duas
     # pílulas dizendo a mesma coisa.
@@ -693,6 +735,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = ""):
                     if modo_evento and (any(k for k in contagens if k) or filtro_mes) else [])
     return _render("prospeccao", request, titulo="Prospecção", secao_ativa="prospeccao",
                    grupos=grupos, trilho_itens=trilho_itens, filtro_mes=filtro_mes,
+                   vista_mes=vista_mes, vista_cols=vista_cols,
                    filtro_mes_rotulo=(_evl.mes_rotulo(filtro_mes) if _evl.mes_valido(filtro_mes) else ""),
                    totais_col=totais_col, modo_evento=modo_evento, pergunta_data=_evl.PERGUNTA_DATA,
                    status=status_tpl, etapas=etapas_edit, colunas=colunas, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
@@ -9872,6 +9915,9 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
        nenhum — abre o painel de captação logo abaixo, nesta mesma tela. Como aba ele
        ocupava 129px da barra apontando pro próprio Funil; como botão fica em evidência,
        ao lado do título, e a barra ganhou o espaço de volta. #}
+    {% if modo_evento %}<div class="vseg" title="Colunas por etapa do funil, ou por mês da festa">
+      <a class="{% if not vista_mes %}on{% endif %}" href="/painel/prospeccao{% if filtro_vend %}?vendedor={{ filtro_vend }}{% endif %}">Por etapa</a><a class="{% if vista_mes %}on{% endif %}" href="/painel/prospeccao?vista=mes{% if filtro_vend %}&amp;vendedor={{ filtro_vend }}{% endif %}">Por mês do evento</a>
+    </div>{% endif %}
     <button type="button" class="cap-btn" onclick="capToggle()">🎯 Captar Lead</button>
   </div>
 
@@ -10003,13 +10049,14 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% for v in vendedores %}<option value="{{ v.id }}" {% if filtro_vend==(v.id|string) %}selected{% endif %}>{{ v.nome }}</option>{% endfor %}
     </select>
     {% if filtro_mes %}<input type="hidden" name="mes" value="{{ filtro_mes }}">{% endif %}
+    {% if vista_mes %}<input type="hidden" name="vista" value="mes">{% endif %}
   </form>
   {% endif %}
 
   {# O TRILHO DE MESES: mês do EVENTO, não o mês em que o lead escreveu. Clicou em
      Jan 27, o quadro inteiro vira o funil de janeiro (todas as etapas). "Sem data"
      é a fila de trabalho — quem ainda não disse quando é a festa. #}
-  {% if trilho_itens %}
+  {% if trilho_itens and not vista_mes %}
   <div class="trilho" id="trilho"><span class="rot">Mês do evento</span>
     {% for t in trilho_itens %}<a class="mes{% if t.on %} on{% endif %}{% if t.sem %} semdata{% endif %}{% if not t.n and not t.on %} vazio{% endif %}" href="/painel/prospeccao?{% if filtro_vend %}vendedor={{ filtro_vend }}&amp;{% endif %}{% if t.chave %}mes={{ t.chave }}{% endif %}">{{ t.rotulo }} <b>{{ t.n }}</b></a>{% endfor %}
   </div>
@@ -10073,13 +10120,13 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
   <!-- abas de status (só mobile) -->
   <div class="kbtabs" id="kbtabs">
-    {% for s, rot in status %}<button type="button" class="kbtab" data-tab="{{ s }}" onclick="kbTab('{{ s }}')">{{ rot }} <span class="c">{{ colunas[s]|length }}</span></button>{% endfor %}
+    {% for s, rot in (vista_cols or status) %}<button type="button" class="kbtab" data-tab="{{ s }}" onclick="kbTab('{{ s }}')">{{ rot }} <span class="c">{{ (grupos or {}).get(s, []) | sum(attribute='n') if vista_mes else colunas[s]|length }}</span></button>{% endfor %}
   </div>
 
   {# O CARD, uma vez só: a mesma marcação serve pros grupos por mês e pra dobra dos
      parados. Macro do próprio template — enxerga o contexto (temp_cor, vendedores…). #}
   {% macro kbcard(c) -%}
-        <div class="kbcard" draggable="true" data-id="{{ c.id }}" ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"
+        <div class="kbcard" draggable="{{ 'false' if vista_mes else 'true' }}" data-id="{{ c.id }}"{% if not vista_mes %} ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"{% endif %}
              onclick="if(!window._kbMoved)kbAbrirLead(event,{{ c.id }},this)">
           <div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" title="{{ c.temperatura }}" style="background:{{ temp_cor[c.temperatura] }}"></span><span class="emp">{{ c.empresa }}</span><button type="button" class="kbx" style="flex:none" title="Excluir lead" onclick="kbExcluir(event,{{ c.id }})">✕</button></div>
           {% if c.segmento or c.cidade %}<div class="sub">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
@@ -10090,6 +10137,9 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
              já passou com etapa aberta fica coral: festa que aconteceu e ninguém fechou. #}
           {% if c.evento_em or c.evento_tipo or c.evento_convidados %}<div class="kbev{% if c.passou %} passou{% endif %}" title="{% if c.passou %}A data do evento já passou{% else %}Evento{% endif %}">{{ c.ev_ic }} {% if c.evento_tipo %}<b>{{ c.evento_tipo }}</b>{% endif %}{% if c.evento_em %}{% if c.evento_tipo %} · {% endif %}<span class="d">{{ c.ev_data }}</span>{% endif %}{% if c.evento_convidados %} · {{ c.evento_convidados }} conv.{% endif %}</div>
           {% elif modo_evento %}<div class="kbev sem">📅 sem data{% if c.conv_whatsapp %}<button type="button" class="kbperg" title="Perguntar a data do evento" onclick="kbPerguntarData(event,{{ c.conv_whatsapp }},this)">perguntar</button>{% elif c.zap_pergunta %}<a class="kbperg" href="{{ c.zap_pergunta }}" target="_blank" rel="noopener" title="Abre o WhatsApp com a pergunta pronta" onclick="event.stopPropagation()">perguntar</a>{% endif %}</div>{% endif %}
+          {# na vista por mês a coluna já é a data: a ETAPA vem pro card como selo,
+             com o nº da proposta e a próxima visita quando existem #}
+          {% if vista_mes %}<div class="kbetapas"><span class="kbetapa{% if c.etapa_cls %} {{ c.etapa_cls }}{% endif %}">{% if c.proposta_num and c.status == 'proposta' %}Proposta nº {{ c.proposta_num }}{% else %}{{ c.etapa_rot }}{% endif %}</span>{% if c.visita_txt %}<span class="kbetapa vis">{{ c.visita_txt }}</span>{% endif %}</div>{% endif %}
           {% if c.campanha or c.chip_apelido %}<div class="camp">{% if c.campanha %}📣 {{ c.campanha }}{% endif %}{% if c.chip_apelido %}<span class="chip">{% if c.campanha %} · {% endif %}📱 {{ c.chip_apelido }}</span>{% endif %}</div>{% endif %}
           {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido %}<div class="kbch">{% if c.tem_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="Abrir a conversa de WhatsApp">💬</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
           {# A ÚLTIMA MENSAGEM. Fica DEPOIS dos selos de canal e antes do valor
@@ -10109,10 +10159,13 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </div>
   {%- endmacro %}
 
-  <div class="kbrow" id="kbrow">
-    {% for s, rot in status %}
-    <div class="kbcol" data-status="{{ s }}" ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event,'{{ s }}')">
-      <h4><span>{{ rot }}</span><span class="kbcnt">{{ colunas[s]|length }}{% if filtro_mes %} <i>de {{ totais_col.get(s, 0) }}</i>{% endif %}</span></h4>
+  {# Na vista por mês a coluna é um MÊS: não se arrasta card entre meses (a data
+     da festa não muda de arrastar) — o drop fica desligado e a contagem é a soma
+     dos grupos. Mudar a etapa continua pelo balão do lead. #}
+  <div class="kbrow{% if vista_mes %} vmes{% endif %}" id="kbrow">
+    {% for s, rot in (vista_cols or status) %}
+    <div class="kbcol" data-status="{{ s }}"{% if not vista_mes %} ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event,'{{ s }}')"{% endif %}>
+      <h4><span>{{ rot }}</span><span class="kbcnt">{% if vista_mes %}{{ (grupos or {}).get(s, []) | sum(attribute='n') }}{% else %}{{ colunas[s]|length }}{% if filtro_mes %} <i>de {{ totais_col.get(s, 0) }}</i>{% endif %}{% endif %}</span></h4>
       <div class="kbdrop">
         {# A coluna separada em grupos (evento_lead.agrupar): mês do evento, depois
            sem data por mês de entrada, e no pé a dobra dos parados há 15+ dias —
@@ -10185,6 +10238,17 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.45rem .7rem}
 .trilho-faixa a{margin-left:auto;color:var(--verde-claro);font-size:.76rem}
 .kbcnt i{font-style:normal;color:var(--txt-mut);opacity:.75}
+/* a vista por mês: o botão no cabeçalho e os selos de etapa no card */
+.vseg{display:inline-flex;border:1px solid var(--borda);border-radius:9px;padding:3px;gap:2px;background:var(--bg);align-self:center}
+.vseg a{font-size:.78rem;padding:.3rem .65rem;border-radius:6px;color:var(--txt-mut);text-decoration:none;white-space:nowrap}
+.vseg a.on{background:var(--verde);color:var(--sobre-verde);font-weight:600}
+.kbetapas{display:flex;flex-wrap:wrap;gap:.25rem;margin-top:.3rem}
+.kbetapa{display:inline-block;font-size:.64rem;padding:.06rem .42rem;border-radius:999px;border:1px solid var(--borda);
+  color:var(--txt-mut);background:var(--bg);white-space:nowrap}
+.kbetapa.prop{border-color:#4a3163;background:#1c1428;color:var(--roxo,#C9A3E0)}
+.kbetapa.vis{border-color:#1f3a4d;background:#122029;color:#7bb8e6}
+.kbetapa.real{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--verde-claro)}
+.kbrow.vmes .kbcard{cursor:pointer}
 .kbch{display:flex;gap:.35rem;margin-top:.3rem;font-size:.82rem;align-items:center}
 /* a última mensagem no card. `min-width:0` no .txt é o que faz o ellipsis
    funcionar dentro do flex — sem isso o texto empurra a hora pra fora do card. */
@@ -10421,6 +10485,7 @@ function kbAbrirChat(ev,convId,aba,btn){
   });
 }
 var _cpPrefill='';
+window.KB_VISTA={{ ('mes' if vista_mes else '')|tojson }};
 var KB_PERGUNTA_DATA={{ (pergunta_data or '')|tojson }};
 function kbPerguntarData(ev,convId,btn){_cpPrefill=KB_PERGUNTA_DATA;kbAbrirChat(ev,convId,'conversas',btn);}
 function kbResponderChat(convId){
@@ -10608,6 +10673,7 @@ function kbLeadStatus(sel,id){
   fetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
     .then(function(r){return r.json();}).then(function(d){
       if(!d.ok){alert('Não consegui mudar a situação.');sel.value=prev;return;}
+      if(window.KB_VISTA==='mes'){location.reload();return;}
       var card=document.querySelector('.kbcard[data-id="'+id+'"]');
       var colNova=document.querySelector('.kbcol[data-status="'+novo+'"] .kbdrop');
       if(card&&colNova){var vazio=colNova.querySelector('.kbempty');if(vazio)vazio.remove();colNova.appendChild(card);}

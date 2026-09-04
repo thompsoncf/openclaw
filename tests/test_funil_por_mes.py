@@ -25,7 +25,7 @@ CONTA = 11
 
 _SQL = """
 create table contas (id bigserial primary key, chip_de bigint, nome text);
-create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
+create table prospeccao (id bigserial primary key, orcamento_id bigint, conta_id bigint, vendedor_id bigint,
   empresa text not null, segmento text, cidade text, uf text, telefone text, whatsapp text,
   email text, instagram text, temperatura text default 'frio',
   valor_estimado_centavos bigint default 0, proximo_contato_em date,
@@ -99,12 +99,12 @@ def _conversa(pool, lead_id, msg_ha_dias=None):
     return cid
 
 
-def _html(monkeypatch, pool, vendedor="", mes="") -> str:
+def _html(monkeypatch, pool, vendedor="", mes="", vista="") -> str:
     monkeypatch.setattr(pp, "get_pool", lambda: pool)
     monkeypatch.setattr(pp, "_acesso", lambda req: (
         {"conta_id": CONTA, "membro_id": 1, "gerencia": True, "pode_atribuir": True}, None))
     req = SimpleNamespace(session={}, query_params=QueryParams(""))
-    r = pp.prospeccao_kanban(req, vendedor=vendedor, mes=mes)
+    r = pp.prospeccao_kanban(req, vendedor=vendedor, mes=mes, vista=vista)
     assert r.status_code == 200
     return bytes(r.body).decode("utf-8")
 
@@ -270,3 +270,95 @@ def test_o_filtro_de_mes_sobrevive_a_troca_de_vendedor(monkeypatch, pool, vende_
     _lead(pool, "Com Data", evento_em=date(2027, 1, 16))
     html = _html(monkeypatch, pool, mes="2027-01")
     assert '<input type="hidden" name="mes" value="2027-01">' in html
+
+
+# ------------------------------------------------------------------ vista por mês
+def _visita(pool, lead_id, em_dias=2, hora=10):
+    with pool.connection() as c:
+        c.execute("""create table if not exists eventos_agenda (id bigserial primary key,
+                       conta_id bigint, prospeccao_id bigint, titulo text, inicio timestamptz,
+                       status text default 'ativo')""")
+        c.execute("insert into eventos_agenda (conta_id, prospeccao_id, titulo, inicio) "
+                  "values (%s,%s,'Visita', date_trunc('day', now()) + %s * interval '1 day' + %s * interval '1 hour')",
+                  (CONTA, lead_id, em_dias, hora + 3))   # +3: Brasília é UTC-3
+        c.commit()
+
+
+def test_o_botao_da_vista_so_existe_em_conta_que_vende_data(monkeypatch, pool, vende_data):
+    _lead(pool, "A")
+    html = _html(monkeypatch, pool)
+    assert 'href="/painel/prospeccao?vista=mes">Por mês do evento</a>' in html
+
+
+def test_conta_de_mensalidade_nao_tem_a_vista_nem_por_url(monkeypatch, pool):
+    import finance.vendas as v
+    monkeypatch.setattr(v, "vende_data", lambda pool, conta_id: False)
+    _lead(pool, "A", evento_em=date(2027, 1, 16))
+    html = _html(monkeypatch, pool, vista="mes")
+    assert "Por mês do evento" not in html
+    assert 'data-status="contatado"' in html and 'data-status="2027-01"' not in html
+
+
+def test_na_vista_por_mes_as_colunas_sao_meses_e_sem_data_por_ultimo(monkeypatch, pool, vende_data):
+    _lead(pool, "Janeiro", evento_em=date(2027, 1, 16))
+    _lead(pool, "Novembro", evento_em=date(2026, 11, 14), status="proposta")
+    _lead(pool, "Sem Data")
+    _lead(pool, "Perdido", evento_em=date(2026, 11, 20), status="perdido")
+    html = _html(monkeypatch, pool, vista="mes")
+    i_nov, i_jan, i_sem = (html.index('data-status="2026-11"'), html.index('data-status="2027-01"'),
+                           html.index('data-status="sem"'))
+    assert i_nov < i_jan < i_sem
+    assert 'data-status="contatado"' not in html
+    assert "Perdido" not in _coluna(html, "2026-11")          # fora da vista
+    assert "Nov 26</span><span class=\"kbcnt\">1</span>" in html
+    assert "Sem data</span><span class=\"kbcnt\">1</span>" in html
+
+
+def test_na_vista_por_mes_a_etapa_vira_selo_no_card(monkeypatch, pool, vende_data):
+    a = _lead(pool, "Contatada", evento_em=date(2026, 11, 14))
+    b = _lead(pool, "Feita", evento_em=date(2026, 11, 20), status="ganho")
+    html = _html(monkeypatch, pool, vista="mes")
+    assert '<span class="kbetapa">Contatado</span>' in _card(html, a)
+    assert '<span class="kbetapa real">Ganho</span>' in _card(html, b)
+    # na vista por etapa o selo não existe: a coluna já diz a etapa
+    assert "kbetapa" not in _card(_html(monkeypatch, pool), a).split("kbmsg")[0]
+
+
+def test_o_selo_traz_o_numero_da_proposta_e_a_proxima_visita(monkeypatch, pool, vende_data):
+    with pool.connection() as c:
+        c.execute("create table orcamentos (id bigserial primary key, conta_id bigint, numero int)")
+        oid = c.execute("insert into orcamentos (conta_id, numero) values (%s, 58) returning id",
+                        (CONTA,)).fetchone()[0]
+        c.commit()
+    a = _lead(pool, "Marina", evento_em=date(2026, 12, 19), status="proposta")
+    with pool.connection() as c:
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, a))
+        c.commit()
+    b = _lead(pool, "Bruna", evento_em=date(2026, 11, 21), status="qualificado")
+    _visita(pool, b, em_dias=2, hora=10)
+    html = _html(monkeypatch, pool, vista="mes")
+    assert '<span class="kbetapa prop">Proposta nº 58</span>' in _card(html, a)
+    assert '<span class="kbetapa vis">Visita ' in _card(html, b) and "10h</span>" in _card(html, b)
+
+
+def test_a_vista_por_mes_nao_arrasta_card_e_recarrega_ao_trocar_etapa(monkeypatch, pool, vende_data):
+    a = _lead(pool, "A", evento_em=date(2027, 1, 16))
+    html = _html(monkeypatch, pool, vista="mes")
+    assert f'draggable="false" data-id="{a}"' in html and "kbDrag(" not in _card(html, a)
+    assert 'ondrop=' not in html.split('id="kbrow"')[1].split("</div>")[0]
+    assert 'window.KB_VISTA="mes"' in html
+    assert "if(window.KB_VISTA==='mes'){location.reload();return;}" in html
+    # a vista por etapa segue arrastando
+    assert f'draggable="true" data-id="{a}"' in _html(monkeypatch, pool)
+
+
+def test_na_vista_por_mes_sem_data_continua_com_a_dobra_dos_parados_e_o_trilho_some(monkeypatch, pool, vende_data):
+    q = _lead(pool, "Quieto", criado_em=datetime.now(timezone.utc) - timedelta(days=30))
+    _conversa(pool, q, msg_ha_dias=20)
+    _lead(pool, "Vivo")
+    _lead(pool, "Com Data", evento_em=date(2027, 1, 16))
+    html = _html(monkeypatch, pool, vista="mes")
+    sem = _coluna(html, "sem")
+    assert "Parados 15+ dias <b>1</b>" in sem and "Quieto" in sem.split("kbdobra")[1]
+    assert 'id="trilho"' not in html
+    assert '<input type="hidden" name="vista" value="mes">' in html

@@ -70,6 +70,7 @@ PAGINAS = {
                           "cards": [_CARD], "n": 1}], "contatado": []},
         modo_evento=True, pergunta_data="Pra qual data você está pensando?",
         trilho_itens=[], filtro_mes="", filtro_mes_rotulo="", totais_col={},
+        vista_mes=False, vista_cols=None,
         temp_cor={"quente": "#e0574f"}, temp_pill={"quente": "Quente"},
         gerencia=False, pode_atribuir=False, vendedores=[], filtro_vend="",
         total_valor=420000, total_alvos=1, tem_places=False, tem_maps_js=False,

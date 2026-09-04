@@ -206,6 +206,15 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — wa_silencio falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
+                # Quanto o WhatsApp deixou de decifrar hoje — mensagem de cliente
+                # perdida, e eco de resposta que sumiu do painel. O wa_qr_log só
+                # guarda 48h, então sem esta foto diária a pergunta "isso piorou?"
+                # não tem como ser respondida.
+                from finance import wa_decifra as _wdec
+                _wdec.rodar(pool)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — wa_decifra falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
                 from finance import aprovacao_aviso as _ap
                 # A fila de liberação do dono só existe pra quem abre a tela de
                 # Empresa — e quem abre a tela todo dia é quem LANÇA, não quem

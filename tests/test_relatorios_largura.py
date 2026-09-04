@@ -79,20 +79,39 @@ RELATORIOS = {
 }
 
 
-def test_todo_relatorio_tem_exatamente_uma_coluna_elastica():
-    """Zero devolve a rolagem lateral do print; duas brigam pela sobra e nenhuma
-    das duas fica previsível."""
+def test_todo_relatorio_tem_ao_menos_uma_coluna_elastica():
+    """ZERO é o bug: devolve a rolagem lateral do print de 26/08, e o que sai da
+    área visível é a primeira coluna e o começo do nome.
+
+    A regra era "exatamente uma", por medo de que duas brigassem pela sobra. Não
+    brigam: com o mesmo `width` no CSS, dois pedidos que não cabem viram duas
+    fatias iguais do que existe — repartimento do algoritmo da tabela, não sorte.
+    Contas a pagar/receber precisam de duas (Descrição e Fornecedor são os dois
+    nomes livres, e o fornecedor chega a 42 caracteres em produção). O teto de
+    duas continua valendo: a partir da terceira cada fatia fica estreita demais
+    pra caber nome nenhum, e a tabela vira três colunas de reticências."""
     fonte = open(pr.__file__, encoding="utf-8").read()
     # cada bloco "colunas": [...] é um relatório
     blocos = re.findall(r'"colunas":\s*\[(.*?)\]\s*,\s*\n', fonte, re.S)
     assert len(blocos) >= 6, f"esperava ao menos 6 relatórios, achei {len(blocos)}"
     for i, b in enumerate(blocos):
         n = b.count("flex=True")
-        assert n == 1, (
-            f"relatório #{i + 1} tem {n} colunas elásticas (tem que ser exatamente 1).\n"
+        assert 1 <= n <= 2, (
+            f"relatório #{i + 1} tem {n} colunas elásticas (tem que ser 1 ou 2).\n"
             f"Marque a coluna de nome livre com flex=True em _col(...): sem ela a\n"
             f"tabela volta a rolar pro lado e engole a primeira coluna.\n"
             f"Colunas: {b.strip()[:140]}")
+
+
+def test_as_elasticas_dividem_a_sobra_em_partes_iguais():
+    """O que torna duas elásticas previsíveis é UMA regra de CSS valendo pra todas:
+    mesma largura pedida, mesma fatia recebida. Se alguém der largura própria a uma
+    delas, a divisão deixa de ser igual e volta a valer o medo que criou a regra
+    antiga."""
+    larguras = re.findall(r"td\.rel-flex\{[^}]*?width:\s*([\w%]+)", _TPL)
+    assert larguras, "sumiu a largura da coluna elástica"
+    assert len(set(larguras)) == 1, \
+        f"as elásticas pedem larguras diferentes ({larguras}) — a sobra deixa de dividir igual"
 
 
 def test_a_elastica_e_sempre_de_nome_livre():

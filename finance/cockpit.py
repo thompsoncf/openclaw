@@ -1637,7 +1637,37 @@ def mudar_status_orcamento(pool, conta_id: int, orc_id: int, novo: str,
         if atual and atual[0] == "fechado":
             return {"ok": False, "erro": "Essa proposta já virou contrato — não dá pra reabrir."}
         return {"ok": False, "erro": "Proposta não encontrada (ou não é sua)."}
-    return {"ok": True, "status": novo, "msg": f"Proposta marcada como {_ROT_ORC.get(novo, novo)} ✓"}
+    # MOVER PRA "APROVADA" TAMBÉM FAZ O CONTRATO NASCER.
+    #
+    # O contrato nascia só na aprovação do CLIENTE (web/proposta). Quando o
+    # vendedor marcava aprovada aqui — porque o cliente disse sim no WhatsApp, que
+    # é o caso comum — o negócio ficava sem documento nenhum, e o funil pedia
+    # "Mandar o contrato pra assinar" apontando pro vazio.
+    #
+    # NÃO se grava `aprovada_em`: aquilo é a assinatura do cliente, e o vendedor
+    # não assina no lugar dele. É o que mantém a folha pública mostrando o botão de
+    # assinar — se o cliente entrar no link depois, ele ainda pode aprovar, e a
+    # criação do contrato é idempotente, então não sai um segundo.
+    #
+    # Idempotente e tolerante: `criar_para_orcamento` devolve None fora do nicho de
+    # eventos, e uma falha aqui não pode desfazer um movimento de card que já
+    # aconteceu — o status é o registro, o contrato é a consequência.
+    contrato_id = None
+    if novo == "aprovada":
+        try:
+            from finance import contrato as _ctr
+            with pool.connection() as c:
+                tot = c.execute("select coalesce(primeiro_ano_centavos, setup_centavos, 0) "
+                                "from orcamentos where id=%s and conta_id=%s",
+                                (int(orc_id), conta_id)).fetchone()
+            ct = _ctr.criar_para_orcamento(pool, conta_id, int(orc_id),
+                                           valor_centavos=int(tot[0]) if tot else None)
+            contrato_id = ct["id"] if ct else None
+        except Exception as e:  # noqa: BLE001
+            _log.warning("mudar_status %s: não deu pra criar o contrato: %s: %s",
+                         orc_id, type(e).__name__, e)
+    return {"ok": True, "status": novo, "contrato_id": contrato_id,
+            "msg": f"Proposta marcada como {_ROT_ORC.get(novo, novo)} ✓"}
 
 
 def confirmar_sinal(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None) -> dict:

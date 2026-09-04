@@ -274,8 +274,18 @@ def _ip(request: Request) -> str:
 
 
 def registrar_assinatura(pool, token: str, nome: str, doc: str, ip: str) -> bool:
-    """Grava a assinatura (idempotente): só assina se ainda não foi aprovada/fechada.
-    Devolve True se assinou agora."""
+    """Grava a assinatura (idempotente): só assina se ainda não foi assinada.
+    Devolve True se assinou agora.
+
+    A TRAVA É `aprovada_em`, NÃO O STATUS — o outro lado da mesma correção que está
+    em `assinada` (ver o comentário longo lá). Enquanto era `status not in
+    ('aprovada','fechado')`, o vendedor mover o card pra "Aprovada" fechava a
+    porta por dentro: o formulário sumia da folha E o update recusaria a assinatura
+    se o cliente conseguisse enviá-la. Duas travas para um estado que o cliente
+    nunca produziu.
+
+    'fechado' continua barrando: ali o negócio virou contrato com títulos gerados,
+    e assinar de novo não teria o que significar."""
     nome = (nome or "").strip()
     if not nome:
         return False
@@ -284,7 +294,8 @@ def registrar_assinatura(pool, token: str, nome: str, doc: str, ip: str) -> bool
             """update orcamentos
                   set aprovada_por=%s, aprovada_doc=%s, aprovada_ip=%s,
                       aprovada_em=now(), status='aprovada', atualizado_em=now()
-                where token=%s and status not in ('aprovada','fechado')
+                where token=%s and aprovada_em is null
+                  and coalesce(status,'') <> 'fechado'
               returning id""",
             (nome[:120], (doc or "").strip()[:40] or None, (ip or "")[:60], token)).fetchone()
         c.commit()
@@ -565,7 +576,23 @@ def proposta_publica(request: Request, token: str, erro: str = ""):
     d["data_str"] = f"{d['criado'].day} de {_MES[d['criado'].month]} de {d['criado'].year}"
     d["validade_str"] = d["validade"].strftime("%d/%m/%Y")
     d["aprovada_str"] = d["aprovada_em"].strftime("%d/%m/%Y às %H:%M") if d["aprovada_em"] else ""
-    d["assinada"] = d["status"] in ("aprovada", "fechado")
+    # ASSINADA É SOBRE A ASSINATURA, NÃO SOBRE O STATUS.
+    #
+    # Era `status in ('aprovada','fechado')`, e isso confundia duas coisas que só
+    # coincidem quando o cliente responde: o status é do FUNIL e o vendedor move à
+    # mão; a assinatura é do CLIENTE e só ele produz. Quando o vendedor arrastava o
+    # card pra "Aprovada", esta linha concluía que o cliente já tinha respondido,
+    # escondia o formulário — e, sem `aprovada_por` pra mostrar, a folha caía no
+    # último caso do template: "✓ Proposta fechada. Esta proposta já foi
+    # contratada". O cliente lia isso sem nunca ter assinado nada.
+    #
+    # Aconteceu com o orçamento nº 20 da Prime (Kelma, 03/09): mandado às 17:19,
+    # status movido à mão às 18:47, e a cliente trancada do lado de fora. O
+    # contrato, que nasce na aprovação DELA, nunca existiu.
+    #
+    # 'fechado' continua contando: aí o negócio foi fechado de verdade, com
+    # títulos gerados, e não há o que assinar.
+    d["assinada"] = bool(d["aprovada_em"]) or d["status"] == "fechado"
     # SINAL na folha do cliente. ANTES de assinar ainda não há nada gravado no
     # orçamento — o valor sai da 1ª parcela, que é justamente onde a folha escreve
     # "Sinal — confirma a reserva da data". DEPOIS vale o que foi gravado.

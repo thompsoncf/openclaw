@@ -496,7 +496,13 @@ def test_so_quem_tem_gerir_ve_os_botoes_de_decisao():
     assert eq.caps_do_papel("dono")["gerir"] is True
     for papel in ("gestor", "financeiro", "vendedor"):
         assert eq.caps_do_papel(papel)["gerir"] is False, papel
-    assert "{% if pode_liberar and t.tipo=='pagar'" in portal._EMPRESA
+    # A condição ganhou `pode_decidir` em 04/09/2026, quando a lista virou dois
+    # blocos: liberar e recusar só existem no de baixo, e param de aparecer no que
+    # já foi decidido. O que este teste guarda é o `pode_liberar` — sem ele, quem
+    # não é dono veria botão que o servidor recusa.
+    for guarda in ("pode_liberar and t.tipo=='pagar' and t.aprovacao!='autorizado'",
+                   "pode_liberar and t.aprovacao=='aguardando'"):
+        assert guarda in portal._EMPRESA, guarda
 
 
 def test_a_rota_de_decisao_barra_quem_nao_e_dono():

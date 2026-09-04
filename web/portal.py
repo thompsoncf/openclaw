@@ -3956,6 +3956,24 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       border-radius:7px;padding:.34rem .8rem;font-size:.78rem;font-weight:600;
       cursor:pointer;width:auto}
     .tit-ck{width:auto;margin:0 .3rem 0 0;accent-color:var(--verde)}
+    /* Os três blocos. A cor da borda e do cabeçalho é o que separa de longe:
+       verde é "pode pagar", âmbar é "ainda depende de você". */
+    .tit-bloco{border:1px solid var(--borda);border-radius:11px;overflow:hidden;
+      margin:.7rem 0}
+    .tit-bloco.ok{border-color:#1E4A3A}
+    .tit-bloco.esp{border-color:#5A4520}
+    .tit-bcab{display:flex;flex-wrap:wrap;gap:.5rem;align-items:baseline;
+      padding:.55rem .8rem;background:var(--card-2);border-bottom:1px solid var(--borda)}
+    .tit-bloco.ok .tit-bcab{background:#10241A}
+    .tit-bloco.esp .tit-bcab{background:#241C0F}
+    .tit-bt{font-weight:600;font-size:.88rem}
+    .tit-bloco.ok .tit-bt{color:#9fe8c9}
+    .tit-bloco.esp .tit-bt{color:#f0dca6}
+    .tit-bs{font-size:.76rem;color:var(--txt-mut);font-variant-numeric:tabular-nums}
+    .tit-bd{font-size:.74rem;color:var(--txt-mut);flex:1 1 100%}
+    /* dentro do bloco a linha não precisa da borda de cima da primeira */
+    .tit-bloco .tit-lin{padding:.6rem .8rem}
+    .tit-bloco .tit-lin:first-of-type{border-top:0}
   </style>
   <form method="post" action="/painel/empresa/titulo" class="emp-form" style="display:grid;grid-template-columns:1fr 2fr 1fr 1fr 1.4fr auto;gap:.5rem;margin:.7rem 0;align-items:end">
     <label style="font-size:.72rem;color:#8a938a">Tipo<select name="tipo" onchange="titTipoTroca(this)" style="width:100%">
@@ -4004,13 +4022,19 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   <form method="post" action="/painel/empresa/titulo/aprovacao" id="tit-lote-form">
     <input type="hidden" name="decisao" value="autorizado">
     <div class="tit-lote">⏳ <b>{{ n_aguardando }}</b> conta{{ 's' if n_aguardando != 1 }}
-      esperando você. Marque na lista e libere de uma vez:
-      <button type="submit">✓ liberar as marcadas</button></div>
+      esperando você, no bloco de baixo. Marque e libere de uma vez —
+      <b>liberar não paga</b>, autoriza:
+      <button type="submit">✓ liberar as marcadas</button>
+      <a href="/painel/relatorios?tipo=contas_pagar" style="color:var(--verde-claro);font-size:.78rem">ou libere olhando o relatório →</a></div>
   </form>
   {% endif %}
-  {% for t in titulos %}<div class="tit-lin">
+{% macro tit_linha(t, pode_decidir) %}
+  <div class="tit-lin">
     <div class="tit-id">
-      <div class="tit-desc">{% if pode_liberar and t.aprovacao=='aguardando' %}<input class="tit-ck" type="checkbox" name="ids" value="{{ t.id }}" form="tit-lote-form">{% endif %}{{ t.descricao }}{% if t.contraparte %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}
+      <div class="tit-desc">{% if pode_decidir and pode_liberar and t.aprovacao=='aguardando' %}<input class="tit-ck" type="checkbox" name="ids" value="{{ t.id }}" form="tit-lote-form">{% endif %}{{ t.descricao }}{#- o fornecedor saía DUAS vezes na mesma linha: aqui e no 👤
+        de baixo, porque o cadastro vinculado tem o mesmo nome da contraparte
+        digitada — 31 de 31 títulos a pagar da Prime. Fica o de baixo, que é
+        link pra ficha. -#}{% if t.contraparte and t.contraparte|lower|trim != (t.cliente_nome or '')|lower|trim %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}
         {% if t.aprovacao=='aguardando' %} <span class="selo esp">aguardando {{ 'você' if pode_liberar else 'o dono' }}</span>{% elif t.aprovacao=='recusado' %} <span class="selo rec">recusado</span>{% endif %}
         {% if t.sem_fornecedor %} <span class="selo falta">sem fornecedor</span>{% endif %}</div>
       <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span> · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}{% if t.criado_nome %} · lançado por {{ t.criado_nome }}{% endif %}{% if t.aprovacao=='autorizado' and t.aprovado_nome %} · liberado por {{ t.aprovado_nome }}{% endif %}{% if t.aprovacao_motivo %} · <span style="color:#e07a5f">"{{ t.aprovacao_motivo }}"</span>{% endif %}</div>
@@ -4048,13 +4072,13 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         <button style="color:var(--verde-claro);border-color:#1E4A3A"
           title="{{ t.conciliar.titulo|e }}">✓ já foi paga — {{ t.conciliar.resumo }}</button></form>
       {% endif %}
-      {% if pode_liberar and t.tipo=='pagar' and t.aprovacao!='autorizado' %}
+      {% if pode_decidir and pode_liberar and t.tipo=='pagar' and t.aprovacao!='autorizado' %}
       <form method="post" action="/painel/empresa/titulo/aprovacao">
         <input type="hidden" name="titulo_id" value="{{ t.id }}">
         <input type="hidden" name="decisao" value="autorizado">
         <button style="color:var(--verde-claro);border-color:#1E4A3A">✓ liberar</button></form>
       {% endif %}
-      {% if pode_liberar and t.tipo=='pagar' and t.aprovacao=='aguardando' %}
+      {% if pode_decidir and pode_liberar and t.tipo=='pagar' and t.aprovacao=='aguardando' %}
       <form method="post" action="/painel/empresa/titulo/aprovacao"
             onsubmit="var m=prompt('Por que está recusando? (o motivo vai pra quem lançou)');
                       if(m===null)return false; this.motivo.value=m; return true">
@@ -4083,7 +4107,28 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       <button style="background:var(--verde);color:var(--sobre-verde);border:0">salvar</button>
       <button type="button" onclick="titEditToggle(this)" style="color:#8a938a">cancelar</button>
     </form>
-  </div>{% endfor %}
+  </div>
+{% endmacro %}
+
+  {#- TRÊS BLOCOS, e cada um responde uma pergunta. Pedido do dono em 04/09/2026:
+     "coloca lá na aba Empresa, em contas a pagar, uma lista de contas autorizadas
+     depois que ele liberar lá no relatório". Antes era uma lista só e quem
+     quisesse saber o que podia pagar lia o selo linha por linha.
+
+     Os botões seguem o bloco: liberar e recusar só existem em "esperando", e
+     param de aparecer no que já foi decidido — daí o `pode_decidir` do macro.
+
+     As A RECEBER ficam num bloco à parte porque liberação não existe pra elas:
+     ninguém autoriza dinheiro entrando. Jogá-las em "liberadas" — que é onde
+     cairiam, já que nascem `autorizado` — seria mentira de rótulo. -#}
+  {% for bloco in tit_blocos %}{% if bloco.itens %}
+  <div class="tit-bloco {{ bloco.cor }}">
+    <div class="tit-bcab"><span class="tit-bt">{{ bloco.titulo }}</span>
+      <span class="tit-bs">{{ bloco.itens|length }} · {{ bloco.centavos|brl }}</span>
+      {% if bloco.dica %}<span class="tit-bd">{{ bloco.dica }}</span>{% endif %}</div>
+    {% for t in bloco.itens %}{{ tit_linha(t, bloco.decide) }}{% endfor %}
+  </div>
+  {% endif %}{% endfor %}
   {% else %}<div class="mut" style="font-size:.85rem">Nenhum título em aberto. Adicione acima — ou peça pro Zaq no WhatsApp.</div>{% endif %}
   <script>
   function titEditToggle(btn){
@@ -10283,6 +10328,35 @@ def painel_empresa(request: Request):
                     "já está no caixa. Nenhum dinheiro novo é lançado — diferente "
                     "do “dar baixa” ao lado, que lançaria a despesa outra vez."),
             }
+    # TRÊS BLOCOS, cada um respondendo uma pergunta. Pedido do dono em 04/09/2026:
+    # "coloca lá na aba Empresa, em contas a pagar, uma lista de contas
+    # autorizadas depois que ele liberar lá no relatório". Antes era uma lista só,
+    # e pra saber o que podia pagar era preciso ler o selo linha por linha.
+    #
+    # A ordem dos blocos é a ordem em que se usa a tela: primeiro o que dá pra
+    # pagar hoje, depois o que ainda depende do dono, por último o que entra.
+    #
+    # As A RECEBER ficam à parte porque liberação não existe pra elas — ninguém
+    # autoriza dinheiro entrando. Elas nascem `autorizado` por padrão, então cairiam
+    # em "liberadas" e o rótulo estaria mentindo.
+    def _soma(itens):
+        return sum(int(t["valor_centavos"] or 0) for t in itens)
+
+    _pagar = [t for t in titulos if t["tipo"] == "pagar"]
+    _liberadas = [t for t in _pagar if t.get("aprovacao") == "autorizado"]
+    _esperando = [t for t in _pagar if t.get("aprovacao") != "autorizado"]
+    _receber = [t for t in titulos if t["tipo"] != "pagar"]
+    tit_blocos = [
+        {"titulo": "✅ Liberadas — pode pagar", "cor": "ok", "decide": False,
+         "itens": _liberadas, "centavos": _soma(_liberadas), "dica": ""},
+        {"titulo": "⏳ Esperando liberação", "cor": "esp", "decide": True,
+         "itens": _esperando, "centavos": _soma(_esperando),
+         "dica": ("libere várias de uma vez no relatório de Contas a pagar"
+                  if _esperando else "")},
+        {"titulo": "A receber", "cor": "rec", "decide": False,
+         "itens": _receber, "centavos": _soma(_receber),
+         "dica": "sem liberação: ninguém autoriza dinheiro entrando" if _receber else ""},
+    ]
     # Os PAGOS numa seção à parte, recolhida. A tela mostrava só 'aberto', então título
     # baixado sumia do app inteiro — e o que tinha sido baixado por engano (ou cujo
     # lançamento foi apagado no financeiro) ficava preso pra sempre, sem caminho nenhum.
@@ -10302,7 +10376,8 @@ def painel_empresa(request: Request):
                        "on n.id=ct.nicho_id where ct.id=%s", (conta[0],)).fetchone()
     rotulo_receber = _nichos.rotulo_receber(_r[0] if _r else "")
     return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
-                   dre=dre, titulos=titulos, titulos_pagos=titulos_pagos,
+                   dre=dre, titulos=titulos, tit_blocos=tit_blocos,
+                   titulos_pagos=titulos_pagos,
                    folha=folha, clientes_lista=clientes_lista,
                    fornecedores_lista=fornecedores_lista, carteira=carteira,
                    rotulo_receber=rotulo_receber, tem_pj=True,

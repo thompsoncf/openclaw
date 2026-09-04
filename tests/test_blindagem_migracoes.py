@@ -102,7 +102,11 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   criado_em timestamptz default now(), chip_id bigint, visto_ate_id bigint);
 -- orcamentos vem da 045 (marcada como aplicada); a 147 dá a ela o modo evento
 -- (colunas do evento/parcelas, numeração por conta e o backfill do número).
-create table orcamentos (id bigserial primary key, conta_id bigint references contas(id));
+-- criado_por é da 068 (também marcada como aplicada) — a 197 é a primeira
+-- migração ≥088 a lê-la em SQL cru (backfill do vendedor no título), e sem a
+-- coluna aqui ela quebraria só neste teste.
+create table orcamentos (id bigserial primary key, conta_id bigint references contas(id),
+  criado_por text);
 -- servicos_catalogo é criada em runtime (finance/servicos_catalogo.garantir_tabela);
 -- a 148 adiciona categoria/foto do item.
 create table servicos_catalogo (id bigserial primary key, conta_id bigint references contas(id),

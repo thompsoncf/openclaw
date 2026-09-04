@@ -355,6 +355,30 @@ def resumo_titulos(pool, conta_id: int, dias: int = 7) -> dict:
     return res
 
 
+def prazo_do_vencimento(vencimento, hoje) -> tuple[str, str]:
+    """"há 20 dias", "amanhã", "em 6 dias" — e a cor. ("", "") sem data.
+
+    Mora aqui porque duas telas dizem a mesma coisa e não podem dizer diferente:
+    o relatório de Contas a pagar (onde ela substituiu a coluna Status) e a lista
+    da aba Empresa. "Vencida" e "atrasado" são `vencimento < hoje` — a data ao
+    lado já continha o fato. O que faltava é a distância: dever há 4 dias e dever
+    há 20 é a mesma palavra e urgências diferentes, e é a distância que decide
+    quem se liga primeiro.
+    """
+    if not vencimento or not hoje:
+        return "", ""
+    dias = (vencimento - hoje).days
+    if dias < -1:
+        return f"há {-dias} dias", "erro"
+    if dias == -1:
+        return "ontem", "erro"
+    if dias == 0:
+        return "hoje", "aviso"
+    if dias == 1:
+        return "amanhã", "aviso"
+    return f"em {dias} dias", ("aviso" if dias <= 7 else "ok")
+
+
 def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                      data_pagto: date | None = None,
                      membro_id: int | None = None) -> dict:
@@ -846,6 +870,13 @@ def decidir_aprovacao(pool, conta_id: int, ids, decisao: str,
     dinheiro que saiu e só embaralharia o histórico; o que ficou pago sem
     liberação tem marca própria (`pago_sem_autorizacao`).
 
+    E SÓ NO QUE MUDA (`aprovacao <> decisao`). Desde 04/09/2026 a liberação em
+    lote mora no relatório de Contas a pagar, onde o dono marca linhas olhando a
+    lista inteira — e uma linha já liberada pode entrar na marcação por engano.
+    Sem este filtro ela seria recarimbada: `aprovado_em` de hoje numa conta
+    decidida semana passada, e o aviso dizendo "5 contas liberadas" quando só uma
+    precisava. O que se conta é o que mudou.
+
     Não valida PAPEL de propósito — quem sabe quem está logado é a tela, e é lá
     que o portão fica. Este módulo não tem sessão."""
     if decisao not in APROVACOES:
@@ -858,9 +889,10 @@ def decidir_aprovacao(pool, conta_id: int, ids, decisao: str,
             """update titulos
                   set aprovacao=%s, aprovado_por=%s, aprovado_em=now(),
                       aprovacao_motivo=%s
-                where conta_id=%s and id = any(%s) and status='aberto'""",
+                where conta_id=%s and id = any(%s) and status='aberto'
+                  and aprovacao <> %s""",
             (decisao, membro_id, (motivo or "").strip()[:300] or None,
-             conta_id, lista))
+             conta_id, lista, decisao))
         c.commit()
     return cur.rowcount
 

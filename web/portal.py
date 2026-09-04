@@ -6368,6 +6368,23 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   .rel-tbl-wrap table td.rel-venc.erro,
   .rel-tbl-wrap table td.rel-venc.erro .rel-prazo{color:var(--coral)}
   .rel-tbl-wrap table td.rel-venc.aviso .rel-prazo{color:var(--ambar)}
+  /* A liberação em lote: a coluna da caixa, o aviso e a barra que gruda. */
+  .rel-tbl-wrap table th.rel-sel,.rel-tbl-wrap table td.rel-sel{width:1%;padding-right:0}
+  .rel-tbl-wrap table .rel-sel input{width:auto;margin:0;accent-color:var(--verde);
+   cursor:pointer}
+  .rel-lote-aviso{margin:.2rem 0 .6rem;padding:.6rem .8rem;border-radius:10px;
+   border:1px solid var(--ambar-borda);background:var(--ambar-fundo);
+   color:#f0dca6;font-size:.82rem;line-height:1.5}
+  .rel-lote-aviso b{color:#fff0cf}
+  .rel-lote-barra{position:sticky;bottom:.6rem;z-index:4;display:flex;flex-wrap:wrap;
+   gap:.8rem;align-items:center;margin:.7rem 0 .2rem;padding:.6rem .9rem;
+   border:1px solid var(--verde);background:var(--neon-fundo);border-radius:10px;
+   font-size:.84rem;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+  .rel-lote-barra b{color:var(--verde-claro)}
+  .rel-lote-barra button{margin-left:auto;background:var(--verde);
+   color:var(--sobre-verde);border:0;border-radius:7px;padding:.42rem .95rem;
+   font-size:.82rem;font-weight:600;cursor:pointer;width:auto}
+  @media(max-width:560px){.rel-lote-barra button{margin-left:0}}
   /* São até 300 linhas. Rolar 200 e não lembrar qual coluna é qual faz a pessoa
      rolar de volta só pra conferir o cabeçalho. */
   .rel-tbl-wrap{max-height:70vh;overflow-y:auto}
@@ -6521,14 +6538,29 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
      carrega o `max-width:0`, senão a segunda elástica volta pro piso de 107px. -#}
   {% set elasticas = dados.colunas|selectattr("parte")|list %}
   {% if elasticas %}<style>{% for col in dados.colunas %}{% if col.parte
-    %}.rel-tbl-wrap td.rel-flex:nth-child({{ loop.index }}){width:{{ col.parte }}%}{% endif %}{% endfor %}</style>{% endif %}
+    %}.rel-tbl-wrap td.rel-flex:nth-child({{ loop.index + (1 if dados.selecao else 0) }}){width:{{ col.parte }}%}{% endif %}{% endfor %}</style>{% endif %}
+  {% if dados.selecao %}
+  {#- A LIBERAÇÃO EM LOTE. O form não envolve a tabela: as caixas se ligam a ele
+     pelo atributo `form=`, que é o que permite marcá-las espalhadas pelas linhas
+     sem aninhar formulário dentro de <table> (o navegador reescreve isso). #}
+  <form method="post" action="{{ dados.selecao.url }}" id="rel-lote"></form>
+  <div class="rel-lote-aviso">⏳ <b>{{ dados.selecao.n }}</b>
+    conta{{ 's' if dados.selecao.n != 1 }} esperando você liberar,
+    somando <b>{{ dados.selecao.centavos|brl }}</b>. Marque e libere de uma vez —
+    <b>liberar não paga</b>: autoriza o pagamento, e o dinheiro só sai quando
+    alguém der baixa.</div>
+  {% endif %}
   <table>
     <thead>
-    <tr>{% for col in dados.colunas %}<th{% if col.num %} class="rel-num"{% endif %}>{{ col.rotulo }}</th>{% endfor %}{% if dados.acao %}<th></th>{% endif %}</tr>
+    <tr>{% if dados.selecao %}<th class="rel-sel"><input type="checkbox" id="rel-todas"
+      aria-label="Marcar todas as que esperam liberação"></th>{% endif %}{% for col in dados.colunas %}<th{% if col.num %} class="rel-num"{% endif %}>{{ col.rotulo }}</th>{% endfor %}{% if dados.acao %}<th></th>{% endif %}</tr>
     </thead>
     <tbody>
     {% for row in dados.linhas %}
-    <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% elif col.venc %} class="rel-venc {{ row.prazo_cor }}"{% elif col.flex %} class="rel-flex" title="{{ row[col.chave] }}"{% endif %}{% if col.chave == dados.col_total %} data-c="{{ row[col.chave] }}"{% endif %}>{% if col.tag %}{#- pílula SÓ quando há valor: a coluna "Quitou" é
+    <tr>{% if dados.selecao %}<td class="rel-sel">{% if row.sel_id %}<input
+      type="checkbox" class="rel-ck" name="{{ dados.selecao.campo }}"
+      value="{{ row.sel_id }}" form="rel-lote" data-c="{{ row.valor_centavos }}"
+      aria-label="Marcar {{ row.descricao }}">{% endif %}</td>{% endif %}{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% elif col.venc %} class="rel-venc {{ row.prazo_cor }}"{% elif col.flex %} class="rel-flex" title="{{ row[col.chave] }}"{% endif %}{% if col.chave == dados.col_total %} data-c="{{ row[col.chave] }}"{% endif %}>{% if col.tag %}{#- pílula SÓ quando há valor: a coluna "Quitou" é
       esparsa por desenho (o elo é raro), e uma pílula vazia em cada linha vira
       ruído com borda. -#}{% if row[col.chave] %}<span
       class="rel-tag {{ row[col.chave ~ '_cor'] }}">{{ row[col.chave] }}</span>{% endif
@@ -6574,7 +6606,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
       %}<input type="hidden" name="{{ k|e }}" value="{{ v|e }}">{% endfor %}<button type="submit"
       class="rel-print" title="{{ row.acao_post.titulo|e }}">{{ row.acao_post.rotulo }}</button></form>{% endif %}</td>{% endif %}</tr>
     {% else %}
-    <tr><td colspan="{{ dados.colunas|length + (1 if dados.acao else 0) }}" class="mut" style="text-align:center;padding:1.4rem 0">Nenhum registro encontrado{% if not dados.sem_periodo %} em {{ periodo_rotulo|lower }}{% endif %}.</td></tr>
+    <tr><td colspan="{{ dados.colunas|length + (1 if dados.acao else 0) + (1 if dados.selecao else 0) }}" class="mut" style="text-align:center;padding:1.4rem 0">Nenhum registro encontrado{% if not dados.sem_periodo %} em {{ periodo_rotulo|lower }}{% endif %}.</td></tr>
     {% endfor %}
     </tbody>
     {# SÓ QUANDO HÁ O QUE SOMAR. "Leads do chip" não tem coluna de dinheiro —
@@ -6584,12 +6616,23 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
        grossa do `.rel-tot td`, e sobraria um traço solto embaixo da tabela. #}
     {% if dados.col_total %}
     <tfoot>
-    <tr class="rel-tot" id="rel-tot">{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% endif %}>{% if loop.first
+    <tr class="rel-tot" id="rel-tot">{% if dados.selecao %}<td class="rel-sel"></td>{% endif %}{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% endif %}>{% if loop.first
       %}Total{% elif col.chave == dados.col_total %}{{ dados.total_centavos|brl }}{% endif %}</td>{% endfor %}{% if dados.acao %}<td></td>{% endif %}</tr>
     </tfoot>
     {% endif %}
   </table>
   </div>
+  {% if dados.selecao %}
+  {#- A barra gruda no rodapé porque a lista tem 31 linhas na Prime: um botão no
+     topo estaria fora da tela justo na hora de clicar, que é depois de rolar
+     marcando. Só aparece com algo marcado. O TOTAL em dinheiro fica escrito
+     nela — é o número que denuncia uma linha marcada a mais. #}
+  <div class="rel-lote-barra" id="rel-lote-barra" hidden>
+    <span><b id="rel-lote-n">0</b> marcadas · <b id="rel-lote-soma">R$ 0,00</b></span>
+    <button type="submit" form="rel-lote" id="rel-lote-btn"
+      >✓ liberar o pagamento das marcadas</button>
+  </div>
+  {% endif %}
   {# "Entrou no caixa, mas não é venda". Tirar linha de uma tela de dinheiro sem
      dizer pra onde ela foi é a mesma família de erro que esconder o dinheiro: o
      dono olha o total, não reconhece e perde a confiança na tela inteira. Cada
@@ -6621,6 +6664,66 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     if (f && !confirm(f.getAttribute('data-confirmar'))) { e.preventDefault(); }
   });
   </script>
+  {% if dados.selecao %}
+  <script>
+  // A barra da liberação em lote: conta, soma e confirma. Bloco próprio pelo
+  // mesmo motivo do de cima — o teste do filtro roda o <script> SEGUINTE no Node,
+  // e lá não existe nem `document` de verdade nem estas linhas.
+  (function () {
+    function brl(c) {
+      // o separador de milhar entra por regex; as barras invertidas vão dobradas
+      // porque este JS mora dentro de uma string Python — \\B cru viraria
+      // sequência de escape inválida e o bloco inteiro sairia deformado.
+      var n = (c / 100).toFixed(2).replace('.', ',');
+      return 'R$ ' + n.replace(/\\B(?=(\\d{3})+(?!\\d),)/g, '.');
+    }
+    function caixas() {
+      return [].slice.call(document.querySelectorAll('.rel-ck'));
+    }
+    function pinta() {
+      var m = caixas().filter(function (k) { return k.checked; });
+      var soma = m.reduce(function (a, k) {
+        return a + parseInt(k.getAttribute('data-c') || '0', 10); }, 0);
+      var barra = document.getElementById('rel-lote-barra');
+      if (barra) barra.hidden = m.length === 0;
+      var n = document.getElementById('rel-lote-n');
+      var s = document.getElementById('rel-lote-soma');
+      var b = document.getElementById('rel-lote-btn');
+      if (n) n.textContent = m.length;
+      if (s) s.textContent = brl(soma);
+      if (b) b.textContent = '✓ liberar o pagamento das ' + m.length +
+        ' — ' + brl(soma);
+      var todas = document.getElementById('rel-todas');
+      if (todas) todas.checked = m.length > 0 && m.length === caixas().length;
+    }
+    document.addEventListener('change', function (e) {
+      var t = e.target;
+      if (!t || !t.classList) return;
+      if (t.id === 'rel-todas') {
+        // "marcar todas" vale só pras que a TELA está mostrando: com o filtro
+        // ligado, marcar o que está escondido é gravar no escuro.
+        caixas().forEach(function (k) {
+          var tr = k.closest('tr');
+          if (!tr || tr.style.display !== 'none') k.checked = t.checked;
+        });
+        pinta();
+      } else if (t.classList.contains('rel-ck')) { pinta(); }
+    });
+    document.addEventListener('submit', function (e) {
+      if (!e.target || e.target.id !== 'rel-lote') return;
+      var m = caixas().filter(function (k) { return k.checked; });
+      if (!m.length) { e.preventDefault(); alert('Marque as contas antes.'); return; }
+      var soma = m.reduce(function (a, k) {
+        return a + parseInt(k.getAttribute('data-c') || '0', 10); }, 0);
+      if (!confirm('Liberar o pagamento de ' + m.length + ' conta' +
+          (m.length > 1 ? 's' : '') + ', somando ' + brl(soma) + '?\n\n' +
+          'Isso AUTORIZA o pagamento — não paga. O dinheiro só sai quando ' +
+          'alguém der baixa na aba Empresa.')) { e.preventDefault(); }
+    });
+    pinta();
+  })();
+  </script>
+  {% endif %}
   <script>
   // Filtro NA TELA. As linhas já estão todas no HTML (a consulta tem teto de 300),
   // então não há ida ao servidor: filtrar é instantâneo.

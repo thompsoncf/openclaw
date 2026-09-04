@@ -1098,11 +1098,18 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
     # aprovada, e o lead quando a visita foi marcada pelo Cockpit. Antes da 192 só
     # existiam esses dois, e por isso 51 dos 60 compromissos da Prime apareciam
     # sem cliente: locação não nasce de proposta nem de lead, nasce de telefonema.
+    # `convidados` (a contagem) sai do lateral pelo mesmo motivo do nome: o
+    # formulário de "novo compromisso" tem um campo livre pra digitar quanta
+    # gente vem, e quase ninguém preenche — mas quando a festa nasce de um
+    # orçamento aprovado, a contagem JÁ EXISTE em `orcamentos.evento` (a mesma
+    # que o Funil mostra no subtítulo). Sem este fallback a coluna "Convid."
+    # aparecia "—" pra festa que o próprio cliente já tinha informado.
     join_orc = """left join clientes cl
                     on cl.id = e.cliente_id and cl.dono_id = e.conta_id
                   left join pessoas pe on pe.id = cl.pessoa_id
                   left join lateral (
-                    select coalesce(o.empresa, o.cliente) as nome
+                    select coalesce(o.empresa, o.cliente) as nome,
+                           o.evento->>'convidados' as convidados
                       from orcamentos o
                      where o.evento_agenda_id = e.id
                      order by o.id desc limit 1
@@ -1125,7 +1132,7 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                        count(*) filter (where e.status='pre_reservado'),
                        count(*) filter (where e.inicio < now() and e.desfecho is null),
                        count(*) filter (where e.prospeccao_id is not null),
-                       coalesce(sum(e.convidados), 0),
+                       coalesce(sum(coalesce(e.convidados, nullif(oc.convidados,'')::int)), 0),
                        count(*) filter (where e.tipo_evento is null)
                   from eventos_agenda e
                   {join_orc}
@@ -1147,7 +1154,8 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
         rows = c.execute(
             f"""select e.inicio, coalesce(e.tipo_evento, e.titulo),
                        coalesce(pe.nome, cl.nome, oc.nome, p.contato, p.empresa),
-                       e.tipo, e.status, e.desfecho, e.convidados, e.sinal_centavos,
+                       e.tipo, e.status, e.desfecho,
+                       coalesce(e.convidados, nullif(oc.convidados,'')::int), e.sinal_centavos,
                        mb.nome, e.tipo_evento, e.id,
                        coalesce(e.sem_cliente, false), e.titulo,
                        coalesce(pe.nome, cl.nome, oc.nome) is not null as nome_firme,
@@ -1240,10 +1248,15 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                     ("Convidados", str(n_convidados)),
                     ("Sinal no período", _brl(sinal_total))]
     else:
-        # "Todos" continua EXATAMENTE como era antes da espécie existir — quem
-        # abre a aba sem escolher nada tem que ver a tela de sempre.
+        # "Todos" continua quase EXATAMENTE como era antes da espécie existir —
+        # quem abre a aba sem escolher nada tem que ver a tela de sempre. A
+        # exceção é Vendedor (31/08/2026): "Todos" é a única aba que mistura
+        # visita com festa, e sem esta coluna uma visita marcada por alguém da
+        # equipe não tinha como mostrar quem foi — o dado (`membro_id`) sempre
+        # existiu, só a aba Visita mostrava.
         colunas = [_col("inicio", "Data"), _col("evento", "Evento", flex=True),
-                   _col("cliente", "Cliente", cli=True), _col("tipo", "Tipo"),
+                   _col("cliente", "Cliente", cli=True), _col("vendedor", "Vendedor"),
+                   _col("tipo", "Tipo"),
                    _col("status", "Status", tag=True),
                    _col("desfecho", "Desfecho", tag=True),
                    _col("convidados", "Convid.", num=True),

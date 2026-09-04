@@ -5,6 +5,7 @@ cancelados. Mesmo template genérico de Relatórios (colunas/linhas/métricas),
 nenhuma coluna nova no banco — `status`, `desfecho`, `tipo`, `tipo_evento`,
 `convidados` e `sinal_centavos` já existem desde as migrações 098-179.
 """
+import json
 import os
 from datetime import date, datetime, timedelta, timezone
 
@@ -17,7 +18,7 @@ _BASE_SQL = """
 create table contas (id bigserial primary key, nome text);
 create table membros (id bigserial primary key, conta_id bigint, nome text);
 create table orcamentos (id bigserial primary key, conta_id bigint,
-  cliente text, empresa text, evento_agenda_id bigint);
+  cliente text, empresa text, evento_agenda_id bigint, evento jsonb);
 create table prospeccao (id bigserial primary key, conta_id bigint,
   contato text, empresa text not null default 'Empresa');
 create table eventos_agenda (id bigserial primary key, conta_id bigint,
@@ -81,11 +82,13 @@ def _evento(pool, conta, *, titulo="Compromisso", inicio=None, tipo="pessoal",
     return eid
 
 
-def _orc(pool, conta, evento_id, *, cliente=None, empresa=None):
+def _orc(pool, conta, evento_id, *, cliente=None, empresa=None, convidados=None):
     with pool.connection() as c:
         c.execute(
-            "insert into orcamentos (conta_id, cliente, empresa, evento_agenda_id) "
-            "values (%s,%s,%s,%s)", (conta, cliente, empresa, evento_id),
+            "insert into orcamentos (conta_id, cliente, empresa, evento_agenda_id, evento) "
+            "values (%s,%s,%s,%s,%s)",
+            (conta, cliente, empresa, evento_id,
+             json.dumps({"convidados": convidados}) if convidados is not None else None),
         )
         c.commit()
 
@@ -172,6 +175,26 @@ def test_convidados_nulo_mostra_travessao(pool, cen):
     assert dados["linhas"][0]["convidados"] == "—"
 
 
+def test_convidados_cai_pro_orcamento_quando_a_agenda_nao_tem(pool, cen):
+    """Relato do dono, 04/09/2026: "Convid." só mostrava traço. O campo do
+    formulário de compromisso é livre e quase ninguém preenche — mas quando a
+    festa nasce de um orçamento aprovado, a contagem já existe em
+    `orcamentos.evento` (o mesmo número que o Funil mostra no subtítulo)."""
+    eid = _evento(pool, cen["conta"], convidados=None)
+    _orc(pool, cen["conta"], eid, empresa="Josiany", convidados=100)
+    dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["convidados"] == 100
+
+
+def test_convidados_da_propria_agenda_ganha_do_orcamento(pool, cen):
+    """Quando os dois existem, quem preencheu na agenda por último é quem
+    manda — o fallback é só pra quando a agenda está vazia."""
+    eid = _evento(pool, cen["conta"], convidados=80)
+    _orc(pool, cen["conta"], eid, empresa="Josiany", convidados=100)
+    dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["convidados"] == 80
+
+
 def test_cliente_vem_do_orcamento_vinculado(pool, cen):
     eid = _evento(pool, cen["conta"])
     _orc(pool, cen["conta"], eid, empresa="Isabela Silva Mendes")
@@ -185,6 +208,21 @@ def test_sem_orcamento_vinculado_cliente_e_travessao(pool, cen):
     _evento(pool, cen["conta"], tipo="pessoal")
     dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
     assert dados["linhas"][0]["cliente"] == "—"
+
+
+def test_vendedor_aparece_na_aba_todos(pool, cen):
+    """Relato do dono, 04/09/2026: "não aparece o nome do vendedor que marcou
+    a visita". O dado (`membro_id`) sempre existiu — só a aba Visita mostrava
+    a coluna, e "Todos" (que mistura visita com festa) não."""
+    _evento(pool, cen["conta"], titulo="Visita — Erys", membro_id=cen["pedro"])
+    dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["vendedor"] == "Pedro"
+
+
+def test_vendedor_sem_membro_mostra_travessao(pool, cen):
+    _evento(pool, cen["conta"], titulo="Locação — Vanessa", membro_id=None)
+    dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["vendedor"] == "—"
 
 
 def test_cliente_do_orcamento_prioriza_empresa_sobre_cliente(pool, cen):
@@ -362,12 +400,15 @@ def test_especie_invalida_cai_em_todos(pool, cen):
 # --------------------------------------------------- colunas e métricas por espécie
 
 def test_sem_especie_a_tela_continua_a_de_sempre(pool, cen):
-    """Quem abre a aba sem escolher nada tem que ver exatamente o que via antes
-    de a espécie existir — mesmas oito colunas, mesmas cinco métricas."""
+    """Quem abre a aba sem escolher nada tem que ver o que via antes de a
+    espécie existir, mais Vendedor (04/09/2026) — "Todos" mistura visita com
+    festa, e era a única aba onde uma visita marcada por alguém da equipe não
+    tinha como mostrar quem foi (o dado sempre existiu; só a aba Visita
+    mostrava). Mesmas cinco métricas, sem mudança nenhuma."""
     _evento(pool, cen["conta"], sinal=50000)
     d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
     assert [c["chave"] for c in d["colunas"]] == [
-        "inicio", "evento", "cliente", "tipo", "status", "desfecho",
+        "inicio", "evento", "cliente", "vendedor", "tipo", "status", "desfecho",
         "convidados", "sinal_centavos"]
     assert [m[0] for m in d["metricas"]] == [
         "Eventos no período", "Realizados", "Não realizados", "Cancelados",
@@ -433,6 +474,16 @@ def test_evento_mostra_o_tipo_da_festa_e_marca_quem_esta_sem(pool, cen):
     m = dict(d["metricas"])
     assert m["Convidados"] == "260"
     assert m["Eventos no período"] == "2"
+
+
+def test_metrica_de_convidados_tambem_cai_pro_orcamento(pool, cen):
+    """O total da métrica não pode contar menos gente do que a tabela mostra —
+    mesma fonte, mesmo fallback, pra não contradizer a própria linha."""
+    eid = _evento(pool, cen["conta"], titulo="Casamento", convidados=None)
+    _orc(pool, cen["conta"], eid, empresa="Josiany", convidados=100)
+    _evento(pool, cen["conta"], titulo="aniversario Leda", convidados=60)
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="evento")
+    assert dict(d["metricas"])["Convidados"] == "160"
 
 
 def test_aviso_de_sem_tipo_so_aparece_na_especie_evento(pool, cen):

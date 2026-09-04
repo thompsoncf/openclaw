@@ -61,7 +61,7 @@ create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigi
   membro_id bigint, tipo text, resultado text, descricao text,
   criado_em timestamptz default now());
 create table orcamentos (id bigserial primary key, conta_id bigint,
-  cliente text, empresa text, evento_agenda_id bigint);
+  cliente text, empresa text, evento_agenda_id bigint, evento jsonb);
 create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_id bigint,
   titulo text, inicio timestamptz, fim timestamptz, local text, descricao text,
   lembrete_min int, tipo text default 'pessoal', link_online text, desfecho text,

@@ -4000,6 +4000,77 @@ def _trava_numero(c, conta_id, numero) -> str:
     return alvo8
 
 
+def _eh_numero_da_equipe(c, conta_id: int, numero: str) -> bool:
+    """O número é de alguém da EQUIPE ativa desta conta? Casa pelos últimos 8
+    dígitos, a mesma chave do resto do módulo.
+
+    Vendedor que manda mensagem pro WhatsApp da empresa — um recado, um arquivo,
+    testar o chip — virava LEAD, com o próprio nome dele no funil, temperatura
+    quente, e um COLEGA atribuído pelo rodízio. Medido na produção em 04/09/2026:
+    4 membros cadastrados como lead da própria empresa (contas 34 e 35), um deles
+    com 1150 mensagens de conversa interna pendurada num lead do funil.
+
+    Só a equipe ATIVA entra na regra: ex-funcionário pode virar cliente de verdade
+    um dia; quem está na equipe hoje, não."""
+    d = _so_digitos(numero)
+    if len(d) < 8:
+        return False
+    r = c.execute(
+        r"""select 1 from membros
+             where conta_id=%s and ativo
+               and length(regexp_replace(coalesce(whatsapp,''), '\D', '', 'g')) >= 8
+               and right(regexp_replace(coalesce(whatsapp,''), '\D', '', 'g'), 8) = %s
+             limit 1""", (conta_id, d[-8:])).fetchone()
+    return bool(r)
+
+
+def _wa_conversa_da_equipe(c, conta_id, remetente, corpo, sid, nome_perfil,
+                           chip_id, midia):
+    """A conversa de quem é DA CASA: entra no inbox como qualquer outra, mas sem lead.
+
+    Repete a gravação de conversa+mensagem em vez de deixar `lead_id` nulo correr
+    pelo resto de _wa_inbound_conversa: o caminho normal segue dali pra promoção,
+    rodízio, agendamento de retorno e push — tudo coisa que só faz sentido pra
+    cliente. Com o `None` correndo solto, cada um desses precisaria de uma guarda
+    própria, e a que faltasse viraria aviso de "novo lead" sobre o colega.
+
+    O agente nasce DESLIGADO: a IA atender o próprio vendedor não é atendimento."""
+    # Toma a trava aqui também, e não só no chamador: é a regra de
+    # tests/test_conversa_wa_tem_trava.py — quem procura conversa por NÚMERO e insere
+    # tem que travar, sem exceção anônima. O advisory lock é por TRANSAÇÃO, então
+    # pegar de novo o mesmo par (conta, número) dentro da mesma transação não custa
+    # nada; e se um dia alguém chamar esta função de outro lugar, ela já vem travada.
+    alvo8 = _trava_numero(c, conta_id, remetente)
+    conv = _conversa_wa_do_contato(c, conta_id, None, remetente, chip_id=chip_id)
+    if conv:
+        conv_id = conv[0]
+    else:
+        conv_id = c.execute(
+            """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status,
+                 agente_ativo, contato_nome, chip_id)
+               values (%s,null,'whatsapp',%s,'aberta',false,
+                       coalesce((select nome from wa_contatos where conta_id=%s and numero8=%s),
+                                nullif(%s,'')),%s)
+               returning id""",
+            (conta_id, remetente, conta_id, alvo8, (nome_perfil or "").strip()[:120],
+             _chip_gravavel(chip_id, conta_id))).fetchone()[0]
+    mid = midia if isinstance(midia, dict) else None
+    cur = c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto,
+                     provider_sid, midia_ref, midia_tipo, midia_meta)
+                 values (%s,'whatsapp','in','lead',%s,%s,%s::jsonb,%s,%s::jsonb)
+                 on conflict (conversa_id, provider_sid) where provider_sid is not null do nothing""",
+                    (conv_id, (corpo or "")[:8000], sid,
+                     json.dumps(mid["ref"]) if mid and mid.get("ref") else None,
+                     (mid.get("tipo") or None) if mid else None,
+                     json.dumps(mid.get("meta") or {}) if mid else None))
+    c.execute(
+        """update conversas set ultima_msg_em=now(),
+             janela_expira_em=now()+interval '24 hours',
+             contato_nome=coalesce(nullif(contato_nome,''), nullif(%s,''))
+           where id=%s""", ((nome_perfil or "").strip()[:120], conv_id))
+    return conv_id, cur.rowcount > 0
+
+
 def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente_on,
                          *, exigir_continuidade=False, chip_id=None, midia=None):
     """WhatsApp de ENTRADA (Twilio OU Cloud API): resolve lead+conversa pelo telefone,
@@ -4066,6 +4137,13 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     # da órfã logo abaixo. Nasce falso e só o caminho da órfã liga.
     retomada = False
     if not lead_id:
+        # ...a menos que o número seja DA CASA. Vendedor mandando mensagem pro chip da
+        # empresa não é cliente, e virava lead quente com um colega de responsável —
+        # ver _eh_numero_da_equipe pro que isso já produziu em produção. A conversa
+        # entra igual; o funil é que não ganha ninguém.
+        if _eh_numero_da_equipe(c, conta_id, remetente):
+            return _wa_conversa_da_equipe(c, conta_id, remetente, corpo, sid,
+                                          nome_perfil, chip_id, midia)
         # Conversa ÓRFÃ desse número (importada do histórico do WhatsApp por QR, de
         # ANTES de conectar — ver _wa_historico_conversa). ANTES isso era um beco sem
         # saída: a mensagem era anexada e pronto, o contato nunca entrava no funil e

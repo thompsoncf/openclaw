@@ -39,7 +39,8 @@ create table canais_config (
   ativo boolean not null default true, token text, provedor text not null default 'twilio',
   wa_phone_id text, desconectado_em timestamptz, rotulo text);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
-  papel text, ativo boolean default true);
+  papel text, ativo boolean default true,
+  whatsapp text);
 create table prospeccao (id bigserial primary key, conta_id bigint, membro_id bigint,
   vendedor_id bigint, empresa text, contato text, decisor_nome text, socio text, cnpj text,
   segmento text, telefone text, whatsapp text, email text, cidade text, uf text,

@@ -115,7 +115,8 @@ create table mensagens (id bigserial primary key, conversa_id bigint, canal text
 create unique index on mensagens (conversa_id, provider_sid) where provider_sid is not null;
 create table wa_contatos (conta_id bigint, numero8 text, nome text);
 create table membros (id bigserial primary key, conta_id bigint, nome text, papel text,
-  ativo boolean default true);
+  ativo boolean default true,
+  whatsapp text);
 """
 
 

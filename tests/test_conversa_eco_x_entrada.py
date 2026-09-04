@@ -61,7 +61,8 @@ create table mensagens (id bigserial primary key, conversa_id bigint, canal text
 create table wa_contatos (conta_id bigint, numero8 text, nome text,
   da_agenda boolean default false, primary key (conta_id, numero8));
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
-  papel text, ativo boolean default true, cockpit_pausado boolean default false);
+  papel text, ativo boolean default true, cockpit_pausado boolean default false,
+  whatsapp text);
 create table distribuicao (conta_id bigint primary key, ativo boolean default false,
   ponteiro int default 0, avisar boolean default true,
   aviso_zap boolean default false, aviso_zap_chip_id bigint, aviso_zap_texto text,

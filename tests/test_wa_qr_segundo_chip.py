@@ -64,7 +64,8 @@ create table wa_qr_auth (conta_id bigint not null, arquivo text not null,
   conteudo text not null, atualizado timestamptz default now(),
   primary key (conta_id, arquivo));
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
-  papel text, ativo boolean default true);
+  papel text, ativo boolean default true,
+  whatsapp text);
 """
 
 

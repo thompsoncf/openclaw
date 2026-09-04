@@ -1,0 +1,650 @@
+<title>Funil por Mês do Evento</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Tokens de web/tema.py — o mockup serve pra decidir se parecer com a tela real.
+   Escuro único de propósito: o painel não tem tema claro. */
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --roxo-borda:#4a3163; --roxo-fundo:#1c1428;
+  --azul:#7bb8e6;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.86em;color:var(--roxo)}
+a{color:var(--neon-bright)}
+.wrap{max-width:1000px;margin:0 auto;padding:2.6rem 1.25rem 5rem;
+  display:flex;flex-direction:column;gap:2.8rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;
+  color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.6rem,4vw,2.15rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:68ch}
+.head .marca{color:var(--neon)}
+.sec > h2{font-size:1.15rem;margin-bottom:.15rem}
+.sec > p.leg{color:var(--text-dim);margin:.3rem 0 1.15rem;max-width:72ch;font-size:.9rem}
+.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---- manchete ---- */
+.manchete{border:1px solid var(--coral-borda);background:var(--coral-fundo);
+  border-radius:14px;padding:1.15rem 1.3rem;display:flex;gap:1.1rem;align-items:flex-start}
+.manchete .ic{font-size:1.5rem;line-height:1;flex:none}
+.manchete h2{font-size:1.05rem;color:#F2BDB9;margin-bottom:.3rem}
+.manchete p{margin:0 0 .5rem;color:#D9AEAA;font-size:.9rem;max-width:72ch}
+.manchete p:last-child{margin-bottom:0}
+.manchete b{font-family:var(--mono);font-variant-numeric:tabular-nums;color:#F6D3D0}
+
+/* ---- hoje: as colunas como barras ---- */
+.hoje{display:grid;grid-template-columns:repeat(7,1fr);gap:.5rem;align-items:end;
+  border:1px solid var(--line);border-radius:14px;background:var(--bg-2);padding:1rem 1rem .8rem;
+  min-height:260px;overflow-x:auto}
+.hc{display:flex;flex-direction:column;justify-content:flex-end;gap:.3rem;min-width:0}
+.hc .pilha{border-radius:8px;background:var(--surface);border:1px solid var(--line);
+  position:relative;overflow:hidden;
+  background-image:repeating-linear-gradient(to bottom,transparent 0 22px,var(--line) 22px 23px)}
+.hc.grande .pilha{border-color:var(--coral-borda);background-color:#1a1414}
+.hc .pilha span{position:absolute;left:0;right:0;bottom:.35rem;text-align:center;
+  font-family:var(--mono);font-size:.72rem;color:var(--coral)}
+.hc .lab{font-size:.7rem;color:var(--text-dim);text-align:center;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.hc .cnt{font-family:var(--mono);font-size:1.05rem;text-align:center;font-weight:600;
+  font-variant-numeric:tabular-nums}
+.hc.grande .cnt{color:var(--coral)}
+
+/* ---- três movimentos ---- */
+.movs{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem}
+@media (max-width:760px){.movs{grid-template-columns:1fr}}
+.mov{border:1px solid var(--line);border-radius:12px;background:var(--surface);
+  padding:.95rem 1rem;display:flex;flex-direction:column;gap:.4rem}
+.mov .k{font-family:var(--mono);font-size:.7rem;color:var(--neon);letter-spacing:.06em}
+.mov h3{font-size:.98rem}
+.mov p{margin:0;font-size:.84rem;color:var(--text-dim)}
+
+/* ---- a tela ---- */
+.tela{border:1px solid var(--line);border-radius:14px;background:var(--bg-2);overflow:hidden}
+.tela-top{display:flex;align-items:center;justify-content:space-between;gap:.8rem;
+  padding:.8rem 1rem;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tela-top h3{font-size:1.05rem}
+.tela-top .meta{font-size:.76rem;color:var(--text-dim)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;padding:3px;gap:2px;background:var(--bg)}
+.seg span{font-size:.76rem;padding:.28rem .6rem;border-radius:6px;color:var(--text-dim)}
+.seg span.on{background:var(--neon);color:#062011;font-weight:600}
+.trilho{display:flex;gap:.35rem;padding:.7rem 1rem;overflow-x:auto;scrollbar-width:thin;
+  border-bottom:1px solid var(--line);align-items:center}
+.trilho .rot{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);
+  font-weight:600;flex:none;margin-right:.3rem}
+.mes{flex:none;display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--line);
+  border-radius:999px;padding:.28rem .7rem;font-size:.78rem;color:var(--text-dim);background:var(--surface)}
+.mes b{font-family:var(--mono);font-weight:500;font-size:.72rem;color:var(--text);
+  font-variant-numeric:tabular-nums}
+.mes.on{background:var(--neon);border-color:var(--neon);color:#062011;font-weight:600}
+.mes.on b{color:#062011}
+.mes.vazio{opacity:.45}
+.mes.semdata{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:#F0DCA6}
+.mes.semdata b{color:#F0DCA6}
+.mes.ano{border:0;background:transparent;padding:.28rem .2rem;color:var(--text-faint);
+  font-family:var(--mono);font-size:.7rem}
+.faixa{display:flex;align-items:center;gap:.6rem;padding:.55rem 1rem;font-size:.8rem;
+  color:var(--text-dim);border-bottom:1px solid var(--line);background:var(--surface);flex-wrap:wrap}
+.faixa b{color:var(--text)}
+.faixa .x{margin-left:auto;font-size:.72rem;color:var(--neon-bright)}
+
+.kb{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(196px,1fr);gap:.55rem;
+  padding:.8rem 1rem 1rem;overflow-x:auto;scrollbar-width:thin;align-items:start}
+.col{background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:.6rem;
+  display:flex;flex-direction:column;gap:.45rem;min-height:120px}
+.col h4{font-family:var(--body);font-size:.82rem;font-weight:600;display:flex;
+  justify-content:space-between;align-items:center;gap:.4rem;margin:0 .1rem .2rem}
+.col h4 .c{font-family:var(--mono);font-weight:500;font-size:.7rem;color:var(--text-dim);
+  border:1px solid var(--line);border-radius:999px;padding:0 .45rem;background:var(--surface-2)}
+.col h4 .c i{font-style:normal;color:var(--text-faint)}
+.grupo{display:flex;align-items:center;gap:.4rem;font-size:.68rem;text-transform:uppercase;
+  letter-spacing:.07em;color:var(--text-faint);font-weight:600;padding:.35rem .15rem .05rem;
+  border-top:1px dashed var(--line);margin-top:.15rem}
+.grupo:first-of-type{border-top:0;margin-top:0}
+.grupo b{font-family:var(--mono);font-weight:500;color:var(--text-dim);letter-spacing:0}
+.grupo .ln{flex:1;height:1px;background:var(--line)}
+.grupo.alerta{color:#F0DCA6}
+.grupo.alerta b{color:#F0DCA6}
+
+.kc{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:.55rem .6rem;
+  display:flex;flex-direction:column;gap:.3rem}
+.kc.nova{border-color:var(--neon-borda)}
+.kc-top{display:flex;align-items:center;gap:.4rem;min-width:0}
+.dot{width:.5rem;height:.5rem;border-radius:50%;flex:none}
+.dot.quente{background:var(--coral)} .dot.morno{background:var(--ambar)} .dot.frio{background:#5b9bd5}
+.kc-nome{font-size:.86rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kc-ev{display:flex;align-items:center;gap:.35rem;font-size:.74rem;color:var(--text-dim);
+  background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:.22rem .45rem;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kc-ev b{color:var(--text);font-weight:600}
+.kc-ev .d{font-family:var(--mono);color:var(--neon-bright);font-variant-numeric:tabular-nums}
+.kc-ev.sem{border-style:dashed;color:#F0DCA6;background:var(--ambar-fundo);border-color:var(--ambar-borda)}
+.kc-ev.sem u{text-decoration:underline;text-underline-offset:2px;margin-left:auto;cursor:pointer;
+  color:#F0DCA6;font-weight:600}
+.kc-msg{display:flex;gap:.35rem;align-items:flex-start;font-size:.72rem;color:var(--text-dim);
+  border-top:1px solid var(--line);padding-top:.35rem;line-height:1.35}
+.kc-msg .bolha{width:.45rem;height:.45rem;border-radius:50%;background:var(--neon);flex:none;margin-top:.28rem}
+.kc-msg .eu{color:var(--text-faint);flex:none;font-size:.8em;margin-top:.05rem}
+.kc-msg .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kc.nova .kc-msg .txt{color:var(--text)}
+.kc-msg .qdo{flex:none;font-family:var(--mono);font-size:.66rem;color:var(--text-faint)}
+.kc-etapa{display:inline-block;font-size:.64rem;padding:.06rem .42rem;border-radius:999px;
+  border:1px solid var(--line);color:var(--text-dim);background:var(--bg);width:max-content}
+.kc-etapa.prop{border-color:var(--roxo-borda);background:var(--roxo-fundo);color:var(--roxo)}
+.kc-etapa.vis{border-color:#1f3a4d;background:#122029;color:var(--azul)}
+.kc-etapa.real{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright)}
+.dobra{border:1px dashed var(--line);border-radius:10px;padding:.5rem .6rem;font-size:.74rem;
+  color:var(--text-dim);display:flex;justify-content:space-between;align-items:center;gap:.4rem;
+  background:var(--bg-2)}
+.dobra b{font-family:var(--mono);font-weight:500;color:var(--text)}
+.dobra .seta{color:var(--text-faint)}
+.dobra.amarela{border-color:var(--ambar-borda);color:#F0DCA6;background:var(--ambar-fundo)}
+.dobra.amarela b{color:#F0DCA6}
+.vazio{border:1px dashed var(--line);border-radius:10px;color:var(--text-faint);font-size:.74rem;
+  text-align:center;padding:1rem .5rem}
+.tela-pe{padding:.65rem 1rem;color:var(--text-faint);font-size:.76rem;border-top:1px solid var(--line)}
+
+/* ---- antes/depois do card ---- */
+.ad{display:grid;grid-template-columns:1fr 1fr;gap:.9rem;align-items:start}
+@media (max-width:640px){.ad{grid-template-columns:1fr}}
+.ad .lado{border:1px solid var(--line);border-radius:12px;background:var(--bg-2);padding:.9rem}
+.ad .lado h4{font-family:var(--body);font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--text-faint);margin-bottom:.6rem}
+.ad .lado.dep h4{color:var(--neon)}
+.ad .kc{max-width:230px}
+.ad ul{margin:.7rem 0 0;padding-left:1.1rem;font-size:.8rem;color:var(--text-dim)}
+.ad li{margin:.2rem 0}
+
+/* ---- tabela ---- */
+.rolagem{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:.83rem}
+th{text-align:left;font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--text-faint);font-weight:600;padding:.55rem .8rem;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:.6rem .8rem;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tag{display:inline-block;padding:.13rem .5rem;border-radius:99px;font-size:.7rem;font-weight:600;white-space:nowrap}
+.tag.ok{background:var(--neon-fundo);color:var(--neon-bright);border:1px solid var(--neon-borda)}
+.tag.avi{background:var(--ambar-fundo);color:#F0DCA6;border:1px solid var(--ambar-borda)}
+.tag.err{background:var(--coral-fundo);color:#F0B8B8;border:1px solid var(--coral-borda)}
+.tag.neu{background:#20242A;color:#C7CCD6;border:1px solid #3A4048}
+
+/* ---- notas / decisões ---- */
+.notas{display:flex;flex-direction:column;gap:.7rem}
+.nota{border:1px solid var(--line);border-left:3px solid var(--ambar);
+  border-radius:0 11px 11px 0;background:var(--surface);padding:.8rem 1rem}
+.nota h4{margin:0 0 .25rem;font-size:.88rem;font-weight:600}
+.nota p{margin:0;font-size:.84rem;color:var(--text-dim);max-width:74ch}
+.nota.bom{border-left-color:var(--neon)}
+.nota.fora{border-left-color:var(--text-faint)}
+.passos{margin:0;padding-left:1.2rem;font-size:.86rem;color:var(--text-dim);display:flex;flex-direction:column;gap:.35rem}
+.passos b{color:var(--text)}
+.rodape{border-top:1px solid var(--line);padding-top:1.2rem;color:var(--text-faint);font-size:.8rem;max-width:74ch}
+</style>
+
+<div class="wrap">
+
+  <header class="head">
+    <div class="eyebrow">Mockup · Prospecção › Funil</div>
+    <h1>O funil por mês do evento <span class="marca">·</span> a coluna que não para de crescer</h1>
+    <p>Você pediu um jeito de as colunas não virarem uma pilha sem fim, com separação
+    por mês. Medi o problema na conta da <b>Prime Eventos</b> (conta 34, em 04/09/2026)
+    e desenhei em cima do que o nicho de eventos tem de diferente: <b>o mês que importa
+    é o da festa, não o mês em que o cliente escreveu.</b> Os números do diagnóstico
+    são reais; os nomes nas telas são inventados.</p>
+  </header>
+
+  <section class="manchete">
+    <div class="ic">🧱</div>
+    <div>
+      <h2>224 dos 274 leads da Prime estão numa coluna só</h2>
+      <p>Em três semanas de chip, "Contatado" virou uma parede de <b>224</b> cards.
+      Ninguém rola 224 cards; o vendedor olha os cinco de cima e o resto vira
+      arquivo morto. E <b>65</b> desses estão há 15 dias ou mais sem uma mensagem
+      sequer — misturados, com a mesma cara, com os <b>29</b> que falaram esta semana.</p>
+      <p>O sistema sabe a data do evento de só <b>15</b> dos 274. Não por falta de
+      pergunta: o agente pergunta a data em toda conversa que chega em preço. Ele
+      só guarda a resposta <b>no orçamento</b>, e o funil nunca lê de lá.</p>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Como o quadro está hoje</h2>
+    <p class="leg">Uma coluna por etapa, sem eixo de tempo nenhum. As alturas abaixo
+    são proporcionais à contagem real de cada coluna na Prime.</p>
+    <div class="hoje">
+      <div class="hc"><div class="pilha" style="height:8px"></div><div class="cnt">2</div><div class="lab">Novo</div></div>
+      <div class="hc grande"><div class="pilha" style="height:210px"><span>▼ 216 abaixo da dobra</span></div><div class="cnt">224</div><div class="lab">Contatado</div></div>
+      <div class="hc"><div class="pilha" style="height:24px"></div><div class="cnt">10</div><div class="lab">Agendado Visita</div></div>
+      <div class="hc"><div class="pilha" style="height:36px"></div><div class="cnt">16</div><div class="lab">Proposta</div></div>
+      <div class="hc"><div class="pilha" style="height:14px"></div><div class="cnt">5</div><div class="lab">Evento a Realizar</div></div>
+      <div class="hc"><div class="pilha" style="height:8px"></div><div class="cnt">2</div><div class="lab">Evento Realizado</div></div>
+      <div class="hc"><div class="pilha" style="height:34px"></div><div class="cnt">15</div><div class="lab">Perdido</div></div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>A proposta, em três movimentos</h2>
+    <p class="leg">Nenhum deles mexe em conexão, canal ou sessão. É campo novo no lead,
+    leitura nova no funil e uma linha a mais no card.</p>
+    <div class="movs">
+      <div class="mov">
+        <span class="k">1 · O CARD</span>
+        <h3>O lead ganha data do evento</h3>
+        <p>Tipo, data e convidados passam a morar <b>no lead</b>, não só no orçamento.
+        Quem preenche: o agente (já pergunta), o orçamento, a ficha e o Cockpit.
+        Sem data, o card diz isso na cara e oferece o botão de perguntar.</p>
+      </div>
+      <div class="mov">
+        <span class="k">2 · O TRILHO</span>
+        <h3>Meses em cima do quadro</h3>
+        <p>Uma fileira de meses com contagem. Clicou em <b>Jan 27</b>, o quadro inteiro
+        vira "o funil de janeiro": só quem tem festa em janeiro, em todas as etapas.
+        <b>Sem data</b> é uma pílula própria — e é a fila de trabalho.</p>
+      </div>
+      <div class="mov">
+        <span class="k">3 · A COLUNA</span>
+        <h3>Separadores e dobra</h3>
+        <p>Dentro da coluna, os cards se agrupam por mês do evento, os sem data por
+        mês de entrada, e quem está <b>parado há 15+ dias</b> some numa dobra no pé.
+        A coluna encurta sem apagar ninguém.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>A tela proposta</h2>
+    <p class="leg">Desktop, com o trilho em "Todos". As contagens dos meses são
+    <b>ilustrativas</b> (hoje só 15 leads têm data — o trilho só fica útil depois do
+    movimento 1). Os cards da coluna Contatado mostram os três estados: com data,
+    sem data e a dobra dos parados.</p>
+
+    <div class="tela">
+      <div class="tela-top">
+        <div><h3>Funil</h3><div class="meta">274 leads · Prime Eventos · 2 vendedores</div></div>
+        <div class="seg"><span class="on">Por etapa</span><span>Por mês do evento</span></div>
+      </div>
+      <div class="trilho">
+        <span class="rot">Mês do evento</span>
+        <span class="mes on">Todos <b>274</b></span>
+        <span class="mes">Set <b>4</b></span>
+        <span class="mes">Out <b>7</b></span>
+        <span class="mes">Nov <b>11</b></span>
+        <span class="mes">Dez <b>19</b></span>
+        <span class="mes ano">2027</span>
+        <span class="mes">Jan <b>14</b></span>
+        <span class="mes">Fev <b>9</b></span>
+        <span class="mes">Mar <b>6</b></span>
+        <span class="mes vazio">Abr <b>0</b></span>
+        <span class="mes">Mai <b>3</b></span>
+        <span class="mes">Jun–Dez <b>8</b></span>
+        <span class="mes semdata">Sem data <b>193</b></span>
+      </div>
+
+      <div class="kb">
+        <div class="col">
+          <h4>Novo <span class="c">2</span></h4>
+          <div class="kc nova">
+            <div class="kc-top"><span class="dot morno"></span><span class="kc-nome">Larissa M.</span></div>
+            <div class="kc-ev sem">📅 sem data <u>perguntar</u></div>
+            <div class="kc-msg"><span class="bolha"></span><span class="txt">Oi, queria saber valores pra 80 pessoas</span><span class="qdo">12min</span></div>
+          </div>
+          <div class="kc nova">
+            <div class="kc-top"><span class="dot frio"></span><span class="kc-nome">Rodrigo A.</span></div>
+            <div class="kc-ev sem">📅 sem data <u>perguntar</u></div>
+            <div class="kc-msg"><span class="bolha"></span><span class="txt">Vcs fazem formatura?</span><span class="qdo">1h</span></div>
+          </div>
+        </div>
+
+        <div class="col">
+          <h4>Contatado <span class="c">224</span></h4>
+          <div class="grupo">Nov 26 <b>3</b><span class="ln"></span></div>
+          <div class="kc nova">
+            <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Fernanda Lima</span></div>
+            <div class="kc-ev">🎂 <b>Aniversário</b> · <span class="d">28 nov</span> · 120 conv.</div>
+            <div class="kc-msg"><span class="bolha"></span><span class="txt">Tem como visitar sábado?</span><span class="qdo">2h</span></div>
+          </div>
+          <div class="kc">
+            <div class="kc-top"><span class="dot morno"></span><span class="kc-nome">Casal Souza</span></div>
+            <div class="kc-ev">💍 <b>Casamento</b> · <span class="d">14 nov</span> · 150 conv.</div>
+            <div class="kc-msg"><span class="eu">↩</span><span class="txt">Segue o pacote de sexta a domingo</span><span class="qdo">ontem</span></div>
+          </div>
+          <div class="grupo">Dez 26 <b>5</b><span class="ln"></span></div>
+          <div class="kc">
+            <div class="kc-top"><span class="dot morno"></span><span class="kc-nome">Escritório Vale</span></div>
+            <div class="kc-ev">🏢 <b>Confraternização</b> · <span class="d">12 dez</span> · 60 conv.</div>
+            <div class="kc-msg"><span class="eu">↩</span><span class="txt">Posso segurar a data até quinta</span><span class="qdo">3d</span></div>
+          </div>
+          <div class="dobra"><span>mais 4 de dezembro</span><span class="seta">▾</span></div>
+          <div class="grupo">Jan 27 <b>9</b><span class="ln"></span></div>
+          <div class="dobra"><span>9 leads</span><span class="seta">▾</span></div>
+          <div class="grupo">Sem data · entrou em set <b>16</b><span class="ln"></span></div>
+          <div class="kc nova">
+            <div class="kc-top"><span class="dot frio"></span><span class="kc-nome">Priscila N.</span></div>
+            <div class="kc-ev sem">📅 sem data <u>perguntar</u></div>
+            <div class="kc-msg"><span class="bolha"></span><span class="txt">Quanto fica só o salão?</span><span class="qdo">5h</span></div>
+          </div>
+          <div class="dobra"><span>mais 15 sem data</span><span class="seta">▾</span></div>
+          <div class="grupo">Sem data · entrou em ago <b>126</b><span class="ln"></span></div>
+          <div class="dobra"><span>126 leads</span><span class="seta">▾</span></div>
+          <div class="grupo alerta">Parados 15+ dias <b>65</b><span class="ln"></span></div>
+          <div class="dobra amarela"><span>sem mensagem desde 20/08 ou antes</span><span class="seta">▸</span></div>
+        </div>
+
+        <div class="col">
+          <h4>Agendado Visita <span class="c">10</span></h4>
+          <div class="grupo">Nov 26 <b>1</b><span class="ln"></span></div>
+          <div class="kc">
+            <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Bruna e Caio</span></div>
+            <div class="kc-ev">💍 <b>Casamento</b> · <span class="d">21 nov</span> · 110 conv.</div>
+            <div class="kc-msg"><span class="eu">↩</span><span class="txt">Visita confirmada sáb 10h</span><span class="qdo">ontem</span></div>
+          </div>
+          <div class="grupo">Jan 27 <b>2</b><span class="ln"></span></div>
+          <div class="kc">
+            <div class="kc-top"><span class="dot morno"></span><span class="kc-nome">Turma Med 2027</span></div>
+            <div class="kc-ev">🎓 <b>Formatura</b> · <span class="d">16 jan</span> · 100 conv.</div>
+            <div class="kc-msg"><span class="eu">↩</span><span class="txt">Te espero terça às 18h</span><span class="qdo">2d</span></div>
+          </div>
+          <div class="dobra"><span>mais 1 de janeiro</span><span class="seta">▾</span></div>
+          <div class="grupo">Sem data <b>6</b><span class="ln"></span></div>
+          <div class="dobra"><span>6 leads</span><span class="seta">▾</span></div>
+        </div>
+
+        <div class="col">
+          <h4>Proposta <span class="c">16</span></h4>
+          <div class="grupo">Dez 26 <b>2</b><span class="ln"></span></div>
+          <div class="kc nova">
+            <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Marina Dias</span></div>
+            <div class="kc-ev">🎂 <b>15 anos</b> · <span class="d">19 dez</span> · 130 conv.</div>
+            <div class="kc-msg"><span class="bolha"></span><span class="txt">Dá pra parcelar em 6?</span><span class="qdo">40min</span></div>
+          </div>
+          <div class="dobra"><span>mais 1 de dezembro</span><span class="seta">▾</span></div>
+          <div class="grupo">Fev 27 <b>3</b><span class="ln"></span></div>
+          <div class="dobra"><span>3 leads</span><span class="seta">▾</span></div>
+          <div class="grupo">Mai–Ago 27 <b>4</b><span class="ln"></span></div>
+          <div class="dobra"><span>4 leads</span><span class="seta">▾</span></div>
+          <div class="grupo alerta">Parados 15+ dias <b>3</b><span class="ln"></span></div>
+          <div class="dobra amarela"><span>proposta sem resposta</span><span class="seta">▸</span></div>
+        </div>
+      </div>
+      <div class="tela-pe">As colunas Evento a Realizar, Evento Realizado e Perdido continuam à direita, rolando
+      como hoje. Perdido não entra no trilho de meses.</div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O mesmo quadro com um mês escolhido</h2>
+    <p class="leg">Clicou em <b>Jan 27</b>. Cada coluna mostra só os leads com festa em
+    janeiro e a contagem vira "9 de 224". É a resposta direta à pergunta "como está
+    janeiro?", que hoje ninguém consegue responder olhando o funil.</p>
+
+    <div class="tela">
+      <div class="trilho">
+        <span class="rot">Mês do evento</span>
+        <span class="mes">Todos <b>274</b></span>
+        <span class="mes">Nov <b>11</b></span>
+        <span class="mes">Dez <b>19</b></span>
+        <span class="mes ano">2027</span>
+        <span class="mes on">Jan <b>14</b></span>
+        <span class="mes">Fev <b>9</b></span>
+        <span class="mes">Mar <b>6</b></span>
+        <span class="mes semdata">Sem data <b>193</b></span>
+      </div>
+      <div class="faixa">🎉 <b>Janeiro de 2027</b> · 14 leads · 3 casamentos, 4 formaturas, 7 sem tipo
+        <span class="x">✕ limpar</span></div>
+      <div class="kb">
+        <div class="col"><h4>Novo <span class="c">0 <i>de 2</i></span></h4><div class="vazio">nenhum de janeiro</div></div>
+        <div class="col">
+          <h4>Contatado <span class="c">9 <i>de 224</i></span></h4>
+          <div class="kc nova">
+            <div class="kc-top"><span class="dot morno"></span><span class="kc-nome">Aline Castro</span></div>
+            <div class="kc-ev">💍 <b>Casamento</b> · <span class="d">09 jan</span> · 90 conv.</div>
+            <div class="kc-msg"><span class="bolha"></span><span class="txt">Vou conversar com meu noivo</span><span class="qdo">6h</span></div>
+          </div>
+          <div class="kc">
+            <div class="kc-top"><span class="dot frio"></span><span class="kc-nome">Turma Direito</span></div>
+            <div class="kc-ev">🎓 <b>Formatura</b> · <span class="d">23 jan</span> · 200 conv.</div>
+            <div class="kc-msg"><span class="eu">↩</span><span class="txt">Mandei as fotos do salão</span><span class="qdo">4d</span></div>
+          </div>
+          <div class="dobra"><span>mais 7</span><span class="seta">▾</span></div>
+        </div>
+        <div class="col">
+          <h4>Agendado Visita <span class="c">2 <i>de 10</i></span></h4>
+          <div class="kc">
+            <div class="kc-top"><span class="dot morno"></span><span class="kc-nome">Turma Med 2027</span></div>
+            <div class="kc-ev">🎓 <b>Formatura</b> · <span class="d">16 jan</span> · 100 conv.</div>
+            <div class="kc-msg"><span class="eu">↩</span><span class="txt">Te espero terça às 18h</span><span class="qdo">2d</span></div>
+          </div>
+          <div class="dobra"><span>mais 1</span><span class="seta">▾</span></div>
+        </div>
+        <div class="col">
+          <h4>Proposta <span class="c">3 <i>de 16</i></span></h4>
+          <div class="kc">
+            <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Família Rocha</span></div>
+            <div class="kc-ev">🎂 <b>Aniversário</b> · <span class="d">30 jan</span> · 80 conv.</div>
+            <div class="kc-msg"><span class="eu">↩</span><span class="txt">Proposta nº 61 enviada</span><span class="qdo">1d</span></div>
+          </div>
+          <div class="dobra"><span>mais 2</span><span class="seta">▾</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O card, antes e depois</h2>
+    <p class="leg">Uma linha a mais, no lugar mais alto depois do nome. Segmento e cidade
+    saem dessa posição — na Prime são quase sempre vazios, porque o lead é pessoa física
+    que chegou pelo WhatsApp.</p>
+    <div class="ad">
+      <div class="lado">
+        <h4>Hoje</h4>
+        <div class="kc nova">
+          <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Fernanda Lima</span></div>
+          <div class="kc-msg" style="border-top:0;padding-top:0"><span>💬</span></div>
+          <div class="kc-msg"><span class="bolha"></span><span class="txt">Tem como visitar sábado?</span><span class="qdo">2h</span></div>
+        </div>
+        <ul>
+          <li>Nome, canal, última mensagem.</li>
+          <li>Nada diz <b>quando</b> é a festa nem <b>que</b> festa é.</li>
+          <li>O card de quem fecha em novembro é igual ao de quem só perguntou preço.</li>
+        </ul>
+      </div>
+      <div class="lado dep">
+        <h4>Proposto</h4>
+        <div class="kc nova">
+          <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Fernanda Lima</span></div>
+          <div class="kc-ev">🎂 <b>Aniversário</b> · <span class="d">28 nov</span> · 120 conv.</div>
+          <div class="kc-msg"><span class="bolha"></span><span class="txt">Tem como visitar sábado?</span><span class="qdo">2h</span></div>
+        </div>
+        <div class="kc" style="margin-top:.5rem">
+          <div class="kc-top"><span class="dot frio"></span><span class="kc-nome">Priscila N.</span></div>
+          <div class="kc-ev sem">📅 sem data <u>perguntar</u></div>
+          <div class="kc-msg"><span class="bolha"></span><span class="txt">Quanto fica só o salão?</span><span class="qdo">5h</span></div>
+        </div>
+        <ul>
+          <li>Tipo · data · convidados: o que o vendedor precisa pra saber qual pacote cabe (semana ou fim de semana).</li>
+          <li><b>Perguntar</b> manda pela conversa a mesma pergunta que o agente já faz: "pra qual data você está pensando?". A resposta preenche o campo.</li>
+          <li>Data no passado com etapa aberta pinta a linha de coral: evento que já passou e ninguém fechou.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Vista alternativa: "Por mês do evento"</h2>
+    <p class="leg">O botão no topo troca o eixo: as colunas viram meses e a etapa vai pra
+    dentro do card, como selo. É a visão de agenda de vendas — quantas festas estão
+    em negociação pra cada mês, e em que pé cada uma está. Serve ao dono; o vendedor
+    tende a viver na vista por etapa.</p>
+    <div class="tela">
+      <div class="tela-top">
+        <div><h3>Funil</h3><div class="meta">81 leads com data · 193 sem data ficam na última coluna</div></div>
+        <div class="seg"><span>Por etapa</span><span class="on">Por mês do evento</span></div>
+      </div>
+      <div class="kb">
+        <div class="col">
+          <h4>Nov 26 <span class="c">11</span></h4>
+          <div class="kc">
+            <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Casal Souza</span></div>
+            <div class="kc-ev">💍 <span class="d">14 nov</span> · 150 conv.</div>
+            <span class="kc-etapa">Contatado</span>
+          </div>
+          <div class="kc">
+            <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Bruna e Caio</span></div>
+            <div class="kc-ev">💍 <span class="d">21 nov</span> · 110 conv.</div>
+            <span class="kc-etapa vis">Visita sáb 10h</span>
+          </div>
+          <div class="kc">
+            <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Fernanda Lima</span></div>
+            <div class="kc-ev">🎂 <span class="d">28 nov</span> · 120 conv.</div>
+            <span class="kc-etapa">Contatado</span>
+          </div>
+          <div class="dobra"><span>mais 8</span><span class="seta">▾</span></div>
+        </div>
+        <div class="col">
+          <h4>Dez 26 <span class="c">19</span></h4>
+          <div class="kc">
+            <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Marina Dias</span></div>
+            <div class="kc-ev">🎂 <span class="d">19 dez</span> · 130 conv.</div>
+            <span class="kc-etapa prop">Proposta nº 58</span>
+          </div>
+          <div class="kc">
+            <div class="kc-top"><span class="dot morno"></span><span class="kc-nome">Escritório Vale</span></div>
+            <div class="kc-ev">🏢 <span class="d">12 dez</span> · 60 conv.</div>
+            <span class="kc-etapa">Contatado</span>
+          </div>
+          <div class="kc">
+            <div class="kc-top"><span class="dot quente"></span><span class="kc-nome">Tech Norte</span></div>
+            <div class="kc-ev">🏢 <span class="d">05 dez</span> · 250 conv.</div>
+            <span class="kc-etapa real">Evento a realizar</span>
+          </div>
+          <div class="dobra"><span>mais 16</span><span class="seta">▾</span></div>
+        </div>
+        <div class="col">
+          <h4>Jan 27 <span class="c">14</span></h4>
+          <div class="kc">
+            <div class="kc-top"><span class="dot morno"></span><span class="kc-nome">Turma Med 2027</span></div>
+            <div class="kc-ev">🎓 <span class="d">16 jan</span> · 100 conv.</div>
+            <span class="kc-etapa vis">Visita ter 18h</span>
+          </div>
+          <div class="kc">
+            <div class="kc-top"><span class="dot morno"></span><span class="kc-nome">Aline Castro</span></div>
+            <div class="kc-ev">💍 <span class="d">09 jan</span> · 90 conv.</div>
+            <span class="kc-etapa">Contatado</span>
+          </div>
+          <div class="dobra"><span>mais 12</span><span class="seta">▾</span></div>
+        </div>
+        <div class="col">
+          <h4>Sem data <span class="c">193</span></h4>
+          <div class="kc nova">
+            <div class="kc-top"><span class="dot frio"></span><span class="kc-nome">Priscila N.</span></div>
+            <div class="kc-ev sem">📅 sem data <u>perguntar</u></div>
+            <span class="kc-etapa">Contatado</span>
+          </div>
+          <div class="dobra"><span>mais 127 ativos</span><span class="seta">▾</span></div>
+          <div class="dobra amarela"><span>65 parados 15+ dias</span><span class="seta">▸</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>De onde a data vem</h2>
+    <p class="leg">O trilho só presta se a data existir. Quatro fontes, e a primeira
+    já funciona hoje — só grava no lugar errado.</p>
+    <div class="rolagem">
+      <table>
+        <thead><tr><th>Fonte</th><th>Como preenche</th><th>Cobertura hoje na Prime</th><th>O que muda</th></tr></thead>
+        <tbody>
+          <tr><td><b>Agente</b> (conversa)</td>
+            <td>Já pergunta data, horário e convidados antes de orçar (<code>_PRECISA_SABER</code>). Hoje a resposta vai só pro <code>orcamentos.evento</code>.</td>
+            <td class="num"><span class="tag avi">15 de 274</span></td>
+            <td>Quando extrair a data, gravar também no lead. Vale pra quem já respondeu e nunca chegou a orçamento.</td></tr>
+          <tr><td><b>Orçamento</b></td>
+            <td>O bloco "O evento" da proposta (data, convidados, início).</td>
+            <td class="num"><span class="tag ok">17 leads</span></td>
+            <td>Backfill único: copiar <code>evento.data</code> do orçamento ligado pro lead. Depois, sincronizar ao salvar.</td></tr>
+          <tr><td><b>Visita</b> (agenda)</td>
+            <td>Data da <i>visita ao espaço</i>, não da festa.</td>
+            <td class="num"><span class="tag neu">9 leads</span></td>
+            <td>Não vira data do evento. Aparece no card como selo da etapa ("Visita sáb 10h"), como já é no Cockpit.</td></tr>
+          <tr><td><b>Mão</b> (ficha e Cockpit)</td>
+            <td>Campo "Evento: tipo · data · convidados" na ficha do lead e na tela do vendedor no celular. O botão <b>perguntar</b> do card manda a pergunta pela conversa.</td>
+            <td class="num"><span class="tag err">não existe</span></td>
+            <td>Campo novo nas duas telas. Sem isso o vendedor que soube a data por telefone não tem onde pôr.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Regras que o mockup assume</h2>
+    <div class="notas">
+      <div class="nota bom">
+        <h4>Agrupa por mês do evento; sem data, por mês de entrada</h4>
+        <p>O eixo do nicho é a festa. Mas 193 leads sem data não podem virar um bloco só —
+        então eles se separam pelo mês em que chegaram ("entrou em ago"), que é a
+        separação que você pediu e a única possível sem o dado.</p>
+      </div>
+      <div class="nota">
+        <h4>Parado = 15 dias sem mensagem em nenhum sentido</h4>
+        <p>Na Prime isso dobra 65 dos 224 de Contatado. O lead não sai da etapa nem
+        muda de status — só vai pra dobra no pé da coluna, e volta sozinho na primeira
+        mensagem nova. Nada é apagado, nada é movido no banco.</p>
+      </div>
+      <div class="nota">
+        <h4>Filtro de mês vale pro quadro inteiro, e o vendedor vê o "de 224"</h4>
+        <p>A contagem da coluna com filtro mostra "9 de 224" pra ninguém achar que os
+        outros 215 sumiram. O filtro fica na URL (<code>?mes=2027-01</code>), como o
+        de vendedor já fica.</p>
+      </div>
+      <div class="nota fora">
+        <h4>Fora deste desenho</h4>
+        <p>Arquivar ou apagar lead parado automaticamente (regra 0 desta base: nada do
+        cliente se perde). Trocar as etapas da Prime. Mexer em chip, sessão ou canal.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O que muda no código, se aprovar</h2>
+    <ol class="passos">
+      <li><b>Migração aditiva</b> em <code>prospeccao</code>: <code>evento_em date</code>, <code>evento_tipo text</code>, <code>evento_convidados int</code>. Só <code>add column if not exists</code>.</li>
+      <li><b>Backfill</b> a partir de <code>orcamentos.evento</code> pros 17 leads ligados; <b>agente</b> passa a gravar no lead o que extrai da conversa.</li>
+      <li><b>Funil</b>: a consulta traz os três campos e a data da última mensagem; o Python agrupa por mês dentro de cada coluna e monta o trilho. Filtro <code>?mes=</code> ao lado do <code>?vendedor=</code>.</li>
+      <li><b>Card</b>: a linha do evento e o botão perguntar (reusa o envio de mensagem que o 💬 já usa).</li>
+      <li><b>Ficha e Cockpit</b>: o campo do evento, editável.</li>
+      <li><b>Vista "Por mês"</b>: mesmo dado, outro agrupamento — pode ficar pra uma segunda rodada.</li>
+    </ol>
+  </section>
+
+  <section class="sec">
+    <h2>Pra você decidir</h2>
+    <div class="notas">
+      <div class="nota"><h4>1. A dobra dos parados: 15 dias está bom?</h4>
+        <p>Com 7 dias dobraria 157 dos 224; com 30, nenhum ainda (o chip tem três semanas). 15 é o meio que já separa os 65 mais frios.</p></div>
+      <div class="nota"><h4>2. A vista "Por mês do evento" entra agora ou depois?</h4>
+        <p>O trilho + separadores já resolvem o que você pediu. A segunda vista é mais pro dono do que pro vendedor.</p></div>
+      <div class="nota"><h4>3. O botão "perguntar" manda na hora ou abre a conversa com o texto pronto?</h4>
+        <p>Na hora é um toque; abrir a conversa deixa o vendedor ajustar o tom. Sugiro abrir com o texto pronto, que é como o 💬 já funciona.</p></div>
+    </div>
+  </section>
+
+  <p class="rodape">Diagnóstico lido em 04/09/2026 no banco de produção (só consulta): 274 leads
+  da conta 34, 224 em Contatado, 65 sem mensagem há 15+ dias, 15 com data do evento
+  conhecida via orçamento. Tipos e meses de evento nos exemplos seguem a distribuição
+  real dos orçamentos da Prime (casamento, aniversário, formatura, confraternização,
+  corporativo; festas de set/26 a fev/28). Nomes de pessoas são fictícios.</p>
+
+</div>

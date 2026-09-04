@@ -1,0 +1,199 @@
+<title>Duas listas em Contas a pagar</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-fundo:#10241A; --neon-borda:#1E4A3A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,sans-serif;
+  --body:"Inter",system-ui,-apple-system,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  --lede:68ch;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;
+  line-height:1.62;-webkit-font-smoothing:antialiased}
+.pagina{display:flex;flex-direction:column;gap:2.8rem;padding:3rem 1.5rem 6rem;
+  max-width:1200px;margin:0 auto}
+.lede{max-width:var(--lede);margin:0 auto;width:100%;display:flex;flex-direction:column;gap:1rem}
+h1,h2{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:clamp(1.9rem,4vw,2.9rem);font-weight:700;letter-spacing:-.022em}
+h2{font-size:1.45rem;font-weight:700;letter-spacing:-.014em}
+p{margin:0}
+strong{color:var(--neon-bright);font-weight:600}
+em{color:var(--text);font-style:normal;border-bottom:1px dotted var(--text-faint)}
+code{font-family:var(--mono);font-size:.86em;color:var(--text-dim);background:var(--bg-2);
+  border:1px solid var(--line);border-radius:5px;padding:.08em .38em}
+.olho{font-family:var(--mono);font-size:.7rem;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--text-faint)}
+.dim{color:var(--text-dim)}
+hr{border:0;border-top:1px solid var(--line);margin:0}
+.pedido{border-left:2px solid var(--neon);padding:.1rem 0 .1rem 1.1rem;
+  color:var(--text-dim);font-size:1.02rem}
+.pedido b{color:var(--text);font-weight:500}
+
+/* a lista, com a régua da aba Empresa */
+.tela{background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  padding:1rem 1.1rem;display:flex;flex-direction:column;gap:1.1rem}
+.tela-cab{font-family:var(--display);font-weight:600;font-size:.96rem;
+  color:var(--text-dim)}
+.grupo{border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.grupo.ok{border-color:var(--neon-borda)}
+.grupo.esp{border-color:var(--ambar-borda)}
+.gcab{display:flex;flex-wrap:wrap;gap:.6rem;align-items:baseline;padding:.6rem .85rem;
+  background:var(--bg-2);border-bottom:1px solid var(--line)}
+.grupo.ok .gcab{background:var(--neon-fundo)}
+.grupo.esp .gcab{background:var(--ambar-fundo)}
+.gt{font-family:var(--display);font-weight:600;font-size:.92rem}
+.grupo.ok .gt{color:#9fe8c9}.grupo.esp .gt{color:#f0dca6}
+.gs{font-size:.78rem;color:var(--text-dim)}
+.lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .9rem;
+  padding:.65rem .85rem;border-top:1px solid var(--line)}
+.grupo .lin:first-of-type{border-top:0}
+.id{flex:1 1 260px;min-width:0}
+.desc{font-size:.9rem;font-weight:600}
+.meta{font-size:.76rem;color:var(--text-dim);margin-top:.1rem}
+.meta .pz{font-family:var(--mono)}
+.meta .pz.erro{color:var(--coral)}.meta .pz.aviso{color:var(--ambar)}
+.meta .pag{color:#e07a5f}
+.meta a{color:var(--neon-bright);text-decoration:none}
+.meta .mot{color:var(--coral)}
+.val{font-variant-numeric:tabular-nums;font-weight:700;font-size:.9rem;color:#e07a5f;
+  white-space:nowrap}
+.acoes{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.3rem}
+.acoes .bt,.acoes .mut{font-size:.74rem;border:1px solid var(--line);border-radius:6px;
+  padding:.2rem .55rem;font-weight:500;white-space:nowrap}
+.acoes .bt{color:var(--neon-bright);border-color:#2b3a33}
+.acoes .bt.ok{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.acoes .bt.no{color:#c98080;border-color:var(--coral-borda)}
+.acoes .mut{color:var(--text-faint)}
+.selo{font-size:.68rem;padding:.1rem .45rem;border-radius:999px;font-weight:600;
+  margin-left:.3rem;white-space:nowrap}
+.selo.esp{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:#f0dca6}
+.selo.rec{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:#f0b8b8}
+.vazio{padding:.9rem .85rem;font-size:.82rem;color:var(--text-faint)}
+
+.nota{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:13px;
+  padding:1.2rem 1.3rem;display:flex;flex-direction:column;gap:.8rem;
+  max-width:var(--lede);margin:0 auto;width:100%}
+.nota h2{font-size:1.1rem;color:#f0dca6}
+.nota p{font-size:.9rem;color:#e6d9bb}
+.nota strong{color:#fff0cf}
+.rodape{max-width:var(--lede);margin:0 auto;width:100%;font-size:.82rem;
+  color:var(--text-faint);display:flex;flex-direction:column;gap:.4rem}
+:focus-visible{outline:2px solid var(--neon-bright);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="pagina">
+
+<header class="lede">
+  <div class="olho">Aba Empresa · Contas · 04/09/2026</div>
+  <h1>Duas listas: o que pode pagar e o que ainda espera</h1>
+  <div class="pedido"><b>“Coloca lá na aba Empresa, em contas a pagar, uma lista
+  de contas autorizadas depois que ele liberar lá no relatório.”</b></div>
+  <p class="dim">Você já está usando: das 32 contas a pagar da Prime,
+  <strong>1 está liberada</strong>, <strong>1 recusada</strong> (“Somente par
+  teste”) e 30 esperando. Hoje as três misturam na mesma lista, e só o selo
+  separa.</p>
+</header>
+
+<section>
+  <div class="tela">
+    <div class="tela-cab">Hoje — uma lista só</div>
+    <div class='grupo '><div class=gcab><span class=gt>Contas</span><span class=gs>32 a pagar + 2 a receber, tudo na mesma lista</span></div>
+<div class=lin><div class=id><div class=desc>EQUATORIAL </div><div class=meta><span class='pz aviso'>vence 10/09 · em 6 dias</span> · <span class=pag>a pagar</span> · <a>👤 EQUATORIAL</a></div></div><div class=val>R$ 0,01</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+<div class=lin><div class=id><div class=desc>COMISSÃO SOBRE VENDAS <span class="selo rec">recusado</span></div><div class=meta><span class='pz ok'>vence 10/10 · em 36 dias</span> · <span class=pag>a pagar</span> · <a>👤 JAQUELINE DUARTE</a> · <span class=mot>“Somente par teste”</span></div></div><div class=val>R$ 0,01</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+<div class=lin><div class=id><div class=desc>ZARB CONSULTORIA <span class="selo esp">aguardando você</span></div><div class=meta><span class='pz erro'>vence 15/08 · há 20 dias</span> · <span class=pag>a pagar</span> · <a>👤 ZARB ASSESSORIA</a></div></div><div class=val>R$ 2.200,00</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <b class="bt ok">✓ já foi paga — 10/08, R$ 2.200,00</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+<div class=lin><div class=id><div class=desc>BANCO DO NORDESTE <span class="selo esp">aguardando você</span></div><div class=meta><span class='pz erro'>vence 15/08 · há 20 dias</span> · <span class=pag>a pagar</span> · <a>👤 BANCO DO NORDESTE</a></div></div><div class=val>R$ 2.400,00</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+<div class=lin><div class=id><div class=desc>IPTU 2026 3/6 <span class="selo esp">aguardando você</span></div><div class=meta><span class='pz erro'>vence 31/08 · há 4 dias</span> · <span class=pag>a pagar</span> · <a>👤 PREFEITURA DE TERESINA</a></div></div><div class=val>R$ 1.160,85</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+</div>
+    <div class="dim" style="font-size:.8rem">Pra saber o que pode pagar, você lê o
+      selo linha por linha. E os botões de liberar aparecem em todas, inclusive
+      nas que já estão liberadas.</div>
+  </div>
+</section>
+
+<section>
+  <div class="lede" style="margin-bottom:1.1rem">
+    <div class="olho">A proposta</div>
+    <h2>Cada lista responde uma pergunta</h2>
+    <p class="dim">A de cima: <em>o que eu posso pagar agora</em>. A de baixo:
+    <em>o que ainda depende de mim</em>. Os botões seguem a lista — liberar e
+    recusar só existem embaixo, e não poluem o que já foi decidido.</p>
+  </div>
+  <div class="tela">
+    <div class="tela-cab">Como ficaria — com o estado real de agora</div>
+    <div class='grupo ok'><div class=gcab><span class=gt>✅ Liberadas — pode pagar</span><span class=gs>1 · R$ 0,01</span></div>
+<div class=lin><div class=id><div class=desc>EQUATORIAL </div><div class=meta><span class='pz aviso'>vence 10/09 · em 6 dias</span> · <span class=pag>a pagar</span> · <a>👤 EQUATORIAL</a></div></div><div class=val>R$ 0,01</div><div class=acoes><b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+</div>
+<div class='grupo esp'><div class=gcab><span class=gt>⏳ Esperando liberação</span><span class=gs>31 · R$ 31.040,42 · libere em lote no relatório →</span></div>
+<div class=lin><div class=id><div class=desc>ZARB CONSULTORIA <span class="selo esp">aguardando você</span></div><div class=meta><span class='pz erro'>vence 15/08 · há 20 dias</span> · <span class=pag>a pagar</span> · <a>👤 ZARB ASSESSORIA</a></div></div><div class=val>R$ 2.200,00</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <b class="bt ok">✓ já foi paga — 10/08, R$ 2.200,00</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+<div class=lin><div class=id><div class=desc>BANCO DO NORDESTE <span class="selo esp">aguardando você</span></div><div class=meta><span class='pz erro'>vence 15/08 · há 20 dias</span> · <span class=pag>a pagar</span> · <a>👤 BANCO DO NORDESTE</a></div></div><div class=val>R$ 2.400,00</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+<div class=lin><div class=id><div class=desc>IPTU 2026 3/6 <span class="selo esp">aguardando você</span></div><div class=meta><span class='pz erro'>vence 31/08 · há 4 dias</span> · <span class=pag>a pagar</span> · <a>👤 PREFEITURA DE TERESINA</a></div></div><div class=val>R$ 1.160,85</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+<div class=lin><div class=id><div class=desc>DIARIAS PEDREIRO <span class="selo esp">aguardando você</span></div><div class=meta><span class='pz aviso'>vence 04/09 · hoje</span> · <span class=pag>a pagar</span> · <a>👤 GILVAN PEREIRA DE CARVALHO</a></div></div><div class=val>R$ 1.650,00</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+<div class=lin><div class=id><div class=desc>2 QUINZENA AGOSTO/26 BETO <span class="selo esp">aguardando você</span></div><div class=meta><span class='pz aviso'>vence 05/09 · amanhã</span> · <span class=pag>a pagar</span> · <a>👤 ROBERTO LOPES</a></div></div><div class=val>R$ 721,07</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+<div class=lin><div class=id><div class=desc>COMISSÃO SOBRE VENDAS <span class="selo rec">recusado</span></div><div class=meta><span class='pz ok'>vence 10/10 · em 36 dias</span> · <span class=pag>a pagar</span> · <a>👤 JAQUELINE DUARTE</a> · <span class=mot>“Somente par teste”</span></div></div><div class=val>R$ 0,01</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+</div>
+<div class='grupo rec'><div class=gcab><span class=gt>A receber</span><span class=gs>2 · R$ 5.250,00</span></div><div class=vazio>Sem liberação: ninguém autoriza dinheiro entrando.</div></div>
+  </div>
+</section>
+
+<section>
+  <div class="lede" style="margin-bottom:1.1rem">
+    <div class="olho">E depois de liberar</div>
+    <h2>As contas sobem de lista sozinhas</h2>
+    <p class="dim">Liberando as três vencidas no relatório, elas trocam de bloco.
+    A lista de cima vira a fila do que pagar — e a ZARB chega com o
+    <em>“já foi paga”</em> do lado, porque o Pix dela já está no caixa.</p>
+  </div>
+  <div class="tela">
+    <div class="tela-cab">Depois de liberar as 3 vencidas</div>
+    <div class='grupo ok'><div class=gcab><span class=gt>✅ Liberadas — pode pagar</span><span class=gs>4 · R$ 5.760,86</span></div>
+<div class=lin><div class=id><div class=desc>EQUATORIAL </div><div class=meta><span class='pz aviso'>vence 10/09 · em 6 dias</span> · <span class=pag>a pagar</span> · <a>👤 EQUATORIAL</a></div></div><div class=val>R$ 0,01</div><div class=acoes><b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+<div class=lin><div class=id><div class=desc>ZARB CONSULTORIA </div><div class=meta><span class='pz erro'>vence 15/08 · há 20 dias</span> · <span class=pag>a pagar</span> · <a>👤 ZARB ASSESSORIA</a></div></div><div class=val>R$ 2.200,00</div><div class=acoes><b class=bt>dar baixa ✓</b> <b class="bt ok">✓ já foi paga — 10/08, R$ 2.200,00</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+<div class=lin><div class=id><div class=desc>BANCO DO NORDESTE </div><div class=meta><span class='pz erro'>vence 15/08 · há 20 dias</span> · <span class=pag>a pagar</span> · <a>👤 BANCO DO NORDESTE</a></div></div><div class=val>R$ 2.400,00</div><div class=acoes><b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+<div class=lin><div class=id><div class=desc>IPTU 2026 3/6 </div><div class=meta><span class='pz erro'>vence 31/08 · há 4 dias</span> · <span class=pag>a pagar</span> · <a>👤 PREFEITURA DE TERESINA</a></div></div><div class=val>R$ 1.160,85</div><div class=acoes><b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+</div>
+<div class='grupo esp'><div class=gcab><span class=gt>⏳ Esperando liberação</span><span class=gs>28 · R$ 25.279,57</span></div>
+<div class=lin><div class=id><div class=desc>DIARIAS PEDREIRO <span class="selo esp">aguardando você</span></div><div class=meta><span class='pz aviso'>vence 04/09 · hoje</span> · <span class=pag>a pagar</span> · <a>👤 GILVAN PEREIRA DE CARVALHO</a></div></div><div class=val>R$ 1.650,00</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+<div class=lin><div class=id><div class=desc>2 QUINZENA AGOSTO/26 BETO <span class="selo esp">aguardando você</span></div><div class=meta><span class='pz aviso'>vence 05/09 · amanhã</span> · <span class=pag>a pagar</span> · <a>👤 ROBERTO LOPES</a></div></div><div class=val>R$ 721,07</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+<div class=lin><div class=id><div class=desc>COMISSÃO SOBRE VENDAS <span class="selo rec">recusado</span></div><div class=meta><span class='pz ok'>vence 10/10 · em 36 dias</span> · <span class=pag>a pagar</span> · <a>👤 JAQUELINE DUARTE</a> · <span class=mot>“Somente par teste”</span></div></div><div class=val>R$ 0,01</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+</div>
+  </div>
+</section>
+
+<section class="nota">
+  <div class="olho" style="color:#c9a86a">Uma coisa que eu decidi e você precisa saber</div>
+  <h2>As contas a receber saem pra uma terceira lista</h2>
+  <p>Liberação só existe pra conta a <b>pagar</b> — ninguém autoriza dinheiro
+  entrando. Hoje as duas contas a receber da Prime (R$ 5.250,00) moram na mesma
+  lista das a pagar; dividindo por “liberada / esperando”, elas cairiam em
+  “liberadas” só porque nasceram assim, e isso seria mentira de rótulo.</p>
+  <p>Então elas ganham bloco próprio, <strong>A receber</strong>, sem os botões
+  de liberação. É consequência da sua escolha, não um pedido a mais — mas se você
+  preferir que fiquem junto, é uma linha.</p>
+</section>
+
+<section class="lede">
+  <div class="olho">O que preciso de você</div>
+  <h2 style="font-size:1.2rem">Aprova assim?</h2>
+  <p class="dim">Se sim, faço: dois blocos em Contas a pagar (liberadas /
+  esperando), com contagem e total em cada cabeçalho, os botões de liberar e
+  recusar só no de baixo, e as a receber num terceiro bloco.</p>
+</section>
+
+<div class="rodape">
+  <hr>
+  <p>Estado lido da produção em 04/09/2026 — conta 34 (Prime Eventos): 32 títulos
+  a pagar em aberto (R$ 31.040,43), sendo 1 autorizado, 1 recusado e 30
+  aguardando; mais 2 a receber (R$ 5.250,00). Só leitura.</p>
+  <p>Cores, selos e a régua da linha são os da aba Empresa que já está no ar.</p>
+</div>
+
+</div>

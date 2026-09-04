@@ -6376,6 +6376,10 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
    border:1px solid var(--ambar-borda);background:var(--ambar-fundo);
    color:#f0dca6;font-size:.82rem;line-height:1.5}
   .rel-lote-aviso b{color:#fff0cf}
+  /* [hidden] ANTES e mais específico que a regra de display: o atributo sozinho
+     perde pro `display:flex` da classe (a folha do navegador tem menos peso), e a
+     barra ficava visível com "0 marcadas" pra sempre. */
+  .rel-lote-barra[hidden]{display:none}
   .rel-lote-barra{position:sticky;bottom:.6rem;z-index:4;display:flex;flex-wrap:wrap;
    gap:.8rem;align-items:center;margin:.7rem 0 .2rem;padding:.6rem .9rem;
    border:1px solid var(--verde);background:var(--neon-fundo);border-radius:10px;
@@ -6715,8 +6719,15 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
       if (!m.length) { e.preventDefault(); alert('Marque as contas antes.'); return; }
       var soma = m.reduce(function (a, k) {
         return a + parseInt(k.getAttribute('data-c') || '0', 10); }, 0);
+      // A quebra de linha do confirm vai com a barra invertida DOBRADA. Este JS
+      // mora dentro de uma string Python: uma barra só e o Python já transforma
+      // em quebra de linha de verdade aqui no HTML — e string JavaScript não
+      // atravessa linha, então o bloco inteiro morre com SyntaxError antes de
+      // definir qualquer coisa. Aconteceu no ar em 04/09/2026: a barra ficou
+      // parada em "0 marcadas" porque nada deste bloco chegou a existir. (Este
+      // comentário já foi escrito errado uma vez, pelo mesmo motivo.)
       if (!confirm('Liberar o pagamento de ' + m.length + ' conta' +
-          (m.length > 1 ? 's' : '') + ', somando ' + brl(soma) + '?\n\n' +
+          (m.length > 1 ? 's' : '') + ', somando ' + brl(soma) + '?\\n\\n' +
           'Isso AUTORIZA o pagamento — não paga. O dinheiro só sai quando ' +
           'alguém der baixa na aba Empresa.')) { e.preventDefault(); }
     });

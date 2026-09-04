@@ -210,7 +210,7 @@ def test_a_janela_do_servidor_e_a_mesma_da_tela(pool):
     """Se divergirem, aparece botão que o servidor recusa — ou, pior, o servidor
     aceita o que a tela não sugeriu."""
     from web import painel_relatorios as rel
-    assert rel._JANELA_CANDIDATO_DIAS == emp.JANELA_CONCILIACAO_DIAS == 14
+    assert emp.JANELA_CONCILIACAO_DIAS == emp.JANELA_CONCILIACAO_DIAS == 14
 
 
 def test_titulo_de_outra_conta_e_recusado(pool, conta):

@@ -42,6 +42,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import web.painel_relatorios as rel
+from finance import empresa as emp
 
 _BASE_SQL = """
 create table contas (id bigserial primary key, nome text);
@@ -180,7 +181,7 @@ def test_a_janela_e_de_catorze_dias(pool):
     dicas na Prime e 2 eram falsas — conta quinzenal tem espaçamento de 15 dias,
     então a janela alcançava a ocorrência vizinha. Aumentar traz os falsos de
     volta."""
-    assert rel._JANELA_CANDIDATO_DIAS == 14
+    assert emp.JANELA_CONCILIACAO_DIAS == 14
 
 
 def test_a_quinzena_vizinha_nao_vira_dica(pool, conta):
@@ -315,7 +316,7 @@ def test_sem_suspeito_nao_tem_aviso(pool, conta):
 def test_a_aba_sem_titulo_nao_quebra(pool, conta):
     d = _abertos(pool, conta)
     assert d["linhas"] == []
-    assert rel._pagamentos_candidatos(pool, conta, [], "pagar") == {}
+    assert emp.pagamentos_candidatos(pool, conta, [], "pagar") == {}
 
 
 def test_titulo_sem_vencimento_nao_derruba(pool, conta):

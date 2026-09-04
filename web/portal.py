@@ -4041,6 +4041,14 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .tit-edit{flex:1 1 100%;flex-wrap:wrap;gap:.4rem;margin-top:.3rem;align-items:center}
     .tit-edit input{font-size:.8rem;padding:.35rem .5rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt)}
     .tit-edit button{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
+    .tit-baixa{flex:1 1 100%;flex-wrap:wrap;gap:.5rem .8rem;margin-top:.4rem;align-items:end;
+      background:var(--card-2);border:1px solid #5A4520;border-radius:9px;padding:.6rem .7rem}
+    .tit-bx{display:flex;flex-direction:column;gap:.15rem;font-size:.68rem;color:#8a938a}
+    .tit-baixa input{font-size:.8rem;padding:.32rem .5rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt);width:auto;max-width:140px}
+    .tit-baixa button{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
+    .tit-bx-dica{flex:1 1 100%;font-size:.72rem;color:#8a938a;order:9}
+    .tit-bx-tot{font-size:.82rem;font-weight:600;font-variant-numeric:tabular-nums;color:#f0dca6;align-self:center}
+    .selo.jur{border:1px solid #5A2B2B;background:#241313;color:#E0A32E}
   </style>
   <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid var(--card-2)"><span>Título</span><span>Valor</span></div>
   {% if pode_liberar and n_aguardando %}
@@ -4084,9 +4092,13 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       {#- SEM VALOR NÃO TEM BAIXA, e o botão some em vez de o servidor recusar:
          botão que a gravação nega é a mesma armadilha que a régua da conciliação
          evita. Quem manda aqui é `dar_baixa_titulo`, que também recusa. -#}
+      {#- A BAIXA DEIXOU DE SER UM BOTÃO CEGO. Ela gravava o valor de face na
+         data de HOJE, sem perguntar nada — e as duas coisas estavam erradas: o
+         boleto pago em atraso custa mais que a face, e quem paga na sexta e
+         registra na segunda tem uma data pra informar. Custa um clique a mais;
+         em troca, o caixa passa a bater com o banco. -#}
       {% if t.valor_centavos %}
-      <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa"
-        {%- if t.tipo=='pagar' and t.aprovacao!='autorizado' %} onsubmit="return confirm('Esta conta {{ 'foi RECUSADA' if t.aprovacao=='recusado' else 'ainda não foi liberada' }} pelo dono. Dar baixa mesmo assim? Fica registrado que ela foi paga sem autorização.')"{% endif %}><button style="color:var(--verde-claro)">dar baixa ✓</button></form>
+      <button type="button" onclick="titBaixaToggle(this)" style="color:var(--verde-claro)">dar baixa ✓</button>
       {% else %}
       <button type="button" onclick="titEditToggle(this,'valor')" style="color:#f0c05a;border-color:#5A4520">✎ pôr o valor</button>
       {% endif %}
@@ -4147,6 +4159,28 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       <button type="button" onclick="titEditToggle(this)" title="editar descrição e/ou valor" style="color:#8a938a">editar ✎</button>
       <form method="post" action="/painel/empresa/titulo/{{ t.id }}/apagar" onsubmit="return confirm('Apagar este título? (só some da lista; não mexe em nada já pago)')"><button title="apagar título" style="color:#c98080">apagar ✕</button></form>
     </div>
+    {#- O PAINEL DA BAIXA. Nasce fechado e com a sugestão já preenchida: a regra
+       da casa (multa 2% + juros de mora 1% ao mês, cláusula 3.4 do contrato da
+       Prime) chega por `data-multa`/`data-juros`, pra que exista um lugar só
+       onde ela é escrita. É SUGESTÃO — o boleto atualizado é quem manda, e o
+       campo é editável, inclusive pra zerar quando o fornecedor perdoou. -#}
+    {% if t.valor_centavos %}
+    <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa" class="tit-baixa"
+          style="display:none" data-base="{{ t.valor_centavos }}"
+          data-venc="{{ t.vencimento.isoformat() if t.vencimento else '' }}"
+          data-multa="{{ MULTA_ATRASO_PCT }}" data-juros="{{ JUROS_MORA_PCT_MES }}"
+      {%- if t.tipo=='pagar' and t.aprovacao!='autorizado' %} onsubmit="return confirm('Esta conta {{ 'foi RECUSADA' if t.aprovacao=='recusado' else 'ainda não foi liberada' }} pelo dono. Dar baixa mesmo assim? Fica registrado que ela foi paga sem autorização.')"{% endif %}>
+      <label class="tit-bx">{{ 'Paguei em' if t.tipo=='pagar' else 'Recebi em' }}
+        <input type="date" name="pago_em" value="{{ hoje_iso }}" oninput="titBaixaConta(this)"></label>
+      <label class="tit-bx">{{ 'Multa e juros' if t.tipo=='pagar' else 'Juros recebidos' }}
+        <input name="acrescimo" inputmode="decimal" placeholder="0,00" oninput="titBaixaConta(this)"
+               title="negativo é desconto: quem pagou adiantado escreve -20,00"></label>
+      <span class="tit-bx-dica"></span>
+      <span class="tit-bx-tot"></span>
+      <button style="color:var(--verde-claro);border-color:#1E4A3A">confirmar baixa</button>
+      <button type="button" onclick="titBaixaToggle(this)" style="color:#8a938a">cancelar</button>
+    </form>
+    {% endif %}
     {# edição INLINE (descrição + valor juntos, cada um independente) — evita o vaivém de prompts #}
     <form method="post" action="/painel/empresa/titulo/{{ t.id }}/descricao" class="tit-edit" style="display:none">
       <input name="descricao" value="{{ t.descricao }}" placeholder="descrição" style="flex:2 1 140px;min-width:0">
@@ -4197,6 +4231,50 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     // faria a pessoa dar um Tab pra chegar onde ela clicou pra ir.
     if(!aberto){ var d = f.querySelector('input[name=' + (campo || 'descricao') + ']'); if(d) d.focus(); }
   }
+  function titBaixaToggle(btn){
+    var lin = btn.closest('.tit-lin');
+    var f = lin ? lin.querySelector('.tit-baixa') : null;
+    if(!f) return;
+    var aberto = f.style.display === 'flex';
+    f.style.display = aberto ? 'none' : 'flex';
+    if(!aberto) titBaixaConta(f.querySelector('input[name=pago_em]'));
+  }
+  function titBrl(c){
+    var n = (Math.abs(c)/100).toFixed(2).replace('.', ',');
+    return (c < 0 ? '- R$ ' : 'R$ ') + n.replace(/\B(?=(\d{3})+(?!\d),)/g, '.');
+  }
+  // A sugestão de multa e juros, pela regra que veio em `data-multa`/`data-juros`
+  // (cláusula 3.4 do contrato da casa). Recalcula quando a DATA muda, porque o
+  // atraso depende dela — e para de mexer no campo assim que a pessoa digita:
+  // o boleto atualizado manda, a sugestão é só o primeiro palpite.
+  function titBaixaConta(el){
+    var f = el && el.closest('.tit-baixa'); if(!f) return;
+    var base = parseInt(f.dataset.base, 10) || 0;
+    var venc = f.dataset.venc;
+    var campo = f.querySelector('input[name=acrescimo]');
+    var quando = f.querySelector('input[name=pago_em]').value;
+    var dias = 0;
+    if(venc && quando){
+      dias = Math.round((Date.parse(quando + 'T00:00:00') - Date.parse(venc + 'T00:00:00')) / 86400000);
+    }
+    var multa = 0, juros = 0;
+    if(dias > 0){
+      multa = Math.round(base * parseFloat(f.dataset.multa) / 100);
+      juros = Math.round(base * parseFloat(f.dataset.juros) / 100 * dias / 30);
+    }
+    if(el === campo) campo.dataset.tocado = '1';
+    if(!campo.dataset.tocado){
+      campo.value = (multa + juros) ? ((multa + juros)/100).toFixed(2).replace('.', ',') : '';
+    }
+    var acr = Math.round(parseFloat((campo.value || '0').replace(/\./g,'').replace(',','.')) * 100) || 0;
+    f.querySelector('.tit-bx-dica').textContent = dias > 0
+      ? ('Sugerido pela regra da casa: ' + dias + ' dia(s) de atraso — multa '
+         + titBrl(multa) + ' + juros ' + titBrl(juros) + '. Troque pelo que o boleto cobrou.')
+      : (dias < 0
+         ? ('Pagando ' + (-dias) + ' dia(s) antes do vencimento. Boleto com desconto? Escreva negativo: -20,00')
+         : 'No prazo — sem multa nem juros.');
+    f.querySelector('.tit-bx-tot').textContent = 'Total ' + titBrl(base + acr);
+  }
   // Pergunta antes de gravar, pra quem usa `data-confirmar`. Delegado no
   // documento porque os formulários nascem linha a linha.
   document.addEventListener('submit', function (e) {
@@ -4215,10 +4293,12 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <div style="margin-top:.5rem">
     {% for t in titulos_pagos %}<div class="tit-lin">
       <div class="tit-id">
-        <div class="tit-desc" style="opacity:.75">{{ t.descricao }}{% if t.contraparte %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}</div>
-        <div class="tit-meta">baixado {% if t.pago_em %}{{ t.pago_em.strftime('%d/%m/%Y') }}{% else %}—{% endif %} · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">pago</span>{% else %}<span style="color:var(--verde-claro)">recebido</span>{% endif %}</div>
+        <div class="tit-desc" style="opacity:.75">{{ t.descricao }}{% if t.contraparte %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}{#- o que o atraso custou fica NA LINHA, e não só no caixa: quem
+          abre esta lista está perguntando "quanto essa conta me custou", e a
+          resposta com juros é diferente da face. -#}{% if t.acrescimo_centavos %} <span class="selo jur">{{ '+' if t.acrescimo_centavos > 0 else '−' }} {{ (t.acrescimo_centavos if t.acrescimo_centavos > 0 else -t.acrescimo_centavos)|brl }} de {{ 'juros' if t.acrescimo_centavos > 0 else 'desconto' }}</span>{% endif %}</div>
+        <div class="tit-meta">baixado {% if t.pago_em %}{{ t.pago_em.strftime('%d/%m/%Y') }}{% else %}—{% endif %}{% if t.acrescimo_centavos and t.pago_em and t.vencimento and t.pago_em > t.vencimento %} · <span style="color:#f0c05a">{{ (t.pago_em - t.vencimento).days }} dias de atraso</span>{% endif %} · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">pago</span>{% else %}<span style="color:var(--verde-claro)">recebido</span>{% endif %}</div>
       </div>
-      <div class="tit-val" style="opacity:.75">{{ t.valor_centavos|brl }}</div>
+      <div class="tit-val" style="opacity:.75">{{ (t.valor_centavos + t.acrescimo_centavos)|brl }}{% if t.acrescimo_centavos %}<div style="font-size:.66rem;font-weight:400;color:var(--txt-mut)">conta {{ t.valor_centavos|brl }}</div>{% endif %}</div>
       <div class="tit-acoes">
         {% if t.lancamento_id %}
         <a href="/painel/financeiro" class="mut" style="font-size:.72rem;text-decoration:none"
@@ -10379,15 +10459,26 @@ def painel_empresa(request: Request):
         if _c and _c["n"] == 1:
             _verbo = "paga" if _t["tipo"] == "pagar" else "recebida"
             _quando = _c["data"].strftime("%d/%m")
+            # O ACRÉSCIMO vai NO BOTÃO, e não só no confirm. O pagamento que
+            # veio do extrato agora pode ser MAIOR que a conta (é boleto pago em
+            # atraso, com multa e juros): mostrar só "R$ 2.258,67" sem dizer que
+            # R$ 58,67 daquilo é juros faria a pessoa achar que a régua errou o
+            # alvo, justo na hora de confirmar.
+            _acr = int(_c.get("acrescimo_centavos") or 0)
+            _extra = f" (+{brl(_acr)} de juros)" if _acr > 0 else ""
             _t["conciliar"] = {
                 "lancamento_id": _c["lancamento_id"],
-                "resumo": f"{_quando}, {brl(_c['centavos'])}",
+                "resumo": f"{_quando}, {brl(_c['centavos'])}{_extra}",
                 "titulo": f"Ligar esta conta ao pagamento de {_quando}",
                 "confirmar": (
                     f"Marcar “{(_t['descricao'] or '').strip()[:60]}” como {_verbo}"
                     f" em {_c['data'].strftime('%d/%m/%Y')}?\n\n"
                     f"Isso LIGA esta conta ao pagamento de {brl(_c['centavos'])} que "
-                    "já está no caixa. Nenhum dinheiro novo é lançado — diferente "
+                    "já está no caixa."
+                    + (f" A conta era de {brl(_t['valor_centavos'])}; a diferença de "
+                       f"{brl(_acr)} fica registrada como multa e juros do atraso."
+                       if _acr > 0 else "")
+                    + " Nenhum dinheiro novo é lançado — diferente "
                     "do “dar baixa” ao lado, que lançaria a despesa outra vez."),
             }
     # TRÊS BLOCOS, cada um respondendo uma pergunta. Pedido do dono em 04/09/2026:
@@ -10444,8 +10535,14 @@ def painel_empresa(request: Request):
     # mais longo.
     ritmos = [("quinzenal", "a cada 15 dias"), ("mensal", "todo mês"),
               ("anual", "todo ano")]
+    # A regra da casa vai pra tela em NÚMERO, não em texto: o painel da baixa
+    # recalcula a sugestão quando a data muda, e escrever "2%" no JavaScript
+    # criaria uma segunda verdade — que ia divergir na primeira vez que o dono
+    # mudasse a cláusula do contrato.
+    _multa_pct, _juros_pct = emp._regras_da_casa()
     return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
                    RITMOS=ritmos,
+                   MULTA_ATRASO_PCT=_multa_pct, JUROS_MORA_PCT_MES=_juros_pct,
                    # o selo é mais curto que a opção do select: na descrição ele
                    # divide espaço com "aguardando você" e o nome do fornecedor.
                    RITMO_SELO={"quinzenal": "quinzenal", "mensal": "mensal",
@@ -10867,6 +10964,22 @@ def _reais_para_centavos(txt: str) -> int:
         return 0
 
 
+def _acrescimo_para_centavos(txt: str) -> int:
+    """Centavos COM SINAL, pro campo de multa e juros (197).
+
+    Existe ao lado de `_reais_para_centavos` e não dentro dele porque as duas
+    perguntas são diferentes: valor de conta negativo é erro de digitação, e
+    acréscimo negativo é o desconto de quem pagou adiantado. Um conversor só
+    teria que escolher, e escolheria errado pra metade dos casos.
+    """
+    t = (txt or "").strip().replace("−", "-")       # o menos "de verdade" (U+2212)
+    if not t:
+        return 0
+    negativo = t.startswith("-")
+    return -_reais_para_centavos(t.lstrip("-+")) if negativo \
+        else _reais_para_centavos(t)
+
+
 def _guard_pj(request: Request):
     """Retorna (conta, pool) se a conta tem o módulo PJ ativo; senão None."""
     from finance import empresa as emp
@@ -11000,14 +11113,31 @@ def empresa_centro_desativar(request: Request, centro_id: int, ativo: str = Form
 
 
 @router.post("/painel/empresa/titulo/{titulo_id}/baixa")
-def empresa_titulo_baixa(request: Request, titulo_id: int):
+def empresa_titulo_baixa(request: Request, titulo_id: int,
+                         pago_em: str = Form(""), acrescimo: str = Form("")):
+    """Fecha a conta e lança no caixa. Agora com a DATA e o ACRÉSCIMO (197).
+
+    Os dois são opcionais de propósito: formulário antigo, link salvo ou chamada
+    de fora seguem funcionando como antes — data de hoje, sem acréscimo.
+
+    `acrescimo` aceita NEGATIVO (desconto por antecipação), e é por isso que ele
+    não passa por `_reais_para_centavos`, que descarta o sinal.
+    """
     from finance import empresa as emp
     g = _guard_pj(request)
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
-    emp.dar_baixa_titulo(pool, conta[0], titulo_id)
-    return RedirectResponse("/painel/empresa", status_code=303)
+    try:
+        quando = _date.fromisoformat(pago_em) if pago_em.strip() else None
+    except ValueError:
+        quando = None
+    r = emp.dar_baixa_titulo(pool, conta[0], titulo_id, data_pagto=quando,
+                             membro_id=request.session.get("membro_id"),
+                             acrescimo_centavos=_acrescimo_para_centavos(acrescimo))
+    if not r.get("ok"):
+        request.session["emp_aviso"] = r.get("erro") or "Não consegui dar baixa."
+    return RedirectResponse("/painel/empresa#titulos", status_code=303)
 
 
 @router.post("/painel/empresa/titulo/{titulo_id}/conciliar")

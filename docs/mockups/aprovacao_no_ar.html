@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Como ficou — e por que a aprovação ainda não aparece</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A; --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;
+  --body:"Inter",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  --card:var(--surface); --card-2:var(--bg-2);
+  --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1120px;margin:0 auto;padding:34px 18px 90px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.65rem;font-weight:700}
+h2{font-size:1.15rem;font-weight:700;margin:0 0 .2rem}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
+  padding:.1rem .35rem;border-radius:4px;color:var(--text-dim)}
+.sec{margin-top:42px}
+.sec>.num{font-family:var(--mono);font-size:.72rem;color:var(--verde);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:78ch;margin-top:.5rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.86rem;margin-top:1rem;
+  color:var(--txt-mut);max-width:82ch}
+.nota b{color:var(--txt)}
+.alerta{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.alerta b{color:var(--ambar)}
+.grave{border-left-color:var(--coral-borda);background:var(--coral-fundo)}
+.grave b{color:var(--coral)}
+/* réplicas de web/portal.py — bloco "Títulos a pagar e receber" */
+.titbox{background:var(--card);border:1px solid var(--borda);border-radius:14px;overflow:hidden}
+.titbox>.cap{background:var(--bg-2);padding:.5rem .85rem;font-size:.72rem;
+  color:var(--txt-mut);border-bottom:1px solid var(--borda);font-family:var(--mono);
+  display:flex;justify-content:space-between;gap:.5rem}
+.titbox>.miolo{padding:10px 16px 14px}
+.tit-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .9rem;
+  padding:.7rem 0;border-top:1px solid var(--card-2)}
+.tit-lin:first-of-type{border-top:0}
+.tit-id{flex:1 1 200px;min-width:0}
+.tit-desc{font-size:.9rem}
+.tit-meta{font-size:.7rem;margin-top:3px;color:var(--txt-mut)}
+.tit-val{flex:0 0 auto;margin-left:auto;text-align:right;white-space:nowrap;
+  font-weight:600;font-variant-numeric:tabular-nums}
+.tit-acoes{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.15rem}
+.tit-acoes button{background:none;border:1px solid #2f2f31;border-radius:7px;
+  padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;color:var(--txt);
+  font-family:inherit}
+.tit-edit{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.3rem;align-items:center}
+.tit-edit input{font-size:.8rem;padding:.35rem .5rem;border-radius:7px;
+  border:1px solid #333;background:var(--bg);color:var(--txt);font-family:inherit}
+.tit-lote{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.6rem 0 .2rem;
+  padding:.6rem .7rem;border:1px solid var(--ambar-borda);background:var(--ambar-fundo);
+  border-radius:10px;font-size:.8rem}
+.tit-lote button{background:var(--verde);color:var(--sobre-verde);border:0;
+  border-radius:7px;padding:.34rem .8rem;font-size:.78rem;font-weight:600;cursor:pointer;width:auto}
+.selo{display:inline-block;font-size:.66rem;font-weight:700;border-radius:5px;
+  padding:.08rem .42rem;letter-spacing:.02em;white-space:nowrap;vertical-align:.05em}
+.selo.esp{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
+.selo.rec{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:var(--coral)}
+.selo.aut{border:1px solid var(--neon-borda);background:var(--neon-fundo);color:var(--neon)}
+.selo.falta{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
+.b-ok{border-color:var(--neon-borda)!important;color:var(--neon)!important}
+.b-nao{border-color:var(--coral-borda)!important;color:var(--coral)!important}
+.b-forte{background:var(--verde)!important;color:var(--sobre-verde)!important;
+  border-color:var(--verde)!important;font-weight:600}
+.mut{color:var(--txt-mut)}
+.par{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:1rem;align-items:start}
+@media (max-width:900px){.par{grid-template-columns:1fr}}
+.rot-tela{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--txt-mut);margin-bottom:.45rem}
+.rot-tela.hoje{color:var(--coral)} .rot-tela.novo{color:var(--verde)}
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);
+  text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.76rem;
+  text-transform:uppercase;letter-spacing:.05em}
+.sim{color:var(--verde);font-weight:600} .nao{color:var(--coral);font-weight:600}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px;margin-top:1rem}
+.card{background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.85rem}
+.card .r{display:block;font-size:.72rem;color:var(--txt-mut);margin-bottom:.3rem}
+.card p{font-size:.78rem;color:var(--txt-mut);margin-top:.35rem}
+.big{font-family:var(--mono);font-size:1.45rem;font-weight:700;display:block}
+.big.ruim{color:var(--coral)} .big.bom{color:var(--verde)} .big.am{color:var(--ambar)}
+.passo{display:grid;grid-template-columns:2rem minmax(0,1fr);gap:.7rem;align-items:start;
+  padding:.65rem 0;border-bottom:1px solid var(--borda);font-size:.88rem}
+.passo:last-child{border-bottom:0}
+.passo .n{font-family:var(--mono);font-size:1.1rem;font-weight:700;color:var(--verde)}
+.passo .q{color:var(--txt-mut);font-size:.82rem;margin-top:.2rem}
+.passo b{color:var(--txt)}
+@media print{
+  body{max-width:none;padding:22px 20px}
+  .sec{margin-top:32px}
+  .titbox,.card,.nota,.passo,.tit-lin,table.diag tr{break-inside:avoid}
+  h1,h2,h3,.sec>.num,.rot-tela{break-after:avoid}
+  .par{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+
+<h1>Como ficou — e por que a aprovação ainda não aparece</h1>
+<p class="lede">Você tem razão: <b>a aprovação não está aparecendo</b>. Fui atrás, e
+não é a tela nem o deploy. O deploy subiu ontem às 12:28 (horário de Brasília) e
+está <code>live</code>; as duas migrações aplicaram. O problema é meu, de desenho:
+<b>eu liguei a aprovação a uma situação que não acontece nessa empresa.</b></p>
+<p class="lede" style="font-size:.82rem;color:var(--text-faint)">Conferido na conta 34
+(Prime Eventos) em 04/09/2026. Nada foi alterado. As classes de estilo são cópia do
+bloco real de <code>web/portal.py</code>.</p>
+
+<div class="cards">
+  <div class="card"><span class="r">deploy no ar desde</span>
+    <span class="big bom">12:28</span><p>ontem · status live ✓</p></div>
+  <div class="card"><span class="r">sem fornecedor</span>
+    <span class="big bom">0</span><p>eram 30 anteontem</p></div>
+  <div class="card"><span class="r">esperando liberação</span>
+    <span class="big am">0</span><p>e não tem como haver</p></div>
+  <div class="card"><span class="r">do time que acessa o financeiro</span>
+    <span class="big ruim">0</span><p>de 3 — todos são vendedor</p></div>
+</div>
+
+<!-- ==================================================================== 1 -->
+<div class="sec">
+  <div class="num">1 · o que JÁ está aparecendo</div>
+  <h2>O fornecedor entrou, e alguém já usou</h2>
+  <p class="lede">Essa metade funcionou no primeiro dia. Clicando em <b>editar ✎</b>
+  numa conta a pagar, agora são <b>três campos</b> — o de fornecedor com a lista de
+  sugestão. Anteontem eram 30 títulos sem fornecedor; hoje são <b>zero</b>, e cada
+  um ficou com ficha ligada de verdade.</p>
+
+  <div class="par">
+    <div>
+      <div class="rot-tela hoje">como estava</div>
+      <div class="titbox"><div class="cap"><span>editar ✎</span><span>2 campos</span></div>
+      <div class="miolo"><div class="tit-lin">
+        <div class="tit-id"><div class="tit-desc">ENERGIA SOLAR</div>
+          <div class="tit-meta">vence 05/09 · <span style="color:#e07a5f">a pagar</span></div></div>
+        <div class="tit-val" style="color:#e07a5f">R$ 2.877,77</div>
+        <div class="tit-edit">
+          <input value="ENERGIA SOLAR" style="flex:2 1 150px;min-width:0">
+          <input value="2877,77" style="flex:1 1 90px;min-width:0">
+          <button class="b-forte">salvar</button></div>
+      </div></div></div>
+    </div>
+    <div>
+      <div class="rot-tela novo">como está agora</div>
+      <div class="titbox"><div class="cap"><span>editar ✎</span><span>3 campos</span></div>
+      <div class="miolo"><div class="tit-lin">
+        <div class="tit-id"><div class="tit-desc">ENERGIA SOLAR <span class="mut">· NORDESTE ENERGIA SOLAR</span></div>
+          <div class="tit-meta">vence 05/09 · <span style="color:#e07a5f">a pagar</span> · <span style="color:var(--verde-claro)">👤 Nordeste Energia Solar</span></div></div>
+        <div class="tit-val" style="color:#e07a5f">R$ 2.877,77</div>
+        <div class="tit-edit">
+          <input value="ENERGIA SOLAR" style="flex:2 1 140px;min-width:0">
+          <input value="2877,77" style="flex:1 1 80px;min-width:0">
+          <input value="NORDESTE ENERGIA SOLAR" style="flex:1.4 1 130px;min-width:0;border-color:var(--neon-borda)">
+          <button class="b-forte">salvar</button></div>
+      </div></div></div>
+      <p class="lede" style="font-size:.85rem">Os nomes que entraram ontem: ROBERTO
+      LOPES, JAQUELINE DUARTE, INSIGHT ASSESSORIA, NORDESTE ENERGIA SOLAR, ESCONTAB
+      CONTABIL — todos com ficha criada.</p>
+    </div>
+  </div>
+  <div class="nota"><b>O selo "sem fornecedor" você não vê hoje porque não sobrou
+  nenhum.</b> Ele volta a aparecer sozinho na primeira conta que for lançada sem o
+  campo preenchido.</div>
+</div>
+
+<!-- ==================================================================== 2 -->
+<div class="sec">
+  <div class="num">2 · por que a aprovação não aparece</div>
+  <h2>Ela espera alguém que não é você lançar — e ninguém pode</h2>
+  <p class="lede">A regra que eu escrevi: <b>conta a pagar lançada por quem não é o
+  dono nasce "aguardando"</b>. O dono lançando não espera por si mesmo, senão o
+  controle viraria burocracia com você mesmo.</p>
+  <p class="lede">Só que fui conferir <b>quem</b>, na Prime, consegue lançar uma conta
+  a pagar. E a resposta é: <b>só você.</b></p>
+
+  <table class="diag">
+    <tr><th>quem</th><th>papel</th><th>abre Contas a pagar?</th><th>lança?</th><th>o que acontece</th></tr>
+    <tr><td><b>Manoel</b></td><td>dono</td><td class="sim">SIM</td><td class="sim">SIM</td>
+        <td>nasce <span class="selo aut">autorizado</span> — você não espera por você</td></tr>
+    <tr><td>Jacqueline</td><td>vendedor</td><td class="nao">NÃO</td><td class="nao">NÃO</td><td>nem chega na tela</td></tr>
+    <tr><td>Pedro</td><td>vendedor</td><td class="nao">NÃO</td><td class="nao">NÃO</td><td>nem chega na tela</td></tr>
+    <tr><td>Thiago</td><td>vendedor</td><td class="nao">NÃO</td><td class="nao">NÃO</td><td>nem chega na tela</td></tr>
+  </table>
+
+  <div class="nota grave"><b>Isso é falha minha, e é de desenho, não de código.</b>
+  Eu conferi que a capacidade <code>gerir</code> já era exclusiva do dono — e estava
+  certo. O que eu <b>não</b> conferi antes de desenhar foi <b>quem de fato lança</b>
+  conta a pagar nessa empresa. Os três do time são <code>vendedor</code>, e vendedor
+  não tem acesso ao financeiro: o portão do sistema nem deixa a tela abrir. Então a
+  fila de aprovação nunca tem como receber nada, e a tela fica idêntica à de antes —
+  que é exatamente o que você viu.</div>
+</div>
+
+<!-- ==================================================================== 3 -->
+<div class="sec">
+  <div class="num">3 · como fica quando ligar</div>
+  <h2>Os três estados, na tela de Contas a pagar</h2>
+  <p class="lede">Nada disso precisa de código novo — está tudo no ar desde ontem,
+  esperando existir uma conta em cada estado.</p>
+
+  <div class="titbox" style="margin-top:1rem">
+    <div class="cap"><span>Títulos a pagar e receber</span><span>2 esperando você</span></div>
+    <div class="miolo">
+      <div class="tit-lote">⏳ <b>2</b> contas esperando você. Marque na lista e libere de uma vez:
+        <button>✓ liberar as marcadas</button></div>
+
+      <div class="tit-lin">
+        <div class="tit-id">
+          <div class="tit-desc"><input type="checkbox" checked style="width:auto;margin-right:.3rem;accent-color:var(--verde)">INTERNET <span class="mut">· Brisanet</span> <span class="selo esp">aguardando você</span></div>
+          <div class="tit-meta">vence 10/09 · <span style="color:#e07a5f">a pagar</span> · lançado por Jacqueline hoje 09:12</div>
+        </div>
+        <div class="tit-val" style="color:#e07a5f">R$ 94,90</div>
+        <div class="tit-acoes">
+          <button style="color:var(--verde-claro)">dar baixa ✓</button>
+          <button class="b-ok">✓ liberar</button>
+          <button class="b-nao">✕ recusar</button>
+          <button style="color:#8a938a">editar ✎</button>
+        </div>
+      </div>
+
+      <div class="tit-lin">
+        <div class="tit-id">
+          <div class="tit-desc">MENSALIDADE PISCINEIRO <span class="selo rec">recusado</span></div>
+          <div class="tit-meta">vence 15/09 · lançado por Jacqueline · <span style="color:#e07a5f">"o mês passado já foi pago"</span> — você, hoje</div>
+        </div>
+        <div class="tit-val" style="color:#e07a5f">R$ 270,00</div>
+        <div class="tit-acoes">
+          <button style="color:var(--verde-claro)">dar baixa ✓</button>
+          <button class="b-ok">✓ liberar</button>
+          <button style="color:#8a938a">editar ✎</button>
+        </div>
+      </div>
+
+      <div class="tit-lin">
+        <div class="tit-id">
+          <div class="tit-desc">ZARB CONSULTORIA <span class="mut">· Zarb Consultoria</span></div>
+          <div class="tit-meta">vence 15/08 <span style="color:#f0c05a">⚠ atrasado</span> · lançado por Jacqueline · liberado por você em 20/08</div>
+        </div>
+        <div class="tit-val" style="color:#e07a5f">R$ 2.200,00</div>
+        <div class="tit-acoes">
+          <button class="b-forte">dar baixa ✓</button>
+          <button style="color:#8a938a">editar ✎</button>
+          <button style="color:#c98080">apagar ✕</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota"><b>A terceira linha é a que justifica ter separado os campos:</b>
+  ela está <b>liberada e atrasada ao mesmo tempo</b>. Você já disse sim, o dinheiro
+  não saiu, e a data passou — num campo único, ela teria que se chamar "autorizado"
+  <i>ou</i> "atrasado", e a metade que faz alguém correr sumiria.</div>
+
+  <div class="nota alerta"><b>E a baixa nunca trava</b>, como você decidiu: em conta
+  não liberada ela pergunta <i>"esta conta ainda não foi liberada. Dar baixa mesmo
+  assim? Fica registrado que foi paga sem autorização"</i> — e segue. O registro é o
+  que dá peso à escolha.</div>
+</div>
+
+<!-- ==================================================================== 4 -->
+<div class="sec">
+  <div class="num">4 · como ligar</div>
+  <h2>É configuração, não código</h2>
+  <p class="lede">Quem lança conta a pagar hoje precisa de um papel que <b>acesse o
+  financeiro mas não gerencie</b> — e esse papel já existe no sistema, com esse nome:</p>
+
+  <table class="diag">
+    <tr><th>papel</th><th>vê Vendas</th><th>vê Contas a pagar</th><th>libera</th><th>serve pra</th></tr>
+    <tr><td><b>Dono</b></td><td>✓</td><td>✓</td><td class="sim">✓ só ele</td><td>você</td></tr>
+    <tr><td><b>Financeiro</b></td><td>—</td><td>✓</td><td>—</td><td>quem só cuida do dinheiro</td></tr>
+    <tr><td><b>Gestor</b></td><td>✓</td><td>✓</td><td>—</td><td>quem vende <i>e</i> lança conta</td></tr>
+    <tr><td>Vendedor</td><td>✓</td><td>—</td><td>—</td><td>é o que os três têm hoje</td></tr>
+  </table>
+
+  <div class="passo">
+    <div class="n">1</div>
+    <div><b>Decida quem lança conta a pagar.</b>
+      <div class="q">Pelas conversas do WhatsApp, quem organiza pagamento e cobrança
+      parece ser a Jacqueline — mas quem sabe é você.</div></div>
+  </div>
+  <div class="passo">
+    <div class="n">2</div>
+    <div><b>Mude o papel dessa pessoa em Equipe.</b>
+      <div class="q">De <code>vendedor</code> para <b>gestor</b> se ela também vende
+      (o caso da Jacqueline), ou <b>financeiro</b> se for alguém que só cuida do
+      dinheiro. Nos dois casos ela passa a abrir Contas a pagar e a liberação
+      continua só sua.</div></div>
+  </div>
+  <div class="passo">
+    <div class="n">3</div>
+    <div><b>Peça uma conta de teste.</b>
+      <div class="q">Qualquer coisa de valor pequeno. Ela deve nascer com o selo
+      <span class="selo esp">aguardando você</span>, aparecer a faixa no topo, e sair
+      um e-mail e push pra você em até ~2 min.</div></div>
+  </div>
+
+  <div class="nota alerta"><b>Um aviso honesto sobre esse teste:</b> o e-mail/push é o
+  mesmo caminho do aviso de lead que a gente ligou em 02/09, e eu <b>ainda não vi
+  ele entregar de verdade nenhuma vez</b>. Se o selo aparecer na tela mas o aviso não
+  chegar, o problema é do canal de notificação, não da aprovação — e aí eu vou atrás
+  dele.</div>
+
+  <div class="nota"><b>Se você preferir que continue só você lançando</b>, aí a
+  aprovação não tem função nenhuma e é melhor assumir isso do que deixar código
+  dormindo: eu tiro a fila da tela e fica só o conserto do fornecedor, que é o que
+  estava doendo de verdade. Diga qual dos dois e eu faço.</div>
+</div>
+
+<p class="lede" style="margin-top:2.5rem;font-size:.8rem;color:var(--text-faint);
+   border-top:1px solid var(--borda);padding-top:1rem">
+04/09/2026 · conferido na conta 34 (Prime Eventos) · nada foi alterado no sistema.</p>
+
+</body>
+</html>

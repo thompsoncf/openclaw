@@ -10555,19 +10555,18 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
         # sem saber de quem, e o lançamento no caixa já dependia disto pra achar
         # o vendedor da comissão (ver dar_baixa_titulo).
         membro_id = request.session.get("membro_id")
-        # QUEM PRECISA DE LIBERAÇÃO: conta a PAGAR lançada por quem não é o dono.
-        # A pagar só — título a receber é dinheiro entrando, e ninguém precisa
-        # autorizar dinheiro entrando. O dono lançando não espera por si mesmo.
-        from contas import equipe as _equipe
-        papel = _papel_logado(request, conta[0])
-        precisa = (tipo_ok == "pagar"
-                   and not _equipe.caps_do_papel(papel).get("gerir", False))
+        # QUEM PRECISA DE LIBERAÇÃO não se decide mais aqui: a regra ("toda conta
+        # a pagar nasce aguardando") virou regra do negócio e mora no
+        # `criar_titulo`. Era daqui, e o furo apareceu na primeira semana: na
+        # Prime só o dono abre o financeiro, então "aguarda quem não é dono"
+        # nunca acendia — e o agente do WhatsApp, que também cria título, não
+        # tinha cópia nenhuma dessa regra.
         try:
             emp.criar_titulo(pool, conta[0], tipo_ok,
                              descricao, cent, _date.fromisoformat(vencimento),
                              contraparte=contraparte or nome_cli,
                              recorrente=bool(recorrente), criado_por=membro_id,
-                             cliente_id=cli_id, precisa_aprovacao=precisa)
+                             cliente_id=cli_id)
         except Exception:
             pass
     return RedirectResponse("/painel/empresa", status_code=303)

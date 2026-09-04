@@ -85,6 +85,15 @@ def _pode_ver(request: Request):
     return conta, None
 
 
+def _pode_liberar(request: Request) -> bool:
+    """Quem libera conta a pagar: a capacidade `gerir`, exclusiva do dono.
+
+    É a MESMA régua de `_so_o_dono` no portal, e é de propósito que seja a mesma
+    função de capacidades e não uma cópia da conclusão: a pergunta "quem pode
+    liberar" não pode ter duas respostas em duas telas."""
+    return bool(eq.caps_do_papel(request.session.get("papel", "dono")).get("gerir"))
+
+
 def _dia(s) -> date | None:
     """A data que vem do `<input type="date">`: sempre AAAA-MM-DD, nunca o texto
     que o usuário vê. O navegador mostra dd/mm/aaaa em aparelho brasileiro e
@@ -402,25 +411,12 @@ _JANELA_CANDIDATO_DIAS = emp.JANELA_CONCILIACAO_DIAS
 def _prazo(vencimento, hoje) -> tuple[str, str]:
     """"há 20 dias", "amanhã", "em 6 dias" — e a cor. Devolve ("", "") sem data.
 
-    É o que substituiu a coluna Status, e substituiu dizendo mais. "Vencida" e
-    "A vencer" eram `vencimento < hoje` — a data ao lado já continha o fato. O que
-    a palavra NÃO continha é a distância: dever há 4 dias e dever há 20 é a mesma
-    palavra e urgências diferentes, e é a distância que decide quem se liga
-    primeiro. Fica escrito, não só colorido: cor sozinha não é informação pra quem
-    não a distingue.
+    É o que substituiu a coluna Status, e substituiu dizendo mais. A régua mora em
+    `finance/empresa.py` porque a lista da aba Empresa diz a mesma coisa na mesma
+    linha ("vence 15/08 · há 20 dias"): duas telas falando do mesmo vencimento não
+    podem falar diferente.
     """
-    if not vencimento:
-        return "", ""
-    dias = (vencimento - hoje).days
-    if dias < -1:
-        return f"há {-dias} dias", "erro"
-    if dias == -1:
-        return "ontem", "erro"
-    if dias == 0:
-        return "hoje", "aviso"
-    if dias == 1:
-        return "amanhã", "aviso"
-    return f"em {dias} dias", ("aviso" if dias <= 7 else "ok")
+    return emp.prazo_do_vencimento(vencimento, hoje)
 
 
 def _pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
@@ -563,9 +559,17 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
             # e chute numa tela de dinheiro é o que este aviso existe pra evitar
             talvez = f"Talvez {paga} · {c['n']} iguais por perto"
         prazo, prazo_cor = _prazo(t["vencimento"], hoje)
+        # `sel_id` só existe na linha que AINDA precisa de liberação: é o que a
+        # tela usa pra desenhar a caixa. Marcar o que já está liberado não faria
+        # nada (a régua em `decidir_aprovacao` ignora), mas ofereceria caixa que
+        # não muda nada — e caixa que não faz nada foi exatamente a queixa do
+        # dono no print de 04/09/2026.
+        espera = (t.get("aprovacao") or "autorizado") != "autorizado"
         linhas.append({
             "vencimento": _fmt(t["vencimento"]),
             "prazo": prazo, "prazo_cor": prazo_cor,
+            "aprovacao": t.get("aprovacao") or "autorizado",
+            "sel_id": t["id"] if (espera and tipo == "pagar") else None,
             "descricao": (t["descricao"] or "").strip() or "—",
             "contraparte": t["cliente_nome"] or t["contraparte"] or "—",
             # `status` e `categoria` ficam na LINHA sem ter coluna: as métricas do
@@ -605,6 +609,20 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
                      (f"Talvez já {verbo}", f"{len(a_conferir)} · "
                       f"{_brl(_soma(a_conferir, 'valor_centavos'))}")],
     }
+    # A LIBERAÇÃO EM LOTE, e ela mora AQUI e não na aba Empresa por escolha do
+    # dono em 04/09/2026 — "faz mais sentido no relatório". Ele tem razão: é esta
+    # tela que mostra descrição, fornecedor, prazo e valor lado a lado, que é o
+    # que decide se a conta pode ser paga. A aba Empresa é a tela de manutenção
+    # (adicionar, editar, apagar), e a caixa que morava lá aparecia em 1 de 33
+    # linhas — a 32ª —, o que gerou o print perguntando pra que servia.
+    esperando = [r for r in linhas if r["sel_id"]]
+    if esperando:
+        dados["selecao"] = {
+            "url": "/painel/relatorios/liberar", "campo": "ids",
+            "aba": "contas_pagar", "rotulo": "liberar o pagamento",
+            "n": len(esperando),
+            "centavos": _soma(esperando, "valor_centavos"),
+        }
     if a_conferir:
         plural = "s" if len(a_conferir) != 1 else ""
         dados["aviso_config"] = (
@@ -1920,6 +1938,12 @@ def painel_relatorios(request: Request, tipo: str = "vendas", periodo: str = "me
         return redir
     tipo, periodo, dados = _contexto(conta[0], tipo, periodo, status, vendedor, q,
                                      especie, de, ate)
+    # A caixa de liberar só existe pra QUEM LIBERA. `financeiro` (o gate desta
+    # tela) deixa ver e conciliar; liberar conta a pagar é `gerir`, que no modelo
+    # de papéis já é exclusivo do dono. Sem este corte, o gerente veria caixa e
+    # botão que o servidor recusaria — pior que não ver.
+    if dados.get("selecao") and not _pode_liberar(request):
+        dados.pop("selecao")
     return _render("relatorios", request, tipos=TIPOS, tipo=tipo, periodo=periodo,
                    periodos=periodos_da_aba(tipo),
                    periodo_rotulo=_rotulo_periodo(tipo, periodo, de, ate),
@@ -1963,6 +1987,39 @@ def painel_relatorios_pdf(request: Request, tipo: str = "vendas", periodo: str =
 
 def _volta_pra(tipo: str, aba: str) -> RedirectResponse:
     return RedirectResponse(f"/painel/relatorios?tipo={aba}", status_code=303)
+
+
+@router.post("/painel/relatorios/liberar")
+def relatorios_liberar(request: Request, ids: list[str] = Form([])):
+    """O dono libera o pagamento de várias contas de uma vez.
+
+    LIBERAR NÃO PAGA, e a tela diz isso com todas as letras: autoriza que a conta
+    seja paga. Quem paga é o "dar baixa" da aba Empresa, e continua lá — foi
+    escolha do dono em 04/09/2026 manter as duas coisas separadas.
+
+    Dois portões, e são diferentes de propósito: `_pode_ver` (capacidade
+    `financeiro`) é quem entra na tela; `_pode_liberar` (capacidade `gerir`, do
+    dono) é quem decide. A tela já esconde a caixa de quem não pode, mas esconder
+    não é proteger: o POST vem do navegador.
+    """
+    conta, redir = _pode_ver(request)
+    if redir is not None:
+        return redir
+    if not _pode_liberar(request):
+        request.session["erro"] = ("Só o dono libera conta a pagar. "
+                                   "Você pode ver e conciliar.")
+        return _volta_pra("pagar", "contas_pagar")
+    alvos = [int(i) for i in ids if str(i).strip().isdigit()]
+    if not alvos:
+        request.session["erro"] = "Marque as contas na lista antes."
+        return _volta_pra("pagar", "contas_pagar")
+    n = emp.decidir_aprovacao(get_pool(), conta[0], alvos, "autorizado",
+                              membro_id=request.session.get("membro_id"))
+    request.session["aviso"] = (
+        f"{n} conta{'s' if n != 1 else ''} liberada{'s' if n != 1 else ''} "
+        "pra pagamento. O dinheiro só sai quando alguém der baixa."
+        if n else "Nada mudou — essas contas já estavam liberadas.")
+    return _volta_pra("pagar", "contas_pagar")
 
 
 @router.post("/painel/relatorios/conciliar")

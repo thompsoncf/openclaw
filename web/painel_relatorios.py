@@ -167,7 +167,7 @@ def _soma(linhas, chave):
 
 
 def _col(chave, rotulo, num=False, brl=False, tag=False, flex=False, cli=False,
-         extra=None):
+         extra=None, venc=False, parte=None):
     """`flex=True` marca uma coluna ELÁSTICA da tabela — as que podem encolher
     quando falta largura. São sempre as de nome livre (descrição, cliente,
     contraparte), e todo relatório tem ao menos uma.
@@ -182,19 +182,36 @@ def _col(chave, rotulo, num=False, brl=False, tag=False, flex=False, cli=False,
 
     **Duas elásticas na mesma tabela é permitido, e é o caso de Contas a
     pagar/receber**, que mostram Descrição E Fornecedor — dois nomes livres, os
-    dois longos. A regra antiga era "exatamente uma", com medo de que duas
-    brigassem pela sobra; não brigam, porque a sobra é dividida em partes iguais
-    entre elas (`width:99%` em ambas, no CSS do portal). O que continua proibido é
-    ZERO — aí volta a rolagem lateral do print — e marcar como elástica uma coluna
-    de tamanho previsível (valor, data), que encolheria justo o que já cabia."""
+    dois longos. O que continua proibido é ZERO — aí volta a rolagem lateral do
+    print — e marcar como elástica uma coluna de tamanho previsível (valor, data),
+    que encolheria justo o que já cabia.
+
+    **`parte` é obrigatório quando há duas, e a razão é um erro meu.** Eu tinha
+    escrito aqui que duas elásticas dividiriam a sobra em partes iguais sozinhas,
+    "repartimento do algoritmo da tabela, não sorte". É falso, e o print do dono
+    em 04/09/2026 mostrou: numa tabela de largura automática, dois pedidos iguais
+    que não cabem NÃO viram duas fatias iguais — **a primeira leva tudo e a
+    segunda desce pro piso dela**. Medido no Chromium com o CSS real: o Fornecedor
+    recebia 107px numa janela de 900 e os mesmos 107px numa de 1500, cortado em 8
+    de 8 linhas. `parte=55` / `parte=45` declara a divisão, e aí ela acontece.
+    Medido também que declarar no `<th>` não resolve: a largura precisa estar na
+    célula que carrega o `max-width:0`, ou seja no `<td>`."""
     return {"chave": chave, "rotulo": rotulo, "num": num, "brl": brl, "tag": tag,
-            "flex": flex,
-            # `extra` pendura uma SEGUNDA pílula na mesma célula, opcional. Nasceu
-            # da coluna "Conferir", que ninguém entendia: ela nomeava a ação ("vá
-            # conferir") em vez do fato ("esta conta talvez já esteja paga"). Como
-            # fato, ela cabe dentro do Status — que é onde o olho já vai — em vez
-            # de gastar uma coluna inteira que fica vazia em 25 das 30 linhas.
+            "flex": flex, "parte": parte,
+            # `extra` pendura uma SEGUNDA coisa na mesma célula, opcional — pílula
+            # ao lado, numa coluna de tag; linha de baixo, menor, numa elástica.
+            # Nasceu da coluna "Conferir", que ninguém entendia: ela nomeava a ação
+            # ("vá conferir") em vez do fato ("esta conta talvez já esteja paga"),
+            # e ficava vazia em 25 das 30 linhas da Prime. Conteúdo que aparece em
+            # poucas linhas não paga uma coluna, que cobra largura de todas.
             "extra": extra,
+            # `venc=True` é a célula de vencimento de Contas a pagar/receber: a
+            # data MAIS o prazo ("15/08/2026 · há 20 dias"), pintada. Ela substitui
+            # a coluna Status inteira, e substitui dizendo mais: "Vencida" era
+            # `vencimento < hoje` — fato nenhum que a data já não tivesse —, e
+            # achatava numa palavra só a diferença entre dever há 4 dias e dever há
+            # 20. A coluna cobrava 278px por isso, medidos.
+            "venc": venc,
             # `cli=True` é a coluna Cliente da Agenda, que precisa de marcação
             # própria: nome lido do TÍTULO sai apagado e com selo, e a célula vira
             # link pra ligar ao cadastro. Um flag e não `|safe`: a escapagem
@@ -382,6 +399,30 @@ def _bloco_fora(fora: dict) -> dict:
 _JANELA_CANDIDATO_DIAS = emp.JANELA_CONCILIACAO_DIAS
 
 
+def _prazo(vencimento, hoje) -> tuple[str, str]:
+    """"há 20 dias", "amanhã", "em 6 dias" — e a cor. Devolve ("", "") sem data.
+
+    É o que substituiu a coluna Status, e substituiu dizendo mais. "Vencida" e
+    "A vencer" eram `vencimento < hoje` — a data ao lado já continha o fato. O que
+    a palavra NÃO continha é a distância: dever há 4 dias e dever há 20 é a mesma
+    palavra e urgências diferentes, e é a distância que decide quem se liga
+    primeiro. Fica escrito, não só colorido: cor sozinha não é informação pra quem
+    não a distingue.
+    """
+    if not vencimento:
+        return "", ""
+    dias = (vencimento - hoje).days
+    if dias < -1:
+        return f"há {-dias} dias", "erro"
+    if dias == -1:
+        return "ontem", "erro"
+    if dias == 0:
+        return "hoje", "aviso"
+    if dias == 1:
+        return "amanhã", "aviso"
+    return f"em {dias} dias", ("aviso" if dias <= 7 else "ok")
+
+
 def _pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
     """Pra cada título em aberto, o pagamento que TEM CARA de ser ele.
 
@@ -521,10 +562,14 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
             # dizer QUAL seria chute quando há vários do mesmo valor por perto —
             # e chute numa tela de dinheiro é o que este aviso existe pra evitar
             talvez = f"Talvez {paga} · {c['n']} iguais por perto"
+        prazo, prazo_cor = _prazo(t["vencimento"], hoje)
         linhas.append({
             "vencimento": _fmt(t["vencimento"]),
+            "prazo": prazo, "prazo_cor": prazo_cor,
             "descricao": (t["descricao"] or "").strip() or "—",
             "contraparte": t["cliente_nome"] or t["contraparte"] or "—",
+            # `status` e `categoria` ficam na LINHA sem ter coluna: as métricas do
+            # topo contam por eles, e o dado continua servindo a quem lê a linha.
             "categoria": t["categoria"] or "—", "status": status, "status_cor": cor,
             "talvez": talvez, "talvez_cor": "aviso",
             "acao_post": acao,
@@ -539,14 +584,19 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
     dados = {
         "label": label, "mock": False, "sem_periodo": True,
         "acao": any(r["acao_post"] for r in linhas), "acao_rotulo": "Conciliar",
-        # A descrição vem PRIMEIRO porque é ela que responde "que conta é essa" —
-        # é a mesma ordem que a aba Empresa já usa ao listar título
-        # (`{{ t.descricao }} · {{ t.contraparte }}`). Esta tabela é que estava
-        # fora do padrão da casa.
-        "colunas": [_col("vencimento", "Vencimento"),
-                    _col("descricao", "Descrição", flex=True),
-                    _col("contraparte", rotulo_col, flex=True),
-                    _col("status", "Status", tag=True, extra="talvez"),
+        # Quatro colunas, e cada uma paga o lugar dela. A descrição vem PRIMEIRO
+        # porque é ela que responde "que conta é essa" — mesma ordem que a aba
+        # Empresa já usa (`{{ t.descricao }} · {{ t.contraparte }}`).
+        #
+        # O Status saiu (vira o prazo dentro do Vencimento) e a ressalva "Talvez
+        # paga" desceu pra segunda linha da descrição, onde só engorda a linha que
+        # a tem. Medido no Chromium: com Status como coluna sobravam 949px pros
+        # dois nomes numa janela de 1500 e o fornecedor era cortado em toda linha;
+        # sem ela sobram 1.155px e não corta nenhum até 1280.
+        "colunas": [_col("vencimento", "Vencimento", venc=True, extra="prazo"),
+                    _col("descricao", "Descrição", flex=True, parte=55,
+                         extra="talvez"),
+                    _col("contraparte", rotulo_col, flex=True, parte=45),
                     _col("valor_centavos", "Valor", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
         "metricas": [("Total em aberto", _brl(total)),

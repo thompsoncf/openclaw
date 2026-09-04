@@ -103,15 +103,40 @@ def test_todo_relatorio_tem_ao_menos_uma_coluna_elastica():
             f"Colunas: {b.strip()[:140]}")
 
 
-def test_as_elasticas_dividem_a_sobra_em_partes_iguais():
-    """O que torna duas elásticas previsíveis é UMA regra de CSS valendo pra todas:
-    mesma largura pedida, mesma fatia recebida. Se alguém der largura própria a uma
-    delas, a divisão deixa de ser igual e volta a valer o medo que criou a regra
-    antiga."""
-    larguras = re.findall(r"td\.rel-flex\{[^}]*?width:\s*([\w%]+)", _TPL)
-    assert larguras, "sumiu a largura da coluna elástica"
-    assert len(set(larguras)) == 1, \
-        f"as elásticas pedem larguras diferentes ({larguras}) — a sobra deixa de dividir igual"
+def test_quem_tem_duas_elasticas_declara_a_divisao():
+    """**Este teste substitui um meu que estava errado, e o erro custou uma ida à
+    produção.** Eu tinha escrito que duas elásticas com a mesma largura pedida
+    dividiriam a sobra em partes iguais sozinhas — "repartimento do algoritmo da
+    tabela, não sorte" — e um teste que só conferia que as duas pediam o mesmo.
+    Ele passava dizendo a verdade sobre o que eu tinha escrito, e nada sobre o que
+    o navegador fazia.
+
+    O que o navegador faz, medido no Chromium com o CSS real: numa tabela de
+    largura automática, **a primeira elástica leva toda a sobra e a segunda desce
+    pro piso dela**. O Fornecedor de Contas a pagar recebia 107px numa janela de
+    900 e os mesmos 107px numa de 1500, cortado em 8 de 8 linhas — foi o print que
+    o dono mandou em 04/09/2026.
+
+    Então a regra é: com duas elásticas, cada uma DECLARA a sua parte, e as partes
+    fecham 100."""
+    fonte = open(pr.__file__, encoding="utf-8").read()
+    blocos = re.findall(r'"colunas":\s*\[(.*?)\]\s*,\s*\n', fonte, re.S)
+    for i, b in enumerate(blocos):
+        if b.count("flex=True") < 2:
+            continue
+        partes = [int(m) for m in re.findall(r"parte=(\d+)", b)]
+        assert len(partes) == b.count("flex=True"), (
+            f"relatório #{i + 1} tem duas elásticas e não declarou a parte de "
+            f"cada uma — a segunda vai pro piso de ~107px em qualquer tela")
+        assert sum(partes) == 100, f"as partes somam {sum(partes)}, não 100"
+
+
+def test_a_parte_declarada_chega_no_td_e_nao_so_no_th():
+    """Medido também: declarar a largura no `<th>` NÃO resolve — o fornecedor volta
+    pros 107px. Ela tem que estar na célula que carrega o `max-width:0`."""
+    assert "td.rel-flex:nth-child(" in _TPL, \
+        "a regra de divisão saiu do td — a segunda elástica volta ao piso"
+    assert "col.parte" in _TPL, "a divisão deixou de vir das colunas do relatório"
 
 
 def test_a_elastica_e_sempre_de_nome_livre():

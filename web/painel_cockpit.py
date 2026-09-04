@@ -376,6 +376,8 @@ b,strong{font-weight:600}
 .acoes a:active{border-color:var(--neon)}
 .acoes a.acao-forte{border-color:var(--neon-borda);background:var(--neon-fundo);
   color:var(--neon);font-weight:600}
+.acoes a.acao-apagar{border-color:var(--coral-borda);background:var(--coral-fundo);
+  color:#f0b8b8;font-weight:600}
 /* "hoje está marcada pra" — o de-para tem que estar à vista na hora de escolher a
    data nova, senão a pessoa remarca sem lembrar de quando era. */
 .agora-e{background:var(--bg-2);border:1px solid var(--line);border-radius:11px;
@@ -1704,6 +1706,11 @@ def cockpit_agenda(request: Request, t: str = "", e: str = "", m: str = ""):
         if v["tipo_ev"] == "visita":
             acoes.append(f"<a class=acao-forte href='{_BASE}/agenda/{v['id']}/remarcar'>"
                          "Remarcar</a>")
+            # EXCLUIR — o corretivo de "marquei com o vendedor errado". A trava real
+            # (orçamento/sinal/convidado/mensagem) mora em `ag.excluir_evento`; aqui é
+            # só o mesmo limite do Remarcar (só visita, só a posse).
+            acoes.append(f"<a class=acao-apagar href='{_BASE}/agenda/{v['id']}/excluir'>"
+                         "🗑 Excluir</a>")
         if v["ics_url"]:
             acoes.append(f"<a href='{esc(v['ics_url'])}'>{_ic('agenda', 'ic p')} Calendário</a>")
         rot, cor, borda, fundo = _TAG[v["tipo_ev"]]
@@ -2029,6 +2036,66 @@ def cockpit_remarcar(request: Request, ev_id: int, data: str = Form(""),
         msg += f" ⚠ Esse dia já tinha: {quais}"
 
     request.session["ck_ok"] = msg
+    return RedirectResponse(f"{_BASE}/agenda", status_code=303)
+
+
+@router.get("/cockpit/agenda/{ev_id}/excluir", response_class=HTMLResponse)
+def cockpit_excluir_tela(request: Request, ev_id: int):
+    """Apagar a VISITA pelo celular — o vendedor corrige o próprio erro (marcou
+    com o vendedor errado) sem precisar abrir o desktop nem chamar o dono.
+
+    SÓ VISITA, mesmo limite do Remarcar: apagar uma festa mexe em contrato e
+    sinal, isso fica no painel, com o dono. `visita_para_remarcar` já é a
+    consulta certa pra mostrar ANTES de mudar nada — pede a mesma posse, só que
+    aqui o "não existe" quer dizer "não dá pra apagar esta"."""
+    sess = _sessao(request)
+    g = _gerencia(request)
+    if not sess and not g:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess if sess else g
+    v = ck.visita_para_remarcar(get_pool(), conta_id, membro_id, ev_id, gestao=bool(g))
+    if not v:
+        request.session["ck_err"] = "Essa visita não está disponível pra excluir."
+        return RedirectResponse(f"{_BASE}/agenda", status_code=303)
+
+    corpo = (_hdr("Excluir visita", voltar=f"{_BASE}/agenda")
+             + _flash(request)
+             + f"<form class=telaform method=post action='{_BASE}/agenda/{ev_id}/excluir'>"
+             + "<div class=scroll><div class=secao>"
+             + "<div class=agora-e><div class=r>Vai apagar de vez</div>"
+             + f"<b>{esc(v['titulo'])}</b>"
+             + f"<div class=q>{esc(v['dia_sem'])}, {esc(v['quando'])}</div>"
+             + (f"<div class=q>{esc(v['local'])}</div>" if v["local"] else "")
+             + "</div>"
+             + "<div class=fonte>Isso não é cancelar — a linha some da agenda pra "
+               "sempre. Se a data ainda pode acontecer, volte e cancele em vez "
+               "disso. Se já tiver orçamento, sinal, convidado ou mensagem "
+               "ligados a ela, não vai deixar apagar — aí é o dono quem resolve.</div>"
+             + "</div></div>"
+             + "<div class=rodape-b><button class='btn perigo' type=submit "
+               "data-busy='⏳ Excluindo…'>Excluir de vez</button></div>"
+             + "</form>")
+    return _page("Excluir visita", corpo)
+
+
+@router.post("/cockpit/agenda/{ev_id}/excluir")
+def cockpit_excluir(request: Request, ev_id: int):
+    sess = _sessao(request)
+    g = _gerencia(request)
+    if not sess and not g:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess if sess else g
+    r = ck.excluir_visita(get_pool(), conta_id, membro_id, ev_id, gestao=bool(g))
+    if not r.get("ok"):
+        erro = r.get("erro")
+        if erro == "escopo":
+            request.session["ck_err"] = "Essa visita não é sua."
+        elif erro == "trava":
+            request.session["ck_err"] = f"Não dá pra excluir: já {r['msg']}. Fala com o dono."
+        else:
+            request.session["ck_err"] = erro or "Não consegui excluir essa visita."
+        return RedirectResponse(f"{_BASE}/agenda", status_code=303)
+    request.session["ck_ok"] = "Visita excluída. Marca de novo com o vendedor certo."
     return RedirectResponse(f"{_BASE}/agenda", status_code=303)
 
 

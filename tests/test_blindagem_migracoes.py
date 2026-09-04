@@ -71,9 +71,10 @@ create table canais_config (id bigserial primary key, conta_id bigint, canal tex
   identificador text, ativo boolean default true, token text);
 -- prospeccao vem da 075 (marcada como aplicada); a 102 adiciona colunas de decisor.
 -- whatsapp/telefone também são da 075: a 148 lê os dois pra reconstruir o número
--- que a campanha já tentou.
+-- que a campanha já tentou. orcamento_id é da 075 também: o backfill da 197 (data
+-- do evento no lead) copia de `orcamentos.evento` pelo lead amarrado por ela.
 create table prospeccao (id bigserial primary key, conta_id bigint,
-  whatsapp text, telefone text);
+  whatsapp text, telefone text, orcamento_id bigint);
 -- prospeccao_atividades vem da 075 também (marcada como aplicada); a 127 recria
 -- o check de tipo pra incluir 'bounce'.
 create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint,

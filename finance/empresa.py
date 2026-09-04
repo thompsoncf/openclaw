@@ -460,6 +460,165 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
 JANELA_CONCILIACAO_DIAS = 14
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# A segunda régua: o TEXTO. Valor + data não bastam, e a Prime provou.
+#
+# Em 04/09/2026 a aba avisava 5 contas como "talvez já paga" e DUAS estavam
+# simplesmente erradas: as duas contas da Jaqueline Duarte, R$ 3.000,00 de dívida
+# real, apareciam marcadas por causa de três pagamentos de R$ 1.500,00 que são do
+# Pedro Yan, do Thiago e de um reembolso ao cliente Jonas Barros. Nenhum dela. Um
+# aviso desses não é só ruído: convence o dono a NÃO pagar quem ele deve.
+#
+# O contrapeso, e é ele que decide o desenho: **deixar de avisar é pior que
+# avisar à toa.** Perder um aviso custa pagar duas vezes — dinheiro que sai. Por
+# isso aqui não se recusa por "não achei parecença"; recusa-se só por
+# CONTRADIÇÃO, que é evidência positiva de que são coisas diferentes. Na dúvida,
+# o aviso fica de pé.
+#
+# São duas contradições, e cada uma tem a sua condição de confiança:
+#
+# 1. PERÍODO. Os dois textos dizem um período e os períodos são outros —
+#    "1 quinzena setembro/26" contra "2ª quinzena ago/26". Isso não é palpite:
+#    são compromissos diferentes, e vale venha o texto de onde vier. Só mês por
+#    NOME conta; "IPTU 2026 3/6" não vira março nem junho.
+#
+# 2. NOME, e só quando dá pra confiar no texto do pagamento. Extrato de banco
+#    escreve "Pagamento Pix 58.608.090 0001-88" — um CNPJ, nome nenhum; recusar
+#    por aí mataria justamente a única dica boa que a produção inteira produziu
+#    (a ZARB, que veio do extrato). Já a foto do comprovante e o lançamento
+#    escrito à mão nomeiam o beneficiário: "Serviço prestado - Thiago Cesar
+#    Borges Pinheiro". Aí, se o nome não encosta em nada do título nem do
+#    fornecedor dele, é outro pagamento.
+_ORIGENS_COM_NOME = {"foto", "manual", "balcao", "folha"}
+
+_MESES = {"janeiro": 1, "jan": 1, "fevereiro": 2, "fev": 2, "marco": 3, "mar": 3,
+          "abril": 4, "abr": 4, "maio": 5, "mai": 5, "junho": 6, "jun": 6,
+          "julho": 7, "jul": 7, "agosto": 8, "ago": 8, "setembro": 9, "set": 9,
+          "outubro": 10, "out": 10, "novembro": 11, "nov": 11,
+          "dezembro": 12, "dez": 12}
+
+# Palavras que não identificam ninguém. Lista generosa de propósito: quanto mais
+# palavra genérica sai, menor a assinatura, mais fácil ela ficar VAZIA — e
+# assinatura vazia nunca recusa nada. Errar pra cá deixa o aviso de pé.
+_SEM_IDENTIDADE = {
+    # período e recorrência
+    "quinzena", "quinzenal", "mensalidade", "mensal", "mes", "meses", "semana",
+    "semanal", "ano", "anual", "dia", "dias", "periodo", "primeira", "segunda",
+    "ref", "referencia", "referente", "competencia", "vencimento",
+    # dinheiro andando
+    "pagamento", "pagto", "pago", "pix", "ted", "doc", "transferencia",
+    "boleto", "deposito", "saque", "comprovante", "recibo", "nota", "fiscal",
+    "fatura", "parcela", "parcelas", "valor", "total", "juros", "multa",
+    "desconto", "adiantamento", "reembolso", "estorno", "acordo", "credito",
+    "debito",
+    # o que a coisa é
+    "servico", "servicos", "prestado", "prestados", "prestacao", "produto",
+    "produtos", "compra", "venda", "conta", "contas", "despesa", "receita",
+    "cliente", "fornecedor", "funcionario", "colaborador", "empresa",
+    # sufixo de razão social
+    "ltda", "epp", "eireli", "cia", "sociedade", "comercio", "industria",
+    "assessoria", "consultoria", "administrativa", "administrativo",
+    "servicos", "solucoes", "grupo", "filial", "matriz",
+}
+
+
+def _sem_acento(texto) -> str:
+    """Minúscula, sem acento, só letra e número — o resto vira espaço.
+
+    NFKD e não NFD por causa do "2ª quinzena", que é como o agente escreve o
+    comprovante. O "ª" é U+00AA, e pro Python ele é ALFANUMÉRICO: sobrevive ao
+    NFD e à limpeza, e "2ª quinzena" não casa com nenhuma régua que espere
+    "2a quinzena". O NFKD abre o ordinal em "a" e o problema some.
+    """
+    import unicodedata
+    bruto = unicodedata.normalize("NFKD", str(texto or ""))
+    limpo = "".join(c for c in bruto if unicodedata.category(c) != "Mn")
+    return "".join(c if c.isalnum() else " " for c in limpo.lower())
+
+
+def assinatura_de_nome(*textos) -> set[str]:
+    """As palavras de um texto que servem pra dizer QUEM é.
+
+    Fora: número (CNPJ, ano, parcela), palavra curta (até 3 letras — "de", "da",
+    "e", e também o "26" de "ago/26"), mês, e a lista de genéricas acima. O que
+    sobra é nome próprio, marca ou coisa específica.
+    """
+    fora = set()
+    for t in textos:
+        for p in _sem_acento(t).split():
+            if len(p) < 4 or p.isdigit():
+                continue
+            if p in _SEM_IDENTIDADE or p in _MESES:
+                continue
+            fora.add(p)
+    return fora
+
+
+def _nomes_se_encostam(a: set[str], b: set[str]) -> bool:
+    """Duas assinaturas se encostam se QUALQUER palavra de uma cabe na outra.
+
+    Contenção, e não igualdade, por causa do apelido: na Prime o título é
+    "2 QUINZENA AGOSTO/26 BETO" e o fornecedor é "ROBERTO LOPES" — "beto" está
+    dentro de "roberto". Igualdade estrita recusaria o pagamento certo. E o erro
+    aqui só pode ser pra um lado: encostar demais mantém o aviso, que é o lado
+    barato.
+    """
+    for x in a:
+        for y in b:
+            if x in y or y in x:
+                return True
+    return False
+
+
+def periodo_no_texto(texto) -> tuple[int | None, int | None] | None:
+    """(quinzena, mês) achados no texto, ou None se ele não fala de período.
+
+    Mês só por NOME — "IPTU 2026 3/6" não pode virar março. Quinzena só colada na
+    palavra: "1 QUINZENA SETEMBRO", "2ª quinzena ago/26", "quinzena 1".
+    """
+    import re
+    limpo = _sem_acento(texto)
+    mes = None
+    for p in limpo.split():
+        if p in _MESES:
+            mes = _MESES[p]
+            break
+    quinzena = None
+    m = (re.search(r"(\d)\s*a?\s+quinzena", limpo)
+         or re.search(r"quinzena\s+(\d)", limpo))
+    if m and m.group(1) in ("1", "2"):
+        quinzena = int(m.group(1))
+    return None if (mes is None and quinzena is None) else (quinzena, mes)
+
+
+def texto_contradiz(titulo: dict, lanc: dict) -> str | None:
+    """O que no TEXTO diz que este pagamento não é deste título — ou None.
+
+    Devolve motivo legível porque ele vai virar mensagem de erro na gravação. Só
+    responde por contradição; ausência de parecença não é motivo.
+    """
+    do_titulo = f"{titulo.get('descricao') or ''} {titulo.get('contraparte') or ''}"
+    do_lanc = lanc.get("descricao") or ""
+
+    p_tit, p_lanc = periodo_no_texto(do_titulo), periodo_no_texto(do_lanc)
+    if p_tit and p_lanc:
+        q_t, m_t = p_tit
+        q_l, m_l = p_lanc
+        if (m_t is not None and m_l is not None and m_t != m_l) or \
+           (q_t is not None and q_l is not None and q_t != q_l):
+            return ("Esse pagamento é de outro período — a conta e o pagamento "
+                    "falam de quinzenas/meses diferentes.")
+
+    if (lanc.get("origem") or "") in _ORIGENS_COM_NOME:
+        a, b = assinatura_de_nome(do_titulo), assinatura_de_nome(do_lanc)
+        # assinatura vazia dos dois lados = texto que não nomeia ninguém. Não dá
+        # pra contradizer com o que não foi dito.
+        if a and b and not _nomes_se_encostam(a, b):
+            return ("Esse pagamento está em nome de outra pessoa — o comprovante "
+                    "não fala da mesma conta.")
+    return None
+
+
 def pagamento_serve_pro_titulo(titulo: dict, lanc: dict) -> str | None:
     """O erro que impede este pagamento de quitar este título, ou None se serve.
 
@@ -480,7 +639,11 @@ def pagamento_serve_pro_titulo(titulo: dict, lanc: dict) -> str | None:
     if abs((lanc["data"] - titulo["vencimento"]).days) > JANELA_CONCILIACAO_DIAS:
         return (f"O pagamento está a mais de {JANELA_CONCILIACAO_DIAS} dias do "
                 "vencimento — pode ser de outro mês.")
-    return None
+    # e o texto, pelo mesmo motivo que a janela mora aqui: a tela deixou de
+    # sugerir estes casos, e a gravação tem que recusar os mesmos. Sem isto um
+    # POST forjado — ou um formulário aberto antes da mudança — fecharia a conta
+    # de setembro com o dinheiro de agosto.
+    return texto_contradiz(titulo, lanc)
 
 
 def conciliar_titulo(pool, conta_id: int, titulo_id: int, lancamento_id: int) -> dict:
@@ -536,15 +699,19 @@ def conciliar_titulo(pool, conta_id: int, titulo_id: int, lancamento_id: int) ->
             return {"ok": False, "erro": "Esse dinheiro já foi contado na baixa de "
                                          "outra conta — é a mesma entrada, repetida."}
 
+        # `contraparte` entra junto da descrição porque a régua do texto lê as
+        # duas: na Prime o título diz "2 QUINZENA AGOSTO/26 BETO" e só a
+        # contraparte ("ROBERTO LOPES") permite reconhecer o pagamento em nome
+        # dele. Sem ela, o apelido recusaria o dinheiro certo.
         t = c.execute(
-            """select tipo, valor_centavos, vencimento, status, descricao
+            """select tipo, valor_centavos, vencimento, status, descricao, contraparte
                  from titulos where id=%s and conta_id=%s""",
             (titulo_id, conta_id),
         ).fetchone()
         if not t:
             return {"ok": False, "erro": "Conta não encontrada."}
         titulo = {"tipo": t[0], "valor_centavos": int(t[1] or 0), "vencimento": t[2],
-                  "status": t[3], "descricao": t[4]}
+                  "status": t[3], "descricao": t[4], "contraparte": t[5]}
         erro = pagamento_serve_pro_titulo(titulo, lanc)
         if erro:
             return {"ok": False, "erro": erro}

@@ -329,17 +329,40 @@ def test_titulo_sem_vencimento_nao_derruba(pool, conta):
 
 
 # ── as colunas na tabela ─────────────────────────────────────────────────────
-def test_o_aviso_mora_dentro_do_status_e_nao_numa_coluna_propria(pool, conta):
+def test_o_aviso_mora_embaixo_da_descricao_e_nao_numa_coluna_propria(pool, conta):
     """A coluna "Conferir" foi embora, o aviso não. O dono olhou o print e disse
     "não sei pra que serve": o nome dizia a AÇÃO ("vá conferir") e não o FATO
-    ("esta conta talvez já esteja paga"). Como fato ele cabe no Status, que é onde
-    o olho já está — e economiza uma coluna que ficava vazia em 25 das 30 linhas
-    da Prime."""
+    ("esta conta talvez já esteja paga").
+
+    Ele passou pelo Status e parou embaixo da descrição, que é onde ele custa
+    menos: ali só engorda a linha que o tem. Numa coluna própria — e depois numa
+    pílula ao lado do Status — ele cobrava largura de TODAS as linhas pra servir a
+    uma em trinta."""
     cols = _abertos(pool, conta)["colunas"]
     por_chave = {c["chave"]: c for c in cols}
     assert "talvez" not in por_chave, "o aviso voltou a gastar uma coluna inteira"
-    assert por_chave["status"]["extra"] == "talvez"
-    assert por_chave["status"]["tag"] is True
+    assert por_chave["descricao"]["extra"] == "talvez"
+    assert por_chave["descricao"]["flex"] is True, \
+        "numa coluna elástica o extra vira a linha de baixo; numa de tag, pílula"
+
+
+def test_o_status_deixou_de_ser_coluna_e_virou_o_prazo(pool, conta):
+    """"Vencida" é `vencimento < hoje` — a data ao lado já continha o fato, e a
+    coluna cobrava 278px (medidos no Chromium) pra repeti-lo. O prazo diz o que a
+    palavra não dizia: a distância."""
+    dados = _abertos(pool, conta)
+    por_chave = {c["chave"]: c for c in dados["colunas"]}
+    assert "status" not in por_chave, "a coluna Status voltou a cobrar largura"
+    assert por_chave["vencimento"]["venc"] is True
+    assert por_chave["vencimento"]["extra"] == "prazo"
+
+
+def test_o_status_continua_na_linha_porque_as_metricas_contam_por_ele(pool, conta):
+    """Saiu a COLUNA, não o dado. "Vencidas 3 · R$ 5.760,85" no topo da aba é
+    contado por ele."""
+    _titulo(pool, conta)
+    linha = _abertos(pool, conta)["linhas"][0]
+    assert linha["status"] == "Vencida" and linha["status_cor"] == "erro"
 
 
 def test_a_descricao_esta_na_tabela_e_vem_antes_do_fornecedor(pool, conta):
@@ -390,25 +413,52 @@ def _render(dados: dict) -> str:
     return env.get_template("t").render(dados=dados, request=None)
 
 
-def test_a_celula_de_status_sai_com_as_duas_pilulas(pool, conta):
-    """O status é a resposta principal ("Vencida") e o aviso é a ressalva
-    ("Talvez paga · 10/08") — as duas na mesma célula, nessa ordem."""
+def test_a_celula_de_vencimento_sai_com_a_data_e_o_prazo(pool, conta):
+    """O que o leitor vê no lugar da pílula "Vencida"."""
+    _titulo(pool, conta)
+    html = _render(_abertos(pool, conta))
+    assert 'class="rel-venc erro"' in html, "a data tem que sair pintada de vencida"
+    assert 'class="rel-prazo">· há 17 dias' in html, \
+        "o prazo tem que ir ESCRITO — cor sozinha não serve a quem não a distingue"
+
+
+def test_a_ressalva_sai_como_linha_de_baixo_da_descricao(pool, conta):
     _titulo(pool, conta)
     _pag(pool, conta)
     html = _render(_abertos(pool, conta))
-    assert "Vencida" in html and "Talvez paga" in html
-    assert html.index("Vencida") < html.index("Talvez paga"), \
-        "a ressalva não pode vir antes do fato principal"
-    assert html.count("rel-tag") >= 2
+    assert 'class="rel-sub">Talvez paga' in html
+    # e dentro da célula da descrição, não solta numa coluna
+    celula = html.split('class="rel-flex"')[1].split("</td>")[0]
+    assert "rel-sub" in celula and "ZARB" in celula
 
 
-def test_sem_dica_a_celula_sai_com_uma_pilula_so(pool, conta):
-    """Pílula vazia em cada linha é ruído com borda — o aviso é esparso por
-    desenho (5 linhas em 30, na Prime)."""
+def test_sem_dica_a_linha_nao_ganha_segunda_linha(pool, conta):
+    """A ressalva é esparsa por desenho — 1 linha em 30 na Prime depois do #610.
+    Se ela aparecesse vazia em todas, a tabela dobraria de altura à toa."""
     _titulo(pool, conta, valor=240000, descricao="BANCO DO NORDESTE")
     html = _render(_abertos(pool, conta))
-    assert "Talvez" not in html
-    assert html.count("rel-tag") == 1
+    assert "Talvez" not in html and "rel-sub" not in html
+
+
+def test_as_duas_elasticas_declaram_a_divisao(pool, conta):
+    """O bug do print de 04/09: sem declarar, a primeira elástica leva TODA a
+    sobra e a segunda desce pro piso de 107px — em qualquer tamanho de tela."""
+    cols = {c["chave"]: c for c in _abertos(pool, conta)["colunas"]}
+    assert cols["descricao"]["parte"] and cols["contraparte"]["parte"]
+    assert cols["descricao"]["parte"] + cols["contraparte"]["parte"] == 100
+
+
+@pytest.mark.parametrize("dias,texto,cor", [
+    (-20, "há 20 dias", "erro"), (-2, "há 2 dias", "erro"), (-1, "ontem", "erro"),
+    (0, "hoje", "aviso"), (1, "amanhã", "aviso"), (7, "em 7 dias", "aviso"),
+    (8, "em 8 dias", "ok"), (26, "em 26 dias", "ok"),
+])
+def test_o_prazo_que_substituiu_a_pilula(dias, texto, cor):
+    assert rel._prazo(HOJE + timedelta(days=dias), HOJE) == (texto, cor)
+
+
+def test_sem_vencimento_o_prazo_fica_vazio():
+    assert rel._prazo(None, HOJE) == ("", "")
 
 
 def test_o_pdf_leva_a_ressalva_junto(pool, conta):

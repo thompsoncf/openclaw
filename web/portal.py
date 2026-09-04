@@ -6354,6 +6354,20 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
      a sua no fim, e nenhuma empurra as colunas de tamanho fixo pra fora. */
   .rel-tbl-wrap table td.rel-flex{white-space:nowrap;overflow:hidden;
    text-overflow:ellipsis;max-width:0;width:99%}
+  /* A linha de baixo da célula elástica: a ressalva "Talvez paga · 10/08" de
+     Contas a pagar. Só existe onde há ressalva — 1 linha em 30 na Prime —, então
+     29 linhas continuam com a altura de sempre. Corta no fim igual à de cima. */
+  .rel-tbl-wrap table td.rel-flex .rel-sub{display:block;font-size:.75rem;
+   font-weight:500;color:#f0dca6;overflow:hidden;text-overflow:ellipsis}
+  /* A célula de vencimento de Contas a pagar/receber: data + prazo, pintada.
+     Ela substituiu a coluna Status, que cobrava 278px (medidos no Chromium) pra
+     repetir o que a data já dizia. O prazo é o que a palavra "Vencida" não
+     dizia — a distância —, e vai escrito, não só colorido. */
+  .rel-tbl-wrap table td.rel-venc{white-space:nowrap;font-variant-numeric:tabular-nums}
+  .rel-tbl-wrap table td.rel-venc .rel-prazo{color:var(--txt-mut)}
+  .rel-tbl-wrap table td.rel-venc.erro,
+  .rel-tbl-wrap table td.rel-venc.erro .rel-prazo{color:var(--coral)}
+  .rel-tbl-wrap table td.rel-venc.aviso .rel-prazo{color:var(--ambar)}
   /* São até 300 linhas. Rolar 200 e não lembrar qual coluna é qual faz a pessoa
      rolar de volta só pra conferir o cabeçalho. */
   .rel-tbl-wrap{max-height:70vh;overflow-y:auto}
@@ -6500,22 +6514,32 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
 
   <p class="dica-toque rel-scroll-dica">👉 arraste a tabela pros lados pra ver todas as colunas</p>
   <div class="rel-tbl-wrap">
+  {#- A divisão entre as colunas ELÁSTICAS, declarada por quem montou o relatório
+     (`parte=55` / `parte=45` em _col). Sai como regra de CSS e não como `style=`
+     em cada célula porque são até 300 linhas: uma regra contra 600 atributos.
+     Vale no `td` e não no `th` — medido: a largura tem que estar na célula que
+     carrega o `max-width:0`, senão a segunda elástica volta pro piso de 107px. -#}
+  {% set elasticas = dados.colunas|selectattr("parte")|list %}
+  {% if elasticas %}<style>{% for col in dados.colunas %}{% if col.parte
+    %}.rel-tbl-wrap td.rel-flex:nth-child({{ loop.index }}){width:{{ col.parte }}%}{% endif %}{% endfor %}</style>{% endif %}
   <table>
     <thead>
     <tr>{% for col in dados.colunas %}<th{% if col.num %} class="rel-num"{% endif %}>{{ col.rotulo }}</th>{% endfor %}{% if dados.acao %}<th></th>{% endif %}</tr>
     </thead>
     <tbody>
     {% for row in dados.linhas %}
-    <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% elif col.flex %} class="rel-flex" title="{{ row[col.chave] }}"{% endif %}{% if col.chave == dados.col_total %} data-c="{{ row[col.chave] }}"{% endif %}>{% if col.tag %}{#- pílula SÓ quando há valor: as colunas "Quitou" e o aviso de
-      "talvez paga" são esparsas por desenho (o elo é raro), e uma pílula vazia em
-      cada linha vira ruído com borda. -#}{% if row[col.chave] %}<span
+    <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% elif col.venc %} class="rel-venc {{ row.prazo_cor }}"{% elif col.flex %} class="rel-flex" title="{{ row[col.chave] }}"{% endif %}{% if col.chave == dados.col_total %} data-c="{{ row[col.chave] }}"{% endif %}>{% if col.tag %}{#- pílula SÓ quando há valor: a coluna "Quitou" é
+      esparsa por desenho (o elo é raro), e uma pílula vazia em cada linha vira
+      ruído com borda. -#}{% if row[col.chave] %}<span
       class="rel-tag {{ row[col.chave ~ '_cor'] }}">{{ row[col.chave] }}</span>{% endif
-      %}{#- e a SEGUNDA pílula da mesma célula, quando a coluna declarou `extra`.
-      É o "Talvez paga · 10/08" de Contas a pagar, que antes gastava uma coluna
-      inteira chamada "Conferir" — vazia em 25 das 30 linhas, e com um nome que
-      dizia a ação em vez do fato. Ela vem DEPOIS do status porque o status é a
-      resposta principal ("Vencida") e isto é a ressalva. -#}{% if col.extra and row[col.extra]
+      %}{% if col.extra and row[col.extra]
       %} <span class="rel-tag {{ row[col.extra ~ '_cor'] }}">{{ row[col.extra] }}</span>{% endif
+      %}{% elif col.venc %}{#- a data MAIS o prazo: "15/08/2026 · há 20 dias". Ela
+      substituiu a coluna Status de Contas a pagar/receber, que cobrava 278px
+      (medidos) pra repetir o que a data já dizia — "Vencida" é `vencimento <
+      hoje`. O prazo diz o que a palavra não dizia: a distância. Fica ESCRITO e não
+      só colorido, senão quem não distingue a cor perde o aviso. -#}{{ row[col.chave]
+      }}{% if col.extra and row[col.extra] %} <span class="rel-prazo">· {{ row[col.extra] }}</span>{% endif
       %}{% elif col.brl %}{{ row[col.chave]|brl
       }}{% elif col.cli %}{#- a célula Cliente da Agenda. Nome vindo do VÍNCULO sai
       limpo; DEDUÇÃO sai apagada e com selo, porque é palpite e a tela não pode
@@ -6527,7 +6551,11 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
       %}<span{% if row.cliente_deduzido %} class="rel-deriv"{% endif %}>{{ row[col.chave] }}</span>{%
       if row.cliente_do_lead %}<span class="rel-selo lead" title="Nome do lead que marcou a visita — ainda não é um cadastro ligado">do lead</span>{%
       elif row.cliente_do_titulo %}<span class="rel-selo" title="Lido do título do compromisso — ainda não é um cadastro ligado">do título</span>{%
-      endif %}{% if row.cliente_link %}</a>{% endif %}{% else %}{{ row[col.chave] }}{% endif %}</td>{% endfor %}{% if dados.acao %}<td class="rel-act">{% if row.acao_href
+      endif %}{% if row.cliente_link %}</a>{% endif %}{% else %}{{ row[col.chave]
+      }}{#- numa coluna ELÁSTICA o `extra` é a linha de baixo, menor: é o "Talvez
+      paga · 10/08" de Contas a pagar. Ali ele só engorda a linha que o tem — em
+      vez de alargar as 30 pra servir a uma, que é o que a coluna própria fazia. -#}{% if col.flex and col.extra and row[col.extra]
+      %}<span class="rel-sub">{{ row[col.extra] }}</span>{% endif %}{% endif %}</td>{% endfor %}{% if dados.acao %}<td class="rel-act">{% if row.acao_href
       %}<a class="rel-print" href="{{ row.acao_href }}" target="_blank" rel="noopener" title="{{ dados.acao_rotulo }}">🖨️</a>{%
       elif row.acao_post %}{#- botão que GRAVA. Form de verdade (POST + 303), não
       link: ação que muda dinheiro não pode ser disparada por um GET que o

@@ -261,15 +261,19 @@ def test_nenhuma_conta_da_jaqueline_fica_marcada(pool, prime):
         if "JAQUELINE" in r["descricao"]:
             assert r["talvez"] == "", \
                 "R$ 1.500,00 que ela tem a receber marcados como talvez pagos"
-            assert r["acao_post"] is None
 
 
-def test_o_botao_sobra_so_na_zarb(pool, prime):
-    """O botão é o que GRAVA. Depois do conserto ele existe uma vez só, e na
-    linha certa."""
+def test_o_aviso_sobra_so_na_zarb(pool, prime):
+    """Depois do conserto a dica existe uma vez só, e na linha certa.
+
+    Era o BOTÃO que se contava aqui. Em 04/09/2026 ele saiu do relatório e foi
+    pra aba Empresa, por escolha do dono — o que sobra nesta tela é o aviso, que
+    é informação e não ação. A régua que decide continua a mesma, e é ela que
+    este teste guarda."""
     d = rel._dados_titulos_abertos(pool, prime, "pagar")
-    com_botao = [r["descricao"] for r in d["linhas"] if r["acao_post"]]
-    assert com_botao == ["ZARB CONSULTORIA"]
+    com_aviso = [r["descricao"] for r in d["linhas"] if r["talvez"]]
+    assert com_aviso == ["ZARB CONSULTORIA"]
+    assert "acao" not in d, "o relatório voltou a ter coluna de ação"
 
 
 def test_a_gravacao_recusa_o_que_a_tela_deixou_de_sugerir(pool, prime):
@@ -312,10 +316,13 @@ def test_a_gravacao_continua_aceitando_a_zarb(pool, prime):
 def test_a_regua_do_texto_esta_no_finance_e_nao_na_tela():
     """Se ela nascer na tela, a gravação fica sem ela e um POST forjado passa —
     que é o motivo de `pagamento_serve_pro_titulo` existir separada."""
-    fonte = open(rel.__file__, encoding="utf-8").read()
-    corpo = fonte.split("def _pagamentos_candidatos")[1].split("\ndef ")[0]
-    assert "emp.texto_contradiz" in corpo, "a tela tem que CHAMAR a régua"
-    assert "_SEM_IDENTIDADE" not in fonte, "a régua não pode ter cópia na tela"
+    fonte = open(emp.__file__, encoding="utf-8").read()
+    corpo = fonte.split("def pagamentos_candidatos")[1].split("\ndef ")[0]
+    assert "texto_contradiz" in corpo, "a busca por candidato tem que CHAMAR a régua"
+    da_tela = open(rel.__file__, encoding="utf-8").read()
+    assert "_SEM_IDENTIDADE" not in da_tela, "a régua não pode ter cópia na tela"
+    assert "def pagamentos_candidatos" not in da_tela, \
+        "a busca por candidato voltou pra tela — duas telas perguntam isso agora"
     servidor = open(emp.__file__, encoding="utf-8").read()
     trecho = servidor.split("def pagamento_serve_pro_titulo")[1].split("\ndef ")[0]
     assert "texto_contradiz" in trecho, \

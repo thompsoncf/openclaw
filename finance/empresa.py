@@ -670,6 +670,90 @@ def pagamento_serve_pro_titulo(titulo: dict, lanc: dict) -> str | None:
     return texto_contradiz(titulo, lanc)
 
 
+def pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
+    """Pra cada título em aberto, o pagamento que TEM CARA de ser ele.
+
+    Isto é uma DICA, não uma conclusão, e a diferença é a razão da função existir
+    com este desenho. Rodando casamento por valor + janela nos 11 títulos vencidos
+    da produção em 01/09/2026 saem duas sugestões, e uma delas casaria a
+    "parcela 2/2 da Bianca Oliveira" com o dinheiro do SINAL (parcela 1) — ou
+    seja, fecharia uma dívida que a cliente ainda tem e inventaria receita que não
+    entrou. Por isso aqui não se dá baixa em nada: a tela avisa, conta quantos
+    candidatos existem e deixa a decisão com quem sabe.
+
+    Três travas contra o falso positivo:
+
+    * lançamento que JÁ é a baixa de algum título não vira candidato de outro
+      (`titulos.lancamento_id`);
+    * **nem o gêmeo dele.** Esta trava nasceu conferindo a anterior em produção: a
+      primeira versão ainda sugeria o pagamento da parcela 2/2 da Bianca, porque o
+      dinheiro do sinal está no banco DUAS vezes — a baixa do título (amarrada, e
+      barrada pela trava 1) e a foto do mesmo comprovante (solta, e passava). Um
+      lançamento de mesmo valor e mesma data de um lançamento `origem='titulo'` é
+      o eco daquele dinheiro, não dinheiro novo — é a mesma régua que
+      `_dados_vendas` usa pra não contar o sinal duas vezes;
+    * a janela é apertada de propósito (ver `JANELA_CONCILIACAO_DIAS`), porque em
+      conta recorrente o mesmo valor se repete todo mês;
+    * **e o TEXTO, que faltava.** As três acima olham só valor e data, e isso não
+      basta: em 04/09/2026 a aba avisava 5 contas da Prime e DUAS estavam
+      erradas — as duas da Jaqueline Duarte, R$ 3.000,00 de dívida real, marcadas
+      por causa de pagamentos ao Pedro Yan, ao Thiago e de um reembolso ao
+      cliente Jonas Barros. A régua está em `texto_contradiz` e recusa só por
+      CONTRADIÇÃO (período diferente, ou nome de outra pessoa num comprovante que
+      nomeia gente) — nunca por falta de parecença, porque deixar de avisar custa
+      pagar duas vezes.
+
+    Mora aqui, e não na tela, porque DUAS telas perguntam a mesma coisa desde
+    04/09/2026: o relatório de Contas a pagar, pra escrever o aviso "Talvez paga",
+    e a aba Empresa, pra oferecer o botão que fecha a conta. Se cada uma tivesse a
+    sua régua, uma avisaria o que a outra não deixa fechar.
+
+    Devolve {titulo_id: {"n", "data", "lancamento_id", "centavos"}}.
+    """
+    alvos = [t for t in titulos if t["vencimento"] and t["valor_centavos"]]
+    if not alvos:
+        return {}
+    lanc_tipo = "despesa" if tipo == "pagar" else "receita"
+    janela = timedelta(days=JANELA_CONCILIACAO_DIAS)
+    de = min(t["vencimento"] for t in alvos) - janela
+    ate = max(t["vencimento"] for t in alvos) + janela
+    with pool.connection() as c:
+        rows = c.execute(
+            """select l.id, l.data, l.valor_centavos, l.descricao, l.origem
+                 from lancamentos l
+                where l.conta_id=%s and l.tipo=%s and l.data >= %s and l.data <= %s
+                  and not exists (select 1 from titulos t
+                                   where t.lancamento_id = l.id and t.conta_id = l.conta_id)
+                  and (l.origem = 'titulo' or not exists (
+                        select 1 from lancamentos g
+                         where g.conta_id = l.conta_id and g.origem = 'titulo'
+                           and g.tipo = l.tipo and g.data = l.data
+                           and g.valor_centavos = l.valor_centavos))""",
+            (conta_id, lanc_tipo, de, ate),
+        ).fetchall()
+    por_valor: dict[int, list] = {}
+    for lid, data, valor, desc, origem in rows:
+        por_valor.setdefault(int(valor or 0), []).append(
+            {"id": lid, "data": data, "descricao": desc, "origem": origem})
+    achados = {}
+    for t in alvos:
+        perto = [p for p in por_valor.get(t["valor_centavos"], [])
+                 if abs((p["data"] - t["vencimento"]).days) <= JANELA_CONCILIACAO_DIAS
+                 # e a quarta trava, a do TEXTO (ver `texto_contradiz`): valor
+                 # e data iguais não bastam. Na Prime as duas contas da Jaqueline
+                 # eram avisadas por causa de pagamentos ao Pedro Yan, ao Thiago e
+                 # de um reembolso a cliente — R$ 3.000,00 de dívida real marcada
+                 # como talvez paga. A régua recusa por contradição, nunca por
+                 # falta de parecença: na dúvida o aviso fica de pé.
+                 and not texto_contradiz(t, p)]
+        if perto:
+            perto.sort(key=lambda p: abs((p["data"] - t["vencimento"]).days))
+            achados[t["id"]] = {"n": len(perto), "data": perto[0]["data"],
+                                "lancamento_id": perto[0]["id"],
+                                "centavos": t["valor_centavos"]}
+    return achados
+
+
 def conciliar_titulo(pool, conta_id: int, titulo_id: int, lancamento_id: int) -> dict:
     """Amarra um pagamento QUE JÁ EXISTE a um título aberto, e fecha o título.
 

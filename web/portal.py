@@ -4023,6 +4023,31 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
          escolha viraria um clique a mais e nada mais. #}
       <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa"
         {%- if t.tipo=='pagar' and t.aprovacao!='autorizado' %} onsubmit="return confirm('Esta conta {{ 'foi RECUSADA' if t.aprovacao=='recusado' else 'ainda não foi liberada' }} pelo dono. Dar baixa mesmo assim? Fica registrado que ela foi paga sem autorização.')"{% endif %}><button style="color:var(--verde-claro)">dar baixa ✓</button></form>
+      {#- "JÁ FOI PAGA": liga esta conta a um pagamento que JÁ ESTÁ no caixa, em
+         vez de lançar um novo. Veio do relatório em 04/09/2026, junto com a
+         decisão do dono de concentrar pagamento aqui.
+
+         Ela e o "dar baixa" ao lado NÃO são a mesma coisa, e é por isso que as
+         duas existem: a de cima CRIA um lançamento (o dinheiro sai agora), esta
+         AMARRA um que já saiu. Na ZARB o título de R$ 2.200 está aberto e o Pix
+         de R$ 2.200 de 10/08 já está no caixa — fechá-lo pelo "dar baixa"
+         lançaria a despesa uma segunda vez, no livro-caixa e no DRE.
+
+         Só aparece com candidato ÚNICO: com dois pagamentos iguais por perto a
+         régua conta e não escolhe, e oferecer botão ali seria pedir pro dono
+         confirmar um chute que a própria tela não soube fazer. #}
+      {% if t.conciliar %}
+      {#- o texto vai por `data-confirmar` e NÃO por `onsubmit="confirm({{...|tojson}})"`:
+         o tojson do Jinja não escapa aspas, e esta frase carrega a DESCRIÇÃO do
+         título, que é texto do usuário. Foi assim que o atributo saiu quebrado no
+         #598. Com `|e` a escapagem do HTML vale, e quem lê é o ouvinte delegado
+         no fim deste bloco. #}
+      <form method="post" action="/painel/empresa/titulo/{{ t.id }}/conciliar"
+            data-confirmar="{{ t.conciliar.confirmar|e }}">
+        <input type="hidden" name="lancamento_id" value="{{ t.conciliar.lancamento_id }}">
+        <button style="color:var(--verde-claro);border-color:#1E4A3A"
+          title="{{ t.conciliar.titulo|e }}">✓ já foi paga — {{ t.conciliar.resumo }}</button></form>
+      {% endif %}
       {% if pode_liberar and t.tipo=='pagar' and t.aprovacao!='autorizado' %}
       <form method="post" action="/painel/empresa/titulo/aprovacao">
         <input type="hidden" name="titulo_id" value="{{ t.id }}">
@@ -4069,6 +4094,12 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     f.style.display = aberto ? 'none' : 'flex';
     if(!aberto){ var d = f.querySelector('input[name=descricao]'); if(d) d.focus(); }
   }
+  // Pergunta antes de gravar, pra quem usa `data-confirmar`. Delegado no
+  // documento porque os formulários nascem linha a linha.
+  document.addEventListener('submit', function (e) {
+    var f = e.target.closest && e.target.closest('form[data-confirmar]');
+    if (f && !confirm(f.getAttribute('data-confirmar'))) { e.preventDefault(); }
+  });
   </script>
   {# Os PAGOS, recolhidos: histórico não é operação — quem abre a tela quer o que
      ainda está em aberto. O "apagar" aqui só aparece pro título cujo lançamento
@@ -10223,6 +10254,35 @@ def painel_empresa(request: Request):
                       (conta[0],)).fetchone()
         doc = _mascara_cnpj(r[0]) if r else ""
     titulos = emp.listar_titulos(pool, conta[0], status="aberto")
+    # "JÁ FOI PAGA": o pagamento que já está no caixa e tem cara de ser esta conta.
+    # A régua mora em `finance/empresa.py` porque o relatório de Contas a pagar usa
+    # a MESMA pra escrever o aviso "Talvez paga" — se cada tela tivesse a sua, uma
+    # avisaria o que a outra não deixa fechar.
+    _cands = {}
+    for _tp in ("pagar", "receber"):
+        _doTipo = [t for t in titulos if t["tipo"] == _tp]
+        if _doTipo:
+            _cands.update(emp.pagamentos_candidatos(pool, conta[0], _doTipo, _tp))
+    for _t in titulos:
+        _c = _cands.get(_t["id"])
+        # SÓ com candidato ÚNICO: com dois pagamentos iguais por perto a régua
+        # conta e não escolhe, e botão ali seria pedir pra confirmar um chute que
+        # a própria tela não soube fazer.
+        _t["conciliar"] = None
+        if _c and _c["n"] == 1:
+            _verbo = "paga" if _t["tipo"] == "pagar" else "recebida"
+            _quando = _c["data"].strftime("%d/%m")
+            _t["conciliar"] = {
+                "lancamento_id": _c["lancamento_id"],
+                "resumo": f"{_quando}, {brl(_c['centavos'])}",
+                "titulo": f"Ligar esta conta ao pagamento de {_quando}",
+                "confirmar": (
+                    f"Marcar “{(_t['descricao'] or '').strip()[:60]}” como {_verbo}"
+                    f" em {_c['data'].strftime('%d/%m/%Y')}?\n\n"
+                    f"Isso LIGA esta conta ao pagamento de {brl(_c['centavos'])} que "
+                    "já está no caixa. Nenhum dinheiro novo é lançado — diferente "
+                    "do “dar baixa” ao lado, que lançaria a despesa outra vez."),
+            }
     # Os PAGOS numa seção à parte, recolhida. A tela mostrava só 'aberto', então título
     # baixado sumia do app inteiro — e o que tinha sido baixado por engano (ou cujo
     # lançamento foi apagado no financeiro) ficava preso pra sempre, sem caminho nenhum.
@@ -10790,6 +10850,39 @@ def empresa_titulo_baixa(request: Request, titulo_id: int):
     conta, pool = g
     emp.dar_baixa_titulo(pool, conta[0], titulo_id)
     return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/titulo/{titulo_id}/conciliar")
+def empresa_titulo_conciliar(request: Request, titulo_id: int,
+                             lancamento_id: int = Form(...)):
+    """Liga esta conta a um pagamento que JÁ ESTÁ no caixa, e a fecha.
+
+    Veio do relatório em 04/09/2026: o dono pediu pra tirar o botão de lá e
+    concentrar pagamento aqui. É a irmã do "dar baixa" ao lado, e a diferença é o
+    dinheiro: aquele CRIA um lançamento novo, este AMARRA um que já existe. Usar o
+    "dar baixa" numa conta já paga por Pix lançaria a despesa duas vezes.
+
+    Sem portão de papel próprio, pelo mesmo motivo do "dar baixa": quem pode
+    fechar uma conta pode fechar esta. `conciliar_titulo` revalida tudo no
+    servidor — valor, lado do caixa, janela e texto —, porque o pedido vem do
+    navegador.
+    """
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    r = emp.conciliar_titulo(pool, conta[0], titulo_id, lancamento_id)
+    if not r.get("ok"):
+        request.session["emp_aviso"] = r.get("erro") or "Não consegui ligar esse pagamento."
+    else:
+        verbo = "paga" if r["tipo"] == "pagar" else "recebida"
+        onde = "pagas" if r["tipo"] == "pagar" else "recebidas"
+        request.session["emp_aviso"] = (
+            f"“{(r['descricao'] or '').strip()[:60]}” marcada como {verbo} em "
+            f"{r['pago_em'].strftime('%d/%m/%Y')}. Nenhum dinheiro novo foi "
+            f"lançado — se errei, dá pra desfazer no relatório de Contas {onde}.")
+    return RedirectResponse("/painel/empresa#titulos", status_code=303)
 
 
 @router.post("/painel/empresa/titulo/{titulo_id}/cobrar")

@@ -1289,10 +1289,16 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                     ("Sem resposta", _pct(n_sem_resposta)),
                     ("Vindas de lead", _pct(n_com_lead))]
     elif especie == "evento":
+        # Vendedor e Desfecho (04/09/2026): nenhum dos dois é exclusivo de
+        # visita — `membro_id` existe pra qualquer compromisso (uma festa também
+        # foi criada por alguém da equipe), e "✅ Aconteceu / ❌ Não rolou" marca
+        # qualquer evento passado, não só visita. A aba Eventos escondia os dois
+        # sem motivo — mesma inconsistência que "Todos" tinha com Vendedor.
         colunas = [_col("inicio", "Data"), _col("evento", "Evento", flex=True),
-                   _col("cliente", "Cliente", cli=True),
+                   _col("cliente", "Cliente", cli=True), _col("vendedor", "Vendedor"),
                    _col("tipo_evento", "Tipo", tag=True),
                    _col("status", "Status", tag=True),
+                   _col("desfecho", "Desfecho", tag=True),
                    _col("convidados", "Convid.", num=True),
                    _col("sinal_centavos", "Sinal", num=True, brl=True)]
         col_total, total_centavos = "sinal_centavos", _soma(linhas, "sinal_centavos")

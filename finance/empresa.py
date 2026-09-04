@@ -172,11 +172,64 @@ def acesso_pj(pool, conta_id: int) -> bool:
 #: que isto NÃO é mais um valor de `status`.
 APROVACOES = ("aguardando", "autorizado", "recusado")
 
+# ─────────────────────────────────────────────────────────────────────────
+#: Os ritmos em que uma conta repete (migração 196). QUINZENAL é 15 dias
+#: CORRIDOS, e não "duas vezes por mês": é como a folha da Prime anda —
+#: 15/09 → 30/09 → 15/10.
+#:
+#: Ele existe porque o booleano `recorrente`, sozinho, significava "mensal" — e
+#: mensal deixa de fora o MAIOR bloco de contas da Prime. Das 33 a pagar abertas
+#: em 04/09/2026: 12 quinzenais (as quinzenas do time), 11 mensais de valor fixo
+#: e 6 mensais de valor que muda.
+PERIODICIDADES = ("quinzenal", "mensal", "anual")
+
+
+def proxima_data(vencimento: date, periodicidade: str | None = None) -> date:
+    """Quando cai a próxima ocorrência de uma conta que repete.
+
+    `None` lê-se **mensal**: era a única regra que existia antes da 196, e os
+    títulos recorrentes antigos dependem de continuar assim.
+
+    O dia 28 é o teto do MENSAL pelo motivo de sempre (não existe 31/02). O anual
+    não precisa de teto — 30/09 é 30/09 em qualquer ano —, só do desvio do 29/02;
+    e o quinzenal não precisa de nenhum dos dois, porque anda em dias corridos.
+    """
+    p = (periodicidade or "mensal").strip().lower()
+    if p == "quinzenal":
+        return vencimento + timedelta(days=15)
+    if p == "anual":
+        try:
+            return vencimento.replace(year=vencimento.year + 1)
+        except ValueError:   # 29/02 caindo em ano que não é bissexto
+            return date(vencimento.year + 1, 2, 28)
+    return _mes_seguinte(vencimento)
+
+
+def _recorrencia(recorrente: bool, periodicidade: str | None) -> tuple[bool, str | None]:
+    """Concilia o interruptor com o ritmo — as duas metades da mesma verdade.
+
+    Existe pra que NENHUMA porta (formulário, agente do WhatsApp, PDV) precise
+    saber a regra: pedir um ritmo já liga o interruptor, e ligar o interruptor sem
+    dizer o ritmo cai em 'mensal', que é o que `recorrente` sempre quis dizer.
+    A constraint da 196 recusa ritmo sem interruptor; aqui é onde isso não chega
+    a acontecer.
+    """
+    p = (periodicidade or "").strip().lower() or None
+    if p is not None and p not in PERIODICIDADES:
+        raise ValueError(f"periodicidade deve ser uma de {PERIODICIDADES}")
+    if p:
+        return True, p
+    if recorrente:
+        return True, "mensal"
+    return False, None
+
 
 def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
                  valor_centavos: int, vencimento: date,
                  contraparte: str = "", categoria: str = "",
                  recorrente: bool = False,
+                 periodicidade: str | None = None,
+                 valor_variavel: bool = False,
                  criado_por: int | None = None,
                  cliente_id: int | None = None,
                  precisa_aprovacao: bool | None = None) -> dict:
@@ -201,9 +254,21 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
     O parâmetro continua existindo como escape explícito, e tem um usuário real: a
     parcela seguinte de um título recorrente herda a decisão do anterior (ver
     `dar_baixa_titulo`) — o aluguel autorizado em janeiro não volta a perguntar em
-    fevereiro."""
+    fevereiro.
+
+    A REPETIÇÃO entra por dois campos que andam juntos (migração 196):
+    `periodicidade` diz o ritmo ('quinzenal'|'mensal'|'anual') e já liga o
+    `recorrente` sozinha; `valor_variavel` diz que a conta repete a DATA e não o
+    valor — a água e a luz voltam todo mês, mas por um valor que só o boleto
+    sabe. Quem chamar sem nenhum dos dois continua criando título avulso, como
+    sempre."""
     if tipo not in ("pagar", "receber"):
         raise ValueError("tipo deve ser 'pagar' ou 'receber'")
+    recorrente, periodicidade = _recorrencia(recorrente, periodicidade)
+    # `valor_variavel` só faz sentido em conta que repete: é "repete a data, não
+    # o valor". Fora da recorrência ele não teria o que marcar — e, pior, abriria
+    # o zero pro resto da base (ver a constraint do valor na 196).
+    valor_variavel = bool(valor_variavel) and recorrente
     if not categoria:
         categoria = CAT_FORNECEDORES if tipo == "pagar" else CAT_VENDAS
     cli_id = int(cliente_id) if cliente_id else None
@@ -214,17 +279,18 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
         r = c.execute(
             """insert into titulos
                  (conta_id, tipo, descricao, contraparte, valor_centavos,
-                  vencimento, categoria, recorrente, criado_por, cliente_id,
-                  aprovacao)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                  vencimento, categoria, recorrente, periodicidade,
+                  valor_variavel, criado_por, cliente_id, aprovacao)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
             (conta_id, tipo, (descricao or "").strip(), (contraparte or "").strip(),
              int(valor_centavos), vencimento, categoria, bool(recorrente),
-             criado_por, cli_id, aprov),
+             periodicidade, valor_variavel, criado_por, cli_id, aprov),
         ).fetchone()
         c.commit()
     return {"id": r[0], "tipo": tipo, "descricao": descricao,
             "valor_centavos": int(valor_centavos), "vencimento": vencimento,
             "status": "aberto", "recorrente": bool(recorrente),
+            "periodicidade": periodicidade, "valor_variavel": valor_variavel,
             "cliente_id": cli_id, "aprovacao": aprov}
 
 
@@ -241,6 +307,7 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
         rows = c.execute(
             f"""select t.id, t.tipo, t.descricao, t.contraparte, t.valor_centavos,
                        t.vencimento, t.status, t.recorrente, t.categoria,
+                       t.periodicidade, t.valor_variavel,
                        t.cobranca_link_url, t.pago_em, t.lancamento_id,
                        t.cliente_id, coalesce(p.nome, cl.nome) as cliente_nome,
                        t.aprovacao, t.aprovacao_motivo, t.pago_sem_autorizacao,
@@ -264,22 +331,32 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
             "id": r[0], "tipo": r[1], "descricao": r[2], "contraparte": r[3],
             "valor_centavos": int(r[4] or 0), "vencimento": venc,
             "status": r[6], "recorrente": bool(r[7]), "categoria": r[8],
-            "cobranca_link_url": r[9], "pago_em": r[10], "lancamento_id": r[11],
-            "cliente_id": r[12], "cliente_nome": r[13],
+            "cobranca_link_url": r[11], "pago_em": r[12], "lancamento_id": r[13],
+            "cliente_id": r[14], "cliente_nome": r[15],
             "atrasado": (r[6] == "aberto" and venc is not None and venc < hoje),
             # A LIBERAÇÃO DO DONO — ver migração 195. Vem junto do resto porque a
             # tela precisa das três coisas na mesma linha (dinheiro, prazo,
             # decisão) pra escrever UM selo; buscar em separado seria três
             # verdades chegando em momentos diferentes.
-            "aprovacao": r[14] or "autorizado",
-            "aprovacao_motivo": r[15],
-            "pago_sem_autorizacao": bool(r[16]),
-            "criado_nome": r[17], "aprovado_nome": r[18], "aprovado_em": r[19],
+            "aprovacao": r[16] or "autorizado",
+            "aprovacao_motivo": r[17],
+            "pago_sem_autorizacao": bool(r[18]),
+            "criado_nome": r[19], "aprovado_nome": r[20], "aprovado_em": r[21],
+            # A REPETIÇÃO (196). `periodicidade` nula em título recorrente lê-se
+            # 'mensal' — e quem faz essa leitura é `proxima_data`, um lugar só,
+            # pra que a tela e a baixa nunca discordem sobre quando cai a próxima.
+            "periodicidade": (r[9] or "mensal") if r[7] else None,
+            "valor_variavel": bool(r[10]),
+            # A data que a linha mostra ANTES de a conta ser paga. Só em título
+            # aberto: em título pago a próxima já existe (ou já foi recusada pela
+            # trava de duplicata), e prometer uma segunda seria mentir.
+            "proxima": (proxima_data(venc, r[9])
+                        if r[7] and r[6] == "aberto" and venc else None),
             # `sem_fornecedor` é o selo da frente 1: nem texto nem ficha ligada.
             # Sai daqui, e não de um `{% if %}` na tela, pra que o relatório e a
             # tela concordem sobre o que é "sem fornecedor".
             "sem_fornecedor": (r[1] == "pagar" and not (r[3] or "").strip()
-                               and not r[12]),
+                               and not r[14]),
         })
     return out
 
@@ -384,8 +461,10 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                      membro_id: int | None = None) -> dict:
     """Marca o título como pago e LANÇA no livro-caixa (fonte única).
 
-    pagar → despesa; receber → receita. Se recorrente, já cria o do mês
-    seguinte. Idempotente: título já pago/cancelado não lança de novo.
+    pagar → despesa; receber → receita. Se a conta repete, já cria a próxima —
+    no ritmo dela (quinzenal, mensal ou anual), sem o valor quando o valor é
+    variável, e **só se ainda não existir uma igual naquela data**. Idempotente:
+    título já pago/cancelado não lança de novo.
     """
     data_pagto = data_pagto or date.today()
     # Baixa ATÔMICA numa ÚNICA transação/conexão: o status vira num UPDATE ...
@@ -400,6 +479,21 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
     # volta vazia, sem lançar.
     proximo_id = None
     with pool.connection() as c:
+        # CONTA SEM VALOR NÃO SE PAGA. Uma conta de valor variável (196) nasce
+        # com zero esperando o boleto — dar baixa nela lançaria R$ 0,00 no
+        # livro-caixa, e uma despesa de zero real é pior que despesa nenhuma:
+        # some do DRE sem sumir da lista. A tela também esconde o botão neste
+        # caso; a checagem mora aqui porque a tela não é a última palavra.
+        falta = c.execute(
+            """select 1 from titulos
+                where id=%s and conta_id=%s and status='aberto'
+                  and valor_centavos <= 0""",
+            (titulo_id, conta_id),
+        ).fetchone()
+        if falta:
+            return {"ok": False,
+                    "erro": "Ponha o valor antes de dar baixa: esta conta repete "
+                            "a data, não o valor."}
         # `pago_sem_autorizacao` é carimbado no MESMO update da baixa, e é a única
         # consequência de a conta não estar liberada: o dono escolheu "só avisa,
         # não trava" em 03/09/2026. Sem esta marca a escolha não valeria nada — o
@@ -413,7 +507,7 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                 where id=%s and conta_id=%s and status='aberto'
              returning tipo, descricao, contraparte, valor_centavos, categoria,
                        recorrente, vencimento, criado_por, pago_sem_autorizacao,
-                       aprovacao""",
+                       aprovacao, periodicidade, valor_variavel""",
             (data_pagto, titulo_id, conta_id),
         ).fetchone()
         if not t:
@@ -448,25 +542,54 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                 where id=%s and conta_id=%s""",
             (salvo.id, titulo_id, conta_id),
         )
-        if t[5]:  # recorrente mensal: cria o próximo
-            prox = _mes_seguinte(t[6])
-            r = c.execute(
-                # criado_por vai junto: a mensalidade do mês que vem é da MESMA
-                # venda. Sem carregar isso, o vendedor recebia comissão no primeiro
-                # mês e o resto da recorrência virava "Sem vendedor".
-                # `aprovacao` vai junto pelo MESMO motivo do criado_por logo
-                # acima: a parcela do mês que vem não é uma decisão nova. O
-                # aluguel que o dono liberou em janeiro não pode voltar a
-                # perguntar em fevereiro, senão a fila de conferência vira uma
-                # cobrança mensal do que já foi respondido — e fila que repete
-                # pergunta respondida é fila que alguém desliga.
-                """insert into titulos
-                     (conta_id, tipo, descricao, contraparte, valor_centavos,
-                      vencimento, categoria, recorrente, criado_por, aprovacao)
-                   values (%s,%s,%s,%s,%s,%s,%s,true,%s,%s) returning id""",
-                (conta_id, t[0], t[1], t[2], int(t[3]), prox, t[4], t[7], t[9]),
+        if t[5]:  # a conta repete: cria a próxima
+            prox = proxima_data(t[6], t[10])
+            # O VALOR. Conta de valor variável repete a DATA, não o valor: a
+            # água, a luz, o cartão e os impostos voltam todo mês por um número
+            # que só o boleto sabe. Copiar o valor antigo aqui espalharia pelos
+            # meses seguintes o R$ 0,01 que o dono digita como marcador — quatro
+            # das contas abertas da Prime estavam assim em 04/09/2026. Zero é
+            # legítimo só neste caso, e a constraint da 196 é quem garante isso.
+            prox_valor = 0 if t[11] else int(t[3])
+            # A TRAVA CONTRA CONTA DOBRADA, e ela não é teórica. A ZARB de agosto
+            # e a de setembro estão AS DUAS abertas na Prime — o dono digitou as
+            # duas na mão. Marcar a de agosto como mensal e pagá-la criaria uma
+            # SEGUNDA ZARB de setembro em cima da que já está lá.
+            #
+            # A chave é (mesma descrição, mesmo vencimento), e de propósito NÃO
+            # inclui o fornecedor: FGTS, INSS e DAS têm o MESMO fornecedor
+            # ("IMPOSTOS (FGTS/INSS/DAS)") e o MESMO vencimento (18/09) sendo
+            # três contas diferentes. Uma trava por fornecedor+data engoliria
+            # duas delas — e conta engolida é pior que conta repetida: a repetida
+            # a pessoa vê e apaga; a engolida ninguém procura.
+            ja_existe = c.execute(
+                """select 1 from titulos
+                    where conta_id=%s and tipo=%s and status='aberto'
+                      and vencimento=%s
+                      and lower(btrim(descricao)) = lower(btrim(%s))
+                    limit 1""",
+                (conta_id, t[0], prox, t[1]),
             ).fetchone()
-            proximo_id = r[0]
+            if not ja_existe:
+                r = c.execute(
+                    # criado_por vai junto: a mensalidade do mês que vem é da MESMA
+                    # venda. Sem carregar isso, o vendedor recebia comissão no primeiro
+                    # mês e o resto da recorrência virava "Sem vendedor".
+                    # `aprovacao` vai junto pelo MESMO motivo do criado_por logo
+                    # acima: a parcela do mês que vem não é uma decisão nova. O
+                    # aluguel que o dono liberou em janeiro não pode voltar a
+                    # perguntar em fevereiro, senão a fila de conferência vira uma
+                    # cobrança mensal do que já foi respondido — e fila que repete
+                    # pergunta respondida é fila que alguém desliga.
+                    """insert into titulos
+                         (conta_id, tipo, descricao, contraparte, valor_centavos,
+                          vencimento, categoria, recorrente, periodicidade,
+                          valor_variavel, criado_por, aprovacao)
+                       values (%s,%s,%s,%s,%s,%s,%s,true,%s,%s,%s,%s) returning id""",
+                    (conta_id, t[0], t[1], t[2], prox_valor, prox, t[4], t[10],
+                     bool(t[11]), t[7], t[9]),
+                ).fetchone()
+                proximo_id = r[0]
         c.commit()
     return {"ok": True, "lancamento_id": salvo.id, "proximo_titulo_id": proximo_id,
             "sem_autorizacao": bool(t[8])}
@@ -925,7 +1048,12 @@ def editar_titulo(pool, conta_id: int, titulo_id: int,
         desc = descricao.strip()[:200]
         if desc:
             sets.append("descricao=%s"); args.append(desc)
-    if valor_centavos is not None and int(valor_centavos) >= 0:
+    # Valor tem que ser POSITIVO. Era `>= 0`, e zero chegava aqui sozinho: o
+    # formulário converte texto não numérico em 0 (`_reais_para_centavos`), então
+    # digitar "mil reais" no campo zerava o título — e desde a 196 o zero é
+    # reservado pra conta de valor variável, que a constraint recusa aqui. Quem
+    # quer "não mexe no valor" já manda None; zero nunca foi uma edição de verdade.
+    if valor_centavos is not None and int(valor_centavos) > 0:
         sets.append("valor_centavos=%s"); args.append(int(valor_centavos))
     if contraparte is not None:
         sets.append("contraparte=%s"); args.append(contraparte.strip()[:200])
@@ -937,6 +1065,35 @@ def editar_titulo(pool, conta_id: int, titulo_id: int,
         cur = c.execute(
             f"update titulos set {', '.join(sets)} where id=%s and conta_id=%s",
             (*args, titulo_id, conta_id),
+        )
+        c.commit()
+        return cur.rowcount > 0
+
+
+def definir_recorrencia(pool, conta_id: int, titulo_id: int,
+                        periodicidade: str | None = None,
+                        valor_variavel: bool = False) -> bool:
+    """Liga, troca ou desliga a repetição de um título aberto.
+
+    `periodicidade=None` DESLIGA. Os três campos vão no MESMO update de propósito:
+    `recorrente` e `periodicidade` são duas metades da mesma verdade, e a
+    constraint da 196 recusa ritmo sem interruptor — gravar em dois updates
+    abriria uma janela em que a linha está pela metade.
+
+    O `valor_variavel` tem uma teimosia deliberada: **ele não se desliga enquanto
+    o valor for zero**. Uma conta que ainda não tem valor não pode deixar de ser
+    de valor variável, senão a constraint da 196 recusaria a própria linha que já
+    está no banco. Pra tirar a marca, põe-se o valor primeiro — que é a ordem
+    natural de quem recebeu o boleto.
+    """
+    rec, p = _recorrencia(bool(periodicidade), periodicidade)
+    with pool.connection() as c:
+        cur = c.execute(
+            """update titulos
+                  set recorrente=%s, periodicidade=%s,
+                      valor_variavel = (%s or valor_centavos = 0)
+                where id=%s and conta_id=%s and status='aberto'""",
+            (rec, p, bool(valor_variavel) and rec, titulo_id, conta_id),
         )
         c.commit()
         return cur.rowcount > 0

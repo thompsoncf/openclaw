@@ -44,6 +44,7 @@ def pool():
     with p.connection() as c:
         c.execute(_sql("053_modulo_pj.sql"))        # titulos
         c.execute(_sql("195_titulo_aprovacao.sql"))  # aprovação do dono
+        c.execute(_sql("196_titulo_recorrencia.sql"))  # ritmo da repetição
         # a baixa do título lança no livro-caixa; `lancamentos` precisa das
         # colunas que o LivroCaixa escreve. Sem elas o arquivo só passava
         # quando outro teste tinha criado a coluna antes, no banco compartilhado.

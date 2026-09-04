@@ -176,7 +176,7 @@ def _soma(linhas, chave):
 
 
 def _col(chave, rotulo, num=False, brl=False, tag=False, flex=False, cli=False,
-         extra=None, venc=False, parte=None):
+         extra=None, venc=False, parte=None, zero=None):
     """`flex=True` marca uma coluna ELÁSTICA da tabela — as que podem encolher
     quando falta largura. São sempre as de nome livre (descrição, cliente,
     contraparte), e todo relatório tem ao menos uma.
@@ -207,6 +207,13 @@ def _col(chave, rotulo, num=False, brl=False, tag=False, flex=False, cli=False,
     célula que carrega o `max-width:0`, ou seja no `<td>`."""
     return {"chave": chave, "rotulo": rotulo, "num": num, "brl": brl, "tag": tag,
             "flex": flex, "parte": parte,
+            # `zero` é o que a célula de dinheiro escreve NO LUGAR de "R$ 0,00".
+            # Nasceu da conta de valor variável (196): a água repete a data e não
+            # o valor, então ela fica sem valor até o boleto chegar. "R$ 0,00" ali
+            # mentiria duas vezes — diz que a conta é de graça e não pede nada de
+            # quem olha. Só vale onde a coluna declara; zero legítimo (um total
+            # que deu zero) continua saindo como zero.
+            "zero": zero,
             # `extra` pendura uma SEGUNDA coisa na mesma célula, opcional — pílula
             # ao lado, numa coluna de tag; linha de baixo, menor, numa elástica.
             # Nasceu da coluna "Conferir", que ninguém entendia: ela nomeava a ação
@@ -503,7 +510,8 @@ def _dados_titulos_abertos(pool, conta_id, tipo):
                     _col("descricao", "Descrição", flex=True, parte=55,
                          extra="talvez"),
                     _col("contraparte", rotulo_col, flex=True, parte=45),
-                    _col("valor_centavos", "Valor", num=True, brl=True)],
+                    _col("valor_centavos", "Valor", num=True, brl=True,
+                         zero="— informar")],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": total,
         "metricas": [("Total em aberto", _brl(total)),
                      ("Vencidas", f"{len(vencidas)} · {_brl(_soma(vencidas, 'valor_centavos'))}"),

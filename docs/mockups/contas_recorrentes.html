@@ -1,0 +1,405 @@
+<title>Contas que repetem</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-fundo:#10241A; --neon-borda:#1E4A3A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#8E7CE0; --roxo-borda:#3A3260; --roxo-fundo:#191630;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,sans-serif;
+  --body:"Inter",system-ui,-apple-system,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  --lede:68ch;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;
+  line-height:1.62;-webkit-font-smoothing:antialiased}
+.pagina{display:flex;flex-direction:column;gap:2.8rem;padding:3rem 1.5rem 6rem;
+  max-width:1200px;margin:0 auto}
+.lede{max-width:var(--lede);margin:0 auto;width:100%;display:flex;flex-direction:column;gap:1rem}
+h1,h2{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:clamp(1.9rem,4vw,2.9rem);font-weight:700;letter-spacing:-.022em}
+h2{font-size:1.45rem;font-weight:700;letter-spacing:-.014em}
+p{margin:0}
+strong{color:var(--neon-bright);font-weight:600}
+em{color:var(--text);font-style:normal;border-bottom:1px dotted var(--text-faint)}
+code{font-family:var(--mono);font-size:.86em;color:var(--text-dim);background:var(--bg-2);
+  border:1px solid var(--line);border-radius:5px;padding:.08em .38em}
+.olho{font-family:var(--mono);font-size:.7rem;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--text-faint)}
+.dim{color:var(--text-dim)}
+hr{border:0;border-top:1px solid var(--line);margin:0}
+.pedido{border-left:2px solid var(--neon);padding:.1rem 0 .1rem 1.1rem;
+  color:var(--text-dim);font-size:1.02rem}
+.pedido b{color:var(--text);font-weight:500}
+
+/* a lista, com a régua da aba Empresa */
+.tela{background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  padding:1rem 1.1rem;display:flex;flex-direction:column;gap:1.1rem}
+.tela-cab{font-family:var(--display);font-weight:600;font-size:.96rem;
+  color:var(--text-dim)}
+.grupo{border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.grupo.ok{border-color:var(--neon-borda)}
+.grupo.esp{border-color:var(--ambar-borda)}
+.grupo.rep{border-color:var(--roxo-borda)}
+.gcab{display:flex;flex-wrap:wrap;gap:.6rem;align-items:baseline;padding:.6rem .85rem;
+  background:var(--bg-2);border-bottom:1px solid var(--line)}
+.grupo.ok .gcab{background:var(--neon-fundo)}
+.grupo.esp .gcab{background:var(--ambar-fundo)}
+.grupo.rep .gcab{background:var(--roxo-fundo)}
+.gt{font-family:var(--display);font-weight:600;font-size:.92rem}
+.grupo.ok .gt{color:#9fe8c9}.grupo.esp .gt{color:#f0dca6}.grupo.rep .gt{color:#c3b8f5}
+.gs{font-size:.78rem;color:var(--text-dim)}
+.lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .9rem;
+  padding:.65rem .85rem;border-top:1px solid var(--line)}
+.grupo .lin:first-of-type{border-top:0}
+.id{flex:1 1 260px;min-width:0}
+.desc{font-size:.9rem;font-weight:600}
+.meta{font-size:.76rem;color:var(--text-dim);margin-top:.1rem}
+.meta .pz{font-family:var(--mono)}
+.meta .pz.erro{color:var(--coral)}.meta .pz.aviso{color:var(--ambar)}
+.meta .pag{color:#e07a5f}
+.meta a{color:var(--neon-bright);text-decoration:none}
+.meta .prox{color:var(--roxo)}
+.val{font-variant-numeric:tabular-nums;font-weight:700;font-size:.9rem;color:#e07a5f;
+  white-space:nowrap}
+.val.falta{color:var(--ambar);font-weight:600}
+.acoes{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.3rem}
+.acoes .bt,.acoes .mut{font-size:.74rem;border:1px solid var(--line);border-radius:6px;
+  padding:.2rem .55rem;font-weight:500;white-space:nowrap}
+.acoes .bt{color:var(--neon-bright);border-color:#2b3a33}
+.acoes .bt.ok{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.acoes .bt.no{color:#c98080;border-color:var(--coral-borda)}
+.acoes .bt.rep{color:#c3b8f5;border-color:var(--roxo-borda);background:var(--roxo-fundo)}
+.acoes .bt.repoff{color:var(--text-faint);border-color:#2b3a33}
+.acoes .mut{color:var(--text-faint)}
+.selo{font-size:.68rem;padding:.1rem .45rem;border-radius:999px;font-weight:600;
+  margin-left:.3rem;white-space:nowrap}
+.selo.esp{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:#f0dca6}
+.selo.rec{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:#f0b8b8}
+.selo.rep{border:1px solid var(--roxo-borda);background:var(--roxo-fundo);color:#c3b8f5}
+.selo.falta{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:#f0dca6}
+.vazio{padding:.9rem .85rem;font-size:.82rem;color:var(--text-faint)}
+
+/* o formulário de criar, como está na aba */
+.form{display:grid;grid-template-columns:.8fr 1.6fr .8fr .9fr 1.2fr auto;gap:.5rem;
+  align-items:end;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:10px;padding:.8rem}
+.form label{font-size:.7rem;color:var(--text-faint);display:flex;flex-direction:column;gap:.2rem}
+.form .campo{background:var(--surface);border:1px solid var(--line);border-radius:6px;
+  padding:.4rem .5rem;font-size:.82rem;color:var(--text-dim)}
+.form .add{background:var(--neon);color:var(--sobre-verde);border:0;border-radius:6px;
+  padding:.5rem .8rem;font-weight:700;font-size:.8rem;text-align:center}
+.form .larga{grid-column:1/-1}
+.ck{display:flex;align-items:center;gap:.45rem;font-size:.8rem;color:var(--text-dim)}
+.ck .cx{width:14px;height:14px;border:1px solid var(--text-faint);border-radius:3px;
+  display:inline-block;flex:0 0 auto}
+.ck .cx.on{background:var(--roxo);border-color:var(--roxo)}
+.ritmo{display:flex;gap:.35rem;flex-wrap:wrap}
+.ritmo b{font-size:.74rem;font-weight:500;border:1px solid var(--line);border-radius:999px;
+  padding:.15rem .6rem;color:var(--text-faint)}
+.ritmo b.on{border-color:var(--roxo-borda);background:var(--roxo-fundo);color:#c3b8f5;font-weight:600}
+
+/* comparação das opções */
+.opcoes{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem}
+.op{border:1px solid var(--line);border-radius:12px;padding:1rem 1.05rem;
+  background:var(--surface);display:flex;flex-direction:column;gap:.55rem}
+.op.rec{border-color:var(--neon-borda)}
+.op h3{margin:0;font-family:var(--display);font-size:1rem;font-weight:700}
+.op .qt{font-size:.82rem;color:var(--text-dim)}
+.op ul{margin:0;padding-left:1.05rem;font-size:.82rem;color:var(--text-dim);
+  display:flex;flex-direction:column;gap:.25rem}
+.op .tag{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--text-faint)}
+.op.rec .tag{color:var(--neon-bright)}
+
+table{border-collapse:collapse;width:100%;font-size:.82rem}
+th,td{text-align:left;padding:.42rem .6rem;border-bottom:1px solid var(--line)}
+th{font-family:var(--mono);font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-faint);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.tab-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:11px;
+  background:var(--surface);padding:.3rem .5rem}
+
+.nota{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:13px;
+  padding:1.2rem 1.3rem;display:flex;flex-direction:column;gap:.8rem;
+  max-width:var(--lede);margin:0 auto;width:100%}
+.nota h2{font-size:1.1rem;color:#f0dca6}
+.nota p{font-size:.9rem;color:#e6d9bb}
+.nota strong{color:#fff0cf}
+.rodape{max-width:var(--lede);margin:0 auto;width:100%;font-size:.82rem;
+  color:var(--text-faint);display:flex;flex-direction:column;gap:.4rem}
+:focus-visible{outline:2px solid var(--neon-bright);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="pagina">
+
+<header class="lede">
+  <div class="olho">Aba Empresa · Contas a pagar · 04/09/2026</div>
+  <h1>As contas que repetem todo mês</h1>
+  <div class="pedido"><b>“Vamos ver como colocar um botão em contas a pagar
+  recorrentes, tipo água, luz, aluguel — e como pode ficar.”</b></div>
+  <p class="dim">Fui olhar antes de desenhar, e o achado é maior que o pedido:
+  <strong>o motor de repetição já existe e está desligado</strong>. O título tem
+  o campo <code>recorrente</code>, e quando ele é verdadeiro a baixa já cria
+  sozinha a conta do mês seguinte. Só que <strong>não existe botão nenhum</strong>
+  pra ligar isso na tela — nem no formulário de criar, nem na linha. Resultado na
+  Prime: <strong>0 de 39 títulos</strong> estão marcados como recorrentes.</p>
+</header>
+
+<section>
+  <div class="lede" style="margin-bottom:1.1rem">
+    <div class="olho">O que a base mostra</div>
+    <h2>Você já está redigitando as mesmas contas</h2>
+    <p class="dim">Estas quatro aparecem duas vezes na base — agosto e setembro,
+    cadastradas na mão, com o mesmo valor:</p>
+  </div>
+  <div class="tab-wrap">
+  <table>
+    <tr><th>Conta</th><th>Fornecedor</th><th>Meses já digitados</th><th class="n">Valor</th></tr>
+    <tr><td>ENERGIA SOLAR</td><td class="dim">NORDESTE ENERGIA SOLAR</td><td class="dim">08/26 · 09/26</td><td class="n">R$ 2.877,77</td></tr>
+    <tr><td>BANCO DO NORDESTE</td><td class="dim">BANCO DO NORDESTE</td><td class="dim">08/26 · 09/26</td><td class="n">R$ 2.400,00</td></tr>
+    <tr><td>ZARB CONSULTORIA</td><td class="dim">ZARB ASSESSORIA</td><td class="dim">08/26 · 09/26</td><td class="n">R$ 2.200,00</td></tr>
+    <tr><td>IPTU 2026 3/6 e 4/6</td><td class="dim">PREFEITURA DE TERESINA</td><td class="dim">08/26 · 09/26</td><td class="n">R$ 1.160,85</td></tr>
+  </table>
+  </div>
+  <p class="dim" style="max-width:var(--lede);margin:0 auto;width:100%;font-size:.9rem">
+  E as suas 33 contas a pagar abertas se separam assim — <strong>29 delas
+  repetem</strong>, em três ritmos diferentes. É isso que decide o tamanho do
+  botão:</p>
+  <div class="tab-wrap">
+  <table>
+    <tr><th>Formato</th><th class="n">Quantas</th><th>Exemplos</th><th>O que o botão precisa saber</th></tr>
+    <tr><td><b>Quinzenal</b></td><td class="n">12</td>
+      <td class="dim">as quinzenas do time: BETO, JAQUELINE, INSIGHT, IASMIM, THIAGO, PEDRO YAN</td>
+      <td class="dim">o ritmo não é mensal</td></tr>
+    <tr><td><b>Mensal, valor fixo</b></td><td class="n">11</td>
+      <td class="dim">ZARB · BANCO DO NORDESTE · ENERGIA SOLAR · CONTABILIDADE · INTERNET · SEGURANÇA · PISCINEIRO · GESTÃO CLICK</td>
+      <td class="dim">só “repete todo mês”</td></tr>
+    <tr><td><b>Mensal, valor que muda</b></td><td class="n">6</td>
+      <td class="dim">ÁGUAS DE TERESINA · EQUATORIAL · CARTÃO SICOOB · DAS · FGTS · INSS — quatro delas cadastradas com <b>R$ 0,01</b> de marcador</td>
+      <td class="dim">repete a data, <b>não</b> o valor</td></tr>
+    <tr><td class="dim">Parcelado</td><td class="n dim">2</td>
+      <td class="dim">IPTU 2026 3/6 e 4/6 — repete, mas <b>acaba na 6/6</b></td>
+      <td class="dim">não é recorrência: tem fim</td></tr>
+    <tr><td class="dim">Avulsa</td><td class="n dim">2</td>
+      <td class="dim">DIARIAS PEDREIRO · COMISSÃO SOBRE VENDAS</td>
+      <td class="dim">não repete</td></tr>
+  </table>
+  </div>
+  <p class="dim" style="max-width:var(--lede);margin:0 auto;width:100%;font-size:.9rem">
+  Os <b>R$ 0,01</b> são o sintoma mais claro: você digita um centavo porque a
+  conta de água ainda não chegou. Se a repetição copiar o valor, ela vai
+  espalhar esse centavo por todos os meses seguintes.</p>
+</section>
+
+<hr>
+
+<section>
+  <div class="lede" style="margin-bottom:1.1rem">
+    <div class="olho">Opção A</div>
+    <h2>Só o interruptor — “repete todo mês”</h2>
+    <p class="dim">Um botão a mais na linha e uma caixa a mais no formulário.
+    Nada de banco novo: liga o campo que já existe.</p>
+  </div>
+  <div class="tela">
+    <div class="tela-cab">Ao cadastrar</div>
+    <div class="form">
+      <label>Tipo<span class="campo">A pagar</span></label>
+      <label>Descrição<span class="campo">ÁGUAS DE TERESINA</span></label>
+      <label>Valor R$<span class="campo">0,01</span></label>
+      <label>Vencimento<span class="campo">21/09/2026</span></label>
+      <label>Fornecedor<span class="campo">ÁGUAS DE TERESINA</span></label>
+      <span class="add">+ Add</span>
+      <div class="larga ck"><span class="cx on"></span>
+        <span>🔁 <b style="color:var(--text)">Repete todo mês</b> — quando você
+        der baixa, a de outubro já nasce sozinha.</span></div>
+    </div>
+    <div class="tela-cab">Na linha</div>
+    <div class="grupo esp"><div class=gcab><span class=gt>⏳ Esperando liberação</span><span class=gs>com o botão novo à direita</span></div>
+      <div class=lin><div class=id><div class=desc>ÁGUAS DE TERESINA <span class="selo rep">🔁 mensal</span></div><div class=meta><span class='pz aviso'>vence 21/09 · em 17 dias</span> · <span class=pag>a pagar</span> · <a>👤 ÁGUAS DE TERESINA</a> · <span class=prox>próxima: 21/10</span></div></div><div class=val>R$ 0,01</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <b class="bt rep">🔁 repete todo mês</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+      <div class=lin><div class=id><div class=desc>DIARIAS PEDREIRO</div><div class=meta><span class='pz aviso'>vence 04/09 · hoje</span> · <span class=pag>a pagar</span> · <a>👤 GILVAN PEREIRA DE CARVALHO</a></div></div><div class=val>R$ 1.650,00</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <b class="bt repoff">🔁 não repete</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+    </div>
+    <div class="dim" style="font-size:.8rem">O botão é um interruptor: clicou,
+      vira <b>🔁 repete todo mês</b> e o selo aparece na descrição. Clicou de
+      novo, desliga. A diária do pedreiro é o contrário — acontece uma vez.</div>
+  </div>
+  <p class="dim" style="max-width:var(--lede);margin:0 auto;width:100%;font-size:.9rem">
+  <b>O que fica de fora:</b> as 12 quinzenas do time (mensal não serve) e o
+  centavo da água, que seria copiado pra outubro.</p>
+</section>
+
+<hr>
+
+<section>
+  <div class="lede" style="margin-bottom:1.1rem">
+    <div class="olho">Opção B</div>
+    <h2>O interruptor com o ritmo</h2>
+    <p class="dim">Mesmo botão, mas ele pergunta <em>de quanto em quanto tempo</em>:
+    quinzenal, mensal ou anual. É o que faz as 12 quinzenas do time entrarem —
+    hoje são o maior bloco da sua lista.</p>
+  </div>
+  <div class="tela">
+    <div class="tela-cab">Ao cadastrar</div>
+    <div class="form">
+      <label>Tipo<span class="campo">A pagar</span></label>
+      <label>Descrição<span class="campo">1 QUINZENA SETEMBRO/26 BETO</span></label>
+      <label>Valor R$<span class="campo">837,50</span></label>
+      <label>Vencimento<span class="campo">15/09/2026</span></label>
+      <label>Fornecedor<span class="campo">ROBERTO LOPES</span></label>
+      <span class="add">+ Add</span>
+      <div class="larga ck"><span class="cx on"></span>
+        <span>🔁 <b style="color:var(--text)">Repete</b></span>
+        <span class="ritmo"><b class="on">a cada 15 dias</b><b>todo mês</b><b>todo ano</b></span></div>
+    </div>
+    <div class="tela-cab">Na linha — o ritmo aparece no selo</div>
+    <div class="grupo esp"><div class=gcab><span class=gt>⏳ Esperando liberação</span><span class=gs>três ritmos convivendo</span></div>
+      <div class=lin><div class=id><div class=desc>1 QUINZENA SETEMBRO/26 BETO <span class="selo rep">🔁 a cada 15 dias</span></div><div class=meta><span class='pz aviso'>vence 15/09 · em 11 dias</span> · <span class=pag>a pagar</span> · <a>👤 ROBERTO LOPES</a> · <span class=prox>próxima: 30/09</span></div></div><div class=val>R$ 837,50</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <b class="bt rep">🔁 a cada 15 dias</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+      <div class=lin><div class=id><div class=desc>ZARB CONSULTORIA <span class="selo rep">🔁 mensal</span></div><div class=meta><span class='pz erro'>vence 15/08 · há 20 dias</span> · <span class=pag>a pagar</span> · <a>👤 ZARB ASSESSORIA</a> · <span class=prox>próxima: 15/10</span></div></div><div class=val>R$ 2.200,00</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <b class="bt rep">🔁 todo mês</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+      <div class=lin><div class=id><div class=desc>IPTU 2026 4/6</div><div class=meta><span class='pz aviso'>vence 30/09 · em 26 dias</span> · <span class=pag>a pagar</span> · <a>👤 PREFEITURA DE TERESINA</a></div></div><div class=val>R$ 1.160,85</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class="bt no">✕ recusar</b> <b class=bt>dar baixa ✓</b> <b class="bt repoff">🔁 não repete</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+    </div>
+    <div class="dim" style="font-size:.8rem"><b>O IPTU fica de fora de propósito</b>,
+      e vale dizer por quê: 3/6 e 4/6 repetem, mas <b>acabam na 6/6</b>. Recorrência
+      não tem fim — se eu marcasse o IPTU, ele continuaria nascendo em 2027, 2028.
+      Parcelamento é outra coisa, e se você quiser eu faço depois, separado.</div>
+    <div class="dim" style="font-size:.8rem">O <b>todo ano</b> você não usa hoje
+      em nenhuma conta — entra pro alvará, o seguro, a licença. Se achar ruído,
+      tiro e ficam só dois ritmos.</div>
+  </div>
+</section>
+
+<hr>
+
+<section>
+  <div class="lede" style="margin-bottom:1.1rem">
+    <div class="olho">Opção C · recomendada</div>
+    <h2>B mais “o valor muda todo mês”</h2>
+    <p class="dim">A conta de água repete a <em>data</em>, não o <em>valor</em>.
+    Marcando isso, a próxima nasce <strong>sem valor</strong> e com um aviso
+    “falta o valor” — em vez de arrastar o R$ 0,01 pra dezembro. É uma segunda
+    caixinha, só isso.</p>
+  </div>
+  <div class="tela">
+    <div class="tela-cab">Ao cadastrar</div>
+    <div class="form">
+      <label>Tipo<span class="campo">A pagar</span></label>
+      <label>Descrição<span class="campo">ÁGUAS DE TERESINA</span></label>
+      <label>Valor R$<span class="campo">—</span></label>
+      <label>Vencimento<span class="campo">21/09/2026</span></label>
+      <label>Fornecedor<span class="campo">ÁGUAS DE TERESINA</span></label>
+      <span class="add">+ Add</span>
+      <div class="larga ck"><span class="cx on"></span>
+        <span>🔁 <b style="color:var(--text)">Repete</b></span>
+        <span class="ritmo"><b>a cada 15 dias</b><b class="on">todo mês</b><b>todo ano</b></span></div>
+      <div class="larga ck"><span class="cx on"></span>
+        <span>💧 <b style="color:var(--text)">O valor muda todo mês</b> — a próxima
+        chega em branco, esperando o boleto.</span></div>
+    </div>
+    <div class="tela-cab">Depois de dar baixa na de setembro</div>
+    <div class="grupo rep"><div class=gcab><span class=gt>⏳ Esperando liberação</span><span class=gs>outubro nasceu sozinha</span></div>
+      <div class=lin><div class=id><div class=desc>ÁGUAS DE TERESINA <span class="selo rep">🔁 mensal</span> <span class="selo falta">falta o valor</span></div><div class=meta><span class='pz'>vence 21/10 · em 47 dias</span> · <span class=pag>a pagar</span> · <a>👤 ÁGUAS DE TERESINA</a> · <span class=dim>criada pela repetição de 21/09</span></div></div><div class="val falta">— informar</div><div class=acoes><b class="bt ok">✎ pôr o valor</b> <b class=bt>dar baixa ✓</b> <b class="bt rep">🔁 todo mês</b> <span class=mut>apagar ✕</span></div></div>
+      <div class=lin><div class=id><div class=desc>ZARB CONSULTORIA <span class="selo rep">🔁 mensal</span></div><div class=meta><span class='pz'>vence 15/10 · em 41 dias</span> · <span class=pag>a pagar</span> · <a>👤 ZARB ASSESSORIA</a> · <span class=dim>criada pela repetição de 15/09</span></div></div><div class=val>R$ 2.200,00</div><div class=acoes><b class="bt ok">✓ liberar</b> <b class=bt>dar baixa ✓</b> <b class="bt rep">🔁 todo mês</b> <span class=mut>editar ✎</span> <span class=mut>apagar ✕</span></div></div>
+    </div>
+    <div class="dim" style="font-size:.8rem">A ZARB, de valor fixo, veio pronta e
+      já liberada — <b>a repetição herda a sua decisão</b>, o aluguel liberado em
+      janeiro não volta a perguntar em fevereiro. A da água veio em branco e
+      pedindo o valor, que é a única coisa que ela não sabe.</div>
+  </div>
+</section>
+
+<hr>
+
+<section>
+  <div class="lede" style="margin-bottom:1.1rem">
+    <div class="olho">Dois detalhes que valem em qualquer opção</div>
+    <h2>Quando a próxima nasce — e a trava contra conta dobrada</h2>
+  </div>
+  <div class="opcoes">
+    <div class="op">
+      <div class="tag">Quando</div>
+      <h3>Ela nasce na baixa</h3>
+      <p class="qt">Hoje o motor cria a do mês seguinte no momento em que você dá
+      baixa — não antes. Mantendo assim, a lista não incha com meses futuros e
+      você continua vendo só o que está pra vencer.</p>
+      <p class="qt">O selo <b style="color:var(--roxo)">próxima: 21/10</b> na
+      linha é o que avisa que ela vem, sem precisar criá-la antes.</p>
+    </div>
+    <div class="op rec">
+      <div class="tag">A trava</div>
+      <h3>Não cria se você já digitou</h3>
+      <p class="qt">Risco real, com o seu dado: a ZARB de <b>agosto</b> está
+      aberta e a de <b>setembro</b> também — você já digitou as duas. Marcar a de
+      agosto como repetida e pagá-la criaria uma <b>segunda ZARB de setembro</b>.</p>
+      <p class="qt">Então a repetição confere antes: mesmo fornecedor, mesma
+      descrição e mesmo mês já em aberto → <b>não cria</b>. É a mesma família de
+      cuidado da conciliação, que também não repete o que já existe.</p>
+    </div>
+  </div>
+</section>
+
+<hr>
+
+<section>
+  <div class="lede" style="margin-bottom:1.1rem">
+    <div class="olho">Escolha</div>
+    <h2>As três, lado a lado</h2>
+  </div>
+  <div class="opcoes">
+    <div class="op">
+      <div class="tag">Opção A</div>
+      <h3>Só o interruptor</h3>
+      <p class="qt">“Repete todo mês”, e pronto.</p>
+      <ul>
+        <li>atende <b>11</b> das suas contas</li>
+        <li>não mexe no banco</li>
+        <li>deixa as <b>12 quinzenas</b> de fora</li>
+        <li>copia o R$ 0,01 da água</li>
+      </ul>
+    </div>
+    <div class="op">
+      <div class="tag">Opção B</div>
+      <h3>Com o ritmo</h3>
+      <p class="qt">Quinzenal, mensal ou anual.</p>
+      <ul>
+        <li>atende <b>23</b> das 33 (11 mensais + 12 quinzenas)</li>
+        <li>pega o maior bloco (as quinzenas)</li>
+        <li>ainda copia o R$ 0,01 da água</li>
+      </ul>
+    </div>
+    <div class="op rec">
+      <div class="tag">Opção C · recomendada</div>
+      <h3>Com o ritmo e o valor</h3>
+      <p class="qt">B mais “o valor muda todo mês”.</p>
+      <ul>
+        <li>atende <b>29</b> das 33 — as 23 mais as 6 de valor variável</li>
+        <li>a água e a luz chegam pedindo o boleto, não um centavo</li>
+        <li>é uma caixinha a mais que a B</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<div class="nota">
+  <h2>O que eu não faço sem você mandar</h2>
+  <p>Nada disso liga sozinho no que já existe: as suas 33 contas abertas
+  continuam exatamente como estão, e <strong>nenhuma vira recorrente</strong> sem
+  você clicar. Marcar é decisão sua, conta por conta.</p>
+  <p>E um conserto que vai junto de qualquer opção: o texto embaixo do formulário
+  hoje promete que <strong>“contraparte/recorrência aparecem ao detalhar”</strong>
+  — e recorrência não aparece em lugar nenhum. Some com a promessa e entra o
+  botão.</p>
+</div>
+
+<div class="rodape">
+  <div>Dados de produção da Prime Eventos lidos em 04/09/2026: 39 títulos,
+  33 contas a pagar abertas, 0 marcadas como recorrentes.</div>
+  <div>Mockup — nada disso está no ar ainda.</div>
+</div>
+
+</div>

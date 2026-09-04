@@ -3949,6 +3949,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .selo.rec{border:1px solid #5A2B2B;background:#241313;color:#E0574F}
     .selo.falta{border:1px solid #5A4520;background:#241C0F;color:#E0A32E}
     .selo.furo{border:1px solid #5A2B2B;background:#241313;color:#E0574F}
+    .selo.rep{border:1px solid #3A3260;background:#191630;color:#B3A7EA}
     .tit-lote{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;
       margin:.6rem 0 .2rem;padding:.6rem .7rem;border:1px solid #5A4520;
       background:#241C0F;border-radius:10px;font-size:.8rem}
@@ -3987,7 +3988,30 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
        digitado ali nem chegava a ser salvo (só ligava em título a receber). #}
     <label id="tit-cli-lbl" style="font-size:.72rem;color:#8a938a" title="opcional — liga o título à ficha do fornecedor">Fornecedor<input name="cliente" id="tit-cli-input" list="tit-forn-dl" placeholder="opcional" style="width:100%"></label>
     <button type="submit" style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
+    {# A REPETIÇÃO, que nunca teve porta. O campo `recorrente` existe desde a
+       053 e a baixa já cria a conta seguinte sozinha — mas nenhuma tela sabia
+       ligá-lo, e por isso 0 de 39 títulos da Prime estavam marcados. Fica na
+       linha de baixo, e não numa sexta coluna, porque são duas perguntas
+       (ritmo e valor) e a grade de cima já está no limite no notebook. #}
+    <div class="tit-rep-nova">
+      <label>🔁 Repete
+        <select name="periodicidade">
+          <option value="">não repete</option>
+          <option value="quinzenal">a cada 15 dias</option>
+          <option value="mensal">todo mês</option>
+          <option value="anual">todo ano</option>
+        </select></label>
+      <label title="a próxima nasce sem valor, esperando o boleto — água, luz, cartão, impostos">
+        <input type="checkbox" name="valor_variavel" style="width:auto"> 💧 o valor muda todo mês</label>
+      <span class="mut">Marcado, quando você der baixa a próxima já nasce sozinha.</span>
+    </div>
   </form>
+  <style>
+    .tit-rep-nova{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;font-size:.76rem;color:#8a938a}
+    .tit-rep-nova label{display:flex;align-items:center;gap:.35rem;color:var(--txt)}
+    .tit-rep-nova select{font-size:.76rem;padding:.2rem .35rem;width:auto}
+    .tit-rep-nova .mut{font-size:.72rem}
+  </style>
   <datalist id="tit-cli-dl">{% for c in clientes_lista or [] %}<option value="{{ c.nome }}">{% endfor %}</datalist>
   <datalist id="tit-forn-dl">{% for c in fornecedores_lista or [] %}<option value="{{ c.nome }}">{% endfor %}</datalist>
   <script>
@@ -3999,7 +4023,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     inp.setAttribute('list', pagar ? 'tit-forn-dl' : 'tit-cli-dl');
   }
   </script>
-  <label style="font-size:.72rem;color:#8a938a;display:flex;gap:.4rem;align-items:center;margin-bottom:.6rem"><input type="checkbox" form="_nada" disabled style="width:auto"> <span class="mut">Vincule um cliente ou fornecedor pra o título aparecer na ficha dele. Contraparte/recorrência aparecem ao detalhar.</span></label>
+  <label style="font-size:.72rem;color:#8a938a;display:flex;gap:.4rem;align-items:center;margin-bottom:.6rem"><input type="checkbox" form="_nada" disabled style="width:auto"> <span class="mut">Vincule um cliente ou fornecedor pra o título aparecer na ficha dele.</span></label>
   {% if titulos %}
   <style>
     .tit-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .9rem;padding:.7rem 0;border-top:1px solid var(--card-2)}
@@ -4010,6 +4034,10 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .tit-acoes{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.15rem}
     .tit-acoes button,.tit-acoes a{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;text-decoration:none}
     .tit-acoes form{display:inline;margin:0}
+    .tit-rep{display:inline-flex!important;align-items:center;gap:.35rem;font-size:.75rem;color:var(--txt-mut)}
+    .tit-rep select{font-size:.75rem;padding:.24rem .35rem;width:auto;border-radius:7px;border:1px solid #2f2f31;background:var(--bg);color:var(--txt)}
+    .tit-rep label{display:inline-flex;align-items:center;gap:.25rem;white-space:nowrap}
+    .tit-rep input[type=checkbox]{width:auto}
     .tit-edit{flex:1 1 100%;flex-wrap:wrap;gap:.4rem;margin-top:.3rem;align-items:center}
     .tit-edit input{font-size:.8rem;padding:.35rem .5rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt)}
     .tit-edit button{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
@@ -4036,17 +4064,32 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         digitada — 31 de 31 títulos a pagar da Prime. Fica o de baixo, que é
         link pra ficha. -#}{% if t.contraparte and t.contraparte|lower|trim != (t.cliente_nome or '')|lower|trim %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}
         {% if t.aprovacao=='aguardando' %} <span class="selo esp">aguardando {{ 'você' if pode_liberar else 'o dono' }}</span>{% elif t.aprovacao=='recusado' %} <span class="selo rec">recusado</span>{% endif %}
+        {% if t.periodicidade %} <span class="selo rep">🔁 {{ RITMO_SELO[t.periodicidade] }}</span>{% endif %}
+        {% if not t.valor_centavos %} <span class="selo falta">falta o valor</span>{% endif %}
         {% if t.sem_fornecedor %} <span class="selo falta">sem fornecedor</span>{% endif %}</div>
-      <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span> · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}{% if t.criado_nome %} · lançado por {{ t.criado_nome }}{% endif %}{% if t.aprovacao=='autorizado' and t.aprovado_nome %} · liberado por {{ t.aprovado_nome }}{% endif %}{% if t.aprovacao_motivo %} · <span style="color:#e07a5f">"{{ t.aprovacao_motivo }}"</span>{% endif %}</div>
+      <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span> · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}{% if t.criado_nome %} · lançado por {{ t.criado_nome }}{% endif %}{% if t.aprovacao=='autorizado' and t.aprovado_nome %} · liberado por {{ t.aprovado_nome }}{% endif %}{% if t.aprovacao_motivo %} · <span style="color:#e07a5f">"{{ t.aprovacao_motivo }}"</span>{% endif %}{#- a próxima só é prometida em título ABERTO: em título pago ela já
+      nasceu (ou foi barrada pela trava de duplicata), e repetir a promessa ali
+      seria anunciar uma segunda. -#}{% if t.proxima %} · <span style="color:#9b8fd6" title="nasce sozinha quando você der baixa nesta">próxima: {{ t.proxima.strftime('%d/%m') }}</span>{% endif %}</div>
     </div>
-    <div class="tit-val" style="color:{{ '#e07a5f' if t.tipo=='pagar' else 'var(--verde-claro)' }}">{{ t.valor_centavos|brl }}</div>
+    {#- R$ 0,00 seria mentira de dois jeitos: diz que a conta é de graça e some
+       na soma da lista. A conta de valor variável (196) nasce sem valor de
+       propósito — o boleto da água ainda não chegou. -#}
+    {% if t.valor_centavos %}<div class="tit-val" style="color:{{ '#e07a5f' if t.tipo=='pagar' else 'var(--verde-claro)' }}">{{ t.valor_centavos|brl }}</div>
+    {% else %}<div class="tit-val" style="color:#f0c05a;font-weight:500" title="esta conta repete a data, não o valor">— informar</div>{% endif %}
     <div class="tit-acoes">
       {# A BAIXA NÃO TRAVA — decisão do dono em 03/09/2026 ("só avisa, não
          trava"). O confirm é o aviso, e o que dá peso a ele é a marca
          `pago_sem_autorizacao`, gravada no mesmo update da baixa: sem ela a
          escolha viraria um clique a mais e nada mais. #}
+      {#- SEM VALOR NÃO TEM BAIXA, e o botão some em vez de o servidor recusar:
+         botão que a gravação nega é a mesma armadilha que a régua da conciliação
+         evita. Quem manda aqui é `dar_baixa_titulo`, que também recusa. -#}
+      {% if t.valor_centavos %}
       <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa"
         {%- if t.tipo=='pagar' and t.aprovacao!='autorizado' %} onsubmit="return confirm('Esta conta {{ 'foi RECUSADA' if t.aprovacao=='recusado' else 'ainda não foi liberada' }} pelo dono. Dar baixa mesmo assim? Fica registrado que ela foi paga sem autorização.')"{% endif %}><button style="color:var(--verde-claro)">dar baixa ✓</button></form>
+      {% else %}
+      <button type="button" onclick="titEditToggle(this,'valor')" style="color:#f0c05a;border-color:#5A4520">✎ pôr o valor</button>
+      {% endif %}
       {#- "JÁ FOI PAGA": liga esta conta a um pagamento que JÁ ESTÁ no caixa, em
          vez de lançar um novo. Veio do relatório em 04/09/2026, junto com a
          decisão do dono de concentrar pagamento aqui.
@@ -4088,6 +4131,19 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         <button style="color:#c98080">✕ recusar</button></form>
       {% endif %}
       {% if t.tipo=='receber' %}{% if t.cobranca_link_url %}<a href="{{ t.cobranca_link_url }}" target="_blank" style="color:#c99536">link Pix ↗</a>{% else %}<form method="post" action="/painel/empresa/titulo/{{ t.id }}/cobrar"><button style="color:#c99536">cobrar via Pix →</button></form>{% endif %}{% endif %}
+      {#- O CONTROLE DA REPETIÇÃO. É um `select` e não um botão de liga-desliga
+         porque a pergunta tem três respostas, não duas — e a quinzenal é o maior
+         bloco da Prime (12 das 33 contas abertas), então "todo mês" sozinho não
+         serviria. Grava no `change` pra não pedir um segundo clique de "salvar";
+         a caixa do valor variável vai no MESMO formulário, então ela viaja junto
+         e os dois campos entram no mesmo update (ver `definir_recorrencia`). -#}
+      <form method="post" action="/painel/empresa/titulo/{{ t.id }}/recorrencia" class="tit-rep">
+        <select name="periodicidade" onchange="this.form.submit()" title="esta conta repete?">
+          <option value=""{{ ' selected' if not t.periodicidade }}>🔁 não repete</option>
+          {% for chave, rotulo in RITMOS %}<option value="{{ chave }}"{{ ' selected' if t.periodicidade == chave }}>🔁 {{ rotulo }}</option>{% endfor %}
+        </select>
+        {% if t.periodicidade %}<label title="a próxima nasce sem valor, esperando o boleto"><input type="checkbox" name="valor_variavel" onchange="this.form.submit()"{{ ' checked' if t.valor_variavel }}> 💧 valor muda</label>{% endif %}
+      </form>
       <button type="button" onclick="titEditToggle(this)" title="editar descrição e/ou valor" style="color:#8a938a">editar ✎</button>
       <form method="post" action="/painel/empresa/titulo/{{ t.id }}/apagar" onsubmit="return confirm('Apagar este título? (só some da lista; não mexe em nada já pago)')"><button title="apagar título" style="color:#c98080">apagar ✕</button></form>
     </div>
@@ -4131,13 +4187,15 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   {% endif %}{% endfor %}
   {% else %}<div class="mut" style="font-size:.85rem">Nenhum título em aberto. Adicione acima — ou peça pro Zaq no WhatsApp.</div>{% endif %}
   <script>
-  function titEditToggle(btn){
+  function titEditToggle(btn, campo){
     var lin = btn.closest('.tit-lin');
     var f = lin ? lin.querySelector('.tit-edit') : null;
     if(!f) return;
     var aberto = f.style.display === 'flex';
     f.style.display = aberto ? 'none' : 'flex';
-    if(!aberto){ var d = f.querySelector('input[name=descricao]'); if(d) d.focus(); }
+    // `campo` existe pro "pôr o valor": abrir o editor com o cursor na descrição
+    // faria a pessoa dar um Tab pra chegar onde ela clicou pra ir.
+    if(!aberto){ var d = f.querySelector('input[name=' + (campo || 'descricao') + ']'); if(d) d.focus(); }
   }
   // Pergunta antes de gravar, pra quem usa `data-confirmar`. Delegado no
   // documento porque os formulários nascem linha a linha.
@@ -6440,6 +6498,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
      repetir o que a data já dizia. O prazo é o que a palavra "Vencida" não
      dizia — a distância —, e vai escrito, não só colorido. */
   .rel-tbl-wrap table td.rel-venc{white-space:nowrap;font-variant-numeric:tabular-nums}
+  .rel-tbl-wrap table td .rel-falta{color:var(--ambar)}
   .rel-tbl-wrap table td.rel-venc .rel-prazo{color:var(--txt-mut)}
   .rel-tbl-wrap table td.rel-venc.erro,
   .rel-tbl-wrap table td.rel-venc.erro .rel-prazo{color:var(--coral)}
@@ -6652,8 +6711,11 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
       hoje`. O prazo diz o que a palavra não dizia: a distância. Fica ESCRITO e não
       só colorido, senão quem não distingue a cor perde o aviso. -#}{{ row[col.chave]
       }}{% if col.extra and row[col.extra] %} <span class="rel-prazo">· {{ row[col.extra] }}</span>{% endif
-      %}{% elif col.brl %}{{ row[col.chave]|brl
-      }}{% elif col.cli %}{#- a célula Cliente da Agenda. Nome vindo do VÍNCULO sai
+      %}{% elif col.brl %}{#- "R$ 0,00" mentiria duas vezes na conta de valor
+      variável (196): diz que a conta é de graça e não pede nada de quem olha. A
+      coluna é quem declara o que escrever no lugar; zero legítimo segue zero. -#}{% if col.zero and not row[col.chave]
+      %}<span class="rel-falta" title="esta conta repete a data, não o valor">{{ col.zero }}</span>{% else %}{{ row[col.chave]|brl }}{% endif
+      %}{% elif col.cli %}{#- a célula Cliente da Agenda. Nome vindo do VÍNCULO sai
       limpo; DEDUÇÃO sai apagada e com selo, porque é palpite e a tela não pode
       fingir que é dado. Dois selos, porque são duas origens: "do lead" (azul,
       o nome que o funil trouxe) e "do título" (âmbar, lido do texto). Enquanto a pergunta estiver aberta a célula é um
@@ -10375,7 +10437,19 @@ def painel_empresa(request: Request):
         _r = c.execute("select coalesce(n.slug,'') from contas ct left join nichos n "
                        "on n.id=ct.nicho_id where ct.id=%s", (conta[0],)).fetchone()
     rotulo_receber = _nichos.rotulo_receber(_r[0] if _r else "")
+    # O VOCABULÁRIO DOS RITMOS mora aqui, e não em `{% if %}` no template: o
+    # `select` da linha e o selo ao lado da descrição têm que dizer a MESMA coisa,
+    # e escrever "a cada 15 dias" em dois lugares é escrever duas verdades que
+    # divergem na primeira correção. A ordem é a do intervalo, do mais curto ao
+    # mais longo.
+    ritmos = [("quinzenal", "a cada 15 dias"), ("mensal", "todo mês"),
+              ("anual", "todo ano")]
     return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
+                   RITMOS=ritmos,
+                   # o selo é mais curto que a opção do select: na descrição ele
+                   # divide espaço com "aguardando você" e o nome do fornecedor.
+                   RITMO_SELO={"quinzenal": "quinzenal", "mensal": "mensal",
+                               "anual": "anual"},
                    dre=dre, titulos=titulos, tit_blocos=tit_blocos,
                    titulos_pagos=titulos_pagos,
                    folha=folha, clientes_lista=clientes_lista,
@@ -10809,7 +10883,9 @@ def _guard_pj(request: Request):
 def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
                          descricao: str = Form(""), valor: str = Form(""),
                          vencimento: str = Form(""), contraparte: str = Form(""),
-                         recorrente: str = Form(""), cliente: str = Form("")):
+                         recorrente: str = Form(""), cliente: str = Form(""),
+                         periodicidade: str = Form(""),
+                         valor_variavel: str = Form("")):
     from finance import empresa as emp, clientes as cli
     g = _guard_pj(request)
     if not g:
@@ -10817,7 +10893,13 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
     conta, pool = g
     cent = _reais_para_centavos(valor)
     tipo_ok = tipo if tipo in ("pagar", "receber") else "pagar"
-    if cent > 0 and descricao.strip() and vencimento:
+    # QUEM REPETE PODE NASCER SEM VALOR. A conta de água marcada como "o valor
+    # muda todo mês" é cadastrada antes de o boleto chegar — exigir um número ali
+    # é pedir o R$ 0,01 de marcador, que foi exatamente o que aconteceu em quatro
+    # contas da Prime. Fora desse caso o valor continua obrigatório.
+    ritmo = periodicidade if periodicidade in emp.PERIODICIDADES else None
+    varia = bool(valor_variavel) and bool(ritmo)
+    if (cent > 0 or varia) and descricao.strip() and vencimento:
         # O campo "cliente" do formulário liga a ficha de quem quer que seja —
         # CLIENTE em título a receber (honorário/venda a prazo), FORNECEDOR em
         # título a pagar (é o mesmo cadastro, só um papel diferente marcado nele:
@@ -10858,7 +10940,8 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
             emp.criar_titulo(pool, conta[0], tipo_ok,
                              descricao, cent, _date.fromisoformat(vencimento),
                              contraparte=contraparte or nome_cli,
-                             recorrente=bool(recorrente), criado_por=membro_id,
+                             recorrente=bool(recorrente), periodicidade=ritmo,
+                             valor_variavel=varia, criado_por=membro_id,
                              cliente_id=cli_id)
         except Exception:
             pass
@@ -10957,6 +11040,35 @@ def empresa_titulo_conciliar(request: Request, titulo_id: int,
             f"“{(r['descricao'] or '').strip()[:60]}” marcada como {verbo} em "
             f"{r['pago_em'].strftime('%d/%m/%Y')}. Nenhum dinheiro novo foi "
             f"lançado — se errei, dá pra desfazer no relatório de Contas {onde}.")
+    return RedirectResponse("/painel/empresa#titulos", status_code=303)
+
+
+@router.post("/painel/empresa/titulo/{titulo_id}/recorrencia")
+def empresa_titulo_recorrencia(request: Request, titulo_id: int,
+                               periodicidade: str = Form(""),
+                               valor_variavel: str = Form("")):
+    """Liga, troca ou desliga a repetição de uma conta. Vazio DESLIGA.
+
+    Chega do `select` da linha, que grava no `change` — então cada chamada traz o
+    estado inteiro (ritmo + valor variável), e não um delta. É de propósito: os
+    dois campos são duas metades da mesma verdade e entram num update só (ver
+    `definir_recorrencia`).
+
+    Sem portão de papel próprio, pelo mesmo motivo do "dar baixa" e do
+    "já foi paga": quem pode mexer numa conta pode dizer se ela repete. O que
+    isto NÃO faz é criar, apagar ou pagar coisa nenhuma — só descreve o que já
+    está ali.
+    """
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    # o navegador não é a última palavra: ritmo desconhecido vira "não repete",
+    # que é o estado seguro (nada nasce sozinho).
+    ritmo = periodicidade if periodicidade in emp.PERIODICIDADES else None
+    emp.definir_recorrencia(pool, conta[0], titulo_id, ritmo,
+                            valor_variavel=bool(valor_variavel))
     return RedirectResponse("/painel/empresa#titulos", status_code=303)
 
 

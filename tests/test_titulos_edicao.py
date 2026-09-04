@@ -20,6 +20,7 @@ from finance import empresa as emp
 _MIGRACOES = ("018_chave_nfce_lancamentos.sql",
               "053_modulo_pj.sql",
               "195_titulo_aprovacao.sql",
+              "196_titulo_recorrencia.sql",
               "057_natureza_lancamento.sql",
               "064_clientes_lojista.sql",
               "066_pessoas_identidade.sql",

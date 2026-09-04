@@ -48,7 +48,7 @@ create table titulos (id bigserial primary key, conta_id bigint not null,
   tipo text not null check (tipo in ('pagar','receber')), descricao text not null,
   contraparte text not null default '', valor_centavos int not null check (valor_centavos > 0),
   vencimento date not null, status text not null default 'aberto',
-  recorrente boolean not null default false, categoria text not null default '',
+  recorrente boolean not null default false, periodicidade text, valor_variavel boolean not null default false, categoria text not null default '',
   criado_por bigint, criado_em timestamptz not null default now(),
   orcamento_id bigint, parcela_idx int);   -- 162: liga o título à parcela do orçamento
 """

@@ -1089,6 +1089,30 @@ def _idx_com_titulo(c, conta_id: int, orcamento_id: int) -> set[int]:
     return {int(r[0]) for r in rs}
 
 
+def _membro_id_de(texto) -> int | None:
+    """`orcamentos.criado_por` é texto: guarda o id do membro OU a palavra 'dono'
+    (conta sem vendedor específico). Só o primeiro caso vira um id."""
+    try:
+        return int(str(texto).strip()) if texto else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _vendedor_do_orcamento(c, conta_id: int, orcamento_id: int) -> int | None:
+    """De quem é a venda: quem FEZ a proposta (`orcamentos.criado_por`), não quem
+    apertou o botão de fechar ou confirmar o sinal. Mesma leitura que
+    `finance.cockpit.fechar_contrato` já fazia.
+
+    Existe porque três chamadores diferentes (o botão "Fechar contrato" do
+    painel, `contrato.assinar` e `confirmar_sinal`) geravam título sem vendedor
+    — só o botão do app resolvia isso na mão. Centralizar aqui faz os três
+    acertarem de graça, e qualquer chamador novo também acerta sem precisar
+    lembrar da regra."""
+    r = c.execute("select criado_por from orcamentos where id=%s and conta_id=%s",
+                  (orcamento_id, conta_id)).fetchone()
+    return _membro_id_de(r[0]) if r else None
+
+
 def lancar_sinal_recebido(pool, conta_id: int, orcamento_id: int, parcelas,
                           pago_em, criado_por: int | None = None) -> int | None:
     """O sinal caiu: o título DELE nasce e já entra baixado, na data em que caiu.
@@ -1123,11 +1147,13 @@ def lancar_sinal_recebido(pool, conta_id: int, orcamento_id: int, parcelas,
             p = itens[i]
             base = f"Evento — {contraparte}".strip(" —")
             rotulo = p["obs"] or f"parcela {i + 1}/{len(itens)}"
+            dono = criado_por if criado_por is not None else \
+                _vendedor_do_orcamento(c, conta_id, int(orcamento_id))
             c.execute(
                 _SQL_TITULO,
                 (conta_id, f"{base} · {rotulo}"[:200], contraparte,
                  p["valor_centavos"], _venc(p["venc"], date.today()),
-                 CAT_SERVICOS, False, criado_por, int(orcamento_id), i))
+                 CAT_SERVICOS, False, dono, int(orcamento_id), i))
             c.commit()
     # a baixa abre a própria conexão, então fica fora do `with` — mesmo cuidado
     # que o fechar_orcamento já tomava.
@@ -1210,7 +1236,7 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
                 where id=%s and conta_id=%s and status <> 'fechado'
              returning empresa, cliente, setup_centavos, mensal_centavos,
                        coalesce(modo,'recorrente'), parcelas, primeiro_ano_centavos,
-                       sinal_pago_em""",
+                       sinal_pago_em, criado_por""",
             (orcamento_id, conta_id),
         ).fetchone()
         if not orc:
@@ -1223,8 +1249,13 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
             return {"ok": False, "erro": f"Orçamento já está '{estado[0]}'."}
 
         (empresa, cliente, setup_cent, mensal_cent, modo, parcelas_raw, total_cent,
-         sinal_pago_em) = orc
+         sinal_pago_em, criado_por_orc) = orc
         contraparte = (empresa or cliente or "").strip()
+        # De quem é a venda: quem FEZ a proposta, não quem apertou "Fechar
+        # contrato" — mesma regra de `_vendedor_do_orcamento`, mas sem outra ida
+        # ao banco porque `criado_por_orc` já veio no RETURNING acima.
+        if criado_por is None:
+            criado_por = _membro_id_de(criado_por_orc)
         setup_cent = int(setup_cent or 0)
         mensal_cent = int(mensal_cent or 0)
 

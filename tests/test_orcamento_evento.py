@@ -1130,6 +1130,73 @@ def test_sinal_ja_confirmado_nao_vira_titulo_em_aberto(pool, conta_id):
     assert valor == 181000 and tipo == "receita"
 
 
+def test_o_titulo_do_sinal_carrega_o_vendedor_do_orcamento(pool, conta_id):
+    """Achado em produção em 04/09/2026: dois orçamentos com vendedor certo
+    (`orcamentos.criado_por`) geravam título do sinal SEM ninguém — o relatório
+    de Vendas mostrava "-" onde devia mostrar o nome de quem fechou.
+    `confirmar_sinal` não sabe quem apertou o botão, e não precisa saber: o dono
+    da venda é quem FEZ a proposta."""
+    with pool.connection() as c:
+        vend = c.execute("insert into membros (conta_id, nome, papel) values (%s,%s,'vendedor') "
+                         "returning id", (conta_id, "Jacqueline")).fetchone()[0]
+        c.commit()
+    oid, tok = _semear(pool, conta_id, criado_por=str(vend))
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    with pool.connection() as c:
+        c.execute("update orcamentos set sinal_pago_em=now() where id=%s", (oid,))
+        c.commit()
+    achado = ag.orcamento_do_evento(pool, conta_id, ev_id)
+    res = vendas.confirmar_sinal(pool, conta_id, achado)
+    assert res["ok"] and res["titulo_baixado"]
+    with pool.connection() as c:
+        cp = c.execute("select criado_por from titulos where orcamento_id=%s and parcela_idx=0",
+                       (oid,)).fetchone()[0]
+    assert cp == vend
+
+
+def test_fechar_orcamento_carrega_o_vendedor_do_orcamento(pool, conta_id):
+    """Mesmo achado, outro caminho: `contrato.assinar` e o botão "Fechar
+    contrato" do painel também não passavam o vendedor adiante."""
+    with pool.connection() as c:
+        vend = c.execute("insert into membros (conta_id, nome, papel) values (%s,%s,'vendedor') "
+                         "returning id", (conta_id, "Pedro Yan")).fetchone()[0]
+        c.commit()
+    oid, _tok = _semear(pool, conta_id, criado_por=str(vend))
+    r = vendas.fechar_orcamento(pool, conta_id, oid)
+    with pool.connection() as c:
+        donos = c.execute("select criado_por from titulos where id = any(%s)",
+                          (r["titulos"],)).fetchall()
+    assert donos and all(d[0] == vend for d in donos)
+
+
+def test_criado_por_explicito_ganha_do_orcamento(pool, conta_id):
+    """Quem PASSA o vendedor na mão (o botão do app) continua mandando — o
+    orçamento só é consultado quando ninguém disse quem é."""
+    with pool.connection() as c:
+        do_orc = c.execute("insert into membros (conta_id, nome, papel) values (%s,%s,'vendedor') "
+                           "returning id", (conta_id, "Do orçamento")).fetchone()[0]
+        explicito = c.execute("insert into membros (conta_id, nome, papel) values (%s,%s,'vendedor') "
+                              "returning id", (conta_id, "Quem clicou")).fetchone()[0]
+        c.commit()
+    oid, _tok = _semear(pool, conta_id, criado_por=str(do_orc))
+    r = vendas.fechar_orcamento(pool, conta_id, oid, criado_por=explicito)
+    with pool.connection() as c:
+        donos = {d[0] for d in c.execute(
+            "select criado_por from titulos where id = any(%s)", (r["titulos"],)).fetchall()}
+    assert donos == {explicito}
+
+
+def test_orcamento_do_dono_nao_vira_titulo_com_vendedor_fantasma(pool, conta_id):
+    """`orcamentos.criado_por = 'dono'` é conta sem vendedor específico — texto,
+    não um id, e não pode virar um por acidente de cast."""
+    oid, _tok = _semear(pool, conta_id, criado_por="dono")
+    r = vendas.fechar_orcamento(pool, conta_id, oid)
+    with pool.connection() as c:
+        donos = {d[0] for d in c.execute(
+            "select criado_por from titulos where id = any(%s)", (r["titulos"],)).fetchall()}
+    assert donos == {None}
+
+
 def test_as_outras_parcelas_seguem_em_aberto(pool, conta_id):
     """Só o sinal foi pago. O resto do plano continua a receber — senão fechar o
     contrato de um evento daria por recebido o que ainda vai ser cobrado."""

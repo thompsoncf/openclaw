@@ -179,20 +179,36 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
                  recorrente: bool = False,
                  criado_por: int | None = None,
                  cliente_id: int | None = None,
-                 precisa_aprovacao: bool = False) -> dict:
+                 precisa_aprovacao: bool | None = None) -> dict:
     """Cria um título aberto. tipo: 'pagar' | 'receber'. cliente_id LIGA o título
     a um cliente da base (honorário/venda a prazo aparece na ficha dele).
 
-    `precisa_aprovacao` nasce False e quem decide é QUEM CHAMA, não este módulo: a
-    regra de quem precisa de liberação é de tela (o dono libera o que os outros
-    lançam) e depende da sessão, que aqui não existe. Falhar para False é
-    deliberado — título que nasce liberado por engano é ruído; título que nasce
-    preso por engano é uma conta que ninguém paga."""
+    `precisa_aprovacao=None` (o padrão) aplica A REGRA DA CASA: **toda conta a
+    PAGAR nasce aguardando liberação**; a receber nasce liberada, porque dinheiro
+    entrando ninguém precisa autorizar.
+
+    A regra mudou de lugar em 04/09/2026, e o motivo é o que importa. Ela nascia
+    na tela — "aguarda quem não é o dono" —, e a primeira semana no ar mostrou o
+    furo: na Prime só o dono acessa o financeiro (os três do time são `vendedor`),
+    então nenhum título jamais nascia aguardando e a fila nunca acendia. Perguntado,
+    o dono escolheu que **tudo espera, inclusive o que ele mesmo lança**: vira um
+    checklist de conferência em vez de um controle de quem gasta.
+
+    Sendo regra do negócio e não de tela, o lugar dela é aqui — senão cada porta
+    que cria título (o formulário, o agente do WhatsApp, o PDV) teria a sua cópia,
+    e a do agente já estava faltando.
+
+    O parâmetro continua existindo como escape explícito, e tem um usuário real: a
+    parcela seguinte de um título recorrente herda a decisão do anterior (ver
+    `dar_baixa_titulo`) — o aluguel autorizado em janeiro não volta a perguntar em
+    fevereiro."""
     if tipo not in ("pagar", "receber"):
         raise ValueError("tipo deve ser 'pagar' ou 'receber'")
     if not categoria:
         categoria = CAT_FORNECEDORES if tipo == "pagar" else CAT_VENDAS
     cli_id = int(cliente_id) if cliente_id else None
+    if precisa_aprovacao is None:
+        precisa_aprovacao = (tipo == "pagar")
     aprov = "aguardando" if precisa_aprovacao else "autorizado"
     with pool.connection() as c:
         r = c.execute(
@@ -372,7 +388,8 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                       pago_sem_autorizacao = (aprovacao <> 'autorizado')
                 where id=%s and conta_id=%s and status='aberto'
              returning tipo, descricao, contraparte, valor_centavos, categoria,
-                       recorrente, vencimento, criado_por, pago_sem_autorizacao""",
+                       recorrente, vencimento, criado_por, pago_sem_autorizacao,
+                       aprovacao""",
             (data_pagto, titulo_id, conta_id),
         ).fetchone()
         if not t:
@@ -413,11 +430,17 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                 # criado_por vai junto: a mensalidade do mês que vem é da MESMA
                 # venda. Sem carregar isso, o vendedor recebia comissão no primeiro
                 # mês e o resto da recorrência virava "Sem vendedor".
+                # `aprovacao` vai junto pelo MESMO motivo do criado_por logo
+                # acima: a parcela do mês que vem não é uma decisão nova. O
+                # aluguel que o dono liberou em janeiro não pode voltar a
+                # perguntar em fevereiro, senão a fila de conferência vira uma
+                # cobrança mensal do que já foi respondido — e fila que repete
+                # pergunta respondida é fila que alguém desliga.
                 """insert into titulos
                      (conta_id, tipo, descricao, contraparte, valor_centavos,
-                      vencimento, categoria, recorrente, criado_por)
-                   values (%s,%s,%s,%s,%s,%s,%s,true,%s) returning id""",
-                (conta_id, t[0], t[1], t[2], int(t[3]), prox, t[4], t[7]),
+                      vencimento, categoria, recorrente, criado_por, aprovacao)
+                   values (%s,%s,%s,%s,%s,%s,%s,true,%s,%s) returning id""",
+                (conta_id, t[0], t[1], t[2], int(t[3]), prox, t[4], t[7], t[9]),
             ).fetchone()
             proximo_id = r[0]
         c.commit()

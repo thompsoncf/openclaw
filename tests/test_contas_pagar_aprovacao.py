@@ -191,16 +191,38 @@ def test_quem_lancou_fica_gravado(pool):
 # ======================================================================== 2
 # A LIBERAÇÃO DO DONO
 
-def test_titulo_comum_nasce_liberado(pool):
-    """`precisa_aprovacao` é False por padrão e quem decide é a TELA, que sabe
-    quem está logado. Falhar pra liberado é deliberado: título preso por engano
-    é uma conta que ninguém paga."""
-    assert _um(pool, _titulo(pool))["aprovacao"] == "autorizado"
+def test_TODA_conta_a_pagar_nasce_aguardando(pool):
+    """A regra da casa desde 04/09/2026, escolhida pelo dono depois que a primeira
+    versão não acendeu: **tudo espera, inclusive o que ele mesmo lança.**
+
+    Antes a regra era "aguarda quem não é dono", e morava na tela. Na Prime só o
+    dono abre o financeiro (os três do time são `vendedor`), então nenhum título
+    jamais nasceu aguardando — a funcionalidade estava no ar e invisível."""
+    assert _um(pool, _titulo(pool))["aprovacao"] == "aguardando"
 
 
-def test_lancado_por_quem_nao_e_dono_espera(pool):
-    tid = _titulo(pool, precisa_aprovacao=True)
-    assert _um(pool, tid)["aprovacao"] == "aguardando"
+def test_a_receber_nao_espera(pool):
+    """Dinheiro entrando ninguém precisa autorizar."""
+    tid = _titulo(pool, tipo="receber", descricao="Honorário")
+    assert _um(pool, tid)["aprovacao"] == "autorizado"
+
+
+def test_a_regra_vale_pra_toda_porta_que_cria_titulo(pool):
+    """A regra mora no `criar_titulo`, não na tela — senão cada porta teria a sua
+    cópia. O agente do WhatsApp (tools_pj) também cria conta a pagar, e na versão
+    anterior ele não tinha cópia nenhuma dessa regra."""
+    import inspect
+    from web import portal
+    fonte_rota = inspect.getsource(portal.empresa_titulo_criar)
+    assert "precisa_aprovacao" not in fonte_rota, (
+        "a tela voltou a decidir quem espera — a regra é do negócio, não da tela")
+    assert 'precisa_aprovacao = (tipo == "pagar")' in inspect.getsource(emp.criar_titulo)
+
+
+def test_escape_explicito_ainda_existe(pool):
+    """O parâmetro continua servindo pra quem tem motivo — hoje, a recorrente."""
+    tid = _titulo(pool, precisa_aprovacao=False)
+    assert _um(pool, tid)["aprovacao"] == "autorizado"
 
 
 def test_o_dono_libera(pool):
@@ -235,8 +257,8 @@ def test_libera_em_lote(pool):
 
 
 def test_a_fila_do_dono_so_traz_o_que_espera(pool):
-    _titulo(pool, descricao="JA LIBERADO")
-    esperando = _titulo(pool, descricao="ESPERANDO", precisa_aprovacao=True)
+    _titulo(pool, descricao="JA LIBERADO", precisa_aprovacao=False)
+    esperando = _titulo(pool, descricao="ESPERANDO")
     fila = emp.aguardando_aprovacao(pool, CONTA)
     assert [f["id"] for f in fila] == [esperando]
 
@@ -280,6 +302,29 @@ def test_decidir_nao_mexe_no_que_ja_foi_pago(pool):
     tid = _titulo(pool, precisa_aprovacao=True)
     emp.dar_baixa_titulo(pool, CONTA, tid, HOJE)
     assert emp.decidir_aprovacao(pool, CONTA, tid, "autorizado") == 0
+
+
+def test_a_recorrente_herda_a_decisao_do_mes_anterior(pool):
+    """O aluguel liberado em janeiro não volta a perguntar em fevereiro.
+
+    Com "tudo nasce aguardando", a parcela seguinte de um recorrente seria uma
+    pergunta nova todo mês sobre algo já respondido — e fila que repete pergunta
+    respondida é fila que alguém desliga. A parcela do mês que vem não é decisão
+    nova: é a mesma, continuando."""
+    tid = _titulo(pool, descricao="ALUGUEL", recorrente=True)
+    emp.decidir_aprovacao(pool, CONTA, tid, "autorizado")
+    r = emp.dar_baixa_titulo(pool, CONTA, tid, HOJE)
+    prox = r["proximo_titulo_id"]
+    assert prox, "recorrente tinha que gerar a próxima"
+    assert _um(pool, prox)["aprovacao"] == "autorizado"
+
+
+def test_a_recorrente_nao_liberada_continua_esperando(pool):
+    """Herdar vale nos dois sentidos: o que passou sem liberação não vira
+    liberado no mês seguinte por descuido."""
+    tid = _titulo(pool, descricao="ALUGUEL", recorrente=True)
+    r = emp.dar_baixa_titulo(pool, CONTA, tid, HOJE)   # baixa sem liberar
+    assert _um(pool, r["proximo_titulo_id"])["aprovacao"] == "aguardando"
 
 
 # ---- "só avisa, não trava" (decisão do dono em 03/09/2026) --------------

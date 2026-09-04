@@ -491,6 +491,13 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
     alvo = _carrega_alvo(pool, conta_id, lead_id)
     if not alvo or alvo.get("vendedor_id") != membro_id:
         return None
+    # conta que VENDE DATA (nicho de eventos): só nela a ficha do celular pede o
+    # evento. Tolerante: base sem nicho é ficha de sempre.
+    try:
+        from finance import vendas as _vendas
+        alvo["vende_data"] = bool(_vendas.vende_data(pool, conta_id))
+    except Exception:  # noqa: BLE001
+        alvo["vende_data"] = False
     with pool.connection() as c:
         etapas = [e for e in _etapas(c, conta_id) if e["chave"] not in ("ganho", "perdido")]
         # `chip_id` vem junto pro aviso de conversa repetida saber se a outra está no
@@ -1176,6 +1183,12 @@ def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict)
         # resolve; aqui o valor já vem date-ou-None do _data_nascimento.
         sets.append("nascimento=coalesce(%s,nascimento)")
         vals.append(nasc)
+        # o evento (migração 197), com a mesma regra: em branco fica como está
+        from finance import evento_lead as _evl
+        sets += ["evento_tipo=coalesce(%s,evento_tipo)", "evento_em=coalesce(%s,evento_em)",
+                 "evento_convidados=coalesce(%s,evento_convidados)"]
+        vals += [_evl.parse_tipo(limpo("evento_tipo")), _evl.parse_data(limpo("evento_em")),
+                 _evl.parse_convidados(limpo("evento_convidados"))]
         if doc:
             sets += ["tipo=%s", "cnpj=%s", "cpf=%s"]
             vals += [tipo, cnpj, cpf]
@@ -2024,6 +2037,9 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens,
                           str(membro_id), token, modo)).fetchone()[0]
         c.execute("update prospeccao set orcamento_id=%s, atualizado_em=now() where id=%s and conta_id=%s",
                   (oid, lead_id, conta_id))
+        # a data/tipo/convidados da proposta vão pro lead (migração 197)
+        from finance import evento_lead as _evl
+        _evl.sincronizar_do_orcamento(c, conta_id, oid)
         c.commit()
     link = f"{_app_url()}/proposta/{token}"
     numero = (lead[4] or lead[5] or "")

@@ -419,6 +419,15 @@ def _atender(pool, conta_id, conversa_id):
             c.execute("update prospeccao set temperatura=%s, atualizado_em=now() where id=%s and conta_id=%s",
                       (d["temperatura"], conv[1], conta_id))
 
+        # O EVENTO NO LEAD (migração 197). O que o cliente disse de data, tipo e
+        # convidados vai pro lead NA HORA — e não só pro orçamento, que nem sempre
+        # nasce: na Prime, 224 leads em "Contatado" e a data da festa conhecida em
+        # 15, com o agente perguntando a data em toda conversa de preço. Só preenche
+        # o que está vazio: o que o vendedor pôs à mão fica.
+        if conv[1]:
+            from finance import evento_lead as _evl
+            _evl.gravar(c, conta_id, conv[1], _evento_do_json(d), so_vazios=True)
+
         # o agente fica SEMPRE ativo e segue o painel: NUNCA se desliga sozinho (nem por
         # confiança, nem por trocas, nem por 'achar' que precisa de humano). Quem assume
         # é um humano — botão "Assumir" ou responder pelo chat. Se o dono desligou o

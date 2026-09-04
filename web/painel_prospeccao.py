@@ -39,6 +39,7 @@ from finance.email_sender import remetente_configurado
 from web.portal import _render, _env, conta_logada, brl
 
 router = APIRouter()
+from finance import evento_lead as _evl  # noqa: E402 — o evento no lead (migração 197)
 
 # ---------------------------------------------------------------- domínio (rótulos)
 STATUS = [
@@ -249,7 +250,8 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
                       p.site_url, p.decisor_nome, p.decisor_cargo, p.decisor_telefone,
                       p.decisor_whatsapp, p.decisor_em, p.decisor_telefones,
                       p.tipo, p.cpf,
-                      p.cep, p.endereco, p.numero, p.bairro, p.nascimento
+                      p.cep, p.endereco, p.numero, p.bairro, p.nascimento,
+                      p.evento_em, p.evento_tipo, p.evento_convidados
                  from prospeccao p
                  left join membros m on m.id = p.vendedor_id
                 where p.id=%s and p.conta_id=%s""", (alvo_id, conta_id)).fetchone()
@@ -262,8 +264,14 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
             "orcamento_id", "tem_site", "maps_url", "receita", "site_url",
             "decisor_nome", "decisor_cargo", "decisor_telefone", "decisor_whatsapp", "decisor_em",
             "decisor_telefones", "tipo", "cpf",
-            "cep", "endereco", "numero", "bairro", "nascimento"]
+            "cep", "endereco", "numero", "bairro", "nascimento",
+            "evento_em", "evento_tipo", "evento_convidados"]
     d = dict(zip(cols, r))
+    # o evento (migração 197) pronto pra tela: ISO pro <input type=date>, ícone pelo
+    # tipo e uma linha só ("💍 Casamento · 14/11/2026 · 150 convidados")
+    d["evento_iso"] = d["evento_em"].isoformat() if d.get("evento_em") else ""
+    d["evento_ic"] = _evl.icone_tipo(d.get("evento_tipo"))
+    d["evento_fmt"] = _evl.linha_evento(d.get("evento_tipo"), d.get("evento_em"), d.get("evento_convidados"))
     # PF x PJ: o que a ficha precisa saber pra trocar rótulo, documento e esconder o
     # que só existe em empresa (sócio, regime, porte, Receita, decisor).
     d["eh_pf"] = (d.get("tipo") == "pf")
@@ -456,7 +464,7 @@ def _promover_para_lead(c, conta_id, pros_id) -> None:
 
 
 @router.get("/painel/prospeccao", response_class=HTMLResponse)
-def prospeccao_kanban(request: Request, vendedor: str = ""):
+def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = ""):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -476,6 +484,26 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
             where.append("p.vendedor_id = %s")
             params.append(int(filtro_vend))
     where.append("p.estagio = 'lead'")   # funil = só quem engajou; o resto fica na aba Base
+    # O TRILHO DE MESES (finance/evento_lead.py). `where_base` é o quadro inteiro
+    # (vendedor e tudo) SEM o mês: é dele que saem as contagens das pílulas e o
+    # "9 de 224" da coluna — senão o filtro esconderia a própria régua.
+    where_base, params_base = list(where), list(params)
+    filtro_mes = (mes or "").strip()
+    if filtro_mes == "sem":
+        where.append("p.evento_em is null")
+    elif _evl.mes_valido(filtro_mes):
+        _ini, _fim = _evl.mes_intervalo(filtro_mes)
+        where.append("p.evento_em >= %s and p.evento_em < %s")
+        params += [_ini, _fim]
+    else:
+        filtro_mes = ""
+    # Conta que VENDE DATA (nicho de eventos): só nela o card cobra "sem data" e o
+    # trilho aparece. Numa padaria a data da festa não existe, e a linha seria ruído.
+    try:
+        from finance import vendas as _vendas
+        modo_evento = bool(_vendas.vende_data(pool, conta_id))
+    except Exception:  # noqa: BLE001 — base sem nicho: funil de sempre
+        modo_evento = False
     with pool.connection() as c:
         etapas = _etapas(c, conta_id)
         # dois_chips decide se o apelido do chip aparece no selo de campanha — com um
@@ -485,7 +513,9 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
             f"""select p.id, p.empresa, p.segmento, p.cidade, p.uf, p.status,
                        p.temperatura, p.valor_estimado_centavos, p.proximo_contato_em,
                        p.telefone, p.whatsapp, p.vendedor_id, m.nome,
-                       p.email, p.instagram, p.enriquecido_em, ca.cnome
+                       p.email, p.instagram, p.enriquecido_em, ca.cnome,
+                       p.evento_em, p.evento_tipo, p.evento_convidados,
+                       p.criado_em, p.ultimo_contato_em
                   from prospeccao p
                   left join membros m on m.id = p.vendedor_id
                   left join lateral (
@@ -585,7 +615,27 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
         # o mesmo número atendido pelo OUTRO chip — uma consulta pro funil inteiro, e
         # nenhuma numa empresa de um chip só (que é o caso de quase todas)
         gemeos = _gemeos_de_outro_chip(c, conta_id, [r[0] for r in rows])
+        # as pílulas do trilho: leads por mês do evento, no quadro inteiro (sem o
+        # filtro de mês), fora Perdido. Duas consultas leves, e nenhuma delas pode
+        # derrubar o funil (base sem a 197 → sem trilho, quadro de sempre).
+        contagens: dict = {}
+        totais_col: dict = {}
+        try:
+            with c.transaction():
+                for k, n in c.execute(
+                    f"""select to_char(p.evento_em, 'YYYY-MM'), count(*) from prospeccao p
+                         where {' and '.join(where_base)} and p.status <> 'perdido'
+                         group by 1""", tuple(params_base)).fetchall():
+                    contagens[k] = n
+                if filtro_mes:
+                    totais_col = dict(c.execute(
+                        f"""select p.status, count(*) from prospeccao p
+                             where {' and '.join(where_base)} group by 1""",
+                        tuple(params_base)).fetchall())
+        except Exception:  # noqa: BLE001
+            contagens, totais_col = {}, {}
     colunas = {e["chave"]: [] for e in etapas}
+    hoje = _agora().date()
     primeira = etapas[0]["chave"] if etapas else "novo"
     total_valor = 0
     for r in rows:
@@ -612,6 +662,20 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                 "gemeo": _aviso_gemeo(gemeos.get(r[0])),
                 "gemeo_lead": ((gemeos.get(r[0]) or {}).get("lead_id")
                                if _gemeo_abre(gemeos.get(r[0]), ctx) else None)}
+        # O EVENTO (migração 197): a linha do card, o mês do grupo e o "parado".
+        # `ult_em` é a data da última mensagem em QUALQUER sentido — é ela (ou o
+        # último contato, ou a entrada) que decide a dobra dos parados.
+        ev_em = r[17]
+        card.update({
+            "evento_em": ev_em, "evento_tipo": r[18], "evento_convidados": r[19],
+            "criado_em": r[20], "ultimo_contato_em": r[21],
+            "ult_em": (ult_por_lead.get(r[0]) or {}).get("em"),
+            "ev_ic": _evl.icone_tipo(r[18]), "ev_data": _evl.data_curta(ev_em, hoje),
+            "passou": bool(ev_em and ev_em < hoje and r[5] not in ("ganho", "perdido")),
+            # sem conversa aberta o "perguntar" cai no wa.me com o texto pronto
+            "zap_pergunta": (_zap_link_texto(r[10] or r[9], _evl.PERGUNTA_DATA)
+                             if (r[10] or r[9]) else ""),
+        })
         colunas.get(r[5], colunas[primeira]).append(card)
         if r[5] != "perdido":
             total_valor += int(r[7] or 0)
@@ -619,7 +683,18 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
     status_tpl = [(e["chave"], e["rotulo"]) for e in etapas]
     etapas_edit = [{**e, "n": len(colunas.get(e["chave"], []))} for e in etapas]
     vends = _vendedores(pool, conta_id) if ctx["gerencia"] else []
+    # a coluna separada em meses (evento → entrada → parados), ver evento_lead.agrupar
+    agora = _agora()
+    grupos = {chave: _evl.agrupar(cards, agora) for chave, cards in colunas.items()}
+    # o trilho só entra quando há data em algum lead (ou um filtro pra limpar):
+    # numa conta onde ninguém tem data ainda ele seria "Todos · Sem data", duas
+    # pílulas dizendo a mesma coisa.
+    trilho_itens = (_evl.trilho(contagens, filtro_mes)
+                    if modo_evento and (any(k for k in contagens if k) or filtro_mes) else [])
     return _render("prospeccao", request, titulo="Prospecção", secao_ativa="prospeccao",
+                   grupos=grupos, trilho_itens=trilho_itens, filtro_mes=filtro_mes,
+                   filtro_mes_rotulo=(_evl.mes_rotulo(filtro_mes) if _evl.mes_valido(filtro_mes) else ""),
+                   totais_col=totais_col, modo_evento=modo_evento, pergunta_data=_evl.PERGUNTA_DATA,
                    status=status_tpl, etapas=etapas_edit, colunas=colunas, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
                    temperaturas_all=TEMPERATURAS, gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"],
                    vendedores=vends, filtro_vend=filtro_vend, total_valor=total_valor,
@@ -7621,6 +7696,8 @@ def prospeccao_resumo(request: Request, alvo_id: int):
         "telefone": alvo["telefone"], "whatsapp": alvo["whatsapp"], "email": alvo["email"],
         "instagram": alvo["instagram"], "site_url": alvo["site_url"], "site_dominio": alvo["site_dominio"],
         "obs": alvo["obs"], "valor_fmt": brl(alvo["valor"]) if alvo["valor"] else "",
+        "evento_fmt": alvo["evento_fmt"], "evento_tipo": alvo["evento_tipo"],
+        "evento_iso": alvo["evento_iso"], "evento_convidados": alvo["evento_convidados"],
         "valor_edit": (f"{alvo['valor'] / 100:.2f}".replace(".", ",")) if alvo["valor"] else "",
         "doc_fmt": alvo["doc_fmt"], "doc_rot": alvo["doc_rot"],
         "tel_link": alvo["tel_link"], "zap_link": alvo["zap_link"],
@@ -7638,7 +7715,9 @@ def prospeccao_resumo(request: Request, alvo_id: int):
 def prospeccao_editar_rapido(request: Request, alvo_id: int, contato: str = Form(""),
                              cargo: str = Form(""), telefone: str = Form(""), whatsapp: str = Form(""),
                              email: str = Form(""), instagram: str = Form(""),
-                             site_url: str = Form(""), valor: str = Form(""), obs: str = Form("")):
+                             site_url: str = Form(""), valor: str = Form(""), obs: str = Form(""),
+                             evento_tipo: str = Form(""), evento_em: str = Form(""),
+                             evento_convidados: str = Form("")):
     """Edição rápida pelo balão do funil — só os campos de contato/valor, sem
     tocar documento/tipo/segmento/cidade/uf/sócio/regime/porte (esses ficam só
     na ficha completa, que tem a verificação própria de CNPJ/CPF). Por isso é
@@ -7659,11 +7738,14 @@ def prospeccao_editar_rapido(request: Request, alvo_id: int, contato: str = Form
         c.execute(
             """update prospeccao set contato=%s, cargo=%s, telefone=%s, whatsapp=%s,
                    email=%s, instagram=%s, site_url=%s, valor_estimado_centavos=%s,
-                   obs=%s, atualizado_em=now()
+                   obs=%s, evento_tipo=%s, evento_em=%s, evento_convidados=%s,
+                   atualizado_em=now()
                  where id=%s and conta_id=%s""",
             (contato.strip() or None, cargo.strip() or None, telefone.strip() or None,
              whatsapp.strip() or None, email.strip().lower() or None, instagram.strip() or None,
              site_link or None, _reais_para_centavos(valor), obs.strip() or None,
+             _evl.parse_tipo(evento_tipo), _evl.parse_data(evento_em),
+             _evl.parse_convidados(evento_convidados),
              alvo_id, ctx["conta_id"]))
         c.commit()
     return JSONResponse({"ok": True})
@@ -7716,7 +7798,9 @@ def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
                       socio: str = Form(""), regime_tributario: str = Form(""),
                       porte: str = Form(""), instagram: str = Form(""),
                       empresa: str = Form(""),
-                      tem_site: str = Form(""), site_url: str = Form(""), obs: str = Form("")):
+                      tem_site: str = Form(""), site_url: str = Form(""), obs: str = Form(""),
+                      evento_tipo: str = Form(""), evento_em: str = Form(""),
+                      evento_convidados: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -7745,7 +7829,8 @@ def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
                 """update prospeccao set contato=%s, cargo=%s, telefone=%s, whatsapp=%s,
                        email=%s, cnpj=%s, cpf=%s, tipo=%s, empresa=%s, segmento=%s, cidade=%s, uf=%s,
                        valor_estimado_centavos=%s, socio=%s, regime_tributario=%s, porte=%s,
-                       instagram=%s, tem_site=%s, site_url=%s, obs=%s, atualizado_em=now()
+                       instagram=%s, tem_site=%s, site_url=%s, obs=%s,
+                       evento_tipo=%s, evento_em=%s, evento_convidados=%s, atualizado_em=now()
                      where id=%s and conta_id=%s""",
                 (contato.strip() or None, cargo.strip() or None, telefone.strip() or None,
                  whatsapp.strip() or None, email.strip().lower() or None, cnpj_limpo, cpf_limpo,
@@ -7753,6 +7838,10 @@ def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
                  (uf or "").strip()[:2].upper() or None,
                  _reais_para_centavos(valor), socio.strip() or None, regime_tributario.strip() or None,
                  porte.strip() or None, instagram.strip() or None, site, site_link, obs.strip() or None,
+                 # o evento entra como os outros campos deste formulário: o que está
+                 # na tela é o que fica (em branco limpa — é a ficha completa)
+                 _evl.parse_tipo(evento_tipo), _evl.parse_data(evento_em),
+                 _evl.parse_convidados(evento_convidados),
                  alvo_id, ctx["conta_id"]))
             c.commit()
     except UniqueViolation:
@@ -9913,7 +10002,18 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <option value="nao" {% if filtro_vend=='nao' %}selected{% endif %}>Sem responsável</option>
       {% for v in vendedores %}<option value="{{ v.id }}" {% if filtro_vend==(v.id|string) %}selected{% endif %}>{{ v.nome }}</option>{% endfor %}
     </select>
+    {% if filtro_mes %}<input type="hidden" name="mes" value="{{ filtro_mes }}">{% endif %}
   </form>
+  {% endif %}
+
+  {# O TRILHO DE MESES: mês do EVENTO, não o mês em que o lead escreveu. Clicou em
+     Jan 27, o quadro inteiro vira o funil de janeiro (todas as etapas). "Sem data"
+     é a fila de trabalho — quem ainda não disse quando é a festa. #}
+  {% if trilho_itens %}
+  <div class="trilho" id="trilho"><span class="rot">Mês do evento</span>
+    {% for t in trilho_itens %}<a class="mes{% if t.on %} on{% endif %}{% if t.sem %} semdata{% endif %}{% if not t.n and not t.on %} vazio{% endif %}" href="/painel/prospeccao?{% if filtro_vend %}vendedor={{ filtro_vend }}&amp;{% endif %}{% if t.chave %}mes={{ t.chave }}{% endif %}">{{ t.rotulo }} <b>{{ t.n }}</b></a>{% endfor %}
+  </div>
+  {% if filtro_mes %}<div class="trilho-faixa">{% if filtro_mes == 'sem' %}📅 <b>Sem data do evento</b> · quem ainda não disse quando é a festa{% else %}🎉 <b>{{ filtro_mes_rotulo }}</b> · só as festas desse mês, em todas as etapas{% endif %}<a href="/painel/prospeccao{% if filtro_vend %}?vendedor={{ filtro_vend }}{% endif %}">✕ limpar</a></div>{% endif %}
   {% endif %}
 
   {% if gerencia %}
@@ -9976,16 +10076,20 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     {% for s, rot in status %}<button type="button" class="kbtab" data-tab="{{ s }}" onclick="kbTab('{{ s }}')">{{ rot }} <span class="c">{{ colunas[s]|length }}</span></button>{% endfor %}
   </div>
 
-  <div class="kbrow" id="kbrow">
-    {% for s, rot in status %}
-    <div class="kbcol" data-status="{{ s }}" ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event,'{{ s }}')">
-      <h4><span>{{ rot }}</span><span class="kbcnt">{{ colunas[s]|length }}</span></h4>
-      <div class="kbdrop">
-        {% for c in colunas[s] %}
+  {# O CARD, uma vez só: a mesma marcação serve pros grupos por mês e pra dobra dos
+     parados. Macro do próprio template — enxerga o contexto (temp_cor, vendedores…). #}
+  {% macro kbcard(c) -%}
         <div class="kbcard" draggable="true" data-id="{{ c.id }}" ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"
              onclick="if(!window._kbMoved)kbAbrirLead(event,{{ c.id }},this)">
           <div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" title="{{ c.temperatura }}" style="background:{{ temp_cor[c.temperatura] }}"></span><span class="emp">{{ c.empresa }}</span><button type="button" class="kbx" style="flex:none" title="Excluir lead" onclick="kbExcluir(event,{{ c.id }})">✕</button></div>
           {% if c.segmento or c.cidade %}<div class="sub">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
+          {# O EVENTO — tipo · data · convidados — é a linha mais alta depois do nome:
+             é o que diz qual pacote cabe (semana ou fim de semana) e em que mês a
+             venda cai. Sem data, numa conta que vende data, o card diz isso na cara
+             e oferece o "perguntar" (abre a conversa com a pergunta pronta). Data que
+             já passou com etapa aberta fica coral: festa que aconteceu e ninguém fechou. #}
+          {% if c.evento_em or c.evento_tipo or c.evento_convidados %}<div class="kbev{% if c.passou %} passou{% endif %}" title="{% if c.passou %}A data do evento já passou{% else %}Evento{% endif %}">{{ c.ev_ic }} {% if c.evento_tipo %}<b>{{ c.evento_tipo }}</b>{% endif %}{% if c.evento_em %}{% if c.evento_tipo %} · {% endif %}<span class="d">{{ c.ev_data }}</span>{% endif %}{% if c.evento_convidados %} · {{ c.evento_convidados }} conv.{% endif %}</div>
+          {% elif modo_evento %}<div class="kbev sem">📅 sem data{% if c.conv_whatsapp %}<button type="button" class="kbperg" title="Perguntar a data do evento" onclick="kbPerguntarData(event,{{ c.conv_whatsapp }},this)">perguntar</button>{% elif c.zap_pergunta %}<a class="kbperg" href="{{ c.zap_pergunta }}" target="_blank" rel="noopener" title="Abre o WhatsApp com a pergunta pronta" onclick="event.stopPropagation()">perguntar</a>{% endif %}</div>{% endif %}
           {% if c.campanha or c.chip_apelido %}<div class="camp">{% if c.campanha %}📣 {{ c.campanha }}{% endif %}{% if c.chip_apelido %}<span class="chip">{% if c.campanha %} · {% endif %}📱 {{ c.chip_apelido }}</span>{% endif %}</div>{% endif %}
           {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido %}<div class="kbch">{% if c.tem_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="Abrir a conversa de WhatsApp">💬</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
           {# A ÚLTIMA MENSAGEM. Fica DEPOIS dos selos de canal e antes do valor
@@ -10003,6 +10107,26 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
              vendedores negociam com a mesma pessoa, cada um com um preço. #}
           {% if c.gemeo %}<div class="kbgem" onclick="event.stopPropagation()">⚠️ {{ c.gemeo }}{% if c.gemeo_lead %} <a href="/painel/prospeccao/{{ c.gemeo_lead }}">Abrir →</a>{% endif %}</div>{% endif %}
         </div>
+  {%- endmacro %}
+
+  <div class="kbrow" id="kbrow">
+    {% for s, rot in status %}
+    <div class="kbcol" data-status="{{ s }}" ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event,'{{ s }}')">
+      <h4><span>{{ rot }}</span><span class="kbcnt">{{ colunas[s]|length }}{% if filtro_mes %} <i>de {{ totais_col.get(s, 0) }}</i>{% endif %}</span></h4>
+      <div class="kbdrop">
+        {# A coluna separada em grupos (evento_lead.agrupar): mês do evento, depois
+           sem data por mês de entrada, e no pé a dobra dos parados há 15+ dias —
+           fechada, pra coluna encurtar sem apagar ninguém. Um card arrastado pra cá
+           entra no fim do .kbdrop e se acomoda no grupo certo no próximo carregar. #}
+        {% for g in (grupos or {}).get(s, []) %}
+        {% if g.tipo == 'parado' %}
+        <details class="kbdobra"><summary><span class="kbgrp alerta">{{ g.rotulo }} <b>{{ g.n }}</b></span></summary>
+          {% for c in g.cards %}{{ kbcard(c) }}{% endfor %}
+        </details>
+        {% else %}
+        {% if g.rotulo %}<div class="kbgrp">{{ g.rotulo }} <b>{{ g.n }}</b><span class="ln"></span></div>{% endif %}
+        {% for c in g.cards %}{{ kbcard(c) }}{% endfor %}
+        {% endif %}
         {% else %}<div class="kbempty">vazio</div>{% endfor %}
       </div>
     </div>
@@ -10014,6 +10138,53 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .kbgem{margin-top:.4rem;font-size:.7rem;line-height:1.35;color:#e0b45f;background:rgba(224,180,95,.10);
   border:1px solid rgba(224,180,95,.32);border-radius:8px;padding:.3rem .42rem;cursor:default}
 .kbgem a{color:#e0b45f;text-decoration:underline;white-space:nowrap}
+/* ---- a coluna separada em meses + a dobra dos parados (migração 197) ---- */
+.kbgrp{display:flex;align-items:center;gap:.35rem;font-size:.64rem;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--txt-mut);font-weight:600;padding:.5rem .1rem .1rem;border-top:1px dashed var(--borda);margin-top:.1rem;min-width:0}
+.kbdrop>.kbgrp:first-child{border-top:0;margin-top:0;padding-top:.05rem}
+.kbgrp b{font-weight:500;color:var(--txt-mut);letter-spacing:0;font-variant-numeric:tabular-nums}
+.kbgrp .ln{flex:1;height:1px;background:var(--borda);min-width:6px}
+.kbgrp.alerta{color:#e0b45f;padding:0;border:0;margin:0;flex:1}
+.kbgrp.alerta b{color:#e0b45f}
+.kbdobra{border:1px dashed rgba(224,180,95,.32);border-radius:10px;background:rgba(224,180,95,.06);padding:.35rem .45rem;margin-top:.35rem}
+.kbdobra>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:.4rem;user-select:none}
+.kbdobra>summary::-webkit-details-marker{display:none}
+.kbdobra>summary::after{content:'▸';margin-left:auto;color:var(--txt-mut);font-size:.8rem}
+.kbdobra[open]>summary::after{content:'▾'}
+.kbdobra .kbcard{margin-top:.45rem;opacity:.85}
+/* a linha do evento no card: tipo · data · convidados */
+/* QUEBRA em vez de truncar: numa coluna de 150px "💍 Casamento · 14 nov · 150 conv."
+   não cabe numa linha, e com ellipsis o que sumia era justamente o tipo — a
+   informação inteira da linha. Em duas linhas continua legível. */
+.kbev{display:block;margin-top:.3rem;font-size:.72rem;line-height:1.35;color:var(--txt-mut);
+  background:var(--card-2);border:1px solid var(--borda);border-radius:7px;padding:.18rem .42rem;
+  white-space:normal;overflow-wrap:anywhere;min-width:0;box-sizing:border-box;max-width:100%}
+.kbev b{color:var(--txt);font-weight:600}
+.kbev .d{font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--verde-claro);font-variant-numeric:tabular-nums;white-space:nowrap}
+.kbev.passou{border-color:#5A2B2B;background:rgba(224,87,79,.10)}
+.kbev.passou .d{color:var(--coral)}
+/* "sem data" + perguntar: flex, e o botão desce pra linha de baixo quando não cabe */
+.kbev.sem{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .5rem;border-style:dashed;color:#e0b45f;
+  background:rgba(224,180,95,.08);border-color:rgba(224,180,95,.32)}
+.kbperg{margin:0 0 0 auto;width:auto;padding:0;font-size:.7rem;font-weight:600;color:#e0b45f;background:transparent;
+  border:0;text-decoration:underline;text-underline-offset:2px;cursor:pointer;line-height:1.3;font-family:inherit}
+.kbperg:hover{color:var(--txt)}
+/* o trilho de meses em cima do quadro */
+.trilho{display:flex;gap:.35rem;overflow-x:auto;margin-top:.8rem;padding-bottom:.35rem;align-items:center;
+  scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+.trilho .rot{font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-mut);font-weight:600;flex:none;margin-right:.2rem}
+.trilho .mes{flex:none;display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--borda);border-radius:999px;
+  padding:.26rem .65rem;font-size:.78rem;color:var(--txt-mut);background:var(--card);text-decoration:none}
+.trilho .mes b{font-weight:500;font-size:.72rem;color:var(--txt);font-variant-numeric:tabular-nums}
+.trilho .mes.on{background:var(--verde);border-color:var(--verde);color:var(--sobre-verde);font-weight:600}
+.trilho .mes.on b{color:var(--sobre-verde)}
+.trilho .mes.vazio{opacity:.45}
+.trilho .mes.semdata{border-color:rgba(224,180,95,.32);background:rgba(224,180,95,.08);color:#e0b45f}
+.trilho .mes.semdata b{color:#e0b45f}
+.trilho-faixa{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:.4rem;font-size:.82rem;color:var(--txt-mut);
+  background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.45rem .7rem}
+.trilho-faixa a{margin-left:auto;color:var(--verde-claro);font-size:.76rem}
+.kbcnt i{font-style:normal;color:var(--txt-mut);opacity:.75}
 .kbch{display:flex;gap:.35rem;margin-top:.3rem;font-size:.82rem;align-items:center}
 /* a última mensagem no card. `min-width:0` no .txt é o que faz o ellipsis
    funcionar dentro do flex — sem isso o texto empurra a hora pra fora do card. */
@@ -10238,13 +10409,20 @@ function kbAbrirChat(ev,convId,aba,btn){
       comp.innerHTML='<div class="cx-comp"><textarea id="cp-input" rows="1" placeholder="Escreva uma resposta…"'
         +' onkeydown="if(event.key===\\'Enter\\'&&!event.shiftKey){event.preventDefault();kbResponderChat('+convId+');}"></textarea>'
         +'<button type="button" onclick="kbResponderChat('+convId+')">Enviar</button></div>';
+      // o "perguntar" do card deixa a pergunta pronta na caixa — o vendedor
+      // confere o tom e manda (decisão do dono, 04/09: abre, não dispara)
+      if(_cpPrefill){var ta=comp.querySelector('#cp-input');if(ta){ta.value=_cpPrefill;ta.rows=2;ta.focus();ta.setSelectionRange(ta.value.length,ta.value.length);}}
     }else if(d.ok){
       comp.innerHTML='<div class="cx-stub">Responder por aqui <span class="lbl2">em breve</span></div>';
     }
+    _cpPrefill='';
   }).catch(function(){
     if(_chatPop===pop)pop.querySelector('#cp-msgs').innerHTML='<div class="cx-empty">Falha de rede.</div>';
   });
 }
+var _cpPrefill='';
+var KB_PERGUNTA_DATA={{ (pergunta_data or '')|tojson }};
+function kbPerguntarData(ev,convId,btn){_cpPrefill=KB_PERGUNTA_DATA;kbAbrirChat(ev,convId,'conversas',btn);}
 function kbResponderChat(convId){
   if(!_chatPop)return;
   var ta=_chatPop.querySelector('#cp-input');
@@ -10345,6 +10523,7 @@ function kbLeadHtml(d,id){
 // porte, Receita) — aquilo não é algo que se corrige rápido, fica só na ficha.
 function kbLeadDadosHtml(d){
   var h='<div class="lp-sh"><b>Dados</b><button type="button" class="lp-edit-btn" onclick="kbLeadEditar()">✎ Editar</button></div><div class="lp-grid">';
+  if(d.evento_fmt)h+='<div class="full"><div class="k">Evento</div><div class="v">'+cxEscK(d.evento_fmt)+'</div></div>';
   if(d.contato)h+='<div><div class="k">Contato</div><div class="v">'+cxEscK(d.contato)+(d.cargo?(' · '+cxEscK(d.cargo)):'')+'</div></div>';
   if(d.doc_fmt)h+='<div><div class="k">'+cxEscK(d.doc_rot||'Documento')+'</div><div class="v">'+cxEscK(d.doc_fmt)+'</div></div>';
   if(d.telefone)h+='<div><div class="k">Telefone</div><div class="v">'+cxEscK(d.telefone)+'</div></div>';
@@ -10376,6 +10555,9 @@ function kbLeadEditHtml(d,id){
     +'<div><label>E-mail</label><input id="lp-ed-email" value="'+_lpVal(d.email)+'"></div>'
     +'<div><label>Instagram</label><input id="lp-ed-instagram" value="'+_lpVal(d.instagram)+'"></div>'
     +'<div class="full"><label>Site</label><input id="lp-ed-site" value="'+_lpVal(d.site_url)+'"></div>'
+    +'<div><label>Tipo do evento</label><input id="lp-ed-evtipo" placeholder="Casamento, aniversário…" value="'+_lpVal(d.evento_tipo)+'"></div>'
+    +'<div><label>Data do evento</label><input id="lp-ed-evdata" type="date" value="'+_lpVal(d.evento_iso)+'"></div>'
+    +'<div><label>Convidados</label><input id="lp-ed-evconv" inputmode="numeric" value="'+_lpVal(d.evento_convidados)+'"></div>'
     +'<div class="full"><label>Valor estimado</label><input id="lp-ed-valor" value="'+_lpVal(d.valor_edit)+'"></div>'
     +'<div class="full"><label>Observação</label><textarea id="lp-ed-obs">'+_lpVal(d.obs)+'</textarea></div>'
     +'</div><div class="lp-ed-acoes">'
@@ -10400,15 +10582,11 @@ function kbLeadSalvar(id){
   var btn=_leadPop&&_leadPop.querySelector('.lp-ed-salvar');
   if(btn){btn.disabled=true;btn.textContent='Salvando…';}
   var body=new URLSearchParams();
-  body.append('contato',document.getElementById('lp-ed-contato').value);
-  body.append('cargo',document.getElementById('lp-ed-cargo').value);
-  body.append('telefone',document.getElementById('lp-ed-telefone').value);
-  body.append('whatsapp',document.getElementById('lp-ed-whatsapp').value);
-  body.append('email',document.getElementById('lp-ed-email').value);
-  body.append('instagram',document.getElementById('lp-ed-instagram').value);
-  body.append('site_url',document.getElementById('lp-ed-site').value);
-  body.append('valor',document.getElementById('lp-ed-valor').value);
-  body.append('obs',document.getElementById('lp-ed-obs').value);
+  // campo do formulário → id do input no balão (os três do evento: migração 197)
+  [['contato','contato'],['cargo','cargo'],['telefone','telefone'],['whatsapp','whatsapp'],
+   ['email','email'],['instagram','instagram'],['site_url','site'],['valor','valor'],['obs','obs'],
+   ['evento_tipo','evtipo'],['evento_em','evdata'],['evento_convidados','evconv']
+  ].forEach(function(p){var el=document.getElementById('lp-ed-'+p[1]);if(el)body.append(p[0],el.value);});
   fetch('/painel/prospeccao/'+id+'/editar-rapido',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
     .then(function(r){return r.json();}).then(function(d){
       if(!_leadPop)return;
@@ -10917,6 +11095,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </span>
         </div>
         {% endif %}
+        {% if a.evento_fmt %}<div class="drow"><span class="ic">{{ a.evento_ic }}</span><span class="lb">Evento</span><span>{{ a.evento_fmt }}</span></div>{% endif %}
         {% if a.contato %}<div class="drow"><span class="ic">👤</span><span class="lb">Contato</span><span>{{ a.contato }}{% if a.cargo %} · {{ a.cargo }}{% endif %}</span></div>{% endif %}
         {% if a.doc %}<div class="drow"><span class="ic">{{ '🪪' if a.eh_pf else '🏢' }}</span><span class="lb">{{ a.doc_rot }}</span><span>{{ a.doc_fmt }}</span></div>{% endif %}
         {% if a.socio %}<div class="drow"><span class="ic">🧑‍💼</span><span class="lb">Sócio</span><span>{{ a.socio }}</span></div>{% endif %}
@@ -10966,6 +11145,9 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <div data-so-pj{% if a.eh_pf %} style="display:none"{% endif %}><label class="lbl">Regime</label><input class="fld" name="regime_tributario" value="{{ a.regime_tributario or '' }}"></div>
             <div data-so-pj{% if a.eh_pf %} style="display:none"{% endif %}><label class="lbl">Porte</label><input class="fld" name="porte" value="{{ a.porte or '' }}"></div>
             <div><label class="lbl">Instagram</label><input class="fld" name="instagram" value="{{ a.instagram or '' }}"></div>
+            <div><label class="lbl">Tipo do evento</label><input class="fld" name="evento_tipo" placeholder="Casamento, aniversário…" value="{{ a.evento_tipo or '' }}"></div>
+            <div><label class="lbl">Data do evento</label><input class="fld" name="evento_em" type="date" value="{{ a.evento_iso }}"></div>
+            <div><label class="lbl">Convidados</label><input class="fld" name="evento_convidados" inputmode="numeric" value="{{ a.evento_convidados or '' }}"></div>
             <div><label class="lbl">Valor est. (R$)</label><input class="fld" name="valor" inputmode="decimal" value="{{ (a.valor/100)|n2 if a.valor else '' }}"></div>
             <div><label class="lbl">Tem site?</label><select class="fld" name="tem_site">
               <option value="" {% if a.tem_site is none %}selected{% endif %}>—</option>

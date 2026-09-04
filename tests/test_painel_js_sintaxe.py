@@ -42,6 +42,14 @@ from web import painel_servicos as _ps  # registra "servicos" no mesmo loader
 #
 # Os contextos não são decoração: com `_Mudo` (falso pra tudo) o {% if %} esconde
 # justamente o bloco que interessa, e o teste passaria sem ter olhado nada.
+_CARD = {"id": 1, "empresa": "Padaria Bom Pão", "segmento": "Varejo",
+         "cidade": "Teresina", "uf": "PI", "temperatura": "quente",
+         "valor": 420000, "proximo": None, "vendedor": None, "vendedor_id": None,
+         "tem_whatsapp": True, "tem_email": True, "tem_instagram": False,
+         "enriquecido": True,
+         "conv_whatsapp": 501, "conv_email": None, "conv_instagram": None,
+         "evento_em": None, "evento_tipo": None, "evento_convidados": None,
+         "passou": False, "zap_pergunta": ""}
 PAGINAS = {
     # 'gerencia' e provedor 'qr': é o ramo que traz o bloco do QR, que foi o que
     # quebrou em 17/08.
@@ -54,14 +62,14 @@ PAGINAS = {
     # justamente o JS que o teste existe pra proteger.
     "prospeccao": dict(
         status=[("novo", "Novo"), ("contatado", "Contatado")],
-        colunas={
-            "novo": [{"id": 1, "empresa": "Padaria Bom Pão", "segmento": "Varejo",
-                      "cidade": "Teresina", "uf": "PI", "temperatura": "quente",
-                      "valor": 420000, "proximo": None, "vendedor": None, "vendedor_id": None,
-                      "tem_whatsapp": True, "tem_email": True, "tem_instagram": False,
-                      "enriquecido": True,
-                      "conv_whatsapp": 501, "conv_email": None, "conv_instagram": None}],
-            "contatado": []},
+        colunas={"novo": [_CARD], "contatado": []},
+        # a coluna é desenhada em GRUPOS (evento_lead.agrupar, migração 197): é
+        # daqui que o card sai. Sem data + conta que vende data = o ramo do
+        # "perguntar" (kbPerguntarData), que também mora no JS.
+        grupos={"novo": [{"tipo": "entrada", "chave": "2026-09", "rotulo": "",
+                          "cards": [_CARD], "n": 1}], "contatado": []},
+        modo_evento=True, pergunta_data="Pra qual data você está pensando?",
+        trilho_itens=[], filtro_mes="", filtro_mes_rotulo="", totais_col={},
         temp_cor={"quente": "#e0574f"}, temp_pill={"quente": "Quente"},
         gerencia=False, pode_atribuir=False, vendedores=[], filtro_vend="",
         total_valor=420000, total_alvos=1, tem_places=False, tem_maps_js=False,

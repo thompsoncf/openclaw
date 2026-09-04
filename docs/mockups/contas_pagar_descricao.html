@@ -1,0 +1,466 @@
+<title>Descrição em Contas a pagar</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* A tela é a do produto: os tokens abaixo são os de web/tema.py, não uma
+   paleta nova. O mockup só vale como decisão se for a cara do que vai no ar. */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-fraco:rgba(37,211,102,.10);
+  --neon-borda:#1E4A3A; --neon-fundo:#10241A; --sobre-verde:#04150C;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul:#229ED9; --azul-borda:#1B3A4A; --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --lede:68ch;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--body);
+  font-size:15px;line-height:1.62;-webkit-font-smoothing:antialiased}
+.pagina{display:flex;flex-direction:column;gap:3.2rem;padding:3rem 1.5rem 6rem;
+  max-width:1560px;margin:0 auto}
+.lede{max-width:var(--lede);margin:0 auto;width:100%;display:flex;
+  flex-direction:column;gap:1rem}
+.larga{width:100%}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:clamp(2rem,4.4vw,3.1rem);font-weight:700;letter-spacing:-.022em}
+h2{font-size:1.62rem;font-weight:700;letter-spacing:-.014em}
+h3{font-size:1.06rem;font-weight:600}
+p{margin:0}
+strong{color:var(--neon-bright);font-weight:600}
+em{color:var(--text);font-style:normal;border-bottom:1px dotted var(--text-faint)}
+code{font-family:var(--mono);font-size:.86em;color:var(--text-dim);
+  background:var(--bg-2);border:1px solid var(--line);border-radius:5px;padding:.08em .38em}
+.olho{font-family:var(--mono);font-size:.7rem;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--text-faint)}
+.dim{color:var(--text-dim)}
+hr{border:0;border-top:1px solid var(--line);margin:0}
+
+/* ---- cabeçalho ---- */
+.capa{max-width:var(--lede);margin:0 auto;width:100%;display:flex;
+  flex-direction:column;gap:1.4rem}
+.pedido{border-left:2px solid var(--neon);padding:.1rem 0 .1rem 1.1rem;
+  color:var(--text-dim);font-size:1.02rem}
+.pedido b{color:var(--text);font-weight:500}
+
+/* ---- placar ---- */
+.placar{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;
+  overflow:hidden;max-width:var(--lede);margin:0 auto;width:100%}
+.placar div{background:var(--surface);padding:1rem 1.1rem;display:flex;
+  flex-direction:column;gap:.15rem}
+.placar .n{font-family:var(--display);font-size:1.85rem;font-weight:700;
+  line-height:1;font-variant-numeric:tabular-nums}
+.placar .n.mal{color:var(--coral)}
+.placar .n.bem{color:var(--neon-bright)}
+.placar .q{font-size:.79rem;color:var(--text-dim);line-height:1.4}
+
+/* ---- tabela: a régua é a de .rel-tbl-wrap em web/portal.py ---- */
+.tela{background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  overflow:hidden}
+.tela-cab{display:flex;align-items:baseline;gap:.7rem;flex-wrap:wrap;
+  padding:.85rem 1.1rem;border-bottom:1px solid var(--line);background:var(--bg-2)}
+.tela-cab .t{font-family:var(--display);font-weight:600;font-size:.98rem}
+.tela-cab .s{font-size:.8rem;color:var(--text-dim)}
+.tw{overflow-x:auto;max-height:none}
+.tw table{width:100%;min-width:680px;border-collapse:collapse}
+.tw th,.tw td{padding:.5rem .7rem;border-bottom:1px solid var(--line);
+  text-align:left;font-size:.855rem;white-space:nowrap}
+.tw th{font-size:.72rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--text-faint);background:var(--bg-2);position:sticky;top:0;z-index:1}
+.tw tbody tr:last-child td{border-bottom:0}
+.tw tbody tr:nth-child(even){background:rgba(255,255,255,.014)}
+/* a coluna elástica: corta no FIM, nunca no começo (incidente de 26/08) */
+.tw td.flex{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;width:99%}
+.tw td.dt{font-family:var(--mono);font-size:.8rem;color:var(--text-dim)}
+.tw td.num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.tw th.num{text-align:right}
+.tw td.fraco{color:var(--text-faint)}
+.tw td.act{width:1%;padding-left:0}
+.tw td.stat{white-space:nowrap}
+.tw td .sub{display:block;font-size:.76rem;color:var(--text-dim);font-weight:400;
+  overflow:hidden;text-overflow:ellipsis}
+.tw td b{font-weight:600}
+.pill{display:inline-block;padding:.13rem .55rem;border-radius:999px;font-size:.72rem;
+  font-weight:600;white-space:nowrap}
+.pill.ok{background:var(--neon-fundo);color:#9fe8c9;border:1px solid var(--neon-borda)}
+.pill.aviso{background:var(--ambar-fundo);color:#f0dca6;border:1px solid var(--ambar-borda)}
+.pill.erro{background:var(--coral-fundo);color:#f0b8b8;border:1px solid var(--coral-borda)}
+.btn-ok{background:var(--neon);color:var(--sobre-verde);border:0;border-radius:7px;
+  padding:.1rem .5rem;font-weight:700;font-size:.82rem;cursor:default;font-family:var(--body)}
+/* as linhas que hoje são indistinguíveis de outra linha da mesma tela */
+.tw tr.colide td{background:rgba(224,87,79,.085)}
+.tw tr.colide td.dt{box-shadow:inset 2px 0 0 var(--coral)}
+.tw tr.colide-leve td{background:rgba(224,163,46,.07)}
+.tw tr.colide-leve td.dt{box-shadow:inset 2px 0 0 var(--ambar)}
+.legenda{display:flex;gap:1.2rem;flex-wrap:wrap;padding:.6rem 1.1rem;
+  border-top:1px solid var(--line);background:var(--bg-2);font-size:.78rem;
+  color:var(--text-dim)}
+.legenda i{font-style:normal;display:inline-flex;align-items:center;gap:.4rem}
+.legenda i::before{content:"";width:11px;height:11px;border-radius:3px;flex:none}
+.legenda i.c1::before{background:rgba(224,87,79,.5);box-shadow:inset 2px 0 0 var(--coral)}
+.legenda i.c2::before{background:rgba(224,163,46,.45);box-shadow:inset 2px 0 0 var(--ambar)}
+
+/* ---- opções ---- */
+.ops{display:flex;flex-direction:column;gap:1.6rem}
+.op{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--surface)}
+.op.rec{border-color:var(--neon-borda);box-shadow:0 0 0 1px var(--neon-borda)}
+.op-cab{display:flex;align-items:flex-start;gap:1rem;padding:1.1rem 1.2rem;
+  background:var(--bg-2);border-bottom:1px solid var(--line)}
+.op-letra{font-family:var(--display);font-size:1.5rem;font-weight:700;line-height:1;
+  width:2.1rem;height:2.1rem;flex:none;display:flex;align-items:center;
+  justify-content:center;border-radius:9px;background:var(--bg);
+  border:1px solid var(--line);color:var(--text-dim)}
+.op.rec .op-letra{background:var(--neon);color:var(--sobre-verde);border-color:var(--neon)}
+.op-tit{display:flex;flex-direction:column;gap:.2rem;min-width:0}
+.op-tit .n{font-family:var(--display);font-weight:600;font-size:1.08rem}
+.op-tit .d{font-size:.87rem;color:var(--text-dim)}
+.selo{font-family:var(--mono);font-size:.66rem;font-weight:600;letter-spacing:.12em;
+  text-transform:uppercase;padding:.2rem .5rem;border-radius:5px;margin-left:auto;
+  flex:none;background:var(--neon-fundo);color:var(--neon-bright);
+  border:1px solid var(--neon-borda)}
+.selo.frio{background:var(--bg);color:var(--text-faint);border-color:var(--line)}
+.op-corpo{padding:1.1rem 1.2rem;display:flex;flex-direction:column;gap:.9rem}
+.op-corpo p{font-size:.92rem}
+.saldo{display:grid;grid-template-columns:1fr 1fr;gap:.9rem}
+@media(max-width:640px){.saldo{grid-template-columns:1fr}}
+.saldo ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:.35rem}
+.saldo li{font-size:.87rem;padding-left:1.25rem;position:relative;color:var(--text-dim)}
+.saldo li::before{position:absolute;left:0;font-weight:700}
+.saldo .bem li::before{content:"+";color:var(--neon)}
+.saldo .mal li::before{content:"−";color:var(--coral)}
+
+/* ---- achado ---- */
+.achado{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);
+  border-radius:14px;padding:1.3rem 1.4rem;display:flex;flex-direction:column;gap:.9rem;
+  max-width:var(--lede);margin:0 auto;width:100%}
+.achado h2{font-size:1.2rem;color:#f0dca6}
+.achado p{font-size:.92rem;color:#e6d9bb}
+.achado strong{color:#fff0cf}
+.linhas{display:flex;flex-direction:column;gap:.5rem;font-family:var(--mono);
+  font-size:.78rem;background:rgba(0,0,0,.28);border-radius:9px;padding:.9rem 1rem;
+  overflow-x:auto}
+.linhas div{white-space:nowrap;color:#e6d9bb}
+.linhas .seta{color:var(--ambar)}
+.linhas .nao{color:var(--coral)}
+.linhas .sim{color:var(--neon-bright)}
+
+.rodape{max-width:var(--lede);margin:0 auto;width:100%;font-size:.82rem;
+  color:var(--text-faint);display:flex;flex-direction:column;gap:.4rem}
+:focus-visible{outline:2px solid var(--neon-bright);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="pagina">
+
+<header class="capa">
+  <div class="olho">Painel · Financeiro · Contas a pagar · 04/09/2026</div>
+  <h1>A coluna que diz <em>qual</em> conta é essa</h1>
+  <div class="pedido">
+    <b>“Nesse relatório de contas a pagar tem uma coluna chamada Conferir, não sei
+    pra que serve. Quero substituir por a descrição da conta. Veja se algo é
+    melhor e traga soluções com mockup.”</b>
+  </div>
+  <p class="dim">Fui olhar os 30 títulos abertos da Prime Eventos antes de mexer
+  na tela. O pedido está certo, e o motivo é mais forte do que “ficaria bom ter”:
+  <strong>16 dessas 30 linhas são hoje idênticas a outra linha da mesma tela</strong>
+  — mesmo fornecedor, mesmo valor. A descrição é o único campo que já está no banco
+  e que separa uma da outra.</p>
+</header>
+
+<section class="placar">
+  <div><span class="n mal">16<span style="font-size:.55em;color:var(--text-faint)">/30</span></span>
+    <span class="q">linhas hoje indistinguíveis de outra: mesmo <b>Fornecedor</b> + mesmo <b>Valor</b></span></div>
+  <div><span class="n bem">4<span style="font-size:.55em;color:var(--text-faint)">/30</span></span>
+    <span class="q">o que sobra de ambíguo trocando Fornecedor por <b>Descrição</b></span></div>
+  <div><span class="n">30<span style="font-size:.55em;color:var(--text-faint)">/30</span></span>
+    <span class="q">títulos abertos que <b>já têm</b> descrição gravada — nada a preencher</span></div>
+  <div><span class="n">1</span>
+    <span class="q">valor distinto na coluna <b>Categoria</b> em toda a produção: “Fornecedores”</span></div>
+</section>
+
+<section class="larga">
+  <div class="lede" style="margin-bottom:1.2rem">
+    <div class="olho">Hoje</div>
+    <h2>A tela não consegue dizer qual é qual</h2>
+    <p class="dim">Esta é a aba como está no ar, com os dados reais. As faixas
+    vermelhas são as linhas que repetem nome e valor de outra linha. Repare no bloco
+    de 18/09: <em>IMPOSTOS (FGTS/INSS/DAS)</em> três vezes, no mesmo dia — a tela não
+    diz qual é o FGTS, qual é o INSS e qual é o DAS. E em 05/09 e 15/09,
+    <em>JAQUELINE DUARTE</em> por R$ 1.500,00 nas duas: uma é a 2ª quinzena de agosto,
+    a outra é a 1ª de setembro.</p>
+  </div>
+  <div class="tela">
+    <div class="tela-cab"><span class="t">Contas a pagar</span>
+      <span class="s">Prime Eventos · 30 em aberto · R$ 29.390,42</span></div>
+    <div class='tw'><table><thead><tr><th>Vencimento</th><th>Fornecedor</th><th>Categoria</th><th>Status</th><th>Conferir</th><th class=num>Valor</th><th></th></tr></thead><tbody>
+<tr class='colide'><td class=dt>15/08</td><td class=flex title='ZARB ASSESSORIA'>ZARB ASSESSORIA</td><td class=fraco>Fornecedores</td><td><span class="pill erro">Vencida</span></td><td><span class="pill aviso">parece pago em 10/08</span></td><td class=num>R$ 2.200,00</td><td class=act><button class="btn-ok" type="button" tabindex="-1" aria-hidden="true">✓</button></td></tr>
+<tr class='colide'><td class=dt>15/08</td><td class=flex title='BANCO DO NORDESTE'>BANCO DO NORDESTE</td><td class=fraco>Fornecedores</td><td><span class="pill erro">Vencida</span></td><td></td><td class=num>R$ 2.400,00</td><td class=act></td></tr>
+<tr class='colide'><td class=dt>31/08</td><td class=flex title='PREFEITURA DE TERESINA'>PREFEITURA DE TERESINA</td><td class=fraco>Fornecedores</td><td><span class="pill erro">Vencida</span></td><td></td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+<tr><td class=dt>05/09</td><td class=flex title='ROBERTO LOPES'>ROBERTO LOPES</td><td class=fraco>Fornecedores</td><td><span class="pill aviso">A vencer</span></td><td></td><td class=num>R$ 721,07</td><td class=act></td></tr>
+<tr class='colide'><td class=dt>05/09</td><td class=flex title='JAQUELINE DUARTE'>JAQUELINE DUARTE</td><td class=fraco>Fornecedores</td><td><span class="pill aviso">A vencer</span></td><td><span class="pill aviso">3 pagamentos iguais por perto</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr class='colide'><td class=dt>05/09</td><td class=flex title='INSIGHT ASSESSORIA  ADMINISTRATIVA'>INSIGHT ASSESSORIA  ADMINISTRATIVA</td><td class=fraco>Fornecedores</td><td><span class="pill aviso">A vencer</span></td><td></td><td class=num>R$ 810,50</td><td class=act></td></tr>
+<tr><td class=dt>05/09</td><td class=flex title='NORDESTE ENERGIA SOLAR'>NORDESTE ENERGIA SOLAR</td><td class=fraco>Fornecedores</td><td><span class="pill aviso">A vencer</span></td><td></td><td class=num>R$ 2.877,77</td><td class=act></td></tr>
+<tr><td class=dt>10/09</td><td class=flex title='ESCONTAB ASSESSORIA E CONSULTORIA CONTABIL'>ESCONTAB ASSESSORIA E CONSULTORIA CONTABIL</td><td class=fraco>Fornecedores</td><td><span class="pill aviso">A vencer</span></td><td></td><td class=num>R$ 1.000,00</td><td class=act></td></tr>
+<tr><td class=dt>10/09</td><td class=flex title='G3 TELECON'>G3 TELECON</td><td class=fraco>Fornecedores</td><td><span class="pill aviso">A vencer</span></td><td></td><td class=num>R$ 94,90</td><td class=act></td></tr>
+<tr><td class=dt>10/09</td><td class=flex title='EQUATORIAL'>EQUATORIAL</td><td class=fraco>Fornecedores</td><td><span class="pill aviso">A vencer</span></td><td></td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class=dt>15/09</td><td class=flex title='DOMINGOS PASCOAL DA SILVA FILHO'>DOMINGOS PASCOAL DA SILVA FILHO</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 270,00</td><td class=act></td></tr>
+<tr class='colide'><td class=dt>15/09</td><td class=flex title='JAQUELINE DUARTE'>JAQUELINE DUARTE</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td><span class="pill aviso">3 pagamentos iguais por perto</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class=dt>15/09</td><td class=flex title='ROBERTO LOPES'>ROBERTO LOPES</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 837,50</td><td class=act></td></tr>
+<tr class='colide'><td class=dt>15/09</td><td class=flex title='INSIGHT ASSESSORIA  ADMINISTRATIVA'>INSIGHT ASSESSORIA  ADMINISTRATIVA</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 810,50</td><td class=act></td></tr>
+<tr class='colide'><td class=dt>15/09</td><td class=flex title='IASMIM FLOR DA COSTA SANTOS'>IASMIM FLOR DA COSTA SANTOS</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 360,00</td><td class=act></td></tr>
+<tr class='colide'><td class=dt>15/09</td><td class=flex title='THIAGO CESAR BORGES PINHEIRO'>THIAGO CESAR BORGES PINHEIRO</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td><span class="pill aviso">3 pagamentos iguais por perto</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr class='colide'><td class=dt>15/09</td><td class=flex title='PEDRO YAN MENDES VALENÇA XIMENES'>PEDRO YAN MENDES VALENÇA XIMENES</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td><span class="pill aviso">3 pagamentos iguais por perto</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr class='colide'><td class=dt>15/09</td><td class=flex title='BANCO DO NORDESTE'>BANCO DO NORDESTE</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 2.400,00</td><td class=act></td></tr>
+<tr class='colide'><td class=dt>15/09</td><td class=flex title='ZARB ASSESSORIA'>ZARB ASSESSORIA</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 2.200,00</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 134,00</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 126,43</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class=dt>20/09</td><td class=flex title='GESTÃO CLICK'>GESTÃO CLICK</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 214,11</td><td class=act></td></tr>
+<tr><td class=dt>21/09</td><td class=flex title='ÁGUAS DE TERESINA'>ÁGUAS DE TERESINA</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class=dt>22/09</td><td class=flex title='CARTÃO DE CRÉDITO - SICOOB'>CARTÃO DE CRÉDITO - SICOOB</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class=dt>25/09</td><td class=flex title='SECURITY'>SECURITY</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 251,90</td><td class=act></td></tr>
+<tr class='colide'><td class=dt>30/09</td><td class=flex title='IASMIM FLOR DA COSTA SANTOS'>IASMIM FLOR DA COSTA SANTOS</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 360,00</td><td class=act></td></tr>
+<tr class='colide'><td class=dt>30/09</td><td class=flex title='PEDRO YAN MENDES VALENÇA XIMENES'>PEDRO YAN MENDES VALENÇA XIMENES</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr class='colide'><td class=dt>30/09</td><td class=flex title='THIAGO CESAR BORGES PINHEIRO'>THIAGO CESAR BORGES PINHEIRO</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr class='colide'><td class=dt>30/09</td><td class=flex title='PREFEITURA DE TERESINA'>PREFEITURA DE TERESINA</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td></td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+</tbody></table></div>
+    <div class="legenda"><i class="c1">repete Fornecedor + Valor de outra linha (16 de 30)</i>
+      <span>Categoria diz “Fornecedores” nas 30</span></div>
+  </div>
+</section>
+
+<section class="larga">
+  <div class="lede" style="margin-bottom:1.2rem">
+    <div class="olho">As três saídas</div>
+    <h2>Mesmas sete linhas, três desenhos</h2>
+    <p class="dim">Peguei as três famílias que mais colidem — os impostos de 18/09,
+    a Jaqueline em duplicidade e o IPTU 3/6 contra o 4/6 — e montei as três nas
+    mesmas linhas, pra comparar sem truque.</p>
+  </div>
+
+  <div class="ops">
+
+    <article class="op">
+      <div class="op-cab">
+        <div class="op-letra">A</div>
+        <div class="op-tit"><span class="n">Troca direta</span>
+          <span class="d">Sai <em>Conferir</em>, entra <em>Descrição</em> — literalmente o que você pediu.</span></div>
+        <span class="selo frio">Perde um sinal</span>
+      </div>
+      <div class="op-corpo">
+        <div class='tw'><table><thead><tr><th>Vencimento</th><th>Fornecedor</th><th>Descrição</th><th>Categoria</th><th>Status</th><th class=num>Valor</th><th></th></tr></thead><tbody>
+<tr><td class=dt>31/08</td><td class=flex title='PREFEITURA DE TERESINA'>PREFEITURA DE TERESINA</td><td class=flex title='IPTU 2026 3/6'>IPTU 2026 3/6</td><td class=fraco>Fornecedores</td><td><span class="pill erro">Vencida</span></td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+<tr><td class=dt>05/09</td><td class=flex title='JAQUELINE DUARTE'>JAQUELINE DUARTE</td><td class=flex title='2 QUINZENA AGOSTO/26 JAQUELINE'>2 QUINZENA AGOSTO/26 JAQUELINE</td><td class=fraco>Fornecedores</td><td><span class="pill aviso">A vencer</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class=dt>15/09</td><td class=flex title='JAQUELINE DUARTE'>JAQUELINE DUARTE</td><td class=flex title='1 QUINZENA SETEMBRO/26 JAQUELINE'>1 QUINZENA SETEMBRO/26 JAQUELINE</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=flex title='FGTS AGOSTO/26'>FGTS AGOSTO/26</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td class=num>R$ 134,00</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=flex title='INSS AGOSTO/26'>INSS AGOSTO/26</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td class=num>R$ 126,43</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=flex title='DAS AGOSTO/26'>DAS AGOSTO/26</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class=dt>30/09</td><td class=flex title='PREFEITURA DE TERESINA'>PREFEITURA DE TERESINA</td><td class=flex title='IPTU 2026 4/6'>IPTU 2026 4/6</td><td class=fraco>Fornecedores</td><td><span class="pill ok">A vencer</span></td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+</tbody></table></div>
+        <div class="saldo">
+          <ul class="bem"><li>Resolve o problema principal: dá pra ler qual conta é.</li>
+            <li>Mudança pequena, nada mais se move de lugar.</li></ul>
+          <ul class="mal"><li>Some da linha o aviso de conta talvez já paga — hoje são
+            5 contas, R$ 8.200,00 na Prime. O número continua no KPI, mas você deixa de
+            saber <b>qual linha</b>.</li>
+            <li>Some também o botão ✓ que fecha o título sem digitar nada.</li>
+            <li>Sobram 6 colunas, e uma delas (<em>Categoria</em>) escreve “Fornecedores” 30 vezes.</li></ul>
+        </div>
+      </div>
+    </article>
+
+    <article class="op rec">
+      <div class="op-cab">
+        <div class="op-letra">B</div>
+        <div class="op-tit"><span class="n">Sai a Categoria, o Conferir vira parte do Status</span>
+          <span class="d">Descrição em primeiro, Fornecedor logo ao lado. Uma coluna a
+          <em>menos</em> que hoje, e nada some.</span></div>
+        <span class="selo">Recomendo</span>
+      </div>
+      <div class="op-corpo">
+        <div class='tw'><table><thead><tr><th>Vencimento</th><th>Descrição</th><th>Fornecedor</th><th>Status</th><th class=num>Valor</th><th></th></tr></thead><tbody>
+<tr><td class=dt>31/08</td><td class=flex title='IPTU 2026 3/6'><b>IPTU 2026 3/6</b></td><td class=flex title='PREFEITURA DE TERESINA'>PREFEITURA DE TERESINA</td><td class=stat><span class="pill erro">Vencida</span></td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+<tr><td class=dt>05/09</td><td class=flex title='2 QUINZENA AGOSTO/26 JAQUELINE'><b>2 QUINZENA AGOSTO/26 JAQUELINE</b></td><td class=flex title='JAQUELINE DUARTE'>JAQUELINE DUARTE</td><td class=stat><span class="pill aviso">A vencer</span> <span class="pill aviso">Talvez paga · 3 iguais por perto</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class=dt>15/09</td><td class=flex title='1 QUINZENA SETEMBRO/26 JAQUELINE'><b>1 QUINZENA SETEMBRO/26 JAQUELINE</b></td><td class=flex title='JAQUELINE DUARTE'>JAQUELINE DUARTE</td><td class=stat><span class="pill ok">A vencer</span> <span class="pill aviso">Talvez paga · 3 iguais por perto</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='FGTS AGOSTO/26'><b>FGTS AGOSTO/26</b></td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 134,00</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='INSS AGOSTO/26'><b>INSS AGOSTO/26</b></td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 126,43</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='DAS AGOSTO/26'><b>DAS AGOSTO/26</b></td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class=dt>30/09</td><td class=flex title='IPTU 2026 4/6'><b>IPTU 2026 4/6</b></td><td class=flex title='PREFEITURA DE TERESINA'>PREFEITURA DE TERESINA</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+</tbody></table></div>
+        <p>A coluna que não estava pagando aluguel não é a <em>Conferir</em> — é a
+        <em>Categoria</em>. Em toda a produção, cada aba tem <strong>um único</strong>
+        valor de categoria: “Fornecedores” nas 34 contas a pagar, “Serviços”/“Vendas”
+        nas a receber. Uma coluna que escreve a mesma palavra em toda linha não
+        informa; só ocupa a largura de que a descrição precisa.</p>
+        <p>E não seria novidade no produto: a aba <b>Empresa</b>, onde o dono libera
+        as contas, já lista cada título como <em>descrição</em> em primeiro e
+        fornecedor logo atrás, apagado — <code>{{ t.descricao }} · {{ t.contraparte }}</code>.
+        Quem está fora do padrão é justamente esta tela de relatório.</p>
+        <p>O <em>Conferir</em>, esse, tinha o nome errado. Ele nomeava a
+        <b>ação</b> (“vá conferir”) em vez do <b>fato</b> (“esta conta talvez já esteja
+        paga”). Como fato, ele cabe dentro do Status, que é onde o olho já vai:
+        <span class="pill erro">Vencida</span> <span class="pill aviso">Talvez paga · 10/08</span>.
+        O botão ✓ continua no fim da linha, igual.</p>
+        <div class="saldo">
+          <ul class="bem"><li>Descrição <b>e</b> Fornecedor, os dois elásticos: cada um
+            corta no fim com reticências, nenhum empurra a tabela pro lado.</li>
+            <li>Nenhum sinal perdido — o aviso de “talvez paga” só mudou de coluna e de nome.</li>
+            <li>Cinco colunas em vez de seis: sobra largura no celular do vendedor.</li></ul>
+          <ul class="mal"><li>Duas pílulas na mesma célula em 5 das 30 linhas — é o único
+            adensamento.</li>
+            <li>Quem procurava por categoria perde o filtro visual (o campo continua no
+            banco e no PDF).</li></ul>
+        </div>
+      </div>
+    </article>
+
+    <article class="op">
+      <div class="op-cab">
+        <div class="op-letra">C</div>
+        <div class="op-tit"><span class="n">Uma coluna só, em duas linhas</span>
+          <span class="d">Descrição em cima, fornecedor embaixo, menor.</span></div>
+        <span class="selo frio">Não recomendo</span>
+      </div>
+      <div class="op-corpo">
+        <div class='tw'><table><thead><tr><th>Vencimento</th><th>Conta</th><th>Status</th><th class=num>Valor</th><th></th></tr></thead><tbody>
+<tr><td class=dt>31/08</td><td class=flex title='IPTU 2026 3/6'><b>IPTU 2026 3/6</b><span class=sub>PREFEITURA DE TERESINA</span></td><td class=stat><span class="pill erro">Vencida</span></td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+<tr><td class=dt>05/09</td><td class=flex title='2 QUINZENA AGOSTO/26 JAQUELINE'><b>2 QUINZENA AGOSTO/26 JAQUELINE</b><span class=sub>JAQUELINE DUARTE</span></td><td class=stat><span class="pill aviso">A vencer</span> <span class="pill aviso">Talvez paga</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class=dt>15/09</td><td class=flex title='1 QUINZENA SETEMBRO/26 JAQUELINE'><b>1 QUINZENA SETEMBRO/26 JAQUELINE</b><span class=sub>JAQUELINE DUARTE</span></td><td class=stat><span class="pill ok">A vencer</span> <span class="pill aviso">Talvez paga</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='FGTS AGOSTO/26'><b>FGTS AGOSTO/26</b><span class=sub>IMPOSTOS (FGTS/INSS/DAS)</span></td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 134,00</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='INSS AGOSTO/26'><b>INSS AGOSTO/26</b><span class=sub>IMPOSTOS (FGTS/INSS/DAS)</span></td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 126,43</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='DAS AGOSTO/26'><b>DAS AGOSTO/26</b><span class=sub>IMPOSTOS (FGTS/INSS/DAS)</span></td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class=dt>30/09</td><td class=flex title='IPTU 2026 4/6'><b>IPTU 2026 4/6</b><span class=sub>PREFEITURA DE TERESINA</span></td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+</tbody></table></div>
+        <div class="saldo">
+          <ul class="bem"><li>É o que cabe melhor em tela estreita.</li>
+            <li>Deixa claro que o fornecedor é detalhe da conta, não o contrário.</li></ul>
+          <ul class="mal"><li>Dobra a altura de todas as 30 linhas — o que hoje se lê numa
+            rolagem passa a exigir duas.</li>
+            <li>Quebra o “Exportar PDF”, que assume uma linha por título.</li>
+            <li>Some a coluna Fornecedor: não dá mais pra bater o olho na coluna e
+            somar o que se deve a uma pessoa.</li></ul>
+        </div>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<section class="larga">
+  <div class="lede" style="margin-bottom:1.2rem">
+    <div class="olho">A opção B, inteira</div>
+    <h2>As 30 contas da Prime, do jeito que ficariam</h2>
+    <p class="dim">Restam quatro linhas âmbar — ZARB e Banco do Nordeste, que se
+    repetem de agosto pra setembro com a mesma descrição e o mesmo valor. Aí o
+    vencimento resolve, e é honesto que resolva: é a única coisa que de fato as
+    separa.</p>
+  </div>
+  <div class="tela">
+    <div class="tela-cab"><span class="t">Contas a pagar</span>
+      <span class="s">Prime Eventos · 30 em aberto · R$ 29.390,42</span></div>
+    <div class='tw'><table><thead><tr><th>Vencimento</th><th>Descrição</th><th>Fornecedor</th><th>Status</th><th class=num>Valor</th><th></th></tr></thead><tbody>
+<tr class='colide-leve'><td class=dt>15/08</td><td class=flex title='ZARB CONSULTORIA'><b>ZARB CONSULTORIA</b></td><td class=flex title='ZARB ASSESSORIA'>ZARB ASSESSORIA</td><td class=stat><span class="pill erro">Vencida</span> <span class="pill aviso">Talvez paga · 10/08</span></td><td class=num>R$ 2.200,00</td><td class=act><button class="btn-ok" type="button" tabindex="-1" aria-hidden="true">✓</button></td></tr>
+<tr class='colide-leve'><td class=dt>15/08</td><td class=flex title='BANCO DO NORDESTE'><b>BANCO DO NORDESTE</b></td><td class=flex title='BANCO DO NORDESTE'>BANCO DO NORDESTE</td><td class=stat><span class="pill erro">Vencida</span></td><td class=num>R$ 2.400,00</td><td class=act></td></tr>
+<tr><td class=dt>31/08</td><td class=flex title='IPTU 2026 3/6'><b>IPTU 2026 3/6</b></td><td class=flex title='PREFEITURA DE TERESINA'>PREFEITURA DE TERESINA</td><td class=stat><span class="pill erro">Vencida</span></td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+<tr><td class=dt>05/09</td><td class=flex title='2 QUINZENA AGOSTO/26 BETO'><b>2 QUINZENA AGOSTO/26 BETO</b></td><td class=flex title='ROBERTO LOPES'>ROBERTO LOPES</td><td class=stat><span class="pill aviso">A vencer</span></td><td class=num>R$ 721,07</td><td class=act></td></tr>
+<tr><td class=dt>05/09</td><td class=flex title='2 QUINZENA AGOSTO/26 JAQUELINE'><b>2 QUINZENA AGOSTO/26 JAQUELINE</b></td><td class=flex title='JAQUELINE DUARTE'>JAQUELINE DUARTE</td><td class=stat><span class="pill aviso">A vencer</span> <span class="pill aviso">Talvez paga · 3 iguais por perto</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class=dt>05/09</td><td class=flex title='2 QUINZENA AGOSTO/26 INSIGHT'><b>2 QUINZENA AGOSTO/26 INSIGHT</b></td><td class=flex title='INSIGHT ASSESSORIA  ADMINISTRATIVA'>INSIGHT ASSESSORIA  ADMINISTRATIVA</td><td class=stat><span class="pill aviso">A vencer</span></td><td class=num>R$ 810,50</td><td class=act></td></tr>
+<tr><td class=dt>05/09</td><td class=flex title='ENERGIA SOLAR'><b>ENERGIA SOLAR</b></td><td class=flex title='NORDESTE ENERGIA SOLAR'>NORDESTE ENERGIA SOLAR</td><td class=stat><span class="pill aviso">A vencer</span></td><td class=num>R$ 2.877,77</td><td class=act></td></tr>
+<tr><td class=dt>10/09</td><td class=flex title='CONTABILIDADE'><b>CONTABILIDADE</b></td><td class=flex title='ESCONTAB ASSESSORIA E CONSULTORIA CONTABIL'>ESCONTAB ASSESSORIA E CONSULTORIA CONTABIL</td><td class=stat><span class="pill aviso">A vencer</span></td><td class=num>R$ 1.000,00</td><td class=act></td></tr>
+<tr><td class=dt>10/09</td><td class=flex title='INTERNET'><b>INTERNET</b></td><td class=flex title='G3 TELECON'>G3 TELECON</td><td class=stat><span class="pill aviso">A vencer</span></td><td class=num>R$ 94,90</td><td class=act></td></tr>
+<tr><td class=dt>10/09</td><td class=flex title='EQUATORIAL'><b>EQUATORIAL</b></td><td class=flex title='EQUATORIAL'>EQUATORIAL</td><td class=stat><span class="pill aviso">A vencer</span></td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class=dt>15/09</td><td class=flex title='MENSALIDADE PISCINEIRO'><b>MENSALIDADE PISCINEIRO</b></td><td class=flex title='DOMINGOS PASCOAL DA SILVA FILHO'>DOMINGOS PASCOAL DA SILVA FILHO</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 270,00</td><td class=act></td></tr>
+<tr><td class=dt>15/09</td><td class=flex title='1 QUINZENA SETEMBRO/26 JAQUELINE'><b>1 QUINZENA SETEMBRO/26 JAQUELINE</b></td><td class=flex title='JAQUELINE DUARTE'>JAQUELINE DUARTE</td><td class=stat><span class="pill ok">A vencer</span> <span class="pill aviso">Talvez paga · 3 iguais por perto</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class=dt>15/09</td><td class=flex title='1 QUINZENA SETEMBRO/26 BETO'><b>1 QUINZENA SETEMBRO/26 BETO</b></td><td class=flex title='ROBERTO LOPES'>ROBERTO LOPES</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 837,50</td><td class=act></td></tr>
+<tr><td class=dt>15/09</td><td class=flex title='1 QUINZENA SETEMBRO/26 INSIGHT'><b>1 QUINZENA SETEMBRO/26 INSIGHT</b></td><td class=flex title='INSIGHT ASSESSORIA  ADMINISTRATIVA'>INSIGHT ASSESSORIA  ADMINISTRATIVA</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 810,50</td><td class=act></td></tr>
+<tr><td class=dt>15/09</td><td class=flex title='1 QUINZENA SETEMBRO/26 IASMIM'><b>1 QUINZENA SETEMBRO/26 IASMIM</b></td><td class=flex title='IASMIM FLOR DA COSTA SANTOS'>IASMIM FLOR DA COSTA SANTOS</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 360,00</td><td class=act></td></tr>
+<tr><td class=dt>15/09</td><td class=flex title='1 QUINZENA SETEMBRO/26 THIAGO'><b>1 QUINZENA SETEMBRO/26 THIAGO</b></td><td class=flex title='THIAGO CESAR BORGES PINHEIRO'>THIAGO CESAR BORGES PINHEIRO</td><td class=stat><span class="pill ok">A vencer</span> <span class="pill aviso">Talvez paga · 3 iguais por perto</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class=dt>15/09</td><td class=flex title='1 QUINZENA SETEMBRO/26 PEDRO YAN'><b>1 QUINZENA SETEMBRO/26 PEDRO YAN</b></td><td class=flex title='PEDRO YAN MENDES VALENÇA XIMENES'>PEDRO YAN MENDES VALENÇA XIMENES</td><td class=stat><span class="pill ok">A vencer</span> <span class="pill aviso">Talvez paga · 3 iguais por perto</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr class='colide-leve'><td class=dt>15/09</td><td class=flex title='BANCO DO NORDESTE'><b>BANCO DO NORDESTE</b></td><td class=flex title='BANCO DO NORDESTE'>BANCO DO NORDESTE</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 2.400,00</td><td class=act></td></tr>
+<tr class='colide-leve'><td class=dt>15/09</td><td class=flex title='ZARB CONSULTORIA'><b>ZARB CONSULTORIA</b></td><td class=flex title='ZARB ASSESSORIA'>ZARB ASSESSORIA</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 2.200,00</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='FGTS AGOSTO/26'><b>FGTS AGOSTO/26</b></td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 134,00</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='INSS AGOSTO/26'><b>INSS AGOSTO/26</b></td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 126,43</td><td class=act></td></tr>
+<tr><td class=dt>18/09</td><td class=flex title='DAS AGOSTO/26'><b>DAS AGOSTO/26</b></td><td class=flex title='IMPOSTOS (FGTS/INSS/DAS)'>IMPOSTOS (FGTS/INSS/DAS)</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class=dt>20/09</td><td class=flex title='MENSALIDADE GESTÃO CLICK'><b>MENSALIDADE GESTÃO CLICK</b></td><td class=flex title='GESTÃO CLICK'>GESTÃO CLICK</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 214,11</td><td class=act></td></tr>
+<tr><td class=dt>21/09</td><td class=flex title='ÁGUAS DE TERESINA'><b>ÁGUAS DE TERESINA</b></td><td class=flex title='ÁGUAS DE TERESINA'>ÁGUAS DE TERESINA</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class=dt>22/09</td><td class=flex title='CARTÃO DE CRÉDITO'><b>CARTÃO DE CRÉDITO</b></td><td class=flex title='CARTÃO DE CRÉDITO - SICOOB'>CARTÃO DE CRÉDITO - SICOOB</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 0,01</td><td class=act></td></tr>
+<tr><td class=dt>25/09</td><td class=flex title='EMPRESA DE SEGURANÇA'><b>EMPRESA DE SEGURANÇA</b></td><td class=flex title='SECURITY'>SECURITY</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 251,90</td><td class=act></td></tr>
+<tr><td class=dt>30/09</td><td class=flex title='2 QUINZENA SETEMBRO/26 IASMIM'><b>2 QUINZENA SETEMBRO/26 IASMIM</b></td><td class=flex title='IASMIM FLOR DA COSTA SANTOS'>IASMIM FLOR DA COSTA SANTOS</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 360,00</td><td class=act></td></tr>
+<tr><td class=dt>30/09</td><td class=flex title='2 QUINZENA SETEMBRO/26 PEDRO YAN'><b>2 QUINZENA SETEMBRO/26 PEDRO YAN</b></td><td class=flex title='PEDRO YAN MENDES VALENÇA XIMENES'>PEDRO YAN MENDES VALENÇA XIMENES</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class=dt>30/09</td><td class=flex title='2 QUINZENA SETEMBRO/26 THIAGO'><b>2 QUINZENA SETEMBRO/26 THIAGO</b></td><td class=flex title='THIAGO CESAR BORGES PINHEIRO'>THIAGO CESAR BORGES PINHEIRO</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 1.500,00</td><td class=act></td></tr>
+<tr><td class=dt>30/09</td><td class=flex title='IPTU 2026 4/6'><b>IPTU 2026 4/6</b></td><td class=flex title='PREFEITURA DE TERESINA'>PREFEITURA DE TERESINA</td><td class=stat><span class="pill ok">A vencer</span></td><td class=num>R$ 1.160,85</td><td class=act></td></tr>
+</tbody></table></div>
+    <div class="legenda"><i class="c2">ainda repetem Descrição + Valor de outra linha (4 de 30)</i>
+      <span>eram 16 antes</span></div>
+  </div>
+</section>
+
+<section class="achado">
+  <div class="olho" style="color:#c9a86a">Achado, e por que não mexo nele agora</div>
+  <h2>O “3 pagamentos iguais por perto” está errando em duas das quatro linhas</h2>
+  <p>Enquanto media a tela, conferi o que a coluna <em>Conferir</em> está de fato
+  dizendo na Prime. Ela avisa 5 contas; <strong>duas delas não têm pagamento
+  nenhum</strong>. Os três pagamentos de R$ 1.500,00 que ela vê por perto são:</p>
+  <div class="linhas">
+    <div><span class="sim">824</span> · 01/09 · Serviço prestado — <b>Pedro Yan</b> — 2ª quinzena ago/26</div>
+    <div><span class="sim">833</span> · 01/09 · Serviço prestado — <b>Thiago</b> — 2ª quinzena ago/26</div>
+    <div><span class="sim">832</span> · 02/09 · Acordo cliente — <b>Jonas Barros</b> — reembolso prejuízo</div>
+  </div>
+  <p>Nenhum é da <b>Jaqueline</b> — e mesmo assim as duas contas dela aparecem com
+  “3 pagamentos iguais por perto”. São R$ 3.000,00 de dívida real marcados como
+  “talvez já paga”. O terceiro pagamento nem é folha: é reembolso a um cliente.</p>
+  <p>A correção parece óbvia — comparar a descrição, como o Zaq já faz desde
+  o #603 pra não engolir comprovante repetido. <strong>Só que a régua ingênua
+  piora.</strong> Filtrando por nome, o título “1 QUINZENA SETEMBRO/26 THIAGO”
+  ficaria com <b>um</b> candidato — o pagamento 833 — e a tela promoveria isso a
+  botão ✓. Esse pagamento é da <span class="nao">2ª quinzena de agosto</span>, não
+  da 1ª de setembro: um clique fecharia a conta de setembro com o dinheiro de
+  agosto e sumiria com a dívida que existe.</p>
+  <p>Então isto fica como pergunta, não como entrega: dá pra apertar o
+  <em>Conferir</em> pra parar de acusar a Jaqueline, mas exige comparar
+  <b>período</b> além de nome. É trabalho separado deste, e não quero encostar em
+  botão que dá baixa sem você mandar.</p>
+</section>
+
+<section class="lede">
+  <div class="olho">Uma coisa que mudou ontem</div>
+  <h2 style="font-size:1.25rem">O #606 criou um estado novo que esta tela ainda não mostra</h2>
+  <p class="dim">Enquanto eu media isto, entrou na main a liberação de contas a
+  pagar: um título agora nasce <em>aguardando</em>, <em>autorizado</em> ou
+  <em>recusado</em>, e quem paga sem liberação fica marcado. A aba Empresa já
+  mostra isso; <b>o relatório de Contas a pagar, não</b> — ele continua com as
+  seis colunas do print. Mais cedo ou mais tarde esse selo vai querer aparecer
+  aqui também, e é mais um motivo pra tirar a Categoria agora: a largura que ela
+  gasta escrevendo “Fornecedores” 30 vezes é exatamente a que vai faltar.</p>
+</section>
+
+<section class="lede">
+  <div class="olho">O que preciso de você</div>
+  <h2 style="font-size:1.25rem">Uma letra</h2>
+  <p class="dim">Se for <b>B</b>, faço: tira a Categoria, entra a Descrição como
+  primeira coluna elástica, o Fornecedor vira a segunda elástica, e o aviso de
+  “talvez paga” passa pro Status com esse nome. Vale igual pra <b>Contas a
+  receber</b>, que usa a mesma função e tem o mesmo problema em menor escala.
+  Se preferir o <b>A</b> puro, também faço — só quero que a perda do aviso seja
+  escolha sua, não efeito colateral.</p>
+  <p class="dim">E, à parte: quer que eu abra o conserto do <em>Conferir</em> como
+  trabalho próprio?</p>
+</section>
+
+<div class="rodape">
+  <hr>
+  <p>Dados lidos da produção em 04/09/2026 — conta 34 (Prime Eventos), 30 títulos
+  <code>status='aberto'</code>, <code>tipo='pagar'</code>. Só leitura; nada foi
+  gravado. Os totais batem com o print: R$ 29.390,42 em aberto, 3 vencidas
+  (R$ 5.760,85), R$ 7.004,25 a vencer em 7 dias, 5 “talvez já pago” (R$ 8.200,00).</p>
+  <p>As cores, fontes e a régua da tabela são as de <code>web/tema.py</code> e
+  <code>web/portal.py</code> — inclusive o corte com reticências no fim da coluna
+  elástica, que existe desde o print de 26/08.</p>
+</div>
+
+</div>

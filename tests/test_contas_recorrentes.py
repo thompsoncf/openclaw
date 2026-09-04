@@ -72,7 +72,7 @@ create table titulos (
   contraparte text not null default '', valor_centavos bigint,
   vencimento date, status text not null default 'aberto',
   recorrente boolean not null default false,
-  periodicidade text, valor_variavel boolean not null default false,
+  periodicidade text, valor_variavel boolean not null default false, acrescimo_centavos int not null default 0, lancamento_acrescimo_id bigint,
   categoria text, cobranca_link_url text,
   pago_em date, lancamento_id bigint, cliente_id bigint, criado_por bigint,
   aprovacao text not null default 'autorizado', aprovado_por bigint,

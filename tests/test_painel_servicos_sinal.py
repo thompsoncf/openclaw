@@ -56,7 +56,7 @@ def cliente(monkeypatch):
         # o certo é não achar título nenhum — e é isso que se quer provar.
         c.execute("""create table titulos (id bigserial primary key, conta_id bigint,
             tipo text, descricao text, contraparte text default '', valor_centavos int,
-            vencimento date, status text default 'aberto', recorrente boolean default false, periodicidade text, valor_variavel boolean not null default false,
+            vencimento date, status text default 'aberto', recorrente boolean default false, periodicidade text, valor_variavel boolean not null default false, acrescimo_centavos int not null default 0, lancamento_acrescimo_id bigint,
             categoria text default '', lancamento_id bigint, pago_em date,
             criado_por bigint, orcamento_id bigint, parcela_idx int,
             aprovacao text not null default 'autorizado', aprovado_por bigint,

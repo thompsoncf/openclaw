@@ -43,6 +43,7 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql",
               "058_dados_empresa.sql",      # contas.nome_fantasia (o aviso usa)
               "195_titulo_aprovacao.sql",
               "196_titulo_recorrencia.sql",
+              "197_titulo_acrescimo.sql",
               "057_natureza_lancamento.sql",
               "064_clientes_lojista.sql",
               "066_pessoas_identidade.sql",

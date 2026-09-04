@@ -26,6 +26,38 @@ CAT_PESSOAL = "Pessoal"
 CAT_FORNECEDORES = "Fornecedores"
 CAT_VENDAS = "Vendas"
 
+#: Onde o ACRÉSCIMO cai no caixa (migração 197). São quatro fatos contábeis
+#: diferentes, e não um com o sinal trocado — por isso a tabela, e não um `if`:
+#:
+#:   paguei atrasado    → DESPESA financeira   (o atraso custou)
+#:   paguei adiantado   → RECEITA financeira   (o desconto rendeu)
+#:   recebi atrasado    → RECEITA financeira   (o juros do cliente)
+#:   recebi adiantado   → DESPESA financeira   (o desconto que eu dei)
+#:
+#: O código do plano leva pro grupo certo do DRE — "6.1.01 Juros e Multas" e
+#: "1.2.02 Receitas Financeiras" existem desde a migração 132 e estavam vazias
+#: por falta de porta. Sem isso o juros viraria custo de fornecedor, e a pergunta
+#: "quanto paguei de juros esse ano?" continuaria sem resposta.
+ACRESCIMO_DESTINO = {
+    ("pagar", 1):    ("despesa", "Juros e multas",       "6.1.01"),
+    ("pagar", -1):   ("receita", "Descontos obtidos",    "1.2.02"),
+    ("receber", 1):  ("receita", "Juros recebidos",      "1.2.02"),
+    ("receber", -1): ("despesa", "Descontos concedidos", "6.1.01"),
+}
+
+
+def _plano_por_codigo(pool, conta_id: int, codigo: str) -> int | None:
+    """O id da conta do plano, ou None se esta base não tem o plano (132).
+
+    Tolerante de propósito: sem o plano a classificação fina do DRE não sai, mas
+    a baixa não pode falhar por causa disso — o dinheiro já saiu do banco.
+    """
+    try:
+        from .plano_contas import id_por_codigo
+        return id_por_codigo(pool, conta_id, codigo)
+    except Exception:
+        return None
+
 # Custo real GERENCIAL (estimativa p/ Simples Nacional, transparente na tela):
 # FGTS 8% + provisão 13º (1/12) + provisão férias com 1/3 ((1/12)*(4/3)).
 # INSS patronal não entra (no Simples está dentro do DAS). Pró-labore: fator 1.
@@ -224,6 +256,89 @@ def _recorrencia(recorrente: bool, periodicidade: str | None) -> tuple[bool, str
     return False, None
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# O ACRÉSCIMO: o que o atraso custou (migração 197).
+#
+# A regra da SUGESTÃO é a da própria casa — multa de 2% + juros de mora de 1% ao
+# mês, proporcional aos dias. Não é número inventado aqui: é a cláusula 3.4 do
+# contrato que a Prime manda pros clientes dela, e vem de `finance/contrato.py`
+# pra que exista UM lugar só. Se o dono mudar a cláusula, a sugestão muda junto.
+#
+# E é SÓ sugestão. O boleto atualizado é quem manda: o campo chega preenchido e
+# editável, porque o banco arredonda diferente, o fornecedor às vezes perdoa o
+# juros, e a conta de luz tem regra própria.
+def _regras_da_casa() -> tuple[float, float]:
+    try:
+        from .contrato import REGRAS_PADRAO as _r
+        return float(_r["multa_atraso_pct"]), float(_r["juros_mora_pct_mes"])
+    except Exception:            # contrato ausente não pode derrubar a baixa
+        return 2.0, 1.0
+
+
+def acrescimo_sugerido(valor_centavos: int, vencimento: date,
+                       pago_em: date | None = None) -> dict:
+    """Multa + juros de mora de um título pago em atraso.
+
+    Devolve sempre o mesmo formato, com zeros quando não há atraso — assim a tela
+    não precisa de dois caminhos. `dias` é o atraso corrido; pagamento no dia do
+    vencimento (ou antes) não gera nada.
+    """
+    pago_em = pago_em or date.today()
+    zero = {"dias": 0, "multa_centavos": 0, "juros_centavos": 0, "centavos": 0}
+    if not vencimento or not pago_em or pago_em <= vencimento:
+        return zero
+    dias = (pago_em - vencimento).days
+    base = int(valor_centavos or 0)
+    if base <= 0:
+        return {**zero, "dias": dias}
+    multa_pct, juros_pct_mes = _regras_da_casa()
+    multa = int(round(base * multa_pct / 100))
+    # PROPORCIONAL AOS DIAS, com o mês de 30 — é assim que o boleto conta, e é o
+    # que a cláusula diz ("1% ao mês"). Mês civil daria número diferente em
+    # fevereiro pro mesmo atraso.
+    juros = int(round(base * juros_pct_mes / 100 * dias / 30))
+    return {"dias": dias, "multa_centavos": multa, "juros_centavos": juros,
+            "centavos": multa + juros}
+
+
+#: Teto do que a régua do extrato aceita como acréscimo, em % do valor do título.
+#:
+#: Existe porque afrouxar "o valor tem que bater" sem limite deixaria QUALQUER
+#: débito maior fechar qualquer conta — um pagamento de R$ 5.000 quitando uma
+#: conta de R$ 2.200 seria pior que o problema que estamos resolvendo.
+#:
+#: 10% cobre com folga o caso real: 2% de multa mais 1% ao mês de juros só passa
+#: disso depois de oito meses de atraso. E ele falha pro lado seguro — acréscimo
+#: acima do teto simplesmente não é sugerido, e a conta continua aberta esperando
+#: alguém olhar, em vez de ser fechada com o dinheiro errado.
+ACRESCIMO_TETO_PCT = 10
+
+
+def acrescimo_do_pagamento(titulo: dict, lanc: dict) -> int | None:
+    """Quanto deste pagamento é acréscimo — ou None se ele não serve pro título.
+
+    Zero é resposta legítima (pagamento exato); None é recusa. Quem chama tem que
+    distinguir os dois, por isso não devolve 0 pra recusa.
+    """
+    base = int(titulo.get("valor_centavos") or 0)
+    pago = int(lanc.get("valor_centavos") or 0)
+    if pago == base:
+        return 0
+    sobra = pago - base
+    if sobra < 0:
+        # Pagou MENOS que a conta. Pode ser pagamento parcial, pode ser desconto,
+        # pode ser outra conta parecida — e nenhuma dessas a tela sabe distinguir
+        # sozinha. Fechar a conta aqui esconderia dívida, que é o pior dos erros
+        # deste módulo. O desconto se registra na BAIXA, onde a pessoa digita.
+        return None
+    venc, quando = titulo.get("vencimento"), lanc.get("data")
+    if not venc or not quando or quando <= venc:
+        return None      # sem atraso não há multa nem juros que expliquem a sobra
+    if sobra > int(round(base * ACRESCIMO_TETO_PCT / 100)):
+        return None
+    return sobra
+
+
 def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
                  valor_centavos: int, vencimento: date,
                  contraparte: str = "", categoria: str = "",
@@ -307,7 +422,7 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
         rows = c.execute(
             f"""select t.id, t.tipo, t.descricao, t.contraparte, t.valor_centavos,
                        t.vencimento, t.status, t.recorrente, t.categoria,
-                       t.periodicidade, t.valor_variavel,
+                       t.periodicidade, t.valor_variavel, t.acrescimo_centavos,
                        t.cobranca_link_url, t.pago_em, t.lancamento_id,
                        t.cliente_id, coalesce(p.nome, cl.nome) as cliente_nome,
                        t.aprovacao, t.aprovacao_motivo, t.pago_sem_autorizacao,
@@ -331,17 +446,22 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
             "id": r[0], "tipo": r[1], "descricao": r[2], "contraparte": r[3],
             "valor_centavos": int(r[4] or 0), "vencimento": venc,
             "status": r[6], "recorrente": bool(r[7]), "categoria": r[8],
-            "cobranca_link_url": r[11], "pago_em": r[12], "lancamento_id": r[13],
-            "cliente_id": r[14], "cliente_nome": r[15],
+            "cobranca_link_url": r[12], "pago_em": r[13], "lancamento_id": r[14],
+            "cliente_id": r[15], "cliente_nome": r[16],
+            # O que o atraso custou (197). Vem junto do resto pelo mesmo motivo
+            # da aprovação: a linha escreve UM selo com dinheiro, prazo e
+            # decisão, e buscar em separado seria três verdades chegando em
+            # momentos diferentes.
+            "acrescimo_centavos": int(r[11] or 0),
             "atrasado": (r[6] == "aberto" and venc is not None and venc < hoje),
             # A LIBERAÇÃO DO DONO — ver migração 195. Vem junto do resto porque a
             # tela precisa das três coisas na mesma linha (dinheiro, prazo,
             # decisão) pra escrever UM selo; buscar em separado seria três
             # verdades chegando em momentos diferentes.
-            "aprovacao": r[16] or "autorizado",
-            "aprovacao_motivo": r[17],
-            "pago_sem_autorizacao": bool(r[18]),
-            "criado_nome": r[19], "aprovado_nome": r[20], "aprovado_em": r[21],
+            "aprovacao": r[17] or "autorizado",
+            "aprovacao_motivo": r[18],
+            "pago_sem_autorizacao": bool(r[19]),
+            "criado_nome": r[20], "aprovado_nome": r[21], "aprovado_em": r[22],
             # A REPETIÇÃO (196). `periodicidade` nula em título recorrente lê-se
             # 'mensal' — e quem faz essa leitura é `proxima_data`, um lugar só,
             # pra que a tela e a baixa nunca discordem sobre quando cai a próxima.
@@ -356,7 +476,7 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
             # Sai daqui, e não de um `{% if %}` na tela, pra que o relatório e a
             # tela concordem sobre o que é "sem fornecedor".
             "sem_fornecedor": (r[1] == "pagar" and not (r[3] or "").strip()
-                               and not r[14]),
+                               and not r[15]),
         })
     return out
 
@@ -458,15 +578,27 @@ def prazo_do_vencimento(vencimento, hoje) -> tuple[str, str]:
 
 def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                      data_pagto: date | None = None,
-                     membro_id: int | None = None) -> dict:
+                     membro_id: int | None = None,
+                     acrescimo_centavos: int = 0) -> dict:
     """Marca o título como pago e LANÇA no livro-caixa (fonte única).
 
     pagar → despesa; receber → receita. Se a conta repete, já cria a próxima —
     no ritmo dela (quinzenal, mensal ou anual), sem o valor quando o valor é
     variável, e **só se ainda não existir uma igual naquela data**. Idempotente:
     título já pago/cancelado não lança de novo.
+
+    `acrescimo_centavos` é o que o ATRASO custou (migração 197): positivo é multa
+    + juros, negativo é desconto por antecipação. Ele NÃO entra no lançamento do
+    principal — vira um SEGUNDO lançamento, em conta financeira própria (ver
+    `ACRESCIMO_DESTINO`). Somar tudo numa linha só faria o juros virar custo de
+    fornecedor no DRE, que é justamente a pergunta que se quer poder responder.
+
+    O valor do TÍTULO não muda: ele continua sendo o que se devia. O acréscimo
+    fica ao lado — "quanto era" e "quanto saiu" seguem sendo duas perguntas com
+    duas respostas.
     """
     data_pagto = data_pagto or date.today()
+    acrescimo_centavos = int(acrescimo_centavos or 0)
     # Baixa ATÔMICA numa ÚNICA transação/conexão: o status vira num UPDATE ...
     # WHERE status='aberto' RETURNING e, na MESMA conexão, o lançamento entra
     # (adicionar(conn=c)) e o lancamento_id/recorrente são gravados — tudo commita
@@ -502,13 +634,13 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
         # auditoria que pode falhar sozinha depois do fato não é auditoria.
         t = c.execute(
             """update titulos
-                  set status='pago', pago_em=%s,
+                  set status='pago', pago_em=%s, acrescimo_centavos=%s,
                       pago_sem_autorizacao = (aprovacao <> 'autorizado')
                 where id=%s and conta_id=%s and status='aberto'
              returning tipo, descricao, contraparte, valor_centavos, categoria,
                        recorrente, vencimento, criado_por, pago_sem_autorizacao,
                        aprovacao, periodicidade, valor_variavel""",
-            (data_pagto, titulo_id, conta_id),
+            (data_pagto, acrescimo_centavos, titulo_id, conta_id),
         ).fetchone()
         if not t:
             # não ganhou a corrida: ou o título não existe, ou já não está aberto
@@ -537,10 +669,27 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
         salvo = LivroCaixa(pool, conta_id, vendedor_id).adicionar(
             lanc, forcar=True, conn=c)
 
+        # O ACRÉSCIMO, em lançamento PRÓPRIO. Só nasce se houver: conta paga no
+        # prazo não ganha uma linha de R$ 0,00 no caixa.
+        acr_id = None
+        if acrescimo_centavos:
+            sinal = 1 if acrescimo_centavos > 0 else -1
+            tipo_acr, cat_acr, codigo = ACRESCIMO_DESTINO[(t[0], sinal)]
+            dias = (data_pagto - t[6]).days if t[6] else 0
+            quando = (f" ({dias} dias de atraso)" if dias > 0
+                      else f" ({-dias} dias adiantado)" if dias < 0 else "")
+            acr = Lancamento(
+                tipo=Tipo(tipo_acr), valor_centavos=abs(acrescimo_centavos),
+                categoria=cat_acr, descricao=f"{cat_acr} · {t[1]}{quem}{quando}",
+                data=data_pagto, origem="titulo", natureza="empresa",
+                plano_conta_id=_plano_por_codigo(pool, conta_id, codigo))
+            acr_id = LivroCaixa(pool, conta_id, vendedor_id).adicionar(
+                acr, forcar=True, conn=c).id
+
         c.execute(
-            """update titulos set lancamento_id=%s
+            """update titulos set lancamento_id=%s, lancamento_acrescimo_id=%s
                 where id=%s and conta_id=%s""",
-            (salvo.id, titulo_id, conta_id),
+            (salvo.id, acr_id, titulo_id, conta_id),
         )
         if t[5]:  # a conta repete: cria a próxima
             prox = proxima_data(t[6], t[10])
@@ -592,6 +741,8 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                 proximo_id = r[0]
         c.commit()
     return {"ok": True, "lancamento_id": salvo.id, "proximo_titulo_id": proximo_id,
+            "lancamento_acrescimo_id": acr_id,
+            "acrescimo_centavos": acrescimo_centavos,
             "sem_autorizacao": bool(t[8])}
 
 
@@ -605,6 +756,23 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
 # falsas, porque os títulos "2ª quinzena agosto" vencem em 05/09 e o pagamento da
 # 1ª quinzena caiu em 21/08 — exatamente 15 dias antes.
 JANELA_CONCILIACAO_DIAS = 14
+
+#: A janela do ATRASO, que é outra pergunta e por isso outro número.
+#:
+#: Os 14 dias acima existem pra não confundir DUAS OCORRÊNCIAS DE MESMO VALOR de
+#: uma conta que se repete — a quinzena de 15/09 com a de 30/09. Mas o boleto
+#: pago com multa e juros NÃO tem o mesmo valor de nenhuma outra ocorrência: o
+#: acréscimo é o que o distingue. E ele vem justamente do atraso, que quase
+#: sempre passa de 14 dias — a ZARB da Prime venceu 15/08 e ia ser paga em 04/09,
+#: 20 dias depois. Com a janela curta, o conserto que este módulo acabou de fazer
+#: não pegaria o caso que o motivou.
+#:
+#: Então: pagamento COM acréscimo pode estar mais longe, desde que DEPOIS do
+#: vencimento (`acrescimo_do_pagamento` já exige isso). 90 dias porque daí pra
+#: frente a conversa deixa de ser "paguei atrasado" e vira renegociação, com
+#: outro valor e outro combinado — e porque a ambiguidade que sobra já tem dono:
+#: com mais de um candidato a tela conta e não escolhe.
+JANELA_ATRASO_DIAS = 90
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -779,18 +947,46 @@ def pagamento_serve_pro_titulo(titulo: dict, lanc: dict) -> str | None:
     esperado = "despesa" if titulo["tipo"] == "pagar" else "receita"
     if lanc["tipo"] != esperado:
         return "Esse lançamento é do outro lado do caixa."
-    if int(lanc["valor_centavos"]) != int(titulo["valor_centavos"]):
-        return "O valor do pagamento não bate com o da conta."
     if not titulo["vencimento"] or not lanc["data"]:
         return "Falta a data pra conferir se é esse pagamento."
-    if abs((lanc["data"] - titulo["vencimento"]).days) > JANELA_CONCILIACAO_DIAS:
-        return (f"O pagamento está a mais de {JANELA_CONCILIACAO_DIAS} dias do "
+    # O VALOR NÃO PRECISA MAIS SER IDÊNTICO — e essa exigência era um buraco, não
+    # um cuidado. Boleto pago depois do vencimento chega no extrato COM multa e
+    # juros: o débito de R$ 2.258,67 nunca fecharia a ZARB de R$ 2.200,00, e
+    # sobravam dar baixa (lançando a despesa uma segunda vez em cima da do
+    # extrato) ou editar o valor da conta (apagando quanto se devia).
+    #
+    # O que entrou no lugar não é frouxidão: a sobra só passa se houver ATRASO
+    # que a explique e couber no teto (ver `ACRESCIMO_TETO_PCT`). Pagar a MENOS
+    # continua recusado — aí é pagamento parcial ou outra conta, e fechar
+    # esconderia dívida.
+    acr = acrescimo_do_pagamento(titulo, lanc)
+    if acr is None:
+        return "O valor do pagamento não bate com o da conta."
+    if not _dentro_da_janela(titulo["vencimento"], lanc["data"], acr):
+        limite = JANELA_ATRASO_DIAS if acr else JANELA_CONCILIACAO_DIAS
+        return (f"O pagamento está a mais de {limite} dias do "
                 "vencimento — pode ser de outro mês.")
     # e o texto, pelo mesmo motivo que a janela mora aqui: a tela deixou de
     # sugerir estes casos, e a gravação tem que recusar os mesmos. Sem isto um
     # POST forjado — ou um formulário aberto antes da mudança — fecharia a conta
     # de setembro com o dinheiro de agosto.
     return texto_contradiz(titulo, lanc)
+
+
+def _dentro_da_janela(vencimento, quando, acrescimo: int) -> bool:
+    """A data do pagamento cabe neste título?
+
+    Duas janelas porque são duas perguntas (ver `JANELA_ATRASO_DIAS`): sem
+    acréscimo vale a curta, dos dois lados; com acréscimo vale a longa, e só pra
+    frente — `acrescimo_do_pagamento` já garantiu que o pagamento é posterior ao
+    vencimento.
+    """
+    if not vencimento or not quando:
+        return False
+    dias = (quando - vencimento).days
+    if acrescimo:
+        return 0 < dias <= JANELA_ATRASO_DIAS
+    return abs(dias) <= JANELA_CONCILIACAO_DIAS
 
 
 def pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
@@ -837,9 +1033,10 @@ def pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
     if not alvos:
         return {}
     lanc_tipo = "despesa" if tipo == "pagar" else "receita"
-    janela = timedelta(days=JANELA_CONCILIACAO_DIAS)
-    de = min(t["vencimento"] for t in alvos) - janela
-    ate = max(t["vencimento"] for t in alvos) + janela
+    # a faixa de busca abre pro lado do ATRASO: é lá que mora o boleto pago com
+    # multa e juros, que é o caso que a régua nova passou a reconhecer.
+    de = min(t["vencimento"] for t in alvos) - timedelta(days=JANELA_CONCILIACAO_DIAS)
+    ate = max(t["vencimento"] for t in alvos) + timedelta(days=JANELA_ATRASO_DIAS)
     with pool.connection() as c:
         rows = c.execute(
             """select l.id, l.data, l.valor_centavos, l.descricao, l.origem
@@ -854,14 +1051,19 @@ def pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
                            and g.valor_centavos = l.valor_centavos))""",
             (conta_id, lanc_tipo, de, ate),
         ).fetchall()
-    por_valor: dict[int, list] = {}
-    for lid, data, valor, desc, origem in rows:
-        por_valor.setdefault(int(valor or 0), []).append(
-            {"id": lid, "data": data, "descricao": desc, "origem": origem})
+    # A busca deixou de ser por valor EXATO (um dicionário indexado pelo centavo)
+    # e passou a testar pagamento a pagamento, porque o valor certo agora é uma
+    # FAIXA: o principal, ou o principal mais o que multa e juros explicariam.
+    # Custa uma varredura de dezenas por dezenas — nada, no tamanho destas listas.
+    pagamentos = [{"id": lid, "data": data, "valor_centavos": int(valor or 0),
+                   "descricao": desc, "origem": origem}
+                  for lid, data, valor, desc, origem in rows]
     achados = {}
     for t in alvos:
-        perto = [p for p in por_valor.get(t["valor_centavos"], [])
-                 if abs((p["data"] - t["vencimento"]).days) <= JANELA_CONCILIACAO_DIAS
+        perto = [p for p in pagamentos
+                 if acrescimo_do_pagamento(t, p) is not None
+                 and _dentro_da_janela(t["vencimento"], p["data"],
+                                       acrescimo_do_pagamento(t, p))
                  # e a quarta trava, a do TEXTO (ver `texto_contradiz`): valor
                  # e data iguais não bastam. Na Prime as duas contas da Jaqueline
                  # eram avisadas por causa de pagamentos ao Pedro Yan, ao Thiago e
@@ -870,10 +1072,19 @@ def pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
                  # falta de parecença: na dúvida o aviso fica de pé.
                  and not texto_contradiz(t, p)]
         if perto:
-            perto.sort(key=lambda p: abs((p["data"] - t["vencimento"]).days))
+            # empate desfeito pela distância do vencimento, e depois pelo MENOR
+            # acréscimo: entre dois pagamentos do mesmo dia, o que precisa de
+            # menos explicação é o mais provável.
+            perto.sort(key=lambda p: (abs((p["data"] - t["vencimento"]).days),
+                                      acrescimo_do_pagamento(t, p) or 0))
             achados[t["id"]] = {"n": len(perto), "data": perto[0]["data"],
                                 "lancamento_id": perto[0]["id"],
-                                "centavos": t["valor_centavos"]}
+                                # `centavos` é o que SAIU do caixa, não o que a
+                                # conta pedia: é isso que a tela mostra no botão,
+                                # e mostrar a face esconderia o juros justo na
+                                # hora de confirmar.
+                                "centavos": perto[0]["valor_centavos"],
+                                "acrescimo_centavos": acrescimo_do_pagamento(t, perto[0])}
     return achados
 
 
@@ -950,9 +1161,18 @@ def conciliar_titulo(pool, conta_id: int, titulo_id: int, lancamento_id: int) ->
         # pago_em é a data em que o DINHEIRO andou, não a de hoje: é ela que decide
         # o mês do compromisso nos relatórios
         feito = c.execute(
-            """update titulos set status='pago', pago_em=%s, lancamento_id=%s
+            # O ACRÉSCIMO fica registrado no TÍTULO, e NÃO vira um segundo
+            # lançamento como na baixa. Aqui o dinheiro já entrou no caixa como
+            # UMA linha do extrato, com o valor cheio que o banco debitou —
+            # quebrá-la em duas seria reescrever dado vindo do banco, e o
+            # extrato é a única coisa nesta tela que não é palpite de ninguém.
+            # O DRE, nesse caminho, vê o total na categoria da conta; o quanto
+            # foi juros fica no título, que é onde alguém vai procurar.
+            """update titulos set status='pago', pago_em=%s, lancamento_id=%s,
+                      acrescimo_centavos=%s
                 where id=%s and conta_id=%s and status='aberto' returning id""",
-            (lanc["data"], lancamento_id, titulo_id, conta_id),
+            (lanc["data"], lancamento_id,
+             acrescimo_do_pagamento(titulo, lanc) or 0, titulo_id, conta_id),
         ).fetchone()
         if not feito:
             return {"ok": False, "erro": "Essa conta acabou de mudar de estado. "

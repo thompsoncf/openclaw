@@ -57,7 +57,7 @@ create table lancamentos (
 create table titulos (
   id bigserial primary key, conta_id bigint, tipo text, descricao text,
   contraparte text, valor_centavos bigint, vencimento date, status text,
-  recorrente boolean default false, periodicidade text, valor_variavel boolean not null default false, categoria text, cobranca_link_url text,
+  recorrente boolean default false, periodicidade text, valor_variavel boolean not null default false, acrescimo_centavos int not null default 0, lancamento_acrescimo_id bigint, categoria text, cobranca_link_url text,
   pago_em date, lancamento_id bigint, cliente_id bigint, criado_por bigint,
   aprovacao text not null default 'autorizado', aprovado_por bigint,
   aprovado_em timestamptz, aprovacao_motivo text,

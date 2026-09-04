@@ -476,6 +476,21 @@ def test_evento_mostra_o_tipo_da_festa_e_marca_quem_esta_sem(pool, cen):
     assert m["Eventos no período"] == "2"
 
 
+def test_evento_tambem_mostra_vendedor_e_desfecho(pool, cen):
+    """Relato do dono, 04/09/2026: nem Vendedor nem Desfecho são exclusivos de
+    visita — `membro_id` existe pra qualquer compromisso, e "Aconteceu/Não
+    rolou" marca qualquer evento passado. Escondê-los na aba Eventos era a
+    mesma inconsistência que "Todos" tinha com Vendedor."""
+    eid = _evento(pool, cen["conta"], titulo="Casamento", tipo_evento="Casamento",
+                  membro_id=cen["jacqueline"], desfecho="realizado")
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="evento")
+    chaves = [c["chave"] for c in d["colunas"]]
+    assert "vendedor" in chaves and "desfecho" in chaves
+    linha = d["linhas"][0]
+    assert linha["vendedor"] == "Jacqueline"
+    assert linha["desfecho"] == "Realizado"
+
+
 def test_metrica_de_convidados_tambem_cai_pro_orcamento(pool, cen):
     """O total da métrica não pode contar menos gente do que a tabela mostra —
     mesma fonte, mesmo fallback, pra não contradizer a própria linha."""

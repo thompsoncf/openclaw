@@ -150,9 +150,9 @@ suíte, LEDs —, onde convidado a mais pode não mudar valor nenhum. Conclusão
 <tr><td>CONTRATADO (nome, CNPJ, endereço)</td><td><code>dados_empresa</code> da conta</td><td class="sim">pronto — a página do contrato já imprime</td></tr>
 <tr><td>CONTRATANTE (nome, CPF, endereço)</td><td><code>orcamentos</code> + <code>contrato.completar_do_cadastro</code></td><td class="sim">pronto — inclusive o CPF que só está no cadastro</td></tr>
 <tr><td>“contrato celebrado em DD/MM/AAAA, sob o nº N”</td><td><code>contratos.criado_em</code>, <code>contratos.numero</code></td><td class="sim">pronto</td></tr>
-<tr><td>Convidados (de → para)</td><td><code>orcamentos.evento-&gt;&gt;'convidados'</code></td><td class="sim">pronto <span style="color:#8A8475">(115 na Cláudia, 300 na Bianca)</span></td></tr>
 <tr><td>Data (de → para) + as 4 conferências da cláusula 7</td><td><code>evento-&gt;&gt;'data'</code>, <code>eventos_agenda</code>, <code>contrato_modelo.regras</code>, e o detector de choque de data que subiu no #606</td><td class="sim">tudo pronto — só falta juntar</td></tr>
 <tr><td>Horário (de → para)</td><td><code>evento-&gt;&gt;'inicio'</code> / <code>'fim'</code></td><td class="nao">existe, mas sujo — ver abaixo</td></tr>
+<tr><td>Convidados (de → para)</td><td><code>orcamentos.evento-&gt;&gt;'convidados'</code></td><td class="sim">pronto <span style="color:#8A8475">(115 na Cláudia, 300 na Bianca)</span></td></tr>
 <tr><td>Itens substituídos</td><td><code>orcamentos.itens</code> (jsonb, 7 itens na Cláudia)</td><td class="sim">pronto</td></tr>
 <tr><td>“orçamento nº N”</td><td><code>orcamentos.numero</code></td><td class="sim">pronto</td></tr>
 <tr><td>Novo valor total / diferença</td><td><code>primeiro_ano_centavos</code></td><td class="sim">pronto pra ler, digitado pra mudar</td></tr>
@@ -430,6 +430,34 @@ seu contrato.</div></div>
 negócio fechado. <span class="rec">Minha recomendação: só dono e gestor</span> — vendedor pede, você
 libera. Mas se na Prime é a Jacqueline quem trata o cliente, talvez trave mais do que ajude; você conhece a
 rotina.</div></div>
+
+<!-- ============================================================ 8 -->
+<h2><span class="n">8</span> O que a revisão achou faltando</h2>
+<div class="sub">Quatro buracos no desenho anterior — todos meus</div>
+
+<div class="card">
+<p style="margin:0 0 10px"><b>1. O contrato original não conta que foi alterado.</b> Hoje a página do
+contrato termina com “<i>Guarde este link: ele é o seu contrato</i>”. Se a Cláudia abrir aquele link depois
+do aditivo, lê 115 convidados e 15/01 — o documento certo dizendo o errado. O contrato assinado <b>não pode
+ser reescrito</b> (é o congelamento que dá valor a ele), então o que entra é uma tarja no topo:
+“<i>Este contrato foi alterado pelo 1º termo aditivo em 05/09/2026 — ver aditivo</i>”, com link. Vale nos
+dois sentidos: o aditivo já linka o original.</p>
+
+<p style="margin:0 0 10px"><b>2. A segunda alteração de data: avisa, não trava.</b> A cláusula 7.1 permite
+<b>uma</b> alteração. Eu não tinha dito o que acontece na segunda. Pela regra que você já deu em contas a
+pagar — <b>“só avisa, não trava”</b> —, a tela mostra “<i>este contrato já teve 1 alteração de data em
+22/01/2027; a cláusula 7.1 prevê uma</i>” e deixa seguir. Mesma coisa quando faltarem menos de 30 dias ou a
+nova data passar dos 180: o sistema diz qual regra está sendo furada e você decide. Quem manda no contrato
+é você, não a tela.</p>
+
+<p style="margin:0 0 10px"><b>3. Aditivo enviado e não assinado precisa poder ser cancelado.</b> Você vai
+errar um valor uma hora e mandar mesmo assim. Enquanto ninguém assinou, o aditivo é rascunho: dá pra
+cancelar e refazer. <b>Depois de assinado, não</b> — aí é outro aditivo, igual ao contrato.</p>
+
+<p style="margin:0"><b>4. O aditivo tem que aparecer nas telas que listam contrato.</b> O relatório de
+contratos (<code>painel_relatorios.py:892</code>) lista “todos os contratos vivos”. Um contrato com aditivo
+assinado que aparece lá com o valor velho é o mesmo erro do item 1, só que na sua tela em vez da do cliente.</p>
+</div>
 
 <div class="ftr">Fontes deste desenho: o PDF de 16 páginas que você mandou (modelo + 4 aditivos reais);
 <code>finance/contrato.py</code>, <code>web/contrato_publico.py</code>, <code>db/migracoes/164_contratos.sql</code>;

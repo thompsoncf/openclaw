@@ -3317,6 +3317,12 @@ _CLIENTES_DUP = """{% extends "base" %}{% block conteudo %}
   .dup-btn{background:transparent;border:1px solid var(--verde);color:var(--verde-claro);
       border-radius:7px;padding:.35rem .7rem;font-size:.76rem;cursor:pointer;width:auto;white-space:nowrap}
   .dup-hist{font-size:.78rem;color:#8a938a;padding:.4rem 0;border-bottom:1px solid var(--card-2)}
+  .dup-selo-fica{border:1px solid var(--verde);background:#10241A;color:var(--verde-claro);
+      border-radius:7px;padding:.35rem .7rem;font-size:.76rem;font-weight:600;white-space:nowrap}
+  .dup-btn .dup-alvo{color:var(--txt)}
+  /* o `hidden` tem que ganhar de qualquer coisa que dê display a estes dois:
+     foi assim que a barra de lote do relatório ficou visível pra sempre. */
+  .dup-lin [hidden]{display:none!important}
 </style>
 <div class="card larga">
   <a href="/painel/clientes" style="color:var(--verde-claro);text-decoration:none;font-size:.85rem">← Clientes/Fornecedores</a>
@@ -3336,8 +3342,9 @@ _CLIENTES_DUP = """{% extends "base" %}{% block conteudo %}
     <form method="get" action="/painel/clientes/duplicados/revisar" class="dup-grp">
       <div class="dup-por">{{ g.rotulo }}</div>
       {% for c in g.clientes %}
-      <div class="dup-lin">
+      <div class="dup-lin" data-nome="{{ c.nome }}">
         <input type="radio" name="fica" value="{{ c.id }}" {% if c.id == g.sugerido %}checked{% endif %}
+               onchange="dupTroca(this)"
                style="width:auto;margin-top:.25rem;accent-color:var(--verde)" title="quem fica">
         <div class="dup-dados">
           <div class="dup-nome">{{ c.nome }}
@@ -3357,18 +3364,54 @@ _CLIENTES_DUP = """{% extends "base" %}{% block conteudo %}
             {%- if not c.endereco and not c.cidade %}<i>sem endereço</i>{% endif %}
           </div>
         </div>
-        <button class="dup-btn" name="sai" value="{{ c.id }}"
-                title="revisar antes de juntar">juntar este →</button>
+        {#- O BOTÃO DIZ O QUE FAZ, COM O NOME DE QUEM FICA DENTRO DELE. Antes
+           era "juntar este →" em toda linha, inclusive na que já estava marcada
+           pra ficar — e ali ele mandava `fica=25&sai=25`, que cai em "São o
+           mesmo cadastro" com saída nenhuma (o link "inverter" da tela de
+           revisão não resolve nada quando os dois lados são o mesmo). Era o
+           movimento mais natural da tela: a linha sugerida vem marcada, em
+           destaque, e com o botão do lado. O dono travou nisso em 05/09/2026.
+
+           Agora a linha marcada NÃO TEM BOTÃO — tem um selo. O beco sem saída
+           deixa de existir por construção, e não por aviso. Os dois elementos
+           nascem no HTML e o `hidden` escolhe qual aparece, pra que a troca no
+           ✓ não precise reconstruir a linha. -#}
+        <span class="dup-selo-fica" {% if c.id != g.sugerido %}hidden{% endif %}>✓ esta fica</span>
+        <button class="dup-btn" name="sai" value="{{ c.id }}" {% if c.id == g.sugerido %}hidden{% endif %}
+                title="revisar antes de juntar">arquivar esta e juntar em
+          <b class="dup-alvo">{% for o in g.clientes %}{% if o.id == g.sugerido %}{{ o.nome }}{% endif %}{% endfor %}</b></button>
       </div>
       {% endfor %}
       <div class="mut" style="font-size:.72rem;margin-top:.4rem">
-        Marque no ✓ quem <b>fica</b> e clique em <b>juntar este</b> na linha que deve sair.
+        O <b>✓</b> escolhe quem fica; o botão da outra linha arquiva ela e leva
+        tudo pro escolhido. Nada é confirmado aqui — a próxima tela mostra o que
+        vai acontecer.
       </div>
     </form>
     {% endfor %}
   {% else %}
     <p class="mut">Nenhum cadastro repetido à vista. 🎉</p>
   {% endif %}
+
+  <script>
+  // Troca de "quem fica": o selo anda pra linha marcada, e os botões das outras
+  // passam a nomear o novo escolhido. Sem isto o botão continuaria dizendo o
+  // nome de quem NÃO fica mais — que é pior que não dizer nome nenhum.
+  function dupTroca(radio){
+    var grupo = radio.closest('.dup-grp');
+    if(!grupo) return;
+    var nome = radio.closest('.dup-lin').getAttribute('data-nome') || '';
+    var linhas = grupo.querySelectorAll('.dup-lin');
+    for(var i = 0; i < linhas.length; i++){
+      var lin = linhas[i];
+      var marcado = lin.querySelector('input[name=fica]').checked;
+      lin.querySelector('.dup-selo-fica').hidden = !marcado;
+      var bt = lin.querySelector('.dup-btn');
+      bt.hidden = marcado;
+      lin.querySelector('.dup-alvo').textContent = nome;
+    }
+  }
+  </script>
 
   {% if historico %}
   <h3 style="margin:1.6rem 0 .4rem;font-size:.95rem">Fusões feitas</h3>
@@ -3429,8 +3472,13 @@ _CLIENTES_DUP_REVISAR = """{% extends "base" %}{% block conteudo %}
   {% if p.impedimento %}
     <div class="erro">{{ p.impedimento }}</div>
     <div style="display:flex;gap:.9rem;align-items:center;flex-wrap:wrap">
+      {#- inverter só existe quando há dois lados. Com `fica == sai` o link
+         devolvia a MESMA tela com o mesmo erro, e era a única coisa que parecia
+         uma saída. -#}
+      {% if p.vencedor and p.perdedor and p.vencedor.id != p.perdedor.id %}
       <a href="/painel/clientes/duplicados/revisar?fica={{ p.perdedor.id }}&sai={{ p.vencedor.id }}"
          style="color:var(--verde-claro);font-size:.85rem;text-decoration:none">↔ inverter: deixar o outro ficar</a>
+      {% endif %}
       <a href="/painel/clientes/duplicados"
          style="color:#8a938a;font-size:.82rem;text-decoration:none">voltar</a>
     </div>

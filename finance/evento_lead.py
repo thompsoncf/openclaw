@@ -275,37 +275,67 @@ def parado(card: dict, agora: datetime | None = None) -> bool:
     return ultima_atividade(card, agora) < agora - timedelta(days=PARADO_DIAS)
 
 
-def agrupar(cards: list[dict], agora: datetime | None = None) -> list[dict]:
+def esperando_resposta(card: dict) -> bool:
+    """O cliente falou por último e ninguém respondeu (resposta do agente conta como
+    resposta, como no Cockpit). É o que pede ação — vai pro topo da coluna."""
+    ult = card.get("ult")
+    return bool(ult) and not ult.get("minha")
+
+
+def _semana_chave(d: date) -> str:
+    seg = d - timedelta(days=d.weekday())
+    return seg.isoformat()
+
+
+def agrupar(cards: list[dict], agora: datetime | None = None, *,
+            por_semana: bool = False) -> list[dict]:
     """Separa os cards de UMA coluna em grupos, na ordem em que aparecem:
 
+      0. esperando resposta (o cliente falou por último) — é o que pede ação;
       1. por mês do EVENTO, do mais próximo pro mais distante;
-      2. sem data, por mês de ENTRADA no funil, do mais novo pro mais velho;
+      2. sem data, por mês de ENTRADA no funil, do mais novo pro mais velho
+         (ou por SEMANA de entrada, quando o quadro já está num mês só);
       3. parados há PARADO_DIAS+ (qualquer data), numa dobra fechada no pé.
 
-    Cada grupo: {tipo: 'evento'|'entrada'|'parado', chave, rotulo, cards, n}.
-    Uma coluna que só tem um grupo de entrada volta com rotulo vazio — não há o
-    que separar, e um cabeçalho ali seria enfeite."""
+    Cada grupo: {tipo: 'esperando'|'evento'|'entrada'|'parado', chave, rotulo,
+    cards, n}. Uma coluna que só tem um grupo de entrada volta com rotulo vazio —
+    não há o que separar, e um cabeçalho ali seria enfeite."""
     agora = agora or datetime.now(timezone.utc)
     limite = agora - timedelta(days=PARADO_DIAS)
+    esperando: list = []
     evento: dict[str, list] = {}
     entrada: dict[str, list] = {}
     parados: list = []
     for c in cards:
-        if ultima_atividade(c, agora) < limite:
+        # quem entrou pela pílula de fora (esperando resposta, festa em 30 dias)
+        # entrou porque é urgente: nunca se esconde na dobra
+        if (ultima_atividade(c, agora) < limite and not c.get("fora")
+                and not festa_em_30_dias(c, agora.date())):
             parados.append(c)
+        elif esperando_resposta(c):
+            esperando.append(c)
         elif c.get("evento_em"):
             evento.setdefault(mes_chave(c["evento_em"]), []).append(c)
         else:
-            base = _aware(c.get("criado_em")) or agora
-            entrada.setdefault(mes_chave(base.date()), []).append(c)
+            base = (_aware(c.get("criado_em")) or agora).date()
+            entrada.setdefault(_semana_chave(base) if por_semana else mes_chave(base), []).append(c)
     grupos = []
+    if esperando:
+        # a mensagem mais nova primeiro: é a que está esperando há menos e dói mais
+        esperando.sort(key=lambda x: _aware(x.get("ult_em")) or agora, reverse=True)
+        grupos.append({"tipo": "esperando", "chave": "esperando", "rotulo": "🟢 Esperando resposta",
+                       "cards": esperando, "n": len(esperando)})
     for k in sorted(evento):
         lst = sorted(evento[k], key=lambda x: x["evento_em"])
         grupos.append({"tipo": "evento", "chave": k, "rotulo": mes_rotulo(k),
                        "cards": lst, "n": len(lst)})
     for k in sorted(entrada, reverse=True):
-        grupos.append({"tipo": "entrada", "chave": k,
-                       "rotulo": "Sem data · entrou em " + _MESES[int(k[5:7]) - 1],
+        if por_semana:
+            seg = date.fromisoformat(k)
+            rot = f"Sem data · semana de {seg.day:02d}/{seg.month:02d}"
+        else:
+            rot = "Sem data · entrou em " + _MESES[int(k[5:7]) - 1]
+        grupos.append({"tipo": "entrada", "chave": k, "rotulo": rot,
                        "cards": entrada[k], "n": len(entrada[k])})
     if parados:
         grupos.append({"tipo": "parado", "chave": "parado",
@@ -314,6 +344,48 @@ def agrupar(cards: list[dict], agora: datetime | None = None) -> list[dict]:
     if len(grupos) == 1 and grupos[0]["tipo"] == "entrada":
         grupos[0]["rotulo"] = ""
     return grupos
+
+
+# ------------------------------------------------------------------ o período do quadro
+def periodo_atual(hoje: date | None = None) -> str:
+    return mes_chave(hoje or date.today())
+
+
+def no_periodo(card: dict, entrou: str) -> bool:
+    """O card entrou no mês `entrou` ('AAAA-MM')? 'tudo' aceita todo mundo."""
+    if entrou == "tudo":
+        return True
+    base = _aware(card.get("criado_em"))
+    return bool(base) and mes_chave(base.date()) == entrou
+
+
+def festa_em_30_dias(card: dict, hoje: date | None = None) -> bool:
+    hoje = hoje or date.today()
+    d = card.get("evento_em")
+    return bool(d) and hoje <= d <= hoje + timedelta(days=30)
+
+
+def meses_entrada(cards: list[dict], hoje: date | None = None) -> list[dict]:
+    """As pílulas "Entraram em": um mês por leva, do mais novo pro mais velho, com o
+    mês corrente sempre presente (mesmo com zero — é o padrão), e "Tudo" no fim.
+    [{chave, rotulo, n}]."""
+    hoje = hoje or date.today()
+    cont: dict[str, int] = {periodo_atual(hoje): 0}
+    for c in cards:
+        base = _aware(c.get("criado_em"))
+        if base:
+            k = mes_chave(base.date())
+            cont[k] = cont.get(k, 0) + 1
+    itens = [{"chave": k, "rotulo": _NOME_MES_CHEIO[int(k[5:7]) - 1].capitalize()
+              + ("" if k[:4] == str(hoje.year) else f" {k[2:4]}"), "n": n}
+             for k, n in sorted(cont.items(), reverse=True)]
+    itens.append({"chave": "tudo", "rotulo": "Tudo", "n": len(cards)})
+    return itens
+
+
+_NOME_MES_CHEIO = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",
+                   "agosto", "setembro", "outubro", "novembro", "dezembro"]
+
 
 
 def trilho(contagens: dict, mes_sel: str = "") -> list[dict]:

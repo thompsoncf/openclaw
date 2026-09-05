@@ -235,6 +235,42 @@ b,strong{font-weight:600}
    Apagado de propósito — ele informa, não cobra; quem cobra é a bolinha. */
 .chip.aberto{color:var(--txt-mut);border-color:var(--line);background:transparent}
 .chip.err{color:var(--coral);border-color:#5a2b2b;background:#241313}
+/* de fora do mês (mockup cockpit_mes_atual): o mês em que entrou */
+.chip.entrou{color:#F0DCA6;border-color:#5a4520;background:#241c0f}
+.lead.fora{background:rgba(224,163,46,.05);box-shadow:inset 3px 0 0 #5a4520}
+/* a barra de foco: período e as pílulas do que ficou de fora, rolando pro lado */
+.foco{display:flex;gap:.35rem;padding:.35rem 1.1rem .55rem;overflow-x:auto;align-items:center;scrollbar-width:none}
+.foco::-webkit-scrollbar{display:none}
+.foco .pil{flex:none;display:inline-flex;align-items:center;gap:.3rem;border:1px solid var(--line);border-radius:999px;
+  padding:.3rem .65rem;font-size:.76rem;color:var(--text-dim);background:var(--surface);text-decoration:none}
+.foco .pil b{font-family:var(--mono);font-weight:500;font-size:.7rem;color:var(--text)}
+.foco .pil.on{background:var(--neon);border-color:var(--neon);color:var(--ink);font-weight:600}
+.foco .pil.on b{color:var(--ink)}
+.foco .pil.fora{border-color:#5a4520;background:#241c0f;color:#F0DCA6}
+.foco .pil.fora b{color:#F0DCA6}
+.foco .pil.fora.on{background:var(--ambar);border-color:var(--ambar);color:#1c1408}
+.foco .pil.fora.on b{color:#1c1408}
+.foco .sep{flex:none;width:1px;height:18px;background:var(--line);margin:0 .2rem}
+/* os grupos da fila e a dobra dos parados */
+.grp{display:flex;align-items:center;gap:.4rem;padding:.6rem 1.1rem .25rem;font-size:.66rem;text-transform:uppercase;
+  letter-spacing:.07em;color:var(--text-faint);font-weight:600}
+.grp b{font-family:var(--mono);font-weight:500;color:var(--text-dim);letter-spacing:0}
+.grp .ln{flex:1;height:1px;background:var(--line)}
+.dobra>summary{list-style:none;cursor:pointer}
+.dobra>summary::-webkit-details-marker{display:none}
+.dobra>summary .grp{color:#F0DCA6}
+.dobra>summary .grp::after{content:'▸';color:var(--text-faint)}
+.dobra[open]>summary .grp::after{content:'▾'}
+/* a linha do evento no card */
+.lead .ev{display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;font-size:.72rem;color:var(--text-dim);margin-top:.1rem}
+.lead .ev b{color:var(--text)} .lead .ev .d{font-style:normal;font-family:var(--mono);color:var(--neon)}
+.lead .ev .src{font-style:normal;font-size:.56rem;color:#7bb8e6;border:1px solid #1f3a4d;background:#122029;border-radius:999px;padding:0 .32rem}
+.lead .ev.sem{color:#F0DCA6}
+.lead .ev .perg{margin-left:auto;font-size:.68rem;font-weight:600;color:#F0DCA6;border:1px solid #5a4520;background:#241c0f;border-radius:999px;padding:.06rem .5rem}
+.aviso.pista{text-align:left;margin:.6rem 1.1rem 0;border:1px solid #5a4520;background:#241c0f;color:#F0DCA6;border-radius:12px;padding:.55rem .7rem;font-size:.8rem;display:flex;flex-direction:column;gap:.35rem}
+.aviso.pista .bts{display:flex;gap:.4rem}
+.aviso.pista .bt{font-size:.72rem;font-weight:600;padding:.3rem .6rem;border-radius:8px;border:1px solid #5a4520;color:#F0DCA6;text-decoration:none}
+.aviso.pista .bt.ok{background:var(--ambar);color:#1c1408;border-color:var(--ambar)}
 
 /* ---------- deslizar o card pra revelar ação ----------
    As ações ficam ATRÁS: o card da frente é opaco e escorrega pra esquerda por
@@ -1304,7 +1340,7 @@ def _selo(conta_id: int) -> str:
 
 # ================================================================== VENDEDOR
 @router.get("/cockpit", response_class=HTMLResponse)
-def cockpit_inicio(request: Request, meus: str = ""):
+def cockpit_inicio(request: Request, meus: str = "", entrou: str = "", fora: str | None = None):
     """Bifurca como sempre foi: dono/gestor cai na visão de equipe, vendedor na fila.
 
     `?meus=1` é a saída pro gestor que TAMBÉM vende: na versão anterior ele nunca chegava na
@@ -1316,7 +1352,7 @@ def cockpit_inicio(request: Request, meus: str = ""):
     sess = _sessao(request)
     if not sess:
         return RedirectResponse("/cockpit/login", status_code=303)
-    return _fila(request, sess[0], sess[1], gestor=bool(g))
+    return _fila(request, sess[0], sess[1], gestor=bool(g), entrou=entrou, fora=fora)
 
 
 # Deslizar o card. É a única tela do app com gesto — o resto é form + redirect —
@@ -1464,14 +1500,77 @@ def _acoes_card(ia: bool) -> str:
             f"<button class='act ganho' data-a=ganho>{_ic('check')}Ganho</button></div>")
 
 
-def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = False) -> HTMLResponse:
+def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = False,
+          entrou: str = "", fora: str | None = None) -> HTMLResponse:
     pool = get_pool()
     leads = ck.leads_do_vendedor(pool, conta_id, membro_id)
     p = ck.perfil(pool, conta_id, membro_id)
     vez = sum(1 for l in leads if l["sua_vez"])
 
-    # a fila já tem os leads em mão: soma daqui, sem uma consulta a mais só pra aba
+    # a fila já tem os leads em mão: soma daqui, sem uma consulta a mais só pra aba.
+    # É a carteira INTEIRA: o de fora do mês some da lista, nunca do número.
     total_pend = sum(int(l.get("pend") or 0) for l in leads)
+
+    # O PERÍODO (mockup cockpit_mes_atual): a Fila abre no mês corrente, a escolha
+    # fica na sessão, e as pílulas de fora somam quem ficou de fora à lista.
+    from finance import evento_lead as _evl
+    from urllib.parse import quote as _quote
+    sess = request.session
+    _e = (entrou or "").strip()
+    if _e == "tudo" or _evl.mes_valido(_e):
+        sess["ck_entrou"] = _e
+    filtro_entrou = sess.get("ck_entrou") or _evl.periodo_atual()
+    if fora is not None:
+        sess["ck_fora"] = ",".join(x for x in (fora or "").split(",") if x in ("suavez", "festa30"))
+    fora_on = [x for x in (sess.get("ck_fora") or "").split(",") if x]
+    try:
+        from finance import vendas as _vendas
+        vende = bool(_vendas.vende_data(pool, conta_id))
+    except Exception:  # noqa: BLE001
+        vende = False
+    fila = ck.fila_agrupada(leads, entrou=filtro_entrou, fora_on=fora_on, vende_data=vende)
+
+    def _url(**over):
+        q = {"entrou": "", "fora": None}
+        q.update(over)
+        partes = [f"{k}={_quote(str(v))}" for k, v in q.items() if v not in ("", None)]
+        return _BASE + ("?" + "&".join(partes) if partes else "")
+
+    pil = "".join(f"<a class='pil{' on' if m['on'] else ''}' href='{_url(entrou=m['chave'])}'>"
+                  f"{esc(m['curto'])} <b>{m['n']}</b></a>" for m in fila["meses"])
+    fc = fila["fora_cont"]
+    if filtro_entrou != "tudo" and (fc["suavez"] or (vende and fc["festa30"])):
+        def _tog(k):
+            return _url(fora=",".join(sorted(set(fora_on) ^ {k})) or "")
+        pil += "<span class=sep></span>"
+        pil += (f"<a class='pil fora{' on' if 'suavez' in fora_on else ''}' href='{_tog('suavez')}'>"
+                f"🟢 sua vez <b>{fc['suavez']}</b></a>")
+        if vende:
+            pil += (f"<a class='pil fora{' on' if 'festa30' in fora_on else ''}' href='{_tog('festa30')}'>"
+                    f"🎉 30 dias <b>{fc['festa30']}</b></a>")
+    foco = f"<div class=foco>{pil}</div>"
+
+    def _linha_evento(l):
+        """A linha do evento no card do celular, como no funil."""
+        if not vende:
+            return ""
+        href = f"{_BASE}/lead/{l['id']}"
+        if l.get("evento_em") or l.get("evento_tipo") or l.get("evento_convidados"):
+            partes = []
+            if l.get("evento_tipo"):
+                partes.append(f"<b>{esc(l['evento_tipo'])}</b>")
+            if l.get("evento_em"):
+                partes.append(f"<i class=d>{esc(l['ev_data'])}</i>")
+            if l.get("evento_convidados"):
+                partes.append(f"{int(l['evento_convidados'])} conv.")
+            src = (" <em class=src>💬 lido</em>" if l.get("evento_origem") == "conversa"
+                   else " <em class=src>✓</em>" if l.get("evento_origem") == "confirmado" else "")
+            return f"<span class=ev>{l['ev_ic']} " + " · ".join(partes) + src + "</span>"
+        if l.get("evento_pista"):
+            return (f"<span class='ev sem'>📅 {esc(l['evento_pista'])}"
+                    f"<span class=perg data-href='{href}?pista=1'>confirmar</span></span>")
+        return (f"<span class='ev sem'>📅 sem data"
+                f"<span class=perg data-href='{href}?texto={_quote(_evl.PERGUNTA_DATA)}'>perguntar</span></span>")
 
     cartoes = []
     for l in leads:
@@ -1501,13 +1600,29 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
         pend = int(l.get("pend") or 0)
         selo = (f"<span class=pend aria-label='{pend} sem resposta'>"
                 f"{pend if pend < 10 else '9+'}</span>") if pend else ""
+        # de fora do mês: chega marcado com o mês em que entrou
+        mes_chip = (f"<span class='chip entrou'>📥 {esc(l['entrou_rot'])}</span>" if l.get("fora") else "")
         # sem JS o card ainda é um link normal pro lead — o deslizar só acrescenta
-        cartoes.append(
+        l["html"] = (
             f"<div class=swipe data-id='{l['id']}'>{_acoes_card(bool(l['ia']))}"
-            f"<a class='lead front' draggable=false href='{_BASE}/lead/{l['id']}'>"
+            f"<a class='lead front{' fora' if l.get('fora') else ''}' draggable=false href='{_BASE}/lead/{l['id']}'>"
             f"<span class=dot style='background:{_TEMP.get(l['temperatura'], 'var(--azul)')}'></span>"
-            f"<span class=mid><span class=top><span class=emp>{esc(l['empresa'])}</span>{chip}</span>"
+            f"<span class=mid><span class=top><span class=emp>{esc(l['empresa'])}</span>{chip}{mes_chip}</span>"
+            f"{_linha_evento(l)}"
             f"<span class=snip>{esc(l['snip'])}</span></span>{selo}</a></div>")
+    # os grupos: sua vez → festa marcada → sem data → parados (dobra fechada)
+    for g in fila["grupos"]:
+        n = len(g["leads"])
+        cabeca = f"<div class=grp>{esc(g['rotulo'])} <b>{n}</b><span class=ln></span></div>"
+        corpo_g = "".join(l["html"] for l in g["leads"])
+        if g["dobra"]:
+            cartoes.append(f"<details class=dobra><summary>{cabeca}</summary>{corpo_g}</details>")
+        else:
+            cartoes.append(cabeca + corpo_g)
+    if not cartoes and leads:
+        # tem lead, mas nenhum no período: diz isso, em vez de "fila zerada"
+        cartoes.append("<div class=vazio><div class=big>◎</div><b>Nada deste mês</b>"
+                       "Toque em outro mês ou numa pílula de fora pra trazer.</div>")
     lista = "".join(cartoes) or (
         "<div class=vazio><div class=big>◎</div><b>Fila zerada</b>"
         "Nenhum lead aberto agora. Quando cair um novo no rodízio, você é avisado.</div>")
@@ -1528,10 +1643,18 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
 
     volta = ("<div class=bloco style='margin-top:.9rem'>"
              f"<a class='btn ghost' href='{_BASE}'>Ver a visão da equipe</a></div>") if gestor else ""
-    corpo = (_hdr("Meus leads", f"{len(leads)} abertos · {vez} sua vez",
-                  inicial=_ini(p["nome"]), direita=_selo(conta_id))
+    rot_mes = next((m["rotulo"].lower() for m in fila["meses"] if m["on"]), "tudo")
+    sub = (f"{len(leads)} abertos · {vez} sua vez" if filtro_entrou == "tudo"
+           else f"{fila['n_quadro']} de {len(leads)} · {rot_mes} · {vez} sua vez")
+    corpo = (_hdr("Meus leads", sub, inicial=_ini(p["nome"]), direita=_selo(conta_id))
              + _flash(request)
+             + foco
              + f"<div class=scroll>{pushcard}{lista}{dica}{volta}</div>"
+             # o "perguntar"/"confirmar" mora dentro do link do card: para o clique
+             # no card e vai pra conversa com o texto (ou o aviso) pronto
+             + "<script>document.querySelectorAll('.perg').forEach(function(b){"
+               "b.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();"
+               "location.href=b.getAttribute('data-href');});});</script>"
              + (f"<a class=fab href='{_BASE}/lead/novo' aria-label='Novo lead'>+</a>"
                 if not gestor else "")
              + "<div class=toast id=toast></div>"
@@ -4143,8 +4266,12 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                  "<path d='M21.4 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.2-9.19a4 4 0 "
                  "015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48'/></svg></button>"
                  "<input type=file id=arq hidden>") if pode_voz else ""
+        # "perguntar" da Fila: a pergunta chega pronta na caixa, o vendedor confere e manda
+        _qp = getattr(request, "query_params", None)
+        texto_pre = ((_qp.get("texto") if _qp else "") or "")[:300]
         acao = (f"<form class=composer id=comp method=post action='{_BASE}/lead/{lead_id}/mensagem'>"
-                "<input name=texto placeholder='Responder…' required autocomplete=off>"
+                f"<input name=texto placeholder='Responder…' required autocomplete=off value='{esc(texto_pre)}'"
+                f"{' autofocus' if texto_pre else ''}>"
                 + clipe + mic +
                 "<button type=submit aria-label=Enviar>&#10148;</button>"
                 + barra + "</form>")
@@ -4329,10 +4456,21 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                  f" O histórico dela não aparece aqui.{link}</div>")
 
     chip = ("<span class='chip ia'>IA</span>" if d["ia"] else "<span class='chip voce'>você</span>")
+    # A PISTA (198): o leitor ouviu o mês (ou uma data diferente) e não gravou. O
+    # aviso fica em cima do chat até o vendedor confirmar na ficha ou perguntar o dia.
+    pista = ""
+    if d.get("evento_pista"):
+        from finance import evento_lead as _evl
+        from urllib.parse import quote as _quote
+        pista = (f"<div class='aviso pista'>💬 O cliente <b>{esc(d['evento_pista'])}</b> na conversa. "
+                 "Confirmar a data?<span class=bts>"
+                 f"<a class='bt ok' href='{_BASE}/lead/{lead_id}/ficha'>Abrir a ficha</a>"
+                 f"<a class=bt href='{_BASE}/lead/{lead_id}?texto={_quote(_evl.PERGUNTA_DATA)}'>Perguntar o dia</a>"
+                 "</span></div>")
     corpo = (
                _hdr(d["empresa"], sub, voltar=_BASE, direita=chip)
              + _flash(request)
-             + dupla
+             + dupla + pista
              + f"<div class=chat>{chat}</div>{lupa_html}"
              + f"<div class=rodape>{acao}"
              + "<a class='btn ghost' style='margin-top:.5rem' href='#acoes'>Ficha, funil e fechamento</a>"

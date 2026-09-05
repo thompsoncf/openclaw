@@ -1027,3 +1027,135 @@ def test_agendar_visita(pool):
     # .ics público com VALARM (lembrete do cliente)
     ics = ck.visita_ics(pool, r["ics_url"].rsplit("/", 1)[1].replace(".ics", ""))
     assert ics and "BEGIN:VEVENT" in ics and "BEGIN:VALARM" in ics and "Visita — Ana" in ics
+
+
+# ------------------------------------------------------------------ a Fila no mês atual
+# (mockup cockpit_mes_atual): o período, as pílulas de fora, os grupos por o que o lead
+# pede, a linha do evento no card, e "perguntar"/"confirmar" num toque.
+def _conv_msg(c, conta, lead, *, ia=False, direcao="in", texto="oi", ha_dias=0):
+    conv = c.execute("insert into conversas (conta_id, prospeccao_id, canal, agente_ativo) "
+                     "values (%s,%s,'whatsapp',%s) returning id", (conta, lead, ia)).fetchone()[0]
+    c.execute("insert into mensagens (conversa_id, direcao, texto, criado_em) "
+              "values (%s,%s,%s, now() - %s * interval '1 day')", (conv, direcao, texto, ha_dias))
+    c.execute("update conversas set ultima_msg_em = now() - %s * interval '1 day' where id=%s", (ha_dias, conv))
+    return conv
+
+
+def test_a_fila_traz_o_evento_e_o_periodo_de_cada_lead(pool):
+    from datetime import date
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Jaque", email="jaque@x.com")
+        lid = _lead(c, conta, vend, "Larissa")
+        c.execute("update prospeccao set evento_em=%s, evento_tipo='Casamento', evento_convidados=70, "
+                  "evento_origem='conversa', evento_pista=null where id=%s", (date(2027, 2, 13), lid))
+        _conv_msg(c, conta, lid, texto="Média de 70 pessoas")
+        c.commit()
+    l = ck.leads_do_vendedor(pool, conta, vend)[0]
+    assert (l["evento_em"], l["evento_tipo"], l["evento_convidados"], l["evento_origem"]) == (
+        date(2027, 2, 13), "Casamento", 70, "conversa")
+    assert l["ev_ic"] == "💍" and l["ev_data"] == "13 fev 27"
+    assert l["criado_em"] is not None and l["esperando"] == 1 and l["sua_vez"] is True
+
+
+def test_fila_agrupada_por_o_que_o_lead_pede():
+    from datetime import date, datetime, timedelta, timezone
+    ag = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
+
+    def L(i, *, dias=1, ia=False, esperando=0, evento=None, ult=None):
+        return {"id": i, "ia": ia, "esperando": esperando, "evento_em": evento,
+                "criado_em": ag - timedelta(days=dias), "ult_em": ult}
+
+    leads = [L(1, esperando=2),                                   # sua vez, deste mês
+             L(2, evento=date(2026, 12, 19)),                       # festa marcada
+             L(3, evento=date(2026, 11, 14)),                       # festa marcada, antes
+             L(4),                                                  # sem data
+             L(5, dias=40, ult=ag - timedelta(days=20)),            # julho, parado — fora
+             L(6, dias=40, esperando=1, ult=ag),                    # julho, sua vez — fora
+             L(7, dias=40, evento=ag.date() + timedelta(days=10)),  # julho, festa em 30d — fora
+             L(8, esperando=3, ia=True)]                            # o agente atende: não é "sua vez"
+    f = ck.fila_agrupada(leads, entrou="2026-09", fora_on=[], agora=ag)
+    assert [(g["chave"], [l["id"] for l in g["leads"]]) for g in f["grupos"]] == [
+        ("vez", [1]), ("festa", [3, 2]), ("sem", [4, 8])]
+    assert f["fora_cont"] == {"suavez": 1, "festa30": 1} and f["n_quadro"] == 5 and f["total"] == 8
+    assert [(m["chave"], m["n"], m["on"], m["curto"]) for m in f["meses"]] == [
+        ("2026-09", 5, True, "Set"), ("2026-07", 3, False, "Jul"), ("tudo", 8, False, "Tudo")]
+    # liga "sua vez" e "30 dias": os de julho entram, marcados
+    f2 = ck.fila_agrupada(leads, entrou="2026-09", fora_on=["suavez", "festa30"], agora=ag)
+    assert [(g["chave"], [l["id"] for l in g["leads"]]) for g in f2["grupos"]] == [
+        ("vez", [1, 6]), ("festa", [7, 3, 2]), ("sem", [4, 8])]
+    assert all(l["fora"] for l in leads if l["id"] in (6, 7)) and leads[5]["entrou_rot"] == "jul"
+    # tudo: julho inteiro, com o parado na dobra
+    f3 = ck.fila_agrupada(leads, entrou="tudo", fora_on=[], agora=ag)
+    assert f3["grupos"][-1]["chave"] == "parados" and f3["grupos"][-1]["dobra"] is True
+    assert [l["id"] for l in f3["grupos"][-1]["leads"]] == [5]
+
+
+def _fila_html(monkeypatch, pool, conta, vend, req=None, **kw):
+    from types import SimpleNamespace
+    from starlette.datastructures import QueryParams
+    from web import painel_cockpit as pc
+    import finance.vendas as v
+    from finance import webpush
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    monkeypatch.setattr(pc, "_selo", lambda conta_id: "")
+    monkeypatch.setattr(v, "vende_data", lambda pool, conta_id: True)
+    monkeypatch.setattr(webpush, "chave_publica", lambda: None)
+    req = req or SimpleNamespace(session={}, query_params=QueryParams(""))
+    r = pc._fila(req, conta, vend, **kw)
+    return bytes(r.body).decode("utf-8"), req
+
+
+def test_a_fila_abre_no_mes_atual_com_pilulas_grupos_e_a_linha_do_evento(pool, monkeypatch):
+    from datetime import date
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Jaque", email="jaque2@x.com")
+        a = _lead(c, conta, vend, "Deste Mes")
+        c.execute("update prospeccao set evento_em=%s, evento_tipo='Casamento', evento_convidados=70, "
+                  "evento_origem='conversa' where id=%s", (date(2027, 2, 13), a))
+        _conv_msg(c, conta, a, texto="Média de 70 pessoas")                      # sua vez
+        b = _lead(c, conta, vend, "Do Mes Passado")
+        c.execute("update prospeccao set criado_em = now() - interval '40 days' where id=%s", (b,))
+        _conv_msg(c, conta, b, texto="Vai dar certo?")                           # sua vez, fora
+        s_ = _lead(c, conta, vend, "Sem Data")
+        p_ = _lead(c, conta, vend, "So Pista")
+        c.execute("update prospeccao set evento_pista='falou de março' where id=%s", (p_,))
+        c.commit()
+    html, req = _fila_html(monkeypatch, pool, conta, vend)
+    assert "Deste Mes" in html and "Sem Data" in html and "Do Mes Passado" not in html
+    assert "3 de 4 · " in html and "🟢 sua vez <b>1</b>" in html          # o subtítulo e a pílula de fora
+    assert "🟢 Sua vez <b>1</b>" in html and "📅 Sem data <b>2</b>" in html
+    assert "💍 <b>Casamento</b> · <i class=d>13 fev 27</i> · 70 conv. <em class=src>💬 lido</em>" in html
+    assert f"data-href='/cockpit/lead/{s_}?texto=Pra%20qual%20data" in html and ">perguntar</span>" in html
+    assert f"data-href='/cockpit/lead/{p_}?pista=1'>confirmar</span>" in html and "📅 falou de março" in html
+    assert "class='pil on' href='/cockpit?entrou=" in html and "Tudo <b>4</b>" in html
+    # liga a pílula: o de agosto entra, marcado com o mês; e a escolha fica na sessão
+    html2, _ = _fila_html(monkeypatch, pool, conta, vend, req=req, fora="suavez")
+    assert "Do Mes Passado" in html2 and "<span class='chip entrou'>📥 " in html2 and "class='lead front fora'" in html2
+    assert "🟢 Sua vez <b>2</b>" in html2 and req.session["ck_fora"] == "suavez"
+    html3, _ = _fila_html(monkeypatch, pool, conta, vend, req=req)
+    assert "Do Mes Passado" in html3                                            # sem parâmetro: vale a sessão
+    html4, _ = _fila_html(monkeypatch, pool, conta, vend, req=req, entrou="tudo")
+    assert "4 abertos · " in html4 and "sua vez <b>" not in html4.split("class=scroll")[0].split("class=foco")[1]
+
+
+def test_a_tela_do_lead_preenche_a_caixa_e_avisa_a_pista(pool, monkeypatch):
+    from types import SimpleNamespace
+    from starlette.datastructures import QueryParams
+    from web import painel_cockpit as pc
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Jaque", email="jaque3@x.com")
+        lid = _lead(c, conta, vend, "Turma Enfermagem")
+        c.execute("update prospeccao set evento_tipo='Formatura', evento_pista='falou de março' where id=%s", (lid,))
+        _conv_msg(c, conta, lid, texto="a data seria mais ou menos março")
+        c.commit()
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    d = ck.lead_do_vendedor(pool, conta, vend, lid)
+    req = SimpleNamespace(session={}, query_params=QueryParams("texto=Pra%20qual%20data%20voc%C3%AA%20est%C3%A1%20pensando%3F"))
+    html = bytes(pc._lead_vendedor(req, lid, d).body).decode("utf-8")
+    assert "value='Pra qual data você está pensando?' autofocus" in html
+    assert "O cliente <b>falou de março</b> na conversa. Confirmar a data?" in html
+    assert f"href='/cockpit/lead/{lid}/ficha'>Abrir a ficha</a>" in html
+    assert f"href='/cockpit/lead/{lid}?texto=Pra%20qual%20data" in html

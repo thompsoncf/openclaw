@@ -71,6 +71,8 @@ PAGINAS = {
         modo_evento=True, pergunta_data="Pra qual data você está pensando?",
         trilho_itens=[], filtro_mes="", filtro_mes_rotulo="", totais_col={},
         vista_mes=False, vista_cols=None,
+        entrou="tudo", entrou_itens=[], entrou_rotulo="Tudo", fora_on=[], fora_cont={}, fora_urls={},
+        n_quadro=1, filtrado=False,
         temp_cor={"quente": "#e0574f"}, temp_pill={"quente": "Quente"},
         gerencia=False, pode_atribuir=False, vendedores=[], filtro_vend="",
         total_valor=420000, total_alvos=1, tem_places=False, tem_maps_js=False,

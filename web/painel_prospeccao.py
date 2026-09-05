@@ -467,7 +467,8 @@ def _promover_para_lead(c, conta_id, pros_id) -> None:
 
 
 @router.get("/painel/prospeccao", response_class=HTMLResponse)
-def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista: str = ""):
+def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista: str = "",
+                      entrou: str = "", fora: str | None = None):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -487,19 +488,24 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
             where.append("p.vendedor_id = %s")
             params.append(int(filtro_vend))
     where.append("p.estagio = 'lead'")   # funil = só quem engajou; o resto fica na aba Base
-    # O TRILHO DE MESES (finance/evento_lead.py). `where_base` é o quadro inteiro
-    # (vendedor e tudo) SEM o mês: é dele que saem as contagens das pílulas e o
-    # "9 de 224" da coluna — senão o filtro esconderia a própria régua.
-    where_base, params_base = list(where), list(params)
+    # OS FILTROS DO QUADRO ficam no Python, não no SQL: o quadro inteiro da conta
+    # (vendedor e tudo) vem de uma vez — são centenas de linhas, não milhares — e
+    # daí saem, da mesma lista, o que aparece, as pílulas do período e do trilho e
+    # o "9 de 224" da coluna. Filtrar no SQL esconderia a própria régua.
     filtro_mes = (mes or "").strip()
-    if filtro_mes == "sem":
-        where.append("p.evento_em is null")
-    elif _evl.mes_valido(filtro_mes):
-        _ini, _fim = _evl.mes_intervalo(filtro_mes)
-        where.append("p.evento_em >= %s and p.evento_em < %s")
-        params += [_ini, _fim]
-    else:
+    if filtro_mes != "sem" and not _evl.mes_valido(filtro_mes):
         filtro_mes = ""
+    # O PERÍODO (mockup funil_mes_atual): o quadro abre no MÊS CORRENTE, e a escolha
+    # fica guardada na sessão de quem está olhando. `entrou` = 'AAAA-MM' | 'tudo';
+    # `fora` = quais pílulas do que ficou de fora estão ligadas.
+    sess = request.session
+    _entrou_q = (entrou or "").strip()
+    if _entrou_q == "tudo" or _evl.mes_valido(_entrou_q):
+        sess["funil_entrou"] = _entrou_q
+    filtro_entrou = sess.get("funil_entrou") or _evl.periodo_atual(_agora().date())
+    if fora is not None:
+        sess["funil_fora"] = ",".join(x for x in (fora or "").split(",") if x in ("esperando", "festa30"))
+    fora_on = [x for x in (sess.get("funil_fora") or "").split(",") if x]
     # Conta que VENDE DATA (nicho de eventos): só nela o card cobra "sem data" e o
     # trilho aparece. Numa padaria a data da festa não existe, e a linha seria ruído.
     try:
@@ -619,25 +625,6 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
         # o mesmo número atendido pelo OUTRO chip — uma consulta pro funil inteiro, e
         # nenhuma numa empresa de um chip só (que é o caso de quase todas)
         gemeos = _gemeos_de_outro_chip(c, conta_id, [r[0] for r in rows])
-        # as pílulas do trilho: leads por mês do evento, no quadro inteiro (sem o
-        # filtro de mês), fora Perdido. Duas consultas leves, e nenhuma delas pode
-        # derrubar o funil (base sem a 197 → sem trilho, quadro de sempre).
-        contagens: dict = {}
-        totais_col: dict = {}
-        try:
-            with c.transaction():
-                for k, n in c.execute(
-                    f"""select to_char(p.evento_em, 'YYYY-MM'), count(*) from prospeccao p
-                         where {' and '.join(where_base)} and p.status <> 'perdido'
-                         group by 1""", tuple(params_base)).fetchall():
-                    contagens[k] = n
-                if filtro_mes:
-                    totais_col = dict(c.execute(
-                        f"""select p.status, count(*) from prospeccao p
-                             where {' and '.join(where_base)} group by 1""",
-                        tuple(params_base)).fetchall())
-        except Exception:  # noqa: BLE001
-            contagens, totais_col = {}, {}
         # A VISTA POR MÊS troca a coluna pela data e põe a ETAPA no card como selo.
         # Dois selos pedem dado de fora: a próxima visita marcada (agenda) e o nº
         # da proposta. Uma consulta em lote cada, tolerantes: instalação sem a
@@ -735,13 +722,71 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     status_tpl = [(e["chave"], e["rotulo"]) for e in etapas]
     etapas_edit = [{**e, "n": len(colunas.get(e["chave"], []))} for e in etapas]
     vends = _vendedores(pool, conta_id) if ctx["gerencia"] else []
-    # a coluna separada em meses (evento → entrada → parados), ver evento_lead.agrupar
     agora = _agora()
-    grupos = {chave: _evl.agrupar(cards, agora) for chave, cards in colunas.items()}
+    # ---- O PERÍODO e O QUE FICOU DE FORA. Cada card sabe se entrou no mês do
+    # quadro; quem ficou de fora só entra pela pílula (esperando resposta, festa
+    # nos próximos 30 dias) e chega marcado com o mês em que entrou.
+    todos_cards = [cc for cards in colunas.values() for cc in cards]
+    for cc in todos_cards:
+        cc["esperando"] = _evl.esperando_resposta(cc)
+        cc["festa30"] = _evl.festa_em_30_dias(cc, hoje)
+        cc["no_periodo"] = _evl.no_periodo(cc, filtro_entrou)
+        cc["fora"] = not cc["no_periodo"]
+        _ce = _evl._aware(cc.get("criado_em"))
+        cc["entrou_rot"] = _evl._MESES[_ce.month - 1] if _ce else ""
+    fora_cont = {"esperando": sum(1 for cc in todos_cards if cc["fora"] and cc["esperando"] and cc["status"] != "perdido"),
+                 "festa30": sum(1 for cc in todos_cards if cc["fora"] and cc["festa30"] and cc["status"] != "perdido")}
+
+    def _visivel(cc):
+        return (cc["no_periodo"] or ("esperando" in fora_on and cc["esperando"] and cc["status"] != "perdido")
+                or ("festa30" in fora_on and cc["festa30"] and cc["status"] != "perdido"))
+
+    def _passa_mes(cc):
+        if not filtro_mes:
+            return True
+        if filtro_mes == "sem":
+            return not cc.get("evento_em")
+        return bool(cc.get("evento_em")) and _evl.mes_chave(cc["evento_em"]) == filtro_mes
+
+    # "9 de 224": o total da coluna na conta inteira, pra ninguém achar que sumiu
+    totais_col = {chave: len(cards) for chave, cards in colunas.items()}
+    filtrado = bool(filtro_mes) or filtro_entrou != "tudo"
+    # o trilho ("Festa em") conta só o que está no quadro, fora Perdido, antes do
+    # próprio filtro de mês — senão a régua sumiria ao usá-la
+    contagens: dict = {}
+    for cc in todos_cards:
+        if _visivel(cc) and cc["status"] != "perdido":
+            k = _evl.mes_chave(cc["evento_em"]) if cc.get("evento_em") else None
+            contagens[k] = contagens.get(k, 0) + 1
+    colunas = {chave: [cc for cc in cards if _visivel(cc) and _passa_mes(cc)]
+               for chave, cards in colunas.items()}
+    n_quadro = sum(len(v) for v in colunas.values())
+    entrou_itens = _evl.meses_entrada(todos_cards, hoje)
+    entrou_rotulo = next((m["rotulo"] for m in entrou_itens if m["chave"] == filtro_entrou), "Tudo")
+
+    # os links das pílulas: o período e o de-fora vão na URL uma vez e ficam na sessão
+    from urllib.parse import urlencode as _urlencode
+
+    def _kb_url(**over):
+        q = {"vendedor": filtro_vend, "mes": filtro_mes, "vista": "mes" if vista_mes else ""}
+        q.update(over)
+        return "/painel/prospeccao?" + _urlencode({k: v for k, v in q.items() if v not in ("", None)})
+
+    for m in entrou_itens:
+        m["url"] = _kb_url(entrou=m["chave"])
+    fora_urls = {k: _kb_url(fora=",".join(sorted((set(fora_on) ^ {k}))) or "") for k in ("esperando", "festa30")}
+    # `fora=` vazio precisa chegar na URL pra limpar — o urlencode acima o descarta
+    for k, u in fora_urls.items():
+        if "fora=" not in u:
+            fora_urls[k] = u + ("&" if "?" in u and not u.endswith("?") else "") + "fora="
+    # a coluna separada (esperando → mês do evento → entrada → parados); com o quadro
+    # num mês só, os sem data se separam por SEMANA de entrada
+    por_semana = _evl.mes_valido(filtro_entrou)
+    grupos = {chave: _evl.agrupar(cards, agora, por_semana=por_semana) for chave, cards in colunas.items()}
     # a vista por mês: as colunas viram meses (e "Sem data"), a etapa vai pro card
     vista_cols = None
     if vista_mes:
-        todos = [c for cards in colunas.values() for c in cards]
+        todos = [cc for cards in colunas.values() for cc in cards]
         vista_cols, grupos = _evl.colunas_por_mes(todos, agora)
     # o trilho só entra quando há data em algum lead (ou um filtro pra limpar):
     # numa conta onde ninguém tem data ainda ele seria "Todos · Sem data", duas
@@ -751,6 +796,9 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     return _render("prospeccao", request, titulo="Prospecção", secao_ativa="prospeccao",
                    grupos=grupos, trilho_itens=trilho_itens, filtro_mes=filtro_mes,
                    vista_mes=vista_mes, vista_cols=vista_cols, por_ler=por_ler,
+                   entrou=filtro_entrou, entrou_itens=entrou_itens, entrou_rotulo=entrou_rotulo,
+                   fora_on=fora_on, fora_cont=fora_cont, fora_urls=fora_urls,
+                   n_quadro=n_quadro, filtrado=filtrado,
                    filtro_mes_rotulo=(_evl.mes_rotulo(filtro_mes) if _evl.mes_valido(filtro_mes) else ""),
                    totais_col=totais_col, modo_evento=modo_evento, pergunta_data=_evl.PERGUNTA_DATA,
                    status=status_tpl, etapas=etapas_edit, colunas=colunas, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
@@ -9981,7 +10029,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
     <div style="flex:1;min-width:170px">
       <h2 class="tt">Prospecção</h2>
-      <div class="mut" style="font-size:.82rem;margin-top:.15rem">{% if conta %}<b style="color:var(--verde-claro)">🏢 {{ conta[2] }}</b> · {% endif %}<span id="kb-total-n">{{ total_alvos }}</span> alvo(s){% if total_valor %} · pipeline {{ brl(total_valor) }}{% endif %}{% if n_contextos and n_contextos > 1 %} · <a href="/trocar" style="color:var(--verde-claro)">trocar empresa ⇄</a>{% endif %}</div>
+      <div class="mut" style="font-size:.82rem;margin-top:.15rem">{% if conta %}<b style="color:var(--verde-claro)">🏢 {{ conta[2] }}</b> · {% endif %}<span id="kb-total-n">{{ total_alvos }}</span> alvo(s){% if entrou_itens %} · <b style="color:var(--txt)">{{ n_quadro }}</b> no quadro{% if entrou != 'tudo' %} · entraram em {{ entrou_rotulo|lower }}{% endif %}{% endif %}{% if total_valor %} · pipeline {{ brl(total_valor) }}{% endif %}{% if n_contextos and n_contextos > 1 %} · <a href="/trocar" style="color:var(--verde-claro)">trocar empresa ⇄</a>{% endif %}</div>
     </div>
     {# Captar Lead saiu da barra de abas e virou botão AQUI: ele nunca navegou pra lugar
        nenhum — abre o painel de captação logo abaixo, nesta mesma tela. Como aba ele
@@ -10112,18 +10160,29 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
   </div>
 
-  {% if gerencia %}
-  <form method="get" action="/painel/prospeccao" style="margin-top:.8rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-    <span class="mut" style="font-size:.8rem">Vendedor:</span>
-    <select name="vendedor" onchange="this.form.submit()" style="width:auto;padding:.4rem .6rem">
-      <option value="" {% if not filtro_vend %}selected{% endif %}>Todos</option>
-      <option value="nao" {% if filtro_vend=='nao' %}selected{% endif %}>Sem responsável</option>
-      {% for v in vendedores %}<option value="{{ v.id }}" {% if filtro_vend==(v.id|string) %}selected{% endif %}>{{ v.nome }}</option>{% endfor %}
-    </select>
-    {% if filtro_mes %}<input type="hidden" name="mes" value="{{ filtro_mes }}">{% endif %}
-    {% if vista_mes %}<input type="hidden" name="vista" value="mes">{% endif %}
-  </form>
-  {% endif %}
+  {# A BARRA DE FOCO (mockup funil_mes_atual): numa linha só, o período ("Entraram
+     em", padrão mês corrente), o vendedor e as pílulas âmbar do que ficou de fora —
+     ligou, entram no quadro marcados; desligou, saem. A escolha fica na sessão. #}
+  <div class="foco" id="foco">
+    {% if entrou_itens %}<span class="rot">Entraram em</span>
+    {% for m in entrou_itens %}<a class="pil{% if m.chave == entrou %} on{% endif %}" href="{{ m.url }}">{{ m.rotulo }} <b>{{ m.n }}</b></a>{% endfor %}{% endif %}
+    {% if gerencia %}<span class="sep"></span>
+    <form method="get" action="/painel/prospeccao" class="vendf">
+      <span class="mut" style="font-size:.8rem">Vendedor:</span>
+      <select name="vendedor" onchange="this.form.submit()" style="width:auto;padding:.35rem .55rem;margin:0">
+        <option value="" {% if not filtro_vend %}selected{% endif %}>Todos</option>
+        <option value="nao" {% if filtro_vend=='nao' %}selected{% endif %}>Sem responsável</option>
+        {% for v in vendedores %}<option value="{{ v.id }}" {% if filtro_vend==(v.id|string) %}selected{% endif %}>{{ v.nome }}</option>{% endfor %}
+      </select>
+      {% if filtro_mes %}<input type="hidden" name="mes" value="{{ filtro_mes }}">{% endif %}
+      {% if vista_mes %}<input type="hidden" name="vista" value="mes">{% endif %}
+    </form>{% endif %}
+    {% if entrou_itens and entrou != 'tudo' and ((fora_cont or {}).get('esperando') or (fora_cont or {}).get('festa30')) %}<span class="sep"></span>
+    <span class="rot">Fora de {{ entrou_rotulo|lower }}</span>
+    <a class="pil fora{% if 'esperando' in (fora_on or []) %} on{% endif %}" href="{{ (fora_urls or {}).get('esperando', '#') }}" title="O cliente falou por último e ninguém respondeu">🟢 esperando resposta <b>{{ (fora_cont or {}).get('esperando', 0) }}</b></a>
+    {% if modo_evento %}<a class="pil fora{% if 'festa30' in (fora_on or []) %} on{% endif %}" href="{{ (fora_urls or {}).get('festa30', '#') }}" title="Data do evento nos próximos 30 dias">🎉 festa em 30 dias <b>{{ (fora_cont or {}).get('festa30', 0) }}</b></a>{% endif %}
+    {% endif %}
+  </div>
 
   {# O TRILHO DE MESES: mês do EVENTO, não o mês em que o lead escreveu. Clicou em
      Jan 27, o quadro inteiro vira o funil de janeiro (todas as etapas). "Sem data"
@@ -10135,7 +10194,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <button type="button" class="pbtn" id="lerconv-btn" onclick="kbLerConversas(this)">Ler as conversas</button></div>
   {% endif %}
   {% if trilho_itens and not vista_mes %}
-  <div class="trilho" id="trilho"><span class="rot">Mês do evento</span>
+  <div class="trilho" id="trilho"><span class="rot">Festa em</span>
     {% for t in trilho_itens %}<a class="mes{% if t.on %} on{% endif %}{% if t.sem %} semdata{% endif %}{% if not t.n and not t.on %} vazio{% endif %}" href="/painel/prospeccao?{% if filtro_vend %}vendedor={{ filtro_vend }}&amp;{% endif %}{% if t.chave %}mes={{ t.chave }}{% endif %}">{{ t.rotulo }} <b>{{ t.n }}</b></a>{% endfor %}
   </div>
   {% if filtro_mes %}<div class="trilho-faixa">{% if filtro_mes == 'sem' %}📅 <b>Sem data do evento</b> · quem ainda não disse quando é a festa{% else %}🎉 <b>{{ filtro_mes_rotulo }}</b> · só as festas desse mês, em todas as etapas{% endif %}<a href="/painel/prospeccao{% if filtro_vend %}?vendedor={{ filtro_vend }}{% endif %}">✕ limpar</a></div>{% endif %}
@@ -10204,9 +10263,9 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   {# O CARD, uma vez só: a mesma marcação serve pros grupos por mês e pra dobra dos
      parados. Macro do próprio template — enxerga o contexto (temp_cor, vendedores…). #}
   {% macro kbcard(c) -%}
-        <div class="kbcard" draggable="{{ 'false' if vista_mes else 'true' }}" data-id="{{ c.id }}"{% if not vista_mes %} ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"{% endif %}
+        <div class="kbcard{% if c.fora %} fora{% endif %}" draggable="{{ 'false' if vista_mes else 'true' }}" data-id="{{ c.id }}"{% if not vista_mes %} ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"{% endif %}
              onclick="if(!window._kbMoved)kbAbrirLead(event,{{ c.id }},this)">
-          <div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" title="{{ c.temperatura }}" style="background:{{ temp_cor[c.temperatura] }}"></span><span class="emp">{{ c.empresa }}</span><button type="button" class="kbx" style="flex:none" title="Excluir lead" onclick="kbExcluir(event,{{ c.id }})">✕</button></div>
+          <div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" title="{{ c.temperatura }}" style="background:{{ temp_cor[c.temperatura] }}"></span><span class="emp">{{ c.empresa }}</span>{% if c.fora %}<span class="kbfora" title="Entrou em {{ c.entrou_rot }} — está no quadro pela pílula de fora">📥 {{ c.entrou_rot }}</span>{% endif %}<button type="button" class="kbx" style="flex:none" title="Excluir lead" onclick="kbExcluir(event,{{ c.id }})">✕</button></div>
           {% if c.segmento or c.cidade %}<div class="sub">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
           {# O EVENTO — tipo · data · convidados — é a linha mais alta depois do nome:
              é o que diz qual pacote cabe (semana ou fim de semana) e em que mês a
@@ -10249,7 +10308,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div class="kbrow{% if vista_mes %} vmes{% endif %}" id="kbrow">
     {% for s, rot in (vista_cols or status) %}
     <div class="kbcol" data-status="{{ s }}"{% if not vista_mes %} ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event,'{{ s }}')"{% endif %}>
-      <h4><span>{{ rot }}</span><span class="kbcnt">{% if vista_mes %}{{ (grupos or {}).get(s, []) | sum(attribute='n') }}{% else %}{{ colunas[s]|length }}{% if filtro_mes %} <i>de {{ totais_col.get(s, 0) }}</i>{% endif %}{% endif %}</span></h4>
+      <h4><span>{{ rot }}</span><span class="kbcnt">{% if vista_mes %}{{ (grupos or {}).get(s, []) | sum(attribute='n') }}{% else %}{{ colunas[s]|length }}{% if filtrado %} <i>de {{ totais_col.get(s, 0) }}</i>{% endif %}{% endif %}</span></h4>
       <div class="kbdrop">
         {# A coluna separada em grupos (evento_lead.agrupar): mês do evento, depois
            sem data por mês de entrada, e no pé a dobra dos parados há 15+ dias —
@@ -10261,7 +10320,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {% for c in g.cards %}{{ kbcard(c) }}{% endfor %}
         </details>
         {% else %}
-        {% if g.rotulo %}<div class="kbgrp">{{ g.rotulo }} <b>{{ g.n }}</b><span class="ln"></span></div>{% endif %}
+        {% if g.rotulo %}<div class="kbgrp{% if g.tipo == 'esperando' %} verde{% endif %}">{{ g.rotulo }} <b>{{ g.n }}</b><span class="ln"></span></div>{% endif %}
         {% for c in g.cards %}{{ kbcard(c) }}{% endfor %}
         {% endif %}
         {% else %}<div class="kbempty">vazio</div>{% endfor %}
@@ -10322,6 +10381,25 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.45rem .7rem}
 .trilho-faixa a{margin-left:auto;color:var(--verde-claro);font-size:.76rem}
 .kbcnt i{font-style:normal;color:var(--txt-mut);opacity:.75}
+/* a barra de foco: período, vendedor e o que ficou de fora, numa linha */
+.foco{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-top:.8rem}
+.foco .rot{font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-mut);font-weight:600;margin-right:.1rem}
+.foco .pil{display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--borda);border-radius:999px;
+  padding:.28rem .68rem;font-size:.8rem;color:var(--txt-mut);background:var(--card);text-decoration:none;white-space:nowrap}
+.foco .pil b{font-weight:500;font-size:.72rem;color:var(--txt);font-variant-numeric:tabular-nums}
+.foco .pil.on{background:var(--verde);border-color:var(--verde);color:var(--sobre-verde);font-weight:600}
+.foco .pil.on b{color:var(--sobre-verde)}
+.foco .pil.fora{border-color:rgba(224,180,95,.32);background:rgba(224,180,95,.08);color:#e0b45f}
+.foco .pil.fora b{color:#e0b45f}
+.foco .pil.fora.on{background:var(--ambar);border-color:var(--ambar);color:#1c1408}
+.foco .pil.fora.on b{color:#1c1408}
+.foco .sep{width:1px;height:20px;background:var(--borda);margin:0 .3rem}
+.foco .vendf{display:inline-flex;align-items:center;gap:.4rem;margin:0}
+.kbcard.fora{border-style:dashed;border-color:rgba(224,180,95,.45)}
+.kbfora{flex:none;font-size:.62rem;color:#e0b45f;border:1px solid rgba(224,180,95,.32);background:rgba(224,180,95,.08);
+  border-radius:999px;padding:.02rem .4rem;white-space:nowrap}
+.kbgrp.verde{color:var(--verde-claro)}
+.kbgrp.verde b{color:var(--verde-claro)}
 /* a vista por mês: o botão no cabeçalho e os selos de etapa no card */
 .vseg{display:inline-flex;border:1px solid var(--borda);border-radius:9px;padding:3px;gap:2px;background:var(--bg);align-self:center}
 .vseg a{font-size:.78rem;padding:.3rem .65rem;border-radius:6px;color:var(--txt-mut);text-decoration:none;white-space:nowrap}

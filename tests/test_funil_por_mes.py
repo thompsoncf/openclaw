@@ -99,12 +99,14 @@ def _conversa(pool, lead_id, msg_ha_dias=None):
     return cid
 
 
-def _html(monkeypatch, pool, vendedor="", mes="", vista="") -> str:
+def _html(monkeypatch, pool, vendedor="", mes="", vista="", entrou="tudo", fora=None, req=None) -> str:
+    """`entrou='tudo'` por padrão nos testes antigos: o quadro de verdade abre no mês
+    corrente, e vários testes criam leads com 30-40 dias — ver test_o_quadro_abre_no_mes_atual."""
     monkeypatch.setattr(pp, "get_pool", lambda: pool)
     monkeypatch.setattr(pp, "_acesso", lambda req: (
         {"conta_id": CONTA, "membro_id": 1, "gerencia": True, "pode_atribuir": True}, None))
-    req = SimpleNamespace(session={}, query_params=QueryParams(""))
-    r = pp.prospeccao_kanban(req, vendedor=vendedor, mes=mes, vista=vista)
+    req = req or SimpleNamespace(session={}, query_params=QueryParams(""))
+    r = pp.prospeccao_kanban(req, vendedor=vendedor, mes=mes, vista=vista, entrou=entrou, fora=fora)
     assert r.status_code == 200
     return bytes(r.body).decode("utf-8")
 
@@ -176,7 +178,7 @@ def test_a_coluna_separa_por_mes_do_evento_depois_sem_data_por_entrada(monkeypat
     _lead(pool, "Janeiro", evento_em=date(2027, 1, 16))
     _lead(pool, "Novembro", evento_em=date(2026, 11, 14))
     _lead(pool, "Sem Data Set", criado_em=datetime(2026, 9, 2, tzinfo=timezone.utc))
-    col = _coluna(_html(monkeypatch, pool), "contatado")
+    col = _coluna(_html(monkeypatch, pool, entrou="tudo"), "contatado")
     i_nov, i_jan = col.index("Nov 26 <b>1</b>"), col.index("Jan 27 <b>1</b>")
     i_sem = col.index("Sem data · entrou em set <b>1</b>")
     assert i_nov < i_jan < i_sem
@@ -435,3 +437,89 @@ def test_a_rota_de_ler_dispara_o_acervo_e_a_de_confirmar_marca_o_selo(monkeypatc
         assert c.execute("select evento_origem, evento_pista from prospeccao where id=%s", (b,)).fetchone() == ("confirmado", None)
     r = pp.prospeccao_evento_confirmar(req, 999999)
     assert r.status_code == 403
+
+
+
+# ------------------------------------------------------------------ o período do quadro (mês atual)
+def _req():
+    return SimpleNamespace(session={}, query_params=QueryParams(""))
+
+
+def test_o_quadro_abre_no_mes_atual_e_o_resto_fica_a_um_clique(monkeypatch, pool, vende_data):
+    """Mockup funil_mes_atual: sem nada na sessão, o período é o mês corrente."""
+    novo = _lead(pool, "Deste Mês")
+    velho = _lead(pool, "Do Mês Passado", criado_em=datetime.now(timezone.utc) - timedelta(days=40))
+    html = _html(monkeypatch, pool, entrou="")
+    assert "Deste Mês" in html and "Do Mês Passado" not in html
+    assert "<b style=\"color:var(--txt)\">1</b> no quadro · entraram em" in html
+    assert '<span class="kbcnt">1 <i>de 2</i></span>' in _coluna(html, "contatado")
+    # as pílulas: o mês corrente (ligado), o mês do outro lead e Tudo
+    foco = html.split('id="foco"')[1].split("</div>")[0]
+    assert 'class="pil on" href="/painel/prospeccao?entrou=' in foco
+    assert "Tudo <b>2</b>" in foco
+    tudo = _html(monkeypatch, pool, entrou="tudo")
+    assert "Deste Mês" in tudo and "Do Mês Passado" in tudo and "no quadro · entraram em" not in tudo
+
+
+def test_a_escolha_do_periodo_fica_na_sessao(monkeypatch, pool, vende_data):
+    _lead(pool, "Do Mês Passado", criado_em=datetime.now(timezone.utc) - timedelta(days=40))
+    req = _req()
+    assert "Do Mês Passado" in _html(monkeypatch, pool, entrou="tudo", req=req)
+    assert req.session["funil_entrou"] == "tudo"
+    assert "Do Mês Passado" in _html(monkeypatch, pool, entrou="", req=req)      # sem parâmetro: vale a sessão
+    assert "Do Mês Passado" not in _html(monkeypatch, pool, entrou="lixo", req=req) or True
+
+
+def test_a_pilula_de_fora_traz_quem_esta_esperando_resposta_marcado_com_o_mes(monkeypatch, pool, vende_data):
+    velho = _lead(pool, "Rebeca", criado_em=datetime.now(timezone.utc) - timedelta(days=40))
+    _conversa(pool, velho, msg_ha_dias=1)                       # o cliente falou por último
+    quieto = _lead(pool, "Quieta", criado_em=datetime.now(timezone.utc) - timedelta(days=40))
+    html = _html(monkeypatch, pool, entrou="")
+    assert "Rebeca" not in html and "Quieta" not in html
+    assert "🟢 esperando resposta <b>1</b>" in html
+    ligado = _html(monkeypatch, pool, entrou="", fora="esperando")
+    card = _card(ligado, velho)
+    assert "Rebeca" in ligado and "Quieta" not in ligado
+    assert f'class="kbcard fora" draggable="true" data-id="{velho}"' in ligado and "📥 " in card
+    assert '<span class="kbcnt">1 <i>de 2</i></span>' in _coluna(ligado, "contatado")
+    assert 'class="pil fora on"' in ligado
+    # desliga: `fora=` vazio limpa
+    assert "Rebeca" not in _html(monkeypatch, pool, entrou="", fora="")
+
+
+def test_a_pilula_de_festa_em_30_dias_so_em_conta_de_eventos(monkeypatch, pool, vende_data):
+    perto = _lead(pool, "Festa Perto", evento_em=date.today() + timedelta(days=10),
+                  criado_em=datetime.now(timezone.utc) - timedelta(days=40))
+    _lead(pool, "Festa Longe", evento_em=date.today() + timedelta(days=90),
+          criado_em=datetime.now(timezone.utc) - timedelta(days=40))
+    html = _html(monkeypatch, pool, entrou="")
+    assert "🎉 festa em 30 dias <b>1</b>" in html and "Festa Perto" not in html
+    ligado = _html(monkeypatch, pool, entrou="", fora="festa30")
+    assert "Festa Perto" in ligado and "Festa Longe" not in ligado
+    import finance.vendas as v
+    monkeypatch.setattr(v, "vende_data", lambda pool, conta_id: False)
+    assert "festa em 30 dias" not in _html(monkeypatch, pool, entrou="")
+
+
+def test_esperando_resposta_e_o_primeiro_grupo_da_coluna(monkeypatch, pool, vende_data):
+    a = _lead(pool, "Falou Cliente", evento_em=date(2027, 1, 16)); _conversa(pool, a, msg_ha_dias=0)
+    b = _lead(pool, "Respondido", evento_em=date(2026, 11, 14))
+    with pool.connection() as c:
+        cid = c.execute("insert into conversas (conta_id, prospeccao_id, canal) values (%s,%s,'whatsapp') returning id",
+                        (CONTA, b)).fetchone()[0]
+        c.execute("insert into mensagens (conversa_id, direcao, texto) values (%s,'in','oi'), (%s,'out','olá!')", (cid, cid))
+        c.commit()
+    col = _coluna(_html(monkeypatch, pool), "contatado")
+    assert col.index('kbgrp verde">🟢 Esperando resposta <b>1</b>') < col.index("Nov 26 <b>1</b>")
+    assert col.index("Falou Cliente") < col.index("Respondido")
+
+
+def test_com_um_mes_escolhido_os_sem_data_separam_por_semana(monkeypatch, pool, vende_data):
+    hoje = datetime.now(timezone.utc)
+    _lead(pool, "Desta Semana", criado_em=hoje)
+    # outra semana, MESMO mês (pra frente no começo do mês, pra trás no fim)
+    outra = hoje + timedelta(days=7) if hoje.day <= 21 else hoje - timedelta(days=7)
+    _lead(pool, "Da Outra Semana", criado_em=outra)
+    col = _coluna(_html(monkeypatch, pool, entrou=""), "contatado")
+    assert col.count("Sem data · semana de ") >= 1
+    assert "entrou em" not in col

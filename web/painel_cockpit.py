@@ -929,6 +929,15 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .esc.on{border-color:var(--neon);background:var(--neon-fraco);color:var(--neon);font-weight:600}
 .escolhas.horas{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none;padding-bottom:2px}
 .escolhas.horas::-webkit-scrollbar{height:0}
+/* a pílula de escape: as 14 de sempre são só os próximos dias — pra visita
+   marcada mais adiante (o cliente pediu "daqui a três semanas"), esta abre um
+   campo de data de verdade, sem limite nenhum. */
+.esc.outra{border-style:dashed;border-color:#3a4a42}
+.esc.outra.on{border-style:solid}
+#dia-outro{display:none;width:100%;margin-top:.5rem;background:var(--bg-2);
+  border:1px solid var(--line);border-radius:9px;color:var(--text);
+  padding:.5rem .65rem;font-family:inherit;font-size:.85rem}
+#dia-outro.show{display:block}
 .local{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:.75rem .85rem}
 .local .nome{font-weight:600;font-size:.9rem}
 .local .end{color:var(--text-dim);font-size:.82rem;margin-top:.15rem}
@@ -2876,15 +2885,33 @@ _VISITA_JS = r"""
   var st={dia:(V.dias[0]||{}).iso,hora:"10:00",dur:60,lembr:60};
   var DURS=[["30 min",30],["1 h",60],["1h30",90],["2 h",120]];
   var LEMBR=[["Sem lembrete",0],["1h antes",60],["1 dia antes",1440]];
+  // domingo primeiro porque é o que Date.getDay() devolve — os 14 dias fixos
+  // (V.dias) usam a semana do servidor (segunda primeiro), mas esta é só pra
+  // rotular uma data avulsa, então segue o índice do próprio JS.
+  var DIA_SEM=["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
   function $(id){return document.getElementById(id);}
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(m){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m];});}
   function toast(m){var t=$("toast");if(!t)return;t.textContent=m;t.classList.add("show");
     clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show");},2200);}
+  // "T00:00:00" força o parse em horário LOCAL — sem isso "2026-10-06" vira
+  // meia-noite UTC, e em fuso negativo (BRT) o dia local ainda é 05/10.
+  function fmtDia(iso){
+    var d=new Date(iso+"T00:00:00");
+    return DIA_SEM[d.getDay()]+" "+d.getDate()+"/"+(d.getMonth()+1);
+  }
 
   function pinta(){
+    // A PÍLULA DE ESCAPE. Os 14 dias fixos bastam pro caso comum (visita essa
+    // semana), mas o cliente que pede "daqui a três semanas" ficava sem
+    // caminho nenhum — reclamação do vendedor, 05/09/2026. Esta pílula abre um
+    // campo de data sem limite; quando uma data fora dos 14 dias está
+    // escolhida, ela mesma mostra qual (e some com o "outra data" genérico).
+    var foraDaLista=!V.dias.some(function(d){return d.iso===st.dia;});
+    var lblOutra=foraDaLista?("📅 "+fmtDia(st.dia)):"📅 Outra data";
     $("dias").innerHTML=V.dias.map(function(d){
-      return '<div class="esc'+(d.iso===st.dia?' on':'')+'" data-d="'+d.iso+'">'+d.lab+'</div>';}).join("");
+      return '<div class="esc'+(d.iso===st.dia?' on':'')+'" data-d="'+d.iso+'">'+d.lab+'</div>';}).join("")
+      +'<div class="esc outra'+(foraDaLista?' on':'')+'">'+lblOutra+'</div>';
     $("horas").innerHTML=V.horas.map(function(h){
       return '<div class="esc'+(h===st.hora?' on':'')+'" data-h="'+h+'">'+h+'</div>';}).join("");
     $("durs").innerHTML=DURS.map(function(o){
@@ -2895,7 +2922,7 @@ _VISITA_JS = r"""
   }
   function diaLab(){
     var d=V.dias.filter(function(x){return x.iso===st.dia;})[0];
-    return d?d.lab.toLowerCase():st.dia;
+    return d?d.lab.toLowerCase():fmtDia(st.dia).toLowerCase();
   }
   function resumo(){
     var on=!$("avisar").classList.contains("off");
@@ -2908,6 +2935,16 @@ _VISITA_JS = r"""
   }
   document.addEventListener("click",function(e){
     var t=e.target.closest(".esc");if(!t)return;
+    if(t.classList.contains("outra")){
+      // não escolhe nada sozinha — só abre o campo de data pro toque seguinte.
+      var inp=$("dia-outro");
+      inp.classList.toggle("show");
+      if(inp.classList.contains("show")){
+        inp.focus();
+        if(inp.showPicker){try{inp.showPicker();}catch(err){/* navegador sem suporte: o foco já abre o teclado nativo */}}
+      }
+      return;
+    }
     if(t.dataset.d!=null)st.dia=t.dataset.d;
     else if(t.dataset.h!=null)st.hora=t.dataset.h;
     else if(t.dataset.dur!=null)st.dur=parseInt(t.dataset.dur,10);
@@ -2918,6 +2955,15 @@ _VISITA_JS = r"""
   $("avisar").onclick=function(){
     var off=this.classList.toggle("off");this.textContent=off?"Desligado":"Ligado";resumo();};
   $("endereco").oninput=resumo;
+  // o mínimo é HOJE (V.dias[0] é sempre o primeiro dia da lista fixa) — sem
+  // isso o teclado de data deixaria marcar visita no passado.
+  $("dia-outro").min=(V.dias[0]||{}).iso||"";
+  $("dia-outro").onchange=function(){
+    if(!this.value)return;
+    st.dia=this.value;
+    this.classList.remove("show");
+    pinta();
+  };
   $("agendar").onclick=function(){
     var b=this;b.disabled=true;b.textContent="Agendando…";
     fetch(V.base+"/lead/"+V.leadId+"/visita",{method:"POST",
@@ -2945,6 +2991,10 @@ _VISITA_JS = r"""
       +'<a class="btn ghost" style="margin-top:.9rem" href="'+V.base+'/lead/'+V.leadId+'">Voltar pro lead</a></div>';
     $("pronto").style.display="block";
   }
+  // ganchos só pro teste de sintaxe/comportamento (tests/test_painel_js_sintaxe.py)
+  // alcançar fmtDia/pinta sem precisar clicar em nada — mesmo desenho do
+  // `window.__orc` que `_ORC_JS` já expõe.
+  window.__visita={fmtDia:fmtDia,st:st,pinta:pinta};
   pinta();
 })();
 </script>"""
@@ -2984,7 +3034,8 @@ def cockpit_visita_marcar(request: Request, lead_id: int):
              + "<div class=scroll id=build>"
              + f"<div class=secao><div class=rot>Quem vem visitar</div>"
                f"<div class=local><div class=nome>{esc(quem)}</div></div></div>"
-             + "<div class=secao><div class=rot>Dia</div><div class=escolhas id=dias></div></div>"
+             + "<div class=secao><div class=rot>Dia</div><div class=escolhas id=dias></div>"
+               "<input type=date id=dia-outro aria-label='Escolher outra data'></div>"
              + "<div class=secao><div class=rot>Horário</div>"
                "<div class='escolhas horas' id=horas></div></div>"
              + "<div class=secao><div class=rot>Duração</div><div class=escolhas id=durs></div></div>"

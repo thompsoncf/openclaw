@@ -271,6 +271,21 @@ def test_o_js_de_responder_a_visita_compila(tmp_path):
     assert r.returncode == 0, r.stderr.strip()[:600]
 
 
+def test_o_js_de_agendar_visita_compila(tmp_path):
+    """`_VISITA_JS` é string Python solta em painel_cockpit, igual ao `_CEP_JS` —
+    erro de sintaxe aqui e a tela de "Agendar visita" (a pílula "Outra data"
+    incluída) para de reagir a qualquer toque, calado."""
+    if not shutil.which("node"):
+        pytest.skip("sem node no ambiente")
+    from web import painel_cockpit as pc
+    corpo = "\n".join(_scripts(pc._VISITA_JS))
+    assert corpo.strip(), "o _VISITA_JS deixou de ter <script> — o teste ficaria vazio"
+    alvo = tmp_path / "visita.js"
+    alvo.write_text(corpo, encoding="utf-8")
+    r = subprocess.run(["node", "--check", str(alvo)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr.strip()[:600]
+
+
 def test_responder_a_visita_usa_a_rota_que_ja_existe():
     """Nada de endpoint novo: `marcar_desfecho` já é servido por
     POST /painel/agenda/desfecho, e o portão de papel deixa o vendedor passar

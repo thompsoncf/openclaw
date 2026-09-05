@@ -302,7 +302,11 @@ def _base_leads_sql() -> str:
                -- mesmo instante, e a "última" vira sorte de desempate).
                exists(select 1 from mensagens mm3
                        where mm3.conversa_id=cv.id and mm3.direcao='out'
-                         and mm3.autor='humano') as tem_resposta_humana
+                         and mm3.autor='humano') as tem_resposta_humana,
+               -- o período e o evento (197/198): a Fila abre no mês atual e o card
+               -- do celular passa a saber a festa, como o funil (mockup cockpit_mes_atual)
+               p.criado_em, p.evento_em, p.evento_tipo, p.evento_convidados,
+               p.evento_origem, p.evento_pista
           from prospeccao p
           left join conversas cv on cv.prospeccao_id=p.id and cv.conta_id=p.conta_id
           left join lateral (select texto, autor from mensagens
@@ -370,6 +374,8 @@ def sinal_fila(pool, conta_id: int, membro_id: int) -> str:
 
 def leads_do_vendedor(pool, conta_id: int, membro_id: int) -> list[dict]:
     from web.painel_prospeccao import _zap_link, TEMP_COR
+    from finance import evento_lead as _evl
+    hoje = _agora().date()
     out = []
     with pool.connection() as c:
         rows = c.execute(_base_leads_sql(), (conta_id, membro_id)).fetchall()
@@ -413,8 +419,72 @@ def leads_do_vendedor(pool, conta_id: int, membro_id: int) -> list[dict]:
             # "autor da última mensagem" (isso seria a mesma armadilha do
             # `lm`/criado_em que o n_pend já evita usando id).
             "respondido": (not ia) and esperando == 0 and bool(r[16]),
+            # o período e o evento (mockup cockpit_mes_atual)
+            "criado_em": r[17], "ult_em": r[11],
+            "evento_em": r[18], "evento_tipo": r[19], "evento_convidados": r[20],
+            "evento_origem": r[21], "evento_pista": r[22],
+            "ev_ic": _evl.icone_tipo(r[19]), "ev_data": _evl.data_curta(r[18], hoje),
         })
     return out
+
+
+def fila_agrupada(leads: list[dict], *, entrou: str, fora_on, vende_data: bool = True,
+                  agora=None) -> dict:
+    """A Fila do celular no desenho do funil (mockup cockpit_mes_atual): o período
+    ("Entraram em", padrão mês corrente), as pílulas do que ficou de fora, e os
+    grupos por O QUE O LEAD PEDE:
+
+      🟢 sua vez        o cliente falou por último e o agente está desligado
+      🎉 festa marcada  com data, na ordem da data
+      📅 sem data       o resto, com o "perguntar"
+      ⏸ parados         15+ dias sem mensagem, numa dobra fechada
+
+    Devolve {grupos: [{chave, rotulo, leads, dobra}], meses: [{chave, rotulo, n, on}],
+    fora_cont: {suavez, festa30}, n_quadro, total}. Pura: não toca no banco."""
+    from finance import evento_lead as _evl
+    agora = agora or _agora()
+    hoje = agora.date()
+    fora_on = set(fora_on or ())
+    for l in leads:
+        l["vez"] = (not l["ia"]) and int(l.get("esperando") or 0) > 0
+        l["festa30"] = _evl.festa_em_30_dias(l, hoje)
+        l["no_periodo"] = _evl.no_periodo(l, entrou)
+        l["fora"] = not l["no_periodo"]
+        ce = _evl._aware(l.get("criado_em"))
+        l["entrou_rot"] = _evl._MESES[ce.month - 1] if ce else ""
+        l["parado"] = _evl.parado(l, agora)
+    fora_cont = {"suavez": sum(1 for l in leads if l["fora"] and l["vez"]),
+                 "festa30": sum(1 for l in leads if l["fora"] and l["festa30"])}
+    vis = [l for l in leads if l["no_periodo"] or ("suavez" in fora_on and l["vez"])
+           or ("festa30" in fora_on and l["festa30"])]
+    vez = [l for l in vis if l["vez"]]
+    resto = [l for l in vis if not l["vez"]]
+    # quem entrou pela pílula de fora entrou porque é urgente, e festa em 30 dias é
+    # urgente por definição: nenhum dos dois vai pra dobra
+    def _dobra(l):
+        return l["parado"] and not l["fora"] and not l["festa30"]
+    parados = [l for l in resto if _dobra(l)]
+    resto = [l for l in resto if not _dobra(l)]
+    festa = sorted([l for l in resto if l.get("evento_em")], key=lambda x: x["evento_em"])
+    sem = [l for l in resto if not l.get("evento_em")]
+    grupos = []
+    if vez:
+        grupos.append({"chave": "vez", "rotulo": "🟢 Sua vez", "leads": vez, "dobra": False})
+    if festa:
+        grupos.append({"chave": "festa", "rotulo": "🎉 Festa marcada", "leads": festa, "dobra": False})
+    if sem:
+        grupos.append({"chave": "sem", "rotulo": "📅 Sem data" if vende_data else "Os outros",
+                       "leads": sem, "dobra": False})
+    if parados:
+        grupos.append({"chave": "parados", "rotulo": f"⏸ Parados {_evl.PARADO_DIAS}+ dias",
+                       "leads": parados, "dobra": True})
+    meses = _evl.meses_entrada(leads, hoje)
+    for m in meses:
+        m["on"] = (m["chave"] == entrou)
+        # no celular a pílula é curta: "Set 8", "Ago 77", "Tudo 85"
+        m["curto"] = m["rotulo"] if m["chave"] == "tudo" else (m["rotulo"][:3] + m["rotulo"][9:] if len(m["rotulo"]) > 9 else m["rotulo"][:3])
+    return {"grupos": grupos, "meses": meses, "fora_cont": fora_cont,
+            "n_quadro": len(vis), "total": len(leads)}
 
 
 def _conta_membro(c, conta_id, membro_id):

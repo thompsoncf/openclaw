@@ -1,0 +1,329 @@
+<title>Cockpit no Mês Atual</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Tokens de web/tema.py (o Cockpit usa os mesmos nomes). Escuro único de propósito. */
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --azul:#7bb8e6; --ink:#062011;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.86em;color:var(--roxo)}
+a{color:var(--neon-bright)}
+.wrap{max-width:1180px;margin:0 auto;padding:2.6rem 1.25rem 5rem;display:flex;flex-direction:column;gap:2.8rem}
+.txt{max-width:1000px}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.6rem,4vw,2.15rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:68ch}
+.head .marca{color:var(--neon)}
+.sec > h2{font-size:1.15rem;margin-bottom:.15rem}
+.sec > p.leg{color:var(--text-dim);margin:.3rem 0 1.15rem;max-width:72ch;font-size:.9rem}
+
+.manchete{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:14px;padding:1.15rem 1.3rem;display:flex;gap:1.1rem;align-items:flex-start;max-width:1000px}
+.manchete .ic{font-size:1.5rem;line-height:1;flex:none}
+.manchete h2{font-size:1.05rem;color:#F2BDB9;margin-bottom:.3rem}
+.manchete p{margin:0 0 .5rem;color:#D9AEAA;font-size:.9rem;max-width:72ch}
+.manchete p:last-child{margin-bottom:0}
+.manchete b{font-family:var(--mono);font-variant-numeric:tabular-nums;color:#F6D3D0}
+
+.movs{display:grid;grid-template-columns:repeat(4,1fr);gap:.8rem}
+@media (max-width:860px){.movs{grid-template-columns:1fr 1fr}}
+@media (max-width:520px){.movs{grid-template-columns:1fr}}
+.mov{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.95rem 1rem;display:flex;flex-direction:column;gap:.4rem}
+.mov .k{font-family:var(--mono);font-size:.7rem;color:var(--neon);letter-spacing:.06em}
+.mov h3{font-size:.95rem}
+.mov p{margin:0;font-size:.82rem;color:var(--text-dim)}
+
+/* ============ os celulares, no visual do Cockpit ============ */
+.fones{display:grid;grid-template-columns:repeat(3,1fr);gap:1.2rem;align-items:start}
+@media (max-width:1000px){.fones{grid-template-columns:1fr 1fr}}
+@media (max-width:680px){.fones{grid-template-columns:1fr}}
+.fone{border:1px solid var(--line);border-radius:28px;background:var(--bg);box-shadow:0 20px 60px rgba(0,0,0,.45);overflow:hidden;display:flex;flex-direction:column;min-height:640px}
+.fone .leg{padding:.6rem .9rem;font-size:.72rem;color:var(--text-faint);border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+.hdr{display:flex;align-items:center;gap:.7rem;padding:.9rem 1rem .5rem}
+.hdr .av{width:34px;height:34px;border-radius:50%;background:var(--neon-fundo);border:1px solid var(--neon-borda);color:var(--neon-bright);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem}
+.hdr .tt b{display:block;font-family:var(--display);font-size:1.15rem;line-height:1.1}
+.hdr .tt small{color:var(--text-dim);font-size:.76rem}
+.hdr .tt small b{display:inline;font-family:var(--mono);font-size:.76rem;color:var(--neon-bright);font-weight:500}
+.foco{display:flex;gap:.35rem;padding:.35rem 1rem .55rem;overflow-x:auto;align-items:center;scrollbar-width:none}
+.foco::-webkit-scrollbar{display:none}
+.pil{flex:none;display:inline-flex;align-items:center;gap:.3rem;border:1px solid var(--line);border-radius:999px;padding:.3rem .65rem;font-size:.76rem;color:var(--text-dim);background:var(--surface)}
+.pil b{font-family:var(--mono);font-weight:500;font-size:.7rem;color:var(--text)}
+.pil.on{background:var(--neon);border-color:var(--neon);color:var(--ink);font-weight:600}.pil.on b{color:var(--ink)}
+.pil.fora{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:#F0DCA6}.pil.fora b{color:#F0DCA6}
+.pil.fora.on{background:var(--ambar);border-color:var(--ambar);color:#1c1408}.pil.fora.on b{color:#1c1408}
+.foco .sep{flex:none;width:1px;height:18px;background:var(--line);margin:0 .2rem}
+.scroll{flex:1;overflow:hidden}
+.grp{display:flex;align-items:center;gap:.4rem;padding:.55rem 1rem .25rem;font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint);font-weight:600;background:var(--bg)}
+.grp b{font-family:var(--mono);font-weight:500;color:var(--text-dim);letter-spacing:0}
+.grp .ln{flex:1;height:1px;background:var(--line)}
+.grp.verde{color:var(--neon-bright)}.grp.verde b{color:var(--neon-bright)}
+.grp.alerta{color:#F0DCA6}.grp.alerta b{color:#F0DCA6}
+.lead{display:flex;align-items:flex-start;gap:.65rem;padding:.7rem 1rem;border-bottom:1px solid var(--line)}
+.lead.fora{background:rgba(224,163,46,.05);box-shadow:inset 3px 0 0 var(--ambar-borda)}
+.lead .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:.45rem}
+.lead .mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:.18rem}
+.lead .top{display:flex;align-items:center;gap:.4rem}
+.lead .emp{font-weight:600;font-size:.92rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip{font-size:.62rem;padding:.1rem .45rem;border-radius:999px;border:1px solid var(--line);color:var(--text-dim);flex-shrink:0;white-space:nowrap}
+.chip.ia{color:var(--roxo);border-color:#3a2b52;background:#1a1226}
+.chip.voce{color:var(--ambar);border-color:#5a4520;background:#241c0f}
+.chip.neon{color:var(--neon);border-color:#1e4a3a;background:rgba(37,211,102,.10)}
+.chip.mes{color:#F0DCA6;border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.ev{font-size:.72rem;color:var(--text-dim);display:flex;align-items:center;gap:.3rem;flex-wrap:wrap}
+.ev b{color:var(--text)} .ev .d{font-family:var(--mono);color:var(--neon-bright)}
+.ev .src{font-size:.56rem;color:var(--azul);border:1px solid #1f3a4d;background:#122029;border-radius:999px;padding:0 .32rem}
+.ev.sem{color:#F0DCA6}
+.ev .perg{margin-left:auto;font-size:.7rem;font-weight:600;color:#F0DCA6;border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:999px;padding:.08rem .5rem}
+.snip{color:var(--text-dim);font-size:.76rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.snip.nova{color:var(--text)}
+.pend{flex-shrink:0;min-width:20px;height:20px;padding:0 .32rem;border-radius:999px;background:var(--coral);color:#fff;font-family:var(--mono);font-size:.7rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;margin-top:.35rem}
+.dobra{margin:.4rem 1rem;border:1px dashed var(--line);border-radius:10px;padding:.45rem .6rem;font-size:.72rem;color:var(--text-dim);display:flex;justify-content:space-between;background:var(--bg-2)}
+.dobra b{font-family:var(--mono);font-weight:500;color:var(--text)}
+.dobra.amarela{border-color:var(--ambar-borda);color:#F0DCA6;background:var(--ambar-fundo)}.dobra.amarela b{color:#F0DCA6}
+.dica{padding:.5rem 1rem;font-size:.7rem;color:var(--text-faint);text-align:center}
+.fab{position:relative;margin:-2.2rem 1rem .4rem auto;width:44px;height:44px;border-radius:50%;background:var(--neon);color:var(--ink);font-size:1.5rem;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 20px rgba(37,211,102,.35)}
+.tabs{display:flex;border-top:1px solid var(--line);background:var(--bg-2);padding:.45rem .3rem .55rem}
+.tabs span{flex:1;text-align:center;font-size:.62rem;color:var(--text-faint);display:flex;flex-direction:column;align-items:center;gap:.15rem;position:relative}
+.tabs span i{font-style:normal;font-size:1rem;line-height:1}
+.tabs span.on{color:var(--neon-bright)}
+.tabs .tsel{position:absolute;top:-4px;right:18%;min-width:16px;height:16px;border-radius:999px;background:var(--coral);color:#fff;font-family:var(--mono);font-size:.6rem;font-weight:700;display:flex;align-items:center;justify-content:center}
+/* a tela do lead: o aviso da pista */
+.chat{padding:.6rem 1rem;display:flex;flex-direction:column;gap:.45rem}
+.aviso{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:12px;padding:.55rem .7rem;font-size:.78rem;color:#F0DCA6;display:flex;flex-direction:column;gap:.35rem}
+.aviso .bts{display:flex;gap:.4rem}
+.aviso .bt{font-size:.72rem;font-weight:600;padding:.3rem .6rem;border-radius:8px;border:1px solid var(--ambar-borda)}
+.aviso .bt.ok{background:var(--ambar);color:#1c1408;border-color:var(--ambar)}
+.bub{max-width:86%;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;border-bottom-left-radius:4px;padding:.45rem .65rem;font-size:.8rem;line-height:1.4}
+.bub mark{background:rgba(70,245,138,.16);color:var(--neon-bright);border-radius:4px;padding:0 .15rem}
+.bub .meta{display:block;color:var(--text-faint);font-size:.62rem;margin-top:.2rem;font-family:var(--mono)}
+.bub.eu{align-self:flex-end;background:#123028;border-color:#1d5741;border-bottom-left-radius:12px;border-bottom-right-radius:4px}
+.composer{margin:auto .8rem .6rem;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.5rem .7rem;font-size:.8rem;color:var(--text);display:flex;gap:.5rem;align-items:center}
+.composer span{flex:1}
+.composer i{font-style:normal;color:var(--neon-bright)}
+
+.notas{display:flex;flex-direction:column;gap:.7rem;max-width:1000px}
+.nota{border:1px solid var(--line);border-left:3px solid var(--ambar);border-radius:0 11px 11px 0;background:var(--surface);padding:.8rem 1rem}
+.nota h4{margin:0 0 .25rem;font-size:.88rem;font-weight:600}
+.nota p{margin:0;font-size:.84rem;color:var(--text-dim);max-width:74ch}
+.nota.bom{border-left-color:var(--neon)} .nota.fora{border-left-color:var(--text-faint)}
+.passos{margin:0;padding-left:1.2rem;font-size:.86rem;color:var(--text-dim);display:flex;flex-direction:column;gap:.35rem;max-width:1000px}
+.passos b{color:var(--text)}
+.rolagem{overflow-x:auto;border:1px solid var(--line);border-radius:12px;max-width:1000px}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:.83rem}
+th{text-align:left;font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint);font-weight:600;padding:.55rem .8rem;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:.55rem .8rem;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+.rodape{border-top:1px solid var(--line);padding-top:1.2rem;color:var(--text-faint);font-size:.8rem;max-width:74ch}
+</style>
+
+<div class="wrap">
+
+  <header class="head txt">
+    <div class="eyebrow">Mockup · Cockpit do vendedor › Fila</div>
+    <h1>O Cockpit no mês atual <span class="marca">·</span> a fila que diz o que fazer</h1>
+    <p>O mesmo desenho do funil, levado pro celular do vendedor. Hoje a Fila é uma lista
+    única, ordenada pela última mensagem: quem entrou em agosto e quem entrou hoje,
+    quem tem festa em novembro e quem não disse a data, tudo na mesma pilha. Desenhei
+    em cima da fila real da <b>Jacqueline</b> (Prime Eventos, 04/09/2026); nomes de
+    clientes inventados.</p>
+  </header>
+
+  <section class="manchete">
+    <div class="ic">📱</div>
+    <div>
+      <h2>A Jacqueline abre o app e vê 85 leads numa lista só</h2>
+      <p>Só <b>8</b> entraram este mês. <b>17</b> são "sua vez" — o cliente falou e ninguém
+      respondeu. <b>30</b> já têm a data da festa, <b>43</b> foram lidos da conversa pelo
+      leitor de ontem, e <b>10</b> estão parados há 15+ dias. A lista de hoje não separa
+      nada disso: é a ordem de quem falou por último.</p>
+      <p>A proposta: a fila abre no <b>mês atual</b>, com as pílulas do que ficou fora, e
+      os leads se agrupam por <b>o que pedem</b> — sua vez, festa marcada, sem data, parados.</p>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>A proposta, em quatro movimentos</h2>
+    <div class="movs">
+      <div class="mov"><span class="k">1 · O MÊS</span><h3>As mesmas pílulas do funil</h3>
+        <p>"Set 8 · Ago 77 · Tudo 85", e as duas âmbar do que ficou fora: "🟢 15 sua vez" e
+        "🎉 4 festas em 30 dias". Ligou, entram na fila marcados; desligou, saem. A escolha
+        fica guardada no aparelho.</p></div>
+      <div class="mov"><span class="k">2 · OS GRUPOS</span><h3>Por o que o lead pede</h3>
+        <p><b>Sua vez</b> em cima (o cliente está esperando). Depois <b>festa marcada</b>, na
+        ordem da data. Depois <b>sem data</b>, com o "perguntar" na linha. E a dobra dos
+        <b>parados</b> no pé, fechada.</p></div>
+      <div class="mov"><span class="k">3 · A LINHA DO EVENTO</span><h3>O card do celular sabe a festa</h3>
+        <p>"💍 Casamento · 13 fev 27 · 70 conv." entre o nome e a última mensagem, com o
+        selinho "lido da conversa" quando veio do leitor. É o que o funil já mostra; o
+        celular ainda não.</p></div>
+      <div class="mov"><span class="k">4 · PERGUNTAR E CONFIRMAR</span><h3>Um toque</h3>
+        <p>"Perguntar" abre a conversa com a pergunta pronta na caixa. Quando o leitor só
+        ouviu o mês, a conversa abre com um aviso em cima: "o cliente falou de março —
+        confirmar a data?".</p></div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>As três telas</h2>
+    <p class="leg">Esquerda: como a Fila abre. Meio: ligou "sua vez" e os de agosto entraram.
+    Direita: a conversa de quem só disse o mês, com o aviso pra confirmar.</p>
+    <div class="fones">
+
+      <div class="fone">
+        <div class="leg">1 · Como abre</div>
+        <div class="hdr"><span class="av">JA</span><div class="tt"><b>Meus leads</b><small><b>8 de 85</b> · setembro · 2 sua vez</small></div></div>
+        <div class="foco">
+          <span class="pil on">Set <b>8</b></span><span class="pil">Ago <b>77</b></span><span class="pil">Tudo <b>85</b></span>
+          <span class="sep"></span><span class="pil fora">🟢 sua vez <b>15</b></span><span class="pil fora">🎉 30 dias <b>4</b></span>
+        </div>
+        <div class="scroll">
+          <div class="grp verde">🟢 Sua vez <b>2</b><span class="ln"></span></div>
+          <div class="lead"><span class="dot" style="background:var(--coral)"></span><span class="mid">
+            <span class="top"><span class="emp">Gabriela</span><span class="chip voce">sua vez</span></span>
+            <span class="ev">💍 <b>Casamento</b> · <span class="d">13 fev 27</span> · 70 conv. <span class="src">💬 lido</span></span>
+            <span class="snip nova">Média de 70 pessoas</span></span><span class="pend">2</span></div>
+          <div class="lead"><span class="dot" style="background:#5b9bd5"></span><span class="mid">
+            <span class="top"><span class="emp">Priscila N.</span><span class="chip voce">sua vez</span></span>
+            <span class="ev sem">📅 sem data <span class="perg">perguntar</span></span>
+            <span class="snip nova">Quanto fica só o salão?</span></span><span class="pend">1</span></div>
+
+          <div class="grp">🎉 Festa marcada <b>5</b><span class="ln"></span></div>
+          <div class="lead"><span class="dot" style="background:var(--ambar)"></span><span class="mid">
+            <span class="top"><span class="emp">Casal Souza</span><span class="chip neon">respondido</span></span>
+            <span class="ev">💍 <b>Casamento</b> · <span class="d">14 nov</span> · 150 conv. <span class="src">💬 lido</span></span>
+            <span class="snip">Você: Segue o pacote de fim de semana</span></span></div>
+          <div class="lead"><span class="dot" style="background:var(--coral)"></span><span class="mid">
+            <span class="top"><span class="emp">Marina Dias</span><span class="chip neon">respondido</span></span>
+            <span class="ev">🎂 <b>15 anos</b> · <span class="d">19 dez</span> · 130 conv.</span>
+            <span class="snip">Você: Proposta nº 58 enviada</span></span></div>
+          <div class="dobra"><span>mais 3 · jan, fev, abr</span><span>▾</span></div>
+
+          <div class="grp">📅 Sem data <b>1</b><span class="ln"></span></div>
+          <div class="lead"><span class="dot" style="background:var(--ambar)"></span><span class="mid">
+            <span class="top"><span class="emp">Turma Enfermagem</span><span class="chip ia">IA</span></span>
+            <span class="ev sem">📅 falou de março <span class="perg">confirmar</span></span>
+            <span class="snip">🤖 Pra montar o orçamento preciso saber a data…</span></span></div>
+          <div class="dica">Arraste um card pra esquerda pra assumir, devolver ou marcar ganho.</div>
+        </div>
+        <div class="fab">+</div>
+        <div class="tabs"><span class="on"><i>☰</i>Fila<span class="tsel">3</span></span><span><i>📅</i>Agenda</span><span><i>📄</i>Propostas</span><span><i>📈</i>Resultado</span><span><i>👤</i>Perfil</span></div>
+      </div>
+
+      <div class="fone">
+        <div class="leg">2 · Ligou "sua vez": agosto entra</div>
+        <div class="hdr"><span class="av">JA</span><div class="tt"><b>Meus leads</b><small><b>8 + 15</b> · setembro, mais os de fora esperando</small></div></div>
+        <div class="foco">
+          <span class="pil on">Set <b>8</b></span><span class="pil">Ago <b>77</b></span><span class="pil">Tudo <b>85</b></span>
+          <span class="sep"></span><span class="pil fora on">🟢 sua vez <b>15</b></span><span class="pil fora">🎉 30 dias <b>4</b></span>
+        </div>
+        <div class="scroll">
+          <div class="grp verde">🟢 Sua vez <b>17</b><span class="ln"></span></div>
+          <div class="lead"><span class="dot" style="background:var(--coral)"></span><span class="mid">
+            <span class="top"><span class="emp">Gabriela</span><span class="chip voce">sua vez</span></span>
+            <span class="ev">💍 <b>Casamento</b> · <span class="d">13 fev 27</span> · 70 conv.</span>
+            <span class="snip nova">Média de 70 pessoas</span></span><span class="pend">2</span></div>
+          <div class="lead fora"><span class="dot" style="background:var(--coral)"></span><span class="mid">
+            <span class="top"><span class="emp">Família Rocha</span><span class="chip voce">sua vez</span><span class="chip mes">📥 ago</span></span>
+            <span class="ev">🎂 <b>Aniversário</b> · <span class="d">30 jan 27</span> · 80 conv.</span>
+            <span class="snip nova">Fechamos! Como faço o sinal?</span></span><span class="pend">1</span></div>
+          <div class="lead fora"><span class="dot" style="background:var(--ambar)"></span><span class="mid">
+            <span class="top"><span class="emp">Rebeca</span><span class="chip voce">sua vez</span><span class="chip mes">📥 ago</span></span>
+            <span class="ev">🎓 <b>Formatura</b> · <span class="d">16 jan 27</span> <span class="src">💬 lido</span></span>
+            <span class="snip nova">Vai dar certo pro dia 16?</span></span><span class="pend">1</span></div>
+          <div class="lead fora"><span class="dot" style="background:#5b9bd5"></span><span class="mid">
+            <span class="top"><span class="emp">Erys</span><span class="chip voce">sua vez</span><span class="chip mes">📥 ago</span></span>
+            <span class="ev sem">📅 sem data <span class="perg">perguntar</span></span>
+            <span class="snip nova">Vocês têm estacionamento?</span></span><span class="pend">3</span></div>
+          <div class="lead fora"><span class="dot" style="background:var(--coral)"></span><span class="mid">
+            <span class="top"><span class="emp">Auria</span><span class="chip voce">sua vez</span><span class="chip mes">📥 ago</span></span>
+            <span class="ev">💍 <b>Casamento</b> · <span class="d">22 mai 27</span> <span class="src">💬 lido</span></span>
+            <span class="snip nova">Já conseguiu preparar o orçamento?</span></span><span class="pend">1</span></div>
+          <div class="dobra"><span>mais 12 esperando</span><span>▾</span></div>
+          <div class="grp">🎉 Festa marcada <b>5</b><span class="ln"></span></div>
+          <div class="dobra"><span>5 leads de setembro</span><span>▾</span></div>
+        </div>
+        <div class="tabs"><span class="on"><i>☰</i>Fila<span class="tsel">9+</span></span><span><i>📅</i>Agenda</span><span><i>📄</i>Propostas</span><span><i>📈</i>Resultado</span><span><i>👤</i>Perfil</span></div>
+      </div>
+
+      <div class="fone">
+        <div class="leg">3 · A conversa de quem só disse o mês</div>
+        <div class="hdr"><span class="av" style="background:var(--surface);border-color:var(--line);color:var(--text-dim)">‹</span><div class="tt"><b>Turma Enfermagem</b><small>🎓 Formatura · sem data · Teresina/PI</small></div></div>
+        <div class="chat">
+          <div class="aviso">💬 O cliente falou de <b>março</b> na conversa. Confirmar a data?
+            <div class="bts"><span class="bt ok">Abrir a ficha</span><span class="bt">Perguntar o dia</span></div></div>
+          <div class="bub">boa noite, gostaria de fazer um orçamento<span class="meta">cliente · 02/09 21:14</span></div>
+          <div class="bub">Bom dia, é uma cerimônia do jaleco, para o curso de enfermagem. A data seria para até
+            mais ou menos <mark>março</mark>, com início do pagamento em outubro<span class="meta">cliente · 03/09 08:02</span></div>
+          <div class="bub eu">🤖 Que legal! Pra montar o orçamento certinho eu preciso saber a data do evento, o horário de início e quantos convidados. Me conta? 😊<span class="meta">agente · 03/09 08:02</span></div>
+        </div>
+        <div class="composer"><span>Pra qual data você está pensando? E mais ou menos quantos convidados? 😊</span><i>➤</i></div>
+        <div class="tabs"><span class="on"><i>☰</i>Fila</span><span><i>📅</i>Agenda</span><span><i>📄</i>Propostas</span><span><i>📈</i>Resultado</span><span><i>👤</i>Perfil</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Agosto aberto, pra Jacqueline</h2>
+    <p class="leg">Os 77 de agosto dela não viram pilha: os grupos separam, e cada um vem fechado com a
+    contagem. Números reais da fila dela.</p>
+    <div class="rolagem">
+      <table>
+        <thead><tr><th>Grupo</th><th>O que é</th><th class="num">Set</th><th class="num">Ago</th></tr></thead>
+        <tbody>
+          <tr><td><b>🟢 Sua vez</b></td><td>o cliente falou, ninguém respondeu, agente desligado</td><td class="num">2</td><td class="num">15</td></tr>
+          <tr><td><b>🎉 Festa marcada</b></td><td>com data, na ordem da data (nov, dez, jan…)</td><td class="num">5</td><td class="num">25</td></tr>
+          <tr><td><b>📅 Sem data</b></td><td>com "perguntar"; os que só disseram o mês vêm com "confirmar"</td><td class="num">1</td><td class="num">27 (7 só pista)</td></tr>
+          <tr><td><b>⏸ Parados 15+</b></td><td>dobra fechada no pé, como no funil</td><td class="num">0</td><td class="num">10</td></tr>
+          <tr><td><b>Festa em 30 dias</b> (pílula)</td><td>entra de qualquer mês quando ligada</td><td class="num">0</td><td class="num">4</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O que muda no código, se aprovar</h2>
+    <ol class="passos">
+      <li><b>Nenhuma migração.</b> A Fila lê o que o funil já lê: mês de entrada, evento (197/198), última mensagem.</li>
+      <li><b>A consulta da Fila</b> ganha o evento (data, tipo, convidados, origem, pista) e o mês de entrada; o filtro <code>?entrou=</code> e as pílulas de fora, guardados no aparelho (o Cockpit já guarda o token lá).</li>
+      <li><b>Os grupos</b> na lista: sua vez → festa marcada → sem data → parados, com as dobras. O deslizar dos cards continua igual.</li>
+      <li><b>A linha do evento</b> no card, com o selo; <b>"perguntar"</b> abre a conversa com o texto na caixa (<code>?texto=</code>), e <b>"confirmar"</b> abre com o aviso da pista em cima.</li>
+      <li>O contador da aba Fila continua sendo o não visto da carteira inteira — o de fora do mês não some do número, só da lista.</li>
+    </ol>
+  </section>
+
+  <section class="sec">
+    <h2>Pra você decidir</h2>
+    <div class="notas">
+      <div class="nota"><h4>1. A Fila do vendedor também abre no mês atual?</h4>
+        <p>Sugiro <b>sim</b>, igual ao funil, com "🟢 sua vez" contando o de fora na pílula. O que
+        pede resposta nunca some do número da aba.</p></div>
+      <div class="nota"><h4>2. "Sua vez" fica em cima ou continua pela ordem da última mensagem?</h4>
+        <p>Sugiro <b>em cima</b>: é a única coisa que o cliente está esperando. Dentro do grupo, a
+        mensagem mais nova primeiro.</p></div>
+      <div class="nota"><h4>3. O vendedor vê os parados dele?</h4>
+        <p>Sugiro <b>sim, na dobra</b>, como no funil. Hoje eles ficam no fim da lista e ninguém rola até lá.</p></div>
+      <div class="nota fora"><h4>Fora deste desenho</h4>
+        <p>A visão de equipe do dono no Cockpit e a Agenda: ficam como estão. Mudar a etapa pelo card
+        (hoje é na tela do lead): não entra.</p></div>
+    </div>
+  </section>
+
+  <p class="rodape">Números lidos em 04/09/2026 no banco de produção (só consulta), conta 34, fila da vendedora
+  JACQUELINE PRIME: 85 leads abertos, 8 de setembro e 77 de agosto; "sua vez" 2 e 15; com data 5 e
+  25; festa nos próximos 30 dias 0 e 4; parados 0 e 10; só com a pista do mês 1 e 7; 43 com data
+  lida da conversa. Nomes de clientes são fictícios; as frases são as deles, de leve retocadas.</p>
+
+</div>

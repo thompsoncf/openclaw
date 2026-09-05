@@ -222,6 +222,23 @@ def test_a_linha_do_funil_desenha_pendencia_acao_e_menu():
     assert "oc-menu-btn" in js, "o botão Ações sumiu"
 
 
+def test_o_valor_da_linha_do_funil_e_sempre_o_liquido():
+    """05/09/2026: um cliente de evento com desconto via um valor na linha do
+    funil (setup_centavos, BRUTO) diferente do que a folha de assinatura, o
+    e-mail de envio e o título a receber mostravam (todos os três leem
+    primeiro_ano_centavos, o líquido) — o mesmo orçamento com dois preços.
+
+    `evento?it.setup:it.total` era o único lugar da tela que preferia o bruto.
+    Guarda dupla: o padrão velho não pode voltar, e o campo usado tem que ser
+    sempre `it.total`, sem condicionar ao modo."""
+    js = "\n".join(_scripts(_render("servicos")))
+    m = re.search(r"var sub=\[esc\(it\.sub.*?\.join\(' · '\);", js, re.S)
+    assert m, "não achei o join que monta a linha do funil"
+    linha = m.group(0)
+    assert "it.setup" not in linha, "o valor bruto voltou a entrar na linha do funil"
+    assert "esc(it.total)" in linha, "a linha do funil não lê mais it.total"
+
+
 def test_o_js_da_agenda_compila(tmp_path):
     """A Agenda serve o JS como ARQUIVO (web/estaticos.py), então dá pra checar a
     fonte direto — sem render, sem contexto. Vale o mesmo que os outros: erro de

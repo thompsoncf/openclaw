@@ -143,6 +143,29 @@ def _preenchidos(c: dict) -> int:
     return sum(1 for k in campos if str(c.get(k) or "").strip())
 
 
+def _refs_por_cliente(pool, dono_id: int, ids: list[int]) -> dict[int, int]:
+    """Quantos títulos, lançamentos e orçamentos apontam pra cada cadastro.
+
+    Três consultas, não uma por cadastro: isto alimenta a sugestão da tela de
+    repetidos, que abre junto com a aba Clientes — e esta base já teve um
+    episódio de lentidão geral por trabalho extra em rota quente.
+    """
+    if not ids:
+        return {}
+    contagem: dict[int, int] = {}
+    with pool.connection() as c:
+        presentes = _tabelas_presentes(c)
+        for tabela, col, col_conta in _TABELAS_REF:
+            if tabela not in presentes:
+                continue
+            for cid, n in c.execute(
+                    f"select {col}, count(*) from {tabela} "
+                    f" where {col} = any(%s) and {col_conta}=%s group by {col}",
+                    (ids, dono_id)).fetchall():
+                contagem[int(cid)] = contagem.get(int(cid), 0) + int(n)
+    return contagem
+
+
 # ---------------------------------------------------------------------------
 # Achar os suspeitos
 # ---------------------------------------------------------------------------
@@ -246,9 +269,23 @@ def candidatos(pool, dono_id: int) -> list[dict]:
         membros = [por_id[i] for i in ids if i in por_id]
         if len(membros) < 2:
             continue
-        # quem fica: mais campos preenchidos > tem documento > mais antigo (id menor)
+        # QUEM FICA: quem TEM HISTÓRICO > mais campos preenchidos > tem documento
+        # > mais antigo (id menor).
+        #
+        # O histórico entrou primeiro em 05/09/2026, olhando a Prime. Sem ele o
+        # desempate caía no "mais antigo", e nos quatro grupos dela isso errava
+        # duas vezes de um jeito visível: sugeria ficar com a **"Visctoria"** (o
+        # nome escrito errado, sem orçamento nenhum) em vez da "Victoria", que
+        # tem um orçamento; e com o Gilvan sem título em vez do que tem.
+        #
+        # A razão de o histórico pesar mais que o cadastro cheio: as referências
+        # se movem nos dois sentidos e o resultado final é a união dos dois de
+        # qualquer jeito — o que NÃO se move é o NOME do que fica. E o nome com
+        # histórico é o que já está impresso em orçamento e título do cliente.
+        refs = _refs_por_cliente(pool, dono_id, [c["id"] for c in membros])
         vencedor = max(membros,
-                       key=lambda c: (_preenchidos(c), 1 if _doc(c) else 0, -c["id"]))
+                       key=lambda c: (refs.get(c["id"], 0), _preenchidos(c),
+                                      1 if _doc(c) else 0, -c["id"]))
         motivos = {}
         for outro in membros:
             if outro["id"] == vencedor["id"]:

@@ -510,3 +510,145 @@ def test_fusao_funciona_em_conta_sem_o_modulo_de_orcamentos(pool, dono):
             with pool.connection() as c:
                 c.execute((base / m).read_text(encoding="utf-8"))
                 c.commit()
+
+
+# ---------------------------------------------------------------------------
+# QUEM FICA — e a tela que o dono não conseguia usar
+#
+# Relato do dono em 05/09/2026, com a tela na frente: *"não tô conseguindo juntar
+# os cadastros"*. O motor estava certo — reproduzindo os 50 cadastros da Prime
+# num banco descartável, `candidatos()` achava os quatro grupos e nenhum tinha
+# impedimento. O que travava era a PRIMEIRA tela, por dois motivos, e a sugestão
+# errava por um terceiro.
+# ---------------------------------------------------------------------------
+
+def test_quem_tem_historico_ganha_o_desempate(pool, dono):
+    """A Victoria da Prime, exatamente. Os dois cadastros têm o mesmo telefone,
+    a mesma cidade e nenhum documento — então o desempate caía no "mais antigo",
+    e o mais antigo era o **"Visctoria"**, com o nome escrito errado e sem
+    orçamento nenhum. Aceitar a sugestão guardava o nome errado pra sempre.
+
+    Quem tem histórico ganha porque as referências se movem nos dois sentidos e
+    o resultado final é a união dos dois de qualquer jeito — o que NÃO se move é
+    o NOME de quem fica, e o nome com histórico é o que já está impresso nos
+    documentos do cliente."""
+    errado = cli.puxar_ou_criar_cliente(
+        pool, dono, pessoa_id=_pessoa(pool, "Visctoria Caroline de Aragao",
+                                      "8695000031"))
+    certo = cli.puxar_ou_criar_cliente(
+        pool, dono, pessoa_id=_pessoa(pool, "Victoria Caroline de Aragao",
+                                      "8695000031"))
+    assert errado < certo, "o de nome errado é o mais antigo — é esse o caso"
+    _orcamento(pool, dono, certo)
+    g = [x for x in dd.candidatos(pool, dono)
+         if {c["id"] for c in x["clientes"]} == {errado, certo}]
+    assert g and g[0]["sugerido"] == certo
+
+
+def test_sem_historico_o_desempate_continua_sendo_o_cadastro_mais_cheio(pool, dono):
+    """O histórico entrou NA FRENTE, não NO LUGAR: sem nenhuma referência dos
+    dois lados, quem tem mais campo preenchido continua sendo o sugerido."""
+    magro = cli.puxar_ou_criar_cliente(
+        pool, dono, pessoa_id=_pessoa(pool, "Tereza Nunes de Brito", "8695000032"))
+    cheio = cli.puxar_ou_criar_cliente(
+        pool, dono, pessoa_id=_pessoa(pool, "Tereza Nunes de Brito", "8695000032"))
+    cli.atualizar_cliente(pool, dono, cheio, cidade="Teresina", uf="PI",
+                          endereco="Rua das Flores, 10")
+    g = [x for x in dd.candidatos(pool, dono)
+         if {c["id"] for c in x["clientes"]} == {magro, cheio}]
+    assert g and g[0]["sugerido"] == cheio
+
+
+# ------------------------------------------------------------------- a tela
+
+def _lista_html(grupos) -> str:
+    """A lista de repetidos pelo Jinja de verdade, como o portal roda."""
+    from jinja2 import DictLoader, Environment
+    from web import portal as pt
+    corpo = pt._CLIENTES_DUP.split("{% block conteudo %}", 1)[1].rsplit("{% endblock %}", 1)[0]
+    env = Environment(loader=DictLoader({"t": corpo}))
+    return env.get_template("t").render(grupos=grupos, historico=[], erro=None,
+                                        aviso=None)
+
+
+def _grupo_falso(sugerido=1):
+    return [{"rotulo": "mesmo telefone", "sugerido": sugerido, "motivos": {},
+             "clientes": [
+                 {"id": 1, "nome": "Victoria Caroline", "eh_cliente": True,
+                  "eh_fornecedor": False, "documento_fmt": "", "telefone": "",
+                  "email": "", "endereco": "", "cidade": "", "uf": "", "tipo": "pf"},
+                 {"id": 2, "nome": "Visctoria Caroline", "eh_cliente": True,
+                  "eh_fornecedor": False, "documento_fmt": "", "telefone": "",
+                  "email": "", "endereco": "", "cidade": "", "uf": "", "tipo": "pf"}]}]
+
+
+def test_a_linha_que_fica_nao_tem_botao_de_juntar():
+    """O BECO SEM SAÍDA, que é o que travou o dono. A linha sugerida vinha
+    marcada, em destaque, E com o botão do lado — clicar nele mandava
+    `fica=25&sai=25`, que cai em "São o mesmo cadastro" e não oferece saída
+    nenhuma (o "inverter" da tela seguinte devolve a mesma tela). Era o
+    movimento mais natural da tela inteira.
+
+    Agora a linha marcada não tem botão: o beco deixa de existir por
+    construção."""
+    html = _lista_html(_grupo_falso(sugerido=1))
+    assert 'name="sai" value="1" hidden' in html, "a linha que fica ainda oferece juntar"
+    assert 'name="sai" value="2" hidden' not in html, "a outra linha perdeu o botão"
+
+
+def test_o_botao_diz_o_nome_de_quem_fica():
+    """"juntar este →" não dizia o que fazia: na linha onde estava, significava
+    "esta aqui vai ser arquivada" — o contrário do que se lê."""
+    html = _lista_html(_grupo_falso(sugerido=1))
+    assert "arquivar esta e juntar em" in html
+    assert "Victoria Caroline</b>" in html
+    assert "juntar este" not in html
+
+
+def test_o_selo_de_quem_fica_aparece_so_na_linha_marcada():
+    html = _lista_html(_grupo_falso(sugerido=2))
+    assert html.count("✓ esta fica") == 2, "o selo nasce nas duas, escondido numa"
+    assert html.count('class="dup-selo-fica" hidden') == 1
+
+
+def test_o_hidden_ganha_de_quem_der_display():
+    """A barra de lote do relatório ficou visível pra sempre porque uma classe
+    com `display:flex` ganhou do atributo `hidden`. Aqui a regra é explícita."""
+    from web import portal as pt
+    assert ".dup-lin [hidden]{display:none!important}" in pt._CLIENTES_DUP
+
+
+def test_o_javascript_da_troca_e_valido():
+    """Um `\\n` de Python virando quebra de linha de verdade dentro de uma string
+    JS derruba o bloco `<script>` inteiro, sem erro visível — foi assim que a
+    barra de lote nasceu morta no #615."""
+    import re
+    import subprocess
+    from web import portal as pt
+    blocos = re.findall(r"<script>(.*?)</script>", pt._CLIENTES_DUP, re.S)
+    livres = [b for b in blocos if "{{" not in b and "{%" not in b]
+    assert any("dupTroca" in b for b in livres), \
+        "o bloco da troca não está entre os conferidos"
+    for b in livres:
+        r = subprocess.run(["node", "--check", "-"], input=b, text=True,
+                           capture_output=True)
+        assert r.returncode == 0, r.stderr
+
+
+def test_inverter_some_quando_os_dois_lados_sao_o_mesmo_cadastro():
+    """Com `fica == sai` o link "inverter" devolvia a MESMA tela com o mesmo
+    erro — e era a única coisa na tela que parecia uma saída."""
+    from jinja2 import DictLoader, Environment
+    from web import portal as pt
+    corpo = pt._CLIENTES_DUP_REVISAR.split("{% block conteudo %}", 1)[1] \
+                                    .rsplit("{% endblock %}", 1)[0]
+    env = Environment(loader=DictLoader({"t": corpo}))
+    mesmo = {"id": 5, "nome": "Ana Clara", "documento_fmt": "", "telefone": "",
+             "email": ""}
+    html = env.get_template("t").render(
+        p={"vencedor": mesmo, "perdedor": mesmo, "impedimento": "São o mesmo cadastro.",
+           "campos": {}, "campos_pessoa": {}, "papeis": [], "refs": {},
+           "refs_resumo": [], "rotulos": {}}, motivo="")
+    assert "São o mesmo cadastro." in html
+    assert "inverter" not in html
+    assert "voltar" in html

@@ -206,3 +206,44 @@ mesmo PR**, como migração `NNN_novidade_<chave>.sql`, seguindo a receita da 17
 O que **não** precisa de aviso: correção que não muda tela, teste, mockup,
 documentação, mudança de serviço interno. Na dúvida, é 'novidade' com público
 'todos'.
+
+## 6. Toda tela segue o nicho da conta, e na dúvida se pergunta
+
+Regra do dono, dada em 05/09/2026, depois de ver o Raio-X na conta dele:
+
+> "o raio-x tem que ser condizente a cada nicho, então o evento não se mistura
+> com o raio-x de outros nichos. tem que pegar o que cada nicho tem pra colocar
+> cada um no seu lugar"
+
+O que aconteceu: o Raio-X (#635, #636) foi desenhado olhando a Prime Eventos e
+saiu falando de festa pra toda conta: "tipo de festa", "dia da festa",
+"convidados", "visita", "data indisponível". A ZAQ, que vende sistema por
+mensalidade, viu tudo isso vazio em 43 leads que nunca terão data. O conserto
+(#640) foi um **perfil por conta** — `finance/raio_x_perfil.py` — lido dos
+portões que já existiam: `finance.vendas.modo_por_nicho` (evento × recorrente),
+`finance.nichos.vende_servico` e `vende_produto`.
+
+**Então, toda tela, relatório, aviso ou métrica nova segue o nicho da conta:**
+
+1. **Antes de desenhar, pergunte o que a conta vende.** Os perfis são três:
+   `eventos` (festa com data, visita, contrato de locação), `recorrente` (setup e
+   mensalidade, reunião, lead PJ com segmento e porte) e `produto` (caixa e
+   pedido, sem funil nem vendedor). Conta sem nicho escolhido cai em
+   `recorrente`, e a tela pede pra escolher em Empresa.
+2. **Vocabulário, filtros, blocos e listas vêm do perfil**, nunca fixos no
+   código. "Festa" só aparece pra quem vende festa; "reunião" pra quem vende
+   serviço; produto não ganha tela de funil. `finance/raio_x_perfil.py` é o lugar
+   de acrescentar o que um nicho tem, e `tests/test_raio_x_perfil.py` é onde se
+   garante que nada de um nicho vaza pro outro.
+3. **O aviso da novidade mira pelo mesmo portão** (seção 5): `servico`,
+   `eventos`, `recorrente`, `produto` — nunca `todos` pra uma tela que só faz
+   sentido num nicho.
+4. **Meça em mais de uma conta antes de aprovar.** A Prime (34, eventos) e a ZAQ
+   (3, consultoria) são os dois extremos em produção; um mockup que só olha uma
+   delas está incompleto. A lista de contas com nicho sai de `contas` ×
+   `nichos`, só leitura.
+
+**E na dúvida, pergunte ao dono antes de construir.** Se não estiver claro o que
+um nicho tem, o que ele chama cada coisa, ou se um número faz sentido pra ele, a
+pergunta custa uma linha; a tela errada custou um PR inteiro. Nunca assuma que o
+vocabulário de um nicho serve pro outro.

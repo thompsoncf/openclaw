@@ -536,6 +536,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
      placar da semana toda segunda às 8h. O dono escolhe o grupo aqui; sem grupo,
      nada é enviado. Só com o WhatsApp da própria empresa (QR): grupo não existe
      na API oficial. #}
+  {% if raio_x_perfil and raio_x_perfil.aplica %}
   <div class="papeis" style="margin-top:1.4rem">
     <div class="ph-tt">🔎 Raio-X de segunda <span class="mut" style="font-weight:400">— o placar da semana no grupo dos vendedores</span></div>
     <div class="mut" style="font-size:.82rem;line-height:1.5">Toda segunda às 8h o Zaq manda no grupo uma linha por vendedor (leads novos, 1ª resposta, propostas enviadas e em rascunho, quantos clientes esperando), a linha da empresa e a confiança do dado. O mesmo Raio-X está no app de cada um, na aba Raio-X.</div>
@@ -568,6 +569,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
     </form>
     {% endif %}
   </div>
+  {% endif %}
 </div>
 {% endblock %}"""
 

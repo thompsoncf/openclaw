@@ -17,6 +17,10 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from finance import raio_x as rx
+from finance import raio_x_perfil as rxp
+
+EVENTOS = rxp.perfil("eventos")
+RECORRENTE = rxp.perfil("consultoria")
 
 BRT = ZoneInfo("America/Sao_Paulo")
 MIG = Path(__file__).resolve().parent.parent / "db" / "migracoes"
@@ -32,7 +36,7 @@ create table membros (id bigserial primary key, conta_id bigint, nome text, emai
   papel text default 'vendedor', ativo boolean default true);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text, contato text, status text default 'novo', evento_em date, evento_tipo text,
-  orcamento_id bigint, criado_em timestamptz default now());
+  orcamento_id bigint, segmento text, criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   contato_ref text, contato_nome text, criado_em timestamptz default now());
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
@@ -268,10 +272,10 @@ def test_responda_hoje_quatro_faixas_na_ordem_e_um_lead_por_faixa(pool):
         cv = _conversa(c, conta, mel, _t(1)); _msg(c, cv, "in", _t(0.1), "e aí, quando fechamos?")
         c.commit()
 
-    h = rx.responda_hoje(pool, conta, v, SEGUNDA_10H)
+    h = rx.responda_hoje(pool, conta, v, SEGUNDA_10H, perfil=EVENTOS)
     assert [(i["faixa"], i["nome"]) for i in h["itens"]] == [
         ("pergunta", "Gil"), ("festa", "Iva"), ("toque", "Jô"), ("visita", "Lia")]
-    assert h["n"] == 4 and h["por_faixa"] == {"pergunta": 1, "festa": 1, "toque": 1, "visita": 1}
+    assert h["n"] == 4 and h["por_faixa"] == {"pergunta": 1, "festa": 1, "proposta": 0, "toque": 1, "visita": 1}
     assert h["sem_urgencia"] == 2          # Hugo e Kim seguem na Fila, sem urgência
     por = {i["nome"]: i for i in h["itens"]}
     assert "qual o valor?" in por["Gil"]["detalhe"] and "2h" in por["Gil"]["detalhe"] and por["Gil"]["acao"] == "responder"
@@ -296,7 +300,7 @@ def test_responda_hoje_perguntas_mais_antigas_primeiro_e_4o_toque_vira_porta_abe
         for d in (29, 25, 20, 10):
             _msg(c, cv, "out", _t(d))
         c.commit()
-    h = rx.responda_hoje(pool, conta, v, SEGUNDA_10H)
+    h = rx.responda_hoje(pool, conta, v, SEGUNDA_10H, perfil=EVENTOS)
     nomes = [i["nome"] for i in h["itens"]]
     assert nomes == ["Antiga", "Recente", "Parado"]
     assert [i for i in h["itens"] if i["nome"] == "Parado"][0]["acao"] == "porta aberta"
@@ -312,7 +316,7 @@ def test_responda_hoje_visita_com_desfecho_ou_cancelada_nao_entra(pool):
         c.execute("insert into eventos_agenda (conta_id, prospeccao_id, titulo, inicio, status) values (%s,%s,'x',%s,'cancelado')",
                   (conta, a, datetime(2026, 9, 8, 11, 0, tzinfo=BRT)))
         c.commit()
-    assert rx.responda_hoje(pool, conta, v, SEGUNDA_10H)["itens"] == []
+    assert rx.responda_hoje(pool, conta, v, SEGUNDA_10H, perfil=EVENTOS)["itens"] == []
 
 
 # ------------------------------------------------------------------ fechamentos
@@ -584,3 +588,49 @@ def test_migracao_207_e_idempotente(pool):
     with pool.connection() as c:
         c.execute((MIG / "207_raio_x.sql").read_text(encoding="utf-8"))
         c.commit()
+
+
+def test_responda_hoje_no_recorrente_troca_festa_por_proposta_parada_e_visita_por_reuniao(pool):
+    """Perfil recorrente (a ZAQ): a festa perto não existe, a proposta enviada
+    sem resposta há 3 dias entra como faixa própria, e o compromisso de amanhã
+    se chama reunião. O mesmo cenário no perfil eventos tem a festa e a visita."""
+    hoje = SEGUNDA_10H.date()
+    with pool.connection() as c:
+        conta = _conta(c, "ZAQ"); v = _vend(c, conta, "Vend")
+        # festa em 20 dias sem proposta: só entra no perfil eventos
+        festa = _lead(c, conta, v, "Festa", status="qualificado", evento_em=hoje + timedelta(days=20), evento_tipo="casamento")
+        # proposta enviada há 9 dias, nossa última mensagem há 4 dias, sem resposta
+        cli = _lead(c, conta, v, "Clínica Sorriso", status="proposta")
+        o = _orc(c, "Clínica Sorriso", "enviado", 89000, criado=_t(9))
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, cli))
+        cv = _conversa(c, conta, cli, _t(10)); _msg(c, cv, "in", _t(10)); _msg(c, cv, "out", _t(9)); _msg(c, cv, "out", _t(4))
+        # reunião amanhã
+        est = _lead(c, conta, v, "Estética Vila", status="qualificado")
+        c.execute("insert into eventos_agenda (conta_id, prospeccao_id, titulo, inicio) values (%s,%s,'Reunião',%s)",
+                  (conta, est, datetime(2026, 9, 8, 10, 0, tzinfo=BRT)))
+        c.commit()
+    h = rx.responda_hoje(pool, conta, v, SEGUNDA_10H, perfil=RECORRENTE)
+    assert [(i["faixa"], i["nome"]) for i in h["itens"]] == [("proposta", "Clínica Sorriso"), ("visita", "Estética Vila")]
+    por = {i["nome"]: i for i in h["itens"]}
+    assert por["Clínica Sorriso"]["detalhe"] == "proposta de R$ 890 enviada há 9 dia(s) · sem resposta"
+    assert por["Clínica Sorriso"]["acao"] == "3º toque"          # 2 nossas depois da última dele
+    assert por["Estética Vila"]["detalhe"].startswith("reunião amanhã 10:00")
+    assert h["sem_urgencia"] == 1                                # a festa fica na Fila, sem urgência
+    assert "festa" not in {i["faixa"] for i in h["itens"]}
+    # o mesmo cenário em eventos: a festa entra, a visita se chama visita
+    h2 = rx.responda_hoje(pool, conta, v, SEGUNDA_10H, perfil=EVENTOS)
+    assert [(i["faixa"], i["nome"]) for i in h2["itens"]] == [("festa", "Festa"), ("proposta", "Clínica Sorriso"), ("visita", "Estética Vila")]
+    assert h2["itens"][-1]["detalhe"].startswith("visita amanhã")
+
+
+def test_sua_semana_conta_o_segmento_em_familias(pool):
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c, "Seg"); v = _vend(c, conta, "V")
+        for seg in ("Loja", "Comércio varejista de calçados", "Atividade odontológica", "", None):
+            lid = _lead(c, conta, v, "x", criado=_t(3))
+            c.execute("update prospeccao set segmento=%s where id=%s", (seg, lid))
+        c.commit()
+    s = rx.sua_semana(pool, conta, v, ini, fim)
+    assert s["leads"] == 5 and s["leads_sem_segmento"] == 2
+    assert s["segmentos"] == [{"rotulo": "Loja / comércio", "n": 2}, {"rotulo": "Clínica / saúde", "n": 1}]

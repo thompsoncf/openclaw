@@ -17,6 +17,10 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from finance import raio_x_dono as rxd
+from finance import raio_x_perfil as rxp
+
+EVENTOS = rxp.perfil("eventos")
+RECORRENTE = rxp.perfil("consultoria")
 
 BRT = ZoneInfo("America/Sao_Paulo")
 MIG = Path(__file__).resolve().parent.parent / "db" / "migracoes"
@@ -29,7 +33,7 @@ create table membros (id bigserial primary key, conta_id bigint, nome text, emai
   papel text default 'vendedor', ativo boolean default true);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text, contato text, status text default 'novo', evento_em date, evento_tipo text,
-  evento_convidados int, orcamento_id bigint, origem text,
+  evento_convidados int, orcamento_id bigint, origem text, segmento text, porte text, uf text,
   criado_em timestamptz default now(), atualizado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   contato_ref text, contato_nome text, criado_em timestamptz default now());
@@ -37,8 +41,8 @@ create table mensagens (id bigserial primary key, conversa_id bigint, direcao te
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now());
 create table orcamentos (id bigserial primary key, cliente text, status text default 'rascunho',
-  primeiro_ano_centavos bigint default 0, criado_em timestamptz default now(),
-  aprovada_em timestamptz, sinal_pago_em timestamptz);
+  primeiro_ano_centavos bigint default 0, mensal_centavos bigint default 0, setup_centavos bigint default 0,
+  itens jsonb, criado_em timestamptz default now(), aprovada_em timestamptz, sinal_pago_em timestamptz);
 create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
   status text default 'enviado', valor_centavos bigint, assinado_em timestamptz,
   enviado_em timestamptz, criado_em timestamptz default now());
@@ -72,6 +76,7 @@ def pool():
     with p.connection() as c:
         c.execute(_SQL)
         c.execute((MIG / "209_raio_x_dono.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "213_perda_motivo_por_perfil.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -144,7 +149,7 @@ def cen(pool):
 def _f(**kw):
     base = {"periodo": "mes"}
     base.update(kw)
-    return rxd.filtros(base)
+    return rxd.filtros(base, EVENTOS)
 
 
 # ------------------------------------------------------------------ os filtros, puros
@@ -153,7 +158,7 @@ def test_filtros_normalizam_e_recusam_o_que_nao_esta_na_lista():
     f = rxd.filtros({"periodo": "xyz", "vendedor": "abc", "tipo": "Bolo", "mes": "2026-13", "dia": "x",
                      "conv": "1000", "origem": "tiktok", "hora": "madrugada"})
     assert f == {"periodo": "mes", "de": None, "ate": None, "vendedor": None, "tipo": "", "mes": "",
-                 "dia": "", "conv": "", "origem": "", "hora": ""}
+                 "dia": "", "conv": "", "origem": "", "hora": "", "segmento": "", "porte": "", "uf": "", "servico": ""}
     f = rxd.filtros({"periodo": "datas", "de": "2026-09-01", "ate": "2026-09-05", "vendedor": "7",
                      "tipo": "sem", "mes": "2026-10", "dia": "sabado", "conv": "60a99", "origem": "indicacao", "hora": "fds"})
     assert f["periodo"] == "datas" and f["de"] == date(2026, 9, 1) and f["ate"] == date(2026, 9, 5)
@@ -178,7 +183,7 @@ def test_rotulos_das_listas():
 # ------------------------------------------------------------------ o placar
 
 def test_placar_do_mes_sem_filtro(pool, cen):
-    d = rxd.dono(pool, cen["conta"], _f(), AGORA)
+    d = rxd.dono(pool, cen["conta"], _f(), AGORA, perfil=EVENTOS)
     p = d["placar"]
     assert d["rotulo"] == "01/09 a 07/09"
     assert p["leads"] == 5 and p["leads_com_data"] == 4 and p["leads_sem_tipo"] == 1
@@ -218,14 +223,14 @@ def test_cada_filtro_devolve_o_lead_que_descreve(pool, cen, filtro, esperados):
             f"select p.contato from prospeccao p where p.conta_id = %s and p.criado_em >= %s{w}",
             [cen["conta"], datetime(2026, 9, 1, tzinfo=BRT), *wv]).fetchall()}
     assert nomes == esperados, filtro
-    assert rxd.dono(pool, cen["conta"], f, AGORA)["placar"]["leads"] == len(esperados)
+    assert rxd.dono(pool, cen["conta"], f, AGORA, perfil=EVENTOS)["placar"]["leads"] == len(esperados)
 
 
 def test_filtro_por_vendedor_corta_o_placar_e_a_linha_por_vendedor(pool, cen):
-    d = rxd.dono(pool, cen["conta"], _f(vendedor=str(cen["p"])), AGORA)
+    d = rxd.dono(pool, cen["conta"], _f(vendedor=str(cen["p"])), AGORA, perfil=EVENTOS)
     assert d["placar"]["leads"] == 2                    # Bia e Dora
     assert [v["nome"] for v in d["vendedores"]] == ["Pedro Yan"]
-    d = rxd.dono(pool, cen["conta"], _f(), AGORA)
+    d = rxd.dono(pool, cen["conta"], _f(), AGORA, perfil=EVENTOS)
     assert [v["primeiro_nome"] for v in d["vendedores"]] == ["Jaqueline", "Pedro"]
     jaq = d["vendedores"][0]
     assert jaq["semana"]["leads"] == 3 and len(jaq["semana"]["contratos"]) == 1 and jaq["hoje"] >= 0
@@ -234,7 +239,7 @@ def test_filtro_por_vendedor_corta_o_placar_e_a_linha_por_vendedor(pool, cen):
 # ------------------------------------------------------------------ os blocos
 
 def test_demanda_x_agenda_seis_meses_a_partir_do_corrente(pool, cen):
-    d = rxd.dono(pool, cen["conta"], _f(), AGORA)["demanda_agenda"]
+    d = rxd.dono(pool, cen["conta"], _f(), AGORA, perfil=EVENTOS)["demanda_agenda"]
     assert [m["rotulo"] for m in d] == ["set", "out", "nov", "dez", "jan 27", "fev 27"]
     por = {m["rotulo"]: (m["pedindo"], m["agenda"]) for m in d}
     assert por["out"] == (2, 1)      # Ana e Eva pedindo (Dora é perdida); 1 festa (a cancelada não conta)
@@ -243,7 +248,7 @@ def test_demanda_x_agenda_seis_meses_a_partir_do_corrente(pool, cen):
 
 
 def test_dia_da_festa_e_tipo_com_ticket(pool, cen):
-    d = rxd.dono(pool, cen["conta"], _f(), AGORA)
+    d = rxd.dono(pool, cen["conta"], _f(), AGORA, perfil=EVENTOS)
     dias = {x["rotulo"]: x["n"] for x in d["dia_festa"]}
     assert dias["sáb"] == 3 and dias["dom"] == 1 and sum(dias.values()) == 4
     tipos = {t["tipo"]: t for t in d["tipos"]}
@@ -254,7 +259,7 @@ def test_dia_da_festa_e_tipo_com_ticket(pool, cen):
 
 
 def test_ciclo_e_perdas(pool, cen):
-    d = rxd.dono(pool, cen["conta"], _f(), AGORA)
+    d = rxd.dono(pool, cen["conta"], _f(), AGORA, perfil=EVENTOS)
     c = d["ciclo"]
     assert c["lead_proposta_n"] == 2 and 0 < c["lead_proposta_dias"] <= 1.0   # Ana 1 dia, Fabi 4h
     assert c["proposta_contrato_n"] == 1 and c["proposta_contrato_dias"] == 2.0
@@ -269,7 +274,7 @@ def test_bloco_que_falha_nao_derruba_a_tela(pool, cen, monkeypatch):
     def estoura(*a, **k):
         raise RuntimeError("tabela sumiu")
     monkeypatch.setattr(rxd, "_perdas", estoura)
-    d = rxd.dono(pool, cen["conta"], _f(), AGORA)
+    d = rxd.dono(pool, cen["conta"], _f(), AGORA, perfil=EVENTOS)
     assert d["perdas"] is None and d["placar"]["leads"] == 5 and d["ciclo"] is not None
 
 
@@ -305,6 +310,7 @@ def test_a_tela_renderiza_o_placar_os_filtros_e_os_blocos(pool, cen, monkeypatch
     monkeypatch.setattr(prx, "conta_logada", lambda req: (cen["conta"], "pj", "Prime"))
     monkeypatch.setattr(prx, "get_pool", lambda: pool)
     monkeypatch.setattr(rxd, "agora_brt", lambda agora=None: AGORA)
+    monkeypatch.setattr(rxd, "perfil_da_conta", lambda pool, conta_id: EVENTOS)
     capt = {}
 
     def fake_render(nome, request, **ctx):
@@ -328,3 +334,147 @@ def test_a_tela_renderiza_o_placar_os_filtros_e_os_blocos(pool, cen, monkeypatch
               "Por que perdeu", "Hora que chegou", "Confiança do dado", "Por vendedor"):
         assert t in html, t
     assert "Jaqueline Silva" in html
+
+
+# ------------------------------------------------------------------ o perfil recorrente (a ZAQ em miniatura)
+
+@pytest.fixture(scope="module")
+def zaq(pool):
+    """Consultoria que vende sistema por mensalidade: lead PJ com segmento, porte
+    e UF; orçamento com mensalidade e itens do catálogo; reunião na agenda."""
+    with pool.connection() as c:
+        conta = c.execute("insert into contas (nome, nome_fantasia) values ('ZAQ Sistemas','ZAQ') returning id").fetchone()[0]
+        v = c.execute("insert into membros (conta_id, nome) values (%s,'Vendedor Um') returning id", (conta,)).fetchone()[0]
+
+        def lead(nome, criado, seg, porte, uf, status="novo", motivo=None):
+            return c.execute("""insert into prospeccao (conta_id, vendedor_id, contato, status, segmento, porte, uf, perda_motivo, origem, criado_em, atualizado_em)
+                                values (%s,%s,%s,%s,%s,%s,%s,%s,'whatsapp_inbound',%s,%s) returning id""",
+                             (conta, v, nome, status, seg, porte, uf, motivo, criado, criado)).fetchone()[0]
+
+        def orc(lid, status, mensal, itens, criado, aprovada=None):
+            import json
+            o = c.execute("""insert into orcamentos (cliente, status, primeiro_ano_centavos, mensal_centavos, itens, criado_em, aprovada_em)
+                             values ('x',%s,%s,%s,%s::jsonb,%s,%s) returning id""",
+                          (status, mensal * 12, mensal, json.dumps(itens), criado, aprovada)).fetchone()[0]
+            c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, lid))
+            return o
+        a = lead("Ótica Central", _dt(1, 9, 10), "Comércio varejista de artigos de óptica", "Microempresa", "PI", status="ganho")
+        oa = orc(a, "fechado", 89000, [{"nome": "Agente de Atendimento", "mensal_centavos": 59000}, {"nome": "CRM / Leads", "mensal_centavos": 30000}], _dt(2, 9, 10), aprovada=_dt(3, 9, 10))
+        c.execute("insert into contratos (conta_id, orcamento_id, status, valor_centavos, assinado_em) values (%s,%s,'assinado',1068000,%s)", (conta, oa, _dt(4, 9, 10)))
+        b = lead("Clínica Sorriso", _dt(2, 9, 21), "Atividade odontológica", "Empresa de Pequeno Porte", "PI", status="proposta")
+        orc(b, "enviado", 129000, [{"nome": "Agente de Atendimento", "mensal_centavos": 59000}, {"nome": "Automação Financeira", "mensal_centavos": 70000}], _dt(3, 9, 9))
+        lead("Loja Bella", _dt(3, 9, 15), "Loja", "Microempresa", "MA")
+        lead("Sem Nada", _dt(4, 9, 11), "", "", "")
+        lead("Contábil Souza", _dt(5, 9, 13), "Atividades de contabilidade", "Demais", "PI", status="perdido", motivo="ficou_com_atual")
+        c.execute("insert into eventos_agenda (conta_id, prospeccao_id, titulo, inicio, desfecho) values (%s,%s,'Reunião Ótica',%s,'realizado')", (conta, a, _dt(3, 9, 16)))
+        c.execute("insert into eventos_agenda (conta_id, prospeccao_id, titulo, inicio) values (%s,%s,'Reunião Clínica',%s)", (conta, b, _dt(4, 9, 16)))
+        c.commit()
+    return {"conta": conta, "v": v}
+
+
+def _fr(**kw):
+    base = {"periodo": "mes"}
+    base.update(kw)
+    return rxd.filtros(base, RECORRENTE)
+
+
+def test_no_recorrente_os_filtros_de_festa_sao_ignorados_e_os_de_segmento_valem(zaq, pool):
+    f = _fr(tipo="Casamento", dia="sabado", conv="60a99", mes="2026-10", segmento="clinica", porte="epp", uf="pi", servico="Agente de Atendimento")
+    assert f["tipo"] == "" and f["dia"] == "" and f["conv"] == "" and f["mes"] == ""
+    assert f["segmento"] == "clinica" and f["porte"] == "epp" and f["uf"] == "PI" and f["servico"] == "Agente de Atendimento"
+
+
+@pytest.mark.parametrize("filtro, esperados", [
+    ({"segmento": "loja"}, {"Ótica Central", "Loja Bella"}),
+    ({"segmento": "clinica"}, {"Clínica Sorriso"}),
+    ({"segmento": "escritorio"}, {"Contábil Souza"}),
+    ({"segmento": "sem"}, {"Sem Nada"}),
+    ({"porte": "me"}, {"Ótica Central", "Loja Bella"}),
+    ({"porte": "epp"}, {"Clínica Sorriso"}),
+    ({"porte": "sem"}, {"Sem Nada"}),
+    ({"uf": "ma"}, {"Loja Bella"}),
+    ({"servico": "Automação Financeira"}, {"Clínica Sorriso"}),
+    ({"servico": "Agente de Atendimento"}, {"Ótica Central", "Clínica Sorriso"}),
+])
+def test_cada_filtro_do_recorrente_devolve_o_lead_que_descreve(pool, zaq, filtro, esperados):
+    w, wv = rxd._where(_fr(**filtro))
+    with pool.connection() as c:
+        nomes = {r[0] for r in c.execute(
+            f"select p.contato from prospeccao p where p.conta_id = %s{w}", [zaq["conta"], *wv]).fetchall()}
+    assert nomes == esperados, filtro
+
+
+def test_placar_e_blocos_do_recorrente(pool, zaq):
+    d = rxd.dono(pool, zaq["conta"], _fr(), AGORA, perfil=RECORRENTE)
+    p = d["placar"]
+    assert p["leads"] == 5 and p["propostas"] == 2 and p["propostas_mensal"] == 89000 + 129000
+    assert p["contratos"] == 1 and p["contratos_mensal"] == 89000
+    assert p["visitas_ok"] == 1 and p["visitas_sem_resposta"] == 1
+    # os blocos de festa não rodam; os do recorrente sim
+    assert d["demanda_agenda"] is None and d["dia_festa"] is None and d["tipos"] is None
+    assert [(m["rotulo"], m["proposta"], m["fechada"]) for m in d["mrr"]] == [("set", 218000, 89000)]
+    seg = {x["chave"]: (x["n"], x["fechou"]) for x in d["segmentos"]}
+    assert seg == {"loja": (2, 1), "clinica": (1, 0), "escritorio": (1, 0), "sem": (1, 0)}
+    assert d["segmentos"][0]["chave"] == "loja" and d["segmentos"][-1]["chave"] == "sem"
+    sv = d["servicos"]
+    assert sv["historico"] is False
+    assert sv["itens"][0] == {"nome": "Agente de Atendimento", "n": 2, "mensal_centavos": 59000}
+    assert {x["nome"] for x in sv["itens"]} == {"Agente de Atendimento", "CRM / Leads", "Automação Financeira"}
+    perdas = d["perdas"]
+    assert perdas["total"] == 1 and perdas["itens"][0]["chave"] == "ficou_com_atual"
+    assert "data_indisponivel" not in {x["chave"] for x in perdas["itens"]}
+
+
+def test_servicos_sem_proposta_no_periodo_cai_no_historico(pool, zaq):
+    f = rxd.filtros({"periodo": "datas", "de": "2026-07-01", "ate": "2026-07-31"}, RECORRENTE)
+    d = rxd.dono(pool, zaq["conta"], f, AGORA, perfil=RECORRENTE)
+    assert d["placar"]["propostas"] == 0 and d["servicos"]["historico"] is True and d["servicos"]["itens"]
+
+
+def test_a_tela_do_recorrente_nao_fala_de_festa(pool, zaq, monkeypatch):
+    import web.painel_raio_x as prx
+    from web import portal
+    monkeypatch.setattr(prx, "conta_logada", lambda req: (zaq["conta"], "pj", "ZAQ"))
+    monkeypatch.setattr(prx, "get_pool", lambda: pool)
+    monkeypatch.setattr(rxd, "agora_brt", lambda agora=None: AGORA)
+    monkeypatch.setattr(rxd, "perfil_da_conta", lambda pool, conta_id: RECORRENTE)
+
+    def fake_render(nome, request, **ctx):
+        from fastapi.responses import HTMLResponse
+        tpl = portal._env.get_template(nome)
+        return HTMLResponse("".join(tpl.blocks["conteudo"](tpl.new_context(dict(ctx, request=request)))))
+    monkeypatch.setattr(prx, "_render", fake_render)
+    html = bytes(prx.painel_raio_x(_req(segmento="loja")).body).decode("utf-8")
+    baixo = html.lower()
+    for palavra in ("festa", "convidados", "visita", "sábado", "casamento"):
+        assert palavra not in baixo, palavra
+    for t in ("Segmento", "Porte", "UF", "Serviço", "Mensalidade proposta × fechada", "Segmento que chega",
+              "Serviço mais proposto", "Reuniões que aconteceram", "reuniões que aconteceram", "/mês", "Por que perdeu"):
+        assert t in html, t
+    assert 'value="loja" selected' in html and ">2</b><span>leads</span>" in html
+    assert "Sua conta ainda não escolheu o nicho" not in html
+
+
+def test_conta_sem_nicho_ve_o_aviso_pra_escolher(pool, zaq, monkeypatch):
+    import web.painel_raio_x as prx
+    from web import portal
+    monkeypatch.setattr(prx, "conta_logada", lambda req: (zaq["conta"], "pj", "ZAQ"))
+    monkeypatch.setattr(prx, "get_pool", lambda: pool)
+    monkeypatch.setattr(rxd, "perfil_da_conta", lambda pool, conta_id: rxp.perfil(None))
+
+    def fake_render(nome, request, **ctx):
+        from fastapi.responses import HTMLResponse
+        tpl = portal._env.get_template(nome)
+        return HTMLResponse("".join(tpl.blocks["conteudo"](tpl.new_context(dict(ctx, request=request)))))
+    monkeypatch.setattr(prx, "_render", fake_render)
+    html = bytes(prx.painel_raio_x(_req()).body).decode("utf-8")
+    assert "Sua conta ainda não escolheu o nicho" in html and "festa" not in html.lower()
+
+
+def test_conta_de_produto_nao_tem_raio_x(pool, monkeypatch):
+    import web.painel_raio_x as prx
+    monkeypatch.setattr(prx, "conta_logada", lambda req: (1, "pj", "Loja"))
+    monkeypatch.setattr(prx, "get_pool", lambda: pool)
+    monkeypatch.setattr(rxd, "perfil_da_conta", lambda pool, conta_id: rxp.perfil("hortifruti"))
+    r = prx.painel_raio_x(_req())
+    assert r.status_code == 303 and r.headers["location"] == "/painel"

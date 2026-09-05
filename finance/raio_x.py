@@ -143,6 +143,17 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
               from prospeccao
              where conta_id = %s and vendedor_id = %s and criado_em >= %s and criado_em < %s""",
             (conta_id, membro_id, ini, fim)).fetchone()
+        # o segmento (do CNPJ), em famílias curtas: é o comparativo do perfil
+        # recorrente ("6 lojas, 2 clínicas · 3 ainda sem segmento")
+        from finance.raio_x_perfil import familia_segmento
+        fam: dict[str, int] = {}
+        for (seg,) in c.execute("""select segmento from prospeccao
+                                    where conta_id = %s and vendedor_id = %s and criado_em >= %s and criado_em < %s""",
+                                 (conta_id, membro_id, ini, fim)).fetchall():
+            k, r = familia_segmento(seg)
+            fam[r] = fam.get(r, 0) + 1
+        sem_segmento = fam.pop("sem segmento", 0)
+        segmentos = sorted(fam.items(), key=lambda x: -x[1])
         resp = _primeiras_respostas(c, conta_id, membro_id, ini, fim)
         resp_ant = _primeiras_respostas(c, conta_id, membro_id, ant_ini, ant_fim)
         enviadas, rascunhos = c.execute("""
@@ -201,6 +212,7 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
     return {
         "ini": ini, "fim": fim,
         "leads": int(leads), "leads_com_data": int(com_data), "leads_sem_tipo": int(sem_tipo),
+        "leads_sem_segmento": int(sem_segmento), "segmentos": [{"rotulo": r, "n": n} for r, n in segmentos],
         "primeira_min": _mediana(resp), "primeira_n": len(resp), "primeira_em_5": n_5,
         "primeira_min_anterior": _mediana(resp_ant),
         "propostas_enviadas": int(enviadas), "rascunhos": int(rascunhos),
@@ -239,17 +251,30 @@ def _ordinal(n: int) -> str:
     return f"{n}º"
 
 
+#: proposta enviada há pelo menos X dias sem o cliente responder é "parada"
+PROPOSTA_PARADA_DIAS = 3
+
+
 def responda_hoje(pool, conta_id: int, membro_id: int, agora: datetime | None = None,
-                  base: str = "/cockpit") -> dict:
-    """A fila do que mais urge, em quatro faixas, na ordem em que aparecem:
+                  base: str = "/cockpit", perfil: dict | None = None) -> dict:
+    """A fila do que mais urge, em faixas, na ordem em que aparecem:
 
       pergunta   o cliente falou por último e não foi despedida
-      festa      festa em até 60 dias, sem proposta
+      festa      festa em até 60 dias, sem proposta (só no perfil eventos)
+      proposta   proposta enviada, sem resposta do cliente há 3 dias
       toque      a última mensagem é nossa e o toque N da cadência venceu
-      visita     visita amanhã, sem desfecho
+      visita     visita (ou reunião) amanhã, sem desfecho
 
-    Um lead entra numa faixa só (a primeira em que cabe). `sem_urgencia` é o resto
-    dos leads em jogo — a Fila normal continua com todos."""
+    O PERFIL (finance/raio_x_perfil) decide quais faixas existem e como o
+    compromisso se chama: quem vende mensalidade não tem "festa perto", e a
+    visita é reunião. Um lead entra numa faixa só (a primeira em que cabe).
+    `sem_urgencia` é o resto dos leads em jogo — a Fila normal continua com todos."""
+    if perfil is None:
+        from finance.raio_x_perfil import perfil_da_conta
+        perfil = perfil_da_conta(pool, conta_id)
+    faixas = set(perfil.get("faixas") or ())
+    vocab = perfil.get("vocab") or {}
+    nome_comp = vocab.get("compromisso", "visita")
     a = agora_brt(agora)
     hoje = a.date()
     with pool.connection() as c:
@@ -292,12 +317,32 @@ def responda_hoje(pool, conta_id: int, membro_id: int, agora: datetime | None = 
             t = (texto or "").strip() or "mensagem"
             _add("pergunta", lid, nome, f"“{t[:70]}” · {quando}", "responder", -horas)
     for lid, nome, status, ev_em, ev_tipo, orc, dirc, texto, em, cauda in leads:
-        if lid in usados or not ev_em or orc:
+        if "festa" not in faixas or lid in usados or not ev_em or orc:
             continue
         dias = (ev_em - hoje).days
         if 0 <= dias <= FESTA_PERTO_DIAS and status in ("novo", "contatado", "qualificado"):
             tipo = f"{ev_tipo} " if ev_tipo else "Festa "
             _add("festa", lid, nome, f"{tipo}{ev_em:%d/%m} · em {dias} dias · sem proposta", "proposta", dias)
+    # proposta parada: enviada, e a última mensagem é nossa há 3+ dias
+    if "proposta" in faixas and leads:
+        with pool.connection() as c:
+            enviadas = {r[0]: (r[1], r[2]) for r in c.execute("""
+                select p.id, o.criado_em, o.primeiro_ano_centavos
+                  from prospeccao p join orcamentos o on o.id = p.orcamento_id
+                 where p.conta_id = %s and p.vendedor_id = %s and o.status = 'enviado' and o.aprovada_em is null""",
+                (conta_id, membro_id)).fetchall()}
+        for lid, nome, status, ev_em, ev_tipo, orc, dirc, texto, em, cauda in leads:
+            if lid in usados or lid not in enviadas or dirc != "out" or not em:
+                continue
+            dias = (a - em.astimezone(_TZ)).total_seconds() / 86400
+            if dias >= PROPOSTA_PARADA_DIAS:
+                enviada_em, valor = enviadas[lid]
+                desde = (a - enviada_em.astimezone(_TZ)).days if enviada_em else int(dias)
+                n = int(cauda)
+                rot = "porta aberta" if n + 1 >= MAX_TOQUES else f"{_ordinal(n + 1)} toque"
+                _add("proposta", lid, nome,
+                     (f"proposta de {_reais(valor)} " if valor else "proposta ") + f"enviada há {desde} dia(s) · sem resposta",
+                     rot, -dias)
     for lid, nome, status, ev_em, ev_tipo, orc, dirc, texto, em, cauda in leads:
         if lid in usados or dirc != "out" or not em:
             continue
@@ -310,9 +355,11 @@ def responda_hoje(pool, conta_id: int, membro_id: int, agora: datetime | None = 
             rot = "porta aberta" if prox == MAX_TOQUES else f"{_ordinal(prox)} toque"
             _add("toque", lid, nome, f"sem resposta há {int(dias)} dia(s) · {n} toque(s) feito(s)", rot, -dias)
     for eid, lid, titulo, inicio, nome in visitas:
-        _add("visita", lid, nome, f"visita amanhã {inicio.astimezone(_TZ):%H:%M} · confirmar na véspera",
+        if "visita" not in faixas or lid in usados:
+            continue
+        _add("visita", lid, nome, f"{nome_comp} amanhã {inicio.astimezone(_TZ):%H:%M} · confirmar na véspera",
              "confirmar", 0, href=f"{base}/lead/{lid}")
-    ordem_faixa = {"pergunta": 0, "festa": 1, "toque": 2, "visita": 3}
+    ordem_faixa = {"pergunta": 0, "festa": 1, "proposta": 2, "toque": 3, "visita": 4}
     itens.sort(key=lambda i: (ordem_faixa[i["faixa"]], i["ordem"]))
     return {"itens": itens, "n": len(itens),
             "por_faixa": {f: sum(1 for i in itens if i["faixa"] == f) for f in ordem_faixa},

@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Raio-X por nicho</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --ink:#062011;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.86em;color:var(--roxo)}
+.wrap{max-width:1180px;margin:0 auto;padding:2.6rem 1.25rem 5rem;display:flex;flex-direction:column;gap:2.8rem}
+.head .k{margin-bottom:.5rem}
+.head h1{font-size:clamp(1.6rem,4vw,2.2rem);margin:.35rem 0 .55rem}
+.head p{color:var(--text-dim);max-width:74ch;margin:0}
+.head .marca{color:var(--neon)}
+.sec>h2{font-size:1.2rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.1rem;max-width:74ch;font-size:.9rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em;margin-bottom:.35rem}
+.lado{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media (max-width:900px){.lado{grid-template-columns:1fr}}
+.lado>div>.k{margin-bottom:.5rem}
+/* ===== a tabela do perfil ===== */
+.perfil{width:100%;border-collapse:collapse;font-size:.8rem}
+.perfil th{font:500 .62rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--line);vertical-align:bottom}
+.perfil td{padding:.55rem .6rem;border-bottom:1px solid var(--line);vertical-align:top;color:var(--text-dim)}
+.perfil td:first-child{color:var(--text);font-weight:500;white-space:nowrap}
+.perfil td b{color:var(--text);font-weight:500}
+.perfil .ev{color:var(--neon-bright)}.perfil .rc{color:var(--azul)}.perfil .pd{color:var(--text-faint)}
+.tabwrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+/* ===== o painel ===== */
+.painel{border:1px solid var(--line);border-radius:14px;background:var(--bg);overflow:hidden}
+.painel .quem{padding:.6rem 1rem;border-bottom:1px solid var(--line);background:var(--bg-2);display:flex;justify-content:space-between;align-items:center;font-size:.74rem;color:var(--text-dim)}
+.painel .quem b{color:var(--text)}
+.painel .quem .tag{font:600 .62rem var(--mono);border-radius:999px;padding:.15rem .5rem;border:1px solid}
+.tag.ev{color:var(--neon-bright);border-color:var(--neon-borda);background:var(--neon-fundo)}
+.tag.rc{color:var(--azul);border-color:var(--azul-borda);background:var(--azul-fundo)}
+.pbar{display:flex;flex-wrap:wrap;gap:.35rem;padding:.7rem .9rem;border-bottom:1px solid var(--line);background:var(--bg-2);align-items:center}
+.pbar .f{display:inline-flex;align-items:center;gap:.3rem;border:1px solid var(--line);border-radius:999px;padding:.28rem .6rem;font-size:.7rem;color:var(--text-dim);background:var(--surface)}
+.pbar .f b{color:var(--text);font-weight:500}
+.pbar .f.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--text)}
+.pbar .f.on b{color:var(--neon-bright)}
+.pbar .f.novo{border-style:dashed;border-color:var(--azul-borda)}
+.pmain{padding:.9rem;display:flex;flex-direction:column;gap:.8rem}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem}
+@media (max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.6rem .7rem}
+.kpi b{display:block;font:600 1.25rem/1 var(--display);font-variant-numeric:tabular-nums}
+.kpi span{display:block;font-size:.62rem;color:var(--text-faint);margin-top:.25rem}
+.kpi em{display:block;font:500 .58rem var(--mono);font-style:normal;margin-top:.25rem;color:var(--text-dim)}
+.kpi.ok b{color:var(--neon-bright)}.kpi.amb b{color:var(--ambar)}.kpi.ruim b{color:var(--coral)}
+.grade{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+@media (max-width:600px){.grade{grid-template-columns:1fr}}
+.bloco{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.75rem .85rem;display:flex;flex-direction:column;gap:.45rem}
+.bloco h4{font-size:.86rem;display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
+.bloco h4 small{font:500 .58rem var(--mono);color:var(--text-faint)}
+.bloco p{margin:0;font-size:.76rem;color:var(--text-dim)}
+.bloco p b{color:var(--text);font-weight:500}
+.bloco .acha{font-size:.72rem;color:#F0DCA6;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:8px;padding:.4rem .55rem}
+.bloco.novo{border-color:var(--azul-borda);box-shadow:inset 3px 0 0 var(--azul)}
+.barras{display:flex;flex-direction:column;gap:.25rem;font-size:.7rem}
+.barras div{display:grid;grid-template-columns:110px 1fr 58px;gap:.4rem;align-items:center}
+.barras div span:last-child{font-family:var(--mono);color:var(--text-dim);text-align:right}
+.barras i{display:block;height:8px;border-radius:999px;background:var(--roxo);opacity:.8;min-width:2px}
+.barras i.n{background:var(--neon)}
+.duas{display:flex;flex-direction:column;gap:.28rem;font-size:.7rem}
+.duas div{display:grid;grid-template-columns:46px 1fr 1fr;gap:.4rem;align-items:center}
+.duas div span{font-family:var(--mono);color:var(--text-faint)}
+.duas i{display:block;height:8px;border-radius:999px}
+.duas .a{background:var(--neon)}.duas .b{background:var(--line)}
+.perdas{display:flex;flex-wrap:wrap;gap:.3rem}
+.perdas span{font:500 .64rem var(--mono);border:1px solid var(--line);border-radius:999px;padding:.15rem .5rem;color:var(--text-dim)}
+.perdas span.on{border-color:var(--coral-borda);background:var(--coral-fundo);color:#F2BDB9}
+.perdas span.novo{border-color:var(--azul-borda);color:var(--azul)}
+/* ===== o app ===== */
+.fones{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media (max-width:900px){.fones{grid-template-columns:1fr}}
+.fone{border:1px solid var(--line);border-radius:28px;background:var(--bg);box-shadow:0 20px 60px rgba(0,0,0,.45);overflow:hidden;display:flex;flex-direction:column;min-height:560px}
+.fone .leg{padding:.6rem .9rem;font-size:.72rem;color:var(--text-faint);border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.08em;font-weight:600;display:flex;justify-content:space-between}
+.ey{display:flex;justify-content:space-between;padding:.55rem 1rem .3rem;font:500 .64rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint)}
+.metas{display:grid;grid-template-columns:1fr 1fr;gap:.45rem;padding:.2rem 1rem .4rem}
+.meta{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:.5rem .6rem .7rem;position:relative;overflow:hidden}
+.meta b{display:block;font:600 1.15rem/1.1 var(--display)}
+.meta span{display:block;font-size:.62rem;color:var(--text-dim)}
+.meta em{display:block;font:400 .58rem var(--mono);color:var(--text-faint);font-style:normal;margin-top:.1rem}
+.meta i{position:absolute;left:0;bottom:0;height:3px;background:var(--neon)}
+.meta.ok b{color:var(--neon-bright)}.meta.amb b{color:var(--ambar)}.meta.amb i{background:var(--ambar)}.meta.ruim b{color:var(--coral)}.meta.ruim i{background:var(--coral)}
+.lead{display:flex;gap:.6rem;padding:.55rem 1rem;border-bottom:1px solid var(--line);font-size:.78rem;align-items:flex-start}
+.lead .dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:.4rem}
+.lead .mid{flex:1;min-width:0}
+.lead .emp{font-weight:600;font-size:.84rem}
+.lead .por{color:var(--text-dim);font-size:.72rem}
+.lead .acao{flex:none;font:600 .62rem var(--mono);color:var(--neon-bright);border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:999px;padding:.2rem .5rem;white-space:nowrap}
+.comp{margin:.2rem 1rem;padding:.45rem .6rem;border:1px solid var(--line);border-radius:10px;font-size:.72rem;color:var(--text-dim)}
+.comp b{color:var(--text);font-weight:500}
+.comp.x{border-color:var(--coral-borda);background:var(--coral-fundo);text-decoration:line-through;color:var(--text-faint)}
+.dado{margin:.5rem 1rem .8rem;padding:.5rem .65rem;border-radius:10px;background:var(--azul-fundo);border:1px solid var(--azul-borda);font:500 .6rem/1.45 var(--mono);color:var(--azul)}
+/* ===== notas ===== */
+.notas{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.8rem}
+.nota{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem .95rem}
+.nota h4{font-size:.9rem;margin-bottom:.3rem}
+.nota p{margin:0;font-size:.8rem;color:var(--text-dim)}
+.nota.bom{border-color:var(--neon-borda)}
+.nota.fora{border-color:var(--coral-borda)}
+.passos{margin:0;padding-left:1.2rem;font-size:.86rem;color:var(--text-dim);display:flex;flex-direction:column;gap:.45rem}
+.passos b{color:var(--text);font-weight:500}
+.rodape{font-size:.74rem;color:var(--text-faint);border-top:1px solid var(--line);padding-top:1rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <div class="k">RAIO-X · O MESMO RELATÓRIO, A LÍNGUA DE CADA NICHO · MOCKUP PRA APROVAR</div>
+    <h1>O Raio-X pergunta primeiro <span class="marca">o que a empresa vende</span>, e só então decide o que medir</h1>
+    <p>O Raio-X das Peças 1 a 3 nasceu olhando a Prime. Numa conta que vende festa, ele está certo. Na ZAQ, que vende sistema por mensalidade, ele pergunta "tipo de festa" e "dia da festa" pra 43 leads que nunca terão data. A correção não é esconder campo: é um <b>perfil por conta</b>, lido dos portões que o sistema já tem, e cada peça do Raio-X (filtros, blocos, faixas do "responda hoje", motivos de perda, avisos) passa a ler o perfil. Números reais de 13/08 a 05/09; nomes de clientes fictícios.</p>
+  </div>
+
+  <!-- ══════════ 1. O PERFIL ══════════ -->
+  <section class="sec">
+    <div class="k">1 · O PERFIL: TRÊS JEITOS DE VENDER, TRÊS RAIO-X</div>
+    <h2>O que cada nicho tem no banco, e o que o Raio-X pega de cada um</h2>
+    <p class="leg">O perfil sai de <code>modo_por_nicho</code> (evento × recorrente) e de <code>vende_servico</code> / <code>vende_produto</code>, os mesmos portões que já decidem o modo do orçamento e os campos da ficha. Nada novo pra configurar: a conta que escolheu o nicho no cadastro já tem perfil.</p>
+    <div class="tabwrap"><table class="perfil">
+      <tr><th></th><th class="ev">Eventos</th><th class="rc">Serviço recorrente</th><th class="pd">Produto</th></tr>
+      <tr><td>Quem é hoje</td><td>Prime Eventos, Doce Mell</td><td>ZAQ, Ramo Capital, MGB, PC Contabilidade</td><td>Zé do Arroz e o resto do varejo</td></tr>
+      <tr><td>Como vende</td><td>festa com data; orçamento modo <b>evento</b>; contrato de locação</td><td>setup + mensalidade; orçamento modo <b>recorrente</b>; contrato de serviço; lead PJ com CNPJ, segmento, porte, decisor</td><td>no caixa e no pedido; não tem funil nem vendedor</td></tr>
+      <tr><td>O lead pede</td><td>uma data, um tipo de festa, convidados</td><td>um serviço do catálogo (agente, CRM, automação…) pra um segmento</td><td>—</td></tr>
+      <tr><td>Compromisso na agenda</td><td><b>visita</b> ao espaço · festa marcada</td><td><b>reunião</b> (apresentação, diagnóstico)</td><td>—</td></tr>
+      <tr><td>Filtros do dono</td><td>período · vendedor · tipo de festa · mês da festa · dia da festa · convidados · origem · hora que chegou</td><td>período · vendedor · <b>segmento</b> · <b>porte</b> · <b>cidade/UF</b> · <b>serviço proposto</b> · origem · hora que chegou</td><td>—</td></tr>
+      <tr><td>Blocos do dono</td><td>demanda × agenda · dia da festa · tipo e ticket · lead→proposta→contrato · por que perdeu · hora que chegou</td><td><b>mensalidade proposta × fechada</b> · <b>segmento que chega e que fecha</b> · <b>serviço mais proposto e ticket</b> · <b>reuniões que aconteceram</b> · lead→proposta→contrato · por que perdeu · hora que chegou</td><td>—</td></tr>
+      <tr><td>"Responda hoje" no app</td><td>pergunta · <b>festa perto sem proposta</b> · toque vencido · <b>visita amanhã</b></td><td>pergunta · <b>proposta parada</b> (enviada, sem resposta há 3 dias) · toque vencido · <b>reunião amanhã</b></td><td>—</td></tr>
+      <tr><td>Motivos de perda</td><td>sumiu depois da proposta · <b>data indisponível</b> · achou caro · fora do escopo · sem interesse · outro</td><td>sumiu depois da proposta · <b>ficou com o fornecedor atual</b> · achou caro · fora do escopo · sem interesse · outro</td><td>—</td></tr>
+      <tr><td>Quem vê</td><td>dono, gestor (painel) · vendedor (app) · grupo de segunda</td><td>dono, gestor (painel) · vendedor (app) · grupo de segunda</td><td>ninguém: o item some do menu, o aviso não sai, o grupo não recebe</td></tr>
+    </table></div>
+  </section>
+
+  <!-- ══════════ 2. O PAINEL, LADO A LADO ══════════ -->
+  <section class="sec">
+    <div class="k">2 · O PAINEL DO DONO, LADO A LADO</div>
+    <h2>A mesma tela, em duas empresas. À esquerda o que já está no ar; à direita o que a ZAQ passa a ver.</h2>
+    <p class="leg">Tudo à direita é lido do que a ZAQ já tem no banco: 43 leads em 24 dias, todos ainda em "novo", segmento vindo do CNPJ, 18 reuniões na agenda, um orçamento em rascunho, nenhum contrato. O Raio-X não inventa: ele diz isso.</p>
+    <div class="lado">
+      <div>
+        <div class="painel">
+          <div class="quem"><span><b>Prime Eventos</b> · Raio-X · 13/08 a 05/09</span><span class="tag ev">eventos</span></div>
+          <div class="pbar">
+            <span class="f on">Período <b>13/08 a 05/09</b></span><span class="f">Vendedor <b>todos</b></span><span class="f">Tipo de festa <b>todos</b></span><span class="f">Mês da festa <b>todos</b></span><span class="f">Dia da festa <b>todos</b></span><span class="f">Convidados <b>todos</b></span><span class="f">Origem <b>todas</b></span><span class="f">Chegou <b>qualquer hora</b></span>
+          </div>
+          <div class="pmain">
+            <div class="kpis">
+              <div class="kpi"><b>283</b><span>leads</span><em>12/dia · pico sáb 13h</em></div>
+              <div class="kpi ruim"><b>2h30</b><span>1ª resposta</span><em>comercial 1h17 · noite 11h</em></div>
+              <div class="kpi amb"><b>16</b><span>propostas · R$ 107 mil</span><em>9 em rascunho</em></div>
+              <div class="kpi ok"><b>2</b><span>contratos · R$ 9.250</span><em>+2 aprovados sem assinar</em></div>
+              <div class="kpi amb"><b>45%</b><span>visitas que aconteceram</span><em>4 sim · 5 não</em></div>
+            </div>
+            <div class="grade">
+              <div class="bloco"><h4>Demanda × agenda <small>festas</small></h4>
+                <div class="duas"><div><span>out</span><i class="a" style="width:69%"></i><i class="b" style="width:25%"></i></div><div><span>nov</span><i class="a" style="width:88%"></i><i class="b" style="width:25%"></i></div><div><span>dez</span><i class="a" style="width:100%"></i><i class="b" style="width:44%"></i></div></div>
+                <div class="acha">Out a dez: 41 pedindo, 15 marcadas.</div></div>
+              <div class="bloco"><h4>Dia da festa <small>106 com data</small></h4><p><b>62% no sábado.</b></p><div class="acha">Tabela própria de sábado.</div></div>
+              <div class="bloco"><h4>Tipo de festa e ticket</h4><div class="barras"><div><span>Formatura</span><i style="width:100%"></i><span>R$ 9.883</span></div><div><span>15 anos</span><i style="width:98%"></i><span>R$ 9.650</span></div><div><span>Casamento</span><i style="width:74%"></i><span>R$ 7.285</span></div></div><div class="acha">47% sem tipo de festa.</div></div>
+              <div class="bloco"><h4>Por que perdeu <small>13</small></h4><div class="perdas"><span class="on">sumiu depois da proposta · 2</span><span class="on">data indisponível · 2</span><span class="on">achou caro · 1</span><span>sem motivo · 6</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="painel">
+          <div class="quem"><span><b>ZAQ Sistemas</b> · Raio-X · 13/08 a 05/09</span><span class="tag rc">serviço recorrente</span></div>
+          <div class="pbar">
+            <span class="f on">Período <b>13/08 a 05/09</b></span><span class="f">Vendedor <b>todos</b></span><span class="f novo">Segmento <b>todos</b></span><span class="f novo">Porte <b>todos</b></span><span class="f novo">Cidade/UF <b>todas</b></span><span class="f novo">Serviço <b>todos</b></span><span class="f">Origem <b>todas</b></span><span class="f">Chegou <b>qualquer hora</b></span>
+          </div>
+          <div class="pmain">
+            <div class="kpis">
+              <div class="kpi"><b>43</b><span>leads</span><em>1,8/dia · 34 do PI, 4 do MA</em></div>
+              <div class="kpi ruim"><b>51h</b><span>1ª resposta</span><em>meta 5 min · 0 no alvo</em></div>
+              <div class="kpi ruim"><b>0</b><span>propostas · R$ 0/mês</span><em>1 em rascunho, zerado</em></div>
+              <div class="kpi amb"><b>0</b><span>contratos · R$ 0/mês</span><em>nenhum aprovado esperando</em></div>
+              <div class="kpi amb"><b>100%</b><span>reuniões que aconteceram</span><em>7 sim · 0 não · 11 sem resposta · pouco confiável</em></div>
+            </div>
+            <div class="grade">
+              <div class="bloco novo"><h4>Mensalidade proposta × fechada <small>MRR novo no período</small></h4>
+                <div class="duas"><div><span>ago</span><i class="a" style="width:2%"></i><i class="b" style="width:2%"></i></div><div><span>set</span><i class="a" style="width:2%"></i><i class="b" style="width:2%"></i></div></div>
+                <div class="acha"><b>Nenhuma proposta enviada em 24 dias, com 43 leads novos.</b> O funil não está sendo trabalhado: todos os 43 continuam em "novo".</div></div>
+              <div class="bloco novo"><h4>Segmento que chega <small>do CNPJ</small></h4>
+                <div class="barras"><div><span>Loja</span><i style="width:100%"></i><span>21</span></div><div><span>Odontologia</span><i style="width:29%"></i><span>6</span></div><div><span>Estética</span><i style="width:19%"></i><span>4</span></div><div><span>Eventos</span><i style="width:10%"></i><span>2</span></div><div><span>sem segmento</span><i style="width:24%"></i><span>5</span></div></div>
+                <div class="acha"><b>Metade dos leads é loja.</b> É o segmento pra ter proposta pronta (CRM + agente de atendimento) e responder em minutos.</div></div>
+              <div class="bloco novo"><h4>Serviço mais proposto e ticket <small>catálogo · 15 orçamentos</small></h4>
+                <div class="barras"><div><span>Agente de Atend.</span><i class="n" style="width:100%"></i><span>—</span></div><div><span>CRM / Leads</span><i class="n" style="width:80%"></i><span>—</span></div><div><span>Automação</span><i class="n" style="width:55%"></i><span>—</span></div></div>
+                <div class="acha">Ticket por serviço só depois da primeira proposta enviada no período. Até lá o bloco mostra o que mais entrou em orçamento.</div></div>
+              <div class="bloco"><h4>Por que perdeu <small>0 no período</small></h4><div class="perdas"><span>sumiu depois da proposta · 0</span><span class="novo">ficou com o fornecedor atual · 0</span><span>achou caro · 0</span><span>sem motivo · 0</span></div><div class="acha">Ninguém foi marcado como perdido. Com 43 em "novo" há 24 dias, parte já esfriou sem ninguém dizer por quê.</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 3. O APP, LADO A LADO ══════════ -->
+  <section class="sec">
+    <div class="k">3 · O APP DO VENDEDOR, LADO A LADO</div>
+    <h2>"Responda hoje" troca as faixas; "Sua semana" troca a linha de comparativo</h2>
+    <p class="leg">O que está riscado é o que hoje aparece errado na ZAQ. As faixas de pergunta e de toque são iguais nos dois; muda o que é urgência no meio: festa perto vira proposta parada, visita vira reunião.</p>
+    <div class="fones">
+      <div class="fone">
+        <div class="leg"><span>Prime · vendedora</span><span class="tag ev">eventos</span></div>
+        <div class="ey"><span>Sua semana · 31/08 a 06/09</span></div>
+        <div class="metas">
+          <div class="meta ruim"><b>2h30</b><span>1ª resposta</span><em>meta 5 min · 3 de 41</em><i style="width:7%"></i></div>
+          <div class="meta amb"><b>4 / 7</b><span>propostas</span><em>3 em rascunho</em><i style="width:57%"></i></div>
+        </div>
+        <div class="comp"><b>38 leads novos · 21 já com data</b> · 17 ainda sem tipo de festa</div>
+        <div class="ey"><span>Responda hoje</span><span>6</span></div>
+        <div class="lead"><span class="dot" style="background:var(--coral)"></span><div class="mid"><div class="emp">Camila Reis</div><div class="por">"qual o valor pra 80 pessoas?" · 3h</div></div><span class="acao">responder</span></div>
+        <div class="lead"><span class="dot" style="background:var(--ambar)"></span><div class="mid"><div class="emp">Tiago Moura</div><div class="por">Casamento 24/10 · em 49 dias · sem proposta</div></div><span class="acao">proposta</span></div>
+        <div class="lead"><span class="dot" style="background:var(--ambar)"></span><div class="mid"><div class="emp">Sandra Pires</div><div class="por">sem resposta há 3 dias · 1 toque</div></div><span class="acao">2º toque</span></div>
+        <div class="lead"><span class="dot" style="background:var(--azul)"></span><div class="mid"><div class="emp">Rafael Souto</div><div class="por">visita amanhã 15:00 · confirmar na véspera</div></div><span class="acao">confirmar</span></div>
+        <div class="dado">📡 6 de 7 dias medidos · religou 42× · 2 podem não ter chegado</div>
+      </div>
+      <div class="fone">
+        <div class="leg"><span>ZAQ · vendedor</span><span class="tag rc">serviço recorrente</span></div>
+        <div class="ey"><span>Sua semana · 31/08 a 06/09</span></div>
+        <div class="metas">
+          <div class="meta ruim"><b>51h</b><span>1ª resposta</span><em>meta 5 min · 0 de 12</em><i style="width:2%"></i></div>
+          <div class="meta ruim"><b>0 / 1</b><span>propostas</span><em>1 em rascunho há 9 dias</em><i style="width:2%"></i></div>
+        </div>
+        <div class="comp x">12 leads novos · 0 já com data · 12 ainda sem tipo de festa</div>
+        <div class="comp"><b>12 leads novos · 6 lojas, 2 clínicas</b> · 3 ainda sem segmento</div>
+        <div class="ey"><span>Responda hoje</span><span>5</span></div>
+        <div class="lead"><span class="dot" style="background:var(--coral)"></span><div class="mid"><div class="emp">Ótica Central</div><div class="por">"vocês integram com o meu sistema?" · 2 dias</div></div><span class="acao">responder</span></div>
+        <div class="lead"><span class="dot" style="background:var(--ambar)"></span><div class="mid"><div class="emp">Clínica Sorriso</div><div class="por">proposta de R$ 890/mês enviada há 9 dias · sem resposta</div></div><span class="acao">2º toque</span></div>
+        <div class="lead"><span class="dot" style="background:var(--ambar)"></span><div class="mid"><div class="emp">Loja Bella</div><div class="por">sem resposta há 3 dias · 1 toque</div></div><span class="acao">2º toque</span></div>
+        <div class="lead"><span class="dot" style="background:var(--azul)"></span><div class="mid"><div class="emp">Estética Vila</div><div class="por">reunião amanhã 10:00 · confirmar na véspera</div></div><span class="acao">confirmar</span></div>
+        <div class="dado">📡 7 de 7 dias medidos · religou 0× · nenhuma mensagem perdida</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 4. O QUE MUDA ══════════ -->
+  <section class="sec">
+    <div class="k">4 · O QUE MUDA NO CÓDIGO, SE APROVAR</div>
+    <ol class="passos">
+      <li><b><code>finance/raio_x_perfil.py</code></b>: <code>perfil(pool, conta_id)</code> devolve <code>eventos</code> · <code>recorrente</code> · <code>produto</code> a partir dos portões que já existem, com o vocabulário (festa/visita ou serviço/reunião), a lista de filtros, a de blocos, as faixas do "responda hoje" e os motivos de perda. Um lugar só; é ele que os testes conferem.</li>
+      <li><b>Painel do dono</b> renderiza filtros e blocos a partir do perfil. Entram os blocos do recorrente: mensalidade proposta × fechada (soma de <code>mensal_centavos</code> por status), segmento que chega e que fecha, serviço mais proposto (dos <code>itens</code> do orçamento) e reuniões que aconteceram. Os de festa só saem pra quem vende data.</li>
+      <li><b>App do vendedor</b>: a linha de comparativo e as faixas do "responda hoje" leem o perfil. "Proposta parada" (enviada, sem resposta há 3 dias) entra pros dois perfis; "festa perto" só pra eventos.</li>
+      <li><b>Migração</b>: o check de <code>perda_motivo</code> ganha <code>ficou_com_atual</code>; cada perfil oferece a sua lista de seis. Nenhuma linha muda.</li>
+      <li><b>Avisos corrigidos</b> por migração: o do Raio-X do dono passa a ter corpo neutro (sem "tipo de festa") e não sai pra conta de produto; o do app idem. Quem já leu não recebe de novo.</li>
+      <li><b>Conta de produto</b>: sem funil e sem vendedor, o item some do menu, a aba do app não existe (não tem app), e o Raio-X de segunda não é oferecido em Equipe.</li>
+      <li><b>Testes</b> com dois cenários: a Prime em miniatura (que já existe) e uma ZAQ em miniatura, e a garantia de que nenhuma palavra de festa aparece no perfil recorrente.</li>
+    </ol>
+  </section>
+
+  <!-- ══════════ 5. PRA DECIDIR ══════════ -->
+  <section class="sec">
+    <div class="k">PRA VOCÊ DECIDIR</div>
+    <div class="notas">
+      <div class="nota"><h4>1 · Conta sem nicho escolhido</h4><p>Sete contas com lead nunca escolheram nicho (João Pedro, Fátima…). Proposta: caem em <b>recorrente</b>, que é o perfil sem festa, e a tela avisa "escolha o nicho em Empresa pra o Raio-X acertar o vocabulário".</p></div>
+      <div class="nota"><h4>2 · Os motivos do recorrente</h4><p>Proposta: sumiu depois da proposta · ficou com o fornecedor atual · achou caro · fora do escopo · sem interesse · outro. Se tiver um motivo que a ZAQ ouve mais, é só trocar antes de eu implementar.</p></div>
+      <div class="nota"><h4>3 · O segmento vem do CNPJ</h4><p>Hoje 38 dos 43 leads da ZAQ já têm segmento, lido da Receita no cadastro. O Raio-X usa isso como está; o texto do CNAE é longo ("Atividades de estética e outros serviços de cuidados com a beleza"), e proponho agrupar em famílias curtas (loja, clínica, estética, escritório…) só pra tela.</p></div>
+      <div class="nota fora"><h4>Fica de fora</h4><p>Perfil por conta configurável na tela. O perfil sai do nicho, e o nicho já é escolhido no cadastro. Um segundo lugar pra dizer "o que eu vendo" é onde os dois discordam.</p></div>
+    </div>
+  </section>
+
+  <p class="rodape">Números lidos do banco em 05/09/2026, só leitura, 13/08 a 05/09 (Prime 34, ZAQ 3). Nomes de clientes nas telas são fictícios; os agregados são reais. Nada aqui encosta em chip, sessão ou canal.</p>
+</div>
+</body>
+</html>

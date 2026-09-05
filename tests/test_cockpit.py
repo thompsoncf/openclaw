@@ -113,7 +113,8 @@ def pool():
         from tests.test_novidades import BASE as _MIG
         c.execute("alter table contas add column criado_em timestamptz not null default now()")
         for m in ("174_novidades.sql", "184_novidade_voz_e_porta_fechada.sql",
-                  "199_novidades_pra_quem.sql", "207_raio_x.sql", "209_raio_x_dono.sql"):
+                  "199_novidades_pra_quem.sql", "207_raio_x.sql", "209_raio_x_dono.sql",
+                  "213_perda_motivo_por_perfil.sql"):
             c.execute((_MIG / m).read_text(encoding="utf-8"))
         # `orcamentos` com TODAS as colunas do app (o Raio-X lê status, aprovada_em,
         # sinal_pago_em, primeiro_ano_centavos; criar_orcamento grava dezenas)
@@ -1458,9 +1459,11 @@ def test_perdido_com_motivo_da_lista_grava_a_chave_e_o_rotulo_na_timeline(pool):
     assert desc[a] == "Perdido — Achou caro" and desc[b] == "Perdido — texto solto"
 
 
-def test_a_folha_do_lead_oferece_os_seis_motivos_por_chave(pool, monkeypatch):
+def test_a_folha_do_lead_oferece_os_seis_motivos_do_perfil(pool, monkeypatch):
+    """Conta sem nicho escolhido é perfil recorrente: a lista tem "ficou com o
+    fornecedor atual" e não tem "data indisponível". Em eventos, o contrário."""
     from web import painel_cockpit as pc
-    from finance.raio_x_dono import MOTIVOS_PERDA
+    from finance import raio_x_perfil as rxp
     with pool.connection() as c:
         conta = _conta(c, "Folha"); vend = _membro(c, conta, email="folha@x.com")
         lid = _lead(c, conta, vend, "Doceria"); c.commit()
@@ -1468,9 +1471,15 @@ def test_a_folha_do_lead_oferece_os_seis_motivos_por_chave(pool, monkeypatch):
     monkeypatch.setattr(pc, "_selo", lambda conta_id: "")
     html = bytes(pc.cockpit_lead(_req_vend(conta, vend), lid).body).decode("utf-8")
     assert "Por que perdeu?" in html
-    for k, r in MOTIVOS_PERDA:
+    for k, r in rxp.perfil("consultoria")["motivos"]:
         assert f"<option value='{k}'>{r}</option>" in html, k
+    assert "value='data_indisponivel'" not in html
     assert "Comprou concorrente" not in html                   # a lista antiga, solta, saiu
+    monkeypatch.setattr(pc, "_perfil_conta", lambda pool, conta_id: rxp.perfil("eventos"), raising=False)
+    import finance.raio_x_perfil as _m
+    monkeypatch.setattr(_m, "perfil_da_conta", lambda pool, conta_id: rxp.perfil("eventos"))
+    html = bytes(pc.cockpit_lead(_req_vend(conta, vend), lid).body).decode("utf-8")
+    assert "value='data_indisponivel'" in html and "value='ficou_com_atual'" not in html
 
 
 def test_ficha_guarda_de_onde_veio_o_cliente_e_recusa_o_que_nao_esta_na_lista(pool, monkeypatch):

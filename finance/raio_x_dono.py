@@ -31,15 +31,11 @@ from finance.raio_x import (_TZ, ABERTOS, META_PRIMEIRA_MIN, _anterior, _mediana
 
 _log = logging.getLogger("finance.raio_x_dono")
 
-#: por que perdeu — a lista fixa (check da migração 209). Chave → rótulo.
-MOTIVOS_PERDA = (
-    ("sumiu_apos_proposta", "Sumiu depois da proposta"),
-    ("data_indisponivel", "Data indisponível"),
-    ("achou_caro", "Achou caro"),
-    ("fora_do_escopo", "Fora do escopo"),
-    ("sem_interesse", "Sem interesse"),
-    ("outro", "Outro"),
-)
+from finance.raio_x_perfil import (MOTIVOS_TODOS, PORTES, chave_porte, familia_segmento, familias,  # noqa: F401
+                                   perfil_da_conta, regex_da_familia, regex_do_porte, rotulo_motivo)
+
+#: por que perdeu — a lista COMPLETA (check da 213); o perfil escolhe seis.
+MOTIVOS_PERDA = MOTIVOS_TODOS
 #: de onde o cliente veio, na palavra dele (check da 209)
 ORIGENS = (
     ("whatsapp", "WhatsApp"),
@@ -67,10 +63,6 @@ _MESES = ("jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", 
 COMERCIAL = (8, 18)
 
 
-def rotulo_motivo(chave: str | None) -> str:
-    return dict(MOTIVOS_PERDA).get(chave or "", "sem motivo")
-
-
 def rotulo_origem(chave: str | None) -> str:
     return dict(ORIGENS).get(chave or "", "")
 
@@ -84,10 +76,13 @@ def _data(s: str | None) -> date | None:
         return None
 
 
-def filtros(params) -> dict:
+def filtros(params, perfil: dict | None = None) -> dict:
     """Normaliza o que veio da URL. Valor fora da lista vira 'todos' (vazio), nunca
-    erro: a tela sempre abre."""
+    erro: a tela sempre abre. O PERFIL diz quais filtros existem: um filtro de
+    festa numa conta de mensalidade é ignorado mesmo que venha na URL."""
     g = params.get if hasattr(params, "get") else (lambda k, d="": d)
+    permitidos = set((perfil or {}).get("filtros") or
+                     ("periodo", "vendedor", "tipo", "mes", "dia", "conv", "origem", "hora"))
     periodo = g("periodo", "mes") or "mes"
     if periodo not in dict(PERIODOS):
         periodo = "mes"
@@ -108,10 +103,21 @@ def filtros(params) -> dict:
     conv = g("conv", "") if g("conv", "") in {k for k, *_ in FAIXAS_CONVIDADOS} else ""
     origem = g("origem", "") if g("origem", "") in dict(ORIGENS) else ""
     hora = g("hora", "") if g("hora", "") in dict(HORAS) else ""
-    return {"periodo": periodo, "de": de if periodo == "datas" else None,
-            "ate": ate if periodo == "datas" else None, "vendedor": vend_id,
-            "tipo": tipo, "mes": mes_ini.strftime("%Y-%m") if mes_ini else "", "dia": dia,
-            "conv": conv, "origem": origem, "hora": hora}
+    # os do perfil recorrente
+    segmento = g("segmento", "") if g("segmento", "") in dict(familias()) else ""
+    porte = g("porte", "") if g("porte", "") in {k for k, *_ in PORTES} | {"sem"} else ""
+    uf = (g("uf", "") or "").strip().upper()[:2]
+    uf = uf if (len(uf) == 2 and uf.isalpha()) or uf == "" else ""
+    servico = (g("servico", "") or "").strip()[:80]
+    f = {"periodo": periodo, "de": de if periodo == "datas" else None,
+         "ate": ate if periodo == "datas" else None, "vendedor": vend_id,
+         "tipo": tipo, "mes": mes_ini.strftime("%Y-%m") if mes_ini else "", "dia": dia,
+         "conv": conv, "origem": origem, "hora": hora,
+         "segmento": segmento, "porte": porte, "uf": uf, "servico": servico}
+    for k in ("vendedor", "tipo", "mes", "dia", "conv", "origem", "hora", "segmento", "porte", "uf", "servico"):
+        if k not in permitidos:
+            f[k] = None if k == "vendedor" else ""
+    return f
 
 
 def janela_f(f: dict, agora: datetime | None = None) -> tuple[datetime, datetime, str]:
@@ -157,6 +163,27 @@ def _where(f: dict) -> tuple[str, list]:
             conds.append("p.evento_convidados is not null")
     if f.get("origem"):
         conds.append("p.origem_cliente = %s"); vals.append(f["origem"])
+    seg = f.get("segmento")
+    if seg == "sem":
+        conds.append("coalesce(p.segmento, '') = ''")
+    elif seg == "outro":
+        conds.append("coalesce(p.segmento, '') <> ''")
+        from finance.raio_x_perfil import FAMILIAS_SEGMENTO as _FAM
+        for k, _, _rx in _FAM:
+            conds.append("p.segmento !~* %s"); vals.append(regex_da_familia(k))
+    elif seg:
+        conds.append("p.segmento ~* %s"); vals.append(regex_da_familia(seg))
+    porte = f.get("porte")
+    if porte == "sem":
+        conds.append("coalesce(p.porte, '') = ''")
+    elif porte:
+        conds.append("p.porte ~* %s"); vals.append(regex_do_porte(porte))
+    if f.get("uf"):
+        conds.append("upper(p.uf) = %s"); vals.append(f["uf"])
+    if f.get("servico"):
+        conds.append("""exists (select 1 from orcamentos o2, jsonb_array_elements(coalesce(o2.itens, '[]'::jsonb)) i
+                                 where o2.id = p.orcamento_id and i->>'nome' ilike %s)""")
+        vals.append(f["servico"])
     h = f.get("hora")
     if h == "fds":
         conds.append(f"extract(dow from {_HORA_LOCAL}) in (0, 6)")
@@ -209,15 +236,16 @@ def _placar(c, conta_id: int, w: str, wv: list, ini, fim, agora) -> dict:
     for chegou, m in resp:
         por_faixa[_faixa_hora(chegou)].append(float(m))
     todos = [m for xs in por_faixa.values() for m in xs]
-    enviadas, valor_env, rasc = c.execute(f"""
+    enviadas, valor_env, rasc, mensal_env = c.execute(f"""
         select count(*) filter (where o.status <> 'rascunho'),
                coalesce(sum(o.primeiro_ano_centavos) filter (where o.status <> 'rascunho'), 0),
-               count(*) filter (where o.status = 'rascunho')
+               count(*) filter (where o.status = 'rascunho'),
+               coalesce(sum(o.mensal_centavos) filter (where o.status <> 'rascunho'), 0)
           from orcamentos o join prospeccao p on p.orcamento_id = o.id
          where p.conta_id = %s and o.criado_em >= %s and o.criado_em < %s{w}""",
         [conta_id, ini, fim, *wv]).fetchone()
-    contratos, valor_ctr = c.execute(f"""
-        select count(*), coalesce(sum(c.valor_centavos), 0)
+    contratos, valor_ctr, mensal_ctr = c.execute(f"""
+        select count(*), coalesce(sum(c.valor_centavos), 0), coalesce(sum(o.mensal_centavos), 0)
           from contratos c join orcamentos o on o.id = c.orcamento_id
           join prospeccao p on p.orcamento_id = o.id
          where c.conta_id = %s and c.status = 'assinado' and c.assinado_em >= %s and c.assinado_em < %s{w}""",
@@ -247,7 +275,9 @@ def _placar(c, conta_id: int, w: str, wv: list, ini, fim, agora) -> dict:
         "primeira_comercial": _mediana(por_faixa["comercial"]),
         "primeira_noite": _mediana(por_faixa["noite"] + por_faixa["fds"]),
         "propostas": int(enviadas), "propostas_valor": int(valor_env), "rascunhos": int(rasc),
+        "propostas_mensal": int(mensal_env),
         "contratos": int(contratos), "contratos_valor": int(valor_ctr), "sem_assinar": int(sem_assinar),
+        "contratos_mensal": int(mensal_ctr),
         "visitas_ok": vis_ok, "visitas_nao": vis_nao, "visitas_sem_resposta": vis_sem,
         "visitas_pct": (round(100 * vis_ok / (vis_ok + vis_nao)) if (vis_ok + vis_nao) else None),
         # abaixo de metade respondida a taxa é pouco confiável (regra do relatório do funil)
@@ -354,38 +384,121 @@ def _ciclo(c, conta_id, w, wv, ini, fim) -> dict:
     }
 
 
-def _perdas(c, conta_id, w, wv, ini, fim) -> dict:
+def _perdas(c, conta_id, w, wv, ini, fim, motivos=MOTIVOS_TODOS) -> dict:
     rows = c.execute(f"""
         select coalesce(p.perda_motivo, ''), count(*)
           from prospeccao p
          where p.conta_id = %s and p.status = 'perdido' and p.atualizado_em >= %s and p.atualizado_em < %s{w}
          group by 1""", [conta_id, ini, fim, *wv]).fetchall()
     cont = {k: int(n) for k, n in rows}
-    itens = [{"chave": k, "rotulo": r, "n": cont.get(k, 0)} for k, r in MOTIVOS_PERDA]
+    itens = [{"chave": k, "rotulo": r, "n": cont.get(k, 0)} for k, r in motivos]
+    # um motivo gravado que não está na lista deste perfil (a conta trocou de
+    # nicho) não some: entra com o rótulo dele
+    for k, n in cont.items():
+        if k and k not in dict(motivos):
+            itens.append({"chave": k, "rotulo": rotulo_motivo(k), "n": n})
     itens.sort(key=lambda x: -x["n"])
     return {"itens": itens, "sem_motivo": cont.get("", 0), "total": sum(cont.values())}
 
 
+# ---------------------------------------------------------------- os blocos do recorrente
+
+def _mrr(c, conta_id, w, wv, ini, fim) -> list[dict]:
+    """Mensalidade proposta × fechada, por mês do período (MRR novo)."""
+    prop = dict(c.execute(f"""
+        select to_char(o.criado_em at time zone 'America/Sao_Paulo', 'YYYY-MM'), coalesce(sum(o.mensal_centavos), 0)
+          from orcamentos o join prospeccao p on p.orcamento_id = o.id
+         where p.conta_id = %s and o.status <> 'rascunho' and o.criado_em >= %s and o.criado_em < %s{w}
+         group by 1""", [conta_id, ini, fim, *wv]).fetchall())
+    fech = dict(c.execute(f"""
+        select to_char(c.assinado_em at time zone 'America/Sao_Paulo', 'YYYY-MM'), coalesce(sum(o.mensal_centavos), 0)
+          from contratos c join orcamentos o on o.id = c.orcamento_id
+          join prospeccao p on p.orcamento_id = o.id
+         where c.conta_id = %s and c.status = 'assinado' and c.assinado_em >= %s and c.assinado_em < %s{w}
+         group by 1""", [conta_id, ini, fim, *wv]).fetchall())
+    meses = []
+    m = ini.date().replace(day=1)
+    while m < fim.date():
+        k = m.strftime("%Y-%m")
+        meses.append({"mes": k, "rotulo": _MESES[m.month - 1], "proposta": int(prop.get(k, 0)), "fechada": int(fech.get(k, 0))})
+        m = (m.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return meses
+
+
+def _segmentos(c, conta_id, w, wv, ini, fim) -> list[dict]:
+    """Quantos leads chegaram de cada família de segmento, e quantos fecharam."""
+    rows = c.execute(f"""
+        select p.segmento, count(*),
+               count(*) filter (where p.status = 'ganho' or exists (
+                   select 1 from contratos c join orcamentos o on o.id = c.orcamento_id
+                    where o.id = p.orcamento_id and c.status = 'assinado'))
+          from prospeccao p
+         where p.conta_id = %s and p.criado_em >= %s and p.criado_em < %s{w}
+         group by 1""", [conta_id, ini, fim, *wv]).fetchall()
+    agg: dict[str, dict] = {}
+    for seg, n, fechou in rows:
+        k, r = familia_segmento(seg)
+        a = agg.setdefault(k, {"chave": k, "rotulo": r, "n": 0, "fechou": 0})
+        a["n"] += int(n); a["fechou"] += int(fechou)
+    out = list(agg.values())
+    out.sort(key=lambda x: (x["chave"] == "sem", -x["n"]))
+    return out
+
+
+def _servicos(c, conta_id, w, wv, ini, fim) -> dict:
+    """O serviço mais proposto (dos itens do orçamento) e a mensalidade média
+    por serviço. Sem proposta enviada no período, cai em tudo-que-já-foi-orçado,
+    marcado."""
+    def consulta(so_periodo: bool):
+        cond = " and o.criado_em >= %s and o.criado_em < %s" if so_periodo else ""
+        params = [conta_id, *([ini, fim] if so_periodo else []), *wv]
+        return c.execute(f"""
+            select i->>'nome', count(distinct o.id),
+                   avg(nullif(coalesce((i->>'mensal_centavos')::numeric, (i->>'mensal')::numeric * 100), 0))
+              from orcamentos o join prospeccao p on p.orcamento_id = o.id,
+                   jsonb_array_elements(coalesce(o.itens, '[]'::jsonb)) i
+             where p.conta_id = %s and o.status <> 'rascunho'{cond}{w}
+             group by 1 order by 2 desc, 1 limit 8""", params).fetchall()
+    rows = consulta(True)
+    historico = False
+    if not rows:
+        rows, historico = consulta(False), True
+    return {"itens": [{"nome": n, "n": int(q), "mensal_centavos": (int(m) if m is not None else None)} for n, q, m in rows],
+            "historico": historico}
+
+
 # ---------------------------------------------------------------- tudo junto
 
-def dono(pool, conta_id: int, f: dict, agora: datetime | None = None) -> dict:
-    """O Raio-X do dono pra um conjunto de filtros. Tolerante bloco a bloco: um
-    que falhar vira None e a tela diz isso, sem derrubar o resto."""
+def dono(pool, conta_id: int, f: dict, agora: datetime | None = None, perfil: dict | None = None) -> dict:
+    """O Raio-X do dono pra um conjunto de filtros. O PERFIL (finance/raio_x_perfil)
+    decide quais blocos existem: os de festa só pra quem vende data, os de
+    mensalidade só pra quem vende serviço recorrente. Tolerante bloco a bloco:
+    um que falhar vira None e a tela diz isso, sem derrubar o resto."""
+    if perfil is None:
+        perfil = perfil_da_conta(pool, conta_id)
     a = agora_brt(agora)
     ini, fim, rot = janela_f(f, a)
     ant_ini, ant_fim = _anterior(ini, fim)
     w, wv = _where(f)
-    out = {"ini": ini, "fim": fim, "rotulo": rot, "filtros": f, "placar": None, "anterior": None,
+    blocos = set(perfil.get("blocos") or ())
+    out = {"ini": ini, "fim": fim, "rotulo": rot, "filtros": f, "perfil": perfil, "placar": None, "anterior": None,
            "demanda_agenda": None, "dia_festa": None, "tipos": None, "ciclo": None, "perdas": None,
+           "mrr": None, "segmentos": None, "servicos": None,
            "vendedores": [], "confianca": None}
+    todos = (("placar", lambda: _placar(c, conta_id, w, wv, ini, fim, a)),
+             ("anterior", lambda: _placar(c, conta_id, w, wv, ant_ini, ant_fim, a)),
+             ("demanda_agenda", lambda: _demanda_agenda(c, conta_id, w, wv, a.date())),
+             ("dia_festa", lambda: _dia_festa(c, conta_id, w, wv, ini, fim)),
+             ("tipos", lambda: _tipos_ticket(c, conta_id, w, wv, ini, fim)),
+             ("mrr", lambda: _mrr(c, conta_id, w, wv, ini, fim)),
+             ("segmentos", lambda: _segmentos(c, conta_id, w, wv, ini, fim)),
+             ("servicos", lambda: _servicos(c, conta_id, w, wv, ini, fim)),
+             ("ciclo", lambda: _ciclo(c, conta_id, w, wv, ini, fim)),
+             ("perdas", lambda: _perdas(c, conta_id, w, wv, ini, fim, perfil.get("motivos") or MOTIVOS_TODOS)))
     with pool.connection() as c:
-        for k, fn in (("placar", lambda: _placar(c, conta_id, w, wv, ini, fim, a)),
-                      ("anterior", lambda: _placar(c, conta_id, w, wv, ant_ini, ant_fim, a)),
-                      ("demanda_agenda", lambda: _demanda_agenda(c, conta_id, w, wv, a.date())),
-                      ("dia_festa", lambda: _dia_festa(c, conta_id, w, wv, ini, fim)),
-                      ("tipos", lambda: _tipos_ticket(c, conta_id, w, wv, ini, fim)),
-                      ("ciclo", lambda: _ciclo(c, conta_id, w, wv, ini, fim)),
-                      ("perdas", lambda: _perdas(c, conta_id, w, wv, ini, fim))):
+        for k, fn in todos:
+            if k not in ("placar", "anterior") and k not in blocos:
+                continue
             try:
                 with c.transaction():
                     out[k] = fn()

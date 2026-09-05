@@ -2399,8 +2399,9 @@ def _rx_meta(cls, valor, rotulo, nota, pct) -> str:
             f"<div class=bar><i style='width:{max(0, min(100, int(pct)))}%'></i></div></div>")
 
 
-def _rx_sua_semana(s: dict, rot: str) -> str:
+def _rx_sua_semana(s: dict, rot: str, perfil: dict | None = None) -> str:
     from finance import raio_x as _rx
+    vende_data = bool((perfil or {}).get("vocab", {}).get("data", True))
     n5, n = s["primeira_em_5"], s["primeira_n"]
     primeira = _rx.fmt_min(s["primeira_min"])
     nota1 = (f"meta {_rx.META_PRIMEIRA_MIN} min · {n5} de {n} no alvo" if n else "nenhum lead novo no período")
@@ -2428,9 +2429,14 @@ def _rx_sua_semana(s: dict, rot: str) -> str:
         comp.append(("ok" if a < b else "ruim",
                      f"1ª resposta {'melhorou' if a < b else 'piorou'} {_rx.fmt_min(abs(a - b))}",
                      f"{_rx.fmt_min(b)} → {_rx.fmt_min(a)}"))
-    if s["leads"]:
+    if s["leads"] and vende_data:
         comp.append(("amb", f"{s['leads']} lead(s) novo(s) · {s['leads_com_data']} já com data",
                      f"{s['leads_sem_tipo']} ainda sem tipo de festa" if s["leads_sem_tipo"] else "todos com tipo de festa"))
+    elif s["leads"]:
+        # perfil recorrente: o segmento (do CNPJ) no lugar da data e do tipo de festa
+        tops = " · ".join(f"{x['n']} {x['rotulo'].lower()}" for x in (s.get("segmentos") or [])[:2])
+        comp.append(("amb", f"{s['leads']} lead(s) novo(s)" + (f" · {tops}" if tops else ""),
+                     f"{s['leads_sem_segmento']} ainda sem segmento" if s.get("leads_sem_segmento") else "todos com segmento"))
     if s["paradas_1a"]:
         comp.append(("ruim", f"Parou na 1ª tentativa: {s['paradas_1a']} conversa(s)", "Meta: nenhuma. O 2º toque está na fila abaixo."))
     if comp:
@@ -2441,9 +2447,11 @@ def _rx_sua_semana(s: dict, rot: str) -> str:
     return html
 
 
-def _rx_responda_hoje(h: dict) -> str:
+def _rx_responda_hoje(h: dict, perfil: dict | None = None) -> str:
+    comp = ((perfil or {}).get("vocab") or {}).get("compromisso", "visita")
     rot = {"pergunta": "🔴 Pergunta sem resposta", "festa": "🟠 Festa perto, sem proposta",
-           "toque": "🟡 Toque da cadência vence hoje", "visita": "🔵 Visita amanhã"}
+           "proposta": "🟠 Proposta parada, sem resposta",
+           "toque": "🟡 Toque da cadência vence hoje", "visita": f"🔵 {comp.capitalize()} amanhã"}
     html = f"<div class=rx-ey><span>Responda hoje</span><span>{h['n']} pelo que mais urge</span></div>"
     if not h["itens"]:
         html += "<div class=rx-vazio>Ninguém esperando você agora. 🎉</div>"
@@ -2494,10 +2502,12 @@ def cockpit_raio_x(request: Request):
         return RedirectResponse("/cockpit/login", status_code=303)
     conta_id, membro_id = sess
     from finance import raio_x as _rx
+    from finance.raio_x_perfil import perfil_da_conta as _perfil_conta
     periodo = request.query_params.get("p", "semana")
     if periodo not in ("semana", "mes", "tudo"):
         periodo = "semana"
     pool = get_pool()
+    perfil = _perfil_conta(pool, conta_id)
     ini, fim, rot = _rx.janela(periodo)
 
     def seg(k, lab):
@@ -2506,14 +2516,14 @@ def cockpit_raio_x(request: Request):
     partes = []
     n_hoje = 0
     try:
-        partes.append(_rx_sua_semana(_rx.sua_semana(pool, conta_id, membro_id, ini, fim), rot))
+        partes.append(_rx_sua_semana(_rx.sua_semana(pool, conta_id, membro_id, ini, fim), rot, perfil))
     except Exception as e:  # noqa: BLE001
         _log.warning("raio-x sua semana: %s: %s", type(e).__name__, e)
         partes.append("<div class=rx-vazio>Não deu pra medir a semana agora. Tenta de novo em instantes.</div>")
     try:
-        h = _rx.responda_hoje(pool, conta_id, membro_id)
+        h = _rx.responda_hoje(pool, conta_id, membro_id, perfil=perfil)
         n_hoje = h["n"]
-        partes.append(_rx_responda_hoje(h))
+        partes.append(_rx_responda_hoje(h, perfil))
     except Exception as e:  # noqa: BLE001
         _log.warning("raio-x responda hoje: %s: %s", type(e).__name__, e)
         partes.append("<div class=rx-vazio>A fila de hoje não carregou. A Fila normal continua na primeira aba.</div>")
@@ -4636,8 +4646,12 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
 
     # a lista FIXA de motivos (finance/raio_x_dono.MOTIVOS_PERDA, check da 209): a
     # chave vai no value, o rótulo na tela. É o que o Raio-X do dono agrega.
-    from finance.raio_x_dono import MOTIVOS_PERDA as _MOTIVOS
-    motivos = "".join(f"<option value='{esc(k)}'>{esc(r)}</option>" for k, r in _MOTIVOS)
+    from finance.raio_x_perfil import perfil as _perfil_de, perfil_da_conta as _perfil_conta
+    try:
+        _lista = _perfil_conta(get_pool(), request.session.get("conta_id"))["motivos"]
+    except Exception:  # noqa: BLE001 — sem banco (tela montada solta), o perfil sem festa
+        _lista = _perfil_de(None)["motivos"]
+    motivos = "".join(f"<option value='{esc(k)}'>{esc(r)}</option>" for k, r in _lista)
 
     # A folha só sobe com :target — sem JS, então funciona igual ao resto do app,
     # que é todo form + redirect. Ela só se sustenta CURTA: é `position:absolute` com

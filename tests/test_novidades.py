@@ -628,3 +628,30 @@ def test_reaplicar_a_208_nao_duplica_nem_troca_id(pool):
     antes = {k: v["id"] for k, v in _raio_x(pool).items()}
     depois = {k: v["id"] for k, v in _raio_x(pool).items()}
     assert antes == depois and len(antes) == 2
+
+
+def _raio_x_dono(pool) -> dict:
+    """Os avisos da Peça 3 (210): a tela do dono, e o motivo de perda no app."""
+    with pool.connection() as c:
+        c.execute((BASE / "210_novidade_raio_x_dono.sql").read_text(encoding="utf-8"))
+        c.commit()
+        rows = c.execute("""select chave, tipo, publico, pra_quem, resumo, link, id from novidades
+                            where chave in ('raio-x-do-dono', 'motivo-de-perda-no-app')""").fetchall()
+    return {r[0]: {"tipo": r[1], "publico": r[2], "pra_quem": list(r[3]), "resumo": r[4],
+                   "link": r[5], "id": r[6]} for r in rows}
+
+
+def test_os_avisos_da_peca_3_miram_certo(pool):
+    a = _raio_x_dono(pool)
+    assert set(a) == {"raio-x-do-dono", "motivo-de-perda-no-app"}
+    assert a["raio-x-do-dono"]["publico"] == "todos" and sorted(a["raio-x-do-dono"]["pra_quem"]) == ["dono", "gestor"]
+    assert a["raio-x-do-dono"]["link"] == "/painel/raio-x"
+    assert a["motivo-de-perda-no-app"]["pra_quem"] == ["vendedor"] and a["motivo-de-perda-no-app"]["link"] == "/cockpit"
+    for chave, x in a.items():
+        assert x["tipo"] == "novidade" and x["resumo"], chave
+    vend = {n["chave"] for n in nv.listar(pool, 3, papel="vendedor")}
+    dono = {n["chave"] for n in nv.listar(pool, 3, papel="dono")}
+    assert "motivo-de-perda-no-app" in vend and "raio-x-do-dono" not in vend
+    assert "raio-x-do-dono" in dono and "motivo-de-perda-no-app" not in dono
+    antes = {k: v["id"] for k, v in a.items()}
+    assert {k: v["id"] for k, v in _raio_x_dono(pool).items()} == antes

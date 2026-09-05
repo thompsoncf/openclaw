@@ -372,6 +372,8 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      cesta não ganhar um menu que ela nunca teve. #}
   {% if _tem_app and (caps.vendas or caps.financeiro) %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
+  {# o Raio-X (finance/raio_x_dono) é de quem manda na conta: dono e gestor #}
+  {% if tem_pj and papel in ('dono','gestor') %}{{ navi('raio_x','/painel/raio-x','relatorios','Raio-X') }}{% endif %}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes/Fornecedores') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
@@ -411,6 +413,8 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      cesta não ganhar um menu que ela nunca teve. #}
   {% if _tem_app and (caps.vendas or caps.financeiro) %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
+  {# o Raio-X (finance/raio_x_dono) é de quem manda na conta: dono e gestor #}
+  {% if tem_pj and papel in ('dono','gestor') %}{{ navi('raio_x','/painel/raio-x','relatorios','Raio-X') }}{% endif %}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes/Fornecedores') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
@@ -7462,7 +7466,8 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                  ("servicos", "/painel/servicos"), ("prospeccao", "/painel/prospeccao"),
                  ("agenda", "/painel/agenda"), ("equipe", "/painel/equipe"),
                  ("financeiro", "/painel/financeiro"), ("empresa", "/painel/empresa"),
-                 ("relatorios", "/painel/relatorios"), ("novidades", "/painel/novidades"),
+                 ("relatorios", "/painel/relatorios"), ("raio_x", "/painel/raio-x"),
+                 ("novidades", "/painel/novidades"),
                  ("fornecedor", "/painel/fornecedor"), ("assinaturas", "/painel/assinaturas"),
                  ("pedidos", "/painel/meus-pedidos"), ("compras", "/painel/compras"),
                  ("painel", "/painel")]

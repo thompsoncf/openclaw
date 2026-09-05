@@ -196,5 +196,92 @@ def test_a_linha_e_um_macro_e_nao_tres_copias():
         "a linha foi copiada por bloco — seriam três lugares pra cada conserto"
 
 
+# ═══════════════ a pílula de filtro (05/09/2026) ═══════════════
+#
+# Os três blocos empilhados e sempre abertos foram a reclamação seguinte do
+# dono: "não gostei das divisões, dá uma melhorada". Com 28+ contas em
+# "Esperando liberação", ver "A receber" era rolar por tudo antes. A pílula
+# troca QUAL bloco fica visível — o bloco em si (cabeçalho, cada `tit_linha`)
+# não muda nada, só um aparece por vez.
+
+def _render_filtro(liberadas=0, esperando=0, receber=0):
+    """Como `_monta`, mas o trecho extraído começa ANTES do macro — inclui a
+    faixa de pílulas, que `_monta` propositalmente não pega (ela testa só a
+    linha e os blocos, sem se importar com o que decide a visibilidade)."""
+    tpl = pt._EMPRESA
+    i = tpl.index("{#- O FILTRO.")
+    j = tpl.index('{% else %}<div class="mut" style="font-size:.85rem">'
+                  "Nenhum título em aberto")
+    env = Environment(loader=DictLoader({"t": tpl[i:j]}))
+    env.filters["brl"] = pt.brl
+    env.filters["n2"] = lambda v: f"{v:.2f}"
+
+    from datetime import date
+
+    def t(desc, apro, tipo="pagar"):
+        return {"id": 1, "descricao": desc, "contraparte": "", "valor_centavos": 10000,
+                "aprovacao": apro, "tipo": tipo, "vencimento": date(2026, 9, 15),
+                "atrasado": False, "prazo": "em 11 dias", "cliente_nome": None,
+                "cliente_id": None, "criado_nome": None, "aprovado_nome": None,
+                "aprovacao_motivo": None, "sem_fornecedor": False, "conciliar": None,
+                "cobranca_link_url": None, "periodicidade": None,
+                "valor_variavel": False, "proxima": None}
+
+    lib = [t(f"LIB {n}", "autorizado") for n in range(liberadas)]
+    esp = [t(f"ESP {n}", "aguardando") for n in range(esperando)]
+    rec = [t(f"RECEB {n}", "autorizado", tipo="receber") for n in range(receber)]
+    blocos = [
+        {"titulo": "✅ Liberadas — pode pagar", "cor": "ok", "decide": False,
+         "itens": lib, "centavos": 10000 * len(lib), "dica": ""},
+        {"titulo": "⏳ Esperando liberação", "cor": "esp", "decide": True,
+         "itens": esp, "centavos": 10000 * len(esp), "dica": ""},
+        {"titulo": "A receber", "cor": "rec", "decide": False, "itens": rec,
+         "centavos": 10000 * len(rec), "dica": ""},
+    ]
+    return env.get_template("t").render(
+        tit_blocos=blocos, titulos=lib + esp + rec, pode_liberar=True,
+        RITMOS=[], RITMO_SELO={})
+
+
+def _tag_do_bloco(html, cor):
+    m = re.search(r'<div class="tit-bloco %s"[^>]*>' % cor, html)
+    assert m, f"bloco {cor} não achado"
+    return m.group(0)
+
+
+def test_filtro_so_aparece_com_mais_de_um_bloco():
+    """Um bloco só não precisa de pílula pra escolher — não tem o que escolher."""
+    assert '<div class="tit-filtro">' not in _render_filtro(esperando=2)
+    assert '<div class="tit-filtro">' in _render_filtro(liberadas=1, esperando=2)
+
+
+def test_esperando_liberacao_comeca_visivel_por_padrao():
+    """É o único bloco que pede uma decisão — os outros dois são só consulta."""
+    html = _render_filtro(liberadas=1, esperando=2, receber=1)
+    assert "display:none" not in _tag_do_bloco(html, "esp")
+    assert "display:none" in _tag_do_bloco(html, "ok")
+    assert "display:none" in _tag_do_bloco(html, "rec")
+
+
+def test_sem_esperando_o_primeiro_bloco_com_itens_comeca_visivel():
+    """Sem nada esperando decisão, mostra o que existe — não uma tela vazia."""
+    html = _render_filtro(liberadas=1, receber=1)
+    assert "display:none" not in _tag_do_bloco(html, "ok")
+    assert "display:none" in _tag_do_bloco(html, "rec")
+
+
+def test_pilula_mostra_a_contagem_de_cada_bloco():
+    html = _render_filtro(liberadas=1, esperando=3, receber=2)
+    assert "<b>1</b>✅ Liberadas — pode pagar" in html
+    assert "<b>3</b>⏳ Esperando liberação" in html
+    assert "<b>2</b>A receber" in html
+    assert "<b>6</b>Tudo" in html
+
+
+def test_a_pilula_tudo_sempre_existe_quando_ha_filtro():
+    html = _render_filtro(liberadas=1, esperando=1)
+    assert 'data-alvo=""' in html
+
+
 def test_o_template_compila():
     Environment().parse(pt._EMPRESA)

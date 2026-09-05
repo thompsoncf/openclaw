@@ -51,8 +51,12 @@ def painel_raio_x(request: Request):
     if redir is not None:
         return redir
     pool = get_pool()
-    f = rxd.filtros(request.query_params)
-    d = rxd.dono(pool, conta[0], f)
+    perfil = rxd.perfil_da_conta(pool, conta[0])
+    if not perfil["aplica"]:
+        # conta só de produto: vende no caixa, não tem funil nem vendedor
+        return RedirectResponse("/painel", status_code=303)
+    f = rxd.filtros(request.query_params, perfil)
+    d = rxd.dono(pool, conta[0], f, perfil=perfil)
     try:
         with pool.connection() as c:
             vendedores = c.execute("""select id, nome from membros
@@ -76,7 +80,19 @@ def painel_raio_x(request: Request):
         meses.append((m.strftime("%Y-%m"), f"{rxd._MESES[m.month - 1]}/{m:%y}"))
         m = (m.replace(day=28) + timedelta(days=4)).replace(day=1)
     quente = [m["rotulo"] for m in (d["demanda_agenda"] or []) if m["pedindo"] > m["agenda"]]
-    return _render("raio_x", request, titulo="Raio-X", secao_ativa="raio_x",
+    # as UFs e os serviços que existem nesta conta, pros selects do recorrente
+    ufs, servicos = [], []
+    if "uf" in perfil["filtros"] or "servico" in perfil["filtros"]:
+        try:
+            with pool.connection() as c:
+                ufs = [r[0] for r in c.execute("""select distinct upper(uf) from prospeccao
+                                                   where conta_id = %s and coalesce(uf, '') <> '' order by 1""", (conta[0],)).fetchall()]
+                servicos = [r[0] for r in c.execute("""select nome from servicos_catalogo
+                                                        where conta_id = %s and coalesce(ativo, true) order by ordem, nome""", (conta[0],)).fetchall()]
+        except Exception:  # noqa: BLE001
+            ufs, servicos = [], []
+    return _render("raio_x", request, titulo="Raio-X", secao_ativa="raio_x", perfil=perfil, raio_x_perfil=perfil,
+                   ufs=ufs, servicos=servicos, familias=rxd.familias(), portes=[(k, r) for k, r, _ in rxd.PORTES],
                    d=d, f=f, p=p, comp=comp, vendedores=vendedores, meses=meses, quente=quente,
                    rxd=rxd, brl=_brl, fmt_min=rxd.fmt_min,
                    confianca_txt=(rxd.texto_confianca(d["confianca"]) if d["confianca"] else ""),
@@ -144,6 +160,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div>
     <h1>Raio-X</h1>
     <p class="lede">O placar de <b>{{ d.rotulo }}</b>, comparado com o período anterior. Os filtros cortam tudo que está abaixo; a linha por vendedor é a mesma que o grupo recebe na segunda.</p>
+    {% if not perfil.nicho_escolhido %}<p class="lede" style="color:var(--ambar)">Sua conta ainda não escolheu o nicho. O Raio-X está usando o perfil de serviço; escolha o nicho em <a href="/painel/empresa">Empresa</a> pra ele acertar o vocabulário.</p>{% endif %}
   </div>
 
   {% set fl = f %}
@@ -161,24 +178,41 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       <select name="vendedor" onchange="rxEnviar()"><option value="">todos</option>
         {% for vid, vnome in vendedores %}<option value="{{ vid }}" {% if fl.vendedor==vid %}selected{% endif %}>{{ vnome }}</option>{% endfor %}
       </select></label>
-    <label class="{{ 'on' if fl.tipo }}">Tipo de festa
+    {% if 'tipo' in perfil.filtros %}<label class="{{ 'on' if fl.tipo }}">Tipo de festa
       <select name="tipo" onchange="rxEnviar()"><option value="">todos</option>
         {% for t in rxd.TIPOS_FESTA %}<option value="{{ t }}" {% if fl.tipo==t %}selected{% endif %}>{{ t }}</option>{% endfor %}
         <option value="outro" {% if fl.tipo=='outro' %}selected{% endif %}>outro</option>
         <option value="sem" {% if fl.tipo=='sem' %}selected{% endif %}>sem tipo</option>
-      </select></label>
-    <label class="{{ 'on' if fl.mes }}">Mês da festa
+      </select></label>{% endif %}
+    {% if 'mes' in perfil.filtros %}<label class="{{ 'on' if fl.mes }}">Mês da festa
       <select name="mes" onchange="rxEnviar()"><option value="">todos</option>
         {% for k, r in meses %}<option value="{{ k }}" {% if fl.mes==k %}selected{% endif %}>{{ r }}</option>{% endfor %}
-      </select></label>
-    <label class="{{ 'on' if fl.dia }}">Dia da festa
+      </select></label>{% endif %}
+    {% if 'dia' in perfil.filtros %}<label class="{{ 'on' if fl.dia }}">Dia da festa
       <select name="dia" onchange="rxEnviar()"><option value="">todos</option>
         {% for k, r in rxd.DIAS_FESTA %}<option value="{{ k }}" {% if fl.dia==k %}selected{% endif %}>{{ r }}</option>{% endfor %}
-      </select></label>
-    <label class="{{ 'on' if fl.conv }}">Convidados
+      </select></label>{% endif %}
+    {% if 'conv' in perfil.filtros %}<label class="{{ 'on' if fl.conv }}">Convidados
       <select name="conv" onchange="rxEnviar()"><option value="">todos</option>
         {% for k, r, lo, hi in rxd.FAIXAS_CONVIDADOS %}<option value="{{ k }}" {% if fl.conv==k %}selected{% endif %}>{{ r }}</option>{% endfor %}
-      </select></label>
+      </select></label>{% endif %}
+    {% if 'segmento' in perfil.filtros %}<label class="{{ 'on' if fl.segmento }}">Segmento
+      <select name="segmento" onchange="rxEnviar()"><option value="">todos</option>
+        {% for k, r in familias %}<option value="{{ k }}" {% if fl.segmento==k %}selected{% endif %}>{{ r }}</option>{% endfor %}
+      </select></label>{% endif %}
+    {% if 'porte' in perfil.filtros %}<label class="{{ 'on' if fl.porte }}">Porte
+      <select name="porte" onchange="rxEnviar()"><option value="">todos</option>
+        {% for k, r in portes %}<option value="{{ k }}" {% if fl.porte==k %}selected{% endif %}>{{ r }}</option>{% endfor %}
+        <option value="sem" {% if fl.porte=='sem' %}selected{% endif %}>sem porte</option>
+      </select></label>{% endif %}
+    {% if 'uf' in perfil.filtros %}<label class="{{ 'on' if fl.uf }}">UF
+      <select name="uf" onchange="rxEnviar()"><option value="">todas</option>
+        {% for u in ufs %}<option value="{{ u }}" {% if fl.uf==u %}selected{% endif %}>{{ u }}</option>{% endfor %}
+      </select></label>{% endif %}
+    {% if 'servico' in perfil.filtros %}<label class="{{ 'on' if fl.servico }}">Serviço
+      <select name="servico" onchange="rxEnviar()"><option value="">todos</option>
+        {% for sv in servicos %}<option value="{{ sv }}" {% if fl.servico==sv %}selected{% endif %}>{{ sv }}</option>{% endfor %}
+      </select></label>{% endif %}
     <label class="{{ 'on' if fl.origem }}">Origem
       <select name="origem" onchange="rxEnviar()"><option value="">todas</option>
         {% for k, r in rxd.ORIGENS %}<option value="{{ k }}" {% if fl.origem==k %}selected{% endif %}>{{ r }}</option>{% endfor %}
@@ -187,7 +221,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       <select name="hora" onchange="rxEnviar()"><option value="">qualquer hora</option>
         {% for k, r in rxd.HORAS %}<option value="{{ k }}" {% if fl.hora==k %}selected{% endif %}>{{ r }}</option>{% endfor %}
       </select></label>
-    {% if fl.vendedor or fl.tipo or fl.mes or fl.dia or fl.conv or fl.origem or fl.hora or fl.periodo!='mes' %}
+    {% if fl.vendedor or fl.tipo or fl.mes or fl.dia or fl.conv or fl.origem or fl.hora or fl.segmento or fl.porte or fl.uf or fl.servico or fl.periodo!='mes' %}
     <a class="limpar" href="/painel/raio-x">limpar filtros</a>{% endif %}
   </form>
   <script>
@@ -204,15 +238,15 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       <b>{{ fmt_min(p.primeira_min) }}</b><span>1ª resposta (mediana · meta 5 min)</span>
       <em>{% if p.primeira_n %}{{ p.primeira_em_5 }} de {{ p.primeira_n }} no alvo · comercial {{ fmt_min(p.primeira_comercial) }} · noite/fds {{ fmt_min(p.primeira_noite) }}{% else %}nenhum lead respondido no período{% endif %}</em>
       {% if comp.primeira %}<em class="{{ comp.primeira[0] }}">{{ comp.primeira[1] }}</em>{% endif %}</div>
-    <div class="kpi {{ 'ruim' if p.rascunhos else 'ok' if p.propostas else '' }}"><b>{{ p.propostas }}</b><span>propostas · {{ brl(p.propostas_valor) }}</span>
+    <div class="kpi {{ 'ruim' if p.rascunhos else 'ok' if p.propostas else '' }}"><b>{{ p.propostas }}</b><span>propostas · {% if perfil.chave == 'recorrente' %}{{ brl(p.propostas_mensal) }}/mês{% else %}{{ brl(p.propostas_valor) }}{% endif %}</span>
       <em>{% if p.rascunhos %}{{ p.rascunhos }} em rascunho, nunca enviada(s){% else %}nenhum rascunho parado{% endif %}</em>
       {% if comp.propostas %}<em class="{{ comp.propostas[0] }}">{{ comp.propostas[1] }}</em>{% endif %}</div>
-    <div class="kpi {{ 'ok' if p.contratos else 'amb' if p.sem_assinar else '' }}"><b>{{ p.contratos }}</b><span>contratos · {{ brl(p.contratos_valor) }}</span>
+    <div class="kpi {{ 'ok' if p.contratos else 'amb' if p.sem_assinar else '' }}"><b>{{ p.contratos }}</b><span>contratos · {% if perfil.chave == 'recorrente' %}{{ brl(p.contratos_mensal) }}/mês{% else %}{{ brl(p.contratos_valor) }}{% endif %}</span>
       <em>{% if p.sem_assinar %}+{{ p.sem_assinar }} aprovado(s) sem assinatura{% else %}nenhum aprovado esperando assinatura{% endif %}</em>
       {% if comp.contratos %}<em class="{{ comp.contratos[0] }}">{{ comp.contratos[1] }}</em>{% endif %}</div>
     <div class="kpi {{ 'ok' if p.visitas_pct is not none and p.visitas_pct >= 70 else 'amb' if p.visitas_pct is not none else '' }}">
-      <b>{% if p.visitas_pct is not none %}{{ p.visitas_pct }}%{% else %}—{% endif %}</b><span>visitas que aconteceram</span>
-      <em>{% if p.visitas_ok + p.visitas_nao + p.visitas_sem_resposta %}{{ p.visitas_ok }} sim · {{ p.visitas_nao }} não · {{ p.visitas_sem_resposta }} sem resposta{% if not p.visitas_confiavel %} · pouco confiável{% endif %}{% else %}nenhuma visita no período{% endif %}</em></div>
+      <b>{% if p.visitas_pct is not none %}{{ p.visitas_pct }}%{% else %}—{% endif %}</b><span>{{ perfil.vocab.compromisso_kpi }}</span>
+      <em>{% if p.visitas_ok + p.visitas_nao + p.visitas_sem_resposta %}{{ p.visitas_ok }} sim · {{ p.visitas_nao }} não · {{ p.visitas_sem_resposta }} sem resposta{% if not p.visitas_confiavel %} · pouco confiável{% endif %}{% else %}nenhuma {{ perfil.vocab.compromisso }} no período{% endif %}</em></div>
   </div>
   {% else %}
   <div class="rx-dado">Não deu pra montar o placar agora. Tenta de novo em instantes.</div>
@@ -238,6 +272,35 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
 
   <div class="rx-ey">O que o Zaq enriquece sozinho</div>
   <div class="rx-grade">
+    {% if 'mrr' in perfil.blocos %}
+    <div class="bloco">
+      <h4>Mensalidade proposta × fechada <small>MRR novo, por mês</small></h4>
+      {% if d.mrr %}{% set mxm = maximo(1, (d.mrr|map(attribute='proposta')|max), (d.mrr|map(attribute='fechada')|max)) %}
+      <div class="duas">
+        {% for m in d.mrr %}<div><span>{{ m.rotulo }}</span><i class="a" style="width:{{ (100 * m.proposta / mxm)|round|int }}%" title="proposta {{ brl(m.proposta) }}/mês"></i><i class="b" style="width:{{ (100 * m.fechada / mxm)|round|int }}%" title="fechada {{ brl(m.fechada) }}/mês"></i></div>{% endfor %}
+        <div class="lg"><span><i class="a"></i>proposta: {{ brl(d.mrr|map(attribute='proposta')|sum) }}/mês</span><span><i class="b"></i>fechada: {{ brl(d.mrr|map(attribute='fechada')|sum) }}/mês</span></div>
+      </div>
+      {% set prop_tot = d.mrr|map(attribute='proposta')|sum %}{% set fech_tot = d.mrr|map(attribute='fechada')|sum %}
+      <div class="acha">{% if not p or not p.propostas %}<b>Nenhuma proposta enviada no período{% if p %}, com {{ p.leads }} leads novos{% endif %}.</b> O funil não está sendo trabalhado.{% elif fech_tot %}{{ (100 * fech_tot / prop_tot)|round|int if prop_tot else 0 }}% da mensalidade proposta virou contrato.{% else %}{{ brl(prop_tot) }}/mês em propostas e nenhum contrato fechado no período. O gargalo é depois da proposta.{% endif %}</div>
+      {% else %}<div class="vazio">Sem dado pra este corte.</div>{% endif %}
+    </div>
+    <div class="bloco">
+      <h4>Segmento que chega <small>do CNPJ · e quantos fecharam</small></h4>
+      {% if d.segmentos %}{% set mxs = maximo(1, d.segmentos|map(attribute='n')|max) %}
+      <div class="tipos">{% for sg in d.segmentos %}<div><span>{{ sg.rotulo }}</span><i style="width:{{ (100 * sg.n / mxs)|round|int }}%"></i><span>{{ sg.n }}{% if sg.fechou %} · {{ sg.fechou }} ✓{% endif %}</span></div>{% endfor %}</div>
+      {% set tot_s = d.segmentos|map(attribute='n')|sum %}{% set top = d.segmentos[0] %}
+      <div class="acha">{% if top.chave != 'sem' and top.n * 2 >= tot_s %}<b>{{ (100 * top.n / tot_s)|round|int }}% dos leads é {{ top.rotulo|lower }}.</b> É o segmento pra ter proposta pronta e responder em minutos.{% elif top.chave == 'sem' %}<b>{{ top.n }} de {{ tot_s }} leads sem segmento.</b> O CNPJ na ficha preenche sozinho.{% else %}A demanda está espalhada: {{ top.rotulo|lower }} lidera com {{ top.n }}.{% endif %}</div>
+      {% else %}<div class="vazio">Sem dado pra este corte.</div>{% endif %}
+    </div>
+    <div class="bloco">
+      <h4>Serviço mais proposto <small>{% if d.servicos and d.servicos.historico %}sem proposta no período · tudo que já foi orçado{% else %}itens das propostas · mensalidade média{% endif %}</small></h4>
+      {% if d.servicos and d.servicos.itens %}{% set mxv = maximo(1, d.servicos.itens|map(attribute='n')|max) %}
+      <div class="tipos">{% for sv in d.servicos.itens %}<div><span>{{ sv.nome }}</span><i style="width:{{ (100 * sv.n / mxv)|round|int }}%"></i><span>{{ sv.n }}×{% if sv.mensal_centavos %} · {{ brl(sv.mensal_centavos) }}/mês{% endif %}</span></div>{% endfor %}</div>
+      <div class="acha">{% if d.servicos.historico %}Ticket por serviço só depois da primeira proposta enviada no período. Até lá, o que mais entrou em orçamento.{% else %}<b>{{ d.servicos.itens[0].nome }}</b> é o que mais entra em proposta. É o serviço pra ter pacote e preço prontos.{% endif %}</div>
+      {% else %}<div class="vazio">Nenhum orçamento com itens ainda.</div>{% endif %}
+    </div>
+    {% endif %}
+    {% if 'demanda_agenda' in perfil.blocos %}
     <div class="bloco">
       <h4>Demanda × agenda <small>leads pedindo o mês vs festas marcadas</small></h4>
       {% if d.demanda_agenda %}{% set mx = maximo(1, (d.demanda_agenda|map(attribute='pedindo')|max), (d.demanda_agenda|map(attribute='agenda')|max)) %}
@@ -248,7 +311,9 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       <div class="acha">{% if quente %}Em <b>{{ quente|join(', ') }}</b> tem mais cliente pedindo do que festa marcada: a agenda tem espaço e o cliente está pedindo. É onde a proposta rápida vira contrato.{% else %}Nenhum mês com mais pedido do que festa marcada. A demanda está coberta pela agenda.{% endif %}</div>
       {% else %}<div class="vazio">Sem dado pra este corte.</div>{% endif %}
     </div>
+    {% endif %}
 
+    {% if 'dia_festa' in perfil.blocos %}
     <div class="bloco">
       {% set tot_dia = (d.dia_festa|map(attribute='n')|sum) if d.dia_festa else 0 %}
       <h4>Dia da festa <small>{{ tot_dia }} lead(s) com data</small></h4>
@@ -258,7 +323,9 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       <div class="acha"><b>{{ (100 * sab / tot_dia)|round|int }}% das festas pedidas caem no sábado.</b> {% if sab / tot_dia >= 0.5 %}Sábado é o produto escasso: vale tabela própria, lista de espera por data, e sexta e domingo com condição melhor pra quem tem data flexível.{% else %}A demanda está espalhada na semana; o sábado não é o gargalo neste corte.{% endif %}</div>
       {% else %}<div class="vazio">Nenhum lead com data neste corte.</div>{% endif %}
     </div>
+    {% endif %}
 
+    {% if 'tipos' in perfil.blocos %}
     <div class="bloco">
       <h4>Tipo de festa e ticket <small>proposta média por tipo</small></h4>
       {% if d.tipos %}{% set com_ticket = d.tipos|selectattr('ticket_centavos')|list %}{% set mxt = maximo(1, (com_ticket|map(attribute='ticket_centavos')|max) if com_ticket else 1) %}
@@ -267,6 +334,15 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       <div class="acha">{% if sem_t %}<b>{{ sem_t }} dos {{ tot_t }} leads ({{ (100 * sem_t / tot_t)|round|int }}%) estão sem tipo de festa.</b> Sem o tipo, o Zaq não sabe o ticket nem qual pacote sugerir: é a 2ª pergunta da primeira resposta.{% else %}Todo lead deste corte tem tipo de festa. O ticket por tipo é o que orienta a proposta.{% endif %}</div>
       {% else %}<div class="vazio">Sem dado pra este corte.</div>{% endif %}
     </div>
+    {% endif %}
+
+    {% if 'reunioes' in perfil.blocos and p %}
+    <div class="bloco">
+      <h4>{{ perfil.vocab.compromisso_kpi|capitalize }} <small>na agenda, no período</small></h4>
+      <p><b>{{ p.visitas_ok }}</b> aconteceram · <b>{{ p.visitas_nao }}</b> não · <b>{{ p.visitas_sem_resposta }}</b> sem desfecho marcado.</p>
+      <div class="acha">{% if p.visitas_sem_resposta and p.visitas_sem_resposta >= p.visitas_ok %}<b>{{ p.visitas_sem_resposta }} {{ perfil.vocab.compromissos }} sem desfecho.</b> Sem o "aconteceu / não aconteceu" a taxa não vale: é um toque na Agenda depois de cada uma.{% elif p.visitas_ok + p.visitas_nao %}{{ p.visitas_pct }}% das {{ perfil.vocab.compromissos }} marcadas aconteceram.{% else %}Nenhuma {{ perfil.vocab.compromisso }} no período. Proposta sem {{ perfil.vocab.compromisso }} fecha menos.{% endif %}</div>
+    </div>
+    {% endif %}
 
     <div class="bloco">
       <h4>Do lead à proposta, da proposta ao contrato <small>dias, mediana</small></h4>
@@ -281,7 +357,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       <h4>Por que perdeu <small>{{ d.perdas.total if d.perdas else 0 }} perdido(s) no período</small></h4>
       {% if d.perdas %}
       <div class="perdas">{% for x in d.perdas.itens %}<span class="{{ 'on' if x.n }}">{{ x.rotulo|lower }} · {{ x.n }}</span>{% endfor %}<span>sem motivo · {{ d.perdas.sem_motivo }}</span></div>
-      <div class="acha">{% if d.perdas.sem_motivo and d.perdas.total and d.perdas.sem_motivo * 2 >= d.perdas.total %}<b>{{ d.perdas.sem_motivo }} de {{ d.perdas.total }} sem motivo.</b> O motivo é um toque numa lista de seis ao marcar perdido, no app e na ficha. "Data indisponível" alimenta a lista de espera; "achou caro" alimenta a tabela de sábado.{% elif d.perdas.total %}"Data indisponível" alimenta a lista de espera por data; "achou caro" alimenta a tabela de sábado.{% else %}Nenhum lead perdido no período.{% endif %}</div>
+      <div class="acha">{% if d.perdas.sem_motivo and d.perdas.total and d.perdas.sem_motivo * 2 >= d.perdas.total %}<b>{{ d.perdas.sem_motivo }} de {{ d.perdas.total }} sem motivo.</b> O motivo é um toque numa lista de seis ao marcar perdido, no app e na ficha.{% elif d.perdas.total %}{% if perfil.chave == 'eventos' %}"Data indisponível" alimenta a lista de espera por data; "achou caro" alimenta a tabela de sábado.{% else %}"Ficou com o fornecedor atual" diz contra quem a proposta perdeu; "achou caro" alimenta a tabela.{% endif %}{% elif p and p.leads and not p.propostas %}Ninguém foi marcado como perdido, e nenhuma proposta saiu: parte dos {{ p.leads }} leads já esfriou sem ninguém dizer por quê.{% else %}Nenhum lead perdido no período.{% endif %}</div>
       {% else %}<div class="vazio">Sem dado pra este corte.</div>{% endif %}
     </div>
 

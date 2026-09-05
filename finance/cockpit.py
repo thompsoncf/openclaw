@@ -1305,8 +1305,8 @@ def fechar(pool, conta_id: int, membro_id: int, lead_id: int, tipo: str, motivo:
         # check da migração 209): é o que o Raio-X do dono agrega em "por que
         # perdeu". Texto solto que não é chave continua só na timeline. Savepoint
         # porque a coluna nasceu na 209 e fechar o lead não pode depender dela.
-        from finance.raio_x_dono import MOTIVOS_PERDA, rotulo_motivo
-        chave = motivo if motivo in dict(MOTIVOS_PERDA) else None
+        from finance.raio_x_perfil import MOTIVOS_TODOS, rotulo_motivo
+        chave = motivo if motivo in dict(MOTIVOS_TODOS) else None
         try:
             with c.transaction():
                 c.execute("update prospeccao set perda_motivo=%s where id=%s and conta_id=%s",

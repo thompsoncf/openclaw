@@ -373,7 +373,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _tem_app and (caps.vendas or caps.financeiro) %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
   {# o Raio-X (finance/raio_x_dono) é de quem manda na conta: dono e gestor #}
-  {% if tem_pj and papel in ('dono','gestor') %}{{ navi('raio_x','/painel/raio-x','relatorios','Raio-X') }}{% endif %}
+  {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('raio_x','/painel/raio-x','relatorios','Raio-X') }}{% endif %}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes/Fornecedores') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
@@ -414,7 +414,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _tem_app and (caps.vendas or caps.financeiro) %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
   {# o Raio-X (finance/raio_x_dono) é de quem manda na conta: dono e gestor #}
-  {% if tem_pj and papel in ('dono','gestor') %}{{ navi('raio_x','/painel/raio-x','relatorios','Raio-X') }}{% endif %}
+  {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('raio_x','/painel/raio-x','relatorios','Raio-X') }}{% endif %}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes/Fornecedores') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
@@ -7503,6 +7503,16 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
         if "vende_produto" not in ctx:
             ctx["vende_produto"] = bool(_c and _c[13])
             ctx["vende_servico"] = bool(_c and _c[14])
+        # o perfil do Raio-X (finance/raio_x_perfil), do slug do nicho (_c[7]):
+        # decide se o item aparece no menu e qual lista de motivos de perda a
+        # ficha oferece. Puro, sem consulta.
+        if "raio_x_perfil" not in ctx:
+            from finance import raio_x_perfil as _rxp
+            # `_c` pode ser um mock curto nos testes: sem o slug, o perfil é o de
+            # serviço (o que não fala de festa), nunca um IndexError na tela
+            _perfil = _rxp.perfil(_c[7] if (_c and len(_c) > 7) else None)
+            ctx["raio_x_perfil"] = _perfil
+            ctx.setdefault("motivos_perda", _perfil["motivos"])
     if "beta_gratis" not in ctx:
         try:
             from finance import config_app as _cfg

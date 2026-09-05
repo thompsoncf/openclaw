@@ -701,3 +701,32 @@ def test_o_aviso_do_vendedor_no_funil_sai_no_site(pool):
 
 def test_reaplicar_a_211_nao_duplica(pool):
     assert _vendedor_no_funil(pool)["id"] == _vendedor_no_funil(pool)["id"]
+
+
+def test_a_214_corrige_o_publico_dos_avisos_do_raio_x_e_avisa_o_perfil(pool):
+    """Os avisos do Raio-X saíram como 'todos' falando de festa. A 214 passa os
+    quatro pra 'servico' (quem vende serviço: eventos e recorrente), tira a
+    festa do corpo, e cria o aviso do perfil. Conta só de produto fica fora."""
+    _raio_x(pool); _raio_x_dono(pool)
+    with pool.connection() as c:
+        c.execute((BASE / "214_novidade_raio_x_por_nicho.sql").read_text(encoding="utf-8"))
+        c.commit()
+        rows = {r[0]: r for r in c.execute("""select chave, publico, corpo, pra_quem, link from novidades
+                                              where chave in ('raio-x-no-app','raio-x-de-segunda','raio-x-do-dono',
+                                                              'motivo-de-perda-no-app','raio-x-por-nicho')""").fetchall()}
+    assert set(rows) == {"raio-x-no-app", "raio-x-de-segunda", "raio-x-do-dono", "motivo-de-perda-no-app", "raio-x-por-nicho"}
+    for chave, r in rows.items():
+        assert r[1] == "servico", chave
+    assert "língua do seu nicho" in rows["raio-x-do-dono"][2]
+    assert "festa" not in rows["raio-x-no-app"][2].lower().split("quem vende festa")[0]   # o corpo do app só cita festa como exceção
+    assert sorted(rows["raio-x-por-nicho"][3]) == ["dono", "gestor", "vendedor"] and rows["raio-x-por-nicho"][4] == "/painel/raio-x"
+    # eventos (conta 1) e consultoria (conta 2) recebem; sem nicho (conta 3) não: o
+    # portão 'servico' exige nicho escolhido — a tela do Raio-X dela abre igual, no
+    # perfil recorrente, mas o aviso só sai pra quem declarou o que vende
+    assert "raio-x-por-nicho" in {n["chave"] for n in nv.listar(pool, 1, papel="dono")}
+    assert "raio-x-por-nicho" in {n["chave"] for n in nv.listar(pool, 2, papel="vendedor")}
+    assert "raio-x-por-nicho" not in {n["chave"] for n in nv.listar(pool, 3, papel="dono")}
+    # reaplicar não duplica
+    with pool.connection() as c:
+        c.execute((BASE / "214_novidade_raio_x_por_nicho.sql").read_text(encoding="utf-8")); c.commit()
+        assert c.execute("select count(*) from novidades where chave='raio-x-por-nicho'").fetchone()[0] == 1

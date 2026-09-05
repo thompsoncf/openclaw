@@ -655,3 +655,49 @@ def test_os_avisos_da_peca_3_miram_certo(pool):
     assert "raio-x-do-dono" in dono and "motivo-de-perda-no-app" not in dono
     antes = {k: v["id"] for k, v in a.items()}
     assert {k: v["id"] for k, v in _raio_x_dono(pool).items()} == antes
+
+
+# ------------------------------------ 211: quem vendeu, no funil de orçamentos
+
+def _vendedor_no_funil(pool) -> dict:
+    with pool.connection() as c:
+        c.execute((BASE / "211_novidade_vendedor_no_funil.sql").read_text(encoding="utf-8"))
+        c.commit()
+        r = c.execute("""select tipo, publico, pra_quem, resumo, link, id
+                           from novidades where chave='vendedor-no-funil'""").fetchone()
+    return {"tipo": r[0], "publico": r[1], "pra_quem": list(r[2]), "resumo": r[3],
+            "link": r[4], "id": r[5]}
+
+
+def test_o_aviso_do_vendedor_no_funil_e_de_quem_vende_servico():
+    """A tela é gate por `vende_servico` (finance.novidades._n.vende_servico) —
+    'servico' é o portão exato, não 'todos'."""
+    assert nv.nichos_alcancados("servico") == {s for s in nic.NICHOS if nic.vende_servico(s)}
+
+
+def test_o_aviso_do_vendedor_no_funil_mira_certo(pool):
+    a = _vendedor_no_funil(pool)
+    assert a["publico"] == "servico" and sorted(a["pra_quem"]) == ["dono", "gestor"]
+    assert a["link"] == "/painel/servicos"
+    assert a["tipo"] == "novidade" and a["resumo"]
+
+
+def test_o_aviso_do_vendedor_no_funil_nao_vai_pro_vendedor(pool):
+    """O vendedor já só vê a própria carteira — a linha dele sempre diria o
+    próprio nome, então não é rotina nova nenhuma pra ele."""
+    _vendedor_no_funil(pool)
+    dono_ev = {n["chave"] for n in nv.listar(pool, 1, papel="dono")}
+    vend_ev = {n["chave"] for n in nv.listar(pool, 1, papel="vendedor")}
+    dono_sem = {n["chave"] for n in nv.listar(pool, 3, papel="dono")}
+    assert "vendedor-no-funil" in dono_ev
+    assert "vendedor-no-funil" not in vend_ev
+    assert "vendedor-no-funil" not in dono_sem   # conta sem nicho não vende serviço
+
+
+def test_o_aviso_do_vendedor_no_funil_sai_no_site(pool):
+    _vendedor_no_funil(pool)
+    assert "vendedor-no-funil" in {n["chave"] for n in nv.publicas(pool)}
+
+
+def test_reaplicar_a_211_nao_duplica(pool):
+    assert _vendedor_no_funil(pool)["id"] == _vendedor_no_funil(pool)["id"]

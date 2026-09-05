@@ -940,16 +940,29 @@ def painel_servicos_lista(request: Request):
                           -- interna, endereçada por id.
                           (select ct.id from contratos ct
                             where ct.orcamento_id = orcamentos.id and ct.substitui_id is null
-                            order by ct.id desc limit 1) as contrato_id"""
+                            order by ct.id desc limit 1) as contrato_id,
+                          -- QUEM VENDEU. `criado_por` guarda o id do membro OU a
+                          -- palavra 'dono' (conta sem vendedor específico) — mesma
+                          -- leitura de `finance.vendas._membro_id_de` e a mesma
+                          -- redação que Relatórios → Vendas já usa pra essa coluna
+                          -- (web/painel_relatorios.py): sem o 2º ramo, todo
+                          -- orçamento do dono ficava "—", como se não tivesse
+                          -- autor nenhum.
+                          coalesce(
+                            (select mm.nome from membros mm
+                              where mm.id::text = orcamentos.criado_por
+                                and mm.conta_id = orcamentos.conta_id),
+                            case when orcamentos.criado_por = 'dono' then %s end,
+                            '—') as vendedor"""
         if papel == "vendedor" and membro_id:
             rows = c.execute(
                 _cols + """ from orcamentos where conta_id=%s and criado_por=%s
                    order by criado_em desc limit 50""",
-                (conta[0], str(membro_id))).fetchall()
+                (conta[2], conta[0], str(membro_id))).fetchall()
         else:
             rows = c.execute(
                 _cols + """ from orcamentos where conta_id=%s
-                   order by criado_em desc limit 50""", (conta[0],)).fetchall()
+                   order by criado_em desc limit 50""", (conta[2], conta[0])).fetchall()
     # OS PAGAMENTOS DE TODAS AS LINHAS, em dois SELECTs. Por linha seriam cem
     # consultas numa lista de cinquenta — o mesmo N+1 que já custou caro na Agenda.
     ids = [r[0] for r in rows]
@@ -1010,6 +1023,7 @@ def painel_servicos_lista(request: Request):
         # só serve depois de assinado (é quando existe o que aditar), mas vai
         # sempre: o menu do funil decide com `contrato_assinado`
         "contrato_id": r[27],
+        "vendedor": r[28],
         # QUANDO o contrato foi mandado — o mesmo dado que a proposta já mostra em
         # `enviado_em`. Sem ele o menu ofereceria "Mandar por e-mail" sem dizer se
         # já foi mandado, e é justamente essa dúvida que faz o vendedor mandar de
@@ -3953,13 +3967,23 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         // orçamento — o funil (bruto) e a folha que o cliente assina, o e-mail de
         // envio e o título a receber (todos os três já liam primeiro_ano_centavos
         // de propósito). O dinheiro sempre saiu certo; só a etiqueta mentia.
-        var sub=[esc(it.sub||''), (it.numero?('nº '+it.numero):''),
-                 (it.data?('gerada '+esc(it.data)):''),
-                 esc(it.total), esc(pn.resumo||'')]
-                .filter(Boolean).join(' · ');
+        // QUEM VENDEU (05/09/2026): dono e gestor viam o funil inteiro sem saber
+        // de qual vendedor era cada proposta — só dava pra descobrir abrindo uma
+        // por uma. `it.vendedor` já vem resolvido do servidor (mesma redação de
+        // Relatórios → Vendas, "—" só se de fato não há como saber quem foi).
+        //
+        // A linha virou DUAS: quem é o cliente/nº/vendedor em cima, valor e o que
+        // já aconteceu embaixo — a de cima tinha virado um parágrafo só, cada vez
+        // mais difícil de escanear.
+        var sub1=[esc(it.sub||''), (it.numero?('nº '+it.numero):''),
+                  (it.data?('gerada '+esc(it.data)):''),
+                  (it.vendedor?('vendido por '+esc(it.vendedor)):'')]
+                 .filter(Boolean).join(' · ');
+        var sub2=[esc(it.total), esc(pn.resumo||'')].filter(Boolean).join(' · ');
         left.innerHTML='<div class="oc-av">'+esc(it.inicial)+'</div>'
           +'<div style="min-width:0"><b>'+esc(it.titulo)+'</b>'
-          +'<div class="mut" style="font-size:.78rem">'+sub+'</div></div>';
+          +'<div class="mut" style="font-size:.78rem">'+sub1+'</div>'
+          +'<div class="mut" style="font-size:.78rem">'+sub2+'</div></div>';
         left.addEventListener('click',function(){abrir(it.id);});
         el.appendChild(left);
 

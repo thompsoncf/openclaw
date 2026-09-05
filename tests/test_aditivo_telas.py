@@ -29,7 +29,7 @@ from web import contrato_publico as cp
 CONTA = 34
 
 _SQL_BASE = open(os.path.join(os.path.dirname(__file__), "..", "db", "migracoes",
-                              "196_contrato_aditivos.sql"), encoding="utf-8").read()
+                              "201_contrato_aditivos.sql"), encoding="utf-8").read()
 
 _SQL = """
 create table nichos (id bigserial primary key, nome text, slug text unique, tipo text);
@@ -71,7 +71,12 @@ create table titulos (id bigserial primary key, conta_id bigint, tipo text,
   pago_em timestamptz, criado_em timestamptz default now(), criado_por bigint,
   cliente_id bigint, aprovacao text not null default 'autorizado',
   aprovado_por bigint, aprovado_em timestamptz, aprovacao_motivo text,
-  pago_sem_autorizacao boolean not null default false);
+  pago_sem_autorizacao boolean not null default false,
+  -- 196 e 197 (chegaram na main enquanto este PR estava aberto): `criar_titulo`
+  -- passou a escrever nelas, então o fixture precisa tê-las — senão o título do
+  -- aditivo falha em silêncio e só o log conta.
+  periodicidade text, valor_variavel boolean not null default false,
+  acrescimo_centavos int not null default 0, lancamento_acrescimo_id bigint);
 create table contrato_modelo (conta_id bigint primary key, clausulas jsonb not null
   default '[]'::jsonb, regras jsonb not null default '{}'::jsonb,
   atualizado_em timestamptz default now(), atualizado_por text default '',
@@ -301,7 +306,7 @@ def test_o_contrato_assinado_passa_a_avisar_do_aditivo(pool):
     assert f"/aditivo/{a['token']}" in html
 
 
-def test_base_sem_a_196_nao_derruba_a_folha_do_contrato(pool):
+def test_base_sem_a_201_nao_derruba_a_folha_do_contrato(pool):
     _cenario(pool)
     with pool.connection() as conn:
         conn.execute("drop table contrato_aditivos")

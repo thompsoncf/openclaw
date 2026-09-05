@@ -463,3 +463,49 @@ def test_reaplicar_a_200_nao_duplica_nem_troca_id(pool):
     antes = {k: v["id"] for k, v in _hoje(pool).items()}
     depois = {k: v["id"] for k, v in _hoje(pool).items()}
     assert antes == depois and len(antes) == 3
+
+
+# ------------------------------------------------- 202: o aviso do termo aditivo
+
+def _aditivo(pool) -> dict:
+    with pool.connection() as c:
+        c.execute((BASE / "202_novidade_termo_aditivo.sql").read_text(encoding="utf-8"))
+        c.commit()
+        r = c.execute("""select tipo, publico, pra_quem, resumo, link, id, titulo
+                           from novidades where chave='termo-aditivo'""").fetchone()
+    return {"tipo": r[0], "publico": r[1], "pra_quem": list(r[2]), "resumo": r[3],
+            "link": r[4], "id": r[5], "titulo": r[6]}
+
+
+def test_o_aviso_do_aditivo_so_alcanca_eventos(pool):
+    """Sem contrato de locação não há o que aditar — anunciar pra quem não tem
+    contrato seria prometer uma tela que não abre."""
+    a = _aditivo(pool)
+    assert nv.nichos_alcancados(a["publico"]) == {"eventos"}
+    assert a["tipo"] == "novidade" and a["resumo"] and a["link"]
+
+
+def test_o_aviso_do_aditivo_vai_pro_vendedor_tambem(pool):
+    """O dono escolheu que dono, gestor e vendedor fazem aditivo, e a tela mora
+    sob /painel/servicos justamente pra caber no que o vendedor alcança. Avisar
+    só dono e gestor repetiria, em forma de aviso, o erro que o recurso evitou em
+    forma de rota."""
+    a = _aditivo(pool)
+    assert sorted(a["pra_quem"]) == ["dono", "gestor", "vendedor"]
+    ev_dono = {n["chave"] for n in nv.listar(pool, 1, papel="dono")}
+    ev_vend = {n["chave"] for n in nv.listar(pool, 1, papel="vendedor")}
+    sem_dono = {n["chave"] for n in nv.listar(pool, 3, papel="dono")}
+    assert "termo-aditivo" in ev_dono and "termo-aditivo" in ev_vend
+    # conta sem nicho de eventos não recebe
+    assert "termo-aditivo" not in sem_dono
+
+
+def test_o_aviso_do_aditivo_sai_no_site(pool):
+    # tem resumo, então é público — a regra que impede aviso interno virar
+    # público por esquecimento vale nos dois sentidos
+    _aditivo(pool)
+    assert "termo-aditivo" in {n["chave"] for n in nv.publicas(pool)}
+
+
+def test_reaplicar_a_202_nao_duplica_nem_troca_id(pool):
+    assert _aditivo(pool)["id"] == _aditivo(pool)["id"]

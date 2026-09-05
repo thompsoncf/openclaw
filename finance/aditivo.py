@@ -344,7 +344,7 @@ def quantas_mudaram_data(pool, conta_id: int, contrato_id: int) -> int:
                       and alteracoes @> '[{"campo":"data"}]'::jsonb""",
                 (conta_id, int(contrato_id))).fetchone()
         return int(r[0] or 0)
-    except Exception:  # noqa: BLE001 — base sem a 196 ainda
+    except Exception:  # noqa: BLE001 — base sem a 201 ainda
         return 0
 
 
@@ -371,7 +371,7 @@ def do_contrato(pool, conta_id: int, contrato_id: int) -> list[dict]:
                 "select " + _COLS + " from contrato_aditivos "
                 " where conta_id=%s and contrato_id=%s order by ordem desc",
                 (conta_id, int(contrato_id))).fetchall()
-    except Exception:  # noqa: BLE001 — base sem a 196: a tela abre sem aditivo
+    except Exception:  # noqa: BLE001 — base sem a 201: a tela abre sem aditivo
         return []
     return [_fmt(r) for r in rows]
 

@@ -67,7 +67,12 @@ create table titulos (id bigserial primary key, conta_id bigint, tipo text,
   pago_em timestamptz, criado_em timestamptz default now(), criado_por bigint,
   cliente_id bigint, aprovacao text not null default 'autorizado',
   aprovado_por bigint, aprovado_em timestamptz, aprovacao_motivo text,
-  pago_sem_autorizacao boolean not null default false);
+  pago_sem_autorizacao boolean not null default false,
+  -- 196 e 197 (chegaram na main enquanto este PR estava aberto): `criar_titulo`
+  -- passou a escrever nelas, então o fixture precisa tê-las — senão o título do
+  -- aditivo falha em silêncio e só o log conta.
+  periodicidade text, valor_variavel boolean not null default false,
+  acrescimo_centavos int not null default 0, lancamento_acrescimo_id bigint);
 create table contrato_modelo (conta_id bigint primary key, clausulas jsonb not null
   default '[]'::jsonb, regras jsonb not null default '{}'::jsonb,
   atualizado_em timestamptz default now(), atualizado_por text default '',
@@ -75,14 +80,14 @@ create table contrato_modelo (conta_id bigint primary key, clausulas jsonb not n
 """
 
 
-def _migracao_196() -> str:
+def _migracao_201() -> str:
     """A migração de verdade, lida do arquivo.
 
     Copiar o DDL pro teste é como as duas cópias de preço que o `finance/contrato`
     existe pra matar: um dia divergem e o teste passa contra um esquema que a
     produção não tem."""
     caminho = os.path.join(os.path.dirname(__file__), "..", "db", "migracoes",
-                           "196_contrato_aditivos.sql")
+                           "201_contrato_aditivos.sql")
     with open(caminho, encoding="utf-8") as f:
         return f.read()
 
@@ -101,7 +106,7 @@ def pool():
                        kwargs={"prepare_threshold": None})
     with p.connection() as c:
         c.execute(_SQL)
-        c.execute(_migracao_196())
+        c.execute(_migracao_201())
         c.execute("insert into nichos (nome, slug, tipo) values ('Eventos','eventos','servico')")
         c.execute("insert into contas (id, nome, razao_social, documento, nicho_id) "
                   "values (%s,'Prime','M S DE SOUSA JUNIOR FESTAS E EVENTOS',"
@@ -590,7 +595,7 @@ def test_cancelado_nao_conta_pra_nada(pool):
     assert ad.quantas_mudaram_data(pool, CONTA, c["contrato_id"]) == 0
 
 
-def test_base_sem_a_196_nao_derruba_a_tela(pool):
+def test_base_sem_a_201_nao_derruba_a_tela(pool):
     # a tela do contrato tem que abrir mesmo antes de a migração rodar
     c = _contrato(pool)
     with pool.connection() as conn:

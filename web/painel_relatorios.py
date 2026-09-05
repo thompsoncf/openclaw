@@ -928,7 +928,7 @@ def _aditivos_vigentes(pool, conta_id, contrato_ids) -> dict:
     """{contrato_id: {"ordem": n, "valor": centavos}} do ÚLTIMO aditivo assinado.
 
     Numa consulta só pra lista inteira — por linha seriam 300 consultas numa tela
-    que já é a mais pesada do painel. Tolerante: base sem a 196 devolve vazio e o
+    que já é a mais pesada do painel. Tolerante: base sem a 201 devolve vazio e o
     relatório abre com os valores de sempre."""
     ids = [i for i in (contrato_ids or []) if i]
     if not ids:
@@ -1027,7 +1027,7 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -
     # O VALOR QUE VALE HOJE, não o congelado na assinatura. Contrato com aditivo
     # assinado aparecendo aqui com o valor velho é o mesmo defeito da folha do
     # cliente sem tarja — só que na tela do dono, que é quem decide com este
-    # número. Numa consulta só, e tolerante: base sem a 196 mostra o de antes.
+    # número. Numa consulta só, e tolerante: base sem a 201 mostra o de antes.
     vigentes = _aditivos_vigentes(pool, conta_id, [r[10] for r in rows])
 
     linhas = []

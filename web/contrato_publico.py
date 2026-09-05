@@ -231,7 +231,7 @@ def carregar(token: str, pool=None) -> dict | None:
 
 
 def _aditivo_aviso(pool, ct) -> dict | None:
-    """A tarja "alterado pelo Nº aditivo". Tolerante: base sem a 196 não derruba
+    """A tarja "alterado pelo Nº aditivo". Tolerante: base sem a 201 não derruba
     a página do contrato, que é documento de cliente."""
     try:
         from finance import aditivo as _ad

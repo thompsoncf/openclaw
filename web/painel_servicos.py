@@ -1497,6 +1497,10 @@ def painel_servicos_pagamentos(request: Request, orc_id: int):
     return JSONResponse({
         "parcelas": linhas, "total": brl(d["total"]), "recebido": brl(d["recebido"]),
         "falta": brl(d["falta"]),
+        # QUANTOS COMPROVANTES EXISTEM, à parte de quantas parcelas estão pagas —
+        # as duas coisas viviam misturadas debaixo de "pagas de total", e um
+        # comprovante já anexado não aparecia em lugar nenhum do topo do modal.
+        "anexados": len(anexos),
         # a tela só oferece o botão quando ele tem pra onde mandar o arquivo —
         # botão que engole comprovante é pior que botão nenhum. O PAPEL saiu da
         # conta em 03/09: quem abre esta tela (dono, gestor, vendedor) anexa.
@@ -1971,6 +1975,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .pg-tot b{color:var(--txt); font-variant-numeric:tabular-nums}
 .pg-tot .ok b{color:var(--verde-claro)}
 .pg-tot .fl b{color:var(--amar)}
+.pg-tot .an b{color:var(--azul)}
 .pl{display:grid; grid-template-columns:3px 1fr auto auto; gap:.7rem; align-items:center;
   padding:.5rem 0; border-top:1px dashed var(--borda)}
 .pl:first-of-type{border-top:0}
@@ -3805,8 +3810,13 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     }
     if(it.pgto&&it.pgto.total){
       m.appendChild(_mgrupo('Dinheiro'));
+      // "pagas" e "anexados" são coisas DIFERENTES (anexar não marca como pago —
+      // ver o comentário em finance.vendas.resumo_pagamentos). Antes só "pagas de
+      // total" aparecia aqui, sob o rótulo "...e comprovantes" — um dono com
+      // comprovante já anexado lia aquele número e achava que não tinha nenhum.
       m.appendChild(_mi('Pagamentos e comprovantes','📎',
-        it.pgto.pagas+' de '+it.pgto.total, function(){abrirPagamentos(it.id,it.cliente);}));
+        it.pgto.pagas+' de '+it.pgto.total+' pagas · '+it.pgto.anexados+' anexados',
+        function(){abrirPagamentos(it.id,it.cliente);}));
     }
     // APAGAR FICA SOZINHO, ATRÁS DE UMA LINHA E EM CORAL. Era um 🗑 do mesmo
     // tamanho e da mesma cor do 📄, encostado nele.
@@ -3852,10 +3862,15 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       .then(function(res){
         if(!res.ok){pgMsg(esc((res.d&&res.d.erro)||'Não consegui abrir.'),'cor'); return;}
         var d=res.d;
+        var n=(d.parcelas||[]).length;
         document.getElementById('pg-tot').innerHTML=
           '<span class="ok">Recebido <b>'+esc(d.recebido)+'</b></span>'
          +'<span class="fl">Falta <b>'+esc(d.falta)+'</b></span>'
-         +'<span>Total <b>'+esc(d.total)+'</b></span>';
+         +'<span>Total <b>'+esc(d.total)+'</b></span>'
+         // anexado é coisa diferente de pago — ver o comentário de
+         // finance.vendas.resumo_pagamentos. Sem este dado aqui, quem já anexou
+         // comprovante só descobria isso rolando a lista parcela por parcela.
+         +(n?'<span class="an">📎 Anexados <b>'+d.anexados+' de '+n+'</b></span>':'');
         var box=document.getElementById('pg-lista');
         box.innerHTML='';
         (d.parcelas||[]).forEach(function(p){

@@ -1451,8 +1451,34 @@ def test_o_selo_do_funil_conta_o_que_falta(cliente, storage):
     """"2 de 3 pagas · 1 sem comprovante". Sem parcela paga sem comprovante ele nem
     aparece — a lição do aviso do contrato."""
     oid = _com_parcelas(cliente, numero=41, sinal_pago=True)
-    assert _item(cliente, oid)["pgto"] == {"pagas": 1, "total": 3, "sem_comprovante": 1}
+    assert _item(cliente, oid)["pgto"] == {
+        "pagas": 1, "total": 3, "sem_comprovante": 1, "anexados": 0}
     cliente.post("/painel/servicos/comprovante",
                  data={"orcamento_id": oid, "parcela_idx": 0},
                  files={"arquivo": ("p.pdf", b"%PDF", "application/pdf")})
-    assert _item(cliente, oid)["pgto"] == {"pagas": 1, "total": 3, "sem_comprovante": 0}
+    assert _item(cliente, oid)["pgto"] == {
+        "pagas": 1, "total": 3, "sem_comprovante": 0, "anexados": 1}
+
+
+def test_anexar_nao_marca_como_pago_mas_conta_como_anexado(cliente, storage):
+    """05/09/2026: o menu Ações mostrava "0 de 6" (pagas de total) sob o rótulo
+    "Pagamentos e comprovantes" — um dono com 2 comprovantes anexados lia aquele
+    "0" como "nenhum comprovante". Anexar continua sem marcar como pago (regra
+    de propósito, ver `painel_servicos_comprovante_subir`); o que faltava era o
+    número de anexados aparecer, tanto no menu quanto no topo do modal."""
+    oid = _com_parcelas(cliente, numero=42, sinal_pago=False)
+    d = _pagamentos(cliente, oid)
+    assert d["anexados"] == 0 and all(not p["pago"] for p in d["parcelas"])
+
+    for idx in (0, 1):
+        cliente.post("/painel/servicos/comprovante",
+                     data={"orcamento_id": oid, "parcela_idx": idx},
+                     files={"arquivo": ("p.pdf", b"%PDF", "application/pdf")})
+
+    d = _pagamentos(cliente, oid)
+    assert d["anexados"] == 2                     # os DOIS anexados contam
+    assert all(not p["pago"] for p in d["parcelas"])   # e nenhum virou pago sozinho
+    assert d["recebido"] == "R$ 0,00"
+
+    pg = _item(cliente, oid)["pgto"]
+    assert pg["anexados"] == 2 and pg["pagas"] == 0    # os dois números, separados

@@ -242,7 +242,7 @@ def pagamentos_do_orcamento(pool, conta_id: int, orcamento_id: int) -> dict:
 
 
 def resumo_pagamentos(parcelas, sinal_pago_em, titulos_pagos=(), com_comprovante=()) -> dict:
-    """{pagas, total, sem_comprovante} de UMA linha do funil.
+    """{pagas, total, sem_comprovante, anexados} de UMA linha do funil.
 
     Pura, e separada de `pagamentos_do_orcamento`, por causa do N+1: a lista do
     funil traz até 50 orçamentos, e chamar a função completa por linha seriam 100
@@ -251,10 +251,17 @@ def resumo_pagamentos(parcelas, sinal_pago_em, titulos_pagos=(), com_comprovante
 
     `sem_comprovante` conta só parcela PAGA. Cobrar comprovante do que ainda nem
     venceu encheria a tela de âmbar que ninguém pode resolver — a mesma armadilha
-    do aviso do contrato."""
+    do aviso do contrato.
+
+    `anexados` é o TOTAL de comprovantes anexados, pago ou não — 05/09/2026: o
+    menu Ações mostrava "0 de 6" (pagas de total) sob o rótulo "Pagamentos e
+    comprovantes", e um dono com 2 comprovantes já anexados lia aquele "0" como
+    "nenhum comprovante". Anexar continua sem marcar como pago (decisão já
+    tomada, ver `painel_servicos_comprovante_subir`); o que faltava era o número
+    de anexados aparecer, em vez de ficar escondido atrás do de pagas."""
     itens = _parcelas(parcelas)
     if not itens:
-        return {"pagas": 0, "total": 0, "sem_comprovante": 0}
+        return {"pagas": 0, "total": 0, "sem_comprovante": 0, "anexados": 0}
     i_sinal = indice_do_sinal(parcelas)
     pagos, faltando = 0, 0
     for idx in range(len(itens)):
@@ -264,7 +271,8 @@ def resumo_pagamentos(parcelas, sinal_pago_em, titulos_pagos=(), com_comprovante
         pagos += 1
         if idx not in set(com_comprovante):
             faltando += 1
-    return {"pagas": pagos, "total": len(itens), "sem_comprovante": faltando}
+    return {"pagas": pagos, "total": len(itens), "sem_comprovante": faltando,
+            "anexados": len(set(com_comprovante))}
 
 
 # -------------------------------------------------- O QUE A LINHA DO FUNIL DIZ

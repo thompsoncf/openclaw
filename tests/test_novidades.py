@@ -544,3 +544,45 @@ def test_o_aviso_do_texto_do_aditivo_sai_no_site(pool):
 
 def test_reaplicar_a_204_nao_duplica(pool):
     assert _aditivo_texto(pool)["id"] == _aditivo_texto(pool)["id"]
+
+
+# ------------------------------------- 205: a pílula "Outra data" no Cockpit
+
+def _outra_data(pool) -> dict:
+    with pool.connection() as c:
+        c.execute((BASE / "205_novidade_agendar_visita_outra_data.sql"
+                   ).read_text(encoding="utf-8"))
+        c.commit()
+        r = c.execute("""select tipo, publico, pra_quem, resumo, link, id
+                           from novidades where chave='agendar-visita-outra-data'""").fetchone()
+    return {"tipo": r[0], "publico": r[1], "pra_quem": list(r[2]), "resumo": r[3],
+            "link": r[4], "id": r[5]}
+
+
+def test_o_aviso_da_outra_data_e_de_qualquer_conta_so_pro_vendedor(pool):
+    """A tela é a mesma pra qualquer conta, sem gate de nicho — por isso 'todos',
+    igual à 'fila-no-mes-atual'. E é rotina do vendedor no Cockpit, não do dono
+    nem do gestor, que não agendam visita por lá."""
+    a = _outra_data(pool)
+    assert a["publico"] == "todos" and a["pra_quem"] == ["vendedor"]
+    assert a["link"] == "/cockpit"
+    assert a["tipo"] == "novidade" and a["resumo"]
+
+
+def test_o_aviso_da_outra_data_chega_ao_vendedor_de_qualquer_conta(pool):
+    _outra_data(pool)
+    vend_ev = {n["chave"] for n in nv.listar(pool, 1, papel="vendedor")}
+    vend_sem = {n["chave"] for n in nv.listar(pool, 3, papel="vendedor")}
+    dono_ev = {n["chave"] for n in nv.listar(pool, 1, papel="dono")}
+    assert "agendar-visita-outra-data" in vend_ev
+    assert "agendar-visita-outra-data" in vend_sem  # 'todos': sem nicho também
+    assert "agendar-visita-outra-data" not in dono_ev  # só vendedor
+
+
+def test_o_aviso_da_outra_data_sai_no_site(pool):
+    _outra_data(pool)
+    assert "agendar-visita-outra-data" in {n["chave"] for n in nv.publicas(pool)}
+
+
+def test_reaplicar_a_205_nao_duplica(pool):
+    assert _outra_data(pool)["id"] == _outra_data(pool)["id"]

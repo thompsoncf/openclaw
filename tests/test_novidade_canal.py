@@ -55,6 +55,8 @@ def pool(monkeypatch):
                      criado_em timestamptz not null default now(), chip_de bigint)""")
         c.execute((BASE / "174_novidades.sql").read_text(encoding="utf-8"))
         c.execute((BASE / "184_novidade_voz_e_porta_fechada.sql").read_text(encoding="utf-8"))
+        # 199: pra_quem, resumo, link — `listar` lê as três colunas.
+        c.execute((BASE / "199_novidades_pra_quem.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values

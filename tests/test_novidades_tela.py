@@ -67,6 +67,7 @@ def cliente(monkeypatch):
         # o trabalho dele.
         c.execute((BASE / "184_novidade_voz_e_porta_fechada.sql"
                    ).read_text(encoding="utf-8"))
+        c.execute((BASE / "199_novidades_pra_quem.sql").read_text(encoding="utf-8"))
         c.execute("insert into nichos (nome, slug) values ('Eventos','eventos'),"
                   "('Consultoria','consultoria')")
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values
@@ -494,3 +495,82 @@ def test_as_rotas_existem_no_app_que_sobe_e_o_gate_deixa_passar(cliente, monkeyp
     assert r.status_code == 303 and "Aviso de eventos" not in r.text
     # mas a faixa de versão é dele também
     assert c.get("/painel/versao").json() == {"v": vs.VERSAO}
+
+
+# ═══════════════════════════════════════ pra quem, "Ver como ficou" e o site
+
+def _aviso2(pool, chave, **campos):
+    campos.setdefault("publico", "todos")
+    campos.setdefault("tipo", "novidade")
+    campos.setdefault("pra_quem", ["dono", "gestor"])
+    with pool.connection() as c:
+        c.execute("""insert into novidades (chave, tipo, publico, pra_quem, titulo, corpo, resumo, link)
+                     values (%s,%s,%s,%s,%s,'corpo do aviso',%s,%s)""",
+                  (chave, campos["tipo"], campos["publico"], campos["pra_quem"],
+                   "T " + chave, campos.get("resumo"), campos.get("link")))
+        c.commit()
+
+
+def test_ver_como_ficou_so_sai_quando_o_aviso_tem_link(cliente):
+    _aviso2(cliente.pool, "com-link", link="/painel/prospeccao")
+    _aviso2(cliente.pool, "sem-link")
+    html = cliente.get("/painel/novidades").text
+    assert html.count('class="nv-ver"') == 1
+    assert 'class="nv-ver" href="/painel/prospeccao"' in html
+    assert "abre a tela que mudou" in html
+
+
+def test_a_mudanca_com_link_tem_entendi_e_ver_como_ficou(cliente):
+    _aviso2(cliente.pool, "mud-link", tipo="mudanca", link="/painel/agenda")
+    html = cliente.get("/painel/novidades").text
+    assert 'class="nv-ok"' in html and 'href="/painel/agenda"' in html
+
+
+def test_o_publico_sai_como_etiqueta_menos_todos(cliente):
+    _aviso2(cliente.pool, "de-eventos", publico="eventos")
+    _aviso2(cliente.pool, "de-todos")
+    html = cliente.get("/painel/novidades").text
+    assert html.count('class="nv-tag p"') == 1 and ">eventos</span>" in html
+
+
+def test_o_dono_nao_ve_nem_marca_o_aviso_que_e_so_do_vendedor(cliente):
+    _aviso2(cliente.pool, "so-vend", pra_quem=["vendedor"], tipo="mudanca")
+    _aviso2(cliente.pool, "do-dono")
+    html = cliente.get("/painel/novidades").text
+    assert "T do-dono" in html and "T so-vend" not in html
+    with cliente.pool.connection() as c:
+        (nid,) = c.execute("select id from novidades where chave='so-vend'").fetchone()
+    assert cliente.post(f"/painel/novidades/{nid}/lida").status_code == 404
+    # abrir a tela marcou a 'novidade' do dono; a do vendedor não vira linha nenhuma
+    assert [l[0] for l in _lidas(cliente.pool)] == ["do-dono"]
+
+
+def test_a_bolinha_do_dono_nao_conta_o_aviso_do_vendedor(cliente):
+    _aviso2(cliente.pool, "so-vend2", pra_quem=["vendedor"], tipo="mudanca")
+    _aviso2(cliente.pool, "mud-dono", tipo="mudanca")
+    assert nv.nao_lidas(cliente.pool, CONTA_EV, None, "dono") == 1
+    assert nv.nao_lidas(cliente.pool, CONTA_EV, None, "vendedor") == 1
+
+
+def test_a_lista_publica_responde_sem_sessao_e_sem_nada_de_conta(cliente):
+    _aviso2(cliente.pool, "pub", resumo="Uma linha pra fora.")
+    _aviso2(cliente.pool, "interno")   # sem resumo: não sai
+    cliente.post("/_sair")
+    r = cliente.get("/novidades.json")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "public, max-age=300"
+    itens = r.json()["itens"]
+    chaves = [n["chave"] for n in itens]
+    assert "pub" in chaves and "interno" not in chaves
+    for n in itens:
+        assert "corpo" not in n and "lida" not in n and "conta" not in str(n.keys())
+
+
+def test_a_lista_publica_sem_banco_da_503_e_nao_grava_cache(cliente, monkeypatch):
+    def _boom(pool):
+        raise RuntimeError("sem banco")
+    monkeypatch.setattr(nv, "publicas", _boom)
+    r = cliente.get("/novidades.json")
+    assert r.status_code == 503
+    assert r.headers["cache-control"] == "no-store"
+    assert r.json()["itens"] == []

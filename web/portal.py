@@ -4779,7 +4779,10 @@ _NOVIDADES = """{% extends "base" %}{% block conteudo %}
  border:1px solid var(--borda);color:var(--txt-mut)}
 .nv-tag.m{border-color:#6e5a22;color:#f0dca6;background:#332a12}
 .nv-tag.n{border-color:var(--verde);color:var(--verde-claro);background:rgba(29,158,117,.14)}
+.nv-tag.p{border-color:#3a2b52;color:#c9a3e0;background:#1a1226}
 .nv-ti{font-size:1rem;font-weight:600;margin-bottom:.3rem}
+.nv-ver{display:inline-block;padding:.4rem .95rem;border-radius:8px;font-size:.85rem;font-weight:600;
+ border:1px solid var(--verde);color:var(--verde-claro);background:rgba(29,158,117,.14);text-decoration:none}
 .nv-co{font-size:.9rem;color:#c5c5c0;line-height:1.5;white-space:pre-line}
 .nv-pe{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-top:.8rem}
 .nv-pe button{width:auto;margin:0;padding:.4rem .95rem;font-size:.85rem}
@@ -4798,6 +4801,7 @@ subir, ela aparece nesta tela — e o menu avisa com uma bolinha.</div>
   <div class="nv-tp">
     <span class="nv-tag {% if n.tipo == 'mudanca' %}m{% else %}n{% endif %}">{% if n.tipo == 'mudanca' %}Mudança{% else %}Novidade{% endif %}</span>
     <span class="nv-tag">{{ n.dia }}</span>
+    {% if n.publico and n.publico != 'todos' %}<span class="nv-tag p">{{ n.publico }}</span>{% endif %}
     {% if n.lida %}<span class="nv-tag">&#10003; lida</span>{% endif %}
   </div>
   <div class="nv-ti">{{ n.titulo }}</div>
@@ -4805,8 +4809,12 @@ subir, ela aparece nesta tela — e o menu avisa com uma bolinha.</div>
   {% if n.tipo == 'mudanca' and not n.lida %}
   <div class="nv-pe">
     <button type="button" class="nv-ok" data-id="{{ n.id }}">Entendi</button>
+    {% if n.link %}<a class="nv-ver" href="{{ n.link }}">Ver como ficou</a>{% endif %}
     <span class="mut">precisa confirmar &mdash; muda como você trabalha</span>
   </div>
+  {% elif n.link %}
+  <div class="nv-pe"><a class="nv-ver" href="{{ n.link }}">Ver como ficou</a>
+    <span class="mut">abre a tela que mudou</span></div>
   {% endif %}
 </div>
 {% endfor %}
@@ -7476,7 +7484,8 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
     if "novidades_n" not in ctx and request.session.get("conta_id") and ctx["ve_novidades"]:
         from finance import novidades as _nv
         ctx["novidades_n"] = _nv.nao_lidas(get_pool(), request.session["conta_id"],
-                                           request.session.get("membro_id"))
+                                           request.session.get("membro_id"),
+                                           papel=request.session.get("papel", "dono"))
     # Injeta conta + gating (o conta_logada ja traz tudo numa query so: conta[11..15])
     if request.session.get("conta_id"):
         if "conta" not in ctx:
@@ -7507,6 +7516,29 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
 
 
 # ---------- rotas ----------
+
+@router.get("/novidades.json")
+def novidades_publicas():
+    """O que o site mostra em zaq-ia.com/atualizacoes. Público, sem sessão, sem
+    nada de conta (ver finance.novidades.publicas): só título, resumo, ramo, data.
+
+    Uma fonte só: a landing lê daqui e monta a página, em vez de alguém copiar
+    texto pra um segundo lugar — que é como o painel ficou 17 dias sem aviso.
+    O CORS do app já libera GET pra zaq-ia.com e pra zaq-landing.onrender.com.
+
+    Cinco minutos de cache: a lista muda uma vez por deploy, e o site não precisa
+    bater no banco a cada visita. Sem banco, 503 — a landing guarda a última
+    cópia que viu e mostra ela."""
+    from finance import novidades as nv
+    try:
+        itens = nv.publicas(get_pool())
+    except Exception as e:  # noqa: BLE001
+        log.warning("novidades.json: não deu pra listar: %s: %s", type(e).__name__, e)
+        return JSONResponse({"itens": [], "erro": "indisponivel"}, status_code=503,
+                            headers={"Cache-Control": "no-store"})
+    return JSONResponse({"itens": itens},
+                        headers={"Cache-Control": "public, max-age=300"})
+
 
 @router.get("/painel/versao")
 def painel_versao(request: Request):
@@ -7546,7 +7578,7 @@ def painel_novidades(request: Request):
     membro_id = request.session.get("membro_id")
     pool = get_pool()
     try:
-        itens = nv.listar(pool, conta[0], membro_id)
+        itens = nv.listar(pool, conta[0], membro_id, papel)
     except Exception as e:  # noqa: BLE001
         log.warning("novidades: não deu pra listar da conta %s: %s: %s",
                     conta[0], type(e).__name__, e)
@@ -7576,7 +7608,8 @@ def painel_novidade_lida(request: Request, nid: int):
     # linha em novidade_lida só porque alguém digitou o número na URL.
     pool = get_pool()
     membro_id = request.session.get("membro_id")
-    if not any(n["id"] == nid for n in nv.listar(pool, conta[0], membro_id)):
+    papel = request.session.get("papel", "dono")
+    if not any(n["id"] == nid for n in nv.listar(pool, conta[0], membro_id, papel)):
         return JSONResponse({"ok": False, "erro": "nao encontrada"}, status_code=404)
     nv.marcar_lida(pool, nid, conta[0], membro_id)
     # true mesmo quando já estava marcada: o botão é clicável de novo enquanto a

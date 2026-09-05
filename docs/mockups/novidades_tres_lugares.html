@@ -1,0 +1,450 @@
+<title>Novidades em Três Lugares</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Tokens de web/tema.py (o Cockpit usa os mesmos nomes). Escuro único de propósito. */
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --azul:#7bb8e6; --ink:#062011;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.86em;color:var(--roxo)}
+a{color:var(--neon-bright)}
+.wrap{max-width:1180px;margin:0 auto;padding:2.6rem 1.25rem 5rem;display:flex;flex-direction:column;gap:2.8rem}
+.txt{max-width:1000px}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.6rem,4vw,2.15rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:68ch}
+.head .marca{color:var(--neon)}
+.sec > h2{font-size:1.15rem;margin-bottom:.15rem}
+.sec > p.leg{color:var(--text-dim);margin:.3rem 0 1.15rem;max-width:72ch;font-size:.9rem}
+
+.manchete{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:14px;padding:1.15rem 1.3rem;display:flex;gap:1.1rem;align-items:flex-start;max-width:1000px}
+.manchete .ic{font-size:1.5rem;line-height:1;flex:none}
+.manchete h2{font-size:1.05rem;color:#F2BDB9;margin-bottom:.3rem}
+.manchete p{margin:0 0 .5rem;color:#D9AEAA;font-size:.9rem;max-width:72ch}
+.manchete p:last-child{margin-bottom:0}
+.manchete b{font-family:var(--mono);font-variant-numeric:tabular-nums;color:#F6D3D0}
+
+.movs{display:grid;grid-template-columns:repeat(4,1fr);gap:.8rem}
+@media (max-width:860px){.movs{grid-template-columns:1fr 1fr}}
+@media (max-width:520px){.movs{grid-template-columns:1fr}}
+.mov{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.95rem 1rem;display:flex;flex-direction:column;gap:.4rem}
+.mov .k{font-family:var(--mono);font-size:.7rem;color:var(--neon);letter-spacing:.06em}
+.mov h3{font-size:.95rem}
+.mov p{margin:0;font-size:.82rem;color:var(--text-dim)}
+
+/* ============ os celulares, no visual do Cockpit ============ */
+.fones{display:grid;grid-template-columns:repeat(3,1fr);gap:1.2rem;align-items:start}
+@media (max-width:1000px){.fones{grid-template-columns:1fr 1fr}}
+@media (max-width:680px){.fones{grid-template-columns:1fr}}
+.fone{border:1px solid var(--line);border-radius:28px;background:var(--bg);box-shadow:0 20px 60px rgba(0,0,0,.45);overflow:hidden;display:flex;flex-direction:column;min-height:640px}
+.fone .leg{padding:.6rem .9rem;font-size:.72rem;color:var(--text-faint);border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+.hdr{display:flex;align-items:center;gap:.7rem;padding:.9rem 1rem .5rem}
+.hdr .av{width:34px;height:34px;border-radius:50%;background:var(--neon-fundo);border:1px solid var(--neon-borda);color:var(--neon-bright);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem}
+.hdr .tt b{display:block;font-family:var(--display);font-size:1.15rem;line-height:1.1}
+.hdr .tt small{color:var(--text-dim);font-size:.76rem}
+.hdr .tt small b{display:inline;font-family:var(--mono);font-size:.76rem;color:var(--neon-bright);font-weight:500}
+.foco{display:flex;gap:.35rem;padding:.35rem 1rem .55rem;overflow-x:auto;align-items:center;scrollbar-width:none}
+.foco::-webkit-scrollbar{display:none}
+.pil{flex:none;display:inline-flex;align-items:center;gap:.3rem;border:1px solid var(--line);border-radius:999px;padding:.3rem .65rem;font-size:.76rem;color:var(--text-dim);background:var(--surface)}
+.pil b{font-family:var(--mono);font-weight:500;font-size:.7rem;color:var(--text)}
+.pil.on{background:var(--neon);border-color:var(--neon);color:var(--ink);font-weight:600}.pil.on b{color:var(--ink)}
+.pil.fora{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:#F0DCA6}.pil.fora b{color:#F0DCA6}
+.pil.fora.on{background:var(--ambar);border-color:var(--ambar);color:#1c1408}.pil.fora.on b{color:#1c1408}
+.foco .sep{flex:none;width:1px;height:18px;background:var(--line);margin:0 .2rem}
+.scroll{flex:1;overflow:hidden}
+.grp{display:flex;align-items:center;gap:.4rem;padding:.55rem 1rem .25rem;font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint);font-weight:600;background:var(--bg)}
+.grp b{font-family:var(--mono);font-weight:500;color:var(--text-dim);letter-spacing:0}
+.grp .ln{flex:1;height:1px;background:var(--line)}
+.grp.verde{color:var(--neon-bright)}.grp.verde b{color:var(--neon-bright)}
+.grp.alerta{color:#F0DCA6}.grp.alerta b{color:#F0DCA6}
+.lead{display:flex;align-items:flex-start;gap:.65rem;padding:.7rem 1rem;border-bottom:1px solid var(--line)}
+.lead.fora{background:rgba(224,163,46,.05);box-shadow:inset 3px 0 0 var(--ambar-borda)}
+.lead .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:.45rem}
+.lead .mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:.18rem}
+.lead .top{display:flex;align-items:center;gap:.4rem}
+.lead .emp{font-weight:600;font-size:.92rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip{font-size:.62rem;padding:.1rem .45rem;border-radius:999px;border:1px solid var(--line);color:var(--text-dim);flex-shrink:0;white-space:nowrap}
+.chip.ia{color:var(--roxo);border-color:#3a2b52;background:#1a1226}
+.chip.voce{color:var(--ambar);border-color:#5a4520;background:#241c0f}
+.chip.neon{color:var(--neon);border-color:#1e4a3a;background:rgba(37,211,102,.10)}
+.chip.mes{color:#F0DCA6;border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.ev{font-size:.72rem;color:var(--text-dim);display:flex;align-items:center;gap:.3rem;flex-wrap:wrap}
+.ev b{color:var(--text)} .ev .d{font-family:var(--mono);color:var(--neon-bright)}
+.ev .src{font-size:.56rem;color:var(--azul);border:1px solid #1f3a4d;background:#122029;border-radius:999px;padding:0 .32rem}
+.ev.sem{color:#F0DCA6}
+.ev .perg{margin-left:auto;font-size:.7rem;font-weight:600;color:#F0DCA6;border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:999px;padding:.08rem .5rem}
+.snip{color:var(--text-dim);font-size:.76rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.snip.nova{color:var(--text)}
+.pend{flex-shrink:0;min-width:20px;height:20px;padding:0 .32rem;border-radius:999px;background:var(--coral);color:#fff;font-family:var(--mono);font-size:.7rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;margin-top:.35rem}
+.dobra{margin:.4rem 1rem;border:1px dashed var(--line);border-radius:10px;padding:.45rem .6rem;font-size:.72rem;color:var(--text-dim);display:flex;justify-content:space-between;background:var(--bg-2)}
+.dobra b{font-family:var(--mono);font-weight:500;color:var(--text)}
+.dobra.amarela{border-color:var(--ambar-borda);color:#F0DCA6;background:var(--ambar-fundo)}.dobra.amarela b{color:#F0DCA6}
+.dica{padding:.5rem 1rem;font-size:.7rem;color:var(--text-faint);text-align:center}
+.fab{position:relative;margin:-2.2rem 1rem .4rem auto;width:44px;height:44px;border-radius:50%;background:var(--neon);color:var(--ink);font-size:1.5rem;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 20px rgba(37,211,102,.35)}
+.tabs{display:flex;border-top:1px solid var(--line);background:var(--bg-2);padding:.45rem .3rem .55rem}
+.tabs span{flex:1;text-align:center;font-size:.62rem;color:var(--text-faint);display:flex;flex-direction:column;align-items:center;gap:.15rem;position:relative}
+.tabs span i{font-style:normal;font-size:1rem;line-height:1}
+.tabs span.on{color:var(--neon-bright)}
+.tabs .tsel{position:absolute;top:-4px;right:18%;min-width:16px;height:16px;border-radius:999px;background:var(--coral);color:#fff;font-family:var(--mono);font-size:.6rem;font-weight:700;display:flex;align-items:center;justify-content:center}
+/* a tela do lead: o aviso da pista */
+.chat{padding:.6rem 1rem;display:flex;flex-direction:column;gap:.45rem}
+.aviso{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:12px;padding:.55rem .7rem;font-size:.78rem;color:#F0DCA6;display:flex;flex-direction:column;gap:.35rem}
+.aviso .bts{display:flex;gap:.4rem}
+.aviso .bt{font-size:.72rem;font-weight:600;padding:.3rem .6rem;border-radius:8px;border:1px solid var(--ambar-borda)}
+.aviso .bt.ok{background:var(--ambar);color:#1c1408;border-color:var(--ambar)}
+.bub{max-width:86%;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;border-bottom-left-radius:4px;padding:.45rem .65rem;font-size:.8rem;line-height:1.4}
+.bub mark{background:rgba(70,245,138,.16);color:var(--neon-bright);border-radius:4px;padding:0 .15rem}
+.bub .meta{display:block;color:var(--text-faint);font-size:.62rem;margin-top:.2rem;font-family:var(--mono)}
+.bub.eu{align-self:flex-end;background:#123028;border-color:#1d5741;border-bottom-left-radius:12px;border-bottom-right-radius:4px}
+.composer{margin:auto .8rem .6rem;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.5rem .7rem;font-size:.8rem;color:var(--text);display:flex;gap:.5rem;align-items:center}
+.composer span{flex:1}
+.composer i{font-style:normal;color:var(--neon-bright)}
+
+.notas{display:flex;flex-direction:column;gap:.7rem;max-width:1000px}
+.nota{border:1px solid var(--line);border-left:3px solid var(--ambar);border-radius:0 11px 11px 0;background:var(--surface);padding:.8rem 1rem}
+.nota h4{margin:0 0 .25rem;font-size:.88rem;font-weight:600}
+.nota p{margin:0;font-size:.84rem;color:var(--text-dim);max-width:74ch}
+.nota.bom{border-left-color:var(--neon)} .nota.fora{border-left-color:var(--text-faint)}
+.passos{margin:0;padding-left:1.2rem;font-size:.86rem;color:var(--text-dim);display:flex;flex-direction:column;gap:.35rem;max-width:1000px}
+.passos b{color:var(--text)}
+.rolagem{overflow-x:auto;border:1px solid var(--line);border-radius:12px;max-width:1000px}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:.83rem}
+th{text-align:left;font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint);font-weight:600;padding:.55rem .8rem;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:.55rem .8rem;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+.rodape{border-top:1px solid var(--line);padding-top:1.2rem;color:var(--text-faint);font-size:.8rem;max-width:74ch}
+/* ============ este mockup ============ */
+.pecas{display:flex;flex-direction:column;gap:3rem}
+.peca{display:flex;flex-direction:column;gap:1rem}
+.peca .k{font-family:var(--mono);font-size:.7rem;color:var(--neon);letter-spacing:.08em}
+.peca h2{font-size:1.25rem}
+.peca > p{margin:0;color:var(--text-dim);max-width:72ch;font-size:.9rem}
+.lado{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:1.4rem;align-items:start}
+@media (max-width:900px){.lado{grid-template-columns:1fr}}
+.numeros{display:grid;grid-template-columns:repeat(4,1fr);gap:.8rem;max-width:1000px}
+@media (max-width:860px){.numeros{grid-template-columns:1fr 1fr}}
+.numero{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.9rem 1rem}
+.numero b{display:block;font-family:var(--display);font-size:1.7rem;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums}
+.numero b.ruim{color:var(--coral)}.numero b.amb{color:var(--ambar)}
+.numero span{display:block;font-size:.76rem;color:var(--text-dim);margin-top:.35rem}
+
+/* a tela do painel web (mesmas classes de _NOVIDADES em web/portal.py) */
+.painel{border:1px solid var(--line);border-radius:14px;background:var(--bg);overflow:hidden;display:grid;grid-template-columns:150px 1fr;min-height:520px}
+.pside{background:var(--bg-2);border-right:1px solid var(--line);padding:.9rem .6rem;font-size:.74rem;color:var(--text-dim);display:flex;flex-direction:column;gap:.15rem}
+.pside .lg{font-family:var(--display);font-weight:800;font-size:1.05rem;color:var(--text);padding:.2rem .5rem .7rem}
+.pside .grp{padding:.7rem .5rem .2rem;font-size:.62rem;background:transparent}
+.pside a{display:flex;align-items:center;justify-content:space-between;padding:.38rem .55rem;border-radius:7px;color:var(--text-dim)}
+.pside a.on{background:var(--neon-fundo);color:var(--neon-bright)}
+.pside .nvb{min-width:16px;height:16px;border-radius:999px;background:var(--coral);color:#fff;font-family:var(--mono);font-size:.62rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 .3rem}
+.pmain{padding:1rem 1.1rem}
+.pmain h3{font-size:1.05rem;margin-bottom:.15rem}
+.pmain .mut{color:var(--text-dim);font-size:.78rem}
+.nv{background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:10px;padding:.8rem .9rem;margin-top:.65rem}
+.nv.mud{border-left-color:#c99a2e}.nv.nova{border-left-color:var(--neon)}.nv.lida{opacity:.55}
+.nv-tp{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-bottom:.35rem}
+.nv-tag{display:inline-block;padding:.08rem .5rem;border-radius:999px;font-size:.66rem;border:1px solid var(--line);color:var(--text-dim)}
+.nv-tag.n{border-color:var(--neon-borda);color:var(--neon-bright);background:var(--neon-fundo)}
+.nv-tag.m{border-color:#6e5a22;color:#f0dca6;background:#332a12}
+.nv-tag.p{border-color:#3a2b52;color:var(--roxo);background:#1a1226}
+.nv-ti{font-size:.92rem;font-weight:600;margin-bottom:.25rem}
+.nv-co{font-size:.8rem;color:#c5d0c9;line-height:1.5}
+.nv-pe{display:flex;align-items:center;gap:.6rem;margin-top:.6rem;flex-wrap:wrap}
+.nv-pe .bt{font-size:.74rem;font-weight:600;padding:.3rem .7rem;border-radius:8px;border:1px solid var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright)}
+.nv-pe .bt.g{border-color:var(--line);background:transparent;color:var(--text-dim)}
+.nv-pe .mut{font-size:.72rem}
+
+/* a faixa no app */
+.faixa{margin:.2rem .8rem .5rem;border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:12px;padding:.55rem .7rem;font-size:.78rem;color:var(--text);display:flex;align-items:center;gap:.5rem}
+.faixa b{color:var(--neon-bright)}
+.faixa .x{margin-left:auto;color:var(--text-faint);font-size:.9rem}
+.faixa .ver{font-weight:600;color:var(--neon-bright);white-space:nowrap}
+.bloco{padding:.4rem 1rem}
+.card2{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.7rem .8rem;margin-bottom:.5rem;font-size:.8rem}
+.card2 .t{font-weight:600;font-size:.86rem;display:flex;justify-content:space-between;gap:.5rem}
+.card2 .t small{font-family:var(--mono);font-weight:400;color:var(--text-faint);font-size:.66rem}
+.card2 p{margin:.25rem 0 0;color:var(--text-dim);font-size:.76rem}
+.card2.nova{border-left:3px solid var(--neon)}
+.card2.lida{opacity:.55}
+.ey{padding:.6rem 1rem .2rem;font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);font-weight:600}
+.tabs .tsel.verde{background:var(--neon);color:var(--ink)}
+.imgs{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.35rem;margin:.5rem 0}
+.imgs div{aspect-ratio:9/16;border:1px solid var(--line);border-radius:8px;background:repeating-linear-gradient(135deg,var(--bg-2) 0 6px,var(--surface) 6px 12px);display:flex;align-items:flex-end;justify-content:center;font-size:.6rem;color:var(--text-faint);padding-bottom:.3rem}
+.btn2{display:block;text-align:center;border-radius:10px;padding:.55rem;font-size:.82rem;font-weight:600;background:var(--neon);color:var(--ink);margin-top:.5rem}
+.btn2.g{background:transparent;border:1px solid var(--line);color:var(--text-dim)}
+
+/* a landing, dentro de um navegador */
+.nav-browser{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg)}
+.nav-browser .barra{display:flex;align-items:center;gap:.5rem;padding:.5rem .8rem;background:var(--bg-2);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:.7rem;color:var(--text-faint)}
+.nav-browser .barra i{width:9px;height:9px;border-radius:50%;background:var(--line);display:inline-block}
+.nav-browser .barra span{margin-left:.4rem;padding:.2rem .6rem;border-radius:6px;background:var(--bg);flex:1}
+.ln{padding:0 1.4rem 1.4rem}
+.ln nav{display:flex;justify-content:space-between;align-items:center;height:52px;border-bottom:1px solid var(--line)}
+.ln .logo{display:flex;align-items:center;gap:8px;font-family:var(--display);font-weight:800;font-size:19px}
+.ln .logo .mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(145deg,var(--neon),#0FA85A);color:#04150C;display:grid;place-items:center;font-size:14px}
+.ln .cta{font-size:.74rem;font-weight:600;padding:.4rem .8rem;border-radius:999px;border:1px solid var(--neon);color:var(--neon)}
+.ln .ey2{font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--neon);margin-top:1.4rem;display:flex;align-items:center;gap:.5rem}
+.ln .ey2::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--neon);box-shadow:0 0 8px var(--neon)}
+.ln h3{font-family:var(--display);font-size:1.7rem;letter-spacing:-.02em;margin:.4rem 0 .3rem;font-weight:800}
+.ln .sub{color:var(--text-dim);font-size:.86rem;max-width:56ch}
+.ln .ramos{display:flex;gap:.4rem;flex-wrap:wrap;margin:1rem 0 .4rem}
+.ln .ramos span{border:1px solid var(--line);border-radius:999px;padding:.3rem .75rem;font-size:.76rem;color:var(--text-dim)}
+.ln .ramos span.on{background:var(--neon);border-color:var(--neon);color:var(--ink);font-weight:600}
+.ln .mes{font-family:var(--mono);font-size:.68rem;color:var(--text-faint);letter-spacing:.1em;text-transform:uppercase;margin:1.2rem 0 .5rem;display:flex;align-items:center;gap:.6rem}
+.ln .mes::after{content:"";flex:1;height:1px;background:var(--line)}
+.ln .item{display:grid;grid-template-columns:64px 1fr;gap:.8rem;padding:.7rem 0;border-bottom:1px solid var(--line)}
+.ln .item .d{font-family:var(--mono);font-size:.7rem;color:var(--text-faint);padding-top:.15rem}
+.ln .item b{font-size:.92rem;display:block}
+.ln .item p{margin:.15rem 0 0;font-size:.8rem;color:var(--text-dim);max-width:62ch}
+.ln .item .tg{display:inline-flex;gap:.3rem;margin-top:.35rem}
+.ln .item .tg span{font-size:.62rem;padding:.08rem .45rem;border-radius:999px;border:1px solid var(--line);color:var(--text-dim)}
+.ln .item .tg span.ev{border-color:#3a2b52;color:var(--roxo)}
+.ln .item .tg span.td{border-color:var(--neon-borda);color:var(--neon-bright)}
+.ln .item .tg span.ap{border-color:var(--ambar-borda);color:#F0DCA6}
+.ln .entrar{margin-top:1.2rem;border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:12px;padding:.8rem 1rem;font-size:.84rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
+.ln .entrar b{color:var(--neon-bright)}
+.ln .entrar .cta{white-space:nowrap}
+.fluxo{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:.6rem;align-items:center;max-width:1000px;font-size:.8rem}
+@media (max-width:760px){.fluxo{grid-template-columns:1fr}.fluxo .seta{transform:rotate(90deg);justify-self:center}}
+.fluxo .no{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.8rem .9rem}
+.fluxo .no b{display:block;font-size:.86rem;margin-bottom:.2rem}
+.fluxo .no code{font-size:.72rem}
+.fluxo .no p{margin:0;color:var(--text-dim);font-size:.76rem}
+.fluxo .seta{color:var(--neon);font-size:1.3rem;text-align:center}
+</style>
+
+<div class="wrap">
+
+  <div class="head txt">
+    <div class="eyebrow">Mockup pra aprovação · Novidades · 5 de setembro de 2026</div>
+    <h1>Novidades em três lugares: <span class="marca">painel</span>, <span class="marca">app do vendedor</span> e <span class="marca">site</span></h1>
+    <p>O Zaq já tem a tela Novidades no painel, com mira por tipo de negócio. O que falta é ela voltar a ser
+    alimentada, chegar no celular do vendedor e ter uma versão pública no site. Números do banco de hoje.</p>
+  </div>
+
+  <div class="numeros">
+    <div class="numero"><b class="ruim">19/08</b><span>data do último aviso publicado. As 4 entregas de hoje subiram sem aviso.</span></div>
+    <div class="numero"><b class="amb">1 a 4</b><span>leituras por aviso, em 22 contas. A bolinha no menu não está bastando.</span></div>
+    <div class="numero"><b class="ruim">0</b><span>avisos que chegam no vendedor. A tela é só de dono e gestor.</span></div>
+    <div class="numero"><b>15 de 22</b><span>contas sem nicho declarado. Só recebem aviso "pra todos", por regra.</span></div>
+  </div>
+
+  <div class="pecas">
+
+  <!-- ══════════════════════════ PEÇA 1 ══════════════════════════ -->
+  <section class="peca">
+    <div class="k">PEÇA 1 · PAINEL WEB</div>
+    <h2>A tela que já existe, alimentada de novo, com "ver como ficou"</h2>
+    <p>Nada de tela nova. Os avisos de hoje entram por migração, como os sete de agosto: um pra todo mundo
+    (o funil abre no mês atual) e um só pra eventos (o card lê a data da festa). O que muda de verdade é
+    o botão "Ver como ficou", que abre o guia com as telas, em vez de só texto.</p>
+    <div class="painel">
+      <div class="pside">
+        <div class="lg">Zaq</div>
+        <div class="grp">Vendas</div>
+        <a>Prospecção</a><a>Agenda</a><a>Serviços</a>
+        <div class="grp">Empresa</div>
+        <a>Clientes</a><a>Financeiro</a><a>Relatórios</a>
+        <div class="grp">Sistema</div>
+        <a class="on">Novidades <span class="nvb">2</span></a>
+      </div>
+      <div class="pmain">
+        <h3>Novidades</h3>
+        <div class="mut">O que mudou no Zaq pro seu tipo de negócio. Só aparece aqui o que afeta você.</div>
+
+        <div class="nv nova">
+          <div class="nv-tp"><span class="nv-tag n">Novidade</span><span class="nv-tag">05/09</span><span class="nv-tag p">eventos</span></div>
+          <div class="nv-ti">O card do funil lê a data da festa na conversa</div>
+          <div class="nv-co">Quando o cliente escreve "dia 20 de fevereiro, umas 120 pessoas", a data, o tipo e os convidados vão pro card sozinhos, com o selo "💬 lido". Quem só falou o mês vira uma pista pra você confirmar. Sem IA: é leitura por regra, e o vendedor bate o martelo.</div>
+          <div class="nv-pe"><span class="bt">Ver como ficou</span><span class="mut">abre o guia com as telas</span></div>
+        </div>
+
+        <div class="nv nova">
+          <div class="nv-tp"><span class="nv-tag n">Novidade</span><span class="nv-tag">05/09</span><span class="nv-tag p">todos</span></div>
+          <div class="nv-ti">O funil abre no mês atual, e a Fila do vendedor também</div>
+          <div class="nv-co">Agosto trouxe 254 leads e setembro 21, e caía tudo numa coluna só. Agora o quadro abre no mês corrente, com as pílulas "esperando resposta" e "festa em 30 dias" trazendo o que ficou de fora. Ninguém sumiu: "Tudo" está a um toque.</div>
+          <div class="nv-pe"><span class="bt">Ver como ficou</span><span class="bt g">Mandar pros vendedores</span></div>
+        </div>
+
+        <div class="nv nova lida">
+          <div class="nv-tp"><span class="nv-tag n">Novidade</span><span class="nv-tag">19/08</span><span class="nv-tag">✓ lida</span></div>
+          <div class="nv-ti">Seu vendedor manda áudio pelo Zaq</div>
+          <div class="nv-co">O microfone entrou na conversa do lead, no app do vendedor…</div>
+        </div>
+        <div class="nv mud lida">
+          <div class="nv-tp"><span class="nv-tag m">Mudança</span><span class="nv-tag">17/08</span><span class="nv-tag">✓ lida</span></div>
+          <div class="nv-ti">O contrato agora é quem fecha o negócio</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════ PEÇA 2 ══════════════════════════ -->
+  <section class="peca">
+    <div class="k">PEÇA 2 · APP DO VENDEDOR</div>
+    <h2>O aviso chega onde o vendedor está: uma faixa na Fila, e a lista no Perfil</h2>
+    <p>Cada aviso ganha um campo "pra quem": dono, gestor, vendedor. O vendedor só recebe o que muda a
+    rotina dele; aviso de tela que ele não tem, nunca. A leitura por pessoa já existe no banco.</p>
+    <div class="fones">
+
+      <div class="fone">
+        <div class="leg">1 · A Fila, na primeira vez depois do deploy</div>
+        <div class="hdr"><span class="av">JA</span><div class="tt"><b>Meus leads</b><small><b>8 de 85</b> · setembro · 2 sua vez</small></div></div>
+        <div class="faixa">✨ <span><b>Sua Fila mudou.</b> Abre no mês e separa por sua vez.</span><span class="ver">Ver →</span></div>
+        <div class="foco">
+          <span class="pil on">Set <b>8</b></span><span class="pil">Ago <b>77</b></span><span class="pil">Tudo <b>85</b></span>
+          <span class="sep"></span><span class="pil fora">🟢 sua vez <b>15</b></span>
+        </div>
+        <div class="scroll">
+          <div class="grp verde">🟢 Sua vez <b>2</b><span class="ln"></span></div>
+          <div class="lead"><span class="dot" style="background:var(--coral)"></span><span class="mid">
+            <span class="top"><span class="emp">Gabriela</span><span class="chip voce">sua vez</span></span>
+            <span class="ev">💍 <b>Casamento</b> · <span class="d">13 fev 27</span> · 70 conv. <span class="src">💬 lido</span></span>
+            <span class="snip nova">Média de 70 pessoas</span></span><span class="pend">2</span></div>
+          <div class="lead"><span class="dot" style="background:#5b9bd5"></span><span class="mid">
+            <span class="top"><span class="emp">Priscila N.</span><span class="chip voce">sua vez</span></span>
+            <span class="ev sem">📅 sem data <span class="perg">perguntar</span></span>
+            <span class="snip nova">Quanto fica só o salão?</span></span><span class="pend">1</span></div>
+          <div class="grp">🎉 Festa marcada <b>5</b><span class="ln"></span></div>
+          <div class="lead"><span class="dot" style="background:var(--ambar)"></span><span class="mid">
+            <span class="top"><span class="emp">Casal Souza</span><span class="chip neon">respondido</span></span>
+            <span class="ev">💍 <b>Casamento</b> · <span class="d">14 nov</span> · 150 conv.</span>
+            <span class="snip">Você: Segue o pacote de fim de semana</span></span></div>
+          <div class="dica">A faixa some ao tocar em "Ver" ou no ✕, e não volta.</div>
+        </div>
+        <div class="tabs"><span class="on"><i>☰</i>Fila<span class="tsel">3</span></span><span><i>📅</i>Agenda</span><span><i>📄</i>Propostas</span><span><i>📈</i>Resultado</span><span><i>👤</i>Perfil<span class="tsel verde">1</span></span></div>
+      </div>
+
+      <div class="fone">
+        <div class="leg">2 · O aviso aberto, com as telas</div>
+        <div class="hdr"><span class="av" style="background:var(--surface);border-color:var(--line);color:var(--text-dim)">‹</span><div class="tt"><b>Sua Fila mudou</b><small>novidade · 05/09</small></div></div>
+        <div class="scroll">
+          <div class="bloco">
+            <div class="card2" style="border-left:3px solid var(--neon)">
+              <p style="color:var(--text);font-size:.8rem;line-height:1.5">A Fila abre no mês atual e se separa por o que cada lead precisa de você: <b>🟢 sua vez</b> em cima, <b>🎉 festa marcada</b> na ordem da data, <b>📅 sem data</b>, e os parados numa dobra.</p>
+              <p>Os de fora do mês entram pelas pílulas amarelas. "Tudo" está sempre a um toque.</p>
+            </div>
+            <div class="imgs"><div>tela 1</div><div>tela 2</div><div>tela 3</div></div>
+            <p class="mut" style="font-size:.7rem;color:var(--text-faint);margin:0 0 .4rem">As três telas do guia, na ordem. Toque pra ampliar.</p>
+            <span class="btn2">Entendi</span>
+            <span class="btn2 g">Ver a Fila</span>
+          </div>
+        </div>
+        <div class="tabs"><span><i>☰</i>Fila</span><span><i>📅</i>Agenda</span><span><i>📄</i>Propostas</span><span><i>📈</i>Resultado</span><span class="on"><i>👤</i>Perfil</span></div>
+      </div>
+
+      <div class="fone">
+        <div class="leg">3 · Perfil: a lista, com o que já leu apagado</div>
+        <div class="hdr"><span class="av">JA</span><div class="tt"><b>Meu perfil</b><small>Jacqueline · vendedora</small></div></div>
+        <div class="scroll">
+          <div class="ey">Novidades</div>
+          <div class="bloco">
+            <div class="card2 nova"><div class="t">Sua Fila mudou <small>05/09</small></div><p>Abre no mês, separa por sua vez, e o card mostra a data da festa.</p></div>
+            <div class="card2 lida"><div class="t">Você manda áudio pelo Zaq <small>19/08</small></div><p>O microfone entrou na conversa do lead.</p></div>
+            <div class="card2 lida"><div class="t">Desconto pelo celular <small>19/08</small></div><p>Por item, em % ou em R$, direto na proposta.</p></div>
+          </div>
+          <div class="ey">Preferências</div>
+          <div class="bloco">
+            <div class="card2"><div class="t">Notificações push <small style="color:var(--neon-bright)">Ligado</small></div><p>avisar quando cair um lead</p></div>
+            <div class="card2"><div class="t">Receber no rodízio <small style="color:var(--neon-bright)">Ligado</small></div><p>desligue pra pausar leads novos</p></div>
+          </div>
+          <div class="dica">O aviso "Mandar no WhatsApp saiu do app", de 19/08, era pra ele. Nunca chegou.</div>
+        </div>
+        <div class="tabs"><span><i>☰</i>Fila<span class="tsel">3</span></span><span><i>📅</i>Agenda</span><span><i>📄</i>Propostas</span><span><i>📈</i>Resultado</span><span class="on"><i>👤</i>Perfil</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════ PEÇA 3 ══════════════════════════ -->
+  <section class="peca">
+    <div class="k">PEÇA 3 · SITE (zaq-ia.com/atualizacoes)</div>
+    <h2>Uma página pública "O que mudou", por mês e por ramo, lendo do mesmo lugar</h2>
+    <p>Na landing não tem login, então o corte é por ramo (o que o público de cada aviso já diz), não por
+    empresa. Por empresa é a tela do painel, e a página convida a entrar. Pra não virar uma segunda lista
+    mantida à mão, a página lê os avisos do próprio Zaq.</p>
+    <div class="lado">
+      <div class="nav-browser">
+        <div class="barra"><i></i><i></i><i></i><span>zaq-ia.com/atualizacoes</span></div>
+        <div class="ln">
+          <nav><div class="logo"><span class="mark">Z</span>Zaq</div><span class="cta">Entrar</span></nav>
+          <div class="ey2">O que mudou</div>
+          <h3>O Zaq de hoje não é o de ontem.</h3>
+          <div class="sub">Tudo que subiu, por mês. Escolha o seu ramo pra ver só o que é seu.</div>
+          <div class="ramos"><span class="on">Todos</span><span>Eventos</span><span>Serviços</span><span>Produto</span><span>Recorrente</span></div>
+
+          <div class="mes">Setembro 2026</div>
+          <div class="item"><div class="d">05 set</div><div><b>O funil abre no mês atual, e a Fila do vendedor também</b><p>Cada mês na sua coluna, o que está esperando resposta em cima, e os parados numa dobra.</p><div class="tg"><span class="td">todos</span><span class="ap">app do vendedor</span></div></div></div>
+          <div class="item"><div class="d">05 set</div><div><b>O card lê a data da festa na conversa</b><p>"Dia 20 de fevereiro, umas 120 pessoas" vira data, tipo e convidados no card, sem digitar.</p><div class="tg"><span class="ev">eventos</span></div></div></div>
+          <div class="item"><div class="d">05 set</div><div><b>Vista por mês do evento</b><p>O funil também se vê pelos meses das festas, com as etapas dentro de cada mês.</p><div class="tg"><span class="ev">eventos</span></div></div></div>
+
+          <div class="mes">Agosto 2026</div>
+          <div class="item"><div class="d">19 ago</div><div><b>Seu vendedor manda áudio pelo Zaq</b><p>Microfone na conversa do lead, e o áudio chega transcrito no histórico.</p><div class="tg"><span class="td">canal próprio</span><span class="ap">app do vendedor</span></div></div></div>
+          <div class="item"><div class="d">19 ago</div><div><b>A agenda avisa quando duas festas caem no mesmo dia</b><div class="tg"><span class="ev">eventos</span></div></div></div>
+          <div class="item"><div class="d">18 ago</div><div><b>Desconto por item, em % ou em R$</b><div class="tg"><span class="td">serviços</span></div></div></div>
+          <div class="item" style="border-bottom:0"><div class="d">17 ago</div><div><b>O contrato agora é quem fecha o negócio</b><div class="tg"><span class="ev">eventos</span></div></div></div>
+
+          <div class="entrar"><span><b>Já usa o Zaq?</b> Entrando, você vê só o que mudou pro seu negócio, e o que a sua equipe já leu.</span><span class="cta">Entrar no painel</span></div>
+        </div>
+      </div>
+
+      <div class="notas">
+        <div class="nota bom"><h4>Uma fonte só</h4><p>O Zaq passa a responder <code>GET /novidades.json</code>: título, resumo, ramo, data. Público e sem nada de conta. A landing lê isso e monta a página; se o Zaq estiver fora, mostra a última cópia gravada no build.</p></div>
+        <div class="nota"><h4>Por que ramo e não empresa</h4><p>Ramo é o que o público do aviso já diz (eventos, serviços, produto, recorrente, canal próprio). Empresa exige saber quem está olhando, e isso é login: é exatamente o que a tela do painel faz.</p></div>
+        <div class="nota"><h4>O texto muda de tom</h4><p>No painel o aviso fala com quem já usa ("o botão saiu do funil"). No site ele vende ("o funil abre no mês atual"). Por isso cada aviso ganha um resumo curto separado do corpo, e é o resumo que vai pro site.</p></div>
+        <div class="nota fora"><h4>Fica de fora</h4><p>Comentário, curtida, assinatura de e-mail. A página é leitura. Se um dia valer, o lugar é o painel, onde a pessoa está logada.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════ como liga ══════════════════════════ -->
+  <section class="sec">
+    <h2>Como as três peças se ligam</h2>
+    <p class="leg">Um aviso, escrito uma vez, no PR da mudança. Ele mesmo decide onde aparece.</p>
+    <div class="fluxo">
+      <div class="no"><b>O PR leva o aviso</b><p>Migração com título, corpo, resumo, público (o portão que já existe) e <code>pra_quem</code>: dono, gestor, vendedor.</p></div>
+      <div class="seta">→</div>
+      <div class="no"><b>O Zaq mira</b><p>Painel pra dono e gestor, com bolinha. App pro vendedor, com a faixa uma vez e a lista no Perfil. Leitura por pessoa, como hoje.</p></div>
+      <div class="seta">→</div>
+      <div class="no"><b>O site mostra</b><p>A landing lê <code>/novidades.json</code> e monta "O que mudou" por mês e ramo, sem ninguém copiar texto.</p></div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>O que muda no código, se aprovar</h2>
+    <ol class="passos">
+      <li><b>Migração 199.</b> Coluna <code>pra_quem text[]</code> (padrão dono e gestor) e <code>resumo text</code> em <code>novidades</code>; os avisos de hoje, dois pro painel e um pro vendedor. Aditiva, idempotente, sem tocar em nada de cliente.</li>
+      <li><b><code>finance/novidades.py</code></b> aprende o papel: <code>listar(..., papel=)</code> filtra por <code>pra_quem</code>. O teste que compara os públicos do banco e do Python continua valendo.</li>
+      <li><b>Painel:</b> o botão "Ver como ficou" (link opcional no aviso) e "Mandar pros vendedores" (abre o guia pra encaminhar). Sem tela nova.</li>
+      <li><b>App do vendedor:</b> a faixa na Fila (some ao tocar, guardada como lida), a tela <code>/cockpit/novidades/{id}</code> e a lista no Perfil com a bolinha verde na aba.</li>
+      <li><b><code>GET /novidades.json</code></b> público, com cache de 5 minutos e CORS pra zaq-ia.com. Só título, resumo, ramo, data, pra_quem. Nunca corpo com número de conta.</li>
+      <li><b>zaq-landing:</b> <code>atualizacoes.html</code> lendo o JSON, com filtro por ramo, e um link "O que mudou" no rodapé da home.</li>
+      <li><b>Regra:</b> PR que muda tela leva o aviso. Entra no CLAUDE.md como seção 5.</li>
+    </ol>
+  </section>
+
+  <section class="sec">
+    <h2>Pra você decidir</h2>
+    <div class="notas">
+      <div class="nota"><h4>1 · A faixa na Fila some quando?</h4><p>Proposta: ao tocar em "Ver" ou no ✕, e nunca volta pra aquele aviso. Alternativa: some sozinha depois de 7 dias mesmo sem tocar.</p></div>
+      <div class="nota"><h4>2 · O vendedor recebe o quê?</h4><p>Proposta: só aviso marcado "vendedor". Hoje isso seria: a Fila nova, o áudio, o desconto e o atalho que saiu. O contrato e a agenda, não.</p></div>
+      <div class="nota"><h4>3 · O site lê do Zaq, ou copia à mão?</h4><p>Proposta: lê do Zaq, uma fonte só. Custa um endpoint pequeno e evita o site ficar pra trás, que é o que aconteceu com o painel desde 19/08.</p></div>
+      <div class="nota"><h4>4 · Os avisos de hoje entram já neste PR?</h4><p>Proposta: sim, os três, pra estrear a peça com conteúdo real. A lista de quem recebe vai no corpo do PR, como manda a receita da migração 175.</p></div>
+    </div>
+  </section>
+
+  <p class="rodape">Números lidos do banco em 05/09/2026: 7 avisos publicados entre 16 e 19/08, leituras entre 1 e 4 cada; 22 contas, 15 sem nicho, 2 de eventos (9 pessoas), 4 de consultoria (9 pessoas). Nomes de vendedores e clientes são fictícios. Nada aqui encosta em chip, sessão ou canal.</p>
+
+  </div>
+</div>

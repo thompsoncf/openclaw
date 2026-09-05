@@ -42,6 +42,14 @@ _log = logging.getLogger("finance.novidades")
 
 TIPOS = ("novidade", "mudanca")
 
+# PRA QUEM o aviso é, por papel (migração 199). O check de `pra_quem` no banco
+# espelha esta tupla, e um teste compara as duas — a mesma trava dos públicos.
+#
+# O vendedor é a novidade aqui: até 05/09/2026 nenhum aviso chegava nele, e três
+# dos sete de agosto falavam do app DELE. Dono e gestor continuam sendo o padrão
+# (é o `default '{dono,gestor}'` da coluna), então aviso antigo não muda de mão.
+PAPEIS = ("dono", "gestor", "vendedor")
+
 
 def _declarou(slug) -> bool:
     """Esta conta ESCOLHEU um nicho? `config_do_nicho` cai no genérico pra slug
@@ -164,18 +172,31 @@ def nichos_alcancados(publico: str) -> set[str]:
 
 # ------------------------------------------------------------------ persistência
 
-_COLS = "id, chave, tipo, publico, titulo, corpo, publicado_em"
+_COLS = "id, chave, tipo, publico, titulo, corpo, publicado_em, pra_quem, resumo, link"
 
 
 def _fmt(r, lida=None) -> dict:
     return {"id": r[0], "chave": r[1], "tipo": r[2], "publico": r[3],
             "titulo": r[4], "corpo": r[5], "publicado_em": r[6],
+            "pra_quem": list(r[7] or ()), "resumo": r[8] or "", "link": r[9] or "",
             "lida": bool(lida)}
 
 
-def listar(pool, conta_id: int, membro_id=None) -> list[dict]:
+def para_papel(item: dict, papel: str | None) -> bool:
+    """Este aviso é pra este papel? Sem papel (chamada antiga), é pra todo mundo —
+    o filtro só aperta quando quem chama diz quem está olhando."""
+    if not papel:
+        return True
+    return papel in (item.get("pra_quem") or ())
+
+
+def listar(pool, conta_id: int, membro_id=None, papel: str | None = None) -> list[dict]:
     """Os avisos que ESTA conta deve ver, mais novos primeiro, já com o estado de
     lida de QUEM está olhando.
+
+    `papel` (migração 199) corta pelo `pra_quem` do aviso: o vendedor só recebe o
+    que é marcado pra ele, e o dono não recebe o aviso da Fila que é só do app do
+    vendedor. Sem papel, devolve tudo — é o comportamento das chamadas antigas.
 
     Duas exclusões que não são detalhe:
 
@@ -202,13 +223,14 @@ def listar(pool, conta_id: int, membro_id=None) -> list[dict]:
                  where publicado_em > %s
                  order by publicado_em desc, id desc""",
             (conta_id, membro_id, criada_em)).fetchall()
-    return [_fmt(r, r[7]) for r in rows if alcanca(r[3], slug, pool, conta_id)]
+    itens = [_fmt(r, r[10]) for r in rows if alcanca(r[3], slug, pool, conta_id)]
+    return [n for n in itens if para_papel(n, papel)]
 
 
-def nao_lidas(pool, conta_id: int, membro_id=None) -> int:
+def nao_lidas(pool, conta_id: int, membro_id=None, papel: str | None = None) -> int:
     """Quantas faltam ler — é o número da bolinha no menu."""
     try:
-        return sum(1 for n in listar(pool, conta_id, membro_id) if not n["lida"])
+        return sum(1 for n in listar(pool, conta_id, membro_id, papel) if not n["lida"])
     except Exception as e:  # noqa: BLE001
         # TOLERANTE: a bolinha é enfeite, e o painel inteiro não pode deixar de
         # abrir porque a contagem de avisos falhou. Mesma escolha do `vende_data`.
@@ -231,6 +253,30 @@ def marcar_lida(pool, novidade_id: int, conta_id: int, membro_id=None) -> bool:
             (int(novidade_id), conta_id, membro_id))
         c.commit()
     return cur.rowcount > 0
+
+
+# ----------------------------------------------------------------- o site
+
+def publicas(pool) -> list[dict]:
+    """O que o site (zaq-ia.com/atualizacoes) mostra: todo aviso com resumo, mais
+    novos primeiro, SEM nada de conta — nem quem leu, nem quem recebeu, nem corpo.
+
+    O corpo fica de fora de propósito: ele fala com quem já usa e cita número de
+    conta, nome de cliente, o que sumiu de onde. O resumo é a versão que vende.
+    Aviso sem resumo não sai: é o jeito de um aviso interno não virar público
+    por esquecimento.
+
+    `ramo` é o público do aviso, que é o que a landing usa pra filtrar. Não é
+    nicho de conta nenhuma."""
+    with pool.connection() as c:
+        rows = c.execute(
+            """select chave, tipo, publico, titulo, resumo, publicado_em, pra_quem
+                 from novidades
+                where resumo is not null and resumo <> ''
+                order by publicado_em desc, id desc""").fetchall()
+    return [{"chave": r[0], "tipo": r[1], "ramo": r[2], "titulo": r[3], "resumo": r[4],
+             "dia": r[5].date().isoformat(), "pra_quem": list(r[6] or ())}
+            for r in rows]
 
 
 # ----------------------------------------------------------------- prévia (CI)

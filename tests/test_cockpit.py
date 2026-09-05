@@ -93,6 +93,17 @@ def pool():
     p = ConnectionPool(url, min_size=1, max_size=3, open=True, kwargs={"prepare_threshold": None})
     with p.connection() as c:
         c.execute(_BASE_SQL)
+        # as Novidades no app (migração 199): a tabela nasce na 174, o check de
+        # público na 184, pra_quem/resumo/link na 199. `listar` corta pelo
+        # `criado_em` da conta, que este schema não tinha. Os avisos são GLOBAIS
+        # e o banco é de módulo: cada teste cria a conta (criado_em = now(), o
+        # início da transação) e grava o aviso com clock_timestamp(), que é
+        # depois — assim a conta só enxerga os avisos do próprio teste.
+        from tests.test_novidades import BASE as _MIG
+        c.execute("alter table contas add column criado_em timestamptz not null default now()")
+        for m in ("174_novidades.sql", "184_novidade_voz_e_porta_fechada.sql",
+                  "199_novidades_pra_quem.sql"):
+            c.execute((_MIG / m).read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -1159,3 +1170,167 @@ def test_a_tela_do_lead_preenche_a_caixa_e_avisa_a_pista(pool, monkeypatch):
     assert "O cliente <b>falou de março</b> na conversa. Confirmar a data?" in html
     assert f"href='/cockpit/lead/{lid}/ficha'>Abrir a ficha</a>" in html
     assert f"href='/cockpit/lead/{lid}?texto=Pra%20qual%20data" in html
+
+
+# ═══════════════════════════════════════ as Novidades no app (migração 199)
+
+def _aviso_vend(c, chave, *, pra_quem=("vendedor",), tipo="novidade", resumo="Uma linha.",
+                link="/cockpit"):
+    c.execute("""insert into novidades (chave, tipo, publico, pra_quem, titulo, corpo, resumo, link,
+                                        publicado_em)
+                 values (%s,%s,'todos',%s,%s,'O corpo do aviso, com detalhes.',%s,%s,
+                         clock_timestamp())
+                 on conflict (chave) do nothing""",
+              (chave, tipo, list(pra_quem), "T " + chave, resumo, link))
+    return c.execute("select id from novidades where chave=%s", (chave,)).fetchone()[0]
+
+
+def _req_vend(conta, vend):
+    from types import SimpleNamespace
+    from starlette.datastructures import QueryParams
+    return SimpleNamespace(session={"conta_id": conta, "membro_id": vend, "papel": "vendedor"},
+                           query_params=QueryParams(""), cookies={})
+
+
+def _lidas_de(pool, vend):
+    with pool.connection() as c:
+        return {r[0] for r in c.execute("""select n.chave from novidade_lida l
+                                            join novidades n on n.id = l.novidade_id
+                                           where l.membro_id=%s""", (vend,)).fetchall()}
+
+
+def test_a_faixa_na_fila_e_so_do_aviso_do_vendedor_por_ler(pool, monkeypatch):
+    """A faixa mostra UM aviso, o mais novo que ele não leu, e só se for pra
+    vendedor. O do dono não aparece na Fila dele. O selo verde vai na aba Perfil."""
+    with pool.connection() as c:
+        conta = _conta(c, "Nov1")
+        vend = _membro(c, conta, nome="Jaque", email="nv1@x.com")
+        _lead(c, conta, vend, "Alguem")
+        _aviso_vend(c, "nv1-vend", resumo="A Fila abre no mês.")
+        _aviso_vend(c, "nv1-dono", pra_quem=("dono", "gestor"))
+        c.commit()
+    html, _ = _fila_html(monkeypatch, pool, conta, vend)
+    assert "class=faixa" in html and "T nv1-vend" in html and "A Fila abre no mês." in html
+    assert "T nv1-dono" not in html
+    assert "class='tsel ok' aria-label='1 por ler'" in html
+    # ninguém marcou nada só por ver a faixa
+    assert _lidas_de(pool, vend) == set()
+
+
+def test_abrir_o_aviso_marca_lida_e_a_faixa_some(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    with pool.connection() as c:
+        conta = _conta(c, "Nov2")
+        vend = _membro(c, conta, nome="Jaque", email="nv2@x.com")
+        _lead(c, conta, vend, "Alguem")
+        nid = _aviso_vend(c, "nv2-vend")
+        c.commit()
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    r = pc.cockpit_novidade(_req_vend(conta, vend), nid)
+    html = bytes(r.body).decode("utf-8")
+    assert "O corpo do aviso, com detalhes." in html and "Ver a Fila" in html
+    assert "Entendi" not in html            # novidade: abrir já basta
+    assert _lidas_de(pool, vend) == {"nv2-vend"}
+    fila, _ = _fila_html(monkeypatch, pool, conta, vend)
+    assert "class=faixa" not in fila and "tsel ok" not in fila
+
+
+def test_o_x_da_faixa_marca_lida_sem_abrir_e_volta_pra_fila(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    with pool.connection() as c:
+        conta = _conta(c, "Nov3")
+        vend = _membro(c, conta, nome="Jaque", email="nv3@x.com")
+        nid = _aviso_vend(c, "nv3-vend")
+        c.commit()
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    r = pc.cockpit_novidade_lida(_req_vend(conta, vend), nid, volta="fila")
+    assert r.status_code == 303 and r.headers["location"] == "/cockpit"
+    assert _lidas_de(pool, vend) == {"nv3-vend"}
+    r = pc.cockpit_novidade_lida(_req_vend(conta, vend), nid, volta="perfil")
+    assert r.headers["location"] == "/cockpit/perfil"
+
+
+def test_a_mudanca_espera_o_entendi(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    with pool.connection() as c:
+        conta = _conta(c, "Nov4")
+        vend = _membro(c, conta, nome="Jaque", email="nv4@x.com")
+        nid = _aviso_vend(c, "nv4-mud", tipo="mudanca", link="/cockpit/agenda")
+        c.commit()
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    html = bytes(pc.cockpit_novidade(_req_vend(conta, vend), nid).body).decode("utf-8")
+    assert ">Entendi</button>" in html and "mudança ·" in html
+    assert "href='/cockpit/agenda'>Ver como ficou" in html
+    assert _lidas_de(pool, vend) == set()
+    pc.cockpit_novidade_lida(_req_vend(conta, vend), nid, volta="perfil")
+    assert _lidas_de(pool, vend) == {"nv4-mud"}
+    html = bytes(pc.cockpit_novidade(_req_vend(conta, vend), nid).body).decode("utf-8")
+    assert ">Entendi</button>" not in html
+
+
+def test_o_perfil_lista_os_avisos_com_o_lido_apagado(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    from finance import novidades as nv
+    with pool.connection() as c:
+        conta = _conta(c, "Nov5")
+        vend = _membro(c, conta, nome="Jaque", email="nv5@x.com")
+        a = _aviso_vend(c, "nv5-a", resumo="Primeiro.")
+        _aviso_vend(c, "nv5-b", resumo="Segundo.")
+        c.commit()
+    nv.marcar_lida(pool, a, conta, vend)
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    html = bytes(pc._perfil_vendedor(_req_vend(conta, vend), conta, vend).body).decode("utf-8")
+    assert "<div class=eyebrow>Novidades</div>" in html
+    assert f"class='nvc lida' href='/cockpit/novidades/{a}'" in html
+    assert "class='nvc nova'" in html and "Segundo." in html
+    assert "class='tsel ok' aria-label='1 por ler'" in html
+
+
+def test_sem_aviso_o_perfil_nao_tem_a_secao(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    with pool.connection() as c:
+        conta = _conta(c, "Nov6")
+        vend = _membro(c, conta, nome="Jaque", email="nv6@x.com")
+        c.commit()
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    html = bytes(pc._perfil_vendedor(_req_vend(conta, vend), conta, vend).body).decode("utf-8")
+    assert "<div class=eyebrow>Novidades</div>" not in html and "tsel ok" not in html
+
+
+def test_aviso_de_outro_publico_nao_abre_nem_marca(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    with pool.connection() as c:
+        conta = _conta(c, "Nov7")
+        vend = _membro(c, conta, nome="Jaque", email="nv7@x.com")
+        nid = _aviso_vend(c, "nv7-dono", pra_quem=("dono",))
+        c.commit()
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    html = bytes(pc.cockpit_novidade(_req_vend(conta, vend), nid).body).decode("utf-8")
+    assert "não é seu" in html and "O corpo do aviso" not in html
+    pc.cockpit_novidade_lida(_req_vend(conta, vend), nid, volta="perfil")
+    assert _lidas_de(pool, vend) == set()
+
+
+def test_o_gestor_vendo_a_equipe_nao_ganha_a_faixa_do_vendedor(pool, monkeypatch):
+    with pool.connection() as c:
+        conta = _conta(c, "Nov8")
+        vend = _membro(c, conta, nome="Jaque", email="nv8@x.com")
+        _aviso_vend(c, "nv8-vend")
+        c.commit()
+    html, _ = _fila_html(monkeypatch, pool, conta, vend, gestor=True)
+    assert "class=faixa" not in html
+
+
+def test_a_faixa_nao_derruba_a_fila_sem_a_tabela(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    from finance import novidades as nv
+    with pool.connection() as c:
+        conta = _conta(c, "Nov9")
+        vend = _membro(c, conta, nome="Jaque", email="nv9@x.com")
+        c.commit()
+
+    def _boom(*a, **k):
+        raise RuntimeError("sem tabela")
+    monkeypatch.setattr(nv, "listar", _boom)
+    html, _ = _fila_html(monkeypatch, pool, conta, vend)
+    assert "Meus leads" in html and "class=faixa" not in html

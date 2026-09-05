@@ -17,6 +17,7 @@ contas passa por sorte e quebra quando alguém se cadastra — o que mede a regr
 a lista de nichos.
 """
 import os
+import re
 from pathlib import Path
 
 import psycopg
@@ -118,6 +119,9 @@ def pool():
         # o trabalho dele.
         c.execute((BASE / "184_novidade_voz_e_porta_fechada.sql"
                    ).read_text(encoding="utf-8"))
+        # 199: pra_quem, resumo, link. Só schema e acerto dos avisos que já
+        # existem; os avisos de hoje (200) entram por `_hoje`, teste a teste.
+        c.execute((BASE / "199_novidades_pra_quem.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values
@@ -305,3 +309,157 @@ def test_o_aviso_do_desconto_no_cockpit_segue_o_portao_do_montador(pool):
     assert a == ("novidade", "servico")
     assert nv.nichos_alcancados(a[1]) == {s for s in nic.NICHOS if nic.vende_servico(s)}
     assert nv.alcanca(a[1], None) is False
+
+
+# ═══════════════════════════════════════ pra quem (migração 199) e o site
+
+def _aviso2(pool, chave, **campos):
+    """`_aviso` com as colunas da 199: pra_quem, resumo, link."""
+    campos.setdefault("publico", "todos")
+    campos.setdefault("tipo", "novidade")
+    campos.setdefault("pra_quem", ["dono", "gestor"])
+    with pool.connection() as c:
+        c.execute("""insert into novidades (chave, tipo, publico, pra_quem, titulo, corpo,
+                                            resumo, link, publicado_em)
+                     values (%s,%s,%s,%s,%s,'corpo',%s,%s, now() - interval '1 day')
+                     on conflict (chave) do nothing""",
+                  (chave, campos["tipo"], campos["publico"], campos["pra_quem"],
+                   "T " + chave, campos.get("resumo"), campos.get("link")))
+        c.commit()
+
+
+def _papeis_do_check(pool) -> set[str]:
+    with pool.connection() as c:
+        (defn,) = c.execute("""select pg_get_constraintdef(oid) from pg_constraint
+                               where conrelid = 'novidades'::regclass
+                                 and conname = 'novidades_pra_quem_check'""").fetchone()
+    return set(re.findall(r"'(\w+)'", defn))
+
+
+def test_o_banco_e_o_python_conhecem_os_mesmos_papeis(pool):
+    """A mesma trava dos públicos: a lista do check e `PAPEIS` são uma só. Um
+    papel novo no Python sem entrar no check é aviso que o banco recusa; um papel
+    no check sem o Python saber é aviso que ninguém filtra."""
+    assert _papeis_do_check(pool) == set(nv.PAPEIS)
+
+
+def test_o_banco_recusa_papel_que_nao_existe_e_lista_vazia(pool):
+    import psycopg
+    for ruim in (["estagiario"], []):
+        with pytest.raises(psycopg.errors.CheckViolation):
+            with pool.connection() as c:
+                c.execute("""insert into novidades (chave, titulo, corpo, pra_quem)
+                             values ('x', 't', 'c', %s)""", (ruim,))
+
+
+def test_o_padrao_e_dono_e_gestor_e_o_vendedor_fica_de_fora(pool):
+    """Aviso gravado sem `pra_quem` (todos os anteriores à 199) continua sendo
+    de dono e gestor — e só deles. Nenhum aviso antigo muda de mão."""
+    _aviso(pool, "antigo")
+    assert [n["chave"] for n in nv.listar(pool, 1, papel="dono")] == ["antigo"] or \
+        "antigo" in [n["chave"] for n in nv.listar(pool, 1, papel="dono")]
+    assert "antigo" in [n["chave"] for n in nv.listar(pool, 1, papel="gestor")]
+    assert "antigo" not in [n["chave"] for n in nv.listar(pool, 1, papel="vendedor")]
+    # sem papel, a chamada antiga: devolve tudo
+    assert "antigo" in [n["chave"] for n in nv.listar(pool, 1)]
+
+
+def test_o_vendedor_so_recebe_o_que_e_dele_e_o_dono_nao_recebe_o_que_e_so_dele(pool):
+    _aviso2(pool, "so-vendedor", pra_quem=["vendedor"])
+    _aviso2(pool, "os-tres", pra_quem=["dono", "gestor", "vendedor"])
+    vend = [n["chave"] for n in nv.listar(pool, 1, papel="vendedor")]
+    dono = [n["chave"] for n in nv.listar(pool, 1, papel="dono")]
+    assert "so-vendedor" in vend and "os-tres" in vend
+    assert "so-vendedor" not in dono and "os-tres" in dono
+    assert nv.nao_lidas(pool, 1, papel="vendedor") >= 2
+
+
+def test_a_mira_por_publico_continua_valendo_pro_vendedor(pool):
+    """`pra_quem` não substitui o público: o vendedor de uma consultoria não recebe
+    o aviso de eventos só porque é marcado pra vendedor."""
+    _aviso2(pool, "eventos-vend", publico="eventos", pra_quem=["vendedor"])
+    assert "eventos-vend" in [n["chave"] for n in nv.listar(pool, 1, papel="vendedor")]
+    assert "eventos-vend" not in [n["chave"] for n in nv.listar(pool, 2, papel="vendedor")]
+
+
+def test_a_lista_publica_so_tem_o_que_tem_resumo_e_nada_de_conta(pool):
+    """O site lê `publicas`: só aviso com resumo (o interno sem resumo não vaza),
+    e nenhuma chave de conta, leitura ou corpo — o corpo cita número de conta e
+    o que sumiu de onde."""
+    _aviso2(pool, "com-resumo", resumo="Uma linha pra fora.", link="/painel/x")
+    _aviso2(pool, "sem-resumo")
+    pub = nv.publicas(pool)
+    chaves = [n["chave"] for n in pub]
+    assert "com-resumo" in chaves and "sem-resumo" not in chaves
+    item = next(n for n in pub if n["chave"] == "com-resumo")
+    assert set(item) == {"chave", "tipo", "ramo", "titulo", "resumo", "dia", "pra_quem"}
+    assert item["ramo"] == "todos" and item["dia"] and item["pra_quem"] == ["dono", "gestor"]
+
+
+def test_a_199_leva_os_avisos_de_agosto_pro_vendedor_sem_tirar_o_dono(pool):
+    """Os dois da 184 (o microfone e o atalho que saiu) eram do app do vendedor e
+    nunca chegaram nele. A 199 acrescenta 'vendedor' e mantém dono e gestor; e
+    dá o resumo, que é o que o site mostra."""
+    with pool.connection() as c:
+        rows = dict(c.execute("""select chave, pra_quem from novidades
+                                  where chave in ('voz-no-app-do-vendedor',
+                                                  'atalho-whatsapp-fechado')""").fetchall())
+    assert rows and all(set(v) == {"dono", "gestor", "vendedor"} for v in rows.values())
+    chaves = [n["chave"] for n in nv.publicas(pool)]
+    assert {"voz-no-app-do-vendedor", "atalho-whatsapp-fechado"} <= set(chaves)
+
+
+def test_reaplicar_a_199_nao_duplica_o_vendedor(pool):
+    with pool.connection() as c:
+        c.execute((BASE / "199_novidades_pra_quem.sql").read_text(encoding="utf-8"))
+        c.commit()
+        (pq,) = c.execute("select pra_quem from novidades where chave='voz-no-app-do-vendedor'").fetchone()
+    assert sorted(pq) == ["dono", "gestor", "vendedor"]
+
+
+def _hoje(pool) -> dict:
+    """Os avisos das entregas de 05/09, como a 200 os grava."""
+    with pool.connection() as c:
+        c.execute((BASE / "200_novidade_funil_mes_atual.sql").read_text(encoding="utf-8"))
+        c.commit()
+        rows = c.execute("""select chave, tipo, publico, pra_quem, resumo, link, id from novidades
+                            where chave in ('funil-mes-atual', 'card-le-a-data-da-festa',
+                                            'fila-no-mes-atual')""").fetchall()
+    return {r[0]: {"tipo": r[1], "publico": r[2], "pra_quem": list(r[3]), "resumo": r[4],
+                   "link": r[5], "id": r[6]} for r in rows}
+
+
+def test_os_avisos_de_hoje_miram_certo(pool):
+    """O funil é de qualquer conta (todos, dono e gestor); o card que lê a data é
+    só de eventos, que é o portão `vende_data`; a Fila é do vendedor, no app."""
+    a = _hoje(pool)
+    assert set(a) == {"funil-mes-atual", "card-le-a-data-da-festa", "fila-no-mes-atual"}
+    assert a["funil-mes-atual"]["publico"] == "todos"
+    assert sorted(a["funil-mes-atual"]["pra_quem"]) == ["dono", "gestor"]
+    assert nv.nichos_alcancados(a["card-le-a-data-da-festa"]["publico"]) == {"eventos"}
+    assert a["fila-no-mes-atual"]["pra_quem"] == ["vendedor"]
+    assert a["fila-no-mes-atual"]["publico"] == "todos"
+    assert a["fila-no-mes-atual"]["link"] == "/cockpit"
+    for chave, x in a.items():
+        assert x["tipo"] == "novidade" and x["resumo"] and x["link"], chave
+
+
+def test_os_avisos_de_hoje_chegam_em_quem_devem(pool):
+    """Conta de eventos: o dono vê os dois do painel, o vendedor vê o da Fila.
+    Conta sem nicho: só os de 'todos'. Ninguém vê o que não é seu."""
+    _hoje(pool)
+    dono_ev = {n["chave"] for n in nv.listar(pool, 1, papel="dono")}
+    vend_ev = {n["chave"] for n in nv.listar(pool, 1, papel="vendedor")}
+    dono_sem = {n["chave"] for n in nv.listar(pool, 3, papel="dono")}
+    vend_sem = {n["chave"] for n in nv.listar(pool, 3, papel="vendedor")}
+    assert {"funil-mes-atual", "card-le-a-data-da-festa"} <= dono_ev
+    assert "fila-no-mes-atual" not in dono_ev
+    assert "fila-no-mes-atual" in vend_ev and "card-le-a-data-da-festa" not in vend_ev
+    assert "funil-mes-atual" in dono_sem and "card-le-a-data-da-festa" not in dono_sem
+    assert vend_sem & {"funil-mes-atual", "card-le-a-data-da-festa", "fila-no-mes-atual"} == {"fila-no-mes-atual"}
+
+
+def test_reaplicar_a_200_nao_duplica_nem_troca_id(pool):
+    antes = {k: v["id"] for k, v in _hoje(pool).items()}
+    depois = {k: v["id"] for k, v in _hoje(pool).items()}
+    assert antes == depois and len(antes) == 3

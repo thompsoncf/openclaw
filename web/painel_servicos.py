@@ -3934,7 +3934,6 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         var el=document.createElement('div'); el.className='oc-hist';
         var fechado=it.status==='fechado', aprovada=it.status==='aprovada';
         var pn=it.painel||{selos:[],acao:null,resumo:''};
-        var evento=it.modo==='evento';
 
         // ESQUERDA: quem, e o que JÁ ACONTECEU. O resumo em cinza é onde mora o
         // "aprovada · sinal recebido · data reservada" — continua visível, para de
@@ -3947,9 +3946,16 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         // `it.cliente + " · " + it.empresa` — dois campos livres pra mesma coisa,
         // que davam "−", telefone cru e nome repetido em 23 dos 26 orçamentos.
         // `it.sub` é a festa (modo evento) ou o contato (recorrente).
+        // O VALOR é SEMPRE `it.total` (primeiro_ano_centavos, o líquido — já com
+        // desconto). Aqui ficava `evento?it.setup:it.total`: `it.setup` é o BRUTO
+        // (antes do desconto, comentado assim no próprio SalvarIn). Toda proposta
+        // de evento com desconto mostrava dois valores diferentes pro mesmo
+        // orçamento — o funil (bruto) e a folha que o cliente assina, o e-mail de
+        // envio e o título a receber (todos os três já liam primeiro_ano_centavos
+        // de propósito). O dinheiro sempre saiu certo; só a etiqueta mentia.
         var sub=[esc(it.sub||''), (it.numero?('nº '+it.numero):''),
                  (it.data?('gerada '+esc(it.data)):''),
-                 esc(evento?it.setup:it.total), esc(pn.resumo||'')]
+                 esc(it.total), esc(pn.resumo||'')]
                 .filter(Boolean).join(' · ');
         left.innerHTML='<div class="oc-av">'+esc(it.inicial)+'</div>'
           +'<div style="min-width:0"><b>'+esc(it.titulo)+'</b>'

@@ -641,6 +641,38 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .nvc p{margin:.25rem 0 0;color:var(--text-dim);font-size:.76rem}
 .nvcorpo{white-space:pre-line;font-size:.86rem;line-height:1.5;color:var(--text)}
 .tabs .tsel.ok{background:var(--neon);color:var(--ink)}
+/* RAIO-X (mockup raio_x_como_fica): as quatro metas com cor e barra, a fila do
+   "responda hoje" em faixas, os fechamentos com o botão certo, e a confiança do
+   dado no pé. Tudo lido do que já existe (finance/raio_x.py). */
+.rx-metas{display:grid;grid-template-columns:1fr 1fr;gap:.45rem;margin:.3rem 1.1rem .5rem}
+.rx-meta{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.55rem .65rem}
+.rx-meta b{display:block;font-family:var(--display);font-size:1.3rem;line-height:1;font-variant-numeric:tabular-nums}
+.rx-meta span{display:block;font-size:.64rem;color:var(--text-faint);margin-top:.2rem}
+.rx-meta em{display:block;font-family:var(--mono);font-size:.6rem;margin-top:.3rem;font-style:normal}
+.rx-meta .bar{height:4px;border-radius:999px;background:var(--line);margin-top:.4rem;overflow:hidden}
+.rx-meta .bar i{display:block;height:100%;background:var(--neon)}
+.rx-meta.ok b,.rx-meta.ok em{color:var(--neon-bright)}
+.rx-meta.amb b,.rx-meta.amb em{color:var(--ambar)}.rx-meta.amb .bar i{background:var(--ambar)}
+.rx-meta.ruim b,.rx-meta.ruim em{color:#F2BDB9}.rx-meta.ruim .bar i{background:var(--coral)}
+.rx-ey{padding:.6rem 1.1rem .2rem;font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);font-weight:600;display:flex;justify-content:space-between}
+.rx-lead{display:flex;gap:.6rem;padding:.6rem 1.1rem;border-bottom:1px solid var(--line);font-size:.8rem;align-items:flex-start;color:inherit;text-decoration:none}
+.rx-lead .dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:.4rem;background:var(--text-faint)}
+.rx-lead.pergunta .dot{background:var(--coral)}.rx-lead.festa .dot{background:var(--ambar)}
+.rx-lead.toque .dot{background:#F0DCA6}.rx-lead.visita .dot{background:#5b9bd5}
+.rx-lead .mid{flex:1;min-width:0}
+.rx-lead .emp{font-weight:600;font-size:.88rem}
+.rx-lead .por{color:var(--text-dim);font-size:.74rem;overflow-wrap:anywhere}
+.rx-lead .acao{flex:none;font-family:var(--mono);font-size:.66rem;font-weight:600;color:var(--neon-bright);border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:999px;padding:.2rem .55rem;white-space:nowrap}
+.rx-lead.festa .acao,.rx-lead.toque .acao{color:#F0DCA6;border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.rx-fecha{margin:.3rem 1.1rem;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.6rem .7rem;font-size:.78rem;display:block;color:inherit;text-decoration:none}
+.rx-fecha .t{display:flex;justify-content:space-between;gap:.5rem;font-weight:600}
+.rx-fecha .t small{font-family:var(--mono);font-size:.64rem;color:var(--text-faint);font-weight:500;white-space:nowrap}
+.rx-fecha p{margin:.2rem 0 0;color:var(--text-dim);font-size:.72rem}
+.rx-fecha.ok{border-left:3px solid var(--neon)}.rx-fecha.amb{border-left:3px solid var(--ambar)}.rx-fecha.ruim{border-left:3px solid var(--coral)}
+.rx-fecha .bt{display:inline-block;margin-top:.4rem;font-family:var(--mono);font-size:.64rem;font-weight:600;color:var(--neon-bright);border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:999px;padding:.18rem .55rem}
+.rx-dado{margin:.5rem 1.1rem .3rem;padding:.5rem .65rem;border-radius:10px;background:#122029;border:1px solid #1f3a4d;font-family:var(--mono);font-size:.62rem;line-height:1.45;color:#7bb8e6}
+.rx-vazio{margin:.3rem 1.1rem;font-size:.78rem;color:var(--text-dim)}
+.rx-dobra{margin:.4rem 1.1rem;border:1px dashed var(--line);border-radius:10px;padding:.45rem .6rem;font-size:.72rem;color:var(--text-dim);display:flex;justify-content:space-between;background:var(--bg-2)}
 /* "este número tem outra conversa". Fica FORA do .chat de propósito: a conversa
    nasce rolada no fim (ver o script do rodapé), então um aviso no topo do
    histórico nunca seria lido por ninguém. */
@@ -1308,13 +1340,27 @@ def _abas(itens, ativo: str, selos: dict | None = None, verdes: tuple = ("perfil
     return "<div class=tabs>" + "".join(out) + "</div>"
 
 
-def _abas_vend(ativo: str, pend: int = 0, novas: int = 0) -> str:
+def _abas_vend(ativo: str, pend: int = 0, novas: int = 0, raiox: int = 0) -> str:
+    # "resultado" continua sendo a CHAVE da aba (os testes e as telas a chamam
+    # assim); o que mudou é o rótulo e o destino: a aba é o Raio-X, e o resultado
+    # (comissão, recebido) é o último bloco dele.
     return _abas([("fila", "fila", "Fila", _BASE),
                   ("agenda", "agenda", "Agenda", f"{_BASE}/agenda"),
                   ("orcamentos", "orc", "Propostas", f"{_BASE}/orcamentos"),
-                  ("resultado", "resultado", "Resultado", f"{_BASE}/resultado"),
+                  ("resultado", "resultado", "Raio-X", f"{_BASE}/raio-x"),
                   ("perfil", "perfil", "Perfil", f"{_BASE}/perfil")],
-                 ativo, {"fila": pend, "perfil": novas})
+                 ativo, {"fila": pend, "perfil": novas, "resultado": raiox},
+                 verdes=("perfil", "resultado"))
+
+
+def _raiox_n(conta_id: int, membro_id: int) -> int:
+    """Quantos no "responda hoje" — o selo verde da aba Raio-X. Best-effort."""
+    try:
+        from finance import raio_x as _rx
+        return int(_rx.responda_hoje(get_pool(), conta_id, membro_id)["n"])
+    except Exception as e:  # noqa: BLE001
+        _log.info("raio-x selo: %s: %s", type(e).__name__, e)
+        return 0
 
 
 def _novidades_vend(conta_id: int, membro_id: int) -> list[dict]:
@@ -1727,7 +1773,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
              + (f"<a class=fab href='{_BASE}/lead/novo' aria-label='Novo lead'>+</a>"
                 if not gestor else "")
              + "<div class=toast id=toast></div>"
-             + _abas_vend("fila", total_pend, novas)
+             + _abas_vend("fila", total_pend, novas, 0 if gestor else _raiox_n(conta_id, membro_id))
              + f'<script>window.CKBASE="{_BASE}";</script>' + vapid_js + _FILA_JS
              + _sinal_js(ck.sinal_fila(pool, conta_id, membro_id))
              + _badge_js(total_pend))
@@ -2291,26 +2337,23 @@ def cockpit_excluir(request: Request, ev_id: int):
     return RedirectResponse(f"{_BASE}/agenda", status_code=303)
 
 
-@router.get("/cockpit/resultado", response_class=HTMLResponse)
+@router.get("/cockpit/resultado")
 def cockpit_resultado(request: Request):
-    """O que faltava: o vendedor vendo o próprio dinheiro.
+    """A aba Resultado virou Raio-X (mockup raio_x_como_fica, 05/09/2026). O
+    endereço antigo continua valendo — quem tem o app aberto ou um link guardado
+    cai na tela nova, com o mesmo período."""
+    p = request.query_params.get("p", "")
+    return RedirectResponse(f"{_BASE}/raio-x" + (f"?p={p}" if p in ("semana", "mes", "tudo") else ""),
+                            status_code=303)
+
+
+def _bloco_dinheiro(r: dict) -> str:
+    """O que a aba Resultado mostrava: o vendedor vendo o próprio dinheiro.
 
     `membros.comissao_pct` existe desde a migração 137, mas só o dono via, no
     relatório do painel. Sem % configurada a linha de comissão simplesmente não
     aparece — melhor faltar do que inventar número.
     """
-    sess = _sessao(request)
-    if not sess:
-        return RedirectResponse("/cockpit/login", status_code=303)
-    conta_id, membro_id = sess
-    periodo = request.query_params.get("p", "mes")
-    if periodo not in ("hoje", "semana", "mes"):
-        periodo = "mes"
-    r = ck.remuneracao(get_pool(), conta_id, membro_id, periodo)
-
-    def seg(k, lab):
-        return f"<a class='{'on' if periodo == k else ''}' href='{_BASE}/resultado?p={k}'>{lab}</a>"
-
     # A comissão é sobre o que o cliente PAGOU — mesma conta do relatório do dono
     # (finance/comissao.py). O funil fica separado, embaixo, como previsão.
     if r["comissao_centavos"] is not None:
@@ -2326,9 +2369,7 @@ def cockpit_resultado(request: Request):
     pos = (f"<div class=kpi><div class=v>{r['posicao']}º</div><div class=l>No placar</div>"
            f"<div class=d>entre {r['total_equipe']} da equipe</div></div>") if r["posicao"] else ""
 
-    corpo = (
-               _hdr("Meu resultado", "o que entrou e o que está por vir")
-             + f"<div class=scroll><div class=seg>{seg('hoje','Hoje')}{seg('semana','Semana')}{seg('mes','Mês')}</div>"
+    return (  "<div class=rx-ey id=dinheiro><span>Seu dinheiro</span></div>"
              + comissao
              + "<div class=kpis>"
              + f"<div class=kpi><div class=v>{esc(_brl(r['recebido_centavos']))}</div>"
@@ -2349,9 +2390,149 @@ def cockpit_resultado(request: Request):
                "<div class=d>leads abertos com você</div></div>"
              + f"<div class=kpi><div class=v>{esc(r['resp'])}</div><div class=l>Resposta</div>"
                "<div class=d>média de 30 dias</div></div>"
-             + pos + "</div>"
-             + "</div>" + _abas_vend("resultado", _pend_vend(conta_id, membro_id)))
-    return _page("Meu resultado", corpo)
+             + pos + "</div>")
+
+
+def _rx_meta(cls, valor, rotulo, nota, pct) -> str:
+    return (f"<div class='rx-meta {cls}'><b>{esc(valor)}</b><span>{esc(rotulo)}</span><em>{esc(nota)}</em>"
+            f"<div class=bar><i style='width:{max(0, min(100, int(pct)))}%'></i></div></div>")
+
+
+def _rx_sua_semana(s: dict, rot: str) -> str:
+    from finance import raio_x as _rx
+    n5, n = s["primeira_em_5"], s["primeira_n"]
+    primeira = _rx.fmt_min(s["primeira_min"])
+    nota1 = (f"meta {_rx.META_PRIMEIRA_MIN} min · {n5} de {n} no alvo" if n else "nenhum lead novo no período")
+    pct1 = (100 * n5 / n) if n else 0
+    env, rasc = s["propostas_enviadas"], s["rascunhos"]
+    nota2 = (f"{rasc} em rascunho há {s['rascunho_dias']} dia(s)" if rasc else "nenhum rascunho parado")
+    pct2 = 100 if not rasc else (100 * env / (env + rasc))
+    nota3 = (f"{s['paradas_1a']} parou na 1ª tentativa" if s["paradas_1a"] else "ninguém parado na 1ª tentativa")
+    pct3 = 100 if not s["paradas_1a"] else max(10, 100 - 12 * s["paradas_1a"])
+    nc = len(s["contratos"])
+    nota4 = ((" · ".join(f"{_rx._reais(c['valor_centavos'])} · {c['nome'].split(' ')[0]}" for c in s["contratos"][:2]))
+             if nc else (f"{len(s['sem_assinar'])} disse sim, falta assinar" if s["sem_assinar"] else "nenhum ainda"))
+    pct4 = 100 if nc else (50 if s["sem_assinar"] else 0)
+    html = (f"<div class=rx-ey><span>Sua semana · {esc(rot)}</span><span>meta · você</span></div>"
+            "<div class=rx-metas>"
+            + _rx_meta(_rx.cor("primeira", s), primeira, "1ª resposta ao lead novo", nota1, pct1)
+            + _rx_meta(_rx.cor("propostas", s), f"{env}" + (f" / {env + rasc}" if rasc else ""), "propostas enviadas", nota2, pct2)
+            + _rx_meta(_rx.cor("toques", s), str(s["toques"]), "toques de retorno", nota3, pct3)
+            + _rx_meta(_rx.cor("contratos", s), str(nc), "contrato(s) assinado(s)", nota4, pct4)
+            + "</div>")
+    # o comparativo com o período anterior, em uma linha por número que mudou
+    comp = []
+    a, b = s["primeira_min"], s["primeira_min_anterior"]
+    if a is not None and b is not None and a != b:
+        comp.append(("ok" if a < b else "ruim",
+                     f"1ª resposta {'melhorou' if a < b else 'piorou'} {_rx.fmt_min(abs(a - b))}",
+                     f"{_rx.fmt_min(b)} → {_rx.fmt_min(a)}"))
+    if s["leads"]:
+        comp.append(("amb", f"{s['leads']} lead(s) novo(s) · {s['leads_com_data']} já com data",
+                     f"{s['leads_sem_tipo']} ainda sem tipo de festa" if s["leads_sem_tipo"] else "todos com tipo de festa"))
+    if s["paradas_1a"]:
+        comp.append(("ruim", f"Parou na 1ª tentativa: {s['paradas_1a']} conversa(s)", "Meta: nenhuma. O 2º toque está na fila abaixo."))
+    if comp:
+        html += "<div class=rx-ey><span>Comparado com o período anterior</span></div>"
+        for cls, t, d in comp:
+            html += (f"<div class='rx-lead {cls}'><span class=dot style='background:var(--{'neon' if cls == 'ok' else 'coral' if cls == 'ruim' else 'ambar'})'></span>"
+                     f"<div class=mid><div class=emp>{esc(t)}</div><div class=por>{esc(d)}</div></div></div>")
+    return html
+
+
+def _rx_responda_hoje(h: dict) -> str:
+    rot = {"pergunta": "🔴 Pergunta sem resposta", "festa": "🟠 Festa perto, sem proposta",
+           "toque": "🟡 Toque da cadência vence hoje", "visita": "🔵 Visita amanhã"}
+    html = f"<div class=rx-ey><span>Responda hoje</span><span>{h['n']} pelo que mais urge</span></div>"
+    if not h["itens"]:
+        html += "<div class=rx-vazio>Ninguém esperando você agora. 🎉</div>"
+    atual = None
+    for i in h["itens"]:
+        if i["faixa"] != atual:
+            atual = i["faixa"]
+            html += f"<div class=rx-ey><span>{rot[atual]}</span><span>{h['por_faixa'][atual]}</span></div>"
+        html += (f"<a class='rx-lead {i['faixa']}' href='{esc(i['href'])}'><span class=dot></span>"
+                 f"<div class=mid><div class=emp>{esc(i['nome'])}</div><div class=por>{esc(i['detalhe'])}</div></div>"
+                 f"<span class=acao>{esc(i['acao'])}</span></a>")
+    if h["sem_urgencia"]:
+        html += f"<div class=rx-dobra><span>Sem urgência hoje · {h['sem_urgencia']} lead(s)</span><span>na Fila</span></div>"
+    return html
+
+
+def _rx_fechamentos(f: dict) -> str:
+    from finance import raio_x as _rx
+    html = f"<div class=rx-ey><span>Fechamentos, a um passo</span><span>{_rx._reais(f['em_jogo_centavos'])} em jogo</span></div>"
+
+    def card(cls, x, bt=None):
+        return (f"<a class='rx-fecha {cls}' href='{_BASE}/lead/{x['lead_id']}'><div class=t><span>{esc(x['nome'])}"
+                + (f" · {esc(x['festa'])}" if x.get("festa") else "") + f"</span><small>{_rx._reais(x['valor_centavos'])}</small></div>"
+                f"<p>{esc(x['detalhe'])}</p>" + (f"<span class=bt>{esc(bt)}</span>" if bt else "") + "</a>")
+    blocos = [("Assinou 🎉", "ok", f["assinou"], None), ("Disse sim, falta assinar", "amb", f["falta_assinar"], "acao"),
+              ("Proposta esperando o cliente", "amb", f["esperando"], "acao"), ("Rascunho que não saiu", "ruim", f["rascunhos"], "acao")]
+    vazio = True
+    for titulo, cls, lista, bt in blocos:
+        if not lista:
+            continue
+        vazio = False
+        html += f"<div class=rx-ey><span>{titulo}</span><span>{len(lista)}</span></div>"
+        for x in lista:
+            html += card(cls, x, x.get(bt) if bt else None)
+    if vazio:
+        html += "<div class=rx-vazio>Nenhuma proposta em jogo. Quando uma sair, ela aparece aqui.</div>"
+    return html
+
+
+@router.get("/cockpit/raio-x", response_class=HTMLResponse)
+def cockpit_raio_x(request: Request):
+    """O Raio-X do vendedor (mockup docs/mockups/raio_x_como_fica.html): sua
+    semana, responda hoje, fechamentos, seu dinheiro, e a confiança do dado no
+    pé. Cada bloco é tolerante: um que falhar vira uma linha dizendo isso, não
+    uma tela em branco."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    from finance import raio_x as _rx
+    periodo = request.query_params.get("p", "semana")
+    if periodo not in ("semana", "mes", "tudo"):
+        periodo = "semana"
+    pool = get_pool()
+    ini, fim, rot = _rx.janela(periodo)
+
+    def seg(k, lab):
+        return f"<a class='{'on' if periodo == k else ''}' href='{_BASE}/raio-x?p={k}'>{lab}</a>"
+
+    partes = []
+    n_hoje = 0
+    try:
+        partes.append(_rx_sua_semana(_rx.sua_semana(pool, conta_id, membro_id, ini, fim), rot))
+    except Exception as e:  # noqa: BLE001
+        _log.warning("raio-x sua semana: %s: %s", type(e).__name__, e)
+        partes.append("<div class=rx-vazio>Não deu pra medir a semana agora. Tenta de novo em instantes.</div>")
+    try:
+        h = _rx.responda_hoje(pool, conta_id, membro_id)
+        n_hoje = h["n"]
+        partes.append(_rx_responda_hoje(h))
+    except Exception as e:  # noqa: BLE001
+        _log.warning("raio-x responda hoje: %s: %s", type(e).__name__, e)
+        partes.append("<div class=rx-vazio>A fila de hoje não carregou. A Fila normal continua na primeira aba.</div>")
+    try:
+        partes.append(_rx_fechamentos(_rx.fechamentos(pool, conta_id, membro_id)))
+    except Exception as e:  # noqa: BLE001
+        _log.warning("raio-x fechamentos: %s: %s", type(e).__name__, e)
+    try:
+        partes.append(_bloco_dinheiro(ck.remuneracao(pool, conta_id, membro_id, "mes" if periodo != "semana" else "semana")))
+    except Exception as e:  # noqa: BLE001
+        _log.warning("raio-x dinheiro: %s: %s", type(e).__name__, e)
+    try:
+        partes.append(f"<div class=rx-dado>📡 Confiança do dado: {esc(_rx.texto_confianca(_rx.confianca(pool, conta_id, ini, fim)))}</div>")
+    except Exception as e:  # noqa: BLE001
+        _log.warning("raio-x confiança: %s: %s", type(e).__name__, e)
+    corpo = (_hdr("Raio-X", rot, inicial="", direita=_selo(conta_id))
+             + f"<div class=scroll><div class=seg>{seg('semana','Semana')}{seg('mes','Mês')}{seg('tudo','Tudo')}</div>"
+             + "".join(partes)
+             + "</div>" + _abas_vend("resultado", _pend_vend(conta_id, membro_id), 0, n_hoje))
+    return _page("Raio-X", corpo)
 
 
 # ------------------------------------------------------------------ montar orçamento

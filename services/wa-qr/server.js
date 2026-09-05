@@ -1475,6 +1475,17 @@ function jidDe (numero) {
   return comDDI + '@s.whatsapp.net'
 }
 
+// Pra onde vai um envio. Um número vira jid de pessoa (jidDe). Um jid de GRUPO
+// (…@g.us) passa como veio: grupo não tem "número de verdade" pra perguntar ao
+// onWhatsApp, e o único jeito de saber o jid de um grupo é o próprio WhatsApp
+// listar (GET /session/:conta/grupos). É por aqui que o Raio-X de segunda chega
+// no grupo dos vendedores (finance/raio_x.py).
+function alvoDoEnvio (numero) {
+  const s = String(numero || '').trim()
+  if (/^[0-9-]+@g\.us$/.test(s)) return { jid: s, grupo: true }
+  return { jid: jidDe(s), grupo: false }
+}
+
 // Número do jeito que está guardado NEM SEMPRE é o JID de verdade da pessoa, e o
 // WhatsApp não reclama: ele aceita a mensagem (vira ✓, SERVER_ACK) e nunca
 // entrega. Fica o traço único pra sempre, sem erro nenhum em lugar nenhum.
@@ -3278,9 +3289,27 @@ const servidor = http.createServer(async (req, res) => {
         await resyncAgenda(contaId, 0, true)
         return json(res, 200, { ok: true })
       }
+      // Os grupos em que este número está: é de onde o dono escolhe o grupo do
+      // Raio-X de segunda. Só leitura do socket; sessão fora do ar responde
+      // {ok:false} e a tela pede pra conectar primeiro.
+      if (req.method === 'GET' && acao === 'grupos') {
+        const s = sessoes.get(contaId)
+        if (!s || s.status !== 'conectado' || !s.sock) return json(res, 200, { ok: false, erro: 'desconectado' })
+        try {
+          const todos = await s.sock.groupFetchAllParticipating()
+          const grupos = Object.values(todos || {})
+            .map((g) => ({ id: g.id, nome: g.subject || '', participantes: (g.participants || []).length }))
+            .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+          return json(res, 200, { ok: true, grupos })
+        } catch (e) {
+          log.warn({ contaId, e: String(e) }, 'grupos: groupFetchAllParticipating falhou')
+          return json(res, 200, { ok: false, erro: String(e).slice(0, 180) })
+        }
+      }
       if (req.method === 'POST' && acao === 'enviar') {
         const body = await lerBody(req)
-        const jid = jidDe(body.numero)
+        const alvoPedido = alvoDoEnvio(body.numero)
+        const jid = alvoPedido.jid
         let s = sessoes.get(contaId)
         // log sempre, mesmo quando falha — sem isso não dava pra saber SE o
         // status realmente não era 'conectado' na hora do envio ou se o
@@ -3313,15 +3342,19 @@ const servidor = http.createServer(async (req, res) => {
         }
         if (!s || s.status !== 'conectado' || !s.sock) return json(res, 200, { ok: false, erro: 'desconectado' })
         if (!jid) return json(res, 200, { ok: false, erro: 'numero_invalido' })
-        // pergunta ao WhatsApp o JID de verdade antes de mandar — ver jidRealDe
-        const alvo = await jidRealDe(s.sock, contaId, body.numero)
+        // pergunta ao WhatsApp o JID de verdade antes de mandar — ver jidRealDe.
+        // Grupo não: o jid já é o de verdade, veio da lista do próprio WhatsApp.
+        const alvo = alvoPedido.grupo ? alvoPedido : await jidRealDe(s.sock, contaId, body.numero)
         if (!alvo.jid) return json(res, 200, { ok: false, erro: alvo.erro || 'numero_invalido' })
         try {
           const r = await s.sock.sendMessage(alvo.jid, { text: String(body.texto || '').slice(0, 4000) })
           guardarEnviada(contaId, r)
           // ...e fica no aguardo do eco: se ele não voltar, a entrada desta conta
-          // está morta e ninguém descobriria pelo silêncio — ver cobrarEcos
-          esperarEco(contaId, r && r.key && r.key.id, Date.now())
+          // está morta e ninguém descobriria pelo silêncio — ver cobrarEcos.
+          // GRUPO NÃO ESPERA ECO: a entrada descarta grupo de propósito (ver
+          // "entrada ignorada"), então o eco de um envio pra grupo nunca conta —
+          // esperá-lo acusaria "entrada morta" com a conta viva.
+          if (!alvoPedido.grupo) esperarEco(contaId, r && r.key && r.key.id, Date.now())
           log.info({ contaId, id: r && r.key && r.key.id }, 'enviar: sucesso ✓')
           return json(res, 200, { ok: true, id: (r && r.key && r.key.id) || '' })
         } catch (e) {
@@ -3710,4 +3743,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

@@ -77,6 +77,17 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_i
   pre_reserva_ate timestamptz, sinal_centavos int,
   tipo_evento text, convidados int, hora_sugerida boolean default false);
   -- 160/163/179: agenda._COLS lê todas essas
+-- o Raio-X (finance/raio_x) lê estas três (e `orcamentos`, criada no fixture pelo
+-- DDL do próprio app) além das de cima; sem elas cada bloco da tela cairia no
+-- `except` e o teste passaria sem exercitar a consulta
+create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
+  status text default 'enviado', valor_centavos bigint, assinado_em timestamptz, enviado_em timestamptz);
+create table wa_qr_log (id bigserial primary key, conta_id bigint, nivel text default 'warn',
+  msg text not null default '', dados jsonb, criado_em timestamptz not null default now());
+create table wa_decifra_diario (dia date not null, conta_id bigint not null, from_me boolean not null,
+  ocorrencias int not null default 0, ids_distintos int not null default 0,
+  chegaram int, nunca_chegaram int, correlacionado_em timestamptz,
+  apurado_em timestamptz not null default now(), primary key (dia, conta_id, from_me));
 """
 
 
@@ -102,8 +113,12 @@ def pool():
         from tests.test_novidades import BASE as _MIG
         c.execute("alter table contas add column criado_em timestamptz not null default now()")
         for m in ("174_novidades.sql", "184_novidade_voz_e_porta_fechada.sql",
-                  "199_novidades_pra_quem.sql"):
+                  "199_novidades_pra_quem.sql", "207_raio_x.sql"):
             c.execute((_MIG / m).read_text(encoding="utf-8"))
+        # `orcamentos` com TODAS as colunas do app (o Raio-X lê status, aprovada_em,
+        # sinal_pago_em, primeiro_ano_centavos; criar_orcamento grava dezenas)
+        from web.painel_servicos import _criar_orcamentos
+        _criar_orcamentos(c)
         c.commit()
     yield p
     p.close()
@@ -1334,3 +1349,94 @@ def test_a_faixa_nao_derruba_a_fila_sem_a_tabela(pool, monkeypatch):
     monkeypatch.setattr(nv, "listar", _boom)
     html, _ = _fila_html(monkeypatch, pool, conta, vend)
     assert "Meus leads" in html and "class=faixa" not in html
+
+
+# ------------------------------------------------------------------ Raio-X (a aba Resultado virou Raio-X)
+def _msg_rx(c, conv, direcao, texto, horas_atras, autor=None):
+    c.execute("""insert into mensagens (conversa_id, direcao, autor, texto, criado_em)
+                 values (%s,%s,%s,%s, now() - make_interval(hours => %s))""",
+              (conv, direcao, autor or ("lead" if direcao == "in" else "humano"), texto, horas_atras))
+
+
+def test_resultado_redireciona_pro_raio_x_com_o_mesmo_periodo():
+    """Quem tem o app aberto na aba antiga, ou um link guardado, cai na tela nova."""
+    from types import SimpleNamespace
+    from starlette.datastructures import QueryParams
+    from web import painel_cockpit as pc
+    r = pc.cockpit_resultado(SimpleNamespace(query_params=QueryParams("p=mes")))
+    assert r.status_code == 303 and r.headers["location"] == "/cockpit/raio-x?p=mes"
+    r = pc.cockpit_resultado(SimpleNamespace(query_params=QueryParams("p=xyz")))
+    assert r.headers["location"] == "/cockpit/raio-x"
+
+
+def test_aba_resultado_se_chama_raio_x_e_leva_o_selo_do_responda_hoje():
+    from web import painel_cockpit as pc
+    html = pc._abas_vend("fila", 0, 0, 3)
+    assert "Raio-X" in html and "href='/cockpit/raio-x'" in html and "Resultado" not in html
+    assert "class='tsel ok' aria-label='3 por ler'" in html      # verde: é lista de trabalho, não alerta
+    assert "tsel" not in pc._abas_vend("fila", 0, 0, 0)
+
+
+def test_raio_x_mostra_os_quatro_blocos_e_a_fila_de_hoje_do_vendedor(pool, monkeypatch):
+    """Um lead perguntou há 2h e não foi respondido: aparece em "Responda hoje",
+    com o texto e o link da conversa; a semana, os fechamentos e a confiança do
+    dado estão na tela. O bloco do dinheiro continua no fim."""
+    from web import painel_cockpit as pc
+    with pool.connection() as c:
+        conta = _conta(c, "RX1")
+        vend = _membro(c, conta, nome="Jaque", email="rx1@x.com")
+        outro = _membro(c, conta, nome="Pedro", email="rx1b@x.com")
+        lid = _lead(c, conta, vend, "Doceria Flor")
+        conv = c.execute("insert into conversas (conta_id, prospeccao_id, canal) values (%s,%s,'whatsapp') returning id",
+                         (conta, lid)).fetchone()[0]
+        _msg_rx(c, conv, "out", "Oi! Posso ajudar?", 30)
+        _msg_rx(c, conv, "in", "Quanto fica pra 80 pessoas?", 2)
+        # o lead do OUTRO vendedor não entra na tela deste
+        lid2 = _lead(c, conta, outro, "Buffet Alheio")
+        conv2 = c.execute("insert into conversas (conta_id, prospeccao_id, canal) values (%s,%s,'whatsapp') returning id",
+                          (conta, lid2)).fetchone()[0]
+        _msg_rx(c, conv2, "in", "e aí?", 1)
+        c.commit()
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    monkeypatch.setattr(pc, "_selo", lambda conta_id: "")
+    # o bloco do dinheiro é o de sempre (finance.cockpit.remuneracao lê títulos e
+    # lançamentos, que este schema não tem): entra pronto
+    monkeypatch.setattr(pc.ck, "remuneracao", lambda pool, conta_id, membro_id, periodo: {
+        "comissao_centavos": 12000, "comissao_pct": 10, "recebido_centavos": 120000, "n_vendas": 1,
+        "fechado_centavos": 500000, "ganhos": 2, "conversao": "50%", "fila": 1, "resp": "2h",
+        "posicao": 1, "total_equipe": 2})
+    html = bytes(pc.cockpit_raio_x(_req_vend(conta, vend)).body).decode("utf-8")
+    assert "Sua semana" in html and "Responda hoje" in html and "Fechamentos, a um passo" in html
+    assert "Confiança do dado" in html and "dias medidos" in html
+    assert "🔴 Pergunta sem resposta" in html
+    assert "Doceria Flor" in html and "Quanto fica pra 80 pessoas?" in html and f"href='/cockpit/lead/{lid}'" in html
+    assert "Buffet Alheio" not in html
+    assert "Seu dinheiro" in html                 # o que a aba Resultado mostrava, no fim
+    assert "class='tsel ok' aria-label='1 por ler'" in html      # a aba Raio-X com o 1 de hoje
+    assert "href='/cockpit/raio-x?p=mes'" in html # o seletor de período
+    # ninguém esperando: a fila diz isso, sem quebrar
+    html2 = bytes(pc.cockpit_raio_x(_req_vend(conta, outro)).body).decode("utf-8")
+    assert "Buffet Alheio" in html2 and "Doceria Flor" not in html2
+
+
+def test_raio_x_sem_sessao_manda_pro_login(monkeypatch):
+    from types import SimpleNamespace
+    from starlette.datastructures import QueryParams
+    from web import painel_cockpit as pc
+    r = pc.cockpit_raio_x(SimpleNamespace(session={}, query_params=QueryParams(""), cookies={}))
+    assert r.status_code == 303 and r.headers["location"] == "/cockpit/login"
+
+
+def test_fila_leva_o_selo_do_raio_x_so_pro_vendedor(pool, monkeypatch):
+    """O selo verde da aba Raio-X é o "responda hoje" do vendedor. O gestor não
+    tem Raio-X próprio (não tem leads): a aba dele vai sem número."""
+    with pool.connection() as c:
+        conta = _conta(c, "RX2")
+        vend = _membro(c, conta, nome="Jaque", email="rx2@x.com")
+        lid = _lead(c, conta, vend, "Padoca")
+        conv = c.execute("insert into conversas (conta_id, prospeccao_id, canal) values (%s,%s,'whatsapp') returning id",
+                         (conta, lid)).fetchone()[0]
+        _msg_rx(c, conv, "in", "tem pra sábado?", 3)
+        c.commit()
+    html, _ = _fila_html(monkeypatch, pool, conta, vend)
+    assert "href='/cockpit/raio-x'" in html and "aria-label='1 por ler'" in html

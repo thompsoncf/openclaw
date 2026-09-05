@@ -1,0 +1,369 @@
+<title>Raio-X · Como Fica</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --ink:#062011;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.86em;color:var(--roxo)}
+.wrap{max-width:1180px;margin:0 auto;padding:2.6rem 1.25rem 5rem;display:flex;flex-direction:column;gap:2.8rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.6rem,4vw,2.2rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:70ch}
+.head .marca{color:var(--neon)}
+.sec>h2{font-size:1.2rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.1rem;max-width:74ch;font-size:.9rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em;margin-bottom:.35rem}
+
+/* ============ os celulares ============ */
+.fones{display:grid;grid-template-columns:repeat(3,1fr);gap:1.2rem;align-items:start}
+@media (max-width:1000px){.fones{grid-template-columns:1fr 1fr}}
+@media (max-width:680px){.fones{grid-template-columns:1fr}}
+.fone{border:1px solid var(--line);border-radius:28px;background:var(--bg);box-shadow:0 20px 60px rgba(0,0,0,.45);overflow:hidden;display:flex;flex-direction:column;min-height:620px}
+.fone .leg{padding:.6rem .9rem;font-size:.72rem;color:var(--text-faint);border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+.hdr{display:flex;align-items:center;gap:.7rem;padding:.9rem 1rem .5rem}
+.hdr .av{width:34px;height:34px;border-radius:50%;background:var(--neon-fundo);border:1px solid var(--neon-borda);color:var(--neon-bright);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem}
+.hdr .tt b{display:block;font-family:var(--display);font-size:1.15rem;line-height:1.1}
+.hdr .tt small{color:var(--text-dim);font-size:.76rem}
+.seg{display:flex;gap:.3rem;padding:.2rem 1rem .5rem}
+.seg span{flex:1;text-align:center;font-size:.7rem;padding:.35rem .4rem;border-radius:999px;border:1px solid var(--line);color:var(--text-dim)}
+.seg span.on{background:var(--neon);border-color:var(--neon);color:var(--ink);font-weight:600}
+.scroll{flex:1;overflow:hidden}
+.ey{padding:.6rem 1rem .2rem;font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);font-weight:600;display:flex;justify-content:space-between}
+.metas{display:grid;grid-template-columns:1fr 1fr;gap:.45rem;padding:.3rem 1rem}
+.meta{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.55rem .65rem}
+.meta b{display:block;font:600 1.3rem/1 var(--display);font-variant-numeric:tabular-nums}
+.meta span{display:block;font-size:.64rem;color:var(--text-faint);margin-top:.2rem}
+.meta em{display:block;font:500 .6rem var(--mono);margin-top:.3rem;font-style:normal}
+.meta.ok b,.meta.ok em{color:var(--neon-bright)}.meta.amb b,.meta.amb em{color:var(--ambar)}.meta.ruim b,.meta.ruim em{color:#F2BDB9}
+.meta .bar{height:4px;border-radius:999px;background:var(--line);margin-top:.4rem;overflow:hidden}
+.meta .bar i{display:block;height:100%;background:var(--neon)}
+.meta.amb .bar i{background:var(--ambar)}.meta.ruim .bar i{background:var(--coral)}
+.lead{display:flex;gap:.6rem;padding:.6rem 1rem;border-bottom:1px solid var(--line);font-size:.8rem;align-items:flex-start}
+.lead .dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:.4rem}
+.lead .mid{flex:1;min-width:0}
+.lead .emp{font-weight:600;font-size:.88rem}
+.lead .por{color:var(--text-dim);font-size:.74rem}
+.lead .por b{color:#F0DCA6;font-weight:500}
+.lead .acao{flex:none;font:600 .66rem var(--mono);color:var(--neon-bright);border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:999px;padding:.2rem .55rem;white-space:nowrap}
+.lead .acao.amb{color:#F0DCA6;border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.dobra{margin:.4rem 1rem;border:1px dashed var(--line);border-radius:10px;padding:.45rem .6rem;font-size:.72rem;color:var(--text-dim);display:flex;justify-content:space-between;background:var(--bg-2)}
+.fecha{margin:.3rem 1rem;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.6rem .7rem;font-size:.78rem}
+.fecha .t{display:flex;justify-content:space-between;font-weight:600}
+.fecha .t small{font:500 .64rem var(--mono);color:var(--text-faint)}
+.fecha p{margin:.2rem 0 0;color:var(--text-dim);font-size:.72rem}
+.fecha.ok{border-left:3px solid var(--neon)}.fecha.amb{border-left:3px solid var(--ambar)}.fecha.ruim{border-left:3px solid var(--coral)}
+.fecha .bt{display:inline-block;margin-top:.4rem;font:600 .64rem var(--mono);color:var(--neon-bright);border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:999px;padding:.18rem .55rem}
+.dado{margin:.5rem 1rem .3rem;padding:.5rem .65rem;border-radius:10px;background:var(--azul-fundo);border:1px solid var(--azul-borda);font:500 .62rem/1.45 var(--mono);color:var(--azul)}
+.tabs{display:flex;border-top:1px solid var(--line);background:var(--bg-2);padding:.45rem .3rem .55rem;margin-top:auto}
+.tabs span{flex:1;text-align:center;font-size:.62rem;color:var(--text-faint);display:flex;flex-direction:column;align-items:center;gap:.15rem;position:relative}
+.tabs span i{font-style:normal;font-size:1rem;line-height:1}
+.tabs span.on{color:var(--neon-bright)}
+.tabs .tsel{position:absolute;top:-4px;right:18%;min-width:16px;height:16px;border-radius:999px;background:var(--coral);color:#fff;font-family:var(--mono);font-size:.6rem;font-weight:700;display:flex;align-items:center;justify-content:center}
+.tabs .tsel.ok{background:var(--neon);color:var(--ink)}
+
+/* ============ a mensagem de segunda ============ */
+.zap{background:#0B141A;border:1px solid #20302a;border-radius:18px;padding:.9rem;display:flex;flex-direction:column;gap:.5rem;max-width:560px}
+.zap .grp{font-size:.72rem;color:var(--text-faint);text-align:center}
+.bub{background:#1F2C25;border-radius:12px 12px 12px 3px;padding:.65rem .8rem;font-size:.82rem;line-height:1.45;max-width:96%;white-space:pre-line}
+.bub b{color:var(--neon-bright)}
+.bub .meta{display:block;font:400 .62rem var(--mono);color:var(--text-faint);margin-top:.3rem;text-align:right}
+
+/* ============ o painel do dono ============ */
+.painel{border:1px solid var(--line);border-radius:14px;background:var(--bg);overflow:hidden}
+.pbar{display:flex;flex-wrap:wrap;gap:.4rem;padding:.8rem 1rem;border-bottom:1px solid var(--line);background:var(--bg-2);align-items:center}
+.pbar .f{display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--line);border-radius:999px;padding:.32rem .7rem;font-size:.76rem;color:var(--text-dim);background:var(--surface)}
+.pbar .f b{color:var(--text);font-weight:500}
+.pbar .f.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--text)}
+.pbar .f.on b{color:var(--neon-bright)}
+.pbar .sep{width:1px;height:18px;background:var(--line);margin:0 .2rem}
+.pmain{padding:1rem 1.1rem;display:flex;flex-direction:column;gap:1rem}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:.6rem}
+@media (max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.65rem .8rem}
+.kpi b{display:block;font:600 1.35rem/1 var(--display);font-variant-numeric:tabular-nums}
+.kpi span{display:block;font-size:.66rem;color:var(--text-faint);margin-top:.25rem}
+.kpi em{display:block;font:500 .6rem var(--mono);font-style:normal;margin-top:.25rem;color:var(--text-dim)}
+.kpi.ok b{color:var(--neon-bright)}.kpi.amb b{color:var(--ambar)}.kpi.ruim b{color:var(--coral)}
+.grade{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem}
+@media (max-width:900px){.grade{grid-template-columns:1fr}}
+.bloco{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem .95rem;display:flex;flex-direction:column;gap:.5rem}
+.bloco h4{font-size:.92rem;display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
+.bloco h4 small{font:500 .62rem var(--mono);color:var(--text-faint)}
+.bloco p{margin:0;font-size:.8rem;color:var(--text-dim)}
+.bloco p b{color:var(--text);font-weight:500}
+.bloco .acha{font-size:.76rem;color:#F0DCA6;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:8px;padding:.4rem .55rem}
+.duas{display:flex;flex-direction:column;gap:.28rem;font-size:.72rem}
+.duas div{display:grid;grid-template-columns:46px 1fr 1fr;gap:.4rem;align-items:center}
+.duas div span{font-family:var(--mono);color:var(--text-faint)}
+.duas i{display:block;height:8px;border-radius:999px}
+.duas .a{background:var(--neon)}.duas .b{background:var(--line)}
+.duas .lg{display:flex;gap:.8rem;font-size:.64rem;color:var(--text-faint);margin-top:.15rem}
+.duas .lg i{display:inline-block;width:10px;height:8px;vertical-align:middle;margin-right:.25rem}
+.sem{display:grid;grid-template-columns:repeat(7,1fr);gap:.25rem;align-items:end;height:74px}
+.sem div{display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:.2rem;height:100%;font:500 .62rem var(--mono);color:var(--text-faint)}
+.sem i{display:block;width:100%;border-radius:4px 4px 0 0;background:var(--line)}
+.sem i.on{background:var(--neon)}
+.tipos{display:flex;flex-direction:column;gap:.25rem;font-size:.74rem}
+.tipos div{display:grid;grid-template-columns:96px 1fr 60px;gap:.4rem;align-items:center}
+.tipos div span:last-child{font-family:var(--mono);color:var(--text-dim);text-align:right}
+.tipos i{display:block;height:8px;border-radius:999px;background:var(--roxo);opacity:.8}
+.perdas{display:flex;flex-wrap:wrap;gap:.3rem}
+.perdas span{font:500 .66rem var(--mono);border:1px solid var(--line);border-radius:999px;padding:.15rem .5rem;color:var(--text-dim)}
+.perdas span.on{border-color:var(--coral-borda);background:var(--coral-fundo);color:#F2BDB9}
+
+.notas{display:flex;flex-direction:column;gap:.7rem;max-width:1000px}
+.nota{border:1px solid var(--line);border-left:3px solid var(--ambar);border-radius:0 11px 11px 0;background:var(--surface);padding:.8rem 1rem}
+.nota h4{margin:0 0 .25rem;font-size:.88rem;font-weight:600}
+.nota p{margin:0;font-size:.84rem;color:var(--text-dim);max-width:74ch}
+.nota.bom{border-left-color:var(--neon)} .nota.fora{border-left-color:var(--text-faint)}
+.passos{margin:0;padding-left:1.2rem;font-size:.86rem;color:var(--text-dim);display:flex;flex-direction:column;gap:.35rem;max-width:1000px}
+.passos b{color:var(--text)}
+.rodape{border-top:1px solid var(--line);padding-top:1.2rem;color:var(--text-faint);font-size:.8rem;max-width:74ch}
+</style>
+
+<div class="wrap">
+
+  <div class="head">
+    <div class="eyebrow">Mockup pra aprovação · Raio-X · 05/09/2026 · segue o Raio-X da Prime Eventos</div>
+    <h1>Como fica o <span class="marca">Raio-X</span>: no app do vendedor, no grupo e no painel do dono</h1>
+    <p>Três lugares, um relatório só, lido do que já existe no banco. No app, a aba Resultado vira Raio-X com três blocos. No grupo, a mensagem de segunda. No painel, a versão do dono com filtros e o que o Zaq passa a enriquecer sozinho. Números reais da Prime; nomes de clientes fictícios.</p>
+  </div>
+
+  <!-- ══════════════════════════ PEÇA 1: o app ══════════════════════════ -->
+  <section class="sec">
+    <div class="k">PEÇA 1 · APP DO VENDEDOR · A ABA RAIO-X</div>
+    <h2>Três blocos, na ordem em que o vendedor usa: como foi, o que fazer agora, o que está a um passo</h2>
+    <p class="leg">Os três cabem numa tela rolando; aqui estão separados pra ler. As metas têm cor do dia e uma barra do quanto falta. A fila é ordenada pelo que mais urge, e cada linha abre a conversa no ponto certo. No pé, a confiança do dado.</p>
+    <div class="fones">
+
+      <div class="fone">
+        <div class="leg">1 · Sua semana</div>
+        <div class="hdr"><span class="av">JA</span><div class="tt"><b>Raio-X</b><small>31/08 a 06/09 · Jacqueline</small></div></div>
+        <div class="seg"><span class="on">Semana</span><span>Mês</span><span>Tudo</span></div>
+        <div class="scroll">
+          <div class="ey"><span>Sua semana</span><span>meta · você</span></div>
+          <div class="metas">
+            <div class="meta ruim"><b>2h40</b><span>1ª resposta ao lead novo</span><em>meta 5 min · 4 de 9 no alvo</em><div class="bar"><i style="width:44%"></i></div></div>
+            <div class="meta amb"><b>2 / 4</b><span>propostas enviadas</span><em>2 em rascunho há 8 dias</em><div class="bar"><i style="width:50%"></i></div></div>
+            <div class="meta amb"><b>11 / 17</b><span>toques de retorno</span><em>cadência 3h · 24h · 3d · 7d</em><div class="bar"><i style="width:65%"></i></div></div>
+            <div class="meta ok"><b>1</b><span>contrato assinado</span><em>R$ 7.750 · Cláudia</em><div class="bar"><i style="width:100%"></i></div></div>
+          </div>
+          <div class="ey"><span>Comparado com a semana passada</span></div>
+          <div class="lead"><span class="dot" style="background:var(--neon)"></span><div class="mid"><div class="emp">1ª resposta melhorou 40 min</div><div class="por">3h20 → 2h40. O pico ainda é sábado 13h.</div></div></div>
+          <div class="lead"><span class="dot" style="background:var(--ambar)"></span><div class="mid"><div class="emp">9 leads novos · 6 já com data</div><div class="por">O card leu a data em 4 deles. 3 ainda sem tipo de festa.</div></div></div>
+          <div class="lead" style="border-bottom:0"><span class="dot" style="background:var(--coral)"></span><div class="mid"><div class="emp">Parou na 1ª tentativa: 12 conversas</div><div class="por">Meta: nenhuma. O 2º toque está pronto na fila.</div></div></div>
+          <div class="dado">📡 Confiança do dado: 7 de 7 dias medidos · conexão religou 42× · 2 mensagens podem não ter chegado (Rômulo, Amanda): confira no celular</div>
+        </div>
+        <div class="tabs"><span><i>☰</i>Fila<span class="tsel">3</span></span><span><i>📅</i>Agenda</span><span><i>📄</i>Propostas</span><span class="on"><i>🔎</i>Raio-X<span class="tsel ok">6</span></span><span><i>👤</i>Perfil</span></div>
+      </div>
+
+      <div class="fone">
+        <div class="leg">2 · Responda hoje</div>
+        <div class="hdr"><span class="av">JA</span><div class="tt"><b>Raio-X</b><small>responda hoje · 6 pelo que mais urge</small></div></div>
+        <div class="scroll">
+          <div class="ey"><span>🔴 Pergunta sem resposta</span><span>2</span></div>
+          <div class="lead"><span class="dot" style="background:var(--coral)"></span><div class="mid"><div class="emp">Karla Santos</div><div class="por">"Esses valores incluem o quê no pacote?" · <b>9 dias</b></div></div><span class="acao">o que inclui</span></div>
+          <div class="lead"><span class="dot" style="background:var(--coral)"></span><div class="mid"><div class="emp">Paulo Alencar</div><div class="por">Deu a data: <b>26/09</b>, festa em 3 semanas · 9 dias</div></div><span class="acao">responder</span></div>
+          <div class="ey"><span>🟠 Festa perto, sem proposta</span><span>2</span></div>
+          <div class="lead"><span class="dot" style="background:var(--ambar)"></span><div class="mid"><div class="emp">Camila Damasceno</div><div class="por">Aniversário <b>20/09</b> · 60 conv. · proposta em rascunho há 17 dias</div></div><span class="acao amb">enviar</span></div>
+          <div class="lead"><span class="dot" style="background:var(--ambar)"></span><div class="mid"><div class="emp">Renata Costa</div><div class="por">Aniversário <b>20/09</b> · disse "Confirmado!" ontem</div></div><span class="acao amb">proposta</span></div>
+          <div class="ey"><span>🟡 Toque da cadência vence hoje</span><span>2</span></div>
+          <div class="lead"><span class="dot" style="background:#F0DCA6"></span><div class="mid"><div class="emp">J. Neto · casamento 27/03</div><div class="por">"Vai dar certo" em 19/08 · nenhum toque desde então</div></div><span class="acao">3º toque</span></div>
+          <div class="lead"><span class="dot" style="background:#F0DCA6"></span><div class="mid"><div class="emp">Costa · casamento 23/01</div><div class="por">Áudio sobre a data · proposta R$ 6.500 na mesa · 3 dias</div></div><span class="acao">ouvir</span></div>
+          <div class="ey"><span>🔵 Visita amanhã</span><span>1</span></div>
+          <div class="lead" style="border-bottom:0"><span class="dot" style="background:#5b9bd5"></span><div class="mid"><div class="emp">Erys · visita 09/09 13h</div><div class="por">Faltou 2× · confirmar na véspera, com horário alternativo</div></div><span class="acao">confirmar</span></div>
+          <div class="dobra"><span>Sem urgência hoje · 12 leads</span><span>▾</span></div>
+        </div>
+        <div class="tabs"><span><i>☰</i>Fila<span class="tsel">3</span></span><span><i>📅</i>Agenda</span><span><i>📄</i>Propostas</span><span class="on"><i>🔎</i>Raio-X<span class="tsel ok">6</span></span><span><i>👤</i>Perfil</span></div>
+      </div>
+
+      <div class="fone">
+        <div class="leg">3 · Fechamentos, a um passo</div>
+        <div class="hdr"><span class="av">JA</span><div class="tt"><b>Raio-X</b><small>fechamentos · R$ 23.975 em jogo</small></div></div>
+        <div class="scroll">
+          <div class="ey"><span>Assinou 🎉</span></div>
+          <div class="fecha ok"><div class="t"><span>Cláudia · casamento 15/01</span><small>02/09</small></div><p>Proposta, sinal e contrato no mesmo dia. Fechou em 1 dia depois de entrar.</p></div>
+          <div class="ey"><span>Disse sim, falta assinar</span><span>1</span></div>
+          <div class="fecha amb"><div class="t"><span>Formatura · 16/01</span><small>R$ 7.500</small></div><p>Sinal pago 31/08. Contrato enviado, sem assinatura há 5 dias.</p><span class="bt">reenviar o contrato</span></div>
+          <div class="ey"><span>Proposta esperando o cliente</span><span>2</span></div>
+          <div class="fecha amb"><div class="t"><span>Renata T. · 15 anos 18/09/27</span><small>R$ 9.650</small></div><p>Enviada 30/08 · 2 toques feitos · próximo hoje</p><span class="bt">4º toque</span></div>
+          <div class="fecha amb"><div class="t"><span>Kleiton · corporativo 07/11</span><small>R$ 6.000</small></div><p>Enviada 02/09 · sem conversa no Zaq: falou por telefone?</p><span class="bt">registrar</span></div>
+          <div class="ey"><span>Rascunho que não saiu</span><span>2</span></div>
+          <div class="fecha ruim"><div class="t"><span>Sarah · formatura 08/02</span><small>R$ 9.225</small></div><p>Montada 28/08, nunca enviada. <b>Alerta desde 29/08.</b></p><span class="bt">enviar agora</span></div>
+          <div class="fecha ruim"><div class="t"><span>Camila · aniversário 20/09</span><small>R$ 6.000</small></div><p>Montada 19/08. A festa é em 15 dias.</p><span class="bt">enviar agora</span></div>
+        </div>
+        <div class="tabs"><span><i>☰</i>Fila<span class="tsel">3</span></span><span><i>📅</i>Agenda</span><span><i>📄</i>Propostas</span><span class="on"><i>🔎</i>Raio-X<span class="tsel ok">6</span></span><span><i>👤</i>Perfil</span></div>
+      </div>
+    </div>
+    <div class="notas">
+      <div class="nota bom"><h4>O selo verde na aba é o número do "responda hoje"</h4><p>Não é vermelho de propósito: vermelho é cliente esperando na Fila. O verde é "tem coisa pra você decidir", e zera quando a lista zera. É o mesmo padrão do selo das Novidades no Perfil.</p></div>
+      <div class="nota"><h4>Semana, mês, tudo</h4><p>A mesma pílula de período do funil. "Semana" é a que abre por padrão e a que o grupo recebe. "Mês" serve pra ver a curva; "Tudo" pra comparar com quando começou.</p></div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════ PEÇA 2: o grupo ══════════════════════════ -->
+  <section class="sec">
+    <div class="k">PEÇA 2 · O GRUPO · SEGUNDA, 8H</div>
+    <h2>A mesma coisa, em uma mensagem: placar por vendedor, quem responde hoje, e a confiança do dado</h2>
+    <p class="leg">Curta de propósito: cabe numa tela de celular sem rolar muito. O detalhe fica no app. Sai pelo número da Prime, em nome do Zaq, e o Manoel pode responder em cima com a meta da semana.</p>
+    <div class="zap">
+      <div class="grp">Grupo · Prime Eventos · Vendas</div>
+      <div class="bub"><b>🔎 Raio-X da semana · 31/08 a 06/09</b>
+
+<b>Jacqueline</b> · 9 leads · 1ª resposta 2h40 (4 em 5 min) · propostas 2 enviadas, 2 rascunho ⚠️ · responda hoje: <b>6</b> · contrato: Cláudia 🎉
+<b>Pedro Yan</b> · 14 leads · 1h50 (3 em 5 min) · 1 enviada, <b>6 rascunho</b> ⚠️ · responda hoje: 4 · formatura: 5 dias sem assinatura
+<b>Thiago</b> · 7 leads · 3h20 (1 em 5 min) · 0 enviadas, 1 rascunho · responda hoje: 3
+
+<b>Prime na semana:</b> 30 leads · 1ª resposta 2h20 (meta 5 min) · 3 propostas enviadas · 1 contrato · R$ 107 mil em propostas abertas
+
+📡 7 de 7 dias medidos · conexão religou 42× · 2 mensagens podem não ter chegado (Rômulo, Amanda): confiram no celular
+<span class="meta">Zaq · segunda 08:00</span></div>
+      <div class="bub" style="background:#123028"><b>Meta desta semana:</b> metade das primeiras respostas em 5 min, zero rascunho com mais de 24h, todo mundo do "responda hoje" respondido até terça.<span class="meta">Manoel · 08:12</span></div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════ PEÇA 3: o painel do dono ══════════════════════════ -->
+  <section class="sec">
+    <div class="k">PEÇA 3 · PAINEL DO DONO · RAIO-X COM FILTROS E O QUE O ZAQ ENRIQUECE</div>
+    <h2>Pro dono, o mesmo Raio-X vira uma tela com filtros. E o Zaq passa a contar o que só ele consegue ver.</h2>
+    <p class="leg">Os filtros são os cortes que fizeram diferença na análise da Prime. Os blocos de baixo são o "enriquecer": coisas que o dono não consegue medir olhando o WhatsApp, e que o banco já tem. Todos com número real de 13/08 a 05/09.</p>
+
+    <div class="painel">
+      <div class="pbar">
+        <span class="f on">Período <b>13/08 a 05/09</b></span>
+        <span class="f">Vendedor <b>todos</b></span>
+        <span class="f">Tipo de festa <b>todos</b></span>
+        <span class="f">Mês da festa <b>todos</b></span>
+        <span class="f">Dia da festa <b>todos</b></span>
+        <span class="f">Convidados <b>todos</b></span>
+        <span class="f">Origem <b>WhatsApp</b></span>
+        <span class="f">Chegou <b>qualquer hora</b></span>
+        <span class="sep"></span>
+        <span class="f">Comparar com <b>mês anterior</b></span>
+      </div>
+      <div class="pmain">
+        <div class="kpis">
+          <div class="kpi"><b>283</b><span>leads</span><em>12/dia · sábado 13h é o pico</em></div>
+          <div class="kpi ruim"><b>2h30</b><span>1ª resposta (mediana)</span><em>comercial 1h17 · noite 11h</em></div>
+          <div class="kpi amb"><b>16</b><span>propostas · R$ 107 mil</span><em>9 nunca enviadas</em></div>
+          <div class="kpi ok"><b>2</b><span>contratos · R$ 9.250</span><em>+2 aprovados sem assinatura</em></div>
+          <div class="kpi amb"><b>45%</b><span>visitas que aconteceram</span><em>5 de 9 não vieram</em></div>
+        </div>
+
+        <div class="grade">
+          <div class="bloco">
+            <h4>Demanda × agenda <small>leads pedindo o mês vs festas marcadas</small></h4>
+            <div class="duas">
+              <div><span>set</span><i class="a" style="width:56%"></i><i class="b" style="width:44%"></i></div>
+              <div><span>out</span><i class="a" style="width:69%"></i><i class="b" style="width:25%"></i></div>
+              <div><span>nov</span><i class="a" style="width:88%"></i><i class="b" style="width:25%"></i></div>
+              <div><span>dez</span><i class="a" style="width:100%"></i><i class="b" style="width:44%"></i></div>
+              <div><span>jan</span><i class="a" style="width:69%"></i><i class="b" style="width:31%"></i></div>
+              <div><span>fev</span><i class="a" style="width:50%"></i><i class="b" style="width:2%"></i></div>
+              <div class="lg"><span><i class="a"></i>pedindo: 9 · 11 · 14 · 16 · 11 · 8</span><span><i class="b"></i>na agenda: 7 · 4 · 4 · 7 · 5 · 0</span></div>
+            </div>
+            <div class="acha">Outubro a dezembro têm 41 leads pedindo e 15 festas marcadas. A agenda tem espaço e o cliente está pedindo: é onde a proposta rápida vira contrato.</div>
+          </div>
+          <div class="bloco">
+            <h4>Dia da festa <small>106 leads com data</small></h4>
+            <div class="sem">
+              <div><i style="height:21%"></i>dom<br>14</div><div><i style="height:6%"></i>seg<br>4</div><div><i style="height:2%"></i>ter<br>1</div><div><i style="height:3%"></i>qua<br>2</div><div><i style="height:11%"></i>qui<br>7</div><div><i style="height:18%"></i>sex<br>12</div><div><i class="on" style="height:100%"></i>sáb<br>66</div>
+            </div>
+            <div class="acha"><b>62% das festas pedidas caem no sábado.</b> Sábado é o produto escasso: vale tabela própria, lista de espera por data, e sexta e domingo com condição melhor pra quem tem data flexível.</div>
+          </div>
+          <div class="bloco">
+            <h4>Tipo de festa e ticket <small>proposta média por tipo</small></h4>
+            <div class="tipos">
+              <div><span>Formatura</span><i style="width:100%"></i><span>R$ 9.883</span></div>
+              <div><span>15 anos</span><i style="width:98%"></i><span>R$ 9.650</span></div>
+              <div><span>Aniversário</span><i style="width:88%"></i><span>R$ 8.744</span></div>
+              <div><span>Casamento</span><i style="width:74%"></i><span>R$ 7.285</span></div>
+              <div><span>Corporativo</span><i style="width:38%"></i><span>R$ 3.750</span></div>
+            </div>
+            <div class="acha"><b>134 dos 283 leads (47%) estão sem tipo de festa.</b> Casamento é 65 dos 149 que têm. Sem o tipo, o Zaq não sabe o ticket nem qual pacote sugerir: é a 2ª pergunta da primeira resposta.</div>
+          </div>
+          <div class="bloco">
+            <h4>Do lead à proposta, da proposta ao contrato <small>dias, mediana</small></h4>
+            <p>Lead → proposta: <b>Jacqueline 3,3 dias</b> · <b>Pedro 4,0</b> · Thiago 0,3 (uma só). Proposta → contrato: Cláudia <b>0 dias</b>, Bianca <b>1 dia</b>. Quando a proposta sai, o contrato vem rápido. O gargalo é a proposta sair.</p>
+            <div class="acha">Meta sugerida: proposta em 24h depois de data e convidados. Hoje a mediana é 3,7 dias.</div>
+          </div>
+          <div class="bloco">
+            <h4>Preço praticado <small>proposta vs valor cheio dos itens</small></h4>
+            <p>A proposta sai em média <b>32% a 41% abaixo</b> do valor cheio dos itens (Pedro 32%, Jacqueline 41%), e o campo "desconto" fica em zero. Ou o valor cheio está inflado, ou o desconto está escondido no pacote.</p>
+            <div class="acha">Pra conferir com o Manoel antes de virar número no Raio-X: como o orçamento calcula o total. Se for desconto, vira política; se for tabela, vira ajuste.</div>
+          </div>
+          <div class="bloco">
+            <h4>Por que perdeu <small>13 perdidos reais</small></h4>
+            <div class="perdas"><span class="on">sumiu depois da proposta · 2</span><span class="on">data indisponível · 2</span><span class="on">achou caro · 1</span><span class="on">fora do escopo · 1</span><span class="on">sem interesse · 1</span><span>sem motivo · 6</span></div>
+            <div class="acha">Motivo vira lista fixa ao marcar perdido (um toque, não texto livre). "Data indisponível" alimenta a lista de espera; "achou caro" alimenta a tabela de sábado.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="k">OS FILTROS, E POR QUE CADA UM</div>
+    <ol class="passos">
+      <li><b>Período</b> (semana · mês · tudo · datas): o mesmo do funil. Toda comparação é "contra o período anterior".</li>
+      <li><b>Vendedor</b>: o Raio-X inteiro de um só, ou lado a lado. É o que o grupo recebe.</li>
+      <li><b>Tipo de festa</b>: casamento, 15 anos, aniversário, formatura, corporativo, outro, e <b>sem tipo</b> como filtro próprio, porque hoje é quase metade.</li>
+      <li><b>Mês da festa</b>: o trilho "Festa em" do funil, agora com a agenda ao lado. Responde "onde a gente tem espaço e cliente ao mesmo tempo".</li>
+      <li><b>Dia da festa</b>: sábado vs resto. É o corte que mais muda preço.</li>
+      <li><b>Convidados</b>: até 59 · 60 a 99 · 100 a 149 · 150 a 199 · 200+. A faixa de 60 a 99 é a maior (39 leads) e a que menos avança.</li>
+      <li><b>Origem</b>: WhatsApp, indicação, Instagram, manual. Hoje 279 dos 283 vêm como "whatsapp_inbound"; o filtro só vale quando o vendedor marcar de onde o cliente veio (a 1ª resposta pode perguntar).</li>
+      <li><b>Hora que chegou</b>: comercial · noite · fim de semana. É o que prova a escala de sábado e o plantão do agente.</li>
+    </ol>
+  </section>
+
+  <section class="sec">
+    <div class="k">O QUE O ZAQ PASSA A ENRIQUECER SOZINHO</div>
+    <div class="notas">
+      <div class="nota bom"><h4>1 · O tipo de festa e os convidados, lidos da conversa</h4><p>Já existe pra data (#626). Estende pro tipo e pros convidados com a mesma leitura por regra, e o "sem tipo" cai de 47% sem ninguém digitar.</p></div>
+      <div class="nota bom"><h4>2 · A lista de espera por data</h4><p>Cliente que pediu um sábado ocupado, ou foi perdido por "data indisponível", entra numa lista por data. Quando uma data abre (cancelamento, pré-reserva vencida), o Zaq avisa o vendedor com quem estava esperando.</p></div>
+      <div class="nota bom"><h4>3 · Demanda × agenda por mês</h4><p>O bloco de cima, sempre atual: leads pedindo cada mês contra festas marcadas. É o que diz onde apertar a proposta e onde já está cheio.</p></div>
+      <div class="nota bom"><h4>4 · A urgência de cada lead</h4><p>Um número por lead, calculado do que já existe: festa perto, pergunta sem resposta, proposta parada, toque vencido, visita amanhã. É o que ordena o "responda hoje" e o que o dono vê no funil como cor.</p></div>
+      <div class="nota bom"><h4>5 · Motivo de perda estruturado</h4><p>Lista fixa ao marcar perdido. Alimenta a lista de espera (data) e a tabela (preço). Hoje 6 de 13 estão sem motivo.</p></div>
+      <div class="nota bom"><h4>6 · A confiança do dado</h4><p>Dias medidos, quantas vezes a conexão religou, e as mensagens que podem não ter chegado, pelo nome. Vai no pé de todo Raio-X. Sem isso, número não sai.</p></div>
+      <div class="nota fora"><h4>Fica de fora, de propósito</h4><p>Enriquecer o lead por CPF, Instagram ou dados de terceiros. O Zaq só conta o que o cliente disse e o que a Prime fez. O que a Prime aprende do cliente é da Prime.</p></div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="k">O QUE MUDA NO CÓDIGO, SE APROVAR</div>
+    <ol class="passos">
+      <li><b>Migração 201:</b> <code>prospeccao.perda_motivo</code> (lista fixa) e <code>prospeccao.origem_cliente</code>; <code>raio_x_semana</code> (o placar guardado por vendedor e semana, pra comparar). Aditiva.</li>
+      <li><b><code>finance/raio_x.py</code></b>: as métricas puras (1ª resposta, toques, propostas, contratos, urgência por lead, confiança do dado) sobre <code>mensagens</code>, <code>orcamentos</code>, <code>contratos</code>, <code>eventos_agenda</code> e <code>wa_qr_log</code>. Testadas com números fixos.</li>
+      <li><b>App:</b> a aba Resultado vira Raio-X (<code>/cockpit/raio-x</code>) com os três blocos e o período. O selo verde na aba.</li>
+      <li><b>Grupo:</b> a mensagem de segunda 8h pelo número da Prime, com o texto da Peça 2. Liga por conta, com o grupo escolhido pelo dono.</li>
+      <li><b>Painel:</b> <code>/painel/raio-x</code> com a barra de filtros e os seis blocos. O "preço praticado" só entra depois da conferência com o Manoel.</li>
+      <li><b>Alertas:</b> rascunho &gt; 24h, contrato sem assinatura &gt; 48h, visita amanhã sem confirmação, festa em 60 dias sem proposta, cliente esperando &gt; 3h no comercial. Push pro vendedor, cópia no painel.</li>
+      <li><b>Aviso de novidade no mesmo PR</b> (seção 5 do CLAUDE.md): pra dono, gestor e vendedor.</li>
+    </ol>
+  </section>
+
+  <section class="sec">
+    <div class="k">PRA VOCÊ DECIDIR</div>
+    <div class="notas">
+      <div class="nota"><h4>1 · A ordem de entrega</h4><p>Proposta: primeiro o app e o grupo (Peças 1 e 2), que é o que os vendedores sentem. O painel do dono (Peça 3) na semana seguinte, já com uma semana de Raio-X guardada pra comparar.</p></div>
+      <div class="nota"><h4>2 · O grupo recebe os três lado a lado?</h4><p>Proposta: sim. Alternativa: cada um recebe o seu no app e o grupo recebe só a linha "Prime na semana".</p></div>
+      <div class="nota"><h4>3 · O motivo de perda vira obrigatório?</h4><p>Proposta: sim, um toque numa lista de 6. Sem motivo, não marca perdido.</p></div>
+      <div class="nota"><h4>4 · O "preço praticado" entra no Raio-X?</h4><p>Só depois de conferir com o Manoel como o orçamento calcula o total. Se for desconto de verdade, é o número mais importante do painel dele.</p></div>
+    </div>
+  </section>
+
+  <p class="rodape">Números lidos do banco em 05/09/2026, só leitura, 13/08 a 05/09. Nomes de clientes nas telas são fictícios; os agregados são reais. Nada aqui encosta em chip, sessão ou canal.</p>
+</div>

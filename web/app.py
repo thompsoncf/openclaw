@@ -219,6 +219,16 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — wa_decifra falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
+                # O Raio-X de segunda no grupo dos vendedores: só faz alguma coisa
+                # na segunda a partir das 8h, e uma vez por conta e semana (a trava
+                # é a linha em raio_x_envios — com 2 workers só um consegue inserir).
+                from finance import raio_x as _rx
+                n_rx = _rx.rodar(pool)
+                if n_rx:
+                    log.info("poller: ciclo #%d — Raio-X de segunda: %d grupo(s)", ciclo, n_rx)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — raio_x falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
                 from finance import aprovacao_aviso as _ap
                 # A fila de liberação do dono só existe pra quem abre a tela de
                 # Empresa — e quem abre a tela todo dia é quem LANÇA, não quem

@@ -238,6 +238,37 @@ def _vendedores(pool, conta_id: int) -> list[dict]:
     return out
 
 
+# as listas da 209 pra ficha completa (template abaixo lê `origens_cliente` e
+# `motivos_perda`); globais do ambiente porque a ficha é renderizada de mais de
+# um caminho e a lista é a mesma em todos
+from finance.raio_x_dono import MOTIVOS_PERDA as _MOTIVOS_PERDA, ORIGENS as _ORIGENS_CLI  # noqa: E402
+_env.globals.setdefault("origens_cliente", _ORIGENS_CLI)
+_env.globals.setdefault("motivos_perda", _MOTIVOS_PERDA)
+
+
+def _gravar_origem_e_motivo(c, conta_id: int, alvo_id: int, origem_cliente: str, perda_motivo: str) -> None:
+    """De onde veio o cliente e por que perdeu (migração 209): só chaves da lista
+    fixa entram; em branco não mexe. Savepoint: a coluna nasceu na 209 e salvar a
+    ficha ou mover o card não pode depender dela."""
+    from finance.raio_x_dono import MOTIVOS_PERDA, ORIGENS
+    # chamada direta (testes) pode trazer o default Form() em vez de texto
+    o = origem_cliente.strip() if isinstance(origem_cliente, str) else ""
+    m = perda_motivo.strip() if isinstance(perda_motivo, str) else ""
+    sets, vals = [], []
+    if o in dict(ORIGENS):
+        sets.append("origem_cliente=%s"); vals.append(o)
+    if m in dict(MOTIVOS_PERDA):
+        sets.append("perda_motivo=%s"); vals.append(m)
+    if not sets:
+        return
+    try:
+        with c.transaction():
+            c.execute(f"update prospeccao set {', '.join(sets)} where id=%s and conta_id=%s",
+                      (*vals, alvo_id, conta_id))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _carrega_alvo(pool, conta_id: int, alvo_id: int):
     with pool.connection() as c:
         r = c.execute(
@@ -269,6 +300,17 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
             "evento_em", "evento_tipo", "evento_convidados",
             "evento_origem", "evento_trecho", "evento_pista", "evento_lido_em"]
     d = dict(zip(cols, r))
+    # de onde veio o cliente e por que perdeu (migração 209): lidos à parte pra
+    # a ficha não depender da coluna existir (schemas de teste antigos não têm)
+    d["origem_cliente"], d["perda_motivo"] = None, None
+    try:
+        with pool.connection() as c:
+            r2 = c.execute("select origem_cliente, perda_motivo from prospeccao where id=%s and conta_id=%s",
+                           (alvo_id, conta_id)).fetchone()
+        if r2:
+            d["origem_cliente"], d["perda_motivo"] = r2
+    except Exception:  # noqa: BLE001
+        pass
     d["evento_lido_fmt"] = _hora_br(d["evento_lido_em"]) if d.get("evento_lido_em") else ""
     # o evento (migração 197) pronto pra tela: ISO pro <input type=date>, ícone pelo
     # tipo e uma linha só ("💍 Casamento · 14/11/2026 · 150 convidados")
@@ -7960,7 +8002,8 @@ def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
                       empresa: str = Form(""),
                       tem_site: str = Form(""), site_url: str = Form(""), obs: str = Form(""),
                       evento_tipo: str = Form(""), evento_em: str = Form(""),
-                      evento_convidados: str = Form("")):
+                      evento_convidados: str = Form(""),
+                      origem_cliente: str = Form(""), perda_motivo: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -8006,6 +8049,8 @@ def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
                  # mexeu no evento à mão: origem 'mao' e a pista do leitor sai
                  *_evl.origem_apos_edicao(alvo, evento_tipo, evento_em, evento_convidados),
                  alvo_id, ctx["conta_id"]))
+            # migração 209, à parte e em savepoint: a ficha não depende da coluna
+            _gravar_origem_e_motivo(c, ctx["conta_id"], alvo_id, origem_cliente, perda_motivo)
             c.commit()
     except UniqueViolation:
         doc, campo = (cpf_limpo, "cpf") if cpf_limpo else (cnpj_limpo, "cnpj")
@@ -8297,6 +8342,8 @@ async def prospeccao_status(request: Request, alvo_id: int):
         c.execute("""update prospeccao set status=%s, estagio='lead', atualizado_em=now()
                        where id=%s and conta_id=%s""",
                   (status, alvo_id, ctx["conta_id"]))
+        if status == "perdido":
+            _gravar_origem_e_motivo(c, ctx["conta_id"], alvo_id, "", form.get("motivo") or "")
         # O histórico é o que o banco nunca teve: sem ele ninguém consegue dizer
         # quanto um lead ficou em cada coluna. Grava desde já, com a régua toda
         # desligada — anotar o que a pessoa acabou de fazer não é automação. E é
@@ -11411,6 +11458,12 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <div><label class="lbl">Tipo do evento</label><input class="fld" name="evento_tipo" placeholder="Casamento, aniversário…" value="{{ a.evento_tipo or '' }}"></div>
             <div><label class="lbl">Data do evento</label><input class="fld" name="evento_em" type="date" value="{{ a.evento_iso }}"></div>
             <div><label class="lbl">Convidados</label><input class="fld" name="evento_convidados" inputmode="numeric" value="{{ a.evento_convidados or '' }}"></div>
+            {# migração 209: de onde o cliente veio e por que perdeu — os filtros "Origem" e
+               "Por que perdeu" do Raio-X do dono (/painel/raio-x) leem daqui #}
+            <div><label class="lbl">De onde veio o cliente</label><select class="fld" name="origem_cliente">
+              <option value="">—</option>{% for k, r in origens_cliente %}<option value="{{ k }}" {% if a.origem_cliente==k %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></div>
+            <div><label class="lbl">Por que perdeu</label><select class="fld" name="perda_motivo">
+              <option value="">—</option>{% for k, r in motivos_perda %}<option value="{{ k }}" {% if a.perda_motivo==k %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></div>
             <div><label class="lbl">Valor est. (R$)</label><input class="fld" name="valor" inputmode="decimal" value="{{ (a.valor/100)|n2 if a.valor else '' }}"></div>
             <div><label class="lbl">Tem site?</label><select class="fld" name="tem_site">
               <option value="" {% if a.tem_site is none %}selected{% endif %}>—</option>

@@ -1260,6 +1260,12 @@ def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict)
                    _evl.parse_convidados(limpo("evento_convidados")))
         sets += ["evento_tipo=coalesce(%s,evento_tipo)", "evento_em=coalesce(%s,evento_em)",
                  "evento_convidados=coalesce(%s,evento_convidados)"]
+        # de onde o cliente veio (migração 209): só as chaves da lista; em branco
+        # fica como está, como todo campo desta ficha. Gravado à parte, em
+        # savepoint, pra ficha não depender da coluna existir.
+        from finance.raio_x_dono import ORIGENS as _ORIGENS
+        origem_cli = limpo("origem_cliente")
+        origem_cli = origem_cli if origem_cli in dict(_ORIGENS) else None
         vals += list(ev_novo)
         # mexeu no evento à mão (198): origem 'mao' e a pista do leitor sai. Aqui em
         # branco mantém, então só conta o que veio preenchido E diferente.
@@ -1271,6 +1277,13 @@ def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict)
             vals += [tipo, cnpj, cpf]
         c.execute(f"update prospeccao set {', '.join(sets)}, atualizado_em=now() "
                   "where id=%s and conta_id=%s", (*vals, lead_id, conta_id))
+        if origem_cli:
+            try:
+                with c.transaction():
+                    c.execute("update prospeccao set origem_cliente=%s where id=%s and conta_id=%s",
+                              (origem_cli, lead_id, conta_id))
+            except Exception:  # noqa: BLE001
+                pass
         c.commit()
     return {"ok": True}
 
@@ -1288,11 +1301,24 @@ def fechar(pool, conta_id: int, membro_id: int, lead_id: int, tipo: str, motivo:
         c.execute("update prospeccao set status=%s, atualizado_em=now() "
                   "where id=%s and conta_id=%s", (tipo, lead_id, conta_id))
         _historico(c, conta_id, lead_id, antes[0] if antes else None, tipo, membro_id)
+        # O motivo é uma CHAVE da lista fixa (finance/raio_x_dono.MOTIVOS_PERDA,
+        # check da migração 209): é o que o Raio-X do dono agrega em "por que
+        # perdeu". Texto solto que não é chave continua só na timeline. Savepoint
+        # porque a coluna nasceu na 209 e fechar o lead não pode depender dela.
+        from finance.raio_x_dono import MOTIVOS_PERDA, rotulo_motivo
+        chave = motivo if motivo in dict(MOTIVOS_PERDA) else None
+        try:
+            with c.transaction():
+                c.execute("update prospeccao set perda_motivo=%s where id=%s and conta_id=%s",
+                          (chave if tipo == "perdido" else None, lead_id, conta_id))
+        except Exception:  # noqa: BLE001
+            pass
+        texto_motivo = rotulo_motivo(chave) if chave else (motivo or "sem motivo")
         try:
             c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, resultado, descricao)
                          values (%s,%s,'nota',%s,%s)""",
                       (lead_id, membro_id, "fechado" if tipo == "ganho" else "sem_interesse",
-                       ("Ganho 🎉" if tipo == "ganho" else f"Perdido — {motivo or 'sem motivo'}")[:400]))
+                       ("Ganho 🎉" if tipo == "ganho" else f"Perdido — {texto_motivo}")[:400]))
         except Exception:  # noqa: BLE001 — timeline é best-effort
             pass
         c.commit()

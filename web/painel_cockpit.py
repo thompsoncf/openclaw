@@ -738,7 +738,8 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .fic-c input,.fic-c textarea{width:100%;min-width:0;background:var(--bg-2);
   border:1px solid var(--line);border-radius:10px;color:var(--text);
   padding:.55rem .7rem;font-family:inherit;font-size:.88rem;resize:none}
-.fic-c input:focus,.fic-c textarea:focus{outline:none;border-color:var(--neon)}
+.fic-c input:focus,.fic-c textarea:focus,.fic-c select:focus{outline:none;border-color:var(--neon)}
+.fic-c select{width:100%;min-width:0;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;color:var(--text);padding:.55rem .7rem;font-size:16px}
 .fic .btn{margin-top:.25rem}
 /* retorno do CEP. `min-height` reservado: sem isso a linha nasce e some, e o
    formulário inteiro pula pra cima e pra baixo a cada consulta. */
@@ -3310,6 +3311,13 @@ _CEP_JS = """<script>(function(){
 
 
 # ------------------------------------------------------------------ ficha do cliente
+def _select_origem(atual: str | None) -> str:
+    from finance.raio_x_dono import ORIGENS
+    ops = "".join(f"<option value='{esc(k)}'{' selected' if atual == k else ''}>{esc(r)}</option>" for k, r in ORIGENS)
+    return ("<label class=fic-c><span>De onde veio o cliente</span><select name=origem_cliente>"
+            f"<option value=''>{'—' if not atual else 'não mudar'}</option>{ops}</select></label>")
+
+
 @router.get("/cockpit/lead/{lead_id}/ficha", response_class=HTMLResponse)
 def cockpit_ficha_tela(request: Request, lead_id: int):
     """Os dados do cliente, preenchidos por quem está conversando com ele. O lead entra
@@ -3325,6 +3333,15 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
     d = ck.lead_do_vendedor(get_pool(), conta_id, membro_id, lead_id)
     if not d:
         return RedirectResponse(_BASE, status_code=303)
+    # de onde veio o cliente (migração 209), lido à parte: a ficha não depende
+    # da coluna existir
+    try:
+        with get_pool().connection() as c:
+            r = c.execute("select origem_cliente from prospeccao where id=%s and conta_id=%s",
+                          (lead_id, conta_id)).fetchone()
+        d["origem_cliente"] = r[0] if r else None
+    except Exception:  # noqa: BLE001
+        d["origem_cliente"] = None
 
     def campo(nome, rot, valor, *, tipo="text", modo="", meia=False, dica=""):
         # id=fic-<nome> porque o autopreenchimento do CEP precisa achar rua, bairro,
@@ -3373,6 +3390,10 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
                     modo="numeric", meia=True)) if d.get("vende_data") else "")
         + campo("cidade", "Cidade", d.get("cidade"), meia=True)
         + campo("uf", "UF", d.get("uf"), meia=True)
+        # de onde o cliente veio, na palavra dele (migração 209): a 2ª pergunta da
+        # primeira resposta, junto com o tipo de festa. É o filtro "Origem" do
+        # Raio-X do dono.
+        + _select_origem(d.get("origem_cliente"))
         + "<label class=fic-c><span>Observação</span>"
         + f"<textarea name=obs rows=3>{esc(d.get('obs') or '')}</textarea></label>")
 
@@ -4613,8 +4634,10 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
         f"<button class='{'on' if d['status'] == e['chave'] else ''}' type=submit>{esc(e['rotulo'])}</button>"
         "</form>" for e in d["etapas"])
 
-    motivos = "".join(f"<option>{esc(m)}</option>" for m in
-                      ("Preço", "Sem retorno", "Comprou concorrente", "Fora do perfil", "Sem interesse"))
+    # a lista FIXA de motivos (finance/raio_x_dono.MOTIVOS_PERDA, check da 209): a
+    # chave vai no value, o rótulo na tela. É o que o Raio-X do dono agrega.
+    from finance.raio_x_dono import MOTIVOS_PERDA as _MOTIVOS
+    motivos = "".join(f"<option value='{esc(k)}'>{esc(r)}</option>" for k, r in _MOTIVOS)
 
     # A folha só sobe com :target — sem JS, então funciona igual ao resto do app,
     # que é todo form + redirect. Ela só se sustenta CURTA: é `position:absolute` com
@@ -4633,7 +4656,7 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
         "<input type=hidden name=tipo value=ganho><button class=btn type=submit>Marcar como ganho</button></form>"
         f"<form method=post action='{_BASE}/lead/{lead_id}/fechar' class=linhaform>"
         "<input type=hidden name=tipo value=perdido>"
-        f"<select name=motivo><option value=''>Motivo (opcional)</option>{motivos}</select>"
+        f"<select name=motivo><option value=''>Por que perdeu?</option>{motivos}</select>"
         "<button class='btn perigo' style='width:auto;padding:.55rem .9rem' type=submit>Perdido</button></form>"
         + "</div><a class=fbg href='#fechar' aria-label='Fechar'></a>")
 
@@ -5330,9 +5353,10 @@ def cockpit_ficha(request: Request, lead_id: int, empresa: str = Form(""), conta
                   bairro: str = Form(""), nascimento: str = Form(""),
                   cidade: str = Form(""), uf: str = Form(""), obs: str = Form(""),
                   evento_tipo: str = Form(""), evento_em: str = Form(""),
-                  evento_convidados: str = Form("")):
+                  evento_convidados: str = Form(""), origem_cliente: str = Form("")):
     """Ficha do cliente preenchida pelo vendedor, de dentro da conversa."""
     dados = {"empresa": empresa, "contato": contato, "cargo": cargo, "segmento": segmento,
+             "origem_cliente": origem_cliente if isinstance(origem_cliente, str) else "",
              "telefone": telefone, "whatsapp": whatsapp, "documento": documento, "email": email,
              "cep": cep, "endereco": endereco, "numero": numero, "bairro": bairro,
              "nascimento": nascimento,

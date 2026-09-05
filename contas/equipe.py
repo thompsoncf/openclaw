@@ -98,6 +98,10 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     # papel 'restrito' continua de fora.
     if caps["vendas"] or caps["financeiro"]:
         permitido += ["/painel/agenda"]
+    # o Raio-X do dono (/painel/raio-x) é de quem manda na conta: o gestor (vendas E
+    # financeiro) entra; vendedor tem o dele no app, financeiro não vende.
+    if caps["vendas"] and caps["financeiro"]:
+        permitido += ["/painel/raio-x"]
     if caps["gerir"]:
         permitido += ["/painel/equipe", "/membros"]
     if recebe_novidades(papel):

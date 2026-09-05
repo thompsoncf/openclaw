@@ -113,7 +113,7 @@ def pool():
         from tests.test_novidades import BASE as _MIG
         c.execute("alter table contas add column criado_em timestamptz not null default now()")
         for m in ("174_novidades.sql", "184_novidade_voz_e_porta_fechada.sql",
-                  "199_novidades_pra_quem.sql", "207_raio_x.sql"):
+                  "199_novidades_pra_quem.sql", "207_raio_x.sql", "209_raio_x_dono.sql"):
             c.execute((_MIG / m).read_text(encoding="utf-8"))
         # `orcamentos` com TODAS as colunas do app (o Raio-X lê status, aprovada_em,
         # sinal_pago_em, primeiro_ano_centavos; criar_orcamento grava dezenas)
@@ -1440,3 +1440,53 @@ def test_fila_leva_o_selo_do_raio_x_so_pro_vendedor(pool, monkeypatch):
         c.commit()
     html, _ = _fila_html(monkeypatch, pool, conta, vend)
     assert "href='/cockpit/raio-x'" in html and "aria-label='1 por ler'" in html
+
+
+# ------------------------------------------------------------------ por que perdeu · de onde veio (migração 209)
+def test_perdido_com_motivo_da_lista_grava_a_chave_e_o_rotulo_na_timeline(pool):
+    with pool.connection() as c:
+        conta = _conta(c, "Perda"); vend = _membro(c, conta, email="perda@x.com")
+        a = _lead(c, conta, vend, "A"); b = _lead(c, conta, vend, "B"); g = _lead(c, conta, vend, "G"); c.commit()
+    assert ck.fechar(pool, conta, vend, a, "perdido", "achou_caro")["ok"] is True
+    assert ck.fechar(pool, conta, vend, b, "perdido", "texto solto")["ok"] is True   # não é chave: só na timeline
+    assert ck.fechar(pool, conta, vend, g, "ganho", "achou_caro")["ok"] is True      # ganho nunca leva motivo
+    with pool.connection() as c:
+        rows = dict(c.execute("select id, perda_motivo from prospeccao where id = any(%s)", ([a, b, g],)).fetchall())
+        assert rows == {a: "achou_caro", b: None, g: None}
+        desc = {r[0]: r[1] for r in c.execute(
+            "select prospeccao_id, descricao from prospeccao_atividades where prospeccao_id = any(%s)", ([a, b],)).fetchall()}
+    assert desc[a] == "Perdido — Achou caro" and desc[b] == "Perdido — texto solto"
+
+
+def test_a_folha_do_lead_oferece_os_seis_motivos_por_chave(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    from finance.raio_x_dono import MOTIVOS_PERDA
+    with pool.connection() as c:
+        conta = _conta(c, "Folha"); vend = _membro(c, conta, email="folha@x.com")
+        lid = _lead(c, conta, vend, "Doceria"); c.commit()
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    monkeypatch.setattr(pc, "_selo", lambda conta_id: "")
+    html = bytes(pc.cockpit_lead(_req_vend(conta, vend), lid).body).decode("utf-8")
+    assert "Por que perdeu?" in html
+    for k, r in MOTIVOS_PERDA:
+        assert f"<option value='{k}'>{r}</option>" in html, k
+    assert "Comprou concorrente" not in html                   # a lista antiga, solta, saiu
+
+
+def test_ficha_guarda_de_onde_veio_o_cliente_e_recusa_o_que_nao_esta_na_lista(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    with pool.connection() as c:
+        conta = _conta(c, "Origem"); vend = _membro(c, conta, email="origem@x.com")
+        lid = _lead(c, conta, vend, "Buffet"); c.commit()
+    assert ck.salvar_ficha(pool, conta, vend, lid, {"origem_cliente": "indicacao"})["ok"] is True
+    with pool.connection() as c:
+        assert c.execute("select origem_cliente from prospeccao where id=%s", (lid,)).fetchone()[0] == "indicacao"
+    # em branco não apaga; fora da lista não grava
+    assert ck.salvar_ficha(pool, conta, vend, lid, {"origem_cliente": ""})["ok"] is True
+    assert ck.salvar_ficha(pool, conta, vend, lid, {"origem_cliente": "tiktok"})["ok"] is True
+    with pool.connection() as c:
+        assert c.execute("select origem_cliente from prospeccao where id=%s", (lid,)).fetchone()[0] == "indicacao"
+    # a tela da ficha mostra o select com o valor gravado
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    html = bytes(pc.cockpit_ficha_tela(_req_vend(conta, vend), lid).body).decode("utf-8")
+    assert "De onde veio o cliente" in html and "<option value='indicacao' selected>Indicação</option>" in html

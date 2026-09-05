@@ -80,6 +80,7 @@ from web.admin_precos import router as precos_router
 from web.painel_servicos import router as servicos_router
 from web.painel_aditivo import router as aditivo_router
 from web.painel_equipe import router as equipe_router
+from web.painel_raio_x import router as raio_x_router
 from web.painel_prospeccao import router as prospeccao_router
 from web.painel_conteudo import router as conteudo_router
 from web.painel_agenda import router as agenda_router
@@ -114,6 +115,7 @@ app.include_router(precos_router)
 app.include_router(servicos_router)
 app.include_router(aditivo_router)
 app.include_router(equipe_router)
+app.include_router(raio_x_router)
 app.include_router(conteudo_router)  # antes do prospeccao_router: aquele tem um
                                       # catch-all GET /painel/prospeccao/{alvo_id}
                                       # (ficha do lead) que engoliria /ia-insta*

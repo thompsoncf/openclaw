@@ -1,0 +1,330 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<title>Cláusulas do aditivo, editáveis como as do contrato</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:880px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:32px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.card{background:#fff;border:1px solid #E3DDD0;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden;margin-bottom:14px}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+
+/* ---------- réplica FIEL do painel escuro (web/painel_servicos) ---------- */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC}
+.pn .card2{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.55rem}
+.pn .cab{display:flex;align-items:center;gap:.6rem}
+.pn .seta{color:#7B8A99;font-size:.85rem}
+.pn .tit{font-weight:700;font-size:1rem}
+.pn .mut{color:#7B8A99;font-size:.78rem;margin-top:.1rem}
+.pn .selo{margin-left:auto;font-size:.68rem;font-weight:700;background:#3A2A10;color:#E0B458;border:1px solid #5C4418;border-radius:5px;padding:.1rem .38rem;white-space:nowrap}
+.pn .selo.ok{background:#10241d;color:#7EE7B8;border-color:#1c3a30}
+.pn .expl{color:#9AA7B4;font-size:.85rem;margin:.7rem 0 .8rem;line-height:1.6}
+.pn .expl b{color:#7EE7B8}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.4rem .55rem;font-size:.85rem;color:#DDE4EC;width:100%}
+.pn .ta{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.45rem .55rem;font-size:.78rem;color:#C6D2DE;width:100%;font-family:ui-monospace,Menlo,monospace;line-height:1.6}
+.pn .pill{display:inline-block;background:#1B2836;border:1px solid #2A3947;border-radius:99px;padding:.2rem .55rem;font-size:.75rem;color:#C6D2DE}
+.pn .pill.mono{font-family:ui-monospace,Menlo,monospace;font-size:.7rem;padding:.15rem .4rem}
+.pn .pill.novo{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .btnv{display:inline-block;background:#1F7A55;color:#EAFFF5;border-radius:8px;padding:.45rem .9rem;font-size:.85rem;font-weight:700}
+.pn .lbl{color:#7B8A99;font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:.2rem}
+.pn .bloco{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem}
+.pn .linha{display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem}
+.pn .mini{display:inline-flex;align-items:center;justify-content:center;background:#1B2836;border:1px solid #2A3947;border-radius:6px;width:26px;height:26px;font-size:.8rem;color:#9AA7B4;flex:0 0 auto}
+.pn .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.5rem}
+.eti{display:inline-block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;vertical-align:middle;margin-left:6px}
+.e-hoje{background:#FDECEA;color:#B4453C;border:1px solid #F5C6C0}
+.e-novo{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.card,.pn,.q{break-inside:avoid}}
+</style></head><body><div class="wrap">
+
+<h1>Cláusulas do aditivo, editáveis como as do contrato</h1>
+<p class="lead">Pedido do dono em 05/09/2026: <i>"não é interessante também deixar o aditivo igual o
+contrato, podendo alterar alguma coisa nas cláusulas? veja lá na parte de serviços em contrato e
+veja como está, e a gente replica."</i><br>
+Fui ler o editor de contrato que já existe e desenhei o espelho dele. Nada implementado — é pra aprovar.</p>
+
+<!-- ============================================================ 1 -->
+<h2><span class="n">1</span> Como o contrato está hoje</h2>
+<div class="sub">O card em Serviços, que é o que você mandou eu olhar</div>
+
+<p>Aberto, ele é isto — lista de cláusulas com título e texto, setas pra reordenar, o ✕ pra remover,
+os <b>campos</b> clicáveis que entram no texto, os números da casa, e três botões no pé:</p>
+
+<div class="pn">
+  <div class="card2">
+    <div class="cab"><span class="seta">▾</span>
+      <div><div class="tit">Contrato de locação</div>
+        <div class="mut">15 cláusulas · alterado em 30/08 por Manoel</div></div>
+      <span class="selo ok">✓ pronto</span></div>
+    <div class="expl">As cláusulas são suas — escreva como quiser. Onde entra um valor, use um
+      <b>campo</b>: ele é preenchido na hora com o preço do catálogo e os dados do orçamento, então o
+      contrato nunca diz um número diferente da proposta.</div>
+
+    <div class="bloco">
+      <div class="linha">
+        <div class="inp" style="flex:1;font-weight:600">Cláusula 7 — Da alteração de data</div>
+        <span class="mini">↑</span><span class="mini">↓</span><span class="mini">✕</span></div>
+      <div class="ta">7.1. Será permitida 1 (uma) alteração de data, solicitada por escrito com antecedência mínima de {regra.reagenda_dias} dias corridos.
+7.2. A alteração depende de disponibilidade e será cobrada taxa de {regra.taxa_reagendamento} sobre o valor atualizado do contrato.
+7.3. A nova data deverá ocorrer em até {regra.reagenda_prazo} dias corridos contados da data originalmente contratada.</div>
+    </div>
+    <div style="margin-bottom:.7rem"><span class="pill">+ Cláusula</span></div>
+
+    <div class="card2" style="margin-bottom:.55rem">
+      <div class="lbl">Campos — clique para inserir no texto</div>
+      <div style="display:flex;flex-wrap:wrap;gap:.3rem">
+        <span class="pill mono">{cliente.nome}</span><span class="pill mono">{cliente.doc}</span>
+        <span class="pill mono">{evento.data}</span><span class="pill mono">{evento.convidados}</span>
+        <span class="pill mono">{valor.total}</span><span class="pill mono">{regra.sinal_pct}</span>
+        <span class="pill mono">{empresa.razao}</span><span class="pill mono">{preco.hora-extra}</span></div>
+    </div>
+    <div class="card2" style="margin-bottom:.55rem">
+      <div class="lbl">Números da casa — é daqui que os campos {regra.*} saem</div>
+      <div class="grid">
+        <div><span class="lbl">Entrada (%)</span><div class="inp">30</div></div>
+        <div><span class="lbl">Taxa de reagendamento (%)</span><div class="inp">10</div></div>
+        <div><span class="lbl">Remarcar com (dias)</span><div class="inp">30</div></div>
+      </div>
+    </div>
+    <div><span class="btnv">Salvar contrato</span>
+      <span class="pill" style="margin-left:.3rem">Pré-visualizar</span>
+      <span class="pill" style="margin-left:.3rem">Restaurar modelo padrão</span></div>
+  </div>
+</div>
+
+<div class="nota"><b>A ideia de fundo, que vale copiar inteira:</b> o texto é do dono, mas os
+<b>números não são digitados dentro dele</b>. Onde vai um valor, entra um campo, e o valor é buscado
+na hora. Foi assim que o contrato parou de dizer R$ 600 na hora extra enquanto o catálogo dizia
+R$ 620 — divergência medida na Prime em 16/08/2026.</div>
+
+<!-- ============================================================ 2 -->
+<h2><span class="n">2</span> Como o aditivo está hoje</h2>
+<div class="sub">O texto está escrito em Python — e isso é o problema</div>
+
+<p>As cláusulas do aditivo que subiu hoje são montadas por código, em
+<code>finance/aditivo.py</code>. Estão certas (saíram dos seus quatro aditivos reais), mas
+<b>você não alcança nenhuma delas</b>:</p>
+
+<div class="card" style="font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.7;color:#3B4757">
+"O número de convidados para prestação de serviços passa a ser<br>
+&nbsp;{qtd} convidados, em substituição à quantidade originalmente<br>
+&nbsp;estabelecida de {qtd_antiga} convidados."
+</div>
+
+<p>Quer trocar "para prestação de serviços" por "para o buffet"? Hoje só mexendo no código. É
+exatamente a situação em que o contrato estava antes de virar modelo editável.</p>
+
+<div class="alerta"><b>E tem uma incoerência que só aparece agora:</b> o contrato é seu, escrito por
+você — mas o aditivo, que <b>altera esse mesmo contrato</b>, sai com texto que a gente escreveu. Os
+dois documentos vão pro mesmo cliente, no mesmo negócio, com duas vozes diferentes.</div>
+
+<!-- ============================================================ 3 -->
+<h2><span class="n">3</span> O espelho: modelo do aditivo</h2>
+<div class="sub">Mesmo card, mesmo lugar, mesma gramática de campos</div>
+
+<p>Um segundo card em Serviços, logo abaixo do contrato. <b>Cinco textos fixos</b>, um por tipo de
+alteração — não é lista livre, porque cada texto casa com um bloco do formulário:</p>
+
+<div class="pn">
+  <div class="card2">
+    <div class="cab"><span class="seta">▾</span>
+      <div><div class="tit">Termo aditivo <span style="font-size:.7rem;color:#7EE7B8;font-weight:400">· novo</span></div>
+        <div class="mut">5 cláusulas · nunca alterado — usando o texto padrão</div></div>
+      <span class="selo ok">✓ pronto</span></div>
+    <div class="expl">O texto de cada alteração é seu. Os <b>campos</b> trazem o número novo e o
+      antigo — é o que faz o documento dizer "passa a ser 140, em substituição a 115" sem ninguém
+      digitar 140 nem 115.</div>
+
+    <div class="bloco">
+      <div class="linha">
+        <div class="inp" style="flex:1;font-weight:600">Alteração de convidados</div>
+        <span class="pill" style="font-size:.68rem">bloco 3 do formulário</span></div>
+      <div class="lbl" style="margin-top:.3rem">Título quando AUMENTA</div>
+      <div class="inp" style="margin-bottom:.35rem">ACRÉSCIMO DE CONVIDADOS</div>
+      <div class="lbl">Título quando DIMINUI</div>
+      <div class="inp" style="margin-bottom:.35rem">REDUÇÃO DE CONVIDADOS</div>
+      <div class="lbl">Texto</div>
+      <div class="ta">O número de convidados para prestação de serviços de buffet passa a ser {aditivo.convidados} convidados, em substituição à quantidade originalmente estabelecida de {aditivo.convidados_antes} convidados.</div>
+    </div>
+
+    <div class="bloco">
+      <div class="linha">
+        <div class="inp" style="flex:1;font-weight:600">Alteração de data</div>
+        <span class="pill" style="font-size:.68rem">bloco 1 do formulário</span></div>
+      <div class="ta">A data de realização do evento será alterada para {aditivo.data}, em substituição à data originalmente contratada de {aditivo.data_antes}, nos termos da Cláusula 7 do contrato original.</div>
+    </div>
+
+    <div class="bloco" style="opacity:.65">
+      <div class="linha"><div class="inp" style="flex:1;font-weight:600">Alteração de horário</div>
+        <span class="pill" style="font-size:.68rem">bloco 2</span></div>
+      <div class="ta">O horário de início será alterado para às {aditivo.inicio}h do dia {aditivo.dia_inicio} e término às {aditivo.fim}h do dia {aditivo.dia_fim}.</div>
+    </div>
+    <div class="bloco" style="opacity:.65">
+      <div class="linha"><div class="inp" style="flex:1;font-weight:600">Alteração de serviços</div>
+        <span class="pill" style="font-size:.68rem">bloco 4</span></div>
+      <div class="ta">Os itens: {aditivo.itens_saem}, descritos no orçamento nº {aditivo.orcamento}, serão substituídos por {aditivo.itens_entram}.</div>
+    </div>
+    <div class="bloco" style="opacity:.65">
+      <div class="linha"><div class="inp" style="flex:1;font-weight:600">Ajuste no valor</div>
+        <span class="pill" style="font-size:.68rem">bloco 5</span></div>
+      <div class="ta">O valor total do contrato será alterado para {aditivo.valor_novo}. Considerando as modificações realizadas, o valor de {aditivo.valor_pagar} será pago nas condições abaixo descritas:
+  ○ {aditivo.forma_pagamento}, com vencimento em {aditivo.vencimento}.</div>
+    </div>
+
+    <div class="card2" style="margin-bottom:.55rem">
+      <div class="lbl">Campos do aditivo — clique para inserir</div>
+      <div style="display:flex;flex-wrap:wrap;gap:.3rem">
+        <span class="pill mono novo">{aditivo.data}</span><span class="pill mono novo">{aditivo.data_antes}</span>
+        <span class="pill mono novo">{aditivo.convidados}</span><span class="pill mono novo">{aditivo.convidados_antes}</span>
+        <span class="pill mono novo">{aditivo.valor_novo}</span><span class="pill mono novo">{aditivo.valor_pagar}</span>
+        <span class="pill mono novo">{aditivo.taxa}</span><span class="pill mono novo">{aditivo.numero}</span>
+        <span class="pill mono">{cliente.nome}</span><span class="pill mono">{empresa.razao}</span>
+        <span class="pill mono">{regra.taxa_reagendamento}</span></div>
+    </div>
+
+    <div class="card2" style="margin-bottom:.55rem">
+      <div class="lbl">Disposições gerais e fecho</div>
+      <div class="ta" style="margin-bottom:.35rem">1. Permanecem inalteradas todas as demais cláusulas e condições estabelecidas no contrato original, que não tenham sido expressamente modificadas por este termo aditivo.
+2. Este termo aditivo entra em vigor na data de sua assinatura pelas partes e passa a integrar o contrato original para todos os fins de direito.</div>
+      <div class="ta">Por estarem justas e acordadas, as partes assinam eletronicamente este termo aditivo, ficando registrados o nome, o documento, a data, a hora e o endereço de IP de quem assina, para que produza seus efeitos legais.</div>
+    </div>
+
+    <div><span class="btnv">Salvar modelo do aditivo</span>
+      <span class="pill" style="margin-left:.3rem">Pré-visualizar</span>
+      <span class="pill" style="margin-left:.3rem">Restaurar modelo padrão</span></div>
+  </div>
+</div>
+
+<div class="bom"><b>Tudo o que o contrato já tem, o aditivo herda de graça:</b> o mesmo motor de
+campos (<code>contrato.preencher</code>), o mesmo aviso de campo sem valor, o mesmo "Restaurar modelo
+padrão" — e o mesmo padrão inicial, que é o texto que já está no ar hoje, tirado dos seus quatro
+aditivos. Quem nunca abrir esse card não vê diferença nenhuma.</div>
+
+<!-- ============================================================ 4 -->
+<h2><span class="n">4</span> Os campos novos</h2>
+<div class="sub">Um grupo <code>{aditivo.*}</code>, na mesma gramática dos outros seis</div>
+
+<table>
+<tr><th style="width:38%">Campo</th><th>O que traz</th></tr>
+<tr><td class="mono">{aditivo.numero}</td><td>1º, 2º… — a ordem deste aditivo no contrato</td></tr>
+<tr><td class="mono">{aditivo.contrato}</td><td>o número do contrato original</td></tr>
+<tr><td class="mono">{aditivo.orcamento}</td><td>o número do orçamento (os aditivos reais citam)</td></tr>
+<tr><td class="mono">{aditivo.data}<br>{aditivo.data_antes}</td><td>a data nova e a contratada, já em DD/MM/AAAA</td></tr>
+<tr><td class="mono">{aditivo.inicio} {aditivo.fim}<br>{aditivo.dia_inicio} {aditivo.dia_fim}</td><td>horas novas, e os dias — o do término já com a virada da noite resolvida</td></tr>
+<tr><td class="mono">{aditivo.convidados}<br>{aditivo.convidados_antes}</td><td>com o número por extenso junto: <i>140 (cento e quarenta)</i></td></tr>
+<tr><td class="mono">{aditivo.itens_saem}<br>{aditivo.itens_entram}</td><td>os itens marcados e o texto que você escreveu</td></tr>
+<tr><td class="mono">{aditivo.valor_novo}<br>{aditivo.valor_pagar}<br>{aditivo.diferenca}<br>{aditivo.taxa}</td><td>por extenso, como o documento escreve: <i>R$ 9.900,00 (nove mil e novecentos reais)</i></td></tr>
+<tr><td class="mono">{aditivo.vencimento}<br>{aditivo.forma_pagamento}</td><td>o que foi digitado no bloco 5</td></tr>
+</table>
+
+<div class="nota"><b>Os campos de sempre continuam valendo</b> — <code>{cliente.nome}</code>,
+<code>{empresa.razao}</code>, <code>{regra.taxa_reagendamento}</code> e os outros. É o mesmo motor;
+o grupo novo só acrescenta o que é do aditivo.</div>
+
+<!-- ============================================================ 5 -->
+<h2><span class="n">5</span> A cláusula avulsa</h2>
+<div class="sub">Pro que não cabe em nenhum dos cinco blocos</div>
+
+<p>Além do modelo, um <b>sexto bloco no formulário</b>: título e texto livre, escritos na hora, só
+para aquele cliente. É o que resolve o caso que não é data, nem horário, nem convidado, nem serviço,
+nem valor — trocar o responsável pela chave, liberar entrada de um fornecedor específico, o que for.</p>
+
+<div class="pn">
+  <div class="bloco">
+    <div class="linha" style="margin-bottom:.5rem">
+      <span style="width:16px;height:16px;border:2px solid #7EE7B8;background:#12281F;border-radius:3px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:#7EE7B8">✓</span>
+      <b style="font-size:.95rem">6 · Outra alteração</b>
+      <span class="pill" style="margin-left:auto;font-size:.68rem">texto livre</span></div>
+    <div class="lbl">Título da cláusula</div>
+    <div class="inp" style="margin-bottom:.4rem">ALTERAÇÃO NO RESPONSÁVEL PELA ENTREGA DAS CHAVES</div>
+    <div class="lbl">Texto</div>
+    <div class="ta">A retirada e a devolução das chaves do espaço passam a ser de responsabilidade do Sr. Pedro Yan Mendes Valença, CPF 023.794.343-36, indicado pela CONTRATANTE.</div>
+  </div>
+</div>
+
+<div class="alerta"><b>Esta cláusula não mexe em nada no sistema</b>, e é de propósito. Ela entra no
+documento, é assinada e fica registrada — mas não muda agenda, valor nem convidado, porque o sistema
+não tem como saber o que "responsável pela chave" significa. Serve pra combinar por escrito o que o
+formulário não sabe perguntar.</div>
+
+<!-- ============================================================ 6 -->
+<h2><span class="n">6</span> O que eu NÃO vou deixar fazer</h2>
+<div class="sub">E aqui eu preciso da sua concordância, porque é uma recusa</div>
+
+<div class="perigo"><b>Editar à mão o texto das cinco cláusulas de um aditivo específico, na hora de
+mandar.</b> Parece a coisa mais natural do mundo — e cria a falha mais cara que este sistema pode
+ter.<br><br>
+Imagine: o formulário está com <b>140</b> convidados, e alguém corrige o texto à mão pra
+<b>150</b> antes de mandar. O cliente lê 150, concorda com 150 e assina 150. Aí a assinatura grava de
+volta — e grava <b>140</b>, porque é o que está no formulário. O documento assinado e o sistema
+passam a dizer coisas diferentes, e ninguém descobre até o dia da festa, quando chegam 150 pessoas
+para uma montagem de 140.</div>
+
+<p>Por isso o desenho separa duas coisas que parecem uma só:</p>
+
+<table>
+<tr><th style="width:34%">O quê</th><th style="width:26%">Quando se edita</th><th>Por quê</th></tr>
+<tr><td><b>O modelo</b> (as cinco cláusulas)</td><td>uma vez, no card de Serviços</td>
+    <td>é a sua redação, e vale pra todos os aditivos. Os números continuam vindo de campo.</td></tr>
+<tr><td><b>A cláusula avulsa</b></td><td>a cada aditivo</td>
+    <td>é texto que não representa nenhum número do sistema — então não tem o que divergir.</td></tr>
+<tr><td style="color:#B4453C"><b>O texto gerado das cinco</b></td><td style="color:#B4453C">nunca</td>
+    <td style="color:#B4453C">é a única porta por onde documento e sistema podem discordar.</td></tr>
+</table>
+
+<div class="nota"><b>É a mesma regra que o contrato já segue,</b> e pela mesma razão que o
+<code>finance/contrato</code> existe: número não se digita dentro do texto. Lá era pra o contrato não
+divergir do catálogo; aqui é pra o aditivo não divergir da agenda.</div>
+
+<!-- ============================================================ 7 -->
+<h2><span class="n">7</span> O que eu preciso que você decida</h2>
+<div class="sub">Três perguntas</div>
+
+<div class="q"><div class="qt">1. Quem edita o modelo do aditivo?</div>
+<div class="qo"><span class="rec">Recomendo: só você (dono)</span>, igual ao contrato. O card do
+contrato hoje é gateado por <code>gerir</code>, que só o dono tem — o argumento no código é "ele
+define o que a empresa se compromete a cumprir, e isso não é decisão de quem vende". O texto do
+aditivo é a mesma natureza. <b>Fazer</b> aditivo continua sendo dos três (dono, gestor, vendedor);
+<b>escrever o modelo</b> seria só seu.</div></div>
+
+<div class="q"><div class="qt">2. A cláusula avulsa fica disponível pra quem?</div>
+<div class="qo">Ela vai junto num documento assinado, mas é texto livre, sem conferência.
+<span class="rec">Recomendo liberar pros três</span> — quem está com o cliente ao telefone é quem
+sabe o que precisa combinar, e travar isso empurra pro WhatsApp "combinado por fora", que é pior.
+Se preferir, dá pra deixar só dono e gestor.</div></div>
+
+<div class="q"><div class="qt">3. Sobre a recusa da seção 6 — você concorda?</div>
+<div class="qo">É a única parte deste desenho em que eu digo "não" a algo que você pode querer. Se
+você tiver um caso real em que precisa mesmo mudar o texto de uma das cinco na hora, me conta qual é
+— talvez ele caiba na cláusula avulsa, ou talvez mostre que eu estou errado.</div></div>
+
+<div class="ftr">Fontes: o editor de contrato em <code>web/painel_servicos.py</code> (card
+<code>ct-card</code>, linhas 2155–2190 e o JS em 4007–4230), <code>finance/contrato.py</code>
+(<code>GRUPOS</code>, <code>preencher</code>, <code>campos_disponiveis</code>,
+<code>modelo_padrao</code>) e <code>finance/aditivo.py</code> (<code>clausulas</code>,
+<code>DISPOSICOES</code>, <code>FECHO</code>), como estão na main em 05/09/2026 · nada implementado.</div>
+
+</div></body></html>

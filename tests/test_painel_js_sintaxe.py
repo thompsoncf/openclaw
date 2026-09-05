@@ -232,7 +232,7 @@ def test_o_valor_da_linha_do_funil_e_sempre_o_liquido():
     Guarda dupla: o padrão velho não pode voltar, e o campo usado tem que ser
     sempre `it.total`, sem condicionar ao modo."""
     js = "\n".join(_scripts(_render("servicos")))
-    m = re.search(r"var sub=\[esc\(it\.sub.*?\.join\(' · '\);", js, re.S)
+    m = re.search(r"var sub1=\[esc\(it\.sub.*?var sub2=.*?\.join\(' · '\);", js, re.S)
     assert m, "não achei o join que monta a linha do funil"
     linha = m.group(0)
     assert "it.setup" not in linha, "o valor bruto voltou a entrar na linha do funil"

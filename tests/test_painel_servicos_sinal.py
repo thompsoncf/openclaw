@@ -1164,6 +1164,32 @@ def test_o_editor_tambem_diz_quando_foi_gerada(cliente):
     assert cliente.get(f"/painel/servicos/item/{oid}").json()["gerado_em"] == "12/08/2026"
 
 
+def test_a_linha_diz_quem_vendeu(cliente):
+    """05/09/2026: dono e gestor viam o funil inteiro sem saber de qual vendedor
+    era cada proposta — só dava pra descobrir abrindo uma por uma.
+
+    `vendedor` segue a MESMA redação que Relatórios → Vendas já usa pra essa
+    coluna (web/painel_relatorios.py): o nome do membro quando `criado_por` é um
+    id; o nome da CONTA quando foi o próprio dono (`criado_por='dono'`, sem
+    vendedor específico); e '—' só quando não sobra nem isso."""
+    with cliente.pool.connection() as cx:
+        mid = cx.execute(
+            "insert into membros (conta_id, nome, papel) values (%s,'Ana Souza','vendedor') "
+            "returning id", (CONTA,)).fetchone()[0]
+        ids = {}
+        for chave, criado_por in (("dono", "dono"), ("vendedor", str(mid)), ("ninguem", "")):
+            ids[chave] = cx.execute(
+                """insert into orcamentos (conta_id, cliente, empresa, status, criado_por,
+                     setup_centavos, modo) values (%s,'X','X','rascunho',%s,10000,'recorrente')
+                   returning id""",
+                (CONTA, criado_por)).fetchone()[0]
+        cx.commit()
+    itens = {i["id"]: i["vendedor"] for i in cliente.get("/painel/servicos/lista").json()["itens"]}
+    assert itens[ids["dono"]] == "Buffet Teste"     # o nome da CONTA, não "Você"
+    assert itens[ids["vendedor"]] == "Ana Souza"
+    assert itens[ids["ninguem"]] == "—"
+
+
 def test_a_data_de_geracao_tambem_vai_no_email(cliente, correio):
     """O terceiro lugar: o cliente que acha o e-mail duas semanas depois precisa
     saber se aquilo ainda é de hoje sem ter que perguntar."""

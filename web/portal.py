@@ -4074,7 +4074,9 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   <label style="font-size:.72rem;color:#8a938a;display:flex;gap:.4rem;align-items:center;margin-bottom:.6rem"><input type="checkbox" form="_nada" disabled style="width:auto"> <span class="mut">Vincule um cliente ou fornecedor pra o título aparecer na ficha dele.</span></label>
   {% if titulos %}
   <style>
-    .tit-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .9rem;padding:.7rem 0;border-top:1px solid var(--card-2)}
+    /* a separação de verdade entre uma conta e a próxima: var(--card-2) é quase
+       da cor do fundo, e as contas grudavam visualmente umas nas outras. */
+    .tit-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .9rem;padding:.7rem 0;border-top:1px solid var(--borda)}
     .tit-id{flex:1 1 200px;min-width:0}
     .tit-desc{font-size:.9rem}
     .tit-meta{font-size:.7rem;margin-top:3px;color:var(--txt-mut)}
@@ -4111,6 +4113,43 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       <button type="submit">✓ liberar as marcadas</button>
       <a href="/painel/relatorios?tipo=contas_pagar" style="color:var(--verde-claro);font-size:.78rem">ou libere olhando o relatório →</a></div>
   </form>
+  {% endif %}
+  {#- O FILTRO. Antes eram os três blocos empilhados e sempre abertos — pedido
+     do dono em 04/09/2026 pra separar "o que dá pra pagar" de "o que ainda
+     depende de você". Certo na intenção, mas com 30+ contas em cada divisão a
+     tela virava uma parede: pra ver "A receber" era rolar por todo "Esperando
+     liberação" primeiro. Reclamação do dono em 05/09/2026 ("não gostei das
+     divisões, dá uma melhorada").
+
+     A pílula troca QUAL bloco aparece — o bloco em si (cabeçalho com
+     contagem/total, cada `tit_linha`) continua exatamente o mesmo, só um fica
+     visível por vez. "Esperando liberação" abre por padrão por ser o único
+     que pede uma decisão; "Tudo" existe pra quem quer ver os três juntos,
+     como era antes. -#}
+  <style>
+    .tit-filtro{display:flex;flex-wrap:wrap;gap:.4rem;margin:.7rem 0}
+    .tit-filtro a{flex:1 1 auto;min-width:110px;text-align:center;padding:.5rem .6rem;
+      border-radius:9px;border:1px solid var(--borda);background:var(--card-2);
+      color:var(--txt-mut);text-decoration:none;font-size:.78rem;line-height:1.35}
+    .tit-filtro a b{display:block;font-family:var(--mono);font-size:.86rem;color:var(--txt)}
+    .tit-filtro a.on{background:#241C0F;border-color:#5A4520;color:#f0dca6}
+    .tit-filtro a.on b{color:#f0dca6}
+    .tit-filtro a.ok.on{background:#10241A;border-color:#1E4A3A;color:#9fe8c9}
+    .tit-filtro a.ok.on b{color:#9fe8c9}
+    .tit-filtro a.rec.on{background:var(--card-2);border-color:var(--verde-claro);color:var(--verde-claro)}
+    .tit-filtro a.rec.on b{color:var(--verde-claro)}
+  </style>
+  {% set ns = namespace(ativo='') %}
+  {% for bloco in tit_blocos if bloco.decide and bloco.itens %}{% if not ns.ativo %}{% set ns.ativo = bloco.cor %}{% endif %}{% endfor %}
+  {% for bloco in tit_blocos if bloco.itens %}{% if not ns.ativo %}{% set ns.ativo = bloco.cor %}{% endif %}{% endfor %}
+  {% if tit_blocos|selectattr('itens')|list|length > 1 %}
+  <div class="tit-filtro">
+    {% for bloco in tit_blocos if bloco.itens %}
+    <a href="#" class="{{ bloco.cor }}{{ ' on' if bloco.cor == ns.ativo }}" data-alvo="tbl-{{ bloco.cor }}"
+       onclick="titFiltroClicar(this);return false"><b>{{ bloco.itens|length }}</b>{{ bloco.titulo }}</a>
+    {% endfor %}
+    <a href="#" data-alvo="" onclick="titFiltroClicar(this);return false"><b>{{ titulos|length }}</b>Tudo</a>
+  </div>
   {% endif %}
 {% macro tit_linha(t, pode_decidir) %}
   <div class="tit-lin">
@@ -4258,9 +4297,17 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
 
      As A RECEBER ficam num bloco à parte porque liberação não existe pra elas:
      ninguém autoriza dinheiro entrando. Jogá-las em "liberadas" — que é onde
-     cairiam, já que nascem `autorizado` — seria mentira de rótulo. -#}
+     cairiam, já que nascem `autorizado` — seria mentira de rótulo.
+
+     SÓ UM BLOCO FICA VISÍVEL por vez (a pílula de filtro decide, ver acima) —
+     `ns` é recalculado aqui, e não reaproveitado de lá em cima, porque
+     `tests/test_empresa_duas_listas.py` e `test_contas_recorrentes.py` rendem
+     só ESTE trecho (de `tit_linha` em diante) isolado, sem o filtro por perto. -#}
+  {% set ns = namespace(ativo='') %}
+  {% for bloco in tit_blocos if bloco.decide and bloco.itens %}{% if not ns.ativo %}{% set ns.ativo = bloco.cor %}{% endif %}{% endfor %}
+  {% for bloco in tit_blocos if bloco.itens %}{% if not ns.ativo %}{% set ns.ativo = bloco.cor %}{% endif %}{% endfor %}
   {% for bloco in tit_blocos %}{% if bloco.itens %}
-  <div class="tit-bloco {{ bloco.cor }}">
+  <div class="tit-bloco {{ bloco.cor }}" id="tbl-{{ bloco.cor }}"{% if bloco.cor != ns.ativo %} style="display:none"{% endif %}>
     <div class="tit-bcab"><span class="tit-bt">{{ bloco.titulo }}</span>
       <span class="tit-bs">{{ bloco.itens|length }} · {{ bloco.centavos|brl }}</span>
       {% if bloco.dica %}<span class="tit-bd">{{ bloco.dica }}</span>{% endif %}</div>
@@ -4269,6 +4316,16 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   {% endif %}{% endfor %}
   {% else %}<div class="mut" style="font-size:.85rem">Nenhum título em aberto. Adicione acima — ou peça pro Zaq no WhatsApp.</div>{% endif %}
   <script>
+  // A pílula troca qual bloco (Liberadas/Esperando/A receber) fica visível —
+  // o resto da tela (título, botões, forms) não muda, só a exibição.
+  function titFiltroClicar(a){
+    document.querySelectorAll('.tit-filtro a').forEach(function(x){x.classList.remove('on')});
+    a.classList.add('on');
+    var alvo = a.getAttribute('data-alvo');
+    document.querySelectorAll('.tit-bloco').forEach(function(b){
+      b.style.display = (!alvo || b.id === alvo) ? '' : 'none';
+    });
+  }
   function titEditToggle(btn, campo){
     var lin = btn.closest('.tit-lin');
     var f = lin ? lin.querySelector('.tit-edit') : null;

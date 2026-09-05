@@ -90,7 +90,10 @@ def carregar(token: str, pool=None) -> dict | None:
 
     assinado = bool(a["assinado_em"])
     # congelado quando assinado, montado ao vivo antes — mesma regra do contrato
-    clausulas = a["texto"] if (assinado and a.get("texto")) else ad.clausulas(a, est)
+    # o `pool` como terceiro argumento é o que faz o texto sair do MODELO DA
+    # CONTA (migração 203) em vez do padrão de fábrica. Congelado quando
+    # assinado, montado ao vivo antes — mesma regra do contrato.
+    clausulas = a["texto"] if (assinado and a.get("texto")) else ad.clausulas(a, est, pool)
     return {
         "aditivo": a, "clausulas": clausulas, "assinado": assinado,
         "rotulo": ad.ordinal(a["ordem"]), "token": a["token"],

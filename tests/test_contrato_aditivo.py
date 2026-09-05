@@ -80,6 +80,12 @@ create table contrato_modelo (conta_id bigint primary key, clausulas jsonb not n
 """
 
 
+def _migracao(nome: str) -> str:
+    caminho = os.path.join(os.path.dirname(__file__), "..", "db", "migracoes", nome)
+    with open(caminho, encoding="utf-8") as f:
+        return f.read()
+
+
 def _migracao_201() -> str:
     """A migração de verdade, lida do arquivo.
 
@@ -107,6 +113,7 @@ def pool():
     with p.connection() as c:
         c.execute(_SQL)
         c.execute(_migracao_201())
+        c.execute(_migracao("203_aditivo_modelo.sql"))
         c.execute("insert into nichos (nome, slug, tipo) values ('Eventos','eventos','servico')")
         c.execute("insert into contas (id, nome, razao_social, documento, nicho_id) "
                   "values (%s,'Prime','M S DE SOUSA JUNIOR FESTAS E EVENTOS',"
@@ -604,3 +611,138 @@ def test_base_sem_a_201_nao_derruba_a_tela(pool):
     assert ad.do_contrato(pool, CONTA, c["contrato_id"]) == []
     assert ad.aviso_no_contrato(pool, CONTA, c["contrato_id"]) is None
     assert ad.quantas_mudaram_data(pool, CONTA, c["contrato_id"]) == 0
+
+
+# ============================================================ o modelo editável
+
+def test_sem_nada_salvo_vale_o_padrao_de_fabrica(pool):
+    m = ad.carregar_modelo(pool, CONTA)
+    assert m["novo"] is True
+    assert m["textos"]["convidados"]["titulo"] == "ACRÉSCIMO DE CONVIDADOS"
+    assert m["textos"]["convidados"]["titulo_reduz"] == "REDUÇÃO DE CONVIDADOS"
+    assert "{aditivo.convidados}" in m["textos"]["convidados"]["corpo"]
+
+
+def test_o_texto_do_dono_manda_no_documento(pool):
+    """É o pedido inteiro em um teste: ele reescreve, o documento sai com a
+    redação dele."""
+    c = _contrato(pool)
+    ad.salvar_modelo(pool, CONTA, {"convidados": {
+        "titulo": "MAIS GENTE NA FESTA",
+        "corpo": "Agora vão {aditivo.convidados} pessoas, e não {aditivo.convidados_antes}."}},
+        por="dono")
+    est = ad.estado_atual(pool, CONTA, c["contrato_id"])
+    a = ad.criar(pool, CONTA, c["contrato_id"],
+                 [{"campo": "convidados", "de": 115, "para": 140}])
+    cls = ad.clausulas(a, est, pool)
+    assert cls[0]["titulo"] == "1. MAIS GENTE NA FESTA"
+    assert cls[0]["corpo"] == ("Agora vão 140 (cento e quarenta) pessoas, e não "
+                               "115 (cento e quinze).")
+
+
+def test_editar_um_texto_nao_apaga_os_outros_quatro(pool):
+    """MESCLA por chave. Substituir o bloco inteiro congelaria a conta na versão
+    do dia em que ela clicou Salvar pela primeira vez."""
+    ad.salvar_modelo(pool, CONTA, {"data": {"titulo": "MUDANÇA DE DIA",
+                                            "corpo": "Fica {aditivo.data}."}})
+    m = ad.carregar_modelo(pool, CONTA)
+    assert m["textos"]["data"]["titulo"] == "MUDANÇA DE DIA"
+    assert m["textos"]["valor"]["corpo"] == ad.MODELO_PADRAO["valor"]["corpo"]
+    assert m["novo"] is False
+
+
+def test_o_titulo_de_reducao_tambem_e_do_dono(pool):
+    c = _contrato(pool)
+    ad.salvar_modelo(pool, CONTA, {"convidados": {
+        "titulo": "SUBIU", "titulo_reduz": "DESCEU",
+        "corpo": "de {aditivo.convidados_antes} para {aditivo.convidados}."}})
+    est = ad.estado_atual(pool, CONTA, c["contrato_id"])
+    sobe = ad.clausulas({"conta_id": CONTA, "ordem": 1,
+                         "alteracoes": [{"campo": "convidados", "de": 115, "para": 140}]},
+                        est, pool)
+    desce = ad.clausulas({"conta_id": CONTA, "ordem": 1,
+                          "alteracoes": [{"campo": "convidados", "de": 115, "para": 90}]},
+                         est, pool)
+    assert sobe[0]["titulo"] == "1. SUBIU"
+    assert desce[0]["titulo"] == "1. DESCEU"
+
+
+def test_campo_escrito_errado_fica_visivel_no_texto(pool):
+    """Mesma regra do contrato: o valor que evapora em silêncio é o perigoso.
+    A cláusula continuaria gramaticalmente inteira, sem o número que lhe dava
+    sentido."""
+    c = _contrato(pool)
+    ad.salvar_modelo(pool, CONTA, {"convidados": {
+        "titulo": "X", "corpo": "são {aditivo.convidadso} pessoas."}})
+    est = ad.estado_atual(pool, CONTA, c["contrato_id"])
+    cls = ad.clausulas({"conta_id": CONTA, "ordem": 1,
+                        "alteracoes": [{"campo": "convidados", "de": 115, "para": 140}]},
+                       est, pool)
+    assert "{aditivo.convidadso}" in cls[0]["corpo"]
+
+
+def test_a_paleta_traz_os_campos_do_aditivo_e_os_do_contrato():
+    campos = {c["campo"] for c in ad.campos_disponiveis()}
+    assert "aditivo.convidados" in campos and "aditivo.data_antes" in campos
+    # os de sempre continuam valendo: uma cláusula de aditivo pode citar o cliente
+    assert "cliente.nome" in campos and "regra.taxa_reagendamento" in campos
+
+
+def test_o_padrao_de_fabrica_produz_o_texto_que_ja_estava_no_ar(pool):
+    """Rede de segurança da migração pro modelo: quem não editar nada tem que
+    continuar recebendo, palavra por palavra, o documento do #632."""
+    c = _contrato(pool)
+    est = ad.estado_atual(pool, CONTA, c["contrato_id"])
+    cls = ad.clausulas({"conta_id": CONTA, "ordem": 1,
+                        "alteracoes": [{"campo": "convidados", "de": 115, "para": 140}]}, est)
+    assert cls[0]["corpo"] == (
+        "O número de convidados para prestação de serviços passa a ser "
+        "140 (cento e quarenta) convidados, em substituição à quantidade "
+        "originalmente estabelecida de 115 (cento e quinze) convidados.")
+
+
+# ============================================================ a cláusula avulsa
+
+def test_a_avulsa_entra_no_documento_por_ultimo(pool):
+    c = _contrato(pool)
+    est = ad.estado_atual(pool, CONTA, c["contrato_id"])
+    a = ad.criar(pool, CONTA, c["contrato_id"], [
+        {"campo": "convidados", "de": 115, "para": 140},
+        {"campo": "avulsa", "titulo": "ALTERAÇÃO NO RESPONSÁVEL PELAS CHAVES",
+         "texto": "A retirada passa a ser do Sr. Pedro Yan."}])
+    cls = ad.clausulas(a, est, pool)
+    assert len(cls) == 2
+    assert cls[1]["titulo"] == "2. ALTERAÇÃO NO RESPONSÁVEL PELAS CHAVES"
+    assert cls[1]["corpo"] == "A retirada passa a ser do Sr. Pedro Yan."
+
+
+def test_a_avulsa_nao_passa_por_campo(pool):
+    """É texto de gente, não gabarito. Uma chave entre chaves ali é literal —
+    e é por isso que ela pode ser livre: não representa número do sistema, então
+    não há o que divergir."""
+    c = _contrato(pool)
+    est = ad.estado_atual(pool, CONTA, c["contrato_id"])
+    a = ad.criar(pool, CONTA, c["contrato_id"],
+                 [{"campo": "avulsa", "titulo": "T", "texto": "combinado {seja o que for}"}])
+    cls = ad.clausulas(a, est, pool)
+    assert cls[0]["corpo"] == "combinado {seja o que for}"
+
+
+def test_a_avulsa_nao_muda_nada_no_sistema(pool):
+    c = _contrato(pool)
+    a = ad.criar(pool, CONTA, c["contrato_id"],
+                 [{"campo": "avulsa", "titulo": "T", "texto": "combinado à parte"}])
+    ad.assinar(pool, a["id"], "Claudia", "077", "1.1.1.1")
+    with pool.connection() as conn:
+        ev, total = conn.execute(
+            "select evento, primeiro_ano_centavos from orcamentos where id=%s",
+            (c["orcamento_id"],)).fetchone()
+        n = conn.execute("select count(*) from titulos").fetchone()[0]
+    assert ev["convidados"] == 115 and total == 775000 and n == 0
+
+
+def test_aditivo_só_com_avulsa_é_aditivo_válido(pool):
+    c = _contrato(pool)
+    a = ad.criar(pool, CONTA, c["contrato_id"],
+                 [{"campo": "avulsa", "titulo": "T", "texto": "x"}])
+    assert a["ordem"] == 1 and a["token"]

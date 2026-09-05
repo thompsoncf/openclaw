@@ -27,7 +27,8 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from db.conexao import get_pool
 from finance import aditivo as ad
@@ -73,6 +74,124 @@ def _data_iso(v) -> str:
     return ""
 
 
+def _so_o_dono(request: Request):
+    """Gate do MODELO do aditivo: a mesma trava do modelo do contrato.
+
+    O card é escondido no template, mas isto é POST e a URL é chamável direto —
+    o vendedor abre a mesma aba (tem `vendas`), então sem esta linha ele
+    reescreveria o texto que a empresa assina. `gerir` é a capacidade que já
+    separa o titular do resto, e usar ela evita criar uma segunda régua que
+    amanhã diverge da primeira. FAZER aditivo continua sendo dos três."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return None, JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    from contas import equipe as _equipe
+    if not _equipe.caps_do_papel(request.session.get("papel", "dono"))["gerir"]:
+        return None, JSONResponse(
+            {"erro": "só o dono da empresa configura o texto do aditivo"},
+            status_code=403)
+    return conta, None
+
+
+@router.get("/painel/servicos/aditivo-modelo")
+def aditivo_modelo(request: Request):
+    """O modelo pra tela desenhar. Mesma forma da rota do contrato."""
+    conta, erro = _so_o_dono(request)
+    if erro is not None:
+        return erro
+    pool = get_pool()
+    m = ad.carregar_modelo(pool, conta[0])
+    from finance import servicos_catalogo as _scat
+    return JSONResponse({
+        "textos": m["textos"], "novo": m["novo"],
+        "campos": ad.campos_disponiveis(_scat.listar(pool, conta[0])),
+        "ordem": list(ad.ORDEM),
+        "rotulos": {"data": "Alteração de data", "horario": "Alteração de horário",
+                    "convidados": "Alteração de convidados",
+                    "servicos": "Alteração de serviços", "valor": "Ajuste no valor"},
+        "resumo": {
+            "em": m["atualizado_em"].strftime("%d/%m") if m.get("atualizado_em") else "",
+            "por": m.get("atualizado_por") or "",
+        },
+    })
+
+
+class ModeloIn(BaseModel):
+    """O corpo das rotas do modelo.
+
+    SÍNCRONO de propósito, e o teste `test_event_loop_nao_trava` é quem cobra:
+    handler `async` que fala com o banco por psycopg (que é bloqueante) segura o
+    event loop inteiro do processo. Recebendo o corpo por BaseModel em vez de
+    `await request.json()`, o handler pode ser `def` — e aí o FastAPI o joga na
+    threadpool sozinho. É como as rotas do contrato já faziam."""
+    textos: dict = {}
+
+
+@router.post("/painel/servicos/aditivo-modelo/salvar")
+def aditivo_modelo_salvar(request: Request, dados: ModeloIn):
+    conta, erro = _so_o_dono(request)
+    if erro is not None:
+        return erro
+    membro_id = request.session.get("membro_id")
+    r = ad.salvar_modelo(get_pool(), conta[0], dados.textos or {},
+                         por=str(membro_id or "dono"))
+    return JSONResponse(r)
+
+
+@router.post("/painel/servicos/aditivo-modelo/padrao")
+def aditivo_modelo_padrao(request: Request):
+    """"Restaurar modelo padrão" — devolve o texto de fábrica SEM salvar.
+
+    Não salva de propósito: o dono vê o padrão na tela e decide. Salvar no clique
+    apagaria a redação dele antes de ele ler o que vem no lugar."""
+    conta, erro = _so_o_dono(request)
+    if erro is not None:
+        return erro
+    return JSONResponse({"textos": {k: (dict(v) if isinstance(v, dict) else v)
+                                    for k, v in ad.MODELO_PADRAO.items()},
+                         "novo": True})
+
+
+@router.post("/painel/servicos/aditivo-modelo/previa")
+def aditivo_modelo_previa(request: Request, dados: ModeloIn):
+    """A prévia com um aditivo de MENTIRA, mas com os números do contrato real
+    mais recente da conta.
+
+    Prévia sem número nenhum esconderia justamente o erro que interessa: o campo
+    escrito errado, que fica visível no texto como `{aditivo.convidadso}`."""
+    conta, erro = _so_o_dono(request)
+    if erro is not None:
+        return erro
+    pool = get_pool()
+    with pool.connection() as c:
+        r = c.execute("""select id from contratos where conta_id=%s
+                          and assinado_em is not null order by id desc limit 1""",
+                      (conta[0],)).fetchone()
+    if not r:
+        return JSONResponse({"erro": "esta conta ainda não tem contrato assinado — "
+                                     "a prévia aparece quando houver um"})
+    est = ad.estado_atual(pool, conta[0], r[0]) or {}
+    # um aditivo fictício que aciona TODAS as cláusulas, pra ele ver as cinco
+    falso = {
+        "conta_id": conta[0], "ordem": 1,
+        "alteracoes": [
+            {"campo": "data", "de": est.get("data"), "para": est.get("data")},
+            {"campo": "horario", "de": {"inicio": est.get("inicio"), "fim": est.get("fim")},
+             "para": {"inicio": est.get("inicio"), "fim": est.get("fim")}},
+            {"campo": "convidados", "de": est.get("convidados"),
+             "para": (est.get("convidados") or 0) + 10},
+            {"campo": "servicos", "saem": [i.get("nome") for i in (est.get("itens") or [])[:2]],
+             "entram": "(o que entrar no lugar)"},
+        ],
+        "valor_antes_centavos": est.get("valor_centavos"),
+        "valor_novo_centavos": (est.get("valor_centavos") or 0) + 100000,
+        "diferenca_centavos": 100000, "taxa_centavos": 0,
+        "vencimento": None, "forma_pagamento": "chave PIX",
+    }
+    cls = ad.clausulas(falso, est, dados.textos or None)
+    return JSONResponse({"clausulas": cls, "contrato": est.get("contrato_numero")})
+
+
 @router.get("/painel/servicos/aditivo/{contrato_id}")
 def aditivo_form(request: Request, contrato_id: int, erro: str = ""):
     conta, redir = _conta_servico(request)
@@ -107,7 +226,6 @@ def aditivo_conferir(request: Request, contrato_id: int, nova_data: str = Form("
     regras = (ctr.carregar_modelo(pool, conta[0]) or {}).get("regras") or {}
     avisos = ad.conferir_data(pool, conta[0], contrato_id,
                               _data_iso(nova_data), regras)
-    from fastapi.responses import JSONResponse
     return JSONResponse({"avisos": avisos})
 
 
@@ -121,7 +239,9 @@ def aditivo_criar(request: Request, contrato_id: int,
                   itens_entram: str = Form(""),
                   mudar_valor: str = Form(""), diferenca: str = Form(""),
                   taxa: str = Form(""), vencimento: str = Form(""),
-                  forma_pagamento: str = Form("")):
+                  forma_pagamento: str = Form(""),
+                  mudar_avulsa: str = Form(""), avulsa_titulo: str = Form(""),
+                  avulsa_texto: str = Form("")):
     conta, redir = _conta_servico(request)
     if redir:
         return redir
@@ -150,6 +270,15 @@ def aditivo_criar(request: Request, contrato_id: int,
         alteracoes.append({"campo": "servicos",
                            "saem": [s for s in (itens_saem or []) if s.strip()],
                            "entram": itens_entram.strip()})
+
+    # A CLÁUSULA AVULSA é texto livre e não representa número nenhum do sistema —
+    # por isso ela PODE ser livre, e por isso ela não muda agenda, valor nem
+    # convidado quando o cliente assina. Entra no documento e é assinada; é o
+    # lugar de combinar por escrito o que o formulário não sabe perguntar.
+    if mudar_avulsa == "on" and (avulsa_titulo.strip() or avulsa_texto.strip()):
+        alteracoes.append({"campo": "avulsa",
+                           "titulo": avulsa_titulo.strip()[:200],
+                           "texto": avulsa_texto.strip()[:20000]})
 
     dif = _centavos(diferenca) if mudar_valor == "on" else 0
     tx = _centavos(taxa) if mudar_valor == "on" else 0
@@ -318,6 +447,23 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
           </div>
         <div class="ad-c"></div>
         <div class="ad-nota" id="resumo-valor"></div>
+      </div>
+    </div>
+
+    <!-- 6 AVULSA -->
+    <div class="ad-bloco">
+      <label class="ad-bh"><input type="checkbox" name="mudar_avulsa">
+        <span>6 · <b>Outra alteração</b></span>
+        <span class="marca" style="border-color:var(--linha);background:var(--fundo2);color:var(--mut)">texto livre</span></label>
+      <div class="ad-bc" style="grid-template-columns:1fr">
+        <div class="ad-c"><label>Título da cláusula</label>
+          <input name="avulsa_titulo" placeholder="ALTERAÇÃO NO RESPONSÁVEL PELA ENTREGA DAS CHAVES"></div>
+        <div class="ad-c"><label>Texto</label>
+          <textarea name="avulsa_texto" rows="3"
+            placeholder="A retirada e a devolução das chaves passam a ser de responsabilidade de..."></textarea></div>
+        <div class="ad-nota">Pro que não é data, horário, convidado, serviço nem valor. Entra no
+          documento e é assinada, mas <b>não muda nada no sistema</b> — o sistema não tem como
+          saber o que o texto significa.</div>
       </div>
     </div>
 

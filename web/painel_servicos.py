@@ -717,10 +717,17 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     # mesmo motivo. Precisou mudar? É aditivo (contrato novo).
     if dados.id:
         try:
-            if ctr.assinado_do_orcamento(pool, conta[0], int(dados.id)):
+            _ct = ctr.por_orcamento(pool, conta[0], int(dados.id))
+            if _ct and _ct.get("assinado_em"):
+                # O BECO VIROU PORTA. Esta resposta mandava "faça um aditivo" desde
+                # a 164 sem ter para onde mandar — e pior, o JS que a recebia só
+                # escrevia "Erro ao salvar", então nem a frase chegava. Agora vai o
+                # caminho junto, e a tela leva o vendedor até lá.
                 return JSONResponse(
                     {"erro": "esta proposta tem contrato assinado e não pode ser editada — "
-                             "faça um aditivo"}, status_code=409)
+                             "faça um aditivo",
+                     "aditivo_url": f"/painel/servicos/aditivo/{_ct['id']}"},
+                    status_code=409)
         except Exception:  # noqa: BLE001 — base sem a 164: segue o fluxo de antes
             logging.getLogger("servicos.salvar").info(
                 "não deu pra checar contrato assinado do orçamento %s", dados.id)
@@ -923,7 +930,17 @@ def painel_servicos_lista(request: Request):
                           -- e derruba o `order by` de baixo com ORDER BY ambíguo.
                           (select ct.enviado_em from contratos ct
                             where ct.orcamento_id = orcamentos.id and ct.substitui_id is null
-                            order by ct.id desc limit 1) as contrato_enviado_em"""
+                            order by ct.id desc limit 1) as contrato_enviado_em,
+                          -- O ID do contrato, no FIM da lista de propósito: inserir
+                          -- coluna no meio empurraria todos os r[n] de baixo, e o
+                          -- `_fmt_item` lê por posição.
+                          --
+                          -- Precisa do id, e não do token: o token abre a folha
+                          -- pública do cliente; a tela de termo aditivo é rota
+                          -- interna, endereçada por id.
+                          (select ct.id from contratos ct
+                            where ct.orcamento_id = orcamentos.id and ct.substitui_id is null
+                            order by ct.id desc limit 1) as contrato_id"""
         if papel == "vendedor" and membro_id:
             rows = c.execute(
                 _cols + """ from orcamentos where conta_id=%s and criado_por=%s
@@ -990,6 +1007,9 @@ def painel_servicos_lista(request: Request):
         "contrato_token": r[17] or "",
         "contrato_numero": r[18],
         "contrato_assinado": bool(r[19]),
+        # só serve depois de assinado (é quando existe o que aditar), mas vai
+        # sempre: o menu do funil decide com `contrato_assinado`
+        "contrato_id": r[27],
         # QUANDO o contrato foi mandado — o mesmo dado que a proposta já mostra em
         # `enviado_em`. Sem ele o menu ofereceria "Mandar por e-mail" sem dizer se
         # já foi mandado, e é justamente essa dúvida que faz o vendedor mandar de
@@ -3391,7 +3411,22 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   }
   document.getElementById('oc-salvar').addEventListener('click',function(){
     var btn=this; btn.textContent='Salvando...';
-    salvarProposta(function(d){ btn.textContent=(d&&d.id)?'Salvo!':'Erro ao salvar'; carregarHist(); setTimeout(function(){btn.textContent='Salvar no funil';},1500); });
+    salvarProposta(function(d){
+      // CONTRATO ASSINADO: o servidor responde por que não dá e para onde ir. Até
+      // aqui a tela engolia a frase e escrevia só "Erro ao salvar" — quem tentava
+      // mudar convidado de um contrato assinado não descobria que existe aditivo.
+      if(d && d.aditivo_url){
+        btn.textContent='Salvar no funil';
+        if(confirm((d.erro||'Contrato assinado.')+'.\n\nAbrir a tela de termo aditivo agora?')){
+          window.location = d.aditivo_url;
+        }
+        return;
+      }
+      if(d && d.erro){ btn.textContent='Erro ao salvar'; alert(d.erro);
+                       setTimeout(function(){btn.textContent='Salvar no funil';},1500); return; }
+      btn.textContent=(d&&d.id)?'Salvo!':'Erro ao salvar'; carregarHist();
+      setTimeout(function(){btn.textContent='Salvar no funil';},1500);
+    });
   });
 
   function esc(s){var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML;}
@@ -3718,6 +3753,14 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       m.appendChild(_mi(it.contrato_assinado?'Mandar a via assinada':'Mandar pra assinar','✉️',
         it.contrato_enviado_em?('mandado '+it.contrato_enviado_em):'nunca mandado',
         function(){abrirEnvio(it.id,'contrato');}));
+      // DEPOIS DE ASSINADO, mudar data, horário, convidados, serviço ou valor só
+      // por aditivo — é o que as três travas do sistema já respondiam sem ter pra
+      // onde mandar. Aparece aqui, e não escondido atrás do erro de salvar: quem
+      // vai remarcar uma festa procura o contrato, não o botão de editar.
+      if(it.contrato_assinado && it.contrato_id){
+        m.appendChild(_mi('Fazer termo aditivo','📝','muda data, convidados ou valor',
+          function(){ window.location='/painel/servicos/aditivo/'+it.contrato_id; }));
+      }
     }
     if(it.pgto&&it.pgto.total){
       m.appendChild(_mgrupo('Dinheiro'));

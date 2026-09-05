@@ -78,6 +78,7 @@ from web.portal import router as portal_router
 from web.admin import router as admin_router
 from web.admin_precos import router as precos_router
 from web.painel_servicos import router as servicos_router
+from web.painel_aditivo import router as aditivo_router
 from web.painel_equipe import router as equipe_router
 from web.painel_prospeccao import router as prospeccao_router
 from web.painel_conteudo import router as conteudo_router
@@ -87,6 +88,7 @@ from web.painel_relatorios import router as relatorios_router
 from web.proposta import router as proposta_router
 # o contrato tem página e link PRÓPRIOS (/contrato/<token>) — não é bloco da folha
 from web.contrato_publico import router as contrato_pub_router
+from web.aditivo_publico import router as aditivo_pub_router
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.environ.get("PORTAL_SECRET", "troque-isto-em-producao"),
@@ -110,6 +112,7 @@ app.include_router(portal_router)
 app.include_router(admin_router)
 app.include_router(precos_router)
 app.include_router(servicos_router)
+app.include_router(aditivo_router)
 app.include_router(equipe_router)
 app.include_router(conteudo_router)  # antes do prospeccao_router: aquele tem um
                                       # catch-all GET /painel/prospeccao/{alvo_id}
@@ -121,6 +124,7 @@ app.include_router(cockpit_router)
 app.include_router(relatorios_router)
 app.include_router(proposta_router)
 app.include_router(contrato_pub_router)
+app.include_router(aditivo_pub_router)
 
 
 @app.on_event("startup")

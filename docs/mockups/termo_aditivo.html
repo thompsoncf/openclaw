@@ -1,0 +1,467 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<title>Termo aditivo — do papel para o sistema</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 18px}
+.wrap{max-width:900px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 26px;line-height:1.6}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:34px 0 4px;padding-top:20px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 14px}
+p{margin:0 0 12px}
+.card{background:#fff;border:1px solid #E3DDD0;border-radius:12px;padding:18px 20px;margin-bottom:14px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:12px 14px;font-size:13px;color:#3B4757;margin-bottom:14px;line-height:1.6}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:12px 14px;font-size:13px;color:#7A4E0C;margin-bottom:14px;line-height:1.6}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:14px;line-height:1.6}
+.perigo b{color:#6E241E}
+table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:14px;background:#fff;border-radius:10px;overflow:hidden;border:1px solid #E3DDD0}
+th{background:#F6F3EC;text-align:left;padding:9px 11px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:9px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.5}
+tr:last-child td{border-bottom:0}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#14213D}
+.sim{color:#1c7a4f;font-weight:700}.nao{color:#B4453C;font-weight:700}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:720px){.grid2{grid-template-columns:1fr}}
+.tag{display:inline-block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;vertical-align:middle}
+.t-hoje{background:#FDECEA;color:#B4453C;border:1px solid #F5C6C0}
+.t-novo{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+
+/* ---------- réplica fiel: página pública do contrato (web/contrato_publico.py) ---------- */
+.pg{background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 20px 50px -25px rgba(20,33,61,.4);max-width:794px;margin:0 auto 14px}
+.hd{background:#14213D;color:#F4F1EA;padding:26px 34px;display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+.hd .lg{font-size:20px;font-weight:600;line-height:1.2}
+.hd .sb{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#9FA8BC;margin-top:5px}
+.hd .mt{text-align:right;font-size:11px;color:#9FA8BC;flex:0 0 auto;white-space:nowrap}
+.hd .mt b{display:block;color:#E0B458;font-size:10px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px}
+.bd{padding:24px 34px 32px}
+.eb{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#B8862E;font-weight:600;margin:22px 0 8px}
+.eb:first-child{margin-top:0}
+.partes{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.parte{background:#FBFAF7;border:1px solid #ECE7DC;border-radius:9px;padding:12px 14px;font-size:13px;line-height:1.5}
+.parte .p{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#B8862E;font-weight:700;margin-bottom:4px}
+.parte b{font-size:14px}
+.parte small{display:block;color:#5A6678;font-size:12px;margin-top:2px}
+.ev{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#ECE7DC;border:1px solid #ECE7DC;border-radius:9px;overflow:hidden}
+.ev>div{background:#fff;padding:10px 12px}
+.ev .k{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:600}
+.ev .v{font-size:14px;font-weight:600;margin-top:2px}
+.ctrc{margin-bottom:13px}
+.ctrt{font-size:12.5px;font-weight:700;color:#14213D;margin-bottom:3px}
+.ctrb{font-size:13px;line-height:1.6;color:#3B4757;white-space:pre-wrap}
+.carimbo{margin-top:20px;border:1px dashed #C9BFA8;border-radius:9px;padding:14px 16px;font-size:12.5px;color:#3B4757;line-height:1.6}
+.carimbo b{color:#14213D}
+.sign{margin-top:22px;background:#FBFAF7;border:1px solid #ECE7DC;border-radius:10px;padding:18px 20px}
+.sign h3{font-size:15px;margin:0 0 6px}
+.sign p{font-size:12.5px;color:#5A6678;line-height:1.55;margin:0}
+.rowi{display:flex;gap:9px;margin:12px 0 9px;flex-wrap:wrap}
+.rowi input{flex:1;min-width:170px;padding:10px 12px;border:1px solid #DCD5C6;border-radius:8px;font-size:14px;font-family:inherit;background:#fff}
+.go{margin-top:12px;width:100%;background:#14213D;color:#F4F1EA;border:0;border-radius:9px;padding:12px;font-size:14px;font-weight:600}
+.ft{margin-top:20px;padding-top:12px;border-top:1px solid #ECE7DC;font-size:10.5px;color:#8A8475;line-height:1.5}
+.antes{text-decoration:line-through;color:#A6A093}
+.dep{color:#1c7a4f;font-weight:700}
+
+/* ---------- réplica: tela do dono (painel) ---------- */
+.tela{background:#F4F1EA;border:1px solid #DCD5C6;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.tela h4{margin:0 0 12px;font-size:15px}
+.bloco{background:#fff;border:1px solid #E3DDD0;border-radius:9px;padding:12px 14px;margin-bottom:9px}
+.bloco.off{opacity:.5}
+.bh{display:flex;align-items:center;gap:9px;font-size:13.5px;font-weight:600}
+.bh input[type=checkbox]{width:16px;height:16px;accent-color:#14213D}
+.bc{margin-top:10px;padding-top:10px;border-top:1px solid #F0ECE3;display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+@media(max-width:720px){.bc{grid-template-columns:1fr}}
+.cmp label{display:block;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:#8A8475;font-weight:700;margin-bottom:3px}
+.cmp input,.cmp select,.cmp textarea{width:100%;padding:8px 10px;border:1px solid #DCD5C6;border-radius:7px;font-size:13.5px;font-family:inherit;background:#fff;color:#14213D}
+.cmp .de{font-size:11.5px;color:#8A8475;margin-top:3px}
+.cmp textarea{min-height:56px;resize:vertical}
+.btnp{background:#14213D;color:#F4F1EA;border:0;border-radius:9px;padding:10px 18px;font-size:13.5px;font-weight:600}
+.btns{background:#fff;color:#14213D;border:1px solid #DCD5C6;border-radius:9px;padding:10px 18px;font-size:13.5px;font-weight:600}
+.calc{background:#FBFAF7;border:1px dashed #C9BFA8;border-radius:8px;padding:10px 12px;font-size:12.5px;color:#3B4757;grid-column:1/-1;line-height:1.6}
+.calc b{color:#14213D}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:14px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:6px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.6;margin-bottom:4px}
+.q .rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:34px;padding-top:14px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+</style></head><body><div class="wrap">
+
+<h1>Termo aditivo — do papel para o sistema</h1>
+<p class="lead">Leitura do modelo que o dono mandou (16 páginas: 1 modelo em branco + <b>4 aditivos reais já
+assinados</b> — Maria Gardênia, Ana Grazielly, Bárbara e Ana Aline), cruzada com o que o sistema já tem.
+Nada aqui está implementado. É pra decidir antes de escrever código.</p>
+
+<div class="perigo"><b>O sistema já manda fazer aditivo — e o aditivo não existe.</b> Em três lugares
+(<code>web/painel_servicos.py:723</code>, <code>finance/cockpit.py:1935</code> e a cláusula 9.1 do modelo de
+contrato) o código responde “não pode editar, <b>faça um aditivo</b>”. Hoje isso é uma porta pintada na
+parede: o contrato nº 5 da Prime (Cláudia, casamento 15/01/2027) está assinado, e se ela pedir mais 25
+convidados <b>ninguém consegue mexer</b> — nem no orçamento, nem no valor. A saída é o Word.</p></div>
+
+<!-- ============================================================ 1 -->
+<h2><span class="n">1</span> O que o papel é</h2>
+<div class="sub">Cinco alterações possíveis — e só as que valem entram no documento</div>
+
+<p>O modelo em branco lista quatro cláusulas numeradas, mas a sua lista tem cinco — porque data e
+horário, que o modelo juntou num “DATA E/OU HORÁRIO”, são coisas diferentes na prática. Os quatro casos
+reais confirmam: <b>nunca saem todas</b>, sai só o que mudou, renumerado de 1 em diante.</p>
+
+<table>
+<tr><th>Cláusula do modelo</th><th>Gardênia</th><th>Grazielly</th><th>Bárbara</th><th>Ana Aline</th></tr>
+<tr><td><b>Convidados</b><br><span style="color:#8A8475">“passa a ser XX, em substituição a XX”</span></td>
+    <td>—</td><td>—</td><td class="sim">50 → 73</td><td class="sim">40 → 50</td></tr>
+<tr><td><b>Valor</b><br><span style="color:#8A8475">novo total + a diferença a pagar</span></td>
+    <td>—</td><td>—</td><td class="sim">R$ 13.505,00<br><small>a pagar R$ 5.576,43</small></td>
+    <td class="sim">R$ 9.250,00<br><small>a pagar R$ 1.850,00</small></td></tr>
+<tr><td><b>Data</b><br><span style="color:#8A8475">a que cai na cláusula 7</span></td>
+    <td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td><b>Horário</b></td>
+    <td class="sim">20:00 → 01:00</td><td class="sim">22:00 → 03:00</td><td>—</td><td>—</td></tr>
+<tr><td><b>Serviços</b><br><span style="color:#8A8475">“os itens X do orçamento nº N passam a ser Y”</span></td>
+    <td>—</td><td class="sim">souplats, vasos… → monitor kids + louças</td><td>—</td><td>—</td></tr>
+<tr><td style="background:#F6F3EC"><b>Total de cláusulas</b></td>
+    <td style="background:#F6F3EC"><b>1</b></td><td style="background:#F6F3EC"><b>2</b></td>
+    <td style="background:#F6F3EC"><b>2</b></td><td style="background:#F6F3EC"><b>2</b></td></tr>
+</table>
+
+<div class="alerta"><b>Nos quatro aditivos reais, nenhum mudou a DATA — só o horário.</b> E é justamente a
+data que o seu contrato trata à parte: a cláusula 7 tem três regras (uma alteração só, 30 dias de
+antecedência, 10% de taxa, nova data em até 180 dias) e <b>nenhuma delas vale pra horário</b>. Por isso o
+formulário separa as duas coisas, como você listou. Ver a seção 4.</div>
+
+<div class="nota"><b>O título da cláusula muda com o sentido.</b> O modelo diz “ALTERAÇÃO NO NÚMERO DE
+CONVIDADOS”; os dois casos reais, ambos de aumento, dizem “<b>ACRÉSCIMO</b> DE CONVIDADOS”. E “ALTERAÇÃO NA
+DATA E/OU HORÁRIO” virou “ALTERAÇÃO NO <b>HORÁRIO</b>” nos dois casos em que a data não mudou. Não é
+firula: um documento que anuncia alteração de data e não altera data confunde quem lê depois.</div>
+
+<div class="alerta"><b>A conta do valor não fecha sozinha — e um dos quatro casos prova isso.</b>
+Ana Aline: 40 → 50 convidados, R$ 1.850,00 = <b>R$ 185/pessoa</b>, batendo com o total (R$ 9.250 ÷ 50 = 185).
+Bárbara: 50 → 73, R$ 5.576,43 = <b>R$ 242,45/pessoa</b>, e o total dá R$ 185/pessoa. Ou seja, ali houve
+renegociação, não regra de três. E o contrato nº 5 da Prime é <b>locação pura</b> — climatizador, cozinha,
+suíte, LEDs —, onde convidado a mais pode não mudar valor nenhum. Conclusão de projeto:
+<b>o sistema sugere, o dono digita por cima.</b> Nunca o contrário.</div>
+
+<!-- ============================================================ 2 -->
+<h2><span class="n">2</span> Onde cada campo já mora</h2>
+<div class="sub">O aditivo quase não precisa de dado novo</div>
+
+<table>
+<tr><th style="width:26%">O que o papel escreve</th><th style="width:37%">De onde sai hoje</th><th>Situação</th></tr>
+<tr><td>CONTRATADO (nome, CNPJ, endereço)</td><td><code>dados_empresa</code> da conta</td><td class="sim">pronto — a página do contrato já imprime</td></tr>
+<tr><td>CONTRATANTE (nome, CPF, endereço)</td><td><code>orcamentos</code> + <code>contrato.completar_do_cadastro</code></td><td class="sim">pronto — inclusive o CPF que só está no cadastro</td></tr>
+<tr><td>“contrato celebrado em DD/MM/AAAA, sob o nº N”</td><td><code>contratos.criado_em</code>, <code>contratos.numero</code></td><td class="sim">pronto</td></tr>
+<tr><td>Data (de → para) + as 4 conferências da cláusula 7</td><td><code>evento-&gt;&gt;'data'</code>, <code>eventos_agenda</code>, <code>contrato_modelo.regras</code>, e o detector de choque de data que subiu no #606</td><td class="sim">tudo pronto — só falta juntar</td></tr>
+<tr><td>Horário (de → para)</td><td><code>evento-&gt;&gt;'inicio'</code> / <code>'fim'</code></td><td class="nao">existe, mas sujo — ver abaixo</td></tr>
+<tr><td>Convidados (de → para)</td><td><code>orcamentos.evento-&gt;&gt;'convidados'</code></td><td class="sim">pronto <span style="color:#8A8475">(115 na Cláudia, 300 na Bianca)</span></td></tr>
+<tr><td>Itens substituídos</td><td><code>orcamentos.itens</code> (jsonb, 7 itens na Cláudia)</td><td class="sim">pronto</td></tr>
+<tr><td>“orçamento nº N”</td><td><code>orcamentos.numero</code></td><td class="sim">pronto</td></tr>
+<tr><td>Novo valor total / diferença</td><td><code>primeiro_ano_centavos</code></td><td class="sim">pronto pra ler, digitado pra mudar</td></tr>
+<tr><td>Assinatura do cliente</td><td>fluxo do contrato: token público, nome + CPF, grava data/hora e IP</td><td class="sim">pronto — reaproveita inteiro</td></tr>
+<tr><td>Testemunhas</td><td>—</td><td class="nao">não existe (e talvez não deva)</td></tr>
+</table>
+
+<div class="alerta"><b>O horário do sistema não está em condição de ir pra documento jurídico.</b> Medido
+agora nos quatro orçamentos com contrato da Prime, o campo <code>inicio</code>/<code>fim</code> vem assim:
+<code>"20h30"</code>, <code>"01h"</code>, <code>"22"</code>, <code>"17"</code>, <code>"18:00"</code>,
+<code>"23:40"</code>. Um aditivo que imprima “início às 17h e término às 22” já nasce ruim. O formulário do
+aditivo tem que pedir hora de verdade (campo de hora), e é a oportunidade de normalizar o que entra.</div>
+
+<!-- ============================================================ 3 -->
+<h2><span class="n">3</span> A decisão de fundo</h2>
+<div class="sub">Aditivo é emenda, não contrato novo</div>
+
+<p>A migração 164 já reservou <code>substitui_id</code> e chama o aditivo de “contrato novo que substitui um
+anterior”. <b>O papel do dono diz o contrário</b>, duas vezes no mesmo documento:</p>
+
+<div class="nota">“…cujas cláusulas permanecem em vigor, <b>exceto naquilo que forem alteradas</b> pelo
+presente instrumento.”<br>
+“<b>Permanecem inalteradas</b> todas as demais cláusulas e condições estabelecidas no contrato original.”</div>
+
+<p>O aditivo real tem <b>uma página</b> e cita só o que mudou. O contrato original continua valendo e
+continua sendo <i>o</i> contrato. Então o desenho é <b>emenda</b>: um documento próprio, com assinatura
+própria, pendurado no contrato — e não uma segunda via do contrato inteiro com os números trocados.</p>
+
+<div class="perigo"><b>E tem uma armadilha no código de hoje.</b> <code>por_orcamento()</code> se diz “o
+contrato VIVO (o que não foi substituído por aditivo)”, mas a consulta filtra
+<code>substitui_id is null</code> — que quer dizer “o que <i>não substitui</i> outro”, ou seja, <b>o
+original</b>. Se o aditivo virasse linha em <code>contratos</code>, ou ele estoura o índice único de
+“um contrato vivo por orçamento”, ou some da tela. Tabela separada (<code>contrato_aditivos</code>) custa
+repetir ~8 colunas de assinatura e, em troca, <b>nenhuma consulta existente muda de sentido</b> — as três
+travas de edição e os relatórios continuam intactos.</div>
+
+<!-- ============================================================ 4 -->
+<h2><span class="n">4</span> A tela do dono</h2>
+<div class="sub">Cinco blocos, na sua ordem — clica no que mudou, o resto nem entra no documento</div>
+
+<p>Você listou <b>cinco</b> alterações habituais; o mockup anterior tinha quatro, porque eu tinha juntado
+data e horário. Separei. E ao separar apareceu o motivo de fundo: <b>a data cai na cláusula 7 do seu
+contrato, o horário não cai em cláusula nenhuma.</b></p>
+
+<div class="tela">
+  <h4>Termo aditivo ao contrato nº 5 <span style="font-weight:400;color:#8A8475">· Cláudia Maria Almeida de Carvalho · orçamento nº 18 · casamento 15/01/2027</span></h4>
+
+  <!-- 1 DATA -->
+  <div class="bloco">
+    <div class="bh"><input type="checkbox" checked> <span>1 · Alterar a <b>data</b></span>
+      <span class="tag t-hoje" style="margin-left:auto">cai na cláusula 7</span></div>
+    <div class="bc" style="grid-template-columns:1fr 1fr 1fr">
+      <div class="cmp"><label>Data contratada</label><input value="15/01/2027" disabled style="background:#F6F3EC;color:#8A8475"><div class="de">sexta-feira</div></div>
+      <div class="cmp"><label>Nova data</label><input value="22/01/2027"><div class="de" style="color:#1c7a4f;font-weight:700">✓ agenda livre nesse dia</div></div>
+      <div class="cmp"><label>Motivo (opcional)</label><input placeholder="a pedido da contratante"></div>
+      <div class="calc" style="border-color:#F0DDBA;background:#FFF6E8;color:#7A4E0C">
+        <b>O que a cláusula 7 exige — conferido automaticamente:</b><br>
+        ✓ <b>7.1</b> primeira alteração de data deste contrato (é permitida 1)<br>
+        ✓ <b>7.1</b> 133 dias de antecedência — o mínimo é 30<br>
+        ✓ <b>7.2</b> disponibilidade: 22/01/2027 está livre na agenda
+           <span style="color:#8A8475">(23 e 24/01 estão ocupados — Casamento Kelma)</span><br>
+        ✓ <b>7.3</b> nova data 7 dias após a original — o limite é 180<br>
+        → <b>7.2 cobra taxa de reagendamento de 10%</b>, que entra sozinha no bloco 5. Dá pra tirar.</div>
+    </div>
+  </div>
+
+  <!-- 2 HORÁRIO -->
+  <div class="bloco">
+    <div class="bh"><input type="checkbox" checked> <span>2 · Alterar o <b>horário</b></span>
+      <span class="tag t-novo" style="margin-left:auto">sem cláusula, sem taxa</span></div>
+    <div class="bc">
+      <div class="cmp"><label>Início</label><input type="time" value="19:00"><div class="de">era 18:00</div></div>
+      <div class="cmp"><label>Término</label><input type="time" value="23:40"><div class="de">sem mudança</div></div>
+      <div class="cmp"><label>Termina no dia seguinte?</label>
+        <select><option>Não — mesmo dia</option><option>Sim — vira o dia</option></select>
+        <div class="de">os aditivos da Gardênia e da Grazielly viravam a madrugada</div></div>
+      <div class="calc">Campo de <b>hora de verdade</b>, não texto livre. Hoje o orçamento guarda coisas como
+        <code>"22"</code>, <code>"17"</code> e <code>"01h"</code> — imprimir isso num documento assinado é
+        pedir discussão na entrega.</div>
+    </div>
+  </div>
+
+  <!-- 3 CONVIDADOS -->
+  <div class="bloco">
+    <div class="bh"><input type="checkbox" checked> <span>3 · Alterar a <b>quantidade de convidados</b></span></div>
+    <div class="bc">
+      <div class="cmp"><label>Era</label><input value="115" disabled style="background:#F6F3EC;color:#8A8475"><div class="de">do orçamento nº 18</div></div>
+      <div class="cmp"><label>Passa a ser</label><input value="140"><div class="de">subiu → título vira <b>ACRÉSCIMO</b></div></div>
+      <div class="cmp"></div>
+    </div>
+  </div>
+
+  <!-- 4 SERVIÇOS -->
+  <div class="bloco off">
+    <div class="bh"><input type="checkbox"> <span>4 · Alterar os <b>serviços contratados</b></span></div>
+    <div class="bc" style="grid-template-columns:1fr 1fr">
+      <div class="cmp"><label>Itens que saem (do orçamento nº 18)</label>
+        <select multiple style="height:78px"><option>LOCAÇÃO CLIMATIZADORES (4)</option><option>LOCAÇÃO COZINHA (1)</option><option>LOCAÇÃO FREEZER (2)</option><option>LOCAÇÃO LEDS (15)</option><option>LOCAÇÃO SUÍTE (2)</option><option>LOCAÇÃO UTENSÍLIOS/LOUÇAS (1)</option></select>
+        <div class="de">a lista sai dos 7 itens que já estão no orçamento</div></div>
+      <div class="cmp"><label>Passam a ser</label><textarea placeholder="01 (um) monitor para área kids, e louças limitado a atender até 100 pessoas"></textarea>
+        <div class="de">texto livre — foi assim no aditivo da Grazielly</div></div>
+    </div>
+  </div>
+
+  <!-- 5 VALOR -->
+  <div class="bloco">
+    <div class="bh"><input type="checkbox" checked> <span>5 · Ajustar o <b>valor</b></span>
+      <span class="tag t-novo" style="margin-left:auto">marcou sozinho: a data mudou</span></div>
+    <div class="bc" style="grid-template-columns:1fr 1fr 1fr">
+      <div class="cmp"><label>Total de hoje</label><input value="R$ 7.750,00" disabled style="background:#F6F3EC;color:#8A8475"></div>
+      <div class="cmp"><label>Diferença pelos 25 convidados</label><input value="R$ 1.250,00"><div class="de">você digita — o sistema não chuta</div></div>
+      <div class="cmp"><label>Taxa de reagendamento (10%)</label><input value="R$ 900,00"><div class="de" style="color:#7A4E0C">veio da cláusula 7.2 · <u>zerar</u></div></div>
+      <div class="cmp"><label>Vencimento da diferença</label><input value="20/12/2026"></div>
+      <div class="cmp"><label>Forma de pagamento</label><select><option>PIX / transferência</option><option>Cartão de crédito</option><option>Boleto</option></select></div>
+      <div class="cmp"></div>
+      <div class="calc">A cobrar agora: R$ 1.250,00 + R$ 900,00 = <b>R$ 2.150,00</b> ·
+        novo total do contrato: <b>R$ 9.900,00</b><br>
+        <span style="color:#8A8475">Este bloco é o único que se marca sozinho — “dependendo da alteração, há
+        alteração no valor”, como você disse. Se nada mudar de preço, é só desmarcar.</span></div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:9px;margin-top:14px;flex-wrap:wrap;align-items:center">
+    <button class="btnp">Gerar aditivo e mandar pro cliente</button>
+    <button class="btns">Ver prévia</button>
+    <span style="font-size:12.5px;color:#8A8475">sai um aditivo com <b>4 cláusulas</b> (serviços ficou de fora)</span>
+  </div>
+</div>
+
+<div class="nota"><b>Por que a data merece bloco próprio, em uma linha:</b> mudar o horário é digitar dois
+campos; mudar a data é conferir quatro regras do contrato, olhar a agenda e possivelmente cobrar 10%. Se
+fossem o mesmo bloco, ou a conferência apareceria em cima de quem só queria adiantar meia hora, ou não
+apareceria pra ninguém.</div>
+
+<!-- ============================================================ 5 -->
+<h2><span class="n">5</span> O documento que o cliente recebe</h2>
+<div class="sub">Mesma página do contrato, mesmo link público, mesma assinatura — <code>/aditivo/&lt;token&gt;</code></div>
+
+<div class="pg">
+  <div class="hd">
+    <div><div class="lg">M S DE SOUSA JUNIOR FESTAS E EVENTOS</div>
+         <div class="sb">Termo aditivo ao contrato de locação</div></div>
+    <div class="mt"><b>1º Aditivo</b>ao contrato nº 5<br>04/09/2026</div>
+  </div>
+  <div class="bd">
+
+    <div class="eb">Partes</div>
+    <div class="partes">
+      <div class="parte"><div class="p">Contratada (locadora)</div>
+        <b>M S DE SOUSA JUNIOR FESTAS E EVENTOS</b>
+        <small>CNPJ 52.752.898/0001-58</small>
+        <small>Rua Deoclécio Brito, 3399 · Planalto · Teresina/PI</small></div>
+      <div class="parte"><div class="p">Contratante (locatário)</div>
+        <b>Claudia Maria Almeida de Carvalho</b>
+        <small>CPF 077.148.093-88</small>
+        <small>Rua Benjamin Constant · Centro · CEP 64000-280 · Teresina/PI</small></div>
+    </div>
+
+    <div class="eb">Contrato original</div>
+    <div class="ev" style="grid-template-columns:1fr 1fr 2fr">
+      <div><div class="k">Contrato</div><div class="v">nº 5</div></div>
+      <div><div class="k">Celebrado em</div><div class="v">02/09/2026</div></div>
+      <div><div class="k">Orçamento</div><div class="v">nº 18 · Casamento · 15/01/2027</div></div>
+    </div>
+    <div class="ctrb" style="margin-top:9px;font-size:12.5px;color:#5A6678">Cujas cláusulas permanecem em
+vigor, exceto naquilo que forem alteradas pelo presente instrumento.</div>
+
+    <div class="eb">Objeto do termo aditivo</div>
+    <div class="ctrc"><div class="ctrt">1. ALTERAÇÃO NA DATA</div>
+      <div class="ctrb">A data de realização do evento será alterada para <b>22 de janeiro de 2027</b>, em
+substituição à data originalmente contratada de <span class="antes">15 de janeiro de 2027</span>, nos termos
+da Cláusula 7 do contrato original.</div></div>
+
+    <div class="ctrc"><div class="ctrt">2. ALTERAÇÃO NO HORÁRIO</div>
+      <div class="ctrb">O horário de início será alterado para às <b>19:00h</b> do dia 22/01/2027 e término
+às <b>23:40h</b> do dia 22/01/2027.</div></div>
+
+    <div class="ctrc"><div class="ctrt">3. ACRÉSCIMO DE CONVIDADOS</div>
+      <div class="ctrb">O número de convidados para prestação de serviços passa a ser <b>140 (cento e
+quarenta)</b> convidados, em substituição à quantidade originalmente estabelecida de <span class="antes">115
+(cento e quinze)</span> convidados.</div></div>
+
+    <div class="ctrc"><div class="ctrt">4. AJUSTE NO VALOR</div>
+      <div class="ctrb">O valor total do contrato será alterado para <b>R$ 9.900,00 (nove mil e novecentos
+reais)</b>. Considerando as modificações realizadas, o valor de <b>R$ 2.150,00 (dois mil, cento e cinquenta
+reais)</b> — sendo R$ 1.250,00 referentes ao acréscimo de 25 convidados e R$ 900,00 referentes à taxa de
+reagendamento prevista na Cláusula 7.2 — será pago nas condições abaixo descritas:
+  ○ Pagamento via chave PIX: primeeventosthe@gmail.com, com vencimento em 20/12/2026.</div></div>
+
+    <div class="eb">Disposições gerais</div>
+    <div class="ctrb" style="font-size:12.5px">1. Permanecem inalteradas todas as demais cláusulas e condições
+estabelecidas no contrato original, que não tenham sido expressamente modificadas por este termo aditivo.
+2. Este termo aditivo entra em vigor na data de sua assinatura pelas partes e passa a integrar o contrato
+original para todos os fins de direito.</div>
+
+    <form class="sign">
+      <h3>✍️ Assinar o termo aditivo</h3>
+      <p>Ao assinar, você aceita as alterações acima. O contrato nº 5 continua valendo em tudo o mais.
+      Fica registrado com nome, CPF, data/hora e IP.</p>
+      <div class="rowi"><input value="Claudia Maria Almeida de Carvalho"><input value="077.148.093-88"></div>
+      <button class="go">Assinar o aditivo</button>
+    </form>
+
+    <div class="ft">Teresina — PI, 04 de setembro de 2026 · Documento gerado eletronicamente.</div>
+  </div>
+</div>
+
+<div class="alerta"><b>Duas frases do papel não sobrevivem ao digital, e não sou eu que decido.</b>
+O modelo diz “assinam este termo aditivo em <b>02 (Duas) vias de igual teor</b>, na presença de <b>02 (Duas)
+testemunhas</b>”. No link não há vias nem testemunhas — e dos quatro aditivos reais, <b>três foram
+assinados sem testemunha nenhuma</b> (só o da Gardênia tem uma: Pedro Yan Mendes Valença). Manter a frase é
+o documento afirmar algo que não aconteceu.</div>
+
+<div class="nota"><b>Um erro de digitação do modelo, pra você conferir:</b> no bloco de assinatura, embaixo
+de “CONTRATADO:” está escrito “M S DE SOUSA JUNIOR FESTAS E EVENTOS <b>CONTRATANTE</b>”. A palavra
+CONTRATANTE está no lado do contratado, nas 4 vias. Se a gente gerar pelo sistema, isso some sozinho —
+mas é bom você saber que estava lá.</div>
+
+<!-- ============================================================ 6 -->
+<h2><span class="n">6</span> O que acontece quando ele assina</h2>
+<div class="sub">A parte que decide se isso vale a pena ou se é um Word mais bonito</div>
+
+<p>Se o aditivo só gerar papel, ele resolve metade do problema: o documento sai bonito e <b>o sistema
+continua achando que o evento é 115 pessoas às 18:00 por R$ 7.750</b>. A equipe monta no horário errado e
+os R$ 1.250 não existem em lugar nenhum.</p>
+
+<table>
+<tr><th style="width:24%">Cláusula assinada</th><th style="width:38%">O que o sistema grava</th><th>Por que</th></tr>
+<tr><td><b>Data</b></td><td><code>orcamentos.evento.data</code> <b>e</b> <code>eventos_agenda.inicio/fim</code> (evento 581)</td><td>é o dia em que a equipe aparece. Documento dizendo 22 e agenda dizendo 15 é a pior falha possível</td></tr>
+<tr><td><b>Horário</b></td><td><code>evento.inicio</code> / <code>evento.fim</code> + a mesma linha da agenda</td><td>idem, na hora</td></tr>
+<tr><td><b>Convidados</b></td><td><code>orcamentos.evento.convidados</code> 115 → 140</td><td>é o número que a cozinha e o buffet leem</td></tr>
+<tr><td><b>Valor</b></td><td>novo total no orçamento + <b>um título a receber</b> de R$ 1.250,00 com o vencimento digitado</td><td>senão a diferença combinada não vira cobrança</td></tr>
+<tr><td><b>Serviços</b></td><td><code>orcamentos.itens</code></td><td>é de onde sai a lista de montagem</td></tr>
+<tr><td colspan="3" style="background:#F6F3EC"><b>Em todos os casos:</b> o texto do aditivo é congelado no ato
+(igual ao contrato), e o orçamento volta a ficar travado depois. A trava não some — ela passa a ter uma porta.</td></tr>
+</table>
+
+<div class="perigo"><b>Achado ao conferir a agenda pra este mockup: o casamento da Cláudia está lançado
+DUAS vezes.</b> Evento <b>581</b> (“Casamento — Claudia Maria Almeida de Carvalho”, com término 02:40) e
+evento <b>578</b> (“Casamento”, sem nome), os dois em 15/01/2027 às 21:00 UTC. O orçamento aponta pro 581.
+Se o aditivo mudar a data, ele move o 581 e <b>deixa o 578 parado no dia 15</b> — a agenda passa a mostrar
+um casamento fantasma na data velha. Isso precisa ser resolvido antes (ou junto), e não é problema do
+aditivo: é o mesmo tipo de duplicata que a tela de clientes duplicados já trata.</div>
+
+<div class="nota"><b>Escrever só na assinatura, nunca antes.</b> Mesma regra do contrato: a assinatura é o
+fato. Enquanto o cliente não assinou, o aditivo é proposta e nada muda no sistema — se ele nunca assinar, o
+evento continua exatamente como estava, e ninguém precisa desfazer nada.</div>
+
+<div class="nota"><b>E o título a receber nasce autorizado</b>, pela regra que subiu hoje de manhã: dinheiro
+entrando não pede liberação do dono. Só conta a pagar espera.</div>
+
+<!-- ============================================================ 7 -->
+<h2><span class="n">7</span> O que eu preciso que você decida</h2>
+<div class="sub">Quatro perguntas — o resto eu toco sozinho</div>
+
+<div class="q"><div class="qt">1. O aditivo assinado muda o sistema, ou só gera o papel?</div>
+<div class="qo"><span class="rec">Minha recomendação: muda o sistema</span>, do jeito da tabela acima —
+convidados, horário, agenda, valor e título a receber. É a diferença entre resolver o problema e ter um
+gerador de documento. Se você preferir por partes (ex.: só o papel agora, o resto depois), também dá.</div></div>
+
+<div class="q"><div class="qt">2. A taxa de reagendamento de 10% entra marcada ou desmarcada?</div>
+<div class="qo">Ela está no seu contrato (cláusula 7.2) e nenhum dos quatro aditivos reais cobrou — porque
+nenhum mudou data. <span class="rec">Minha recomendação: entra marcada, com o valor calculado e fácil de
+zerar</span> — assim você decide caso a caso e nunca esquece que ela existe. O contrário (entrar zerada)
+faz a taxa sumir na pressa.</div></div>
+
+<div class="q"><div class="qt">3. Testemunhas e “02 vias”: mantém, tira ou adapta?</div>
+<div class="qo">Três opções: (a) tirar as duas frases, já que o registro digital é nome + CPF + data/hora +
+IP; (b) manter o texto e deixar campo pra testemunha assinar depois no papel; (c) trocar por uma frase que
+descreva o que de fato acontece. <span class="rec">Eu não decido isso sozinho</span> — é texto jurídico do
+seu contrato.</div></div>
+
+<div class="q"><div class="qt">4. Quem pode fazer aditivo?</div>
+<div class="qo">O contrato hoje é gerado pelo sistema sem pedir papel de ninguém. O aditivo mexe em preço de
+negócio fechado. <span class="rec">Minha recomendação: só dono e gestor</span> — vendedor pede, você
+libera. Mas se na Prime é a Jacqueline quem trata o cliente, talvez trave mais do que ajude; você conhece a
+rotina.</div></div>
+
+<!-- ============================================================ 8 -->
+<h2><span class="n">8</span> O que a revisão achou faltando</h2>
+<div class="sub">Quatro buracos no desenho anterior — todos meus</div>
+
+<div class="card">
+<p style="margin:0 0 10px"><b>1. O contrato original não conta que foi alterado.</b> Hoje a página do
+contrato termina com “<i>Guarde este link: ele é o seu contrato</i>”. Se a Cláudia abrir aquele link depois
+do aditivo, lê 115 convidados e 15/01 — o documento certo dizendo o errado. O contrato assinado <b>não pode
+ser reescrito</b> (é o congelamento que dá valor a ele), então o que entra é uma tarja no topo:
+“<i>Este contrato foi alterado pelo 1º termo aditivo em 05/09/2026 — ver aditivo</i>”, com link. Vale nos
+dois sentidos: o aditivo já linka o original.</p>
+
+<p style="margin:0 0 10px"><b>2. A segunda alteração de data: avisa, não trava.</b> A cláusula 7.1 permite
+<b>uma</b> alteração. Eu não tinha dito o que acontece na segunda. Pela regra que você já deu em contas a
+pagar — <b>“só avisa, não trava”</b> —, a tela mostra “<i>este contrato já teve 1 alteração de data em
+22/01/2027; a cláusula 7.1 prevê uma</i>” e deixa seguir. Mesma coisa quando faltarem menos de 30 dias ou a
+nova data passar dos 180: o sistema diz qual regra está sendo furada e você decide. Quem manda no contrato
+é você, não a tela.</p>
+
+<p style="margin:0 0 10px"><b>3. Aditivo enviado e não assinado precisa poder ser cancelado.</b> Você vai
+errar um valor uma hora e mandar mesmo assim. Enquanto ninguém assinou, o aditivo é rascunho: dá pra
+cancelar e refazer. <b>Depois de assinado, não</b> — aí é outro aditivo, igual ao contrato.</p>
+
+<p style="margin:0"><b>4. O aditivo tem que aparecer nas telas que listam contrato.</b> O relatório de
+contratos (<code>painel_relatorios.py:892</code>) lista “todos os contratos vivos”. Um contrato com aditivo
+assinado que aparece lá com o valor velho é o mesmo erro do item 1, só que na sua tela em vez da do cliente.</p>
+</div>
+
+<div class="ftr">Fontes deste desenho: o PDF de 16 páginas que você mandou (modelo + 4 aditivos reais);
+<code>finance/contrato.py</code>, <code>web/contrato_publico.py</code>, <code>db/migracoes/164_contratos.sql</code>;
+e leitura da produção em 04/09/2026 — 4 contratos na conta 34, 2 assinados (Cláudia nº 5 e Bianca nº 3),
+<b>zero aditivos</b>.</div>
+
+</div></body></html>

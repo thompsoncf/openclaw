@@ -20,6 +20,7 @@ Dados reais, reaproveitando o que já existe:
                         % configurada aparece com comissão R$ 0,00 e um aviso na tela
                         apontando pra Equipe.
 """
+import logging
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Form, Request
@@ -32,6 +33,8 @@ from finance import empresa as emp
 from finance import models as mod
 from finance import vendas
 from web.portal import _render, _env, conta_logada, brl as _brl, _mascara_cnpj
+
+_log = logging.getLogger("painel.relatorios")
 
 router = APIRouter()
 
@@ -921,6 +924,33 @@ def _dados_orcamentos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) 
     }
 
 
+def _aditivos_vigentes(pool, conta_id, contrato_ids) -> dict:
+    """{contrato_id: {"ordem": n, "valor": centavos}} do ÚLTIMO aditivo assinado.
+
+    Numa consulta só pra lista inteira — por linha seriam 300 consultas numa tela
+    que já é a mais pesada do painel. Tolerante: base sem a 201 devolve vazio e o
+    relatório abre com os valores de sempre."""
+    ids = [i for i in (contrato_ids or []) if i]
+    if not ids:
+        return {}
+    try:
+        with pool.connection() as c:
+            rows = c.execute(
+                """select contrato_id, ordem, valor_novo_centavos from (
+                     select contrato_id, ordem, valor_novo_centavos,
+                            row_number() over (partition by contrato_id
+                                               order by ordem desc) rn
+                       from contrato_aditivos
+                      where conta_id=%s and status='assinado'
+                        and contrato_id = any(%s)) t
+                    where rn = 1""", (conta_id, ids)).fetchall()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("relatório de contratos: sem aditivos (%s: %s)",
+                     type(e).__name__, e)
+        return {}
+    return {r[0]: {"ordem": r[1], "valor": r[2]} for r in rows}
+
+
 def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> dict:
     """TODOS os contratos vivos (sem os substituídos por aditivo — mesma trava de
     `finance/contrato.por_orcamento`). Vendedor vem do orçamento de origem: o
@@ -986,7 +1016,7 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -
                        -- membro OU a palavra 'dono'.
                        coalesce(m.nome, case when o.criado_por = 'dono' then ct.nome end, '—'),
                        coalesce(c.valor_centavos, 0), c.token,
-                       c.enviado_em, o.numero
+                       c.enviado_em, o.numero, c.id
                   from contratos c {join_sql}
                   left join membros m on m.id::text = o.criado_por and m.conta_id = c.conta_id
                   left join contas ct on ct.id = c.conta_id
@@ -994,13 +1024,22 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -
                  order by c.criado_em desc limit 300""",
             params2).fetchall()
 
+    # O VALOR QUE VALE HOJE, não o congelado na assinatura. Contrato com aditivo
+    # assinado aparecendo aqui com o valor velho é o mesmo defeito da folha do
+    # cliente sem tarja — só que na tela do dono, que é quem decide com este
+    # número. Numa consulta só, e tolerante: base sem a 201 mostra o de antes.
+    vigentes = _aditivos_vigentes(pool, conta_id, [r[10] for r in rows])
+
     linhas = []
     for r in rows:
         rotulo, cor = CT_STATUS_TAG.get(r[2], (r[2] or "—", "neutro"))
+        vig = vigentes.get(r[10])
         linhas.append({
             "numero": r[0], "cliente": r[1], "status": rotulo, "status_cor": cor,
             "criado_em": _fmt(r[3]), "assinado_em": _fmt(r[4]),
-            "vendedor": r[5], "valor_centavos": int(r[6] or 0),
+            "vendedor": r[5],
+            "valor_centavos": int((vig or {}).get("valor") or r[6] or 0),
+            "aditivo": f"{vig['ordem']}º" if vig else "—",
             "enviado_em": _fmt(r[8]),
             "orcamento": f"nº {r[9]}" if r[9] else "—",
             "acao_href": f"/contrato/{r[7]}" if r[7] else None,
@@ -1013,6 +1052,7 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -
                     _col("status", "Status", tag=True), _col("criado_em", "Criado em"),
                     _col("enviado_em", "Enviado em"),
                     _col("assinado_em", "Assinado em"), _col("vendedor", "Vendedor"),
+                    _col("aditivo", "Aditivo"),
                     _col("valor_centavos", "Valor", num=True, brl=True)],
         "linhas": linhas, "col_total": "valor_centavos", "total_centavos": _soma(linhas, "valor_centavos"),
         "metricas": [("Total geral", _brl(v_assinado + v_aguardando + v_pronto + v_rescindido)),

@@ -62,15 +62,17 @@ def _linha_end(*partes) -> str:
     return " · ".join(p for p in (str(x or "").strip() for x in partes) if p)
 
 
-def carregar(token: str, pool=None) -> dict | None:
-    """Tudo que o documento precisa, numa consulta por token.
+def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
+    """As PARTES e o OBJETO, do jeito que um documento desta empresa se qualifica.
 
-    Devolve None quando o token não existe — a página responde 404 com texto de
-    gente, e não com stack trace."""
-    pool = pool or get_pool()
-    ct = ctr.por_token(pool, token)
-    if not ct:
-        return None
+    Extraída de `carregar` quando o termo aditivo precisou do mesmo cabeçalho: as
+    duas partes com documento e endereço, e o quadro do evento. Duplicar isso lá
+    seria repetir a decisão de qual coluna vence (`empresa` antes de `cliente`) e
+    a leitura do cadastro que completa o CPF — e é exatamente esse tipo de cópia
+    que o `finance/contrato` existe pra matar: um dia divergem e o contrato diz
+    um nome e o aditivo diz outro, no mesmo negócio.
+
+    Devolve None quando o orçamento não existe."""
     with pool.connection() as c:
         r = c.execute(
             """select o.cliente, o.empresa, o.cnpj, o.whatsapp, o.email, o.telefone,
@@ -83,7 +85,7 @@ def carregar(token: str, pool=None) -> dict | None:
                       o.cliente_id
                  from orcamentos o join contas ct on ct.id = o.conta_id
                 where o.id=%s and o.conta_id=%s""",
-            (ct["orcamento_id"], ct["conta_id"])).fetchone()
+            (orcamento_id, conta_id)).fetchone()
     if not r:
         return None
     (cli, emp_nome, cli_doc, whats, cli_email, cli_tel, cli_end, cli_cep, cli_cid,
@@ -115,28 +117,12 @@ def carregar(token: str, pool=None) -> dict | None:
     # Aqui, ANTES do contexto, pra as cláusulas e o quadro das partes lerem a
     # mesma coisa — foi de duas leituras do mesmo dado que nasceu o bug do e-mail
     # que mostrava contrato e mandava proposta.
-    orcamento = ctr.completar_do_cadastro(pool, ct["conta_id"], orcamento, cliente_id)
-
-    # "este orçamento pede entrada?" sai do mesmo lugar que a folha do cliente usa
-    # pra prometer o valor do sinal — duas leituras diferentes seriam dois números.
-    from finance import vendas
-    tem_sinal = vendas.valor_do_sinal(parcelas) > 0
-
-    assinado = bool(ct["assinado_em"])
-    if assinado and ct.get("texto"):
-        clausulas, faltas = ct["texto"], []
-    else:
-        modelo = ctr.carregar_modelo(pool, ct["conta_id"])
-        ctx = ctr.contexto(catalogo=scat.listar(pool, ct["conta_id"]),
-                           orcamento=orcamento, modelo=modelo, empresa=empresa)
-        clausulas, faltas = ctr.montar(modelo["clausulas"], ctx)
+    orcamento = ctr.completar_do_cadastro(pool, conta_id, orcamento, cliente_id)
     return {
-        "contrato": ct, "clausulas": clausulas, "faltas": faltas, "assinado": assinado,
-        "numero": ct["numero"], "token": ct["token"],
-        "assinado_por": ct["assinado_por"],
-        "assinado_em": (ct["assinado_em"].strftime("%d/%m/%Y às %H:%M")
-                        if ct["assinado_em"] else ""),
-        "criado_em": ct["criado_em"].strftime("%d/%m/%Y") if ct["criado_em"] else "",
+        "empresa": empresa, "orcamento": orcamento, "evento_bruto": evento,
+        "total": int(total or 0), "parcelas": parcelas,
+        "orc_status": orc_status or "", "sinal_pago_em": sinal_pago_em,
+        "orcamento_numero": numero,
         # AS PARTES, qualificadas pelos campos que o sistema já tem — não dependem
         # de a empresa ter citado cada um dentro de uma cláusula.
         "contratada": {
@@ -165,8 +151,56 @@ def carregar(token: str, pool=None) -> dict | None:
             "convidados": evento.get("convidados") or "",
         },
         "valor": ctr.reais(int(total or 0)),
-        "orcamento_numero": numero,
-        "orcamento_status": orc_status or "",
+    }
+
+
+def carregar(token: str, pool=None) -> dict | None:
+    """Tudo que o documento precisa, numa consulta por token.
+
+    Devolve None quando o token não existe — a página responde 404 com texto de
+    gente, e não com stack trace."""
+    pool = pool or get_pool()
+    ct = ctr.por_token(pool, token)
+    if not ct:
+        return None
+    q = qualificacao(pool, ct["conta_id"], ct["orcamento_id"])
+    if not q:
+        return None
+
+    # "este orçamento pede entrada?" sai do mesmo lugar que a folha do cliente usa
+    # pra prometer o valor do sinal — duas leituras diferentes seriam dois números.
+    from finance import vendas
+    tem_sinal = vendas.valor_do_sinal(q["parcelas"]) > 0
+
+    assinado = bool(ct["assinado_em"])
+    if assinado and ct.get("texto"):
+        clausulas, faltas = ct["texto"], []
+    else:
+        modelo = ctr.carregar_modelo(pool, ct["conta_id"])
+        ctx = ctr.contexto(catalogo=scat.listar(pool, ct["conta_id"]),
+                           orcamento=q["orcamento"], modelo=modelo,
+                           empresa=q["empresa"])
+        clausulas, faltas = ctr.montar(modelo["clausulas"], ctx)
+    orc_status = q["orc_status"]
+    return {
+        "contrato": ct, "clausulas": clausulas, "faltas": faltas, "assinado": assinado,
+        "numero": ct["numero"], "token": ct["token"],
+        "assinado_por": ct["assinado_por"],
+        "assinado_em": (ct["assinado_em"].strftime("%d/%m/%Y às %H:%M")
+                        if ct["assinado_em"] else ""),
+        "criado_em": ct["criado_em"].strftime("%d/%m/%Y") if ct["criado_em"] else "",
+        "contratada": q["contratada"],
+        "contratante": q["contratante"],
+        "evento": q["evento"],
+        "valor": q["valor"],
+        "orcamento_numero": q["orcamento_numero"],
+        "orcamento_status": orc_status,
+        # O CONTRATO ASSINADO NÃO É REESCRITO — o congelamento é o que dá valor a
+        # ele. Mas esta página termina dizendo "guarde este link: ele é o seu
+        # contrato", e sem esta tarja o cliente releria 115 convidados e 15/01
+        # depois de ter assinado a mudança. Documento certo dizendo o errado é
+        # pior que documento faltando.
+        "aditivo": _aditivo_aviso(pool, ct),
         # APROVOU, ASSINA. O contrato é amarrado ao ORÇAMENTO APROVADO e a mais nada
         # (decisão do dono em 01/09/2026).
         #
@@ -186,15 +220,26 @@ def carregar(token: str, pool=None) -> dict | None:
         # `sinal_pago` e `tem_sinal` seguem no dicionário: a página ainda os mostra
         # (é o que explica ao cliente o que falta pra data ficar firme), só não
         # mandam mais na assinatura.
-        "aprovada": (orc_status or "") in ("aprovada", "fechado"),
-        "sinal_pago": bool(sinal_pago_em),
+        "aprovada": orc_status in ("aprovada", "fechado"),
+        "sinal_pago": bool(q["sinal_pago_em"]),
         "tem_sinal": tem_sinal,
         # a ordem que a empresa escolheu (194) — muda o que a folha promete DEPOIS
         # da assinatura, não a cláusula 4.1, que é a mesma nos dois casos
         "assinar_antes": ctr.assina_antes_do_sinal(pool, ct["conta_id"]),
-        "pode_assinar": ((orc_status or "") in ("aprovada", "fechado")
-                         and not assinado),
+        "pode_assinar": (orc_status in ("aprovada", "fechado") and not assinado),
     }
+
+
+def _aditivo_aviso(pool, ct) -> dict | None:
+    """A tarja "alterado pelo Nº aditivo". Tolerante: base sem a 201 não derruba
+    a página do contrato, que é documento de cliente."""
+    try:
+        from finance import aditivo as _ad
+        return _ad.aviso_no_contrato(pool, ct["conta_id"], ct["id"])
+    except Exception as e:  # noqa: BLE001
+        _log.warning("contrato %s: não deu pra ler os aditivos: %s: %s",
+                     ct.get("id"), type(e).__name__, e)
+        return None
 
 
 @router.get("/contrato/{token}", response_class=HTMLResponse)
@@ -275,6 +320,9 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
 .ctrt{font-size:12.5px;font-weight:700;color:#14213D;margin-bottom:3px}
 .ctrb{font-size:13px;line-height:1.6;color:#3B4757;white-space:pre-wrap}
 .falta{background:#FFF6E8;border:1px solid #F0DDBA;border-radius:8px;padding:9px 11px;font-size:12px;color:#8A5A12;margin-bottom:12px}
+.tarja{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 13px;font-size:12.5px;color:#7A4E0C;margin-bottom:16px;line-height:1.55}
+.tarja b{color:#5C3A06}
+.tarja a{color:#7A4E0C;font-weight:700}
 .sign{margin-top:24px;background:#FBFAF7;border:1px solid #ECE7DC;border-radius:10px;padding:18px 20px}
 .sign h3{font-size:15px;margin-bottom:6px}
 .sign p{font-size:12.5px;color:#5A6678;line-height:1.55}
@@ -317,6 +365,19 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
       <div class="mt"><b>Contrato</b>nº {{ d.numero }}<br>{{ d.criado_em }}</div>
     </div>
     <div class="bd">
+
+      {% if d.aditivo %}
+      {# O contrato assinado NÃO é reescrito — é o congelamento que dá valor a ele.
+         Então quem avisa que o combinado mudou é esta tarja, e ela precisa vir
+         ANTES das partes: quem abre o link relê o documento de cima pra baixo, e
+         descobrir no rodapé que a data é outra é descobrir tarde. #}
+      <div class="tarja">Este contrato foi alterado pelo
+        <b>{{ d.aditivo.rotulo }} termo aditivo</b>{% if d.aditivo.quantos > 1 %}
+        (são {{ d.aditivo.quantos }} aditivos ao todo){% endif %}.
+        O que está escrito abaixo vale, <b>exceto naquilo que o aditivo alterou</b>.
+        {% if d.aditivo.token %}<a href="/aditivo/{{ d.aditivo.token }}">Ver o termo aditivo</a>{% endif %}
+      </div>
+      {% endif %}
 
       <div class="eb">Partes</div>
       <div class="partes">

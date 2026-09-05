@@ -80,6 +80,16 @@ def enviar_texto(conta_id: int, numero: str, texto: str) -> dict:
     return {"ok": False, "erro": r.get("erro") or "falha"}
 
 
+def grupos(conta_id: int) -> dict:
+    """Os grupos de WhatsApp em que o número conectado está: {ok, grupos:[{id, nome,
+    participantes}]}. É de onde o dono escolhe o grupo do Raio-X de segunda (o jid
+    de grupo termina em @g.us, e ninguém digita isso à mão).
+
+    Só leitura do socket (groupFetchAllParticipating). Sessão fora do ar devolve
+    {ok: False} e a tela diz "conecte o WhatsApp primeiro", em vez de lista vazia."""
+    return _req("GET", f"/session/{conta_id}/grupos")
+
+
 def aparelhos(conta_id: int) -> dict:
     """Quantos aparelhos estão ligados neste WhatsApp.
 

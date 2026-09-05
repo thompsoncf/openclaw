@@ -586,3 +586,45 @@ def test_o_aviso_da_outra_data_sai_no_site(pool):
 
 def test_reaplicar_a_205_nao_duplica(pool):
     assert _outra_data(pool)["id"] == _outra_data(pool)["id"]
+
+
+def _raio_x(pool) -> dict:
+    """Os avisos do Raio-X (208): a aba do app pro vendedor, o grupo de segunda
+    pro dono e gestor."""
+    with pool.connection() as c:
+        c.execute((BASE / "208_novidade_raio_x.sql").read_text(encoding="utf-8"))
+        c.commit()
+        rows = c.execute("""select chave, tipo, publico, pra_quem, resumo, link, id from novidades
+                            where chave in ('raio-x-no-app', 'raio-x-de-segunda')""").fetchall()
+    return {r[0]: {"tipo": r[1], "publico": r[2], "pra_quem": list(r[3]), "resumo": r[4],
+                   "link": r[5], "id": r[6]} for r in rows}
+
+
+def test_os_avisos_do_raio_x_miram_certo(pool):
+    """A aba é do vendedor, no app; o grupo de segunda é de quem manda na conta
+    (é ele quem escolhe o grupo em Equipe). Os dois são de qualquer nicho."""
+    a = _raio_x(pool)
+    assert set(a) == {"raio-x-no-app", "raio-x-de-segunda"}
+    assert a["raio-x-no-app"]["publico"] == "todos" and a["raio-x-no-app"]["pra_quem"] == ["vendedor"]
+    assert a["raio-x-no-app"]["link"] == "/cockpit/raio-x"
+    assert a["raio-x-de-segunda"]["publico"] == "todos"
+    assert sorted(a["raio-x-de-segunda"]["pra_quem"]) == ["dono", "gestor"]
+    assert a["raio-x-de-segunda"]["link"] == "/painel/equipe"
+    for chave, x in a.items():
+        assert x["tipo"] == "novidade" and x["resumo"], chave
+
+
+def test_os_avisos_do_raio_x_chegam_em_quem_devem(pool):
+    _raio_x(pool)
+    for conta in (1, 3):     # com nicho e sem nicho: os dois são 'todos'
+        dono = {n["chave"] for n in nv.listar(pool, conta, papel="dono")}
+        vend = {n["chave"] for n in nv.listar(pool, conta, papel="vendedor")}
+        assert "raio-x-de-segunda" in dono and "raio-x-no-app" not in dono
+        assert "raio-x-no-app" in vend and "raio-x-de-segunda" not in vend
+    assert "raio-x-de-segunda" in {n["chave"] for n in nv.listar(pool, 1, papel="gestor")}
+
+
+def test_reaplicar_a_208_nao_duplica_nem_troca_id(pool):
+    antes = {k: v["id"] for k, v in _raio_x(pool).items()}
+    depois = {k: v["id"] for k, v in _raio_x(pool).items()}
+    assert antes == depois and len(antes) == 2

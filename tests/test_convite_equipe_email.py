@@ -133,3 +133,62 @@ def test_ja_tem_login_nao_manda_link_nem_email(monkeypatch):
     assert "equipe_link" not in req.session
     assert chamadas["n"] == 0                       # ninguém já-logado recebe e-mail de link
     assert "já tem login" in req.session["equipe_aviso"].lower()
+
+
+# ------------------------------------------------------------------ Raio-X de segunda (o grupo)
+def test_raio_x_escolher_grupo_salva_e_avisa(monkeypatch):
+    """O select manda `jid|nome`; ligado é o checkbox. O que chega em
+    `raio_x.definir` é o jid, o nome e o booleano, separados."""
+    _mock_dono(monkeypatch)
+    capt = {}
+    monkeypatch.setattr(pe, "get_pool", lambda: "POOL")
+    from finance import raio_x as rx
+    monkeypatch.setattr(rx, "definir", lambda pool, conta, jid, nome, ativo: capt.update(
+        pool=pool, conta=conta, jid=jid, nome=nome, ativo=ativo) or {"ok": True})
+    req = _req()
+    r = pe.painel_equipe_raio_x(req, grupo="120363012345@g.us|Vendas Prime", ativo="1")
+    assert r.status_code == 303 and r.headers["location"] == "/painel/equipe"
+    assert capt == {"pool": "POOL", "conta": 7, "jid": "120363012345@g.us", "nome": "Vendas Prime", "ativo": True}
+    assert "ligado" in req.session["equipe_aviso"]
+    # desligado
+    pe.painel_equipe_raio_x(_req_ := _req(), grupo="120363012345@g.us|Vendas Prime", ativo="")
+    assert capt["ativo"] is False and "desligado" in _req_.session["equipe_aviso"]
+
+
+def test_raio_x_grupo_invalido_vira_erro_na_tela(monkeypatch):
+    _mock_dono(monkeypatch)
+    from finance import raio_x as rx
+    monkeypatch.setattr(rx, "definir", lambda *a: {"ok": False, "erro": "grupo_invalido"})
+    req = _req()
+    pe.painel_equipe_raio_x(req, grupo="5586999990000@s.whatsapp.net|x", ativo="1")
+    assert "equipe_aviso" not in req.session and "não vale" in req.session["equipe_erro"]
+
+
+def test_raio_x_so_o_dono_mexe(monkeypatch):
+    monkeypatch.setattr(pe, "conta_logada", lambda req: (7, "pj", "Emp"))
+    from finance import raio_x as rx
+    monkeypatch.setattr(rx, "definir", lambda *a: (_ for _ in ()).throw(AssertionError("não devia chamar")))
+    r = pe.painel_equipe_raio_x(_req("vendedor"), grupo="120363@g.us|x", ativo="1")
+    assert r.status_code == 303
+    r = pe.painel_equipe_raio_x_enviar(_req("vendedor"))
+    assert r.status_code == 303
+
+
+def test_raio_x_mandar_agora_traduz_os_erros(monkeypatch):
+    _mock_dono(monkeypatch)
+    from finance import raio_x as rx
+    for erro, frase in (("sem_grupo", "Escolha o grupo"), ("so_numero_proprio", "WhatsApp próprio"),
+                        ("desconectado", "desconectado"), ("timeout", "Não consegui mandar: timeout")):
+        monkeypatch.setattr(rx, "enviar_agora", lambda pool, conta, _e=erro: {"ok": False, "erro": _e})
+        req = _req()
+        pe.painel_equipe_raio_x_enviar(req)
+        assert frase in req.session["equipe_erro"], erro
+    monkeypatch.setattr(rx, "enviar_agora", lambda pool, conta: {"ok": True, "texto": "..."})
+    req = _req()
+    pe.painel_equipe_raio_x_enviar(req)
+    assert "enviado no grupo" in req.session["equipe_aviso"]
+    # estourou por dentro: vira erro na tela, não 500
+    monkeypatch.setattr(rx, "enviar_agora", lambda pool, conta: (_ for _ in ()).throw(RuntimeError("x")))
+    req = _req()
+    pe.painel_equipe_raio_x_enviar(req)
+    assert "RuntimeError" in req.session["equipe_erro"]

@@ -68,7 +68,9 @@ def painel_equipe(request: Request):
         return redir
     pool = get_pool()
     eq.garantir_tabela(pool)
+    raiox, grupos, raiox_qr = _raiox_contexto(pool, conta[0])
     return _render("equipe", request, tem_pj=True,
+                   raiox=raiox, grupos=grupos, raiox_qr=raiox_qr,
                    membros=eq.listar_equipe(pool, conta[0]),
                    papeis=[(p, eq.rotulo(p)) for p in eq.PAPEIS_PJ],
                    novo_link=request.session.pop("equipe_link", None),
@@ -76,6 +78,75 @@ def painel_equipe(request: Request):
                    senha_temp=request.session.pop("equipe_senha_temp", None),
                    aviso=request.session.pop("equipe_aviso", None),
                    erro=request.session.pop("equipe_erro", None))
+
+
+def _raiox_contexto(pool, conta_id: int):
+    """O bloco "Raio-X de segunda": a config guardada, os grupos em que o número
+    da empresa está (só com WhatsApp próprio conectado), e se o provedor é QR.
+    Tudo best-effort — a tela Equipe não pode deixar de abrir por causa disto."""
+    from finance import raio_x as _rx
+    cfg = None
+    try:
+        cfg = _rx.config(pool, conta_id)
+    except Exception:  # noqa: BLE001
+        cfg = None
+    qr = False
+    grupos = []
+    try:
+        from finance import whatsapp_out as _wo
+        with pool.connection() as c:
+            qr = _wo.provedor_da_conta(c, conta_id) == "qr"
+    except Exception:  # noqa: BLE001
+        qr = False
+    if qr:
+        try:
+            from finance import whatsapp_qr as _qr
+            r = _qr.grupos(conta_id)
+            if r.get("ok"):
+                grupos = r.get("grupos") or []
+        except Exception:  # noqa: BLE001
+            grupos = []
+    return cfg, grupos, qr
+
+
+@router.post("/painel/equipe/raio-x")
+def painel_equipe_raio_x(request: Request, grupo: str = Form(""), ativo: str = Form("")):
+    """O dono escolhe o grupo (valor = jid|nome, do select) e liga/desliga."""
+    conta, redir = _dono(request)
+    if redir is not None:
+        return redir
+    from finance import raio_x as _rx
+    jid, _, nome = (grupo or "").partition("|")
+    r = _rx.definir(get_pool(), conta[0], jid, nome, ativo == "1")
+    if r.get("ok"):
+        request.session["equipe_aviso"] = ("Raio-X de segunda ligado ✓ Toda segunda às 8h, no grupo escolhido."
+                                          if (ativo == "1" and jid) else "Raio-X de segunda salvo (desligado)." if not (ativo == "1") else
+                                          "Raio-X salvo. Escolha um grupo pra ele ter onde chegar.")
+    else:
+        request.session["equipe_erro"] = "Esse grupo não vale. Escolha um da lista."
+    return RedirectResponse("/painel/equipe", status_code=303)
+
+
+@router.post("/painel/equipe/raio-x/enviar")
+def painel_equipe_raio_x_enviar(request: Request):
+    """"Mandar agora": a semana corrente no grupo, pra ver como fica antes da
+    primeira segunda. Não passa pela trava de segunda."""
+    conta, redir = _dono(request)
+    if redir is not None:
+        return redir
+    from finance import raio_x as _rx
+    try:
+        r = _rx.enviar_agora(get_pool(), conta[0])
+    except Exception as e:  # noqa: BLE001
+        r = {"ok": False, "erro": f"{type(e).__name__}"}
+    if r.get("ok"):
+        request.session["equipe_aviso"] = "Raio-X enviado no grupo ✓"
+    else:
+        erros = {"sem_grupo": "Escolha o grupo primeiro.",
+                 "so_numero_proprio": "O Raio-X no grupo só sai pelo WhatsApp próprio (QR).",
+                 "desconectado": "O WhatsApp da empresa está desconectado."}
+        request.session["equipe_erro"] = erros.get(str(r.get("erro")), f"Não consegui mandar: {r.get('erro')}")
+    return RedirectResponse("/painel/equipe", status_code=303)
 
 
 @router.post("/painel/equipe/convidar")
@@ -459,6 +530,43 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
       </div>
     </div>
     {% endfor %}
+  </div>
+
+  {# ── Raio-X de segunda (mockup raio_x_como_fica): o grupo dos vendedores recebe o
+     placar da semana toda segunda às 8h. O dono escolhe o grupo aqui; sem grupo,
+     nada é enviado. Só com o WhatsApp da própria empresa (QR): grupo não existe
+     na API oficial. #}
+  <div class="papeis" style="margin-top:1.4rem">
+    <div class="ph-tt">🔎 Raio-X de segunda <span class="mut" style="font-weight:400">— o placar da semana no grupo dos vendedores</span></div>
+    <div class="mut" style="font-size:.82rem;line-height:1.5">Toda segunda às 8h o Zaq manda no grupo uma linha por vendedor (leads novos, 1ª resposta, propostas enviadas e em rascunho, quantos clientes esperando), a linha da empresa e a confiança do dado. O mesmo Raio-X está no app de cada um, na aba Raio-X.</div>
+    {% if raiox and raiox.grupo_jid %}
+    <div style="margin-top:.6rem;font-size:.84rem">Hoje: <b>{{ raiox.grupo_nome or raiox.grupo_jid }}</b>
+      {% if raiox.ativo %}<span class="mtag on">ligado</span>{% else %}<span class="mtag off">desligado</span>{% endif %}
+      {% if raiox.ultimo %}<span class="mut" style="font-size:.76rem"> · último envio: semana de {{ raiox.ultimo.semana.strftime('%d/%m') }}{% if raiox.ultimo.enviado_em %} ✓{% elif raiox.ultimo.erro %} ✗ {{ raiox.ultimo.erro }}{% endif %}</span>{% endif %}
+    </div>
+    {% else %}
+    <div style="margin-top:.6rem;font-size:.84rem"><span class="mtag pend">nenhum grupo escolhido</span> <span class="mut" style="font-size:.78rem">— nada é enviado até você escolher.</span></div>
+    {% endif %}
+    {% if not raiox_qr %}
+    <div class="mut" style="margin-top:.6rem;font-size:.8rem">O Raio-X no grupo só sai pelo WhatsApp da própria empresa (conectado por QR). Na API oficial não existe grupo.</div>
+    {% elif not grupos %}
+    <div class="mut" style="margin-top:.6rem;font-size:.8rem">Não consegui listar os grupos agora: confira se o WhatsApp da empresa está conectado, e se o número está no grupo da equipe.</div>
+    {% endif %}
+    <form method="post" action="/painel/equipe/raio-x" style="margin-top:.7rem;display:flex;gap:.5rem;align-items:end;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px"><label class="mut" style="font-size:.72rem">Grupo do WhatsApp</label>
+        <select name="grupo" style="width:100%">
+          <option value="">— escolha o grupo —</option>
+          {% for g in grupos %}<option value="{{ g.id }}|{{ g.nome }}" {% if raiox and raiox.grupo_jid == g.id %}selected{% endif %}>{{ g.nome or g.id }} ({{ g.participantes }})</option>{% endfor %}
+          {% if raiox and raiox.grupo_jid and not (grupos|selectattr('id','equalto',raiox.grupo_jid)|list) %}<option value="{{ raiox.grupo_jid }}|{{ raiox.grupo_nome or '' }}" selected>{{ raiox.grupo_nome or raiox.grupo_jid }}</option>{% endif %}
+        </select></div>
+      <label style="display:flex;align-items:center;gap:.4rem;font-size:.84rem;margin:0 .3rem .5rem 0"><input type="checkbox" name="ativo" value="1" {% if not raiox or raiox.ativo %}checked{% endif %} style="width:auto;margin:0"> ligado</label>
+      <button style="white-space:nowrap;margin:0;width:auto">Salvar</button>
+    </form>
+    {% if raiox and raiox.grupo_jid %}
+    <form method="post" action="/painel/equipe/raio-x/enviar" style="margin-top:.5rem">
+      <button style="white-space:nowrap;margin:0;width:auto;background:var(--card-2);border:1px solid var(--borda);color:var(--txt)">Mandar agora (a semana até aqui)</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 {% endblock %}"""

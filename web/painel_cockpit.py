@@ -57,6 +57,7 @@ from finance import cockpit_dono as cd
 router = APIRouter()
 
 _BASE = "/cockpit"
+_log = _logging.getLogger("cockpit.novidades")
 _PAPEIS_OK = ("vendedor", "gestor", "dono")
 
 
@@ -620,6 +621,26 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 }
 .aviso{margin:.2rem 0;padding:.55rem .7rem;border-radius:11px;font-size:.78rem;text-align:center;
   background:var(--surface);border:1px solid var(--line);color:var(--text-dim)}
+/* NOVIDADES no app (migração 199, mockup novidades_tres_lugares): a faixa em
+   cima da Fila aparece UMA vez por aviso e some ao tocar em "Ver" ou no ✕ —
+   as duas marcam lida. Nunca fica: faixa que fica vira papel de parede. */
+.faixa{margin:.2rem .8rem .5rem;border:1px solid var(--neon-borda);background:var(--neon-fundo);
+  border-radius:12px;padding:.5rem .3rem .5rem .7rem;font-size:.78rem;color:var(--text);
+  display:flex;align-items:center;gap:.5rem}
+.faixa>a{flex:1;min-width:0;color:inherit;text-decoration:none;display:flex;gap:.45rem;align-items:center}
+.faixa b{color:var(--neon-bright)}
+.faixa .ver{font-weight:600;color:var(--neon-bright);white-space:nowrap;margin-left:auto}
+.faixa form{margin:0}
+.faixa .x{background:none;border:0;color:var(--text-faint);font-size:1rem;padding:.2rem .5rem;width:auto;margin:0;line-height:1}
+.nvc{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.7rem .8rem;
+  margin-bottom:.5rem;font-size:.8rem;display:block;color:inherit;text-decoration:none}
+.nvc.nova{border-left:3px solid var(--neon)}
+.nvc.lida{opacity:.55}
+.nvc .t{font-weight:600;font-size:.86rem;display:flex;justify-content:space-between;gap:.5rem}
+.nvc .t small{font-family:var(--mono);font-weight:400;color:var(--text-faint);font-size:.66rem;white-space:nowrap}
+.nvc p{margin:.25rem 0 0;color:var(--text-dim);font-size:.76rem}
+.nvcorpo{white-space:pre-line;font-size:.86rem;line-height:1.5;color:var(--text)}
+.tabs .tsel.ok{background:var(--neon);color:var(--ink)}
 /* "este número tem outra conversa". Fica FORA do .chat de propósito: a conversa
    nasce rolada no fim (ver o script do rodapé), então um aviso no topo do
    histórico nunca seria lido por ninguém. */
@@ -1257,27 +1278,61 @@ def _hdr(titulo: str, sub: str = "", *, voltar: str = "", direita: str = "",
             + (f"<small>{esc(sub)}</small>" if sub else "") + f"</div>{direita}</div>")
 
 
-def _abas(itens, ativo: str, selos: dict | None = None) -> str:
-    """Barra de abas. É o que faltava no app do vendedor — ele tinha uma tela só."""
+def _abas(itens, ativo: str, selos: dict | None = None, verdes: tuple = ("perfil",)) -> str:
+    """Barra de abas. É o que faltava no app do vendedor — ele tinha uma tela só.
+
+    O selo da Fila é vermelho (cliente esperando); o do Perfil é verde (aviso por
+    ler): cor diferente porque a urgência é outra, e um vermelho a mais na barra
+    ensinaria o vendedor a ignorar o vermelho que importa."""
     selos = selos or {}
     out = []
     for chave, icone, rotulo, href in itens:
         on = " class=on" if chave == ativo else ""
         n = int(selos.get(chave) or 0)
-        selo = (f"<span class=tsel aria-label='{n} sem resposta'>"
+        verde = chave in verdes
+        classe = "'tsel ok'" if verde else "tsel"
+        rotulo_selo = "por ler" if verde else "sem resposta"
+        selo = (f"<span class={classe} aria-label='{n} {rotulo_selo}'>"
                 f"{n if n < 10 else '9+'}</span>") if n else ""
         out.append(f"<a{on} href='{esc(href)}'>{_ic(icone)}{selo}"
                    f"<span>{esc(rotulo)}</span></a>")
     return "<div class=tabs>" + "".join(out) + "</div>"
 
 
-def _abas_vend(ativo: str, pend: int = 0) -> str:
+def _abas_vend(ativo: str, pend: int = 0, novas: int = 0) -> str:
     return _abas([("fila", "fila", "Fila", _BASE),
                   ("agenda", "agenda", "Agenda", f"{_BASE}/agenda"),
                   ("orcamentos", "orc", "Propostas", f"{_BASE}/orcamentos"),
                   ("resultado", "resultado", "Resultado", f"{_BASE}/resultado"),
                   ("perfil", "perfil", "Perfil", f"{_BASE}/perfil")],
-                 ativo, {"fila": pend})
+                 ativo, {"fila": pend, "perfil": novas})
+
+
+def _novidades_vend(conta_id: int, membro_id: int) -> list[dict]:
+    """Os avisos que são do VENDEDOR (pra_quem contém 'vendedor'), com o estado de
+    lida dele. Best-effort, como `_pend_vend`: uma faixa não derruba a Fila."""
+    try:
+        from finance import novidades as nv
+        return nv.listar(get_pool(), conta_id, membro_id, "vendedor")
+    except Exception as e:  # noqa: BLE001
+        _log.warning("novidades do vendedor %s/%s: %s: %s", conta_id, membro_id,
+                     type(e).__name__, e)
+        return []
+
+
+def _faixa_novidade(itens: list[dict]) -> str:
+    """A faixa em cima da Fila: o aviso mais novo que ele ainda não leu, um só.
+    "Ver" abre o aviso (que marca lida ao abrir); o ✕ marca lida sem abrir."""
+    por_ler = [n for n in itens if not n["lida"]]
+    if not por_ler:
+        return ""
+    n = por_ler[0]
+    resumo = f" {esc(n['resumo'])}" if n.get("resumo") else ""
+    return (f"<div class=faixa><a href='{_BASE}/novidades/{n['id']}'>✨ "
+            f"<span><b>{esc(n['titulo'])}</b>{resumo}</span><span class=ver>Ver →</span></a>"
+            f"<form method=post action='{_BASE}/novidades/{n['id']}/lida'>"
+            f"<input type=hidden name=volta value=fila>"
+            f"<button type=submit class=x aria-label='Fechar o aviso'>✕</button></form></div>")
 
 
 def _pend_vend(conta_id: int, membro_id: int) -> int:
@@ -1646,8 +1701,13 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     rot_mes = next((m["rotulo"].lower() for m in fila["meses"] if m["on"]), "tudo")
     sub = (f"{len(leads)} abertos · {vez} sua vez" if filtro_entrou == "tudo"
            else f"{fila['n_quadro']} de {len(leads)} · {rot_mes} · {vez} sua vez")
+    # o aviso do vendedor (migração 199) só na fila DELE: o gestor vendo a equipe
+    # recebe os dele no painel, e a faixa aqui seria de outra pessoa.
+    novidades = [] if gestor else _novidades_vend(conta_id, membro_id)
+    novas = sum(1 for n in novidades if not n["lida"])
     corpo = (_hdr("Meus leads", sub, inicial=_ini(p["nome"]), direita=_selo(conta_id))
              + _flash(request)
+             + _faixa_novidade(novidades)
              + foco
              + f"<div class=scroll>{pushcard}{lista}{dica}{volta}</div>"
              # o "perguntar"/"confirmar" mora dentro do link do card: para o clique
@@ -1658,7 +1718,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
              + (f"<a class=fab href='{_BASE}/lead/novo' aria-label='Novo lead'>+</a>"
                 if not gestor else "")
              + "<div class=toast id=toast></div>"
-             + _abas_vend("fila", total_pend)
+             + _abas_vend("fila", total_pend, novas)
              + f'<script>window.CKBASE="{_BASE}";</script>' + vapid_js + _FILA_JS
              + _sinal_js(ck.sinal_fila(pool, conta_id, membro_id))
              + _badge_js(total_pend))
@@ -3690,8 +3750,22 @@ def cockpit_perfil(request: Request):
     return RedirectResponse("/cockpit/login", status_code=303)
 
 
+def _bloco_novidades(itens: list[dict]) -> str:
+    """A seção Novidades do Perfil: o que já leu vem apagado, o que falta vem com
+    a borda verde. Sem aviso nenhum, a seção não aparece — Perfil sem lista vazia."""
+    if not itens:
+        return ""
+    cards = "".join(
+        f"<a class='nvc{' lida' if n['lida'] else ' nova'}' href='{_BASE}/novidades/{n['id']}'>"
+        f"<span class=t>{esc(n['titulo'])}<small>{n['publicado_em'].strftime('%d/%m')}</small></span>"
+        + (f"<p>{esc(n['resumo'])}</p>" if n.get("resumo") else "") + "</a>"
+        for n in itens)
+    return f"<div class=eyebrow>Novidades</div><div class=bloco>{cards}</div>"
+
+
 def _perfil_vendedor(request: Request, conta_id: int, membro_id: int) -> HTMLResponse:
     p = ck.perfil(get_pool(), conta_id, membro_id)
+    novidades = _novidades_vend(conta_id, membro_id)
 
     def tgl(rotulo, sub, ligado, acao):
         # posta no endpoint que já existe no /cockpit e volta pra cá
@@ -3712,6 +3786,7 @@ def _perfil_vendedor(request: Request, conta_id: int, membro_id: int) -> HTMLRes
              + f"<div style='min-width:0'><b>{esc(p['nome'])}</b>"
                f"<div class=mut style='font-size:.78rem;word-break:break-word'>{esc(p['email'])}"
              + (f" · {esc(p['whatsapp'])}" if p["whatsapp"] else "") + "</div></div></div></div>"
+             + _bloco_novidades(novidades)
              + "<div class=eyebrow>Preferências</div><div class=bloco>"
              + tgl("Notificações push", "avisar quando cair um lead", p["push_ativo"], f"{_BASE}/perfil/push")
              + tgl("Receber no rodízio", "desligue pra pausar leads novos", not p["pausado"], f"{_BASE}/perfil/rodizio")
@@ -3722,7 +3797,8 @@ def _perfil_vendedor(request: Request, conta_id: int, membro_id: int) -> HTMLRes
              + "<div class=bloco><a class='btn ghost' style='margin-bottom:.5rem' "
                "href='/painel'>Abrir o painel completo</a>"
              + f"<a class='btn ghost' href='/cockpit/sair'>{_ic('sair', 'ic p')} Sair</a></div>"
-             + "</div>" + _abas_vend("perfil", _pend_vend(conta_id, membro_id)))
+             + "</div>" + _abas_vend("perfil", _pend_vend(conta_id, membro_id),
+                                     sum(1 for n in novidades if not n["lida"])))
     return _page("Meu perfil", corpo)
 
 
@@ -5073,6 +5149,63 @@ def cockpit_fechar(request: Request, lead_id: int, tipo: str = Form(...), motivo
         return RedirectResponse(_BASE, status_code=303)
     request.session["ck_err"] = _erro(r)
     return RedirectResponse(f"{_BASE}/lead/{lead_id}", status_code=303)
+
+
+@router.get("/cockpit/novidades/{nid}", response_class=HTMLResponse)
+def cockpit_novidade(request: Request, nid: int):
+    """O aviso aberto, no app. Abrir marca a 'novidade' como lida (ganhar uma tela
+    nova não precisa de confirmação); a 'mudanca' espera o "Entendi" — a mesma
+    regra do painel (web/portal.painel_novidades). O que a tela mostra é o
+    estado de ANTES de marcar, pra ele ainda ver o aviso como novo nesta visita."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    n = next((x for x in _novidades_vend(conta_id, membro_id) if x["id"] == nid), None)
+    if not n:
+        return _page("Aviso", _hdr("Aviso", voltar=f"{_BASE}/perfil")
+                     + "<div class=aviso>Esse aviso não é seu, ou não existe mais.</div>"
+                     + _abas_vend("perfil", _pend_vend(conta_id, membro_id)))
+    if n["tipo"] == "novidade" and not n["lida"]:
+        try:
+            from finance import novidades as nv
+            nv.marcar_lida(get_pool(), n["id"], conta_id, membro_id)
+        except Exception as e:  # noqa: BLE001
+            _log.warning("marcar novidade %s lida: %s: %s", nid, type(e).__name__, e)
+    tipo = "mudança" if n["tipo"] == "mudanca" else "novidade"
+    botoes = ""
+    if n["tipo"] == "mudanca" and not n["lida"]:
+        botoes += (f"<form method=post action='{_BASE}/novidades/{n['id']}/lida' style='margin:0 0 .5rem'>"
+                   "<input type=hidden name=volta value=perfil>"
+                   "<button type=submit class=btn>Entendi</button></form>")
+    if n.get("link"):
+        botoes += (f"<a class='btn ghost' href='{esc(n['link'])}'>"
+                   + ("Ver a Fila" if n["link"].rstrip("/") == _BASE else "Ver como ficou") + "</a>")
+    corpo = (_hdr(n["titulo"], f"{tipo} · {n['publicado_em'].strftime('%d/%m')}", voltar=f"{_BASE}/perfil")
+             + "<div class=scroll><div class=bloco>"
+             + f"<div class=card><div class=nvcorpo>{esc(n['corpo'])}</div></div>"
+             + f"<div style='margin-top:.6rem'>{botoes}</div>"
+             + "</div></div>"
+             + _abas_vend("perfil", _pend_vend(conta_id, membro_id)))
+    return _page(n["titulo"], corpo)
+
+
+@router.post("/cockpit/novidades/{nid}/lida")
+def cockpit_novidade_lida(request: Request, nid: int, volta: str = Form("perfil")):
+    """O "Entendi" da mudança, e o ✕ da faixa. Marca por PESSOA, e só o que este
+    vendedor enxerga — id de aviso de outro público não vira linha em
+    novidade_lida porque alguém postou o número."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    if any(x["id"] == nid for x in _novidades_vend(conta_id, membro_id)):
+        try:
+            from finance import novidades as nv
+            nv.marcar_lida(get_pool(), nid, conta_id, membro_id)
+        except Exception as e:  # noqa: BLE001
+            _log.warning("marcar novidade %s lida: %s: %s", nid, type(e).__name__, e)
+    return RedirectResponse(_BASE if volta == "fila" else f"{_BASE}/perfil", status_code=303)
 
 
 @router.post("/cockpit/perfil/push")

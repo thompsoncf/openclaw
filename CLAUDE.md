@@ -176,3 +176,33 @@ e mais commits do que a mudança tem**, porque está remontando o que já entrou
 Um segundo sinal, mais tardio: o CI fica “rodando” e nunca termina, ou o check do
 pytest simplesmente não aparece na lista. Antes de esperar mais, confira o
 `mergeable_state` do PR — `dirty` é isto aqui, não lentidão.
+
+## 5. PR que muda tela leva o aviso
+
+Regra do dono, dada em 05/09/2026, ao aprovar o mockup das Novidades em três
+lugares (`docs/mockups/novidades_tres_lugares.html`):
+
+O painel tem a tela Novidades desde 16/08 (`finance/novidades.py`, migração 174),
+com mira por público. Entre 19/08 e 05/09 ela ficou **17 dias sem aviso** —
+inclusive nas quatro entregas do funil de 05/09 (#622, #625, #626, #627), que
+mudaram o quadro de todo mundo e a Fila do vendedor sem ninguém ser avisado. Foi
+o autor do sistema de avisos que esqueceu de usá-lo.
+
+**Então, todo PR que muda o que uma pessoa vê ou faz na tela leva o aviso no
+mesmo PR**, como migração `NNN_novidade_<chave>.sql`, seguindo a receita da 175:
+
+1. Nomeie o portão que decide quem recebeu a mudança (`publico`). Se nenhum dos
+   portões de `finance.novidades.PUBLICOS` descreve o alcance, crie o portão no
+   código primeiro — aviso é o teste da própria gatilhagem.
+2. Diga **pra quem** é, por papel (`pra_quem`: dono, gestor, vendedor). O vendedor
+   só recebe o que muda a rotina dele; aviso de tela que ele não tem, nunca.
+3. Escreva o **resumo** (uma linha, tom de fora: é o que vai pro site em
+   `zaq-ia.com/atualizacoes`, via `GET /novidades.json`) separado do **corpo**
+   (fala com quem já usa). Aviso sem resumo não sai no site — é assim que um
+   aviso interno não vira público por esquecimento.
+4. `link` aponta pra tela que mudou ("Ver como ficou").
+5. A lista de quem recebe, por nome, vai no corpo do PR (`contas_alcancadas`).
+
+O que **não** precisa de aviso: correção que não muda tela, teste, mockup,
+documentação, mudança de serviço interno. Na dúvida, é 'novidade' com público
+'todos'.

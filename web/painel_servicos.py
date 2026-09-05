@@ -2188,6 +2188,33 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     <div id="ct-box"><p class="mut">Carregando...</p></div>
   </div>
 </div>
+
+{# TERMO ADITIVO: o mesmo card, pro documento que ALTERA o contrato acima.
+   Pedido do dono em 05/09/2026 — "deixar o aditivo igual o contrato, podendo
+   alterar alguma coisa nas cláusulas... e a gente replica". A incoerência que
+   ele apontou: o contrato era escrito por ele e o aditivo saía com texto escrito
+   dentro do código, no mesmo negócio e pro mesmo cliente.
+
+   Vem DEPOIS do contrato porque é o que emenda o de cima, e o mesmo gate
+   (`pode_contrato` = eventos + gerir): FAZER aditivo é dos três papéis, mas
+   ESCREVER o texto é do dono, igual ao contrato. #}
+<div class="card" id="ad-card">
+  <div id="ad-cab" style="display:flex;align-items:center;gap:.6rem;cursor:pointer;user-select:none">
+    <span id="ad-seta" style="color:var(--mut);font-size:.85rem;transition:transform .18s">▸</span>
+    <div style="min-width:0">
+      <div style="font-weight:700;font-size:1rem">Termo aditivo</div>
+      <div id="ad-resumo" class="mut" style="font-size:.78rem;margin-top:.1rem">Carregando...</div>
+    </div>
+  </div>
+  <div id="ad-corpo" style="display:none;margin-top:.85rem;padding-top:.85rem;border-top:1px solid var(--borda)">
+    <p class="mut" style="margin-top:0;font-size:.86rem">
+      O texto de cada alteração é seu. Os <b style="color:var(--verde-claro)">campos</b> trazem o
+      número novo e o antigo — é o que faz o documento dizer “passa a ser 140, em substituição a
+      115” sem ninguém digitar 140 nem 115.
+    </p>
+    <div id="ad-box"><p class="mut">Carregando...</p></div>
+  </div>
+</div>
 {% endif %}
 
 <div class="card"{% if servico_avulso %} style="display:none"{% endif %}>
@@ -4274,6 +4301,152 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   });
   carregarHist();
 })();
+
+  // ---------------------------------------------------------------- ADITIVO
+  // O MESMO card do contrato, pro documento que altera ele. Vive aqui e não em
+  // arquivo próprio porque compartilha o `esc` e o mesmo desenho de "inserir
+  // campo no cursor" — duas cópias disso divergiriam na primeira correção.
+  (function(){
+    var adBox=document.getElementById('ad-box');
+    if(!adBox) return;                       // conta sem contrato: não tem card
+    var CAMPOS=[], ORDEM=[], ROTULOS={}, ultimo=null;
+    function esc(t){var d=document.createElement('div');d.textContent=t==null?'':t;return d.innerHTML;}
+
+    document.getElementById('ad-cab').addEventListener('click',function(){
+      var c=document.getElementById('ad-corpo'), st=document.getElementById('ad-seta');
+      var abrindo=c.style.display==='none';
+      c.style.display=abrindo?'block':'none';
+      st.style.transform=abrindo?'rotate(90deg)':'';
+    });
+
+    function inserir(campo){
+      var t=ultimo; if(!t) return;
+      var a=t.selectionStart||0, b=t.selectionEnd||0, v=t.value;
+      t.value=v.slice(0,a)+'{'+campo+'}'+v.slice(b);
+      t.focus(); t.selectionStart=t.selectionEnd=a+campo.length+2;
+    }
+
+    function bloco(chave,t){
+      var d=document.createElement('div');
+      d.className='ad-cl'; d.setAttribute('data-k',chave);
+      d.style.cssText='border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem;background:var(--card-2)';
+      var extra = (chave==='convidados')
+        ? '<label class="mut" style="font-size:.68rem">Título quando DIMINUI</label>'
+          +'<input class="ad-tr oc-inp" style="width:100%;margin-bottom:.35rem" value="'+esc(t.titulo_reduz||'')+'">'
+        : '';
+      d.innerHTML=
+        '<div class="mut" style="font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.35rem">'
+        +esc(ROTULOS[chave]||chave)+'</div>'
+        +'<label class="mut" style="font-size:.68rem">'
+        +(chave==='convidados'?'Título quando AUMENTA':'Título')+'</label>'
+        +'<input class="ad-t oc-inp" style="width:100%;font-weight:600;margin-bottom:.35rem" value="'+esc(t.titulo||'')+'">'
+        +extra
+        +'<label class="mut" style="font-size:.68rem">Texto</label>'
+        +'<textarea class="ad-c oc-inp" rows="3" style="width:100%;font-family:var(--mono);font-size:.78rem;line-height:1.6">'+esc(t.corpo||'')+'</textarea>';
+      d.querySelector('.ad-c').addEventListener('focus',function(){ultimo=this;});
+      return d;
+    }
+
+    function textos(){
+      var out={};
+      document.querySelectorAll('#ad-lista .ad-cl').forEach(function(d){
+        var k=d.getAttribute('data-k');
+        out[k]={titulo:d.querySelector('.ad-t').value,corpo:d.querySelector('.ad-c').value};
+        var tr=d.querySelector('.ad-tr'); if(tr) out[k].titulo_reduz=tr.value;
+      });
+      out.disposicoes=(document.getElementById('ad-disp')||{}).value||'';
+      out.fecho=(document.getElementById('ad-fecho')||{}).value||'';
+      return out;
+    }
+
+    function desenhar(d){
+      CAMPOS=d.campos||[]; ORDEM=d.ordem||[]; ROTULOS=d.rotulos||{};
+      var r=d.resumo||{};
+      document.getElementById('ad-resumo').textContent = d.novo
+        ? 'Usando o texto padrão — abra pra escrever com as suas palavras.'
+        : '5 cláusulas · alterado em '+(r.em||'?')+(r.por?' por '+r.por:'');
+      adBox.innerHTML='<div id="ad-lista"></div>'
+        +'<div id="ad-campos" style="background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.8rem">'
+        +'<div class="mut" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.4rem">Campos — clique para inserir no texto</div>'
+        +'<div id="ad-chips" style="display:flex;flex-wrap:wrap;gap:.3rem"></div></div>'
+        +'<div style="background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.8rem">'
+        +'<div class="mut" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.4rem">Disposições gerais e fecho</div>'
+        +'<textarea id="ad-disp" class="oc-inp" rows="3" style="width:100%;font-family:var(--mono);font-size:.78rem;line-height:1.6;margin-bottom:.4rem">'+esc(d.textos.disposicoes||'')+'</textarea>'
+        +'<textarea id="ad-fecho" class="oc-inp" rows="3" style="width:100%;font-family:var(--mono);font-size:.78rem;line-height:1.6">'+esc(d.textos.fecho||'')+'</textarea></div>'
+        +'<div style="display:flex;gap:.45rem;flex-wrap:wrap">'
+        +'<button type="button" id="ad-salvar" class="oc-btn oc-btn-g" style="width:auto">Salvar modelo do aditivo</button>'
+        +'<button type="button" id="ad-previa" class="oc-pill">Pré-visualizar</button>'
+        +'<button type="button" id="ad-padrao" class="oc-pill">Restaurar modelo padrão</button></div>'
+        +'<div id="ad-msg" style="margin-top:.7rem"></div>';
+
+      var lista=document.getElementById('ad-lista');
+      ORDEM.forEach(function(k){ lista.appendChild(bloco(k, d.textos[k]||{})); });
+
+      var chips=document.getElementById('ad-chips');
+      CAMPOS.forEach(function(f){
+        var b=document.createElement('button');
+        b.type='button'; b.className='oc-pill';
+        b.style.cssText='font-family:var(--mono);font-size:.7rem;padding:.15rem .4rem'
+          +(f.grupo==='aditivo'?';border-color:var(--verde-borda,#2C6E52)':'');
+        b.textContent='{'+f.campo+'}'; b.title=f.rotulo;
+        b.addEventListener('click',function(){inserir(f.campo);});
+        chips.appendChild(b);
+      });
+
+      document.getElementById('ad-salvar').addEventListener('click',salvar);
+      document.getElementById('ad-previa').addEventListener('click',previa);
+      document.getElementById('ad-padrao').addEventListener('click',function(){
+        if(!confirm('Trocar o texto atual pelo modelo padrão? O que você escreveu será perdido.')) return;
+        fetch('/painel/servicos/aditivo-modelo/padrao',{method:'POST'})
+          .then(function(r){return r.json();})
+          .then(function(x){x.campos=CAMPOS;x.ordem=ORDEM;x.rotulos=ROTULOS;desenhar(x);});
+      });
+    }
+
+    function admsg(h){document.getElementById('ad-msg').innerHTML=h;}
+
+    function salvar(){
+      var b=document.getElementById('ad-salvar'), t=b.textContent; b.textContent='Salvando...';
+      fetch('/painel/servicos/aditivo-modelo/salvar',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({textos:textos()})})
+        .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+        .then(function(res){
+          b.textContent=t;
+          admsg(res.ok?'<span style="color:var(--verde-claro)">Salvo.</span>'
+                     :'<span style="color:var(--coral)">'+esc((res.d&&res.d.erro)||'Não consegui salvar.')+'</span>');
+          if(res.ok) carregar();
+        }).catch(function(){b.textContent=t;admsg('<span style="color:var(--coral)">Não consegui salvar.</span>');});
+    }
+
+    function previa(){
+      var b=document.getElementById('ad-previa'), t=b.textContent; b.textContent='Montando...';
+      fetch('/painel/servicos/aditivo-modelo/previa',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({textos:textos()})})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          b.textContent=t;
+          if(d.erro){admsg('<span class="mut">'+esc(d.erro)+'</span>');return;}
+          admsg('<div class="mut" style="font-size:.72rem;margin-bottom:.4rem">'
+                +'Prévia com os números do contrato nº '+esc(d.contrato)+' — só pra conferir o texto.</div>'
+                +'<div style="background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.7rem .85rem">'
+                +(d.clausulas||[]).map(function(c){
+                    return '<div style="margin-bottom:.6rem"><b style="font-size:.82rem">'+esc(c.titulo)
+                          +'</b><div style="font-size:.82rem;line-height:1.6;white-space:pre-wrap;color:var(--mut)">'
+                          +esc(c.corpo)+'</div></div>';}).join('')
+                +'</div>');
+        }).catch(function(){b.textContent=t;admsg('<span style="color:var(--coral)">Não consegui montar.</span>');});
+    }
+
+    function carregar(){
+      fetch('/painel/servicos/aditivo-modelo').then(function(r){return r.json();})
+        .then(desenhar)
+        .catch(function(){adBox.innerHTML='<p class="mut">Não consegui carregar.</p>';});
+    }
+    carregar();
+  })();
+
 </script>{% endraw %}
 {% endblock %}"""
 

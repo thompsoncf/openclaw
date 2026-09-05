@@ -88,6 +88,12 @@ create table servicos_catalogo (id bigserial primary key, conta_id bigint, slug 
 """
 
 
+def _migracao(nome: str) -> str:
+    caminho = os.path.join(os.path.dirname(__file__), "..", "db", "migracoes", nome)
+    with open(caminho, encoding="utf-8") as f:
+        return f.read()
+
+
 class _Req:
     """Só o que a rota lê do request: o IP."""
     headers: dict = {}
@@ -111,6 +117,7 @@ def pool(monkeypatch):
     with p.connection() as c:
         c.execute(_SQL)
         c.execute(_SQL_BASE)
+        c.execute(_migracao("203_aditivo_modelo.sql"))
         c.execute("insert into nichos (nome, slug, tipo) values ('Eventos','eventos','servico')")
         c.execute(
             """insert into contas (id, nome, razao_social, documento, endereco,
@@ -402,3 +409,60 @@ def test_o_funil_leva_ao_aditivo_sem_precisar_errar_antes():
     assert "it.contrato_assinado && it.contrato_id" in fonte
     assert "'/painel/servicos/aditivo/'+it.contrato_id" in fonte
     assert '"contrato_id": r[27]' in fonte
+
+
+# ==================================================== o modelo: quem escreve
+
+def test_escrever_o_texto_e_do_dono_mas_fazer_aditivo_e_dos_tres():
+    """A distinção que o desenho faz, e que é fácil de errar nos dois sentidos.
+
+    O card do contrato é gateado por `gerir` — só o dono — com o argumento de que
+    ele define o que a empresa se compromete a cumprir. O texto do aditivo é a
+    mesma natureza. Já FAZER o aditivo continua sendo dos três, senão a tela
+    voltaria a nascer invisível pro vendedor."""
+    from web import painel_aditivo as pa
+    import inspect
+    fonte = inspect.getsource(pa)
+    # a trava do modelo existe e usa a mesma capacidade do contrato
+    assert "_so_o_dono" in fonte and 'caps_do_papel(request.session.get("papel", "dono"))["gerir"]' in fonte
+    # e as quatro rotas do modelo passam por ela
+    for rota in ("aditivo_modelo", "aditivo_modelo_salvar",
+                 "aditivo_modelo_padrao", "aditivo_modelo_previa"):
+        corpo = inspect.getsource(getattr(pa, rota))
+        assert "_so_o_dono(request)" in corpo, rota
+    # enquanto criar/cancelar seguem no gate da aba (os três papéis)
+    for rota in ("aditivo_criar", "aditivo_cancelar"):
+        assert "_conta_servico(request)" in inspect.getsource(getattr(pa, rota)), rota
+
+
+def test_o_card_do_aditivo_esta_junto_do_card_do_contrato():
+    """Mesmo lugar, mesmo gate — o `pode_contrato` que já é eventos + dono."""
+    import inspect
+    from web import painel_servicos as ps
+    fonte = inspect.getsource(ps)
+    assert 'id="ad-card"' in fonte
+    assert "Salvar modelo do aditivo" in fonte
+    # dentro do mesmo {% if pode_contrato %} do contrato
+    trecho = fonte[fonte.index("{% if pode_contrato %}"):fonte.index('id="ad-card"')]
+    assert "{% endif %}" not in trecho
+
+
+def test_o_formulario_tem_o_sexto_bloco_de_texto_livre():
+    import web.app  # noqa: F401
+    from web.portal import _env
+    html = _env.get_template("painel_aditivo.html").render(
+        est={"contrato_id": 8, "contrato_numero": 5, "cliente": "Claudia",
+             "orcamento_numero": 18, "tipo": "Casamento", "data": "2027-01-15",
+             "inicio": "18:00", "fim": "23:40", "convidados": 115,
+             "valor_centavos": 775000},
+        aberto=None, anteriores=[], pct_taxa="10", valor_atual="R$ 7.750,00",
+        itens=[], erro="", logado=True, titulo="Termo aditivo",
+        secao_ativa="servicos",
+        caps={"vendas": True, "financeiro": False, "gerir": False}, papel="vendedor",
+        n_contextos=0, versao_app="x", ve_novidades=False, conta=None,
+        tem_cesta=False, tem_pj=True, vende_produto=False, vende_servico=True,
+        beta_gratis=True, plano_aviso=None, empresa_nome="Prime")
+    assert "6 · " in html and "Outra alteração" in html
+    assert 'name="avulsa_titulo"' in html and 'name="avulsa_texto"' in html
+    # e diz o que ela NÃO faz — é o que impede alguém esperar efeito dela
+    assert "não muda nada no sistema" in html

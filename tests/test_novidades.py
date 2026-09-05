@@ -509,3 +509,38 @@ def test_o_aviso_do_aditivo_sai_no_site(pool):
 
 def test_reaplicar_a_202_nao_duplica_nem_troca_id(pool):
     assert _aditivo(pool)["id"] == _aditivo(pool)["id"]
+
+
+# ------------------------------------------ 204: o texto do aditivo é do dono
+
+def _aditivo_texto(pool) -> dict:
+    with pool.connection() as c:
+        c.execute((BASE / "204_novidade_aditivo_texto.sql").read_text(encoding="utf-8"))
+        c.commit()
+        r = c.execute("""select tipo, publico, pra_quem, resumo, link, id
+                           from novidades where chave='aditivo-texto-editavel'""").fetchone()
+    return {"tipo": r[0], "publico": r[1], "pra_quem": list(r[2]), "resumo": r[3],
+            "link": r[4], "id": r[5]}
+
+
+def test_o_aviso_do_texto_do_aditivo_nao_vai_pro_vendedor(pool):
+    """Ao contrário do aviso do aditivo em si (202), que foi pros três.
+
+    A régua da seção 5 é "aviso de tela que ele não tem, nunca": o card do modelo
+    é gateado por `gerir`. O vendedor FAZ aditivo, mas não escreve o texto."""
+    a = _aditivo_texto(pool)
+    assert sorted(a["pra_quem"]) == ["dono", "gestor"]
+    assert nv.nichos_alcancados(a["publico"]) == {"eventos"}
+    ev_vend = {n["chave"] for n in nv.listar(pool, 1, papel="vendedor")}
+    ev_dono = {n["chave"] for n in nv.listar(pool, 1, papel="dono")}
+    assert "aditivo-texto-editavel" not in ev_vend
+    assert "aditivo-texto-editavel" in ev_dono
+
+
+def test_o_aviso_do_texto_do_aditivo_sai_no_site(pool):
+    _aditivo_texto(pool)
+    assert "aditivo-texto-editavel" in {n["chave"] for n in nv.publicas(pool)}
+
+
+def test_reaplicar_a_204_nao_duplica(pool):
+    assert _aditivo_texto(pool)["id"] == _aditivo_texto(pool)["id"]

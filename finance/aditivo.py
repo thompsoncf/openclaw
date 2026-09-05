@@ -478,103 +478,137 @@ def _de_para(alteracoes, campo) -> dict | None:
     return None
 
 
-def clausulas(aditivo: dict, est: dict | None = None) -> list[dict]:
-    """As cláusulas do documento, numeradas de 1 em diante — só as que existem.
+def contexto(aditivo: dict, est: dict | None = None) -> dict:
+    """O grupo {aditivo.*} pronto pro `contrato.preencher`.
 
-    A ordem é a que o dono deu como habitual: data, horário, convidados,
-    serviços, valor. O título de cada uma segue os quatro aditivos reais, que
-    escrevem o sentido da mudança em vez de um rótulo genérico."""
+    Tudo já FORMATADO como o documento escreve: data em DD/MM/AAAA, convidado com
+    o extenso ao lado, dinheiro com o extenso entre parênteses. Formatar aqui e
+    não no texto é o que permite ao dono reescrever a frase inteira sem nunca
+    precisar saber que existe uma função de número por extenso."""
     from finance.contrato import data_br
+    est = est or {}
     alt = aditivo.get("alteracoes") or []
-    out: list[dict] = []
-
     d = _de_para(alt, "data")
-    if d:
-        out.append({
-            "titulo": "ALTERAÇÃO NA DATA",
-            "corpo": (f"A data de realização do evento será alterada para "
-                      f"{data_br(d.get('para'))}, em substituição à data originalmente "
-                      f"contratada de {data_br(d.get('de'))}, nos termos da Cláusula 7 "
-                      f"do contrato original."),
-        })
-
     h = _de_para(alt, "horario")
-    if h:
-        para = h.get("para") or {}
-        dia = (d or {}).get("para") or (est or {}).get("data") or ""
-        dia_ini = data_br(dia)
-        # VIRAR A NOITE É A REGRA DO RAMO, não a exceção: dos dois aditivos reais
-        # que mexeram em horário, os dois terminavam no dia seguinte (26→27/09 e
-        # 30→31/05). Quem sabe disso é `janela_evento`, que já rola o fim pro dia
-        # seguinte quando ele é menor que o início — então o documento pergunta a
-        # ela em vez de ter a sua própria regra, que amanhã divergiria.
-        dia_fim = dia_ini
-        try:
-            from finance.agenda import janela_evento
-            _i, _f = janela_evento(dia, para.get("inicio"), para.get("fim"))
-            if _f is not None:
-                dia_fim = _f.strftime("%d/%m/%Y")
-        except Exception:  # noqa: BLE001 — sem data legível, os dois dias são o mesmo
-            pass
-        out.append({
-            "titulo": "ALTERAÇÃO NO HORÁRIO",
-            "corpo": (f"O horário de início será alterado para às "
-                      f"{para.get('inicio') or '—'}h do dia {dia_ini} e término às "
-                      f"{para.get('fim') or '—'}h do dia {dia_fim}."),
-        })
-
     cv = _de_para(alt, "convidados")
-    if cv:
-        de, para = cv.get("de"), cv.get("para")
-        try:
-            subiu = int(para) > int(de)
-            titulo = "ACRÉSCIMO DE CONVIDADOS" if subiu else "REDUÇÃO DE CONVIDADOS"
-        except (TypeError, ValueError):
-            titulo = "ALTERAÇÃO NO NÚMERO DE CONVIDADOS"
-        out.append({
-            "titulo": titulo,
-            "corpo": (f"O número de convidados para prestação de serviços passa a ser "
-                      f"{qtd_por_extenso(para)} convidados, em substituição à quantidade "
-                      f"originalmente estabelecida de {qtd_por_extenso(de)} convidados."),
-        })
-
     sv = _de_para(alt, "servicos")
-    if sv:
-        saem = ", ".join(str(x) for x in (sv.get("saem") or []) if str(x).strip())
-        num = (est or {}).get("orcamento_numero")
-        onde = f", descritos no orçamento nº {num}," if num else ""
-        out.append({
-            "titulo": "ALTERAÇÃO NOS SERVIÇOS",
-            "corpo": (f"Os itens: {saem or '—'}{onde} serão substituídos por "
-                      f"{(sv.get('entram') or '—').strip()}."),
-        })
+
+    dia = (d or {}).get("para") or est.get("data") or ""
+    para_h = (h or {}).get("para") or {}
+    # VIRAR A NOITE É A REGRA DO RAMO, não a exceção: dos dois aditivos reais que
+    # mexeram em horário, os dois terminavam no dia seguinte (26→27/09 e
+    # 30→31/05). Quem sabe disso é `janela_evento`, que já rola o fim quando ele é
+    # menor que o início — então o documento pergunta a ela em vez de ter a sua
+    # própria regra, que amanhã divergiria.
+    dia_fim = data_br(dia)
+    try:
+        from finance.agenda import janela_evento
+        _i, _f = janela_evento(dia, para_h.get("inicio"), para_h.get("fim"))
+        if _f is not None:
+            dia_fim = _f.strftime("%d/%m/%Y")
+    except Exception:  # noqa: BLE001 — sem data legível, os dois dias são o mesmo
+        pass
 
     dif = int(aditivo.get("diferenca_centavos") or 0)
     taxa = int(aditivo.get("taxa_centavos") or 0)
-    if dif or taxa:
-        total = int(aditivo.get("valor_novo_centavos") or 0)
-        a_pagar = dif + taxa
-        # as duas parcelas discriminadas só quando existem as duas — com uma só,
-        # repetir o mesmo número entre parênteses é ruído no documento.
-        detalhe = ""
-        if dif and taxa:
-            detalhe = (f" — sendo {valor_por_extenso(dif)} referentes à alteração "
-                       f"contratada e {valor_por_extenso(taxa)} referentes à taxa de "
-                       f"reagendamento prevista na Cláusula 7.2 —")
-        cond = []
-        if aditivo.get("forma_pagamento"):
-            cond.append(f"Pagamento via {aditivo['forma_pagamento']}")
-        if aditivo.get("vencimento"):
-            cond.append(f"com vencimento em {data_br(aditivo['vencimento'])}")
-        linha = (", ".join(cond) + "." if cond else
-                 "Condições de pagamento a combinar entre as partes.")
-        out.append({
-            "titulo": "AJUSTE NO VALOR",
-            "corpo": (f"O valor total do contrato será alterado para "
-                      f"{valor_por_extenso(total)}. Considerando as modificações "
-                      f"realizadas, o valor de {valor_por_extenso(a_pagar)}{detalhe} "
-                      f"será pago nas condições abaixo descritas:\n  ○ {linha}"),
-        })
+    # as duas parcelas discriminadas só quando existem as duas — com uma só,
+    # repetir o mesmo número entre parênteses é ruído no documento.
+    detalhe = ""
+    if dif and taxa:
+        detalhe = (f" — sendo {valor_por_extenso(dif)} referentes à alteração "
+                   f"contratada e {valor_por_extenso(taxa)} referentes à taxa de "
+                   f"reagendamento prevista na Cláusula 7.2 —")
+    cond = []
+    if aditivo.get("forma_pagamento"):
+        cond.append(f"Pagamento via {aditivo['forma_pagamento']}")
+    if aditivo.get("vencimento"):
+        cond.append(f"com vencimento em {data_br(aditivo['vencimento'])}")
+    num_orc = est.get("orcamento_numero")
+
+    return {"aditivo": {
+        "numero": ordinal(aditivo.get("ordem") or 1),
+        "contrato": est.get("contrato_numero") or "",
+        "orcamento": num_orc or "",
+        "data": data_br((d or {}).get("para")) if d else "",
+        "data_antes": data_br((d or {}).get("de")) if d else "",
+        "inicio": para_h.get("inicio") or "",
+        "fim": para_h.get("fim") or "",
+        "dia_inicio": data_br(dia),
+        "dia_fim": dia_fim,
+        "convidados": qtd_por_extenso(cv.get("para")) if cv else "",
+        "convidados_antes": qtd_por_extenso(cv.get("de")) if cv else "",
+        "itens_saem": (", ".join(str(x) for x in (sv.get("saem") or [])
+                                 if str(x).strip()) or "—") if sv else "",
+        "itens_entram": ((sv.get("entram") or "—").strip()) if sv else "",
+        # o "descritos no orçamento nº N" inteiro, porque ele some quando não há
+        # número — e um texto com vírgula solta é pior que um sem a referência
+        "no_orcamento": f", descritos no orçamento nº {num_orc}," if (sv and num_orc) else "",
+        "valor_novo": valor_por_extenso(int(aditivo.get("valor_novo_centavos") or 0)),
+        "valor_pagar": valor_por_extenso(dif + taxa),
+        "diferenca": valor_por_extenso(dif),
+        "taxa": valor_por_extenso(taxa),
+        "vencimento": data_br(aditivo["vencimento"]) if aditivo.get("vencimento") else "",
+        "forma_pagamento": aditivo.get("forma_pagamento") or "",
+        "detalhe_valor": detalhe,
+        "condicao_pagamento": (", ".join(cond) + "."
+                               if cond else
+                               "Condições de pagamento a combinar entre as partes."),
+    }}
+
+
+def clausulas(aditivo: dict, est: dict | None = None, modelo=None) -> list[dict]:
+    """As cláusulas do documento, numeradas de 1 em diante — só as que existem.
+
+    O TEXTO VEM DO MODELO DA CONTA (migração 203), não daqui. `modelo` pode ser o
+    dicionário de textos já carregado, um pool (que é lido na hora) ou None, que
+    usa o padrão. Aceitar as três formas é o que deixa esta função servir tanto a
+    página do cliente, que já tem o pool na mão, quanto os testes de texto puro.
+
+    A ordem é a que o dono deu como habitual: data, horário, convidados,
+    serviços, valor — e a avulsa por último, porque ela é o "além disso".
+    """
+    from finance.contrato import preencher
+    if modelo is None:
+        textos = {k: (dict(v) if isinstance(v, dict) else v)
+                  for k, v in MODELO_PADRAO.items()}
+    elif isinstance(modelo, dict) and "textos" in modelo:
+        textos = modelo["textos"]
+    elif isinstance(modelo, dict):
+        textos = modelo
+    else:                                   # é um pool
+        textos = carregar_modelo(modelo, aditivo["conta_id"])["textos"]
+
+    ctx = contexto(aditivo, est)
+    alt = aditivo.get("alteracoes") or []
+    out: list[dict] = []
+
+    for chave in ORDEM:
+        if chave == "valor":
+            tem = bool(int(aditivo.get("diferenca_centavos") or 0)
+                       or int(aditivo.get("taxa_centavos") or 0))
+        else:
+            tem = _de_para(alt, chave) is not None
+        if not tem:
+            continue
+        t = textos.get(chave) or MODELO_PADRAO[chave]
+        titulo = t.get("titulo") or ""
+        if chave == "convidados":
+            cv = _de_para(alt, "convidados") or {}
+            try:
+                if int(cv.get("para")) < int(cv.get("de")):
+                    titulo = t.get("titulo_reduz") or titulo
+            except (TypeError, ValueError):
+                pass
+        out.append({"titulo": preencher(titulo, ctx)[0],
+                    "corpo": preencher(t.get("corpo") or "", ctx)[0]})
+
+    # A CLÁUSULA AVULSA vem por último e NÃO passa por campo nenhum: é texto que
+    # alguém escreveu para aquele cliente, e não representa número do sistema. É
+    # justamente por isso que ela pode ser livre — não há o que divergir.
+    for a in alt:
+        if a.get("campo") == "avulsa" and (a.get("titulo") or a.get("texto")):
+            out.append({"titulo": (a.get("titulo") or "OUTRAS ALTERAÇÕES").strip(),
+                        "corpo": (a.get("texto") or "").strip()})
 
     for i, c in enumerate(out, 1):
         c["titulo"] = f"{i}. {c['titulo']}"
@@ -599,6 +633,158 @@ FECHO = (
     "aditivo, ficando registrados o nome, o documento, a data, a hora e o endereço "
     "de IP de quem assina, para que produza seus efeitos legais."
 )
+
+
+# ------------------------------------------------------------------- o MODELO
+# O texto é do dono, como o do contrato — pedido dele em 05/09/2026, apontando
+# pro card de Serviços: "deixar o aditivo igual o contrato, podendo alterar
+# alguma coisa nas cláusulas... e a gente replica".
+#
+# CINCO TEXTOS FIXOS, não lista livre. No contrato ele acrescenta e remove
+# cláusulas à vontade; aqui cada texto casa com um bloco do formulário, então uma
+# a mais não teria o que a preenchesse e uma a menos deixaria bloco marcado sem
+# texto. Ver o comentário da migração 203.
+#
+# Este padrão é, palavra por palavra, o texto que subiu no #632 — tirado dos
+# quatro aditivos reais. Conta que nunca abrir o card não vê diferença nenhuma.
+
+MODELO_PADRAO = {
+    "data": {
+        "titulo": "ALTERAÇÃO NA DATA",
+        "corpo": "A data de realização do evento será alterada para {aditivo.data}, "
+                 "em substituição à data originalmente contratada de "
+                 "{aditivo.data_antes}, nos termos da Cláusula 7 do contrato original.",
+    },
+    "horario": {
+        "titulo": "ALTERAÇÃO NO HORÁRIO",
+        "corpo": "O horário de início será alterado para às {aditivo.inicio}h do dia "
+                 "{aditivo.dia_inicio} e término às {aditivo.fim}h do dia "
+                 "{aditivo.dia_fim}.",
+    },
+    "convidados": {
+        "titulo": "ACRÉSCIMO DE CONVIDADOS",
+        # o título muda com o SENTIDO: os dois casos reais eram aumento e
+        # escreveram ACRÉSCIMO, e o modelo em branco do dono dizia "ALTERAÇÃO NO
+        # NÚMERO DE CONVIDADOS". Quem edita pode dar a redação que quiser aos
+        # dois, mas os dois existem.
+        "titulo_reduz": "REDUÇÃO DE CONVIDADOS",
+        "corpo": "O número de convidados para prestação de serviços passa a ser "
+                 "{aditivo.convidados} convidados, em substituição à quantidade "
+                 "originalmente estabelecida de {aditivo.convidados_antes} convidados.",
+    },
+    "servicos": {
+        "titulo": "ALTERAÇÃO NOS SERVIÇOS",
+        "corpo": "Os itens: {aditivo.itens_saem}{aditivo.no_orcamento} serão "
+                 "substituídos por {aditivo.itens_entram}.",
+    },
+    "valor": {
+        "titulo": "AJUSTE NO VALOR",
+        "corpo": "O valor total do contrato será alterado para {aditivo.valor_novo}. "
+                 "Considerando as modificações realizadas, o valor de "
+                 "{aditivo.valor_pagar}{aditivo.detalhe_valor} será pago nas condições "
+                 "abaixo descritas:\n  ○ {aditivo.condicao_pagamento}",
+    },
+    "disposicoes": DISPOSICOES,
+    "fecho": FECHO,
+}
+
+# A ordem em que as cláusulas saem no documento — a que o dono deu como habitual.
+ORDEM = ("data", "horario", "convidados", "servicos", "valor")
+
+# Os campos do grupo {aditivo.*}, com o rótulo que a tela mostra. Os grupos de
+# sempre ({cliente.*}, {empresa.*}, {regra.*}…) continuam valendo: é o mesmo
+# `contrato.preencher`, e este grupo só acrescenta o que é do aditivo.
+CAMPOS = (
+    ("aditivo.numero", "1º, 2º… — a ordem deste aditivo"),
+    ("aditivo.contrato", "número do contrato original"),
+    ("aditivo.orcamento", "número do orçamento"),
+    ("aditivo.data", "a data nova"),
+    ("aditivo.data_antes", "a data contratada"),
+    ("aditivo.inicio", "hora de início nova"),
+    ("aditivo.fim", "hora de término nova"),
+    ("aditivo.dia_inicio", "dia do início"),
+    ("aditivo.dia_fim", "dia do término (já com a virada da noite)"),
+    ("aditivo.convidados", "convidados novos, com o extenso"),
+    ("aditivo.convidados_antes", "convidados contratados, com o extenso"),
+    ("aditivo.itens_saem", "itens que saem"),
+    ("aditivo.itens_entram", "o que entra no lugar"),
+    ("aditivo.valor_novo", "novo total do contrato, por extenso"),
+    ("aditivo.valor_pagar", "o que o cliente paga agora, por extenso"),
+    ("aditivo.diferenca", "só a diferença, por extenso"),
+    ("aditivo.taxa", "só a taxa de reagendamento, por extenso"),
+    ("aditivo.vencimento", "vencimento digitado"),
+    ("aditivo.forma_pagamento", "forma de pagamento digitada"),
+)
+
+
+def campos_disponiveis(catalogo=None) -> list[dict]:
+    """A paleta da tela: os campos do aditivo primeiro, depois os do contrato.
+
+    Os do contrato entram inteiros porque valem aqui — uma cláusula de aditivo
+    pode muito bem citar {cliente.nome} ou {regra.taxa_reagendamento}."""
+    from finance.contrato import campos_disponiveis as _cc
+    saida = [{"campo": c, "rotulo": r, "grupo": "aditivo"} for c, r in CAMPOS]
+    return saida + _cc(catalogo)
+
+
+def carregar_modelo(pool, conta_id: int) -> dict:
+    """O modelo da conta, com o padrão preenchendo o que ela não escreveu.
+
+    MESCLA por chave, não substitui o bloco: quem editou só o texto de convidados
+    continua com os outros quatro no padrão — e ganha de graça qualquer melhoria
+    futura neles. Substituir tudo congelaria a conta na versão do dia em que ela
+    clicou Salvar pela primeira vez."""
+    guardado = {}
+    atualizado_em, por = None, ""
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                """select m.textos, m.atualizado_em,
+                          coalesce((select mb.nome from membros mb
+                                     where mb.id = case when m.atualizado_por ~ '^[0-9]+$'
+                                                        then m.atualizado_por::bigint end),
+                                   (select ct.nome from contas ct where ct.id = m.conta_id), '')
+                     from aditivo_modelo m where m.conta_id=%s""", (conta_id,)).fetchone()
+        if r:
+            guardado, atualizado_em, por = (r[0] or {}), r[1], (r[2] or "")
+    except Exception as e:  # noqa: BLE001 — base sem a 203: vale o padrão
+        _log.warning("aditivo: modelo indisponível na conta %s (%s: %s)",
+                     conta_id, type(e).__name__, e)
+    textos = {}
+    for chave, padrao in MODELO_PADRAO.items():
+        seu = guardado.get(chave)
+        if isinstance(padrao, dict):
+            base = dict(padrao)
+            if isinstance(seu, dict):
+                base.update({k: v for k, v in seu.items() if v})
+            textos[chave] = base
+        else:
+            textos[chave] = seu or padrao
+    return {"textos": textos, "novo": not guardado,
+            "atualizado_em": atualizado_em, "atualizado_por": por}
+
+
+def salvar_modelo(pool, conta_id: int, textos: dict, por: str = "") -> dict:
+    """Grava o modelo. Só as chaves conhecidas entram — o resto é ignorado."""
+    limpo = {}
+    for chave, padrao in MODELO_PADRAO.items():
+        v = (textos or {}).get(chave)
+        if isinstance(padrao, dict):
+            if isinstance(v, dict):
+                limpo[chave] = {k: str(v.get(k) or "")[:20000]
+                                for k in padrao if v.get(k)}
+        elif v:
+            limpo[chave] = str(v)[:20000]
+    with pool.connection() as c:
+        c.execute(
+            """insert into aditivo_modelo (conta_id, textos, atualizado_por)
+               values (%s,%s::jsonb,%s)
+               on conflict (conta_id) do update
+                  set textos=excluded.textos, atualizado_em=now(),
+                      atualizado_por=excluded.atualizado_por""",
+            (conta_id, json.dumps(limpo), (por or "")[:120]))
+        c.commit()
+    return {"ok": True, "textos": len(limpo)}
 
 
 # ------------------------------------------------------------------- assinatura

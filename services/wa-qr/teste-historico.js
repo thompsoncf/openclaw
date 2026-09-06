@@ -28,7 +28,8 @@ process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent'
 process.env.APP_URL = process.env.APP_URL || 'http://localhost:8000'
 
 const { deveSincronizarHistorico, deveSeguirNoHistorico, prepararHistorico, TIPO_HIST,
-  lidMaps } = require('./server')
+  lidMaps, ehAudioDoHistorico, HISTORICO_AUDIO_JANELA_SEGUNDOS, HISTORICO_AUDIO_MAX,
+  LIMITE_AUDIO_SEG } = require('./server')
 
 let falhas = 0
 function conferir (ok, descricao) {
@@ -182,6 +183,62 @@ conferir(deveSeguirNoHistorico({ ondas: 40, aproveitadas: 900 }, SEM_NADA, MAX) 
   'quarenta ondas: freio de mão, aproveitando ou não')
 conferir(deveSeguirNoHistorico({ ondas: 63, aproveitadas: 0 }, SEM_NADA, MAX) === false,
   'as 63 ondas que mataram a instância nunca teriam passado da quinta')
+
+// -------------------------------------------- áudio do histórico também vira texto
+//
+// O TERCEIRO caminho. A transcrição já valia pros dois AO VIVO (repassarEntrada e
+// repassarSaida, este consertado em 29/08); o histórico ficou de fora e ninguém viu
+// por um motivo desagradável: o sintoma não é erro nenhum. A mensagem APARECE, com a
+// marca e a duração certas — o textoDaMsg devolve '🎵 Áudio (0:59)' e a peneira aceita
+// como qualquer texto — e só nunca recebe a transcrição por cima. Quem repareia o QR
+// reimporta 30 dias de conversa e lê o texto todo com os áudios mudos, sem uma linha
+// de log dizendo por quê.
+//
+// Janela e teto PRÓPRIOS, menores que os do histórico: transcrever custa por áudio, e
+// um pareamento traz o mês inteiro. O que fica de fora não some — continua na tela com
+// a marca, exatamente como está hoje.
+console.log('\náudio do histórico: o que vale a pena transcrever')
+const audioMsg = (segundos, extra) => msg(Object.assign(
+  { message: { audioMessage: { seconds: segundos, ptt: true } } }, extra))
+const ehAudio = (m, ts) => ehAudioDoHistorico(m, ts === undefined ? agora - DIA : ts, agora)
+
+conferir(ehAudio(audioMsg(9)) === true,
+  'áudio gravado ontem: transcreve')
+conferir(ehAudio(msg({ message: { audioMessage: { seconds: 59, ptt: false } } })) === true,
+  'áudio enviado como ARQUIVO (a marca 🎵) conta igual — é o caso do print da Prime')
+conferir(ehAudio(msg()) === false,
+  'mensagem de texto nunca entra na fila de transcrição')
+conferir(ehAudio(audioMsg(9), agora - 8 * DIA) === false,
+  'áudio de 8 dias: dentro dos 30 dias do histórico, fora da janela de áudio')
+conferir(ehAudio(audioMsg(LIMITE_AUDIO_SEG + 1)) === false,
+  'áudio mais longo que o teto: mesmo limite do caminho ao vivo')
+conferir(ehAudio(audioMsg(LIMITE_AUDIO_SEG)) === true,
+  'exatamente no teto de duração ainda passa')
+
+console.log('\nentrada estranha não pode estourar a peneira de áudio')
+for (const [valor, rotulo] of [[{}, 'sem message'], [{ message: null }, 'message null'],
+  [{ message: {} }, 'message vazio']]) {
+  let ok = false
+  try { ok = ehAudioDoHistorico(valor, agora - DIA, agora) === false } catch (_) { ok = false }
+  conferir(ok, rotulo + ' → false, sem exceção')
+}
+
+console.log('\na peneira devolve o sinal junto com a mensagem pronta')
+const comAudio = prepararHistorico(CONTA, audioMsg(26))
+conferir(!comAudio.motivo, 'áudio não é descartado — ele É a mensagem, com a marca de texto')
+conferir(comAudio.audio === true, 'sai marcado pro handler enfileirar')
+conferir(JSON.parse(comAudio.corpo || '{}').texto === '🎤 Áudio (0:26)',
+  'o corpo leva a marca, que é o que aparece na tela antes da transcrição chegar')
+conferir(prepararHistorico(CONTA, msg()).audio === false,
+  'mensagem de texto sai com audio=false, nunca undefined')
+conferir(prepararHistorico(CONTA, audioMsg(9, { messageTimestamp: agora - 8 * DIA })).audio === false,
+  'áudio velho entra na conversa mas NÃO na fila — é assim que o teto de custo funciona')
+
+console.log('\nos tetos existem e são conferíveis')
+conferir(HISTORICO_AUDIO_JANELA_SEGUNDOS < 30 * DIA,
+  'a janela de áudio é menor que a do histórico (senão não há teto nenhum)')
+conferir(HISTORICO_AUDIO_MAX > 0 && HISTORICO_AUDIO_MAX < 1000,
+  'teto de áudios por encarnação, entre 1 e 1000 (achou ' + HISTORICO_AUDIO_MAX + ')')
 
 console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'tudo passou'))
 process.exit(falhas ? 1 : 0)

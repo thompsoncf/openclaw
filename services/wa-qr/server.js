@@ -1519,6 +1519,7 @@ function lembrarJid (chave, valor) {
 function esquecerConta (contaId) {
   lidMaps.delete(contaId)
   ondasDeHistorico.delete(contaId)
+  audiosDoHistorico.delete(contaId)
   // o mapa de falhas por mensagem se poda sozinho pela janela, mas só quando a
   // conta falha DE NOVO — uma conta esquecida deixaria o último punhado de ids
   // preso pra sempre. Aqui é o lugar onde isso se resolve, junto com os outros.
@@ -1972,7 +1973,19 @@ async function transcreverAudio (contaId, m, sender) {
     return
   }
   try {
-    const bytes = await downloadMediaMessage(m, 'buffer', {})
+    // reuploadRequest: sem ele, áudio cuja mídia já saiu do servidor do WhatsApp
+    // (o directPath tem validade) simplesmente falha o download — e no histórico
+    // isso é a REGRA, não a exceção: ali toda mensagem é de dias atrás. Com ele o
+    // Baileys pede ao aparelho que reenvie a mídia, e o download volta a funcionar.
+    // O socket sai de `sessoes` porque nenhum dos três caminhos que chamam aqui
+    // (entrada, saída, histórico) tem o sock em mãos; se a sessão caiu enquanto a
+    // fila andava, segue sem reupload em vez de estourar.
+    const s = sessoes.get(contaId)
+    const sock = s && s.sock
+    const bytes = await downloadMediaMessage(m, 'buffer',
+      sock && sock.updateMediaMessage
+        ? { reuploadRequest: sock.updateMediaMessage.bind(sock) }
+        : {})
     if (!bytes || !bytes.length) return
     if (bytes.length > LIMITE_AUDIO_BYTES) {
       log.info({ contaId, seg, kb: Math.round(bytes.length / 1024) },
@@ -2473,6 +2486,34 @@ function deveSeguirNoHistorico (h, semNada, max) {
 
 const HISTORICO_JANELA_SEGUNDOS = 30 * 24 * 3600 // só os últimos 30 dias — ver README (risco QR)
 
+// Áudio do histórico também vira texto — mas com janela e teto PRÓPRIOS, os dois
+// menores que os do histórico em si. Transcrever custa por áudio, e um pareamento
+// traz 30 dias de conversa: o que o vendedor precisa ler ao abrir o Zaq é a semana
+// que ele acabou de viver, não o mês inteiro. O que fica de fora continua na tela
+// com a marca '🎤 Áudio (0:09)', como sempre esteve — não some nada.
+const HISTORICO_AUDIO_JANELA_SEGUNDOS =
+  parseInt(process.env.WA_QR_AUDIO_HIST_DIAS || '7', 10) * 24 * 3600
+// Teto por ENCARNAÇÃO, não por onda: o histórico chega em várias ondas e a conta
+// do custo é do pareamento inteiro. Zerado no iniciarSessao, junto com o de ondas.
+const HISTORICO_AUDIO_MAX = parseInt(process.env.WA_QR_AUDIO_HIST_MAX || '30', 10)
+
+// contaId -> quantos áudios do histórico já foram mandados pra transcrição nesta
+// encarnação. É também o que limita a memória: só os áudios que cabem no teto têm
+// o proto do Baileys retido até o fim da onda (ver o laço do messaging-history.set).
+const audiosDoHistorico = new MapaPorConta()
+
+// Vale a pena transcrever este áudio do histórico? Aritmética pura (sem socket, sem
+// mapa) pelo mesmo motivo do deveSeguirNoHistorico: é o que deixa a regra conferível
+// no teste. `agora` entra por parâmetro pra o teste não depender do relógio.
+function ehAudioDoHistorico (m, ts, agora) {
+  const msg = normalizeMessageContent(m && m.message) || {}
+  const audio = msg.audioMessage
+  if (!audio) return false
+  // mesmo teto de duração do caminho ao vivo — áudio de 10 minutos não é recado
+  if (Math.round(Number(audio.seconds) || 0) > LIMITE_AUDIO_SEG) return false
+  return ts >= agora - HISTORICO_AUDIO_JANELA_SEGUNDOS
+}
+
 // Histórico importado (evento messaging-history.set, só dispara logo após conectar/parear).
 // Vira conversa ÓRFÃ do lado Python (nunca gera lead sozinho) — ver /webhooks/wa-qr/historico.
 //
@@ -2516,7 +2557,12 @@ function prepararHistorico (contaId, m) {
   // mensagens de 8 pessoas é um problema, de 300 pessoas é outro.
   if (resolvido.endsWith('@lid')) return { motivo: 'lid_sem_mapa', jid: resolvido }
   const sender = resolvido.split('@')[0]
+  // A decisão sobre o áudio é tomada AQUI porque aqui o `m` ainda está em mãos —
+  // mas quem enfileira é o handler, no fim da onda: o webhook de transcrição casa
+  // por provider_sid numa mensagem que já tem que existir no banco.
+  const audio = ehAudioDoHistorico(m, ts, Math.floor(Date.now() / 1000))
   return {
+    audio,
     // agrupa pelo CHAT já resolvido: duas mensagens do mesmo contato que chegaram
     // com jid diferente (@lid e @s.whatsapp.net) precisam cair na MESMA fila, senão
     // saem em paralelo e recriam a corrida de conversa duplicada que o comentário
@@ -2689,8 +2735,10 @@ async function iniciarSessao (contaId) {
     s.abertoEm = null
     s.handshakeDesde = Date.now()
     // Teto de ondas do histórico é por ENCARNAÇÃO (ver deveSeguirNoHistorico): quem
-    // pareia de novo tem direito à janela inteira outra vez.
+    // pareia de novo tem direito à janela inteira outra vez. Vale igual pro teto de
+    // áudio transcrito: repareou, tem direito aos áudios da semana de novo.
     ondasDeHistorico.delete(contaId)
+    audiosDoHistorico.delete(contaId)
     log.info({ contaId }, 'iniciarSessao: socket criado, registrando listeners')
 
     sock.ev.on('creds.update', saveCreds)
@@ -3023,6 +3071,13 @@ async function iniciarSessao (contaId) {
     // atrasada de @lid; os exemplos são pra conferir no celular se é gente de verdade.
     const motivos = Object.create(null)
     const lidsPerdidos = new Set()
+    // Os ÚNICOS protos do Baileys que sobrevivem a este laço. O comentário do
+    // prepararHistorico explica por que o resto não pode sobreviver (numa onda de
+    // milhares de mensagens, segurar o proto é segurar centenas de MB); aqui o teto
+    // é o que torna a exceção segura — no pior caso são HISTORICO_AUDIO_MAX protos
+    // de áudio, que não carregam thumbnail.
+    const paraTranscrever = []
+    let audiosNoTeto = 0
     for (const m of messages) {
       const pronta = prepararHistorico(contaId, m)
       if (pronta.motivo) {
@@ -3030,6 +3085,14 @@ async function iniciarSessao (contaId) {
         motivos[pronta.motivo] = (motivos[pronta.motivo] || 0) + 1
         if (pronta.jid) lidsPerdidos.add(pronta.jid)
         continue
+      }
+      if (pronta.audio) {
+        const jaMandados = audiosDoHistorico.get(contaId) || 0
+        if (jaMandados + paraTranscrever.length < HISTORICO_AUDIO_MAX) {
+          // o chat já vem resolvido da peneira — não refaz numeroDoChat
+          paraTranscrever.push({ m, destinatario: pronta.chat.split('@')[0] })
+        }
+        else audiosNoTeto++
       }
       let grupo = porChat.get(pronta.chat)
       if (!grupo) { grupo = []; porChat.set(pronta.chat, grupo) }
@@ -3051,6 +3114,30 @@ async function iniciarSessao (contaId) {
         grupo[i] = null   // solta o corpo assim que ele virou POST
       }
     })
+    // Áudio do histórico vira texto — o terceiro caminho, que faltava.
+    //
+    // A transcrição já valia pros dois caminhos AO VIVO (repassarEntrada e
+    // repassarSaida). O histórico não: a mensagem entrava com a marca que o
+    // textoDaMsg devolve ('🎵 Áudio (0:59)') e nunca recebia texto por cima. Quem
+    // reparease o QR — que é o que reimporta a conversa — via o texto do mês inteiro
+    // e os áudios todos mudos, sem erro nenhum no log pra explicar.
+    //
+    // SÓ AGORA, e não dentro do laço: o webhook casa por provider_sid numa mensagem
+    // que já tem que estar no banco, e quem põe ela lá é o enviarHistorico acima.
+    // Mesma fila de concorrência 1 do caminho ao vivo, pelo mesmo motivo (N áudios
+    // juntos multiplicam o pico de memória). Não se espera o fim: transcrever é
+    // assíncrono pro vendedor, a marca já está na tela.
+    if (paraTranscrever.length || audiosNoTeto) {
+      audiosDoHistorico.set(contaId, (audiosDoHistorico.get(contaId) || 0) + paraTranscrever.length)
+      log.info({ contaId, syncType, audios: paraTranscrever.length, noTeto: audiosNoTeto,
+        totalDaEncarnacao: audiosDoHistorico.get(contaId), teto: HISTORICO_AUDIO_MAX,
+        janelaDias: Math.round(HISTORICO_AUDIO_JANELA_SEGUNDOS / 86400) },
+      'áudio do histórico indo pra transcrição')
+      for (const { m, destinatario } of paraTranscrever) {
+        enfileirarAudio(() => transcreverAudio(contaId, m, destinatario)).catch((e) =>
+          log.warn({ contaId, e: String(e) }, 'transcreverAudio (histórico) falhou'))
+      }
+    }
     const _m1 = process.memoryUsage()
     log.info({ contaId, syncType,
       rssMB: MB(_m1.rss), heapMB: MB(_m1.heapUsed),
@@ -3743,4 +3830,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, ehAudioDoHistorico, audiosDoHistorico, HISTORICO_AUDIO_JANELA_SEGUNDOS, HISTORICO_AUDIO_MAX, LIMITE_AUDIO_SEG, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

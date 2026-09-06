@@ -52,7 +52,7 @@ _PERFIS = {
                   "compromisso_kpi": "visitas que aconteceram", "pedido": "festa"},
         "filtros": ("periodo", "vendedor", "tipo", "mes", "dia", "conv", "origem", "hora"),
         "blocos": ("demanda_agenda", "dia_festa", "tipos", "ciclo", "perdas", "hora"),
-        "faixas": ("pergunta", "festa", "proposta", "toque", "visita"),
+        "faixas": ("data_abriu", "pergunta", "festa", "proposta", "toque", "visita"),
     },
     "recorrente": {
         "chave": "recorrente", "rotulo": "serviço recorrente",

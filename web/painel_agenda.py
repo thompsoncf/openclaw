@@ -554,6 +554,26 @@ def _montar_share(request: Request, pool, conta_id: int, convite_ev: str, convit
 
 
 # ================================================================ CALENDÁRIO
+def _espera_por_data(pool, conta_id: int) -> list[dict]:
+    """A lista de espera pro card da Agenda, já com os rótulos prontos.
+
+    Best-effort e curta (8 datas): a Agenda é a tela mais pesada do painel e não
+    pode ficar refém de uma lista que é acessória. Conta sem `festas_por_dia`
+    devolve [] e o card nem aparece."""
+    try:
+        from finance import lista_espera as _le
+        out = []
+        for d in _le.por_data(pool, conta_id)[:8]:
+            out.append(dict(d,
+                            rotulo=f"{DIAS_SEM[(d['data'].weekday() + 1) % 7]} {d['data']:%d/%m}",
+                            o_que="",
+                            livres=[dict(x, rotulo=f"{x['data']:%d/%m}") for x in d.get("livres") or []]))
+        return out
+    except Exception as e:  # noqa: BLE001
+        _log_ag.info("agenda: lista de espera falhou: %s: %s", type(e).__name__, e)
+        return []
+
+
 @router.get("/painel/agenda", response_class=HTMLResponse)
 def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = "",
                 convite_ev: str = "", p: str = ""):
@@ -690,6 +710,11 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    mes_hoje=f"{hoje.year:04d}-{hoje.month:02d}",
                    hoje_iso=hoje.isoformat(), abrir_novo=(novo == "1"),
                    cfg=cfg, feed_url=feed_url, share=share, seguradas=seguradas,
+                   # LISTA DE ESPERA POR DATA (finance/lista_espera): quem quer um dia
+                   # que a empresa já vendeu. Só aparece pra conta que usa a lista
+                   # (contas.festas_por_dia preenchido) — pras outras, `espera` é []
+                   # e o card nem existe.
+                   espera=_espera_por_data(pool, conta_id),
                    confirmadas=confirmadas, pend=pend,
                    vende_data=vende_data, pessoas=pessoas, p_id=p_id,
                    # A lista canônica das festas mora em finance.servicos_catalogo
@@ -1802,6 +1827,12 @@ _CSS_CRU = """
 /* card das datas seguradas */
 .segrow{display:grid;grid-template-columns:3px 1fr auto;gap:9px;align-items:center;
         padding:8px 0;border-top:1px dashed var(--borda)}
+/* a data voltou a ter vaga: a linha da lista de espera fica verde (mockup
+   lista_de_espera_por_data) — é onde a venda está */
+.segrow.abriu{background:#10241a88}
+.segrow.abriu .segbar{background:var(--verde)}
+.leok{font:600 .62rem var(--mono);color:var(--verde-claro);border:1px solid var(--verde);
+  border-radius:999px;padding:.1rem .4rem;margin-left:.3rem;white-space:nowrap}
 .segrow:first-of-type{border-top:0;padding-top:2px}
 .segbar{align-self:stretch;border-radius:2px;
         background:repeating-linear-gradient(180deg,var(--ambar) 0 3px,transparent 3px 6px)}
@@ -3396,6 +3427,32 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       libera sozinha e você é avisado — abra o dia no calendário pra firmar ou soltar antes disso.</p>
       {% endif %}
     </div>
+
+    {# ── LISTA DE ESPERA POR DATA (mockup lista_de_espera_por_data): quem pediu um
+       dia que já foi vendido. As linhas VERDES são datas que voltaram a ter vaga —
+       é onde a venda está. Só pra conta com `festas_por_dia` (hoje, a Prime). #}
+    {% if espera %}
+    <div class="ag-card">
+      <h2>📋 Lista de espera <span class="cnt pre">{{ espera|map(attribute='n')|sum }}</span></h2>
+      {% for d in espera[:8] %}
+      <div class="segrow{% if d.abriu %} abriu{% endif %}">
+        <div class="segbar"></div>
+        <div>
+          <div class="stt">{{ d.rotulo }}{% if d.abriu %} <span class="leok">a data abriu</span>{% endif %}</div>
+          <div class="smt">{% for q in d.quem[:3] %}{{ q.nome }}{% if not loop.last %} · {% endif %}{% endfor %}{% if d.n > 3 %} · +{{ d.n - 3 }}{% endif %}
+            {%- if not d.abriu and d.o_que %} · o dia tem {{ d.o_que|lower }}{% endif %}</div>
+          {% if d.livres %}<div class="smt">livres perto: {% for x in d.livres %}{{ x.rotulo }}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+        </div>
+        <div class="srt">
+          <div class="v">{{ d.n }}</div>
+          <div class="s">{% if d.abriu %}avisar{% else %}esperando{% endif %}</div>
+        </div>
+      </div>
+      {% endfor %}
+      <p class="hint" style="margin:6px 0 0">Entra sozinho quando o cliente pede um dia já vendido.
+      Quando a data abre, o vendedor de cada um é avisado no app e você recebe o resumo.</p>
+    </div>
+    {% endif %}
 
     <div class="ag-card">
       <h2>✓ Reservado <span class="cnt res">{{ confirmadas|length }}</span></h2>

@@ -2557,6 +2557,17 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
     <input id="razao" name="razao_social" value="{{ dados.razao_social }}" required>
     <label>Nome fantasia</label>
     <input id="fantasia" name="nome_fantasia" value="{{ dados.nome_fantasia }}">
+    {# LISTA DE ESPERA POR DATA (finance/lista_espera): quantas festas a empresa faz
+       no MESMO dia. É o número que decide quando a data está "tomada" e o cliente
+       entra na lista. Em branco = a conta não usa lista de espera. Só pra quem
+       vende data (regra 6: nada de festa pra quem vende mensalidade). #}
+    {% if raio_x_perfil and raio_x_perfil.chave == 'eventos' %}
+    <label>Festas por dia <span class="mut" style="font-weight:400;font-size:.78rem">— quantas você faz no mesmo dia</span></label>
+    <input id="festas_dia" name="festas_por_dia" value="{{ dados.festas_por_dia or '' }}"
+           inputmode="numeric" placeholder="deixe em branco pra não usar lista de espera">
+    <div class="mut" style="font-size:.72rem;margin-top:.25rem">Com esse número preenchido, o cliente
+      que pedir um dia já vendido entra na <b>lista de espera</b>, e o vendedor é avisado quando a data abrir.</div>
+    {% endif %}
     <div style="display:grid;grid-template-columns:1fr 2fr;gap:.7rem">
       <div><label>CEP</label>
         <input id="cep" name="cep" value="{{ dados.cep }}" inputmode="numeric" placeholder="00000-000"></div>
@@ -11013,6 +11024,13 @@ def painel_empresa_dados_form(request: Request):
     if not emp.modulo_pj_ativo(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
     d = emp.obter_dados_empresa(pool, conta[0])
+    # festas por dia (migração 216) — lido à parte: a tela não depende da coluna
+    try:
+        with pool.connection() as _c:
+            _r = _c.execute("select festas_por_dia from contas where id=%s", (conta[0],)).fetchone()
+        d["festas_por_dia"] = _r[0] if _r else None
+    except Exception:  # noqa: BLE001
+        d["festas_por_dia"] = None
     eh_forn = bool(conta[8])
     identidade = emp.obter_identidade(pool, conta[0])
     margem_alvo = 60.0
@@ -11035,6 +11053,7 @@ def painel_empresa_dados_salvar(
     cidade: str = Form(""), uf: str = Form(""),
     email_empresa: str = Form(""), telefone: str = Form(""),
     nicho: str = Form(""), cnae: str = Form(""),
+    festas_por_dia: str = Form(""),
 ):
     from finance import empresa as emp
     conta = conta_logada(request)
@@ -11043,6 +11062,18 @@ def painel_empresa_dados_salvar(
     pool = get_pool()
     if not emp.modulo_pj_ativo(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
+    # festas por dia (migração 216): em branco limpa, fora de 1..20 é ignorado.
+    # À parte e em savepoint — salvar a empresa não pode depender desta coluna.
+    try:
+        _fpd = (festas_por_dia or "").strip()
+        _val = int(_fpd) if _fpd.isdigit() and 1 <= int(_fpd) <= 20 else None
+        if _fpd == "" or _val is not None:
+            with pool.connection() as _c:
+                with _c.transaction():
+                    _c.execute("update contas set festas_por_dia=%s where id=%s", (_val, conta[0]))
+                _c.commit()
+    except Exception:  # noqa: BLE001
+        pass
     ok, msg = emp.salvar_dados_empresa(
         pool, conta[0], documento=documento, razao_social=razao_social,
         nome_fantasia=nome_fantasia, endereco=endereco, bairro=bairro,

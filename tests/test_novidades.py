@@ -730,3 +730,26 @@ def test_a_214_corrige_o_publico_dos_avisos_do_raio_x_e_avisa_o_perfil(pool):
     with pool.connection() as c:
         c.execute((BASE / "214_novidade_raio_x_por_nicho.sql").read_text(encoding="utf-8")); c.commit()
         assert c.execute("select count(*) from novidades where chave='raio-x-por-nicho'").fetchone()[0] == 1
+
+
+def test_o_aviso_da_lista_de_espera_e_so_de_quem_vende_festa(pool):
+    """Regra 6: data pra disputar é de quem vende festa. A consultoria (conta 2)
+    não recebe, e a conta sem nicho (3) também não — não se sabe o que ela vende."""
+    with pool.connection() as c:
+        c.execute((BASE / "217_novidade_lista_espera.sql").read_text(encoding="utf-8"))
+        c.commit()
+        chave, publico, pra_quem, link, resumo = c.execute(
+            """select chave, publico, pra_quem, link, resumo from novidades
+                where chave = 'lista-de-espera-por-data'""").fetchone()
+    assert publico == "eventos" and sorted(pra_quem) == ["dono", "gestor", "vendedor"]
+    assert link == "/painel/agenda" and resumo
+    assert nv.nichos_alcancados(publico) == {"eventos"}
+    ev = {n["chave"] for n in nv.listar(pool, 1, papel="vendedor")}
+    cons = {n["chave"] for n in nv.listar(pool, 2, papel="dono")}
+    sem = {n["chave"] for n in nv.listar(pool, 3, papel="dono")}
+    assert "lista-de-espera-por-data" in ev
+    assert "lista-de-espera-por-data" not in cons and "lista-de-espera-por-data" not in sem
+    # reaplicar não duplica
+    with pool.connection() as c:
+        c.execute((BASE / "217_novidade_lista_espera.sql").read_text(encoding="utf-8")); c.commit()
+        assert c.execute("select count(*) from novidades where chave='lista-de-espera-por-data'").fetchone()[0] == 1

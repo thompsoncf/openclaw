@@ -36,7 +36,8 @@ create table membros (id bigserial primary key, conta_id bigint, nome text, emai
   papel text default 'vendedor', ativo boolean default true);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text, contato text, status text default 'novo', evento_em date, evento_tipo text,
-  orcamento_id bigint, segmento text, criado_em timestamptz default now());
+  orcamento_id bigint, segmento text, perda_motivo text, criado_em timestamptz default now());
+create table nichos (id bigserial primary key, nome text, slug text unique, ativo boolean default true);
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   contato_ref text, contato_nome text, criado_em timestamptz default now());
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
@@ -49,7 +50,9 @@ create table contratos (id bigserial primary key, conta_id bigint, orcamento_id 
   status text default 'enviado', valor_centavos bigint, assinado_em timestamptz,
   enviado_em timestamptz, criado_em timestamptz default now());
 create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
-  titulo text, inicio timestamptz, status text default 'ativo', desfecho text);
+  titulo text, inicio timestamptz, status text default 'ativo', desfecho text,
+  -- a régua da lista de espera lê tipo/tipo_evento pra saber o que TOMA o dia
+  tipo text default 'empresa', tipo_evento text);
 create table wa_qr_log (id bigserial primary key, conta_id bigint, nivel text default 'warn',
   msg text not null default '', dados jsonb, criado_em timestamptz not null default now());
 create table wa_decifra_diario (dia date not null, conta_id bigint not null, from_me boolean not null,
@@ -275,7 +278,8 @@ def test_responda_hoje_quatro_faixas_na_ordem_e_um_lead_por_faixa(pool):
     h = rx.responda_hoje(pool, conta, v, SEGUNDA_10H, perfil=EVENTOS)
     assert [(i["faixa"], i["nome"]) for i in h["itens"]] == [
         ("pergunta", "Gil"), ("festa", "Iva"), ("toque", "Jô"), ("visita", "Lia")]
-    assert h["n"] == 4 and h["por_faixa"] == {"pergunta": 1, "festa": 1, "proposta": 0, "toque": 1, "visita": 1}
+    assert h["n"] == 4 and h["por_faixa"] == {"data_abriu": 0, "pergunta": 1, "festa": 1,
+                                             "proposta": 0, "toque": 1, "visita": 1}
     assert h["sem_urgencia"] == 2          # Hugo e Kim seguem na Fila, sem urgência
     por = {i["nome"]: i for i in h["itens"]}
     assert "qual o valor?" in por["Gil"]["detalhe"] and "2h" in por["Gil"]["detalhe"] and por["Gil"]["acao"] == "responder"
@@ -634,3 +638,36 @@ def test_sua_semana_conta_o_segmento_em_familias(pool):
     s = rx.sua_semana(pool, conta, v, ini, fim)
     assert s["leads"] == 5 and s["leads_sem_segmento"] == 2
     assert s["segmentos"] == [{"rotulo": "Loja / comércio", "n": 2}, {"rotulo": "Clínica / saúde", "n": 1}]
+
+
+def test_a_data_que_abriu_vem_antes_de_tudo_no_responda_hoje(pool):
+    """A única faixa que SOME se o vendedor demorar: a data é vendida pra outro.
+    Por isso ela passa na frente até da pergunta sem resposta."""
+    from finance import lista_espera as _le
+    with pool.connection() as c:
+        c.execute("alter table contas add column if not exists festas_por_dia int")
+        c.execute("alter table contas add column if not exists nicho_id bigint")
+        c.execute("""create table if not exists lista_espera_data (
+                       id bigserial primary key, conta_id bigint, prospeccao_id bigint,
+                       data date, entrou_em timestamptz default now(), saiu_em timestamptz,
+                       saiu_motivo text, avisado_em timestamptz, unique (prospeccao_id, data))""")
+        c.execute("insert into nichos (nome, slug) values ('Eventos','eventos') on conflict do nothing")
+        conta = _conta(c, "Espera")
+        c.execute("""update contas set festas_por_dia=1,
+                       nicho_id=(select id from nichos where slug='eventos') where id=%s""", (conta,))
+        v = _vend(c, conta, "V")
+        # pergunta sem resposta agora: normalmente seria a primeira
+        p1 = _lead(c, conta, v, "Perguntou")
+        cv = _conversa(c, conta, p1, _t(1)); _msg(c, cv, "in", _t(0.1), "e o valor?")
+        # e um lead esperando por uma data que acabou de abrir
+        dia = SEGUNDA_10H.date() + timedelta(days=60)
+        p2 = _lead(c, conta, v, "Esperando", status="qualificado", evento_em=dia)
+        c.execute("""insert into lista_espera_data (conta_id, prospeccao_id, data)
+                     values (%s,%s,%s)""", (conta, p2, dia))
+        c.commit()
+    h = rx.responda_hoje(pool, conta, v, SEGUNDA_10H, perfil=EVENTOS)
+    assert [(i["faixa"], i["nome"]) for i in h["itens"]] == [("data_abriu", "Esperando"), ("pergunta", "Perguntou")]
+    assert "abriu" in h["itens"][0]["detalhe"] and h["itens"][0]["acao"] == "avisar"
+    # no perfil recorrente a faixa não existe
+    h2 = rx.responda_hoje(pool, conta, v, SEGUNDA_10H, perfil=RECORRENTE)
+    assert [i["faixa"] for i in h2["itens"]] == ["pergunta"]

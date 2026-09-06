@@ -1313,6 +1313,17 @@ def fechar(pool, conta_id: int, membro_id: int, lead_id: int, tipo: str, motivo:
                           (chave if tipo == "perdido" else None, lead_id, conta_id))
         except Exception:  # noqa: BLE001
             pass
+        # lista de espera (migração 216): ganho sai como "fechou"; perdido sai —
+        # SALVO quando o motivo é "data indisponível", porque aí o cliente ainda
+        # quer aquele dia e é justamente ele que a lista precisa avisar quando abrir.
+        try:
+            from finance import lista_espera as _le
+            if tipo == "ganho":
+                _le.sair(pool, conta_id, lead_id, "fechou")
+            elif chave != "data_indisponivel":
+                _le.sair(pool, conta_id, lead_id, "desistiu")
+        except Exception:  # noqa: BLE001 — a lista nunca segura o fechamento
+            pass
         texto_motivo = rotulo_motivo(chave) if chave else (motivo or "sem motivo")
         try:
             c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, resultado, descricao)

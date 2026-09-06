@@ -624,6 +624,19 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 /* NOVIDADES no app (migração 199, mockup novidades_tres_lugares): a faixa em
    cima da Fila aparece UMA vez por aviso e some ao tocar em "Ver" ou no ✕ —
    as duas marcam lida. Nunca fica: faixa que fica vira papel de parede. */
+/* LISTA DE ESPERA POR DATA (finance/lista_espera): a data pedida já tem festa.
+   A pílula diz o problema; as datas livres são a resposta pronta pro cliente. */
+.le{margin:.35rem .8rem 0;border:1px solid var(--coral-borda);background:var(--coral-fundo);
+  border-radius:11px;padding:.5rem .65rem;font-size:.76rem;color:#F2BDB9;display:flex;
+  flex-direction:column;gap:.35rem}
+.le.ok{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright)}
+.le b{font-weight:600}
+.le .liv{display:flex;gap:.3rem;flex-wrap:wrap}
+.le .liv a{font:600 .68rem var(--mono);border:1px dashed var(--neon-borda);color:var(--neon-bright);
+  border-radius:8px;padding:.25rem .5rem;text-decoration:none}
+.le form{margin:0}
+.le button{width:auto;margin:0;font:600 .66rem var(--mono);background:transparent;color:var(--text-dim);
+  border:1px solid var(--line);border-radius:999px;padding:.25rem .6rem}
 .faixa{margin:.2rem .8rem .5rem;border:1px solid var(--neon-borda);background:var(--neon-fundo);
   border-radius:12px;padding:.5rem .3rem .5rem .7rem;font-size:.78rem;color:var(--text);
   display:flex;align-items:center;gap:.5rem}
@@ -2449,7 +2462,8 @@ def _rx_sua_semana(s: dict, rot: str, perfil: dict | None = None) -> str:
 
 def _rx_responda_hoje(h: dict, perfil: dict | None = None) -> str:
     comp = ((perfil or {}).get("vocab") or {}).get("compromisso", "visita")
-    rot = {"pergunta": "🔴 Pergunta sem resposta", "festa": "🟠 Festa perto, sem proposta",
+    rot = {"data_abriu": "🟢 A data que ele esperava abriu",
+           "pergunta": "🔴 Pergunta sem resposta", "festa": "🟠 Festa perto, sem proposta",
            "proposta": "🟠 Proposta parada, sem resposta",
            "toque": "🟡 Toque da cadência vence hoje", "visita": f"🔵 {comp.capitalize()} amanhã"}
     html = f"<div class=rx-ey><span>Responda hoje</span><span>{h['n']} pelo que mais urge</span></div>"
@@ -4534,12 +4548,49 @@ def _dia_br(dt) -> str:
     return d.strftime("%d/%m/%Y")
 
 
+def _bloco_espera(request: Request, lead_id: int, d: dict) -> str:
+    """A data que o cliente pediu já tem festa? (finance/lista_espera)
+
+    Diz o problema E a resposta: as três datas livres mais perto, pro vendedor
+    oferecer sem sair da conversa. Foi o que faltou na Prime — 25 leads com data
+    tomada, nenhum com proposta. Best-effort: a conversa nunca cai por causa
+    disto, e conta que não usa lista não vê nada."""
+    try:
+        from finance import lista_espera as _le
+        conta_id = request.session.get("conta_id")
+        dia = d.get("evento_em")
+        if not conta_id or not dia:
+            return ""
+        st = _le.data_tomada(get_pool(), conta_id, dia)
+        if st is None:
+            return ""
+        esperando = _le.esperando_por(get_pool(), conta_id, lead_id)
+        if not st["tomada"]:
+            if dia in esperando:
+                return (f"<div class='le ok'><span>🟢 <b>A data {dia:%d/%m} abriu.</b> "
+                        "Avise o cliente antes que ele feche em outro lugar.</span></div>")
+            return ""
+        livres = _le.datas_livres_perto(get_pool(), conta_id, dia)
+        chips = "".join(
+            f"<span>{x['data']:%d/%m}</span>" for x in livres)
+        o_que = esc(st["o_que"]) if st["o_que"] else "festa"
+        na_lista = ("<span>Na lista de espera desta data ✓</span>" if dia in esperando else "")
+        return ("<div class=le>"
+                f"<span>📅 <b>Data tomada</b> — {dia:%d/%m} já tem {o_que}.</span>"
+                + (f"<span>Datas livres perto:</span><div class=liv>{chips}</div>" if chips else "")
+                + na_lista + "</div>")
+    except Exception as e:  # noqa: BLE001
+        _log.info("lista de espera na tela do lead: %s: %s", type(e).__name__, e)
+        return ""
+
+
 def _lead_vendedor(request: Request, lead_id: int, d: dict,
                    pode_voz: bool = False, saida_wa: bool = True) -> HTMLResponse:
     sub = " · ".join(x for x in [d.get("cidade") or "", d.get("uf") or ""] if x) or (d.get("doc_fmt") or "")
     # o evento na frente de tudo: é o que se precisa ver antes de responder (197)
     if d.get("evento_fmt"):
         sub = d["evento_fmt"] + (" · " + sub if sub else "")
+    espera = _bloco_espera(request, lead_id, d)
 
     bolhas = []
     # (o _midia_html mora fora daqui pra o polling do JS desenhar igual — ver cxMid)
@@ -4815,7 +4866,7 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
     corpo = (
                _hdr(d["empresa"], sub, voltar=_BASE, direita=chip)
              + _flash(request)
-             + dupla + pista
+             + dupla + pista + espera
              + f"<div class=chat>{chat}</div>{lupa_html}"
              + f"<div class=rodape>{acao}"
              + "<a class='btn ghost' style='margin-top:.5rem' href='#acoes'>Ficha, funil e fechamento</a>"

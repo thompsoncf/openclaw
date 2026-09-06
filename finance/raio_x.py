@@ -277,6 +277,18 @@ def responda_hoje(pool, conta_id: int, membro_id: int, agora: datetime | None = 
     nome_comp = vocab.get("compromisso", "visita")
     a = agora_brt(agora)
     hoje = a.date()
+    # a data que o cliente esperava abriu (finance/lista_espera): vem primeiro de
+    # todas, porque é a única que some se o vendedor demorar — a data é vendida
+    # pra outro. Só existe no perfil eventos, com a conta usando a lista.
+    abriu: dict[int, dict] = {}
+    if "data_abriu" in faixas:
+        try:
+            from finance import lista_espera as _le
+            for x in _le.datas_que_abriram(pool, conta_id):
+                if x["vendedor_id"] == membro_id:
+                    abriu[x["lead_id"]] = x
+        except Exception as e:  # noqa: BLE001
+            _log.info("responda hoje: lista de espera falhou: %s: %s", type(e).__name__, e)
     with pool.connection() as c:
         leads = c.execute("""
             select p.id, coalesce(nullif(p.contato, ''), nullif(p.empresa, ''), 'lead') as nome,
@@ -310,6 +322,15 @@ def responda_hoje(pool, conta_id: int, membro_id: int, agora: datetime | None = 
                       "acao": acao, "ordem": ordem, "href": href or f"{base}/lead/{lid}"})
 
     for lid, nome, status, ev_em, ev_tipo, orc, dirc, texto, em, cauda in leads:
+        x = abriu.get(lid)
+        if x:
+            _add("data_abriu", lid, nome,
+                 f"a data {x['data']:%d/%m} abriu · esperava há {x['dias_esperando']} dia(s)"
+                 + (f" · {x['tipo']}" if x["tipo"] else ""),
+                 "avisar", -10000)
+    for lid, nome, status, ev_em, ev_tipo, orc, dirc, texto, em, cauda in leads:
+        if lid in usados:
+            continue
         em_brt = em.astimezone(_TZ) if em else None
         if dirc == "in" and texto is not None and not _DESPEDIDA.match(texto or "") and em_brt:
             horas = (a - em_brt).total_seconds() / 3600
@@ -359,7 +380,7 @@ def responda_hoje(pool, conta_id: int, membro_id: int, agora: datetime | None = 
             continue
         _add("visita", lid, nome, f"{nome_comp} amanhã {inicio.astimezone(_TZ):%H:%M} · confirmar na véspera",
              "confirmar", 0, href=f"{base}/lead/{lid}")
-    ordem_faixa = {"pergunta": 0, "festa": 1, "proposta": 2, "toque": 3, "visita": 4}
+    ordem_faixa = {"data_abriu": -1, "pergunta": 0, "festa": 1, "proposta": 2, "toque": 3, "visita": 4}
     itens.sort(key=lambda i: (ordem_faixa[i["faixa"]], i["ordem"]))
     return {"itens": itens, "n": len(itens),
             "por_faixa": {f: sum(1 for i in itens if i["faixa"] == f) for f in ordem_faixa},

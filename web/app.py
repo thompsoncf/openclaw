@@ -221,6 +221,18 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — wa_decifra falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
+                # A lista de espera por data (só conta com festas_por_dia): põe na
+                # lista quem pede data tomada, tira quem saiu, e avisa quem
+                # esperava por uma data que abriu. A trava do aviso em dobro é a
+                # coluna `avisado_em` — com 2 workers, quem marca avisa.
+                from finance import lista_espera as _le
+                r_le = _le.rodar(pool)
+                if r_le["entraram"] or r_le["avisados"]:
+                    log.info("poller: ciclo #%d — lista de espera: +%d na lista, %d avisado(s)",
+                             ciclo, r_le["entraram"], r_le["avisados"])
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — lista_espera falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
                 # O Raio-X de segunda no grupo dos vendedores: só faz alguma coisa
                 # na segunda a partir das 8h, e uma vez por conta e semana (a trava
                 # é a linha em raio_x_envios — com 2 workers só um consegue inserir).

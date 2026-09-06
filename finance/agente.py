@@ -508,16 +508,23 @@ def _orcamento(pool, c, conta_id, conversa_id, conv, catalogo, d, canal, destino
     # campo é NULO. O default da coluna é ZERO, que não é nulo: a proposta 32 da conta
     # 34, feita pelo agente em 20/08, foi aprovada pelo cliente valendo R$ 0,00.
     # Sem desconto (o agente não dá), o primeiro ano É o setup.
-    orc_id = c.execute(
-        """insert into orcamentos (conta_id, cliente, empresa, modulos, itens, escopo,
+    # numerada ao nascer — o agente criava sem número até 06/09 (ver
+    # finance.vendas.NUMERO_SQL). O retry usa savepoint de propósito: a conversa
+    # já foi gravada nesta transação e uma colisão de número não pode apagá-la.
+    _r = _vendas.com_retry_numero(c, lambda: c.execute(
+        f"""insert into orcamentos (conta_id, cliente, empresa, modulos, itens, escopo,
              evento, setup_centavos, mensal_centavos, primeiro_ano_centavos, whatsapp,
-             n_modulos, criado_por, token, status, modo)
-           values (%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s::jsonb,%s,%s,%s,%s,%s,'agente',%s,'rascunho',%s)
+             n_modulos, criado_por, token, status, modo, numero)
+           values (%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s::jsonb,%s,%s,%s,%s,%s,'agente',%s,'rascunho',%s,
+                   {_vendas.NUMERO_SQL})
            returning id""",
         (conta_id, empresa, empresa, json.dumps([s["slug"] for s in escolhidos]),
          json.dumps(itens), _CONDICOES, json.dumps(evento), setup, mensal, setup,
          fone[:60], len(escolhidos), token,
-         _vendas.modo_por_nicho(_n[0] if _n else ""))).fetchone()[0]
+         _vendas.modo_por_nicho(_n[0] if _n else ""), conta_id)).fetchone())
+    if not _r:
+        raise RuntimeError("não consegui numerar a proposta depois de 3 tentativas")
+    orc_id = _r[0]
 
     # O CARD DO FUNIL, amarrado AQUI, na mesma transação da proposta.
     #

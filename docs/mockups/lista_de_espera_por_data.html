@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lista de espera por data</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --ink:#062011;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.86em;color:var(--roxo)}
+.wrap{max-width:1180px;margin:0 auto;padding:2.6rem 1.25rem 5rem;display:flex;flex-direction:column;gap:2.8rem}
+.head .k{margin-bottom:.5rem}
+.head h1{font-size:clamp(1.6rem,4vw,2.2rem);margin:.35rem 0 .55rem}
+.head p{color:var(--text-dim);max-width:74ch;margin:0}
+.head .marca{color:var(--neon)}
+.sec>h2{font-size:1.2rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.1rem;max-width:74ch;font-size:.9rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em;margin-bottom:.35rem}
+/* placar */
+.placar{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem}
+@media (max-width:900px){.placar{grid-template-columns:repeat(2,1fr)}}
+.placar div{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.8rem .9rem}
+.placar b{display:block;font:600 1.6rem/1 var(--display);font-variant-numeric:tabular-nums}
+.placar span{display:block;font-size:.72rem;color:var(--text-dim);margin-top:.3rem}
+.placar .ruim b{color:var(--coral)}.placar .amb b{color:var(--ambar)}.placar .ok b{color:var(--neon-bright)}
+/* lado a lado */
+.lado{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media (max-width:900px){.lado{grid-template-columns:1fr}}
+.lado>div>.k{margin-bottom:.5rem}
+/* o app */
+.fone{border:1px solid var(--line);border-radius:28px;background:var(--bg);box-shadow:0 20px 60px rgba(0,0,0,.45);overflow:hidden;display:flex;flex-direction:column;min-height:520px}
+.fone .leg{padding:.6rem .9rem;font-size:.72rem;color:var(--text-faint);border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.08em;font-weight:600;display:flex;justify-content:space-between}
+.ey{display:flex;justify-content:space-between;padding:.55rem 1rem .3rem;font:500 .64rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint)}
+.card{margin:.5rem 1rem;border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:.75rem .85rem;display:flex;flex-direction:column;gap:.4rem}
+.card .emp{font-weight:600;font-size:.92rem}
+.card .por{color:var(--text-dim);font-size:.76rem}
+.pil{display:inline-flex;align-items:center;gap:.3rem;font:600 .64rem var(--mono);border-radius:999px;padding:.2rem .55rem;border:1px solid}
+.pil.tomada{color:#F2BDB9;border-color:var(--coral-borda);background:var(--coral-fundo)}
+.pil.abriu{color:var(--neon-bright);border-color:var(--neon-borda);background:var(--neon-fundo)}
+.pil.espera{color:#F0DCA6;border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.livres{display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.2rem}
+.livres span{font:500 .68rem var(--mono);border:1px dashed var(--neon-borda);color:var(--neon-bright);border-radius:8px;padding:.25rem .5rem}
+.bts{display:flex;gap:.4rem;margin-top:.3rem}
+.bts span{font:600 .68rem var(--mono);border-radius:999px;padding:.32rem .65rem;border:1px solid var(--line);color:var(--text-dim)}
+.bts span.p{background:var(--neon);border-color:var(--neon);color:var(--ink)}
+.lead{display:flex;gap:.6rem;padding:.55rem 1rem;border-bottom:1px solid var(--line);font-size:.78rem;align-items:flex-start}
+.lead .dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:.4rem}
+.lead .mid{flex:1;min-width:0}
+.lead .emp{font-weight:600;font-size:.84rem}
+.lead .por{color:var(--text-dim);font-size:.72rem}
+.lead .acao{flex:none;font:600 .62rem var(--mono);color:var(--neon-bright);border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:999px;padding:.2rem .5rem;white-space:nowrap}
+.push{margin:.6rem 1rem;border:1px solid var(--azul-borda);background:var(--azul-fundo);border-radius:12px;padding:.55rem .7rem;font-size:.74rem;color:var(--text)}
+.push b{color:var(--azul)}
+.push small{display:block;color:var(--text-faint);font:400 .62rem var(--mono);margin-top:.2rem}
+/* o painel */
+.painel{border:1px solid var(--line);border-radius:14px;background:var(--bg);overflow:hidden}
+.painel .quem{padding:.6rem 1rem;border-bottom:1px solid var(--line);background:var(--bg-2);display:flex;justify-content:space-between;align-items:center;font-size:.74rem;color:var(--text-dim)}
+.painel .quem b{color:var(--text)}
+.tab{width:100%;border-collapse:collapse;font-size:.78rem}
+.tab th{font:500 .6rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--line)}
+.tab td{padding:.55rem .7rem;border-bottom:1px solid var(--line);vertical-align:top;font-variant-numeric:tabular-nums}
+.tab td:first-child{font-weight:600;white-space:nowrap}
+.tab .mut{color:var(--text-dim)}
+.tab tr.abriu td{background:var(--neon-fundo)}
+.tab .n{text-align:right}
+.acha{margin:.7rem .9rem .9rem;font-size:.76rem;color:#F0DCA6;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:8px;padding:.45rem .6rem}
+/* fluxo */
+.fluxo{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem}
+@media (max-width:900px){.fluxo{grid-template-columns:1fr 1fr}}
+.passo{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.8rem .9rem}
+.passo .num{font:600 .62rem var(--mono);color:var(--neon);letter-spacing:.08em}
+.passo h4{font-size:.9rem;margin:.25rem 0 .3rem}
+.passo p{margin:0;font-size:.78rem;color:var(--text-dim)}
+/* notas */
+.notas{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.8rem}
+.nota{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem .95rem}
+.nota h4{font-size:.9rem;margin-bottom:.3rem}
+.nota p{margin:0;font-size:.8rem;color:var(--text-dim)}
+.nota.bom{border-color:var(--neon-borda)}
+.nota.fora{border-color:var(--coral-borda)}
+.passos{margin:0;padding-left:1.2rem;font-size:.86rem;color:var(--text-dim);display:flex;flex-direction:column;gap:.45rem}
+.passos b{color:var(--text);font-weight:500}
+.rodape{font-size:.74rem;color:var(--text-faint);border-top:1px solid var(--line);padding-top:1rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <div class="k">LISTA DE ESPERA POR DATA · SÓ PRA QUEM VENDE FESTA · A PRIME PRIMEIRO · MOCKUP PRA APROVAR</div>
+    <h1>Quando o cliente pede uma data que <span class="marca">já foi vendida</span>, ele entra numa fila. Quando a data abre, o vendedor fica sabendo na hora.</h1>
+    <p>Hoje a Prime tem 25 clientes sendo trabalhados pra datas que ela já vendeu, e o vendedor não vê isso na tela: nenhum dos 25 recebeu proposta. Quando uma festa é cancelada (foram 7), ninguém lembra quem tinha pedido aquele dia. A lista faz três coisas: marca "data tomada" no lead e sugere as datas livres mais perto; guarda quem espera por cada data; e avisa o vendedor certo no instante em que a data abre. Números reais da Prime em 06/09; nomes de clientes fictícios.</p>
+  </div>
+
+  <!-- ══════════ os números ══════════ -->
+  <section class="sec">
+    <div class="k">O QUE O BANCO DIZ HOJE</div>
+    <div class="placar">
+      <div class="ruim"><b>25</b><span>leads em jogo pedindo data <b style="font:inherit;color:var(--coral)">já tomada</b> · 18 datas · nenhum com proposta</span></div>
+      <div class="amb"><b>6 de 17</b><span>sábados livres nos próximos 120 dias · os 3 próximos já foram</span></div>
+      <div class="amb"><b>45</b><span>leads disputando entre si as mesmas 18 datas futuras (19/12 tem 5)</span></div>
+      <div class="ok"><b>3</b><span>leads esperando por 16/01, que <b style="font:inherit;color:var(--neon-bright)">já abriu</b> por cancelamento e ninguém avisou</span></div>
+    </div>
+  </section>
+
+  <!-- ══════════ o app ══════════ -->
+  <section class="sec">
+    <div class="k">1 · NO APP DO VENDEDOR</div>
+    <h2>O lead sabe que a data está tomada, e a resposta pronta vem junto</h2>
+    <p class="leg">O card e a tela do lead ganham a pílula "data tomada" quando a data pedida já tem festa na agenda. O lead entra na lista sozinho. Embaixo, as três datas livres mais perto, pra o vendedor responder "24/10 já está com festa, mas tenho 03/10, sexta 09/10 e o sábado 07/11" sem abrir a agenda.</p>
+    <div class="lado">
+      <div class="fone">
+        <div class="leg"><span>Prime · vendedor · lead</span><span>data tomada</span></div>
+        <div class="card">
+          <div><span class="pil tomada">📅 data tomada · 10/10 já tem festa</span></div>
+          <div class="emp">Renata Figueiredo</div>
+          <div class="por">Aniversário · sáb 10/10 · 80 convidados · pediu há 17 dias</div>
+          <div class="por">Datas livres perto:</div>
+          <div class="livres"><span>sáb 03/10</span><span>sex 09/10</span><span>sáb 07/11</span></div>
+          <div class="bts"><span class="p">na lista de espera ✓</span><span>tirar da lista</span></div>
+        </div>
+        <div class="ey"><span>Responda hoje</span><span>3</span></div>
+        <div class="lead"><span class="dot" style="background:var(--neon)"></span><div class="mid"><div class="emp">Marcos Teixeira</div><div class="por"><b>a data 16/01 abriu</b> · esperava há 19 dias · formatura</div></div><span class="acao">avisar</span></div>
+        <div class="lead"><span class="dot" style="background:var(--coral)"></span><div class="mid"><div class="emp">Camila Reis</div><div class="por">"qual o valor pra 80 pessoas?" · 3h</div></div><span class="acao">responder</span></div>
+        <div class="lead"><span class="dot" style="background:var(--ambar)"></span><div class="mid"><div class="emp">Renata Figueiredo</div><div class="por">data tomada · sem proposta · 3 datas livres perto</div></div><span class="acao">oferecer</span></div>
+        <div class="push"><b>🔔 Zaq · agora</b> A data 16/01 abriu. Marcos Teixeira esperava por ela há 19 dias. Avise antes que ele feche em outro lugar.<small>push pro vendedor do lead · o dono recebe o resumo no Telegram, como já recebe da pré-reserva vencida</small></div>
+      </div>
+      <div>
+        <div class="k" style="margin-top:.2rem">O QUE ACONTECE, EM QUATRO PASSOS</div>
+        <div class="fluxo" style="grid-template-columns:1fr 1fr">
+          <div class="passo"><div class="num">1 · ENTRA</div><h4>Data pedida já tem festa</h4><p>O lead entra na lista sozinho, na hora em que a data é lida da conversa ou digitada na ficha. Lead perdido por "data indisponível" também entra: o cliente ainda quer aquele dia.</p></div>
+          <div class="passo"><div class="num">2 · ESPERA</div><h4>A pílula fica no card</h4><p>"Data tomada" no card, na Fila e na tela do lead, com as três datas livres mais perto. O vendedor oferece outra data ou tira da lista quando o cliente desiste.</p></div>
+          <div class="passo"><div class="num">3 · ABRE</div><h4>Cancelamento ou pré-reserva vencida</h4><p>No instante em que a festa daquele dia é cancelada, ou a pré-reserva vence sem sinal, a data abre. Os dois caminhos já existem no código; a lista só escuta.</p></div>
+          <div class="passo"><div class="num">4 · AVISA</div><h4>Todos ao mesmo tempo</h4><p>Cada lead que esperava vira linha verde no "responda hoje" do seu vendedor, com push. O dono recebe o resumo no Telegram. Quem fecha é o vendedor, não o sistema.</p></div>
+        </div>
+        <div class="acha" style="margin:.8rem 0 0"><b>Por que o 0 em "com proposta" importa:</b> os 25 leads com data tomada não receberam proposta nenhuma. É sinal de que o vendedor viu a data ocupada na agenda e parou, sem oferecer outra. As três datas livres no card são a resposta que hoje não existe.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ o painel ══════════ -->
+  <section class="sec">
+    <div class="k">2 · NO PAINEL DO DONO · AGENDA → LISTA DE ESPERA</div>
+    <h2>Uma linha por data: quem espera, desde quando, com quem, e se a data abriu</h2>
+    <p class="leg">Entra como aba da Agenda e como bloco no Raio-X do dono. Ordenada pela data. As linhas verdes são datas que abriram e ainda têm gente esperando: é onde a ação está.</p>
+    <div class="painel">
+      <div class="quem"><span><b>Prime Eventos</b> · Lista de espera por data · 18 datas · 25 esperando</span><span>festas por dia: <b>1</b></span></div>
+      <table class="tab">
+        <tr><th>Data</th><th>Situação</th><th class="n">Esperando</th><th>Quem</th><th>Vendedor</th><th>Desde</th><th></th></tr>
+        <tr class="abriu"><td>sáb 16/01</td><td><span class="pil abriu">abriu · cancelada em 02/09</span></td><td class="n">3</td><td>Marcos T. · Luana P. · Beatriz A.</td><td class="mut">Thiago, Pedro, Jacqueline</td><td class="mut">19 dias</td><td><span class="pil abriu">avisar os 3</span></td></tr>
+        <tr><td>sáb 26/09</td><td><span class="pil tomada">tomada · locação</span></td><td class="n">2</td><td>Fernanda L. · Igor S.</td><td class="mut">Pedro, Thiago</td><td class="mut">24 dias</td><td class="mut">livres: 03/10 · 27/09 · 02/10</td></tr>
+        <tr><td>sáb 10/10</td><td><span class="pil tomada">tomada · locação</span></td><td class="n">2</td><td>Renata F. · Vitor M.</td><td class="mut">Jacqueline, Thiago</td><td class="mut">17 dias</td><td class="mut">livres: 03/10 · 09/10 · 07/11</td></tr>
+        <tr><td>sáb 31/10</td><td><span class="pil tomada">tomada · locação</span></td><td class="n">2</td><td>Aline B. · Carlos N.</td><td class="mut">Pedro, Pedro</td><td class="mut">3 dias</td><td class="mut">livres: 24/10 · 01/11 · 07/11</td></tr>
+        <tr><td>sáb 05/12</td><td><span class="pil tomada">tomada · formatura</span></td><td class="n">2</td><td>Diego R. · Helena C.</td><td class="mut">Jacqueline, Thiago</td><td class="mut">19 dias</td><td class="mut">livres: 06/12 · 04/12 · 19/12</td></tr>
+        <tr><td>sáb 12/12</td><td><span class="pil tomada">tomada · locação</span></td><td class="n">2</td><td>Paulo E. · Sofia M.</td><td class="mut">Pedro, Pedro</td><td class="mut">11 dias</td><td class="mut">livres: 06/12 · 13/12 · 19/12</td></tr>
+        <tr><td>sex 18/12</td><td><span class="pil tomada">tomada · buffet</span></td><td class="n">2</td><td>Júlia V. · Rafael O.</td><td class="mut">Thiago, Jacqueline</td><td class="mut">15 dias</td><td class="mut">livres: 19/12 · 13/12 · 20/12</td></tr>
+        <tr><td>sáb 19/12</td><td><span class="pil espera">livre · 5 disputando</span></td><td class="n">5</td><td>Amanda G. · Bruno F. · +3</td><td class="mut">3 vendedores</td><td class="mut">22 dias</td><td class="mut">quem fechar primeiro leva</td></tr>
+        <tr><td class="mut" colspan="7">… mais 10 datas</td></tr>
+      </table>
+      <div class="acha"><b>19/12 está livre e cinco clientes querem.</b> É a data pra fechar esta semana: proposta pros cinco, o primeiro que der sinal segura. A lista mostra também o outro lado: as datas com fila viram a tabela de sábado.</div>
+    </div>
+  </section>
+
+  <!-- ══════════ configuração ══════════ -->
+  <section class="sec">
+    <div class="k">3 · A REGRA DA CASA: FESTAS POR DIA</div>
+    <h2>Um número na conta decide quando a data está tomada</h2>
+    <p class="leg">Em Empresa, quem vende festa ganha o campo <b>festas por dia</b>. A Prime nasce com 1: nunca teve duas festas no mesmo dia em 29 dias de agenda, e é a regra que o aviso de remarcação já usa. Se um dia abrir dois salões, é trocar o número. A Doce Mell fica sem o campo nesta rodada, e sem o campo não há lista.</p>
+    <div class="notas">
+      <div class="nota bom"><h4>Data tomada</h4><p>O dia tem tantas festas na agenda (ativas ou pré-reservadas) quanto "festas por dia". Com 1, uma festa toma o dia.</p></div>
+      <div class="nota bom"><h4>Data livre perto</h4><p>Os três dias mais próximos, antes e depois, sem festa. Sábado primeiro, porque é o que o cliente pede; depois sexta e domingo.</p></div>
+      <div class="nota bom"><h4>Data abriu</h4><p>A festa daquele dia foi cancelada, ou a pré-reserva venceu sem sinal, e o dia voltou a ter vaga. Os dois caminhos já existem; a lista escuta os dois.</p></div>
+      <div class="nota fora"><h4>Fica de fora</h4><p>Reserva automática, ordem de chegada com prazo, e bloqueio de proposta pra data tomada. O sistema avisa; quem vende é o vendedor.</p></div>
+    </div>
+  </section>
+
+  <!-- ══════════ código ══════════ -->
+  <section class="sec">
+    <div class="k">O QUE MUDA NO CÓDIGO, SE APROVAR</div>
+    <ol class="passos">
+      <li><b>Migração:</b> <code>contas.festas_por_dia</code> (nulo = sem lista; a Prime nasce com 1) e <code>lista_espera_data</code> (conta, lead, data, entrou_em, saiu_em, motivo de saída, avisado_em). Aditiva.</li>
+      <li><b><code>finance/lista_espera.py</code></b>: <code>data_tomada</code>, <code>datas_livres_perto</code>, <code>entrar</code>/<code>sair</code>, <code>sincronizar</code> (roda no ticker: todo lead em jogo com data tomada entra; quem mudou de data ou fechou sai), <code>datas_que_abriram</code> (escuta o cancelamento e a pré-reserva vencida) e <code>avisar</code> (push pro vendedor, linha no "responda hoje", Telegram pro dono).</li>
+      <li><b>App:</b> pílula "data tomada" e as datas livres no card, na Fila e na tela do lead; a faixa "a data abriu" no "responda hoje" (só no perfil eventos, pelo perfil do #640).</li>
+      <li><b>Painel:</b> aba "Lista de espera" na Agenda e bloco no Raio-X do dono; o campo "festas por dia" em Empresa.</li>
+      <li><b>Sincronização inicial:</b> no deploy, os 25 leads de hoje entram na lista sozinhos, e os 3 de 16/01 aparecem como "a data abriu" no primeiro ciclo.</li>
+      <li><b>Aviso de novidade</b> no mesmo PR (seção 5): público <code>eventos</code>, pra dono, gestor e vendedor.</li>
+    </ol>
+  </section>
+
+  <p class="rodape">Números lidos do banco em 06/09/2026, só leitura, conta 34. Nomes de clientes nas telas são fictícios; os agregados, as datas e a situação da agenda são reais. Nada aqui encosta em chip, sessão ou canal.</p>
+</div>
+</body>
+</html>

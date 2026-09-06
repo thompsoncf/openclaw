@@ -57,7 +57,12 @@ create table orcamentos (id bigserial primary key, conta_id bigint,
   setup_centavos bigint default 0, mensal_centavos bigint default 0,
   primeiro_ano_centavos bigint default 0, n_modulos int default 0,
   criado_por text, token text, modo text,
+  -- 06/09: o agente passou a numerar a proposta ao criá-la, como as outras três
+  -- portas. O índice único é quem arbitra a série por conta — sem ele aqui, o
+  -- teste não exercitaria o retry que a colisão dispara.
+  numero int,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
+create unique index ux_orc_conta_numero on orcamentos (conta_id, numero);
 create table orcamento_envios (id bigserial primary key, conta_id bigint,
   orcamento_id bigint, canal text default 'email', destino text default '',
   remetente text default '', ok boolean default true, erro text default '',
@@ -236,3 +241,58 @@ def test_a_data_da_festa_que_o_agente_ouviu_vai_pro_lead_junto_com_o_vinculo(poo
     with pool.connection() as c:
         assert c.execute("select evento_em, evento_tipo from prospeccao where id=%s",
                          (lid,)).fetchone() == (date(2026, 12, 31), "casamento")
+
+
+# ───────────────── a proposta do agente nasce numerada (06/09)
+
+def test_a_proposta_do_agente_nasce_com_numero(pool):
+    """Até 06/09 o agente inseria sem `numero` — a proposta só ganhava o dela se
+    alguém depois a abrisse e salvasse no painel."""
+    orc = _rodar(pool, _conv(_lead(pool)))
+    with pool.connection() as c:
+        n = c.execute("select numero from orcamentos where id=%s", (orc[0],)).fetchone()[0]
+    assert n == 1
+
+
+def test_a_serie_do_agente_continua_a_da_conta(pool):
+    """O agente não tem série própria: entra na mesma numeração do painel e do
+    app, senão duas propostas da mesma empresa saem com o mesmo número."""
+    with pool.connection() as c:
+        c.execute("insert into orcamentos (conta_id, cliente, numero) values (%s,'antiga',7)",
+                  (CONTA,))
+        c.commit()
+    orc = _rodar(pool, _conv(_lead(pool)))
+    with pool.connection() as c:
+        n = c.execute("select numero from orcamentos where id=%s", (orc[0],)).fetchone()[0]
+    assert n == 8
+
+
+def test_duas_propostas_seguidas_nao_repetem_numero(pool):
+    orc1 = _rodar(pool, _conv(_lead(pool)))
+    orc2 = _rodar(pool, _conv(_lead(pool)))
+    with pool.connection() as c:
+        ns = [c.execute("select numero from orcamentos where id=%s", (o[0],)).fetchone()[0]
+              for o in (orc1, orc2)]
+    assert ns == [1, 2]
+
+
+def test_a_conversa_gravada_antes_sobrevive_a_colisao_de_numero(pool):
+    """A RAZÃO DO SAVEPOINT, no caminho real. A proposta do agente nasce depois de
+    a conversa e o lead já terem sido gravados na MESMA transação. Com o
+    `c.rollback()` antigo, um número repetido apagaria a conversa junto."""
+    lead = _lead(pool)
+    conv = _conv(lead)
+    # alguém tomou o número 1 entre a leitura do max e a gravação
+    with pool.connection() as c:
+        c.execute("insert into orcamentos (conta_id, cliente, numero) values (%s,'corrida',1)",
+                  (CONTA,))
+        c.commit()
+
+    orc = _rodar(pool, conv)
+
+    with pool.connection() as c:
+        n = c.execute("select numero from orcamentos where id=%s", (orc[0],)).fetchone()[0]
+        vinculo = c.execute("select orcamento_id from prospeccao where id=%s",
+                            (lead,)).fetchone()[0]
+    assert n == 2
+    assert vinculo == orc[0], "a colisão de número desfez o vínculo com o lead"

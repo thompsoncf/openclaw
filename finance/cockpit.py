@@ -2125,19 +2125,29 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens,
             oid, token = r[0], r[1]
         else:
             token = _secrets.token_urlsafe(16)
-            oid = c.execute(
-                """insert into orcamentos
+            # O NÚMERO NASCE AQUI, com a proposta. Até 06/09 este insert não
+            # numerava: a proposta feita no celular só ganhava número se alguém
+            # depois a abrisse e salvasse no painel — e a que nascia e morria no
+            # app ficava sem número no card e no funil. Mesma regra e mesmo retry
+            # do painel (finance.vendas), pra a série ser uma só por conta.
+            from finance import vendas as _vendas
+            r = _vendas.com_retry_numero(c, lambda: c.execute(
+                f"""insert into orcamentos
                      (itens, setup_centavos, mensal_centavos, primeiro_ano_centavos,
                       desconto_tipo, desconto_pct, desconto_centavos, evento, parcelas,
                       conta_id, cliente, empresa, cnpj, segmento, whatsapp, telefone,
-                      email, cidade, uf, status, criado_por, canal, token, modo)
+                      email, cidade, uf, status, criado_por, canal, token, modo, numero)
                    values (%s::jsonb,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,
-                           %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'enviado',%s,'cockpit',%s,%s)
+                           %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'enviado',%s,'cockpit',%s,%s,
+                           {_vendas.NUMERO_SQL})
                    returning id""",
                 campos + (conta_id, (lead[1] or None), (lead[0] or None), lead[2],
                           lead[3], lead[4], lead[5], lead[6], lead[7],
                           (lead[8] or "")[:2] or None,
-                          str(membro_id), token, modo)).fetchone()[0]
+                          str(membro_id), token, modo, conta_id)).fetchone())
+            if not r:
+                return {"ok": False, "erro": "Não consegui numerar a proposta. Tente de novo."}
+            oid = r[0]
         c.execute("update prospeccao set orcamento_id=%s, atualizado_em=now() where id=%s and conta_id=%s",
                   (oid, lead_id, conta_id))
         # a data/tipo/convidados da proposta vão pro lead (migração 197)

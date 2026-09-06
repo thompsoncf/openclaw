@@ -8295,16 +8295,22 @@ def prospeccao_orcamento(request: Request, alvo_id: int):
         criador = str(ctx["membro_id"]) if ctx["membro_id"] else "dono"
         with pool.connection() as c:
             _garantir_tabela(c)
-            row = c.execute(
-                """insert into orcamentos (conta_id, cliente, empresa, cnpj, segmento,
+            # numerada ao nascer — esta porta criava sem número até 06/09, ver
+            # finance.vendas.NUMERO_SQL
+            row = vendas.com_retry_numero(c, lambda: c.execute(
+                f"""insert into orcamentos (conta_id, cliente, empresa, cnpj, segmento,
                      whatsapp, email, telefone, cidade, uf, site, cargo, socio,
-                     criado_por, token, status, modo)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'rascunho',%s) returning id""",
+                     criado_por, token, status, modo, numero)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'rascunho',%s,
+                           {vendas.NUMERO_SQL}) returning id""",
                 (ctx["conta_id"], alvo["contato"], alvo["empresa"], alvo["cnpj"], alvo["segmento"],
                  alvo["whatsapp"] or alvo["telefone"], alvo["email"], alvo["telefone"],
                  alvo["cidade"], alvo["uf"], alvo["site_url"], alvo["cargo"], alvo["socio"],
                  criador, secrets.token_urlsafe(16),
-                 vendas.modo_do_orcamento(pool, ctx["conta_id"]))).fetchone()
+                 vendas.modo_do_orcamento(pool, ctx["conta_id"]), ctx["conta_id"])).fetchone())
+            if not row:
+                request.session["prosp_aviso"] = "Não consegui numerar o orçamento — tente de novo."
+                return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
             oid = row[0]
             novo_status = alvo["status"] if alvo["status"] in ("ganho", "perdido") else "proposta"
             c.execute("update prospeccao set orcamento_id=%s, status=%s, atualizado_em=now() "

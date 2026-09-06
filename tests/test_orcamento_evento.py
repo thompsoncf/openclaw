@@ -574,10 +574,38 @@ def test_modo_do_orcamento_pela_conta(pool):
 
 def test_numero_repete_quando_dois_salvam_junto():
     """A série por conta é garantida pelo índice único: quem perde a corrida
-    refaz o cálculo em vez de estourar na cara do vendedor."""
+    refaz o cálculo em vez de estourar na cara do vendedor.
+
+    O DESFAZER MUDOU EM 06/09, e a propriedade acima é a mesma. Era
+    `c.rollback()`, que desfaz a transação INTEIRA — servia enquanto só o painel
+    numerava, onde o insert é a transação toda. Agora as quatro portas numeram, e
+    no agente e no app a proposta nasce depois de a conversa e o lead já terem
+    sido gravados na MESMA transação: um rollback de conexão apagaria tudo aquilo
+    junto por causa de um número repetido. Virou SAVEPOINT (`c.transaction()`),
+    que desfaz só a tentativa que colidiu.
+
+    O fake conta savepoints em vez de rollbacks — é a mesma pergunta ("a tentativa
+    perdida foi desfeita?") no mecanismo novo.
+    """
     class FakeCursor:
-        def __init__(self): self.rollbacks = 0
-        def rollback(self): self.rollbacks += 1
+        def __init__(self):
+            self.savepoints = 0
+            self.rollbacks = 0
+
+        def rollback(self):                      # não deve mais ser chamado
+            self.rollbacks += 1
+
+        def transaction(self):
+            c = self
+
+            class _SP:
+                def __enter__(self_):
+                    c.savepoints += 1
+                    return self_
+
+                def __exit__(self_, *a):
+                    return False                 # deixa a exceção subir
+            return _SP()
 
     c = FakeCursor()
     tentativas = []
@@ -589,7 +617,8 @@ def test_numero_repete_quando_dois_salvam_junto():
         return ("ok",)
 
     assert _com_retry_numero(c, uma_colisao) == ("ok",)
-    assert c.rollbacks == 1
+    assert c.savepoints == 2, "cada tentativa corre no próprio savepoint"
+    assert c.rollbacks == 0, "rollback de conexão apagaria o que veio antes na transação"
 
     def sempre_colide():
         raise UniqueViolation("colidiu")

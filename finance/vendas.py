@@ -50,6 +50,50 @@ CAT_SERVICOS = "Serviços"
 NICHOS_EVENTO = {"eventos"}
 
 
+# ─────────────────────────────────────────── o NÚMERO da proposta
+#
+# POR QUE ISTO VIROU FUNÇÃO. Quatro portas criam orçamento — o painel, o app do
+# vendedor, a prospecção e o agente — e só o PAINEL numerava. As outras três
+# inseriam sem `numero`, e a proposta só ganhava o dela se alguém depois abrisse e
+# salvasse no painel. Quem criava e mandava tudo pelo celular ficava com uma
+# proposta sem número pra sempre, no card e no funil.
+#
+# Medido em 06/09/2026: existia UMA proposta criada pelo app em toda a produção
+# (`canal='cockpit'`), e era exatamente a única sem número — 1 de 35. Um caso só
+# porque o construtor do app é novo; o comunicado que acabou de sair manda os
+# vendedores trabalharem por lá, então a exceção viraria a regra.
+#
+# A NUMERAÇÃO É POR CONTA e mora no próprio INSERT: calcular antes, em Python,
+# abriria a janela entre ler o max e gravar. O índice único (conta_id, numero) é
+# quem arbitra, e `com_retry_numero` reexecuta quando dois salvam no mesmo
+# instante — na segunda volta o max já é o do vencedor.
+
+NUMERO_SQL = "(select coalesce(max(numero),0)+1 from orcamentos o2 where o2.conta_id=%s)"
+
+
+def com_retry_numero(c, executar, tentativas: int = 3):
+    """Roda um insert/update que calcula `numero = max+1` da conta.
+
+    Devolve o que `executar` devolver, ou None se as tentativas acabarem — e é
+    proposital que o chamador trate o None: numerar errado é pior que não numerar,
+    porque duas propostas com o mesmo número se confundem na hora de citar uma.
+    """
+    from psycopg.errors import UniqueViolation
+    for _ in range(tentativas):
+        try:
+            # SAVEPOINT, não rollback da conexão. A versão que vivia no painel fazia
+            # `c.rollback()`, e isso desfaz a transação INTEIRA — no agente e no
+            # app a proposta nasce no meio de uma transação que já gravou coisa
+            # (a conversa, o lead); uma colisão de número apagaria tudo aquilo
+            # junto. `c.transaction()` dentro de transação aberta vira savepoint:
+            # só a tentativa que colidiu volta, o que veio antes fica.
+            with c.transaction():
+                return executar()
+        except UniqueViolation:
+            continue
+    return None
+
+
 def modo_por_nicho(slug: str | None) -> str:
     return "evento" if (slug or "").strip() in NICHOS_EVENTO else "recorrente"
 

@@ -285,19 +285,11 @@ def _espelhar_cliente(pool, conta_id: int, dados) -> int | None:
         return cli.criar_cliente(pool, conta_id, nome, **comuns)
 
 
-def _com_retry_numero(c, executar, tentativas: int = 3):
-    """Roda um insert/update que calcula `numero = max+1` da conta.
-
-    O índice único (conta_id, numero) é quem garante a série: se dois salvarem
-    ao mesmo tempo, o perdedor leva UniqueViolation, a transação volta e ele
-    tenta de novo — na segunda vez o max já é o do vencedor.
-    """
-    for _ in range(tentativas):
-        try:
-            return executar()
-        except UniqueViolation:
-            c.rollback()
-    return None
+# A numeração mora em `finance.vendas` desde 06/09: quatro portas criam orçamento
+# e só esta numerava. Manter uma cópia aqui seria a segunda leitura da mesma
+# regra — e foi de duas leituras que nasceu o e-mail que mostrava contrato e
+# mandava proposta (#601).
+_com_retry_numero = vendas.com_retry_numero
 
 
 def _nicho(conta_id: int) -> str:
@@ -756,8 +748,9 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
                        desconto_tipo=%s, desconto_pct=%s, desconto_centavos=%s,
                        atualizado_em=now(),
                        token=coalesce(token, %s),
-                       -- proposta criada fora do painel (cockpit, prospecção,
-                       -- agente) entra sem número: ganha o dela agora.
+                       -- REDE DE SEGURANÇA, não a regra: desde 06/09 toda porta
+                       -- numera ao criar (finance.vendas.NUMERO_SQL). Isto só
+                       -- alcança proposta antiga que nasceu sem número antes disso.
                        numero=coalesce(numero,
                            (select coalesce(max(numero),0)+1 from orcamentos o2
                              where o2.conta_id=%s)),

@@ -196,7 +196,8 @@ ultmsg as (
   -- board inteiro. `visto_ate_id` nulo é "nunca abriu" — aí toda entrada conta
   -- como não vista, que é o estado de quem nunca usou o Inbox.
   select distinct on (cv.prospeccao_id)
-         cv.prospeccao_id as lead, cv.visto_ate_id, m.id as mid,
+         cv.prospeccao_id as lead, cv.visto_ate_id, cv.id as conversa_id,
+         coalesce(cv.canal, 'whatsapp') as canal, m.id as mid,
          m.direcao as dir, m.texto, m.criado_em as em
     from conversas cv
     join lateral (select id, direcao, texto, criado_em from mensagens
@@ -217,7 +218,8 @@ select p.id, p.status, p.vendedor_id,
        msg.ult_in, msg.ult_out, coalesce(tent.n, 0),
        marc.prazo_em, marc.acao, marc.criado_em, coalesce(adiam.n, 0),
        coalesce(nullif(mb.nome,''), mb.email), marc.membro_id,
-       ultmsg.texto, ultmsg.em, ultmsg.dir, ultmsg.mid, ultmsg.visto_ate_id
+       ultmsg.texto, ultmsg.em, ultmsg.dir, ultmsg.mid, ultmsg.visto_ate_id,
+       ultmsg.conversa_id, ultmsg.canal
   from prospeccao p
   left join msg    on msg.lead    = p.id
   left join ultmsg on ultmsg.lead = p.id
@@ -247,7 +249,7 @@ def leads(c, conta_id: int, perfil: dict | None = None,
     for r in c.execute(_SQL_LEADS, {"conta": conta_id}).fetchall():
         (lid, status, vend, quem, evento_em, ev_tipo, ev_conv, criado,
          ult_in, ult_out, tent, m_prazo, m_acao, m_em, adiados, vend_nome, m_por,
-         msg_txt, msg_em, msg_dir, msg_id, visto) = r
+         msg_txt, msg_em, msg_dir, msg_id, visto, conversa_id, canal) = r
         ult = max([x for x in (ult_in, ult_out) if x], default=None)
         # festa que já passou e o lead segue aberto: não há o que propor
         sem_acao = bool(tem_data and evento_em and evento_em < hoje)
@@ -276,7 +278,12 @@ def leads(c, conta_id: int, perfil: dict | None = None,
             "faltam": ((evento_em - hoje).days if evento_em else None),
             # o balão do card: onde a conversa parou, sem precisar abrir o lead
             "msg": ({"texto": msg_txt or "", "em": msg_em, "minha": msg_dir == "out",
-                     "nova": (msg_dir == "in" and (visto is None or (msg_id or 0) > visto))}
+                     "nova": (msg_dir == "in" and (visto is None or (msg_id or 0) > visto)),
+                     # o que o balão precisa pra abrir: a conversa e em qual aba
+                     # ela mora (o mesmo par que o funil e o Raio-X passam pro
+                     # kbAbrirChat de web/balao_conversa.py)
+                     "conversa_id": conversa_id,
+                     "aba": ("emails" if canal == "email" else "conversas")}
                     if msg_em else None),
         })
     return out

@@ -467,8 +467,19 @@ def test_a_tela_mostra_o_que_o_dono_pediu_em_cada_card():
 
 def test_a_tela_marca_quem_foi_adiado_em_serie():
     html = _tela(fila=[_linha(adiados=3, adiado_por=5)])
-    assert "🔁 adiado 3×" in html and "sem mensagem no meio" in html
+    assert "🔁 adiado 3× sem falar" in html
     assert "obrigatório" in html          # o campo motivo já avisa antes de recusar
+    # o número aparece UMA vez: no selo. Antes vinha no selo e de novo na linha
+    # de baixo, a mesma informação duas vezes no mesmo campo de visão.
+    assert html.count("adiado 3×") == 1
+
+
+def test_quem_adiou_uma_ou_duas_vezes_aparece_na_linha_de_detalhes():
+    """Abaixo da trava não há selo — mas o número precisa aparecer em algum
+    lugar, senão o vendedor só descobre o histórico quando é recusado."""
+    html = _tela(fila=[_linha(adiados=2, adiado_por=5)])
+    assert "adiado <b>2×</b> sem mensagem no meio" in html
+    assert "fu-pill hoje" not in html
 
 
 def test_o_vendedor_nao_ve_o_painel_da_gestao():
@@ -528,10 +539,20 @@ def test_o_banco_recusa_modo_inventado(c):
         c.execute("update funil_regua set follow_up_modo='talvez' where conta_id=%s", (CONTA,))
 
 
+def _conta_row(slug, cidade="TERESINA"):
+    """Uma linha de `conta_logada` como ela é de verdade: a cidade no 7, o slug do
+    nicho no 16. Foi confundir os dois que fez o menu sumir na Prime (07/09) —
+    ver tests/test_nicho_da_conta.py."""
+    return (34, "pj", "Empresa", "e@x.com", "pro", "ativa", None, cidade,
+            False, None, False, True, True, False, True, False, slug)
+
+
 def test_o_perfil_de_eventos_e_o_unico_que_liga_a_chave():
     from web.painel_prospeccao import _tem_follow_up
-    eventos = (34, None, None, None, None, None, None, "eventos")
-    assert _tem_follow_up(eventos) is True
-    assert _tem_follow_up((3, None, None, None, None, None, None, "consultoria")) is False
-    assert _tem_follow_up((9, None, None, None, None, None, None, None)) is False
+    assert _tem_follow_up(_conta_row("eventos")) is True
+    assert _tem_follow_up(_conta_row("consultoria")) is False
+    assert _tem_follow_up(_conta_row("hortifruti")) is False
+    assert _tem_follow_up(_conta_row(None)) is False
+    # a cidade nunca decide nada: era o índice que estava sendo lido por engano
+    assert _tem_follow_up(_conta_row("eventos", cidade="consultoria")) is True
     assert _tem_follow_up((1, "curta")) is False        # mock de teste não quebra a tela

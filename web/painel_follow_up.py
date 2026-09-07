@@ -23,7 +23,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from db.conexao import get_pool
 from finance import follow_up as fu
 from finance import raio_x_perfil as rxp
-from web.portal import _env, _render, conta_logada
+from web.portal import _env, _render, conta_logada, nicho_da_conta
 
 router = APIRouter()
 
@@ -37,7 +37,7 @@ def _acesso(request: Request):
     papel = request.session.get("papel", "dono")
     if papel not in ("dono", "gestor", "vendedor"):
         return None, None, RedirectResponse("/painel", status_code=303)
-    perfil = rxp.perfil(conta[7] if len(conta) > 7 else None)
+    perfil = rxp.perfil(nicho_da_conta(conta))
     if perfil["chave"] not in fu.PERFIS_COM_TELA:
         return None, None, RedirectResponse("/painel", status_code=303)
     return conta, perfil, None
@@ -267,7 +267,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
           <a href="/painel/prospeccao/lead/{{ x.id }}">{{ x.quem }}</a>
           <span class="fu-pill {{ x.estado }}">{{ emoji[x.estado] }} {{ rotulo[x.estado] }}</span>
           <span class="fu-pill">{{ x.bola }}</span>
-          {% if x.adiados >= adia_max %}<span class="fu-pill hoje">🔁 adiado {{ x.adiados }}×</span>{% endif %}
+          {% if x.adiados >= adia_max %}<span class="fu-pill hoje" title="sem nenhuma mensagem no meio">🔁 adiado {{ x.adiados }}× sem falar</span>{% endif %}
         </div>
         <div class="meta">
           {% if perfil.vocab.data %}
@@ -279,7 +279,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
           <span><i>🔄</i>{{ x.tentativas }} tentativa{{ '' if x.tentativas == 1 else 's' }}</span>
           <span><i>📍</i>{{ x.status }}</span>
           <span><i>👤</i>{{ x.vendedor }}</span>
-          {% if x.adiados %}<span><i>🔁</i>adiado <b>{{ x.adiados }}×</b>{% if x.adiado_por %} sem mensagem no meio{% endif %}</span>{% endif %}
+          {% if x.adiados and x.adiados < adia_max %}<span><i>🔁</i>adiado <b>{{ x.adiados }}×</b> sem mensagem no meio</span>{% endif %}
         </div>
         {% if x.estado == 'sem_acao' %}
           <div class="fu-acao calma">A data já passou. <b>Encerre com motivo, ou remarque.</b></div>

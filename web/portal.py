@@ -374,6 +374,9 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
   {# o Raio-X (finance/raio_x_dono) é de quem manda na conta: dono e gestor #}
   {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('raio_x','/painel/raio-x','relatorios','Raio-X') }}{% endif %}
+  {# Origens (finance/origens): de onde veio o lead e o que virou. Mesmo par que o
+     Raio-X, e some em conta só de produto, que não tem funil (CLAUDE.md §6). #}
+  {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Origens') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
@@ -419,6 +422,9 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
   {# o Raio-X (finance/raio_x_dono) é de quem manda na conta: dono e gestor #}
   {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('raio_x','/painel/raio-x','relatorios','Raio-X') }}{% endif %}
+  {# Origens (finance/origens): de onde veio o lead e o que virou. Mesmo par que o
+     Raio-X, e some em conta só de produto, que não tem funil (CLAUDE.md §6). #}
+  {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Origens') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
@@ -7486,6 +7492,7 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                  ("agenda", "/painel/agenda"), ("equipe", "/painel/equipe"),
                  ("financeiro", "/painel/financeiro"), ("empresa", "/painel/empresa"),
                  ("relatorios", "/painel/relatorios"), ("raio_x", "/painel/raio-x"),
+                 ("origens", "/painel/origens"),
                  ("follow_up", "/painel/follow-up"),
                  ("novidades", "/painel/novidades"),
                  ("fornecedor", "/painel/fornecedor"), ("assinaturas", "/painel/assinaturas"),

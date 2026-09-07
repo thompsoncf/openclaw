@@ -792,3 +792,31 @@ def test_o_aviso_das_pendencias_sai_no_site(pool):
 
 def test_reaplicar_a_220_nao_duplica(pool):
     assert _rx_pendencias(pool)["id"] == _rx_pendencias(pool)["id"]
+
+
+def test_a_221_atualiza_o_aviso_das_pendencias_sem_criar_outro(pool):
+    """O dono usou a tela no mesmo dia e pediu balão, dias e telefone. Dois
+    avisos seguidos da mesma tela viram ruído — a 221 reescreve o corpo da 220 e
+    não mexe em título, resumo, link nem na data (mexer no `publicado_em` jogaria
+    a novidade de novo pro topo como se fosse outra)."""
+    antes = _rx_pendencias(pool)
+    with pool.connection() as c:
+        titulo0, pub0 = c.execute("""select titulo, publicado_em from novidades
+                                      where chave='raio-x-pendencias'""").fetchone()
+        c.execute((BASE / "221_novidade_raio_x_pendencias_balao.sql").read_text(encoding="utf-8"))
+        c.commit()
+        n, corpo, titulo, pub = c.execute("""select count(*) over (), corpo, titulo, publicado_em
+                                               from novidades where chave='raio-x-pendencias'""").fetchone()
+    assert n == 1, "virou dois avisos da mesma tela"
+    assert "balão" in corpo and "telefone ao lado" in corpo
+    assert titulo == titulo0 and pub == pub0
+    assert _rx_pendencias(pool)["id"] == antes["id"], "o aviso trocou de id"
+
+
+def test_a_221_nao_quebra_se_a_220_ainda_nao_rodou(pool):
+    """Migração roda em banco novo também: sem a 220 aplicada, o update não acha
+    linha nenhuma e segue — não estoura nem inventa aviso."""
+    with pool.connection() as c:
+        c.execute((BASE / "221_novidade_raio_x_pendencias_balao.sql").read_text(encoding="utf-8"))
+        c.commit()
+        assert c.execute("select count(*) from novidades where chave='raio-x-pendencias'").fetchone()[0] == 0

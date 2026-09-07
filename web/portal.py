@@ -7356,6 +7356,8 @@ _env.globals["brl"] = brl
 _env.filters["brl"] = brl
 from finance import marca as _marca
 _marca.registrar_jinja(_env)   # marca_avatar / marca_cabecalho nos templates
+from web import balao_conversa as _balao
+_balao.registrar_jinja(_env)   # balao_css / balao_js: o funil e o Raio-X usam o MESMO balão
 _env.filters["n2"] = _n2
 from finance.models import canonizar_categoria, categorias_de
 _env.globals["canon"] = lambda c, t="despesa": canonizar_categoria(c, t)

@@ -163,19 +163,27 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
 .rx-vend .n .cv{font-size:.62rem;opacity:.7;margin-left:.15rem}
 .pend-row td{padding:0;border-bottom:1px solid var(--line)}
 .pend-row.fechada{display:none}
-.pend{padding:.5rem .9rem .7rem 2.2rem;background:var(--bg-2)}
-.pend-item{display:flex;align-items:center;gap:.6rem;padding:.4rem 0;border-top:1px dashed var(--line)}
+.pend{padding:.55rem .9rem .75rem 2.2rem;background:var(--bg-2)}
+.pend-cap{font:500 .62rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);padding-bottom:.4rem}
+/* LARGURA DE LEITURA. A tabela ocupa a tela toda; sem teto, o nome ficava numa
+   ponta e o botão na outra, com meia tela de vão no meio. */
+.pend-lista{max-width:640px;display:flex;flex-direction:column}
+.pend-nome .fone{color:var(--text-faint);font-family:var(--mono);font-size:.7rem;margin-left:.35rem}
+.pend-item{display:flex;align-items:center;gap:.5rem;padding:.34rem 0;border-top:1px dashed var(--line)}
 .pend-item:first-child{border-top:0}
-.pend-nome{flex:1;min-width:0;font-size:.8rem;color:var(--text)}
-.pend-meta{font-size:.7rem;color:var(--text-faint);white-space:nowrap}
+.pend-nome{flex:1;min-width:0;font-size:.8rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pend-meta{font:500 .7rem var(--mono);color:var(--text-faint);white-space:nowrap;flex:none}
+.pend-meta.velha{color:var(--coral)}
 .pend-acoes{display:flex;gap:.35rem;flex:none}
 .pend-btn{display:inline-flex;align-items:center;gap:.3rem;font-size:.7rem;font-weight:600;
   border-radius:7px;padding:.22rem .5rem;text-decoration:none;border:1px solid var(--line);
   color:var(--text-dim);background:var(--surface)}
 .pend-btn.doc{border-color:var(--azul-borda);color:var(--azul);background:var(--azul-fundo)}
 .pend-btn.zap{border-color:var(--neon-borda);color:var(--neon-bright);background:var(--neon-fundo)}
-.pend-mais{font-size:.72rem;color:var(--text-faint);padding:.3rem 0 0}
+.pend-mais{font-size:.72rem;color:var(--text-faint);padding:.3rem 0 0;max-width:640px}
 </style>
+{# o balão de conversa é o MESMO do funil (web/balao_conversa.py) #}
+<style>{{ balao_css }}</style>
 <div class="rx">
   <div>
     <h1>Raio-X</h1>
@@ -247,6 +255,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
   <script>
     function rxEnviar(){document.getElementById('rx-form').submit();}
     function rxPeriodo(s){var d=document.getElementById('rx-datas');if(s.value==='datas'){d.hidden=false;}else{rxEnviar();}}
+    {{ balao_js }}
     function rxTogg(id){
       var row=document.getElementById(id);if(!row)return;
       var cv=document.getElementById(id+'-cv');
@@ -299,24 +308,33 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
         {%- elif not s.contratos %}—{% endif %}</td></tr>
     {% if s.rascunhos_itens %}
     <tr class="pend-row fechada" id="rx-{{ v.id }}-rasc"><td colspan="9"><div class="pend">
-      {% for i in s.rascunhos_itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}</div>
+      <div class="pend-cap">Rascunho · {{ s.rascunhos }} proposta(s) que nunca saíram</div>
+      <div class="pend-lista">
+      {% for i in s.rascunhos_itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}{% if i.fone %}<span class="fone">{{ i.fone }}</span>{% endif %}</div>
         <div class="pend-meta">há {{ i.dias }} dia{{ 's' if i.dias != 1 }}</div>
-        <div class="pend-acoes"><a class="pend-btn doc" href="/painel/servicos?abrir={{ i.orcamento_id }}">📄 abrir</a>{% if i.conversa_id %}<a class="pend-btn zap" href="/painel/prospeccao/comunicacao?aba={{ i.aba }}&abrir={{ i.conversa_id }}">💬 conversa</a>{% endif %}</div></div>{% endfor %}
+        <div class="pend-acoes"><a class="pend-btn doc" href="/painel/servicos?abrir={{ i.orcamento_id }}">📄 abrir</a>{% if i.conversa_id %}<button type="button" class="pend-btn zap" onclick="kbAbrirChat(event,{{ i.conversa_id }},'{{ i.aba }}',this,{{ i.nome|tojson }})">💬 conversa</button>{% endif %}</div></div>{% endfor %}
+      </div>
     </div></td></tr>
     {% endif %}
     {% if s.paradas_1a_itens %}
     <tr class="pend-row fechada" id="rx-{{ v.id }}-par"><td colspan="9"><div class="pend">
-      {% for i in s.paradas_1a_itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}</div>
-        <div class="pend-meta">esperando há {{ i.horas }}h</div>
-        <div class="pend-acoes">{% if i.conversa_id %}<a class="pend-btn zap" href="/painel/prospeccao/comunicacao?aba={{ i.aba }}&abrir={{ i.conversa_id }}">💬 conversa</a>{% endif %}</div></div>{% endfor %}
+      <div class="pend-cap">Parou na 1ª resposta · {{ s.paradas_1a }} lead(s) — {% if s.paradas_1a > s.paradas_1a_itens|length %}os {{ s.paradas_1a_itens|length }} que esperam há mais tempo{% else %}quem está esperando{% endif %}</div>
+      <div class="pend-lista">
+      {% for i in s.paradas_1a_itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}{% if i.fone %}<span class="fone">{{ i.fone }}</span>{% endif %}</div>
+        <div class="pend-meta{{ ' velha' if i.horas >= 48 }}">{{ rxd.fmt_espera(i.horas) }}</div>
+        <div class="pend-acoes">{% if i.conversa_id %}<button type="button" class="pend-btn zap" onclick="kbAbrirChat(event,{{ i.conversa_id }},'{{ i.aba }}',this,{{ i.nome|tojson }})">💬 conversa</button>{% endif %}</div></div>{% endfor %}
+      </div>
       {% if s.paradas_1a > s.paradas_1a_itens|length %}<div class="pend-mais">+ {{ s.paradas_1a - s.paradas_1a_itens|length }} outro(s) — lista completa em Prospecção, filtrada por {{ v.primeiro_nome }}</div>{% endif %}
     </div></td></tr>
     {% endif %}
     {% if s.sem_assinar %}
     <tr class="pend-row fechada" id="rx-{{ v.id }}-ass"><td colspan="9"><div class="pend">
-      {% for i in s.sem_assinar %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}</div>
+      <div class="pend-cap">Aprovado, esperando assinatura · {{ s.sem_assinar|length }}</div>
+      <div class="pend-lista">
+      {% for i in s.sem_assinar %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}{% if i.fone %}<span class="fone">{{ i.fone }}</span>{% endif %}</div>
         <div class="pend-meta">{{ brl(i.valor_centavos) }} · há {{ i.dias }} dia{{ 's' if i.dias != 1 }}</div>
-        <div class="pend-acoes"><a class="pend-btn doc" href="/painel/servicos?abrir={{ i.orcamento_id }}">📄 abrir</a>{% if i.conversa_id %}<a class="pend-btn zap" href="/painel/prospeccao/comunicacao?aba={{ i.aba }}&abrir={{ i.conversa_id }}">💬 conversa</a>{% endif %}</div></div>{% endfor %}
+        <div class="pend-acoes"><a class="pend-btn doc" href="/painel/servicos?abrir={{ i.orcamento_id }}">📄 abrir</a>{% if i.conversa_id %}<button type="button" class="pend-btn zap" onclick="kbAbrirChat(event,{{ i.conversa_id }},'{{ i.aba }}',this,{{ i.nome|tojson }})">💬 conversa</button>{% endif %}</div></div>{% endfor %}
+      </div>
     </div></td></tr>
     {% endif %}
     {% endfor %}

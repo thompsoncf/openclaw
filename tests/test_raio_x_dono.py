@@ -32,7 +32,7 @@ create table contas (id bigserial primary key, nome text, nome_fantasia text,
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
-  empresa text, contato text, status text default 'novo', evento_em date, evento_tipo text,
+  empresa text, contato text, whatsapp text, telefone text, status text default 'novo', evento_em date, evento_tipo text,
   evento_convidados int, orcamento_id bigint, origem text, origem_codigo text, segmento text, porte text, uf text,
   criado_em timestamptz default now(), atualizado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
@@ -520,9 +520,17 @@ def test_a_tabela_por_vendedor_abre_quem_esta_pendente(pool, cen, monkeypatch):
                            (cen["conta"],)).fetchone()[0]
 
     html = bytes(prx.painel_raio_x(_req()).body).decode("utf-8")
-    # o rascunho da Bia (Pedro): abre a proposta e abre a conversa
+    # o rascunho da Bia (Pedro): abre a proposta e abre a conversa. O 💬 abre o
+    # BALÃO na própria página (o mesmo do funil, web/balao_conversa.py) — antes
+    # navegava pra Comunicação, e voltar recarregava o Raio-X inteiro.
     assert f"/painel/servicos?abrir={o_bia}" in html
-    assert f"/painel/prospeccao/comunicacao?aba=conversas&abrir={cv_bia}" in html
+    assert f"kbAbrirChat(event,{cv_bia},'conversas',this," in html
+    assert '<a class="pend-btn zap" href=' not in html, (
+        "o 💬 da lista voltou a ser link de navegação em vez de abrir o balão "
+        "(o link pra Comunicação continua existindo, mas DENTRO do balão, no "
+        "'Ver conversa completa')")
+    assert "function kbAbrirChat" in html and ".chatpop{" in html, (
+        "o balão não foi injetado na página — o botão chamaria uma função que não existe")
     # o aprovado sem assinar da Fabi (Jaqueline): a Fabi não tem conversa no
     # cenário, então só o link do documento — e nenhum link quebrado com "None"
     assert f"/painel/servicos?abrir={o_fabi}" in html

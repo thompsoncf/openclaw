@@ -26,8 +26,8 @@ import logging
 from datetime import date, datetime, timedelta
 
 from finance.raio_x import (_TZ, ABERTOS, META_PRIMEIRA_MIN, _anterior, _mediana, _reais,  # noqa: F401
-                            agora_brt, confianca, cor, fmt_min, janela, responda_hoje, sua_semana,
-                            texto_confianca)
+                            agora_brt, confianca, cor, fmt_espera, fmt_min, janela, responda_hoje,
+                            sua_semana, texto_confianca)
 
 _log = logging.getLogger("finance.raio_x_dono")
 

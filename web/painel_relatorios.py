@@ -1331,40 +1331,89 @@ def _chips_da_conta(pool, conta_id: int) -> tuple[str, dict[int, str]]:
     return (prin[0] if prin and prin[0] else ""), {r[0]: r[1] or "" for r in secs}
 
 
+#: As origens que são LISTA DE GARIMPO, não lead que chegou. Quem entra por aqui
+#: nunca falou com a empresa: foi raspado do Google Maps pra prospecção fria
+#: (`web/painel_prospeccao.py`, o insert com 'google_places'). Sem conversa E sem
+#: pessoa por trás, não é topo de funil — é matéria-prima.
+#:
+#: A distinção existe porque abrir a tela pra "todo lead sem conversa" custaria
+#: caro fora da Prime, e isso foi medido em 07/09/2026 antes de escrever:
+#:   conta 34 (Prime)   305 leads,   3 sem conversa  -> os 3 são cadastro de gente
+#:   conta  3 (ZAQ)     263 leads, 146 sem conversa  -> 145 são garimpo
+#:   conta 21 (Maylson)  60 leads,  60 sem conversa  -> 60 de 60 são garimpo
+#: Sem este portão, a tela do Maylson passaria de vazia a 60 linhas de lista fria,
+#: e a conversão da ZAQ cairia de 5/117 pra 6/263 por mudança de régua, não por
+#: mudança de resultado. Uma segunda fonte raspada entra nesta tupla.
+ORIGENS_GARIMPO = ("google_places",)
+
+
 def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) -> dict:
-    """Os leads que entraram por um chip de WhatsApp, e quanto cada um esperou.
+    """TODOS os leads do período, quanto cada um esperou e quantos viraram proposta.
+
+    A BASE É O LEAD, não a conversa — e isso é o coração da tela. Até 07/09/2026 a
+    consulta começava em `conversas`, então lead sem conversa nenhuma não existia
+    aqui. Parece detalhe e não é: o vendedor que cadastra o cliente na mão (a
+    Prime faz isso quando o contato chega por indicação ou visita) criava um lead
+    que a tela nunca mostrava — levando o ORÇAMENTO dele junto.
+
+    Medido na conta 34 no dia da mudança: 305 leads, dos quais 3 sem conversa; 20
+    leads com orçamento, dos quais **2 invisíveis** (nº 18 Claudia e nº 19
+    Kleiton, os dois `origem = manual_vendedor`). A conversão saía 18/302 em vez
+    de 20/305 — e era justamente por esses dois que o dono estava procurando.
 
     UMA LINHA POR LEAD, não por conversa: o mesmo lead pode ter mais de uma
-    conversa, e contá-las duas vezes inflaria "leads recebidos" e a mediana.
+    conversa, e contá-las duas vezes inflaria "leads" e a mediana.
 
-    Três decisões que a consulta carrega, cada uma medida em produção:
+    Cinco decisões que a consulta carrega, cada uma medida em produção:
 
     1. **`chip_id` NULO é o chip principal**, não é dado faltando (ver
        `vendas.rotulo_do_chip`). Filtrar por `chip_id = %s` esconderia 174 dos
        186 leads da conta 34.
-    2. **Resposta é `out` de HUMANO.** Havia 18 mensagens de bot na conta 34;
+    2. **Lead sem conversa NÃO é `rotulo_do_chip(None)`.** O mesmo NULL quer dizer
+       "chip principal" na conversa e "não veio de chip nenhum" aqui; passar um
+       pelo outro carimbaria o cadastro manual como se tivesse entrado pelo
+       número da casa. Ele aparece como "Cadastro manual".
+    3. **Resposta é `out` de HUMANO.** Havia 18 mensagens de bot na conta 34;
        contá-las zeraria a espera de quem, na prática, continuou esperando gente.
-    3. **"Última msg" vem da conversa, não de `prospeccao.ultimo_contato_em`.**
+    4. **"Última msg" vem da conversa, não de `prospeccao.ultimo_contato_em`.**
        Esse campo está vazio em 158 dos 174 leads do chip principal — que têm
        2.772 mensagens trocadas. Lido dali, o relatório anunciaria que quase
        ninguém foi atendido.
+    5. **Mediana e "nunca respondido" continuam sendo do CHIP.** Quem entrou sem
+       conversa não esperou por ninguém, e somá-lo ali diluiria o único número que
+       mede atendimento. Ele conta pra conversão, não pra espera.
     """
     ini, fim = _intervalo(periodo)
-    where = ["cv.conta_id=%s", "cv.prospeccao_id is not null"]
-    params: list = [conta_id]
-    if periodo != "todos":
-        where.append("p.criado_em::date >= %s and p.criado_em::date <= %s")
-        params += [ini, fim]
+    # O filtro de CHIP mora na conversa (CTE `conv`); os demais moram no lead, e
+    # por isso vão no `where` de fora — é o lead que é a base agora.
+    onde_conv, p_conv = ["cv.conta_id=%s", "cv.prospeccao_id is not null"], [conta_id]
     if chip_sel == CHIP_PRINCIPAL:
-        where.append("cv.chip_id is null")
+        onde_conv.append("cv.chip_id is null")
     elif chip_sel:
-        where.append("cv.chip_id = %s")
-        params.append(int(chip_sel))
+        onde_conv.append("cv.chip_id = %s")
+        p_conv.append(int(chip_sel))
+
+    onde, params = ["p.conta_id=%s"], [conta_id]
+    # QUEM ENTRA: quem teve conversa (como sempre foi) MAIS quem uma pessoa
+    # cadastrou. Fica de fora só a lista fria raspada que ninguém tocou — ver
+    # ORIGENS_GARIMPO. Note que garimpo COM conversa continua entrando: alguém
+    # ligou, virou lead de verdade, e tirá-lo agora seria perder linha na ZAQ.
+    onde.append("(l.lead_id is not null or coalesce(p.origem,'') <> all(%s))")
+    params.append(list(ORIGENS_GARIMPO))
+    if periodo != "todos":
+        onde.append("p.criado_em::date >= %s and p.criado_em::date <= %s")
+        params += [ini, fim]
+    if chip_sel:
+        # Escolher um chip é perguntar "quem entrou POR ELE": quem não veio de
+        # conversa nenhuma não veio por chip nenhum e sai da lista.
+        onde.append("l.lead_id is not null")
     if vendedor_sel:
-        where.append("cv.responsavel_membro_id = %s")
+        # `coalesce`: no lead que veio por conversa o dono é quem responde nela;
+        # no cadastrado na mão não há conversa, e o dono é o do próprio lead.
+        onde.append("coalesce(l.memb, p.vendedor_id) = %s")
         params.append(int(vendedor_sel))
     if busca:
-        where.append("p.empresa ilike %s")
+        onde.append("p.empresa ilike %s")
         params.append(f"%{busca}%")
 
     sql = f"""
@@ -1378,8 +1427,8 @@ def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) ->
                where m.conversa_id=cv.id and m.direcao='out'
                  and m.autor='humano') as prim_resp,
              (select count(*) from mensagens m where m.conversa_id=cv.id) as msgs
-        from conversas cv join prospeccao p on p.id = cv.prospeccao_id
-       where {" and ".join(where)}
+        from conversas cv
+       where {" and ".join(onde_conv)}
     ), por_lead as (
       select prospeccao_id as lead_id,
              -- o chip da PRIMEIRA conversa: é por ele que o lead entrou.
@@ -1393,42 +1442,71 @@ def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) ->
         from conv group by prospeccao_id
     )
     select p.id, p.empresa, l.chip_id, l.prim_in, l.prim_resp, l.msgs,
-           l.ultima_msg, coalesce(mb.nome, '—'), o.numero
-      from por_lead l
-      join prospeccao p on p.id = l.lead_id
-      left join membros mb on mb.id = l.memb
+           l.ultima_msg, coalesce(mb.nome, '—'), o.numero,
+           (l.lead_id is not null) as tem_conversa, p.criado_em,
+           -- OS CONTADORES SAEM DE JANELA, não do laço de baixo: a tabela mostra
+           -- no máximo 300 linhas e a conta 34 já tem 305 leads. Lidos das linhas
+           -- exibidas, "leads" e "viraram orçamento" — e portanto a CONVERSÃO —
+           -- passariam a mentir por truncagem justo quando a base cresce. Janela
+           -- roda antes do LIMIT.
+           count(*) over () as n_total,
+           count(o.numero) over () as n_orc
+      from prospeccao p
+      left join por_lead l on l.lead_id = p.id
+      left join membros mb on mb.id = coalesce(l.memb, p.vendedor_id)
       left join orcamentos o on o.id = p.orcamento_id
-     order by l.prim_in desc nulls last, p.id desc
+     where {" and ".join(onde)}
+     order by coalesce(l.prim_in, p.criado_em) desc, p.id desc
      limit 300"""
     with pool.connection() as c:
-        rows = c.execute(sql, params).fetchall()
+        rows = c.execute(sql, p_conv + params).fetchall()
 
     nome_prin, rot_secs = _chips_da_conta(pool, conta_id)
     linhas, esperas = [], []
-    n_nunca = n_orc = 0
+    n_nunca = 0
+    n_total = int(rows[0][11]) if rows else 0
+    n_orc = int(rows[0][12]) if rows else 0
     for r in rows:
-        esp = vendas.espera_do_lead(r[3], r[4])
-        if esp["minutos"] is not None:
-            esperas.append(esp["minutos"])
-        if esp["texto"] == "nunca respondido":
-            n_nunca += 1
-        if r[8]:
-            n_orc += 1
+        tem_conversa = bool(r[9])
+        if tem_conversa:
+            esp = vendas.espera_do_lead(r[3], r[4])
+            if esp["minutos"] is not None:
+                esperas.append(esp["minutos"])
+            if esp["texto"] == "nunca respondido":
+                n_nunca += 1
+            chip = vendas.rotulo_do_chip(r[2], rotulos=rot_secs,
+                                         nome_principal=nome_prin)
+            entrou, ultima = _fmt_hora(r[3]), _fmt_hora(r[6])
+        else:
+            # SEM CONVERSA não é "nunca respondido" nem "sem mensagem": é lead que
+            # o vendedor digitou na mão, e ninguém ficou esperando resposta. Entra
+            # na lista (o orçamento dele é do mês tanto quanto os outros) sem
+            # entrar na mediana nem na contagem de abandono, que são do chip.
+            #
+            # E o chip NÃO pode sair de `rotulo_do_chip(None)`: lá o nulo quer
+            # dizer "chip principal", e aqui quer dizer "não veio de chip
+            # nenhum" — o mesmo NULL com dois sentidos opostos.
+            esp = {"texto": "—", "tom": "neutro"}
+            chip = "Cadastro manual"
+            entrou, ultima = _fmt_hora(r[10]), "—"
         linhas.append({
             "lead": r[1] or "—",
-            "chip": vendas.rotulo_do_chip(r[2], rotulos=rot_secs,
-                                          nome_principal=nome_prin),
-            "entrou": _fmt_hora(r[3]),
+            "chip": chip,
+            "entrou": entrou,
             "esperou": esp["texto"], "esperou_cor": _TOM_TAG[esp["tom"]],
             "msgs": int(r[5] or 0),
             "vendedor": r[7],
-            "ultima": _fmt_hora(r[6]),
+            "ultima": ultima,
             "orcamento": f"nº {r[8]}" if r[8] else "—",
         })
 
     med = vendas.mediana(esperas)
+    # A CONVERSÃO, que é a pergunta do dono ("de quantos leads saiu orçamento").
+    # Vem dos contadores de janela, não de `len(linhas)`: com 305 leads na conta 34
+    # e teto de 300 na tabela, a taxa lida da tela já nasceria errada.
+    pct = f" · {round(100 * n_orc / n_total)}%" if n_total else ""
     return {
-        "label": "Leads do chip", "mock": False,
+        "label": "Leads e conversão", "mock": False,
         # o NOME DO LEAD é a coluna elástica: é a única de texto livre aqui, e as
         # outras (chip, hora, espera, contagem) têm largura previsível. Sem uma
         # marcada, a tabela volta a rolar pro lado e engole o começo do nome.
@@ -1453,10 +1531,10 @@ def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) ->
         # linha "Total R$ 0,00" seria exatamente o ruído que o funil acabou de
         # tirar. O template pula a linha quando `col_total` é nulo.
         "col_total": None, "total_centavos": 0,
-        "metricas": [("Leads recebidos", str(len(linhas))),
+        "metricas": [("Leads no período", str(n_total)),
                      ("Nunca respondidos", str(n_nunca)),
                      ("Espera (mediana)", vendas.duracao_curta(med)),
-                     ("Viraram orçamento", str(n_orc))],
+                     ("Viraram orçamento", f"{n_orc} de {n_total}{pct}")],
         "filtro_extra": {
             "chips": _opcoes_de_chip(nome_prin, rot_secs),
             "chip_sel": str(chip_sel or ""),
@@ -1662,7 +1740,10 @@ TIPOS = {
     # o filtro de chip viaja no MESMO parâmetro `status` das outras abas, de
     # propósito: o template já tem esse select e a rota já o repassa. Um
     # parâmetro novo obrigaria a mexer nos dois pra não ganhar nada.
-    "leads_chip": {"label": "Leads do chip", "montar": lambda pool, cid, per, **f: _dados_leads_chip(
+    # A CHAVE continua `leads_chip` de propósito: ela está em link salvo, em
+    # favorito e na URL do PDF que já saiu daqui. Só o RÓTULO muda — a aba deixou
+    # de ser só do chip quando o cadastro manual entrou.
+    "leads_chip": {"label": "Leads e conversão", "montar": lambda pool, cid, per, **f: _dados_leads_chip(
         pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
     "funil": {"label": "Funil", "montar": lambda pool, cid, per, **f: _dados_funil(
         pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},

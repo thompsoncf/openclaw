@@ -40,7 +40,7 @@ create table canais_config (id bigserial primary key, conta_id bigint, canal tex
   identificador text, rotulo text);
 create table orcamentos (id bigserial primary key, conta_id bigint, numero int);
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
-  orcamento_id bigint, ultimo_contato_em timestamptz,
+  orcamento_id bigint, ultimo_contato_em timestamptz, origem text, vendedor_id bigint,
   criado_em timestamptz not null default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   chip_id bigint, responsavel_membro_id bigint, ultima_msg_em timestamptz,
@@ -255,9 +255,11 @@ def test_metricas_contam_o_que_a_tabela_mostra(pool, cen):
     _lead(pool, cen["conta"], nome="C", entrou_min=0, resp_min=None)
     _lead(pool, cen["conta"], nome="D", entrou_min=0, resp_min=30, orcamento=7)
     d = _rel(pool, cen["conta"])
-    assert _metrica(d, "Leads recebidos") == "4"
+    assert _metrica(d, "Leads no período") == "4"
     assert _metrica(d, "Nunca respondidos") == "2"
-    assert _metrica(d, "Viraram orçamento") == "1"
+    # "1 de 4 · 25%" e não só "1": a pergunta do dono é a CONVERSÃO, e um número
+    # solto obriga a procurar o denominador na outra métrica pra fazer a conta.
+    assert _metrica(d, "Viraram orçamento") == "1 de 4 · 25%"
 
 
 def test_mediana_ignora_quem_nunca_foi_respondido(pool, cen):
@@ -334,20 +336,96 @@ def test_outra_conta_nao_vaza(pool, cen):
     assert [l["lead"] for l in _rel(pool, cen["conta"])["linhas"]] == ["Meu"]
 
 
-def test_lead_sem_conversa_nao_entra(pool, cen):
-    """A base tem 314 leads garimpados no Google Maps, que nunca chegaram por chip.
-    Este relatório é só do que entrou pelo QR."""
+def _sem_conversa(pool, conta, nome, origem, *, orcamento=None):
+    """Lead que existe sem conversa nenhuma — o cadastro na mão e o garimpo."""
     with pool.connection() as c:
-        c.execute("insert into prospeccao (conta_id, empresa) values (%s,'Garimpado')",
-                  (cen["conta"],))
+        oid = None
+        if orcamento is not None:
+            oid = c.execute("insert into orcamentos (conta_id, numero) values (%s,%s) "
+                            "returning id", (conta, orcamento)).fetchone()[0]
+        c.execute("insert into prospeccao (conta_id, empresa, origem, orcamento_id) "
+                  "values (%s,%s,%s,%s)", (conta, nome, origem, oid))
         c.commit()
+
+
+def test_garimpo_do_maps_sem_conversa_continua_fora(pool, cen):
+    """A conta 21 tem 60 leads e os 60 são garimpo puro; a ZAQ tem 145. Deixar essa
+    lista fria entrar transformaria uma tela vazia em 60 linhas de nada e mudaria a
+    conversão da ZAQ por régua, não por resultado."""
+    _sem_conversa(pool, cen["conta"], "Garimpado", "google_places")
     _lead(pool, cen["conta"], nome="DoChip", entrou_min=0, resp_min=10)
     assert [l["lead"] for l in _rel(pool, cen["conta"])["linhas"]] == ["DoChip"]
 
 
+def test_garimpo_COM_conversa_continua_entrando(pool, cen):
+    """O outro lado da mesma regra: alguém ligou pro garimpado e ele virou lead de
+    verdade. Tirá-lo agora custaria 103 linhas na ZAQ."""
+    pid = _lead(pool, cen["conta"], nome="Garimpado que falou", entrou_min=0, resp_min=10)
+    with pool.connection() as c:
+        c.execute("update prospeccao set origem='google_places' where id=%s", (pid,))
+        c.commit()
+    assert [l["lead"] for l in _rel(pool, cen["conta"])["linhas"]] == ["Garimpado que falou"]
+
+
+def test_cadastro_manual_sem_conversa_entra_e_leva_o_orcamento(pool, cen):
+    """O caso do dono, 07/09/2026: os orçamentos nº 18 (Claudia) e nº 19 (Kleiton)
+    eram de leads `manual_vendedor` sem conversa, e por isso não apareciam em lugar
+    nenhum — a conversão saía 18/302 em vez de 20/305."""
+    _sem_conversa(pool, cen["conta"], "Claudia", "manual_vendedor", orcamento=18)
+    _lead(pool, cen["conta"], nome="DoChip", entrou_min=0, resp_min=10)
+    d = _rel(pool, cen["conta"])
+    claudia = _por_nome(d, "Claudia")
+    assert claudia["orcamento"] == "nº 18"
+    assert claudia["chip"] == "Cadastro manual", (
+        "o NULL de 'sem conversa' não pode virar 'chip principal'")
+    assert _metrica(d, "Viraram orçamento").startswith("1 de 2")
+
+
+def test_cadastro_manual_nao_suja_a_espera_nem_o_abandono(pool, cen):
+    """Ninguém esperou por ele: não é 'nunca respondido' e não entra na mediana.
+    Sem isto, cada cadastro na mão viraria um abandono inventado."""
+    _sem_conversa(pool, cen["conta"], "Manual", "manual_vendedor")
+    _lead(pool, cen["conta"], nome="Esperou30", entrou_min=0, resp_min=30)
+    d = _rel(pool, cen["conta"])
+    assert _por_nome(d, "Manual")["esperou"] == "—"
+    assert _metrica(d, "Nunca respondidos") == "0"
+    assert _metrica(d, "Espera (mediana)") == vendas.duracao_curta(30), (
+        "a mediana tem que continuar sendo só de quem esperou"
+    )
+
+
+def test_filtrar_por_chip_exclui_quem_nao_veio_de_chip(pool, cen):
+    """Escolher um chip é perguntar "quem entrou POR ELE" — cadastro manual não
+    entrou por chip nenhum."""
+    _sem_conversa(pool, cen["conta"], "Manual", "manual_vendedor")
+    _lead(pool, cen["conta"], nome="Principal", entrou_min=0, resp_min=10)
+    nomes = [l["lead"] for l in _rel(pool, cen["conta"], chip=rel.CHIP_PRINCIPAL)["linhas"]]
+    assert nomes == ["Principal"]
+
+
+def test_conversao_sai_da_janela_e_nao_das_linhas_exibidas(pool, cen):
+    """A tabela corta em 300 e a conta 34 já tem 305 leads. Lida de `len(linhas)`, a
+    conversão passaria a mentir por truncagem justo quando a base cresce."""
+    with pool.connection() as c:
+        oid = c.execute("insert into orcamentos (conta_id, numero) values (%s,7) "
+                        "returning id", (cen["conta"],)).fetchone()[0]
+        c.execute("""insert into prospeccao (conta_id, empresa, origem, orcamento_id, criado_em)
+                     select %s, 'L'||g, 'manual_vendedor',
+                            case when g = 1 then %s else null end, %s
+                       from generate_series(1, 310) g""",
+                  (cen["conta"], oid, T0))
+        c.commit()
+    d = _rel(pool, cen["conta"])
+    assert len(d["linhas"]) == 300, "o teto da tabela continua de pé"
+    assert _metrica(d, "Leads no período") == "310"
+    assert _metrica(d, "Viraram orçamento") == "1 de 310 · 0%"
+
+
 def test_aba_esta_registrada(pool, cen):
     assert "leads_chip" in rel.TIPOS
-    assert rel.TIPOS["leads_chip"]["label"] == "Leads do chip"
+    assert rel.TIPOS["leads_chip"]["label"] == "Leads e conversão", (
+        "o rótulo mudou quando o cadastro manual entrou; a CHAVE não pode mudar, "
+        "que ela está em link salvo e na URL do PDF")
 
 
 # ------------------------------------------------ a redação, sem banco nenhum
@@ -503,7 +581,7 @@ def test_periodo_recorta_pela_entrada_do_lead_e_nao_pela_data_do_orcamento(pool,
     assert "Entrou faz tempo" not in nomes, (
         "o período filtra p.criado_em; lead de 60 dias atrás não pode entrar "
         "só porque o orçamento dele é novo")
-    assert _metrica(d, "Viraram orçamento") == "0", (
+    assert _metrica(d, "Viraram orçamento") == "0 de 1 · 0%", (
         "a métrica tem que contar o mesmo universo da tabela")
 
 

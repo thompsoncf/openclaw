@@ -10,8 +10,18 @@ números são medida da agência. O Zaq publicar um que divergisse do painel del
 faria o Zaq parecer errado — e a ponte entre os dois lados não precisa disso: é o
 CÓDIGO do criativo, que aparece dos dois lados e junta as duas planilhas.
 
-Quem vê hoje: dono e gestor. O papel de convidado, que é como a agência entra
-sem enxergar o resto do sistema, vem no PR seguinte.
+Quem vê: dono, gestor e o **convidado** — o papel da agência, que entra por
+convite do dono e não alcança mais nada do sistema.
+
+O QUE O CONVIDADO NÃO VÊ, decidido pelo dono em 07/09/2026: o dinheiro da faixa
+"sem código". Ele precisa da CONTAGEM dela (parte é anúncio que perdeu o texto, e
+é assim que a agência percebe a atribuição vazando), mas o faturamento que veio de
+fora do anúncio não é assunto dela. O faturamento das linhas COM código continua
+em reais — é o que deixa a agência calcular o retorno do lado dela, e sem isso o
+painel volta a ser contagem de lead.
+
+O corte é de APRESENTAÇÃO: `finance/origens.py` devolve tudo pra todo mundo, e é
+esta tela que decide o que desenha. Assim a regra fica num lugar que se lê.
 """
 from __future__ import annotations
 
@@ -26,12 +36,16 @@ from web.portal import _env, _render, conta_logada, nicho_da_conta
 
 router = APIRouter()
 
+#: quem abre esta tela. O `convidado` é a agência de tráfego: entra por convite do
+#: dono, vê isto e mais nada — o gate de web/app.py devolve todo o resto.
+_PAPEIS_OK = ("dono", "gestor", "convidado")
+
 
 def _pode_ver(request: Request):
     conta = conta_logada(request)
     if conta is None:
         return None, RedirectResponse("/login", status_code=303)
-    if request.session.get("papel", "dono") not in ("dono", "gestor"):
+    if request.session.get("papel", "dono") not in _PAPEIS_OK:
         return None, RedirectResponse("/painel", status_code=303)
     return conta, None
 
@@ -84,7 +98,9 @@ def painel_origens(request: Request):
     ini, fim = per.intervalo(periodo, de, ate)
     d = og.dados_origens(pool, conta[0], ini, fim,
                          compromisso=perfil["vocab"]["compromisso"])
+    convidado = request.session.get("papel", "dono") == "convidado"
     return _render("origens", request, titulo="Origens", secao_ativa="origens",
+                   convidado=convidado,
                    d=d, periodo=periodo, periodos=per.PERIODOS_ORIGENS,
                    # o menu lateral lê `raio_x_perfil` pra decidir o que mostrar
                    raio_x_perfil=perfil,
@@ -129,6 +145,7 @@ _ORIGENS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .og-tab td{text-align:right;padding:.5rem .6rem;border-bottom:1px solid var(--borda);white-space:nowrap}
 .og-tab tr:last-child td{border-bottom:0}
 .og-tab tr.sem td{color:var(--amar);font-style:italic}
+.og-tab td.oculto{color:var(--txt-mut);opacity:.5}
 .og-cod{font-family:ui-monospace,Menlo,monospace;background:var(--neon-fundo);color:var(--verde-claro);
   border:1px solid var(--neon-borda);border-radius:5px;padding:.05rem .35rem;font-size:.78rem}
 .og-aviso{border-radius:11px;padding:.75rem .9rem;font-size:.85rem;line-height:1.5;margin-top:1rem}
@@ -169,9 +186,10 @@ _ORIGENS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div class="og-cx"><span class="r">total da casa</span>
     <span class="v">{{ d.resumo.total }}</span>
     <div class="n">no período</div></div>
+  {# o faturamento aqui é só o das linhas COM código — o convidado pode vê-lo #}
   <div class="og-cx"><span class="r">faturamento</span>
     <span class="v">{{ brl(d.faturamento_centavos) }}</span>
-    <div class="n">com sinal pago</div></div>
+    <div class="n">de anúncio, com sinal pago</div></div>
 </div>
 
 {% if d.resumo.com_codigo == 0 %}
@@ -226,13 +244,21 @@ _ORIGENS_TPL = r"""{% extends "base" %}{% block conteudo %}
       </tr>
       {% endfor %}
       {% if d.sem_codigo %}
+      {# O convidado (a agência) vê a CONTAGEM desta faixa, porque parte dela é
+         anúncio que perdeu o texto e é assim que ele percebe a atribuição
+         vazando. O dinheiro que veio de fora do anúncio não é assunto dele. #}
       <tr class="sem">
         <td>sem código</td>
         <td>{{ d.sem_codigo.conversas }}</td><td>{{ d.sem_codigo.atendidas }}</td>
         <td>{{ min_txt(d.sem_codigo.resposta_mediana_min) }}</td>
         <td>{{ d.sem_codigo.marcaram }}</td><td>{{ d.sem_codigo.compareceram }}</td>
+        {% if convidado %}
+        <td class="oculto" title="visível para a empresa">—</td>
+        <td class="oculto" title="visível para a empresa">—</td>
+        {% else %}
         <td>{{ d.sem_codigo.vendas }}</td>
         <td>{% if d.sem_codigo.faturamento_centavos %}{{ brl(d.sem_codigo.faturamento_centavos) }}{% else %}—{% endif %}</td>
+        {% endif %}
       </tr>
       {% endif %}
     </tbody>
@@ -250,6 +276,14 @@ _ORIGENS_TPL = r"""{% extends "base" %}{% block conteudo %}
 {% endif %}
 {% endif %}
 
+{% if convidado %}
+<div class="og-aviso azul">
+  <b>O que fica com a empresa.</b> Vendas e faturamento da faixa “sem código” não
+  aparecem aqui — é o que a casa vendeu por fora do anúncio. O faturamento das
+  linhas com código está completo, que é o que você precisa pra cruzar com o
+  investimento do seu lado.
+</div>
+{% endif %}
 <div class="og-aviso azul">
   <b>“Sem código” não é só orgânico.</b> Junta quem chegou por indicação ou pelo
   Google com quem veio do anúncio e apagou o texto antes de enviar. O Zaq não tem

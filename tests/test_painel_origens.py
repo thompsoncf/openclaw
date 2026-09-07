@@ -126,8 +126,14 @@ def test_gestor_abre(cliente):
     assert cliente.get("/painel/origens").status_code == 200
 
 
+def test_convidado_abre(cliente):
+    """A agência de tráfego: entra por convite do dono e vê esta tela e mais nada."""
+    cliente.estado["papel"] = "convidado"
+    assert cliente.get("/painel/origens").status_code == 200
+
+
 @pytest.mark.parametrize("papel", ["vendedor", "financeiro", "restrito", "membro"])
-def test_quem_nao_e_dono_nem_gestor_nao_entra(cliente, papel):
+def test_quem_nao_e_dono_gestor_ou_convidado_nao_entra(cliente, papel):
     cliente.estado["papel"] = papel
     r = cliente.get("/painel/origens")
     assert r.status_code == 303 and r.headers["location"] == "/painel"
@@ -233,3 +239,52 @@ def test_diz_o_que_sem_codigo_mistura(cliente):
     """Prometer que "sem código" é só orgânico seria mentir: junta com quem apagou
     o texto do anúncio antes de enviar."""
     assert "apagou o texto" in cliente.get("/painel/origens").text
+
+
+# ────────────────────────── o que o convidado NÃO vê ──────────────────────────
+# Decidido pelo dono em 07/09/2026: a agência precisa da CONTAGEM da faixa "sem
+# código" (parte dela é anúncio que perdeu o texto, e é assim que ela percebe a
+# atribuição vazando), mas o dinheiro que veio de fora do anúncio é da casa.
+
+def _com_sem_codigo(cliente):
+    """Um lead com código que fechou, e um SEM código que fechou por mais."""
+    with cliente.pool.connection() as c:
+        _lead(c, "A3", sinal=datetime.now(timezone.utc), valor=750000)
+        _lead(c, None, sinal=datetime.now(timezone.utc), valor=9900000)
+        c.commit()
+
+
+def test_convidado_nao_ve_o_faturamento_de_quem_veio_sem_codigo(cliente):
+    _com_sem_codigo(cliente)
+    cliente.estado["papel"] = "convidado"
+    html = cliente.get("/painel/origens").text
+    assert "99.000,00" not in html, "o caixa de fora do anúncio vazou pra agência"
+
+
+def test_o_dono_ve_esse_faturamento(cliente):
+    """O corte é só pro convidado: pra casa a tela continua inteira."""
+    _com_sem_codigo(cliente)
+    assert "99.000,00" in cliente.get("/painel/origens").text
+
+
+def test_convidado_ve_o_faturamento_do_que_veio_do_anuncio(cliente):
+    """É o que dá sentido ao painel: sem isso ela volta a contar leads."""
+    _com_sem_codigo(cliente)
+    cliente.estado["papel"] = "convidado"
+    assert "7.500,00" in cliente.get("/painel/origens").text
+
+
+def test_convidado_ve_a_contagem_da_faixa_sem_codigo(cliente):
+    """Sem o denominador ela não percebe quando a atribuição está vazando."""
+    _com_sem_codigo(cliente)
+    cliente.estado["papel"] = "convidado"
+    html = cliente.get("/painel/origens").text
+    assert "sem código" in html
+    assert "total da casa" in html
+
+
+def test_a_tela_explica_ao_convidado_o_que_ficou_de_fora(cliente):
+    """Número escondido sem explicação vira desconfiança na próxima reunião."""
+    _com_sem_codigo(cliente)
+    cliente.estado["papel"] = "convidado"
+    assert "fica com a empresa" in cliente.get("/painel/origens").text.lower()

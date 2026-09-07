@@ -106,10 +106,28 @@ def conta_logada(request: Request):
     if not _prod and not _serv:
         _prod = True
     _tem_cesta = bool(r[10]) or bool(_cesta_db)
+    # [16] = o SLUG DO NICHO. Ele já vinha na consulta (r[12]) e era descartado
+    # aqui — e três telas passaram a lê-lo do índice 7, que é `cidade`. Resultado:
+    # a Prime Eventos, cidade TERESINA, era classificada como perfil "recorrente",
+    # o menu do Follow-up nunca aparecia, o campo "Festas por dia" não existia em
+    # Empresa (e sem ele a lista de espera não liga) e a ficha oferecia os motivos
+    # de perda do nicho errado. Nada disso dava erro em lugar nenhum: a tela
+    # simplesmente não estava lá. Entra no FIM da tupla de propósito — os índices
+    # 0..15 são lidos por dezenas de telas e não podem andar.
     row = tuple(r[0:11]) + (_modulo_pj, _acesso,
-                            bool(_prod) and _acesso, bool(_serv) and _acesso, _tem_cesta)
+                            bool(_prod) and _acesso, bool(_serv) and _acesso, _tem_cesta,
+                            _nslug)
     request.state._conta_cache = row
     return row
+
+
+def nicho_da_conta(conta) -> str | None:
+    """O slug do nicho da linha de `conta_logada` — o índice, num lugar só.
+
+    Existe pra que ninguém volte a contar posições na mão: foi assim que o
+    `cidade` virou nicho e três telas sumiram sem ninguém perceber. Tupla curta
+    (mock de teste) devolve None, que cai no perfil sem festa — o lado seguro."""
+    return conta[16] if (conta and len(conta) > 16) else None
 
 
 def _planos():
@@ -7523,14 +7541,14 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
         if "vende_produto" not in ctx:
             ctx["vende_produto"] = bool(_c and _c[13])
             ctx["vende_servico"] = bool(_c and _c[14])
-        # o perfil do Raio-X (finance/raio_x_perfil), do slug do nicho (_c[7]):
+        # o perfil do Raio-X (finance/raio_x_perfil), do slug do nicho:
         # decide se o item aparece no menu e qual lista de motivos de perda a
         # ficha oferece. Puro, sem consulta.
         if "raio_x_perfil" not in ctx:
             from finance import raio_x_perfil as _rxp
             # `_c` pode ser um mock curto nos testes: sem o slug, o perfil é o de
             # serviço (o que não fala de festa), nunca um IndexError na tela
-            _perfil = _rxp.perfil(_c[7] if (_c and len(_c) > 7) else None)
+            _perfil = _rxp.perfil(nicho_da_conta(_c))
             ctx["raio_x_perfil"] = _perfil
             ctx.setdefault("motivos_perda", _perfil["motivos"])
     if "beta_gratis" not in ctx:

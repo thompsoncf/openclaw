@@ -225,12 +225,12 @@ def _acesso(request: Request):
 def _tem_follow_up(conta) -> bool:
     """A conta já ganhou o Follow-up? Depende do nicho (CLAUDE.md §6): o segundo
     relógio da régua é a data da festa, e a entrega foi combinada em duas etapas —
-    eventos primeiro. `conta[7]` é o slug do nicho; conta curta (mock de teste) não
-    tem follow-up, que é o lado seguro de errar."""
+    eventos primeiro. O slug sai de `portal.nicho_da_conta`; conta curta (mock de
+    teste) não tem follow-up, que é o lado seguro de errar."""
     from finance import follow_up as _fu
     from finance import raio_x_perfil as _rxp
-    slug = conta[7] if (conta and len(conta) > 7) else None
-    return _rxp.perfil(slug)["chave"] in _fu.PERFIS_COM_TELA
+    from web.portal import nicho_da_conta
+    return _rxp.perfil(nicho_da_conta(conta))["chave"] in _fu.PERFIS_COM_TELA
 
 
 def _vendedores(pool, conta_id: int) -> list[dict]:

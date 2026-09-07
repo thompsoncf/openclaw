@@ -12,14 +12,40 @@ revela. Só o clique quebra.
 A verificação não olha indentação (que não prova nada em JS): mede a PROFUNDIDADE
 DE CHAVES dentro de cada `<script>`. Função declarada em profundidade 0 é global;
 qualquer coisa mais funda está presa num IIFE ou closure e o onclick não alcança.
+
+POR QUE OLHA MAIS DE UMA TELA (07/09/2026). O balão de conversa saiu do funil pra
+`web/balao_conversa.py` quando o Raio-X passou a abrir o MESMO balão. Duas coisas
+mudaram pra este teste: `kbAbrirChat` deixou de estar no arquivo do funil (a
+fonte tem `{{ balao_js }}`, e o Jinja é que junta), e passou a existir uma
+segunda tela com `onclick=`. Por isso cada página é lida COMO CHEGA NO NAVEGADOR
+— com o balão já colado no lugar do marcador — e conferida SEPARADAMENTE: função
+global numa tela não alcança o clique da outra.
 """
 import re
 from pathlib import Path
 
 import pytest
 
-FONTE = Path(__file__).resolve().parent.parent / "web" / "painel_prospeccao.py"
-TEXTO = FONTE.read_text(encoding="utf-8")
+from web import balao_conversa as _balao
+
+RAIZ = Path(__file__).resolve().parent.parent / "web"
+
+
+def _pagina(nome: str) -> str:
+    """A fonte da tela com o balão já colado — é o que o navegador recebe.
+
+    Só o `{{ balao_js }}` é substituído: o `{{ balao_css }}` mora num `<style>` e
+    não tem função nenhuma pra alcançar."""
+    return RAIZ.joinpath(nome).read_text(encoding="utf-8").replace(
+        "{{ balao_js }}", _balao.JS
+    )
+
+
+TELAS = {
+    "painel_prospeccao.py": _pagina("painel_prospeccao.py"),
+    "painel_raio_x.py": _pagina("painel_raio_x.py"),
+}
+TEXTO = TELAS["painel_prospeccao.py"]
 
 # palavras que parecem chamada mas não são função nossa
 _PALAVRAS = {"if", "for", "while", "switch", "return", "typeof", "function", "catch",
@@ -29,12 +55,12 @@ _NATIVOS = {"alert", "confirm", "prompt", "fetch", "setTimeout", "setInterval",
             "encodeURIComponent", "decodeURIComponent", "event", "this", "window"}
 
 
-def _handlers():
+def _handlers(texto: str = TEXTO):
     """Funções chamadas por `onclick=`. Ignora chamada de método (`x.foo()`), que
     não depende do escopo global, e o conteúdo de strings — um `confirm('… o
     acompanhamento (aberturas) …')` tem prosa que parece chamada de função."""
     nomes = set()
-    for trecho in re.findall(r'onclick="([^"]+)"', TEXTO):
+    for trecho in re.findall(r'onclick="([^"]+)"', texto):
         trecho = re.sub(r"'[^']*'", "''", trecho)      # some com o texto das strings
         for m in re.finditer(r"(\.?)\b([A-Za-z_$][\w$]*)\s*\(", trecho):
             ponto, nome = m.group(1), m.group(2)
@@ -43,10 +69,10 @@ def _handlers():
     return nomes
 
 
-def _globais():
+def _globais(texto: str = TEXTO):
     """Funções em profundidade de chaves ZERO dentro de algum `<script>`."""
     out = set()
-    for bloco in re.findall(r"<script[^>]*>(.*?)</script>", TEXTO, re.S):
+    for bloco in re.findall(r"<script[^>]*>(.*?)</script>", texto, re.S):
         prof = 0
         for i, ch in enumerate(bloco):
             if ch == "{":
@@ -57,7 +83,7 @@ def _globais():
                 m = re.match(r"function\s+([A-Za-z_$][\w$]*)\s*\(", bloco[i:])
                 if m:
                     out.add(m.group(1))
-    return out | set(re.findall(r"window\.([A-Za-z_$][\w$]*)\s*=", TEXTO))
+    return out | set(re.findall(r"window\.([A-Za-z_$][\w$]*)\s*=", texto))
 
 
 def test_a_deteccao_funciona():
@@ -72,12 +98,23 @@ def test_a_deteccao_funciona():
     assert len(_handlers()) > 10
 
 
-@pytest.mark.parametrize("nome", sorted(_handlers()))
-def test_toda_funcao_de_onclick_e_alcancavel(nome):
-    assert nome in _globais(), (
-        f"`{nome}` é chamada por onclick= mas não está no escopo global — "
-        "provavelmente dentro de um IIFE/closure. O HTML renderiza certo e o "
-        "clique morre num ReferenceError, sem nada acontecer na tela."
+def test_as_duas_telas_tem_clique_pra_conferir():
+    """Guarda da leitura de cada tela: arquivo renomeado ou marcador do balão
+    trocado deixaria a lista vazia, e o teste passaria sem conferir nada."""
+    for tela, texto in TELAS.items():
+        assert _handlers(texto), f"{tela} não tem nenhum onclick= pra conferir"
+
+
+@pytest.mark.parametrize(
+    "tela,nome",
+    sorted((t, n) for t, txt in TELAS.items() for n in _handlers(txt)),
+)
+def test_toda_funcao_de_onclick_e_alcancavel(tela, nome):
+    assert nome in _globais(TELAS[tela]), (
+        f"`{nome}` é chamada por onclick= em {tela} mas não está no escopo global "
+        "dessa tela — provavelmente dentro de um IIFE/closure, ou definida só em "
+        "OUTRA tela. O HTML renderiza certo e o clique morre num ReferenceError, "
+        "sem nada acontecer na tela."
     )
 
 
@@ -86,3 +123,12 @@ def test_kpiabre_esta_no_topo():
     e foi exatamente aqui que o bug apareceu em produção."""
     assert "kpiAbre" in _handlers()
     assert "kpiAbre" in _globais()
+
+
+def test_o_balao_do_raio_x_alcanca_a_funcao_do_modulo():
+    """O caso que quebrou na extração: o Raio-X chama `kbAbrirChat` no onclick, e
+    a função só existe em `web/balao_conversa.py`. Se alguém tirar o
+    `{{ balao_js }}` da tela, o botão 💬 vira um clique morto."""
+    rx = TELAS["painel_raio_x.py"]
+    assert "kbAbrirChat" in _handlers(rx)
+    assert "kbAbrirChat" in _globais(rx)

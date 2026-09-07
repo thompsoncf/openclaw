@@ -333,7 +333,7 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
         {% if x.msg %}
         {% if x.msg.conversa_id %}
         <button type="button" class="fu-msg abre{% if x.msg.nova %} nova{% endif %}"
-                onclick="kbAbrirChat(event,{{ x.msg.conversa_id }},'{{ x.msg.aba }}',this,{{ x.quem|tojson }})"
+                onclick="kbAbrirChat(event,{{ x.msg.conversa_id }},'{{ x.msg.aba }}',this,{{ x.quem|tojson|forceescape }})"
                 title="abrir a conversa aqui mesmo">
           {% if x.msg.nova %}<span class="bolha" aria-hidden="true"></span>
           {% elif x.msg.minha %}<span class="eu" aria-hidden="true">↩</span>{% endif %}

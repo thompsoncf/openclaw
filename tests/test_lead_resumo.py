@@ -27,7 +27,7 @@ create table prospeccao (id bigserial primary key, evento_em date, evento_tipo t
   empresa text not null, cnpj text, segmento text, cidade text, uf text,
   contato text, cargo text, telefone text, whatsapp text, email text,
   status text default 'novo', temperatura text default 'frio',
-  valor_estimado_centavos bigint default 0, origem text, obs text, instagram text,
+  valor_estimado_centavos bigint default 0, origem text, origem_codigo text, obs text, instagram text,
   socio text, regime_tributario text, porte text,
   ultimo_contato_em timestamptz, proximo_contato_em date,
   orcamento_id bigint, tem_site boolean, maps_url text, receita jsonb, site_url text,

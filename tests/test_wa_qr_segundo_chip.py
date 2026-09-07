@@ -42,7 +42,7 @@ create table prospeccao (id bigserial primary key, conta_id bigint, membro_id bi
   vendedor_id bigint, empresa text, contato text, decisor_nome text, socio text, cnpj text,
   segmento text, telefone text, whatsapp text, email text, cidade text, uf text,
   status text default 'novo', temperatura text default 'frio', estagio text default 'base',
-  origem text, orcamento_id bigint, tipo text default 'pj',
+  origem text, origem_codigo text, orcamento_id bigint, tipo text default 'pj',
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text, contato_ref text, contato_nome text, status text default 'aberta',

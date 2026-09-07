@@ -25,7 +25,7 @@ _SQL = """
 create table prospeccao (id bigserial primary key, evento_em date, evento_tipo text, evento_convidados int, evento_origem text, evento_trecho text, evento_pista text, evento_lido_em timestamptz, ultimo_contato_em timestamptz, conta_id bigint, vendedor_id bigint,
   empresa text not null, segmento text, cidade text, uf text, contato text, cargo text,
   telefone text, whatsapp text, email text, cnpj text, cpf text, tipo text default 'pj',
-  temperatura text default 'frio', valor_estimado_centavos bigint default 0, origem text,
+  temperatura text default 'frio', valor_estimado_centavos bigint default 0, origem text, origem_codigo text,
   obs text, socio text, regime_tributario text, porte text, instagram text, site_url text,
   tem_site boolean, receita jsonb, criado_por bigint, estagio text default 'base',
   atualizado_em timestamptz default now(), criado_em timestamptz default now(),

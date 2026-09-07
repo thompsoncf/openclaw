@@ -40,7 +40,7 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   empresa text, cnpj text, segmento text, cidade text, uf text, contato text, cargo text,
   telefone text, whatsapp text, email text, status text default 'novo',
   temperatura text default 'frio', valor_estimado_centavos bigint default 0,
-  origem text, obs text, decisor_nome text, socio text, estagio text default 'lead',
+  origem text, origem_codigo text, obs text, decisor_nome text, socio text, estagio text default 'lead',
   orcamento_id bigint, atualizado_em timestamptz default now(),
   criado_em timestamptz default now());
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,

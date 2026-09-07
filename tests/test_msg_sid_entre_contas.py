@@ -40,7 +40,7 @@ SID = "2A996A40A98D0A57B281"     # o id que as duas pontas veem
 _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text, contato text, tipo text default 'pj',
-  telefone text, whatsapp text, email text, origem text,
+  telefone text, whatsapp text, email text, origem text, origem_codigo text,
   status text default 'novo', temperatura text default 'frio', estagio text default 'base',
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,

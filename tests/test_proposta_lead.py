@@ -29,7 +29,7 @@ from finance import proposta_lead as pl
 _SCHEMA = """
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text, contato text, cnpj text, whatsapp text, telefone text, email text,
-  cidade text, uf text, segmento text, origem text, status text default 'novo',
+  cidade text, uf text, segmento text, origem text, origem_codigo text, status text default 'novo',
   estagio text default 'lead', orcamento_id bigint, criado_por bigint,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table orcamentos (id bigserial primary key, conta_id bigint, status text default 'rascunho',

@@ -23,20 +23,31 @@ from . import senha as _senha
 from core import esquema_runtime
 
 # capacidade por papel — fonte única da verdade do que cada um acessa.
+# `origens` é a QUARTA capacidade, e nasceu pra um papel que não é da casa: a
+# agência de tráfego. Ela precisa ver o que aconteceu com os leads que os anúncios
+# dela trouxeram — e nada mais. Não dava pra reusar `vendas` (abriria funil,
+# conversa e cliente) nem `financeiro` (abriria caixa e relatório), então a única
+# saída honesta era uma capacidade própria, estreita de propósito.
 CAPS = {
-    "dono":       {"vendas": True,  "financeiro": True,  "gerir": True},
-    "gestor":     {"vendas": True,  "financeiro": True,  "gerir": False},
-    "vendedor":   {"vendas": True,  "financeiro": False, "gerir": False},
-    "financeiro": {"vendas": False, "financeiro": True,  "gerir": False},
+    "dono":       {"vendas": True,  "financeiro": True,  "gerir": True,  "origens": True},
+    "gestor":     {"vendas": True,  "financeiro": True,  "gerir": False, "origens": True},
+    "vendedor":   {"vendas": True,  "financeiro": False, "gerir": False, "origens": False},
+    "financeiro": {"vendas": False, "financeiro": True,  "gerir": False, "origens": False},
+    # a agência: entra, vê a tela de Origens e mais nada. Não é gente da casa.
+    "convidado":  {"vendas": False, "financeiro": False, "gerir": False, "origens": True},
     # compat com o modelo família (chat): nunca acessam Vendas nem gerem a conta.
-    "membro":     {"vendas": False, "financeiro": True,  "gerir": False},
-    "restrito":   {"vendas": False, "financeiro": False, "gerir": False},
+    "membro":     {"vendas": False, "financeiro": True,  "gerir": False, "origens": False},
+    "restrito":   {"vendas": False, "financeiro": False, "gerir": False, "origens": False},
 }
 # papéis que o dono pode atribuir a um membro de equipe (o dono é o titular).
-PAPEIS_PJ = ("gestor", "vendedor", "financeiro")
+# `convidado` entra aqui pra reusar o convite por link que já existe: o dono manda
+# o link, a agência cria a própria senha (o dono nunca a vê) e a revogação é a
+# mesma de qualquer membro.
+PAPEIS_PJ = ("gestor", "vendedor", "financeiro", "convidado")
 _ROTULOS = {"dono": "Dono", "gestor": "Gestor", "vendedor": "Vendedor",
-            "financeiro": "Financeiro", "membro": "Membro", "restrito": "Restrito"}
-_SEM_ACESSO = {"vendas": False, "financeiro": False, "gerir": False}
+            "financeiro": "Financeiro", "convidado": "Convidado (agência)",
+            "membro": "Membro", "restrito": "Restrito"}
+_SEM_ACESSO = {"vendas": False, "financeiro": False, "gerir": False, "origens": False}
 
 
 def caps_do_papel(papel: str | None) -> dict:
@@ -71,7 +82,34 @@ def home_do_papel(papel: str | None, membro_id=None) -> str:
         return "/painel"
     if papel == "vendedor":
         return "/cockpit"
+    # o convidado não tem painel nenhum além da tela dele; mandá-lo pro /painel o
+    # gate devolve, e ele acabaria no /trocar sem entender por quê
+    if papel == "convidado":
+        return "/painel/origens"
     return "/painel"
+
+
+def destino_barrado(papel: str | None) -> str:
+    """Pra onde o gate manda um membro que bateu numa rota que não é dele.
+
+    Mora aqui, junto do CAPS e do `rotas_do_papel`, porque estava escrito à MÃO
+    dentro de `web/app.py` — duas contas do mesmo destino, sem nada ligando uma à
+    outra. Um papel novo entrava no CAPS, ganhava rota na whitelist, e continuava
+    caindo no `/trocar` porque ninguém lembrava do `if` lá. Foi o que aconteceu
+    com o convidado, e nenhum teste pegava: os testes conferiam o
+    `home_do_papel`, que é outra coisa (onde a pessoa cai ao ENTRAR).
+
+    O destino tem que estar em `rotas_do_papel(papel)`, senão o gate devolve de
+    novo e vira laço. `/trocar` é o último recurso, e está sempre liberado.
+    """
+    caps = caps_do_papel(papel)
+    if caps["vendas"]:
+        return "/painel/servicos"
+    if caps["financeiro"]:
+        return "/painel/empresa"
+    if caps["origens"]:
+        return "/painel/origens"
+    return "/trocar"
 
 
 def rotas_do_papel(papel: str | None) -> list[str]:
@@ -102,6 +140,16 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     # financeiro) entra; vendedor tem o dele no app, financeiro não vende.
     if caps["vendas"] and caps["financeiro"]:
         permitido += ["/painel/raio-x"]
+    # O Follow-up é de quem vende (o vendedor tem a fila dele, o gestor vê a conta).
+    # Estava no menu desde o #644 e FORA daqui: os dois clicavam e levavam 303 de
+    # volta. Quem barra conta de outro perfil é a própria rota (o Follow-up nasceu
+    # só em 'eventos'), não a whitelist, que não conhece o nicho da conta.
+    if caps["vendas"]:
+        permitido += ["/painel/follow-up"]
+    # Origens: dono, gestor e o convidado da agência. Mesmo erro do Follow-up, meu,
+    # no #650 — o link entrou no menu e a rota ficou de fora.
+    if caps["origens"]:
+        permitido += ["/painel/origens"]
     if caps["gerir"]:
         permitido += ["/painel/equipe", "/membros"]
     if recebe_novidades(papel):

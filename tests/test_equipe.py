@@ -43,10 +43,19 @@ def conta_id(pool):
 
 
 def test_caps_por_papel():
-    assert equipe.caps_do_papel("dono") == {"vendas": True, "financeiro": True, "gerir": True}
-    assert equipe.caps_do_papel("vendedor") == {"vendas": True, "financeiro": False, "gerir": False}
-    assert equipe.caps_do_papel("financeiro") == {"vendas": False, "financeiro": True, "gerir": False}
-    assert equipe.caps_do_papel(None) == {"vendas": False, "financeiro": False, "gerir": False}
+    # `origens` é a quarta capacidade (tela de Origens, pro convidado da agência).
+    # A comparação segue sendo do dicionário INTEIRO de propósito: capacidade nova
+    # que vaze pra um papel errado tem que quebrar aqui, não passar despercebida.
+    assert equipe.caps_do_papel("dono") == {
+        "vendas": True, "financeiro": True, "gerir": True, "origens": True}
+    assert equipe.caps_do_papel("vendedor") == {
+        "vendas": True, "financeiro": False, "gerir": False, "origens": False}
+    assert equipe.caps_do_papel("financeiro") == {
+        "vendas": False, "financeiro": True, "gerir": False, "origens": False}
+    assert equipe.caps_do_papel("convidado") == {
+        "vendas": False, "financeiro": False, "gerir": False, "origens": True}
+    assert equipe.caps_do_papel(None) == {
+        "vendas": False, "financeiro": False, "gerir": False, "origens": False}
 
 
 def test_aplicar_contexto():

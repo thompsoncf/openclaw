@@ -394,7 +394,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('raio_x','/painel/raio-x','relatorios','Raio-X') }}{% endif %}
   {# Origens (finance/origens): de onde veio o lead e o que virou. Mesmo par que o
      Raio-X, e some em conta só de produto, que não tem funil (CLAUDE.md §6). #}
-  {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Origens') }}{% endif %}
+  {% if tem_pj and caps.origens and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Origens') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
@@ -442,7 +442,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('raio_x','/painel/raio-x','relatorios','Raio-X') }}{% endif %}
   {# Origens (finance/origens): de onde veio o lead e o que virou. Mesmo par que o
      Raio-X, e some em conta só de produto, que não tem funil (CLAUDE.md §6). #}
-  {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Origens') }}{% endif %}
+  {% if tem_pj and caps.origens and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Origens') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}

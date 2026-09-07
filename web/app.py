@@ -44,7 +44,9 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 # carregada quando o gate roda. O titular (dono) e visitantes passam direto;
 # só barra membro de equipe fora do que o papel dele acessa (defesa central,
 # além de esconder do menu).
-from contas.equipe import caps_do_papel as _caps_do_papel, rotas_do_papel as _rotas_do_papel
+from contas.equipe import (caps_do_papel as _caps_do_papel,
+                           destino_barrado as _destino_barrado,
+                           rotas_do_papel as _rotas_do_papel)
 
 
 @app.middleware("http")
@@ -58,8 +60,9 @@ async def _gate_permissoes(request: Request, call_next):
         # o /painel do dono (Pessoas da conta, plano) nem áreas de outro papel.
         caps = _caps_do_papel(papel)
         p = request.url.path
-        home = ("/painel/servicos" if caps["vendas"]
-                else "/painel/empresa" if caps["financeiro"] else "/trocar")
+        # o destino mora em contas.equipe, junto do CAPS e da whitelist: escrito
+        # à mão aqui, um papel novo ganhava rota e continuava caindo no /trocar
+        home = _destino_barrado(papel)
         # a whitelist mora em contas.equipe, junto do CAPS: quem precisa desviar um
         # membro (ex: painel_servicos._saida) confere nela pra não mandar ele pra
         # uma rota que o gate devolve — o vai-e-vem virava laço infinito.

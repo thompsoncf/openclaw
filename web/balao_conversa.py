@@ -20,6 +20,17 @@ O QUE A TELA PRECISA TER: um botão que chame
 (WhatsApp/Instagram) ou 'emails'; `nome` é opcional — sem ele o balão procura
 no card do funil (`.kbcard .emp`).
 
+COMO PASSAR O `nome` DE UM TEMPLATE, que já quebrou uma vez (07/09/2026):
+
+    onclick="kbAbrirChat(event,{{ id }},'{{ aba }}',this,{{ nome|tojson|forceescape }})"
+
+O `|forceescape` NÃO é enfeite. `|tojson` devolve Markup com aspas DUPLAS de
+verdade, e dentro de um atributo delimitado por aspas duplas a primeira delas
+ENCERRA o atributo: o navegador recebe `kbAbrirChat(event,12,'conversas',this,`
+e o clique morre num SyntaxError — botão na tela, nada acontecendo. O
+`forceescape` transforma as aspas em `&#34;`, que o parser de HTML devolve
+como `"` já dentro do valor do atributo, e o JS recebe a string inteira.
+
 O QUE NÃO ESTÁ AQUI, de propósito: o balão do LEAD (`kbAbrirLead`), o
 "Ler as conversas" e o `kbPerguntarData` — são do funil e continuam lá, o
 último porque depende de uma variável que só aquela tela tem.

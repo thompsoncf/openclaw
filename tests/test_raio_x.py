@@ -35,7 +35,7 @@ create table contas (id bigserial primary key, nome text, nome_fantasia text,
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
-  empresa text, contato text, status text default 'novo', evento_em date, evento_tipo text,
+  empresa text, contato text, whatsapp text, telefone text, status text default 'novo', evento_em date, evento_tipo text,
   orcamento_id bigint, segmento text, perda_motivo text, criado_em timestamptz default now());
 create table nichos (id bigserial primary key, nome text, slug text unique, ativo boolean default true);
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
@@ -93,10 +93,11 @@ def _vend(c, conta, nome="Jaqueline Silva", ativo=True):
                      (conta, nome, ativo)).fetchone()[0]
 
 
-def _lead(c, conta, vend, contato="Ana", status="novo", criado=None, evento_em=None, evento_tipo=None, orc=None):
-    return c.execute("""insert into prospeccao (conta_id, vendedor_id, contato, status, criado_em, evento_em, evento_tipo, orcamento_id)
-                        values (%s,%s,%s,%s,coalesce(%s, now()),%s,%s,%s) returning id""",
-                     (conta, vend, contato, status, criado, evento_em, evento_tipo, orc)).fetchone()[0]
+def _lead(c, conta, vend, contato="Ana", status="novo", criado=None, evento_em=None, evento_tipo=None,
+          orc=None, whatsapp=None):
+    return c.execute("""insert into prospeccao (conta_id, vendedor_id, contato, status, criado_em, evento_em, evento_tipo, orcamento_id, whatsapp)
+                        values (%s,%s,%s,%s,coalesce(%s, now()),%s,%s,%s,%s) returning id""",
+                     (conta, vend, contato, status, criado, evento_em, evento_tipo, orc, whatsapp)).fetchone()[0]
 
 
 def _conversa(c, conta, lead, criado, ref="5586999990001", nome=None):
@@ -171,7 +172,8 @@ def test_sua_semana_mede_primeira_resposta_propostas_toques_e_contratos(pool):
         cv = _conversa(c, conta, ana, _t(5)); _msg(c, cv, "in", _t(5)); _msg(c, cv, "out", _t(5) + timedelta(minutes=3))
         bia = _lead(c, conta, v, "Bia", criado=_t(4))
         cv = _conversa(c, conta, bia, _t(4)); _msg(c, cv, "in", _t(4)); _msg(c, cv, "out", _t(4) + timedelta(hours=2))
-        caio = _lead(c, conta, v, "Caio", status="contatado", criado=_t(3.5))
+        caio = _lead(c, conta, v, "Caio", status="contatado", criado=_t(3.5),
+                     whatsapp="5586991885930")
         cv = _conversa(c, conta, caio, _t(3.5)); _msg(c, cv, "in", _t(3.5)); _msg(c, cv, "out", _t(3))
         dora = _lead(c, conta, v, "Dora", status="contatado", criado=_t(6))
         cv = _conversa(c, conta, dora, _t(6)); _msg(c, cv, "in", _t(6)); _msg(c, cv, "out", _t(5.9)); _msg(c, cv, "out", _t(4))
@@ -221,7 +223,8 @@ def test_cada_numero_pendente_traz_o_nome_e_por_onde_abrir(pool):
     with pool.connection() as c:
         conta = _conta(c); v = _vend(c, conta)
         # Caio: respondemos uma vez e paramos há 3 dias → parou na 1ª
-        caio = _lead(c, conta, v, "Caio", status="contatado", criado=_t(3.5))
+        caio = _lead(c, conta, v, "Caio", status="contatado", criado=_t(3.5),
+                     whatsapp="5586991885930")
         cv_caio = _conversa(c, conta, caio, _t(3.5)); _msg(c, cv_caio, "in", _t(3.5)); _msg(c, cv_caio, "out", _t(3))
         # Bia: rascunho parado, com conversa
         bia = _lead(c, conta, v, "Bia", criado=_t(5))
@@ -245,10 +248,34 @@ def test_cada_numero_pendente_traz_o_nome_e_por_onde_abrir(pool):
     assert s["paradas_1a"] == 1
     (p,) = s["paradas_1a_itens"]
     assert p["nome"] == "Caio" and p["conversa_id"] == cv_caio and p["horas"] >= 24
+    # o TELEFONE ao lado do nome (pedido do dono em 07/09): metade dos leads da
+    # Prime tem nome de WhatsApp que não identifica ninguém ("🧡", nome em
+    # hebraico) — o número é o que faz o dono reconhecer de quem se trata.
+    assert p["fone"] == "(86) 99188-5930"
 
     (a,) = s["sem_assinar"]
     assert a["nome"] == "Fabi Costa" and a["orcamento_id"] == o_ass
     assert a["conversa_id"] == cv_fabi and a["valor_centavos"] == 450000
+
+
+def test_a_espera_vira_dias_depois_de_dois_dias():
+    """07/09/2026, o dono olhando a tela: a lista dizia "esperando há 476h", e
+    ninguém divide 476 por 24 de cabeça. Até 48h a hora ainda diz algo ("há 30h"
+    é hoje de manhã); dali pra cima, dias."""
+    assert rx.fmt_espera(3) == "há 3h"
+    assert rx.fmt_espera(47) == "há 47h"
+    assert rx.fmt_espera(48) == "há 2 dias"
+    assert rx.fmt_espera(476) == "há 19 dias"      # o caso da tela
+    assert rx.fmt_espera(30 * 24) == "há 30 dias"
+    assert rx.fmt_espera(None) == "—"
+
+
+def test_o_telefone_sai_no_formato_que_se_disca():
+    assert rx.fmt_fone("5586991885930") == "(86) 99188-5930"   # com DDI
+    assert rx.fmt_fone("86991885930") == "(86) 99188-5930"     # sem DDI
+    assert rx.fmt_fone("8634348180") == "(86) 3434-8180"       # fixo
+    assert rx.fmt_fone("") == "" and rx.fmt_fone(None) == ""
+    assert rx.fmt_fone("123") == "123"     # o que não dá pra formatar sai como veio
 
 
 def test_conversa_de_email_manda_o_link_pra_aba_de_emails(pool):

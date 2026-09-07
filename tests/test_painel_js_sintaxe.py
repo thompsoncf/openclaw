@@ -35,6 +35,18 @@ import pytest
 from finance import vendas as v
 from web import painel_prospeccao as pp
 from web import painel_servicos as _ps  # registra "servicos" no mesmo loader
+from web import balao_conversa as _balao
+
+
+def _fonte_balao() -> str:
+    """O código do balão de conversa (CSS e JS), venha de onde vier.
+
+    07/09/2026: o balão saiu de `painel_prospeccao` pra `web/balao_conversa.py`,
+    porque o Raio-X passou a abrir o MESMO balão. Os testes daqui protegem o
+    comportamento dele (cabe na tela, fecha no Esc, um por vez), não o endereço
+    — então olham os dois lugares e continuam valendo se um dia ele mudar de
+    casa de novo."""
+    return inspect.getsource(pp) + "\n" + _balao.CSS + "\n" + _balao.JS
 
 # páginas que carregam JS próprio, pelo nome com que são registradas no loader, e
 # o contexto MÍNIMO que abre os ramos de {% if %} onde o JS mora. Crescer esta
@@ -350,7 +362,7 @@ def test_selo_de_conversa_vira_botao_so_com_conversa_de_verdade():
 def test_o_clique_no_selo_nao_propaga_pro_card():
     """O card inteiro tem onclick pra abrir a FICHA. Sem stopPropagation, clicar
     no selo abriria os dois drawers ao mesmo tempo (ficha por baixo do chat)."""
-    fonte = inspect.getsource(pp).split("function kbAbrirChat")[1][:400]
+    fonte = _fonte_balao().split("function kbAbrirChat")[1][:400]
     assert "ev.stopPropagation()" in fonte
 
 
@@ -364,7 +376,7 @@ def test_o_balao_do_chat_e_so_mensagens_nao_a_tela_inteira():
     js = "\n".join(_scripts(_render("prospeccao")))
     for fn in ("kbFecharChat", "kbMsgsHtml", "kbResponderChat", "cxEscK"):
         assert fn in js, f"{fn} não está no JS servido"
-    fonte_chat = inspect.getsource(pp).split("function kbAbrirChat")[1]
+    fonte_chat = _fonte_balao().split("function kbAbrirChat")[1]
     fonte_chat = fonte_chat[:fonte_chat.index("function kbResponderChat")]
     assert "kb-dframe" not in fonte_chat, "voltou a carregar o hub inteiro num iframe"
     assert "kb-drawer" not in fonte_chat, "voltou a usar o drawer da ficha pro chat"
@@ -375,12 +387,12 @@ def test_o_balao_do_chat_e_so_mensagens_nao_a_tela_inteira():
 def test_o_balao_so_deixa_um_aberto_por_vez():
     """Abrir o chat de um segundo lead tem que fechar o balão do primeiro —
     dois balões abertos ao mesmo tempo se sobrepõem e nenhum fica legível."""
-    fonte = inspect.getsource(pp).split("function kbAbrirChat")[1][:200]
+    fonte = _fonte_balao().split("function kbAbrirChat")[1][:200]
     assert "kbFecharChat()" in fonte, "kbAbrirChat não fecha o balão anterior antes de abrir o novo"
 
 
 def test_o_balao_fecha_clicando_fora_e_com_esc():
-    fonte = inspect.getsource(pp)
+    fonte = _fonte_balao()
     assert "_chatPopFora" in fonte and "e.target" in fonte
     assert "_chatPopEsc" in fonte and "'Escape'" in fonte
 
@@ -388,7 +400,7 @@ def test_o_balao_fecha_clicando_fora_e_com_esc():
 def test_responder_pelo_balao_usa_a_rota_que_ja_existe():
     """A caixa de responder do balão não é feature nova no backend — é a mesma
     rota que o hub de Comunicação já usa pra enviar."""
-    fonte = inspect.getsource(pp).split("function kbResponderChat")[1][:600]
+    fonte = _fonte_balao().split("function kbResponderChat")[1][:600]
     assert "/painel/prospeccao/comunicacao/responder" in fonte
     assert "conversa_id" in fonte and "texto" in fonte
 
@@ -399,7 +411,7 @@ def test_o_balao_sempre_cabe_na_tela_mesmo_perto_da_borda():
     `position:fixed`, rolar a página não revelava o resto (fixed não se move
     com a rolagem). `kbAbrirChat` tem que medir o espaço acima/abaixo do botão
     e escolher o lado com folga, prendendo a altura a esse espaço."""
-    fonte_chat = inspect.getsource(pp).split("function kbAbrirChat")[1]
+    fonte_chat = _fonte_balao().split("function kbAbrirChat")[1]
     fonte_chat = fonte_chat[:fonte_chat.index("function kbResponderChat")]
     assert "innerHeight" in fonte_chat, (
         "não mede mais o espaço disponível na janela — pode voltar a nascer fora da tela")
@@ -419,7 +431,7 @@ def test_rolar_a_pagina_fecha_o_balao_mas_o_auto_scroll_interno_nao():
     instante em que as mensagens chegavam, ANTES do usuário conseguir ler
     qualquer coisa (era exatamente o sintoma relatado: abre e não dá pra ver
     as mensagens)."""
-    fonte = inspect.getsource(pp)
+    fonte = _fonte_balao()
     assert "window.addEventListener('scroll',_chatPopRolou,true)" in fonte, (
         "balão não fecha mais quando a página rola de verdade")
     fonte_guard = fonte.split("function _chatPopRolou")[1][:200]
@@ -482,7 +494,7 @@ def test_trocar_situacao_no_balao_move_o_card_e_fecha_o_balao():
 def test_abrir_o_chat_e_abrir_o_resumo_do_lead_se_excluem():
     """Só um balão por vez, do tipo que for — chat e resumo do lead não podem
     ficar abertos ao mesmo tempo (se sobrepõem e nenhum fica legível)."""
-    fonte = inspect.getsource(pp)
+    fonte = _fonte_balao()
     fonte_chat = fonte.split("function kbAbrirChat")[1][:400]
     assert "kbFecharLead()" in fonte_chat, "abrir o chat não fecha o resumo do lead"
     fonte_lead = fonte.split("function kbAbrirLead")[1][:400]
@@ -595,7 +607,7 @@ def test_botao_de_fechar_o_balao_fica_cravado_no_canto_nao_no_fluxo_do_cabecalho
     resumo do lead) — `.pop-close` é compartilhada de propósito aqui: é
     estilo puramente visual, sem estado, sem risco de um balão fechar o
     outro por engano."""
-    fonte = inspect.getsource(pp)
+    fonte = _fonte_balao()
     regra = fonte.split(".pop-close{")[1].split("}")[0]
     assert "position:absolute" in regra and "top:" in regra and "right:" in regra
     assert "border-radius:50%" in regra, "botão de fechar não virou um círculo"

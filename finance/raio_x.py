@@ -106,6 +106,41 @@ def fmt_min(m: float | None) -> str:
     return f"{h // 24} dias"
 
 
+def fmt_fone(v: str | None) -> str:
+    """'(86) 99188-5930' — o número do jeito que o dono lê e disca.
+
+    Existe porque a lista de pendentes mostra o nome do WhatsApp, e nem todo
+    nome identifica alguém: no Raio-X da Prime tinha lead chamado "🧡" e outro
+    só em hebraico. O telefone ao lado é o que faz o dono reconhecer de quem se
+    trata. (Mesma conta que `web/contrato_publico._fone` e `web/proposta._fone`
+    fazem pros documentos — se um dia alguém juntar as três, este é o terceiro
+    lugar.)
+    """
+    d = "".join(ch for ch in (v or "") if ch.isdigit())
+    if len(d) in (12, 13) and d.startswith("55"):
+        d = d[2:]
+    if len(d) in (10, 11):
+        return f"({d[:2]}) {d[2:-4]}-{d[-4:]}"
+    return (v or "").strip()
+
+
+def fmt_espera(horas: int | None) -> str:
+    """'há 3h', 'há 1 dia', 'há 19 dias' — quanto tempo o cliente está esperando.
+
+    07/09/2026, o dono olhando a tela: a lista dizia "esperando há 476h" e
+    ninguém divide 476 por 24 de cabeça. A régua é a mesma do `fmt_min`: até
+    dois dias a hora ainda diz alguma coisa ("há 30h" é hoje de manhã); dali pra
+    cima só o número de dias importa.
+    """
+    if horas is None:
+        return "—"
+    h = int(horas)
+    if h < 48:
+        return f"há {h}h"
+    d = h // 24
+    return "há 1 dia" if d == 1 else f"há {d} dias"
+
+
 def _reais(centavos) -> str:
     v = int(centavos or 0) // 100
     return f"R$ {v:,}".replace(",", ".")
@@ -172,6 +207,7 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
         # que Comunicação já aceita — os dois já existiam pra outras telas.
         rascunhos_itens = c.execute("""
             select coalesce(nullif(o.cliente, ''), p.contato, p.empresa, 'cliente'), o.id, o.criado_em,
+                   coalesce(nullif(p.whatsapp, ''), nullif(p.telefone, ''), ''),
                    (select cv.id from conversas cv where cv.prospeccao_id = p.id
                      order by (cv.canal = 'whatsapp') desc, cv.criado_em desc limit 1),
                    (select cv.canal from conversas cv where cv.prospeccao_id = p.id
@@ -216,14 +252,15 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
             with in_ as (
               select cv.id as cid, cv.canal,
                      coalesce(nullif(o2.cliente, ''), p.contato, p.empresa, 'cliente') as nome,
+                     coalesce(nullif(p.whatsapp, ''), nullif(p.telefone, ''), '') as fone,
                      max(ms.criado_em) filter (where ms.direcao = 'in') as ult_in,
                      max(ms.criado_em) as ult
                 from conversas cv join prospeccao p on p.id = cv.prospeccao_id
                 join mensagens ms on ms.conversa_id = cv.id
                 left join orcamentos o2 on o2.id = p.orcamento_id
                where cv.conta_id = %s and p.vendedor_id = %s and p.status = any(%s)
-               group by cv.id, cv.canal, o2.cliente, p.contato, p.empresa)
-            select nome, cid, canal, ult from in_
+               group by cv.id, cv.canal, o2.cliente, p.contato, p.empresa, p.whatsapp, p.telefone)
+            select nome, cid, canal, ult, fone from in_
              where ult > coalesce(ult_in, '2000-01-01') and ult < %s - interval '24 hours'
                and (select count(*) from mensagens m where m.conversa_id = in_.cid
                       and m.direcao = 'out' and m.criado_em > coalesce(in_.ult_in, '2000-01-01')) = 1
@@ -238,7 +275,7 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
              order by c.assinado_em desc""", (conta_id, membro_id, ini, fim)).fetchall()
         sem_assinar = c.execute("""
             select coalesce(nullif(o.cliente, ''), p.contato, p.empresa, 'cliente'), o.primeiro_ano_centavos,
-                   o.aprovada_em, o.id,
+                   o.aprovada_em, o.id, coalesce(nullif(p.whatsapp, ''), nullif(p.telefone, ''), ''),
                    (select cv.id from conversas cv where cv.prospeccao_id = p.id
                      order by (cv.canal = 'whatsapp') desc, cv.criado_em desc limit 1),
                    (select cv.canal from conversas cv where cv.prospeccao_id = p.id
@@ -261,17 +298,19 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
         "propostas_enviadas": int(enviadas), "rascunhos": int(rascunhos),
         "rascunho_dias": ((fim - rascunho_mais_velho).days if rascunho_mais_velho else 0),
         "rascunhos_itens": [{"nome": n, "orcamento_id": oid, "dias": (fim - em).days if em else 0,
-                             "conversa_id": cid, "aba": _aba(canal)}
-                            for n, oid, em, cid, canal in rascunhos_itens],
+                             "fone": fmt_fone(fone), "conversa_id": cid, "aba": _aba(canal)}
+                            for n, oid, em, fone, cid, canal in rascunhos_itens],
         "toques": int(toques), "paradas_1a": int(paradas),
         "paradas_1a_itens": [{"nome": n, "conversa_id": cid, "aba": _aba(canal),
+                              "fone": fmt_fone(fone),
                               "horas": int((fim - ult).total_seconds() // 3600)}
-                             for n, cid, canal, ult in paradas_itens],
+                             for n, cid, canal, ult, fone in paradas_itens],
         "contratos": [{"nome": n, "valor_centavos": int(v or 0), "em": em} for n, v, em in assinados],
         "contratos_valor": sum(int(v or 0) for _, v, _ in assinados),
         "sem_assinar": [{"nome": n, "valor_centavos": int(v or 0), "dias": (fim - em).days if em else 0,
-                         "orcamento_id": oid, "conversa_id": cid, "aba": _aba(canal)}
-                        for n, v, em, oid, cid, canal in sem_assinar],
+                         "orcamento_id": oid, "fone": fmt_fone(fone),
+                         "conversa_id": cid, "aba": _aba(canal)}
+                        for n, v, em, oid, fone, cid, canal in sem_assinar],
     }
 
 

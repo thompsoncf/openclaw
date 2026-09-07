@@ -830,17 +830,14 @@ def _modo_no_banco(c):
 
 
 def _post_modo(rota, valor, papel="dono"):
-    """Chama a rota como o navegador chama: POST com `modo` no formulário."""
-    import asyncio
+    """Chama a rota como o FastAPI chama: o `modo` vem por `Form(...)`, e o
+    handler é síncrono de propósito (ver o docstring dele — async com banco
+    síncrono trava o event loop)."""
     from types import SimpleNamespace
     pfu, req = rota
     req = SimpleNamespace(session=dict(req.session, papel=papel),
                           state=req.state, query_params={})
-
-    async def form():
-        return {"modo": valor}
-    req.form = form
-    return asyncio.run(pfu.follow_up_modo(req))
+    return pfu.follow_up_modo(req, modo=valor)
 
 
 def test_o_dono_liga_o_follow_up_na_propria_tela(rota, c):

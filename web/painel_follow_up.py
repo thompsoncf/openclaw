@@ -142,7 +142,7 @@ def painel_follow_up(request: Request):
 
 
 @router.post("/painel/follow-up/modo")
-async def follow_up_modo(request: Request):
+def follow_up_modo(request: Request, modo: str = Form("")):
     """Liga, ensaia ou desliga o follow-up automático desta conta.
 
     Era da Régua do funil até 07/09/2026 — e a tela de lá dizia "ligue na Régua",
@@ -152,14 +152,19 @@ async def follow_up_modo(request: Request):
 
     Só dono e gestor. O vendedor não decide o que a conta inteira recebe — a
     mesma regra da Régua, que já barrava por `gerencia`.
+
+    `def`, e não `async def`: o handler escreve no banco de forma síncrona, e
+    handler async fazendo isso trava o event loop do processo inteiro. Sem o
+    `async`, o FastAPI joga a função na threadpool sozinho — é o que o
+    `follow_up_reagendar` aqui do lado já faz, e o que
+    `tests/test_event_loop_nao_trava.py` cobra de todo handler novo.
     """
     conta, _perfil, redir = _acesso(request)
     if redir is not None:
         return redir
     if request.session.get("papel", "dono") not in ("dono", "gestor"):
         return RedirectResponse("/painel/follow-up", status_code=303)
-    f = await request.form()
-    modo = (f.get("modo") or "").strip()
+    modo = (modo or "").strip()
     if modo not in fr.MODOS:
         return RedirectResponse("/painel/follow-up", status_code=303)
     with get_pool().connection() as c:

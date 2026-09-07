@@ -132,11 +132,14 @@ table.t td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tab
 <div class="wrap">
 
   <header class="head">
-    <div class="k">Mockup para aprovação · 07/09/2026 · nicho <span class="marca">eventos</span></div>
+    <div class="k">Mockup para aprovação · 07/09/2026 · 2ª rodada, com alertas · nicho <span class="marca">eventos</span></div>
     <h1>Follow-up automático no funil</h1>
     <p>O pedido, lido linha por linha, e medido na <b style="color:var(--text)">Prime Eventos</b> (conta 34) — 274 leads
     ativos, 3 vendedores, 30 dias de funil. Tudo que aparece aqui em número é leitura de produção de hoje, não estimativa.
     O que muda em relação ao pedido está marcado, e o porquê está do lado.</p>
+    <p style="margin-top:.7rem"><b style="color:var(--neon-bright)">Nesta rodada:</b> os alertas automáticos que você
+    acrescentou. A notícia boa é que <b style="color:var(--text)">o motor de cobrança já existe em produção e está
+    desligado</b> — seção 7. O que falta é menos do que parece.</p>
   </header>
 
   <!-- ============ 1. o que o pedido encontra ============ -->
@@ -247,7 +250,7 @@ table.t td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tab
     <h2>O painel, no topo do funil</h2>
     <p class="leg">Os quatro indicadores do pedido, com os números reais da Prime. Cada um abre a lista abaixo; os
     filtros de vendedor e etapa valem para a lista aberta. Abaixo está o estado <b>🚨 CRÍTICOS</b> selecionado, filtrado
-    em Pedro Yan.</p>
+    em Pedro Yan. Os selos <b>🔔 avisado 3×</b> e <b>🔁 reagendado 3×</b> são as seções 7 e 8 aparecendo no card.</p>
 
     <div class="painel">
       <div class="barra">
@@ -288,6 +291,7 @@ table.t td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tab
               <span><i>⏱️</i><b>94h</b> sem interação</span>
               <span><i>🔄</i>1 tentativa</span>
               <span><i>📍</i>Contatado · sem proposta</span>
+              <span><i>🔔</i>avisado <b>3×</b> · gestor avisado ontem</span>
             </div>
             <div class="acao"><span>📅 Próxima ação:</span> <b>mandar proposta hoje</b> <span>— venceu há 3 dias</span></div>
           </div>
@@ -308,6 +312,7 @@ table.t td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tab
               <span><i>⏱️</i><b>36h</b> sem interação</span>
               <span><i>🔄</i>0 tentativas</span>
               <span><i>📍</i>Proposta enviada</span>
+              <span><i>🔁</i><b style="color:var(--ambar)">reagendado 3×</b> por Pedro · sem mensagem no meio</span>
             </div>
             <div class="acao"><span>📅 Próxima ação:</span> <b>ela respondeu e ninguém voltou</b> <span>— venceu ontem 11h</span></div>
           </div>
@@ -403,9 +408,151 @@ table.t td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tab
     </div>
   </section>
 
+  <!-- ============ 7. alertas ============ -->
+  <section class="sec">
+    <div class="k">7 · os alertas automáticos</div>
+    <h2>O motor de cobrança já existe. Está desligado.</h2>
+    <p class="leg">Isto é a melhor notícia do documento. O que você descreveu — avisar o vendedor no vencimento,
+    escalar quando ninguém age, não repetir o mesmo aviso, não acordar gente fora do expediente — <b>foi construído,
+    testado e está em produção</b>, em <code>finance/funil_regua.py</code>. Nunca foi ligado em conta nenhuma.</p>
+
+    <div class="medida" style="border-color:var(--neon-borda);background:var(--neon-fundo)">
+      <h3 style="color:var(--neon-bright)">O que a produção diz sobre o motor de cobrança</h3>
+      <div class="nums">
+        <div class="n" style="border-color:var(--neon-borda);background:#0C1A12"><b style="color:var(--neon-bright)">ligado</b><span>os gatilhos de card na Prime — já moveram <b>350</b> cards sozinhos</span></div>
+        <div class="n" style="border-color:var(--neon-borda);background:#0C1A12"><b style="color:var(--ambar)">off</b><span>a <b>cobrança</b> na Prime — e em todas as 5 contas</span></div>
+        <div class="n" style="border-color:var(--neon-borda);background:#0C1A12"><b style="color:var(--ambar)">0</b><span>linhas em <code>funil_avisos</code> em toda a base, desde sempre</span></div>
+        <div class="n" style="border-color:var(--neon-borda);background:#0C1A12"><b style="color:var(--neon-bright)">3/3</b><span>vendedores da Prime com push instalado e ligado</span></div>
+      </div>
+      <p style="color:#CDE8D8">Ou seja: metade do seu pedido é ligar uma chave e ajustar os degraus. A outra metade —
+      os quatro níveis, o destaque na gestão, o histórico de reagendamento — é construção nova em cima do que já roda.</p>
+    </div>
+
+    <h3 style="font-size:1rem;margin:1.4rem 0 .5rem">Os quatro degraus, e o que cada um já tem pronto</h3>
+    <div class="tabwrap">
+      <table class="t">
+        <thead><tr><th>Degrau</th><th>A mensagem</th><th>Quem recebe</th><th>Situação</th></tr></thead>
+        <tbody>
+          <tr><td><span class="pill p-hoj">🟡 No vencimento</span></td><td>“Você tem um follow-up pendente com <b>Roberta Benigno</b>. Fazer contato agora.”</td><td>Vendedor responsável</td><td><b>Motor pronto</b> — falta o degrau</td></tr>
+          <tr><td><span class="pill p-atr">🔴 24h de atraso</span></td><td>“Follow-up atrasado há 24h — <b>Roberta Benigno</b>.”</td><td>Vendedor, de novo</td><td><b>Motor pronto</b> — falta o degrau</td></tr>
+          <tr><td><span class="pill p-cri">🚨 48h</span></td><td>“Follow-up crítico — <b>Roberta Benigno</b> está há 48h sem acompanhamento.”</td><td>Vendedor <b>+ gestor</b></td><td>Escalação <b>já existe</b> (hoje em 4h fixas)</td></tr>
+          <tr><td><span class="pill p-cri">🚨 72h</span></td><td>Continua crítico e <b>entra em destaque no painel da gestão</b>.</td><td>Dono e gestor</td><td>Painel <b>é novo</b> — seção 9</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grade2" style="margin-top:.9rem">
+      <div class="bloco">
+        <h4>O que o motor já resolve sozinho <small>e custou caro pra acertar</small></h4>
+        <ul>
+          <li><b>Não repete.</b> O aviso é único por <b>fato</b>, não por lead: o mesmo atraso nunca cobra duas vezes.
+          Se o cliente voltar a escrever daqui a um mês, o fato muda e o aviso pode sair de novo.</li>
+          <li><b>Não acorda ninguém.</b> Segunda a sábado, 8h às 19h. O relógio não anda fora do expediente — e também
+          não zera. Lead que chega 22h de sábado começa a contar segunda de manhã.</li>
+          <li><b>Escala em sequência.</b> O vendedor é cobrado <b>sempre primeiro</b>, mesmo num lead atrasado há dias.
+          O gestor só entra depois, e por não ter havido ação — não vira fofoca sobre o vendedor.</li>
+          <li><b>Tem modo ensaio.</b> Em <code>observando</code> ele calcula tudo e grava o que <i>teria</i> mandado,
+          sem mandar nada. É assim que se vê o volume real antes de alguém receber o primeiro push.</li>
+        </ul>
+      </div>
+      <div class="bloco alerta">
+        <h4>O teto: 5 por dia não serve para 183 <small>é o número que precisa mudar</small></h4>
+        <p>O motor limita <b>5 leads por vendedor por dia</b> — e o que passa disso não some, fica represado para o dia
+        seguinte. Com 81 críticos, o Pedro levaria <b>17 dias</b> para ser cobrado de todos.</p>
+        <p><b>Proposta:</b> teto de <b>15</b>, o mesmo tamanho da fila do dia, e o aviso sai <b>agrupado</b> — o motor já
+        junta: “<b>7 leads esperando você</b>” é um push, não sete. Push imediato e avulso fica só para dois casos:
+        cliente esperando resposta, e o degrau 🚨.</p>
+      </div>
+    </div>
+
+    <h3 style="font-size:1rem;margin:1.4rem 0 .5rem">Os canais, medidos na Prime</h3>
+    <div class="tabwrap">
+      <table class="t">
+        <thead><tr><th>Canal</th><th>Alcance real hoje</th><th>Situação</th></tr></thead>
+        <tbody>
+          <tr><td>Push no app (PWA)</td><td>Jacqueline 2 aparelhos · Pedro 2 · Thiago 1 — todos com push ligado</td><td><span class="pill p-and">pronto</span></td></tr>
+          <tr><td>E-mail</td><td>Os 3 vendedores têm e-mail cadastrado</td><td><span class="pill p-and">pronto</span></td></tr>
+          <tr><td>Destaque no painel do vendedor</td><td>A fila do dia, no mesmo lugar do “Responda hoje”</td><td><span class="pill p-age">a construir</span></td></tr>
+          <tr><td>WhatsApp</td><td>É possível: o mesmo caminho que manda o Raio-X de segunda no grupo</td><td><span class="pill p-hoj">com ressalva</span></td></tr>
+          <tr><td><b>Manoel (dono)</b></td><td><b style="color:var(--coral)">Sem e-mail, sem push e sem Telegram</b> — a escalação pro gestor não alcança ninguém</td><td><span class="pill p-atr">resolver antes</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grade2" style="margin-top:.9rem">
+      <div class="bloco alerta">
+        <h4>A ressalva do WhatsApp</h4>
+        <p>Dá para fazer — o chip da própria empresa já manda mensagem em grupo, é assim que o Raio-X de segunda
+        funciona. Só que <b>é o mesmo número que fala com cliente</b>, e ele é a receita entrando.</p>
+        <p><b>Proposta:</b> WhatsApp só para o degrau <b>🚨 crítico</b> e para o resumo do gestor — nunca para o
+        🟡 do vencimento, que é o de maior volume. Push e e-mail dão conta do resto sem encostar no chip.</p>
+      </div>
+      <div class="bloco">
+        <h4>O que encerra o alerta <small>abrir o card não conta</small></h4>
+        <p>Exatamente como você pediu, e é aqui que o motor já joga a favor: ele não olha o card, olha o <b>fato</b>.
+        Só encerra o alerta:</p>
+        <ul>
+          <li>mensagem enviada ao cliente — pelo painel, pelo Cockpit ou <b>pelo celular do vendedor</b>;</li>
+          <li>proposta enviada, ou compromisso marcado na agenda;</li>
+          <li>ligação registrada na ficha;</li>
+          <li>reagendamento com motivo (e ele fica no histórico — seção 8).</li>
+        </ul>
+        <p>Abrir a conversa, arrastar o card ou marcar como lido <b>não encerram nada</b>: o aviso volta no ciclo
+        seguinte, porque o fato que o gerou continua de pé.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 8. reagendamento ============ -->
+  <section class="sec">
+    <div class="k">8 · a trava do reagendamento</div>
+    <h2>Adiar é permitido. Adiar em silêncio, não.</h2>
+    <p class="leg">Sua observação está certa e é o furo mais fácil de abrir numa régua dessas: o vendedor empurra a
+    data para a frente toda vez que o aviso chega, e o painel fica verde sem ninguém ter falado com ninguém.</p>
+    <div class="grade2">
+      <div class="bloco">
+        <h4>Toda marcação vira linha <small>tabela nova</small></h4>
+        <p>Cada vez que a próxima ação é marcada ou mudada, nasce uma linha: <b>quando</b>, <b>quem</b>, <b>para quando</b>,
+        <b>por quê</b>, e se foi o sistema ou a mão do vendedor. Nada é sobrescrito.</p>
+        <p>No card aparece o contador: <b>“reagendado 3× por Pedro · nenhuma mensagem no meio”</b>. Essa segunda metade
+        é a que importa — reagendar depois de falar com o cliente é trabalho; reagendar sem falar é adiar.</p>
+      </div>
+      <div class="bloco alerta">
+        <h4>A trava, a partir do 3º <small>proposta</small></h4>
+        <p>Do <b>terceiro reagendamento seguido sem nenhuma mensagem no meio</b>, o sistema passa a exigir um motivo
+        escrito, e o lead entra no painel da gestão marcado como <b>adiado em série</b>.</p>
+        <p>Não bloqueia ninguém: o vendedor continua podendo adiar. Só que a partir dali <b>o adiamento tem autor,
+        data e justificativa</b>, e você vê sem precisar perguntar.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 9. gestão ============ -->
+  <section class="sec">
+    <div class="k">9 · o painel da gestão</div>
+    <h2>Por vendedor, com os números da Prime hoje</h2>
+    <p class="leg">Os quatro indicadores repetidos por pessoa, como você pediu, mais as duas colunas de recorrência.
+    Clicar em qualquer número abre a lista daquele vendedor.</p>
+    <div class="tabwrap">
+      <table class="t">
+        <thead><tr><th>Vendedor</th><th style="text-align:right">Ativos</th><th style="text-align:right">🟡 Hoje</th><th style="text-align:right">🔴 Atrasados</th><th style="text-align:right">🚨 Críticos</th><th style="text-align:right">⚠️ Sem ação</th><th style="text-align:right">Adiados 3×+</th></tr></thead>
+        <tbody>
+          <tr><td>Pedro Yan</td><td class="num">121</td><td class="num">5</td><td class="num">9</td><td class="num" style="color:var(--sangue)">81</td><td class="num">1</td><td class="num" style="color:var(--text-faint)">—</td></tr>
+          <tr><td>Jacqueline</td><td class="num">88</td><td class="num">3</td><td class="num">9</td><td class="num" style="color:var(--sangue)">65</td><td class="num">1</td><td class="num" style="color:var(--text-faint)">—</td></tr>
+          <tr><td>Thiago Pinheiro</td><td class="num">60</td><td class="num">6</td><td class="num">7</td><td class="num" style="color:var(--sangue)">34</td><td class="num">2</td><td class="num" style="color:var(--text-faint)">—</td></tr>
+          <tr><td>zaq teste</td><td class="num">5</td><td class="num">0</td><td class="num">0</td><td class="num">3</td><td class="num">0</td><td class="num" style="color:var(--text-faint)">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="nota" style="margin-top:.8rem"><b>Por que a última coluna está vazia:</b> o ranking de recorrência —
+    quem deixa vencer sempre, quem adia sempre — precisa de <b>histórico</b>, e <code>funil_avisos</code> tem zero linha
+    porque a cobrança nunca rodou. Ele nasce vazio no dia 1 e passa a valer alguma coisa na segunda semana. Prometer
+    ranking na estreia seria inventar número.</p>
+  </section>
+
   <!-- ============ 7. a estreia ============ -->
   <section class="sec">
-    <div class="k">7 · a primeira semana</div>
+    <div class="k">10 · a primeira semana</div>
     <h2>Como aterrissar 183 críticos sem enterrar a equipe</h2>
     <p class="leg">Este é o único ponto em que o número real assusta, e ele merece plano próprio. Os 183 não são iguais
     entre si — 102 têm festa marcada no futuro e valem dinheiro; o resto é lista velha.</p>
@@ -437,7 +584,7 @@ table.t td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tab
 
   <!-- ============ 8. nicho ============ -->
   <section class="sec">
-    <div class="k">8 · o portão do nicho</div>
+    <div class="k">11 · o portão do nicho</div>
     <h2>Isto é o perfil <span style="color:var(--neon-bright)">eventos</span>. O que os outros veem</h2>
     <p class="leg">Regra 6 do CLAUDE.md: toda tela segue o nicho. Este mockup foi desenhado na Prime e é a versão de
     eventos; a régua é a mesma, o vocabulário e o segundo relógio não.</p>
@@ -458,39 +605,53 @@ table.t td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tab
 
   <!-- ============ 9. perguntas ============ -->
   <section class="sec">
-    <div class="k">9 · antes de eu construir</div>
-    <h2>Quatro perguntas suas</h2>
-    <p class="leg">A regra diz que na dúvida se pergunta. Nenhuma delas trava o resto: se você responder só “pode
-    fazer”, eu sigo pela opção marcada como padrão.</p>
+    <div class="k">12 · antes de eu construir</div>
+    <h2>Seis perguntas suas</h2>
+    <p class="leg">A regra diz que na dúvida se pergunta. Nenhuma trava o resto: se você responder só “pode fazer”,
+    eu sigo pela opção marcada como padrão em cada uma.</p>
     <div class="grade2">
       <div class="bloco pergunta">
-        <h4>1. A escada de dias está certa?</h4>
-        <p>Proposta <b>+3</b>, 1ª tentativa <b>+2</b>, 2ª <b>+4</b>, 3ª <b>+7</b>, 4ª+ <b>+15</b>. Esses números saíram
-        do que a Prime já pratica, não de manual. <b>Padrão:</b> começar assim e deixar o dono ajustar na tela de
-        Empresa.</p>
+        <h4>1. Ligar em ensaio antes de valer?</h4>
+        <p>O motor tem o modo <code>observando</code>: calcula tudo e grava o que <b>teria</b> mandado, sem mandar nada.
+        <b>Padrão:</b> três dias em ensaio na Prime, você olha o volume real, e só então vira <code>ligado</code>.
+        Ninguém recebe push de estreia baseado em palpite meu.</p>
       </div>
       <div class="bloco pergunta">
-        <h4>2. A temperatura: calcular ou tirar?</h4>
-        <p>Hoje ela diz “quente” para 270 de 274. <b>Padrão:</b> calcular do comportamento e deixar o vendedor fixar na
-        mão quando quiser. A alternativa é tirar do card e não fingir que mede.</p>
+        <h4>2. Teto de 15 por dia, agrupado?</h4>
+        <p>Hoje o motor limita 5 leads por vendedor por dia. <b>Padrão:</b> subir para 15 — o tamanho da fila do dia —
+        com um push agrupado de manhã, e push avulso na hora só para cliente esperando resposta e para o 🚨.</p>
       </div>
       <div class="bloco pergunta">
-        <h4>3. O crítico avisa por push?</h4>
-        <p>O lead que vira 🚨 pode notificar o vendedor na hora, e o dono num resumo de segunda no Monday.
-        <b>Padrão:</b> nesta entrega o painel só mostra; o push fica para a entrega de alertas que já está na sua
-        lista.</p>
+        <h4>3. Manoel recebe por onde?</h4>
+        <p>Sem e-mail, sem push e sem Telegram, a escalação pro gestor não chega em ninguém. <b>Padrão:</b> vincular o
+        Telegram dele — é o caminho que já existe e leva dois minutos. A alternativa é ele instalar o app e aceitar
+        push, como os vendedores fizeram.</p>
       </div>
       <div class="bloco pergunta">
-        <h4>4. O mutirão de 54 é seu ou do vendedor?</h4>
-        <p>Encerrar 54 leads em lote é decisão de carteira. <b>Padrão:</b> a lista aparece para o dono e para o gestor,
-        com o nome do vendedor de cada um; o vendedor pode encerrar os dele, mas não os dos outros.</p>
+        <h4>4. WhatsApp só no crítico?</h4>
+        <p>Passar alerta interno pelo chip que fala com cliente é tráfego no número que sustenta a receita.
+        <b>Padrão:</b> WhatsApp só no 🚨 e no resumo do gestor; push e e-mail no resto. Se você quiser tudo por
+        WhatsApp, dá — só quero que a escolha seja sua.</p>
+      </div>
+      <div class="bloco pergunta">
+        <h4>5. A escada de dias está certa?</h4>
+        <p>Proposta <b>+3</b>, 1ª tentativa <b>+2</b>, 2ª <b>+4</b>, 3ª <b>+7</b>, 4ª+ <b>+15</b>, e os alertas em
+        <b>0 / 24h / 48h / 72h</b> como você escreveu. <b>Padrão:</b> começar assim e deixar você ajustar na tela de
+        Empresa, sem depender de mim.</p>
+      </div>
+      <div class="bloco pergunta">
+        <h4>6. A temperatura: calcular ou tirar?</h4>
+        <p>Hoje ela diz “quente” para <b>270 de 274</b> leads. <b>Padrão:</b> calcular do comportamento, com o vendedor
+        podendo fixar na mão. A alternativa honesta é tirar do card em vez de fingir que mede.</p>
       </div>
     </div>
   </section>
 
   <footer class="fim">
     <span><b>Medido em:</b> Prime Eventos (conta 34) e ZAQ (conta 3), leitura de produção em 07/09/2026 — nenhuma escrita.</span>
-    <span><b>Fica de fora desta entrega:</b> push de alerta, temperatura calculada se você preferir tirar, e o perfil recorrente.</span>
+    <span><b>Já existe e só precisa ser ligado:</b> o motor de cobrança, a escalação, o teto por vendedor, a janela de expediente e o push no app.</span>
+    <span><b>É construção nova:</b> os quatro degraus, a fila do dia, o painel da gestão por vendedor, o histórico de reagendamento e o mutirão de estreia.</span>
+    <span><b>Fica de fora desta entrega:</b> o perfil recorrente (ZAQ e as outras), e o ranking de recorrência só passa a valer na segunda semana.</span>
     <span><b>Leva aviso de novidade</b> (regra 5) mirado no público <code>eventos</code>, para dono, gestor e vendedor.</span>
   </footer>
 

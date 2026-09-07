@@ -461,3 +461,92 @@ def test_template_esconde_o_seletor_quando_a_conta_tem_um_chip_so():
     html = _render(um, "leads_chip")["relatorios"]
     assert "CP Thiago" not in html and "Status: todos" not in html
     assert "Pedro" in html, "o filtro de vendedor não podia sumir junto"
+
+
+# ------------------------------------- o período recorta a ENTRADA DO LEAD
+#
+# Em 07/09/2026 o dono abriu esta aba com "Este mês" marcado, viu a coluna
+# Orçamento inteira em "—" e perguntou por que, já que o funil mostrava quatro
+# orçamentos feitos no mês. Nada estava quebrado: dos quatro, dois eram de leads
+# que entraram em 15/08 (fora do período, que filtra `p.criado_em`) e dois eram de
+# leads cadastrados na mão, sem conversa nenhuma — esses não entram nesta aba em
+# período nenhum, porque a aba é de quem chegou POR UM CHIP.
+#
+# O filtro continua o mesmo de propósito: é um relatório de entrada por chip, e a
+# mediana de espera ao lado mede esses mesmos leads. O que mudou é a tela DIZER o
+# que ela recorta. Os dois testes abaixo prendem as duas metades: o
+# comportamento (inalterado) e o rótulo (novo).
+
+def _lead_em(pool, conta, nome, quando, *, orcamento=None):
+    """Um lead com data de entrada escolhida — `_lead` fixa tudo em T0."""
+    pid = _lead(pool, conta, nome=nome, entrou_min=0, resp_min=5, orcamento=orcamento)
+    with pool.connection() as c:
+        c.execute("update prospeccao set criado_em=%s where id=%s", (quando, pid))
+        c.commit()
+    return pid
+
+
+def test_periodo_recorta_pela_entrada_do_lead_e_nao_pela_data_do_orcamento(pool, cen):
+    """O caso do dono, reproduzido: orçamento novo em lead velho fica de fora.
+
+    Datas relativas ao relógio real de propósito — "este mês" é sempre o mês
+    corrente, e uma data fixa faria o teste passar hoje e falhar em outro mês.
+    """
+    from datetime import datetime as _dt
+    agora = _dt.now(timezone.utc)
+    _lead_em(pool, cen["conta"], "Entrou este mes", agora, orcamento=None)
+    _lead_em(pool, cen["conta"], "Entrou faz tempo", agora - timedelta(days=60),
+             orcamento=21)
+    d = rel._dados_leads_chip(pool, cen["conta"], "mes", "", "", "")
+    nomes = [l["lead"] for l in d["linhas"]]
+    assert "Entrou este mes" in nomes
+    assert "Entrou faz tempo" not in nomes, (
+        "o período filtra p.criado_em; lead de 60 dias atrás não pode entrar "
+        "só porque o orçamento dele é novo")
+    assert _metrica(d, "Viraram orçamento") == "0", (
+        "a métrica tem que contar o mesmo universo da tabela")
+
+
+def test_a_coluna_de_orcamento_diz_que_e_do_lead(pool, cen):
+    """"Orçamento" sozinho lia-se como "orçamentos do período". É do LEAD."""
+    _lead(pool, cen["conta"], nome="A", entrou_min=0, resp_min=10)
+    col = next(c for c in _rel(pool, cen["conta"])["colunas"]
+               if c["chave"] == "orcamento")
+    assert col["rotulo"] == "Orçamento do lead"
+
+
+def test_esta_aba_diz_que_o_periodo_e_a_entrada_do_lead(pool, cen):
+    _lead(pool, cen["conta"], nome="A", entrou_min=0, resp_min=10)
+    assert _rel(pool, cen["conta"])["periodo_label"] == "leads que entraram em"
+
+
+def test_so_esta_aba_declara_rotulo_de_periodo():
+    """A mudança é DESTA aba, não das nove.
+
+    Lido da fonte porque as outras abas pedem tabelas que este arquivo não cria
+    (`eventos_agenda`, `titulos`, `contratos`), e subir o schema inteiro só pra
+    conferir a ausência de uma chave custaria mais do que vale. O par deste teste
+    é `test_template_mantem_periodo_generico_onde_nao_ha_rotulo`, que prova o
+    outro lado: sem a chave, o template escreve "período:".
+    """
+    import inspect
+    fonte = inspect.getsource(rel)
+    assert fonte.count('"periodo_label"') == 1, (
+        "outra aba passou a declarar periodo_label — se for de propósito, "
+        "atualize este teste e o do template")
+
+
+# --------------------------------------------- e o rótulo na tela e no PDF
+
+def test_template_escreve_o_rotulo_do_periodo_desta_aba():
+    com = dict(_LEADS_FAKE, periodo_label="leads que entraram em")
+    for nome, html in _render(com, "leads_chip").items():
+        assert "leads que entraram em: Este mês" in html, f"{nome}: rótulo não saiu"
+        assert "período: Este mês" not in html, (
+            f"{nome}: o rótulo genérico continuou junto do específico")
+
+
+def test_template_mantem_periodo_generico_onde_nao_ha_rotulo():
+    """A mutação óbvia — trocar o rótulo pra todo mundo — morre aqui."""
+    for nome, html in _render(_LEADS_FAKE, "leads_chip").items():
+        assert "período: Este mês" in html, f"{nome}: o rótulo padrão sumiu"

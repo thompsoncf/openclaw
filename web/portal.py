@@ -6899,7 +6899,12 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
            aria-label="Filtrar as linhas mostradas" autocomplete="off">
     {% endif %}
     {% if dados.sem_periodo %}<span class="mut">mostra tudo que está em aberto — o período aqui não filtra</span>
-    {% else %}<span class="mut">período: {{ periodo_rotulo }}</span>{% endif %}
+    {# `periodo_label` deixa o relatório dizer O QUE o período recorta. Quase todos
+       filtram pela data do próprio registro e ficam no "período:" genérico; "Leads
+       do chip" filtra pela data de ENTRADA DO LEAD, e sem dizer isso a coluna de
+       orçamento parecia vazia por defeito. Autoescape está desligado neste
+       template (ver o comentário da linha da ação), daí o `|e`. #}
+    {% else %}<span class="mut">{{ (dados.periodo_label or 'período')|e }}: {{ periodo_rotulo }}</span>{% endif %}
     <span style="flex:1"></span>
     <a class="rel-pdf" href="/painel/relatorios/pdf?tipo={{ tipo }}&periodo={{ periodo }}{% if dados.filtro_extra %}&status={{ dados.filtro_extra.chip_sel if dados.filtro_extra.chips else dados.filtro_extra.status_sel }}&vendedor={{ dados.filtro_extra.vendedor_sel }}&q={{ dados.filtro_extra.busca_sel|urlencode }}{% if dados.filtro_extra.especies %}&especie={{ dados.filtro_extra.especie_sel }}{% endif %}{% endif %}{% if de %}&de={{ de }}{% endif %}{% if ate %}&ate={{ ate }}{% endif %}" target="_blank" rel="noopener">🖨️ Exportar PDF</a>
   </form>
@@ -7328,7 +7333,9 @@ _RELATORIO_PDF = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8
       <div class="t1">{{ dados.label }}</div>
       <div class="t2">{{ empresa_nome }}{% if cnpj_fmt %} · CNPJ {{ cnpj_fmt }}{% endif %}</div>
       {% if endereco_fmt %}<div class="t2">{{ endereco_fmt }}</div>{% endif %}
-      <div class="t2">período: {{ periodo_rotulo }}</div>
+      {# mesmo rótulo da tela: o PDF é o que sai da sala impresso, e ele não pode
+         dizer "período" onde a tela diz "leads que entraram em" #}
+      <div class="t2">{{ (dados.periodo_label or 'período')|e }}: {{ periodo_rotulo }}</div>
     </div>
     <div class="dir">Gerado em {{ gerado_em }}<br>Zaq · Relatórios</div>
   </div>

@@ -30,6 +30,7 @@ from contas import equipe as eq
 from db.conexao import get_pool
 from finance import agenda as _ag
 from finance import empresa as emp
+from finance import periodo as _per
 from finance import models as mod
 from finance import vendas
 from web.portal import _render, _env, conta_logada, brl as _brl, _mascara_cnpj
@@ -38,35 +39,15 @@ _log = logging.getLogger("painel.relatorios")
 
 router = APIRouter()
 
-PERIODOS = [
-    ("mes", "Este mês"),
-    ("mes_passado", "Mês passado"),
-    ("90d", "Últimos 90 dias"),
-    ("ano", "Este ano"),
-    ("todos", "Todo o período"),
-    # "Período específico" NÃO entra aqui, e não é esquecimento: as outras oito
-    # abas chamam `_intervalo(periodo)` sem `de`/`ate`, então escolher datas ali
-    # cairia calado no mês corrente — filtro que mente é pior que filtro que não
-    # existe. Quando alguma delas precisar, é só passar os dois argumentos.
-]
-
-# A pílula Agenda tem a sua própria lista, e o motivo é que ela olha pro outro
-# lado do tempo. Os presets acima terminam todos em HOJE porque nasceram pra
-# Vendas e Contas pagas, que são histórico. A agenda de um salão é o contrário:
-# medido na Prime em 31/08/2026, 38 dos 60 compromissos estavam no FUTURO, 13
-# deles em 2027 — e "Este mês" e "Este ano" mostravam os mesmos 22. Dezembro
-# tinha 8 festas e não existia jeito de pedir dezembro: ou 22, ou os 60 de
-# "Todo o período".
-PERIODOS_AGENDA = [
-    ("mes", "Este mês"),
-    ("mes_passado", "Mês passado"),
-    ("prox30", "Próximos 30 dias"),
-    ("prox90", "Próximos 90 dias"),
-    ("ano", "Este ano"),
-    ("todos", "Todo o período"),
-    ("personalizado", "Período específico…"),
-]
-_PERIODO_ROTULO = dict(PERIODOS) | dict(PERIODOS_AGENDA)
+# O recorte de tempo mora em finance/periodo.py desde que a tela de Origens
+# passou a precisar do MESMO intervalo (inclusive o personalizado). Os nomes
+# privados seguem valendo aqui: o resto do arquivo e os testes usam eles.
+PERIODOS = _per.PERIODOS
+PERIODOS_AGENDA = _per.PERIODOS_AGENDA
+_PERIODO_ROTULO = _per.ROTULO
+_dia = _per.dia
+_fim_do_mes = _per.fim_do_mes
+_intervalo = _per.intervalo
 
 
 def periodos_da_aba(tipo: str) -> list[tuple[str, str]]:
@@ -95,62 +76,6 @@ def _pode_liberar(request: Request) -> bool:
     função de capacidades e não uma cópia da conclusão: a pergunta "quem pode
     liberar" não pode ter duas respostas em duas telas."""
     return bool(eq.caps_do_papel(request.session.get("papel", "dono")).get("gerir"))
-
-
-def _dia(s) -> date | None:
-    """A data que vem do `<input type="date">`: sempre AAAA-MM-DD, nunca o texto
-    que o usuário vê. O navegador mostra dd/mm/aaaa em aparelho brasileiro e
-    manda ISO no formulário — quem formata é ele, não nós."""
-    if isinstance(s, date):
-        return s
-    try:
-        return date.fromisoformat((s or "").strip())
-    except ValueError:
-        return None
-
-
-def _fim_do_mes(d: date) -> date:
-    return (d.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
-
-
-def _intervalo(periodo: str, de=None, ate=None,
-               ate_o_fim: bool = False) -> tuple[date, date]:
-    """O par (início, fim) do período pedido.
-
-    `ate_o_fim` estica "este mês"/"este ano" até o ÚLTIMO dia em vez de parar
-    hoje. Só a pílula Agenda liga isso (decisão do dono em 31/08/2026): num
-    relatório de histórico, "este mês" que vai além de hoje mostraria linha
-    nenhuma; numa agenda, parar em hoje esconde justamente a festa que ainda vai
-    acontecer.
-
-    `de`/`ate` só valem com `periodo='personalizado'`. Data faltando ou torta cai
-    no mês corrente — filtro quebrado não pode virar tela vazia sem explicação.
-    Invertidas (de > ate), são trocadas: é engano de digitação, não pedido.
-    """
-    hoje = date.today()
-    if periodo == "personalizado":
-        d, a = _dia(de), _dia(ate)
-        if d and a:
-            return (a, d) if d > a else (d, a)
-        if d:
-            return d, _fim_do_mes(d)
-        if a:
-            return a.replace(day=1), a
-        return hoje.replace(day=1), _fim_do_mes(hoje) if ate_o_fim else hoje
-    if periodo == "todos":
-        return date(2000, 1, 1), hoje
-    if periodo == "mes_passado":
-        fim = hoje.replace(day=1) - timedelta(days=1)
-        return fim.replace(day=1), fim
-    if periodo == "90d":
-        return hoje - timedelta(days=90), hoje
-    if periodo == "prox30":
-        return hoje, hoje + timedelta(days=30)
-    if periodo == "prox90":
-        return hoje, hoje + timedelta(days=90)
-    if periodo == "ano":
-        return date(hoje.year, 1, 1), date(hoje.year, 12, 31) if ate_o_fim else hoje
-    return hoje.replace(day=1), _fim_do_mes(hoje) if ate_o_fim else hoje  # "mes"
 
 
 def _fmt(d) -> str:

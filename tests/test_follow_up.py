@@ -52,7 +52,10 @@ create table funil_regua (conta_id bigint primary key,
   janela_dias text default '1,2,3,4,5,6', janela_abre time default '08:00',
   janela_fecha time default '19:00', sem_resposta_min int default 120,
   bola_nossa_min int default 240, bola_cliente_min int default 4320,
-  escala_min int default 240, teto_avisos_dia int default 5);
+  escala_min int default 240, teto_avisos_dia int default 5,
+  -- a coluna existe na 177; o stub não a tinha porque nada aqui escrevia
+  -- na tabela até a aba do Follow-up ganhar o interruptor (07/09/2026)
+  atualizado_em timestamptz not null default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text default 'whatsapp', visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
@@ -441,9 +444,14 @@ def test_a_config_le_a_janela_da_regua_e_nao_inventa_outra(c):
 def _tela(**ctx):
     import web.painel_follow_up as pfu  # noqa: F401 — registra o template
     from web.portal import _env
+    # `cfg`, `caps` e `tem_follow_up` entraram em 07/09/2026, quando a tela virou
+    # aba de Prospecção: a barra de abas lê os dois últimos, e o bloco "como
+    # funciona" tira os prazos do `cfg` da conta em vez de escrevê-los no texto.
     base = dict(perfil=EVENTOS, papel="dono", topo=fu.resumo([]), fila=[], sobrando=0,
                 estado="critico", vend_f=None, etapa_f="", vendedores=[], etapas=[],
                 gestao=[], modo="off", rotulo=fu.ROTULO, emoji=fu.EMOJI,
+                cfg=dict(fu._PADRAO), tem_follow_up=True, raio_x_perfil=EVENTOS,
+                caps={"vendas": True, "origens": True, "financeiro": True, "gerir": True},
                 br=pfu._br, tempo=pfu._tempo, adia_max=fu.ADIAMENTOS_ATE_MOTIVO, erro="",
                 resumo_msg=pfu._resumo_msg, quando_curto=pfu._quando_curto)
     t = _env.get_template("follow_up")
@@ -496,10 +504,13 @@ def test_o_vendedor_nao_ve_o_painel_da_gestao():
 
 
 def test_a_tela_avisa_quando_os_avisos_estao_desligados_ou_em_ensaio():
-    assert "desligados" in _tela(modo="off")
-    assert "ensaio" in _tela(modo="observando")
+    """A frase mudou em 07/09/2026 (era "os avisos automáticos estão desligados…
+    ligue na Régua"): agora o interruptor está aqui, e o aviso só diz em que pé
+    a coisa está. O que se checa é o ESTADO dito na tela, não o texto antigo."""
+    assert "Está <b>desligado</b>" in _tela(modo="off")
+    assert "Está em <b>ensaio</b>" in _tela(modo="observando")
     ligado = _tela(modo="ligado")
-    assert "desligados" not in ligado and "ensaio" not in ligado
+    assert "Está <b>desligado</b>" not in ligado and "Está em <b>ensaio</b>" not in ligado
 
 
 def test_o_vocabulario_de_festa_so_aparece_pra_quem_vende_festa():
@@ -518,25 +529,31 @@ def test_a_volta_nao_aceita_endereco_de_fora():
         assert pfu._volta(hostil, "").startswith("/painel/follow-up")
 
 
-def test_a_chave_de_ligar_so_aparece_no_nicho_que_tem_a_tela():
-    """Sem isto o dono da conta de eventos não teria por onde ligar — e o dono de
-    outro nicho veria uma chave que não faz nada."""
-    import web.painel_prospeccao as pp  # noqa: F401 — registra o template
+def test_a_chave_de_ligar_saiu_da_regua_e_o_nicho_continua_valendo():
+    """Era "a chave de ligar só aparece no nicho que tem a tela", e ficava na
+    Régua. Em 07/09/2026 o dono mandou tirá-la de lá — mas a intenção original
+    continua sendo protegida, agora em dois lugares: a Régua não oferece mais a
+    chave a ninguém, e quem não tem a tela não vê nem a ABA (portão
+    `tem_follow_up` na barra), então não há chave sem tela em canto nenhum."""
+    import web.painel_prospeccao as pp
     from web.portal import _env
     t = _env.get_template("prospeccao_regua")
     base = dict(conta=None, aviso=None, etapas=[], conv=[], eventos=[], unidades=[],
                 dias_on={1, 2, 3, 4, 5, 6}, n_mov=0, gerencia=True, request=None,
+                caps={"vendas": True, "origens": True}, raio_x_perfil=EVENTOS,
+                tem_follow_up=True,
                 cfg=dict(fu._PADRAO, gatilhos_modo="off", cobranca_modo="off",
                          janela_abre=time(8), janela_fecha=time(19), teto_avisos_dia=5,
                          sem_resposta_min=120, bola_nossa_min=240, bola_cliente_min=4320,
                          escala_min=240, janela_dias="1,2,3,4,5,6"))
     bloco = t.blocks["conteudo"]
-    com = "".join(bloco(t.new_context(dict(base, tem_follow_up=True))))
-    sem = "".join(bloco(t.new_context(dict(base, tem_follow_up=False))))
-    assert "Follow-up automático" in com and "Follow-up automático" not in sem
-    # e os dois motores antigos continuam lá nos dois casos
-    for html in (com, sem):
-        assert "Gatilhos das etapas" in html and "Cobrança por prazo" in html
+    regua = "".join(bloco(t.new_context(base)))
+    assert "Follow-up automático" not in regua, "a chave voltou pra Régua"
+    # os dois motores que continuam sendo dela
+    assert "Gatilhos das etapas" in regua and "Cobrança por prazo" in regua
+    # e a chave está na tela do Follow-up, com o portão do nicho na aba
+    assert 'action="/painel/follow-up/modo"' in _tela()
+    assert "{% if tem_follow_up %}" in pp._navbar("funil")
 
 
 def test_o_banco_recusa_modo_inventado(c):
@@ -743,3 +760,122 @@ def test_data_vazia_ou_torta_volta_com_recado_e_nao_grava(rota, c):
     r = pfu.follow_up_reagendar(req, lead_id=lead, dias="9999", volta="/painel/follow-up")
     assert r.headers["location"] == "/painel/follow-up?erro=data_invalida"
     assert _marcado(c, lead) is None
+
+
+# ------------------------------------------------- a tela virou aba (07/09/2026)
+
+def test_a_tela_desenha_a_barra_de_abas_da_prospeccao():
+    """O pedido do dono: "follow up e origens faz mais sentido dentro da aba
+    prospecção, por que está tudo relacionado". A barra é a MESMA do funil
+    (`_navbar`), não uma cópia — cópia foi como a aba "Quem atacar" sumiu."""
+    html = _tela()
+    assert '<nav class="pnavbar"' in html
+    assert 'href="/painel/prospeccao"' in html and 'href="/painel/prospeccao/regua"' in html
+    # e é ELA que está acesa
+    assert 'href="/painel/follow-up">📅 Follow-up</a>' in html
+    import re
+    aba = re.search(r'<a class="pnav([^"]*)" href="/painel/follow-up"', html)
+    assert aba and " on" in aba.group(1), "a aba do Follow-up não fica acesa na própria tela"
+
+
+def test_o_interruptor_esta_na_tela_e_nao_manda_mais_pra_regua():
+    """O interruptor saiu da Régua (decisão do dono, 07/09/2026). A tela dizia
+    "ligue na Régua do funil" — mandava a pessoa embora pra ligar o que estava
+    olhando."""
+    html = _tela(modo="off")
+    assert 'action="/painel/follow-up/modo"' in html
+    for rotulo in ("Desligado", "Observando", "Ligado"):
+        assert f'>{rotulo}</button>' in html
+    assert "Régua do funil</a>" not in html, "a tela ainda empurra pra Régua pra ligar"
+
+
+def test_o_vendedor_le_o_estado_mas_nao_liga_nem_desliga():
+    """Ligar o follow-up muda o que a CONTA INTEIRA recebe — é de dono e gestor,
+    a mesma regra que a Régua já aplicava por `gerencia`."""
+    html = _tela(papel="vendedor", modo="observando")
+    assert 'action="/painel/follow-up/modo"' not in html
+    assert "em ensaio" in html          # ele vê em que pé está
+
+
+def test_as_regras_saem_da_config_da_conta_nao_do_texto():
+    """O bloco "como funciona" mostra os prazos DESTA conta. Escrever "3 dias" no
+    texto viraria mentira na primeira conta que mexesse na régua."""
+    html = _tela(cfg=dict(fu._PADRAO, fu_proposta_dias=5, fu_toques=(1, 9), fu_festa_dias=20,
+                          fu_teto_dia=7))
+    assert "cobrar retorno em <b>5 dias</b>" in html
+    assert "<b>1d</b>" in html and "<b>9d</b>" in html
+    assert "<b>20 dias</b>" in html and "<b>7 avisos por dia</b>" in html
+    # os quatro degraus e as duas travas, que ninguém sabia que existiam
+    assert "48h" in html and "vendedor + gestor" in html
+    assert f"<b>{fu.ADIAMENTOS_ATE_MOTIVO} adiamentos seguidos</b>" in html
+    # e o que mais importa saber: o relógio não é o card
+    import re
+    liso = re.sub(r"\s+", " ", html)
+    assert "não encerram alerta nenhum" in liso
+
+
+def test_o_relogio_da_festa_so_aparece_pra_quem_vende_data(monkeypatch):
+    """CLAUDE.md §6: o segundo relógio é do nicho. Hoje só o perfil de eventos
+    tem a tela, mas o texto não pode falar de festa por estar escrito na mão —
+    ele pergunta ao perfil."""
+    assert "sem proposta vence <b>hoje</b>" in _tela(perfil=EVENTOS)
+    assert "sem proposta vence <b>hoje</b>" not in _tela(perfil=RECORRENTE)
+
+
+# ------------------------------------------- ligar/desligar na própria tela
+
+def _modo_no_banco(c):
+    return c.execute("select follow_up_modo from funil_regua where conta_id=%s",
+                     (CONTA,)).fetchone()[0]
+
+
+def _post_modo(rota, valor, papel="dono"):
+    """Chama a rota como o navegador chama: POST com `modo` no formulário."""
+    import asyncio
+    from types import SimpleNamespace
+    pfu, req = rota
+    req = SimpleNamespace(session=dict(req.session, papel=papel),
+                          state=req.state, query_params={})
+
+    async def form():
+        return {"modo": valor}
+    req.form = form
+    return asyncio.run(pfu.follow_up_modo(req))
+
+
+def test_o_dono_liga_o_follow_up_na_propria_tela(rota, c):
+    """O interruptor era da Régua, e a tela dizia "ligue na Régua do funil" —
+    mandava a pessoa embora pra ligar o que ela estava olhando (decisão do dono,
+    07/09/2026)."""
+    pfu, _ = rota
+    fu.config(c, CONTA)
+    c.commit()
+    assert _modo_no_banco(c) == "off"
+    r = _post_modo(rota, "ligado")
+    assert r.status_code == 303 and r.headers["location"] == "/painel/follow-up"
+    assert _modo_no_banco(c) == "ligado"
+    _post_modo(rota, "observando")
+    assert _modo_no_banco(c) == "observando"
+
+
+def test_o_vendedor_nao_liga_nem_desliga(rota, c):
+    """Ligar muda o que a CONTA INTEIRA recebe — a mesma regra que a Régua já
+    aplicava por `gerencia`."""
+    fu.config(c, CONTA)
+    c.execute("update funil_regua set follow_up_modo='ligado' where conta_id=%s", (CONTA,))
+    c.commit()
+    r = _post_modo(rota, "off", papel="vendedor")
+    assert r.status_code == 303
+    assert _modo_no_banco(c) == "ligado", "o vendedor desligou o follow-up da conta"
+
+
+def test_valor_estranho_nao_vira_modo(rota, c):
+    """Só os três de `funil_regua.MODOS`. Um valor torto virando coluna deixaria
+    o motor lendo um estado que ele não sabe interpretar."""
+    from finance import funil_regua as fr
+    fu.config(c, CONTA)
+    c.execute("update funil_regua set follow_up_modo='observando' where conta_id=%s", (CONTA,))
+    c.commit()
+    assert _post_modo(rota, "ligadão").status_code == 303
+    assert _modo_no_banco(c) == "observando"
+    assert fr.MODOS == ("off", "observando", "ligado")

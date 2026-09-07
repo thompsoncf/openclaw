@@ -753,3 +753,42 @@ def test_o_aviso_da_lista_de_espera_e_so_de_quem_vende_festa(pool):
     with pool.connection() as c:
         c.execute((BASE / "217_novidade_lista_espera.sql").read_text(encoding="utf-8")); c.commit()
         assert c.execute("select count(*) from novidades where chave='lista-de-espera-por-data'").fetchone()[0] == 1
+
+# --------------------------- 220: quem é cada número pendente do Raio-X
+
+def _rx_pendencias(pool) -> dict:
+    with pool.connection() as c:
+        c.execute((BASE / "220_novidade_raio_x_pendencias.sql").read_text(encoding="utf-8"))
+        c.commit()
+        r = c.execute("""select tipo, publico, pra_quem, resumo, link, id
+                           from novidades where chave='raio-x-pendencias'""").fetchone()
+    return {"tipo": r[0], "publico": r[1], "pra_quem": list(r[2]), "resumo": r[3],
+            "link": r[4], "id": r[5]}
+
+
+def test_o_aviso_das_pendencias_segue_a_mira_da_propria_tela(pool):
+    """A mesma mira que a 214 deu aos outros avisos do Raio-X: 'servico', porque
+    conta só de produto nem abre a tela."""
+    a = _rx_pendencias(pool)
+    assert a["publico"] == "servico" and sorted(a["pra_quem"]) == ["dono", "gestor"]
+    assert a["link"] == "/painel/raio-x" and a["tipo"] == "novidade" and a["resumo"]
+
+
+def test_o_aviso_das_pendencias_nao_vai_pro_vendedor(pool):
+    """O vendedor tem o Raio-X dele no app, que não tem esta tabela."""
+    _rx_pendencias(pool)
+    for conta in (1, 2):        # eventos e consultoria: as duas vendem serviço
+        dono = {n["chave"] for n in nv.listar(pool, conta, papel="dono")}
+        vend = {n["chave"] for n in nv.listar(pool, conta, papel="vendedor")}
+        assert "raio-x-pendencias" in dono and "raio-x-pendencias" not in vend
+    # conta sem nicho não declarou o que vende: fica fora, como os outros do Raio-X
+    assert "raio-x-pendencias" not in {n["chave"] for n in nv.listar(pool, 3, papel="dono")}
+
+
+def test_o_aviso_das_pendencias_sai_no_site(pool):
+    _rx_pendencias(pool)
+    assert "raio-x-pendencias" in {n["chave"] for n in nv.publicas(pool)}
+
+
+def test_reaplicar_a_220_nao_duplica(pool):
+    assert _rx_pendencias(pool)["id"] == _rx_pendencias(pool)["id"]

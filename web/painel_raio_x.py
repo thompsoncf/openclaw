@@ -155,6 +155,26 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
 .rx-tab{overflow-x:auto}
 .rx-dado{border:1px solid var(--azul-borda);background:var(--azul-fundo);border-radius:10px;padding:.55rem .7rem;font:400 .7rem/1.5 var(--mono);color:var(--azul)}
 .rx-ey{font:500 .66rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);margin:.2rem 0 -.4rem}
+
+/* 05/09/2026: "3 em rascunho" não dizia QUAL — clique no número, aparece quem é */
+.rx-vend .n.clic{cursor:pointer}
+.rx-vend .n.clic b{border-bottom:1.5px dashed currentColor;padding-bottom:1px}
+.rx-vend .n.clic:hover b{border-bottom-style:solid}
+.rx-vend .n .cv{font-size:.62rem;opacity:.7;margin-left:.15rem}
+.pend-row td{padding:0;border-bottom:1px solid var(--line)}
+.pend-row.fechada{display:none}
+.pend{padding:.5rem .9rem .7rem 2.2rem;background:var(--bg-2)}
+.pend-item{display:flex;align-items:center;gap:.6rem;padding:.4rem 0;border-top:1px dashed var(--line)}
+.pend-item:first-child{border-top:0}
+.pend-nome{flex:1;min-width:0;font-size:.8rem;color:var(--text)}
+.pend-meta{font-size:.7rem;color:var(--text-faint);white-space:nowrap}
+.pend-acoes{display:flex;gap:.35rem;flex:none}
+.pend-btn{display:inline-flex;align-items:center;gap:.3rem;font-size:.7rem;font-weight:600;
+  border-radius:7px;padding:.22rem .5rem;text-decoration:none;border:1px solid var(--line);
+  color:var(--text-dim);background:var(--surface)}
+.pend-btn.doc{border-color:var(--azul-borda);color:var(--azul);background:var(--azul-fundo)}
+.pend-btn.zap{border-color:var(--neon-borda);color:var(--neon-bright);background:var(--neon-fundo)}
+.pend-mais{font-size:.72rem;color:var(--text-faint);padding:.3rem 0 0}
 </style>
 <div class="rx">
   <div>
@@ -227,6 +247,12 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
   <script>
     function rxEnviar(){document.getElementById('rx-form').submit();}
     function rxPeriodo(s){var d=document.getElementById('rx-datas');if(s.value==='datas'){d.hidden=false;}else{rxEnviar();}}
+    function rxTogg(id){
+      var row=document.getElementById(id);if(!row)return;
+      var cv=document.getElementById(id+'-cv');
+      var fechada=row.classList.toggle('fechada');
+      if(cv)cv.textContent=fechada?'▾':'▴';
+    }
   </script>
 
   {% if p %}
@@ -253,7 +279,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
   {% endif %}
 
   {% if d.vendedores %}
-  <div class="rx-ey">Por vendedor · {{ d.rotulo }}</div>
+  <div class="rx-ey">Por vendedor · {{ d.rotulo }} — clique num número sublinhado pra ver quem é</div>
   <div class="rx-tab"><table class="rx-vend">
     <tr><th>Vendedor</th><th class="n">Leads</th><th class="n">1ª resposta</th><th class="n">Propostas</th><th class="n">Rascunho</th><th class="n">Toques</th><th class="n">Parou na 1ª</th><th class="n">Responda hoje</th><th>Contratos</th></tr>
     {% for v in d.vendedores %}{% set s = v.semana %}
@@ -261,11 +287,38 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       <td class="n">{{ s.leads }}</td>
       <td class="n {{ rxd.cor('primeira', s) if s.primeira_min is not none else '' }}">{{ fmt_min(s.primeira_min) }}{% if s.primeira_n %} <small>({{ s.primeira_em_5 }}/{{ s.primeira_n }})</small>{% endif %}</td>
       <td class="n">{{ s.propostas_enviadas }}</td>
-      <td class="n {{ 'ruim' if s.rascunhos else '' }}">{{ s.rascunhos }}</td>
+      <td class="n {{ 'ruim' if s.rascunhos else '' }}{{ ' clic' if s.rascunhos_itens }}" {% if s.rascunhos_itens %}onclick="rxTogg('rx-{{ v.id }}-rasc')"{% endif %}><b>{{ s.rascunhos }}</b>{% if s.rascunhos_itens %}<span class="cv" id="rx-{{ v.id }}-rasc-cv">▾</span>{% endif %}</td>
       <td class="n">{{ s.toques }}</td>
-      <td class="n {{ 'ruim' if s.paradas_1a > 5 else 'amb' if s.paradas_1a else 'ok' }}">{{ s.paradas_1a }}</td>
+      <td class="n {{ 'ruim' if s.paradas_1a > 5 else 'amb' if s.paradas_1a else 'ok' }}{{ ' clic' if s.paradas_1a_itens }}" {% if s.paradas_1a_itens %}onclick="rxTogg('rx-{{ v.id }}-par')"{% endif %}><b>{{ s.paradas_1a }}</b>{% if s.paradas_1a_itens %}<span class="cv" id="rx-{{ v.id }}-par-cv">▾</span>{% endif %}</td>
       <td class="n"><b>{{ v.hoje }}</b></td>
-      <td>{% if s.contratos %}<span class="ok">{{ s.contratos|length }} · {{ brl(s.contratos_valor) }}</span>{% elif s.sem_assinar %}<span class="amb">{{ s.sem_assinar|length }} sem assinar</span>{% else %}—{% endif %}</td></tr>
+      {# CONTRATO ASSINADO E ESPERA DE ASSINATURA CONVIVEM. Era `elif`: quem
+         fechou um contrato no período perdia de vista os aprovados que ainda não
+         assinaram — justo o que o dono foi procurar aqui. #}
+      <td>{% if s.contratos %}<span class="ok">{{ s.contratos|length }} · {{ brl(s.contratos_valor) }}</span>{% endif %}
+        {%- if s.sem_assinar %}{% if s.contratos %} · {% endif %}<span class="amb clic" onclick="rxTogg('rx-{{ v.id }}-ass')"><b>{{ s.sem_assinar|length }}</b> sem assinar</span> <span class="cv" id="rx-{{ v.id }}-ass-cv">▾</span>
+        {%- elif not s.contratos %}—{% endif %}</td></tr>
+    {% if s.rascunhos_itens %}
+    <tr class="pend-row fechada" id="rx-{{ v.id }}-rasc"><td colspan="9"><div class="pend">
+      {% for i in s.rascunhos_itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}</div>
+        <div class="pend-meta">há {{ i.dias }} dia{{ 's' if i.dias != 1 }}</div>
+        <div class="pend-acoes"><a class="pend-btn doc" href="/painel/servicos?abrir={{ i.orcamento_id }}">📄 abrir</a>{% if i.conversa_id %}<a class="pend-btn zap" href="/painel/prospeccao/comunicacao?aba={{ i.aba }}&abrir={{ i.conversa_id }}">💬 conversa</a>{% endif %}</div></div>{% endfor %}
+    </div></td></tr>
+    {% endif %}
+    {% if s.paradas_1a_itens %}
+    <tr class="pend-row fechada" id="rx-{{ v.id }}-par"><td colspan="9"><div class="pend">
+      {% for i in s.paradas_1a_itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}</div>
+        <div class="pend-meta">esperando há {{ i.horas }}h</div>
+        <div class="pend-acoes">{% if i.conversa_id %}<a class="pend-btn zap" href="/painel/prospeccao/comunicacao?aba={{ i.aba }}&abrir={{ i.conversa_id }}">💬 conversa</a>{% endif %}</div></div>{% endfor %}
+      {% if s.paradas_1a > s.paradas_1a_itens|length %}<div class="pend-mais">+ {{ s.paradas_1a - s.paradas_1a_itens|length }} outro(s) — lista completa em Prospecção, filtrada por {{ v.primeiro_nome }}</div>{% endif %}
+    </div></td></tr>
+    {% endif %}
+    {% if s.sem_assinar %}
+    <tr class="pend-row fechada" id="rx-{{ v.id }}-ass"><td colspan="9"><div class="pend">
+      {% for i in s.sem_assinar %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}</div>
+        <div class="pend-meta">{{ brl(i.valor_centavos) }} · há {{ i.dias }} dia{{ 's' if i.dias != 1 }}</div>
+        <div class="pend-acoes"><a class="pend-btn doc" href="/painel/servicos?abrir={{ i.orcamento_id }}">📄 abrir</a>{% if i.conversa_id %}<a class="pend-btn zap" href="/painel/prospeccao/comunicacao?aba={{ i.aba }}&abrir={{ i.conversa_id }}">💬 conversa</a>{% endif %}</div></div>{% endfor %}
+    </div></td></tr>
+    {% endif %}
     {% endfor %}
   </table></div>
   {% endif %}

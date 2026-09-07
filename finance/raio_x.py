@@ -166,6 +166,19 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
             select min(o.criado_em) from orcamentos o join prospeccao p on p.orcamento_id = o.id
              where p.conta_id = %s and p.vendedor_id = %s and o.status = 'rascunho'""",
             (conta_id, membro_id)).fetchone()[0]
+        # QUAIS rascunhos, não só quantos (05/09/2026): "3 em rascunho" não dizia
+        # pra quem — pra saber, era abrir Serviços e procurar. `orcamento_id` vai
+        # pro deep-link que Serviços já aceita (?abrir=), `conversa_id`/`canal` pro
+        # que Comunicação já aceita — os dois já existiam pra outras telas.
+        rascunhos_itens = c.execute("""
+            select coalesce(nullif(o.cliente, ''), p.contato, p.empresa, 'cliente'), o.id, o.criado_em,
+                   (select cv.id from conversas cv where cv.prospeccao_id = p.id
+                     order by (cv.canal = 'whatsapp') desc, cv.criado_em desc limit 1),
+                   (select cv.canal from conversas cv where cv.prospeccao_id = p.id
+                     order by (cv.canal = 'whatsapp') desc, cv.criado_em desc limit 1)
+              from orcamentos o join prospeccao p on p.orcamento_id = o.id
+             where p.conta_id = %s and p.vendedor_id = %s and o.status = 'rascunho'
+             order by o.criado_em limit 8""", (conta_id, membro_id)).fetchall()
         # toque = mensagem nossa mandada quando a anterior da conversa também era
         # nossa (o cliente não tinha respondido). É o "insistiu".
         toques = c.execute("""
@@ -195,6 +208,27 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
                and (select count(*) from mensagens m where m.conversa_id = in_.cid
                       and m.direcao = 'out' and m.criado_em > coalesce(in_.ult_in, '2000-01-01')) = 1""",
             (conta_id, membro_id, list(ABERTOS), fim)).fetchone()[0]
+        # A MESMA CONTA, com o nome de quem tá esperando: sem isto, "2 parou na 1ª"
+        # não dizia se era a Beatriz ou a Larissa — o dono tinha que abrir a Fila e
+        # procurar quem não teve resposta. `conversa_id` vai direto pro deep-link
+        # que Comunicação já usa (?abrir=).
+        paradas_itens = c.execute("""
+            with in_ as (
+              select cv.id as cid, cv.canal,
+                     coalesce(nullif(o2.cliente, ''), p.contato, p.empresa, 'cliente') as nome,
+                     max(ms.criado_em) filter (where ms.direcao = 'in') as ult_in,
+                     max(ms.criado_em) as ult
+                from conversas cv join prospeccao p on p.id = cv.prospeccao_id
+                join mensagens ms on ms.conversa_id = cv.id
+                left join orcamentos o2 on o2.id = p.orcamento_id
+               where cv.conta_id = %s and p.vendedor_id = %s and p.status = any(%s)
+               group by cv.id, cv.canal, o2.cliente, p.contato, p.empresa)
+            select nome, cid, canal, ult from in_
+             where ult > coalesce(ult_in, '2000-01-01') and ult < %s - interval '24 hours'
+               and (select count(*) from mensagens m where m.conversa_id = in_.cid
+                      and m.direcao = 'out' and m.criado_em > coalesce(in_.ult_in, '2000-01-01')) = 1
+             order by ult limit 8""",
+            (conta_id, membro_id, list(ABERTOS), fim)).fetchall()
         assinados = c.execute("""
             select coalesce(nullif(o.cliente, ''), p.contato, p.empresa, 'cliente'), c.valor_centavos, c.assinado_em
               from contratos c join orcamentos o on o.id = c.orcamento_id
@@ -203,12 +237,21 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
                and c.assinado_em >= %s and c.assinado_em < %s
              order by c.assinado_em desc""", (conta_id, membro_id, ini, fim)).fetchall()
         sem_assinar = c.execute("""
-            select coalesce(nullif(o.cliente, ''), p.contato, p.empresa, 'cliente'), o.primeiro_ano_centavos, o.aprovada_em
+            select coalesce(nullif(o.cliente, ''), p.contato, p.empresa, 'cliente'), o.primeiro_ano_centavos,
+                   o.aprovada_em, o.id,
+                   (select cv.id from conversas cv where cv.prospeccao_id = p.id
+                     order by (cv.canal = 'whatsapp') desc, cv.criado_em desc limit 1),
+                   (select cv.canal from conversas cv where cv.prospeccao_id = p.id
+                     order by (cv.canal = 'whatsapp') desc, cv.criado_em desc limit 1)
               from orcamentos o join prospeccao p on p.orcamento_id = o.id
              where p.conta_id = %s and p.vendedor_id = %s and o.aprovada_em is not null
                and not exists (select 1 from contratos c where c.orcamento_id = o.id and c.status = 'assinado')
              order by o.aprovada_em""", (conta_id, membro_id)).fetchall()
     n_5 = sum(1 for m in resp if m <= META_PRIMEIRA_MIN)
+
+    def _aba(canal):
+        return "emails" if canal == "email" else "conversas"
+
     return {
         "ini": ini, "fim": fim,
         "leads": int(leads), "leads_com_data": int(com_data), "leads_sem_tipo": int(sem_tipo),
@@ -217,11 +260,18 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
         "primeira_min_anterior": _mediana(resp_ant),
         "propostas_enviadas": int(enviadas), "rascunhos": int(rascunhos),
         "rascunho_dias": ((fim - rascunho_mais_velho).days if rascunho_mais_velho else 0),
+        "rascunhos_itens": [{"nome": n, "orcamento_id": oid, "dias": (fim - em).days if em else 0,
+                             "conversa_id": cid, "aba": _aba(canal)}
+                            for n, oid, em, cid, canal in rascunhos_itens],
         "toques": int(toques), "paradas_1a": int(paradas),
+        "paradas_1a_itens": [{"nome": n, "conversa_id": cid, "aba": _aba(canal),
+                              "horas": int((fim - ult).total_seconds() // 3600)}
+                             for n, cid, canal, ult in paradas_itens],
         "contratos": [{"nome": n, "valor_centavos": int(v or 0), "em": em} for n, v, em in assinados],
         "contratos_valor": sum(int(v or 0) for _, v, _ in assinados),
-        "sem_assinar": [{"nome": n, "valor_centavos": int(v or 0), "dias": (fim - em).days if em else 0}
-                        for n, v, em in sem_assinar],
+        "sem_assinar": [{"nome": n, "valor_centavos": int(v or 0), "dias": (fim - em).days if em else 0,
+                         "orcamento_id": oid, "conversa_id": cid, "aba": _aba(canal)}
+                        for n, v, em, oid, cid, canal in sem_assinar],
     }
 
 

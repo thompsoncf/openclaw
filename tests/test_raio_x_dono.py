@@ -36,7 +36,8 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   evento_convidados int, orcamento_id bigint, origem text, segmento text, porte text, uf text,
   criado_em timestamptz default now(), atualizado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
-  contato_ref text, contato_nome text, criado_em timestamptz default now());
+  contato_ref text, contato_nome text, canal text default 'whatsapp',
+  criado_em timestamptz default now());
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now());
@@ -439,6 +440,17 @@ def test_a_tela_do_recorrente_nao_fala_de_festa(pool, zaq, monkeypatch):
     monkeypatch.setattr(rxd, "agora_brt", lambda agora=None: AGORA)
     monkeypatch.setattr(rxd, "perfil_da_conta", lambda pool, conta_id: RECORRENTE)
 
+def test_a_tabela_por_vendedor_abre_quem_esta_pendente(pool, cen, monkeypatch):
+    """07/09/2026, pedido do dono: "não consigo saber qual contrato ou proposta
+    está pendente e a conversa pra analisar". Rascunho, parou na 1ª e sem assinar
+    passam a abrir a lista de nomes na própria linha, com os dois deep-links que
+    as outras telas já usam."""
+    import web.painel_raio_x as prx
+    from web import portal
+    monkeypatch.setattr(prx, "conta_logada", lambda req: (cen["conta"], "pj", "Prime"))
+    monkeypatch.setattr(prx, "get_pool", lambda: pool)
+    monkeypatch.setattr(rxd, "agora_brt", lambda agora=None: AGORA)
+
     def fake_render(nome, request, **ctx):
         from fastapi.responses import HTMLResponse
         tpl = portal._env.get_template(nome)
@@ -478,3 +490,47 @@ def test_conta_de_produto_nao_tem_raio_x(pool, monkeypatch):
     monkeypatch.setattr(rxd, "perfil_da_conta", lambda pool, conta_id: rxp.perfil("hortifruti"))
     r = prx.painel_raio_x(_req())
     assert r.status_code == 303 and r.headers["location"] == "/painel"
+
+
+def test_a_tabela_por_vendedor_abre_quem_esta_pendente(pool, cen, monkeypatch):
+    """07/09/2026, pedido do dono: "não consigo saber qual contrato ou proposta
+    está pendente e a conversa pra analisar". Rascunho, parou na 1ª e sem assinar
+    passam a abrir a lista de nomes na própria linha, com os dois deep-links que
+    as outras telas já usam."""
+    import web.painel_raio_x as prx
+    from web import portal
+    monkeypatch.setattr(prx, "conta_logada", lambda req: (cen["conta"], "pj", "Prime"))
+    monkeypatch.setattr(prx, "get_pool", lambda: pool)
+    monkeypatch.setattr(rxd, "agora_brt", lambda agora=None: AGORA)
+    monkeypatch.setattr(rxd, "perfil_da_conta", lambda pool, conta_id: EVENTOS)
+
+    def fake_render(nome, request, **ctx):
+        from fastapi.responses import HTMLResponse
+        tpl = portal._env.get_template(nome)
+        bloco = tpl.blocks["conteudo"]
+        return HTMLResponse("".join(bloco(tpl.new_context(dict(ctx, request=request)))))
+    monkeypatch.setattr(prx, "_render", fake_render)
+
+    with pool.connection() as c:
+        o_bia, cv_bia = c.execute(
+            """select p.orcamento_id, (select cv.id from conversas cv where cv.prospeccao_id = p.id)
+                 from prospeccao p where p.conta_id = %s and p.contato = 'Bia'""",
+            (cen["conta"],)).fetchone()
+        o_fabi = c.execute("select orcamento_id from prospeccao where conta_id=%s and contato='Fabi'",
+                           (cen["conta"],)).fetchone()[0]
+
+    html = bytes(prx.painel_raio_x(_req()).body).decode("utf-8")
+    # o rascunho da Bia (Pedro): abre a proposta e abre a conversa
+    assert f"/painel/servicos?abrir={o_bia}" in html
+    assert f"/painel/prospeccao/comunicacao?aba=conversas&abrir={cv_bia}" in html
+    # o aprovado sem assinar da Fabi (Jaqueline): a Fabi não tem conversa no
+    # cenário, então só o link do documento — e nenhum link quebrado com "None"
+    assert f"/painel/servicos?abrir={o_fabi}" in html
+    assert "abrir=None" not in html
+    # e os números viraram gatilho, cada um com o seu id de linha
+    assert f"rxTogg('rx-{cen['p']}-rasc')" in html
+    # a Jaqueline tem contrato assinado E um aprovado sem assinar: os dois
+    # aparecem na mesma célula. Antes era `elif`, e quem fechava um contrato no
+    # período escondia o que estava esperando assinatura.
+    assert f"rxTogg('rx-{cen['j']}-ass')" in html
+    assert "1 · R$ 5.000</span> · " in html and "sem assinar" in html

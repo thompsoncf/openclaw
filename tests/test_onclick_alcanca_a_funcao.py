@@ -132,3 +132,37 @@ def test_o_balao_do_raio_x_alcanca_a_funcao_do_modulo():
     rx = TELAS["painel_raio_x.py"]
     assert "kbAbrirChat" in _handlers(rx)
     assert "kbAbrirChat" in _globais(rx)
+
+
+def test_nenhum_tojson_cru_dentro_de_atributo_de_aspas_duplas():
+    """`|tojson` dentro de `atributo="…"` corta o atributo — em TODA a web/.
+
+    07/09/2026: o 💬 do Raio-X passava o nome do cliente com `|tojson`, que
+    devolve Markup com aspas DUPLAS de verdade. A primeira delas ENCERRA o
+    atributo, e o navegador recebia `kbAbrirChat(event,12,'conversas',this,` —
+    chamada cortada na vírgula, clique morto sem nada no HTML parecendo errado.
+
+    Não é a primeira vez: o #598 quebrou o mesmo jeito num `onsubmit="confirm(…)"`
+    com a descrição do título, e a saída lá foi `data-confirmar` com `|e`. Duas
+    vezes é padrão, então vira teste — o remédio é `|tojson|forceescape` (ou
+    mandar o valor por `data-…` e ler no JS).
+
+    Só olha atributo de ASPAS DUPLAS: em atributo de aspas simples o `tojson`
+    já é seguro, porque ele escapa a apóstrofe como \\u0027.
+    """
+    culpados = []
+    for arq in sorted(RAIZ.glob("*.py")):
+        # comentário de Jinja fora: é onde o #598 DOCUMENTA a armadilha, citando
+        # o `onsubmit="confirm({{...|tojson}})"` que não se deve escrever. As
+        # quebras de linha ficam, pra o número da linha continuar batendo.
+        texto = re.sub(r"{#.*?#}", lambda m: "\n" * m.group(0).count("\n"),
+                       arq.read_text(encoding="utf-8"), flags=re.S)
+        for m in re.finditer(r'[A-Za-z_-]+="[^"\n]*"', texto):
+            trecho = m.group(0)
+            if "tojson" in trecho and "forceescape" not in trecho:
+                linha = texto.count("\n", 0, m.start()) + 1
+                culpados.append(f"{arq.name}:{linha}  {trecho[:90]}")
+    assert not culpados, (
+        "atributo de aspas duplas com |tojson cru — o atributo termina na "
+        "primeira aspa do JSON e o handler morre:\n" + "\n".join(culpados)
+    )

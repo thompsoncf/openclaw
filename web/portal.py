@@ -2823,7 +2823,7 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
       <label style="font-size:.85rem">Categoria</label>
       {% if categorias %}
       <div id="prod-cat-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin:.35rem 0 .5rem">
-        {% for c in categorias %}<span class="prod-catchip" onclick="prodSetCat(this, {{ c|tojson }})" style="font-size:.76rem;color:#b4b2a9;background:var(--card);border:1.5px solid var(--borda);border-radius:16px;padding:4px 12px;cursor:pointer">{{ c }}</span>{% endfor %}
+        {% for c in categorias %}<span class="prod-catchip" onclick="prodSetCat(this, {{ c|tojson|forceescape }})" style="font-size:.76rem;color:#b4b2a9;background:var(--card);border:1.5px solid var(--borda);border-radius:16px;padding:4px 12px;cursor:pointer">{{ c }}</span>{% endfor %}
       </div>
       {% endif %}
       <input name="categoria" id="prod-f-categoria" placeholder="toque numa sugestão ou digite" oninput="prodCatLimpaSel()" class="prod-inp">

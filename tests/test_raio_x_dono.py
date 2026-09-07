@@ -10,6 +10,7 @@ Banco dedicado e descartável; aplica a 209 (perda_motivo, origem_cliente).
 """
 import os
 from datetime import date, datetime, timedelta
+from html.parser import HTMLParser
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -25,6 +26,36 @@ RECORRENTE = rxp.perfil("consultoria")
 BRT = ZoneInfo("America/Sao_Paulo")
 MIG = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 AGORA = datetime(2026, 9, 7, 10, 0, tzinfo=BRT)      # segunda
+
+
+class _Onclicks(HTMLParser):
+    """Os `onclick=` COMO O NAVEGADOR OS LÊ — não como estão na fonte.
+
+    Existe por causa do bug de 07/09/2026: o nome do cliente ia pro onclick com
+    `|tojson`, que devolve Markup com aspas DUPLAS de verdade. Dentro de um
+    atributo delimitado por aspas duplas, a primeira delas ENCERRA o atributo:
+    o navegador recebia `kbAbrirChat(event,12,'conversas',this,` — chamada
+    cortada na vírgula — e o clique morria num SyntaxError.
+
+    Casar pedaço de texto na fonte não pega isso (o texto casado estava lá,
+    inteiro); só ler o atributo com um parser de HTML pega, porque é ele quem
+    decide onde o atributo termina.
+    """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.valores = []
+
+    def handle_starttag(self, tag, attrs):
+        for k, v in attrs:
+            if k == "onclick" and v:
+                self.valores.append(v)
+
+
+def _onclicks(html: str) -> list[str]:
+    p = _Onclicks()
+    p.feed(html)
+    return p.valores
 
 _SQL = """
 create table contas (id bigserial primary key, nome text, nome_fantasia text,
@@ -524,7 +555,20 @@ def test_a_tabela_por_vendedor_abre_quem_esta_pendente(pool, cen, monkeypatch):
     # BALÃO na própria página (o mesmo do funil, web/balao_conversa.py) — antes
     # navegava pra Comunicação, e voltar recarregava o Raio-X inteiro.
     assert f"/painel/servicos?abrir={o_bia}" in html
-    assert f"kbAbrirChat(event,{cv_bia},'conversas',this," in html
+    # A chamada INTEIRA, lida com parser de HTML — não um pedaço casado na
+    # fonte. O nome vai como JSON dentro de um atributo de aspas duplas, e sem
+    # escapar o `"` o atributo terminava antes da hora: o botão existia, o texto
+    # batia, e clicar não fazia nada. Ver `_Onclicks`.
+    chamadas = [v for v in _onclicks(html) if v.startswith("kbAbrirChat(")]
+    assert chamadas, "nenhum 💬 na lista"
+    import re as _re
+    inteira = _re.compile(
+        r'''^kbAbrirChat\(event,%d,'conversas',this,"[^"]+"\)$''' % cv_bia)
+    assert any(inteira.match(v) for v in chamadas), (
+        "a chamada do balão chegou cortada ao navegador: " + repr(chamadas))
+    for v in _onclicks(html):
+        assert v.count("(") == v.count(")") and v.rstrip().endswith(")"), (
+            f"onclick truncado ou desbalanceado: {v!r} — clique morto")
     assert '<a class="pend-btn zap" href=' not in html, (
         "o 💬 da lista voltou a ser link de navegação em vez de abrir o balão "
         "(o link pra Comunicação continua existindo, mas DENTRO do balão, no "

@@ -312,7 +312,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       <div class="pend-lista">
       {% for i in s.rascunhos_itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}{% if i.fone %}<span class="fone">{{ i.fone }}</span>{% endif %}</div>
         <div class="pend-meta">há {{ i.dias }} dia{{ 's' if i.dias != 1 }}</div>
-        <div class="pend-acoes"><a class="pend-btn doc" href="/painel/servicos?abrir={{ i.orcamento_id }}">📄 abrir</a>{% if i.conversa_id %}<button type="button" class="pend-btn zap" onclick="kbAbrirChat(event,{{ i.conversa_id }},'{{ i.aba }}',this,{{ i.nome|tojson }})">💬 conversa</button>{% endif %}</div></div>{% endfor %}
+        <div class="pend-acoes"><a class="pend-btn doc" href="/painel/servicos?abrir={{ i.orcamento_id }}">📄 abrir</a>{% if i.conversa_id %}<button type="button" class="pend-btn zap" onclick="kbAbrirChat(event,{{ i.conversa_id }},'{{ i.aba }}',this,{{ i.nome|tojson|forceescape }})">💬 conversa</button>{% endif %}</div></div>{% endfor %}
       </div>
     </div></td></tr>
     {% endif %}
@@ -322,7 +322,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       <div class="pend-lista">
       {% for i in s.paradas_1a_itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}{% if i.fone %}<span class="fone">{{ i.fone }}</span>{% endif %}</div>
         <div class="pend-meta{{ ' velha' if i.horas >= 48 }}">{{ rxd.fmt_espera(i.horas) }}</div>
-        <div class="pend-acoes">{% if i.conversa_id %}<button type="button" class="pend-btn zap" onclick="kbAbrirChat(event,{{ i.conversa_id }},'{{ i.aba }}',this,{{ i.nome|tojson }})">💬 conversa</button>{% endif %}</div></div>{% endfor %}
+        <div class="pend-acoes">{% if i.conversa_id %}<button type="button" class="pend-btn zap" onclick="kbAbrirChat(event,{{ i.conversa_id }},'{{ i.aba }}',this,{{ i.nome|tojson|forceescape }})">💬 conversa</button>{% endif %}</div></div>{% endfor %}
       </div>
       {% if s.paradas_1a > s.paradas_1a_itens|length %}<div class="pend-mais">+ {{ s.paradas_1a - s.paradas_1a_itens|length }} outro(s) — lista completa em Prospecção, filtrada por {{ v.primeiro_nome }}</div>{% endif %}
     </div></td></tr>
@@ -333,7 +333,7 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       <div class="pend-lista">
       {% for i in s.sem_assinar %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}{% if i.fone %}<span class="fone">{{ i.fone }}</span>{% endif %}</div>
         <div class="pend-meta">{{ brl(i.valor_centavos) }} · há {{ i.dias }} dia{{ 's' if i.dias != 1 }}</div>
-        <div class="pend-acoes"><a class="pend-btn doc" href="/painel/servicos?abrir={{ i.orcamento_id }}">📄 abrir</a>{% if i.conversa_id %}<button type="button" class="pend-btn zap" onclick="kbAbrirChat(event,{{ i.conversa_id }},'{{ i.aba }}',this,{{ i.nome|tojson }})">💬 conversa</button>{% endif %}</div></div>{% endfor %}
+        <div class="pend-acoes"><a class="pend-btn doc" href="/painel/servicos?abrir={{ i.orcamento_id }}">📄 abrir</a>{% if i.conversa_id %}<button type="button" class="pend-btn zap" onclick="kbAbrirChat(event,{{ i.conversa_id }},'{{ i.aba }}',this,{{ i.nome|tojson|forceescape }})">💬 conversa</button>{% endif %}</div></div>{% endfor %}
       </div>
     </div></td></tr>
     {% endif %}

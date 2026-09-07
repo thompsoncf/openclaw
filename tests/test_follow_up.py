@@ -13,7 +13,7 @@ Banco descartável, `agora` sempre fixo — o motor tem janela de atendimento, e
 teste que dependesse da hora real passaria ou falharia conforme o dia.
 """
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -499,3 +499,39 @@ def test_a_volta_nao_aceita_endereco_de_fora():
     assert pfu._volta("/painel/follow-up", "falhou") == "/painel/follow-up?erro=falhou"
     for hostil in ("https://outro.site", "//evil.com", "/painel/empresa", "", None):
         assert pfu._volta(hostil, "").startswith("/painel/follow-up")
+
+
+def test_a_chave_de_ligar_so_aparece_no_nicho_que_tem_a_tela():
+    """Sem isto o dono da conta de eventos não teria por onde ligar — e o dono de
+    outro nicho veria uma chave que não faz nada."""
+    import web.painel_prospeccao as pp  # noqa: F401 — registra o template
+    from web.portal import _env
+    t = _env.get_template("prospeccao_regua")
+    base = dict(conta=None, aviso=None, etapas=[], conv=[], eventos=[], unidades=[],
+                dias_on={1, 2, 3, 4, 5, 6}, n_mov=0, gerencia=True, request=None,
+                cfg=dict(fu._PADRAO, gatilhos_modo="off", cobranca_modo="off",
+                         janela_abre=time(8), janela_fecha=time(19), teto_avisos_dia=5,
+                         sem_resposta_min=120, bola_nossa_min=240, bola_cliente_min=4320,
+                         escala_min=240, janela_dias="1,2,3,4,5,6"))
+    bloco = t.blocks["conteudo"]
+    com = "".join(bloco(t.new_context(dict(base, tem_follow_up=True))))
+    sem = "".join(bloco(t.new_context(dict(base, tem_follow_up=False))))
+    assert "Follow-up automático" in com and "Follow-up automático" not in sem
+    # e os dois motores antigos continuam lá nos dois casos
+    for html in (com, sem):
+        assert "Gatilhos das etapas" in html and "Cobrança por prazo" in html
+
+
+def test_o_banco_recusa_modo_inventado(c):
+    fu.config(c, CONTA)
+    with pytest.raises(Exception):
+        c.execute("update funil_regua set follow_up_modo='talvez' where conta_id=%s", (CONTA,))
+
+
+def test_o_perfil_de_eventos_e_o_unico_que_liga_a_chave():
+    from web.painel_prospeccao import _tem_follow_up
+    eventos = (34, None, None, None, None, None, None, "eventos")
+    assert _tem_follow_up(eventos) is True
+    assert _tem_follow_up((3, None, None, None, None, None, None, "consultoria")) is False
+    assert _tem_follow_up((9, None, None, None, None, None, None, None)) is False
+    assert _tem_follow_up((1, "curta")) is False        # mock de teste não quebra a tela

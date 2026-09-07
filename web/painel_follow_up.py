@@ -221,7 +221,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     <h1>Follow-up</h1>
     <p class="lede">A próxima ação de cada lead em jogo, proposta pelo sistema e corrigida por você.
     O relógio lê a conversa — mensagem enviada pelo celular também conta. Abrir o card não encerra nada.</p>
-    {% if modo == 'off' %}<p class="lede" style="color:var(--ambar)">Os avisos automáticos estão <b>desligados</b>: a tela mostra o quadro, mas ninguém recebe push nem e-mail. Ligue em <a href="/painel/prospeccao/funil">Funil</a> quando quiser.</p>
+    {% if modo == 'off' %}<p class="lede" style="color:var(--ambar)">Os avisos automáticos estão <b>desligados</b>: a tela mostra o quadro, mas ninguém recebe push nem e-mail. Ligue na <a href="/painel/prospeccao/regua">Régua do funil</a> quando quiser.</p>
     {% elif modo == 'observando' %}<p class="lede" style="color:var(--azul)">Os avisos estão em <b>ensaio</b>: o sistema calcula e grava o que mandaria, sem mandar nada a ninguém.</p>{% endif %}
   </div>
 

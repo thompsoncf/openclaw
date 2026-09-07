@@ -227,7 +227,11 @@ def _tem_follow_up(conta) -> bool:
     """A conta já ganhou o Follow-up? Depende do nicho (CLAUDE.md §6): o segundo
     relógio da régua é a data da festa, e a entrega foi combinada em duas etapas —
     eventos primeiro. O slug sai de `portal.nicho_da_conta`; conta curta (mock de
-    teste) não tem follow-up, que é o lado seguro de errar."""
+    teste) não tem follow-up, que é o lado seguro de errar.
+
+    A MESMA regra, a partir do perfil já calculado, é o `tem_follow_up` que o
+    `_render` injeta em toda tela (é ele que decide a aba). As duas leem
+    `follow_up.PERFIS_COM_TELA` — acrescentar um perfil lá muda as duas."""
     from finance import follow_up as _fu
     from finance import raio_x_perfil as _rxp
     from web.portal import nicho_da_conta
@@ -7709,7 +7713,6 @@ def regua_pagina(request: Request):
                    etapas=linhas, cfg=cfg, conv=conv, eventos=sorted(_fr.EVENTOS.items()),
                    unidades=[(u, r) for u, r, _m in _UNIDADES],
                    dias_on=_fr._dias(cfg), n_mov=n_mov,
-                   tem_follow_up=_tem_follow_up(ctx["conta"]),
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -7731,8 +7734,10 @@ async def regua_config(request: Request):
     fecha = (f.get("fecha") or "19:00").strip()[:5]
     with get_pool().connection() as c:
         _fr.config(c, ctx["conta_id"])          # garante a linha
+        # `follow_up_modo` NÃO entra aqui: ele é salvo na aba Follow-up. Se
+        # continuasse na lista, salvar a Régua (que não tem mais o campo no
+        # formulário) desligaria o follow-up da conta sem ninguém pedir.
         c.execute("""update funil_regua set gatilhos_modo=%s, cobranca_modo=%s,
-                       follow_up_modo=%s,
                        janela_dias=%s, janela_abre=%s, janela_fecha=%s,
                        sem_resposta_min=coalesce(%s, sem_resposta_min),
                        bola_nossa_min=coalesce(%s, bola_nossa_min),
@@ -7741,7 +7746,7 @@ async def regua_config(request: Request):
                        teto_avisos_dia=greatest(1, coalesce(%s, teto_avisos_dia)),
                        atualizado_em=now()
                      where conta_id=%s""",
-                  (modo("gatilhos_modo"), modo("cobranca_modo"), modo("follow_up_modo"),
+                  (modo("gatilhos_modo"), modo("cobranca_modo"),
                    dias, abre, fecha,
                    _par_min(f.get("sem_resposta_n"), f.get("sem_resposta_u")),
                    _par_min(f.get("bola_nossa_n"), f.get("bola_nossa_u")),
@@ -9404,6 +9409,22 @@ _CSS = """<style>
 # ---- barra de navegação do módulo + agilidade no front (prefetch no hover + barra
 # de progresso). O <script> entra no _CSS, então TODA tela de prospecção ganha a
 # navegação instantânea sem recarregar sensação de lentidão; o back segue rendrizando.
+#: As regras da BARRA DE ABAS, sozinhas — sem o resto do CSS desta tela.
+#: Existem como constante porque o Follow-up e o Origens viraram abas daqui
+#: (07/09/2026) e desenham a mesma barra em `web/painel_follow_up.py` e
+#: `web/painel_origens.py`. Uma segunda cópia divergiria: foi assim que a aba
+#: "Quem atacar" sumiu pra quem estava no Funil.
+NAVBAR_CSS = """.pnavbar{display:flex;gap:.4rem;flex-wrap:nowrap;align-items:center;margin:.2rem 0 1.1rem}
+.pnav-rol{display:flex;gap:.4rem;flex-wrap:nowrap;align-items:center;min-width:0;
+  overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.pnav-rol::-webkit-scrollbar{display:none}
+.pnav{flex:none}
+.pnav{display:inline-flex;align-items:center;gap:.35rem;font:inherit;font-size:.84rem;font-weight:600;padding:.45rem .8rem;border-radius:9px;border:1px solid var(--borda);color:var(--txt);background:transparent;text-decoration:none;white-space:nowrap;cursor:pointer;line-height:1;box-sizing:border-box;width:auto;margin:0;-webkit-appearance:none;appearance:none;vertical-align:middle;height:auto}
+.pnav:hover{border-color:var(--verde);color:#fff}
+.pnav.on{color:var(--sobre-verde);background:var(--verde);border-color:var(--verde)}
+.pnav.cfg{margin-left:auto;padding:.45rem .55rem;flex:none}
+"""
+
 _NAV_ASSETS = """<style>
 /* NUNCA quebra linha. Era `flex-wrap:wrap`, e com 8 abas (996px medidos) a última
    descia pra segunda linha assim que o viewport caía abaixo de ~1030px — zoom de 125%
@@ -9414,22 +9435,14 @@ _NAV_ASSETS = """<style>
    Numa caixa só, duas coisas quebravam — o esfumado da borda direita apagaria o próprio
    ⚙️ (que mora encostado ali), e a engrenagem sairia de vista junto com as abas quando a
    pessoa rolasse. Configuração tem que estar sempre alcançável. */
-.pnavbar{display:flex;gap:.4rem;flex-wrap:nowrap;align-items:center;margin:.2rem 0 1.1rem}
-.pnav-rol{display:flex;gap:.4rem;flex-wrap:nowrap;align-items:center;min-width:0;
-  overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
-.pnav-rol::-webkit-scrollbar{display:none}
-.pnav{flex:none}
-.pnav{display:inline-flex;align-items:center;gap:.35rem;font:inherit;font-size:.84rem;font-weight:600;padding:.45rem .8rem;border-radius:9px;border:1px solid var(--borda);color:var(--txt);background:transparent;text-decoration:none;white-space:nowrap;cursor:pointer;line-height:1;box-sizing:border-box;width:auto;margin:0;-webkit-appearance:none;appearance:none;vertical-align:middle;height:auto}
-.pnav:hover{border-color:var(--verde);color:#fff}
-.pnav.on{color:var(--sobre-verde);background:var(--verde);border-color:var(--verde)}
+""" + NAVBAR_CSS + """
 /* Captar Lead: botão de AÇÃO no cabeçalho do Funil, não aba de navegação. Verde
    cheio porque é o call-to-action da tela — abrir o painel de captação. */
 .cap-btn{display:inline-flex;align-items:center;gap:.4rem;font:inherit;font-size:.84rem;
   font-weight:700;padding:.5rem .9rem;border-radius:9px;border:0;cursor:pointer;
   background:var(--verde);color:var(--sobre-verde);white-space:nowrap;flex:none}
 .cap-btn:hover{background:var(--verde2,var(--verde))}
-/* o ⚙️ encostado à direita, separado das abas de trabalho e fora da rolagem */
-.pnav.cfg{margin-left:auto;padding:.45rem .55rem;flex:none}
+/* o ⚙️ encostado à direita: a regra vem no NAVBAR_CSS acima */
 #pnavprog{position:fixed;top:0;left:0;height:3px;width:0;background:var(--verde);box-shadow:0 0 8px var(--verde);z-index:99999;transition:width .3s ease;opacity:0}
 #pnavprog.go{opacity:1}
 /* cercar área no mapa (Captar leads → Google Maps) — acordeão retraído por padrão */
@@ -9509,17 +9522,28 @@ def _navbar(active):
     aberto (?captar=1), então virou botão no cabeçalho do Funil, onde ele age. O link
     ?captar=1 continua funcionando pra quem vem de fora ou tem o atalho salvo.
     """
-    tabs = [("base", "📇 Base", "/painel/prospeccao/base", False),
-            ("campanhas", "📣 Campanhas", "/painel/prospeccao/campanhas", True),
-            ("radar", "🎯 Quem atacar", "/painel/prospeccao/radar", True),
-            ("ia-insta", "✨ IA Insta", "/painel/prospeccao/ia-insta", False),
-            ("comunicacao", "💬 Comunicação", "/painel/prospeccao/comunicacao", False),
-            ("funil", "🔥 Funil", "/painel/prospeccao", False),
-            ("regua", "⏱️ Régua", "/painel/prospeccao/regua", False),
-            ("canais", "⚙️", "/painel/prospeccao/comunicacao?aba=canais", False)]
+    # O 4º campo é a CONDIÇÃO Jinja que decide se a aba aparece (vazio = sempre).
+    # Era um bool "gated" que só sabia dizer "Campanhas"; virou condição quando o
+    # Follow-up e o Origens entraram, cada um com o seu próprio portão.
+    #
+    # A ORDEM É DE USO DIÁRIO, não de nascimento (07/09/2026, pedido do dono):
+    # Funil e Follow-up abrem o dia; a Régua configura-se uma vez e fica no fim.
+    tabs = [("funil", "🔥 Funil", "/painel/prospeccao", ""),
+            ("follow_up", "📅 Follow-up", "/painel/follow-up", "tem_follow_up"),
+            ("comunicacao", "💬 Comunicação", "/painel/prospeccao/comunicacao", ""),
+            ("base", "📇 Base", "/painel/prospeccao/base", ""),
+            ("campanhas", "📣 Campanhas", "/painel/prospeccao/campanhas", "gerencia or caps.vendas"),
+            ("radar", "🎯 Quem atacar", "/painel/prospeccao/radar", "gerencia or caps.vendas"),
+            # Origens é do dono, do gestor e da agência — o vendedor não tem
+            # (`caps.origens` é False pra ele), e a aba some sozinha.
+            ("origens", "📊 Origens", "/painel/origens",
+             "caps.origens and raio_x_perfil and raio_x_perfil.aplica"),
+            ("ia-insta", "✨ IA Insta", "/painel/prospeccao/ia-insta", ""),
+            ("regua", "⏱️ Régua", "/painel/prospeccao/regua", ""),
+            ("canais", "⚙️", "/painel/prospeccao/comunicacao?aba=canais", "")]
     # as abas dentro da caixa que rola; o ⚙️ sai dela (ver o CSS do .pnav-rol)
     out = ['<nav class="pnavbar" aria-label="Prospecção">', '<div class="pnav-rol">']
-    for key, label, href, gated in tabs:
+    for key, label, href, cond_jinja in tabs:
         # .cfg empurra o ⚙️ pra direita (margin-left:auto) e some com o rótulo: quem
         # configura canal vai lá uma vez; quem trabalha usa as outras seis todo dia.
         extra = " cfg" if key == "canais" else ""
@@ -9529,8 +9553,8 @@ def _navbar(active):
         titulo = ' title="Canais" aria-label="Canais"' if key == "canais" else ""
         a = ('<a class="pnav' + cond + extra + '"' + titulo + ' href="' + href + '">'
              + label + '</a>')
-        if gated:  # Campanhas: gestão vê tudo; vendedor vê as em que é responsável
-            a = "{% if gerencia or caps.vendas %}" + a + "{% endif %}"
+        if cond_jinja:
+            a = "{% if " + cond_jinja + " %}" + a + "{% endif %}"
         if key == "canais":       # fecha a caixa que rola ANTES da engrenagem
             out.append("</div>")
         out.append(a)
@@ -15042,8 +15066,10 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div class="sh"><b>Estado</b><span class="mut" style="font-size:.76rem">tudo construído · você decide quando cada parte age</span></div>
     {% for campo, nome, desc in [
         ('gatilhos_modo','Gatilhos das etapas','movem o card sozinhos quando o fato acontece'),
-        ('cobranca_modo','Cobrança por prazo','avisa o vendedor e escala pro gestor')]
-        + ([('follow_up_modo','Follow-up automático','marca a próxima ação de cada lead e cobra quando ela vence')] if tem_follow_up else []) %}
+        ('cobranca_modo','Cobrança por prazo','avisa o vendedor e escala pro gestor')] %}
+    {#- O Follow-up automático SAIU daqui em 07/09/2026, por decisão do dono: ele
+        se liga na própria aba Follow-up. A tela de lá dizia "ligue na Régua do
+        funil" — mandava a pessoa embora pra ligar o que ela estava olhando. -#}
     <div style="display:flex;align-items:center;gap:1rem;padding:.8rem 0;border-top:1px solid var(--borda);flex-wrap:wrap">
       <div style="flex:1;min-width:240px">
         <div style="font-size:.9rem;font-weight:600">{{ nome }}</div>

@@ -394,11 +394,14 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('raio_x','/painel/raio-x','relatorios','Raio-X') }}{% endif %}
   {# Origens (finance/origens): de onde veio o lead e o que virou. Mesmo par que o
      Raio-X, e some em conta só de produto, que não tem funil (CLAUDE.md §6). #}
-  {% if tem_pj and caps.origens and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Origens') }}{% endif %}
+  {#- Origens virou aba de Prospecção (07/09/2026). Continua no menu só pra quem
+      NÃO alcança Prospecção: o convidado da agência, que entra por convite, cai
+      aqui como página inicial e não tem mais nada. Sem esta linha ele fica com o
+      menu vazio na única tela que tem. -#}
+  {% if tem_pj and caps.origens and not caps.vendas and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Origens') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
-  {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'eventos' %}{{ navi('follow_up','/painel/follow-up','prospeccao','Follow-up') }}{% endif %}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes/Fornecedores') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
@@ -442,11 +445,14 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if tem_pj and papel in ('dono','gestor') and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('raio_x','/painel/raio-x','relatorios','Raio-X') }}{% endif %}
   {# Origens (finance/origens): de onde veio o lead e o que virou. Mesmo par que o
      Raio-X, e some em conta só de produto, que não tem funil (CLAUDE.md §6). #}
-  {% if tem_pj and caps.origens and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Origens') }}{% endif %}
+  {#- Origens virou aba de Prospecção (07/09/2026). Continua no menu só pra quem
+      NÃO alcança Prospecção: o convidado da agência, que entra por convite, cai
+      aqui como página inicial e não tem mais nada. Sem esta linha ele fica com o
+      menu vazio na única tela que tem. -#}
+  {% if tem_pj and caps.origens and not caps.vendas and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Origens') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
-  {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'eventos' %}{{ navi('follow_up','/painel/follow-up','prospeccao','Follow-up') }}{% endif %}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes/Fornecedores') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
@@ -7567,6 +7573,13 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
             _perfil = _rxp.perfil(nicho_da_conta(_c))
             ctx["raio_x_perfil"] = _perfil
             ctx.setdefault("motivos_perda", _perfil["motivos"])
+        # A conta já ganhou o Follow-up? Quem decide é `finance.follow_up`, não um
+        # 'eventos' escrito no template: quando o recorrente entrar em
+        # PERFIS_COM_TELA, a aba nasce sozinha nas duas telas que a citam.
+        if "tem_follow_up" not in ctx:
+            from finance import follow_up as _fu
+            ctx["tem_follow_up"] = bool(
+                ctx.get("raio_x_perfil") and ctx["raio_x_perfil"]["chave"] in _fu.PERFIS_COM_TELA)
     if "beta_gratis" not in ctx:
         try:
             from finance import config_app as _cfg

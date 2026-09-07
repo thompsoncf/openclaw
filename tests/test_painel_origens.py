@@ -14,6 +14,8 @@ o que muda o que vale a pena travar com teste:
 import os
 from datetime import date, datetime, timedelta, timezone
 
+import re
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -224,8 +226,12 @@ def test_a_tela_nao_fala_de_dinheiro_de_anuncio(cliente):
         _lead(c, "A3", sinal=datetime.now(timezone.utc), valor=750000)
         c.commit()
     html = cliente.get("/painel/origens").text.lower()
-    for proibido in ("investimento", "cpl", "cac", "roas", " roi", "impressões"):
-        assert proibido not in html, f"{proibido} não é medida do Zaq"
+    # PALAVRA INTEIRA, não pedaço. Com pedaço, "prospeccao/comunicacao" — que
+    # entrou na página em 07/09/2026, quando Origens virou aba de Prospecção —
+    # casa com "cac" e reprova a tela por causa do próprio menu. O que se proíbe
+    # aqui é a MEDIDA da agência aparecer, não a letra.
+    for proibido in ("investimento", "cpl", "cac", "roas", "roi", "impressões"):
+        assert not re.search(rf"\b{proibido}", html), f"{proibido} não é medida do Zaq"
 
 
 def test_a_tela_nao_mostra_texto_de_conversa(cliente):
@@ -288,3 +294,31 @@ def test_a_tela_explica_ao_convidado_o_que_ficou_de_fora(cliente):
     _com_sem_codigo(cliente)
     cliente.estado["papel"] = "convidado"
     assert "fica com a empresa" in cliente.get("/painel/origens").text.lower()
+
+
+# ------------------------------------------------- a tela virou aba (07/09/2026)
+
+def test_quem_trabalha_na_conta_ve_a_barra_de_abas(cliente):
+    """Origens virou aba de Prospecção: quem alcança Prospecção chega por lá."""
+    cliente.estado["papel"] = "gestor"
+    html = cliente.get("/painel/origens").text
+    assert '<nav class="pnavbar"' in html
+    assert 'href="/painel/prospeccao"' in html
+    import re
+    aba = re.search(r'<a class="pnav([^"]*)" href="/painel/origens"', html)
+    assert aba and " on" in aba.group(1), "a aba de Origens não fica acesa na própria tela"
+
+
+def test_o_convidado_nao_ve_barra_de_abas(cliente):
+    """A TRAVA da mudança. O convidado é a agência: `vendas: False`, entra por
+    convite, cai aqui como página inicial e não alcança mais nada (#654, de
+    ontem). Uma barra com sete abas que o gate devolve seria pior que nenhuma —
+    e Origens continua no menu lateral só pra ele, senão ele fica sem caminho."""
+    cliente.estado["papel"] = "convidado"
+    html = cliente.get("/painel/origens").text
+    assert '<nav class="pnavbar"' not in html
+    assert 'href="/painel/prospeccao"' not in html
+    # A outra metade — que ele CONTINUA tendo o item no menu lateral, senão fica
+    # sem caminho nenhum — mora em `test_menu_bate_com_o_gate.py`, que renderiza
+    # o menu de verdade. Aqui a conta vem mockada e o menu sai vazio pra todo
+    # papel, então cobrar isso neste arquivo seria cobrar do fixture.

@@ -19,11 +19,17 @@ Sem banco: é tudo texto de template e função pura.
 import re
 
 import web.painel_conteudo  # noqa: F401 — registra o template da IA Insta no _env
+import web.painel_follow_up  # noqa: F401 — idem, a aba do Follow-up
+import web.painel_origens  # noqa: F401 — idem, a aba de Origens
 from web import painel_prospeccao as pp
 
 # as telas do módulo que desenham a barra, pelo nome no loader do Jinja
 _TELAS = ("prospeccao", "prospeccao_base", "prospeccao_comunicacao",
-          "prospeccao_campanhas", "prospeccao_radar")
+          "prospeccao_campanhas", "prospeccao_radar",
+          # entraram em 07/09/2026, quando viraram abas daqui. Estão nesta lista
+          # justamente pra não repetir a história da cópia: aba nova tem que
+          # aparecer nas oito telas ou o teste abaixo reclama.
+          "follow_up", "origens")
 
 
 def _fonte(nome_template: str) -> str:
@@ -105,8 +111,9 @@ def test_o_atalho_antigo_continua_abrindo_o_painel():
 
 
 # ── o tamanho ──────────────────────────────────────────────────────────────
-def test_sao_sete_abas_mais_a_engrenagem():
-    """Eram 6 + ⚙️ (786px). A Régua entrou e são 7 + ⚙️.
+def test_sao_nove_abas_mais_a_engrenagem():
+    """Eram 6 + ⚙️ (786px). A Régua entrou e foram 7; em 07/09/2026 o Follow-up e o
+    Origens saíram do menu lateral e são 9 + ⚙️.
 
     O aviso do teste anterior valia como aviso, não como proibição: a barra ROLA em
     vez de quebrar (test_a_barra_rola_em_vez_de_quebrar), então uma aba a mais custa
@@ -116,9 +123,14 @@ def test_sao_sete_abas_mais_a_engrenagem():
     função inteira. Se este número subir de novo, pense duas vezes: a próxima
     provavelmente é submenu, não aba."""
     abas = _abas(pp._navbar("funil"))
-    assert len(abas) == 8, f"esperado 7 abas + ⚙️, veio {len(abas)}: {abas}"
+    assert len(abas) == 10, f"esperado 9 abas + ⚙️, veio {len(abas)}: {abas}"
     assert abas[-1] == "⚙️"
     assert "⏱️ Régua" in abas
+    # A ORDEM É DE USO DIÁRIO (pedido do dono, 07/09/2026): o que se abre todo dia
+    # primeiro, o que se configura uma vez por último. Nove abas só cabem porque a
+    # barra rola; a ordem é o que evita ter que rolar.
+    assert abas[0] == "🔥 Funil" and abas[1] == "📅 Follow-up"
+    assert abas.index("⏱️ Régua") == len(abas) - 2
 
 
 # ── o quadro do funil ──────────────────────────────────────────────────────
@@ -165,3 +177,42 @@ def test_a_ficha_do_lead_continua_atendendo_id():
     """E o conserto não pode ter roubado o caminho de quem é dono dele."""
     assert _resolve("/painel/prospeccao/629") == "prospeccao_ficha"
     assert _resolve("/painel/prospeccao/629/status", "POST") == "prospeccao_status"
+
+
+# ── as duas que vieram do menu lateral (07/09/2026) ────────────────────────
+def test_o_follow_up_e_o_origens_sao_abas_daqui():
+    """O pedido do dono: "follow up e origens faz mais sentido dentro da aba
+    prospecção, por que está tudo relacionado". A Régua já morava aqui — eram os
+    dois únicos parentes ainda no menu lateral."""
+    abas = _abas(pp._navbar("funil"))
+    assert "📅 Follow-up" in abas and "📊 Origens" in abas
+    barra = pp._navbar("funil")
+    assert 'href="/painel/follow-up"' in barra and 'href="/painel/origens"' in barra
+
+
+def test_cada_uma_das_duas_leva_o_proprio_portao():
+    """Nem toda conta tem as duas (CLAUDE.md §6). O Follow-up só existe no perfil
+    de eventos; Origens é de quem tem `caps.origens` — o vendedor não tem. Sem o
+    `{% if %}` a aba apareceria e devolveria a pessoa no gate."""
+    barra = pp._navbar("funil")
+    assert "{% if tem_follow_up %}" in barra
+    assert "{% if caps.origens and raio_x_perfil and raio_x_perfil.aplica %}" in barra
+
+
+def test_o_interruptor_do_follow_up_saiu_da_regua():
+    """Decisão do dono em 07/09/2026: "sai da régua e vai pra aba do follow up".
+
+    Duas pontas, e a segunda é a que morde: além de sumir do FORMULÁRIO, o campo
+    tem que sair do UPDATE. Se ficasse só no SQL, salvar a Régua — que não manda
+    mais o campo — gravaria 'off' e desligaria o follow-up da conta sem ninguém
+    pedir. É perda silenciosa, do tipo que a §0 do CLAUDE.md proíbe."""
+    regua = _fonte("prospeccao_regua")
+    assert "follow_up_modo" not in regua, "o interruptor voltou pro formulário da Régua"
+    import inspect
+    # a ATRIBUIÇÃO, não a palavra: o comentário que explica a ausência cita o
+    # campo pelo nome, e é bom que cite.
+    fonte = inspect.getsource(pp.regua_config)
+    assert "follow_up_modo=" not in fonte and 'modo("follow_up_modo")' not in fonte, \
+        "o UPDATE da Régua ainda escreve follow_up_modo — salvar a Régua desliga o follow-up"
+    # e as outras duas continuam lá, que é o que a Régua ainda configura
+    assert "gatilhos_modo" in regua and "cobranca_modo" in regua

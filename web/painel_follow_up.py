@@ -22,7 +22,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from db.conexao import get_pool
 from finance import follow_up as fu
+from finance import funil_regua as fr
 from finance import raio_x_perfil as rxp
+# a barra de abas de Prospecção: o Follow-up virou uma delas em 07/09/2026, e a
+# barra tem que ser a MESMA — `_navbar` é fonte única desde que a cópia escrita à
+# mão no Funil divergiu e escondeu a aba "Quem atacar" de quem estava lá.
+from web.painel_prospeccao import NAVBAR_CSS, _navbar
 from web.portal import _env, _render, conta_logada, nicho_da_conta
 
 router = APIRouter()
@@ -121,7 +126,11 @@ def painel_follow_up(request: Request):
             if (estado == "todos" or x["estado"] == estado)
             and (not etapa_f or x["status"] == etapa_f)]
     fila = fu.ordenar(fila)
-    return _render("follow_up", request, titulo="Follow-up", secao_ativa="follow_up",
+    # `secao_ativa='prospeccao'` e `nav_ativo='follow_up'`: a tela virou ABA de
+    # Prospecção (07/09/2026) — o menu lateral acende Prospecção, e a barra de
+    # abas acende Follow-up.
+    return _render("follow_up", request, titulo="Follow-up", secao_ativa="prospeccao",
+                   nav_ativo="follow_up", cfg=cfg,
                    perfil=perfil, papel=papel, topo=topo, fila=fila[:200],
                    sobrando=max(0, len(fila) - 200), estado=estado, vend_f=vend_f,
                    etapa_f=etapa_f, vendedores=vendedores, etapas=etapas,
@@ -130,6 +139,40 @@ def painel_follow_up(request: Request):
                    br=_br, tempo=_tempo, adia_max=fu.ADIAMENTOS_ATE_MOTIVO,
                    resumo_msg=_resumo_msg, quando_curto=_quando_curto,
                    erro=q.get("erro") or "")
+
+
+@router.post("/painel/follow-up/modo")
+def follow_up_modo(request: Request, modo: str = Form("")):
+    """Liga, ensaia ou desliga o follow-up automático desta conta.
+
+    Era da Régua do funil até 07/09/2026 — e a tela de lá dizia "ligue na Régua",
+    mandando a pessoa embora pra ligar o que ela estava olhando. Grava na hora, no
+    clique: um formulário com "salvar" no topo de uma tela de trabalho é botão
+    pra esquecer de apertar.
+
+    Só dono e gestor. O vendedor não decide o que a conta inteira recebe — a
+    mesma regra da Régua, que já barrava por `gerencia`.
+
+    `def`, e não `async def`: o handler escreve no banco de forma síncrona, e
+    handler async fazendo isso trava o event loop do processo inteiro. Sem o
+    `async`, o FastAPI joga a função na threadpool sozinho — é o que o
+    `follow_up_reagendar` aqui do lado já faz, e o que
+    `tests/test_event_loop_nao_trava.py` cobra de todo handler novo.
+    """
+    conta, _perfil, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if request.session.get("papel", "dono") not in ("dono", "gestor"):
+        return RedirectResponse("/painel/follow-up", status_code=303)
+    modo = (modo or "").strip()
+    if modo not in fr.MODOS:
+        return RedirectResponse("/painel/follow-up", status_code=303)
+    with get_pool().connection() as c:
+        fu.config(c, conta[0])          # garante a linha da régua
+        c.execute("update funil_regua set follow_up_modo=%s, atualizado_em=now() "
+                  " where conta_id=%s", (modo, conta[0]))
+        c.commit()
+    return RedirectResponse("/painel/follow-up", status_code=303)
 
 
 @router.post("/painel/follow-up/reagendar")
@@ -189,6 +232,7 @@ def _volta(volta: str, erro: str) -> str:
 
 
 _TPL = r"""{% extends "base" %}{% block conteudo %}
+<style>""" + NAVBAR_CSS + r"""</style>
 {# o balão de conversa é o MESMO do funil e do Raio-X (web/balao_conversa.py):
    abre ancorado no botão, sem sair da tela e sem perder a fila aberta #}
 <style>{{ balao_css }}</style>
@@ -264,15 +308,77 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
 .fu-nota{font-size:.74rem;color:var(--text-faint);border-left:2px solid var(--line);padding-left:.6rem}
 .fu-erro{font-size:.78rem;color:#F2BDB9;background:var(--coral-fundo);border:1px solid var(--coral-borda);border-radius:8px;padding:.45rem .6rem}
 .fu-vazio{padding:1.4rem .9rem;text-align:center;color:var(--text-faint);font-size:.85rem}
+/* ---- o interruptor que veio da Régua (07/09/2026) ---- */
+.fu-modo{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;
+  border:1px solid var(--line);border-radius:10px;padding:.7rem .85rem;margin:.9rem 0 .2rem}
+.fu-modo .txt{flex:1;min-width:230px}
+.fu-modo .txt b{font-size:.9rem}
+.fu-modo .txt small{display:block;color:var(--text-dim);font-size:.79rem;margin-top:.1rem}
+/* o segmentado: três botões de submit colados, o ativo pintado. São BOTÕES e não
+   rádios porque a escolha grava na hora — sem "salvar" pra esquecer de apertar. */
+.fu-seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;
+  flex:none;margin:0;width:auto}
+.fu-seg button{font:inherit;font-size:.78rem;padding:.34rem .68rem;margin:0;width:auto;
+  border:0;border-right:1px solid var(--line);border-radius:0;background:transparent;
+  color:var(--text-dim);cursor:pointer;line-height:1.3}
+.fu-seg button:last-child{border-right:0}
+.fu-seg button:hover{color:var(--text)}
+.fu-seg button.on{background:var(--neon);color:var(--sobre-verde);font-weight:700}
+.fu-seg button.observando.on{background:var(--azul);color:#04131B}
+.fu-seg button.off.on{background:var(--line);color:var(--text)}
+.fu-selo{font-size:.75rem;border:1px solid var(--line);border-radius:20px;padding:.15rem .55rem;color:var(--text-dim)}
+.fu-selo.ligado{color:var(--neon);border-color:var(--neon-borda);background:var(--neon-fundo)}
+.fu-selo.observando{color:var(--azul);border-color:var(--azul-borda);background:var(--azul-fundo)}
+/* ---- como funciona ---- */
+.fu-ajuda{border:1px solid var(--line);border-radius:10px;margin-top:1.4rem;background:var(--bg-2)}
+.fu-ajuda>summary{cursor:pointer;padding:.7rem .85rem;font-size:.86rem;font-weight:600;list-style:none}
+.fu-ajuda>summary::-webkit-details-marker{display:none}
+.fu-ajuda>summary::before{content:"▸ ";color:var(--text-faint)}
+.fu-ajuda[open]>summary::before{content:"▾ "}
+.fu-ajuda .corpo{padding:0 .85rem .9rem;font-size:.85rem;color:var(--text-dim);line-height:1.6}
+.fu-ajuda h4{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);
+  margin:1rem 0 .4rem;font-weight:600}
+.fu-ajuda b{color:var(--text)}
+.fu-passos{margin:0;padding:0;list-style:none;counter-reset:fp}
+.fu-passos li{counter-increment:fp;position:relative;padding:.45rem 0 .45rem 1.9rem;border-top:1px solid var(--line)}
+.fu-passos li::before{content:counter(fp);position:absolute;left:0;top:.45rem;font:500 .7rem var(--mono);
+  color:var(--neon);border:1px solid var(--neon-borda);border-radius:4px;padding:0 .3rem;line-height:1.5}
+.fu-chips{display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.45rem}
+.fu-chip{font:500 .74rem var(--mono);border:1px solid var(--line);border-radius:7px;
+  padding:.24rem .5rem;color:var(--text-dim);background:var(--bg)}
+.fu-chip b{color:var(--text)}
+.fu-chip.g{border-color:var(--coral-borda);background:var(--coral-fundo);color:var(--coral)}
+.fu-chip.g b{color:var(--coral)}
 </style>
 <div class="fu">
+""" + _navbar("follow_up") + r"""
   <div>
     <h1>Follow-up</h1>
     <p class="lede">A próxima ação de cada lead em jogo, proposta pelo sistema e corrigida por você.
     O relógio lê a conversa — mensagem enviada pelo celular também conta. Abrir o card não encerra nada.</p>
-    {% if modo == 'off' %}<p class="lede" style="color:var(--ambar)">Os avisos automáticos estão <b>desligados</b>: a tela mostra o quadro, mas ninguém recebe push nem e-mail. Ligue na <a href="/painel/prospeccao/regua">Régua do funil</a> quando quiser.</p>
-    {% elif modo == 'observando' %}<p class="lede" style="color:var(--azul)">Os avisos estão em <b>ensaio</b>: o sistema calcula e grava o que mandaria, sem mandar nada a ninguém.</p>{% endif %}
   </div>
+
+  {#- O INTERRUPTOR MORA AQUI desde 07/09/2026. Ele era da Régua do funil, e esta
+      tela dizia "ligue na Régua" — mandava a pessoa pra outra tela pra ligar o
+      que ela estava olhando. Quem liga é dono ou gestor; o vendedor lê o estado
+      e não vê botão, como no resto da régua. -#}
+  <div class="fu-modo">
+    <div class="txt">
+      <b>Follow-up automático</b>
+      <small>marca a próxima ação de cada lead e cobra quando ela vence</small>
+    </div>
+    {% if papel in ('dono','gestor') %}
+    <form method="post" action="/painel/follow-up/modo" class="fu-seg">
+      {% for v, r in [('off','Desligado'),('observando','Observando'),('ligado','Ligado')] %}
+      <button type="submit" name="modo" value="{{ v }}" class="{{ v }}{% if modo==v %} on{% endif %}">{{ r }}</button>
+      {% endfor %}
+    </form>
+    {% else %}
+    <span class="fu-selo {{ modo }}">{{ {'off':'desligado','observando':'em ensaio','ligado':'ligado'}[modo] }}</span>
+    {% endif %}
+  </div>
+  {% if modo == 'off' %}<p class="lede" style="color:var(--ambar)">Está <b>desligado</b>: a tela mostra o quadro, mas ninguém recebe push nem e-mail.</p>
+  {% elif modo == 'observando' %}<p class="lede" style="color:var(--azul)">Está em <b>ensaio</b>: o sistema calcula e grava o que mandaria, sem mandar nada a ninguém.</p>{% endif %}
 
   {% if erro == 'motivo_obrigatorio' %}
     <div class="fu-erro">Este lead já foi adiado {{ adia_max - 1 }} vezes sem ninguém falar com o cliente. Pra adiar de novo, escreva o motivo.</div>
@@ -421,6 +527,63 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
   {% endif %}
 </div>
 <script>{{ balao_js }}</script>
+
+  {#- AS REGRAS, ESCRITAS (07/09/2026, pedido do dono). Tudo aqui sai de
+      finance/follow_up.py: a escada, os quatro degraus, os seis estados e os
+      dois limites. Os números vêm da CONFIG da conta (`cfg`), não fixos no
+      texto — conta que mexer nos prazos lê os dela. -#}
+  <details class="fu-ajuda">
+    <summary>Como o Zaq escolhe a próxima ação</summary>
+    <div class="corpo">
+      <h4>A ordem que o sistema segue</h4>
+      <ol class="fu-passos">
+        <li><b>Ninguém falou com ele ainda</b> → responder.</li>
+        <li><b>O cliente respondeu por último</b> → responder, a bola é nossa.
+          <br>Vem antes de tudo: cliente esperando é mais urgente que card parado.</li>
+        <li><b>Proposta enviada</b> → cobrar retorno em <b>{{ cfg.fu_proposta_dias }} dia{{ '' if cfg.fu_proposta_dias == 1 else 's' }}</b>.</li>
+        <li><b>Nenhum caso acima</b> → sobe a escada de toques.
+          <div class="fu-chips">
+            {% for d in cfg.fu_toques %}<span class="fu-chip{{ ' g' if loop.last }}"><b>{{ d }}d</b> {{ ['2º toque','3º toque','último desta rodada'][loop.index0] if loop.index0 < 3 else 'insistiu demais' }}</span>{% endfor %}
+          </div></li>
+        {% if perfil.vocab.data %}
+        <li><b>A data da festa aperta o que estiver frouxo</b> → festa em até
+          <b>{{ cfg.fu_festa_dias }} dias</b> sem proposta vence <b>hoje</b>, por mais
+          recente que tenha sido a conversa.</li>
+        {% endif %}
+      </ol>
+      <p style="margin:.7rem 0 0">O sistema <b>propõe</b> e você <b>corrige</b> — nada disso é
+      obrigatório preencher.</p>
+
+      <h4>O relógio lê a conversa, não o card</h4>
+      <p style="margin:0">Interação é <b>mensagem trocada</b>, inclusive a que o vendedor manda
+      pelo próprio celular. <b>Abrir o card, arrastar a coluna ou marcar como lido não encerram
+      alerta nenhum</b>: o fato que gerou o aviso continua de pé. Em compensação, qualquer coisa
+      que mude o prazo — uma mensagem enviada, uma proposta, um reagendamento — <b>zera a escada
+      de avisos</b> na hora.</p>
+
+      <h4>Quando vence, a cobrança sobe em quatro degraus</h4>
+      <div class="fu-chips">
+        <span class="fu-chip"><b>no vencimento</b> → o vendedor</span>
+        <span class="fu-chip"><b>24h</b> → o vendedor de novo</span>
+        <span class="fu-chip"><b>48h</b> → vendedor + gestor</span>
+        <span class="fu-chip g"><b>72h</b> → destaque no painel da gestão</span>
+      </div>
+
+      <h4>Os seis estados</h4>
+      <div class="fu-chips">
+        <span class="fu-chip">🚨 Crítico · +72h</span>
+        <span class="fu-chip">🔴 Atrasado · 24–72h</span>
+        <span class="fu-chip">🟡 Hoje · até 24h</span>
+        <span class="fu-chip">🔵 Agendado</span>
+        <span class="fu-chip">🟢 Em andamento</span>
+        <span class="fu-chip">⚠️ Sem próxima ação</span>
+      </div>
+
+      <h4>Duas travas, pra não virar metralhadora</h4>
+      <p style="margin:0"><b>{{ adia_max }} adiamentos seguidos</b> sem falar com o cliente passam a
+      exigir um motivo, e há um teto de <b>{{ cfg.fu_teto_dia }} avisos por dia</b> na conta.</p>
+    </div>
+  </details>
 {% endblock %}"""
 
 _env.loader.mapping["follow_up"] = _TPL

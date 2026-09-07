@@ -26,6 +26,7 @@ import web.painel_conteudo  # noqa: F401
 import web.painel_origens  # noqa: F401
 import web.painel_raio_x  # noqa: F401
 from contas import equipe as eq
+from web.painel_prospeccao import _navbar
 from web.portal import _env
 
 #: conta PJ com app, na forma que o template lê (índice 4 = plano, 11 = tem_pj,
@@ -52,9 +53,33 @@ def _menu(papel: str) -> str:
         embed=False, raio_x_perfil=perfil)
 
 
+def _abas_da_prospeccao(papel: str) -> str:
+    """A barra de abas de Prospecção, renderizada pra este papel.
+
+    Entrou em 07/09/2026, quando Follow-up e Origens saíram do menu lateral e
+    viraram abas de Prospecção. O que este arquivo protege é "toda tela que a
+    pessoa pode abrir tem um caminho de clique" — e a barra de abas É um caminho
+    de clique, pra quem alcança Prospecção. Se ela ficasse de fora da conta, o
+    teste cobraria um link no menu que a mudança tirou de propósito, e a rede
+    viraria um estorvo em vez de uma rede.
+
+    Quem não tem `vendas` não entra em Prospecção e não vê barra nenhuma — pra
+    esse papel esta função devolve vazio, e a cobrança do menu continua inteira.
+    """
+    caps = eq.caps_do_papel(papel)
+    if not caps["vendas"]:
+        return ""
+    perfil = {"chave": "eventos", "aplica": True}
+    return _env.from_string(_navbar("funil")).render(
+        papel=papel, caps=caps, gerencia=(papel in ("dono", "gestor")),
+        raio_x_perfil=perfil, tem_follow_up=True, nav_ativo="funil")
+
+
 def _links_do_menu(papel: str) -> set[str]:
-    """Os destinos `/painel/...` que o menu oferece a este papel."""
-    achados = set(re.findall(r'href="(/painel/[a-z0-9\-/]*)"', _menu(papel)))
+    """Os destinos `/painel/...` que a NAVEGAÇÃO oferece a este papel — o menu
+    lateral mais a barra de abas de Prospecção, que é menu tanto quanto ele."""
+    fonte = _menu(papel) + _abas_da_prospeccao(papel)
+    achados = set(re.findall(r'href="(/painel/[a-z0-9\-/]*)"', fonte))
     return {a.rstrip("/") for a in achados} - _LIVRES
 
 
@@ -100,7 +125,30 @@ def test_o_dono_ve_no_menu_tudo_que_o_gestor_ve():
 
 
 def test_origens_e_o_caso_que_motivou_este_arquivo():
-    """Nomeado de propósito: quando este quebrar, é o #650 acontecendo de novo."""
+    """Nomeado de propósito: quando este quebrar, é o #650 acontecendo de novo.
+
+    Desde 07/09/2026 o caminho do gestor é a ABA de Prospecção, não o item do
+    menu lateral — por isso a checagem é contra `_links_do_menu`, que soma os
+    dois. O que não pode voltar é a tela liberada sem caminho nenhum."""
     assert _passa_no_gate("gestor", "/painel/origens"), \
-        "o gestor vê 'Origens' no menu desde o #650 e o gate o devolve"
+        "o gestor vê 'Origens' desde o #650 e o gate o devolve"
     assert "/painel/origens" in _links_do_menu("gestor")
+    assert "/painel/origens" in _abas_da_prospeccao("gestor")
+
+
+def test_o_convidado_da_agencia_continua_com_o_item_no_menu():
+    """Ele tem `vendas: False`: não alcança Prospecção, logo não vê aba nenhuma.
+    Se Origens saísse do menu lateral pra ele também, a agência ficaria sem
+    caminho pra única tela que tem — e foi por um triz (o #654 é de ontem)."""
+    assert "/painel/origens" in _links_do_menu("convidado")
+    assert _abas_da_prospeccao("convidado") == ""
+    assert "/painel/origens" in _menu("convidado")
+
+
+def test_o_vendedor_alcanca_o_follow_up_pela_aba():
+    """A fila dele saiu do menu lateral e virou aba. O gate continua liberando —
+    e sem a aba isso seria tela alcançável só por URL decorada."""
+    assert _passa_no_gate("vendedor", "/painel/follow-up")
+    assert "/painel/follow-up" in _abas_da_prospeccao("vendedor")
+    # e Origens NÃO é dele: `caps.origens` é False, a aba nem nasce
+    assert "/painel/origens" not in _abas_da_prospeccao("vendedor")

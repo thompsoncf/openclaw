@@ -820,3 +820,62 @@ def test_a_221_nao_quebra_se_a_220_ainda_nao_rodou(pool):
         c.execute((BASE / "221_novidade_raio_x_pendencias_balao.sql").read_text(encoding="utf-8"))
         c.commit()
         assert c.execute("select count(*) from novidades where chave='raio-x-pendencias'").fetchone()[0] == 0
+
+
+# ---------------- 223/224: Follow-up e Origens viraram abas (07/09/2026)
+
+def _aplica(pool, arquivo: str, chave: str) -> dict:
+    with pool.connection() as c:
+        c.execute((BASE / arquivo).read_text(encoding="utf-8"))
+        c.commit()
+        r = c.execute("""select tipo, publico, pra_quem, resumo, link, corpo, id
+                           from novidades where chave=%s""", (chave,)).fetchone()
+    return {"tipo": r[0], "publico": r[1], "pra_quem": list(r[2]), "resumo": r[3],
+            "link": r[4], "corpo": r[5], "id": r[6]}
+
+
+def _fu_aba(pool):
+    return _aplica(pool, "223_novidade_follow_up_na_prospeccao.sql", "follow-up-na-prospeccao")
+
+
+def _og_aba(pool):
+    return _aplica(pool, "224_novidade_origens_na_prospeccao.sql", "origens-na-prospeccao")
+
+
+def test_o_aviso_do_follow_up_mira_so_quem_tem_a_tela(pool):
+    """CLAUDE.md §6: `follow_up.PERFIS_COM_TELA` é ("eventos",). Anunciar a aba
+    pra conta que vende por mensalidade seria prometer tela que ela não tem."""
+    from finance import follow_up as fu
+    a = _fu_aba(pool)
+    assert a["publico"] == "eventos" and fu.PERFIS_COM_TELA == ("eventos",)
+    assert a["link"] == "/painel/follow-up" and a["resumo"]
+
+
+def test_o_vendedor_recebe_o_aviso_do_follow_up_porque_a_fila_e_dele(pool):
+    """A §5 diz que o vendedor só recebe o que muda a rotina DELE — e o Follow-up
+    é a fila dele. Ligar e desligar continua sendo de dono e gestor, e o aviso
+    diz isso."""
+    a = _fu_aba(pool)
+    assert set(a["pra_quem"]) == {"dono", "gestor", "vendedor"}
+    assert "dono ou gestor" in a["corpo"]
+
+
+def test_o_aviso_de_origens_usa_o_mesmo_portao_de_quando_a_tela_nasceu(pool):
+    """A 221 apresentou a tela com `canal_proprio`. Quem foi apresentado é quem
+    precisa saber que ela mudou de lugar — por nicho alcançaria quem nunca ouviu
+    falar dela."""
+    a = _og_aba(pool)
+    assert a["publico"] == "canal_proprio"
+    assert set(a["pra_quem"]) == {"dono", "gestor"}
+    assert a["link"] == "/painel/origens" and a["resumo"]
+
+
+def test_os_dois_avisos_saem_no_site(pool):
+    _fu_aba(pool), _og_aba(pool)
+    publicas = {n["chave"] for n in nv.publicas(pool)}
+    assert "follow-up-na-prospeccao" in publicas and "origens-na-prospeccao" in publicas
+
+
+def test_reaplicar_as_duas_nao_duplica(pool):
+    assert _fu_aba(pool)["id"] == _fu_aba(pool)["id"]
+    assert _og_aba(pool)["id"] == _og_aba(pool)["id"]

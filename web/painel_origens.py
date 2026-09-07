@@ -32,6 +32,9 @@ from db.conexao import get_pool
 from finance import origens as og
 from finance import periodo as per
 from finance import raio_x_perfil as rxp
+# a barra de abas de Prospecção: Origens virou uma delas em 07/09/2026 — pra quem
+# alcança Prospecção. O convidado da agência não alcança, e não vê barra nenhuma.
+from web.painel_prospeccao import NAVBAR_CSS, _navbar
 from web.portal import _env, _render, conta_logada, nicho_da_conta
 
 router = APIRouter()
@@ -99,8 +102,14 @@ def painel_origens(request: Request):
     d = og.dados_origens(pool, conta[0], ini, fim,
                          compromisso=perfil["vocab"]["compromisso"])
     convidado = request.session.get("papel", "dono") == "convidado"
-    return _render("origens", request, titulo="Origens", secao_ativa="origens",
-                   convidado=convidado,
+    # A tela virou aba de Prospecção — pra quem entra em Prospecção. O convidado
+    # tem `vendas: False`, cai aqui como página inicial e não alcança mais nada:
+    # pra ele o menu lateral continua acendendo Origens, e a barra de abas nem
+    # aparece (ver o `{% if caps.vendas %}` no template). Sem isso, a agência
+    # ficaria com uma barra de abas onde não pode clicar em nada.
+    return _render("origens", request, titulo="Origens",
+                   secao_ativa=("origens" if convidado else "prospeccao"),
+                   nav_ativo="origens", convidado=convidado,
                    d=d, periodo=periodo, periodos=per.PERIODOS_ORIGENS,
                    # o menu lateral lê `raio_x_perfil` pra decidir o que mostrar
                    raio_x_perfil=perfil,
@@ -109,6 +118,8 @@ def painel_origens(request: Request):
 
 
 _ORIGENS_TPL = r"""{% extends "base" %}{% block conteudo %}
+<style>""" + NAVBAR_CSS + r"""</style>
+{% if caps.vendas %}""" + _navbar("origens") + r"""{% endif %}
 <style>
 .og-topo{display:flex;align-items:baseline;justify-content:space-between;gap:.8rem;flex-wrap:wrap}
 .og-pills{display:flex;gap:.3rem;overflow-x:auto;padding:.7rem 0 .4rem;-webkit-overflow-scrolling:touch}

@@ -22,7 +22,7 @@ from db.conexao import get_pool
 from finance import origens as og
 from finance import periodo as per
 from finance import raio_x_perfil as rxp
-from web.portal import _env, _render, conta_logada
+from web.portal import _env, _render, conta_logada, nicho_da_conta
 
 router = APIRouter()
 
@@ -68,7 +68,12 @@ def painel_origens(request: Request):
     # Regra 6: o vocabulário é do nicho. Quem vende festa marca VISITA; quem vende
     # serviço recorrente marca REUNIÃO; quem só vende produto não tem funil, e a
     # tela não se aplica.
-    perfil = rxp.perfil_da_conta(pool, conta[0])
+    #
+    # O slug sai de `nicho_da_conta`, não de um índice contado na mão: foi contando
+    # posição que o `cidade` virou nicho e três telas sumiram sem erro nenhum
+    # (#647). Também não vale reler do banco aqui — a tupla da sessão já traz o
+    # slug, e uma segunda fonte é uma segunda chance de divergir.
+    perfil = rxp.perfil(nicho_da_conta(conta))
     if not perfil["aplica"]:
         return RedirectResponse("/painel", status_code=303)
     q = request.query_params

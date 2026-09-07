@@ -42,12 +42,11 @@ create table orcamentos (id bigserial primary key, conta_id bigint,
 """
 
 
-def _perfil(compromisso="visita", aplica=True):
-    return {"chave": "eventos" if aplica else "produto",
-            "vocab": {"compromisso": compromisso, "compromissos": compromisso + "s",
-                      "data": True, "pedido": "festa", "compromisso_kpi": ""},
-            "aplica": aplica, "filtros": (), "blocos": (), "faixas": (),
-            "motivos": (), "nicho": "buffet", "nicho_escolhido": True}
+#: os slugs reais, não perfis inventados: o teste exercita o mapeamento de
+#: verdade (finance/raio_x_perfil), que é onde a regra 6 mora. Mock casando com
+#: mock foi exatamente o que deixou o defeito do #647 passar.
+NICHO_EVENTOS = "eventos"        # festa com data -> marca VISITA
+NICHO_RECORRENTE = "advocacia"   # mensalidade  -> marca REUNIÃO
 
 
 @pytest.fixture()
@@ -66,10 +65,10 @@ def cliente(monkeypatch):
         c.execute(_SQL)
         c.commit()
 
-    estado = {"papel": "dono", "perfil": _perfil()}
+    estado = {"papel": "dono", "nicho": NICHO_EVENTOS}
     monkeypatch.setattr(po, "get_pool", lambda: pool)
     monkeypatch.setattr(po, "conta_logada", lambda req: (CONTA, "Prime Eventos"))
-    monkeypatch.setattr(po.rxp, "perfil_da_conta", lambda p, cid: estado["perfil"])
+    monkeypatch.setattr(po, "nicho_da_conta", lambda conta: estado["nicho"])
 
     app = FastAPI()
 
@@ -144,7 +143,7 @@ def test_sem_login_vai_pro_login(cliente, monkeypatch):
 
 def test_conta_so_de_produto_nao_tem_esta_tela(cliente):
     """Quem vende no caixa não tem funil nem vendedor — a tela não se aplica."""
-    cliente.estado["perfil"] = _perfil(aplica=False)
+    cliente.estado["nicho"] = "minimercado"   # vende produto no caixa
     r = cliente.get("/painel/origens")
     assert r.status_code == 303 and r.headers["location"] == "/painel"
 
@@ -154,7 +153,7 @@ def test_vocabulario_segue_o_nicho(cliente):
         _lead(c, "A3", marcou=True)
         c.commit()
     assert "Marcaram visita" in cliente.get("/painel/origens").text
-    cliente.estado["perfil"] = _perfil(compromisso="reunião")
+    cliente.estado["nicho"] = NICHO_RECORRENTE
     html = cliente.get("/painel/origens").text
     assert "Marcaram reunião" in html
     assert "Marcaram visita" not in html

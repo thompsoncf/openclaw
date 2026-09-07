@@ -39,7 +39,8 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   orcamento_id bigint, segmento text, perda_motivo text, criado_em timestamptz default now());
 create table nichos (id bigserial primary key, nome text, slug text unique, ativo boolean default true);
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
-  contato_ref text, contato_nome text, criado_em timestamptz default now());
+  contato_ref text, contato_nome text, canal text default 'whatsapp',
+  criado_em timestamptz default now());
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now());
@@ -207,11 +208,71 @@ def test_sua_semana_mede_primeira_resposta_propostas_toques_e_contratos(pool):
     assert rx.cor("contratos", s) == "ok"
 
 
+def test_cada_numero_pendente_traz_o_nome_e_por_onde_abrir(pool):
+    """07/09/2026, pedido do dono: "não consigo saber qual contrato ou proposta
+    está pendente e a conversa pra analisar". Os três números pendentes do Raio-X
+    (rascunho, parou na 1ª, sem assinar) contavam sem dizer QUEM — pra descobrir,
+    era abrir Serviços e Prospecção e procurar um por um.
+
+    Agora cada um traz a lista: o nome, e o id que os deep-links que JÁ existem
+    consomem — `/painel/servicos?abrir=<orcamento_id>` e
+    `/painel/prospeccao/comunicacao?abrir=<conversa_id>`."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        # Caio: respondemos uma vez e paramos há 3 dias → parou na 1ª
+        caio = _lead(c, conta, v, "Caio", status="contatado", criado=_t(3.5))
+        cv_caio = _conversa(c, conta, caio, _t(3.5)); _msg(c, cv_caio, "in", _t(3.5)); _msg(c, cv_caio, "out", _t(3))
+        # Bia: rascunho parado, com conversa
+        bia = _lead(c, conta, v, "Bia", criado=_t(5))
+        cv_bia = _conversa(c, conta, bia, _t(5))
+        o_rasc = _orc(c, "Bia Souza", "rascunho", 300000, criado=_t(5))
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o_rasc, bia))
+        # Fabi: aprovou e não assinou
+        fabi = _lead(c, conta, v, "Fabi", status="proposta", criado=_t(15))
+        cv_fabi = _conversa(c, conta, fabi, _t(15))
+        o_ass = _orc(c, "Fabi Costa", "enviado", 450000, criado=_t(12), aprovada=_t(9))
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o_ass, fabi))
+        c.commit()
+
+    s = rx.sua_semana(pool, conta, v, ini, fim)
+
+    assert s["rascunhos"] == 1
+    (r,) = s["rascunhos_itens"]
+    assert r["nome"] == "Bia Souza" and r["orcamento_id"] == o_rasc
+    assert r["conversa_id"] == cv_bia and r["aba"] == "conversas" and r["dias"] == 4
+
+    assert s["paradas_1a"] == 1
+    (p,) = s["paradas_1a_itens"]
+    assert p["nome"] == "Caio" and p["conversa_id"] == cv_caio and p["horas"] >= 24
+
+    (a,) = s["sem_assinar"]
+    assert a["nome"] == "Fabi Costa" and a["orcamento_id"] == o_ass
+    assert a["conversa_id"] == cv_fabi and a["valor_centavos"] == 450000
+
+
+def test_conversa_de_email_manda_o_link_pra_aba_de_emails(pool):
+    """O deep-link de Comunicação tem duas abas: `conversas` (WhatsApp,
+    Instagram) e `emails`. Mandar o e-mail pra aba errada abre a lista vazia."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        bia = _lead(c, conta, v, "Bia", criado=_t(5))
+        cv = _conversa(c, conta, bia, _t(5))
+        c.execute("update conversas set canal='email' where id=%s", (cv,))
+        o = _orc(c, "Bia Souza", "rascunho", 300000, criado=_t(5))
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, bia))
+        c.commit()
+    (r,) = rx.sua_semana(pool, conta, v, ini, fim)["rascunhos_itens"]
+    assert r["conversa_id"] == cv and r["aba"] == "emails"
+
+
 def test_sua_semana_vazia_nao_quebra_e_fica_amarela(pool):
     ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
     with pool.connection() as c:
         conta = _conta(c); v = _vend(c, conta, "Novo"); c.commit()
     s = rx.sua_semana(pool, conta, v, ini, fim)
+    assert s["rascunhos_itens"] == [] and s["paradas_1a_itens"] == []
     assert s["leads"] == 0 and s["primeira_min"] is None and s["contratos"] == [] and s["sem_assinar"] == []
     assert rx.cor("primeira", s) == "amb" and rx.cor("propostas", s) == "ok" and rx.cor("toques", s) == "ok"
     assert rx.cor("contratos", s) == "amb"

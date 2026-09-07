@@ -11,6 +11,7 @@ O que estes testes protegem:
 """
 import asyncio
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -19,6 +20,7 @@ from psycopg_pool import ConnectionPool
 from web import painel_prospeccao as pp
 
 CONTA = 11
+MIG = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 
 _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, status text default 'novo',
@@ -60,6 +62,10 @@ def pool():
     p = ConnectionPool(url, min_size=1, max_size=3, open=True, kwargs={"prepare_threshold": None})
     with p.connection() as c:
         c.execute(_SQL)
+        # a 218 acrescenta o follow-up à mesma linha de config, e é a tela da Régua
+        # que liga os três motores — aplicar a migração de verdade é o que faz este
+        # teste perceber quando uma coluna nova não chegou ao POST
+        c.execute((MIG / "218_follow_up.sql").read_text(encoding="utf-8"))
         for chave, rot, ordem, fixa, fase in [("novo", "Novo", 0, True, "venda"),
                                               ("contatado", "Contatado", 10, False, "venda"),
                                               ("ganho", "Sinal Pago", 900, True, "fechamento"),

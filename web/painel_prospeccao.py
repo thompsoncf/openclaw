@@ -222,6 +222,17 @@ def _acesso(request: Request):
     return ctx, None
 
 
+def _tem_follow_up(conta) -> bool:
+    """A conta já ganhou o Follow-up? Depende do nicho (CLAUDE.md §6): o segundo
+    relógio da régua é a data da festa, e a entrega foi combinada em duas etapas —
+    eventos primeiro. `conta[7]` é o slug do nicho; conta curta (mock de teste) não
+    tem follow-up, que é o lado seguro de errar."""
+    from finance import follow_up as _fu
+    from finance import raio_x_perfil as _rxp
+    slug = conta[7] if (conta and len(conta) > 7) else None
+    return _rxp.perfil(slug)["chave"] in _fu.PERFIS_COM_TELA
+
+
 def _vendedores(pool, conta_id: int) -> list[dict]:
     """Quem pode receber alvos: o dono (aparece pelo nome) + vendedores/gestores.
     O dono vem primeiro e rotulado, pra ele poder ficar com leads no próprio nome."""
@@ -7628,7 +7639,8 @@ def regua_pagina(request: Request):
     pool = get_pool()
     with pool.connection() as c:
         _etapas(c, ctx["conta_id"])                 # semeia o padrão na 1ª visita
-        cfg = _fr.config(c, ctx["conta_id"])
+        from finance import follow_up as _fu
+        cfg = _fu.config(c, ctx["conta_id"])   # a da régua + a do follow-up
         c.commit()
         linhas = _fr.etapas(c, ctx["conta_id"])
         # quantos leads em cada coluna, pro dono ver o que ele está mexendo (e pra
@@ -7654,6 +7666,7 @@ def regua_pagina(request: Request):
                    etapas=linhas, cfg=cfg, conv=conv, eventos=sorted(_fr.EVENTOS.items()),
                    unidades=[(u, r) for u, r, _m in _UNIDADES],
                    dias_on=_fr._dias(cfg), n_mov=n_mov,
+                   tem_follow_up=_tem_follow_up(ctx["conta"]),
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -7676,6 +7689,7 @@ async def regua_config(request: Request):
     with get_pool().connection() as c:
         _fr.config(c, ctx["conta_id"])          # garante a linha
         c.execute("""update funil_regua set gatilhos_modo=%s, cobranca_modo=%s,
+                       follow_up_modo=%s,
                        janela_dias=%s, janela_abre=%s, janela_fecha=%s,
                        sem_resposta_min=coalesce(%s, sem_resposta_min),
                        bola_nossa_min=coalesce(%s, bola_nossa_min),
@@ -7684,7 +7698,8 @@ async def regua_config(request: Request):
                        teto_avisos_dia=greatest(1, coalesce(%s, teto_avisos_dia)),
                        atualizado_em=now()
                      where conta_id=%s""",
-                  (modo("gatilhos_modo"), modo("cobranca_modo"), dias, abre, fecha,
+                  (modo("gatilhos_modo"), modo("cobranca_modo"), modo("follow_up_modo"),
+                   dias, abre, fecha,
                    _par_min(f.get("sem_resposta_n"), f.get("sem_resposta_u")),
                    _par_min(f.get("bola_nossa_n"), f.get("bola_nossa_u")),
                    _par_min(f.get("bola_cliente_n"), f.get("bola_cliente_u")),
@@ -15136,7 +15151,8 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div class="sh"><b>Estado</b><span class="mut" style="font-size:.76rem">tudo construído · você decide quando cada parte age</span></div>
     {% for campo, nome, desc in [
         ('gatilhos_modo','Gatilhos das etapas','movem o card sozinhos quando o fato acontece'),
-        ('cobranca_modo','Cobrança por prazo','avisa o vendedor e escala pro gestor')] %}
+        ('cobranca_modo','Cobrança por prazo','avisa o vendedor e escala pro gestor')]
+        + ([('follow_up_modo','Follow-up automático','marca a próxima ação de cada lead e cobra quando ela vence')] if tem_follow_up else []) %}
     <div style="display:flex;align-items:center;gap:1rem;padding:.8rem 0;border-top:1px solid var(--borda);flex-wrap:wrap">
       <div style="flex:1;min-width:240px">
         <div style="font-size:.9rem;font-weight:600">{{ nome }}</div>

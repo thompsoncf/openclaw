@@ -81,6 +81,7 @@ from web.painel_servicos import router as servicos_router
 from web.painel_aditivo import router as aditivo_router
 from web.painel_equipe import router as equipe_router
 from web.painel_raio_x import router as raio_x_router
+from web.painel_follow_up import router as follow_up_router
 from web.painel_prospeccao import router as prospeccao_router
 from web.painel_conteudo import router as conteudo_router
 from web.painel_agenda import router as agenda_router
@@ -116,6 +117,7 @@ app.include_router(servicos_router)
 app.include_router(aditivo_router)
 app.include_router(equipe_router)
 app.include_router(raio_x_router)
+app.include_router(follow_up_router)
 app.include_router(conteudo_router)  # antes do prospeccao_router: aquele tem um
                                       # catch-all GET /painel/prospeccao/{alvo_id}
                                       # (ficha do lead) que engoliria /ia-insta*
@@ -268,6 +270,19 @@ def _iniciar_poller_email() -> None:
                              _r["avisos"], _r["escalados"])
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — régua falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
+                # O follow-up: sincroniza a próxima ação proposta e cobra quem
+                # deixou vencer. Inerte por padrão — só entra em conta que ligou
+                # (follow_up_modo <> 'off'), e nasce desligada.
+                from finance import follow_up as _fup
+                _f = _fup.rodar(pool)
+                if _f["contas"]:
+                    log.info("poller: ciclo #%d — follow-up: %d conta(s), %d aviso(s), "
+                             "%d simulado(s), %d represado(s), %d prazo(s) sincronizado(s)",
+                             ciclo, _f["contas"], _f["avisos"], _f["simulados"],
+                             _f["represados"], _f["sincronizados"])
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — follow-up falhou: %s: %s", ciclo, type(e).__name__, e)
 
     try:
         threading.Thread(target=_loop, daemon=True, name="email-poller").start()

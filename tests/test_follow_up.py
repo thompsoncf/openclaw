@@ -1,0 +1,501 @@
+"""O follow-up automático (finance/follow_up): a escada, os seis estados, os
+quatro degraus de cobrança e a trava do reagendamento.
+
+O que estes testes protegem, em uma frase cada:
+  * a próxima ação NASCE SOZINHA — se ela dependesse do vendedor, o dia 1 na
+    Prime seria 273 campos em branco (é o que a produção dizia em 07/09);
+  * a data da festa só aperta o prazo de quem VENDE festa (CLAUDE.md §6);
+  * a mão do vendedor manda, mas só até o cliente falar de novo;
+  * o mesmo atraso nunca cobra duas vezes, e abrir o card não encerra nada;
+  * adiar em silêncio três vezes passa a exigir motivo.
+
+Banco descartável, `agora` sempre fixo — o motor tem janela de atendimento, e um
+teste que dependesse da hora real passaria ou falharia conforme o dia.
+"""
+import os
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+from psycopg_pool import ConnectionPool
+
+from finance import follow_up as fu
+from finance import raio_x_perfil as rxp
+
+EVENTOS = rxp.perfil("eventos")
+RECORRENTE = rxp.perfil("consultoria")
+
+MIG = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+CONTA = 7
+# quarta-feira, 09/09/2026, 12h UTC = 09h em Brasília — dentro da janela padrão
+AGORA = datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc)
+
+_SQL = """
+create table prospeccao (id bigserial primary key, conta_id bigint, empresa text, contato text,
+  status text default 'novo', estagio text default 'lead', orcamento_id bigint,
+  vendedor_id bigint, evento_em date, evento_tipo text, evento_convidados int,
+  proximo_contato_em timestamptz, atualizado_em timestamptz default now(),
+  criado_em timestamptz default now());
+create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
+  papel text default 'vendedor', ativo boolean default true);
+create table funil_avisos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
+  estado text, nivel text, etapa text default '', ref_em timestamptz, simulado boolean default false,
+  membro_id bigint, criado_em timestamptz default now());
+create unique index uq_funil_aviso on funil_avisos
+  (prospeccao_id, estado, nivel, etapa, ref_em, simulado);
+create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
+  rotulo text, ordem int default 0, fixa boolean default false, fase text default 'venda',
+  prazo_min integer, gatilho text, gatilho_ativo boolean default false);
+create table funil_regua (conta_id bigint primary key,
+  gatilhos_modo text default 'off', cobranca_modo text default 'off',
+  janela_dias text default '1,2,3,4,5,6', janela_abre time default '08:00',
+  janela_fecha time default '19:00', sem_resposta_min int default 120,
+  bola_nossa_min int default 240, bola_cliente_min int default 4320,
+  escala_min int default 240, teto_avisos_dia int default 5);
+create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint);
+create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
+  criado_em timestamptz default now());
+"""
+
+_ETAPAS = [("novo", 0, "venda"), ("contatado", 10, "venda"), ("qualificado", 20, "venda"),
+           ("proposta", 30, "venda"), ("ganho", 900, "fechamento"), ("perdido", 910, "fechamento")]
+
+
+@pytest.fixture(scope="module")
+def pool():
+    admin = ConnectionPool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=1, open=True)
+    dbname = "zaq_follow_up_test"
+    with admin.connection() as c:
+        c.autocommit = True
+        c.execute(f"drop database if exists {dbname}")
+        c.execute(f"create database {dbname}")
+    admin.close()
+    url = os.environ["TEST_DATABASE_URL"].rsplit("/", 1)[0] + "/" + dbname
+    p = ConnectionPool(url, min_size=1, max_size=3, open=True, kwargs={"prepare_threshold": None})
+    with p.connection() as c:
+        c.execute(_SQL)
+        # a migração de verdade, não uma cópia dela: é o único jeito de o teste
+        # perceber que a coluna nova não chegou em produção
+        c.execute((MIG / "218_follow_up.sql").read_text(encoding="utf-8"))
+        for ch, o, fase in _ETAPAS:
+            c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fase)
+                         values (%s,%s,%s,%s,%s)""", (CONTA, ch, ch.capitalize(), o, fase))
+        c.commit()
+    yield p
+    p.close()
+
+
+@pytest.fixture()
+def c(pool):
+    with pool.connection() as con:
+        con.execute("delete from follow_up_marcacoes")
+        con.execute("delete from funil_avisos")
+        con.execute("delete from mensagens")
+        con.execute("delete from conversas")
+        con.execute("delete from prospeccao")
+        con.execute("delete from membros")
+        con.execute("delete from funil_regua")
+        con.commit()
+        yield con
+        con.rollback()
+
+
+# ------------------------------------------------------------------ montadores
+
+def _vend(c, nome="Pedro", papel="vendedor"):
+    return c.execute("""insert into membros (conta_id, nome, email, papel)
+                        values (%s,%s,%s,%s) returning id""",
+                     (CONTA, nome, f"{nome.lower()}@x.com", papel)).fetchone()[0]
+
+
+def _lead(c, vend=None, status="contatado", contato="Ana", evento_em=None, criado=None):
+    return c.execute("""insert into prospeccao (conta_id, vendedor_id, contato, status, evento_em, criado_em)
+                        values (%s,%s,%s,%s,%s,coalesce(%s, now())) returning id""",
+                     (CONTA, vend, contato, status, evento_em, criado)).fetchone()[0]
+
+
+def _conversa(c, lead):
+    return c.execute("insert into conversas (conta_id, prospeccao_id) values (%s,%s) returning id",
+                     (CONTA, lead)).fetchone()[0]
+
+
+def _msg(c, conv, direcao, em):
+    c.execute("insert into mensagens (conversa_id, direcao, criado_em) values (%s,%s,%s)",
+              (conv, direcao, em))
+
+
+def _fala(c, lead, *pares):
+    """(direcao, dias_atras) — monta a conversa de um lead de uma vez."""
+    conv = _conversa(c, lead)
+    for direcao, dias in pares:
+        _msg(c, conv, direcao, AGORA - timedelta(days=dias))
+    return conv
+
+
+def _modo(c, modo="ligado", **kw):
+    fu.config(c, CONTA)   # semeia a linha
+    campos = ", ".join(f"{k}=%s" for k in kw)
+    c.execute(f"update funil_regua set follow_up_modo=%s{', ' + campos if kw else ''} where conta_id=%s",
+              (modo, *kw.values(), CONTA))
+
+
+# ------------------------------------------------------------------ a escada (pura)
+
+def test_escada_torta_volta_pro_padrao():
+    assert fu._escada("2,4,7,15") == (2, 4, 7, 15)
+    assert fu._escada(" 3 , 5 ") == (3, 5)
+    # config ilegível não pode virar prazo zero, que cobraria tudo de todo mundo
+    for torto in ("", None, "abc", "0", "-1,-2"):
+        assert fu._escada(torto) == (2, 4, 7, 15), torto
+
+
+def _cfg(**kw):
+    return dict(fu._PADRAO, sem_resposta_min=120, bola_nossa_min=240, **kw)
+
+
+def test_a_bola_vem_antes_de_tudo():
+    """Cliente esperando é mais urgente e mais acionável que card parado."""
+    ult_in = AGORA - timedelta(hours=10)
+    prazo, acao = fu.prazo_automatico(
+        status="proposta", ult_in=ult_in, ult_out=AGORA - timedelta(days=9),
+        criado_em=None, tentativas=0, evento_em=None, cfg=_cfg(), tem_data=True, agora=AGORA)
+    assert prazo == ult_in + timedelta(minutes=240)
+    assert "esperando" in acao
+
+
+def test_lead_sem_resposta_nossa_conta_do_nascimento():
+    nasceu = AGORA - timedelta(hours=5)
+    prazo, acao = fu.prazo_automatico(
+        status="novo", ult_in=None, ult_out=None, criado_em=nasceu, tentativas=0,
+        evento_em=None, cfg=_cfg(), tem_data=True, agora=AGORA)
+    assert prazo == nasceu + timedelta(minutes=120) and "ninguém falou" in acao
+
+
+def test_proposta_tem_prazo_proprio_e_a_escada_sobe():
+    out = AGORA - timedelta(days=1)
+    p, a = fu.prazo_automatico(status="proposta", ult_in=None, ult_out=out, criado_em=None,
+                               tentativas=1, evento_em=None, cfg=_cfg(), tem_data=True, agora=AGORA)
+    assert p == out + timedelta(days=3) and "proposta" in a
+    esperado = {1: 2, 2: 4, 3: 7, 4: 15, 9: 15}
+    for tent, dias in esperado.items():
+        p, _ = fu.prazo_automatico(status="contatado", ult_in=None, ult_out=out, criado_em=None,
+                                   tentativas=tent, evento_em=None, cfg=_cfg(), tem_data=True, agora=AGORA)
+        assert p == out + timedelta(days=dias), tent
+    # do 4º toque a tela para de insistir e pergunta
+    _, a4 = fu.prazo_automatico(status="contatado", ult_in=None, ult_out=out, criado_em=None,
+                                tentativas=4, evento_em=None, cfg=_cfg(), tem_data=True, agora=AGORA)
+    assert "encerra" in a4
+
+
+def test_a_festa_perto_aperta_o_prazo_so_de_quem_vende_festa():
+    """CLAUDE.md §6: o segundo relógio é do nicho, e a palavra também."""
+    out = AGORA - timedelta(hours=2)          # conversou agorinha: prazo folgado
+    festa = AGORA.date() + timedelta(days=12)
+    p_ev, a_ev = fu.prazo_automatico(status="contatado", ult_in=None, ult_out=out, criado_em=None,
+                                     tentativas=1, evento_em=festa, cfg=_cfg(), tem_data=True, agora=AGORA)
+    assert p_ev == AGORA and "data" in a_ev
+    p_rc, a_rc = fu.prazo_automatico(status="contatado", ult_in=None, ult_out=out, criado_em=None,
+                                     tentativas=1, evento_em=festa, cfg=_cfg(), tem_data=False, agora=AGORA)
+    assert p_rc == out + timedelta(days=2)
+    for palavra in ("festa", "data", "convidados", "visita"):
+        assert palavra not in a_rc
+
+
+def test_festa_longe_nao_aperta_nada():
+    out = AGORA - timedelta(hours=2)
+    p, _ = fu.prazo_automatico(status="contatado", ult_in=None, ult_out=out, criado_em=None,
+                               tentativas=1, evento_em=AGORA.date() + timedelta(days=200),
+                               cfg=_cfg(), tem_data=True, agora=AGORA)
+    assert p == out + timedelta(days=2)
+
+
+def test_os_seis_estados():
+    e = fu.estado_de
+    assert e(AGORA + timedelta(days=2), AGORA - timedelta(hours=1), AGORA) == "andamento"
+    assert e(AGORA + timedelta(days=2), AGORA - timedelta(days=5), AGORA) == "agendado"
+    assert e(AGORA - timedelta(hours=3), AGORA - timedelta(days=5), AGORA) == "hoje"
+    assert e(AGORA - timedelta(hours=30), AGORA - timedelta(days=5), AGORA) == "atrasado"
+    assert e(AGORA - timedelta(hours=80), AGORA - timedelta(days=5), AGORA) == "critico"
+    assert e(AGORA - timedelta(hours=80), None, AGORA, sem_acao=True) == "sem_acao"
+    assert e(None, None, AGORA) == "sem_acao"
+
+
+# ------------------------------------------------------------------ os leads (banco)
+
+def test_a_conta_inteira_numa_consulta_com_estado_e_acao(c):
+    v = _vend(c)
+    # 1. cliente falou por último, ninguém respondeu → bola nossa, já venceu
+    a = _lead(c, v, contato="Ana"); _fala(c, a, ("out", 6), ("in", 5))
+    # 2. proposta enviada e ele sumiu há 9 dias → crítico
+    b = _lead(c, v, status="proposta", contato="Bia"); _fala(c, b, ("in", 12), ("out", 9))
+    # 3. falamos ontem, 1ª tentativa → ainda no prazo
+    d = _lead(c, v, contato="Duda"); _fala(c, d, ("in", 3), ("out", 1))
+    # 4. festa já passou → não há o que propor
+    e = _lead(c, v, contato="Eva", evento_em=AGORA.date() - timedelta(days=3)); _fala(c, e, ("out", 20))
+    linhas = {x["quem"]: x for x in fu.leads(c, CONTA, EVENTOS, AGORA)}
+    assert linhas["Ana"]["estado"] == "critico" and linhas["Ana"]["bola"] == "aguardando vendedor"
+    assert linhas["Bia"]["estado"] == "critico" and "proposta" in linhas["Bia"]["acao"]
+    assert linhas["Duda"]["estado"] in ("agendado", "andamento")
+    assert linhas["Eva"]["estado"] == "sem_acao" and linhas["Eva"]["prazo"] is None
+    assert linhas["Bia"]["tentativas"] == 1 and linhas["Bia"]["bola"] == "aguardando cliente"
+
+
+def test_lead_encerrado_nao_entra_na_fila(c):
+    v = _vend(c)
+    for st in ("ganho", "perdido"):
+        lead = _lead(c, v, status=st, contato=st); _fala(c, lead, ("out", 30))
+    assert fu.leads(c, CONTA, EVENTOS, AGORA) == []
+
+
+def test_a_mao_manda_ate_o_cliente_falar_de_novo(c):
+    """'Ele disse que retorna terça' vale — mas não vira um jeito de silenciar
+    o lead pra sempre: mensagem nova é fato novo, e a escada recomeça."""
+    v = _vend(c)
+    lead = _lead(c, v, contato="Ana"); conv = _fala(c, lead, ("in", 9), ("out", 8))
+    terca = AGORA + timedelta(days=4)
+    fu.marcar(c, CONTA, lead, terca, acao="retorno que ele pediu", membro_id=v)
+    x = fu.leads(c, CONTA, EVENTOS, AGORA)[0]
+    assert x["na_mao"] and x["prazo"] == terca and x["estado"] == "agendado"
+    # o cliente escreve depois da marcação: a bola volta a ser nossa
+    _msg(c, conv, "in", AGORA - timedelta(hours=6))
+    y = fu.leads(c, CONTA, EVENTOS, AGORA)[0]
+    assert not y["na_mao"] and "esperando" in y["acao"]
+
+
+def test_ordem_da_fila_poe_a_festa_mais_perto_na_frente(c):
+    v = _vend(c)
+    longe = _lead(c, v, contato="Longe", evento_em=AGORA.date() + timedelta(days=300))
+    perto = _lead(c, v, contato="Perto", evento_em=AGORA.date() + timedelta(days=40))
+    sem = _lead(c, v, contato="Sem")
+    for lead in (longe, perto, sem):
+        _fala(c, lead, ("in", 30), ("out", 29))
+    nomes = [x["quem"] for x in fu.ordenar(fu.leads(c, CONTA, EVENTOS, AGORA))]
+    assert nomes == ["Perto", "Longe", "Sem"]
+
+
+def test_resumo_e_painel_por_vendedor(c):
+    p, j = _vend(c, "Pedro"), _vend(c, "Jacque")
+    for dono, n in ((p, 3), (j, 1)):
+        for i in range(n):
+            lead = _lead(c, dono, contato=f"L{dono}{i}"); _fala(c, lead, ("in", 20), ("out", 19))
+    linhas = fu.leads(c, CONTA, EVENTOS, AGORA)
+    assert fu.resumo(linhas)["critico"] == 4 and fu.resumo(linhas)["ativos"] == 4
+    gest = fu.por_vendedor(linhas)
+    assert [(g["nome"], g["ativos"], g["critico"]) for g in gest] == [("Pedro", 3, 3), ("Jacque", 1, 1)]
+
+
+def test_sincronizar_escreve_o_prazo_e_nao_encosta_no_marcado_na_mao(c):
+    v = _vend(c)
+    auto = _lead(c, v, contato="Auto"); _fala(c, auto, ("in", 20), ("out", 19))
+    mao = _lead(c, v, contato="Mao"); _fala(c, mao, ("in", 20), ("out", 19))
+    escolhido = AGORA + timedelta(days=5)
+    fu.marcar(c, CONTA, mao, escolhido, membro_id=v)
+    linhas = fu.leads(c, CONTA, EVENTOS, AGORA)
+    assert fu.sincronizar(c, CONTA, linhas) == 1        # só o automático
+    assert fu.sincronizar(c, CONTA, linhas) == 0        # nada mudou: não repete
+    prazos = dict(c.execute("select contato, proximo_contato_em from prospeccao").fetchall())
+    assert prazos["Mao"] == escolhido and prazos["Auto"] is not None
+
+
+# ------------------------------------------------------------------ o reagendamento
+
+def test_adiar_em_silencio_tres_vezes_passa_a_exigir_motivo(c):
+    v = _vend(c)
+    lead = _lead(c, v, contato="Ana"); conv = _fala(c, lead, ("in", 9), ("out", 8))
+    assert fu.marcar(c, CONTA, lead, AGORA + timedelta(days=1), membro_id=v)["ok"]
+    assert fu.marcar(c, CONTA, lead, AGORA + timedelta(days=2), membro_id=v)["ok"]
+    r = fu.marcar(c, CONTA, lead, AGORA + timedelta(days=3), membro_id=v)
+    assert r == {"ok": False, "erro": "motivo_obrigatorio"}
+    # com motivo, passa
+    assert fu.marcar(c, CONTA, lead, AGORA + timedelta(days=3), membro_id=v,
+                     motivo="noiva viajou")["ok"]
+    # e falar com o cliente zera a contagem: adiar depois de conversar é trabalho
+    _msg(c, conv, "out", AGORA - timedelta(hours=1))
+    assert not fu.exige_motivo(c, CONTA, lead)
+    assert fu.marcar(c, CONTA, lead, AGORA + timedelta(days=6), membro_id=v)["ok"]
+
+
+def test_o_historico_guarda_quem_adiou_e_por_que(c):
+    v = _vend(c, "Pedro")
+    lead = _lead(c, v); _fala(c, lead, ("in", 9), ("out", 8))
+    fu.marcar(c, CONTA, lead, AGORA + timedelta(days=1), acao="ligar", membro_id=v, motivo="pediu terça")
+    fu.marcar(c, CONTA, lead, AGORA + timedelta(days=2), membro_id=None, automatico=True)
+    h = fu.historico(c, CONTA, lead)
+    assert len(h) == 2 and h[0]["automatico"] and h[0]["quem"] == "o sistema"
+    assert h[1]["quem"] == "Pedro" and h[1]["motivo"] == "pediu terça" and h[1]["acao"] == "ligar"
+    # o contador do card conta só o que foi feito na mão depois da última mensagem
+    assert fu.leads(c, CONTA, EVENTOS, AGORA)[0]["adiados"] == 1
+
+
+# ------------------------------------------------------------------ a cobrança
+
+def test_desligado_nao_cobra_ninguem(c):
+    v = _vend(c)
+    lead = _lead(c, v); _fala(c, lead, ("in", 20), ("out", 19))
+    assert fu.avaliar(c, CONTA, AGORA, EVENTOS) == {"avisos": 0, "simulados": 0,
+                                                    "represados": 0, "pendentes": []}
+    assert c.execute("select count(*) from funil_avisos").fetchone()[0] == 0
+
+
+def test_ensaio_grava_o_que_teria_mandado_e_nao_manda(c):
+    v = _vend(c)
+    lead = _lead(c, v); _fala(c, lead, ("in", 20), ("out", 19))
+    _modo(c, "observando")
+    r = fu.avaliar(c, CONTA, AGORA, EVENTOS)
+    assert r["simulados"] == 1 and r["avisos"] == 0 and r["pendentes"] == []
+    assert c.execute("select count(*) from funil_avisos where simulado").fetchone()[0] == 4
+
+
+def test_o_mesmo_atraso_nunca_cobra_duas_vezes(c):
+    v = _vend(c)
+    lead = _lead(c, v, contato="Ana"); conv = _fala(c, lead, ("in", 20), ("out", 19))
+    _modo(c, "ligado")
+    r1 = fu.avaliar(c, CONTA, AGORA, EVENTOS)
+    assert r1["avisos"] == 1 and r1["pendentes"][0]["degrau"] == "a72"
+    # segunda passada, mesmo fato: nada
+    assert fu.avaliar(c, CONTA, AGORA, EVENTOS)["avisos"] == 0
+    # o vendedor MANDA MENSAGEM: fato novo, prazo novo — e o lead sai da fila
+    _msg(c, conv, "out", AGORA - timedelta(minutes=5))
+    assert fu.avaliar(c, CONTA, AGORA, EVENTOS)["avisos"] == 0
+    assert fu.leads(c, CONTA, EVENTOS, AGORA)[0]["estado"] in ("andamento", "agendado")
+
+
+def test_abrir_o_card_nao_encerra_o_alerta(c):
+    """Só ação registrada encerra. Um update em `atualizado_em` — que é o que
+    abrir/arrastar o card faz — não muda o fato, logo o aviso continua de pé."""
+    v = _vend(c)
+    lead = _lead(c, v); _fala(c, lead, ("in", 20), ("out", 19))
+    _modo(c, "ligado")
+    fu.avaliar(c, CONTA, AGORA, EVENTOS)
+    c.execute("update prospeccao set atualizado_em=now(), status='qualificado' where id=%s", (lead,))
+    x = fu.leads(c, CONTA, EVENTOS, AGORA)[0]
+    assert x["estado"] == "critico" and x["atraso_h"] > 72
+
+
+def test_os_degraus_sobem_e_o_gestor_entra_a_partir_de_48h(c):
+    v = _vend(c)
+    # atraso de ~26h: pegou 'venc' e 'a24', ainda não escalou
+    lead = _lead(c, v, status="proposta"); _fala(c, lead, ("in", 10), ("out", 4))
+    _modo(c, "ligado")
+    r = fu.avaliar(c, CONTA, AGORA, EVENTOS)
+    assert r["pendentes"][0]["degrau"] == "a24" and r["pendentes"][0]["nivel"] == "vendedor"
+    niveis = {x[0] for x in c.execute("select nivel from funil_avisos").fetchall()}
+    assert niveis == {"venc", "a24"}
+
+
+def test_o_teto_represa_e_nao_perde_o_aviso(c):
+    v = _vend(c)
+    for i in range(4):
+        lead = _lead(c, v, contato=f"L{i}"); _fala(c, lead, ("in", 20), ("out", 19))
+    _modo(c, "ligado", fu_teto_dia=2)
+    r = fu.avaliar(c, CONTA, AGORA, EVENTOS)
+    assert r["avisos"] == 2 and r["represados"] == 2
+    # amanhã o teto zera e os represados saem: o dedup é pelo FATO, não pelo dia
+    c.execute("update funil_avisos set criado_em = %s", (AGORA - timedelta(days=1),))
+    r2 = fu.avaliar(c, CONTA, AGORA, EVENTOS)
+    assert r2["avisos"] == 2 and r2["represados"] == 0
+
+
+def test_fora_do_expediente_ninguem_e_acordado(c):
+    v = _vend(c)
+    lead = _lead(c, v); _fala(c, lead, ("in", 20), ("out", 19))
+    _modo(c, "ligado")
+    madrugada = AGORA.replace(hour=5)      # 02h em Brasília
+    assert fu.avaliar(c, CONTA, madrugada, EVENTOS)["avisos"] == 0
+    domingo = datetime(2026, 9, 13, 15, 0, tzinfo=timezone.utc)   # 12h de domingo
+    assert fu.avaliar(c, CONTA, domingo, EVENTOS)["avisos"] == 0
+
+
+def test_quem_esta_no_prazo_ou_sem_acao_nao_e_cobrado(c):
+    v = _vend(c)
+    ok = _lead(c, v, contato="Ok"); _fala(c, ok, ("in", 2), ("out", 1))
+    passou = _lead(c, v, contato="Passou", evento_em=AGORA.date() - timedelta(days=2))
+    _fala(c, passou, ("in", 30), ("out", 29))
+    _modo(c, "ligado")
+    assert fu.avaliar(c, CONTA, AGORA, EVENTOS)["avisos"] == 0
+
+
+# ------------------------------------------------------------------ o nicho
+
+def test_so_o_perfil_de_eventos_ganhou_a_tela_nesta_rodada():
+    """Combinado com o dono em 07/09: eventos primeiro, na Prime; o recorrente
+    entra quando a régua provar que funciona com gente usando."""
+    assert fu.PERFIS_COM_TELA == ("eventos",)
+    assert RECORRENTE["chave"] not in fu.PERFIS_COM_TELA
+    assert rxp.perfil("hortifruti")["chave"] not in fu.PERFIS_COM_TELA
+
+
+def test_a_config_le_a_janela_da_regua_e_nao_inventa_outra(c):
+    cfg = fu.config(c, CONTA)
+    assert cfg["follow_up_modo"] == "off" and cfg["fu_toques"] == (2, 4, 7, 15)
+    assert cfg["fu_teto_dia"] == 15 and cfg["fu_festa_dias"] == 30
+    # os prazos da conversa são os MESMOS da régua — uma configuração só
+    assert cfg["bola_nossa_min"] == 240 and cfg["janela_abre"].hour == 8
+
+
+# ------------------------------------------------------------------ a tela
+
+def _tela(**ctx):
+    import web.painel_follow_up as pfu  # noqa: F401 — registra o template
+    from web.portal import _env
+    base = dict(perfil=EVENTOS, papel="dono", topo=fu.resumo([]), fila=[], sobrando=0,
+                estado="critico", vend_f=None, etapa_f="", vendedores=[], etapas=[],
+                gestao=[], modo="off", rotulo=fu.ROTULO, emoji=fu.EMOJI,
+                br=pfu._br, tempo=pfu._tempo, adia_max=fu.ADIAMENTOS_ATE_MOTIVO, erro="")
+    t = _env.get_template("follow_up")
+    return "".join(t.blocks["conteudo"](t.new_context(dict(base, **ctx))))
+
+
+def _linha(**kw):
+    d = {"id": 1, "status": "contatado", "vendedor_id": 5, "vendedor": "Pedro", "quem": "Roberta",
+         "evento_em": date(2026, 9, 19), "evento_tipo": "Casamento", "convidados": 120,
+         "ult_in": None, "ult_out": None, "ult": None, "tentativas": 1,
+         "prazo": AGORA - timedelta(days=3), "acao": "mandar proposta hoje", "na_mao": False,
+         "adiados": 0, "adiado_por": None, "estado": "critico", "atraso_h": 94,
+         "parado_h": 94, "bola": "aguardando cliente", "faltam": 12}
+    d.update(kw)
+    return d
+
+
+def test_a_tela_mostra_o_que_o_dono_pediu_em_cada_card():
+    html = _tela(fila=[_linha()], topo=dict(fu.resumo([_linha()]), com_festa=1))
+    for pedaco in ("Roberta", "🚨 Crítico", "aguardando cliente", "mandar proposta hoje",
+                   "3d</b> sem interação", "1 tentativa", "Casamento", "120 convidados", "Pedro",
+                   "FOLLOW-UPS HOJE", "CRÍTICOS +72H", "SEM PRÓXIMA AÇÃO"):
+        assert pedaco in html, pedaco
+
+
+def test_a_tela_marca_quem_foi_adiado_em_serie():
+    html = _tela(fila=[_linha(adiados=3, adiado_por=5)])
+    assert "🔁 adiado 3×" in html and "sem mensagem no meio" in html
+    assert "obrigatório" in html          # o campo motivo já avisa antes de recusar
+
+
+def test_o_vendedor_nao_ve_o_painel_da_gestao():
+    com = _tela(papel="dono", gestao=[{"id": 5, "nome": "Pedro", "ativos": 3, "adiados": 0,
+                                       **{e: 0 for e in fu.ESTADOS}}])
+    sem = _tela(papel="vendedor", gestao=[])
+    assert "Por vendedor" in com and "Por vendedor" not in sem
+
+
+def test_a_tela_avisa_quando_os_avisos_estao_desligados_ou_em_ensaio():
+    assert "desligados" in _tela(modo="off")
+    assert "ensaio" in _tela(modo="observando")
+    ligado = _tela(modo="ligado")
+    assert "desligados" not in ligado and "ensaio" not in ligado
+
+
+def test_o_vocabulario_de_festa_so_aparece_pra_quem_vende_festa():
+    """CLAUDE.md §6 — o mesmo teste que o Raio-X faz, no card do follow-up."""
+    rc = _tela(perfil=RECORRENTE, fila=[_linha()])
+    for palavra in ("festa", "Casamento", "convidados", "sem data definida"):
+        assert palavra not in rc, palavra
+    assert "Roberta" in rc and "3d</b> sem interação" in rc
+
+
+def test_a_volta_nao_aceita_endereco_de_fora():
+    import web.painel_follow_up as pfu
+    assert pfu._volta("/painel/follow-up?estado=hoje", "") == "/painel/follow-up?estado=hoje"
+    assert pfu._volta("/painel/follow-up", "falhou") == "/painel/follow-up?erro=falhou"
+    for hostil in ("https://outro.site", "//evil.com", "/painel/empresa", "", None):
+        assert pfu._volta(hostil, "").startswith("/painel/follow-up")

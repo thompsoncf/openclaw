@@ -52,9 +52,10 @@ create table funil_regua (conta_id bigint primary key,
   janela_fecha time default '19:00', sem_resposta_min int default 120,
   bola_nossa_min int default 240, bola_cliente_min int default 4320,
   escala_min int default 240, teto_avisos_dia int default 5);
-create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint);
+create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
+  canal text default 'whatsapp', visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
-  criado_em timestamptz default now());
+  texto text default '', criado_em timestamptz default now());
 """
 
 _ETAPAS = [("novo", 0, "venda"), ("contatado", 10, "venda"), ("qualificado", 20, "venda"),
@@ -119,9 +120,10 @@ def _conversa(c, lead):
                      (CONTA, lead)).fetchone()[0]
 
 
-def _msg(c, conv, direcao, em):
-    c.execute("insert into mensagens (conversa_id, direcao, criado_em) values (%s,%s,%s)",
-              (conv, direcao, em))
+def _msg(c, conv, direcao, em, texto=""):
+    return c.execute("""insert into mensagens (conversa_id, direcao, texto, criado_em)
+                        values (%s,%s,%s,%s) returning id""",
+                     (conv, direcao, texto, em)).fetchone()[0]
 
 
 def _fala(c, lead, *pares):
@@ -441,7 +443,8 @@ def _tela(**ctx):
     base = dict(perfil=EVENTOS, papel="dono", topo=fu.resumo([]), fila=[], sobrando=0,
                 estado="critico", vend_f=None, etapa_f="", vendedores=[], etapas=[],
                 gestao=[], modo="off", rotulo=fu.ROTULO, emoji=fu.EMOJI,
-                br=pfu._br, tempo=pfu._tempo, adia_max=fu.ADIAMENTOS_ATE_MOTIVO, erro="")
+                br=pfu._br, tempo=pfu._tempo, adia_max=fu.ADIAMENTOS_ATE_MOTIVO, erro="",
+                resumo_msg=pfu._resumo_msg, quando_curto=pfu._quando_curto)
     t = _env.get_template("follow_up")
     return "".join(t.blocks["conteudo"](t.new_context(dict(base, **ctx))))
 
@@ -452,7 +455,7 @@ def _linha(**kw):
          "ult_in": None, "ult_out": None, "ult": None, "tentativas": 1,
          "prazo": AGORA - timedelta(days=3), "acao": "mandar proposta hoje", "na_mao": False,
          "adiados": 0, "adiado_por": None, "estado": "critico", "atraso_h": 94,
-         "parado_h": 94, "bola": "aguardando cliente", "faltam": 12}
+         "parado_h": 94, "bola": "aguardando cliente", "faltam": 12, "msg": None}
     d.update(kw)
     return d
 
@@ -469,9 +472,11 @@ def test_a_tela_marca_quem_foi_adiado_em_serie():
     html = _tela(fila=[_linha(adiados=3, adiado_por=5)])
     assert "🔁 adiado 3× sem falar" in html
     assert "obrigatório" in html          # o campo motivo já avisa antes de recusar
-    # o número aparece UMA vez: no selo. Antes vinha no selo e de novo na linha
-    # de baixo, a mesma informação duas vezes no mesmo campo de visão.
-    assert html.count("adiado 3×") == 1
+    # o selo é UM. Antes o número vinha no selo e de novo na linha de detalhes
+    # logo abaixo — a mesma informação duas vezes no mesmo campo de visão. A
+    # repetição que sobrou está dentro do formulário, explicando a exigência.
+    assert html.count('class="fu-pill hoje"') == 1
+    assert "adiado <b>3×</b>" not in html
 
 
 def test_quem_adiou_uma_ou_duas_vezes_aparece_na_linha_de_detalhes():
@@ -556,3 +561,82 @@ def test_o_perfil_de_eventos_e_o_unico_que_liga_a_chave():
     # a cidade nunca decide nada: era o índice que estava sendo lido por engano
     assert _tem_follow_up(_conta_row("eventos", cidade="consultoria")) is True
     assert _tem_follow_up((1, "curta")) is False        # mock de teste não quebra a tela
+
+
+# ------------------------------------------------------------------ o balão da conversa
+
+def test_o_card_mostra_onde_a_conversa_parou(c):
+    """O vendedor via o lead sem uma palavra do que havia dentro — a mesma coisa
+    que o funil corrigiu em 02/09 e que faltava aqui."""
+    v = _vend(c)
+    lead = _lead(c, v, contato="Ana")
+    conv = _conversa(c, lead)
+    _msg(c, conv, "out", AGORA - timedelta(days=9), "mandei os valores")
+    mid = _msg(c, conv, "in", AGORA - timedelta(days=8), "vou ver com meu marido e te falo")
+    x = fu.leads(c, CONTA, EVENTOS, AGORA)[0]
+    assert x["msg"]["texto"] == "vou ver com meu marido e te falo"
+    assert x["msg"]["nova"] is True and x["msg"]["minha"] is False
+    # depois de o vendedor abrir o Inbox, a bolinha verde apaga
+    c.execute("update conversas set visto_ate_id=%s where id=%s", (mid, conv))
+    assert fu.leads(c, CONTA, EVENTOS, AGORA)[0]["msg"]["nova"] is False
+
+
+def test_a_ultima_mensagem_vale_a_mais_nova_entre_os_canais(c):
+    v = _vend(c)
+    lead = _lead(c, v)
+    wa = _conversa(c, lead)
+    _msg(c, wa, "in", AGORA - timedelta(days=5), "pelo whatsapp")
+    email = c.execute("""insert into conversas (conta_id, prospeccao_id, canal)
+                         values (%s,%s,'email') returning id""", (CONTA, lead)).fetchone()[0]
+    _msg(c, email, "out", AGORA - timedelta(days=2), "pelo e-mail")
+    x = fu.leads(c, CONTA, EVENTOS, AGORA)[0]
+    assert x["msg"]["texto"] == "pelo e-mail" and x["msg"]["minha"] is True
+
+
+def test_lead_sem_conversa_nao_ganha_balao(c):
+    v = _vend(c)
+    _lead(c, v)
+    assert fu.leads(c, CONTA, EVENTOS, AGORA)[0]["msg"] is None
+
+
+def test_o_balao_aparece_na_tela_com_o_texto_cortado():
+    longa = "esse é um texto bem comprido que não cabe numa linha só do card e precisa ser cortado"
+    html = _tela(fila=[_linha(msg={"texto": longa, "em": AGORA - timedelta(hours=3),
+                                   "nova": True, "minha": False})])
+    assert 'class="fu-msg nova"' in html and "…" in html
+    assert longa not in html          # cortado, não inteiro
+    sem = _tela(fila=[_linha(msg=None)])
+    assert 'class="fu-msg' not in sem
+
+
+# ------------------------------------------------------------------ remarcar em um toque
+
+def test_a_tela_oferece_remarcar_em_um_toque():
+    html = _tela(fila=[_linha()])
+    assert 'name="dias" value="1"' in html and ">Amanhã<" in html
+    assert 'name="dias" value="3"' in html and 'name="dias" value="7"' in html
+    assert "Outra data" in html
+
+
+def test_batida_a_trava_o_toque_rapido_some_e_o_motivo_vira_obrigatorio():
+    """Um toque não tem onde escrever motivo — então, a um adiamento da trava,
+    o único caminho é o formulário."""
+    perto = _tela(fila=[_linha(adiados=fu.ADIAMENTOS_ATE_MOTIVO - 1)])
+    assert 'name="dias"' not in perto
+    assert "obrigatório" in perto and "required" in perto
+    assert "Remarcar com motivo" in perto
+    longe = _tela(fila=[_linha(adiados=0)])
+    assert 'name="dias"' in longe
+
+
+def test_a_ficha_do_lead_abre_no_endereco_que_existe():
+    """O link apontava pra /painel/prospeccao/lead/{id}, que não existe — e o
+    FastAPI devolvia {"detail":"Not Found"} sem passar por tela nenhuma."""
+    import web.painel_prospeccao as pp  # noqa: F401
+    from fastapi.routing import APIRoute
+    html = _tela(fila=[_linha(id=931)])
+    assert 'href="/painel/prospeccao/931"' in html
+    assert "/painel/prospeccao/lead/" not in html
+    # e o endereço existe mesmo, na tabela de rotas
+    caminhos = {r.path for r in pp.router.routes if isinstance(r, APIRoute)}
+    assert "/painel/prospeccao/{alvo_id}" in caminhos

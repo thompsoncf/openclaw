@@ -60,6 +60,18 @@ def _br(dt) -> str:
     return f"{loc:%d/%m} {loc:%H:%M}"
 
 
+def _resumo_msg(texto: str, limite: int = 62) -> str:
+    """Uma linha só da última mensagem — os mesmos do funil, reaproveitados pra
+    que o balão daqui e o do card sejam a mesma coisa, e não duas parecidas."""
+    from web.painel_prospeccao import _resumo_msg as _r
+    return _r(texto, limite)
+
+
+def _quando_curto(quando) -> str:
+    from web.painel_prospeccao import _quando_curto as _q
+    return _q(quando)
+
+
 def _tempo(horas) -> str:
     if horas is None:
         return "—"
@@ -116,31 +128,43 @@ def painel_follow_up(request: Request):
                    gestao=(fu.por_vendedor(linhas) if papel != "vendedor" else []),
                    modo=cfg["follow_up_modo"], rotulo=fu.ROTULO, emoji=fu.EMOJI,
                    br=_br, tempo=_tempo, adia_max=fu.ADIAMENTOS_ATE_MOTIVO,
+                   resumo_msg=_resumo_msg, quando_curto=_quando_curto,
                    erro=q.get("erro") or "")
 
 
 @router.post("/painel/follow-up/reagendar")
 def follow_up_reagendar(request: Request, lead_id: int = Form(...),
                         quando: str = Form(""), hora: str = Form(""),
-                        acao: str = Form(""), motivo: str = Form(""),
-                        volta: str = Form("")):
-    """Remarca a próxima ação. O motivo passa a ser obrigatório do 3º adiamento
-    seguido sem nenhuma mensagem no meio — a trava que o dono pediu pra que
-    reagendar não vire um jeito de silenciar o lead."""
+                        dias: str = Form(""), acao: str = Form(""),
+                        motivo: str = Form(""), volta: str = Form("")):
+    """Remarca a próxima ação — por data escolhida (`quando`) ou em um toque
+    (`dias`: os botões Amanhã / +3d / +7d).
+
+    O motivo passa a ser obrigatório do 3º adiamento seguido sem nenhuma mensagem
+    no meio — a trava que o dono pediu pra que reagendar não vire um jeito de
+    silenciar o lead. É por isso que os botões rápidos somem quando a trava está
+    a um adiamento de distância: um toque não tem onde escrever motivo."""
     conta, _perfil, redir = _acesso(request)
     if redir is not None:
         return redir
     conta_id = conta[0]
     d = (quando or "").strip() if isinstance(quando, str) else ""
-    h = (hora or "").strip() if isinstance(hora, str) else ""
-    try:
-        dia = datetime.strptime(d, "%Y-%m-%d").date()
-    except ValueError:
-        return RedirectResponse(_volta(volta, "data_invalida"), status_code=303)
-    try:
-        hh, mm = (int(x) for x in h.split(":")[:2])
-    except (ValueError, TypeError):
-        hh, mm = 9, 0
+    n = (dias or "").strip() if isinstance(dias, str) else ""
+    hh, mm = 9, 0
+    if n.isdigit() and 1 <= int(n) <= 90:
+        # o toque rápido marca pras 9h do dia, no fuso de Brasília: prazo de
+        # madrugada só serviria pra vencer antes de alguém acordar
+        dia = (datetime.now(timezone.utc) + _UTC_BR).date() + timedelta(days=int(n))
+    else:
+        try:
+            dia = datetime.strptime(d, "%Y-%m-%d").date()
+        except ValueError:
+            return RedirectResponse(_volta(volta, "data_invalida"), status_code=303)
+        h = (hora or "").strip() if isinstance(hora, str) else ""
+        try:
+            hh, mm = (int(x) for x in h.split(":")[:2])
+        except (ValueError, TypeError):
+            hh, mm = 9, 0
     # a tela fala em hora de Brasília; o banco guarda UTC
     prazo = datetime.combine(dia, time(hh, mm)).replace(tzinfo=timezone.utc) - _UTC_BR
     try:
@@ -207,6 +231,19 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 .fu-form input,.fu-form select{margin:0;font-size:.76rem;padding:.25rem .35rem}
 .fu-form button{font-size:.74rem;padding:.3rem .5rem;margin:0}
 .fu-form .dica{font-size:.64rem;color:var(--text-faint)}
+.fu-rapido{display:flex;gap:.25rem;margin:0}
+.fu-rapido button{font:500 .68rem var(--body);border:1px solid var(--line);background:var(--bg-2);
+  color:var(--text-dim);border-radius:8px;padding:.28rem .45rem;margin:0;width:auto;cursor:pointer}
+.fu-rapido button:hover,.fu-rapido button:focus-visible{border-color:var(--neon-borda);color:var(--neon-bright);outline:none}
+/* o balão da conversa: a mesma marcação do card do funil (kbmsg), pro vendedor
+   ver onde parou sem abrir o lead */
+.fu-msg{display:flex;gap:.4rem;align-items:flex-start;margin-top:.4rem;padding-top:.4rem;
+  border-top:1px solid var(--line);font-size:.74rem;color:var(--text-dim);line-height:1.35}
+.fu-msg .bolha{flex:0 0 auto;width:.5rem;height:.5rem;border-radius:50%;background:var(--neon);margin-top:.3rem}
+.fu-msg .eu{flex:0 0 auto;color:var(--text-faint);font-size:.8em;margin-top:.1rem}
+.fu-msg .txt{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fu-msg .qdo{flex:0 0 auto;color:var(--text-faint);font-size:.68rem}
+.fu-msg.nova .txt{color:var(--text)}
 .fu-gest{width:100%;border-collapse:collapse;font-size:.8rem}
 .fu-gest th{font:500 .6rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint);text-align:left;padding:.4rem .5rem;border-bottom:1px solid var(--line)}
 .fu-gest td{padding:.45rem .5rem;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
@@ -264,7 +301,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
     <div class="fu-lead">
       <div>
         <div class="nome">
-          <a href="/painel/prospeccao/lead/{{ x.id }}">{{ x.quem }}</a>
+          <a href="/painel/prospeccao/{{ x.id }}">{{ x.quem }}</a>
           <span class="fu-pill {{ x.estado }}">{{ emoji[x.estado] }} {{ rotulo[x.estado] }}</span>
           <span class="fu-pill">{{ x.bola }}</span>
           {% if x.adiados >= adia_max %}<span class="fu-pill hoje" title="sem nenhuma mensagem no meio">🔁 adiado {{ x.adiados }}× sem falar</span>{% endif %}
@@ -281,6 +318,14 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
           <span><i>👤</i>{{ x.vendedor }}</span>
           {% if x.adiados and x.adiados < adia_max %}<span><i>🔁</i>adiado <b>{{ x.adiados }}×</b> sem mensagem no meio</span>{% endif %}
         </div>
+        {% if x.msg %}
+        <div class="fu-msg{% if x.msg.nova %} nova{% endif %}">
+          {% if x.msg.nova %}<span class="bolha" aria-hidden="true"></span>
+          {% elif x.msg.minha %}<span class="eu" aria-hidden="true">↩</span>{% endif %}
+          <span class="txt">{{ resumo_msg(x.msg.texto) }}</span>
+          <span class="qdo">{{ quando_curto(x.msg.em) }}</span>
+        </div>
+        {% endif %}
         {% if x.estado == 'sem_acao' %}
           <div class="fu-acao calma">A data já passou. <b>Encerre com motivo, ou remarque.</b></div>
         {% else %}
@@ -290,17 +335,32 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
         {% endif %}
       </div>
       <div class="fu-dir">
-        <a class="bt" href="/painel/prospeccao/lead/{{ x.id }}">Abrir</a>
+        <a class="bt forte" href="/painel/prospeccao/{{ x.id }}">Abrir ficha</a>
+        {# UM TOQUE, não um formulário. O prazo já nasce proposto; remarcar é
+           quase sempre "empurra pra amanhã / pra semana que vem", e obrigar a
+           escolher dia, hora e texto pra isso é o mesmo erro de pedir que o
+           vendedor preencha a próxima ação. A data exata continua a um clique,
+           em "Outra data" — e, batida a trava, ela é o único caminho, porque o
+           motivo não pode ser pulado. #}
+        {% if x.adiados < adia_max - 1 %}
+        <form method="post" action="/painel/follow-up/reagendar" class="fu-rapido">
+          <input type="hidden" name="lead_id" value="{{ x.id }}">
+          <input type="hidden" name="volta" value="/painel/follow-up{{ qs(estado) }}">
+          <button type="submit" name="dias" value="1" title="remarcar pra amanhã, 9h">Amanhã</button>
+          <button type="submit" name="dias" value="3" title="remarcar pra daqui a 3 dias">+3d</button>
+          <button type="submit" name="dias" value="7" title="remarcar pra daqui a 7 dias">+7d</button>
+        </form>
+        {% endif %}
         <details>
-          <summary>Remarcar</summary>
+          <summary>{% if x.adiados >= adia_max - 1 %}Remarcar com motivo{% else %}Outra data{% endif %}</summary>
           <form method="post" action="/painel/follow-up/reagendar" class="fu-form">
             <input type="hidden" name="lead_id" value="{{ x.id }}">
             <input type="hidden" name="volta" value="/painel/follow-up{{ qs(estado) }}">
             <input type="date" name="quando" required>
             <input type="time" name="hora" value="09:00">
             <input type="text" name="acao" maxlength="120" placeholder="o que fazer (opcional)">
-            <input type="text" name="motivo" maxlength="300" placeholder="motivo{% if x.adiados >= adia_max - 1 %} (obrigatório){% endif %}">
-            <span class="dica">Do {{ adia_max }}º adiamento seguido sem falar com o cliente, o motivo é obrigatório.</span>
+            <input type="text" name="motivo" maxlength="300" placeholder="motivo{% if x.adiados >= adia_max - 1 %} (obrigatório){% endif %}"{% if x.adiados >= adia_max - 1 %} required{% endif %}>
+            <span class="dica">{% if x.adiados >= adia_max - 1 %}Já adiado {{ x.adiados }}× sem falar com o cliente: agora o motivo é obrigatório.{% else %}Do {{ adia_max }}º adiamento seguido sem falar com o cliente, o motivo passa a ser obrigatório.{% endif %}</span>
             <button type="submit">Remarcar</button>
           </form>
         </details>

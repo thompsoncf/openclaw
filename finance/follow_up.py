@@ -190,6 +190,20 @@ marc as (
    -- então duas marcações da mesma transação nascem com o mesmo instante e a
    -- "última" seria sorteada a cada consulta
    order by prospeccao_id, criado_em desc, id desc),
+ultmsg as (
+  -- a última mensagem de cada lead, pro balão do card. É a MESMA leitura do
+  -- funil (painel_prospeccao): lateral limit 1 por conversa, uma consulta pro
+  -- board inteiro. `visto_ate_id` nulo é "nunca abriu" — aí toda entrada conta
+  -- como não vista, que é o estado de quem nunca usou o Inbox.
+  select distinct on (cv.prospeccao_id)
+         cv.prospeccao_id as lead, cv.visto_ate_id, m.id as mid,
+         m.direcao as dir, m.texto, m.criado_em as em
+    from conversas cv
+    join lateral (select id, direcao, texto, criado_em from mensagens
+                   where conversa_id = cv.id order by criado_em desc, id desc limit 1) m on true
+   where cv.conta_id = %(conta)s and cv.prospeccao_id is not null
+     and coalesce(cv.canal, 'whatsapp') in ('whatsapp', 'email', 'instagram')
+   order by cv.prospeccao_id, m.criado_em desc, m.id desc),
 adiam as (
   select fm.prospeccao_id as lead, count(*) as n
     from follow_up_marcacoes fm
@@ -202,9 +216,11 @@ select p.id, p.status, p.vendedor_id,
        p.evento_em, p.evento_tipo, p.evento_convidados, p.criado_em,
        msg.ult_in, msg.ult_out, coalesce(tent.n, 0),
        marc.prazo_em, marc.acao, marc.criado_em, coalesce(adiam.n, 0),
-       coalesce(nullif(mb.nome,''), mb.email), marc.membro_id
+       coalesce(nullif(mb.nome,''), mb.email), marc.membro_id,
+       ultmsg.texto, ultmsg.em, ultmsg.dir, ultmsg.mid, ultmsg.visto_ate_id
   from prospeccao p
-  left join msg   on msg.lead   = p.id
+  left join msg    on msg.lead    = p.id
+  left join ultmsg on ultmsg.lead = p.id
   left join tent  on tent.lead  = p.id
   left join marc  on marc.lead  = p.id
   left join adiam on adiam.lead = p.id
@@ -230,7 +246,8 @@ def leads(c, conta_id: int, perfil: dict | None = None,
     out = []
     for r in c.execute(_SQL_LEADS, {"conta": conta_id}).fetchall():
         (lid, status, vend, quem, evento_em, ev_tipo, ev_conv, criado,
-         ult_in, ult_out, tent, m_prazo, m_acao, m_em, adiados, vend_nome, m_por) = r
+         ult_in, ult_out, tent, m_prazo, m_acao, m_em, adiados, vend_nome, m_por,
+         msg_txt, msg_em, msg_dir, msg_id, visto) = r
         ult = max([x for x in (ult_in, ult_out) if x], default=None)
         # festa que já passou e o lead segue aberto: não há o que propor
         sem_acao = bool(tem_data and evento_em and evento_em < hoje)
@@ -257,6 +274,10 @@ def leads(c, conta_id: int, perfil: dict | None = None,
             "bola": ("aguardando vendedor" if (ult_out is None or (ult_in and ult_in > ult_out))
                      else "aguardando cliente"),
             "faltam": ((evento_em - hoje).days if evento_em else None),
+            # o balão do card: onde a conversa parou, sem precisar abrir o lead
+            "msg": ({"texto": msg_txt or "", "em": msg_em, "minha": msg_dir == "out",
+                     "nova": (msg_dir == "in" and (visto is None or (msg_id or 0) > visto))}
+                    if msg_em else None),
         })
     return out
 

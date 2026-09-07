@@ -189,6 +189,9 @@ def _volta(volta: str, erro: str) -> str:
 
 
 _TPL = r"""{% extends "base" %}{% block conteudo %}
+{# o balão de conversa é o MESMO do funil e do Raio-X (web/balao_conversa.py):
+   abre ancorado no botão, sem sair da tela e sem perder a fila aberta #}
+<style>{{ balao_css }}</style>
 <style>
 .fu{display:flex;flex-direction:column;gap:1rem}
 .fu h1{font-size:1.5rem;margin:0}
@@ -244,6 +247,15 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 .fu-msg .txt{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fu-msg .qdo{flex:0 0 auto;color:var(--text-faint);font-size:.68rem}
 .fu-msg.nova .txt{color:var(--text)}
+/* a prévia vira BOTÃO quando existe conversa: é ela que abre o balão. Largura
+   cheia e fundo transparente pra continuar parecendo a linha de texto que era —
+   o `width:100%;margin-top:1.4rem` global dos formulários é vencido aqui. */
+button.fu-msg{width:100%;margin:.4rem 0 0;padding:.4rem 0 0;background:none;text-align:left;
+  cursor:pointer;font-family:inherit;font-size:.74rem;border:0;border-top:1px solid var(--line)}
+button.fu-msg .zap{flex:0 0 auto;opacity:.85;font-size:.9rem}
+button.fu-msg:hover .txt,button.fu-msg:focus-visible .txt{color:var(--neon-bright)}
+button.fu-msg:hover .zap,button.fu-msg:focus-visible .zap{opacity:1}
+button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2px}
 .fu-gest{width:100%;border-collapse:collapse;font-size:.8rem}
 .fu-gest th{font:500 .6rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint);text-align:left;padding:.4rem .5rem;border-bottom:1px solid var(--line)}
 .fu-gest td{padding:.45rem .5rem;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
@@ -319,12 +331,24 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
           {% if x.adiados and x.adiados < adia_max %}<span><i>🔁</i>adiado <b>{{ x.adiados }}×</b> sem mensagem no meio</span>{% endif %}
         </div>
         {% if x.msg %}
+        {% if x.msg.conversa_id %}
+        <button type="button" class="fu-msg abre{% if x.msg.nova %} nova{% endif %}"
+                onclick="kbAbrirChat(event,{{ x.msg.conversa_id }},'{{ x.msg.aba }}',this,{{ x.quem|tojson|forceescape }})"
+                title="abrir a conversa aqui mesmo">
+          {% if x.msg.nova %}<span class="bolha" aria-hidden="true"></span>
+          {% elif x.msg.minha %}<span class="eu" aria-hidden="true">↩</span>{% endif %}
+          <span class="txt">{{ resumo_msg(x.msg.texto) }}</span>
+          <span class="qdo">{{ quando_curto(x.msg.em) }}</span>
+          <span class="zap" aria-hidden="true">💬</span>
+        </button>
+        {% else %}
         <div class="fu-msg{% if x.msg.nova %} nova{% endif %}">
           {% if x.msg.nova %}<span class="bolha" aria-hidden="true"></span>
           {% elif x.msg.minha %}<span class="eu" aria-hidden="true">↩</span>{% endif %}
           <span class="txt">{{ resumo_msg(x.msg.texto) }}</span>
           <span class="qdo">{{ quando_curto(x.msg.em) }}</span>
         </div>
+        {% endif %}
         {% endif %}
         {% if x.estado == 'sem_acao' %}
           <div class="fu-acao calma">A data já passou. <b>Encerre com motivo, ou remarque.</b></div>
@@ -396,6 +420,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   </div>
   {% endif %}
 </div>
+<script>{{ balao_js }}</script>
 {% endblock %}"""
 
 _env.loader.mapping["follow_up"] = _TPL

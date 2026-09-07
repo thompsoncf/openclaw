@@ -44,6 +44,10 @@ def _pagina(nome: str) -> str:
 TELAS = {
     "painel_prospeccao.py": _pagina("painel_prospeccao.py"),
     "painel_raio_x.py": _pagina("painel_raio_x.py"),
+    # o Follow-up é a TERCEIRA tela a abrir o mesmo balão (07/09/2026). Entrar
+    # aqui não é zelo: a tela só tem `{{ balao_js }}`, então quem esquecer de
+    # injetar deixa o 💬 na tela com o clique morto, sem nada errado no HTML.
+    "painel_follow_up.py": _pagina("painel_follow_up.py"),
 }
 TEXTO = TELAS["painel_prospeccao.py"]
 
@@ -123,6 +127,14 @@ def test_kpiabre_esta_no_topo():
     e foi exatamente aqui que o bug apareceu em produção."""
     assert "kpiAbre" in _handlers()
     assert "kpiAbre" in _globais()
+
+
+def test_o_balao_do_follow_up_alcanca_a_funcao_do_modulo():
+    """Mesmo caso do Raio-X, na tela do Follow-up: a prévia da conversa é um
+    botão que chama `kbAbrirChat`, e a função só existe no módulo do balão."""
+    fu = TELAS["painel_follow_up.py"]
+    assert "kbAbrirChat" in _handlers(fu)
+    assert "kbAbrirChat" in _globais(fu)
 
 
 def test_o_balao_do_raio_x_alcanca_a_funcao_do_modulo():

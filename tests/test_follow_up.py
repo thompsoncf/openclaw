@@ -15,6 +15,7 @@ teste que dependesse da hora real passaria ou falharia conforme o dia.
 import os
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from psycopg_pool import ConnectionPool
@@ -640,3 +641,105 @@ def test_a_ficha_do_lead_abre_no_endereco_que_existe():
     # e o endereço existe mesmo, na tabela de rotas
     caminhos = {r.path for r in pp.router.routes if isinstance(r, APIRoute)}
     assert "/painel/prospeccao/{alvo_id}" in caminhos
+
+
+# ------------------------------------------------------------------ abrir a conversa
+
+def test_a_previa_carrega_a_conversa_e_a_aba(c):
+    """O balão de web/balao_conversa precisa de (conversa_id, aba) — sem isso o
+    card mostra o texto e não tem como abrir nada."""
+    v = _vend(c)
+    zap = _lead(c, v, contato="Zap")
+    conv = _conversa(c, zap)
+    _msg(c, conv, "in", AGORA - timedelta(days=8), "oi")
+    mail = _lead(c, v, contato="Mail")
+    cm = c.execute("""insert into conversas (conta_id, prospeccao_id, canal)
+                      values (%s,%s,'email') returning id""", (CONTA, mail)).fetchone()[0]
+    _msg(c, cm, "in", AGORA - timedelta(days=8), "bom dia")
+    linhas = {x["quem"]: x for x in fu.leads(c, CONTA, EVENTOS, AGORA)}
+    assert linhas["Zap"]["msg"]["conversa_id"] == conv and linhas["Zap"]["msg"]["aba"] == "conversas"
+    assert linhas["Mail"]["msg"]["conversa_id"] == cm and linhas["Mail"]["msg"]["aba"] == "emails"
+
+
+def test_a_previa_e_o_botao_que_abre_a_conversa():
+    html = _tela(fila=[_linha(msg={"texto": "vou ver com meu marido", "em": AGORA,
+                                   "nova": True, "minha": False,
+                                   "conversa_id": 4242, "aba": "conversas"})])
+    assert "kbAbrirChat(event,4242,'conversas'" in html
+    assert 'class="fu-msg abre nova"' in html and "💬" in html
+
+
+def test_sem_conversa_a_previa_nao_vira_botao():
+    """Lead com mensagem mas sem id de conversa (dado torto) não pode virar um
+    botão que abre o nada."""
+    html = _tela(fila=[_linha(msg={"texto": "oi", "em": AGORA, "nova": False,
+                                   "minha": True, "conversa_id": None, "aba": "conversas"})])
+    assert "kbAbrirChat(event," not in html and 'class="fu-msg"' in html
+
+
+def test_a_tela_carrega_o_balao_da_conversa():
+    """CSS e JS vêm de web/balao_conversa pelas globais do Jinja — se a tela
+    esquecer de injetar, o botão existe e o clique não faz nada."""
+    html = _tela(fila=[_linha(msg={"texto": "oi", "em": AGORA, "nova": False, "minha": True,
+                                   "conversa_id": 7, "aba": "conversas"})])
+    assert ".chatpop{" in html and "function kbAbrirChat" in html
+
+
+# ------------------------------------------------------------------ a rota de remarcar
+
+@pytest.fixture()
+def rota(monkeypatch, pool, c):
+    """A rota de verdade, com pool e sessão — a camada que não tinha teste
+    nenhum, que foi por onde o link quebrado da ficha passou."""
+    import web.painel_follow_up as pfu
+    from web import portal as pt
+    linha = (CONTA, "pj", "Prime", "e@x.com", "pro", "ativa", None, "TERESINA",
+             False, None, False, True, True, False, True, False, "eventos")
+    monkeypatch.setattr(pfu, "get_pool", lambda: pool)
+    monkeypatch.setattr(pfu, "conta_logada", lambda r: linha)
+    req = SimpleNamespace(session={"conta_id": CONTA, "papel": "dono", "membro_id": None},
+                          state=SimpleNamespace(), query_params={})
+    return pfu, req
+
+
+def _marcado(c, lead):
+    return c.execute("""select prazo_em, acao from follow_up_marcacoes
+                         where prospeccao_id=%s order by id desc limit 1""", (lead,)).fetchone()
+
+
+def test_outra_data_grava_no_fuso_de_brasilia(rota, c):
+    """14:30 em Brasília é 17:30 UTC. Um fuso trocado aqui faria o prazo vencer
+    três horas antes ou depois do combinado, todo dia, sem ninguém notar."""
+    pfu, req = rota
+    lead = _lead(c, _vend(c))
+    c.commit()
+    r = pfu.follow_up_reagendar(req, lead_id=lead, quando="2026-09-25", hora="14:30",
+                                acao="ligar pra ela", volta="/painel/follow-up?estado=critico")
+    assert r.status_code == 303 and r.headers["location"] == "/painel/follow-up?estado=critico"
+    prazo, acao = _marcado(c, lead)
+    assert prazo == datetime(2026, 9, 25, 17, 30, tzinfo=timezone.utc) and acao == "ligar pra ela"
+
+
+def test_o_botao_rapido_marca_as_nove_da_manha(rota, c):
+    pfu, req = rota
+    lead = _lead(c, _vend(c))
+    c.commit()
+    r = pfu.follow_up_reagendar(req, lead_id=lead, dias="3", volta="/painel/follow-up")
+    assert r.status_code == 303 and "erro" not in r.headers["location"]
+    prazo, _ = _marcado(c, lead)
+    assert prazo.astimezone(timezone.utc).hour == 12      # 09h de Brasília
+    assert (prazo.date() - datetime.now(timezone.utc).date()).days == 3
+
+
+def test_data_vazia_ou_torta_volta_com_recado_e_nao_grava(rota, c):
+    pfu, req = rota
+    lead = _lead(c, _vend(c))
+    c.commit()
+    for ruim in ("", "amanhã", "2026-13-45"):
+        r = pfu.follow_up_reagendar(req, lead_id=lead, quando=ruim, volta="/painel/follow-up")
+        assert r.headers["location"] == "/painel/follow-up?erro=data_invalida", ruim
+    assert _marcado(c, lead) is None
+    # e um número de dias fora da faixa cai no mesmo lugar, em vez de marcar 2030
+    r = pfu.follow_up_reagendar(req, lead_id=lead, dias="9999", volta="/painel/follow-up")
+    assert r.headers["location"] == "/painel/follow-up?erro=data_invalida"
+    assert _marcado(c, lead) is None

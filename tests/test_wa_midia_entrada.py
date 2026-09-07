@@ -100,7 +100,7 @@ _SQL = """
 create table contas (id bigserial primary key, nome text, chip_de bigint);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text, contato text, whatsapp text, telefone text, email text, cidade text,
-  uf text, origem text, status text default 'novo', estagio text default 'lead',
+  uf text, origem text, origem_codigo text, status text default 'novo', estagio text default 'lead',
   temperatura text, criado_em timestamptz default now(),
   atualizado_em timestamptz default now(), tipo text);
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,

@@ -31,7 +31,7 @@ create table membros (id bigserial primary key, conta_id bigint, nome text, emai
 create table prospeccao (id bigserial primary key, evento_em date, evento_tipo text, evento_convidados int, evento_origem text, evento_trecho text, evento_pista text, evento_lido_em timestamptz, conta_id bigint, vendedor_id bigint,
   empresa text, cnpj text, segmento text, cidade text, uf text, contato text, cargo text,
   telefone text, whatsapp text, email text, status text default 'novo', temperatura text default 'frio',
-  valor_estimado_centavos bigint default 0, origem text, obs text, instagram text, socio text,
+  valor_estimado_centavos bigint default 0, origem text, origem_codigo text, obs text, instagram text, socio text,
   regime_tributario text, porte text, ultimo_contato_em timestamptz, proximo_contato_em timestamptz,
   orcamento_id bigint, tem_site boolean, maps_url text, receita text, site_url text,
   decisor_nome text, decisor_cargo text, decisor_telefone text, decisor_whatsapp boolean,

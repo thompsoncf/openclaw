@@ -21,7 +21,7 @@ from web.painel_prospeccao import _eh_numero_da_equipe, _wa_inbound_conversa
 _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text not null, contato text, whatsapp text, telefone text, tipo text default 'pj',
-  origem text, temperatura text default 'frio', status text default 'novo',
+  origem text, origem_codigo text, temperatura text default 'frio', status text default 'novo',
   estagio text default 'base', atualizado_em timestamptz default now(),
   criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,

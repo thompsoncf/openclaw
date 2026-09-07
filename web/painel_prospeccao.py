@@ -30,6 +30,7 @@ from db.conexao import get_pool
 from contas import equipe as eq
 from finance import campanhas_motor as _cm
 from finance import funil_regua as _fr
+from finance import origem_anuncio
 from finance import prospec_convite as _prospec_convite
 from finance import prospec_inbound as _prospec_inbound
 from finance import prospeccao_fontes as fontes
@@ -4183,6 +4184,40 @@ def _ja_conversou(c, conta_id, lead_id) -> bool:
     return bool(r and ((r[0] or 0) >= 1 or (r[1] or 0) >= 1))
 
 
+def _carimbar_origem(c, lead_id, codigo) -> None:
+    """Grava de qual anúncio veio um lead QUE JÁ EXISTIA. Vale o PRIMEIRO toque.
+
+    Lead novo não passa por aqui — o código entra no próprio insert. Aqui é o outro
+    caso: alguém que já estava na base (ou já tinha falado antes) chega de novo, e
+    agora com código.
+
+    NÃO SOBRESCREVE. Se a pessoa voltar meses depois por outro criativo, quem a
+    trouxe foi o primeiro; deixar o segundo carimbar por cima faria dois criativos
+    reivindicarem a mesma venda, e a soma do painel ficaria maior que o faturamento
+    de verdade. O `where origem_codigo is null` é a regra inteira, e ele resolve no
+    banco — sem ler-e-decidir, que numa segunda mensagem simultânea daria as duas
+    gravando.
+
+    O toque repetido não se perde: vira nota no histórico do lead, que é onde o
+    vendedor já procura o que aconteceu com aquela pessoa.
+    """
+    if not codigo or not lead_id:
+        return
+    n = c.execute(
+        "update prospeccao set origem_codigo=%s where id=%s and origem_codigo is null",
+        (codigo, lead_id)).rowcount
+    if n:
+        return
+    ja = c.execute("select origem_codigo from prospeccao where id=%s",
+                   (lead_id,)).fetchone()
+    if ja and (ja[0] or "") != codigo:
+        c.execute(
+            """insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, descricao)
+               values (%s, null, 'nota', %s)""",
+            (lead_id, f"Voltou por outro anúncio ({codigo}). "
+                      f"A origem segue sendo a primeira ({ja[0]})."))
+
+
 def _trava_numero(c, conta_id, numero) -> str:
     """UMA MENSAGEM POR VEZ, POR NÚMERO. Devolve os 8 dígitos finais.
 
@@ -4353,6 +4388,13 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     #
     # O aviso cruzado (o gêmeo na outra campanha) é o `_gemeos_de_outro_chip`,
     # que é só leitura de tela — aqui a regra é apenas: não roubar o lead do outro chip.
+    #
+    # DE QUAL ANÚNCIO VEIO. O código viaja no texto da mensagem pronta do anúncio
+    # ("...sobre o espaço. [#A3]") porque no QR não existe o `referral.source_id` da
+    # API oficial — ver finance/origem_anuncio.py. A leitura acontece ANTES de tudo,
+    # e `corpo` segue limpo daqui pra baixo: assim o vendedor não vê o código na
+    # conversa, no aviso de lead novo nem no que o agente lê.
+    codigo_anuncio, corpo = origem_anuncio.extrair(corpo)
     lead = c.execute(
         r"""select p.id, coalesce(p.origem,'') from prospeccao p
              where p.conta_id=%s
@@ -4426,9 +4468,9 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         # clique na ficha troca pra empresa quando o número for de um comércio.
         lead_id = c.execute(
             """insert into prospeccao (conta_id, vendedor_id, empresa, contato, whatsapp,
-                 tipo, origem, temperatura, status, estagio)
-               values (%s, null, %s, %s, %s, 'pf', 'whatsapp_inbound', 'quente', 'novo', 'lead') returning id""",
-            (conta_id, nome[:250], nome[:250], "+" + remetente)).fetchone()[0]
+                 tipo, origem, temperatura, status, estagio, origem_codigo)
+               values (%s, null, %s, %s, %s, 'pf', 'whatsapp_inbound', 'quente', 'novo', 'lead', %s) returning id""",
+            (conta_id, nome[:250], nome[:250], "+" + remetente, codigo_anuncio)).fetchone()[0]
         # `lead_novo` governa o "Retornar contato: X" agendado pra daqui a 2h (mais
         # abaixo). Numa retomada isso é tarefa inventada: ninguém deixou de responder
         # esse cliente — a conversa é que voltou a existir do zero pro sistema.
@@ -4453,6 +4495,7 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         # separa cliente ativo de alvo frio, e não depende do estágio.
         if not (exigir_continuidade and de_prospeccao) or _ja_conversou(c, conta_id, lead_id):
             _promover_para_lead(c, conta_id, lead_id)
+        _carimbar_origem(c, lead_id, codigo_anuncio)
     # Acha a conversa do lead OU qualquer uma do mesmo número (e vincula ela ao lead,
     # se estiver órfã). A conversa deste lead vem primeiro; depois as que já têm dono;
     # por último a mais recente. Exigir `prospeccao_id is null` pra casar por número,

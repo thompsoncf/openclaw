@@ -33,7 +33,7 @@ create table membros (id bigserial primary key, conta_id bigint, nome text, emai
   papel text default 'vendedor', ativo boolean default true);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text, contato text, status text default 'novo', evento_em date, evento_tipo text,
-  evento_convidados int, orcamento_id bigint, origem text, segmento text, porte text, uf text,
+  evento_convidados int, orcamento_id bigint, origem text, origem_codigo text, segmento text, porte text, uf text,
   criado_em timestamptz default now(), atualizado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   contato_ref text, contato_nome text, criado_em timestamptz default now());

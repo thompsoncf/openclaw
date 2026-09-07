@@ -160,15 +160,50 @@ git push --force-with-lease -u origin <branch>
 ```
 
 O `--force-with-lease` aqui é seguro porque a remota carrega **só história já
-mesclada** — o squash levou tudo pra main. Confira antes, e o comando é este; diff
-vazio quer dizer que o conteúdo está inteiro na main e nada se perde:
+mesclada** — o squash levou tudo pra main. Quem autoriza o force é **o PR estar
+mesclado**; a conferência é sobre COMMITS depois da cabeça do PR, não sobre
+conteúdo:
 
 ```
-git diff origin/<branch> origin/main
+git log --oneline <sha-da-cabeça-do-PR>..origin/<branch>
 ```
 
-Se esse diff NÃO vier vazio, pare: há trabalho na remota que não entrou na main.
-Aí é `rebase --onto` (acima) pra salvar o que sobrou, nunca force.
+Vazio quer dizer que tudo que está na remota foi carregado por um PR que entrou.
+Se vier alguma linha, pare: são commits que nenhum PR levou. Aí é `rebase --onto`
+(acima) pra salvar o que sobrou, nunca force.
+
+### A conferência que PARECE certa e não é
+
+**Não use `git diff origin/<branch> origin/main`.** Esta seção mandava usar isso
+até 07/09/2026, e nesse dia o erro apareceu, no #647.
+
+O diff veio NÃO-VAZIO e eu segui assim mesmo — mas o que ele mostrava era o #646,
+mesclado na main enquanto o meu PR rodava. Isto é a **main à frente**, não a
+minha branch para trás; as duas coisas pedem decisões opostas e um diff de
+conteúdo entre duas pontas não distingue uma da outra. Depois do squash, aliás,
+nem a direção contrária serve sozinha: `git log origin/main..<branch>` sempre
+lista o commit recém-mesclado, porque o squash criou outro commit com o mesmo
+conteúdo. Por isso a pergunta certa é **"algum commit ficou fora de todo PR?"**,
+e a âncora é a cabeça do PR, não a main.
+
+Nada se perdeu no #647 — conferi arquivo por arquivo depois. Mas foi sorte, e a
+conferência existe pra não depender de sorte.
+
+### A conferência tem que barrar o push, não só reclamar
+
+O segundo erro do mesmo dia, porque este se repete em qualquer checagem de shell:
+
+```
+# ERRADO: o `|| echo` devolve 0, e o push roda mesmo com a checagem reclamando
+(git diff --quiet A B && echo ok || echo pare) && git push --force-with-lease ...
+
+# CERTO: nenhum push se a conferência não passar
+git log --oneline <sha>..origin/<branch> | grep -q . && { echo PARE; exit 1; }
+git push --force-with-lease -u origin <branch>
+```
+
+Aviso impresso não é trava. Se a checagem não muda o código de saída, ela é
+comentário.
 
 E o sinal de que se caiu nisso, pra reconhecer rápido: o PR mostra **mais arquivos
 e mais commits do que a mudança tem**, porque está remontando o que já entrou.

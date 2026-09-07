@@ -1437,8 +1437,18 @@ def _dados_leads_chip(pool, conta_id, periodo, chip_sel, vendedor_sel, busca) ->
                     _col("esperou", "Esperou", tag=True),
                     _col("msgs", "Msgs", num=True),
                     _col("vendedor", "Vendedor"), _col("ultima", "Última msg"),
-                    _col("orcamento", "Orçamento")],
+                    # "do lead", não só "Orçamento": a coluna diz se ESTE lead tem
+                    # proposta, e não quais propostas saíram no período. Com o
+                    # rótulo curto, quem via a coluna toda "—" em setembro/2026 —
+                    # com quatro orçamentos feitos no mês, todos de leads de
+                    # agosto ou cadastrados na mão — lia "sumiu orçamento".
+                    _col("orcamento", "Orçamento do lead")],
         "linhas": linhas,
+        # O PERÍODO AQUI FILTRA A ENTRADA DO LEAD (`p.criado_em`), não a data do
+        # orçamento nem a da última mensagem. Dito só como "período: Este mês", o
+        # filtro promete uma coisa e faz outra — ver o rótulo no topo da tela e no
+        # PDF, que passam a dizer o que ele realmente recorta.
+        "periodo_label": "leads que entraram em",
         # SEM total: `valor_estimado_centavos` é zero nos 675 leads da base, e uma
         # linha "Total R$ 0,00" seria exatamente o ruído que o funil acabou de
         # tirar. O template pula a linha quando `col_total` é nulo.

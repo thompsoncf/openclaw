@@ -1257,7 +1257,18 @@ def test_proposta_ja_enviada_perde_o_selo_de_nunca_enviada(cliente, correio):
         "id": oid, "para": "maria@x.com", "assunto": "Orçamento",
         "mensagem": "Segue."}).status_code == 200
     pn = _item(cliente, oid)["painel"]
-    assert pn["selos"] == [] and pn["acao"] is None
+    # A asserção era `selos == []`. Em 08/09/2026 o funil ganhou o aviso de
+    # proposta enviada sem plano de pagamento, e esta fixture é exatamente isso
+    # (`modo='evento'`, `status='enviado'`, sem `parcelas`) — então a lista deixou
+    # de ser vazia por um motivo legítimo.
+    #
+    # CONTINUA SENDO LISTA EXATA, e isso é o ponto. A primeira tentativa de
+    # conserto foi `"Orçamento nunca enviado ao cliente" not in [...]`, que parece
+    # mais preciso e é uma guarda VAZIA: renomear o selo no código faz o `not in`
+    # passar sozinho. Provado com mutação — ela sobreviveu. A lista exata continua
+    # matando tanto o selo que teima em ficar quanto o selo que aparece à toa.
+    assert [s["texto"] for s in pn["selos"]] == ["Enviado sem plano de pagamento"]
+    assert pn["acao"] is None
     assert pn["resumo"].startswith("enviada ")
 
 

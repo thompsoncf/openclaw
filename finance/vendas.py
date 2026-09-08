@@ -456,6 +456,11 @@ _ORDEM_ACAO = ("marcar", "resegurar", "sinal", "comprovante", "assinar",
 # fica exatamente onde estava. Reordenar mais coisas aqui seria embutir uma
 # segunda mudança de comportamento num parâmetro que promete uma só, e o teste
 # `test_a_troca_e_posicional` cobra isso comparando as duas filas.
+#: Os status em que a proposta JÁ SAIU DE CASA e ainda dá pra arrumar o plano sem
+#: remendo. 'fechado' não entra: lá o título já nasceu e o aviso é outro, mais
+#: forte. 'rascunho' também não — proposta em construção sem plano é o normal.
+ENVIADOS_SEM_PLANO = ("enviado", "negociando", "aprovada")
+
 _ORDEM_ACAO_ASSINA_ANTES = ("marcar", "resegurar", "assinar", "comprovante",
                             "sinal", "fechar", "enviar")
 
@@ -464,11 +469,17 @@ def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
                    pagamentos=None, enviado_em="", contrato_numero=None,
                    contrato_assinado=False, plano_difere=0, aprovada_por="",
                    nunca_enviada=True, contrato_enviado_em=None,
-                   tem_contrato=True, assinar_antes_do_sinal=False, hoje=None) -> dict:
+                   tem_contrato=True, assinar_antes_do_sinal=False, modo="",
+                   hoje=None) -> dict:
     """{selos, acao, resumo} de uma linha — a redação inteira, testável sem tela.
 
     `selos` são só PENDÊNCIAS. `resumo` é o que já aconteceu, pro subtítulo.
-    `acao` é o único botão verde, ou None quando não há o que fazer agora."""
+    `acao` é o único botão verde, ou None quando não há o que fazer agora.
+
+    `modo` é o do ORÇAMENTO ('evento' ou 'recorrente'), e hoje só o aviso de plano
+    de pagamento o consulta — porque só no evento o plano MORA em `parcelas`. Nasce
+    vazio de propósito: quem não informa o modo não recebe aviso que dependa dele.
+    """
     pg = pagamentos or {}
     selos, feito, acoes = [], [], []
 
@@ -521,12 +532,33 @@ def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
     # `"total" in pg` e não `pg.get("total")`: quem chama pode não ter buscado os
     # pagamentos, e "não sei o plano" não é "não tem plano" — sem esta guarda o
     # selo apareceria em toda linha fechada de qualquer chamador distraído.
-    if status == "fechado" and "total" in pg and not int(pg.get("total") or 0):
+    #
+    # E `modo == "evento"`, PORTÃO QUE FALTOU NA PRIMEIRA VERSÃO (#662, corrigido
+    # em 08/09/2026 no mesmo dia). Só no evento o plano mora em `parcelas`: no
+    # recorrente ele é setup + mensalidade, e `fechar_orcamento` nem lê `parcelas`
+    # nesse modo. Sem o portão, TODA proposta recorrente fechada acusava falta de
+    # um plano que ela nunca teve — a conta 3 (ZAQ) tinha uma assim, e foi a §6
+    # cobrando o que eu não fiz: medir na segunda conta antes de subir.
+    sem_plano = modo == "evento" and "total" in pg and not int(pg.get("total") or 0)
+    if sem_plano and status == "fechado":
         selos.append({
             "texto": "Fechado sem plano de pagamento", "tom": "ambar",
             "dica": "O contas a receber ficou com um título único do valor total. "
                     "Monte o plano de pagamento pra registrar entrada e parcelas "
                     "— e pra ter onde anexar os comprovantes."})
+    elif sem_plano and not nunca_enviada and status in ENVIADOS_SEM_PLANO:
+        # ANTES DE FECHAR, que é quando ainda dá pra arrumar sem remendo: o cliente
+        # está com uma proposta que não diz como pagar. Foi o dono quem pediu
+        # (08/09/2026), olhando duas da conta 34 que saíram assim — nº 19 e nº 22.
+        #
+        # `not nunca_enviada` e não só o status: é o cliente TER RECEBIDO que
+        # transforma a falta em problema. Enquanto está em casa, é rascunho em
+        # andamento, e avisar ali pintaria de âmbar toda proposta em construção.
+        selos.append({
+            "texto": "Enviado sem plano de pagamento", "tom": "ambar",
+            "dica": "O cliente recebeu uma proposta que não diz como pagar. Monte "
+                    "o plano antes de fechar — depois de fechado, o contas a "
+                    "receber vira um título único do valor total."})
 
     # ---- o plano que não fecha com o total. Era um aviso que só aparecia DENTRO
     # do confirm de "Fechar contrato" — quem não clicava nunca sabia, e é dinheiro:

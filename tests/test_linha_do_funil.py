@@ -452,7 +452,7 @@ def test_fechado_sem_documento_fala_em_negocio_e_nao_em_contrato():
 def test_fechado_sem_plano_de_pagamento_vira_selo():
     r = v.linha_do_funil(status="fechado", nunca_enviada=False, enviado_em="19/08",
                          contrato_numero=7, contrato_assinado=True,
-                         contrato_enviado_em="2026-09-08",
+                         contrato_enviado_em="2026-09-08", modo="evento",
                          pagamentos={"pagas": 0, "total": 0, "sem_comprovante": 0})
     assert "Fechado sem plano de pagamento" in textos(r)
     assert tons(r) == ["ambar"]
@@ -463,7 +463,7 @@ def test_fechado_com_plano_nao_avisa_nada():
     """O contraste: com plano, a linha fechada não ganha selo nenhum novo."""
     r = v.linha_do_funil(status="fechado", nunca_enviada=False, enviado_em="19/08",
                          contrato_numero=7, contrato_assinado=True,
-                         contrato_enviado_em="2026-09-08",
+                         contrato_enviado_em="2026-09-08", modo="evento",
                          pagamentos={"pagas": 1, "total": 3, "sem_comprovante": 0})
     assert "Fechado sem plano de pagamento" not in textos(r)
 
@@ -473,6 +473,7 @@ def test_so_avisa_no_fechado_e_nao_no_caminho():
     sendo montada. Avisar ali pintaria de âmbar toda linha em construção."""
     for st in ("rascunho", "enviado", "negociando", "aprovada"):
         r = v.linha_do_funil(status=st, nunca_enviada=False, enviado_em="19/08",
+                             modo="evento",
                              pagamentos={"pagas": 0, "total": 0, "sem_comprovante": 0})
         assert "Fechado sem plano de pagamento" not in textos(r), st
 
@@ -483,7 +484,7 @@ def test_sem_saber_o_plano_nao_inventa_aviso():
     um selo de âmbar por omissão — a guarda é `"total" in pg`."""
     r = v.linha_do_funil(status="fechado", nunca_enviada=False, enviado_em="19/08",
                          contrato_numero=7, contrato_assinado=True,
-                         contrato_enviado_em="2026-09-08")
+                         contrato_enviado_em="2026-09-08", modo="evento")
     assert "Fechado sem plano de pagamento" not in textos(r)
 
 
@@ -492,7 +493,86 @@ def test_o_aviso_nao_rouba_o_botao_verde():
     não pode empurrar pra fora o que a linha já mandava fazer."""
     r = v.linha_do_funil(status="fechado", nunca_enviada=False, enviado_em="19/08",
                          contrato_numero=7, contrato_assinado=True,
-                         contrato_enviado_em="2026-09-08",
+                         contrato_enviado_em="2026-09-08", modo="evento",
                          pagamentos={"pagas": 1, "total": 0, "sem_comprovante": 1})
     assert chave(r) == "comprovante", "a ação continua sendo a que já era"
     assert "Fechado sem plano de pagamento" in textos(r)
+
+
+# --------------------- o portão do MODO, e o aviso antes de fechar
+#
+# A primeira versão (#662) esqueceu o modo e avisou onde não devia: no RECORRENTE
+# o plano de pagamento é setup + mensalidade, `parcelas` fica vazio por definição,
+# e `fechar_orcamento` nem lê esse campo nesse modo. A conta 3 (ZAQ) tinha uma
+# proposta recorrente fechada — e ela passou a acusar falta de um plano que nunca
+# teve. Foi a §6 cobrando o passo que faltou: medir na segunda conta.
+
+def test_recorrente_fechado_sem_parcelas_nao_acusa_nada():
+    """O caso da ZAQ. No recorrente `parcelas` vazio é o estado NORMAL."""
+    r = v.linha_do_funil(status="fechado", nunca_enviada=False, enviado_em="19/08",
+                         contrato_numero=7, contrato_assinado=True,
+                         contrato_enviado_em="2026-09-08", modo="recorrente",
+                         pagamentos={"pagas": 0, "total": 0, "sem_comprovante": 0})
+    assert textos(r) == []
+
+
+def test_sem_saber_o_modo_nao_inventa_aviso():
+    """Mesma escolha do `"total" in pg`: quem não informa o modo não recebe um
+    aviso que depende dele. Falha fechada."""
+    r = v.linha_do_funil(status="fechado", nunca_enviada=False, enviado_em="19/08",
+                         contrato_numero=7, contrato_assinado=True,
+                         contrato_enviado_em="2026-09-08",
+                         pagamentos={"pagas": 0, "total": 0, "sem_comprovante": 0})
+    assert textos(r) == []
+
+
+def test_enviado_sem_plano_avisa_antes_de_fechar():
+    """Pedido do dono em 08/09/2026, olhando a nº 19 (Kleiton) e a nº 22 (Renata
+    Tatiana) da conta 34: as duas saíram pro cliente sem dizer como pagar."""
+    for st in v.ENVIADOS_SEM_PLANO:
+        r = v.linha_do_funil(status=st, nunca_enviada=False, enviado_em="19/08",
+                             modo="evento",
+                             pagamentos={"pagas": 0, "total": 0, "sem_comprovante": 0})
+        assert "Enviado sem plano de pagamento" in textos(r), st
+        assert "antes de fechar" in r["selos"][0]["dica"], st
+
+
+def test_rascunho_sem_plano_continua_calado():
+    """Proposta em construção sem plano é o normal — avisar ali pintaria de âmbar
+    toda linha que ainda está sendo montada.
+
+    `nunca_enviada=False` DE PROPÓSITO, e é o ponto do teste: o estado existe em
+    produção (a proposta saiu e o status voltou pra rascunho) e é o único jeito de
+    provar que quem exclui 'rascunho' é a LISTA, não a guarda do envio. Escrito com
+    `nunca_enviada=True` na primeira versão, ele passava verde mesmo com 'rascunho'
+    acrescentado a `ENVIADOS_SEM_PLANO` — a mutação sobreviveu e denunciou o teste.
+    """
+    r = v.linha_do_funil(status="rascunho", nunca_enviada=False, enviado_em="19/08",
+                         modo="evento",
+                         pagamentos={"pagas": 0, "total": 0, "sem_comprovante": 0})
+    assert "Enviado sem plano de pagamento" not in textos(r)
+
+
+def test_o_que_nunca_saiu_de_casa_nao_e_enviado_sem_plano():
+    """É o cliente TER RECEBIDO que transforma a falta em problema. Status diz
+    'enviado', mas `nunca_enviada` diz que ninguém mandou — vale o segundo."""
+    r = v.linha_do_funil(status="enviado", nunca_enviada=True, modo="evento",
+                         pagamentos={"pagas": 0, "total": 0, "sem_comprovante": 0})
+    assert "Enviado sem plano de pagamento" not in textos(r)
+
+
+def test_os_dois_avisos_nunca_aparecem_juntos():
+    """Fechado tem o aviso forte (o título único já nasceu); o outro é o de antes
+    de fechar. Uma linha só pode estar num dos dois lados."""
+    r = v.linha_do_funil(status="fechado", nunca_enviada=False, enviado_em="19/08",
+                         contrato_numero=7, contrato_assinado=True,
+                         contrato_enviado_em="2026-09-08", modo="evento",
+                         pagamentos={"pagas": 0, "total": 0, "sem_comprovante": 0})
+    assert textos(r) == ["Fechado sem plano de pagamento"]
+
+
+def test_enviado_com_plano_nao_avisa():
+    r = v.linha_do_funil(status="enviado", nunca_enviada=False, enviado_em="19/08",
+                         modo="evento",
+                         pagamentos={"pagas": 0, "total": 2, "sem_comprovante": 0})
+    assert "Enviado sem plano de pagamento" not in textos(r)

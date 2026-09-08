@@ -1082,7 +1082,11 @@ def painel_servicos_lista(request: Request):
             plano_difere=it["plano_difere"], aprovada_por=it["aprovada_por"],
             nunca_enviada=not it["enviado_em"],
             contrato_enviado_em=it["_contrato_enviado_em"], tem_contrato=_nicho_tem_contrato,
-            assinar_antes_do_sinal=_assina_antes)
+            assinar_antes_do_sinal=_assina_antes,
+            # o modo do ORÇAMENTO, não o da conta: é ele que diz se o plano de
+            # pagamento mora em `parcelas` (evento) ou em setup + mensalidade
+            # (recorrente). `titulo_do_funil`, logo abaixo, já usava o mesmo campo.
+            modo=it["modo"])
         # o NOME, resolvido no servidor pela mesma função pura que os testes cobrem.
         # A tela não decide mais quem é o cliente desta linha.
         it.update(vendas.titulo_do_funil(

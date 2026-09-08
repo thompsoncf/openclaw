@@ -210,8 +210,18 @@ const espera = (ms) => new Promise((r) => setTimeout(r, ms))
   t('o 500 não apaga mais tudo sozinho',
     !/if \(code === DisconnectReason\.badSession\)\s*\{\s*await limparSessoesSignal/.test(src))
   t('a limpeza geral está desligada por padrão', LIMPAR_TUDO_NO_500 === false)
+  // O padrão do LIKE mudou de forma em 08/09 (passou a ser uma LISTA, um item por
+  // identificador do contato — ver usuariosDoPeer), mas a exigência é a mesma de
+  // sempre: cada padrão nasce ancorado em 'session-<usuario>.%', nunca um LIKE
+  // solto que pudesse varrer o cofre inteiro.
   t('o SQL cirúrgico mira o contato, não o like solto',
-    /arquivo like 'session-' \|\| \$2 \|\| '\.%'/.test(src))
+    /'session-' \+ u \+ '\.%'/.test(src) && /arquivo like any\(\$2::text\[\]\)/.test(src))
+  // As duas descobertas de 08/09, travadas pra não voltarem:
+  t('a limpeza junta LID e número do mesmo contato',
+    /function usuariosDoPeer/.test(src) &&
+    /limparSessaoDoPeer[\s\S]{0,200}usuariosDoPeer\(contaId, jid\)/.test(src))
+  t('e apaga pelo key store, pra invalidar o cache do Baileys',
+    /store\.set\(\{ session: zeradas \}\)/.test(src))
   t('o usuário é validado como só-dígitos antes do SQL',
     /\/\^\[0-9\]\+\$\/\.test\(u\)/.test(src))
   t('o disjuntor continua contando (a limpeza não substitui o aviso)',

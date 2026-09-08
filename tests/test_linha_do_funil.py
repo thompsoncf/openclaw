@@ -434,3 +434,65 @@ def test_fechado_sem_documento_fala_em_negocio_e_nao_em_contrato():
     assert "contrato fechado" in v.linha_do_funil(
         status="fechado", nunca_enviada=False, contrato_numero=4,
         contrato_assinado=True)["resumo"]
+
+
+# ------------------------------------------ fechou sem plano de pagamento
+#
+# `fechar_orcamento` tem uma saída de emergência: orçamento de evento sem plano
+# vira UM título com o total. O recebível fica de pé — mas a tela de Pagamentos
+# monta as linhas a partir do `parcelas` (vazio) e o comprovante é indexado por
+# `parcela_idx` (nulo naquele título). Resultado: dinheiro no contas a receber e
+# nenhum lugar pra anexar o comprovante.
+#
+# Aconteceu com o orçamento nº 20 da conta 34 (Kelma): contrato assinado em
+# 08/09/2026 18:37, título de R$ 6.500 criado no mesmo segundo, e o dono
+# procurando um botão que não existia. No nicho de eventos quem fecha é a
+# ASSINATURA do cliente, não um clique — por isso o aviso é selo, não confirm.
+
+def test_fechado_sem_plano_de_pagamento_vira_selo():
+    r = v.linha_do_funil(status="fechado", nunca_enviada=False, enviado_em="19/08",
+                         contrato_numero=7, contrato_assinado=True,
+                         contrato_enviado_em="2026-09-08",
+                         pagamentos={"pagas": 0, "total": 0, "sem_comprovante": 0})
+    assert "Fechado sem plano de pagamento" in textos(r)
+    assert tons(r) == ["ambar"]
+    assert "comprovantes" in r["selos"][0]["dica"]
+
+
+def test_fechado_com_plano_nao_avisa_nada():
+    """O contraste: com plano, a linha fechada não ganha selo nenhum novo."""
+    r = v.linha_do_funil(status="fechado", nunca_enviada=False, enviado_em="19/08",
+                         contrato_numero=7, contrato_assinado=True,
+                         contrato_enviado_em="2026-09-08",
+                         pagamentos={"pagas": 1, "total": 3, "sem_comprovante": 0})
+    assert "Fechado sem plano de pagamento" not in textos(r)
+
+
+def test_so_avisa_no_fechado_e_nao_no_caminho():
+    """Rascunho e aprovada SEM plano são estado normal — a proposta ainda está
+    sendo montada. Avisar ali pintaria de âmbar toda linha em construção."""
+    for st in ("rascunho", "enviado", "negociando", "aprovada"):
+        r = v.linha_do_funil(status=st, nunca_enviada=False, enviado_em="19/08",
+                             pagamentos={"pagas": 0, "total": 0, "sem_comprovante": 0})
+        assert "Fechado sem plano de pagamento" not in textos(r), st
+
+
+def test_sem_saber_o_plano_nao_inventa_aviso():
+    """"Não sei o plano" não é "não tem plano". Quem chama `linha_do_funil` sem
+    `pagamentos` (os testes, e qualquer chamador que não buscou) não pode ganhar
+    um selo de âmbar por omissão — a guarda é `"total" in pg`."""
+    r = v.linha_do_funil(status="fechado", nunca_enviada=False, enviado_em="19/08",
+                         contrato_numero=7, contrato_assinado=True,
+                         contrato_enviado_em="2026-09-08")
+    assert "Fechado sem plano de pagamento" not in textos(r)
+
+
+def test_o_aviso_nao_rouba_o_botao_verde():
+    """SELO É PENDÊNCIA, AÇÃO É UMA SÓ: o aviso novo não entra na fila de ações e
+    não pode empurrar pra fora o que a linha já mandava fazer."""
+    r = v.linha_do_funil(status="fechado", nunca_enviada=False, enviado_em="19/08",
+                         contrato_numero=7, contrato_assinado=True,
+                         contrato_enviado_em="2026-09-08",
+                         pagamentos={"pagas": 1, "total": 0, "sem_comprovante": 1})
+    assert chave(r) == "comprovante", "a ação continua sendo a que já era"
+    assert "Fechado sem plano de pagamento" in textos(r)

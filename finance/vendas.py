@@ -499,6 +499,35 @@ def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
         acoes.append(("comprovante", "Anexar comprovante"))
 
 
+    # ---- FECHOU SEM PLANO DE PAGAMENTO (08/09/2026, pedido do dono).
+    #
+    # `fechar_orcamento` tem uma saída de emergência: orçamento de evento sem plano
+    # vira UM título com o total. Ela salva o recebível — mas deixa um buraco que
+    # ninguém vê, porque a tela de Pagamentos monta as linhas a partir do `parcelas`
+    # (vazio) e o comprovante é indexado por `parcela_idx` (nulo nesse título). Ou
+    # seja: o dinheiro está no contas a receber e não há onde anexar o comprovante,
+    # nem como acompanhar entrada e parcelas.
+    #
+    # E NO NICHO DE EVENTOS NINGUÉM ESTÁ NA TELA na hora de fechar: quem fecha é a
+    # ASSINATURA do cliente (`contrato.assinar` chama com `por_assinatura=True`).
+    # Um `confirm()` no botão avisaria o vendedor de um clique que ele não deu. Por
+    # isso o aviso é SELO, que aparece depois do fato e fica até alguém resolver.
+    #
+    # Caso real que motivou: orçamento nº 20 (Kelma, conta 34) — contrato assinado
+    # em 08/09 18:37, título nº 61 de R$ 6.500 criado no mesmo segundo com
+    # `parcela_idx` nulo, e o dono procurando o botão de anexar comprovante que não
+    # existia. Outros dois na mesma conta foram MANDADOS ao cliente sem plano.
+    #
+    # `"total" in pg` e não `pg.get("total")`: quem chama pode não ter buscado os
+    # pagamentos, e "não sei o plano" não é "não tem plano" — sem esta guarda o
+    # selo apareceria em toda linha fechada de qualquer chamador distraído.
+    if status == "fechado" and "total" in pg and not int(pg.get("total") or 0):
+        selos.append({
+            "texto": "Fechado sem plano de pagamento", "tom": "ambar",
+            "dica": "O contas a receber ficou com um título único do valor total. "
+                    "Monte o plano de pagamento pra registrar entrada e parcelas "
+                    "— e pra ter onde anexar os comprovantes."})
+
     # ---- o plano que não fecha com o total. Era um aviso que só aparecia DENTRO
     # do confirm de "Fechar contrato" — quem não clicava nunca sabia, e é dinheiro:
     # os títulos saem pelo valor das parcelas, não pelo que a folha declara.

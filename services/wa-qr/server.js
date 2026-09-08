@@ -53,7 +53,7 @@ const makeWASocket = require('@whiskeysockets/baileys').default
 const { DisconnectReason, makeCacheableSignalKeyStore, fetchLatestBaileysVersion, proto, BufferJSON,
   normalizeMessageContent, downloadMediaMessage, jidNormalizedUser } = require('@whiskeysockets/baileys')
 const TIPO_HIST = proto.Message.HistorySyncNotification.HistorySyncType
-const { useDbAuthState } = require('./auth-db')
+const { useDbAuthState, MARCA_CHAVE_FALTANDO } = require('./auth-db')
 const { criarTrava } = require('./sessao-lock')
 
 const PORT = parseInt(process.env.PORT || '3000', 10)
@@ -618,6 +618,53 @@ process.on('uncaughtException', (err) => log.error({ err: String(err && err.stac
 // "vazamento que sobe em rampa" — que exigem consertos opostos. Vai junto o tamanho de
 // cada estrutura em memória e a fila do pool do Postgres (waitingCount): consulta
 // enfileirada é memória retida esperando uma das 4 conexões, e cresce sem teto.
+// O CARIMBO do travamento. A linha "event loop travou" dizia só o atrasoMs — e
+// atrasoMs sozinho não conserta nada: em 07/09 eu tinha 20,7s / 23,2s / 40,6s e
+// não sabia dizer QUEM travou, então a única saída era cruzar horário com o resto
+// do log na mão. Pior: pra medir quanto o resyncAgenda de uma conta custava, a
+// alternativa era pagar um provedor de métricas por fora, quando o dado já estava
+// aqui dentro faltando um rótulo.
+//
+// Então toda operação nossa que sabidamente segura o loop passa por `medindo()`,
+// que só guarda rótulo + conta + instante num Map. Quando o tique detecta atraso,
+// ele despeja o que estava em curso NAQUELE momento. Custo: um set e um delete por
+// operação — nada de timer, nada de amostragem.
+//
+// O que NÃO aparece aqui é o que roda dentro do Baileys antes de emitir evento (a
+// decifragem, por exemplo). Pra esse caso o carimbo leva junto a contagem de falhas
+// de decifragem por conta na janela do disjuntor, que é o outro suspeito conhecido.
+const emCurso = new Map()
+let _seqCurso = 0
+async function medindo (rotulo, contaId, fn) {
+  const chave = rotulo + '#' + (++_seqCurso)
+  emCurso.set(chave, { rotulo, contaId, desde: Date.now() })
+  try {
+    return await fn()
+  } finally {
+    emCurso.delete(chave)
+  }
+}
+// o que está em curso, do mais antigo pro mais novo (o mais antigo é o suspeito)
+function oQueEstaEmCurso (agora) {
+  const fora = []
+  for (const v of emCurso.values()) {
+    fora.push({ op: v.rotulo, conta: v.contaId, haMs: (agora || Date.now()) - v.desde })
+  }
+  fora.sort((a, b) => b.haMs - a.haMs)
+  return fora.slice(0, 8)
+}
+// falhas de decifragem por conta na janela corrente — o suspeito que não passa por
+// medindo(), porque acontece dentro do Baileys
+function decifragemPorConta (agora) {
+  const fora = {}
+  for (const [conta, marcas] of falhasDeDecifrar) {
+    if (!Array.isArray(marcas)) continue
+    const n = marcas.filter((t) => (agora - t) < DECIFRAR_JANELA_MS).length
+    if (n) fora[conta] = n
+  }
+  return fora
+}
+
 const MB = (b) => Math.round((b || 0) / 1048576)
 let _ultimoTique = Date.now()
 let _tiques = 0
@@ -626,7 +673,7 @@ setInterval(() => {
   const atraso = agora - _ultimoTique - 1000
   _ultimoTique = agora
   if (atraso > 1000) {
-    log.warn({ atrasoMs: atraso },
+    log.warn({ atrasoMs: atraso, emCurso: oQueEstaEmCurso(agora), decifragem: decifragemPorConta(agora) },
       'event loop travou — nesse intervalo /saude não respondia (risco de health check falhar)')
   }
   if (++_tiques % 60) return
@@ -2204,6 +2251,10 @@ async function repassarSaida (contaId, m) {
 // SOMENTE `notify`, era descartada inteira. Era a maior fonte de nomes do
 // WhatsApp indo pro lixo. Agora cada contato é classificado pelo campo que trouxe.
 async function repassarContatos (contaId, contatos, daAgenda) {
+  return medindo('repassarContatos', contaId, () => _repassarContatos(contaId, contatos, daAgenda))
+}
+
+async function _repassarContatos (contaId, contatos, daAgenda) {
   if (!APP_URL || !Array.isArray(contatos) || !contatos.length) return
   const agenda = []
   const reserva = []
@@ -2268,6 +2319,36 @@ const INTERVALO_AGENDA_MS = 20 * 60 * 1000
 // ...com teto: 6 × 20min ≈ 2h de insistência por conexão — ver insistirNaAgenda.
 const MAX_INSISTENCIAS_AGENDA = 6
 
+// A VÁLVULA da marca de chave faltando (ver MARCA_CHAVE_FALTANDO no auth-db).
+// A marca fecha a porta por tempo indeterminado, e isso é forte demais pra apoiar
+// só na minha leitura do log: se eu estiver errado sobre a causa, a agenda de uma
+// conta ficaria congelada pra sempre sem ninguém perceber. Então a porta reabre
+// sozinha uma vez por dia. Uma decodificação diária é ruído (eram ~71); o que a
+// válvula compra é que nenhuma conta fica presa numa conclusão minha.
+const VALVULA_CHAVE_FALTANDO_MS = parseInt(
+  process.env.WA_QR_VALVULA_CHAVE_FALTANDO_MS || String(24 * 60 * 60 * 1000), 10)
+
+// Pedir a agenda agora é inútil? Devolve a marca (pra logar) ou null.
+// Falha de banco devolve null DE PROPÓSITO: na dúvida a gente pede a agenda, que é
+// o comportamento de antes — o portão é uma economia, não pode virar um bloqueio
+// novo por causa de um select que não respondeu.
+async function agendaTrancadaPorChave (contaId, agora) {
+  try {
+    const r = await pool.query(
+      'select conteudo, atualizado from wa_qr_auth where conta_id=$1 and arquivo=$2',
+      [contaId, MARCA_CHAVE_FALTANDO])
+    if (!r.rows[0]) return null
+    const desde = new Date(r.rows[0].atualizado).getTime()
+    if ((agora || Date.now()) - desde > VALVULA_CHAVE_FALTANDO_MS) return null   // válvula
+    let ids = []
+    try { ids = (JSON.parse(r.rows[0].conteudo) || {}).ids || [] } catch (e) { ids = [] }
+    return { ids, desde }
+  } catch (e) {
+    log.warn({ contaId, e: String(e) }, 'agenda: falha ao ler a marca da chave faltando')
+    return null
+  }
+}
+
 function agendarResyncAgenda (contaId, s) {
   pararTimersDaAgenda(s)
   s._agendaTentativas = 0
@@ -2316,6 +2397,14 @@ async function insistirNaAgenda (contaId) {
     s._agendaT3 = null
     return
   }
+  const trancada = await agendaTrancadaPorChave(contaId, Date.now())
+  if (trancada) {
+    log.info({ contaId, faltando: trancada.ids },
+      'agenda: falta a chave que decodifica os patches — parando de insistir até ela chegar')
+    clearInterval(s._agendaT3)
+    s._agendaT3 = null
+    return
+  }
   log.info({ contaId, tentativa: s._agendaTentativas }, 'agenda: ainda não veio, tentando de novo')
   await esperarAcalmarEResync(contaId)
 }
@@ -2341,6 +2430,14 @@ async function insistirNaAgenda (contaId) {
 //     depois. Antes disso a tentativa era uma só: se as chaves demorassem mais
 //     que ela, a agenda ficava vazia até o próximo religamento do serviço.
 async function esperarAcalmarEResync (contaId) {
+  // sem chave não há o que decodificar: nem vale entrar no laço de espera abaixo,
+  // que sozinho já custa um select de 5 em 5 segundos por até 15 minutos
+  const trancada0 = await agendaTrancadaPorChave(contaId, Date.now())
+  if (trancada0) {
+    log.info({ contaId, faltando: trancada0.ids },
+      'agenda: falta a chave que decodifica os patches — não vou esperar nem pedir')
+    return
+  }
   const limite = Date.now() + 15 * 60 * 1000
   let acalmou = false
   let temChaves = false
@@ -2383,10 +2480,23 @@ async function esperarAcalmarEResync (contaId) {
 const COLECOES = ['critical_unblock_low']
 const VERSAO_AGENDA = 'app-state-sync-version-critical_unblock_low'
 
-async function resyncAgenda (contaId, tentativa, completa) {
+// `forcado` = pedido humano (POST /agenda). Passa por cima do portão de propósito:
+// quem clicou está dizendo que o que veio sozinho não bastou, e uma decodificação
+// sob demanda não é laço. É também como se testa se a chave voltou sem esperar a
+// válvula de 24h.
+async function resyncAgenda (contaId, tentativa, completa, forcado) {
   const s = sessoes.get(contaId)
   if (!s || !s.sock || s.status !== 'conectado') return
   try {
+    if (!forcado) {
+      const trancada = await agendaTrancadaPorChave(contaId, Date.now())
+      if (trancada) {
+        log.info({ contaId, tentativa, faltando: trancada.ids,
+          desdeMin: Math.round((Date.now() - trancada.desde) / 60000) },
+        'resyncAgenda: a chave que decodifica os patches não está gravada — pulando o pedido')
+        return
+      }
+    }
     const chaves = await pool.query(
       `select count(*)::int as n from wa_qr_auth
         where conta_id=$1 and arquivo like 'app-state-sync-key-%'`, [contaId])
@@ -2420,7 +2530,9 @@ async function resyncAgenda (contaId, tentativa, completa) {
     }
     log.info({ contaId, tentativa, completa: !!completa, chaves: chaves.rows[0].n },
       'resyncAgenda: pedindo a agenda de novo')
-    await s.sock.resyncAppState(COLECOES, true)
+    // carimbado: é esta a chamada que decodifica a coleção inteira e que a
+    // gente suspeita de segurar o loop na conta 23 — ver medindo()
+    await medindo('resyncAgenda', contaId, () => s.sock.resyncAppState(COLECOES, true))
     if (completa) {
       // Só marca DEPOIS de dar certo, e o critério é a versão ter voltado: o
       // Baileys grava a versão nova quando o snapshot decodifica, e o catch dele
@@ -3406,9 +3518,10 @@ const servidor = http.createServer(async (req, res) => {
         }
         // na mão é sempre a agenda INTEIRA: quem chama aqui está justamente
         // dizendo que o que veio sozinho não bastou, então a marca sai da frente
-        await pool.query(`delete from wa_qr_auth where conta_id=$1 and arquivo='agenda-completa'`,
-          [contaId])
-        await resyncAgenda(contaId, 0, true)
+        await pool.query(
+          `delete from wa_qr_auth where conta_id=$1 and arquivo in ('agenda-completa', $2)`,
+          [contaId, MARCA_CHAVE_FALTANDO])
+        await resyncAgenda(contaId, 0, true, true)
         return json(res, 200, { ok: true })
       }
       // Os grupos em que este número está: é de onde o dono escolhe o grupo do
@@ -3882,4 +3995,5 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { QUARENTENA_PEER_MS, porPeerEmQuarentena, peerEmQuarentena, esquecerQuarentena, peersEmQuarentena, avisarChipQuebrado, alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { agendaTrancadaPorChave, VALVULA_CHAVE_FALTANDO_MS, MARCA_CHAVE_FALTANDO,
+  medindo, oQueEstaEmCurso, decifragemPorConta, emCurso, QUARENTENA_PEER_MS, porPeerEmQuarentena, peerEmQuarentena, esquecerQuarentena, peersEmQuarentena, avisarChipQuebrado, alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

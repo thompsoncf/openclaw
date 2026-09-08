@@ -6050,6 +6050,87 @@ def _webhook_wa_qr_status_sync(corpo: bytes):
     return Response("ok", media_type="text/plain")
 
 
+@router.post("/webhooks/wa-qr/chip-quebrado")
+async def webhook_wa_qr_chip_quebrado(request: Request):
+    """O disjuntor do zaq-waqr desistiu de um chip: a sessão do Signal não decifra
+    mais e não se conserta sozinha — precisa parear de novo no celular.
+
+    POR QUE ESTA ROTA EXISTE (07/09/2026). O serviço já sabia disso: na terceira
+    abertura do disjuntor ele escrevia "precisa ser pareado de novo no celular" no
+    log, e o log morria ali. O dono descobria pelo e-mail de health check do Render
+    — quando descobria. Naquele dia dois contatos com sessão quebrada travaram o
+    event loop 40s e derrubaram os TRÊS chips da instância junto; ninguém foi
+    avisado por nenhum caminho.
+
+    Avisa dois: o dono da conta (Telegram, best-effort — nem todo dono tem) e o
+    ADMIN do SaaS, que é quem consegue agir sem depender do cliente estar por perto.
+
+    NÃO desliga o canal e NÃO apaga nada: o cofre está íntegro nesse estado, e o
+    chip volta com um pareamento. Desligar aqui só tiraria a conta da tela sem
+    consertar coisa nenhuma.
+    """
+    import logging
+    log = logging.getLogger("prospeccao.wa_qr")
+    if not _qr_segredo_ok(request):
+        return Response(status_code=403)
+    corpo = await request.body()
+    return await run_in_threadpool(_webhook_wa_qr_chip_quebrado_sync, corpo)
+
+
+def _webhook_wa_qr_chip_quebrado_sync(corpo: bytes):
+    """O trabalho de verdade — sincrono, fora do event loop (mesmo motivo do vizinho)."""
+    import logging
+    log = logging.getLogger("prospeccao.wa_qr")
+    try:
+        payload = json.loads(corpo.decode("utf-8") or "{}")
+    except Exception:  # noqa: BLE001
+        return Response("ok", media_type="text/plain")
+    try:
+        conta_id = int(payload.get("conta_id") or 0)
+        aberturas = int(payload.get("aberturas") or 0)
+    except (TypeError, ValueError):
+        return Response("ok", media_type="text/plain")
+    if not conta_id:
+        return Response("ok", media_type="text/plain")
+    pool = get_pool()
+    nome, rotulo = "", ""
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                """select coalesce(nullif(co.nome_fantasia,''), co.nome),
+                          coalesce(cc.rotulo, '')
+                     from contas co
+                     left join canais_config cc
+                            on cc.conta_id = co.id and cc.canal = 'whatsapp'
+                    where co.id = %s""", (conta_id,)).fetchone()
+            if r:
+                nome, rotulo = r[0] or "", r[1] or ""
+    except Exception as e:  # noqa: BLE001 — sem o nome o aviso ainda vale
+        # mas não em silêncio: foi um `pass` aqui que escondeu uma coluna faltando
+        # no schema, e o aviso saiu dizendo "conta 10" pro dono da Prime Eventos
+        log.warning("chip-quebrado: não deu pra ler o nome da conta %s: %s", conta_id, e)
+    quem = f"{nome} ({rotulo})" if rotulo else (nome or f"conta {conta_id}")
+    texto = (f"📵 *Chip precisa ser pareado de novo*\n\n{quem}\n\n"
+             f"O WhatsApp desta conta parou de decifrar as mensagens que chegam e "
+             f"não se conserta sozinho ({aberturas} tentativas). Enquanto isso ela "
+             f"não recebe nem envia.\n\n"
+             f"O que fazer: no celular, WhatsApp → Aparelhos conectados. Se houver "
+             f"sessão duplicada, desconecte por lá; se não, é parear de novo pelo "
+             f"painel.")
+    from finance import notificar as _nt
+    try:
+        _nt.enviar_para_dono(pool, conta_id, texto)
+    except Exception:  # noqa: BLE001
+        log.warning("chip-quebrado: não deu pra avisar o dono da conta %s", conta_id)
+    try:
+        _nt.avisar_admin(f"Chip sem decifrar — {quem}", texto)
+    except Exception:  # noqa: BLE001
+        log.warning("chip-quebrado: não deu pra avisar o admin (conta %s)", conta_id)
+    log.warning("chip-quebrado: conta %s (%s), %s aberturas do disjuntor",
+                conta_id, quem, aberturas)
+    return Response("ok", media_type="text/plain")
+
+
 @router.post("/webhooks/wa-qr/deslogado")
 async def webhook_wa_qr_deslogado(request: Request):
     """WhatsApp por QR deslogou DE VEZ (não é queda temporária — só dispara quando

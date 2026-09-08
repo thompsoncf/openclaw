@@ -728,7 +728,13 @@ def test_o_botao_rapido_marca_as_nove_da_manha(rota, c):
     assert r.status_code == 303 and "erro" not in r.headers["location"]
     prazo, _ = _marcado(c, lead)
     assert prazo.astimezone(timezone.utc).hour == 12      # 09h de Brasília
-    assert (prazo.date() - datetime.now(timezone.utc).date()).days == 3
+    # A CONTA É EM BRASÍLIA, dos dois lados. O botão marca "daqui a 3 dias" a
+    # partir do dia LOCAL; comparar com `date.today()` em UTC quebra das 21h à
+    # meia-noite, quando o UTC já virou e o Brasil não — foi assim que este teste
+    # falhou às 21h13 de 07/09, com o produto certo. Um teste que passa ou falha
+    # conforme a hora do dia é pior que teste nenhum: ensina a ignorar vermelho.
+    hoje_br = (datetime.now(timezone.utc) + pfu._UTC_BR).date()
+    assert ((prazo + pfu._UTC_BR).date() - hoje_br).days == 3
 
 
 def test_data_vazia_ou_torta_volta_com_recado_e_nao_grava(rota, c):

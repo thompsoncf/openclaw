@@ -33,6 +33,7 @@ _BASE_SQL = """
 -- o caso de tudo que existe hoje. As rotas leem as duas colunas desde que a empresa
 -- passou a poder ter mais de um chip.
 create table contas (id bigserial primary key, tipo text, nome text,
+  nome_fantasia text,
   chip_de bigint references contas(id) on delete cascade);
 create table conversas (id bigserial primary key, conta_id bigint, canal text,
   contato text, status text, chip_id bigint references contas(id) on delete set null, visto_ate_id bigint);
@@ -44,6 +45,9 @@ create table canais_config (
   id bigserial primary key, conta_id bigint, canal text, identificador text,
   ativo boolean not null default true, token text, provedor text not null default 'twilio',
   wa_phone_id text,
+  -- o apelido do chip ("CP Zarb", "CP Thiago"): é como o dono reconhece QUAL
+  -- aparelho parou, quando a empresa tem mais de um
+  rotulo text,
   -- marco zero da retenção de histórico (migração 165): o /deslogado carimba aqui
   desconectado_em timestamptz);
 """
@@ -234,3 +238,95 @@ def test_audio_so_transcreve_em_conta_no_qr(pool, monkeypatch):
         _FakeRequest({"conta_id": alheia, "id": "MSG3", "audio_b64": "eA=="})))
     assert resp.status_code == 200
     assert chamou == []
+
+
+# ------------------------------------------------------------------ o chip quebrado
+
+def _chip_quebrado(conta_id, segredo=_SEGREDO, aberturas=3):
+    return asyncio.run(pp.webhook_wa_qr_chip_quebrado(
+        _FakeRequest({"conta_id": conta_id, "aberturas": aberturas}, segredo)))
+
+
+def test_chip_quebrado_avisa_o_dono_e_o_admin(pool, monkeypatch):
+    """O disjuntor do serviço Node desistiu do chip: a sessão do Signal não
+    decifra mais e não se conserta sozinha.
+
+    Até 07/09/2026 esse diagnóstico morria numa linha de log. O dono descobria
+    pelo e-mail de health check do Render — quando descobria. Este teste fixa que
+    ele sai do log e chega em gente."""
+    conta = _conta_com_historico(pool, "PRIME EVENTOS", "qr")
+    from finance import notificar as nt
+    avisos = []
+    monkeypatch.setattr(nt, "enviar_para_dono",
+                        lambda pool_, cid, texto: avisos.append(("dono", cid, texto)) or True)
+    monkeypatch.setattr(nt, "avisar_admin",
+                        lambda assunto, msg: avisos.append(("admin", assunto, msg)) or True)
+    resp = _chip_quebrado(conta)
+    assert resp.status_code == 200
+    quem = {a[0] for a in avisos}
+    assert quem == {"dono", "admin"}, (
+        "os dois precisam saber: o dono resolve no celular, o admin resolve sem "
+        f"depender de o cliente estar por perto — chegou em {quem}")
+    texto = next(a[2] for a in avisos if a[0] == "dono")
+    assert "Aparelhos conectados" in texto, (
+        "o aviso tem que dizer o que fazer, não só que quebrou")
+    assert "PRIME EVENTOS" in texto, "e de qual empresa é o chip"
+
+
+def test_chip_quebrado_diz_o_apelido_do_chip(pool, monkeypatch):
+    """Empresa com dois chips (a Prime tem "CP Zarb" e "CP Thiago"): sem o apelido
+    o dono não sabe QUAL aparelho pegar."""
+    conta = _conta_com_historico(pool, "PRIME EVENTOS", "qr")
+    with pool.connection() as c:
+        c.execute("""update canais_config set rotulo='CP Zarb'
+                      where conta_id=%s and canal='whatsapp'""", (conta,))
+        c.commit()
+    from finance import notificar as nt
+    avisos = []
+    monkeypatch.setattr(nt, "enviar_para_dono",
+                        lambda pool_, cid, texto: avisos.append(texto) or True)
+    monkeypatch.setattr(nt, "avisar_admin", lambda *a, **k: True)
+    _chip_quebrado(conta)
+    assert "CP Zarb" in avisos[0] and "PRIME EVENTOS" in avisos[0]
+
+
+def test_chip_quebrado_nao_apaga_nem_desliga_nada(pool, monkeypatch):
+    """O cofre está ÍNTEGRO nesse estado (deslogado=false em todos os fechamentos
+    de 07/09). Desligar o canal aqui tiraria a conta da tela sem consertar nada, e
+    apagar seria o erro de 22/08 de novo."""
+    conta = _conta_com_historico(pool, "Chip que parou", "qr")
+    from finance import notificar as nt
+    monkeypatch.setattr(nt, "enviar_para_dono", lambda *a, **k: True)
+    monkeypatch.setattr(nt, "avisar_admin", lambda *a, **k: True)
+    antes = _estado(pool, conta)
+    _chip_quebrado(conta)
+    assert _estado(pool, conta) == antes, (
+        "avisar não pode mexer em canal, conversa, mensagem nem contato")
+
+
+def test_chip_quebrado_sem_segredo_e_403(pool):
+    conta = _conta_com_historico(pool, "Alheia", "qr")
+    assert _chip_quebrado(conta, segredo="errado").status_code == 403
+
+
+def test_chip_quebrado_com_corpo_torto_nao_derruba(pool, monkeypatch):
+    """Vem do serviço Node por HTTP: corpo torto não pode virar 500 num caminho
+    que existe justamente pra avisar que algo já está ruim."""
+    from finance import notificar as nt
+    monkeypatch.setattr(nt, "enviar_para_dono", lambda *a, **k: True)
+    monkeypatch.setattr(nt, "avisar_admin", lambda *a, **k: True)
+    for corpo in ({}, {"conta_id": "abc"}, {"conta_id": 0}, {"aberturas": 3}):
+        r = asyncio.run(pp.webhook_wa_qr_chip_quebrado(_FakeRequest(corpo, _SEGREDO)))
+        assert r.status_code == 200, corpo
+
+
+def test_chip_quebrado_tolera_aviso_que_falha(pool, monkeypatch):
+    """Telegram fora do ar não pode derrubar o webhook: o dono sem Telegram
+    vinculado é o caso NORMAL (o da Prime não tem)."""
+    conta = _conta_com_historico(pool, "Sem telegram", "qr")
+    from finance import notificar as nt
+    def _explode(*a, **k):
+        raise RuntimeError("telegram fora do ar")
+    monkeypatch.setattr(nt, "enviar_para_dono", _explode)
+    monkeypatch.setattr(nt, "avisar_admin", _explode)
+    assert _chip_quebrado(conta).status_code == 200

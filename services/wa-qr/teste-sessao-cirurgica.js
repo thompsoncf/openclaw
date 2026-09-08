@@ -200,8 +200,12 @@ const espera = (ms) => new Promise((r) => setTimeout(r, ms))
 
   // ── travas de leitura do fonte ────────────────────────────────────────────
   const src = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8')
+  // a folga subiu de 900 pra 1800 em 08/09: o comentário que explica a ordem
+  // "conserta primeiro, prende só se não deu" entrou entre o `if` e a chamada. A
+  // exigência é a mesma — a limpeza nasce DENTRO do bloco do retry esgotado, não
+  // pendurada no 500.
   t('o gatilho é o esgotamento do retry, não o 500',
-    /if \(!aindaTemRetry\) \{[\s\S]{0,900}limparSessaoDoPeer\(contaId,/.test(src))
+    /if \(!aindaTemRetry\) \{[\s\S]{0,1800}limparSessaoDoPeer\(contaId,/.test(src))
   // Em grupo o remoteJid é o GRUPO e quem não decifra é o membro. Mirar o grupo
   // não consertaria ninguém — e o teste do usuarioDoJid acima sozinho não pegaria
   // isso, porque lá o corte só devolve ''.
@@ -222,6 +226,14 @@ const espera = (ms) => new Promise((r) => setTimeout(r, ms))
     /limparSessaoDoPeer[\s\S]{0,200}usuariosDoPeer\(contaId, jid\)/.test(src))
   t('e apaga pelo key store, pra invalidar o cache do Baileys',
     /store\.set\(\{ session: zeradas \}\)/.test(src))
+  // 08/09, minutos depois de a limpeza passar a funcionar de verdade: o chip da
+  // Prime mandava e não recebia. A limpeza tinha consertado ('apagadas: 3') e a
+  // quarentena caiu sobre o MESMO contato no mesmo segundo, calando por 30min
+  // justamente as mensagens que exercitariam a sessão nova. Conserta primeiro,
+  // prende só se não deu — a trava de 1h garante que a enxurrada insistente caia
+  // no `apagadas: 0` da rodada seguinte e aí sim seja contida.
+  t('a quarentena só entra se a limpeza NÃO consertou',
+    /\.then\(\(apagadas\) => \{[\s\S]{0,400}if \(apagadas > 0\) \{[\s\S]{0,300}return[\s\S]{0,200}porPeerEmQuarentena/.test(src))
   t('o usuário é validado como só-dígitos antes do SQL',
     /\/\^\[0-9\]\+\$\/\.test\(u\)/.test(src))
   t('o disjuntor continua contando (a limpeza não substitui o aviso)',

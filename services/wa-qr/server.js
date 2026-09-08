@@ -546,18 +546,36 @@ function comContaDoBaileys (contaId, base) {
         // nenhum. Em conversa de um pra um o participant não vem, e o remoteJid
         // já é a pessoa.
         const peer = obj.key && (obj.key.participant || obj.key.remoteJid)
+        // A QUARENTENA SÓ ENTRA SE A LIMPEZA NÃO CONSERTOU.
+        // Ela existe pra enxurrada: o que já está na fila do WhatsApp continua
+        // chegando indecifrável mesmo depois de apagar a sessão, e sem ela apagar
+        // não interrompia nada — foi o que aconteceu em 07/09.
+        //
+        // Só que prender um contato cuja sessão ACABOU de ser refeita é o oposto do
+        // conserto: cala justamente as mensagens que exercitariam a sessão nova.
+        // Visto em produção em 08/09, minutos depois de a limpeza passar a funcionar
+        // ('apagadas: 3'): o chip mandava e não recebia, porque a quarentena de 30min
+        // caiu sobre o mesmo contato que tinha sido curado no mesmo segundo.
+        //
+        // Então a ordem passa a ser: conserta primeiro, prende só se não deu.
+        // A proteção não se perde — a limpeza tem trava de 1h por contato, então a
+        // enxurrada que insistir cai no `apagadas: 0` da segunda rodada e aí sim a
+        // quarentena entra, uma mensagem depois.
         limparSessaoDoPeer(contaId, peer, 'retry esgotado')
+          .then((apagadas) => {
+            if (apagadas > 0) {
+              log.info({ contaId, jid: peer, apagadas },
+                'quarentena dispensada: a sessão deste contato foi refeita agora')
+              return
+            }
+            if (porPeerEmQuarentena(contaId, peer, Date.now(), QUARENTENA_PEER_MS)) {
+              log.warn({ contaId, jid: peer, minutos: Math.round(QUARENTENA_PEER_MS / 60000) },
+                'quarentena: este contato não decifra e não houve sessão pra refazer — ' +
+                'parando de ouvi-lo antes de decifrar, pra a enxurrada não travar o serviço')
+            }
+          })
           .catch((e) => log.error({ contaId, e: String(e) },
             'limpeza cirúrgica de sessão falhou'))
-        // ...e para de ouvir esse contato por um tempo. A limpeza acima só vale
-        // pra PRÓXIMA sessão; o que já está na fila do WhatsApp continua chegando
-        // e continua sem decifrar. Sem isto, apagar a sessão não interrompe nada —
-        // foi o que aconteceu em 07/09, com a limpeza feita e a enxurrada seguindo.
-        if (porPeerEmQuarentena(contaId, peer, agora, QUARENTENA_PEER_MS)) {
-          log.warn({ contaId, jid: peer, minutos: Math.round(QUARENTENA_PEER_MS / 60000) },
-            'quarentena: este contato não decifra — parando de ouvi-lo antes de ' +
-            'decifrar, pra a enxurrada não travar o serviço inteiro')
-        }
         if (contarFalhaDeDecifrar(contaId, agora, DECIFRAR_TETO, DECIFRAR_JANELA_MS)) {
           abrirDisjuntor(contaId).catch((e) =>
             log.error({ contaId, e: String(e) }, 'disjuntor: falhou ao abrir'))

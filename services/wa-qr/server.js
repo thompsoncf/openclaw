@@ -1787,22 +1787,85 @@ function usuarioDoJid (jid) {
   return /^[0-9]+$/.test(u) ? u : ''
 }
 
+// A MESMA PESSOA TEM DOIS NOMES NO COFRE.
+// Medido na Prime em 08/09, conta 34, com o dono do sistema como contato:
+//
+//   session-558681885930.0/.33/.35     ← pelo NÚMERO — tocada no ENVIO   (07:43:47)
+//   session-35626837647552.0/.33/.35   ← pelo LID    — tocada no RETRY   (07:43:54)
+//
+// Os mesmos três aparelhos (.0, .33, .35) sob dois identificadores. Ciframos com a
+// sessão de um lado enquanto o aparelho dele estava ratcheteado no outro: a mensagem
+// CHEGAVA e não abria ("Aguardando mensagem" na tela dele), e o reenvio que o celular
+// pedia refazia pelo mesmo caminho errado.
+//
+// A limpeza cirúrgica mirava só o identificador que vinha no jid — e registrou
+// `apagadas: 0` duas vezes no mesmo dia procurando o LID enquanto a sessão viva
+// estava sob o número. O remédio existia e nunca tinha curado ninguém.
+//
+// Então junta os dois. O `lidMaps` guarda lid→número; a volta (número→lid) não tem
+// índice e sai por varredura, o que é aceitável porque isto roda no esgotamento da
+// retentativa e ainda por cima com trava de 1h.
+function usuariosDoPeer (contaId, jid) {
+  const fora = new Set()
+  const u = usuarioDoJid(jid)
+  if (u) fora.add(u)
+  const mapa = lidMaps.get(contaId)
+  if (!mapa) return [...fora]
+  const daIda = mapa.get(jid) || mapa.get(u + '@lid')
+  if (daIda) { const p = usuarioDoJid(daIda); if (p) fora.add(p) }
+  for (const [lid, numero] of mapa) {
+    if (usuarioDoJid(numero) === u) { const l = usuarioDoJid(lid); if (l) fora.add(l) }
+  }
+  return [...fora]
+}
+
 async function limparSessaoDoPeer (contaId, jid, motivo) {
-  const usuario = usuarioDoJid(jid)
-  if (!usuario) return 0
-  const chave = contaId + ':' + usuario
+  const usuarios = usuariosDoPeer(contaId, jid).sort()
+  if (!usuarios.length) return 0
+  // a trava é do CONTATO, não do identificador: chamar com o lid ou com o número
+  // expande pro mesmo conjunto e portanto pra mesma chave
+  const chave = contaId + ':' + usuarios.join(',')
   const agora = Date.now()
   const ultima = ultimaLimpezaDePeer.get(chave) || 0
   if (agora - ultima < LIMPAR_SESSAO_ESPERA_MS) return 0
   ultimaLimpezaDePeer.set(chave, agora)
   try {
     const r = await pool.query(
-      "delete from wa_qr_auth where conta_id=$1 and arquivo like 'session-' || $2 || '.%'",
-      [contaId, usuario])
-    log.warn({ contaId, jid, motivo, apagadas: r.rowCount },
+      'select arquivo from wa_qr_auth where conta_id=$1 and arquivo like any($2::text[])',
+      [contaId, usuarios.map((u) => 'session-' + u + '.%')])
+    const arquivos = r.rows.map((x) => x.arquivo)
+    if (!arquivos.length) {
+      log.warn({ contaId, jid, motivo, usuarios },
+        'sessão deste contato não decifra, mas não há sessão gravada pra apagar')
+      return 0
+    }
+    // APAGAR PELO KEY STORE, NÃO POR SQL.
+    // O Baileys lê as chaves através do makeCacheableSignalKeyStore, que guarda o
+    // valor em memória (ver o mesmo cuidado no resyncAgenda). Apagando a linha no
+    // Postgres, o socket vivo continua com a sessão velha em mãos e a reescreve na
+    // próxima mensagem — a limpeza virava enfeite. Pelo store, o set(null) grava
+    // null no cache E chama o nosso apagar(), então some dos dois lugares.
+    const s = sessoes.get(contaId)
+    const store = s && s.sock && s.sock.authState && s.sock.authState.keys
+    if (store) {
+      const zeradas = {}
+      for (const a of arquivos) zeradas[a.slice('session-'.length)] = null
+      await store.set({ session: zeradas })
+    } else {
+      // sem socket não há cache pra invalidar — o SQL basta e é o que sobra
+      await pool.query('delete from wa_qr_auth where conta_id=$1 and arquivo = any($2::text[])',
+        [contaId, arquivos])
+    }
+    // conta o que REALMENTE saiu, em vez de supor: é este número que apareceu como
+    // `apagadas: 0` e denunciou o defeito — ele não pode voltar a ser um palpite
+    const sobrou = await pool.query(
+      'select count(*)::int as n from wa_qr_auth where conta_id=$1 and arquivo = any($2::text[])',
+      [contaId, arquivos])
+    const apagadas = arquivos.length - ((sobrou.rows[0] && sobrou.rows[0].n) || 0)
+    log.warn({ contaId, jid, motivo, usuarios, apagadas, peloStore: !!store },
       'sessão deste contato não decifra mais — apagada só a dele, pra ela ser ' +
       'refeita no próximo contato (as outras conversas ficam intactas)')
-    return r.rowCount
+    return apagadas
   } catch (e) {
     log.error({ contaId, jid, motivo, e: String((e && e.message) || e) },
       'não consegui apagar a sessão deste contato (segue normal)')
@@ -3995,5 +4058,5 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { agendaTrancadaPorChave, VALVULA_CHAVE_FALTANDO_MS, MARCA_CHAVE_FALTANDO,
+module.exports = { usuariosDoPeer, agendaTrancadaPorChave, VALVULA_CHAVE_FALTANDO_MS, MARCA_CHAVE_FALTANDO,
   medindo, oQueEstaEmCurso, decifragemPorConta, emCurso, QUARENTENA_PEER_MS, porPeerEmQuarentena, peerEmQuarentena, esquecerQuarentena, peersEmQuarentena, avisarChipQuebrado, alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

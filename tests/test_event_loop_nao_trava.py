@@ -104,6 +104,9 @@ def test_pendentes_nao_tem_entrada_morta():
 @pytest.mark.parametrize("nome", [
     "webhook_wa_qr", "webhook_wa_qr_historico", "webhook_wa_qr_saida",
     "webhook_wa_qr_status", "webhook_wa_qr_deslogado",
+    # o aviso de chip quebrado é raro, mas chega pelo MESMO caminho: se ele
+    # segurar o event loop, segura o painel inteiro junto (dois workers no Render)
+    "webhook_wa_qr_chip_quebrado",
 ])
 def test_webhooks_do_wa_qr_passam_o_trabalho_pra_threadpool(nome):
     """Os que rodam a CADA mensagem: o wrapper async só lê o corpo."""

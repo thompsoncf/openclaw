@@ -545,10 +545,19 @@ function comContaDoBaileys (contaId, base) {
         // decifra é o membro que mandou. Mirar o grupo não consertaria contato
         // nenhum. Em conversa de um pra um o participant não vem, e o remoteJid
         // já é a pessoa.
-        limparSessaoDoPeer(contaId,
-          (obj.key && (obj.key.participant || obj.key.remoteJid)), 'retry esgotado')
+        const peer = obj.key && (obj.key.participant || obj.key.remoteJid)
+        limparSessaoDoPeer(contaId, peer, 'retry esgotado')
           .catch((e) => log.error({ contaId, e: String(e) },
             'limpeza cirúrgica de sessão falhou'))
+        // ...e para de ouvir esse contato por um tempo. A limpeza acima só vale
+        // pra PRÓXIMA sessão; o que já está na fila do WhatsApp continua chegando
+        // e continua sem decifrar. Sem isto, apagar a sessão não interrompe nada —
+        // foi o que aconteceu em 07/09, com a limpeza feita e a enxurrada seguindo.
+        if (porPeerEmQuarentena(contaId, peer, agora, QUARENTENA_PEER_MS)) {
+          log.warn({ contaId, jid: peer, minutos: Math.round(QUARENTENA_PEER_MS / 60000) },
+            'quarentena: este contato não decifra — parando de ouvi-lo antes de ' +
+            'decifrar, pra a enxurrada não travar o serviço inteiro')
+        }
         if (contarFalhaDeDecifrar(contaId, agora, DECIFRAR_TETO, DECIFRAR_JANELA_MS)) {
           abrirDisjuntor(contaId).catch((e) =>
             log.error({ contaId, e: String(e) }, 'disjuntor: falhou ao abrir'))
@@ -747,7 +756,15 @@ function marcarVivo (contaId, entregouMensagem) {
   // do esperaPos440: numa conta movimentada sempre chega um recibo entre subir e
   // levar 440 de novo, então o contador voltava a zero toda volta e a espera ficava
   // presa nos 5 minutos iniciais pra sempre. Quem zera é o tempo de pé (sessaoFirme).
-  if (sessaoFirme(s, Date.now(), SESSAO_FIRME_MS)) s.tentativasPos440 = 0
+  if (sessaoFirme(s, Date.now(), SESSAO_FIRME_MS)) {
+    s.tentativasPos440 = 0
+    // ...e a conta deixa de estar "parada pelo disjuntor". Firme aqui já exige
+    // tempo de pé SEM falha de decifragem (ver sessaoFirme), que é exatamente a
+    // prova que interessa: a enxurrada passou, o /enviar pode religar de novo.
+    s.paradoPeloDisjuntor = false
+    s.aberturasDoDisjuntor = 0
+    s.avisouChipQuebrado = false
+  }
 }
 
 // ---------------------------------------------- o eco: a prova de que a entrada vive
@@ -990,13 +1007,29 @@ async function abrirDisjuntor (contaId) {
   // aparecer no log: em 20/08 a conta 35 abriu o disjuntor onze vezes e as onze
   // linhas eram idênticas — nada distinguia "aconteceu" de "não para de acontecer".
   s.aberturasDoDisjuntor = (s.aberturasDoDisjuntor || 0) + 1
+  // A ESPERA TEM QUE CRESCER. O comentário abaixo promete "a espera dobrando a cada
+  // retomada que não segurar", mas quem incrementava `tentativasPos440` era só o
+  // vigia — pelo caminho do disjuntor a espera ficava em `base × 2⁰`, 5 minutos
+  // fixos, por mais vezes que abrisse. Em 07/09 abriu três vezes em três minutos.
+  s.tentativasPos440 = (s.tentativasPos440 || 0) + 1
+  // ...e a conta fica MARCADA como parada por decisão nossa. É o que o /enviar lê
+  // pra não religar em cima da espera que acabou de começar (ver o handler).
+  s.paradoPeloDisjuntor = true
   log.error({ contaId, teto: DECIFRAR_TETO, aberturas: s.aberturasDoDisjuntor,
-    janelaS: Math.round(DECIFRAR_JANELA_MS / 1000), seguraATrava: trava.segura(contaId) },
+    janelaS: Math.round(DECIFRAR_JANELA_MS / 1000), seguraATrava: trava.segura(contaId),
+    proximaEsperaMin: Math.round(esperaPos440(s, ESPERA_POS_440_MS) / 60000) },
   'disjuntor: enxurrada de falhas ao decifrar — parando esta conta pra não brigar por ela')
   if (s.aberturasDoDisjuntor >= DISJUNTOR_AVISA_EM) {
     log.error({ contaId, aberturas: s.aberturasDoDisjuntor },
       'disjuntor: este chip não decifra o que chega há várias rodadas — a sessão do ' +
       'Signal não vai se consertar sozinha, ele precisa ser pareado de novo no celular')
+    // UMA vez por encarnação: a partir daqui toda abertura repetiria o aviso, e
+    // aviso repetido é aviso ignorado. `sessaoFirme` zera as aberturas quando a
+    // conta prova que ficou de pé — é lá que o direito de avisar de novo volta.
+    if (!s.avisouChipQuebrado) {
+      s.avisouChipQuebrado = true
+      avisarChipQuebrado(contaId, s.aberturasDoDisjuntor).catch(() => {})
+    }
   }
   // Mesmo desmonte do 440 (ver o ramo do connectionReplaced): esta encarnação
   // acabou e não pode deixar nada dela para trás — inclusive os laços da agenda,
@@ -1533,6 +1566,9 @@ function esquecerConta (contaId) {
   // badSession legítimo da credencial NOVA seria engolido pela espera da antiga —
   // e a conta ficaria com sessão podre justamente na estreia.
   ultimaLimpezaDeSessao.delete(contaId)
+  // a quarentena é por conta+contato e tem prazo, mas uma conta que sai daqui não
+  // pode deixar contato calado pra trás — se ela voltar, volta ouvindo todo mundo
+  esquecerQuarentena(contaId)
 }
 
 // Apaga o retrato da sessão que deixou de existir.
@@ -1620,6 +1656,68 @@ const LIMPAR_TUDO_NO_500 = (process.env.WA_QR_LIMPAR_SESSAO_TUDO || '') === 'SIM
 // tentativas falharam — aquela sessão específica não serve mais, e é a única que se
 // apaga. Quem estava conversando bem continua conversando.
 const ultimaLimpezaDePeer = new Map()
+
+// QUARENTENA DO CONTATO QUE NÃO DECIFRA — a alavanca contra a enxurrada.
+//
+// Medido em 07/09/2026, conta 34: dois contatos com a sessão do Signal quebrada
+// (30331126157545@lid e 20487077900426@lid) travaram o serviço INTEIRO três vezes
+// em três minutos. O WhatsApp reentrega o que não decifra, para sempre; cada
+// reentrega custa cripto + Postgres, e o event loop parou 20,7s, 23,2s e 40,6s.
+// O /saude do Render desiste em 5s — e os outros dois chips caíram junto, 4ms
+// depois do bloqueio soltar (code 408, o ping deles venceu durante a trava).
+//
+// A limpeza cirúrgica (limparSessaoDoPeer) já apagava a sessão do contato, mas o
+// serviço CONTINUAVA aceitando as mensagens dele — e elas continuavam sem
+// decifrar. Faltava parar de olhar pra elas.
+//
+// Aqui o contato entra em quarentena e o `shouldIgnoreJid` passa a descartá-lo
+// ANTES do decryptMessageNode (Socket/messages-recv.ts:727): não decifra, não
+// pede retry, não vai ao banco. A enxurrada morre na porta.
+//
+// O QUE SE PERDE, dito sem rodeio: mensagem real daquele contato é descartada
+// enquanto durar a quarentena. Só que ela JÁ está sendo perdida — o que não
+// decifra não vira mensagem em lugar nenhum. A escolha aqui é entre perder o que
+// já estava perdido de um contato, ou derrubar a empresa inteira por causa dele.
+//
+// Tem prazo de propósito: sessão quebrada às vezes se resolve quando o outro lado
+// reinstala ou volta a falar. Vencida a quarentena, ele volta a ser ouvido; se
+// ainda não decifrar, entra de novo, e aí o disjuntor já terá contado a rodada.
+const QUARENTENA_PEER_MS = parseInt(
+  process.env.WA_QR_QUARENTENA_PEER_MS || '1800000', 10)   // 30 min
+const peersEmQuarentena = new Map()   // 'contaId:usuario' -> instante em que sai
+
+function chaveDoPeer (contaId, jid) {
+  const usuario = usuarioDoJid(jid)
+  return usuario ? contaId + ':' + usuario : ''
+}
+
+// Põe o contato de castigo. Devolve false quando o jid não tem sessão de contato
+// (grupo, status, canal) — lá quem falha é o participant, não o jid.
+function porPeerEmQuarentena (contaId, jid, agora, ms) {
+  const chave = chaveDoPeer(contaId, jid)
+  if (!chave) return false
+  peersEmQuarentena.set(chave, (agora || Date.now()) + (ms || QUARENTENA_PEER_MS))
+  return true
+}
+
+function peerEmQuarentena (contaId, jid, agora) {
+  const chave = chaveDoPeer(contaId, jid)
+  if (!chave) return false
+  const ate = peersEmQuarentena.get(chave)
+  if (!ate) return false
+  if ((agora || Date.now()) >= ate) {
+    peersEmQuarentena.delete(chave)   // venceu: o contato volta a ser ouvido
+    return false
+  }
+  return true
+}
+
+function esquecerQuarentena (contaId) {
+  const prefixo = contaId + ':'
+  for (const k of peersEmQuarentena.keys()) {
+    if (k.startsWith(prefixo)) peersEmQuarentena.delete(k)
+  }
+}
 
 // "5586...@s.whatsapp.net", "1013...@lid", "5586...:33@s.whatsapp.net" -> "5586..."
 // O nome do registro é `session-<usuario>.<dispositivo>` (ver auth-db.js), então é o
@@ -1922,8 +2020,14 @@ function ehConversaValida (jid) {
 // (repassarContatos) — ignorá-la no Baileys perderia isso. Status e canal não têm
 // esse valor: canal é propaganda, e o contato que aparece num status já vem da
 // agenda ou de conversa real.
-function deveIgnorarNoBaileys (jid) {
-  return jid === 'status@broadcast' || (typeof jid === 'string' && jid.endsWith('@newsletter'))
+// `contaId` e `agora` são opcionais: sem eles a função responde só sobre status e
+// canal, que é o que ela sempre fez. Com eles, também descarta o contato em
+// quarentena — ver porPeerEmQuarentena.
+function deveIgnorarNoBaileys (jid, contaId, agora) {
+  if (jid === 'status@broadcast') return true
+  if (typeof jid === 'string' && jid.endsWith('@newsletter')) return true
+  if (contaId != null && peerEmQuarentena(contaId, jid, agora)) return true
+  return false
 }
 
 // Quantas vezes reenviar uma mensagem que a outra ponta não conseguiu decifrar.
@@ -2388,6 +2492,24 @@ async function avisarDeslogado (contaId) {
   } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao avisar deslogado') }
 }
 
+// O CHIP PRECISA SER PAREADO DE NOVO, e alguém tem que ficar sabendo.
+//
+// Até 07/09/2026 o disjuntor detectava o estado terminal na terceira abertura e
+// escrevia uma linha de log — que morria ali. Não ia pro painel, não ia pro
+// Telegram, não virava alerta. O dono descobria pelo e-mail de health check do
+// Render, ou quando um vendedor reclamava que o cliente não respondia. Saber e
+// não contar é pior que não saber: o serviço tinha o diagnóstico pronto.
+async function avisarChipQuebrado (contaId, aberturas) {
+  if (!APP_URL) return
+  try {
+    await fetch(APP_URL + '/webhooks/wa-qr/chip-quebrado', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-wa-secret': SEGREDO },
+      body: JSON.stringify({ conta_id: contaId, aberturas })
+    })
+  } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao avisar chip quebrado') }
+}
+
 // QUAIS ondas de histórico processar. Esta função decide se um BLOB inteiro vai ser
 // baixado da rede e descompactado na memória — não é um filtro de "o que fazer com o
 // que já chegou". Confira na fonte do Baileys:
@@ -2661,7 +2783,7 @@ async function iniciarSessao (contaId) {
       markOnlineOnConnect: false,
       // Corta status de contato e canal ANTES de decifrar — ver deveIgnorarNoBaileys.
       // É a maior das três alavancas contra a saturação de CPU de 20/08.
-      shouldIgnoreJid: deveIgnorarNoBaileys,
+      shouldIgnoreJid: (jid) => deveIgnorarNoBaileys(jid, contaId),
       // ...e as outras duas: menos retentativas, mais espaçadas (ver as constantes).
       maxMsgRetryCount: MAX_RETRY_DECIFRAR,
       retryRequestDelayMs: RETRY_DELAY_MS,
@@ -3319,6 +3441,23 @@ const servidor = http.createServer(async (req, res) => {
         // ou ela caiu agora): tenta religar na hora com a credencial salva em vez
         // de já responder "desconectado" — que era o que o vendedor via bem no meio
         // de uma conversa. Se mesmo assim não subir, aí sim devolve o erro.
+        // MAS NÃO EM CIMA DO DISJUNTOR. Se a conta foi parada por nós porque não
+        // decifra, religar aqui a joga direto na mesma enxurrada — e foi assim que
+        // ela abriu pela terceira vez em 07/09: disjuntor às 23:43:52, um envio às
+        // 23:45:15 religou, e às 23:46:28 abriu de novo, travando o event loop 40s
+        // e derrubando os outros dois chips junto. Enquanto a espera não vence,
+        // responde 'desconectado' — que a tela já sabe mostrar — e deixa o vigia
+        // retomar na hora certa. Vale SÓ pro disjuntor: o caso que este religamento
+        // existe pra atender (serviço subiu agora, conta ainda não religou) não tem
+        // a marca e segue como antes.
+        if (s && s.paradoPeloDisjuntor && !sessaoOrfa(s, Date.now(), ESPERA_POS_440_MS)) {
+          const faltaMs = (s.substituidaEm + esperaPos440(s, ESPERA_POS_440_MS)) - Date.now()
+          log.warn({ contaId, aberturas: s.aberturasDoDisjuntor,
+            faltaMin: Math.max(0, Math.round(faltaMs / 60000)) },
+          'enviar: conta parada pelo disjuntor e ainda em espera — não vou religar ' +
+          'em cima da enxurrada')
+          return json(res, 200, { ok: false, erro: 'desconectado' })
+        }
         if (!s || s.status !== 'conectado' || !s.sock) {
           log.info({ contaId }, 'enviar: sem sessão viva — religando e AGUARDANDO conectar')
           try { await iniciarSessao(contaId) } catch (e) {
@@ -3743,4 +3882,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { QUARENTENA_PEER_MS, porPeerEmQuarentena, peerEmQuarentena, esquecerQuarentena, peersEmQuarentena, avisarChipQuebrado, alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

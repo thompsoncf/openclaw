@@ -28,8 +28,41 @@ RECORRENTE = rxp.perfil("consultoria")
 
 MIG = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 CONTA = 7
-# quarta-feira, 09/09/2026, 12h UTC = 09h em Brasília — dentro da janela padrão
-AGORA = datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc)
+
+
+def _proxima_quarta_12h() -> datetime:
+    """Quarta-feira 12h UTC (09h em Brasília, dentro da janela padrão) — a
+    PRÓXIMA, nunca hoje, então `AGORA` fica sempre de 1 a 7 dias no futuro.
+
+    POR QUE NÃO É MAIS UMA DATA FIXA. Era `datetime(2026, 9, 9, 12, 0)`, e em
+    09/09/2026 essa data virou HOJE: a suíte ficou vermelha na main sem ninguém
+    ter tocado em código, e continuaria vermelha pra sempre.
+
+    O motivo é que dois testes daqui comparam duas linhas do tempo diferentes.
+    `test_a_mao_manda_ate_o_cliente_falar_de_novo` e
+    `test_adiar_em_silencio_tres_vezes_passa_a_exigir_motivo` injetam a mensagem
+    do cliente em `AGORA - 6h` / `AGORA - 1h` e exigem que ela seja mais NOVA que
+    a marcação — mas o `criado_em` da marcação sai do relógio de verdade do banco
+    (`follow_up_marcacoes.criado_em default now()`), não de `AGORA`. Enquanto o
+    dia de hoje era anterior a 09/09 essas mensagens estavam no futuro e a
+    comparação fechava sozinha; às 06:00 UTC de 09/09/2026 o relógio real passou
+    por `AGORA - 6h` e a asserção inverteu.
+
+    Ancorar numa quarta futura preserva o que a data fixa queria dizer (o dia da
+    semana e a hora dentro da janela de trabalho) e tira o prazo de validade.
+
+    O `+ 7` não é folga por desencargo: sem ele, a "próxima quarta" vista de uma
+    terça à noite fica a 12h de distância, e um teste novo com deslocamento maior
+    que isso voltaria a quebrar por relógio. Com ele a distância é sempre de 7 a
+    13 dias, e nenhum deslocamento plausível dentro de um teste alcança o passado.
+    """
+    agora = datetime.now(timezone.utc)
+    dias = (2 - agora.weekday()) % 7 + 7           # 2 = quarta; nunca menos de 7 dias
+    return (agora + timedelta(days=dias)).replace(hour=12, minute=0, second=0,
+                                                  microsecond=0)
+
+
+AGORA = _proxima_quarta_12h()
 
 _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text, contato text,
@@ -143,6 +176,25 @@ def _modo(c, modo="ligado", **kw):
     campos = ", ".join(f"{k}=%s" for k in kw)
     c.execute(f"update funil_regua set follow_up_modo=%s{', ' + campos if kw else ''} where conta_id=%s",
               (modo, *kw.values(), CONTA))
+
+
+# ------------------------------------------------------------------ a âncora do tempo
+
+def test_agora_esta_sempre_no_futuro_e_numa_quarta():
+    """A invariante que os testes deste arquivo assumem sem dizer.
+
+    Dois deles injetam mensagem em `AGORA - 6h` / `AGORA - 1h` e a comparam com um
+    `criado_em` vindo do relógio do banco. Se `AGORA` deixar de estar no futuro,
+    eles quebram sozinhos, num dia qualquer, sem nenhum commit — foi o que
+    aconteceu em 09/09/2026. Esta asserção falha primeiro e diz o porquê, em vez
+    de mandar quem está de plantão caçar `assert not True` em dois testes de
+    follow-up.
+    """
+    folga = AGORA - datetime.now(timezone.utc)
+    assert folga > timedelta(hours=24), (
+        f"AGORA precisa estar pelo menos 1 dia à frente do relógio real; está {folga}")
+    assert AGORA.weekday() == 2, "a janela padrão dos testes é quarta-feira"
+    assert (AGORA.hour, AGORA.minute) == (12, 0), "12h UTC = 09h em Brasília"
 
 
 # ------------------------------------------------------------------ a escada (pura)

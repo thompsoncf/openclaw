@@ -259,7 +259,13 @@ def test_a_mao_manda_ate_o_cliente_falar_de_novo(c):
     v = _vend(c)
     lead = _lead(c, v, contato="Ana"); conv = _fala(c, lead, ("in", 9), ("out", 8))
     terca = AGORA + timedelta(days=4)
-    fu.marcar(c, CONTA, lead, terca, acao="retorno que ele pediu", membro_id=v)
+    # ONTEM o vendedor marcou (depois da última fala, que foi há 8 dias) — é o
+    # instante da marcação que decide se ela é mais nova que a conversa, então ele
+    # entra explícito. Antes de 09/09/2026 quem carimbava era o `now()` do banco, e
+    # o teste passava só porque `AGORA` ainda era futuro; no dia em que a data
+    # chegou, a comparação inverteu e o teste quebrou sozinho na main.
+    fu.marcar(c, CONTA, lead, terca, acao="retorno que ele pediu", membro_id=v,
+              agora=AGORA - timedelta(days=1))
     x = fu.leads(c, CONTA, EVENTOS, AGORA)[0]
     assert x["na_mao"] and x["prazo"] == terca and x["estado"] == "agendado"
     # o cliente escreve depois da marcação: a bola volta a ser nossa
@@ -295,7 +301,7 @@ def test_sincronizar_escreve_o_prazo_e_nao_encosta_no_marcado_na_mao(c):
     auto = _lead(c, v, contato="Auto"); _fala(c, auto, ("in", 20), ("out", 19))
     mao = _lead(c, v, contato="Mao"); _fala(c, mao, ("in", 20), ("out", 19))
     escolhido = AGORA + timedelta(days=5)
-    fu.marcar(c, CONTA, mao, escolhido, membro_id=v)
+    fu.marcar(c, CONTA, mao, escolhido, membro_id=v, agora=AGORA)
     linhas = fu.leads(c, CONTA, EVENTOS, AGORA)
     assert fu.sincronizar(c, CONTA, linhas) == 1        # só o automático
     assert fu.sincronizar(c, CONTA, linhas) == 0        # nada mudou: não repete
@@ -308,24 +314,29 @@ def test_sincronizar_escreve_o_prazo_e_nao_encosta_no_marcado_na_mao(c):
 def test_adiar_em_silencio_tres_vezes_passa_a_exigir_motivo(c):
     v = _vend(c)
     lead = _lead(c, v, contato="Ana"); conv = _fala(c, lead, ("in", 9), ("out", 8))
-    assert fu.marcar(c, CONTA, lead, AGORA + timedelta(days=1), membro_id=v)["ok"]
-    assert fu.marcar(c, CONTA, lead, AGORA + timedelta(days=2), membro_id=v)["ok"]
-    r = fu.marcar(c, CONTA, lead, AGORA + timedelta(days=3), membro_id=v)
+    # os adiamentos acontecem ao longo dos últimos dias, todos DEPOIS da última
+    # fala (há 8 dias) e ANTES da conversa lá embaixo que zera a contagem
+    assert fu.marcar(c, CONTA, lead, AGORA + timedelta(days=1), membro_id=v,
+                     agora=AGORA - timedelta(days=5))["ok"]
+    assert fu.marcar(c, CONTA, lead, AGORA + timedelta(days=2), membro_id=v,
+                     agora=AGORA - timedelta(days=4))["ok"]
+    r = fu.marcar(c, CONTA, lead, AGORA + timedelta(days=3), membro_id=v,
+                  agora=AGORA - timedelta(days=3))
     assert r == {"ok": False, "erro": "motivo_obrigatorio"}
     # com motivo, passa
     assert fu.marcar(c, CONTA, lead, AGORA + timedelta(days=3), membro_id=v,
-                     motivo="noiva viajou")["ok"]
+                     motivo="noiva viajou", agora=AGORA - timedelta(days=2))["ok"]
     # e falar com o cliente zera a contagem: adiar depois de conversar é trabalho
     _msg(c, conv, "out", AGORA - timedelta(hours=1))
     assert not fu.exige_motivo(c, CONTA, lead)
-    assert fu.marcar(c, CONTA, lead, AGORA + timedelta(days=6), membro_id=v)["ok"]
+    assert fu.marcar(c, CONTA, lead, AGORA + timedelta(days=6), membro_id=v, agora=AGORA)["ok"]
 
 
 def test_o_historico_guarda_quem_adiou_e_por_que(c):
     v = _vend(c, "Pedro")
     lead = _lead(c, v); _fala(c, lead, ("in", 9), ("out", 8))
-    fu.marcar(c, CONTA, lead, AGORA + timedelta(days=1), acao="ligar", membro_id=v, motivo="pediu terça")
-    fu.marcar(c, CONTA, lead, AGORA + timedelta(days=2), membro_id=None, automatico=True)
+    fu.marcar(c, CONTA, lead, AGORA + timedelta(days=1), acao="ligar", membro_id=v, motivo="pediu terça", agora=AGORA)
+    fu.marcar(c, CONTA, lead, AGORA + timedelta(days=2), membro_id=None, automatico=True, agora=AGORA)
     h = fu.historico(c, CONTA, lead)
     assert len(h) == 2 and h[0]["automatico"] and h[0]["quem"] == "o sistema"
     assert h[1]["quem"] == "Pedro" and h[1]["motivo"] == "pediu terça" and h[1]["acao"] == "ligar"
@@ -882,3 +893,44 @@ def test_valor_estranho_nao_vira_modo(rota, c):
     assert _post_modo(rota, "ligadão").status_code == 303
     assert _modo_no_banco(c) == "observando"
     assert fr.MODOS == ("off", "observando", "ligado")
+
+
+def test_a_marcacao_nao_depende_do_relogio_do_banco(c):
+    """A trava do defeito de 09/09/2026.
+
+    `criado_em` da marcação NÃO é enfeite: `exige_motivo` e a coluna `na_mao`
+    perguntam "esta marcação é mais nova que a última mensagem do cliente?". Se
+    quem carimba é o `now()` do Postgres e quem pergunta usa um relógio injetado,
+    a resposta passa a depender de qual dos dois está na frente.
+
+    Em produção os dois coincidem e o defeito fica invisível. Foi assim que dois
+    testes verdes por semanas quebraram sozinhos na main, sem ninguém tocar em
+    follow-up: `AGORA` era uma data fixa que até a véspera era futuro, e no dia em
+    que o relógio real passou dela a comparação inverteu.
+
+    Este teste marca no PASSADO e conversa DEPOIS. Com o carimbo do banco isso
+    seria impossível de escrever — a marcação nasceria sempre "agora"."""
+    v = _vend(c)
+    lead = _lead(c, v, contato="Ana"); conv = _fala(c, lead, ("in", 30), ("out", 29))
+    # marcado há 10 dias, muito antes de qualquer relógio de parede desta máquina
+    fu.marcar(c, CONTA, lead, AGORA + timedelta(days=2), membro_id=v,
+              agora=AGORA - timedelta(days=10))
+    assert fu.leads(c, CONTA, EVENTOS, AGORA)[0]["na_mao"], (
+        "marcação sem conversa depois dela: a bola é do vendedor")
+    # o cliente escreve DEPOIS da marcação — mas ainda no passado
+    _msg(c, conv, "in", AGORA - timedelta(days=9))
+    assert not fu.leads(c, CONTA, EVENTOS, AGORA)[0]["na_mao"], (
+        "com o carimbo vindo do banco, a marcação nasceria HOJE e esta mensagem de "
+        "9 dias atrás pareceria velha — a bola nunca voltaria pra empresa")
+
+
+def test_sem_relogio_a_marcacao_segue_carimbando_pelo_banco(c):
+    """O parâmetro é opcional de propósito: a tela chama sem ele (o instante da
+    marcação É agora, e o banco é a fonte certa). Só quem injeta relógio precisa
+    dizer quando."""
+    v = _vend(c)
+    lead = _lead(c, v, contato="Ana"); _fala(c, lead, ("in", 9), ("out", 8))
+    assert fu.marcar(c, CONTA, lead, AGORA + timedelta(days=1), membro_id=v)["ok"]
+    r = c.execute("""select criado_em from follow_up_marcacoes
+                      where prospeccao_id=%s order by id desc limit 1""", (lead,)).fetchone()
+    assert r[0] is not None, "sem `agora`, quem carimba continua sendo o now() do banco"

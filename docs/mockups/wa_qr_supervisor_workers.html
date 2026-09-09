@@ -1,0 +1,325 @@
+<title>Um processo por cliente</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --papel:#EEF1F6; --carta:#FFFFFF; --tinta:#141C28; --tinta2:#48566B; --tinta3:#7A8798;
+    --regua:#D5DCE6; --regua2:#B4C0CF;
+    --planta:#2B55C4; --planta-bg:#E4EAFA;
+    --mudanca:#B36A00; --mudanca-bg:#FBF0DD;
+    --ruim:#B3271E; --ruim-bg:#FAE9E7;
+    --bom:#16704A; --bom-bg:#E2F2EA;
+    --codigo:#E7EBF2;
+    --display:"Bricolage Grotesque",Georgia,serif;
+    --corpo:"Source Sans 3","Helvetica Neue",Arial,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --papel:#0D1219; --carta:#141C26; --tinta:#E3E9F1; --tinta2:#AEBACA; --tinta3:#78889B;
+      --regua:#24303E; --regua2:#374658;
+      --planta:#7FA0F5; --planta-bg:#16233F;
+      --mudanca:#E8A94A; --mudanca-bg:#37280F;
+      --ruim:#F09189; --ruim-bg:#391A17;
+      --bom:#5CC697; --bom-bg:#0F2E22;
+      --codigo:#1A2430;
+    }
+  }
+  :root[data-theme="dark"]{
+    --papel:#0D1219; --carta:#141C26; --tinta:#E3E9F1; --tinta2:#AEBACA; --tinta3:#78889B;
+    --regua:#24303E; --regua2:#374658;
+    --planta:#7FA0F5; --planta-bg:#16233F;
+    --mudanca:#E8A94A; --mudanca-bg:#37280F;
+    --ruim:#F09189; --ruim-bg:#391A17;
+    --bom:#5CC697; --bom-bg:#0F2E22;
+    --codigo:#1A2430;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--papel);color:var(--tinta);font-family:var(--corpo);font-size:16.5px;line-height:1.62;-webkit-font-smoothing:antialiased}
+  a{color:var(--planta)}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--planta);outline-offset:2px}
+  .pagina{max-width:920px;margin:0 auto;padding:44px 24px 88px}
+  .prosa{max-width:66ch}
+  header{display:grid;gap:12px;padding-bottom:26px;border-bottom:2px solid var(--tinta);margin-bottom:34px}
+  .eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--tinta3)}
+  h1{font-family:var(--display);font-size:40px;line-height:1.08;font-weight:700;margin:0;letter-spacing:-.015em;text-wrap:balance}
+  .sub{margin:0;color:var(--tinta2);font-size:17.5px;max-width:58ch}
+  .selo{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:12px;color:var(--mudanca);background:var(--mudanca-bg);padding:4px 11px;border-radius:3px;width:fit-content;letter-spacing:.03em}
+  h2{font-family:var(--display);font-size:25px;font-weight:700;margin:54px 0 12px;letter-spacing:-.01em;text-wrap:balance}
+  h3{font-family:var(--display);font-size:18px;font-weight:600;margin:26px 0 7px}
+  p{margin:0 0 13px}
+  strong{font-weight:600}
+  code{font-family:var(--mono);font-size:.9em;background:var(--codigo);padding:1.5px 5px;border-radius:3px}
+  figure{margin:26px 0 10px;background:var(--carta);border:1px solid var(--regua);border-radius:5px;padding:22px 20px 16px}
+  figure svg{display:block;max-width:100%;height:auto;margin:0 auto}
+  figcaption{margin-top:16px;padding-top:13px;border-top:1px solid var(--regua);font-size:14.5px;color:var(--tinta2);line-height:1.5}
+  .fig-rolagem{overflow-x:auto}
+  .quadro{background:var(--carta);border:1px solid var(--regua);border-radius:5px;margin:20px 0}
+  .quadro .cap{font-family:var(--mono);font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--tinta3);padding:9px 15px;border-bottom:1px solid var(--regua)}
+  .rolagem{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:14.5px}
+  th,td{text-align:left;padding:9px 15px;border-bottom:1px solid var(--regua);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;color:var(--tinta3)}
+  tr:last-child td{border-bottom:0}
+  td.n,th.n{text-align:right;font-family:var(--mono);font-size:13.5px;font-variant-numeric:tabular-nums}
+  .ruim{color:var(--ruim);font-weight:600}
+  .bom{color:var(--bom);font-weight:600}
+  pre{margin:0;padding:14px 16px;font-family:var(--mono);font-size:12.8px;line-height:1.6;background:var(--codigo);overflow-x:auto;white-space:pre;color:var(--tinta)}
+  pre .d{color:var(--tinta3)}
+  pre .r{color:var(--ruim)}
+  pre .a{color:var(--planta)}
+  ol.fases{list-style:none;padding:0;margin:20px 0 0;display:grid;gap:11px}
+  ol.fases li{background:var(--carta);border:1px solid var(--regua);border-left:3px solid var(--planta);border-radius:4px;padding:16px 19px;display:grid;gap:5px}
+  ol.fases li.risco-alto{border-left-color:var(--mudanca)}
+  .fase-topo{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline}
+  .fase-n{font-family:var(--mono);font-size:12px;color:var(--planta);letter-spacing:.06em}
+  ol.fases h3{margin:0;font-size:17px}
+  ol.fases p{margin:0;color:var(--tinta2);font-size:15.5px}
+  .custo{font-family:var(--mono);font-size:12.5px;color:var(--tinta3);margin-top:4px}
+  ul.lista{padding-left:19px;margin:0 0 13px}
+  ul.lista li{margin-bottom:7px}
+  ul.lista li::marker{color:var(--tinta3)}
+  .aviso{border-left:3px solid var(--mudanca);background:var(--mudanca-bg);padding:14px 17px;border-radius:0 4px 4px 0;margin:22px 0;color:var(--tinta);font-size:15.5px}
+  .aviso strong{color:var(--mudanca)}
+  .par{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:20px 0}
+  .par > div{background:var(--carta);border:1px solid var(--regua);border-radius:5px;padding:15px 17px}
+  .par h3{margin:0 0 5px;font-size:16px}
+  .par p{margin:0;font-size:15px;color:var(--tinta2)}
+  .par .tag{font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;display:block;margin-bottom:7px}
+  .par .tag.bom{color:var(--bom)}
+  .par .tag.ruim{color:var(--ruim)}
+  footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--regua);font-size:14px;color:var(--tinta3)}
+  @media(max-width:620px){h1{font-size:30px}.pagina{padding:30px 15px 64px}}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="pagina">
+  <header>
+    <div class="eyebrow">Mockup de arquitetura · serviço zaq-waqr · 09/09/2026</div>
+    <h1>Um processo por cliente</h1>
+    <p class="sub">Hoje todos os chips vivem no mesmo event loop: quando um afoga, os outros caem junto. A proposta separa cada conta no seu próprio processo — e abre o caminho para testar o Baileys 7 sem arriscar um cliente.</p>
+    <span class="selo">Para aprovação — nenhum código escrito ainda</span>
+  </header>
+
+  <div class="prosa">
+    <h2>O que a noite de ontem provou</h2>
+    <p>Entre 22h e 8h, com a empresa fechada e ninguém escrevendo, os dois chips pareados nas últimas 24 h caíram <strong>onze vezes cada um</strong>. E o log mostra por quê, sem margem para dúvida:</p>
+  </div>
+
+  <div class="quadro">
+    <div class="cap">wa_qr_log · stream errored out · noite de 08→09/09</div>
+<pre><span class="d">conta 34</span>   22:22  23:30  00:20  01:10  02:50  03:40  04:30  05:20  06:10  07:00  07:50
+         <span class="r">3A4B3E86598B9C5136C1</span>  ← o mesmo id, onze vezes, de 50 em 50 minutos
+
+<span class="d">conta 23</span>   dois ids alternando: <span class="r">2A6B205ED068FA8B66B0</span> e <span class="r">4AB466C8764E2FB6F11D</span>
+
+<span class="d">conta 36</span>   <span class="a">nenhum</span>   (sem re-pareamento há 20 dias)</pre>
+  </div>
+
+  <div class="prosa">
+    <p>E o detalhe que corrige o diagnóstico de ontem: <strong>a conta 34 teve zero falhas de decifragem nessa noite</strong> e caiu as mesmas onze vezes. Então não é "a mensagem não decifra" — é o <code>ack</code> daquela mensagem específica que o servidor do WhatsApp rejeita, decifrando ou não. Uma mensagem presa por conta, num relógio de 50 minutos, até alguém consertar o <code>ack</code>.</p>
+    <p>Isso separa com clareza as duas coisas que precisam de resposta:</p>
+  </div>
+
+  <div class="par">
+    <div>
+      <span class="tag ruim">Causa 1 — não se resolve com processo</span>
+      <h3>A mensagem presa</h3>
+      <p>Vive dentro do Baileys 6.x. Só sai com a versão 7, que reescreveu o tratamento de <code>ack</code>. Separar processos <em>não conserta isso</em> — a conta afetada continua caindo de 50 em 50 min.</p>
+    </div>
+    <div>
+      <span class="tag bom">Causa 2 — é exatamente o que processo resolve</span>
+      <h3>O estrago se espalhando</h3>
+      <p>Hoje a queda de um chip e o travamento que ele provoca derrubam os vizinhos. Com um processo por conta, a conta doente cai sozinha e as outras nem percebem.</p>
+    </div>
+  </div>
+
+  <div class="aviso">
+    <strong>Sejamos exatos sobre o que esta mudança entrega.</strong> Ela não faz a Ramo Capital parar de cair. Ela faz a Ramo Capital cair <em>sozinha</em> — e permite rodar o Baileys 7 no processo dela enquanto os outros seguem estáveis no 6.7.24. É a fundação do conserto, não o conserto.
+  </div>
+
+  <h2>A forma de hoje e a proposta</h2>
+
+  <figure>
+    <div class="fig-rolagem">
+      <svg viewBox="0 0 880 470" role="img" aria-label="Hoje: um processo com os três chips no mesmo event loop, onde o travamento de um derruba o keepalive dos outros. Proposta: um supervisor com HTTP, trava e log, e um processo worker por conta, cada um com seu event loop e seu socket, isolados entre si." xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="seta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+          <marker id="seta-ruim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#B3271E"/>
+          </marker>
+        </defs>
+
+        <!-- ================= HOJE ================= -->
+        <text x="0" y="16" font-family="ui-monospace,monospace" font-size="12" fill="currentColor" opacity=".55" letter-spacing="1.2">HOJE</text>
+
+        <rect x="0" y="30" width="380" height="230" rx="5" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="16" y="52" font-size="13" font-weight="600" fill="currentColor">1 processo Node</text>
+        <text x="16" y="70" font-size="11.5" fill="currentColor" opacity=".6">HTTP · trava · log · 3 sockets</text>
+
+        <!-- event loop compartilhado -->
+        <rect x="16" y="84" width="348" height="34" rx="4" fill="#B3271E" fill-opacity=".13" stroke="#B3271E" stroke-opacity=".55"/>
+        <text x="190" y="105" font-size="12.5" text-anchor="middle" fill="#B3271E" font-weight="600">um event loop para todos</text>
+
+        <!-- chips -->
+        <rect x="16" y="134" width="106" height="58" rx="4" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-opacity=".4"/>
+        <text x="69" y="156" font-size="12.5" text-anchor="middle" fill="currentColor">conta 23</text>
+        <text x="69" y="173" font-size="11" text-anchor="middle" fill="#B3271E">afoga o loop</text>
+
+        <rect x="137" y="134" width="106" height="58" rx="4" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-opacity=".4"/>
+        <text x="190" y="156" font-size="12.5" text-anchor="middle" fill="currentColor">conta 34</text>
+        <text x="190" y="173" font-size="11" text-anchor="middle" fill="currentColor" opacity=".55">cai junto</text>
+
+        <rect x="258" y="134" width="106" height="58" rx="4" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-opacity=".4"/>
+        <text x="311" y="156" font-size="12.5" text-anchor="middle" fill="currentColor">conta 36</text>
+        <text x="311" y="173" font-size="11" text-anchor="middle" fill="currentColor" opacity=".55">cai junto</text>
+
+        <!-- contágio -->
+        <path d="M69 200 C 69 224, 190 224, 190 200" fill="none" stroke="#B3271E" stroke-width="1.4" marker-end="url(#seta-ruim)"/>
+        <path d="M69 206 C 69 244, 311 244, 311 200" fill="none" stroke="#B3271E" stroke-width="1.4" marker-end="url(#seta-ruim)"/>
+        <text x="190" y="256" font-size="11.5" text-anchor="middle" fill="#B3271E">travamento &gt; 5 s → keepalive vence → 408</text>
+
+        <!-- deploy hoje -->
+        <line x1="16" y1="276" x2="364" y2="276" stroke="currentColor" stroke-opacity=".2"/>
+        <text x="16" y="296" font-size="11.5" fill="currentColor" opacity=".65">deploy: derruba os 3 chips por ~30 s</text>
+        <text x="16" y="314" font-size="11.5" fill="currentColor" opacity=".65">memória: um teto para todos (1 GB)</text>
+        <text x="16" y="332" font-size="11.5" fill="currentColor" opacity=".65">Baileys: uma versão para todos</text>
+
+        <!-- ================= PROPOSTA ================= -->
+        <text x="470" y="16" font-family="ui-monospace,monospace" font-size="12" fill="#2B55C4" letter-spacing="1.2">PROPOSTA</text>
+
+        <rect x="470" y="30" width="410" height="230" rx="5" fill="none" stroke="#2B55C4" stroke-opacity=".55"/>
+
+        <!-- supervisor -->
+        <rect x="486" y="46" width="378" height="52" rx="4" fill="#2B55C4" fill-opacity=".1" stroke="#2B55C4" stroke-opacity=".6"/>
+        <text x="675" y="68" font-size="13" text-anchor="middle" font-weight="600" fill="currentColor">supervisor</text>
+        <text x="675" y="86" font-size="11.5" text-anchor="middle" fill="currentColor" opacity=".7">HTTP · trava · log · sobe e reinicia workers</text>
+
+        <!-- setas supervisor -> workers -->
+        <line x1="545" y1="98" x2="545" y2="132" stroke="currentColor" stroke-opacity=".5" marker-end="url(#seta)"/>
+        <line x1="675" y1="98" x2="675" y2="132" stroke="currentColor" stroke-opacity=".5" marker-end="url(#seta)"/>
+        <line x1="805" y1="98" x2="805" y2="132" stroke="currentColor" stroke-opacity=".5" marker-end="url(#seta)"/>
+
+        <!-- workers -->
+        <rect x="486" y="134" width="118" height="76" rx="4" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-opacity=".4"/>
+        <text x="545" y="154" font-size="12.5" text-anchor="middle" fill="currentColor">worker 23</text>
+        <rect x="498" y="164" width="94" height="20" rx="3" fill="#B3271E" fill-opacity=".13" stroke="#B3271E" stroke-opacity=".4"/>
+        <text x="545" y="178" font-size="10.5" text-anchor="middle" fill="#B3271E">loop próprio</text>
+        <text x="545" y="199" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".55">afoga só a si</text>
+
+        <rect x="616" y="134" width="118" height="76" rx="4" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-opacity=".4"/>
+        <text x="675" y="154" font-size="12.5" text-anchor="middle" fill="currentColor">worker 34</text>
+        <rect x="628" y="164" width="94" height="20" rx="3" fill="#16704A" fill-opacity=".13" stroke="#16704A" stroke-opacity=".4"/>
+        <text x="675" y="178" font-size="10.5" text-anchor="middle" fill="#16704A">loop próprio</text>
+        <text x="675" y="199" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".55">não sente nada</text>
+
+        <rect x="746" y="134" width="118" height="76" rx="4" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-opacity=".4"/>
+        <text x="805" y="154" font-size="12.5" text-anchor="middle" fill="currentColor">worker 36</text>
+        <rect x="758" y="164" width="94" height="20" rx="3" fill="#16704A" fill-opacity=".13" stroke="#16704A" stroke-opacity=".4"/>
+        <text x="805" y="178" font-size="10.5" text-anchor="middle" fill="#16704A">loop próprio</text>
+        <text x="805" y="199" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".55">não sente nada</text>
+
+        <!-- barreira -->
+        <line x1="610" y1="128" x2="610" y2="216" stroke="#2B55C4" stroke-width="1.2" stroke-dasharray="3 4"/>
+        <line x1="740" y1="128" x2="740" y2="216" stroke="#2B55C4" stroke-width="1.2" stroke-dasharray="3 4"/>
+        <text x="675" y="234" font-size="11.5" text-anchor="middle" fill="#2B55C4">a queda de um não atravessa a linha</text>
+
+        <line x1="486" y1="276" x2="864" y2="276" stroke="currentColor" stroke-opacity=".2"/>
+        <text x="486" y="296" font-size="11.5" fill="currentColor" opacity=".65">deploy: um worker de cada vez</text>
+        <text x="486" y="314" font-size="11.5" fill="currentColor" opacity=".65">memória: teto por conta</text>
+        <text x="486" y="332" font-size="11.5" fill="#2B55C4">Baileys: versão POR WORKER → canário do v7</text>
+
+        <!-- ============ base comum ============ -->
+        <line x1="0" y1="362" x2="880" y2="362" stroke="currentColor" stroke-opacity=".25"/>
+        <text x="0" y="386" font-family="ui-monospace,monospace" font-size="11.5" fill="currentColor" opacity=".55" letter-spacing="1">O QUE NÃO MUDA</text>
+
+        <rect x="0" y="398" width="200" height="48" rx="4" fill="currentColor" fill-opacity=".04" stroke="currentColor" stroke-opacity=".3"/>
+        <text x="100" y="420" font-size="12" text-anchor="middle" fill="currentColor">Postgres</text>
+        <text x="100" y="437" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".55">wa_qr_auth · log · trava</text>
+
+        <rect x="226" y="398" width="200" height="48" rx="4" fill="currentColor" fill-opacity=".04" stroke="currentColor" stroke-opacity=".3"/>
+        <text x="326" y="420" font-size="12" text-anchor="middle" fill="currentColor">webhook do painel</text>
+        <text x="326" y="437" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".55">mesma URL, mesmo segredo</text>
+
+        <rect x="452" y="398" width="200" height="48" rx="4" fill="currentColor" fill-opacity=".04" stroke="currentColor" stroke-opacity=".3"/>
+        <text x="552" y="420" font-size="12" text-anchor="middle" fill="currentColor">rotas HTTP</text>
+        <text x="552" y="437" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".55">/enviar · /status · /iniciar</text>
+
+        <rect x="678" y="398" width="202" height="48" rx="4" fill="currentColor" fill-opacity=".04" stroke="currentColor" stroke-opacity=".3"/>
+        <text x="779" y="420" font-size="12" text-anchor="middle" fill="currentColor">cofre e pareamento</text>
+        <text x="779" y="437" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".55">ninguém reparea nada</text>
+      </svg>
+    </div>
+    <figcaption>À esquerda, a forma de hoje: um event loop compartilhado, onde o travamento provocado por uma conta faz o keepalive das vizinhas vencer (as setas vermelhas — 33 das 36 quedas 408 dos últimos três dias). À direita, a proposta: o supervisor mantém HTTP, trava e log, e cada conta ganha um processo próprio. A linha tracejada é a fronteira que a queda não atravessa. Embaixo, o que continua idêntico — inclusive o cofre: <strong>nenhuma conta precisa ser pareada de novo</strong>.</figcaption>
+  </figure>
+
+  <div class="prosa">
+    <h2>Como o supervisor conversa com os workers</h2>
+    <p>O ponto delicado é a <strong>trava de sessão única</strong>, que existe para impedir dois sockets na mesma credencial — é ela que evita a guerra de 440 a cada deploy. A regra nova, em uma frase: <strong>quem segura a trava é o supervisor, não o worker.</strong></p>
+    <p>Assim o worker pode morrer e renascer à vontade sem soltar o aluguel da conta, e nenhuma outra instância assume a credencial no meio da troca. O worker só fala Baileys; toda a decisão de "esta conta é nossa" continua num lugar só.</p>
+  </div>
+
+  <div class="quadro">
+    <div class="cap">divisão de responsabilidade</div>
+    <div class="rolagem"><table>
+      <thead><tr><th>Fica no supervisor</th><th>Vai para o worker</th></tr></thead>
+      <tbody>
+        <tr><td>Servidor HTTP e o segredo compartilhado</td><td>O socket do Baileys e todos os listeners</td></tr>
+        <tr><td>A trava por conta (<code>sessao-lock.js</code>) e o batimento</td><td>Decifragem, envio, mídia, transcrição</td></tr>
+        <tr><td>A fila do log no Postgres (uma só, em lote)</td><td>Agenda, quarentena, disjuntor, vigia — tudo por conta</td></tr>
+        <tr><td>Subir, vigiar e reiniciar cada worker</td><td>O cofre da própria conta (<code>wa_qr_auth</code>)</td></tr>
+        <tr><td>Roteamento: <code>/session/34/enviar</code> → worker 34</td><td>Responder o pedido e devolver ao supervisor</td></tr>
+        <tr><td><code>GET /saude</code> — e ele responde <em>sempre</em>, porque nenhum socket roda aqui</td><td>Nada de HTTP</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="prosa">
+    <p>Esse último item merece uma linha própria: hoje o <code>/saude</code> vive no mesmo loop que decifra mensagem, e foi por isso que o Render trocou a instância em 07/09 — o health check não foi respondido em 5 s. <strong>Com o supervisor sem sockets, o <code>/saude</code> deixa de poder travar.</strong> Só isso já elimina a classe de queda que derrubou a empresa naquele dia.</p>
+
+    <h2>As fases, e o que cada uma custa</h2>
+    <p>Nenhuma delas exige parear nada de novo, e cada uma é reversível sozinha.</p>
+  </div>
+
+  <ol class="fases">
+    <li>
+      <div class="fase-topo"><span class="fase-n">FASE 1</span><h3>Carimbar a partida e detectar a mensagem presa</h3></div>
+      <p>Duas coisas de log, sem tocar em conexão. O carimbo passa a cobrir a partida do Baileys (hoje ele mostra <code>emCurso: []</code> nos travamentos de 12,5 s e 5,2 s). E o serviço passa a reconhecer sozinho o padrão de ontem: <em>mesmo id de <code>ack</code> em quedas consecutivas = conta presa no laço</em>, com aviso ao dono. Vira o número que prova se o Baileys 7 resolveu.</p>
+      <p class="custo">~1 dia · risco baixo (só log) · reversível: sim</p>
+    </li>
+    <li>
+      <div class="fase-topo"><span class="fase-n">FASE 2</span><h3>Supervisor com um worker só</h3></div>
+      <p>A forma nova sobe carregando <strong>todas as contas num único worker</strong> — mesma topologia de hoje, código novo. Se algo estiver errado, aparece aqui, com o comportamento antigo como referência. Nada de isolamento ainda; o objetivo é provar o encanamento (roteamento HTTP, trava no supervisor, log em lote, reinício).</p>
+      <p class="custo">~2 dias · risco médio · reversível: voltar o Start Command do Render</p>
+    </li>
+    <li>
+      <div class="fase-topo"><span class="fase-n">FASE 3</span><h3>Um worker por conta</h3></div>
+      <p>Liga o isolamento de verdade. Cada conta ganha processo, teto de memória e loop próprios. A medição que diz se deu certo já existe: quedas <code>408</code> por conta. Hoje o CP Thiago — que não tem mensagem presa nenhuma — leva 14 quedas em 3 dias, todas pagas pelo travamento das vizinhas. <strong>Se a Fase 3 funcionar, esse número vai a zero.</strong></p>
+      <p class="custo">~2 dias · risco médio · reversível: um worker para todos (Fase 2)</p>
+    </li>
+    <li class="risco-alto">
+      <div class="fase-topo"><span class="fase-n">FASE 4</span><h3>Baileys 7 no worker de um chip de teste</h3></div>
+      <p>Só depois das três anteriores, e <strong>num chip que não seja de cliente</strong>. Uma semana rodando, contando quedas por código. Se as quedas <code>500</code> zerarem, migra conta por conta, uma por vez, cada uma no seu worker. Se não zerarem, descobrimos sem custar um cliente — e o v7 fica esperando amadurecer.</p>
+      <p class="custo">1 semana de observação · risco contido ao chip de teste · reversível: o worker volta para o 6.7.24</p>
+    </li>
+  </ol>
+
+  <div class="prosa">
+    <h2>O que eu não sei, e não vou fingir que sei</h2>
+    <ul class="lista">
+      <li><strong>Se a mensagem presa expira sozinha.</strong> O chip Zarb está no laço desde ontem à noite; a Ramo Capital, desde ontem à tarde. Se em alguns dias pararem sozinhos, a fila do WhatsApp esvazia e o v7 vira menos urgente. Estou medindo.</li>
+      <li><strong>Quanto trabalho é migrar para o Baileys 7.</strong> O guia oficial de migração está bloqueado no meu ambiente; li as notas de versão, que citam ESM, opções renomeadas e tipos novos de chave no cofre. Antes da Fase 4 eu leio o código do v7 direto e te trago um número. Não prometo prazo com o que tenho hoje.</li>
+      <li><strong>O custo de memória real por worker.</strong> A referência medida é ~106 MB por processo Node ocioso com Baileys. Três workers cabem folgados nos 2 GB do plano (hoje o serviço inteiro opera em 164–181 MB), mas o número por conta em produção só se sabe medindo na Fase 3.</li>
+      <li><strong>Se o isolamento sozinho basta.</strong> Ele mata a Causa 2 entre clientes. A conta doente continua caindo — e a resposta para isso está na Fase 4, não aqui.</li>
+    </ul>
+
+    <h2>Se você aprovar</h2>
+    <p>Começo pela <strong>Fase 1 hoje</strong>: é só log, não encosta em conexão, e produz a medição que vai julgar todo o resto. As Fases 2 e 3 vão em PRs separados, cada uma com deploy próprio e janela combinada — nunca em horário de movimento, depois do que aconteceu ontem às 8h30. A Fase 4 só entra na conversa quando você tiver um chip de teste.</p>
+  </div>
+
+  <footer>
+    Medições em <code>wa_qr_log</code> e <code>wa_qr_auth</code> (projeto de produção, só leitura). Fonte do Baileys 6.7.24 lido em <code>node_modules</code>. Diagnóstico completo das duas causas no documento anterior, de 08/09.
+  </footer>
+</div>

@@ -6092,8 +6092,10 @@ def _webhook_wa_qr_chip_quebrado_sync(corpo: bytes):
     try:
         conta_id = int(payload.get("conta_id") or 0)
         aberturas = int(payload.get("aberturas") or 0)
+        quedas = int(payload.get("quedas") or 0)
     except (TypeError, ValueError):
         return Response("ok", media_type="text/plain")
+    motivo = str(payload.get("motivo") or "nao_decifra")
     if not conta_id:
         return Response("ok", media_type="text/plain")
     pool = get_pool()
@@ -6114,24 +6116,40 @@ def _webhook_wa_qr_chip_quebrado_sync(corpo: bytes):
         # no schema, e o aviso saiu dizendo "conta 10" pro dono da Prime Eventos
         log.warning("chip-quebrado: não deu pra ler o nome da conta %s: %s", conta_id, e)
     quem = f"{nome} ({rotulo})" if rotulo else (nome or f"conta {conta_id}")
-    texto = (f"📵 *Chip precisa ser pareado de novo*\n\n{quem}\n\n"
-             f"O WhatsApp desta conta parou de decifrar as mensagens que chegam e "
-             f"não se conserta sozinho ({aberturas} tentativas). Enquanto isso ela "
-             f"não recebe nem envia.\n\n"
-             f"O que fazer: no celular, WhatsApp → Aparelhos conectados. Se houver "
-             f"sessão duplicada, desconecte por lá; se não, é parear de novo pelo "
-             f"painel.")
+    if motivo == "mensagem_presa":
+        # O AVISO OPOSTO. Aqui parear de novo NÃO resolve — e é o que a pessoa faria
+        # por conta própria ao ver o chip caindo, o que só instala outra mensagem
+        # presa. Medido em 08/09: os dois chips pareados nas últimas 24h estavam no
+        # laço; o que não era pareado há 20 dias, não.
+        assunto = f"Chip caindo em laço — {quem}"
+        texto = (f"🔁 *Uma mensagem está derrubando este chip*\n\n{quem}\n\n"
+                 f"O WhatsApp reentrega a mesma mensagem de tempos em tempos e a "
+                 f"conexão cai junto — já são {quedas} quedas pela mesma. Entre uma "
+                 f"queda e outra o chip volta sozinho e segue recebendo e enviando "
+                 f"normalmente.\n\n"
+                 f"O que fazer: *nada*. Principalmente NÃO parear de novo — parear é "
+                 f"o que instala esse laço, e o chip volta a cair pelo mesmo motivo. "
+                 f"A correção é do serviço e já está sendo trabalhada.")
+    else:
+        assunto = f"Chip sem decifrar — {quem}"
+        texto = (f"📵 *Chip precisa ser pareado de novo*\n\n{quem}\n\n"
+                 f"O WhatsApp desta conta parou de decifrar as mensagens que chegam e "
+                 f"não se conserta sozinho ({aberturas} tentativas). Enquanto isso ela "
+                 f"não recebe nem envia.\n\n"
+                 f"O que fazer: no celular, WhatsApp → Aparelhos conectados. Se houver "
+                 f"sessão duplicada, desconecte por lá; se não, é parear de novo pelo "
+                 f"painel.")
     from finance import notificar as _nt
     try:
         _nt.enviar_para_dono(pool, conta_id, texto)
     except Exception:  # noqa: BLE001
         log.warning("chip-quebrado: não deu pra avisar o dono da conta %s", conta_id)
     try:
-        _nt.avisar_admin(f"Chip sem decifrar — {quem}", texto)
+        _nt.avisar_admin(assunto, texto)
     except Exception:  # noqa: BLE001
         log.warning("chip-quebrado: não deu pra avisar o admin (conta %s)", conta_id)
-    log.warning("chip-quebrado: conta %s (%s), %s aberturas do disjuntor",
-                conta_id, quem, aberturas)
+    log.warning("chip-quebrado: conta %s (%s), motivo=%s, aberturas=%s quedas=%s",
+                conta_id, quem, motivo, aberturas, quedas)
     return Response("ok", media_type="text/plain")
 
 

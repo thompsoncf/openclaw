@@ -4399,7 +4399,10 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   }
   function titBrl(c){
     var n = (Math.abs(c)/100).toFixed(2).replace('.', ',');
-    return (c < 0 ? '- R$ ' : 'R$ ') + n.replace(/\B(?=(\d{3})+(?!\d),)/g, '.');
+    // barras dobradas de propósito: este JS mora dentro de uma string Python, e
+    // \\B / \\d crus são sequência de escape inválida (SyntaxWarning no 3.12,
+    // SyntaxError adiante). O JS que sai daqui é o mesmo — ver brl() lá embaixo.
+    return (c < 0 ? '- R$ ' : 'R$ ') + n.replace(/\\B(?=(\\d{3})+(?!\\d),)/g, '.');
   }
   // A sugestão de multa e juros, pela regra que veio em `data-multa`/`data-juros`
   // (cláusula 3.4 do contrato da casa). Recalcula quando a DATA muda, porque o
@@ -4424,7 +4427,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     if(!campo.dataset.tocado){
       campo.value = (multa + juros) ? ((multa + juros)/100).toFixed(2).replace('.', ',') : '';
     }
-    var acr = Math.round(parseFloat((campo.value || '0').replace(/\./g,'').replace(',','.')) * 100) || 0;
+    var acr = Math.round(parseFloat((campo.value || '0').replace(/\\./g,'').replace(',','.')) * 100) || 0;
     f.querySelector('.tit-bx-dica').textContent = dias > 0
       ? ('Sugerido pela regra da casa: ' + dias + ' dia(s) de atraso — multa '
          + titBrl(multa) + ' + juros ' + titBrl(juros) + '. Troque pelo que o boleto cobrou.')

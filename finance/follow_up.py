@@ -342,19 +342,37 @@ def exige_motivo(c, conta_id: int, lead_id: int) -> bool:
 
 def marcar(c, conta_id: int, lead_id: int, prazo: datetime, acao: str = "",
            membro_id: int | None = None, motivo: str = "",
-           automatico: bool = False) -> dict:
+           automatico: bool = False, agora: datetime | None = None) -> dict:
     """Marca (ou remarca) a próxima ação. Nada é sobrescrito: cada marcação é uma
     linha nova, e `proximo_contato_em` só carrega a vigente pras telas antigas.
 
-    Devolve {ok, adiamentos} ou {ok: False, erro: 'motivo_obrigatorio'}.
+    `agora` é o instante da marcação. Ele existe porque o CRIADO_EM É COMPARADO:
+    `exige_motivo` e a coluna `na_mao` das telas perguntam "esta marcação é mais
+    nova que a última mensagem do cliente?" — quem responde sim adiou em silêncio,
+    quem responde não adiou depois de conversar. Deixando o Postgres carimbar com
+    `now()`, essa comparação passa a misturar DOIS relógios: o do banco, na hora da
+    transação, e o que o chamador injeta em `leads`/`avaliar`.
+
+    Em produção os dois coincidem e ninguém percebe. Sob relógio injetado eles se
+    separam — e em 09/09/2026 se separaram de verdade: `AGORA` dos testes era uma
+    data fixa (09/09 12:00 UTC) que até a véspera era futuro. Quando o relógio real
+    passou dela, "mensagem mais nova que a marcação" inverteu e dois testes que
+    nunca tinham falhado passaram a falhar TODO DIA, na main, sem ninguém ter
+    mexido em follow-up.
+
+    É o mesmo defeito que o teto diário teve em 07/09, noutro ponto do módulo: hora
+    do banco competindo com hora injetada. Agora quem marca diz quando.
     """
     if not automatico and not (motivo or "").strip() and exige_motivo(c, conta_id, lead_id):
         return {"ok": False, "erro": "motivo_obrigatorio"}
+    # coalesce e não `agora or now()` em Python: sem `agora`, o carimbo continua
+    # sendo o do banco, que é o comportamento de sempre pra quem chama sem relógio
     c.execute("""insert into follow_up_marcacoes
-                   (conta_id, prospeccao_id, prazo_em, acao, membro_id, automatico, motivo)
-                 values (%s,%s,%s,%s,%s,%s,%s)""",
+                   (conta_id, prospeccao_id, prazo_em, acao, membro_id, automatico,
+                    motivo, criado_em)
+                 values (%s,%s,%s,%s,%s,%s,%s, coalesce(%s, now()))""",
               (conta_id, lead_id, prazo, (acao or "")[:200], membro_id, automatico,
-               (motivo or "")[:400]))
+               (motivo or "")[:400], agora))
     c.execute("""update prospeccao set proximo_contato_em=%s, atualizado_em=now()
                   where id=%s and conta_id=%s""", (prazo, lead_id, conta_id))
     n = c.execute("""select count(*) from follow_up_marcacoes

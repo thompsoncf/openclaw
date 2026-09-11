@@ -169,11 +169,19 @@ def test_conta_que_nao_vende_data_tem_o_funil_de_sempre(monkeypatch, pool):
 
 
 def test_evento_que_ja_passou_com_etapa_aberta_fica_marcado(monkeypatch, pool, vende_data):
+    """O alerta é sobre a festa que passou SEM ser fechada. A fechada não leva selo —
+    e desde o modelo de funil do ramo (11/09/2026) ela nem está no quadro comercial:
+    'Fechado' nasce com `sai_do_quadro`, então a conta de eventos abre já com as seis
+    colunas. As duas garantias são conferidas aqui, uma em cada vista."""
     a = _lead(pool, "Festa Passada", evento_em=date(2026, 1, 10), tipo="Casamento")
     b = _lead(pool, "Festa Feita", status="ganho", evento_em=date(2026, 1, 10), tipo="Casamento")
     html = _html(monkeypatch, pool)
     assert 'class="kbev passou"' in _card(html, a)
-    assert 'class="kbev passou"' not in _card(html, b)
+    assert f'data-id="{b}"' not in html, "a festa fechada continua no quadro comercial"
+    # na vista por mês ela aparece (é o calendário do que está vendido) — e ali
+    # também não leva o alerta de "passou"
+    mes = _html(monkeypatch, pool, vista="mes")
+    assert 'class="kbev passou"' not in _card(mes, b)
 
 
 # ------------------------------------------------------------------ grupos na coluna
@@ -324,7 +332,11 @@ def test_na_vista_por_mes_a_etapa_vira_selo_no_card(monkeypatch, pool, vende_dat
     b = _lead(pool, "Feita", evento_em=date(2026, 11, 20), status="ganho")
     html = _html(monkeypatch, pool, vista="mes")
     assert '<span class="kbetapa">Contatado</span>' in _card(html, a)
-    assert '<span class="kbetapa real">Ganho</span>' in _card(html, b)
+    # "Fechado" é o RÓTULO da etapa 'ganho' no modelo do ramo (11/09/2026). O selo
+    # lê o nome que a conta deu à etapa mesmo quando ela não é coluna do quadro —
+    # antes caía num palpite feito da chave, e mostrava "Ganho" pra quem tinha
+    # batizado a etapa de outra coisa.
+    assert '<span class="kbetapa real">Fechado</span>' in _card(html, b)
     # na vista por etapa o selo não existe: a coluna já diz a etapa
     assert "kbetapa" not in _card(_html(monkeypatch, pool), a).split("kbmsg")[0]
 

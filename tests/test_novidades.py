@@ -879,3 +879,47 @@ def test_os_dois_avisos_saem_no_site(pool):
 def test_reaplicar_as_duas_nao_duplica(pool):
     assert _fu_aba(pool)["id"] == _fu_aba(pool)["id"]
     assert _og_aba(pool)["id"] == _og_aba(pool)["id"]
+
+
+# ---------------- 240: o modelo de funil do ramo (11/09/2026)
+
+def _modelo(pool):
+    return _aplica(pool, "240_novidade_modelo_de_funil.sql", "modelo-de-funil-do-ramo")
+
+
+def test_o_aviso_do_modelo_de_funil_e_pra_todo_ramo(pool):
+    """CLAUDE.md §6 manda mirar pelo nicho — e aqui o alcance É todo nicho: os três
+    perfis ganharam modelo, cada um com o vocabulário dele. Mirar 'eventos' deixaria
+    de fora exatamente as contas que continuam com o funil genérico."""
+    a = _modelo(pool)
+    assert a["publico"] == "todos" and a["tipo"] == "novidade"
+    assert a["link"] == "/painel/prospeccao/regua" and a["resumo"]
+
+
+def test_o_vendedor_nao_recebe_o_aviso_do_modelo(pool):
+    """§5: o vendedor só recebe o que muda a rotina dele. O quadro dele só muda
+    depois que o dono marcar as caixas — avisar antes seria avisar de uma mudança
+    que talvez nunca aconteça na conta dele."""
+    assert set(_modelo(pool)["pra_quem"]) == {"dono", "gestor"}
+
+
+def test_o_corpo_promete_as_tres_travas_que_o_codigo_cumpre(pool):
+    """O texto diz "não apaga etapa", "não move lead" e "não reescreve o nome que
+    você deu". `tests/test_funil_modelo.py` é onde cada uma é medida; aqui só se
+    garante que o aviso não promete menos do que o código faz."""
+    corpo = _modelo(pool)["corpo"]
+    assert "Não apaga etapa" in corpo
+    assert "Não move lead" in corpo
+    assert "Não reescreve o nome que você deu" in corpo
+
+
+def test_o_aviso_do_modelo_nao_fala_de_festa_pra_quem_nao_vende_festa(pool):
+    """Público 'todos' obriga texto sem vocabulário de um nicho só — foi assim que
+    o Raio-X saiu falando de festa pra 43 leads da ZAQ (§6)."""
+    a = _modelo(pool)
+    for palavra in ("festa", "buffet", "convidados"):
+        assert palavra not in (a["resumo"] + " " + a["corpo"]).lower(), palavra
+
+
+def test_reaplicar_o_aviso_do_modelo_nao_duplica(pool):
+    assert _modelo(pool)["id"] == _modelo(pool)["id"]

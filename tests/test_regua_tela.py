@@ -30,7 +30,7 @@ create table funil_etapas (id bigserial primary key, conta_id bigint, chave text
   prazo_min integer, gatilho text, gatilho_ativo boolean default false,
   teto_dias integer, renovacoes_max integer not null default 0,
   exige_justificativa boolean not null default true, renova_sozinho_h integer,
-  saidas_permitidas text,
+  saidas_permitidas text, toques_dias text,
   criado_em timestamptz default now(), constraint uq_fe unique (conta_id, chave));
 create table funil_regua (conta_id bigint primary key,
   gatilhos_modo text default 'off', cobranca_modo text default 'off',

@@ -7974,10 +7974,10 @@ async def regua_etapa(request: Request, eid: int):
                             -- O ::text é pro Postgres saber o tipo do parâmetro solto.
                             gatilho_ativo = (%s and %s::text is not null),
                             teto_dias = %s, renovacoes_max = %s, exige_justificativa = %s,
-                            saidas_permitidas = %s
+                            saidas_permitidas = %s, toques_dias = %s
                       where id=%s and conta_id=%s""",
                   (rot, prazo, gat, ativo, gat, teto, renov, exige, saidas,
-                   eid, ctx["conta_id"]))
+                   _escada_txt(f.get("toques_dias")), eid, ctx["conta_id"]))
         c.commit()
     return JSONResponse({"ok": True, "gatilho_ativo": bool(ativo and gat)})
 
@@ -15562,6 +15562,15 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </label>
           {% endfor %}
           <span class="mut" style="font-size:.7rem">nenhuma marcada = qualquer uma</span>
+        </div>
+        <!-- AS TENTATIVAS COMO TAREFAS (migração 233). Preenchido, a escada passa a
+             ser contada da ENTRADA nesta etapa — é o "D1, D3 e D7, total de 7 dias"
+             do documento. Vazio, vale a escada relativa à conversa de sempre. -->
+        <div style="display:flex;align-items:center;gap:.5rem;margin:.4rem 0 0 1.35rem;flex-wrap:wrap;font-size:.74rem;color:var(--txt-mut)">
+          <span>tentativas em (dias após entrar aqui)</span>
+          <input class="fld" name="toques_dias" value="{{ e.toques_dias or '' }}" placeholder="ex.: 1,3,7"
+                 style="width:110px">
+          <span class="mut" style="font-size:.7rem">em branco = usa a escada do Follow-up</span>
         </div>
         {% endif %}
         <div style="display:flex;justify-content:flex-end;margin-top:.4rem">

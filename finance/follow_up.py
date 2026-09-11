@@ -137,14 +137,42 @@ def config(c, conta_id: int) -> dict:
 
 # ------------------------------------------------------------------ a escada
 
+def toques_da_etapa(*, desde, toques: tuple, feitos: int, agora: datetime) -> list[dict]:
+    """As tentativas como TAREFAS, ancoradas na entrada na etapa (migração 233).
+
+    O pedido do dono era "as três tentativas devem nascer automaticamente como
+    tarefas em D1, D3 e D7, sem depender da lembrança do vendedor". Nascer é isto:
+    a lista existe assim que o lead entra na etapa, com data em cada linha, e a
+    tela só mostra o que já está calculado.
+
+    `feitos` são as mensagens que saíram DEPOIS da entrada — o mesmo relógio do
+    resto da régua, que lê a conversa e não "atividade registrada" (5 usos em toda
+    a história da conta 34).
+    """
+    out = []
+    for i, d in enumerate(toques):
+        prazo = desde + timedelta(days=int(d))
+        feito = i < feitos
+        out.append({"n": i + 1, "dia": int(d), "prazo": prazo, "feito": feito,
+                    "atrasado": (not feito and prazo <= agora)})
+    return out
+
+
 def prazo_automatico(*, status: str, ult_in, ult_out, criado_em, tentativas: int,
-                     evento_em, cfg: dict, tem_data: bool, agora: datetime) -> tuple[datetime, str]:
+                     evento_em, cfg: dict, tem_data: bool, agora: datetime,
+                     toques_fixos: tuple = (), desde=None,
+                     feitos_na_etapa: int = 0) -> tuple[datetime, str]:
     """(prazo, ação) que o sistema propõe pra este lead. Puro — sem banco.
 
     A ordem é a do mockup: a bola vem antes de tudo (cliente esperando é mais
     urgente e mais acionável que card parado), a proposta tem prazo próprio, e o
     resto sobe a escada de toques. Por último, e só pra quem vende festa, a data
     aperta o que estiver frouxo.
+
+    `toques_fixos` é a etapa que declarou D1/D3/D7 (migração 233): ali a escada
+    deixa de ser relativa à última conversa e passa a ser contada da ENTRADA na
+    etapa. A bola continua vindo antes — cliente esperando resposta é mais urgente
+    que a próxima tentativa agendada, e essa ordem não muda por etapa nenhuma.
     """
     if ult_out is None:
         # nunca falamos nada — nem pelo painel, nem pelo celular
@@ -154,6 +182,18 @@ def prazo_automatico(*, status: str, ult_in, ult_out, criado_em, tentativas: int
         prazo, acao = ult_in + timedelta(minutes=cfg["bola_nossa_min"]), "responder — o cliente está esperando"
     elif status == "proposta":
         prazo, acao = ult_out + timedelta(days=cfg["fu_proposta_dias"]), "cobrar retorno da proposta"
+    elif toques_fixos and desde:
+        # a etapa declarou as tentativas (D1/D3/D7). A próxima é a primeira ainda
+        # não feita; feitas todas, o prazo é o fim do período — e o lead fica
+        # esperando DECISÃO, não virando Perdido sozinho: perder exige motivo, e só
+        # quem falou com o cliente sabe qual (mesma trava do teto da etapa).
+        n = min(max(0, int(feitos_na_etapa or 0)), len(toques_fixos))
+        if n >= len(toques_fixos):
+            prazo = desde + timedelta(days=int(toques_fixos[-1]))
+            acao = "as tentativas acabaram — encerrar ou reativar?"
+        else:
+            prazo = desde + timedelta(days=int(toques_fixos[n]))
+            acao = f"{n + 1}ª tentativa de {len(toques_fixos)}"
     else:
         esc = cfg["fu_toques"]
         n = min(max(int(tentativas or 1), 1), len(esc))
@@ -265,6 +305,16 @@ adiam as (
 select p.id, p.status, p.vendedor_id,
        coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'Lead'),
        p.evento_em, p.evento_tipo, p.evento_convidados, p.criado_em,
+       -- desde quando está NESTA etapa, e quantas mensagens nossas saíram depois
+       -- disso: é o par que a escada ancorada (migração 233) precisa, e vem do
+       -- histórico que roda desde 19/08 com tudo desligado
+       coalesce((select max(fm.criado_em) from funil_movimentos fm
+                  where fm.prospeccao_id = p.id and fm.para = p.status), p.criado_em) as na_etapa,
+       (select count(*) from conversas cv2 join mensagens m2 on m2.conversa_id = cv2.id
+         where cv2.prospeccao_id = p.id and m2.direcao = 'out'
+           and m2.criado_em > coalesce((select max(fm2.criado_em) from funil_movimentos fm2
+                                         where fm2.prospeccao_id = p.id and fm2.para = p.status),
+                                       p.criado_em)) as saiu_na_etapa,
        msg.ult_in, msg.ult_out, coalesce(tent.n, 0),
        marc.prazo_em, marc.acao, marc.criado_em, coalesce(adiam.n, 0),
        coalesce(nullif(mb.nome,''), mb.email), marc.membro_id,
@@ -294,18 +344,30 @@ def leads(c, conta_id: int, perfil: dict | None = None,
         from finance import raio_x_perfil as rxp
         perfil = rxp.perfil(None)
     tem_data = bool(perfil.get("vocab", {}).get("data"))
+    # as etapas que declararam as tentativas como tarefas (migração 233). Uma
+    # consulta pra conta inteira, como tudo aqui: a versão por lead seriam 274 idas
+    # ao banco por ciclo do poller na Prime.
+    toques_por_etapa = {r[0]: tuple(int(x) for x in (r[1] or "").split(",") if x.strip().isdigit())
+                        for r in c.execute(
+                            """select chave, toques_dias from funil_etapas
+                                where conta_id=%s and coalesce(toques_dias,'') <> ''""",
+                            (conta_id,)).fetchall()}
+    toques_por_etapa = {k: v for k, v in toques_por_etapa.items() if v}
     hoje = agora.date()
     out = []
     for r in c.execute(_SQL_LEADS, {"conta": conta_id}).fetchall():
         (lid, status, vend, quem, evento_em, ev_tipo, ev_conv, criado,
+         na_etapa, saiu_na_etapa,
          ult_in, ult_out, tent, m_prazo, m_acao, m_em, adiados, vend_nome, m_por,
          msg_txt, msg_em, msg_dir, msg_id, visto, conversa_id, canal) = r
         ult = max([x for x in (ult_in, ult_out) if x], default=None)
         # festa que já passou e o lead segue aberto: não há o que propor
         sem_acao = bool(tem_data and evento_em and evento_em < hoje)
+        fixos = toques_por_etapa.get(status) or ()
         prazo, acao = prazo_automatico(
             status=status, ult_in=ult_in, ult_out=ult_out, criado_em=criado,
-            tentativas=tent, evento_em=evento_em, cfg=cfg, tem_data=tem_data, agora=agora)
+            tentativas=tent, evento_em=evento_em, cfg=cfg, tem_data=tem_data, agora=agora,
+            toques_fixos=fixos, desde=na_etapa, feitos_na_etapa=saiu_na_etapa)
         na_mao = False
         # A MÃO MANDA — mas só enquanto for a última palavra. A marcação vale se
         # foi feita DEPOIS da última mensagem; se o cliente voltou a falar, o fato
@@ -326,6 +388,10 @@ def leads(c, conta_id: int, perfil: dict | None = None,
             "bola": ("aguardando vendedor" if (ult_out is None or (ult_in and ult_in > ult_out))
                      else "aguardando cliente"),
             "faltam": ((evento_em - hoje).days if evento_em else None),
+            "na_etapa": na_etapa,
+            # as tentativas como tarefas — lista vazia na etapa que não declarou
+            "toques": (toques_da_etapa(desde=na_etapa, toques=fixos,
+                                       feitos=saiu_na_etapa, agora=agora) if fixos else []),
             # o balão do card: onde a conversa parou, sem precisar abrir o lead
             "msg": ({"texto": msg_txt or "", "em": msg_em, "minha": msg_dir == "out",
                      "nova": (msg_dir == "in" and (visto is None or (msg_id or 0) > visto)),

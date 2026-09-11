@@ -82,7 +82,7 @@ create table funil_etapas (id bigserial primary key, conta_id bigint, chave text
   prazo_min integer, gatilho text, gatilho_ativo boolean default false,
   teto_dias integer, renovacoes_max integer not null default 0,
   exige_justificativa boolean not null default true, renova_sozinho_h integer,
-  saidas_permitidas text);
+  saidas_permitidas text, toques_dias text);
 create table funil_regua (conta_id bigint primary key,
   gatilhos_modo text default 'off', cobranca_modo text default 'off',
   janela_dias text default '1,2,3,4,5,6', janela_abre time default '08:00',
@@ -94,6 +94,10 @@ create table funil_regua (conta_id bigint primary key,
   atualizado_em timestamptz not null default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text default 'whatsapp', visto_ate_id bigint);
+-- o histórico existe desde a 177 e passou a ser lido aqui em 11/09/2026: a escada
+-- ancorada na etapa (migração 233) precisa saber desde quando o lead está nela
+create table funil_movimentos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
+  de text, para text, motivo text, membro_id bigint, criado_em timestamptz default now());
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   texto text default '', criado_em timestamptz default now());
 """
@@ -1037,3 +1041,79 @@ def test_sem_relogio_a_marcacao_segue_carimbando_pelo_banco(c):
     r = c.execute("""select criado_em from follow_up_marcacoes
                       where prospeccao_id=%s order by id desc limit 1""", (lead,)).fetchone()
     assert r[0] is not None, "sem `agora`, quem carimba continua sendo o now() do banco"
+
+
+# ------------------------------------------------- as tentativas como tarefas
+# Regra 4 do documento: "as três tentativas devem nascer automaticamente como
+# tarefas em D1, D3 e D7, com prazo e alerta de atraso, sem depender da lembrança
+# do vendedor". Migração 233: é a ETAPA que declara — sem isso, a escada relativa
+# à conversa continua valendo, que é o comportamento de toda conta hoje.
+
+def test_a_etapa_sem_toques_declarados_usa_a_escada_de_sempre():
+    p, a = fu.prazo_automatico(status="contatado", ult_in=None, ult_out=AGORA - timedelta(days=1),
+                               criado_em=None, tentativas=1, evento_em=None, cfg=_cfg(),
+                               tem_data=True, agora=AGORA)
+    assert p == AGORA - timedelta(days=1) + timedelta(days=2) and "toque" in a
+
+
+def test_as_tentativas_da_etapa_contam_da_ENTRADA_e_nao_da_ultima_conversa():
+    """A diferença que motivou a migração 233. Com a escada relativa, o vendedor que
+    tenta no D2 empurra a próxima pra D2+3, e o "período total de 7 dias" vira sete
+    dias depois do último esforço — que pode ser um mês depois da entrada."""
+    entrou = AGORA - timedelta(days=2)
+    p, a = fu.prazo_automatico(status="follow_up", ult_in=None, ult_out=AGORA - timedelta(hours=3),
+                               criado_em=None, tentativas=1, evento_em=None, cfg=_cfg(),
+                               tem_data=True, agora=AGORA,
+                               toques_fixos=(1, 3, 7), desde=entrou, feitos_na_etapa=1)
+    assert p == entrou + timedelta(days=3), "a 2ª tentativa é D3 da ENTRADA"
+    assert a == "2ª tentativa de 3"
+
+
+def test_feitas_as_tres_o_lead_espera_DECISAO_e_nao_vira_perdido():
+    """Perder exige motivo (regra 5), e só quem falou com o cliente sabe qual — a
+    mesma trava do teto da etapa, que também não move ninguém sozinho."""
+    entrou = AGORA - timedelta(days=8)
+    p, a = fu.prazo_automatico(status="follow_up", ult_in=None, ult_out=AGORA - timedelta(days=1),
+                               criado_em=None, tentativas=3, evento_em=None, cfg=_cfg(),
+                               tem_data=True, agora=AGORA,
+                               toques_fixos=(1, 3, 7), desde=entrou, feitos_na_etapa=3)
+    assert p == entrou + timedelta(days=7) and "encerrar ou reativar" in a
+
+
+def test_a_bola_do_cliente_continua_vindo_antes_das_tentativas():
+    """Cliente esperando resposta é mais urgente que a próxima tentativa agendada,
+    e essa ordem não muda por etapa nenhuma."""
+    ult_in = AGORA - timedelta(hours=10)
+    p, a = fu.prazo_automatico(status="follow_up", ult_in=ult_in, ult_out=AGORA - timedelta(days=3),
+                               criado_em=None, tentativas=1, evento_em=None, cfg=_cfg(),
+                               tem_data=True, agora=AGORA,
+                               toques_fixos=(1, 3, 7), desde=AGORA - timedelta(days=4),
+                               feitos_na_etapa=1)
+    assert p == ult_in + timedelta(minutes=240) and "esperando" in a
+
+
+def test_as_tarefas_nascem_com_data_e_marcam_feito_e_atrasado():
+    entrou = AGORA - timedelta(days=4)
+    t = fu.toques_da_etapa(desde=entrou, toques=(1, 3, 7), feitos=1, agora=AGORA)
+    assert [x["dia"] for x in t] == [1, 3, 7]
+    assert [x["feito"] for x in t] == [True, False, False]
+    # D1 feita; D3 já venceu e não foi feita; D7 ainda não venceu
+    assert [x["atrasado"] for x in t] == [False, True, False]
+    assert t[2]["prazo"] == entrou + timedelta(days=7)
+
+
+def test_a_lista_de_tarefas_chega_na_linha_do_lead(c):
+    """De ponta a ponta: a etapa declara, o motor calcula, a linha leva pra tela."""
+    c.execute("update funil_etapas set toques_dias='1,3,7' where conta_id=%s and chave='contatado'",
+              (CONTA,))
+    v = _vend(c)
+    lid = _lead(c, v, criado=AGORA - timedelta(days=4))
+    c.execute("""insert into funil_movimentos (conta_id, prospeccao_id, de, para, motivo, criado_em)
+                 values (%s,%s,'novo','contatado','manual',%s)""",
+              (CONTA, lid, AGORA - timedelta(days=4)))
+    _fala(c, lid, ("out", 3))       # uma tentativa saiu 1 dia depois de entrar na etapa
+    linha = [x for x in fu.leads(c, CONTA, EVENTOS, AGORA) if x["id"] == lid][0]
+    assert [t["dia"] for t in linha["toques"]] == [1, 3, 7]
+    assert linha["toques"][0]["feito"] is True and linha["toques"][1]["feito"] is False
+    c.execute("update funil_etapas set toques_dias=null where conta_id=%s and chave='contatado'",
+              (CONTA,))

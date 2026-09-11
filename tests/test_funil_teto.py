@@ -90,6 +90,7 @@ def pool():
         # que a coluna nova não chegou em produção
         c.execute((MIG / "230_funil_teto_da_etapa.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "232_funil_saidas_da_etapa.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "233_funil_toques_da_etapa.sql").read_text(encoding="utf-8"))
         for ch, o in _ETAPAS:
             c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem)
                          values (%s,%s,%s,%s)""", (CONTA, ch, ch.capitalize(), o))

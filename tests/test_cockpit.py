@@ -54,6 +54,11 @@ create table mensagens (id bigserial primary key, conversa_id bigint, canal text
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now(),
   midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
+-- o histórico do funil (migração 177). Faltava aqui, e a falta ESCONDIA o defeito:
+-- `_historico` é best-effort de propósito (savepoint + except), então sem a tabela
+-- as três escritas de status do Cockpit passavam nos testes sem registrar nada.
+create table funil_movimentos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
+  de text, para text, motivo text, membro_id bigint, criado_em timestamptz default now());
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
   -- `fase` (migração 177) é o que os painéis leem pra saber o que conta como venda
   -- ganha; sem a coluna aqui, toda consulta do cockpit estoura com UndefinedColumn
@@ -1054,6 +1059,15 @@ def test_agendar_visita(pool):
         assert c.execute("select status from prospeccao where id=%s", (meu,)).fetchone()[0] == "qualificado"
         assert c.execute("select count(*) from prospeccao_atividades where prospeccao_id=%s and tipo='visita'",
                          (meu,)).fetchone()[0] == 1
+        # E O MOVIMENTO NO HISTÓRICO. Esta era a única das sete escritas de status do
+        # produto que mudava a coluna sem deixar linha — medido em 11/09/2026: 9 dos
+        # 14 leads em "Agendado Visita" da conta 34 não tinham registro de entrada.
+        # Sem a linha, "desde quando está nesta etapa" cai no nascimento do LEAD, e o
+        # teto de dias (migração 230) faria o card nascer vencido.
+        mov = c.execute("""select de, para, motivo from funil_movimentos
+                            where prospeccao_id=%s order by criado_em desc limit 1""",
+                        (meu,)).fetchone()
+        assert mov and mov[1] == "qualificado", "agendar visita não registrou o movimento"
     # .ics público com VALARM (lembrete do cliente)
     ics = ck.visita_ics(pool, r["ics_url"].rsplit("/", 1)[1].replace(".ics", ""))
     assert ics and "BEGIN:VEVENT" in ics and "BEGIN:VALARM" in ics and "Visita — Ana" in ics

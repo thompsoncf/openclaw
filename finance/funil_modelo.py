@@ -108,8 +108,12 @@ def plano(c, conta_id: int, chave_perfil: str) -> list[dict]:
     for chave, rotulo, ordem, _fixa, sai, agenda in modelo:
         cur = atuais.get(chave)
         if cur is None:
-            itens.append(_item("criar", chave, de=None, para=rotulo,
-                               texto=f"criar a coluna “{rotulo}”"))
+            # "etapa" e não "coluna" quando ela nasce fora do quadro: chamar de
+            # coluna o que nunca vai virar coluna é prometer errado na própria tela
+            itens.append(_item(
+                "criar", chave, de=None, para=rotulo,
+                texto=(f"criar a etapa “{rotulo}”, fora do quadro" if sai
+                       else f"criar a coluna “{rotulo}”")))
             continue
         if (cur["rotulo"] or "") != rotulo:
             # rótulo que a conta já trocou à mão não é reescrito sem o dono marcar
@@ -138,10 +142,26 @@ def plano(c, conta_id: int, chave_perfil: str) -> list[dict]:
 
     # etapa que a conta tem e o modelo não. NÃO se apaga (CLAUDE.md §0): sai do
     # quadro, que é o que o dono pediu pras colunas de pós-venda da Prime.
+    #
+    # E LEVA A AGENDA JUNTO, quando o ramo usa a ponte. Medido na Prime: "Evento A
+    # Realizar" tem 5 leads com data de festa e não existe no modelo. Propor só a
+    # saída do quadro tiraria as 5 festas da tela sem pôr nenhuma na agenda — que é
+    # exatamente o erro que a migração 238 foi escrita pra evitar, e o que o aviso
+    # dela chama de "trocar uma coluna cheia por uma agenda vazia".
+    agenda_no_ramo = any(m[5] for m in modelo if m[4])
     for chave, cur in atuais.items():
         if chave in do_modelo or cur["sai_do_quadro"]:
             continue
         n = nleads.get(chave, 0)
+        # a agenda vem ANTES da saída na lista: é a ordem em que o aviso da 239
+        # manda ligar ("Ligue a segunda antes da primeira"), e ler a tela de cima
+        # pra baixo tem que ser ler a ordem certa
+        if agenda_no_ramo and not cur["agenda_ao_entrar"]:
+            itens.append(_item(
+                "agenda", chave, de=False, para=True, leads=n,
+                texto=f"criar o compromisso na Agenda ao entrar em “{cur['rotulo']}”",
+                nota="marque junto com a linha abaixo: é o que faz o evento aparecer "
+                     "na Agenda em vez de sumir de vista"))
         itens.append(_item(
             "quadro", chave, de=False, para=True, leads=n,
             texto=f"tirar “{cur['rotulo']}” do quadro (não existe no modelo do ramo)",

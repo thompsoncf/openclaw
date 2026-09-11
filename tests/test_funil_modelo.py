@@ -333,3 +333,35 @@ def test_uma_conta_nao_alcanca_a_outra(limpo):
         c.commit()
     assert _por(limpo, "qualificado", CONTA)[1] == "Agendado Visita"
     assert _por(limpo, "qualificado", CONTA + 1)[1] == "Qualificado"
+
+
+def test_etapa_fora_do_modelo_leva_a_agenda_junto_ao_sair_do_quadro(limpo):
+    """Medido na Prime: "Evento A Realizar" tem 5 leads com data de festa e não
+    existe no modelo. Propor só a saída do quadro tiraria as 5 festas da tela sem
+    pôr nenhuma na agenda — "trocar uma coluna cheia por uma agenda vazia", que é
+    o erro que a migração 238 foi escrita pra evitar."""
+    _generico(limpo)
+    with limpo.connection() as c:
+        c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa)
+                     values (%s,'evento_realizado','Evento A Realizar',60,false)""", (CONTA,))
+        c.commit()
+    _leads(limpo, "evento_realizado", 5)
+    with limpo.connection() as c:
+        itens = fm.plano(c, CONTA, "eventos")
+    ids = [i["id"] for i in itens]
+    assert "agenda:evento_realizado" in ids
+    # e vem ANTES da saída: é a ordem em que o aviso da 239 manda ligar
+    assert ids.index("agenda:evento_realizado") < ids.index("quadro:evento_realizado")
+
+
+def test_ramo_sem_ponte_com_a_agenda_nao_propoe_agendar(limpo):
+    """Recorrente não tem data de evento no cadastro. Propor a ponte ali seria
+    prometer um compromisso que nunca aparece (CLAUDE.md §6)."""
+    _generico(limpo)
+    with limpo.connection() as c:
+        c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa)
+                     values (%s,'implantacao','Implantação',60,false)""", (CONTA,))
+        c.commit()
+        ids = [i["id"] for i in fm.plano(c, CONTA, "recorrente")]
+    assert "quadro:implantacao" in ids
+    assert not [i for i in ids if i.startswith("agenda:")]

@@ -99,6 +99,13 @@ const ESPERA_RESTAURAR_MS = parseInt(process.env.WA_QR_ESPERA_RESTAURAR_MS || '1
 // O custo de espaçar é a última conta demorar mais pra voltar a RECEBER; o envio não
 // espera, porque /enviar religa a sessão sob demanda.
 const ESPACO_CONTAS_MS = parseInt(process.env.WA_QR_ESPACO_CONTAS_MS || '30000', 10)
+// DE QUAL CONTA ESTE WORKER CUIDA. Vazio = todas, que é como o serviço sempre
+// funcionou e continua funcionando se o supervisor for desligado.
+//
+// Com uma conta por processo, o event loop, o heap e a queda de uma conta deixam
+// de ser das vizinhas. Era essa mistura que, em 11/09, fez um chip com 15
+// mensagens presas derrubar os três: 45s de loop travado num processo só.
+const MINHA_CONTA = parseInt(process.env.WA_QR_CONTA || '0', 10) || null
 // Vigia de sessão MUDA — ver vigiarSessoes(). Quanto tempo sem UM evento do socket
 // (mensagem, recibo, contato, histórico) até desconfiar, e de quanto em quanto tempo
 // conferir. 10min é folgado de propósito: conta parada meia hora é rotina.
@@ -3653,7 +3660,11 @@ async function restaurarSessoes () {
       `select conta_id from wa_qr_auth
         where arquivo = 'creds' and conteudo::json->'me'->>'id' is not null
         order by conta_id`)
-    const contas = r.rows.map((l) => l.conta_id)
+    let contas = r.rows.map((l) => l.conta_id)
+    // Worker de uma conta só religa a dele. A consulta continua a mesma de propósito:
+    // ela é quem responde "esta conta está pareada?", e um worker que subiu pra uma
+    // conta sem credencial não pode sair abrindo socket que só sabe pedir QR.
+    if (MINHA_CONTA) contas = contas.filter((c) => c === MINHA_CONTA)
     if (!contas.length) {
       log.info('restaurarSessoes: nenhuma conta pareada pra religar')
       return
@@ -3786,6 +3797,16 @@ const servidor = http.createServer(async (req, res) => {
       const contaId = parseInt(partes[1], 10)
       const acao = partes[2] || ''
       if (!contaId) return json(res, 400, { ok: false, erro: 'conta' })
+      // Quem roteia por conta é o supervisor. Se uma requisição de OUTRA conta
+      // chegar aqui, o roteamento errou — e atender seria pior que recusar: este
+      // processo abriria socket de uma conta que já tem worker, que é exatamente a
+      // guerra de sessão (dois processos com a mesma credencial) que a trava existe
+      // pra impedir. Recusar alto deixa o erro aparecer em vez de virar um 440.
+      if (MINHA_CONTA && contaId !== MINHA_CONTA) {
+        log.error({ contaId, minhaConta: MINHA_CONTA },
+          'rota de outra conta chegou neste worker — o supervisor roteou errado')
+        return json(res, 421, { ok: false, erro: 'conta de outro worker' })
+      }
 
       if (req.method === 'POST' && acao === 'iniciar') {
         // {forcar:true} = derruba o socket atual ANTES de abrir outro. Sem isso o

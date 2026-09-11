@@ -1,6 +1,6 @@
 'use strict'
-// O SUPERVISOR É QUEM SEGURA A PORTA QUANDO O WORKER CONGELA. Este teste fixa as
-// quatro coisas que a Fase 2 existe pra provar.
+// O SUPERVISOR SEGURA A PORTA E SOBE UM WORKER POR CONTA. Este teste fixa o que as
+// Fases 2 e 3 existem pra provar.
 //
 // O caso real, 11/09/2026, medido com o carimbo da Fase 1:
 //
@@ -8,13 +8,12 @@
 //   16:37:23  event loop travou  atrasoMs: 45.575  decifragem: { 34: 30 }
 //   16:37:33  wa-qr no ar        ← o Render matou a instância e subiu outra
 //
-// Quarenta e cinco segundos de event loop parado com as três contas subindo juntas.
-// Nesse intervalo o /saude não responde e o Render desiste — derrubando os TRÊS
-// chips por causa de um. A RSS estava em 118 MB o tempo todo: não faltava memória,
-// faltava loop.
+// Quarenta e cinco segundos de event loop parado com as três contas subindo juntas
+// num processo só. O /saude não responde, o Render desiste, e os TRÊS chips caem
+// por causa de um. A RSS estava em 118 MB: não faltava memória, faltava loop.
 //
-// Sobe um worker DE MENTIRA (um http trivial), então não precisa de banco, de
-// WhatsApp, nem do Baileys:
+// Sobe workers DE MENTIRA (http trivial) ou nenhum, então não precisa de banco,
+// de WhatsApp nem do Baileys:
 //
 //     cd services/wa-qr && node teste-supervisor.js
 
@@ -23,7 +22,7 @@ process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent'
 const http = require('node:http')
 const fs = require('fs')
 const path = require('path')
-const { iniciarSupervisor } = require('./supervisor')
+const { iniciarSupervisor, execArgvDoWorker, saudavel, portaLivre, SQL_CONTAS_PAREADAS } = require('./supervisor')
 
 let falhas = 0
 function conferir (ok, descricao) {
@@ -31,8 +30,8 @@ function conferir (ok, descricao) {
   if (!ok) falhas++
 }
 const dorme = (ms) => new Promise((r) => setTimeout(r, ms))
+const SEG = 'segredo-de-teste'
 
-// Um cliente HTTP mínimo, pra não depender de nada de fora.
 function pedir (porta, caminho, opcoes) {
   const op = opcoes || {}
   return new Promise((resolve, reject) => {
@@ -48,208 +47,261 @@ function pedir (porta, caminho, opcoes) {
   })
 }
 
-;(async () => {
-  // --- 1. a regra do /saude, sem subir nada ---------------------------------
-  //
-  // É a regra que decide se o Render mata a instância. Testada como função pura
-  // porque uma regra dessas não pode depender de tempo de processo pra ser lida.
-  console.log('\nA regra do /saude:')
-  const sup0 = iniciarSupervisor({ fork: () => { throw new Error('não devia forkar') } })
-  const T = 1000000
-  conferir(sup0.saudavel({ worker: {}, semWorkerDesde: null }, T, 120000) === true,
-    'worker vivo (mesmo CONGELADO, que é o caso de 16:36) — saudável')
-  conferir(sup0.saudavel({ worker: null, semWorkerDesde: T - 5000 }, T, 120000) === true,
-    'worker reiniciando há 5s — saudável, o Render não precisa saber')
-  conferir(sup0.saudavel({ worker: null, semWorkerDesde: T - 130000 }, T, 120000) === false,
-    'worker morto há mais de 2 min — NÃO saudável: esconder isso seria pior que hoje')
-  conferir(sup0.saudavel({ worker: null, semWorkerDesde: T - 119000 }, T, 120000) === true,
-    'a tolerância é a fronteira, e ela é respeitada')
-
-  // --- 2. o supervisor responde /saude SOZINHO ------------------------------
-  //
-  // O ponto inteiro da fase: /saude não passa pelo worker. Aqui não existe worker
-  // nenhum, e mesmo assim a porta responde.
-  console.log('\n/saude não depende do worker:')
-  const sup1 = iniciarSupervisor({ fork: () => null, porta: 0, portaWorker: 59999 })
-  await new Promise((r) => sup1.servidor.listen(0, r))
-  const p1 = sup1.servidor.address().port
-  const saude = await pedir(p1, '/saude')
-  conferir(saude.status === 200, 'responde 200 sem worker nenhum de pé')
-  conferir(JSON.parse(saude.corpo).worker === false,
-    'e diz `worker: false` — quem depura vê a diferença sem abrir o log')
-
-  // --- 3. worker fora do ar não pendura o painel ----------------------------
-  console.log('\nWorker fora do ar:')
-  const semWorker = await pedir(p1, '/session/34/status', { headers: { 'x-wa-secret': 'x' } })
-  conferir(semWorker.status === 503, 'responde 503 na hora, não fica pendurado')
-  conferir(JSON.parse(semWorker.corpo).ok === false,
-    'no mesmo formato que o worker usaria ({ok:false, erro})')
-  sup1.servidor.close()
-
-  // --- 4. roteamento, inclusive com corpo grande ----------------------------
-  //
-  // O `enviar-midia` manda arquivo. Se o supervisor juntasse o corpo na memória,
-  // traria de volta pra cá o problema que a gente veio tirar do worker.
-  console.log('\nRoteamento pro worker:')
-  let visto = null
-  const worker = http.createServer((req, res) => {
-    let n = 0
-    req.on('data', (d) => { n += d.length })
-    req.on('end', () => {
-      visto = { metodo: req.method, url: req.url, segredo: req.headers['x-wa-secret'], bytes: n }
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ ok: true, eco: n }))
-    })
-  })
-  await new Promise((r) => worker.listen(0, '127.0.0.1', r))
-  const pw = worker.address().port
-
-  const sup2 = iniciarSupervisor({ fork: () => null, portaWorker: pw })
-  await new Promise((r) => sup2.servidor.listen(0, r))
-  const p2 = sup2.servidor.address().port
-
-  const grande = 'x'.repeat(3 * 1024 * 1024)     // 3 MB, tamanho de mídia de verdade
-  const r4 = await pedir(p2, '/session/34/enviar-midia', {
-    metodo: 'POST', corpo: grande, headers: { 'x-wa-secret': 'segredo-de-teste' }
-  })
-  conferir(r4.status === 200, 'a resposta do worker volta pro cliente')
-  conferir(JSON.parse(r4.corpo).eco === grande.length, 'os 3 MB do corpo chegaram inteiros')
-  conferir(visto && visto.metodo === 'POST' && visto.url === '/session/34/enviar-midia',
-    'método e caminho preservados')
-  conferir(visto && visto.segredo === 'segredo-de-teste',
-    'e o x-wa-secret atravessa — o worker é quem autentica, o supervisor não opina')
-
-  // e o /saude continua sendo dele, não do worker
-  const saude2 = await pedir(p2, '/saude')
-  conferir(saude2.status === 200 && visto.url === '/session/34/enviar-midia',
-    'o /saude NÃO foi repassado ao worker — é isso que o Render passa a medir')
-  sup2.servidor.close(); worker.close()
-
-  // --- 5. o worker morre e o supervisor sobe outro --------------------------
-  console.log('\nCiclo de vida do worker:')
-  const filhos = []
-  function forkFalso () {
-    const ouvintes = {}
-    const f = {
-      pid: 1000 + filhos.length,
-      on (ev, fn) { (ouvintes[ev] = ouvintes[ev] || []).push(fn) },
-      kill () { this.matou = true },
-      morrer (codigo, sinal) { (ouvintes.exit || []).forEach((fn) => fn(codigo, sinal)) }
-    }
-    filhos.push(f)
-    return f
+// Um fork de mentira que lembra com que env e execArgv foi chamado.
+const filhos = []
+function forkFalso (caminho, args, opts) {
+  const ouvintes = {}
+  const f = {
+    pid: 1000 + filhos.length, env: opts.env, execArgv: opts.execArgv,
+    on (ev, fn) { (ouvintes[ev] = ouvintes[ev] || []).push(fn) },
+    kill (sinal) { this.matou = sinal || 'SIGTERM' },
+    morrer (codigo, sinal) { (ouvintes.exit || []).forEach((fn) => fn(codigo, sinal)) }
   }
-  const sup3 = iniciarSupervisor({ fork: forkFalso, esperaMs: 10, esperaMaxMs: 80 })
-  sup3.subirWorker()
-  conferir(filhos.length === 1 && sup3.estado.worker === filhos[0], 'sobe um worker')
-  conferir(sup3.estado.semWorkerDesde === null, 'com worker de pé o relógio do /saude para')
+  filhos.push(f)
+  return f
+}
+// Desliga um supervisor de teste sem deixar timer pendente. Sem isto, o reinício
+// agendado de um bloco disparava DENTRO do bloco seguinte e empurrava um filho a
+// mais no `filhos` — o teste do SIGTERM viu quatro workers onde esperava três.
+function desligar (sup) {
+  sup.estado.encerrando = true
+  clearTimeout(sup.estado.timerFila)
+  for (const w of sup.estado.workers.values()) clearTimeout(w.timerSubida)
+}
+function base (extra) {
+  return Object.assign({ fork: forkFalso, pool: null, noBanco: () => {}, segredo: SEG,
+    esperaMs: 10, esperaMaxMs: 80, espacoMs: 0, graceMs: 0 }, extra || {})
+}
 
-  filhos[0].morrer(1, null)
-  conferir(sup3.estado.worker === null && sup3.estado.quedas === 1,
-    'morreu: o supervisor conta a queda')
-  conferir(typeof sup3.estado.semWorkerDesde === 'number',
-    'e o relógio do /saude começa a correr')
-  await dorme(60)
-  conferir(filhos.length === 2, 'e sobe outro depois da espera')
-  conferir(sup3.estado.espera > 10, 'a espera CRESCE — worker que morre no arranque não vira laço apertado')
-  conferir(sup3.estado.espera <= 80, 'mas tem teto')
-
-  // o worker ANTIGO terminando tarde não pode mexer em nada do novo
-  const antesDeMorrerTarde = sup3.estado.quedas
-  filhos[0].morrer(0, 'SIGTERM')
-  conferir(sup3.estado.quedas === antesDeMorrerTarde && sup3.estado.worker === filhos[1],
-    'worker ANTIGO fechando tarde não ressuscita nada nem derruba o novo')
-
-  // --- 5b. a espera volta a zero DEPOIS de tempo de pé -----------------------
+;(async () => {
+  // --- 1. o teto de heap repartido -----------------------------------------
   //
-  // Mesmo raciocínio do `sessaoFirme` no worker: zerar a cada worker que sobe
-  // desarmaria a dobra, e um worker que morre de 40 em 40s reiniciaria pra sempre
-  // com a espera inicial, sem o log nunca dizer "isto não para de acontecer".
-  console.log('\nA espera só zera com tempo de pé:')
-  // Lê a espera REALMENTE usada em cada morte (o `esperaMs` da linha de log), não a
-  // próxima da escada — que é o que a primeira versão deste teste media, e por isso
-  // acusava falha num comportamento correto.
+  // O Start Command é `node --max-old-space-size=1024 server.js` e o fork herda
+  // isso. Com N workers cada um herdaria 1 GB: três workers = 3 GB autorizados num
+  // plano de 2 GB. É a diferença entre isolamento e OOM.
+  console.log('\nO teto de heap é repartido entre os workers:')
+  const herdado = ['--max-old-space-size=1024']
+  conferir(execArgvDoWorker(herdado, 1, 1536, 384).join(' ') === '--max-old-space-size=1536',
+    'um worker fica com o total (Fase 2 continua igual)')
+  conferir(execArgvDoWorker(herdado, 3, 1536, 384).join(' ') === '--max-old-space-size=512',
+    'três workers: 512 cada — cabe nos 2 GB do plano com folga pro nativo')
+  conferir(execArgvDoWorker(herdado, 10, 1536, 384).join(' ') === '--max-old-space-size=384',
+    'dez workers: o piso segura em 384 (a onda de 20/08 levou UMA conta a 314 MB)')
+  conferir(!execArgvDoWorker(herdado, 3, 1536, 384).some((a, i, arr) => arr.indexOf(a) !== i),
+    'e o teto herdado do pai é SUBSTITUÍDO, não empilhado')
+  conferir(execArgvDoWorker(['--inspect', '--max-old-space-size=1024'], 2, 1536, 384).join(' ') === '--inspect --max-old-space-size=768',
+    'outros argumentos do Node atravessam intactos')
+
+  // --- 2. a regra do /saude, sem subir nada ---------------------------------
+  //
+  // Com um worker por conta a regra muda de figura: UM worker morto NÃO pode
+  // derrubar a instância — seria devolver ao Render o poder de matar os três
+  // chips por causa de um.
+  console.log('\nA regra do /saude com N workers:')
+  const T = 1000000
+  const est = (workers, esperadas) => ({ workers: new Map(workers), contasEsperadas: new Set(esperadas), desde: T - 999999 })
+  conferir(saudavel(est([], []), T, 120000) === true, 'sem conta esperada: de pé (arranque, serviço vazio)')
+  conferir(saudavel(est([[34, { filho: {} }], [23, { filho: null, semWorkerDesde: T - 999000 }]], [34, 23]), T, 120000) === true,
+    'UM worker morto há muito tempo e outro vivo: de pé — um chip não derruba os outros')
+  conferir(saudavel(est([[34, { filho: null, semWorkerDesde: T - 5000 }]], [34]), T, 120000) === true,
+    'todos reiniciando há 5s: de pé, o Render não precisa saber')
+  conferir(saudavel(est([[34, { filho: null, semWorkerDesde: T - 130000 }], [23, { filho: null, semWorkerDesde: T - 130000 }]], [34, 23]), T, 120000) === false,
+    'TODOS mortos há mais de 2 min: vermelho — aí o serviço está quebrado e esconder seria pior')
+  conferir(saudavel(est([], [34]), T, 120000) === false,
+    'conta esperada que nunca ganhou worker, há muito: vermelho')
+
+  // --- 3. portas determinísticas -------------------------------------------
+  console.log('\nPortas:')
+  const e3 = { workers: new Map([[34, { porta: 10001 }], [23, { porta: 10002 }]]) }
+  conferir(portaLivre(e3, 10001) === 10003, 'a próxima livre a partir da base')
+  e3.workers.delete(34)
+  conferir(portaLivre(e3, 10001) === 10001, 'buraco deixado por quem saiu é reaproveitado')
+
+  // --- 4. reconciliar: sobe um worker por conta, com o env certo ------------
+  console.log('\nReconciliar sobe um worker por conta:')
+  filhos.length = 0
+  const sup4 = iniciarSupervisor(base({ execArgv: ['--max-old-space-size=1024'] }))
+  await sup4.reconciliar([23, 34, 36])
+  await dorme(20)
+  conferir(filhos.length === 3, 'três contas pareadas → três workers')
+  conferir(filhos.map((f) => f.env.WA_QR_CONTA).sort().join(',') === '23,34,36',
+    'cada um com WA_QR_CONTA da sua conta')
+  conferir(filhos.every((f) => f.env.WA_QR_WORKER === '1'), 'e WA_QR_WORKER=1 (é o que faz o server.js ser o serviço)')
+  conferir(new Set(filhos.map((f) => f.env.PORT)).size === 3, 'portas todas diferentes')
+  conferir(filhos.every((f) => f.execArgv.includes('--max-old-space-size=512')),
+    'e o teto de heap repartido em três (512 cada), não o 1024 herdado')
+  conferir(sup4.estado.contasEsperadas.size === 3, 'as três viram "esperadas" pro /saude')
+
+  // reconciliar de novo com as mesmas contas não sobe nada
+  await sup4.reconciliar([23, 34, 36]); await dorme(20)
+  conferir(filhos.length === 3, 'reconciliar de novo com as mesmas contas: nada muda')
+
+  // uma conta saiu (/sair apagou as creds): o worker dela é parado
+  await sup4.reconciliar([23, 36]); await dorme(20)
+  const w34 = filhos.find((f) => f.env.WA_QR_CONTA === '34')
+  conferir(w34.matou === 'SIGTERM', 'conta que deixou de estar pareada: o worker leva SIGTERM')
+  w34.morrer(0, null); await dorme(10)
+  conferir(!sup4.estado.workers.has(34) && filhos.length === 3, 'e some do mapa sem ser ressuscitado')
+  desligar(sup4)
+
+  // --- 5. a folga do primeiro pareamento ------------------------------------
+  //
+  // O painel chama /iniciar, o worker sobe, mostra o QR, e a pessoa leva um tempo
+  // pra escanear. Nesse meio tempo NÃO existe credencial no banco — parar o worker
+  // aqui devolveria "desconectado" pra quem está com o celular na mão.
+  console.log('\nA folga do primeiro pareamento:')
+  filhos.length = 0
+  const sup5 = iniciarSupervisor(base({ graceMs: 60 }))
+  sup5.subirWorker(77)                       // subiu sob demanda, ainda sem creds
+  await sup5.reconciliar([]); await dorme(10)
+  conferir(filhos[0].matou === undefined, 'worker jovem sem credencial NÃO é parado — está pareando')
+  await dorme(70)
+  await sup5.reconciliar([]); await dorme(10)
+  conferir(filhos[0].matou === 'SIGTERM', 'passada a folga e ainda sem credencial: aí sim é parado')
+  desligar(sup5)
+
+  // --- 6. subida escalonada -------------------------------------------------
+  console.log('\nArranque escalonado:')
+  filhos.length = 0
+  const sup6 = iniciarSupervisor(base({ espacoMs: 40 }))
+  await sup6.reconciliar([1, 2, 3])
+  await dorme(10)
+  conferir(filhos.length === 1, 'sobe o primeiro na hora...')
+  await dorme(50)
+  conferir(filhos.length === 2, '...o segundo depois do espaço...')
+  await dorme(50)
+  conferir(filhos.length === 3, '...e o terceiro depois do outro — nunca os três no mesmo segundo')
+  desligar(sup6)
+
+  // --- 7. o supervisor responde /saude SOZINHO e roteia por conta ------------
+  console.log('\nRoteamento por conta:')
+  const vistos = {}
+  async function workerFalso (rotulo) {
+    const s = http.createServer((req, res) => {
+      let n = 0
+      req.on('data', (d) => { n += d.length })
+      req.on('end', () => {
+        vistos[rotulo] = { url: req.url, bytes: n, segredo: req.headers['x-wa-secret'] }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, quem: rotulo, eco: n }))
+      })
+    })
+    await new Promise((r) => s.listen(0, '127.0.0.1', r))
+    return s
+  }
+  const wA = await workerFalso('A')
+  const wB = await workerFalso('B')
+  const sup7 = iniciarSupervisor(base())
+  // dois "workers" já de pé, cada um numa porta — o mapa aponta pra eles
+  sup7.estado.workers.set(34, { contaId: 34, porta: wA.address().port, filho: {}, subiuEm: Date.now() - 60000, quedas: 0 })
+  sup7.estado.workers.set(23, { contaId: 23, porta: wB.address().port, filho: {}, subiuEm: Date.now() - 60000, quedas: 0 })
+  sup7.estado.contasEsperadas = new Set([34, 23])
+  await new Promise((r) => sup7.servidor.listen(0, r))
+  const p7 = sup7.servidor.address().port
+
+  const saude = await pedir(p7, '/saude')
+  conferir(saude.status === 200 && JSON.parse(saude.corpo).workers === 2,
+    '/saude é do supervisor e conta os workers vivos')
+  const grande = 'x'.repeat(3 * 1024 * 1024)
+  const rA = await pedir(p7, '/session/34/enviar-midia', { metodo: 'POST', corpo: grande, headers: { 'x-wa-secret': SEG } })
+  const rB = await pedir(p7, '/session/23/status', { headers: { 'x-wa-secret': SEG } })
+  conferir(JSON.parse(rA.corpo).quem === 'A' && JSON.parse(rB.corpo).quem === 'B',
+    'conta 34 vai pro worker da 34, conta 23 pro da 23')
+  conferir(vistos.A.bytes === grande.length, 'os 3 MB do corpo chegam inteiros no worker certo')
+  conferir(vistos.A.segredo === SEG, 'e o x-wa-secret atravessa — o worker é quem autentica')
+  conferir(vistos.B.url === '/session/23/status', 'caminho preservado')
+  const r404 = await pedir(p7, '/qualquer', { headers: { 'x-wa-secret': SEG } })
+  conferir(r404.status === 404, 'rota sem conta: 404 aqui mesmo, sem incomodar worker nenhum')
+
+  // --- 8. conta sem worker: sobe sob demanda, MAS só com o segredo ------------
+  //
+  // O worker é quem autentica de verdade — só que ele ainda não existe. Abrir
+  // processo pra qualquer requisição de fora seria dar ao mundo o botão de fork.
+  console.log('\nConta sem worker:')
+  filhos.length = 0
+  const rSem = await pedir(p7, '/session/99/iniciar', { metodo: 'POST' })
+  conferir(rSem.status === 403 && filhos.length === 0,
+    'SEM segredo: 403 e NENHUM processo aberto')
+  const rErr = await pedir(p7, '/session/99/iniciar', { metodo: 'POST', headers: { 'x-wa-secret': 'errado' } })
+  conferir(rErr.status === 403 && filhos.length === 0, 'segredo errado: idem')
+  // com o segredo certo o supervisor sobe o worker (de mentira, que nunca abre
+  // porta) e, como ele não atende, responde 503 depois de tentar
+  const antes = Date.now()
+  const rCom = await pedir(p7, '/session/99/status', { headers: { 'x-wa-secret': SEG } })
+  conferir(filhos.length === 1 && filhos[0].env.WA_QR_CONTA === '99',
+    'com o segredo certo: sobe o worker da conta 99 sob demanda')
+  conferir(rCom.status === 503 && JSON.parse(rCom.corpo).ok === false,
+    'e como este worker de mentira nunca abre porta, responde 503 — não pendura o painel')
+  conferir(Date.now() - antes >= 1000, 'depois de INSISTIR um pouco (o worker recém-nascido ainda está abrindo a porta)')
+  sup7.servidor.close(); wA.close(); wB.close(); desligar(sup7)
+
+  // --- 9. worker morre: só ELE volta, e a espera cresce ---------------------
+  console.log('\nCiclo de vida por conta:')
+  filhos.length = 0
   const usadas = []
-  const logFalso = { info () {}, warn () {}, error (o) { if (o && o.esperaMs) usadas.push(o.esperaMs) } }
-  const sup3b = iniciarSupervisor({ fork: forkFalso, log: logFalso, esperaMs: 10, esperaMaxMs: 80, firmeMs: 50 })
-  sup3b.subirWorker()
-  sup3b.estado.worker.morrer(1, null)       // morreu na hora
+  const logFalso = { info () {}, warn () {}, error (o) { if (o && o.esperaMs) usadas.push([o.contaId, o.esperaMs]) } }
+  const sup9 = iniciarSupervisor(base({ log: logFalso, firmeMs: 50 }))
+  await sup9.reconciliar([34, 23]); await dorme(20)
+  const f34 = filhos.find((f) => f.env.WA_QR_CONTA === '34')
+  const f23 = filhos.find((f) => f.env.WA_QR_CONTA === '23')
+  f34.morrer(1, null)
+  conferir(sup9.estado.workers.get(34).filho === null && sup9.estado.workers.get(23).filho === f23,
+    'a 34 morreu: a 23 nem percebe')
   await dorme(30)
-  sup3b.estado.worker.morrer(1, null)       // e de novo
-  await dorme(60)
-  const w2 = sup3b.estado.worker
-  await dorme(60)                           // este fica de pé MAIS que o firmeMs
-  w2.morrer(1, null)
-  conferir(usadas[0] === 10 && usadas[1] === 20,
-    'worker que cai logo: a espera dobra a cada queda (10, 20)')
-  conferir(usadas[2] === 10,
-    'worker que FICOU de pé e caiu uma vez: a espera volta ao início, não continua em 40')
-  conferir(sup3b.estado.espera === 20,
-    'e a escada recomeça do começo — se cair logo de novo, dobra a partir dali')
+  conferir(filhos.filter((f) => f.env.WA_QR_CONTA === '34').length === 2, 'e só a 34 sobe de novo')
+  conferir(sup9.estado.workers.get(34).quedas === 1 && sup9.estado.workers.get(23).quedas === 0,
+    'a queda é contada na conta certa')
+  sup9.estado.workers.get(34).filho.morrer(1, null); await dorme(60)
+  const f34c = sup9.estado.workers.get(34).filho
+  await dorme(60)                              // este fica de pé mais que o firmeMs
+  f34c.morrer(1, null)
+  conferir(usadas.map((u) => u[1]).join(',') === '10,20,10',
+    'a espera dobra a cada queda rápida (10, 20) e volta ao início depois de tempo de pé')
+  conferir(usadas.every((u) => u[0] === 34), 'e é por conta — a 23 nunca entrou nessa escada')
+  desligar(sup9)
 
-  // --- 5c. fork falhando não derruba quem segura a porta ---------------------
-  console.log('\nSe o fork falhar:')
-  let tentativas = 0
-  const sup3c = iniciarSupervisor({
-    esperaMs: 10,
-    fork: () => { tentativas++; throw new Error('EAGAIN') }
-  })
-  let explodiu = false
-  try { sup3c.subirWorker() } catch (e) { explodiu = true }
-  conferir(explodiu === false, 'não explode — quem segura a porta não pode cair junto')
-  conferir(sup3c.estado.worker === null, 'e não finge que tem worker')
-  await dorme(40)
-  conferir(tentativas >= 2, 'tenta de novo depois da espera, como se o worker tivesse morrido')
-
-  // --- 6. SIGTERM espera o worker fechar ------------------------------------
+  // --- 10. SIGTERM espera TODOS os workers ---------------------------------
   //
-  // O número mais importante do arquivo: quem solta `wa_qr_sessao_lock` é o
-  // encerrar() do WORKER. Supervisor que morre antes dele deixa as travas presas
-  // até o prazo vencer (180s) — e a instância nova do deploy espera de braços
-  // cruzados, com os chips no chão.
+  // Cada worker solta a trava da própria conta no encerrar(). Sair antes de
+  // qualquer um deles deixa aquela trava presa 180s.
   console.log('\nSIGTERM (o deploy):')
-  // O encerrar() termina em process.exit de verdade. Fica trocado durante TODO
-  // este bloco — restaurar no meio fazia o teste sair calado no meio do caminho,
-  // com código 0, parecendo que tinha passado.
+  filhos.length = 0
   const exitReal = process.exit
   let saiu = false
   process.exit = () => { saiu = true }
   try {
-    const sup4 = iniciarSupervisor({ fork: forkFalso, esperaMs: 10 })
-    sup4.subirWorker()
-    const atual = sup4.estado.worker
-    sup4.encerrar('SIGTERM')
-    conferir(atual.matou === true, 'repassa o SIGTERM ao worker')
-    conferir(saiu === false, 'e NÃO sai antes dele — é o worker que solta as travas')
-    atual.morrer(0, null)
-    conferir(saiu === true, 'só sai quando o worker fecha')
-
-    const sup5 = iniciarSupervisor({ fork: forkFalso, esperaMs: 10 })
-    sup5.subirWorker()
-    const w5 = sup5.estado.worker
-    const quantosAntes = filhos.length
-    sup5.encerrar('SIGTERM')
-    w5.morrer(1, null)                  // morte FEIA no meio do encerramento
-    await dorme(40)                     // mais que a espera de 10ms
-    conferir(filhos.length === quantosAntes,
-      'e nem uma morte feia durante o encerramento faz subir worker novo')
+    const sup10 = iniciarSupervisor(base())
+    await sup10.reconciliar([34, 23, 36]); await dorme(20)
+    sup10.encerrar('SIGTERM')
+    conferir(filhos.every((f) => f.matou === 'SIGTERM'), 'repassa o SIGTERM aos TRÊS')
+    conferir(saiu === false, 'e não sai antes de nenhum')
+    filhos[0].morrer(0, null); filhos[1].morrer(0, null)
+    conferir(saiu === false, 'dois fecharam, um falta: ainda não sai')
+    filhos[2].morrer(0, null)
+    conferir(saiu === true, 'só sai quando o ÚLTIMO fecha')
+    const n = filhos.length
+    await dorme(40)
+    conferir(filhos.length === n, 'e nenhuma dessas mortes fez subir worker novo')
   } finally {
     process.exit = exitReal
   }
 
-  // --- 7. a trava de leitura do fonte ---------------------------------------
-  console.log('\nA decisão de entrada está no código:')
+  // --- 11. a trava de leitura do fonte --------------------------------------
+  console.log('\nO código faz o que este teste diz:')
   const src = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8')
   conferir(/if \(require\.main === module && !process\.env\.WA_QR_WORKER && process\.env\.WA_QR_SUPERVISOR !== '0'\) \{\s*\n\s*require\('\.\/supervisor'\)\.rodar\(\)\s*\n\s*return\s*\n\s*\}/.test(src),
-    'server.js delega pro supervisor e PARA ali (o return é o que impede o processo leve de virar o pesado)')
-  // `require` sozinho não sobe nada — foi o defeito que o teste de fumaça pegou na
-  // primeira tentativa: o processo saía calado, sem porta e sem worker.
-  conferir(/require\('\.\/supervisor'\)\.rodar\(\)/.test(src),
-    'e CHAMA rodar() — importar o módulo por si só não abre porta nem dá fork')
-  const antesDoBaileys = src.indexOf("require('./supervisor')") < src.indexOf("require('@whiskeysockets/baileys')")
-  conferir(antesDoBaileys === true, 'e a delegação vem mesmo antes do Baileys, medido por posição no arquivo')
-  conferir(/WA_QR_SUPERVISOR !== '0'/.test(src),
-    'e existe escape por variável de ambiente, sem tocar no Start Command do Render')
+    'server.js delega pro supervisor e PARA ali, chamando rodar() — importar não basta')
+  conferir(src.indexOf("require('./supervisor')") < src.indexOf("require('@whiskeysockets/baileys')"),
+    'e a delegação vem antes do Baileys, medido por posição no arquivo')
+  conferir(/const MINHA_CONTA = parseInt\(process\.env\.WA_QR_CONTA/.test(src),
+    'o worker lê WA_QR_CONTA')
+  conferir(/if \(MINHA_CONTA\) contas = contas\.filter\(\(c\) => c === MINHA_CONTA\)/.test(src),
+    'e o restaurarSessoes religa SÓ a conta dele')
+  conferir(/if \(MINHA_CONTA && contaId !== MINHA_CONTA\) \{[\s\S]{0,400}?return json\(res, 421/.test(src),
+    'e rota de OUTRA conta é recusada — atender seria abrir socket de conta que já tem worker (guerra de sessão)')
+  const sqlWorker = src.match(/select conta_id from wa_qr_auth\s+where arquivo = 'creds' and conteudo::json->'me'->>'id' is not null/)
+  conferir(!!sqlWorker && /where arquivo = 'creds' and conteudo::json->'me'->>'id' is not null/.test(SQL_CONTAS_PAREADAS),
+    'supervisor e worker usam a MESMA definição de "conta pareada" — duas definições seriam duas verdades')
 
   console.log(falhas ? '\n' + falhas + ' FALHA(S)\n' : '\ntudo certo\n')
   process.exit(falhas ? 1 : 0)

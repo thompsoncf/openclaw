@@ -72,6 +72,8 @@ create table funil_etapas (id bigserial primary key, conta_id bigint, chave text
   exige_justificativa boolean not null default true, renova_sozinho_h integer,
   saidas_permitidas text, toques_dias text,
   exige_motivo boolean not null default false, reativa_para text,
+  sai_do_quadro boolean not null default false,
+  agenda_ao_entrar boolean not null default false,
   unique (conta_id, chave));
 create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint, membro_id bigint,
   tipo text, resultado text, descricao text, criado_em timestamptz default now());

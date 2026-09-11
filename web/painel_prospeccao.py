@@ -64,7 +64,11 @@ _ORDEM_PERDIDO = 910   # e as de PÓS-VENDA depois daqui (migração 177)
 def _etapas(c, conta_id: int) -> list[dict]:
     """Etapas do funil da conta, ordenadas. Semeia o padrão na 1ª vez (conta sem
     etapas ainda). Retorna [{id, chave, rotulo, ordem, fixa}]."""
-    sql = "select id, chave, rotulo, ordem, fixa from funil_etapas where conta_id=%s order by ordem, id"
+    # `sai_do_quadro` entra aqui (migração 238) e não numa segunda consulta: quem
+    # pede as etapas do funil precisa saber quais delas o quadro não mostra, e duas
+    # leituras dariam dois jeitos de a lista sair incompleta.
+    sql = ("select id, chave, rotulo, ordem, fixa, coalesce(sai_do_quadro, false) "
+           "  from funil_etapas where conta_id=%s order by ordem, id")
     rows = c.execute(sql, (conta_id,)).fetchall()
     if not rows:
         for chave, rotulo, ordem, fixa in _ETAPAS_PADRAO:
@@ -73,7 +77,8 @@ def _etapas(c, conta_id: int) -> list[dict]:
                       (conta_id, chave, rotulo, ordem, fixa))
         c.commit()
         rows = c.execute(sql, (conta_id,)).fetchall()
-    return [{"id": r[0], "chave": r[1], "rotulo": r[2], "ordem": r[3], "fixa": r[4]} for r in rows]
+    return [{"id": r[0], "chave": r[1], "rotulo": r[2], "ordem": r[3], "fixa": r[4],
+             "sai_do_quadro": r[5]} for r in rows]
 TEMPERATURAS = [("frio", "Frio"), ("morno", "Morno"), ("quente", "Quente")]
 TEMP_OK = {t for t, _ in TEMPERATURAS}
 TEMP_COR = {"frio": "#5b9bd5", "morno": "var(--ambar)", "quente": "var(--coral)"}
@@ -581,6 +586,13 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
         modo_evento = False
     with pool.connection() as c:
         etapas = _etapas(c, conta_id)
+        # ETAPA QUE SAI DO QUADRO (migração 238): "o Kanban comercial deve mostrar
+        # apenas etapas que exigem atuação de prospecção e venda". A etapa some da
+        # barra de colunas E os leads dela somem do quadro — o cadastro fica inteiro,
+        # some da TELA. Nenhuma etapa nasce assim: sem ninguém marcar na Régua, esta
+        # linha não tira nada de lugar nenhum.
+        fora_do_quadro = [e["chave"] for e in etapas if e.get("sai_do_quadro")]
+        etapas = [e for e in etapas if not e.get("sai_do_quadro")]
         # dois_chips decide se o apelido do chip aparece no selo de campanha — com um
         # chip só não existe "de qual chip" pra confundir (mesma regra do Inbox).
         dois_chips = _tem_dois_chips(c, conta_id)
@@ -601,8 +613,9 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                       order by a.ultima_msg_em desc nulls last, a.id desc limit 1
                   ) ca on true
                  where {' and '.join(where)}
+                       {"and p.status <> all(%s)" if fora_do_quadro else ""}
                  order by p.proximo_contato_em asc nulls last, p.atualizado_em desc""",
-            tuple(params)).fetchall()
+            tuple(params) + ((fora_do_quadro,) if fora_do_quadro else ())).fetchall()
         # O selo do canal só vira BOTÃO (abre o chat) quando existe conversa de
         # verdade — não quando só tem telefone/e-mail cadastrado. Uma query em
         # lote pra todo o board (= any), não uma por card: o índice único
@@ -8049,7 +8062,7 @@ async def regua_etapa(request: Request, eid: int):
                             gatilho_ativo = (%s and %s::text is not null),
                             teto_dias = %s, renovacoes_max = %s, exige_justificativa = %s,
                             saidas_permitidas = %s, toques_dias = %s, exige_motivo = %s,
-                            reativa_para = %s
+                            reativa_para = %s, sai_do_quadro = %s, agenda_ao_entrar = %s
                       where id=%s and conta_id=%s""",
                   (rot, prazo, gat, ativo, gat, teto, renov, exige, saidas,
                    _escada_txt(f.get("toques_dias")),
@@ -8059,6 +8072,8 @@ async def regua_etapa(request: Request, eid: int):
                    ((f.get("reativa_para") or "").strip()
                     if (f.get("reativa_para") or "").strip() in validas
                     and (f.get("reativa_para") or "").strip() != r[0] else None),
+                   str(f.get("sai_do_quadro") or "").lower() in ("1", "on", "true", "sim"),
+                   str(f.get("agenda_ao_entrar") or "").lower() in ("1", "on", "true", "sim"),
                    eid, ctx["conta_id"]))
         c.commit()
     return JSONResponse({"ok": True, "gatilho_ativo": bool(ativo and gat)})
@@ -15751,6 +15766,17 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <input type="checkbox" name="exige_motivo" value="1" {% if e.exige_motivo %}checked{% endif %}
                    style="width:auto;margin:0;accent-color:var(--coral)">
             exigir motivo pra entrar aqui
+          </label>
+          <span>·</span>
+          <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;cursor:pointer">
+            <input type="checkbox" name="sai_do_quadro" value="1" {% if e.sai_do_quadro %}checked{% endif %}
+                   style="width:auto;margin:0;accent-color:var(--azul)">
+            não mostrar no quadro
+          </label>
+          <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;cursor:pointer">
+            <input type="checkbox" name="agenda_ao_entrar" value="1" {% if e.agenda_ao_entrar %}checked{% endif %}
+                   style="width:auto;margin:0;accent-color:var(--verde)">
+            criar o compromisso na Agenda
           </label>
           <span>·</span>
           <span>se o cliente voltar a falar daqui, leva para</span>

@@ -44,6 +44,9 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   orcamento_id bigint, atualizado_em timestamptz default now(),
   criado_em timestamptz default now());
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
+  -- migração 238: a etapa que o quadro comercial não mostra
+  sai_do_quadro boolean not null default false,
+  agenda_ao_entrar boolean not null default false,
   ordem int default 0, fixa boolean default false, fase text not null default 'venda',
   unique (conta_id, chave));
 create table servicos_catalogo (id bigserial primary key, conta_id bigint, slug text, nome text,

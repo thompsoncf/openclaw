@@ -288,6 +288,20 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — teto falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
+                # A ponte com a Agenda: o lead que fecha vira compromisso pela data
+                # do evento. Roda aqui, e não no caminho que move o card, porque o
+                # lead chega em "Fechado" por quatro portas diferentes — pendurar em
+                # cada uma seria quatro lugares pra esquecer. Inerte por padrão.
+                from finance import funil_agenda as _fag
+                _a = _fag.rodar(pool)
+                if _a["contas"]:
+                    log.info("poller: ciclo #%d — agenda do funil: %d conta(s), "
+                             "%d criado(s), %d ligado(s)",
+                             ciclo, _a["contas"], _a["criados"], _a["ligados"])
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — agenda do funil falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
+            try:
                 # O follow-up: sincroniza a próxima ação proposta e cobra quem
                 # deixou vencer. Inerte por padrão — só entra em conta que ligou
                 # (follow_up_modo <> 'off'), e nasce desligada.

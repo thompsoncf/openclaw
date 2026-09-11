@@ -1025,6 +1025,36 @@ _E_VISITA = "(e.titulo ilike 'visita%%' and e.tipo_evento is null)"
 AGENDA_ESPECIES = [("", "Todos"), ("visita", "Visitas"), ("evento", "Eventos")]
 
 
+def _dinheiro_dos_eventos(pool, conta_id, de, ate) -> tuple[int, int]:
+    """(contratada, recebida) em centavos, dos eventos do período.
+
+    CONTRATADA é o valor do orçamento do lead cujo evento cai no período e que já
+    está fechado — `aprovada_em` preenchido ou status de fechado. RECEBIDA é o sinal
+    que entrou (`sinal_pago_em`). "A receber" é a diferença, e não uma terceira
+    consulta: a subtração não pode discordar das duas parcelas que a própria tela
+    mostra logo acima.
+
+    Best-effort: esta aba existia antes e não pode quebrar porque o orçamento de um
+    lead está torto. Falhou, os três números saem zerados — que é o mesmo que a
+    conta vê hoje, antes de alguém preencher valor.
+    """
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                f"""select coalesce(sum({_VALOR_ORC}) filter (
+                             where o.aprovada_em is not null
+                                or o.status in ('aprovada','fechado')), 0),
+                           coalesce(sum(o.sinal_centavos) filter (
+                             where o.sinal_pago_em is not null), 0)
+                      from prospeccao p
+                      join orcamentos o on o.id = p.orcamento_id and o.conta_id = p.conta_id
+                     where p.conta_id=%s and p.evento_em >= %s and p.evento_em <= %s""",
+                (conta_id, de, ate)).fetchone()
+        return (int(r[0] or 0), int(r[1] or 0)) if r else (0, 0)
+    except Exception:  # noqa: BLE001
+        return (0, 0)
+
+
 def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                   especie="", de=None, ate=None) -> dict:
     """A Agenda (web/painel_agenda.py) só mostra o que vem — mês corrente e os
@@ -1245,11 +1275,24 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                    _col("convidados", "Convid.", num=True),
                    _col("sinal_centavos", "Sinal", num=True, brl=True)]
         col_total, total_centavos = "sinal_centavos", _soma(linhas, "sinal_centavos")
+        # OS TRÊS NÚMEROS DE DINHEIRO que o fluxo V3 pede na aba de eventos
+        # ("receita contratada; receita recebida; valores a receber"). Saem dos
+        # orçamentos dos leads cujo evento cai no período — é a única fonte que sabe
+        # quanto foi vendido; a agenda sabe a data, não o valor.
+        #
+        # Eles nascem em R$ 0 e isso é informação, não defeito: medido na conta 34 em
+        # 11/09/2026, são 21 orçamentos e NENHUM aprovado. O rodapé diz isso em vez
+        # de deixar três zeros sem explicação — zero silencioso parece sistema
+        # quebrado, e o dono precisa saber que o buraco é o valor não preenchido.
+        contratada, recebida = _dinheiro_dos_eventos(pool, conta_id, de, ate)
         metricas = [("Eventos no período", str(n_total)),
                     ("Confirmados", _pct(n_ativo)),
                     ("Pré-reserva", _pct(n_pre)),
                     ("Cancelados", _pct(n_cancelado)),
                     ("Convidados", str(n_convidados)),
+                    ("Receita contratada", _brl(contratada)),
+                    ("Receita recebida", _brl(recebida)),
+                    ("A receber", _brl(max(0, contratada - recebida))),
                     ("Sinal no período", _brl(sinal_total))]
     else:
         # "Todos" continua quase EXATAMENTE como era antes da espécie existir —

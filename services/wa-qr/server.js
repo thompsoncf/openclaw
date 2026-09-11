@@ -958,7 +958,31 @@ function pararTimersDaAgenda (s) {
 // primeiro a sumir quando o aparelho sai da lista de dispositivos da conta.
 function marcarVivo (contaId, entregouMensagem) {
   const s = sessoes.get(contaId)
-  if (!s) return
+  // SEM SOCKET NÃO HÁ VIDA PRA MARCAR — e esta linha custou uma tarde de chip fora
+  // do ar. Evento de um socket JÁ DESCARTADO ainda chega aqui: o handler do
+  // `messages.upsert` é assíncrono, então o lote que dispara o disjuntor termina de
+  // ser processado DEPOIS do `descartarSocket`. Em 11/09 foi exatamente isso na conta
+  // 34, tudo dentro do mesmo segundo e nesta ordem no wa_qr_log:
+  //
+  //   15:19:02  disjuntor abre → socket descartado (motivo: disjuntor_guerra_de_sessao)
+  //   15:19:02  messages.upsert recebido (n: 15)   ← o lote retardatário
+  //   15:19:02  marcarVivo apaga a marca de órfã
+  //
+  // `abrirDisjuntor` tinha acabado de pôr `substituidaEm` pra que o vigia retomasse a
+  // conta 40 minutos depois. O retardatário apagou a marca, e `sessaoOrfa` exige ela:
+  // sem marca devolve false PRA SEMPRE. O vigia nunca mais olhou pra conta 34 — ela
+  // ficou `desconectado`, `temSock: false`, `iniciando: false`, sem uma única linha no
+  // log por mais de uma hora, esperando um deploy que só viria por nossa mão. Não eram
+  // os 40 minutos da espera: era até alguém perceber.
+  //
+  // O mesmo vale pro caminho do 440, que marca órfã do mesmo jeito.
+  //
+  // A saída é reler o que o comentário lá embaixo sempre disse — "quem entrega está
+  // vivo e é nosso". Um evento que chega depois do socket morrer não prova nem uma
+  // coisa nem outra: ele é eco de uma encarnação que acabou. Nada do que está abaixo
+  // deve valer pra ele — nem a marca de órfã, nem zerar `reconexoesMudas` (que
+  // afrouxaria o teto do vigia na encarnação seguinte), nem encerrar a partida.
+  if (!s || !s.sock) return
   s.ultimoEvento = Date.now()
   // entregou CONVERSA de verdade = a desconfiança do vigia zera junto (ver tetoMudo)
   // ...e é aqui que a PARTIDA desta conta termina, pelo mesmo critério: socket

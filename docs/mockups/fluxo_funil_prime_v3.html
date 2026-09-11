@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fluxo do Funil Prime</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --sangue:#F2603A; --sangue-fundo:#2A1710; --sangue-borda:#6B3320;
+  --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d;
+  --roxo:#C9A3E0; --roxo-fundo:#1B1424; --roxo-borda:#3B2B4A; --ink:#062011;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo)}
+b{font-weight:600}
+.wrap{max-width:1180px;margin:0 auto;padding-block:2.6rem 5rem;padding-inline:1.25rem;display:flex;flex-direction:column;gap:2.9rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em;margin-bottom:.35rem;text-transform:uppercase}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.4rem);margin:.35rem 0 .6rem}
+.head p{color:var(--text-dim);max-width:74ch;margin:0}
+.head .marca{color:var(--neon)}
+.sec>h2{font-size:1.22rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.1rem;max-width:78ch;font-size:.9rem}
+.sec>p.leg b{color:var(--text)}
+
+/* medida — a caixa do que a produção diz */
+.medida{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:14px;padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.8rem}
+.medida h3{font-size:1rem;color:#F5C9C4}
+.medida .nums{display:grid;grid-template-columns:repeat(4,1fr);gap:.55rem}
+@media (max-width:820px){.medida .nums{grid-template-columns:repeat(2,1fr)}}
+.medida .n{border:1px solid var(--coral-borda);border-radius:10px;background:#1C0F0F;padding:.6rem .7rem}
+.medida .n b{display:block;font:600 1.5rem/1 var(--display);color:var(--coral);font-variant-numeric:tabular-nums}
+.medida .n.ok b{color:var(--neon)}
+.medida .n span{display:block;font-size:.66rem;color:var(--text-dim);margin-top:.3rem;line-height:1.35}
+.medida p{margin:0;font-size:.84rem;color:#EED6D3}
+.medida p b{color:#fff}
+
+/* regras do documento */
+.regras{display:grid;grid-template-columns:repeat(2,1fr);gap:.7rem}
+@media (max-width:900px){.regras{grid-template-columns:1fr}}
+.reg{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem .95rem;display:flex;gap:.7rem;align-items:flex-start}
+.reg .num{font:600 .78rem/1 var(--mono);color:var(--ink);background:var(--neon);border-radius:6px;padding:.32rem .42rem;flex-shrink:0}
+.reg h4{font-size:.92rem;margin-bottom:.25rem}
+.reg p{margin:0;font-size:.8rem;color:var(--text-dim)}
+
+/* o funil: antes e depois */
+/* empilhadas, não lado a lado: o quadro de hoje tem 8 colunas e em meia largura
+   elas eram cortadas pela borda — o leitor via seis e achava que eram seis */
+.duas{display:grid;grid-template-columns:1fr;gap:1rem}
+.quadro{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:1rem}
+.quadro>h3{font-size:.95rem;margin-bottom:.15rem}
+.quadro>p{margin:.2rem 0 .85rem;font-size:.78rem;color:var(--text-dim)}
+.cols{display:flex;gap:.4rem;overflow-x:auto;padding-bottom:.3rem}
+.col{flex:1 1 0;min-width:106px;border:1px solid var(--line);border-radius:9px;background:var(--bg-2);padding:.5rem .45rem;text-align:center}
+.col .t{font:600 .68rem/1.25 var(--body);letter-spacing:.01em}
+.col .q{font:600 1.05rem/1 var(--display);color:var(--text-dim);margin-top:.3rem;font-variant-numeric:tabular-nums}
+.col.morta{opacity:.42;border-style:dashed}
+.col.morta .t{text-decoration:line-through}
+.col.nova{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.col.nova .t{color:var(--neon-bright)}
+.col.alerta{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.col.alerta .q{color:var(--coral)}
+.col .sub{font-size:.6rem;color:var(--text-faint);margin-top:.25rem;line-height:1.3}
+
+/* tela — a moldura do app */
+.telas{display:grid;grid-template-columns:repeat(2,1fr);gap:1rem}
+@media (max-width:980px){.telas{grid-template-columns:1fr}}
+.tela{border:1px solid var(--line);border-radius:14px;background:var(--surface);overflow:hidden;display:flex;flex-direction:column}
+.tela>.cap{padding:.75rem .95rem .1rem}
+.tela>.cap h3{font-size:.95rem}
+.tela>.cap p{margin:.25rem 0 .7rem;font-size:.78rem;color:var(--text-dim)}
+.tela .app{background:var(--bg-2);border-top:1px solid var(--line);padding:.85rem;display:flex;flex-direction:column;gap:.6rem}
+
+/* card de lead */
+.card{border:1px solid var(--line);border-radius:11px;background:var(--surface-2);padding:.65rem .7rem;display:flex;flex-direction:column;gap:.45rem}
+.card .lin1{display:flex;align-items:center;gap:.45rem}
+.card .nome{font-weight:600;font-size:.86rem}
+.card .meta{font-size:.72rem;color:var(--text-dim)}
+.card .meta b{color:var(--text)}
+.pill{font:600 .63rem/1 var(--mono);padding:.28rem .42rem;border-radius:6px;letter-spacing:.02em;white-space:nowrap}
+.pill.ok{background:var(--neon-fundo);color:var(--neon-bright);border:1px solid var(--neon-borda)}
+.pill.warn{background:var(--ambar-fundo);color:var(--ambar);border:1px solid var(--ambar-borda)}
+.pill.bad{background:var(--coral-fundo);color:var(--coral);border:1px solid var(--coral-borda)}
+.pill.info{background:var(--azul-fundo);color:var(--azul);border:1px solid var(--azul-borda)}
+.pill.roxa{background:var(--roxo-fundo);color:var(--roxo);border:1px solid var(--roxo-borda)}
+
+/* a barra do prazo */
+.prazo{display:flex;flex-direction:column;gap:.28rem}
+.prazo .rot{display:flex;justify-content:space-between;font-size:.68rem;color:var(--text-dim)}
+.prazo .rot b{color:var(--text);font-variant-numeric:tabular-nums}
+.barra{height:6px;border-radius:99px;background:#0B120E;border:1px solid var(--line);overflow:hidden;display:flex}
+.barra i{display:block;height:100%}
+.barra i.v{background:var(--neon)}
+.barra i.a{background:var(--ambar)}
+.barra i.c{background:var(--coral)}
+.marcos{display:flex;justify-content:space-between;font:500 .6rem/1 var(--mono);color:var(--text-faint)}
+
+/* botões */
+.btns{display:flex;gap:.4rem;flex-wrap:wrap}
+.bt{font:600 .72rem/1 var(--body);padding:.5rem .65rem;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text)}
+.bt.pri{background:var(--neon);color:var(--ink);border-color:var(--neon)}
+.bt.gh{background:transparent;color:var(--text-dim)}
+.bt.trv{background:#151515;color:var(--text-faint);border-style:dashed}
+
+/* caixa de justificativa */
+.just{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:11px;padding:.7rem .75rem;display:flex;flex-direction:column;gap:.5rem}
+.just h4{font-size:.82rem;color:var(--ambar)}
+.just .ta{border:1px solid var(--ambar-borda);border-radius:8px;background:#140F06;padding:.55rem .6rem;font-size:.76rem;color:var(--text-dim);min-height:44px}
+.just .ta.vazio{color:var(--text-faint);font-style:italic}
+.just .aviso{font-size:.7rem;color:var(--ambar)}
+
+/* tarefas D1 D3 D7 */
+.tarefas{display:flex;flex-direction:column;gap:.4rem}
+.tar{display:flex;align-items:center;gap:.55rem;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);padding:.5rem .6rem}
+.tar .d{font:600 .68rem/1 var(--mono);background:var(--azul-fundo);color:var(--azul);border:1px solid var(--azul-borda);border-radius:6px;padding:.3rem .4rem;flex-shrink:0}
+.tar.feito .d{background:var(--neon-fundo);color:var(--neon-bright);border-color:var(--neon-borda)}
+.tar.venc .d{background:var(--coral-fundo);color:var(--coral);border-color:var(--coral-borda)}
+.tar .txt{flex:1;font-size:.76rem}
+.tar .txt span{display:block;font-size:.68rem;color:var(--text-dim);margin-top:.12rem}
+.tar.feito .txt{color:var(--text-dim);text-decoration:line-through}
+
+/* motivos de perda */
+.motivos{display:grid;grid-template-columns:repeat(2,1fr);gap:.35rem}
+@media (max-width:520px){.motivos{grid-template-columns:1fr}}
+.mot{display:flex;align-items:center;gap:.45rem;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);padding:.42rem .5rem;font-size:.74rem}
+.mot .b{width:12px;height:12px;border-radius:4px;border:1px solid var(--text-faint);flex-shrink:0}
+.mot.on{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.mot.on .b{background:var(--coral);border-color:var(--coral)}
+.mot .tagnovo{font:600 .55rem/1 var(--mono);color:var(--neon-bright);background:var(--neon-fundo);border:1px solid var(--neon-borda);border-radius:4px;padding:.18rem .26rem;margin-left:auto}
+
+/* melhorias */
+.melh{display:flex;flex-direction:column;gap:.7rem}
+.m{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.9rem 1rem;display:flex;flex-direction:column;gap:.5rem;box-shadow:inset 3px 0 0 var(--roxo)}
+.m.forte{box-shadow:inset 3px 0 0 var(--coral)}
+.m .top{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.m .num{font:600 .7rem/1 var(--mono);color:var(--ink);background:var(--roxo);border-radius:5px;padding:.28rem .38rem}
+.m.forte .num{background:var(--coral);color:#fff}
+.m h4{font-size:.95rem}
+.m p{margin:0;font-size:.82rem;color:var(--text-dim)}
+.m p b{color:var(--text)}
+.m .porque{font-size:.76rem;color:var(--text-faint);border-left:2px solid var(--line);padding-left:.6rem}
+.m .porque b{color:var(--ambar)}
+
+/* perguntas */
+.perg{border:1px solid var(--azul-borda);background:var(--azul-fundo);border-radius:14px;padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.8rem}
+.perg h3{font-size:1rem;color:var(--azul)}
+.q{border:1px solid var(--azul-borda);border-radius:10px;background:#0C1A22;padding:.75rem .8rem}
+.q h4{font-size:.86rem;margin-bottom:.3rem}
+.q p{margin:0 0 .5rem;font-size:.78rem;color:var(--text-dim)}
+.opc{display:flex;gap:.4rem;flex-wrap:wrap}
+.opc .o{border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:.42rem .55rem;font-size:.74rem;color:var(--text-dim)}
+.opc .o.rec{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright);font-weight:600}
+
+/* rodapé */
+.rod{border-top:1px solid var(--line);padding-top:1.1rem;color:var(--text-faint);font-size:.76rem}
+.rod b{color:var(--text-dim)}
+.fluxo{font-family:var(--mono);font-size:.74rem;line-height:1.9;color:var(--text-dim);background:var(--bg-2);border:1px solid var(--line);border-radius:11px;padding:.9rem 1rem;overflow-x:auto;white-space:pre}
+.fluxo b{color:var(--neon-bright)}
+.fluxo i{color:var(--coral);font-style:normal}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <div class="k">Mockup · Prime Eventos · conta 34</div>
+  <h1>O fluxo final do funil <span class="marca">— e o que a produção diz sobre ele</span></h1>
+  <p>Desenho do documento <b>FLUXO_FINAL_FUNIL_PRIME_EVENTOS_DESENVOLVEDOR_V3</b>, medido contra os 316 leads
+  ativos da conta em 11/09/2026. Nada aqui está implementado ainda: é o que vai ser construído, para aprovação
+  antes de escrever código. As <b>melhorias</b> estão separadas do pedido de propósito — cada uma diz o número
+  que a motivou, e nenhuma entra sem seu "sim".</p>
+</div>
+
+<!-- ------------------------------------------------------------------ 1 -->
+<section class="sec">
+  <div class="k">1 · o pedido</div>
+  <h2>As seis regras do documento</h2>
+  <p class="leg">Lidas do arquivo, sem interpretação. É este texto que o resto do mockup desenha.</p>
+  <div class="regras">
+    <div class="reg"><span class="num">1</span><div>
+      <h4>Contactado tem teto de 21 dias</h4>
+      <p>7 dias iniciais + duas renovações de 7, cada uma liberada <b>só</b> com justificativa obrigatória
+      preenchida. Sem justificativa, o sistema trava a renovação.</p></div></div>
+    <div class="reg"><span class="num">2</span><div>
+      <h4>Aviso no 6º e no 7º dia</h4>
+      <p>De cada período de 7 dias, alerta automático ao vendedor avisando que está perto de vencer.</p></div></div>
+    <div class="reg"><span class="num">3</span><div>
+      <h4>Só duas saídas do Contactado</h4>
+      <p><b>Negociação</b> (visita domiciliar, proposta, sinal, contrato) quando houve avanço concreto;
+      <b>Follow-up</b> quando não houve. Nenhuma outra saída é permitida.</p></div></div>
+    <div class="reg"><span class="num">4</span><div>
+      <h4>Follow-up é D1 → D3 → D7</h4>
+      <p>Sete dias no total. As três tentativas <b>nascem sozinhas como tarefas</b>, com prazo e alerta de
+      atraso, sem depender da lembrança do vendedor.</p></div></div>
+    <div class="reg"><span class="num">5</span><div>
+      <h4>Perdido exige motivo, e não apaga</h4>
+      <p>Dez motivos padronizados, "Outro" com descrição obrigatória. O cadastro fica no banco; se o cliente
+      voltar a falar, o mesmo cadastro <b>reativa</b> com todo o histórico.</p></div></div>
+    <div class="reg"><span class="num">6</span><div>
+      <h4>Fechado sai do Kanban</h4>
+      <p>"Evento a realizar" e "Evento realizado" deixam de ser colunas. A gestão do evento passa para
+      <b>Agenda</b> + <b>Relatórios</b>.</p></div></div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ 2 -->
+<section class="sec">
+  <div class="k">2 · a medida</div>
+  <h2>O que a Prime tem hoje, antes de qualquer regra entrar</h2>
+  <p class="leg">Consultado na produção em 11/09/2026. Estes números decidem se a regra nasce funcionando ou
+  nasce sendo desligada na primeira manhã.</p>
+  <div class="medida">
+    <h3>O Contactado já é o estacionamento que o documento descreve</h3>
+    <div class="nums">
+      <div class="n"><b>275</b><span>leads em Contactado — 87% de todo o funil ativo</span></div>
+      <div class="n"><b>75</b><span>já passaram de 21 dias hoje</span></div>
+      <div class="n"><b>89</b><span>vencem os 21 dias dentro de uma semana</span></div>
+      <div class="n ok"><b>0</b><span>desses 75 tiveram mensagem do cliente nos últimos 7 dias</span></div>
+    </div>
+    <p>O último número é o que <b>valida a regra</b>: nenhum dos 75 leads estourados está em conversa viva.
+    Eles estão parados de verdade — o teto de 21 dias não vai expulsar ninguém que esteja sendo trabalhado.</p>
+    <div class="nums">
+      <div class="n"><b>325</b><span>movimentos automáticos (Novo→Contactado) em 23 dias</span></div>
+      <div class="n"><b>~50</b><span>movimentos feitos à mão, no mesmo período</span></div>
+      <div class="n"><b>0</b><span>leads na coluna "Follow-up" que já existe</span></div>
+      <div class="n"><b>51</b><span>estourados só do Pedro Yan (de 118 contactados dele)</span></div>
+    </div>
+    <p>Entra sozinho e não sai: <b>o funil tem entrada automática e saída manual que ninguém usa</b>. É por isso
+    que a coluna Follow-up está vazia com 265 leads aguardando o cliente responder — a coluna existe, o hábito
+    de arrastar não.</p>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ 3 -->
+<section class="sec">
+  <div class="k">3 · o quadro</div>
+  <h2>O Kanban, antes e depois</h2>
+  <p class="leg">Os números são os leads reais de hoje em cada coluna.</p>
+  <div class="duas">
+    <div class="quadro">
+      <h3>Hoje — 8 colunas</h3>
+      <p>Três delas são pós-venda ocupando espaço de prospecção.</p>
+      <div class="cols">
+        <div class="col"><div class="t">Novo</div><div class="q">2</div></div>
+        <div class="col alerta"><div class="t">Contactado</div><div class="q">275</div><div class="sub">75 &gt; 21 dias</div></div>
+        <div class="col"><div class="t">Follow-up</div><div class="q">0</div><div class="sub">vazia</div></div>
+        <div class="col"><div class="t">Agendado Visita</div><div class="q">14</div></div>
+        <div class="col"><div class="t">Proposta</div><div class="q">20</div></div>
+        <div class="col morta"><div class="t">Evento A Realizar</div><div class="q">5</div></div>
+        <div class="col morta"><div class="t">Evento Realizado</div><div class="q">2</div></div>
+        <div class="col"><div class="t">Perdido</div><div class="q">19</div></div>
+      </div>
+    </div>
+    <div class="quadro">
+      <h3>Proposto — 5 colunas</h3>
+      <p>Negociação vira uma coluna com o degrau no próprio card.</p>
+      <div class="cols">
+        <div class="col"><div class="t">Novo</div><div class="q">2</div></div>
+        <div class="col alerta"><div class="t">Contactado</div><div class="q">275</div><div class="sub">com relógio</div></div>
+        <div class="col nova"><div class="t">Follow-up</div><div class="q">—</div><div class="sub">D1·D3·D7</div></div>
+        <div class="col nova"><div class="t">Negociação</div><div class="q">34</div><div class="sub">visita → proposta<br>→ sinal → contrato</div></div>
+        <div class="col"><div class="t">Perdido</div><div class="q">19</div></div>
+      </div>
+      <p style="margin-top:.7rem;font-size:.75rem;color:var(--text-faint)">
+      <b style="color:var(--neon-bright)">Fechado</b> não é coluna: ao fechar, o lead sai do quadro e aparece na
+      Agenda e nos Relatórios. Os 7 leads que hoje estão em "Evento a realizar/realizado" já entram como fechados.</p>
+    </div>
+  </div>
+  <div class="fluxo" style="margin-top:1rem">NOVO
+ └─▶ <b>CONTACTADO</b>  ·  7d  +7d(justificativa)  +7d(justificativa)  =  teto de 21 dias
+       ├─▶ <b>NEGOCIAÇÃO</b>  visita ▸ proposta ▸ sinal ▸ contrato  ─▶  <b>FECHADO</b> ─▶ sai do quadro (Agenda + Relatórios)
+       └─▶ <b>FOLLOW-UP</b>   D1 ▸ D3 ▸ D7  (7 dias)
+             ├─▶ cliente respondeu / avançou  ─▶  <b>NEGOCIAÇÃO</b>
+             └─▶ sem avanço  ─▶  <i>PERDIDO</i> (motivo obrigatório)
+                                    └─▶ cliente volta a falar ─▶ reativa em CONTACTADO</div>
+</section>
+
+<!-- ------------------------------------------------------------------ 4 -->
+<section class="sec">
+  <div class="k">4 · as telas</div>
+  <h2>Como cada regra aparece para o vendedor</h2>
+  <p class="leg">Tudo dentro do card do funil e da ficha do lead — sem tela nova para aprender.</p>
+
+  <div class="telas">
+
+    <!-- 4.1 relógio do contactado -->
+    <div class="tela">
+      <div class="cap">
+        <h3>① O relógio do Contactado</h3>
+        <p>Cada card ganha a barra dos 21 dias, com os dois marcos de renovação. A cor é o estado, não
+        decoração: verde dentro do prazo, âmbar nos dois últimos dias, vermelho vencido.</p>
+      </div>
+      <div class="app">
+        <div class="card">
+          <div class="lin1"><span class="nome">Camila Andrade</span><span class="pill ok">dia 4 de 7</span></div>
+          <div class="meta">Casamento · 180 convidados · festa em <b>14/03/2027</b></div>
+          <div class="prazo">
+            <div class="rot"><span>1º período</span><span>vence em <b>3 dias</b></span></div>
+            <div class="barra"><i class="v" style="width:19%"></i></div>
+            <div class="marcos"><span>0</span><span>7</span><span>14</span><span>21</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="lin1"><span class="nome">Rogério Mattos</span><span class="pill warn">dia 6 de 7 · avisado</span></div>
+          <div class="meta">Aniversário 15 anos · festa em <b>02/11/2026</b></div>
+          <div class="prazo">
+            <div class="rot"><span>1º período</span><span>vence <b>amanhã</b></span></div>
+            <div class="barra"><i class="v" style="width:24%"></i><i class="a" style="width:5%"></i></div>
+            <div class="marcos"><span>0</span><span>7</span><span>14</span><span>21</span></div>
+          </div>
+          <div class="btns"><button class="bt pri">Renovar +7 dias</button><button class="bt">Ir para Negociação</button><button class="bt gh">Ir para Follow-up</button></div>
+        </div>
+        <div class="card">
+          <div class="lin1"><span class="nome">Fernanda Lopes</span><span class="pill bad">21 dias · esgotado</span></div>
+          <div class="meta">Formatura · festa em <b>28/09/2026</b> · 2 renovações usadas</div>
+          <div class="prazo">
+            <div class="rot"><span>teto atingido</span><span><b>sem nova renovação</b></span></div>
+            <div class="barra"><i class="c" style="width:100%"></i></div>
+            <div class="marcos"><span>0</span><span>7</span><span>14</span><span>21</span></div>
+          </div>
+          <div class="btns"><button class="bt pri">Ir para Negociação</button><button class="bt pri">Ir para Follow-up</button><button class="bt trv">Renovar (bloqueado)</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4.2 justificativa -->
+    <div class="tela">
+      <div class="cap">
+        <h3>② A trava da renovação</h3>
+        <p>O botão "Renovar" abre a caixa. Enquanto ela estiver vazia, o botão de confirmar fica desligado —
+        a trava é o botão não funcionar, não um aviso que dá para ignorar.</p>
+      </div>
+      <div class="app">
+        <div class="just">
+          <h4>⚠️ Renovar Rogério Mattos por mais 7 dias</h4>
+          <div class="ta vazio">Por que este lead precisa de mais 7 dias em Contactado?</div>
+          <div class="aviso">Obrigatório. Sem justificativa a renovação não é liberada.</div>
+          <div class="btns"><button class="bt trv">Confirmar renovação</button><button class="bt gh">Cancelar</button></div>
+        </div>
+        <div class="just" style="border-color:var(--neon-borda);background:var(--neon-fundo)">
+          <h4 style="color:var(--neon-bright)">✓ Pronto para renovar</h4>
+          <div class="ta" style="border-color:var(--neon-borda);background:#0A1A12;color:var(--text)">Cliente pediu para
+          retomar depois do dia 20, quando fecha o orçamento do buffet. Combinado por áudio hoje.</div>
+          <div class="btns"><button class="bt pri">Confirmar renovação</button><button class="bt gh">Cancelar</button></div>
+        </div>
+        <div style="font-size:.74rem;color:var(--text-faint);line-height:1.6">
+          A justificativa vira linha no histórico do lead, com autor e data — igual ao que o adiamento de
+          follow-up já grava hoje. É o que permite o dono ver, depois, <b style="color:var(--ambar)">quem renova
+          por trabalho e quem renova por hábito</b>.
+        </div>
+      </div>
+    </div>
+
+    <!-- 4.3 follow-up D1 D3 D7 -->
+    <div class="tela">
+      <div class="cap">
+        <h3>③ Follow-up: as três tarefas que nascem sozinhas</h3>
+        <p>Ao entrar na coluna, D1, D3 e D7 já existem com data marcada. O vendedor não cria nada — ele só
+        faz, ou o prazo vence e o alerta sai.</p>
+      </div>
+      <div class="app">
+        <div class="card">
+          <div class="lin1"><span class="nome">Fernanda Lopes</span><span class="pill info">Follow-up · dia 4 de 7</span></div>
+          <div class="meta">Entrou em 07/09 vinda do Contactado (teto de 21 dias)</div>
+          <div class="tarefas">
+            <div class="tar feito"><span class="d">D1</span><div class="txt">1ª tentativa — WhatsApp<span>feita em 08/09 09:12 · sem resposta</span></div></div>
+            <div class="tar feito"><span class="d">D3</span><div class="txt">2ª tentativa — ligação<span>feita em 10/09 14:40 · não atendeu</span></div></div>
+            <div class="tar venc"><span class="d">D7</span><div class="txt">3ª e última tentativa<span>vence em 14/09 · depois dela, encerrar ou reativar</span></div></div>
+          </div>
+          <div class="btns"><button class="bt pri">Marcar D7 como feita</button><button class="bt">Cliente respondeu → Negociação</button></div>
+        </div>
+        <div class="card" style="border-color:var(--coral-borda)">
+          <div class="lin1"><span class="nome">Marcelo Tavares</span><span class="pill bad">D7 vencida · decidir</span></div>
+          <div class="meta">3 tentativas feitas, nenhuma resposta · 7 dias em Follow-up</div>
+          <div style="font-size:.75rem;color:var(--text-dim)">O sistema <b style="color:var(--text)">não move sozinho
+          para Perdido</b>: perder exige motivo, e só quem falou com o cliente sabe qual é.</div>
+          <div class="btns"><button class="bt pri">Encerrar como Perdido</button><button class="bt">Reativar em Contactado</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4.4 perdido -->
+    <div class="tela">
+      <div class="cap">
+        <h3>④ Perdido: o motivo é obrigatório</h3>
+        <p>Os dez motivos do documento. Hoje o sistema tem seis, e "Outro" não pede descrição — as duas coisas
+        mudam. <span class="pill ok" style="padding:.18rem .3rem">novo</span> marca o que ainda não existe.</p>
+      </div>
+      <div class="app">
+        <div class="card">
+          <div class="lin1"><span class="nome">Marcelo Tavares</span><span class="pill bad">encerrando</span></div>
+          <div class="meta">Por que este lead foi perdido?</div>
+          <div class="motivos">
+            <div class="mot on"><span class="b"></span>Não respondeu (3 tentativas)<span class="tagnovo">novo</span></div>
+            <div class="mot"><span class="b"></span>Preço acima do orçamento</div>
+            <div class="mot"><span class="b"></span>Fechou com concorrente<span class="tagnovo">novo</span></div>
+            <div class="mot"><span class="b"></span>Desistiu / cancelou o evento<span class="tagnovo">novo</span></div>
+            <div class="mot"><span class="b"></span>Data indisponível</div>
+            <div class="mot"><span class="b"></span>Localização / distância<span class="tagnovo">novo</span></div>
+            <div class="mot"><span class="b"></span>Estrutura não atendeu</div>
+            <div class="mot"><span class="b"></span>Condição de pagamento<span class="tagnovo">novo</span></div>
+            <div class="mot"><span class="b"></span>Evento adiado, sem nova data<span class="tagnovo">novo</span></div>
+            <div class="mot"><span class="b"></span>Outro — exige descrição</div>
+          </div>
+          <div style="font-size:.72rem;color:var(--text-faint);line-height:1.6">Salvos junto, sem ninguém digitar:
+          vendedor responsável · data da perda · etapa de origem · tempo total no funil · histórico das conversas
+          e das tentativas.</div>
+          <div class="btns"><button class="bt pri">Confirmar perda</button><button class="bt gh">Voltar</button></div>
+        </div>
+        <div class="card" style="border-color:var(--neon-borda);background:var(--neon-fundo)">
+          <div class="lin1"><span class="nome">Juliana Reis</span><span class="pill ok">reativado</span></div>
+          <div class="meta">Perdida em 12/08 (não respondeu) · <b>voltou a escrever hoje 10:24</b></div>
+          <div style="font-size:.75rem;color:var(--text-dim)">Mesmo cadastro, histórico inteiro preservado,
+          de volta em <b style="color:var(--text)">Contactado</b> com o relógio zerado. O vendedor foi avisado.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4.5 fechado sai -->
+    <div class="tela">
+      <div class="cap">
+        <h3>⑤ Fechado sai do quadro</h3>
+        <p>Ao entrar em Fechado o card deixa o Kanban na hora, e o evento aparece na Agenda pela data da festa.
+        O quadro fica só com quem ainda exige venda.</p>
+      </div>
+      <div class="app">
+        <div class="card" style="border-color:var(--neon-borda)">
+          <div class="lin1"><span class="nome">Bianca Oliveira</span><span class="pill ok">FECHADO</span></div>
+          <div class="meta">Contrato assinado em 11/09 · festa em <b>05/12/2026</b> · R$ 12.400</div>
+          <div style="font-size:.75rem;color:var(--text-dim)">Saiu do Kanban. Agora está em:</div>
+          <div class="btns"><button class="bt">📅 Agenda — 05/12</button><button class="bt">📊 Relatórios — receita contratada</button></div>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:11px;background:var(--surface-2);padding:.7rem .75rem">
+          <div style="font-size:.8rem;font-weight:600;margin-bottom:.5rem">📊 Relatórios · Eventos</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem;font-size:.73rem;color:var(--text-dim)">
+            <div>Eventos a realizar <b style="color:var(--text);float:right">9</b></div>
+            <div>Eventos realizados <b style="color:var(--text);float:right">3</b></div>
+            <div>Receita contratada <b style="color:var(--neon);float:right">R$ 74.100</b></div>
+            <div>Receita recebida <b style="color:var(--neon);float:right">R$ 21.800</b></div>
+            <div>A receber <b style="color:var(--ambar);float:right">R$ 52.300</b></div>
+            <div>Próximo evento <b style="color:var(--text);float:right">26/09</b></div>
+          </div>
+        </div>
+        <div style="font-size:.72rem;color:var(--text-faint);line-height:1.6">Os valores dependem de o vendedor
+        preencher o valor do orçamento. Hoje a conta tem <b style="color:var(--ambar)">21 orçamentos e nenhum
+        aprovado</b> — sem isso, esses seis números nascem zerados. Ver a melhoria 6.</div>
+      </div>
+    </div>
+
+    <!-- 4.6 aviso -->
+    <div class="tela">
+      <div class="cap">
+        <h3>⑥ O aviso do 6º e 7º dia</h3>
+        <p>Um push por dia, agrupado por vendedor. O documento pede alerta nos dias 6 e 7 de cada período;
+        agrupar é o que impede virar 31 notificações numa manhã.</p>
+      </div>
+      <div class="app">
+        <div style="border:1px solid var(--line);border-radius:11px;background:#0B120E;padding:.75rem .8rem">
+          <div style="font-size:.78rem;font-weight:600">⏱️ 7 leads vencem o prazo esta semana</div>
+          <div style="font-size:.72rem;color:var(--text-dim);margin-top:.25rem">Camila Andrade · Rogério Mattos ·
+          Fernanda Lopes · e mais 4 — toque para abrir a lista</div>
+          <div style="font-size:.66rem;color:var(--text-faint);margin-top:.4rem">para PEDRO YAN · hoje 08:00</div>
+        </div>
+        <div class="medida" style="border-radius:11px;padding:.75rem .8rem">
+          <p style="font-size:.78rem">Sem agrupar, o Pedro Yan receberia <b>31 avisos</b> em um dia só —
+          é quantos leads dele vencem os 21 dias dentro de uma semana. A Jacqueline, 28. O Thiago, 28.
+          <b>87 notificações numa manhã</b> desliga a função e o aplicativo junto.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ 5 -->
+<section class="sec">
+  <div class="k">5 · o dia 1</div>
+  <h2>O que acontece na manhã em que isso for ligado</h2>
+  <p class="leg">A parte que nenhum documento de fluxo prevê, e que é onde essas regras costumam morrer.</p>
+  <div class="medida">
+    <h3>75 leads estouram o teto no primeiro minuto</h3>
+    <div class="nums">
+      <div class="n"><b>75</b><span>vão exigir decisão imediata: Negociação ou Follow-up</span></div>
+      <div class="n"><b>51</b><span>são do Pedro Yan sozinho</span></div>
+      <div class="n"><b>225</b><span>tarefas D1/D3/D7 nasceriam de uma vez, se todos forem para Follow-up</span></div>
+      <div class="n ok"><b>24</b><span>desses 75 têm festa futura — esses valem a ligação hoje</span></div>
+    </div>
+    <p>Proposta: o teto de 21 dias entra com <b>carência de 5 dias úteis</b> para o que já está estourado.
+    A fila do mutirão nasce ordenada pela data da festa — quem tem festa perto primeiro — e o vendedor decide
+    em um toque por lead. Do 6º dia em diante a regra passa a valer cheia, para todo mundo.</p>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ 6 -->
+<section class="sec">
+  <div class="k">6 · melhorias</div>
+  <h2>O que eu mudaria no fluxo — e por quê</h2>
+  <p class="leg">Cada uma tem o número de produção que a motivou. Nenhuma entra sem aprovação; se disser não,
+  o documento é implementado como está escrito.</p>
+
+  <div class="melh">
+
+    <div class="m forte">
+      <div class="top"><span class="num">1</span><h4>A renovação é automática quando o cliente falou nas últimas 48h</h4><span class="pill warn">muda a regra 1</span></div>
+      <p>Mantém a justificativa obrigatória para lead <b>mudo</b> — que é o problema real que o documento
+      ataca — e dispensa o vendedor de justificar um lead com quem ele conversou ontem. A justificativa
+      continua obrigatória em todos os outros casos.</p>
+      <div class="porque">Hoje, dos 75 leads estourados, <b>zero</b> tiveram mensagem do cliente em 7 dias — então
+      esta exceção não abre buraco nenhum na regra agora. Mas <b>221 leads estão calados há mais de 3 dias</b> e
+      265 aguardam resposta do cliente: em qualquer semana há lead vivo chegando no dia 21, e obrigar o vendedor
+      a escrever justificativa para um cliente que respondeu ontem é o tipo de atrito que faz a equipe inventar
+      texto vazio — e aí a justificativa deixa de informar qualquer coisa ao dono.</div>
+    </div>
+
+    <div class="m">
+      <div class="top"><span class="num">2</span><h4>Negociação como uma coluna com o degrau no card</h4><span class="pill info">decisão sua</span></div>
+      <p>O documento lista visita domiciliar, proposta, sinal e contrato dentro de Negociação. Duas leituras
+      possíveis: quatro colunas, ou uma coluna com o degrau escrito no card. Recomendo a segunda — é o que
+      cumpre o pedido de "otimizar o espaço visual" (de 8 colunas para 5).</p>
+      <div class="porque">Os quatro degraus já têm gatilho automático funcionando na conta: compromisso na
+      agenda → visita, orçamento enviado → proposta, sinal pago → sinal, contrato assinado → fechado. Em 23 dias
+      foram <b>325 movimentos automáticos contra ~50 manuais</b> — o card avança sozinho, então não precisa de
+      coluna para alguém arrastar.</div>
+    </div>
+
+    <div class="m forte">
+      <div class="top"><span class="num">3</span><h4>D7 vencida não move sozinha para Perdido</h4><span class="pill warn">protege a regra 5</span></div>
+      <p>Se o sistema movesse sozinho, ele teria que inventar o motivo da perda — e o documento exige motivo
+      obrigatório. O lead com D7 vencida entra numa fila <b>"Encerrar ou reativar?"</b> com os dois botões, e
+      espera a decisão de quem falou com o cliente.</p>
+      <div class="porque">É a única forma de as duas regras do documento conviverem. Um motivo carimbado pelo
+      sistema poluiria exatamente o relatório de perdas que a regra 5 existe para alimentar.</div>
+    </div>
+
+    <div class="m">
+      <div class="top"><span class="num">4</span><h4>Reativar o perdido quando ele volta a escrever</h4><span class="pill ok">já é pedido, ainda não existe</span></div>
+      <p>O documento pede, e hoje <b>não acontece</b>: quando um lead perdido manda mensagem, a conversa já está
+      ligada ao cadastro, então o caminho de "lead novo" não roda e ele fica em Perdido para sempre. Vira um
+      gatilho novo, <code>cliente_voltou</code>, no mesmo motor que já move os outros quatro.</p>
+      <div class="porque">Os 19 leads em Perdido de hoje seriam cobertos imediatamente. O histórico é preservado
+      por construção — a reativação muda o status, nunca apaga linha.</div>
+    </div>
+
+    <div class="m">
+      <div class="top"><span class="num">5</span><h4>A festa perto manda no relógio dos 21 dias</h4><span class="pill roxa">acrescenta à regra 1</span></div>
+      <p>Um lead com festa em 15 dias e um com festa em 8 meses não podem ter o mesmo prazo. Quando a festa está
+      a 30 dias ou menos, o prazo do Contactado vence <b>na hora</b>, por mais novo que o lead seja.</p>
+      <div class="porque">Esse segundo relógio já está construído e rodando em ensaio. <b>130 leads</b> da conta
+      têm data de festa, e 24 dos 75 estourados têm festa futura. Sem ele, um lead que entrou ontem com festa em
+      duas semanas fica 21 dias tranquilo enquanto a data passa.</div>
+    </div>
+
+    <div class="m">
+      <div class="top"><span class="num">6</span><h4>Fechado só sai do quadro se a Agenda receber o evento</h4><span class="pill warn">protege a regra 6</span></div>
+      <p>Tirar a coluna sem a Agenda ser preenchida troca uma coluna cheia por uma agenda vazia. Ao entrar em
+      Fechado, o sistema cria o evento na Agenda a partir da data da festa que já está no cadastro.</p>
+      <div class="porque">Hoje a conta tem <b>86 eventos na agenda e só 14 ligados a um lead</b> — a ponte entre
+      as duas telas praticamente não existe. E <b>nenhum dos 21 orçamentos está aprovado</b>, então "receita
+      contratada" nasce em R$ 0 até alguém preencher valor. Sugiro que "Fechar" peça o valor na mesma tela.</div>
+    </div>
+
+    <div class="m">
+      <div class="top"><span class="num">7</span><h4>Follow-up D1/D3/D7 é configuração, não código novo</h4><span class="pill ok">barato</span></div>
+      <p>O motor de follow-up já roda com uma escada de toques regulável. Passar de <code>2,4,7,15</code> para
+      <code>1,3,7</code> é trocar um campo na tela da Régua — as tarefas, o alerta de atraso e o agrupamento do
+      push já existem e estão em ensaio na conta desde 07/09.</p>
+      <div class="porque">Economiza a maior parte da regra 4. O que falta construir de verdade é o teto de 21
+      dias, a justificativa, a lista de motivos e a saída do Fechado.</div>
+    </div>
+
+    <div class="m forte">
+      <div class="top"><span class="num">8</span><h4>Consertar o relógio da festa antes de ligar qualquer coisa</h4><span class="pill bad">defeito achado no ensaio</span></div>
+      <p>Um lead com festa próxima está gerando <b>um alerta a cada 2 minutos</b> — 442 em quatro dias, no ensaio.
+      A causa é o prazo ser recalculado como "agora" a cada ciclo, então o sistema nunca reconhece que já avisou.</p>
+      <div class="porque">Se estivesse ligado, esse único lead consumiria a cota diária inteira do vendedor em
+      30 minutos e <b>engoliria todos os follow-ups de verdade dele</b>, todo dia. Foi o ensaio que pegou — é
+      exatamente para isso que ele existe. Correção pequena e independente deste fluxo.</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ 6b -->
+<section class="sec">
+  <div class="k">7 · o nicho</div>
+  <h2>Isto não pode valer para toda conta</h2>
+  <p class="leg">Regra da casa (CLAUDE.md §6): toda tela segue o nicho, e o mockup mede em mais de uma conta
+  antes de aprovar. Este fluxo foi escrito olhando a Prime — então medi a segunda ponta.</p>
+  <div class="medida" style="border-color:var(--azul-borda);background:var(--azul-fundo)">
+    <h3 style="color:var(--azul)">A mesma regra na ZAQ (conta 3, serviço recorrente)</h3>
+    <div class="nums">
+      <div class="n" style="border-color:var(--azul-borda);background:#0C1A22"><b style="color:var(--azul)">242</b><span>leads ativos — mais que a Prime tem em Contactado</span></div>
+      <div class="n" style="border-color:var(--azul-borda);background:#0C1A22"><b style="color:var(--azul)">4</b><span>em Contactado: a coluna nem é usada lá</span></div>
+      <div class="n" style="border-color:var(--azul-borda);background:#0C1A22"><b style="color:var(--azul)">0</b><span>leads com data de festa — o segundo relógio não existe</span></div>
+      <div class="n" style="border-color:var(--azul-borda);background:#0C1A22"><b style="color:var(--azul)">0</b><span>visitas domiciliares: lá é reunião, e o funil é outro</span></div>
+    </div>
+    <p style="color:#CFE3EE">O fluxo inteiro fala <b>visita domiciliar</b>, <b>festa</b>, <b>data do evento</b> e
+    <b>contrato de locação</b>. Nada disso existe em quem vende mensalidade. Então ele nasce <b>ligado só no
+    perfil eventos</b> — o mesmo portão que a tela de Follow-up já usa hoje. A ZAQ e as outras quatro contas
+    não veem coluna nova, não recebem aviso e não ganham teto de 21 dias.</p>
+    <p style="color:#CFE3EE">O que é <b>genérico de verdade</b> e vale para qualquer nicho: o teto de dias na
+    coluna, a justificativa para renovar, o motivo obrigatório na perda e a reativação de quem volta a falar.
+    Esses quatro ficam construídos com o vocabulário vindo do perfil — quando o senhor quiser ligar na ZAQ,
+    "visita" vira "reunião" e o relógio da festa simplesmente não aparece, sem código novo.</p>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ 7 -->
+<section class="sec">
+  <div class="k">8 · antes de construir</div>
+  <h2>Quatro decisões que são suas</h2>
+  <div class="perg">
+    <h3>Preciso destas respostas para começar</h3>
+
+    <div class="q">
+      <h4>1. Negociação: uma coluna ou quatro?</h4>
+      <p>Visita domiciliar, proposta, pagamento de sinal e contrato — como eles aparecem no quadro?</p>
+      <div class="opc">
+        <span class="o rec">Uma coluna, degrau no card (5 colunas no total)</span>
+        <span class="o">Quatro colunas (8 no total, como hoje)</span>
+      </div>
+    </div>
+
+    <div class="q">
+      <h4>2. O relógio dos 21 dias conta desde quando?</h4>
+      <p>O histórico de movimentos só existe desde 19/08. Para os leads mais antigos não há registro de quando
+      entraram em Contactado.</p>
+      <div class="opc">
+        <span class="o rec">Desde a entrada na coluna; quem não tem registro conta desde 19/08</span>
+        <span class="o">Zera para todo mundo no dia em que ligar</span>
+      </div>
+    </div>
+
+    <div class="q">
+      <h4>3. Os 75 leads já estourados entram como?</h4>
+      <p>Eles precisam de decisão assim que a regra ligar.</p>
+      <div class="opc">
+        <span class="o rec">Carência de 5 dias úteis, fila ordenada pela festa mais próxima</span>
+        <span class="o">Valem a regra no ato, todos de uma vez</span>
+        <span class="o">Todos direto para Follow-up (D1/D3/D7 nascem sozinhas)</span>
+      </div>
+    </div>
+
+    <div class="q">
+      <h4>4. Ligo tudo de uma vez ou em ensaio primeiro?</h4>
+      <p>Igual ao que já foi feito com os gatilhos e com o follow-up: o modo ensaio calcula tudo e mostra o
+      volume, sem mandar um aviso sequer.</p>
+      <div class="opc">
+        <span class="o rec">Ensaio por uma semana, depois ligo com os números na mão</span>
+        <span class="o">Ligado direto</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="rod">
+  <b>Mockup para aprovação.</b> Nada foi implementado. Fonte do pedido:
+  FLUXO_FINAL_FUNIL_PRIME_EVENTOS_DESENVOLVEDOR_V3. Números consultados na produção (conta 34, PRIME EVENTOS)
+  em 11/09/2026, somente leitura: 316 leads ativos, 275 em Contactado, 394 movimentos de funil registrados
+  desde 19/08, 1.509 avisos de ensaio do follow-up desde 07/09.
+</div>
+
+</div>
+</body>
+</html>

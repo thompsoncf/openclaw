@@ -23,10 +23,13 @@ a coluna ou marcar como lido NÃO encerram alerta nenhum: o fato que gerou o avi
 continua de pé.
 
 O SEGUNDO RELÓGIO É DO NICHO (CLAUDE.md §6)
-Em eventos a data da festa manda: festa em até `fu_festa_dias` sem proposta vence
-HOJE, por mais recente que tenha sido a última conversa. Quem não vende festa
-(perfil recorrente) não tem esse relógio — e nunca vê a palavra. O perfil vem de
-finance/raio_x_perfil, os mesmos três de sempre.
+Em eventos a data da festa manda: festa em até `fu_festa_dias` sem proposta já está
+vencida, por mais recente que tenha sido a última conversa. O prazo dela é o
+instante em que a festa ENTROU nessa janela (`_janela_da_festa`), nunca "agora" —
+"agora" muda a cada passada do poller, e prazo que muda é fato novo, que fura o
+dedup e cobra de novo sem parar. Quem não vende festa (perfil recorrente) não tem
+esse relógio — e nunca vê a palavra. O perfil vem de finance/raio_x_perfil, os
+mesmos três de sempre.
 
 OS QUATRO DEGRAUS DA COBRANÇA
     venc  no vencimento          → o vendedor
@@ -45,11 +48,15 @@ calcula tudo e grava com `simulado=true`, sem mandar um push sequer.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from finance import funil_regua as fr
 
 _log = logging.getLogger("openclaw.follow_up")
+
+#: Brasília é -3 fixo no produto inteiro (o país não tem horário de verão desde
+#: 2019). Mesma convenção de finance/funil_regua e do painel.
+_UTC_BR = timedelta(hours=-3)
 
 #: Perfis que já ganharam a tela. O motor é do perfil (o vocabulário e o relógio
 #: da festa saem dele), mas a ENTREGA foi combinada com o dono em duas etapas:
@@ -146,8 +153,34 @@ def prazo_automatico(*, status: str, ult_in, ult_out, criado_em, tentativas: int
     if tem_data and evento_em and status != "proposta":
         faltam = (evento_em - agora.date()).days
         if 0 <= faltam <= cfg["fu_festa_dias"] and prazo > agora:
-            prazo, acao = agora, "mandar proposta — a data está chegando"
+            prazo, acao = _janela_da_festa(evento_em, criado_em, cfg), "mandar proposta — a data está chegando"
     return prazo, acao
+
+
+def _janela_da_festa(evento_em, criado_em, cfg: dict) -> datetime:
+    """Quando a festa ENTROU na janela que aperta o prazo — um fato do lead, não do
+    relógio de quem está perguntando.
+
+    ISTO ERA `agora`, E `agora` NÃO É UM FATO. O dedup do aviso é por `ref_em`, que
+    é o prazo; com o prazo valendo "agora", cada passada do poller inventava um fato
+    novo e o aviso saía DE NOVO. Medido no ensaio da conta 34 em 11/09/2026: o lead
+    977 (festa em 26/09) acumulou 442 avisos em quatro dias, 441 com `ref_em`
+    distinto — um por ciclo, dentro da janela de atendimento. Ligado, esse lead
+    sozinho comeria a cota diária do vendedor (`fu_teto_dia`) em meia hora e
+    represaria todo o follow-up de verdade dele, todo dia.
+
+    A âncora é `evento_em - fu_festa_dias`, às 9h de Brasília — determinística a
+    partir do cadastro, então duas passadas seguidas devolvem o mesmo instante e o
+    dedup volta a funcionar. Nunca antes de o lead existir: com a festa já dentro da
+    janela no dia do cadastro, a abertura ficaria no passado e o lead nasceria
+    "atrasado há 20 dias", número que nunca foi verdade.
+
+    9h e não meia-noite porque prazo de madrugada só serve pra vencer antes de
+    alguém acordar — é a mesma hora que o reagendamento de um toque já usa.
+    """
+    dia = evento_em - timedelta(days=int(cfg["fu_festa_dias"]))
+    abertura = datetime.combine(dia, time(9, 0)).replace(tzinfo=timezone.utc) - _UTC_BR
+    return max(abertura, criado_em) if criado_em else abertura
 
 
 def estado_de(prazo: datetime | None, ult: datetime | None, agora: datetime,

@@ -251,12 +251,48 @@ def test_a_festa_perto_aperta_o_prazo_so_de_quem_vende_festa():
     festa = AGORA.date() + timedelta(days=12)
     p_ev, a_ev = fu.prazo_automatico(status="contatado", ult_in=None, ult_out=out, criado_em=None,
                                      tentativas=1, evento_em=festa, cfg=_cfg(), tem_data=True, agora=AGORA)
-    assert p_ev == AGORA and "data" in a_ev
+    # apertou: já vencido (a festa entrou na janela há 18 dias), e não o prazo folgado
+    assert p_ev < AGORA and p_ev != out + timedelta(days=2) and "data" in a_ev
     p_rc, a_rc = fu.prazo_automatico(status="contatado", ult_in=None, ult_out=out, criado_em=None,
                                      tentativas=1, evento_em=festa, cfg=_cfg(), tem_data=False, agora=AGORA)
     assert p_rc == out + timedelta(days=2)
     for palavra in ("festa", "data", "convidados", "visita"):
         assert palavra not in a_rc
+
+
+def test_o_prazo_da_festa_nao_muda_de_uma_passada_pra_outra():
+    """O DEFEITO DE 11/09/2026, e o teste que faltava pra pegá-lo.
+
+    O ramo da festa devolvia `agora` como prazo. Como o dedup do aviso é por
+    `ref_em` (= o prazo), cada ciclo do poller inventava um fato novo e o aviso saía
+    outra vez: no ensaio da conta 34 o lead 977 acumulou 442 avisos em quatro dias,
+    441 com `ref_em` distinto. Ligado, ele sozinho comeria a cota diária do vendedor
+    em meia hora, todo dia, represando o follow-up de verdade.
+
+    O teste antigo (`..._aperta_o_prazo_...`) passava com o defeito de pé: ele
+    chamava a função UMA vez, e um relógio errado só aparece quando se pergunta duas.
+    """
+    out = AGORA - timedelta(hours=2)
+    festa = AGORA.date() + timedelta(days=12)
+    prazos = {fu.prazo_automatico(status="contatado", ult_in=None, ult_out=out,
+                                  criado_em=AGORA - timedelta(days=40), tentativas=1,
+                                  evento_em=festa, cfg=_cfg(), tem_data=True,
+                                  agora=AGORA + timedelta(minutes=m))[0]
+              for m in (0, 2, 4, 120)}
+    assert len(prazos) == 1, f"o prazo da festa mudou entre passadas: {sorted(prazos)}"
+
+
+def test_a_janela_da_festa_nao_comeca_antes_de_o_lead_existir():
+    """Lead cadastrado com a festa JÁ dentro da janela: a abertura da janela está no
+    passado dele, e ancorar ali faria o lead nascer "atrasado há 20 dias" — número
+    que nunca foi verdade. O relógio começa quando o lead chegou."""
+    nasceu = AGORA - timedelta(hours=3)
+    # a janela abriu há 25 dias (festa em 5, `fu_festa_dias` 30); o lead tem 3 horas
+    p, _ = fu.prazo_automatico(status="contatado", ult_in=None, ult_out=AGORA - timedelta(hours=1),
+                               criado_em=nasceu, tentativas=1,
+                               evento_em=AGORA.date() + timedelta(days=5),
+                               cfg=_cfg(), tem_data=True, agora=AGORA)
+    assert p == nasceu
 
 
 def test_festa_longe_nao_aperta_nada():

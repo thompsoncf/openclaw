@@ -45,6 +45,32 @@
  *
  * Env: DATABASE_URL, WA_QR_SHARED_SECRET, APP_URL, PORT (default 3000).
  */
+// ====================== QUEM ESTE PROCESSO É, decidido ANTES de tudo ==========
+//
+// O wa-qr virou dois processos (ver supervisor.js): um SUPERVISOR que abre a porta
+// e responde /saude sem nunca congelar, e um WORKER que é este arquivo inteiro,
+// com o Baileys, numa porta interna.
+//
+// A decisão mora AQUI EM CIMA, antes de qualquer require pesado, por dois motivos:
+//
+//   1. Sem mexer no Render. O Start Command continua `node server.js`. Rodando
+//      direto e sem WA_QR_WORKER, este arquivo delega pro supervisor e para por
+//      aqui; o supervisor dá fork nele de novo com WA_QR_WORKER=1, e aí ele é o
+//      serviço de sempre.
+//   2. O supervisor não pode carregar o Baileys. Se este `return` viesse depois
+//      dos requires, o processo que precisa ficar leve subiria com a biblioteca
+//      inteira na memória à toa.
+//
+// require()-ado por teste (`require.main !== module`) nada disto vale: os 24
+// teste-*.js seguem importando o serviço como sempre importaram.
+//
+// PRA VOLTAR ATRÁS: `WA_QR_SUPERVISOR=0` no ambiente do Render devolve o
+// comportamento de antes — um processo só — sem tocar no Start Command.
+if (require.main === module && !process.env.WA_QR_WORKER && process.env.WA_QR_SUPERVISOR !== '0') {
+  require('./supervisor').rodar()
+  return
+}
+
 const http = require('node:http')
 const { Pool } = require('pg')
 const pino = require('pino')

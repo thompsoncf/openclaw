@@ -91,6 +91,8 @@ def pool():
         c.execute((MIG / "230_funil_teto_da_etapa.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "232_funil_saidas_da_etapa.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "233_funil_toques_da_etapa.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "235_motivos_de_perda_da_conta.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "236_reativar_o_lead_que_volta.sql").read_text(encoding="utf-8"))
         for ch, o in _ETAPAS:
             c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem)
                          values (%s,%s,%s,%s)""", (CONTA, ch, ch.capitalize(), o))

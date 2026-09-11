@@ -1295,14 +1295,33 @@ def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict)
     return {"ok": True}
 
 
-def fechar(pool, conta_id: int, membro_id: int, lead_id: int, tipo: str, motivo: str = "") -> dict:
+def fechar(pool, conta_id: int, membro_id: int, lead_id: int, tipo: str, motivo: str = "",
+           descricao: str = "") -> dict:
     """Fecha o lead: 'ganho' ou 'perdido'. Em perdido, grava o motivo em obs (timeline).
-    Revalida posse."""
+    Revalida posse.
+
+    Quando a etapa de destino EXIGE motivo (migração 235), a recusa vem antes de
+    qualquer escrita e devolve a lista da conta pra tela montar as opções. Perguntar
+    antes de mexer no lead é o ponto: fechar e só então descobrir que falta o motivo
+    deixaria o lead em Perdido sem ninguém ter dito por quê — o "limpar o funil" que
+    a regra 5 existe pra impedir.
+    """
     if tipo not in ("ganho", "perdido"):
         return {"ok": False, "erro": "tipo"}
     with pool.connection() as c:
         if not _posse(c, conta_id, membro_id, lead_id):
             return {"ok": False, "erro": "escopo"}
+        from finance import funil_perda as _fp
+        from finance import funil_regua as _fr
+        perfil_chave = _fr.perfil_da_conta(c, conta_id)
+        val = _fp.validar(c, conta_id, etapa_destino=tipo, motivo=motivo,
+                          descricao=descricao, perfil_chave=perfil_chave)
+        if not val["ok"]:
+            lista = [{"chave": m["chave"], "rotulo": m["rotulo"],
+                      "exige_descricao": m["exige_descricao"]}
+                     for m in _fp.motivos(c, conta_id, perfil_chave)]
+            c.commit()          # a semente da lista, se foi a 1ª vez, fica gravada
+            return {"ok": False, "erro": val["erro"], "motivos": lista}
         antes = c.execute("select status from prospeccao where id=%s and conta_id=%s",
                           (lead_id, conta_id)).fetchone()
         c.execute("update prospeccao set status=%s, atualizado_em=now() "
@@ -1312,8 +1331,14 @@ def fechar(pool, conta_id: int, membro_id: int, lead_id: int, tipo: str, motivo:
         # check da migração 209): é o que o Raio-X do dono agrega em "por que
         # perdeu". Texto solto que não é chave continua só na timeline. Savepoint
         # porque a coluna nasceu na 209 e fechar o lead não pode depender dela.
+        # A CHAVE VALE CONTRA A LISTA DA CONTA (migração 235), e não mais contra a
+        # constante do código: um motivo que o dono criou hoje não estaria lá, e
+        # seria descartado em silêncio bem na hora em que ele quis usá-lo.
+        # `MOTIVOS_TODOS` segue no fallback pro histórico de quem foi perdido antes.
         from finance.raio_x_perfil import MOTIVOS_TODOS, rotulo_motivo
-        chave = motivo if motivo in dict(MOTIVOS_TODOS) else None
+        _da_conta = {m["chave"]: m["rotulo"] for m in _fp.motivos(c, conta_id, perfil_chave,
+                                                                 so_ativos=False)}
+        chave = motivo if (motivo in _da_conta or motivo in dict(MOTIVOS_TODOS)) else None
         try:
             with c.transaction():
                 c.execute("update prospeccao set perda_motivo=%s where id=%s and conta_id=%s",
@@ -1331,7 +1356,10 @@ def fechar(pool, conta_id: int, membro_id: int, lead_id: int, tipo: str, motivo:
                 _le.sair(pool, conta_id, lead_id, "desistiu")
         except Exception:  # noqa: BLE001 — a lista nunca segura o fechamento
             pass
-        texto_motivo = rotulo_motivo(chave) if chave else (motivo or "sem motivo")
+        if tipo == "perdido":
+            _fp.registrar(c, conta_id, lead_id, motivo=chave or "", descricao=descricao,
+                          etapa_origem=antes[0] if antes else None)
+        texto_motivo = (_da_conta.get(chave) or rotulo_motivo(chave)) if chave else (motivo or "sem motivo")
         try:
             c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, resultado, descricao)
                          values (%s,%s,'nota',%s,%s)""",

@@ -25,12 +25,17 @@ MIG = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, status text default 'novo',
   estagio text default 'lead', vendedor_id bigint, criado_em timestamptz default now());
+create table funil_motivos_perda (id bigserial primary key, conta_id bigint,
+  chave text, rotulo text, ordem int default 0, ativo boolean default true,
+  exige_descricao boolean default false, criado_em timestamptz default now(),
+  constraint uq_fmp unique (conta_id, chave));
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
   ordem int default 0, fixa boolean default false, fase text default 'venda',
   prazo_min integer, gatilho text, gatilho_ativo boolean default false,
   teto_dias integer, renovacoes_max integer not null default 0,
   exige_justificativa boolean not null default true, renova_sozinho_h integer,
   saidas_permitidas text, toques_dias text,
+  exige_motivo boolean not null default false, reativa_para text,
   criado_em timestamptz default now(), constraint uq_fe unique (conta_id, chave));
 create table funil_regua (conta_id bigint primary key,
   gatilhos_modo text default 'off', cobranca_modo text default 'off',

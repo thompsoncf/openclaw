@@ -59,6 +59,10 @@ create table mensagens (id bigserial primary key, conversa_id bigint, canal text
 -- as três escritas de status do Cockpit passavam nos testes sem registrar nada.
 create table funil_movimentos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   de text, para text, motivo text, membro_id bigint, criado_em timestamptz default now());
+create table funil_motivos_perda (id bigserial primary key, conta_id bigint,
+  chave text, rotulo text, ordem int default 0, ativo boolean default true,
+  exige_descricao boolean default false, criado_em timestamptz default now(),
+  constraint uq_fmp unique (conta_id, chave));
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
   -- `fase` (migração 177) é o que os painéis leem pra saber o que conta como venda
   -- ganha; sem a coluna aqui, toda consulta do cockpit estoura com UndefinedColumn
@@ -67,6 +71,7 @@ create table funil_etapas (id bigserial primary key, conta_id bigint, chave text
   teto_dias integer, renovacoes_max integer not null default 0,
   exige_justificativa boolean not null default true, renova_sozinho_h integer,
   saidas_permitidas text, toques_dias text,
+  exige_motivo boolean not null default false, reativa_para text,
   unique (conta_id, chave));
 create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint, membro_id bigint,
   tipo text, resultado text, descricao text, criado_em timestamptz default now());
@@ -122,7 +127,11 @@ def pool():
         c.execute("alter table contas add column criado_em timestamptz not null default now()")
         for m in ("174_novidades.sql", "184_novidade_voz_e_porta_fechada.sql",
                   "199_novidades_pra_quem.sql", "207_raio_x.sql", "209_raio_x_dono.sql",
-                  "213_perda_motivo_por_perfil.sql"):
+                  "213_perda_motivo_por_perfil.sql",
+                  # a 235 tira o CHECK dos sete motivos e cria as colunas da perda:
+                  # aplicar a migração DE VERDADE é o que faz o teste perceber quando
+                  # ela não chegou em produção
+                  "235_motivos_de_perda_da_conta.sql"):
             c.execute((_MIG / m).read_text(encoding="utf-8"))
         # `orcamentos` com TODAS as colunas do app (o Raio-X lê status, aprovada_em,
         # sinal_pago_em, primeiro_ano_centavos; criar_orcamento grava dezenas)
@@ -1473,7 +1482,15 @@ def test_perdido_com_motivo_da_lista_grava_a_chave_e_o_rotulo_na_timeline(pool):
         assert rows == {a: "achou_caro", b: None, g: None}
         desc = {r[0]: r[1] for r in c.execute(
             "select prospeccao_id, descricao from prospeccao_atividades where prospeccao_id = any(%s)", ([a, b],)).fetchall()}
-    assert desc[a] == "Perdido — Achou caro" and desc[b] == "Perdido — texto solto"
+    # O RÓTULO VEM DA LISTA DA CONTA (migração 235), não mais da constante do código:
+    # a chave `achou_caro` continua a mesma — é ela que está gravada no histórico de
+    # quem já foi perdido —, mas o texto que a timeline mostra é o que a empresa
+    # escolheu chamar. Aqui a conta não tem nicho, então caiu no perfil recorrente.
+    from finance import funil_perda as _fp
+    with pool.connection() as c2:
+        rot = {m["chave"]: m["rotulo"] for m in _fp.motivos(c2, conta, "recorrente")}
+    assert desc[a] == f"Perdido — {rot['achou_caro']}"
+    assert desc[b] == "Perdido — texto solto", "texto solto continua só na timeline"
 
 
 def test_a_folha_do_lead_oferece_os_seis_motivos_do_perfil(pool, monkeypatch):

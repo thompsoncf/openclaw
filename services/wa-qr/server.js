@@ -75,10 +75,48 @@ const http = require('node:http')
 const { Pool } = require('pg')
 const pino = require('pino')
 const QRCode = require('qrcode')
-const makeWASocket = require('@whiskeysockets/baileys').default
+// ============================ QUAL BAILEYS este worker carrega (Fase 4) ==========
+//
+// Dois Baileys convivem no node_modules: o 6.7.24 de sempre em
+// `@whiskeysockets/baileys`, e o 7.0.0-rc14 sob o apelido `baileys7`
+// (package.json: "baileys7": "npm:@whiskeysockets/baileys@7.0.0-rc14"). Cada
+// processo carrega UM — quem escolhe é o supervisor, por conta, com WA_QR_BAILEYS=7
+// nas contas listadas em WA_QR_BAILEYS7_CONTAS. Sem a variável, nada muda pra
+// ninguém: é o 6.7.24, byte a byte como antes.
+//
+// A Fase 4 existe pra medir o v7 num chip de teste por uma semana, contando
+// quedas por código, antes de migrar conta por conta. Lido no código do rc14 (o
+// guia de migração fica atrás de proxy): os nove símbolos que usamos existem com
+// os mesmos nomes, as doze opções do makeWASocket também, os sete eventos e o
+// `CB:message` cru também, e o cofre é genérico por tipo (os tipos novos —
+// lid-mapping, device-list, tctoken, identity-key — viram linhas novas, sem
+// migração). O que muda de verdade são dois pontos, marcados abaixo com "v7:".
+//
+// O rc14 é ESM. `require()` de ESM funciona sem flag do Node 22.12 em diante (e
+// do 20.19); num Node mais velho ele lança ERR_REQUIRE_ESM. Aí este worker sai com
+// código 3 — distinto de qualquer outra morte — e o supervisor sobe a conta de
+// volta no 6.7.24, gravando isso no wa_qr_log. Um Node velho no Render nunca
+// deixa a conta no chão por causa da fase.
+const BAILEYS_VERSAO = process.env.WA_QR_BAILEYS === '7' ? 7 : 6
+let baileys
+try {
+  baileys = require(BAILEYS_VERSAO === 7 ? 'baileys7' : '@whiskeysockets/baileys')
+} catch (e) {
+  // sem o pino ainda: o logger nasce mais abaixo, e esta linha tem que sair mesmo
+  // que nada mais suba
+  console.error(JSON.stringify({ level: 50, msg: 'não consegui carregar o Baileys ' + BAILEYS_VERSAO +
+    ' — saindo com código 3 pro supervisor voltar esta conta pro 6.7.24', e: String(e && e.code || e),
+    node: process.version }))
+  process.exit(3)
+}
+const makeWASocket = baileys.default
 const { DisconnectReason, makeCacheableSignalKeyStore, fetchLatestBaileysVersion, proto, BufferJSON,
-  normalizeMessageContent, downloadMediaMessage, jidNormalizedUser } = require('@whiskeysockets/baileys')
-const TIPO_HIST = proto.Message.HistorySyncNotification.HistorySyncType
+  normalizeMessageContent, downloadMediaMessage, jidNormalizedUser } = baileys
+// v7: o enum saiu de proto.Message.HistorySyncNotification e foi pra proto.HistorySync.
+// Sem o fallback o worker v7 morria nesta linha, antes de abrir porta.
+const TIPO_HIST = (proto.Message.HistorySyncNotification && proto.Message.HistorySyncNotification.HistorySyncType) ||
+  (proto.HistorySync && proto.HistorySync.HistorySyncType)
+if (!TIPO_HIST) { console.error('HistorySyncType não encontrado no proto do Baileys ' + BAILEYS_VERSAO); process.exit(3) }
 const { useDbAuthState, MARCA_CHAVE_FALTANDO } = require('./auth-db')
 const { criarTrava } = require('./sessao-lock')
 
@@ -2308,14 +2346,31 @@ function textoDaMsg (m) {
 // Mensagem de HISTÓRICO (messaging-history.set) não tem senderPn — esse campo só
 // existe no decode de mensagem ao vivo — então cai pro mapa lid->jid construído a
 // partir da lista de contatos que vem junto no próprio histórico (atualizarLidMap).
+// v7: o Baileys 7 refez o par código->número. O `senderPn` do 6.7.24 não existe
+// mais; em vez dele a key traz `remoteJidAlt` (e `participantAlt` em grupo) com o
+// OUTRO endereço da mesma pessoa, mais `addressingMode` ('lid' | 'pn'). Cuidado
+// com a direção: quando o chat é @lid, o Alt é o telefone; quando o chat já é
+// telefone, o Alt é o @lid — devolver o Alt sem olhar seria trocar um número por
+// um código. Esta função só devolve o Alt quando ele é telefone e o principal é
+// código. No 6.7.24 os campos não existem e ela devolve null: caminho inalterado.
+function numeroAlternativo (key) {
+  if (!key) return null
+  if (key.senderPn) return key.senderPn                       // 6.7.24
+  const principal = key.remoteJid || ''
+  const alt = key.remoteJidAlt || ''
+  if (principal.endsWith('@lid') && alt.endsWith('@s.whatsapp.net')) return alt   // rc14
+  return null
+}
+
 function numeroReal (m, contaId) {
   const remoteJid = (m.key && m.key.remoteJid) || ''
-  if (m.key && m.key.senderPn) {
-    // chat @lid + senderPn na mesma mensagem = par código->número de graça.
+  const pn = numeroAlternativo(m.key)
+  if (pn) {
+    // chat @lid + número na mesma mensagem = par código->número de graça.
     // Aprende aqui pra que o ECO de uma resposta mandada pelo celular pra esse
     // mesmo chat (que só traz o @lid) consiga ser resolvido depois.
-    aprenderLid(contaId, remoteJid, m.key.senderPn)
-    return m.key.senderPn
+    aprenderLid(contaId, remoteJid, pn)
+    return pn
   }
   if (remoteJid.endsWith('@lid')) {
     const real = lidMaps.get(contaId) && lidMaps.get(contaId).get(remoteJid)
@@ -2331,6 +2386,11 @@ function numeroReal (m, contaId) {
 function numeroDoChat (m, contaId) {
   const remoteJid = (m.key && m.key.remoteJid) || ''
   if (remoteJid.endsWith('@lid')) {
+    // v7: no eco de saída o remoteJidAlt é o telefone do DESTINATÁRIO (o Alt é do
+    // chat, não do remetente) — serve aqui, e ensina o mapa de quebra. No 6.7.24
+    // o senderPn seria o NOSSO número, e por isso numeroAlternativo não o usa aqui.
+    const alt = (m.key && m.key.remoteJidAlt) || ''
+    if (alt.endsWith('@s.whatsapp.net')) { aprenderLid(contaId, remoteJid, alt); return alt }
     const real = lidMaps.get(contaId) && lidMaps.get(contaId).get(remoteJid)
     if (real) return real
   }
@@ -4349,6 +4409,7 @@ servidor.listen(PORT, () => {
 
 // exposto só pro teste — ver o bloco acima
 module.exports = {
+  BAILEYS_VERSAO, numeroAlternativo, TIPO_HIST,
   contasDesteWorker, MINHA_CONTA, contarContatoComFalha, contatosComFalha, DISJUNTOR_MIN_CONTATOS,
   contarQuedaPresa, esquecerQuedasPresas, quedasPresas, PRESA_AVISA_EM,
   comecouAPartida, terminouAPartida, quemEstaSubindo, partidas, usuariosDoPeer, agendaTrancadaPorChave, VALVULA_CHAVE_FALTANDO_MS, MARCA_CHAVE_FALTANDO,

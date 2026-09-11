@@ -286,12 +286,62 @@ function base (extra) {
     process.exit = exitReal
   }
 
+  // --- 10b. Fase 4: o v7 devolve a conta pro v6 sozinho ---------------------
+  //
+  // Esta é a rede de proteção do chip de teste, e por isso é testada por
+  // COMPORTAMENTO, não só por leitura do fonte: se ela não funcionar, um rc14 que
+  // não sobe deixa uma conta de cliente no chão até alguém perceber.
+  console.log('\nFase 4: o Baileys 7 não pode custar um chip:')
+  filhos.length = 0
+  const sup10b = iniciarSupervisor(base({ baileys7Contas: '23', baileys7QuedasMax: 3 }))
+  await sup10b.reconciliar([23, 34]); await dorme(20)
+  const w23 = filhos.find((f) => f.env.WA_QR_CONTA === '23')
+  const w34b = filhos.find((f) => f.env.WA_QR_CONTA === '34')
+  conferir(w23 && w23.env.WA_QR_BAILEYS === '7', 'a conta da lista sobe com WA_QR_BAILEYS=7')
+  conferir(w34b && w34b.env.WA_QR_BAILEYS === '6', 'a vizinha continua no 6 — o teste não encosta nela')
+
+  // código 3 = não carregou a biblioteca (Node sem require de ESM, engine-requirements).
+  // Insistir seria repetir o mesmo erro pra sempre: volta na PRIMEIRA vez.
+  w23.morrer(3, null); await dorme(40)
+  const w23b = filhos.filter((f) => f.env.WA_QR_CONTA === '23')[1]
+  conferir(!!w23b, 'worker que morre é substituído')
+  conferir(w23b.env.WA_QR_BAILEYS === '6',
+    'código 3 devolve a conta pro 6.7.24 JÁ NA PRIMEIRA queda — não adianta insistir')
+  desligar(sup10b)
+
+  // qualquer outra morte gasta uma tentativa; esgotadas, volta também
+  filhos.length = 0
+  const sup10c = iniciarSupervisor(base({ baileys7Contas: '23', baileys7QuedasMax: 3 }))
+  await sup10c.reconciliar([23]); await dorme(20)
+  const versoes = []
+  for (let i = 0; i < 3; i++) {
+    const atual = sup10c.estado.workers.get(23).filho
+    versoes.push(atual.env.WA_QR_BAILEYS)
+    atual.morrer(1, null)                 // morte comum, não código 3
+    await dorme(40)
+  }
+  versoes.push(sup10c.estado.workers.get(23).filho.env.WA_QR_BAILEYS)
+  conferir(versoes.slice(0, 3).join(',') === '7,7,7', 'morte comum não desiste do v7 de primeira')
+  conferir(versoes[3] === '6', 'mas na terceira a conta volta pro 6.7.24')
+  conferir(sup10c.estado.workers.get(23).baileys === 6, 'e fica no 6 — o caminho automático não volta pro 7')
+  desligar(sup10c)
+
   // --- 11. a trava de leitura do fonte --------------------------------------
   console.log('\nO código faz o que este teste diz:')
   const src = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8')
   conferir(/if \(require\.main === module && !process\.env\.WA_QR_WORKER && process\.env\.WA_QR_SUPERVISOR !== '0'\) \{\s*\n\s*require\('\.\/supervisor'\)\.rodar\(\)\s*\n\s*return\s*\n\s*\}/.test(src),
     'server.js delega pro supervisor e PARA ali, chamando rodar() — importar não basta')
-  conferir(src.indexOf("require('./supervisor')") < src.indexOf("require('@whiskeysockets/baileys')"),
+  // Medido por POSIÇÃO no arquivo, não por regex de uma forma: se a delegação
+  // vier depois, o supervisor — o processo que precisa ficar leve e nunca congelar —
+  // sobe carregando a biblioteca inteira à toa.
+  //
+  // A âncora é `require(BAILEYS_VERSAO ===` porque a Fase 4 tirou o require
+  // literal: agora o worker escolhe entre '@whiskeysockets/baileys' e 'baileys7'
+  // num ternário. A primeira versão desta trava procurava o literal, não achava,
+  // e indexOf devolvia -1 — a asserção acusava falha num código correto.
+  const posDelegacao = src.indexOf("require('./supervisor')")
+  const posBaileys = src.indexOf('require(BAILEYS_VERSAO ===')
+  conferir(posDelegacao >= 0 && posBaileys > posDelegacao,
     'e a delegação vem antes do Baileys, medido por posição no arquivo')
   conferir(/const MINHA_CONTA = parseInt\(process\.env\.WA_QR_CONTA/.test(src),
     'o worker lê WA_QR_CONTA')

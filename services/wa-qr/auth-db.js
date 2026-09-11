@@ -18,7 +18,11 @@
 // exceção é RELANÇADA — engolir aqui faria o commit do Baileys "dar certo" e a
 // chave se perderia de vez, sem nem o retry dele.
 
-const { initAuthCreds, BufferJSON, proto } = require('@whiskeysockets/baileys')
+// A MESMA biblioteca do worker (ver o topo do server.js). Este módulo cria as
+// credenciais iniciais (initAuthCreds) e monta objetos proto pra entregar ao
+// socket; misturar o proto/initAuthCreds de uma versão com o socket de outra é
+// pedir um bug silencioso na hora do pareamento.
+const { initAuthCreds, BufferJSON, proto } = require(process.env.WA_QR_BAILEYS === '7' ? 'baileys7' : '@whiskeysockets/baileys')
 
 const TIPO_AGENDA = 'app-state-sync-key'
 const ehChaveDaAgenda = (arquivo) => String(arquivo || '').startsWith(TIPO_AGENDA)

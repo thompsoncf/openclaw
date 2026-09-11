@@ -119,6 +119,24 @@ const HEAP_MIN_MB = parseInt(process.env.WA_QR_HEAP_MIN_MB || '384', 10)
 // segredo vazado não pode virar fork-bomb).
 const MAX_WORKERS = parseInt(process.env.WA_QR_MAX_WORKERS || '40', 10)
 
+// ------------------------------------------------------- Fase 4: o Baileys 7
+//
+// Quais contas rodam no 7.0.0-rc14 em vez do 6.7.24. Lista de ids separada por
+// vírgula; VAZIA por padrão, então nada muda pra ninguém sem alguém escrever isto
+// no ambiente do Render. É o chip de teste da Fase 4 — uma semana contando quedas
+// por código antes de sequer pensar em migrar conta de cliente.
+const BAILEYS7_CONTAS = String(process.env.WA_QR_BAILEYS7_CONTAS || '')
+
+// Quantas vezes um worker v7 pode morrer ANTES de o supervisor desistir do v7
+// naquela conta e subi-la de volta no 6.7.24.
+//
+// A regra existe porque a Fase 4 não pode custar um chip. Duas causas de morte
+// precoce são certas e diagnosticáveis: Node velho demais pro require() de ESM
+// (o rc14 é ESM puro) e o engine-requirements do próprio pacote. As duas saem com
+// código 3 — e código 3 volta pro v6 na PRIMEIRA vez, sem gastar tentativa.
+// Qualquer outra morte gasta uma tentativa: três seguidas e a conta volta pro v6.
+const BAILEYS7_QUEDAS_MAX = parseInt(process.env.WA_QR_BAILEYS7_QUEDAS_MAX || '3', 10)
+
 // Quanto o supervisor espera os workers fecharem depois do SIGTERM.
 //
 // É o número mais importante deste arquivo. Quem solta a trava de cada conta
@@ -133,6 +151,17 @@ const SIGTERM_ESPERA_MS = parseInt(process.env.WA_QR_SIGTERM_ESPERA_MS || '20000
 //
 // Pura de propósito: é a conta que decide se N workers cabem no plano, e uma
 // conta dessas tem que poder ser lida e testada sem dar fork em nada.
+// Esta conta roda em qual Baileys? Pura, porque é a chave da Fase 4: decide num
+// lugar só, dá pra testar sem subir processo, e o teste fixa os dois sentidos.
+//
+// `lista` vem do ambiente como texto ('23' ou '23,36'). Comparação por String
+// pelo mesmo motivo do contasDesteWorker no server.js: o id vem como número aqui
+// e como texto do banco, e um `===` entre os dois já derrubou os três chips hoje.
+function baileysDaConta (contaId, lista) {
+  const ids = String(lista || '').split(',').map((x) => x.trim()).filter(Boolean)
+  return ids.some((id) => String(id) === String(contaId)) ? 7 : 6
+}
+
 function execArgvDoWorker (execArgvDoPai, nWorkers, totalMb, minMb) {
   const n = Math.max(1, nWorkers || 1)
   const porWorker = Math.max(minMb, Math.floor(totalMb / n))
@@ -210,6 +239,8 @@ function iniciarSupervisor (opcoes) {
   const heapTotalMb = op.heapTotalMb || HEAP_TOTAL_MB
   const heapMinMb = op.heapMinMb || HEAP_MIN_MB
   const execArgvDoPai = op.execArgv || process.execArgv
+  const baileys7Contas = op.baileys7Contas !== undefined ? op.baileys7Contas : BAILEYS7_CONTAS
+  const baileys7QuedasMax = op.baileys7QuedasMax || BAILEYS7_QUEDAS_MAX
   const pool = op.pool !== undefined ? op.pool
     : (process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL, max: 2 }) : null)
   const noBanco = op.noBanco || criarLogDoBanco(log, process.env.WA_QR_LOG_DB === '0' ? null : pool)
@@ -229,7 +260,11 @@ function iniciarSupervisor (opcoes) {
     let w = estado.workers.get(contaId)
     if (!w) {
       w = { contaId, porta: portaLivre(estado, portaBase), filho: null, subiuEm: null,
-        semWorkerDesde: Date.now(), quedas: 0, espera: esperaMs, timerSubida: null, parando: false }
+        semWorkerDesde: Date.now(), quedas: 0, espera: esperaMs, timerSubida: null, parando: false,
+        // Fase 4: a versão que ESTA conta usa agora. Nasce da lista do ambiente e
+        // só muda num sentido — 7 pode virar 6 quando o v7 não para de pé; 6 nunca
+        // vira 7 sozinho. Voltar tem que ser decisão do serviço; avançar, de gente.
+        baileys: baileysDaConta(contaId, baileys7Contas), quedasBaileys7: 0 }
       estado.workers.set(contaId, w)
     }
     return w
@@ -247,6 +282,7 @@ function iniciarSupervisor (opcoes) {
         env: Object.assign({}, process.env, {
           WA_QR_WORKER: '1',                 // é isto que faz o server.js ser o serviço
           WA_QR_CONTA: String(contaId),      // ...de UMA conta
+          WA_QR_BAILEYS: String(w.baileys),   // ...com esta versão da biblioteca
           PORT: String(w.porta)
         }),
         execArgv: execArgvDoWorker(execArgvDoPai, nAgora, heapTotalMb, heapMinMb),
@@ -265,8 +301,12 @@ function iniciarSupervisor (opcoes) {
     w.filho = filho
     w.subiuEm = Date.now()
     w.semWorkerDesde = null
-    log.info({ contaId, pid: filho.pid, porta: w.porta, workers: vivos().length }, 'supervisor: worker no ar')
-    noBanco('info', 'supervisor: worker no ar', { pid: filho.pid, porta: w.porta, quedas: w.quedas }, contaId)
+    // `baileys` em TODA linha desta conta: é o que permite contar quedas por versão
+    // com um group by, que é a medição inteira da Fase 4.
+    log.info({ contaId, pid: filho.pid, porta: w.porta, baileys: w.baileys, workers: vivos().length },
+      'supervisor: worker no ar')
+    noBanco('info', 'supervisor: worker no ar',
+      { pid: filho.pid, porta: w.porta, quedas: w.quedas, baileys: w.baileys }, contaId)
 
     filho.on('exit', (codigo, sinal) => {
       // Só reage à morte do worker ATUAL desta conta. Um worker antigo terminando
@@ -280,6 +320,25 @@ function iniciarSupervisor (opcoes) {
         return
       }
       w.quedas++
+      // FASE 4: o v7 não pode custar um chip. Código 3 é o worker dizendo "não
+      // consegui nem carregar a biblioteca" (require de ESM num Node velho, ou o
+      // engine-requirements do pacote) — não adianta tentar de novo, volta na hora.
+      // Qualquer outra morte gasta uma tentativa; esgotadas, volta também. O v6
+      // nunca vira v7 por conta própria: avançar é decisão de gente.
+      if (w.baileys === 7) {
+        w.quedasBaileys7++
+        const naoCarregou = codigo === 3
+        if (naoCarregou || w.quedasBaileys7 >= baileys7QuedasMax) {
+          w.baileys = 6
+          const porque = naoCarregou
+            ? 'o worker não conseguiu carregar o Baileys 7 (código 3: Node sem require de ESM, ou engine-requirements)'
+            : 'o worker do Baileys 7 morreu ' + w.quedasBaileys7 + ' vezes'
+          log.error({ contaId, codigo, quedasBaileys7: w.quedasBaileys7 },
+            'supervisor: desistindo do Baileys 7 nesta conta — volta pro 6.7.24 (' + porque + ')')
+          noBanco('error', 'supervisor: desistindo do Baileys 7 nesta conta — volta pro 6.7.24',
+            { codigo, quedasBaileys7: w.quedasBaileys7, porque }, contaId)
+        }
+      }
       // A ESPERA SÓ VOLTA A ZERO DEPOIS DE TEMPO DE PÉ, não a cada worker que sobe.
       // Mesmo raciocínio do sessaoFirme, e pelo mesmo motivo: zerar no arranque
       // desarma a dobra, e um worker que morre a cada 40s reiniciaria pra sempre
@@ -287,10 +346,10 @@ function iniciarSupervisor (opcoes) {
       const dePeMs = w.subiuEm ? Date.now() - w.subiuEm : null
       if (dePeMs !== null && dePeMs >= firmeMs) w.espera = esperaMs
       const espera = w.espera
-      log.error({ contaId, pid: filho.pid, codigo, sinal, quedas: w.quedas, esperaMs: espera, dePeMs },
+      log.error({ contaId, pid: filho.pid, codigo, sinal, quedas: w.quedas, esperaMs: espera, dePeMs, baileys: w.baileys },
         'supervisor: o worker morreu — subindo outro')
       noBanco('error', 'supervisor: o worker morreu — subindo outro',
-        { pid: filho.pid, codigo, sinal, quedas: w.quedas, esperaMs: espera, dePeMs }, contaId)
+        { pid: filho.pid, codigo, sinal, quedas: w.quedas, esperaMs: espera, dePeMs, baileys: w.baileys }, contaId)
       w.espera = Math.min(espera * 2, esperaMaxMs)
       w.timerSubida = setTimeout(() => subirWorker(contaId), espera)
       if (w.timerSubida.unref) w.timerSubida.unref()
@@ -513,4 +572,4 @@ function rodar (opcoes) {
 
 if (require.main === module) rodar()
 
-module.exports = { iniciarSupervisor, rodar, criarLogDoBanco, execArgvDoWorker, saudavel, portaLivre, SQL_CONTAS_PAREADAS }
+module.exports = { iniciarSupervisor, rodar, criarLogDoBanco, execArgvDoWorker, saudavel, portaLivre, baileysDaConta, SQL_CONTAS_PAREADAS }

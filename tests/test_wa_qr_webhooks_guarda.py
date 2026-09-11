@@ -247,6 +247,12 @@ def _chip_quebrado(conta_id, segredo=_SEGREDO, aberturas=3):
         _FakeRequest({"conta_id": conta_id, "aberturas": aberturas}, segredo)))
 
 
+def _mensagem_presa(conta_id, segredo=_SEGREDO, quedas=3, ack="3A4B3E86598B9C5136C1"):
+    return asyncio.run(pp.webhook_wa_qr_chip_quebrado(_FakeRequest(
+        {"conta_id": conta_id, "motivo": "mensagem_presa",
+         "quedas": quedas, "ack_id": ack}, segredo)))
+
+
 def test_chip_quebrado_avisa_o_dono_e_o_admin(pool, monkeypatch):
     """O disjuntor do serviço Node desistiu do chip: a sessão do Signal não
     decifra mais e não se conserta sozinha.
@@ -330,3 +336,80 @@ def test_chip_quebrado_tolera_aviso_que_falha(pool, monkeypatch):
     monkeypatch.setattr(nt, "enviar_para_dono", _explode)
     monkeypatch.setattr(nt, "avisar_admin", _explode)
     assert _chip_quebrado(conta).status_code == 200
+
+
+def test_mensagem_presa_manda_o_dono_NAO_parear(pool, monkeypatch):
+    """O aviso OPOSTO ao do chip quebrado, e o oposto é o ponto.
+
+    Medido na noite de 08→09/09/2026: a conta 34 caiu onze vezes e as onze linhas
+    de `stream errored out` traziam o mesmo id de ack. O WhatsApp reentrega uma
+    mensagem, o `ack` é recusado, a conexão morre — e entre uma queda e outra o
+    chip volta sozinho e segue atendendo.
+
+    Quem vê o chip caindo faz a coisa mais natural do mundo: pareia de novo. E
+    parear é justamente o que INSTALA outro laço — os dois chips no laço naquele
+    dia eram os dois pareados nas últimas 24h; o que não era pareado há 20 dias
+    não tinha nenhum. Por isso este aviso tem que dizer, com todas as letras, pra
+    não parear."""
+    conta = _conta_com_historico(pool, "PRIME EVENTOS", "qr")
+    from finance import notificar as nt
+    avisos = []
+    monkeypatch.setattr(nt, "enviar_para_dono",
+                        lambda pool_, cid, texto: avisos.append(("dono", texto)) or True)
+    monkeypatch.setattr(nt, "avisar_admin",
+                        lambda assunto, msg: avisos.append(("admin", msg)) or True)
+    resp = _mensagem_presa(conta, quedas=11)
+    assert resp.status_code == 200
+    assert {a[0] for a in avisos} == {"dono", "admin"}
+    texto = next(a[1] for a in avisos if a[0] == "dono")
+    assert "NÃO parear" in texto, (
+        "sem isso o dono pareia de novo e instala outro laço — é a ação errada "
+        f"mais provável, e o aviso existe pra barrá-la. Saiu: {texto!r}")
+    assert "11" in texto, "e quantas quedas a mesma mensagem já causou"
+    assert "PRIME EVENTOS" in texto, "e de qual empresa é o chip"
+
+
+def test_mensagem_presa_nao_repete_o_texto_do_chip_quebrado(pool, monkeypatch):
+    """Os dois avisos pedem AÇÕES OPOSTAS: o do chip quebrado manda parear, o da
+    mensagem presa manda não parear. Se um dia alguém unificar os textos pra
+    economizar código, este teste quebra antes de o dono receber a instrução
+    errada."""
+    conta = _conta_com_historico(pool, "Chip no laço", "qr")
+    from finance import notificar as nt
+    textos = {}
+    monkeypatch.setattr(nt, "avisar_admin", lambda *a, **k: True)
+    monkeypatch.setattr(nt, "enviar_para_dono",
+                        lambda pool_, cid, texto: textos.__setitem__(textos.get("k"), texto) or True)
+
+    monkeypatch.setattr(nt, "enviar_para_dono",
+                        lambda pool_, cid, t: textos.__setitem__("quebrado", t) or True)
+    _chip_quebrado(conta)
+    monkeypatch.setattr(nt, "enviar_para_dono",
+                        lambda pool_, cid, t: textos.__setitem__("presa", t) or True)
+    _mensagem_presa(conta)
+
+    assert textos["quebrado"] != textos["presa"], "os dois avisos não podem ser o mesmo"
+    assert "Aparelhos conectados" in textos["quebrado"]
+    assert "Aparelhos conectados" not in textos["presa"], (
+        "mandar mexer em Aparelhos conectados aqui é empurrar pro pareamento, "
+        "que é exatamente o que não se deve fazer")
+
+
+def test_mensagem_presa_nao_apaga_nem_desliga_nada(pool, monkeypatch):
+    """A conta está SAUDÁVEL entre as quedas — recebendo e enviando. Desligar o
+    canal por causa deste aviso tiraria da tela uma conta que está atendendo."""
+    conta = _conta_com_historico(pool, "Chip no laço", "qr")
+    from finance import notificar as nt
+    monkeypatch.setattr(nt, "enviar_para_dono", lambda *a, **k: True)
+    monkeypatch.setattr(nt, "avisar_admin", lambda *a, **k: True)
+    with pool.connection() as c:
+        antes = c.execute("""select ativo, desconectado_em from canais_config
+                              where conta_id=%s and canal='whatsapp'""", (conta,)).fetchone()
+        msgs_antes = c.execute("select count(*) from mensagens").fetchone()[0]
+    _mensagem_presa(conta)
+    with pool.connection() as c:
+        depois = c.execute("""select ativo, desconectado_em from canais_config
+                               where conta_id=%s and canal='whatsapp'""", (conta,)).fetchone()
+        msgs_depois = c.execute("select count(*) from mensagens").fetchone()[0]
+    assert antes == depois, "o canal não pode ser mexido: a conta está atendendo"
+    assert msgs_antes == msgs_depois, "e nada de mensagem some"

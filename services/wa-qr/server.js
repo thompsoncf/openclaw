@@ -132,6 +132,48 @@ const DECIFRAR_JANELA_MS = parseInt(process.env.WA_QR_DECIFRAR_JANELA_MS || '600
 // o chip precisa de pareamento novo — ver abrirDisjuntor.
 const DISJUNTOR_AVISA_EM = parseInt(process.env.WA_QR_DISJUNTOR_AVISA_EM || '3', 10)
 
+// A MENSAGEM PRESA — o laço de 50 em 50 minutos.
+//
+// Medido na noite de 08→09/09, com a empresa fechada e ninguém escrevendo: a conta
+// 34 caiu ONZE vezes, e as onze linhas de `stream errored out` carregavam o MESMO
+// id de ack — 3A4B3E86598B9C5136C1 — às 22:22, 23:30, 00:20, 01:10, 02:50, 03:40,
+// 04:30, 05:20, 06:10, 07:00 e 07:50. A conta 23, dois ids se alternando. A 36, que
+// não é pareada de novo há 20 dias, nenhum.
+//
+// O mecanismo: o WhatsApp reentrega uma mensagem, o Baileys responde um `ack` que o
+// servidor recusa, e a conexão morre com 500. Como ninguém consome a mensagem, ela
+// volta no ciclo seguinte, pra sempre. E — o detalhe que corrigiu o diagnóstico — a
+// conta 34 teve ZERO falhas de decifragem naquela noite: não é a mensagem que não
+// abre, é o `ack` dela que é recusado. Decifrar não entra na história.
+//
+// Nada aqui conserta isso: o conserto mora no tratamento de `ack` do Baileys (a
+// linha 7 reescreveu essa parte). O que dá pra fazer hoje é PARAR DE DESCOBRIR ISSO
+// NA MÃO — o padrão é inconfundível e o serviço passa a reconhecê-lo sozinho, dizer
+// qual conta está presa e desde quando, e avisar o dono uma vez.
+const PRESA_AVISA_EM = parseInt(process.env.WA_QR_PRESA_AVISA_EM || '3', 10)
+// o mapa em si nasce junto dos outros por conta, depois da classe MapaPorConta —
+// aqui em cima ela ainda não existe (classe não é içada como função)
+
+// Conta uma queda de stream e diz se o id se repetiu o bastante pra ser laço.
+// Id diferente ZERA a contagem: duas quedas seguidas por mensagens diferentes são
+// duas quedas, não um laço — o que denuncia o laço é a REPETIÇÃO do mesmo id.
+function contarQuedaPresa (contaId, ackId, agora, avisaEm) {
+  if (!ackId) return null
+  const r = quedasPresas.get(contaId)
+  if (!r || r.id !== ackId) {
+    quedasPresas.set(contaId, { id: ackId, vezes: 1, desde: agora, avisou: false })
+    return null
+  }
+  r.vezes++
+  if (r.vezes < avisaEm || r.avisou) return null
+  r.avisou = true                    // uma vez por mensagem presa, não por queda
+  return { id: ackId, vezes: r.vezes, desde: r.desde }
+}
+
+// O pareamento novo começa a história do zero: o cofre é outro, e uma mensagem
+// presa do cofre velho não é mais assunto desta conta.
+function esquecerQuedasPresas (contaId) { quedasPresas.delete(contaId) }
+
 // Por quanto tempo um socket recém-criado conta como "em handshake" e barra uma
 // segunda chamada de iniciarSessao — ver emHandshake. Medido em produção: entre
 // 'socket criado' e 'WhatsApp conectado' deu 1,7s no arranque limpo e 3,8s no pior
@@ -431,6 +473,9 @@ class MapaPorConta extends Map {
 }
 
 const falhasDeDecifrar = new MapaPorConta()   // contaId -> [instantes das falhas]
+// contaId -> { id, vezes, desde, avisou } — o laço da mensagem presa (ver
+// contarQuedaPresa, lá em cima, junto das constantes que explicam o caso)
+const quedasPresas = new MapaPorConta()
 
 // ------------------------------- falha que o retry conserta não é perda
 //
@@ -514,6 +559,25 @@ function comContaDoBaileys (contaId, base) {
     let obj = (a && typeof a === 'object') ? a : null
     const msg = typeof a === 'string' ? a : b
     let nivelFinal = n
+    // O 'stream errored out' do Baileys traz o nó que o WhatsApp devolveu, e dentro
+    // dele o id do ack recusado. É o único lugar onde esse id aparece — ver
+    // contarQuedaPresa pro laço que ele denuncia.
+    if (obj && msg === 'stream errored out') {
+      let ackId = null
+      try {
+        const c = obj.node && obj.node.content
+        ackId = (Array.isArray(c) && c[0] && c[0].attrs && c[0].attrs.id) || null
+      } catch (e) { ackId = null }
+      const presa = contarQuedaPresa(contaId, ackId, Date.now(), PRESA_AVISA_EM)
+      if (presa) {
+        log.error({ contaId, ackId: presa.id, quedas: presa.vezes,
+          desdeMin: Math.round((Date.now() - presa.desde) / 60000) },
+        'mensagem presa: a MESMA mensagem derruba esta conta a cada volta — o ' +
+        'WhatsApp reentrega e o ack é recusado. Não se conserta sozinho e não é ' +
+        'pareamento: é o tratamento de ack do Baileys 6.x')
+        avisarMensagemPresa(contaId, presa).catch(() => {})
+      }
+    }
     if (obj && msg === 'failed to decrypt message') {
       const agora = Date.now()
       // Carimba a falha na sessão ANTES de qualquer decisão. É este carimbo que
@@ -662,6 +726,35 @@ async function medindo (rotulo, contaId, fn) {
     emCurso.delete(chave)
   }
 }
+// A PARTIDA DE UMA CONTA, que o `medindo` sozinho não alcança.
+//
+// O carimbo do travamento nasceu cobrindo operações NOSSAS (resyncAgenda,
+// repassarContatos). Só que os dois piores travamentos medidos até hoje — 12.490ms
+// em 08/09 08:32 e 5.227ms na madrugada seguinte — saíram com `emCurso: []` e
+// `decifragem: {}`: não era nenhuma delas. O que roda nesses momentos é o arranque
+// do Baileys por dentro (restaurar sessões do cofre, sincronização inicial,
+// decodificar o backlog offline), e isso não passa por função nossa nenhuma.
+//
+// Não dá pra instrumentar o que é de dentro da biblioteca. Dá pra dizer QUEM estava
+// arrancando: a conta entra aqui quando o iniciarSessao começa e sai quando ela
+// entrega conversa de verdade (marcarVivo com upsert) — que é o mesmo sinal que o
+// vigia usa pra dizer "esta sessão está viva", e não só "o socket abriu".
+const partidas = new MapaPorConta()   // contaId -> instante em que começou a subir
+
+// `agora` entra por parâmetro como no resto desta base (contarFalhaDeDecifrar,
+// sessaoFirme, contarQuedaPresa): relógio injetado é o que deixa a medição ser
+// testada sem esperar o tempo passar.
+function comecouAPartida (contaId, agora) { partidas.set(contaId, agora || Date.now()) }
+function terminouAPartida (contaId) { partidas.delete(contaId) }
+function quemEstaSubindo (agora) {
+  const fora = []
+  for (const [conta, desde] of partidas) {
+    fora.push({ conta, haMs: (agora || Date.now()) - desde })
+  }
+  fora.sort((a, b) => b.haMs - a.haMs)
+  return fora
+}
+
 // o que está em curso, do mais antigo pro mais novo (o mais antigo é o suspeito)
 function oQueEstaEmCurso (agora) {
   const fora = []
@@ -691,8 +784,9 @@ setInterval(() => {
   const atraso = agora - _ultimoTique - 1000
   _ultimoTique = agora
   if (atraso > 1000) {
-    log.warn({ atrasoMs: atraso, emCurso: oQueEstaEmCurso(agora), decifragem: decifragemPorConta(agora) },
-      'event loop travou — nesse intervalo /saude não respondia (risco de health check falhar)')
+    log.warn({ atrasoMs: atraso, emCurso: oQueEstaEmCurso(agora),
+      subindo: quemEstaSubindo(agora), decifragem: decifragemPorConta(agora) },
+    'event loop travou — nesse intervalo /saude não respondia (risco de health check falhar)')
   }
   if (++_tiques % 60) return
   const m = process.memoryUsage()
@@ -813,7 +907,9 @@ function marcarVivo (contaId, entregouMensagem) {
   if (!s) return
   s.ultimoEvento = Date.now()
   // entregou CONVERSA de verdade = a desconfiança do vigia zera junto (ver tetoMudo)
-  if (entregouMensagem) s.reconexoesMudas = 0
+  // ...e é aqui que a PARTIDA desta conta termina, pelo mesmo critério: socket
+  // aberto não é conta de pé; entregar conversa é.
+  if (entregouMensagem) { s.reconexoesMudas = 0; terminouAPartida(contaId) }
   // ...e a conta deixa de ser órfã de 440: quem entrega está vivo e é nosso
   s.substituidaEm = null
   // Mas o contador de retomadas NÃO se apaga aqui. Entregar um evento prova que o
@@ -1634,6 +1730,8 @@ function esquecerConta (contaId) {
   // a quarentena é por conta+contato e tem prazo, mas uma conta que sai daqui não
   // pode deixar contato calado pra trás — se ela voltar, volta ouvindo todo mundo
   esquecerQuarentena(contaId)
+  esquecerQuedasPresas(contaId)
+  terminouAPartida(contaId)
 }
 
 // Apaga o retrato da sessão que deixou de existir.
@@ -2692,6 +2790,23 @@ async function avisarDeslogado (contaId) {
 // Telegram, não virava alerta. O dono descobria pelo e-mail de health check do
 // Render, ou quando um vendedor reclamava que o cliente não respondia. Saber e
 // não contar é pior que não saber: o serviço tinha o diagnóstico pronto.
+// Avisa o dono que uma conta está presa no laço da mensagem que não passa. Vai pelo
+// MESMO webhook do chip quebrado, com `motivo` diferente: é a mesma pergunta do
+// ponto de vista de quem recebe ("meu chip está caindo, o que eu faço?"), e o texto
+// muda porque a resposta é o OPOSTO — aqui parear de novo não resolve, e a conta
+// segue recebendo e enviando entre uma queda e outra.
+async function avisarMensagemPresa (contaId, presa) {
+  if (!APP_URL) return
+  try {
+    await fetch(APP_URL + '/webhooks/wa-qr/chip-quebrado', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-wa-secret': SEGREDO },
+      body: JSON.stringify({ conta_id: contaId, motivo: 'mensagem_presa',
+        quedas: presa.vezes, ack_id: presa.id })
+    })
+  } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao avisar mensagem presa') }
+}
+
 async function avisarChipQuebrado (contaId, aberturas) {
   if (!APP_URL) return
   try {
@@ -2876,6 +2991,9 @@ async function iniciarSessao (contaId) {
   s = s || { status: 'desconectado', qr: null }
   s.iniciando = true
   sessoes.set(contaId, s)
+  // daqui até a conta entregar conversa, ela conta como EM PARTIDA — é o que o
+  // carimbo do travamento passa a mostrar quando nada nosso está em curso
+  comecouAPartida(contaId)
   log.info({ contaId }, 'iniciarSessao: começando')
 
   // Trava de segurança: se por qualquer motivo isso nunca terminar (nem sucesso
@@ -3227,7 +3345,12 @@ async function iniciarSessao (contaId) {
     }
   })
 
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+  // Carimbado: é por aqui que entra o backlog acumulado enquanto o socket esteve
+  // fora — a onda que o arranque despeja de uma vez. Ficou de fora do carimbo na
+  // primeira versão por eu ter julgado que só espera I/O; os travamentos de partida
+  // com `emCurso: []` mostraram que julgar não basta, tem que medir.
+  sock.ev.on('messages.upsert', (ev) => medindo('messages.upsert', contaId, async () => {
+    const { messages, type } = ev
     // log sempre que o evento disparar, mesmo filtrado — sem isso não dava pra saber
     // se o socket estava recebendo mensagem nenhuma ou só descartando pelo filtro.
     log.info({ contaId, type, n: messages.length }, 'messages.upsert recebido')
@@ -3246,7 +3369,7 @@ async function iniciarSessao (contaId) {
       if (m.key && m.key.fromMe) { guardarEnviada(contaId, m); await repassarSaida(contaId, m); continue }
       await repassarEntrada(contaId, m)
     }
-  })
+  }))
 
   // Histórico (só dispara logo após conectar/parear). Mensagens de ANTES de
   // conectar viram conversa ÓRFÃ (nunca lead sozinho) — importa só os últimos
@@ -4076,5 +4199,6 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { usuariosDoPeer, agendaTrancadaPorChave, VALVULA_CHAVE_FALTANDO_MS, MARCA_CHAVE_FALTANDO,
+module.exports = { contarQuedaPresa, esquecerQuedasPresas, quedasPresas, PRESA_AVISA_EM,
+  comecouAPartida, terminouAPartida, quemEstaSubindo, partidas, usuariosDoPeer, agendaTrancadaPorChave, VALVULA_CHAVE_FALTANDO_MS, MARCA_CHAVE_FALTANDO,
   medindo, oQueEstaEmCurso, decifragemPorConta, emCurso, QUARENTENA_PEER_MS, porPeerEmQuarentena, peerEmQuarentena, esquecerQuarentena, peersEmQuarentena, avisarChipQuebrado, alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

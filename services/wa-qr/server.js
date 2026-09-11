@@ -132,6 +132,29 @@ const DECIFRAR_JANELA_MS = parseInt(process.env.WA_QR_DECIFRAR_JANELA_MS || '600
 // o chip precisa de pareamento novo — ver abrirDisjuntor.
 const DISJUNTOR_AVISA_EM = parseInt(process.env.WA_QR_DISJUNTOR_AVISA_EM || '3', 10)
 
+// QUANTOS CONTATOS DISTINTOS precisam estar falhando pra valer parar a CONTA INTEIRA.
+//
+// O teto de falhas acima conta repetição: o retry reenvia a mesma mensagem até 3
+// vezes, então 15 mensagens de UM contato viram 60 falhas e estouram o teto sozinhas.
+// Foi exatamente isso em 11/09: a conta 34 parou duas vezes (12:07 e 12:19) por 60
+// falhas em 60s — 15 ids distintos, UM contato, todas `fromMe: true`, ou seja o eco
+// das mensagens que o próprio dono mandou pelo celular. Nada de cliente se perdia, e
+// mesmo assim o chip principal da empresa saía do ar, com a espera dobrando (10, 20,
+// 40 min) porque as mesmas 15 voltavam a cada reconexão.
+//
+// Contato ÚNICO falhando é o caso da quarentena, que é cirúrgica: cala só ele. Parar
+// a conta inteira por isso é usar o martelo errado.
+//
+// O disjuntor existe pro outro caso — 20/08, quando outro aparelho assumiu a
+// credencial e TODO eco passou a chegar indecifrável (1119 falhas numa hora). Ali não
+// é um contato: é a conta inteira, todos os interlocutores de uma vez, e nenhuma
+// quarentena por contato dá conta.
+//
+// Por isso a condição passa a ser AND, não OR: muitas falhas E vindas de mais de um
+// contato. Quem falha sozinho fica com a quarentena; quem falha em bando derruba o
+// disjuntor.
+const DISJUNTOR_MIN_CONTATOS = parseInt(process.env.WA_QR_DISJUNTOR_MIN_CONTATOS || '2', 10)
+
 // A MENSAGEM PRESA — o laço de 50 em 50 minutos.
 //
 // Medido na noite de 08→09/09, com a empresa fechada e ninguém escrevendo: a conta
@@ -473,6 +496,9 @@ class MapaPorConta extends Map {
 }
 
 const falhasDeDecifrar = new MapaPorConta()   // contaId -> [instantes das falhas]
+// contaId -> Map(usuario do contato -> instante da última falha dele). É o que
+// responde "a enxurrada é de UM contato ou de muitos?" — ver DISJUNTOR_MIN_CONTATOS.
+const contatosComFalha = new MapaPorConta()
 // contaId -> { id, vezes, desde, avisou } — o laço da mensagem presa (ver
 // contarQuedaPresa, lá em cima, junto das constantes que explicam o caso)
 const quedasPresas = new MapaPorConta()
@@ -533,6 +559,18 @@ function contarFalhaDaMensagem (contaId, msgId, agora, janelaMs) {
 
 // Estourou o teto NESTA falha? Janela deslizante, aritmética pura — sem socket
 // nenhum, que é o que deixa isso conferível no teste.
+// Quantos contatos DISTINTOS falharam nesta janela. Carimba o de agora e devolve a
+// contagem, esquecendo os vencidos — mesma disciplina de janela do contador acima.
+// Sem `peer` identificável a falha conta como um contato próprio ('?'): não dá pra
+// afirmar que é o mesmo de antes, e na dúvida o disjuntor tem que poder agir.
+function contarContatoComFalha (contaId, peer, agora, janelaMs) {
+  let porContato = contatosComFalha.get(contaId)
+  if (!porContato) { porContato = new Map(); contatosComFalha.set(contaId, porContato) }
+  for (const [k, visto] of porContato) if (agora - visto >= janelaMs) porContato.delete(k)
+  porContato.set(usuarioDoJid(peer) || '?', agora)
+  return porContato.size
+}
+
 function contarFalhaDeDecifrar (contaId, agora, teto, janelaMs) {
   const marcas = (falhasDeDecifrar.get(contaId) || []).filter((t) => agora - t < janelaMs)
   marcas.push(agora)
@@ -640,9 +678,25 @@ function comContaDoBaileys (contaId, base) {
           })
           .catch((e) => log.error({ contaId, e: String(e) },
             'limpeza cirúrgica de sessão falhou'))
+        // O disjuntor precisa das DUAS coisas: enxurrada E vinda de mais de um
+        // contato — ver DISJUNTOR_MIN_CONTATOS. A contagem de contatos roda SEMPRE
+        // (mesmo sem estourar o teto), senão a janela dela nasceria só no estouro e
+        // chegaria vazia justo na hora de decidir.
+        const nContatos = contarContatoComFalha(contaId, peer, agora, DECIFRAR_JANELA_MS)
         if (contarFalhaDeDecifrar(contaId, agora, DECIFRAR_TETO, DECIFRAR_JANELA_MS)) {
-          abrirDisjuntor(contaId).catch((e) =>
-            log.error({ contaId, e: String(e) }, 'disjuntor: falhou ao abrir'))
+          if (nContatos >= DISJUNTOR_MIN_CONTATOS) {
+            abrirDisjuntor(contaId).catch((e) =>
+              log.error({ contaId, e: String(e) }, 'disjuntor: falhou ao abrir'))
+          } else {
+            // Não é silêncio: é a decisão de NÃO parar a conta, e ela precisa
+            // aparecer. Foi a falta desta linha que fez o chip da Prime sair do ar
+            // duas vezes em 11/09 sem que o log dissesse que a enxurrada era de um
+            // contato só.
+            log.warn({ contaId, jid: peer, contatos: nContatos, teto: DECIFRAR_TETO,
+              janelaS: Math.round(DECIFRAR_JANELA_MS / 1000) },
+            'enxurrada de falhas de UM contato só — a quarentena cuida dele; a conta ' +
+            'NÃO é parada (o disjuntor é pra credencial comprometida, não pra um chat)')
+          }
         }
       }
     }
@@ -904,7 +958,31 @@ function pararTimersDaAgenda (s) {
 // primeiro a sumir quando o aparelho sai da lista de dispositivos da conta.
 function marcarVivo (contaId, entregouMensagem) {
   const s = sessoes.get(contaId)
-  if (!s) return
+  // SEM SOCKET NÃO HÁ VIDA PRA MARCAR — e esta linha custou uma tarde de chip fora
+  // do ar. Evento de um socket JÁ DESCARTADO ainda chega aqui: o handler do
+  // `messages.upsert` é assíncrono, então o lote que dispara o disjuntor termina de
+  // ser processado DEPOIS do `descartarSocket`. Em 11/09 foi exatamente isso na conta
+  // 34, tudo dentro do mesmo segundo e nesta ordem no wa_qr_log:
+  //
+  //   15:19:02  disjuntor abre → socket descartado (motivo: disjuntor_guerra_de_sessao)
+  //   15:19:02  messages.upsert recebido (n: 15)   ← o lote retardatário
+  //   15:19:02  marcarVivo apaga a marca de órfã
+  //
+  // `abrirDisjuntor` tinha acabado de pôr `substituidaEm` pra que o vigia retomasse a
+  // conta 40 minutos depois. O retardatário apagou a marca, e `sessaoOrfa` exige ela:
+  // sem marca devolve false PRA SEMPRE. O vigia nunca mais olhou pra conta 34 — ela
+  // ficou `desconectado`, `temSock: false`, `iniciando: false`, sem uma única linha no
+  // log por mais de uma hora, esperando um deploy que só viria por nossa mão. Não eram
+  // os 40 minutos da espera: era até alguém perceber.
+  //
+  // O mesmo vale pro caminho do 440, que marca órfã do mesmo jeito.
+  //
+  // A saída é reler o que o comentário lá embaixo sempre disse — "quem entrega está
+  // vivo e é nosso". Um evento que chega depois do socket morrer não prova nem uma
+  // coisa nem outra: ele é eco de uma encarnação que acabou. Nada do que está abaixo
+  // deve valer pra ele — nem a marca de órfã, nem zerar `reconexoesMudas` (que
+  // afrouxaria o teto do vigia na encarnação seguinte), nem encerrar a partida.
+  if (!s || !s.sock) return
   s.ultimoEvento = Date.now()
   // entregou CONVERSA de verdade = a desconfiança do vigia zera junto (ver tetoMudo)
   // ...e é aqui que a PARTIDA desta conta termina, pelo mesmo critério: socket
@@ -1731,6 +1809,7 @@ function esquecerConta (contaId) {
   // pode deixar contato calado pra trás — se ela voltar, volta ouvindo todo mundo
   esquecerQuarentena(contaId)
   esquecerQuedasPresas(contaId)
+  contatosComFalha.delete(contaId)
   terminouAPartida(contaId)
 }
 
@@ -4199,6 +4278,7 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { contarQuedaPresa, esquecerQuedasPresas, quedasPresas, PRESA_AVISA_EM,
+module.exports = { contarContatoComFalha, contatosComFalha, DISJUNTOR_MIN_CONTATOS,
+  contarQuedaPresa, esquecerQuedasPresas, quedasPresas, PRESA_AVISA_EM,
   comecouAPartida, terminouAPartida, quemEstaSubindo, partidas, usuariosDoPeer, agendaTrancadaPorChave, VALVULA_CHAVE_FALTANDO_MS, MARCA_CHAVE_FALTANDO,
   medindo, oQueEstaEmCurso, decifragemPorConta, emCurso, QUARENTENA_PEER_MS, porPeerEmQuarentena, peerEmQuarentena, esquecerQuarentena, peersEmQuarentena, avisarChipQuebrado, alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

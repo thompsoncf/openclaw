@@ -7774,6 +7774,29 @@ def _par_min(n, uni):
     return v * _UNI_MIN.get(uni, 60)
 
 
+def _inteiro(v, minimo: int = 1):
+    """Campo numérico da Régua: vazio ou torto = None, que é HERDA (migração 228),
+    e nunca zero. Zero num prazo cobraria todo mundo o tempo todo; zero num teto
+    calaria a régua inteira — os dois seriam silenciosos e catastróficos. Era o que
+    o `greatest(1, ...)` do SQL garantia; agora é aqui, junto do resto da limpeza."""
+    try:
+        n = int(str(v).strip())
+    except (TypeError, ValueError):
+        return None
+    return max(minimo, n)
+
+
+def _escada_txt(v):
+    """"1, 3,7 " -> "1,3,7". Sem nenhum número válido = None (herda).
+
+    Limpa aqui, e não no motor, porque o que vai pro banco é o que o dono vê de
+    volta na tela: guardar o texto cru faria "1, 3,7 " voltar com o espaço e parecer
+    que o sistema não entendeu o que ele escreveu.
+    """
+    nums = [p.strip() for p in str(v or "").split(",")]
+    return ",".join(p for p in nums if p.isdigit() and int(p) > 0) or None
+
+
 @router.get("/painel/prospeccao/regua", response_class=HTMLResponse)
 def regua_pagina(request: Request):
     ctx, redir = _acesso(request)
@@ -7787,6 +7810,7 @@ def regua_pagina(request: Request):
         _etapas(c, ctx["conta_id"])                 # semeia o padrão na 1ª visita
         from finance import follow_up as _fu
         cfg = _fu.config(c, ctx["conta_id"])   # a da régua + a do follow-up
+        perfil_chave = _fr.perfil_da_conta(c, ctx["conta_id"])
         c.commit()
         linhas = _fr.etapas(c, ctx["conta_id"])
         # quantos leads em cada coluna, pro dono ver o que ele está mexendo (e pra
@@ -7803,13 +7827,51 @@ def regua_pagina(request: Request):
         e["n"] = n_por.get(e["chave"], 0)
         e["prazo_n"], e["prazo_u"] = _min_par(e["prazo_min"])
         e["gatilho_rot"] = _fr.EVENTOS.get(e["gatilho"] or "", "")
-    conv = [{"chave": k, "rotulo": v, "prazo_n": _min_par(cfg[c_])[0], "prazo_u": _min_par(cfg[c_])[1]}
+    # PROCEDÊNCIA DE CADA CAMPO (migração 228). Campo em branco = herda o padrão do
+    # ramo; o placeholder mostra QUAL é esse padrão, senão "em branco" viraria "sem
+    # prazo" na cabeça de quem lê — que é o oposto do que acontece.
+    from finance import raio_x_perfil as _rxp
+    escolhidas = set(cfg.get("_escolhidas") or ())
+    padrao = _rxp.funil_padrao(perfil_chave)
+    rot_ramo = _rxp.perfil(None if perfil_chave != "eventos" else "eventos")["rotulo"] \
+        if perfil_chave in ("eventos", "recorrente") else perfil_chave
+
+    def _campo(chave_cfg):
+        """(valor no input, unidade, placeholder, herda?) de um prazo em minutos."""
+        pn, pu = _min_par(padrao.get(chave_cfg))
+        if chave_cfg in escolhidas:
+            n, u = _min_par(cfg.get(chave_cfg))
+            return {"n": n, "u": u, "ph": "", "herda": False}
+        return {"n": "", "u": pu, "ph": str(pn or "—"), "herda": True}
+
+    conv = [dict(_campo(c_), chave=k, rotulo=v)
             for k, v, c_ in (("sem_resposta", "Sem resposta", "sem_resposta_min"),
                              ("bola_nossa", "Bola com você", "bola_nossa_min"),
                              ("bola_cliente", "Bola com o cliente", "bola_cliente_min"))]
+    esc = _campo("escala_min")
+    teto = {"v": ("" if "teto_avisos_dia" not in escolhidas else cfg.get("teto_avisos_dia")),
+            "ph": str(padrao.get("teto_avisos_dia") or 5),
+            "herda": "teto_avisos_dia" not in escolhidas}
+    # os quatro do follow-up nunca tiveram tela: até 11/09/2026 mudar a escada de
+    # toques era deploy. A parametrização só vale se o dono alcançar o número.
+    fup = {"proposta": {"v": ("" if "fu_proposta_dias" not in escolhidas else cfg.get("fu_proposta_dias")),
+                        "ph": str(padrao.get("fu_proposta_dias") or 3),
+                        "herda": "fu_proposta_dias" not in escolhidas},
+           "toques": {"v": ("" if "fu_toques_dias" not in escolhidas else (cfg.get("fu_toques_dias") or "")),
+                      "ph": str(padrao.get("fu_toques_dias") or ""),
+                      "herda": "fu_toques_dias" not in escolhidas},
+           "festa": {"v": ("" if "fu_festa_dias" not in escolhidas else cfg.get("fu_festa_dias")),
+                     "ph": str(padrao.get("fu_festa_dias") or "—"),
+                     "herda": "fu_festa_dias" not in escolhidas,
+                     "tem": bool(padrao.get("fu_festa_dias")) or "fu_festa_dias" in escolhidas},
+           "teto": {"v": ("" if "fu_teto_dia" not in escolhidas else cfg.get("fu_teto_dia")),
+                    "ph": str(padrao.get("fu_teto_dia") or 15),
+                    "herda": "fu_teto_dia" not in escolhidas}}
+    janela_herda = not ({"janela_dias", "janela_abre", "janela_fecha"} & escolhidas)
     return _render("prospeccao_regua", request, titulo="Régua do funil",
                    secao_ativa="prospeccao", nav_ativo="regua", gerencia=True,
                    etapas=linhas, cfg=cfg, conv=conv, eventos=sorted(_fr.EVENTOS.items()),
+                   esc=esc, teto=teto, fup=fup, janela_herda=janela_herda, rot_ramo=rot_ramo,
                    unidades=[(u, r) for u, r, _m in _UNIDADES],
                    dias_on=_fr._dias(cfg), n_mov=n_mov,
                    aviso=request.session.pop("prosp_aviso", None))
@@ -7836,14 +7898,16 @@ async def regua_config(request: Request):
         # `follow_up_modo` NÃO entra aqui: ele é salvo na aba Follow-up. Se
         # continuasse na lista, salvar a Régua (que não tem mais o campo no
         # formulário) desligaria o follow-up da conta sem ninguém pedir.
+        # CAMPO EM BRANCO = NULL = HERDA O PADRÃO DO RAMO (migração 228). Antes era
+        # `coalesce(%s, <coluna>)`, que queria dizer "em branco mantém o que estava"
+        # — e com isso não havia jeito nenhum de VOLTAR ao padrão depois de digitar
+        # um número uma vez. Agora apagar o campo É o botão de voltar ao padrão.
         c.execute("""update funil_regua set gatilhos_modo=%s, cobranca_modo=%s,
                        janela_dias=%s, janela_abre=%s, janela_fecha=%s,
-                       sem_resposta_min=coalesce(%s, sem_resposta_min),
-                       bola_nossa_min=coalesce(%s, bola_nossa_min),
-                       bola_cliente_min=coalesce(%s, bola_cliente_min),
-                       escala_min=coalesce(%s, escala_min),
-                       teto_avisos_dia=greatest(1, coalesce(%s, teto_avisos_dia)),
-                       atualizado_em=now()
+                       sem_resposta_min=%s, bola_nossa_min=%s, bola_cliente_min=%s,
+                       escala_min=%s, teto_avisos_dia=%s,
+                       fu_proposta_dias=%s, fu_toques_dias=%s, fu_festa_dias=%s,
+                       fu_teto_dia=%s, atualizado_em=now()
                      where conta_id=%s""",
                   (modo("gatilhos_modo"), modo("cobranca_modo"),
                    dias, abre, fecha,
@@ -7851,7 +7915,11 @@ async def regua_config(request: Request):
                    _par_min(f.get("bola_nossa_n"), f.get("bola_nossa_u")),
                    _par_min(f.get("bola_cliente_n"), f.get("bola_cliente_u")),
                    _par_min(f.get("escala_n"), f.get("escala_u")),
-                   _par_min(f.get("teto"), "min"), ctx["conta_id"]))
+                   _inteiro(f.get("teto")),
+                   _inteiro(f.get("fu_proposta_dias")),
+                   _escada_txt(f.get("fu_toques_dias")),
+                   _inteiro(f.get("fu_festa_dias")),
+                   _inteiro(f.get("fu_teto_dia")), ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Régua salva ✓"
     return RedirectResponse("/painel/prospeccao/regua", status_code=303)
@@ -15135,6 +15203,12 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .rg-grp b{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap}
 .rg-grp span{flex:1;height:1px;background:var(--borda)}
 .rg-r1{display:grid;grid-template-columns:12px 1fr 150px 62px;gap:.6rem;align-items:center}
+/* procedência do campo (migração 228): herdado do ramo × escolhido pela empresa.
+   Sem isso o dono olha "4 horas" e não tem como saber se foi ele quem pôs. */
+.lblp{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.rg-proc{font:600 .62rem/1 var(--mono,ui-monospace);padding:.26rem .38rem;border-radius:5px;
+  white-space:nowrap;border:1px solid var(--borda);color:var(--txt-mut);background:var(--bg)}
+.rg-proc.seu{border-color:var(--ambar);color:var(--ambar)}
 .rg-uni{padding:.48rem .5rem;border-radius:8px;border:1px solid #333;background:var(--bg);color:var(--txt);font-size:.8rem;font-family:inherit}
 .rg-sel{width:100%;box-sizing:border-box;padding:.42rem .6rem;border-radius:8px;border:1px solid var(--azul-borda);
   background:var(--azul-fundo);color:var(--azul);font-size:.8rem;font-family:inherit}
@@ -15195,16 +15269,20 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div class="fsec" style="margin-top:.9rem">
     <div class="sh"><b>Quando a bola está com a gente</b><span class="mut" style="font-size:.76rem">lido da conversa, inclusive do celular do vendedor</span></div>
     {% for b in conv %}
-    <div style="display:grid;grid-template-columns:1fr 150px;gap:.6rem;align-items:center;padding:.62rem 0;border-top:1px solid var(--borda)">
+    <div style="display:grid;grid-template-columns:1fr auto 150px;gap:.6rem;align-items:center;padding:.62rem 0;border-top:1px solid var(--borda)">
       <div style="font-size:.89rem;font-weight:600">{{ b.rotulo }}</div>
+      <span class="rg-proc {% if not b.herda %}seu{% endif %}">{% if b.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span>
       <div style="display:flex;gap:.3rem">
-        <input class="fld" style="text-align:right" name="{{ b.chave }}_n" value="{{ b.prazo_n }}">
+        <input class="fld" style="text-align:right" name="{{ b.chave }}_n" value="{{ b.n }}" placeholder="{{ b.ph }}">
         <select class="rg-uni" name="{{ b.chave }}_u">
-          {% for u, r in unidades %}<option value="{{ u }}" {% if b.prazo_u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
+          {% for u, r in unidades %}<option value="{{ u }}" {% if b.u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
         </select>
       </div>
     </div>
     {% endfor %}
+    <p class="mut" style="font-size:.75rem;line-height:1.5;margin:.6rem 0 0;padding-top:.5rem;border-top:1px solid var(--borda)">
+      Campo em branco usa o padrão do seu ramo (o número cinza). Para voltar ao padrão depois de mudar, apague o campo e salve.
+    </p>
   </div>
 
   <!-- ---------------- janela + escalonamento ---------------- -->
@@ -15228,14 +15306,50 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
     <div class="fsec">
       <div class="sh"><b>Escalonamento</b></div>
-      <label class="lbl" style="margin-top:.3rem">Depois de quanto tempo sem toque escala pro gestor</label>
+      <label class="lbl lblp" style="margin-top:.3rem">Depois de quanto tempo sem toque escala pro gestor
+        <span class="rg-proc {% if not esc.herda %}seu{% endif %}">{% if esc.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
       <div style="display:flex;gap:.3rem">
-        <input class="fld" style="text-align:right" name="escala_n" value="{{ (cfg.escala_min // 60) or 4 }}">
-        <select class="rg-uni" name="escala_u"><option value="h" selected>horas</option><option value="d">dias</option></select>
+        <input class="fld" style="text-align:right" name="escala_n" value="{{ esc.n }}" placeholder="{{ esc.ph }}">
+        <select class="rg-uni" name="escala_u">
+          {% for u, r in unidades %}<option value="{{ u }}" {% if esc.u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
+        </select>
       </div>
-      <label class="lbl" style="margin-top:.7rem">Teto de avisos por vendedor / dia</label>
-      <input class="fld" name="teto" value="{{ cfg.teto_avisos_dia }}">
+      <label class="lbl lblp" style="margin-top:.7rem">Teto de avisos por vendedor / dia
+        <span class="rg-proc {% if not teto.herda %}seu{% endif %}">{% if teto.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+      <input class="fld" name="teto" value="{{ teto.v }}" placeholder="{{ teto.ph }}">
       <p class="mut" style="font-size:.76rem;line-height:1.5;margin:.55rem 0 0">Passou do teto, vira um resumo só no fim do expediente.</p>
+    </div>
+  </div>
+
+  <!-- ---------------- follow-up ----------------
+       Estes quatro números existiam desde 07/09 e NÃO tinham tela: mudar a escada
+       de toques era deploy. Parametrizar só vale se o dono alcançar o número. -->
+  <div class="fsec" style="margin-top:.9rem">
+    <div class="sh"><b>Prazos do follow-up</b><span class="mut" style="font-size:.76rem">a chave de ligar fica na aba Follow-up — aqui só os números</span></div>
+    <div class="fgrid" style="grid-template-columns:repeat(2,1fr);gap:.8rem;margin-top:.5rem">
+      <div>
+        <label class="lbl lblp">Proposta parada cobra depois de (dias)
+          <span class="rg-proc {% if not fup.proposta.herda %}seu{% endif %}">{% if fup.proposta.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+        <input class="fld" name="fu_proposta_dias" value="{{ fup.proposta.v }}" placeholder="{{ fup.proposta.ph }}">
+      </div>
+      <div>
+        <label class="lbl lblp">Escada de toques, em dias
+          <span class="rg-proc {% if not fup.toques.herda %}seu{% endif %}">{% if fup.toques.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+        <input class="fld" name="fu_toques_dias" value="{{ fup.toques.v }}" placeholder="{{ fup.toques.ph }}">
+        <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Separe por vírgula. <b>1,3,7</b> = três tentativas em D1, D3 e D7.</p>
+      </div>
+      {% if fup.festa.tem %}
+      <div>
+        <label class="lbl lblp">Data do evento perto aperta o prazo (dias)
+          <span class="rg-proc {% if not fup.festa.herda %}seu{% endif %}">{% if fup.festa.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+        <input class="fld" name="fu_festa_dias" value="{{ fup.festa.v }}" placeholder="{{ fup.festa.ph }}">
+      </div>
+      {% endif %}
+      <div>
+        <label class="lbl lblp">Teto de leads cobrados por vendedor / dia
+          <span class="rg-proc {% if not fup.teto.herda %}seu{% endif %}">{% if fup.teto.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+        <input class="fld" name="fu_teto_dia" value="{{ fup.teto.v }}" placeholder="{{ fup.teto.ph }}">
+      </div>
     </div>
   </div>
 

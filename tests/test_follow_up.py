@@ -641,13 +641,25 @@ def test_a_chave_de_ligar_saiu_da_regua_e_o_nicho_continua_valendo():
                 dias_on={1, 2, 3, 4, 5, 6}, n_mov=0, gerencia=True, request=None,
                 caps={"vendas": True, "origens": True}, raio_x_perfil=EVENTOS,
                 tem_follow_up=True,
+                rot_ramo="eventos", janela_herda=True,
+                esc={"n": "", "u": "h", "ph": "4", "herda": True},
+                teto={"v": "", "ph": "5", "herda": True},
+                fup={"proposta": {"v": "", "ph": "3", "herda": True},
+                     "toques": {"v": "", "ph": "2,4,7,15", "herda": True},
+                     "festa": {"v": "", "ph": "30", "herda": True, "tem": True},
+                     "teto": {"v": "", "ph": "15", "herda": True}},
                 cfg=dict(fu._PADRAO, gatilhos_modo="off", cobranca_modo="off",
                          janela_abre=time(8), janela_fecha=time(19), teto_avisos_dia=5,
                          sem_resposta_min=120, bola_nossa_min=240, bola_cliente_min=4320,
                          escala_min=240, janela_dias="1,2,3,4,5,6"))
     bloco = t.blocks["conteudo"]
     regua = "".join(bloco(t.new_context(base)))
-    assert "Follow-up automático" not in regua, "a chave voltou pra Régua"
+    # A trava é sobre a CHAVE DE LIGAR, não sobre a palavra: desde 11/09/2026 a
+    # Régua carrega os PRAZOS do follow-up (parametrização — o dono precisa alcançar
+    # o número sem deploy). Procurar o texto "Follow-up automático" confundia as duas
+    # coisas e barraria a tela certa; o que não pode voltar é o seletor de modo.
+    assert 'name="follow_up_modo"' not in regua, "a chave voltou pra Régua"
+    assert "Prazos do follow-up" in regua, "os prazos do follow-up sumiram da Régua"
     # os dois motores que continuam sendo dela
     assert "Gatilhos das etapas" in regua and "Cobrança por prazo" in regua
     # e a chave está na tela do Follow-up, com o portão do nicho na aba

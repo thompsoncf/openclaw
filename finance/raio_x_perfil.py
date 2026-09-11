@@ -24,6 +24,7 @@ aqui que os testes conferem que nenhuma palavra de festa vaza pro recorrente.
 from __future__ import annotations
 
 import re
+from datetime import time
 
 from finance import nichos as _n
 
@@ -69,6 +70,70 @@ _PERFIS = {
         "filtros": (), "blocos": (), "faixas": (),
     },
 }
+
+# ---------------------------------------------------------------- o funil do perfil
+#
+# O PADRÃO DE FUNIL DE CADA NICHO, e por que ele mora aqui.
+#
+# Até 11/09/2026 cada número da régua era `NOT NULL DEFAULT <valor>` no banco: o
+# valor era COPIADO pra dentro da conta no dia em que ela nascia. Medido nesse dia:
+# as 6 contas com config carregavam exatamente os mesmos 17 valores, e nenhuma
+# delas tinha escolhido nenhum. O efeito de copiar é que melhorar o padrão depois
+# não alcança ninguém — cada conta carrega a cópia velha e, olhando o banco, parece
+# ter escolhido aquilo.
+#
+# Agora a coluna nasce NULL e NULL quer dizer "usa o padrão do meu perfil". Quem
+# nunca mexeu recebe a melhoria no mesmo dia; quem mexeu mantém a escolha. É a
+# mesma ideia do vocabulário e dos motivos logo acima: o que é do NICHO fica aqui,
+# versionado e revisado, e o que é da EMPRESA fica no banco.
+#
+# Os números de 'eventos' são os que já estavam em produção — este passo é só a
+# mecânica, e mudar valor aqui muda o comportamento de quem herda. Os de
+# 'recorrente' repetem por enquanto, com UMA diferença declarada: `fu_festa_dias`
+# é None, porque quem vende mensalidade não tem segundo relógio. Isso era um `if`
+# escondido no motor (`tem_data`); aqui vira propriedade do perfil, que é onde dá
+# pra ler sem abrir o código do motor.
+_FUNIL_POR_PERFIL = {
+    "eventos": {
+        "janela_dias": "1,2,3,4,5,6", "janela_abre": time(8, 0), "janela_fecha": time(19, 0),
+        "sem_resposta_min": 120, "bola_nossa_min": 240, "bola_cliente_min": 4320,
+        "escala_min": 240, "teto_avisos_dia": 5,
+        "fu_proposta_dias": 3, "fu_toques_dias": "2,4,7,15", "fu_festa_dias": 30,
+        "fu_teto_dia": 15,
+    },
+    "recorrente": {
+        "janela_dias": "1,2,3,4,5", "janela_abre": time(8, 0), "janela_fecha": time(19, 0),
+        "sem_resposta_min": 120, "bola_nossa_min": 240, "bola_cliente_min": 4320,
+        "escala_min": 240, "teto_avisos_dia": 5,
+        "fu_proposta_dias": 3, "fu_toques_dias": "2,4,7,15", "fu_festa_dias": None,
+        "fu_teto_dia": 15,
+    },
+    # produto não tem funil nem vendedor (ver o docstring): nada a herdar.
+    "produto": None,
+}
+
+#: as chaves que a conta pode sobrescrever. Os MODOS (gatilhos/cobranca/follow_up)
+#: ficam de fora de propósito: 'off' é uma escolha, não uma herança — quem liga
+#: uma automação está dizendo algo sobre a empresa dele, não sobre o ramo.
+CHAVES_FUNIL = tuple(_FUNIL_POR_PERFIL["eventos"])
+
+
+def funil_padrao(chave_perfil: str) -> dict:
+    """O padrão de funil do perfil. Perfil sem funil (produto) devolve {}."""
+    return dict(_FUNIL_POR_PERFIL.get(chave_perfil) or {})
+
+
+def funil_resolvido(chave_perfil: str, da_conta: dict) -> tuple[dict, set]:
+    """Junta o padrão do nicho com o que a conta escolheu.
+
+    Devolve (valores, escolhidas) — `escolhidas` são as chaves que a CONTA gravou,
+    e é o que a tela usa pra dizer "definido por você" em vez de "padrão do nicho".
+    Sem isso o dono não tem como saber se um número é escolha dele ou herança, e
+    "voltar ao padrão" vira um botão que ninguém sabe o que faz.
+    """
+    base = funil_padrao(chave_perfil)
+    escolhidas = {k for k in CHAVES_FUNIL if da_conta.get(k) is not None}
+    return dict(base, **{k: da_conta[k] for k in escolhidas}), escolhidas
 
 
 def perfil_por_nicho(slug: str | None) -> str:

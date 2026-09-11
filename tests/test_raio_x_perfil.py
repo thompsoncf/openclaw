@@ -85,3 +85,53 @@ def test_equipe_esconde_o_raio_x_de_segunda_pra_conta_de_produto():
     com = "".join(bloco(t.new_context(dict(base, raio_x_perfil=rxp.perfil("eventos")))))
     sem = "".join(bloco(t.new_context(dict(base, raio_x_perfil=rxp.perfil("hortifruti")))))
     assert "Raio-X de segunda" in com and "Raio-X de segunda" not in sem
+
+
+# ---------------------------------------------------------------- o funil do nicho
+# Pedido do dono em 11/09/2026: "tudo isso é configurado, deixa uma forma de
+# parametrizar, porque serve pra outras empresas do mesmo nicho ou outras".
+
+def test_o_padrao_do_funil_vem_do_perfil_e_produto_nao_tem_nenhum():
+    ev, rc = rxp.funil_padrao("eventos"), rxp.funil_padrao("recorrente")
+    assert set(ev) == set(rxp.CHAVES_FUNIL) and set(rc) == set(rxp.CHAVES_FUNIL)
+    # produto não tem funil nem vendedor: não há o que herdar, e devolver o padrão
+    # de outro perfil seria inventar régua pra quem nem tem quadro.
+    assert rxp.funil_padrao("produto") == {}
+
+
+def test_o_relogio_da_data_e_do_nicho_que_vende_data():
+    """CLAUDE.md §6. Isto era um `if` escondido no motor (`tem_data`); declarar no
+    perfil é o que permite ler a regra sem abrir o código do follow-up."""
+    assert rxp.funil_padrao("eventos")["fu_festa_dias"] == 30
+    assert rxp.funil_padrao("recorrente")["fu_festa_dias"] is None
+
+
+def test_o_sabado_e_do_ramo_que_trabalha_no_sabado():
+    """O primeiro número que diverge de verdade entre os dois perfis — e a prova de
+    que a herança serve pra alguma coisa. Empresa de evento atende sábado (a festa
+    é no sábado); consultoria, não."""
+    assert "6" in rxp.funil_padrao("eventos")["janela_dias"].split(",")
+    assert "6" not in rxp.funil_padrao("recorrente")["janela_dias"].split(",")
+
+
+def test_vazio_herda_e_o_que_a_conta_gravou_manda():
+    """O coração da migração 228. `escolhidas` é o que a tela usa pra dizer se um
+    número é do ramo ou da empresa — sem isso, "voltar ao padrão" é um botão que
+    ninguém sabe o que faz."""
+    vals, escolhidas = rxp.funil_resolvido("eventos", {"bola_nossa_min": 60,
+                                                       "teto_avisos_dia": None})
+    assert vals["bola_nossa_min"] == 60, "a escolha da empresa tem que mandar"
+    assert vals["teto_avisos_dia"] == rxp.funil_padrao("eventos")["teto_avisos_dia"]
+    assert escolhidas == {"bola_nossa_min"}
+
+
+def test_melhorar_o_padrao_do_ramo_alcanca_quem_nunca_mexeu():
+    """O defeito que a 228 conserta, escrito como teste: com os valores COPIADOS
+    pra dentro da conta (NOT NULL DEFAULT), mudar o padrão não chegava em ninguém.
+    Medido em 11/09/2026: as 6 contas com config carregavam os mesmos 12 valores e
+    nenhuma tinha escolhido nenhum."""
+    padrao = dict(rxp.funil_padrao("eventos"))
+    padrao["fu_toques_dias"] = "1,3,7"          # o ramo melhora o padrão
+    conta_que_nunca_mexeu, conta_que_escolheu = {}, {"fu_toques_dias": "5,10"}
+    assert dict(padrao, **conta_que_nunca_mexeu)["fu_toques_dias"] == "1,3,7"
+    assert dict(padrao, **conta_que_escolheu)["fu_toques_dias"] == "5,10"

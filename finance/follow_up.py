@@ -117,8 +117,22 @@ def config(c, conta_id: int) -> dict:
              from funil_regua where conta_id=%s""", (conta_id,)).fetchone()
     if not r:
         return dict(base, **_PADRAO)
-    return dict(base, follow_up_modo=r[0], fu_proposta_dias=r[1],
-                fu_toques=_escada(r[2]), fu_festa_dias=r[3], fu_teto_dia=r[4])
+    # COLUNA VAZIA = HERDA (migração 228). `base` já traz o padrão do nicho resolvido
+    # pra estas quatro; aqui só entra o que a CONTA escolheu de verdade.
+    escolhidas = set(base.get("_escolhidas") or ())
+    vals = {"fu_proposta_dias": r[1], "fu_toques_dias": r[2],
+            "fu_festa_dias": r[3], "fu_teto_dia": r[4]}
+    escolhidas |= {k for k, v in vals.items() if v is not None}
+    out = dict(base, follow_up_modo=r[0],
+               **{k: v for k, v in vals.items() if v is not None})
+    out["_escolhidas"] = escolhidas
+    # `fu_festa_dias` é None no perfil recorrente — quem não vende festa não tem o
+    # segundo relógio, e o None é a declaração disso (não um valor faltando).
+    out.setdefault("fu_proposta_dias", _PADRAO["fu_proposta_dias"])
+    out.setdefault("fu_teto_dia", _PADRAO["fu_teto_dia"])
+    out["fu_festa_dias"] = out.get("fu_festa_dias")
+    out["fu_toques"] = _escada(out.get("fu_toques_dias"))
+    return out
 
 
 # ------------------------------------------------------------------ a escada
@@ -149,8 +163,11 @@ def prazo_automatico(*, status: str, ult_in, ult_out, criado_em, tentativas: int
                 else "insistiu demais — muda de canal ou encerra?")
         if n >= len(esc):
             acao = "insistiu demais — muda de canal ou encerra?"
-    # o segundo relógio: só existe pra quem vende festa
-    if tem_data and evento_em and status != "proposta":
+    # O segundo relógio: só existe pra quem vende festa. Duas portas pra mesma
+    # pergunta, e ambas contam: `tem_data` vem do vocabulário do perfil, e
+    # `fu_festa_dias` é None no perfil que não tem esse relógio (raio_x_perfil).
+    # Quem declara não ter data nunca deve cair aqui por um cfg mal montado.
+    if tem_data and evento_em and status != "proposta" and cfg.get("fu_festa_dias"):
         faltam = (evento_em - agora.date()).days
         if 0 <= faltam <= cfg["fu_festa_dias"] and prazo > agora:
             prazo, acao = _janela_da_festa(evento_em, criado_em, cfg), "mandar proposta — a data está chegando"

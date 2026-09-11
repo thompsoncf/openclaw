@@ -1109,6 +1109,13 @@ def mudar_etapa(pool, conta_id: int, membro_id: int, lead_id: int, chave: str) -
             return {"ok": False, "erro": "etapa_invalida"}
         antes = c.execute("select status from prospeccao where id=%s and conta_id=%s",
                           (lead_id, conta_id)).fetchone()
+        # AS SAÍDAS DA ETAPA (migração 232). A mesma trava do painel, chamando a
+        # MESMA função: duas cópias da regra viram duas regras no dia em que uma
+        # delas mudar, e o app do vendedor é justamente onde o card mais se move.
+        from finance import funil_regua as _fr
+        recusa = _fr.recusa_de_saida(c, conta_id, antes[0] if antes else None, chave)
+        if recusa:
+            return {"ok": False, "erro": "saida", "msg": recusa}
         c.execute("update prospeccao set status=%s, atualizado_em=now() "
                   "where id=%s and conta_id=%s", (chave, lead_id, conta_id))
         _historico(c, conta_id, lead_id, antes[0] if antes else None, chave, membro_id)

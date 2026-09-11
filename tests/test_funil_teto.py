@@ -89,6 +89,7 @@ def pool():
         # a migração de verdade, não uma cópia: é o único jeito de o teste perceber
         # que a coluna nova não chegou em produção
         c.execute((MIG / "230_funil_teto_da_etapa.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "232_funil_saidas_da_etapa.sql").read_text(encoding="utf-8"))
         for ch, o in _ETAPAS:
             c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem)
                          values (%s,%s,%s,%s)""", (CONTA, ch, ch.capitalize(), o))
@@ -370,3 +371,57 @@ def test_o_teto_da_ficha_some_quando_a_etapa_nao_tem_teto(c):
     teto, _hist = pp._teto_da_ficha(c, CONTA, lid, "contatado")
     assert teto and teto["estado"] == "vencido" and teto["teto_dias"] == 7
     assert 0 < teto["pct"] <= 100
+
+
+# ------------------------------------------------------------------ as saídas
+# Regra 3 do documento: "ao sair de CONTACTADO existem somente dois caminhos".
+
+def _saidas(c, chave="contatado", destinos="follow_up,proposta"):
+    c.execute("update funil_etapas set saidas_permitidas=%s where conta_id=%s and chave=%s",
+              (destinos, CONTA, chave))
+
+
+def test_sem_saida_configurada_o_funil_continua_como_sempre_foi(c):
+    """Nenhuma conta nasce restrita — e as 6 em produção seguem livres até alguém
+    marcar uma caixa na Régua."""
+    from finance import funil_regua as fr
+    assert fr.saidas_de(c, CONTA) == {}
+    assert fr.recusa_de_saida(c, CONTA, "contatado", "ganho") is None
+
+
+def test_a_saida_barrada_diz_para_onde_pode_ir(c):
+    """Um "movimento não permitido" manda a pessoa adivinhar — e adivinhar num
+    funil de 275 leads é como a regra vira algo que a equipe contorna arrastando
+    pra qualquer outra coluna."""
+    from finance import funil_regua as fr
+    _saidas(c)
+    msg = fr.recusa_de_saida(c, CONTA, "contatado", "ganho")
+    assert msg and "Proposta" in msg and "só pode ir para" in msg
+    assert fr.recusa_de_saida(c, CONTA, "contatado", "proposta") is None
+
+
+def test_ficar_na_mesma_etapa_nunca_e_barrado(c):
+    """Salvar a ficha sem trocar de coluna não é uma saída. Recusar isso travaria
+    o vendedor por nada."""
+    from finance import funil_regua as fr
+    _saidas(c)
+    assert fr.recusa_de_saida(c, CONTA, "contatado", "contatado") is None
+    assert fr.pode_mover(fr.saidas_de(c, CONTA), None, "ganho") is True
+
+
+def test_a_trava_e_da_MAO_e_nao_do_gatilho(c):
+    """A decisão mais importante desta regra, e a que o documento não tinha como
+    prever: gatilho não é alguém escolhendo para onde levar o card — é um FATO que
+    já aconteceu sendo anotado. Barrar fato faria o funil voltar a mentir, que é o
+    problema que esta régua existe pra resolver (74 dos 81 leads "parados em Novo"
+    em 18/08/2026 já tinham resposta nossa na conversa).
+
+    `aplicar_gatilhos` não consulta `saidas_de` em lugar nenhum — e é isso que este
+    teste fixa, lendo o código: se alguém acoplar as duas coisas, quebra aqui.
+    """
+    import inspect
+
+    from finance import funil_regua as fr
+    fonte = inspect.getsource(fr.aplicar_gatilhos)
+    assert "saidas_de" not in fonte and "pode_mover" not in fonte, \
+        "o gatilho passou a obedecer a trava de saída — fato não se barra"

@@ -7828,6 +7828,7 @@ def regua_pagina(request: Request):
         # o total é derivado, e mostrar derivado evita a conta de cabeça que faz o
         # dono digitar 21 onde o campo pede o PERÍODO
         e["teto_total"] = (e["teto_dias"] or 0) * ((e["renovacoes_max"] or 0) + 1)
+        e["saidas_lista"] = _fr._lista(e.get("saidas_permitidas"))
         e["prazo_n"], e["prazo_u"] = _min_par(e["prazo_min"])
         e["gatilho_rot"] = _fr.EVENTOS.get(e["gatilho"] or "", "")
     # PROCEDÊNCIA DE CADA CAMPO (migração 228). Campo em branco = herda o padrão do
@@ -7960,6 +7961,11 @@ async def regua_etapa(request: Request, eid: int):
         teto = None if r[0] in ("ganho", "perdido") else _inteiro(f.get("teto_dias"))
         renov = _inteiro(f.get("renovacoes_max"), minimo=0) or 0
         exige = str(f.get("exige_justificativa") or "").lower() in ("1", "on", "true", "sim")
+        # só chaves que existem nesta conta, e nunca a própria etapa: uma saída pra
+        # si mesma não é saída, e chave inventada viraria uma trava que barra tudo
+        validas = {x[0] for x in c.execute(
+            "select chave from funil_etapas where conta_id=%s", (ctx["conta_id"],)).fetchall()}
+        saidas = ",".join(x for x in f.getlist("saidas") if x in validas and x != r[0]) or None
         c.execute("""update funil_etapas
                         set rotulo = coalesce(nullif(%s,''), rotulo),
                             prazo_min = %s, gatilho = %s,
@@ -7967,9 +7973,11 @@ async def regua_etapa(request: Request, eid: int):
                             -- "ativa" apontando pro vazio e o motor rodaria em falso.
                             -- O ::text é pro Postgres saber o tipo do parâmetro solto.
                             gatilho_ativo = (%s and %s::text is not null),
-                            teto_dias = %s, renovacoes_max = %s, exige_justificativa = %s
+                            teto_dias = %s, renovacoes_max = %s, exige_justificativa = %s,
+                            saidas_permitidas = %s
                       where id=%s and conta_id=%s""",
-                  (rot, prazo, gat, ativo, gat, teto, renov, exige, eid, ctx["conta_id"]))
+                  (rot, prazo, gat, ativo, gat, teto, renov, exige, saidas,
+                   eid, ctx["conta_id"]))
         c.commit()
     return JSONResponse({"ok": True, "gatilho_ativo": bool(ativo and gat)})
 
@@ -8648,6 +8656,12 @@ async def prospeccao_status(request: Request, alvo_id: int):
     alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
     if not alvo or not _pode_ver(alvo, ctx):
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    # AS SAÍDAS DA ETAPA (migração 232). A trava é do lado do servidor porque o
+    # arrastar do kanban é um POST: esconder a coluna na tela não impediria nada.
+    with pool.connection() as c:
+        recusa = _fr.recusa_de_saida(c, ctx["conta_id"], alvo["status"], status)
+    if recusa:
+        return JSONResponse({"ok": False, "erro": "saida", "msg": recusa}, status_code=400)
     # Mudar a fase no funil implica que é um lead sendo trabalhado: se ainda estava
     # na base, promove pro funil (estagio='lead') mantendo a fase escolhida — senão
     # ele sumiria (base não aparece no funil). Quem já é lead só troca de coluna.
@@ -15534,6 +15548,20 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             exigir justificativa pra renovar
           </label>
           <span class="mut" style="font-size:.7rem">em branco = sem teto</span>
+        </div>
+        <!-- AS SAÍDAS (migração 232). Nenhuma marcada = pode ir pra qualquer lugar,
+             que é como o funil sempre funcionou. A trava é do servidor: esconder a
+             coluna na tela não impediria o arrastar, que é um POST. -->
+        <div style="display:flex;align-items:center;gap:.5rem;margin:.4rem 0 0 1.35rem;flex-wrap:wrap;font-size:.74rem;color:var(--txt-mut)">
+          <span>daqui a mão só leva para</span>
+          {% for d in etapas if d.chave != e.chave %}
+          <label class="chk" style="display:inline-flex;align-items:center;gap:.3rem;cursor:pointer">
+            <input type="checkbox" name="saidas" value="{{ d.chave }}"
+                   {% if d.chave in e.saidas_lista %}checked{% endif %}
+                   style="width:auto;margin:0;accent-color:var(--verde)">{{ d.rotulo }}
+          </label>
+          {% endfor %}
+          <span class="mut" style="font-size:.7rem">nenhuma marcada = qualquer uma</span>
         </div>
         {% endif %}
         <div style="display:flex;justify-content:flex-end;margin-top:.4rem">

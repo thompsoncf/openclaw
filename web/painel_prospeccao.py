@@ -7825,6 +7825,9 @@ def regua_pagina(request: Request):
                           (ctx["conta_id"],)).fetchone()[0]
     for e in linhas:
         e["n"] = n_por.get(e["chave"], 0)
+        # o total é derivado, e mostrar derivado evita a conta de cabeça que faz o
+        # dono digitar 21 onde o campo pede o PERÍODO
+        e["teto_total"] = (e["teto_dias"] or 0) * ((e["renovacoes_max"] or 0) + 1)
         e["prazo_n"], e["prazo_u"] = _min_par(e["prazo_min"])
         e["gatilho_rot"] = _fr.EVENTOS.get(e["gatilho"] or "", "")
     # PROCEDÊNCIA DE CADA CAMPO (migração 228). Campo em branco = herda o padrão do
@@ -7902,14 +7905,14 @@ async def regua_config(request: Request):
         # `coalesce(%s, <coluna>)`, que queria dizer "em branco mantém o que estava"
         # — e com isso não havia jeito nenhum de VOLTAR ao padrão depois de digitar
         # um número uma vez. Agora apagar o campo É o botão de voltar ao padrão.
-        c.execute("""update funil_regua set gatilhos_modo=%s, cobranca_modo=%s,
+        c.execute("""update funil_regua set gatilhos_modo=%s, cobranca_modo=%s, teto_modo=%s,
                        janela_dias=%s, janela_abre=%s, janela_fecha=%s,
                        sem_resposta_min=%s, bola_nossa_min=%s, bola_cliente_min=%s,
                        escala_min=%s, teto_avisos_dia=%s,
                        fu_proposta_dias=%s, fu_toques_dias=%s, fu_festa_dias=%s,
                        fu_teto_dia=%s, atualizado_em=now()
                      where conta_id=%s""",
-                  (modo("gatilhos_modo"), modo("cobranca_modo"),
+                  (modo("gatilhos_modo"), modo("cobranca_modo"), modo("teto_modo"),
                    dias, abre, fecha,
                    _par_min(f.get("sem_resposta_n"), f.get("sem_resposta_u")),
                    _par_min(f.get("bola_nossa_n"), f.get("bola_nossa_u")),
@@ -7951,15 +7954,22 @@ async def regua_etapa(request: Request, eid: int):
         # a criar um alarme que nunca deveria tocar.
         if r[0] in ("ganho", "perdido"):
             prazo = None
+        # O teto é da etapa (migração 230). Etapa de resultado não tem teto pela
+        # mesma razão que não tem prazo: "está em Perdido há 30 dias" é o fim da
+        # história, não uma cobrança.
+        teto = None if r[0] in ("ganho", "perdido") else _inteiro(f.get("teto_dias"))
+        renov = _inteiro(f.get("renovacoes_max"), minimo=0) or 0
+        exige = str(f.get("exige_justificativa") or "").lower() in ("1", "on", "true", "sim")
         c.execute("""update funil_etapas
                         set rotulo = coalesce(nullif(%s,''), rotulo),
                             prazo_min = %s, gatilho = %s,
                             -- ligar sem escolher evento não liga nada: a etapa ficaria
                             -- "ativa" apontando pro vazio e o motor rodaria em falso.
                             -- O ::text é pro Postgres saber o tipo do parâmetro solto.
-                            gatilho_ativo = (%s and %s::text is not null)
+                            gatilho_ativo = (%s and %s::text is not null),
+                            teto_dias = %s, renovacoes_max = %s, exige_justificativa = %s
                       where id=%s and conta_id=%s""",
-                  (rot, prazo, gat, ativo, gat, eid, ctx["conta_id"]))
+                  (rot, prazo, gat, ativo, gat, teto, renov, exige, eid, ctx["conta_id"]))
         c.commit()
     return JSONResponse({"ok": True, "gatilho_ativo": bool(ativo and gat)})
 
@@ -8183,6 +8193,72 @@ def prospeccao_evento_confirmar(request: Request, alvo_id: int):
     return JSONResponse({"ok": True})
 
 
+_TETO_COR = {"ok": ("var(--verde)", "#10241A", "#1E4A3A"),
+             "avisar": ("var(--ambar)", "#241C0F", "#5A4520"),
+             "vencido": ("var(--coral)", "#241313", "#5A2B2B"),
+             "esgotado": ("var(--coral)", "#241313", "#5A2B2B")}
+
+
+def _teto_da_ficha(c, conta_id: int, lead_id: int, status: str):
+    """O estado do teto deste lead, pronto pra tela — ou (None, []) quando a etapa
+    não tem teto, que é como toda conta nasce.
+
+    Best-effort: a ficha do lead é a tela mais usada do produto, e nenhuma régua
+    vale derrubá-la. Erro aqui vira "sem teto", não vira erro 500.
+    """
+    try:
+        from finance import funil_teto as _ft
+        regras = _ft.etapas_com_teto(c, conta_id)
+        regra = regras.get(status)
+        if not regra:
+            return None, []
+        desde = _ft.na_etapa_desde(c, lead_id)
+        if not desde:
+            return None, []
+        cfg = _ft.config(c, conta_id)
+        e = _ft.estado(desde=desde, renovacoes=_ft.renovacoes_de(c, lead_id, status),
+                       regra=regra, agora=_agora(), avisar_antes=cfg["teto_avisar_antes"])
+        cor, fundo, borda = _TETO_COR.get(e["estado"], _TETO_COR["ok"])
+        e.update(rotulo=_ft.ROTULO.get(e["estado"], ""), cor=cor, cor_fundo=fundo,
+                 cor_borda=borda, teto_dias=regra["teto_dias"],
+                 exige_justificativa=regra["exige_justificativa"],
+                 pct=min(100, max(2, round(100 * e["dias"] / max(1, e["total_dias"])))))
+        return e, _ft.historico(c, lead_id, 5)
+    except Exception:  # noqa: BLE001
+        return None, []
+
+
+@router.post("/painel/prospeccao/{alvo_id}/renovar")
+async def prospeccao_renovar(request: Request, alvo_id: int):
+    """Renova o prazo da etapa deste lead. A trava do dono mora no motor
+    (`funil_teto.renovar` RECUSA sem justificativa); aqui só se conta o que
+    aconteceu, porque validar em dois lugares é ter duas regras."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    f = await request.form()
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    from finance import funil_teto as _ft
+    with pool.connection() as c:
+        regra = _ft.etapas_com_teto(c, ctx["conta_id"]).get(alvo["status"])
+        if not regra:
+            request.session["prosp_aviso"] = "Esta etapa não tem teto de dias."
+            return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
+        r = _ft.renovar(c, ctx["conta_id"], alvo_id, etapa=alvo["status"], regra=regra,
+                        membro_id=ctx["membro_id"],
+                        justificativa=(f.get("justificativa") or ""))
+        if r.get("ok"):
+            c.commit()
+    request.session["prosp_aviso"] = {
+        "justificativa": "Escreva a justificativa — sem ela a renovação não é liberada.",
+        "sem_renovacao": "As renovações desta etapa acabaram. Leve o lead adiante ou para o follow-up.",
+    }.get(r.get("erro"), f"Prazo renovado · restam {r.get('restam', 0)}")
+    return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
+
+
 @router.get("/painel/prospeccao/{alvo_id}", response_class=HTMLResponse)
 def prospeccao_ficha(request: Request, alvo_id: int):
     ctx, redir = _acesso(request)
@@ -8207,8 +8283,9 @@ def prospeccao_ficha(request: Request, alvo_id: int):
         # card some assim que o vendedor abre a ficha (é a ficha que abre na gaveta) —
         # e é aqui, com o telefone na mão pra ligar, que saber disso muda o que ele faz.
         avisos = avisos_do_numero_da_ficha(c, ctx, alvo, alvo_id)
+        teto, teto_hist = _teto_da_ficha(c, ctx["conta_id"], alvo_id, alvo["status"])
     return _render("prospeccao_ficha", request, titulo=alvo["empresa"], secao_ativa="prospeccao",
-                   **avisos,
+                   **avisos, teto=teto, teto_hist=teto_hist,
                    canais_contato=canais_contato, origem_ch=origem_ch,
                    a=alvo, timeline=timeline, status=status_ficha, temperaturas=TEMPERATURAS,
                    tipos=TIPOS, resultados=RESULTADOS, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
@@ -11521,6 +11598,47 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% if a.valor %}<div class="drow"><span class="ic">💰</span><span class="lb">Valor est.</span><span style="color:var(--verde-claro)">{{ brl(a.valor) }}</span></div>{% endif %}
         {% if a.proximo_contato_em %}<div class="drow"><span class="ic">📅</span><span class="lb">Próximo</span><span style="color:var(--verde-claro)">{{ a.proximo_contato_em.strftime('%d/%m/%Y') }}</span></div>{% endif %}
         {% if a.obs %}<div class="drow"><span class="ic">📝</span><span class="lb">Obs</span><span>{{ a.obs }}</span></div>{% endif %}
+        {% if teto %}
+        <!-- O TETO DA ETAPA (migração 230). Fica na ficha, e não só no card, porque
+             é aqui que cabe a caixa de justificativa — e a justificativa é a regra,
+             não um detalhe: sem ela a renovação não sai. -->
+        <div style="margin-top:.6rem;border-top:1px solid var(--borda);padding-top:.6rem">
+          <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+            <span class="ic">⏱️</span>
+            <b style="font-size:.86rem">{{ teto.dias|round|int }} de {{ teto.total_dias }} dias nesta etapa</b>
+            <span class="rg-tag" style="background:{{ teto.cor_fundo }};border:1px solid {{ teto.cor_borda }};color:{{ teto.cor }}">{{ teto.rotulo }}</span>
+          </div>
+          <div style="height:6px;border-radius:99px;background:var(--bg);border:1px solid var(--borda);overflow:hidden;margin:.45rem 0 .3rem">
+            <i style="display:block;height:100%;width:{{ teto.pct }}%;background:{{ teto.cor }}"></i>
+          </div>
+          <div class="mut" style="font-size:.74rem">
+            período {{ teto.periodo }} de {{ teto.periodos }} ·
+            {% if teto.restam %}{{ teto.restam }} renovação(ões) restante(s){% else %}sem nova renovação{% endif %}
+          </div>
+          {% if teto.restam and teto.estado in ('avisar','vencido') %}
+          <form method="post" action="/painel/prospeccao/{{ a.id }}/renovar" style="margin-top:.5rem">
+            {% if teto.exige_justificativa %}
+            <textarea class="fld" name="justificativa" rows="2" required
+                      placeholder="Por que este lead precisa de mais {{ teto.teto_dias }} dias aqui?"
+                      style="font-size:.8rem"></textarea>
+            <div class="mut" style="font-size:.72rem;margin:.25rem 0 .4rem">Obrigatório. Sem justificativa a renovação não é liberada.</div>
+            {% endif %}
+            <button class="pbtn ghost" style="font-size:.8rem">Renovar +{{ teto.teto_dias }} dias</button>
+          </form>
+          {% elif not teto.restam and teto.estado == 'esgotado' %}
+          <div class="mut" style="font-size:.74rem;margin-top:.4rem;color:var(--coral)">
+            Teto atingido — leve o lead adiante ou para o follow-up.
+          </div>
+          {% endif %}
+          {% if teto_hist %}
+          <div style="margin-top:.5rem;font-size:.73rem;color:var(--txt-mut);line-height:1.6">
+            {% for h in teto_hist %}
+            <div>· {{ h.em.strftime('%d/%m') }} — {{ h.quem }}{% if h.justificativa %}: “{{ h.justificativa }}”{% elif h.automatica %}: renovada sozinha (cliente respondeu){% endif %}</div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+        {% endif %}
         {% if a.receita %}
         <div style="margin-top:.6rem;border-top:1px solid var(--borda);padding-top:.5rem">
           <div class="lb" style="text-transform:uppercase;letter-spacing:.03em;margin-bottom:.2rem">🧾 Receita Federal{% if a.receita.fonte %} · <span style="opacity:.7">{{ a.receita.fonte }}</span>{% endif %}</div>
@@ -15239,7 +15357,8 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div class="sh"><b>Estado</b><span class="mut" style="font-size:.76rem">tudo construído · você decide quando cada parte age</span></div>
     {% for campo, nome, desc in [
         ('gatilhos_modo','Gatilhos das etapas','movem o card sozinhos quando o fato acontece'),
-        ('cobranca_modo','Cobrança por prazo','avisa o vendedor e escala pro gestor')] %}
+        ('cobranca_modo','Cobrança por prazo','avisa o vendedor e escala pro gestor'),
+        ('teto_modo','Teto de dias na etapa','avisa antes de vencer e trava a renovação sem justificativa')] %}
     {#- O Follow-up automático SAIU daqui em 07/09/2026, por decisão do dono: ele
         se liga na própria aba Follow-up. A tela de lá dizia "ligue na Régua do
         funil" — mandava a pessoa embora pra ligar o que ela estava olhando. -#}
@@ -15396,6 +15515,28 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <option value="">— só na mão —</option>
             {% for ev, rot in eventos %}<option value="{{ ev }}" {% if e.gatilho==ev %}selected{% endif %}>{{ rot }}</option>{% endfor %}
           </select>
+        </div>
+        {% if e.chave not in ('ganho','perdido') %}
+        <!-- O TETO DE DIAS. É propriedade de QUALQUER etapa, não "a regra do
+             Contactado": o teto de 21 dias da Prime é 7 dias × 2 renovações
+             preenchido aqui, e outra empresa põe outro número — ou nenhum. -->
+        <div style="display:flex;align-items:center;gap:.5rem;margin:.45rem 0 0 1.35rem;flex-wrap:wrap;font-size:.74rem;color:var(--txt-mut)">
+          <span>no máximo</span>
+          <input class="fld" name="teto_dias" value="{{ e.teto_dias or '' }}" placeholder="—"
+                 style="width:54px;text-align:right" inputmode="numeric">
+          <span>dias aqui, com</span>
+          <input class="fld" name="renovacoes_max" value="{{ e.renovacoes_max or 0 }}"
+                 style="width:46px;text-align:right" inputmode="numeric">
+          <span>renovação(ões){% if e.teto_dias %} · total de <b style="color:var(--txt)">{{ e.teto_total }} dias</b>{% endif %}</span>
+          <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;cursor:pointer">
+            <input type="checkbox" name="exige_justificativa" value="1" {% if e.exige_justificativa %}checked{% endif %}
+                   style="width:auto;margin:0;accent-color:var(--ambar)">
+            exigir justificativa pra renovar
+          </label>
+          <span class="mut" style="font-size:.7rem">em branco = sem teto</span>
+        </div>
+        {% endif %}
+        <div style="display:flex;justify-content:flex-end;margin-top:.4rem">
           <button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem">Salvar</button>
         </div>
       </form>

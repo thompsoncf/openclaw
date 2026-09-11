@@ -309,10 +309,15 @@ _SQL_EVENTO = {
 
 def etapas(c, conta_id: int) -> list[dict]:
     rows = c.execute(
-        """select chave, rotulo, ordem, fixa, fase, prazo_min, gatilho, gatilho_ativo, id
+        """select chave, rotulo, ordem, fixa, fase, prazo_min, gatilho, gatilho_ativo, id,
+                  teto_dias, coalesce(renovacoes_max, 0), coalesce(exige_justificativa, true),
+                  renova_sozinho_h
              from funil_etapas where conta_id=%s order by ordem, id""", (conta_id,)).fetchall()
     return [{"chave": r[0], "rotulo": r[1], "ordem": r[2], "fixa": r[3], "fase": r[4],
-             "prazo_min": r[5], "gatilho": r[6], "gatilho_ativo": r[7], "id": r[8]} for r in rows]
+             "prazo_min": r[5], "gatilho": r[6], "gatilho_ativo": r[7], "id": r[8],
+             # o teto da etapa (migração 230) — quem lê etapas já lê tudo dela
+             "teto_dias": r[9], "renovacoes_max": r[10], "exige_justificativa": r[11],
+             "renova_sozinho_h": r[12]} for r in rows]
 
 
 def chaves_fechadas(etapas_: list[dict]) -> list[str]:

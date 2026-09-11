@@ -276,6 +276,18 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — régua falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
+                # O teto de dias na etapa: avisa antes de vencer e renova sozinho o
+                # lead que voltou a conversar (quando a etapa liga isso). Inerte por
+                # padrão — nasce 'off' e nenhuma etapa nasce com teto.
+                from finance import funil_teto as _fteto
+                _t = _fteto.rodar(pool)
+                if _t["contas"]:
+                    log.info("poller: ciclo #%d — teto: %d conta(s), %d aviso(s), "
+                             "%d simulado(s), %d renovado(s)",
+                             ciclo, _t["contas"], _t["avisos"], _t["simulados"], _t["renovados"])
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — teto falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
                 # O follow-up: sincroniza a próxima ação proposta e cobra quem
                 # deixou vencer. Inerte por padrão — só entra em conta que ligou
                 # (follow_up_modo <> 'off'), e nasce desligada.

@@ -28,6 +28,8 @@ create table prospeccao (id bigserial primary key, conta_id bigint, status text 
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
   ordem int default 0, fixa boolean default false, fase text default 'venda',
   prazo_min integer, gatilho text, gatilho_ativo boolean default false,
+  teto_dias integer, renovacoes_max integer not null default 0,
+  exige_justificativa boolean not null default true, renova_sozinho_h integer,
   criado_em timestamptz default now(), constraint uq_fe unique (conta_id, chave));
 create table funil_regua (conta_id bigint primary key,
   gatilhos_modo text default 'off', cobranca_modo text default 'off',
@@ -40,6 +42,8 @@ create table funil_regua (conta_id bigint primary key,
   -- justamente o caso que a tela precisa saber mostrar.
   follow_up_modo text default 'off', fu_proposta_dias int, fu_toques_dias text,
   fu_festa_dias int, fu_teto_dia int,
+  -- o quarto modo (migração 230): um interruptor POR REGRA, não um geral
+  teto_modo text not null default 'off', teto_avisar_antes int,
   atualizado_em timestamptz default now());
 create table funil_movimentos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   de text, para text, motivo text, membro_id bigint, criado_em timestamptz default now());

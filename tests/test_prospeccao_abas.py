@@ -177,6 +177,10 @@ def test_a_ficha_do_lead_continua_atendendo_id():
     """E o conserto não pode ter roubado o caminho de quem é dono dele."""
     assert _resolve("/painel/prospeccao/629") == "prospeccao_ficha"
     assert _resolve("/painel/prospeccao/629/status", "POST") == "prospeccao_status"
+    # o teto da etapa (11/09/2026) entrou com a mesma forma das rotas da ficha —
+    # a pergunta é feita ao router justamente porque ler a ordem no arquivo não
+    # teria pego o 422 da Régua
+    assert _resolve("/painel/prospeccao/629/renovar", "POST") == "prospeccao_renovar"
 
 
 # ── as duas que vieram do menu lateral (07/09/2026) ────────────────────────

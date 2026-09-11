@@ -32,6 +32,9 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   constraint uq_prospeccao_conta_cpf unique (conta_id, cpf));
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
   rotulo text, ordem int default 0, fixa boolean default false,
+  -- migração 238: a etapa que o quadro comercial não mostra
+  sai_do_quadro boolean not null default false,
+  agenda_ao_entrar boolean not null default false,
   criado_em timestamptz default now(), constraint uq_funil_etapa unique (conta_id, chave));
 """
 

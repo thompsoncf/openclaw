@@ -77,9 +77,19 @@ create table funil_avisos (id bigserial primary key, conta_id bigint, prospeccao
   membro_id bigint, criado_em timestamptz default now());
 create unique index uq_funil_aviso on funil_avisos
   (prospeccao_id, estado, nivel, etapa, ref_em, simulado);
+create table funil_motivos_perda (id bigserial primary key, conta_id bigint,
+  chave text, rotulo text, ordem int default 0, ativo boolean default true,
+  exige_descricao boolean default false, criado_em timestamptz default now(),
+  constraint uq_fmp unique (conta_id, chave));
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
   rotulo text, ordem int default 0, fixa boolean default false, fase text default 'venda',
-  prazo_min integer, gatilho text, gatilho_ativo boolean default false);
+  prazo_min integer, gatilho text, gatilho_ativo boolean default false,
+  teto_dias integer, renovacoes_max integer not null default 0,
+  exige_justificativa boolean not null default true, renova_sozinho_h integer,
+  saidas_permitidas text, toques_dias text,
+  exige_motivo boolean not null default false, reativa_para text,
+  sai_do_quadro boolean not null default false,
+  agenda_ao_entrar boolean not null default false);
 create table funil_regua (conta_id bigint primary key,
   gatilhos_modo text default 'off', cobranca_modo text default 'off',
   janela_dias text default '1,2,3,4,5,6', janela_abre time default '08:00',
@@ -91,6 +101,10 @@ create table funil_regua (conta_id bigint primary key,
   atualizado_em timestamptz not null default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text default 'whatsapp', visto_ate_id bigint);
+-- o histórico existe desde a 177 e passou a ser lido aqui em 11/09/2026: a escada
+-- ancorada na etapa (migração 233) precisa saber desde quando o lead está nela
+create table funil_movimentos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
+  de text, para text, motivo text, membro_id bigint, criado_em timestamptz default now());
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   texto text default '', criado_em timestamptz default now());
 """
@@ -251,12 +265,48 @@ def test_a_festa_perto_aperta_o_prazo_so_de_quem_vende_festa():
     festa = AGORA.date() + timedelta(days=12)
     p_ev, a_ev = fu.prazo_automatico(status="contatado", ult_in=None, ult_out=out, criado_em=None,
                                      tentativas=1, evento_em=festa, cfg=_cfg(), tem_data=True, agora=AGORA)
-    assert p_ev == AGORA and "data" in a_ev
+    # apertou: já vencido (a festa entrou na janela há 18 dias), e não o prazo folgado
+    assert p_ev < AGORA and p_ev != out + timedelta(days=2) and "data" in a_ev
     p_rc, a_rc = fu.prazo_automatico(status="contatado", ult_in=None, ult_out=out, criado_em=None,
                                      tentativas=1, evento_em=festa, cfg=_cfg(), tem_data=False, agora=AGORA)
     assert p_rc == out + timedelta(days=2)
     for palavra in ("festa", "data", "convidados", "visita"):
         assert palavra not in a_rc
+
+
+def test_o_prazo_da_festa_nao_muda_de_uma_passada_pra_outra():
+    """O DEFEITO DE 11/09/2026, e o teste que faltava pra pegá-lo.
+
+    O ramo da festa devolvia `agora` como prazo. Como o dedup do aviso é por
+    `ref_em` (= o prazo), cada ciclo do poller inventava um fato novo e o aviso saía
+    outra vez: no ensaio da conta 34 o lead 977 acumulou 442 avisos em quatro dias,
+    441 com `ref_em` distinto. Ligado, ele sozinho comeria a cota diária do vendedor
+    em meia hora, todo dia, represando o follow-up de verdade.
+
+    O teste antigo (`..._aperta_o_prazo_...`) passava com o defeito de pé: ele
+    chamava a função UMA vez, e um relógio errado só aparece quando se pergunta duas.
+    """
+    out = AGORA - timedelta(hours=2)
+    festa = AGORA.date() + timedelta(days=12)
+    prazos = {fu.prazo_automatico(status="contatado", ult_in=None, ult_out=out,
+                                  criado_em=AGORA - timedelta(days=40), tentativas=1,
+                                  evento_em=festa, cfg=_cfg(), tem_data=True,
+                                  agora=AGORA + timedelta(minutes=m))[0]
+              for m in (0, 2, 4, 120)}
+    assert len(prazos) == 1, f"o prazo da festa mudou entre passadas: {sorted(prazos)}"
+
+
+def test_a_janela_da_festa_nao_comeca_antes_de_o_lead_existir():
+    """Lead cadastrado com a festa JÁ dentro da janela: a abertura da janela está no
+    passado dele, e ancorar ali faria o lead nascer "atrasado há 20 dias" — número
+    que nunca foi verdade. O relógio começa quando o lead chegou."""
+    nasceu = AGORA - timedelta(hours=3)
+    # a janela abriu há 25 dias (festa em 5, `fu_festa_dias` 30); o lead tem 3 horas
+    p, _ = fu.prazo_automatico(status="contatado", ult_in=None, ult_out=AGORA - timedelta(hours=1),
+                               criado_em=nasceu, tentativas=1,
+                               evento_em=AGORA.date() + timedelta(days=5),
+                               cfg=_cfg(), tem_data=True, agora=AGORA)
+    assert p == nasceu
 
 
 def test_festa_longe_nao_aperta_nada():
@@ -605,13 +655,25 @@ def test_a_chave_de_ligar_saiu_da_regua_e_o_nicho_continua_valendo():
                 dias_on={1, 2, 3, 4, 5, 6}, n_mov=0, gerencia=True, request=None,
                 caps={"vendas": True, "origens": True}, raio_x_perfil=EVENTOS,
                 tem_follow_up=True,
+                rot_ramo="eventos", janela_herda=True,
+                esc={"n": "", "u": "h", "ph": "4", "herda": True},
+                teto={"v": "", "ph": "5", "herda": True},
+                fup={"proposta": {"v": "", "ph": "3", "herda": True},
+                     "toques": {"v": "", "ph": "2,4,7,15", "herda": True},
+                     "festa": {"v": "", "ph": "30", "herda": True, "tem": True},
+                     "teto": {"v": "", "ph": "15", "herda": True}},
                 cfg=dict(fu._PADRAO, gatilhos_modo="off", cobranca_modo="off",
                          janela_abre=time(8), janela_fecha=time(19), teto_avisos_dia=5,
                          sem_resposta_min=120, bola_nossa_min=240, bola_cliente_min=4320,
                          escala_min=240, janela_dias="1,2,3,4,5,6"))
     bloco = t.blocks["conteudo"]
     regua = "".join(bloco(t.new_context(base)))
-    assert "Follow-up automático" not in regua, "a chave voltou pra Régua"
+    # A trava é sobre a CHAVE DE LIGAR, não sobre a palavra: desde 11/09/2026 a
+    # Régua carrega os PRAZOS do follow-up (parametrização — o dono precisa alcançar
+    # o número sem deploy). Procurar o texto "Follow-up automático" confundia as duas
+    # coisas e barraria a tela certa; o que não pode voltar é o seletor de modo.
+    assert 'name="follow_up_modo"' not in regua, "a chave voltou pra Régua"
+    assert "Prazos do follow-up" in regua, "os prazos do follow-up sumiram da Régua"
     # os dois motores que continuam sendo dela
     assert "Gatilhos das etapas" in regua and "Cobrança por prazo" in regua
     # e a chave está na tela do Follow-up, com o portão do nicho na aba
@@ -986,3 +1048,79 @@ def test_sem_relogio_a_marcacao_segue_carimbando_pelo_banco(c):
     r = c.execute("""select criado_em from follow_up_marcacoes
                       where prospeccao_id=%s order by id desc limit 1""", (lead,)).fetchone()
     assert r[0] is not None, "sem `agora`, quem carimba continua sendo o now() do banco"
+
+
+# ------------------------------------------------- as tentativas como tarefas
+# Regra 4 do documento: "as três tentativas devem nascer automaticamente como
+# tarefas em D1, D3 e D7, com prazo e alerta de atraso, sem depender da lembrança
+# do vendedor". Migração 233: é a ETAPA que declara — sem isso, a escada relativa
+# à conversa continua valendo, que é o comportamento de toda conta hoje.
+
+def test_a_etapa_sem_toques_declarados_usa_a_escada_de_sempre():
+    p, a = fu.prazo_automatico(status="contatado", ult_in=None, ult_out=AGORA - timedelta(days=1),
+                               criado_em=None, tentativas=1, evento_em=None, cfg=_cfg(),
+                               tem_data=True, agora=AGORA)
+    assert p == AGORA - timedelta(days=1) + timedelta(days=2) and "toque" in a
+
+
+def test_as_tentativas_da_etapa_contam_da_ENTRADA_e_nao_da_ultima_conversa():
+    """A diferença que motivou a migração 233. Com a escada relativa, o vendedor que
+    tenta no D2 empurra a próxima pra D2+3, e o "período total de 7 dias" vira sete
+    dias depois do último esforço — que pode ser um mês depois da entrada."""
+    entrou = AGORA - timedelta(days=2)
+    p, a = fu.prazo_automatico(status="follow_up", ult_in=None, ult_out=AGORA - timedelta(hours=3),
+                               criado_em=None, tentativas=1, evento_em=None, cfg=_cfg(),
+                               tem_data=True, agora=AGORA,
+                               toques_fixos=(1, 3, 7), desde=entrou, feitos_na_etapa=1)
+    assert p == entrou + timedelta(days=3), "a 2ª tentativa é D3 da ENTRADA"
+    assert a == "2ª tentativa de 3"
+
+
+def test_feitas_as_tres_o_lead_espera_DECISAO_e_nao_vira_perdido():
+    """Perder exige motivo (regra 5), e só quem falou com o cliente sabe qual — a
+    mesma trava do teto da etapa, que também não move ninguém sozinho."""
+    entrou = AGORA - timedelta(days=8)
+    p, a = fu.prazo_automatico(status="follow_up", ult_in=None, ult_out=AGORA - timedelta(days=1),
+                               criado_em=None, tentativas=3, evento_em=None, cfg=_cfg(),
+                               tem_data=True, agora=AGORA,
+                               toques_fixos=(1, 3, 7), desde=entrou, feitos_na_etapa=3)
+    assert p == entrou + timedelta(days=7) and "encerrar ou reativar" in a
+
+
+def test_a_bola_do_cliente_continua_vindo_antes_das_tentativas():
+    """Cliente esperando resposta é mais urgente que a próxima tentativa agendada,
+    e essa ordem não muda por etapa nenhuma."""
+    ult_in = AGORA - timedelta(hours=10)
+    p, a = fu.prazo_automatico(status="follow_up", ult_in=ult_in, ult_out=AGORA - timedelta(days=3),
+                               criado_em=None, tentativas=1, evento_em=None, cfg=_cfg(),
+                               tem_data=True, agora=AGORA,
+                               toques_fixos=(1, 3, 7), desde=AGORA - timedelta(days=4),
+                               feitos_na_etapa=1)
+    assert p == ult_in + timedelta(minutes=240) and "esperando" in a
+
+
+def test_as_tarefas_nascem_com_data_e_marcam_feito_e_atrasado():
+    entrou = AGORA - timedelta(days=4)
+    t = fu.toques_da_etapa(desde=entrou, toques=(1, 3, 7), feitos=1, agora=AGORA)
+    assert [x["dia"] for x in t] == [1, 3, 7]
+    assert [x["feito"] for x in t] == [True, False, False]
+    # D1 feita; D3 já venceu e não foi feita; D7 ainda não venceu
+    assert [x["atrasado"] for x in t] == [False, True, False]
+    assert t[2]["prazo"] == entrou + timedelta(days=7)
+
+
+def test_a_lista_de_tarefas_chega_na_linha_do_lead(c):
+    """De ponta a ponta: a etapa declara, o motor calcula, a linha leva pra tela."""
+    c.execute("update funil_etapas set toques_dias='1,3,7' where conta_id=%s and chave='contatado'",
+              (CONTA,))
+    v = _vend(c)
+    lid = _lead(c, v, criado=AGORA - timedelta(days=4))
+    c.execute("""insert into funil_movimentos (conta_id, prospeccao_id, de, para, motivo, criado_em)
+                 values (%s,%s,'novo','contatado','manual',%s)""",
+              (CONTA, lid, AGORA - timedelta(days=4)))
+    _fala(c, lid, ("out", 3))       # uma tentativa saiu 1 dia depois de entrar na etapa
+    linha = [x for x in fu.leads(c, CONTA, EVENTOS, AGORA) if x["id"] == lid][0]
+    assert [t["dia"] for t in linha["toques"]] == [1, 3, 7]
+    assert linha["toques"][0]["feito"] is True and linha["toques"][1]["feito"] is False
+    c.execute("update funil_etapas set toques_dias=null where conta_id=%s and chave='contatado'",
+              (CONTA,))

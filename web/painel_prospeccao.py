@@ -64,7 +64,11 @@ _ORDEM_PERDIDO = 910   # e as de PÓS-VENDA depois daqui (migração 177)
 def _etapas(c, conta_id: int) -> list[dict]:
     """Etapas do funil da conta, ordenadas. Semeia o padrão na 1ª vez (conta sem
     etapas ainda). Retorna [{id, chave, rotulo, ordem, fixa}]."""
-    sql = "select id, chave, rotulo, ordem, fixa from funil_etapas where conta_id=%s order by ordem, id"
+    # `sai_do_quadro` entra aqui (migração 238) e não numa segunda consulta: quem
+    # pede as etapas do funil precisa saber quais delas o quadro não mostra, e duas
+    # leituras dariam dois jeitos de a lista sair incompleta.
+    sql = ("select id, chave, rotulo, ordem, fixa, coalesce(sai_do_quadro, false) "
+           "  from funil_etapas where conta_id=%s order by ordem, id")
     rows = c.execute(sql, (conta_id,)).fetchall()
     if not rows:
         for chave, rotulo, ordem, fixa in _ETAPAS_PADRAO:
@@ -73,7 +77,8 @@ def _etapas(c, conta_id: int) -> list[dict]:
                       (conta_id, chave, rotulo, ordem, fixa))
         c.commit()
         rows = c.execute(sql, (conta_id,)).fetchall()
-    return [{"id": r[0], "chave": r[1], "rotulo": r[2], "ordem": r[3], "fixa": r[4]} for r in rows]
+    return [{"id": r[0], "chave": r[1], "rotulo": r[2], "ordem": r[3], "fixa": r[4],
+             "sai_do_quadro": r[5]} for r in rows]
 TEMPERATURAS = [("frio", "Frio"), ("morno", "Morno"), ("quente", "Quente")]
 TEMP_OK = {t for t, _ in TEMPERATURAS}
 TEMP_COR = {"frio": "#5b9bd5", "morno": "var(--ambar)", "quente": "var(--coral)"}
@@ -260,6 +265,11 @@ def _vendedores(pool, conta_id: int) -> list[dict]:
 from finance.raio_x_dono import MOTIVOS_PERDA as _MOTIVOS_PERDA, ORIGENS as _ORIGENS_CLI  # noqa: E402
 _env.globals.setdefault("origens_cliente", _ORIGENS_CLI)
 _env.globals.setdefault("motivos_perda", _MOTIVOS_PERDA)
+# a mesma lista antiga no formato de dicionário que a tela nova espera, pro template
+# não precisar saber de qual das duas fontes o motivo veio
+_env.globals.setdefault("motivos_perda_compat",
+                        [{"chave": k, "rotulo": r, "exige_descricao": k == "outro"}
+                         for k, r in _MOTIVOS_PERDA])
 
 
 def _gravar_origem_e_motivo(c, conta_id: int, alvo_id: int, origem_cliente: str, perda_motivo: str) -> None:
@@ -318,13 +328,16 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
     d = dict(zip(cols, r))
     # de onde veio o cliente e por que perdeu (migração 209): lidos à parte pra
     # a ficha não depender da coluna existir (schemas de teste antigos não têm)
-    d["origem_cliente"], d["perda_motivo"] = None, None
+    d["origem_cliente"], d["perda_motivo"], d["perda_descricao"] = None, None, None
     try:
         with pool.connection() as c:
-            r2 = c.execute("select origem_cliente, perda_motivo from prospeccao where id=%s and conta_id=%s",
+            # `perda_descricao` nasceu na 235 e vai na MESMA leitura: uma segunda
+            # consulta protegida daria dois jeitos de a ficha ficar incompleta
+            r2 = c.execute("select origem_cliente, perda_motivo, perda_descricao "
+                           "  from prospeccao where id=%s and conta_id=%s",
                            (alvo_id, conta_id)).fetchone()
         if r2:
-            d["origem_cliente"], d["perda_motivo"] = r2
+            d["origem_cliente"], d["perda_motivo"], d["perda_descricao"] = r2
     except Exception:  # noqa: BLE001
         pass
     d["evento_lido_fmt"] = _hora_br(d["evento_lido_em"]) if d.get("evento_lido_em") else ""
@@ -573,6 +586,13 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
         modo_evento = False
     with pool.connection() as c:
         etapas = _etapas(c, conta_id)
+        # ETAPA QUE SAI DO QUADRO (migração 238): "o Kanban comercial deve mostrar
+        # apenas etapas que exigem atuação de prospecção e venda". A etapa some da
+        # barra de colunas E os leads dela somem do quadro — o cadastro fica inteiro,
+        # some da TELA. Nenhuma etapa nasce assim: sem ninguém marcar na Régua, esta
+        # linha não tira nada de lugar nenhum.
+        fora_do_quadro = [e["chave"] for e in etapas if e.get("sai_do_quadro")]
+        etapas = [e for e in etapas if not e.get("sai_do_quadro")]
         # dois_chips decide se o apelido do chip aparece no selo de campanha — com um
         # chip só não existe "de qual chip" pra confundir (mesma regra do Inbox).
         dois_chips = _tem_dois_chips(c, conta_id)
@@ -593,8 +613,9 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                       order by a.ultima_msg_em desc nulls last, a.id desc limit 1
                   ) ca on true
                  where {' and '.join(where)}
+                       {"and p.status <> all(%s)" if fora_do_quadro else ""}
                  order by p.proximo_contato_em asc nulls last, p.atualizado_em desc""",
-            tuple(params)).fetchall()
+            tuple(params) + ((fora_do_quadro,) if fora_do_quadro else ())).fetchall()
         # O selo do canal só vira BOTÃO (abre o chat) quando existe conversa de
         # verdade — não quando só tem telefone/e-mail cadastrado. Uma query em
         # lote pra todo o board (= any), não uma por card: o índice único
@@ -4500,6 +4521,16 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         if not (exigir_continuidade and de_prospeccao) or _ja_conversou(c, conta_id, lead_id):
             _promover_para_lead(c, conta_id, lead_id)
         _carimbar_origem(c, lead_id, codigo_anuncio)
+        # O CLIENTE PERDIDO QUE VOLTA A FALAR (migração 236). Fica FORA da trava de
+        # continuidade acima de propósito: aquela trava existe pra alvo frio que a
+        # gente foi atrás, e quem volta depois de ter sido perdido não é alvo frio —
+        # é cliente batendo na porta. `reativar` não faz nada quando a etapa não
+        # declara destino, que é o caso de toda conta hoje.
+        # Não precisa de push próprio: o inbound já avisa o vendedor da mensagem, e o
+        # card saindo de Perdido é o que ele vê. O registro fica em
+        # `funil_movimentos` com motivo 'reativado', que é o que o relatório lê.
+        from finance import funil_perda as _fperda
+        _fperda.reativar(c, conta_id, lead_id)
     # Acha a conversa do lead OU qualquer uma do mesmo número (e vincula ela ao lead,
     # se estiver órfã). A conversa deste lead vem primeiro; depois as que já têm dono;
     # por último a mais recente. Exigir `prospeccao_id is null` pra casar por número,
@@ -7774,6 +7805,29 @@ def _par_min(n, uni):
     return v * _UNI_MIN.get(uni, 60)
 
 
+def _inteiro(v, minimo: int = 1):
+    """Campo numérico da Régua: vazio ou torto = None, que é HERDA (migração 228),
+    e nunca zero. Zero num prazo cobraria todo mundo o tempo todo; zero num teto
+    calaria a régua inteira — os dois seriam silenciosos e catastróficos. Era o que
+    o `greatest(1, ...)` do SQL garantia; agora é aqui, junto do resto da limpeza."""
+    try:
+        n = int(str(v).strip())
+    except (TypeError, ValueError):
+        return None
+    return max(minimo, n)
+
+
+def _escada_txt(v):
+    """"1, 3,7 " -> "1,3,7". Sem nenhum número válido = None (herda).
+
+    Limpa aqui, e não no motor, porque o que vai pro banco é o que o dono vê de
+    volta na tela: guardar o texto cru faria "1, 3,7 " voltar com o espaço e parecer
+    que o sistema não entendeu o que ele escreveu.
+    """
+    nums = [p.strip() for p in str(v or "").split(",")]
+    return ",".join(p for p in nums if p.isdigit() and int(p) > 0) or None
+
+
 @router.get("/painel/prospeccao/regua", response_class=HTMLResponse)
 def regua_pagina(request: Request):
     ctx, redir = _acesso(request)
@@ -7787,6 +7841,7 @@ def regua_pagina(request: Request):
         _etapas(c, ctx["conta_id"])                 # semeia o padrão na 1ª visita
         from finance import follow_up as _fu
         cfg = _fu.config(c, ctx["conta_id"])   # a da régua + a do follow-up
+        perfil_chave = _fr.perfil_da_conta(c, ctx["conta_id"])
         c.commit()
         linhas = _fr.etapas(c, ctx["conta_id"])
         # quantos leads em cada coluna, pro dono ver o que ele está mexendo (e pra
@@ -7797,19 +7852,65 @@ def regua_pagina(request: Request):
             (ctx["conta_id"],)).fetchall())
         # o histórico já roda com tudo desligado — mostrar o tamanho dele é o que
         # justifica esperar antes de ligar
+        from finance import funil_perda as _fp
+        motivos_conta = _fp.motivos(c, ctx["conta_id"], perfil_chave, so_ativos=False)
+        c.commit()          # a semente da lista, se foi a 1ª vez, fica gravada
         n_mov = c.execute("select count(*) from funil_movimentos where conta_id=%s",
                           (ctx["conta_id"],)).fetchone()[0]
     for e in linhas:
         e["n"] = n_por.get(e["chave"], 0)
+        # o total é derivado, e mostrar derivado evita a conta de cabeça que faz o
+        # dono digitar 21 onde o campo pede o PERÍODO
+        e["teto_total"] = (e["teto_dias"] or 0) * ((e["renovacoes_max"] or 0) + 1)
+        e["saidas_lista"] = _fr._lista(e.get("saidas_permitidas"))
         e["prazo_n"], e["prazo_u"] = _min_par(e["prazo_min"])
         e["gatilho_rot"] = _fr.EVENTOS.get(e["gatilho"] or "", "")
-    conv = [{"chave": k, "rotulo": v, "prazo_n": _min_par(cfg[c_])[0], "prazo_u": _min_par(cfg[c_])[1]}
+    # PROCEDÊNCIA DE CADA CAMPO (migração 228). Campo em branco = herda o padrão do
+    # ramo; o placeholder mostra QUAL é esse padrão, senão "em branco" viraria "sem
+    # prazo" na cabeça de quem lê — que é o oposto do que acontece.
+    from finance import raio_x_perfil as _rxp
+    escolhidas = set(cfg.get("_escolhidas") or ())
+    padrao = _rxp.funil_padrao(perfil_chave)
+    rot_ramo = _rxp.perfil(None if perfil_chave != "eventos" else "eventos")["rotulo"] \
+        if perfil_chave in ("eventos", "recorrente") else perfil_chave
+
+    def _campo(chave_cfg):
+        """(valor no input, unidade, placeholder, herda?) de um prazo em minutos."""
+        pn, pu = _min_par(padrao.get(chave_cfg))
+        if chave_cfg in escolhidas:
+            n, u = _min_par(cfg.get(chave_cfg))
+            return {"n": n, "u": u, "ph": "", "herda": False}
+        return {"n": "", "u": pu, "ph": str(pn or "—"), "herda": True}
+
+    conv = [dict(_campo(c_), chave=k, rotulo=v)
             for k, v, c_ in (("sem_resposta", "Sem resposta", "sem_resposta_min"),
                              ("bola_nossa", "Bola com você", "bola_nossa_min"),
                              ("bola_cliente", "Bola com o cliente", "bola_cliente_min"))]
+    esc = _campo("escala_min")
+    teto = {"v": ("" if "teto_avisos_dia" not in escolhidas else cfg.get("teto_avisos_dia")),
+            "ph": str(padrao.get("teto_avisos_dia") or 5),
+            "herda": "teto_avisos_dia" not in escolhidas}
+    # os quatro do follow-up nunca tiveram tela: até 11/09/2026 mudar a escada de
+    # toques era deploy. A parametrização só vale se o dono alcançar o número.
+    fup = {"proposta": {"v": ("" if "fu_proposta_dias" not in escolhidas else cfg.get("fu_proposta_dias")),
+                        "ph": str(padrao.get("fu_proposta_dias") or 3),
+                        "herda": "fu_proposta_dias" not in escolhidas},
+           "toques": {"v": ("" if "fu_toques_dias" not in escolhidas else (cfg.get("fu_toques_dias") or "")),
+                      "ph": str(padrao.get("fu_toques_dias") or ""),
+                      "herda": "fu_toques_dias" not in escolhidas},
+           "festa": {"v": ("" if "fu_festa_dias" not in escolhidas else cfg.get("fu_festa_dias")),
+                     "ph": str(padrao.get("fu_festa_dias") or "—"),
+                     "herda": "fu_festa_dias" not in escolhidas,
+                     "tem": bool(padrao.get("fu_festa_dias")) or "fu_festa_dias" in escolhidas},
+           "teto": {"v": ("" if "fu_teto_dia" not in escolhidas else cfg.get("fu_teto_dia")),
+                    "ph": str(padrao.get("fu_teto_dia") or 15),
+                    "herda": "fu_teto_dia" not in escolhidas}}
+    janela_herda = not ({"janela_dias", "janela_abre", "janela_fecha"} & escolhidas)
     return _render("prospeccao_regua", request, titulo="Régua do funil",
                    secao_ativa="prospeccao", nav_ativo="regua", gerencia=True,
                    etapas=linhas, cfg=cfg, conv=conv, eventos=sorted(_fr.EVENTOS.items()),
+                   esc=esc, teto=teto, fup=fup, janela_herda=janela_herda, rot_ramo=rot_ramo,
+                   motivos_conta=motivos_conta,
                    unidades=[(u, r) for u, r, _m in _UNIDADES],
                    dias_on=_fr._dias(cfg), n_mov=n_mov,
                    aviso=request.session.pop("prosp_aviso", None))
@@ -7836,25 +7937,83 @@ async def regua_config(request: Request):
         # `follow_up_modo` NÃO entra aqui: ele é salvo na aba Follow-up. Se
         # continuasse na lista, salvar a Régua (que não tem mais o campo no
         # formulário) desligaria o follow-up da conta sem ninguém pedir.
-        c.execute("""update funil_regua set gatilhos_modo=%s, cobranca_modo=%s,
+        # CAMPO EM BRANCO = NULL = HERDA O PADRÃO DO RAMO (migração 228). Antes era
+        # `coalesce(%s, <coluna>)`, que queria dizer "em branco mantém o que estava"
+        # — e com isso não havia jeito nenhum de VOLTAR ao padrão depois de digitar
+        # um número uma vez. Agora apagar o campo É o botão de voltar ao padrão.
+        c.execute("""update funil_regua set gatilhos_modo=%s, cobranca_modo=%s, teto_modo=%s,
                        janela_dias=%s, janela_abre=%s, janela_fecha=%s,
-                       sem_resposta_min=coalesce(%s, sem_resposta_min),
-                       bola_nossa_min=coalesce(%s, bola_nossa_min),
-                       bola_cliente_min=coalesce(%s, bola_cliente_min),
-                       escala_min=coalesce(%s, escala_min),
-                       teto_avisos_dia=greatest(1, coalesce(%s, teto_avisos_dia)),
-                       atualizado_em=now()
+                       sem_resposta_min=%s, bola_nossa_min=%s, bola_cliente_min=%s,
+                       escala_min=%s, teto_avisos_dia=%s,
+                       fu_proposta_dias=%s, fu_toques_dias=%s, fu_festa_dias=%s,
+                       fu_teto_dia=%s, atualizado_em=now()
                      where conta_id=%s""",
-                  (modo("gatilhos_modo"), modo("cobranca_modo"),
+                  (modo("gatilhos_modo"), modo("cobranca_modo"), modo("teto_modo"),
                    dias, abre, fecha,
                    _par_min(f.get("sem_resposta_n"), f.get("sem_resposta_u")),
                    _par_min(f.get("bola_nossa_n"), f.get("bola_nossa_u")),
                    _par_min(f.get("bola_cliente_n"), f.get("bola_cliente_u")),
                    _par_min(f.get("escala_n"), f.get("escala_u")),
-                   _par_min(f.get("teto"), "min"), ctx["conta_id"]))
+                   _inteiro(f.get("teto")),
+                   _inteiro(f.get("fu_proposta_dias")),
+                   _escada_txt(f.get("fu_toques_dias")),
+                   _inteiro(f.get("fu_festa_dias")),
+                   _inteiro(f.get("fu_teto_dia")), ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Régua salva ✓"
     return RedirectResponse("/painel/prospeccao/regua", status_code=303)
+
+
+@router.post("/painel/prospeccao/regua/motivo/novo")
+def regua_motivo_novo(request: Request, rotulo: str = Form(""),
+                      exige_descricao: str = Form("")):
+    """Acrescenta um motivo de perda que é só desta empresa (migração 235).
+
+    `def` e `Form(...)` em vez de `async def` + `await request.form()`: o handler
+    escreve no banco de forma síncrona (ver tests/test_event_loop_nao_trava)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    from finance import funil_perda as _fp
+    with get_pool().connection() as c:
+        r = _fp.salvar_motivo(
+            c, ctx["conta_id"], rotulo=rotulo, ordem=9990,
+            exige_descricao=str(exige_descricao or "").lower() in ("1", "on", "true", "sim"))
+        if r.get("ok"):
+            c.commit()
+    request.session["prosp_aviso"] = {
+        "sem_rotulo": "Dê um nome ao motivo.",
+        "repetido": "Já existe um motivo com esse nome.",
+    }.get(r.get("erro"), "Motivo criado ✓")
+    return RedirectResponse("/painel/prospeccao/regua", status_code=303)
+
+
+@router.post("/painel/prospeccao/regua/motivo/{mid}")
+def regua_motivo(request: Request, mid: int, rotulo: str = Form(""),
+                 ordem: str = Form("0"), ativo: str = Form(""),
+                 exige_descricao: str = Form("")):
+    """Salva UM motivo: rótulo, ordem, se pede texto e se está na lista.
+
+    A CHAVE não entra: ela está gravada em `prospeccao.perda_motivo` de todo lead já
+    perdido, e trocá-la apagaria o motivo do histórico de quem já foi. Renomear mexe
+    só no rótulo, que é o que a tela lê."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    from finance import funil_perda as _fp
+    with get_pool().connection() as c:
+        r = _fp.salvar_motivo(
+            c, ctx["conta_id"], motivo_id=mid, rotulo=rotulo,
+            ordem=_inteiro(ordem, minimo=0) or 0,
+            ativo=str(ativo or "").lower() in ("1", "on", "true", "sim"),
+            exige_descricao=str(exige_descricao or "").lower() in ("1", "on", "true", "sim"))
+        if r.get("ok"):
+            c.commit()
+    return JSONResponse(r, status_code=200 if r.get("ok") else 404)
 
 
 @router.post("/painel/prospeccao/regua/etapa/{eid}")
@@ -7883,15 +8042,39 @@ async def regua_etapa(request: Request, eid: int):
         # a criar um alarme que nunca deveria tocar.
         if r[0] in ("ganho", "perdido"):
             prazo = None
+        # O teto é da etapa (migração 230). Etapa de resultado não tem teto pela
+        # mesma razão que não tem prazo: "está em Perdido há 30 dias" é o fim da
+        # história, não uma cobrança.
+        teto = None if r[0] in ("ganho", "perdido") else _inteiro(f.get("teto_dias"))
+        renov = _inteiro(f.get("renovacoes_max"), minimo=0) or 0
+        exige = str(f.get("exige_justificativa") or "").lower() in ("1", "on", "true", "sim")
+        # só chaves que existem nesta conta, e nunca a própria etapa: uma saída pra
+        # si mesma não é saída, e chave inventada viraria uma trava que barra tudo
+        validas = {x[0] for x in c.execute(
+            "select chave from funil_etapas where conta_id=%s", (ctx["conta_id"],)).fetchall()}
+        saidas = ",".join(x for x in f.getlist("saidas") if x in validas and x != r[0]) or None
         c.execute("""update funil_etapas
                         set rotulo = coalesce(nullif(%s,''), rotulo),
                             prazo_min = %s, gatilho = %s,
                             -- ligar sem escolher evento não liga nada: a etapa ficaria
                             -- "ativa" apontando pro vazio e o motor rodaria em falso.
                             -- O ::text é pro Postgres saber o tipo do parâmetro solto.
-                            gatilho_ativo = (%s and %s::text is not null)
+                            gatilho_ativo = (%s and %s::text is not null),
+                            teto_dias = %s, renovacoes_max = %s, exige_justificativa = %s,
+                            saidas_permitidas = %s, toques_dias = %s, exige_motivo = %s,
+                            reativa_para = %s, sai_do_quadro = %s, agenda_ao_entrar = %s
                       where id=%s and conta_id=%s""",
-                  (rot, prazo, gat, ativo, gat, eid, ctx["conta_id"]))
+                  (rot, prazo, gat, ativo, gat, teto, renov, exige, saidas,
+                   _escada_txt(f.get("toques_dias")),
+                   str(f.get("exige_motivo") or "").lower() in ("1", "on", "true", "sim"),
+                   # destino da reativação: só chave que existe, e nunca a própria
+                   # etapa — reativar pra si mesmo não reativa nada
+                   ((f.get("reativa_para") or "").strip()
+                    if (f.get("reativa_para") or "").strip() in validas
+                    and (f.get("reativa_para") or "").strip() != r[0] else None),
+                   str(f.get("sai_do_quadro") or "").lower() in ("1", "on", "true", "sim"),
+                   str(f.get("agenda_ao_entrar") or "").lower() in ("1", "on", "true", "sim"),
+                   eid, ctx["conta_id"]))
         c.commit()
     return JSONResponse({"ok": True, "gatilho_ativo": bool(ativo and gat)})
 
@@ -8115,6 +8298,104 @@ def prospeccao_evento_confirmar(request: Request, alvo_id: int):
     return JSONResponse({"ok": True})
 
 
+_TETO_COR = {"ok": ("var(--verde)", "#10241A", "#1E4A3A"),
+             "avisar": ("var(--ambar)", "#241C0F", "#5A4520"),
+             "vencido": ("var(--coral)", "#241313", "#5A2B2B"),
+             "esgotado": ("var(--coral)", "#241313", "#5A2B2B")}
+
+
+def _perda_da_ficha(c, conta_id: int, lead_id: int):
+    """(lista de motivos da conta, ficha da perda). Best-effort: a ficha do lead é a
+    tela mais usada do produto, e nenhuma régua vale derrubá-la — erro aqui vira
+    lista vazia, e o template cai no global antigo."""
+    try:
+        # SAVEPOINT, e não enfeite: as tabelas nasceram na 235 e num banco que ainda
+        # não rodou a migração a consulta falha — sem o savepoint o `except` aqui
+        # devolveria lista vazia com a TRANSAÇÃO INTEIRA envenenada, e o commit da
+        # ficha lá fora estouraria. Foi o que test_lead_resumo pegou, e é o mesmo
+        # defeito que já custou um ciclo nos gatilhos e no perfil da conta.
+        with c.transaction():
+            from finance import funil_perda as _fp
+            perfil = _fr.perfil_da_conta(c, conta_id)
+            return _fp.motivos(c, conta_id, perfil), _fp.ficha(c, conta_id, lead_id)
+    except Exception:  # noqa: BLE001
+        return [], None
+
+
+def _teto_da_ficha(c, conta_id: int, lead_id: int, status: str):
+    """O estado do teto deste lead, pronto pra tela — ou (None, []) quando a etapa
+    não tem teto, que é como toda conta nasce.
+
+    Best-effort: a ficha do lead é a tela mais usada do produto, e nenhuma régua
+    vale derrubá-la. Erro aqui vira "sem teto", não vira erro 500.
+    """
+    try:
+        # SAVEPOINT pelo mesmo motivo do vizinho `_perda_da_ficha`: banco sem a
+        # migração 230 faz esta leitura falhar, e um `except` sem savepoint deixaria
+        # a transação da ficha abortada.
+        with c.transaction():
+            return _teto_calcula(c, conta_id, lead_id, status)
+    except Exception:  # noqa: BLE001
+        return None, []
+
+
+def _teto_calcula(c, conta_id: int, lead_id: int, status: str):
+    """O miolo de `_teto_da_ficha`, separado só pra caber dentro do savepoint sem
+    aninhar try/except dentro de with dentro de try."""
+    from finance import funil_teto as _ft
+    regras = _ft.etapas_com_teto(c, conta_id)
+    regra = regras.get(status)
+    if not regra:
+        return None, []
+    desde = _ft.na_etapa_desde(c, lead_id)
+    if not desde:
+        return None, []
+    cfg = _ft.config(c, conta_id)
+    e = _ft.estado(desde=desde, renovacoes=_ft.renovacoes_de(c, lead_id, status),
+                   regra=regra, agora=_agora(), avisar_antes=cfg["teto_avisar_antes"])
+    cor, fundo, borda = _TETO_COR.get(e["estado"], _TETO_COR["ok"])
+    e.update(rotulo=_ft.ROTULO.get(e["estado"], ""), cor=cor, cor_fundo=fundo,
+             cor_borda=borda, teto_dias=regra["teto_dias"],
+             exige_justificativa=regra["exige_justificativa"],
+             pct=min(100, max(2, round(100 * e["dias"] / max(1, e["total_dias"])))))
+    return e, _ft.historico(c, lead_id, 5)
+
+
+@router.post("/painel/prospeccao/{alvo_id}/renovar")
+def prospeccao_renovar(request: Request, alvo_id: int, justificativa: str = Form("")):
+    """Renova o prazo da etapa deste lead. A trava do dono mora no motor
+    (`funil_teto.renovar` RECUSA sem justificativa); aqui só se conta o que
+    aconteceu, porque validar em dois lugares é ter duas regras.
+
+    `def`, e não `async def`: este handler fala com o banco de forma síncrona, e
+    handler async fazendo isso congela o worker inteiro (tests/test_event_loop_nao_trava,
+    nascido do incidente de 22/08/2026 — 527 ms viraram ~50 s com a CPU em 0,7%).
+    Sem o `async`, o FastAPI joga a função na threadpool sozinho."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    from finance import funil_teto as _ft
+    with pool.connection() as c:
+        regra = _ft.etapas_com_teto(c, ctx["conta_id"]).get(alvo["status"])
+        if not regra:
+            request.session["prosp_aviso"] = "Esta etapa não tem teto de dias."
+            return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
+        r = _ft.renovar(c, ctx["conta_id"], alvo_id, etapa=alvo["status"], regra=regra,
+                        membro_id=ctx["membro_id"],
+                        justificativa=justificativa)
+        if r.get("ok"):
+            c.commit()
+    request.session["prosp_aviso"] = {
+        "justificativa": "Escreva a justificativa — sem ela a renovação não é liberada.",
+        "sem_renovacao": "As renovações desta etapa acabaram. Leve o lead adiante ou para o follow-up.",
+    }.get(r.get("erro"), f"Prazo renovado · restam {r.get('restam', 0)}")
+    return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
+
+
 @router.get("/painel/prospeccao/{alvo_id}", response_class=HTMLResponse)
 def prospeccao_ficha(request: Request, alvo_id: int):
     ctx, redir = _acesso(request)
@@ -8139,8 +8420,15 @@ def prospeccao_ficha(request: Request, alvo_id: int):
         # card some assim que o vendedor abre a ficha (é a ficha que abre na gaveta) —
         # e é aqui, com o telefone na mão pra ligar, que saber disso muda o que ele faz.
         avisos = avisos_do_numero_da_ficha(c, ctx, alvo, alvo_id)
+        teto, teto_hist = _teto_da_ficha(c, ctx["conta_id"], alvo_id, alvo["status"])
+        # sem `c.commit()` aqui: o `with pool.connection()` já commita ao sair limpo,
+        # e um commit explícito estoura quando a conexão está dentro de um
+        # `c.transaction()` (foi o que test_lead_resumo pegou). A semente da lista,
+        # se foi a 1ª vez, fica gravada do mesmo jeito.
+        motivos_conta, perda = _perda_da_ficha(c, ctx["conta_id"], alvo_id)
     return _render("prospeccao_ficha", request, titulo=alvo["empresa"], secao_ativa="prospeccao",
-                   **avisos,
+                   **avisos, teto=teto, teto_hist=teto_hist,
+                   motivos_conta=motivos_conta, perda=perda,
                    canais_contato=canais_contato, origem_ch=origem_ch,
                    a=alvo, timeline=timeline, status=status_ficha, temperaturas=TEMPERATURAS,
                    tipos=TIPOS, resultados=RESULTADOS, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
@@ -8165,7 +8453,8 @@ def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
                       tem_site: str = Form(""), site_url: str = Form(""), obs: str = Form(""),
                       evento_tipo: str = Form(""), evento_em: str = Form(""),
                       evento_convidados: str = Form(""),
-                      origem_cliente: str = Form(""), perda_motivo: str = Form("")):
+                      origem_cliente: str = Form(""), perda_motivo: str = Form(""),
+                      perda_descricao: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -8213,6 +8502,17 @@ def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
                  alvo_id, ctx["conta_id"]))
             # migração 209, à parte e em savepoint: a ficha não depende da coluna
             _gravar_origem_e_motivo(c, ctx["conta_id"], alvo_id, origem_cliente, perda_motivo)
+            # o texto do motivo que exige descrição (migração 235). Savepoint pelo
+            # mesmo motivo do vizinho: a coluna é nova e editar a ficha não pode
+            # depender dela.
+            if isinstance(perda_descricao, str) and perda_descricao.strip():
+                try:
+                    with c.transaction():
+                        c.execute("update prospeccao set perda_descricao=%s "
+                                  " where id=%s and conta_id=%s",
+                                  (perda_descricao.strip()[:1000], alvo_id, ctx["conta_id"]))
+                except Exception:  # noqa: BLE001
+                    pass
             c.commit()
     except UniqueViolation:
         doc, campo = (cpf_limpo, "cpf") if cpf_limpo else (cnpj_limpo, "cnpj")
@@ -8503,6 +8803,31 @@ async def prospeccao_status(request: Request, alvo_id: int):
     alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
     if not alvo or not _pode_ver(alvo, ctx):
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    # AS SAÍDAS DA ETAPA (migração 232). A trava é do lado do servidor porque o
+    # arrastar do kanban é um POST: esconder a coluna na tela não impediria nada.
+    with pool.connection() as c:
+        recusa = _fr.recusa_de_saida(c, ctx["conta_id"], alvo["status"], status)
+    if recusa:
+        return JSONResponse({"ok": False, "erro": "saida", "msg": recusa}, status_code=400)
+    # O MOTIVO, ANTES DE MOVER (migração 235). Perguntar antes é o ponto: mover o
+    # card e só então descobrir que falta o motivo deixaria o lead em Perdido sem
+    # ninguém ter dito por quê — que é exatamente o "limpar o funil" que a regra 5
+    # existe pra impedir.
+    from finance import funil_perda as _fp
+    with pool.connection() as c:
+        val = _fp.validar(c, ctx["conta_id"], etapa_destino=status,
+                          motivo=(form.get("motivo") or ""),
+                          descricao=(form.get("perda_descricao") or ""),
+                          perfil_chave=_fr.perfil_da_conta(c, ctx["conta_id"]))
+        if not val["ok"]:
+            lista = [{"chave": m["chave"], "rotulo": m["rotulo"],
+                      "exige_descricao": m["exige_descricao"]}
+                     for m in _fp.motivos(c, ctx["conta_id"],
+                                          _fr.perfil_da_conta(c, ctx["conta_id"]))]
+            c.commit()          # a semente da lista, se foi a 1ª vez, fica gravada
+            return JSONResponse({"ok": False, "erro": val["erro"], "motivos": lista},
+                                status_code=400)
+        c.commit()
     # Mudar a fase no funil implica que é um lead sendo trabalhado: se ainda estava
     # na base, promove pro funil (estagio='lead') mantendo a fase escolhida — senão
     # ele sumiria (base não aparece no funil). Quem já é lead só troca de coluna.
@@ -8512,6 +8837,14 @@ async def prospeccao_status(request: Request, alvo_id: int):
                   (status, alvo_id, ctx["conta_id"]))
         if status == "perdido":
             _gravar_origem_e_motivo(c, ctx["conta_id"], alvo_id, "", form.get("motivo") or "")
+        # a data da perda, a etapa de origem e o texto do motivo (migração 235). Vale
+        # pra QUALQUER etapa que exija motivo, não só 'perdido' — a exigência é da
+        # etapa, e outra empresa pode pedir motivo ao arquivar ou ao pausar.
+        if _fp.exige_motivo(c, ctx["conta_id"], status):
+            _fp.registrar(c, ctx["conta_id"], alvo_id,
+                          motivo=(form.get("motivo") or ""),
+                          descricao=(form.get("perda_descricao") or ""),
+                          etapa_origem=alvo["status"])
         # O histórico é o que o banco nunca teve: sem ele ninguém consegue dizer
         # quanto um lead ficou em cada coluna. Grava desde já, com a régua toda
         # desligada — anotar o que a pessoa acabou de fazer não é automação. E é
@@ -11319,6 +11652,16 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if partida_abre and partida.lead_id %}<a href="/painel/prospeccao/{{ partida.lead_id }}">Abrir a outra ficha →</a>{% endif %}</div>{% endif %}
     {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
     <script>
+function perdaDesc(sel){
+  // o campo aparece só quando o motivo escolhido exige texto — quem manda é o
+  // `data-desc` da opção, que vem da lista da conta, e não uma chave fixa no JS
+  var o=sel.options[sel.selectedIndex], box=document.getElementById('perda-desc-campo');
+  if(!box) return;
+  var exige=o&&o.getAttribute('data-desc')==='1';
+  box.style.display=exige?'block':'none';
+  var inp=box.querySelector('input'); if(inp) inp.required=!!exige;
+}
+
     function fichaStatus(sel,id){
       var prev=sel.getAttribute('data-prev')||'';
       var body=new URLSearchParams();body.append('status',sel.value);
@@ -11453,6 +11796,47 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% if a.valor %}<div class="drow"><span class="ic">💰</span><span class="lb">Valor est.</span><span style="color:var(--verde-claro)">{{ brl(a.valor) }}</span></div>{% endif %}
         {% if a.proximo_contato_em %}<div class="drow"><span class="ic">📅</span><span class="lb">Próximo</span><span style="color:var(--verde-claro)">{{ a.proximo_contato_em.strftime('%d/%m/%Y') }}</span></div>{% endif %}
         {% if a.obs %}<div class="drow"><span class="ic">📝</span><span class="lb">Obs</span><span>{{ a.obs }}</span></div>{% endif %}
+        {% if teto %}
+        <!-- O TETO DA ETAPA (migração 230). Fica na ficha, e não só no card, porque
+             é aqui que cabe a caixa de justificativa — e a justificativa é a regra,
+             não um detalhe: sem ela a renovação não sai. -->
+        <div style="margin-top:.6rem;border-top:1px solid var(--borda);padding-top:.6rem">
+          <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+            <span class="ic">⏱️</span>
+            <b style="font-size:.86rem">{{ teto.dias|round|int }} de {{ teto.total_dias }} dias nesta etapa</b>
+            <span class="rg-tag" style="background:{{ teto.cor_fundo }};border:1px solid {{ teto.cor_borda }};color:{{ teto.cor }}">{{ teto.rotulo }}</span>
+          </div>
+          <div style="height:6px;border-radius:99px;background:var(--bg);border:1px solid var(--borda);overflow:hidden;margin:.45rem 0 .3rem">
+            <i style="display:block;height:100%;width:{{ teto.pct }}%;background:{{ teto.cor }}"></i>
+          </div>
+          <div class="mut" style="font-size:.74rem">
+            período {{ teto.periodo }} de {{ teto.periodos }} ·
+            {% if teto.restam %}{{ teto.restam }} renovação(ões) restante(s){% else %}sem nova renovação{% endif %}
+          </div>
+          {% if teto.restam and teto.estado in ('avisar','vencido') %}
+          <form method="post" action="/painel/prospeccao/{{ a.id }}/renovar" style="margin-top:.5rem">
+            {% if teto.exige_justificativa %}
+            <textarea class="fld" name="justificativa" rows="2" required
+                      placeholder="Por que este lead precisa de mais {{ teto.teto_dias }} dias aqui?"
+                      style="font-size:.8rem"></textarea>
+            <div class="mut" style="font-size:.72rem;margin:.25rem 0 .4rem">Obrigatório. Sem justificativa a renovação não é liberada.</div>
+            {% endif %}
+            <button class="pbtn ghost" style="font-size:.8rem">Renovar +{{ teto.teto_dias }} dias</button>
+          </form>
+          {% elif not teto.restam and teto.estado == 'esgotado' %}
+          <div class="mut" style="font-size:.74rem;margin-top:.4rem;color:var(--coral)">
+            Teto atingido — leve o lead adiante ou para o follow-up.
+          </div>
+          {% endif %}
+          {% if teto_hist %}
+          <div style="margin-top:.5rem;font-size:.73rem;color:var(--txt-mut);line-height:1.6">
+            {% for h in teto_hist %}
+            <div>· {{ h.em.strftime('%d/%m') }} — {{ h.quem }}{% if h.justificativa %}: “{{ h.justificativa }}”{% elif h.automatica %}: renovada sozinha (cliente respondeu){% endif %}</div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+        {% endif %}
         {% if a.receita %}
         <div style="margin-top:.6rem;border-top:1px solid var(--borda);padding-top:.5rem">
           <div class="lb" style="text-transform:uppercase;letter-spacing:.03em;margin-bottom:.2rem">🧾 Receita Federal{% if a.receita.fonte %} · <span style="opacity:.7">{{ a.receita.fonte }}</span>{% endif %}</div>
@@ -11497,8 +11881,15 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                "Por que perdeu" do Raio-X do dono (/painel/raio-x) leem daqui #}
             <div><label class="lbl">De onde veio o cliente</label><select class="fld" name="origem_cliente">
               <option value="">—</option>{% for k, r in origens_cliente %}<option value="{{ k }}" {% if a.origem_cliente==k %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></div>
-            <div><label class="lbl">Por que perdeu</label><select class="fld" name="perda_motivo">
-              <option value="">—</option>{% for k, r in motivos_perda %}<option value="{{ k }}" {% if a.perda_motivo==k %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></div>
+            {# A LISTA É DA CONTA (migração 235): `motivos_conta` vem da rota; o global
+               `motivos_perda` continua no fallback pro caminho que ainda não passa
+               por lá, e pro histórico de quem foi perdido antes. #}
+            <div><label class="lbl">Por que perdeu</label><select class="fld" name="perda_motivo" onchange="perdaDesc(this)">
+              <option value="">—</option>{% for m in (motivos_conta or motivos_perda_compat) %}<option value="{{ m.chave }}" data-desc="{{ 1 if m.exige_descricao else 0 }}" {% if a.perda_motivo==m.chave %}selected{% endif %}>{{ m.rotulo }}</option>{% endfor %}</select></div>
+            <div class="full" id="perda-desc-campo" style="display:{{ 'block' if a.perda_descricao else 'none' }}">
+              <label class="lbl">Conte o que aconteceu</label>
+              <input class="fld" name="perda_descricao" value="{{ a.perda_descricao or '' }}"
+                     placeholder="Obrigatório para este motivo"></div>
             <div><label class="lbl">Valor est. (R$)</label><input class="fld" name="valor" inputmode="decimal" value="{{ (a.valor/100)|n2 if a.valor else '' }}"></div>
             <div><label class="lbl">Tem site?</label><select class="fld" name="tem_site">
               <option value="" {% if a.tem_site is none %}selected{% endif %}>—</option>
@@ -15135,6 +15526,12 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .rg-grp b{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap}
 .rg-grp span{flex:1;height:1px;background:var(--borda)}
 .rg-r1{display:grid;grid-template-columns:12px 1fr 150px 62px;gap:.6rem;align-items:center}
+/* procedência do campo (migração 228): herdado do ramo × escolhido pela empresa.
+   Sem isso o dono olha "4 horas" e não tem como saber se foi ele quem pôs. */
+.lblp{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.rg-proc{font:600 .62rem/1 var(--mono,ui-monospace);padding:.26rem .38rem;border-radius:5px;
+  white-space:nowrap;border:1px solid var(--borda);color:var(--txt-mut);background:var(--bg)}
+.rg-proc.seu{border-color:var(--ambar);color:var(--ambar)}
 .rg-uni{padding:.48rem .5rem;border-radius:8px;border:1px solid #333;background:var(--bg);color:var(--txt);font-size:.8rem;font-family:inherit}
 .rg-sel{width:100%;box-sizing:border-box;padding:.42rem .6rem;border-radius:8px;border:1px solid var(--azul-borda);
   background:var(--azul-fundo);color:var(--azul);font-size:.8rem;font-family:inherit}
@@ -15165,7 +15562,8 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div class="sh"><b>Estado</b><span class="mut" style="font-size:.76rem">tudo construído · você decide quando cada parte age</span></div>
     {% for campo, nome, desc in [
         ('gatilhos_modo','Gatilhos das etapas','movem o card sozinhos quando o fato acontece'),
-        ('cobranca_modo','Cobrança por prazo','avisa o vendedor e escala pro gestor')] %}
+        ('cobranca_modo','Cobrança por prazo','avisa o vendedor e escala pro gestor'),
+        ('teto_modo','Teto de dias na etapa','avisa antes de vencer e trava a renovação sem justificativa')] %}
     {#- O Follow-up automático SAIU daqui em 07/09/2026, por decisão do dono: ele
         se liga na própria aba Follow-up. A tela de lá dizia "ligue na Régua do
         funil" — mandava a pessoa embora pra ligar o que ela estava olhando. -#}
@@ -15195,16 +15593,20 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div class="fsec" style="margin-top:.9rem">
     <div class="sh"><b>Quando a bola está com a gente</b><span class="mut" style="font-size:.76rem">lido da conversa, inclusive do celular do vendedor</span></div>
     {% for b in conv %}
-    <div style="display:grid;grid-template-columns:1fr 150px;gap:.6rem;align-items:center;padding:.62rem 0;border-top:1px solid var(--borda)">
+    <div style="display:grid;grid-template-columns:1fr auto 150px;gap:.6rem;align-items:center;padding:.62rem 0;border-top:1px solid var(--borda)">
       <div style="font-size:.89rem;font-weight:600">{{ b.rotulo }}</div>
+      <span class="rg-proc {% if not b.herda %}seu{% endif %}">{% if b.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span>
       <div style="display:flex;gap:.3rem">
-        <input class="fld" style="text-align:right" name="{{ b.chave }}_n" value="{{ b.prazo_n }}">
+        <input class="fld" style="text-align:right" name="{{ b.chave }}_n" value="{{ b.n }}" placeholder="{{ b.ph }}">
         <select class="rg-uni" name="{{ b.chave }}_u">
-          {% for u, r in unidades %}<option value="{{ u }}" {% if b.prazo_u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
+          {% for u, r in unidades %}<option value="{{ u }}" {% if b.u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
         </select>
       </div>
     </div>
     {% endfor %}
+    <p class="mut" style="font-size:.75rem;line-height:1.5;margin:.6rem 0 0;padding-top:.5rem;border-top:1px solid var(--borda)">
+      Campo em branco usa o padrão do seu ramo (o número cinza). Para voltar ao padrão depois de mudar, apague o campo e salve.
+    </p>
   </div>
 
   <!-- ---------------- janela + escalonamento ---------------- -->
@@ -15228,14 +15630,50 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
     <div class="fsec">
       <div class="sh"><b>Escalonamento</b></div>
-      <label class="lbl" style="margin-top:.3rem">Depois de quanto tempo sem toque escala pro gestor</label>
+      <label class="lbl lblp" style="margin-top:.3rem">Depois de quanto tempo sem toque escala pro gestor
+        <span class="rg-proc {% if not esc.herda %}seu{% endif %}">{% if esc.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
       <div style="display:flex;gap:.3rem">
-        <input class="fld" style="text-align:right" name="escala_n" value="{{ (cfg.escala_min // 60) or 4 }}">
-        <select class="rg-uni" name="escala_u"><option value="h" selected>horas</option><option value="d">dias</option></select>
+        <input class="fld" style="text-align:right" name="escala_n" value="{{ esc.n }}" placeholder="{{ esc.ph }}">
+        <select class="rg-uni" name="escala_u">
+          {% for u, r in unidades %}<option value="{{ u }}" {% if esc.u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
+        </select>
       </div>
-      <label class="lbl" style="margin-top:.7rem">Teto de avisos por vendedor / dia</label>
-      <input class="fld" name="teto" value="{{ cfg.teto_avisos_dia }}">
+      <label class="lbl lblp" style="margin-top:.7rem">Teto de avisos por vendedor / dia
+        <span class="rg-proc {% if not teto.herda %}seu{% endif %}">{% if teto.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+      <input class="fld" name="teto" value="{{ teto.v }}" placeholder="{{ teto.ph }}">
       <p class="mut" style="font-size:.76rem;line-height:1.5;margin:.55rem 0 0">Passou do teto, vira um resumo só no fim do expediente.</p>
+    </div>
+  </div>
+
+  <!-- ---------------- follow-up ----------------
+       Estes quatro números existiam desde 07/09 e NÃO tinham tela: mudar a escada
+       de toques era deploy. Parametrizar só vale se o dono alcançar o número. -->
+  <div class="fsec" style="margin-top:.9rem">
+    <div class="sh"><b>Prazos do follow-up</b><span class="mut" style="font-size:.76rem">a chave de ligar fica na aba Follow-up — aqui só os números</span></div>
+    <div class="fgrid" style="grid-template-columns:repeat(2,1fr);gap:.8rem;margin-top:.5rem">
+      <div>
+        <label class="lbl lblp">Proposta parada cobra depois de (dias)
+          <span class="rg-proc {% if not fup.proposta.herda %}seu{% endif %}">{% if fup.proposta.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+        <input class="fld" name="fu_proposta_dias" value="{{ fup.proposta.v }}" placeholder="{{ fup.proposta.ph }}">
+      </div>
+      <div>
+        <label class="lbl lblp">Escada de toques, em dias
+          <span class="rg-proc {% if not fup.toques.herda %}seu{% endif %}">{% if fup.toques.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+        <input class="fld" name="fu_toques_dias" value="{{ fup.toques.v }}" placeholder="{{ fup.toques.ph }}">
+        <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Separe por vírgula. <b>1,3,7</b> = três tentativas em D1, D3 e D7.</p>
+      </div>
+      {% if fup.festa.tem %}
+      <div>
+        <label class="lbl lblp">Data do evento perto aperta o prazo (dias)
+          <span class="rg-proc {% if not fup.festa.herda %}seu{% endif %}">{% if fup.festa.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+        <input class="fld" name="fu_festa_dias" value="{{ fup.festa.v }}" placeholder="{{ fup.festa.ph }}">
+      </div>
+      {% endif %}
+      <div>
+        <label class="lbl lblp">Teto de leads cobrados por vendedor / dia
+          <span class="rg-proc {% if not fup.teto.herda %}seu{% endif %}">{% if fup.teto.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>
+        <input class="fld" name="fu_teto_dia" value="{{ fup.teto.v }}" placeholder="{{ fup.teto.ph }}">
+      </div>
     </div>
   </div>
 
@@ -15282,6 +15720,75 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <option value="">— só na mão —</option>
             {% for ev, rot in eventos %}<option value="{{ ev }}" {% if e.gatilho==ev %}selected{% endif %}>{{ rot }}</option>{% endfor %}
           </select>
+        </div>
+        {% if e.chave not in ('ganho','perdido') %}
+        <!-- O TETO DE DIAS. É propriedade de QUALQUER etapa, não "a regra do
+             Contactado": o teto de 21 dias da Prime é 7 dias × 2 renovações
+             preenchido aqui, e outra empresa põe outro número — ou nenhum. -->
+        <div style="display:flex;align-items:center;gap:.5rem;margin:.45rem 0 0 1.35rem;flex-wrap:wrap;font-size:.74rem;color:var(--txt-mut)">
+          <span>no máximo</span>
+          <input class="fld" name="teto_dias" value="{{ e.teto_dias or '' }}" placeholder="—"
+                 style="width:54px;text-align:right" inputmode="numeric">
+          <span>dias aqui, com</span>
+          <input class="fld" name="renovacoes_max" value="{{ e.renovacoes_max or 0 }}"
+                 style="width:46px;text-align:right" inputmode="numeric">
+          <span>renovação(ões){% if e.teto_dias %} · total de <b style="color:var(--txt)">{{ e.teto_total }} dias</b>{% endif %}</span>
+          <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;cursor:pointer">
+            <input type="checkbox" name="exige_justificativa" value="1" {% if e.exige_justificativa %}checked{% endif %}
+                   style="width:auto;margin:0;accent-color:var(--ambar)">
+            exigir justificativa pra renovar
+          </label>
+          <span class="mut" style="font-size:.7rem">em branco = sem teto</span>
+        </div>
+        <!-- AS SAÍDAS (migração 232). Nenhuma marcada = pode ir pra qualquer lugar,
+             que é como o funil sempre funcionou. A trava é do servidor: esconder a
+             coluna na tela não impediria o arrastar, que é um POST. -->
+        <div style="display:flex;align-items:center;gap:.5rem;margin:.4rem 0 0 1.35rem;flex-wrap:wrap;font-size:.74rem;color:var(--txt-mut)">
+          <span>daqui a mão só leva para</span>
+          {% for d in etapas if d.chave != e.chave %}
+          <label class="chk" style="display:inline-flex;align-items:center;gap:.3rem;cursor:pointer">
+            <input type="checkbox" name="saidas" value="{{ d.chave }}"
+                   {% if d.chave in e.saidas_lista %}checked{% endif %}
+                   style="width:auto;margin:0;accent-color:var(--verde)">{{ d.rotulo }}
+          </label>
+          {% endfor %}
+          <span class="mut" style="font-size:.7rem">nenhuma marcada = qualquer uma</span>
+        </div>
+        <!-- AS TENTATIVAS COMO TAREFAS (migração 233). Preenchido, a escada passa a
+             ser contada da ENTRADA nesta etapa — é o "D1, D3 e D7, total de 7 dias"
+             do documento. Vazio, vale a escada relativa à conversa de sempre. -->
+        <div style="display:flex;align-items:center;gap:.5rem;margin:.4rem 0 0 1.35rem;flex-wrap:wrap;font-size:.74rem;color:var(--txt-mut)">
+          <span>tentativas em (dias após entrar aqui)</span>
+          <input class="fld" name="toques_dias" value="{{ e.toques_dias or '' }}" placeholder="ex.: 1,3,7"
+                 style="width:110px">
+          <span class="mut" style="font-size:.7rem">em branco = usa a escada do Follow-up</span>
+          <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;cursor:pointer">
+            <input type="checkbox" name="exige_motivo" value="1" {% if e.exige_motivo %}checked{% endif %}
+                   style="width:auto;margin:0;accent-color:var(--coral)">
+            exigir motivo pra entrar aqui
+          </label>
+          <span>·</span>
+          <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;cursor:pointer">
+            <input type="checkbox" name="sai_do_quadro" value="1" {% if e.sai_do_quadro %}checked{% endif %}
+                   style="width:auto;margin:0;accent-color:var(--azul)">
+            não mostrar no quadro
+          </label>
+          <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;cursor:pointer">
+            <input type="checkbox" name="agenda_ao_entrar" value="1" {% if e.agenda_ao_entrar %}checked{% endif %}
+                   style="width:auto;margin:0;accent-color:var(--verde)">
+            criar o compromisso na Agenda
+          </label>
+          <span>·</span>
+          <span>se o cliente voltar a falar daqui, leva para</span>
+          <select class="rg-uni" name="reativa_para">
+            <option value="">— não reativa —</option>
+            {% for d in etapas if d.chave != e.chave %}
+            <option value="{{ d.chave }}" {% if e.reativa_para==d.chave %}selected{% endif %}>{{ d.rotulo }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
+        <div style="display:flex;justify-content:flex-end;margin-top:.4rem">
           <button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem">Salvar</button>
         </div>
       </form>
@@ -15294,6 +15801,37 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <select class="rg-uni" name="fase"><option value="venda">na fase de venda</option><option value="pos">na pós-venda</option></select>
       <button class="pbtn novo">+ Nova etapa</button>
       <span class="mut" style="font-size:.78rem">só remove etapa vazia · as fixas só renomeiam</span>
+    </form>
+  </div>
+
+  <!-- ---------------- motivos de perda ----------------
+       A lista é DA CONTA (migração 235). Nasce com a do ramo e daqui em diante é
+       dela: liga, desliga, renomeia, reordena e acrescenta. A CHAVE nunca muda —
+       é ela que está gravada em todo lead já perdido. -->
+  <div class="fsec" style="margin-top:1.1rem">
+    <div class="sh"><b>Por que perdemos</b><span class="mut" style="font-size:.76rem">a lista que o vendedor escolhe ao encerrar um lead · cada linha salva sozinha</span></div>
+    {% for m in motivos_conta %}
+    <form class="rg-etapa" onsubmit="return rgSalvar(event)"
+          action="/painel/prospeccao/regua/motivo/{{ m.id }}" method="post"
+          style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:.55rem 0;border-top:1px solid var(--borda)">
+      <input class="fld" name="rotulo" value="{{ m.rotulo }}" style="flex:1;min-width:220px;max-width:340px">
+      <code class="mut" style="font-size:.68rem">{{ m.chave }}</code>
+      <input class="fld" name="ordem" value="{{ m.ordem }}" style="width:58px;text-align:right" title="ordem na lista">
+      <label class="chk" style="display:inline-flex;align-items:center;gap:.3rem;font-size:.74rem;color:var(--txt-mut);cursor:pointer">
+        <input type="checkbox" name="exige_descricao" value="1" {% if m.exige_descricao %}checked{% endif %}
+               style="width:auto;margin:0;accent-color:var(--ambar)">pede texto</label>
+      <label class="chk" style="display:inline-flex;align-items:center;gap:.3rem;font-size:.74rem;color:var(--txt-mut);cursor:pointer">
+        <input type="checkbox" name="ativo" value="1" {% if m.ativo %}checked{% endif %}
+               style="width:auto;margin:0;accent-color:var(--verde)">na lista</label>
+      <button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem">Salvar</button>
+    </form>
+    {% endfor %}
+    <form method="post" action="/painel/prospeccao/regua/motivo/novo" style="display:flex;gap:.5rem;align-items:center;margin-top:.9rem;padding-top:.8rem;border-top:1px solid var(--borda);flex-wrap:wrap">
+      <input class="fld" name="rotulo" placeholder="Ex.: Não aceitou o regulamento" style="max-width:280px">
+      <label class="chk" style="display:inline-flex;align-items:center;gap:.3rem;font-size:.74rem;color:var(--txt-mut);cursor:pointer">
+        <input type="checkbox" name="exige_descricao" value="1" style="width:auto;margin:0;accent-color:var(--ambar)">pede texto</label>
+      <button class="pbtn novo">+ Novo motivo</button>
+      <span class="mut" style="font-size:.78rem">desmarcar "na lista" tira da tela sem apagar de quem já foi perdido assim</span>
     </form>
   </div>
 </div>

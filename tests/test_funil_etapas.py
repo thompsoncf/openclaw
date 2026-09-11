@@ -25,6 +25,9 @@ create table funil_etapas (id bigserial primary key, conta_id bigint, chave text
   -- colunas da migração 177 (fase/prazo/gatilho): a etapa nova nasce com fase
   fase text not null default 'venda', prazo_min integer, gatilho text,
   gatilho_ativo boolean not null default false,
+  -- migração 238: a etapa que o quadro comercial não mostra
+  sai_do_quadro boolean not null default false,
+  agenda_ao_entrar boolean not null default false,
   criado_em timestamptz not null default now(), unique (conta_id, chave));
 """
 

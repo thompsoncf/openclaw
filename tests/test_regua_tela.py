@@ -25,9 +25,19 @@ MIG = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, status text default 'novo',
   estagio text default 'lead', vendedor_id bigint, criado_em timestamptz default now());
+create table funil_motivos_perda (id bigserial primary key, conta_id bigint,
+  chave text, rotulo text, ordem int default 0, ativo boolean default true,
+  exige_descricao boolean default false, criado_em timestamptz default now(),
+  constraint uq_fmp unique (conta_id, chave));
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
   ordem int default 0, fixa boolean default false, fase text default 'venda',
   prazo_min integer, gatilho text, gatilho_ativo boolean default false,
+  teto_dias integer, renovacoes_max integer not null default 0,
+  exige_justificativa boolean not null default true, renova_sozinho_h integer,
+  saidas_permitidas text, toques_dias text,
+  exige_motivo boolean not null default false, reativa_para text,
+  sai_do_quadro boolean not null default false,
+  agenda_ao_entrar boolean not null default false,
   criado_em timestamptz default now(), constraint uq_fe unique (conta_id, chave));
 create table funil_regua (conta_id bigint primary key,
   gatilhos_modo text default 'off', cobranca_modo text default 'off',
@@ -35,6 +45,13 @@ create table funil_regua (conta_id bigint primary key,
   janela_fecha time default '19:00', sem_resposta_min int default 120,
   bola_nossa_min int default 240, bola_cliente_min int default 4320,
   escala_min int default 240, teto_avisos_dia int default 5,
+  -- sem NOT NULL e SEM DEFAULT, como a migração 228 deixou a tabela de verdade:
+  -- coluna vazia quer dizer "herda o padrão do nicho", e um default aqui esconderia
+  -- justamente o caso que a tela precisa saber mostrar.
+  follow_up_modo text default 'off', fu_proposta_dias int, fu_toques_dias text,
+  fu_festa_dias int, fu_teto_dia int,
+  -- o quarto modo (migração 230): um interruptor POR REGRA, não um geral
+  teto_modo text not null default 'off', teto_avisar_antes int,
   atualizado_em timestamptz default now());
 create table funil_movimentos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   de text, para text, motivo text, membro_id bigint, criado_em timestamptz default now());
@@ -158,11 +175,42 @@ def test_modo_invalido_cai_pra_desligado(monkeypatch, pool):
 
 
 def test_teto_nunca_fica_zero(monkeypatch, pool):
+    """Teto zero calaria a régua inteira sem ninguém perceber — a trava é antiga,
+    o que mudou foi onde ela mora.
+
+    Até a migração 228 o "0" caía no `coalesce` do SQL e o valor ANTERIOR ficava.
+    Agora campo vazio quer dizer HERDA, então "0" deixou de ser indistinguível de
+    "não mexi": é um número que o dono digitou, e a resposta certa pra um número
+    inválido é o menor válido (1), não ressuscitar em silêncio o que estava lá.
+    """
     _logado(monkeypatch, pool)
     asyncio.run(pp.regua_config(_Req({"teto": "0"})))
     with pool.connection() as c:
         assert c.execute("select teto_avisos_dia from funil_regua where conta_id=%s",
-                         (CONTA,)).fetchone()[0] == 5   # coalesce mantém o que havia
+                         (CONTA,)).fetchone()[0] == 1
+
+
+def test_campo_vazio_volta_a_herdar_o_padrao_do_ramo(monkeypatch, pool):
+    """O pedido do dono de 11/09/2026: "deixa uma forma de parametrizar, porque
+    serve pra outras empresas do mesmo nicho ou outras".
+
+    Antes da 228 não existia caminho de volta: `coalesce(%s, coluna)` fazia campo
+    vazio significar "mantém o que estava", então quem digitasse um número uma vez
+    ficava com ele pra sempre e o padrão do ramo nunca mais alcançava a conta.
+    """
+    _logado(monkeypatch, pool)
+    asyncio.run(pp.regua_config(_Req({"sem_resposta_n": "90", "sem_resposta_u": "min",
+                                      "fu_toques_dias": "1, 3,7 "})))
+    with pool.connection() as c:
+        r = c.execute("select sem_resposta_min, fu_toques_dias from funil_regua where conta_id=%s",
+                      (CONTA,)).fetchone()
+    assert r == (90, "1,3,7"), "escolha do dono não gravou (ou não limpou o espaço)"
+
+    asyncio.run(pp.regua_config(_Req({"sem_resposta_n": "", "fu_toques_dias": ""})))
+    with pool.connection() as c:
+        r = c.execute("select sem_resposta_min, fu_toques_dias from funil_regua where conta_id=%s",
+                      (CONTA,)).fetchone()
+    assert r == (None, None), "apagar o campo tinha que devolver a conta pro padrão do ramo"
 
 
 # ----------------------------------------------------------------- etapa

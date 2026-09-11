@@ -262,6 +262,13 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 .fu-lead .meta{display:flex;flex-wrap:wrap;gap:.2rem .8rem;font-size:.72rem;color:var(--text-dim)}
 .fu-lead .meta i{font-style:normal;color:var(--text-faint);margin-right:.2rem}
 .fu-lead .meta b{color:var(--text);font-weight:500}
+/* as tentativas como tarefas: feito, pendente, atrasado — a cor é o estado, não
+   enfeite, e é o que se lê antes de ler o texto */
+.fu-toques{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-top:.35rem}
+.fu-toque{font:600 .66rem/1 ui-monospace,monospace;padding:.3rem .4rem;border-radius:6px;
+  border:1px solid var(--borda);color:var(--txt-mut);background:var(--bg)}
+.fu-toque.feito{border-color:var(--verde);color:var(--verde)}
+.fu-toque.atrasado{border-color:var(--coral);color:var(--coral)}
 .fu-acao{margin-top:.35rem;font-size:.76rem;color:#F0DCA6;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:8px;padding:.35rem .55rem;display:inline-block}
 .fu-acao b{color:#fff}
 .fu-acao.calma{color:var(--text-dim);background:var(--surface-2);border-color:var(--line)}
@@ -462,6 +469,21 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
           <div class="fu-acao"><span>📅 Próxima ação:</span> <b>{{ x.acao }}</b>
             {% if x.atraso_h > 0 %}— venceu há {{ tempo(x.atraso_h) }}{% else %}— {{ br(x.prazo) }}{% endif %}
             {% if x.na_mao %} · marcada na mão{% endif %}</div>
+        {% endif %}
+        {% if x.toques %}
+        {# AS TENTATIVAS COMO TAREFAS (migração 233). Elas já nascem com data ao
+           entrar na etapa — aqui a tela só mostra o que o motor calculou, que é o
+           que "sem depender da lembrança do vendedor" quer dizer na prática. #}
+        <div class="fu-toques">
+          {% for t in x.toques %}
+          <span class="fu-toque {% if t.feito %}feito{% elif t.atrasado %}atrasado{% endif %}"
+                title="{{ br(t.prazo) }}">{% if t.feito %}✓{% else %}D{{ t.dia }}{% endif %}</span>
+          {% endfor %}
+          <span class="mut" style="font-size:.72rem">
+            {% set faltam = x.toques | rejectattr('feito') | list | length %}
+            {% if faltam %}{{ faltam }} de {{ x.toques|length }} tentativa(s) pendente(s){% else %}as {{ x.toques|length }} tentativas foram feitas{% endif %}
+          </span>
+        </div>
         {% endif %}
       </div>
       <div class="fu-dir">

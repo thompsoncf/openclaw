@@ -23,10 +23,13 @@ a coluna ou marcar como lido NÃO encerram alerta nenhum: o fato que gerou o avi
 continua de pé.
 
 O SEGUNDO RELÓGIO É DO NICHO (CLAUDE.md §6)
-Em eventos a data da festa manda: festa em até `fu_festa_dias` sem proposta vence
-HOJE, por mais recente que tenha sido a última conversa. Quem não vende festa
-(perfil recorrente) não tem esse relógio — e nunca vê a palavra. O perfil vem de
-finance/raio_x_perfil, os mesmos três de sempre.
+Em eventos a data da festa manda: festa em até `fu_festa_dias` sem proposta já está
+vencida, por mais recente que tenha sido a última conversa. O prazo dela é o
+instante em que a festa ENTROU nessa janela (`_janela_da_festa`), nunca "agora" —
+"agora" muda a cada passada do poller, e prazo que muda é fato novo, que fura o
+dedup e cobra de novo sem parar. Quem não vende festa (perfil recorrente) não tem
+esse relógio — e nunca vê a palavra. O perfil vem de finance/raio_x_perfil, os
+mesmos três de sempre.
 
 OS QUATRO DEGRAUS DA COBRANÇA
     venc  no vencimento          → o vendedor
@@ -45,11 +48,15 @@ calcula tudo e grava com `simulado=true`, sem mandar um push sequer.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from finance import funil_regua as fr
 
 _log = logging.getLogger("openclaw.follow_up")
+
+#: Brasília é -3 fixo no produto inteiro (o país não tem horário de verão desde
+#: 2019). Mesma convenção de finance/funil_regua e do painel.
+_UTC_BR = timedelta(hours=-3)
 
 #: Perfis que já ganharam a tela. O motor é do perfil (o vocabulário e o relógio
 #: da festa saem dele), mas a ENTREGA foi combinada com o dono em duas etapas:
@@ -110,20 +117,62 @@ def config(c, conta_id: int) -> dict:
              from funil_regua where conta_id=%s""", (conta_id,)).fetchone()
     if not r:
         return dict(base, **_PADRAO)
-    return dict(base, follow_up_modo=r[0], fu_proposta_dias=r[1],
-                fu_toques=_escada(r[2]), fu_festa_dias=r[3], fu_teto_dia=r[4])
+    # COLUNA VAZIA = HERDA (migração 228). `base` já traz o padrão do nicho resolvido
+    # pra estas quatro; aqui só entra o que a CONTA escolheu de verdade.
+    escolhidas = set(base.get("_escolhidas") or ())
+    vals = {"fu_proposta_dias": r[1], "fu_toques_dias": r[2],
+            "fu_festa_dias": r[3], "fu_teto_dia": r[4]}
+    escolhidas |= {k for k, v in vals.items() if v is not None}
+    out = dict(base, follow_up_modo=r[0],
+               **{k: v for k, v in vals.items() if v is not None})
+    out["_escolhidas"] = escolhidas
+    # `fu_festa_dias` é None no perfil recorrente — quem não vende festa não tem o
+    # segundo relógio, e o None é a declaração disso (não um valor faltando).
+    out.setdefault("fu_proposta_dias", _PADRAO["fu_proposta_dias"])
+    out.setdefault("fu_teto_dia", _PADRAO["fu_teto_dia"])
+    out["fu_festa_dias"] = out.get("fu_festa_dias")
+    out["fu_toques"] = _escada(out.get("fu_toques_dias"))
+    return out
 
 
 # ------------------------------------------------------------------ a escada
 
+def toques_da_etapa(*, desde, toques: tuple, feitos: int, agora: datetime) -> list[dict]:
+    """As tentativas como TAREFAS, ancoradas na entrada na etapa (migração 233).
+
+    O pedido do dono era "as três tentativas devem nascer automaticamente como
+    tarefas em D1, D3 e D7, sem depender da lembrança do vendedor". Nascer é isto:
+    a lista existe assim que o lead entra na etapa, com data em cada linha, e a
+    tela só mostra o que já está calculado.
+
+    `feitos` são as mensagens que saíram DEPOIS da entrada — o mesmo relógio do
+    resto da régua, que lê a conversa e não "atividade registrada" (5 usos em toda
+    a história da conta 34).
+    """
+    out = []
+    for i, d in enumerate(toques):
+        prazo = desde + timedelta(days=int(d))
+        feito = i < feitos
+        out.append({"n": i + 1, "dia": int(d), "prazo": prazo, "feito": feito,
+                    "atrasado": (not feito and prazo <= agora)})
+    return out
+
+
 def prazo_automatico(*, status: str, ult_in, ult_out, criado_em, tentativas: int,
-                     evento_em, cfg: dict, tem_data: bool, agora: datetime) -> tuple[datetime, str]:
+                     evento_em, cfg: dict, tem_data: bool, agora: datetime,
+                     toques_fixos: tuple = (), desde=None,
+                     feitos_na_etapa: int = 0) -> tuple[datetime, str]:
     """(prazo, ação) que o sistema propõe pra este lead. Puro — sem banco.
 
     A ordem é a do mockup: a bola vem antes de tudo (cliente esperando é mais
     urgente e mais acionável que card parado), a proposta tem prazo próprio, e o
     resto sobe a escada de toques. Por último, e só pra quem vende festa, a data
     aperta o que estiver frouxo.
+
+    `toques_fixos` é a etapa que declarou D1/D3/D7 (migração 233): ali a escada
+    deixa de ser relativa à última conversa e passa a ser contada da ENTRADA na
+    etapa. A bola continua vindo antes — cliente esperando resposta é mais urgente
+    que a próxima tentativa agendada, e essa ordem não muda por etapa nenhuma.
     """
     if ult_out is None:
         # nunca falamos nada — nem pelo painel, nem pelo celular
@@ -133,6 +182,18 @@ def prazo_automatico(*, status: str, ult_in, ult_out, criado_em, tentativas: int
         prazo, acao = ult_in + timedelta(minutes=cfg["bola_nossa_min"]), "responder — o cliente está esperando"
     elif status == "proposta":
         prazo, acao = ult_out + timedelta(days=cfg["fu_proposta_dias"]), "cobrar retorno da proposta"
+    elif toques_fixos and desde:
+        # a etapa declarou as tentativas (D1/D3/D7). A próxima é a primeira ainda
+        # não feita; feitas todas, o prazo é o fim do período — e o lead fica
+        # esperando DECISÃO, não virando Perdido sozinho: perder exige motivo, e só
+        # quem falou com o cliente sabe qual (mesma trava do teto da etapa).
+        n = min(max(0, int(feitos_na_etapa or 0)), len(toques_fixos))
+        if n >= len(toques_fixos):
+            prazo = desde + timedelta(days=int(toques_fixos[-1]))
+            acao = "as tentativas acabaram — encerrar ou reativar?"
+        else:
+            prazo = desde + timedelta(days=int(toques_fixos[n]))
+            acao = f"{n + 1}ª tentativa de {len(toques_fixos)}"
     else:
         esc = cfg["fu_toques"]
         n = min(max(int(tentativas or 1), 1), len(esc))
@@ -142,12 +203,41 @@ def prazo_automatico(*, status: str, ult_in, ult_out, criado_em, tentativas: int
                 else "insistiu demais — muda de canal ou encerra?")
         if n >= len(esc):
             acao = "insistiu demais — muda de canal ou encerra?"
-    # o segundo relógio: só existe pra quem vende festa
-    if tem_data and evento_em and status != "proposta":
+    # O segundo relógio: só existe pra quem vende festa. Duas portas pra mesma
+    # pergunta, e ambas contam: `tem_data` vem do vocabulário do perfil, e
+    # `fu_festa_dias` é None no perfil que não tem esse relógio (raio_x_perfil).
+    # Quem declara não ter data nunca deve cair aqui por um cfg mal montado.
+    if tem_data and evento_em and status != "proposta" and cfg.get("fu_festa_dias"):
         faltam = (evento_em - agora.date()).days
         if 0 <= faltam <= cfg["fu_festa_dias"] and prazo > agora:
-            prazo, acao = agora, "mandar proposta — a data está chegando"
+            prazo, acao = _janela_da_festa(evento_em, criado_em, cfg), "mandar proposta — a data está chegando"
     return prazo, acao
+
+
+def _janela_da_festa(evento_em, criado_em, cfg: dict) -> datetime:
+    """Quando a festa ENTROU na janela que aperta o prazo — um fato do lead, não do
+    relógio de quem está perguntando.
+
+    ISTO ERA `agora`, E `agora` NÃO É UM FATO. O dedup do aviso é por `ref_em`, que
+    é o prazo; com o prazo valendo "agora", cada passada do poller inventava um fato
+    novo e o aviso saía DE NOVO. Medido no ensaio da conta 34 em 11/09/2026: o lead
+    977 (festa em 26/09) acumulou 442 avisos em quatro dias, 441 com `ref_em`
+    distinto — um por ciclo, dentro da janela de atendimento. Ligado, esse lead
+    sozinho comeria a cota diária do vendedor (`fu_teto_dia`) em meia hora e
+    represaria todo o follow-up de verdade dele, todo dia.
+
+    A âncora é `evento_em - fu_festa_dias`, às 9h de Brasília — determinística a
+    partir do cadastro, então duas passadas seguidas devolvem o mesmo instante e o
+    dedup volta a funcionar. Nunca antes de o lead existir: com a festa já dentro da
+    janela no dia do cadastro, a abertura ficaria no passado e o lead nasceria
+    "atrasado há 20 dias", número que nunca foi verdade.
+
+    9h e não meia-noite porque prazo de madrugada só serve pra vencer antes de
+    alguém acordar — é a mesma hora que o reagendamento de um toque já usa.
+    """
+    dia = evento_em - timedelta(days=int(cfg["fu_festa_dias"]))
+    abertura = datetime.combine(dia, time(9, 0)).replace(tzinfo=timezone.utc) - _UTC_BR
+    return max(abertura, criado_em) if criado_em else abertura
 
 
 def estado_de(prazo: datetime | None, ult: datetime | None, agora: datetime,
@@ -215,6 +305,16 @@ adiam as (
 select p.id, p.status, p.vendedor_id,
        coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'Lead'),
        p.evento_em, p.evento_tipo, p.evento_convidados, p.criado_em,
+       -- desde quando está NESTA etapa, e quantas mensagens nossas saíram depois
+       -- disso: é o par que a escada ancorada (migração 233) precisa, e vem do
+       -- histórico que roda desde 19/08 com tudo desligado
+       coalesce((select max(fm.criado_em) from funil_movimentos fm
+                  where fm.prospeccao_id = p.id and fm.para = p.status), p.criado_em) as na_etapa,
+       (select count(*) from conversas cv2 join mensagens m2 on m2.conversa_id = cv2.id
+         where cv2.prospeccao_id = p.id and m2.direcao = 'out'
+           and m2.criado_em > coalesce((select max(fm2.criado_em) from funil_movimentos fm2
+                                         where fm2.prospeccao_id = p.id and fm2.para = p.status),
+                                       p.criado_em)) as saiu_na_etapa,
        msg.ult_in, msg.ult_out, coalesce(tent.n, 0),
        marc.prazo_em, marc.acao, marc.criado_em, coalesce(adiam.n, 0),
        coalesce(nullif(mb.nome,''), mb.email), marc.membro_id,
@@ -244,18 +344,30 @@ def leads(c, conta_id: int, perfil: dict | None = None,
         from finance import raio_x_perfil as rxp
         perfil = rxp.perfil(None)
     tem_data = bool(perfil.get("vocab", {}).get("data"))
+    # as etapas que declararam as tentativas como tarefas (migração 233). Uma
+    # consulta pra conta inteira, como tudo aqui: a versão por lead seriam 274 idas
+    # ao banco por ciclo do poller na Prime.
+    toques_por_etapa = {r[0]: tuple(int(x) for x in (r[1] or "").split(",") if x.strip().isdigit())
+                        for r in c.execute(
+                            """select chave, toques_dias from funil_etapas
+                                where conta_id=%s and coalesce(toques_dias,'') <> ''""",
+                            (conta_id,)).fetchall()}
+    toques_por_etapa = {k: v for k, v in toques_por_etapa.items() if v}
     hoje = agora.date()
     out = []
     for r in c.execute(_SQL_LEADS, {"conta": conta_id}).fetchall():
         (lid, status, vend, quem, evento_em, ev_tipo, ev_conv, criado,
+         na_etapa, saiu_na_etapa,
          ult_in, ult_out, tent, m_prazo, m_acao, m_em, adiados, vend_nome, m_por,
          msg_txt, msg_em, msg_dir, msg_id, visto, conversa_id, canal) = r
         ult = max([x for x in (ult_in, ult_out) if x], default=None)
         # festa que já passou e o lead segue aberto: não há o que propor
         sem_acao = bool(tem_data and evento_em and evento_em < hoje)
+        fixos = toques_por_etapa.get(status) or ()
         prazo, acao = prazo_automatico(
             status=status, ult_in=ult_in, ult_out=ult_out, criado_em=criado,
-            tentativas=tent, evento_em=evento_em, cfg=cfg, tem_data=tem_data, agora=agora)
+            tentativas=tent, evento_em=evento_em, cfg=cfg, tem_data=tem_data, agora=agora,
+            toques_fixos=fixos, desde=na_etapa, feitos_na_etapa=saiu_na_etapa)
         na_mao = False
         # A MÃO MANDA — mas só enquanto for a última palavra. A marcação vale se
         # foi feita DEPOIS da última mensagem; se o cliente voltou a falar, o fato
@@ -276,6 +388,10 @@ def leads(c, conta_id: int, perfil: dict | None = None,
             "bola": ("aguardando vendedor" if (ult_out is None or (ult_in and ult_in > ult_out))
                      else "aguardando cliente"),
             "faltam": ((evento_em - hoje).days if evento_em else None),
+            "na_etapa": na_etapa,
+            # as tentativas como tarefas — lista vazia na etapa que não declarou
+            "toques": (toques_da_etapa(desde=na_etapa, toques=fixos,
+                                       feitos=saiu_na_etapa, agora=agora) if fixos else []),
             # o balão do card: onde a conversa parou, sem precisar abrir o lead
             "msg": ({"texto": msg_txt or "", "em": msg_em, "minha": msg_dir == "out",
                      "nova": (msg_dir == "in" and (visto is None or (msg_id or 0) > visto)),

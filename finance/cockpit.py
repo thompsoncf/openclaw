@@ -1109,6 +1109,13 @@ def mudar_etapa(pool, conta_id: int, membro_id: int, lead_id: int, chave: str) -
             return {"ok": False, "erro": "etapa_invalida"}
         antes = c.execute("select status from prospeccao where id=%s and conta_id=%s",
                           (lead_id, conta_id)).fetchone()
+        # AS SAÍDAS DA ETAPA (migração 232). A mesma trava do painel, chamando a
+        # MESMA função: duas cópias da regra viram duas regras no dia em que uma
+        # delas mudar, e o app do vendedor é justamente onde o card mais se move.
+        from finance import funil_regua as _fr
+        recusa = _fr.recusa_de_saida(c, conta_id, antes[0] if antes else None, chave)
+        if recusa:
+            return {"ok": False, "erro": "saida", "msg": recusa}
         c.execute("update prospeccao set status=%s, atualizado_em=now() "
                   "where id=%s and conta_id=%s", (chave, lead_id, conta_id))
         _historico(c, conta_id, lead_id, antes[0] if antes else None, chave, membro_id)
@@ -1288,14 +1295,33 @@ def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict)
     return {"ok": True}
 
 
-def fechar(pool, conta_id: int, membro_id: int, lead_id: int, tipo: str, motivo: str = "") -> dict:
+def fechar(pool, conta_id: int, membro_id: int, lead_id: int, tipo: str, motivo: str = "",
+           descricao: str = "") -> dict:
     """Fecha o lead: 'ganho' ou 'perdido'. Em perdido, grava o motivo em obs (timeline).
-    Revalida posse."""
+    Revalida posse.
+
+    Quando a etapa de destino EXIGE motivo (migração 235), a recusa vem antes de
+    qualquer escrita e devolve a lista da conta pra tela montar as opções. Perguntar
+    antes de mexer no lead é o ponto: fechar e só então descobrir que falta o motivo
+    deixaria o lead em Perdido sem ninguém ter dito por quê — o "limpar o funil" que
+    a regra 5 existe pra impedir.
+    """
     if tipo not in ("ganho", "perdido"):
         return {"ok": False, "erro": "tipo"}
     with pool.connection() as c:
         if not _posse(c, conta_id, membro_id, lead_id):
             return {"ok": False, "erro": "escopo"}
+        from finance import funil_perda as _fp
+        from finance import funil_regua as _fr
+        perfil_chave = _fr.perfil_da_conta(c, conta_id)
+        val = _fp.validar(c, conta_id, etapa_destino=tipo, motivo=motivo,
+                          descricao=descricao, perfil_chave=perfil_chave)
+        if not val["ok"]:
+            lista = [{"chave": m["chave"], "rotulo": m["rotulo"],
+                      "exige_descricao": m["exige_descricao"]}
+                     for m in _fp.motivos(c, conta_id, perfil_chave)]
+            c.commit()          # a semente da lista, se foi a 1ª vez, fica gravada
+            return {"ok": False, "erro": val["erro"], "motivos": lista}
         antes = c.execute("select status from prospeccao where id=%s and conta_id=%s",
                           (lead_id, conta_id)).fetchone()
         c.execute("update prospeccao set status=%s, atualizado_em=now() "
@@ -1305,8 +1331,14 @@ def fechar(pool, conta_id: int, membro_id: int, lead_id: int, tipo: str, motivo:
         # check da migração 209): é o que o Raio-X do dono agrega em "por que
         # perdeu". Texto solto que não é chave continua só na timeline. Savepoint
         # porque a coluna nasceu na 209 e fechar o lead não pode depender dela.
+        # A CHAVE VALE CONTRA A LISTA DA CONTA (migração 235), e não mais contra a
+        # constante do código: um motivo que o dono criou hoje não estaria lá, e
+        # seria descartado em silêncio bem na hora em que ele quis usá-lo.
+        # `MOTIVOS_TODOS` segue no fallback pro histórico de quem foi perdido antes.
         from finance.raio_x_perfil import MOTIVOS_TODOS, rotulo_motivo
-        chave = motivo if motivo in dict(MOTIVOS_TODOS) else None
+        _da_conta = {m["chave"]: m["rotulo"] for m in _fp.motivos(c, conta_id, perfil_chave,
+                                                                 so_ativos=False)}
+        chave = motivo if (motivo in _da_conta or motivo in dict(MOTIVOS_TODOS)) else None
         try:
             with c.transaction():
                 c.execute("update prospeccao set perda_motivo=%s where id=%s and conta_id=%s",
@@ -1324,7 +1356,10 @@ def fechar(pool, conta_id: int, membro_id: int, lead_id: int, tipo: str, motivo:
                 _le.sair(pool, conta_id, lead_id, "desistiu")
         except Exception:  # noqa: BLE001 — a lista nunca segura o fechamento
             pass
-        texto_motivo = rotulo_motivo(chave) if chave else (motivo or "sem motivo")
+        if tipo == "perdido":
+            _fp.registrar(c, conta_id, lead_id, motivo=chave or "", descricao=descricao,
+                          etapa_origem=antes[0] if antes else None)
+        texto_motivo = (_da_conta.get(chave) or rotulo_motivo(chave)) if chave else (motivo or "sem motivo")
         try:
             c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, resultado, descricao)
                          values (%s,%s,'nota',%s,%s)""",
@@ -2394,8 +2429,27 @@ def agendar_visita(pool, conta_id: int, membro_id: int, lead_id: int, *, data: s
         except Exception:  # noqa: BLE001
             pass
         # ao agendar a visita, o lead avança pra 'qualificado' (nunca mexe em ganho/perdido)
-        c.execute("update prospeccao set status='qualificado', ultimo_contato_em=now(), atualizado_em=now() "
-                  "where id=%s and conta_id=%s and " + _ABERTO_T, (lead_id, conta_id))
+        #
+        # O `antes` e o `_historico` NÃO são zelo — eram o buraco. Até 11/09/2026 esta
+        # era a ÚNICA das sete escritas de `prospeccao.status` do produto que mudava a
+        # coluna sem deixar linha em `funil_movimentos`. Medido na conta 34 nesse dia:
+        # 9 dos 14 leads em "Agendado Visita" não tinham registro de entrada na etapa,
+        # contra 4 em 275 no Contatado (esses, de antes de o histórico existir).
+        #
+        # O estrago é maior do que um relatório torto: tudo que pergunta "desde quando
+        # este lead está nesta coluna" cai no `criado_em` do LEAD quando não acha
+        # movimento — então o teto de dias (migração 230) contaria desde o nascimento
+        # do lead e o card nasceria vencido, e as tentativas ancoradas na entrada
+        # (migração 233) nasceriam todas atrasadas.
+        antes = c.execute("select status from prospeccao where id=%s and conta_id=%s",
+                          (lead_id, conta_id)).fetchone()
+        movido = c.execute(
+            "update prospeccao set status='qualificado', ultimo_contato_em=now(), atualizado_em=now() "
+            "where id=%s and conta_id=%s and " + _ABERTO_T, (lead_id, conta_id)).rowcount
+        # só registra o que de fato mudou: o `_ABERTO_T` acima recusa lead fechado, e
+        # anotar um movimento que não aconteceu seria a mesma mentira ao contrário
+        if movido and (not antes or antes[0] != "qualificado"):
+            _historico(c, conta_id, lead_id, antes[0] if antes else None, "qualificado", membro_id)
         c.commit()
     ics_url = f"{_app_url()}/visita/{token}.ics"
     msg = (f"Olá! 👋 Sua visita ao {esp['nome']} está marcada:\n📅 {quando}\n📍 {local}"

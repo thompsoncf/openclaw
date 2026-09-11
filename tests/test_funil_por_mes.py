@@ -33,6 +33,9 @@ create table prospeccao (id bigserial primary key, orcamento_id bigint, conta_id
   evento_em date, evento_tipo text, evento_convidados int, evento_origem text, evento_trecho text, evento_pista text, evento_lido_em timestamptz, ultimo_contato_em timestamptz,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
+  -- migração 238: a etapa que o quadro comercial não mostra
+  sai_do_quadro boolean not null default false,
+  agenda_ao_entrar boolean not null default false,
   rotulo text, ordem int default 0, fixa boolean default false,
   criado_em timestamptz default now(), constraint uq_funil_etapa unique (conta_id, chave));
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,

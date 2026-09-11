@@ -65,8 +65,45 @@ _PADRAO = {
 
 # ------------------------------------------------------------------ config
 
+def perfil_da_conta(c, conta_id: int) -> str:
+    """O perfil do nicho da conta, lido com o MESMO cursor da config.
+
+    `raio_x_perfil.perfil_da_conta` existe e faz isto, mas pede um pool — e aqui já
+    estamos dentro de uma transação. Abrir uma segunda conexão pra ler o nicho no
+    meio de uma passada do poller é o tipo de coisa que esgota o pool no dia em que
+    o número de contas dobrar.
+
+    Tolerante de propósito: nicho ilegível cai em 'recorrente', o perfil SEM festa.
+    Errar pra esse lado nunca inventa um relógio de data pra quem não tem data.
+
+    O `with c.transaction()` NÃO é zelo: sem ele, uma consulta que falha (banco de
+    teste sem `contas`/`nichos`, coluna que ainda não existe num deploy pela metade)
+    ENVENENA a transação inteira, e o `except` aqui devolveria 'recorrente' enquanto
+    todo comando seguinte morre com "current transaction is aborted". O SAVEPOINT
+    desfaz só esta leitura. Mesmo defeito que já custou um ciclo nos gatilhos do
+    funil, em 19/08/2026.
+    """
+    from finance import raio_x_perfil as _rxp
+    try:
+        with c.transaction():
+            r = c.execute("""select coalesce(n.slug, '') from contas ct
+                              left join nichos n on n.id = ct.nicho_id
+                             where ct.id=%s""", (conta_id,)).fetchone()
+    except Exception:  # noqa: BLE001
+        return "recorrente"
+    return _rxp.perfil_por_nicho(r[0] if r else None)
+
+
 def config(c, conta_id: int) -> dict:
-    """Config da régua da conta, semeando o padrão (tudo desligado) na 1ª vez."""
+    """Config da régua da conta, semeando a linha (tudo desligado) na 1ª vez.
+
+    COLUNA VAZIA = HERDA O PADRÃO DO NICHO (migração 228). Antes dela cada número
+    era copiado pra dentro da conta no INSERT, e melhorar o padrão depois não
+    alcançava conta nenhuma. Agora só vem do banco o que o dono escolheu; o resto sai
+    de `raio_x_perfil.funil_resolvido`.
+
+    Os três modos não herdam nada: 'off' é escolha, não ausência de escolha.
+    """
     c.execute("insert into funil_regua (conta_id) values (%s) on conflict (conta_id) do nothing",
               (conta_id,))
     r = c.execute(
@@ -75,10 +112,15 @@ def config(c, conta_id: int) -> dict:
              from funil_regua where conta_id=%s""", (conta_id,)).fetchone()
     if not r:
         return dict(_PADRAO)
-    return {"gatilhos_modo": r[0], "cobranca_modo": r[1], "janela_dias": r[2],
-            "janela_abre": r[3], "janela_fecha": r[4], "sem_resposta_min": r[5],
-            "bola_nossa_min": r[6], "bola_cliente_min": r[7], "escala_min": r[8],
-            "teto_avisos_dia": r[9]}
+    from finance import raio_x_perfil as _rxp
+    da_conta = {"janela_dias": r[2], "janela_abre": r[3], "janela_fecha": r[4],
+                "sem_resposta_min": r[5], "bola_nossa_min": r[6], "bola_cliente_min": r[7],
+                "escala_min": r[8], "teto_avisos_dia": r[9]}
+    vals, escolhidas = _rxp.funil_resolvido(perfil_da_conta(c, conta_id), da_conta)
+    # `_PADRAO` continua sendo o piso: perfil sem funil (produto) devolve {}, e a
+    # régua não pode responder com prazo None pra quem for perguntar.
+    return dict(_PADRAO, **{k: v for k, v in vals.items() if v is not None},
+                gatilhos_modo=r[0], cobranca_modo=r[1], _escolhidas=escolhidas)
 
 
 def _dias(cfg) -> set[int]:
@@ -267,10 +309,70 @@ _SQL_EVENTO = {
 
 def etapas(c, conta_id: int) -> list[dict]:
     rows = c.execute(
-        """select chave, rotulo, ordem, fixa, fase, prazo_min, gatilho, gatilho_ativo, id
+        """select chave, rotulo, ordem, fixa, fase, prazo_min, gatilho, gatilho_ativo, id,
+                  teto_dias, coalesce(renovacoes_max, 0), coalesce(exige_justificativa, true),
+                  renova_sozinho_h, saidas_permitidas, toques_dias,
+                  coalesce(exige_motivo, false), reativa_para,
+                  coalesce(sai_do_quadro, false), coalesce(agenda_ao_entrar, false)
              from funil_etapas where conta_id=%s order by ordem, id""", (conta_id,)).fetchall()
     return [{"chave": r[0], "rotulo": r[1], "ordem": r[2], "fixa": r[3], "fase": r[4],
-             "prazo_min": r[5], "gatilho": r[6], "gatilho_ativo": r[7], "id": r[8]} for r in rows]
+             "prazo_min": r[5], "gatilho": r[6], "gatilho_ativo": r[7], "id": r[8],
+             # o teto da etapa (migração 230) — quem lê etapas já lê tudo dela
+             "teto_dias": r[9], "renovacoes_max": r[10], "exige_justificativa": r[11],
+             "renova_sozinho_h": r[12], "saidas_permitidas": r[13],
+             "toques_dias": r[14], "exige_motivo": r[15],
+             "reativa_para": r[16], "sai_do_quadro": r[17],
+             "agenda_ao_entrar": r[18]} for r in rows]
+
+
+def _lista(txt) -> list[str]:
+    return [p.strip() for p in (txt or "").split(",") if p.strip()]
+
+
+def saidas_de(c, conta_id: int) -> dict:
+    """{chave da etapa: [chaves permitidas]} — só das etapas que RESTRINGEM.
+
+    Etapa fora do dicionário não restringe nada, que é como toda conta nasce e como
+    o funil sempre funcionou. Assim quem pergunta decide por ausência, sem precisar
+    testar None em todo lugar.
+    """
+    linhas = c.execute(
+        """select chave, saidas_permitidas from funil_etapas
+            where conta_id=%s and coalesce(saidas_permitidas,'') <> ''""",
+        (conta_id,)).fetchall()
+    return {r[0]: _lista(r[1]) for r in linhas if _lista(r[1])}
+
+
+def pode_mover(saidas: dict, de: str | None, para: str) -> bool:
+    """A MÃO pode levar este lead de `de` pra `para`?
+
+    Ficar onde está é sempre permitido — salvar a ficha sem trocar de coluna não é
+    uma saída, e recusar isso travaria o vendedor por nada.
+
+    O GATILHO NÃO PASSA POR AQUI (migração 232): ele anota um fato que já aconteceu,
+    e barrar fato faria o funil voltar a mentir — que é o problema que esta régua
+    inteira existe pra resolver.
+    """
+    if not de or de == para:
+        return True
+    permitidas = saidas.get(de)
+    return True if not permitidas else para in permitidas
+
+
+def recusa_de_saida(c, conta_id: int, de: str | None, para: str) -> str | None:
+    """A mensagem pro vendedor quando a saída é barrada, ou None quando pode.
+
+    A frase diz PARA ONDE pode ir, e não só que não pode: um "movimento não
+    permitido" manda a pessoa adivinhar, e adivinhar num funil de 275 leads é como
+    a regra vira algo que a equipe contorna arrastando pra qualquer outra coluna.
+    """
+    saidas = saidas_de(c, conta_id)
+    if pode_mover(saidas, de, para):
+        return None
+    rot = {e["chave"]: e["rotulo"] for e in etapas(c, conta_id)}
+    destinos = [rot.get(k, k) for k in saidas.get(de, [])]
+    lista = " ou ".join([", ".join(destinos[:-1]), destinos[-1]]) if len(destinos) > 1 else (destinos[0] if destinos else "")
+    return f"De {rot.get(de, de)} o lead só pode ir para {lista}."
 
 
 def chaves_fechadas(etapas_: list[dict]) -> list[str]:

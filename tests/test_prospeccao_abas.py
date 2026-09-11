@@ -171,12 +171,21 @@ def test_regua_vem_antes_da_ficha_do_lead():
     assert _resolve("/painel/prospeccao/regua/ritmo") == "regua_ritmo"
     assert _resolve("/painel/prospeccao/regua/config", "POST") == "regua_config"
     assert _resolve("/painel/prospeccao/regua/etapa/7", "POST") == "regua_etapa"
+    # os motivos de perda (migração 235): "novo" tem que casar com a rota dele, e
+    # não com `/motivo/{mid}`, que espera int e responderia 422 — é o MESMO defeito
+    # que a Régua teve, e a pergunta é feita ao router de propósito
+    assert _resolve("/painel/prospeccao/regua/motivo/novo", "POST") == "regua_motivo_novo"
+    assert _resolve("/painel/prospeccao/regua/motivo/7", "POST") == "regua_motivo"
 
 
 def test_a_ficha_do_lead_continua_atendendo_id():
     """E o conserto não pode ter roubado o caminho de quem é dono dele."""
     assert _resolve("/painel/prospeccao/629") == "prospeccao_ficha"
     assert _resolve("/painel/prospeccao/629/status", "POST") == "prospeccao_status"
+    # o teto da etapa (11/09/2026) entrou com a mesma forma das rotas da ficha —
+    # a pergunta é feita ao router justamente porque ler a ordem no arquivo não
+    # teria pego o 422 da Régua
+    assert _resolve("/painel/prospeccao/629/renovar", "POST") == "prospeccao_renovar"
 
 
 # ── as duas que vieram do menu lateral (07/09/2026) ────────────────────────

@@ -159,6 +159,28 @@ b{font-weight:600}
 .opc .o{border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:.42rem .55rem;font-size:.74rem;color:var(--text-dim)}
 .opc .o.rec{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright);font-weight:600}
 
+
+/* camadas da configuração */
+.camadas{display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem}
+@media (max-width:900px){.camadas{grid-template-columns:1fr}}
+.cam{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.9rem .95rem;display:flex;flex-direction:column;gap:.5rem}
+.cam .et{font:600 .62rem/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint)}
+.cam h4{font-size:.92rem}
+.cam .onde{font:500 .68rem/1 var(--mono);color:var(--roxo)}
+.cam p{margin:0;font-size:.78rem;color:var(--text-dim)}
+.cam ul{margin:0;padding-left:1rem;font-size:.75rem;color:var(--text-dim);line-height:1.7}
+.cam.a{box-shadow:inset 3px 0 0 var(--azul)}
+.cam.b{box-shadow:inset 3px 0 0 var(--neon)}
+.cam.c{box-shadow:inset 3px 0 0 var(--ambar)}
+
+/* campo com procedência */
+.campo{display:flex;align-items:center;gap:.5rem;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);padding:.5rem .6rem;flex-wrap:wrap}
+.campo .lb{font-size:.78rem;flex:1;min-width:150px}
+.campo .val{font:600 .8rem/1 var(--mono);color:var(--text);background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:.35rem .5rem;font-variant-numeric:tabular-nums}
+.campo .proc{font:500 .64rem/1 var(--mono);padding:.28rem .4rem;border-radius:5px;white-space:nowrap}
+.campo .proc.herda{background:var(--azul-fundo);color:var(--azul);border:1px solid var(--azul-borda)}
+.campo .proc.seu{background:var(--ambar-fundo);color:var(--ambar);border:1px solid var(--ambar-borda)}
+
 /* rodapé */
 .rod{border-top:1px solid var(--line);padding-top:1.1rem;color:var(--text-faint);font-size:.76rem}
 .rod b{color:var(--text-dim)}
@@ -613,9 +635,108 @@ b{font-weight:600}
   </div>
 </section>
 
+<!-- ------------------------------------------------------------------ 8 -->
+<section class="sec">
+  <div class="k">8 · parametrização</div>
+  <h2>Nada disso pode nascer com número fixo no código</h2>
+  <p class="leg">O fluxo é da Prime, mas a <b>mecânica</b> serve para qualquer empresa de eventos — e boa parte
+  dela serve para qualquer nicho. O que muda de empresa para empresa são os números e os nomes, e é isso que
+  precisa ser campo de tela, não linha de código.</p>
+
+  <div class="medida">
+    <h3>O defeito que já existe hoje, e que este fluxo ia repetir</h3>
+    <div class="nums">
+      <div class="n"><b>6</b><span>contas com configuração de funil no banco</span></div>
+      <div class="n"><b>6</b><span>carregam exatamente os mesmos números</span></div>
+      <div class="n"><b>0</b><span>escolheram esses números — foram copiados na criação</span></div>
+      <div class="n"><b>17</b><span>colunas de config, todas NOT NULL DEFAULT</span></div>
+    </div>
+    <p>Hoje toda config nasce <b>copiada</b> para dentro da conta. Consequência: no dia em que descobrirmos que
+    a escada certa para eventos é 1·3·7 e não 2·4·7·15, <b>nenhuma das seis contas recebe a correção</b> — todas
+    carregam a cópia velha e parecem ter escolhido aquilo. O padrão fica congelado no dia em que a conta nasceu.</p>
+  </div>
+
+  <h3 style="font-size:1rem;margin:1.4rem 0 .2rem">A regra que resolve: <code>vazio = herda do nicho</code></h3>
+  <p class="leg">Toda coluna de configuração nasce <b>NULL</b>, e NULL significa "usa o padrão do meu nicho".
+  O valor só é gravado quando o dono encosta no campo. Assim melhorar o padrão do nicho alcança, no mesmo dia,
+  todas as empresas que nunca mexeram — e não desfaz a escolha de quem mexeu.</p>
+
+  <div class="camadas">
+    <div class="cam a">
+      <div class="et">camada 1 · o nicho</div>
+      <h4>O padrão que vem pronto</h4>
+      <div class="onde">finance/raio_x_perfil.py</div>
+      <p>Fica no código, versionado e revisado — é onde o vocabulário e os motivos de perda por nicho já moram
+      hoje. Uma empresa de eventos nova abre o funil e já encontra:</p>
+      <ul>
+        <li>colunas: Novo · Contactado · Follow-up · Negociação · Perdido</li>
+        <li>teto de 21 dias no Contactado, 2 renovações</li>
+        <li>escada D1 · D3 · D7</li>
+        <li>os dez motivos de perda de eventos</li>
+        <li>gatilhos ligados nos quatro degraus da Negociação</li>
+      </ul>
+      <p><b>Tudo desligado</b> — pronto não é ligado.</p>
+    </div>
+    <div class="cam b">
+      <div class="et">camada 2 · a conta</div>
+      <h4>O que o dono muda na tela</h4>
+      <div class="onde">funil_regua · funil_etapas</div>
+      <p>Cada campo da Régua mostra de onde o valor veio e volta ao padrão em um clique:</p>
+      <div style="display:flex;flex-direction:column;gap:.35rem;margin-top:.2rem">
+        <div class="campo"><span class="lb">Teto do Contactado</span><span class="val">21 dias</span><span class="proc herda">padrão eventos</span></div>
+        <div class="campo"><span class="lb">Renovações</span><span class="val">2</span><span class="proc herda">padrão eventos</span></div>
+        <div class="campo"><span class="lb">Escada do Follow-up</span><span class="val">1 · 3 · 7</span><span class="proc seu">definido por você</span></div>
+        <div class="campo"><span class="lb">Festa perto aperta em</span><span class="val">30 dias</span><span class="proc herda">padrão eventos</span></div>
+      </div>
+    </div>
+    <div class="cam c">
+      <div class="et">camada 3 · a etapa</div>
+      <h4>A generalização que eu recomendo</h4>
+      <div class="onde">funil_etapas</div>
+      <p><b>O teto não é uma regra do Contactado — é uma propriedade de qualquer etapa.</b> Em vez de construir
+      "a regra dos 21 dias", cada coluna ganha quatro campos:</p>
+      <ul>
+        <li><code>teto_dias</code> — vazio = sem teto</li>
+        <li><code>renovacoes</code> — quantas, 0 = nenhuma</li>
+        <li><code>exige_justificativa</code> — sim/não</li>
+        <li><code>saidas_permitidas</code> — para onde pode ir</li>
+      </ul>
+      <p>Contactado fica 7 × 3. Amanhã o senhor quer teto na Proposta: é preencher um campo, não pedir código.</p>
+    </div>
+  </div>
+
+  <div class="melh" style="margin-top:1.2rem">
+    <div class="m">
+      <div class="top"><span class="num">A</span><h4>Os motivos de perda viram lista da conta, não constante do código</h4></div>
+      <p>Hoje são sete chaves fixas no código com uma trava no banco. Os dez do seu documento viram a
+      <b>lista semente do nicho eventos</b>, copiada para a conta na primeira abertura — e ali o dono liga,
+      desliga, renomeia, reordena e acrescenta o que for dele.</p>
+      <div class="porque">Os dez são os da Prime. A próxima empresa de eventos vai querer "buffet próprio",
+      "estacionamento", "não aceitou o regulamento" — e não pode depender de um deploy para ter isso.</div>
+    </div>
+    <div class="m">
+      <div class="top"><span class="num">B</span><h4>Um modo por regra, não um interruptor geral</h4></div>
+      <p>Cada regra tem o seu <b>desligado / ensaio / ligado</b>: o teto, a justificativa, o Follow-up, a
+      cobrança e a saída do Fechado. O dono liga uma, olha uma semana, liga a próxima.</p>
+      <div class="porque">É o que já foi feito com os gatilhos e com o follow-up nesta conta, e funcionou: hoje
+      a Prime está com gatilhos ligados, cobrança desligada e follow-up em ensaio — três estados ao mesmo tempo,
+      cada um no tempo dele.</div>
+    </div>
+    <div class="m">
+      <div class="top"><span class="num">C</span><h4>Modelo de funil por nicho na criação da conta</h4></div>
+      <p>Hoje toda conta nova nasce com o mesmo funil genérico — Novo, Contatado, Qualificado, Proposta, Ganho,
+      Perdido — e cada empresa reconstrói na mão. Foi assim que a Prime acabou com "Agendado Visita",
+      "Evento A Realizar" e "Evento Realizado" fora de ordem.</p>
+      <div class="porque">Com o modelo por nicho, a próxima empresa de eventos abre o funil e ele já é este
+      fluxo — colunas, prazos, gatilhos, motivos e escada — tudo desligado, pronto para ligar um de cada vez.
+      É a diferença entre vender um CRM e vender um CRM que já sabe do ramo dela.</div>
+    </div>
+  </div>
+</section>
+
 <!-- ------------------------------------------------------------------ 7 -->
 <section class="sec">
-  <div class="k">8 · antes de construir</div>
+  <div class="k">9 · antes de construir</div>
   <h2>Quatro decisões que são suas</h2>
   <div class="perg">
     <h3>Preciso destas respostas para começar</h3>

@@ -304,3 +304,41 @@ def test_tempo_por_etapa_fica_vazio_sem_historico(monkeypatch, pool):
     from finance import funil_regua as fr
     with pool.connection() as c:
         assert fr.medir(c, CONTA, 21)["etapas"] == []
+
+
+# ------------------------------------------------------------ o modelo do ramo
+# O bloco novo da Régua (11/09/2026). Jinja quebrado num `{% if %}` só apareceria
+# em produção, na tela onde o dono conserta as coisas — então ele é renderizado
+# aqui, nos dois estados que existem: com plano e sem plano.
+
+def _html_modelo(modelo):
+    """Renderiza SÓ o bloco do modelo, com o resto da tela no mínimo que ela pede."""
+    from web.portal import _env
+    tpl = pp._REGUA_TPL
+    ini = tpl.index("<!-- ---------------- o modelo do ramo")
+    fim = tpl.index("<!-- ---------------- etapas ---------------- -->")
+    return _env.from_string(tpl[ini:fim]).render(modelo=modelo, rot_ramo="eventos")
+
+
+def test_bloco_do_modelo_diz_quando_nao_ha_o_que_mudar():
+    html = _html_modelo({"itens": [], "colunas": ["Novo", "Contatado"], "fora": ["Fechado"]})
+    assert "já está igual ao modelo" in html
+    assert "Adotar o que marquei" not in html, "botão de aplicar sem nada a aplicar"
+
+
+def test_bloco_do_modelo_lista_os_itens_e_a_nota():
+    from finance import funil_modelo as fm
+    item = fm._item("quadro", "evento_realizado", de=False, para=True, leads=5,
+                    texto="tirar “Evento A Realizar” do quadro", nota="5 leads continuam no cadastro")
+    html = _html_modelo({"itens": [item], "colunas": ["Novo"], "fora": []})
+    assert 'value="quadro:evento_realizado"' in html
+    assert "5 leads" in html and "continuam no cadastro" in html
+    assert "Adotar o que marquei" in html
+
+
+def test_item_desmarcado_nao_vem_checked():
+    from finance import funil_modelo as fm
+    a = fm._item("rotulo", "perdido", de="Entregue", para="Perdido", marcado=False, texto="x")
+    b = fm._item("rotulo", "ganho", de="Ganho", para="Fechado", texto="y")
+    html = _html_modelo({"itens": [a, b], "colunas": [], "fora": []})
+    assert html.count("checked") == 1, "a caixa do rótulo renomeado à mão veio marcada"

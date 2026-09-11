@@ -655,6 +655,8 @@ def test_a_chave_de_ligar_saiu_da_regua_e_o_nicho_continua_valendo():
                 dias_on={1, 2, 3, 4, 5, 6}, n_mov=0, gerencia=True, request=None,
                 caps={"vendas": True, "origens": True}, raio_x_perfil=EVENTOS,
                 tem_follow_up=True,
+                # o bloco do modelo do ramo (11/09/2026) — aqui já no modelo
+                modelo={"itens": [], "colunas": ["Novo"], "fora": ["Fechado"]},
                 rot_ramo="eventos", janela_herda=True,
                 esc={"n": "", "u": "h", "ph": "4", "herda": True},
                 teto={"v": "", "ph": "5", "herda": True},

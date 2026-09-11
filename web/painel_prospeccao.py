@@ -52,11 +52,12 @@ STATUS_ROT = dict(STATUS)
 # Etapas do funil personalizáveis por conta (migração 130). As três "fixas" podem ser
 # renomeadas mas não removidas/reordenadas: 'novo' é a entrada (o lead nasce nela) e
 # 'ganho'/'perdido' são resultado (relatórios dependem delas). O miolo é livre.
-_ETAPAS_PADRAO = [
-    ("novo", "Novo", 0, True), ("contatado", "Contatado", 10, False),
-    ("qualificado", "Qualificado", 20, False), ("proposta", "Proposta", 30, False),
-    ("ganho", "Ganho", 900, True), ("perdido", "Perdido", 910, True),
-]
+# O PADRÃO SAIU DAQUI e foi pro nicho (`raio_x_perfil.etapas_padrao`, 11/09/2026).
+# Esta lista era igual pra toda conta, e a prova de que não servia está em produção:
+# a Prime (34, eventos) reconstruiu o funil dela na mão até as oito colunas de hoje,
+# e a Doce Mell (35), a SEGUNDA conta de eventos, nasceu depois disso e recebeu estas
+# seis genéricas mesmo assim. Continua existindo como `ETAPAS_GENERICAS` lá, que é o
+# que 'produto' e perfil desconhecido recebem.
 _ORDEM_GANHO = 900     # etapas de VENDA entram antes disso (o miolo fica < 900)
 _ORDEM_PERDIDO = 910   # e as de PÓS-VENDA depois daqui (migração 177)
 
@@ -71,10 +72,12 @@ def _etapas(c, conta_id: int) -> list[dict]:
            "  from funil_etapas where conta_id=%s order by ordem, id")
     rows = c.execute(sql, (conta_id,)).fetchall()
     if not rows:
-        for chave, rotulo, ordem, fixa in _ETAPAS_PADRAO:
-            c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa)
-                         values (%s,%s,%s,%s,%s) on conflict (conta_id, chave) do nothing""",
-                      (conta_id, chave, rotulo, ordem, fixa))
+        # A semente é a do RAMO da conta (11/09/2026). Só alcança quem está abrindo o
+        # funil pela primeira vez: conta que já tem etapa nenhuma linha é tocada aqui,
+        # e adotar o modelo depois é um ato explícito do dono na Régua
+        # (finance.funil_modelo.plano → o bloco "O modelo do seu ramo").
+        from finance import funil_modelo as _fm
+        _fm.semear(c, conta_id, _fr.perfil_da_conta(c, conta_id))
         c.commit()
         rows = c.execute(sql, (conta_id,)).fetchall()
     return [{"id": r[0], "chave": r[1], "rotulo": r[2], "ordem": r[3], "fixa": r[4],
@@ -591,7 +594,22 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
         # barra de colunas E os leads dela somem do quadro — o cadastro fica inteiro,
         # some da TELA. Nenhuma etapa nasce assim: sem ninguém marcar na Régua, esta
         # linha não tira nada de lugar nenhum.
-        fora_do_quadro = [e["chave"] for e in etapas if e.get("sai_do_quadro")]
+        #
+        # ...MENOS NA VISTA POR MÊS. Ali a coluna é o mês do evento, não a etapa: a
+        # pergunta que essa tela responde é "o que tem em novembro", e a festa já
+        # fechada é justamente a que TEM que aparecer. Esconder o fechado ali daria
+        # um novembro vazio num mês lotado — e o card já carrega a etapa como selo,
+        # então quem olha vê que aquela data está fechada. O que o dono pediu pra
+        # limpar foi o Kanban COMERCIAL ("etapas que exigem atuação de prospecção e
+        # venda"), e a vista por mês não é ele.
+        quadro_comercial = not (modo_evento and (vista or "").strip() == "mes")
+        fora_do_quadro = ([e["chave"] for e in etapas if e.get("sai_do_quadro")]
+                          if quadro_comercial else [])
+        # os RÓTULOS vêm da lista inteira, e não da filtrada: na vista por mês o card
+        # do lead fechado continua na tela, e sem isto o selo dele cairia no palpite
+        # a partir da chave — "Ganho" no lugar de "Evento Realizado", que é o nome que
+        # o dono deu à etapa. Nome de etapa é do cliente; palpite só quando não há nome.
+        rotulo_etapa = {e["chave"]: e["rotulo"] for e in etapas}
         etapas = [e for e in etapas if not e.get("sai_do_quadro")]
         # dois_chips decide se o apelido do chip aparece no selo de campanha — com um
         # chip só não existe "de qual chip" pra confundir (mesma regra do Inbox).
@@ -743,7 +761,6 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
             except Exception:  # noqa: BLE001
                 por_ler = 0
     colunas = {e["chave"]: [] for e in etapas}
-    rotulo_etapa = {e["chave"]: e["rotulo"] for e in etapas}
     hoje = _agora().date()
     primeira = etapas[0]["chave"] if etapas else "novo"
     total_valor = 0
@@ -7828,6 +7845,30 @@ def _escada_txt(v):
     return ",".join(p for p in nums if p.isdigit() and int(p) > 0) or None
 
 
+def _modelo_do_ramo(c, conta_id: int, perfil_chave: str) -> dict:
+    """O modelo de funil do ramo e o que ele mudaria nesta conta (finance.funil_modelo).
+
+    `itens` vazio = a conta já está no modelo. `colunas` e `fora` são os rótulos do
+    MODELO, pro dono ver o desenho antes de adotar qualquer coisa.
+
+    O SAVEPOINT não é zelo: sem ele uma leitura que falhe (deploy pela metade, coluna
+    que ainda não chegou) envenena a transação e derruba a Régua inteira — que é a
+    tela onde o dono conserta as coisas. Mesmo defeito que já custou um ciclo aqui
+    em 11/09/2026, no bloco do teto da ficha.
+    """
+    from finance import funil_modelo as _fm
+    from finance import raio_x_perfil as _rxp
+    m = _rxp.etapas_padrao(perfil_chave)
+    base = {"colunas": [e[1] for e in m if not e[4]],
+            "fora": [e[1] for e in m if e[4]], "itens": []}
+    try:
+        with c.transaction():
+            base["itens"] = _fm.plano(c, conta_id, perfil_chave)
+    except Exception:  # noqa: BLE001
+        pass
+    return base
+
+
 @router.get("/painel/prospeccao/regua", response_class=HTMLResponse)
 def regua_pagina(request: Request):
     ctx, redir = _acesso(request)
@@ -7857,6 +7898,7 @@ def regua_pagina(request: Request):
         c.commit()          # a semente da lista, se foi a 1ª vez, fica gravada
         n_mov = c.execute("select count(*) from funil_movimentos where conta_id=%s",
                           (ctx["conta_id"],)).fetchone()[0]
+        modelo = _modelo_do_ramo(c, ctx["conta_id"], perfil_chave)
     for e in linhas:
         e["n"] = n_por.get(e["chave"], 0)
         # o total é derivado, e mostrar derivado evita a conta de cabeça que faz o
@@ -7910,7 +7952,7 @@ def regua_pagina(request: Request):
                    secao_ativa="prospeccao", nav_ativo="regua", gerencia=True,
                    etapas=linhas, cfg=cfg, conv=conv, eventos=sorted(_fr.EVENTOS.items()),
                    esc=esc, teto=teto, fup=fup, janela_herda=janela_herda, rot_ramo=rot_ramo,
-                   motivos_conta=motivos_conta,
+                   motivos_conta=motivos_conta, modelo=modelo,
                    unidades=[(u, r) for u, r, _m in _UNIDADES],
                    dias_on=_fr._dias(cfg), n_mov=n_mov,
                    aviso=request.session.pop("prosp_aviso", None))
@@ -8014,6 +8056,36 @@ def regua_motivo(request: Request, mid: int, rotulo: str = Form(""),
         if r.get("ok"):
             c.commit()
     return JSONResponse(r, status_code=200 if r.get("ok") else 404)
+
+
+@router.post("/painel/prospeccao/regua/modelo")
+def regua_modelo(request: Request, itens: list[str] = Form([])):
+    """Adota o modelo de funil do ramo, só nos itens que o dono marcou.
+
+    `def` e não `async def`: o trabalho aqui é banco síncrono, e handler assíncrono
+    fazendo I/O bloqueante congela o worker inteiro — 527 ms viraram ~50 s com a CPU
+    a 0,7% em 22/08/2026. `tests/test_event_loop_nao_trava.py` guarda isso.
+
+    Quem decide o que muda é `funil_modelo.aplicar`, que RECALCULA o plano: a tela só
+    manda quais ids foram marcados. Formulário velho de outra aba manda id de mudança
+    que não existe mais, e ele é simplesmente ignorado.
+    """
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "O modelo do funil é configuração da empresa — só dono/gestor."
+        return RedirectResponse("/painel/prospeccao/regua", status_code=303)
+    from finance import funil_modelo as _fm
+    with get_pool().connection() as c:
+        feito = _fm.aplicar(c, ctx["conta_id"], _fr.perfil_da_conta(c, ctx["conta_id"]), itens)
+        c.commit()
+    n = sum(feito.values())
+    request.session["prosp_aviso"] = (
+        "Nada mudou — nenhum item marcado." if not n else
+        f"Modelo aplicado: {n} mudança{'s' if n != 1 else ''} no funil. "
+        "Nenhum lead foi movido nem apagado.")
+    return RedirectResponse("/painel/prospeccao/regua", status_code=303)
 
 
 @router.post("/painel/prospeccao/regua/etapa/{eid}")
@@ -15679,6 +15751,44 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
   <div style="margin-top:1rem"><button class="pbtn">Salvar régua</button></div>
   </form>
+
+  <!-- ---------------- o modelo do ramo ----------------
+       As colunas que o RAMO usa (finance.raio_x_perfil.etapas_padrao). Conta nova
+       já nasce assim; quem já existe vê aqui o que mudaria e marca o que quer.
+       Nada é aplicado sem marcar, e NENHUMA etapa é apagada — a que não está no
+       modelo é proposta pra sair do quadro, com os leads intactos. -->
+  <div class="fsec" style="margin-top:1.1rem">
+    <div class="sh"><b>O modelo do seu ramo</b><span class="mut" style="font-size:.76rem">as colunas que {{ rot_ramo }} costuma usar</span></div>
+    {% if not modelo.itens %}
+    <p class="mut" style="margin:.5rem 0 0;font-size:.85rem">
+      Seu funil já está igual ao modelo de {{ rot_ramo }}: {{ modelo.colunas|join(' · ') }}.
+      {% if modelo.fora %}<br>Fora do quadro: {{ modelo.fora|join(' · ') }}.{% endif %}
+    </p>
+    {% else %}
+    <p class="mut" style="margin:.5rem 0 .7rem;font-size:.85rem">
+      O modelo de {{ rot_ramo }} é <b>{{ modelo.colunas|join(' · ') }}</b>{% if modelo.fora %},
+      com <b>{{ modelo.fora|join(' · ') }}</b> fora do quadro{% endif %}.
+      Marque o que quiser adotar — <b>nada é apagado</b>: etapa que sai do quadro
+      continua no cadastro, na busca, nos relatórios e na ficha.
+    </p>
+    <form method="post" action="/painel/prospeccao/regua/modelo">
+      {% for it in modelo.itens %}
+      <label class="chk mod-l" style="display:flex;align-items:flex-start;gap:.55rem;padding:.5rem 0;border-top:1px solid var(--borda);cursor:pointer">
+        <input type="checkbox" name="itens" value="{{ it.id }}" {% if it.marcado %}checked{% endif %}
+               style="width:auto;margin:.2rem 0 0;accent-color:var(--verde);flex:0 0 auto">
+        <span style="flex:1;min-width:0">
+          <span style="font-size:.86rem">{{ it.texto }}</span>
+          {% if it.leads %}<span class="mut" style="font-size:.74rem"> · {{ it.leads }} lead{% if it.leads != 1 %}s{% endif %}</span>{% endif %}
+          {% if it.nota %}<br><span class="mut" style="font-size:.74rem">{{ it.nota }}</span>{% endif %}
+        </span>
+      </label>
+      {% endfor %}
+      <div style="display:flex;justify-content:flex-end;margin-top:.8rem">
+        <button class="pbtn">Adotar o que marquei</button>
+      </div>
+    </form>
+    {% endif %}
+  </div>
 
   <!-- ---------------- etapas ---------------- -->
   <div class="fsec" style="margin-top:1.1rem">

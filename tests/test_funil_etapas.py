@@ -65,30 +65,41 @@ def _mp(monkeypatch, pool, conta):
 
 
 def test_seed_padrao(pool):
+    """A semente virou a do RAMO (11/09/2026, finance.raio_x_perfil.etapas_padrao).
+
+    Este banco de teste não tem `nichos`, então `perfil_da_conta` cai em
+    'recorrente' — que é o perfil de quem não escolheu nicho, e é de propósito: o
+    perfil SEM festa nunca inventa uma data pra quem não tem data.
+    """
     with pool.connection() as c:
         conta = _conta(c, "Seed")
         et = pp._etapas(c, conta)
     chaves = [e["chave"] for e in et]
-    assert chaves == ["novo", "contatado", "qualificado", "proposta", "ganho", "perdido"]
+    assert chaves == ["novo", "contatado", "follow_up", "qualificado",
+                      "proposta", "ganho", "perdido"]
     fixas = {e["chave"] for e in et if e["fixa"]}
     assert fixas == {"novo", "ganho", "perdido"}
+    # o fechamento não é coluna: sai do quadro (regra 6 do fluxo V3)
+    assert next(e for e in et if e["chave"] == "ganho")["sai_do_quadro"] is True
     # 2ª chamada não duplica
     with pool.connection() as c:
-        assert len(pp._etapas(c, conta)) == 6
+        assert len(pp._etapas(c, conta)) == 7
 
 
 def test_adicionar_etapa(pool, monkeypatch):
     with pool.connection() as c:
         conta = _conta(c, "Add")
     req = _mp(monkeypatch, pool, conta)
-    resp = pp.prospeccao_etapa_nova(req, rotulo="Reunião marcada")
+    # um rótulo que NENHUM modelo de ramo usa: "Reunião marcada" hoje é o rótulo de
+    # 'qualificado' no modelo recorrente, e o `next()` abaixo acharia a etapa errada
+    resp = pp.prospeccao_etapa_nova(req, rotulo="Degustação")
     assert isinstance(resp, RedirectResponse)
     with pool.connection() as c:
         et = pp._etapas(c, conta)
-    nova = next(e for e in et if e["rotulo"] == "Reunião marcada")
+    nova = next(e for e in et if e["rotulo"] == "Degustação")
     assert nova["fixa"] is False
     assert nova["ordem"] < pp._ORDEM_GANHO          # entra no miolo, antes de Ganho
-    assert nova["chave"].startswith("reuniao")      # slug do rótulo
+    assert nova["chave"].startswith("degusta")      # slug do rótulo
     # e a ordem geral mantém Ganho/Perdido no fim
     assert [e["chave"] for e in et][-2:] == ["ganho", "perdido"]
 
@@ -143,10 +154,12 @@ def test_mover_reordena_miolo(pool, monkeypatch):
         et = pp._etapas(c, conta)
         cont = next(e for e in et if e["chave"] == "contatado")
     req = _mp(monkeypatch, pool, conta)
-    pp.prospeccao_etapa_mover(req, eid=cont["id"], dir="dir")   # contatado passa qualificado
+    # o vizinho da direita de 'contatado' passou a ser 'follow_up' (o modelo do ramo
+    # pôs a coluna de Follow-up entre ele e 'qualificado')
+    pp.prospeccao_etapa_mover(req, eid=cont["id"], dir="dir")
     with pool.connection() as c:
         ordem = [e["chave"] for e in pp._etapas(c, conta)]
-    assert ordem.index("qualificado") < ordem.index("contatado")
+    assert ordem.index("follow_up") < ordem.index("contatado")
     assert ordem[0] == "novo" and ordem[-2:] == ["ganho", "perdido"]
 
 

@@ -154,6 +154,90 @@ _FUNIL_POR_PERFIL = {
     "produto": None,
 }
 
+# ---------------------------------------------------------------- as colunas do funil
+#
+# O MODELO DE FUNIL DE CADA NICHO — as colunas, não os números.
+#
+# Até 11/09/2026 toda conta nascia com as mesmas seis colunas genéricas
+# (Novo · Contatado · Qualificado · Proposta · Ganho · Perdido), fixas em
+# `web.painel_prospeccao._ETAPAS_PADRAO`. A prova de que isso não servia está em
+# produção: a Prime (34, eventos) reconstruiu o funil dela na mão até chegar em oito
+# colunas com "Follow-up" e "Agendado Visita", e a Doce Mell (35) — a SEGUNDA conta
+# de eventos — nasceu depois disso e mesmo assim recebeu as seis genéricas. O que
+# o dono de uma conta aprendeu não alcançava a próxima conta do mesmo ramo.
+#
+# Então o modelo vira do NICHO, como o vocabulário, os motivos de perda e os prazos.
+#
+# O QUE O MODELO CARREGA: a forma. Chave, rótulo, ordem, se é fixa, e as duas
+# decisões que SÃO a forma — `sai_do_quadro` (esta etapa é coluna?) e
+# `agenda_ao_entrar` (o que fecha aqui vira compromisso?). Não carrega teto, toques
+# nem gatilho: esses são política de cobrança, nascem desligados (migrações 230-238)
+# e o dono liga um de cada vez.
+#
+# AS SEIS COLUNAS DE EVENTOS, aprovadas pelo dono em 11/09/2026:
+#   Novo · Contatado · Follow-up · Agendado Visita · Proposta · Perdido
+# "Fechado" é a sétima ETAPA e não é coluna: sai do quadro e a gestão do evento
+# passa pra Agenda (regra 6 do fluxo V3). Por isso `sai_do_quadro` e
+# `agenda_ao_entrar` vêm marcados no modelo de eventos — separá-los aqui seria
+# entregar um quadro de seis colunas e uma agenda vazia, que é exatamente o erro
+# que a migração 238 foi escrita pra evitar.
+#
+# "Agendado Visita" mantém a CHAVE `qualificado`. A chave é o que está gravado em
+# `prospeccao.status` de 14 leads da Prime hoje; trocá-la por `agendado_visita`
+# deixaria esses 14 apontando pra uma etapa que não existe mais. Rótulo é o que a
+# pessoa lê, chave é o que o banco guarda — e é o rótulo que muda por nicho.
+#
+# (chave, rótulo, ordem, fixa, sai_do_quadro, agenda_ao_entrar)
+ETAPAS_GENERICAS = (
+    ("novo", "Novo", 0, True, False, False),
+    ("contatado", "Contatado", 10, False, False, False),
+    ("qualificado", "Qualificado", 20, False, False, False),
+    ("proposta", "Proposta", 30, False, False, False),
+    ("ganho", "Ganho", 900, True, False, False),
+    ("perdido", "Perdido", 910, True, False, False),
+)
+
+_ETAPAS_POR_PERFIL = {
+    "eventos": (
+        ("novo", "Novo", 0, True, False, False),
+        ("contatado", "Contatado", 10, False, False, False),
+        ("follow_up", "Follow-up", 20, False, False, False),
+        ("qualificado", "Agendado Visita", 30, False, False, False),
+        ("proposta", "Proposta", 40, False, False, False),
+        # a festa fechada sai do quadro E entra na agenda, nesta ordem
+        ("ganho", "Fechado", 900, True, True, True),
+        ("perdido", "Perdido", 910, True, False, False),
+    ),
+    "recorrente": (
+        ("novo", "Novo", 0, True, False, False),
+        ("contatado", "Contatado", 10, False, False, False),
+        ("follow_up", "Follow-up", 20, False, False, False),
+        # quem vende mensalidade marca REUNIÃO, não visita ao espaço (§6 do CLAUDE.md:
+        # o vocabulário de um nicho nunca serve pro outro)
+        ("qualificado", "Reunião marcada", 30, False, False, False),
+        ("proposta", "Proposta", 40, False, False, False),
+        # sai do quadro sim — o contrato assinado não é prospecção. Mas NÃO agenda:
+        # não há data de evento no cadastro, e a ponte não teria o que ler.
+        ("ganho", "Fechado", 900, True, True, False),
+        ("perdido", "Perdido", 910, True, False, False),
+    ),
+    # produto não tem funil nem vendedor (ver o docstring). Recebe o genérico de
+    # sempre: nada muda pra quem já está assim, e ninguém ganha uma coluna de
+    # "Agendado Visita" numa tela que vende caixa.
+    "produto": ETAPAS_GENERICAS,
+}
+
+
+def etapas_padrao(chave_perfil: str) -> tuple:
+    """As colunas que uma conta deste perfil recebe ao abrir o funil pela 1ª vez.
+
+    Devolve tuplas (chave, rótulo, ordem, fixa, sai_do_quadro, agenda_ao_entrar).
+    Perfil desconhecido cai no genérico — nunca vazio: conta sem etapa nenhuma é
+    um Kanban sem coluna, e o funil inteiro depende de 'novo' existir.
+    """
+    return _ETAPAS_POR_PERFIL.get(chave_perfil) or ETAPAS_GENERICAS
+
+
 #: as chaves que a conta pode sobrescrever. Os MODOS (gatilhos/cobranca/follow_up)
 #: ficam de fora de propósito: 'off' é uma escolha, não uma herança — quem liga
 #: uma automação está dizendo algo sobre a empresa dele, não sobre o ramo.

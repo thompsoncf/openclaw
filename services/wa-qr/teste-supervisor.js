@@ -295,8 +295,13 @@ function base (extra) {
     'e a delegação vem antes do Baileys, medido por posição no arquivo')
   conferir(/const MINHA_CONTA = parseInt\(process\.env\.WA_QR_CONTA/.test(src),
     'o worker lê WA_QR_CONTA')
-  conferir(/if \(MINHA_CONTA\) contas = contas\.filter\(\(c\) => c === MINHA_CONTA\)/.test(src),
-    'e o restaurarSessoes religa SÓ a conta dele')
+  // Esta trava fixava `contas.filter((c) => c === MINHA_CONTA)` — a forma que
+  // derrubou os três chips em 11/09 às 17:46 (bigint chega como texto, o === dava
+  // falso). Uma trava de leitura garante que o código tem a FORMA esperada, não
+  // que a forma está certa; quem prova a regra é teste-worker-conta.js, com ids em
+  // texto. Aqui só se exige que o restaurarSessoes passe pela função pura.
+  conferir(/contas = contasDesteWorker\(contas, MINHA_CONTA\)/.test(src),
+    'e o restaurarSessoes religa SÓ a conta dele — pela função pura, que compara por texto')
   conferir(/if \(MINHA_CONTA && contaId !== MINHA_CONTA\) \{[\s\S]{0,400}?return json\(res, 421/.test(src),
     'e rota de OUTRA conta é recusada — atender seria abrir socket de conta que já tem worker (guerra de sessão)')
   const sqlWorker = src.match(/select conta_id from wa_qr_auth\s+where arquivo = 'creds' and conteudo::json->'me'->>'id' is not null/)

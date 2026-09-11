@@ -106,6 +106,29 @@ const ESPACO_CONTAS_MS = parseInt(process.env.WA_QR_ESPACO_CONTAS_MS || '30000',
 // de ser das vizinhas. Era essa mistura que, em 11/09, fez um chip com 15
 // mensagens presas derrubar os três: 45s de loop travado num processo só.
 const MINHA_CONTA = parseInt(process.env.WA_QR_CONTA || '0', 10) || null
+
+// Quais destas contas são DESTE worker? Função pura porque a regra derrubou os três
+// chips em produção em 11/09/2026, às 17:46, no primeiro deploy da fase 3:
+//
+//   17:46:16  worker 23   restaurarSessoes: nenhuma conta pareada pra religar
+//   17:46:21  worker 34   restaurarSessoes: nenhuma conta pareada pra religar
+//   17:46:26  worker 36   restaurarSessoes: nenhuma conta pareada pra religar
+//   17:47:09  a instância velha levou SIGTERM e soltou as travas — e ninguém assumiu
+//
+// `wa_qr_auth.conta_id` é bigint, e o driver do Postgres entrega bigint como TEXTO
+// ('34'); WA_QR_CONTA chega como NÚMERO (34). `'34' === 34` é falso, o filtro
+// esvaziava, e cada worker concluía que não tinha o que religar. O resto do
+// arquivo já sabia disso — o `castigo.get(String(contaId))` logo abaixo existe
+// exatamente por causa desse texto — mas o filtro novo não seguiu o idioma.
+//
+// O teste de fumaça não pegou porque o banco descartável não tinha credencial
+// pareada: a comparação nunca rodou contra um bigint de verdade. Por isso a regra
+// sai pra cá, onde teste-worker-conta.js a exercita com ids em TEXTO, como o
+// driver entrega.
+function contasDesteWorker (ids, minhaConta) {
+  if (!minhaConta) return ids
+  return ids.filter((c) => String(c) === String(minhaConta))
+}
 // Vigia de sessão MUDA — ver vigiarSessoes(). Quanto tempo sem UM evento do socket
 // (mensagem, recibo, contato, histórico) até desconfiar, e de quanto em quanto tempo
 // conferir. 10min é folgado de propósito: conta parada meia hora é rotina.
@@ -3664,7 +3687,7 @@ async function restaurarSessoes () {
     // Worker de uma conta só religa a dele. A consulta continua a mesma de propósito:
     // ela é quem responde "esta conta está pareada?", e um worker que subiu pra uma
     // conta sem credencial não pode sair abrindo socket que só sabe pedir QR.
-    if (MINHA_CONTA) contas = contas.filter((c) => c === MINHA_CONTA)
+    contas = contasDesteWorker(contas, MINHA_CONTA)
     if (!contas.length) {
       log.info('restaurarSessoes: nenhuma conta pareada pra religar')
       return
@@ -4325,7 +4348,8 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { contarContatoComFalha, contatosComFalha, DISJUNTOR_MIN_CONTATOS,
+module.exports = {
+  contasDesteWorker, MINHA_CONTA, contarContatoComFalha, contatosComFalha, DISJUNTOR_MIN_CONTATOS,
   contarQuedaPresa, esquecerQuedasPresas, quedasPresas, PRESA_AVISA_EM,
   comecouAPartida, terminouAPartida, quemEstaSubindo, partidas, usuariosDoPeer, agendaTrancadaPorChave, VALVULA_CHAVE_FALTANDO_MS, MARCA_CHAVE_FALTANDO,
   medindo, oQueEstaEmCurso, decifragemPorConta, emCurso, QUARENTENA_PEER_MS, porPeerEmQuarentena, peerEmQuarentena, esquecerQuarentena, peersEmQuarentena, avisarChipQuebrado, alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

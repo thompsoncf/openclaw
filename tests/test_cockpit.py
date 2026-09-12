@@ -1495,27 +1495,129 @@ def test_perdido_com_motivo_da_lista_grava_a_chave_e_o_rotulo_na_timeline(pool):
     assert desc[b] == "Perdido — texto solto", "texto solto continua só na timeline"
 
 
-def test_a_folha_do_lead_oferece_os_seis_motivos_do_perfil(pool, monkeypatch):
-    """Conta sem nicho escolhido é perfil recorrente: a lista tem "ficou com o
-    fornecedor atual" e não tem "data indisponível". Em eventos, o contrário."""
+def test_a_folha_do_lead_oferece_os_motivos_DA_CONTA(pool, monkeypatch):
+    """A lista de perda do app é a da conta (`funil_motivos_perda`, migração 235), a
+    MESMA que `funil_perda.validar` usa pra aceitar ou recusar.
+
+    Até 12/09/2026 este bloco montava as opções da constante de seis do código. As
+    duas listas divergiram na primeira conta que usou de verdade: a Prime tem dez
+    motivos, e dos seis do código só quatro existiam lá. Com `exige_motivo` ligado, o
+    vendedor via duas opções que o motor recusa e não achava as seis que ele usa —
+    e é no app que ele perde o lead. O teste cobre justamente o que a lista fixa
+    nunca conseguiria mostrar: um motivo que a empresa criou.
+    """
     from web import painel_cockpit as pc
-    from finance import raio_x_perfil as rxp
+    from finance import funil_perda as fp
     with pool.connection() as c:
         conta = _conta(c, "Folha"); vend = _membro(c, conta, email="folha@x.com")
-        lid = _lead(c, conta, vend, "Doceria"); c.commit()
+        lid = _lead(c, conta, vend, "Doceria")
+        fp.motivos(c, conta, "recorrente")           # semeia a lista do perfil
+        c.execute("""insert into funil_motivos_perda
+                       (conta_id, chave, rotulo, ordem, exige_descricao)
+                     values (%s,'sem_estacionamento','Não tinha estacionamento',500,false),
+                            (%s,'desistiu_calado','Sumiu sem dizer nada',510,true)""",
+                  (conta, conta))
+        # desligado NÃO aparece: o motor também o recusa, e oferecer o que ele recusa
+        # é exatamente o defeito que este teste fecha
+        c.execute("update funil_motivos_perda set ativo=false where conta_id=%s and chave='achou_caro'",
+                  (conta,))
+        c.commit()
     monkeypatch.setattr(pc, "get_pool", lambda: pool)
     monkeypatch.setattr(pc, "_selo", lambda conta_id: "")
     html = bytes(pc.cockpit_lead(_req_vend(conta, vend), lid).body).decode("utf-8")
     assert "Por que perdeu?" in html
-    for k, r in rxp.perfil("consultoria")["motivos"]:
-        assert f"<option value='{k}'>{r}</option>" in html, k
-    assert "value='data_indisponivel'" not in html
+    with pool.connection() as c:
+        da_conta = fp.motivos(c, conta, "recorrente")
+    assert any(m["chave"] == "sem_estacionamento" for m in da_conta)
+    for m in da_conta:
+        assert f"value='{m['chave']}'" in html, m["chave"]
+        assert m["rotulo"] in html, m["rotulo"]
+    assert "value='achou_caro'" not in html, "motivo desligado não pode ser oferecido"
     assert "Comprou concorrente" not in html                   # a lista antiga, solta, saiu
-    monkeypatch.setattr(pc, "_perfil_conta", lambda pool, conta_id: rxp.perfil("eventos"), raising=False)
-    import finance.raio_x_perfil as _m
-    monkeypatch.setattr(_m, "perfil_da_conta", lambda pool, conta_id: rxp.perfil("eventos"))
-    html = bytes(pc.cockpit_lead(_req_vend(conta, vend), lid).body).decode("utf-8")
-    assert "value='data_indisponivel'" in html and "value='ficou_com_atual'" not in html
+    # o motivo que pede texto vem marcado E com onde escrever: sem o campo, escolher
+    # 'Sumiu sem dizer nada' levaria 'descricao_obrigatoria' sem ter o que preencher
+    assert "value='desistiu_calado' data-desc=1" in html
+    # o campo NASCE VISÍVEL e o script esconde quando o motivo não pede texto. Ao
+    # contrário, quem estivesse sem JS escolheria um motivo que exige explicação e
+    # não teria onde escrever — o beco que este bloco existe pra fechar.
+    assert "<input name=motivo_desc id=perdadesc" in html and " hidden" not in html.split("perdadesc")[1][:120]
+    assert "i.hidden=!(o&&o.hasAttribute('data-desc'))" in html
+
+
+def test_etapas_do_app_nao_oferecem_as_de_DEPOIS_da_venda(pool):
+    """`sai_do_quadro` (migração 238) marca as etapas de pós-venda — 'Festa
+    realizada' e parecidas —, que o quadro não desenha porque o funil já acabou ali.
+
+    No app elas viravam botão de um toque ao lado de 'Proposta'. Um toque errado
+    tirava o lead da fila do vendedor sem passar por fechamento nenhum: sem ganho,
+    sem motivo, sem rastro de venda — e o vendedor não tinha como desfazer, porque o
+    lead sumia da lista dele no mesmo instante.
+    """
+    with pool.connection() as c:
+        conta = _conta(c, "Pos"); vend = _membro(c, conta, email="pos@x.com")
+        lead = _lead(c, conta, vend, "Aniversário")
+        c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, sai_do_quadro)
+                     values (%s,'proposta','Proposta',40,false),
+                            (%s,'evento_realizado','Festa realizada',920,true)""",
+                  (conta, conta))
+        c.commit()
+    d = ck.lead_do_vendedor(pool, conta, vend, lead)
+    chaves = [e["chave"] for e in d["etapas"]]
+    assert "proposta" in chaves
+    assert "evento_realizado" not in chaves
+    assert all(k not in ("ganho", "perdido") for k in chaves)
+
+    # MAS a etapa atual continua na lista: um lead que JÁ está em 'Festa realizada'
+    # precisa ver onde está. Escondê-la deixaria a ficha sem nenhuma etapa acesa, e
+    # o vendedor leria isso como "o lead não está em lugar nenhum".
+    with pool.connection() as c:
+        c.execute("update prospeccao set status='evento_realizado' where id=%s", (lead,))
+        c.commit()
+    d = ck.lead_do_vendedor(pool, conta, vend, lead)
+    assert [e["chave"] for e in d["etapas"]] == ["proposta", "evento_realizado"]
+
+
+def test_perder_pelo_app_leva_o_texto_do_motivo_que_pede_texto(pool, monkeypatch):
+    """A rota `/fechar` não recebia `motivo_desc`. `ck.fechar` aceita a descrição
+    desde a 235 e ela nunca chegava lá: escolher um motivo com `exige_descricao` no
+    app devolvia 'descricao_obrigatoria' sem saída nenhuma — não havia campo na tela
+    nem parâmetro na rota. E o recado que o vendedor lia era a chave crua."""
+    from types import SimpleNamespace
+    from starlette.datastructures import QueryParams
+    from web import painel_cockpit as pc
+    from finance import funil_perda as fp
+    with pool.connection() as c:
+        conta = _conta(c, "Desc"); vend = _membro(c, conta, email="desc@x.com")
+        lead = _lead(c, conta, vend, "Festa Ana")
+        fp.motivos(c, conta, "recorrente")
+        c.execute("""insert into funil_motivos_perda (conta_id, chave, rotulo, ordem, exige_descricao)
+                     values (%s,'outro','Outro',900,true)
+                     on conflict (conta_id, chave) do update set exige_descricao=true""", (conta,))
+        c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, exige_motivo)
+                     values (%s,'perdido','Perdido',910,true)""", (conta,))
+        c.commit()
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+
+    def _req():
+        return SimpleNamespace(session={"conta_id": conta, "membro_id": vend, "papel": "vendedor"},
+                               query_params=QueryParams(""), cookies={}, headers={})
+
+    r = _req()
+    pc.cockpit_fechar(r, lead, tipo="perdido", motivo="outro", motivo_desc="")
+    assert r.session["ck_err"] == pc._RECADO["descricao_obrigatoria"], "e não a chave crua"
+    with pool.connection() as c:      # nada gravado: a recusa vem ANTES de mexer no lead
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] != "perdido"
+
+    r = _req()
+    pc.cockpit_fechar(r, lead, tipo="perdido", motivo="outro",
+                      motivo_desc="o pai decidiu fazer em casa")
+    assert "ck_err" not in r.session
+    with pool.connection() as c:
+        st, mot = c.execute("select status, perda_motivo from prospeccao where id=%s",
+                            (lead,)).fetchone()
+        assert (st, mot) == ("perdido", "outro")
+        desc = c.execute("select perda_descricao from prospeccao where id=%s", (lead,)).fetchone()[0]
+    assert desc == "o pai decidiu fazer em casa"
 
 
 def test_ficha_guarda_de_onde_veio_o_cliente_e_recusa_o_que_nao_esta_na_lista(pool, monkeypatch):

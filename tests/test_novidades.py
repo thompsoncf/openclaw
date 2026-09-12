@@ -1051,3 +1051,35 @@ def test_o_aviso_da_temperatura_nao_fala_de_festa(pool):
 
 def test_reaplicar_o_aviso_da_temperatura_nao_duplica(pool):
     assert _temp_fato(pool)["id"] == _temp_fato(pool)["id"]
+
+
+# ---------------- 249: a perda no app do vendedor (12/09/2026)
+
+def _perda_app(pool):
+    return _aplica(pool, "249_novidade_perda_no_app.sql", "perda-no-app-do-vendedor")
+
+
+def test_o_aviso_da_perda_vai_primeiro_pro_vendedor(pool):
+    """§5: o vendedor só recebe o que muda a rotina DELE. A tela que mudou é a do
+    celular, e quem marca o lead como perdido é ele. Dono e gestor entram porque são
+    eles que editam a lista e ligam a obrigatoriedade na Régua."""
+    a = _perda_app(pool)
+    assert set(a["pra_quem"]) == {"dono", "gestor", "vendedor"}
+    assert a["publico"] == "todos" and a["link"] == "/cockpit"
+
+
+def test_o_corpo_diz_as_tres_coisas_que_mudaram_na_tela(pool):
+    corpo = _perda_app(pool)["corpo"]
+    assert "lista é a da sua empresa" in corpo
+    assert "pede explicação agora tem onde escrever" in corpo
+    assert "sair do quadro" in corpo and "sem passar por Ganho nem por Perdido" in corpo
+
+
+def test_o_aviso_da_perda_nao_fala_de_festa(pool):
+    a = _perda_app(pool)
+    for palavra in ("festa", "buffet", "convidados", "mensalidade"):
+        assert palavra not in (a["resumo"] + " " + a["corpo"]).lower(), palavra
+
+
+def test_reaplicar_o_aviso_da_perda_nao_duplica(pool):
+    assert _perda_app(pool)["id"] == _perda_app(pool)["id"]

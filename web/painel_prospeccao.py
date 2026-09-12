@@ -7899,6 +7899,14 @@ def regua_pagina(request: Request):
         n_mov = c.execute("select count(*) from funil_movimentos where conta_id=%s",
                           (ctx["conta_id"],)).fetchone()[0]
         modelo = _modelo_do_ramo(c, ctx["conta_id"], perfil_chave)
+        # os limiares da temperatura (migração 247) vêm do módulo que os resolve
+        # com o padrão do ramo — a config da régua não conhece as colunas novas
+        try:
+            with c.transaction():
+                from finance import temperatura as _tmp
+                cfg_temp = _tmp.config(c, ctx["conta_id"])
+        except Exception:  # noqa: BLE001
+            cfg_temp = {"temperatura_modo": "off"}
     for e in linhas:
         e["n"] = n_por.get(e["chave"], 0)
         # o total é derivado, e mostrar derivado evita a conta de cabeça que faz o
@@ -7948,11 +7956,17 @@ def regua_pagina(request: Request):
                     "ph": str(padrao.get("fu_teto_dia") or 15),
                     "herda": "fu_teto_dia" not in escolhidas}}
     janela_herda = not ({"janela_dias", "janela_abre", "janela_fecha"} & escolhidas)
+    cfg = dict(cfg, **{k: v for k, v in cfg_temp.items() if k.startswith("temp")})
+    escolhidas |= {k for k in ("temp_quente_h", "temp_morno_dias", "temp_frio_tentativas")
+                   if cfg_temp.get("_escolhidas_temp") and k in cfg_temp["_escolhidas_temp"]}
+    padrao = dict(padrao, **{k: _rxp.funil_padrao(perfil_chave).get(k)
+                             for k in ("temp_quente_h", "temp_morno_dias", "temp_frio_tentativas")})
     return _render("prospeccao_regua", request, titulo="Régua do funil",
                    secao_ativa="prospeccao", nav_ativo="regua", gerencia=True,
                    etapas=linhas, cfg=cfg, conv=conv, eventos=sorted(_fr.EVENTOS.items()),
                    esc=esc, teto=teto, fup=fup, janela_herda=janela_herda, rot_ramo=rot_ramo,
                    motivos_conta=motivos_conta, modelo=modelo,
+                   escolhidas_tpl=escolhidas, padrao_tpl=padrao,
                    unidades=[(u, r) for u, r, _m in _UNIDADES],
                    dias_on=_fr._dias(cfg), n_mov=n_mov,
                    aviso=request.session.pop("prosp_aviso", None))
@@ -7983,6 +7997,17 @@ async def regua_config(request: Request):
         # `coalesce(%s, <coluna>)`, que queria dizer "em branco mantém o que estava"
         # — e com isso não havia jeito nenhum de VOLTAR ao padrão depois de digitar
         # um número uma vez. Agora apagar o campo É o botão de voltar ao padrão.
+        tmodo = (f.get("temperatura_modo") or "").strip()
+        c.execute("""update funil_regua set temperatura_modo=%s, temp_quente_h=%s,
+                        temp_morno_dias=%s, temp_frio_tentativas=%s
+                      where conta_id=%s""",
+                  (tmodo if tmodo in ("off", "observando", "ligado") else "off",
+                   _inteiro(f.get("temp_quente_h")), _inteiro(f.get("temp_morno_dias")),
+                   _inteiro(f.get("temp_frio_tentativas")), ctx["conta_id"]))
+        fila_modo = (f.get("fila_modo") or "").strip()
+        c.execute("update funil_regua set fila_modo=%s where conta_id=%s",
+                  (fila_modo if fila_modo in ("prazo", "temperatura") else "prazo",
+                   ctx["conta_id"]))
         c.execute("""update funil_regua set gatilhos_modo=%s, cobranca_modo=%s, teto_modo=%s,
                        janela_dias=%s, janela_abre=%s, janela_fecha=%s,
                        sem_resposta_min=%s, bola_nossa_min=%s, bola_cliente_min=%s,
@@ -9028,6 +9053,53 @@ def prospeccao_etapa_renomear(request: Request, eid: int, rotulo: str = Form("")
                       (rot, eid, ctx["conta_id"]))
             c.commit()
         request.session["prosp_aviso"] = "Etapa renomeada ✓"
+    return RedirectResponse("/painel/prospeccao", status_code=303)
+
+
+@router.post("/painel/prospeccao/etapas/{eid}/fundir")
+def prospeccao_etapa_fundir(request: Request, eid: int, para: str = Form("")):
+    """Leva os leads desta etapa para outra e tira esta do quadro.
+
+    É o verbo que faltava: o botão de remover diz "mova os leads primeiro" desde a
+    migração 130, e não existia jeito de mover em lote. Nasceu do Projeto Adaptado
+    da Prime (12/09/2026), que pede NEGOCIAÇÃO como coluna única — na conta 34 isso
+    é juntar "Agendado Visita" (14 leads) e "Proposta" (20).
+
+    `def` e não `async def`: banco síncrono em handler assíncrono congela o worker
+    (`tests/test_event_loop_nao_trava.py`).
+
+    O `membro_id` vai pro histórico. Mover lead é mexer em informação do cliente
+    (CLAUDE.md §0) — e informação que se move sem autor é informação que ninguém
+    consegue desfazer.
+    """
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "Só o dono/gestor edita as etapas do funil."
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    from finance import funil_fusao as _ff
+    destino = (para or "").strip()
+    with get_pool().connection() as c:
+        r = c.execute("select chave from funil_etapas where id=%s and conta_id=%s",
+                      (eid, ctx["conta_id"])).fetchone()
+        if not r:
+            request.session["prosp_aviso"] = "Etapa não encontrada."
+            return RedirectResponse("/painel/prospeccao", status_code=303)
+        res = _ff.fundir(c, ctx["conta_id"], r[0], destino, ctx.get("membro_id"))
+        if res["erro"]:
+            c.rollback()
+        else:
+            c.commit()
+    request.session["prosp_aviso"] = {
+        "etapa": "Escolha uma etapa de destino que exista.",
+        "mesma": "Não dá pra fundir uma etapa nela mesma.",
+        "fixa": "Etapa fixa (entrada/resultado) não pode ser fundida.",
+    }.get(res["erro"]) or (
+        f"“{res['rotulo_de']}” foi fundida em “{res['rotulo_para']}”: "
+        f"{res['movidos']} lead{'' if res['movidos'] == 1 else 's'} movido"
+        f"{'' if res['movidos'] == 1 else 's'}, com registro no histórico. "
+        "A etapa saiu do quadro e não foi apagada.")
     return RedirectResponse("/painel/prospeccao", status_code=303)
 
 
@@ -10894,6 +10966,8 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     background:var(--bg);color:var(--txt);font-family:inherit;font-size:.86rem}
   .etin:focus{outline:none;border-color:var(--verde)}
   .etn{font-size:.72rem;color:var(--txt-mut);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:52px}
+  .etsel{padding:.34rem .4rem;border-radius:7px;border:1px solid var(--borda);background:var(--bg);
+    color:var(--txt-mut);font-family:inherit;font-size:.74rem;max-width:150px}
   .etb{border:1px solid var(--borda);background:var(--card-2);color:var(--txt);border-radius:7px;
     width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
     font-size:.85rem;line-height:1;flex-shrink:0}
@@ -10907,7 +10981,9 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <summary>⚙️ Editar etapas do funil</summary>
     <div class="etbody">
       <p class="ethint">Renomeie no campo e clique ✓. Reordene com ◀ ▶. O ✕ remove — só quando a etapa
-        estiver <b>sem leads</b>. 🔒 = etapa fixa (entrada/resultado): pode renomear, mas não remover.</p>
+        estiver <b>sem leads</b>. Pra esvaziar, escolha uma etapa em <b>fundir em…</b> e clique ⇥: os leads
+        vão pra lá com registro no histórico, e a etapa some do quadro sem ser apagada.
+        🔒 = etapa fixa (entrada/resultado): pode renomear, mas não remover.</p>
       <div class="etlist">
         {% for e in etapas %}
         <form method="post" class="etrow">
@@ -10921,6 +10997,19 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                   {% if e.fixa or e.n > 0 %}disabled{% endif %}
                   title="{% if e.fixa %}Etapa fixa — não remove{% elif e.n > 0 %}Mova os leads primeiro{% else %}Remover etapa{% endif %}"
                   onclick="return confirm('Remover a etapa “{{ e.rotulo }}”?')">✕</button>
+          {% if not e.fixa and etapas|length > 1 %}
+          <!-- FUNDIR (12/09/2026). Fica colado no ✕ de propósito: é o ✕ que diz
+               "mova os leads primeiro", e até hoje não existia o "mova". -->
+          <select class="etsel" name="para" aria-label="Fundir esta etapa em">
+            <option value="">fundir em…</option>
+            {% for d in etapas if d.chave != e.chave %}
+            <option value="{{ d.chave }}">{{ d.rotulo }}</option>
+            {% endfor %}
+          </select>
+          <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/fundir"
+                  title="Levar os leads desta etapa para a escolhida"
+                  onclick="return etFundir(this,'{{ e.rotulo|e }}',{{ e.n }})">⇥</button>
+          {% endif %}
         </form>
         {% endfor %}
       </div>
@@ -11403,6 +11492,15 @@ function kbLeadStatus(sel,id){
       kbFecharLead();
     }).catch(function(){alert('Falha de rede.');sel.value=prev;});
 }
+// FUNDIR: o confirm diz o NÚMERO e o DESTINO. "Confirma?" sozinho não é escolha —
+// quem aperta tem que ver quantos leads vão andar e pra onde.
+function etFundir(btn,rot,n){
+  var sel=btn.form.querySelector('select[name=para]');
+  if(!sel||!sel.value){alert('Escolha a etapa de destino em "fundir em…".');return false;}
+  var destino=sel.options[sel.selectedIndex].text;
+  return confirm(n? ('Levar '+n+' lead'+(n===1?'':'s')+' de “'+rot+'” para “'+destino+'”?\\n\\n'
+                     +'Cada lead fica registrado no histórico, e “'+rot+'” sai do quadro sem ser apagada.')
+                   : ('“'+rot+'” está vazia. Tirar do quadro e apontar para “'+destino+'”?'));}
 function kbTab(s){document.querySelectorAll('.kbcol').forEach(function(c){c.classList.toggle('show',c.getAttribute('data-status')===s);});
   document.querySelectorAll('.kbtab').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===s);});}
 (function(){var cols=document.querySelectorAll('#kbrow .kbcol');var alvo='novo';
@@ -15779,6 +15877,46 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <input class="fld" name="fu_festa_dias" value="{{ fup.festa.v }}" placeholder="{{ fup.festa.ph }}">
       </div>
       {% endif %}
+      <div>
+        <label class="lbl">Temperatura pelos fatos da conversa</label>
+        <select class="rg-sel" name="temperatura_modo" style="width:100%">
+          <option value="off" {% if cfg.temperatura_modo not in ('observando','ligado') %}selected{% endif %}>desligada — a de hoje</option>
+          <option value="observando" {% if cfg.temperatura_modo == 'observando' %}selected{% endif %}>em ensaio — calcula e mostra, não grava</option>
+          <option value="ligado" {% if cfg.temperatura_modo == 'ligado' %}selected{% endif %}>ligada — grava, com histórico</option>
+        </select>
+        <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Quente = o cliente
+          falou há pouco. Frio = não respondeu às tentativas, ou sumiu.
+          <b>Hoje todo lead é carimbado quente ao entrar no funil e nada esfria.</b>
+          Comece pelo ensaio.</p>
+      </div>
+      <div>
+        <label class="lbl lblp">Horas desde a fala do cliente que ainda é quente
+          <span class="rg-proc {% if 'temp_quente_h' in escolhidas_tpl %}seu{% endif %}">{% if 'temp_quente_h' in escolhidas_tpl %}você{% else %}padrão {{ rot_ramo }}{% endif %}</span></label>
+        <input class="fld" name="temp_quente_h" value="{{ cfg.temp_quente_h if 'temp_quente_h' in escolhidas_tpl else '' }}"
+               placeholder="{{ padrao_tpl.temp_quente_h or 48 }}" inputmode="numeric">
+      </div>
+      <div>
+        <label class="lbl lblp">Dias sem o cliente falar até esfriar
+          <span class="rg-proc {% if 'temp_morno_dias' in escolhidas_tpl %}seu{% endif %}">{% if 'temp_morno_dias' in escolhidas_tpl %}você{% else %}padrão {{ rot_ramo }}{% endif %}</span></label>
+        <input class="fld" name="temp_morno_dias" value="{{ cfg.temp_morno_dias if 'temp_morno_dias' in escolhidas_tpl else '' }}"
+               placeholder="{{ padrao_tpl.temp_morno_dias or 7 }}" inputmode="numeric">
+      </div>
+      <div>
+        <label class="lbl lblp">Tentativas sem resposta que esfriam
+          <span class="rg-proc {% if 'temp_frio_tentativas' in escolhidas_tpl %}seu{% endif %}">{% if 'temp_frio_tentativas' in escolhidas_tpl %}você{% else %}padrão {{ rot_ramo }}{% endif %}</span></label>
+        <input class="fld" name="temp_frio_tentativas" value="{{ cfg.temp_frio_tentativas if 'temp_frio_tentativas' in escolhidas_tpl else '' }}"
+               placeholder="{{ padrao_tpl.temp_frio_tentativas or 3 }}" inputmode="numeric">
+      </div>
+      <div>
+        <label class="lbl">Ordem da fila do vendedor</label>
+        <select class="rg-sel" name="fila_modo" style="width:100%">
+          <option value="prazo" {% if cfg.fila_modo != 'temperatura' %}selected{% endif %}>por prazo — a de sempre</option>
+          <option value="temperatura" {% if cfg.fila_modo == 'temperatura' %}selected{% endif %}>por temperatura — quente primeiro</option>
+        </select>
+        <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Quente esperando você ·
+          tarefa atrasada · quente vencendo · respondeu e espera · morno com chance · o resto.
+          <b>Muda o que a equipe vê primeiro de manhã.</b></p>
+      </div>
       <div>
         <label class="lbl lblp">Teto de leads cobrados por vendedor / dia
           <span class="rg-proc {% if not fup.teto.herda %}seu{% endif %}">{% if fup.teto.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>

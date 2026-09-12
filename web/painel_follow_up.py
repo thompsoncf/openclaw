@@ -125,7 +125,11 @@ def painel_follow_up(request: Request):
     fila = [x for x in minhas
             if (estado == "todos" or x["estado"] == estado)
             and (not etapa_f or x["status"] == etapa_f)]
-    fila = fu.ordenar(fila)
+    # a ordem é a de sempre, salvo se o dono ligou a fila por temperatura na Régua
+    # (migração 245): aí os seis níveis do § 7 vêm na frente, e a ordem antiga vira
+    # o desempate dentro de cada nível.
+    por_temp = cfg.get("fila_modo") == "temperatura"
+    fila = fu.ordenar(fila, por_temperatura=por_temp)
     # `secao_ativa='prospeccao'` e `nav_ativo='follow_up'`: a tela virou ABA de
     # Prospecção (07/09/2026) — o menu lateral acende Prospecção, e a barra de
     # abas acende Follow-up.
@@ -136,6 +140,7 @@ def painel_follow_up(request: Request):
                    etapa_f=etapa_f, vendedores=vendedores, etapas=etapas,
                    gestao=(fu.por_vendedor(linhas) if papel != "vendedor" else []),
                    modo=cfg["follow_up_modo"], rotulo=fu.ROTULO, emoji=fu.EMOJI,
+                   por_temp=por_temp, rot_prio=fu.ROTULO_PRIORIDADE,
                    br=_br, tempo=_tempo, adia_max=fu.ADIAMENTOS_ATE_MOTIVO,
                    resumo_msg=_resumo_msg, quando_curto=_quando_curto,
                    erro=q.get("erro") or "")
@@ -264,6 +269,16 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 .fu-lead .meta b{color:var(--text);font-weight:500}
 /* as tentativas como tarefas: feito, pendente, atrasado — a cor é o estado, não
    enfeite, e é o que se lê antes de ler o texto */
+/* a temperatura: as mesmas cores do card do funil (painel_prospeccao.TEMP_PILL) —
+   duas paletas pro mesmo conceito faria o vendedor achar que são coisas diferentes */
+.fu-temp{font-size:.66rem;font-weight:700;letter-spacing:.04em;padding:.1rem .4rem;
+  border-radius:5px;text-transform:uppercase}
+.fu-temp.quente{background:#3a1a1a;color:#f0917f}
+.fu-temp.morno{background:#2e2713;color:#e0b25a}
+.fu-temp.frio{background:#14273a;color:#7bb8e6}
+/* o nível da fila: só aparece quando o dono ligou a ordem por temperatura */
+.fu-nivel{font-size:.64rem;color:var(--txt-mut);font-family:var(--mono,ui-monospace);
+  border:1px solid var(--borda);border-radius:5px;padding:.1rem .35rem}
 .fu-toques{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-top:.35rem}
 .fu-toque{font:600 .66rem/1 ui-monospace,monospace;padding:.3rem .4rem;border-radius:6px;
   border:1px solid var(--borda);color:var(--txt-mut);background:var(--bg)}
@@ -427,8 +442,10 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
       <div>
         <div class="nome">
           <a href="/painel/prospeccao/{{ x.id }}">{{ x.quem }}</a>
+          <span class="fu-temp {{ x.temperatura }}">{{ x.temperatura }}</span>
           <span class="fu-pill {{ x.estado }}">{{ emoji[x.estado] }} {{ rotulo[x.estado] }}</span>
           <span class="fu-pill">{{ x.bola }}</span>
+          {% if por_temp %}<span class="fu-nivel" title="nível da fila de prioridade">{{ x.prioridade }}º {{ rot_prio[x.prioridade] }}</span>{% endif %}
           {% if x.adiados >= adia_max %}<span class="fu-pill hoje" title="sem nenhuma mensagem no meio">🔁 adiado {{ x.adiados }}× sem falar</span>{% endif %}
         </div>
         <div class="meta">

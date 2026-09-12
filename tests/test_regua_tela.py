@@ -52,6 +52,10 @@ create table funil_regua (conta_id bigint primary key,
   fu_festa_dias int, fu_teto_dia int,
   -- o quarto modo (migração 230): um interruptor POR REGRA, não um geral
   teto_modo text not null default 'off', teto_avisar_antes int,
+  -- a ordem da fila do vendedor (migração 245)
+  fila_modo text not null default 'prazo',
+  -- a temperatura pelos fatos (migração 247): modo + três limiares que herdam do ramo
+  temperatura_modo text, temp_quente_h int, temp_morno_dias int, temp_frio_tentativas int,
   atualizado_em timestamptz default now());
 create table funil_movimentos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   de text, para text, motivo text, membro_id bigint, criado_em timestamptz default now());

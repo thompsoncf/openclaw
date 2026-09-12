@@ -958,3 +958,96 @@ def test_o_aviso_da_fase_nao_fala_de_festa(pool):
 
 def test_reaplicar_o_aviso_da_fase_nao_duplica(pool):
     assert _fase_etapa(pool)["id"] == _fase_etapa(pool)["id"]
+
+
+# ---------------- 244: fundir etapas do funil (12/09/2026)
+
+def _fundir(pool):
+    return _aplica(pool, "244_novidade_fundir_etapas.sql", "fundir-etapas-do-funil")
+
+
+def test_o_aviso_de_fundir_e_de_quem_edita_o_funil(pool):
+    a = _fundir(pool)
+    assert a["publico"] == "todos" and set(a["pra_quem"]) == {"dono", "gestor"}
+    assert a["link"] == "/painel/prospeccao" and a["resumo"]
+
+
+def test_o_corpo_diz_o_que_acontece_com_o_lead_e_com_a_coluna(pool):
+    """Fundir é a primeira ação da Régua que mexe em informação do cliente e não em
+    configuração. "Some a coluna" e "some o cliente" são a mesma frase pra quem está
+    olhando a tela — o aviso tem que desfazer essa leitura."""
+    corpo = _fundir(pool)["corpo"]
+    assert "linha no histórico" in corpo
+    assert "não é apagada" in corpo
+    assert "quem apertou o botão" in corpo
+
+
+def test_reaplicar_o_aviso_de_fundir_nao_duplica(pool):
+    assert _fundir(pool)["id"] == _fundir(pool)["id"]
+
+
+# ---------------- 246: a fila por temperatura (12/09/2026)
+
+def _fila_temp(pool):
+    return _aplica(pool, "246_novidade_fila_por_temperatura.sql", "fila-por-temperatura")
+
+
+def test_o_vendedor_recebe_o_aviso_da_fila_porque_a_fila_e_dele(pool):
+    """§5 diz que o vendedor só recebe o que muda a rotina DELE — e a ordem da fila
+    que ele abre todo dia é exatamente isso. Ligar continua sendo de dono/gestor."""
+    a = _fila_temp(pool)
+    assert set(a["pra_quem"]) == {"dono", "gestor", "vendedor"}
+    assert a["link"] == "/painel/follow-up" and a["publico"] == "todos"
+
+
+def test_o_corpo_repete_que_temperatura_nao_muda_etapa(pool):
+    """O documento do cliente repete isso três vezes. O aviso não pode deixar a
+    equipe achar que ficar quente promove o lead sozinho."""
+    corpo = _fila_temp(pool)["corpo"]
+    assert "não muda a etapa" in corpo
+    assert "até alguém ligar" in corpo
+
+
+def test_o_aviso_da_fila_nao_fala_de_festa(pool):
+    a = _fila_temp(pool)
+    for palavra in ("festa", "buffet", "convidados"):
+        assert palavra not in (a["resumo"] + " " + a["corpo"]).lower(), palavra
+
+
+def test_reaplicar_o_aviso_da_fila_nao_duplica(pool):
+    assert _fila_temp(pool)["id"] == _fila_temp(pool)["id"]
+
+
+# ---------------- 248: a temperatura pelos fatos (12/09/2026)
+
+def _temp_fato(pool):
+    return _aplica(pool, "248_novidade_temperatura_por_fato.sql", "temperatura-por-fato")
+
+
+def test_o_aviso_da_temperatura_chega_ao_vendedor(pool):
+    a = _temp_fato(pool)
+    assert set(a["pra_quem"]) == {"dono", "gestor", "vendedor"}
+    assert a["publico"] == "todos" and a["link"] == "/painel/prospeccao/regua"
+
+
+def test_o_corpo_avisa_que_ligar_reescreve_quase_tudo(pool):
+    """Ligar muda a temperatura de 289 dos 319 leads da Prime. Aviso que omite isso
+    entrega uma tela que amanheceu diferente sem explicação."""
+    corpo = _temp_fato(pool)["corpo"]
+    assert "reescreve de uma vez" in corpo
+    assert "ensaio" in corpo and "sem gravar nada" in corpo
+    assert "registrada no histórico" in corpo
+
+
+def test_o_corpo_diz_que_o_vendedor_continua_mandando(pool):
+    assert "vendedor continua mandando" in _temp_fato(pool)["corpo"]
+
+
+def test_o_aviso_da_temperatura_nao_fala_de_festa(pool):
+    a = _temp_fato(pool)
+    for palavra in ("festa", "buffet", "convidados"):
+        assert palavra not in (a["resumo"] + " " + a["corpo"]).lower(), palavra
+
+
+def test_reaplicar_o_aviso_da_temperatura_nao_duplica(pool):
+    assert _temp_fato(pool)["id"] == _temp_fato(pool)["id"]

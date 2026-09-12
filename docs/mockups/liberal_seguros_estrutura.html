@@ -1,0 +1,258 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<title>Liberal Seguros: a estrutura da corretora</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:880px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:32px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.card{background:#fff;border:1px solid #E3DDD0;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden;margin-bottom:14px}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+
+/* ---------- réplica FIEL do painel escuro (web/painel_servicos) ---------- */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC}
+.pn .card2{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.55rem}
+.pn .cab{display:flex;align-items:center;gap:.6rem}
+.pn .seta{color:#7B8A99;font-size:.85rem}
+.pn .tit{font-weight:700;font-size:1rem}
+.pn .mut{color:#7B8A99;font-size:.78rem;margin-top:.1rem}
+.pn .selo{margin-left:auto;font-size:.68rem;font-weight:700;background:#3A2A10;color:#E0B458;border:1px solid #5C4418;border-radius:5px;padding:.1rem .38rem;white-space:nowrap}
+.pn .selo.ok{background:#10241d;color:#7EE7B8;border-color:#1c3a30}
+.pn .expl{color:#9AA7B4;font-size:.85rem;margin:.7rem 0 .8rem;line-height:1.6}
+.pn .expl b{color:#7EE7B8}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.4rem .55rem;font-size:.85rem;color:#DDE4EC;width:100%}
+.pn .ta{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.45rem .55rem;font-size:.78rem;color:#C6D2DE;width:100%;font-family:ui-monospace,Menlo,monospace;line-height:1.6}
+.pn .pill{display:inline-block;background:#1B2836;border:1px solid #2A3947;border-radius:99px;padding:.2rem .55rem;font-size:.75rem;color:#C6D2DE}
+.pn .pill.mono{font-family:ui-monospace,Menlo,monospace;font-size:.7rem;padding:.15rem .4rem}
+.pn .pill.novo{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .btnv{display:inline-block;background:#1F7A55;color:#EAFFF5;border-radius:8px;padding:.45rem .9rem;font-size:.85rem;font-weight:700}
+.pn .lbl{color:#7B8A99;font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:.2rem}
+.pn .bloco{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem}
+.pn .linha{display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem}
+.pn .mini{display:inline-flex;align-items:center;justify-content:center;background:#1B2836;border:1px solid #2A3947;border-radius:6px;width:26px;height:26px;font-size:.8rem;color:#9AA7B4;flex:0 0 auto}
+.pn .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.5rem}
+.eti{display:inline-block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;vertical-align:middle;margin-left:6px}
+.e-hoje{background:#FDECEA;color:#B4453C;border:1px solid #F5C6C0}
+.e-novo{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.card,.pn,.q{break-inside:avoid}}
+</style></head><body><div class="wrap">
+</head><body><div class="wrap">
+
+<h1>Liberal Seguros: a estrutura da corretora</h1>
+<p class="lead">A conta 37 existe desde 09/09/2026 e está vazia: um membro (o dono), <b>nicho nulo</b>,
+nenhum canal, nenhum cliente, nenhum catálogo, nenhum título. E o sistema não tem nicho de seguros —
+os 22 vão de hortifrúti a eventos, e nenhum descreve uma corretora. Este documento desenha a
+<b>Camada 1</b>: o nicho que faz a Liberal funcionar já, com o vocabulário e a persona certos. A
+carteira de apólices fica pra Camada 2, esboçada no fim.</p>
+
+<h2><span class="n">01</span> O que a Liberal veria se entrasse hoje</h2>
+<div class="sub">Nicho nulo cai em <code>generico</code> — e genérico é loja de produto</div>
+
+<table>
+<tr><th>Onde</th><th>O que ela veria hoje</th><th>Por quê</th></tr>
+<tr><td>Unidade do que ela vende</td><td class="mono">unidade · kg · caixa · pacote · litro</td>
+    <td>É o vocabulário de mercearia. Corretora não vende por quilo.</td></tr>
+<tr><td>Categoria</td><td>lista vazia, digita o que quiser</td>
+    <td>Sem ramo pra agrupar, o relatório nunca soma "quanto entrou de auto".</td></tr>
+<tr><td>O agente</td><td>persona PJ genérica</td>
+    <td>Vai explicar o básico pra quem é o especialista, e não sabe que quem paga é a seguradora.</td></tr>
+<tr><td>Modo do orçamento</td><td><code>recorrente</code></td>
+    <td>Este está certo por acidente — e continua certo depois da mudança.</td></tr>
+</table>
+
+<div class="nota"><b>O sinal de que ninguém configurou:</b> <code>nicho_id</code>, <code>documento</code>,
+<code>razao_social</code>, <code>telefone</code>, <code>uf</code> e <code>cnae</code> estão todos nulos.
+A conta nasceu do cadastro e parou ali. Status <code>trial</code>.</div>
+
+<h2><span class="n">02</span> As cinco peças de um nicho</h2>
+<div class="sub">Mapeei onde cada uma mora — nenhuma é invenção nova</div>
+
+<table>
+<tr><th>Peça</th><th>Arquivo</th><th>O que muda pra seguros</th></tr>
+<tr><td>Linha na tabela</td><td class="mono">migração <code>NNN_nicho_seguros.sql</code></td>
+    <td>Cria o slug <code>seguros</code>. Sem ela a FK de <code>contas.nicho_id</code> recusa.</td></tr>
+<tr><td>Vocabulário</td><td class="mono">finance/nichos.py · <code>NICHOS</code></td>
+    <td>Unidades e categorias novas (seção 3).</td></tr>
+<tr><td>Persona do agente</td><td class="mono">finance/nichos.py · <code>_PERSONAS_NICHO</code></td>
+    <td>Bloco próprio, não o molde de serviço (seção 5 explica por quê).</td></tr>
+<tr><td>CNAE → nicho</td><td class="mono">finance/cnpj_info.py</td>
+    <td>Ramo <code>Seguros</code>, pra conta com CNPJ se classificar sozinha.</td></tr>
+<tr><td>Modo do orçamento</td><td class="mono">finance/vendas.py · <code>NICHOS_EVENTO</code></td>
+    <td><b>Nada.</b> Fora dessa lista = <code>recorrente</code>, que é o certo.</td></tr>
+</table>
+
+<h2><span class="n">03</span> O vocabulário</h2>
+<div class="sub">A primeira da lista é o padrão — por isso a ordem importa</div>
+
+<div class="card">
+<p><b>Unidades</b> — como o que ela vende é medido:</p>
+<p><span class="pill mono">apolice</span> <span class="pill mono">veiculo</span>
+<span class="pill mono">vida</span> <span class="pill mono">mensal</span>
+<span class="pill mono">avulso</span></p>
+<p style="margin-top:10px"><code>apolice</code> é o padrão porque é a unidade de quase tudo.
+<code>veiculo</code> existe pra frota (cota-se por carro, não por apólice), <code>vida</code> pra
+vida em grupo (por vida segurada), <code>mensal</code> pra saúde e benefícios, que não são anuais.</p>
+</div>
+
+<div class="card">
+<p><b>Categorias</b> — os ramos, que é como uma corretora enxerga a carteira:</p>
+<p><span class="pill mono">auto</span> <span class="pill mono">frota</span>
+<span class="pill mono">vida</span> <span class="pill mono">residencial</span>
+<span class="pill mono">empresarial</span> <span class="pill mono">condominio</span>
+<span class="pill mono">saude</span> <span class="pill mono">rc</span>
+<span class="pill mono">garantia</span> <span class="pill mono">viagem</span>
+<span class="pill mono">outro</span></p>
+<p style="margin-top:10px"><code>auto</code> vem primeiro porque você disse que é o forte dela — e
+primeiro da lista é o que o formulário já vem preenchido. Trocar a ordem é uma linha.</p>
+</div>
+
+<h2><span class="n">04</span> Como fica a tela do cadastro</h2>
+<div class="sub">Mesma tela de sempre; só o que está dentro dos selects muda</div>
+
+<div class="pn">
+  <div class="bloco">
+    <span class="lbl">Nome do serviço</span>
+    <div class="inp">Seguro Auto — cobertura compreensiva</div>
+  </div>
+  <div class="grid">
+    <div class="bloco"><span class="lbl">Unidade <span class="eti e-novo">novo</span></span>
+      <div class="inp">apólice ▾</div>
+      <div class="mut" style="margin-top:.3rem">apólice · veículo · vida · mensal · avulso</div></div>
+    <div class="bloco"><span class="lbl">Categoria (ramo) <span class="eti e-novo">novo</span></span>
+      <div class="inp">auto ▾</div>
+      <div class="mut" style="margin-top:.3rem">auto · frota · vida · residencial · empresarial…</div></div>
+    <div class="bloco"><span class="lbl">Preço de referência</span>
+      <div class="inp">R$ 3.200,00</div></div>
+  </div>
+  <div class="expl">Hoje, no genérico, esses dois selects mostram <b>kg, caixa, pacote</b> e uma lista
+  de categoria <b>vazia</b>.</div>
+</div>
+
+<h2><span class="n">05</span> A persona: por que ela não cabe no molde pronto</h2>
+<div class="sub">Existe um <code>_molde_servico</code> reaproveitado por advocacia, agência, consultoria
+e tecnologia — e ele erra o essencial aqui</div>
+
+<div class="perigo"><b>A linha do molde que não serve:</b> <i>"O nome do cliente vai na
+CONTRAPARTE"</i>. Numa corretora quem paga é a <b>seguradora</b>, não o segurado. Se a Liberal usar o
+molde, todo título a receber vai nascer com o nome errado no lugar de quem deve — e o relatório de
+"quem me deve" vai listar clientes que não devem nada a ela.</div>
+
+<div class="card">
+<p><b>O que a persona de seguros ensina, e nenhuma outra ensina:</b></p>
+<p>1. <b>Quem paga é a seguradora.</b> A receita é comissão, um % do prêmio. Título a receber com a
+<b>seguradora na contraparte</b>; o segurado é o cliente da carteira, não o pagador.</p>
+<p>2. <b>A apólice tem vigência de 12 meses.</b> Recorrente com
+<code>periodicidade='anual'</code> — que o banco já aceita desde a migração 196. O sistema projeta o
+próximo vencimento sozinho, e é isso que vira o lembrete de renovação.</p>
+<p>3. <b>Ramos são as categorias</b>, não texto livre — é o que deixa o relatório responder "quanto
+entrou de auto este ano".</p>
+<p>4. <b>A pagar são só os custos dela:</b> taxa SUSEP, sistema de cotação, anuidade, marketing.
+Prêmio de cliente <b>nunca</b> é despesa dela — ela não paga o seguro, ela intermedeia.</p>
+<p>5. <b>Proativo na renovação:</b> apólice vencendo é o pão da corretora. O agente avisa em uma
+linha quem vence no mês; não insiste.</p>
+</div>
+
+<h2><span class="n">06</span> O dinheiro, num caso concreto</h2>
+<div class="sub">Seguro auto fechado, do jeito que o sistema vai gravar</div>
+
+<table>
+<tr><th>O que acontece</th><th>Onde grava</th></tr>
+<tr><td>Cliente Fulano fecha seguro do Argo, prêmio anual <b>R$ 3.200,00</b>, na Porto</td>
+    <td>Orçamento no funil, modo <code>recorrente</code>, categoria <code>auto</code></td></tr>
+<tr><td>Fulano entra na carteira</td><td><code>clientes</code> — é o segurado, e é dele o histórico</td></tr>
+<tr><td>Comissão de <b>20% = R$ 640,00</b></td>
+    <td><code>titulos</code> a receber · contraparte <b>Porto Seguro</b> · categoria de comissão ·
+        <code>recorrente=true</code> · <code>periodicidade='anual'</code></td></tr>
+<tr><td>Setembro de 2027</td><td>O título se renova sozinho na baixa — e é o gancho da renovação</td></tr>
+</table>
+
+<div class="alerta"><b>Uma decisão sua, pequena mas visível:</b> não existe categoria de receita
+<code>Comissoes</code>. A lista tem <span class="mono">Salario, Honorarios, Freela, Consultoria,
+Investimentos, Vendas, Aluguel…</span> — e é a mesma lista pra todo mundo.
+<span class="rec">Recomendo acrescentar "Comissoes"</span>: é a palavra certa, e serve também a
+representante comercial e corretor de imóveis. O custo é uma opção a mais no select de todas as
+contas. A alternativa é usar <code>Honorarios</code> e não mexer em nada — funciona, só fica com o
+nome errado no relatório dela.</div>
+
+<h2><span class="n">07</span> A equipe: dono + corretores</h2>
+<div class="sub">Sem código — os papéis já existem</div>
+<div class="bom"><b>Nada a construir aqui.</b> <code>dono</code>, <code>gestor</code> e
+<code>vendedor</code> já existem, com a Fila no app e comissão por vendedor. Um corretor entra como
+<code>vendedor</code>: alcança o funil, os clientes e o orçamento, e <b>não</b> alcança
+<code>/painel/empresa</code>. É convite pela tela de Equipe, não é deploy.</div>
+
+<h2><span class="n">08</span> Camada 2: a carteira de apólices (fica pra depois)</h2>
+<div class="sub">O que um nicho não resolve, e por que merece PR próprio</div>
+
+<div class="card">
+<p>O nicho dá vocabulário e persona. O que ele <b>não</b> dá é o objeto central do negócio: a
+<b>apólice</b>. Ela tem número, seguradora, ramo, vigência (início e fim), prêmio, comissão %,
+parcelamento, e um segurado — e nada disso cabe em <code>orcamentos</code>.</p>
+<p><b>O que a Camada 2 traria:</b></p>
+<p>• <code>apolices</code>: número, seguradora, ramo, segurado, vigência, prêmio, comissão, situação<br>
+• <b>Tela de renovação:</b> o que vence em 30 / 60 / 90 dias, que é a agenda comercial de uma corretora<br>
+• <b>Endosso:</b> a alteração no meio da vigência — trocou o carro, mudou o endereço. É o mesmo
+formato do termo aditivo que acabamos de entregar, e dá pra reaproveitar quase inteiro<br>
+• <b>Sinistro:</b> registro e acompanhamento, se ela quiser</p>
+<p style="margin-bottom:0">Fica pra depois de propósito: a Camada 1 põe a Liberal operando esta
+semana. Construir a carteira antes de ela usar o sistema é desenhar no escuro.</p>
+</div>
+
+<h2><span class="n">09</span> O aviso (regra 5 do CLAUDE.md)</h2>
+<div class="nota">O PR muda tela, então leva aviso. Nenhum portão de
+<code>finance.novidades.PUBLICOS</code> descreve "contas de seguros" — então o portão
+<code>seguros</code> nasce junto, como manda o passo 1 da regra. <b>Quem recebe:</b> só a conta 37.
+<b>Pra quem:</b> dono e gestor (o vendedor não configura nicho).</div>
+
+<h2><span class="n">10</span> O que eu preciso que você bata o martelo</h2>
+
+<div class="q"><div class="qt">1. A categoria de receita: "Comissoes" nova, ou "Honorarios"?</div>
+<div class="qo"><span class="rec">Recomendo criar "Comissoes"</span> — é o nome certo do que entra
+numa corretora, e aparece pra todo mundo como uma opção a mais, não como mudança de comportamento.</div></div>
+
+<div class="q"><div class="qt">2. Confirma o rótulo "Corretora de Seguros"?</div>
+<div class="qo">É o que vai aparecer no select de nicho e nas telas. A alternativa mais ampla seria
+"Seguros / Corretagem", que abriria espaço pra consórcio e previdência sem PR novo.</div></div>
+
+<div class="q"><div class="qt">3. Eu configuro a conta 37 junto, ou só entrego o nicho?</div>
+<div class="qo">Depois do deploy, alguém precisa <b>marcar</b> o nicho na conta 37 e preencher CNPJ,
+telefone e UF. <span class="rec">Recomendo que você faça pela tela</span> — é dado do cliente, e a
+regra 0 diz que eu não escrevo no banco de produção na mão. Se preferir, eu preparo o passo a passo.</div></div>
+
+<div class="q"><div class="qt">4. Quais seguradoras ela trabalha?</div>
+<div class="qo">Não muda a Camada 1, mas muda a Camada 2: se forem poucas e fixas, viram lista; se
+forem muitas, vira cadastro. Se souber, me diz — se não, deixo como texto livre por ora.</div></div>
+
+<div class="ftr">Levantado na produção em 12/09/2026: conta 37, <code>contas</code>,
+<code>membros</code>, <code>nichos</code>. Código lido: <code>finance/nichos.py</code> (o mapa
+<code>NICHOS</code> e <code>_PERSONAS_NICHO</code>), <code>finance/cnpj_info.py</code>
+(<code>_RAMOS</code> e <code>_RAMO_NICHO</code>), <code>finance/vendas.py</code>
+(<code>modo_por_nicho</code>), <code>finance/models.py</code> (<code>CATEGORIAS_RECEITA</code>),
+<code>finance/novidades.py</code> (<code>PUBLICOS</code>), migrações
+<code>132_nicho_eventos.sql</code>, <code>091_nichos_servico_profissional.sql</code> e
+<code>196_titulo_recorrencia.sql</code>. Mockup, não implementação — nada foi escrito no banco.</div>
+
+</div></body></html>

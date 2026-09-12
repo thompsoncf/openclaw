@@ -569,7 +569,37 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
     except Exception:  # noqa: BLE001
         alvo["vende_data"] = False
     with pool.connection() as c:
-        etapas = [e for e in _etapas(c, conta_id) if e["chave"] not in ("ganho", "perdido")]
+        # `sai_do_quadro` (migração 238) fica de fora: são as etapas de DEPOIS da
+        # venda — 'Festa realizada' e parecidas, que o quadro não desenha porque o
+        # funil acabou ali. No app elas viravam botão de um toque ao lado de
+        # 'Proposta', e um toque errado tirava o lead da fila do vendedor sem passar
+        # por fechamento nenhum: sem ganho, sem motivo, sem rastro de venda.
+        # A etapa ATUAL continua na lista, marcada — quem já está numa delas precisa
+        # ver onde está, e esconder isso deixaria a ficha sem etapa nenhuma acesa.
+        atual = alvo.get("status")
+        etapas = [e for e in _etapas(c, conta_id)
+                  if e["chave"] not in ("ganho", "perdido")
+                  and (not e.get("sai_do_quadro") or e["chave"] == atual)]
+        # A LISTA DE PERDA É DA CONTA (migração 235), e sai daqui — do mesmo cursor
+        # que já está aberto — e não de uma constante na tela.
+        #
+        # Até 12/09/2026 o app montava as opções da lista fixa de seis do código. A
+        # lista de verdade vive em `funil_motivos_perda`, e as duas divergiram na
+        # primeira conta que usou: a Prime tem dez motivos, e dos seis do código só
+        # quatro existiam lá. Com `exige_motivo` desligado isso passou batido
+        # (`funil_perda.validar` devolve ok sem olhar a lista); no dia em que o dono
+        # ligou, o vendedor viu duas opções que o motor recusa e não achou as seis
+        # que ele de fato usa. O painel já lia a lista certa — era só o app que
+        # tinha ficado pra trás, e é no app que o vendedor perde o lead.
+        try:
+            from finance import funil_perda as _fp
+            from finance import funil_regua as _fr
+            with c.transaction():     # savepoint: lista ilegível não derruba a ficha
+                alvo["motivos_perda"] = _fp.motivos(c, conta_id, _fr.perfil_da_conta(c, conta_id))
+        except Exception as e:  # noqa: BLE001 — tela que não abre é pior que tela incompleta
+            _log.warning("não deu pra ler os motivos de perda da conta %s (%s: %s)",
+                         conta_id, type(e).__name__, e)
+            alvo["motivos_perda"] = []
         # `chip_id` vem junto pro aviso de conversa repetida saber se a outra está no
         # MESMO chip (entrega dupla, defeito) ou no outro (a campanha nos dois números,
         # que é de propósito). Ver `aviso_outra_conversa`.

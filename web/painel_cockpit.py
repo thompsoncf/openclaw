@@ -4695,14 +4695,17 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
         f"<button class='{'on' if d['status'] == e['chave'] else ''}' type=submit>{esc(e['rotulo'])}</button>"
         "</form>" for e in d["etapas"])
 
-    # a lista FIXA de motivos (finance/raio_x_dono.MOTIVOS_PERDA, check da 209): a
-    # chave vai no value, o rótulo na tela. É o que o Raio-X do dono agrega.
-    from finance.raio_x_perfil import perfil as _perfil_de, perfil_da_conta as _perfil_conta
-    try:
-        _lista = _perfil_conta(get_pool(), request.session.get("conta_id"))["motivos"]
-    except Exception:  # noqa: BLE001 — sem banco (tela montada solta), o perfil sem festa
-        _lista = _perfil_de(None)["motivos"]
-    motivos = "".join(f"<option value='{esc(k)}'>{esc(r)}</option>" for k, r in _lista)
+    # A lista de perda vem pronta de `cockpit.lead_do_vendedor` — é a DA CONTA
+    # (`funil_motivos_perda`, migração 235), lida no mesmo cursor da ficha e a mesma
+    # que `funil_perda.validar` usa pra aceitar ou recusar. Ver o comentário lá.
+    _motivos = d.get("motivos_perda") or []
+    motivos = "".join(
+        f"<option value='{esc(m['chave'])}'"
+        f"{' data-desc=1' if m['exige_descricao'] else ''}>{esc(m['rotulo'])}</option>"
+        for m in _motivos)
+    # o "Outro" da lista pede texto (`exige_descricao`): sem este campo o vendedor
+    # escolheria e levaria "descricao_obrigatoria" sem ter onde escrever
+    pede_desc = any(m["exige_descricao"] for m in _motivos)
 
     # A folha só sobe com :target — sem JS, então funciona igual ao resto do app,
     # que é todo form + redirect. Ela só se sustenta CURTA: é `position:absolute` com
@@ -4719,10 +4722,27 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
         + f"<h3>Fechar</h3>"
         f"<form method=post action='{_BASE}/lead/{lead_id}/fechar' style='margin-bottom:.5rem'>"
         "<input type=hidden name=tipo value=ganho><button class=btn type=submit>Marcar como ganho</button></form>"
-        f"<form method=post action='{_BASE}/lead/{lead_id}/fechar' class=linhaform>"
+        f"<form method=post action='{_BASE}/lead/{lead_id}/fechar' class=linhaform"
+        " style='flex-wrap:wrap'>"
         "<input type=hidden name=tipo value=perdido>"
-        f"<select name=motivo><option value=''>Por que perdeu?</option>{motivos}</select>"
-        "<button class='btn perigo' style='width:auto;padding:.55rem .9rem' type=submit>Perdido</button></form>"
+        f"<select name=motivo style='flex:1'><option value=''>Por que perdeu?</option>{motivos}</select>"
+        "<button class='btn perigo' style='width:auto;padding:.55rem .9rem' type=submit>Perdido</button>"
+        # O texto vai DENTRO do mesmo form, e não num segundo abaixo: são um POST só.
+        # Num form separado ele sairia sem o `motivo` ao lado e o motor devolveria
+        # "motivo_obrigatorio" — o vendedor escreveria a explicação e levaria de volta
+        # justamente o erro de não ter explicado.
+        + ("<input name=motivo_desc id=perdadesc placeholder='Conte em uma linha o que houve' "
+           "style='flex-basis:100%;order:3;margin-top:.35rem'>"
+           # NASCE VISÍVEL, e o script ESCONDE quando o motivo escolhido não pede
+           # texto. Ao contrário — nascer escondido e o script mostrar — o vendedor
+           # sem JS ficaria com um motivo que exige explicação e nenhum campo pra
+           # escrever, que é exatamente o beco de onde este PR está tirando ele.
+           "<script>(function(){"
+           "var s=document.querySelector(\"select[name=motivo]\"),i=document.getElementById('perdadesc');"
+           "if(!s||!i)return;"
+           "function v(){var o=s.options[s.selectedIndex];i.hidden=!(o&&o.hasAttribute('data-desc'));}"
+           "s.addEventListener('change',v);v();})();</script>" if pede_desc else "")
+        + "</form>"
         + "</div><a class=fbg href='#fechar' aria-label='Fechar'></a>")
 
     # Conversa abre no fim, na mensagem mais recente — é onde o trabalho está.
@@ -5152,6 +5172,11 @@ _RECADO = {
     "etapa_invalida": "Essa etapa não existe no funil.",
     "use_fechar": "Pra encerrar o lead use Ganho ou Perdido.",
     "login": "Sua sessão expirou — entre de novo.",
+    # as duas recusas de `funil_perda.validar`. Sem elas o vendedor lia a CHAVE crua
+    # ("motivo_obrigatorio") na barra de recado — e era o único retorno que ele tinha
+    # no dia em que o dono ligasse o `exige_motivo` do Perdido.
+    "motivo_obrigatorio": "Escolha por que perdeu antes de marcar como Perdido.",
+    "descricao_obrigatoria": "Esse motivo pede uma linha explicando. Escreva e mande de novo.",
 }
 
 
@@ -5455,14 +5480,18 @@ def cockpit_devolver(request: Request, lead_id: int):
 
 
 @router.post("/cockpit/lead/{lead_id}/fechar")
-def cockpit_fechar(request: Request, lead_id: int, tipo: str = Form(...), motivo: str = Form("")):
+def cockpit_fechar(request: Request, lead_id: int, tipo: str = Form(...),
+                   motivo: str = Form(""), motivo_desc: str = Form("")):
+    """`motivo_desc` é o texto do motivo que PEDE texto (`exige_descricao`). Faltava:
+    a rota não o recebia, `ck.fechar` já o aceitava desde a 235 e nunca chegava nele
+    — escolher 'Outro' no app devolvia 'descricao_obrigatoria' sem saída."""
     swipe = request.headers.get("x-cockpit") == "1"
     sess = _sessao(request)
     if not sess:
         if swipe:
             return JSONResponse({"ok": False, "erro": _RECADO["login"]}, status_code=401)
         return RedirectResponse("/cockpit/login", status_code=303)
-    r = ck.fechar(get_pool(), sess[0], sess[1], lead_id, tipo, motivo)
+    r = ck.fechar(get_pool(), sess[0], sess[1], lead_id, tipo, motivo, motivo_desc)
     if swipe:                                         # o card some da lista sozinho
         return JSONResponse({"ok": bool(r.get("ok")), "erro": "" if r.get("ok") else _erro(r)})
     if r.get("ok"):                                   # fechou: o lead sai da fila

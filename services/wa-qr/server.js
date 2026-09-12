@@ -551,13 +551,20 @@ async function gravarLogsPendentes () {
         'insert into wa_qr_log (conta_id, nivel, msg, dados, criado_em) values ' + partes.join(','),
         params)
     }
+    // Os três agregados abaixo vão carimbados com a conta do worker. Desde a
+    // fase 3 cada worker atende UMA conta, então ele sabe de quem é o número —
+    // e "1.800 Bad MAC por hora" sem dizer de qual chip não responde a primeira
+    // pergunta que qualquer um faz. Em processo único (`WA_QR_SUPERVISOR=0`)
+    // `MINHA_CONTA` é nulo e o agregado realmente abrange todas as contas: aí
+    // `conta_id` nulo é a resposta certa, não um buraco.
+    //
     // a perda tem que aparecer NA PRÓPRIA tabela: um diagnóstico com buraco
     // silencioso é pior que um diagnóstico que avisa onde está o buraco
     if (perdidas) {
       await pool.query(
-        `insert into wa_qr_log (nivel, msg, dados) values
-         ('warn','log: fila cheia, linhas descartadas',$1::jsonb)`,
-        [JSON.stringify({ perdidas })])
+        `insert into wa_qr_log (conta_id, nivel, msg, dados) values
+         ($1,'warn','log: fila cheia, linhas descartadas',$2::jsonb)`,
+        [MINHA_CONTA, JSON.stringify({ perdidas })])
     }
     // ...e o volume que o filtro do Baileys engoliu, numa linha só. Sem isto o
     // wa_qr_log responde ZERO a "quantas decifragens falharam agora", que é
@@ -567,9 +574,9 @@ async function gravarLogsPendentes () {
       let total = 0
       for (const [k, v] of suprimidas) { por[k] = v; total += v }
       await pool.query(
-        `insert into wa_qr_log (nivel, msg, dados) values
-         ('info','log: linhas do Baileys suprimidas (só o agregado vem pro banco)',$1::jsonb)`,
-        [JSON.stringify({ total, janelaMs: LOG_DB_FLUSH_MS, por })])
+        `insert into wa_qr_log (conta_id, nivel, msg, dados) values
+         ($1,'info','log: linhas do Baileys suprimidas (só o agregado vem pro banco)',$2::jsonb)`,
+        [MINHA_CONTA, JSON.stringify({ total, janelaMs: LOG_DB_FLUSH_MS, por })])
     }
     // ...e o que o libsignal grita no console sem passar por logger nenhum. Nível
     // `warn` na linha do agregado (não `info`): é sinal de saúde da criptografia,
@@ -579,9 +586,9 @@ async function gravarLogsPendentes () {
       let total = 0
       for (const [k, v] of doConsole) { por[k] = v; total += v }
       await pool.query(
-        `insert into wa_qr_log (nivel, msg, dados) values
-         ('warn','log: console do libsignal (não passa pelo pino — só o agregado vem pro banco)',$1::jsonb)`,
-        [JSON.stringify({ total, janelaMs: LOG_DB_FLUSH_MS, por })])
+        `insert into wa_qr_log (conta_id, nivel, msg, dados) values
+         ($1,'warn','log: console do libsignal (não passa pelo pino — só o agregado vem pro banco)',$2::jsonb)`,
+        [MINHA_CONTA, JSON.stringify({ total, janelaMs: LOG_DB_FLUSH_MS, por })])
     }
     _logAvisouFalha = false
   } catch (e) {

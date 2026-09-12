@@ -148,6 +148,12 @@ async function testeNivelEFila () {
   conferir(perda.length === 1 && perda[0].dados.perdidas === 30,
     'a perda ficou registrada na própria tabela, com o número',
     perda.length ? JSON.stringify(perda[0].dados) : 'nenhuma linha de aviso')
+  // Este arquivo roda SEM `WA_QR_CONTA` — é o processo único, que atende todas as
+  // contas. Aí o agregado abrange mesmo todas, e conta nula é a resposta certa, não
+  // um buraco. O caso do worker de uma conta está no teste-log-agregado-conta.js.
+  conferir(perda.length === 1 && perda[0].conta_id === null,
+    'sem WA_QR_CONTA o agregado fica sem conta — ele é de todas',
+    perda.length ? 'conta_id=' + perda[0].conta_id : '-')
 }
 
 async function testeSuprimidasDoBaileys () {
@@ -176,6 +182,8 @@ async function testeSuprimidasDoBaileys () {
   conferir(ag.length === 1 && ag[0].dados.por['warn|failed to decrypt message'] === 118,
     'e discriminado por nível+mensagem — 118 decifragens falhas em warn',
     ag.length ? JSON.stringify(ag[0].dados.por) : '-')
+  conferir(ag.length === 1 && ag[0].conta_id === null,
+    'e sem WA_QR_CONTA ele não inventa dono', ag.length ? 'conta_id=' + ag[0].conta_id : '-')
 
   console.log('\no contador não pode virar parte da enxurrada')
   await limpar()

@@ -456,13 +456,88 @@ function contarSuprimida (nivel, a, b) {
   _logSuprimidas.set(chave, (_logSuprimidas.get(chave) || 0) + 1)
 }
 
+// ---------------------------------------------------- o console cru do libsignal
+//
+// O libsignal chama `console.error` DIRETO (session_cipher.js:157 e :159) e nunca
+// passa pelo pino. Efeito: o `Bad MAC` aparece no painel do Render e o wa_qr_log
+// responde ZERO — o dono teve que copiar log do Render na mão em 12/09 pra me
+// mostrar um erro que eu não conseguia ver de dentro.
+//
+// É o mesmo engano que o comentário do `_logSuprimidas` acima conta (24/08: "o log
+// cru mostrava 592 Bad MAC por hora e o wa_qr_log mostrava ZERO"), mas por outra
+// porta: lá o buraco era o filtro `soErro` do pino; aqui é o console, que não tem
+// logger nenhum no caminho.
+//
+// CONTADOR PRÓPRIO, e não o `_logSuprimidas`, de propósito: aquele conta linha que
+// o NOSSO filtro engoliu. Estas nunca entraram no pino. Somar as duas num número
+// só faria o agregado responder "quantas o filtro engoliu?" com a conta errada —
+// exatamente o tipo de número enganoso que já custou um diagnóstico aqui.
+const _logConsole = new Map()
+
+// `error` e `warn` sempre; `info` só sob pedido. O `info` do libsignal é
+// operação normal e de alto volume (session_record.js: "Opening session",
+// "Closing session", "Removing old closed session") — capturar por padrão poria uma
+// linha no banco a cada janela de descarga sem dizer nada que interesse.
+const CONSOLE_NIVEIS = ['error', 'warn'].concat(
+  process.env.WA_QR_CONSOLE_INFO === '1' ? ['info'] : [])
+
+// Soma uma linha do console. Só conta, igual ao contarSuprimida: contar uma
+// enxurrada não pode virar parte dela.
+//
+// A chave é o PRIMEIRO argumento, truncado. É o que o libsignal usa como texto
+// fixo ("Session error:...", "Failed to decrypt message with any known session...",
+// "Closing session:"), então a cardinalidade fica baixa sozinha. O segundo
+// argumento costuma ser o `e.stack` inteiro — de fora da chave de propósito: ele
+// carrega o id do peer e faria cada linha virar uma chave nova. Quem quer o peer
+// tem o `failed to decrypt message`, que já traz `key.remoteJid`.
+function contarConsole (nivel, args) {
+  if (!LOG_DB) return
+  const primeiro = args && args.length ? args[0] : ''
+  const msg = typeof primeiro === 'string' ? primeiro : String(primeiro && primeiro.message || primeiro)
+  const chave = nivel + '|' + msg.slice(0, 80)
+  if (!_logConsole.has(chave) && _logConsole.size >= LOG_SUPRIMIDAS_CHAVES_MAX) {
+    const balde = nivel + '|(outras)'
+    _logConsole.set(balde, (_logConsole.get(balde) || 0) + 1)
+    return
+  }
+  _logConsole.set(chave, (_logConsole.get(chave) || 0) + 1)
+}
+
+// Instala a captura. Chamada SÓ no arranque do worker (ver o fim do arquivo): em
+// teste o console fica intacto, e o supervisor nem carrega o libsignal.
+//
+// O original é chamado SEMPRE e PRIMEIRO: o log do Render não perde nada, e um erro
+// nosso na contagem não pode engolir a linha que a gente veio preservar.
+function capturarConsole (alvo) {
+  const console_ = alvo || console
+  let dentro = false            // trava de reentrância: contar não pode se logar
+  for (const nivel of CONSOLE_NIVEIS) {
+    const original = console_[nivel]
+    if (typeof original !== 'function' || original._capturado) continue
+    const novo = function (...args) {
+      const r = original.apply(console_, args)
+      if (!dentro) {
+        dentro = true
+        try { contarConsole(nivel, args) } catch (_) {} finally { dentro = false }
+      }
+      return r
+    }
+    novo._capturado = true
+    novo._original = original
+    console_[nivel] = novo
+  }
+  return console_
+}
+
 async function gravarLogsPendentes () {
-  if (!_logFila.length && !_logDescartadas && !_logSuprimidas.size) return
+  if (!_logFila.length && !_logDescartadas && !_logSuprimidas.size && !_logConsole.size) return
   const lote = _logFila.splice(0, LOG_DB_LOTE)
   const perdidas = _logDescartadas
   _logDescartadas = 0
   const suprimidas = new Map(_logSuprimidas)
   _logSuprimidas.clear()
+  const doConsole = new Map(_logConsole)
+  _logConsole.clear()
   const partes = []
   const params = []
   lote.forEach((l, i) => {
@@ -494,6 +569,18 @@ async function gravarLogsPendentes () {
       await pool.query(
         `insert into wa_qr_log (nivel, msg, dados) values
          ('info','log: linhas do Baileys suprimidas (só o agregado vem pro banco)',$1::jsonb)`,
+        [JSON.stringify({ total, janelaMs: LOG_DB_FLUSH_MS, por })])
+    }
+    // ...e o que o libsignal grita no console sem passar por logger nenhum. Nível
+    // `warn` na linha do agregado (não `info`): é sinal de saúde da criptografia,
+    // e quem varre o log por warn/error tem que topar com ele.
+    if (doConsole.size) {
+      const por = {}
+      let total = 0
+      for (const [k, v] of doConsole) { por[k] = v; total += v }
+      await pool.query(
+        `insert into wa_qr_log (nivel, msg, dados) values
+         ('warn','log: console do libsignal (não passa pelo pino — só o agregado vem pro banco)',$1::jsonb)`,
         [JSON.stringify({ total, janelaMs: LOG_DB_FLUSH_MS, por })])
     }
     _logAvisouFalha = false
@@ -4366,6 +4453,11 @@ async function encerrar (sinal) {
 }
 
 if (require.main === module) {
+// A captura do console do libsignal entra AQUI, e só aqui: no worker de verdade.
+// Requerido por teste (`require.main !== module`) o console fica intacto — hook
+// global instalado por import é o tipo de coisa que quebra a suíte de alguém —
+// e o supervisor nem chega nesta linha, porque delega lá no topo do arquivo.
+capturarConsole()
 process.on('SIGTERM', () => { encerrar('SIGTERM').catch(() => process.exit(0)) })
 process.on('SIGINT', () => { encerrar('SIGINT').catch(() => process.exit(0)) })
 servidor.listen(PORT, () => {
@@ -4409,6 +4501,7 @@ servidor.listen(PORT, () => {
 
 // exposto só pro teste — ver o bloco acima
 module.exports = {
+  capturarConsole, contarConsole, _logConsole, CONSOLE_NIVEIS,
   BAILEYS_VERSAO, numeroAlternativo, TIPO_HIST,
   contasDesteWorker, MINHA_CONTA, contarContatoComFalha, contatosComFalha, DISJUNTOR_MIN_CONTATOS,
   contarQuedaPresa, esquecerQuedasPresas, quedasPresas, PRESA_AVISA_EM,

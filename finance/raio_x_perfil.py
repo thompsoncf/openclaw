@@ -142,6 +142,9 @@ _FUNIL_POR_PERFIL = {
         "escala_min": 240, "teto_avisos_dia": 5,
         "fu_proposta_dias": 3, "fu_toques_dias": "2,4,7,15", "fu_festa_dias": 30,
         "fu_teto_dia": 15,
+        # A TEMPERATURA, em horas e dias (migração 247). Quem vende festa decide
+        # rápido: 48h sem o cliente voltar já é esfriar. Ver finance/temperatura.py.
+        "temp_quente_h": 48, "temp_morno_dias": 7, "temp_frio_tentativas": 3,
     },
     "recorrente": {
         "janela_dias": "1,2,3,4,5", "janela_abre": time(8, 0), "janela_fecha": time(19, 0),
@@ -149,6 +152,9 @@ _FUNIL_POR_PERFIL = {
         "escala_min": 240, "teto_avisos_dia": 5,
         "fu_proposta_dias": 3, "fu_toques_dias": "2,4,7,15", "fu_festa_dias": None,
         "fu_teto_dia": 15,
+        # venda de mensalidade respira mais devagar que festa: o cliente some por
+        # uma semana e volta, e chamar isso de frio no 2º dia seria inventar perda
+        "temp_quente_h": 72, "temp_morno_dias": 14, "temp_frio_tentativas": 4,
     },
     # produto não tem funil nem vendedor (ver o docstring): nada a herdar.
     "produto": None,

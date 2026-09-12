@@ -662,6 +662,10 @@ def test_a_chave_de_ligar_saiu_da_regua_e_o_nicho_continua_valendo():
                 tem_follow_up=True,
                 # o bloco do modelo do ramo (11/09/2026) — aqui já no modelo
                 modelo={"itens": [], "colunas": ["Novo"], "fora": ["Fechado"]},
+                # a temperatura pelos fatos (12/09/2026): procedência e padrão do ramo
+                escolhidas_tpl=set(), padrao_tpl={"temp_quente_h": 48,
+                                                  "temp_morno_dias": 7,
+                                                  "temp_frio_tentativas": 3},
                 rot_ramo="eventos", janela_herda=True,
                 esc={"n": "", "u": "h", "ph": "4", "herda": True},
                 teto={"v": "", "ph": "5", "herda": True},
@@ -670,6 +674,8 @@ def test_a_chave_de_ligar_saiu_da_regua_e_o_nicho_continua_valendo():
                      "festa": {"v": "", "ph": "30", "herda": True, "tem": True},
                      "teto": {"v": "", "ph": "15", "herda": True}},
                 cfg=dict(fu._PADRAO, gatilhos_modo="off", cobranca_modo="off",
+                         temperatura_modo="off", temp_quente_h=48, temp_morno_dias=7,
+                         temp_frio_tentativas=3,
                          janela_abre=time(8), janela_fecha=time(19), teto_avisos_dia=5,
                          sem_resposta_min=120, bola_nossa_min=240, bola_cliente_min=4320,
                          escala_min=240, janela_dias="1,2,3,4,5,6"))

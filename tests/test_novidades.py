@@ -1016,3 +1016,38 @@ def test_o_aviso_da_fila_nao_fala_de_festa(pool):
 
 def test_reaplicar_o_aviso_da_fila_nao_duplica(pool):
     assert _fila_temp(pool)["id"] == _fila_temp(pool)["id"]
+
+
+# ---------------- 248: a temperatura pelos fatos (12/09/2026)
+
+def _temp_fato(pool):
+    return _aplica(pool, "248_novidade_temperatura_por_fato.sql", "temperatura-por-fato")
+
+
+def test_o_aviso_da_temperatura_chega_ao_vendedor(pool):
+    a = _temp_fato(pool)
+    assert set(a["pra_quem"]) == {"dono", "gestor", "vendedor"}
+    assert a["publico"] == "todos" and a["link"] == "/painel/prospeccao/regua"
+
+
+def test_o_corpo_avisa_que_ligar_reescreve_quase_tudo(pool):
+    """Ligar muda a temperatura de 289 dos 319 leads da Prime. Aviso que omite isso
+    entrega uma tela que amanheceu diferente sem explicação."""
+    corpo = _temp_fato(pool)["corpo"]
+    assert "reescreve de uma vez" in corpo
+    assert "ensaio" in corpo and "sem gravar nada" in corpo
+    assert "registrada no histórico" in corpo
+
+
+def test_o_corpo_diz_que_o_vendedor_continua_mandando(pool):
+    assert "vendedor continua mandando" in _temp_fato(pool)["corpo"]
+
+
+def test_o_aviso_da_temperatura_nao_fala_de_festa(pool):
+    a = _temp_fato(pool)
+    for palavra in ("festa", "buffet", "convidados"):
+        assert palavra not in (a["resumo"] + " " + a["corpo"]).lower(), palavra
+
+
+def test_reaplicar_o_aviso_da_temperatura_nao_duplica(pool):
+    assert _temp_fato(pool)["id"] == _temp_fato(pool)["id"]

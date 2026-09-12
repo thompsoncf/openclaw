@@ -7899,6 +7899,14 @@ def regua_pagina(request: Request):
         n_mov = c.execute("select count(*) from funil_movimentos where conta_id=%s",
                           (ctx["conta_id"],)).fetchone()[0]
         modelo = _modelo_do_ramo(c, ctx["conta_id"], perfil_chave)
+        # os limiares da temperatura (migração 247) vêm do módulo que os resolve
+        # com o padrão do ramo — a config da régua não conhece as colunas novas
+        try:
+            with c.transaction():
+                from finance import temperatura as _tmp
+                cfg_temp = _tmp.config(c, ctx["conta_id"])
+        except Exception:  # noqa: BLE001
+            cfg_temp = {"temperatura_modo": "off"}
     for e in linhas:
         e["n"] = n_por.get(e["chave"], 0)
         # o total é derivado, e mostrar derivado evita a conta de cabeça que faz o
@@ -7948,11 +7956,17 @@ def regua_pagina(request: Request):
                     "ph": str(padrao.get("fu_teto_dia") or 15),
                     "herda": "fu_teto_dia" not in escolhidas}}
     janela_herda = not ({"janela_dias", "janela_abre", "janela_fecha"} & escolhidas)
+    cfg = dict(cfg, **{k: v for k, v in cfg_temp.items() if k.startswith("temp")})
+    escolhidas |= {k for k in ("temp_quente_h", "temp_morno_dias", "temp_frio_tentativas")
+                   if cfg_temp.get("_escolhidas_temp") and k in cfg_temp["_escolhidas_temp"]}
+    padrao = dict(padrao, **{k: _rxp.funil_padrao(perfil_chave).get(k)
+                             for k in ("temp_quente_h", "temp_morno_dias", "temp_frio_tentativas")})
     return _render("prospeccao_regua", request, titulo="Régua do funil",
                    secao_ativa="prospeccao", nav_ativo="regua", gerencia=True,
                    etapas=linhas, cfg=cfg, conv=conv, eventos=sorted(_fr.EVENTOS.items()),
                    esc=esc, teto=teto, fup=fup, janela_herda=janela_herda, rot_ramo=rot_ramo,
                    motivos_conta=motivos_conta, modelo=modelo,
+                   escolhidas_tpl=escolhidas, padrao_tpl=padrao,
                    unidades=[(u, r) for u, r, _m in _UNIDADES],
                    dias_on=_fr._dias(cfg), n_mov=n_mov,
                    aviso=request.session.pop("prosp_aviso", None))
@@ -7983,6 +7997,13 @@ async def regua_config(request: Request):
         # `coalesce(%s, <coluna>)`, que queria dizer "em branco mantém o que estava"
         # — e com isso não havia jeito nenhum de VOLTAR ao padrão depois de digitar
         # um número uma vez. Agora apagar o campo É o botão de voltar ao padrão.
+        tmodo = (f.get("temperatura_modo") or "").strip()
+        c.execute("""update funil_regua set temperatura_modo=%s, temp_quente_h=%s,
+                        temp_morno_dias=%s, temp_frio_tentativas=%s
+                      where conta_id=%s""",
+                  (tmodo if tmodo in ("off", "observando", "ligado") else "off",
+                   _inteiro(f.get("temp_quente_h")), _inteiro(f.get("temp_morno_dias")),
+                   _inteiro(f.get("temp_frio_tentativas")), ctx["conta_id"]))
         fila_modo = (f.get("fila_modo") or "").strip()
         c.execute("update funil_regua set fila_modo=%s where conta_id=%s",
                   (fila_modo if fila_modo in ("prazo", "temperatura") else "prazo",
@@ -15856,6 +15877,36 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <input class="fld" name="fu_festa_dias" value="{{ fup.festa.v }}" placeholder="{{ fup.festa.ph }}">
       </div>
       {% endif %}
+      <div>
+        <label class="lbl">Temperatura pelos fatos da conversa</label>
+        <select class="rg-sel" name="temperatura_modo" style="width:100%">
+          <option value="off" {% if cfg.temperatura_modo not in ('observando','ligado') %}selected{% endif %}>desligada — a de hoje</option>
+          <option value="observando" {% if cfg.temperatura_modo == 'observando' %}selected{% endif %}>em ensaio — calcula e mostra, não grava</option>
+          <option value="ligado" {% if cfg.temperatura_modo == 'ligado' %}selected{% endif %}>ligada — grava, com histórico</option>
+        </select>
+        <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Quente = o cliente
+          falou há pouco. Frio = não respondeu às tentativas, ou sumiu.
+          <b>Hoje todo lead é carimbado quente ao entrar no funil e nada esfria.</b>
+          Comece pelo ensaio.</p>
+      </div>
+      <div>
+        <label class="lbl lblp">Horas desde a fala do cliente que ainda é quente
+          <span class="rg-proc {% if 'temp_quente_h' in escolhidas_tpl %}seu{% endif %}">{% if 'temp_quente_h' in escolhidas_tpl %}você{% else %}padrão {{ rot_ramo }}{% endif %}</span></label>
+        <input class="fld" name="temp_quente_h" value="{{ cfg.temp_quente_h if 'temp_quente_h' in escolhidas_tpl else '' }}"
+               placeholder="{{ padrao_tpl.temp_quente_h or 48 }}" inputmode="numeric">
+      </div>
+      <div>
+        <label class="lbl lblp">Dias sem o cliente falar até esfriar
+          <span class="rg-proc {% if 'temp_morno_dias' in escolhidas_tpl %}seu{% endif %}">{% if 'temp_morno_dias' in escolhidas_tpl %}você{% else %}padrão {{ rot_ramo }}{% endif %}</span></label>
+        <input class="fld" name="temp_morno_dias" value="{{ cfg.temp_morno_dias if 'temp_morno_dias' in escolhidas_tpl else '' }}"
+               placeholder="{{ padrao_tpl.temp_morno_dias or 7 }}" inputmode="numeric">
+      </div>
+      <div>
+        <label class="lbl lblp">Tentativas sem resposta que esfriam
+          <span class="rg-proc {% if 'temp_frio_tentativas' in escolhidas_tpl %}seu{% endif %}">{% if 'temp_frio_tentativas' in escolhidas_tpl %}você{% else %}padrão {{ rot_ramo }}{% endif %}</span></label>
+        <input class="fld" name="temp_frio_tentativas" value="{{ cfg.temp_frio_tentativas if 'temp_frio_tentativas' in escolhidas_tpl else '' }}"
+               placeholder="{{ padrao_tpl.temp_frio_tentativas or 3 }}" inputmode="numeric">
+      </div>
       <div>
         <label class="lbl">Ordem da fila do vendedor</label>
         <select class="rg-sel" name="fila_modo" style="width:100%">

@@ -302,6 +302,21 @@ def _iniciar_poller_email() -> None:
                 log.info("poller: ciclo #%d — agenda do funil falhou: %s: %s",
                          ciclo, type(e).__name__, e)
             try:
+                # A temperatura pelos FATOS da conversa (migração 247). Existe
+                # porque o campo saturou: 281 de 284 leads da Prime estavam
+                # "quente", carimbados na promoção e nunca esfriados. Inerte por
+                # padrão, e o modo 'observando' calcula sem escrever.
+                from finance import temperatura as _temp
+                _t = _temp.rodar(pool)
+                if _t["contas"]:
+                    log.info("poller: ciclo #%d — temperatura: %d conta(s), "
+                             "%d avaliado(s), %d mudado(s), %d em ensaio",
+                             ciclo, _t["contas"], _t["avaliados"], _t["mudados"],
+                             _t["ensaios"])
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — temperatura falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
+            try:
                 # O follow-up: sincroniza a próxima ação proposta e cobra quem
                 # deixou vencer. Inerte por padrão — só entra em conta que ligou
                 # (follow_up_modo <> 'off'), e nasce desligada.

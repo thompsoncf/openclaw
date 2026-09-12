@@ -67,6 +67,9 @@ AGORA = _proxima_quarta_12h()
 _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text, contato text,
   status text default 'novo', estagio text default 'lead', orcamento_id bigint,
+  -- a temperatura existe no banco desde sempre; passou a ser LIDA aqui em
+  -- 12/09/2026, quando a fila do vendedor ganhou os seis níveis do § 7
+  temperatura text,
   vendedor_id bigint, evento_em date, evento_tipo text, evento_convidados int,
   proximo_contato_em timestamptz, atualizado_em timestamptz default now(),
   criado_em timestamptz default now());
@@ -96,6 +99,8 @@ create table funil_regua (conta_id bigint primary key,
   janela_fecha time default '19:00', sem_resposta_min int default 120,
   bola_nossa_min int default 240, bola_cliente_min int default 4320,
   escala_min int default 240, teto_avisos_dia int default 5,
+  -- a ordem da fila (migração 245): 'prazo' é o que a tela sempre fez
+  fila_modo text not null default 'prazo',
   -- a coluna existe na 177; o stub não a tinha porque nada aqui escrevia
   -- na tabela até a aba do Follow-up ganhar o interruptor (07/09/2026)
   atualizado_em timestamptz not null default now());
@@ -1126,3 +1131,69 @@ def test_a_lista_de_tarefas_chega_na_linha_do_lead(c):
     assert linha["toques"][0]["feito"] is True and linha["toques"][1]["feito"] is False
     c.execute("update funil_etapas set toques_dias=null where conta_id=%s and chave='contatado'",
               (CONTA,))
+
+
+# ══════════════════════════════ a fila de prioridade (§ 7 do Projeto Adaptado)
+# A temperatura existia no banco desde sempre e NÃO entrava na ordem da fila —
+# `follow_up.py` e `painel_follow_up.py` tinham zero ocorrências da palavra. Estes
+# testes fixam os seis níveis e, principalmente, que ligar a ordem nova é escolha.
+
+def _na_fila(temp="frio", bola="aguardando cliente", estado="andamento", **extra):
+    return dict({"temperatura": temp, "bola": bola, "estado": estado,
+                 "faltam": None, "atraso_h": 0}, **extra)
+
+
+def test_os_seis_niveis_do_documento():
+    """A ordem dos `if` É a regra do § 7, e cada linha aqui é um nível dele."""
+    assert fu.prioridade(_na_fila("quente", "aguardando vendedor")) == 1
+    assert fu.prioridade(_na_fila("frio", "aguardando cliente", "critico")) == 2
+    assert fu.prioridade(_na_fila("quente", "aguardando cliente", "hoje")) == 3
+    assert fu.prioridade(_na_fila("frio", "aguardando vendedor")) == 4
+    assert fu.prioridade(_na_fila("morno", "aguardando cliente", "hoje")) == 5
+    assert fu.prioridade(_na_fila("frio", "aguardando cliente")) == 6
+
+
+def test_um_lead_aparece_num_nivel_so():
+    """Quente, esperando a gente E com tarefa atrasada é UM lead. Se caísse no 1º e
+    no 2º, a fila mostraria a mesma pessoa duas vezes e o vendedor perderia a conta
+    de quantos realmente faltam."""
+    quente_e_atrasado = _na_fila("quente", "aguardando vendedor", "critico")
+    assert fu.prioridade(quente_e_atrasado) == 1
+
+
+def test_lead_sem_temperatura_nao_quebra_a_fila():
+    """`temperatura` pode vir vazia em lead antigo. A consulta já devolve 'frio' por
+    coalesce, mas a função é pura e recebe o que vier."""
+    assert fu.prioridade({"bola": "aguardando cliente", "estado": "andamento"}) == 6
+    assert fu.prioridade({}) == 6
+
+
+def test_a_ordem_nova_nasce_desligada():
+    """Mudar a ordem da fila muda o que três pessoas veem primeiro de manhã."""
+    quente = _na_fila("quente", "aguardando vendedor", "andamento")
+    quente["prioridade"] = 1
+    frio_critico = _na_fila("frio", "aguardando cliente", "critico")
+    frio_critico["prioridade"] = 2
+    # sem ligar: o estado manda, e 'critico' vem antes de 'andamento'
+    assert [x["temperatura"] for x in fu.ordenar([quente, frio_critico])] == ["frio", "quente"]
+    # ligada: o quente esperando a gente sobe
+    assert [x["temperatura"] for x in
+            fu.ordenar([quente, frio_critico], por_temperatura=True)] == ["quente", "frio"]
+
+
+def test_dentro_do_nivel_a_ordem_antiga_desempata():
+    """Sem isto o 1º nível viraria uma lista de quentes em ordem aleatória — a fila
+    trocaria um problema por outro."""
+    a = _na_fila("quente", "aguardando vendedor", "critico", faltam=30); a["prioridade"] = 1
+    b = _na_fila("quente", "aguardando vendedor", "critico", faltam=3); b["prioridade"] = 1
+    assert [x["faltam"] for x in fu.ordenar([a, b], por_temperatura=True)] == [3, 30]
+
+
+def test_a_temperatura_nao_move_ninguem_de_etapa():
+    """O documento repete três vezes: "a temperatura não altera a etapa do funil;
+    ela altera a prioridade de atendimento". `prioridade` é função de ORDENAÇÃO —
+    se um dia alguém puser um `status` aqui dentro, este teste cai."""
+    import inspect
+    fonte = inspect.getsource(fu.prioridade)
+    assert "status" not in fonte, "a prioridade encostou na etapa do lead"
+    assert "update" not in fonte.lower()

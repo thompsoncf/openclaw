@@ -87,7 +87,7 @@ _DEGRAU_TXT = {
 ADIAMENTOS_ATE_MOTIVO = 3
 
 _PADRAO = {"follow_up_modo": "off", "fu_proposta_dias": 3, "fu_toques": (2, 4, 7, 15),
-           "fu_festa_dias": 30, "fu_teto_dia": 15}
+           "fu_festa_dias": 30, "fu_teto_dia": 15, "fila_modo": "prazo"}
 
 
 # ------------------------------------------------------------------ config
@@ -113,7 +113,8 @@ def config(c, conta_id: int) -> dict:
     """
     base = fr.config(c, conta_id)
     r = c.execute(
-        """select follow_up_modo, fu_proposta_dias, fu_toques_dias, fu_festa_dias, fu_teto_dia
+        """select follow_up_modo, fu_proposta_dias, fu_toques_dias, fu_festa_dias, fu_teto_dia,
+                  coalesce(fila_modo, 'prazo')
              from funil_regua where conta_id=%s""", (conta_id,)).fetchone()
     if not r:
         return dict(base, **_PADRAO)
@@ -132,6 +133,9 @@ def config(c, conta_id: int) -> dict:
     out.setdefault("fu_teto_dia", _PADRAO["fu_teto_dia"])
     out["fu_festa_dias"] = out.get("fu_festa_dias")
     out["fu_toques"] = _escada(out.get("fu_toques_dias"))
+    # a ordem da fila (migração 245). Não entra em `_escolhidas`: modo não se herda
+    # do ramo — 'prazo' é o que a conta já faz, não "ainda não escolheu".
+    out["fila_modo"] = r[5] if r[5] in ("prazo", "temperatura") else "prazo"
     return out
 
 
@@ -304,6 +308,7 @@ adiam as (
    group by fm.prospeccao_id)
 select p.id, p.status, p.vendedor_id,
        coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'Lead'),
+       coalesce(nullif(p.temperatura,''), 'frio') as temperatura,
        p.evento_em, p.evento_tipo, p.evento_convidados, p.criado_em,
        -- desde quando está NESTA etapa, e quantas mensagens nossas saíram depois
        -- disso: é o par que a escada ancorada (migração 233) precisa, e vem do
@@ -356,7 +361,7 @@ def leads(c, conta_id: int, perfil: dict | None = None,
     hoje = agora.date()
     out = []
     for r in c.execute(_SQL_LEADS, {"conta": conta_id}).fetchall():
-        (lid, status, vend, quem, evento_em, ev_tipo, ev_conv, criado,
+        (lid, status, vend, quem, temperatura, evento_em, ev_tipo, ev_conv, criado,
          na_etapa, saiu_na_etapa,
          ult_in, ult_out, tent, m_prazo, m_acao, m_em, adiados, vend_nome, m_por,
          msg_txt, msg_em, msg_dir, msg_id, visto, conversa_id, canal) = r
@@ -378,7 +383,8 @@ def leads(c, conta_id: int, perfil: dict | None = None,
         e = estado_de(prazo, ult, agora, sem_acao)
         out.append({
             "id": lid, "status": status, "vendedor_id": vend, "vendedor": vend_nome or "sem dono",
-            "quem": quem, "evento_em": evento_em, "evento_tipo": ev_tipo, "convidados": ev_conv,
+            "quem": quem, "temperatura": temperatura,
+            "evento_em": evento_em, "evento_tipo": ev_tipo, "convidados": ev_conv,
             "ult_in": ult_in, "ult_out": ult_out, "ult": ult, "tentativas": int(tent or 0),
             "prazo": None if sem_acao else prazo, "acao": acao, "na_mao": na_mao,
             "adiados": int(adiados or 0), "adiado_por": m_por,
@@ -402,16 +408,90 @@ def leads(c, conta_id: int, perfil: dict | None = None,
                      "aba": ("emails" if canal == "email" else "conversas")}
                     if msg_em else None),
         })
+        out[-1]["prioridade"] = prioridade(out[-1])
     return out
 
 
-def ordenar(linhas: list[dict]) -> list[dict]:
-    """A ordem da fila: primeiro o estado mais urgente, depois a festa mais
-    próxima (quem tem data antes de quem não tem), depois o mais atrasado."""
+# ------------------------------------------------------------ a fila de prioridade
+# "QUEM EU PRECISO ATENDER AGORA?" — § 7 do Projeto Adaptado da Prime (12/09/2026).
+#
+# A TEMPERATURA JÁ EXISTIA E NÃO VALIA NADA. `prospeccao.temperatura` está no banco
+# desde sempre e aparece como pílula colorida no card do funil, mas até hoje este
+# módulo e `web/painel_follow_up.py` tinham ZERO ocorrências da palavra: ela não
+# entrava na ordem da fila do vendedor. Era enfeite.
+#
+# O QUE O DOCUMENTO PEDE, NA ORDEM DELE
+#   1º  quentes aguardando ação do vendedor
+#   2º  tarefas atrasadas
+#   3º  quentes com a próxima ação vencendo
+#   4º  responderam e aguardam retorno da equipe
+#   5º  mornos com possibilidade de avanço
+#   6º  o resto
+#
+# E A REGRA QUE O DOCUMENTO REPETE TRÊS VEZES: "a temperatura não altera a etapa do
+# funil; ela altera a prioridade de atendimento". Por isso isto é uma função de
+# ORDENAÇÃO e nada mais — nenhum lead muda de coluna por ser quente.
+#
+# PURA, SEM BANCO: a fila é a tela que o vendedor abre todo dia, e uma regra de
+# prioridade que só dá pra conferir com o banco montado é uma regra que ninguém
+# confere. Recebe o dicionário que `leads()` já monta.
+PRIORIDADES = (
+    (1, "quente esperando você"),
+    (2, "tarefa atrasada"),
+    (3, "quente vencendo"),
+    (4, "respondeu e espera"),
+    (5, "morno com chance"),
+    (6, "no fluxo"),
+)
+ROTULO_PRIORIDADE = dict(PRIORIDADES)
+
+#: estados que contam como "tarefa atrasada" (2º nível)
+_ATRASADOS = ("critico", "atrasado")
+
+
+def prioridade(lead: dict) -> int:
+    """Em qual dos seis níveis do § 7 este lead cai. 1 é o mais urgente.
+
+    A ordem dos `if` É a regra: quem cai no 1º não é reavaliado pro 2º. Um quente
+    esperando resposta há três dias e com tarefa atrasada é UM lead, e ele aparece
+    uma vez só, no topo.
+    """
+    quente = lead.get("temperatura") == "quente"
+    espera_nos = lead.get("bola") == "aguardando vendedor"
+    estado = lead.get("estado")
+    if quente and espera_nos:
+        return 1
+    if estado in _ATRASADOS:
+        return 2
+    if quente and estado in ("hoje", "atrasado", "critico"):
+        return 3
+    if espera_nos:
+        return 4
+    if lead.get("temperatura") == "morno" and estado in ("hoje", "agendado"):
+        return 5
+    return 6
+
+
+def ordenar(linhas: list[dict], por_temperatura: bool = False) -> list[dict]:
+    """A ordem da fila.
+
+    `por_temperatura=False` (o padrão) é a ordem de sempre: estado mais urgente,
+    festa mais próxima, mais atrasado. `True` põe os seis níveis do § 7 na frente
+    dela — e a ordem antiga vira o critério de desempate DENTRO de cada nível, que
+    é o que impede a fila de virar uma lista de quentes em ordem aleatória.
+
+    Nasce desligado de propósito: mudar a ordem da fila muda o que três pessoas
+    veem primeiro todo dia de manhã. Quem liga é o dono, na Régua.
+    """
     pos = {e: i for i, e in enumerate(ESTADOS)}
-    return sorted(linhas, key=lambda x: (pos.get(x["estado"], 9),
-                                         x["faltam"] if x["faltam"] is not None else 9999,
-                                         -x["atraso_h"]))
+
+    def chave(x):
+        antiga = (pos.get(x["estado"], 9),
+                  x["faltam"] if x["faltam"] is not None else 9999,
+                  -x["atraso_h"])
+        return ((x.get("prioridade") or 6,) + antiga) if por_temperatura else antiga
+
+    return sorted(linhas, key=chave)
 
 
 def resumo(linhas: list[dict]) -> dict:

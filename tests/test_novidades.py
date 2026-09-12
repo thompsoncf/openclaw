@@ -984,3 +984,35 @@ def test_o_corpo_diz_o_que_acontece_com_o_lead_e_com_a_coluna(pool):
 
 def test_reaplicar_o_aviso_de_fundir_nao_duplica(pool):
     assert _fundir(pool)["id"] == _fundir(pool)["id"]
+
+
+# ---------------- 246: a fila por temperatura (12/09/2026)
+
+def _fila_temp(pool):
+    return _aplica(pool, "246_novidade_fila_por_temperatura.sql", "fila-por-temperatura")
+
+
+def test_o_vendedor_recebe_o_aviso_da_fila_porque_a_fila_e_dele(pool):
+    """§5 diz que o vendedor só recebe o que muda a rotina DELE — e a ordem da fila
+    que ele abre todo dia é exatamente isso. Ligar continua sendo de dono/gestor."""
+    a = _fila_temp(pool)
+    assert set(a["pra_quem"]) == {"dono", "gestor", "vendedor"}
+    assert a["link"] == "/painel/follow-up" and a["publico"] == "todos"
+
+
+def test_o_corpo_repete_que_temperatura_nao_muda_etapa(pool):
+    """O documento do cliente repete isso três vezes. O aviso não pode deixar a
+    equipe achar que ficar quente promove o lead sozinho."""
+    corpo = _fila_temp(pool)["corpo"]
+    assert "não muda a etapa" in corpo
+    assert "até alguém ligar" in corpo
+
+
+def test_o_aviso_da_fila_nao_fala_de_festa(pool):
+    a = _fila_temp(pool)
+    for palavra in ("festa", "buffet", "convidados"):
+        assert palavra not in (a["resumo"] + " " + a["corpo"]).lower(), palavra
+
+
+def test_reaplicar_o_aviso_da_fila_nao_duplica(pool):
+    assert _fila_temp(pool)["id"] == _fila_temp(pool)["id"]

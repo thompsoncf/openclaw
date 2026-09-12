@@ -7983,6 +7983,10 @@ async def regua_config(request: Request):
         # `coalesce(%s, <coluna>)`, que queria dizer "em branco mantém o que estava"
         # — e com isso não havia jeito nenhum de VOLTAR ao padrão depois de digitar
         # um número uma vez. Agora apagar o campo É o botão de voltar ao padrão.
+        fila_modo = (f.get("fila_modo") or "").strip()
+        c.execute("update funil_regua set fila_modo=%s where conta_id=%s",
+                  (fila_modo if fila_modo in ("prazo", "temperatura") else "prazo",
+                   ctx["conta_id"]))
         c.execute("""update funil_regua set gatilhos_modo=%s, cobranca_modo=%s, teto_modo=%s,
                        janela_dias=%s, janela_abre=%s, janela_fecha=%s,
                        sem_resposta_min=%s, bola_nossa_min=%s, bola_cliente_min=%s,
@@ -15852,6 +15856,16 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <input class="fld" name="fu_festa_dias" value="{{ fup.festa.v }}" placeholder="{{ fup.festa.ph }}">
       </div>
       {% endif %}
+      <div>
+        <label class="lbl">Ordem da fila do vendedor</label>
+        <select class="rg-sel" name="fila_modo" style="width:100%">
+          <option value="prazo" {% if cfg.fila_modo != 'temperatura' %}selected{% endif %}>por prazo — a de sempre</option>
+          <option value="temperatura" {% if cfg.fila_modo == 'temperatura' %}selected{% endif %}>por temperatura — quente primeiro</option>
+        </select>
+        <p class="mut" style="font-size:.73rem;margin:.3rem 0 0">Quente esperando você ·
+          tarefa atrasada · quente vencendo · respondeu e espera · morno com chance · o resto.
+          <b>Muda o que a equipe vê primeiro de manhã.</b></p>
+      </div>
       <div>
         <label class="lbl lblp">Teto de leads cobrados por vendedor / dia
           <span class="rg-proc {% if not fup.teto.herda %}seu{% endif %}">{% if fup.teto.herda %}padrão {{ rot_ramo }}{% else %}você{% endif %}</span></label>

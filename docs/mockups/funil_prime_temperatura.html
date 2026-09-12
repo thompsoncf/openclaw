@@ -1,0 +1,448 @@
+<title>O funil Prime com temperatura</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;700&display=swap">
+
+<style>
+/* ═══════════════════════════ tokens da PÁGINA (segue o tema do leitor) */
+:root{
+  --ground:#F4F6F4;
+  --surface:#FFFFFF;
+  --ink:#171C19;
+  --ink-soft:#3C4640;
+  --muted:#626D66;
+  --line:#DBE1DA;
+  --line-strong:#BFC9BF;
+  --ok:#2C7A57;
+  --ok-wash:#E5F1EA;
+  --novo:#8A5E12;
+  --novo-wash:#F8EEDA;
+  --f-sans:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --f-serif:"Source Serif 4",Georgia,serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#101410;--surface:#181D19;--ink:#E5EBE6;--ink-soft:#C0CAC3;
+    --muted:#8B968F;--line:#272E28;--line-strong:#38423A;
+    --ok:#67C398;--ok-wash:#152E22;--novo:#D6A24F;--novo-wash:#31270E;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#101410;--surface:#181D19;--ink:#E5EBE6;--ink-soft:#C0CAC3;
+  --muted:#8B968F;--line:#272E28;--line-strong:#38423A;
+  --ok:#67C398;--ok-wash:#152E22;--novo:#D6A24F;--novo-wash:#31270E;
+}
+
+/* ═══════════════════════════ tokens do PAINEL (sempre escuro: é o produto) */
+.tela{
+  --bg:#0f1720;--card:#16202b;--card2:#1c2835;--borda:#26323f;
+  --txt:#e6edf3;--txt-mut:#8b9bab;
+  --ambar:#e0b25a;--coral:#f0917f;--verde:#4ec98a;--azul:#5b9bd5;--roxo:#c9a3e0;
+  --quente-bg:#3a1a1a;--quente-fg:#f0917f;
+  --morno-bg:#2e2713;--morno-fg:#e0b25a;
+  --frio-bg:#14273a;--frio-fg:#7bb8e6;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--ground);color:var(--ink);font-family:var(--f-sans);
+  font-size:16px;line-height:1.6;padding-inline:20px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:960px;margin:0 auto;padding-block:clamp(2.2rem,5vw,3.8rem) 4rem}
+
+h1,h2,h3{margin:0;font-family:var(--f-serif);font-weight:600;text-wrap:balance}
+h1{font-size:clamp(2rem,5vw,2.9rem);line-height:1.1;letter-spacing:-.015em}
+h2{font-size:clamp(1.3rem,3vw,1.6rem);line-height:1.2}
+h3{font-size:1.02rem;font-family:var(--f-sans);font-weight:700}
+p{margin:0}
+.lede{font-size:1.1rem;color:var(--ink-soft);max-width:62ch}
+.eyebrow{font-family:var(--f-mono);font-size:.68rem;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.mut{color:var(--muted)}
+.mono{font-family:var(--f-mono);font-size:.84em}
+
+header{border-bottom:2px solid var(--line-strong);padding-bottom:1.6rem;
+  display:flex;flex-direction:column;gap:.9rem}
+.hlinha{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:baseline}
+
+section{margin-top:clamp(2.6rem,6vw,4rem)}
+.shead{display:flex;flex-direction:column;gap:.4rem;margin-bottom:1.3rem}
+.shead p{color:var(--muted);max-width:64ch;font-size:.95rem}
+
+/* ═══════════════════════════ moldura de tela */
+.tela{background:var(--bg);border:1px solid var(--borda);border-radius:10px;
+  padding:1.1rem;color:var(--txt);overflow-x:auto;
+  box-shadow:0 14px 40px -28px rgba(0,0,0,.75)}
+.tela .cap{font-family:var(--f-mono);font-size:.64rem;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--txt-mut);margin-bottom:.85rem;
+  display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+
+/* ═══════════════════════════ quadro kanban */
+.kb{display:flex;gap:.55rem;min-width:660px}
+.kbc{flex:1;min-width:0;background:var(--card);border:1px solid var(--borda);
+  border-radius:7px;padding:.5rem .5rem .6rem}
+.kbc > h4{margin:0 0 .5rem;font-size:.74rem;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--txt-mut);display:flex;justify-content:space-between;gap:.4rem}
+.kbc > h4 b{color:var(--txt);font-variant-numeric:tabular-nums}
+.kbc.nova{border-color:var(--verde);box-shadow:inset 0 0 0 1px rgba(78,201,138,.2)}
+.kbc.fora{border-style:dashed;opacity:.62}
+.mini{background:var(--card2);border:1px solid var(--borda);border-radius:5px;
+  padding:.36rem .45rem;margin-bottom:.32rem;font-size:.7rem;line-height:1.35;
+  display:flex;align-items:center;gap:.35rem}
+.dot{width:6px;height:6px;border-radius:50%;flex:0 0 auto}
+.dot.q{background:var(--coral)} .dot.m{background:var(--ambar)} .dot.f{background:var(--azul)}
+
+/* ═══════════════════════════ card do lead */
+.lead{background:var(--card);border:1px solid var(--borda);border-radius:9px;
+  padding:.85rem .95rem;max-width:420px;display:flex;flex-direction:column;gap:.5rem}
+.lead .topo{display:flex;align-items:center;justify-content:space-between;gap:.6rem}
+.lead .nome{font-size:1rem;font-weight:700;letter-spacing:.01em}
+.pill{font-family:var(--f-mono);font-size:.62rem;font-weight:700;letter-spacing:.07em;
+  padding:.22rem .5rem;border-radius:4px;white-space:nowrap}
+.pill.q{background:var(--quente-bg);color:var(--quente-fg)}
+.pill.m{background:var(--morno-bg);color:var(--morno-fg)}
+.pill.f{background:var(--frio-bg);color:var(--frio-fg)}
+.linhas{display:flex;flex-direction:column;gap:.2rem;font-size:.78rem;color:var(--txt-mut)}
+.linhas b{color:var(--txt);font-weight:600}
+.acao{display:flex;align-items:center;gap:.45rem;background:var(--card2);
+  border:1px solid var(--borda);border-left:2px solid var(--verde);
+  border-radius:5px;padding:.4rem .55rem;font-size:.78rem}
+.acao .lbl{font-family:var(--f-mono);font-size:.6rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--txt-mut)}
+.faixa{display:flex;align-items:center;gap:.4rem;font-size:.72rem;
+  background:#3a2a12;color:var(--ambar);border-radius:5px;padding:.34rem .5rem}
+.faixa.eq{background:#12293a;color:var(--azul)}
+
+/* ═══════════════════════════ fila */
+.fila{display:flex;flex-direction:column;gap:.3rem;counter-reset:f}
+.fl{display:flex;align-items:center;gap:.6rem;background:var(--card);
+  border:1px solid var(--borda);border-radius:6px;padding:.45rem .6rem;font-size:.8rem}
+.fl .n{font-family:var(--f-mono);font-size:.68rem;font-weight:700;color:var(--txt-mut);
+  width:1.2rem;flex:0 0 auto;text-align:right}
+.fl .txt{flex:1;min-width:0}
+.fl .qt{font-family:var(--f-mono);font-size:.72rem;color:var(--txt-mut);
+  font-variant-numeric:tabular-nums}
+.fl.top{border-left:2px solid var(--coral)}
+
+/* ═══════════════════════════ teto */
+.regua{display:flex;gap:2px;margin:.6rem 0 .4rem}
+.dia{flex:1;height:30px;border-radius:3px;background:var(--card2);
+  display:grid;place-items:center;font-family:var(--f-mono);font-size:.6rem;color:var(--txt-mut)}
+.dia.av{background:#3a2a12;color:var(--ambar)}
+.dia.vc{background:#3a1a1a;color:var(--coral)}
+.per{display:flex;gap:.5rem;font-size:.7rem;color:var(--txt-mut);flex-wrap:wrap}
+.per span{font-family:var(--f-mono)}
+
+/* ═══════════════════════════ mapa pronto × novo */
+.mapa{display:flex;flex-direction:column;gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.it{background:var(--surface);padding:.75rem .9rem;display:grid;
+  grid-template-columns:2.2rem 1fr auto;gap:.3rem .85rem;align-items:baseline}
+@media (max-width:600px){.it{grid-template-columns:2.2rem 1fr}.it .tag{grid-column:2}}
+.it .s{font-family:var(--f-mono);font-size:.7rem;color:var(--muted);font-weight:700}
+.it .c{min-width:0}
+.it .c b{font-size:.93rem}
+.it .c p{font-size:.85rem;color:var(--muted);margin-top:.1rem}
+.tag{font-family:var(--f-mono);font-size:.62rem;font-weight:700;letter-spacing:.07em;
+  text-transform:uppercase;padding:.22rem .48rem;border-radius:4px;white-space:nowrap}
+.tag.pronto{background:var(--ok-wash);color:var(--ok)}
+.tag.novo{background:var(--novo-wash);color:var(--novo)}
+.tag.meio{background:transparent;color:var(--muted);border:1px solid var(--line-strong)}
+
+/* ═══════════════════════════ decisão */
+.opcoes{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1.2rem}
+@media (max-width:700px){.opcoes{grid-template-columns:1fr}}
+.op{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:1rem 1.1rem;
+  display:flex;flex-direction:column;gap:.5rem}
+.op.rec{border-color:var(--ok);box-shadow:inset 3px 0 0 var(--ok)}
+.op .marca{font-family:var(--f-mono);font-size:.62rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted)}
+.op.rec .marca{color:var(--ok)}
+.op ul{margin:.1rem 0 0;padding-left:1.05rem;font-size:.87rem;color:var(--ink-soft)}
+.op li{margin-bottom:.25rem}
+
+.nota{border-left:3px solid var(--ok);background:var(--surface);padding:.85rem 1.05rem;
+  border-radius:0 6px 6px 0;font-size:.92rem;color:var(--ink-soft);margin-top:1.2rem}
+.nota.alerta{border-left-color:var(--novo)}
+
+footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
+  color:var(--muted);font-size:.84rem;display:flex;flex-wrap:wrap;gap:.4rem 1.4rem}
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="hlinha">
+    <span class="eyebrow">Prime Eventos · conta 34</span>
+    <span class="eyebrow">Mockup para aprovação · 12/09/2026</span>
+  </div>
+  <h1>O funil Prime com temperatura</h1>
+  <p class="lede">O projeto adaptado pede três informações independentes em cada
+  lead: <b>onde ele está</b> (etapa), <b>o quanto ele quer comprar</b> (temperatura)
+  e <b>o que fazer agora</b> (próxima ação). Metade disso já está no ar. Este
+  documento mostra o que muda na tela, o que é novo de verdade, e a decisão que
+  depende de você.</p>
+</header>
+
+<!-- ═══════════════════════════════ 1. a decisão -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Antes de tudo</span>
+    <h2>O documento pede uma coluna que nós tínhamos separado</h2>
+    <p>Na semana passada você aprovou seis colunas, com <b>Agendado Visita</b> e
+    <b>Proposta</b> separadas. O projeto adaptado pede <b>NEGOCIAÇÃO</b>, uma coluna
+    só, que absorve visita, proposta, sinal e contrato (§ 1 e § 4).</p>
+  </div>
+
+  <div class="opcoes">
+    <div class="op rec">
+      <span class="marca">Minha recomendação · 6 colunas</span>
+      <h3>Manter Agendado Visita e Proposta</h3>
+      <ul>
+        <li><b>14 leads</b> estão em Agendado Visita e <b>20</b> em Proposta — são dois momentos diferentes da venda.</li>
+        <li>"Visita marcada" e "orçamento enviado" pedem ações diferentes do vendedor.</li>
+        <li>O relatório de conversão por etapa (§ 13) fica mais fino: dá pra ver onde a venda trava.</li>
+        <li>A temperatura já dá a priorização que o documento quer, sem fundir as colunas.</li>
+      </ul>
+    </div>
+    <div class="op">
+      <span class="marca">Como o documento pede · 5 colunas</span>
+      <h3>Fundir tudo em Negociação</h3>
+      <ul>
+        <li>Quadro mais curto, menos arrasto de card.</li>
+        <li>Bate exatamente com o texto que o cliente escreveu.</li>
+        <li><b>Custo:</b> os 34 leads das duas colunas viram um monte só, e "conversão de visita para proposta" deixa de existir.</li>
+        <li>Reversível, mas mexer em coluna com lead dentro é sempre ida e volta.</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="nota"><b>Dá pra ter as duas coisas.</b> A coluna <b>Proposta</b> pode ser
+  renomeada para <b>Negociação</b> — o vocabulário do documento — mantendo
+  <b>Agendado Visita</b> como a etapa anterior. O cliente lê o nome que pediu, e
+  você não perde o degrau que mostra onde a venda emperra. É o que está desenhado
+  abaixo.</p>
+</section>
+
+<!-- ═══════════════════════════════ 2. o quadro -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">§ 1 e § 15 · o quadro</span>
+    <h2>Seis colunas, e o fechado fora</h2>
+    <p>Os números são os leads reais de hoje. A cor do ponto em cada card é a
+    temperatura — ela vive <i>dentro</i> da coluna, não cria coluna nova.</p>
+  </div>
+
+  <div class="tela">
+    <div class="cap"><span>Painel › Prospecção › Funil</span><span>340 leads</span></div>
+    <div class="kb">
+      <div class="kbc">
+        <h4>Novo <b>2</b></h4>
+        <div class="mini"><span class="dot f"></span>Renata M.</div>
+        <div class="mini"><span class="dot f"></span>Paulo H.</div>
+      </div>
+      <div class="kbc">
+        <h4>Contatado <b>280</b></h4>
+        <div class="mini"><span class="dot q"></span>Carolina Costa</div>
+        <div class="mini"><span class="dot q"></span>Marina Alves</div>
+        <div class="mini"><span class="dot m"></span>Diego Ramos</div>
+        <div class="mini"><span class="dot f"></span>Sueli B.</div>
+      </div>
+      <div class="kbc nova">
+        <h4>Follow-up <b>0</b></h4>
+        <div class="mini mut" style="justify-content:center;color:var(--txt-mut)">D1 · D3 · D7</div>
+      </div>
+      <div class="kbc">
+        <h4>Agendado Visita <b>14</b></h4>
+        <div class="mini"><span class="dot q"></span>Ana e Léo</div>
+        <div class="mini"><span class="dot q"></span>Família Prado</div>
+      </div>
+      <div class="kbc nova">
+        <h4>Negociação <b>20</b></h4>
+        <div class="mini"><span class="dot q"></span>Bianca O.</div>
+        <div class="mini"><span class="dot m"></span>Jacque Costa</div>
+      </div>
+      <div class="kbc">
+        <h4>Perdido <b>20</b></h4>
+        <div class="mini mut" style="color:var(--txt-mut)">com motivo</div>
+      </div>
+      <div class="kbc fora">
+        <h4>Fechado</h4>
+        <div class="mini mut" style="justify-content:center;color:var(--txt-mut)">→ Agenda</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="nota"><b>"Proposta" vira "Negociação"</b> — só o nome. A etapa continua
+  sendo a mesma, com os mesmos 20 leads e o mesmo gatilho de orçamento enviado.
+  Nenhum lead se move. <b>Fechado</b> já está construído para sair do quadro e cair
+  na Agenda; falta só ligar.</p>
+</section>
+
+<!-- ═══════════════════════════════ 3. o card -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">§ 6 e § 8 · o card</span>
+    <h2>Leitura de dois segundos</h2>
+    <p>O documento desenhou este card. Quase tudo já existe — o que falta é a faixa
+    de responsabilidade e o verbo da próxima ação.</p>
+  </div>
+
+  <div class="tela">
+    <div class="cap"><span>Card no funil</span><span>§ 6 do projeto</span></div>
+    <div class="lead">
+      <div class="topo">
+        <span class="nome">Carolina Costa</span>
+        <span class="pill q">Quente · prioridade alta</span>
+      </div>
+      <div class="linhas">
+        <span>Etapa: <b>Contatado</b> · 4º dia de 7</span>
+        <span>🎂 <b>Casamento</b> · 17/07/2027 · 150 convidados</span>
+        <span>Última mensagem: <b>cliente</b>, há 3h</span>
+        <span>Vendedor: <b>Márcia</b></span>
+      </div>
+      <div class="acao">
+        <span class="lbl">Próxima ação</span>
+        <span><b>Enviar proposta</b> · hoje 17h</span>
+      </div>
+      <div class="faixa eq">⏳ Aguardando resposta da equipe — há 3h</div>
+    </div>
+  </div>
+
+  <p class="nota alerta"><b>O que é novo aqui:</b> a faixa <i>“aguardando equipe /
+  aguardando cliente”</i> com o tempo, e a próxima ação como <b>verbo</b> (responder,
+  ligar, enviar orçamento, agendar visita, enviar proposta, acompanhar decisão…).
+  Hoje o sistema já calcula de quem é a bola e já propõe uma data — mas não mostra
+  nenhuma das duas coisas no card.</p>
+</section>
+
+<!-- ═══════════════════════════════ 4. a fila -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">§ 7 · a fila</span>
+    <h2>Quem eu preciso atender agora</h2>
+    <p>A tela de Follow-up já existe e já é a fila do vendedor. O que muda é a
+    ordem: hoje ela ordena por prazo, e passa a ordenar pelos seis níveis do
+    documento — com a temperatura no topo.</p>
+  </div>
+
+  <div class="tela">
+    <div class="cap"><span>Painel › Follow-up</span><span>fila da Márcia</span></div>
+    <div class="fila">
+      <div class="fl top"><span class="n">1º</span><span class="txt">Quentes aguardando ação do vendedor</span><span class="qt">7</span></div>
+      <div class="fl top"><span class="n">2º</span><span class="txt">Tarefas atrasadas</span><span class="qt">3</span></div>
+      <div class="fl top"><span class="n">3º</span><span class="txt">Quentes com próxima ação vencendo hoje</span><span class="qt">4</span></div>
+      <div class="fl"><span class="n">4º</span><span class="txt">Responderam e aguardam retorno</span><span class="qt">12</span></div>
+      <div class="fl"><span class="n">5º</span><span class="txt">Mornos com possibilidade de avanço</span><span class="qt">31</span></div>
+      <div class="fl"><span class="n">6º</span><span class="txt">Demais leads no fluxo normal</span><span class="qt">223</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ 5. o teto -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">§ 2 · o teto do Contatado</span>
+    <h2>7 + 7 + 7, com aviso no 6º e no 7º dia</h2>
+    <p>Esta regra <b>já está construída</b> e desligada. Os números do documento
+    cabem na configuração que existe, sem código novo.</p>
+  </div>
+
+  <div class="tela">
+    <div class="cap"><span>Régua › Contatado</span><span>teto 7 dias · 2 renovações</span></div>
+    <div class="regua">
+      <div class="dia">1</div><div class="dia">2</div><div class="dia">3</div>
+      <div class="dia">4</div><div class="dia">5</div>
+      <div class="dia av">6 ⚠</div><div class="dia av">7 ⚠</div>
+      <div class="dia">8</div><div class="dia">9</div><div class="dia">10</div>
+      <div class="dia">11</div><div class="dia">12</div>
+      <div class="dia av">13 ⚠</div><div class="dia av">14 ⚠</div>
+      <div class="dia">15</div><div class="dia">16</div><div class="dia">17</div>
+      <div class="dia">18</div><div class="dia">19</div>
+      <div class="dia av">20 ⚠</div><div class="dia vc">21 ⛔</div>
+    </div>
+    <div class="per">
+      <span>teto_dias = 7</span>·<span>renovacoes_max = 2</span>·<span>avisar_antes = 2</span>·<span>exige_justificativa = sim</span>
+    </div>
+  </div>
+
+  <p class="nota alerta"><b>Falta uma coisa:</b> o documento diz que, aos 21 dias,
+  “o lead <i>deverá obrigatoriamente</i> seguir para Negociação ou Follow-up”. Hoje o
+  card acende e para por aí — ninguém é forçado a nada. Isso é construção nova, e é
+  a única parte do § 2 que não existe.</p>
+</section>
+
+<!-- ═══════════════════════════════ 6. o mapa -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">A conta honesta</span>
+    <h2>O que já está pronto e o que é construção nova</h2>
+    <p>As quinze seções do documento, conferidas contra o código que está no ar
+    hoje. <b>Pronto</b> quer dizer construído — quase tudo ainda está desligado,
+    esperando você ligar.</p>
+  </div>
+
+  <div class="mapa">
+    <div class="it"><span class="s">§ 1</span><div class="c"><b>Funil principal</b>
+      <p>As colunas e o Follow-up entre Contatado e Negociação.</p></div><span class="tag pronto">pronto</span></div>
+    <div class="it"><span class="s">§ 2</span><div class="c"><b>Teto de 21 dias com justificativa</b>
+      <p>7+7+7 e o aviso no 6º e 7º dia cabem na configuração atual. A saída obrigatória aos 21 não existe.</p></div><span class="tag meio">quase</span></div>
+    <div class="it"><span class="s">§ 3</span><div class="c"><b>Temperatura quente / morno / frio</b>
+      <p>O campo existe e aparece no card. Os critérios do documento não estão escritos em lugar nenhum.</p></div><span class="tag meio">quase</span></div>
+    <div class="it"><span class="s">§ 4</span><div class="c"><b>Só avanço concreto muda a etapa</b>
+      <p>Gatilhos de visita, orçamento, sinal e contrato + as saídas permitidas por etapa.</p></div><span class="tag pronto">pronto</span></div>
+    <div class="it"><span class="s">§ 5</span><div class="c"><b>Temperatura sugerida pela conversa</b>
+      <p>Não existe. Há uma função de nome parecido, mas ela chuta a temperatura de empresa captada por CNPJ — outra coisa.</p></div><span class="tag novo">novo</span></div>
+    <div class="it"><span class="s">§ 6</span><div class="c"><b>Card com leitura rápida</b>
+      <p>Falta a faixa de responsabilidade e o verbo da próxima ação.</p></div><span class="tag meio">quase</span></div>
+    <div class="it"><span class="s">§ 7</span><div class="c"><b>Fila de prioridade comercial</b>
+      <p>A fila existe; a temperatura não entra nela hoje — zero referências no código da tela.</p></div><span class="tag meio">quase</span></div>
+    <div class="it"><span class="s">§ 8</span><div class="c"><b>Aguardando equipe × aguardando cliente</b>
+      <p>O sistema já calcula de quem é a bola. Falta mostrar no card com o tempo.</p></div><span class="tag meio">quase</span></div>
+    <div class="it"><span class="s">§ 9</span><div class="c"><b>Alertas de lead quente</b>
+      <p>“Sem próxima ação definida” e “com ação atrasada”. Não existem.</p></div><span class="tag novo">novo</span></div>
+    <div class="it"><span class="s">§ 10</span><div class="c"><b>Follow-up D1 · D3 · D7</b>
+      <p>A escada é configurável e já roda; nasce desligada.</p></div><span class="tag pronto">pronto</span></div>
+    <div class="it"><span class="s">§ 11</span><div class="c"><b>Perdido com motivo padronizado</b>
+      <p>Os dez motivos do documento já estão na lista, com “Outro” pedindo descrição.</p></div><span class="tag pronto">pronto</span></div>
+    <div class="it"><span class="s">§ 12</span><div class="c"><b>Reativação preservando histórico</b>
+      <p>Pronto. Falta só reavaliar a temperatura na volta.</p></div><span class="tag meio">quase</span></div>
+    <div class="it"><span class="s">§ 13</span><div class="c"><b>Dashboard comercial</b>
+      <p>Parte dos quinze indicadores já vive no Raio-X e nos Relatórios. Os de temperatura e de tempo de resposta, não.</p></div><span class="tag meio">quase</span></div>
+    <div class="it"><span class="s">§ 14</span><div class="c"><b>Etapa ≠ temperatura ≠ próxima ação</b>
+      <p>Etapa e próxima ação já são independentes. A temperatura ainda não participa de nada.</p></div><span class="tag meio">quase</span></div>
+    <div class="it"><span class="s">§ 15</span><div class="c"><b>Funil separado da gestão de eventos</b>
+      <p>Fechado sai do quadro e vira compromisso na Agenda. Construído, desligado.</p></div><span class="tag pronto">pronto</span></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ 7. ordem -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Se aprovar</span>
+    <h2>Em que ordem eu construiria</h2>
+  </div>
+  <div class="mapa">
+    <div class="it"><span class="s">1</span><div class="c"><b>A temperatura entra na fila e no card</b>
+      <p>É o coração do pedido e usa um campo que já existe. Sem código de IA: só ordenar e mostrar.</p></div><span class="tag novo">1ª</span></div>
+    <div class="it"><span class="s">2</span><div class="c"><b>A faixa de responsabilidade no card</b>
+      <p>O cálculo já existe na régua. É expor.</p></div><span class="tag novo">2ª</span></div>
+    <div class="it"><span class="s">3</span><div class="c"><b>Alertas de lead quente</b>
+      <p>Sem próxima ação · ação atrasada. Depende do 1 e do 2.</p></div><span class="tag novo">3ª</span></div>
+    <div class="it"><span class="s">4</span><div class="c"><b>Temperatura sugerida pela conversa</b>
+      <p>O maior dos itens, e o único que precisa ler texto. Depois que a temperatura já estiver valendo alguma coisa na tela.</p></div><span class="tag novo">4ª</span></div>
+    <div class="it"><span class="s">5</span><div class="c"><b>Saída obrigatória aos 21 dias e o dashboard</b>
+      <p>Por último, quando a rotina nova já estiver rodando.</p></div><span class="tag novo">5ª</span></div>
+  </div>
+
+  <p class="nota"><b>Nada disso muda o que já foi entregue.</b> O teto, os motivos de
+  perda, a reativação, o Follow-up e a saída do quadro continuam como estão,
+  desligados, esperando sua decisão de ligar — que é independente deste projeto.</p>
+</section>
+
+<footer>
+  <span>Projeto Adaptado — Funil Prime Eventos · 15 seções</span>
+  <span>Conferido contra o código em produção em 12/09/2026</span>
+</footer>
+
+</div>

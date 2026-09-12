@@ -75,6 +75,19 @@ def _eventos(slug) -> bool:
     return tem_contrato(slug)
 
 
+def _seguros(slug) -> bool:
+    """Corretora de seguros — e' o unico portao de UM nicho so'.
+
+    Os outros portoes descrevem familias ('produto', 'servico', 'recorrente') ou um
+    modo de operar ('eventos' pergunta a `tem_contrato`, e nao ao slug). Aqui a
+    mira e' mesmo o ramo: apolice, seguradora e comissao nao existem em nenhum
+    outro nicho, e um aviso sobre eles em qualquer outra conta e' prometer tela que
+    nao abre. Se um dia entrar corretora de imoveis ou consorcio, isto vira uma
+    familia — hoje seria inventar alcance que ninguem tem.
+    """
+    return (slug or "") == "seguros"
+
+
 def _canal_proprio(pool, conta_id: int) -> bool:
     """A conta fala pelo WhatsApp DELA, conectado por QR code.
 
@@ -119,6 +132,7 @@ PUBLICOS_NICHO = {
     "servico": _n.vende_servico,
     "eventos": _eventos,
     "recorrente": _recorrente,
+    "seguros": _seguros,
 }
 
 PUBLICOS_CONTA = {

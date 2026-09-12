@@ -100,6 +100,11 @@ CATEGORIAS_DESPESA = [
 
 CATEGORIAS_RECEITA = [
     "Salario", "Honorarios", "Freela", "Consultoria", "Investimentos",
+    # "Comissoes" nasceu com o nicho de corretora de seguros (conta 37): lá a
+    # receita INTEIRA e' comissao paga pela seguradora, e nenhuma das outras
+    # descrevia isso — 'Vendas' e' varejo, 'Honorarios' e' honorario de
+    # profissional. Serve tambem a representante comercial e corretor de imoveis.
+    "Comissoes",
     "Vendas", "Aluguel", "Beneficio", "Presentes", "Reembolso",
     # ── entrou no caixa, mas NAO e' faturamento (ver RECEITA_NAO_OPERACIONAL)
     "Aporte", "Emprestimo", "Transferencia",

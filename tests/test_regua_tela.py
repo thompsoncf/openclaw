@@ -342,3 +342,95 @@ def test_item_desmarcado_nao_vem_checked():
     b = fm._item("rotulo", "ganho", de="Ganho", para="Fechado", texto="y")
     html = _html_modelo({"itens": [a, b], "colunas": [], "fora": []})
     assert html.count("checked") == 1, "a caixa do rótulo renomeado à mão veio marcada"
+
+
+# ------------------------------------------------------------ a fase da etapa
+# Editável desde 12/09/2026. Medido na conta 34: "Evento A Realizar" — festa já
+# contratada, esperando acontecer — estava presa em fase 'venda', então as 5 festas
+# dela não entravam nos ganhos do mês, e não havia botão na tela pra arrumar.
+
+def _fase(pool, chave):
+    with pool.connection() as c:
+        return c.execute("""select fase, ordem from funil_etapas
+                             where conta_id=%s and chave=%s""", (CONTA, chave)).fetchone()
+
+
+def _nova(pool, chave, rotulo, ordem, fase="venda"):
+    with pool.connection() as c:
+        c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fase)
+                     values (%s,%s,%s,%s,%s) on conflict (conta_id, chave) do nothing""",
+                  (CONTA, chave, rotulo, ordem, fase))
+        c.commit()
+    return _eid(pool, chave)
+
+
+def test_a_etapa_de_venda_vira_pos_venda_e_a_tela_recarrega(monkeypatch, pool):
+    """O caso da Prime: a coluna da festa contratada passa a contar como vendida."""
+    eid = _nova(pool, "evento_a_realizar", "Evento A Realizar", 60)
+    _logado(monkeypatch, pool)
+    r = asyncio.run(pp.regua_etapa(_Req({"fase": "pos"}), eid))
+    assert r.status_code == 200
+    import json
+    assert json.loads(bytes(r.body))["recarrega"] is True, "a coluna mudou de lugar e a tela não avisa"
+    assert _fase(pool, "evento_a_realizar")[0] == "pos"
+
+
+def test_a_pos_venda_vai_pra_depois_do_perdido(monkeypatch, pool):
+    """A ORDEM anda junto com a fase, e esta é a razão: `escolher_etapa` decide o que
+    está "à frente" pela ordem. Pós-venda em ordem 60 seria alcançável por um gatilho
+    lá de Contatado — o lead pularia a venda inteira e cairia em pós-venda."""
+    eid = _nova(pool, "entregue", "Entregue", 60)
+    _logado(monkeypatch, pool)
+    asyncio.run(pp.regua_etapa(_Req({"fase": "pos"}), eid))
+    fase, ordem = _fase(pool, "entregue")
+    assert fase == "pos"
+    assert ordem > pp._ORDEM_PERDIDO, f"pós-venda ficou em {ordem}, antes de Perdido"
+
+
+def test_voltar_pra_venda_traz_a_ordem_de_volta_pro_miolo(monkeypatch, pool):
+    eid = _nova(pool, "montagem", "Montagem", 930, fase="pos")
+    _logado(monkeypatch, pool)
+    asyncio.run(pp.regua_etapa(_Req({"fase": "venda"}), eid))
+    fase, ordem = _fase(pool, "montagem")
+    assert fase == "venda"
+    assert ordem < pp._ORDEM_GANHO, f"etapa de venda ficou em {ordem}, depois de Ganho"
+
+
+def test_a_fase_das_fixas_nao_muda(monkeypatch, pool):
+    """'novo' é a entrada; 'ganho' e 'perdido' são o resultado e estão fixos nas
+    consultas de fechamento. Trocar a fase delas quebraria o relatório de todo mundo."""
+    _logado(monkeypatch, pool)
+    for chave in ("novo", "ganho", "perdido"):
+        antes = _fase(pool, chave)
+        asyncio.run(pp.regua_etapa(_Req({"fase": "pos" if antes[0] != "pos" else "venda"}),
+                                   _eid(pool, chave)))
+        assert _fase(pool, chave) == antes, f"a fase de {chave} mudou"
+
+
+def test_fase_inventada_e_ignorada(monkeypatch, pool):
+    eid = _nova(pool, "limbo", "Limbo", 70)
+    _logado(monkeypatch, pool)
+    for lixo in ("fechamento", "qualquer", ""):
+        asyncio.run(pp.regua_etapa(_Req({"fase": lixo}), eid))
+        assert _fase(pool, "limbo") == ("venda", 70), f"aceitou fase {lixo!r}"
+
+
+def test_salvar_a_etapa_sem_mexer_na_fase_nao_reordena(monkeypatch, pool):
+    """O formulário salva a linha inteira. Mandar a mesma fase de volta — que é o que
+    acontece em todo salvamento normal — não pode empurrar a coluna de lugar."""
+    eid = _nova(pool, "visita_feita", "Visita feita", 70)
+    _logado(monkeypatch, pool)
+    r = asyncio.run(pp.regua_etapa(_Req({"fase": "venda", "rotulo": "Visita feita"}), eid))
+    import json
+    assert json.loads(bytes(r.body))["recarrega"] is False
+    assert _fase(pool, "visita_feita") == ("venda", 70), "reordenou sem a fase ter mudado"
+
+
+def test_a_fase_so_aparece_pra_quem_pode_mudar():
+    """O seletor não existe nas fixas — e a chave continua visível em todas."""
+    tpl = pp._REGUA_TPL
+    assert 'name="fase"' in tpl and "já vendido · pós-venda" in tpl
+    ini = tpl.index('<code class="mut" style="font-size:.68rem">{{ e.chave }}</code>')
+    trecho = tpl[ini:ini + 900]
+    assert "{% if e.fixa %}" in trecho and "{% else %}" in trecho, \
+        "o seletor de fase não está atrás do portão das fixas"

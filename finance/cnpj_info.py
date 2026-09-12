@@ -91,6 +91,15 @@ _RAMOS = [
     ("Beleza",       ("cosmetic", "perfumaria", "artigos de perfumaria")),
     # Contabilidade vem ANTES de Consultoria: "assessoria/consultoria contabil"
     # e' contabilidade, nao consultoria de TI. Palavras bem especificas do ramo.
+    # Corretora de seguros. Vem ANTES de Agencia por causa de "agenciamento de
+    # seguros" ("agenciamento" sozinho e' chave da Agencia) e antes de Consultoria,
+    # que e' generica. Todas as chaves sao MULTI-PALAVRA de proposito: "corretor"
+    # sozinho pegaria corretor de IMOVEIS (CNAE 6821-8/01), que nao e' este nicho,
+    # e "seguros" sozinho pegaria a seguradora, que e' o outro lado do balcao.
+    ("Seguros",      ("corretores e agentes de seguros", "corretor de seguros",
+                      "corretora de seguros", "corretagem de seguros",
+                      "agenciamento de seguros", "corretores de seguros",
+                      "previdencia complementar")),
     ("Contabilidade",("contabil", "contabilidade", "escritorio contabil",
                       "escrituracao", "pericia contabil", "auditoria",
                       "assessoria contabil", "servicos contabeis")),
@@ -138,6 +147,7 @@ _RAMO_NICHO = {
     "Vestuario":    "vestuario",
     "Salao":        "salao",
     "Beleza":       "beleza",
+    "Seguros":      "seguros",
     "Contabilidade": "contabilidade",
     "Advocacia":    "advocacia",
     "Construcao":   "construcao",

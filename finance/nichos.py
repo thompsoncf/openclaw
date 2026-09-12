@@ -118,6 +118,20 @@ NICHOS: dict[str, dict] = {
         "unidades": ["servico", "hora", "diaria", "visita", "orcamento"],
         "categorias": ["manutencao", "reparo", "instalacao", "limpeza", "outro"],
     },
+    "seguros": {
+        "label": "Corretora de Seguros",
+        "vende_produto": False, "vende_servico": True,
+        # 'apolice' é o padrão porque é a unidade de quase tudo. As outras existem
+        # pelos casos em que a apólice NÃO é a conta: frota cota por veículo, vida
+        # em grupo cota por vida segurada, saúde e benefícios são mensais.
+        "unidades": ["apolice", "veiculo", "vida", "mensal", "avulso"],
+        # As categorias aqui são os RAMOS — é assim que uma corretora enxerga a
+        # carteira, e é o que deixa o relatório responder "quanto entrou de auto".
+        # 'auto' vem primeiro porque é o forte da primeira corretora da base
+        # (Liberal Seguros, conta 37) e primeiro da lista é o padrão do formulário.
+        "categorias": ["auto", "frota", "vida", "residencial", "empresarial",
+                       "condominio", "saude", "rc", "garantia", "viagem", "outro"],
+    },
     "contabilidade": {
         "label": "Contabilidade / Escritório contábil",
         "vende_produto": False, "vende_servico": True,
@@ -380,6 +394,39 @@ _PERSONAS_NICHO: dict[str, str] = {
         "mensalidade de SaaS/suporte é recorrente; projeto ou sprint é avulso.",
         "infra (nuvem/servidores) e licenças -> 'Assinaturas'; DAS/impostos -> "
         "'Impostos'."),
+    # NÃO usa _molde_servico, e essa é a decisão de projeto deste nicho. O molde
+    # ensina "o nome do cliente vai na CONTRAPARTE" — verdade em advocacia, agência,
+    # consultoria e tecnologia, onde quem contrata é quem paga. Numa corretora quem
+    # paga é a SEGURADORA: o segurado é cliente da carteira, não devedor. Reusar o
+    # molde faria todo título a receber nascer com o nome errado no lugar de quem
+    # deve, e o "quem me deve" listaria gente que não deve nada a ela.
+    "seguros": (
+        "RAMO DA EMPRESA: CORRETORA DE SEGUROS. Você fala com um(a) corretor(a) — "
+        "vá direto, sem explicar o básico de seguro (ele é o especialista). Você é o "
+        "braço OPERACIONAL rápido da corretora dele.\n"
+        "- QUEM PAGA É A SEGURADORA, não o segurado. A receita da corretora é "
+        "COMISSÃO: um % do prêmio, pago pela seguradora (Porto, Bradesco, Allianz, "
+        "Tokio, HDI...). Título a RECEBER com a SEGURADORA na CONTRAPARTE. O "
+        "segurado entra na carteira de clientes (cadastrar_cliente) porque o "
+        "histórico é dele — mas ele não é quem deve.\n"
+        "- VIGÊNCIA DE 12 MESES: apólice é anual. Comissão de apólice -> "
+        "recorrente=true com periodicidade='anual'; o sistema projeta o vencimento "
+        "do ano que vem sozinho, e é esse título que vira o lembrete de renovação. "
+        "Saúde e benefícios costumam ser MENSAIS: aí é periodicidade='mensal'.\n"
+        "- CATEGORIA da receita: 'Comissoes'. Não use 'Vendas' (é varejo) nem "
+        "'Honorarios' (é honorário de profissional, não corretagem).\n"
+        "- RAMO do negócio vai na descrição: auto, frota, vida, residencial, "
+        "empresarial, condomínio, saúde, RC, garantia, viagem.\n"
+        "- A PAGAR (só custos DELA): taxa SUSEP e impostos -> 'Impostos'; sistema de "
+        "cotação/multicálculo e assinaturas -> 'Assinaturas'; comissão repassada a "
+        "corretor parceiro -> 'Servicos'. PRÊMIO DE CLIENTE NUNCA É DESPESA DELA — "
+        "ela intermedeia, não paga o seguro. Se ele falar de um prêmio, é receita "
+        "de comissão a nascer, não conta a pagar.\n"
+        "- SEJA PROATIVO NA RENOVAÇÃO (sem encher): apólice que vence é o pão da "
+        "corretora. Se notar comissão anual vencendo no mês, avise em 1 linha de "
+        "quem é e ofereça preparar a renovação. Nunca insista nem repita a cada "
+        "mensagem."
+    ),
     "construcao": _molde_servico(
         "CONSTRUÇÃO CIVIL / OBRAS", "um construtor/engenheiro de obras",
         "o faturamento é por MEDIÇÃO/ETAPA da obra (o cliente paga conforme a obra "

@@ -152,7 +152,14 @@ def test_nichos_alcancados_nao_inventa_resposta(pool, canal):
 # ═════════════════ os portões antigos não mudaram ═════════════════
 
 def test_os_cinco_portoes_de_nicho_continuam_iguais(pool, canal):
-    assert set(nv.PUBLICOS_NICHO) == {"todos", "produto", "servico", "eventos", "recorrente"}
+    """Os cinco de origem seguem inteiros — o que entrar depois entra POR CIMA,
+    nunca no lugar de um deles. `seguros` (migração 243) foi o primeiro a entrar
+    assim, e por isso a primeira asserção é de contenção e não de igualdade;
+    quem impede portão entrar escondido é a paridade banco × Python, em
+    test_novidades. A segunda continua exata: `canal_proprio` é o único portão
+    que pergunta à CONTA, e mais nenhum pode aparecer desse lado sem alguém ver."""
+    assert {"todos", "produto", "servico", "eventos",
+            "recorrente"} <= set(nv.PUBLICOS_NICHO)
     assert set(nv.PUBLICOS) == set(nv.PUBLICOS_NICHO) | {"canal_proprio"}
 
 

@@ -122,6 +122,10 @@ def pool():
         # 199: pra_quem, resumo, link. Só schema e acerto dos avisos que já
         # existem; os avisos de hoje (200) entram por `_hoje`, teste a teste.
         c.execute((BASE / "199_novidades_pra_quem.sql").read_text(encoding="utf-8"))
+        # 243 amplia o check de novo, com o primeiro portão de UM NICHO só
+        # (`seguros`). Mesmo motivo da 184: sem ela o schema fica com a lista
+        # antiga e a paridade banco × Python falha.
+        c.execute((BASE / "243_novidade_nicho_seguros.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values

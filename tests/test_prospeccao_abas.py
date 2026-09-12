@@ -173,6 +173,9 @@ def test_regua_vem_antes_da_ficha_do_lead():
     assert _resolve("/painel/prospeccao/regua/etapa/7", "POST") == "regua_etapa"
     # o modelo do ramo (11/09/2026): rota nova no mesmo prefixo da régua
     assert _resolve("/painel/prospeccao/regua/modelo", "POST") == "regua_modelo"
+    # fundir etapas (12/09/2026): vizinha de remover/mover, no prefixo das etapas
+    assert _resolve("/painel/prospeccao/etapas/7/fundir", "POST") == "prospeccao_etapa_fundir"
+    assert _resolve("/painel/prospeccao/etapas/7/remover", "POST") == "prospeccao_etapa_remover"
     # os motivos de perda (migração 235): "novo" tem que casar com a rota dele, e
     # não com `/motivo/{mid}`, que espera int e responderia 422 — é o MESMO defeito
     # que a Régua teve, e a pergunta é feita ao router de propósito

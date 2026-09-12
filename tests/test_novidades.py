@@ -958,3 +958,29 @@ def test_o_aviso_da_fase_nao_fala_de_festa(pool):
 
 def test_reaplicar_o_aviso_da_fase_nao_duplica(pool):
     assert _fase_etapa(pool)["id"] == _fase_etapa(pool)["id"]
+
+
+# ---------------- 244: fundir etapas do funil (12/09/2026)
+
+def _fundir(pool):
+    return _aplica(pool, "244_novidade_fundir_etapas.sql", "fundir-etapas-do-funil")
+
+
+def test_o_aviso_de_fundir_e_de_quem_edita_o_funil(pool):
+    a = _fundir(pool)
+    assert a["publico"] == "todos" and set(a["pra_quem"]) == {"dono", "gestor"}
+    assert a["link"] == "/painel/prospeccao" and a["resumo"]
+
+
+def test_o_corpo_diz_o_que_acontece_com_o_lead_e_com_a_coluna(pool):
+    """Fundir é a primeira ação da Régua que mexe em informação do cliente e não em
+    configuração. "Some a coluna" e "some o cliente" são a mesma frase pra quem está
+    olhando a tela — o aviso tem que desfazer essa leitura."""
+    corpo = _fundir(pool)["corpo"]
+    assert "linha no histórico" in corpo
+    assert "não é apagada" in corpo
+    assert "quem apertou o botão" in corpo
+
+
+def test_reaplicar_o_aviso_de_fundir_nao_duplica(pool):
+    assert _fundir(pool)["id"] == _fundir(pool)["id"]

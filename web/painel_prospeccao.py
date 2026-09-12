@@ -9031,6 +9031,53 @@ def prospeccao_etapa_renomear(request: Request, eid: int, rotulo: str = Form("")
     return RedirectResponse("/painel/prospeccao", status_code=303)
 
 
+@router.post("/painel/prospeccao/etapas/{eid}/fundir")
+def prospeccao_etapa_fundir(request: Request, eid: int, para: str = Form("")):
+    """Leva os leads desta etapa para outra e tira esta do quadro.
+
+    É o verbo que faltava: o botão de remover diz "mova os leads primeiro" desde a
+    migração 130, e não existia jeito de mover em lote. Nasceu do Projeto Adaptado
+    da Prime (12/09/2026), que pede NEGOCIAÇÃO como coluna única — na conta 34 isso
+    é juntar "Agendado Visita" (14 leads) e "Proposta" (20).
+
+    `def` e não `async def`: banco síncrono em handler assíncrono congela o worker
+    (`tests/test_event_loop_nao_trava.py`).
+
+    O `membro_id` vai pro histórico. Mover lead é mexer em informação do cliente
+    (CLAUDE.md §0) — e informação que se move sem autor é informação que ninguém
+    consegue desfazer.
+    """
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "Só o dono/gestor edita as etapas do funil."
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    from finance import funil_fusao as _ff
+    destino = (para or "").strip()
+    with get_pool().connection() as c:
+        r = c.execute("select chave from funil_etapas where id=%s and conta_id=%s",
+                      (eid, ctx["conta_id"])).fetchone()
+        if not r:
+            request.session["prosp_aviso"] = "Etapa não encontrada."
+            return RedirectResponse("/painel/prospeccao", status_code=303)
+        res = _ff.fundir(c, ctx["conta_id"], r[0], destino, ctx.get("membro_id"))
+        if res["erro"]:
+            c.rollback()
+        else:
+            c.commit()
+    request.session["prosp_aviso"] = {
+        "etapa": "Escolha uma etapa de destino que exista.",
+        "mesma": "Não dá pra fundir uma etapa nela mesma.",
+        "fixa": "Etapa fixa (entrada/resultado) não pode ser fundida.",
+    }.get(res["erro"]) or (
+        f"“{res['rotulo_de']}” foi fundida em “{res['rotulo_para']}”: "
+        f"{res['movidos']} lead{'' if res['movidos'] == 1 else 's'} movido"
+        f"{'' if res['movidos'] == 1 else 's'}, com registro no histórico. "
+        "A etapa saiu do quadro e não foi apagada.")
+    return RedirectResponse("/painel/prospeccao", status_code=303)
+
+
 @router.post("/painel/prospeccao/etapas/{eid}/remover")
 def prospeccao_etapa_remover(request: Request, eid: int):
     ctx, redir = _acesso(request)
@@ -10894,6 +10941,8 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     background:var(--bg);color:var(--txt);font-family:inherit;font-size:.86rem}
   .etin:focus{outline:none;border-color:var(--verde)}
   .etn{font-size:.72rem;color:var(--txt-mut);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:52px}
+  .etsel{padding:.34rem .4rem;border-radius:7px;border:1px solid var(--borda);background:var(--bg);
+    color:var(--txt-mut);font-family:inherit;font-size:.74rem;max-width:150px}
   .etb{border:1px solid var(--borda);background:var(--card-2);color:var(--txt);border-radius:7px;
     width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
     font-size:.85rem;line-height:1;flex-shrink:0}
@@ -10907,7 +10956,9 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <summary>⚙️ Editar etapas do funil</summary>
     <div class="etbody">
       <p class="ethint">Renomeie no campo e clique ✓. Reordene com ◀ ▶. O ✕ remove — só quando a etapa
-        estiver <b>sem leads</b>. 🔒 = etapa fixa (entrada/resultado): pode renomear, mas não remover.</p>
+        estiver <b>sem leads</b>. Pra esvaziar, escolha uma etapa em <b>fundir em…</b> e clique ⇥: os leads
+        vão pra lá com registro no histórico, e a etapa some do quadro sem ser apagada.
+        🔒 = etapa fixa (entrada/resultado): pode renomear, mas não remover.</p>
       <div class="etlist">
         {% for e in etapas %}
         <form method="post" class="etrow">
@@ -10921,6 +10972,19 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                   {% if e.fixa or e.n > 0 %}disabled{% endif %}
                   title="{% if e.fixa %}Etapa fixa — não remove{% elif e.n > 0 %}Mova os leads primeiro{% else %}Remover etapa{% endif %}"
                   onclick="return confirm('Remover a etapa “{{ e.rotulo }}”?')">✕</button>
+          {% if not e.fixa and etapas|length > 1 %}
+          <!-- FUNDIR (12/09/2026). Fica colado no ✕ de propósito: é o ✕ que diz
+               "mova os leads primeiro", e até hoje não existia o "mova". -->
+          <select class="etsel" name="para" aria-label="Fundir esta etapa em">
+            <option value="">fundir em…</option>
+            {% for d in etapas if d.chave != e.chave %}
+            <option value="{{ d.chave }}">{{ d.rotulo }}</option>
+            {% endfor %}
+          </select>
+          <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/fundir"
+                  title="Levar os leads desta etapa para a escolhida"
+                  onclick="return etFundir(this,'{{ e.rotulo|e }}',{{ e.n }})">⇥</button>
+          {% endif %}
         </form>
         {% endfor %}
       </div>
@@ -11403,6 +11467,15 @@ function kbLeadStatus(sel,id){
       kbFecharLead();
     }).catch(function(){alert('Falha de rede.');sel.value=prev;});
 }
+// FUNDIR: o confirm diz o NÚMERO e o DESTINO. "Confirma?" sozinho não é escolha —
+// quem aperta tem que ver quantos leads vão andar e pra onde.
+function etFundir(btn,rot,n){
+  var sel=btn.form.querySelector('select[name=para]');
+  if(!sel||!sel.value){alert('Escolha a etapa de destino em "fundir em…".');return false;}
+  var destino=sel.options[sel.selectedIndex].text;
+  return confirm(n? ('Levar '+n+' lead'+(n===1?'':'s')+' de “'+rot+'” para “'+destino+'”?\n\n'
+                     +'Cada lead fica registrado no histórico, e “'+rot+'” sai do quadro sem ser apagada.')
+                   : ('“'+rot+'” está vazia. Tirar do quadro e apontar para “'+destino+'”?'));}
 function kbTab(s){document.querySelectorAll('.kbcol').forEach(function(c){c.classList.toggle('show',c.getAttribute('data-status')===s);});
   document.querySelectorAll('.kbtab').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===s);});}
 (function(){var cols=document.querySelectorAll('#kbrow .kbcol');var alvo='novo';

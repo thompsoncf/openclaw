@@ -187,48 +187,47 @@ footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
 <!-- ═══════════════════════════════ 1. a decisão -->
 <section>
   <div class="shead">
-    <span class="eyebrow">Antes de tudo</span>
-    <h2>O documento pede uma coluna que nós tínhamos separado</h2>
-    <p>Na semana passada você aprovou seis colunas, com <b>Agendado Visita</b> e
-    <b>Proposta</b> separadas. O projeto adaptado pede <b>NEGOCIAÇÃO</b>, uma coluna
-    só, que absorve visita, proposta, sinal e contrato (§ 1 e § 4).</p>
+    <span class="eyebrow">Decidido em 12/09/2026</span>
+    <h2>Negociação vira uma coluna só, como o documento pede</h2>
+    <p>O dono escolheu seguir o plano do cliente à risca: <b>Agendado Visita</b> e
+    <b>Proposta</b> se juntam em <b>NEGOCIAÇÃO</b> (§ 1 e § 4). São 34 leads hoje —
+    14 de uma e 20 da outra.</p>
   </div>
 
-  <div class="opcoes">
-    <div class="op rec">
-      <span class="marca">Minha recomendação · 6 colunas</span>
-      <h3>Manter Agendado Visita e Proposta</h3>
-      <ul>
-        <li><b>14 leads</b> estão em Agendado Visita e <b>20</b> em Proposta — são dois momentos diferentes da venda.</li>
-        <li>"Visita marcada" e "orçamento enviado" pedem ações diferentes do vendedor.</li>
-        <li>O relatório de conversão por etapa (§ 13) fica mais fino: dá pra ver onde a venda trava.</li>
-        <li>A temperatura já dá a priorização que o documento quer, sem fundir as colunas.</li>
-      </ul>
+  <p class="nota"><b>Juntar coluna é mover lead, e lead é informação do cliente.</b>
+  Por isso a fusão não é um botão que acontece em silêncio: a tela diz quantos leads
+  vão andar e para onde, cada lead movido deixa uma linha no histórico com quem
+  apertou o botão, e a coluna de origem <b>sai do quadro sem ser apagada</b> — o
+  histórico de quem passou por ela aponta para o nome dela.</p>
+
+  <div class="tela" style="margin-top:1.2rem">
+    <div class="cap"><span>Funil › ⚙️ Editar etapas do funil</span><span>fundir</span></div>
+    <div class="fila">
+      <div class="fl"><span class="n">⠿</span><span class="txt">Agendado Visita</span>
+        <span class="qt">14 leads</span>
+        <span class="pill f" style="background:var(--card2);color:var(--txt-mut)">fundir em ▾ Proposta</span>
+        <span class="qt">⇥</span></div>
     </div>
-    <div class="op">
-      <span class="marca">Como o documento pede · 5 colunas</span>
-      <h3>Fundir tudo em Negociação</h3>
-      <ul>
-        <li>Quadro mais curto, menos arrasto de card.</li>
-        <li>Bate exatamente com o texto que o cliente escreveu.</li>
-        <li><b>Custo:</b> os 34 leads das duas colunas viram um monte só, e "conversão de visita para proposta" deixa de existir.</li>
-        <li>Reversível, mas mexer em coluna com lead dentro é sempre ida e volta.</li>
-      </ul>
-    </div>
+    <p style="font-size:.76rem;color:var(--txt-mut);margin-top:.7rem;line-height:1.5">
+      “Levar <b style="color:var(--txt)">14 leads</b> de <b style="color:var(--txt)">Agendado Visita</b>
+      para <b style="color:var(--txt)">Proposta</b>? Cada lead fica registrado no histórico,
+      e Agendado Visita sai do quadro sem ser apagada.”
+    </p>
   </div>
 
-  <p class="nota"><b>Dá pra ter as duas coisas.</b> A coluna <b>Proposta</b> pode ser
-  renomeada para <b>Negociação</b> — o vocabulário do documento — mantendo
-  <b>Agendado Visita</b> como a etapa anterior. O cliente lê o nome que pediu, e
-  você não perde o degrau que mostra onde a venda emperra. É o que está desenhado
-  abaixo.</p>
+  <p class="nota alerta"><b>Uma perda que vale saber.</b> Com as duas juntas, o
+  relatório deixa de conseguir responder “quantas visitas viram proposta?”. O
+  histórico guarda cada movimento, então o número continua existindo no passado —
+  mas para de aparecer sozinho na conversão por etapa (§ 13). Se um dia isso fizer
+  falta, dá para separar de novo: a fusão é desfazível, e devolve só os leads que
+  ela levou.</p>
 </section>
 
 <!-- ═══════════════════════════════ 2. o quadro -->
 <section>
   <div class="shead">
     <span class="eyebrow">§ 1 e § 15 · o quadro</span>
-    <h2>Seis colunas, e o fechado fora</h2>
+    <h2>Cinco colunas, e o fechado fora</h2>
     <p>Os números são os leads reais de hoje. A cor do ponto em cada card é a
     temperatura — ela vive <i>dentro</i> da coluna, não cria coluna nova.</p>
   </div>
@@ -252,14 +251,11 @@ footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
         <h4>Follow-up <b>0</b></h4>
         <div class="mini mut" style="justify-content:center;color:var(--txt-mut)">D1 · D3 · D7</div>
       </div>
-      <div class="kbc">
-        <h4>Agendado Visita <b>14</b></h4>
-        <div class="mini"><span class="dot q"></span>Ana e Léo</div>
-        <div class="mini"><span class="dot q"></span>Família Prado</div>
-      </div>
       <div class="kbc nova">
-        <h4>Negociação <b>20</b></h4>
+        <h4>Negociação <b>34</b></h4>
+        <div class="mini"><span class="dot q"></span>Ana e Léo</div>
         <div class="mini"><span class="dot q"></span>Bianca O.</div>
+        <div class="mini"><span class="dot q"></span>Família Prado</div>
         <div class="mini"><span class="dot m"></span>Jacque Costa</div>
       </div>
       <div class="kbc">
@@ -273,10 +269,10 @@ footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
     </div>
   </div>
 
-  <p class="nota"><b>"Proposta" vira "Negociação"</b> — só o nome. A etapa continua
-  sendo a mesma, com os mesmos 20 leads e o mesmo gatilho de orçamento enviado.
-  Nenhum lead se move. <b>Fechado</b> já está construído para sair do quadro e cair
-  na Agenda; falta só ligar.</p>
+  <p class="nota"><b>Negociação recebe os 34</b> — os 20 que já estavam em Proposta
+  e os 14 de Agendado Visita, com o gatilho de orçamento enviado que a etapa já
+  tinha. <b>Fechado</b> já está construído para sair do quadro e cair na Agenda;
+  falta só ligar.</p>
 </section>
 
 <!-- ═══════════════════════════════ 3. o card -->
@@ -384,7 +380,7 @@ footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
 
   <div class="mapa">
     <div class="it"><span class="s">§ 1</span><div class="c"><b>Funil principal</b>
-      <p>As colunas e o Follow-up entre Contatado e Negociação.</p></div><span class="tag pronto">pronto</span></div>
+      <p>As colunas e o Follow-up entre Contatado e Negociação. A fusão de duas colunas numa só não existia — foi construída em 12/09.</p></div><span class="tag pronto">pronto</span></div>
     <div class="it"><span class="s">§ 2</span><div class="c"><b>Teto de 21 dias com justificativa</b>
       <p>7+7+7 e o aviso no 6º e 7º dia cabem na configuração atual. A saída obrigatória aos 21 não existe.</p></div><span class="tag meio">quase</span></div>
     <div class="it"><span class="s">§ 3</span><div class="c"><b>Temperatura quente / morno / frio</b>
@@ -423,6 +419,8 @@ footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
     <h2>Em que ordem eu construiria</h2>
   </div>
   <div class="mapa">
+    <div class="it"><span class="s">0</span><div class="c"><b>Fundir Agendado Visita em Negociação</b>
+      <p>Construído. É um clique seu no editor de etapas — 34 leads, com histórico.</p></div><span class="tag pronto">pronto</span></div>
     <div class="it"><span class="s">1</span><div class="c"><b>A temperatura entra na fila e no card</b>
       <p>É o coração do pedido e usa um campo que já existe. Sem código de IA: só ordenar e mostrar.</p></div><span class="tag novo">1ª</span></div>
     <div class="it"><span class="s">2</span><div class="c"><b>A faixa de responsabilidade no card</b>

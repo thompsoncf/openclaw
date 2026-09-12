@@ -279,33 +279,46 @@ footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
   </div>
 </section>
 
-<!-- ═══════════════ 2. o achado urgente -->
+<!-- ═══════════════ 2. o quadro final -->
 <section>
   <div class="shead">
-    <span class="eyebrow">Achado · precisa de decisão antes do resto</span>
-    <h2>“Agendado Visita” está marcada para sair do quadro</h2>
+    <span class="eyebrow">Aplicado hoje · roteiro concluído</span>
+    <h2>O quadro da Prime fechou em cinco colunas</h2>
+    <p>O último passo do roteiro esperava a Agenda. Ela recebeu os quatro
+    compromissos, e as duas colunas de evento saíram do quadro.</p>
   </div>
-  <div class="corpo">
-    <p>A etapa <span class="mono">qualificado</span> — que na Prime se chama
-    <b>Agendado Visita</b>, ordem 30, no meio do funil — está com
-    <span class="mono">sai_do_quadro = true</span>. Essa marca existe para as etapas
-    de <i>depois</i> da venda: ela tira a coluna do quadro, porque ali a prospecção
-    já acabou.</p>
-    <p>O efeito é que <b>a coluna não aparece no quadro</b>, e qualquer lead movido
-    para ela some da tela do gestor. Hoje há <b>zero leads</b> nessa etapa — o que
-    sugere que ninguém conseguiu usá-la, e não que ninguém quis.</p>
-    <p>No modelo do ramo de eventos essa etapa <b>não</b> tem a marca. Ela foi ligada
-    na conta 34 em algum momento da configuração desta semana, e eu não encontrei
-    motivo para ela estar lá. <b>Proponho desligar.</b> Nenhum lead é tocado: a
-    coluna volta a aparecer, e nada se move.</p>
+
+  <div class="rolar">
+  <table class="med">
+    <thead><tr><th>Coluna</th><th>Ordem</th><th>Teto</th><th>Leads</th></tr></thead>
+    <tbody>
+      <tr><td class="nome">Novo</td><td>0</td><td>—</td><td>1</td></tr>
+      <tr><td class="nome">Contatado</td><td>10</td><td>7 dias</td><td>284</td></tr>
+      <tr><td class="nome">Follow-up</td><td>20</td><td>—</td><td>0</td></tr>
+      <tr><td class="nome">Negociação</td><td>50</td><td>—</td><td>34</td></tr>
+      <tr><td class="nome">Perdido</td><td>910</td><td>—</td><td>21</td></tr>
+    </tbody>
+  </table>
   </div>
-  <div class="nota alerta">
-    <b>Por que isto vem antes.</b> A correção que eu subi hoje tira as etapas de
-    pós-venda dos botões do app — é o certo, e impede o toque errado que fazia o lead
-    sumir da fila sem passar por Ganho nem por Perdido. Mas enquanto
-    “Agendado Visita” estiver marcada como pós-venda, ela vai sumir junto: o vendedor
-    fica sem como marcar a visita pelo celular. Desligar a marca resolve os dois de
-    uma vez.
+
+  <div class="corpo" style="margin-top:1.3rem">
+    <p><b>“Evento Realizado” e “Evento A Realizar” saíram do quadro</b> e agora vivem
+    na Agenda: Bianca (31/08), Claudia (15/01), Beatriz (16/01) e Jacque (23/01) já
+    estão lá como compromisso. Elas continuam na busca, na ficha e nos relatórios —
+    o que some é a coluna do Kanban, porque ali a prospecção acabou.</p>
+    <p><b>“Agendado Visita” também está fora do quadro</b>, e isso é de propósito:
+    ela foi fundida em <b>Negociação</b> hoje, com os 13 leads movidos e 13 linhas de
+    histórico. A coluna ficou vazia e aposentada. A correção nº 2 que subi tira essa
+    etapa dos botões do app — o que está certo: ela não existe mais como destino.</p>
+  </div>
+
+  <div class="nota aten">
+    <b>A pendência das datas continua.</b> Lucas Fortes Carvalho, Missilene Sousa e
+    Julia Castro estão em etapa de evento <i>sem data no cadastro</i>. Como as duas
+    colunas saíram do quadro agora, esses três deixaram de aparecer no Kanban e não
+    chegam à Agenda, porque a Agenda precisa da data. Eles não sumiram do sistema —
+    estão na busca e na ficha — mas ninguém vai tropeçar neles até alguém preencher
+    a data.
   </div>
 </section>
 
@@ -455,7 +468,6 @@ footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
             <span class="chip">Novo</span>
             <span class="chip on">Contatado</span>
             <span class="chip">Follow-up</span>
-            <span class="chip">Agendado Visita</span>
             <span class="chip">Negociação</span>
           </div>
           <h5>Fechar</h5>
@@ -472,8 +484,8 @@ footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
       </div>
       <p class="mut" style="font-size:.82rem">A lista passa a ser a da empresa, na
       ordem dela, sem os motivos desligados. O campo de texto entra no mesmo
-      formulário. As etapas de pós-venda saem dos botões — e “Agendado Visita”
-      volta, se você aprovar o item da seção anterior.</p>
+      formulário. As etapas de pós-venda e as colunas aposentadas saem dos botões:
+      sobram os quatro destinos que existem de verdade no funil de hoje.</p>
     </div>
   </div>
 </section>
@@ -536,9 +548,9 @@ footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
     </div>
     <div class="prop">
       <span class="s">3</span>
-      <div class="c"><b>Desligar “sai do quadro” de Agendado Visita</b>
-      <p>Mudança de configuração na conta 34. Zero leads afetados; a coluna volta ao quadro. Sem isso, o item 2 tira a etapa do app.</p></div>
-      <span class="tag urg">Preciso do seu sim</span>
+      <div class="c"><b>As duas colunas de evento saíram do quadro</b>
+      <p>Último passo do roteiro, aplicado depois de confirmar na Agenda os 4 compromissos. O quadro fechou em cinco colunas.</p></div>
+      <span class="tag feito">Aplicado hoje</span>
     </div>
     <div class="prop">
       <span class="s">4</span>
@@ -587,8 +599,9 @@ footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
   </div>
   <div class="perg">
     <ol>
-      <li><b>Desligo o “sai do quadro” de Agendado Visita?</b> É configuração, não
-      toca em lead nenhum, e destrava o item 2. Meu voto: sim.</li>
+      <li><b>As três festas sem data ficam assim?</b> Lucas Fortes, Missilene e
+      Julia Castro saíram do quadro hoje e não têm data para entrar na Agenda —
+      ficam só na busca e na ficha. Alguém da equipe preenche a data?</li>
       <li><b>A temperatura sai do ensaio?</b> A primeira passada reescreve 289 dos
       315 leads dos três vendedores — a fila do Pedro passa de 131 quentes para 7. Cada mudança
       fica no histórico do lead. Sem isso, os itens 4 e 5 não têm o que mostrar.</li>
@@ -597,12 +610,14 @@ footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
       de fila represada — e a resposta muda o que o item 6 mostra no primeiro dia.</li>
     </ol>
   </div>
-  <div class="nota aten">
-    <b>Uma pendência que não é deste mockup, mas segue de pé.</b> Três leads com
-    festa fechada — Missilene Sousa, Lucas Fortes Carvalho e Julia Castro — não têm
-    data de evento no cadastro. Quando a etapa Fechado passar a sair do quadro, eles
-    somem da tela sem chegar à Agenda, porque a Agenda precisa da data. Vale alguém
-    preencher antes.
+  <div class="nota">
+    <b>Onde as coisas estão agora, para o registro.</b>
+    <span class="mono">temperatura_modo</span> em ensaio ·
+    <span class="mono">teto_modo</span> desligado ·
+    <span class="mono">fila_modo</span> em prazo ·
+    <span class="mono">gatilhos_modo</span> ligado. O motivo de perda obrigatório
+    está desligado por enquanto: eu religo assim que a correção do app for para o
+    ar, porque ligado antes disso o vendedor trava na tela de fechar.
   </div>
 </section>
 

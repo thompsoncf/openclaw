@@ -923,3 +923,34 @@ def test_o_aviso_do_modelo_nao_fala_de_festa_pra_quem_nao_vende_festa(pool):
 
 def test_reaplicar_o_aviso_do_modelo_nao_duplica(pool):
     assert _modelo(pool)["id"] == _modelo(pool)["id"]
+
+
+# ---------------- 241: a fase da etapa, editável na Régua (12/09/2026)
+
+def _fase_etapa(pool):
+    return _aplica(pool, "241_novidade_fase_da_etapa.sql", "fase-da-etapa-na-regua")
+
+
+def test_o_aviso_da_fase_e_de_dono_e_gestor_em_qualquer_ramo(pool):
+    a = _fase_etapa(pool)
+    assert a["publico"] == "todos" and set(a["pra_quem"]) == {"dono", "gestor"}
+    assert a["link"] == "/painel/prospeccao/regua" and a["resumo"]
+
+
+def test_o_corpo_avisa_que_a_fase_mexe_no_passado(pool):
+    """Mudar a fase faz os leads que JÁ estão na etapa entrarem nos ganhos, inclusive
+    em mês fechado. Um aviso que omite isso entrega um relatório que muda sozinho."""
+    corpo = _fase_etapa(pool)["corpo"]
+    assert "mexe no passado" in corpo
+    assert "meses que já fecharam" in corpo
+    assert "muda de lugar no quadro" in corpo
+
+
+def test_o_aviso_da_fase_nao_fala_de_festa(pool):
+    a = _fase_etapa(pool)
+    for palavra in ("festa", "buffet", "convidados"):
+        assert palavra not in (a["resumo"] + " " + a["corpo"]).lower(), palavra
+
+
+def test_reaplicar_o_aviso_da_fase_nao_duplica(pool):
+    assert _fase_etapa(pool)["id"] == _fase_etapa(pool)["id"]

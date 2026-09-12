@@ -8105,10 +8105,26 @@ async def regua_etapa(request: Request, eid: int):
     ativo = str(f.get("gatilho_ativo") or "").lower() in ("1", "on", "true", "sim")
     prazo = _par_min(f.get("prazo_n"), f.get("prazo_u"))
     with get_pool().connection() as c:
-        r = c.execute("select chave, fixa from funil_etapas where id=%s and conta_id=%s",
+        r = c.execute("select chave, fixa, fase from funil_etapas where id=%s and conta_id=%s",
                       (eid, ctx["conta_id"])).fetchone()
         if not r:
             return JSONResponse({"ok": False, "erro": "etapa"}, status_code=404)
+        # A FASE — "isto ainda é venda, ou já está vendido?" (12/09/2026).
+        #
+        # Até hoje a fase só era escolhida ao CRIAR a etapa, e não havia como
+        # corrigir depois. Medido na conta 34: "Evento A Realizar" — festa já
+        # contratada, esperando acontecer — estava em fase 'venda', então as 5 festas
+        # dela não entravam nos ganhos do mês, e não existia botão pra arrumar.
+        #
+        # As três FIXAS não mudam: 'novo' é a entrada, 'ganho' e 'perdido' são o
+        # resultado e estão fixos nas consultas de fechamento (`sql_fechadas`).
+        # 'fechamento' também não se escolhe — é a fase delas, não das outras.
+        fase_nova = (f.get("fase") or "").strip()
+        muda_fase = (not r[1] and fase_nova in ("venda", "pos") and fase_nova != r[2])
+        ordem_nova = _ordem_da_fase(c, ctx["conta_id"], fase_nova, eid) if muda_fase else None
+        if muda_fase:
+            c.execute("update funil_etapas set fase=%s, ordem=%s where id=%s and conta_id=%s",
+                      (fase_nova, ordem_nova, eid, ctx["conta_id"]))
         # Etapa de resultado não tem prazo: "está em Perdido há 30 dias" não é uma
         # cobrança, é o fim da história. Deixar o campo aberto só convidaria alguém
         # a criar um alarme que nunca deveria tocar.
@@ -8148,7 +8164,10 @@ async def regua_etapa(request: Request, eid: int):
                    str(f.get("agenda_ao_entrar") or "").lower() in ("1", "on", "true", "sim"),
                    eid, ctx["conta_id"]))
         c.commit()
-    return JSONResponse({"ok": True, "gatilho_ativo": bool(ativo and gat)})
+    # mudar a fase reordena a coluna no quadro: a tela recarrega pra mostrar onde ela
+    # foi parar, em vez de deixar a linha no lugar antigo dizendo "salvo ✓"
+    return JSONResponse({"ok": True, "gatilho_ativo": bool(ativo and gat),
+                         "recarrega": bool(muda_fase)})
 
 
 
@@ -8940,6 +8959,35 @@ async def prospeccao_status(request: Request, alvo_id: int):
 # ---------------------------------------------------------------- etapas do funil (editar)
 # Só o dono/gestor edita a estrutura do funil (é uma configuração da empresa). O vendedor
 # usa o funil normalmente. 'novo'/'ganho'/'perdido' (fixa=true) só renomeiam.
+def _ordem_da_fase(c, conta_id: int, fase: str, excluir_id: int | None = None) -> int:
+    """A ordem que uma etapa desta fase ocupa no funil.
+
+    Etapa de PÓS-VENDA entra depois do fechamento — o que era impossível até a
+    migração 177. Numa empresa de eventos a festa acontece DEPOIS de o sinal ser
+    pago, e prender essa coluna no meio da venda é errado na origem. Quem conta como
+    venda ganha é a `fase` (ver `funil_regua.chaves_fechadas`), mas a ORDEM não pode
+    ficar para trás: é ela que `escolher_etapa` usa pra decidir o que está "à frente",
+    e uma etapa de pós-venda em ordem 60 seria alcançável por um gatilho lá de
+    Contatado — o lead pularia a venda inteira e cairia em pós-venda.
+
+    Por isso fase e ordem andam juntas, aqui, num lugar só. Este cálculo já existia
+    dentro de `prospeccao_etapa_nova`; virou função quando a Régua passou a deixar
+    TROCAR a fase de uma etapa que já existe (12/09/2026) — duas cópias da mesma
+    conta é como as duas ficam diferentes na terceira mudança.
+    """
+    onde = "and id <> %s" if excluir_id else ""
+    args_extra = (excluir_id,) if excluir_id else ()
+    if fase == "pos":
+        mx = c.execute(
+            f"select coalesce(max(ordem),%s) from funil_etapas where conta_id=%s {onde}",
+            (_ORDEM_PERDIDO, conta_id) + args_extra).fetchone()[0]
+        return max(mx + 10, _ORDEM_PERDIDO + 10)
+    mx = c.execute(
+        f"select coalesce(max(ordem),0) from funil_etapas where conta_id=%s and ordem<%s {onde}",
+        (conta_id, _ORDEM_GANHO) + args_extra).fetchone()[0]
+    return min(mx + 10, _ORDEM_GANHO - 1)
+
+
 @router.post("/painel/prospeccao/etapas/nova")
 def prospeccao_etapa_nova(request: Request, rotulo: str = Form(""), fase: str = Form("venda")):
     ctx, redir = _acesso(request)
@@ -8958,17 +9006,7 @@ def prospeccao_etapa_nova(request: Request, rotulo: str = Form(""), fase: str = 
         chave, i = base, 2
         while chave in existentes:
             chave, i = f"{base}_{i}", i + 1
-        mx = c.execute("select coalesce(max(ordem),0) from funil_etapas where conta_id=%s and ordem<%s",
-                       (ctx["conta_id"], _ORDEM_GANHO)).fetchone()[0]
-        ordem = min(mx + 10, _ORDEM_GANHO - 1)
-        # Etapa de PÓS-VENDA entra depois do fechamento — o que era impossível até a
-        # migração 177. Numa empresa de eventos o evento acontece DEPOIS de o sinal
-        # ser pago, e prender essa coluna no meio da venda é errado na origem. Quem
-        # continua contando como venda ganha é a `fase`, não a ordem (chaves_fechadas).
-        if fase == "pos":
-            mxp = c.execute("select coalesce(max(ordem),%s) from funil_etapas where conta_id=%s",
-                            (_ORDEM_PERDIDO, ctx["conta_id"])).fetchone()[0]
-            ordem = max(mxp + 10, _ORDEM_PERDIDO + 10)
+        ordem = _ordem_da_fase(c, ctx["conta_id"], fase)
         c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa, fase)
                      values (%s,%s,%s,%s,false,%s)""", (ctx["conta_id"], chave, rot, ordem, fase))
         c.commit()
@@ -15795,7 +15833,7 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div class="sh"><b>As etapas do funil</b><span class="mut" style="font-size:.76rem">cada linha salva sozinha · ligue um gatilho de cada vez</span></div>
     {% set fases = [('venda','Fase · Venda','o lead ainda está sendo conquistado'),
                     ('fechamento','Fase · Fechamento','relatório e comissão contam a partir daqui'),
-                    ('pos','Fase · Pós-venda','já é cliente — continua contando como fechado')] %}
+                    ('pos','Fase · Pós-venda','já é cliente — continua contando como fechado · muda pelo seletor na linha')] %}
     {% for fchave, ftit, fnota in fases %}
       {% set doFase = etapas | selectattr('fase','equalto',fchave) | list %}
       {% if doFase %}
@@ -15806,10 +15844,22 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             style="padding:.65rem 0;border-top:1px solid var(--borda)">
         <div class="rg-r1">
           <span class="tdot" style="background:{{ '#25D366' if e.fase!='venda' else '#229ED9' }}"></span>
-          <span style="display:flex;align-items:center;gap:.5rem;min-width:0">
-            <input class="fld" name="rotulo" value="{{ e.rotulo }}" style="max-width:240px">
+          <!-- `flex-wrap` porque esta célula é o `1fr` de um grid de 4 colunas e
+               agora carrega três controles: com o seletor de fase, em tela estreita
+               a linha estouraria a coluna em vez de quebrar. -->
+          <span style="display:flex;align-items:center;gap:.5rem;min-width:0;flex-wrap:wrap">
+            <input class="fld" name="rotulo" value="{{ e.rotulo }}" style="max-width:240px;min-width:0">
             <code class="mut" style="font-size:.68rem">{{ e.chave }}</code>
-            {% if e.fixa %}<span class="rg-tag" style="background:var(--card-2);border:1px solid var(--borda);color:var(--txt-mut)">fixa</span>{% endif %}
+            {% if e.fixa %}<span class="rg-tag" style="background:var(--card-2);border:1px solid var(--borda);color:var(--txt-mut)">fixa</span>
+            {% else %}
+            <!-- A FASE, editável desde 12/09/2026. Antes só se escolhia ao criar a
+                 etapa, e "Evento A Realizar" da Prime ficou presa em 'venda' — as 5
+                 festas já contratadas dela não contavam nos ganhos do mês. -->
+            <select class="rg-uni" name="fase" title="o que está aqui já está vendido?">
+              <option value="venda" {% if e.fase=='venda' %}selected{% endif %}>ainda é venda</option>
+              <option value="pos" {% if e.fase=='pos' %}selected{% endif %}>já vendido · pós-venda</option>
+            </select>
+            {% endif %}
           </span>
           <span style="display:flex;gap:.3rem">
             <input class="fld" name="prazo_n" value="{{ e.prazo_n }}" style="text-align:right;width:56px"
@@ -15956,7 +16006,9 @@ function rgDia(el){setTimeout(function(){el.classList.toggle('on',el.querySelect
 function rgSalvar(ev){ev.preventDefault();var f=ev.target;
   fetch(f.action,{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData(f)})
     .then(function(r){return r.json();}).then(function(d){
-      rgToast(d.ok?'Etapa salva ✓':(d.erro||'Não consegui salvar'),!d.ok);})
+      rgToast(d.ok?(d.recarrega?'Fase alterada — reordenando…':'Etapa salva ✓')
+                  :(d.erro||'Não consegui salvar'),!d.ok);
+      if(d.ok&&d.recarrega){setTimeout(function(){location.reload();},900);}})
     .catch(function(){rgToast('Falha de rede',true);});
   return false;}
 </script>

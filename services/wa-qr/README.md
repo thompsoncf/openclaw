@@ -207,6 +207,12 @@ WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_guerra_test node teste-gu
 
 # filtro pré-decifragem (status/canal) + retentativa: não precisa de banco
 node teste-ignorar-jid.js
+# o que o libsignal grita no console (Bad MAC) vira agregado no wa_qr_log — sem banco
+node teste-console-libsignal.js
+# ...e o agregado sai carimbado com a conta do worker (precisa de banco)
+createdb wa_qr_log_test
+psql wa_qr_log_test -f ../../db/migracoes/158_wa_qr_log.sql
+WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_log_test node teste-log-agregado-conta.js
 ```
 
 ## CPU: a guerra de sessão derrubava a instância (20/08/2026)

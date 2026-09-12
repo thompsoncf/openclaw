@@ -11473,7 +11473,7 @@ function etFundir(btn,rot,n){
   var sel=btn.form.querySelector('select[name=para]');
   if(!sel||!sel.value){alert('Escolha a etapa de destino em "fundir em…".');return false;}
   var destino=sel.options[sel.selectedIndex].text;
-  return confirm(n? ('Levar '+n+' lead'+(n===1?'':'s')+' de “'+rot+'” para “'+destino+'”?\n\n'
+  return confirm(n? ('Levar '+n+' lead'+(n===1?'':'s')+' de “'+rot+'” para “'+destino+'”?\\n\\n'
                      +'Cada lead fica registrado no histórico, e “'+rot+'” sai do quadro sem ser apagada.')
                    : ('“'+rot+'” está vazia. Tirar do quadro e apontar para “'+destino+'”?'));}
 function kbTab(s){document.querySelectorAll('.kbcol').forEach(function(c){c.classList.toggle('show',c.getAttribute('data-status')===s);});

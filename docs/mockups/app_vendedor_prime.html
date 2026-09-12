@@ -1,0 +1,634 @@
+<title>O app do vendedor Prime</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;700&display=swap">
+
+<style>
+/* ═══════════════════ tokens da PÁGINA — mesmos do mockup do funil (12/09) */
+:root{
+  --ground:#F4F6F4;
+  --surface:#FFFFFF;
+  --ink:#171C19;
+  --ink-soft:#3C4640;
+  --muted:#626D66;
+  --line:#DBE1DA;
+  --line-strong:#BFC9BF;
+  --ok:#2C7A57;
+  --ok-wash:#E5F1EA;
+  --novo:#8A5E12;
+  --novo-wash:#F8EEDA;
+  --alerta:#A8402F;
+  --alerta-wash:#F8E6E2;
+  --f-sans:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --f-serif:"Source Serif 4",Georgia,serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#101410;--surface:#181D19;--ink:#E5EBE6;--ink-soft:#C0CAC3;
+    --muted:#8B968F;--line:#272E28;--line-strong:#38423A;
+    --ok:#67C398;--ok-wash:#152E22;--novo:#D6A24F;--novo-wash:#31270E;
+    --alerta:#E2887A;--alerta-wash:#33150F;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#101410;--surface:#181D19;--ink:#E5EBE6;--ink-soft:#C0CAC3;
+  --muted:#8B968F;--line:#272E28;--line-strong:#38423A;
+  --ok:#67C398;--ok-wash:#152E22;--novo:#D6A24F;--novo-wash:#31270E;
+  --alerta:#E2887A;--alerta-wash:#33150F;
+}
+
+/* ═══════════════════ tokens do PRODUTO — o app é sempre escuro */
+.fone,.tela{
+  --bg:#0f1720;--card:#16202b;--card2:#1c2835;--borda:#26323f;
+  --txt:#e6edf3;--txt-mut:#8b9bab;
+  --ambar:#e0b25a;--coral:#f0917f;--verde:#4ec98a;--azul:#5b9bd5;
+  --quente-bg:#3a1a1a;--quente-fg:#f0917f;
+  --morno-bg:#2e2713;--morno-fg:#e0b25a;
+  --frio-bg:#14273a;--frio-fg:#7bb8e6;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--ground);color:var(--ink);font-family:var(--f-sans);
+  font-size:16px;line-height:1.6;padding-inline:20px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px;margin:0 auto;padding-block:clamp(2.2rem,5vw,3.8rem) 4rem}
+
+h1,h2,h3{margin:0;font-family:var(--f-serif);font-weight:600;text-wrap:balance}
+h1{font-size:clamp(2rem,5vw,2.9rem);line-height:1.1;letter-spacing:-.015em}
+h2{font-size:clamp(1.3rem,3vw,1.62rem);line-height:1.2}
+h3{font-size:1.02rem;font-family:var(--f-sans);font-weight:700}
+p{margin:0}
+a{color:inherit}
+.lede{font-size:1.1rem;color:var(--ink-soft);max-width:62ch}
+.eyebrow{font-family:var(--f-mono);font-size:.68rem;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.mut{color:var(--muted)}
+.mono{font-family:var(--f-mono);font-size:.84em;font-variant-numeric:tabular-nums}
+
+header{border-bottom:2px solid var(--line-strong);padding-bottom:1.6rem;
+  display:flex;flex-direction:column;gap:.9rem}
+.hlinha{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:baseline}
+
+section{margin-top:clamp(2.6rem,6vw,4rem)}
+.shead{display:flex;flex-direction:column;gap:.4rem;margin-bottom:1.3rem}
+.shead p{color:var(--muted);max-width:66ch;font-size:.95rem}
+.corpo{display:flex;flex-direction:column;gap:1.1rem;max-width:66ch}
+.corpo p{font-size:.97rem;color:var(--ink-soft)}
+.corpo p b{color:var(--ink)}
+
+/* ═══════════════════ a parede de pontos */
+.parede{display:grid;grid-template-columns:1fr 1fr;gap:1.4rem;margin-top:.4rem}
+@media (max-width:640px){.parede{grid-template-columns:1fr}}
+.pq{background:var(--surface);border:1px solid var(--line);border-radius:8px;
+  padding:1rem 1.05rem;display:flex;flex-direction:column;gap:.7rem}
+.pq > .cab{display:flex;flex-direction:column;gap:.15rem}
+.pq .cab b{font-size:.93rem}
+.pq .cab span{font-size:.8rem;color:var(--muted)}
+.pontos{display:flex;flex-wrap:wrap;gap:3px}
+.pt{width:9px;height:9px;border-radius:2px;background:var(--line-strong)}
+.pt.q{background:#E0674E}.pt.m{background:#C79233}.pt.f{background:#5B8FBF}
+.leg{display:flex;flex-wrap:wrap;gap:.25rem .9rem;font-family:var(--f-mono);
+  font-size:.66rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.leg i{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:.3rem}
+
+/* ═══════════════════ tabela de medição */
+.med{width:100%;border-collapse:collapse;font-size:.87rem}
+.med th,.med td{padding:.5rem .6rem;text-align:right;border-bottom:1px solid var(--line)}
+.med th:first-child,.med td:first-child{text-align:left}
+.med thead th{font-family:var(--f-mono);font-size:.64rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);font-weight:700;border-bottom:1px solid var(--line-strong)}
+.med td{font-variant-numeric:tabular-nums}
+.med td.nome{font-weight:600;font-variant-numeric:normal}
+.med .grave{color:var(--alerta);font-weight:700}
+.rolar{overflow-x:auto}
+
+/* ═══════════════════ o celular */
+.pares{display:flex;flex-wrap:wrap;gap:1.6rem;align-items:flex-start}
+.par{flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:.55rem}
+.par > .rot{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap}
+.par > .rot b{font-size:.9rem}
+.par > .rot span{font-family:var(--f-mono);font-size:.62rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted)}
+.par > .rot span.nv{color:var(--ok)}
+.fone{background:var(--bg);border:1px solid var(--borda);border-radius:16px;
+  padding:.7rem .6rem .85rem;color:var(--txt);max-width:340px;
+  box-shadow:0 16px 44px -30px rgba(0,0,0,.8)}
+.fone .barra{display:flex;justify-content:space-between;align-items:center;
+  font-family:var(--f-mono);font-size:.6rem;color:var(--txt-mut);
+  padding:0 .3rem .55rem;letter-spacing:.06em}
+.grupo{font-family:var(--f-mono);font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--txt-mut);margin:.6rem .25rem .35rem;display:flex;justify-content:space-between;gap:.5rem}
+.grupo.dest{color:var(--coral)}
+.card{background:var(--card);border:1px solid var(--borda);border-radius:8px;
+  padding:.5rem .55rem;margin-bottom:.34rem;display:flex;flex-direction:column;gap:.25rem}
+.card.vez{border-left:2px solid var(--verde)}
+.card.prazo{border-left:2px solid var(--coral)}
+.card .l1{display:flex;align-items:center;gap:.4rem}
+.card .nm{font-size:.79rem;font-weight:700;flex:1;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+.dot.q{background:var(--coral)}.dot.m{background:var(--ambar)}.dot.f{background:var(--azul)}
+.card .sn{font-size:.69rem;color:var(--txt-mut);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.porq{font-size:.66rem;color:var(--txt-mut);line-height:1.35}
+.porq em{font-style:normal;color:var(--ambar)}
+.porq.fr em{color:var(--azul)}
+.porq.qt em{color:var(--coral)}
+.tp{font-family:var(--f-mono);font-size:.55rem;font-weight:700;letter-spacing:.06em;
+  padding:.12rem .32rem;border-radius:3px;white-space:nowrap}
+.tp.q{background:var(--quente-bg);color:var(--quente-fg)}
+.tp.m{background:var(--morno-bg);color:var(--morno-fg)}
+.tp.f{background:var(--frio-bg);color:var(--frio-fg)}
+.tp.pz{background:#3a2a12;color:var(--ambar)}
+.dobra{font-size:.68rem;color:var(--txt-mut);border:1px dashed var(--borda);
+  border-radius:7px;padding:.42rem .55rem;text-align:center;margin-top:.2rem}
+.aviso{display:flex;align-items:center;gap:.4rem;font-size:.67rem;
+  background:#12293a;color:#9ccaf0;border-radius:6px;padding:.36rem .5rem;margin-bottom:.5rem}
+.aviso b{color:#cfe6fa}
+.aviso .x{margin-left:auto;font-family:var(--f-mono);opacity:.6}
+
+/* folha de ações */
+.folha{background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.7rem}
+.folha h5{margin:.55rem 0 .35rem;font-size:.62rem;font-family:var(--f-mono);
+  letter-spacing:.1em;text-transform:uppercase;color:var(--txt-mut);font-weight:700}
+.folha h5:first-child{margin-top:0}
+.chips{display:flex;flex-wrap:wrap;gap:.28rem}
+.chip{font-size:.68rem;padding:.26rem .55rem;border-radius:999px;
+  border:1px solid var(--borda);background:var(--card2);color:var(--txt-mut)}
+.chip.on{border-color:var(--verde);color:var(--verde);background:rgba(78,201,138,.12);font-weight:700}
+.chip.mau{border-color:var(--coral);color:var(--coral);background:rgba(240,145,127,.1)}
+.sel{width:100%;background:var(--card2);border:1px solid var(--borda);border-radius:6px;
+  padding:.4rem .5rem;font-size:.7rem;color:var(--txt);display:flex;justify-content:space-between}
+.sel span{color:var(--txt-mut);font-family:var(--f-mono);font-size:.62rem}
+.opts{margin:.3rem 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:.16rem}
+.opts li{font-size:.67rem;color:var(--txt-mut);padding:.2rem .45rem;border-radius:4px;background:var(--card2)}
+.opts li.n{color:var(--verde)}
+.opts li.x{color:var(--coral);text-decoration:line-through;opacity:.7}
+.campo{margin-top:.3rem;background:var(--card2);border:1px dashed var(--verde);border-radius:6px;
+  padding:.34rem .5rem;font-size:.66rem;color:var(--txt-mut)}
+
+/* ═══════════════════ blocos de decisão */
+.props{display:flex;flex-direction:column;gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.prop{background:var(--surface);padding:1rem 1.1rem;display:grid;
+  grid-template-columns:2.4rem 1fr auto;gap:.35rem .95rem;align-items:baseline}
+@media (max-width:640px){.prop{grid-template-columns:2.4rem 1fr}.prop .tag{grid-column:2}}
+.prop .s{font-family:var(--f-mono);font-size:.72rem;font-weight:700;color:var(--muted)}
+.prop .c{min-width:0}
+.prop .c b{font-size:.95rem}
+.prop .c p{font-size:.87rem;color:var(--muted);margin-top:.18rem}
+.tag{font-family:var(--f-mono);font-size:.62rem;font-weight:700;letter-spacing:.07em;
+  text-transform:uppercase;padding:.22rem .48rem;border-radius:4px;white-space:nowrap}
+.tag.feito{background:var(--ok-wash);color:var(--ok)}
+.tag.novo{background:var(--novo-wash);color:var(--novo)}
+.tag.urg{background:var(--alerta-wash);color:var(--alerta)}
+.tag.nao{background:transparent;color:var(--muted);border:1px solid var(--line-strong)}
+
+.nota{border-left:3px solid var(--ok);background:var(--surface);padding:.9rem 1.1rem;
+  border-radius:0 6px 6px 0;font-size:.93rem;color:var(--ink-soft);margin-top:1.2rem}
+.nota.alerta{border-left-color:var(--alerta)}
+.nota.aten{border-left-color:var(--novo)}
+.nota b{color:var(--ink)}
+
+.perg{background:var(--surface);border:1px solid var(--line-strong);border-radius:8px;
+  padding:1.1rem 1.2rem;display:flex;flex-direction:column;gap:.75rem}
+.perg ol{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.55rem;
+  font-size:.94rem;color:var(--ink-soft)}
+.perg li b{color:var(--ink)}
+
+footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
+  color:var(--muted);font-size:.84rem;display:flex;flex-wrap:wrap;gap:.4rem 1.4rem}
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="hlinha">
+    <span class="eyebrow">Prime Eventos · conta 34</span>
+    <span class="eyebrow">Mockup para aprovação · 12/09/2026</span>
+  </div>
+  <h1>O app do vendedor Prime</h1>
+  <p class="lede">Em cinco dias o funil ganhou temperatura, prazo por etapa, fila por
+  prioridade e motivo de perda da empresa. Quase tudo isso ficou no painel — a tela
+  do Manoel. O Pedro, a Jacqueline e o Thiago trabalham no celular, e o celular
+  mudou muito pouco. Este documento mede o que eles veem hoje, mostra o que proponho
+  mudar, e separa o que já corrigi do que depende do seu sim.</p>
+</header>
+
+<!-- ═══════════════ 1. o que ele abre hoje -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Medido em produção · 12/09/2026</span>
+    <h2>O que o Pedro abre de manhã</h2>
+    <p>134 cartões. Em 131 deles a bolinha de temperatura é da mesma cor. Um sinal
+    que aparece em 98% dos cartões não é um sinal — é o fundo da tela.</p>
+  </div>
+
+  <div class="parede">
+    <div class="pq">
+      <div class="cab">
+        <b>Hoje — a fila do Pedro</b>
+        <span>a temperatura como está gravada agora</span>
+      </div>
+      <div class="pontos" id="p-hoje"></div>
+      <div class="leg">
+        <span><i style="background:#E0674E"></i>131 quente</span>
+        <span><i style="background:#5B8FBF"></i>3 frio</span>
+      </div>
+    </div>
+    <div class="pq">
+      <div class="cab">
+        <b>Com a regra ligada — o ensaio de hoje</b>
+        <span>o que o motor sugere, pelos fatos da conversa</span>
+      </div>
+      <div class="pontos" id="p-ensaio"></div>
+      <div class="leg">
+        <span><i style="background:#E0674E"></i>7 quente</span>
+        <span><i style="background:#C79233"></i>8 morno</span>
+        <span><i style="background:#5B8FBF"></i>119 frio</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="rolar" style="margin-top:1.4rem">
+  <table class="med">
+    <thead>
+      <tr><th>Vendedor</th><th>Leads abertos</th><th>Quentes hoje</th>
+          <th>Esperando resposta</th><th>Em Contatado</th><th>Passaram do teto (7d)</th>
+          <th>Festa em 30 dias</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="nome">Pedro Yan</td><td>134</td><td>131</td><td>13</td><td>120</td><td class="grave">101</td><td>4</td></tr>
+      <tr><td class="nome">Jacqueline</td><td>104</td><td>103</td><td>19</td><td>90</td><td class="grave">62</td><td>4</td></tr>
+      <tr><td class="nome">Thiago Pinheiro</td><td>77</td><td>77</td><td>10</td><td>71</td><td class="grave">49</td><td>4</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="corpo" style="margin-top:1.3rem">
+    <p>A coluna que importa é a penúltima. A etapa <b>Contatado</b> tem teto de 7
+    dias configurado, e <b>212 dos 281 leads que estão nela já passaram desse
+    prazo</b> — 101 só na fila do Pedro. O teto existe, está gravado na Régua, e
+    nunca chegou ao celular de ninguém: <span class="mono">teto_modo</span> está em
+    <b>off</b>, e mesmo ligado ele avisaria no painel, não no app.</p>
+    <p>A penúltima coluna e a terceira contam a mesma história por dois caminhos.
+    O que precisa do Pedro hoje são <b>13 conversas</b> em que o cliente falou e
+    ninguém respondeu. As outras 121 são trabalho de garimpo numa lista sem ordem
+    de importância.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ 2. o achado urgente -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Achado · precisa de decisão antes do resto</span>
+    <h2>“Agendado Visita” está marcada para sair do quadro</h2>
+  </div>
+  <div class="corpo">
+    <p>A etapa <span class="mono">qualificado</span> — que na Prime se chama
+    <b>Agendado Visita</b>, ordem 30, no meio do funil — está com
+    <span class="mono">sai_do_quadro = true</span>. Essa marca existe para as etapas
+    de <i>depois</i> da venda: ela tira a coluna do quadro, porque ali a prospecção
+    já acabou.</p>
+    <p>O efeito é que <b>a coluna não aparece no quadro</b>, e qualquer lead movido
+    para ela some da tela do gestor. Hoje há <b>zero leads</b> nessa etapa — o que
+    sugere que ninguém conseguiu usá-la, e não que ninguém quis.</p>
+    <p>No modelo do ramo de eventos essa etapa <b>não</b> tem a marca. Ela foi ligada
+    na conta 34 em algum momento da configuração desta semana, e eu não encontrei
+    motivo para ela estar lá. <b>Proponho desligar.</b> Nenhum lead é tocado: a
+    coluna volta a aparecer, e nada se move.</p>
+  </div>
+  <div class="nota alerta">
+    <b>Por que isto vem antes.</b> A correção que eu subi hoje tira as etapas de
+    pós-venda dos botões do app — é o certo, e impede o toque errado que fazia o lead
+    sumir da fila sem passar por Ganho nem por Perdido. Mas enquanto
+    “Agendado Visita” estiver marcada como pós-venda, ela vai sumir junto: o vendedor
+    fica sem como marcar a visita pelo celular. Desligar a marca resolve os dois de
+    uma vez.
+  </div>
+</section>
+
+<!-- ═══════════════ 3. a fila -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Proposta 1 · a tela que ele abre primeiro</span>
+    <h2>A Fila mostra o que precisa dele, e diz por quê</h2>
+    <p>A fila do app já agrupa por “sua vez”, festa marcada, sem data e parados.
+    O que falta é o resto: a temperatura só existe como uma bolinha de 7 pixels, e o
+    prazo da etapa não existe.</p>
+  </div>
+
+  <div class="pares">
+    <div class="par">
+      <div class="rot"><b>Hoje</b><span>no ar</span></div>
+      <div class="fone">
+        <div class="barra"><span>FILA · PEDRO</span><span>134</span></div>
+        <div class="grupo"><span>🟢 Sua vez</span><span>13</span></div>
+        <div class="card vez">
+          <div class="l1"><span class="dot q"></span><span class="nm">Amanda Ribeiro</span></div>
+          <div class="sn">Vocês têm 22 de novembro livre?</div>
+        </div>
+        <div class="card vez">
+          <div class="l1"><span class="dot q"></span><span class="nm">Célia Barbosa</span></div>
+          <div class="sn">Bom dia! Consegue me mandar o valor?</div>
+        </div>
+        <div class="grupo"><span>🎉 Festa marcada</span><span>54</span></div>
+        <div class="card">
+          <div class="l1"><span class="dot q"></span><span class="nm">Rafaela Nunes</span></div>
+          <div class="sn">Você: te mando as fotos do salão hoje</div>
+        </div>
+        <div class="grupo"><span>📅 Sem data</span><span>67</span></div>
+        <div class="card">
+          <div class="l1"><span class="dot q"></span><span class="nm">Wesley Carvalho</span></div>
+          <div class="sn">Você: oi Wesley, tudo bem?</div>
+        </div>
+        <div class="card">
+          <div class="l1"><span class="dot q"></span><span class="nm">Vanessa Lopes</span></div>
+          <div class="sn">🤖 Posso te ajudar com o orçamento?</div>
+        </div>
+        <div class="dobra">⏸ 86 parados há mais de 15 dias</div>
+      </div>
+    </div>
+
+    <div class="par">
+      <div class="rot"><b>Proposto</b><span class="nv">precisa do seu sim</span></div>
+      <div class="fone">
+        <div class="barra"><span>FILA · PEDRO</span><span>134</span></div>
+        <div class="aviso">📣 <b>2 avisos novos</b> sobre o funil <span class="x">ver</span></div>
+        <div class="grupo dest"><span>⏱ Precisa de você hoje</span><span>13</span></div>
+        <div class="card vez">
+          <div class="l1"><span class="dot q"></span><span class="nm">Amanda Ribeiro</span><span class="tp q">QUENTE</span></div>
+          <div class="sn">Vocês têm 22 de novembro livre?</div>
+          <div class="porq qt">↳ <em>respondeu há 2h</em> · esperando você</div>
+        </div>
+        <div class="card vez">
+          <div class="l1"><span class="dot q"></span><span class="nm">Célia Barbosa</span><span class="tp q">QUENTE</span></div>
+          <div class="sn">Bom dia! Consegue me mandar o valor?</div>
+          <div class="porq qt">↳ <em>respondeu ontem</em> · esperando você</div>
+        </div>
+        <div class="grupo"><span>⚠️ Prazo da etapa estourando</span></div>
+        <div class="card prazo">
+          <div class="l1"><span class="dot m"></span><span class="nm">Rafaela Nunes</span><span class="tp pz">6º DIA</span></div>
+          <div class="sn">Você: te mando as fotos do salão hoje</div>
+          <div class="porq">↳ <em>Contatado há 6 dias</em> · o teto é 7</div>
+        </div>
+        <div class="grupo"><span>🎉 Festa marcada</span></div>
+        <div class="card">
+          <div class="l1"><span class="dot m"></span><span class="nm">Juliana Prado</span><span class="tp m">MORNO</span></div>
+          <div class="sn">Você: qualquer coisa me chama</div>
+          <div class="porq">↳ <em>a bola está com ele</em> · festa em 14/11</div>
+        </div>
+        <div class="grupo"><span>❄️ Frios</span><span>119</span></div>
+        <div class="card">
+          <div class="l1"><span class="dot f"></span><span class="nm">Wesley Carvalho</span><span class="tp f">FRIO</span></div>
+          <div class="sn">Você: oi Wesley, tudo bem?</div>
+          <div class="porq fr">↳ <em>3 tentativas sem resposta</em></div>
+        </div>
+        <div class="dobra">❄️ mais 118 frios — toque para abrir</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="corpo" style="margin-top:1.4rem">
+    <p><b>O que muda, em uma frase:</b> o cartão passa a dizer <i>por que</i> está
+    naquela cor. “Frio” sozinho é um julgamento; “3 tentativas sem resposta” é um
+    fato que o vendedor reconhece e pode contestar — e contestar é mudar na ficha,
+    que continua valendo sobre a sugestão.</p>
+    <p>Os cortes entre os grupos — o que entra em cada um e em que ordem — são
+    parte do que este item propõe, e a gente afina com vocês vendo a fila de
+    verdade. As contagens que aparecem acima são as medidas de hoje: 13 esperando
+    resposta e 119 frios na fila do Pedro.</p>
+    <p>O grupo <b>Prazo da etapa estourando</b> só aparece quando a empresa tirar o
+    teto do <span class="mono">off</span>. Hoje ele nasceria com 101 cartões na fila
+    do Pedro, o que não é um aviso, é outra parede. Por isso a ordem que eu sugiro é:
+    primeiro a temperatura (que reorganiza a fila), depois o teto — e o teto
+    começando pelas etapas de baixo volume.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ 4. a folha -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Proposta 2 · já corrigido hoje</span>
+    <h2>A folha de ações do lead</h2>
+    <p>Dois defeitos que só apareceram quando a Prime começou a usar o funil de
+    verdade. Os dois já estão corrigidos e esperando o próximo deploy.</p>
+  </div>
+
+  <div class="pares">
+    <div class="par">
+      <div class="rot"><b>Hoje</b><span>no ar</span></div>
+      <div class="fone">
+        <div class="barra"><span>AMANDA RIBEIRO</span><span>AÇÕES</span></div>
+        <div class="folha">
+          <h5>Etapa no funil</h5>
+          <div class="chips">
+            <span class="chip">Novo</span>
+            <span class="chip on">Contatado</span>
+            <span class="chip">Follow-up</span>
+            <span class="chip">Negociação</span>
+            <span class="chip mau">Evento A Realizar</span>
+          </div>
+          <h5>Fechar</h5>
+          <div class="sel">Por que perdeu? <span>6 opções</span></div>
+          <ul class="opts">
+            <li class="x">Comprou do concorrente</li>
+            <li class="x">Sem orçamento</li>
+            <li>Achou caro</li>
+            <li>Sumiu depois da proposta</li>
+          </ul>
+        </div>
+      </div>
+      <p class="mut" style="font-size:.82rem">A lista era a do código, de seis. A da
+      Prime tem dez. Duas das seis o sistema recusa; seis das dez não apareciam.
+      E “Evento A Realizar” — pós-venda — era um toque de distância.</p>
+    </div>
+
+    <div class="par">
+      <div class="rot"><b>Corrigido</b><span class="nv">no PR de hoje</span></div>
+      <div class="fone">
+        <div class="barra"><span>AMANDA RIBEIRO</span><span>AÇÕES</span></div>
+        <div class="folha">
+          <h5>Etapa no funil</h5>
+          <div class="chips">
+            <span class="chip">Novo</span>
+            <span class="chip on">Contatado</span>
+            <span class="chip">Follow-up</span>
+            <span class="chip">Agendado Visita</span>
+            <span class="chip">Negociação</span>
+          </div>
+          <h5>Fechar</h5>
+          <div class="sel">Por que perdeu? <span>10 opções</span></div>
+          <ul class="opts">
+            <li class="n">Data indisponível</li>
+            <li class="n">Achou caro</li>
+            <li class="n">Escolheu outro buffet</li>
+            <li class="n">Adiou a festa</li>
+            <li class="n">Outro — conte o que houve</li>
+          </ul>
+          <div class="campo">✍️ aparece quando o motivo pede explicação</div>
+        </div>
+      </div>
+      <p class="mut" style="font-size:.82rem">A lista passa a ser a da empresa, na
+      ordem dela, sem os motivos desligados. O campo de texto entra no mesmo
+      formulário. As etapas de pós-venda saem dos botões — e “Agendado Visita”
+      volta, se você aprovar o item da seção anterior.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ 5. os avisos -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Você pediu para ver · medido hoje</span>
+    <h2>Os avisos estão saindo. Ninguém está abrindo.</h2>
+  </div>
+
+  <div class="rolar">
+  <table class="med">
+    <thead><tr><th>Pessoa</th><th>Papel</th><th>Avisos desde 08/09</th><th>Abertos</th></tr></thead>
+    <tbody>
+      <tr><td class="nome">Manoel Soares</td><td style="text-align:left">dono</td><td>13</td><td class="grave">0</td></tr>
+      <tr><td class="nome">Pedro Yan</td><td style="text-align:left">vendedor</td><td>5</td><td>2</td></tr>
+      <tr><td class="nome">Jacqueline</td><td style="text-align:left">vendedor</td><td>5</td><td class="grave">0</td></tr>
+      <tr><td class="nome">Thiago Pinheiro</td><td style="text-align:left">vendedor</td><td>5</td><td class="grave">0</td></tr>
+      <tr><td class="nome">Iris</td><td style="text-align:left">membro</td><td>5</td><td class="grave">0</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="corpo" style="margin-top:1.3rem">
+    <p>A mira está certa: cada vendedor recebeu exatamente os <b>5</b> avisos que
+    mudam a rotina dele — motivo de perda, teto da etapa, saídas e tentativas, fila
+    por temperatura e temperatura pelos fatos. Os outros oito (fundir colunas,
+    modelo do ramo, fase da etapa, nicho de seguros) ficaram com dono e gestor, como
+    devem.</p>
+    <p>O problema é o outro lado. <b>Dois de vinte e três avisos foram abertos</b>,
+    todos pelo Pedro. A faixa existe no topo da fila e some quando o aviso é lido —
+    mas ela divide espaço com o cartão que o vendedor veio buscar, e perde.</p>
+    <p><b>Proposta:</b> a faixa fica até ser aberta (não some ao rolar), e a de tipo
+    “mudança” — a que altera o que ele faz, como o motivo de perda obrigatório —
+    pede um “Entendi” antes de sair. É a regra que o painel já usa; o app tinha
+    ficado com a versão fraca.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ 6. o placar -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Resumo</span>
+    <h2>O que já está pronto, o que proponho, o que não faria</h2>
+  </div>
+
+  <div class="props">
+    <div class="prop">
+      <span class="s">1</span>
+      <div class="c"><b>Motivos de perda: a lista da empresa, no celular</b>
+      <p>Dez em vez de seis, sem os desligados, com campo de texto para o motivo que pede explicação. E o erro em português.</p></div>
+      <span class="tag feito">Corrigido hoje</span>
+    </div>
+    <div class="prop">
+      <span class="s">2</span>
+      <div class="c"><b>Pós-venda fora dos botões de etapa</b>
+      <p>Um toque não tira mais o lead da fila sem passar por Ganho ou Perdido. A etapa atual continua visível, marcada.</p></div>
+      <span class="tag feito">Corrigido hoje</span>
+    </div>
+    <div class="prop">
+      <span class="s">3</span>
+      <div class="c"><b>Desligar “sai do quadro” de Agendado Visita</b>
+      <p>Mudança de configuração na conta 34. Zero leads afetados; a coluna volta ao quadro. Sem isso, o item 2 tira a etapa do app.</p></div>
+      <span class="tag urg">Preciso do seu sim</span>
+    </div>
+    <div class="prop">
+      <span class="s">4</span>
+      <div class="c"><b>O cartão diz por que o lead está naquela cor</b>
+      <p>“3 tentativas sem resposta”, “respondeu há 2h”, “a bola está com ele”. Uma linha, o mesmo texto que o painel já mostra.</p></div>
+      <span class="tag novo">Proposta</span>
+    </div>
+    <div class="prop">
+      <span class="s">5</span>
+      <div class="c"><b>A fila ordena pela prioridade, e não só pelo agrupamento</b>
+      <p>Quente esperando resposta na frente; frio sem data no fim, dobrado. É a mesma régua de seis níveis que o painel usa desde ontem.</p></div>
+      <span class="tag novo">Proposta</span>
+    </div>
+    <div class="prop">
+      <span class="s">6</span>
+      <div class="c"><b>Grupo “prazo da etapa estourando”</b>
+      <p>Só aparece com o teto ligado. Nasceria com 101 cartões no Pedro — por isso sugiro ligar depois da temperatura, e por etapa.</p></div>
+      <span class="tag novo">Proposta</span>
+    </div>
+    <div class="prop">
+      <span class="s">7</span>
+      <div class="c"><b>A faixa de aviso fica até ser lida</b>
+      <p>Dois de vinte e três avisos abertos. Aviso de “mudança” pede o “Entendi”, como no painel.</p></div>
+      <span class="tag novo">Proposta</span>
+    </div>
+    <div class="prop">
+      <span class="s">—</span>
+      <div class="c"><b>O quadro kanban inteiro no celular</b>
+      <p>Cinco colunas em 360 pixels vira rolagem lateral sobre rolagem vertical. O vendedor trabalha uma conversa por vez; o quadro é a tela de quem olha o time.</p></div>
+      <span class="tag nao">Não faria</span>
+    </div>
+    <div class="prop">
+      <span class="s">—</span>
+      <div class="c"><b>Push quando um lead esquenta</b>
+      <p>Push é para o cliente falando com você. O sistema mudando de ideia sobre uma cor não merece o mesmo toque — e mudaria de ideia sobre 289 leads na primeira passada.</p></div>
+      <span class="tag nao">Não faria</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ 7. o que preciso -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Para seguir</span>
+    <h2>Três respostas suas</h2>
+  </div>
+  <div class="perg">
+    <ol>
+      <li><b>Desligo o “sai do quadro” de Agendado Visita?</b> É configuração, não
+      toca em lead nenhum, e destrava o item 2. Meu voto: sim.</li>
+      <li><b>A temperatura sai do ensaio?</b> A primeira passada reescreve 289 dos
+      315 leads dos três vendedores — a fila do Pedro passa de 131 quentes para 7. Cada mudança
+      fica no histórico do lead. Sem isso, os itens 4 e 5 não têm o que mostrar.</li>
+      <li><b>O teto de 7 dias em Contatado continua sendo 7?</b> 212 dos 281 leads
+      da etapa já passaram dele. Ou o prazo está curto para o ramo, ou há dois meses
+      de fila represada — e a resposta muda o que o item 6 mostra no primeiro dia.</li>
+    </ol>
+  </div>
+  <div class="nota aten">
+    <b>Uma pendência que não é deste mockup, mas segue de pé.</b> Três leads com
+    festa fechada — Missilene Sousa, Lucas Fortes Carvalho e Julia Castro — não têm
+    data de evento no cadastro. Quando a etapa Fechado passar a sair do quadro, eles
+    somem da tela sem chegar à Agenda, porque a Agenda precisa da data. Vale alguém
+    preencher antes.
+  </div>
+</section>
+
+<footer>
+  <span>Prime Eventos · conta 34</span>
+  <span>Números medidos em produção em 12/09/2026, só leitura</span>
+  <span>Ensaio da temperatura: 48h quente · 7 dias morno · 3 tentativas frio</span>
+</footer>
+
+</div>
+
+<script>
+(function(){
+  function encher(el, lista){
+    if(!el) return;
+    var frag = document.createDocumentFragment();
+    lista.forEach(function(par){
+      for(var i=0;i<par[0];i++){
+        var d = document.createElement('span');
+        d.className = 'pt ' + par[1];
+        frag.appendChild(d);
+      }
+    });
+    el.appendChild(frag);
+  }
+  encher(document.getElementById('p-hoje'),   [[131,'q'],[3,'f']]);
+  encher(document.getElementById('p-ensaio'), [[7,'q'],[8,'m'],[119,'f']]);
+})();
+</script>

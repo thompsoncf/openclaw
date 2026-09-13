@@ -71,6 +71,7 @@ Ela vende whey, café proteico, vitamina em cápsula e comida saudável, com ite
 R$&nbsp;459. Este documento mostra o que esse desencontro já custou no catálogo dela —
 tudo medido em produção, só leitura, em 13/09/2026 — e desenha o nicho <code>suplementos</code>:
 vocabulário, persona, CNAE e o aviso. No fim, as quatro decisões que são suas.</p>
+<p class="lead" style="border-left:3px solid #B8862E;background:#FBFAF7;padding:10px 13px;border-radius:8px;margin-top:-10px"><b>Atualização de 13/09/2026 — a decisão 1 já foi respondida.</b> O dono confirmou que a SuperFit <b>tem cozinha e vende prato feito</b>. Isso muda duas coisas aqui: o nicho passa a ser <b>misto</b> (produto + serviço) e <code>marmita</code> deixa de ser condicional. A cozinha está medida e desenhada no documento irmão — <code>docs/mockups/superfit_cozinha.html</code>, que traz a ficha técnica, o CMV, a produção do dia e o plano de marmitas.</p>
 
 <h2><span class="n">01</span> O que a SuperFit vê hoje</h2>
 <div class="sub">Nicho de lanchonete numa loja de suplemento</div>
@@ -196,8 +197,8 @@ e a recategorização da seção 07 é um passo separado, que só acontece com o
 <p style="margin-top:10px"><code>pote</code> é o padrão porque é a unidade de quase tudo no catálogo
 dele (900g, 300g, 220g). <code>frasco</code> é pra cápsula (os 60caps), <code>sache</code> pra dose
 avulsa de pré-treino, <code>caixa</code> pra display de barrinha, <code>kit</code> pra combo.
-<span class="pill cond" style="margin:0">marmita</span> só entra se a resposta da decisão 1 for
-"vende comida pronta".</p>
+<span class="pill cond" style="margin:0">marmita</span> está <b>confirmada</b>: a cozinha dele vende
+prato feito (ver o documento irmão da cozinha).</p>
 </div>
 
 <div class="card">
@@ -373,12 +374,8 @@ hoje o painel não oferece esse botão, e ligar isso é decisão sua.</div>
 <h2><span class="n">11</span> As quatro decisões que são suas</h2>
 <div class="sub">Regra 6 do CLAUDE.md: na dúvida, pergunta antes de construir</div>
 
-<div class="q"><div class="qt">1. A comida saudável é balcão ou plano?</div>
-<div class="qo">Se ela vende marmita no balcão, é produto e o nicho fica <b>produto puro</b> — igual
-hoje, nada muda no menu dele. Se for <b>plano semanal/mensal de marmita</b>, é receita recorrente: o
-nicho vira misto (<code>vende_servico=true</code>), aparece a aba Serviços, o funil e o Raio-X no
-perfil <code>recorrente</code>, e a mensalidade vira título que se renova sozinho. <span class="rec">É
-a decisão que mais muda o desenho</span> — e por isso é a primeira.</div></div>
+<div class="q" style="border-left-color:#1c7a4f"><div class="qt">1. A comida saudável é balcão ou plano? <span class="eti e-novo">respondida</span></div>
+<div class="qo"><b>Ela tem cozinha e vende prato feito.</b> Então o nicho nasce <b>misto</b> (<code>vende_servico=true</code>) e o perfil do Raio-X dela deixa de ser <code>produto</code> e vira <code>recorrente</code> — funil, Raio-X e follow-up entram no menu, que é o que serve pra vender plano em academia e empresa. O desenho da cozinha (ficha técnica, CMV, produção do dia, plano de marmitas e as fases) está no documento irmão <code>superfit_cozinha.html</code>; lá também está o efeito colateral que ainda precisa da sua escolha: o perfil olha só o slug do nicho, e a conta 16 tem <code>vende_servico=false</code> gravado.</div></div>
 
 <div class="q"><div class="qt">2. Validade e lote entram agora?</div>
 <div class="qo">O catálogo hoje não tem campo de validade. Numa loja com item de R$ 459 e giro lento,

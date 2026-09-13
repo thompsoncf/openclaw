@@ -1,0 +1,378 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<title>SUPER FIT: a cozinha (pratos feitos)</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:880px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:32px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.card{background:#fff;border:1px solid #E3DDD0;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden;margin-bottom:14px}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.tot td{background:#F6F3EC;font-weight:700}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC}
+.pn .bloco{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.4rem .55rem;font-size:.85rem;color:#DDE4EC;width:100%}
+.pn .lbl{color:#7B8A99;font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:.2rem}
+.pn .mut{color:#7B8A99;font-size:.78rem;margin-top:.1rem}
+.pn .expl{color:#9AA7B4;font-size:.85rem;margin:.7rem 0 .2rem;line-height:1.6}
+.pn .expl b{color:#7EE7B8}
+.pn .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:.5rem}
+.pn .lin{display:flex;align-items:center;gap:10px;background:#16212C;border:1px solid #22303C;border-radius:8px;padding:.45rem .6rem;margin-bottom:.35rem;font-size:.82rem}
+.pn .lin .qtd{color:#7B8A99;font-size:.75rem;white-space:nowrap}
+.pn .lin .v{margin-left:auto;color:#cfcfcf;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pn .tot{background:#12281F;border:1px solid #2C6E52;color:#7EE7B8;border-radius:8px;padding:.5rem .6rem;font-size:.85rem;display:flex;margin-top:.5rem}
+.pn .tot .v{margin-left:auto;font-weight:700}
+.pn .btn{display:inline-block;background:#1F7A55;color:#EAFFF5;border-radius:8px;padding:.45rem .9rem;font-size:.85rem;font-weight:700;margin-top:.4rem}
+.pill{display:inline-block;background:#F2EFE7;border:1px solid #E3DDD0;border-radius:99px;padding:.18rem .6rem;font-size:.78rem;margin:0 4px 6px 0;font-family:ui-monospace,Menlo,monospace}
+.pill.pad{background:#E8F5EE;border-color:#BFE3D0;color:#155c3b;font-weight:700}
+.eti{display:inline-block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;vertical-align:middle;margin-left:6px}
+.e-novo{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.e-hoje{background:#FDECEA;color:#B4453C;border:1px solid #F5C6C0}
+.e-tem{background:#EDF1F7;color:#3B5480;border:1px solid #C9D6EA}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.fonte{font-size:11.5px;color:#8A8475}
+.fonte a{color:#5A6678}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.card,.pn,.q,table{break-inside:avoid}}
+</style></head><body><div class="wrap">
+
+<h1>SUPER FIT: a cozinha</h1>
+<p class="lead">O primeiro documento tratou a SuperFit como loja de suplemento e terminou perguntando
+se a comida é balcão ou plano. A resposta veio: <b>ela tem cozinha e vende prato feito</b>. Isso não
+é um detalhe a mais — <b>é a operação inteira que já está no sistema</b>. Os R$&nbsp;3.084,78 que
+passaram pela conta dela até hoje são de cozinha e estrutura; do suplemento não entrou nem saiu um
+centavo. Este documento mede isso, olha como o mercado opera, e desenha o que falta — em fases, com
+a nota do que é reuso e do que é código novo.</p>
+
+<h2><span class="n">01</span> A cozinha já está no financeiro dele — e ninguém percebeu</h2>
+<div class="sub">Os 8 lançamentos e os 2 títulos da conta 16, um por um</div>
+
+<table>
+<tr><th>Data</th><th>O que é</th><th>Categoria hoje</th><th>Valor</th></tr>
+<tr><td>22/06</td><td>Carne</td><td class="mono">Mercado</td><td class="num">R$ 859,00</td></tr>
+<tr><td>09/09</td><td>Compras no mercado — Carvalho Supershop</td><td class="mono">Mercado</td><td class="num">R$ 103,24</td></tr>
+<tr><td>09/09</td><td><b>Queijo para cozinha</b> — Laticínios Vale do Leite (NF 112965/1)</td>
+    <td class="mono">Fornecedores</td><td class="num">R$ 126,04</td></tr>
+<tr><td>10/09</td><td>Compra no Sam's — VHB Supermercados</td><td class="mono">Mercado</td><td class="num">R$ 139,27</td></tr>
+<tr><td>10/09</td><td>Compra na Sendas (Assaí)</td><td class="mono">Mercado</td><td class="num">R$ 55,83</td></tr>
+<tr><td>10/09</td><td>Compra na Sendas (Assaí)</td><td class="mono">Mercado</td><td class="num">R$ 23,46</td></tr>
+<tr><td>11/09</td><td>Compra na DC Pães Tomaz Tajra</td><td class="mono">Mercado</td><td class="num">R$ 5,38</td></tr>
+<tr class="tot"><td colspan="3">Insumo de cozinha</td><td class="num">R$ 1.312,22</td></tr>
+<tr><td>09/09</td><td>Conta de luz Equatorial (08/2026)</td><td class="mono">Fornecedores</td><td class="num">R$ 1.759,56</td></tr>
+<tr><td>09/09</td><td>Estacionamento Rio Poty</td><td class="mono">Transporte</td><td class="num">R$ 13,00</td></tr>
+<tr class="tot"><td colspan="3">Tudo que passou pela conta</td><td class="num">R$ 3.084,78</td></tr>
+<tr class="tot"><td colspan="3">Receita registrada</td><td class="num">R$ 0,00</td></tr>
+</table>
+
+<div class="perigo"><b>Seis compras de insumo estão em "Mercado".</b> Olhe a lista de categorias de
+despesa do sistema: <span class="mono">Mercado · Restaurante · Transporte · Moradia · Contas de casa ·
+Saude · Lazer · Pet…</span> — é uma lista de <b>pessoa física</b>. Não existe <b>Insumos</b>,
+não existe <b>Embalagem</b>. Então a matéria-prima da cozinha dele está classificada como
+compra de supermercado doméstica, misturada com o que ele gasta em casa. <b>Sem separar isso, o CMV
+não existe</b> — e CMV é o número que decide se marmitaria dá lucro.</div>
+
+<div class="nota"><b>O precedente é recente e é seu:</b> a categoria de receita
+<code>Comissoes</code> nasceu com o nicho de corretora (#678) porque nenhuma das antigas descrevia a
+receita de uma corretora. Aqui é o mesmo caso, do lado da despesa. <span class="rec">Recomendo
+acrescentar <code>Insumos</code> e <code>Embalagens</code></span> — servem a toda conta que
+transforma matéria-prima: cozinha, padaria, açougue, confeitaria (a Doce Mell, conta 35, é uma).</div>
+
+<h2><span class="n">02</span> Como esse mercado opera (pesquisa)</h2>
+<div class="sub">O que é consenso entre quem vende marmita — e o que disso vira software</div>
+
+<table>
+<tr><th>O que o mercado diz</th><th>O que isso exige do sistema</th></tr>
+<tr><td><b>O lucro nasce na ficha técnica</b> — cada grama de cada ingrediente em cada receita.
+    Sem ela não se sabe o custo do prato.</td>
+    <td>Tabela de <b>receita</b>: prato → insumos, quantidade, fator de correção, rendimento.</td></tr>
+<tr><td><b>CMV saudável entre 32% e 40%</b> (matéria-prima + embalagem ÷ preço de venda), com a
+    proteína puxando o custo.</td>
+    <td>Custo do prato calculado pelo sistema e comparado com a <b>meta de CMV</b> da conta —
+    o campo <code>margem_alvo_pct</code> já existe.</td></tr>
+<tr><td><b>Preço sai do custo, não do "achismo":</b> custo ÷ CMV alvo. Custo de R$&nbsp;8,75 com CMV
+    de 30% pede preço de R$&nbsp;29,17 — arredonda pra R$&nbsp;29,90.</td>
+    <td>A tela mostra o <b>preço mínimo sugerido</b> ao lado do preço que ele pôs.</td></tr>
+<tr><td><b>Assinatura tem margem melhor</b> (o cliente paga adiantado e o desperdício cai), e é o
+    modelo que dá previsibilidade à marmita fit.</td>
+    <td><b>Plano de marmitas</b>: pacote semanal/mensal com preço fixo e cobrança que se repete.</td></tr>
+<tr><td><b>Cardápio rotativo semanal</b> evita monotonia e é o que segura o assinante.</td>
+    <td><b>Cardápio da semana</b>: qual prato em qual dia — e o que produzir de cada um.</td></tr>
+<tr><td><b>Os canais são academia, empresa e WhatsApp</b> — e loja de suplemento é justamente onde
+    o público dessa marmita já vai.</td>
+    <td>Prospecção de academias/empresas e o canal de WhatsApp — <b>as duas coisas já existem</b>
+    no sistema, desligadas na conta dele.</td></tr>
+<tr><td><b>Marmita embalada tem rótulo obrigatório</b> (RDC 727/2022): denominação, lista de
+    ingredientes, alergênicos, validade e identificação de quem produziu.</td>
+    <td><b>Etiqueta</b> impressa da ficha técnica + <b>validade</b> no lote produzido. O sistema já
+    tem tela de etiqueta no fluxo do fornecedor.</td></tr>
+</table>
+
+<div class="fonte">Fontes: ficha técnica e CMV —
+<a href="https://saipos.com/sistema/marmitaria/ficha-tecnica-marmitex">Saipos</a>,
+<a href="https://blog.yooga.com.br/como-calcular-custo-marmitex/">Yooga</a>,
+<a href="https://www.custoporprato.com.br/precificacao/marmitaria">Custo por Prato</a>,
+<a href="https://www.sisfood.com.br/saiba-mais/gestao-financeira/ficha-tecnica-prato">Sisfood</a>,
+<a href="https://checkbits.com.br/ficha-tecnica-gastronomica-food-service/">Checkbits</a>;
+assinatura e cardápio —
+<a href="https://blog.tamy.ai/blog/quanto-custa-montar-marmitaria">Tamy</a>,
+<a href="https://saipos.com/marmitex/plano-de-negocio-marmita-fit">Saipos</a>,
+<a href="https://wabiz.com.br/marmita-fit/">WAbiz</a>;
+canais —
+<a href="https://www.lojabrazil.com.br/blog/marmita-fitness-saiba-como-vender/">Loja Brazil</a>,
+<a href="https://controlenamao.com.br/blog/como-vender-marmita-fitness/">Controle na Mão</a>;
+rotulagem —
+<a href="https://blog.volkdobrasil.com.br/rdc-727/">RDC 727 (resumo)</a>,
+<a href="https://www.rotulagem.com.br/resolucao-rdc-727-de-1-de-julho-de-2022-anvisa">texto da resolução</a>.
+Números de mercado são referência do setor, não medição da SuperFit.</div>
+
+<h2><span class="n">03</span> O que o sistema JÁ tem e serve à cozinha</h2>
+<div class="sub">Antes de propor tabela nova: três quartos do caminho já está construído</div>
+
+<table>
+<tr><th>Peça pronta</th><th>Serve pra cozinha como</th><th>Ressalva</th></tr>
+<tr><td><code>catalogo_produtos</code> + <code>estoque_mov</code></td>
+    <td>O <b>prato pronto</b> é um produto com saldo; o <b>insumo</b> também. Entrada e saída de
+        estoque já existem e já guardam custo médio.</td>
+    <td>Falta marcar quem é insumo e quem é venda.</td></tr>
+<tr><td><code>finance/pdv.py</code></td>
+    <td>Venda de balcão mista: 5 marmitas + 1 pote de whey na mesma venda, com baixa de estoque e
+        receita no livro-caixa.</td>
+    <td>Funciona hoje, desde que o prato tenha saldo.</td></tr>
+<tr><td><code>titulos</code> recorrentes</td>
+    <td>O <b>plano de marmita</b> como conta a receber que se repete (mensal/quinzenal) e projeta o
+        mês seguinte na baixa.</td>
+    <td>Pronto. É o caminho barato do plano (seção 06).</td></tr>
+<tr><td>Cesta: <code>cesta_tamanhos</code>, <code>assinaturas</code>, <code>cesta_semana</code>,
+    <code>montador.py</code>, <code>pedidos.py</code></td>
+    <td>É <b>exatamente</b> o modelo do plano: tamanho com preço fixo, composição que varia toda
+        semana, restrições do cliente, separação, embalagem, etiqueta e rota.</td>
+    <td><b>Aqui mora a pegadinha</b> — ver o alerta abaixo.</td></tr>
+<tr><td>Prospecção + funil + campanhas + canal</td>
+    <td>Academia e empresa são lead PJ: é venda consultiva, com funil e follow-up.</td>
+    <td>Tudo desligado na conta 16 hoje.</td></tr>
+</table>
+
+<div class="alerta"><b>A pegadinha do reuso da Cesta:</b> em <code>cesta_semana</code> e
+<code>assinaturas</code>, o cliente é <code>references contas(id)</code> — o assinante precisa ter
+<b>login no sistema</b>. Foi desenhado pra marketplace. Os clientes da marmita do Danilo são um nome e
+um telefone no WhatsApp, que vivem em <code>clientes</code>. Generalizar isso é migração em módulo
+<b>vivo</b>: o Zé do Arroz (conta 9) tem <b>6 assinaturas e 3 tamanhos</b> rodando ali. Pela regra 0
+do CLAUDE.md, não se encosta nisso sem necessidade — e na v1 não há necessidade.</div>
+
+<h2><span class="n">04</span> O que falta, e é código novo</h2>
+<div class="sub">Quatro peças. Só as duas primeiras são indispensáveis</div>
+
+<table>
+<tr><th>#</th><th>Peça</th><th>O que é</th><th>Peso</th></tr>
+<tr><td class="num">1</td><td><b>Ficha técnica</b> <span class="eti e-novo">novo</span></td>
+    <td>Duas tabelas: <code>ficha_tecnica</code> (do prato: rendimento, modo de preparo) e
+        <code>ficha_itens</code> (insumo, quantidade bruta, fator de correção). O custo do prato
+        deixa de ser chute.</td><td>médio</td></tr>
+<tr><td class="num">2</td><td><b>Produção do dia</b> <span class="eti e-novo">novo</span></td>
+    <td>"Hoje fiz 40 marmitas de frango com batata-doce": <b>uma</b> ação que dá saída nos insumos
+        (pela ficha) e entrada no prato pronto. Reusa <code>estoque_mov</code> — é transação, não
+        tabela nova.</td><td>médio</td></tr>
+<tr><td class="num">3</td><td><b>Categorias Insumos e Embalagens</b> <span class="eti e-novo">novo</span></td>
+    <td>Duas linhas em <code>CATEGORIAS_DESPESA</code>. É o que separa o CMV da despesa de casa.</td>
+    <td><b>uma tarde</b></td></tr>
+<tr><td class="num">4</td><td><b>Lote e validade</b> <span class="eti e-novo">novo</span></td>
+    <td>Data de produção + validade no lote, e a etiqueta da RDC 727 saindo da ficha técnica.</td>
+    <td>médio</td></tr>
+</table>
+
+<div class="bom"><b>O que NÃO precisa nascer:</b> tela de pedido, carrinho, entrega, etiqueta, rota,
+cobrança recorrente, prospecção, campanha, agente de WhatsApp. Tudo isso já está de pé — e é por isso
+que a cozinha cabe neste sistema sem virar um produto novo.</div>
+
+<h2><span class="n">05</span> Como fica na tela</h2>
+<div class="sub">A ficha técnica de um prato, e a produção do dia</div>
+
+<p style="font-size:12.5px;color:#8A8475;margin-bottom:6px"><b>FICHA TÉCNICA</b> <span class="eti e-novo">novo</span> — <span class="mono">Frango grelhado com batata-doce e brócolis</span></p>
+<div class="pn">
+  <div class="grid">
+    <div class="bloco"><span class="lbl">Rende</span><div class="inp">20 marmitas</div></div>
+    <div class="bloco"><span class="lbl">Preço de venda</span><div class="inp">R$ 22,00</div></div>
+    <div class="bloco"><span class="lbl">CMV alvo da casa</span><div class="inp">35%</div>
+      <div class="mut">teto de custo: R$ 7,70</div></div>
+  </div>
+  <div class="bloco">
+    <span class="lbl">Insumos da receita</span>
+    <div class="lin">Peito de frango <span class="qtd">· 4,000 kg bruto · FC 1,10</span><span class="v">R$ 92,40</span></div>
+    <div class="lin">Batata-doce <span class="qtd">· 3,000 kg bruto · FC 1,25</span><span class="v">R$ 18,75</span></div>
+    <div class="lin">Brócolis <span class="qtd">· 2,000 kg bruto · FC 1,40</span><span class="v">R$ 22,40</span></div>
+    <div class="lin">Azeite, sal, temperos <span class="qtd">· rateio</span><span class="v">R$ 6,00</span></div>
+    <div class="lin">Embalagem + etiqueta <span class="qtd">· 20 un</span><span class="v">R$ 14,00</span></div>
+    <div class="tot"><span>Custo por marmita &nbsp;·&nbsp; CMV real 35,8%</span><span class="v">R$ 7,88</span></div>
+  </div>
+  <div class="expl">O <b>fator de correção</b> é o que separa o peso que ele compra do peso que vai na
+  marmita — sem ele o custo sai menor do que é. Aqui o CMV deu <b>35,8%</b>: passou do teto por
+  R$&nbsp;0,18, e a tela diz isso em vez de deixar ele descobrir no fim do mês.</div>
+</div>
+
+<p style="font-size:12.5px;color:#8A8475;margin:18px 0 6px"><b>PRODUÇÃO DO DIA</b> <span class="eti e-novo">novo</span></p>
+<div class="pn">
+  <div class="grid">
+    <div class="bloco"><span class="lbl">Prato</span><div class="inp">Frango c/ batata-doce ▾</div></div>
+    <div class="bloco"><span class="lbl">Quantas</span><div class="inp">40 marmitas</div></div>
+    <div class="bloco"><span class="lbl">Validade</span><div class="inp">11/10/2026</div>
+      <div class="mut">30 dias, congelada</div></div>
+  </div>
+  <div class="bloco">
+    <span class="lbl">O que sai do estoque (pela ficha, × 2 receitas)</span>
+    <div class="lin">Peito de frango<span class="v">− 8,000 kg</span></div>
+    <div class="lin">Batata-doce<span class="v">− 6,000 kg</span></div>
+    <div class="lin">Brócolis<span class="v">− 4,000 kg</span></div>
+    <div class="lin">Embalagem<span class="v">− 40 un</span></div>
+    <div class="tot"><span>Entra no estoque: 40 marmitas · custo R$ 7,88 cada</span><span class="v">R$ 315,20</span></div>
+  </div>
+  <div class="btn">Registrar produção</div>
+  <div class="expl">Um toque: baixa insumo, sobe prato pronto, grava o custo real do dia. É o mesmo
+  <code>estoque_mov</code> que o suplemento usa — <b>nenhuma tabela nova</b>.</div>
+</div>
+
+<h2><span class="n">06</span> O plano de marmitas: dois caminhos</h2>
+<div class="sub">O barato entrega este mês; o completo é pra quando o plano provar que vende</div>
+
+<table>
+<tr><th></th><th>Caminho A — título recorrente <span class="eti e-tem">reuso puro</span></th>
+    <th>Caminho B — assinatura de verdade</th></tr>
+<tr><td><b>Como funciona</b></td>
+    <td>O plano é um produto ("Plano 20 marmitas/mês"). Ao vender, nasce um título a receber
+        <b>recorrente</b>; o cardápio da semana vai por WhatsApp.</td>
+    <td>Cliente tem plano, restrições ("não como peixe"), cardápio montado por semana, separação,
+        etiqueta e rota — como a cesta do Zé do Arroz.</td></tr>
+<tr><td><b>Código novo</b></td><td><b>Nenhum.</b> Já funciona hoje.</td>
+    <td>Generalizar <code>assinaturas</code>/<code>cesta_semana</code> pra aceitar cliente sem login,
+        e um montador que pensa em cardápio, não em cesta.</td></tr>
+<tr><td><b>Risco</b></td><td>Nenhum.</td>
+    <td><b>Mexe em módulo vivo</b> (6 assinaturas do Zé do Arroz). Migração com cuidado.</td></tr>
+<tr><td><b>Limite</b></td><td>Ele controla o cardápio e as trocas na mão.</td>
+    <td>Nenhum relevante.</td></tr>
+</table>
+
+<div class="bom"><span class="rec">Recomendo o caminho A agora</span> e o B só depois que o plano
+tiver assinante de verdade. O que decide não é a arquitetura — é se o cliente de Teresina compra
+pacote fechado. O A responde essa pergunta em uma semana, sem tocar em nada do Zé do Arroz.</div>
+
+<h2><span class="n">07</span> O nicho, revisto pela cozinha</h2>
+<div class="sub">Uma conta tem UM nicho — e a SuperFit tem duas operações</div>
+
+<p>O primeiro documento propôs <code>suplementos</code> como produto puro. Com a cozinha confirmada,
+isso não descreve mais a empresa. Três saídas:</p>
+
+<table>
+<tr><th>Saída</th><th>O que dá</th><th>O que custa</th></tr>
+<tr><td><b>a)</b> <code>suplementos</code> <b>misto</b>, com a cozinha dentro
+    <span class="eti e-novo">recomendado</span></td>
+    <td>Um nicho só, vocabulário dos dois lados: <code>whey</code>… e
+        <code>marmita</code>, <code>prato_pronto</code>, <code>insumo</code>. Bate com o mercado:
+        suplemento + marmita fit é o combo do ramo, mesma clientela de academia.</td>
+    <td>Uma lista de categoria mais longa.</td></tr>
+<tr><td><b>b)</b> Dois nichos separados</td>
+    <td>Vocabulário limpo em cada um.</td>
+    <td><b>Não cabe:</b> <code>contas.nicho_id</code> é uma FK só. Ele teria que escolher qual metade
+        da empresa dele o sistema enxerga.</td></tr>
+<tr><td><b>c)</b> Permitir vários nichos por conta</td>
+    <td>Resolve de verdade, e serviria a qualquer negócio misto.</td>
+    <td>Mudança estrutural: todo o código lê <b>um</b> slug. Fica anotado como caminho futuro,
+        não é pra agora.</td></tr>
+</table>
+
+<div class="alerta"><b>Um efeito colateral que precisa de decisão sua.</b> Se o nicho passa a vender
+serviço (o plano), <code>raio_x_perfil.perfil_por_nicho</code> devolve <b><code>recorrente</code></b>
+em vez de <code>produto</code> — e a conta ganha <b>funil, Raio-X e follow-up</b> no menu. Pra vender
+plano em academia e empresa isso é bom: é venda consultiva, com lead e proposta. Mas repare que o
+perfil hoje olha só o <b>slug do nicho</b>, e não as flags <code>vende_produto</code>/
+<code>vende_servico</code> da CONTA — a conta 16 tem <code>vende_servico=false</code> gravado, então
+ela ganharia o funil no menu <b>sem</b> a aba Serviços. <span class="rec">Ou ele liga "vende serviço"
+em Empresa</span> (uma linha, e some a inconsistência), <span class="rec">ou o perfil passa a
+respeitar as flags da conta</span> — que é a correção mais certa, e hoje não mudaria o
+comportamento de nenhuma outra conta da base.</div>
+
+<h2><span class="n">08</span> As fases</h2>
+<div class="sub">Cada uma entrega sozinha — nenhuma depende da seguinte pra valer a pena</div>
+
+<table>
+<tr><th>Fase</th><th>O que entra</th><th>O que o Danilo ganha</th></tr>
+<tr><td><b>0</b> <span class="eti e-hoje">já escrito</span></td>
+    <td>Nicho <code>suplementos</code> (agora misto) + vocabulário + persona + CNAE + aviso</td>
+    <td>A tela para de falar em prato e porção pro whey dele</td></tr>
+<tr><td><b>1</b></td><td>Categorias <code>Insumos</code> e <code>Embalagens</code> + reclassificar os
+    6 lançamentos de "Mercado"</td>
+    <td><b>O CMV passa a existir.</b> É a fase mais barata e a de maior efeito</td></tr>
+<tr><td><b>2</b></td><td>Ficha técnica + custo do prato + preço mínimo sugerido</td>
+    <td>Ele descobre quanto custa cada marmita — e se o preço está certo</td></tr>
+<tr><td><b>3</b></td><td>Produção do dia (baixa insumo, sobe prato pronto)</td>
+    <td>Estoque de marmita de pé, e o PDV vende sem recusar</td></tr>
+<tr><td><b>4</b></td><td>Plano de marmitas pelo caminho A + cardápio da semana</td>
+    <td>Receita recorrente e previsível</td></tr>
+<tr><td><b>5</b></td><td>Lote, validade e etiqueta RDC 727</td>
+    <td>Marmita congelada rotulada como a lei pede</td></tr>
+</table>
+
+<div class="nota"><b>E as três travas do primeiro documento continuam valendo</b>, agora com mais
+motivo: estoque zerado em 42 de 42 produtos (o PDV recusa a primeira venda), custo zerado em 42 de 42
+(a margem-alvo de 60% não mede nada) e 15 produtos duplicados. A fase 3 resolve o estoque do lado da
+cozinha; o do suplemento continua sendo entrada manual, na tela de Abastecimento.</div>
+
+<h2><span class="n">09</span> O que eu preciso saber do Danilo</h2>
+<div class="sub">Regra 6: o vocabulário de um ramo não serve pro outro, e eu não conheço a cozinha dele</div>
+
+<div class="q"><div class="qt">1. A marmita é fresca do dia ou congelada?</div>
+<div class="qo">Muda a validade (2–3 dias × 30–90), muda se precisa de etiqueta com data, e muda se o
+"estoque de marmita" é do dia ou acumulado. <b>A fase 5 depende inteira desta resposta.</b></div></div>
+
+<div class="q"><div class="qt">2. Quantos pratos ele tem e quantas marmitas faz por dia?</div>
+<div class="qo">Cinco pratos e 40 marmitas/dia é uma coisa; vinte pratos sob encomenda é outra. O
+número define se a produção do dia é uma tela ou um botão no card do prato.</div></div>
+
+<div class="q"><div class="qt">3. Ele já vende plano, ou só avulso no balcão?</div>
+<div class="qo">Se já tem cliente de pacote, a fase 4 sobe na fila. Se é tudo avulso, o plano é uma
+aposta — e o caminho A existe justamente pra testar barato.</div></div>
+
+<div class="q"><div class="qt">4. Entrega ele mesmo, por app, ou o cliente retira?</div>
+<div class="qo">Entrega própria puxa a rota por bairro (que já existe no fluxo de fornecedor); app de
+entrega não passa pelo nosso sistema; retirada não precisa de nada.</div></div>
+
+<div class="q"><div class="qt">5. A cozinha é da SuperFit mesmo, ou é outro CNPJ?</div>
+<div class="qo">A conta é uma só e o CNAE é de comércio varejista de alimentos. Se a cozinha for
+outra empresa dele, são <b>duas contas</b> — e aí cada uma pega o nicho certo, o que resolve a seção
+07 sozinho.</div></div>
+
+<div class="ftr">
+<b>Como isto foi medido.</b> Leitura, só leitura, no banco de produção em 13/09/2026: os 8
+lançamentos e 2 títulos da conta 16 (valores conferidos um a um), o uso real dos módulos de cesta e
+assinatura na base inteira (6 assinaturas e 3 tamanhos, todos do Zé do Arroz — conta 9), e o código
+de hoje na main: <code>finance/models.py</code> (categorias), <code>finance/pdv.py</code>,
+<code>finance/catalogo.py</code>, <code>finance/cestas.py</code>, <code>finance/assinaturas.py</code>,
+<code>finance/montador.py</code>, <code>finance/pedidos.py</code>,
+<code>finance/raio_x_perfil.py</code>. Nenhuma escrita foi feita.<br>
+<b>Referências de mercado</b> estão linkadas na seção 02 — são parâmetro do setor (CMV, margem de
+assinatura, rotulagem), não medição da SuperFit. Os números da ficha técnica da seção 05 são
+<b>exemplo</b>, pra mostrar a tela: os preços de insumo do Danilo entram quando ele cadastrar.<br>
+<b>Documento irmão:</b> <code>docs/mockups/nicho_suplementos.html</code> — a parte da loja.
+</div>
+
+</div></body></html>

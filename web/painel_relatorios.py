@@ -1024,6 +1024,18 @@ _E_VISITA = "(e.titulo ilike 'visita%%' and e.tipo_evento is null)"
 #: visitas + eventos é sempre igual ao total, em qualquer base.
 AGENDA_ESPECIES = [("", "Todos"), ("visita", "Visitas"), ("evento", "Eventos")]
 
+#: Tipos de festa que NÃO têm contagem de convidados, e por isso mostram "n/a" em
+#: vez de "—". Regra do dono, 13/09/2026: "na locação não conta convidado".
+#:
+#: A diferença importa porque as duas células diziam a mesma coisa e queriam dizer
+#: o contrário: "—" é uma cobrança ("falta preencher"), "n/a" é uma resposta ("não
+#: existe pra este tipo"). Na Prime são 16 das 64 linhas da aba Eventos — um quarto
+#: da tela parecendo pendência que ninguém nunca vai resolver.
+#:
+#: Casa pelo rótulo de `TIPOS_EVENTO` porque é isso que fica gravado em
+#: `eventos_agenda.tipo_evento` — não há id.
+SEM_CONVIDADOS = {"Locação"}
+
 
 def _dinheiro_dos_eventos(pool, conta_id, de, ate) -> tuple[int, int]:
     """(contratada, recebida) em centavos, dos eventos do período.
@@ -1070,11 +1082,17 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
     (o porquê está no comentário de `AGENDA_ESPECIES`).
 
     A espécie muda as COLUNAS e as MÉTRICAS, não só as linhas, e é de propósito:
-    visita nunca tem sinal (não segura data) nem convidados, e tem vendedor e
-    comparecimento; festa tem convidados, sinal e tipo. Mostrar as oito colunas
-    fixas obrigava a ler R$ 0,00 e "—" em metade da tela. Já `status` e
-    `vendedor` continuam sendo só recorte: as métricas os ignoram, como sempre
-    ignoraram — recorte não muda o que está sendo contado, espécie muda.
+    visita não segura data (nunca teve sinal) e tem comparecimento; festa tem
+    tipo. Mostrar as oito colunas fixas obrigava a ler "—" em metade da tela. Já
+    `status` e `vendedor` continuam sendo só recorte: as métricas os ignoram,
+    como sempre ignoraram — recorte não muda o que está sendo contado, espécie
+    muda.
+
+    CONVIDADOS aparece nas TRÊS abas desde 13/09/2026, e antes disso a visita era
+    a exceção — "visita não tem convidados". A frase estava certa sobre o
+    compromisso e errada sobre a visita: o lead que a originou sabe quantos vêm, e
+    é antes de receber a pessoa que o número muda o que alguém faz. Ver o terceiro
+    elo em `join_orc` e a aba `especie == "visita"`.
 
     PERÍODO. Esta é a única aba que pede `ate_o_fim`: "este mês" aqui vai até o
     último dia, não até hoje (decisão do dono em 31/08/2026). Numa agenda, parar
@@ -1098,10 +1116,14 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
     Reunião interna e compromisso pessoal seguem sem nenhuma das três e continuam
     "—" — é o esperado, não bug.
 
-    "Sinal" é `eventos_agenda.sinal_centavos`, o valor que segura a DATA
-    (163_evento_sinal_esperado) — só é gravado no "Só segurar a data" do
-    formulário de novo compromisso (web/painel_agenda.py, checkbox `segurar`) ou
-    na pré-reserva por orçamento (web/proposta._reservar_na_agenda).
+    SINAL não é mais COLUNA em nenhuma aba (13/09/2026), só a métrica "Sinal no
+    período" no rodapé. `eventos_agenda.sinal_centavos` é o valor que segura a
+    DATA (163_evento_sinal_esperado) e só é gravado por dois caminhos estreitos —
+    o "Só segurar a data" do formulário (web/painel_agenda.py, checkbox
+    `segurar`) e a pré-reserva por orçamento (web/proposta._reservar_na_agenda).
+    Festa que entra por telefonema não passa por nenhum dos dois, e era a maioria:
+    3 linhas de 64 na Prime. A soma continua sendo feita sobre TODAS as linhas do
+    período (`sinal_total`, no agregado) — tirar a coluna não tirou o número.
     """
     especie = especie if especie in ("visita", "evento") else ""
     ini, fim = _intervalo(periodo, de, ate, ate_o_fim=True)
@@ -1132,6 +1154,14 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
     # orçamento aprovado, a contagem JÁ EXISTE em `orcamentos.evento` (a mesma
     # que o Funil mostra no subtítulo). Sem este fallback a coluna "Convid."
     # aparecia "—" pra festa que o próprio cliente já tinha informado.
+    #
+    # O TERCEIRO ELO é o lead (`prospeccao.evento_convidados` / `evento_tipo`),
+    # e ele existe pela VISITA, não pela festa. Medido na Prime em 13/09/2026: na
+    # aba Eventos ele não acrescenta nada (13 de 64, com e sem ele), porque festa
+    # vinda de lead também tem orçamento e o orçamento já responde. Na aba
+    # Visitas ele é a diferença entre não ter coluna e ter: 7 das 25 visitas já
+    # trazem a contagem e 11 das 25 o tipo da festa. Quem vai receber a pessoa
+    # precisa saber que é uma formatura de 100 antes de ela chegar.
     join_orc = """left join clientes cl
                     on cl.id = e.cliente_id and cl.dono_id = e.conta_id
                   left join pessoas pe on pe.id = cl.pessoa_id
@@ -1160,7 +1190,8 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                        count(*) filter (where e.status='pre_reservado'),
                        count(*) filter (where e.inicio < now() and e.desfecho is null),
                        count(*) filter (where e.prospeccao_id is not null),
-                       coalesce(sum(coalesce(e.convidados, nullif(oc.convidados,'')::int)), 0),
+                       coalesce(sum(coalesce(e.convidados, nullif(oc.convidados,'')::int,
+                                             p.evento_convidados)), 0),
                        count(*) filter (where e.tipo_evento is null)
                   from eventos_agenda e
                   {join_orc}
@@ -1183,11 +1214,13 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
             f"""select e.inicio, coalesce(e.tipo_evento, e.titulo),
                        coalesce(pe.nome, cl.nome, oc.nome, p.contato, p.empresa),
                        e.tipo, e.status, e.desfecho,
-                       coalesce(e.convidados, nullif(oc.convidados,'')::int), e.sinal_centavos,
+                       coalesce(e.convidados, nullif(oc.convidados,'')::int,
+                                p.evento_convidados), e.sinal_centavos,
                        mb.nome, e.tipo_evento, e.id,
                        coalesce(e.sem_cliente, false), e.titulo,
                        coalesce(pe.nome, cl.nome, oc.nome) is not null as nome_firme,
-                       coalesce(p.contato, p.empresa) as nome_lead
+                       coalesce(p.contato, p.empresa) as nome_lead,
+                       coalesce(e.tipo_evento, p.evento_tipo) as festa
                   from eventos_agenda e
                   {join_orc}
                  where {where2_sql}
@@ -1243,16 +1276,31 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
             "status": st_rotulo, "status_cor": st_cor,
             "desfecho": df_rotulo, "desfecho_cor": df_cor,
             "vendedor": r[8] or "—",
-            "convidados": r[6] if r[6] is not None else "—",
+            # "n/a" (locação) ≠ "—" (falta preencher). Ver SEM_CONVIDADOS.
+            "convidados": (r[6] if r[6] is not None
+                           else "n/a" if r[15] in SEM_CONVIDADOS else "—"),
+            # `festa` é o tipo COM o elo do lead, e existe separado de
+            # `tipo_evento` de propósito: a aba Eventos continua cobrando o tipo
+            # que falta no compromisso (o selo âmbar), enquanto a aba Visitas
+            # mostra o que o lead já disse. Misturar os dois apagaria a cobrança.
+            "festa": r[15] or "—",
             "sinal_centavos": int(r[7] or 0),
         })
 
     if especie == "visita":
-        # Sem Sinal (visita não segura data — era sempre R$ 0,00) e sem
-        # Convidados; entram Vendedor e o comparecimento, que é o que se pergunta
-        # de uma visita.
+        # Sem Sinal — visita não segura data, a coluna era sempre R$ 0,00.
+        #
+        # COM Festa e Convid. desde 13/09/2026, e é a inversão de uma decisão
+        # anterior ("visita nunca tem convidados"). Ela estava certa sobre o
+        # COMPROMISSO e errada sobre a VISITA: o compromisso de fato nasce sem
+        # esses campos, mas o lead que originou a visita costuma saber os dois, e
+        # é justamente antes de receber a pessoa que eles mudam o que alguém faz.
+        # Quem vê "Visita — Elsinha" não se prepara igual a quem vê "Visita —
+        # Elsinha · Formatura · 100".
         colunas = [_col("inicio", "Data"), _col("evento", "Visita", flex=True),
                    _col("cliente", "Cliente", cli=True), _col("vendedor", "Vendedor"),
+                   _col("festa", "Festa", tag=True),
+                   _col("convidados", "Convid.", num=True),
                    _col("status", "Status", tag=True),
                    _col("desfecho", "Desfecho", tag=True)]
         col_total, total_centavos = None, 0
@@ -1272,9 +1320,19 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                    _col("tipo_evento", "Tipo", tag=True),
                    _col("status", "Status", tag=True),
                    _col("desfecho", "Desfecho", tag=True),
-                   _col("convidados", "Convid.", num=True),
-                   _col("sinal_centavos", "Sinal", num=True, brl=True)]
-        col_total, total_centavos = "sinal_centavos", _soma(linhas, "sinal_centavos")
+                   _col("convidados", "Convid.", num=True)]
+        # SINAL saiu em 13/09/2026, a pedido do dono ("a coluna sinal você já
+        # pode tirar"). Medido na Prime no mesmo dia: 3 de 64 linhas preenchidas
+        # (4,7%) — 61 células de R$ 0,00. Não era desleixo de quem preenche:
+        # `sinal_centavos` só é gravado por dois caminhos estreitos (o "Só
+        # segurar a data" do formulário e a pré-reserva por orçamento), e festa
+        # que entra por telefonema não passa por nenhum dos dois.
+        #
+        # O NÚMERO NÃO SOME: "Sinal no período" segue no rodapé, logo abaixo.
+        # Uma linha no rodapé custa nada; 61 células de R$ 0,00 custam a leitura
+        # da tela. Por isso `col_total` também sai — ele somava a coluna que
+        # deixou de existir.
+        col_total, total_centavos = None, 0
         # OS TRÊS NÚMEROS DE DINHEIRO que o fluxo V3 pede na aba de eventos
         # ("receita contratada; receita recebida; valores a receber"). Saem dos
         # orçamentos dos leads cujo evento cai no período — é a única fonte que sabe
@@ -1306,9 +1364,11 @@ def _dados_agenda(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
                    _col("tipo", "Tipo"),
                    _col("status", "Status", tag=True),
                    _col("desfecho", "Desfecho", tag=True),
-                   _col("convidados", "Convid.", num=True),
-                   _col("sinal_centavos", "Sinal", num=True, brl=True)]
-        col_total, total_centavos = "sinal_centavos", _soma(linhas, "sinal_centavos")
+                   _col("convidados", "Convid.", num=True)]
+        # Sinal sai aqui pelo mesmo motivo da aba Eventos (ver acima) — e aqui a
+        # coluna era ainda mais vazia, porque "Todos" mistura visita com festa e
+        # visita nunca teve sinal. A métrica do rodapé continua.
+        col_total, total_centavos = None, 0
         metricas = [("Eventos no período", str(n_total)),
                     ("Realizados", _pct(n_realizado)),
                     ("Não realizados", _pct(n_nao_realizado)),

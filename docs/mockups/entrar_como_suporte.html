@@ -1,0 +1,300 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<title>Entrar como: o acesso de suporte às contas</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:880px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:32px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.card{background:#fff;border:1px solid #E3DDD0;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden;margin-bottom:14px}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+td.sim{color:#1c7a4f;font-weight:700}
+td.nao{color:#B4453C;font-weight:700}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+.passos{counter-reset:p;margin:0 0 14px;padding:0;list-style:none}
+.passos li{counter-increment:p;position:relative;padding:10px 0 10px 44px;border-bottom:1px solid #E7E1D4;font-size:13.5px}
+.passos li:last-child{border-bottom:0}
+.passos li::before{content:counter(p);position:absolute;left:0;top:9px;width:28px;height:28px;border-radius:50%;
+  background:#14213D;color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center}
+/* ---------- réplica do painel escuro ---------- */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:0;margin-bottom:14px;color:#DDE4EC;overflow:hidden}
+.pn .corpo{padding:14px 16px}
+.faixa{background:#5C3A06;border-bottom:1px solid #8a6a2a;color:#FFE9C2;padding:.55rem .9rem;font-size:.82rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+.faixa b{color:#fff}
+.faixa .dir{margin-left:auto;display:flex;gap:.5rem;align-items:center}
+.faixa .btn{background:#FFE9C2;color:#5C3A06;border-radius:6px;padding:.18rem .6rem;font-weight:700;font-size:.76rem;white-space:nowrap}
+.faixa .btn.vazio{background:transparent;border:1px solid #a9853f;color:#FFE9C2;font-weight:600}
+.faixa .rel{font-variant-numeric:tabular-nums;opacity:.85}
+.pn .topo{display:flex;align-items:center;gap:.6rem;border-bottom:1px solid #22303C;padding:.7rem .9rem;font-size:.85rem;color:#9AA7B4}
+.pn .topo .logo{font-weight:700;color:#DDE4EC}
+.pn .bloco{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem}
+.pn .lbl{color:#7B8A99;font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:.25rem}
+.pn .mut{color:#7B8A99;font-size:.78rem}
+.pn .expl{color:#9AA7B4;font-size:.85rem;margin:.7rem 0 .2rem;line-height:1.6}
+.pn .expl b{color:#7EE7B8}
+.pn .lin{display:flex;align-items:center;gap:10px;background:#16212C;border:1px solid #22303C;border-radius:8px;padding:.5rem .65rem;margin-bottom:.35rem;font-size:.83rem}
+.pn .lin .dir{margin-left:auto;display:flex;gap:.4rem;align-items:center}
+.pn .btnv{background:#1F7A55;color:#EAFFF5;border-radius:7px;padding:.28rem .7rem;font-size:.76rem;font-weight:700;white-space:nowrap}
+.pn .btno{background:transparent;border:1px solid #2A3947;color:#9AA7B4;border-radius:7px;padding:.28rem .7rem;font-size:.76rem;white-space:nowrap}
+.pn .btntrava{background:#3A2A10;border:1px solid #5C4418;color:#E0B458;border-radius:7px;padding:.28rem .7rem;font-size:.76rem;font-weight:700}
+.pn .campo{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.4rem .55rem;font-size:.85rem;color:#5d6b78}
+.pn .campo.travado{background:#121a21;color:#4e5b67;border-style:dashed}
+.eti{display:inline-block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;vertical-align:middle;margin-left:6px}
+.e-novo{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.e-hoje{background:#FDECEA;color:#B4453C;border:1px solid #F5C6C0}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.card,.pn,.q,table{break-inside:avoid}}
+</style></head><body><div class="wrap">
+
+<h1>Entrar como: o acesso de suporte às contas</h1>
+<p class="lead">Hoje, pra ver a tela de um cliente, só existem caminhos ruins: pedir a senha dele,
+ou virar membro da equipe dele — foi o que fizemos na SUPER FIT em 13/09/2026, e o remendo aparece
+na tela de Equipe do Danilo até hoje. A saída que o dono cogitou (<b>uma senha mestra pra todas as
+empresas</b>) resolve o incômodo e cria um problema maior, e a seção 02 mostra por quê. Este
+documento desenha o <b>"Entrar como"</b>: acesso de suporte pela sessão que você já tem,
+<b>em modo leitura</b>, com <b>60 minutos</b> de validade e trilha de quem entrou onde — as duas
+escolhas já aprovadas pelo dono.</p>
+
+<h2><span class="n">01</span> Como é hoje, e por que cada saída é ruim</h2>
+<div class="sub">Três caminhos, três problemas diferentes</div>
+
+<table>
+<tr><th>Caminho</th><th>O que acontece</th><th>O problema</th></tr>
+<tr><td><b>Pedir a senha ao cliente</b></td>
+    <td>Ele manda a senha por WhatsApp</td>
+    <td>A senha dele passa a existir fora da cabeça dele — no seu celular, no histórico da conversa.
+        E você depende de ele responder pra resolver qualquer coisa.</td></tr>
+<tr><td><b>Trocar a senha dele</b></td>
+    <td>Você entra</td>
+    <td><b>Ele deixa de entrar.</b> Descartado na hora: a conta 16 tem senha própria em uso.</td></tr>
+<tr><td><b>Virar membro da equipe</b> <span class="eti e-hoje">é o de hoje</span></td>
+    <td>Um membro "Suporte ZAQ" na conta do cliente</td>
+    <td>Aparece na tela de Equipe dele; precisa ser criado e removido conta a conta; e o papel
+        <code>gestor</code> <b>não abre a tela de Produtos</b> — a whitelist de
+        <code>contas.equipe.rotas_do_papel</code> não tem <code>/painel/produtos</code>,
+        <code>/painel/pdv</code> nem <code>/painel/clientes</code>.</td></tr>
+</table>
+
+<div class="nota"><b>De onde veio a lacuna do gestor</b>, e por que ela reforça este documento: o
+Follow-up (#644) e o Origens (#650) entraram no menu e ficaram FORA da whitelist — o link aparecia,
+o clique levava 303 de volta. Está comentado no próprio arquivo. Produtos, PDV e Clientes estão no
+mesmo caso hoje, e isso vale pra qualquer cliente com equipe, não só pro suporte. <b>É um conserto
+separado</b>, que este desenho não substitui.</div>
+
+<h2><span class="n">02</span> Por que NÃO uma senha mestra</h2>
+<div class="sub">Ela resolve o incômodo de hoje e cria quatro problemas pra depois</div>
+
+<table>
+<tr><th>Pergunta que um dia vai ser feita</th><th>Senha mestra</th><th>Entrar como</th></tr>
+<tr><td>"Quem entrou na conta desse cliente?"</td>
+    <td class="nao">Não dá pra saber — a senha é a mesma pra todos</td>
+    <td class="sim">Nome, conta e horário na trilha</td></tr>
+<tr><td>"Essa senha vazou. E agora?"</td>
+    <td class="nao">Todas as contas caem juntas; trocar exige avisar todo mundo</td>
+    <td class="sim">Revoga-se o <code>is_admin</code> de uma pessoa. Zero impacto nos clientes</td></tr>
+<tr><td>"Dá pra deixar alguém olhar só uma conta?"</td>
+    <td class="nao">Não. Quem tem a senha tem tudo</td>
+    <td class="sim">Sim — e com prazo</td></tr>
+<tr><td>"Onde essa senha fica guardada?"</td>
+    <td class="nao">Em algum lugar. Anotada, ela é compartilhada</td>
+    <td class="sim">Em lugar nenhum: reusa a sessão que você já abriu</td></tr>
+</table>
+
+<div class="perigo"><b>E tem o detalhe que decide:</b> senha mestra é uma credencial a mais pra
+existir no mundo. O "Entrar como" <b>não cria credencial nenhuma</b> — ele aproveita o login que
+você já fez, e por isso não tem o que vazar.</div>
+
+<h2><span class="n">03</span> O fluxo, do clique à volta</h2>
+<div class="sub">Sem senha, sem convite, sem aparecer na equipe do cliente</div>
+
+<ol class="passos">
+<li>Você entra normalmente com a <b>sua</b> conta — a que já tem <code>is_admin</code>.</li>
+<li>No <code>/admin</code>, cada conta ganha um botão <b>Entrar como</b>.</li>
+<li>O painel vira o do cliente, <b>em modo leitura</b>, com uma faixa laranja fixa no topo e um
+    relógio de 60 minutos.</li>
+<li>Precisa mexer? <b>Destravar edição</b> — um clique, que fica registrado na trilha com o horário.</li>
+<li><b>Voltar pra minha conta</b> devolve a sessão de onde ela saiu. Se você esquecer aberto, os
+    60 minutos fazem isso por você.</li>
+</ol>
+
+<h2><span class="n">04</span> As telas</h2>
+<div class="sub">Três, e só a primeira é nova de verdade</div>
+
+<p style="font-size:12.5px;color:#8A8475;margin-bottom:6px"><b>1. A LISTA DO ADMIN</b> — o botão entra na linha que já existe</p>
+<div class="pn">
+  <div class="topo"><span class="logo">Zaq · admin</span><span>contas</span></div>
+  <div class="corpo">
+    <div class="lin">SUPER FIT <span class="mut">· #16 · Teresina-PI · trial</span>
+      <div class="dir"><span class="btno">detalhes</span><span class="btnv">Entrar como</span></div></div>
+    <div class="lin">PRIME EVENTOS <span class="mut">· #34 · ativa</span>
+      <div class="dir"><span class="btno">detalhes</span><span class="btnv">Entrar como</span></div></div>
+    <div class="lin">ze do arroz <span class="mut">· #9 · ativa · fornecedor</span>
+      <div class="dir"><span class="btno">detalhes</span><span class="btnv">Entrar como</span></div></div>
+    <div class="expl">O <code>/admin</code> já lista as contas e já confere <code>is_admin</code> em
+    toda rota. O botão é <b>uma coluna a mais</b> na tabela que existe.</div>
+  </div>
+</div>
+
+<p style="font-size:12.5px;color:#8A8475;margin:18px 0 6px"><b>2. A FAIXA</b> <span class="eti e-novo">novo</span> — no <code>_BASE</code>, então aparece em TODAS as telas</p>
+<div class="pn">
+  <div class="faixa">👁 Você está em <b>SUPER FIT</b> como suporte · <b>modo leitura</b>
+    <div class="dir"><span class="rel">volta em 58:12</span>
+      <span class="btn vazio">Destravar edição</span>
+      <span class="btn">Voltar pra ZAQ</span></div></div>
+  <div class="topo"><span class="logo">Zaq</span><span>Produtos · Financeiro · Empresa · Novidades</span></div>
+  <div class="corpo">
+    <div class="bloco"><span class="lbl">Produto</span>
+      <div class="campo travado">BEST WHEY ISO 907G — BAUNILHA</div>
+      <div class="mut" style="margin-top:.35rem">pote · whey · saldo 0 · <span style="color:#E0B458">campo travado no modo leitura</span></div></div>
+    <div class="expl">A faixa <b>não é um aviso que some</b>: ela fica no topo enquanto durar a
+    sessão de suporte. É o que impede o erro clássico — lançar na conta errada achando que está na sua.</div>
+  </div>
+</div>
+
+<p style="font-size:12.5px;color:#8A8475;margin:18px 0 6px"><b>3. DESTRAVAR</b> — o clique que a trilha registra</p>
+<div class="pn">
+  <div class="faixa" style="background:#4a1d1a;border-color:#8a3b33;color:#FFD9D4">✏️ <b>SUPER FIT</b> · suporte com <b>edição destravada</b>
+    <div class="dir"><span class="rel">volta em 41:07</span>
+      <span class="btn" style="background:#FFD9D4;color:#6E241E">Voltar pra ZAQ</span></div></div>
+  <div class="corpo">
+    <div class="bloco"><span class="lbl">Produto</span>
+      <div class="campo" style="color:#DDE4EC">BEST WHEY ISO 907G — BAUNILHA</div>
+      <div class="mut" style="margin-top:.35rem">agora editável · toda alteração fica na trilha</div></div>
+    <div class="expl">A faixa <b>muda de cor</b> quando a edição está destravada. Olhando de longe
+    dá pra saber em que modo você está — e é de propósito que o vermelho incomode.</div>
+  </div>
+</div>
+
+<h2><span class="n">05</span> O que o modo leitura trava — e o que ele NÃO pode deixar passar</h2>
+<div class="sub">A parte que decide se isso é seguro ou só parece</div>
+
+<div class="card">
+<p><b>Como trava:</b> no mesmo middleware que já existe (<code>_gate_permissoes</code>, em
+<code>web/app.py</code>). Sessão de suporte sem destravar: todo <code>POST</code>/<code>PUT</code>/
+<code>DELETE</code> do painel volta com um aviso. Uma regra, em um lugar — não é botão escondido em
+cada tela, que é como se esquece um.</p>
+</div>
+
+<div class="perigo"><b>O ponto crítico, e eu quero sua decisão nele:</b> destravar a edição libera
+também o que <b>sai do sistema e não volta</b> — mandar mensagem no WhatsApp do cliente final,
+disparar campanha, dar baixa em título, enviar proposta por e-mail. Um clique errado em modo suporte
+não estraga um dado: <b>fala com o cliente do seu cliente</b>, em nome dele.<br><br>
+<span class="rec">Minha recomendação:</span> mesmo destravado, as ações que <b>disparam mensagem
+pra fora</b> ficam bloqueadas em sessão de suporte. Quem manda mensagem em nome da empresa é a
+empresa. Se um dia precisar, isso vira um segundo destravamento, com nome e sobrenome.</div>
+
+<h2><span class="n">06</span> O que fica guardado</h2>
+<div class="sub">Uma tabela, e é ela que responde "quem entrou aí?"</div>
+
+<table>
+<tr><th>Campo</th><th>O que guarda</th></tr>
+<tr><td class="mono">admin_conta_id</td><td>Quem entrou (a conta com <code>is_admin</code>)</td></tr>
+<tr><td class="mono">conta_id</td><td>Em qual conta entrou</td></tr>
+<tr><td class="mono">iniciado_em</td><td>Quando começou</td></tr>
+<tr><td class="mono">encerrado_em</td><td>Quando voltou — nulo enquanto está dentro</td></tr>
+<tr><td class="mono">destravado_em</td><td>Se e quando saiu do modo leitura. Nulo = só olhou</td></tr>
+<tr><td class="mono">motivo</td><td>Uma linha digitada na entrada ("conferir o nicho novo"). Opcional,
+    mas é o que faz a trilha valer em vez de só existir</td></tr>
+</table>
+
+<div class="nota"><b>A sessão ganha duas chaves</b>, e nenhuma tabela a mais: <code>suporte_de</code>
+(a sua conta, pra onde voltar) e <code>suporte_expira</code> (o relógio). O resto —
+<code>conta_id</code>, <code>papel</code>, <code>membro_id</code> — já é como a troca de empresa
+funciona hoje em <code>/trocar</code>.</div>
+
+<h2><span class="n">07</span> Onde encaixa no código</h2>
+<div class="sub">Nada aqui é peça nova; é encaixe no que já está de pé</div>
+
+<table>
+<tr><th>Peça</th><th>Onde</th><th>O que muda</th></tr>
+<tr><td>O botão</td><td class="mono">web/admin.py</td><td>Uma coluna na lista de contas + a rota
+    <code>/admin/conta/{id}/assumir</code> (o <code>_admin(request)</code> já é o porteiro)</td></tr>
+<tr><td>A volta</td><td class="mono">web/admin.py</td><td><code>/admin/voltar</code> restaura
+    <code>conta_id</code> a partir de <code>suporte_de</code></td></tr>
+<tr><td>A faixa</td><td class="mono">web/portal.py · <code>_BASE</code></td><td>Um bloco no template
+    base. Todas as telas do painel passam por <code>_render</code> — inclusive as dos outros
+    módulos, que o importam</td></tr>
+<tr><td>A trava</td><td class="mono">web/app.py · <code>_gate_permissoes</code></td><td>Barra
+    escrita quando a sessão é de suporte e não está destravada</td></tr>
+<tr><td>O relógio</td><td class="mono">web/app.py</td><td>Passou de <code>suporte_expira</code>?
+    Volta sozinho pra sua conta</td></tr>
+<tr><td>A trilha</td><td class="mono">migração <code>NNN_suporte_acessos.sql</code></td>
+    <td>A tabela da seção 06 + a tela de leitura em <code>/admin/suporte</code></td></tr>
+</table>
+
+<h2><span class="n">08</span> As fases</h2>
+<div class="sub">A primeira já resolve o seu dia a dia</div>
+
+<table>
+<tr><th>Fase</th><th>O que entra</th><th>O que muda pra você</th></tr>
+<tr><td><b>1</b></td><td>Entrar como + faixa + voltar + 60 min + trilha (entrada e saída)</td>
+    <td><b>Nunca mais pedir senha nem criar membro.</b> Só leitura</td></tr>
+<tr><td><b>2</b></td><td>Destravar edição, com registro</td><td>Configurar a conta do cliente por ele,
+    com rastro de que foi você</td></tr>
+<tr><td><b>3</b></td><td>Bloqueio das ações que mandam mensagem pra fora (seção 05)</td>
+    <td>A garantia de que o suporte não fala com o cliente do cliente</td></tr>
+<tr><td><b>4</b></td><td>Tela da trilha em <code>/admin/suporte</code></td><td>Ver o histórico sem
+    abrir o banco</td></tr>
+</table>
+
+<div class="bom"><b>A fase 3 é pequena e eu faria junto da 2</b>, não depois: destravar sem ela é
+justamente a janela em que o acidente acontece.</div>
+
+<h2><span class="n">09</span> O que ainda depende de você</h2>
+<div class="sub">Duas decisões e uma faxina</div>
+
+<div class="q" style="border-left-color:#1c7a4f"><div class="qt">Já decidido</div>
+<div class="qo"><b>Modo leitura por padrão</b> e <b>60 minutos</b> de sessão. É o que está desenhado
+acima.</div></div>
+
+<div class="q"><div class="qt">1. O cliente fica sabendo?</div>
+<div class="qo">Três posturas possíveis: <b>(a)</b> só trilha interna, ele não vê nada;
+<b>(b)</b> aparece no histórico da conta dele ("o suporte acessou em 13/09, 15h40");
+<b>(c)</b> ele recebe aviso na hora. <span class="rec">Recomendo (b)</span> — é honesto, não
+interrompe ninguém, e é o que te protege no dia em que alguém perguntar. O (c) transforma cada
+consulta de rotina numa notificação, e daí a dez você para de entrar.</div></div>
+
+<div class="q"><div class="qt">2. As ações que mandam mensagem ficam bloqueadas mesmo destravado?</div>
+<div class="qo">É a recomendação da seção 05. Se você discordar, o desenho continua valendo — só
+tiro o bloqueio da fase 3 e deixo o registro.</div></div>
+
+<div class="q"><div class="qt">3. O remendo de hoje sai quando?</div>
+<div class="qo">O membro <b>"Suporte ZAQ"</b> (id 47, papel gestor) que criei na conta 16 em
+13/09/2026 vira desnecessário na fase 1. <span class="rec">Eu o desativo no mesmo PR</span> —
+a menos que você prefira tirar antes.</div></div>
+
+<div class="ftr">
+<b>De onde saiu este desenho.</b> Código de hoje na main: <code>web/admin.py</code> (o porteiro
+<code>_admin</code> e a lista de contas), <code>web/app.py</code> (<code>_gate_permissoes</code>, o
+middleware que já barra membro fora do papel), <code>web/portal.py</code> (<code>_render</code> e
+<code>_BASE</code>, por onde passam todas as telas do painel), <code>contas/equipe.py</code>
+(<code>contextos_de_login</code>, <code>aplicar_contexto</code> e a whitelist
+<code>rotas_do_papel</code>).<br>
+<b>Medido em produção, 13/09/2026:</b> uma única conta tem <code>is_admin</code> (a 3, ZAQ); a conta
+16 tem senha própria em uso, e por isso trocá-la foi descartado; o membro "Suporte ZAQ" está ativo
+na conta 16 desde hoje.<br>
+<b>Nada disso foi implementado ainda</b> — é mockup, pra aprovação.
+</div>
+
+</div></body></html>

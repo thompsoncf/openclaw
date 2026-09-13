@@ -7,7 +7,7 @@ leitor achou já vale, com o selo; sem IA por agora; quem muda o que já está l
 o vendedor (a conversa vira pista).
 """
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from psycopg_pool import ConnectionPool
@@ -15,6 +15,25 @@ from psycopg_pool import ConnectionPool
 from finance import evento_leitor as L
 
 HOJE = date(2026, 9, 4)
+
+# A DATA QUE O CLIENTE MANDA, sempre no futuro.
+#
+# `HOJE` acima é injetado em `ler_texto(frase, HOJE)` e por isso pode ser fixo: a
+# tabela parametrizada logo abaixo não olha relógio nenhum. Já os testes que
+# passam pelo BANCO (`ler_conversa`, `ler_acervo`, `ler_conversa_bg`) não injetam
+# nada — o leitor cai no relógio da máquina, e recusa data passada, porque festa
+# que já aconteceu não é festa que se vai marcar.
+#
+# Com a data escrita à mão ("14/11/2026") isso era bomba-relógio: em 14/11/2026 os
+# três testes passariam a receber None e ninguém saberia por quê. Achado por uma
+# varredura com o relógio 90 dias à frente, junto com os casos do
+# `test_funil_por_mes` e do `finance/raio_x.py`.
+#
+# 240 dias porque o leitor rola datas ambíguas pro ano seguinte, e uma margem
+# curta faria "dia 14/11" cair ora neste ano ora no outro conforme o mês em que a
+# suíte roda — o teste passaria a depender da época do ano.
+_FUTURA = date.today() + timedelta(days=240)
+_FUTURA_TXT = _FUTURA.strftime("%d/%m/%Y")
 
 
 # ------------------------------------------------------------------ ler_texto
@@ -159,7 +178,24 @@ def test_ler_conversa_preenche_o_card_com_origem_e_trecho(pool):
     em, tipo, conv, origem, trecho, pista, lido = _le(pool, lid)
     assert (em, tipo, conv, origem, pista) == (date(2027, 2, 13), "Casamento", 70, "conversa", None)
     assert "13 de fevereiro" in trecho and "70 pessoas" in trecho
-    assert lido == agora
+    # O CARIMBO NÃO É O `agora` INJETADO, e não pode voltar a ser.
+    #
+    # Este assert dizia `lido == agora` e era ele que segurava o defeito no lugar:
+    # `evento_lido_em` é comparado com `mensagens.criado_em` dentro de
+    # `leads_por_ler`, e `criado_em` vem do `now()` do banco. Carimbar com o
+    # relógio do Python punha dois relógios — duas máquinas — na mesma
+    # comparação, e a margem medida era de 4 milissegundos: mensagem que chegasse
+    # nesse intervalo depois da leitura sumia da fila "por ler" para sempre.
+    #
+    # `agora` segue injetável e segue importando: é ele que decide em que ANO cai
+    # "13 de fevereiro", na linha acima. O que mudou é só quem carimba a leitura.
+    with pool.connection() as c:
+        agora_banco, ultima_msg = c.execute(
+            """select now(), (select max(m.criado_em) from conversas cv
+                                join mensagens m on m.conversa_id = cv.id
+                               where cv.prospeccao_id = %s)""", (lid,)).fetchone()
+    assert lido != agora, "o carimbo voltou a vir do relógio injetado"
+    assert ultima_msg < lido <= agora_banco, "o carimbo tem que ser do relógio do banco"
 
 
 def test_ler_conversa_so_preenche_o_vazio_e_a_data_diferente_vira_pista(pool):
@@ -200,13 +236,13 @@ def test_sem_nada_na_conversa_nao_toca_no_card_mas_marca_a_leitura(pool):
 
 def test_so_le_o_que_o_cliente_disse_nao_o_vendedor(pool):
     lid = _lead(pool)
-    _msg(pool, lid, "temos data em 14/11/2026, quer?", direcao="out")
+    _msg(pool, lid, f"temos data em {_FUTURA_TXT}, quer?", direcao="out")
     L.ler_conversa(pool, CONTA, lid)
     assert _le(pool, lid)[0] is None
 
 
 def test_leads_por_ler_e_o_acervo_e_o_botao_le_todos(pool):
-    a = _lead(pool); _msg(pool, a, "14/11/2026 15 anos 120 convidados")
+    a = _lead(pool); _msg(pool, a, f"{_FUTURA_TXT} 15 anos 120 convidados")
     b = _lead(pool); _msg(pool, b, "sem nada")
     c_ = _lead(pool, evento_em=date(2027, 1, 1), evento_tipo="Casamento", evento_convidados=10)
     _msg(pool, c_, "13 de fevereiro")                         # já está completo: não entra
@@ -224,7 +260,7 @@ def test_leads_por_ler_e_o_acervo_e_o_botao_le_todos(pool):
 
 def test_ler_conversa_bg_so_roda_em_conta_que_vende_data(pool, monkeypatch):
     import finance.vendas as v
-    lid = _lead(pool); _msg(pool, lid, "14/11/2026 15 anos 120 convidados")
+    lid = _lead(pool); _msg(pool, lid, f"{_FUTURA_TXT} 15 anos 120 convidados")
     with pool.connection() as c:
         cid = c.execute("select id from conversas where prospeccao_id=%s", (lid,)).fetchone()[0]
     monkeypatch.setattr(v, "vende_data", lambda pool, conta_id: False)
@@ -232,7 +268,7 @@ def test_ler_conversa_bg_so_roda_em_conta_que_vende_data(pool, monkeypatch):
     assert _le(pool, lid)[0] is None
     monkeypatch.setattr(v, "vende_data", lambda pool, conta_id: True)
     L.ler_conversa_bg(pool, CONTA, cid)
-    assert _le(pool, lid)[0] == date(2026, 11, 14)
+    assert _le(pool, lid)[0] == _FUTURA
 
 
 def test_os_tres_webhooks_chamam_o_leitor_em_toda_mensagem_nova():

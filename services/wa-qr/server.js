@@ -2530,17 +2530,50 @@ function ehConversaValida (jid) {
 // decryptMessageNode (Socket/messages-recv.ts:727 na v6.7.9): ele só confirma o
 // recebimento e sai. Nada de decifrar, nada de retry, nada de ida ao banco.
 //
-// GRUPO NÃO ENTRA AQUI, de propósito. O `ehConversaValida` também descarta grupo
-// como conversa, mas a mensagem de grupo ainda alimenta o aprendizado de contato
-// (repassarContatos) — ignorá-la no Baileys perderia isso. Status e canal não têm
-// esse valor: canal é propaganda, e o contato que aparece num status já vem da
-// agenda ou de conversa real.
-// `contaId` e `agora` são opcionais: sem eles a função responde só sobre status e
-// canal, que é o que ela sempre fez. Com eles, também descarta o contato em
-// quarentena — ver porPeerEmQuarentena.
+// GRUPO TAMBÉM É CORTADO AQUI, desde 13/09/2026. Até então passava de propósito:
+// a mensagem de grupo não vira lead (ehConversaValida descarta), mas alimentava o
+// aprendizado de contato. O dono decidiu em 13/09: "ninguém usa grupo pra receber
+// lead". E o preço de manter era este, contado no wa_qr_log da conta 23 no dia
+// 12/09 inteiro (o dia da tempestade), pelas linhas de descarte:
+//
+//   entrada ignorada, grupo ......... 3.478      \  3.815 de 12.766 eventos:
+//   saída ignorada, grupo ...........   337      /  30% do caminho quente,
+//   entrada repassada (o que serve) .   792         decifrado pra ser jogado fora
+//
+// TRINTA por cento, não noventa. A primeira versão desta conta dizia "~94% era
+// grupo" comparando upserts com repassadas — e o que estava no meio não era
+// grupo: 6.918 dos descartes são ECO DE SAÍDA pra pessoa (`@lid`, sem texto),
+// que este corte não toca. Quem for medir depois do deploy espere ~30% a menos
+// de mensagem decifrada na conta 23, e não se assuste com o resto: ele tem outro
+// dono (ver o comentário de repassarSaida sobre mídia sem legenda).
+//
+// O que se perde: nome/número aprendido só por grupo via repassarContatos. Na
+// prática o contato vem da agenda (contacts.upsert) ou de conversa real.
+//
+// O QUE NÃO MUDA, e é o que torna este corte seguro:
+//   - `ehConversaValida` JÁ descartava grupo, então nenhuma mensagem que o app
+//     usaria deixa de chegar — o corte só antecipa um descarte que existia;
+//   - o frame cru segue passando por `CB:message`, e ali moram DUAS coisas que
+//     dependiam do tráfego de grupo: `marcarVivo` (o vigia continua vendo sinal
+//     de vida) e `aprenderLid` (o mapa lid->número continua aprendendo pelos
+//     atributos do nó). O segundo é o que importa de verdade: sem ele, quem
+//     aparecesse primeiro num grupo perderia o número e uma mensagem futura dessa
+//     pessoa cairia em `semNumeroReal` — sumiria calada. Não acontece, porque
+//     `shouldIgnoreJid` filtra o handleMessage e não o websocket;
+//   - o envio pra grupo (Raio-X) segue igual: shouldIgnoreJid só olha ENTRADA, e
+//     o eco de envio pra grupo nunca foi esperado (alvoPedido.grupo em /enviar).
+// Pra voltar ao comportamento antigo sem deploy: WA_QR_IGNORAR_GRUPOS=0.
+//
+// Status e canal seguem cortados como sempre: canal é propaganda, e o contato que
+// aparece num status já vem da agenda ou de conversa real.
+// `contaId` e `agora` são opcionais: sem eles a função responde só sobre status,
+// canal e grupo. Com eles, também descarta o contato em quarentena — ver
+// porPeerEmQuarentena.
+const IGNORAR_GRUPOS = (process.env.WA_QR_IGNORAR_GRUPOS || '1') !== '0'
 function deveIgnorarNoBaileys (jid, contaId, agora) {
   if (jid === 'status@broadcast') return true
   if (typeof jid === 'string' && jid.endsWith('@newsletter')) return true
+  if (IGNORAR_GRUPOS && typeof jid === 'string' && jid.endsWith('@g.us')) return true
   if (contaId != null && peerEmQuarentena(contaId, jid, agora)) return true
   return false
 }
@@ -4513,4 +4546,4 @@ module.exports = {
   contasDesteWorker, MINHA_CONTA, contarContatoComFalha, contatosComFalha, DISJUNTOR_MIN_CONTATOS,
   contarQuedaPresa, esquecerQuedasPresas, quedasPresas, PRESA_AVISA_EM,
   comecouAPartida, terminouAPartida, quemEstaSubindo, partidas, usuariosDoPeer, agendaTrancadaPorChave, VALVULA_CHAVE_FALTANDO_MS, MARCA_CHAVE_FALTANDO,
-  medindo, oQueEstaEmCurso, decifragemPorConta, emCurso, QUARENTENA_PEER_MS, porPeerEmQuarentena, peerEmQuarentena, esquecerQuarentena, peersEmQuarentena, avisarChipQuebrado, alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+  medindo, oQueEstaEmCurso, decifragemPorConta, emCurso, QUARENTENA_PEER_MS, porPeerEmQuarentena, peerEmQuarentena, esquecerQuarentena, peersEmQuarentena, avisarChipQuebrado, alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, IGNORAR_GRUPOS, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

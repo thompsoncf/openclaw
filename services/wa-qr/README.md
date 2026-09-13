@@ -33,6 +33,7 @@ Todas as rotas (menos `GET /saude`) exigem o header `x-wa-secret` = `WA_QR_SHARE
 | `WA_QR_MUDO_LIMITE_MS` · `WA_QR_MUDO_TETO_MS` | vigia da sessão muda: quando pingar (10min) e quando religar mesmo com ping voltando (45min) |
 | `WA_QR_DECIFRAR_TETO` · `WA_QR_DECIFRAR_JANELA_MS` | disjuntor da guerra de sessão: quantas falhas ao decifrar numa janela derrubam a conta (60 em 60s) |
 | `WA_QR_ESPERA_POS_440_MS` | base da espera pra retomar conta substituída — dobra a cada tentativa (5, 10, 20, 40, 80min) |
+| `WA_QR_IGNORAR_GRUPOS` | `0` volta a decifrar mensagem de grupo (padrão: cortada antes de decifrar — ver "Grupo não é decifrado") |
 
 ## Diagnóstico sem abrir o dashboard
 
@@ -205,8 +206,9 @@ WA_LOCK_TEST_URL=postgresql://postgres@localhost:5432/wa_lock_test node teste-tr
 createdb wa_guerra_test
 WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_guerra_test node teste-guerra-sessao.js
 
-# filtro pré-decifragem (status/canal) + retentativa: não precisa de banco
+# filtro pré-decifragem (grupo/status/canal) + retentativa: não precisa de banco
 node teste-ignorar-jid.js
+WA_QR_IGNORAR_GRUPOS=0 node teste-ignorar-jid.js   # o modo antigo também tem que passar
 # o que o libsignal grita no console (Bad MAC) vira agregado no wa_qr_log — sem banco
 node teste-console-libsignal.js
 # ...e o agregado sai carimbado com a conta do worker (precisa de banco)
@@ -214,6 +216,33 @@ createdb wa_qr_log_test
 psql wa_qr_log_test -f ../../db/migracoes/158_wa_qr_log.sql
 WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_log_test node teste-log-agregado-conta.js
 ```
+
+## Grupo não é decifrado (13/09/2026)
+
+Decisão do dono: **ninguém recebe lead por grupo**. Então `deveIgnorarNoBaileys`
+devolve `true` pra `@g.us`, e o Baileys confirma o recebimento e sai — sem cripto,
+sem retentativa, sem ida ao Postgres. `WA_QR_IGNORAR_GRUPOS=0` volta atrás sem
+deploy.
+
+**Quanto isso vale.** Contado na conta 23 no dia 12/09 inteiro: 3.478 entradas e
+337 saídas de grupo, contra 12.766 eventos no total — **~30%** do caminho quente.
+Não confunda com os 6.918 descartes de eco de saída pra pessoa (`@lid`, sem
+texto), que são o balde maior e **não** têm nada a ver com grupo.
+
+**Por que é seguro cortar antes de decifrar**, que é a pergunta certa a fazer de
+qualquer filtro deste tipo (ver `teste-ignorar-jid.js`, invariante
+`!(cortado && usavel)`):
+
+* `ehConversaValida` **já** descartava grupo. Nenhuma mensagem que o app usaria
+  deixa de chegar — o corte só antecipa um descarte que já existia.
+* `marcarVivo` e `aprenderLid` moram no listener do nó cru (`CB:message`), que o
+  `shouldIgnoreJid` não filtra. O segundo é o que importa: sem ele, quem
+  aparecesse primeiro num grupo perderia o número no mapa `lid->telefone`, e uma
+  mensagem futura dessa pessoa cairia em `semNumeroReal` — sumiria calada.
+* Envio pra grupo (Raio-X) segue igual: `shouldIgnoreJid` só olha entrada.
+
+**O que se perde:** nome/número aprendido só por grupo via `repassarContatos`. A
+agenda (`contacts.upsert`) e a conversa real continuam ensinando.
 
 ## CPU: a guerra de sessão derrubava a instância (20/08/2026)
 

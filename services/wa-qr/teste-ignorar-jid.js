@@ -21,7 +21,15 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://x@127.0.0.1:5
 process.env.WA_QR_SHARED_SECRET = process.env.WA_QR_SHARED_SECRET || 'teste'
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent'
 
-const { deveIgnorarNoBaileys, ehConversaValida,
+// Grupo: o padrão é CORTAR (decisão do dono em 13/09/2026 — ninguém recebe lead
+// por grupo; conta 23 pagava decifragem de 14 mil mensagens em 48h pra repassar
+// 828). WA_QR_IGNORAR_GRUPOS=0 volta ao comportamento antigo, e este teste roda
+// nos dois modos:
+//
+//     node teste-ignorar-jid.js
+//     WA_QR_IGNORAR_GRUPOS=0 node teste-ignorar-jid.js
+
+const { deveIgnorarNoBaileys, IGNORAR_GRUPOS, ehConversaValida,
   MAX_RETRY_DECIFRAR, RETRY_DELAY_MS } = require('./server')
 
 let falhas = 0
@@ -43,8 +51,20 @@ conferir(deveIgnorarNoBaileys('558694095301@s.whatsapp.net') === false,
   'conversa normal (@s.whatsapp.net)')
 conferir(deveIgnorarNoBaileys('133157005312040@lid') === false,
   'conversa por lid (@lid) — é como a maioria chega hoje')
-conferir(deveIgnorarNoBaileys('558698392961-1607041815@g.us') === false,
-  'GRUPO passa de propósito: não vira lead, mas alimenta repassarContatos')
+
+// --- grupo: depende da chave ------------------------------------------------
+console.log('\nGrupo (WA_QR_IGNORAR_GRUPOS=' + (IGNORAR_GRUPOS ? '1' : '0') + '):')
+if (IGNORAR_GRUPOS) {
+  conferir(deveIgnorarNoBaileys('558698392961-1607041815@g.us') === true,
+    'GRUPO cortado antes de decifrar — ninguém recebe lead por grupo (13/09)')
+  conferir(deveIgnorarNoBaileys('120363420205108265@g.us') === true,
+    'grupo de id longo (formato novo) também')
+} else {
+  conferir(deveIgnorarNoBaileys('558698392961-1607041815@g.us') === false,
+    'com a chave em 0, GRUPO passa como antes (alimenta repassarContatos)')
+}
+conferir(deveIgnorarNoBaileys('558698392961@s.whatsapp.net') === false,
+  'número que PARECE grupo mas é conversa (@s.whatsapp.net) nunca é cortado')
 
 // --- robustez ---------------------------------------------------------------
 console.log('\nEntrada torta não derruba:')

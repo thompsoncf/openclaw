@@ -356,6 +356,15 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   .mais-grab{width:34px;height:4px;background:var(--borda);border-radius:2px;margin:.4rem auto .5rem}
 }
 </style>{% if embed %}<style>body{padding-left:0 !important;padding-bottom:0 !important}.side,.topo-mob,.wa-suporte,.btmnav,.mais-sheet,.mais-bg,#ver-nova{display:none !important}</style>{% endif %}</head><body>
+{% if suporte %}<div style="position:sticky;top:0;z-index:999;background:#5C3A06;border-bottom:1px solid #8a6a2a;color:#FFE9C2;padding:.5rem .85rem;font-size:.82rem;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap">
+  <span>👁 Você está em <b style="color:#fff">{{ conta[2] if conta else 'esta conta' }}</b> como suporte · <b style="color:#fff">modo leitura</b></span>
+  <span style="margin-left:auto;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <span style="opacity:.85;font-variant-numeric:tabular-nums">volta em {{ suporte.restam_min }} min</span>
+    <form method="post" action="/admin/voltar" style="display:inline;margin:0">
+      <button style="background:#FFE9C2;color:#5C3A06;border:0;border-radius:6px;padding:.2rem .65rem;font-weight:700;font-size:.76rem;cursor:pointer">Voltar pra {{ suporte.volta_para }}</button>
+    </form>
+  </span>
+</div>{% endif %}
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="ic-caixa" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol><symbol id="ic-produtos" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol><symbol id="ic-clientes" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 6a3 3 0 010 6"/></symbol><symbol id="ic-financeiro" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 15l3-4 3 2 4-6"/></symbol><symbol id="ic-mais" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol><symbol id="ic-abastecimento" viewBox="0 0 24 24"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></symbol><symbol id="ic-empresa" viewBox="0 0 24 24"><path d="M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5"/></symbol><symbol id="ic-fornecedor" viewBox="0 0 24 24"><path d="M12 21v-8M12 13c0-3 2-5.5 5.5-5.5C17.5 11 15.5 13 12 13zM12 15c0-2.5-1.6-4.5-4.5-4.5C7.5 13 9 15 12 15z"/></symbol><symbol id="ic-compras" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M2 4h2.2l2.3 11h11l1.8-8H6"/></symbol><symbol id="ic-cesta" viewBox="0 0 24 24"><path d="M5 9h14l-1.4 10H6.4zM9 9l1.2-5M15 9l-1.2-5"/></symbol><symbol id="ic-painel" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z"/></symbol><symbol id="ic-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol><symbol id="ic-prospeccao" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol><symbol id="ic-agenda" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/></symbol><symbol id="ic-relatorios" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 17v-5M12.5 17V7M17 17v-8"/></symbol><symbol id="ic-novidades" viewBox="0 0 24 24"><path d="M18 8.5a6 6 0 10-12 0c0 6.5-2.5 6.5-2.5 8.5h17c0-2-2.5-2-2.5-8.5"/><path d="M10.2 20.5a2.2 2.2 0 003.6 0"/></symbol></defs></svg>
 <div id="navprog"></div>
 {% macro navi(sec, href, ic, label) -%}
@@ -7543,6 +7552,14 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
         ctx.setdefault("papel", _papel)
         ctx["caps"] = _equipe.caps_do_papel(_papel)
     ctx.setdefault("n_contextos", len(request.session.get("contextos") or []))
+    # A FAIXA DE SUPORTE (contas/suporte.py). Fica aqui, e não em cada tela, pelo
+    # mesmo motivo da trava de escrita estar no middleware: é o único lugar por
+    # onde TODAS as telas do painel passam — inclusive as dos outros módulos, que
+    # importam este _render. Uma tela que esquecesse a faixa seria uma tela em que
+    # o suporte se acha o dono.
+    if "suporte" not in ctx:
+        from contas import suporte as _sup
+        ctx["suporte"] = _sup.ativo(request.session)
     ctx.setdefault("versao_app", _versao.VERSAO)
     # A bolinha do menu. Só pra quem tem o item (dono ou gestor) — pro vendedor
     # seria uma consulta por página pra um menu que ele não vê. `nao_lidas` já é

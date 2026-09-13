@@ -55,6 +55,41 @@ async def _gate_permissoes(request: Request, call_next):
         papel = request.session.get("papel")
     except Exception:  # rota sem sessão
         papel = None
+    # SESSÃO DE SUPORTE (contas/suporte.py): o relógio e o modo leitura moram
+    # aqui, e não em cada tela, porque toda requisição do painel passa por este
+    # middleware — uma tela esquecida seria uma tela onde o suporte escreve.
+    # Vem ANTES do gate de papel de propósito: em suporte o papel é 'dono' (pra
+    # enxergar a conta inteira), então o bloco de baixo nem olharia pra ela.
+    try:
+        _sessao = request.session
+    except Exception:  # rota sem sessão (webhook, estático)
+        _sessao = None
+    if _sessao is not None and _sessao.get("suporte_de"):
+        from contas import suporte as _sup
+        from fastapi.responses import RedirectResponse as _RR2
+        if _sup.expirou(_sessao):
+            _acesso = _sessao.get("suporte_acesso_id")
+            _sup.restaurar_sessao(_sessao)
+            if _acesso:
+                try:
+                    _sup.encerrar(get_pool(), int(_acesso), "expirou")
+                except Exception as e:  # noqa: BLE001 - a volta vale mais que a trilha
+                    log.warning("não deu pra fechar o acesso de suporte %s: %s", _acesso, e)
+            _sessao["admin_aviso"] = "A sessão de suporte expirou (60 min) e você voltou pra sua conta."
+            return _RR2("/admin", status_code=303)
+        if _sup.escrita_bloqueada(_sessao, request.method, request.url.path):
+            # fetch (as telas do painel salvam por JSON) recebe JSON; form recebe
+            # uma página curta — devolver HTML pra um fetch vira "erro ao salvar"
+            # sem motivo na tela, e o motivo é justamente o que a pessoa precisa ler
+            _msg = ("Você está em modo leitura (suporte). Para alterar dados desta conta, "
+                    "volte pra sua conta na faixa do topo.")
+            _aceita = (request.headers.get("accept") or "")
+            if "application/json" in _aceita or request.headers.get("x-requested-with"):
+                return JSONResponse({"ok": False, "erro": _msg}, status_code=403)
+            return HTMLResponse(
+                f"<div style='font:16px system-ui;padding:2rem;max-width:34rem;margin:auto'>"
+                f"<h2 style='margin:0 0 .6rem'>Modo leitura</h2><p>{_msg}</p>"
+                f"<p><a href='/painel'>voltar</a></p></div>", status_code=403)
     if papel and papel != "dono":
         # MEMBRO de equipe: whitelist. Só acessa a(s) área(s) do papel dele — nunca
         # o /painel do dono (Pessoas da conta, plano) nem áreas de outro papel.

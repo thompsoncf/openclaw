@@ -1,0 +1,225 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<title>O Raio-X da Liberal Seguros, medido</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:880px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:32px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.card{background:#fff;border:1px solid #E3DDD0;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden;margin-bottom:14px}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+
+/* ---------- réplica FIEL do painel escuro (web/painel_servicos) ---------- */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC}
+.pn .card2{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.55rem}
+.pn .cab{display:flex;align-items:center;gap:.6rem}
+.pn .seta{color:#7B8A99;font-size:.85rem}
+.pn .tit{font-weight:700;font-size:1rem}
+.pn .mut{color:#7B8A99;font-size:.78rem;margin-top:.1rem}
+.pn .selo{margin-left:auto;font-size:.68rem;font-weight:700;background:#3A2A10;color:#E0B458;border:1px solid #5C4418;border-radius:5px;padding:.1rem .38rem;white-space:nowrap}
+.pn .selo.ok{background:#10241d;color:#7EE7B8;border-color:#1c3a30}
+.pn .expl{color:#9AA7B4;font-size:.85rem;margin:.7rem 0 .8rem;line-height:1.6}
+.pn .expl b{color:#7EE7B8}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.4rem .55rem;font-size:.85rem;color:#DDE4EC;width:100%}
+.pn .ta{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.45rem .55rem;font-size:.78rem;color:#C6D2DE;width:100%;font-family:ui-monospace,Menlo,monospace;line-height:1.6}
+.pn .pill{display:inline-block;background:#1B2836;border:1px solid #2A3947;border-radius:99px;padding:.2rem .55rem;font-size:.75rem;color:#C6D2DE}
+.pn .pill.mono{font-family:ui-monospace,Menlo,monospace;font-size:.7rem;padding:.15rem .4rem}
+.pn .pill.novo{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .btnv{display:inline-block;background:#1F7A55;color:#EAFFF5;border-radius:8px;padding:.45rem .9rem;font-size:.85rem;font-weight:700}
+.pn .lbl{color:#7B8A99;font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:.2rem}
+.pn .bloco{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem}
+.pn .linha{display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem}
+.pn .mini{display:inline-flex;align-items:center;justify-content:center;background:#1B2836;border:1px solid #2A3947;border-radius:6px;width:26px;height:26px;font-size:.8rem;color:#9AA7B4;flex:0 0 auto}
+.pn .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.5rem}
+.eti{display:inline-block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;vertical-align:middle;margin-left:6px}
+.e-hoje{background:#FDECEA;color:#B4453C;border:1px solid #F5C6C0}
+.e-novo{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.card,.pn,.q{break-inside:avoid}}
+</style></head><body><div class="wrap">
+</head><body><div class="wrap">
+
+<h1>O Raio-X da Liberal Seguros, medido</h1>
+<p class="lead">Você pediu pra medir antes de propor conserto. Rodei
+<code>finance.raio_x_perfil</code> com o slug <code>seguros</code> e li a produção pra saber se o que
+o perfil promete tem dado pra encher. <b>Isto é medição, não proposta</b> — o que eu recomendo está
+só no fim, e depende de duas respostas suas.</p>
+
+<div class="nota"><b>O veredito em uma linha:</b> dos 7 blocos que a corretora receberia, <b>1 erra
+de verdade</b> (mostra R$ 0 e diagnostica gargalo que não existe), <b>2 nascem vazios</b> (leem CNPJ
+de um público que é pessoa física), <b>3 servem</b> e <b>1 serve com o nome trocado</b>.</p>
+
+<h2><span class="n">01</span> Que perfil ela recebe</h2>
+
+<div class="card">
+<p class="mono">perfil_por_nicho("seguros") → "recorrente"</p>
+<p style="margin-top:10px">É a regra de <code>finance/raio_x_perfil.py:271</code>: não é evento, vende
+serviço, logo é recorrente. Não há erro de código — o perfil "recorrente" é o único que sobra, e ele
+foi desenhado olhando a ZAQ, que vende <b>sistema por mensalidade pra empresa</b>.</p>
+<p style="margin-bottom:0">Uma corretora de auto vende <b>apólice anual pra pessoa física</b>. As
+duas coisas que o perfil assume — mensalidade e cliente PJ — são justamente as duas que ela não
+tem.</p>
+</div>
+
+<h2><span class="n">02</span> Bloco a bloco, o que ela veria</h2>
+
+<table>
+<tr><th>Bloco</th><th>O que mostra</th><th>Na corretora</th></tr>
+<tr><td><b>Mensalidade proposta × fechada</b><br><span class="mono">mrr</span></td>
+    <td>Soma <code>orcamentos.mensal_centavos</code> por mês</td>
+    <td><span class="eti e-hoje">erra</span> Comissão de apólice não é mensalidade: vai em
+        <code>setup_centavos</code>. O bloco lê <b>R$ 0/mês</b> e escreve o diagnóstico
+        <i>"R$ 0/mês em propostas e nenhum contrato fechado. O gargalo é depois da proposta"</i> —
+        num mês em que ela pode ter fechado 20 apólices.</td></tr>
+<tr><td><b>Segmento que chega</b><br><span class="mono">segmentos</span></td>
+    <td>Família do segmento, tirada do <b>CNPJ</b> do lead</td>
+    <td><span class="eti e-hoje">vazio</span> Seguro auto é pessoa física. Vira "N de N leads sem
+        segmento", com a dica <i>"o CNPJ na ficha preenche sozinho"</i> — um conselho impossível
+        de seguir.</td></tr>
+<tr><td><b>Serviço mais proposto</b><br><span class="mono">servicos</span></td>
+    <td>Itens das propostas, com "mensalidade média"</td>
+    <td><span class="eti e-novo">serve</span> com o nome trocado: os itens seriam os ramos (auto,
+        vida, residencial) e é útil. Mas o subtítulo diz "mensalidade média" e a coluna imprime
+        <b>R$ x/mês</b>, que ali é R$ 0.</td></tr>
+<tr><td><b>Reuniões</b><br><span class="mono">reunioes</span></td>
+    <td>Compromissos marcados × acontecidos</td>
+    <td><span class="eti e-hoje">nome errado</span> Corretora de auto não marca reunião: ela faz
+        <b>cotação</b>. A etapa do funil dela nasce chamada "Reunião marcada".</td></tr>
+<tr><td><b>Ciclo</b> · <b>Perdas</b> · <b>Hora</b></td>
+    <td>Tempo até fechar, por que perdeu, hora do lead</td>
+    <td><span class="eti e-novo">serve</span> Não têm vocabulário de nicho — medem o funil, e o
+        funil dela é funil.</td></tr>
+</table>
+
+<div class="alerta"><b>O filtro também:</b> a barra do perfil recorrente é
+<span class="mono">periodo · vendedor · segmento · porte · uf · servico · origem · hora</span>.
+<b>Segmento, porte e UF saem todos do CNPJ</b> — três dos oito filtros nascem sem opção nenhuma pra
+quem vende a pessoa física.</div>
+
+<h2><span class="n">03</span> A prova está nas duas contas que já existem</h2>
+<div class="sub">A regra 6 manda medir em mais de uma conta. Medi nas duas pontas.</div>
+
+<table>
+<tr><th>Conta</th><th>Vende pra</th><th>Leads</th><th>Com segmento</th><th>Com porte</th><th>Com CNPJ</th></tr>
+<tr><td><b>3 · ZAQ</b> (consultoria)</td><td>empresa</td><td>263</td><td><b>252</b> (96%)</td><td>86 (33%)</td><td>94</td></tr>
+<tr><td><b>34 · Prime</b> (eventos)</td><td>pessoa física</td><td>349</td><td><b>0</b></td><td><b>0</b></td><td>1</td></tr>
+<tr><td><b>37 · Liberal</b> (sem nicho)</td><td>pessoa física</td><td>0</td><td>—</td><td>—</td><td>—</td></tr>
+</table>
+
+<div class="perigo"><b>É o mesmo erro de 05/09, do outro lado.</b> Lá o Raio-X mostrava "tipo de
+festa" pra ZAQ, que nunca teria data. Aqui ele mostraria "segmento do CNPJ" e "mensalidade" pra uma
+corretora, que nunca terá nem um nem outro. A Prime prova o padrão: <b>349 leads e ZERO segmento</b>
+— quem vende pra pessoa física não enche esses campos, e a corretora de auto vende pra pessoa
+física.</div>
+
+<div class="nota"><b>E o que o perfil recorrente acerta, pra ser justo:</b> na ZAQ ele está certo.
+252 de 263 leads com segmento, R$ 20.200/mês em orçamentos com mensalidade. O perfil não é ruim — ele
+é de outro negócio.</div>
+
+<h2><span class="n">04</span> Como a tela fica, hoje</h2>
+
+<div class="pn">
+  <div class="card2">
+    <div class="cab"><div><div class="tit">Mensalidade proposta × fechada</div>
+      <div class="mut">MRR novo, por mês</div></div>
+      <span class="selo">R$ 0</span></div>
+    <div class="bloco" style="margin-top:.6rem">
+      <div class="linha"><span class="pill mono">set</span><i style="display:inline-block;height:8px;width:2px;background:#2A3947"></i></div>
+      <div class="linha"><span class="pill mono">out</span><i style="display:inline-block;height:8px;width:2px;background:#2A3947"></i></div>
+      <div class="mut">proposta: R$ 0,00/mês · fechada: R$ 0,00/mês</div>
+    </div>
+    <div class="expl" style="margin-bottom:0">R$ 0,00/mês em propostas e nenhum contrato fechado no
+    período. <b style="color:#E0B458">O gargalo é depois da proposta.</b></div>
+  </div>
+  <div class="card2">
+    <div class="cab"><div><div class="tit">Segmento que chega</div>
+      <div class="mut">do CNPJ · e quantos fecharam</div></div></div>
+    <div class="expl" style="margin-bottom:0"><b style="color:#E0B458">todos os leads sem
+    segmento.</b> O CNPJ na ficha preenche sozinho.</div>
+  </div>
+  <div class="card2" style="margin-bottom:0">
+    <div class="cab"><div><div class="tit">Reunião marcada</div>
+      <div class="mut">etapa do funil, nome herdado do perfil recorrente</div></div>
+      <span class="selo">nome errado</span></div>
+  </div>
+</div>
+
+<p style="font-size:12.5px;color:#5A6678">A frase em amarelo do primeiro bloco é o que mais me
+preocupa: <b>não é um campo vazio, é um diagnóstico errado</b>. Campo vazio a pessoa ignora; uma
+frase afirmando que o gargalo está depois da proposta manda o dono cobrar a equipe pelo motivo
+errado.</p>
+
+<h2><span class="n">05</span> Um achado a favor: ela TEM o segundo relógio</h2>
+
+<div class="bom">O perfil recorrente zera <code>fu_festa_dias</code> — o segundo relógio, que em
+eventos dispara 30 dias antes da festa — com o comentário <i>"quem vende mensalidade não tem segundo
+relógio"</i>. Verdade pra consultoria. <b>Uma corretora tem, e é o coração do negócio dela: o fim da
+vigência.</b> Apólice que vence em 30 dias é o mesmo formato de gatilho que a festa em 30 dias.
+Quando a Camada 2 existir, esse campo já tem onde encaixar — não precisa de mecanismo novo, só de um
+dado que hoje não é guardado em lugar nenhum.</div>
+
+<h2><span class="n">06</span> O que eu NÃO sei, e a regra 6 manda perguntar</h2>
+
+<div class="q"><div class="qt">1. O que a Liberal chama de compromisso no funil?</div>
+<div class="qo">"Reunião" quase certamente não é. Meu palpite é <b>cotação</b> — mas corretora de
+vida e de empresarial faz reunião mesmo, e ela pode vender os dois. É o nome que vai na coluna do
+Kanban e no KPI, então prefiro que venha dela.</div></div>
+
+<div class="q"><div class="qt">2. Ela vende pra pessoa física, pra empresa, ou os dois?</div>
+<div class="qo">Auto é o forte, e auto é PF — foi por isso que medi a Prime. Mas se ela também faz
+frota, condomínio e empresarial, o CNPJ volta a existir e os blocos de segmento/porte deixam de ser
+inúteis: passam a valer <b>pra parte</b> da carteira. Isso muda se eles somem ou se ficam.</div></div>
+
+<div class="q"><div class="qt">3. O que ela quer ver medido no mês?</div>
+<div class="qo">Meu palpite, e é só palpite: <b>comissão proposta × fechada</b> (no lugar do MRR),
+<b>ramo que mais entra</b> (no lugar do segmento), e — quando houver carteira — <b>o que vence nos
+próximos 30/60/90 dias</b>. Se for isso, dá pra fazer os dois primeiros já, sem esperar a
+carteira.</div></div>
+
+<h2><span class="n">07</span> As duas saídas, e a que eu recomendo</h2>
+
+<div class="card">
+<p><b>A. Perfil <code>seguros</code> próprio</b> — um quarto perfil ao lado de eventos, recorrente e
+produto, com vocabulário e blocos dela. <span class="rec">É o que eu recomendo</span>, pelo mesmo
+argumento da regra 6: o que é do nicho fica no perfil, e o perfil é onde se garante que nada de um
+ramo vaza pro outro. O custo é pequeno — o mecanismo já existe, é preencher um dicionário.</p>
+<p style="margin-bottom:0"><b>B. Ajustar o perfil recorrente</b> pra ser menos específico. Mais
+barato, mas piora a ZAQ, onde ele hoje está certo — e cria um perfil que não é de ninguém.</p>
+</div>
+
+<div class="alerta"><b>Uma coisa que eu não faria agora, mesmo com sua ordem:</b> construir os
+blocos novos antes de a Liberal ter um lead sequer. Ela está com <b>zero leads, zero orçamentos,
+zero clientes</b> e sem nicho marcado. O vocabulário e os nomes dá pra acertar agora, porque
+dependem do ramo e não do uso. Já <i>quais números ela quer ver</i> eu prefiro decidir depois de
+existir dado — foi assim que o Raio-X de eventos ficou bom, olhando a Prime rodando.</div>
+
+<div class="ftr">Medido em 13/09/2026. Código: <code>finance/raio_x_perfil.py</code>
+(<code>perfil</code>, <code>_PERFIS</code>, <code>_FUNIL_POR_PERFIL</code>,
+<code>_ETAPAS_POR_PERFIL</code>, <code>_SEMENTE_MOTIVOS</code>),
+<code>finance/raio_x_dono.py</code> (<code>_mrr</code>, <code>_segmentos</code>) e
+<code>web/painel_raio_x.py</code> (o HTML dos blocos). Produção, só leitura: contas 3, 34 e 37 —
+<code>prospeccao</code> e <code>orcamentos</code>. Nada foi escrito.</div>
+
+</div></body></html>

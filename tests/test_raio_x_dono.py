@@ -368,6 +368,75 @@ def test_a_tela_renderiza_o_placar_os_filtros_e_os_blocos(pool, cen, monkeypatch
     assert "Jaqueline Silva" in html
 
 
+# ------------------------------------------------------------------ o perfil seguros (a Liberal em miniatura)
+
+@pytest.fixture(scope="module")
+def corretora(pool):
+    """Corretora de seguros: comissão em `setup_centavos` (NUNCA mensalidade),
+    lead pessoa física sem CNPJ ao lado de lead PJ com segmento — porque o dono
+    disse em 13/09 que ela vende pros dois — e cotação na agenda."""
+    with pool.connection() as c:
+        conta = c.execute("insert into contas (nome, nome_fantasia) values ('Liberal Seguros','Liberal') returning id").fetchone()[0]
+        v = c.execute("insert into membros (conta_id, nome) values (%s,'Corretor Um') returning id", (conta,)).fetchone()[0]
+
+        def lead(nome, criado, seg, porte, uf, status="novo"):
+            return c.execute("""insert into prospeccao (conta_id, vendedor_id, contato, status, segmento, porte, uf, origem, criado_em, atualizado_em)
+                                values (%s,%s,%s,%s,%s,%s,%s,'whatsapp_inbound',%s,%s) returning id""",
+                             (conta, v, nome, status, seg, porte, uf, criado, criado)).fetchone()[0]
+
+        def orc(lid, status, setup, itens, criado, aprovada=None):
+            import json
+            o = c.execute("""insert into orcamentos (cliente, status, setup_centavos, mensal_centavos, itens, criado_em, aprovada_em)
+                             values ('x',%s,%s,0,%s::jsonb,%s,%s) returning id""",
+                          (status, setup, json.dumps(itens), criado, aprovada)).fetchone()[0]
+            c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, lid))
+            return o
+        # pessoa física, o forte dela: sem segmento, sem porte, sem CNPJ
+        a = lead("Fulano do Argo", _dt(1, 9, 10), "", "", "", status="ganho")
+        oa = orc(a, "fechado", 64000, [{"nome": "Seguro Auto"}], _dt(2, 9, 10), aprovada=_dt(3, 9, 10))
+        c.execute("insert into contratos (conta_id, orcamento_id, status, valor_centavos, assinado_em) values (%s,%s,'assinado',64000,%s)", (conta, oa, _dt(4, 9, 10)))
+        # e a metade PJ, que é o que mantém segmento/porte no perfil
+        b = lead("Transportadora Sul", _dt(2, 9, 21), "Transporte rodoviário de carga", "Empresa de Pequeno Porte", "PI", status="proposta")
+        orc(b, "enviado", 380000, [{"nome": "Seguro Frota"}], _dt(3, 9, 9))
+        c.execute("insert into eventos_agenda (conta_id, prospeccao_id, titulo, inicio, desfecho) values (%s,%s,'Cotação Fulano',%s,'realizado')", (conta, a, _dt(3, 9, 16)))
+        c.commit()
+    return {"conta": conta, "v": v}
+
+
+def test_a_corretora_ve_comissao_e_cotacao_e_nunca_mensalidade(pool, corretora, monkeypatch):
+    """A TELA INTEIRA, no perfil `seguros`. O que este teste impede de voltar:
+    a corretora vendo "Mensalidade proposta × fechada" somando R$ 0 e o
+    diagnóstico "o gargalo é depois da proposta" (medido em 13/09/2026)."""
+    import web.painel_raio_x as prx
+    from web import portal
+    monkeypatch.setattr(prx, "conta_logada", lambda req: (corretora["conta"], "pj", "Liberal"))
+    monkeypatch.setattr(prx, "get_pool", lambda: pool)
+    monkeypatch.setattr(rxd, "agora_brt", lambda agora=None: AGORA)
+    monkeypatch.setattr(rxd, "perfil_da_conta", lambda pool, conta_id: rxp.perfil("seguros"))
+
+    def fake_render(nome, request, **ctx):
+        from fastapi.responses import HTMLResponse
+        tpl = portal._env.get_template(nome)
+        return HTMLResponse("".join(tpl.blocks["conteudo"](tpl.new_context(dict(ctx, request=request)))))
+    monkeypatch.setattr(prx, "_render", fake_render)
+    html = bytes(prx.painel_raio_x(_req()).body).decode("utf-8")
+    baixo = html.lower()
+
+    # nem festa, nem mensalidade
+    for palavra in ("festa", "convidados", "casamento", "mensalidade", "/mês", "reunião", "reuniões"):
+        assert palavra not in baixo, palavra
+    # o vocabulário dela
+    for t in ("Comissão proposta × fechada", "Cotações que aconteceram", "Ramo mais proposto"):
+        assert t in html, t
+    # o bloco de valor soma o setup: R$ 640 cotados e fechados, R$ 3.800 cotados
+    # o bloco soma `setup_centavos`: R$ 640 da apólice fechada + R$ 3.800 cotados
+    assert "proposta: R$ 4.440" in html and "fechada: R$ 640" in html
+    assert "14% do que foi cotado virou apólice." in html
+    # os blocos que sobreviveram ao guard separado
+    assert "Segmento que chega" in html and "Por que perdeu" in html
+    assert "Sua conta ainda não escolheu o nicho" not in html
+
+
 # ------------------------------------------------------------------ o perfil recorrente (a ZAQ em miniatura)
 
 @pytest.fixture(scope="module")

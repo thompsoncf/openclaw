@@ -79,6 +79,19 @@ _RAMOS = [
                       "casa de carnes")),
     ("Hortifruti",   ("hortifruti", "horti", "frutas", "verdura", "legume",
                       "hortigranjeiro")),
+    # Loja de suplemento / nutrição esportiva. Vem ANTES de Supermercado porque
+    # a chave "alimentos"/"alimenticios" de lá pega qualquer CNAE de comércio de
+    # alimento — e uma loja de whey ia parar em mercearia.
+    #
+    # HONESTIDADE SOBRE O ALCANCE: o CNAE que a Receita costuma dar pra esse ramo
+    # é o 4729-6/99 ("comércio varejista de produtos alimentícios em geral ou
+    # especializado em produtos alimentícios não especificados anteriormente"),
+    # que NÃO tem a palavra suplemento — é o caso da SUPER FIT (conta 16). Esse
+    # continua caindo em Supermercado, e quem resolve é a escolha do nicho na tela
+    # Empresa. Este ramo pega quem tem CNAE descritivo, que é o outro pedaço.
+    ("Suplementos",  ("suplementos alimentares", "suplemento alimentar",
+                      "suplementos nutricionais", "nutricao esportiva",
+                      "produtos naturais", "casa de suplementos")),
     ("Supermercado", ("supermerc", "hipermerc", "minimerc", "mercearia",
                       "mercadorias em geral", "alimenticios", "varejista de merc",
                       "atacadista de alimentos", "alimentos")),
@@ -143,6 +156,7 @@ _RAMO_NICHO = {
     "Padaria":      "alimentacao",
     "Acougue":      "minimercado",
     "Hortifruti":   "hortifruti",
+    "Suplementos":  "suplementos",
     "Supermercado": "minimercado",
     "Vestuario":    "vestuario",
     "Salao":        "salao",

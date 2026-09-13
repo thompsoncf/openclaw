@@ -178,6 +178,34 @@ NICHOS: dict[str, dict] = {
         "categorias": ["decoracao", "buffet", "estrutura", "som_iluminacao",
                        "cerimonial", "aluguel", "outro"],
     },
+    # Loja de suplemento COM COZINHA (SUPER FIT, conta 16, Teresina-PI): ela
+    # revende pote e PRODUZ prato feito, fresco, na hora. Nenhum dos 23 nichos
+    # descrevia isso — 'alimentacao' é lanchonete (prato, porção, combo) e
+    # 'minimercado' é mercearia; medido no catálogo dela em 13/09/2026, 12 dos 42
+    # produtos ficaram sem categoria e 10 caíram em 'fruta' (que é do hortifrúti)
+    # porque o sabor do whey é morango, pêssego, coco.
+    #
+    # É MISTO, e o serviço aqui não é mão de obra: é o PLANO DE MARMITAS — pacote
+    # semanal/mensal, que vira título a receber recorrente. Sem `vende_servico` a
+    # aba de serviço não abre e o plano não tem onde morar.
+    #
+    # A ORDEM: `pote` é a unidade de quase tudo que ela revende (900g, 300g, 220g)
+    # e `whey` é 13 dos 27 produtos dela — metade da loja. Primeiro da lista é o
+    # que o formulário já vem preenchido.
+    #
+    # `insumo` é categoria de propósito: o frango e a batata-doce da cozinha também
+    # entram no catálogo (é deles que a ficha técnica do prato vai sair), e sem uma
+    # categoria própria eles se misturariam com o que está à venda na prateleira.
+    "suplementos": {
+        "label": "Suplementos / Nutrição esportiva",
+        "vende_produto": True, "vende_servico": True,
+        "unidades": ["pote", "unidade", "caixa", "frasco", "sache", "kit",
+                     "marmita", "kg"],
+        "categorias": ["whey", "proteina", "creatina", "pre_treino", "aminoacido",
+                       "cafeina", "termogenico", "vitamina", "colageno",
+                       "barra_snack", "bebida", "marmita", "insumo", "acessorio",
+                       "outro"],
+    },
 }
 
 # União de TODAS as unidades de todos os nichos. Serve pra validação frouxa no
@@ -299,6 +327,7 @@ _UNIDADE_LABEL = {
     "processo": "processo", "diagnostico": "diagnóstico", "sprint": "sprint",
     "licenca": "licença", "etapa": "etapa", "medicao": "medição", "m2": "m²",
     "campanha": "campanha", "convidado": "convidado",
+    "pote": "pote", "sache": "sachê", "marmita": "marmita",
 }
 
 
@@ -426,6 +455,47 @@ _PERSONAS_NICHO: dict[str, str] = {
         "corretora. Se notar comissão anual vencendo no mês, avise em 1 linha de "
         "quem é e ofereça preparar a renovação. Nunca insista nem repita a cada "
         "mensagem."
+    ),
+    # NÃO usa _molde_servico, como a corretora também não usa — e pelo motivo
+    # oposto. Lá o molde erra o pagador; aqui ele erra o NEGÓCIO: o molde ensina a
+    # tratar mensalidade de cliente como o forte do faturamento, e esta é uma LOJA
+    # DE BALCÃO com cozinha. O grosso entra em venda avulsa; o plano de marmitas é
+    # o extra que se quer fazer crescer, não o normal.
+    #
+    # As duas frases que só existem aqui: INSUMO NÃO É MERCADORIA (o frango vira
+    # prato, não vai pra prateleira) e NADA DE CONSELHO DE SAÚDE — suplemento não
+    # é remédio, e um agente que responde "o que tomar pra emagrecer" põe a loja
+    # num lugar onde ela não pode estar.
+    "suplementos": (
+        "RAMO DA EMPRESA: LOJA DE SUPLEMENTOS COM COZINHA (vende pote e prato "
+        "feito). Você fala com o dono da loja — vá direto, sem explicar o básico "
+        "de suplemento nem de cozinha. Você é o braço OPERACIONAL do balcão dele.\n"
+        "- O PRODUTO É MARCA + SABOR + GRAMATURA, e os três juntos são o item: "
+        "\"whey\" não é produto, \"Best Whey ISO 907g baunilha\" é. Antes de lançar "
+        "venda ou entrada, confirme o SABOR — senão o estoque baixa do item errado.\n"
+        "- QUEM PAGA É O CLIENTE DO BALCÃO. Receita na categoria 'Vendas'. O "
+        "distribuidor (Integral Médica, Dux, New Millen, Shark) é FORNECEDOR, e "
+        "compra de mercadoria pra revenda é a pagar -> 'Compras'.\n"
+        "- A COZINHA TEM CUSTO SEPARADO: frango, batata-doce, queijo, tempero são "
+        "INSUMO -> categoria 'Insumos'; pote, marmitex, sacola e etiqueta -> "
+        "'Embalagens'. NUNCA lance isso em 'Mercado' (é categoria de compra de "
+        "casa) — é justamente essa separação que deixa o CMV existir.\n"
+        "- INSUMO NÃO É MERCADORIA: o que entra pra virar prato não vai pra "
+        "prateleira. Se ele falar de compra de insumo, é custo da cozinha, não "
+        "produto novo do catálogo.\n"
+        "- A MARMITA É FRESCA, FEITA NA HORA: validade é curta e o estoque de prato "
+        "é do DIA — não acumula de uma semana pra outra. Ao fim do dia, o que "
+        "sobrou é perda, e perda é informação: vale registrar.\n"
+        "- PLANO DE MARMITAS = receita recorrente: título a RECEBER recorrente "
+        "(recorrente=true, periodicidade mensal ou quinzenal), com o cliente na "
+        "contraparte. É o que dá previsibilidade num negócio de venda avulsa.\n"
+        "- MARGEM E GIRO, NÃO FATURAMENTO: pote parado é dinheiro parado na "
+        "prateleira. Quando ele perguntar do mês, fale do que girou e do que "
+        "encalhou, não só do total vendido.\n"
+        "- NADA DE CONSELHO DE SAÚDE. Suplemento não é medicamento: não recomende "
+        "dose, não fale de tratamento, não responda \"o que tomar pra emagrecer\" "
+        "nem \"posso tomar com tal remédio\". Isso é com nutricionista ou médico — "
+        "diga isso em uma linha e siga ajudando na loja."
     ),
     "construcao": _molde_servico(
         "CONSTRUÇÃO CIVIL / OBRAS", "um construtor/engenheiro de obras",

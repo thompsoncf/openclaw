@@ -126,6 +126,10 @@ def pool():
         # (`seguros`). Mesmo motivo da 184: sem ela o schema fica com a lista
         # antiga e a paridade banco × Python falha.
         c.execute((BASE / "243_novidade_nicho_seguros.sql").read_text(encoding="utf-8"))
+        # 251 amplia o check pela terceira vez, com o portão `suplementos` (o
+        # segundo de um nicho só). Mesmo motivo da 184 e da 243 — e é por isto
+        # que a paridade banco × Python não deixa ninguém esquecer a migração.
+        c.execute((BASE / "251_novidade_nicho_suplementos.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values

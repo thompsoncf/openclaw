@@ -61,8 +61,12 @@ Presentes; encanador/eletricista/conserto/diarista/pedreiro = Servicos;
 uber/99/gasolina/onibus/estacionamento = Transporte; aluguel/condominio/IPTU =
 Moradia; luz/agua/gas/internet/telefone = Contas de casa; streaming/Spotify/
 academia mensal = Assinaturas; cinema/bar/viagem/passeio = Lazer; escola/curso/
-livro = Educacao. Na duvida entre duas, escolha a mais especifica ao inves de
-"Outros". So' use "Outros" se realmente nao houver categoria aplicavel.
+livro = Educacao. QUEM PRODUZ (cozinha, padaria, confeitaria, acougue): materia-
+prima comprada PRA VIRAR PRODUTO - carne, farinha, legume, queijo, tempero, mesmo
+comprada no atacado ou no supermercado - e' Insumos, NAO "Mercado"; marmitex,
+pote, sacola, etiqueta e filme sao Embalagens. "Mercado" continua sendo a compra
+de casa: se o que entrou vai virar o que a pessoa VENDE, e' Insumos. Na duvida
+entre duas, escolha a mais especifica ao inves de "Outros". So' use "Outros" se realmente nao houver categoria aplicavel.
 RECEITAS - mesmo cuidado: salario/holerite = Salario; freelance/bico/servico
 prestado = Freela; rendimento/dividendo/juros = Investimentos; venda de produto/
 item = Vendas; aluguel que voce RECEBE de imovel = Aluguel; INSS/aposentadoria/

@@ -88,6 +88,18 @@ def _seguros(slug) -> bool:
     return (slug or "") == "seguros"
 
 
+def _suplementos(slug) -> bool:
+    """Loja de suplemento com cozinha — o segundo portão de UM nicho só.
+
+    Mesma justificativa do `_seguros` logo acima: whey, marmita e ficha técnica não
+    existem em nenhum outro nicho da base. Os portões de família erram os dois
+    lados aqui — `produto` alcançaria o hortifrúti do Zé do Arroz (conta 9) e a
+    mercearia, `servico` alcançaria advocacia e contabilidade, e `recorrente`
+    alcançaria as quatro consultorias. Nenhuma delas ganha tela nenhuma com isto.
+    """
+    return (slug or "") == "suplementos"
+
+
 def _canal_proprio(pool, conta_id: int) -> bool:
     """A conta fala pelo WhatsApp DELA, conectado por QR code.
 
@@ -133,6 +145,7 @@ PUBLICOS_NICHO = {
     "eventos": _eventos,
     "recorrente": _recorrente,
     "seguros": _seguros,
+    "suplementos": _suplementos,
 }
 
 PUBLICOS_CONTA = {

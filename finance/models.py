@@ -93,7 +93,24 @@ class Tipo(str, Enum):
 
 CATEGORIAS_DESPESA = [
     "Mercado", "Restaurante", "Transporte", "Moradia", "Contas de casa",
-    "Saude", "Educacao", "Lazer", "Compras", "Vestuario", "Beleza",
+    "Saude", "Educacao", "Lazer", "Compras",
+    # "Insumos" e "Embalagens" nasceram com a cozinha da SUPER FIT (conta 16), do
+    # mesmo jeito que "Comissoes" nasceu com a corretora: nenhuma das antigas
+    # descrevia o gasto. Medido na produção em 13/09/2026 — as SEIS compras de
+    # insumo dela (carne, queijo da NF do laticínio, Assaí, Sam's, Carvalho,
+    # pães; R$ 1.312,22) estavam em "Mercado", que é a categoria de compra de
+    # SUPERMERCADO DOMÉSTICA. Matéria-prima virava despesa de casa.
+    #
+    # Por que isso importa mais do que parece: em cozinha, matéria-prima +
+    # embalagem sobre o preço de venda É o CMV, o número que decide se o prato dá
+    # lucro. Sem uma categoria própria ele não se separa da despesa pessoal e
+    # simplesmente não existe.
+    #
+    # Servem a qualquer conta que TRANSFORMA matéria-prima — cozinha, padaria,
+    # confeitaria (a Doce Mell, conta 35, é uma), açougue — e não só ao nicho de
+    # suplementos. Por isso entram na lista geral, e não numa lista por nicho.
+    "Insumos", "Embalagens",
+    "Vestuario", "Beleza",
     "Presentes", "Servicos", "Assinaturas", "Impostos", "Pet",
     "Construcao", "Outros",
 ]

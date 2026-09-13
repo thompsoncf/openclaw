@@ -1,0 +1,416 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<title>SUPER FIT: o nicho de suplementos</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:880px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:32px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.card{background:#fff;border:1px solid #E3DDD0;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden;margin-bottom:14px}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+.barra{display:inline-block;height:9px;border-radius:3px;background:#C9BFA8;vertical-align:middle;margin-right:6px}
+.barra.ruim{background:#D99A93}
+.barra.boa{background:#7FBFA0}
+
+/* ---------- réplica do painel escuro (web/portal · aba Produtos) ---------- */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC}
+.pn .bloco{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.4rem .55rem;font-size:.85rem;color:#DDE4EC;width:100%}
+.pn .lbl{color:#7B8A99;font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:.2rem}
+.pn .mut{color:#7B8A99;font-size:.78rem;margin-top:.1rem}
+.pn .expl{color:#9AA7B4;font-size:.85rem;margin:.7rem 0 .2rem;line-height:1.6}
+.pn .expl b{color:#7EE7B8}
+.pn .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:.5rem}
+.pn .chip{display:inline-block;background:#16212C;border:1.5px solid #22303C;border-radius:16px;padding:3px 11px;font-size:.74rem;color:#B4B2A9;margin:0 4px 5px 0}
+.pn .chip.on{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .chip.off{opacity:.45;text-decoration:line-through}
+.pn .prod{display:flex;align-items:center;gap:10px;background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.55rem .7rem;margin-bottom:.4rem}
+.pn .prod .ico{width:34px;height:34px;border-radius:8px;background:#1a2a1f;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.pn .prod .nm{flex:1;min-width:0;font-size:.86rem}
+.pn .prod .sub2{color:#7B8A99;font-size:.72rem;margin-top:1px}
+.pn .prod .vl{text-align:right;font-size:.86rem;font-weight:600;color:#cfcfcf;white-space:nowrap}
+.pn .prod .vl small{display:block;font-weight:400;font-size:.66rem;color:#6a8a7a}
+.pn .prod .vl small.ruim{color:#ff6b6b}
+.pill{display:inline-block;background:#F2EFE7;border:1px solid #E3DDD0;border-radius:99px;padding:.18rem .6rem;font-size:.78rem;margin:0 4px 6px 0;font-family:ui-monospace,Menlo,monospace}
+.pill.pad{background:#E8F5EE;border-color:#BFE3D0;color:#155c3b;font-weight:700}
+.pill.cond{background:#FFF6E8;border-color:#F0DDBA;color:#7A4E0C}
+.eti{display:inline-block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;vertical-align:middle;margin-left:6px}
+.e-novo{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.e-hoje{background:#FDECEA;color:#B4453C;border:1px solid #F5C6C0}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.card,.pn,.q,table{break-inside:avoid}}
+</style></head><body><div class="wrap">
+
+<h1>SUPER FIT: o nicho de suplementos</h1>
+<p class="lead">A conta 16 (<b>SUPER FIT</b>, Danilo, Teresina-PI) está no nicho
+<code>alimentacao</code> — o de lanchonete, que fala em <i>prato</i>, <i>porção</i> e <i>combo</i>.
+Ela vende whey, café proteico, vitamina em cápsula e comida saudável, com item de R$&nbsp;50 a
+R$&nbsp;459. Este documento mostra o que esse desencontro já custou no catálogo dela —
+tudo medido em produção, só leitura, em 13/09/2026 — e desenha o nicho <code>suplementos</code>:
+vocabulário, persona, CNAE e o aviso. No fim, as quatro decisões que são suas.</p>
+<p class="lead" style="border-left:3px solid #B8862E;background:#FBFAF7;padding:10px 13px;border-radius:8px;margin-top:-10px"><b>Atualização de 13/09/2026 — a decisão 1 já foi respondida.</b> O dono confirmou que a SuperFit <b>tem cozinha e vende prato feito</b>. Isso muda duas coisas aqui: o nicho passa a ser <b>misto</b> (produto + serviço) e <code>marmita</code> deixa de ser condicional. A cozinha está medida e desenhada no documento irmão — <code>docs/mockups/superfit_cozinha.html</code>, que traz a ficha técnica, o CMV, a produção do dia e o plano de marmitas.</p>
+
+<h2><span class="n">01</span> O que a SuperFit vê hoje</h2>
+<div class="sub">Nicho de lanchonete numa loja de suplemento</div>
+
+<table>
+<tr><th>Onde</th><th>O que ela vê hoje</th><th>Por quê é errado pra ela</th></tr>
+<tr><td>Unidade do produto</td><td class="mono">unidade · porcao · prato · litro</td>
+    <td>É o vocabulário de quem serve prato. Whey se vende por <b>pote</b>, barra por unidade,
+        vitamina por frasco.</td></tr>
+<tr><td>Chips de categoria</td><td class="mono">salgado · doce · bebida · prato · combo · outro</td>
+    <td>Nenhum descreve suplemento. Sobra digitar do zero — e foi o que aconteceu (seção 02).</td></tr>
+<tr><td>O agente no WhatsApp</td><td>persona PJ genérica</td>
+    <td><code>alimentacao</code> não tem persona própria. O agente não sabe de marca, sabor,
+        gramatura, validade nem giro.</td></tr>
+<tr><td>Perfil do Raio-X</td><td><code>produto</code> — sem funil, sem Raio-X, sem vendedor</td>
+    <td>Este está <b>certo</b>, e continua certo depois da mudança. Loja de balcão não tem funil
+        de lead.</td></tr>
+<tr><td>CNAE dela</td><td class="mono">"comércio varejista de produtos alimentícios… não
+    especificados anteriormente"</td>
+    <td>Bate em <code>"alimenticios"</code> no <code>_RAMOS</code> e cai em
+        <b>Supermercado&nbsp;→&nbsp;minimercado</b>. Nem o automático acerta hoje.</td></tr>
+</table>
+
+<div class="nota"><b>O CNAE dela é o da loja de suplemento (4729-6/99).</b> É exatamente o que a
+Receita dá pra esse ramo — então o erro não é dela ter escolhido errado: é o sistema não ter a opção.</div>
+
+<h2><span class="n">02</span> A prova está no catálogo dela</h2>
+<div class="sub">42 linhas, 27 produtos, e nenhum relatório por categoria fecha</div>
+
+<table>
+<tr><th>Categoria como está gravada</th><th>Linhas</th><th></th><th>De onde veio</th></tr>
+<tr><td><i>(vazia)</i></td><td class="num">12</td>
+    <td><span class="barra ruim" style="width:120px"></span></td>
+    <td>Desistiu de classificar — nenhum chip servia</td></tr>
+<tr><td class="mono">fruta</td><td class="num">10</td>
+    <td><span class="barra ruim" style="width:100px"></span></td>
+    <td><b>Vocabulário do hortifrúti.</b> São os sabores: morango, pêssego e manga, creme de coco,
+        maracujá</td></tr>
+<tr><td class="mono">CAFEINA</td><td class="num">8</td>
+    <td><span class="barra" style="width:80px"></span></td><td>Ele digitou — e a palavra é boa</td></tr>
+<tr><td class="mono">whey protein isolado hidrolizado</td><td class="num">6</td>
+    <td><span class="barra" style="width:60px"></span></td><td>Ele digitou, em minúsculo e com Z</td></tr>
+<tr><td class="mono">AMINOACIDO</td><td class="num">2</td>
+    <td><span class="barra" style="width:20px"></span></td><td>Ele digitou</td></tr>
+<tr><td class="mono">DIURETICO</td><td class="num">2</td>
+    <td><span class="barra" style="width:20px"></span></td><td>Ele digitou</td></tr>
+<tr><td class="mono">WHEY PROTEIN ISOLADO HIDROLISADO</td><td class="num">1</td>
+    <td><span class="barra" style="width:10px"></span></td>
+    <td><b>A mesma coisa da linha de cima</b>, em maiúsculo e com S</td></tr>
+<tr><td class="mono">BEEF PROTEIN</td><td class="num">1</td>
+    <td><span class="barra" style="width:10px"></span></td><td>Ele digitou</td></tr>
+</table>
+
+<div class="perigo"><b>Dez linhas em <code>fruta</code>.</b> Todas são item com sabor no nome — whey de
+morango, de pêssego e manga, creme de coco, magnésio de maracujá. Seja chip clicado por falta de coisa
+melhor, seja coluna de planilha, o efeito é o mesmo: a loja de suplemento dele tem um quarto do
+catálogo classificado como fruta, e a mesma categoria escrita de dois jeitos. Relatório por categoria
+não fecha assim.</div>
+
+<div class="alerta"><b>E existe um jeito de isso piorar sozinho.</b>
+<code>finance/categorias.py</code> tem um palpite automático de categoria feito pra hortifrúti: ele lê
+"morango" e devolve <code>fruta</code>. Hoje só o ingestor de preços usa. Se alguém plugar esse palpite
+no cadastro de produto, o catálogo de suplemento inteiro vira feira — por sabor.</div>
+
+<h2><span class="n">03</span> Três coisas que travam a venda hoje, e não são o nicho</h2>
+<div class="sub">Arrumar o vocabulário não resolve nenhuma das três</div>
+
+<table>
+<tr><th>O que está assim</th><th>Quanto</th><th>O que acontece na prática</th></tr>
+<tr><td><b>Estoque zerado</b></td><td class="num">42 de 42</td>
+    <td>O PDV pré-valida saldo e o painel não permite negativo: a <b>primeira venda no balcão falha</b>
+        com <span class="mono">"estoque insuficiente de X: tem 0, tentou vender 1"</span>
+        (<code>finance/pdv.py:114</code>). Ele cadastrou o catálogo e não deu entrada em nada.</td></tr>
+<tr><td><b>Custo médio zerado</b></td><td class="num">42 de 42</td>
+    <td>A margem-alvo dele está em <b>60%</b> e não mede nada — sem custo, a margem não aparece no
+        card do produto. Em suplemento, que é caro e de giro lento, é onde está o dinheiro.</td></tr>
+<tr><td><b>Produtos duplicados</b></td><td class="num">15 pares</td>
+    <td>27 produtos ocupando 42 linhas — o mesmo item duas vezes. Não existe trava de nome repetido:
+        <code>catalogo.criar_produto</code> insere sempre, e <code>catalogo_import.importar_itens</code>
+        também não checa.</td></tr>
+</table>
+
+<div class="nota"><b>Some-se:</b> nenhum canal de WhatsApp conectado, nenhum cliente cadastrado,
+vitrine sem logo e sem número. E os 8 lançamentos da conta são <b>todos despesa</b> (luz, queijo da
+cozinha, compras de mercado) — nenhuma receita entrou pelo sistema ainda. O trial venceu em 29/06.</div>
+
+<h2><span class="n">04</span> As peças do nicho</h2>
+<div class="sub">O mesmo caminho do <code>seguros</code> (#678) — nada aqui é invenção nova</div>
+
+<table>
+<tr><th>Peça</th><th>Onde mora</th><th>O que muda pra suplementos</th></tr>
+<tr><td>Linha na tabela</td><td class="mono">migração <code>250_nicho_suplementos.sql</code></td>
+    <td>Cria o slug <code>suplementos</code>. Sem ela a FK de <code>contas.nicho_id</code> recusa.</td></tr>
+<tr><td>Vocabulário</td><td class="mono">finance/nichos.py · <code>NICHOS</code></td>
+    <td>Unidades e categorias novas (seção 05).</td></tr>
+<tr><td>Persona do agente</td><td class="mono">finance/nichos.py · <code>_PERSONAS_NICHO</code></td>
+    <td>Bloco próprio — hoje <code>alimentacao</code> não tem nenhum (seção 08).</td></tr>
+<tr><td>CNAE → nicho</td><td class="mono">finance/cnpj_info.py · <code>_RAMOS</code></td>
+    <td>Ramo <b>Suplementos</b> <u>antes</u> de Supermercado, com chave multi-palavra
+        (<span class="mono">"suplementos alimentares"</span>), pra não roubar mercearia.</td></tr>
+<tr><td>Modo do orçamento</td><td class="mono">finance/vendas.py · <code>NICHOS_EVENTO</code></td>
+    <td><b>Nada.</b> Fora dessa lista o modo é <code>recorrente</code>, e loja de balcão nem usa.</td></tr>
+<tr><td>Perfil do Raio-X</td><td class="mono">finance/raio_x_perfil.py</td>
+    <td><b>Nada</b>, se ficar produto puro: cai em <code>produto</code> igual hoje. <u>Muda</u> se a
+        marmita virar plano mensal — ver a decisão 1 da seção 11.</td></tr>
+<tr><td>O aviso</td><td class="mono">migração <code>251_novidade_nicho_suplementos.sql</code></td>
+    <td>Portão novo <code>suplementos</code> em <code>finance/novidades.PUBLICOS</code> (seção 09).</td></tr>
+</table>
+
+<div class="bom"><b>Trocar o nicho não mexe em nada do que já está cadastrado.</b> O check rígido de
+unidade saiu na migração 060 — o banco guarda texto livre e quem valida é o código. Os 27 produtos
+dela continuam lá, com a unidade que têm. O que muda é o que a tela <b>sugere daqui pra frente</b>,
+e a recategorização da seção 07 é um passo separado, que só acontece com o seu sim.</div>
+
+<h2><span class="n">05</span> O vocabulário</h2>
+<div class="sub">A primeira da lista é o padrão do formulário — por isso a ordem importa</div>
+
+<div class="card">
+<p><b>Unidades</b> — como o produto é medido e vendido:</p>
+<p><span class="pill pad">pote</span><span class="pill">unidade</span><span class="pill">caixa</span>
+<span class="pill">frasco</span><span class="pill">sache</span><span class="pill">kit</span>
+<span class="pill">kg</span><span class="pill cond">marmita</span></p>
+<p style="margin-top:10px"><code>pote</code> é o padrão porque é a unidade de quase tudo no catálogo
+dele (900g, 300g, 220g). <code>frasco</code> é pra cápsula (os 60caps), <code>sache</code> pra dose
+avulsa de pré-treino, <code>caixa</code> pra display de barrinha, <code>kit</code> pra combo.
+<span class="pill cond" style="margin:0">marmita</span> está <b>confirmada</b>: a cozinha dele vende
+prato feito (ver o documento irmão da cozinha).</p>
+</div>
+
+<div class="card">
+<p><b>Categorias</b> — como uma loja de suplemento enxerga a prateleira. Cinco das quatorze
+<b>são as palavras que ele já digitou</b>, com a grafia unificada:</p>
+<p><span class="pill pad">whey</span><span class="pill">proteina</span><span class="pill">creatina</span>
+<span class="pill">pre_treino</span><span class="pill">aminoacido</span><span class="pill">cafeina</span>
+<span class="pill">termogenico</span><span class="pill">vitamina</span><span class="pill">colageno</span>
+<span class="pill">barra_snack</span><span class="pill">bebida</span>
+<span class="pill">marmita</span><span class="pill">insumo</span><span class="pill">acessorio</span>
+<span class="pill">outro</span></p>
+<p style="margin-top:10px"><code>whey</code> vem primeiro porque é <b>13 dos 27 produtos</b> dele —
+metade da loja. <code>creatina</code> e <code>pre_treino</code> não estão no catálogo de hoje e entram
+mesmo assim: não existe loja de suplemento sem os dois, e categoria que falta vira campo vazio.
+<code>termogenico</code> é o nome de prateleira do que ele chamou de <span class="mono">DIURETICO</span>
+— se a palavra dele for a certa pro balcão de Teresina, troca-se numa linha.</p>
+<p style="margin-top:10px"><b>E duas categorias são da cozinha:</b> <code>marmita</code> é o que ela
+vende pronto, e <code>insumo</code> é o que ela compra pra fazer — o frango e a batata-doce também
+entram no catálogo, porque é deles que a ficha técnica do prato vai sair. Sem uma categoria própria,
+o insumo se misturaria com o que está à venda na prateleira.</p>
+</div>
+
+<h2><span class="n">06</span> Como fica a tela de cadastro</h2>
+<div class="sub">Mesma tela de sempre; só o que está dentro dos chips e do select muda</div>
+
+<p style="font-size:12.5px;color:#8A8475;margin-bottom:6px"><b>HOJE</b> <span class="eti e-hoje">nicho alimentacao</span></p>
+<div class="pn">
+  <div class="bloco"><span class="lbl">Nome do produto</span>
+    <div class="inp">NEW MILLEN-ISOLATE PROTEIN 900G-MORANGO</div></div>
+  <div class="grid">
+    <div class="bloco"><span class="lbl">Unidade</span>
+      <div class="inp">un ▾</div>
+      <div class="mut">un · porção · prato · litro</div></div>
+    <div class="bloco"><span class="lbl">Preço de venda</span><div class="inp">R$ 229,00</div></div>
+  </div>
+  <div class="bloco"><span class="lbl">Categoria</span>
+    <div><span class="chip off">salgado</span><span class="chip off">doce</span>
+         <span class="chip off">bebida</span><span class="chip off">prato</span>
+         <span class="chip off">combo</span><span class="chip off">outro</span></div>
+    <div class="inp" style="margin-top:.3rem">toque numa sugestão ou digite</div></div>
+  <div class="expl">Nenhum chip serve. O resultado real: <b>12 em branco, 10 em "fruta", 2 grafias
+  de whey</b>.</div>
+</div>
+
+<p style="font-size:12.5px;color:#8A8475;margin:18px 0 6px"><b>DEPOIS</b> <span class="eti e-novo">nicho suplementos</span></p>
+<div class="pn">
+  <div class="bloco"><span class="lbl">Nome do produto</span>
+    <div class="inp">NEW MILLEN-ISOLATE PROTEIN 900G-MORANGO</div></div>
+  <div class="grid">
+    <div class="bloco"><span class="lbl">Unidade <span class="eti e-novo">novo</span></span>
+      <div class="inp">pote ▾</div>
+      <div class="mut">pote · unidade · caixa · frasco · sachê · kit · kg</div></div>
+    <div class="bloco"><span class="lbl">Preço de venda</span><div class="inp">R$ 229,00</div></div>
+    <div class="bloco"><span class="lbl">Custo (entrada) <span class="eti e-hoje">hoje zerado</span></span>
+      <div class="inp">R$ 0,00</div>
+      <div class="mut">sem isto a margem não aparece</div></div>
+  </div>
+  <div class="bloco"><span class="lbl">Categoria <span class="eti e-novo">novo</span></span>
+    <div><span class="chip on">whey</span><span class="chip">proteina</span>
+         <span class="chip">creatina</span><span class="chip">pre_treino</span>
+         <span class="chip">aminoacido</span><span class="chip">cafeina</span>
+         <span class="chip">termogenico</span><span class="chip">vitamina</span>
+         <span class="chip">colageno</span><span class="chip">barra_snack</span>
+         <span class="chip">bebida</span><span class="chip">marmita</span>
+         <span class="chip">insumo</span><span class="chip">acessorio</span></div></div>
+  <div class="expl">O card do produto passa a mostrar <b>saldo em pote</b> e <b>margem %</b> — as duas
+  coisas que decidem repor ou não repor.</div>
+</div>
+
+<p style="font-size:12.5px;color:#8A8475;margin:18px 0 6px"><b>E a lista de produtos, com estoque e custo preenchidos</b></p>
+<div class="pn">
+  <div class="prod"><div class="ico">📦</div>
+    <div class="nm">BEST WHEY ISO 907G — BAUNILHA <span style="color:#7B8A99">· pote</span>
+      <div class="sub2">saldo 6 potes · whey</div></div>
+    <div class="vl">R$ 397,00<small>margem 34%</small></div></div>
+  <div class="prod"><div class="ico">📦</div>
+    <div class="nm">SUPER COFFEE CAFFEINE ARMY 220G — DOCE DE LEITE <span style="color:#7B8A99">· pote</span>
+      <div class="sub2">saldo 2 potes · cafeina · abaixo do mínimo</div></div>
+    <div class="vl">R$ 169,00<small class="ruim">repor</small></div></div>
+  <div class="prod"><div class="ico">📦</div>
+    <div class="nm">LINHA LEV D3+K2 60CAPS <span style="color:#7B8A99">· frasco</span>
+      <div class="sub2">saldo 11 frascos · vitamina</div></div>
+    <div class="vl">R$ 50,00<small>margem 52%</small></div></div>
+</div>
+
+<h2><span class="n">07</span> Para onde vão os 27 produtos dela</h2>
+<div class="sub">O de-para completo, item por item — nenhum sobra em "outro"</div>
+
+<table>
+<tr><th>Categoria nova</th><th>Qtd</th><th>Quais produtos dela</th><th>Está hoje como</th></tr>
+<tr><td class="mono"><b>whey</b></td><td class="num">13</td>
+    <td>BEST WHEY ISO (2 sabores) · ISO HYDRO WHEY CRUSH (4) · ADAPTOGEN TAST ISO (2) ·
+        DUX WHEY ISOLADO · NEW MILLEN ISOLATE (4)</td>
+    <td class="mono">whey…hidrolizado (6) · fruta (5) · vazio (2)</td></tr>
+<tr><td class="mono"><b>whey</b> (concentrado)</td><td class="num">2</td>
+    <td>NUTRATA WHEY CONCENTRADA 900G · DUX WHEY CONCENTRADA 450G</td>
+    <td class="mono">fruta (1) · vazio (1)</td></tr>
+<tr><td class="mono"><b>cafeina</b></td><td class="num">5</td>
+    <td>SUPER COFFEE (2) · VITAFOR V-COFFEE · +MU CAPPUCCINO PROTEICO · SHARK PRO DRY COFFEE</td>
+    <td class="mono">CAFEINA (4) · vazio (1)</td></tr>
+<tr><td class="mono"><b>vitamina</b></td><td class="num">3</td>
+    <td>UNIÃO VEGETAL MAGNÉSIO INOSITOL · LINHA LEV D3+K2 · LINHA LEV K2 MK-7</td>
+    <td class="mono">fruta (1) · vazio (2)</td></tr>
+<tr><td class="mono"><b>proteina</b></td><td class="num">1</td>
+    <td>SHARK BEEF PROTEIN 900G</td><td class="mono">BEEF PROTEIN</td></tr>
+<tr><td class="mono"><b>aminoacido</b></td><td class="num">1</td>
+    <td>INTEGRAL MEDICA GLUTAMINE ISOLATES 300G</td><td class="mono">AMINOACIDO</td></tr>
+<tr><td class="mono"><b>termogenico</b></td><td class="num">1</td>
+    <td>BODY ACTION CHÁ ABDOMEN 140G</td><td class="mono">DIURETICO</td></tr>
+<tr><td class="mono"><b>vitamina</b> (articular)</td><td class="num">1</td>
+    <td>BLACK SKULL TRIPLE JOINT 60CAPS</td><td class="mono">vazio</td></tr>
+</table>
+
+<div class="nota"><b>Onde a conta fecha:</b> 13 + 2 + 5 + 3 + 1 + 1 + 1 + 1 = <b>27</b>, que é o número
+de produtos distintos dela. As outras 15 linhas são as duplicatas — arquivar, nunca apagar
+(<code>ativo=false</code> guarda o histórico de movimentação).</div>
+
+<h2><span class="n">08</span> A persona do agente</h2>
+<div class="sub">O que ela ensina, e que nenhuma outra ensina</div>
+
+<div class="card">
+<p>1. <b>Produto tem marca, sabor e gramatura</b>, e os três juntos são o item. "Whey" não é produto;
+"BEST WHEY ISO 907G baunilha" é. O agente pergunta o sabor antes de lançar, senão o estoque baixa do
+item errado.</p>
+<p>2. <b>Quem paga é o cliente do balcão</b> — nada de contraparte invertida como na corretora. Receita
+em <code>Vendas</code>, que já existe. O distribuidor (Integral Médica, Dux, New Millen) entra como
+<b>fornecedor</b> nas contas a pagar.</p>
+<p>3. <b>Suplemento vence.</b> O agente trata validade como assunto de rotina — é o risco de perda de
+uma loja que gira devagar com item de R$ 400.</p>
+<p>4. <b>Margem e giro, não faturamento.</b> Pote parado é dinheiro parado na prateleira: a pergunta
+certa é "quanto vendi deste e quanto ainda tenho", não "quanto faturei".</p>
+<p>5. <b>Nada de conselho de saúde.</b> Suplemento não é medicamento e o agente não recomenda dose,
+não fala de tratamento, não responde "o que tomar pra emagrecer". Ele é o operacional da loja.</p>
+</div>
+
+<h2><span class="n">09</span> O aviso, no mesmo PR</h2>
+<div class="sub">Regra 5 do CLAUDE.md — PR que muda tela leva o aviso</div>
+
+<table>
+<tr><th>Campo</th><th>Valor</th></tr>
+<tr><td>chave</td><td class="mono">nicho-loja-de-suplementos</td></tr>
+<tr><td>publico</td><td class="mono">suplementos</td></tr>
+<tr><td>pra_quem</td><td class="mono">dono, gestor</td></tr>
+<tr><td>título</td><td>O Zaq agora fala a língua de loja de suplemento</td></tr>
+<tr><td>resumo (vai pro site)</td><td>Loja de suplemento virou um ramo do sistema: o cadastro passa a
+    falar em pote, whey, creatina e vitamina, em vez de prato e porção.</td></tr>
+<tr><td>link</td><td class="mono">/painel/empresa</td></tr>
+<tr><td>quem recebe</td><td><b>conta 16 · SUPER FIT · Teresina-PI</b> — e mais ninguém, de propósito</td></tr>
+</table>
+
+<div class="alerta"><b>Por que o portão é novo.</b> <code>produto</code> alcançaria o hortifrúti do
+Zé do Arroz (conta 9) e o minimercado — ninguém deles ganha tela nenhuma com isto.
+<code>todos</code> alcançaria a Prime Eventos. O portão <code>suplementos</code> é de um nicho só,
+como o <code>seguros</code> foi.</div>
+
+<h2><span class="n">10</span> O plano, na ordem</h2>
+<div class="sub">O nicho é o passo 1 de 5 — e sozinho ele não faz a loja vender</div>
+
+<table>
+<tr><th>#</th><th>Passo</th><th>Quem faz</th><th>Efeito</th></tr>
+<tr><td class="num">1</td><td>Nicho <code>suplementos</code> + vocabulário + persona + CNAE + aviso</td>
+    <td>PR meu</td><td>A tela passa a sugerir a palavra certa</td></tr>
+<tr><td class="num">2</td><td>Trocar o nicho da conta 16</td><td>Você, em <code>/painel/empresa</code>
+    (uma linha), ou eu com sua autorização</td><td>A SuperFit entra no ramo</td></tr>
+<tr><td class="num">3</td><td>Recategorizar os 27 produtos (seção 07) e arquivar as 15 duplicatas</td>
+    <td>Eu, com sua autorização</td><td>Relatório por categoria passa a fechar</td></tr>
+<tr><td class="num">4</td><td>Dar entrada de estoque com <b>custo real</b></td><td>Danilo, em Abastecimento</td>
+    <td><b>Destrava o PDV</b> e faz a margem aparecer</td></tr>
+<tr><td class="num">5</td><td>Conectar canal + ligar a vitrine (logo, número, entrega)</td><td>Danilo</td>
+    <td>27 itens com preço viram loja no WhatsApp</td></tr>
+</table>
+
+<div class="perigo"><b>Sem o passo 4 nada disso vira venda.</b> Enquanto o saldo for 0, o balcão
+recusa a primeira venda — e o dono vai achar que o sistema está quebrado, não que falta a entrada.
+Se ele preferir começar vendendo sem controlar estoque, existe a saída de permitir saldo negativo;
+hoje o painel não oferece esse botão, e ligar isso é decisão sua.</div>
+
+<h2><span class="n">11</span> As quatro decisões que são suas</h2>
+<div class="sub">Regra 6 do CLAUDE.md: na dúvida, pergunta antes de construir</div>
+
+<div class="q" style="border-left-color:#1c7a4f"><div class="qt">1. A comida saudável é balcão ou plano? <span class="eti e-novo">respondida</span></div>
+<div class="qo"><b>Ela tem cozinha e vende prato feito.</b> Então o nicho nasce <b>misto</b> (<code>vende_servico=true</code>) e o perfil do Raio-X dela deixa de ser <code>produto</code> e vira <code>recorrente</code> — funil, Raio-X e follow-up entram no menu, que é o que serve pra vender plano em academia e empresa. O desenho da cozinha (ficha técnica, CMV, produção do dia, plano de marmitas e as fases) está no documento irmão <code>superfit_cozinha.html</code>; lá também está o efeito colateral que ainda precisa da sua escolha: o perfil olha só o slug do nicho, e a conta 16 tem <code>vende_servico=false</code> gravado.</div></div>
+
+<div class="q"><div class="qt">2. Validade e lote entram agora?</div>
+<div class="qo">O catálogo hoje não tem campo de validade. Numa loja com item de R$ 459 e giro lento,
+vencer é perda direta. <span class="rec">Minha recomendação: fica pra depois</span> — é campo novo,
+migração e tela, e o passo 4 (entrada com custo) vale mais dinheiro agora. Mas se o Danilo já perdeu
+pote vencido, sobe na fila.</div></div>
+
+<div class="q"><div class="qt">3. A lista de categorias é essa?</div>
+<div class="qo">Cinco saíram da mão dele (whey, cafeína, aminoácido, diurético, beef protein). Duas eu
+acrescentei sem ele ter: <b>creatina</b> e <b>pré-treino</b> — não existe loja do ramo sem as duas.
+E troquei <span class="mono">DIURETICO</span> por <code>termogenico</code>, que é o nome de
+prateleira. Com a cozinha confirmada entraram mais duas: <code>marmita</code> e <code>insumo</code>.
+<b>A palavra do dono ganha da minha</b>: qualquer uma dessas volta atrás numa linha.</div></div>
+
+<div class="q"><div class="qt">4. Autoriza mexer no catálogo dele?</div>
+<div class="qo">Recategorizar 27 produtos e arquivar 15 duplicatas é escrita na conta de um cliente.
+Não faço sem o seu sim. <b>Arquivar</b> (<code>ativo=false</code>) e não apagar: o produto some da
+tela e o histórico de movimentação continua de pé. Reversível a qualquer momento.</div></div>
+
+<div class="ftr">
+<b>Como isto foi medido.</b> Leitura, só leitura, no banco de produção em 13/09/2026: conta 16 e seu
+nicho, as 42 linhas de <code>catalogo_produtos</code> (categoria, unidade, saldo, custo, preço), os 8
+lançamentos, os 2 títulos, canais, clientes e membros. Nenhuma escrita foi feita. Os arquivos citados
+— <code>finance/nichos.py</code>, <code>finance/raio_x_perfil.py</code>, <code>finance/pdv.py</code>,
+<code>finance/catalogo.py</code>, <code>finance/categorias.py</code>, <code>finance/cnpj_info.py</code>
+— são o código de hoje na main.<br>
+<b>Precedente:</b> migrações 242/243 (nicho de corretora, Liberal Seguros) — mesmo formato, mesma
+ordem de peças.<br>
+<b>De passagem:</b> a Liberal Seguros (conta 37) continua com <code>nicho_id</code> nulo. O nicho foi
+criado pra ela em 12/09 e a conta nunca foi marcada — ela não recebeu o vocabulário nem o aviso.
+</div>
+
+</div></body></html>

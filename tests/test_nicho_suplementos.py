@@ -27,11 +27,30 @@ from finance.vendas import modo_por_nicho
 # ── o vocabulário ─────────────────────────────────────────────────────────
 def test_o_nicho_existe_e_e_misto():
     assert nichos.nicho_existe("suplementos")
-    assert nichos.label_do_nicho("suplementos") == "Suplementos / Nutrição esportiva"
+    # o nome DIZ AS DUAS METADES (decisão do dono, 13/09/2026): "Nutrição
+    # esportiva" descrevia só a prateleira, e escondia a cozinha — que na conta
+    # que deu origem ao nicho é de onde vem TODO o dinheiro que passou pelo sistema
+    assert nichos.label_do_nicho("suplementos") == "Suplementos e cozinha fit"
     # produto: ela revende pote. serviço: o PLANO de marmitas, que é recorrente.
     assert nichos.vende_produto("suplementos") is True
     assert nichos.vende_servico("suplementos") is True
     assert nichos.eh_misto("suplementos") is True
+
+
+def test_o_nome_da_tabela_e_o_label_do_codigo_sao_o_mesmo():
+    """O ramo tem nome em DOIS lugares, e eles divergem calados.
+
+    O painel do cliente monta o select com `nichos.lista_nichos()` — lê o CÓDIGO.
+    O admin lista `select id, nome from nichos` — lê a TABELA. Quem troca um e
+    esquece o outro deixa o mesmo ramo com dois nomes, e ninguém descobre por erro:
+    descobre olhando duas telas e achando que são coisas diferentes.
+
+    Este teste lê o texto da migração que grava o nome e compara com o label."""
+    from pathlib import Path
+    sql = (Path(__file__).resolve().parent.parent / "db" / "migracoes"
+           / "253_nicho_suplementos_nome.sql").read_text(encoding="utf-8")
+    label = nichos.label_do_nicho("suplementos")
+    assert f"update nichos set nome = '{label}'" in sql
 
 
 def test_a_unidade_padrao_e_pote():

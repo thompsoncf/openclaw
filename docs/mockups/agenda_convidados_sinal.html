@@ -1,0 +1,302 @@
+<title>Agenda: Convid. e Sinal</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+
+<style>
+/* Tokens da casa (web/tema.py). O painel é dark-only por decisão de produto. */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A; --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.pag{max-width:1180px;margin:0 auto;padding:40px 20px 90px}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance}
+h1{font-size:clamp(26px,3.4vw,38px);font-weight:700;letter-spacing:-.02em;line-height:1.12}
+h2{font-size:22px;font-weight:600;letter-spacing:-.01em}
+h3{font-size:16px;font-weight:600}
+p{margin:0}
+.olho{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--neon);margin-bottom:12px}
+.sub{color:var(--text-dim);max-width:68ch;margin-top:14px;font-size:16px}
+section{margin-top:54px}
+.cab{margin-bottom:22px}
+.cab p{color:var(--text-dim);max-width:76ch;margin-top:8px}
+.medido{font-family:var(--mono);font-size:11px;color:var(--text-faint);
+  letter-spacing:.06em;margin-top:6px}
+
+/* ── tabela que imita o relatório ─────────────────────────────────────── */
+.tela{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg-2)}
+.tela .topo{padding:14px 18px;border-bottom:1px solid var(--line);
+  display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.aba{font-size:12.5px;padding:5px 12px;border-radius:999px;border:1px solid var(--line);
+  color:var(--text-dim)}
+.aba.on{background:var(--neon-fundo);border-color:var(--neon-borda);color:var(--neon);font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--text-faint);padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid rgba(30,42,35,.55);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+.num{text-align:right;font-family:var(--mono)}
+.vazio{color:var(--text-faint)}
+th.mira,td.mira{background:rgba(224,87,79,.07)}
+th.bom,td.bom{background:rgba(37,211,102,.07)}
+.tag{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);
+  color:var(--text-dim)}
+.rodape{padding:11px 12px;border-top:1px solid var(--line);font-size:12px;color:var(--text-dim);
+  display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono)}
+
+/* ── blocos de apoio ──────────────────────────────────────────────────── */
+.grade{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));margin-top:20px}
+.cartao{border:1px solid var(--line);border-radius:12px;padding:16px 18px;background:var(--surface)}
+.cartao .n{font-family:var(--display);font-size:30px;font-weight:700;letter-spacing:-.02em;
+  line-height:1.1}
+.cartao .r{font-size:12.5px;color:var(--text-dim);margin-top:4px}
+.ruim .n{color:var(--coral)} .ok .n{color:var(--neon)} .meio .n{color:var(--ambar)}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);
+  padding:12px 16px;border-radius:0 10px 10px 0;margin-top:18px;font-size:14px}
+.nota.alerta{border-left-color:var(--coral-borda);background:rgba(224,87,79,.08)}
+.nota.duvida{border-left-color:var(--ambar-borda);background:rgba(224,163,46,.08)}
+.nota b{color:var(--text)}
+code{font-family:var(--mono);font-size:.88em;background:var(--surface);
+  border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+.cadeia{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px;font-size:13px}
+.elo{border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:var(--surface);
+  font-family:var(--mono);font-size:12px}
+.elo.novo{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright)}
+.seta{color:var(--text-faint)}
+ul{margin:12px 0 0;padding-left:20px;color:var(--text-dim);font-size:14.5px}
+li{margin:6px 0} li b{color:var(--text)}
+.rotulo{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text-faint);margin-bottom:8px}
+.par{display:grid;gap:18px;grid-template-columns:1fr;margin-top:8px}
+@media(min-width:900px){.par{grid-template-columns:1fr 1fr}}
+</style>
+
+<div class=pag>
+
+<p class=olho>Relatórios · Agenda · nicho eventos</p>
+<h1>As colunas Convid. e Sinal</h1>
+<p class=sub>O que elas mostram hoje na Prime Eventos, por que estão vazias, e o que dá
+pra fazer. Todos os números vêm de leitura do banco de produção em 13/09/2026 —
+conta 34, a única com nicho de eventos e volume.</p>
+
+<!-- ──────────────────────────────────────────────────────── como está hoje -->
+<section>
+  <div class=cab>
+    <h2>1. Como está hoje</h2>
+    <p>A aba <b>Eventos</b> tem 64 linhas. Estas são as duas últimas colunas, com a
+    taxa de preenchimento real de cada uma.</p>
+  </div>
+
+  <div class=grade>
+    <div class="cartao ruim">
+      <div class=n>3 <span style="font-size:16px;color:var(--text-faint)">de 64</span></div>
+      <div class=r><b style="color:var(--text)">Sinal</b> — 4,7% preenchido.
+      61 células mostrando R$ 0,00.</div>
+    </div>
+    <div class="cartao meio">
+      <div class=n>13 <span style="font-size:16px;color:var(--text-faint)">de 64</span></div>
+      <div class=r><b style="color:var(--text)">Convid.</b> — 20% preenchido.
+      51 células mostrando “—”.</div>
+    </div>
+    <div class="cartao ok">
+      <div class=n>124 <span style="font-size:16px;color:var(--text-faint)">de 349</span></div>
+      <div class=r>Leads que <b style="color:var(--text)">já têm</b> a contagem de
+      convidados guardada em <code>prospeccao</code>.</div>
+    </div>
+  </div>
+
+  <div class=nota>O terceiro número é o achado: <b>a informação existe</b>. Ela está no
+  lead, onde o cliente contou quantas pessoas vêm — só não chega até a agenda.</div>
+
+  <div style="margin-top:26px">
+    <p class=rotulo>Hoje — aba Eventos</p>
+    <div class=tela>
+      <div class=topo>
+        <span class=aba>Todos</span><span class=aba>Visitas</span><span class="aba on">Eventos</span>
+      </div>
+      <table>
+        <tr><th>Data</th><th>Evento</th><th>Cliente</th><th>Tipo</th>
+            <th class=bom>Convid.</th><th class=mira>Sinal</th></tr>
+        <tr><td>23/01/27</td><td>Casamento — Jacque/Costa</td><td>Jacque</td>
+            <td><span class=tag>Casamento</span></td>
+            <td class="num bom">70</td><td class="num mira vazio">R$ 0,00</td></tr>
+        <tr><td>17/01/27</td><td>Formatura — Beatriz do Carmo</td><td>Beatriz</td>
+            <td class=vazio>—</td>
+            <td class="num bom">70</td><td class="num mira vazio">R$ 0,00</td></tr>
+        <tr><td>02/10/27</td><td>Locação salão — Andreia</td><td>Andreia</td>
+            <td><span class=tag>Locação</span></td>
+            <td class="num bom vazio">—</td><td class="num mira vazio">R$ 0,00</td></tr>
+        <tr><td>09/01/27</td><td>Confraternização Prefeitura</td><td>—</td>
+            <td><span class=tag>Confraternização</span></td>
+            <td class="num bom vazio">—</td><td class="num mira vazio">R$ 0,00</td></tr>
+        <tr><td>05/12/26</td><td>Formatura - Beatriz</td><td>—</td>
+            <td class=vazio>—</td>
+            <td class="num bom vazio">—</td><td class="num mira vazio">R$ 0,00</td></tr>
+      </table>
+      <div class=rodape><span>Eventos: 64</span><span>Convidados: 855</span>
+        <span style="color:var(--coral)">Sinal no período: R$ 9.330,00</span></div>
+    </div>
+    <p class=medido>medido: 64 linhas · Convid. 13 (20%) · Sinal 3 (4,7%)</p>
+  </div>
+</section>
+
+<!-- ────────────────────────────────────────────────────────────── o sinal -->
+<section>
+  <div class=cab>
+    <h2>2. Sinal sai — e por que estava vazia</h2>
+    <p><code>eventos_agenda.sinal_centavos</code> só é gravado por <b>dois caminhos
+    estreitos</b>: o checkbox “Só segurar a data” do formulário de novo compromisso, e a
+    pré-reserva nascida de um orçamento. Festa que entra na agenda por telefonema —
+    que é como a maioria entra — nunca passa por nenhum dos dois.</p>
+  </div>
+
+  <div class=nota>Os 3 eventos com sinal somam <b>R$ 9.330</b>, e os três são do grupo
+  “(sem tipo)”. Nenhuma das 37 festas com tipo declarado tem sinal registrado.</div>
+
+  <div class=nota alerta style="border-left-color:var(--ambar-borda);background:rgba(224,163,46,.08)">
+    <b>O número não some junto com a coluna.</b> O rodapé já tem “Sinal no período”, e
+    ele continua: uma linha no rodapé custa nada, 61 células de R$ 0,00 custam a leitura
+    da tela inteira. A soma do rodapé da coluna (<code>col_total</code>) passa a apontar
+    pra nada e sai junto.
+  </div>
+</section>
+
+<!-- ────────────────────────────────────────────────────── os convidados -->
+<section>
+  <div class=cab>
+    <h2>3. Convidados: o elo que falta</h2>
+    <p>O relatório já procura o número em dois lugares antes de desistir. Falta o
+    terceiro — que é justamente o que você apontou: <b>a marcação da visita</b>.</p>
+  </div>
+
+  <div class=cadeia>
+    <span class=elo>eventos_agenda.convidados</span><span class=seta>→</span>
+    <span class=elo>orcamentos.evento→convidados</span><span class=seta>→</span>
+    <span class="elo novo">prospeccao.evento_convidados</span>
+    <span class=seta style="margin-left:4px">← o elo novo</span>
+  </div>
+
+  <div class=nota alerta>
+    <b>Medi o ganho antes de propor, e na aba Eventos ele é zero: 13 → 13.</b>
+    O motivo: toda festa que veio de um lead também tem orçamento, e o orçamento já
+    responde. O elo novo não conserta a aba que você estava olhando.
+  </div>
+
+  <div class=nota>
+    <b>Onde ele conserta é na aba Visitas</b> — e lá o número é mais útil, porque a
+    visita ainda vai acontecer. <code>criar_visita</code> monta o compromisso a partir do
+    lead (<code>finance/cockpit.py:2447</code>) e hoje descarta o que o lead já sabe:
+    quantas pessoas e que tipo de festa.
+  </div>
+
+  <div class=par>
+    <div>
+      <p class=rotulo>Hoje — aba Visitas (as colunas nem aparecem)</p>
+      <div class=tela>
+        <table>
+          <tr><th>Data</th><th>Evento</th><th>Cliente</th><th>Vendedor</th><th>Desfecho</th></tr>
+          <tr><td>21/09</td><td>Visita — Elsinha</td><td>Elsinha</td><td>Pedro Yan</td><td class=vazio>—</td></tr>
+          <tr><td>19/09</td><td>Visita — Shirley</td><td>Shirley</td><td>Pedro Yan</td><td class=vazio>—</td></tr>
+          <tr><td>12/09</td><td>Visita — Agna Luíza</td><td>Agna</td><td>Poly</td><td class=vazio>—</td></tr>
+          <tr><td>08/09</td><td>Visita — Iasminne</td><td>Iasminne</td><td>Poly</td><td>✅ Aconteceu</td></tr>
+        </table>
+      </div>
+      <p class=medido>o vendedor não sabe o que vai receber</p>
+    </div>
+    <div>
+      <p class=rotulo>Proposta — aba Visitas</p>
+      <div class=tela>
+        <table>
+          <tr><th>Data</th><th>Evento</th><th>Cliente</th>
+              <th class=bom>Festa</th><th class=bom>Convid.</th><th>Desfecho</th></tr>
+          <tr><td>21/09</td><td>Visita — Elsinha</td><td>Elsinha</td>
+              <td class=bom><span class=tag>Formatura</span></td><td class="num bom">100</td><td class=vazio>—</td></tr>
+          <tr><td>19/09</td><td>Visita — Shirley</td><td>Shirley</td>
+              <td class=bom><span class=tag>15 anos</span></td><td class="num bom vazio">—</td><td class=vazio>—</td></tr>
+          <tr><td>12/09</td><td>Visita — Agna Luíza</td><td>Agna</td>
+              <td class=bom><span class=tag>Aniversário</span></td><td class="num bom">140</td><td class=vazio>—</td></tr>
+          <tr><td>08/09</td><td>Visita — Iasminne</td><td>Iasminne</td>
+              <td class=bom><span class=tag>Aniversário</span></td><td class="num bom">80</td><td>✅ Aconteceu</td></tr>
+        </table>
+      </div>
+      <p class=medido>medido: 7 de 25 já teriam o número · 11 de 25 já teriam o tipo</p>
+    </div>
+  </div>
+
+  <div class=nota>
+    <b>São duas mudanças, e a segunda é a que dura.</b>
+    <ul style="margin-top:8px">
+      <li><b>Ler do lead no relatório</b> — o histórico que já está no banco aparece
+      sem precisar mexer em dado nenhum.</li>
+      <li><b>Gravar no evento na hora de marcar a visita</b> — <code>criar_visita</code>
+      leva <code>evento_convidados</code> e <code>evento_tipo</code> do lead. Daí pra
+      frente o dado nasce certo, e não depende de ninguém redigitar.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ──────────────────────────────────────────────────────── o que sobra -->
+<section>
+  <div class=cab>
+    <h2>4. E os 51 vazios da aba Eventos?</h2>
+    <p>Separei por tipo, porque “vazio” aqui quer dizer três coisas diferentes — e só
+    uma delas é defeito.</p>
+  </div>
+
+  <div class=tela>
+    <table>
+      <tr><th>Tipo</th><th class=num>Linhas</th><th class=num>Com convid.</th><th>O que o vazio significa</th></tr>
+      <tr><td><span class=tag>Locação</span></td><td class=num>16</td><td class=num>0</td>
+          <td style="white-space:normal;color:var(--text-dim)">Festa de terceiro no espaço. A casa
+          não conta convidado — <b style="color:var(--text)">não se aplica</b>.</td></tr>
+      <tr><td class=vazio>(sem tipo)</td><td class=num>27</td><td class=num>8</td>
+          <td style="white-space:normal;color:var(--text-dim)">Digitado direto no calendário.
+          Vazio de verdade.</td></tr>
+      <tr><td><span class=tag>Casamento</span> <span class=tag>Aniversário</span> <span class=tag>…</span></td>
+          <td class=num>21</td><td class=num>5</td>
+          <td style="white-space:normal;color:var(--text-dim)">Festa com tipo declarado e sem
+          contagem. <b style="color:var(--text)">Aqui é onde falta mesmo.</b></td></tr>
+    </table>
+  </div>
+
+  <div class=nota>
+    <b>Respondido pelo dono em 13/09/2026: “na locação não conta convidado”.</b>
+    Então locação passa a mostrar <b>“n/a”</b>, e não “—”. As duas células diziam a
+    mesma coisa querendo dizer o contrário: “—” é uma cobrança (falta preencher),
+    “n/a” é uma resposta (não existe pra este tipo). São 16 das 64 linhas que
+    deixam de parecer pendência eterna. Quem digitar um número mesmo assim
+    continua vendo o número — “não se aplica” é o padrão, não uma proibição.
+  </div>
+</section>
+
+<!-- ──────────────────────────────────────────────────────── o resumo -->
+<section>
+  <div class=cab>
+    <h2>5. O que eu faria, na ordem</h2>
+  </div>
+  <ul style="font-size:15px">
+    <li><b>Tirar a coluna Sinal</b> das abas Eventos e Todos, mantendo “Sinal no
+    período” no rodapé. Já autorizado por você.</li>
+    <li><b>Mostrar Festa e Convid. na aba Visitas</b>, lendo do lead. É onde o número
+    muda o que o vendedor faz — ele vai receber a pessoa.</li>
+    <li><b>Gravar no evento quando a visita é marcada</b>, pra parar de depender de
+    fallback daqui pra frente.</li>
+    <li><b>Decidir o caso Locação</b> — depende da sua resposta acima.</li>
+  </ul>
+  <div class=nota>Nada disso apaga dado: as duas primeiras só mudam o que a tela lê, e a
+  terceira só preenche coluna que hoje nasce vazia.</div>
+</section>
+
+</div>

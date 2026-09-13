@@ -2438,15 +2438,29 @@ def agendar_visita(pool, conta_id: int, membro_id: int, lead_id: int, *, data: s
         if not _posse(c, conta_id, membro_id, lead_id):
             return {"ok": False, "erro": "escopo"}
         lead = c.execute("select coalesce(nullif(contato,''), nullif(empresa,''), 'Cliente'), "
-                         "coalesce(whatsapp, telefone, '') from prospeccao where id=%s and conta_id=%s",
+                         "coalesce(whatsapp, telefone, ''), evento_convidados "
+                         "from prospeccao where id=%s and conta_id=%s",
                          (lead_id, conta_id)).fetchone()
     quem, numero = (lead[0], lead[1]) if lead else ("Cliente", "")
+    # QUANTA GENTE VEM, copiado do lead (13/09/2026). O cliente já disse isso pra
+    # quem atendeu — o compromisso da visita é que nascia sem, e a coluna
+    # "Convid." do relatório vinha "—" pra visita que o sistema já sabia medir.
+    # Na Prime, 124 dos 349 leads têm o número.
+    #
+    # E SÓ a contagem: `evento_tipo` NÃO é copiado, por mais tentador que pareça.
+    # A régua que separa visita de festa é `_E_VISITA` em web/painel_relatorios.py
+    # — "título começa com Visita E `tipo_evento` está vazio". Gravar o tipo aqui
+    # tiraria a visita da própria aba Visitas e a jogaria em Eventos, silenciosa-
+    # mente. O tipo da festa aparece no relatório por leitura do lead, não por
+    # cópia; ver a coluna `festa` lá.
+    n_conv = lead[2] if lead and len(lead) > 2 else None
     descricao = (f"Visita de {quem} ao {esp['nome']}.\nLocal: {local}"
                  + (f"\nMapa: {esp['maps']}" if esp["maps"] else ""))
     lembrete = int(lembrete_min) if lembrete_min else None
     ev = ag.criar_evento(pool, conta_id, f"Visita — {quem}", ini, membro_id=membro_id, fim=fim,
                          local=local, descricao=descricao, lembrete_min=lembrete, tipo="empresa",
-                         cliente_id=_cliente_do_lead(pool, conta_id, numero))
+                         cliente_id=_cliente_do_lead(pool, conta_id, numero),
+                         convidados=n_conv)
     token = _secrets.token_urlsafe(12)
     quando = ini.astimezone(ag.BRT).strftime("%d/%m às %H:%M")
     with pool.connection() as c:

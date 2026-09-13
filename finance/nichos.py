@@ -197,7 +197,7 @@ NICHOS: dict[str, dict] = {
     # entram no catálogo (é deles que a ficha técnica do prato vai sair), e sem uma
     # categoria própria eles se misturariam com o que está à venda na prateleira.
     "suplementos": {
-        "label": "Suplementos / Nutrição esportiva",
+        "label": "Suplementos e cozinha fit",
         "vende_produto": True, "vende_servico": True,
         "unidades": ["pote", "unidade", "caixa", "frasco", "sache", "kit",
                      "marmita", "kg"],

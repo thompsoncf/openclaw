@@ -373,7 +373,13 @@ def responda_hoje(pool, conta_id: int, membro_id: int, agora: datetime | None = 
     if "data_abriu" in faixas:
         try:
             from finance import lista_espera as _le
-            for x in _le.datas_que_abriram(pool, conta_id):
+            # `hoje` VAI JUNTO. Sem ele `datas_que_abriram` caía em `date.today()`
+            # e esta função passava a comparar duas linhas do tempo: o resto de
+            # `responda_hoje` anda pelo relógio recebido, e a lista de espera pelo
+            # da máquina. Em produção os dois coincidem e o defeito é invisível —
+            # é a mesma armadilha do #666, e foi uma varredura com o relógio 90
+            # dias à frente que a encontrou.
+            for x in _le.datas_que_abriram(pool, conta_id, hoje):
                 if x["vendedor_id"] == membro_id:
                     abriu[x["lead_id"]] = x
         except Exception as e:  # noqa: BLE001

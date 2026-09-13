@@ -28,7 +28,7 @@ from datetime import time
 
 from finance import nichos as _n
 
-PERFIS = ("eventos", "recorrente", "produto")
+PERFIS = ("eventos", "recorrente", "seguros", "produto")
 
 #: por que perdeu — a lista completa (check da migração 213). O perfil escolhe seis.
 MOTIVOS_TODOS = (
@@ -43,6 +43,10 @@ MOTIVOS_TODOS = (
 _MOTIVOS_POR_PERFIL = {
     "eventos": ("sumiu_apos_proposta", "data_indisponivel", "achou_caro", "fora_do_escopo", "sem_interesse", "outro"),
     "recorrente": ("sumiu_apos_proposta", "ficou_com_atual", "achou_caro", "fora_do_escopo", "sem_interesse", "outro"),
+    # corretora divide os seis com o recorrente: o que ela tem de próprio
+    # ("renovou direto com a seguradora") não existe em MOTIVOS_TODOS, que é a
+    # lista LEGADA — nasce só na semente abaixo, que é de onde a conta parte hoje.
+    "seguros": ("sumiu_apos_proposta", "ficou_com_atual", "achou_caro", "fora_do_escopo", "sem_interesse", "outro"),
     "produto": (),
 }
 
@@ -78,6 +82,21 @@ _SEMENTE_MOTIVOS = {
         ("sem_interesse", "Sem interesse", False),
         ("outro", "Outro", True),
     ),
+    # Os da corretora saem do que faz um seguro não fechar, e dois deles não
+    # existem em nenhum outro ramo: o cliente RENOVAR DIRETO com a seguradora
+    # (o corretor é pulado, não perdido pra concorrente) e a COBERTURA não
+    # atender — que é diferente de preço e de escopo.
+    "seguros": (
+        ("nao_respondeu", "Não respondeu — após as tentativas de follow-up", False),
+        ("achou_caro", "Preço do prêmio — acima do que ele queria pagar", False),
+        ("renovou_direto", "Renovou direto com a seguradora", False),
+        ("ficou_com_atual", "Ficou com o corretor atual", False),
+        ("cobertura_nao_atendeu", "Cobertura não atendeu", False),
+        ("sumiu_apos_proposta", "Sumiu depois da cotação", False),
+        ("nao_tem_perfil", "Não tem perfil / recusado pela seguradora", False),
+        ("condicao_pagamento", "Condição de pagamento", False),
+        ("outro", "Outro", True),
+    ),
     # produto não tem funil nem vendedor: não há perda de lead pra motivar
     "produto": (),
 }
@@ -92,7 +111,8 @@ _PERFIS = {
     "eventos": {
         "chave": "eventos", "rotulo": "eventos",
         "vocab": {"data": True, "compromisso": "visita", "compromissos": "visitas",
-                  "compromisso_kpi": "visitas que aconteceram", "pedido": "festa"},
+                  "compromisso_kpi": "visitas que aconteceram", "pedido": "festa",
+                  "oferta": "item"},
         "filtros": ("periodo", "vendedor", "tipo", "mes", "dia", "conv", "origem", "hora"),
         "blocos": ("demanda_agenda", "dia_festa", "tipos", "ciclo", "perdas", "hora"),
         "faixas": ("data_abriu", "pergunta", "festa", "proposta", "toque", "visita"),
@@ -100,15 +120,42 @@ _PERFIS = {
     "recorrente": {
         "chave": "recorrente", "rotulo": "serviço recorrente",
         "vocab": {"data": False, "compromisso": "reunião", "compromissos": "reuniões",
-                  "compromisso_kpi": "reuniões que aconteceram", "pedido": "serviço"},
+                  "compromisso_kpi": "reuniões que aconteceram", "pedido": "serviço",
+                  "oferta": "serviço"},
         "filtros": ("periodo", "vendedor", "segmento", "porte", "uf", "servico", "origem", "hora"),
         "blocos": ("mrr", "segmentos", "servicos", "reunioes", "ciclo", "perdas", "hora"),
+        "faixas": ("pergunta", "proposta", "toque", "visita"),
+    },
+    # CORRETORA DE SEGUROS (nicho `seguros`, migração 242). Nasceu de uma medição
+    # em 13/09/2026 (docs/mockups/raio_x_seguros_medido.html): caindo no perfil
+    # `recorrente`, ela via "Mensalidade proposta × fechada" somando
+    # `mensal_centavos` — que numa corretora é sempre 0, porque comissão de
+    # apólice vai em `setup_centavos`. Não era campo vazio: o bloco escrevia
+    # "o gargalo é depois da proposta" num mês de vinte apólices fechadas.
+    #
+    # DUAS RESPOSTAS DO DONO moldaram o resto (13/09): o compromisso dela é
+    # COTAÇÃO, não reunião; e ela vende pra pessoa FÍSICA e JURÍDICA — por isso
+    # `segmentos`, `porte` e `uf` FICAM, ao contrário do que a medição supunha.
+    # Eles valem pra metade PJ da carteira, e metade é melhor que nada.
+    "seguros": {
+        "chave": "seguros", "rotulo": "corretora de seguros",
+        # `data` é False: apólice tem vigência, não data reservada esperando sinal.
+        "vocab": {"data": False, "compromisso": "cotação", "compromissos": "cotações",
+                  "compromisso_kpi": "cotações que aconteceram", "pedido": "apólice",
+                  "oferta": "ramo"},
+        "filtros": ("periodo", "vendedor", "segmento", "porte", "uf", "servico", "origem", "hora"),
+        # `comissao` no lugar de `mrr`, e a MESMA chave `reunioes` do recorrente: o
+        # bloco lê tudo de `vocab`, então trocar a chave só criaria um segundo
+        # bloco idêntico. Chave é o que o código guarda, rótulo é o que se lê —
+        # a mesma razão pela qual a etapa "Agendado Visita" se chama `qualificado`.
+        "blocos": ("comissao", "segmentos", "servicos", "reunioes", "ciclo", "perdas", "hora"),
         "faixas": ("pergunta", "proposta", "toque", "visita"),
     },
     "produto": {
         "chave": "produto", "rotulo": "produto",
         "vocab": {"data": False, "compromisso": "compromisso", "compromissos": "compromissos",
-                  "compromisso_kpi": "compromissos que aconteceram", "pedido": "pedido"},
+                  "compromisso_kpi": "compromissos que aconteceram", "pedido": "pedido",
+                  "oferta": "item"},
         "filtros": (), "blocos": (), "faixas": (),
     },
 }
@@ -154,6 +201,25 @@ _FUNIL_POR_PERFIL = {
         "fu_teto_dia": 15,
         # venda de mensalidade respira mais devagar que festa: o cliente some por
         # uma semana e volta, e chamar isso de frio no 2º dia seria inventar perda
+        "temp_quente_h": 72, "temp_morno_dias": 14, "temp_frio_tentativas": 4,
+    },
+    "seguros": {
+        "janela_dias": "1,2,3,4,5", "janela_abre": time(8, 0), "janela_fecha": time(19, 0),
+        "sem_resposta_min": 120, "bola_nossa_min": 240, "bola_cliente_min": 4320,
+        "escala_min": 240, "teto_avisos_dia": 5,
+        "fu_proposta_dias": 3, "fu_toques_dias": "2,4,7,15",
+        # O SEGUNDO RELÓGIO FICA NULO, e não é por a corretora não ter um: ela tem,
+        # e é o melhor de todos — o FIM DA VIGÊNCIA. Em eventos este campo dispara
+        # 30 dias antes da festa lendo a data do orçamento; aqui não há onde ler,
+        # porque a vigência da apólice não é guardada em lugar nenhum ainda. Ligar
+        # com 30 fixo dispararia contando do nada. Quando a carteira de apólices
+        # existir, é este campo que passa a valer.
+        "fu_festa_dias": None,
+        "fu_teto_dia": 15,
+        # Os mesmos do recorrente, e de propósito: cotação de auto talvez decida
+        # mais rápido que venda de mensalidade, mas isso é palpite meu — não há um
+        # lead de corretora na base pra medir. A conta sobrescreve sem deploy, e a
+        # hora de mudar o padrão é com dado, não agora.
         "temp_quente_h": 72, "temp_morno_dias": 14, "temp_frio_tentativas": 4,
     },
     # produto não tem funil nem vendedor (ver o docstring): nada a herdar.
@@ -227,6 +293,20 @@ _ETAPAS_POR_PERFIL = {
         ("ganho", "Fechado", 900, True, True, False),
         ("perdido", "Perdido", 910, True, False, False),
     ),
+    "seguros": (
+        ("novo", "Novo", 0, True, False, False),
+        ("contatado", "Contatado", 10, False, False, False),
+        ("follow_up", "Follow-up", 20, False, False, False),
+        # a resposta do dono em 13/09: o compromisso da corretora é COTAÇÃO. A
+        # chave segue `qualificado` pelo mesmo motivo de "Agendado Visita": é o
+        # que fica gravado em `prospeccao.status`.
+        ("qualificado", "Cotação enviada", 30, False, False, False),
+        ("proposta", "Proposta", 40, False, False, False),
+        # sai do quadro (apólice emitida não é prospecção) e NÃO agenda: sem
+        # vigência guardada, a ponte não teria data pra ler.
+        ("ganho", "Fechado", 900, True, True, False),
+        ("perdido", "Perdido", 910, True, False, False),
+    ),
     # produto não tem funil nem vendedor (ver o docstring). Recebe o genérico de
     # sempre: nada muda pra quem já está assim, e ninguém ganha uma coluna de
     # "Agendado Visita" numa tela que vende caixa.
@@ -276,6 +356,12 @@ def perfil_por_nicho(slug: str | None) -> str:
         return "recorrente"
     if modo_por_nicho(s) == "evento":
         return "eventos"
+    # Corretora vem ANTES de `vende_servico`, que a pegaria como recorrente — foi
+    # exatamente o que a medição de 13/09 flagrou. É o único perfil casado com um
+    # nicho só; se um dia entrar corretora de imóveis ou consórcio, isto vira um
+    # conjunto, como NICHOS_EVENTO em finance/vendas.
+    if s == "seguros":
+        return "seguros"
     if _n.vende_servico(s):
         return "recorrente"
     return "produto"

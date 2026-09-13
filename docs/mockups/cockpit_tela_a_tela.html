@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="pt-br"><head><meta charset="utf-8">
+<title>O app do vendedor, tela a tela</title>
+<link rel="stylesheet" href="app-local.css">
+<style>
+@page{size:A4;margin:11mm 12mm 10mm}
+
+:root{
+  /* papel */
+  --pg:#FFFFFF; --pg2:#F4F7F5; --ink:#101613; --soft:#3B4741; --mut:#6D7C75;
+  --rule:#DCE3DE; --rule2:#B7C2BB;
+  --marca:#0F7A43;
+  /* produto — os tokens reais de web/tema.py */
+  --bg:#0A0F0C; --bg2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-borda:#1E4A3A; --neon-fraco:rgba(37,211,102,.10);
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul:#229ED9; --azul-borda:#1B3A4A; --azul-fundo:#0D1B23;
+
+  --disp:"Bricolage Grotesque",system-ui,sans-serif;
+  --body:"Inter",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:var(--body);color:var(--ink);background:var(--pg);
+  font-size:8.6pt;line-height:1.42;-webkit-font-smoothing:antialiased}
+p{margin:0}
+
+h1{font-family:var(--disp);font-size:19pt;line-height:1;margin:0;font-weight:700;letter-spacing:-.02em}
+h2{font-family:var(--disp);font-size:11pt;line-height:1.1;margin:0;font-weight:600;letter-spacing:-.01em}
+.kicker{font-family:var(--mono);font-size:6.6pt;font-weight:700;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--mut)}
+
+header{display:flex;justify-content:space-between;align-items:flex-end;gap:12pt;
+  border-bottom:2.2pt solid var(--ink);padding-bottom:6pt;margin-bottom:9pt}
+header .lede{font-size:8.8pt;color:var(--soft);max-width:100mm;margin-top:3pt}
+header .tabsinfo{text-align:right;font-size:7.4pt;color:var(--mut);white-space:nowrap}
+header .tabsinfo b{color:var(--marca);font-family:var(--mono);font-size:7pt}
+
+/* ───────── a trilha de passos ───────── */
+.trilha{display:flex;gap:9pt;align-items:flex-start}
+.fone{height:103mm}
+.passo{flex:1;min-width:0;display:flex;flex-direction:column;gap:5pt;break-inside:avoid}
+.cab{display:flex;align-items:baseline;gap:5pt;border-bottom:.8pt solid var(--rule2);padding-bottom:3pt}
+.cab .n{font-family:var(--disp);font-size:13pt;font-weight:700;color:var(--marca);line-height:1}
+.nota{font-size:7.6pt;color:var(--soft);line-height:1.38}
+.nota b{color:var(--ink)}
+.nota .novo{color:var(--marca);font-weight:700}
+
+/* ───────── o celular ───────── */
+.fone{background:var(--bg);border:1.1pt solid #263129;border-radius:9pt;overflow:hidden;
+  color:var(--text);font-size:6.6pt;line-height:1.3;display:flex;flex-direction:column}
+.st{display:flex;justify-content:space-between;padding:2.5pt 5pt 0;font-family:var(--mono);
+  font-size:5pt;color:var(--faint);letter-spacing:.04em}
+.hdr{display:flex;align-items:center;gap:4pt;padding:3pt 5pt 4pt;border-bottom:.6pt solid var(--line)}
+.av{width:12pt;height:12pt;border-radius:50%;background:linear-gradient(145deg,#25D366,#0FA85A);
+  color:var(--sobre-verde);display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:6pt;flex:0 0 auto}
+.hdr .tt{flex:1;min-width:0}
+.hdr .tt b{display:block;font-size:7.4pt;font-weight:600;letter-spacing:-.01em}
+.hdr .tt s{display:block;text-decoration:none;color:var(--dim);font-size:5.8pt}
+.hdr .selo{font-family:var(--mono);font-size:5.4pt;color:var(--neon);border:.5pt solid var(--neon-borda);
+  background:var(--neon-fraco);border-radius:2.5pt;padding:1pt 3pt}
+
+.corpo{padding:4pt 5pt;display:flex;flex-direction:column;gap:3pt;flex:1}
+
+/* faixa de aviso */
+.faixa{display:flex;align-items:center;gap:3pt;background:var(--azul-fundo);
+  border:.5pt solid var(--azul-borda);border-radius:3pt;padding:2.5pt 4pt;color:#8FCDEA;font-size:5.8pt}
+.faixa b{color:#CDE8F6}
+.faixa .ver{margin-left:auto;font-family:var(--mono);font-size:5pt;opacity:.75}
+
+/* grupo */
+.grp{display:flex;justify-content:space-between;font-family:var(--mono);font-size:5.2pt;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--faint);margin-top:1.5pt}
+.grp.al{color:var(--coral)}
+
+/* card de lead */
+.lead{background:var(--surface);border:.5pt solid var(--line);border-radius:4pt;
+  padding:3pt 4pt;display:flex;flex-direction:column;gap:1.5pt}
+.lead.vez{border-left:1.4pt solid var(--neon)}
+.lead.pz{border-left:1.4pt solid var(--coral)}
+.l1{display:flex;align-items:center;gap:3pt}
+.dot{width:4pt;height:4pt;border-radius:50%;flex:0 0 auto}
+.dot.q{background:var(--coral)} .dot.m{background:var(--ambar)} .dot.f{background:var(--azul)}
+.nm{flex:1;min-width:0;font-size:6.6pt;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tp{font-family:var(--mono);font-size:4.6pt;font-weight:700;letter-spacing:.05em;
+  padding:.8pt 2.2pt;border-radius:2pt;white-space:nowrap}
+.tp.q{background:var(--coral-fundo);color:var(--coral);border:.4pt solid var(--coral-borda)}
+.tp.m{background:var(--ambar-fundo);color:var(--ambar);border:.4pt solid var(--ambar-borda)}
+.tp.f{background:var(--azul-fundo);color:var(--azul);border:.4pt solid var(--azul-borda)}
+.snip{font-size:5.6pt;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pq{font-size:5.4pt;color:var(--faint)}
+.pq em{font-style:normal;color:var(--ambar)}
+.pq.qt em{color:var(--coral)} .pq.fr em{color:var(--azul)}
+.dobra{border:.5pt dashed var(--line);border-radius:3pt;padding:2.5pt;text-align:center;
+  color:var(--faint);font-size:5.4pt}
+
+/* conversa */
+.chat{display:flex;flex-direction:column;gap:2.5pt;padding:4pt 5pt;flex:1;justify-content:flex-end}
+.bl{max-width:76%;border-radius:4pt;padding:2.5pt 4pt;font-size:5.8pt;line-height:1.32}
+.bl.in{background:var(--surface);border:.5pt solid var(--line);align-self:flex-start;
+  border-bottom-left-radius:1pt}
+.bl.out{background:#123322;border:.5pt solid var(--neon-borda);align-self:flex-end;
+  border-bottom-right-radius:1pt;color:#DCF3E4}
+.bl .h{display:block;font-family:var(--mono);font-size:4.4pt;color:var(--faint);margin-top:1pt;text-align:right}
+.comp{display:flex;align-items:center;gap:3pt;border-top:.6pt solid var(--line);padding:3pt 5pt}
+.comp .cx{flex:1;background:var(--bg2);border:.5pt solid var(--line);border-radius:99pt;
+  padding:2.5pt 5pt;color:var(--faint);font-size:5.8pt}
+.comp .ic{width:9pt;height:9pt;border-radius:50%;background:var(--surface);border:.5pt solid var(--line);
+  display:flex;align-items:center;justify-content:center;font-size:5pt;color:var(--dim)}
+.comp .env{width:10pt;height:10pt;border-radius:50%;background:var(--neon);color:var(--sobre-verde);
+  display:flex;align-items:center;justify-content:center;font-size:5.4pt;font-weight:700}
+
+/* folha de ações */
+.folha{background:var(--surface);border-top:.6pt solid var(--line);border-radius:6pt 6pt 0 0;
+  padding:4pt 5pt 5pt;display:flex;flex-direction:column;gap:3pt;margin-top:auto}
+.puxa{width:22pt;height:1.6pt;border-radius:2pt;background:var(--line);margin:0 auto 1pt}
+.ft{font-family:var(--mono);font-size:5pt;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+.grade{display:grid;grid-template-columns:1fr 1fr;gap:2.5pt}
+.at{background:var(--bg2);border:.5pt solid var(--line);border-radius:3pt;padding:2.5pt 3.5pt;
+  font-size:5.8pt;color:var(--text);display:flex;align-items:center;gap:2.5pt}
+.at .g{color:var(--neon)} .at .o{color:var(--ambar)} .at .v{color:var(--azul)}
+.chips{display:flex;flex-wrap:wrap;gap:2pt}
+.chip{font-size:5.4pt;padding:1.6pt 4pt;border-radius:99pt;border:.5pt solid var(--line);
+  background:var(--bg2);color:var(--dim)}
+.chip.on{border-color:var(--neon);background:var(--neon-fraco);color:var(--neon);font-weight:600}
+.btn{background:var(--neon);color:var(--sobre-verde);border-radius:3pt;padding:2.8pt;
+  text-align:center;font-size:6pt;font-weight:700}
+.linha2{display:flex;gap:2.5pt;align-items:center}
+.sel{flex:1;background:var(--bg2);border:.5pt solid var(--line);border-radius:3pt;
+  padding:2.5pt 3.5pt;font-size:5.6pt;color:var(--text);display:flex;justify-content:space-between}
+.sel s{text-decoration:none;color:var(--faint);font-family:var(--mono);font-size:4.8pt}
+.btn.perigo{background:transparent;border:.6pt solid var(--coral-borda);color:var(--coral);
+  padding:2.6pt 5pt;flex:0 0 auto}
+.txtcampo{background:var(--bg2);border:.5pt dashed var(--neon-borda);border-radius:3pt;
+  padding:2.5pt 3.5pt;font-size:5.4pt;color:var(--faint)}
+.opcoes{display:flex;flex-direction:column;gap:1.2pt}
+.op{background:var(--bg2);border-radius:2pt;padding:1.6pt 3.5pt;font-size:5.4pt;color:var(--dim)}
+.op.sel2{background:var(--neon-fraco);color:var(--neon);font-weight:600}
+
+/* agenda */
+.dia{font-family:var(--mono);font-size:5.2pt;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--faint);margin-top:1.5pt}
+.ev{background:var(--surface);border:.5pt solid var(--line);border-left:1.4pt solid var(--ambar);
+  border-radius:4pt;padding:3pt 4pt;display:flex;gap:4pt}
+.ev .h{font-family:var(--mono);font-size:5.6pt;color:var(--ambar);flex:0 0 auto}
+.ev .c b{display:block;font-size:6.2pt;font-weight:600}
+.ev .c s{text-decoration:none;display:block;font-size:5.2pt;color:var(--dim)}
+.ev.vis{border-left-color:var(--azul)} .ev.vis .h{color:var(--azul)}
+
+/* kpi do raio-x */
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:2.5pt}
+.kpi{background:var(--surface);border:.5pt solid var(--line);border-radius:4pt;padding:3pt 4pt}
+.kpi .v{font-family:var(--mono);font-size:9pt;color:var(--neon);line-height:1}
+.kpi .d{font-size:5pt;color:var(--faint);margin-top:1pt}
+.barra{display:flex;gap:1.2pt;margin-top:2pt}
+.barra i{flex:1;height:8pt;border-radius:1pt;background:var(--bg2)}
+.barra i.on{background:var(--neon)} .barra i.mid{background:var(--ambar)}
+
+/* barra de abas */
+.tabs{display:flex;border-top:.6pt solid var(--line);background:var(--bg);margin-top:auto}
+.tabs a{flex:1;text-align:center;padding:3pt 0 3.5pt;font-size:4.8pt;color:var(--faint);position:relative}
+.tabs a i{display:block;font-size:7pt;margin-bottom:.6pt;font-style:normal;opacity:.7}
+.tabs a.on{color:var(--neon)} .tabs a.on i{opacity:1}
+.tabs .badge{position:absolute;top:1.5pt;left:52%;background:var(--coral);color:#fff;
+  font-family:var(--mono);font-size:4pt;font-weight:700;border-radius:99pt;padding:.3pt 1.8pt}
+.tabs .badge.ok{background:var(--neon);color:var(--sobre-verde)}
+
+/* rodapé de página */
+.fim{margin-top:9pt;border-top:.8pt solid var(--rule);padding-top:5pt;
+  display:flex;justify-content:space-between;gap:10pt;font-size:6.8pt;color:var(--mut)}
+.secao{margin-top:10pt;break-inside:avoid}
+.secao .cab2{display:flex;align-items:baseline;gap:6pt;margin-bottom:5pt}
+.legenda{display:flex;gap:9pt;flex-wrap:wrap;font-size:7.2pt;color:var(--soft);margin-top:5pt}
+.legenda span{display:flex;align-items:center;gap:3pt}
+.legenda i{width:6pt;height:6pt;border-radius:50%;display:inline-block}
+.quebra{break-before:page}
+</style></head><body>
+
+<header>
+  <div>
+    <span class="kicker">Prime Eventos · app do vendedor</span>
+    <h1>O app do vendedor, tela a tela</h1>
+    <p class="lede">O caminho completo de um dia de trabalho no celular, na ordem em
+    que ele acontece. O que está marcado em <b style="color:var(--marca)">verde</b> é
+    o que mudou nesta semana.</p>
+  </div>
+  <div class="tabsinfo">
+    Cinco abas no rodapé<br>
+    <b>Fila · Agenda · Propostas · Raio-X · Perfil</b><br>
+    13/09/2026
+  </div>
+</header>
+
+<div class="trilha">
+
+  <!-- 1 · A FILA -->
+  <div class="passo">
+    <div class="cab"><span class="n">1</span><h2>Ele abre o app</h2></div>
+    <div class="fone">
+      <div class="st"><span>9:12</span><span>▮▮▮ 78%</span></div>
+      <div class="hdr">
+        <span class="av">P</span>
+        <span class="tt"><b>Sua fila</b><s>134 leads · setembro</s></span>
+        <span class="selo">13</span>
+      </div>
+      <div class="corpo">
+        <div class="faixa">📣 <b>2 avisos novos</b> sobre o funil <span class="ver">ver</span></div>
+        <div class="grp al"><span>⏱ Precisa de você hoje</span><span>13</span></div>
+        <div class="lead vez">
+          <div class="l1"><i class="dot q"></i><span class="nm">Amanda Ribeiro</span><span class="tp q">QUENTE</span></div>
+          <span class="snip">Vocês têm 22 de novembro livre?</span>
+          <span class="pq qt">↳ <em>respondeu há 2h</em> · esperando você</span>
+        </div>
+        <div class="lead vez">
+          <div class="l1"><i class="dot q"></i><span class="nm">Célia Barbosa</span><span class="tp q">QUENTE</span></div>
+          <span class="snip">Consegue me mandar o valor?</span>
+          <span class="pq qt">↳ <em>respondeu ontem</em> · esperando você</span>
+        </div>
+        <div class="grp"><span>🎉 Festa marcada</span></div>
+        <div class="lead">
+          <div class="l1"><i class="dot m"></i><span class="nm">Juliana Prado</span><span class="tp m">MORNO</span></div>
+          <span class="snip">Você: qualquer coisa me chama</span>
+          <span class="pq">↳ <em>a bola está com ele</em> · 14/11</span>
+        </div>
+        <div class="grp"><span>❄️ Frios</span><span>119</span></div>
+        <div class="lead">
+          <div class="l1"><i class="dot f"></i><span class="nm">Wesley Carvalho</span><span class="tp f">FRIO</span></div>
+          <span class="snip">Você: oi Wesley, tudo bem?</span>
+          <span class="pq fr">↳ <em>3 tentativas sem resposta</em></span>
+        </div>
+        <div class="dobra">❄️ mais 118 frios — toque para abrir</div>
+      </div>
+      <div class="tabs">
+        <a class="on"><i>☰</i><span class="badge">13</span>Fila</a>
+        <a><i>▦</i>Agenda</a><a><i>◧</i>Propostas</a>
+        <a><i>◔</i><span class="badge ok">4</span>Raio-X</a><a><i>◍</i>Perfil</a>
+      </div>
+    </div>
+    <p class="nota">A fila se organiza sozinha por <b>o que o lead pede</b>. Quem
+    respondeu e está esperando vem primeiro; os frios ficam dobrados no fim.
+    <span class="novo">Novo:</span> a bolinha e a etiqueta de temperatura, com o
+    motivo em uma linha — e a faixa azul dos avisos.</p>
+  </div>
+
+  <!-- 2 · A CONVERSA -->
+  <div class="passo">
+    <div class="cab"><span class="n">2</span><h2>Toca no nome</h2></div>
+    <div class="fone">
+      <div class="st"><span>9:13</span><span>▮▮▮ 78%</span></div>
+      <div class="hdr">
+        <span class="av">←</span>
+        <span class="tt"><b>Amanda Ribeiro</b><s>Contatado · quente</s></span>
+        <span class="selo">✎</span>
+      </div>
+      <div class="chat">
+        <div class="bl out">Oi Amanda! Aqui é o Pedro da Prime 😊<span class="h">ontem 17:40</span></div>
+        <div class="bl in">Oi! Vi o salão no Instagram 😍<span class="h">ontem 19:02</span></div>
+        <div class="bl out">Que bom! É para qual data?<span class="h">ontem 19:05</span></div>
+        <div class="bl in">Ainda estou vendo, mas provavelmente novembro<span class="h">ontem 19:11</span></div>
+        <div class="bl out">Perfeito. Novembro ainda tem sábados abertos 👍<span class="h">ontem 19:14</span></div>
+        <div class="bl in">Vocês têm 22 de novembro livre?<span class="h">hoje 07:14</span></div>
+      </div>
+      <div class="comp">
+        <span class="cx">Responder…</span>
+        <span class="ic">📎</span><span class="ic">🎙</span>
+        <span class="env">➤</span>
+      </div>
+      <div class="tabs">
+        <a class="on"><i>☰</i>Fila</a><a><i>▦</i>Agenda</a>
+        <a><i>◧</i>Propostas</a><a><i>◔</i>Raio-X</a><a><i>◍</i>Perfil</a>
+      </div>
+    </div>
+    <p class="nota">A conversa inteira do WhatsApp, dentro do app — abre já na última
+    mensagem e se atualiza sozinha enquanto ele lê. Dá para mandar texto, áudio e
+    arquivo sem sair. O topo mostra <b>em que etapa</b> o lead está e a temperatura
+    dele.</p>
+  </div>
+
+  <!-- 3 · A FOLHA -->
+  <div class="passo">
+    <div class="cab"><span class="n">3</span><h2>Puxa as ações</h2></div>
+    <div class="fone">
+      <div class="st"><span>9:15</span><span>▮▮▮ 77%</span></div>
+      <div class="hdr">
+        <span class="av">←</span>
+        <span class="tt"><b>Amanda Ribeiro</b><s>Contatado · quente</s></span>
+      </div>
+      <div class="chat" style="opacity:.3;padding-bottom:0">
+        <div class="bl out">Oi Amanda! Aqui é o Pedro da Prime 😊<span class="h">ontem 17:40</span></div>
+        <div class="bl in">Oi! Vi o salão no Instagram<span class="h">ontem 19:02</span></div>
+        <div class="bl out">Que bom! É para qual data?<span class="h">ontem 19:05</span></div>
+        <div class="bl in">Vocês têm 22 de novembro livre?<span class="h">hoje 07:14</span></div>
+      </div>
+      <div class="folha">
+        <div class="puxa"></div>
+        <div class="grade">
+          <span class="at"><b class="g">◉</b> WhatsApp</span>
+          <span class="at"><b>▤</b> Ficha</span>
+          <span class="at"><b class="o">◫</b> Orçamento</span>
+          <span class="at"><b class="v">▦</b> Visita</span>
+        </div>
+        <span class="ft">Etapa no funil</span>
+        <div class="chips">
+          <span class="chip">Novo</span><span class="chip on">Contatado</span>
+          <span class="chip">Follow-up</span><span class="chip">Negociação</span>
+        </div>
+        <span class="ft">Fechar</span>
+        <div class="btn">Marcar como ganho</div>
+        <div class="linha2">
+          <span class="sel">Por que perdeu? <s>10</s></span>
+          <span class="btn perigo">Perdido</span>
+        </div>
+      </div>
+      <div class="tabs">
+        <a class="on"><i>☰</i>Fila</a><a><i>▦</i>Agenda</a>
+        <a><i>◧</i>Propostas</a><a><i>◔</i>Raio-X</a><a><i>◍</i>Perfil</a>
+      </div>
+    </div>
+    <p class="nota">A folha sobe por cima da conversa: quatro atalhos, a etapa e o
+    fechamento. <span class="novo">Novo:</span> as etapas de <b>depois</b> da venda
+    saíram daqui — antes ficavam ao lado de Negociação e um toque errado sumia com o
+    lead da fila, sem ganho nem perdido.</p>
+  </div>
+
+</div>
+
+<div class="legenda">
+  <span><i style="background:#E0574F"></i><b>Quente</b> — respondeu nas últimas 48h</span>
+  <span><i style="background:#E0A32E"></i><b>Morno</b> — a bola está com ele</span>
+  <span><i style="background:#229ED9"></i><b>Frio</b> — 3 tentativas, ou 7 dias calado</span>
+</div>
+
+<!-- ══════════════════ página 2 ══════════════════ -->
+<div class="quebra"></div>
+
+<header style="margin-top:0">
+  <div>
+    <span class="kicker">Prime Eventos · app do vendedor</span>
+    <h1>Fechar, agendar e conferir</h1>
+    <p class="lede">A segunda metade do dia: o que acontece quando a conversa vira
+    festa — ou quando não vira.</p>
+  </div>
+  <div class="tabsinfo">
+    Continuação<br><b>passos 4 a 6</b><br>13/09/2026
+  </div>
+</header>
+
+<div class="trilha">
+
+  <!-- 4 · PERDER -->
+  <div class="passo">
+    <div class="cab"><span class="n">4</span><h2>Quando não vira</h2></div>
+    <div class="fone">
+      <div class="st"><span>11:40</span><span>▮▮▮ 71%</span></div>
+      <div class="hdr">
+        <span class="av">←</span>
+        <span class="tt"><b>Wesley Carvalho</b><s>Contatado · frio</s></span>
+      </div>
+      <div class="folha" style="margin-top:0">
+        <div class="puxa"></div>
+        <span class="ft">Por que perdeu?</span>
+        <div class="opcoes">
+          <span class="op">Não respondeu — após o follow-up</span>
+          <span class="op">Preço — acima do orçamento dele</span>
+          <span class="op">Fechou com concorrente</span>
+          <span class="op">Desistiu / cancelou o evento</span>
+          <span class="op">Data indisponível</span>
+          <span class="op">Localização / distância</span>
+          <span class="op">Estrutura não atendeu</span>
+          <span class="op">Condição de pagamento</span>
+          <span class="op">Evento adiado, sem nova data</span>
+          <span class="op sel2">Outro ✓</span>
+        </div>
+        <div class="txtcampo">✍️ Conte em uma linha o que houve</div>
+        <div class="linha2" style="margin-top:1pt">
+          <span class="sel">Outro <s>escolhido</s></span>
+          <span class="btn perigo">Perdido</span>
+        </div>
+      </div>
+      <div class="tabs">
+        <a class="on"><i>☰</i>Fila</a><a><i>▦</i>Agenda</a>
+        <a><i>◧</i>Propostas</a><a><i>◔</i>Raio-X</a><a><i>◍</i>Perfil</a>
+      </div>
+    </div>
+    <p class="nota"><span class="novo">Novo:</span> a lista é <b>a da Prime</b>, com as
+    dez opções que a empresa usa — antes eram seis genéricas, e duas delas o sistema
+    recusava. “Outro” abre o campo de texto. O motivo é o que faz o lead voltar:
+    “Data indisponível” entra na lista de espera daquele dia.</p>
+  </div>
+
+  <!-- 5 · A AGENDA -->
+  <div class="passo">
+    <div class="cab"><span class="n">5</span><h2>Quando vira</h2></div>
+    <div class="fone">
+      <div class="st"><span>14:02</span><span>▮▮▮ 64%</span></div>
+      <div class="hdr">
+        <span class="av">P</span>
+        <span class="tt"><b>Agenda</b><s>seus compromissos</s></span>
+        <span class="selo">+</span>
+      </div>
+      <div class="corpo">
+        <div class="dia">Hoje · 13 de setembro</div>
+        <div class="ev vis">
+          <span class="h">16:00</span>
+          <span class="c"><b>Visita — Amanda Ribeiro</b><s>Salão principal · 1h</s></span>
+        </div>
+        <div class="dia">Sábado · 31 de outubro</div>
+        <div class="ev">
+          <span class="h">19:00</span>
+          <span class="c"><b>Festa — Bianca Oliveira</b><s>Aniversário · 120 convidados</s></span>
+        </div>
+        <div class="dia">Janeiro de 2027</div>
+        <div class="ev">
+          <span class="h">15/01</span>
+          <span class="c"><b>Festa — Claudia Carvalho</b><s>Casamento</s></span>
+        </div>
+        <div class="ev">
+          <span class="h">16/01</span>
+          <span class="c"><b>Festa — Beatriz Brito</b><s>Formatura</s></span>
+        </div>
+        <div class="ev">
+          <span class="h">23/01</span>
+          <span class="c"><b>Festa — Jacque Costa</b><s>Casamento · hora a confirmar</s></span>
+        </div>
+      </div>
+      <div class="tabs">
+        <a><i>☰</i>Fila</a><a class="on"><i>▦</i>Agenda</a>
+        <a><i>◧</i>Propostas</a><a><i>◔</i>Raio-X</a><a><i>◍</i>Perfil</a>
+      </div>
+    </div>
+    <p class="nota"><span class="novo">Novo:</span> a festa fechada <b>sai do funil e
+    entra aqui</b>, com data e hora, sozinha. Ela não ocupa mais uma coluna do quadro
+    esperando acontecer — e o vendedor vê visita e festa na mesma lista, na ordem do
+    calendário.</p>
+  </div>
+
+  <!-- 6 · O RAIO-X -->
+  <div class="passo">
+    <div class="cab"><span class="n">6</span><h2>Como ele está</h2></div>
+    <div class="fone">
+      <div class="st"><span>18:30</span><span>▮▮ 41%</span></div>
+      <div class="hdr">
+        <span class="av">P</span>
+        <span class="tt"><b>Raio-X</b><s>setembro · Pedro Yan</s></span>
+        <span class="selo">4</span>
+      </div>
+      <div class="corpo">
+        <div class="kpis">
+          <div class="kpi"><div class="v">7</div><div class="d">quentes agora</div></div>
+          <div class="kpi"><div class="v">13</div><div class="d">esperando você</div></div>
+        </div>
+        <span class="ft" style="margin-top:2pt">Responda hoje</span>
+        <div class="lead vez">
+          <div class="l1"><i class="dot q"></i><span class="nm">Amanda Ribeiro</span><span class="tp q">2h</span></div>
+          <span class="snip">Perguntou sobre 22 de novembro</span>
+        </div>
+        <div class="lead vez">
+          <div class="l1"><i class="dot q"></i><span class="nm">Célia Barbosa</span><span class="tp q">1d</span></div>
+          <span class="snip">Pediu o valor</span>
+        </div>
+        <span class="ft" style="margin-top:2pt">Seu mês</span>
+        <div class="kpi">
+          <div class="d">Propostas enviadas · 14 de 20</div>
+          <div class="barra">
+            <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+            <i class="on"></i><i class="on"></i><i class="on"></i><i class="mid"></i>
+            <i></i><i></i>
+          </div>
+        </div>
+        <div class="dobra">Sem urgência hoje · 121 leads na Fila</div>
+      </div>
+      <div class="tabs">
+        <a><i>☰</i>Fila</a><a><i>▦</i>Agenda</a><a><i>◧</i>Propostas</a>
+        <a class="on"><i>◔</i><span class="badge ok">4</span>Raio-X</a><a><i>◍</i>Perfil</a>
+      </div>
+    </div>
+    <p class="nota">O fim do dia em números: quantos estão quentes, quem ainda espera
+    resposta, e como o mês está indo. <b>Propostas</b> guarda os orçamentos dele e
+    <b>Perfil</b> tem os avisos, a senha e o botão de pausar o rodízio.</p>
+  </div>
+
+</div>
+
+<div class="fim">
+  <span>As telas acima usam as cores, as fontes e os textos reais do app.</span>
+  <span>Zaq · Prime Eventos · 13/09/2026</span>
+</div>
+
+</body></html>

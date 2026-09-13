@@ -355,6 +355,27 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       <div class="acha">{% if not p or not p.propostas %}<b>Nenhuma proposta enviada no período{% if p %}, com {{ p.leads }} leads novos{% endif %}.</b> O funil não está sendo trabalhado.{% elif fech_tot %}{{ (100 * fech_tot / prop_tot)|round|int if prop_tot else 0 }}% da mensalidade proposta virou contrato.{% else %}{{ brl(prop_tot) }}/mês em propostas e nenhum contrato fechado no período. O gargalo é depois da proposta.{% endif %}</div>
       {% else %}<div class="vazio">Sem dado pra este corte.</div>{% endif %}
     </div>
+    {% endif %}
+
+    {# COMISSÃO — o mesmo recorte do MRR pra quem fatura por venda, não por mês
+       (perfil `seguros`). Guardas separados de propósito: até 13/09/2026 os três
+       blocos abaixo estavam presos num único `{% if 'mrr' %}`, então um perfil que
+       trocasse só o primeiro perdia os outros dois de brinde. #}
+    {% if 'comissao' in perfil.blocos %}
+    <div class="bloco">
+      <h4>Comissão proposta × fechada <small>por mês, valor da apólice</small></h4>
+      {% if d.comissao %}{% set mxc = maximo(1, (d.comissao|map(attribute='proposta')|max), (d.comissao|map(attribute='fechada')|max)) %}
+      <div class="duas">
+        {% for m in d.comissao %}<div><span>{{ m.rotulo }}</span><i class="a" style="width:{{ (100 * m.proposta / mxc)|round|int }}%" title="proposta {{ brl(m.proposta) }}"></i><i class="b" style="width:{{ (100 * m.fechada / mxc)|round|int }}%" title="fechada {{ brl(m.fechada) }}"></i></div>{% endfor %}
+        <div class="lg"><span><i class="a"></i>proposta: {{ brl(d.comissao|map(attribute='proposta')|sum) }}</span><span><i class="b"></i>fechada: {{ brl(d.comissao|map(attribute='fechada')|sum) }}</span></div>
+      </div>
+      {% set cprop = d.comissao|map(attribute='proposta')|sum %}{% set cfech = d.comissao|map(attribute='fechada')|sum %}
+      <div class="acha">{% if not p or not p.propostas %}<b>Nenhuma cotação enviada no período{% if p %}, com {{ p.leads }} leads novos{% endif %}.</b> O funil não está sendo trabalhado.{% elif cfech %}{{ (100 * cfech / cprop)|round|int if cprop else 0 }}% do que foi cotado virou apólice.{% else %}{{ brl(cprop) }} cotados e nenhuma apólice fechada no período. O gargalo é depois da cotação.{% endif %}</div>
+      {% else %}<div class="vazio">Sem dado pra este corte.</div>{% endif %}
+    </div>
+    {% endif %}
+
+    {% if 'segmentos' in perfil.blocos %}
     <div class="bloco">
       <h4>Segmento que chega <small>do CNPJ · e quantos fecharam</small></h4>
       {% if d.segmentos %}{% set mxs = maximo(1, d.segmentos|map(attribute='n')|max) %}
@@ -363,11 +384,14 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       <div class="acha">{% if top.chave != 'sem' and top.n * 2 >= tot_s %}<b>{{ (100 * top.n / tot_s)|round|int }}% dos leads é {{ top.rotulo|lower }}.</b> É o segmento pra ter proposta pronta e responder em minutos.{% elif top.chave == 'sem' %}<b>{{ top.n }} de {{ tot_s }} leads sem segmento.</b> O CNPJ na ficha preenche sozinho.{% else %}A demanda está espalhada: {{ top.rotulo|lower }} lidera com {{ top.n }}.{% endif %}</div>
       {% else %}<div class="vazio">Sem dado pra este corte.</div>{% endif %}
     </div>
+    {% endif %}
+
+    {% if 'servicos' in perfil.blocos %}
     <div class="bloco">
-      <h4>Serviço mais proposto <small>{% if d.servicos and d.servicos.historico %}sem proposta no período · tudo que já foi orçado{% else %}itens das propostas · mensalidade média{% endif %}</small></h4>
+      <h4>{{ perfil.vocab.oferta|capitalize }} mais proposto <small>{% if d.servicos and d.servicos.historico %}sem proposta no período · tudo que já foi orçado{% else %}itens das propostas{% if 'mrr' in perfil.blocos %} · mensalidade média{% endif %}{% endif %}</small></h4>
       {% if d.servicos and d.servicos.itens %}{% set mxv = maximo(1, d.servicos.itens|map(attribute='n')|max) %}
       <div class="tipos">{% for sv in d.servicos.itens %}<div><span>{{ sv.nome }}</span><i style="width:{{ (100 * sv.n / mxv)|round|int }}%"></i><span>{{ sv.n }}×{% if sv.mensal_centavos %} · {{ brl(sv.mensal_centavos) }}/mês{% endif %}</span></div>{% endfor %}</div>
-      <div class="acha">{% if d.servicos.historico %}Ticket por serviço só depois da primeira proposta enviada no período. Até lá, o que mais entrou em orçamento.{% else %}<b>{{ d.servicos.itens[0].nome }}</b> é o que mais entra em proposta. É o serviço pra ter pacote e preço prontos.{% endif %}</div>
+      <div class="acha">{% if d.servicos.historico %}Ticket por {{ perfil.vocab.oferta }} só depois da primeira proposta enviada no período. Até lá, o que mais entrou em orçamento.{% else %}<b>{{ d.servicos.itens[0].nome }}</b> é o que mais entra em proposta. É o {{ perfil.vocab.oferta }} pra ter pacote e preço prontos.{% endif %}</div>
       {% else %}<div class="vazio">Nenhum orçamento com itens ainda.</div>{% endif %}
     </div>
     {% endif %}

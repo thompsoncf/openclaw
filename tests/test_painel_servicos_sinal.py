@@ -14,6 +14,8 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from finance.agenda import agora_brt as _agora_brt
+
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -28,6 +30,25 @@ from web import painel_servicos as ps
 CONTA = 7
 OUTRA = 8
 BASE = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+
+# A DATA DA FESTA, sempre no futuro.
+#
+# Era fixa em "2026-09-12", e em 13/09/2026 a main amanheceu vermelha sem ninguém
+# ter tocado em código: `finance.vendas.estado_da_data` devolve None pra data que
+# já passou ("Um alarme vermelho eterno num evento de julho não é informação"), e
+# os dois testes que esperam o selo "Fora da agenda" passaram a não receber selo
+# nenhum. O código de produção está certo; quem tinha prazo de validade era a
+# fixture. É o mesmo defeito do `test_follow_up.py` consertado no #665 — segundo
+# caso em cinco dias.
+#
+# 120 dias porque uma festa se marca com meses de antecedência, e nenhum teste
+# daqui desloca tanto. `agora_brt` e não `date.today` pra casar com o fuso que
+# `estado_da_data` usa ao comparar: perto da virada do dia em UTC os dois
+# discordariam, e o teste voltaria a falhar por relógio — só que uma vez a cada
+# 24h, que é pior de achar do que todo dia.
+_FESTA = (_agora_brt() + timedelta(days=120)).date()
+FESTA_ISO = _FESTA.isoformat()
+FESTA_BR = _FESTA.strftime("%d/%m/%Y")
 
 
 @pytest.fixture()
@@ -925,7 +946,7 @@ def _orcamento_pra_mandar(c, *, email="", conta_id=CONTA, numero=14):
                  setup_centavos, primeiro_ano_centavos, modo, evento, numero, email, token)
                values (%s,'Maria Helena','','enviado','',890000,890000,'evento',
                        %s::jsonb,%s,%s,%s) returning id""",
-            (conta_id, json.dumps({"data": "2026-09-12", "tipo": "Casamento"}),
+            (conta_id, json.dumps({"data": FESTA_ISO, "tipo": "Casamento"}),
              numero, email or None, f"tk{numero}{conta_id}")).fetchone()[0]
 
 
@@ -946,7 +967,7 @@ def test_o_resumo_diz_quando_o_orcamento_foi_gerado(cliente, correio):
     oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
     d = cliente.get(f"/painel/servicos/email/{oid}").json()
     assert "gerado em" in d["resumo"]
-    assert "Casamento" in d["resumo"] and "12/09/2026" in d["resumo"]
+    assert "Casamento" in d["resumo"] and FESTA_BR in d["resumo"]
 
 
 def test_manda_pela_caixa_da_empresa_e_registra(cliente, correio):
@@ -1493,3 +1514,15 @@ def test_anexar_nao_marca_como_pago_mas_conta_como_anexado(cliente, storage):
 
     pg = _item(cliente, oid)["pgto"]
     assert pg["anexados"] == 2 and pg["pagas"] == 0    # os dois números, separados
+
+
+def test_a_data_da_festa_esta_sempre_no_futuro():
+    """A invariante que este arquivo assume sem dizer, e que já quebrou uma vez.
+
+    `estado_da_data` devolve None pra data passada, então os testes do selo "Fora
+    da agenda" dependem de `FESTA_ISO` estar à frente do relógio real. Esta
+    asserção falha primeiro e explica o motivo, em vez de mandar quem está de
+    plantão caçar "o estado da data sumiu da linha" em dois testes de sinal."""
+    folga = _FESTA - _agora_brt().date()
+    assert folga.days > 30, (
+        f"FESTA_ISO precisa estar bem à frente do relógio; está {folga.days} dia(s)")

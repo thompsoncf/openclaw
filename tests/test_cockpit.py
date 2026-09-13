@@ -1084,6 +1084,50 @@ def test_agendar_visita(pool):
     assert ics and "BEGIN:VEVENT" in ics and "BEGIN:VALARM" in ics and "Visita — Ana" in ics
 
 
+# --------------------------------------- o que o lead sabe vai junto (13/09/2026)
+#
+# Pedido do dono: "convidados acho que precisa associar na marcação da visita".
+# O cliente já disse quanta gente vem quando o lead foi qualificado — 124 dos 349
+# leads da Prime têm o número — e o compromisso da visita nascia sem ele, deixando
+# a coluna "Convid." do relatório em "—" pra visita que o sistema sabia medir.
+
+def test_a_visita_herda_a_contagem_de_convidados_do_lead(pool):
+    with pool.connection() as c:
+        conta = c.execute("insert into contas (nome) values ('C') returning id").fetchone()[0]
+        v = _membro(c, conta, email="hv1@x.com")
+        lead = _lead(c, conta, v, "Elsinha")
+        c.execute("update prospeccao set contato='Elsinha', evento_convidados=100, "
+                  "evento_tipo='Formatura' where id=%s", (lead,))
+        c.commit()
+    r = ck.agendar_visita(pool, conta, v, lead, data="2026-10-01", hora="10:00",
+                          avisar_cliente=False)
+    assert r["ok"]
+    with pool.connection() as c:
+        ev = c.execute("select convidados, tipo_evento from eventos_agenda where id=%s",
+                       (r["evento_id"],)).fetchone()
+    assert ev[0] == 100, "a contagem do lead não chegou no compromisso"
+    # E O TIPO NÃO VAI JUNTO, de propósito: `_E_VISITA` (web/painel_relatorios.py)
+    # define visita como "título começa com Visita E tipo_evento vazio". Gravar
+    # "Formatura" aqui tiraria esta visita da aba Visitas e a jogaria em Eventos,
+    # sem nenhum aviso. O tipo aparece no relatório por LEITURA do lead.
+    assert ev[1] is None, "gravar o tipo aqui reclassificaria a visita como festa"
+
+
+def test_lead_sem_contagem_nao_inventa_numero(pool):
+    with pool.connection() as c:
+        conta = c.execute("insert into contas (nome) values ('C') returning id").fetchone()[0]
+        v = _membro(c, conta, email="hv2@x.com")
+        lead = _lead(c, conta, v, "Sem número")
+        c.commit()
+    r = ck.agendar_visita(pool, conta, v, lead, data="2026-10-02", hora="10:00",
+                          avisar_cliente=False)
+    assert r["ok"]
+    with pool.connection() as c:
+        conv = c.execute("select convidados from eventos_agenda where id=%s",
+                         (r["evento_id"],)).fetchone()[0]
+    assert conv is None
+
+
 # ------------------------------------------------------------------ a Fila no mês atual
 # (mockup cockpit_mes_atual): o período, as pílulas de fora, os grupos por o que o lead
 # pede, a linha do evento no card, e "perguntar"/"confirmar" num toque.

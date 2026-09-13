@@ -19,8 +19,13 @@ create table contas (id bigserial primary key, nome text);
 create table membros (id bigserial primary key, conta_id bigint, nome text);
 create table orcamentos (id bigserial primary key, conta_id bigint,
   cliente text, empresa text, evento_agenda_id bigint, evento jsonb);
+-- `evento_convidados` / `evento_tipo` (migração 179) são o TERCEIRO elo da
+-- cadeia de convidados, desde 13/09/2026: o lead sabe quantos vêm e que festa é,
+-- e a visita marcada pelo Cockpit herda isso. Sem as colunas aqui a consulta do
+-- relatório nem roda.
 create table prospeccao (id bigserial primary key, conta_id bigint,
-  contato text, empresa text not null default 'Empresa');
+  contato text, empresa text not null default 'Empresa',
+  evento_convidados int, evento_tipo text);
 create table eventos_agenda (id bigserial primary key, conta_id bigint,
   membro_id bigint, titulo text not null, inicio timestamptz not null,
   tipo text default 'pessoal', tipo_evento text, status text default 'ativo',
@@ -93,11 +98,13 @@ def _orc(pool, conta, evento_id, *, cliente=None, empresa=None, convidados=None)
         c.commit()
 
 
-def _lead(pool, conta, *, contato=None, empresa="Empresa Lead"):
+def _lead(pool, conta, *, contato=None, empresa="Empresa Lead",
+          convidados=None, tipo_festa=None):
     with pool.connection() as c:
         lid = c.execute(
-            "insert into prospeccao (conta_id, contato, empresa) values (%s,%s,%s) returning id",
-            (conta, contato, empresa),
+            "insert into prospeccao (conta_id, contato, empresa, evento_convidados, evento_tipo) "
+            "values (%s,%s,%s,%s,%s) returning id",
+            (conta, contato, empresa, convidados, tipo_festa),
         ).fetchone()[0]
         c.commit()
     return lid
@@ -151,12 +158,13 @@ def test_sem_evento_nenhum_percentual_nao_quebra_com_divisao_por_zero(pool, cen)
     assert metricas["Realizados"] == "0 · 0%"
 
 
-def test_sinal_soma_no_total_e_na_metrica(pool, cen):
+def test_sinal_soma_na_metrica(pool, cen):
+    """Desde 13/09/2026 o sinal só existe como MÉTRICA — a coluna saiu (3 de 64
+    linhas preenchidas na Prime). A soma do período é a mesma de antes."""
     _evento(pool, cen["conta"], sinal=50000)
     _evento(pool, cen["conta"], sinal=30000)
     _evento(pool, cen["conta"], sinal=None)  # sem sinal: não quebra a soma
     dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
-    assert dados["total_centavos"] == 80000
     assert dict(dados["metricas"])["Sinal no período"] == "R$ 800,00"
 
 
@@ -407,22 +415,26 @@ def test_sem_especie_a_tela_continua_a_de_sempre(pool, cen):
     mostrava). Mesmas cinco métricas, sem mudança nenhuma."""
     _evento(pool, cen["conta"], sinal=50000)
     d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")
+    # `sinal_centavos` saiu da lista em 13/09/2026; o resto é o de sempre.
     assert [c["chave"] for c in d["colunas"]] == [
         "inicio", "evento", "cliente", "vendedor", "tipo", "status", "desfecho",
-        "convidados", "sinal_centavos"]
+        "convidados"]
     assert [m[0] for m in d["metricas"]] == [
         "Eventos no período", "Realizados", "Não realizados", "Cancelados",
         "Sinal no período"]
-    assert d["col_total"] == "sinal_centavos"
+    assert d["col_total"] is None
 
 
-def test_visita_nao_mostra_sinal_nem_convidados_e_mostra_vendedor(pool, cen):
+def test_visita_nao_mostra_sinal_e_mostra_vendedor(pool, cen):
     """Visita nunca segura data (`agendar_visita` não passa sinal), então a
-    coluna era sempre R$ 0,00 — metade da tela para ler nada."""
+    coluna era sempre R$ 0,00 — metade da tela para ler nada.
+
+    Convidados era exceção junto com o sinal até 13/09/2026 e deixou de ser: o
+    lead sabe quantos vêm, e é antes de receber a pessoa que isso importa."""
     _evento(pool, cen["conta"], titulo="Visita — Erys", membro_id=cen["pedro"])
     d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="visita")
     chaves = [c["chave"] for c in d["colunas"]]
-    assert "sinal_centavos" not in chaves and "convidados" not in chaves
+    assert "sinal_centavos" not in chaves
     assert "vendedor" in chaves
     assert d["col_total"] is None, "sem coluna de dinheiro, não há linha de total"
     assert d["linhas"][0]["vendedor"] == "Pedro"
@@ -784,3 +796,144 @@ def test_o_palpite_nao_e_gravado_em_lugar_nenhum(pool, cen):
         cid, sem = c.execute("select cliente_id, sem_cliente from eventos_agenda "
                              "where id=%s", (ev,)).fetchone()
     assert cid is None and sem is False
+
+
+# ------------------------------------------- Convid. e Sinal (13/09/2026)
+#
+# Pedido do dono olhando a aba na conta dele: "convid. e sinal acredito que não
+# fazem sentido ter elas sem dados". Medido em produção no mesmo dia, aba Eventos
+# da Prime, 64 linhas: Sinal preenchida em 3 (4,7%), Convid. em 13 (20%).
+#
+# As duas viraram mudanças diferentes porque o problema era diferente. Sinal não
+# tinha como ser preenchida — só dois caminhos estreitos gravam `sinal_centavos`,
+# e festa que entra por telefonema não passa por nenhum. Convid. tinha: o número
+# estava no lead o tempo todo (124 dos 349 leads da Prime), e ninguém lia.
+
+
+def _visita(pool, conta, **kw):
+    """Visita é como `_E_VISITA` a reconhece: título 'Visita…' e SEM tipo_evento."""
+    kw.setdefault("titulo", "Visita — Elsinha")
+    kw.pop("tipo_evento", None)
+    return _evento(pool, conta, **kw)
+
+
+def _cols(dados):
+    return [c["rotulo"] for c in dados["colunas"]]
+
+
+def test_sinal_nao_e_mais_coluna_em_nenhuma_aba(pool, cen):
+    _evento(pool, cen["conta"], titulo="Casamento — Ana", tipo_evento="Casamento", sinal=50000)
+    for especie in ("", "evento", "visita"):
+        dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie=especie)
+        assert "Sinal" not in _cols(dados), f"aba {especie or 'todos'} ainda mostra a coluna"
+
+
+def test_mas_o_numero_do_sinal_continua_no_rodape(pool, cen):
+    """Tirar a coluna não podia tirar o dado: são 61 células de R$ 0,00 saindo,
+    não a informação de quanto entrou no período."""
+    _evento(pool, cen["conta"], titulo="Casamento — Ana", tipo_evento="Casamento", sinal=50000)
+    _evento(pool, cen["conta"], titulo="Casamento — Bia", tipo_evento="Casamento", sinal=30000)
+    for especie in ("", "evento"):
+        dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie=especie)
+        assert ("Sinal no período", "R$ 800,00") in dados["metricas"]
+
+
+def test_sem_coluna_de_sinal_nao_sobra_soma_apontando_pra_nada(pool, cen):
+    _evento(pool, cen["conta"], titulo="Casamento — Ana", tipo_evento="Casamento", sinal=50000)
+    dados = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="evento")
+    assert dados["col_total"] is None and dados["total_centavos"] == 0
+
+
+# ------------------------------------------------------ o terceiro elo
+
+def test_convidados_sai_do_lead_quando_o_evento_nao_tem(pool, cen):
+    lead = _lead(pool, cen["conta"], contato="Elsinha", convidados=100, tipo_festa="Formatura")
+    _visita(pool, cen["conta"], prospeccao_id=lead)
+    l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="visita")["linhas"][0]
+    assert l["convidados"] == 100 and l["festa"] == "Formatura"
+
+
+def test_a_ordem_da_cadeia_e_evento_orcamento_lead(pool, cen):
+    """Quem digitou no compromisso manda; depois o orçamento; o lead é o último."""
+    lead = _lead(pool, cen["conta"], contato="Ana", convidados=10)
+    ev = _evento(pool, cen["conta"], titulo="Casamento — Ana", tipo_evento="Casamento",
+                 convidados=300, prospeccao_id=lead)
+    _orc(pool, cen["conta"], ev, cliente="Ana", convidados=200)
+    l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")["linhas"][0]
+    assert l["convidados"] == 300                       # o do compromisso
+
+    with pool.connection() as c:
+        c.execute("update eventos_agenda set convidados=null where id=%s", (ev,))
+        c.commit()
+    l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")["linhas"][0]
+    assert l["convidados"] == 200                       # cai pro orçamento
+
+    with pool.connection() as c:
+        c.execute("update orcamentos set evento=null where evento_agenda_id=%s", (ev,))
+        c.commit()
+    l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")["linhas"][0]
+    assert l["convidados"] == 10                        # e só então pro lead
+
+
+def test_a_metrica_de_convidados_soma_pela_mesma_cadeia(pool, cen):
+    """Se a coluna lê do lead e a métrica não, os dois números discordam na tela:
+    a tabela mostraria 100 numa linha que o rodapé não contou."""
+    lead = _lead(pool, cen["conta"], contato="Bia", convidados=100)
+    _evento(pool, cen["conta"], titulo="Formatura — Bia", tipo_evento="Formatura",
+            prospeccao_id=lead)                                  # só o lead sabe
+    _evento(pool, cen["conta"], titulo="Casamento — Ana", tipo_evento="Casamento",
+            convidados=40)                                       # digitado no evento
+    d = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="evento")
+    assert ("Convidados", "140") in d["metricas"]
+    assert sorted(l["convidados"] for l in d["linhas"]) == [40, 100]
+
+
+def test_a_aba_visitas_passa_a_mostrar_festa_e_convidados(pool, cen):
+    lead = _lead(pool, cen["conta"], contato="Elsinha", convidados=100, tipo_festa="Formatura")
+    _visita(pool, cen["conta"], prospeccao_id=lead)
+    cols = _cols(rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="visita"))
+    assert "Festa" in cols and "Convid." in cols
+
+
+def test_visita_sem_lead_nao_inventa_nada(pool, cen):
+    _visita(pool, cen["conta"], titulo="VISITA TÉCNICA - PEDRO")
+    l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="visita")["linhas"][0]
+    assert l["convidados"] == "—" and l["festa"] == "—"
+
+
+def test_o_tipo_do_lead_nao_apaga_a_cobranca_da_aba_eventos(pool, cen):
+    """`festa` e `tipo_evento` são campos diferentes de propósito: a aba Eventos
+    continua marcando de âmbar a festa sem tipo, mesmo quando o lead sabe qual é."""
+    lead = _lead(pool, cen["conta"], contato="Bia", tipo_festa="Formatura")
+    _evento(pool, cen["conta"], titulo="Formatura - Beatriz", prospeccao_id=lead)
+    l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "")["linhas"][0]
+    assert l["festa"] == "Formatura"                    # a coluna nova sabe
+    assert l["tipo_evento"] == "sem tipo"               # e a cobrança continua
+    assert l["tipo_evento_cor"] == "aviso"
+
+
+# --------------------------------------------------------- locação: n/a
+
+def test_locacao_diz_na_em_vez_de_cobrar_preenchimento(pool, cen):
+    """Regra do dono: "na locação não conta convidado". "—" é cobrança, "n/a" é
+    resposta — e na Prime são 16 das 64 linhas parecendo pendência eterna."""
+    _evento(pool, cen["conta"], titulo="Locação salão", tipo_evento="Locação")
+    l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="evento")["linhas"][0]
+    assert l["convidados"] == "n/a"
+
+
+def test_locacao_com_numero_digitado_mostra_o_numero(pool, cen):
+    """"Não se aplica" é o padrão, não uma proibição: quem digitou quis dizer algo."""
+    _evento(pool, cen["conta"], titulo="Locação salão", tipo_evento="Locação", convidados=80)
+    l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="evento")["linhas"][0]
+    assert l["convidados"] == 80
+
+
+def test_os_outros_tipos_continuam_cobrando(pool, cen):
+    for tipo in ("Casamento", "Aniversário", "Formatura", None):
+        with pool.connection() as c:
+            c.execute("truncate eventos_agenda restart identity")
+            c.commit()
+        _evento(pool, cen["conta"], titulo="Festa", tipo_evento=tipo)
+        l = rel._dados_agenda(pool, cen["conta"], "todos", "", "", "", especie="evento")["linhas"][0]
+        assert l["convidados"] == "—", f"{tipo} não deveria dizer n/a"

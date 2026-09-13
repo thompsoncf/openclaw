@@ -53,9 +53,13 @@ create table contas (id bigserial primary key, nome text, nome_fantasia text,
   razao_social text, email_empresa text, telefone text);
 create table membros (id bigserial primary key, conta_id bigint, nome text,
   email text, papel text default 'vendedor', ativo boolean default true);
+-- `evento_convidados` / `evento_tipo` (migração 179): o lead sabe quantas pessoas
+-- vêm e que festa é, e desde 13/09/2026 tanto o relatório de Agenda quanto a
+-- visita marcada pelo Cockpit leem daqui. Sem as colunas a consulta nem roda.
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   contato text, empresa text, telefone text, whatsapp text,
   status text default 'novo', temperatura text default 'frio',
+  evento_convidados int, evento_tipo text,
   ultimo_contato_em timestamptz, atualizado_em timestamptz default now());
 create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint,
   membro_id bigint, tipo text, resultado text, descricao text,

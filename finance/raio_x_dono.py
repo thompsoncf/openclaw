@@ -403,15 +403,22 @@ def _perdas(c, conta_id, w, wv, ini, fim, motivos=MOTIVOS_TODOS) -> dict:
 
 # ---------------------------------------------------------------- os blocos do recorrente
 
-def _mrr(c, conta_id, w, wv, ini, fim) -> list[dict]:
-    """Mensalidade proposta × fechada, por mês do período (MRR novo)."""
+def _proposto_x_fechado(c, conta_id, w, wv, ini, fim, coluna: str) -> list[dict]:
+    """Proposto × fechado por mês, somando UMA coluna de valor do orçamento.
+
+    A coluna é escolhida pelo PERFIL e nunca vem de fora: `mensal_centavos` pra
+    quem fatura mensalidade, `setup_centavos` pra quem fatura por venda — numa
+    corretora a comissão da apólice é valor único, e somar a mensalidade dava R$ 0
+    todo mês (medido em 13/09/2026, antes do perfil `seguros` existir).
+    """
+    assert coluna in ("mensal_centavos", "setup_centavos")  # nunca entrada de usuário
     prop = dict(c.execute(f"""
-        select to_char(o.criado_em at time zone 'America/Sao_Paulo', 'YYYY-MM'), coalesce(sum(o.mensal_centavos), 0)
+        select to_char(o.criado_em at time zone 'America/Sao_Paulo', 'YYYY-MM'), coalesce(sum(o.{coluna}), 0)
           from orcamentos o join prospeccao p on p.orcamento_id = o.id
          where p.conta_id = %s and o.status <> 'rascunho' and o.criado_em >= %s and o.criado_em < %s{w}
          group by 1""", [conta_id, ini, fim, *wv]).fetchall())
     fech = dict(c.execute(f"""
-        select to_char(c.assinado_em at time zone 'America/Sao_Paulo', 'YYYY-MM'), coalesce(sum(o.mensal_centavos), 0)
+        select to_char(c.assinado_em at time zone 'America/Sao_Paulo', 'YYYY-MM'), coalesce(sum(o.{coluna}), 0)
           from contratos c join orcamentos o on o.id = c.orcamento_id
           join prospeccao p on p.orcamento_id = o.id
          where c.conta_id = %s and c.status = 'assinado' and c.assinado_em >= %s and c.assinado_em < %s{w}
@@ -423,6 +430,21 @@ def _mrr(c, conta_id, w, wv, ini, fim) -> list[dict]:
         meses.append({"mes": k, "rotulo": _MESES[m.month - 1], "proposta": int(prop.get(k, 0)), "fechada": int(fech.get(k, 0))})
         m = (m.replace(day=28) + timedelta(days=4)).replace(day=1)
     return meses
+
+
+def _mrr(c, conta_id, w, wv, ini, fim) -> list[dict]:
+    """Mensalidade proposta × fechada, por mês do período (MRR novo)."""
+    return _proposto_x_fechado(c, conta_id, w, wv, ini, fim, "mensal_centavos")
+
+
+def _comissao(c, conta_id, w, wv, ini, fim) -> list[dict]:
+    """O mesmo recorte pra corretora: valor único proposto × fechado, por mês.
+
+    Um contrato assinado aqui é uma apólice emitida, e o que interessa ao dono é
+    quanto ela vale — o `setup_centavos` do orçamento. A tela rotula sem "/mês",
+    que é a diferença visível pra quem vinha vendo o bloco de mensalidade.
+    """
+    return _proposto_x_fechado(c, conta_id, w, wv, ini, fim, "setup_centavos")
 
 
 def _segmentos(c, conta_id, w, wv, ini, fim) -> list[dict]:
@@ -483,7 +505,7 @@ def dono(pool, conta_id: int, f: dict, agora: datetime | None = None, perfil: di
     blocos = set(perfil.get("blocos") or ())
     out = {"ini": ini, "fim": fim, "rotulo": rot, "filtros": f, "perfil": perfil, "placar": None, "anterior": None,
            "demanda_agenda": None, "dia_festa": None, "tipos": None, "ciclo": None, "perdas": None,
-           "mrr": None, "segmentos": None, "servicos": None,
+           "mrr": None, "comissao": None, "segmentos": None, "servicos": None,
            "vendedores": [], "confianca": None}
     todos = (("placar", lambda: _placar(c, conta_id, w, wv, ini, fim, a)),
              ("anterior", lambda: _placar(c, conta_id, w, wv, ant_ini, ant_fim, a)),
@@ -491,6 +513,7 @@ def dono(pool, conta_id: int, f: dict, agora: datetime | None = None, perfil: di
              ("dia_festa", lambda: _dia_festa(c, conta_id, w, wv, ini, fim)),
              ("tipos", lambda: _tipos_ticket(c, conta_id, w, wv, ini, fim)),
              ("mrr", lambda: _mrr(c, conta_id, w, wv, ini, fim)),
+             ("comissao", lambda: _comissao(c, conta_id, w, wv, ini, fim)),
              ("segmentos", lambda: _segmentos(c, conta_id, w, wv, ini, fim)),
              ("servicos", lambda: _servicos(c, conta_id, w, wv, ini, fim)),
              ("ciclo", lambda: _ciclo(c, conta_id, w, wv, ini, fim)),

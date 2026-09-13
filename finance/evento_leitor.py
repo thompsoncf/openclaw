@@ -224,8 +224,29 @@ def ler_conversa(pool, conta_id: int, lead_id: int, agora: datetime | None = Non
                 pista = "falou de " + _evl.data_curta(lido["data"], hoje)
             elif "data" in novos and lido.get("alternativa"):
                 pista = "disse " + lido["alternativa"]
-            c.execute("update prospeccao set evento_pista=%s, evento_lido_em=%s "
-                      "where id=%s and conta_id=%s", (pista, agora, lead_id, conta_id))
+            # `evento_lido_em` sai do relógio DO BANCO, não do `agora` do Python.
+            #
+            # Quem lê esta coluna é `leads_por_ler`, e a pergunta que ela faz é
+            # "tem mensagem mais nova que a última leitura?" — comparando com
+            # `mensagens.criado_em`, que é gravado por `now()`. Com o carimbo
+            # vindo do Python, a comparação atravessa DOIS relógios: o da
+            # aplicação e o do banco, que são máquinas diferentes.
+            #
+            # A margem medida em 13/09/2026 era de 4 MILISSEGUNDOS. Toda mensagem
+            # que chegasse dentro desse intervalo depois de uma leitura ficaria
+            # com `criado_em` menor que o `evento_lido_em` e o lead sumiria da
+            # fila "por ler" PARA SEMPRE — sem erro, sem log, sem ninguém saber.
+            # Basta o relógio da aplicação adiantar pra janela crescer.
+            #
+            # Encontrado pela varredura de relógio (scripts/varredura_relogio.sh),
+            # que adianta o Python e expõe a diferença. É a mesma lição do #666:
+            # quem compara duas linhas do tempo está comparando errado.
+            #
+            # `agora` continua existindo e continua injetável — ele é o que decide
+            # em que ANO cai "13 de fevereiro" (`hoje = agora.date()`, acima), e
+            # isso é leitura de texto, não contabilidade de quando se leu.
+            c.execute("update prospeccao set evento_pista=%s, evento_lido_em=now() "
+                      "where id=%s and conta_id=%s", (pista, lead_id, conta_id))
             c.commit()
             return {"preencheu": preencheu, "pista": pista}
     except Exception:  # noqa: BLE001

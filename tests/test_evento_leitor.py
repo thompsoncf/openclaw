@@ -178,7 +178,24 @@ def test_ler_conversa_preenche_o_card_com_origem_e_trecho(pool):
     em, tipo, conv, origem, trecho, pista, lido = _le(pool, lid)
     assert (em, tipo, conv, origem, pista) == (date(2027, 2, 13), "Casamento", 70, "conversa", None)
     assert "13 de fevereiro" in trecho and "70 pessoas" in trecho
-    assert lido == agora
+    # O CARIMBO NÃO É O `agora` INJETADO, e não pode voltar a ser.
+    #
+    # Este assert dizia `lido == agora` e era ele que segurava o defeito no lugar:
+    # `evento_lido_em` é comparado com `mensagens.criado_em` dentro de
+    # `leads_por_ler`, e `criado_em` vem do `now()` do banco. Carimbar com o
+    # relógio do Python punha dois relógios — duas máquinas — na mesma
+    # comparação, e a margem medida era de 4 milissegundos: mensagem que chegasse
+    # nesse intervalo depois da leitura sumia da fila "por ler" para sempre.
+    #
+    # `agora` segue injetável e segue importando: é ele que decide em que ANO cai
+    # "13 de fevereiro", na linha acima. O que mudou é só quem carimba a leitura.
+    with pool.connection() as c:
+        agora_banco, ultima_msg = c.execute(
+            """select now(), (select max(m.criado_em) from conversas cv
+                                join mensagens m on m.conversa_id = cv.id
+                               where cv.prospeccao_id = %s)""", (lid,)).fetchone()
+    assert lido != agora, "o carimbo voltou a vir do relógio injetado"
+    assert ultima_msg < lido <= agora_banco, "o carimbo tem que ser do relógio do banco"
 
 
 def test_ler_conversa_so_preenche_o_vazio_e_a_data_diferente_vira_pista(pool):

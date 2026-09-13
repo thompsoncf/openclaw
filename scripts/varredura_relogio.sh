@@ -36,6 +36,12 @@
 #     psql -h localhost -U postgres -tAc 'select now()'
 #     LD_PRELOAD=$LIB FAKETIME=+90d python3 -c 'import datetime;print(datetime.datetime.now())'
 #
+# A PEDRA EM QUE EU TROPECEI, e por isso a conferência acima existe: reiniciar o
+# Postgres o devolve ao tempo REAL. Fiz isso no meio da varredura pra medir o
+# controle, esqueci de subir de volta sob faketime, e passei a ler uma lista de
+# falhas que era metade bomba e metade desencontro dos dois relógios — 9 falhas
+# onde havia 3. Se os dois relógios não baterem, a lista abaixo não vale nada.
+#
 # COMO LER O RESULTADO. Falhou aqui e passa com o relógio normal = bomba-relógio.
 # Falhou nos DOIS = defeito comum, que esta varredura não é quem encontra. Sempre
 # confira os dois lados antes de mexer: em 13/09 o `test_orcamento_evento.py`

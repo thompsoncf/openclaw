@@ -19,9 +19,49 @@ import pytest
 from psycopg_pool import ConnectionPool
 from starlette.datastructures import QueryParams
 
+from finance.evento_lead import _MESES as _MESES_MIN
+from finance.evento_lead import mes_rotulo as _mes_rotulo
 from web import painel_prospeccao as pp
 
 CONTA = 11
+
+
+# OS MESES DA FESTA, sempre à frente do relógio.
+#
+# Eram datas escritas à mão — `date(2026, 11, 14)` e `date(2027, 1, 16)` — e isso
+# é bomba-relógio neste arquivo em particular: metade do que ele verifica é a
+# SEPARAÇÃO por mês da festa, e festa que já passou muda de grupo (ou some, na
+# vista comercial). Em 14/11/2026 seis testes daqui inverteriam sozinhos, num
+# commit que ninguém fez. Achado pela varredura de relógio
+# (scripts/varredura_relogio.sh), junto com dois bugs de produção.
+#
+# Dois meses, e não um: boa parte dos asserts é sobre a ORDEM (o mês mais perto
+# vem antes), e com um mês só não haveria ordem pra conferir. Dois e quatro meses
+# à frente garantem que caem em meses distintos e que nenhum dos dois é o de hoje,
+# em qualquer época do ano.
+def _mes_a_frente(n: int, dia: int = 16) -> date:
+    h = date.today()
+    m = h.month - 1 + n
+    return date(h.year + m // 12, m % 12 + 1, dia)
+
+
+MES_PERTO = _mes_a_frente(2)
+MES_LONGE = _mes_a_frente(4)
+# O rótulo sai da MESMA função que o código usa pra desenhar ("Jan 27"). Repetir a
+# string à mão aqui seria trocar uma data fixa por um texto fixo — o mesmo defeito
+# com outra roupa.
+ROT_PERTO = _mes_rotulo(MES_PERTO.strftime("%Y-%m"))
+ROT_LONGE = _mes_rotulo(MES_LONGE.strftime("%Y-%m"))
+
+# E a ENTRADA do lead sem data, que é agrupada pelo mês em que ele chegou. Três
+# dias atrás: recente o bastante pra não cair na dobra dos "parados 15+ dias", que
+# é um grupo diferente e mudaria a contagem dos asserts.
+ENTRADA = datetime.now(timezone.utc) - timedelta(days=3)
+ROT_ENTRADA = "Sem data · entrou em " + _MESES_MIN[ENTRADA.month - 1]
+# A CHAVE do mês, que é o que vai na URL (`?mes=2027-01`) e no `data-status` das
+# colunas da vista por mês. Mesmo motivo do rótulo: derivada, nunca escrita.
+KEY_PERTO = MES_PERTO.strftime("%Y-%m")
+KEY_LONGE = MES_LONGE.strftime("%Y-%m")
 
 _SQL = """
 create table contas (id bigserial primary key, chip_de bigint, nome text);
@@ -162,7 +202,7 @@ def test_conta_que_nao_vende_data_tem_o_funil_de_sempre(monkeypatch, pool):
     import finance.vendas as v
     monkeypatch.setattr(v, "vende_data", lambda pool, conta_id: False)
     _lead(pool, "Padaria Bom Pão", whatsapp="86977770000")
-    _lead(pool, "Com Data", evento_em=date(2027, 1, 16), tipo="Formatura")
+    _lead(pool, "Com Data", evento_em=MES_LONGE, tipo="Formatura")
     html = _html(monkeypatch, pool)
     assert 'class="kbev sem"' not in html and 'id="trilho"' not in html
     assert "🎓 <b>Formatura</b>" in html
@@ -186,12 +226,12 @@ def test_evento_que_ja_passou_com_etapa_aberta_fica_marcado(monkeypatch, pool, v
 
 # ------------------------------------------------------------------ grupos na coluna
 def test_a_coluna_separa_por_mes_do_evento_depois_sem_data_por_entrada(monkeypatch, pool, vende_data):
-    _lead(pool, "Janeiro", evento_em=date(2027, 1, 16))
-    _lead(pool, "Novembro", evento_em=date(2026, 11, 14))
-    _lead(pool, "Sem Data Set", criado_em=datetime(2026, 9, 2, tzinfo=timezone.utc))
+    _lead(pool, "Janeiro", evento_em=MES_LONGE)
+    _lead(pool, "Novembro", evento_em=MES_PERTO.replace(day=14))
+    _lead(pool, "Sem Data Set", criado_em=ENTRADA)
     col = _coluna(_html(monkeypatch, pool, entrou="tudo"), "contatado")
-    i_nov, i_jan = col.index("Nov 26 <b>1</b>"), col.index("Jan 27 <b>1</b>")
-    i_sem = col.index("Sem data · entrou em set <b>1</b>")
+    i_nov, i_jan = col.index(f"{ROT_PERTO} <b>1</b>"), col.index(f"{ROT_LONGE} <b>1</b>")
+    i_sem = col.index(f"{ROT_ENTRADA} <b>1</b>")
     assert i_nov < i_jan < i_sem
     assert col.index("Novembro") < col.index("Janeiro") < col.index("Sem Data Set")
 
@@ -206,9 +246,9 @@ def test_coluna_com_um_grupo_so_nao_ganha_separador(monkeypatch, pool, vende_dat
 def test_parado_ha_15_dias_sem_mensagem_vai_pra_dobra_fechada_no_pe(monkeypatch, pool, vende_data):
     """Decisão do dono: 15 dias. E NADA muda no banco — o lead continua na etapa,
     só dobra na tela e volta sozinho na primeira mensagem."""
-    vivo = _lead(pool, "Falou Ontem", evento_em=date(2027, 1, 16))
+    vivo = _lead(pool, "Falou Ontem", evento_em=MES_LONGE)
     _conversa(pool, vivo, msg_ha_dias=1)
-    quieto = _lead(pool, "Quieto", evento_em=date(2027, 1, 20),
+    quieto = _lead(pool, "Quieto", evento_em=MES_LONGE.replace(day=20),
                    criado_em=datetime.now(timezone.utc) - timedelta(days=30))
     _conversa(pool, quieto, msg_ha_dias=16)
     _lead(pool, "Nunca Falou", criado_em=datetime.now(timezone.utc) - timedelta(days=40))
@@ -231,16 +271,16 @@ def test_a_contagem_da_coluna_continua_sendo_a_coluna_inteira(monkeypatch, pool,
 
 # ------------------------------------------------------------------ trilho + filtro
 def test_o_trilho_lista_os_meses_com_contagem_e_sem_data_no_fim(monkeypatch, pool, vende_data):
-    _lead(pool, "A", evento_em=date(2027, 1, 16))
-    _lead(pool, "B", evento_em=date(2027, 1, 20), status="proposta")
-    _lead(pool, "C", evento_em=date(2026, 11, 14))
-    _lead(pool, "Perdido", evento_em=date(2026, 11, 30), status="perdido")   # fora do trilho
+    _lead(pool, "A", evento_em=MES_LONGE)
+    _lead(pool, "B", evento_em=MES_LONGE.replace(day=20), status="proposta")
+    _lead(pool, "C", evento_em=MES_PERTO.replace(day=14))
+    _lead(pool, "Perdido", evento_em=MES_PERTO.replace(day=28), status="perdido")   # fora do trilho
     _lead(pool, "Sem")
     html = _html(monkeypatch, pool)
     trilho = html.split('id="trilho"')[1].split("</div>")[0]
     assert "Todos <b>4</b>" in trilho
-    assert trilho.index("Nov 26 <b>1</b>") < trilho.index("Jan 27 <b>2</b>") < trilho.index("Sem data <b>1</b>")
-    assert 'href="/painel/prospeccao?mes=2027-01"' in trilho
+    assert trilho.index(f"{ROT_PERTO} <b>1</b>") < trilho.index(f"{ROT_LONGE} <b>2</b>") < trilho.index("Sem data <b>1</b>")
+    assert f'href="/painel/prospeccao?mes={KEY_LONGE}"' in trilho
     assert 'href="/painel/prospeccao?mes=sem"' in trilho
 
 
@@ -250,23 +290,23 @@ def test_sem_nenhuma_data_o_trilho_nao_aparece(monkeypatch, pool, vende_data):
 
 
 def test_filtrar_por_mes_vale_pro_quadro_inteiro_e_mostra_o_de_quantos(monkeypatch, pool, vende_data):
-    _lead(pool, "Jan Contatado", evento_em=date(2027, 1, 16))
-    _lead(pool, "Jan Proposta", evento_em=date(2027, 1, 20), status="proposta")
-    _lead(pool, "Nov Contatado", evento_em=date(2026, 11, 14))
+    _lead(pool, "Jan Contatado", evento_em=MES_LONGE)
+    _lead(pool, "Jan Proposta", evento_em=MES_LONGE.replace(day=20), status="proposta")
+    _lead(pool, "Nov Contatado", evento_em=MES_PERTO.replace(day=14))
     _lead(pool, "Sem Data")
-    html = _html(monkeypatch, pool, mes="2027-01")
+    html = _html(monkeypatch, pool, mes=KEY_LONGE)
     assert "Jan Contatado" in html and "Jan Proposta" in html
     assert "Nov Contatado" not in html and "Sem Data" not in html
     assert '<span class="kbcnt">1 <i>de 3</i></span>' in _coluna(html, "contatado")
     assert '<span class="kbcnt">1 <i>de 1</i></span>' in _coluna(html, "proposta")
-    assert "<b>Jan 27</b> · só as festas desse mês" in html
+    assert f"<b>{ROT_LONGE}</b> · só as festas desse mês" in html
     # a pílula do mês escolhido acende; o trilho inteiro continua (é a régua)
-    assert 'class="mes on" href="/painel/prospeccao?mes=2027-01"' in html
-    assert "Nov 26 <b>1</b>" in html
+    assert f'class="mes on" href="/painel/prospeccao?mes={KEY_LONGE}"' in html
+    assert f"{ROT_PERTO} <b>1</b>" in html
 
 
 def test_filtrar_sem_data_e_a_fila_de_quem_ainda_nao_disse_quando(monkeypatch, pool, vende_data):
-    _lead(pool, "Com Data", evento_em=date(2027, 1, 16))
+    _lead(pool, "Com Data", evento_em=MES_LONGE)
     _lead(pool, "Sem Data")
     html = _html(monkeypatch, pool, mes="sem")
     assert "Sem Data" in html and "Com Data" not in html
@@ -274,15 +314,15 @@ def test_filtrar_sem_data_e_a_fila_de_quem_ainda_nao_disse_quando(monkeypatch, p
 
 
 def test_mes_invalido_e_ignorado(monkeypatch, pool, vende_data):
-    _lead(pool, "Com Data", evento_em=date(2027, 1, 16))
+    _lead(pool, "Com Data", evento_em=MES_LONGE)
     html = _html(monkeypatch, pool, mes="2027-13; drop table prospeccao")
     assert "Com Data" in html and 'class="trilho-faixa"' not in html
 
 
 def test_o_filtro_de_mes_sobrevive_a_troca_de_vendedor(monkeypatch, pool, vende_data):
-    _lead(pool, "Com Data", evento_em=date(2027, 1, 16))
-    html = _html(monkeypatch, pool, mes="2027-01")
-    assert '<input type="hidden" name="mes" value="2027-01">' in html
+    _lead(pool, "Com Data", evento_em=MES_LONGE)
+    html = _html(monkeypatch, pool, mes=KEY_LONGE)
+    assert f'<input type="hidden" name="mes" value="{KEY_LONGE}">' in html
 
 
 # ------------------------------------------------------------------ vista por mês
@@ -306,29 +346,29 @@ def test_o_botao_da_vista_so_existe_em_conta_que_vende_data(monkeypatch, pool, v
 def test_conta_de_mensalidade_nao_tem_a_vista_nem_por_url(monkeypatch, pool):
     import finance.vendas as v
     monkeypatch.setattr(v, "vende_data", lambda pool, conta_id: False)
-    _lead(pool, "A", evento_em=date(2027, 1, 16))
+    _lead(pool, "A", evento_em=MES_LONGE)
     html = _html(monkeypatch, pool, vista="mes")
     assert "Por mês do evento" not in html
-    assert 'data-status="contatado"' in html and 'data-status="2027-01"' not in html
+    assert 'data-status="contatado"' in html and f'data-status="{KEY_LONGE}"' not in html
 
 
 def test_na_vista_por_mes_as_colunas_sao_meses_e_sem_data_por_ultimo(monkeypatch, pool, vende_data):
-    _lead(pool, "Janeiro", evento_em=date(2027, 1, 16))
-    _lead(pool, "Novembro", evento_em=date(2026, 11, 14), status="proposta")
+    _lead(pool, "Janeiro", evento_em=MES_LONGE)
+    _lead(pool, "Novembro", evento_em=MES_PERTO.replace(day=14), status="proposta")
     _lead(pool, "Sem Data")
     _lead(pool, "Perdido", evento_em=date(2026, 11, 20), status="perdido")
     html = _html(monkeypatch, pool, vista="mes")
-    i_nov, i_jan, i_sem = (html.index('data-status="2026-11"'), html.index('data-status="2027-01"'),
+    i_nov, i_jan, i_sem = (html.index(f'data-status="{KEY_PERTO}"'), html.index(f'data-status="{KEY_LONGE}"'),
                            html.index('data-status="sem"'))
     assert i_nov < i_jan < i_sem
     assert 'data-status="contatado"' not in html
-    assert "Perdido" not in _coluna(html, "2026-11")          # fora da vista
-    assert "Nov 26</span><span class=\"kbcnt\">1</span>" in html
+    assert "Perdido" not in _coluna(html, KEY_PERTO)          # fora da vista
+    assert f"{ROT_PERTO}</span><span class=\"kbcnt\">1</span>" in html
     assert "Sem data</span><span class=\"kbcnt\">1</span>" in html
 
 
 def test_na_vista_por_mes_a_etapa_vira_selo_no_card(monkeypatch, pool, vende_data):
-    a = _lead(pool, "Contatada", evento_em=date(2026, 11, 14))
+    a = _lead(pool, "Contatada", evento_em=MES_PERTO.replace(day=14))
     b = _lead(pool, "Feita", evento_em=date(2026, 11, 20), status="ganho")
     html = _html(monkeypatch, pool, vista="mes")
     assert '<span class="kbetapa">Contatado</span>' in _card(html, a)
@@ -359,7 +399,7 @@ def test_o_selo_traz_o_numero_da_proposta_e_a_proxima_visita(monkeypatch, pool, 
 
 
 def test_a_vista_por_mes_nao_arrasta_card_e_recarrega_ao_trocar_etapa(monkeypatch, pool, vende_data):
-    a = _lead(pool, "A", evento_em=date(2027, 1, 16))
+    a = _lead(pool, "A", evento_em=MES_LONGE)
     html = _html(monkeypatch, pool, vista="mes")
     assert f'draggable="false" data-id="{a}"' in html and "kbDrag(" not in _card(html, a)
     assert 'ondrop=' not in html.split('id="kbrow"')[1].split("</div>")[0]
@@ -373,7 +413,7 @@ def test_na_vista_por_mes_sem_data_continua_com_a_dobra_dos_parados_e_o_trilho_s
     q = _lead(pool, "Quieto", criado_em=datetime.now(timezone.utc) - timedelta(days=30))
     _conversa(pool, q, msg_ha_dias=20)
     _lead(pool, "Vivo")
-    _lead(pool, "Com Data", evento_em=date(2027, 1, 16))
+    _lead(pool, "Com Data", evento_em=MES_LONGE)
     html = _html(monkeypatch, pool, vista="mes")
     sem = _coluna(html, "sem")
     assert "Parados 15+ dias <b>1</b>" in sem and "Quieto" in sem.split("kbdobra")[1]
@@ -517,15 +557,15 @@ def test_a_pilula_de_festa_em_30_dias_so_em_conta_de_eventos(monkeypatch, pool, 
 
 
 def test_esperando_resposta_e_o_primeiro_grupo_da_coluna(monkeypatch, pool, vende_data):
-    a = _lead(pool, "Falou Cliente", evento_em=date(2027, 1, 16)); _conversa(pool, a, msg_ha_dias=0)
-    b = _lead(pool, "Respondido", evento_em=date(2026, 11, 14))
+    a = _lead(pool, "Falou Cliente", evento_em=MES_LONGE); _conversa(pool, a, msg_ha_dias=0)
+    b = _lead(pool, "Respondido", evento_em=MES_PERTO.replace(day=14))
     with pool.connection() as c:
         cid = c.execute("insert into conversas (conta_id, prospeccao_id, canal) values (%s,%s,'whatsapp') returning id",
                         (CONTA, b)).fetchone()[0]
         c.execute("insert into mensagens (conversa_id, direcao, texto) values (%s,'in','oi'), (%s,'out','olá!')", (cid, cid))
         c.commit()
     col = _coluna(_html(monkeypatch, pool), "contatado")
-    assert col.index('kbgrp verde">🟢 Esperando resposta <b>1</b>') < col.index("Nov 26 <b>1</b>")
+    assert col.index('kbgrp verde">🟢 Esperando resposta <b>1</b>') < col.index(f"{ROT_PERTO} <b>1</b>")
     assert col.index("Falou Cliente") < col.index("Respondido")
 
 

@@ -407,6 +407,20 @@ b,strong{font-weight:600}
 .vis .mid{flex:1;min-width:0}
 .vis .mid b{font-size:.9rem;display:block}
 .vis .mid .loc{font-size:.76rem;color:var(--text-dim);margin-top:.1rem}
+/* o cartão da visita que a IA combinou (migração 259) */
+.vp{border:1px solid var(--azul-borda,#1B3A4A);background:var(--azul-fundo,#0D1B23);
+  border-radius:12px;padding:.7rem .8rem;margin:.6rem 0}
+.vp-tt{font-size:.84rem;font-weight:600}
+.vp-q{font-size:.8rem;color:var(--text-dim);margin-top:.25rem}
+.vp-q b{color:var(--text)}
+.vp-livre{color:var(--neon);margin-left:.35rem}
+.vp-choque{color:var(--ambar);margin-left:.35rem}
+.vp-bt{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.6rem}
+.vp-b{font:inherit;font-size:.78rem;padding:.35rem .7rem;border-radius:9px;margin:0;width:auto;
+  border:1px solid var(--line);background:transparent;color:var(--text-dim);cursor:pointer;
+  text-decoration:none;display:inline-flex;align-items:center}
+.vp-b.ok{background:var(--neon);color:var(--sobre-verde,#04150C);border-color:var(--neon);font-weight:700}
+.vp-b:disabled{opacity:.5}
 .acoes{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.5rem}
 .acoes a{font-size:.74rem;padding:.3rem .65rem;border-radius:9px;border:1px solid var(--line);
   background:var(--bg-2);color:var(--text-dim)}
@@ -3279,6 +3293,29 @@ def cockpit_visita_marcar(request: Request, lead_id: int):
     return _page(f"Visita — {d['empresa']}", corpo)
 
 
+@router.post("/cockpit/lead/{lead_id}/visita-proposta/{proposta_id}/{acao}")
+def cockpit_visita_proposta(request: Request, lead_id: int, proposta_id: int, acao: str):
+    """O vendedor decide sobre a visita que a IA combinou (migração 259).
+
+    Confirmar passa pelo MESMO `cockpit.agendar_visita` do botão manual — mesma
+    agenda, mesmo vínculo, mesmo "Qualificado", mesmo WhatsApp com o .ics. A
+    proposta não é um segundo jeito de marcar visita; é um jeito de o vendedor
+    apertar o botão que já existia sem preencher nada.
+
+    `_posse` lá dentro revalida que o lead é de quem está confirmando — por isso
+    aqui basta a sessão."""
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if acao not in ("confirmar", "descartar"):
+        return JSONResponse({"ok": False, "erro": "ação desconhecida"}, status_code=400)
+    from finance import agente_visita as av
+    conta_id, membro_id = sess
+    if acao == "descartar":
+        return JSONResponse(av.descartar(get_pool(), conta_id, membro_id, proposta_id))
+    return JSONResponse(av.confirmar(get_pool(), conta_id, membro_id, proposta_id))
+
+
 @router.post("/cockpit/lead/{lead_id}/visita")
 def cockpit_visita_criar(request: Request, lead_id: int, payload: dict = Body(...)):
     sess = _sessao(request)
@@ -4585,6 +4622,44 @@ def _dia_br(dt) -> str:
     return d.strftime("%d/%m/%Y")
 
 
+def _bloco_visita(request: Request, lead_id: int) -> str:
+    """A visita que a IA combinou e está esperando o OK do vendedor (migração 259).
+
+    Só aparece no modo `propoe` — no `marca` não há o que confirmar. Fica NA TELA
+    DO LEAD, e não numa fila separada, porque é aqui que o vendedor está quando o
+    push o traz: ele lê o que foi combinado na conversa logo acima e decide com o
+    contexto na frente, em vez de num cartão solto que não explica nada.
+
+    Best-effort como o `_bloco_espera` ao lado: a tela do lead nunca cai por causa
+    de um cartão."""
+    try:
+        from finance import agente_visita as av
+        conta_id = request.session.get("conta_id")
+        if not conta_id:
+            return ""
+        prop = next((x for x in av.pendentes(get_pool(), conta_id)
+                     if x["lead_id"] == lead_id), None)
+        if not prop:
+            return ""
+        quando = prop["inicio"].astimezone(av.ag.BRT)
+        dia = f"{_DIA_SEM[quando.weekday()]} {quando.day:02d}/{quando.month:02d}"
+        livre = av.livre(get_pool(), conta_id, prop["inicio"], prop["dur_min"])
+        selo = ("<span class=vp-livre>agenda livre</span>" if livre
+                else "<span class=vp-choque>⚠ já tem compromisso nesse horário</span>")
+        return (f"<div class=vp id=vp-{prop['id']}>"
+                f"<div class=vp-tt>📅 Visita combinada pela IA</div>"
+                f"<div class=vp-q><b>{esc(dia)} às {quando:%H:%M}</b> · "
+                f"{prop['dur_min']} min {selo}</div>"
+                f"<div class=vp-bt>"
+                f"<button type=button class='vp-b ok' onclick=\"vpDecide({prop['id']},'confirmar')\">"
+                f"Confirmar e avisar</button>"
+                f"<a class=vp-b href='{_BASE}/lead/{lead_id}/visita'>Mudar horário</a>"
+                f"<button type=button class='vp-b' onclick=\"vpDecide({prop['id']},'descartar')\">"
+                f"Descartar</button></div></div>")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _bloco_espera(request: Request, lead_id: int, d: dict) -> str:
     """A data que o cliente pediu já tem festa? (finance/lista_espera)
 
@@ -4627,7 +4702,7 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
     # o evento na frente de tudo: é o que se precisa ver antes de responder (197)
     if d.get("evento_fmt"):
         sub = d["evento_fmt"] + (" · " + sub if sub else "")
-    espera = _bloco_espera(request, lead_id, d)
+    espera = _bloco_visita(request, lead_id) + _bloco_espera(request, lead_id, d)
 
     bolhas = []
     # (o _midia_html mora fora daqui pra o polling do JS desenhar igual — ver cxMid)
@@ -4861,6 +4936,24 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "l.hidden=true;document.getElementById('lupaImg').removeAttribute('src');};"
            "document.addEventListener('keydown',function(e){"
            "if(e.key==='Escape')lupaFecha();});"
+           # A VISITA COMBINADA PELA IA (migração 259). No `window` pelo mesmo
+           # motivo do lupaFecha: quem chama é o onclick do HTML, que está fora
+           # deste IIFE. Desabilita os dois botões antes de sair — confirmar duas
+           # vezes criaria dois compromissos pro mesmo cliente.
+           "window.vpDecide=function(id,acao){"
+           "var cx=document.getElementById('vp-'+id);if(!cx)return;"
+           "cx.querySelectorAll('button').forEach(function(b){b.disabled=true;});"
+           "fetch(location.pathname+'/visita-proposta/'+id+'/'+acao,"
+           "{method:'POST',headers:{'X-Requested-With':'fetch'}})"
+           ".then(function(r){return r.json();}).then(function(d){"
+           "if(d&&d.ok){cx.outerHTML=acao==='confirmar'"
+           "?'<div class=vp><div class=vp-tt>\\u2705 Visita confirmada</div>"
+           "<div class=vp-q>O cliente j\\u00e1 recebeu o aviso.</div></div>':'';return;}"
+           "cx.querySelectorAll('button').forEach(function(b){b.disabled=false;});"
+           "alert((d&&d.erro)||'N\\u00e3o consegui agora.');})"
+           ".catch(function(){"
+           "cx.querySelectorAll('button').forEach(function(b){b.disabled=false;});"
+           "alert('Falha de rede.');});};"
            # A MESMA bolha de mídia do _midia_html, pro que chega pelo polling. O
            # arquivo não está no nosso disco: o src busca no CDN e decifra na hora, e
            # o loading=lazy faz a foto que ninguém abre não custar nada.

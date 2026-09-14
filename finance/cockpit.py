@@ -718,6 +718,11 @@ def enviar_mensagem(pool, conta_id: int, membro_id: int, lead_id: int, texto: st
         numero = (p[0] or p[1] or "") if p else ""
         if not numero:
             return {"ok": False, "erro": "Lead sem número de WhatsApp."}
+        # O ENSAIO DA TRAVA DA INSISTÊNCIA (migração 257). Em 'observando' ele só
+        # CONTA o que teria pedido justificativa — a mensagem sai igual. Fica antes
+        # do envio porque é o que ele mede: a tentativa, não o lead parado.
+        from finance import funil_trava as _tv
+        _tv.registrar(c, conta_id, lead_id, membro_id)
         # responde pelo mesmo chip que recebeu. `_conversa_id` já é chamado logo
         # abaixo pra gravar no inbox; aqui ele vem antes porque o chip precisa ser
         # decidido ANTES do envio.

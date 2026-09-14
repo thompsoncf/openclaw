@@ -30,7 +30,9 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   atualizado_em timestamptz default now(), criado_em timestamptz default now(),
   constraint uq_prospeccao_conta_cnpj unique (conta_id, cnpj),
   constraint uq_prospeccao_conta_cpf unique (conta_id, cpf));
-create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
+create table funil_etapas (id bigserial primary key,
+  -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
+  semeado_de text, conta_id bigint, chave text,
   rotulo text, ordem int default 0, fixa boolean default false,
   -- migração 238: a etapa que o quadro comercial não mostra
   sai_do_quadro boolean not null default false,

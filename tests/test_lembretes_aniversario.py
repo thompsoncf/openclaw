@@ -37,7 +37,9 @@ create table membros (id bigserial primary key, conta_id bigint, nome text, emai
   papel text default 'vendedor', ativo boolean default true,
   cockpit_push_ativo boolean default true);
 -- o filtro de "lead ainda em jogo" pergunta pela fase da etapa (migração 177)
-create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
+create table funil_etapas (id bigserial primary key,
+  -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
+  semeado_de text, conta_id bigint, chave text, rotulo text,
   ordem int default 0, fixa boolean default false, fase text not null default 'venda');
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text, contato text, status text default 'novo', estagio text default 'lead',

@@ -57,7 +57,9 @@ create table funil_avisos (id bigserial primary key, conta_id bigint, prospeccao
   membro_id bigint, criado_em timestamptz default now());
 create unique index uq_funil_aviso on funil_avisos
   (prospeccao_id, estado, nivel, etapa, ref_em, simulado);
-create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
+create table funil_etapas (id bigserial primary key,
+  -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
+  semeado_de text, conta_id bigint, chave text,
   rotulo text, ordem int default 0, fixa boolean default false, fase text default 'venda',
   prazo_min integer, gatilho text, gatilho_ativo boolean default false);
 create table funil_regua (conta_id bigint primary key,
@@ -94,6 +96,8 @@ def pool():
         c.execute((MIG / "235_motivos_de_perda_da_conta.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "236_reativar_o_lead_que_volta.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "238_etapa_sai_do_quadro.sql").read_text(encoding="utf-8"))
+        # 254: `semeado_de` — de onde veio o rótulo (semente do ramo × dono)
+        c.execute((MIG / "254_funil_semeado_de.sql").read_text(encoding="utf-8"))
         for ch, o in _ETAPAS:
             c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem)
                          values (%s,%s,%s,%s)""", (CONTA, ch, ch.capitalize(), o))

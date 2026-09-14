@@ -38,6 +38,9 @@ from datetime import datetime, timezone
 
 _log = logging.getLogger("openclaw.funil_perda")
 
+#: o mesmo vazio de `funil_modelo.DO_DONO` — "o nome é do dono, não da semente"
+_DO_DONO = ""
+
 
 # ------------------------------------------------------------------ a lista
 
@@ -56,16 +59,120 @@ def motivos(c, conta_id: int, perfil_chave: str = "recorrente",
         semente = _rxp.semente_motivos(perfil_chave)
         for i, (chave, rotulo, exige) in enumerate(semente):
             c.execute("""insert into funil_motivos_perda
-                           (conta_id, chave, rotulo, ordem, exige_descricao)
-                         values (%s,%s,%s,%s,%s)
+                           (conta_id, chave, rotulo, ordem, exige_descricao, semeado_de)
+                         values (%s,%s,%s,%s,%s,%s)
                          on conflict (conta_id, chave) do nothing""",
-                      (conta_id, chave, rotulo, i * 10, exige))
+                      (conta_id, chave, rotulo, i * 10, exige, perfil_chave))
     linhas = c.execute(
         "select chave, rotulo, ordem, ativo, exige_descricao, id from funil_motivos_perda "
         " where conta_id=%s " + (" and ativo " if so_ativos else "") +
         " order by ordem, id", (conta_id,)).fetchall()
     return [{"chave": r[0], "rotulo": r[1], "ordem": r[2], "ativo": r[3],
              "exige_descricao": r[4], "id": r[5]} for r in linhas]
+
+
+# ------------------------------------------------- o modelo do ramo, pros motivos
+#
+# As ETAPAS já tinham isto desde 11/09 (`finance.funil_modelo.plano`). Os motivos
+# não tinham nada: quem trocasse de ramo — ou quem tivesse aberto a tela antes de
+# escolher o ramo — ficava com a lista errada e sem caminho de volta. Medido em
+# 14/09/2026: 4 das 8 contas com funil tinham ZERO motivo, e a Liberal (37, seguros)
+# tinha os 8 do recorrente, sem "Renovou direto com a seguradora".
+#
+# Mesma forma do plano das etapas, e pelos mesmos motivos: propõe, não aplica;
+# nunca apaga (motivo fora do modelo é proposto pra DESLIGAR, e o histórico de quem
+# foi perdido por ele continua lendo o rótulo); e o que o dono renomeou vem
+# desmarcado.
+
+def plano_motivos(c, conta_id: int, perfil_chave: str) -> list[dict]:
+    """O que o modelo do ramo mudaria na lista de motivos. Vazia = já está igual."""
+    from finance import raio_x_perfil as _rxp
+    from finance.funil_modelo import DO_DONO
+    atuais = {r[0]: {"rotulo": r[1], "ativo": r[2], "semeado_de": r[3], "id": r[4]}
+              for r in c.execute(
+                  """select chave, rotulo, ativo, semeado_de, id
+                       from funil_motivos_perda where conta_id=%s""",
+                  (conta_id,)).fetchall()}
+    modelo = _rxp.semente_motivos(perfil_chave)
+    do_modelo = {m[0] for m in modelo}
+    itens = []
+    for chave, rotulo, _exige in modelo:
+        cur = atuais.get(chave)
+        if cur is None:
+            itens.append({"id": f"criar:{chave}", "acao": "criar", "chave": chave,
+                          "para": rotulo, "marcado": True,
+                          "texto": f"acrescentar “{rotulo}”", "nota": ""})
+            continue
+        if not cur["ativo"]:
+            itens.append({"id": f"ligar:{chave}", "acao": "ligar", "chave": chave,
+                          "para": True, "marcado": False,
+                          "texto": f"reativar “{cur['rotulo']}”",
+                          "nota": "você desligou este motivo — marque só se quiser de volta"})
+        if (cur["rotulo"] or "") != rotulo:
+            a_mao = (cur["semeado_de"] or DO_DONO) == DO_DONO
+            itens.append({"id": f"rotulo:{chave}", "acao": "rotulo", "chave": chave,
+                          "para": rotulo, "marcado": not a_mao,
+                          "texto": f"chamar “{cur['rotulo']}” de “{rotulo}”",
+                          "nota": ("você já renomeou este motivo — marque só se quiser "
+                                   "o nome do ramo" if a_mao else "")})
+    for chave, cur in atuais.items():
+        if chave in do_modelo or not cur["ativo"]:
+            continue
+        itens.append({"id": f"desligar:{chave}", "acao": "desligar", "chave": chave,
+                      "para": False, "marcado": False,
+                      "texto": f"desligar “{cur['rotulo']}” (não existe no modelo do ramo)",
+                      "nota": "some da lista de escolha; quem já foi perdido por ele "
+                              "continua mostrando o motivo na ficha"})
+    return itens
+
+
+def aplicar_motivos(c, conta_id: int, perfil_chave: str, aceitas) -> dict:
+    """Aplica os itens marcados. O plano é RECALCULADO aqui, não recebido da tela —
+    mesma razão de `funil_modelo.aplicar`: formulário velho manda id que já não vale."""
+    from finance import raio_x_perfil as _rxp
+    aceitas = set(aceitas or ())
+    feito = {"criar": 0, "rotulo": 0, "ligar": 0, "desligar": 0}
+    modelo = {m[0]: m for m in _rxp.semente_motivos(perfil_chave)}
+    ordens = {m[0]: i * 10 for i, m in enumerate(_rxp.semente_motivos(perfil_chave))}
+    for it in plano_motivos(c, conta_id, perfil_chave):
+        if it["id"] not in aceitas:
+            continue
+        acao, chave = it["acao"], it["chave"]
+        if acao == "criar":
+            m = modelo[chave]
+            c.execute("""insert into funil_motivos_perda
+                           (conta_id, chave, rotulo, ordem, exige_descricao, semeado_de)
+                         values (%s,%s,%s,%s,%s,%s)
+                         on conflict (conta_id, chave) do nothing""",
+                      (conta_id, chave, m[1], ordens[chave], m[2], perfil_chave))
+        elif acao == "rotulo":
+            c.execute("""update funil_motivos_perda set rotulo=%s, semeado_de=%s
+                          where conta_id=%s and chave=%s""",
+                      (it["para"], perfil_chave, conta_id, chave))
+        elif acao in ("ligar", "desligar"):
+            c.execute("update funil_motivos_perda set ativo=%s where conta_id=%s and chave=%s",
+                      (acao == "ligar", conta_id, chave))
+        feito[acao] += 1
+    return feito
+
+
+def carimbar_motivos(c, conta_id: int) -> int:
+    """O carimbo das linhas anteriores à 254 — irmão de `funil_modelo.carimbar`,
+    com a mesma regra: rótulo que bate com alguma semente conhecida é 'semente'; o
+    que não bate com nenhuma foi o dono que escreveu."""
+    from finance import raio_x_perfil as _rxp
+    from finance.funil_modelo import DO_DONO
+    linhas = c.execute(
+        """select id, chave, rotulo from funil_motivos_perda
+            where conta_id=%s and semeado_de is null""", (conta_id,)).fetchall()
+    for mid, chave, rotulo in linhas:
+        conhecidos = set()
+        for perfil in _rxp.PERFIS:
+            conhecidos |= {r for ch, r, _e in _rxp.semente_motivos(perfil) if ch == chave}
+        conhecidos |= {r for ch, r in _rxp.MOTIVOS_TODOS if ch == chave}
+        c.execute("update funil_motivos_perda set semeado_de=%s where id=%s",
+                  ("semente" if (rotulo or "") in conhecidos else DO_DONO, mid))
+    return len(linhas)
 
 
 def exige_motivo(c, conta_id: int, etapa: str) -> bool:
@@ -164,11 +271,18 @@ def salvar_motivo(c, conta_id: int, *, chave: str = "", rotulo: str = "",
     """
     rot = (rotulo or "").strip()[:80]
     if motivo_id:
+        # RENOMEAR LIMPA O CARIMBO (migração 254): a partir daqui o nome é do dono,
+        # e o bloco "o modelo do seu ramo" para de propor trocá-lo sem ele marcar.
+        # Só o RÓTULO carimba — mudar ordem, ativo ou exigência não é dar nome.
         cur = c.execute("""update funil_motivos_perda
                               set rotulo = coalesce(nullif(%s,''), rotulo), ordem=%s,
-                                  ativo=%s, exige_descricao=%s
+                                  ativo=%s, exige_descricao=%s,
+                                  semeado_de = case when nullif(%s,'') is null
+                                                     or rotulo = %s then semeado_de
+                                                    else %s end
                             where id=%s and conta_id=%s returning chave""",
-                        (rot, ordem, ativo, exige_descricao, motivo_id, conta_id)).fetchone()
+                        (rot, ordem, ativo, exige_descricao,
+                         rot, rot, _DO_DONO, motivo_id, conta_id)).fetchone()
         return {"ok": bool(cur), "chave": cur[0] if cur else None} if cur else {
             "ok": False, "erro": "nao_encontrado"}
     if not rot:

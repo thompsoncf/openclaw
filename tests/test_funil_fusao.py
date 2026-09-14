@@ -25,7 +25,9 @@ _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
   contato text, status text default 'novo', estagio text default 'lead',
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
-create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
+create table funil_etapas (id bigserial primary key,
+  -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
+  semeado_de text, conta_id bigint, chave text,
   rotulo text, ordem int not null default 0, fixa boolean not null default false,
   sai_do_quadro boolean not null default false, unique (conta_id, chave));
 create table funil_movimentos (id bigserial primary key, conta_id bigint,

@@ -46,13 +46,15 @@ from finance import raio_x_perfil as _rxp
 #: o que o modelo pode mudar numa etapa que já existe. Ordem = ordem na tela.
 ACOES = ("criar", "rotulo", "ordem", "quadro", "agenda")
 
-_COLS = ("id", "chave", "rotulo", "ordem", "fixa", "sai_do_quadro", "agenda_ao_entrar")
+_COLS = ("id", "chave", "rotulo", "ordem", "fixa", "sai_do_quadro", "agenda_ao_entrar",
+         "semeado_de")
 
 
 def _atuais(c, conta_id: int) -> dict:
     linhas = c.execute(
         """select id, chave, rotulo, ordem, fixa,
-                  coalesce(sai_do_quadro,false), coalesce(agenda_ao_entrar,false)
+                  coalesce(sai_do_quadro,false), coalesce(agenda_ao_entrar,false),
+                  semeado_de
              from funil_etapas where conta_id=%s order by ordem, id""",
         (conta_id,)).fetchall()
     return {r[1]: dict(zip(_COLS, r)) for r in linhas}
@@ -66,31 +68,114 @@ def _leads(c, conta_id: int) -> dict:
 
 def semear(c, conta_id: int, chave_perfil: str) -> int:
     """Grava as etapas do modelo do ramo. Só faz sentido em conta sem etapa nenhuma;
-    o `on conflict do nothing` garante que chamar de novo não reescreve nada."""
+    o `on conflict do nothing` garante que chamar de novo não reescreve nada.
+
+    `semeado_de` (migração 254) carimba de qual perfil cada linha veio. É o que
+    depois deixa `plano` saber que o rótulo não foi o dono que deu — sem isso ele
+    adivinhava por comparação de texto e errava em toda conta semeada por um perfil
+    diferente do atual (a Liberal, conta 37, em 14/09/2026).
+    """
     n = 0
     for chave, rotulo, ordem, fixa, sai, agenda in _rxp.etapas_padrao(chave_perfil):
         n += c.execute(
             """insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa,
-                                         sai_do_quadro, agenda_ao_entrar)
-                    values (%s,%s,%s,%s,%s,%s,%s)
+                                         sai_do_quadro, agenda_ao_entrar, semeado_de)
+                    values (%s,%s,%s,%s,%s,%s,%s,%s)
                on conflict (conta_id, chave) do nothing""",
-            (conta_id, chave, rotulo, ordem, fixa, sai, agenda)).rowcount
+            (conta_id, chave, rotulo, ordem, fixa, sai, agenda, chave_perfil)).rowcount
     return n
 
 
-def _generico(chave: str) -> str | None:
-    """O rótulo que esta chave teria no funil genérico — o que a conta recebeu ao
-    nascer, antes de o modelo por ramo existir. Serve pra distinguir "nunca mexeu"
-    de "renomeou à mão": só o primeiro caso é renomeado sem perguntar duas vezes."""
-    for ch, rot, *_ in _rxp.ETAPAS_GENERICAS:
-        if ch == chave:
-            return rot
-    return None
+#: o que `semeado_de` guarda quando foi o DONO que escreveu o rótulo. Vazio e não
+#: NULL de propósito: NULL quer dizer "ainda não sei" (linha anterior à 254), e as
+#: duas coisas pedem tratamento oposto em `plano`.
+DO_DONO = ""
+
+
+def _rotulos_de_semente(chave: str) -> set:
+    """Todo rótulo que esta etapa já pôde receber de uma semente — de qualquer
+    perfil, mais o genérico de antes de 11/09.
+
+    Serve pro CARIMBO das linhas antigas, e a pergunta que ele responde é binária:
+    "este nome saiu de uma semente ou o dono escreveu?". Por isso não interessa
+    QUAL perfil — 'Novo' e 'Proposta' são iguais em todos, e escolher um deles seria
+    inventar precisão que a resposta não precisa.
+    """
+    fora = {rot for ch, rot, *_ in _rxp.ETAPAS_GENERICAS if ch == chave}
+    for perfil in _rxp.PERFIS:
+        fora |= {rot for ch, rot, *_ in _rxp.etapas_padrao(perfil) if ch == chave}
+    return fora
+
+
+def carimbar(c, conta_id: int) -> int:
+    """Preenche `semeado_de` das linhas que nasceram antes da migração 254.
+
+    Roda na leitura, uma vez por conta, pelo mesmo motivo da semente: a migração não
+    conhece os modelos (eles são Python) e transcrevê-los em SQL criaria uma segunda
+    verdade. Devolve quantas linhas carimbou.
+
+    A REGRA: rótulo que bate com alguma semente conhecida vira `'semente'`; o que não
+    bate com nenhuma foi o dono que escreveu, e vira `DO_DONO`. Carimbar de menos
+    (achar que foi o dono) é o erro seguro — só faz a proposta vir desmarcada, que é
+    como era antes.
+    """
+    linhas = c.execute(
+        """select id, chave, rotulo from funil_etapas
+            where conta_id=%s and semeado_de is null""", (conta_id,)).fetchall()
+    for eid, chave, rotulo in linhas:
+        de_semente = (rotulo or "") in _rotulos_de_semente(chave)
+        c.execute("update funil_etapas set semeado_de=%s where id=%s",
+                  ("semente" if de_semente else DO_DONO, eid))
+    return len(linhas)
+
+
+def foi_o_dono(cur: dict) -> bool:
+    """O rótulo desta etapa foi o DONO que escreveu?
+
+    ERA UM PALPITE, E O PALPITE ERRAVA. Até 14/09/2026 esta pergunta se respondia
+    comparando o rótulo com `ETAPAS_GENERICAS`, a lista de antes de 11/09 — e desde
+    11/09 as contas nascem semeadas PELO PERFIL. Resultado: todo rótulo vindo de uma
+    semente que não fosse a genérica passava por apelido do dono. A Liberal (conta
+    37) recebeu "Reunião marcada" do próprio sistema e a tela ia lhe dizer "você já
+    renomeou esta etapa".
+
+    Agora é `semeado_de` (migração 254), que é fato gravado. NULL — linha que o
+    carimbo ainda não alcançou — responde True, o lado seguro: no máximo a proposta
+    vem desmarcada, que é exatamente como era antes.
+    """
+    return (cur.get("semeado_de") or DO_DONO) == DO_DONO
 
 
 def _item(acao, chave, *, de, para, leads=0, marcado=True, texto="", nota=""):
     return {"id": f"{acao}:{chave}", "acao": acao, "chave": chave, "de": de,
             "para": para, "leads": leads, "marcado": marcado, "texto": texto, "nota": nota}
+
+
+def desencontro(c, conta_id: int, chave_perfil: str) -> int:
+    """Quantas colunas o ramo mudaria SEM passar por cima de escolha do dono.
+
+    É o número da faixa no topo do funil. Zero = não avisa nada.
+
+    O QUE ELE NÃO CONTA, e é o ponto: linha que o dono nomeou (`semeado_de` vazio).
+    A Prime chama 'ganho' de "Evento Realizado" há meses; uma faixa dizendo que o
+    funil dela "não está no modelo" seria mentira e viraria ruído diário até ela
+    aprender a ignorar — que é como se estraga um aviso.
+
+    Barato: uma consulta de meia dúzia de linhas e uma comparação em memória. Roda no
+    quadro, que é a tela mais aberta do sistema, então não monta o plano inteiro.
+    """
+    modelo = {ch: rot for ch, rot, *_ in _rxp.etapas_padrao(chave_perfil)}
+    linhas = c.execute(
+        "select chave, rotulo, semeado_de from funil_etapas where conta_id=%s",
+        (conta_id,)).fetchall()
+    tem = {r[0] for r in linhas}
+    n = sum(1 for ch in modelo if ch not in tem)
+    for chave, rotulo, semeado in linhas:
+        if (semeado or DO_DONO) == DO_DONO:
+            continue
+        if chave in modelo and (rotulo or "") != modelo[chave]:
+            n += 1
+    return n
 
 
 def plano(c, conta_id: int, chave_perfil: str) -> list[dict]:
@@ -117,7 +202,7 @@ def plano(c, conta_id: int, chave_perfil: str) -> list[dict]:
             continue
         if (cur["rotulo"] or "") != rotulo:
             # rótulo que a conta já trocou à mão não é reescrito sem o dono marcar
-            a_mao = (cur["rotulo"] or "") != (_generico(chave) or "")
+            a_mao = foi_o_dono(cur)
             itens.append(_item(
                 "rotulo", chave, de=cur["rotulo"], para=rotulo,
                 leads=nleads.get(chave, 0), marcado=not a_mao,
@@ -188,13 +273,16 @@ def aplicar(c, conta_id: int, chave_perfil: str, aceitas) -> dict:
         if acao == "criar":
             m = next(x for x in _rxp.etapas_padrao(chave_perfil) if x[0] == chave)
             c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa,
-                                                   sai_do_quadro, agenda_ao_entrar)
-                              values (%s,%s,%s,%s,%s,%s,%s)
+                                                   sai_do_quadro, agenda_ao_entrar,
+                                                   semeado_de)
+                              values (%s,%s,%s,%s,%s,%s,%s,%s)
                          on conflict (conta_id, chave) do nothing""",
-                      (conta_id, m[0], m[1], m[2], m[3], m[4], m[5]))
+                      (conta_id, m[0], m[1], m[2], m[3], m[4], m[5], chave_perfil))
         elif acao == "rotulo":
-            c.execute("update funil_etapas set rotulo=%s where conta_id=%s and chave=%s",
-                      (it["para"], conta_id, chave))
+            # re-carimba: o nome passou a ser o do modelo, não mais o que estava
+            c.execute("""update funil_etapas set rotulo=%s, semeado_de=%s
+                          where conta_id=%s and chave=%s""",
+                      (it["para"], chave_perfil, conta_id, chave))
         elif acao == "ordem":
             c.execute("update funil_etapas set ordem=%s where conta_id=%s and chave=%s",
                       (int(it["para"]), conta_id, chave))

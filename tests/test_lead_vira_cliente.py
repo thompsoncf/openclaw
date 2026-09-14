@@ -74,7 +74,9 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_i
   sinal_centavos int, tipo_evento text, convidados int,
   hora_sugerida boolean default false,
   cliente_id bigint, sem_cliente boolean not null default false);
-create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
+create table funil_etapas (id bigserial primary key,
+  -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
+  semeado_de text, conta_id bigint, chave text,
   -- migração 238: a etapa que o quadro comercial não mostra
   sai_do_quadro boolean not null default false,
   agenda_ao_entrar boolean not null default false,

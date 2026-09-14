@@ -25,7 +25,9 @@ _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
   contato text, status text default 'novo', estagio text default 'lead',
   criado_em timestamptz default now());
-create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
+create table funil_etapas (id bigserial primary key,
+  -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
+  semeado_de text, conta_id bigint, chave text,
   rotulo text, ordem int not null default 0, fixa boolean not null default false,
   unique (conta_id, chave));
 """
@@ -47,6 +49,10 @@ def pool():
         # a migração de verdade das duas caixas: é o que faz o teste perceber que
         # ela não chegou, em vez de fingir um schema que produção não tem
         c.execute((MIG / "238_etapa_sai_do_quadro.sql").read_text(encoding="utf-8"))
+        # 235 antes da 254: é ela que cria `funil_motivos_perda`, que a 254 altera
+        c.execute((MIG / "235_motivos_de_perda_da_conta.sql").read_text(encoding="utf-8"))
+        # 254: `semeado_de` — de onde veio o rótulo (semente do ramo × dono)
+        c.execute((MIG / "254_funil_semeado_de.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -72,12 +78,19 @@ def _por(pool, chave, conta=CONTA):
     return {r[0]: r for r in _etapas(pool, conta)}[chave]
 
 
-def _generico(pool, conta=CONTA):
-    """A conta como ela nascia ANTES do modelo por ramo: as seis genéricas."""
+def _generico(pool, conta=CONTA, carimbar=True):
+    """A conta como ela nascia ANTES do modelo por ramo: as seis genéricas.
+
+    `semeado_de` fica NULL na inserção de propósito — é assim que a linha antiga
+    está no banco de verdade — e o `carimbar` reproduz o que a primeira leitura da
+    tela faz depois da migração 254.
+    """
     with pool.connection() as c:
         for ch, rot, ordem, fixa, _s, _a in rxp.ETAPAS_GENERICAS:
             c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa)
                          values (%s,%s,%s,%s,%s)""", (conta, ch, rot, ordem, fixa))
+        if carimbar:
+            fm.carimbar(c, conta)
         c.commit()
 
 
@@ -241,10 +254,14 @@ def test_rotulo_que_o_dono_trocou_a_mao_vem_desmarcado(limpo):
     """A conta 3 chama 'perdido' de "Entregue" e a 34 chama 'ganho' de "Evento
     Realizado". Renomear isso sozinho apagaria uma decisão de quem usa a tela todo
     dia, em nome de um padrão que ninguém pediu."""
-    _generico(limpo)
+    _generico(limpo, carimbar=False)
     with limpo.connection() as c:
         c.execute("update funil_etapas set rotulo='Entregue' where conta_id=%s and chave='perdido'",
                   (CONTA,))
+        # o carimbo depois do apelido: é a ordem real: a conta renomeou meses atrás e
+        # só agora a 254 chegou. "Entregue" não bate com semente nenhuma -> do dono;
+        # "Qualificado" bate com a genérica -> semente.
+        fm.carimbar(c, CONTA)
         c.commit()
         itens = {i["id"]: i for i in fm.plano(c, CONTA, "eventos")}
     assert itens["rotulo:perdido"]["marcado"] is False

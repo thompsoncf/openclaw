@@ -72,9 +72,12 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now());
-create table orcamentos (id bigserial primary key, cliente text, status text default 'rascunho',
+create table orcamentos (id bigserial primary key, cliente text, empresa text, numero int,
+  cliente_id bigint, status text default 'rascunho',
   primeiro_ano_centavos bigint default 0, mensal_centavos bigint default 0, setup_centavos bigint default 0,
   itens jsonb, criado_em timestamptz default now(), aprovada_em timestamptz, sinal_pago_em timestamptz);
+-- ver o comentário gêmeo em tests/test_raio_x.py
+create table clientes (id bigserial primary key, conta_id bigint, nome text);
 create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
   status text default 'enviado', valor_centavos bigint, assinado_em timestamptz,
   enviado_em timestamptz, criado_em timestamptz default now());

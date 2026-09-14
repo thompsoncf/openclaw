@@ -35,6 +35,43 @@ from zoneinfo import ZoneInfo
 _log = logging.getLogger("finance.raio_x")
 _TZ = ZoneInfo("America/Sao_Paulo")
 
+#: OS CAMPOS CRUS DO NOME de um orçamento, na ordem que `vendas.nome_do_orcamento`
+#: espera. Sai cru do SQL de propósito: qual campo vale é regra de NEGÓCIO e mora
+#: no Python, onde já está testada e onde o filtro de telefone existe.
+#:
+#: Até 14/09/2026 cada consulta daqui resolvia o nome sozinha, com
+#: `coalesce(nullif(o.cliente,''), p.contato, p.empresa, 'cliente')` repetido em
+#: cinco lugares. Duas coisas erradas no mesmo trecho: começava pelo campo que
+#: menos se pode confiar (`cliente`, onde se digita qualquer coisa) e não tinha
+#: guarda nenhuma contra telefone. Resultado em produção: o bloco "Aprovado,
+#: esperando assinatura" mostrava `86998192489` no lugar de "Josiany Rayra Soares
+#: dos Santos", que estava logo ali em `empresa` e no cadastro.
+#:
+#: `{o}` é o apelido da tabela de orçamentos na consulta (`o` ou `o2`). Os campos
+#: vão APELIDADOS porque um deles entra num CTE, e ali `{o}.empresa` e `p.empresa`
+#: colidiriam num `empresa` ambíguo — o Python lê por posição, então o apelido não
+#: custa nada nas outras e salva esta.
+_SQL_NOME = ("cl.nome as n_cadastro, {o}.empresa as n_empresa, {o}.cliente as n_cliente, "
+             "{o}.numero as n_numero, p.contato as n_contato, p.empresa as n_lead_empresa")
+#: os mesmos campos pra repetir num `group by` (apelido não serve lá sem ambiguidade)
+_SQL_NOME_GRUPO = "cl.nome, {o}.empresa, {o}.cliente, {o}.numero, p.contato, p.empresa"
+#: e os apelidos, pra reler do CTE
+_SQL_NOME_ALIAS = "n_cadastro, n_empresa, n_cliente, n_numero, n_contato, n_lead_empresa"
+#: o join que traz o cadastro — sempre LEFT: orçamento sem cliente ligado é comum
+#: e não pode sumir da lista por causa do nome.
+_SQL_NOME_JOIN = "left join clientes cl on cl.id = {o}.cliente_id"
+
+
+def _nome_do(campos) -> str:
+    """Os seis campos de `_SQL_NOME`, na ordem, viram o nome que a tela mostra.
+
+    Um lugar só pra desempacotar, pra que acrescentar um campo à consulta não
+    exija lembrar de mudar cinco laços."""
+    from finance import vendas as _vd
+    cad, emp, cli, num, contato, lead_emp = campos
+    return _vd.nome_do_orcamento(cadastro=cad, empresa=emp, cliente=cli, numero=num,
+                                 lead_contato=contato, lead_empresa=lead_emp)
+
 #: 1ª resposta ao lead novo: a meta do mercado (Chili Piper, InsideSales, e 63%
 #: dos brasileiros esperam isso no WhatsApp — Maxbot/Unnica).
 META_PRIMEIRA_MIN = 5
@@ -205,14 +242,15 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
         # pra quem — pra saber, era abrir Serviços e procurar. `orcamento_id` vai
         # pro deep-link que Serviços já aceita (?abrir=), `conversa_id`/`canal` pro
         # que Comunicação já aceita — os dois já existiam pra outras telas.
-        rascunhos_itens = c.execute("""
-            select coalesce(nullif(o.cliente, ''), p.contato, p.empresa, 'cliente'), o.id, o.criado_em,
+        rascunhos_itens = c.execute(f"""
+            select {_SQL_NOME.format(o='o')}, o.id, o.criado_em,
                    coalesce(nullif(p.whatsapp, ''), nullif(p.telefone, ''), ''),
                    (select cv.id from conversas cv where cv.prospeccao_id = p.id
                      order by (cv.canal = 'whatsapp') desc, cv.criado_em desc limit 1),
                    (select cv.canal from conversas cv where cv.prospeccao_id = p.id
                      order by (cv.canal = 'whatsapp') desc, cv.criado_em desc limit 1)
               from orcamentos o join prospeccao p on p.orcamento_id = o.id
+              {_SQL_NOME_JOIN.format(o='o')}
              where p.conta_id = %s and p.vendedor_id = %s and o.status = 'rascunho'
              order by o.criado_em limit 8""", (conta_id, membro_id)).fetchall()
         # toque = mensagem nossa mandada quando a anterior da conversa também era
@@ -248,42 +286,73 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
         # não dizia se era a Beatriz ou a Larissa — o dono tinha que abrir a Fila e
         # procurar quem não teve resposta. `conversa_id` vai direto pro deep-link
         # que Comunicação já usa (?abrir=).
-        paradas_itens = c.execute("""
+        paradas_itens = c.execute(f"""
             with in_ as (
               select cv.id as cid, cv.canal,
-                     coalesce(nullif(o2.cliente, ''), p.contato, p.empresa, 'cliente') as nome,
+                     {_SQL_NOME.format(o='o2')},
                      coalesce(nullif(p.whatsapp, ''), nullif(p.telefone, ''), '') as fone,
                      max(ms.criado_em) filter (where ms.direcao = 'in') as ult_in,
                      max(ms.criado_em) as ult
                 from conversas cv join prospeccao p on p.id = cv.prospeccao_id
                 join mensagens ms on ms.conversa_id = cv.id
                 left join orcamentos o2 on o2.id = p.orcamento_id
+                {_SQL_NOME_JOIN.format(o='o2')}
                where cv.conta_id = %s and p.vendedor_id = %s and p.status = any(%s)
-               group by cv.id, cv.canal, o2.cliente, p.contato, p.empresa, p.whatsapp, p.telefone)
-            select nome, cid, canal, ult, fone from in_
+               group by cv.id, cv.canal, {_SQL_NOME_GRUPO.format(o='o2')},
+                        p.whatsapp, p.telefone)
+            select {_SQL_NOME_ALIAS}, cid, canal, ult, fone from in_
              where ult > coalesce(ult_in, '2000-01-01') and ult < %s - interval '24 hours'
                and (select count(*) from mensagens m where m.conversa_id = in_.cid
                       and m.direcao = 'out' and m.criado_em > coalesce(in_.ult_in, '2000-01-01')) = 1
              order by ult limit 8""",
             (conta_id, membro_id, list(ABERTOS), fim)).fetchall()
-        assinados = c.execute("""
-            select coalesce(nullif(o.cliente, ''), p.contato, p.empresa, 'cliente'), c.valor_centavos, c.assinado_em
+        assinados = c.execute(f"""
+            select {_SQL_NOME.format(o='o')}, c.valor_centavos, c.assinado_em
               from contratos c join orcamentos o on o.id = c.orcamento_id
               join prospeccao p on p.orcamento_id = o.id
+              {_SQL_NOME_JOIN.format(o='o')}
              where c.conta_id = %s and p.vendedor_id = %s and c.status = 'assinado'
                and c.assinado_em >= %s and c.assinado_em < %s
              order by c.assinado_em desc""", (conta_id, membro_id, ini, fim)).fetchall()
-        sem_assinar = c.execute("""
-            select coalesce(nullif(o.cliente, ''), p.contato, p.empresa, 'cliente'), o.primeiro_ano_centavos,
+        # OS DOIS DOCUMENTOS, e de quem é a bola. O bloco trazia só "aprovado há N
+        # dias" e nem olhava a tabela `contratos` — checava apenas que não havia um
+        # assinado. Com isso juntava dois estados opostos sob o mesmo rótulo:
+        # contrato que o cliente recebeu e não assinou, e contrato que nunca saiu
+        # daqui. Ver docs/mockups/raio_x_assinado_e_falta.html.
+        #
+        # `ct.enviado_em` E NÃO `ct.status`: a coluna nasce 'enviado' por padrão, e
+        # em 14/09/2026 o contrato nº 8 da conta 34 estava `status='enviado'` com
+        # `enviado_em` NULO — nunca mandado. Quem manda é a data. É a mesma leitura
+        # que `vendas.linha_do_funil` já fazia (`contrato_enviado_em`).
+        sem_assinar = c.execute(f"""
+            select {_SQL_NOME.format(o='o')}, o.primeiro_ano_centavos,
                    o.aprovada_em, o.id, coalesce(nullif(p.whatsapp, ''), nullif(p.telefone, ''), ''),
                    (select cv.id from conversas cv where cv.prospeccao_id = p.id
                      order by (cv.canal = 'whatsapp') desc, cv.criado_em desc limit 1),
                    (select cv.canal from conversas cv where cv.prospeccao_id = p.id
-                     order by (cv.canal = 'whatsapp') desc, cv.criado_em desc limit 1)
+                     order by (cv.canal = 'whatsapp') desc, cv.criado_em desc limit 1),
+                   o.aprovada_por, ct.numero, ct.criado_em, ct.enviado_em
               from orcamentos o join prospeccao p on p.orcamento_id = o.id
+              {_SQL_NOME_JOIN.format(o='o')}
+              left join contratos ct on ct.orcamento_id = o.id and ct.status <> 'cancelado'
              where p.conta_id = %s and p.vendedor_id = %s and o.aprovada_em is not null
                and not exists (select 1 from contratos c where c.orcamento_id = o.id and c.status = 'assinado')
              order by o.aprovada_em""", (conta_id, membro_id)).fetchall()
+        # PARADO EM CASA: quanto o contrato fica pronto aqui dentro antes de ir pro
+        # cliente. Nasceu de uma medição da conta 34 em 14/09/2026 — nos 6 contratos
+        # assinados, 35 dias somados parados em casa contra 1 dia esperando o
+        # cliente. Todos assinaram no mesmo dia em que receberam. O número que
+        # faltava era este, e ele torna os 35 visíveis antes de virarem 35.
+        #
+        # Mede os ENVIADOS na janela (não os assinados): é o envio que fecha a
+        # espera, e contrato mandado e não assinado também já pagou esse tempo.
+        parado = c.execute("""
+            select extract(day from (ct.enviado_em - ct.criado_em))::int
+              from contratos ct join orcamentos o on o.id = ct.orcamento_id
+              join prospeccao p on p.orcamento_id = o.id
+             where ct.conta_id = %s and p.vendedor_id = %s and ct.enviado_em is not null
+               and ct.enviado_em >= %s and ct.enviado_em < %s""",
+            (conta_id, membro_id, ini, fim)).fetchall()
     n_5 = sum(1 for m in resp if m <= META_PRIMEIRA_MIN)
 
     def _aba(canal):
@@ -297,21 +366,63 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
         "primeira_min_anterior": _mediana(resp_ant),
         "propostas_enviadas": int(enviadas), "rascunhos": int(rascunhos),
         "rascunho_dias": ((fim - rascunho_mais_velho).days if rascunho_mais_velho else 0),
-        "rascunhos_itens": [{"nome": n, "orcamento_id": oid, "dias": (fim - em).days if em else 0,
+        "rascunhos_itens": [{"nome": _nome_do(nm), "orcamento_id": oid, "dias": (fim - em).days if em else 0,
                              "fone": fmt_fone(fone), "conversa_id": cid, "aba": _aba(canal)}
-                            for n, oid, em, fone, cid, canal in rascunhos_itens],
+                            for *nm, oid, em, fone, cid, canal in rascunhos_itens],
         "toques": int(toques), "paradas_1a": int(paradas),
-        "paradas_1a_itens": [{"nome": n, "conversa_id": cid, "aba": _aba(canal),
+        "paradas_1a_itens": [{"nome": _nome_do(nm), "conversa_id": cid, "aba": _aba(canal),
                               "fone": fmt_fone(fone),
                               "horas": int((fim - ult).total_seconds() // 3600)}
-                             for n, cid, canal, ult, fone in paradas_itens],
-        "contratos": [{"nome": n, "valor_centavos": int(v or 0), "em": em} for n, v, em in assinados],
-        "contratos_valor": sum(int(v or 0) for _, v, _ in assinados),
-        "sem_assinar": [{"nome": n, "valor_centavos": int(v or 0), "dias": (fim - em).days if em else 0,
-                         "orcamento_id": oid, "fone": fmt_fone(fone),
-                         "conversa_id": cid, "aba": _aba(canal)}
-                        for n, v, em, oid, fone, cid, canal in sem_assinar],
+                             for *nm, cid, canal, ult, fone in paradas_itens],
+        "contratos": [{"nome": _nome_do(nm), "valor_centavos": int(v or 0), "em": em}
+                      for *nm, v, em in assinados],
+        "contratos_valor": sum(int(r[-2] or 0) for r in assinados),
+        "sem_assinar": _sem_assinar(sem_assinar, fim, _aba),
+        # a mediana do que FICOU PARADO EM CASA, e quantos estão parados agora — o
+        # segundo é o que dói, porque ainda dá pra resolver hoje.
+        "parado_em_casa": _mediana([int(d[0]) for d in parado if d[0] is not None]),
+        "parado_em_casa_n": len(parado),
     }
+
+
+def _sem_assinar(linhas, fim, _aba) -> list[dict]:
+    """Cada aprovado sem contrato assinado, com O ESTADO DOS DOIS DOCUMENTOS.
+
+    `estado` é a pergunta "de quem é a bola", e é ele que agrupa na tela:
+
+      `nunca_enviado`  o contrato existe e não saiu daqui. A BOLA É NOSSA, e o
+                       relógio é o de "parado em casa".
+      `aguardando`     o cliente recebeu e ainda não assinou. A bola é dele.
+      `sem_contrato`   aprovado e o contrato nem foi criado — raro (ele nasce na
+                       aprovação), mas existe em proposta antiga e não pode sumir
+                       da lista por falta de linha em `contratos`.
+
+    `dias` continua sendo o que a linha mostra, mas agora conta do EVENTO CERTO:
+    do envio pra quem foi enviado, da criação do contrato pra quem não foi. Contar
+    da aprovação — como se fazia — dizia "esperando assinatura há 23 dias" de um
+    contrato que tinha saído no dia anterior.
+    """
+    out = []
+    for *nm, v, aprov, oid, fone, cid, canal, aprov_por, ctr_n, ctr_criado, ctr_env in linhas:
+        if ctr_n is None:
+            estado, desde = "sem_contrato", aprov
+        elif ctr_env is None:
+            estado, desde = "nunca_enviado", (ctr_criado or aprov)
+        else:
+            estado, desde = "aguardando", ctr_env
+        out.append({
+            "nome": _nome_do(nm), "valor_centavos": int(v or 0),
+            "dias": (fim - desde).days if desde else 0,
+            "orcamento_id": oid, "fone": fmt_fone(fone),
+            "conversa_id": cid, "aba": _aba(canal),
+            "estado": estado,
+            "aprovada_em": aprov, "aprovada_por": (aprov_por or "").strip(),
+            "contrato_numero": ctr_n, "contrato_enviado_em": ctr_env,
+        })
+    # a bola nossa primeiro: é a única fila que depende só de nós pra andar
+    ordem = {"nunca_enviado": 0, "sem_contrato": 1, "aguardando": 2}
+    out.sort(key=lambda i: (ordem[i["estado"]], -i["dias"]))
+    return out
 
 
 def cor(metrica: str, s: dict) -> str:
@@ -487,8 +598,8 @@ def responda_hoje(pool, conta_id: int, membro_id: int, agora: datetime | None = 
 def fechamentos(pool, conta_id: int, membro_id: int, agora: datetime | None = None) -> dict:
     a = agora_brt(agora)
     with pool.connection() as c:
-        rows = c.execute("""
-            select o.id, coalesce(nullif(o.cliente, ''), p.contato, p.empresa, 'cliente'), o.status,
+        rows = c.execute(f"""
+            select o.id, {_SQL_NOME.format(o='o')}, o.status,
                    o.primeiro_ano_centavos, o.criado_em, o.aprovada_em, o.sinal_pago_em, p.evento_em, p.evento_tipo,
                    c.status, c.assinado_em, c.valor_centavos, c.enviado_em, p.id,
                    (select count(*) from conversas cv join mensagens m on m.conversa_id = cv.id
@@ -497,10 +608,12 @@ def fechamentos(pool, conta_id: int, membro_id: int, agora: datetime | None = No
                                                      where c3.prospeccao_id = p.id and m3.direcao = 'in'), '2000-01-01'))
               from orcamentos o join prospeccao p on p.orcamento_id = o.id
               left join contratos c on c.orcamento_id = o.id
+              {_SQL_NOME_JOIN.format(o='o')}
              where p.conta_id = %s and p.vendedor_id = %s
              order by o.criado_em desc""", (conta_id, membro_id)).fetchall()
     assinou, falta, esperando, rascunhos = [], [], [], []
-    for (oid, nome, st, total, criado, aprov, sinal, ev_em, ev_tipo, cst, cass, cval, cenv, lid, toques) in rows:
+    for (oid, *nm, st, total, criado, aprov, sinal, ev_em, ev_tipo, cst, cass, cval, cenv, lid, toques) in rows:
+        nome = _nome_do(nm)
         festa = f"{ev_tipo or 'festa'} {ev_em:%d/%m}" if ev_em else (ev_tipo or "")
         base = {"orcamento_id": oid, "lead_id": lid, "nome": nome, "festa": festa,
                 "valor_centavos": int((cval if cst == "assinado" else total) or 0)}

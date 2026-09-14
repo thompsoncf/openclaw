@@ -46,7 +46,9 @@ create table conversas (id bigserial primary key, conta_id bigint,
 create table mensagens (id bigserial primary key, conversa_id bigint,
   direcao text, criado_em timestamptz default now(),
   midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
-create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
+create table funil_etapas (id bigserial primary key,
+  -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
+  semeado_de text, conta_id bigint, chave text,
   rotulo text, ordem int default 0, fixa boolean default false,
   -- migração 238: `_etapas` lê `sai_do_quadro` pra saber o que o quadro não mostra
   sai_do_quadro boolean not null default false,

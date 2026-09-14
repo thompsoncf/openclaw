@@ -25,7 +25,9 @@ create table prospeccao (id bigserial primary key, conta_id bigint, empresa text
   status text default 'novo', estagio text default 'lead', vendedor_id bigint,
   evento_em date, evento_tipo text, evento_convidados int,
   criado_em timestamptz default now());
-create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
+create table funil_etapas (id bigserial primary key,
+  -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
+  semeado_de text, conta_id bigint, chave text,
   rotulo text, ordem int default 0);
 -- as colunas que `agenda.criar_evento` escreve de verdade. O stub existe pra o
 -- teste não depender do schema inteiro, mas o que ele omite vira erro só aqui e
@@ -54,6 +56,12 @@ def pool():
         c.execute(_SQL)
         # a migração de verdade: é o que faz o teste perceber que ela não chegou
         c.execute((MIG / "238_etapa_sai_do_quadro.sql").read_text(encoding="utf-8"))
+        # 235 antes da 254 porque esta cria `funil_motivos_perda`, que a 254 altera:
+        # o esquema deste arquivo é parcial (só o que a ponte com a Agenda usa) e a
+        # migração de verdade não tem por que saber disso.
+        c.execute((MIG / "235_motivos_de_perda_da_conta.sql").read_text(encoding="utf-8"))
+        # 254: `semeado_de` — de onde veio o rótulo (semente do ramo × dono)
+        c.execute((MIG / "254_funil_semeado_de.sql").read_text(encoding="utf-8"))
         for ch, o in (("contatado", 10), ("ganho", 900)):
             c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem)
                          values (%s,%s,%s,%s)""", (CONTA, ch, ch.capitalize(), o))

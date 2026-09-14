@@ -135,3 +135,15 @@ def test_melhorar_o_padrao_do_ramo_alcanca_quem_nunca_mexeu():
     conta_que_nunca_mexeu, conta_que_escolheu = {}, {"fu_toques_dias": "5,10"}
     assert dict(padrao, **conta_que_nunca_mexeu)["fu_toques_dias"] == "1,3,7"
     assert dict(padrao, **conta_que_escolheu)["fu_toques_dias"] == "5,10"
+
+
+# ------------------------------------------- tem contrato pra assinar?
+
+def test_so_eventos_tem_contrato_pra_assinar():
+    """O portão que a tela usa pra decidir se fala de assinatura e de "parado em
+    casa" (§6). Derivado de `contrato.tem_contrato`, e não de `chave == 'eventos'`:
+    as duas saem de `vendas.modo_por_nicho`, e derivar da mesma porta é o que
+    impede que um nicho novo entre num lado e não no outro."""
+    assert rxp.perfil("eventos")["contrato"] is True
+    for slug in ("consultoria", "suplementos", "seguros", None, "nicho-que-nao-existe"):
+        assert rxp.perfil(slug)["contrato"] is False, slug

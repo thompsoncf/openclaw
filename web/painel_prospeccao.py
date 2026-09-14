@@ -34,10 +34,15 @@ from finance import origem_anuncio
 from finance import prospec_convite as _prospec_convite
 from finance import prospec_inbound as _prospec_inbound
 from finance import prospeccao_fontes as fontes
+from finance import agente_visita as _av
 from finance import servicos_catalogo as scat
 from finance import validadoc as _validadoc
 from finance.email_sender import remetente_configurado
 from web.portal import _render, _env, conta_logada, brl
+
+import logging
+
+_log = logging.getLogger("openclaw.painel_prospeccao")
 
 router = APIRouter()
 from finance import evento_lead as _evl  # noqa: E402 — o evento no lead (migração 197)
@@ -80,6 +85,17 @@ def _etapas(c, conta_id: int) -> list[dict]:
         _fm.semear(c, conta_id, _fr.perfil_da_conta(c, conta_id))
         c.commit()
         rows = c.execute(sql, (conta_id,)).fetchall()
+    else:
+        # CARIMBO das linhas anteriores à migração 254 (só a primeira leitura de
+        # cada conta escreve; depois `semeado_de is null` não acha nada). Sem ele o
+        # `plano` continuaria adivinhando quem deu o nome — ver funil_modelo.foi_o_dono.
+        from finance import funil_modelo as _fm
+        try:
+            with c.transaction():
+                if _fm.carimbar(c, conta_id):
+                    c.commit()
+        except Exception:  # noqa: BLE001
+            _log.warning("carimbo das etapas da conta %s falhou", conta_id, exc_info=True)
     return [{"id": r[0], "chave": r[1], "rotulo": r[2], "ordem": r[3], "fixa": r[4],
              "sai_do_quadro": r[5]} for r in rows]
 TEMPERATURAS = [("frio", "Frio"), ("morno", "Morno"), ("quente", "Quente")]
@@ -889,7 +905,25 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     # pílulas dizendo a mesma coisa.
     trilho_itens = (_evl.trilho(contagens, filtro_mes)
                     if modo_evento and (any(k for k in contagens if k) or filtro_mes) else [])
+    # A FAIXA DO MODELO DO RAMO (14/09/2026). Só pra dono/gestor: o vendedor vê o
+    # quadro todo dia e não decide nome de coluna — faixa que ele não resolve vira
+    # barulho diário. Tolerante: se a contagem falhar, a faixa não aparece e o
+    # quadro abre igual.
+    ramo_fora = 0
+    ramo_rotulo = ""
+    if ctx["gerencia"]:
+        try:
+            from finance import funil_modelo as _fm
+            from finance import raio_x_perfil as _rxp2
+            with pool.connection() as _c, _c.transaction():
+                _pf = _fr.perfil_da_conta(_c, conta_id)
+                ramo_fora = _fm.desencontro(_c, conta_id, _pf)
+                ramo_rotulo = _rxp2.rotulo_do_perfil(_pf)
+        except Exception:  # noqa: BLE001
+            _log.warning("faixa do modelo do ramo falhou na conta %s", conta_id, exc_info=True)
+            ramo_fora = 0
     return _render("prospeccao", request, titulo="Prospecção", secao_ativa="prospeccao",
+                   ramo_fora=ramo_fora, ramo_rotulo=ramo_rotulo,
                    grupos=grupos, trilho_itens=trilho_itens, filtro_mes=filtro_mes,
                    vista_mes=vista_mes, vista_cols=vista_cols, por_ler=por_ler,
                    entrou=filtro_entrou, entrou_itens=entrou_itens, entrou_rotulo=entrou_rotulo,
@@ -1823,19 +1857,24 @@ def _chips_para_tela(pool, conta_id: int) -> list[dict]:
 _AGENTE_PADRAO = {"ativo": False, "limiar_confianca": 80, "horario": "comercial",
                   "tom": "informal", "max_trocas": 20, "escalar_para": "dono_lead",
                   "pode_responder": True, "pode_qualificar": True, "pode_agendar": True,
-                  "pode_orcamento": True, "orcamento_proativo": False}
+                  "pode_orcamento": True, "orcamento_proativo": False,
+                  # a visita nasce DESLIGADA em toda conta (migração 259): ligar
+                  # sozinho o que ninguém pediu é o que a §0 do CLAUDE.md proíbe
+                  "agendar_modo": "off"}
 
 
 def _agente_config(c, conta_id: int) -> dict:
     """Config do agente da empresa (defaults se ainda não salvou)."""
     r = c.execute(
         """select ativo, limiar_confianca, horario, tom, max_trocas, escalar_para,
-                  pode_responder, pode_qualificar, pode_agendar, pode_orcamento, orcamento_proativo
+                  pode_responder, pode_qualificar, pode_agendar, pode_orcamento,
+                  orcamento_proativo, agendar_modo
              from agente_config where conta_id=%s""", (conta_id,)).fetchone()
     if not r:
         return dict(_AGENTE_PADRAO)
     ks = ["ativo", "limiar_confianca", "horario", "tom", "max_trocas", "escalar_para",
-          "pode_responder", "pode_qualificar", "pode_agendar", "pode_orcamento", "orcamento_proativo"]
+          "pode_responder", "pode_qualificar", "pode_agendar", "pode_orcamento",
+          "orcamento_proativo", "agendar_modo"]
     return dict(zip(ks, r))
 
 
@@ -2603,6 +2642,11 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
             return JSONResponse({"ok": False, "erro": "canal_sem_resposta"})
         from finance import whatsapp_out
         numero = cv[3] or cv[4] or cv[2]
+        # ensaio da trava da insistência (migração 257): CONTA, não trava. `cv[1]` é
+        # o lead da conversa — conversa solta, sem lead, não tem etapa nem prazo.
+        if cv[1]:
+            from finance import funil_trava as _tv
+            _tv.registrar(c, ctx["conta_id"], cv[1], ctx["membro_id"])
         # sai pelo MESMO chip que recebeu — senão o lead escreve pra um número e é
         # respondido por outro, que do lado dele parece outra empresa
         res = whatsapp_out.enviar(
@@ -3801,6 +3845,12 @@ async def comunicacao_agente_config(request: Request):
     horario = f.get("horario") if f.get("horario") in ("comercial", "24h") else "comercial"
     tom = f.get("tom") if f.get("tom") in ("informal", "formal") else "informal"
     escalar = f.get("escalar_para") if f.get("escalar_para") in ("dono_lead", "plantao") else "dono_lead"
+    # a chave da visita: valor torto cai em 'off', que é o lado seguro de errar —
+    # a IA fica quieta, como sempre esteve. O campo só existe na tela de quem
+    # recebe visita, e conta que não o manda mantém o que já tinha (coalesce
+    # abaixo), em vez de ser desligada por um formulário que nem mostrou a chave.
+    _am = f.get("agendar_modo")
+    agendar_modo = _am if _am in _av.MODOS else None
     vals = (_b("ativo"), _i("limiar_confianca", 80, 50, 95), horario, tom,
             _i("max_trocas", 20, 1, 100), escalar, _b("pode_responder"), _b("pode_qualificar"),
             _b("pode_agendar"), _b("pode_orcamento"), _b("orcamento_proativo"))
@@ -3816,8 +3866,9 @@ async def comunicacao_agente_config(request: Request):
                  escalar_para=excluded.escalar_para, pode_responder=excluded.pode_responder,
                  pode_qualificar=excluded.pode_qualificar, pode_agendar=excluded.pode_agendar,
                  pode_orcamento=excluded.pode_orcamento, orcamento_proativo=excluded.orcamento_proativo,
+                 agendar_modo=coalesce(%s, agente_config.agendar_modo),
                  atualizado_em=now()""",
-            (ctx["conta_id"], *vals))
+            (ctx["conta_id"], *vals, agendar_modo))
         c.commit()
     request.session["prosp_aviso"] = "Agente atualizado ✓"
     return RedirectResponse(_AG_DESTINO, status_code=303)
@@ -7895,7 +7946,18 @@ def regua_pagina(request: Request):
         # justifica esperar antes de ligar
         from finance import funil_perda as _fp
         motivos_conta = _fp.motivos(c, ctx["conta_id"], perfil_chave, so_ativos=False)
+        # carimbo das linhas anteriores à 254 — mesmo motivo do carimbo das etapas
+        try:
+            with c.transaction():
+                _fp.carimbar_motivos(c, ctx["conta_id"])
+        except Exception:  # noqa: BLE001
+            _log.warning("carimbo dos motivos da conta %s falhou",
+                         ctx["conta_id"], exc_info=True)
         c.commit()          # a semente da lista, se foi a 1ª vez, fica gravada
+        # o modelo do ramo PRA OS MOTIVOS (14/09/2026). As etapas tinham isto desde
+        # 11/09 e os motivos não tinham nada — quem trocou de ramo, ou abriu a tela
+        # antes de escolher o ramo, ficava com a lista errada e sem caminho de volta.
+        modelo_motivos = _fp.plano_motivos(c, ctx["conta_id"], perfil_chave)
         n_mov = c.execute("select count(*) from funil_movimentos where conta_id=%s",
                           (ctx["conta_id"],)).fetchone()[0]
         modelo = _modelo_do_ramo(c, ctx["conta_id"], perfil_chave)
@@ -7966,6 +8028,7 @@ def regua_pagina(request: Request):
                    etapas=linhas, cfg=cfg, conv=conv, eventos=sorted(_fr.EVENTOS.items()),
                    esc=esc, teto=teto, fup=fup, janela_herda=janela_herda, rot_ramo=rot_ramo,
                    motivos_conta=motivos_conta, modelo=modelo,
+                   modelo_motivos=modelo_motivos,
                    escolhidas_tpl=escolhidas, padrao_tpl=padrao,
                    unidades=[(u, r) for u, r, _m in _UNIDADES],
                    dias_on=_fr._dias(cfg), n_mov=n_mov,
@@ -8081,6 +8144,36 @@ def regua_motivo(request: Request, mid: int, rotulo: str = Form(""),
         if r.get("ok"):
             c.commit()
     return JSONResponse(r, status_code=200 if r.get("ok") else 404)
+
+
+@router.post("/painel/prospeccao/regua/motivos-modelo")
+def regua_motivos_modelo(request: Request, itens: list[str] = Form([])):
+    """Adota a lista de motivos de perda do ramo, só nos itens marcados.
+
+    Irmã de `regua_modelo`, e `def` pelo mesmo motivo (banco síncrono; ver o
+    docstring de lá e `tests/test_event_loop_nao_trava.py`).
+
+    NUNCA APAGA MOTIVO. O que está fora do modelo é DESLIGADO — some da lista de
+    escolha do vendedor, e o lead que já foi perdido por ele continua mostrando o
+    rótulo na ficha. Apagar reescreveria o histórico de quem já foi.
+    """
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "A lista de motivos é configuração da empresa — só dono/gestor."
+        return RedirectResponse("/painel/prospeccao/regua", status_code=303)
+    from finance import funil_perda as _fp
+    with get_pool().connection() as c:
+        feito = _fp.aplicar_motivos(c, ctx["conta_id"],
+                                    _fr.perfil_da_conta(c, ctx["conta_id"]), itens)
+        c.commit()
+    n = sum(feito.values())
+    request.session["prosp_aviso"] = (
+        "Nada mudou — nenhum item marcado." if not n else
+        f"Lista de motivos: {n} mudança{'s' if n != 1 else ''}. "
+        "Nenhum motivo foi apagado, e quem já foi perdido continua com o dele.")
+    return RedirectResponse("/painel/prospeccao/regua", status_code=303)
 
 
 @router.post("/painel/prospeccao/regua/modelo")
@@ -9049,8 +9142,12 @@ def prospeccao_etapa_renomear(request: Request, eid: int, rotulo: str = Form("")
     rot = (rotulo or "").strip()[:40]
     if rot:
         with get_pool().connection() as c:
-            c.execute("update funil_etapas set rotulo=%s where id=%s and conta_id=%s",
-                      (rot, eid, ctx["conta_id"]))
+            # limpa o carimbo (migração 254): daqui em diante o nome é do DONO, e
+            # o bloco "o modelo do seu ramo" para de propor trocá-lo sem ele marcar
+            from finance import funil_modelo as _fm
+            c.execute("""update funil_etapas set rotulo=%s, semeado_de=%s
+                          where id=%s and conta_id=%s""",
+                      (rot, _fm.DO_DONO, eid, ctx["conta_id"]))
             c.commit()
         request.session["prosp_aviso"] = "Etapa renomeada ✓"
     return RedirectResponse("/painel/prospeccao", status_code=303)
@@ -9781,6 +9878,10 @@ def prospeccao_enviar_whatsapp(request: Request, alvo_id: int, texto: str = Form
         return JSONResponse({"ok": False, "erro": "sem_numero"})
     from finance import whatsapp_out
     with pool.connection() as c:
+        # ensaio da trava da insistência (migração 257): CONTA, não trava
+        if alvo.get("id"):
+            from finance import funil_trava as _tv
+            _tv.registrar(c, ctx["conta_id"], alvo["id"], ctx["membro_id"])
         res = whatsapp_out.enviar(c, ctx["conta_id"], numero, texto)
         if not res.get("ok"):
             erros = {
@@ -10791,6 +10892,26 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   </div>
 
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+
+  {# A FAIXA DO MODELO DO RAMO (14/09/2026). Aparece só pra dono/gestor, e só quando
+     a diferença NÃO é escolha do dono — `funil_modelo.desencontro` não conta rótulo
+     que ele mesmo escreveu. Some sozinha quando o funil casa com o ramo.
+
+     POR QUE ELA MORA AQUI, no quadro, e não na Régua: o bloco que resolve isso
+     existe desde 11/09 e mora lá dentro. Em 14/09, de 8 contas com funil, UMA tinha
+     as colunas do próprio ramo — a Doce Mell, citada pelo nome no docstring do
+     `funil_modelo` como o caso que ele veio resolver, seguia nas seis genéricas.
+     A ferramenta funcionava; ninguém a encontrava. #}
+  {% if ramo_fora %}
+  <div style="margin-top:.8rem;background:#20180a;border:1px solid #5C4418;border-left:3px solid var(--ambar);border-radius:10px;padding:.65rem .85rem;display:flex;align-items:center;gap:.7rem;flex-wrap:wrap">
+    <div style="flex:1;min-width:220px">
+      <div style="font-weight:600;color:var(--ambar);font-size:.9rem">Seu funil não está no modelo de {{ ramo_rotulo }}</div>
+      <div class="mut" style="font-size:.78rem;margin-top:.1rem">{{ ramo_fora }} coluna{% if ramo_fora != 1 %}s{% endif %}
+        diferente{% if ramo_fora != 1 %}s{% endif %} do modelo do seu ramo · nada muda sem você marcar</div>
+    </div>
+    <a href="/painel/prospeccao/regua#modelo" class="pbtn ghost" style="text-decoration:none;padding:.4rem .8rem;font-size:.82rem">Ver o modelo</a>
+  </div>
+  {% endif %}
 
   <!-- painel de captação inline (abre pra baixo, sem sair da página) -->
   <div id="captar" class="fsec" style="display:none;margin-top:1rem">
@@ -12470,6 +12591,19 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .sw input:checked+span{background:var(--verde)}
 .sw input:checked+span::before{transform:translateX(18px);background:#04140d}
 .agrow{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.55rem 0;border-top:1px solid var(--borda)}
+/* a chave de três estados da visita (migração 259) — mesmo desenho do segmentado
+   da Régua do funil, que é onde o produto já ensina "off / meio / total" */
+.ag-seg{display:inline-flex;border:1px solid var(--borda);border-radius:9px;overflow:hidden;flex:none}
+.ag-seg input{position:absolute;opacity:0;pointer-events:none}
+.ag-seg label{font-size:.78rem;padding:.34rem .7rem;color:var(--txt-mut);cursor:pointer;
+  border-right:1px solid var(--borda);line-height:1.35;margin:0}
+.ag-seg label:last-of-type{border-right:0}
+.ag-seg label:hover{color:var(--txt)}
+.ag-seg input:checked + label{background:var(--verde);color:var(--sobre-verde);font-weight:700}
+.ag-seg input[value="off"]:checked + label{background:var(--borda);color:var(--txt)}
+.ag-seg input[value="propoe"]:checked + label{background:var(--azul);color:#04131B}
+.ag-nota{font-size:.78rem;color:var(--txt-mut);line-height:1.55;padding:.1rem 0 .5rem}
+.ag-nota b{color:var(--txt)}
 .agrow:first-of-type{border-top:0}
 .agrow .lab b{font-size:.88rem}.agrow .lab div{color:var(--txt-mut);font-size:.76rem;margin-top:.1rem}
 .aggrid{display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin-top:.3rem}
@@ -12708,7 +12842,26 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <h3>✅ O que ele faz sozinho</h3>
         <div class="agrow"><div class="lab"><b>Responder dúvidas frequentes</b><div>Usa a base de conhecimento ao lado</div></div><label class="sw"><input type="checkbox" name="pode_responder" {% if ag_cfg.pode_responder %}checked{% endif %}><span></span></label></div>
         <div class="agrow"><div class="lab"><b>Qualificar o lead</b><div>Mede interesse e ajusta a temperatura</div></div><label class="sw"><input type="checkbox" name="pode_qualificar" {% if ag_cfg.pode_qualificar %}checked{% endif %}><span></span></label></div>
-        <div class="agrow"><div class="lab"><b>Agendar follow-up</b></div><label class="sw"><input type="checkbox" name="pode_agendar" {% if ag_cfg.pode_agendar %}checked{% endif %}><span></span></label></div>
+        {#- A VISITA (migração 259). Não é interruptor: são três estados, porque o
+            dono pediu as duas opções no sistema ("é bom colocar no sistema as 2
+            opções", 14/09/2026) e cada empresa decide até onde a IA vai. Só
+            aparece pra quem recebe visita — nem toda conta de eventos recebe: a
+            Doce Mell tem 0 pedidos em 361 conversas. -#}
+        {% if raio_x_perfil and raio_x_perfil.vocab.data %}
+        <div class="agrow"><div class="lab"><b>Marcar visita ao espaço<span class="tag-new">novo</span></b><div>Quando o cliente pedir pra conhecer o espaço, em horário comercial</div></div>
+          <span class="ag-seg">
+            {% for v, r in [('off','Desligado'),('propoe','Propõe'),('marca','Marca')] %}
+            <input type="radio" id="agendar_modo_{{ v }}" name="agendar_modo" value="{{ v }}" {% if ag_cfg.agendar_modo==v %}checked{% endif %}>
+            <label for="agendar_modo_{{ v }}">{{ r }}</label>
+            {% endfor %}
+          </span>
+        </div>
+        <div class="ag-nota">
+          <b>Propõe</b> combina dia e hora com o cliente e manda o cartão pro vendedor confirmar — nada entra na agenda sem gente.
+          <b>Marca</b> marca direto e manda a confirmação com o convite de calendário.
+          Nos dois, fora do horário comercial a IA não marca: avisa o vendedor dono do lead.
+        </div>
+        {% endif %}
         <div class="agrow"><div class="lab"><b>Gerar orçamento prévio quando o cliente pedir<span class="tag-new">novo</span></b><div>Monta rascunho com serviços + preço e manda o link</div></div><label class="sw"><input type="checkbox" name="pode_orcamento" {% if ag_cfg.pode_orcamento %}checked{% endif %}><span></span></label></div>
         <div class="agrow"><div class="lab"><b>Oferecer orçamento proativamente</b><div>Sem o cliente pedir</div></div><label class="sw"><input type="checkbox" name="orcamento_proativo" {% if ag_cfg.orcamento_proativo %}checked{% endif %}><span></span></label></div>
       </div>
@@ -15933,7 +16086,7 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
        já nasce assim; quem já existe vê aqui o que mudaria e marca o que quer.
        Nada é aplicado sem marcar, e NENHUMA etapa é apagada — a que não está no
        modelo é proposta pra sair do quadro, com os leads intactos. -->
-  <div class="fsec" style="margin-top:1.1rem">
+  <div class="fsec" id="modelo" style="margin-top:1.1rem">
     <div class="sh"><b>O modelo do seu ramo</b><span class="mut" style="font-size:.76rem">as colunas que {{ rot_ramo }} costuma usar</span></div>
     {% if not modelo.itens %}
     <p class="mut" style="margin:.5rem 0 0;font-size:.85rem">
@@ -16108,6 +16261,31 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
        é ela que está gravada em todo lead já perdido. -->
   <div class="fsec" style="margin-top:1.1rem">
     <div class="sh"><b>Por que perdemos</b><span class="mut" style="font-size:.76rem">a lista que o vendedor escolhe ao encerrar um lead · cada linha salva sozinha</span></div>
+    {# O MODELO DO RAMO, PROS MOTIVOS (14/09/2026). As etapas tinham isto desde
+       11/09; esta lista não tinha nada, então quem trocou de ramo — ou abriu a tela
+       antes de escolher o ramo — ficava com a lista errada e sem caminho de volta.
+       Mesma forma do bloco das etapas: propõe, não aplica; nunca apaga (motivo fora
+       do modelo é DESLIGADO, e quem foi perdido por ele continua lendo o rótulo na
+       ficha); o que o dono renomeou vem desmarcado. #}
+    {% if modelo_motivos %}
+    <div style="background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.7rem .85rem;margin:.6rem 0 .2rem">
+      <div style="font-size:.86rem;margin-bottom:.5rem">A lista de <b>{{ rot_ramo }}</b> tem
+        {{ modelo_motivos|length }} diferença{% if modelo_motivos|length != 1 %}s{% endif %}
+        em relação à sua. <span class="mut">Marque o que quiser adotar — nada é apagado.</span></div>
+      <form method="post" action="/painel/prospeccao/regua/motivos-modelo">
+        {% for it in modelo_motivos %}
+        <label class="chk" style="display:flex;align-items:flex-start;gap:.55rem;padding:.4rem 0;border-top:1px solid var(--borda);cursor:pointer">
+          <input type="checkbox" name="itens" value="{{ it.id }}" {% if it.marcado %}checked{% endif %}
+                 style="width:auto;margin:.2rem 0 0;accent-color:var(--verde);flex:0 0 auto">
+          <span style="flex:1;min-width:0"><span style="font-size:.84rem">{{ it.texto }}</span>
+            {% if it.nota %}<br><span class="mut" style="font-size:.73rem">{{ it.nota }}</span>{% endif %}</span>
+        </label>
+        {% endfor %}
+        <div style="display:flex;justify-content:flex-end;margin-top:.6rem">
+          <button class="pbtn">Adotar o que marquei</button></div>
+      </form>
+    </div>
+    {% endif %}
     {% for m in motivos_conta %}
     <form class="rg-etapa" onsubmit="return rgSalvar(event)"
           action="/painel/prospeccao/regua/motivo/{{ m.id }}" method="post"

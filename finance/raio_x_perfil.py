@@ -367,6 +367,16 @@ def perfil_por_nicho(slug: str | None) -> str:
     return "produto"
 
 
+def rotulo_do_perfil(chave: str) -> str:
+    """O nome do ramo pra tela, a partir da CHAVE do perfil ('corretora de seguros').
+
+    Existe porque `perfil()` recebe SLUG DE NICHO e a tela do funil só tem a chave do
+    perfil em mãos — e converter uma na outra na chamada dava a linha ilegível que
+    esta função substituiu.
+    """
+    return (_PERFIS.get(chave) or _PERFIS["recorrente"])["rotulo"]
+
+
 def perfil(slug: str | None) -> dict:
     """O perfil inteiro pra um slug de nicho (puro, sem banco)."""
     chave = perfil_por_nicho(slug)
@@ -376,6 +386,13 @@ def perfil(slug: str | None) -> dict:
     p["nicho"] = (slug or "").strip().lower() or None
     p["nicho_escolhido"] = bool(p["nicho"]) and _n.nicho_existe(p["nicho"])
     p["aplica"] = chave != "produto"
+    # TEM CONTRATO PRA ASSINAR? Lido de `contrato.tem_contrato`, e não de
+    # `chave == "eventos"`, ainda que hoje as duas respostas coincidam: as duas
+    # saem de `vendas.modo_por_nicho`, e derivar da mesma porta é o que impede
+    # que um nicho novo entre num lado e não no outro. É o portão que a tela usa
+    # pra decidir se fala de assinatura e de "parado em casa" (§6).
+    from finance.contrato import tem_contrato as _tem_contrato
+    p["contrato"] = _tem_contrato(p["nicho"])
     return p
 
 

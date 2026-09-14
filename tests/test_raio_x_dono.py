@@ -72,12 +72,16 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now());
-create table orcamentos (id bigserial primary key, cliente text, status text default 'rascunho',
+create table orcamentos (id bigserial primary key, cliente text, empresa text, numero int,
+  cliente_id bigint, status text default 'rascunho',
   primeiro_ano_centavos bigint default 0, mensal_centavos bigint default 0, setup_centavos bigint default 0,
-  itens jsonb, criado_em timestamptz default now(), aprovada_em timestamptz, sinal_pago_em timestamptz);
+  itens jsonb, criado_em timestamptz default now(), aprovada_em timestamptz, aprovada_por text,
+  sinal_pago_em timestamptz);
+-- ver o comentário gêmeo em tests/test_raio_x.py
+create table clientes (id bigserial primary key, conta_id bigint, nome text);
 create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
   status text default 'enviado', valor_centavos bigint, assinado_em timestamptz,
-  enviado_em timestamptz, criado_em timestamptz default now());
+  numero int, enviado_em timestamptz, criado_em timestamptz default now());
 create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   titulo text, inicio timestamptz, status text default 'ativo', desfecho text,
   tipo text default 'empresa', tipo_evento text);
@@ -655,3 +659,62 @@ def test_a_tabela_por_vendedor_abre_quem_esta_pendente(pool, cen, monkeypatch):
     # período escondia o que estava esperando assinatura.
     assert f"rxTogg('rx-{cen['j']}-ass')" in html
     assert "1 · R$ 5.000</span> · " in html and "sem assinar" in html
+
+
+def test_o_bloco_separa_a_bola_nossa_da_bola_do_cliente(pool, cen, monkeypatch):
+    """14/09/2026. O bloco dizia "Aprovado, esperando assinatura" pros dois casos,
+    e um deles era contrato que o cliente NUNCA RECEBEU. Medido na conta 34: 35
+    dias somados parados em casa contra 1 dia esperando o cliente, nos 6 contratos
+    assinados — todos assinaram no mesmo dia em que receberam.
+    Mockup: docs/mockups/raio_x_assinado_e_falta.html"""
+    import web.painel_raio_x as prx
+    from web import portal
+    monkeypatch.setattr(prx, "conta_logada", lambda req: (cen["conta"], "pj", "Prime"))
+    monkeypatch.setattr(prx, "get_pool", lambda: pool)
+    monkeypatch.setattr(rxd, "agora_brt", lambda agora=None: AGORA)
+    monkeypatch.setattr(rxd, "perfil_da_conta", lambda pool, conta_id: EVENTOS)
+
+    def fake_render(nome, request, **ctx):
+        from fastapi.responses import HTMLResponse
+        tpl = portal._env.get_template(nome)
+        return HTMLResponse("".join(tpl.blocks["conteudo"](tpl.new_context(dict(ctx, request=request)))))
+    monkeypatch.setattr(prx, "_render", fake_render)
+
+    # a Fabi tem orçamento aprovado; dou a ela um contrato PRONTO E NUNCA ENVIADO
+    with pool.connection() as c:
+        o_fabi = c.execute("select orcamento_id from prospeccao where conta_id=%s and contato='Fabi'",
+                           (cen["conta"],)).fetchone()[0]
+        c.execute("update orcamentos set aprovada_por='Fabi Costa' where id=%s", (o_fabi,))
+        c.execute("""insert into contratos (conta_id, orcamento_id, status, valor_centavos,
+                       numero, criado_em, enviado_em)
+                     values (%s,%s,'enviado',450000,7, now() - interval '5 days', null)""",
+                  (cen["conta"], o_fabi))
+        c.commit()
+
+    html = bytes(prx.painel_raio_x(_req()).body).decode("utf-8")
+    assert "A bola está com você" in html, "o grupo de quem depende só de nós"
+    assert "nunca enviado" in html, "o estado, dito com todas as letras"
+    # OS DOIS DOCUMENTOS na linha — foi o pedido do dono
+    assert "Orçamento" in html and "Contrato nº 7" in html
+    # e o rótulo antigo, que juntava os dois estados, não volta
+    assert "Aprovado, esperando assinatura" not in html
+
+
+def test_parado_em_casa_nao_aparece_em_quem_nao_tem_contrato(pool, zaq, monkeypatch):
+    """§6: no recorrente não existe contrato pra assinar, e "parado em casa" mede
+    justamente o tempo entre criar e enviar um contrato. Prometer o número ali
+    seria repetir o Raio-X de 05/09, que falava de festa pra quem vende sistema."""
+    import web.painel_raio_x as prx
+    from web import portal
+    monkeypatch.setattr(prx, "conta_logada", lambda req: (zaq["conta"], "pj", "ZAQ"))
+    monkeypatch.setattr(prx, "get_pool", lambda: pool)
+    monkeypatch.setattr(rxd, "agora_brt", lambda agora=None: AGORA)
+
+    def fake_render(nome, request, **ctx):
+        from fastapi.responses import HTMLResponse
+        tpl = portal._env.get_template(nome)
+        return HTMLResponse("".join(tpl.blocks["conteudo"](tpl.new_context(dict(ctx, request=request)))))
+    monkeypatch.setattr(prx, "_render", fake_render)
+
+    html = bytes(prx.painel_raio_x(_req()).body).decode("utf-8")
+    assert "parado em casa" not in html.lower()

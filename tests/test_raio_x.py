@@ -44,12 +44,16 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now());
-create table orcamentos (id bigserial primary key, cliente text, status text default 'rascunho',
+create table orcamentos (id bigserial primary key, cliente text, empresa text, numero int,
+  cliente_id bigint, status text default 'rascunho',
   primeiro_ano_centavos bigint default 0, criado_em timestamptz default now(),
-  aprovada_em timestamptz, sinal_pago_em timestamptz);
+  aprovada_em timestamptz, aprovada_por text, sinal_pago_em timestamptz);
+-- o CADASTRO do cliente: primeiro degrau de `vendas.nome_do_orcamento`, e por isso
+-- o Raio-X faz left join nela pra montar o nome de cada linha.
+create table clientes (id bigserial primary key, conta_id bigint, nome text);
 create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
   status text default 'enviado', valor_centavos bigint, assinado_em timestamptz,
-  enviado_em timestamptz, criado_em timestamptz default now());
+  numero int, enviado_em timestamptz, criado_em timestamptz default now());
 create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   titulo text, inicio timestamptz, status text default 'ativo', desfecho text,
   -- a régua da lista de espera lê tipo/tipo_evento pra saber o que TOMA o dia
@@ -111,15 +115,26 @@ def _msg(c, conv, direcao, em, texto="oi", autor=None, sid=None):
                         values (%s,%s,%s,%s,%s,%s) returning id""", (conv, direcao, autor, texto, sid, em)).fetchone()[0]
 
 
-def _orc(c, cliente, status="enviado", total=500000, criado=None, aprovada=None, sinal=None):
-    return c.execute("""insert into orcamentos (cliente, status, primeiro_ano_centavos, criado_em, aprovada_em, sinal_pago_em)
-                        values (%s,%s,%s,coalesce(%s, now()),%s,%s) returning id""",
-                     (cliente, status, total, criado, aprovada, sinal)).fetchone()[0]
+def _orc(c, cliente, status="enviado", total=500000, criado=None, aprovada=None, sinal=None,
+         empresa=None, numero=None, cliente_id=None):
+    return c.execute("""insert into orcamentos (cliente, empresa, numero, cliente_id, status,
+                          primeiro_ano_centavos, criado_em, aprovada_em, sinal_pago_em)
+                        values (%s,%s,%s,%s,%s,%s,coalesce(%s, now()),%s,%s) returning id""",
+                     (cliente, empresa, numero, cliente_id, status, total, criado,
+                      aprovada, sinal)).fetchone()[0]
 
 
-def _contrato(c, conta, orc, status="assinado", valor=500000, assinado=None):
-    return c.execute("""insert into contratos (conta_id, orcamento_id, status, valor_centavos, assinado_em)
-                        values (%s,%s,%s,%s,%s) returning id""", (conta, orc, status, valor, assinado)).fetchone()[0]
+def _cadastro(c, conta, nome):
+    return c.execute("insert into clientes (conta_id, nome) values (%s,%s) returning id",
+                     (conta, nome)).fetchone()[0]
+
+
+def _contrato(c, conta, orc, status="assinado", valor=500000, assinado=None,
+              numero=None, criado=None, enviado=None):
+    return c.execute("""insert into contratos (conta_id, orcamento_id, status, valor_centavos,
+                          assinado_em, numero, criado_em, enviado_em)
+                        values (%s,%s,%s,%s,%s,%s,coalesce(%s, now()),%s) returning id""",
+                     (conta, orc, status, valor, assinado, numero, criado, enviado)).fetchone()[0]
 
 
 def _t(dias_atras: float, base: datetime = SEGUNDA_10H) -> datetime:
@@ -759,3 +774,328 @@ def test_a_data_que_abriu_vem_antes_de_tudo_no_responda_hoje(pool):
     # no perfil recorrente a faixa não existe
     h2 = rx.responda_hoje(pool, conta, v, SEGUNDA_10H, perfil=RECORRENTE)
     assert [i["faixa"] for i in h2["itens"]] == ["pergunta"]
+
+
+# ------------------------------- o NOME de cada linha, e de onde ele sai
+#
+# 14/09/2026, olhando o Raio-X da Prime: o bloco "Aprovado, esperando assinatura"
+# anunciava a cliente como `86998192489`. O nome dela — Josiany Rayra Soares dos
+# Santos — estava em `orcamentos.empresa` E no cadastro, dois campos ao lado.
+#
+# A consulta resolvia o nome sozinha, em SQL, com
+# `coalesce(nullif(o.cliente,''), p.contato, p.empresa, 'cliente')`, repetido em
+# cinco lugares. Duas coisas erradas no mesmo trecho:
+#   1. começava pelo campo que menos se pode confiar (`cliente`, onde se digita
+#      qualquer coisa — e ali alguém tinha digitado o telefone);
+#   2. não tinha guarda nenhuma contra telefone, que o Python já tinha em
+#      `vendas._nome_util` e que o funil já usava havia semanas.
+#
+# Agora os cinco leem os campos crus e chamam `vendas.nome_do_orcamento`.
+
+def test_telefone_digitado_no_contato_nao_vira_o_nome_do_cliente(pool):
+    """O caso da Josiany, com os dados dela."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        cad = _cadastro(c, conta, "Josiany Rayra Soares dos Santos")
+        lead = _lead(c, conta, v, "Josiany Rayra Santos", status="proposta", criado=_t(20))
+        _conversa(c, conta, lead, _t(20))
+        o = _orc(c, "86998192489", "enviado", 709000, criado=_t(20), aprovada=_t(18),
+                 empresa="Josiany Rayra Soares dos Santos", numero=8, cliente_id=cad)
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, lead))
+        c.commit()
+
+    s = rx.sua_semana(pool, conta, v, ini, fim)
+    assert [i["nome"] for i in s["sem_assinar"]] == ["Josiany Rayra Soares dos Santos"]
+
+
+def test_o_nome_vem_do_cadastro_e_nao_do_apelido_do_lead(pool):
+    """O caso da Carolina, do mesmo dia: `cliente` VAZIO fazia a tela cair no
+    apelido do lead ("Carolina Costa") em vez do nome do cadastro ("Maria Carolina
+    da Silva Costa") — que é o nome que está no contrato que ela vai assinar.
+
+    Aqui `empresa` do orçamento é diferente do cadastro de propósito: é o único
+    jeito de provar QUAL dos dois ganha."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        cad = _cadastro(c, conta, "Maria Carolina da Silva Costa")
+        lead = _lead(c, conta, v, "Carolina Costa", status="proposta", criado=_t(20))
+        _conversa(c, conta, lead, _t(20))
+        o = _orc(c, None, "enviado", 805000, criado=_t(20), aprovada=_t(18),
+                 empresa="Carolina da Silva", numero=23, cliente_id=cad)
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, lead))
+        c.commit()
+
+    s = rx.sua_semana(pool, conta, v, ini, fim)
+    assert [i["nome"] for i in s["sem_assinar"]] == ["Maria Carolina da Silva Costa"]
+
+
+def test_sem_cadastro_o_nome_cai_pro_orcamento_e_depois_pro_lead(pool):
+    """Os degraus de baixo continuam de pé: sem cadastro vale `empresa` do
+    orçamento; sem nada no orçamento, o lead."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        l1 = _lead(c, conta, v, "apelido", status="proposta", criado=_t(20))
+        o1 = _orc(c, None, "enviado", 100000, criado=_t(20), aprovada=_t(18),
+                  empresa="Nome no Orçamento", numero=1)
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o1, l1))
+        l2 = _lead(c, conta, v, "Nome no Lead", status="proposta", criado=_t(20))
+        o2 = _orc(c, None, "enviado", 100000, criado=_t(20), aprovada=_t(18), numero=2)
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o2, l2))
+        c.commit()
+
+    s = rx.sua_semana(pool, conta, v, ini, fim)
+    assert sorted(i["nome"] for i in s["sem_assinar"]) == ["Nome no Lead", "Nome no Orçamento"]
+
+
+def test_quando_nada_serve_de_nome_sobra_o_numero_da_proposta(pool):
+    """Telefone em TODOS os campos. Antes saía a string 'cliente', que não
+    identifica ninguém; agora sai "Orçamento nº N", que ao menos se acha."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        lead = _lead(c, conta, v, "86999887766", status="proposta", criado=_t(20))
+        c.execute("update prospeccao set empresa='(86) 99988-7766' where id=%s", (lead,))
+        o = _orc(c, "86999887766", "enviado", 100000, criado=_t(20), aprovada=_t(18),
+                 empresa="5586999887766", numero=42)
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, lead))
+        c.commit()
+
+    s = rx.sua_semana(pool, conta, v, ini, fim)
+    assert [i["nome"] for i in s["sem_assinar"]] == ["Orçamento nº 42"]
+
+
+def test_o_mesmo_nome_vale_pros_outros_blocos_do_raio_x(pool):
+    """Rascunho e contrato assinado usavam o MESMO trecho quebrado. Se um só
+    tivesse sido consertado, o dono veria a mesma pessoa com dois nomes na mesma
+    tela."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        cad = _cadastro(c, conta, "Fabiana Costa Lima")
+        l1 = _lead(c, conta, v, "Fabi", criado=_t(5))
+        _conversa(c, conta, l1, _t(5))
+        o1 = _orc(c, "86991112222", "rascunho", 300000, criado=_t(5),
+                  empresa="Fabiana Costa Lima", numero=9, cliente_id=cad)
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o1, l1))
+        l2 = _lead(c, conta, v, "Bia", status="proposta", criado=_t(6))
+        o2 = _orc(c, "86993334444", "aprovada", 450000, criado=_t(6), aprovada=_t(5),
+                  empresa="Beatriz Souza Martins", numero=10)
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o2, l2))
+        _contrato(c, conta, o2, "assinado", 450000, _t(2))
+        c.commit()
+
+    s = rx.sua_semana(pool, conta, v, ini, fim)
+    assert [i["nome"] for i in s["rascunhos_itens"]] == ["Fabiana Costa Lima"]
+    assert [i["nome"] for i in s["contratos"]] == ["Beatriz Souza Martins"]
+
+
+def test_a_ordem_vale_mesmo_quando_o_contato_parece_um_nome(pool):
+    """A guarda que faltava, achada por mutação.
+
+    Nos outros testes o campo `cliente` tem um TELEFONE, então quem salva o nome é
+    o filtro de `_nome_util` — e a ORDEM dos degraus fica sem prova: pôr `cliente`
+    na frente do cadastro passava verde em toda a suíte, que é exatamente o bug
+    que estava em produção.
+
+    Aqui `cliente` é um apelido plausível ("Josi"), coisa que o filtro não tem como
+    recusar. Só a ordem decide, e o cadastro tem que ganhar: é o nome que vai no
+    contrato."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        cad = _cadastro(c, conta, "Josiany Rayra Soares dos Santos")
+        lead = _lead(c, conta, v, "Josi do zap", status="proposta", criado=_t(20))
+        o = _orc(c, "Josi", "enviado", 709000, criado=_t(20), aprovada=_t(18),
+                 empresa="Josiany R. S. Santos", numero=8, cliente_id=cad)
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, lead))
+        c.commit()
+
+    s = rx.sua_semana(pool, conta, v, ini, fim)
+    assert [i["nome"] for i in s["sem_assinar"]] == ["Josiany Rayra Soares dos Santos"]
+
+
+def test_sem_cadastro_a_empresa_do_orcamento_ganha_do_contato(pool):
+    """O degrau seguinte da mesma ordem, pela mesma razão: `empresa` é o campo do
+    formulário onde o nome completo é digitado; `cliente` é o "contato"."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        lead = _lead(c, conta, v, "apelido", status="proposta", criado=_t(20))
+        o = _orc(c, "Bia", "enviado", 100000, criado=_t(20), aprovada=_t(18),
+                 empresa="Beatriz Souza Martins", numero=11)
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, lead))
+        c.commit()
+
+    s = rx.sua_semana(pool, conta, v, ini, fim)
+    assert [i["nome"] for i in s["sem_assinar"]] == ["Beatriz Souza Martins"]
+
+
+# ================== os DOIS documentos, e de quem é a bola
+#
+# 14/09/2026. O bloco "Aprovado, esperando assinatura" juntava dois estados
+# opostos: contrato que o cliente recebeu e não assinou, e contrato que nunca saiu
+# daqui. Medido na conta 34, nos 6 contratos assinados:
+#
+#     parado em casa (criado -> enviado)     35 dias somados
+#     esperando o cliente (enviado -> ass.)   1 dia somado
+#
+# Todo cliente assinou NO MESMO DIA em que recebeu. A demora nunca foi do cliente.
+# Mockup: docs/mockups/raio_x_assinado_e_falta.html
+
+def _aprovado_sem_assinar(c, conta, v, nome, *, ctr_criado, ctr_enviado=None,
+                          ctr_numero=1, aprovada=None, valor=500000):
+    lead = _lead(c, conta, v, nome, status="proposta", criado=_t(30))
+    o = _orc(c, None, "aprovada", valor, criado=_t(30), aprovada=aprovada or _t(25),
+             empresa=nome, numero=ctr_numero)
+    c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, lead))
+    c.execute("update orcamentos set aprovada_por=%s where id=%s", (nome, o))
+    _contrato(c, conta, o, "enviado", valor, None, ctr_numero, ctr_criado, ctr_enviado)
+    return o
+
+
+def test_contrato_nunca_enviado_e_separado_de_quem_espera_o_cliente(pool):
+    """O coração da mudança: os dois não podem viver sob o mesmo rótulo."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        _aprovado_sem_assinar(c, conta, v, "Carolina", ctr_criado=_t(4),
+                              ctr_enviado=None, ctr_numero=8)
+        _aprovado_sem_assinar(c, conta, v, "Beatriz", ctr_criado=_t(9),
+                              ctr_enviado=_t(2), ctr_numero=9)
+        c.commit()
+
+    itens = rx.sua_semana(pool, conta, v, ini, fim)["sem_assinar"]
+    por_nome = {i["nome"]: i for i in itens}
+    assert por_nome["Carolina"]["estado"] == "nunca_enviado"
+    assert por_nome["Beatriz"]["estado"] == "aguardando"
+
+
+def test_a_bola_nossa_vem_primeiro_na_lista(pool):
+    """Ordem não é enfeite: é a única fila que anda só com a gente."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        _aprovado_sem_assinar(c, conta, v, "Espera ha muito", ctr_criado=_t(20),
+                              ctr_enviado=_t(19), ctr_numero=1)
+        _aprovado_sem_assinar(c, conta, v, "Nunca enviado", ctr_criado=_t(2),
+                              ctr_enviado=None, ctr_numero=2)
+        c.commit()
+
+    itens = rx.sua_semana(pool, conta, v, ini, fim)["sem_assinar"]
+    assert [i["nome"] for i in itens] == ["Nunca enviado", "Espera ha muito"], (
+        "o que depende só de nós vem antes, mesmo esperando menos tempo")
+
+
+def test_o_relogio_conta_do_envio_e_nao_da_aprovacao(pool):
+    """O erro que o print do dono mostrou: "esperando assinatura há 23 dias" num
+    contrato que tinha saído no dia anterior. Aprovado há 25 dias, enviado há 2 —
+    o cliente está esperando há 2."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        # ancorado no FIM DA JANELA, não em SEGUNDA_10H: é de `fim` que a linha
+        # conta os dias, e a janela "passada" fecha na segunda 00:00 — usar a base
+        # errada aqui dava 1 onde o teste dizia 2, e o furado era o teste.
+        _aprovado_sem_assinar(c, conta, v, "Ana", ctr_criado=fim - timedelta(days=24),
+                              ctr_enviado=fim - timedelta(days=2),
+                              aprovada=fim - timedelta(days=25), ctr_numero=3)
+        c.commit()
+
+    i = rx.sua_semana(pool, conta, v, ini, fim)["sem_assinar"][0]
+    assert i["dias"] == 2, "conta do envio, não da aprovação (que foi há 25)"
+
+
+def test_o_que_nao_saiu_conta_da_criacao_do_contrato(pool):
+    """E o outro relógio, com o outro nome: quanto está parado EM CASA."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        _aprovado_sem_assinar(c, conta, v, "Ana", ctr_criado=fim - timedelta(days=6),
+                              ctr_enviado=None, aprovada=fim - timedelta(days=25),
+                              ctr_numero=4)
+        c.commit()
+
+    i = rx.sua_semana(pool, conta, v, ini, fim)["sem_assinar"][0]
+    assert i["estado"] == "nunca_enviado" and i["dias"] == 6
+
+
+def test_a_linha_traz_os_dois_documentos(pool):
+    """O pedido do dono: especificar o que foi assinado e o que falta."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        _aprovado_sem_assinar(c, conta, v, "Carolina", ctr_criado=_t(4),
+                              ctr_enviado=None, ctr_numero=8, aprovada=_t(4))
+        c.commit()
+
+    i = rx.sua_semana(pool, conta, v, ini, fim)["sem_assinar"][0]
+    assert i["aprovada_em"] is not None and i["aprovada_por"] == "Carolina"
+    assert i["contrato_numero"] == 8 and i["contrato_enviado_em"] is None
+
+
+def test_status_enviado_com_data_nula_nao_engana(pool):
+    """`contratos.status` nasce 'enviado' por padrão — na conta 34 o contrato nº 8
+    estava assim, com `enviado_em` NULO. Quem manda é a data, nunca o status."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        o = _aprovado_sem_assinar(c, conta, v, "Carolina", ctr_criado=_t(4),
+                                  ctr_enviado=None, ctr_numero=8)
+        c.execute("update contratos set status='enviado' where orcamento_id=%s", (o,))
+        c.commit()
+
+    i = rx.sua_semana(pool, conta, v, ini, fim)["sem_assinar"][0]
+    assert i["estado"] == "nunca_enviado"
+
+
+def test_aprovado_sem_contrato_nenhum_nao_some_da_lista(pool):
+    """O contrato nasce na aprovação, mas proposta antiga pode não ter. Faltar
+    linha em `contratos` não pode apagar a pendência."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        lead = _lead(c, conta, v, "Sem contrato", status="proposta", criado=_t(30))
+        o = _orc(c, None, "aprovada", 100000, criado=_t(30), aprovada=_t(10),
+                 empresa="Sem contrato", numero=5)
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, lead))
+        c.commit()
+
+    itens = rx.sua_semana(pool, conta, v, ini, fim)["sem_assinar"]
+    assert [i["estado"] for i in itens] == ["sem_contrato"]
+
+
+def test_parado_em_casa_mede_o_tempo_que_e_nosso(pool):
+    """A métrica que o dono pediu. Mede os ENVIADOS na janela: é o envio que fecha
+    a espera."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        # criados há 10, 8 e 6 dias; enviados há 4, 4 e 4 -> 6, 4 e 2 dias parados
+        for n, criado in ((1, 10), (2, 8), (3, 6)):
+            _aprovado_sem_assinar(c, conta, v, f"C{n}", ctr_criado=_t(criado),
+                                  ctr_enviado=_t(4), ctr_numero=n)
+        c.commit()
+
+    s = rx.sua_semana(pool, conta, v, ini, fim)
+    assert s["parado_em_casa"] == 4, "a mediana de 6, 4 e 2"
+    assert s["parado_em_casa_n"] == 3
+
+
+def test_parado_em_casa_ignora_o_que_ainda_nao_saiu(pool):
+    """Quem não foi enviado ainda não tem tempo FECHADO — entra na contagem de
+    'sem enviar agora', não na mediana, senão o número encolheria enquanto o
+    problema cresce."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        _aprovado_sem_assinar(c, conta, v, "Saiu", ctr_criado=_t(9), ctr_enviado=_t(3),
+                              ctr_numero=1)
+        _aprovado_sem_assinar(c, conta, v, "Nao saiu", ctr_criado=_t(30),
+                              ctr_enviado=None, ctr_numero=2)
+        c.commit()
+
+    s = rx.sua_semana(pool, conta, v, ini, fim)
+    assert s["parado_em_casa"] == 6 and s["parado_em_casa_n"] == 1

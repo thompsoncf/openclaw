@@ -16,6 +16,7 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
+from finance import agente_visita as _av
 from finance import servicos_catalogo as scat
 
 _log = logging.getLogger("agente")
@@ -24,12 +25,17 @@ _log = logging.getLogger("agente")
 def _cfg(c, conta_id):
     r = c.execute(
         """select ativo, limiar_confianca, horario, tom, max_trocas, escalar_para,
-                  pode_responder, pode_qualificar, pode_agendar, pode_orcamento, orcamento_proativo
+                  pode_responder, pode_qualificar, pode_agendar, pode_orcamento,
+                  orcamento_proativo, agendar_modo
              from agente_config where conta_id=%s""", (conta_id,)).fetchone()
     if not r:
         return None
     ks = ["ativo", "limiar", "horario", "tom", "max_trocas", "escalar_para",
-          "pode_responder", "pode_qualificar", "pode_agendar", "pode_orcamento", "proativo"]
+          "pode_responder", "pode_qualificar", "pode_agendar", "pode_orcamento", "proativo",
+          # o modo da visita (migração 257): 'off' | 'propoe' | 'marca'. O
+          # `pode_agendar` acima continua sendo lido e continua não mandando em
+          # nada — está aqui só pra não quebrar quem grava por ele.
+          "agendar_modo"]
     return dict(zip(ks, r))
 
 
@@ -336,6 +342,29 @@ def _atender(pool, conta_id, conversa_id):
             for (_d, a, t) in reversed(msgs))
 
         cat_txt = "\n".join(_linha_catalogo(s) for s in catalogo) or "(sem catálogo)"
+        # A VISITA (migração 257). O bloco só entra quando a conta ligou a chave E
+        # estamos na janela comercial — fora dela quem resolve é gente, e instruir a
+        # IA sobre visita que ela não pode marcar é convidá-la a prometer horário.
+        visita_txt, visita_livres = "", []
+        _agora = _av.ag.agora_brt()
+        if _av.pode_agora(cfg, _agora):
+            visita_livres = _av.sugestoes(pool, conta_id, _agora, quantas=2)
+            if visita_livres:
+                _op = " ou ".join(d.strftime("%d/%m às %H:%M") for d in visita_livres)
+                visita_txt = (
+                    "\n\nVISITA AO ESPAÇO: a empresa recebe visita, e você pode combinar. "
+                    f"Horários LIVRES na agenda: {_op}. Ofereça só esses — nunca invente "
+                    "outro horário nem confirme um que o cliente propuser sem estar na "
+                    "lista (diga que confere com a equipe). Quando ele ACEITAR um deles, "
+                    "devolva acao=visita com visita.data e visita.hora exatamente do "
+                    "horário aceito.")
+        elif _av.modo(cfg) != "off":
+            # a chave está ligada, mas estamos fora da janela (ou não há horário
+            # livre nos próximos 14 dias). Nos dois casos a IA não pode combinar
+            # nada — e sem esta linha ela inventaria um horário pra agradar.
+            visita_txt = ("\n\nVISITA AO ESPAÇO: a empresa recebe visita, mas você NÃO pode "
+                          "marcar agora. Se o cliente pedir, diga que vai passar pra equipe "
+                          "confirmar o horário — nunca ofereça nem confirme dia e hora.")
         tom = "informal e próximo" if cfg["tom"] == "informal" else "formal e profissional"
         system = (
             "Você é o atendente virtual da empresa, no WhatsApp. Fala em português do "
@@ -389,9 +418,10 @@ def _atender(pool, conta_id, conversa_id):
                 "com a equipe e NÃO feche nada por conta própria.")
 
         pedir = (
-            f"Conversa com {lead_empresa}:\n{historico}{gemeo_nota}\n\n"
+            f"Conversa com {lead_empresa}:\n{historico}{gemeo_nota}{visita_txt}\n\n"
             "Responda a última mensagem do cliente. Retorne APENAS JSON:\n"
-            '{"acao":"responder|orcamento","resposta":"texto pra mandar ao cliente",'
+            '{"acao":"responder|orcamento|visita","resposta":"texto pra mandar ao cliente",'
+            '"visita":{"data":"AAAA-MM-DD","hora":"HH:MM"},'
             '"servicos":[{"slug":"...","qtd":1}],"temperatura":"frio|morno|quente",'
             '"evento":{"data":"AAAA-MM-DD","convidados":0,"inicio":"","fim":"","tipo":""}}\n'
             "- acao=orcamento só quando o cliente ACEITOU receber um orçamento (você "
@@ -411,7 +441,7 @@ def _atender(pool, conta_id, conversa_id):
         txt = "".join(getattr(b, "text", "") for b in resp.content
                       if getattr(b, "type", None) == "text").strip()
         d = _extrair_json(txt)
-        acao = d.get("acao") if d.get("acao") in ("responder", "orcamento") else "responder"
+        acao = d.get("acao") if d.get("acao") in ("responder", "orcamento", "visita") else "responder"
         resposta = (d.get("resposta") or "").strip()
 
         # qualificação: atualiza a temperatura do lead (se ligado e veio no JSON)
@@ -434,6 +464,31 @@ def _atender(pool, conta_id, conversa_id):
         # "responder dúvidas" no painel, o agente fica quieto (mas continua ativo).
         if not cfg["pode_responder"]:
             return
+
+        # ---------------------------------------------------------------- a visita
+        # FORA DA JANELA a IA não marca nem propõe: chama o vendedor dono do lead
+        # (ou a gestão). Decisão do dono em 14/09/2026 — e é a metade que impede
+        # "só em horário comercial" de virar "o pedido morreu no domingo".
+        # Só quando a conta ligou a chave: conta em 'off' não tem visita nenhuma
+        # pra avisar, e o vendedor não recebe push de função que não existe.
+        _ult_cliente = next((t for (_dd, a, t) in msgs if a == "lead"), "")
+        if (_av.modo(cfg) != "off" and conv[1]
+                and not _av.na_janela(_agora) and _av.pediu_visita(_ult_cliente)):
+            _av.fora_de_hora(pool, conta_id, conv[1], lead_empresa)
+
+        if acao == "visita" and _av.pode_agora(cfg, _agora) and conv[1]:
+            # O HORÁRIO TEM QUE SER UM DOS QUE OFERECEMOS. A lista saiu da agenda
+            # segundos atrás, já sem conflito; aceitar outro seria deixar a IA
+            # marcar em cima de festa — no nicho eventos, vender a mesma data
+            # duas vezes. Se não bater, não marca: responde e a conversa segue.
+            quando = _av.ag.parse_datahora(
+                f"{(d.get('visita') or {}).get('data','')} {(d.get('visita') or {}).get('hora','')}".strip())
+            if _av.foi_oferecido(quando, visita_livres):
+                if _av.modo(cfg) == "marca":
+                    _av.marcar(pool, conta_id, conv[1], quando, quem=lead_empresa)
+                else:
+                    _av.propor(pool, conta_id, conv[1], quando,
+                               conversa_id=conversa_id, quem=lead_empresa)
 
         if acao == "orcamento" and cfg["pode_orcamento"]:
             # Duas travas ANTES do documento, as duas de negócio e as duas em código —

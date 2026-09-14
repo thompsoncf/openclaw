@@ -1087,3 +1087,41 @@ def test_o_aviso_da_perda_nao_fala_de_festa(pool):
 
 def test_reaplicar_o_aviso_da_perda_nao_duplica(pool):
     assert _perda_app(pool)["id"] == _perda_app(pool)["id"]
+
+
+# ---------------- 258: a IA marcando visita (14/09/2026)
+
+def _ia_visita(pool) -> dict:
+    with pool.connection() as c:
+        c.execute((BASE / "258_novidade_ia_marca_visita.sql").read_text(encoding="utf-8"))
+        c.commit()
+        r = c.execute("""select tipo, publico, pra_quem, resumo, link, corpo, id
+                           from novidades where chave='ia-marca-visita'""").fetchone()
+    return {"tipo": r[0], "publico": r[1], "pra_quem": list(r[2]), "resumo": r[3],
+            "link": r[4], "corpo": r[5], "id": r[6]}
+
+
+def test_o_aviso_da_visita_mira_so_quem_vende_festa(pool):
+    """CLAUDE.md §6: visita ao espaço é vocabulário de quem vende data. Quem vende
+    por mensalidade marca reunião — outra coisa, que ainda não existe."""
+    a = _ia_visita(pool)
+    assert a["publico"] == "eventos"
+    assert a["link"].startswith("/painel/prospeccao") and a["resumo"]
+
+
+def test_o_vendedor_recebe_porque_e_ele_quem_confirma(pool):
+    a = _ia_visita(pool)
+    assert set(a["pra_quem"]) == {"dono", "gestor", "vendedor"}
+    # o aviso tem que dizer as duas coisas que mudam a rotina de quem lê
+    assert "Propõe" in a["corpo"] and "Marca" in a["corpo"]
+    assert "Desligado" in a["corpo"], "o aviso não diz que a chave nasce desligada"
+    assert "fora do horário comercial" in a["corpo"].lower()
+
+
+def test_o_aviso_da_visita_sai_no_site(pool):
+    _ia_visita(pool)
+    assert "ia-marca-visita" in {n["chave"] for n in nv.publicas(pool)}
+
+
+def test_reaplicar_a_258_nao_duplica(pool):
+    assert _ia_visita(pool)["id"] == _ia_visita(pool)["id"]

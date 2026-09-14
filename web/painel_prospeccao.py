@@ -34,6 +34,7 @@ from finance import origem_anuncio
 from finance import prospec_convite as _prospec_convite
 from finance import prospec_inbound as _prospec_inbound
 from finance import prospeccao_fontes as fontes
+from finance import agente_visita as _av
 from finance import servicos_catalogo as scat
 from finance import validadoc as _validadoc
 from finance.email_sender import remetente_configurado
@@ -1856,19 +1857,24 @@ def _chips_para_tela(pool, conta_id: int) -> list[dict]:
 _AGENTE_PADRAO = {"ativo": False, "limiar_confianca": 80, "horario": "comercial",
                   "tom": "informal", "max_trocas": 20, "escalar_para": "dono_lead",
                   "pode_responder": True, "pode_qualificar": True, "pode_agendar": True,
-                  "pode_orcamento": True, "orcamento_proativo": False}
+                  "pode_orcamento": True, "orcamento_proativo": False,
+                  # a visita nasce DESLIGADA em toda conta (migração 257): ligar
+                  # sozinho o que ninguém pediu é o que a §0 do CLAUDE.md proíbe
+                  "agendar_modo": "off"}
 
 
 def _agente_config(c, conta_id: int) -> dict:
     """Config do agente da empresa (defaults se ainda não salvou)."""
     r = c.execute(
         """select ativo, limiar_confianca, horario, tom, max_trocas, escalar_para,
-                  pode_responder, pode_qualificar, pode_agendar, pode_orcamento, orcamento_proativo
+                  pode_responder, pode_qualificar, pode_agendar, pode_orcamento,
+                  orcamento_proativo, agendar_modo
              from agente_config where conta_id=%s""", (conta_id,)).fetchone()
     if not r:
         return dict(_AGENTE_PADRAO)
     ks = ["ativo", "limiar_confianca", "horario", "tom", "max_trocas", "escalar_para",
-          "pode_responder", "pode_qualificar", "pode_agendar", "pode_orcamento", "orcamento_proativo"]
+          "pode_responder", "pode_qualificar", "pode_agendar", "pode_orcamento",
+          "orcamento_proativo", "agendar_modo"]
     return dict(zip(ks, r))
 
 
@@ -3834,6 +3840,12 @@ async def comunicacao_agente_config(request: Request):
     horario = f.get("horario") if f.get("horario") in ("comercial", "24h") else "comercial"
     tom = f.get("tom") if f.get("tom") in ("informal", "formal") else "informal"
     escalar = f.get("escalar_para") if f.get("escalar_para") in ("dono_lead", "plantao") else "dono_lead"
+    # a chave da visita: valor torto cai em 'off', que é o lado seguro de errar —
+    # a IA fica quieta, como sempre esteve. O campo só existe na tela de quem
+    # recebe visita, e conta que não o manda mantém o que já tinha (coalesce
+    # abaixo), em vez de ser desligada por um formulário que nem mostrou a chave.
+    _am = f.get("agendar_modo")
+    agendar_modo = _am if _am in _av.MODOS else None
     vals = (_b("ativo"), _i("limiar_confianca", 80, 50, 95), horario, tom,
             _i("max_trocas", 20, 1, 100), escalar, _b("pode_responder"), _b("pode_qualificar"),
             _b("pode_agendar"), _b("pode_orcamento"), _b("orcamento_proativo"))
@@ -3849,8 +3861,9 @@ async def comunicacao_agente_config(request: Request):
                  escalar_para=excluded.escalar_para, pode_responder=excluded.pode_responder,
                  pode_qualificar=excluded.pode_qualificar, pode_agendar=excluded.pode_agendar,
                  pode_orcamento=excluded.pode_orcamento, orcamento_proativo=excluded.orcamento_proativo,
+                 agendar_modo=coalesce(%s, agente_config.agendar_modo),
                  atualizado_em=now()""",
-            (ctx["conta_id"], *vals))
+            (ctx["conta_id"], *vals, agendar_modo))
         c.commit()
     request.session["prosp_aviso"] = "Agente atualizado ✓"
     return RedirectResponse(_AG_DESTINO, status_code=303)
@@ -12569,6 +12582,19 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .sw input:checked+span{background:var(--verde)}
 .sw input:checked+span::before{transform:translateX(18px);background:#04140d}
 .agrow{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.55rem 0;border-top:1px solid var(--borda)}
+/* a chave de três estados da visita (migração 257) — mesmo desenho do segmentado
+   da Régua do funil, que é onde o produto já ensina "off / meio / total" */
+.ag-seg{display:inline-flex;border:1px solid var(--borda);border-radius:9px;overflow:hidden;flex:none}
+.ag-seg input{position:absolute;opacity:0;pointer-events:none}
+.ag-seg label{font-size:.78rem;padding:.34rem .7rem;color:var(--txt-mut);cursor:pointer;
+  border-right:1px solid var(--borda);line-height:1.35;margin:0}
+.ag-seg label:last-of-type{border-right:0}
+.ag-seg label:hover{color:var(--txt)}
+.ag-seg input:checked + label{background:var(--verde);color:var(--sobre-verde);font-weight:700}
+.ag-seg input[value="off"]:checked + label{background:var(--borda);color:var(--txt)}
+.ag-seg input[value="propoe"]:checked + label{background:var(--azul);color:#04131B}
+.ag-nota{font-size:.78rem;color:var(--txt-mut);line-height:1.55;padding:.1rem 0 .5rem}
+.ag-nota b{color:var(--txt)}
 .agrow:first-of-type{border-top:0}
 .agrow .lab b{font-size:.88rem}.agrow .lab div{color:var(--txt-mut);font-size:.76rem;margin-top:.1rem}
 .aggrid{display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin-top:.3rem}
@@ -12807,7 +12833,26 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <h3>✅ O que ele faz sozinho</h3>
         <div class="agrow"><div class="lab"><b>Responder dúvidas frequentes</b><div>Usa a base de conhecimento ao lado</div></div><label class="sw"><input type="checkbox" name="pode_responder" {% if ag_cfg.pode_responder %}checked{% endif %}><span></span></label></div>
         <div class="agrow"><div class="lab"><b>Qualificar o lead</b><div>Mede interesse e ajusta a temperatura</div></div><label class="sw"><input type="checkbox" name="pode_qualificar" {% if ag_cfg.pode_qualificar %}checked{% endif %}><span></span></label></div>
-        <div class="agrow"><div class="lab"><b>Agendar follow-up</b></div><label class="sw"><input type="checkbox" name="pode_agendar" {% if ag_cfg.pode_agendar %}checked{% endif %}><span></span></label></div>
+        {#- A VISITA (migração 257). Não é interruptor: são três estados, porque o
+            dono pediu as duas opções no sistema ("é bom colocar no sistema as 2
+            opções", 14/09/2026) e cada empresa decide até onde a IA vai. Só
+            aparece pra quem recebe visita — nem toda conta de eventos recebe: a
+            Doce Mell tem 0 pedidos em 361 conversas. -#}
+        {% if raio_x_perfil and raio_x_perfil.vocab.data %}
+        <div class="agrow"><div class="lab"><b>Marcar visita ao espaço<span class="tag-new">novo</span></b><div>Quando o cliente pedir pra conhecer o espaço, em horário comercial</div></div>
+          <span class="ag-seg">
+            {% for v, r in [('off','Desligado'),('propoe','Propõe'),('marca','Marca')] %}
+            <input type="radio" id="agendar_modo_{{ v }}" name="agendar_modo" value="{{ v }}" {% if ag_cfg.agendar_modo==v %}checked{% endif %}>
+            <label for="agendar_modo_{{ v }}">{{ r }}</label>
+            {% endfor %}
+          </span>
+        </div>
+        <div class="ag-nota">
+          <b>Propõe</b> combina dia e hora com o cliente e manda o cartão pro vendedor confirmar — nada entra na agenda sem gente.
+          <b>Marca</b> marca direto e manda a confirmação com o convite de calendário.
+          Nos dois, fora do horário comercial a IA não marca: avisa o vendedor dono do lead.
+        </div>
+        {% endif %}
         <div class="agrow"><div class="lab"><b>Gerar orçamento prévio quando o cliente pedir<span class="tag-new">novo</span></b><div>Monta rascunho com serviços + preço e manda o link</div></div><label class="sw"><input type="checkbox" name="pode_orcamento" {% if ag_cfg.pode_orcamento %}checked{% endif %}><span></span></label></div>
         <div class="agrow"><div class="lab"><b>Oferecer orçamento proativamente</b><div>Sem o cliente pedir</div></div><label class="sw"><input type="checkbox" name="orcamento_proativo" {% if ag_cfg.orcamento_proativo %}checked{% endif %}><span></span></label></div>
       </div>

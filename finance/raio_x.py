@@ -314,18 +314,45 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
              where c.conta_id = %s and p.vendedor_id = %s and c.status = 'assinado'
                and c.assinado_em >= %s and c.assinado_em < %s
              order by c.assinado_em desc""", (conta_id, membro_id, ini, fim)).fetchall()
+        # OS DOIS DOCUMENTOS, e de quem é a bola. O bloco trazia só "aprovado há N
+        # dias" e nem olhava a tabela `contratos` — checava apenas que não havia um
+        # assinado. Com isso juntava dois estados opostos sob o mesmo rótulo:
+        # contrato que o cliente recebeu e não assinou, e contrato que nunca saiu
+        # daqui. Ver docs/mockups/raio_x_assinado_e_falta.html.
+        #
+        # `ct.enviado_em` E NÃO `ct.status`: a coluna nasce 'enviado' por padrão, e
+        # em 14/09/2026 o contrato nº 8 da conta 34 estava `status='enviado'` com
+        # `enviado_em` NULO — nunca mandado. Quem manda é a data. É a mesma leitura
+        # que `vendas.linha_do_funil` já fazia (`contrato_enviado_em`).
         sem_assinar = c.execute(f"""
             select {_SQL_NOME.format(o='o')}, o.primeiro_ano_centavos,
                    o.aprovada_em, o.id, coalesce(nullif(p.whatsapp, ''), nullif(p.telefone, ''), ''),
                    (select cv.id from conversas cv where cv.prospeccao_id = p.id
                      order by (cv.canal = 'whatsapp') desc, cv.criado_em desc limit 1),
                    (select cv.canal from conversas cv where cv.prospeccao_id = p.id
-                     order by (cv.canal = 'whatsapp') desc, cv.criado_em desc limit 1)
+                     order by (cv.canal = 'whatsapp') desc, cv.criado_em desc limit 1),
+                   o.aprovada_por, ct.numero, ct.criado_em, ct.enviado_em
               from orcamentos o join prospeccao p on p.orcamento_id = o.id
               {_SQL_NOME_JOIN.format(o='o')}
+              left join contratos ct on ct.orcamento_id = o.id and ct.status <> 'cancelado'
              where p.conta_id = %s and p.vendedor_id = %s and o.aprovada_em is not null
                and not exists (select 1 from contratos c where c.orcamento_id = o.id and c.status = 'assinado')
              order by o.aprovada_em""", (conta_id, membro_id)).fetchall()
+        # PARADO EM CASA: quanto o contrato fica pronto aqui dentro antes de ir pro
+        # cliente. Nasceu de uma medição da conta 34 em 14/09/2026 — nos 6 contratos
+        # assinados, 35 dias somados parados em casa contra 1 dia esperando o
+        # cliente. Todos assinaram no mesmo dia em que receberam. O número que
+        # faltava era este, e ele torna os 35 visíveis antes de virarem 35.
+        #
+        # Mede os ENVIADOS na janela (não os assinados): é o envio que fecha a
+        # espera, e contrato mandado e não assinado também já pagou esse tempo.
+        parado = c.execute("""
+            select extract(day from (ct.enviado_em - ct.criado_em))::int
+              from contratos ct join orcamentos o on o.id = ct.orcamento_id
+              join prospeccao p on p.orcamento_id = o.id
+             where ct.conta_id = %s and p.vendedor_id = %s and ct.enviado_em is not null
+               and ct.enviado_em >= %s and ct.enviado_em < %s""",
+            (conta_id, membro_id, ini, fim)).fetchall()
     n_5 = sum(1 for m in resp if m <= META_PRIMEIRA_MIN)
 
     def _aba(canal):
@@ -350,12 +377,52 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
         "contratos": [{"nome": _nome_do(nm), "valor_centavos": int(v or 0), "em": em}
                       for *nm, v, em in assinados],
         "contratos_valor": sum(int(r[-2] or 0) for r in assinados),
-        "sem_assinar": [{"nome": _nome_do(nm), "valor_centavos": int(v or 0),
-                         "dias": (fim - em).days if em else 0,
-                         "orcamento_id": oid, "fone": fmt_fone(fone),
-                         "conversa_id": cid, "aba": _aba(canal)}
-                        for *nm, v, em, oid, fone, cid, canal in sem_assinar],
+        "sem_assinar": _sem_assinar(sem_assinar, fim, _aba),
+        # a mediana do que FICOU PARADO EM CASA, e quantos estão parados agora — o
+        # segundo é o que dói, porque ainda dá pra resolver hoje.
+        "parado_em_casa": _mediana([int(d[0]) for d in parado if d[0] is not None]),
+        "parado_em_casa_n": len(parado),
     }
+
+
+def _sem_assinar(linhas, fim, _aba) -> list[dict]:
+    """Cada aprovado sem contrato assinado, com O ESTADO DOS DOIS DOCUMENTOS.
+
+    `estado` é a pergunta "de quem é a bola", e é ele que agrupa na tela:
+
+      `nunca_enviado`  o contrato existe e não saiu daqui. A BOLA É NOSSA, e o
+                       relógio é o de "parado em casa".
+      `aguardando`     o cliente recebeu e ainda não assinou. A bola é dele.
+      `sem_contrato`   aprovado e o contrato nem foi criado — raro (ele nasce na
+                       aprovação), mas existe em proposta antiga e não pode sumir
+                       da lista por falta de linha em `contratos`.
+
+    `dias` continua sendo o que a linha mostra, mas agora conta do EVENTO CERTO:
+    do envio pra quem foi enviado, da criação do contrato pra quem não foi. Contar
+    da aprovação — como se fazia — dizia "esperando assinatura há 23 dias" de um
+    contrato que tinha saído no dia anterior.
+    """
+    out = []
+    for *nm, v, aprov, oid, fone, cid, canal, aprov_por, ctr_n, ctr_criado, ctr_env in linhas:
+        if ctr_n is None:
+            estado, desde = "sem_contrato", aprov
+        elif ctr_env is None:
+            estado, desde = "nunca_enviado", (ctr_criado or aprov)
+        else:
+            estado, desde = "aguardando", ctr_env
+        out.append({
+            "nome": _nome_do(nm), "valor_centavos": int(v or 0),
+            "dias": (fim - desde).days if desde else 0,
+            "orcamento_id": oid, "fone": fmt_fone(fone),
+            "conversa_id": cid, "aba": _aba(canal),
+            "estado": estado,
+            "aprovada_em": aprov, "aprovada_por": (aprov_por or "").strip(),
+            "contrato_numero": ctr_n, "contrato_enviado_em": ctr_env,
+        })
+    # a bola nossa primeiro: é a única fila que depende só de nós pra andar
+    ordem = {"nunca_enviado": 0, "sem_contrato": 1, "aguardando": 2}
+    out.sort(key=lambda i: (ordem[i["estado"]], -i["dias"]))
+    return out
 
 
 def cor(metrica: str, s: dict) -> str:

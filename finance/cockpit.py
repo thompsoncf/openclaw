@@ -600,6 +600,23 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
             _log.warning("não deu pra ler os motivos de perda da conta %s (%s: %s)",
                          conta_id, type(e).__name__, e)
             alvo["motivos_perda"] = []
+        # A TRAVA DA INSISTÊNCIA na ficha (migração 257). A tela precisa saber ANTES
+        # do envio: o vendedor escolhe o motivo junto com o texto, num gesto só. Se
+        # ele só descobrisse ao apertar enviar, escreveria a mensagem duas vezes.
+        #
+        # Só em 'ligado'. Em ensaio a ficha não muda em nada — é o que faz o ensaio
+        # ser invisível pra equipe.
+        alvo["trava"] = None
+        try:
+            from finance import funil_trava as _tv
+            with c.transaction():
+                if _tv.modo(c, conta_id) == "ligado":
+                    v = _tv.avaliar(c, conta_id, lead_id)
+                    if v["decisao"] in ("pediria_justificativa", "parede"):
+                        alvo["trava"] = {**v, "motivos": _tv.motivos()}
+        except Exception as e:  # noqa: BLE001 — ficha que não abre é pior
+            _log.warning("não deu pra avaliar a trava no lead %s (%s: %s)",
+                         lead_id, type(e).__name__, e)
         # `chip_id` vem junto pro aviso de conversa repetida saber se a outra está no
         # MESMO chip (entrega dupla, defeito) ou no outro (a campanha nos dois números,
         # que é de propósito). Ver `aviso_outra_conversa`.
@@ -702,9 +719,18 @@ def _posse(c, conta_id, membro_id, lead_id) -> bool:
     return bool(r and r[0] == membro_id)
 
 
-def enviar_mensagem(pool, conta_id: int, membro_id: int, lead_id: int, texto: str) -> dict:
+def enviar_mensagem(pool, conta_id: int, membro_id: int, lead_id: int, texto: str,
+                    trava_motivo: str = "", trava_desc: str = "",
+                    trava_data: str = "") -> dict:
     """Manda uma mensagem pro lead pelo WhatsApp da empresa (dentro da janela 24h).
-    Grava no inbox e ASSUME a conversa (pausa o bot). Revalida a posse."""
+    Grava no inbox e ASSUME a conversa (pausa o bot). Revalida a posse.
+
+    A TRAVA DA INSISTÊNCIA (migração 257) entra aqui quando a conta está em
+    'ligado'. Os três `trava_*` são a justificativa que a folha do lead mandou
+    junto; sem ela, um envio que a regra barra volta com `trava` no retorno e a
+    tela sabe o que perguntar. Em 'observando' nada disso acontece: o ensaio conta
+    e a mensagem sai igual.
+    """
     from finance import whatsapp_out
     from web.painel_prospeccao import _add_msg, _conversa_id
     texto = (texto or "").strip()
@@ -718,6 +744,31 @@ def enviar_mensagem(pool, conta_id: int, membro_id: int, lead_id: int, texto: st
         numero = (p[0] or p[1] or "") if p else ""
         if not numero:
             return {"ok": False, "erro": "Lead sem número de WhatsApp."}
+        # A TRAVA DA INSISTÊNCIA (migração 257). Fica ANTES do envio porque é o que
+        # ela mede e, em 'ligado', o que ela barra: a tentativa, não o lead parado.
+        #
+        # Em 'observando' o ensaio conta e a mensagem sai igual — `_barra` só é
+        # verdadeiro no modo 'ligado'.
+        from finance import funil_trava as _tv
+        _v = _tv.registrar(c, conta_id, lead_id, membro_id)
+        _barra = bool(_v and _v.get("modo") == "ligado"
+                      and _v["decisao"] in ("pediria_justificativa", "parede"))
+        if _barra:
+            if _v["decisao"] == "parede":
+                # a PAREDE não tem justificativa que a abra: as renovações da etapa
+                # acabaram. A tela oferece as duas saídas (Follow-up ou Perdido), e
+                # é por isso que o veredito volta inteiro em vez de um erro seco.
+                return {"ok": False, "erro": "trava_parede", "trava": _v}
+            if not trava_motivo:
+                return {"ok": False, "erro": "trava_justifique", "trava": _v,
+                        "motivos": _tv.motivos()}
+            j = _tv.justificar(c, conta_id, lead_id, membro_id, motivo=trava_motivo,
+                               descricao=trava_desc, data=trava_data)
+            if not j.get("ok"):
+                return {"ok": False, "erro": j.get("erro"), "trava": _v,
+                        "motivos": _tv.motivos()}
+            c.commit()   # a renovação e o movimento ficam mesmo se o envio falhar
+                         # depois: o vendedor justificou, e justificar é um fato
         # responde pelo mesmo chip que recebeu. `_conversa_id` já é chamado logo
         # abaixo pra gravar no inbox; aqui ele vem antes porque o chip precisa ser
         # decidido ANTES do envio.

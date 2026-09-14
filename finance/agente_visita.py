@@ -12,7 +12,7 @@ no cadastro, move pra 'qualificado' e manda o WhatsApp com o .ics. Aqui não se
 reimplementa nada disso — dá-se à IA uma porta pra ele, com as travas que uma
 IA marcando compromisso com cliente de verdade exige.
 
-OS TRÊS MODOS (`agente_config.agendar_modo`, migração 257), escolha da conta:
+OS TRÊS MODOS (`agente_config.agendar_modo`, migração 259), escolha da conta:
     off     nem oferece — responde e passa pro time
     propoe  combina com o cliente e deixa PRONTA; o vendedor confirma num toque
     marca   marca direto e manda a confirmação
@@ -247,7 +247,7 @@ def propor(pool, conta_id: int, lead_id: int, inicio: datetime, *,
            quem: str = "O cliente") -> dict:
     """Guarda a visita combinada e entrega o cartão ao vendedor. NÃO toca na agenda.
 
-    Uma proposta viva por lead (índice único da 257): a IA que voltar a combinar
+    Uma proposta viva por lead (índice único da 259): a IA que voltar a combinar
     horário atualiza a que existe, em vez de encher a fila com três cartões do
     mesmo cliente."""
     dur = max(15, int(dur_min or DUR_PADRAO_MIN))

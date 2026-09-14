@@ -407,7 +407,7 @@ b,strong{font-weight:600}
 .vis .mid{flex:1;min-width:0}
 .vis .mid b{font-size:.9rem;display:block}
 .vis .mid .loc{font-size:.76rem;color:var(--text-dim);margin-top:.1rem}
-/* o cartão da visita que a IA combinou (migração 257) */
+/* o cartão da visita que a IA combinou (migração 259) */
 .vp{border:1px solid var(--azul-borda,#1B3A4A);background:var(--azul-fundo,#0D1B23);
   border-radius:12px;padding:.7rem .8rem;margin:.6rem 0}
 .vp-tt{font-size:.84rem;font-weight:600}
@@ -744,6 +744,21 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .grade a:last-child:nth-child(odd),.grade .off:last-child:nth-child(odd){grid-column:1/-1}
 .grade a.orc{border-color:#1e4a3a;color:var(--neon);background:rgba(37,211,102,.08);font-weight:600}
 .grade a.vis2{border-color:#1b3a4a;color:var(--azul);background:#0d1b23;font-weight:600}
+/* a trava da insistência (migração 257), grudada no composer */
+.travabl{background:var(--surface);border:1px solid var(--ambar-borda);border-radius:10px;
+  padding:.6rem .7rem;margin:0 0 .5rem;display:flex;flex-direction:column;gap:.4rem}
+.travat{font-family:var(--mono);font-size:.64rem;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ambar);font-weight:700}
+.travabl p{margin:0;font-size:.78rem;color:var(--text-dim);line-height:1.45}
+.travaops{display:flex;flex-direction:column;gap:.25rem}
+.travaop{display:flex;align-items:center;gap:.45rem;background:var(--bg-2);
+  border:1px solid var(--line);border-radius:7px;padding:.42rem .55rem;font-size:.8rem}
+.travaop:has(input:checked){border-color:var(--neon);background:var(--neon-fraco);color:var(--neon)}
+.travaop input{accent-color:var(--neon);flex:0 0 auto}
+.travaex{width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:7px;
+  padding:.45rem .6rem;color:var(--text);font-family:inherit;font-size:.8rem}
+.travaportas{display:grid;grid-template-columns:1fr 1fr;gap:.4rem}
+.travaportas .btn{text-align:center;padding:.5rem;font-size:.8rem;text-decoration:none}
 .etapas{display:flex;gap:.35rem;flex-wrap:wrap}
 .etapas form{margin:0}
 .etapas button{font-family:inherit;font-size:.78rem;padding:.32rem .7rem;border-radius:999px;
@@ -3280,7 +3295,7 @@ def cockpit_visita_marcar(request: Request, lead_id: int):
 
 @router.post("/cockpit/lead/{lead_id}/visita-proposta/{proposta_id}/{acao}")
 def cockpit_visita_proposta(request: Request, lead_id: int, proposta_id: int, acao: str):
-    """O vendedor decide sobre a visita que a IA combinou (migração 257).
+    """O vendedor decide sobre a visita que a IA combinou (migração 259).
 
     Confirmar passa pelo MESMO `cockpit.agendar_visita` do botão manual — mesma
     agenda, mesmo vínculo, mesmo "Qualificado", mesmo WhatsApp com o .ics. A
@@ -4299,6 +4314,28 @@ _ANEXO_JS = r"""
 """
 
 
+# O campo extra do motivo escolhido. NASCE ESCONDIDO e o script mostra só o que o
+# motivo pede — ao contrário do campo de perda (#680), que nasce visível porque lá
+# o vendedor sem JS ficaria sem onde escrever. Aqui é o oposto: sem JS os dois
+# campos aparecem, e o `required` do rádio já garante que ele escolha um motivo.
+# Mostrar dois campos a mais é feio; esconder um campo obrigatório é um beco.
+_TRAVA_JS = (
+    "<script>(function(){"
+    "var f=document.getElementById('comp'); if(!f)return;"
+    "var ex=f.querySelectorAll('.travaex');"
+    "function v(){"
+    "  var r=f.querySelector('input[name=trava_motivo]:checked');"
+    "  ex.forEach(function(e){"
+    "    var pede=r&&((e.name==='trava_data'&&r.hasAttribute('data-data'))||"
+    "                 (e.name==='trava_desc'&&r.hasAttribute('data-texto')));"
+    "    e.hidden=!pede; e.required=!!pede;});"
+    "}"
+    "f.querySelectorAll('input[name=trava_motivo]').forEach(function(r){"
+    "  r.addEventListener('change',v);});"
+    "ex.forEach(function(e){e.hidden=true;});"
+    "v();})();</script>")
+
+
 _VOZ_JS = r"""
 <script>
 (function(){
@@ -4586,7 +4623,7 @@ def _dia_br(dt) -> str:
 
 
 def _bloco_visita(request: Request, lead_id: int) -> str:
-    """A visita que a IA combinou e está esperando o OK do vendedor (migração 257).
+    """A visita que a IA combinou e está esperando o OK do vendedor (migração 259).
 
     Só aparece no modo `propoe` — no `marca` não há o que confirmar. Fica NA TELA
     DO LEAD, e não numa fila separada, porque é aqui que o vendedor está quando o
@@ -4734,8 +4771,45 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
         # "perguntar" da Fila: a pergunta chega pronta na caixa, o vendedor confere e manda
         _qp = getattr(request, "query_params", None)
         texto_pre = ((_qp.get("texto") if _qp else "") or "")[:300]
+        # A TRAVA DA INSISTÊNCIA (migração 257), quando a conta está em 'ligado' e a
+        # regra engata neste lead. Fica GRUDADA no composer, dentro do mesmo form:
+        # o motivo viaja junto com o texto, num POST só. Num form separado o motivo
+        # sairia sem a mensagem e a mensagem sem o motivo — o mesmo defeito que o
+        # #680 consertou no fluxo de perda.
+        #
+        # A PAREDE não tem escolha: mostra as duas saídas e esconde o campo, porque
+        # não existe justificativa que a abra. Parede sem porta é o que faz gente
+        # falar pelo celular pessoal, e aí a empresa perde a conversa inteira.
+        _tv = d.get("trava") or {}
+        trava_html = ""
+        if _tv.get("decisao") == "parede":
+            trava_html = (
+                "<div class=travabl><span class=travat>🚧 Duas renovações já usadas</span>"
+                f"<p>{_tv.get('tentativas', 0)} mensagens suas sem resposta, "
+                f"{int(_tv.get('dias', 0))} dias na mesma etapa. Insistir de novo não muda "
+                "o resultado — estas duas coisas mudam:</p>"
+                "<div class=travaportas>"
+                f"<a class=btn href='#acoes'>Mover de etapa</a>"
+                f"<a class='btn perigo' href='#acoes'>Marcar Perdido</a>"
+                "</div></div>")
+        elif _tv.get("decisao") == "pediria_justificativa":
+            _ops = "".join(
+                f"<label class=travaop><input type=radio name=trava_motivo value='{esc(m['chave'])}'"
+                f"{' data-data=1' if m['pede_data'] else ''}"
+                f"{' data-texto=1' if m['pede_texto'] else ''} required>"
+                f"<span>{esc(m['rotulo'])}</span></label>" for m in _tv.get("motivos", []))
+            trava_html = (
+                "<div class=travabl><span class=travat>⏱ Por que insistir com ele?</span>"
+                f"<p>{_tv.get('tentativas', 0)} mensagens suas sem resposta. Escolha um motivo "
+                "e a mensagem vai normalmente.</p>"
+                f"<div class=travaops>{_ops}</div>"
+                "<input class=travaex name=trava_data type=date hidden aria-label='Dia que ele pediu'>"
+                "<input class=travaex name=trava_desc hidden placeholder='Conte em uma linha' "
+                "aria-label='Explique em uma linha'>"
+                "</div>" + _TRAVA_JS)
         acao = (f"<form class=composer id=comp method=post action='{_BASE}/lead/{lead_id}/mensagem'>"
-                f"<input name=texto placeholder='Responder…' required autocomplete=off value='{esc(texto_pre)}'"
+                + trava_html
+                + f"<input name=texto placeholder='Responder…' required autocomplete=off value='{esc(texto_pre)}'"
                 f"{' autofocus' if texto_pre else ''}>"
                 + clipe + mic +
                 "<button type=submit aria-label=Enviar>&#10148;</button>"
@@ -4862,7 +4936,7 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "l.hidden=true;document.getElementById('lupaImg').removeAttribute('src');};"
            "document.addEventListener('keydown',function(e){"
            "if(e.key==='Escape')lupaFecha();});"
-           # A VISITA COMBINADA PELA IA (migração 257). No `window` pelo mesmo
+           # A VISITA COMBINADA PELA IA (migração 259). No `window` pelo mesmo
            # motivo do lupaFecha: quem chama é o onclick do HTML, que está fora
            # deste IIFE. Desabilita os dois botões antes de sair — confirmar duas
            # vezes criaria dois compromissos pro mesmo cliente.
@@ -5270,6 +5344,14 @@ _RECADO = {
     # no dia em que o dono ligasse o `exige_motivo` do Perdido.
     "motivo_obrigatorio": "Escolha por que perdeu antes de marcar como Perdido.",
     "descricao_obrigatoria": "Esse motivo pede uma linha explicando. Escreva e mande de novo.",
+    # as recusas da trava da insistência (migração 257)
+    "trava_justifique": "Escolha por que insistir com ele — a mensagem vai logo em seguida.",
+    "trava_parede": "Já foram duas renovações e cinco tentativas. Mova pra Follow-up "
+                    "ou marque como Perdido.",
+    "motivo_invalido": "Esse motivo não está na lista.",
+    "data_obrigatoria": "Diga o dia em que ele pediu para você chamar.",
+    "sem_renovacao": "As renovações desta etapa acabaram. Mova pra Follow-up ou "
+                     "marque como Perdido.",
 }
 
 
@@ -5409,9 +5491,17 @@ async def cockpit_anexo(request: Request, lead_id: int):
 
 
 @router.post("/cockpit/lead/{lead_id}/mensagem")
-def cockpit_mensagem(request: Request, lead_id: int, texto: str = Form(...)):
+def cockpit_mensagem(request: Request, lead_id: int, texto: str = Form(...),
+                     trava_motivo: str = Form(""), trava_desc: str = Form(""),
+                     trava_data: str = Form("")):
+    """Os três `trava_*` são a justificativa da trava da insistência (migração 257),
+    mandada pelo mesmo formulário do texto. Vão vazios quando a conta não está em
+    'ligado' ou o lead está dentro do prazo — que é o caso da esmagadora maioria
+    dos envios."""
     return _agir(request, lead_id,
-                 lambda p, c, m, l: {**ck.enviar_mensagem(p, c, m, l, texto), "msg": "Mensagem enviada ✓"},
+                 lambda p, c, m, l: {**ck.enviar_mensagem(p, c, m, l, texto,
+                                                          trava_motivo, trava_desc, trava_data),
+                                     "msg": "Mensagem enviada ✓"},
                  f"{_BASE}/lead/{lead_id}")
 
 

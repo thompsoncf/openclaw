@@ -1,4 +1,4 @@
--- 258_novidade_ia_marca_visita.sql
+-- 260_novidade_ia_marca_visita.sql
 -- O aviso da visita combinada pela IA (CLAUDE.md §5).
 --
 -- PÚBLICO 'eventos' (§6): visita ao espaço é vocabulário de quem vende festa com

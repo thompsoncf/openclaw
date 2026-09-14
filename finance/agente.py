@@ -32,7 +32,7 @@ def _cfg(c, conta_id):
         return None
     ks = ["ativo", "limiar", "horario", "tom", "max_trocas", "escalar_para",
           "pode_responder", "pode_qualificar", "pode_agendar", "pode_orcamento", "proativo",
-          # o modo da visita (migração 257): 'off' | 'propoe' | 'marca'. O
+          # o modo da visita (migração 259): 'off' | 'propoe' | 'marca'. O
           # `pode_agendar` acima continua sendo lido e continua não mandando em
           # nada — está aqui só pra não quebrar quem grava por ele.
           "agendar_modo"]
@@ -342,7 +342,7 @@ def _atender(pool, conta_id, conversa_id):
             for (_d, a, t) in reversed(msgs))
 
         cat_txt = "\n".join(_linha_catalogo(s) for s in catalogo) or "(sem catálogo)"
-        # A VISITA (migração 257). O bloco só entra quando a conta ligou a chave E
+        # A VISITA (migração 259). O bloco só entra quando a conta ligou a chave E
         # estamos na janela comercial — fora dela quem resolve é gente, e instruir a
         # IA sobre visita que ela não pode marcar é convidá-la a prometer horário.
         visita_txt, visita_livres = "", []

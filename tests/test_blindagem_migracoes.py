@@ -94,10 +94,10 @@ create table mensagens (id bigserial primary key, conversa_id bigint, canal text
   direcao text, autor text, texto text, provider_sid text, membro_id bigint,
   criado_em timestamptz default now(),
   midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
--- agente_config vem da 080 também (marcada como aplicada); a 257 acrescenta a ela
+-- agente_config vem da 080 também (marcada como aplicada); a 259 acrescenta a ela
 -- o modo da visita (off/propoe/marca). Na forma EXATA da 080, que é o estado de
--- onde a 257 parte em produção — inclusive o `pode_agendar`, que existe desde lá
--- e que a 257 deliberadamente não toca.
+-- onde a 259 parte em produção — inclusive o `pode_agendar`, que existe desde lá
+-- e que a 259 deliberadamente não toca.
 create table agente_config (
   conta_id bigint primary key references contas(id) on delete cascade,
   ativo boolean not null default false, limiar_confianca int not null default 80,

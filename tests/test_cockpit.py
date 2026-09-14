@@ -77,6 +77,33 @@ create table funil_etapas (id bigserial primary key,
   sai_do_quadro boolean not null default false,
   agenda_ao_entrar boolean not null default false,
   unique (conta_id, chave));
+-- a trava da insistência (migração 257) e o que ela usa. Sem estas três, o
+-- cockpit passaria nos testes e quebraria em produção no primeiro envio de uma
+-- conta com a trava ligada.
+create table funil_regua (conta_id bigint primary key,
+  gatilhos_modo text not null default 'off', cobranca_modo text not null default 'off',
+  janela_dias text, janela_abre time, janela_fecha time,
+  sem_resposta_min int, bola_nossa_min int, bola_cliente_min int,
+  escala_min int, teto_avisos_dia int,
+  follow_up_modo text not null default 'off', fu_proposta_dias int, fu_toques_dias text,
+  fu_festa_dias int, fu_teto_dia int,
+  teto_modo text not null default 'off', teto_avisar_antes int,
+  fila_modo text not null default 'prazo',
+  temperatura_modo text not null default 'off',
+  temp_quente_h int, temp_morno_dias int, temp_frio_tentativas int,
+  trava_modo text not null default 'off',
+  atualizado_em timestamptz not null default now());
+create table funil_renovacoes (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
+  etapa text, ordem int, membro_id bigint, justificativa text, automatica boolean default false,
+  vence_em timestamptz, criado_em timestamptz default now());
+create table funil_trava_tentativa (id bigserial primary key, conta_id bigint,
+  prospeccao_id bigint, membro_id bigint, etapa text default '', decisao text,
+  bola text default '', dias_na_etapa numeric(8,2), renovacoes int default 0,
+  tentativas int default 0, simulado boolean default true,
+  criado_em timestamptz default now());
+create table follow_up_marcacoes (id bigserial primary key, conta_id bigint,
+  prospeccao_id bigint, prazo_em timestamptz, acao text, membro_id bigint,
+  automatico boolean default false, motivo text, criado_em timestamptz default now());
 create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint, membro_id bigint,
   tipo text, resultado text, descricao text, criado_em timestamptz default now());
 create table cockpit_acesso (token text primary key, conta_id bigint, membro_id bigint,
@@ -98,7 +125,12 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_i
 -- DDL do próprio app) além das de cima; sem elas cada bloco da tela cairia no
 -- `except` e o teste passaria sem exercitar a consulta
 create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
-  status text default 'enviado', valor_centavos bigint, assinado_em timestamptz, enviado_em timestamptz);
+  status text default 'enviado', valor_centavos bigint, assinado_em timestamptz, enviado_em timestamptz,
+  -- 14/09: o bloco de assinatura passou a dizer de quem é a bola, e pra isso lê o
+  -- NÚMERO do contrato e a data em que ele foi criado. Sem as duas colunas a
+  -- consulta estoura, o bloco cai no `except` e a tela renderiza sem "Sua semana"
+  -- — falha muda, que foi exatamente como este teste a pegou.
+  numero int, criado_em timestamptz default now());
 -- o CADASTRO do cliente: primeiro degrau de `vendas.nome_do_orcamento`, e por isso
 -- o Raio-X faz left join nela pra montar o nome de cada linha
 create table clientes (id bigserial primary key, conta_id bigint, nome text);
@@ -1688,3 +1720,82 @@ def test_ficha_guarda_de_onde_veio_o_cliente_e_recusa_o_que_nao_esta_na_lista(po
     monkeypatch.setattr(pc, "get_pool", lambda: pool)
     html = bytes(pc.cockpit_ficha_tela(_req_vend(conta, vend), lid).body).decode("utf-8")
     assert "De onde veio o cliente" in html and "<option value='indicacao' selected>Indicação</option>" in html
+
+
+# ------------------------------------------------------------------ a trava da insistência (257)
+def test_a_folha_mostra_a_trava_so_no_modo_ligado(pool, monkeypatch):
+    """Em ensaio a ficha não muda em NADA — é o que faz o ensaio ser invisível pra
+    equipe. Em 'ligado', o bloco do motivo nasce dentro do mesmo form do texto, pra
+    o motivo e a mensagem irem num POST só."""
+    from web import painel_cockpit as pc
+    from finance import funil_trava as tv
+    with pool.connection() as c:
+        conta = _conta(c, "Trava"); vend = _membro(c, conta, email="trava@x.com")
+        lid = _lead(c, conta, vend, "Insistido")
+        c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem,
+                                               teto_dias, renovacoes_max)
+                     values (%s,'contatado','Contatado',10,7,2)""", (conta,))
+        c.execute("update prospeccao set status='contatado', criado_em=now()-interval '20 days' "
+                  "where id=%s", (lid,))
+        conv = c.execute("""insert into conversas (conta_id, prospeccao_id, canal, agente_ativo)
+                            values (%s,%s,'whatsapp',false) returning id""",
+                         (conta, lid)).fetchone()[0]
+        c.execute("""insert into mensagens (conversa_id, direcao, texto, criado_em)
+                     values (%s,'out','oi', now()-interval '19 days')""", (conv,))
+        c.execute("insert into funil_regua (conta_id, trava_modo) values (%s,'observando')",
+                  (conta,))
+        c.commit()
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    monkeypatch.setattr(pc, "_selo", lambda conta_id: "")
+
+    html = bytes(pc.cockpit_lead(_req_vend(conta, vend), lid).body).decode("utf-8")
+    assert "Por que insistir" not in html, "em ensaio a ficha é a de sempre"
+
+    with pool.connection() as c:
+        c.execute("update funil_regua set trava_modo='ligado' where conta_id=%s", (conta,))
+        c.commit()
+    html = bytes(pc.cockpit_lead(_req_vend(conta, vend), lid).body).decode("utf-8")
+    assert "Por que insistir com ele?" in html
+    for m in tv.motivos():                       # os quatro, com o rótulo aprovado
+        assert f"value='{m['chave']}'" in html and m["rotulo"] in html
+    # o bloco fica DENTRO do form do composer — motivo e texto num POST só
+    comp = html.split("class=composer")[1]
+    assert "trava_motivo" in comp.split("</form>")[0]
+
+
+def test_enviar_sem_justificar_e_recusado_e_com_motivo_passa(pool, monkeypatch):
+    """A recusa devolve o veredito e os motivos, pra tela saber o que perguntar —
+    em vez de um erro seco que deixaria o vendedor sem saída."""
+    from finance import funil_trava as tv
+    from finance import whatsapp_out as wo
+    monkeypatch.setattr(wo, "enviar",
+                        lambda c, cid, num, txt, *, chip_id=None: {"ok": True, "sid": "SM9"})
+    monkeypatch.setattr(wo, "chip_da_conversa", lambda c, cid, conv: None)
+    with pool.connection() as c:
+        conta = _conta(c, "Trava2"); vend = _membro(c, conta, email="trava2@x.com")
+        lid = _lead(c, conta, vend, "Insistido2")
+        c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem,
+                                               teto_dias, renovacoes_max)
+                     values (%s,'contatado','Contatado',10,7,2),
+                            (%s,'proposta','Negociação',50,null,0)""", (conta, conta))
+        c.execute("update prospeccao set status='contatado', criado_em=now()-interval '20 days' "
+                  "where id=%s", (lid,))
+        conv = c.execute("""insert into conversas (conta_id, prospeccao_id, canal, agente_ativo)
+                            values (%s,%s,'whatsapp',false) returning id""",
+                         (conta, lid)).fetchone()[0]
+        c.execute("""insert into mensagens (conversa_id, direcao, texto, criado_em)
+                     values (%s,'out','oi', now()-interval '19 days')""", (conv,))
+        c.execute("insert into funil_regua (conta_id, trava_modo) values (%s,'ligado')", (conta,))
+        c.commit()
+    r = ck.enviar_mensagem(pool, conta, vend, lid, "Oi, tudo bem?")
+    assert r["ok"] is False and r["erro"] == "trava_justifique"
+    assert r["trava"]["decisao"] == "pediria_justificativa"
+    assert [m["chave"] for m in r["motivos"]] == [m[0] for m in tv.MOTIVOS]
+    # com o motivo, a mensagem sai E a justificativa vira ação: o lead anda
+    assert ck.enviar_mensagem(pool, conta, vend, lid, "Segue a proposta",
+                              "mandando")["ok"] is True
+    with pool.connection() as c:
+        assert c.execute("select status from prospeccao where id=%s",
+                         (lid,)).fetchone()[0] == "proposta"
+        assert c.execute("""select count(*) from funil_renovacoes
+                             where prospeccao_id=%s""", (lid,)).fetchone()[0] == 1

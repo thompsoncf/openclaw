@@ -47,13 +47,13 @@ create table mensagens (id bigserial primary key, conversa_id bigint, direcao te
 create table orcamentos (id bigserial primary key, cliente text, empresa text, numero int,
   cliente_id bigint, status text default 'rascunho',
   primeiro_ano_centavos bigint default 0, criado_em timestamptz default now(),
-  aprovada_em timestamptz, sinal_pago_em timestamptz);
+  aprovada_em timestamptz, aprovada_por text, sinal_pago_em timestamptz);
 -- o CADASTRO do cliente: primeiro degrau de `vendas.nome_do_orcamento`, e por isso
 -- o Raio-X faz left join nela pra montar o nome de cada linha.
 create table clientes (id bigserial primary key, conta_id bigint, nome text);
 create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
   status text default 'enviado', valor_centavos bigint, assinado_em timestamptz,
-  enviado_em timestamptz, criado_em timestamptz default now());
+  numero int, enviado_em timestamptz, criado_em timestamptz default now());
 create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   titulo text, inicio timestamptz, status text default 'ativo', desfecho text,
   -- a régua da lista de espera lê tipo/tipo_evento pra saber o que TOMA o dia
@@ -129,9 +129,12 @@ def _cadastro(c, conta, nome):
                      (conta, nome)).fetchone()[0]
 
 
-def _contrato(c, conta, orc, status="assinado", valor=500000, assinado=None):
-    return c.execute("""insert into contratos (conta_id, orcamento_id, status, valor_centavos, assinado_em)
-                        values (%s,%s,%s,%s,%s) returning id""", (conta, orc, status, valor, assinado)).fetchone()[0]
+def _contrato(c, conta, orc, status="assinado", valor=500000, assinado=None,
+              numero=None, criado=None, enviado=None):
+    return c.execute("""insert into contratos (conta_id, orcamento_id, status, valor_centavos,
+                          assinado_em, numero, criado_em, enviado_em)
+                        values (%s,%s,%s,%s,%s,%s,coalesce(%s, now()),%s) returning id""",
+                     (conta, orc, status, valor, assinado, numero, criado, enviado)).fetchone()[0]
 
 
 def _t(dias_atras: float, base: datetime = SEGUNDA_10H) -> datetime:
@@ -928,3 +931,171 @@ def test_sem_cadastro_a_empresa_do_orcamento_ganha_do_contato(pool):
 
     s = rx.sua_semana(pool, conta, v, ini, fim)
     assert [i["nome"] for i in s["sem_assinar"]] == ["Beatriz Souza Martins"]
+
+
+# ================== os DOIS documentos, e de quem é a bola
+#
+# 14/09/2026. O bloco "Aprovado, esperando assinatura" juntava dois estados
+# opostos: contrato que o cliente recebeu e não assinou, e contrato que nunca saiu
+# daqui. Medido na conta 34, nos 6 contratos assinados:
+#
+#     parado em casa (criado -> enviado)     35 dias somados
+#     esperando o cliente (enviado -> ass.)   1 dia somado
+#
+# Todo cliente assinou NO MESMO DIA em que recebeu. A demora nunca foi do cliente.
+# Mockup: docs/mockups/raio_x_assinado_e_falta.html
+
+def _aprovado_sem_assinar(c, conta, v, nome, *, ctr_criado, ctr_enviado=None,
+                          ctr_numero=1, aprovada=None, valor=500000):
+    lead = _lead(c, conta, v, nome, status="proposta", criado=_t(30))
+    o = _orc(c, None, "aprovada", valor, criado=_t(30), aprovada=aprovada or _t(25),
+             empresa=nome, numero=ctr_numero)
+    c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, lead))
+    c.execute("update orcamentos set aprovada_por=%s where id=%s", (nome, o))
+    _contrato(c, conta, o, "enviado", valor, None, ctr_numero, ctr_criado, ctr_enviado)
+    return o
+
+
+def test_contrato_nunca_enviado_e_separado_de_quem_espera_o_cliente(pool):
+    """O coração da mudança: os dois não podem viver sob o mesmo rótulo."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        _aprovado_sem_assinar(c, conta, v, "Carolina", ctr_criado=_t(4),
+                              ctr_enviado=None, ctr_numero=8)
+        _aprovado_sem_assinar(c, conta, v, "Beatriz", ctr_criado=_t(9),
+                              ctr_enviado=_t(2), ctr_numero=9)
+        c.commit()
+
+    itens = rx.sua_semana(pool, conta, v, ini, fim)["sem_assinar"]
+    por_nome = {i["nome"]: i for i in itens}
+    assert por_nome["Carolina"]["estado"] == "nunca_enviado"
+    assert por_nome["Beatriz"]["estado"] == "aguardando"
+
+
+def test_a_bola_nossa_vem_primeiro_na_lista(pool):
+    """Ordem não é enfeite: é a única fila que anda só com a gente."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        _aprovado_sem_assinar(c, conta, v, "Espera ha muito", ctr_criado=_t(20),
+                              ctr_enviado=_t(19), ctr_numero=1)
+        _aprovado_sem_assinar(c, conta, v, "Nunca enviado", ctr_criado=_t(2),
+                              ctr_enviado=None, ctr_numero=2)
+        c.commit()
+
+    itens = rx.sua_semana(pool, conta, v, ini, fim)["sem_assinar"]
+    assert [i["nome"] for i in itens] == ["Nunca enviado", "Espera ha muito"], (
+        "o que depende só de nós vem antes, mesmo esperando menos tempo")
+
+
+def test_o_relogio_conta_do_envio_e_nao_da_aprovacao(pool):
+    """O erro que o print do dono mostrou: "esperando assinatura há 23 dias" num
+    contrato que tinha saído no dia anterior. Aprovado há 25 dias, enviado há 2 —
+    o cliente está esperando há 2."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        # ancorado no FIM DA JANELA, não em SEGUNDA_10H: é de `fim` que a linha
+        # conta os dias, e a janela "passada" fecha na segunda 00:00 — usar a base
+        # errada aqui dava 1 onde o teste dizia 2, e o furado era o teste.
+        _aprovado_sem_assinar(c, conta, v, "Ana", ctr_criado=fim - timedelta(days=24),
+                              ctr_enviado=fim - timedelta(days=2),
+                              aprovada=fim - timedelta(days=25), ctr_numero=3)
+        c.commit()
+
+    i = rx.sua_semana(pool, conta, v, ini, fim)["sem_assinar"][0]
+    assert i["dias"] == 2, "conta do envio, não da aprovação (que foi há 25)"
+
+
+def test_o_que_nao_saiu_conta_da_criacao_do_contrato(pool):
+    """E o outro relógio, com o outro nome: quanto está parado EM CASA."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        _aprovado_sem_assinar(c, conta, v, "Ana", ctr_criado=fim - timedelta(days=6),
+                              ctr_enviado=None, aprovada=fim - timedelta(days=25),
+                              ctr_numero=4)
+        c.commit()
+
+    i = rx.sua_semana(pool, conta, v, ini, fim)["sem_assinar"][0]
+    assert i["estado"] == "nunca_enviado" and i["dias"] == 6
+
+
+def test_a_linha_traz_os_dois_documentos(pool):
+    """O pedido do dono: especificar o que foi assinado e o que falta."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        _aprovado_sem_assinar(c, conta, v, "Carolina", ctr_criado=_t(4),
+                              ctr_enviado=None, ctr_numero=8, aprovada=_t(4))
+        c.commit()
+
+    i = rx.sua_semana(pool, conta, v, ini, fim)["sem_assinar"][0]
+    assert i["aprovada_em"] is not None and i["aprovada_por"] == "Carolina"
+    assert i["contrato_numero"] == 8 and i["contrato_enviado_em"] is None
+
+
+def test_status_enviado_com_data_nula_nao_engana(pool):
+    """`contratos.status` nasce 'enviado' por padrão — na conta 34 o contrato nº 8
+    estava assim, com `enviado_em` NULO. Quem manda é a data, nunca o status."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        o = _aprovado_sem_assinar(c, conta, v, "Carolina", ctr_criado=_t(4),
+                                  ctr_enviado=None, ctr_numero=8)
+        c.execute("update contratos set status='enviado' where orcamento_id=%s", (o,))
+        c.commit()
+
+    i = rx.sua_semana(pool, conta, v, ini, fim)["sem_assinar"][0]
+    assert i["estado"] == "nunca_enviado"
+
+
+def test_aprovado_sem_contrato_nenhum_nao_some_da_lista(pool):
+    """O contrato nasce na aprovação, mas proposta antiga pode não ter. Faltar
+    linha em `contratos` não pode apagar a pendência."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        lead = _lead(c, conta, v, "Sem contrato", status="proposta", criado=_t(30))
+        o = _orc(c, None, "aprovada", 100000, criado=_t(30), aprovada=_t(10),
+                 empresa="Sem contrato", numero=5)
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, lead))
+        c.commit()
+
+    itens = rx.sua_semana(pool, conta, v, ini, fim)["sem_assinar"]
+    assert [i["estado"] for i in itens] == ["sem_contrato"]
+
+
+def test_parado_em_casa_mede_o_tempo_que_e_nosso(pool):
+    """A métrica que o dono pediu. Mede os ENVIADOS na janela: é o envio que fecha
+    a espera."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        # criados há 10, 8 e 6 dias; enviados há 4, 4 e 4 -> 6, 4 e 2 dias parados
+        for n, criado in ((1, 10), (2, 8), (3, 6)):
+            _aprovado_sem_assinar(c, conta, v, f"C{n}", ctr_criado=_t(criado),
+                                  ctr_enviado=_t(4), ctr_numero=n)
+        c.commit()
+
+    s = rx.sua_semana(pool, conta, v, ini, fim)
+    assert s["parado_em_casa"] == 4, "a mediana de 6, 4 e 2"
+    assert s["parado_em_casa_n"] == 3
+
+
+def test_parado_em_casa_ignora_o_que_ainda_nao_saiu(pool):
+    """Quem não foi enviado ainda não tem tempo FECHADO — entra na contagem de
+    'sem enviar agora', não na mediana, senão o número encolheria enquanto o
+    problema cresce."""
+    ini, fim, _ = rx.janela("passada", SEGUNDA_10H)
+    with pool.connection() as c:
+        conta = _conta(c); v = _vend(c, conta)
+        _aprovado_sem_assinar(c, conta, v, "Saiu", ctr_criado=_t(9), ctr_enviado=_t(3),
+                              ctr_numero=1)
+        _aprovado_sem_assinar(c, conta, v, "Nao saiu", ctr_criado=_t(30),
+                              ctr_enviado=None, ctr_numero=2)
+        c.commit()
+
+    s = rx.sua_semana(pool, conta, v, ini, fim)
+    assert s["parado_em_casa"] == 6 and s["parado_em_casa_n"] == 1

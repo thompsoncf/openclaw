@@ -1858,7 +1858,7 @@ _AGENTE_PADRAO = {"ativo": False, "limiar_confianca": 80, "horario": "comercial"
                   "tom": "informal", "max_trocas": 20, "escalar_para": "dono_lead",
                   "pode_responder": True, "pode_qualificar": True, "pode_agendar": True,
                   "pode_orcamento": True, "orcamento_proativo": False,
-                  # a visita nasce DESLIGADA em toda conta (migração 257): ligar
+                  # a visita nasce DESLIGADA em toda conta (migração 259): ligar
                   # sozinho o que ninguém pediu é o que a §0 do CLAUDE.md proíbe
                   "agendar_modo": "off"}
 
@@ -2642,6 +2642,11 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
             return JSONResponse({"ok": False, "erro": "canal_sem_resposta"})
         from finance import whatsapp_out
         numero = cv[3] or cv[4] or cv[2]
+        # ensaio da trava da insistência (migração 257): CONTA, não trava. `cv[1]` é
+        # o lead da conversa — conversa solta, sem lead, não tem etapa nem prazo.
+        if cv[1]:
+            from finance import funil_trava as _tv
+            _tv.registrar(c, ctx["conta_id"], cv[1], ctx["membro_id"])
         # sai pelo MESMO chip que recebeu — senão o lead escreve pra um número e é
         # respondido por outro, que do lado dele parece outra empresa
         res = whatsapp_out.enviar(
@@ -9873,6 +9878,10 @@ def prospeccao_enviar_whatsapp(request: Request, alvo_id: int, texto: str = Form
         return JSONResponse({"ok": False, "erro": "sem_numero"})
     from finance import whatsapp_out
     with pool.connection() as c:
+        # ensaio da trava da insistência (migração 257): CONTA, não trava
+        if alvo.get("id"):
+            from finance import funil_trava as _tv
+            _tv.registrar(c, ctx["conta_id"], alvo["id"], ctx["membro_id"])
         res = whatsapp_out.enviar(c, ctx["conta_id"], numero, texto)
         if not res.get("ok"):
             erros = {
@@ -12582,7 +12591,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .sw input:checked+span{background:var(--verde)}
 .sw input:checked+span::before{transform:translateX(18px);background:#04140d}
 .agrow{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.55rem 0;border-top:1px solid var(--borda)}
-/* a chave de três estados da visita (migração 257) — mesmo desenho do segmentado
+/* a chave de três estados da visita (migração 259) — mesmo desenho do segmentado
    da Régua do funil, que é onde o produto já ensina "off / meio / total" */
 .ag-seg{display:inline-flex;border:1px solid var(--borda);border-radius:9px;overflow:hidden;flex:none}
 .ag-seg input{position:absolute;opacity:0;pointer-events:none}
@@ -12833,7 +12842,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <h3>✅ O que ele faz sozinho</h3>
         <div class="agrow"><div class="lab"><b>Responder dúvidas frequentes</b><div>Usa a base de conhecimento ao lado</div></div><label class="sw"><input type="checkbox" name="pode_responder" {% if ag_cfg.pode_responder %}checked{% endif %}><span></span></label></div>
         <div class="agrow"><div class="lab"><b>Qualificar o lead</b><div>Mede interesse e ajusta a temperatura</div></div><label class="sw"><input type="checkbox" name="pode_qualificar" {% if ag_cfg.pode_qualificar %}checked{% endif %}><span></span></label></div>
-        {#- A VISITA (migração 257). Não é interruptor: são três estados, porque o
+        {#- A VISITA (migração 259). Não é interruptor: são três estados, porque o
             dono pediu as duas opções no sistema ("é bom colocar no sistema as 2
             opções", 14/09/2026) e cada empresa decide até onde a IA vai. Só
             aparece pra quem recebe visita — nem toda conta de eventos recebe: a

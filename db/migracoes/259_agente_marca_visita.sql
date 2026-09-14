@@ -1,4 +1,4 @@
--- 257_agente_marca_visita.sql
+-- 259_agente_marca_visita.sql
 -- A IA passa a poder combinar a visita ao espaço dentro da conversa.
 --
 -- POR QUE UMA CHAVE DE TRÊS ESTADOS, e não um boolean. Decisão do dono em

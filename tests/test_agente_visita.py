@@ -1,4 +1,4 @@
-"""A IA combinando a visita ao espaço (finance/agente_visita, migração 257).
+"""A IA combinando a visita ao espaço (finance/agente_visita, migração 259).
 
 O que estes testes protegem, em uma linha cada:
 

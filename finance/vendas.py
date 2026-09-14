@@ -400,6 +400,32 @@ def _ha(dias: int) -> str:
     return "1 dia" if dias == 1 else f"{dias} dias"
 
 
+def nome_do_orcamento(*, cadastro="", empresa="", cliente="", numero=None,
+                      lead_contato="", lead_empresa="") -> str:
+    """O NOME que uma linha mostra pra um orçamento. Uma regra só, pro app inteiro.
+
+    A ordem é a que produção provou: o CADASTRO do cliente primeiro (dos três
+    campos do orçamento, é o único que estava certo em todas as linhas), depois
+    `empresa`, depois `cliente`. Os campos do LEAD são o último recurso, pra
+    orçamento que ainda não tem nada preenchido.
+
+    E CADA DEGRAU PASSA POR `_nome_util`, que recusa o que parece telefone. É essa
+    guarda que o SQL do Raio-X não tinha, e o preço apareceu em 14/09/2026: o
+    orçamento nº 8 da conta 34 tinha o número digitado no campo "contato"
+    (`cliente = '86998192489'`), e o bloco "Aprovado, esperando assinatura"
+    anunciava a cliente como `86998192489` — com o nome dela, Josiany Rayra
+    Soares dos Santos, salvo em `empresa` e no cadastro, dois campos ao lado.
+
+    O caso vizinho, do mesmo dia, mostra por que a ORDEM também importa e não só o
+    filtro: o nº 23 tinha `cliente` vazio, e a tela caía no apelido do lead
+    ("Carolina Costa") em vez do nome do cadastro ("Maria Carolina da Silva
+    Costa") — que é o nome que está no contrato que ela vai assinar.
+    """
+    return (_nome_util(cadastro) or _nome_util(empresa) or _nome_util(cliente)
+            or _nome_util(lead_contato) or _nome_util(lead_empresa)
+            or (f"Orçamento nº {numero}" if numero else "Orçamento sem nome"))
+
+
 def titulo_do_funil(*, cadastro="", empresa="", cliente="", modo="recorrente",
                     evento=None, numero=None) -> dict:
     """{titulo, sub} de uma linha — a redação do NOME, testável sem tela.
@@ -420,8 +446,10 @@ def titulo_do_funil(*, cadastro="", empresa="", cliente="", modo="recorrente",
                   contato desce; ele some quando repete o título, pra não sair
                   "Aladdin · Aladdin".
     """
-    titulo = (_nome_util(cadastro) or _nome_util(empresa) or _nome_util(cliente)
-              or (f"Orçamento nº {numero}" if numero else "Orçamento sem nome"))
+    # o TÍTULO é `nome_do_orcamento` sem os campos do lead — o funil não os tem à
+    # mão, e a regra de qual campo vale mora num lugar só desde 14/09/2026.
+    titulo = nome_do_orcamento(cadastro=cadastro, empresa=empresa,
+                               cliente=cliente, numero=numero)
     sub = ""
     if (modo or "") == "evento":
         ev = evento if isinstance(evento, dict) else {}

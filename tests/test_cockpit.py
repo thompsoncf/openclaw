@@ -99,6 +99,9 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_i
 -- `except` e o teste passaria sem exercitar a consulta
 create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
   status text default 'enviado', valor_centavos bigint, assinado_em timestamptz, enviado_em timestamptz);
+-- o CADASTRO do cliente: primeiro degrau de `vendas.nome_do_orcamento`, e por isso
+-- o Raio-X faz left join nela pra montar o nome de cada linha
+create table clientes (id bigserial primary key, conta_id bigint, nome text);
 create table wa_qr_log (id bigserial primary key, conta_id bigint, nivel text default 'warn',
   msg text not null default '', dados jsonb, criado_em timestamptz not null default now());
 create table wa_decifra_diario (dia date not null, conta_id bigint not null, from_me boolean not null,

@@ -1,0 +1,228 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<title>O funil que não segue o ramo: os dois consertos</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:880px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:32px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.card{background:#fff;border:1px solid #E3DDD0;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden;margin-bottom:14px}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+
+/* ---------- réplica FIEL do painel escuro (web/painel_servicos) ---------- */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC}
+.pn .card2{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.55rem}
+.pn .cab{display:flex;align-items:center;gap:.6rem}
+.pn .seta{color:#7B8A99;font-size:.85rem}
+.pn .tit{font-weight:700;font-size:1rem}
+.pn .mut{color:#7B8A99;font-size:.78rem;margin-top:.1rem}
+.pn .selo{margin-left:auto;font-size:.68rem;font-weight:700;background:#3A2A10;color:#E0B458;border:1px solid #5C4418;border-radius:5px;padding:.1rem .38rem;white-space:nowrap}
+.pn .selo.ok{background:#10241d;color:#7EE7B8;border-color:#1c3a30}
+.pn .expl{color:#9AA7B4;font-size:.85rem;margin:.7rem 0 .8rem;line-height:1.6}
+.pn .expl b{color:#7EE7B8}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.4rem .55rem;font-size:.85rem;color:#DDE4EC;width:100%}
+.pn .ta{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.45rem .55rem;font-size:.78rem;color:#C6D2DE;width:100%;font-family:ui-monospace,Menlo,monospace;line-height:1.6}
+.pn .pill{display:inline-block;background:#1B2836;border:1px solid #2A3947;border-radius:99px;padding:.2rem .55rem;font-size:.75rem;color:#C6D2DE}
+.pn .pill.mono{font-family:ui-monospace,Menlo,monospace;font-size:.7rem;padding:.15rem .4rem}
+.pn .pill.novo{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .btnv{display:inline-block;background:#1F7A55;color:#EAFFF5;border-radius:8px;padding:.45rem .9rem;font-size:.85rem;font-weight:700}
+.pn .lbl{color:#7B8A99;font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:.2rem}
+.pn .bloco{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem}
+.pn .linha{display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem}
+.pn .mini{display:inline-flex;align-items:center;justify-content:center;background:#1B2836;border:1px solid #2A3947;border-radius:6px;width:26px;height:26px;font-size:.8rem;color:#9AA7B4;flex:0 0 auto}
+.pn .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.5rem}
+.eti{display:inline-block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;vertical-align:middle;margin-left:6px}
+.e-hoje{background:#FDECEA;color:#B4453C;border:1px solid #F5C6C0}
+.e-novo{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.card,.pn,.q{break-inside:avoid}}
+</style></head><body><div class="wrap">
+</head><body><div class="wrap">
+
+<h1>O funil que não segue o ramo: os dois consertos</h1>
+<p class="lead">A Liberal (conta 37) marcou o ramo hoje às 12:0x e o funil dela nasceu no modelo
+<b>errado</b> — coluna "Reunião marcada", motivos de perda genéricos. Antes de desenhar o conserto,
+medi quantas contas estão assim. <b>O problema é bem maior do que a Liberal</b>, e isso muda qual dos
+dois consertos importa.</p>
+
+<h2><span class="n">01</span> A medição: 1 conta de 8 tem o funil do próprio ramo</h2>
+
+<table>
+<tr><th>Conta</th><th>Ramo</th><th>Leads</th><th>Etapas</th><th>Como chama a 4ª coluna</th><th>Motivos</th><th></th></tr>
+<tr><td>3 · ZAQ</td><td>consultoria</td><td>263</td><td>6</td><td>Qualificado</td><td>8</td>
+    <td><span class="eti e-hoje">genérico</span></td></tr>
+<tr><td>7</td><td>—</td><td>16</td><td>6</td><td>Qualificado</td><td>0</td>
+    <td><span class="eti e-hoje">genérico</span></td></tr>
+<tr><td>16 · SUPER FIT</td><td>suplementos</td><td>0</td><td>6</td><td>Qualificado</td><td>0</td>
+    <td><span class="eti e-hoje">genérico</span></td></tr>
+<tr><td>21</td><td>consultoria</td><td><b>60</b></td><td><b>0</b></td><td>—</td><td>0</td>
+    <td><span class="eti e-hoje">sem funil</span></td></tr>
+<tr><td>23</td><td>consultoria</td><td>186</td><td>6</td><td>Qualificado</td><td>8</td>
+    <td><span class="eti e-hoje">genérico</span></td></tr>
+<tr><td>30</td><td>consultoria</td><td>0</td><td>6</td><td>Qualificado</td><td>0</td>
+    <td><span class="eti e-hoje">genérico</span></td></tr>
+<tr><td><b>34 · Prime</b></td><td>eventos</td><td>356</td><td><b>8</b></td><td><b>Agendado Visita</b></td><td>10</td>
+    <td><span class="eti e-novo">do ramo</span></td></tr>
+<tr><td>35 · Doce Mell</td><td>eventos</td><td>21</td><td>6</td><td>Qualificado</td><td>0</td>
+    <td><span class="eti e-hoje">genérico</span></td></tr>
+<tr><td>37 · Liberal</td><td>seguros</td><td>0</td><td>7</td><td>Reunião marcada</td><td>8</td>
+    <td><span class="eti e-hoje">outro ramo</span></td></tr>
+</table>
+
+<div class="perigo"><b>A única conta com o funil do próprio ramo é a Prime — e não foi o sistema que
+fez isso.</b> Foi o dono dela, reconstruindo na mão ao longo de meses. É literalmente a história que
+está escrita no topo do <code>finance/funil_modelo.py</code>.</div>
+
+<div class="alerta"><b>E a Doce Mell continua exatamente como o módulo dizia que ela estava.</b> O
+docstring do <code>funil_modelo</code> abre com ela: <i>"a Doce Mell é a SEGUNDA conta de eventos,
+nasceu DEPOIS disso, e mesmo assim recebeu as seis colunas genéricas"</i>. O módulo foi escrito em
+11/09 pra resolver isso — e três dias depois ela <b>continua nas seis genéricas</b>. A ferramenta de
+adoção existe e funciona; ninguém adotou, porque nada avisa que existe.</div>
+
+<p>Números que resumem: <b>1 de 8</b> contas com o funil do ramo. <b>4 de 8</b> com zero motivos de
+perda (nunca abriram a tela). E a conta <b>21, com 60 leads e ZERO etapas</b> — ela usa o funil por
+outra porta e nunca passou pela que semeia.</p>
+
+<h2><span class="n">02</span> Por que acontece — os dois defeitos, separados</h2>
+
+<div class="card">
+<p><b>Defeito 1 — a semente decide no escuro.</b> As etapas nascem na PRIMEIRA leitura da tela
+(<code>web/painel_prospeccao._etapas</code>), lendo o ramo naquele instante. Quem ainda não escolheu
+ramo cai em <code>recorrente</code> — que é o padrão tolerante e certo pra não inventar festa, mas
+vira uma <b>escolha permanente</b> gravada no banco. Foi o que pegou a Liberal: ela abriu o funil
+antes de salvar o ramo, com minutos de diferença.</p>
+<p style="margin-bottom:0"><b>Defeito 2 — depois, ninguém avisa.</b> Mudar o ramo não reescreve o
+funil, e está certo que não reescreva (senão apagaria o "Agendado Visita" que a Prime construiu). O
+problema é que <b>nada na tela diz que os dois estão em desacordo</b>. O bloco que resolve — "O
+modelo do seu ramo" — mora dentro da Régua, que é uma tela de configuração que ninguém abre sem
+motivo.</p>
+</div>
+
+<div class="perigo"><b>E tem um agravante que eu só achei lendo o código.</b> Quando o bloco enfim
+propõe a correção, ele vem <b>DESMARCADO</b>, com a nota <i>"você já renomeou esta etapa — marque só
+se quiser o nome do ramo"</i>. Na Liberal isso é <b>falso</b>: ninguém renomeou nada, foi o sistema
+que escolheu "Reunião marcada".<br><br>
+A causa é <code>funil_modelo._generico()</code>, que compara o rótulo atual só com a lista
+<code>ETAPAS_GENERICAS</code>. Desde 11/09 as contas são semeadas <b>pelo perfil</b>, não pela lista
+genérica — então qualquer rótulo vindo de outra semente é indistinguível de um apelido escolhido pelo
+dono. O sistema pede desculpa por uma coisa que ele mesmo fez.</div>
+
+<h2><span class="n">03</span> Conserto A — não semear no escuro</h2>
+<div class="sub">Fecha a porta pras contas novas</div>
+
+<div class="card">
+<p><b>O que muda:</b> a semente passa a gravar <b>de onde veio</b>. Uma coluna nova em
+<code>funil_etapas</code> e em <code>funil_motivos_perda</code> — <code>semeado_de</code> — guarda a
+chave do perfil que semeou (<code>'eventos'</code>, <code>'seguros'</code>, <code>'recorrente'</code>)
+ou fica <b>vazia quando o dono mexeu à mão</b>.</p>
+<p>Com isso, "o dono escolheu este nome" deixa de ser um palpite por comparação de texto e vira um
+fato gravado. É o que conserta o agravante da seção 2 <b>de raiz</b>, e não por heurística melhor.</p>
+<p style="margin-bottom:0"><b>E a conta sem ramo escolhido</b> passa a ser semeada com o
+<b>genérico</b>, marcado como provisório — em vez de receber <code>recorrente</code> fingindo que
+alguém decidiu isso.</p>
+</div>
+
+<div class="nota"><b>O que eu NÃO faria, e quero seu aval nisso:</b> deixar a conta sem ramo
+<b>sem etapa nenhuma</b> no banco. É a solução "pura", mas as etapas têm id, e o quadro, os gatilhos
+e o teto por coluna gravam por id. Conta sem linha vira tela sem quadro. <b>A conta 21 já prova o
+estrago</b>: 60 leads e zero etapas, hoje, no ar. Semear sempre — e dizer de onde veio — é mais
+seguro do que não semear.</div>
+
+<h2><span class="n">04</span> Conserto B — a tela avisa sozinha</h2>
+<div class="sub">É este que alcança as 7 contas que já estão erradas</div>
+
+<div class="card">
+<p><b>B1. A proposta vem MARCADA quando o nome não foi o dono que deu.</b> Com o
+<code>semeado_de</code> da parte A, o bloco sabe a diferença. A Prime continua com "Evento Realizado"
+desmarcado (foi ela quem nomeou); a Liberal recebe "chamar «Reunião marcada» de «Cotação enviada»"
+já marcado, sem a nota que a acusa de ter renomeado.</p>
+<p><b>B2. Uma faixa no topo do FUNIL</b> — não escondida na Régua — quando o ramo e a semente
+discordam. Um clique leva pro bloco de adoção.</p>
+<p style="margin-bottom:0"><b>B3. Os motivos de perda ganham o mesmo bloco</b>, que hoje só as etapas
+têm. É o que falta pra Liberal receber "Renovou direto com a seguradora" sem digitar nada, e pras 4
+contas com zero motivos receberem a lista do ramo delas.</p>
+</div>
+
+<div class="sub" style="margin-top:18px">Como a faixa apareceria</div>
+<div class="pn">
+  <div class="card2" style="border-color:#5C4418;background:#20180a">
+    <div class="cab"><div><div class="tit" style="color:#E0B458">Seu funil não está no modelo de corretora de seguros</div>
+      <div class="mut">as colunas foram criadas antes de você escolher o ramo — 1 diferença</div></div>
+      <span class="selo">ver</span></div>
+  </div>
+  <div class="expl" style="margin-bottom:0">A faixa some sozinha quando o funil casa com o ramo, e
+  <b>não aparece</b> pra quem renomeou à mão de propósito.</div>
+</div>
+
+<h2><span class="n">05</span> O que cada conserto alcança</h2>
+
+<table>
+<tr><th></th><th>Conserto A</th><th>Conserto B</th></tr>
+<tr><td>Contas novas (a próxima corretora)</td><td><b>sim</b></td><td>sim</td></tr>
+<tr><td>As 7 contas erradas hoje</td><td>não</td><td><b>sim</b></td></tr>
+<tr><td>Liberal receber "Cotação enviada"</td><td>não</td><td><b>sim</b></td></tr>
+<tr><td>Doce Mell receber as colunas de eventos</td><td>não</td><td><b>sim</b></td></tr>
+<tr><td>As 4 contas sem motivo de perda</td><td>não</td><td><b>sim</b> (B3)</td></tr>
+<tr><td>Acabar com a nota falsa "você já renomeou"</td><td><b>é a base</b></td><td>usa a base</td></tr>
+</table>
+
+<div class="bom"><b>Recomendo os dois, no mesmo PR, nesta ordem — A primeiro porque B depende dele.</b>
+O <code>semeado_de</code> é o que transforma "adivinhar se o dono renomeou" em "saber". Sem ele, o B
+continua chutando por comparação de texto, e a Prime corre o risco de ter o trabalho de meses
+proposto pra ser sobrescrito.</div>
+
+<div class="alerta"><b>Duas coisas que este PR NÃO vai fazer</b>, e é de propósito (regra 0):
+<br>• <b>não reescreve nada sozinho</b> — nem no deploy, nem na primeira abertura. Toda mudança
+continua sendo o dono marcando a caixa e clicando;
+<br>• <b>não toca em lead nenhum.</b> As duas regras do <code>funil_modelo</code> continuam de pé:
+etapa fora do modelo sai do quadro, não é apagada.</div>
+
+<h2><span class="n">06</span> O que eu preciso que você decida</h2>
+
+<div class="q"><div class="qt">1. A faixa aparece pra quem?</div>
+<div class="qo"><span class="rec">Recomendo: dono e gestor</span>. O vendedor vê o quadro todo dia,
+mas quem decide o nome das colunas não é ele — e uma faixa que ele não pode resolver vira barulho
+diário. Se preferir, mostro pros três.</div></div>
+
+<div class="q"><div class="qt">2. Preencher o <code>semeado_de</code> das contas que já existem?</div>
+<div class="qo">A migração pode olhar cada conta e, se os rótulos batem <b>exatamente</b> com um dos
+modelos conhecidos, carimbar aquele perfil. Isso faz a Liberal e a Doce Mell serem reconhecidas na
+hora. <span class="rec">Recomendo fazer</span> — é leitura e carimbo, não muda rótulo nenhum. Onde
+não bater exatamente, fica vazio, que é o mesmo que "foi o dono".</div></div>
+
+<div class="q"><div class="qt">3. A conta 21 (60 leads, zero etapas) — cuido dela agora?</div>
+<div class="qo">Ela usa o funil por outra porta e nunca passou pela que semeia. Não é o defeito deste
+mockup, é um terceiro. Posso investigar por onde ela entra, mas prefiro que seja um trabalho à parte
+— misturar os dois faria um PR que ninguém revisa direito.</div></div>
+
+<div class="ftr">Medido na produção em 14/09/2026, só leitura: <code>contas</code> ×
+<code>nichos</code> × <code>funil_etapas</code> × <code>funil_motivos_perda</code> ×
+<code>prospeccao</code>. Código lido: <code>finance/funil_modelo.py</code> (<code>semear</code>,
+<code>plano</code>, <code>_generico</code>), <code>finance/funil_perda.py</code>,
+<code>finance/raio_x_perfil.py</code> (<code>etapas_padrao</code>, <code>semente_motivos</code>) e
+<code>web/painel_prospeccao.py</code> (<code>_etapas</code>, <code>_modelo_do_ramo</code> e o bloco
+"O modelo do seu ramo"). Mockup — nada foi escrito no banco nem no código.</div>
+
+</div></body></html>

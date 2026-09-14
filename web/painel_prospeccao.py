@@ -2636,6 +2636,11 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
             return JSONResponse({"ok": False, "erro": "canal_sem_resposta"})
         from finance import whatsapp_out
         numero = cv[3] or cv[4] or cv[2]
+        # ensaio da trava da insistência (migração 257): CONTA, não trava. `cv[1]` é
+        # o lead da conversa — conversa solta, sem lead, não tem etapa nem prazo.
+        if cv[1]:
+            from finance import funil_trava as _tv
+            _tv.registrar(c, ctx["conta_id"], cv[1], ctx["membro_id"])
         # sai pelo MESMO chip que recebeu — senão o lead escreve pra um número e é
         # respondido por outro, que do lado dele parece outra empresa
         res = whatsapp_out.enviar(
@@ -9860,6 +9865,10 @@ def prospeccao_enviar_whatsapp(request: Request, alvo_id: int, texto: str = Form
         return JSONResponse({"ok": False, "erro": "sem_numero"})
     from finance import whatsapp_out
     with pool.connection() as c:
+        # ensaio da trava da insistência (migração 257): CONTA, não trava
+        if alvo.get("id"):
+            from finance import funil_trava as _tv
+            _tv.registrar(c, ctx["conta_id"], alvo["id"], ctx["membro_id"])
         res = whatsapp_out.enviar(c, ctx["conta_id"], numero, texto)
         if not res.get("ok"):
             erros = {

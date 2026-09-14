@@ -1,0 +1,549 @@
+<title>A trava do "oi, tudo bem?"</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;700&display=swap">
+
+<style>
+/* ═══════════ tokens da PÁGINA — mesmos dos outros mockups desta pasta */
+:root{
+  --ground:#F4F6F4; --surface:#FFFFFF; --ink:#171C19; --ink-soft:#3C4640;
+  --muted:#626D66; --line:#DBE1DA; --line-strong:#BFC9BF;
+  --ok:#2C7A57; --ok-wash:#E5F1EA;
+  --novo:#8A5E12; --novo-wash:#F8EEDA;
+  --alerta:#A8402F; --alerta-wash:#F8E6E2;
+  --f-sans:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --f-serif:"Source Serif 4",Georgia,serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#101410;--surface:#181D19;--ink:#E5EBE6;--ink-soft:#C0CAC3;
+    --muted:#8B968F;--line:#272E28;--line-strong:#38423A;
+    --ok:#67C398;--ok-wash:#152E22;--novo:#D6A24F;--novo-wash:#31270E;
+    --alerta:#E2887A;--alerta-wash:#33150F;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#101410;--surface:#181D19;--ink:#E5EBE6;--ink-soft:#C0CAC3;
+  --muted:#8B968F;--line:#272E28;--line-strong:#38423A;
+  --ok:#67C398;--ok-wash:#152E22;--novo:#D6A24F;--novo-wash:#31270E;
+  --alerta:#E2887A;--alerta-wash:#33150F;
+}
+
+/* ═══════════ tokens do PRODUTO — web/tema.py. O app é escuro sempre. */
+.fone,.quadro{
+  --bg:#0A0F0C; --bg2:#0E1512; --sup:#121A16; --ln:#1E2A23;
+  --txt:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-b:#1E4A3A; --neon-f:rgba(37,211,102,.10); --sobre:#04150C;
+  --amb:#E0A32E; --amb-b:#5A4520; --amb-f:#241C0F;
+  --cor:#E0574F; --cor-b:#5A2B2B; --cor-f:#241313;
+  --azu:#229ED9; --azu-b:#1B3A4A; --azu-f:#0D1B23;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--ground);color:var(--ink);font-family:var(--f-sans);
+  font-size:16px;line-height:1.6;padding-inline:20px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px;margin:0 auto;padding-block:clamp(2.2rem,5vw,3.8rem) 4rem}
+
+h1,h2,h3{margin:0;font-family:var(--f-serif);font-weight:600;text-wrap:balance}
+h1{font-size:clamp(2rem,5vw,2.9rem);line-height:1.1;letter-spacing:-.015em}
+h2{font-size:clamp(1.3rem,3vw,1.62rem);line-height:1.2}
+h3{font-size:1rem;font-family:var(--f-sans);font-weight:700}
+p{margin:0}
+.lede{font-size:1.1rem;color:var(--ink-soft);max-width:62ch}
+.eyebrow{font-family:var(--f-mono);font-size:.68rem;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.mono{font-family:var(--f-mono);font-size:.84em;font-variant-numeric:tabular-nums}
+
+header{border-bottom:2px solid var(--line-strong);padding-bottom:1.6rem;
+  display:flex;flex-direction:column;gap:.9rem}
+.hlinha{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:baseline}
+
+section{margin-top:clamp(2.6rem,6vw,4rem)}
+.shead{display:flex;flex-direction:column;gap:.4rem;margin-bottom:1.3rem}
+.shead p{color:var(--muted);max-width:66ch;font-size:.95rem}
+.corpo{display:flex;flex-direction:column;gap:1.1rem;max-width:66ch}
+.corpo p{font-size:.97rem;color:var(--ink-soft)}
+.corpo p b{color:var(--ink)}
+
+/* ═══════════ a divisão dos 236 */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;margin-top:.3rem}
+@media (max-width:660px){.split{grid-template-columns:1fr}}
+.sp{background:var(--surface);border:1px solid var(--line);border-radius:8px;
+  padding:1.1rem 1.15rem;display:flex;flex-direction:column;gap:.55rem}
+.sp.trava{border-color:var(--novo);box-shadow:inset 3px 0 0 var(--novo)}
+.sp.nunca{border-color:var(--ok);box-shadow:inset 3px 0 0 var(--ok)}
+.sp .n{font-family:var(--f-mono);font-size:2.1rem;font-weight:700;line-height:1}
+.sp.trava .n{color:var(--novo)} .sp.nunca .n{color:var(--ok)}
+.sp .q{font-size:.95rem;font-weight:700}
+.sp .d{font-size:.87rem;color:var(--muted);line-height:1.45}
+.barra{display:flex;height:10px;border-radius:3px;overflow:hidden;margin-top:.3rem;
+  border:1px solid var(--line)}
+.barra i{display:block;height:100%}
+
+/* ═══════════ celulares */
+.telas{display:grid;grid-template-columns:repeat(auto-fit,minmax(228px,1fr));
+  gap:1.5rem;align-items:start;margin-top:.4rem}
+.tela{min-width:0;display:flex;flex-direction:column;gap:.6rem}
+.rot{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap}
+.rot b{font-size:.94rem}
+.rot span{font-family:var(--f-mono);font-size:.62rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted)}
+.rot span.ok{color:var(--ok)} .rot span.al{color:var(--novo)}
+.fone{background:var(--bg);border:1px solid #263129;border-radius:14px;overflow:hidden;
+  color:var(--txt);font-size:.72rem;line-height:1.35;display:flex;flex-direction:column;
+  min-height:330px;box-shadow:0 16px 42px -30px rgba(0,0,0,.8)}
+.fhdr{display:flex;align-items:center;gap:.45rem;padding:.55rem .6rem;border-bottom:1px solid var(--ln)}
+/* ESCOPADO ao cabeçalho de propósito: `av` solto colidia com `pz av` e `lead av`,
+   que viravam um círculo de 20px e engoliam o conteúdo do card. */
+.fhdr .av{width:20px;height:20px;border-radius:50%;background:linear-gradient(145deg,#25D366,#0FA85A);
+  color:var(--sobre);display:grid;place-items:center;font-weight:700;font-size:.62rem;flex:0 0 auto}
+.fhdr .tt{flex:1;min-width:0}
+.fhdr .tt b{display:block;font-size:.8rem;font-weight:600}
+.fhdr .tt s{display:block;text-decoration:none;color:var(--dim);font-size:.64rem}
+.pz{font-family:var(--f-mono);font-size:.58rem;font-weight:700;padding:.15rem .35rem;
+  border-radius:3px;white-space:nowrap}
+.pz.est{background:var(--cor-f);color:var(--cor);border:1px solid var(--cor-b)}
+.pz.av{background:var(--amb-f);color:var(--amb);border:1px solid var(--amb-b)}
+.pz.ok{background:var(--neon-f);color:var(--neon);border:1px solid var(--neon-b)}
+
+.chat{display:flex;flex-direction:column;gap:.3rem;padding:.55rem .6rem;flex:1;justify-content:flex-end}
+.bl{max-width:78%;border-radius:7px;padding:.3rem .45rem;font-size:.66rem;line-height:1.35}
+.bl.in{background:var(--sup);border:1px solid var(--ln);align-self:flex-start;border-bottom-left-radius:2px}
+.bl.out{background:#123322;border:1px solid var(--neon-b);align-self:flex-end;
+  border-bottom-right-radius:2px;color:#DCF3E4}
+.bl .h{display:block;font-family:var(--f-mono);font-size:.52rem;color:var(--faint);
+  margin-top:.1rem;text-align:right}
+
+.comp{display:flex;align-items:center;gap:.35rem;border-top:1px solid var(--ln);padding:.5rem .6rem}
+.comp .cx{flex:1;background:var(--bg2);border:1px solid var(--ln);border-radius:99px;
+  padding:.32rem .6rem;color:var(--faint);font-size:.66rem}
+.comp .env{width:22px;height:22px;border-radius:50%;background:var(--neon);color:var(--sobre);
+  display:grid;place-items:center;font-size:.62rem;font-weight:700;flex:0 0 auto}
+.comp .env.mudo{background:var(--sup);color:var(--faint);border:1px solid var(--ln)}
+
+/* o bloco da justificativa */
+.just{border-top:1px solid var(--ln);background:var(--sup);padding:.6rem}
+.just .t{font-family:var(--f-mono);font-size:.56rem;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--amb);margin-bottom:.35rem;display:flex;align-items:center;gap:.3rem}
+.just .p{font-size:.68rem;color:var(--dim);margin-bottom:.45rem;line-height:1.4}
+.opts{display:flex;flex-direction:column;gap:.22rem}
+.op{background:var(--bg2);border:1px solid var(--ln);border-radius:5px;padding:.34rem .45rem;
+  font-size:.66rem;color:var(--txt);display:flex;align-items:center;gap:.35rem}
+.op i{font-style:normal;color:var(--faint);font-size:.58rem;flex:0 0 auto}
+.op .faz{margin-left:auto;font-family:var(--f-mono);font-size:.52rem;color:var(--neon);
+  background:var(--neon-f);border-radius:3px;padding:.1rem .25rem;white-space:nowrap}
+.op.on{border-color:var(--neon);background:var(--neon-f)}
+.op.outro{color:var(--dim)}
+
+/* a parede */
+.parede{border-top:1px solid var(--ln);background:var(--sup);padding:.65rem .6rem}
+.parede .t{font-family:var(--f-mono);font-size:.56rem;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--cor);margin-bottom:.35rem}
+.parede .p{font-size:.68rem;color:var(--dim);line-height:1.45;margin-bottom:.5rem}
+.portas{display:grid;grid-template-columns:1fr 1fr;gap:.35rem}
+.porta{border-radius:6px;padding:.42rem .3rem;text-align:center;font-size:.67rem;font-weight:700}
+.porta.a{background:var(--neon);color:var(--sobre)}
+.porta.b{background:transparent;border:1px solid var(--cor-b);color:var(--cor)}
+.parede .rodape{font-size:.62rem;color:var(--faint);margin-top:.45rem;text-align:center}
+
+/* card da fila com contagem */
+.corpo-f{padding:.55rem .6rem;display:flex;flex-direction:column;gap:.32rem;flex:1}
+.corpo-f>*{flex:0 0 auto}
+.chat>*{flex:0 0 auto}
+.grp{font-family:var(--f-mono);font-size:.56rem;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--faint);display:flex;justify-content:space-between}
+.grp.al{color:var(--amb)}
+.lead{background:var(--sup);border:1px solid var(--ln);border-radius:6px;padding:.4rem .45rem;
+  display:flex;flex-direction:column;gap:.18rem}
+.lead.contando{border-left:2px solid var(--amb)}
+.lead.est{border-left:2px solid var(--cor)}
+.l1{display:flex;align-items:center;gap:.35rem}
+.dot{width:6px;height:6px;border-radius:50%;flex:0 0 auto}
+.dot.m{background:var(--amb)} .dot.f{background:var(--azu)} .dot.q{background:var(--cor)}
+.nm{flex:1;min-width:0;font-size:.72rem;font-weight:600;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.snip{font-size:.62rem;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conta{font-size:.6rem;color:var(--amb)}
+.conta.est{color:var(--cor)}
+
+/* o quadro do gestor */
+.quadro{background:var(--bg);border:1px solid #263129;border-radius:10px;padding:.9rem;
+  overflow-x:auto;color:var(--txt);box-shadow:0 14px 40px -30px rgba(0,0,0,.75)}
+.kb{display:flex;gap:.5rem;min-width:600px}
+.kbc{flex:1;min-width:0;background:var(--sup);border:1px solid var(--ln);border-radius:7px;
+  padding:.45rem .45rem .55rem}
+.kbc h4{margin:0 0 .45rem;font-size:.66rem;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--faint);display:flex;justify-content:space-between;gap:.3rem}
+.kbc h4 b{color:var(--txt)}
+.mini{background:var(--bg2);border:1px solid var(--ln);border-radius:5px;padding:.32rem .4rem;
+  margin-bottom:.28rem;font-size:.64rem;display:flex;flex-direction:column;gap:.15rem}
+.mini.est{border-left:2px solid var(--cor)}
+.mini.jst{border-left:2px solid var(--amb)}
+.mini .top{display:flex;align-items:center;gap:.3rem}
+.tarja{font-family:var(--f-mono);font-size:.52rem;font-weight:700;padding:.08rem .25rem;
+  border-radius:3px;white-space:nowrap;margin-left:auto}
+.tarja.est{background:var(--cor-f);color:var(--cor)}
+.tarja.just{background:var(--amb-f);color:var(--amb)}
+.mini .por{font-size:.58rem;color:var(--faint)}
+
+/* blocos de texto */
+.nota{border-left:3px solid var(--ok);background:var(--surface);padding:.9rem 1.1rem;
+  border-radius:0 6px 6px 0;font-size:.93rem;color:var(--ink-soft);margin-top:1.2rem}
+.nota.alerta{border-left-color:var(--alerta)}
+.nota.aten{border-left-color:var(--novo)}
+.nota b{color:var(--ink)}
+
+.props{display:flex;flex-direction:column;gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.prop{background:var(--surface);padding:.95rem 1.1rem;display:grid;
+  grid-template-columns:1.8rem 1fr auto;gap:.3rem .9rem;align-items:baseline}
+@media (max-width:640px){.prop{grid-template-columns:1.8rem 1fr}.prop .tag{grid-column:2}}
+.prop .s{font-family:var(--f-mono);font-size:.7rem;font-weight:700;color:var(--muted)}
+.prop .c b{font-size:.95rem}
+.prop .c p{font-size:.87rem;color:var(--muted);margin-top:.15rem}
+.tag{font-family:var(--f-mono);font-size:.6rem;font-weight:700;letter-spacing:.07em;
+  text-transform:uppercase;padding:.2rem .45rem;border-radius:4px;white-space:nowrap}
+.tag.faz{background:var(--ok-wash);color:var(--ok)}
+.tag.nao{background:transparent;color:var(--muted);border:1px solid var(--line-strong)}
+
+.perg{background:var(--surface);border:1px solid var(--line-strong);border-radius:8px;
+  padding:1.1rem 1.2rem}
+.perg ol{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.6rem;
+  font-size:.94rem;color:var(--ink-soft)}
+.perg li b{color:var(--ink)}
+
+footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
+  color:var(--muted);font-size:.84rem;display:flex;flex-wrap:wrap;gap:.4rem 1.4rem}
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="hlinha">
+    <span class="eyebrow">Prime Eventos · conta 34</span>
+    <span class="eyebrow">Mockup para aprovação · 14/09/2026</span>
+  </div>
+  <h1>A trava do “oi, tudo bem?”</h1>
+  <p class="lede">O pedido foi: depois de 7 dias, o vendedor só fala com o cliente se
+  der uma justificativa. A medição mudou o desenho — porque travar por calendário
+  calaria a Prime justamente com quem está esperando resposta. O que segue é a
+  proposta: travar <b>a insistência</b>, nunca <b>a resposta</b>.</p>
+</header>
+
+<!-- ═══════ 1. a medição -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Medido em produção · 14/09/2026</span>
+    <h2>236 leads já passaram dos 7 dias. Eles não são a mesma coisa.</h2>
+    <p>Em Contatado há 298 leads. Pelo relógio do funil — o histórico de movimentos,
+    não a data de atualização —, 236 estouraram o prazo e 117 passaram de 21 dias.
+    Mas a divisão que importa é outra.</p>
+  </div>
+
+  <div class="split">
+    <div class="sp trava">
+      <span class="n">210</span>
+      <span class="q">Nós falamos por último</span>
+      <span class="d">O vendedor mandou, o cliente não voltou. É aqui que nasce o
+      quarto “oi, tudo bem?” — o que queima o lead e gasta o chip da empresa.
+      <b>É este o alvo da trava.</b></span>
+    </div>
+    <div class="sp nunca">
+      <span class="n">26</span>
+      <span class="q">O cliente está esperando resposta</span>
+      <span class="d">Ele escreveu e ninguém respondeu ainda. Travar aqui é a Prime
+      ficando muda com quem levantou a mão. <b>Nunca trava, em nenhuma hipótese</b> —
+      nem no 7º dia, nem no 30º.</span>
+    </div>
+  </div>
+  <div class="barra" aria-label="210 de 236 são insistência; 26 são cliente esperando">
+    <i style="flex:210;background:var(--novo)"></i><i style="flex:26;background:var(--ok)"></i>
+  </div>
+
+  <div class="corpo" style="margin-top:1.3rem">
+    <p>É a diferença entre as duas colunas que define o gatilho. <b>A trava não olha o
+    calendário sozinho — ela olha quem falou por último.</b> Prazo estourado com o
+    cliente esperando é urgência, não excesso.</p>
+  </div>
+</section>
+
+<!-- ═══════ 2. as telas -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Como fica no celular</span>
+    <h2>Quatro momentos</h2>
+    <p>O vendedor encontra a trava no lugar onde ele está: o campo de escrever.</p>
+  </div>
+
+  <div class="telas">
+
+    <!-- A · avisa antes -->
+    <div class="tela">
+      <div class="rot"><b>Dia 5 — avisa antes</b><span class="al">na fila</span></div>
+      <div class="fone">
+        <div class="fhdr"><span class="av">P</span>
+          <span class="tt"><b>Sua fila</b><s>134 leads</s></span></div>
+        <div class="corpo-f">
+          <div class="grp al"><span>⏳ Prazo acabando</span><span>9</span></div>
+          <div class="lead contando">
+            <div class="l1"><i class="dot m"></i><span class="nm">Rafaela Nunes</span>
+              <span class="pz av">2 DIAS</span></div>
+            <span class="snip">Você: te mando as fotos do salão</span>
+            <span class="conta">↳ em Contatado há 5 dias · o prazo é 7</span>
+          </div>
+          <div class="lead contando">
+            <div class="l1"><i class="dot f"></i><span class="nm">Wesley Carvalho</span>
+              <span class="pz av">1 DIA</span></div>
+            <span class="snip">Você: oi Wesley, tudo bem?</span>
+            <span class="conta">↳ em Contatado há 6 dias · o prazo é 7</span>
+          </div>
+          <div class="grp"><span>Resto da fila</span><span>125</span></div>
+          <div class="lead">
+            <div class="l1"><i class="dot q"></i><span class="nm">Amanda Ribeiro</span></div>
+            <span class="snip">Vocês têm 22 de novembro livre?</span>
+          </div>
+        </div>
+      </div>
+      <p style="font-size:.85rem;color:var(--muted)">Ninguém é surpreendido no meio de
+      um atendimento. Do 5º dia o card mostra a contagem, e o grupo sobe na fila.</p>
+    </div>
+
+    <!-- B · nunca trava -->
+    <div class="tela">
+      <div class="rot"><b>O cliente escreveu</b><span class="ok">nunca trava</span></div>
+      <div class="fone">
+        <div class="fhdr"><span class="av">←</span>
+          <span class="tt"><b>Célia Barbosa</b><s>Contatado há 19 dias</s></span>
+          <span class="pz ok">ABERTO</span></div>
+        <div class="chat">
+          <div class="bl out">Oi Célia! Qualquer coisa me chama 😊<span class="h">01/09</span></div>
+          <div class="bl out">Célia, conseguiu ver o orçamento?<span class="h">05/09</span></div>
+          <div class="bl in">Oi! Desculpa a demora. Ainda dá pra 22/11?<span class="h">hoje 09:40</span></div>
+        </div>
+        <div class="comp">
+          <span class="cx">Responder…</span>
+          <span class="env">➤</span>
+        </div>
+      </div>
+      <p style="font-size:.85rem;color:var(--muted)">Prazo estourado há 12 dias, três
+      tentativas sem resposta — <b>e o campo está aberto</b>, porque ela voltou. São os
+      26 da medição. Travar aqui custaria uma festa.</p>
+    </div>
+
+    <!-- C · a trava -->
+    <div class="tela">
+      <div class="rot"><b>Insistir pela 1ª vez</b><span class="al">pede o porquê</span></div>
+      <div class="fone">
+        <div class="fhdr"><span class="av">←</span>
+          <span class="tt"><b>Wesley Carvalho</b><s>Contatado há 8 dias</s></span>
+          <span class="pz est">PRAZO</span></div>
+        <div class="chat" style="flex:0 1 auto">
+          <div class="bl out">Oi Wesley, tudo bem?<span class="h">03/09</span></div>
+          <div class="bl out">Wesley, conseguiu ver?<span class="h">06/09</span></div>
+        </div>
+        <div class="just">
+          <span class="t">⏱ Por que insistir com ele?</span>
+          <p class="p">Três mensagens suas sem resposta. Escolha um motivo e a mensagem
+          vai normalmente.</p>
+          <div class="opts">
+            <span class="op"><i>○</i>Ele pediu para chamar nesta data
+              <span class="faz">agenda</span></span>
+            <span class="op on"><i>◉</i>Mandando o que ele pediu
+              <span class="faz">→ Negociação</span></span>
+            <span class="op"><i>○</i>Vou tentar por outro caminho
+              <span class="faz">+7 dias</span></span>
+            <span class="op outro"><i>○</i>Outro — conte em uma linha</span>
+          </div>
+        </div>
+        <div class="comp">
+          <span class="cx">Wesley, segue a proposta…</span>
+          <span class="env">➤</span>
+        </div>
+      </div>
+      <p style="font-size:.85rem;color:var(--muted)">A mensagem <b>sai</b>. O motivo é
+      escolhido no mesmo gesto — e cada opção faz alguma coisa, então é trabalho, não
+      papelada.</p>
+    </div>
+
+    <!-- D · a parede -->
+    <div class="tela">
+      <div class="rot"><b>Terceira vez</b><span class="al">a parede tem porta</span></div>
+      <div class="fone">
+        <div class="fhdr"><span class="av">←</span>
+          <span class="tt"><b>Wesley Carvalho</b><s>Contatado há 22 dias</s></span>
+          <span class="pz est">3ª</span></div>
+        <div class="chat" style="flex:0 1 auto">
+          <div class="bl out">Wesley, segue a proposta<span class="h">08/09</span></div>
+          <div class="bl out">Wesley, conseguiu abrir?<span class="h">12/09</span></div>
+        </div>
+        <div class="parede">
+          <span class="t">🚧 Duas renovações já usadas</span>
+          <p class="p">Cinco mensagens suas, nenhuma resposta, 22 dias na mesma coluna.
+          Continuar insistindo aqui não muda o resultado — mas duas coisas mudam:</p>
+          <div class="portas">
+            <span class="porta a">Mover pra Follow-up</span>
+            <span class="porta b">Marcar Perdido</span>
+          </div>
+          <p class="rodape">Follow-up manda nos dias 1, 3 e 7, com texto pronto</p>
+        </div>
+      </div>
+      <p style="font-size:.85rem;color:var(--muted)">A parede nunca é só “não”. As duas
+      saídas certas estão na mesma tela — parede sem porta é o que faz gente pular o
+      muro.</p>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════ 3. no funil -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">O outro lado do pedido</span>
+    <h2>E no funil, o que o Manoel vê</h2>
+    <p>A justificativa não pode morrer no celular do vendedor. Se ninguém lê, vira
+    “.” em uma semana.</p>
+  </div>
+
+  <div class="quadro">
+    <div class="kb">
+      <div class="kbc"><h4><span>Novo</span><b>1</b></h4>
+        <div class="mini"><div class="top"><span>Marcos Vinícius</span></div></div>
+      </div>
+      <div class="kbc"><h4><span>Contatado</span><b>298</b></h4>
+        <div class="mini est"><div class="top"><span>Wesley Carvalho</span>
+          <span class="tarja est">22d</span></div>
+          <span class="por">sem justificar · 5 tentativas</span></div>
+        <div class="mini jst"><div class="top"><span>Rafaela Nunes</span>
+          <span class="tarja just">9d</span></div>
+          <span class="por">“mandando o que ele pediu” · Pedro</span></div>
+        <div class="mini"><div class="top"><span>Amanda Ribeiro</span></div>
+          <span class="por">2 dias na coluna</span></div>
+      </div>
+      <div class="kbc"><h4><span>Follow-up</span><b>14</b></h4>
+        <div class="mini"><div class="top"><span>Tiago Melo</span></div>
+          <span class="por">toque 2 de 3 · dia 3</span></div>
+      </div>
+      <div class="kbc"><h4><span>Negociação</span><b>34</b></h4>
+        <div class="mini"><div class="top"><span>Juliana Prado</span></div>
+          <span class="por">proposta enviada</span></div>
+      </div>
+      <div class="kbc"><h4><span>Perdido</span><b>21</b></h4>
+        <div class="mini"><div class="top"><span>Carla Dias</span></div>
+          <span class="por">não respondeu</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="corpo" style="margin-top:1.3rem">
+    <p>Duas tarjas, e só duas: <b style="color:var(--alerta)">vermelha</b> para quem
+    estourou e ninguém justificou, <b style="color:var(--novo)">âmbar</b> para quem
+    estourou e tem justificativa — com o motivo e o nome de quem deu, no próprio card.</p>
+    <p>E um lugar para olhar o conjunto: <b>uma lista das justificativas da semana</b>,
+    agrupada por motivo. É assim que você descobre se “vou tentar por outro caminho”
+    virou o botão de fugir da trava — sem precisar ler conversa por conversa.</p>
+  </div>
+</section>
+
+<!-- ═══════ 4. o risco -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">O que pode virar o jogo contra</span>
+    <h2>O celular pessoal</h2>
+  </div>
+  <div class="corpo">
+    <p>A Prime tem <b>um chip só, da empresa</b> — “CP Zarb”. O vendedor não tem esse
+    número na mão, então a trava realmente prende o que passa por ele.</p>
+    <p>Mas cada vendedor tem o WhatsApp pessoal. E há uma medição antiga de vocês
+    registrada nesta base: <b>98% do que a Prime mandava por fora chegava sem nome</b> —
+    sem lead, sem histórico, sem temperatura, sem nada.</p>
+    <p>Se a trava incomodar, a conversa migra para o celular pessoal e a Prime troca um
+    problema visível por um invisível. É o argumento central a favor de
+    <b>atrito com porta</b> em vez de muro: a mensagem sempre sai, o motivo é um toque,
+    e o bloqueio de verdade só na terceira vez — quando já houve duas conversas sobre
+    aquele lead.</p>
+  </div>
+  <div class="nota alerta"><b>O sinal de que deu errado, para vigiar desde o 1º dia:</b>
+  o número de mensagens que saem pelo Zaq cair depois da trava. Se cair, não foi a
+  equipe que parou de insistir — foi a conversa que mudou de telefone. Dá para medir
+  sozinho, e eu deixo isso no painel junto.</div>
+</section>
+
+<!-- ═══════ 5. o ensaio -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Antes de valer para a equipe</span>
+    <h2>Uma semana de ensaio, como foi com a temperatura</h2>
+  </div>
+  <div class="corpo">
+    <p>No modo ensaio o sistema <b>conta o que teria travado</b> — quantas mensagens,
+    de quem, em quais leads — e não trava nenhuma. Ninguém na equipe percebe.</p>
+    <p>Em sete dias você responde três coisas com dado em vez de opinião: se <b>7 dias
+    é o prazo certo</b> para o jeito que a Prime vende, <b>quantas justificativas por
+    dia</b> cada vendedor teria de dar, e <b>quais leads</b> estariam batendo na
+    parede. Se der trinta por dia por vendedor, o número está errado — e é melhor
+    descobrir assim do que com eles reclamando.</p>
+  </div>
+</section>
+
+<!-- ═══════ 6. o placar -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Resumo da proposta</span>
+    <h2>O que eu faria, e o que não faria</h2>
+  </div>
+  <div class="props">
+    <div class="prop"><span class="s">1</span>
+      <div class="c"><b>A trava olha quem falou por último, não o calendário</b>
+      <p>Cliente esperando resposta nunca trava. Prazo estourado com a bola conosco, sim.</p></div>
+      <span class="tag faz">Proposta</span></div>
+    <div class="prop"><span class="s">2</span>
+      <div class="c"><b>Justificativa é escolha, e cada opção faz algo</b>
+      <p>Agenda o retorno, move para Negociação, ou renova o prazo. Campo livre só no “Outro”.</p></div>
+      <span class="tag faz">Proposta</span></div>
+    <div class="prop"><span class="s">3</span>
+      <div class="c"><b>Duas renovações, e a terceira oferece as saídas</b>
+      <p>Follow-up ou Perdido com motivo, na mesma tela. Já está configurado: 2 renovações.</p></div>
+      <span class="tag faz">Proposta</span></div>
+    <div class="prop"><span class="s">4</span>
+      <div class="c"><b>Aviso do 5º dia e tarja no funil</b>
+      <p>Contagem no card do vendedor; no quadro, vermelho sem justificar e âmbar justificado.</p></div>
+      <span class="tag faz">Proposta</span></div>
+    <div class="prop"><span class="s">—</span>
+      <div class="c"><b>Bloquear o campo por calendário puro</b>
+      <p>Calaria a Prime com 26 clientes que estão esperando resposta agora. Nunca.</p></div>
+      <span class="tag nao">Não faria</span></div>
+    <div class="prop"><span class="s">—</span>
+      <div class="c"><b>Justificativa como campo de texto livre</b>
+      <p>Vira “.” em uma semana, não é contável, e ninguém lê. Escolha + texto no “Outro”.</p></div>
+      <span class="tag nao">Não faria</span></div>
+  </div>
+</section>
+
+<!-- ═══════ 7. decisões -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Para eu começar</span>
+    <h2>Três decisões suas</h2>
+  </div>
+  <div class="perg">
+    <ol>
+      <li><b>A trava poupa quem está esperando resposta?</b> É o ponto que muda o
+      desenho inteiro. Meu voto é sim — e forte.</li>
+      <li><b>Começo pelo ensaio de uma semana ou ligo direto?</b> Meu voto é ensaio:
+      hoje seriam 210 leads no alvo, e ninguém sabe quantas mensagens por dia isso vira.</li>
+      <li><b>As quatro opções de justificativa estão certas para a Prime?</b> Eu as
+      escrevi olhando o funil de vocês. Se falta uma que acontece toda semana aí, ela
+      entra agora — depois vira mudança de tela.</li>
+    </ol>
+  </div>
+</section>
+
+<footer>
+  <span>Prime Eventos · conta 34</span>
+  <span>Números medidos em produção em 14/09/2026, só leitura</span>
+  <span>Prazo do Contatado hoje: 7 dias · 2 renovações · justificativa obrigatória (desligado)</span>
+</footer>
+
+</div>

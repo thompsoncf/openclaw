@@ -169,7 +169,18 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
    ponta e o botão na outra, com meia tela de vão no meio. */
 .pend-lista{max-width:640px;display:flex;flex-direction:column}
 .pend-nome .fone{color:var(--text-faint);font-family:var(--mono);font-size:.7rem;margin-left:.35rem}
-.pend-item{display:flex;align-items:center;gap:.5rem;padding:.34rem 0;border-top:1px dashed var(--line)}
+.pend-item{display:flex;align-items:center;gap:.5rem;padding:.34rem 0;border-top:1px dashed var(--line);flex-wrap:wrap}
+/* OS DOIS DOCUMENTOS, na linha de baixo. `order` e não a posição no HTML: no
+   markup eles vêm logo depois do nome (é o que se lê junto), e aqui descem pra
+   segunda linha sem obrigar o valor e os botões a mudarem de lugar. */
+.pend-docs{order:9;flex-basis:100%;display:flex;flex-direction:column;gap:.08rem;padding:0 0 .2rem}
+.pd{font-size:.72rem;color:var(--text-dim);display:flex;gap:.4rem;align-items:baseline}
+.pd>span{width:.85rem;flex:none;text-align:center}
+.pd.ok>span{color:var(--neon-bright)}
+.pd.amb{color:var(--ambar)}.pd.amb>span{color:var(--ambar)}
+.pd.cor{color:var(--coral)}.pd.cor>span{color:var(--coral)}
+.pend-cap.coral{color:var(--coral)}
+.pend-cap+.pend-lista{margin-bottom:.7rem}
 .pend-item:first-child{border-top:0}
 .pend-nome{flex:1;min-width:0;font-size:.8rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pend-meta{font:500 .7rem var(--mono);color:var(--text-faint);white-space:nowrap;flex:none}
@@ -278,6 +289,15 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       {% if comp.propostas %}<em class="{{ comp.propostas[0] }}">{{ comp.propostas[1] }}</em>{% endif %}</div>
     <div class="kpi {{ 'ok' if p.contratos else 'amb' if p.sem_assinar else '' }}"><b>{{ p.contratos }}</b><span>contratos · {% if perfil.chave == 'recorrente' %}{{ brl(p.contratos_mensal) }}/mês{% else %}{{ brl(p.contratos_valor) }}{% endif %}</span>
       <em>{% if p.sem_assinar %}+{{ p.sem_assinar }} aprovado(s) sem assinatura{% else %}nenhum aprovado esperando assinatura{% endif %}</em>
+      {# PARADO EM CASA — a espera que é NOSSA, e que o placar não mostrava.
+         Só onde existe contrato pra assinar (§6): no recorrente não há documento,
+         e prometer o número ali seria falar de papel pra quem vende mensalidade.
+         O portão é `perfil.contrato`, o mesmo que o resto da tela usa. #}
+      {% if perfil.contrato and (p.parado_em_casa is not none or p.parado_em_casa_agora) %}
+      <em class="{{ 'ruim' if p.parado_em_casa_agora else '' }}">parado em casa:
+        {%- if p.parado_em_casa is not none %} {{ p.parado_em_casa }} dia{{ 's' if p.parado_em_casa != 1 }} (mediana){% else %} —{% endif %}
+        {%- if p.parado_em_casa_agora %} · {{ p.parado_em_casa_agora }} sem enviar agora{% endif %}</em>
+      {% endif %}
       {% if comp.contratos %}<em class="{{ comp.contratos[0] }}">{{ comp.contratos[1] }}</em>{% endif %}</div>
     <div class="kpi {{ 'ok' if p.visitas_pct is not none and p.visitas_pct >= 70 else 'amb' if p.visitas_pct is not none else '' }}">
       <b>{% if p.visitas_pct is not none %}{{ p.visitas_pct }}%{% else %}—{% endif %}</b><span>{{ perfil.vocab.compromisso_kpi }}</span>
@@ -327,14 +347,38 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
       {% if s.paradas_1a > s.paradas_1a_itens|length %}<div class="pend-mais">+ {{ s.paradas_1a - s.paradas_1a_itens|length }} outro(s) — lista completa em Prospecção, filtrada por {{ v.primeiro_nome }}</div>{% endif %}
     </div></td></tr>
     {% endif %}
+    {# DE QUEM É A BOLA, e não só "esperando assinatura". O bloco juntava dois
+       estados opostos: contrato que o cliente recebeu e não assinou, e contrato
+       que nunca saiu daqui. Medido na conta 34 em 14/09/2026: 35 dias somados
+       parados em casa contra 1 dia esperando cliente, nos 6 contratos assinados
+       — todos assinaram no mesmo dia em que receberam.
+       Mockup: docs/mockups/raio_x_assinado_e_falta.html #}
     {% if s.sem_assinar %}
+    {% set meus = s.sem_assinar|selectattr('estado','in',['nunca_enviado','sem_contrato'])|list %}
+    {% set deles = s.sem_assinar|selectattr('estado','equalto','aguardando')|list %}
     <tr class="pend-row fechada" id="rx-{{ v.id }}-ass"><td colspan="9"><div class="pend">
-      <div class="pend-cap">Aprovado, esperando assinatura · {{ s.sem_assinar|length }}</div>
+      {% for grupo, itens, cap in [
+           ('meu', meus, 'A bola está com você — contrato pronto e não enviado'),
+           ('deles', deles, 'A bola está com o cliente — enviado, aguardando assinatura')] %}
+      {% if itens %}
+      <div class="pend-cap {{ 'coral' if grupo == 'meu' else '' }}">{{ cap }} · {{ itens|length }}</div>
       <div class="pend-lista">
-      {% for i in s.sem_assinar %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}{% if i.fone %}<span class="fone">{{ i.fone }}</span>{% endif %}</div>
-        <div class="pend-meta">{{ brl(i.valor_centavos) }} · há {{ i.dias }} dia{{ 's' if i.dias != 1 }}</div>
+      {% for i in itens %}<div class="pend-item"><div class="pend-nome">{{ i.nome }}{% if i.fone %}<span class="fone">{{ i.fone }}</span>{% endif %}</div>
+        <div class="pend-docs">
+          <div class="pd ok"><span>✓</span> Orçamento{% if i.aprovada_em %} · aprovado {{ i.aprovada_em|dia }}{% endif %}{% if i.aprovada_por %} por {{ i.aprovada_por }}{% endif %}</div>
+          {% if i.estado == 'aguardando' %}
+          <div class="pd amb"><span>◔</span> Contrato{% if i.contrato_numero %} nº {{ i.contrato_numero }}{% endif %} · enviado há {{ i.dias }} dia{{ 's' if i.dias != 1 }}, sem assinatura</div>
+          {% elif i.estado == 'nunca_enviado' %}
+          <div class="pd cor"><span>●</span> Contrato{% if i.contrato_numero %} nº {{ i.contrato_numero }}{% endif %} · pronto há {{ i.dias }} dia{{ 's' if i.dias != 1 }} — <b>nunca enviado</b></div>
+          {% else %}
+          <div class="pd cor"><span>●</span> Contrato ainda não foi criado — há {{ i.dias }} dia{{ 's' if i.dias != 1 }}</div>
+          {% endif %}
+        </div>
+        <div class="pend-meta">{{ brl(i.valor_centavos) }}</div>
         <div class="pend-acoes"><a class="pend-btn doc" href="/painel/servicos?abrir={{ i.orcamento_id }}">📄 abrir</a>{% if i.conversa_id %}<button type="button" class="pend-btn zap" onclick="kbAbrirChat(event,{{ i.conversa_id }},'{{ i.aba }}',this,{{ i.nome|tojson|forceescape }})">💬 conversa</button>{% endif %}</div></div>{% endfor %}
       </div>
+      {% endif %}
+      {% endfor %}
     </div></td></tr>
     {% endif %}
     {% endfor %}

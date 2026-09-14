@@ -1,0 +1,275 @@
+<title>Raio-X · o que foi assinado e o que falta</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --ink:#062011;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.86em;color:var(--roxo)}
+.wrap{max-width:1100px;margin:0 auto;padding:2.6rem 1.25rem 5rem;display:flex;flex-direction:column;gap:2.8rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.6rem,4vw,2.2rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:72ch}
+.head .marca{color:var(--neon)}
+.sec>h2{font-size:1.2rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.1rem;max-width:76ch;font-size:.9rem}
+
+/* ====== o achado ====== */
+.achado{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media(max-width:760px){.achado{grid-template-columns:1fr}}
+.big{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:1.1rem 1.2rem}
+.big.ruim{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.big.bom{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.big b{font-family:var(--display);font-size:2.3rem;line-height:1;display:block}
+.big.ruim b{color:var(--coral)} .big.bom b{color:var(--neon-bright)}
+.big span{display:block;margin-top:.35rem;font-size:.86rem;color:var(--text-dim)}
+
+table.dados{width:100%;border-collapse:collapse;font-size:.86rem;margin-top:1rem}
+table.dados th{text-align:left;font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--text-faint);font-weight:600;padding:.4rem .6rem;border-bottom:1px solid var(--line)}
+table.dados td{padding:.42rem .6rem;border-bottom:1px solid var(--line);color:var(--text-dim)}
+table.dados td.n{text-align:right;font-family:var(--mono)}
+table.dados td.nome{color:var(--text)}
+.mal{color:var(--coral);font-weight:600} .ok{color:var(--neon-bright);font-weight:600}
+
+/* ====== o quadro antes/depois ====== */
+.par{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;align-items:start}
+@media(max-width:900px){.par{grid-template-columns:1fr}}
+.tela{border:1px solid var(--line);border-radius:14px;background:var(--bg-2);overflow:hidden}
+.tela>.cap{padding:.55rem .9rem;font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;
+  font-weight:600;border-bottom:1px solid var(--line)}
+.tela.antes>.cap{color:var(--coral);background:var(--coral-fundo)}
+.tela.depois>.cap{color:var(--neon-bright);background:var(--neon-fundo)}
+.tela .corpo{padding:.9rem}
+
+.grupo{margin-bottom:1rem}
+.grupo:last-child{margin-bottom:0}
+.grupo .tt{font-size:.74rem;font-weight:700;letter-spacing:.02em;display:flex;align-items:center;
+  gap:.45rem;margin-bottom:.5rem}
+.grupo.meu .tt{color:var(--coral)} .grupo.cliente .tt{color:var(--ambar)}
+.grupo.pronto .tt{color:var(--neon-bright)}
+.pill{font-family:var(--mono);font-size:.62rem;padding:.08rem .4rem;border-radius:999px;border:1px solid currentColor}
+
+.item{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.65rem .75rem;margin-bottom:.5rem}
+.item:last-child{margin-bottom:0}
+.item .l1{display:flex;justify-content:space-between;gap:.6rem;align-items:baseline}
+.item .nome{font-weight:600;font-size:.92rem}
+.item .val{font-family:var(--mono);font-size:.8rem;color:var(--text-dim);white-space:nowrap}
+.docs{margin-top:.5rem;display:flex;flex-direction:column;gap:.24rem}
+.doc{display:flex;gap:.5rem;align-items:baseline;font-size:.78rem}
+.doc .ic{width:1rem;text-align:center;flex:none}
+.doc .rot{font-family:var(--mono);font-size:.68rem;color:var(--text-faint);width:10.5rem;flex:none}
+.doc .est{color:var(--text-dim)}
+.doc.feito .ic{color:var(--neon-bright)} .doc.feito .est{color:var(--text-dim)}
+.doc.espera .ic{color:var(--ambar)} .doc.espera .est{color:var(--ambar)}
+.doc.parado .ic{color:var(--coral)} .doc.parado .est{color:var(--coral);font-weight:600}
+.acoes{margin-top:.55rem;display:flex;gap:.4rem;flex-wrap:wrap}
+.bt{font-size:.7rem;padding:.24rem .6rem;border-radius:7px;border:1px solid var(--line);
+  color:var(--text-dim);background:var(--surface-2)}
+.bt.pri{background:var(--neon);border-color:var(--neon);color:var(--ink);font-weight:600}
+.velho{font-size:.78rem;color:var(--text-dim);padding:.3rem 0}
+.velho b{color:var(--text)}
+
+.nota{border-left:2.5px solid var(--azul-borda);background:var(--azul-fundo);padding:.75rem .95rem;
+  border-radius:0 10px 10px 0;font-size:.88rem;color:var(--text-dim)}
+.nota b{color:var(--text)}
+.nota.amb{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+ul.reg{margin:.4rem 0 0;padding-left:1.1rem;color:var(--text-dim);font-size:.88rem}
+ul.reg li{margin:.3rem 0}
+ul.reg b{color:var(--text)}
+</style>
+
+<div class="wrap">
+
+<div class="head">
+  <div class="eyebrow">Mockup · Raio-X do dono · 14/09/2026</div>
+  <h1>O que foi assinado, e o que falta assinar</h1>
+  <p>São <b>dois</b> documentos numa venda de evento: o <b class="marca">orçamento</b>, que o cliente
+  aprova, e o <b class="marca">contrato</b>, que ele assina. Hoje o Raio-X junta os dois num rótulo só
+  — “Aprovado, esperando assinatura” — e com isso esconde de quem é a bola.</p>
+</div>
+
+<!-- ============================================= o achado -->
+<div class="sec">
+  <h2>O que os dados da Prime dizem</h2>
+  <p class="leg">Seis contratos assinados na conta 34. Medi o tempo em dois pedaços: quanto o contrato
+  ficou <b>pronto em casa antes de ser enviado</b>, e quanto o <b>cliente demorou pra assinar depois de
+  receber</b>.</p>
+
+  <div class="achado">
+    <div class="big ruim"><b>35 dias</b><span>parados em casa — contrato pronto e não enviado</span></div>
+    <div class="big bom"><b>1 dia</b><span>esperando o cliente, somando os seis</span></div>
+  </div>
+
+  <table class="dados">
+    <tr><th>Cliente</th><th>Contrato</th><th class="n">Parado em casa</th><th class="n">Até assinar</th></tr>
+    <tr><td class="nome">Josiany Rayra Soares dos Santos</td><td>nº 2</td><td class="n mal">23 dias</td><td class="n ok">0</td></tr>
+    <tr><td class="nome">Beatriz do Carmo Brito</td><td>nº 4</td><td class="n mal">8 dias</td><td class="n ok">0</td></tr>
+    <tr><td class="nome">Kelma Costa da Silva</td><td>nº 6</td><td class="n">3 dias</td><td class="n ok">0</td></tr>
+    <tr><td class="nome">Bianca Oliveira</td><td>nº 3</td><td class="n">1 dia</td><td class="n ok">0</td></tr>
+    <tr><td class="nome">Renata Costa</td><td>nº 7</td><td class="n ok">0</td><td class="n">1 dia</td></tr>
+    <tr><td class="nome">Claudia Maria Almeida de Carvalho</td><td>nº 5</td><td class="n ok">0</td><td class="n ok">0</td></tr>
+  </table>
+
+  <div class="nota" style="margin-top:1rem">
+    <b>Todo cliente assinou no mesmo dia em que recebeu</b> — menos a Renata, que assinou no dia
+    seguinte. A demora nunca foi do cliente. E o caso que motivou este mockup fecha o argumento: a
+    Josiany aparecia no Raio-X como “esperando assinatura há 23 dias”. O contrato dela foi enviado em
+    14/09 e <b>ela assinou no mesmo dia</b>. Ninguém estava esperando ela; ela é que estava esperando
+    o contrato.
+  </div>
+</div>
+
+<!-- ============================================= antes x depois -->
+<div class="sec">
+  <h2>Antes e depois</h2>
+  <p class="leg">Mesmos dois registros, do jeito que a tela mostra hoje e do jeito proposto. O de
+  cima é o estado real da conta 34 agora.</p>
+
+  <div class="par">
+    <div class="tela antes">
+      <div class="cap">Hoje</div>
+      <div class="corpo">
+        <div class="velho" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint);font-weight:600;margin-bottom:.5rem">Aprovado, esperando assinatura · 2</div>
+        <div class="item">
+          <div class="l1"><span class="nome">Josiany Rayra Soares dos Santos</span><span class="val">R$ 7.090</span></div>
+          <div class="velho">há 23 dias</div>
+          <div class="acoes"><span class="bt">📄 abrir</span><span class="bt">💬 conversa</span></div>
+        </div>
+        <div class="item">
+          <div class="l1"><span class="nome">Maria Carolina da Silva Costa</span><span class="val">R$ 8.050</span></div>
+          <div class="velho">há 4 dias</div>
+          <div class="acoes"><span class="bt">📄 abrir</span><span class="bt">💬 conversa</span></div>
+        </div>
+        <div class="nota amb" style="margin-top:.8rem;font-size:.82rem">
+          As duas linhas parecem a mesma coisa e não são. Numa, o cliente nunca recebeu nada.
+          E “há 23 dias” conta do <b>aprovado</b>, não do <b>enviado</b> — mede o tempo errado.
+        </div>
+      </div>
+    </div>
+
+    <div class="tela depois">
+      <div class="cap">Proposto</div>
+      <div class="corpo">
+
+        <div class="grupo meu">
+          <div class="tt">A BOLA ESTÁ COM VOCÊ <span class="pill">1</span></div>
+          <div class="item">
+            <div class="l1"><span class="nome">Maria Carolina da Silva Costa</span><span class="val">R$ 8.050</span></div>
+            <div class="docs">
+              <div class="doc feito"><span class="ic">✓</span><span class="rot">Orçamento nº 23</span>
+                <span class="est">aprovado 10/09 pela cliente</span></div>
+              <div class="doc parado"><span class="ic">●</span><span class="rot">Contrato nº 8</span>
+                <span class="est">pronto há 4 dias — nunca enviado</span></div>
+            </div>
+            <div class="acoes"><span class="bt pri">Mandar o contrato pra assinar</span><span class="bt">📄 abrir</span></div>
+          </div>
+        </div>
+
+        <div class="grupo cliente">
+          <div class="tt">A BOLA ESTÁ COM O CLIENTE <span class="pill">0</span></div>
+          <div class="velho" style="color:var(--text-faint);font-size:.8rem">Nenhum contrato esperando assinatura.</div>
+        </div>
+
+        <div class="grupo pronto">
+          <div class="tt">ASSINADO NO PERÍODO <span class="pill">1</span></div>
+          <div class="item">
+            <div class="l1"><span class="nome">Josiany Rayra Soares dos Santos</span><span class="val">R$ 7.090</span></div>
+            <div class="docs">
+              <div class="doc feito"><span class="ic">✓</span><span class="rot">Orçamento nº 8</span>
+                <span class="est">aprovado 22/08 pela cliente</span></div>
+              <div class="doc feito"><span class="ic">✓</span><span class="rot">Contrato nº 2</span>
+                <span class="est">assinado 14/09 pela cliente</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================= a régua -->
+<div class="sec">
+  <h2>A régua: cada estado e de quem é a bola</h2>
+  <p class="leg">O agrupamento não é decorativo — é a pergunta “quem tem que agir agora”. Os estados
+  saem de campos que já existem, sem coluna nova.</p>
+
+  <div class="par" style="grid-template-columns:1fr">
+    <div class="tela"><div class="corpo">
+      <table class="dados" style="margin-top:0">
+        <tr><th>Estado</th><th>Como se sabe</th><th>Bola</th><th>O que a linha oferece</th></tr>
+        <tr><td class="nome">Orçamento não aprovado</td><td><code>aprovada_em is null</code></td>
+            <td>cliente</td><td>não entra neste bloco</td></tr>
+        <tr><td class="nome"><span class="mal">Contrato pronto, nunca enviado</span></td>
+            <td><code>enviado_em is null</code></td>
+            <td class="mal">VOCÊ</td><td>Mandar o contrato pra assinar</td></tr>
+        <tr><td class="nome">Contrato enviado, sem assinatura</td>
+            <td><code>enviado_em</code> + <code>assinado_em is null</code></td>
+            <td>cliente</td><td>Reenviar · conversa</td></tr>
+        <tr><td class="nome"><span class="ok">Contrato assinado</span></td><td><code>assinado_em</code></td>
+            <td>—</td><td>fecha o negócio</td></tr>
+      </table>
+    </div></div>
+  </div>
+
+  <div class="nota" style="margin-top:1rem">
+    <b>O relógio passa a contar do envio, não da aprovação.</b> “Esperando assinatura há 23 dias” é
+    falso quando o contrato saiu ontem. Quem não foi enviado ganha o próprio relógio, com o outro
+    nome: <b>parado em casa há N dias</b>.
+    <br><br>
+    <b>Cuidado com <code>contratos.status</code>.</b> A coluna nasce <code>'enviado'</code> por padrão
+    — o contrato nº 8 da Carolina está <code>status='enviado'</code> com <code>enviado_em</code> nulo.
+    Quem manda é a data, nunca o status. O funil de Serviços já acerta isso
+    (<code>linha_do_funil</code> lê <code>contrato_enviado_em</code>); o Raio-X é que ainda não.
+  </div>
+</div>
+
+<!-- ============================================= nicho -->
+<div class="sec">
+  <h2>E nos outros nichos (§6)</h2>
+  <p class="leg">Contrato com assinatura só existe onde <code>contrato.exige_assinatura</code> é
+  verdadeiro. Em produção, só a conta 34 tem contratos — as 8 linhas da tabela são todas dela.</p>
+  <ul class="reg">
+    <li><b>Eventos</b> — os dois documentos, como no quadro acima.</li>
+    <li><b>Recorrente (mensalidade)</b> — não há contrato pra assinar. A linha mostra só
+    <b>Orçamento nº N · aprovado DD/MM</b>, e o bloco passa a se chamar
+    <b>“Aprovado, falta fechar”</b>. Prometer assinatura ali seria repetir o erro do Raio-X de 05/09,
+    que falava de festa pra quem vende sistema.</li>
+    <li><b>Produto</b> — não tem funil nem este bloco.</li>
+  </ul>
+</div>
+
+<!-- ============================================= o que eu faria -->
+<div class="sec">
+  <h2>O que isto pede pra virar tela</h2>
+  <ul class="reg">
+    <li><b>Nenhuma coluna nova.</b> <code>aprovada_em</code>, <code>aprovada_por</code>,
+    <code>contratos.numero</code>, <code>criado_em</code>, <code>enviado_em</code> e
+    <code>assinado_em</code> já existem e já estão preenchidos.</li>
+    <li><b>Uma consulta a mais no Raio-X</b> (<code>raio_x.sua_semana</code>): hoje o bloco
+    <code>sem_assinar</code> nem olha a tabela <code>contratos</code> — ele só checa que não existe
+    contrato assinado. Passa a trazer número, criação e envio.</li>
+    <li><b>A redação vem do funil</b>, que já tem os textos certos (“Contrato pronto — ainda não
+    mandou pra assinar”, “Contrato aguardando assinatura há N”). Mesma regra em dois lugares, como
+    foi feito com o nome do cliente.</li>
+    <li><b>Métrica nova, opcional:</b> “parado em casa” — mediana dos dias entre criar e enviar o
+    contrato. É o número que torna os 35 dias visíveis antes de virarem 35.</li>
+  </ul>
+</div>
+
+<div class="eyebrow" style="text-align:center">Mockup — nada disto está no ar. Dados reais da conta 34, lidos em 14/09/2026.</div>
+
+</div>

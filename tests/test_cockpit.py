@@ -98,7 +98,12 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_i
 -- DDL do próprio app) além das de cima; sem elas cada bloco da tela cairia no
 -- `except` e o teste passaria sem exercitar a consulta
 create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
-  status text default 'enviado', valor_centavos bigint, assinado_em timestamptz, enviado_em timestamptz);
+  status text default 'enviado', valor_centavos bigint, assinado_em timestamptz, enviado_em timestamptz,
+  -- 14/09: o bloco de assinatura passou a dizer de quem é a bola, e pra isso lê o
+  -- NÚMERO do contrato e a data em que ele foi criado. Sem as duas colunas a
+  -- consulta estoura, o bloco cai no `except` e a tela renderiza sem "Sua semana"
+  -- — falha muda, que foi exatamente como este teste a pegou.
+  numero int, criado_em timestamptz default now());
 -- o CADASTRO do cliente: primeiro degrau de `vendas.nome_do_orcamento`, e por isso
 -- o Raio-X faz left join nela pra montar o nome de cada linha
 create table clientes (id bigserial primary key, conta_id bigint, nome text);

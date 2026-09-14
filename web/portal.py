@@ -7399,6 +7399,21 @@ _marca.registrar_jinja(_env)   # marca_avatar / marca_cabecalho nos templates
 from web import balao_conversa as _balao
 _balao.registrar_jinja(_env)   # balao_css / balao_js: o funil e o Raio-X usam o MESMO balão
 _env.filters["n2"] = _n2
+
+
+def _dia_br(dt):
+    """'10/09' no fuso de Brasília — a data curta que as listas do Raio-X mostram
+    ao lado de cada documento. Tolerante: `None` vira vazio, e string volta como
+    veio, porque um filtro de data não pode derrubar a tela por causa de um campo
+    que nunca foi preenchido."""
+    try:
+        from finance.raio_x import _TZ
+        return dt.astimezone(_TZ).strftime("%d/%m")
+    except (AttributeError, ValueError, TypeError):
+        return str(dt or "")
+
+
+_env.filters["dia"] = _dia_br
 from finance.models import canonizar_categoria, categorias_de
 _env.globals["canon"] = lambda c, t="despesa": canonizar_categoria(c, t)
 _env.globals["categorias_de"] = categorias_de

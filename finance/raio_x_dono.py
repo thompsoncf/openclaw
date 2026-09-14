@@ -255,6 +255,24 @@ def _placar(c, conta_id: int, w: str, wv: list, ini, fim, agora) -> dict:
          where p.conta_id = %s and o.aprovada_em is not null{w}
            and not exists (select 1 from contratos c where c.orcamento_id = o.id and c.status = 'assinado')""",
         [conta_id, *wv]).fetchone()[0]
+    # PARADO EM CASA: quanto o contrato espera AQUI DENTRO antes de ir pro cliente.
+    # Medido na conta 34 em 14/09/2026, nos 6 contratos assinados: 35 dias somados
+    # parados em casa contra 1 dia esperando o cliente — todos assinaram no mesmo
+    # dia em que receberam. A espera que o placar não mostrava era a nossa.
+    #
+    # Duas contas diferentes e as duas importam: a MEDIANA do que já saiu (o hábito)
+    # e quantos estão parados AGORA (o que ainda dá pra resolver hoje). `enviado_em`
+    # e não `status`, que nasce 'enviado' por padrão e mente.
+    parado = c.execute(f"""
+        select
+          percentile_cont(0.5) within group (
+            order by extract(day from (c.enviado_em - c.criado_em))
+          ) filter (where c.enviado_em is not null
+                      and c.enviado_em >= %s and c.enviado_em < %s),
+          count(*) filter (where c.enviado_em is null and c.status <> 'cancelado')
+          from contratos c join orcamentos o on o.id = c.orcamento_id
+          join prospeccao p on p.orcamento_id = o.id
+         where c.conta_id = %s{w}""", [ini, fim, conta_id, *wv]).fetchone()
     vis = c.execute(f"""
         select count(*) filter (where e.desfecho = 'realizado'),
                count(*) filter (where e.desfecho = 'nao_realizado'),
@@ -278,6 +296,8 @@ def _placar(c, conta_id: int, w: str, wv: list, ini, fim, agora) -> dict:
         "propostas_mensal": int(mensal_env),
         "contratos": int(contratos), "contratos_valor": int(valor_ctr), "sem_assinar": int(sem_assinar),
         "contratos_mensal": int(mensal_ctr),
+        "parado_em_casa": (round(float(parado[0])) if parado and parado[0] is not None else None),
+        "parado_em_casa_agora": int((parado[1] if parado else 0) or 0),
         "visitas_ok": vis_ok, "visitas_nao": vis_nao, "visitas_sem_resposta": vis_sem,
         "visitas_pct": (round(100 * vis_ok / (vis_ok + vis_nao)) if (vis_ok + vis_nao) else None),
         # abaixo de metade respondida a taxa é pouco confiável (regra do relatório do funil)

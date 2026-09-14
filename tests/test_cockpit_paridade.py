@@ -43,7 +43,9 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   origem text, origem_codigo text, obs text, decisor_nome text, socio text, estagio text default 'lead',
   orcamento_id bigint, atualizado_em timestamptz default now(),
   criado_em timestamptz default now());
-create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
+create table funil_etapas (id bigserial primary key,
+  -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
+  semeado_de text, conta_id bigint, chave text, rotulo text,
   -- migração 238: a etapa que o quadro comercial não mostra
   sai_do_quadro boolean not null default false,
   agenda_ao_entrar boolean not null default false,

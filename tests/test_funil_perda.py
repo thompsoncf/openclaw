@@ -33,7 +33,9 @@ create table funil_movimentos (id bigserial primary key, conta_id bigint,
   criado_em timestamptz default now());
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true);
-create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
+create table funil_etapas (id bigserial primary key,
+  -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
+  semeado_de text, conta_id bigint, chave text,
   rotulo text, ordem int default 0);
 """
 
@@ -55,6 +57,8 @@ def pool():
         # chegou em produção
         c.execute((MIG / "235_motivos_de_perda_da_conta.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "236_reativar_o_lead_que_volta.sql").read_text(encoding="utf-8"))
+        # 254: `semeado_de` — de onde veio o rótulo (semente do ramo × dono)
+        c.execute((MIG / "254_funil_semeado_de.sql").read_text(encoding="utf-8"))
         for ch, o in (("novo", 0), ("contatado", 10), ("perdido", 910)):
             c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem)
                          values (%s,%s,%s,%s)""", (CONTA, ch, ch.capitalize(), o))

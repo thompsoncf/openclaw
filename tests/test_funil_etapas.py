@@ -20,7 +20,9 @@ from web import painel_prospeccao as pp
 _BASE_SQL = """
 create table contas (id bigserial primary key, tipo text, nome text, chip_de bigint);
 create table prospeccao (id bigserial primary key, conta_id bigint, status text, estagio text);
-create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
+create table funil_etapas (id bigserial primary key,
+  -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
+  semeado_de text, conta_id bigint, chave text, rotulo text,
   ordem int not null default 0, fixa boolean not null default false,
   -- colunas da migração 177 (fase/prazo/gatilho): a etapa nova nasce com fase
   fase text not null default 'venda', prazo_min integer, gatilho text,

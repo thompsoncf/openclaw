@@ -29,7 +29,9 @@ create table funil_motivos_perda (id bigserial primary key, conta_id bigint,
   chave text, rotulo text, ordem int default 0, ativo boolean default true,
   exige_descricao boolean default false, criado_em timestamptz default now(),
   constraint uq_fmp unique (conta_id, chave));
-create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
+create table funil_etapas (id bigserial primary key,
+  -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
+  semeado_de text, conta_id bigint, chave text, rotulo text,
   ordem int default 0, fixa boolean default false, fase text default 'venda',
   prazo_min integer, gatilho text, gatilho_ativo boolean default false,
   teto_dias integer, renovacoes_max integer not null default 0,

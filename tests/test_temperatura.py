@@ -89,7 +89,9 @@ create table prospeccao (id bigserial primary key, conta_id bigint, contato text
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   criado_em timestamptz);
-create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
+create table funil_etapas (id bigserial primary key,
+  -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
+  semeado_de text, conta_id bigint, chave text,
   rotulo text, ordem int default 0, fase text default 'venda');
 create table funil_movimentos (id bigserial primary key, conta_id bigint,
   prospeccao_id bigint, de text, para text, motivo text, membro_id bigint,

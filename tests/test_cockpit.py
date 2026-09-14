@@ -63,7 +63,9 @@ create table funil_motivos_perda (id bigserial primary key, conta_id bigint,
   chave text, rotulo text, ordem int default 0, ativo boolean default true,
   exige_descricao boolean default false, criado_em timestamptz default now(),
   constraint uq_fmp unique (conta_id, chave));
-create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
+create table funil_etapas (id bigserial primary key,
+  -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
+  semeado_de text, conta_id bigint, chave text, rotulo text,
   -- `fase` (migração 177) é o que os painéis leem pra saber o que conta como venda
   -- ganha; sem a coluna aqui, toda consulta do cockpit estoura com UndefinedColumn
   ordem int default 0, fixa boolean default false, fase text not null default 'venda',
@@ -133,7 +135,9 @@ def pool():
                   # a 235 tira o CHECK dos sete motivos e cria as colunas da perda:
                   # aplicar a migração DE VERDADE é o que faz o teste perceber quando
                   # ela não chegou em produção
-                  "235_motivos_de_perda_da_conta.sql"):
+                  "235_motivos_de_perda_da_conta.sql",
+                  # 254: `semeado_de` nas duas caixas do funil
+                  "254_funil_semeado_de.sql"):
             c.execute((_MIG / m).read_text(encoding="utf-8"))
         # `orcamentos` com TODAS as colunas do app (o Raio-X lê status, aprovada_em,
         # sinal_pago_em, primeiro_ano_centavos; criar_orcamento grava dezenas)

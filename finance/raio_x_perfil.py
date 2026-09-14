@@ -367,6 +367,16 @@ def perfil_por_nicho(slug: str | None) -> str:
     return "produto"
 
 
+def rotulo_do_perfil(chave: str) -> str:
+    """O nome do ramo pra tela, a partir da CHAVE do perfil ('corretora de seguros').
+
+    Existe porque `perfil()` recebe SLUG DE NICHO e a tela do funil só tem a chave do
+    perfil em mãos — e converter uma na outra na chamada dava a linha ilegível que
+    esta função substituiu.
+    """
+    return (_PERFIS.get(chave) or _PERFIS["recorrente"])["rotulo"]
+
+
 def perfil(slug: str | None) -> dict:
     """O perfil inteiro pra um slug de nicho (puro, sem banco)."""
     chave = perfil_por_nicho(slug)

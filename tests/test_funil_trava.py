@@ -29,6 +29,9 @@ AGORA = datetime(2026, 9, 14, 12, 0, tzinfo=timezone.utc)
 _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text, contato text,
   status text default 'novo', estagio text default 'lead', vendedor_id bigint,
+  -- as duas que as AÇÕES da justificativa escrevem: 'pediu_data' marca o retorno
+  -- e 'mandando' move o lead. Sem elas aqui, o teste passaria e a produção quebraria.
+  proximo_contato_em timestamptz, atualizado_em timestamptz default now(),
   criado_em timestamptz default now());
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true);
@@ -74,7 +77,8 @@ def pool():
         # a 254 mexe em `funil_motivos_perda`, que nasce na 235 — a ordem é a mesma
         # em que o Render aplica, e replayar fora de ordem quebraria aqui antes de
         # quebrar em produção, que é exatamente o que este replay existe pra pegar
-        for nome in ("230_funil_teto_da_etapa.sql", "232_funil_saidas_da_etapa.sql",
+        for nome in ("218_follow_up.sql",
+                     "230_funil_teto_da_etapa.sql", "232_funil_saidas_da_etapa.sql",
                      "233_funil_toques_da_etapa.sql",
                      "235_motivos_de_perda_da_conta.sql", "236_reativar_o_lead_que_volta.sql",
                      "238_etapa_sai_do_quadro.sql",
@@ -237,18 +241,20 @@ def test_etapa_sem_teto_nunca_engata(c):
 
 # ------------------------------------------------------------------ o modo
 
-def test_o_modo_nasce_off_e_ligado_ainda_nao_e_aceito(c):
-    """'ligado' fecha para 'off' de propósito: travar de verdade depende da tela de
-    justificativa, que ainda não existe. Aceitar o modo antes da tela faria o motor
-    recusar envios que o vendedor não teria como destravar."""
+def test_o_modo_nasce_off_e_so_aceita_o_que_a_tela_cumpre(c):
+    """Nasce 'off' em toda conta. 'ligado' passou a ser aceito quando a tela de
+    justificativa nasceu — até o PR anterior ele fechava para 'off', porque um
+    modo que a tela não sabe cumprir faria o motor recusar envios que o vendedor
+    não teria como destravar. Valor estranho no banco continua fechando para 'off'."""
     c.execute("delete from funil_regua")
     assert tv.modo(c, CONTA) == "off", "conta sem linha na régua"
     c.execute("insert into funil_regua (conta_id) values (%s)", (CONTA,))
     assert tv.modo(c, CONTA) == "off", "o padrão da coluna"
-    c.execute("update funil_regua set trava_modo='ligado' where conta_id=%s", (CONTA,))
-    assert tv.modo(c, CONTA) == "off", "'ligado' não é cumprível hoje"
-    c.execute("update funil_regua set trava_modo='observando' where conta_id=%s", (CONTA,))
-    assert tv.modo(c, CONTA) == "observando"
+    for v in ("observando", "ligado"):
+        c.execute("update funil_regua set trava_modo=%s where conta_id=%s", (v, CONTA))
+        assert tv.modo(c, CONTA) == v
+    c.execute("update funil_regua set trava_modo='meia-boca' where conta_id=%s", (CONTA,))
+    assert tv.modo(c, CONTA) == "off", "o que o código não cumpre, não vale"
 
 
 # ------------------------------------------------------------------ o ensaio
@@ -340,3 +346,125 @@ def test_o_resumo_traz_o_denominador_de_mensagens(c):
     assert r["engataram"] == 1
     assert r["enviadas"] >= 1
     assert r["por_decisao_e_vendedor"][0]["quem"] == "Pedro"
+
+
+# ------------------------------------------------------------------ a tela (modo ligado)
+
+def _ligado(c):
+    c.execute("update funil_regua set trava_modo='ligado' where conta_id=%s", (CONTA,))
+
+
+def test_no_modo_ligado_o_registro_nao_e_simulado(c):
+    """`simulado` guarda se a mensagem SAIU. Sem essa distinção, o relatório de
+    depois de ligar não separaria "teria travado" de "travou"."""
+    _ligado(c)
+    lead = _lead(c, dias=9)
+    conv = _conversa(c, lead)
+    _msg(c, conv, "out", AGORA - timedelta(days=8))
+    v = tv.registrar(c, CONTA, lead, agora=AGORA)
+    assert v["modo"] == "ligado"
+    assert _tentativas(c)[0][3] is False
+
+
+def test_justificar_com_motivo_fora_da_lista_recusa(c):
+    lead = _lead(c, dias=9)
+    r = tv.justificar(c, CONTA, lead, None, motivo="porque sim", agora=AGORA)
+    assert r == {"ok": False, "erro": "motivo_invalido"}
+
+
+def test_outro_exige_o_texto_e_pediu_data_exige_a_data(c):
+    lead = _lead(c, dias=9)
+    assert tv.justificar(c, CONTA, lead, None, motivo="outro",
+                         agora=AGORA)["erro"] == "descricao_obrigatoria"
+    assert tv.justificar(c, CONTA, lead, None, motivo="pediu_data",
+                         agora=AGORA)["erro"] == "data_obrigatoria"
+
+
+def test_justificar_renova_o_prazo_e_a_regra_para_de_engatar(c):
+    """É a troca que o desenho promete: justificar uma vez compra uma SEMANA com
+    aquele lead. Sem isso o vendedor justificaria a cada mensagem, dez vezes por
+    dia, e a trava viraria pedágio."""
+    lead = _lead(c, dias=9)
+    conv = _conversa(c, lead)
+    _msg(c, conv, "out", AGORA - timedelta(days=8))
+    assert tv.avaliar(c, CONTA, lead, agora=AGORA)["decisao"] == "pediria_justificativa"
+    r = tv.justificar(c, CONTA, lead, None, motivo="outro_caminho", agora=AGORA)
+    assert r["ok"] and r["renovacoes"] == 1
+    assert tv.avaliar(c, CONTA, lead, agora=AGORA)["decisao"] == "no_prazo"
+    # e uma semana depois ela engata de novo
+    assert tv.avaliar(c, CONTA, lead, agora=AGORA + timedelta(days=8))["decisao"] \
+        == "pediria_justificativa"
+
+
+def test_a_terceira_vez_e_a_parede_e_justificar_nao_abre(c):
+    """As duas renovações da Prime. Na terceira não há justificativa que passe —
+    a saída é mover de etapa ou perder, e é isso que a tela oferece."""
+    lead = _lead(c, dias=30)
+    _renovar(c, lead, quantas=2)
+    assert tv.avaliar(c, CONTA, lead, agora=AGORA)["decisao"] == "parede"
+    r = tv.justificar(c, CONTA, lead, None, motivo="outro_caminho", agora=AGORA)
+    assert r["ok"] is False and r["erro"] == "sem_renovacao"
+
+
+def test_pediu_data_marca_o_retorno_pelo_caminho_do_follow_up(c):
+    """Duas coisas de uma vez: o lead volta no dia que o CLIENTE pediu, e a marcação
+    passa por `follow_up.marcar` — com linha em follow_up_marcacoes, autor e motivo.
+    Um update solto em `proximo_contato_em` daria dois donos à mesma coluna.
+
+    E a hora é MEIO-DIA UTC, não meia-noite: 00:00 UTC é 21h do dia anterior no
+    Brasil, e o lead voltaria pra fila na véspera, à noite."""
+    lead = _lead(c, dias=9)
+    r = tv.justificar(c, CONTA, lead, None, motivo="pediu_data", data="2026-10-20",
+                      agora=AGORA)
+    assert r["ok"] and r["voltar_em"] == "2026-10-20"
+    quando = c.execute("select proximo_contato_em from prospeccao where id=%s",
+                       (lead,)).fetchone()[0]
+    assert quando == datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
+    marc = c.execute("""select prazo_em, acao from follow_up_marcacoes
+                         where prospeccao_id=%s""", (lead,)).fetchone()
+    assert marc and marc[0] == quando and "chamar" in marc[1]
+
+
+def test_data_torta_nao_desfaz_a_renovacao_ja_gravada(c):
+    """A renovação é gravada antes da ação. Se a data vier impossível, o vendedor
+    não pode perder a renovação que já consumiu — sairia pior do que entrou."""
+    lead = _lead(c, dias=9)
+    r = tv.justificar(c, CONTA, lead, None, motivo="pediu_data", data="30/02/2026",
+                      agora=AGORA)
+    assert r["ok"] and r.get("data_ignorada") is True
+    assert tv._teto.renovacoes_de(c, lead, "contatado") == 1
+
+
+def test_mandando_o_que_ele_pediu_move_o_lead_pra_frente_com_historico(c):
+    """'proposta' é a próxima etapa de venda deste funil de teste. O nome não está
+    no código: sai da ordem das etapas da conta (CLAUDE.md §6)."""
+    lead = _lead(c, dias=9)
+    r = tv.justificar(c, CONTA, lead, membro_id=None, motivo="mandando", agora=AGORA)
+    assert r["ok"] and r["moveu_para"] == "proposta"
+    assert c.execute("select status from prospeccao where id=%s",
+                     (lead,)).fetchone()[0] == "proposta"
+    mov = c.execute("""select de, para, motivo from funil_movimentos
+                        where prospeccao_id=%s and motivo=%s""",
+                    (lead, tv.MOTIVO_MOV)).fetchone()
+    assert mov == ("contatado", "proposta", tv.MOTIVO_MOV), "o movimento fica no histórico"
+
+
+def test_a_proxima_de_venda_nunca_e_de_fechamento_nem_sai_do_quadro(c):
+    """Justificar um envio não pode GANHAR nem PERDER um lead. Aqui 'proposta' sai
+    do quadro e a única etapa à frente vira uma de fechamento — e o motivo
+    'mandando' então não move nada, em vez de empurrar o lead pra Ganho."""
+    c.execute("""update funil_etapas set sai_do_quadro=true
+                  where conta_id=%s and chave='proposta'""", (CONTA,))
+    c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fase)
+                 values (%s,'ganho','Ganho',900,'fechamento')""", (CONTA,))
+    try:
+        lead = _lead(c, dias=9)
+        assert tv.proxima_de_venda(c, CONTA, "contatado") is None
+        r = tv.justificar(c, CONTA, lead, None, motivo="mandando", agora=AGORA)
+        assert r["ok"] and "moveu_para" not in r
+        assert c.execute("select status from prospeccao where id=%s",
+                         (lead,)).fetchone()[0] == "contatado"
+    finally:
+        c.execute("""update funil_etapas set sai_do_quadro=false
+                      where conta_id=%s and chave='proposta'""", (CONTA,))
+        c.execute("delete from funil_etapas where conta_id=%s and chave='ganho'", (CONTA,))

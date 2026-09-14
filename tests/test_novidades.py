@@ -1087,3 +1087,47 @@ def test_o_aviso_da_perda_nao_fala_de_festa(pool):
 
 def test_reaplicar_o_aviso_da_perda_nao_duplica(pool):
     assert _perda_app(pool)["id"] == _perda_app(pool)["id"]
+
+
+# ---------------- 258: a trava da insistência (14/09/2026)
+
+def _trava(pool):
+    return _aplica(pool, "258_novidade_trava_insistencia.sql", "trava-da-insistencia")
+
+
+def test_o_aviso_da_trava_vai_primeiro_pro_vendedor(pool):
+    a = _trava(pool)
+    assert set(a["pra_quem"]) == {"dono", "gestor", "vendedor"}
+    assert a["publico"] == "todos" and a["link"] == "/cockpit"
+
+
+def test_o_corpo_diz_na_primeira_linha_que_nasce_desligado(pool):
+    """Aviso que descreve uma tela que ninguém tem ainda ensina a ignorar avisos."""
+    corpo = _trava(pool)["corpo"]
+    assert corpo.lstrip().startswith("Isto nasce DESLIGADO")
+
+
+def test_o_corpo_promete_que_quem_espera_resposta_nao_trava(pool):
+    """É a condição que o dono pôs ao aprovar, e a equipe precisa ler isso do app —
+    senão o primeiro cliente calado vira um chamado."""
+    corpo = _trava(pool)["corpo"]
+    assert "NUNCA TRAVA" in corpo
+    assert "não importa há quantos dias" in corpo
+
+
+def test_o_corpo_traz_os_quatro_motivos_com_o_que_cada_um_faz(pool):
+    from finance import funil_trava as tv
+    corpo = _trava(pool)["corpo"]
+    for m in tv.motivos():
+        primeiro = m["rotulo"].split("—")[0].strip()
+        assert primeiro in corpo, m["chave"]
+
+
+def test_o_aviso_da_trava_nao_fala_de_festa(pool):
+    a = _trava(pool)
+    for palavra in ("festa", "buffet", "convidados", "mensalidade"):
+        assert palavra not in (a["resumo"] + " " + a["corpo"]).lower(), palavra
+
+
+def test_reaplicar_o_aviso_da_trava_nao_duplica(pool):
+    assert _trava(pool)["id"] == _trava(pool)["id"]

@@ -15,6 +15,7 @@ from jinja2 import Environment, DictLoader, select_autoescape
 from db.conexao import get_pool
 from web import tema as _tema
 from contas import contas as ct
+from contas import suporte as _suporte
 from finance.estatisticas import estatisticas_funil, estatisticas_custo
 from web.portal import brl
 
@@ -192,6 +193,10 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
       {% if c.qtd_cestas and c.qtd_cestas > 0 %}<span class="tag ativa" title="assinatura de cesta">cesta {{ c.qtd_cestas }}</span>{% endif %}
       <span class="mut" style="font-size:.78rem">vence {{ c.vencimento.strftime('%d/%m/%y') if c.vencimento else '-' }}</span>
       <button type="button" onclick="admToggle({{ c.id }})" id="tgl-{{ c.id }}" style="padding:.3rem .7rem;font-size:.78rem;background:transparent;border:1px solid #333;color:var(--verde-claro)">detalhes</button>
+      <form class="inline" method="post" action="/admin/conta/{{ c.id }}/assumir" style="display:inline"
+            onsubmit="return confirm('Entrar na conta {{ c.nome }} como suporte?\n\nModo LEITURA, 60 minutos, e fica registrado.')">
+        <button style="padding:.3rem .7rem;font-size:.78rem;background:var(--verde);border:0;color:var(--sobre-verde);font-weight:600">Entrar como</button>
+      </form>
     </div>
   </div>
   <div id="det-{{ c.id }}" style="display:none;margin-top:.8rem">
@@ -1056,3 +1061,58 @@ def admin_alertas_teste(request: Request):
         partes.append("Telegram nao configurado (opcional).")
     request.session["admin_aviso"] = " ".join(partes)
     return RedirectResponse("/admin/comunicacao", status_code=303)
+
+
+# ---------- Entrar como: acesso de suporte (contas/suporte.py) ----------
+#
+# A REGRA mora em contas/suporte.py (modo leitura, 60 minutos, trilha); aqui
+# ficam só as duas portas. Ver o docstring de lá pra por que não é uma senha
+# mestra.
+
+@router.post("/admin/conta/{conta_id}/assumir")
+def admin_assumir(request: Request, conta_id: int, motivo: str = Form("")):
+    """Entra na conta do cliente como suporte, em modo leitura."""
+    adm = _admin(request)
+    if adm is None:
+        return _NEGADO
+    pool = get_pool()
+    with pool.connection() as c:
+        alvo = c.execute("select id, nome from contas where id=%s", (conta_id,)).fetchone()
+    if not alvo:
+        request.session["admin_aviso"] = f"Conta {conta_id} não encontrada."
+        return RedirectResponse("/admin", status_code=303)
+    # entrar na PRÓPRIA conta não é suporte: seria uma sessão marcada como
+    # suporte na conta do admin, com escrita barrada e um relógio correndo —
+    # tudo isso pra ficar onde ele já estava.
+    if int(conta_id) == int(adm[0]):
+        request.session["admin_aviso"] = "Essa já é a sua conta."
+        return RedirectResponse("/admin", status_code=303)
+    r = _suporte.iniciar(pool, admin_conta_id=adm[0], conta_id=conta_id, motivo=motivo)
+    # a entrada também vira evento na auditoria que já existe — é onde o admin
+    # olha o histórico da conta, então a trilha aparece sem tela nova
+    ct.registrar_evento(pool, conta_id, "suporte_entrou",
+                        f"admin {adm[0]} ({adm[1]}) · modo leitura · 60min"
+                        + (f" · {motivo.strip()[:120]}" if (motivo or "").strip() else ""))
+    _suporte.aplicar_na_sessao(request.session, admin_conta_id=adm[0], admin_nome=adm[1],
+                               conta_id=conta_id, acesso_id=r["acesso_id"],
+                               expira_em=r["expira_em"])
+    return RedirectResponse("/painel", status_code=303)
+
+
+@router.post("/admin/voltar")
+def admin_voltar(request: Request):
+    """Devolve a sessão pra conta do admin.
+
+    NÃO usa `_admin`: em sessão de suporte a conta logada é a do CLIENTE, que não
+    é admin — o porteiro de lá devolveria 404 e o admin ficaria preso na conta do
+    cliente até o relógio virar. Quem autoriza aqui é a própria marca da sessão,
+    que só `assumir` (já guardado por `_admin`) sabe gravar.
+    """
+    sup = _suporte.ativo(request.session)
+    if sup is None:
+        return RedirectResponse("/painel", status_code=303)
+    if sup.get("acesso_id"):
+        _suporte.encerrar(get_pool(), int(sup["acesso_id"]), "voltou")
+    _suporte.restaurar_sessao(request.session)
+    request.session["admin_aviso"] = "Você voltou pra sua conta."
+    return RedirectResponse("/admin", status_code=303)

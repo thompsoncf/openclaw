@@ -1,0 +1,489 @@
+<title>Onde o lead foi parar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;700&display=swap">
+
+<style>
+:root{
+  --ground:#F4F6F4; --surface:#FFFFFF; --ink:#171C19; --ink-soft:#3C4640;
+  --muted:#626D66; --line:#DBE1DA; --line-strong:#BFC9BF;
+  --ok:#2C7A57; --ok-wash:#E5F1EA;
+  --novo:#8A5E12; --novo-wash:#F8EEDA;
+  --alerta:#A8402F; --alerta-wash:#F8E6E2;
+  --f-sans:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --f-serif:"Source Serif 4",Georgia,serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#101410;--surface:#181D19;--ink:#E5EBE6;--ink-soft:#C0CAC3;
+    --muted:#8B968F;--line:#272E28;--line-strong:#38423A;
+    --ok:#67C398;--ok-wash:#152E22;--novo:#D6A24F;--novo-wash:#31270E;
+    --alerta:#E2887A;--alerta-wash:#33150F;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#101410;--surface:#181D19;--ink:#E5EBE6;--ink-soft:#C0CAC3;
+  --muted:#8B968F;--line:#272E28;--line-strong:#38423A;
+  --ok:#67C398;--ok-wash:#152E22;--novo:#D6A24F;--novo-wash:#31270E;
+  --alerta:#E2887A;--alerta-wash:#33150F;
+}
+
+/* tokens do PRODUTO — web/tema.py. O painel é escuro sempre. */
+.tela{
+  --bg:#0A0F0C; --bg2:#0E1512; --sup:#121A16; --ln:#1E2A23;
+  --txt:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-b:#1E4A3A; --neon-f:rgba(37,211,102,.10); --sobre:#04150C;
+  --amb:#E0A32E; --amb-b:#5A4520; --amb-f:#241C0F;
+  --cor:#E0574F; --cor-b:#5A2B2B; --cor-f:#241313;
+  --azu:#229ED9; --azu-b:#1B3A4A; --azu-f:#0D1B23;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--ground);color:var(--ink);font-family:var(--f-sans);
+  font-size:16px;line-height:1.6;padding-inline:20px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px;margin:0 auto;padding-block:clamp(2.2rem,5vw,3.8rem) 4rem}
+
+h1,h2,h3{margin:0;font-family:var(--f-serif);font-weight:600;text-wrap:balance}
+h1{font-size:clamp(2rem,5vw,2.9rem);line-height:1.1;letter-spacing:-.015em}
+h2{font-size:clamp(1.3rem,3vw,1.62rem);line-height:1.2}
+h3{font-size:1rem;font-family:var(--f-sans);font-weight:700}
+p{margin:0}
+.lede{font-size:1.1rem;color:var(--ink-soft);max-width:62ch}
+.eyebrow{font-family:var(--f-mono);font-size:.68rem;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.mono{font-family:var(--f-mono);font-size:.84em;font-variant-numeric:tabular-nums}
+
+header{border-bottom:2px solid var(--line-strong);padding-bottom:1.6rem;
+  display:flex;flex-direction:column;gap:.9rem}
+.hlinha{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:baseline}
+
+section{margin-top:clamp(2.6rem,6vw,4rem)}
+.shead{display:flex;flex-direction:column;gap:.4rem;margin-bottom:1.3rem}
+.shead p{color:var(--muted);max-width:66ch;font-size:.95rem}
+.corpo{display:flex;flex-direction:column;gap:1.1rem;max-width:66ch}
+.corpo p{font-size:.97rem;color:var(--ink-soft)}
+.corpo p b{color:var(--ink)}
+
+/* ── os que sumiram */
+.sumidos{background:var(--surface);border:1px solid var(--alerta);
+  box-shadow:inset 3px 0 0 var(--alerta);border-radius:8px;overflow:hidden}
+.sumidos table{width:100%;border-collapse:collapse;font-size:.9rem}
+.sumidos th,.sumidos td{padding:.6rem .9rem;text-align:left;border-bottom:1px solid var(--line)}
+.sumidos tr:last-child td{border-bottom:0}
+.sumidos th{font-family:var(--f-mono);font-size:.64rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);font-weight:700}
+.sumidos td b{font-weight:600}
+.sumidos td.d{font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-size:.84rem}
+
+.fluxo{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.2rem 0 .1rem;
+  font-size:.86rem;color:var(--muted)}
+.fluxo b{background:var(--surface);border:1px solid var(--line-strong);border-radius:6px;
+  padding:.25rem .6rem;font-weight:600;color:var(--ink);font-size:.85rem}
+.fluxo b.mau{border-color:var(--alerta);color:var(--alerta)}
+.fluxo .seta{color:var(--line-strong);font-weight:700}
+
+/* ── contagem do que está fora */
+.fora{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.8rem;margin-top:.3rem}
+.fo{background:var(--surface);border:1px solid var(--line);border-radius:8px;
+  padding:.85rem .95rem;display:flex;flex-direction:column;gap:.2rem}
+.fo .n{font-family:var(--f-mono);font-size:1.7rem;font-weight:700;line-height:1}
+.fo .q{font-size:.9rem;font-weight:700}
+.fo .d{font-size:.82rem;color:var(--muted);line-height:1.4}
+.fo.mau{border-color:var(--alerta)} .fo.mau .n{color:var(--alerta)}
+.fo.ok .n{color:var(--ok)}
+
+/* ── a tela proposta */
+.tela{background:var(--bg);border:1px solid #263129;border-radius:12px;padding:1rem;
+  color:var(--txt);overflow-x:auto;box-shadow:0 16px 44px -30px rgba(0,0,0,.8);margin-top:.4rem}
+.cap{font-family:var(--f-mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--faint);margin-bottom:.8rem;display:flex;justify-content:space-between;
+  gap:1rem;flex-wrap:wrap}
+.abas{display:flex;gap:.3rem;border-bottom:1px solid var(--ln);margin-bottom:.8rem;
+  flex-wrap:wrap;padding-bottom:.1rem}
+.abas a{font-size:.8rem;color:var(--dim);padding:.35rem .7rem;border-radius:6px 6px 0 0;
+  text-decoration:none;white-space:nowrap}
+.abas a.on{color:var(--neon);background:var(--neon-f);font-weight:600;
+  box-shadow:inset 0 -2px 0 var(--neon)}
+.abas a.nova{color:var(--amb)}
+
+.buscabar{display:flex;gap:.5rem;align-items:center;margin-bottom:.7rem;flex-wrap:wrap}
+.buscabox{flex:1;min-width:210px;background:var(--bg2);border:1px solid var(--neon-b);
+  border-radius:8px;padding:.5rem .75rem;font-size:.85rem;color:var(--txt);
+  display:flex;align-items:center;gap:.5rem}
+.buscabox .lupa{color:var(--neon)}
+.buscabox .ph{color:var(--faint)}
+.btn{background:var(--sup);border:1px solid var(--ln);border-radius:7px;padding:.45rem .8rem;
+  font-size:.78rem;color:var(--dim);white-space:nowrap}
+.btn.on{border-color:var(--neon);color:var(--neon);background:var(--neon-f)}
+
+.filtros{display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.8rem}
+.fil{background:var(--bg2);border:1px solid var(--ln);border-radius:99px;padding:.28rem .65rem;
+  font-size:.74rem;color:var(--dim)}
+.fil.on{border-color:var(--amb);color:var(--amb);background:var(--amb-f)}
+
+.lista{display:flex;flex-direction:column;gap:.3rem}
+.li{background:var(--sup);border:1px solid var(--ln);border-radius:8px;padding:.55rem .7rem;
+  display:grid;grid-template-columns:1fr auto;gap:.2rem .8rem;align-items:center}
+.li.perdido{border-left:2px solid var(--cor)}
+.li.festa{border-left:2px solid var(--amb)}
+.li.sumido{border-left:2px solid var(--alerta);background:#1a1210}
+.li .nm{font-size:.86rem;font-weight:600;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.li .meta{grid-column:1;font-size:.73rem;color:var(--faint);display:flex;gap:.5rem;flex-wrap:wrap}
+.li .meta span{white-space:nowrap}
+.li .dir{grid-column:2;grid-row:1/3;text-align:right;display:flex;flex-direction:column;gap:.2rem;align-items:flex-end}
+.tag{font-family:var(--f-mono);font-size:.6rem;font-weight:700;letter-spacing:.05em;
+  padding:.13rem .38rem;border-radius:4px;white-space:nowrap}
+.tag.perd{background:var(--cor-f);color:var(--cor);border:1px solid var(--cor-b)}
+.tag.fest{background:var(--amb-f);color:var(--amb);border:1px solid var(--amb-b)}
+.tag.ag{background:var(--azu-f);color:var(--azu);border:1px solid var(--azu-b)}
+.tag.alv{background:#3a1512;color:#E2887A;border:1px solid #6b2a22}
+.acao{font-size:.72rem;color:var(--neon);white-space:nowrap}
+.grp{font-family:var(--f-mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--faint);margin:.7rem 0 .35rem;display:flex;justify-content:space-between}
+
+.rodapetela{margin-top:.8rem;padding-top:.6rem;border-top:1px solid var(--ln);
+  display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;
+  font-size:.74rem;color:var(--faint)}
+
+/* ── o que dá pra buscar */
+.campos{display:flex;flex-direction:column;gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.campo{background:var(--surface);padding:.75rem 1rem;display:grid;
+  grid-template-columns:1fr 6rem auto;gap:.2rem .9rem;align-items:baseline}
+@media (max-width:620px){.campo{grid-template-columns:1fr auto}.campo .qt{grid-column:1}}
+.campo b{font-size:.92rem}
+.campo p{font-size:.84rem;color:var(--muted);grid-column:1;margin-top:.1rem}
+.campo .qt{font-family:var(--f-mono);font-size:.82rem;color:var(--muted);
+  font-variant-numeric:tabular-nums;text-align:right}
+.selo{font-family:var(--f-mono);font-size:.6rem;font-weight:700;letter-spacing:.06em;
+  text-transform:uppercase;padding:.2rem .45rem;border-radius:4px;white-space:nowrap}
+.selo.tem{background:var(--ok-wash);color:var(--ok)}
+.selo.falta{background:var(--alerta-wash);color:var(--alerta)}
+.selo.parcial{background:var(--novo-wash);color:var(--novo)}
+
+.nota{border-left:3px solid var(--ok);background:var(--surface);padding:.9rem 1.1rem;
+  border-radius:0 6px 6px 0;font-size:.93rem;color:var(--ink-soft);margin-top:1.2rem}
+.nota.alerta{border-left-color:var(--alerta)}
+.nota.aten{border-left-color:var(--novo)}
+.nota b{color:var(--ink)}
+
+.props{display:flex;flex-direction:column;gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.prop{background:var(--surface);padding:.95rem 1.1rem;display:grid;
+  grid-template-columns:1.8rem 1fr auto;gap:.3rem .9rem;align-items:baseline}
+@media (max-width:640px){.prop{grid-template-columns:1.8rem 1fr}.prop .tg{grid-column:2}}
+.prop .s{font-family:var(--f-mono);font-size:.7rem;font-weight:700;color:var(--muted)}
+.prop .c b{font-size:.95rem}
+.prop .c p{font-size:.87rem;color:var(--muted);margin-top:.15rem}
+.tg{font-family:var(--f-mono);font-size:.6rem;font-weight:700;letter-spacing:.07em;
+  text-transform:uppercase;padding:.2rem .45rem;border-radius:4px;white-space:nowrap}
+.tg.urg{background:var(--alerta-wash);color:var(--alerta)}
+.tg.faz{background:var(--ok-wash);color:var(--ok)}
+.tg.nao{background:transparent;color:var(--muted);border:1px solid var(--line-strong)}
+
+.perg{background:var(--surface);border:1px solid var(--line-strong);border-radius:8px;
+  padding:1.1rem 1.2rem}
+.perg ol{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.6rem;
+  font-size:.94rem;color:var(--ink-soft)}
+.perg li b{color:var(--ink)}
+
+footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
+  color:var(--muted);font-size:.84rem;display:flex;flex-wrap:wrap;gap:.4rem 1.4rem}
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="hlinha">
+    <span class="eyebrow">Prime Eventos · conta 34</span>
+    <span class="eyebrow">Mockup para aprovação · 15/09/2026</span>
+  </div>
+  <h1>Onde o lead foi parar</h1>
+  <p class="lede">Você perguntou como ficou a aba de onde os leads saem, e se dá para
+  achar essas coisas depois. Fui medir antes de desenhar — e achei um problema mais
+  urgente que a busca: <b>três leads sumiram do quadro ontem</b>, com festa marcada
+  para dezembro.</p>
+</header>
+
+<!-- ═══════ 1. o achado -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Achado · medido hoje</span>
+    <h2>Marcar visita está escondendo o lead</h2>
+    <p>Quando o vendedor marca uma visita pelo app, o sistema move o lead para
+    “Agendado Visita”. Essa coluna foi <b>fundida em Negociação</b> em 12/09 e saiu
+    do quadro — mas o código que marca visita continua mandando leads para ela.</p>
+  </div>
+
+  <div class="fluxo">
+    <b>O vendedor marca a visita</b> <span class="seta">›</span>
+    <b>o lead vai pra “Agendado Visita”</b> <span class="seta">›</span>
+    <b class="mau">a coluna não existe mais no quadro</b> <span class="seta">›</span>
+    <b class="mau">ninguém vê o lead</b>
+  </div>
+
+  <div class="sumidos" style="margin-top:1rem">
+    <table>
+      <thead><tr><th>Cliente</th><th>Vendedor</th><th>Festa</th><th>Sumiu em</th></tr></thead>
+      <tbody>
+        <tr><td><b>Laynne</b></td><td>Jacqueline</td><td class="d">19/12/2026</td><td class="d">14/09 20:41</td></tr>
+        <tr><td><b>Rône Rodrigues — Shild</b></td><td>Jacqueline</td><td class="d">18/12/2026</td><td class="d">14/09 14:53</td></tr>
+        <tr><td><b>Maria Clara Guimarães</b></td><td>Pedro Yan</td><td class="d">19/06/2027</td><td class="d">14/09 13:27</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="corpo" style="margin-top:1.2rem">
+    <p>Os três fizeram exatamente o que deviam: marcaram a visita. Os três leads têm
+    data de festa. E os três estão invisíveis no quadro desde ontem.</p>
+    <p><b>A culpa é minha.</b> Fundi “Agendado Visita” em Negociação no dia 12 e não
+    olhei quem mais escrevia nessa etapa — o fluxo de marcar visita tem o nome da
+    coluna fixo no código, e continuou mandando leads para lá depois de ela sumir.</p>
+  </div>
+
+  <div class="nota alerta"><b>Conserto em duas partes, e o segundo depende de você.</b>
+  No código, marcar visita passa a mover o lead para a etapa que a SUA conta usa, e
+  nunca para uma coluna aposentada. Nos dados, esses três precisam voltar — e o lugar
+  natural é <b>Negociação</b>, que é onde os outros 13 daquela coluna foram na fusão.
+  Confirma que é ali?</div>
+</section>
+
+<!-- ═══════ 2. quem está fora hoje -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Medido em produção · 15/09/2026</span>
+    <h2>Dez leads estão fora do quadro agora</h2>
+    <p>Fora do quadro não é perdido: todos continuam no banco, na ficha e na busca da
+    conversa. O que falta é uma tela onde alguém consiga <i>chegar</i> neles.</p>
+  </div>
+
+  <div class="fora">
+    <div class="fo ok"><span class="n">5</span><span class="q">Evento A Realizar</span>
+      <span class="d">festa vendida esperando a data — 3 já estão na Agenda</span></div>
+    <div class="fo ok"><span class="n">2</span><span class="q">Evento Realizado</span>
+      <span class="d">festa que já aconteceu</span></div>
+    <div class="fo mau"><span class="n">3</span><span class="q">Agendado Visita</span>
+      <span class="d">a coluna aposentada — os três de ontem</span></div>
+  </div>
+
+  <div class="corpo" style="margin-top:1.3rem">
+    <p><b>O funil não tem caixa de busca.</b> Ele filtra por vendedor, por mês e por
+    período de entrada, e é só. Hoje, para achar um cliente cujo card não está numa
+    das colunas visíveis, o caminho é abrir o Inbox e procurar pela conversa — o que
+    funciona se houve conversa, e falha justamente para quem foi cadastrado à mão.</p>
+  </div>
+</section>
+
+<!-- ═══════ 3. a proposta -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Proposta · precisa do seu sim</span>
+    <h2>Uma busca que alcança tudo, e uma aba para o que saiu</h2>
+    <p>Duas coisas no mesmo lugar: procurar por nome ou telefone em qualquer lead da
+    conta, e listar o que deixou o funil, agrupado por motivo.</p>
+  </div>
+
+  <div class="tela">
+    <div class="cap"><span>Painel › Prospecção › Fora do quadro</span><span>Prime Eventos</span></div>
+    <div class="abas">
+      <a>Funil</a><a>Base</a><a>Comunicação</a><a>Follow-up</a>
+      <a class="on nova">Fora do quadro</a><a>Campanhas</a><a>Régua</a>
+    </div>
+
+    <div class="buscabar">
+      <span class="buscabox"><span class="lupa">⌕</span>
+        <span class="ph">Nome, telefone ou empresa — procura em TODOS os leads</span></span>
+      <span class="btn on">Fora do quadro</span>
+      <span class="btn">Tudo</span>
+      <span class="btn">Baixar CSV</span>
+    </div>
+
+    <div class="filtros">
+      <span class="fil on">2026</span><span class="fil">Todo vendedor</span>
+      <span class="fil">Todo motivo</span><span class="fil">Com data de festa</span>
+      <span class="fil">Sem data</span>
+    </div>
+
+    <div class="grp"><span>⚠ Em coluna aposentada — precisa voltar</span><span>3</span></div>
+    <div class="lista">
+      <div class="li sumido">
+        <span class="nm">Laynne <span class="tag alv">FORA DO QUADRO</span></span>
+        <span class="meta"><span>Jacqueline</span><span>festa 19/12/2026</span>
+          <span>“Agendado Visita”</span><span>saiu 14/09</span></span>
+        <span class="dir"><span class="acao">Mover pra Negociação</span></span>
+      </div>
+      <div class="li sumido">
+        <span class="nm">Rône Rodrigues — Shild <span class="tag alv">FORA DO QUADRO</span></span>
+        <span class="meta"><span>Jacqueline</span><span>festa 18/12/2026</span>
+          <span>“Agendado Visita”</span><span>saiu 14/09</span></span>
+        <span class="dir"><span class="acao">Mover pra Negociação</span></span>
+      </div>
+      <div class="li sumido">
+        <span class="nm">Maria Clara Guimarães <span class="tag alv">FORA DO QUADRO</span></span>
+        <span class="meta"><span>Pedro Yan</span><span>festa 19/06/2027</span>
+          <span>“Agendado Visita”</span><span>saiu 14/09</span></span>
+        <span class="dir"><span class="acao">Mover pra Negociação</span></span>
+      </div>
+    </div>
+
+    <div class="grp"><span>🎉 Festa vendida</span><span>7</span></div>
+    <div class="lista">
+      <div class="li festa">
+        <span class="nm">Bianca Oliveira <span class="tag fest">EVENTO REALIZADO</span></span>
+        <span class="meta"><span>Pedro Yan</span><span>festa 31/08/2026</span>
+          <span>aniversário · 120 convidados</span></span>
+        <span class="dir"><span class="tag ag">NA AGENDA</span><span class="acao">Abrir ficha</span></span>
+      </div>
+      <div class="li festa">
+        <span class="nm">Claudia Maria Carvalho <span class="tag fest">A REALIZAR</span></span>
+        <span class="meta"><span>Jacqueline</span><span>festa 15/01/2027</span><span>casamento</span></span>
+        <span class="dir"><span class="tag ag">NA AGENDA</span><span class="acao">Abrir ficha</span></span>
+      </div>
+      <div class="li festa">
+        <span class="nm">Missilene Sousa <span class="tag fest">A REALIZAR</span></span>
+        <span class="meta"><span>Jacqueline</span><span style="color:#E2887A">sem data de festa</span></span>
+        <span class="dir"><span class="acao">Preencher a data</span></span>
+      </div>
+    </div>
+
+    <div class="grp"><span>✕ Perdidos</span><span>21</span></div>
+    <div class="lista">
+      <div class="li perdido">
+        <span class="nm">Carla Dias <span class="tag perd">PERDIDO</span></span>
+        <span class="meta"><span>Thiago</span><span>“Não respondeu — após o follow-up”</span>
+          <span>perdido 12/09</span></span>
+        <span class="dir"><span class="acao">Reabrir</span></span>
+      </div>
+      <div class="li perdido">
+        <span class="nm">Wesley Carvalho <span class="tag perd">PERDIDO</span></span>
+        <span class="meta"><span>Pedro Yan</span>
+          <span style="color:var(--amb)">sem motivo registrado</span><span>perdido 12/09</span></span>
+        <span class="dir"><span class="acao">Reabrir</span></span>
+      </div>
+    </div>
+
+    <div class="rodapetela">
+      <span>31 leads fora do funil — 10 fora do quadro + 21 perdidos · 3 precisam voltar</span>
+      <span>Clicar em qualquer linha abre a ficha, com a conversa inteira</span>
+    </div>
+  </div>
+
+  <div class="corpo" style="margin-top:1.4rem">
+    <p><b>A caixa de busca é a parte que mais falta.</b> Ela procura em todo lead da
+    conta — no quadro, fora dele, perdido, ganho, base — por nome, telefone ou
+    empresa. Hoje não existe em lugar nenhum do funil, e é o que o Manoel vai usar
+    quando o cliente ligar dizendo “falei com vocês em agosto”.</p>
+    <p>O <b>CSV</b> não é enfeite: “buscar algo depois” muitas vezes quer dizer levar
+    para uma planilha, mandar pro contador, ou conferir o mês inteiro de uma vez.</p>
+  </div>
+</section>
+
+<!-- ═══════ 4. o que dá pra buscar hoje -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">O que já está guardado, e o que não está</span>
+    <h2>Dá para buscar por quê?</h2>
+    <p>Medido nos 371 leads da Prime. Guardar a tela não adianta se o dado por trás
+    estiver vazio — então aqui está o que a busca vai achar, e o que ela não vai.</p>
+  </div>
+
+  <div class="campos">
+    <div class="campo"><b>Nome do contato</b><span class="qt">368 de 371</span>
+      <span class="selo tem">dá pra buscar</span></div>
+    <div class="campo"><b>WhatsApp</b><span class="qt">370 de 371</span>
+      <span class="selo tem">dá pra buscar</span></div>
+    <div class="campo"><b>Empresa / apelido do lead</b><span class="qt">371 de 371</span>
+      <span class="selo tem">dá pra buscar</span></div>
+    <div class="campo"><b>Tipo de festa</b><span class="qt">202 de 371</span>
+      <span class="selo parcial">em pouco mais da metade</span></div>
+    <div class="campo"><b>Data da festa</b><span class="qt">144 de 371</span>
+      <p>Só faz sentido para quem chegou a marcar. Nas festas VENDIDAS é o que decide se entra na Agenda.</p>
+      <span class="selo parcial">nos que têm</span></div>
+    <div class="campo"><b>Motivo da perda</b><span class="qt">2 de 21</span>
+      <p>Obrigatório só desde 13/09 — daqui pra frente todo perdido terá o seu. Os 19 de antes ficam sem.</p>
+      <span class="selo parcial">de agora em diante</span></div>
+    <div class="campo"><b>Valor do negócio</b><span class="qt">0 de 371</span>
+      <p>Ninguém preenche. Sem isso a busca nunca vai responder “quanto perdemos em setembro”.</p>
+      <span class="selo falta">não dá</span></div>
+    <div class="campo"><b>De onde veio o cliente</b><span class="qt">0 de 371</span>
+      <p>O campo existe na ficha e está vazio em todos. É o que responderia “Instagram ou indicação?”.</p>
+      <span class="selo falta">não dá</span></div>
+  </div>
+
+  <div class="nota aten"><b>Os dois zeros são a notícia deste bloco.</b> Valor e origem
+  são exatamente as duas perguntas que um arquivo de leads costuma existir para
+  responder — “quanto deixamos na mesa” e “de onde vem quem fecha” — e hoje a Prime
+  não tem nem um nem outro preenchido. A tela pode nascer com os dois campos na busca;
+  eles só começam a valer quando a equipe preencher. Vale decidir se isso entra na
+  rotina antes de a gente construir relatório em cima.</div>
+</section>
+
+<!-- ═══════ 5. o placar -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Resumo</span>
+    <h2>O que eu faria, e em que ordem</h2>
+  </div>
+  <div class="props">
+    <div class="prop"><span class="s">1</span>
+      <div class="c"><b>Marcar visita deixa de esconder o lead</b>
+      <p>O fluxo passa a usar a etapa que a conta tem, e nunca uma coluna que saiu do quadro. Correção de código, pequena.</p></div>
+      <span class="tg urg">Urgente</span></div>
+    <div class="prop"><span class="s">2</span>
+      <div class="c"><b>Os três voltam para Negociação</b>
+      <p>Mesmo destino dos 13 que a fusão moveu. Com registro no histórico, como toda mudança de etapa.</p></div>
+      <span class="tg urg">Preciso do seu sim</span></div>
+    <div class="prop"><span class="s">3</span>
+      <div class="c"><b>Caixa de busca no funil</b>
+      <p>Nome, telefone ou empresa, em todo lead da conta — esteja ele onde estiver. É o que não existe hoje em lugar nenhum.</p></div>
+      <span class="tg faz">Proposta</span></div>
+    <div class="prop"><span class="s">4</span>
+      <div class="c"><b>Aba “Fora do quadro”</b>
+      <p>O que deixou o funil, agrupado por motivo, com filtro por ano, vendedor e motivo de perda — e um aviso quando alguém cair em coluna aposentada.</p></div>
+      <span class="tg faz">Proposta</span></div>
+    <div class="prop"><span class="s">5</span>
+      <div class="c"><b>Baixar CSV do que está na tela</b>
+      <p>Porque metade das vezes “procurar depois” quer dizer abrir numa planilha.</p></div>
+      <span class="tg faz">Proposta</span></div>
+    <div class="prop"><span class="s">—</span>
+      <div class="c"><b>Apagar ou arquivar lead de verdade</b>
+      <p>Nada sai do banco. “Fora do quadro” é só uma tela; o lead continua inteiro, com a conversa e o histórico.</p></div>
+      <span class="tg nao">Não faria</span></div>
+    <div class="prop"><span class="s">—</span>
+      <div class="c"><b>Relatório de valor perdido</b>
+      <p>Seria um relatório de zeros: nenhum lead tem valor preenchido. Primeiro a rotina, depois o relatório.</p></div>
+      <span class="tg nao">Não faria agora</span></div>
+  </div>
+</section>
+
+<!-- ═══════ 6. decisões -->
+<section>
+  <div class="shead">
+    <span class="eyebrow">Para eu começar</span>
+    <h2>Três respostas suas</h2>
+  </div>
+  <div class="perg">
+    <ol>
+      <li><b>Os três vão para Negociação?</b> É o destino que a fusão deu aos outros
+      13. Se para vocês “visita marcada” deve ter coluna própria de novo, o caminho é
+      outro — e aí a gente traz “Agendado Visita” de volta ao quadro em vez de mover
+      os leads.</li>
+      <li><b>A busca fica no funil ou em aba própria?</b> Meu voto é <b>uma caixa no
+      topo do funil</b> (é lá que a pessoa já está quando precisa procurar) e a aba
+      “Fora do quadro” só para a lista do que saiu.</li>
+      <li><b>Valor e origem entram na rotina?</b> Sem eles, o arquivo responde “quem”
+      e “quando”, nunca “quanto” e “de onde”. Se a equipe for preencher, a tela já
+      nasce com os dois; se não, eu não construo relatório em cima de campo vazio.</li>
+    </ol>
+  </div>
+</section>
+
+<footer>
+  <span>Prime Eventos · conta 34</span>
+  <span>Números medidos em produção em 15/09/2026, só leitura</span>
+  <span>371 leads · 10 fora do quadro · 3 por defeito</span>
+</footer>
+
+</div>

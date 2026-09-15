@@ -34,6 +34,7 @@ Todas as rotas (menos `GET /saude`) exigem o header `x-wa-secret` = `WA_QR_SHARE
 | `WA_QR_DECIFRAR_TETO` · `WA_QR_DECIFRAR_JANELA_MS` | disjuntor da guerra de sessão: quantas falhas ao decifrar numa janela derrubam a conta (60 em 60s) |
 | `WA_QR_ESPERA_POS_440_MS` | base da espera pra retomar conta substituída — dobra a cada tentativa (5, 10, 20, 40, 80min) |
 | `WA_QR_IGNORAR_GRUPOS` | `0` volta a decifrar mensagem de grupo (padrão: cortada antes de decifrar — ver "Grupo não é decifrado") |
+| `WA_QR_HIST_CONCORRENCIA` · `WA_QR_HIST_PAUSA_MS` · `WA_QR_HIST_RECUO_MS` | vazão do repasse do histórico: conversas em paralelo (2), pausa entre POSTs (100ms) e recuo quando o web recusa (2s) — ver "O histórico derrubou o web" |
 
 ## Diagnóstico sem abrir o dashboard
 
@@ -211,11 +212,51 @@ node teste-ignorar-jid.js
 WA_QR_IGNORAR_GRUPOS=0 node teste-ignorar-jid.js   # o modo antigo também tem que passar
 # o que o libsignal grita no console (Bad MAC) vira agregado no wa_qr_log — sem banco
 node teste-console-libsignal.js
+# vazão do repasse do histórico (o que derrubou o web em 15/09) — sem banco
+node teste-vazao-historico.js
 # ...e o agregado sai carimbado com a conta do worker (precisa de banco)
 createdb wa_qr_log_test
 psql wa_qr_log_test -f ../../db/migracoes/158_wa_qr_log.sql
 WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_log_test node teste-log-agregado-conta.js
 ```
+
+## O histórico derrubou o web (15/09/2026)
+
+A conta 38 foi pareada às 09:56 e o sync de histórico dela despejou no web, em dois
+minutos e meio, **~5.176 `POST /historico` (um por MENSAGEM) e ~3.799
+`POST /contatos`** — oito conversas em paralelo, sem pausa. Uns **60 req/s** contra
+um web de dois workers que também serve o painel.
+
+O web parou de responder ao `/saude`, o Render matou a instância, e durante os 502
+o wa-qr **perdeu três mensagens de cliente** das contas 23 e 34: o repasse era um
+`fetch` único, sem retentativa. De quebra a fila de log estourou e **10.659 linhas
+foram descartadas** — o diagnóstico ficou cego no minuto em que mais se precisava
+dele.
+
+**O teto de ondas não pega isso.** `HIST_ONDAS_MAX` limita quantas ondas se BAIXA;
+não limita a que velocidade o que foi baixado vira requisição. São coisas
+diferentes, e a confusão entre as duas custou o web no ar.
+
+O que passou a existir:
+
+| | |
+|---|---|
+| `WA_QR_HIST_CONCORRENCIA` (2) | conversas repassadas ao mesmo tempo. Dentro de uma conversa continua **sequencial** — é o que impede a conversa de sair embaralhada no painel |
+| `WA_QR_HIST_PAUSA_MS` (100) | respiro entre POSTs da mesma conversa |
+| `WA_QR_HIST_RECUO_MS` (2000) | espera depois de um não-ok: web em dificuldade passa a receber **menos** carga, não mais |
+| `WA_QR_HIST_TIMEOUT_MS` (15000) | sem ele, um web que PENDURA trava a corrente pra sempre e o recuo nunca chega a valer |
+
+O teto de requisições fica em `concorrência / (latência + pausa)` — uns **13/s** com
+50ms de latência, contra os ~60/s do incidente. `teste-vazao-historico.js` tranca
+isso.
+
+**O preço:** o histórico de um cliente novo demora alguns minutos a mais pra
+aparecer. É conversa antiga e órfã, que ninguém está esperando — contra a instância
+cair no meio do pareamento levando junto os chips dos outros clientes.
+
+**O que isto NÃO resolve:** a perda em si. Enquanto o repasse for um `fetch` único,
+qualquer 502 — deploy, pico, o que for — ainda come mensagem de cliente. Esse é o
+outbox, e é outro PR.
 
 ## Grupo não é decifrado (13/09/2026)
 

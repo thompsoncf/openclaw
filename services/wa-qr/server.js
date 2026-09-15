@@ -3211,6 +3211,43 @@ function deveSincronizarHistorico (syncType) {
 const HIST_ONDAS_SEM_NADA = parseInt(process.env.WA_QR_HIST_ONDAS_SEM_NADA || '5', 10)
 const HIST_ONDAS_MAX = parseInt(process.env.WA_QR_HIST_ONDAS_MAX || '40', 10)
 
+// VAZÃO DO REPASSE DO HISTÓRICO — o teto de ondas acima NÃO é isto, e a diferença
+// custou o web no ar em 15/09/2026.
+//
+// O que aconteceu: a conta 38 foi pareada 09:56 e o sync dela despejou ~5.176
+// mensagens e ~3.799 contatos no web em dois minutos e meio — uma requisição por
+// MENSAGEM, oito em paralelo, sem pausa nenhuma. O web tem dois workers e também
+// serve o painel: parou de responder ao /saude, o Render matou a instância, e
+// durante os 502 o wa-qr perdeu TRÊS mensagens de cliente das contas 23 e 34 (o
+// repasse era um fetch único, sem retentativa). De quebra a fila de log estourou e
+// 10.659 linhas foram descartadas — o diagnóstico ficou cego no pior minuto.
+//
+// O teto de ondas limita quantas ondas se BAIXA; não limita a que velocidade o que
+// foi baixado vira POST. É esse buraco que estas três medidas fecham:
+//
+//   * HIST_CONCORRENCIA — quantas conversas são repassadas ao mesmo tempo. Era 8
+//     fixo. A ordem DENTRO de uma conversa continua sequencial (é o que impede a
+//     conversa de sair embaralhada no painel); o que cai é quantas correm juntas.
+//   * HIST_PAUSA_MS — respiro entre um POST e o seguinte da mesma conversa. Com a
+//     concorrência, é isto que define o teto de requisições por segundo:
+//     aproximadamente `concorrencia / (latência + pausa)`. Com os padrões daqui e
+//     ~50ms de latência dá ~13/s, contra os ~60/s que derrubaram o web.
+//   * HIST_RECUO_MS — quando o web responde não-ok (502, 429, o que for), o
+//     próximo POST espera MAIS. Um web em dificuldade recebia mais carga; agora
+//     recebe menos, que é a única coisa que ajuda quem está afogado.
+//
+// E o POST ganhou timeout: sem ele, um web que PENDURA (em vez de recusar) trava a
+// corrente de histórico pra sempre, e o recuo acima nunca chega a valer.
+//
+// O preço: o histórico de um cliente novo demora alguns minutos a mais pra aparecer
+// no painel. É conversa antiga, órfã, que ninguém está esperando — contra a
+// instância cair no meio do pareamento, levando junto os chips dos outros clientes.
+const dormir = (ms) => new Promise((r) => setTimeout(r, ms))
+const HIST_CONCORRENCIA = parseInt(process.env.WA_QR_HIST_CONCORRENCIA || '2', 10)
+const HIST_PAUSA_MS = parseInt(process.env.WA_QR_HIST_PAUSA_MS || '100', 10)
+const HIST_RECUO_MS = parseInt(process.env.WA_QR_HIST_RECUO_MS || '2000', 10)
+const HIST_TIMEOUT_MS = parseInt(process.env.WA_QR_HIST_TIMEOUT_MS || '15000', 10)
+
 // contaId -> { ondas, aproveitadas }. Por ENCARNAÇÃO: o iniciarSessao zera, senão um
 // pareamento novo nasceria com o teto do anterior já estourado.
 const ondasDeHistorico = new MapaPorConta()
@@ -3284,15 +3321,26 @@ function prepararHistorico (contaId, m) {
   }
 }
 
+// Devolve `true` quando o web aceitou. Quem chama usa isso pra recuar — ver
+// HIST_RECUO_MS. Nunca lança: uma linha de histórico que não entrou não pode
+// derrubar o resto da onda.
 async function enviarHistorico (contaId, corpo) {
+  const ctl = new AbortController()
+  const t = setTimeout(() => ctl.abort(), HIST_TIMEOUT_MS)
   try {
     const r = await fetch(APP_URL + '/webhooks/wa-qr/historico', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-wa-secret': SEGREDO },
-      body: corpo
+      body: corpo,
+      signal: ctl.signal
     })
     if (!r.ok) log.warn({ contaId, status: r.status }, 'webhook wa-qr/historico respondeu não-ok')
-  } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao repassar histórico') }
+    return r.ok
+  } catch (e) {
+    log.warn({ contaId, e: String(e && e.name === 'AbortError' ? 'timeout' : e) },
+      'falha ao repassar histórico')
+    return false
+  } finally { clearTimeout(t) }
 }
 
 async function iniciarSessao (contaId) {
@@ -3805,10 +3853,19 @@ async function iniciarSessao (contaId) {
       ondas: _h.ondas, aproveitadasNoTotal: _h.aproveitadas,
       lidsPerdidos: lidsPerdidos.size, exemplosLid: [...lidsPerdidos].slice(0, 5) },
     'histórico peneirado, repassando')
-    await comLimiteDeConcorrencia([...porChat.values()], 8, async (grupo) => {
+    // Ver HIST_CONCORRENCIA: a ordem DENTRO da conversa continua sequencial, o que
+    // muda é o ritmo.
+    //
+    // A pausa vale pra TODO POST, inclusive o último da conversa. Parece desperdício
+    // — ninguém espera depois da última mensagem — mas é o que segura a vazão de
+    // verdade: quem termina uma conversa pega a próxima NA HORA, então pular a
+    // última pausa faz um histórico de mil conversas de uma mensagem cada passar
+    // sem pausa nenhuma. É exatamente a forma do incidente de 15/09.
+    await comLimiteDeConcorrencia([...porChat.values()], HIST_CONCORRENCIA, async (grupo) => {
       for (let i = 0; i < grupo.length; i++) {
-        await enviarHistorico(contaId, grupo[i])
+        const ok = await enviarHistorico(contaId, grupo[i])
         grupo[i] = null   // solta o corpo assim que ele virou POST
+        await dormir(ok ? HIST_PAUSA_MS : HIST_RECUO_MS)
       }
     })
     const _m1 = process.memoryUsage()
@@ -4546,4 +4603,5 @@ module.exports = {
   contasDesteWorker, MINHA_CONTA, contarContatoComFalha, contatosComFalha, DISJUNTOR_MIN_CONTATOS,
   contarQuedaPresa, esquecerQuedasPresas, quedasPresas, PRESA_AVISA_EM,
   comecouAPartida, terminouAPartida, quemEstaSubindo, partidas, usuariosDoPeer, agendaTrancadaPorChave, VALVULA_CHAVE_FALTANDO_MS, MARCA_CHAVE_FALTANDO,
+  HIST_CONCORRENCIA, HIST_PAUSA_MS, HIST_RECUO_MS, HIST_TIMEOUT_MS, enviarHistorico, dormir,
   medindo, oQueEstaEmCurso, decifragemPorConta, emCurso, QUARENTENA_PEER_MS, porPeerEmQuarentena, peerEmQuarentena, esquecerQuarentena, peersEmQuarentena, avisarChipQuebrado, alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, IGNORAR_GRUPOS, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

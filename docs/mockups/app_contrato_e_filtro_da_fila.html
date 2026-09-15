@@ -1,0 +1,325 @@
+<title>App do vendedor · mandar o contrato e achar o lead</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --ink:#062011;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo)}
+.wrap{max-width:1100px;margin:0 auto;padding:2.6rem 1.25rem 5rem;display:flex;flex-direction:column;gap:2.9rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.6rem,4vw,2.2rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:74ch}
+.marca{color:var(--neon)}
+.sec>h2{font-size:1.25rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.1rem;max-width:78ch;font-size:.9rem}
+.num{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em}
+
+.nota{border-left:2.5px solid var(--azul-borda);background:var(--azul-fundo);padding:.8rem 1rem;
+  border-radius:0 10px 10px 0;font-size:.88rem;color:var(--text-dim)}
+.nota b{color:var(--text)}
+.nota.mal{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.nota.amb{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+
+table.dados{width:100%;border-collapse:collapse;font-size:.86rem}
+table.dados th{text-align:left;font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--text-faint);font-weight:600;padding:.4rem .6rem;border-bottom:1px solid var(--line)}
+table.dados td{padding:.44rem .6rem;border-bottom:1px solid var(--line);color:var(--text-dim)}
+table.dados td.n{text-align:right;font-family:var(--mono)}
+table.dados td.nome{color:var(--text)}
+/* ESCOPADO NA TABELA de propósito: soltos, `.mal` e `.ok` casavam também com
+   `.nota.mal` e `.doc.ok`, e pintavam o parágrafo inteiro de coral/verde em
+   negrito. O render mostrou; a fonte não mostraria. */
+table.dados .mal{color:var(--coral);font-weight:600}
+table.dados .ok{color:var(--neon-bright);font-weight:600}
+
+/* ====== celulares ====== */
+.fones{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.4rem;align-items:start}
+@media(max-width:820px){.fones{grid-template-columns:1fr}}
+.fone{border:1px solid var(--line);border-radius:26px;background:var(--bg);overflow:hidden;
+  display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.fone>.cap{padding:.55rem .9rem;font-size:.67rem;text-transform:uppercase;letter-spacing:.08em;
+  font-weight:600;border-bottom:1px solid var(--line)}
+.fone.antes>.cap{color:var(--coral);background:var(--coral-fundo)}
+.fone.depois>.cap{color:var(--neon-bright);background:var(--neon-fundo)}
+.tela{padding:.85rem .9rem 1rem;display:flex;flex-direction:column;gap:.55rem}
+.hdr{display:flex;flex-direction:column;gap:.1rem;padding-bottom:.2rem}
+.hdr b{font-family:var(--display);font-size:1.05rem}
+.hdr small{color:var(--text-dim);font-size:.74rem}
+.ey{font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-faint);font-weight:600;margin-top:.3rem}
+.bloco{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.65rem .75rem}
+.bloco.dest{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.bloco.alerta{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.lin{display:flex;justify-content:space-between;gap:.5rem;font-size:.8rem;padding:.13rem 0}
+.lin span:first-child{color:var(--text-dim)}
+.btn{display:block;text-align:center;font-size:.8rem;font-weight:600;padding:.55rem;border-radius:9px;
+  background:var(--neon);color:var(--ink);margin-top:.45rem}
+.btn.g{background:var(--surface-2);color:var(--text-dim);border:1px solid var(--line)}
+.btn.amb{background:var(--ambar);color:var(--ink)}
+.faltou{font-size:.78rem;color:var(--coral);display:flex;gap:.4rem;align-items:baseline}
+.faltou b{color:var(--coral)}
+.doc{display:flex;gap:.45rem;align-items:baseline;font-size:.77rem;color:var(--text-dim);padding:.08rem 0}
+.doc>span:first-child{width:.9rem;flex:none;text-align:center}
+.doc.ok>span:first-child{color:var(--neon-bright)}
+.doc.cor{color:var(--coral)}.doc.cor>span:first-child{color:var(--coral)}
+
+/* fila */
+.busca{display:flex;align-items:center;gap:.4rem;border:1px solid var(--line);border-radius:999px;
+  padding:.4rem .75rem;background:var(--surface);font-size:.8rem;color:var(--text-faint)}
+.busca.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--text)}
+.pils{display:flex;gap:.3rem;flex-wrap:wrap}
+.pil{font-size:.68rem;padding:.22rem .55rem;border-radius:999px;border:1px solid var(--line);
+  color:var(--text-dim);background:var(--surface)}
+.pil.on{background:var(--neon);border-color:var(--neon);color:var(--ink);font-weight:600}
+.pil.nova{border-color:var(--ambar-borda);color:var(--ambar)}
+.pil.nova.on{background:var(--ambar);border-color:var(--ambar);color:var(--ink)}
+.grp{font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);
+  font-weight:600;margin-top:.35rem}
+.card{border:1px solid var(--line);border-radius:11px;background:var(--surface);padding:.5rem .65rem;
+  display:flex;gap:.5rem;align-items:center}
+.card .dot{width:7px;height:7px;border-radius:50%;background:var(--ambar);flex:none}
+.card .mid{flex:1;min-width:0}
+.card .emp{font-size:.82rem;font-weight:600;display:block}
+.card .sn{font-size:.71rem;color:var(--text-faint);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rolar{text-align:center;font-size:.72rem;color:var(--text-faint);padding:.5rem 0;font-style:italic}
+
+ul.reg{margin:.4rem 0 0;padding-left:1.15rem;color:var(--text-dim);font-size:.89rem}
+ul.reg li{margin:.32rem 0}
+ul.reg b{color:var(--text)}
+.big{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:14px;padding:1rem 1.15rem}
+.big b{font-family:var(--display);font-size:2.1rem;line-height:1;display:block;color:var(--coral)}
+.big span{display:block;margin-top:.3rem;font-size:.86rem;color:var(--text-dim)}
+.tres{display:grid;grid-template-columns:repeat(3,1fr);gap:.9rem}
+@media(max-width:700px){.tres{grid-template-columns:1fr}}
+</style>
+
+<div class="wrap">
+
+<div class="head">
+  <div class="eyebrow">Mockup · App do vendedor · 15/09/2026</div>
+  <h1>Mandar o contrato, e achar o lead</h1>
+  <p>Duas coisas que faltam no app, e que têm a mesma raiz: em 03/09 dissemos aos
+  vendedores pra trabalhar pelo celular — e o celular não tem as duas peças que o
+  trabalho pede. Uma delas <b class="marca">explica os 35 dias parados</b> que o
+  Raio-X acabou de expor.</p>
+</div>
+
+<!-- ======================================================= PARTE 1 -->
+<div class="sec">
+  <div class="num">PARTE 1</div>
+  <h2>Mandar o contrato pra assinar, pelo app</h2>
+  <p class="leg">O cliente aprova o orçamento e o contrato nasce na hora, numerado.
+  Daí em diante, no celular, não há o que fazer com ele.</p>
+
+  <div class="nota mal">
+    <b>Não existe rota de contrato no app.</b> As rotas de proposta são
+    <code>pagamentos · comprovante · status · fechar · sinal · link-copiado ·
+    enviar · email</code> — e as duas de envio (<code>enviar_proposta_conversa</code>
+    e <code>enviar_proposta_email</code>) mandam <b>a proposta</b>, nunca o
+    contrato. No desktop existe: o funil tem “Mandar o contrato pra assinar”, que
+    chama <code>/painel/servicos/enviar-email</code> com <code>alvo=contrato</code>.
+  </div>
+
+  <div class="tres" style="margin-top:1.1rem">
+    <div class="big"><b>35 dias</b><span>somados com o contrato pronto e não enviado, nos 6 assinados da Prime</span></div>
+    <div class="big" style="border-color:var(--neon-borda);background:var(--neon-fundo)">
+      <b style="color:var(--neon-bright)">1 dia</b><span>somado esperando o cliente assinar — eles assinam no mesmo dia em que recebem</span></div>
+    <div class="big" style="border-color:var(--ambar-borda);background:var(--ambar-fundo)">
+      <b style="color:var(--ambar)">1</b><span>aprovado sem assinar hoje: contrato nº 8 da Carolina, pronto desde 10/09 e nunca enviado</span></div>
+  </div>
+
+  <div class="nota amb" style="margin-top:1rem">
+    <b>E há uma coisa minha pra corrigir aqui.</b> O guia em PDF que saiu pros
+    vendedores em 03/09 manda, no passo 6, “tocar no botão verde <i>Mandar o
+    contrato pra assinar</i>”. Esse botão <b>só existe no desktop</b>. Mandamos a
+    equipe trabalhar pelo celular e descrevemos um passo que o celular não tem —
+    o que, somado aos 35 dias, deixou de ser coincidência.
+  </div>
+
+  <div class="fones" style="margin-top:1.3rem">
+    <div class="fone antes"><div class="cap">Hoje · proposta aprovada, no app</div>
+      <div class="tela">
+        <div class="hdr"><b>Proposta nº 23</b><small>Maria Carolina da Silva Costa · R$ 8.050</small></div>
+        <div class="ey">Situação</div>
+        <div class="bloco">
+          <div class="lin"><span>Status</span><span>Aprovada</span></div>
+          <div class="lin"><span>Aprovada em</span><span>10/09 pela cliente</span></div>
+        </div>
+        <div class="ey">Pagamentos</div>
+        <div class="bloco"><div class="lin"><span>Sinal</span><span>—</span></div>
+          <span class="btn g">Pagamentos e comprovantes</span></div>
+        <div class="ey">Fechar</div>
+        <div class="bloco"><span class="btn g">Fechar contrato</span></div>
+        <div class="bloco alerta" style="margin-top:.2rem">
+          <div class="faltou"><span>●</span><span>O contrato nº 8 existe desde 10/09 e
+          <b>não há nada nesta tela sobre ele</b>. Pra mandar, só abrindo o desktop.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fone depois"><div class="cap">Proposto</div>
+      <div class="tela">
+        <div class="hdr"><b>Proposta nº 23</b><small>Maria Carolina da Silva Costa · R$ 8.050</small></div>
+        <div class="ey">Situação</div>
+        <div class="bloco">
+          <div class="doc ok"><span>✓</span><span>Orçamento nº 23 · aprovado 10/09 pela cliente</span></div>
+          <div class="doc cor"><span>●</span><span>Contrato nº 8 · pronto há 5 dias — <b>nunca enviado</b></span></div>
+        </div>
+        <div class="ey">Contrato</div>
+        <div class="bloco dest">
+          <div class="lin" style="font-size:.78rem;color:var(--text-dim);padding-bottom:.2rem">
+            <span>O cliente assina pelo link, do celular dele.</span></div>
+          <span class="btn">Mandar na conversa</span>
+          <span class="btn g">Mandar por e-mail</span>
+          <span class="btn g">Copiar o link</span>
+        </div>
+        <div class="ey">Pagamentos</div>
+        <div class="bloco"><div class="lin"><span>Sinal</span><span>—</span></div>
+          <span class="btn g">Pagamentos e comprovantes</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota" style="margin-top:1.1rem">
+    <b>Nada de mecanismo novo.</b> “Mandar na conversa” é o mesmo
+    <code>enviar_proposta_conversa</code> com o link do contrato; “Mandar por
+    e-mail” é o mesmo caminho do desktop com <code>alvo=contrato</code>; “Copiar o
+    link” já existe no app (<code>link-copiado</code>). O que falta é a tela
+    oferecer, e as funções aceitarem qual documento mandar.
+    <br><br>
+    <b>Depois de enviado</b> o bloco vira “Contrato nº 8 · enviado há N dias, sem
+    assinatura”, com <b>Reenviar</b> no lugar de Mandar — a mesma redação que o
+    funil já usa, pra não existirem dois vocabulários pro mesmo estado.
+  </div>
+</div>
+
+<!-- ======================================================= PARTE 2 -->
+<div class="sec">
+  <div class="num">PARTE 2</div>
+  <h2>Achar um lead na Fila</h2>
+  <p class="leg">A Fila tem pílulas de mês e duas de urgência. Não tem busca — e o
+  tamanho da fila é o que transforma isso em problema.</p>
+
+  <table class="dados">
+    <tr><th>Vendedor</th><th class="n">Leads abertos</th><th class="n">Com data</th>
+        <th class="n">Com proposta</th><th class="n">Entraram há 15+ dias</th></tr>
+    <tr><td class="nome">Pedro Yan</td><td class="n mal">146</td><td class="n">62</td><td class="n">10</td><td class="n">105</td></tr>
+    <tr><td class="nome">Jacqueline</td><td class="n mal">114</td><td class="n">39</td><td class="n">3</td><td class="n">71</td></tr>
+    <tr><td class="nome">Thiago</td><td class="n mal">87</td><td class="n">37</td><td class="n">4</td><td class="n">47</td></tr>
+  </table>
+
+  <div class="nota mal" style="margin-top:1rem">
+    <b>O cliente liga e pergunta do orçamento dele.</b> Com 146 cartões abertos, o
+    vendedor rola a lista procurando o nome — no meio de uma ligação. É a conta
+    que a Fila não fecha hoje.
+  </div>
+
+  <div class="fones" style="margin-top:1.3rem">
+    <div class="fone antes"><div class="cap">Hoje</div>
+      <div class="tela">
+        <div class="hdr"><b>Fila</b><small>146 abertos · 12 sua vez</small></div>
+        <div class="pils">
+          <span class="pil on">Set <b>41</b></span><span class="pil">Ago <b>77</b></span>
+          <span class="pil">Jul <b>28</b></span><span class="pil">Tudo <b>146</b></span>
+          <span class="pil">🟢 sua vez <b>12</b></span>
+        </div>
+        <div class="grp">🟢 Sua vez <b>12</b></div>
+        <div class="card"><span class="dot"></span><span class="mid"><span class="emp">Jamile Sousa</span><span class="sn">bom dia, consegue me passar…</span></span></div>
+        <div class="card"><span class="dot"></span><span class="mid"><span class="emp">Larissa Rakel</span><span class="sn">e pra 200 pessoas fica quanto?</span></span></div>
+        <div class="grp">🎉 Festa marcada <b>29</b></div>
+        <div class="card"><span class="dot"></span><span class="mid"><span class="emp">Eline Vieira</span><span class="sn">Casamento · 12/12</span></span></div>
+        <div class="rolar">… e mais 132 cartões</div>
+        <div class="bloco alerta">
+          <div class="faltou"><span>●</span><span>Nenhum jeito de procurar “Carolina”
+          a não ser <b>rolando</b>. E a Fila abre no <b>mês corrente</b>: quem entrou
+          em agosto nem está na tela.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fone depois"><div class="cap">Proposto</div>
+      <div class="tela">
+        <div class="hdr"><b>Fila</b><small>146 abertos · 12 sua vez</small></div>
+        <div class="busca on">🔎 <span>caro</span></div>
+        <div class="pils">
+          <span class="pil">Set <b>41</b></span><span class="pil">Ago <b>77</b></span>
+          <span class="pil">Tudo <b>146</b></span>
+          <span class="pil nova on">📄 com proposta <b>10</b></span>
+          <span class="pil nova">📅 com data <b>62</b></span>
+        </div>
+        <div class="grp">Busca em todos os abertos · 1 encontrado</div>
+        <div class="card"><span class="dot" style="background:var(--neon)"></span>
+          <span class="mid"><span class="emp">Maria Carolina da Silva Costa</span>
+          <span class="sn">proposta nº 23 · aprovada · entrou em 08/09</span></span></div>
+        <div class="bloco dest">
+          <div class="faltou" style="color:var(--text-dim)"><span style="color:var(--neon-bright)">✓</span>
+          <span>A busca <b>ignora o filtro de mês</b> e procura em todos os abertos —
+          senão esconderia justamente quem o cliente está cobrando.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota" style="margin-top:1.1rem">
+    <b>A busca é no SERVIDOR, e isso é a decisão que importa.</b> O padrão fácil
+    seria “filtrar na tela”, que o painel já usa nos Relatórios
+    (<code>rel-q</code>) — mas ali a lista inteira está renderizada, e aqui não: a
+    Fila abre no mês corrente (<code>_evl.periodo_atual()</code>). Uma busca que
+    só olhasse o que está na tela diria “nenhum resultado” pra um lead de agosto
+    que existe.
+    <br><br>
+    Essa é exatamente a armadilha que custou um ciclo em 07/09, quando a coluna de
+    orçamento parecia vazia porque o filtro recortava outra coisa. Não vamos
+    repetir: a busca diz, em cima do resultado, <b>onde procurou</b>.
+    <br><br>
+    <b>As duas pílulas novas</b> (com proposta · com data) saem de campos que já
+    existem — <code>prospeccao.orcamento_id</code> e <code>evento_em</code>. “Com
+    proposta” são 10 de 146 no Pedro: é a fila mais curta e mais perto do dinheiro.
+  </div>
+</div>
+
+<!-- ======================================================= nicho -->
+<div class="sec">
+  <h2>E nos outros nichos (§6)</h2>
+  <ul class="reg">
+    <li><b>Contrato</b> — só onde <code>contrato.tem_contrato</code> é verdadeiro
+    (hoje, só eventos; em produção só a conta 34 tem contratos). No recorrente a
+    proposta aprovada vai direto pra “Fechar”, e o bloco de contrato não aparece.</li>
+    <li><b>Pílula “com data”</b> — só onde <code>vendas.vende_data</code> é
+    verdadeiro. É o mesmo portão que já decide se a Fila mostra “📅 sem data”, e
+    quem vende mensalidade não o tem.</li>
+    <li><b>Busca e “com proposta”</b> — valem em qualquer nicho que tenha funil.</li>
+  </ul>
+</div>
+
+<!-- ======================================================= o que pede -->
+<div class="sec">
+  <h2>O que isto pede pra virar tela</h2>
+  <ul class="reg">
+    <li><b>Nenhuma coluna nova, nos dois casos.</b> Contrato, envio e vínculo do
+    lead com a proposta já existem e já estão preenchidos.</li>
+    <li><b>Duas rotas novas no app</b>: mandar o contrato na conversa e por e-mail.
+    As duas funções de envio passam a receber QUAL documento — hoje o documento
+    está fixo dentro delas.</li>
+    <li><b>A Fila ganha <code>?q=</code></b>, lido antes do recorte de mês. O
+    número no cabeçalho passa a dizer o universo da busca.</li>
+    <li><b>O guia dos vendedores é reeditado</b> quando isto subir: o passo 6 hoje
+    descreve um botão que o celular não tem.</li>
+  </ul>
+</div>
+
+<div class="eyebrow" style="text-align:center">Mockup — nada disto está no ar. Dados reais da conta 34, lidos em 15/09/2026.</div>
+
+</div>

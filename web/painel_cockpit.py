@@ -252,6 +252,22 @@ b,strong{font-weight:600}
 .foco .pil.fora.on{background:var(--ambar);border-color:var(--ambar);color:#1c1408}
 .foco .pil.fora.on b{color:#1c1408}
 .foco .sep{flex:none;width:1px;height:18px;background:var(--line);margin:0 .2rem}
+/* as duas pílulas de recorte (mockup app_contrato_e_filtro_da_fila): "com proposta"
+   e "com data". Vivem no MESMO seletor dos meses — ligar uma desliga o mês — e por
+   isso nascem com a borda neutra e acendem em neon igual às outras. */
+.foco .pil.nova{border-style:dashed}
+.foco .pil.nova.on{border-style:solid}
+/* a busca: o vendedor com 146 cartões abertos precisa ACHAR, não rolar */
+.busca{display:flex;align-items:center;gap:.45rem;margin:.1rem 1.1rem .1rem;
+  border:1px solid var(--line);border-radius:999px;background:var(--surface);padding:.42rem .8rem}
+.busca.on{border-color:var(--neon);background:rgba(0,229,160,.06)}
+.busca input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);
+  font:inherit;font-size:.86rem}
+.busca input::placeholder{color:var(--text-faint)}
+.busca .lupa{flex:none;font-size:.85rem;line-height:1}
+.busca .lm{flex:none;color:var(--text-faint);text-decoration:none;font-size:1rem;padding:0 .15rem}
+/* a proposta do lead no card: é o que o cliente cobra ao telefone */
+.chip.prop{color:var(--neon);border-color:#1e5c48;background:#0e2620}
 /* os grupos da fila e a dobra dos parados */
 .grp{display:flex;align-items:center;gap:.4rem;padding:.6rem 1.1rem .25rem;font-size:.66rem;text-transform:uppercase;
   letter-spacing:.07em;color:var(--text-faint);font-weight:600}
@@ -1493,7 +1509,8 @@ def _selo(conta_id: int) -> str:
 
 # ================================================================== VENDEDOR
 @router.get("/cockpit", response_class=HTMLResponse)
-def cockpit_inicio(request: Request, meus: str = "", entrou: str = "", fora: str | None = None):
+def cockpit_inicio(request: Request, meus: str = "", entrou: str = "", fora: str | None = None,
+                   q: str = ""):
     """Bifurca como sempre foi: dono/gestor cai na visão de equipe, vendedor na fila.
 
     `?meus=1` é a saída pro gestor que TAMBÉM vende: na versão anterior ele nunca chegava na
@@ -1505,7 +1522,7 @@ def cockpit_inicio(request: Request, meus: str = "", entrou: str = "", fora: str
     sess = _sessao(request)
     if not sess:
         return RedirectResponse("/cockpit/login", status_code=303)
-    return _fila(request, sess[0], sess[1], gestor=bool(g), entrou=entrou, fora=fora)
+    return _fila(request, sess[0], sess[1], gestor=bool(g), entrou=entrou, fora=fora, q=q)
 
 
 # Deslizar o card. É a única tela do app com gesto — o resto é form + redirect —
@@ -1654,25 +1671,39 @@ def _acoes_card(ia: bool) -> str:
 
 
 def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = False,
-          entrou: str = "", fora: str | None = None) -> HTMLResponse:
+          entrou: str = "", fora: str | None = None, q: str = "") -> HTMLResponse:
     pool = get_pool()
-    leads = ck.leads_do_vendedor(pool, conta_id, membro_id)
+    from finance import evento_lead as _evl
+    from urllib.parse import quote as _quote
+    sess = request.session
+
+    # O PERÍODO (mockup cockpit_mes_atual): a Fila abre no mês corrente, a escolha
+    # fica na sessão, e as pílulas de fora somam quem ficou de fora à lista.
+    #
+    # Os dois recortes novos ('prop', 'data') entram no MESMO seletor do mês — ligar
+    # um desliga o outro — porque são a mesma pergunta ("que fatia da carteira eu
+    # estou olhando?") e duas barras de filtro empilhadas num celular é uma a mais.
+    _e = (entrou or "").strip()
+    if _e == "tudo" or _e in ck._RECORTE_SQL or _evl.mes_valido(_e):
+        sess["ck_entrou"] = _e
+    filtro_entrou = sess.get("ck_entrou") or _evl.periodo_atual()
+    # a BUSCA não fica na sessão: ela é de uma ligação telefônica, não do jeito de
+    # trabalhar. Sair da tela e voltar tem que devolver a fila inteira.
+    termo = (q or "").strip()[:60]
+    recorte = filtro_entrou if filtro_entrou in ck._RECORTE_SQL else ""
+    # buscando, o recorte sai do caminho: quem digita um nome quer procurar em TUDO
+    leads = ck.leads_do_vendedor(pool, conta_id, membro_id, busca=termo,
+                                 recorte="" if termo else recorte)
+    cont = ck.contagens_fila(pool, conta_id, membro_id)
     p = ck.perfil(pool, conta_id, membro_id)
     vez = sum(1 for l in leads if l["sua_vez"])
 
     # a fila já tem os leads em mão: soma daqui, sem uma consulta a mais só pra aba.
     # É a carteira INTEIRA: o de fora do mês some da lista, nunca do número.
-    total_pend = sum(int(l.get("pend") or 0) for l in leads)
+    # (buscando, a lista é um recorte — a aba continua contando a carteira toda.)
+    total_pend = (ck.total_pendentes(pool, conta_id, membro_id) if (termo or recorte)
+                  else sum(int(l.get("pend") or 0) for l in leads))
 
-    # O PERÍODO (mockup cockpit_mes_atual): a Fila abre no mês corrente, a escolha
-    # fica na sessão, e as pílulas de fora somam quem ficou de fora à lista.
-    from finance import evento_lead as _evl
-    from urllib.parse import quote as _quote
-    sess = request.session
-    _e = (entrou or "").strip()
-    if _e == "tudo" or _evl.mes_valido(_e):
-        sess["ck_entrou"] = _e
-    filtro_entrou = sess.get("ck_entrou") or _evl.periodo_atual()
     if fora is not None:
         sess["ck_fora"] = ",".join(x for x in (fora or "").split(",") if x in ("suavez", "festa30"))
     fora_on = [x for x in (sess.get("ck_fora") or "").split(",") if x]
@@ -1681,18 +1712,32 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
         vende = bool(_vendas.vende_data(pool, conta_id))
     except Exception:  # noqa: BLE001
         vende = False
-    fila = ck.fila_agrupada(leads, entrou=filtro_entrou, fora_on=fora_on, vende_data=vende)
+    fila = ck.fila_agrupada(leads, entrou=filtro_entrou, fora_on=fora_on, vende_data=vende,
+                            busca=termo, contagens=cont)
+    buscando = bool(fila["busca"])
 
     def _url(**over):
-        q = {"entrou": "", "fora": None}
-        q.update(over)
-        partes = [f"{k}={_quote(str(v))}" for k, v in q.items() if v not in ("", None)]
+        p_ = {"entrou": "", "fora": None, "q": ""}
+        p_.update(over)
+        partes = [f"{k}={_quote(str(v))}" for k, v in p_.items() if v not in ("", None)]
         return _BASE + ("?" + "&".join(partes) if partes else "")
 
-    pil = "".join(f"<a class='pil{' on' if m['on'] else ''}' href='{_url(entrou=m['chave'])}'>"
-                  f"{esc(m['curto'])} <b>{m['n']}</b></a>" for m in fila["meses"])
+    # a caixa de busca é um GET simples: sem JS, funciona com o teclado do celular e
+    # o "Ir" fecha o teclado sozinho. O ✕ só aparece quando há o que limpar.
+    caixa = (f"<form class='busca{' on' if buscando else ''}' method=get action='{_BASE}'>"
+             f"<span class=lupa>🔎</span>"
+             f"<input name=q value='{esc(termo)}' autocomplete=off enterkeyhint=search "
+             f"placeholder='Procurar por nome ou número'>"
+             + (f"<a class=lm href='{_BASE}' aria-label='Limpar busca'>✕</a>" if buscando else "")
+             + "</form>")
+
+    pil = "".join(f"<a class='pil{' nova' if m.get('nova') else ''}{' on' if m['on'] else ''}' "
+                  f"href='{_url(entrou=m['chave'])}'>{esc(m['curto'])}"
+                  + (f" <b>{m['n']}</b>" if m['n'] is not None else "") + "</a>"
+                  for m in fila["meses"])
     fc = fila["fora_cont"]
-    if filtro_entrou != "tudo" and (fc["suavez"] or (vende and fc["festa30"])):
+    if not buscando and filtro_entrou not in ("tudo", *ck._RECORTE_SQL) \
+            and (fc["suavez"] or (vende and fc["festa30"])):
         def _tog(k):
             return _url(fora=",".join(sorted(set(fora_on) ^ {k})) or "")
         pil += "<span class=sep></span>"
@@ -1701,7 +1746,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
         if vende:
             pil += (f"<a class='pil fora{' on' if 'festa30' in fora_on else ''}' href='{_tog('festa30')}'>"
                     f"🎉 30 dias <b>{fc['festa30']}</b></a>")
-    foco = f"<div class=foco>{pil}</div>"
+    foco = caixa + f"<div class=foco>{pil}</div>"
 
     def _linha_evento(l):
         """A linha do evento no card do celular, como no funil."""
@@ -1753,14 +1798,23 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
         pend = int(l.get("pend") or 0)
         selo = (f"<span class=pend aria-label='{pend} sem resposta'>"
                 f"{pend if pend < 10 else '9+'}</span>") if pend else ""
-        # de fora do mês: chega marcado com o mês em que entrou
-        mes_chip = (f"<span class='chip entrou'>📥 {esc(l['entrou_rot'])}</span>" if l.get("fora") else "")
+        # de fora do mês: chega marcado com o mês em que entrou. Na BUSCA todo mundo
+        # leva a marca — ali o mês é o que responde "é esse mesmo?", e o card não
+        # fica apagado (`.fora`) porque nada ali está fora de lugar.
+        mes_chip = (f"<span class='chip entrou'>📥 {esc(l['entrou_rot'])}</span>"
+                    if (l.get("fora") or buscando) and l.get("entrou_rot") else "")
+        # A PROPOSTA. É o que o cliente cobra ao telefone ("e o meu orçamento?") e o
+        # que a pílula "com proposta" separa. Só o número e a situação: o valor é
+        # dinheiro na tela de quem está no balcão, e cabe na ficha, não no card.
+        prop_chip = (f"<span class='chip prop'>📄 nº {int(l['orc_numero'])}"
+                     + (f" · {esc(l['orc_status'])}" if l.get("orc_status") else "")
+                     + "</span>") if l.get("orc_numero") else ""
         # sem JS o card ainda é um link normal pro lead — o deslizar só acrescenta
         l["html"] = (
             f"<div class=swipe data-id='{l['id']}'>{_acoes_card(bool(l['ia']))}"
             f"<a class='lead front{' fora' if l.get('fora') else ''}' draggable=false href='{_BASE}/lead/{l['id']}'>"
             f"<span class=dot style='background:{_TEMP.get(l['temperatura'], 'var(--azul)')}'></span>"
-            f"<span class=mid><span class=top><span class=emp>{esc(l['empresa'])}</span>{chip}{mes_chip}</span>"
+            f"<span class=mid><span class=top><span class=emp>{esc(l['empresa'])}</span>{chip}{prop_chip}{mes_chip}</span>"
             f"{_linha_evento(l)}"
             f"<span class=snip>{esc(l['snip'])}</span></span>{selo}</a></div>")
     # os grupos: sua vez → festa marcada → sem data → parados (dobra fechada)
@@ -1772,7 +1826,21 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
             cartoes.append(f"<details class=dobra><summary>{cabeca}</summary>{corpo_g}</details>")
         else:
             cartoes.append(cabeca + corpo_g)
-    if not cartoes and leads:
+    if not cartoes and buscando:
+        # "não achei" tem que dizer ONDE procurou, senão o vendedor conclui que o
+        # lead não existe quando o que houve foi um recorte. Aqui não houve: a busca
+        # varreu a carteira aberta inteira, sem mês e sem pílula.
+        cartoes.append(f"<div class=vazio><div class=big>◎</div>"
+                       f"<b>Ninguém com “{esc(termo)}”</b>"
+                       f"Procurei por nome e por número nos {cont['total']} leads abertos "
+                       f"seus — em todos os meses. Se é lead de um colega, ou já ganho/"
+                       f"perdido, ele não está nesta fila.</div>")
+    elif not cartoes and recorte:
+        rot = "com proposta" if recorte == "prop" else "com data"
+        cartoes.append(f"<div class=vazio><div class=big>◎</div>"
+                       f"<b>Nenhum lead {esc(rot)}</b>"
+                       "Toque num mês pra voltar pra fila inteira.</div>")
+    elif not cartoes and leads:
         # tem lead, mas nenhum no período: diz isso, em vez de "fila zerada"
         cartoes.append("<div class=vazio><div class=big>◎</div><b>Nada deste mês</b>"
                        "Toque em outro mês ou numa pílula de fora pra trazer.</div>")
@@ -1797,8 +1865,18 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     volta = ("<div class=bloco style='margin-top:.9rem'>"
              f"<a class='btn ghost' href='{_BASE}'>Ver a visão da equipe</a></div>") if gestor else ""
     rot_mes = next((m["rotulo"].lower() for m in fila["meses"] if m["on"]), "tudo")
-    sub = (f"{len(leads)} abertos · {vez} sua vez" if filtro_entrou == "tudo"
-           else f"{fila['n_quadro']} de {len(leads)} · {rot_mes} · {vez} sua vez")
+    # o cabeçalho diz o UNIVERSO, não só o que está na tela. Buscando ou recortando,
+    # o denominador é a carteira aberta inteira (`contagens_fila`) — dizer "1 de 1"
+    # numa busca seria verdade inútil, e "1 de 146" é o que situa quem procurou.
+    if buscando:
+        sub = f"{fila['n_quadro']} de {cont['total']} abertos · busca"
+    elif recorte:
+        sub = (f"{len(leads)} {'com proposta' if recorte == 'prop' else 'com data'}"
+               f" · de {cont['total']} abertos")
+    elif filtro_entrou == "tudo":
+        sub = f"{cont['total']} abertos · {vez} sua vez"
+    else:
+        sub = f"{fila['n_quadro']} de {cont['total']} · {rot_mes} · {vez} sua vez"
     # o aviso do vendedor (migração 199) só na fila DELE: o gestor vendo a equipe
     # recebe os dele no painel, e a faixa aqui seria de outra pessoa.
     novidades = [] if gestor else _novidades_vend(conta_id, membro_id)
@@ -3772,6 +3850,56 @@ def cockpit_orcamento(request: Request, orc_id: int):
                          for k, v in ficha if v)
 
     total = _brl(o["setup_centavos"] + o["mensal_centavos"])
+    # ---------------------------------------------------------- O CONTRATO
+    #
+    # 15/09/2026. Até aqui o app não tinha NADA sobre contrato: ele nascia na
+    # aprovação e só o desktop sabia mandar. O Raio-X mediu o preço na conta 34 —
+    # 35 dias somados com o contrato pronto e parado em casa, contra 1 dia somado
+    # esperando o cliente, que assina no mesmo dia em que recebe.
+    #
+    # O bloco mostra OS DOIS DOCUMENTOS, como o funil e o Raio-X já fazem, e a
+    # redação é a mesma dos dois: "nunca enviado" / "enviado há N dias, sem
+    # assinatura". Três vocabulários pro mesmo estado seria pior que nenhum.
+    ctr_html = ""
+    from finance import agenda as _ag
+    from finance.vendas import _dias_desde as _dd   # o MESMO relógio do funil
+    try:
+        _ct = ck.contrato_do_orcamento(get_pool(), conta_id, orc_id) if not gestao else None
+    except Exception as e:  # noqa: BLE001 — bloco não derruba a tela da proposta
+        _log.warning("contrato da proposta %s: %s: %s", orc_id, type(e).__name__, e)
+        _ct = None
+    if _ct:
+        _num = f" nº {_ct['numero']}" if _ct.get("numero") else ""
+        if _ct.get("assinado_em"):
+            ctr_html = ("<div class=eyebrow>Contrato</div><div class=bloco><div class=card "
+                        "style='font-size:.84rem;color:var(--text-dim)'>"
+                        f"<b style='color:var(--neon)'>Contrato{esc(_num)} assinado</b> — "
+                        f"em {_ct['assinado_em'].astimezone(_ag.BRT):%d/%m}.</div></div>")
+        else:
+            _dias = _dd(_ct.get("enviado_em")) or 0
+            if _ct.get("enviado_em"):
+                _estado = (f"Enviado há {_dias} dia{'s' if _dias != 1 else ''}, "
+                           "sem assinatura.")
+                _rot = "Reenviar na conversa"
+            else:
+                # PRONTO E PARADO EM CASA: a bola é do vendedor, e a tela diz isso
+                # com todas as letras em vez de ficar muda como ficava.
+                _estado = "<b style='color:var(--coral)'>Ainda não foi enviado.</b>"
+                _rot = "Mandar na conversa"
+            ctr_html = (
+                "<div class=eyebrow>Contrato</div><div class=bloco>"
+                f"<div class=card style='font-size:.84rem;color:var(--text-dim)'>"
+                f"Contrato{esc(_num)} · {_estado}<br>O cliente lê e assina pelo link, "
+                "do celular dele.</div>"
+                + (f"<form method=post action='{_BASE}/orcamentos/{orc_id}/contrato/conversa'>"
+                   f"<button class=btn type=submit>{esc(_rot)}</button></form>"
+                   if o.get("lead_id") else "")
+                + (f"<form method=post action='{_BASE}/orcamentos/{orc_id}/contrato/email'>"
+                   "<button class='btn ghost' type=submit>Mandar por e-mail</button></form>"
+                   if (o.get("email") or "").strip() else "")
+                + f"<a class='btn ghost' href='{esc(_ct['link'])}' target=_blank "
+                  "rel=noopener>Abrir o contrato</a></div>")
+
     corpo = (
                _hdr(o["titulo"], o["status_rot"], voltar=f"{_BASE}/orcamentos")
              + _flash(request)
@@ -3781,7 +3909,7 @@ def cockpit_orcamento(request: Request, orc_id: int):
              + (f"<div class=d>{esc(_brl(o['setup_centavos']))} entrada + "
                 f"{esc(_brl(o['mensal_centavos']))}/mês</div>" if o["mensal_centavos"] else "")
              + "</div></div>"
-             + aprovada
+             + aprovada + ctr_html
              + (f"<div class=eyebrow>Mandar pro cliente</div><div class=bloco>{''.join(envio)}</div>"
                 if envio else "")
              + mover + sinal
@@ -4058,6 +4186,48 @@ def cockpit_orcamento_email(request: Request, orc_id: int):
     r = ck.enviar_proposta_email(get_pool(), conta_id, orc_id, membro_id=membro_id)
     request.session["ck_ok" if r.get("ok") else "ck_err"] = (
         f"Proposta enviada para {r.get('destino','')} ✓" if r.get("ok")
+        else r.get("erro", "Não consegui enviar."))
+    return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+
+
+# ----------------------------------------------------- mandar o CONTRATO
+#
+# As duas rotas que faltavam. Espelham as da proposta (`enviar`/`email`) de
+# propósito: quem já sabe mandar a proposta pelo app não aprende nada novo.
+#
+# O CARIMBO DE `enviado_em` mora em `finance/cockpit`, junto do envio, e vale
+# pros dois caminhos — o desktop só carimbava no e-mail, e nesta casa o caminho
+# que importa é a conversa (canal QR). Sem o carimbo, o Raio-X continuaria
+# dizendo "nunca enviado" pra um contrato que o cliente já tem na mão.
+
+@router.post("/cockpit/orcamentos/{orc_id}/contrato/conversa")
+def cockpit_contrato_conversa(request: Request, orc_id: int):
+    """Manda o link do contrato na conversa do lead, pelo WhatsApp da empresa."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    o = ck.orcamento(get_pool(), conta_id, orc_id, membro_id=membro_id)
+    if not o or not o.get("lead_id"):
+        request.session["ck_err"] = "Essa proposta não está ligada a um lead com conversa."
+        return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+    r = ck.enviar_contrato_conversa(get_pool(), conta_id, membro_id, o["lead_id"], orc_id)
+    request.session["ck_ok" if r.get("ok") else "ck_err"] = (
+        "Contrato enviado na conversa ✓" if r.get("ok")
+        else r.get("erro", "Não consegui enviar."))
+    return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+
+
+@router.post("/cockpit/orcamentos/{orc_id}/contrato/email")
+def cockpit_contrato_email(request: Request, orc_id: int):
+    """Manda o contrato pro e-mail do cliente, assinado pela empresa."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    r = ck.enviar_contrato_email(get_pool(), conta_id, orc_id, membro_id=membro_id)
+    request.session["ck_ok" if r.get("ok") else "ck_err"] = (
+        f"Contrato enviado para {r.get('destino','')} ✓" if r.get("ok")
         else r.get("erro", "Não consegui enviar."))
     return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
 

@@ -16,6 +16,7 @@ etapas do funil — o Cockpit é uma porta mobile pra esse mesmo dado, não um s
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 from finance import funil_regua as _fr
 
@@ -261,9 +262,62 @@ def membro_por_email(pool, email: str) -> dict | None:
 
 # ----------------------------------------------------------------- dados / leituras
 
-def _base_leads_sql() -> str:
+# Os recortes que a Fila sabe fazer NO BANCO, além do mês (que é recortado em
+# Python, sobre o que já veio). Os dois saem de campos que já existem e já estão
+# preenchidos — nenhuma coluna nova. Precisam do banco por um motivo só: o
+# `limit 100` lá embaixo. O Pedro Yan tem 146 leads abertos, e filtrar em Python
+# os 100 que couberam esconderia justamente as propostas que ficaram de fora.
+_RECORTE_SQL = {"prop": "p.orcamento_id is not null",
+                "data": "p.evento_em is not null"}
+
+
+def busca_leads_where(termo: str) -> tuple[str, list]:
+    """O `where` da busca por nome ou número, no MESMO desenho da caixa de conversas
+    (`web.painel_prospeccao._conversas_onde`): acento dobrado na mão (o Postgres
+    daqui não tem `unaccent`, e ninguém digita acento no celular) e número casado
+    pelos 8 ÚLTIMOS dígitos, que é como a mesma pessoa aparece gravada de quatro
+    jeitos — com e sem DDI, com e sem o nono dígito.
+
+    VAI PRO BANCO, e não filtra o que já está na tela, por dois motivos somados: a
+    consulta corta em 100 leads E a Fila abre no MÊS CORRENTE. Uma busca de tela
+    responderia "não achei" pra um lead de agosto que existe — e é justamente um
+    recorte invisível desses que custou um ciclo em 07/09/2026, quando a coluna de
+    orçamento dos Relatórios parecia vazia. Por isso, também, a tela diz em cima do
+    resultado ONDE procurou.
+
+    Devolve ("", []) pra termo vazio — quem chama concatena sem condicional."""
+    from web.painel_prospeccao import _dobrar, _termo_dobrado, _MIN_DIGITOS
+    termo = (termo or "").strip()[:60]
+    if not termo:
+        return "", []
+    alvos: list[str] = []
+    params: list = []
+    dig = re.sub(r"\D", "", termo)
+    if len(dig) >= _MIN_DIGITOS:
+        fim = dig[-8:]
+        comp, valor = ("= %s", fim) if len(dig) >= 8 else ("like %s", "%" + fim)
+        for col in ("p.whatsapp", "p.telefone"):
+            alvos.append(
+                f"right(regexp_replace(coalesce({col},''), '\\D', '', 'g'), 8) {comp}")
+            params.append(valor)
+    # o NOME está em dois lugares na ficha: a empresa (que na Prime é a pessoa) e o
+    # contato. Procurar em só um deixa metade da fila inalcançável.
+    alvo = "%" + _termo_dobrado(termo) + "%"
+    for col in ("p.empresa", "p.contato"):
+        alvos.append(f"{_dobrar(col)} like %s")
+        params.append(alvo)
+    return " and (" + " or ".join(alvos) + ")", params
+
+
+def _base_leads_sql(*, busca: str = "", recorte: str = "") -> tuple[str, list]:
     """Leads ABERTOS do vendedor (estágio 'lead', fora de ganho/perdido), com a
-    última mensagem e se o agente ainda está no automático (IA) ou é a vez dele."""
+    última mensagem e se o agente ainda está no automático (IA) ou é a vez dele.
+
+    `busca` e `recorte` estreitam ANTES do `limit 100` — ver `busca_leads_where` e
+    `_RECORTE_SQL`. Devolve (sql, params_extras)."""
+    extra, params = busca_leads_where(busca)
+    if recorte in _RECORTE_SQL:
+        extra += " and " + _RECORTE_SQL[recorte]
     return """
         select p.id, p.empresa, p.cnpj, p.cidade, p.uf, p.temperatura, p.status,
                p.whatsapp, p.telefone,
@@ -306,16 +360,21 @@ def _base_leads_sql() -> str:
                -- o período e o evento (197/198): a Fila abre no mês atual e o card
                -- do celular passa a saber a festa, como o funil (mockup cockpit_mes_atual)
                p.criado_em, p.evento_em, p.evento_tipo, p.evento_convidados,
-               p.evento_origem, p.evento_pista
+               p.evento_origem, p.evento_pista,
+               -- a proposta do lead: o vínculo já existe (`prospeccao.orcamento_id`,
+               -- migração 075) e é o que a pílula "com proposta" e a busca leem. Sem
+               -- ele o card não sabe dizer o que o cliente está cobrando ao telefone.
+               p.orcamento_id, o.numero, o.status
           from prospeccao p
           left join conversas cv on cv.prospeccao_id=p.id and cv.conta_id=p.conta_id
+          left join orcamentos o on o.id=p.orcamento_id and o.conta_id=p.conta_id
           left join lateral (select texto, autor from mensagens
                               where conversa_id=cv.id order by criado_em desc limit 1) lm on true
          where p.conta_id=%s and p.vendedor_id=%s
            and coalesce(p.estagio,'lead')='lead'
-           and """ + _ABERTO_P + """
+           and """ + _ABERTO_P + extra + """
          order by coalesce(cv.ultima_msg_em, p.atualizado_em) desc
-         limit 100"""
+         limit 100""", params
 
 
 def total_pendentes(pool, conta_id: int, membro_id: int) -> int:
@@ -372,13 +431,15 @@ def sinal_fila(pool, conta_id: int, membro_id: int) -> str:
     return f"{r[0]}:{r[1]}:{r[2]}" if r else "0:0:0"
 
 
-def leads_do_vendedor(pool, conta_id: int, membro_id: int) -> list[dict]:
+def leads_do_vendedor(pool, conta_id: int, membro_id: int, *,
+                      busca: str = "", recorte: str = "") -> list[dict]:
     from web.painel_prospeccao import _zap_link, TEMP_COR
     from finance import evento_lead as _evl
     hoje = _agora().date()
     out = []
+    sql, extra = _base_leads_sql(busca=busca, recorte=recorte)
     with pool.connection() as c:
-        rows = c.execute(_base_leads_sql(), (conta_id, membro_id)).fetchall()
+        rows = c.execute(sql, (conta_id, membro_id, *extra)).fetchall()
     for r in rows:
         ia = bool(r[10])                 # agente_ativo → IA ainda atende
         esperando = int(r[14] or 0)      # o cliente falou e ninguém respondeu
@@ -424,12 +485,34 @@ def leads_do_vendedor(pool, conta_id: int, membro_id: int) -> list[dict]:
             "evento_em": r[18], "evento_tipo": r[19], "evento_convidados": r[20],
             "evento_origem": r[21], "evento_pista": r[22],
             "ev_ic": _evl.icone_tipo(r[19]), "ev_data": _evl.data_curta(r[18], hoje),
+            # a proposta do lead (mockup app_contrato_e_filtro_da_fila)
+            "orcamento_id": r[23], "orc_numero": r[24], "orc_status": r[25] or "",
         })
     return out
 
 
+def contagens_fila(pool, conta_id: int, membro_id: int) -> dict:
+    """Quantos leads abertos o vendedor tem AO TODO, e destes quantos têm proposta e
+    quantos têm data. São os números das duas pílulas novas e do cabeçalho.
+
+    Consulta separada de propósito: `_base_leads_sql` corta em 100, e contar sobre o
+    que coube daria um número menor que a verdade justamente pra quem mais precisa
+    do filtro — o Pedro Yan, com 146 abertos, veria "com proposta 8" onde são 10.
+    Esta aqui não tem as subconsultas de mensagem, então é barata."""
+    with pool.connection() as c:
+        r = c.execute(
+            """select count(*),
+                      count(*) filter (where p.orcamento_id is not null),
+                      count(*) filter (where p.evento_em is not null)
+                 from prospeccao p
+                where p.conta_id=%s and p.vendedor_id=%s
+                  and coalesce(p.estagio,'lead')='lead'
+                  and """ + _ABERTO_P, (conta_id, membro_id)).fetchone()
+    return {"total": int(r[0] or 0), "prop": int(r[1] or 0), "data": int(r[2] or 0)}
+
+
 def fila_agrupada(leads: list[dict], *, entrou: str, fora_on, vende_data: bool = True,
-                  agora=None) -> dict:
+                  agora=None, busca: str = "", contagens: dict | None = None) -> dict:
     """A Fila do celular no desenho do funil (mockup cockpit_mes_atual): o período
     ("Entraram em", padrão mês corrente), as pílulas do que ficou de fora, e os
     grupos por O QUE O LEAD PEDE:
@@ -439,22 +522,43 @@ def fila_agrupada(leads: list[dict], *, entrou: str, fora_on, vende_data: bool =
       📅 sem data       o resto, com o "perguntar"
       ⏸ parados         15+ dias sem mensagem, numa dobra fechada
 
+    `busca` e os recortes `entrou='prop'|'data'` já vieram recortados DO BANCO (ver
+    `_base_leads_sql`): aqui a função só sabe que, nesses modos, não há corte de mês
+    a aplicar — a busca procura em TODOS os abertos, senão esconderia justamente
+    quem o cliente está cobrando ao telefone.
+
     Devolve {grupos: [{chave, rotulo, leads, dobra}], meses: [{chave, rotulo, n, on}],
-    fora_cont: {suavez, festa30}, n_quadro, total}. Pura: não toca no banco."""
+    fora_cont: {suavez, festa30}, n_quadro, total, busca}. Pura: não toca no banco."""
     from finance import evento_lead as _evl
     agora = agora or _agora()
     hoje = agora.date()
     fora_on = set(fora_on or ())
+    busca = (busca or "").strip()
+    # a busca e os dois recortes novos ignoram o mês: o filtro já foi feito no banco
+    sem_corte = bool(busca) or entrou in _RECORTE_SQL
     for l in leads:
         l["vez"] = (not l["ia"]) and int(l.get("esperando") or 0) > 0
         l["festa30"] = _evl.festa_em_30_dias(l, hoje)
-        l["no_periodo"] = _evl.no_periodo(l, entrou)
+        l["no_periodo"] = True if sem_corte else _evl.no_periodo(l, entrou)
         l["fora"] = not l["no_periodo"]
         ce = _evl._aware(l.get("criado_em"))
         l["entrou_rot"] = _evl._MESES[ce.month - 1] if ce else ""
         l["parado"] = _evl.parado(l, agora)
     fora_cont = {"suavez": sum(1 for l in leads if l["fora"] and l["vez"]),
                  "festa30": sum(1 for l in leads if l["fora"] and l["festa30"])}
+    if busca:
+        # quem procurou um nome quer VER o que achou, inteiro: nada de dobra de
+        # parados nem de grupo por etapa escondendo metade do resultado.
+        n = len(leads)
+        # o cabeçalho do grupo diz ONDE procurou, não só quantos achou: é a linha
+        # que impede o vendedor de concluir "não existe" quando o que houve foi um
+        # recorte. O número vem do `<b>` que todo grupo já tem.
+        return {"grupos": ([{"chave": "busca", "rotulo": "Busca em todos os abertos",
+                             "leads": leads, "dobra": False}] if n else []),
+                "meses": _pilulas(leads, hoje, entrou, contagens, vende_data, busca=True),
+                "fora_cont": {"suavez": 0, "festa30": 0},
+                "n_quadro": n, "total": (contagens or {}).get("total") or len(leads),
+                "busca": busca}
     vis = [l for l in leads if l["no_periodo"] or ("suavez" in fora_on and l["vez"])
            or ("festa30" in fora_on and l["festa30"])]
     vez = [l for l in vis if l["vez"]]
@@ -478,13 +582,47 @@ def fila_agrupada(leads: list[dict], *, entrou: str, fora_on, vende_data: bool =
     if parados:
         grupos.append({"chave": "parados", "rotulo": f"⏸ Parados {_evl.PARADO_DIAS}+ dias",
                        "leads": parados, "dobra": True})
+    return {"grupos": grupos,
+            "meses": _pilulas(leads, hoje, entrou, contagens, vende_data),
+            "fora_cont": fora_cont,
+            "n_quadro": len(vis),
+            "total": (contagens or {}).get("total") or len(leads), "busca": ""}
+
+
+def _pilulas(leads, hoje, entrou, contagens, vende_data, *, busca: bool = False) -> list[dict]:
+    """As pílulas do topo: os meses de entrada, e as duas novas — "com proposta" e
+    "com data" — que são recortes do MESMO seletor (ligar uma desliga o mês).
+
+    Os meses contam o que veio; as duas novas contam a carteira inteira
+    (`contagens_fila`), que é a única conta honesta quando a consulta corta em 100.
+    Quando `busca` está ligada nenhuma fica acesa: a busca não é um mês, e a pílula
+    apagada é o caminho de volta pra fila normal.
+
+    E DENTRO de uma busca ou de um recorte o mês perde o número, não ganha um
+    errado: ali a lista que chegou já veio filtrada, então contar por mês diria
+    "Set 3" pra um mês que tem 41 — e o número mudaria sozinho ao tocar na pílula.
+    Sem número, a pílula continua sendo o caminho de volta sem afirmar bobagem.
+
+    "Com data" segue `vende_data` (§6): quem vende mensalidade não tem festa, e a
+    pílula seria uma coluna vazia — é o mesmo portão que decide o grupo "📅 sem data"."""
+    from finance import evento_lead as _evl
+    sem_corte = busca or entrou in _RECORTE_SQL
     meses = _evl.meses_entrada(leads, hoje)
     for m in meses:
-        m["on"] = (m["chave"] == entrou)
+        m["on"] = (not sem_corte) and (m["chave"] == entrou)
+        if sem_corte:
+            m["n"] = None
         # no celular a pílula é curta: "Set 8", "Ago 77", "Tudo 85"
         m["curto"] = m["rotulo"] if m["chave"] == "tudo" else (m["rotulo"][:3] + m["rotulo"][9:] if len(m["rotulo"]) > 9 else m["rotulo"][:3])
-    return {"grupos": grupos, "meses": meses, "fora_cont": fora_cont,
-            "n_quadro": len(vis), "total": len(leads)}
+    c = contagens or {}
+    novas = [("prop", "📄 com proposta", c.get("prop"))]
+    if vende_data:
+        novas.append(("data", "📅 com data", c.get("data")))
+    for chave, rot, n in novas:
+        if n:
+            meses.append({"chave": chave, "rotulo": rot, "curto": rot, "n": n,
+                          "on": (not busca) and entrou == chave, "nova": True})
+    return meses
 
 
 def _conta_membro(c, conta_id, membro_id):
@@ -2313,6 +2451,121 @@ def enviar_proposta_conversa(pool, conta_id: int, membro_id: int, lead_id: int, 
                               ok=bool(r.get("ok")), erro=str(r.get("erro") or ""),
                               por=str(membro_id or ""))
     return r
+
+
+# ------------------------------------------------------- o CONTRATO, pelo app
+#
+# Até 15/09/2026 o app não tinha rota nenhuma de contrato: as duas funções de
+# envio (`enviar_proposta_conversa` e `enviar_proposta_email`) mandavam A PROPOSTA,
+# com o documento fixo dentro delas. O contrato nascia na aprovação e só o desktop
+# sabia mandar.
+#
+# O PREÇO DISSO, medido no Raio-X em 14/09 (conta 34, 6 contratos assinados):
+# 35 dias somados com o contrato pronto e parado em casa, contra 1 dia somado
+# esperando o cliente — que assina no mesmo dia em que recebe. Em 03/09 a equipe
+# foi orientada a trabalhar pelo celular, e o celular não tinha por onde mandar.
+#
+# Ver docs/mockups/app_contrato_e_filtro_da_fila.html.
+
+def contrato_do_orcamento(pool, conta_id: int, orc_id: int) -> dict | None:
+    """{id, numero, link, enviado_em, assinado_em} do contrato daquela proposta.
+
+    None quando não há contrato — o que é o normal em conta que não vende evento
+    (`contrato.tem_contrato`) e em proposta ainda não aprovada.
+
+    QUEM É o contrato vivo (o que não foi substituído por aditivo) quem decide é
+    `contrato.por_orcamento` — essa regra tem um dono só, e não vai ganhar uma
+    segunda cópia aqui. Só o `enviado_em` vem por fora: `_COLS_CT` não o traz, e
+    lê-lo de `ct.get(...)` devolveria None pra todo contrato, fazendo a tela
+    anunciar "nunca enviado" pra um que o cliente já assinou."""
+    from finance import contrato as _ctr
+    from finance.email_sender import _app_url
+    ct = _ctr.por_orcamento(pool, conta_id, int(orc_id))
+    if not ct or not ct.get("token"):
+        return None
+    with pool.connection() as c:
+        env = (c.execute("select enviado_em from contratos where id=%s",
+                         (ct["id"],)).fetchone() or [None])[0]
+    return {"id": ct["id"], "numero": ct.get("numero"),
+            "link": f"{_app_url()}/contrato/{ct['token']}",
+            "enviado_em": env, "assinado_em": ct.get("assinado_em")}
+
+
+def _marcar_contrato_enviado(pool, contrato_id: int) -> None:
+    """Carimba `contratos.enviado_em`.
+
+    É ESTE CAMPO que o funil e o Raio-X leem pra saber que o documento saiu de
+    casa — `linha_do_funil` e o bloco "a bola está com você" olham a DATA, nunca
+    `contratos.status`, que nasce 'enviado' por padrão e mente.
+    Sem o carimbo, mandar pelo app deixaria o Raio-X anunciando "nunca enviado"
+    pra um contrato que o cliente já tem na mão.
+
+    Só carimba a PRIMEIRA vez: `enviado_em` é quando o cliente passou a esperar, e
+    é dele que sai "aguardando assinatura há N dias". Reenviar não reinicia esse
+    relógio — senão bastaria reenviar pra pendência parecer nova."""
+    with pool.connection() as c:
+        c.execute("update contratos set enviado_em=coalesce(enviado_em, now()) "
+                  "where id=%s", (contrato_id,))
+        c.commit()
+
+
+def enviar_contrato_conversa(pool, conta_id: int, membro_id: int, lead_id: int,
+                             orc_id: int) -> dict:
+    """Manda o link do contrato na conversa do lead, pelo WhatsApp da empresa.
+
+    O CAMINHO QUE MAIS IMPORTA nesta casa: a Prime fala por canal QR, e o que sai
+    por fora chega sem o nome da empresa. O desktop só carimbava `enviado_em` no
+    envio por E-MAIL — aqui o carimbo vale pros dois, senão o caminho mais usado
+    continuaria invisível pro Raio-X."""
+    ct = contrato_do_orcamento(pool, conta_id, orc_id)
+    if not ct:
+        return {"ok": False, "erro": "Essa proposta ainda não tem contrato."}
+    r = enviar_mensagem(pool, conta_id, membro_id, lead_id,
+                        "Segue o contrato pra você ler e assinar 📄\n" + ct["link"])
+    if r.get("ok"):
+        _marcar_contrato_enviado(pool, ct["id"])
+    return r
+
+
+def enviar_contrato_email(pool, conta_id: int, orc_id: int,
+                          membro_id: int | None = None) -> dict:
+    """O contrato por e-mail, do app. Mesma redação e mesmo remetente do desktop
+    (`proposta_email.assunto_contrato` / `texto_contrato`): dois vocabulários pro
+    mesmo documento fariam o cliente receber coisas diferentes dependendo de onde
+    o vendedor apertou o botão."""
+    from finance import empresa as _emp
+    from finance import proposta_email as _pe
+
+    o = orcamento(pool, conta_id, orc_id, membro_id=membro_id)
+    if not o:
+        return {"ok": False, "erro": "Proposta não encontrada."}
+    destino = (o.get("email") or "").strip()
+    if "@" not in destino or "." not in destino.split("@")[-1]:
+        return {"ok": False, "erro": "Esse cliente não tem e-mail cadastrado."}
+    ct = contrato_do_orcamento(pool, conta_id, orc_id)
+    if not ct:
+        return {"ok": False, "erro": "Essa proposta ainda não tem contrato."}
+
+    with pool.connection() as c:
+        titular = (c.execute("select coalesce(nome,'') from contas where id=%s",
+                             (conta_id,)).fetchone() or [""])[0]
+    d_emp = _emp.obter_dados_empresa(pool, conta_id) or {}
+    nome_emp = ((d_emp.get("nome_fantasia") or "").strip()
+                or (d_emp.get("razao_social") or "").strip() or (titular or "").strip())
+    quem = o.get("cliente") or o.get("empresa")
+    assunto = _pe.assunto_contrato(ct.get("numero"), nome_emp)
+    mensagem = _pe.texto_contrato(quem, assinado=bool(ct.get("assinado_em")))
+    html, texto = _pe.montar(mensagem=mensagem, link=ct["link"], numero=ct.get("numero"),
+                             empresa=nome_emp, telefone=d_emp.get("telefone") or "",
+                             email_empresa=d_emp.get("email_empresa") or "",
+                             doc_rotulo="contrato")
+    env = _pe.enviar(pool, conta_id, destino=destino, assunto=assunto, html=html,
+                     texto=texto, empresa=nome_emp,
+                     reply_to=d_emp.get("email_empresa") or "")
+    if env.get("ok"):
+        _marcar_contrato_enviado(pool, ct["id"])
+        return {"ok": True, "destino": destino}
+    return {"ok": False, "erro": env.get("erro") or "Não consegui enviar."}
 
 
 def _token_do_link(link: str) -> str:

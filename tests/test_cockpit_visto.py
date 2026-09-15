@@ -56,6 +56,13 @@ def pool():
                        kwargs={"prepare_threshold": None})
     with p.connection() as c:
         c.execute(_SQL)
+        # `orcamentos` pelo DDL do próprio app, como no test_cockpit: desde 15/09 a
+        # consulta da Fila faz left join nela pra saber a proposta do lead. Sem a
+        # tabela, as OITO cenas daqui estouram em `UndefinedTable` — e o motivo é o
+        # mesmo do comentário lá em cima: metade do fixture copiada é metade que
+        # diverge na próxima coluna.
+        from web.painel_servicos import _criar_orcamentos
+        _criar_orcamentos(c)
         c.commit()
     yield p
     p.close()

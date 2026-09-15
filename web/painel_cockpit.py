@@ -264,7 +264,14 @@ b,strong{font-weight:600}
 .busca input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);
   font:inherit;font-size:.86rem}
 .busca input::placeholder{color:var(--text-faint)}
-.busca .lupa{flex:none;font-size:.85rem;line-height:1}
+/* `bq`, e NÃO `lupa`. A folha já tem `.lupa` lá embaixo, e ela é a foto em TELA
+   CHEIA (`position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.94)`). Como
+   `.busca .lupa` é mais específica só nas três propriedades abaixo, o resto da
+   `.lupa` continuava valendo: o ícone de busca virava uma cortina preta por cima
+   do app inteiro, com o emoji no meio, e nenhum card da Fila aceitava toque.
+   Subiu assim em 15/09/2026 e o dono viu no iPhone dele. Nome de classe nova
+   nesta folha se confere antes — ela é uma só, para seis telas. */
+.busca .bq{flex:none;font-size:.85rem;line-height:1}
 .busca .lm{flex:none;color:var(--text-faint);text-decoration:none;font-size:1rem;padding:0 .15rem}
 /* a proposta do lead no card: é o que o cliente cobra ao telefone */
 .chip.prop{color:var(--neon);border-color:#1e5c48;background:#0e2620}
@@ -1725,7 +1732,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     # a caixa de busca é um GET simples: sem JS, funciona com o teclado do celular e
     # o "Ir" fecha o teclado sozinho. O ✕ só aparece quando há o que limpar.
     caixa = (f"<form class='busca{' on' if buscando else ''}' method=get action='{_BASE}'>"
-             f"<span class=lupa>🔎</span>"
+             f"<span class=bq>🔎</span>"
              f"<input name=q value='{esc(termo)}' autocomplete=off enterkeyhint=search "
              f"placeholder='Procurar por nome ou número'>"
              + (f"<a class=lm href='{_BASE}' aria-label='Limpar busca'>✕</a>" if buscando else "")

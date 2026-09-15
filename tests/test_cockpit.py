@@ -1420,6 +1420,40 @@ def test_a_busca_da_fila_atravessa_o_mes_e_o_recorte(pool, monkeypatch):
     assert "Ninguém com “zzz”" in vazio and "nos 2 leads abertos" in vazio
 
 
+def test_a_caixa_de_busca_nao_usa_classe_de_cortina(pool, monkeypatch):
+    """A folha de estilo do app é UMA SÓ pra seis telas, e um nome de classe
+    repetido não dá erro nenhum — só muda a tela de outra pessoa.
+
+    Em 15/09/2026 a caixa de busca nasceu com `<span class=lupa>🔎</span>`, e
+    `.lupa` já era a foto em TELA CHEIA da conversa: `position:fixed; inset:0;
+    z-index:70; background:rgba(0,0,0,.94)`. O ícone virou uma cortina preta por
+    cima do app inteiro, com o emoji no meio, e nenhum card da Fila aceitava
+    toque. Subiu assim, e quem viu foi o dono, no iPhone dele.
+
+    O teste não fixa o NOME que a busca usa — fixa a regra: nada dentro da caixa
+    de busca pode carregar uma classe que a folha declara `position:fixed`. Assim
+    ele continua valendo quando alguém renomear `bq`, e pega a próxima colisão
+    com qualquer uma das cortinas que existirem."""
+    import re
+    from web import painel_cockpit as pc
+    cortinas = {c for sel, corpo in re.findall(r"([^{}]+)\{([^{}]*)\}", pc._CSS_TEXTO)
+                if re.search(r"position\s*:\s*fixed", corpo)
+                for c in re.findall(r"\.([A-Za-z][\w-]*)", sel)}
+    assert "lupa" in cortinas, "a foto em tela cheia sumiu da folha — refaça este teste"
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Manoel", email="manoel-busca@x.com")
+        _lead(c, conta, vend, "Kelly")
+        c.commit()
+    html, _ = _fila_html(monkeypatch, pool, conta, vend)
+    caixa = html.split("class='busca", 1)[1].split("</form>", 1)[0]
+    usadas = set(re.findall(r"class=['\"]?([\w -]+)", caixa))
+    usadas = {c for grupo in usadas for c in grupo.split()}
+    assert not (usadas & cortinas), (
+        f"a caixa de busca usa {usadas & cortinas}, que a folha declara "
+        f"position:fixed — vira cortina por cima do app inteiro")
+
+
 def test_as_pilulas_com_proposta_e_com_data_recortam_no_banco(pool, monkeypatch):
     from datetime import date
     with pool.connection() as c:

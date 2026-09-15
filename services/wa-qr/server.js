@@ -119,6 +119,7 @@ const TIPO_HIST = (proto.Message.HistorySyncNotification && proto.Message.Histor
 if (!TIPO_HIST) { console.error('HistorySyncType não encontrado no proto do Baileys ' + BAILEYS_VERSAO); process.exit(3) }
 const { useDbAuthState, MARCA_CHAVE_FALTANDO } = require('./auth-db')
 const { criarTrava } = require('./sessao-lock')
+const fila = require('./entrada-fila')
 
 const PORT = parseInt(process.env.PORT || '3000', 10)
 const SEGREDO = process.env.WA_QR_SHARED_SECRET || ''
@@ -2645,6 +2646,65 @@ async function transcreverAudio (contaId, m, sender) {
   } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao transcrever áudio') }
 }
 
+// Drenador da fila de repasse (ver entrada-fila.js). Concorrência 1 por conta: o
+// tique de 15s e o "drena já" do caminho feliz nunca correm juntos — dois
+// drenadores na mesma conta reordenariam a conversa do vendedor.
+const _drenando = new Map()
+function drenarFila (contaId, lote) {
+  const conta = contaId == null ? MINHA_CONTA : contaId
+  const chave = String(conta)
+  if (_drenando.get(chave)) return _drenando.get(chave)
+  const p = fila.drenar(pool, { fetch, appUrl: APP_URL, segredo: SEGREDO, log }, { contaId: conta, lote })
+    .catch((e) => log.warn({ contaId: conta, e: String(e) }, 'drenarFila: erro solto'))
+    .finally(() => _drenando.delete(chave))
+  _drenando.set(chave, p)
+  return p
+}
+
+// GRAVA-ANTES, ENTREGA-DEPOIS. É o conserto da perda de 15/09/2026 (ver
+// entrada-fila.js): enquanto o repasse era um fetch único, web fora do ar comia
+// mensagem de cliente com um `warn` e mais nada.
+//
+// `enfileirar` devolve `null` quando a tabela ainda não existe (o web não migrou):
+// aí é o fetch direto de sempre, nunca pior do que era. Devolve `false` quando a
+// mensagem já estava na fila (reentrega do Baileys): nada a fazer, o drenador cuida.
+//
+// LOTE 1 NO CAMINHO QUENTE, de propósito. Drenar o lote inteiro aqui poria o
+// processamento da mensagem atrás de até 20 POSTs — e, com a concorrência 1, atrás
+// do drenar de OUTRA mensagem. Um POST é o que basta: se a fila estiver limpa, ele
+// é o desta mensagem; se houver atraso, ele é o da mais antiga, que é justamente a
+// que tem que sair primeiro. O resto fica com o tique de 15s.
+async function repassarPelaFila (contaId, rota, corpo, sid) {
+  let id
+  try {
+    id = await fila.enfileirar(pool, { contaId, rota, sid, corpo })
+  } catch (e) {
+    log.warn({ contaId, rota, e: String(e) }, 'fila: enfileirar falhou — indo direto')
+    id = null
+  }
+  if (id === false) {
+    log.info({ contaId, rota, sid }, 'fila: mensagem já estava na fila (reentrega) — ignorando')
+    return
+  }
+  if (id === null) {
+    const res = await fila.postar({ fetch, appUrl: APP_URL, segredo: SEGREDO }, rota, corpo)
+    if (!res.ok) log.warn({ contaId, rota, status: res.status, erro: res.erro }, 'webhook wa-qr respondeu não-ok (sem fila)')
+    else log.info({ contaId, rota }, (rota === 'entrada' ? 'entrada' : 'saída') + ' repassada ao webhook ✓ (sem fila)')
+    return
+  }
+  await drenarFila(contaId, 1)
+}
+
+// A hora que o WhatsApp carimbou na mensagem, em ISO. Vai no corpo do repasse
+// porque, com a fila, a entrega pode atrasar — e sem ela o painel ordenaria a
+// conversa pela hora da ENTREGA, não a do envio. Devolve undefined quando não dá
+// pra confiar no valor; aí o Python usa `now()`, como sempre fez.
+function horaDaMsg (m) {
+  const t = Number(m && m.messageTimestamp)
+  if (!t || !isFinite(t)) return undefined
+  return new Date(t * 1000).toISOString()
+}
+
 async function repassarEntrada (contaId, m) {
   if (!APP_URL) { log.warn({ contaId }, 'APP_URL vazio — não repassa entrada'); return }
   let texto = textoDaMsg(m)
@@ -2668,22 +2728,19 @@ async function repassarEntrada (contaId, m) {
   const resolvido = numeroReal(m, contaId)
   if (semNumeroReal(resolvido, contaId, 'entrada')) return
   const sender = resolvido.split('@')[0]
-  const corpo = JSON.stringify({
+  const corpo = {
     conta_id: contaId, sender, texto,
     nome: m.pushName || '', id: (m.key && m.key.id) || '',
     // o ponteiro, não o arquivo — ver midiaDaMsg
-    midia: midia || undefined
-  })
-  try {
-    const r = await fetch(APP_URL + '/webhooks/wa-qr', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-wa-secret': SEGREDO },
-      body: corpo
-    })
-    if (!r.ok) log.warn({ contaId, status: r.status }, 'webhook wa-qr respondeu não-ok')
-    else log.info({ contaId, sender: sender.slice(0, 6) + '…', midia: midia && midia.tipo },
-      'entrada repassada ao webhook ✓')
-  } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao repassar entrada') }
+    midia: midia || undefined,
+    // Quando o WhatsApp diz que a mensagem foi mandada. Com a fila a entrega pode
+    // atrasar minutos, e sem isto o Python carimbaria `criado_em = now()` — a
+    // conversa sairia fora de ordem no painel. O lado de lá tem TETO: timestamp
+    // muito velho ou no futuro é ignorado (ver o webhook), senão uma reentrega do
+    // Baileys com data antiga ressuscitaria conversa no lugar errado.
+    recebido_em: horaDaMsg(m)
+  }
+  await repassarPelaFila(contaId, 'entrada', corpo, corpo.id)
   // depois de a mensagem já estar no painel: assim ela aparece na hora com a
   // marca "🎤 Áudio (0:18)" e o texto entra por cima quando ficar pronto, em vez
   // de o vendedor esperar a transcrição pra ver que chegou alguma coisa
@@ -2712,19 +2769,12 @@ async function repassarSaida (contaId, m) {
   const chatResolvido = numeroDoChat(m, contaId)
   if (semNumeroReal(chatResolvido, contaId, 'saida')) return
   const destinatario = chatResolvido.split('@')[0]
-  const corpo = JSON.stringify({
+  const corpo = {
     conta_id: contaId, sender: destinatario, texto,
-    id: (m.key && m.key.id) || ''
-  })
-  try {
-    const r = await fetch(APP_URL + '/webhooks/wa-qr/saida', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-wa-secret': SEGREDO },
-      body: corpo
-    })
-    if (!r.ok) log.warn({ contaId, status: r.status }, 'webhook wa-qr/saida respondeu não-ok')
-    else log.info({ contaId, destinatario: destinatario.slice(0, 6) + '…' }, 'saída repassada ao webhook ✓')
-  } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao repassar saída') }
+    id: (m.key && m.key.id) || '',
+    recebido_em: horaDaMsg(m)
+  }
+  await repassarPelaFila(contaId, 'saida', corpo, corpo.id)
   // O áudio que o VENDEDOR grava pelo celular também vira texto. Faltava: a
   // transcrição só era disparada aqui na entrada (repassarEntrada), então metade
   // da conversa ficava legível e a outra metade era um "🎤 Áudio (0:09)" mudo —
@@ -4593,6 +4643,12 @@ servidor.listen(PORT, () => {
     limparLogsAntigos().catch(() => {})
     setInterval(() => { limparLogsAntigos().catch(() => {}) }, 60 * 60 * 1000).unref()
   }
+  // Outbox do repasse (entrada-fila.js): o que falhou volta de 15 em 15s, e o que
+  // já entrou sai da tabela depois da retenção. É o tique que faz a mensagem presa
+  // num 502 chegar sozinha quando o web voltar.
+  setInterval(() => { drenarFila(null).catch(() => {}) },
+    parseInt(process.env.WA_QR_FILA_DRENA_MS || '15000', 10)).unref()
+  setInterval(() => { fila.limparEntregues(pool).catch(() => {}) }, 60 * 60 * 1000).unref()
 })
 }
 
@@ -4604,4 +4660,5 @@ module.exports = {
   contarQuedaPresa, esquecerQuedasPresas, quedasPresas, PRESA_AVISA_EM,
   comecouAPartida, terminouAPartida, quemEstaSubindo, partidas, usuariosDoPeer, agendaTrancadaPorChave, VALVULA_CHAVE_FALTANDO_MS, MARCA_CHAVE_FALTANDO,
   HIST_CONCORRENCIA, HIST_PAUSA_MS, HIST_RECUO_MS, HIST_TIMEOUT_MS, enviarHistorico, dormir,
+  repassarPelaFila, drenarFila, horaDaMsg,
   medindo, oQueEstaEmCurso, decifragemPorConta, emCurso, QUARENTENA_PEER_MS, porPeerEmQuarentena, peerEmQuarentena, esquecerQuarentena, peersEmQuarentena, avisarChipQuebrado, alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, IGNORAR_GRUPOS, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

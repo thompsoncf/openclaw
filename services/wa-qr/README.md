@@ -35,6 +35,7 @@ Todas as rotas (menos `GET /saude`) exigem o header `x-wa-secret` = `WA_QR_SHARE
 | `WA_QR_ESPERA_POS_440_MS` | base da espera pra retomar conta substituída — dobra a cada tentativa (5, 10, 20, 40, 80min) |
 | `WA_QR_IGNORAR_GRUPOS` | `0` volta a decifrar mensagem de grupo (padrão: cortada antes de decifrar — ver "Grupo não é decifrado") |
 | `WA_QR_HIST_CONCORRENCIA` · `WA_QR_HIST_PAUSA_MS` · `WA_QR_HIST_RECUO_MS` | vazão do repasse do histórico: conversas em paralelo (2), pausa entre POSTs (100ms) e recuo quando o web recusa (2s) — ver "O histórico derrubou o web" |
+| `WA_QR_FILA_DRENA_MS` · `WA_QR_FILA_PARAR_EM` · `WA_QR_FILA_TIMEOUT_MS` | outbox do repasse: de quanto em quanto o que falhou volta (15s), quantas tentativas até virar dead-letter (12, ~6h) e timeout do POST (15s) — ver "Nenhuma mensagem se perde num 502" |
 
 ## Diagnóstico sem abrir o dashboard
 
@@ -214,10 +215,68 @@ WA_QR_IGNORAR_GRUPOS=0 node teste-ignorar-jid.js   # o modo antigo também tem q
 node teste-console-libsignal.js
 # vazão do repasse do histórico (o que derrubou o web em 15/09) — sem banco
 node teste-vazao-historico.js
+# outbox do repasse: grava antes, entrega depois, nunca perde (precisa de banco)
+createdb wa_fila_test
+psql wa_fila_test -f ../../db/migracoes/261_wa_qr_entrada_fila.sql
+WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_fila_test node teste-entrada-fila.js
 # ...e o agregado sai carimbado com a conta do worker (precisa de banco)
 createdb wa_qr_log_test
 psql wa_qr_log_test -f ../../db/migracoes/158_wa_qr_log.sql
 WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_log_test node teste-log-agregado-conta.js
+```
+
+## Nenhuma mensagem se perde num 502 (o outbox, 15/09/2026)
+
+No mesmo incidente que a seção abaixo conta, os ~2 minutos de 502 **comeram três
+mensagens de cliente** (contas 23 e 34) e um eco de saída. O repasse era um `fetch`
+único, sem timeout e sem retentativa: cada falha virava uma linha `warn` e a
+mensagem sumia. O WhatsApp já a tinha dado por entregue e não reenvia — as três
+estavam no celular do vendedor e nunca no painel.
+
+Consertar a vazão trata a CAUSA daquele dia. Web fora do ar acontece por outros
+motivos — **todo deploy é uma janela de 502** — e a consequência seria a mesma.
+
+Agora a mensagem é **gravada antes de virar rede**, em `wa_qr_entrada_fila`
+(migração 261), e só ganha `entregue_em` quando o web responde 2xx. O que falha
+fica com a próxima tentativa marcada e um drenador volta de 15 em 15s, com espera
+crescente (5s, 30s, 2min, 10min, 30min, 1h). **Nada é apagado enquanto não
+entregue.** Depois de 12 tentativas (~6h) a linha vira dead-letter (`parada_em`):
+sai do caminho pra não segurar a fila da conta, e fica na tabela pra alguém olhar.
+
+Reentregar é seguro: o lado Python é idempotente por `provider_sid` nos dois
+webhooks.
+
+**Três decisões que valem ler antes de mexer** (estão no topo do `entrada-fila.js`):
+
+1. **O POST acontece FORA da transação.** A forma óbvia — abrir transação, `for
+   update skip locked`, postar dentro — seguraria uma das **quatro** conexões do
+   pool durante uma chamada de rede de até 15s, travando log, trava de sessão e
+   `auth-db` junto. Então a transação só **arrenda** as linhas e solta; o POST corre
+   livre; o resultado volta num update curto.
+2. **O caminho quente drena LOTE 1.** Drenar o lote inteiro ali poria o
+   processamento da mensagem atrás de até 20 POSTs. Um basta: se a fila está limpa,
+   é o desta mensagem; se há atraso, é o da mais antiga — que é a que tem que sair
+   primeiro. O resto fica com o tique de 15s.
+3. **A ordem vem do JS, não do SQL.** O `RETURNING` de um `UPDATE` devolve as linhas
+   na ordem em que o Postgres as atualizou, **não** na do `order by` da subconsulta.
+   A primeira versão postava fora de ordem por causa disso e o SQL "parecia" certo —
+   quem pegou foi o teste.
+
+`recebido_em` acompanha o repasse pra a conversa não sair fora de ordem quando a
+entrega atrasa, e o lado Python tem **teto** (`WA_RECEBIDO_EM_JANELA_H`): o Baileys
+reentrega mensagem antiga com o timestamp original, e aceitar qualquer data
+ressuscitaria conversa no lugar errado da caixa.
+
+```sql
+-- o único KPI que importa: mensagem presa
+select conta_id, rota, count(*) filter (where parada_em is null) presas,
+       count(*) filter (where parada_em is not null) paradas, min(criado_em) mais_antiga
+  from wa_qr_entrada_fila where entregue_em is null group by 1,2;
+
+-- a prova de que a fila salvou alguma: entregue DEPOIS de ter falhado
+select conta_id, rota, count(*) n, max(tentativas) pior
+  from wa_qr_entrada_fila
+ where entregue_em > now() - interval '24 hours' and tentativas > 0 group by 1,2;
 ```
 
 ## O histórico derrubou o web (15/09/2026)

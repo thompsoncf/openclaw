@@ -91,9 +91,14 @@ def _etapas(c, conta_id: int) -> list[dict]:
         # `plano` continuaria adivinhando quem deu o nome — ver funil_modelo.foi_o_dono.
         from finance import funil_modelo as _fm
         try:
+            # SEM `c.commit()` AQUI DENTRO. O `with c.transaction()` já confirma na
+            # saída — e chamar commit dentro dele levanta
+            # "Explicit commit() forbidden within a Transaction context", que o
+            # `except` abaixo engolia num log: o carimbo rodava, dava rollback e
+            # NUNCA gravava. Ficou assim de 14 a 15/09/2026, e o sintoma era mudo —
+            # `semeado_de` nulo em todas as 8 contas, com a tela funcionando igual.
             with c.transaction():
-                if _fm.carimbar(c, conta_id):
-                    c.commit()
+                _fm.carimbar(c, conta_id)
         except Exception:  # noqa: BLE001
             _log.warning("carimbo das etapas da conta %s falhou", conta_id, exc_info=True)
     return [{"id": r[0], "chave": r[1], "rotulo": r[2], "ordem": r[3], "fixa": r[4],

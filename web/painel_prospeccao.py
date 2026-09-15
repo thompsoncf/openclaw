@@ -2185,6 +2185,11 @@ def _ha_quanto(minutos) -> str:
 
 _BRT = timezone(timedelta(hours=-3))
 
+#: Janela em que o `recebido_em` do wa-qr é aceito como `criado_em` da mensagem.
+#: Ver _wa_recebido_em: passou disso, é reentrega antiga do Baileys, e usar a data
+#: original ressuscitaria a conversa no lugar errado da caixa.
+WA_RECEBIDO_EM_JANELA_H = 6
+
 
 def _quando_curto(quando, agora=None) -> str:
     """'agora' · '40min' · '3h' · 'ontem' · '12/08'. Cabe no canto de um card.
@@ -4387,7 +4392,7 @@ def _eh_numero_da_equipe(c, conta_id: int, numero: str) -> bool:
 
 
 def _wa_conversa_da_equipe(c, conta_id, remetente, corpo, sid, nome_perfil,
-                           chip_id, midia):
+                           chip_id, midia, recebido_em=None):
     """A conversa de quem é DA CASA: entra no inbox como qualquer outra, mas sem lead.
 
     Repete a gravação de conversa+mensagem em vez de deixar `lead_id` nulo correr
@@ -4418,13 +4423,15 @@ def _wa_conversa_da_equipe(c, conta_id, remetente, corpo, sid, nome_perfil,
              _chip_gravavel(chip_id, conta_id))).fetchone()[0]
     mid = midia if isinstance(midia, dict) else None
     cur = c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto,
-                     provider_sid, midia_ref, midia_tipo, midia_meta)
-                 values (%s,'whatsapp','in','lead',%s,%s,%s::jsonb,%s,%s::jsonb)
+                     provider_sid, midia_ref, midia_tipo, midia_meta, criado_em)
+                 values (%s,'whatsapp','in','lead',%s,%s,%s::jsonb,%s,%s::jsonb,
+                         coalesce(%s, now()))
                  on conflict (conversa_id, provider_sid) where provider_sid is not null do nothing""",
                     (conv_id, (corpo or "")[:8000], sid,
                      json.dumps(mid["ref"]) if mid and mid.get("ref") else None,
                      (mid.get("tipo") or None) if mid else None,
-                     json.dumps(mid.get("meta") or {}) if mid else None))
+                     json.dumps(mid.get("meta") or {}) if mid else None,
+                     _wa_recebido_em(recebido_em)))
     c.execute(
         """update conversas set ultima_msg_em=now(),
              janela_expira_em=now()+interval '24 hours',
@@ -4434,7 +4441,8 @@ def _wa_conversa_da_equipe(c, conta_id, remetente, corpo, sid, nome_perfil,
 
 
 def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente_on,
-                         *, exigir_continuidade=False, chip_id=None, midia=None):
+                         *, exigir_continuidade=False, chip_id=None, midia=None,
+                         recebido_em=None):
     """WhatsApp de ENTRADA (Twilio OU Cloud API): resolve lead+conversa pelo telefone,
     grava a mensagem e reabre a janela/reativa o agente. Devolve (conv_id, nova) — se
     a mensagem entrou agora ou já estava lá. Um humano que 'assumiu'
@@ -4512,7 +4520,8 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         # entra igual; o funil é que não ganha ninguém.
         if _eh_numero_da_equipe(c, conta_id, remetente):
             return _wa_conversa_da_equipe(c, conta_id, remetente, corpo, sid,
-                                          nome_perfil, chip_id, midia)
+                                          nome_perfil, chip_id, midia,
+                                          recebido_em=recebido_em)
         # Conversa ÓRFÃ desse número (importada do histórico do WhatsApp por QR, de
         # ANTES de conectar — ver _wa_historico_conversa). ANTES isso era um beco sem
         # saída: a mensagem era anexada e pronto, o contato nunca entrava no funil e
@@ -4628,13 +4637,15 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     # de ponteiro — e ainda pediria retenção, disco e limpeza (migração 187).
     mid = midia if isinstance(midia, dict) else None
     cur = c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto,
-                     provider_sid, midia_ref, midia_tipo, midia_meta)
-                 values (%s,'whatsapp','in','lead',%s,%s,%s::jsonb,%s,%s::jsonb)
+                     provider_sid, midia_ref, midia_tipo, midia_meta, criado_em)
+                 values (%s,'whatsapp','in','lead',%s,%s,%s::jsonb,%s,%s::jsonb,
+                         coalesce(%s, now()))
                  on conflict (conversa_id, provider_sid) where provider_sid is not null do nothing""",
                     (conv_id, (corpo or "")[:8000], sid,
                      json.dumps(mid["ref"]) if mid and mid.get("ref") else None,
                      (mid.get("tipo") or None) if mid else None,
-                     json.dumps(mid.get("meta") or {}) if mid else None))
+                     json.dumps(mid.get("meta") or {}) if mid else None,
+                     _wa_recebido_em(recebido_em)))
     # entrou agora, ou é a mesma mensagem chegando de novo? Ver o `nova` no docstring:
     # sem esta resposta o dedup era silencioso e o agente respondia uma vez por entrega.
     nova = cur.rowcount > 0
@@ -5617,7 +5628,8 @@ def _webhook_wa_qr_sync(corpo: bytes, background_tasks: BackgroundTasks):
         conv_id, nova = _wa_inbound_conversa(c, empresa_id, sender, texto,
                                             payload.get("id") or None, payload.get("nome"),
                                             agente_on, chip_id=chip_id,
-                                            midia=_midia_do_payload(payload.get("midia")))
+                                            midia=_midia_do_payload(payload.get("midia")),
+                                            recebido_em=payload.get("recebido_em"))
         # lê DENTRO da transação: o update acima já valeu, então a conversa ligada à
         # mão aparece aqui mesmo com o agente-mestre desligado (ver _agente_atende).
         # `nova` corta a reentrega: o wa-qr manda a mesma mensagem de novo quando a
@@ -5750,7 +5762,37 @@ def _webhook_wa_qr_historico_sync(corpo: bytes):
     return Response("ok", media_type="text/plain")
 
 
-def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid, *, chip_id=None):
+def _wa_recebido_em(valor):
+    """A hora que o WhatsApp carimbou na mensagem, quando dá pra confiar nela.
+
+    O wa-qr passou a mandar `recebido_em` junto do repasse porque, desde a fila de
+    saída (migração 261), a entrega pode atrasar minutos: sem isto a mensagem
+    entraria com `criado_em = now()` e a conversa sairia fora de ordem no painel —
+    a que chegou primeiro apareceria depois.
+
+    TEM TETO, e o teto é o ponto. O Baileys reentrega mensagem antiga quando a
+    conexão oscila ('append'), com o timestamp ORIGINAL. Aceitar qualquer data
+    ressuscitaria conversa no lugar errado da caixa — pior que o problema que este
+    campo veio resolver. Então: nada do futuro (relógio torto do celular) e nada
+    mais velho que a janela. Fora disso, `None`, e quem chama usa `now()`.
+    """
+    if not valor:
+        return None
+    try:
+        quando = datetime.fromisoformat(str(valor).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if quando.tzinfo is None:
+        quando = quando.replace(tzinfo=timezone.utc)
+    agora = datetime.now(timezone.utc)
+    if quando > agora + timedelta(minutes=5):
+        return None
+    if quando < agora - timedelta(hours=WA_RECEBIDO_EM_JANELA_H):
+        return None
+    return quando
+
+
+def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid, *, chip_id=None, recebido_em=None):
     """Mensagem que o VENDEDOR mandou DIRETO pelo WhatsApp do celular (fora do
     Zaq) — o Baileys ecoa de volta como fromMe. Dedup por (conversa_id,
     provider_sid): se a mensagem já saiu PELO Zaq (que grava na hora do envio em
@@ -5806,10 +5848,11 @@ def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid, *, chip_id=None):
                returning id""",
             (conta_id, lead_id, destinatario, conta_id, alvo8,
              _chip_gravavel(chip_id, conta_id))).fetchone()[0]
-    c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
-                 values (%s,'whatsapp','out','humano',%s,%s)
+    c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid,
+                     criado_em)
+                 values (%s,'whatsapp','out','humano',%s,%s, coalesce(%s, now()))
                  on conflict (conversa_id, provider_sid) where provider_sid is not null do nothing""",
-              (conv_id, (corpo or "")[:8000], sid))
+              (conv_id, (corpo or "")[:8000], sid, _wa_recebido_em(recebido_em)))
     c.execute("update conversas set ultima_msg_em=greatest(ultima_msg_em, now()) where id=%s", (conv_id,))
     return conv_id
 
@@ -5859,7 +5902,8 @@ def _webhook_wa_qr_saida_sync(corpo: bytes):
             return Response("ok", media_type="text/plain")
         empresa_id, chip_id = alvo
         conv_id = _wa_saida_conversa(c, empresa_id, destinatario, texto,
-                                     payload.get("id") or None, chip_id=chip_id)
+                                     payload.get("id") or None, chip_id=chip_id,
+                                     recebido_em=payload.get("recebido_em"))
         c.commit()
     if conv_id:
         log.info("webhook_wa_qr_saida: chip=%s empresa=%s conv_id=%s registrado ✓",

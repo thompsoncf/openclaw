@@ -405,6 +405,86 @@ def test_resumo_e_painel_por_vendedor(c):
     assert [(g["nome"], g["ativos"], g["critico"]) for g in gest] == [("Pedro", 3, 3), ("Jacque", 1, 1)]
 
 
+def test_sincronizar_solta_a_linha_antes_de_terminar_a_passada(pool, c):
+    """O LOCK DE `prospeccao` NÃO PODE DURAR A PASSADA INTEIRA.
+
+    15/09/2026, medido em produção: o `rodar` abria uma transação por conta e só
+    commitava no fim, depois do sincronizar E do avaliar. Na Prime (379 leads) as
+    linhas de `prospeccao` ficavam travadas dezenas de segundos — e quem esbarrava
+    nelas era o WhatsApp de ENTRADA, que precisa da MESMA linha pra gravar a
+    mensagem do cliente. Resultado: `update prospeccao` com 83 segundos no pior
+    caso, o webhook estourando o timeout de 15s, e 9 das 37 mensagens da tarde só
+    chegando na segunda ou terceira tentativa da fila.
+
+    Este teste é a trava disso: com mais de um lote de leads, uma SEGUNDA conexão
+    tem que conseguir travar a linha do primeiro lead enquanto o sincronizar ainda
+    está rodando. Se voltar a ser uma transação só, o `for update nowait` levanta
+    e o teste falha.
+    """
+    v = _vend(c)
+    ids = []
+    for i in range(fu.FU_SINC_LOTE * 2 + 5):
+        lead = _lead(c, v, contato=f"S{i}")
+        _fala(c, lead, ("in", 20), ("out", 19))
+        ids.append(lead)
+    c.commit()
+    linhas = fu.leads(c, CONTA, EVENTOS, AGORA)
+    assert len(linhas) > fu.FU_SINC_LOTE, "o teste precisa de mais de um lote pra valer"
+
+    primeiro = ids[0]
+    visto = {"soltou": None}
+
+    class Espia:
+        """Passa tudo adiante e, um update depois do primeiro commit, pergunta a
+        outra conexão se a linha do primeiro lead já está livre."""
+
+        def __init__(self, real):
+            self._real = real
+            self.commits = 0
+            self._updates_desde_commit = 0
+            self.maior_lote = 0
+
+        def execute(self, *a, **k):
+            self._updates_desde_commit += 1
+            self.maior_lote = max(self.maior_lote, self._updates_desde_commit)
+            if self.commits == 1 and visto["soltou"] is None:
+                visto["soltou"] = _linha_livre(pool, primeiro)
+            return self._real.execute(*a, **k)
+
+        def commit(self):
+            self.commits += 1
+            self._updates_desde_commit = 0
+            return self._real.commit()
+
+        def __getattr__(self, nome):
+            return getattr(self._real, nome)
+
+    espia = Espia(c)
+    n = fu.sincronizar(espia, CONTA, linhas)
+
+    assert n == len(linhas), "todos os prazos foram escritos"
+    assert espia.commits >= 2, f"commitou {espia.commits}x — a passada inteira virou uma transação só"
+    assert espia.maior_lote <= fu.FU_SINC_LOTE, (
+        f"segurou {espia.maior_lote} updates sem commitar, o teto é {fu.FU_SINC_LOTE}")
+    assert visto["soltou"] is True, (
+        "a linha do primeiro lead continuava travada depois do primeiro commit — "
+        "é exatamente o que fazia o WhatsApp de entrada estourar o timeout")
+
+
+def _linha_livre(pool, prospeccao_id) -> bool:
+    """Outra conexão consegue travar esta linha AGORA? `nowait` levanta se não."""
+    import psycopg
+    with pool.connection() as outra:
+        try:
+            outra.execute("select 1 from prospeccao where id=%s for update nowait",
+                          (prospeccao_id,)).fetchone()
+            outra.rollback()
+            return True
+        except psycopg.errors.LockNotAvailable:
+            outra.rollback()
+            return False
+
+
 def test_sincronizar_escreve_o_prazo_e_nao_encosta_no_marcado_na_mao(c):
     v = _vend(c)
     auto = _lead(c, v, contato="Auto"); _fala(c, auto, ("in", 20), ("out", 19))

@@ -727,11 +727,47 @@ def notificar(pool, conta_id: int, pendentes: list[dict]) -> None:
 _LOCK = 771148   # vizinho do lock da régua (771147)
 
 
+#: De quantos em quantos leads o `sincronizar` fecha a transação. Ver a docstring
+#: dele: o que este número controla é por quanto tempo uma linha de `prospeccao`
+#: fica travada, e é isso que o WhatsApp de entrada sente do outro lado.
+FU_SINC_LOTE = 20
+
+
 def sincronizar(c, conta_id: int, linhas: list[dict]) -> int:
     """Escreve o prazo proposto em `proximo_contato_em`, pras telas que já leem
     esse campo (a ficha, a base, o Cockpit). Só mexe em quem está diferente — um
-    update por lead a cada 2 minutos encheria `atualizado_em` de ruído."""
+    update por lead a cada 2 minutos encheria `atualizado_em` de ruído.
+
+    COMMITA DE LOTE EM LOTE, e o motivo é de produção, medido em 15/09/2026.
+
+    Antes o `rodar` abria UMA transação por conta e só commitava no fim, depois
+    desta função E do `avaliar`. Numa conta grande isso deixava centenas de linhas
+    de `prospeccao` travadas por dezenas de segundos — e quem esbarrava nelas era
+    o WhatsApp de ENTRADA, que precisa da mesma linha pra gravar a mensagem do
+    cliente. Na Prime (379 leads) o efeito apareceu assim:
+
+      * `update prospeccao ... set status`: média 1,3s, PIOR 83 SEGUNDOS;
+      * o webhook estourava o timeout de 15s do repasse, e 9 das 37 mensagens de
+        entrada daquela tarde só chegaram na segunda ou terceira tentativa da
+        fila (ver services/wa-qr/entrada-fila.js);
+      * duas conexões flagradas `idle in transaction` por 89 segundos.
+
+    Nenhuma mensagem se perdeu — o outbox segurou —, mas a conta que mais vende
+    era a que entregava mais devagar.
+
+    Commitar no meio é seguro AQUI e não seria em toda parte: cada update é
+    independente e idempotente (só mexe em quem está com valor diferente), e
+    `proximo_contato_em` é campo derivado — se a passada morrer na metade, a
+    próxima, dois minutos depois, termina o serviço. Não há "meio estado" pra
+    alguém ver.
+
+    O `avaliar` fica de fora deste tratamento de propósito: ele escreve em
+    `funil_avisos`, não em `prospeccao`, e o aviso só pode sair DEPOIS do commit
+    (ver `rodar`) — commitar por lead ali abriria a chance de um aviso gravado e
+    nunca notificado, e o dedup é pelo FATO, então ninguém o reemitiria.
+    """
     n = 0
+    desde_o_commit = 0
     for x in linhas:
         if x["na_mao"] or not x["prazo"]:
             continue
@@ -741,6 +777,12 @@ def sincronizar(c, conta_id: int, linhas: list[dict]) -> int:
                   and (proximo_contato_em is null or proximo_contato_em <> %s)""",
             (x["prazo"], x["id"], conta_id, x["prazo"]))
         n += cur.rowcount
+        desde_o_commit += 1
+        if desde_o_commit >= FU_SINC_LOTE:
+            c.commit()
+            desde_o_commit = 0
+    if desde_o_commit:
+        c.commit()
     return n
 
 

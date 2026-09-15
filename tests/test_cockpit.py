@@ -130,7 +130,14 @@ create table contratos (id bigserial primary key, conta_id bigint, orcamento_id 
   -- NÚMERO do contrato e a data em que ele foi criado. Sem as duas colunas a
   -- consulta estoura, o bloco cai no `except` e a tela renderiza sem "Sua semana"
   -- — falha muda, que foi exatamente como este teste a pegou.
-  numero int, criado_em timestamptz default now());
+  numero int, criado_em timestamptz default now(),
+  -- 15/09: o app passou a MANDAR o contrato, e pra isso lê o contrato vivo por
+  -- `contrato.por_orcamento` — que pede `substitui_id` (qual não foi trocado por
+  -- aditivo) e `token` (o link que o cliente abre). Sem as duas a consulta
+  -- estoura dentro do `except` do próprio módulo e o bloco some da tela sem dizer
+  -- nada: a mesma falha muda de cima, um degrau adiante.
+  substitui_id bigint, texto text, assinado_por text, assinado_doc text,
+  assinado_ip text, rescindido_em timestamptz, rescisao_motivo text, token text);
 -- o CADASTRO do cliente: primeiro degrau de `vendas.nome_do_orcamento`, e por isso
 -- o Raio-X faz left join nela pra montar o nome de cada linha
 create table clientes (id bigserial primary key, conta_id bigint, nome text);
@@ -1229,7 +1236,7 @@ def test_fila_agrupada_por_o_que_o_lead_pede():
     assert [l["id"] for l in f3["grupos"][-1]["leads"]] == [5]
 
 
-def _fila_html(monkeypatch, pool, conta, vend, req=None, **kw):
+def _fila_html(monkeypatch, pool, conta, vend, req=None, vende=True, **kw):
     from types import SimpleNamespace
     from starlette.datastructures import QueryParams
     from web import painel_cockpit as pc
@@ -1237,7 +1244,7 @@ def _fila_html(monkeypatch, pool, conta, vend, req=None, **kw):
     from finance import webpush
     monkeypatch.setattr(pc, "get_pool", lambda: pool)
     monkeypatch.setattr(pc, "_selo", lambda conta_id: "")
-    monkeypatch.setattr(v, "vende_data", lambda pool, conta_id: True)
+    monkeypatch.setattr(v, "vende_data", lambda pool, conta_id: vende)
     monkeypatch.setattr(webpush, "chave_publica", lambda: None)
     req = req or SimpleNamespace(session={}, query_params=QueryParams(""))
     r = pc._fila(req, conta, vend, **kw)
@@ -1276,6 +1283,186 @@ def test_a_fila_abre_no_mes_atual_com_pilulas_grupos_e_a_linha_do_evento(pool, m
     assert "Do Mes Passado" in html3                                            # sem parâmetro: vale a sessão
     html4, _ = _fila_html(monkeypatch, pool, conta, vend, req=req, entrou="tudo")
     assert "4 abertos · " in html4 and "sua vez <b>" not in html4.split("class=scroll")[0].split("class=foco")[1]
+
+
+# ------------------------------------------------ mandar o contrato PELO APP
+# (mockup app_contrato_e_filtro_da_fila). O Raio-X mediu o preço de não ter isto
+# na conta 34: 35 dias com o contrato pronto e parado em casa, contra 1 dia
+# esperando o cliente — que assina no mesmo dia em que recebe.
+def _orc_com_contrato(c, conta, vend, lead, *, enviado=None, assinado=None, numero=8):
+    orc = c.execute("insert into orcamentos (conta_id, empresa, numero, status, setup_centavos, "
+                    "criado_por, token) values (%s,'Carolina Costa',23,'aprovada',650000,%s,"
+                    "'tk-orc-' || nextval('orcamentos_id_seq')::text) returning id",
+                    (conta, str(vend))).fetchone()[0]
+    c.execute("update prospeccao set orcamento_id=%s where id=%s", (orc, lead))
+    c.execute("insert into contratos (conta_id, orcamento_id, numero, token, enviado_em, assinado_em) "
+              "values (%s,%s,%s,%s,%s,%s)", (conta, orc, numero, f"tk-ct-{orc}", enviado, assinado))
+    return orc
+
+
+def _orc_html(monkeypatch, pool, conta, vend, orc_id):
+    from types import SimpleNamespace
+    from starlette.datastructures import QueryParams
+    from web import painel_cockpit as pc
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    monkeypatch.setattr(pc, "_selo", lambda conta_id: "")
+    monkeypatch.setattr(pc, "_gerencia", lambda req: None)
+    monkeypatch.setattr(pc, "_sessao", lambda req: (conta, vend))
+    req = SimpleNamespace(session={}, query_params=QueryParams(""))
+    r = pc.cockpit_orcamento(req, orc_id)
+    return bytes(r.body).decode("utf-8")
+
+
+def test_o_app_diz_que_o_contrato_esta_parado_em_casa(pool, monkeypatch):
+    monkeypatch.setenv("APP_URL", "https://app.zaq-ia.com")
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Thiago", email="thiago-ct@x.com")
+        lead = _lead(c, conta, vend, "Carolina Costa")
+        orc = _orc_com_contrato(c, conta, vend, lead)
+        c.commit()
+    ct = ck.contrato_do_orcamento(pool, conta, orc)
+    # `enviado_em` NÃO vem de `contrato.por_orcamento` (não está em `_COLS_CT`):
+    # lê-lo de lá devolveria None sempre, e a tela diria "nunca enviado" pra um
+    # contrato já assinado. Por isso ele é lido aqui, pelo id do contrato vivo.
+    assert ct["numero"] == 8 and ct["enviado_em"] is None
+    assert ct["link"] == f"https://app.zaq-ia.com/contrato/tk-ct-{orc}"
+    html = _orc_html(monkeypatch, pool, conta, vend, orc)
+    assert "Ainda não foi enviado." in html and "var(--coral)" in html
+    assert f"action='/cockpit/orcamentos/{orc}/contrato/conversa'" in html
+    assert ">Mandar na conversa</button>" in html
+
+
+def test_enviar_o_contrato_carimba_enviado_em_e_nao_reinicia_o_relogio(pool, monkeypatch):
+    monkeypatch.setenv("APP_URL", "https://app.zaq-ia.com")
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Thiago", email="thiago-ct2@x.com")
+        lead = _lead(c, conta, vend, "Carolina Costa")
+        orc = _orc_com_contrato(c, conta, vend, lead)
+        _conv_msg(c, conta, lead, texto="pode mandar")
+        c.commit()
+    saiu = []
+    monkeypatch.setattr(ck, "enviar_mensagem",
+                        lambda *a, **k: (saiu.append(a[-1]), {"ok": True})[1])
+    assert ck.enviar_contrato_conversa(pool, conta, vend, lead, orc)["ok"] is True
+    assert f"https://app.zaq-ia.com/contrato/tk-ct-{orc}" in saiu[0]
+    with pool.connection() as c:
+        primeiro = c.execute("select enviado_em from contratos where orcamento_id=%s",
+                             (orc,)).fetchone()[0]
+    assert primeiro is not None
+    # a tela passa a falar de espera, não de omissão
+    html = _orc_html(monkeypatch, pool, conta, vend, orc)
+    assert "Enviado há 0 dias, sem assinatura." in html and ">Reenviar na conversa</button>" in html
+    # REENVIAR NÃO REINICIA O RELÓGIO: `enviado_em` é quando o cliente passou a
+    # esperar. Se o reenvio carimbasse de novo, bastaria reenviar pra pendência de
+    # 35 dias parecer nova — e o Raio-X do dono deixaria de ver o atraso.
+    ck.enviar_contrato_conversa(pool, conta, vend, lead, orc)
+    with pool.connection() as c:
+        assert c.execute("select enviado_em from contratos where orcamento_id=%s",
+                         (orc,)).fetchone()[0] == primeiro
+    # envio que FALHOU não carimba nada: carimbar aqui faria o Raio-X dar por
+    # entregue um contrato que o cliente nunca recebeu
+    with pool.connection() as c:
+        c.execute("update contratos set enviado_em=null where orcamento_id=%s", (orc,)); c.commit()
+    monkeypatch.setattr(ck, "enviar_mensagem", lambda *a, **k: {"ok": False, "erro": "chip fora"})
+    assert ck.enviar_contrato_conversa(pool, conta, vend, lead, orc)["ok"] is False
+    with pool.connection() as c:
+        assert c.execute("select enviado_em from contratos where orcamento_id=%s",
+                         (orc,)).fetchone()[0] is None
+
+
+def test_o_bloco_de_contrato_nao_existe_sem_contrato(pool, monkeypatch):
+    """§6: conta que não vende evento não tem contrato (`contrato.tem_contrato`), a
+    proposta aprovada vai direto pra "Fechar" — e o bloco simplesmente não nasce."""
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Zaq", email="zaq-ct@x.com")
+        lead = _lead(c, conta, vend, "Cliente PJ")
+        orc = c.execute("insert into orcamentos (conta_id, empresa, numero, status, mensal_centavos, "
+                        "criado_por, token) values (%s,'Cliente PJ',5,'aprovada',90000,%s,'tk-orc-5-' || nextval('orcamentos_id_seq')::text) "
+                        "returning id", (conta, str(vend))).fetchone()[0]
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (orc, lead))
+        c.commit()
+    html = _orc_html(monkeypatch, pool, conta, vend, orc)
+    assert "<div class=eyebrow>Contrato</div>" not in html
+    assert "/contrato/conversa" not in html
+
+
+# ------------------------------------------------- achar um lead na Fila (mockup
+# app_contrato_e_filtro_da_fila): a busca vai pro BANCO, e os dois recortes novos
+# também. O que se fixa aqui é o que uma busca de TELA quebraria.
+def test_a_busca_da_fila_atravessa_o_mes_e_o_recorte(pool, monkeypatch):
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Pedro", email="pedro-busca@x.com")
+        _lead(c, conta, vend, "Jamile Sousa")
+        velho = _lead(c, conta, vend, "Maria Carolina da Silva Costa")
+        # o caso que importa: entrou em AGOSTO, então a Fila (que abre no mês
+        # corrente) não o mostra. É justamente quem o cliente está cobrando.
+        c.execute("update prospeccao set criado_em = now() - interval '40 days' where id=%s", (velho,))
+        c.commit()
+    # acha pelo pedaço do nome, sem acento e fora do mês
+    achou = ck.leads_do_vendedor(pool, conta, vend, busca="caro")
+    assert [l["empresa"] for l in achou] == ["Maria Carolina da Silva Costa"]
+    # e pelo número, pelos 8 últimos dígitos (o mesmo contato vem gravado de vários jeitos)
+    assert len(ck.leads_do_vendedor(pool, conta, vend, busca="99999-0000")) == 2
+    # termo vazio não filtra nada — senão a fila normal viraria uma busca por ""
+    assert len(ck.leads_do_vendedor(pool, conta, vend, busca="  ")) == 2
+    # a tela: a busca ignora o mês, não apaga o card de fora, e diz onde procurou
+    html, _ = _fila_html(monkeypatch, pool, conta, vend, q="caro")
+    assert "Maria Carolina da Silva Costa" in html and "Jamile Sousa" not in html
+    assert "Busca em todos os abertos <b>1</b>" in html
+    assert "class='lead front fora'" not in html and "<span class='chip entrou'>📥 " in html
+    assert "1 de 2 abertos · busca" in html
+    # não achou: a tela diz ONDE procurou, pra ninguém concluir "não existe"
+    vazio, _ = _fila_html(monkeypatch, pool, conta, vend, q="zzz")
+    assert "Ninguém com “zzz”" in vazio and "nos 2 leads abertos" in vazio
+
+
+def test_as_pilulas_com_proposta_e_com_data_recortam_no_banco(pool, monkeypatch):
+    from datetime import date
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Yan", email="yan-pil@x.com")
+        _lead(c, conta, vend, "Sem Nada")
+        com_data = _lead(c, conta, vend, "Tem Festa")
+        c.execute("update prospeccao set evento_em=%s where id=%s", (date(2027, 2, 13), com_data))
+        com_prop = _lead(c, conta, vend, "Tem Proposta")
+        orc = c.execute("insert into orcamentos (conta_id, empresa, numero, status) "
+                        "values (%s,'Tem Proposta',23,'aprovada') returning id", (conta,)).fetchone()[0]
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (orc, com_prop))
+        c.commit()
+    assert ck.contagens_fila(pool, conta, vend) == {"total": 3, "prop": 1, "data": 1}
+    assert [l["empresa"] for l in ck.leads_do_vendedor(pool, conta, vend, recorte="prop")] == ["Tem Proposta"]
+    assert [l["empresa"] for l in ck.leads_do_vendedor(pool, conta, vend, recorte="data")] == ["Tem Festa"]
+    # a tela: as pílulas aparecem com a conta da carteira INTEIRA, e o card diz a proposta
+    html, req = _fila_html(monkeypatch, pool, conta, vend)
+    assert "📄 com proposta <b>1</b>" in html and "📅 com data <b>1</b>" in html
+    assert "<span class='chip prop'>📄 nº 23 · aprovada</span>" in html
+    # liga "com proposta": só ela sobra, o mês perde o número (a lista já veio
+    # recortada, e contar por mês ali diria um número que muda sozinho)
+    so, _ = _fila_html(monkeypatch, pool, conta, vend, req=req, entrou="prop")
+    assert "Tem Proposta" in so and "Tem Festa" not in so and "Sem Nada" not in so
+    assert "1 com proposta · de 3 abertos" in so
+    assert "class='pil nova on'" in so and "Tudo <b>" not in so
+
+
+def test_com_data_some_em_conta_que_nao_vende_data(pool, monkeypatch):
+    """§6: a pílula "com data" segue `vendas.vende_data` — o MESMO portão do grupo
+    "📅 sem data". Quem vende mensalidade não tem festa, e a pílula seria vazia."""
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Zaq", email="zaq-pil@x.com")
+        lid = _lead(c, conta, vend, "Cliente PJ")
+        c.execute("update prospeccao set evento_em=current_date + 30 where id=%s", (lid,))
+        c.commit()
+    html, _ = _fila_html(monkeypatch, pool, conta, vend, vende=False)
+    assert "com data" not in html
+    # e o portão é o do NICHO, não o da contagem: o lead tem data nos dois casos,
+    # e é só o portão que decide se a pílula existe
+    html2, _ = _fila_html(monkeypatch, pool, conta, vend, vende=True)
+    assert "📅 com data <b>1</b>" in html2
 
 
 def test_a_tela_do_lead_preenche_a_caixa_e_avisa_a_pista(pool, monkeypatch):

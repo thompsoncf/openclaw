@@ -1,4 +1,4 @@
--- 265_novidade_funil_ordem_festa.sql
+-- 266_novidade_funil_ordem_festa.sql
 -- O funil de eventos: a festa mais próxima primeiro, e o follow-up no card.
 --
 -- O QUE MUDOU NA TELA (/painel/prospeccao)

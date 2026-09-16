@@ -19,7 +19,8 @@ from web import painel_prospeccao as pp
 
 _BASE_SQL = """
 create table contas (id bigserial primary key, tipo text, nome text, chip_de bigint);
-create table prospeccao (id bigserial primary key, conta_id bigint, status text, estagio text);
+create table prospeccao (id bigserial primary key, conta_id bigint, status text,
+  estagio text, temperatura text, atualizado_em timestamptz default now());
 create table funil_etapas (id bigserial primary key,
   -- 254: de onde veio o rótulo — a semente do ramo, ou o dono
   semeado_de text, conta_id bigint, chave text, rotulo text,
@@ -134,6 +135,58 @@ def test_carimbar_pela_tela_nao_atrapalha_a_leitura(pool):
         et1 = pp._etapas(c, conta)
         et2 = pp._etapas(c, conta)
     assert [e["chave"] for e in et1] == [e["chave"] for e in et2]
+
+
+def test_promover_da_base_semeia_as_etapas(pool, monkeypatch):
+    """O CASO MEDIDO EM 16/09/2026: a conta 21 (MGB SOLUTIONS) tinha 60 leads e
+    ZERO etapas desde 05/08, porque os leads entraram por uma porta que não semeia.
+
+    O funil sem coluna nenhuma se cura quando alguém abre o quadro — mas até lá
+    `cockpit.mover` consulta `funil_etapas` DIRETO e recusa o card com
+    'etapa_invalida'. Semear na porta de entrada faz o estado deixar de existir.
+    """
+    with pool.connection() as c:
+        conta = _conta(c, "Promover")
+        pid = c.execute("""insert into prospeccao (conta_id, status, estagio)
+                           values (%s,'novo','base') returning id""", (conta,)).fetchone()[0]
+        c.commit()
+        assert c.execute("select count(*) from funil_etapas where conta_id=%s",
+                         (conta,)).fetchone()[0] == 0, "o cenário exige funil vazio"
+
+    req = _mp(monkeypatch, pool, conta)
+    pp.prospeccao_base_promover(req, ids=[str(pid)], only="")
+
+    with pool.connection() as c:
+        n = c.execute("select count(*) from funil_etapas where conta_id=%s", (conta,)).fetchone()[0]
+        virou = c.execute("select estagio from prospeccao where id=%s", (pid,)).fetchone()[0]
+    assert n > 0, "promover pôs lead no funil sem criar as colunas dele"
+    assert virou == "lead"
+
+
+def test_semear_na_porta_nao_mexe_em_quem_ja_tem_etapa(pool, monkeypatch):
+    """`_etapas` só escreve quando não há linha nenhuma. Quem já renomeou as
+    colunas não pode ver nada mudar por causa de uma importação."""
+    with pool.connection() as c:
+        conta = _conta(c, "JaTem")
+        pp._etapas(c, conta)
+        c.execute("""update funil_etapas set rotulo='Primeiro contato'
+                      where conta_id=%s and chave='novo'""", (conta,))
+        pid = c.execute("""insert into prospeccao (conta_id, status, estagio)
+                           values (%s,'novo','base') returning id""", (conta,)).fetchone()[0]
+        c.commit()
+        antes = c.execute("select count(*) from funil_etapas where conta_id=%s",
+                          (conta,)).fetchone()[0]
+
+    req = _mp(monkeypatch, pool, conta)
+    pp.prospeccao_base_promover(req, ids=[str(pid)], only="")
+
+    with pool.connection() as c:
+        depois, rot = c.execute(
+            """select (select count(*) from funil_etapas where conta_id=%s),
+                      (select rotulo from funil_etapas where conta_id=%s and chave='novo')""",
+            (conta, conta)).fetchone()
+    assert depois == antes
+    assert rot == "Primeiro contato", "a importação reescreveu o nome que o dono deu"
 
 
 def test_adicionar_etapa(pool, monkeypatch):

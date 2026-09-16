@@ -810,7 +810,14 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
         # consultas seguintes morreriam com "current transaction is aborted" — o
         # funil cairia por causa de um selo.
         fu_por_lead: dict[int, dict] = {}
-        if _tem_follow_up(conta):
+        # `.get` e não `[...]`: o `_acesso` de verdade sempre põe a linha da conta
+        # no ctx, mas quem monta um ctx à mão (teste, e qualquer chamador futuro)
+        # não põe — e ficar sem o selo é o lado seguro de errar, o mesmo que o
+        # `_tem_follow_up` já faz com tupla curta. Um KeyError aqui derrubaria o
+        # QUADRO INTEIRO por causa de um enfeite, que é justamente o contrário do
+        # que o try/except logo abaixo existe pra garantir.
+        _conta_row = ctx.get("conta")
+        if _conta_row is not None and _tem_follow_up(_conta_row):
             try:
                 with c.transaction():
                     from finance import follow_up as _fu
@@ -818,7 +825,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                     _cfg = _fu.config(c, conta_id)
                     if _cfg.get("follow_up_modo") in ("observando", "ligado"):
                         from web.portal import nicho_da_conta as _nicho
-                        _pf3 = _rxp3.perfil(_nicho(conta))
+                        _pf3 = _rxp3.perfil(_nicho(_conta_row))
                         for _l in _fu.leads(c, conta_id, _pf3, cfg=_cfg):
                             fu_por_lead[_l["id"]] = {
                                 "estado": _l["estado"],

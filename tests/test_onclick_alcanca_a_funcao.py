@@ -27,18 +27,26 @@ from pathlib import Path
 import pytest
 
 from web import balao_conversa as _balao
+from web import janela_lead as _janela
 
 RAIZ = Path(__file__).resolve().parent.parent / "web"
 
 
 def _pagina(nome: str) -> str:
-    """A fonte da tela com o balão já colado — é o que o navegador recebe.
+    """A fonte da tela com os módulos compartilhados já colados — é o que o
+    navegador recebe.
 
-    Só o `{{ balao_js }}` é substituído: o `{{ balao_css }}` mora num `<style>` e
-    não tem função nenhuma pra alcançar."""
+    Dois marcadores são substituídos, `{{ balao_js }}` e `{{ janela_js }}`: os
+    `_css` moram em `<style>` e não têm função nenhuma pra alcançar.
+
+    A janela do lead entrou aqui em 16/09/2026, quando saiu do funil pra
+    `web/janela_lead.py` porque o Follow-up passou a abrir a MESMA janela. Sem
+    esta linha o teste veria `kbAbrirLead` sumir do funil e acusar um clique
+    morto que não existe — e, pior, não veria o clique morto DE VERDADE numa tela
+    que esquecesse de injetar o módulo."""
     return RAIZ.joinpath(nome).read_text(encoding="utf-8").replace(
         "{{ balao_js }}", _balao.JS
-    )
+    ).replace("{{ janela_js }}", _janela.JS)
 
 
 TELAS = {

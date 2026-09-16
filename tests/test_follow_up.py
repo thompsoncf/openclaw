@@ -1285,3 +1285,46 @@ def test_a_temperatura_nao_move_ninguem_de_etapa():
     fonte = inspect.getsource(fu.prioridade)
     assert "status" not in fonte, "a prioridade encostou na etapa do lead"
     assert "update" not in fonte.lower()
+
+
+# ----------------------------------------------- a janela do lead na fila (16/09/2026)
+# Pedido do dono, depois de trabalhar a fila: "dentro do follow tem um botao abrir
+# ficha e mudar o status pode ser por la e so deixar abrir uma janela igual tem no
+# funil". O problema concreto: "tem cliente que já fechou mais esta como contato" —
+# e pra arrumar isso ele tinha que sair da tela, perder a fila e voltar.
+
+def test_abrir_ficha_abre_a_janela_em_vez_de_sair_da_tela():
+    html = _tela(fila=[_linha()], status=[("contatado", "Contatado"), ("ganho", "Ganho")])
+    assert "kbAbrirLead(event,1,this)" in html, (
+        "o botão não abre a janela — voltou a navegar pra ficha, e quem volta perde a fila")
+    assert '<a class="bt forte" href="/painel/prospeccao/1">Abrir ficha</a>' not in html
+
+
+def test_a_janela_recebe_as_etapas_da_conta_pra_poder_mudar_a_situacao():
+    """Sem `_KB_STATUS` o seletor de situação nasce vazio — e é ele a razão de o
+    dono ter pedido a janela: mudar de "contato" pra "ganho" sem sair da fila."""
+    html = _tela(fila=[_linha()], status=[("contatado", "Contatado"), ("ganho", "Ganho")])
+    assert "_KB_STATUS=" in html and '"ganho"' in html.split("_KB_STATUS=")[1][:200]
+
+
+def test_a_tela_carrega_a_janela_do_lead():
+    """A janela mora em `web/janela_lead.py` e chega por `{{ janela_js }}`. Sem a
+    injeção, o botão fica na tela com o clique morto — nada errado no HTML."""
+    html = _tela(fila=[_linha()])
+    assert "function kbAbrirLead" in html and ".leadpop{" in html
+
+
+def test_os_campos_do_evento_so_chegam_na_conta_que_vende_data():
+    """§6 outra vez, agora dentro da janela. Os rótulos são declarados pela TELA
+    (`janela_evento_js`), não escritos no módulo: a conta de mensalidade não recebe
+    nem a palavra na página — o campo não fica escondido atrás de um `if`, ele não
+    existe ali."""
+    com = _tela(perfil=EVENTOS, fila=[_linha()])
+    sem = _tela(perfil=RECORRENTE, fila=[_linha()])
+    # o que se confere é a PALAVRA na página, não o nome da variável: o módulo
+    # compartilhado cita `_KB_EVENTO` num comentário, e comentário de JS viaja
+    # pro navegador — mas "Convidados" é vocabulário, e identificador não é.
+    assert "_KB_EVENTO={" in com and "evento_convidados" in com and "Convidados" in com
+    assert "_KB_EVENTO={" not in sem
+    for palavra in ("evento_convidados", "Convidados", "Casamento", "Tipo do evento"):
+        assert palavra not in sem, palavra

@@ -7432,6 +7432,8 @@ from finance import marca as _marca
 _marca.registrar_jinja(_env)   # marca_avatar / marca_cabecalho nos templates
 from web import balao_conversa as _balao
 _balao.registrar_jinja(_env)   # balao_css / balao_js: o funil e o Raio-X usam o MESMO balão
+from web import janela_lead as _janela
+_janela.registrar_jinja(_env)  # janela_css / janela_js: o funil e o Follow-up abrem a MESMA janela
 _env.filters["n2"] = _n2
 
 

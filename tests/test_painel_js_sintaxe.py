@@ -36,17 +36,22 @@ from finance import vendas as v
 from web import painel_prospeccao as pp
 from web import painel_servicos as _ps  # registra "servicos" no mesmo loader
 from web import balao_conversa as _balao
+from web import janela_lead as _janela
 
 
 def _fonte_balao() -> str:
-    """O código do balão de conversa (CSS e JS), venha de onde vier.
+    """O código dos dois balões (CSS e JS), venham de onde vierem.
 
-    07/09/2026: o balão saiu de `painel_prospeccao` pra `web/balao_conversa.py`,
-    porque o Raio-X passou a abrir o MESMO balão. Os testes daqui protegem o
-    comportamento dele (cabe na tela, fecha no Esc, um por vez), não o endereço
-    — então olham os dois lugares e continuam valendo se um dia ele mudar de
-    casa de novo."""
-    return inspect.getsource(pp) + "\n" + _balao.CSS + "\n" + _balao.JS
+    07/09/2026: o balão de conversa saiu de `painel_prospeccao` pra
+    `web/balao_conversa.py`, porque o Raio-X passou a abrir o MESMO balão.
+    16/09/2026: a janela do lead fez o mesmo caminho pra `web/janela_lead.py`,
+    porque o Follow-up passou a abrir a MESMA janela.
+
+    Os testes daqui protegem o COMPORTAMENTO (cabe na tela, fecha no Esc, um por
+    vez, o cadastro inteiro nos dados), não o endereço — então olham todos os
+    lugares e continuam valendo se um dia algo mudar de casa outra vez."""
+    return (inspect.getsource(pp) + "\n" + _balao.CSS + "\n" + _balao.JS
+            + "\n" + _janela.CSS + "\n" + _janela.JS + "\n" + _janela.EVENTO_JS)
 
 # páginas que carregam JS próprio, pelo nome com que são registradas no loader, e
 # o contexto MÍNIMO que abre os ramos de {% if %} onde o JS mora. Crescer esta
@@ -480,15 +485,26 @@ def test_trocar_situacao_no_balao_move_o_card_e_fecha_o_balao():
     em vez de duplicá-la, e fecha o balão: como ele é `fixed` (não acompanha o
     card), deixá-lo aberto depois do card se mudar de coluna reproduziria o
     mesmo "balão desgrudado do lead" que motivou o fechar-ao-rolar do chat."""
-    fonte = inspect.getsource(pp)
-    fonte_status = fonte.split("function kbLeadStatus")[1][:900]
+    # SÃO DUAS METADES desde 16/09/2026, e de propósito: a janela virou módulo
+    # (`web/janela_lead.py`) quando o Follow-up passou a abrir a MESMA, e o que é
+    # do QUADRO — mover o card, refazer as contagens — não pode morar num módulo
+    # que uma tela sem colunas também carrega. A janela chama um gancho; o funil
+    # é quem define o gancho. O comportamento continua o mesmo, e é ele que se
+    # confere aqui: a rota, o gancho, o card andando, o balão fechando.
+    fonte_status = _janela.JS.split("function kbLeadStatus")[1][:1400]
     assert "/status'" in fonte_status, "não usa a rota de status que já existe"
-    assert "_kbAposMoverStatus(d)" in fonte_status, (
-        "não reaproveita a mesma atualização de contagem do drag-and-drop")
-    assert "colNova.appendChild(card)" in fonte_status, (
-        "não move o card pra coluna nova depois de trocar a situação")
-    assert "kbFecharLead()" in fonte_status.split("colNova.appendChild(card)")[1], (
-        "não fecha o balão depois de mover o card — ficaria flutuando desgrudado do lead")
+    assert "window.kbDepoisDoStatus" in fonte_status, (
+        "a janela não avisa a tela depois de trocar a situação — o quadro ficaria mentindo")
+    assert "location.reload()" in fonte_status, (
+        "tela sem gancho tem que recarregar: mostrar o estado antigo é pior")
+    assert "kbFecharLead()" in fonte_status.split("window.kbDepoisDoStatus(")[1], (
+        "não fecha o balão depois de avisar a tela — ficaria flutuando desgrudado do lead")
+
+    gancho = inspect.getsource(pp).split("function kbDepoisDoStatus")[1][:700]
+    assert "_kbAposMoverStatus(d)" in gancho, (
+        "o funil não reaproveita a mesma atualização de contagem do drag-and-drop")
+    assert "if(card&&colNova){" in gancho and "colNova.appendChild(card)" in gancho, (
+        "o funil não move o card pra coluna nova depois de trocar a situação")
 
 
 def test_abrir_o_chat_e_abrir_o_resumo_do_lead_se_excluem():
@@ -505,14 +521,14 @@ def test_dados_do_balao_tem_o_cadastro_todo_nao_so_4_campos():
     """21/08, 2ª rodada: o usuário aprovou um mockup com contato, telefone,
     WhatsApp, e-mail, Instagram, site, valor e observação — a 1ª versão só
     tinha telefone/e-mail/valor/documento. Essa é a guarda de fidelidade."""
-    fonte = inspect.getsource(pp).split("function kbLeadDadosHtml")[1]
+    fonte = _fonte_balao().split("function kbLeadDadosHtml")[1]
     fonte = fonte[:fonte.index("function kbLeadHistHtml")]
     for campo in ("d.contato", "d.whatsapp", "d.instagram", "d.site_url", "d.obs", "d.valor_fmt"):
         assert campo in fonte, f"{campo} sumiu do 'Dados' do balão"
 
 
 def test_secao_de_atividades_chama_historico_igual_a_ficha_completa():
-    fonte = inspect.getsource(pp).split("function kbLeadHistHtml")[1][:300]
+    fonte = _fonte_balao().split("function kbLeadHistHtml")[1][:300]
     assert "Histórico" in fonte
     assert "Últimas atividades" not in fonte, "nome antigo não bate mais com a ficha completa"
 
@@ -521,7 +537,7 @@ def test_editar_o_lead_vira_formulario_no_proprio_balao():
     """O pedido: um botão de editar que salva rápido, sem abrir a ficha
     inteira de novo (senão volta ao problema original). `kbLeadEditar` só
     troca a visibilidade de dois <div> que já estão no balão — não navega."""
-    fonte = inspect.getsource(pp)
+    fonte = _fonte_balao()
     assert "kbLeadEditar" in fonte and "kbLeadCancelarEdicao" in fonte and "kbLeadSalvar" in fonte
     fonte_editar = fonte.split("function kbLeadEditar()")[1][:300]
     assert "lp-view" in fonte_editar and "lp-edit" in fonte_editar
@@ -535,7 +551,7 @@ def test_edicao_rapida_do_balao_nao_toca_documento_nem_dados_de_empresa():
     """Documento (CNPJ/CPF), tipo PF/PJ, segmento, cidade/UF, sócio, regime e
     porte ficam só na ficha completa — a ficha tem verificação própria de
     CNPJ e esses dados não são pra digitar livre num balão rápido."""
-    fonte_edit = inspect.getsource(pp).split("function kbLeadEditHtml")[1]
+    fonte_edit = _fonte_balao().split("function kbLeadEditHtml")[1]
     fonte_edit = fonte_edit[:fonte_edit.index("function kbLeadEditar")]
     for proibido in ("lp-ed-cnpj", "lp-ed-cpf", "lp-ed-documento", "lp-ed-tipo",
                       "lp-ed-segmento", "lp-ed-cidade", "lp-ed-uf", "lp-ed-socio",
@@ -643,8 +659,7 @@ def test_botao_editar_do_balao_tambem_tinha_o_mesmo_vazamento_de_margem():
     dentro de ".lp-sh" (mascarado por `align-items:center`, por isso não foi
     percebido na primeira verificação). `margin:0 0 0 auto` zera tudo e
     mantém só o empurrão pra direita."""
-    fonte = inspect.getsource(pp)
-    regra = fonte.split(".lp-edit-btn{")[1].split("}")[0]
+    regra = _fonte_balao().split(".lp-edit-btn{")[1].split("}")[0]
     assert "margin:0 0 0 auto" in regra or ("margin-top:0" in regra and "margin-left:auto" in regra), (
         "margin-left:auto sozinho não zera margin-top — o button{} global ainda vaza")
 

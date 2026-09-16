@@ -1534,6 +1534,30 @@ def test_a_busca_da_fila_atravessa_o_mes_e_o_recorte(pool, monkeypatch):
     assert "Ninguém com “zzz”" in vazio and "nos 2 leads abertos" in vazio
 
 
+def test_o_x_da_faixa_tem_alvo_de_toque_de_dedo():
+    """Medido no celular do dono em 16/09/2026, viewport de 390px: o ✕ da faixa de
+    novidade tinha 29,4 x 22,4 px e ficava a OITO pixels do link de 309 x 112 que
+    ocupava quase a faixa inteira. O mínimo de alvo de toque é 44 x 44 (Apple e
+    Material dizem o mesmo) e um polegar tem uns 45px — ele tentou fechar o aviso
+    várias vezes e o toque caía no link ou no vazio à direita dele.
+
+    O teste lê a FOLHA, não a tela: medir pixel de verdade pediria um navegador no
+    CI. É um proxy, e proxy declarado — o que ele garante é que ninguém tire o
+    tamanho mínimo sem perceber. A medição de pixel fica no corpo do PR."""
+    import re
+    from web import painel_cockpit as pc
+    regra = re.search(r"\.faixa\s+\.x\s*\{([^}]*)\}", pc._CSS_TEXTO)
+    assert regra, "a regra do ✕ da faixa sumiu — se mudou de nome, refaça este teste"
+    corpo = regra.group(1)
+    largura = re.search(r"min-width\s*:\s*(\d+)px", corpo)
+    assert largura and int(largura.group(1)) >= 44, (
+        "o ✕ da faixa precisa de min-width de 44px ou mais: abaixo disso o dedo "
+        f"erra e o aviso não fecha. Está: {corpo.strip()!r}")
+    # ...e ele estica na altura da faixa, senão sobra uma tira morta em cima e
+    # embaixo dele — que é onde metade dos toques caía
+    assert "align-self:stretch" in corpo.replace(" ", "")
+
+
 def test_a_caixa_de_busca_nao_usa_classe_de_cortina(pool, monkeypatch):
     """A folha de estilo do app é UMA SÓ pra seis telas, e um nome de classe
     repetido não dá erro nenhum — só muda a tela de outra pessoa.
@@ -1646,6 +1670,9 @@ def test_por_conversa_poe_na_frente_quem_falou_por_ultimo(pool, monkeypatch):
     html, req = _fila_html(monkeypatch, pool, conta, vend)
     assert html.index("Bianca Sousa") < html.index("Tem Festa Em Outubro")
     assert "🎉 Festa marcada" not in html and "📅 Sem data" not in html
+    # lista sem grupos = SEM cabeçalho de grupo. Com um rótulo vazio ele saía como
+    # um "4" solto em cima da lista, com régua do lado: parecia sujeira de tela.
+    assert "<div class=grp>" not in html
     assert "class='opt on' href='/cockpit?ordem=conversa'" in html
     # POR URGÊNCIA: os grupos voltam e a festa sobe na frente
     urg, _ = _fila_html(monkeypatch, pool, conta, vend, req=req, ordem="urgencia")

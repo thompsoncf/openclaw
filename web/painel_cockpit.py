@@ -697,8 +697,19 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .faixa>a{flex:1;min-width:0;color:inherit;text-decoration:none;display:flex;gap:.45rem;align-items:center}
 .faixa b{color:var(--neon-bright)}
 .faixa .ver{font-weight:600;color:var(--neon-bright);white-space:nowrap;margin-left:auto}
-.faixa form{margin:0}
-.faixa .x{background:none;border:0;color:var(--text-faint);font-size:1rem;padding:.2rem .5rem;width:auto;margin:0;line-height:1}
+/* O ✕ DA FAIXA, medido em 16/09/2026 num iPhone de 390px: 29,4 x 22,4 px, a OITO
+   pixels do link de 309 x 112 que ocupa quase a faixa inteira. O mínimo de alvo de
+   toque é 44 x 44 (é a régra da Apple e a do Material), e um polegar tem uns 45px:
+   o dono tentou fechar o aviso e não conseguiu — o toque caía no link ou no vazio
+   à direita dele, que não era de ninguém.
+
+   O conserto não é aumentar o glifo, é aumentar o ALVO: o botão passa a ocupar a
+   faixa de 44px de largura por toda a ALTURA da faixa, então qualquer toque
+   naquela coluna fecha. O ✕ continua do mesmo tamanho na tela. */
+.faixa form{margin:0;display:flex;align-self:stretch}
+.faixa .x{background:none;border:0;color:var(--text-faint);font-size:1rem;
+  min-width:44px;padding:0 .6rem;width:auto;margin:0;line-height:1;
+  display:flex;align-items:center;justify-content:center;align-self:stretch}
 .nvc{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.7rem .8rem;
   margin-bottom:.5rem;font-size:.8rem;display:block;color:inherit;text-decoration:none}
 .nvc.nova{border-left:3px solid var(--neon)}
@@ -1879,7 +1890,12 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     # os grupos: sua vez → festa marcada → sem data → parados (dobra fechada)
     for g in fila["grupos"]:
         n = len(g["leads"])
-        cabeca = f"<div class=grp>{esc(g['rotulo'])} <b>{n}</b><span class=ln></span></div>"
+        # grupo SEM RÓTULO não ganha cabeçalho: na ordem por conversa a lista é uma
+        # só, e o cabeçalho saía como um "4" solto em cima dela, com uma régua do
+        # lado — parecia sujeira de tela, não informação. O número já está no
+        # subtítulo ("4 abertos · 1 sua vez").
+        cabeca = (f"<div class=grp>{esc(g['rotulo'])} <b>{n}</b><span class=ln></span></div>"
+                  if g["rotulo"] else "")
         corpo_g = "".join(l["html"] for l in g["leads"])
         if g["dobra"]:
             cartoes.append(f"<details class=dobra><summary>{cabeca}</summary>{corpo_g}</details>")

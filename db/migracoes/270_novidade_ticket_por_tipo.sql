@@ -41,12 +41,16 @@
 -- nada. Medido nas duas pontas (§6): na 34 os números acima são reais; na 3
 -- (consultoria) o bloco não aparece, então não há o que conferir.
 --
+-- TIPO `mudanca`, e não "correcao": a tabela só aceita 'novidade' e 'mudanca'
+-- (check da 174), e o que vale aqui é o que a pessoa vê — o número na tela dela
+-- muda. Errei nisto uma vez e o CI pegou; o check é justamente pra pegar.
+--
 -- PRA QUEM: dono e gestor — o Raio-X do dono é a tela deles.
 --
 -- Aditivo e idempotente.
 
 insert into public.novidades (chave, tipo, publico, pra_quem, titulo, resumo, link, corpo, publicado_em) values
-('ticket-por-tipo-conta-a-proposta-do-mes', 'correcao', 'eventos', '{dono,gestor}',
+('ticket-por-tipo-conta-a-proposta-do-mes', 'mudanca', 'eventos', '{dono,gestor}',
  'O ticket por tipo de festa estava escondendo proposta',
  'O Raio-X passou a contar toda proposta feita no período ao calcular o ticket por tipo de festa — antes ele só via as de leads que tinham entrado no mesmo período.',
  '/painel/raio-x',

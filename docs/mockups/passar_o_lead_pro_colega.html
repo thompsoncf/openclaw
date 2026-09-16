@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="pt-br">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Passar o lead pro colega</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --ink:#062011;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo)}
+.wrap{max-width:1080px;margin:0 auto;padding:2.6rem 1rem 5rem;display:flex;flex-direction:column;gap:2.7rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.55rem,4vw,2.1rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:76ch}
+.marca{color:var(--neon)}
+.sec>h2{font-size:1.22rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.05rem;max-width:82ch;font-size:.9rem}
+.num{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em}
+
+.nota{border-left:2.5px solid var(--azul-borda);background:var(--azul-fundo);padding:.85rem 1rem;
+  border-radius:0 10px 10px 0;font-size:.88rem;color:var(--text-dim)}
+.nota b{color:var(--text)}
+.nota.mal{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.nota.amb{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.nota.ok{border-color:var(--neon-borda);background:var(--neon-fundo)}
+
+table.dados{width:100%;border-collapse:collapse;font-size:.85rem}
+@media(max-width:700px){.sec>table.dados{display:block;overflow-x:auto;white-space:nowrap}}
+table.dados th{text-align:left;font-size:.64rem;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--text-faint);font-weight:600;padding:.4rem .55rem;border-bottom:1px solid var(--line)}
+table.dados td{padding:.42rem .55rem;border-bottom:1px solid var(--line);color:var(--text-dim)}
+table.dados td.nome{color:var(--text)}
+table.dados .ruim{color:var(--coral);font-weight:600}
+
+/* ====== celulares ====== */
+.fones{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.4rem;align-items:start}
+@media(max-width:860px){.fones{grid-template-columns:1fr}}
+.fone{border:1px solid var(--line);border-radius:24px;background:var(--bg);overflow:hidden;
+  box-shadow:0 16px 46px rgba(0,0,0,.45)}
+.fone>.cap{padding:.52rem .9rem;font-size:.66rem;text-transform:uppercase;letter-spacing:.08em;
+  font-weight:600;border-bottom:1px solid var(--line);color:var(--text-dim)}
+.fone.antes>.cap{color:var(--coral);background:var(--coral-fundo)}
+.fone.depois>.cap{color:var(--neon-bright);background:var(--neon-fundo)}
+.tela{padding:.85rem .85rem 1rem;display:flex;flex-direction:column;gap:.55rem}
+.volta{font-size:.7rem;color:var(--text-faint)}
+.hdr{display:flex;flex-direction:column;gap:.05rem}
+.hdr b{font-family:var(--display);font-size:1rem}
+.hdr small{color:var(--text-dim);font-size:.72rem}
+.ey{font-size:.59rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-faint);
+  font-weight:600;margin-top:.3rem}
+.bloco{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.62rem .72rem;
+  font-size:.77rem;color:var(--text-dim)}
+.bloco b{color:var(--text)}
+.dupla{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:12px;
+  padding:.6rem .72rem;font-size:.75rem;color:#F0DCA6}
+.dupla b{color:#fff}
+.btn{display:block;text-align:center;font-size:.77rem;font-weight:600;padding:.5rem;border-radius:9px;
+  background:var(--neon);color:var(--ink);margin-top:.45rem}
+.btn.g{background:var(--surface-2);color:var(--text-dim);border:1px solid var(--line)}
+.btn.amb{background:var(--ambar);color:var(--ink)}
+.quem{display:flex;align-items:center;gap:.5rem;border:1px solid var(--line);border-radius:10px;
+  background:var(--surface);padding:.45rem .6rem;font-size:.78rem;margin-top:.35rem}
+.quem.on{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.ini{width:24px;height:24px;border-radius:50%;background:var(--surface-2);color:var(--text-dim);
+  display:grid;place-items:center;font-size:.66rem;font-weight:700;flex:none}
+.quem.on .ini{background:var(--neon);color:var(--ink)}
+.linha-h{display:flex;gap:.5rem;font-size:.72rem;color:var(--text-dim);padding:.22rem 0;
+  border-bottom:1px solid var(--line)}
+.linha-h .q{font-family:var(--mono);color:var(--text-faint);flex:none}
+.faltou{font-size:.76rem;color:var(--coral);display:flex;gap:.4rem;align-items:baseline}
+.faltou b{color:var(--coral)}
+.bloco.dest{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.bloco.dest .faltou{color:var(--text-dim)}
+.bloco.dest .faltou b{color:var(--text)}
+
+ul.reg{margin:.4rem 0 0;padding-left:1.15rem;color:var(--text-dim);font-size:.89rem}
+ul.reg li{margin:.34rem 0}
+ul.reg b{color:var(--text)}
+.opcoes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}
+@media(max-width:760px){.opcoes{grid-template-columns:1fr}}
+.op{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.9rem 1rem}
+.op.rec{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.op.nao{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.op h3{font-size:.94rem;margin-bottom:.25rem}
+.op .tag{font-size:.59rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:var(--neon-bright)}
+.op.nao .tag{color:var(--coral)}
+.op p{margin:.28rem 0 0;font-size:.83rem;color:var(--text-dim)}
+.op p b{color:var(--text)}
+</style>
+<div class="wrap">
+
+<div class="head">
+  <div class="eyebrow">Prime Eventos <span class="marca">·</span> troca de vendedor <span class="marca">·</span> 16 de setembro de 2026</div>
+  <h1>O vendedor passa o lead pro colega</h1>
+  <p>Hoje <b>só o dono</b> muda de quem é um lead, e a troca <b>não deixa rastro
+  nenhum</b>. Quando um cliente volta meses depois e cai com outro vendedor, os
+  dois se acertam pelo WhatsApp e param na sua caixa de mensagem pra você apertar
+  o botão.</p>
+</div>
+
+<!-- ======================================================= hoje -->
+<div class="sec">
+  <h2>Como está hoje</h2>
+  <ul class="reg">
+    <li><b>Só o dono atribui.</b> <code>pode_atribuir = papel == "dono"</code>. Nem
+    gestor troca — e o vendedor não tem nenhum botão, nem no app nem no painel.</li>
+    <li><b>O app não tem troca nenhuma.</b> "Assumir" e "Devolver" na Fila são
+    sobre o agente de IA, não sobre de quem é o lead.</li>
+    <li><b>A troca não deixa rastro.</b> <code>prospeccao.vendedor_id</code> é
+    sobrescrito e nenhuma tabela guarda quem tinha antes. O
+    <code>funil_movimentos</code> registra movimento de ETAPA, não de dono.</li>
+  </ul>
+  <div class="nota mal" style="margin-top:.9rem">
+    <b>Esse terceiro ponto é o que impede "eles se entenderem".</b> Sem histórico,
+    ninguém consegue nem provar quem atendeu antes — e eu não consigo te dizer
+    quantas vezes isso aconteceu, porque <b>o dado nunca foi guardado</b>.
+  </div>
+</div>
+
+<!-- ======================================================= o mecanismo -->
+<div class="sec">
+  <div class="num">COMO O PROBLEMA NASCE</div>
+  <h2>O rodízio não sabe quem já atendeu</h2>
+  <p class="leg">O caso real da conta 34, e o mecanismo por trás dele:</p>
+
+  <table class="dados">
+    <tr><th>Cliente</th><th>Entrou</th><th>Caiu com</th></tr>
+    <tr><td class="nome">Lêda Lopes</td><td>20/08</td><td>JACQUELINE</td></tr>
+    <tr><td class="nome">Lêda Lopes <span class="ruim">(mesmo número)</span></td><td>24/08</td><td>THIAGO</td></tr>
+  </table>
+
+  <div class="nota" style="margin-top:.9rem">
+    <b>O rodízio está certo e mesmo assim dá nisso.</b>
+    <code>atribuir_se_sem_dono</code> <b>nunca rouba</b> um lead que já tem dono —
+    está escrito lá. O problema é outro: quando o mesmo número escreve de novo,
+    nasce um <b>lead NOVO</b>, sem dono, e o rodízio entrega pro próximo da fila.
+    O contato é o mesmo; a linha na tabela, não.
+    <br><br>
+    Na conta 34 há <b>7 números com lead repetido</b>; na conta 3, <b>5</b>, sendo
+    <b>4 em vendedores diferentes</b>. É pouco hoje e cresce com o tempo — e cada
+    caso vira uma conversa no seu WhatsApp.
+  </div>
+
+  <div class="nota amb" style="margin-top:.9rem">
+    <b>O sistema JÁ AVISA</b> quando isso acontece: a ficha do lead mostra "Este
+    número tem outra conversa com JACQUELINE (12 mensagens). O histórico dela não
+    aparece aqui." O aviso está lá desde 28/08 — e termina sem saída nenhuma.
+    <b>É nele que o botão tem que morar.</b>
+  </div>
+</div>
+
+<!-- ======================================================= as telas -->
+<div class="sec">
+  <h2>Como fica</h2>
+
+  <div class="fones">
+    <div class="fone antes"><div class="cap">Hoje — ficha do lead</div>
+      <div class="tela">
+        <div class="volta">‹ Meus leads</div>
+        <div class="hdr"><b>Lêda Lopes</b><small>sua vez · entrou em 24/08</small></div>
+        <div class="dupla"><b>Atenção:</b> Este número tem outra conversa neste mesmo
+          chip, com JACQUELINE PRIME (12 mensagens). O histórico dela não aparece aqui.</div>
+        <div class="ey">Ações</div>
+        <div class="bloco">Ficha, funil e fechamento</div>
+        <div class="bloco alerta" style="border:1px solid var(--coral-borda);background:var(--coral-fundo)">
+          <div class="faltou"><span>●</span><span>O aviso diz o problema e <b>para
+          aí</b>. Pra resolver, os dois falam no WhatsApp e alguém manda mensagem
+          pro Manoel.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fone depois"><div class="cap">Proposto — ficha do lead</div>
+      <div class="tela">
+        <div class="volta">‹ Meus leads</div>
+        <div class="hdr"><b>Lêda Lopes</b><small>sua vez · entrou em 24/08</small></div>
+        <div class="dupla"><b>Atenção:</b> Este número tem outra conversa neste mesmo
+          chip, com JACQUELINE PRIME (12 mensagens).
+          <span class="btn amb" style="margin-top:.5rem">Passar este lead pra ela</span></div>
+        <div class="ey">Quem atende</div>
+        <div class="bloco">
+          <b>Você</b>, desde 24/08 · veio do rodízio
+          <span class="btn g">Passar pra outro vendedor</span>
+        </div>
+        <div class="ey">Quem já atendeu</div>
+        <div class="bloco" style="padding-top:.4rem">
+          <div class="linha-h"><span class="q">24/08</span><span>Rodízio → <b>THIAGO</b></span></div>
+          <div class="linha-h" style="border:0"><span class="q">20/08</span><span>Rodízio → <b>JACQUELINE</b> <i>(outro lead, mesmo número)</i></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="fones" style="margin-top:1.3rem">
+    <div class="fone depois"><div class="cap">Proposto — passar pra quem</div>
+      <div class="tela">
+        <div class="volta">‹ Lêda Lopes</div>
+        <div class="hdr"><b>Passar o lead</b><small>ele sai da sua Fila e entra na do colega</small></div>
+        <div class="quem on"><span class="ini">JP</span><span>JACQUELINE PRIME
+          <span style="color:var(--text-faint);font-size:.68rem;display:block">já atendeu este número</span></span></div>
+        <div class="quem"><span class="ini">PY</span><span>PEDRO YAN PRIME</span></div>
+        <div class="quem"><span class="ini">TP</span><span>THIAGO PINHEIRO</span></div>
+        <div class="ey">Por quê (opcional)</div>
+        <div class="bloco" style="color:var(--text-faint)">Ela já vinha atendendo…</div>
+        <span class="btn">Passar pra JACQUELINE</span>
+        <div class="bloco dest">
+          <div class="faltou"><span style="color:var(--neon-bright)">✓</span>
+          <span>Quem já atendeu o número <b>aparece primeiro</b>, com o motivo
+          escrito. É o combinado do WhatsApp virando um toque.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fone depois"><div class="cap">Proposto — a Fila da Jacqueline</div>
+      <div class="tela">
+        <div class="hdr"><b>Meus leads</b><small>115 abertos · 9 sua vez</small></div>
+        <div class="bloco dest" style="font-size:.75rem">
+          <b>THIAGO passou a Lêda Lopes pra você</b> — "Ela já vinha atendendo".
+          <span style="color:var(--text-faint);display:block;margin-top:.15rem">agora há pouco</span>
+        </div>
+        <div class="bloco" style="display:flex;gap:.5rem;align-items:center">
+          <span style="width:7px;height:7px;border-radius:50%;background:var(--neon);flex:none"></span>
+          <span style="flex:1"><b style="color:var(--text)">Lêda Lopes</b>
+            <span style="display:block;font-size:.68rem;color:var(--text-faint)">quero ver as datas de dezembro</span></span>
+          <span style="font-family:var(--mono);font-size:.63rem;color:var(--neon-bright)">09:12</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================= a regra -->
+<div class="sec">
+  <div class="num">A REGRA QUE EU RECOMENDO</div>
+  <h2>O vendedor DÁ, e nunca PEGA</h2>
+
+  <div class="opcoes">
+    <div class="op rec"><div class="tag">Recomendado</div>
+      <h3>Passar o meu pro colega</h3>
+      <p>É meu, eu abro mão. <b>Não dá pra fazer estrago</b>: no pior caso alguém
+      entrega um lead que era dele. O combinado acontece no WhatsApp, como já
+      acontece; o sistema executa e anota.</p></div>
+    <div class="op nao"><div class="tag">Não</div>
+      <h3>Puxar o do colega pra mim</h3>
+      <p>Mexe no que é do outro, e <b>abre a porta pro roubo de lead</b> — que num
+      time comissionado é briga na certa. Se o combinado for esse, quem tem é que
+      passa. <b>O dono continua podendo os dois.</b></p></div>
+  </div>
+
+  <div class="nota ok" style="margin-top:1.1rem">
+    <b>E toda troca vira linha.</b> Uma tabela <code>lead_repasse</code> guarda de
+    quem, pra quem, quando e por quê — inclusive as que o dono faz e as do rodízio.
+    Sem isso continuamos sem conseguir responder "quem atendeu antes", que é a
+    pergunta que gerou este pedido.
+  </div>
+</div>
+
+<!-- ======================================================= o que pede -->
+<div class="sec">
+  <h2>O que isto pede pra virar tela</h2>
+  <ul class="reg">
+    <li><b>Uma tabela</b>: <code>lead_repasse</code> (conta, lead, de, para, por
+    quem, motivo, quando). Nenhuma coluna existente muda.</li>
+    <li><b>Um portão novo</b>: hoje <code>pode_atribuir</code> é só do dono. Nasce
+    <code>pode_passar</code> — o vendedor, sobre os leads DELE, e só pra frente.</li>
+    <li><b>Duas telas</b>: "Passar o lead" no app e o mesmo botão na ficha do
+    painel. O aviso de número repetido ganha o atalho direto.</li>
+    <li><b>O bloco "Quem já atendeu"</b> na ficha, lendo a tabela nova — e, pros
+    casos antigos, o que der pra inferir do número repetido.</li>
+    <li><b>O colega é avisado</b> na Fila dele, com o motivo. Passar sem avisar é
+    fazer o lead sumir da tela de um e aparecer na do outro, calado.</li>
+  </ul>
+
+  <h2 style="margin-top:1.6rem">E nos outros nichos (§6)</h2>
+  <ul class="reg">
+    <li><b>Vale em qualquer nicho com funil e mais de um vendedor</b> — não tem
+    nada de festa nem de mensalidade aqui.</li>
+    <li>Conta de <b>um vendedor só</b> não vê o botão: passar pra ninguém não é
+    ação, é botão morto.</li>
+  </ul>
+</div>
+
+<!-- ======================================================= decisões -->
+<div class="sec">
+  <h2>Duas coisas que eu preciso que você decida</h2>
+  <ul class="reg">
+    <li><b>Passa direto, ou o colega precisa aceitar?</b> Eu recomendo <b>direto</b>:
+    vocês já combinam por fora, e um "aguardando aceite" cria lead em limbo — que
+    é pior que qualquer um dos dois donos. Mas se você quiser que ninguém receba
+    lead sem querer, o aceite é possível.</li>
+    <li><b>O gestor também passa?</b> Hoje nem ele atribui. Eu deixaria o
+    <b>gestor com o mesmo poder do dono</b> (passar qualquer um, nos dois
+    sentidos) — ele já enxerga a carteira inteira na visão de equipe.</li>
+  </ul>
+</div>
+
+<div class="eyebrow" style="text-align:center">Mockup — nada disto está no ar.
+Dados reais das contas 3, 34 e 35, lidos em 16/09/2026.</div>
+
+</div>
+</html>

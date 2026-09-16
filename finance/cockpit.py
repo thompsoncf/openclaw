@@ -712,7 +712,9 @@ def aviso_outra_conversa(outras, *, membro_id=None, chip_id=None) -> dict:
         return {}
     o = outras[0]
     quantas = o.get("mensagens") or 0
-    trecho = (f" ({quantas} mensagem{'s' if quantas != 1 else ''})" if quantas else "")
+    # "mensagens", não "mensagems": o plural de mensagem troca o M por NS. Saía
+    # errado na tela do vendedor desde 28/08.
+    trecho = (f" ({quantas} {'mensagens' if quantas != 1 else 'mensagem'})" if quantas else "")
     dono = (o.get("vendedor_nome") or "").strip()
     minha = membro_id is not None and o.get("vendedor_id") == membro_id
     # `is not distinct from` em Python: os dois podem ser None (o chip principal), e
@@ -730,7 +732,12 @@ def aviso_outra_conversa(outras, *, membro_id=None, chip_id=None) -> dict:
     if resto:
         texto += f" E mais {resto}."
     return {"texto": texto, "lead_id": o.get("lead_id") if minha else None,
-            "defeito": mesmo_chip}
+            "defeito": mesmo_chip,
+            # QUEM é o colega, pra tela poder oferecer "passar pra ele" ali mesmo
+            # (migração 267). Só quando a outra conversa NÃO é dele: passar um lead
+            # pra si mesmo não é ação, e o `minha` já é o caso do "abrir".
+            "vendedor_id": None if minha else o.get("vendedor_id"),
+            "vendedor_nome": "" if minha else dono}
 
 
 def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,

@@ -715,6 +715,28 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .faixa .x{background:none;border:0;color:var(--text-faint);font-size:1rem;
   min-width:44px;padding:0 .6rem;width:auto;margin:0;line-height:1;
   display:flex;align-items:center;justify-content:center;align-self:stretch}
+/* "FULANO TE PASSOU A LÊDA" (migração 267): o aviso de quem RECEBEU um lead.
+   Mora no mesmo lugar da faixa de novidade e se parece com ela de propósito — é a
+   mesma pergunta ("mudou uma coisa que é sua"). Duas diferenças, e as duas têm
+   motivo: é âmbar, porque pede AÇÃO e não leitura; e não tem ✕, porque a saída é
+   abrir o lead (`repasse.marcar_visto`) e um ✕ aqui só faria o lead sumir da tela
+   calado, que é exatamente o que este aviso existe pra impedir. */
+.recebi{margin:.2rem .8rem .5rem;border:1px solid var(--ambar-borda);background:var(--ambar-fundo);
+  border-radius:12px;padding:.5rem .7rem;font-size:.78rem;color:var(--text);
+  display:flex;flex-direction:column;gap:.3rem}
+.recebi>a{color:inherit;text-decoration:none;display:flex;gap:.45rem;align-items:center}
+.recebi b{color:var(--ambar)}
+.recebi .ver{font-weight:600;color:var(--ambar);white-space:nowrap;margin-left:auto}
+.recebi .pq{color:var(--text-dim);font-size:.72rem;margin:0}
+/* "QUEM JÁ ATENDEU", na ficha (migração 267). Lista de leitura, não de ação: sem
+   botão, sem cor de alerta. É o que se olha na hora da dúvida. */
+.qja-t{margin:0 0 .4rem;font-size:.82rem}
+.qja{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.4rem}
+.qja li{border-left:2px solid var(--line);padding:0 0 0 .55rem;font-size:.78rem;
+  color:var(--text-dim);display:flex;flex-direction:column;gap:.1rem}
+.qja li b{color:var(--text);font-weight:600}
+.qja li small{font-family:var(--mono);font-size:.64rem;color:var(--text-faint)}
+.qja li a{color:var(--neon-bright)}
 .nvc{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.7rem .8rem;
   margin-bottom:.5rem;font-size:.8rem;display:block;color:inherit;text-decoration:none}
 .nvc.nova{border-left:3px solid var(--neon)}
@@ -1525,6 +1547,36 @@ def _faixa_novidade(itens: list[dict], *, conta_id: int | None = None) -> str:
             f"<button type=submit class=x aria-label='Fechar o aviso'>✕</button></form></div>")
 
 
+def _faixa_recebidos(conta_id: int, membro_id: int) -> str:
+    """"Fulano te passou a Lêda": o que me passaram e eu ainda não abri (migração 267).
+
+    Passar um lead sem avisar é fazê-lo sumir da tela de um e aparecer na do outro,
+    calado — e quem recebe precisa saber POR QUÊ, que é o motivo escrito por quem
+    passou. Sem esta faixa o repasse seria uma troca silenciosa de carteira, que é
+    justamente a queixa que o dono trouxe ("eles precisam se entender").
+
+    NÃO TEM ✕, ao contrário da faixa de novidade: aqui fechar é a mesma coisa que ir
+    ver, e quem abre o lead limpa o aviso (`repasse.marcar_visto`). Um ✕ devolveria
+    o estado de antes — o lead na mão de alguém que não soube que o recebeu.
+
+    Mostra no máximo DOIS: três repasses de uma vez viram parede em cima da Fila, e
+    o que sobra continua na lista de leads, onde o trabalho acontece.
+    """
+    from finance import repasse as rp
+    itens = rp.recebidos_novos(get_pool(), conta_id, membro_id)
+    if not itens:
+        return ""
+    html = ""
+    for r in itens[:2]:
+        quem = (r["de"] or "").strip().split(" ")[0].title() or "Alguém"
+        pq = (f"<p class=pq>“{esc(r['motivo'])}”</p>" if (r.get("motivo") or "").strip()
+              else "")
+        html += (f"<div class=recebi><a href='{_BASE}/lead/{r['lead_id']}'>🤝 "
+                 f"<span><b>{esc(quem)}</b> te passou {esc(r['empresa'])}</span>"
+                 f"<span class=ver>Abrir →</span></a>{pq}</div>")
+    return html
+
+
 def _pend_vend(conta_id: int, membro_id: int) -> int:
     """Total sem resposta pro selo da aba Fila.
 
@@ -2004,6 +2056,9 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     corpo = (_hdr("Meus leads", sub, inicial=_ini(p["nome"]), direita=_selo(conta_id))
              + _flash(request)
              + _faixa_novidade(novidades, conta_id=conta_id)
+             # o repasse vem DEPOIS da novidade e antes do foco: é sobre um lead
+             # que já é dele agora, então pertence ao trabalho, não ao noticiário.
+             + ("" if gestor else _faixa_recebidos(conta_id, membro_id))
              + foco
              + f"<div class=scroll>{pushcard}{lista}{dica}{volta}</div>"
              # o "perguntar"/"confirmar" mora dentro do link do card: para o clique
@@ -3592,6 +3647,52 @@ def _select_origem(atual: str | None) -> str:
             f"<option value=''>{'—' if not atual else 'não mudar'}</option>{ops}</select></label>")
 
 
+def _bloco_quem_atendeu(conta_id: int, lead_id: int) -> str:
+    """"Quem já atendeu" (migração 267): o histórico que faz os vendedores se
+    entenderem sem chamar o dono.
+
+    DUAS FONTES, e as duas precisam existir:
+
+    * `lead_repasse` — as trocas deste lead, com quem passou e por quê. É o dado
+      novo; antes da 267 `prospeccao.vendedor_id` era sobrescrito sem rastro.
+    * `ja_atendeu_o_numero` — OUTROS leads do mesmo número. Sem isto o bloco
+      nasceria vazio justamente nos casos que motivaram o pedido: a Lêda Lopes na
+      conta 34 são DOIS leads (20/08 com a Jacqueline, 24/08 com o Thiago) e
+      nenhum repasse aconteceu entre eles — quando o mesmo número escreve de novo,
+      nasce lead novo e o rodízio entrega pro próximo da fila.
+
+    Some quando não há nada a dizer: bloco vazio em toda ficha é ruído.
+    """
+    from finance import repasse as rp
+    pool = get_pool()
+    hist = rp.historico(pool, conta_id, lead_id)
+    outros = rp.ja_atendeu_o_numero(pool, conta_id, lead_id)
+    if not hist and not outros:
+        return ""
+    linhas = ""
+    for h in hist:
+        de = (h["de"] or "sem dono").split(" ")[0].title()
+        para = (h["para"] or "").split(" ")[0].title()
+        pq = f" — “{esc(h['motivo'])}”" if (h.get("motivo") or "").strip() else ""
+        linhas += (f"<li><b>{esc(de)} → {esc(para)}</b>{pq}"
+                   f"<small>{esc(_data(h['quando']))}</small></li>")
+    for o in outros:
+        quem = (o["vendedor"] or "").strip()
+        # lead antigo sem vendedor não vira linha: "ninguém atendeu este número" não
+        # é histórico, é a ausência dele, e ocupa espaço dizendo nada.
+        if not quem:
+            continue
+        linhas += (f"<li><b>{esc(quem.split(' ')[0].title())}</b> atendeu este mesmo "
+                   f"número em <a href='{_BASE}/lead/{o['lead_id']}'>outro lead</a>"
+                   f"<small>{esc(_data(o['quando']))}</small></li>")
+    if not linhas:
+        return ""
+    return ("<div class=secao><h3 class=qja-t>Quem já atendeu</h3>"
+            f"<ul class=qja>{linhas}</ul>"
+            "<div class=fonte>Serve pra vocês se entenderem sem precisar perguntar "
+            "pro dono quem falou primeiro com este cliente.</div></div>")
+
+
 @router.get("/cockpit/lead/{lead_id}/ficha", response_class=HTMLResponse)
 def cockpit_ficha_tela(request: Request, lead_id: int):
     """Os dados do cliente, preenchidos por quem está conversando com ele. O lead entra
@@ -3678,7 +3779,8 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
              + f"<form class=telaform method=post action='{_BASE}/lead/{lead_id}/ficha'>"
              + f"<div class=scroll><div class=secao><div class='fic'>{campos}</div>"
              + "<div class=fonte>Campo em branco não apaga o que já está salvo — dá pra "
-               "voltar aqui e ir completando conforme a conversa anda.</div></div></div>"
+               "voltar aqui e ir completando conforme a conversa anda.</div></div>"
+             + _bloco_quem_atendeu(conta_id, lead_id) + "</div>"
              + "<div class=rodape-b><button class=btn type=submit>Salvar ficha</button></div>"
              + "</form>" + _CEP_JS)
     return _page(f"Ficha — {d['empresa']}", corpo)
@@ -4800,6 +4902,11 @@ def cockpit_lead(request: Request, lead_id: int):
         # zera e a próxima mensagem do cliente toca na hora (ver lead_do_vendedor).
         d = ck.lead_do_vendedor(get_pool(), sess[0], sess[1], lead_id, pos_visto=True)
         if d:
+            # abriu o lead que lhe passaram: o aviso "fulano te passou" sai da Fila
+            # dele (migração 267). Aqui, e não num botão, porque ir ver É a ação que
+            # o aviso pedia — pedir um segundo toque pra fechar seria trabalho à toa.
+            from finance import repasse as _rp
+            _rp.marcar_visto(get_pool(), sess[0], lead_id, sess[1])
             _entrega = ck.entrega_sempre(get_pool(), sess[0])
             return _lead_vendedor(request, lead_id, d,
                                   pode_voz=ck.pode_gravar_audio(get_pool(), sess[0]),
@@ -5198,10 +5305,32 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
     # um container absoluto que passou a rolar abria a folha no FIM do conteúdo, com
     # um vazio embaixo. Formulário tem tela própria (como orçamento e visita); aqui
     # só entra o que é curto.
+    # PASSAR O LEAD (migração 267). Só aparece quando há pra quem passar: conta de
+    # um vendedor só não ganha botão, porque passar pra ninguém não é ação.
+    # O vendedor DÁ e nunca PEGA — a regra mora em `finance.repasse.pode_passar`.
+    from finance import repasse as _rp
+    _conta = request.session.get("conta_id")
+    _eu = request.session.get("membro_id")
+    _colegas = _rp.colegas(get_pool(), _conta, _eu) if _conta else []
+    _passar = ""
+    if _colegas:
+        _op = "".join(f"<option value='{v['id']}'>{esc(v['nome'])}</option>" for v in _colegas)
+        _passar = (
+            "<h3>Passar pra outro vendedor</h3>"
+            f"<form method=post action='{_BASE}/lead/{lead_id}/passar' class=linhaform"
+            " style='flex-wrap:wrap;margin-bottom:.6rem'>"
+            f"<select name=para style='flex:1'>{_op}</select>"
+            "<button class=btn style='width:auto;padding:.55rem 1rem' type=submit>Passar</button>"
+            "<input name=motivo placeholder='Por quê? (opcional)' "
+            "style='flex-basis:100%;margin-top:.4rem'>"
+            "</form>"
+            "<p class=mut style='font-size:.74rem;margin:0 0 .6rem'>Ele sai da sua Fila "
+            "e entra na do colega, que é avisado com o seu motivo.</p>")
     folha = (
         "<div class=folha id=acoes><div class=puxa></div>"
         f"<div class=grade>{atalhos}</div>"
         + f"<h3>Etapa no funil</h3><div class=etapas>{etapas}</div>"
+        + _passar
         + f"<h3>Fechar</h3>"
         f"<form method=post action='{_BASE}/lead/{lead_id}/fechar' style='margin-bottom:.5rem'>"
         "<input type=hidden name=tipo value=ganho><button class=btn type=submit>Marcar como ganho</button></form>"
@@ -5369,8 +5498,22 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                 if av.get("lead_id") else "")
         rot = "<b>Atenção:</b> " if av.get("defeito") else ""
         cls = "dupla" if av.get("defeito") else "dupla info"
+        # O ATALHO que faltava: o aviso dizia o problema e parava aí, e os dois
+        # vendedores iam resolver no WhatsApp e pedir pro dono apertar o botão.
+        # `vendedor_id` só vem quando a outra conversa é de um COLEGA (a ficha
+        # própria não tem pra quem passar).
+        _pra = av.get("vendedor_id")
+        _nome = (av.get("vendedor_nome") or "").strip()
+        passa = ""
+        if _pra and _nome:
+            passa = (f"<form method=post action='{_BASE}/lead/{lead_id}/passar' "
+                     "style='margin-top:.45rem'>"
+                     f"<input type=hidden name=para value='{int(_pra)}'>"
+                     "<input type=hidden name=motivo value='Já vinha atendendo este número'>"
+                     f"<button class='btn amb' type=submit>Passar este lead pra "
+                     f"{esc(_nome.split()[0].title())}</button></form>")
         dupla = (f"<div class='{cls}'>{rot}{esc(av['texto'])}"
-                 f" O histórico dela não aparece aqui.{link}</div>")
+                 f" O histórico dela não aparece aqui.{link}{passa}</div>")
 
     chip = ("<span class='chip ia'>IA</span>" if d["ia"] else "<span class='chip voce'>você</span>")
     # A PISTA (198): o leitor ouviu o mês (ou uma data diferente) e não gravou. O
@@ -5683,6 +5826,11 @@ _RECADO = {
     "trava_parede": "Já foram duas renovações e cinco tentativas. Mova pra Follow-up "
                     "ou marque como Perdido.",
     "motivo_invalido": "Esse motivo não está na lista.",
+    # as recusas do repasse (migração 267)
+    "sem_permissao": "Esse lead não é seu — quem passa é quem está atendendo.",
+    "destino_invalido": "Essa pessoa não está mais na equipe.",
+    "ja_e_dele": "O lead já é dessa pessoa.",
+    "lead_invalido": "Esse lead não existe mais.",
     "data_obrigatoria": "Diga o dia em que ele pediu para você chamar.",
     "sem_renovacao": "As renovações desta etapa acabaram. Mova pra Follow-up ou "
                      "marque como Perdido.",
@@ -5841,6 +5989,40 @@ def cockpit_mensagem(request: Request, lead_id: int, texto: str = Form(...),
                                                           trava_motivo, trava_desc, trava_data),
                                      "msg": "Mensagem enviada ✓"},
                  f"{_BASE}/lead/{lead_id}")
+
+
+@router.post("/cockpit/lead/{lead_id}/passar")
+def cockpit_lead_passar(request: Request, lead_id: int, para: str = Form(""),
+                        motivo: str = Form("")):
+    """O vendedor passa o lead pro colega (migração 267).
+
+    A REGRA NÃO MORA AQUI: `finance.repasse.passar` decide quem pode e registra a
+    troca na mesma transação. Esta rota só sabe quem está logado e pra onde voltar.
+
+    O vendedor DÁ e nunca PEGA — `pode_passar` confere que o lead é dele. Sem essa
+    checagem no MOTOR, um POST com um id de lead alheio seria roubo de lead com
+    dois campos de formulário.
+    """
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    papel = request.session.get("papel") or "vendedor"
+    from finance import repasse as rp
+    if not (para or "").isdigit():
+        request.session["ck_err"] = "Escolha pra quem passar."
+        return RedirectResponse(f"{_BASE}/lead/{lead_id}", status_code=303)
+    r = rp.passar(get_pool(), conta_id, lead_id, int(para),
+                  por_id=membro_id, papel=papel, motivo=motivo)
+    if r.get("ok"):
+        nome = next((v["nome"] for v in rp.colegas(get_pool(), conta_id, None)
+                     if v["id"] == int(para)), "")
+        request.session["ck_ok"] = f"Lead passado{' pra ' + nome if nome else ''} ✓"
+        # ele NÃO volta pro lead: o lead não é mais dele, e cair numa tela de
+        # "não é seu" logo depois de passar seria o app dando um tapa na mão.
+        return RedirectResponse(_BASE, status_code=303)
+    request.session["ck_err"] = _RECADO.get(r.get("erro", ""), "Não consegui passar o lead.")
+    return RedirectResponse(f"{_BASE}/lead/{lead_id}", status_code=303)
 
 
 @router.get("/cockpit/lead/{lead_id}/mensagens")

@@ -230,29 +230,18 @@ def atividade(pool, conta_id: int, limite: int = 25) -> list[dict]:
 
 
 # ------------------------------------------------------------------ AÇÕES
-def reatribuir(pool, conta_id: int, lead_id: int, para_membro_id: int) -> dict:
-    """Move o lead pra outro vendedor (e a conversa dele). Valida que o destino é
-    membro ativo da conta que pode receber lead."""
-    with pool.connection() as c:
-        alvo = c.execute("select 1 from membros where id=%s and conta_id=%s and ativo "
-                         "and papel in ('vendedor','gestor','dono')", (para_membro_id, conta_id)).fetchone()
-        if not alvo:
-            return {"ok": False, "erro": "destino_invalido"}
-        r = c.execute("select 1 from prospeccao where id=%s and conta_id=%s", (lead_id, conta_id)).fetchone()
-        if not r:
-            return {"ok": False, "erro": "lead_invalido"}
-        c.execute("update prospeccao set vendedor_id=%s, atualizado_em=now() where id=%s and conta_id=%s",
-                  (para_membro_id, lead_id, conta_id))
-        c.execute("update conversas set responsavel_membro_id=%s where conta_id=%s and prospeccao_id=%s",
-                  (para_membro_id, conta_id, lead_id))
-        try:
-            c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, resultado, descricao)
-                         values (%s,%s,'nota','retornar','Lead reatribuído pelo gestor')""",
-                      (lead_id, para_membro_id))
-        except Exception:  # noqa: BLE001
-            pass
-        c.commit()
-    return {"ok": True}
+def reatribuir(pool, conta_id: int, lead_id: int, para_membro_id: int,
+               *, por_id=None, papel: str = "dono", motivo: str = "") -> dict:
+    """Move o lead pra outra pessoa, na visão de equipe do dono/gestor.
+
+    DELEGA pro `finance.repasse`: a regra de quem pode passar e o REGISTRO da
+    troca têm um dono só. Antes esta função escrevia o `update` na mão e não
+    anotava nada — e um histórico que só guarda metade das trocas mente por
+    omissão justamente quando alguém questiona a decisão.
+    """
+    from finance import repasse as _rp
+    return _rp.passar(pool, conta_id, lead_id, para_membro_id,
+                      por_id=por_id, papel=papel, motivo=motivo)
 
 
 def pausar(pool, conta_id: int, membro_id: int, on: bool) -> dict:

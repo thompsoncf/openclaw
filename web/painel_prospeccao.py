@@ -241,7 +241,12 @@ def _acesso(request: Request):
     ctx = {"conta": conta, "conta_id": conta[0], "papel": papel,
            "membro_id": _membro_id,
            "gerencia": _gerencia,                     # vê a carteira toda + filtra
-           "pode_atribuir": papel == "dono",          # só o dono atribui/reatribui
+           # ATRIBUIR/REATRIBUIR: era só do dono. O gestor entrou em 16/09/2026,
+           # junto com o repasse do app (`finance.repasse.PAPEIS_MANDAM`): ele já
+           # enxerga a carteira inteira na visão de equipe e é dele o desempate
+           # quando dois vendedores não se entendem sobre um lead. Deixar a troca
+           # só no dono era o que fazia toda briga de lead subir pro celular dele.
+           "pode_atribuir": papel in ("dono", "gestor"),
            # Campanha liberada individualmente pelo dono (migração 183). Só se
            # consulta pra quem NÃO é gerência: dono e gestor já passam pelo gate
            # antigo, e assim a tela deles não paga uma consulta por request.
@@ -440,8 +445,8 @@ def _pode_campanha(ctx: dict, camp_id: int, c=None) -> bool:
 
 
 def _vendedor_destino(ctx: dict, vendedor_id: str, pool, conta_id: int):
-    """Pra quem vai o alvo captado: só o dono escolhe (validando a conta);
-    vendedor/gestor sempre pra si mesmo."""
+    """Pra quem vai o alvo captado: dono e gestor escolhem (validando a conta);
+    o vendedor sempre pra si mesmo."""
     if not ctx["pode_atribuir"]:
         return ctx["membro_id"]
     if not (vendedor_id or "").isdigit():
@@ -3582,7 +3587,7 @@ def comunicacao_atribuir_lote(request: Request, vendedor_id: str = Form(""),
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     if not ctx["pode_atribuir"]:
-        return JSONResponse({"ok": False, "erro": "Só o dono atribui."}, status_code=403)
+        return JSONResponse({"ok": False, "erro": "Só dono e gestor atribuem."}, status_code=403)
     pool = get_pool()
     conta_id = ctx["conta_id"]
     escopo = escopo if escopo in ("email", "msg") else "msg"
@@ -7806,8 +7811,8 @@ def prospeccao_campanha_status(request: Request, camp_id: int, status: str = For
 @router.post("/painel/prospeccao/campanhas/{camp_id}/responsavel")
 def prospeccao_campanha_responsavel(request: Request, camp_id: int, vendedor_id: str = Form("")):
     """Vincula (ou desvincula) o responsável da campanha — o membro que passa a vê-la e
-    gerenciá-la (espelha a atribuição de lead ao vendedor). Só o dono atribui; '— livre —'
-    (vazio) tira o responsável, e aí só dono/gestor veem a campanha."""
+    gerenciá-la (espelha a atribuição de lead ao vendedor). Dono e gestor atribuem;
+    '— livre —' (vazio) tira o responsável, e aí só dono/gestor veem a campanha."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -9058,18 +9063,35 @@ def prospeccao_atribuir(request: Request, alvo_id: int, vendedor_id: str = Form(
     ajax = _eh_ajax(request)
     if not ctx["pode_atribuir"]:
         if ajax:
-            return JSONResponse({"ok": False, "erro": "Só o dono atribui."}, status_code=403)
+            return JSONResponse({"ok": False, "erro": "Só dono e gestor atribuem."},
+                                status_code=403)
         return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
     vend = _vendedor_destino(ctx, vendedor_id, get_pool(), ctx["conta_id"])
-    with get_pool().connection() as c:
-        c.execute("update prospeccao set vendedor_id=%s, atualizado_em=now() where id=%s and conta_id=%s",
-                  (vend, alvo_id, ctx["conta_id"]))
-        # a conversa acompanha o lead: sem isso o inbox segue dizendo "sem
-        # responsável" (ou o nome antigo) pra quem acabou de ser trocado.
-        c.execute("""update conversas set responsavel_membro_id=%s
-                      where conta_id=%s and prospeccao_id=%s""",
-                  (vend, ctx["conta_id"], alvo_id))
-        c.commit()
+    if vend:
+        # A TROCA PASSA PELO MOTOR DO REPASSE (migração 267) pra deixar rastro. Antes
+        # ela sobrescrevia `vendedor_id` e ninguém sabia quem tinha o lead antes — é
+        # exatamente esse buraco que impedia os vendedores de se entenderem, e a troca
+        # do painel é a mais questionada de todas, porque vem de cima.
+        from finance import repasse as _rp
+        r = _rp.passar(get_pool(), ctx["conta_id"], alvo_id, vend,
+                       por_id=ctx["membro_id"], papel=ctx["papel"])
+        if not r.get("ok") and r.get("erro") != "ja_e_dele":
+            if ajax:
+                return JSONResponse({"ok": False, "erro": "Não deu pra atribuir."},
+                                    status_code=400)
+            request.session["prosp_aviso"] = "Não deu pra atribuir esse alvo."
+            return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
+    else:
+        # "— livre —" NÃO é repasse: tirar o dono devolve o lead ao rodízio, e não há
+        # pra quem apontar na linha do histórico. Segue pelo caminho direto.
+        with get_pool().connection() as c:
+            c.execute("update prospeccao set vendedor_id=null, atualizado_em=now() "
+                      "where id=%s and conta_id=%s", (alvo_id, ctx["conta_id"]))
+            # a conversa acompanha o lead: sem isso o inbox segue dizendo o nome antigo
+            c.execute("""update conversas set responsavel_membro_id=null
+                          where conta_id=%s and prospeccao_id=%s""",
+                      (ctx["conta_id"], alvo_id))
+            c.commit()
     if ajax:
         return JSONResponse({"ok": True, "vendedor_id": vend,
                              "vendedor": _nome_vendedor(get_pool(), ctx["conta_id"], vend) or ""})

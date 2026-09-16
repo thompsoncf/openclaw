@@ -9,6 +9,7 @@ Banco dedicado e descartável com o schema mínimo que as rotas usam (mesmo padr
 teste de blindagem) — não replica migrações antigas nem toca o banco compartilhado.
 """
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -37,6 +38,12 @@ create table distribuicao (conta_id bigint primary key, ativo boolean default fa
 create table distribuicao_fila (conta_id bigint, membro_id bigint, ordem int,
   primary key (conta_id, membro_id));
 """
+
+# A troca de responsável passou a deixar rastro (migração 267), na MESMA transação:
+# repasse sem histórico é o estado de antes, e é ele que a 267 veio acabar. A tabela
+# entra pela migração de verdade — copiada à mão, o teste testaria a cópia.
+_SQL += (Path(__file__).resolve().parents[1] / "db" / "migracoes"
+         / "267_lead_repasse.sql").read_text(encoding="utf-8")
 
 CONTA = 7
 NUM = "558694867388"          # como o WhatsApp entrega: DDI+DDD+número, sem máscara
@@ -67,9 +74,14 @@ def _conversa(c, *, ref=NUM, nome=None, canal="whatsapp"):
 
 
 def _logado(monkeypatch, pool, *, gerencia=True, pode_atribuir=True, membro=1):
+    # `papel` entra aqui porque o ctx de verdade SEMPRE tem — e omitir uma chave que
+    # o de verdade tem é o jeito de um ctx falso mentir. A troca de responsável passou
+    # a lê-la em 16/09/2026 pra registrar o repasse (migração 267), e sem esta linha o
+    # teste quebraria dizendo "KeyError" onde o código está certo.
+    papel = "dono" if pode_atribuir else ("gestor" if gerencia else "vendedor")
     monkeypatch.setattr(pp, "get_pool", lambda: pool)
     monkeypatch.setattr(pp, "_acesso", lambda req: (
-        {"conta_id": CONTA, "membro_id": membro, "gerencia": gerencia,
+        {"conta_id": CONTA, "membro_id": membro, "gerencia": gerencia, "papel": papel,
          "pode_atribuir": pode_atribuir}, None))
     return SimpleNamespace(session={}, headers={})
 

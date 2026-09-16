@@ -11,6 +11,7 @@ Banco dedicado e descartável com o schema mínimo (mesmo padrão do teste de bl
 """
 import os
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from psycopg_pool import ConnectionPool
@@ -158,6 +159,13 @@ create table wa_decifra_diario (dia date not null, conta_id bigint not null, fro
   chegaram int, nunca_chegaram int, correlacionado_em timestamptz,
   apurado_em timestamptz not null default now(), primary key (dia, conta_id, from_me));
 """
+
+# O RASTRO DO REPASSE (migração 267) entra pela MIGRAÇÃO, não por uma cópia à mão:
+# `repasse.passar` grava a linha na mesma transação da troca — de propósito, porque
+# repasse sem rastro é o estado que a 267 veio acabar. Sem a tabela aqui, toda troca
+# de responsável estouraria nos testes, e uma cópia escrita à mão testaria a cópia.
+_BASE_SQL += (Path(__file__).resolve().parents[1] / "db" / "migracoes"
+              / "267_lead_repasse.sql").read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")

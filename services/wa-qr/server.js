@@ -80,17 +80,21 @@ const QRCode = require('qrcode')
 // Dois Baileys convivem no node_modules: o 6.7.24 de sempre em
 // `@whiskeysockets/baileys`, e o 7.0.0-rc14 sob o apelido `baileys7`
 // (package.json: "baileys7": "npm:@whiskeysockets/baileys@7.0.0-rc14"). Cada
-// processo carrega UM — quem escolhe é o supervisor, por conta, com WA_QR_BAILEYS=7
-// nas contas listadas em WA_QR_BAILEYS7_CONTAS. Sem a variável, nada muda pra
-// ninguém: é o 6.7.24, byte a byte como antes.
+// processo carrega UM — quem escolhe é o supervisor, por conta, mandando
+// WA_QR_BAILEYS no ambiente do worker. DESDE 16/09/2026 O PADRÃO É O 7: o
+// supervisor manda 7 pra todo mundo, e só quem estiver em WA_QR_BAILEYS6_CONTAS
+// recebe 6. Este arquivo não mudou por causa disso — ele obedece à variável, e a
+// decisão é de lá; o default local segue 6 de propósito, pra que rodar este
+// worker na mão sem variável nenhuma não troque de biblioteca por acidente.
 //
-// A Fase 4 existe pra medir o v7 num chip de teste por uma semana, contando
-// quedas por código, antes de migrar conta por conta. Lido no código do rc14 (o
-// guia de migração fica atrás de proxy): os nove símbolos que usamos existem com
-// os mesmos nomes, as doze opções do makeWASocket também, os sete eventos e o
-// `CB:message` cru também, e o cofre é genérico por tipo (os tipos novos —
-// lid-mapping, device-list, tctoken, identity-key — viram linhas novas, sem
-// migração). O que muda de verdade são dois pontos, marcados abaixo com "v7:".
+// A Fase 4 mediu o v7 em dois chips antes disso: zero `stream errored out` em 3
+// dias na conta 34 e em 5 dias na 23, contra 8 e 14 quedas no 6.7.24. Lido no
+// código do rc14 (o guia de migração fica atrás de proxy): os nove símbolos que
+// usamos existem com os mesmos nomes, as doze opções do makeWASocket também, os
+// sete eventos e o `CB:message` cru também, e o cofre é genérico por tipo (os
+// tipos novos — lid-mapping, device-list, tctoken, identity-key — viram linhas
+// novas, sem migração). O que muda de verdade são dois pontos, marcados abaixo
+// com "v7:".
 //
 // O rc14 é ESM. `require()` de ESM funciona sem flag do Node 22.12 em diante (e
 // do 20.19); num Node mais velho ele lança ERR_REQUIRE_ESM. Aí este worker sai com

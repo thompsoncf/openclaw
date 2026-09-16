@@ -36,6 +36,7 @@ Todas as rotas (menos `GET /saude`) exigem o header `x-wa-secret` = `WA_QR_SHARE
 | `WA_QR_IGNORAR_GRUPOS` | `0` volta a decifrar mensagem de grupo (padrão: cortada antes de decifrar — ver "Grupo não é decifrado") |
 | `WA_QR_HIST_CONCORRENCIA` · `WA_QR_HIST_PAUSA_MS` · `WA_QR_HIST_RECUO_MS` | vazão do repasse do histórico: conversas em paralelo (2), pausa entre POSTs (100ms) e recuo quando o web recusa (2s) — ver "O histórico derrubou o web" |
 | `WA_QR_FILA_DRENA_MS` · `WA_QR_FILA_PARAR_EM` · `WA_QR_FILA_TIMEOUT_MS` | outbox do repasse: de quanto em quanto o que falhou volta (15s), quantas tentativas até virar dead-letter (12, ~6h) e timeout do POST (15s) — ver "Nenhuma mensagem se perde num 502" |
+| `WA_QR_BAILEYS6_CONTAS` | ids que ficam no Baileys **6.7.24**. Vazia por padrão: desde 16/09 todo mundo roda no 7 — ver "O Baileys 7 é o padrão" |
 
 ## Diagnóstico sem abrir o dashboard
 
@@ -224,6 +225,37 @@ createdb wa_qr_log_test
 psql wa_qr_log_test -f ../../db/migracoes/158_wa_qr_log.sql
 WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_log_test node teste-log-agregado-conta.js
 ```
+
+## O Baileys 7 é o padrão (16/09/2026)
+
+O sintoma era o `stream errored out` de ~50 em ~50 minutos: a conta caía, voltava
+sozinha em segundos, e caía de novo. Medido em três contas:
+
+| conta | no 6.7.24 | no 7.0.0-rc14 |
+|---|---|---|
+| 34 (Prime) | 8 quedas num dia | **zero em 3 dias** |
+| 23 (Ramo) | 14 em 12h30 | **zero em 5 dias** |
+| 38 (Liberal) | 10 em 24h | era a próxima da fila |
+
+Duas contas migradas, duas confirmações, **nenhuma mensagem perdida em nenhuma
+delas**. Continuar exigindo que alguém lembrasse de escrever o id numa variável
+era deixar todo cliente novo nascer caindo a cada 50 minutos — então a lista
+mudou de lado: `WA_QR_BAILEYS6_CONTAS` diz quem **fica** no 6, e nasce vazia.
+
+**Por que a variável não foi apagada**, que é a pergunta seguinte: o 7.0.0 ainda é
+*release candidate* — o `rc14` é o topo no npm, não existe final. Enquanto for,
+ficam de pé as duas redes:
+
+* o **6.7.24 continua instalado**, e é ele que a volta automática usa — se o rc14
+  não carregar (código 3) ou a conta morrer `WA_QR_BAILEYS7_QUEDAS_MAX` vezes, o
+  supervisor devolve aquela conta pro 6 sozinho;
+* **prender uma conta no 6 é uma variável**, sem deploy e sem esperar por ninguém.
+
+Quando sair o 7.0.0 final, a variável e o pacote velho saem juntos.
+
+A variável antiga (`WA_QR_BAILEYS7_CONTAS`, a lista de quem *entrava* no 7) não
+manda mais em nada. Se ficar setada, o supervisor avisa no arranque em vez de
+ignorar calado.
 
 ## Nenhuma mensagem se perde num 502 (o outbox, 15/09/2026)
 

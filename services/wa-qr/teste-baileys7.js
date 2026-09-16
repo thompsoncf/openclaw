@@ -3,11 +3,12 @@
 //
 // Dois Baileys convivem no node_modules: o 6.7.24 de sempre em
 // `@whiskeysockets/baileys` e o 7.0.0-rc14 sob o apelido `baileys7`. Cada worker
-// carrega UM; quem escolhe é o supervisor, por conta, via WA_QR_BAILEYS7_CONTAS.
+// carrega UM; quem escolhe é o supervisor, por conta. Desde 16/09/2026 o padrão
+// é o 7, e WA_QR_BAILEYS6_CONTAS é a lista de quem FICA no 6.7.24.
 //
 // O que este teste fixa, e por quê:
 //
-//   1. A ESCOLHA é por conta e falha fechada (lista vazia = ninguém muda).
+//   1. A ESCOLHA é por conta, e lista vazia significa TODO MUNDO no 7.
 //   2. O HistorySyncType existe nos DOIS — no rc14 ele mudou de lugar
 //      (proto.Message.HistorySyncNotification -> proto.HistorySync) e sem o
 //      fallback o worker v7 morria nessa linha, antes de abrir porta.
@@ -41,15 +42,26 @@ function conferir (ok, descricao) {
 }
 
 // --- 1. quem roda no v7 ------------------------------------------------------
-console.log('\nA escolha da versão é por conta, e falha fechada:')
-conferir(baileysDaConta(23, '') === 6, 'lista VAZIA: ninguém muda — é o padrão, e é o que protege o cliente')
-conferir(baileysDaConta(23, '23') === 7, 'conta na lista: v7')
-conferir(baileysDaConta(34, '23') === 6, 'conta fora da lista: v6, mesmo com vizinha no v7')
-conferir(baileysDaConta(36, '23, 36') === 7, 'lista com espaço depois da vírgula')
-conferir(baileysDaConta('23', '23') === 7 && baileysDaConta(23, ['23']) === 7,
-  'id como texto ou número dá o mesmo — o === entre texto e número já derrubou três chips hoje')
-conferir(baileysDaConta(2, '23') === 6, 'a conta 2 NÃO entra por ser pedaço de "23"')
-conferir(baileysDaConta(23, 'abc') === 6, 'lixo na variável não liga o v7 em ninguém')
+// A LISTA MUDOU DE LADO EM 16/09/2026. Até então ela dizia quem ENTRAVA no v7 e
+// nascia vazia — o padrão era o 6.7.24. Depois de 3 dias com a Prime e 5 com a
+// Ramo no v7 sem uma queda (contra 8 e 14 no v6), o padrão virou o 7 e a lista
+// passou a dizer quem FICA no 6. O pacote velho continua instalado porque o
+// 7.0.0 ainda é release candidate, e é ele que a volta automática usa.
+console.log('\nA escolha da versão é por conta, e o padrão é o 7:')
+conferir(baileysDaConta(23, '') === 7, 'lista VAZIA: todo mundo no 7 — é o padrão desde 16/09')
+conferir(baileysDaConta(23, '23') === 6, 'conta na lista: presa no 6.7.24')
+conferir(baileysDaConta(34, '23') === 7, 'conta fora da lista: v7, mesmo com vizinha presa no 6')
+conferir(baileysDaConta(36, '23, 36') === 6, 'lista com espaço depois da vírgula')
+conferir(baileysDaConta('23', '23') === 6 && baileysDaConta(23, ['23']) === 6,
+  'id como texto ou número dá o mesmo — o === entre texto e número já derrubou três chips')
+conferir(baileysDaConta(2, '23') === 7, 'a conta 2 NÃO fica presa por ser pedaço de "23"')
+conferir(baileysDaConta(23, 'abc') === 7, 'lixo na variável não prende ninguém no 6')
+// O sentido do erro mudou junto: antes, errar pra mais deixava um cliente num
+// rc14 sem querer; agora deixa um cliente no 6, que é a versão que cai a cada 50
+// minutos. Nos dois casos a volta automática segue sendo a rede — ver o
+// teste-supervisor.js, bloco 10b.
+conferir(baileysDaConta(23, null) === 7 && baileysDaConta(23, undefined) === 7,
+  'variável ausente é lista vazia, não erro')
 
 // --- 2. os dois carregam, e dão os mesmos símbolos ---------------------------
 console.log('\nAs duas bibliotecas estão instaladas e expõem o que o serviço usa:')

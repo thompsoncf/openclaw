@@ -227,6 +227,15 @@ b,strong{font-weight:600}
 .lead .pend{flex-shrink:0;min-width:20px;height:20px;padding:0 .32rem;border-radius:999px;
   background:var(--coral);color:#fff;font-family:var(--mono);font-size:.7rem;font-weight:700;
   display:inline-flex;align-items:center;justify-content:center;line-height:1}
+/* A COLUNA DA DIREITA do card, no desenho do WhatsApp: quando foi em cima, quantas
+   esperam embaixo. `align-items:flex-start` no .lead pra ela colar no topo — com o
+   `center` de antes, a hora ficava boiando no meio de um card de três linhas. */
+.lead{align-items:flex-start}
+.lead .dir{flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;
+  gap:.3rem;min-width:2.7rem;padding-top:.1rem}
+.lead .dir .h{font-family:var(--mono);font-size:.68rem;color:var(--text-faint);white-space:nowrap}
+/* verde só pra quem falou HOJE — ver o `novo` em `_fila` */
+.lead .dir .h.novo{color:var(--neon)}
 .chip{font-size:.66rem;padding:.14rem .5rem;border-radius:999px;border:1px solid var(--line);
   color:var(--text-dim);flex-shrink:0;white-space:nowrap}
 .chip.ia{color:var(--roxo);border-color:#3a2b52;background:#1a1226}
@@ -252,6 +261,14 @@ b,strong{font-weight:600}
 .foco .pil.fora.on{background:var(--ambar);border-color:var(--ambar);color:#1c1408}
 .foco .pil.fora.on b{color:#1c1408}
 .foco .sep{flex:none;width:1px;height:18px;background:var(--line);margin:0 .2rem}
+/* o seletor das duas ordens da Fila (mockup fila_ordem_de_conversa). Segmentado, e
+   não pílula: pílula é filtro (liga e desliga), isto é uma escolha entre dois
+   estados em que um SEMPRE vale. A forma tem que dizer qual das duas coisas é. */
+.ordem{display:flex;gap:.2rem;margin:.1rem 1.1rem .15rem;padding:.16rem;border-radius:999px;
+  background:var(--surface);border:1px solid var(--line)}
+.ordem .opt{flex:1;text-align:center;font-size:.74rem;padding:.3rem .4rem;border-radius:999px;
+  color:var(--text-dim);text-decoration:none}
+.ordem .opt.on{background:var(--neon);color:var(--ink);font-weight:600}
 /* as duas pílulas de recorte (mockup app_contrato_e_filtro_da_fila): "com proposta"
    e "com data". Vivem no MESMO seletor dos meses — ligar uma desliga o mês — e por
    isso nascem com a borda neutra e acendem em neon igual às outras. */
@@ -1517,7 +1534,7 @@ def _selo(conta_id: int) -> str:
 # ================================================================== VENDEDOR
 @router.get("/cockpit", response_class=HTMLResponse)
 def cockpit_inicio(request: Request, meus: str = "", entrou: str = "", fora: str | None = None,
-                   q: str = ""):
+                   q: str = "", ordem: str = ""):
     """Bifurca como sempre foi: dono/gestor cai na visão de equipe, vendedor na fila.
 
     `?meus=1` é a saída pro gestor que TAMBÉM vende: na versão anterior ele nunca chegava na
@@ -1529,7 +1546,8 @@ def cockpit_inicio(request: Request, meus: str = "", entrou: str = "", fora: str
     sess = _sessao(request)
     if not sess:
         return RedirectResponse("/cockpit/login", status_code=303)
-    return _fila(request, sess[0], sess[1], gestor=bool(g), entrou=entrou, fora=fora, q=q)
+    return _fila(request, sess[0], sess[1], gestor=bool(g), entrou=entrou, fora=fora,
+                 q=q, ordem=ordem)
 
 
 # Deslizar o card. É a única tela do app com gesto — o resto é form + redirect —
@@ -1678,7 +1696,8 @@ def _acoes_card(ia: bool) -> str:
 
 
 def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = False,
-          entrou: str = "", fora: str | None = None, q: str = "") -> HTMLResponse:
+          entrou: str = "", fora: str | None = None, q: str = "",
+          ordem: str = "") -> HTMLResponse:
     pool = get_pool()
     from finance import evento_lead as _evl
     from urllib.parse import quote as _quote
@@ -1694,6 +1713,12 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     if _e == "tudo" or _e in ck._RECORTE_SQL or _evl.mes_valido(_e):
         sess["ck_entrou"] = _e
     filtro_entrou = sess.get("ck_entrou") or _evl.periodo_atual()
+    # A ORDEM (mockup fila_ordem_de_conversa). Fica na sessão como o mês: é jeito de
+    # trabalhar, não escolha de uma tela. O padrão é `conversa` — ver `ck.ORDENS`.
+    _o = (ordem or "").strip()
+    if _o in ck.ORDENS:
+        sess["ck_ordem"] = _o
+    filtro_ordem = sess.get("ck_ordem") or ck.ORDEM_PADRAO
     # a BUSCA não fica na sessão: ela é de uma ligação telefônica, não do jeito de
     # trabalhar. Sair da tela e voltar tem que devolver a fila inteira.
     termo = (q or "").strip()[:60]
@@ -1720,14 +1745,27 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     except Exception:  # noqa: BLE001
         vende = False
     fila = ck.fila_agrupada(leads, entrou=filtro_entrou, fora_on=fora_on, vende_data=vende,
-                            busca=termo, contagens=cont)
+                            busca=termo, contagens=cont, ordem=filtro_ordem)
     buscando = bool(fila["busca"])
+    por_conversa = fila["ordem"] == "conversa"
 
     def _url(**over):
-        p_ = {"entrou": "", "fora": None, "q": ""}
+        p_ = {"entrou": "", "fora": None, "q": "", "ordem": ""}
         p_.update(over)
         partes = [f"{k}={_quote(str(v))}" for k, v in p_.items() if v not in ("", None)]
         return _BASE + ("?" + "&".join(partes) if partes else "")
+
+    # O SELETOR DE ORDEM. Duas perguntas diferentes, e as duas são verdadeiras:
+    # "cadê quem acabou de falar comigo" e "o que eu faço agora". Buscando ele some
+    # — o resultado da busca não é nenhuma das duas, e um seletor que não muda nada
+    # é botão morto.
+    ordem_html = ""
+    if not buscando:
+        def _ab(chave, rot):
+            on = " on" if fila["ordem"] == chave else ""
+            return f"<a class='opt{on}' href='{_url(ordem=chave)}'>{esc(rot)}</a>"
+        ordem_html = ("<div class=ordem>" + _ab("conversa", "Por conversa")
+                      + _ab("urgencia", "Por urgência") + "</div>")
 
     # a caixa de busca é um GET simples: sem JS, funciona com o teclado do celular e
     # o "Ir" fecha o teclado sozinho. O ✕ só aparece quando há o que limpar.
@@ -1743,7 +1781,9 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
                   + (f" <b>{m['n']}</b>" if m['n'] is not None else "") + "</a>"
                   for m in fila["meses"])
     fc = fila["fora_cont"]
-    if not buscando and filtro_entrou not in ("tudo", *ck._RECORTE_SQL) \
+    # as pílulas de FORA só existem onde existe um "fora": elas trazem de volta quem
+    # o corte de mês tirou, e na ordem por conversa não há corte de mês pra desfazer
+    if not buscando and not por_conversa and filtro_entrou not in ("tudo", *ck._RECORTE_SQL) \
             and (fc["suavez"] or (vende and fc["festa30"])):
         def _tog(k):
             return _url(fora=",".join(sorted(set(fora_on) ^ {k})) or "")
@@ -1753,7 +1793,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
         if vende:
             pil += (f"<a class='pil fora{' on' if 'festa30' in fora_on else ''}' href='{_tog('festa30')}'>"
                     f"🎉 30 dias <b>{fc['festa30']}</b></a>")
-    foco = caixa + f"<div class=foco>{pil}</div>"
+    foco = caixa + ordem_html + (f"<div class=foco>{pil}</div>" if pil else "")
 
     def _linha_evento(l):
         """A linha do evento no card do celular, como no funil."""
@@ -1805,6 +1845,18 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
         pend = int(l.get("pend") or 0)
         selo = (f"<span class=pend aria-label='{pend} sem resposta'>"
                 f"{pend if pend < 10 else '9+'}</span>") if pend else ""
+        # A COLUNA DA DIREITA, no desenho do WhatsApp: QUANDO foi em cima, quantas
+        # esperam embaixo. Até 16/09 o card não dizia quando a pessoa falou — e sem
+        # isso "bom dia! ainda tem para dezembro?" podia ser de hoje ou de julho.
+        # A bolinha ficava solta no fim da linha; agora as duas moram na mesma
+        # coluna, que é onde o olho do vendedor já procura.
+        quando = _quando_br(l.get("ult_em"))
+        # verde só pra quem falou HOJE: é o que separa "responder agora" de "responder
+        # hoje". Aceso pra semana inteira, o verde deixaria de querer dizer algo.
+        novo = " novo" if quando and ":" in quando else ""
+        dir_html = (f"<span class=dir>"
+                    + (f"<span class='h{novo}'>{esc(quando)}</span>" if quando else "")
+                    + selo + "</span>") if (quando or selo) else ""
         # de fora do mês: chega marcado com o mês em que entrou. Na BUSCA todo mundo
         # leva a marca — ali o mês é o que responde "é esse mesmo?", e o card não
         # fica apagado (`.fora`) porque nada ali está fora de lugar.
@@ -1823,7 +1875,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
             f"<span class=dot style='background:{_TEMP.get(l['temperatura'], 'var(--azul)')}'></span>"
             f"<span class=mid><span class=top><span class=emp>{esc(l['empresa'])}</span>{chip}{prop_chip}{mes_chip}</span>"
             f"{_linha_evento(l)}"
-            f"<span class=snip>{esc(l['snip'])}</span></span>{selo}</a></div>")
+            f"<span class=snip>{esc(l['snip'])}</span></span>{dir_html}</a></div>")
     # os grupos: sua vez → festa marcada → sem data → parados (dobra fechada)
     for g in fila["grupos"]:
         n = len(g["leads"])
@@ -1847,8 +1899,9 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
         cartoes.append(f"<div class=vazio><div class=big>◎</div>"
                        f"<b>Nenhum lead {esc(rot)}</b>"
                        "Toque num mês pra voltar pra fila inteira.</div>")
-    elif not cartoes and leads:
-        # tem lead, mas nenhum no período: diz isso, em vez de "fila zerada"
+    elif not cartoes and leads and not por_conversa:
+        # tem lead, mas nenhum no período: diz isso, em vez de "fila zerada".
+        # (na ordem por conversa não há período, então este caso não existe lá)
         cartoes.append("<div class=vazio><div class=big>◎</div><b>Nada deste mês</b>"
                        "Toque em outro mês ou numa pílula de fora pra trazer.</div>")
     lista = "".join(cartoes) or (
@@ -1880,6 +1933,9 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     elif recorte:
         sub = (f"{len(leads)} {'com proposta' if recorte == 'prop' else 'com data'}"
                f" · de {cont['total']} abertos")
+    elif por_conversa:
+        # na ordem por conversa não há mês nem denominador: a lista É a carteira
+        sub = f"{cont['total']} abertos · {vez} sua vez"
     elif filtro_entrou == "tudo":
         sub = f"{cont['total']} abertos · {vez} sua vez"
     else:
@@ -4797,6 +4853,44 @@ def _dia_br(dt) -> str:
     if (hoje - d).days == 1:
         return "ONTEM"
     return d.strftime("%d/%m/%Y")
+
+
+_SEMANA = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
+
+
+def _quando_br(dt) -> str:
+    """A hora da LISTA: `07:42` hoje, `ontem`, `seg` na última semana, `14/09`
+    depois disso. É o mesmo escalonamento do WhatsApp, e cabe em 2,6rem de card.
+
+    Irmão do `_dia_br` e mora coladinho nele de propósito: são duas leituras do
+    mesmo fato ("faz quanto tempo?"), uma pra tarja do chat e outra pro card, e
+    separá-las em arquivos diferentes seria o começo de dois calendários.
+
+    Por que quatro formatos e não um: na conta 34 os quatro casos estão vivos
+    (2 falaram hoje, 18 ontem, 88 na semana, 246 há mais de 7 dias). Só a hora
+    diria "07:42" pra uma mensagem de julho; só a data diria "16/09" pra uma de
+    dez minutos atrás.
+    """
+    if not hasattr(dt, "strftime"):
+        return ""
+    from datetime import datetime
+    from finance import agenda as ag
+    try:
+        d = dt.astimezone(ag.BRT)
+        agora = datetime.now(ag.BRT)
+    except (ValueError, TypeError):
+        return ""
+    dias = (agora.date() - d.date()).days
+    if dias <= 0:
+        # o futuro também cai aqui: relógio torto de aparelho não vira "há -1 dia"
+        return d.strftime("%H:%M")
+    if dias == 1:
+        return "ontem"
+    if dias < 7:
+        return _SEMANA[d.weekday()]
+    # o ano só aparece quando não é o corrente — "14/09/2026" não cabe no card, e
+    # numa conta de eventos a maioria das conversas é do próprio ano
+    return d.strftime("%d/%m") if d.year == agora.year else d.strftime("%d/%m/%y")
 
 
 def _bloco_visita(request: Request, lead_id: int) -> str:

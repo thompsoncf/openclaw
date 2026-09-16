@@ -511,11 +511,28 @@ def contagens_fila(pool, conta_id: int, membro_id: int) -> dict:
     return {"total": int(r[0] or 0), "prop": int(r[1] or 0), "data": int(r[2] or 0)}
 
 
+#: As duas ordens da Fila (mockup fila_ordem_de_conversa). Elas respondem PERGUNTAS
+#: DIFERENTES e as duas são verdadeiras — por isso convivem num seletor em vez de
+#: uma substituir a outra:
+#:
+#:   conversa  "cadê quem acabou de falar comigo" — a ordem do WhatsApp, que é o
+#:             aplicativo que o vendedor tem aberto o dia inteiro. É o PADRÃO.
+#:   urgencia  "o que eu faço agora" — os grupos por o que o lead pede, que é o
+#:             desenho que existia sozinho até 16/09/2026.
+#:
+#: O que obrigou a separação, medido na carteira do Pedro Yan (147 abertos): a
+#: Bianca Sousa escreveu às 07:42 — a mensagem mais recente da carteira inteira — e
+#: caía na POSIÇÃO 43, porque o grupo "festa marcada" ordena pela data da FESTA e
+#: vinha inteiro na frente dela. Oito telas de rolagem até quem acabou de falar.
+ORDENS = ("conversa", "urgencia")
+ORDEM_PADRAO = "conversa"
+
+
 def fila_agrupada(leads: list[dict], *, entrou: str, fora_on, vende_data: bool = True,
-                  agora=None, busca: str = "", contagens: dict | None = None) -> dict:
-    """A Fila do celular no desenho do funil (mockup cockpit_mes_atual): o período
-    ("Entraram em", padrão mês corrente), as pílulas do que ficou de fora, e os
-    grupos por O QUE O LEAD PEDE:
+                  agora=None, busca: str = "", contagens: dict | None = None,
+                  ordem: str = ORDEM_PADRAO) -> dict:
+    """A Fila do celular. Duas ordens (ver `ORDENS`), e na `urgencia` os grupos por
+    O QUE O LEAD PEDE:
 
       🟢 sua vez        o cliente falou por último e o agente está desligado
       🎉 festa marcada  com data, na ordem da data
@@ -528,14 +545,21 @@ def fila_agrupada(leads: list[dict], *, entrou: str, fora_on, vende_data: bool =
     quem o cliente está cobrando ao telefone.
 
     Devolve {grupos: [{chave, rotulo, leads, dobra}], meses: [{chave, rotulo, n, on}],
-    fora_cont: {suavez, festa30}, n_quadro, total, busca}. Pura: não toca no banco."""
+    fora_cont: {suavez, festa30}, n_quadro, total, busca, ordem}. Pura: não toca no
+    banco."""
     from finance import evento_lead as _evl
     agora = agora or _agora()
     hoje = agora.date()
     fora_on = set(fora_on or ())
     busca = (busca or "").strip()
-    # a busca e os dois recortes novos ignoram o mês: o filtro já foi feito no banco
-    sem_corte = bool(busca) or entrou in _RECORTE_SQL
+    ordem = ordem if ordem in ORDENS else ORDEM_PADRAO
+    # Três coisas ignoram o corte de mês, e por um motivo só: o mês é uma pergunta
+    # sobre QUANDO O LEAD ENTROU, e nenhuma das três está perguntando isso.
+    #   busca     — procura quem o cliente está cobrando, tenha entrado quando for
+    #   recortes  — o filtro já foi feito no banco
+    #   conversa  — pergunta quem falou por último, não quem entrou este mês. Sem
+    #               isto a FLAVIA (entrou 17/08, escreveu 14/09) some da lista.
+    sem_corte = bool(busca) or entrou in _RECORTE_SQL or ordem == "conversa"
     for l in leads:
         l["vez"] = (not l["ia"]) and int(l.get("esperando") or 0) > 0
         l["festa30"] = _evl.festa_em_30_dias(l, hoje)
@@ -558,7 +582,23 @@ def fila_agrupada(leads: list[dict], *, entrou: str, fora_on, vende_data: bool =
                 "meses": _pilulas(leads, hoje, entrou, contagens, vende_data, busca=True),
                 "fora_cont": {"suavez": 0, "festa30": 0},
                 "n_quadro": n, "total": (contagens or {}).get("total") or len(leads),
-                "busca": busca}
+                "busca": busca, "ordem": ordem}
+    if ordem == "conversa":
+        # UMA LISTA SÓ, e sem reordenar nada aqui: `_base_leads_sql` já devolve por
+        # `coalesce(ultima_msg_em, atualizado_em) desc`. Ordenar de novo em Python
+        # seria uma SEGUNDA definição de "mais recente" — e duas definições viram
+        # dois resultados no dia em que uma delas mudar.
+        #
+        # Sem rótulo de grupo: a lista é uma só, e um cabeçalho em cima dela seria
+        # enfeite (é a mesma decisão do `agrupar` do funil quando sobra um grupo).
+        return {"grupos": ([{"chave": "conversa", "rotulo": "", "leads": leads,
+                             "dobra": False}] if leads else []),
+                "meses": _pilulas(leads, hoje, entrou, contagens, vende_data,
+                                  conversa=True),
+                "fora_cont": {"suavez": 0, "festa30": 0},
+                "n_quadro": len(leads),
+                "total": (contagens or {}).get("total") or len(leads),
+                "busca": "", "ordem": ordem}
     vis = [l for l in leads if l["no_periodo"] or ("suavez" in fora_on and l["vez"])
            or ("festa30" in fora_on and l["festa30"])]
     vez = [l for l in vis if l["vez"]]
@@ -586,10 +626,12 @@ def fila_agrupada(leads: list[dict], *, entrou: str, fora_on, vende_data: bool =
             "meses": _pilulas(leads, hoje, entrou, contagens, vende_data),
             "fora_cont": fora_cont,
             "n_quadro": len(vis),
-            "total": (contagens or {}).get("total") or len(leads), "busca": ""}
+            "total": (contagens or {}).get("total") or len(leads), "busca": "",
+            "ordem": ordem}
 
 
-def _pilulas(leads, hoje, entrou, contagens, vende_data, *, busca: bool = False) -> list[dict]:
+def _pilulas(leads, hoje, entrou, contagens, vende_data, *, busca: bool = False,
+             conversa: bool = False) -> list[dict]:
     """As pílulas do topo: os meses de entrada, e as duas novas — "com proposta" e
     "com data" — que são recortes do MESMO seletor (ligar uma desliga o mês).
 
@@ -603,11 +645,16 @@ def _pilulas(leads, hoje, entrou, contagens, vende_data, *, busca: bool = False)
     "Set 3" pra um mês que tem 41 — e o número mudaria sozinho ao tocar na pílula.
     Sem número, a pílula continua sendo o caminho de volta sem afirmar bobagem.
 
+    NA ORDEM POR CONVERSA os meses não aparecem. Lá não existe corte de mês (a
+    pergunta é "quem falou por último", não "quem entrou quando"), e uma pílula de
+    mês que não recorta nada seria um botão que não faz nada. Os dois recortes
+    continuam, porque valem nas duas ordens: eles são filtro de banco, não de mês.
+
     "Com data" segue `vende_data` (§6): quem vende mensalidade não tem festa, e a
     pílula seria uma coluna vazia — é o mesmo portão que decide o grupo "📅 sem data"."""
     from finance import evento_lead as _evl
-    sem_corte = busca or entrou in _RECORTE_SQL
-    meses = _evl.meses_entrada(leads, hoje)
+    sem_corte = busca or conversa or entrou in _RECORTE_SQL
+    meses = [] if conversa else _evl.meses_entrada(leads, hoje)
     for m in meses:
         m["on"] = (not sem_corte) and (m["chave"] == entrou)
         if sem_corte:
@@ -622,6 +669,12 @@ def _pilulas(leads, hoje, entrou, contagens, vende_data, *, busca: bool = False)
         if n:
             meses.append({"chave": chave, "rotulo": rot, "curto": rot, "n": n,
                           "on": (not busca) and entrou == chave, "nova": True})
+    if conversa and meses:
+        # sem os meses, "Tudo" some junto — e some o caminho de volta pra lista
+        # inteira quando um recorte está ligado. Este é o botão de voltar.
+        meses.insert(0, {"chave": "tudo", "rotulo": "Tudo", "curto": "Tudo",
+                         "n": (contagens or {}).get("total"),
+                         "on": entrou not in _RECORTE_SQL, "nova": False})
     return meses
 
 

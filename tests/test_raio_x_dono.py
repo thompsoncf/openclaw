@@ -294,6 +294,120 @@ def test_dia_da_festa_e_tipo_com_ticket(pool, cen):
     assert d["tipos"][0]["tipo"] == "Casamento" and d["tipos"][-1]["tipo"] == "sem tipo"
 
 
+@pytest.fixture(scope="module")
+def cohorte(pool):
+    """Uma conta onde a PROPOSTA e o LEAD caem em períodos diferentes.
+
+    É o caso exato que o dono achou em 16/09/2026 olhando o Raio-X da Prime: duas
+    propostas de Aniversário feitas em setembro — R$ 5.000 e R$ 8.600, esta última
+    FECHADA — não apareciam em lugar nenhum, e o tipo saía "sem proposta", porque
+    os leads tinham entrado em agosto e o período filtrava a data do LEAD.
+
+    Conta separada de propósito: a Prime em miniatura tem números pendurados em
+    quase todo teste do arquivo, e esta cena precisa de uma proposta atravessando
+    a fronteira do mês sem mexer naqueles."""
+    with pool.connection() as c:
+        conta = c.execute("insert into contas (nome) values ('Fronteira do Mês') returning id").fetchone()[0]
+        v = c.execute("insert into membros (conta_id, nome) values (%s,'Vend') returning id", (conta,)).fetchone()[0]
+
+        def lead(nome, tipo, criado):
+            return c.execute("""insert into prospeccao (conta_id, vendedor_id, contato, status, evento_tipo,
+                                   origem, criado_em, atualizado_em)
+                                values (%s,%s,%s,'contatado',%s,'whatsapp_inbound',%s,%s) returning id""",
+                             (conta, v, nome, tipo, criado, criado)).fetchone()[0]
+
+        def orc(lid, total, criado, *, status="enviado", setup=0):
+            o = c.execute("""insert into orcamentos (cliente, status, primeiro_ano_centavos,
+                                                     setup_centavos, criado_em)
+                             values ('x',%s,%s,%s,%s) returning id""",
+                          (status, total, setup, criado)).fetchone()[0]
+            c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, lid))
+            return o
+
+        # O CASO: lead de AGOSTO, proposta de SETEMBRO. Era este que sumia.
+        velho = lead("Lead de agosto", "Aniversário", _dt(21, 8, 10))
+        orc(velho, 860000, _dt(3, 9, 10), status="fechado")
+        # o contraste: lead E proposta em setembro — este sempre apareceu
+        novo_ = lead("Lead de setembro", "Aniversário", _dt(1, 9, 10))
+        orc(novo_, 500000, _dt(2, 9, 10))
+        # e um lead de setembro SEM proposta nenhuma: entra na contagem de leads
+        lead("Só lead", "Aniversário", _dt(4, 9, 10))
+        # um lead de setembro cuja proposta só sai em OUTUBRO: conta como lead
+        # agora e como proposta no mês que vem — a ponta oposta da mesma regra
+        futuro = lead("Proposta mês que vem", "Formatura", _dt(5, 9, 10))
+        orc(futuro, 700000, _dt(2, 10, 10))
+        # "Chá" e "Confraternização" caem os dois em "Outro" — é onde o PESO da
+        # média aparece. O Chá tem duas propostas e só uma com valor; pesar pelo
+        # total de propostas (e não pelas que têm valor) puxaria o tipo inteiro
+        # pro lado do Chá. Só dá pra ver quando dois tipos crus viram um.
+        cha1 = lead("Chá com valor", "Chá", _dt(6, 9, 10))
+        orc(cha1, 100000, _dt(6, 9, 11))
+        cha2 = lead("Chá sem valor", "Chá", _dt(6, 9, 12))
+        orc(cha2, 0, _dt(6, 9, 13))            # enviada, mas sem valor nenhum
+        conf = lead("Confra", "Confraternização", _dt(6, 9, 14))
+        orc(conf, 400000, _dt(6, 9, 15))
+        # orçamento de VALOR ÚNICO: o total mora em `setup_centavos` e
+        # `primeiro_ano_centavos` fica vazio. É como o resto da casa lê um
+        # orçamento (`coalesce(primeiro_ano, setup)`); sem isso ele seria contado
+        # como proposta e sairia da média, dizendo "sem proposta" com uma na mão.
+        # 02/09 e não 07/09: `AGORA` é 07/09 às 10h e o período termina nele —
+        # uma proposta feita às 11h seria do futuro e cairia fora do corte.
+        unico = lead("Valor único", "Corporativo", _dt(2, 9, 10))
+        orc(unico, None, _dt(2, 9, 11), setup=300000)
+        c.commit()
+    return {"conta": conta}
+
+
+def test_a_proposta_do_mes_conta_mesmo_que_o_lead_seja_do_mes_passado(pool, cohorte):
+    """O defeito que o dono achou: "acho que está errado" — e estava.
+
+    Antes de 16/09/2026 o período filtrava `prospeccao.criado_em` pros DOIS
+    números, então proposta feita no mês pra lead de antes não existia e o tipo
+    aparecia como "sem proposta" tendo proposta fechada."""
+    d = rxd.dono(pool, cohorte["conta"], _f(), AGORA, perfil=EVENTOS)
+    aniv = {t["tipo"]: t for t in d["tipos"]}["Aniversário"]
+    assert aniv["n_orc"] == 2, "a proposta do lead de agosto sumiu — é o defeito de volta"
+    assert aniv["ticket_centavos"] == 680000, "o ticket não é a média das DUAS propostas do mês"
+
+
+def test_o_numero_de_leads_continua_sendo_quem_entrou_no_periodo(pool, cohorte):
+    """As duas contas convivem na mesma linha e cada uma responde a sua pergunta:
+    quantos procuraram (lead que ENTROU) e quanto se cobrou (proposta FEITA).
+    Somar o lead de agosto aqui seria trocar um erro por outro."""
+    aniv = {t["tipo"]: t for t in
+            rxd.dono(pool, cohorte["conta"], _f(), AGORA, perfil=EVENTOS)["tipos"]}["Aniversário"]
+    assert aniv["n"] == 2, "o de agosto não entrou em setembro — a procura é do mês"
+
+
+def test_proposta_que_so_sai_no_mes_seguinte_nao_vira_ticket_agora(pool, cohorte):
+    """A ponta oposta: o lead entrou em setembro, mas a proposta é de outubro.
+    Conta como lead agora e como proposta lá — senão o ticket do mês corrente
+    ficaria dependendo do futuro."""
+    form = {t["tipo"]: t for t in
+            rxd.dono(pool, cohorte["conta"], _f(), AGORA, perfil=EVENTOS)["tipos"]}["Formatura"]
+    assert form["n"] == 1 and form["n_orc"] == 0 and form["ticket_centavos"] is None
+
+
+def test_o_peso_da_media_e_a_proposta_com_valor_nao_a_proposta_que_existe(pool, cohorte):
+    """"Chá" e "Confraternização" viram o mesmo "Outro". O Chá tem duas propostas
+    e só uma com valor (R$ 1.000); a Confra tem uma, de R$ 4.000. A média das que
+    TÊM valor é R$ 2.500 — pesar pela proposta que existe daria R$ 2.000, puxado
+    por uma proposta que não tem preço nenhum pra contribuir."""
+    outro = {t["tipo"]: t for t in
+             rxd.dono(pool, cohorte["conta"], _f(), AGORA, perfil=EVENTOS)["tipos"]}["Outro"]
+    assert outro["n"] == 3 and outro["n_orc"] == 3
+    assert outro["ticket_centavos"] == 250000
+
+
+def test_orcamento_de_valor_unico_tambem_e_proposta(pool, cohorte):
+    """O total de um orçamento é `coalesce(primeiro_ano, setup)` em toda a casa.
+    Só aqui era o primeiro sem a rede — e um orçamento de valor único saía da
+    média, com a tela dizendo "sem proposta" tendo uma na mão."""
+    corp = {t["tipo"]: t for t in
+            rxd.dono(pool, cohorte["conta"], _f(), AGORA, perfil=EVENTOS)["tipos"]}["Corporativo"]
+    assert corp["ticket_centavos"] == 300000
+
+
 def test_ciclo_e_perdas(pool, cen):
     d = rxd.dono(pool, cen["conta"], _f(), AGORA, perfil=EVENTOS)
     c = d["ciclo"]

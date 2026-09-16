@@ -466,9 +466,17 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
 
     {% if 'tipos' in perfil.blocos %}
     <div class="bloco">
-      <h4>Tipo de festa e ticket <small>proposta média por tipo</small></h4>
+      {#- "no período" no subtítulo NÃO é enfeite: até 16/09/2026 o ticket vinha
+          dos leads que entraram no período, e não das propostas feitas nele —
+          proposta de setembro pra lead de agosto sumia, e o tipo aparecia como
+          "sem proposta" tendo proposta fechada. Ver `_tipos_ticket`. -#}
+      <h4>Tipo de festa e ticket <small>proposta média por tipo, no período</small></h4>
       {% if d.tipos %}{% set com_ticket = d.tipos|selectattr('ticket_centavos')|list %}{% set mxt = maximo(1, (com_ticket|map(attribute='ticket_centavos')|max) if com_ticket else 1) %}
-      <div class="tipos">{% for t in d.tipos if t.tipo != 'sem tipo' %}<div><span>{{ t.tipo }} <small>({{ t.n }})</small></span><i style="width:{{ ((100 * (t.ticket_centavos or 0) / mxt)|round|int) }}%"></i><span>{% if t.ticket_centavos %}{{ brl(t.ticket_centavos) }}{% else %}sem proposta{% endif %}</span></div>{% endfor %}</div>
+      {#- OS DOIS NÚMEROS, e separados: o de leads é a procura ("entraram 38
+          casamentos"), o de propostas é de onde sai o ticket ("de 3 propostas").
+          Lado a lado sem rótulo, como era antes, "(38)" colado em "R$ 7.433"
+          se lia como se os 38 tivessem dado aquele ticket. -#}
+      <div class="tipos">{% for t in d.tipos if t.tipo != 'sem tipo' %}<div><span>{{ t.tipo }} <small>{{ t.n }} lead{{ '' if t.n == 1 else 's' }}{% if t.n_orc %} · {{ t.n_orc }} proposta{{ '' if t.n_orc == 1 else 's' }}{% endif %}</small></span><i style="width:{{ ((100 * (t.ticket_centavos or 0) / mxt)|round|int) }}%"></i><span>{% if t.ticket_centavos %}{{ brl(t.ticket_centavos) }}{% else %}sem proposta no período{% endif %}</span></div>{% endfor %}</div>
       {% set tot_t = d.tipos|map(attribute='n')|sum %}{% set sem_t = (d.tipos|selectattr('tipo', 'equalto', 'sem tipo')|map(attribute='n')|sum) %}
       <div class="acha">{% if sem_t %}<b>{{ sem_t }} dos {{ tot_t }} leads ({{ (100 * sem_t / tot_t)|round|int }}%) estão sem tipo de festa.</b> Sem o tipo, o Zaq não sabe o ticket nem qual pacote sugerir: é a 2ª pergunta da primeira resposta.{% else %}Todo lead deste corte tem tipo de festa. O ticket por tipo é o que orienta a proposta.{% endif %}</div>
       {% else %}<div class="vazio">Sem dado pra este corte.</div>{% endif %}

@@ -36,6 +36,7 @@ Todas as rotas (menos `GET /saude`) exigem o header `x-wa-secret` = `WA_QR_SHARE
 | `WA_QR_IGNORAR_GRUPOS` | `0` volta a decifrar mensagem de grupo (padrão: cortada antes de decifrar — ver "Grupo não é decifrado") |
 | `WA_QR_HIST_CONCORRENCIA` · `WA_QR_HIST_PAUSA_MS` · `WA_QR_HIST_RECUO_MS` | vazão do repasse do histórico: conversas em paralelo (2), pausa entre POSTs (100ms) e recuo quando o web recusa (2s) — ver "O histórico derrubou o web" |
 | `WA_QR_FILA_DRENA_MS` · `WA_QR_FILA_PARAR_EM` · `WA_QR_FILA_TIMEOUT_MS` | outbox do repasse: de quanto em quanto o que falhou volta (15s), quantas tentativas até virar dead-letter (12, ~6h) e timeout do POST (15s) — ver "Nenhuma mensagem se perde num 502" |
+| `WA_QR_BAILEYS6_CONTAS` | ids que ficam no Baileys **6.7.24**. Vazia por padrão: desde 16/09 todo mundo roda no 7 — ver "O Baileys 7 é o padrão" |
 
 ## Diagnóstico sem abrir o dashboard
 
@@ -224,6 +225,48 @@ createdb wa_qr_log_test
 psql wa_qr_log_test -f ../../db/migracoes/158_wa_qr_log.sql
 WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_log_test node teste-log-agregado-conta.js
 ```
+
+## O Baileys 7 é o padrão (16/09/2026)
+
+O sintoma é o `stream errored out` **de ~50 em ~50 minutos, o dia inteiro**: a
+conta cai, volta sozinha em segundos, e cai de novo. O que o v7 mata é esse ciclo
+diurno — e é assim que se lê a tabela, não por "quedas zero":
+
+| conta | versão | 14/09 | 15/09 | a que horas |
+|---|---|---|---|---|
+| 23 (Ramo) | **v7** | 3 | 1 | **só** 21:20–21:49 |
+| 34 (Prime) | **v7** | 1 | 1 | **só** 21:28–21:46 |
+| 36 (CP Thiago) | v6 | 2 | 4 | 15:13 · 18:56 · 21:28–21:45 |
+| 38 (Liberal) | v6 | — | 10 | 12:56 → 23:31, de ~50 em ~50 min |
+
+Nas duas contas no v7 **não há uma queda fora da janela das 21h**; a 38, no v6,
+cai dez vezes ao longo do dia. E naquela janela noturna caem as quatro juntas, v6
+e v7 — o que sobra ali não é a biblioteca, e segue sem explicação (item aberto).
+
+Nenhuma mensagem se perdeu em nenhuma das duas migradas. Continuar exigindo que
+alguém lembrasse de escrever o id numa variável era deixar todo cliente novo
+nascer caindo a cada 50 minutos — então a lista mudou de lado:
+`WA_QR_BAILEYS6_CONTAS` diz quem **fica** no 6, e nasce vazia.
+
+Uma ressalva de método, porque ela muda o que dá pra reconferir: o `wa_qr_log`
+guarda ~2 dias. Os números maiores que motivaram a migração (8 quedas num dia na
+34, 14 em 12h30 na 23, as duas no 6.7.24) foram medidos na hora e **já saíram da
+janela** — não dá mais pra reconferir no banco. A tabela acima é o que dá.
+
+**Por que a variável não foi apagada**, que é a pergunta seguinte: o 7.0.0 ainda é
+*release candidate* — o `rc14` é o topo no npm, não existe final. Enquanto for,
+ficam de pé as duas redes:
+
+* o **6.7.24 continua instalado**, e é ele que a volta automática usa — se o rc14
+  não carregar (código 3) ou a conta morrer `WA_QR_BAILEYS7_QUEDAS_MAX` vezes, o
+  supervisor devolve aquela conta pro 6 sozinho;
+* **prender uma conta no 6 é uma variável**, sem deploy e sem esperar por ninguém.
+
+Quando sair o 7.0.0 final, a variável e o pacote velho saem juntos.
+
+A variável antiga (`WA_QR_BAILEYS7_CONTAS`, a lista de quem *entrava* no 7) não
+manda mais em nada. Se ficar setada, o supervisor avisa no arranque em vez de
+ignorar calado.
 
 ## Nenhuma mensagem se perde num 502 (o outbox, 15/09/2026)
 

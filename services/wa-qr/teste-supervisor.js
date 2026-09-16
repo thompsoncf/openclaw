@@ -293,12 +293,22 @@ function base (extra) {
   // não sobe deixa uma conta de cliente no chão até alguém perceber.
   console.log('\nFase 4: o Baileys 7 não pode custar um chip:')
   filhos.length = 0
-  const sup10b = iniciarSupervisor(base({ baileys7Contas: '23', baileys7QuedasMax: 3 }))
+  // Lista VAZIA é o padrão de produção desde 16/09: todo mundo no 7. Se algum dia
+  // alguém inverter isto de volta sem querer, é aqui que quebra.
+  const supPadrao = iniciarSupervisor(base({ baileys6Contas: '' }))
+  await supPadrao.reconciliar([23, 34]); await dorme(20)
+  conferir(filhos.filter((f) => f.env.WA_QR_BAILEYS === '7').length === 2,
+    'sem lista nenhuma, as DUAS contas sobem no 7 — o padrão virou esse')
+  desligar(supPadrao)
+
+  filhos.length = 0
+  // e a lista agora prende no 6, ao contrário do que fazia até 16/09
+  const sup10b = iniciarSupervisor(base({ baileys6Contas: '34', baileys7QuedasMax: 3 }))
   await sup10b.reconciliar([23, 34]); await dorme(20)
   const w23 = filhos.find((f) => f.env.WA_QR_CONTA === '23')
   const w34b = filhos.find((f) => f.env.WA_QR_CONTA === '34')
-  conferir(w23 && w23.env.WA_QR_BAILEYS === '7', 'a conta da lista sobe com WA_QR_BAILEYS=7')
-  conferir(w34b && w34b.env.WA_QR_BAILEYS === '6', 'a vizinha continua no 6 — o teste não encosta nela')
+  conferir(w23 && w23.env.WA_QR_BAILEYS === '7', 'quem não está na lista sobe no 7')
+  conferir(w34b && w34b.env.WA_QR_BAILEYS === '6', 'e quem ESTÁ na lista fica presa no 6.7.24')
 
   // código 3 = não carregou a biblioteca (Node sem require de ESM, engine-requirements).
   // Insistir seria repetir o mesmo erro pra sempre: volta na PRIMEIRA vez.
@@ -311,7 +321,7 @@ function base (extra) {
 
   // qualquer outra morte gasta uma tentativa; esgotadas, volta também
   filhos.length = 0
-  const sup10c = iniciarSupervisor(base({ baileys7Contas: '23', baileys7QuedasMax: 3 }))
+  const sup10c = iniciarSupervisor(base({ baileys6Contas: '', baileys7QuedasMax: 3 }))
   await sup10c.reconciliar([23]); await dorme(20)
   const versoes = []
   for (let i = 0; i < 3; i++) {

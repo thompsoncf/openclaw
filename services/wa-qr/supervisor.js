@@ -121,11 +121,39 @@ const MAX_WORKERS = parseInt(process.env.WA_QR_MAX_WORKERS || '40', 10)
 
 // ------------------------------------------------------- Fase 4: o Baileys 7
 //
-// Quais contas rodam no 7.0.0-rc14 em vez do 6.7.24. Lista de ids separada por
-// vírgula; VAZIA por padrão, então nada muda pra ninguém sem alguém escrever isto
-// no ambiente do Render. É o chip de teste da Fase 4 — uma semana contando quedas
-// por código antes de sequer pensar em migrar conta de cliente.
-const BAILEYS7_CONTAS = String(process.env.WA_QR_BAILEYS7_CONTAS || '')
+// O PADRÃO VIROU O 7, EM 16/09/2026, e a lista mudou de lado: agora ela diz quem
+// FICA no 6.7.24, e nasce vazia. Conta nova entra no 7 sem ninguém escrever nada.
+//
+// Por que inverteu. O sintoma é o `stream errored out` de ~50 em ~50 minutos, O
+// DIA INTEIRO — e é esse ciclo diurno que o v7 mata. Medido em 14 e 15/09:
+//
+//   conta 23 (Ramo)    v7   3 e 1 quedas, SÓ entre 21:20 e 21:49
+//   conta 34 (Prime)   v7   1 e 1 quedas, SÓ entre 21:28 e 21:46
+//   conta 36 (Thiago)  v6   2 e 4 quedas — 15:13, 18:56 e a janela das 21h
+//   conta 38 (Liberal) v6   10 quedas em 15/09: 12:56, 14:32, 15:47, 16:50,
+//                           17:46, 18:42, 19:32, 20:27, 21:39, 23:31
+//
+// Nas contas no v7 não há UMA queda fora da janela das 21h. Naquela janela caem
+// as quatro juntas, v6 e v7 — ali não é a biblioteca, e segue sem explicação.
+// Nenhuma mensagem se perdeu em nenhuma das duas migradas. Continuar exigindo que
+// alguém lembrasse de escrever o id na variável era deixar todo cliente novo
+// nascer caindo a cada 50 minutos.
+//
+// POR QUE A VARIÁVEL NÃO FOI APAGADA, que é a pergunta seguinte: o 7.0.0 ainda é
+// RELEASE CANDIDATE (o `rc14` é o topo no npm; não existe final). Enquanto for,
+// ficam de pé as duas redes: o 6.7.24 continua instalado, e prender uma conta
+// nele é uma variável de ambiente — sem deploy, sem esperar por ninguém. Quando
+// sair o 7.0.0 final, isto aqui e o pacote velho saem juntos.
+const BAILEYS6_CONTAS = String(process.env.WA_QR_BAILEYS6_CONTAS || '')
+
+// A variável antiga (lista de quem ENTRAVA no 7) não manda mais em nada. Se ela
+// ficou setada no Render, avisa uma vez em vez de ignorar calado: quem a setou
+// esperava que ela restringisse, e o silêncio faria parecer que restringiu.
+if (String(process.env.WA_QR_BAILEYS7_CONTAS || '')) {
+  console.warn('supervisor: WA_QR_BAILEYS7_CONTAS não vale mais — o padrão agora é ' +
+    'o Baileys 7 pra todas as contas. Pra prender alguma no 6.7.24, use ' +
+    'WA_QR_BAILEYS6_CONTAS. Pode apagar a antiga do Render.')
+}
 
 // Quantas vezes um worker v7 pode morrer ANTES de o supervisor desistir do v7
 // naquela conta e subi-la de volta no 6.7.24.
@@ -154,12 +182,12 @@ const SIGTERM_ESPERA_MS = parseInt(process.env.WA_QR_SIGTERM_ESPERA_MS || '20000
 // Esta conta roda em qual Baileys? Pura, porque é a chave da Fase 4: decide num
 // lugar só, dá pra testar sem subir processo, e o teste fixa os dois sentidos.
 //
-// `lista` vem do ambiente como texto ('23' ou '23,36'). Comparação por String
-// pelo mesmo motivo do contasDesteWorker no server.js: o id vem como número aqui
-// e como texto do banco, e um `===` entre os dois já derrubou os três chips hoje.
+// `lista` é quem fica no 6.7.24. Vazia = todo mundo no 7. A comparação é por
+// texto porque o id vem ora do banco (bigint -> string), ora da rota (número) —
+// o mesmo motivo do MapaPorConta, e o mesmo erro que já derrubou três chips.
 function baileysDaConta (contaId, lista) {
   const ids = String(lista || '').split(',').map((x) => x.trim()).filter(Boolean)
-  return ids.some((id) => String(id) === String(contaId)) ? 7 : 6
+  return ids.some((id) => String(id) === String(contaId)) ? 6 : 7
 }
 
 function execArgvDoWorker (execArgvDoPai, nWorkers, totalMb, minMb) {
@@ -239,7 +267,7 @@ function iniciarSupervisor (opcoes) {
   const heapTotalMb = op.heapTotalMb || HEAP_TOTAL_MB
   const heapMinMb = op.heapMinMb || HEAP_MIN_MB
   const execArgvDoPai = op.execArgv || process.execArgv
-  const baileys7Contas = op.baileys7Contas !== undefined ? op.baileys7Contas : BAILEYS7_CONTAS
+  const baileys6Contas = op.baileys6Contas !== undefined ? op.baileys6Contas : BAILEYS6_CONTAS
   const baileys7QuedasMax = op.baileys7QuedasMax || BAILEYS7_QUEDAS_MAX
   const pool = op.pool !== undefined ? op.pool
     : (process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL, max: 2 }) : null)
@@ -264,7 +292,7 @@ function iniciarSupervisor (opcoes) {
         // Fase 4: a versão que ESTA conta usa agora. Nasce da lista do ambiente e
         // só muda num sentido — 7 pode virar 6 quando o v7 não para de pé; 6 nunca
         // vira 7 sozinho. Voltar tem que ser decisão do serviço; avançar, de gente.
-        baileys: baileysDaConta(contaId, baileys7Contas), quedasBaileys7: 0 }
+        baileys: baileysDaConta(contaId, baileys6Contas), quedasBaileys7: 0 }
       estado.workers.set(contaId, w)
     }
     return w

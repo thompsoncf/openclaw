@@ -267,6 +267,19 @@ def _tem_follow_up(conta) -> bool:
     return _rxp.perfil(nicho_da_conta(conta))["chave"] in _fu.PERFIS_COM_TELA
 
 
+def _tempo_curto(horas) -> str:
+    """"16h", "3d" — o atraso do follow-up em uma palavra, pro selo do card.
+
+    Mora AQUI, e não no painel_follow_up, pelo mesmo motivo que o `_quando_curto`:
+    as duas telas mostram o mesmo atraso, e duas grafias do mesmo número é como se
+    descobre, meses depois, que uma delas arredondava diferente. O
+    `painel_follow_up._tempo` delega pra cá."""
+    if horas is None:
+        return "—"
+    h = int(horas)
+    return f"{h}h" if h < 48 else f"{h // 24}d"
+
+
 def _vendedores(pool, conta_id: int) -> list[dict]:
     """Quem pode receber alvos: o dono (aparece pelo nome) + vendedores/gestores.
     O dono vem primeiro e rotulado, pra ele poder ficar com leads no próprio nome."""
@@ -772,6 +785,59 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                             (orc_ids,)).fetchall())
                 except Exception:  # noqa: BLE001
                     numero_por_orc = {}
+        # O SELO DO FOLLOW-UP NO CARD (16/09/2026). Pedido do dono: "avisar no card a
+        # questão do follow". O estado NÃO é recalculado aqui — sai do mesmo
+        # `follow_up.leads()` que a tela /painel/follow-up usa, numa consulta pra
+        # conta inteira. Dois motivos pra reusar em vez de refazer: duas contas do
+        # mesmo estado divergem no dia em que uma das duas mudar, e o motor já
+        # resolve o relógio da festa por nicho (§6), que é a parte difícil.
+        #
+        # O CUSTO, medido antes de entrar: `EXPLAIN ANALYZE` do `_SQL_LEADS` na conta
+        # 34 (362 leads, a maior de eventos em produção) deu 57ms de execução, 22k
+        # buffers e ZERO leitura de disco — tudo cache. É uma consulta a mais numa
+        # tela que já faz várias, e some no ruído. Medir isto não era zelo: o funil
+        # é a tela que três vendedores abrem o dia inteiro, e é onde 57ms viraria
+        # meio segundo se a consulta fosse por card em vez de pra conta inteira.
+        #
+        # SÓ EM CONTA QUE JÁ TEM A TELA e com o modo fora de 'off'. Em 'off' o dono
+        # não optou por nada, e um selo de cobrança que ele não ligou apareceria
+        # sozinho no quadro dos vendedores. Em 'observando' aparece de propósito: foi
+        # a escolha do dono, pra ver a régua rodando com lead de verdade antes de
+        # ligar a cobrança.
+        #
+        # Tolerante e com SAVEPOINT, como as outras leituras deste board: no
+        # Postgres um erro aborta a transação inteira, e sem o ponto de retorno as
+        # consultas seguintes morreriam com "current transaction is aborted" — o
+        # funil cairia por causa de um selo.
+        fu_por_lead: dict[int, dict] = {}
+        # `.get` e não `[...]`: o `_acesso` de verdade sempre põe a linha da conta
+        # no ctx, mas quem monta um ctx à mão (teste, e qualquer chamador futuro)
+        # não põe — e ficar sem o selo é o lado seguro de errar, o mesmo que o
+        # `_tem_follow_up` já faz com tupla curta. Um KeyError aqui derrubaria o
+        # QUADRO INTEIRO por causa de um enfeite, que é justamente o contrário do
+        # que o try/except logo abaixo existe pra garantir.
+        _conta_row = ctx.get("conta")
+        if _conta_row is not None and _tem_follow_up(_conta_row):
+            try:
+                with c.transaction():
+                    from finance import follow_up as _fu
+                    from finance import raio_x_perfil as _rxp3
+                    _cfg = _fu.config(c, conta_id)
+                    if _cfg.get("follow_up_modo") in ("observando", "ligado"):
+                        from web.portal import nicho_da_conta as _nicho
+                        _pf3 = _rxp3.perfil(_nicho(_conta_row))
+                        for _l in _fu.leads(c, conta_id, _pf3, cfg=_cfg):
+                            fu_por_lead[_l["id"]] = {
+                                "estado": _l["estado"],
+                                "rotulo": _fu.ROTULO.get(_l["estado"], ""),
+                                "emoji": _fu.EMOJI.get(_l["estado"], ""),
+                                "atraso": (_tempo_curto(_l["atraso_h"])
+                                           if _l["atraso_h"] else ""),
+                                "acao": _l["acao"]}
+            except Exception:  # noqa: BLE001 — o funil abre sem o selo
+                _log.warning("não deu pra ler o follow-up dos cards na conta %s",
+                             conta_id, exc_info=True)
+                fu_por_lead = {}
         # o acervo do leitor: quem ainda tem campo vazio e conversa não lida
         por_ler = 0
         if modo_evento:
@@ -831,6 +897,8 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
             "visita_txt": _evl.visita_curta(visita_por_lead[r[0]]) if r[0] in visita_por_lead else "",
             # o selo de origem e a pista do leitor (migração 198)
             "evento_origem": r[23], "evento_trecho": r[24], "evento_pista": r[25],
+            # o selo do follow-up: dict ou None (conta sem a tela, ou modo 'off')
+            "fu": fu_por_lead.get(r[0]),
         })
         colunas.get(r[5], colunas[primeira]).append(card)
         if r[5] != "perdido":
@@ -899,7 +967,13 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
     # a coluna separada (esperando → mês do evento → entrada → parados); com o quadro
     # num mês só, os sem data se separam por SEMANA de entrada
     por_semana = _evl.mes_valido(filtro_entrou)
-    grupos = {chave: _evl.agrupar(cards, agora, por_semana=por_semana) for chave, cards in colunas.items()}
+    # `por_festa`: em quem VENDE DATA o grupo "esperando resposta" ordena pela festa
+    # mais próxima, e não pela mensagem mais nova (decisão do dono, 16/09/2026 — o
+    # porquê, com os números da Prime, está no docstring de `evento_lead.agrupar`).
+    # É o MESMO portão que já decide o resto do modo evento, então nenhuma conta de
+    # outro nicho muda de ordem por causa desta entrega.
+    grupos = {chave: _evl.agrupar(cards, agora, por_semana=por_semana, por_festa=modo_evento)
+              for chave, cards in colunas.items()}
     # a vista por mês: as colunas viram meses (e "Sem data"), a etapa vai pro card
     vista_cols = None
     if vista_mes:
@@ -11232,6 +11306,11 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {% if vista_mes %}<div class="kbetapas"><span class="kbetapa{% if c.etapa_cls %} {{ c.etapa_cls }}{% endif %}">{% if c.proposta_num and c.status == 'proposta' %}Proposta nº {{ c.proposta_num }}{% else %}{{ c.etapa_rot }}{% endif %}</span>{% if c.visita_txt %}<span class="kbetapa vis">{{ c.visita_txt }}</span>{% endif %}</div>{% endif %}
           {% if c.campanha or c.chip_apelido %}<div class="camp">{% if c.campanha %}📣 {{ c.campanha }}{% endif %}{% if c.chip_apelido %}<span class="chip">{% if c.campanha %} · {% endif %}📱 {{ c.chip_apelido }}</span>{% endif %}</div>{% endif %}
           {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido %}<div class="kbch">{% if c.tem_whatsapp %}{% if c.conv_whatsapp %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_whatsapp }},'conversas',this)" title="Abrir a conversa de WhatsApp">💬</button>{% else %}<span title="WhatsApp">💬</span>{% endif %}{% endif %}{% if c.tem_email %}{% if c.conv_email %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_email }},'emails',this)" title="Abrir a conversa de e-mail">✉️</button>{% else %}<span title="E-mail">✉️</span>{% endif %}{% endif %}{% if c.tem_instagram %}{% if c.conv_instagram %}<button type="button" class="kbb" onclick="kbAbrirChat(event,{{ c.conv_instagram }},'conversas',this)" title="Abrir a conversa de Instagram">📸</button>{% else %}<span title="Instagram">📸</span>{% endif %}{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
+          {# O SELO DO FOLLOW-UP (16/09/2026). Vem antes da última mensagem porque
+             responde outra pergunta: a mensagem diz o que tem dentro, o selo diz se
+             está no prazo. Só aparece em conta que já tem a tela de Follow-up e com
+             o modo fora de 'off' — ver a leitura de `fu_por_lead` no handler. #}
+          {% if c.fu %}<div class="kbfu {{ c.fu.estado }}" title="{{ c.fu.acao }}">{{ c.fu.emoji }} {{ c.fu.rotulo }}{% if c.fu.atraso %} · {{ c.fu.atraso }}{% endif %}</div>{% endif %}
           {# A ÚLTIMA MENSAGEM. Fica DEPOIS dos selos de canal e antes do valor
              porque é a informação que decide se vale abrir o card. A bolinha
              verde só acende no que ainda não foi visto e veio do cliente — o que
@@ -11278,6 +11357,16 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 </div>
 
 <style>
+/* ---- o selo do follow-up no card (16/09/2026) ---- */
+.kbfu{margin-top:.4rem;font-size:.68rem;line-height:1.3;border-radius:7px;padding:.2rem .4rem;
+  display:inline-flex;gap:.28rem;align-items:baseline;border:1px solid;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.kbfu.critico{color:#f2603a;border-color:rgba(242,96,58,.42);background:rgba(242,96,58,.12)}
+.kbfu.atrasado{color:#e0574f;border-color:rgba(224,87,79,.42);background:rgba(224,87,79,.12)}
+.kbfu.hoje{color:#e0a32e;border-color:rgba(224,163,46,.42);background:rgba(224,163,46,.12)}
+.kbfu.agendado{color:#7bb8e6;border-color:rgba(123,184,230,.36);background:rgba(123,184,230,.10)}
+.kbfu.andamento{color:#46f58a;border-color:rgba(70,245,138,.30);background:rgba(70,245,138,.09)}
+.kbfu.sem_acao{color:var(--mut,#8FA197);border-color:rgba(143,161,151,.32);background:rgba(143,161,151,.09)}
 .kbgem{margin-top:.4rem;font-size:.7rem;line-height:1.35;color:#e0b45f;background:rgba(224,180,95,.10);
   border:1px solid rgba(224,180,95,.32);border-radius:8px;padding:.3rem .42rem;cursor:default}
 .kbgem a{color:#e0b45f;text-decoration:underline;white-space:nowrap}

@@ -269,3 +269,72 @@ def test_visita_curta_na_semana_e_fora_dela():
     assert ev.visita_curta(datetime(2026, 9, 5, 13, 30, tzinfo=timezone.utc), agora) == "Visita sáb 10h30"
     assert ev.visita_curta(datetime(2026, 11, 21, 13, 0, tzinfo=timezone.utc), agora) == "Visita 21/11"
     assert ev.visita_curta(None, agora) == ""
+
+
+# --------------------------------------------- 'esperando' por festa (16/09/2026)
+#
+# Decisão do dono, olhando a coluna Proposta da Prime com dado real: quem vende
+# data ordena o grupo 'esperando' pela FESTA mais próxima, não pela mensagem mais
+# nova. O caso que decidiu está no docstring de `agrupar` — a Renata Costa, festa
+# em 11 dias esperando há 7, ficava embaixo da Josiany, festa em 15 esperando há 2.
+def _esp(**kw):
+    """Um card que cai no grupo 'esperando': o cliente falou por último, e faz
+    menos de PARADO_DIAS (senão ele vai pra dobra dos parados, que vem antes)."""
+    kw.setdefault("ult_em", AGORA - timedelta(days=1))
+    kw.setdefault("ult", {"minha": False})
+    return _card(**kw)
+
+
+def test_esperando_sem_por_festa_continua_pela_mensagem_mais_nova():
+    """O padrão não muda: conta que não vende data não é afetada por esta entrega."""
+    velha = _esp(id=1, ult_em=AGORA - timedelta(days=7), evento_em=date(2026, 9, 15))
+    nova = _esp(id=2, ult_em=AGORA - timedelta(days=2), evento_em=date(2026, 9, 19))
+    g = ev.agrupar([velha, nova], AGORA)
+    assert g[0]["tipo"] == "esperando"
+    assert [c["id"] for c in g[0]["cards"]] == [2, 1]
+
+
+def test_esperando_por_festa_poe_a_festa_mais_proxima_primeiro():
+    """O caso da Prime, com os números de 16/09: a Renata sobe."""
+    josiany = _esp(id=1, ult_em=AGORA - timedelta(days=2), evento_em=date(2026, 9, 19))
+    renata = _esp(id=2, ult_em=AGORA - timedelta(days=7), evento_em=date(2026, 9, 15))
+    g = ev.agrupar([josiany, renata], AGORA, por_festa=True)
+    assert [c["id"] for c in g[0]["cards"]] == [2, 1], "festa mais próxima primeiro"
+
+
+def test_esperando_por_festa_poe_quem_nao_tem_data_depois_de_quem_tem():
+    com = _esp(id=1, evento_em=date(2027, 6, 1))     # festa longe, mas TEM data
+    sem = _esp(id=2)                                  # sem data nenhuma
+    g = ev.agrupar([com, sem], AGORA, por_festa=True)
+    assert [c["id"] for c in g[0]["cards"]] == [1, 2]
+
+
+def test_esperando_por_festa_manda_a_festa_que_JA_PASSOU_pro_fim():
+    """Sem esta faixa a data vencida seria a 'mais próxima' de todas e abriria a
+    coluna. A Prime tem lead aberto com festa passada — é o caso real."""
+    passou = _esp(id=1, evento_em=date(2026, 8, 30))   # AGORA é 04/09
+    proxima = _esp(id=2, evento_em=date(2026, 9, 20))
+    sem = _esp(id=3)
+    g = ev.agrupar([passou, proxima, sem], AGORA, por_festa=True)
+    assert [c["id"] for c in g[0]["cards"]] == [2, 3, 1]
+
+
+def test_esperando_por_festa_desempata_pela_espera_mais_longa():
+    """Mesma festa: quem está esperando há mais tempo primeiro."""
+    recente = _esp(id=1, evento_em=date(2026, 10, 10), ult_em=AGORA - timedelta(hours=2))
+    antigo = _esp(id=2, evento_em=date(2026, 10, 10), ult_em=AGORA - timedelta(days=6))
+    g = ev.agrupar([recente, antigo], AGORA, por_festa=True)
+    assert [c["id"] for c in g[0]["cards"]] == [2, 1]
+
+
+def test_por_festa_nao_mexe_nos_outros_grupos():
+    """A entrega muda UM grupo. Mês do evento, entrada e a dobra ficam como estão."""
+    esperando = _esp(id=1, evento_em=date(2026, 11, 20))
+    quieto = _card(id=2, evento_em=date(2026, 11, 5), ult_em=AGORA - timedelta(days=40),
+                   criado_em=AGORA - timedelta(days=60))
+    nov = _card(id=3, evento_em=date(2026, 11, 14), ult_em=AGORA - timedelta(days=1))
+    com_festa = ev.agrupar([esperando, quieto, nov], AGORA, por_festa=True)
+    sem_festa = ev.agrupar([esperando, quieto, nov], AGORA)
+    assert [x["tipo"] for x in com_festa] == [x["tipo"] for x in sem_festa]
+    for a, b in zip(com_festa[1:], sem_festa[1:]):
+        assert [c["id"] for c in a["cards"]] == [c["id"] for c in b["cards"]]

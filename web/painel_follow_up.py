@@ -78,10 +78,8 @@ def _quando_curto(quando) -> str:
 
 
 def _tempo(horas) -> str:
-    if horas is None:
-        return "—"
-    h = int(horas)
-    return f"{h}h" if h < 48 else f"{h // 24}d"
+    from web.painel_prospeccao import _tempo_curto as _t
+    return _t(horas)
 
 
 @router.get("/painel/follow-up", response_class=HTMLResponse)

@@ -126,6 +126,18 @@ table.t td b{color:var(--text)}
 <div class="wrap">
 
   <header class="head">
+    <div style="border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:14px;padding:.9rem 1.05rem;margin-bottom:1.4rem">
+      <div style="font:600 .66rem var(--mono);color:var(--coral);letter-spacing:.07em;text-transform:uppercase;margin-bottom:.4rem">Corrigido em 16/09 — a 1ª versão desta página estava errada</div>
+      <p style="margin:0;font-size:.85rem;color:#EED6D3">Eu li o <code>order by</code> do SQL e apresentei como se fosse a ordem da TELA.
+      Não é: depois da consulta o funil passa por <code>evento_lead.agrupar()</code>, que reagrupa cada coluna — e isso está na main
+      <b style="color:#fff">desde 04/09 (#622)</b>. O grupo "🟢 Esperando resposta" <b style="color:#fff">já abre toda coluna</b>, o resto
+      já é agrupado por mês da festa, e quem está parado há 15+ dias já cai numa dobra no pé.
+      <b style="color:#fff">A tabela "hoje" da seção 1 não era o que a tela mostra</b> — era a ordem crua do banco.</p>
+      <p style="margin:.55rem 0 0;font-size:.85rem;color:#EED6D3">O que esta entrega faz, então, é menor e mais preciso:
+      <b style="color:#fff">(1)</b> muda a ordem DENTRO do grupo "esperando" pra festa mais próxima, em quem vende data; e
+      <b style="color:#fff">(2)</b> põe o selo do follow-up no card, que é o que de fato não existia. O resto da página descreve
+      corretamente o resultado final — só não era tudo novidade.</p>
+    </div>
     <div class="k">Mockup para aprovação · 16/09/2026 · nicho <span class="marca">eventos</span> (e o que muda no recorrente)</div>
     <h1>A ordem do funil: quem espera a gente vem primeiro</h1>
     <p>Medido hoje na <b style="color:var(--text)">Prime Eventos</b> (conta 34, 362 leads ativos) e na
@@ -143,63 +155,55 @@ table.t td b{color:var(--text)}
   <!-- ===================== 1. o problema medido ===================== -->
   <section class="sec">
     <div class="k">1 · o que a produção diz</div>
-    <h2>A ordem de hoje põe o lead mais esquecido no topo</h2>
-    <p class="leg">O quadro ordena por <code>proximo_contato_em</code> crescente — o prazo mais antigo primeiro.
-    Parece certo. Só que na Prime <b>81% dos prazos já venceram</b>, então "o mais antigo" é sempre um lead de
-    um mês atrás que ninguém vai tocar.</p>
+    <h2>O que já existe, e o que faltava</h2>
+    <p class="leg">O quadro <b>já</b> põe quem espera a gente no topo de cada coluna, desde 04/09. O que faltava
+    era decidir a ordem <b>dentro</b> desse grupo, e contar no card como está o follow-up. Os números abaixo são
+    o tamanho do problema que sobrou.</p>
 
     <div class="medida">
       <h3>Prime Eventos · conta 34 · 16/09/2026</h3>
       <div class="nums">
         <div class="n"><b>362</b><span>leads ativos no quadro</span></div>
-        <div class="n"><b>295</b><span>com prazo VENCIDO (81%)</span></div>
+        <div class="n"><b>51</b><span>no grupo “esperando resposta”</span></div>
         <div class="n"><b>53</b><span>esperando resposta NOSSA</span></div>
         <div class="n"><b>15</b><span>com mensagem não vista</span></div>
       </div>
-      <p>Os <b>53</b> são a lista que importa — e hoje ela está diluída no meio de 362 cards, sem uma marca
-      sequer. Três pessoas dão conta de 53 num dia; de 362, não dão conta nunca.</p>
+      <p>Os <b>53</b> já aparecem primeiro no quadro. O que eles <b>não</b> têm hoje é ordem que respeite a
+      data da festa, nem um selo dizendo se o acompanhamento está no prazo. É isso que esta entrega resolve.</p>
     </div>
 
-    <p class="leg" style="margin-top:1.1rem">A coluna <b>Contatado</b> (318 leads), os 8 primeiros cards de cada ordem.
-    Mesma coluna, mesmo instante:</p>
+    <p class="leg" style="margin-top:1.1rem">A comparação que importa é <b>dentro do grupo "esperando resposta"</b>
+    da coluna <b>Proposta</b> (15 leads esperando). Mesma coluna, mesmo instante:</p>
 
     <div class="grade2">
       <div class="bloco">
-        <h4>Hoje <small>ordem por prazo</small></h4>
+        <h4>Hoje <small>mensagem mais nova primeiro</small></h4>
         <div class="tabwrap" style="border:none;background:none">
         <table class="t" style="min-width:0">
-          <tr><th>lead</th><th>última conversa</th><th>bola</th></tr>
-          <tr><td>Kelly</td><td class="num">14/08</td><td>com a gente</td></tr>
-          <tr><td>Francisca Guimarães</td><td class="num">14/08</td><td>com o cliente</td></tr>
-          <tr><td>Juval Barbosa</td><td class="num">14/08</td><td>com o cliente</td></tr>
-          <tr><td>Edilene marques</td><td class="num">14/08</td><td>com o cliente</td></tr>
-          <tr><td>Maria Júlia</td><td class="num">14/08</td><td>com o cliente</td></tr>
-          <tr><td>Vanessa 💕</td><td class="num">14/08</td><td>com o cliente</td></tr>
-          <tr><td>Vanessa Lima</td><td class="num">14/08</td><td>com o cliente</td></tr>
-          <tr><td>Giovanna S Carvalho</td><td class="num">14/08</td><td>com o cliente</td></tr>
+          <tr><th>#</th><th>lead</th><th>festa</th><th>espera há</th></tr>
+          <tr><td>1º</td><td>Josiany Rayra Santos</td><td class="num">15 dias</td><td class="num">2 dias</td></tr>
+          <tr><td>2º</td><td>Renata Costa</td><td class="num">11 dias</td><td class="num">7 dias</td></tr>
+          <tr><td>3º</td><td>Larissa Rakel</td><td class="num">507 dias</td><td class="num">8 dias</td></tr>
+          <tr><td>4º</td><td>Iasminne Pinheiro</td><td class="num">59 dias</td><td class="num">8 dias</td></tr>
         </table>
         </div>
-        <p style="color:#E6B3AE"><b style="color:#fff">7 dos 8</b> estão esperando o cliente. A conversa mais nova
-        tem <b style="color:#fff">um mês</b>.</p>
+        <p style="color:#E6B3AE">A <b style="color:#fff">Renata</b> tem a festa mais perto <b style="color:#fff">e</b>
+        espera há mais tempo — e fica em 2º. A Larissa, com festa daqui a ano e meio, fica em 3º.</p>
       </div>
 
       <div class="bloco ok">
-        <h4>Proposto <small>quem espera a gente primeiro</small></h4>
+        <h4>Proposto <small>festa mais próxima primeiro</small></h4>
         <div class="tabwrap" style="border:none;background:none">
         <table class="t" style="min-width:0">
-          <tr><th>lead</th><th>última conversa</th><th>bola</th></tr>
-          <tr><td>MiKaella Nara</td><td class="num">16/09 14:08</td><td>com a gente</td></tr>
-          <tr><td>Janui</td><td class="num">16/09 13:35</td><td>com a gente</td></tr>
-          <tr><td>Bianca Sousa</td><td class="num">16/09 11:13</td><td>com a gente</td></tr>
-          <tr><td>Thompson</td><td class="num">16/09 10:52</td><td>com a gente</td></tr>
-          <tr><td>Verônica Cardoso</td><td class="num">15/09 21:55</td><td>com a gente</td></tr>
-          <tr><td>Bárbara 🌬️</td><td class="num">15/09 20:56</td><td>com a gente</td></tr>
-          <tr><td>Laura💯</td><td class="num">15/09 20:49</td><td>com a gente</td></tr>
-          <tr><td>Paula Juliana Loiola</td><td class="num">14/09 21:54</td><td>com a gente</td></tr>
+          <tr><th>#</th><th>lead</th><th>festa</th><th>espera há</th></tr>
+          <tr><td>1º</td><td><b>Renata Costa</b></td><td class="num"><b>11 dias</b></td><td class="num">7 dias</td></tr>
+          <tr><td>2º</td><td>Josiany Rayra Santos</td><td class="num">15 dias</td><td class="num">2 dias</td></tr>
+          <tr><td>3º</td><td>Iasminne Pinheiro</td><td class="num">59 dias</td><td class="num">8 dias</td></tr>
+          <tr><td>4º</td><td>Larissa Rakel</td><td class="num">507 dias</td><td class="num">8 dias</td></tr>
         </table>
         </div>
-        <p><b>Os 8 estão esperando a gente.</b> A Mikaella escreveu há 7 minutos — hoje ela estaria
-        por volta da posição <b>300</b>.</p>
+        <p>A data manda, porque é ela que tranca a venda: passou o dia da festa, não há segunda chance.
+        Empate de data desempata pela <b>espera mais longa</b>.</p>
       </div>
     </div>
   </section>
@@ -270,31 +274,35 @@ table.t td b{color:var(--text)}
             <div class="pe"><span>respondeu <b>ontem 21:55</b></span><span>PEDRO YAN PRIME</span></div>
           </div>
 
-          <div class="card espera velho">
+          <div class="faixa eles"><span>mês da festa · do mais próximo pro mais distante</span><span class="ln"></span></div>
+
+          <div class="card">
+            <div class="lin1"><strong>Bárbara 🌬️</strong><span class="pill p-quente">🔥 quente</span></div>
+            <div class="bolha"><i>▶</i><span>Combinado, qualquer coisa me chama</span></div>
+            <div class="selos"><span class="pill p-hoj">🟡 Follow-up hoje</span>
+              <span class="pill p-sem">Aniversário</span></div>
+            <div class="pe"><span>falamos <b>ontem</b></span><span>THIAGO PINHEIRO</span></div>
+          </div>
+
+          <div class="faixa frio"><span>▸ Parados 15+ dias · dobra fechada no pé</span><span class="ln"></span></div>
+
+          <div class="card velho">
             <div class="lin1"><strong>Kelly</strong></div>
             <div class="bolha deles"><i>◀</i><span>Ok</span></div>
             <div class="selos"><span class="pill p-cri">🚨 Crítico</span></div>
-            <div class="pe"><span>respondeu <b>há 33 dias</b> — e ninguém voltou</span><span>zaq teste</span></div>
+            <div class="pe"><span>respondeu <b>há 33 dias</b></span><span>zaq teste</span></div>
           </div>
-
-          <div class="faixa eles"><span>esperando o cliente · 282 — o mais atrasado primeiro</span><span class="ln"></span></div>
 
           <div class="card velho">
             <div class="lin1"><strong>Francisca Guimarães</strong></div>
             <div class="bolha"><i>▶</i><span>Olá, tudo bem? 😊 Me chamo Pedro e faço parte da equipe de ate…</span></div>
             <div class="selos"><span class="pill p-cri">🚨 Crítico</span></div>
-            <div class="pe"><span>falamos <b>há 33 dias</b> · sem resposta</span><span>PEDRO YAN PRIME</span></div>
-          </div>
-
-          <div class="card velho">
-            <div class="lin1"><strong>Edilene marques</strong></div>
-            <div class="bolha"><i>▶</i><span>Show!</span></div>
-            <div class="selos"><span class="pill p-cri">🚨 Crítico</span></div>
             <div class="pe"><span>falamos <b>há 33 dias</b></span><span>PEDRO YAN PRIME</span></div>
           </div>
 
-          <p class="nota" style="margin:.7rem 0 0;font-size:.71rem">A faixa <b>sem conversa</b> não aparece aqui:
-          nesta coluna ela tem <b>0 leads</b>. É o item (a) da seção 6.</p>
+          <p class="nota" style="margin:.7rem 0 0;font-size:.71rem">A dobra dos <b>parados 15+ dias</b> e o
+          agrupamento por mês da festa <b>já existem</b> desde 04/09. A Kelly, de 33 dias, nunca esteve no topo —
+          ela está aqui embaixo. Só o <b>selo</b> e a <b>ordem do primeiro grupo</b> são desta entrega.</p>
         </div>
 
         <div class="col">

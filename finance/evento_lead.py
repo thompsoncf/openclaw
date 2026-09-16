@@ -287,8 +287,37 @@ def _semana_chave(d: date) -> str:
     return seg.isoformat()
 
 
+def _ordem_por_festa(card: dict, agora: datetime) -> tuple:
+    """A chave de ordem do grupo 'esperando' em quem vende data (ver `agrupar`).
+
+    Três faixas, nesta ordem: festa que ainda vem, do mais próximo pro mais
+    distante; depois quem não tem data, pela mensagem mais nova; e por último a
+    festa que JÁ PASSOU.
+
+    A festa passada por último é o detalhe que este `if` existe pra resolver: ela
+    é a data mais "próxima" de todas em qualquer comparação ingênua, e sem a
+    faixa ela ocuparia o topo do grupo — a Prime tem lead aberto com data vencida,
+    e o topo da coluna é justamente onde ele não pode estar.
+    """
+    hoje = agora.date()
+    festa = card.get("evento_em")
+    if isinstance(festa, datetime):
+        festa = festa.date()
+    # O DESEMPATE É A ESPERA MAIS LONGA, e vai no sentido contrário ao do padrão
+    # do grupo (lá é a mensagem mais nova). Aqui o que ordena é risco de perder a
+    # venda: com a mesma festa, quem está esperando há mais tempo é quem está mais
+    # perto de desistir. `quando` CRESCENTE = mais antigo primeiro.
+    quando = (_aware(card.get("ult_em")) or agora).timestamp()
+    if festa and festa >= hoje:
+        return (0, (festa - hoje).days, quando)
+    if not festa:
+        return (1, 0, quando)
+    # festa passada: a que passou HÁ MENOS TEMPO primeiro — ainda dá pra salvar.
+    return (2, (hoje - festa).days, quando)
+
+
 def agrupar(cards: list[dict], agora: datetime | None = None, *,
-            por_semana: bool = False) -> list[dict]:
+            por_semana: bool = False, por_festa: bool = False) -> list[dict]:
     """Separa os cards de UMA coluna em grupos, na ordem em que aparecem:
 
       0. esperando resposta (o cliente falou por último) — é o que pede ação;
@@ -299,7 +328,19 @@ def agrupar(cards: list[dict], agora: datetime | None = None, *,
 
     Cada grupo: {tipo: 'esperando'|'evento'|'entrada'|'parado', chave, rotulo,
     cards, n}. Uma coluna que só tem um grupo de entrada volta com rotulo vazio —
-    não há o que separar, e um cabeçalho ali seria enfeite."""
+    não há o que separar, e um cabeçalho ali seria enfeite.
+
+    `por_festa` muda a ordem DENTRO de 'esperando', e só ela. Decisão do dono em
+    16/09/2026, olhando a coluna Proposta da Prime com dado real:
+
+        Josiany Rayra Santos   festa em 15 dias   esperando resposta há 2 dias
+        Renata Costa           festa em 11 dias   esperando resposta há 7 dias
+
+    Pela mensagem mais nova a Renata fica EMBAIXO — com a festa mais perto e
+    esperando há mais tempo. Em quem vende data é a data que tranca a venda, então
+    ali a festa mais próxima vem primeiro. Quem não vende data (perfil recorrente)
+    continua na ordem de sempre: não há o que comparar, e mexer nisso seria mudar
+    a tela de quem não pediu."""
     agora = agora or datetime.now(timezone.utc)
     limite = agora - timedelta(days=PARADO_DIAS)
     esperando: list = []
@@ -321,8 +362,11 @@ def agrupar(cards: list[dict], agora: datetime | None = None, *,
             entrada.setdefault(_semana_chave(base) if por_semana else mes_chave(base), []).append(c)
     grupos = []
     if esperando:
-        # a mensagem mais nova primeiro: é a que está esperando há menos e dói mais
-        esperando.sort(key=lambda x: _aware(x.get("ult_em")) or agora, reverse=True)
+        if por_festa:
+            esperando.sort(key=lambda x: _ordem_por_festa(x, agora))
+        else:
+            # a mensagem mais nova primeiro: é a que está esperando há menos e dói mais
+            esperando.sort(key=lambda x: _aware(x.get("ult_em")) or agora, reverse=True)
         grupos.append({"tipo": "esperando", "chave": "esperando", "rotulo": "🟢 Esperando resposta",
                        "cards": esperando, "n": len(esperando)})
     for k in sorted(evento):

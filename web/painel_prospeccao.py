@@ -1057,6 +1057,9 @@ def prospeccao_base_promover(request: Request, ids: list[str] = Form([]), only: 
     alvos = [only] if (only or "").strip() else ids
     n = 0
     with get_pool().connection() as c:
+        # a outra porta que punha lead no funil sem semear — ver o comentário em
+        # `captar_importar`
+        _etapas(c, ctx["conta_id"])
         for i in alvos:
             try:
                 pid = int(i)
@@ -1673,6 +1676,14 @@ async def captar_importar(request: Request):
     nome_vend = _nome_vendedor(pool, ctx["conta_id"], vend) if ctx["gerencia"] else None
     inseridos, dup, leads = 0, 0, []
     with pool.connection() as c:
+        # SEMEIA AS ETAPAS ANTES DE INSERIR. Esta porta punha lead no funil sem
+        # nunca passar pela que semeia, e o resultado foi medido em 16/09/2026: a
+        # conta 21 (MGB SOLUTIONS) está desde 05/08 com 60 leads e ZERO etapas,
+        # importados por aqui. O estado se cura sozinho quando alguém abre o quadro
+        # — mas `cockpit.mover` consulta `funil_etapas` direto e recusaria o card
+        # com "etapa_invalida" antes disso. Custa nada: `_etapas` só escreve na
+        # conta que ainda não tem etapa nenhuma.
+        _etapas(c, ctx["conta_id"])
         for token in escolhidos:
             d = _unpack(token)
             if not d or not d.get("e"):

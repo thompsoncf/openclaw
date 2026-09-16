@@ -103,6 +103,7 @@ def painel_follow_up(request: Request):
     etapa_f = (q.get("etapa") or "").strip()
 
     linhas, cfg, vendedores, etapas = [], dict(fu._PADRAO), [], []
+    status_tpl: list = []
     try:
         with pool.connection() as c:
             cfg = fu.config(c, conta_id)
@@ -115,6 +116,14 @@ def painel_follow_up(request: Request):
             etapas = [r[0] for r in c.execute(
                 """select chave from funil_etapas where conta_id=%s
                     and fase='venda' order by ordem, id""", (conta_id,)).fetchall()]
+            # (chave, rótulo) de TODAS as etapas, pro seletor da janela do lead.
+            # Difere do `etapas` acima de propósito: aquele é o FILTRO da tela, que
+            # só lista etapa de venda; este é pra onde o lead pode ir, e ganho e
+            # perdido têm que estar lá — "já fechou mas está como contato" é
+            # justamente a troca que o dono pediu. Mesma fonte do funil
+            # (`_etapas`), pra conta que renomeou etapa não ver dois vocabulários.
+            from web.painel_prospeccao import _etapas as _et
+            status_tpl = [(e["chave"], e["rotulo"]) for e in _et(c, conta_id)]
     except Exception:  # noqa: BLE001 — tela que não abre é pior que tela incompleta
         linhas = []
 
@@ -136,6 +145,7 @@ def painel_follow_up(request: Request):
                    perfil=perfil, papel=papel, topo=topo, fila=fila[:200],
                    sobrando=max(0, len(fila) - 200), estado=estado, vend_f=vend_f,
                    etapa_f=etapa_f, vendedores=vendedores, etapas=etapas,
+                   status=status_tpl,
                    gestao=(fu.por_vendedor(linhas) if papel != "vendedor" else []),
                    modo=cfg["follow_up_modo"], rotulo=fu.ROTULO, emoji=fu.EMOJI,
                    por_temp=por_temp, rot_prio=fu.ROTULO_PRIORIDADE,
@@ -239,6 +249,9 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 {# o balão de conversa é o MESMO do funil e do Raio-X (web/balao_conversa.py):
    abre ancorado no botão, sem sair da tela e sem perder a fila aberta #}
 <style>{{ balao_css }}</style>
+{# e a janela do lead é a MESMA do funil (web/janela_lead.py): é nela que a
+   situação no funil se muda daqui, sem sair da fila #}
+<style>{{ janela_css }}</style>
 <style>
 .fu{display:flex;flex-direction:column;gap:1rem}
 .fu h1{font-size:1.5rem;margin:0}
@@ -291,8 +304,12 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 .fu-pill.hoje{color:var(--ambar);border-color:var(--ambar-borda);background:var(--ambar-fundo)}
 .fu-pill.agendado,.fu-pill.andamento{color:var(--neon-bright);border-color:var(--neon-borda);background:var(--neon-fundo)}
 .fu-dir{display:flex;flex-direction:column;gap:.3rem;align-items:flex-end}
-.fu-dir a.bt,.fu-dir summary{font:500 .7rem var(--body);border:1px solid var(--line);background:var(--bg-2);color:var(--text-dim);border-radius:8px;padding:.28rem .55rem;white-space:nowrap;cursor:pointer;list-style:none;text-decoration:none}
-.fu-dir a.bt:hover,.fu-dir summary:hover{border-color:var(--neon-borda);color:var(--neon-bright)}
+/* `button.bt` entrou junto do <a> quando "Abrir ficha" virou janela: o botão
+   herdava o `button{width:100%;margin-top:1.4rem}` global (que é dos formulários
+   de login) e nascia esticado e caído — daí o `width:auto;margin:0` explícito. */
+.fu-dir a.bt,.fu-dir button.bt,.fu-dir summary{font:500 .7rem var(--body);border:1px solid var(--line);background:var(--bg-2);color:var(--text-dim);border-radius:8px;padding:.28rem .55rem;white-space:nowrap;cursor:pointer;list-style:none;text-decoration:none}
+.fu-dir button.bt{width:auto;margin:0;font-family:var(--body)}
+.fu-dir a.bt:hover,.fu-dir button.bt:hover,.fu-dir summary:hover{border-color:var(--neon-borda);color:var(--neon-bright)}
 .fu-dir details[open] summary{border-color:var(--neon-borda);color:var(--neon-bright)}
 .fu-form{margin-top:.35rem;display:flex;flex-direction:column;gap:.3rem;border:1px solid var(--line);border-radius:10px;padding:.5rem;background:var(--bg-2);min-width:230px}
 .fu-form input,.fu-form select{margin:0;font-size:.76rem;padding:.25rem .35rem}
@@ -502,7 +519,14 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
         {% endif %}
       </div>
       <div class="fu-dir">
-        <a class="bt forte" href="/painel/prospeccao/{{ x.id }}">Abrir ficha</a>
+        {#- ABRE A JANELA, não navega (16/09/2026, pedido do dono: "mudar o status
+            pode ser por lá e só deixar abrir uma janela igual tem no funil"). Sair
+            da tela pra ver um lead custava a fila inteira de volta e o lugar onde
+            a pessoa estava; e o que ela precisa ali é pequeno — "este já fechou,
+            muda de contato pra ganho". A ficha completa continua a um clique,
+            no rodapé da própria janela ("Ver ficha completa ↗"). -#}
+        <button type="button" class="bt forte" onclick="kbAbrirLead(event,{{ x.id }},this)"
+                title="ver os dados, o histórico e mudar a situação sem sair da fila">Abrir ficha</button>
         {# UM TOQUE, não um formulário. O prazo já nasce proposto; remarcar é
            quase sempre "empurra pra amanhã / pra semana que vem", e obrigar a
            escolher dia, hora e texto pra isso é o mesmo erro de pedir que o
@@ -564,6 +588,16 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
   {% endif %}
 </div>
 <script>{{ balao_js }}</script>
+{#- `_KB_STATUS` é o que enche o seletor de situação da janela: [[chave, rótulo]]
+    das etapas DESTA conta, ganho e perdido inclusive — é exatamente a troca que o
+    dono pediu ("tem cliente que já fechou mais esta como contato"). Sem ela o
+    seletor sai vazio, e é por isso que a janela lê `window._KB_STATUS`: uma tela
+    que esqueça isto perde o seletor, não o clique inteiro. -#}
+<script>var _KB_STATUS={{ (status or [])|tojson }};
+// o portão do §6 dentro da janela: os campos do evento são declarados aqui, e
+// só pra quem vende data — a conta de mensalidade não recebe nem a palavra.
+{% if perfil.vocab.data %}{{ janela_evento_js }}{% endif %}</script>
+<script>{{ janela_js }}</script>
 
   {#- AS REGRAS, ESCRITAS (07/09/2026, pedido do dono). Tudo aqui sai de
       finance/follow_up.py: a escada, os quatro degraus, os seis estados e os

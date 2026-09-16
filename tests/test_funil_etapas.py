@@ -88,6 +88,54 @@ def test_seed_padrao(pool):
         assert len(pp._etapas(c, conta)) == 7
 
 
+def test_o_carimbo_das_linhas_antigas_GRAVA_de_verdade(pool):
+    """O BUG DE 14/09/2026, e por que ele passou por CI verde e por uma revisão.
+
+    O carimbo (migração 254) estava escrito assim:
+
+        with c.transaction():
+            if _fm.carimbar(c, conta_id):
+                c.commit()          # <- aqui
+
+    psycopg recusa: "Explicit commit() forbidden within a Transaction context".
+    A exceção subia, o `with` fazia ROLLBACK, e o `except Exception` logo abaixo
+    engolia tudo num log.warning. Resultado: `carimbar` rodava, os UPDATEs eram
+    desfeitos, e `semeado_de` ficava nulo — em produção, nas 8 contas, com a tela
+    abrindo normalmente. Sintoma zero.
+
+    Os testes de `funil_modelo.carimbar` passavam porque chamam a função DIRETO.
+    Ninguém exercitava o caminho da tela, que é onde estava o defeito. Este teste
+    entra por `_etapas` e confere no BANCO, com outra conexão — é o que faltava.
+    """
+    with pool.connection() as c:
+        conta = _conta(c, "Carimbo")
+        # linhas como estavam antes da 254: sem carimbo
+        for i, (ch, rot) in enumerate((("novo", "Novo"), ("qualificado", "Qualificado"),
+                                       ("perdido", "Entregue"))):
+            c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem)
+                         values (%s,%s,%s,%s)""", (conta, ch, rot, i * 10))
+        c.commit()
+        pp._etapas(c, conta)          # a leitura da tela é quem carimba
+
+    # OUTRA conexão: é o que prova que gravou, e não que ficou na transação aberta
+    with pool.connection() as c2:
+        r = dict(c2.execute("select chave, semeado_de from funil_etapas where conta_id=%s",
+                            (conta,)).fetchall())
+    assert None not in r.values(), f"o carimbo não gravou: {r}"
+    assert r["novo"] == "semente" and r["qualificado"] == "semente"
+    assert r["perdido"] == ""        # "Entregue" não é semente de ninguém: é do dono
+
+
+def test_carimbar_pela_tela_nao_atrapalha_a_leitura(pool):
+    """O carimbo é efeito colateral de uma leitura: se ele falhar ou não achar nada,
+    a tela abre igual. Aqui a segunda chamada não tem o que carimbar."""
+    with pool.connection() as c:
+        conta = _conta(c, "Carimbo2")
+        et1 = pp._etapas(c, conta)
+        et2 = pp._etapas(c, conta)
+    assert [e["chave"] for e in et1] == [e["chave"] for e in et2]
+
+
 def test_adicionar_etapa(pool, monkeypatch):
     with pool.connection() as c:
         conta = _conta(c, "Add")

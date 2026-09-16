@@ -1214,6 +1214,9 @@ def test_a_fila_traz_o_evento_e_o_periodo_de_cada_lead(pool):
 
 
 def test_fila_agrupada_por_o_que_o_lead_pede():
+    """A ordem POR URGÊNCIA — os grupos por o que o lead pede. Desde 16/09 ela
+    deixou de ser a única e virou a segunda: o padrão é `conversa`, então este
+    teste pede a ordem pelo nome (ver `ck.ORDENS`)."""
     from datetime import date, datetime, timedelta, timezone
     ag = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
 
@@ -1229,19 +1232,20 @@ def test_fila_agrupada_por_o_que_o_lead_pede():
              L(6, dias=40, esperando=1, ult=ag),                    # julho, sua vez — fora
              L(7, dias=40, evento=ag.date() + timedelta(days=10)),  # julho, festa em 30d — fora
              L(8, esperando=3, ia=True)]                            # o agente atende: não é "sua vez"
-    f = ck.fila_agrupada(leads, entrou="2026-09", fora_on=[], agora=ag)
+    f = ck.fila_agrupada(leads, entrou="2026-09", fora_on=[], agora=ag, ordem="urgencia")
     assert [(g["chave"], [l["id"] for l in g["leads"]]) for g in f["grupos"]] == [
         ("vez", [1]), ("festa", [3, 2]), ("sem", [4, 8])]
     assert f["fora_cont"] == {"suavez": 1, "festa30": 1} and f["n_quadro"] == 5 and f["total"] == 8
     assert [(m["chave"], m["n"], m["on"], m["curto"]) for m in f["meses"]] == [
         ("2026-09", 5, True, "Set"), ("2026-07", 3, False, "Jul"), ("tudo", 8, False, "Tudo")]
     # liga "sua vez" e "30 dias": os de julho entram, marcados
-    f2 = ck.fila_agrupada(leads, entrou="2026-09", fora_on=["suavez", "festa30"], agora=ag)
+    f2 = ck.fila_agrupada(leads, entrou="2026-09", fora_on=["suavez", "festa30"],
+                          agora=ag, ordem="urgencia")
     assert [(g["chave"], [l["id"] for l in g["leads"]]) for g in f2["grupos"]] == [
         ("vez", [1, 6]), ("festa", [7, 3, 2]), ("sem", [4, 8])]
     assert all(l["fora"] for l in leads if l["id"] in (6, 7)) and leads[5]["entrou_rot"] == "jul"
     # tudo: julho inteiro, com o parado na dobra
-    f3 = ck.fila_agrupada(leads, entrou="tudo", fora_on=[], agora=ag)
+    f3 = ck.fila_agrupada(leads, entrou="tudo", fora_on=[], agora=ag, ordem="urgencia")
     assert f3["grupos"][-1]["chave"] == "parados" and f3["grupos"][-1]["dobra"] is True
     assert [l["id"] for l in f3["grupos"][-1]["leads"]] == [5]
 
@@ -1262,6 +1266,8 @@ def _fila_html(monkeypatch, pool, conta, vend, req=None, vende=True, **kw):
 
 
 def test_a_fila_abre_no_mes_atual_com_pilulas_grupos_e_a_linha_do_evento(pool, monkeypatch):
+    """O recorte de mês e as pílulas de fora vivem na ordem POR URGÊNCIA — é lá que
+    existe um "fora" pra trazer de volta. Na ordem por conversa não há mês."""
     from datetime import date
     with pool.connection() as c:
         conta = _conta(c)
@@ -1277,7 +1283,7 @@ def test_a_fila_abre_no_mes_atual_com_pilulas_grupos_e_a_linha_do_evento(pool, m
         p_ = _lead(c, conta, vend, "So Pista")
         c.execute("update prospeccao set evento_pista='falou de março' where id=%s", (p_,))
         c.commit()
-    html, req = _fila_html(monkeypatch, pool, conta, vend)
+    html, req = _fila_html(monkeypatch, pool, conta, vend, ordem="urgencia")
     assert "Deste Mes" in html and "Sem Data" in html and "Do Mes Passado" not in html
     assert "3 de 4 · " in html and "🟢 sua vez <b>1</b>" in html          # o subtítulo e a pílula de fora
     assert "🟢 Sua vez <b>1</b>" in html and "📅 Sem data <b>2</b>" in html
@@ -1562,6 +1568,134 @@ def test_a_caixa_de_busca_nao_usa_classe_de_cortina(pool, monkeypatch):
         f"position:fixed — vira cortina por cima do app inteiro")
 
 
+def test_por_conversa_preserva_a_ordem_que_o_sql_trouxe():
+    """`_base_leads_sql` já devolve por `coalesce(ultima_msg_em, atualizado_em) desc`.
+    Reordenar de novo aqui seria uma SEGUNDA definição de "mais recente" — e duas
+    definições viram dois resultados no dia em que uma delas mudar.
+
+    A lista de entrada é montada de propósito com id, `criado_em` e `ult_em` em
+    ORDENS DIFERENTES: qualquer reordenação por qualquer uma dessas chaves muda o
+    resultado, e o teste vê.
+
+    (A primeira versão deste teste vivia no banco, e lá os leads nasciam no mesmo
+    `now()` de transação — ordenar por `criado_em` era um no-op e a mutação
+    passava. É a mesma armadilha do `now()` que o `_base_leads_sql` documenta.)"""
+    from datetime import datetime, timedelta, timezone
+    ag = datetime(2026, 9, 16, 12, tzinfo=timezone.utc)
+
+    def L(i, *, entrou, falou):
+        return {"id": i, "ia": True, "esperando": 0, "evento_em": None,
+                "criado_em": ag - timedelta(days=entrou), "ult_em": ag - timedelta(days=falou)}
+
+    # id crescente, criado_em crescente, ult_em decrescente — as três discordam
+    leads = [L(3, entrou=1, falou=0), L(1, entrou=40, falou=2), L(2, entrou=10, falou=9)]
+    f = ck.fila_agrupada(leads, entrou="2026-09", fora_on=[], agora=ag, ordem="conversa")
+    assert [l["id"] for l in f["grupos"][0]["leads"]] == [3, 1, 2]
+    assert f["grupos"][0]["rotulo"] == "" and len(f["grupos"]) == 1
+    assert f["ordem"] == "conversa" and f["n_quadro"] == 3
+    # e a lista vazia não inventa um grupo sem cards
+    assert ck.fila_agrupada([], entrou="2026-09", fora_on=[], agora=ag,
+                            ordem="conversa")["grupos"] == []
+
+
+def test_a_hora_da_lista_escala_como_no_whatsapp():
+    """Quatro formatos, porque os quatro casos estão vivos na conta 34 (2 falaram
+    hoje, 18 ontem, 88 na semana, 246 há mais de 7 dias). Só a hora diria "07:42"
+    pra uma mensagem de julho; só a data diria "16/09" pra uma de dez minutos."""
+    from datetime import datetime, timedelta
+    from finance import agenda as ag
+    from web.painel_cockpit import _quando_br
+    n = datetime.now(ag.BRT)
+    assert ":" in _quando_br(n - timedelta(minutes=5))          # hoje: a hora
+    assert _quando_br(n - timedelta(days=1)) == "ontem"
+    assert _quando_br(n - timedelta(days=3)) in _SEM            # na semana: o dia
+    assert _quando_br(n - timedelta(days=6)) in _SEM
+    assert "/" in _quando_br(n - timedelta(days=9))             # depois: a data
+    # o ANO só aparece fora do corrente — "14/09/2026" não cabe no card
+    assert _quando_br(n - timedelta(days=9)).count("/") == 1
+    assert _quando_br(n - timedelta(days=400)).count("/") == 2
+    # relógio torto de aparelho não vira "há -1 dia": o futuro cai em "hoje"
+    assert ":" in _quando_br(n + timedelta(hours=2))
+    assert _quando_br(None) == "" and _quando_br("ontem") == ""
+
+
+_SEM = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
+
+
+def test_por_conversa_poe_na_frente_quem_falou_por_ultimo(pool, monkeypatch):
+    """O caso que motivou (mockup fila_ordem_de_conversa): a Bianca escreveu às
+    07:42 — a mensagem mais recente da carteira — e caía na posição 43, porque o
+    grupo "festa marcada" ordena pela data da FESTA e vinha inteiro na frente.
+
+    Aqui em miniatura: quem falou por último tem que ser o PRIMEIRO card da tela,
+    e não pode haver cabeçalho de grupo dividindo a lista."""
+    from datetime import date
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Pedro", email="pedro-ordem@x.com")
+        festa = _lead(c, conta, vend, "Tem Festa Em Outubro")
+        c.execute("update prospeccao set evento_em=%s where id=%s", (date(2026, 10, 10), festa))
+        # o agente atende as duas: assim nenhuma é "sua vez", e o que sobra pra
+        # comparar é exatamente a diferença entre as duas ordens — data da festa
+        # contra data da mensagem
+        _conv_msg(c, conta, festa, texto="vou ver com meu esposo", ha_dias=3, ia=True)
+        bianca = _lead(c, conta, vend, "Bianca Sousa")
+        _conv_msg(c, conta, bianca, texto="bom dia! ainda tem para dezembro?", ia=True)
+        c.commit()
+    # POR CONVERSA (o padrão): a Bianca vem primeiro, sem grupo nenhum
+    html, req = _fila_html(monkeypatch, pool, conta, vend)
+    assert html.index("Bianca Sousa") < html.index("Tem Festa Em Outubro")
+    assert "🎉 Festa marcada" not in html and "📅 Sem data" not in html
+    assert "class='opt on' href='/cockpit?ordem=conversa'" in html
+    # POR URGÊNCIA: os grupos voltam e a festa sobe na frente
+    urg, _ = _fila_html(monkeypatch, pool, conta, vend, req=req, ordem="urgencia")
+    assert "🎉 Festa marcada" in urg
+    assert urg.index("Tem Festa Em Outubro") < urg.index("Bianca Sousa")
+    # a escolha fica na sessão, como o mês
+    assert req.session["ck_ordem"] == "urgencia"
+    volta, _ = _fila_html(monkeypatch, pool, conta, vend, req=req)
+    assert "🎉 Festa marcada" in volta
+
+
+def test_por_conversa_nao_recorta_por_mes(pool, monkeypatch):
+    """A FLAVIA entrou em 17/08 e escreveu em 14/09: na ordem por urgência ela some
+    (a Fila abre no mês corrente), e é justamente ela que está falando com você.
+    A pergunta "quem falou por último" não é sobre quando o lead entrou."""
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Pedro", email="pedro-mes@x.com")
+        flavia = _lead(c, conta, vend, "FLAVIA")
+        c.execute("update prospeccao set criado_em = now() - interval '40 days' where id=%s",
+                  (flavia,))
+        _conv_msg(c, conta, flavia, texto="vou confirmar a data e te falo")
+        c.commit()
+    html, req = _fila_html(monkeypatch, pool, conta, vend)
+    assert "FLAVIA" in html
+    # e o card dela não fica APAGADO: `.fora` é o cinza de "veio de outro mês", e
+    # aqui não há mês de onde vir
+    assert "class='lead front fora'" not in html
+    urg, _ = _fila_html(monkeypatch, pool, conta, vend, req=req, ordem="urgencia")
+    assert "FLAVIA" not in urg
+
+
+def test_o_card_diz_quando_a_pessoa_falou(pool, monkeypatch):
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Pedro", email="pedro-hora@x.com")
+        hoje = _lead(c, conta, vend, "Falou Hoje")
+        _conv_msg(c, conta, hoje, texto="bom dia")
+        velho = _lead(c, conta, vend, "Falou Faz Tempo")
+        _conv_msg(c, conta, velho, texto="depois eu vejo", ha_dias=20)
+        c.commit()
+    html, _ = _fila_html(monkeypatch, pool, conta, vend)
+    # a coluna da direita existe, com a hora em cima
+    assert "<span class=dir>" in html
+    # quem falou HOJE fica verde; quem falou faz tempo, não — o verde separa
+    # "responder agora" de "responder hoje", e aceso sempre não separaria nada
+    assert "<span class='h novo'>" in html
+    assert html.count("<span class='h novo'>") == 1
+
+
 def test_as_pilulas_com_proposta_e_com_data_recortam_no_banco(pool, monkeypatch):
     from datetime import date
     with pool.connection() as c:
@@ -1582,12 +1716,20 @@ def test_as_pilulas_com_proposta_e_com_data_recortam_no_banco(pool, monkeypatch)
     html, req = _fila_html(monkeypatch, pool, conta, vend)
     assert "📄 com proposta <b>1</b>" in html and "📅 com data <b>1</b>" in html
     assert "<span class='chip prop'>📄 nº 23 · aprovada</span>" in html
-    # liga "com proposta": só ela sobra, o mês perde o número (a lista já veio
-    # recortada, e contar por mês ali diria um número que muda sozinho)
+    # liga "com proposta": só ela sobra
     so, _ = _fila_html(monkeypatch, pool, conta, vend, req=req, entrou="prop")
     assert "Tem Proposta" in so and "Tem Festa" not in so and "Sem Nada" not in so
-    assert "1 com proposta · de 3 abertos" in so
-    assert "class='pil nova on'" in so and "Tudo <b>" not in so
+    assert "1 com proposta · de 3 abertos" in so and "class='pil nova on'" in so
+    # ...e "Tudo" é o caminho de VOLTA, com o número da carteira inteira. Na ordem
+    # por conversa não existem pílulas de mês, então sem ele o vendedor entraria no
+    # recorte e não teria como sair.
+    assert "Tudo <b>3</b>" in so
+    # já na ordem por URGÊNCIA, dentro de um recorte, o mês aparece SEM número: a
+    # lista que chegou já veio filtrada, e contar por mês ali diria "Set 1" pra um
+    # mês que tem 3 — número que muda sozinho ao tocar na pílula.
+    urg, _ = _fila_html(monkeypatch, pool, conta, vend, req=req, entrou="prop",
+                        ordem="urgencia")
+    assert "Tudo <b>3</b>" not in urg and ">Tudo</a>" in urg
 
 
 def test_com_data_some_em_conta_que_nao_vende_data(pool, monkeypatch):

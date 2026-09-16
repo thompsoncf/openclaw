@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="pt-br">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fila · a hora e a ordem da conversa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --ink:#062011;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo)}
+.wrap{max-width:1100px;margin:0 auto;padding:2.6rem 1rem 5rem;display:flex;flex-direction:column;gap:2.9rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.6rem,4vw,2.2rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:74ch}
+.marca{color:var(--neon)}
+.sec>h2{font-size:1.25rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.1rem;max-width:80ch;font-size:.9rem}
+.num{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em}
+
+.nota{border-left:2.5px solid var(--azul-borda);background:var(--azul-fundo);padding:.85rem 1rem;
+  border-radius:0 10px 10px 0;font-size:.88rem;color:var(--text-dim)}
+.nota b{color:var(--text)}
+.nota.mal{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.nota.amb{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.nota.ok{border-color:var(--neon-borda);background:var(--neon-fundo)}
+
+table.dados{width:100%;border-collapse:collapse;font-size:.85rem}
+@media(max-width:700px){
+  .sec>table.dados{display:block;overflow-x:auto;white-space:nowrap}
+}
+table.dados th{text-align:left;font-size:.64rem;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--text-faint);font-weight:600;padding:.4rem .55rem;border-bottom:1px solid var(--line)}
+table.dados td{padding:.42rem .55rem;border-bottom:1px solid var(--line);color:var(--text-dim)}
+table.dados td.n{text-align:right;font-family:var(--mono)}
+table.dados td.nome{color:var(--text)}
+table.dados .ruim{color:var(--coral);font-weight:600}
+table.dados .bom{color:var(--neon-bright);font-weight:600}
+
+/* ====== celulares ====== */
+.fones{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.4rem;align-items:start}
+@media(max-width:860px){.fones{grid-template-columns:1fr}}
+.fone{border:1px solid var(--line);border-radius:26px;background:var(--bg);overflow:hidden;
+  display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.fone>.cap{padding:.55rem .9rem;font-size:.67rem;text-transform:uppercase;letter-spacing:.08em;
+  font-weight:600;border-bottom:1px solid var(--line)}
+.fone.antes>.cap{color:var(--coral);background:var(--coral-fundo)}
+.fone.depois>.cap{color:var(--neon-bright);background:var(--neon-fundo)}
+.tela{padding:.8rem .8rem .95rem;display:flex;flex-direction:column;gap:.5rem}
+.hdr{display:flex;flex-direction:column;gap:.05rem;padding-bottom:.15rem}
+.hdr b{font-family:var(--display);font-size:1.02rem}
+.hdr small{color:var(--text-dim);font-size:.72rem}
+.busca{display:flex;align-items:center;gap:.4rem;border:1px solid var(--line);border-radius:999px;
+  padding:.36rem .7rem;background:var(--surface);font-size:.75rem;color:var(--text-faint)}
+.pils{display:flex;gap:.28rem;flex-wrap:wrap}
+.pil{font-size:.65rem;padding:.2rem .5rem;border-radius:999px;border:1px solid var(--line);
+  color:var(--text-dim);background:var(--surface);white-space:nowrap}
+.pil.on{background:var(--neon);border-color:var(--neon);color:var(--ink);font-weight:600}
+.pil.nova{border-style:dashed}
+.grp{font-size:.6rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);
+  font-weight:600;margin-top:.3rem}
+
+/* a linha do lead — layout do WhatsApp: ponto · meio · coluna da direita */
+.row{display:flex;gap:.55rem;align-items:flex-start;border:1px solid var(--line);
+  border-radius:11px;background:var(--surface);padding:.5rem .6rem}
+.row.on{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.row .dot{width:7px;height:7px;border-radius:50%;background:var(--ambar);flex:none;margin-top:.38rem}
+.row .mid{flex:1;min-width:0}
+.row .emp{font-size:.81rem;font-weight:600;display:block;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.row .sn{font-size:.69rem;color:var(--text-faint);display:block;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.row .ev{font-size:.67rem;color:var(--ambar);display:block}
+/* a COLUNA DA DIREITA: hora em cima, bolinha embaixo. É o desenho do WhatsApp. */
+.dir{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:.25rem;min-width:2.6rem}
+.dir .h{font-family:var(--mono);font-size:.63rem;color:var(--text-faint);white-space:nowrap}
+.dir .h.novo{color:var(--neon-bright)}
+.dir .n{background:var(--coral);color:#fff;font-size:.6rem;font-weight:700;border-radius:999px;
+  min-width:1.05rem;height:1.05rem;display:grid;place-items:center;padding:0 .25rem}
+.pos{font-family:var(--mono);font-size:.6rem;color:var(--coral);flex:none;margin-top:.4rem}
+.pos.ok{color:var(--neon-bright)}
+.rolar{text-align:center;font-size:.7rem;color:var(--text-faint);padding:.4rem 0;font-style:italic}
+.bloco{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.6rem .7rem}
+.bloco.dest{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.bloco.alerta{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.faltou{font-size:.76rem;color:var(--coral);display:flex;gap:.4rem;align-items:baseline}
+.faltou b{color:var(--coral)}
+/* ESCOPADO: `.faltou b` em coral também pintava os negritos do bloco VERDE, e o
+   "depois" saía com duas frases em vermelho — a mesma armadilha do `.mal`/`.ok`
+   solto do mockup anterior, e do `.lupa` que virou cortina em produção. Só o
+   render mostra; a fonte não mostra. */
+.bloco.dest .faltou b{color:var(--text)}
+
+/* seletor de ordem */
+.ordem{display:flex;gap:.25rem;background:var(--surface);border:1px solid var(--line);
+  border-radius:999px;padding:.15rem}
+.ordem span{flex:1;text-align:center;font-size:.67rem;padding:.25rem .3rem;border-radius:999px;
+  color:var(--text-dim)}
+.ordem span.on{background:var(--neon);color:var(--ink);font-weight:600}
+
+ul.reg{margin:.4rem 0 0;padding-left:1.15rem;color:var(--text-dim);font-size:.89rem}
+ul.reg li{margin:.34rem 0}
+ul.reg b{color:var(--text)}
+.opcoes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem}
+@media(max-width:820px){.opcoes{grid-template-columns:1fr}}
+.op{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.9rem 1rem}
+.op.rec{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.op h3{font-size:.95rem;margin-bottom:.3rem}
+.op .tag{font-size:.6rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;
+  color:var(--neon-bright)}
+.op p{margin:.3rem 0 0;font-size:.83rem;color:var(--text-dim)}
+.op p b{color:var(--text)}
+</style>
+<div class="wrap">
+
+<div class="head">
+  <div class="eyebrow">Prime Eventos <span class="marca">·</span> conta 34 <span class="marca">·</span> lido em 16/09/2026</div>
+  <h1>A hora na lista, e a ordem da conversa</h1>
+  <p>Dois pedidos do dono, que são o mesmo problema visto de dois lados: <b>a Fila
+  não diz quando a pessoa falou</b>, e <b>não põe na frente quem falou por
+  último</b> — que é como o WhatsApp funciona e como o vendedor pensa.</p>
+</div>
+
+<!-- ======================================================= o que já existe -->
+<div class="sec">
+  <h2>O que já existe (pra não refazer)</h2>
+  <p class="leg">Dentro da conversa, a hora já está lá desde o começo — com a
+  tarja de dia do WhatsApp.</p>
+  <ul class="reg">
+    <li><b>Bolha do chat:</b> <code>_hora_br</code> põe <code>HH:MM</code> em cada
+    mensagem, no fuso de Brasília.</li>
+    <li><b>Tarja do dia:</b> <code>_dia_br</code> escreve <b>HOJE</b>, <b>ONTEM</b>
+    ou a data, e só quando o dia vira.</li>
+    <li><b>A lista ordena por conversa no SQL</b> —
+    <code>order by ultima_msg_em desc</code>. O problema não é a consulta: é o que
+    a tela faz com ela depois.</li>
+  </ul>
+  <div class="nota" style="margin-top:.9rem">
+    <b>Então o trabalho é só na LISTA.</b> Falta a hora em cada linha, e falta
+    respeitar a ordem que a consulta já traz.
+  </div>
+</div>
+
+<!-- ======================================================= a medição -->
+<div class="sec">
+  <div class="num">A CONTA QUE FECHA O ASSUNTO</div>
+  <h2>Quem falou hoje está na posição 43</h2>
+  <p class="leg">Carteira do Pedro Yan, 147 leads abertos. Ordenei por última
+  mensagem (a ordem do WhatsApp) e conferi em que posição cada um cai na Fila de
+  hoje.</p>
+
+  <table class="dados">
+    <tr><th>Quem</th><th>Última mensagem</th><th>Grupo de hoje</th>
+        <th class="n">Posição hoje</th><th class="n">Se fosse WhatsApp</th></tr>
+    <tr><td class="nome">Bianca Sousa</td><td>16/09 07:42</td><td>sem data</td><td class="n ruim">43</td><td class="n bom">1</td></tr>
+    <tr><td class="nome">Verônica Cardoso</td><td>15/09 18:55</td><td>sua vez</td><td class="n bom">1</td><td class="n bom">2</td></tr>
+    <tr><td class="nome">Leidi 💐💖</td><td>15/09 17:27</td><td>festa marcada</td><td class="n ruim">24</td><td class="n bom">3</td></tr>
+    <tr><td class="nome">Raymara Santos</td><td>15/09 17:23</td><td>festa marcada</td><td class="n ruim">26</td><td class="n bom">4</td></tr>
+    <tr><td class="nome">Analyce Fernandes</td><td>15/09 17:21</td><td>festa marcada</td><td class="n ruim">32</td><td class="n bom">5</td></tr>
+    <tr><td class="nome">Jacque/Bruna Shellyda</td><td>15/09 16:42</td><td>sem data</td><td class="n ruim">44</td><td class="n bom">6</td></tr>
+    <tr><td class="nome">Nina🍀</td><td>14/09 18:50</td><td>sem data</td><td class="n ruim">45</td><td class="n bom">7</td></tr>
+    <tr><td class="nome">FLAVIA</td><td>14/09 15:47</td><td>festa marcada</td><td class="n ruim">21</td><td class="n bom">8</td></tr>
+  </table>
+
+  <div class="nota mal" style="margin-top:1rem">
+    <b>A Bianca escreveu às 7h42 de hoje</b> — é a mensagem mais recente da
+    carteira inteira do Pedro. Ela está na <b>posição 43</b>: umas oito telas de
+    rolagem, num celular. As oito primeiras por conversa caem nas posições
+    <b>43, 1, 24, 26, 32, 44, 45 e 21</b>.
+    <br><br>
+    <b>E a FLAVIA nem está na tela.</b> Ela entrou em 17/08 e escreveu em 14/09 —
+    a Fila abre no mês corrente, então ela é invisível por padrão. É a mesma
+    armadilha da busca, do PR #698: um recorte que esconde justamente quem está
+    falando com você.
+  </div>
+
+  <p class="leg" style="margin-top:1.1rem">E é isso que a lista tem pra mostrar,
+  por idade da última mensagem:</p>
+  <table class="dados">
+    <tr><th>Conta</th><th class="n">Abertos</th><th class="n">Falaram hoje</th>
+        <th class="n">Ontem</th><th class="n">Esta semana</th><th class="n">Mais de 7 dias</th></tr>
+    <tr><td class="nome">Prime Eventos (34, eventos)</td><td class="n">354</td><td class="n">2</td><td class="n">18</td><td class="n">88</td><td class="n">246</td></tr>
+    <tr><td class="nome">ZAQ (3, recorrente)</td><td class="n">252</td><td class="n">0</td><td class="n">0</td><td class="n">1</td><td class="n">251</td></tr>
+  </table>
+  <div class="nota" style="margin-top:.8rem">
+    Os quatro casos existem, então o rótulo da hora precisa dos quatro formatos. Na
+    ZAQ quase tudo cai em "mais de 7 dias" — lá a coluna vira data, e tudo bem:
+    ela continua dizendo a verdade, que é <b>faz muito tempo que ninguém fala com
+    essa pessoa</b>.
+  </div>
+</div>
+
+<!-- ======================================================= como é no whatsapp -->
+<div class="sec">
+  <h2>Como o WhatsApp faz</h2>
+  <p class="leg">Vale olhar porque o vendedor já tem o WhatsApp aberto o dia
+  inteiro — o que ele aprendeu lá é o que ele espera aqui.</p>
+  <ul class="reg">
+    <li><b>Uma lista só</b>, ordenada pela <b>última mensagem</b>, da mais nova pra
+    mais velha. Sem grupos, sem seções.</li>
+    <li><b>A hora fica na direita</b>, em cima; a bolinha de não lidas fica embaixo
+    dela, na mesma coluna.</li>
+    <li><b>O formato da hora muda com a idade:</b> <code>07:42</code> hoje,
+    <b>Ontem</b>, o <b>dia da semana</b> na última semana, e a <b>data</b> depois
+    disso.</li>
+    <li><b>A prévia leva quem falou:</b> "Você:" quando a última foi sua, e
+    "🎤 Áudio" / "📷 Foto" quando não é texto.</li>
+    <li><b>Fixados no topo</b> (até 3), fora da ordem — é a única exceção.</li>
+    <li><b>E o WhatsApp também tem pílulas</b> hoje (Tudo · Não lidas · Grupos).
+    Ou seja: <b>filtrar por pílula é do WhatsApp; separar a lista em grupos fixos
+    não é.</b></li>
+  </ul>
+</div>
+
+<!-- ======================================================= antes e depois -->
+<div class="sec">
+  <h2>Antes e depois</h2>
+
+  <div class="fones">
+    <div class="fone antes"><div class="cap">Hoje</div>
+      <div class="tela">
+        <div class="hdr"><b>Meus leads</b><small>147 abertos · 12 sua vez</small></div>
+        <div class="busca">🔎 <span>Procurar por nome ou número</span></div>
+        <div class="pils">
+          <span class="pil on">Set <b>41</b></span><span class="pil">Ago <b>77</b></span>
+          <span class="pil">Tudo <b>147</b></span><span class="pil nova">com proposta <b>10</b></span>
+        </div>
+        <div class="grp">🟢 Sua vez <b>12</b></div>
+        <div class="row"><span class="dot"></span><span class="mid">
+          <span class="emp">Verônica Cardoso</span>
+          <span class="sn">pode me mandar o orçamento?</span></span>
+          <span class="pos ok">#1</span></div>
+        <div class="grp">🎉 Festa marcada <b>29</b></div>
+        <div class="row"><span class="dot"></span><span class="mid">
+          <span class="emp">Nágna Nogueira 🍃</span>
+          <span class="ev">💍 10/10 · 120 conv.</span>
+          <span class="sn">vou ver com meu esposo</span></span>
+          <span class="pos">#16</span></div>
+        <div class="rolar">… mais 27 cartões de festa, por data</div>
+        <div class="grp">📅 Sem data <b>63</b></div>
+        <div class="row"><span class="dot"></span><span class="mid">
+          <span class="emp">Bianca Sousa</span>
+          <span class="sn">bom dia! ainda tem para dezembro?</span></span>
+          <span class="pos">#43</span></div>
+        <div class="bloco alerta">
+          <div class="faltou"><span>●</span><span><b>Nenhuma linha diz quando foi.</b>
+          E a Bianca, que escreveu hoje às 7h42, está na 43ª — embaixo de 29 festas
+          ordenadas por data de festa.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fone depois"><div class="cap">Proposto</div>
+      <div class="tela">
+        <div class="hdr"><b>Meus leads</b><small>147 abertos · 12 sua vez</small></div>
+        <div class="busca">🔎 <span>Procurar por nome ou número</span></div>
+        <div class="ordem"><span class="on">Por conversa</span><span>Por urgência</span></div>
+        <div class="pils">
+          <span class="pil on">Tudo <b>147</b></span><span class="pil">🟢 sua vez <b>12</b></span>
+          <span class="pil nova">com proposta <b>10</b></span>
+          <span class="pil nova">com data <b>63</b></span>
+        </div>
+        <div class="row on"><span class="dot" style="background:var(--neon)"></span><span class="mid">
+          <span class="emp">Bianca Sousa</span>
+          <span class="sn">bom dia! ainda tem para dezembro?</span></span>
+          <span class="dir"><span class="h novo">07:42</span><span class="n">2</span></span></div>
+        <div class="row"><span class="dot"></span><span class="mid">
+          <span class="emp">Verônica Cardoso</span>
+          <span class="ev">🎉 08/05/27</span>
+          <span class="sn">pode me mandar o orçamento?</span></span>
+          <span class="dir"><span class="h">ontem</span><span class="n">1</span></span></div>
+        <div class="row"><span class="dot"></span><span class="mid">
+          <span class="emp">Leidi 💐💖</span>
+          <span class="ev">💍 15/12 · 150 conv.</span>
+          <span class="sn">Você: Ahh sim, tranquilo! Pois fico…</span></span>
+          <span class="dir"><span class="h">ontem</span></span></div>
+        <div class="row"><span class="dot"></span><span class="mid">
+          <span class="emp">Jacque/Bruna Shellyda</span>
+          <span class="sn">Você: 🎤 Áudio (0:43)</span></span>
+          <span class="dir"><span class="h">ontem</span></span></div>
+        <div class="row"><span class="dot"></span><span class="mid">
+          <span class="emp">FLAVIA</span>
+          <span class="ev">🎂 26/11 · 80 conv.</span>
+          <span class="sn">vou confirmar a data e te falo</span></span>
+          <span class="dir"><span class="h">seg</span></span></div>
+        <div class="row"><span class="dot"></span><span class="mid">
+          <span class="emp">Agna Luíza</span>
+          <span class="ev">💍 29/07/27</span>
+          <span class="sn">Você: segue o pacote experience</span></span>
+          <span class="dir"><span class="h">14/09</span></span></div>
+        <div class="bloco dest">
+          <div class="faltou" style="color:var(--text-dim)"><span style="color:var(--neon-bright)">✓</span>
+          <span>Uma lista só, na ordem da conversa. A <b>hora na direita</b> com a
+          bolinha embaixo, e a <b>FLAVIA aparece</b> — a ordem por conversa não
+          recorta por mês.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================= a decisão -->
+<div class="sec">
+  <div class="num">A DECISÃO QUE PRECISA DE VOCÊ</div>
+  <h2>Os grupos somem, ou viram a outra ordem?</h2>
+  <p class="leg">A ordem por conversa e os grupos por urgência respondem perguntas
+  diferentes, e as duas são verdadeiras. Não dá pra ter as duas na mesma lista —
+  ou o mais recente vem na frente, ou o mais urgente vem. Três caminhos:</p>
+
+  <div class="opcoes">
+    <div class="op">
+      <h3>A. Vira WhatsApp e pronto</h3>
+      <p>Uma lista só, por última mensagem. Os grupos viram <b>pílulas</b> (que é o
+      que o WhatsApp fez também). <b>Custo:</b> some a visão "festas na ordem da
+      data", que é do nicho eventos e o Pedro usa pra saber quem está mais perto
+      da festa.</p>
+    </div>
+    <div class="op rec">
+      <div class="tag">Recomendado</div>
+      <h3>B. Duas ordens, uma chavinha</h3>
+      <p><b>Por conversa</b> (padrão) e <b>Por urgência</b> (o que existe hoje), num
+      seletor no topo. O dia começa respondendo quem falou; quando ele quer
+      planejar a semana pelas festas, troca. <b>Nada se perde e nada fica
+      escondido.</b></p>
+    </div>
+    <div class="op">
+      <h3>C. Só conserta a festa</h3>
+      <p>Mantém os grupos e ordena <b>"festa marcada" por última mensagem</b> em vez
+      de por data da festa. <b>Custo:</b> a Bianca continua na 43ª — o grupo dela
+      vem depois das 29 festas de qualquer jeito. Resolve pouco.</p>
+    </div>
+  </div>
+
+  <div class="nota amb" style="margin-top:1.1rem">
+    <b>Por que eu recomendo a B.</b> A ordem por urgência não é burrice — ela foi
+    desenhada pra responder "o que eu faço agora", e responde. O problema é ela ser
+    a ÚNICA: quando o cliente escreve, a pergunta do vendedor deixa de ser "o que
+    eu faço agora" e passa a ser "cadê a pessoa que acabou de falar comigo". Duas
+    perguntas, duas ordens. E o padrão é a da conversa porque é ela que o vendedor
+    usa o dia inteiro, no aplicativo ao lado.
+  </div>
+</div>
+
+<!-- ======================================================= detalhes -->
+<div class="sec">
+  <h2>O que isto pede pra virar tela</h2>
+  <ul class="reg">
+    <li><b>Nenhuma coluna nova.</b> <code>conversas.ultima_msg_em</code> já está na
+    consulta e já ordena; <code>_hora_br</code> e <code>_dia_br</code> já existem.</li>
+    <li><b>Um rótulo novo</b> pra hora da lista (hoje <code>07:42</code>, <b>ontem</b>,
+    <b>seg</b> na semana, <code>14/09</code> depois) — irmão do <code>_dia_br</code>,
+    no mesmo lugar, pra não nascer um terceiro jeito de escrever data.</li>
+    <li><b>A coluna da direita no card:</b> hora em cima, bolinha de não lidas
+    embaixo. Hoje a bolinha fica solta no fim da linha.</li>
+    <li><b>A prévia ganha "Você:"</b> quando a última mensagem é do vendedor — já
+    existe em <code>leads_do_vendedor</code>, é só aparecer na ordem nova também.</li>
+    <li><b>Na ordem por conversa o mês não recorta</b> (senão esconde a FLAVIA). As
+    pílulas de mês continuam, mas na ordem por urgência.</li>
+  </ul>
+
+  <h2 style="margin-top:1.6rem">E nos outros nichos (§6)</h2>
+  <ul class="reg">
+    <li><b>Ordem por conversa e hora na lista:</b> valem em qualquer nicho — toda
+    conta tem conversa. Na ZAQ 251 de 252 mostram data, e isso É a informação.</li>
+    <li><b>"Por urgência"</b> muda de forma: sem <code>vendas.vende_data</code> não
+    há "festa marcada", e o grupo "📅 sem data" já vira "Os outros" hoje.</li>
+    <li><b>Pílula "com data"</b> segue o mesmo portão de sempre.</li>
+  </ul>
+</div>
+
+<div class="eyebrow" style="text-align:center">Mockup — nada disto está no ar.
+Dados reais das contas 34 e 3, lidos em 16/09/2026.</div>
+
+</div>
+</html>

@@ -4947,7 +4947,13 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                  "<input type=file id=arq hidden>") if pode_voz else ""
         # "perguntar" da Fila: a pergunta chega pronta na caixa, o vendedor confere e manda
         _qp = getattr(request, "query_params", None)
-        texto_pre = ((_qp.get("texto") if _qp else "") or "")[:300]
+        # O que o vendedor escreveu e NÃO saiu volta pra caixa. Antes o texto
+        # sumia junto com o envio: a bolha some no recarregamento, o campo já foi
+        # esvaziado pelo JS, e a única cópia estava no dedo dele. Quem redigita uma
+        # vez, na segunda responde pelo WhatsApp do celular — e o que sai por fora
+        # não entra no funil (é a "regra de ouro" do guia, quebrada pela tela).
+        texto_pre = (request.session.pop("ck_texto", "")
+                     or (_qp.get("texto") if _qp else "") or "")[:300]
         # A TRAVA DA INSISTÊNCIA (migração 257), quando a conta está em 'ligado' e a
         # regra engata neste lead. Fica GRUDADA no composer, dentro do mesmo form:
         # o motivo viaja junto com o texto, num POST só. Num form separado o motivo
@@ -5550,6 +5556,10 @@ def _agir(request: Request, lead_id: int, fn, destino: str):
     r = fn(get_pool(), sess[0], sess[1], lead_id)
     if swipe:
         return JSONResponse({"ok": bool(r.get("ok")), "erro": "" if r.get("ok") else _erro(r)})
+    # o texto que não saiu volta pra caixa da conversa (ver `texto_pre`). Guardado
+    # no banco pela `enviar_mensagem`; isto aqui é só o caminho de volta pra tela.
+    if r.get("texto_perdido"):
+        request.session["ck_texto"] = str(r["texto_perdido"])[:300]
     request.session["ck_ok" if r.get("ok") else "ck_err"] = (
         r.get("msg", "Feito ✓") if r.get("ok") else _erro(r))
     return RedirectResponse(destino, status_code=303)

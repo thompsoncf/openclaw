@@ -141,6 +141,16 @@ create table contratos (id bigserial primary key, conta_id bigint, orcamento_id 
 -- o CADASTRO do cliente: primeiro degrau de `vendas.nome_do_orcamento`, e por isso
 -- o Raio-X faz left join nela pra montar o nome de cada linha
 create table clientes (id bigserial primary key, conta_id bigint, nome text);
+-- o que o vendedor escreveu e não saiu (migração 264). Sem a tabela, o registro da
+-- falha cai no `except` tolerante e o teste passaria sem guardar nada — que é
+-- exatamente o estado que custou a mensagem da Sheila.
+create table envio_falha (id bigserial primary key, conta_id bigint not null,
+  membro_id bigint, prospeccao_id bigint, conversa_id bigint,
+  canal text not null default 'whatsapp', provedor text, numero text, texto text,
+  erro text, detalhe text, criado_em timestamptz not null default now());
+create table canais_config (id bigserial primary key, conta_id bigint, canal text,
+  provedor text, ativo boolean default true, identificador text,
+  wa_phone_id text, token text);
 create table wa_qr_log (id bigserial primary key, conta_id bigint, nivel text default 'warn',
   msg text not null default '', dados jsonb, criado_em timestamptz not null default now());
 create table wa_decifra_diario (dia date not null, conta_id bigint not null, from_me boolean not null,
@@ -1283,6 +1293,104 @@ def test_a_fila_abre_no_mes_atual_com_pilulas_grupos_e_a_linha_do_evento(pool, m
     assert "Do Mes Passado" in html3                                            # sem parâmetro: vale a sessão
     html4, _ = _fila_html(monkeypatch, pool, conta, vend, req=req, entrou="tudo")
     assert "4 abertos · " in html4 and "sua vez <b>" not in html4.split("class=scroll")[0].split("class=foco")[1]
+
+
+# ------------------------------------- a mensagem que não saiu não se perde
+#
+# 15/09/2026, 19:33: o Thiago respondeu a Sheila pelo app, a mensagem não chegou
+# nela, e a tela ficou em "enviando…". Fui procurar o que houve e não havia nada:
+# `mensagens` só grava DEPOIS do envio dar certo, e o `wa_qr_log` mostra que a
+# requisição nem chegou no serviço. O texto existia só como pixel na tela dele.
+def _cena_envio(c, *, provedor="qr"):
+    conta = _conta(c)
+    vend = _membro(c, conta, nome="Thiago", email=f"thiago-env{provedor}@x.com")
+    lead = _lead(c, conta, vend, "sheilafontenele2020", wa="+558695732370")
+    _conv_msg(c, conta, lead, texto="Oi! Vi o anúncio")
+    c.execute("insert into canais_config (conta_id, canal, provedor, ativo, identificador) "
+              "values (%s,'whatsapp',%s,true,'qr:x')", (conta, provedor))
+    c.commit()
+    return conta, vend, lead
+
+
+def test_a_mensagem_que_nao_saiu_fica_guardada_com_o_texto(pool, monkeypatch):
+    from finance import whatsapp_out as wo
+    with pool.connection() as c:
+        conta, vend, lead = _cena_envio(c)
+    monkeypatch.setattr(wo, "enviar",
+                        lambda *a, **k: {"ok": False, "erro": "desconectado"})
+    r = ck.enviar_mensagem(pool, conta, vend, lead, "Boa tarde Sheila, o local fica na Av. Fátima")
+    assert r["ok"] is False
+    # o texto volta pra quem escreveu, em vez de ele ter que redigitar
+    assert r["texto_perdido"] == "Boa tarde Sheila, o local fica na Av. Fátima"
+    with pool.connection() as c:
+        f = c.execute("select conta_id, membro_id, prospeccao_id, conversa_id, provedor, "
+                      "numero, texto, erro from envio_falha").fetchall()
+    assert len(f) == 1
+    assert f[0][:3] == (conta, vend, lead) and f[0][3] is not None
+    assert f[0][4] == "qr" and f[0][5] == "+558695732370"
+    assert f[0][6] == "Boa tarde Sheila, o local fica na Av. Fátima"
+    assert f[0][7] == "desconectado"
+
+
+def test_a_falha_guardada_sobrevive_a_um_erro_depois_dela(pool, monkeypatch):
+    """O caso que ESTE registro existe pra cobrir é justamente o da Sheila: o envio
+    não deu certo E a requisição morreu depois, sem resposta nenhuma.
+
+    Sem o commit explícito, quem salvaria a linha seria o commit que o psycopg faz
+    ao sair do `with pool.connection()` SEM exceção — e aqui há exceção, então a
+    transação inteira volta atrás e a anotação some junto com a mensagem. Que é o
+    estado de antes: uma mensagem perdida e nenhum rastro de que alguém tentou.
+
+    (A primeira versão deste teste não levantava nada, e por isso passava com ou
+    sem o commit — afirmava o que não provava.)"""
+    from finance import whatsapp_out as wo
+    from finance import cockpit as _ck
+    with pool.connection() as c:
+        conta, vend, lead = _cena_envio(c, provedor="qr")
+    monkeypatch.setattr(wo, "enviar", lambda *a, **k: {"ok": False, "erro": "qr_indisponivel"})
+
+    def _explode(*a, **k):
+        raise RuntimeError("500 depois de gravar a falha")
+    monkeypatch.setattr(_ck, "_recado_da_falha", _explode)
+    with pytest.raises(RuntimeError):
+        ck.enviar_mensagem(pool, conta, vend, lead, "não some")
+    with pool.connection() as c2:
+        row = c2.execute("select texto from envio_falha where conta_id=%s",
+                         (conta,)).fetchone()
+    assert row, "a transação voltou atrás e levou a anotação junto — a mensagem se perdeu"
+    assert row[0] == "não some"
+
+
+def test_o_recado_do_erro_segue_o_provedor_e_nao_inventa_janela_de_24h(pool, monkeypatch):
+    """§ dos três canais: twilio, cloud api e QR são funções distintas. A janela de
+    24h é regra da API OFICIAL; no QR é sessão tipo WhatsApp Web, texto livre pra
+    qualquer número, sempre. O recado único que existia até 16/09 mandava o
+    vendedor do QR caçar uma regra que o canal dele não tem."""
+    from finance import whatsapp_out as wo
+    monkeypatch.setattr(wo, "enviar", lambda *a, **k: {"ok": False, "erro": "http_502"})
+    with pool.connection() as c:
+        conta_q, v_q, l_q = _cena_envio(c, provedor="qr")
+        conta_t, v_t, l_t = _cena_envio(c, provedor="twilio")
+    r_qr = ck.enviar_mensagem(pool, conta_q, v_q, l_q, "oi")
+    r_tw = ck.enviar_mensagem(pool, conta_t, v_t, l_t, "oi")
+    assert "24h" not in r_qr["erro"] and "guardada" in r_qr["erro"]
+    assert "24h" in r_tw["erro"]
+    # e os erros com nome próprio continuam falando por si, em qualquer provedor
+    monkeypatch.setattr(wo, "enviar", lambda *a, **k: {"ok": False, "erro": "numero_invalido"})
+    assert ck.enviar_mensagem(pool, conta_q, v_q, l_q, "oi")["erro"] == "Número do lead inválido."
+
+
+def test_envio_que_deu_certo_nao_vira_linha_de_falha(pool, monkeypatch):
+    from finance import whatsapp_out as wo
+    with pool.connection() as c:
+        conta, vend, lead = _cena_envio(c)
+    monkeypatch.setattr(wo, "enviar", lambda *a, **k: {"ok": True, "sid": "3EB0FEITO"})
+    assert ck.enviar_mensagem(pool, conta, vend, lead, "saiu")["ok"] is True
+    with pool.connection() as c:
+        assert c.execute("select count(*) from envio_falha where conta_id=%s",
+                         (conta,)).fetchone()[0] == 0
+        assert c.execute("select provider_sid from mensagens where direcao='out' "
+                         "and autor='humano' order by id desc limit 1").fetchone()[0] == "3EB0FEITO"
 
 
 # ------------------------------------------------ mandar o contrato PELO APP

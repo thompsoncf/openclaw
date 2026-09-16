@@ -857,6 +857,88 @@ def _posse(c, conta_id, membro_id, lead_id) -> bool:
     return bool(r and r[0] == membro_id)
 
 
+#: O que dizer quando o envio falha, POR PROVEDOR.
+#:
+#: Até 16/09/2026 havia um recado só pra tudo que não fosse um dos três erros
+#: conhecidos: "Não consegui enviar (a janela de 24h pode ter fechado)". Essa
+#: frase é FALSA no QR, que é o canal desta casa: ali é uma sessão tipo WhatsApp
+#: Web, texto livre pra qualquer número, sempre, sem janela nenhuma (ver
+#: `whatsapp_out.provedor_da_conta`). O vendedor lia aquilo e ia caçar uma regra
+#: que o canal dele não tem — quando o problema era o serviço fora do ar.
+#:
+#: Os três provedores são funções diferentes e falham por motivos diferentes; é
+#: por isso que o recado é escolhido pelo provedor, e não por um texto só.
+_RECADO_ENVIO = {
+    "sem_numero_empresa": "Configure o WhatsApp da empresa na aba Canais.",
+    "nao_configurado": "WhatsApp não conectado (credencial no Render).",
+    "numero_invalido": "Número do lead inválido.",
+    # QR
+    "qr_indisponivel": "O WhatsApp da empresa está fora do ar. Avise o Manoel — "
+                       "sua mensagem ficou guardada.",
+    "desconectado": "O WhatsApp da empresa desconectou. Reconecte em Canais — "
+                    "sua mensagem ficou guardada.",
+}
+
+#: O genérico, por provedor. Só na API OFICIAL (twilio/cloud) existe janela de 24h.
+_RECADO_GENERICO = {
+    "qr": "Não consegui falar com o WhatsApp agora. Sua mensagem ficou guardada — "
+          "tente de novo em um minuto.",
+    "twilio": "Não consegui enviar (a janela de 24h pode ter fechado).",
+    "cloud": "Não consegui enviar (a janela de 24h pode ter fechado).",
+}
+
+
+def _recado_da_falha(c, conta_id: int, res: dict) -> str:
+    from finance import whatsapp_out as _wo
+    e = (res.get("erro") or "").strip()
+    if e in _RECADO_ENVIO:
+        return _RECADO_ENVIO[e]
+    try:
+        prov = _wo.provedor_da_conta(c, conta_id)
+    except Exception:  # noqa: BLE001 — o recado nunca derruba o retorno do envio
+        prov = ""
+    # provedor desconhecido cai no recado do QR: ele não AFIRMA uma regra que
+    # pode não existir, e é o canal de 98% do volume.
+    return _RECADO_GENERICO.get(prov, _RECADO_GENERICO["qr"])
+
+
+def _registrar_falha_envio(c, conta_id, membro_id, lead_id, numero, texto, res) -> None:
+    """Guarda o que o vendedor escreveu e não saiu (migração 264).
+
+    Best-effort de ponta a ponta, e com `savepoint`: esta anotação existe PARA um
+    momento em que algo já está quebrado, e uma consulta que falhe aqui (tabela
+    que ainda não existe num deploy pela metade) envenenaria a transação e
+    derrubaria o retorno do próprio envio — trocando "não consegui enviar" por um
+    500 mudo, que é exatamente o que aconteceu com a Sheila.
+    """
+    from finance import whatsapp_out as _wo
+    try:
+        with c.transaction():
+            try:
+                prov = _wo.provedor_da_conta(c, conta_id)
+            except Exception:  # noqa: BLE001
+                prov = ""
+            conv = c.execute("select id from conversas where conta_id=%s and prospeccao_id=%s "
+                             "and canal='whatsapp' order by id desc limit 1",
+                             (conta_id, lead_id)).fetchone()
+            c.execute(
+                """insert into envio_falha
+                     (conta_id, membro_id, prospeccao_id, conversa_id, canal,
+                      provedor, numero, texto, erro, detalhe)
+                   values (%s,%s,%s,%s,'whatsapp',%s,%s,%s,%s,%s)""",
+                (conta_id, membro_id, lead_id, conv[0] if conv else None, prov or None,
+                 (numero or "")[:40], texto, (res.get("erro") or "")[:200],
+                 (res.get("det") or "")[:400] or None))
+        # COMMIT EXPLÍCITO. Quem chama volta com `return` logo abaixo, e o que
+        # salva a linha hoje é o commit que o pool faz ao sair do `with` sem
+        # exceção — comportamento do psycopg, não decisão desta função. A linha
+        # que existe pra não perder a mensagem não pode depender disso.
+        c.commit()
+    except Exception as e:  # noqa: BLE001 — ver o docstring
+        _log.warning("não deu pra guardar a falha de envio (conta %s, lead %s): %s: %s",
+                     conta_id, lead_id, type(e).__name__, e)
+
+
 def enviar_mensagem(pool, conta_id: int, membro_id: int, lead_id: int, texto: str,
                     trava_motivo: str = "", trava_desc: str = "",
                     trava_data: str = "") -> dict:
@@ -915,11 +997,9 @@ def enviar_mensagem(pool, conta_id: int, membro_id: int, lead_id: int, texto: st
             chip_id=whatsapp_out.chip_da_conversa(
                 c, conta_id, _conversa_id(c, conta_id, lead_id, "whatsapp")))
         if not res.get("ok"):
-            erros = {"nao_configurado": "WhatsApp não conectado (credencial no Render).",
-                     "sem_numero_empresa": "Configure o WhatsApp da empresa na aba Canais.",
-                     "numero_invalido": "Número do lead inválido."}
-            return {"ok": False, "erro": erros.get(res.get("erro"),
-                    "Não consegui enviar (a janela de 24h pode ter fechado).")}
+            _registrar_falha_envio(c, conta_id, membro_id, lead_id, numero, texto, res)
+            return {"ok": False, "erro": _recado_da_falha(c, conta_id, res),
+                    "texto_perdido": texto}
         conv = _conversa_id(c, conta_id, lead_id, "whatsapp")
         _add_msg(c, conv, "whatsapp", "out", "humano", texto, membro_id, res.get("sid"))
         # `push_avisado_em=null` zera o cooldown: quem acabou de responder está EM DIA,

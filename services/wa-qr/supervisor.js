@@ -124,16 +124,20 @@ const MAX_WORKERS = parseInt(process.env.WA_QR_MAX_WORKERS || '40', 10)
 // O PADRÃO VIROU O 7, EM 16/09/2026, e a lista mudou de lado: agora ela diz quem
 // FICA no 6.7.24, e nasce vazia. Conta nova entra no 7 sem ninguém escrever nada.
 //
-// Por que inverteu, com os números que decidiram. O sintoma era o `stream errored
-// out` de ~50 em ~50 minutos, medido em três contas:
+// Por que inverteu. O sintoma é o `stream errored out` de ~50 em ~50 minutos, O
+// DIA INTEIRO — e é esse ciclo diurno que o v7 mata. Medido em 14 e 15/09:
 //
-//   conta 34 (Prime)    v6: 8 quedas num dia     v7: ZERO em 3 dias
-//   conta 23 (Ramo)     v6: 14 em 12h30          v7: ZERO em 5 dias
-//   conta 38 (Liberal)  v6: 10 em 24h            — era a próxima da fila
+//   conta 23 (Ramo)    v7   3 e 1 quedas, SÓ entre 21:20 e 21:49
+//   conta 34 (Prime)   v7   1 e 1 quedas, SÓ entre 21:28 e 21:46
+//   conta 36 (Thiago)  v6   2 e 4 quedas — 15:13, 18:56 e a janela das 21h
+//   conta 38 (Liberal) v6   10 quedas em 15/09: 12:56, 14:32, 15:47, 16:50,
+//                           17:46, 18:42, 19:32, 20:27, 21:39, 23:31
 //
-// Duas contas migradas, duas confirmações, nenhuma mensagem perdida em nenhuma
-// delas. Continuar exigindo que alguém lembrasse de escrever o id na variável era
-// deixar todo cliente novo nascer caindo a cada 50 minutos.
+// Nas contas no v7 não há UMA queda fora da janela das 21h. Naquela janela caem
+// as quatro juntas, v6 e v7 — ali não é a biblioteca, e segue sem explicação.
+// Nenhuma mensagem se perdeu em nenhuma das duas migradas. Continuar exigindo que
+// alguém lembrasse de escrever o id na variável era deixar todo cliente novo
+// nascer caindo a cada 50 minutos.
 //
 // POR QUE A VARIÁVEL NÃO FOI APAGADA, que é a pergunta seguinte: o 7.0.0 ainda é
 // RELEASE CANDIDATE (o `rc14` é o topo no npm; não existe final). Enquanto for,

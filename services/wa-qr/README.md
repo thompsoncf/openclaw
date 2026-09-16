@@ -228,19 +228,30 @@ WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_log_test node teste-lo
 
 ## O Baileys 7 é o padrão (16/09/2026)
 
-O sintoma era o `stream errored out` de ~50 em ~50 minutos: a conta caía, voltava
-sozinha em segundos, e caía de novo. Medido em três contas:
+O sintoma é o `stream errored out` **de ~50 em ~50 minutos, o dia inteiro**: a
+conta cai, volta sozinha em segundos, e cai de novo. O que o v7 mata é esse ciclo
+diurno — e é assim que se lê a tabela, não por "quedas zero":
 
-| conta | no 6.7.24 | no 7.0.0-rc14 |
-|---|---|---|
-| 34 (Prime) | 8 quedas num dia | **zero em 3 dias** |
-| 23 (Ramo) | 14 em 12h30 | **zero em 5 dias** |
-| 38 (Liberal) | 10 em 24h | era a próxima da fila |
+| conta | versão | 14/09 | 15/09 | a que horas |
+|---|---|---|---|---|
+| 23 (Ramo) | **v7** | 3 | 1 | **só** 21:20–21:49 |
+| 34 (Prime) | **v7** | 1 | 1 | **só** 21:28–21:46 |
+| 36 (CP Thiago) | v6 | 2 | 4 | 15:13 · 18:56 · 21:28–21:45 |
+| 38 (Liberal) | v6 | — | 10 | 12:56 → 23:31, de ~50 em ~50 min |
 
-Duas contas migradas, duas confirmações, **nenhuma mensagem perdida em nenhuma
-delas**. Continuar exigindo que alguém lembrasse de escrever o id numa variável
-era deixar todo cliente novo nascer caindo a cada 50 minutos — então a lista
-mudou de lado: `WA_QR_BAILEYS6_CONTAS` diz quem **fica** no 6, e nasce vazia.
+Nas duas contas no v7 **não há uma queda fora da janela das 21h**; a 38, no v6,
+cai dez vezes ao longo do dia. E naquela janela noturna caem as quatro juntas, v6
+e v7 — o que sobra ali não é a biblioteca, e segue sem explicação (item aberto).
+
+Nenhuma mensagem se perdeu em nenhuma das duas migradas. Continuar exigindo que
+alguém lembrasse de escrever o id numa variável era deixar todo cliente novo
+nascer caindo a cada 50 minutos — então a lista mudou de lado:
+`WA_QR_BAILEYS6_CONTAS` diz quem **fica** no 6, e nasce vazia.
+
+Uma ressalva de método, porque ela muda o que dá pra reconferir: o `wa_qr_log`
+guarda ~2 dias. Os números maiores que motivaram a migração (8 quedas num dia na
+34, 14 em 12h30 na 23, as duas no 6.7.24) foram medidos na hora e **já saíram da
+janela** — não dá mais pra reconferir no banco. A tabela acima é o que dá.
 
 **Por que a variável não foi apagada**, que é a pergunta seguinte: o 7.0.0 ainda é
 *release candidate* — o `rc14` é o topo no npm, não existe final. Enquanto for,

@@ -697,6 +697,11 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .faixa>a{flex:1;min-width:0;color:inherit;text-decoration:none;display:flex;gap:.45rem;align-items:center}
 .faixa b{color:var(--neon-bright)}
 .faixa .ver{font-weight:600;color:var(--neon-bright);white-space:nowrap;margin-left:auto}
+/* "1 de 15": a fila de avisos deixa de ser invisível. Sem ele, fechar um e ver o
+   próximo aparecer parece o mesmo aviso teimando — foi o que custou o chamado. */
+.faixa .qtos{font-family:var(--mono);font-size:.64rem;color:var(--text-faint);
+  white-space:nowrap;margin-left:auto;padding-left:.4rem}
+.faixa .qtos+.ver{margin-left:.5rem}
 /* O ✕ DA FAIXA, medido em 16/09/2026 num iPhone de 390px: 29,4 x 22,4 px, a OITO
    pixels do link de 309 x 112 que ocupa quase a faixa inteira. O mínimo de alvo de
    toque é 44 x 44 (é a régra da Apple e a do Material), e um polegar tem uns 45px:
@@ -1470,18 +1475,42 @@ def _novidades_vend(conta_id: int, membro_id: int) -> list[dict]:
 
 
 def _faixa_novidade(itens: list[dict]) -> str:
-    """A faixa em cima da Fila: o aviso mais novo que ele ainda não leu, um só.
-    "Ver" abre o aviso (que marca lida ao abrir); o ✕ marca lida sem abrir."""
+    """A faixa em cima da Fila: o aviso mais novo que ele ainda não leu.
+
+    "Ver" abre o aviso (que marca lida ao abrir). O ✕ DISPENSA A FAIXA INTEIRA —
+    não só o aviso que está na tela.
+
+    POR QUE INTEIRA. Em 16/09/2026 o dono disse que não conseguia fechar o aviso.
+    O botão funcionava: ele tocou quatro vezes entre 13:39 e 13:41 e o banco
+    registrou as quatro. O que ele não tinha como saber é que havia QUINZE avisos
+    por ler acumulados desde 19/08, e a faixa mostra um por vez — fechava um e o
+    seguinte tomava o lugar, com o mesmo formato. Da cadeira dele isso é
+    indistinguível de um botão quebrado.
+
+    Um ✕ que não limpa não é um ✕. Quem dispensa o aviso de hoje não vai voltar
+    pra ler o de três semanas atrás, então dispensar o da frente dispensa a fila
+    — e nada se perde: a lista inteira continua no Perfil, que é onde se lê com
+    calma. O contador "1 de 15" existe pra que a fila deixe de ser invisível.
+    """
     por_ler = [n for n in itens if not n["lida"]]
     if not por_ler:
         return ""
     n = por_ler[0]
+    resto = len(por_ler)
     resumo = f" {esc(n['resumo'])}" if n.get("resumo") else ""
+    conta = (f"<span class=qtos>1 de {resto}</span>" if resto > 1 else "")
+    rot = (f"Dispensar os {resto} avisos" if resto > 1 else "Dispensar o aviso")
     return (f"<div class=faixa><a href='{_BASE}/novidades/{n['id']}'>✨ "
-            f"<span><b>{esc(n['titulo'])}</b>{resumo}</span><span class=ver>Ver →</span></a>"
+            f"<span><b>{esc(n['titulo'])}</b>{resumo}</span>{conta}"
+            f"<span class=ver>Ver →</span></a>"
             f"<form method=post action='{_BASE}/novidades/{n['id']}/lida'>"
             f"<input type=hidden name=volta value=fila>"
-            f"<button type=submit class=x aria-label='Fechar o aviso'>✕</button></form></div>")
+            # `faixa=1` é o que diz "dispensa a fila", e não "marca este". O
+            # "Entendi" da tela do aviso manda o mesmo POST sem este campo e
+            # continua marcando um só — são duas ações com o mesmo endereço, e é
+            # o campo que as separa, não de onde vieram.
+            f"<input type=hidden name=faixa value=1>"
+            f"<button type=submit class=x aria-label='{esc(rot)}'>✕</button></form></div>")
 
 
 def _pend_vend(conta_id: int, membro_id: int) -> int:
@@ -6021,18 +6050,30 @@ def cockpit_novidade(request: Request, nid: int):
 
 
 @router.post("/cockpit/novidades/{nid}/lida")
-def cockpit_novidade_lida(request: Request, nid: int, volta: str = Form("perfil")):
+def cockpit_novidade_lida(request: Request, nid: int, volta: str = Form("perfil"),
+                          faixa: str = Form("")):
     """O "Entendi" da mudança, e o ✕ da faixa. Marca por PESSOA, e só o que este
     vendedor enxerga — id de aviso de outro público não vira linha em
-    novidade_lida porque alguém postou o número."""
+    novidade_lida porque alguém postou o número.
+
+    `faixa=1` (só o ✕) dispensa a FILA INTEIRA de não lidos, e não só o `nid`. Ver
+    `_faixa_novidade`: a faixa mostra um por vez, então fechar um e ver o próximo
+    aparecer é o que o dono leu como "o botão não funciona". Quem dispensa o aviso
+    da frente — que é o mais novo — está dispensando os de trás.
+    """
     sess = _sessao(request)
     if not sess:
         return RedirectResponse("/cockpit/login", status_code=303)
     conta_id, membro_id = sess
-    if any(x["id"] == nid for x in _novidades_vend(conta_id, membro_id)):
+    meus = _novidades_vend(conta_id, membro_id)
+    # o `nid` é conferido contra o que ELE enxerga nos dois caminhos: sem isso, um
+    # id postado à mão viraria linha de leitura de um aviso que não é dele
+    if any(x["id"] == nid for x in meus):
+        alvos = ([x["id"] for x in meus if not x["lida"]] if faixa == "1" else [nid])
         try:
             from finance import novidades as nv
-            nv.marcar_lida(get_pool(), nid, conta_id, membro_id)
+            for a in alvos:
+                nv.marcar_lida(get_pool(), a, conta_id, membro_id)
         except Exception as e:  # noqa: BLE001
             _log.warning("marcar novidade %s lida: %s: %s", nid, type(e).__name__, e)
     return RedirectResponse(_BASE if volta == "fila" else f"{_BASE}/perfil", status_code=303)

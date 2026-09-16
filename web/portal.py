@@ -3893,6 +3893,31 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   </div>
 </details>
 
+<details class="card larga sec-pc" id="avisos">
+  <summary><span>✨ Avisos do sistema <span class="mut" style="font-weight:400;font-size:.76rem">· o que a sua equipe vê quando algo muda</span></span><span class="chev">▾</span></summary>
+  <div class="sec-body">
+    <div class="pc-acc{% if not avisos_na_fila %} off{% endif %}" style="align-items:flex-start">
+      <span class="pc-name" style="flex:1">
+        <b>Avisar a equipe na Fila</b>
+        <span class="mut" style="display:block;font-size:.78rem;margin-top:.15rem">
+          Mostra a faixa de novidade no topo da Fila dos vendedores, com o que mudou
+          no sistema. Só avisos dos últimos {{ dias_na_faixa }} dias — o que passa do
+          prazo para de interromper.
+        </span>
+      </span>
+      <form method="post" action="/painel/empresa/avisos-na-fila" style="margin:0">
+        <input type="hidden" name="ligado" value="{{ '0' if avisos_na_fila else '1' }}">
+        <button type="submit" class="pc-sw{% if avisos_na_fila %} on{% endif %}" title="{{ 'desligar' if avisos_na_fila else 'ligar' }}"><span class="knob"></span></button>
+      </form>
+    </div>
+    <div class="mut" style="font-size:.72rem;margin-top:.7rem">
+      Desligado, <b>nada é apagado</b>: os avisos continuam na tela Novidades do
+      Perfil de cada vendedor e continuam contando como não lidos. O que some é só
+      a interrupção no meio do trabalho.
+    </div>
+  </div>
+</details>
+
 <details class="card larga sec-pc" id="centros-custo">
   <summary><span>🎯 Centros de Custo <span class="mut" style="font-weight:400;font-size:.76rem">· seus (unidade, filial, projeto) — opcional no lançamento</span></span><span class="chev">▾</span></summary>
   <div class="sec-body">
@@ -10677,6 +10702,7 @@ def painel_empresa(request: Request):
     # Plano de contas (árvore + liga/desliga), centros de custo e DRE por centro.
     # Tolerante: se a migração 132 ainda não rodou, as seções ficam vazias.
     from finance import plano_contas as _pc
+    from finance import novidades as _nv
     try:
         plano_arvore = _pc.arvore_habilitada(pool, conta[0])
         centros = _pc.listar_centros(pool, conta[0], incluir_inativos=True)
@@ -10808,6 +10834,9 @@ def painel_empresa(request: Request):
                    fornecedores_lista=fornecedores_lista, carteira=carteira,
                    rotulo_receber=rotulo_receber, tem_pj=True,
                    plano_arvore=plano_arvore, centros=centros, dre_centro=dre_centro,
+                   # o interruptor da faixa de novidade na Fila (migração 266)
+                   avisos_na_fila=_nv.faixa_ligada(pool, conta[0]),
+                   dias_na_faixa=_nv.DIAS_NA_FAIXA,
                    a_classificar=a_classificar, plano_opcoes=plano_opcoes,
                    centros_ativos=centros_ativos,
                    # linha do tempo de salário por funcionário (uma consulta só)
@@ -11334,6 +11363,24 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
         except Exception:
             pass
     return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/avisos-na-fila")
+def empresa_avisos_na_fila(request: Request, ligado: str = Form("")):
+    """Liga/desliga a faixa de novidade na Fila dos vendedores desta conta.
+
+    Só liga e desliga a INTERRUPÇÃO: os avisos continuam existindo, continuam não
+    lidos e continuam na tela Novidades do Perfil de cada um. É a diferença entre
+    calar a faixa e apagar leitura, e foi o dono quem fez essa distinção — ver o
+    docstring de `painel_cockpit._faixa_novidade`.
+    """
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    from finance import novidades as nv
+    nv.definir_faixa(pool, conta[0], ligado in ("1", "on", "true", "True"))
+    return RedirectResponse("/painel/empresa#avisos", status_code=303)
 
 
 @router.post("/painel/empresa/plano-contas/habilitar")

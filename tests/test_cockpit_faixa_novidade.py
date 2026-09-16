@@ -57,6 +57,12 @@ def cliente(monkeypatch):
                   "not null default now()")
         for m in ("174_novidades.sql", "199_novidades_pra_quem.sql"):
             c.execute((_MIG / m).read_text(encoding="utf-8"))
+        # o interruptor da faixa (migração 266). Aplicado DE VERDADE: o default
+        # `true` é o que faz a faixa continuar aparecendo pra quem não escolheu,
+        # e escrever a coluna à mão aqui testaria a minha cópia, não a migração.
+        from pathlib import Path as _P
+        _raiz = _P(__file__).resolve().parents[1] / "db" / "migracoes"
+        c.execute((_raiz / "266_avisos_na_fila.sql").read_text(encoding="utf-8"))
         c.commit()
 
     monkeypatch.setattr(pc, "get_pool", lambda: pool)
@@ -153,16 +159,17 @@ def test_o_x_da_faixa_marca_lida_e_a_faixa_some(cliente):
     assert "A Fila abre na ordem da conversa" not in depois
 
 
-def test_o_x_dispensa_a_FILA_inteira_e_nao_so_o_da_frente(cliente):
+def test_o_x_marca_UM_e_o_contador_mostra_a_fila(cliente):
     """O chamado de 16/09: "não consigo tirar esse aviso clicando no X".
 
     O botão funcionava — o dono tocou quatro vezes entre 13:39 e 13:41 e o banco
-    registrou as quatro. O que ele não tinha como saber é que havia QUINZE avisos
-    por ler acumulados desde 19/08: fechava um e o seguinte tomava o lugar, com o
-    mesmo formato. Da cadeira dele, indistinguível de um botão quebrado.
+    registrou as quatro. O que ele não tinha como saber é que havia 26 avisos por
+    ler: fechava um e o seguinte tomava o lugar, com o mesmo formato.
 
-    Um ✕ que não limpa não é um ✕. Este teste fixa as duas metades: a fila
-    aparece no contador, e UM toque zera ela."""
+    Cheguei a fazer o ✕ dispensar TODOS de uma vez. O dono barrou, e estava certo:
+    marcar 26 como lidos destrói informação, e não existe desmarcar. Então o ✕
+    marca UM — e quem resolve o chamado é o CONTADOR, que mostra a fila sem apagar
+    nada. Quem cala a fila é o interruptor da Empresa e o prazo."""
     conta, vend, novo = _cena(cliente.pool)
     with cliente.pool.connection() as c:
         velhos = [c.execute(
@@ -175,26 +182,85 @@ def test_o_x_dispensa_a_FILA_inteira_e_nao_so_o_da_frente(cliente):
     _entrar(cliente, conta, vend)
 
     html = cliente.get("/cockpit").text
-    # a fila deixa de ser invisível: são 4 por ler, e a faixa diz isso
+    # a fila deixa de ser invisível: são 4 dentro do prazo, e a faixa diz isso
     assert "1 de 4" in html, "a faixa não conta quantos avisos estão na fila"
-    assert "Dispensar os 4 avisos" in html
     acao, campos = _form_da_faixa(html)
-    assert campos.get("faixa") == "1", "o ✕ precisa dizer que dispensa a fila"
+    assert "faixa" not in campos, "o ✕ voltou a dispensar a fila — isso apaga leitura"
 
     r = cliente.post(acao, data=campos)
     assert r.status_code == 303
     with cliente.pool.connection() as c:
         lidas = {x[0] for x in c.execute(
             "select novidade_id from novidade_lida where conta_id=%s", (conta,)).fetchall()}
-    assert lidas == {novo, *velhos}, "um toque tem que zerar a fila, não tirar um da pilha"
-    assert "class=faixa" not in cliente.get(r.headers["location"]).text
+    assert lidas == {novo}, "o ✕ tem que marcar UM: os outros três continuam por ler"
+    # ...e o próximo toma o lugar, agora DIZENDO que ainda são três
+    depois = cliente.get(r.headers["location"]).text
+    assert "1 de 3" in depois
+    assert set(velhos) - lidas == set(velhos)
 
 
-def test_o_entendi_do_aviso_continua_marcando_um_so(cliente):
-    """O MESMO endereço serve duas ações: o ✕ da faixa (dispensa a fila) e o
-    "Entendi" da tela do aviso (marca aquele). Quem as separa é o campo `faixa`,
-    não de onde vieram — e sem esta prova o "Entendi" passaria a limpar tudo
-    calado, que é perder aviso que a pessoa ainda ia ler."""
+def test_aviso_velho_nao_interrompe_mais(cliente):
+    """O prazo de 14 dias (`novidades.DIAS_NA_FAIXA`). Dos oito vendedores em
+    produção, QUATRO estavam em 27 de 27 — nunca tocaram a faixa. Aviso que
+    ninguém toca virou mobília, e mobília ensina a não olhar aquele pedaço da
+    tela. O prazo faz a pilha se resolver sozinha, sem apagar nada: o velho
+    continua não lido, só para de pular na frente."""
+    conta, vend, _novo = _cena(cliente.pool)
+    with cliente.pool.connection() as c:
+        c.execute("delete from novidades")           # só o velho na cena
+        velho = c.execute(
+            """insert into novidades (chave, tipo, publico, pra_quem, titulo, resumo,
+                                      link, corpo, publicado_em)
+               values ('velho','novidade','todos','{vendedor}','Aviso de um mês',
+                       'r','/cockpit','c', now() - interval '30 days') returning id""").fetchone()[0]
+        c.commit()
+    _entrar(cliente, conta, vend)
+    html = cliente.get("/cockpit").text
+    assert "class=faixa" not in html, "aviso de 30 dias não pode interromper"
+    # mas ele NÃO foi apagado: continua não lido e continua sendo dele
+    with cliente.pool.connection() as c:
+        assert c.execute("select count(*) from novidade_lida").fetchone()[0] == 0
+    assert cliente.post(f"/cockpit/novidades/{velho}/lida",
+                        data={"volta": "perfil"}).status_code == 303
+
+
+def test_o_dono_desliga_a_faixa_e_nada_e_apagado(cliente):
+    """O parâmetro da tela Empresa (migração 266), que foi ideia do dono. Ele cala
+    a INTERRUPÇÃO, não o aviso: nada vira lido, e a tela de Novidades continua
+    com tudo."""
+    from finance import novidades as nv
+    conta, vend, novo = _cena(cliente.pool)
+    _entrar(cliente, conta, vend)
+    assert "class=faixa" in cliente.get("/cockpit").text
+
+    nv.definir_faixa(cliente.pool, conta, False)
+    assert "class=faixa" not in cliente.get("/cockpit").text
+    with cliente.pool.connection() as c:
+        assert c.execute("select count(*) from novidade_lida").fetchone()[0] == 0, (
+            "desligar a faixa não pode marcar nada como lido")
+    # e volta atrás: é reversível, que é o motivo de ele ser melhor que fechar tudo
+    nv.definir_faixa(cliente.pool, conta, True)
+    assert "class=faixa" in cliente.get("/cockpit").text
+
+
+def test_sem_a_coluna_a_faixa_continua_aparecendo(cliente):
+    """FALHA ABERTA, ao contrário da maioria dos portões desta base: um parâmetro
+    que não pôde ser lido não pode CALAR um aviso. O pior caso é a faixa aparecer
+    pra quem desligou; o contrário seria sumir pra quem contava com ela."""
+    from finance import novidades as nv
+    conta, vend, _ = _cena(cliente.pool)
+    with cliente.pool.connection() as c:
+        c.execute("alter table contas drop column if exists avisos_na_fila")
+        c.commit()
+    assert nv.faixa_ligada(cliente.pool, conta) is True
+    _entrar(cliente, conta, vend)
+    assert "class=faixa" in cliente.get("/cockpit").text
+
+
+def test_o_entendi_do_aviso_marca_um_so(cliente):
+    """O MESMO endereço serve o ✕ da faixa e o "Entendi" da tela do aviso. Os dois
+    marcam UM — e este teste existe pra que ninguém volte a fazer um deles limpar
+    a pilha calado, que é perder aviso que a pessoa ainda ia ler."""
     conta, vend, novo = _cena(cliente.pool)
     with cliente.pool.connection() as c:
         outro = c.execute(

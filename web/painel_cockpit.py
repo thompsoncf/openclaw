@@ -1474,43 +1474,55 @@ def _novidades_vend(conta_id: int, membro_id: int) -> list[dict]:
         return []
 
 
-def _faixa_novidade(itens: list[dict]) -> str:
+def _faixa_novidade(itens: list[dict], *, conta_id: int | None = None) -> str:
     """A faixa em cima da Fila: o aviso mais novo que ele ainda não leu.
 
-    "Ver" abre o aviso (que marca lida ao abrir). O ✕ DISPENSA A FAIXA INTEIRA —
-    não só o aviso que está na tela.
+    "Ver" abre o aviso (que marca lida ao abrir). O ✕ marca ESTE aviso, um só.
 
-    POR QUE INTEIRA. Em 16/09/2026 o dono disse que não conseguia fechar o aviso.
-    O botão funcionava: ele tocou quatro vezes entre 13:39 e 13:41 e o banco
-    registrou as quatro. O que ele não tinha como saber é que havia QUINZE avisos
-    por ler acumulados desde 19/08, e a faixa mostra um por vez — fechava um e o
-    seguinte tomava o lugar, com o mesmo formato. Da cadeira dele isso é
-    indistinguível de um botão quebrado.
+    TRÊS PORTÕES, e cada um nasceu de um erro meu em 16/09/2026:
 
-    Um ✕ que não limpa não é um ✕. Quem dispensa o aviso de hoje não vai voltar
-    pra ler o de três semanas atrás, então dispensar o da frente dispensa a fila
-    — e nada se perde: a lista inteira continua no Perfil, que é onde se lê com
-    calma. O contador "1 de 15" existe pra que a fila deixe de ser invisível.
+    1. O DONO PODE DESLIGAR (`novidades.faixa_ligada`, migração 266). Ele disse
+       que não conseguia fechar o aviso; o ✕ funcionava — tocou quatro vezes e o
+       banco registrou as quatro — mas havia 26 por ler e a faixa mostra um por
+       vez. Eu propus o ✕ dispensar TODOS, e ele barrou com argumento melhor:
+       marcar 26 como lidos destrói informação ("não lido" é o que a bolinha do
+       Perfil conta, e não existe desmarcar), enquanto um interruptor não apaga
+       nada e volta atrás. Por isso o ✕ aqui continua marcando UM.
+
+    2. O PRAZO (`novidades.para_faixa`): aviso de mais de 14 dias não interrompe.
+       Dos oito vendedores em produção, QUATRO estavam em 27 de 27 — nunca tocaram
+       a faixa. Sem o prazo, o interruptor vira a única saída, e desligado uma vez
+       fica desligado pra sempre.
+
+    3. O CONTADOR "1 de 4": era a fila invisível que fazia o ✕ parecer quebrado —
+       fechava um, aparecia outro igual. Este é o que resolve o chamado, e é o
+       único dos três que não apaga nem esconde nada.
     """
     por_ler = [n for n in itens if not n["lida"]]
     if not por_ler:
         return ""
-    n = por_ler[0]
-    resto = len(por_ler)
+    from finance import novidades as nv
+    if conta_id is not None:
+        try:
+            if not nv.faixa_ligada(get_pool(), conta_id):
+                return ""
+        except Exception as e:  # noqa: BLE001 — faixa não derruba a Fila
+            _log.warning("faixa_ligada da conta %s: %s: %s", conta_id, type(e).__name__, e)
+    na_faixa = nv.para_faixa(por_ler)
+    if not na_faixa:
+        return ""
+    n = na_faixa[0]
+    # o contador conta o que a FAIXA vai mostrar, não o que existe por ler: dizer
+    # "1 de 26" e parar de aparecer no quarto seria uma promessa quebrada
+    resto = len(na_faixa)
     resumo = f" {esc(n['resumo'])}" if n.get("resumo") else ""
     conta = (f"<span class=qtos>1 de {resto}</span>" if resto > 1 else "")
-    rot = (f"Dispensar os {resto} avisos" if resto > 1 else "Dispensar o aviso")
     return (f"<div class=faixa><a href='{_BASE}/novidades/{n['id']}'>✨ "
             f"<span><b>{esc(n['titulo'])}</b>{resumo}</span>{conta}"
             f"<span class=ver>Ver →</span></a>"
             f"<form method=post action='{_BASE}/novidades/{n['id']}/lida'>"
             f"<input type=hidden name=volta value=fila>"
-            # `faixa=1` é o que diz "dispensa a fila", e não "marca este". O
-            # "Entendi" da tela do aviso manda o mesmo POST sem este campo e
-            # continua marcando um só — são duas ações com o mesmo endereço, e é
-            # o campo que as separa, não de onde vieram.
-            f"<input type=hidden name=faixa value=1>"
-            f"<button type=submit class=x aria-label='{esc(rot)}'>✕</button></form></div>")
+            f"<button type=submit class=x aria-label='Fechar o aviso'>✕</button></form></div>")
 
 
 def _pend_vend(conta_id: int, membro_id: int) -> int:
@@ -1991,7 +2003,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     novas = sum(1 for n in novidades if not n["lida"])
     corpo = (_hdr("Meus leads", sub, inicial=_ini(p["nome"]), direita=_selo(conta_id))
              + _flash(request)
-             + _faixa_novidade(novidades)
+             + _faixa_novidade(novidades, conta_id=conta_id)
              + foco
              + f"<div class=scroll>{pushcard}{lista}{dica}{volta}</div>"
              # o "perguntar"/"confirmar" mora dentro do link do card: para o clique
@@ -6050,30 +6062,26 @@ def cockpit_novidade(request: Request, nid: int):
 
 
 @router.post("/cockpit/novidades/{nid}/lida")
-def cockpit_novidade_lida(request: Request, nid: int, volta: str = Form("perfil"),
-                          faixa: str = Form("")):
-    """O "Entendi" da mudança, e o ✕ da faixa. Marca por PESSOA, e só o que este
-    vendedor enxerga — id de aviso de outro público não vira linha em
+def cockpit_novidade_lida(request: Request, nid: int, volta: str = Form("perfil")):
+    """O "Entendi" da mudança, e o ✕ da faixa. Marca UM aviso, por PESSOA, e só o
+    que este vendedor enxerga — id de aviso de outro público não vira linha em
     novidade_lida porque alguém postou o número.
 
-    `faixa=1` (só o ✕) dispensa a FILA INTEIRA de não lidos, e não só o `nid`. Ver
-    `_faixa_novidade`: a faixa mostra um por vez, então fechar um e ver o próximo
-    aparecer é o que o dono leu como "o botão não funciona". Quem dispensa o aviso
-    da frente — que é o mais novo — está dispensando os de trás.
+    MARCA UM, E NÃO A FILA. Cheguei a fazer o ✕ dispensar todos os não lidos de uma
+    vez, pra resolver o "não consigo fechar esse aviso" do dono. Ele barrou, e
+    estava certo: "não lido" é informação dele — é o que a bolinha do Perfil conta
+    — e não existe desmarcar como lido. Quem cala a fila é o interruptor da tela
+    Empresa (migração 266) e o prazo de 14 dias; os dois são reversíveis e nenhum
+    apaga nada.
     """
     sess = _sessao(request)
     if not sess:
         return RedirectResponse("/cockpit/login", status_code=303)
     conta_id, membro_id = sess
-    meus = _novidades_vend(conta_id, membro_id)
-    # o `nid` é conferido contra o que ELE enxerga nos dois caminhos: sem isso, um
-    # id postado à mão viraria linha de leitura de um aviso que não é dele
-    if any(x["id"] == nid for x in meus):
-        alvos = ([x["id"] for x in meus if not x["lida"]] if faixa == "1" else [nid])
+    if any(x["id"] == nid for x in _novidades_vend(conta_id, membro_id)):
         try:
             from finance import novidades as nv
-            for a in alvos:
-                nv.marcar_lida(get_pool(), a, conta_id, membro_id)
+            nv.marcar_lida(get_pool(), nid, conta_id, membro_id)
         except Exception as e:  # noqa: BLE001
             _log.warning("marcar novidade %s lida: %s: %s", nid, type(e).__name__, e)
     return RedirectResponse(_BASE if volta == "fila" else f"{_BASE}/perfil", status_code=303)

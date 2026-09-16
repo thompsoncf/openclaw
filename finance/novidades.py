@@ -217,6 +217,77 @@ def para_papel(item: dict, papel: str | None) -> bool:
     return papel in (item.get("pra_quem") or ())
 
 
+#: Quantos dias um aviso pode INTERROMPER — ou seja, virar faixa no topo da Fila.
+#:
+#: Passado o prazo ele continua existindo, continua não lido e continua contando na
+#: bolinha do Perfil. Só para de pular na frente de quem está trabalhando.
+#:
+#: POR QUE ISTO EXISTE. Medido em 16/09/2026: dos OITO vendedores ativos em
+#: produção, QUATRO estavam em 27 de 27 — nunca abriram nem fecharam um único
+#: aviso. A faixa estava no topo da Fila deles todos os dias desde que nasceu e
+#: nunca foi tocada. Aviso que ninguém toca deixou de ser aviso e virou mobília, e
+#: mobília ensina a pessoa a não olhar aquele pedaço da tela — inclusive no dia em
+#: que ele trouxer algo que importa.
+#:
+#: A causa é que a faixa nasceu depois de dezenas de avisos já publicados, e mostra
+#: um por vez: ninguém vai tocar 26 vezes. O prazo faz a pilha se resolver sozinha,
+#: sem apagar nada e sem depender de o dono lembrar de desligar a faixa.
+DIAS_NA_FAIXA = 14
+
+
+def para_faixa(itens: list[dict], *, agora=None) -> list[dict]:
+    """Dos avisos que a pessoa ainda não leu, quais podem virar FAIXA hoje.
+
+    Só o prazo (`DIAS_NA_FAIXA`) mora aqui — quem já filtrou "é dele" e "não leu"
+    foi `listar`. A ordem que entra é a que sai: `listar` já devolve do mais novo
+    pro mais velho, e reordenar aqui seria uma segunda definição de "mais novo".
+
+    Aviso sem `publicado_em` fica DE FORA da faixa: sem data não dá pra dizer que
+    está no prazo, e na dúvida a faixa não interrompe — ela é a única coisa deste
+    módulo que toma a tela de alguém.
+    """
+    from datetime import datetime, timedelta, timezone
+    agora = agora or datetime.now(timezone.utc)
+    corte = agora - timedelta(days=DIAS_NA_FAIXA)
+    out = []
+    for n in itens:
+        p = n.get("publicado_em")
+        if not hasattr(p, "tzinfo"):
+            continue
+        if p.tzinfo is None:
+            p = p.replace(tzinfo=timezone.utc)
+        if p >= corte:
+            out.append(n)
+    return out
+
+
+def faixa_ligada(pool, conta_id: int) -> bool:
+    """Esta conta mostra a faixa de novidade na Fila dos vendedores?
+
+    FALHA ABERTA, ao contrário da maioria dos portões desta base: sem a coluna, sem
+    linha ou com o banco fora, devolve True — que é o comportamento de hoje. Um
+    parâmetro que não pôde ser lido não pode CALAR um aviso; o pior caso aqui é a
+    faixa aparecer pra quem desligou, não sumir pra quem contava com ela.
+    """
+    try:
+        with pool.connection() as c:
+            r = c.execute("select avisos_na_fila from contas where id=%s",
+                          (conta_id,)).fetchone()
+    except Exception as e:  # noqa: BLE001 — base sem a 266 ainda
+        _log.warning("não deu pra ler avisos_na_fila da conta %s: %s: %s",
+                     conta_id, type(e).__name__, e)
+        return True
+    return True if not r or r[0] is None else bool(r[0])
+
+
+def definir_faixa(pool, conta_id: int, ligada: bool) -> None:
+    """Liga ou desliga a faixa desta conta (tela Empresa)."""
+    with pool.connection() as c:
+        c.execute("update contas set avisos_na_fila=%s where id=%s",
+                  (bool(ligada), conta_id))
+        c.commit()
+
+
 def listar(pool, conta_id: int, membro_id=None, papel: str | None = None) -> list[dict]:
     """Os avisos que ESTA conta deve ver, mais novos primeiro, já com o estado de
     lida de QUEM está olhando.

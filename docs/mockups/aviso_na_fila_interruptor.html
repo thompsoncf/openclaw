@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="pt-br">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>O aviso na Fila · interruptor na Empresa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --ink:#062011;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo)}
+.wrap{max-width:1080px;margin:0 auto;padding:2.6rem 1rem 5rem;display:flex;flex-direction:column;gap:2.7rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.55rem,4vw,2.1rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:76ch}
+.marca{color:var(--neon)}
+.sec>h2{font-size:1.22rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.05rem;max-width:80ch;font-size:.9rem}
+.num{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em}
+
+.nota{border-left:2.5px solid var(--azul-borda);background:var(--azul-fundo);padding:.85rem 1rem;
+  border-radius:0 10px 10px 0;font-size:.88rem;color:var(--text-dim)}
+.nota b{color:var(--text)}
+.nota.mal{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.nota.amb{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.nota.ok{border-color:var(--neon-borda);background:var(--neon-fundo)}
+
+table.dados{width:100%;border-collapse:collapse;font-size:.85rem}
+@media(max-width:700px){.sec>table.dados{display:block;overflow-x:auto;white-space:nowrap}}
+table.dados th{text-align:left;font-size:.64rem;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--text-faint);font-weight:600;padding:.4rem .55rem;border-bottom:1px solid var(--line)}
+table.dados td{padding:.42rem .55rem;border-bottom:1px solid var(--line);color:var(--text-dim)}
+table.dados td.n{text-align:right;font-family:var(--mono)}
+table.dados td.nome{color:var(--text)}
+table.dados .ruim{color:var(--coral);font-weight:600}
+table.dados .bom{color:var(--neon-bright);font-weight:600}
+
+/* ====== telas ====== */
+.telas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.4rem;align-items:start}
+@media(max-width:860px){.telas{grid-template-columns:1fr}}
+.tv{border:1px solid var(--line);border-radius:18px;background:var(--bg);overflow:hidden;
+  box-shadow:0 16px 44px rgba(0,0,0,.45)}
+.tv>.cap{padding:.5rem .9rem;font-size:.66rem;text-transform:uppercase;letter-spacing:.08em;
+  font-weight:600;border-bottom:1px solid var(--line);color:var(--text-dim)}
+.tv.on>.cap{color:var(--neon-bright);background:var(--neon-fundo)}
+.tv.off>.cap{color:var(--text-faint)}
+.tela{padding:.85rem .85rem 1rem;display:flex;flex-direction:column;gap:.55rem}
+.hdr{display:flex;flex-direction:column;gap:.05rem}
+.hdr b{font-family:var(--display);font-size:1rem}
+.hdr small{color:var(--text-dim);font-size:.72rem}
+
+/* a faixa do aviso */
+.faixa{border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:12px;
+  padding:.5rem .3rem .5rem .7rem;font-size:.74rem;display:flex;align-items:center;gap:.5rem}
+.faixa .txt{flex:1;min-width:0}
+.faixa b{color:var(--neon-bright)}
+.faixa .qtos{font-family:var(--mono);font-size:.63rem;color:var(--text-faint);white-space:nowrap}
+.faixa .ver{font-weight:600;color:var(--neon-bright);white-space:nowrap;font-size:.72rem}
+.faixa .x{min-width:44px;align-self:stretch;display:flex;align-items:center;justify-content:center;
+  color:var(--text-faint);font-size:.95rem}
+.faixa .x.alvo{background:rgba(37,211,102,.09);border-radius:9px;outline:1px dashed var(--neon-borda)}
+
+.busca{display:flex;align-items:center;gap:.4rem;border:1px solid var(--line);border-radius:999px;
+  padding:.34rem .7rem;background:var(--surface);font-size:.73rem;color:var(--text-faint)}
+.ordem{display:flex;gap:.2rem;background:var(--surface);border:1px solid var(--line);
+  border-radius:999px;padding:.14rem}
+.ordem span{flex:1;text-align:center;font-size:.66rem;padding:.24rem;border-radius:999px;color:var(--text-dim)}
+.ordem span.on{background:var(--neon);color:var(--ink);font-weight:600}
+.card{border:1px solid var(--line);border-radius:11px;background:var(--surface);padding:.48rem .6rem;
+  display:flex;gap:.5rem;align-items:flex-start}
+.card .dot{width:7px;height:7px;border-radius:50%;background:var(--ambar);flex:none;margin-top:.35rem}
+.card .mid{flex:1;min-width:0}
+.card .emp{font-size:.79rem;font-weight:600;display:block}
+.card .sn{font-size:.68rem;color:var(--text-faint);display:block;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.card .h{font-family:var(--mono);font-size:.63rem;color:var(--text-faint);flex:none}
+.card .h.novo{color:var(--neon-bright)}
+
+/* a tela da Empresa */
+.emp{padding:.9rem 1rem 1.1rem;display:flex;flex-direction:column;gap:.7rem}
+.emp .sec2{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);font-weight:600}
+.linha{display:flex;align-items:flex-start;justify-content:space-between;gap:.9rem;
+  border:1px solid var(--line);border-radius:11px;background:var(--surface);padding:.7rem .8rem}
+.linha .t{flex:1;min-width:0}
+.linha .t b{font-size:.86rem;display:block}
+.linha .t small{font-size:.76rem;color:var(--text-dim);display:block;margin-top:.15rem}
+.sw{flex:none;width:44px;height:26px;border-radius:999px;background:var(--surface-2);
+  border:1px solid var(--line);position:relative;margin-top:.1rem}
+.sw .knob{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;
+  background:var(--text-faint)}
+.sw.on{background:var(--neon);border-color:var(--neon)}
+.sw.on .knob{left:auto;right:2px;background:var(--ink)}
+
+ul.reg{margin:.4rem 0 0;padding-left:1.15rem;color:var(--text-dim);font-size:.89rem}
+ul.reg li{margin:.34rem 0}
+ul.reg b{color:var(--text)}
+.pecas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}
+@media(max-width:760px){.pecas{grid-template-columns:1fr}}
+.pc{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem 1rem}
+.pc.seu{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.pc.decidir{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.pc h3{font-size:.93rem;margin-bottom:.25rem}
+.pc .tag{font-size:.59rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:var(--neon-bright)}
+.pc.decidir .tag{color:var(--ambar)}
+.pc p{margin:.28rem 0 0;font-size:.83rem;color:var(--text-dim)}
+.pc p b{color:var(--text)}
+</style>
+<div class="wrap">
+
+<div class="head">
+  <div class="eyebrow">Zaq <span class="marca">·</span> avisos de novidade <span class="marca">·</span> 16 de setembro de 2026</div>
+  <h1>Um interruptor na Empresa, e o ✕ volta a fechar um</h1>
+  <p>Você propôs trocar o "fechar tudo" por um parâmetro na Empresa. <b>Concordo, e
+  pelo motivo que você apontou:</b> fechar tudo destrói informação — os 26 avisos
+  viram lidos e você perde para sempre a marca de que não leu. O interruptor não
+  destrói nada. Mas ele sozinho não resolve, e o mockup mostra por quê.</p>
+</div>
+
+<!-- ======================================================= a medição -->
+<div class="sec">
+  <div class="num">A CONTA QUE MUDA O DESENHO</div>
+  <h2>Quatro dos oito vendedores nunca fecharam nenhum aviso</h2>
+  <p class="leg">Avisos mirados em <code>vendedor</code>, publicados depois de a
+  conta existir, por pessoa. Lido em produção agora.</p>
+
+  <table class="dados">
+    <tr><th>Conta</th><th>Vendedor</th><th class="n">Por ler</th><th class="n">Total</th></tr>
+    <tr><td class="nome">ZAQ (3)</td><td>Joao Pedro</td><td class="n ruim">27</td><td class="n">27</td></tr>
+    <tr><td class="nome">ZAQ (3)</td><td>Rawilson</td><td class="n ruim">27</td><td class="n">27</td></tr>
+    <tr><td class="nome">Prime (34)</td><td>JACQUELINE</td><td class="n ruim">27</td><td class="n">27</td></tr>
+    <tr><td class="nome">Louana (35)</td><td>Maze</td><td class="n ruim">27</td><td class="n">27</td></tr>
+    <tr><td class="nome">ZAQ (3)</td><td>Maylson</td><td class="n ruim">24</td><td class="n">27</td></tr>
+    <tr><td class="nome">Prime (34)</td><td>THIAGO</td><td class="n">18</td><td class="n">27</td></tr>
+    <tr><td class="nome">Prime (34)</td><td>zaq teste (você)</td><td class="n">16</td><td class="n">27</td></tr>
+    <tr><td class="nome">Prime (34)</td><td>PEDRO YAN</td><td class="n">15</td><td class="n">27</td></tr>
+  </table>
+
+  <div class="nota mal" style="margin-top:1rem">
+    <b>Quatro de oito estão em 27 de 27: nunca fecharam nem abriram um único aviso.</b>
+    A faixa está no topo da Fila deles todo dia desde que existe, e nunca foi tocada.
+    Isso não é mais um aviso — é mobília. E quem ignora a faixa de novidade ignora
+    a faixa inteira, inclusive no dia em que ela trouxer algo que importa.
+    <br><br>
+    Da Jacqueline, dos 27 por ler, <b>26 alcançam a conta</b> (9 "todos", 8 de
+    serviço, 7 de eventos, 2 de canal próprio; só 1 de seguros não chega).
+  </div>
+</div>
+
+<!-- ======================================================= por que ele está certo -->
+<div class="sec">
+  <h2>Por que você está certo sobre o "fechar tudo"</h2>
+  <ul class="reg">
+    <li><b>Fechar tudo apaga um fato.</b> "Não lido" é informação sua: é o que a
+    bolinha verde do Perfil conta e o que te diz que tem coisa pra ver. Trocar 26
+    "não lidos" por 26 "lidos" pra resolver um incômodo de tela é pagar caro.</li>
+    <li><b>E é irreversível pela tela.</b> Não existe "desmarcar como lido" — se
+    você fechasse tudo por engano, os 26 sumiam do seu radar sem volta.</li>
+    <li><b>O interruptor é reversível e é seu.</b> Desligou, a faixa some da Fila
+    dos vendedores; ligou de novo, volta. Nada foi apagado no caminho.</li>
+  </ul>
+  <div class="nota ok" style="margin-top:.9rem">
+    Então o <b>✕ volta a fechar UM</b> — é o que eu tinha mudado e que você barrou
+    a tempo. O que fica do meu lado é o <b>contador</b>: era a fila invisível que
+    fazia o ✕ parecer quebrado, e o contador conserta isso sem apagar nada.
+  </div>
+</div>
+
+<!-- ======================================================= as telas -->
+<div class="sec">
+  <h2>Como fica</h2>
+
+  <div class="telas">
+    <div class="tv on"><div class="cap">Painel › Empresa</div>
+      <div class="emp">
+        <div class="sec2">Avisos do sistema</div>
+        <div class="linha">
+          <div class="t"><b>Avisar a equipe na Fila</b>
+            <small>Mostra a faixa de novidade no topo da Fila dos vendedores.
+            Desligado, os avisos continuam no Perfil de cada um — nada é apagado.</small></div>
+          <div class="sw on"><span class="knob"></span></div>
+        </div>
+        <div class="linha">
+          <div class="t"><b>Só avisos dos últimos 14 dias</b>
+            <small>A faixa não interrompe com aviso velho. O que passar do prazo
+            fica no Perfil, sem pular na tela.</small></div>
+          <div class="sw on"><span class="knob"></span></div>
+        </div>
+        <div class="sec2" style="margin-top:.4rem">Margem alvo</div>
+        <div class="linha"><div class="t"><b>30%</b><small>usado no orçamento</small></div></div>
+      </div>
+    </div>
+
+    <div class="tv on"><div class="cap">App › Fila — ligado</div>
+      <div class="tela">
+        <div class="hdr"><b>Meus leads</b><small>4 abertos · 1 sua vez</small></div>
+        <div class="faixa">
+          <span>✨</span>
+          <span class="txt"><b>A Fila abre na ordem da conversa</b> A lista passou a
+          vir com quem falou por último na frente.</span>
+          <span class="qtos">1 de 4</span>
+          <span class="ver">Ver →</span>
+          <span class="x alvo">✕</span>
+        </div>
+        <div class="busca">🔎 <span>Procurar por nome ou número</span></div>
+        <div class="ordem"><span class="on">Por conversa</span><span>Por urgência</span></div>
+        <div class="card"><span class="dot" style="background:var(--neon)"></span>
+          <span class="mid"><span class="emp">Thompson</span>
+          <span class="sn">🤖 Oi, Thompson! Tudo bem? Passando pra confi…</span></span>
+          <span class="h novo">07:53</span></div>
+        <div class="card"><span class="dot"></span><span class="mid">
+          <span class="emp">Daiane Alves</span><span class="sn">Você: Ok</span></span>
+          <span class="h">23/08</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="telas" style="margin-top:1.3rem">
+    <div class="tv off"><div class="cap">App › Fila — desligado</div>
+      <div class="tela">
+        <div class="hdr"><b>Meus leads</b><small>4 abertos · 1 sua vez</small></div>
+        <div class="busca">🔎 <span>Procurar por nome ou número</span></div>
+        <div class="ordem"><span class="on">Por conversa</span><span>Por urgência</span></div>
+        <div class="card"><span class="dot" style="background:var(--neon)"></span>
+          <span class="mid"><span class="emp">Thompson</span>
+          <span class="sn">🤖 Oi, Thompson! Tudo bem? Passando pra confi…</span></span>
+          <span class="h novo">07:53</span></div>
+        <div class="card"><span class="dot"></span><span class="mid">
+          <span class="emp">Thompson</span><span class="sn">Oi</span></span>
+          <span class="h novo">07:52</span></div>
+        <div class="card"><span class="dot"></span><span class="mid">
+          <span class="emp">Daiane Alves</span><span class="sn">Você: Ok</span></span>
+          <span class="h">23/08</span></div>
+        <div class="card"><span class="dot"></span><span class="mid">
+          <span class="emp">Kelly</span><span class="sn">🎂 15 anos</span></span>
+          <span class="h">14/08</span></div>
+      </div>
+    </div>
+
+    <div class="tv off"><div class="cap">App › Perfil — sempre, ligado ou não</div>
+      <div class="tela">
+        <div class="hdr"><b>Perfil</b><small>Pedro Yan · Prime Eventos</small></div>
+        <div class="linha" style="border-radius:11px">
+          <div class="t"><b>Novidades <span style="color:var(--neon)">26</span></b>
+            <small>Tudo que mudou no sistema, do mais novo pro mais velho.</small></div>
+        </div>
+        <div class="nota" style="font-size:.76rem;border-radius:0 8px 8px 0">
+          <b>É aqui que nada se perde.</b> Com o interruptor desligado, os 26
+          continuam aqui e a bolinha verde continua contando. O que some é só a
+          interrupção no meio do trabalho.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================= as peças -->
+<div class="sec">
+  <h2>As quatro peças, e de quem é cada uma</h2>
+  <div class="pecas">
+    <div class="pc seu"><div class="tag">Sua ideia</div>
+      <h3>Interruptor na Empresa</h3>
+      <p><b>Avisar a equipe na Fila</b>, ligado por padrão. Coluna
+      <code>contas.avisos_na_fila</code>, com o mesmo botão do plano de contas, que
+      já existe nessa tela. Desligar não apaga nada.</p></div>
+
+    <div class="pc"><div class="tag">Meu</div>
+      <h3>O ✕ volta a fechar um</h3>
+      <p>Desfaço o "dispensa a fila" do PR #707. Você tem razão: marcar 26 como
+      lidos pra calar a tela é <b>destruir estado pra resolver enfeite</b>.</p></div>
+
+    <div class="pc"><div class="tag">Meu</div>
+      <h3>O contador "1 de 26"</h3>
+      <p>Era a fila invisível que fazia o ✕ parecer quebrado — você fechava um e
+      via outro igual. <b>Isto some com o chamado</b>, e não apaga nada.</p></div>
+
+    <div class="pc decidir"><div class="tag">Precisa de você</div>
+      <h3>O prazo da faixa</h3>
+      <p>Sem prazo, o interruptor vira a <b>única</b> saída — e desligado uma vez,
+      fica desligado pra sempre. Com prazo, a faixa só interrompe com aviso dos
+      últimos <b>N dias</b>, e o acúmulo de 26 se resolve sozinho. <b>14 dias?</b></p></div>
+  </div>
+
+  <div class="nota amb" style="margin-top:1.1rem">
+    <b>Por que eu insisto no prazo.</b> O interruptor resolve a SUA conta, hoje. Mas
+    o que gerou o incômodo foi o acúmulo, e ele acontece em toda conta nova —
+    a Louana (35) já está em 27 de 27 sem ninguém ter reclamado ainda. Se a única
+    saída for desligar, o dono desliga e nunca mais liga; aí a §5 do CLAUDE.md
+    (todo PR que muda tela leva o aviso) passa a escrever pra ninguém. O prazo faz
+    a faixa se limpar sozinha e continuar valendo no dia em que houver algo novo.
+  </div>
+</div>
+
+<!-- ======================================================= o que pede -->
+<div class="sec">
+  <h2>O que isto pede pra virar tela</h2>
+  <ul class="reg">
+    <li><b>Uma coluna</b>: <code>contas.avisos_na_fila boolean default true</code>.
+    Falha fechada ao contrário do normal — sem a coluna, a faixa aparece, que é o
+    comportamento de hoje.</li>
+    <li><b>Um bloco novo na Empresa</b>, com o botão que já existe
+    (<code>pc-sw</code> do plano de contas). Só dono e gestor: a tela já pede a
+    capacidade <code>financeiro</code>.</li>
+    <li><b>Um portão em <code>_faixa_novidade</code></b>: a faixa lê o parâmetro e o
+    prazo. Nada muda em <code>finance/novidades</code> — a mira por público e por
+    papel continua igual, e a tela de Novidades não muda.</li>
+    <li><b>Nada muda pro vendedor</b> além de a faixa aparecer ou não. O ✕, o "Ver"
+    e o Perfil seguem iguais.</li>
+  </ul>
+
+  <h2 style="margin-top:1.6rem">E nos outros nichos (§6)</h2>
+  <ul class="reg">
+    <li><b>Vale em qualquer nicho</b>: o parâmetro é sobre COMO avisar, não sobre o
+    que a conta vende. Quem não tem vendedor não tem Fila e não é afetado.</li>
+    <li><b>A mira do aviso não muda</b> — <code>publico</code> e <code>pra_quem</code>
+    continuam decidindo quem recebe o quê. O interruptor decide só se interrompe.</li>
+  </ul>
+</div>
+
+<div class="eyebrow" style="text-align:center">Mockup — nada disto está no ar.
+Dados reais das contas 3, 34 e 35, lidos em 16/09/2026.</div>
+
+</div>
+</html>

@@ -354,24 +354,71 @@ def _dia_festa(c, conta_id, w, wv, ini, fim) -> list[dict]:
 
 
 def _tipos_ticket(c, conta_id, w, wv, ini, fim) -> list[dict]:
-    rows = c.execute(f"""
-        select p.evento_tipo, count(*),
-               avg(o.primeiro_ano_centavos) filter (where o.status <> 'rascunho' and coalesce(o.primeiro_ano_centavos, 0) > 0),
-               count(o.id) filter (where o.status <> 'rascunho')
-          from prospeccao p left join orcamentos o on o.id = p.orcamento_id
+    """Por tipo de festa: quantos LEADS entraram e quanto se PROPÔS no período.
+
+    SÃO DUAS PERGUNTAS E DUAS DATAS, e é por isso que são duas consultas. A conta
+    só existe separada depois de 16/09/2026, quando o dono olhou a tela e disse
+    "acho que está errado" — e estava.
+
+    O DEFEITO: o período filtrava `prospeccao.criado_em` pros dois números. Então
+    uma proposta FEITA em setembro pra um lead que entrou em agosto não existia
+    aqui. Na Prime, em setembro, isso escondia as duas propostas de Aniversário —
+    R$ 5.000 e R$ 8.600, esta última FECHADA — e a tela dizia "sem proposta" no
+    tipo. Também estreitava o Casamento: R$ 7.900 era a média de duas das três
+    propostas do mês (a de R$ 6.500 ficou de fora porque o lead era de agosto).
+
+    A PROVA de que era defeito e não critério estava na mesma tela: o bloco de
+    propostas enviadas, logo acima, filtra por `orcamentos.criado_em`. Os dois
+    falavam das mesmas propostas e contavam períodos diferentes — o de cima dizia
+    seis, o de baixo mostrava três.
+
+    Então agora: `n` conta lead que ENTROU no período (é a procura por tipo), e
+    `n_orc`/`ticket_centavos` contam proposta FEITA no período (é o preço). A tela
+    mostra os dois lado a lado justamente pra nenhum ser lido como o outro.
+    """
+    leads = c.execute(f"""
+        select p.evento_tipo, count(*)
+          from prospeccao p
          where p.conta_id = %s and p.criado_em >= %s and p.criado_em < %s{w}
          group by 1""", [conta_id, ini, fim, *wv]).fetchall()
+    # o `join` (e não `left join`) é o que diz "proposta feita no período": sem
+    # proposta não há data de proposta, e a linha não tem por que existir aqui.
+    # `coalesce(primeiro_ano, setup)` é como o resto da casa lê o total de um
+    # orçamento (ver `agenda`, `cockpit`, `vendas`) — só aqui era o primeiro sem
+    # a rede, e um orçamento de valor único cairia como "sem valor".
+    props = c.execute(f"""
+        select p.evento_tipo,
+               count(*) filter (where o.status <> 'rascunho'),
+               avg(coalesce(o.primeiro_ano_centavos, o.setup_centavos))
+                 filter (where o.status <> 'rascunho'
+                           and coalesce(o.primeiro_ano_centavos, o.setup_centavos, 0) > 0),
+               count(*) filter (where o.status <> 'rascunho'
+                                  and coalesce(o.primeiro_ano_centavos, o.setup_centavos, 0) > 0)
+          from orcamentos o join prospeccao p on p.orcamento_id = o.id
+         where p.conta_id = %s and o.criado_em >= %s and o.criado_em < %s{w}
+         group by 1""", [conta_id, ini, fim, *wv]).fetchall()
+
     agg: dict[str, dict] = {}
-    for t, n, media, n_orc in rows:
+
+    def _slot(t):
         k = _tipo_canonico(t)
-        a = agg.setdefault(k, {"tipo": k, "n": 0, "soma": 0.0, "n_orc": 0})
-        a["n"] += int(n)
+        return agg.setdefault(k, {"tipo": k, "n": 0, "soma": 0.0, "n_orc": 0, "n_valor": 0})
+
+    for t, n in leads:
+        _slot(t)["n"] += int(n)
+    for t, n_orc, media, n_valor in props:
+        a = _slot(t)
+        a["n_orc"] += int(n_orc or 0)
         if media is not None:
-            a["soma"] += float(media) * int(n_orc); a["n_orc"] += int(n_orc)
-    out = []
-    for a in agg.values():
-        out.append({"tipo": a["tipo"], "n": a["n"], "n_orc": a["n_orc"],
-                    "ticket_centavos": int(a["soma"] / a["n_orc"]) if a["n_orc"] else None})
+            # O PESO é quantas propostas TÊM valor, não quantas existem: a média
+            # que vem do banco já ignorou as de valor zero, e multiplicá-la pelo
+            # total inflava o tipo que tivesse uma proposta sem valor. Só aparece
+            # quando dois `evento_tipo` crus caem no mesmo tipo canônico ("Chá" e
+            # "Confraternização" viram "Outro"), que é onde ninguém ia procurar.
+            a["soma"] += float(media) * int(n_valor); a["n_valor"] += int(n_valor)
+    out = [{"tipo": a["tipo"], "n": a["n"], "n_orc": a["n_orc"],
+            "ticket_centavos": int(a["soma"] / a["n_valor"]) if a["n_valor"] else None}
+           for a in agg.values()]
     out.sort(key=lambda x: (x["tipo"] == "sem tipo", -(x["ticket_centavos"] or 0), -x["n"]))
     return out
 

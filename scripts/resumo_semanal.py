@@ -10,6 +10,12 @@ No Render é um serviço `cron` como o `openclaw-monitor-saldos`:
     schedule: "0 12 * * *"      # 12:00 UTC = 09:00 BRT
     startCommand: python -m scripts.resumo_semanal
 
+As variaveis: DATABASE_URL, SMTP_USER e SMTP_SENHA (os nomes que
+`finance/email_sender._cfg` le — SMTP_SENHA, nao SMTP_PASS). Sem elas o modulo
+loga "envio desabilitado" e o cron termina com sucesso sem mandar nada: e por
+isso que a primeira rodada tem que ser conferida em `resumo_semanal_envio`, e
+nao no codigo de saida.
+
 A hora de sexta (17h BRT) sai de um segundo horário no mesmo serviço não — sai de
 o cron rodar às 12:00 UTC e a conta de sexta receber às 9h da sexta. Se alguém
 escolher sexta esperando 17h, é a primeira coisa a acertar aqui; hoje o dono

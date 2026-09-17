@@ -46,6 +46,7 @@ _log = logging.getLogger("openclaw.painel_prospeccao")
 
 router = APIRouter()
 from finance import evento_lead as _evl  # noqa: E402 — o evento no lead (migração 197)
+from web import janela_lead as _jl  # noqa: E402 — a MESMA janela do Follow-up (16/09)
 
 # ---------------------------------------------------------------- domínio (rótulos)
 STATUS = [
@@ -644,6 +645,24 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
         quadro_comercial = not (modo_evento and (vista or "").strip() == "mes")
         fora_do_quadro = ([e["chave"] for e in etapas if e.get("sai_do_quadro")]
                           if quadro_comercial else [])
+        # A LISTA INTEIRA, GUARDADA ANTES DO FILTRO (17/09/2026). Daqui a três
+        # linhas `etapas` vira só o que o quadro mostra — e era dela que o
+        # `status_tpl` do SELETOR saía, lá embaixo. As duas perguntas são
+        # diferentes: "que colunas o quadro tem" não é "que situações o vendedor
+        # pode escolher", e juntar as duas na mesma variável fez o quadro esconder
+        # a coluna E o vendedor não poder marcar a etapa.
+        #
+        # Custou o principal: na Prime, `ganho` se chama "Evento Realizado" e está
+        # marcada como sai_do_quadro. Quem trabalha PELO QUADRO — a tela onde o
+        # vendedor passa o dia — não tinha como marcar a venda. Em dois meses
+        # entraram 7 leads em ganho num funil de 398, e a explicação que eu dei
+        # antes de ler isto ("o vendedor não move o card") estava errada pela
+        # metade: em parte a tela não deixava.
+        #
+        # Abrindo o MESMO lead pelo Follow-up a lista vinha inteira, porque de lá
+        # ela é lida sem filtro nenhum. Mesma janela, mesmo lead, listas
+        # diferentes conforme a porta.
+        etapas_todas = list(etapas)
         # os RÓTULOS vêm da lista inteira, e não da filtrada: na vista por mês o card
         # do lead fechado continua na tela, e sem isto o selo dele cairia no palpite
         # a partir da chave — "Ganho" no lugar de "Evento Realizado", que é o nome que
@@ -909,7 +928,15 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
         if r[5] != "perdido":
             total_valor += int(r[7] or 0)
     # rótulos (chave, rotulo) pro template + etapas ricas (com nº de leads) pro editor
-    status_tpl = [(e["chave"], e["rotulo"]) for e in etapas]
+    # O SELETOR sai da lista INTEIRA (ver `etapas_todas`, lá em cima); o editor
+    # rápido do quadro continua saindo da filtrada, porque ele edita coluna — quem
+    # mexe em etapa escondida é a Régua, que lê tudo.
+    status_tpl = _jl.lista_de_status(etapas_todas)
+    # As COLUNAS do quadro são outra coisa, e agora têm variável própria: elas
+    # saem da lista FILTRADA, porque coluna de etapa escondida é exatamente o que
+    # a migração 238 tirou daqui. Era a mistura das duas num `status` só que
+    # produziu o defeito de 17/09.
+    colunas_tpl = [(e["chave"], e["rotulo"]) for e in etapas]
     etapas_edit = [{**e, "n": len(colunas.get(e["chave"], []))} for e in etapas]
     vends = _vendedores(pool, conta_id) if ctx["gerencia"] else []
     agora = _agora()
@@ -1015,7 +1042,7 @@ def prospeccao_kanban(request: Request, vendedor: str = "", mes: str = "", vista
                    n_quadro=n_quadro, filtrado=filtrado,
                    filtro_mes_rotulo=(_evl.mes_rotulo(filtro_mes) if _evl.mes_valido(filtro_mes) else ""),
                    totais_col=totais_col, modo_evento=modo_evento, pergunta_data=_evl.PERGUNTA_DATA,
-                   status=status_tpl, etapas=etapas_edit, colunas=colunas, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
+                   status=status_tpl, colunas_tpl=colunas_tpl, etapas=etapas_edit, colunas=colunas, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
                    temperaturas_all=TEMPERATURAS, gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"],
                    vendedores=vends, filtro_vend=filtro_vend, total_valor=total_valor,
                    total_alvos=len(rows), tem_places=fontes.tem_chave_places(),
@@ -8525,6 +8552,35 @@ def _canais_contato_lead(pool, alvo_id: int):
     return canais_contato
 
 
+def _parado_desde(pool, conta_id: int, lead_id: int):
+    """Desde quando o lead está na situação em que está.
+
+    A fonte é `funil_movimentos` — a última vez que ele ENTROU na etapa atual. Sem
+    registro nenhum (lead anterior à tabela, ou que nunca saiu de onde nasceu), o
+    relógio corre desde a criação: é o que a pessoa entende por "parado", e chutar
+    "agora" esconderia justamente o lead esquecido.
+
+    Tolerante de propósito: base sem a tabela devolve None e a janela abre sem o
+    rótulo. Um lead que não mostra "parado há 20 dias" é um detalhe; uma janela que
+    não abre é a tela inteira.
+    """
+    try:
+        with pool.connection() as c:
+            with c.transaction():
+                r = c.execute(
+                    """select coalesce(
+                                (select max(fm.criado_em) from funil_movimentos fm
+                                  where fm.conta_id = p.conta_id and fm.prospeccao_id = p.id
+                                    and fm.para = p.status),
+                                p.criado_em)
+                         from prospeccao p where p.id=%s and p.conta_id=%s""",
+                    (lead_id, conta_id)).fetchone()
+        return r[0] if r else None
+    except Exception:  # noqa: BLE001
+        _log.warning("não consegui medir o tempo parado do lead %s", lead_id, exc_info=True)
+        return None
+
+
 @router.get("/painel/prospeccao/{alvo_id}/resumo")
 def prospeccao_resumo(request: Request, alvo_id: int):
     """Resumo enxuto do lead pro balão do funil — só o que ajuda a decidir a
@@ -8547,6 +8603,8 @@ def prospeccao_resumo(request: Request, alvo_id: int):
         "temp_cor": TEMP_COR.get(alvo["temperatura"]), "temp_pill": list(temp_pill),
         "segmento": alvo["segmento"], "cidade": alvo["cidade"], "uf": alvo["uf"],
         "vendedor_nome": alvo["vendedor_nome"], "status": alvo["status"],
+        # o empurrão pra qualificar: o tempo na situação atual, já escrito
+        "parado_txt": _jl.parado_texto(_parado_desde(pool, ctx["conta_id"], alvo_id), _agora()),
         "contato": alvo["contato"], "cargo": alvo["cargo"],
         "telefone": alvo["telefone"], "whatsapp": alvo["whatsapp"], "email": alvo["email"],
         "instagram": alvo["instagram"], "site_url": alvo["site_url"], "site_dominio": alvo["site_dominio"],
@@ -11300,7 +11358,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
   <!-- abas de status (só mobile) -->
   <div class="kbtabs" id="kbtabs">
-    {% for s, rot in (vista_cols or status) %}<button type="button" class="kbtab" data-tab="{{ s }}" onclick="kbTab('{{ s }}')">{{ rot }} <span class="c">{{ (grupos or {}).get(s, []) | sum(attribute='n') if vista_mes else colunas[s]|length }}</span></button>{% endfor %}
+    {% for s, rot in (vista_cols or colunas_tpl) %}<button type="button" class="kbtab" data-tab="{{ s }}" onclick="kbTab('{{ s }}')">{{ rot }} <span class="c">{{ (grupos or {}).get(s, []) | sum(attribute='n') if vista_mes else colunas[s]|length }}</span></button>{% endfor %}
   </div>
 
   {# O CARD, uma vez só: a mesma marcação serve pros grupos por mês e pra dobra dos
@@ -11354,7 +11412,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
      da festa não muda de arrastar) — o drop fica desligado e a contagem é a soma
      dos grupos. Mudar a etapa continua pelo balão do lead. #}
   <div class="kbrow{% if vista_mes %} vmes{% endif %}" id="kbrow">
-    {% for s, rot in (vista_cols or status) %}
+    {% for s, rot in (vista_cols or colunas_tpl) %}
     <div class="kbcol" data-status="{{ s }}"{% if not vista_mes %} ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event,'{{ s }}')"{% endif %}>
       <h4><span>{{ rot }}</span><span class="kbcnt">{% if vista_mes %}{{ (grupos or {}).get(s, []) | sum(attribute='n') }}{% else %}{{ colunas[s]|length }}{% if filtrado %} <i>de {{ totais_col.get(s, 0) }}</i>{% endif %}{% endif %}</span></h4>
       <div class="kbdrop">

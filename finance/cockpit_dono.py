@@ -277,25 +277,45 @@ def leads(pool, conta_id: int, vend: int | None = None, etapa: str = "", temp: s
 
 
 def filtros_leads(pool, conta_id: int) -> dict:
-    """Opções pros filtros da aba Leads: vendedores (com lead) + etapas do funil."""
+    """Opções pros filtros da aba Leads: vendedores (com lead) + etapas do funil.
+
+    Devolve também `rotulos` — {chave: nome que a CONTA deu} —, e é ele que a tela
+    usa pra escrever etapa, no filtro e em cada linha da lista.
+
+    POR QUE O RÓTULO PASSOU A VIR DAQUI (17/09/2026). A tela montava os nomes de uma
+    tabela fixa de quatro (`_ETAPA_ROT` em web/painel_cockpit.py): novo, contatado,
+    qualificado, proposta. Quem não estivesse nela virava `.title()` da chave. Na
+    Prime, onde o dono renomeou as etapas, o gestor lia no app "Qualificado" onde o
+    painel dizia "Agendado Visita", "Proposta" onde dizia "Negociação" e —
+    literalmente — "Evento_Realizado", com sublinhado no meio da palavra. Dois
+    vocabulários pro mesmo lead, e a regra 6 furada por uma constante esquecida.
+
+    `rotulos` traz TODAS as etapas, ganho e perdido inclusive: a lista de leads
+    mostra a etapa de cada um, e um lead pode estar numa que o FILTRO não oferece.
+    """
     with pool.connection() as c:
         vends = c.execute(
             "select distinct m.id, coalesce(nullif(m.nome,''), m.email) from prospeccao p "
             "join membros m on m.id=p.vendedor_id where p.conta_id=%s and coalesce(p.estagio,'lead')='lead' "
             "and " + _ABERTO_P + " order by 2", (conta_id,)).fetchall()
-        etapas = [e for e in _etapas_conta(c, conta_id) if e not in ("ganho", "perdido")]
-    return {"vendedores": [{"id": r[0], "nome": r[1]} for r in vends], "etapas": etapas}
+        todas = _etapas_conta(c, conta_id)
+        etapas = [e for e, _r in todas if e not in ("ganho", "perdido")]
+        rotulos = {e: r for e, r in todas}
+    return {"vendedores": [{"id": r[0], "nome": r[1]} for r in vends],
+            "etapas": etapas, "rotulos": rotulos}
 
 
-def _etapas_conta(c, conta_id: int) -> list[str]:
+def _etapas_conta(c, conta_id: int) -> list[tuple[str, str]]:
+    """(chave, rótulo) de todas as etapas da conta, na ordem do funil."""
     try:
-        rows = c.execute("select chave from funil_etapas where conta_id=%s order by ordem, id",
+        rows = c.execute("select chave, rotulo from funil_etapas where conta_id=%s order by ordem, id",
                          (conta_id,)).fetchall()
         if rows:
-            return [r[0] for r in rows]
+            return [(r[0], r[1] or r[0].replace("_", " ").title()) for r in rows]
     except Exception:  # noqa: BLE001
         pass
-    return ["novo", "contatado", "qualificado", "proposta"]
+    return [("novo", "Novo"), ("contatado", "Contatado"),
+            ("qualificado", "Qualificado"), ("proposta", "Proposta")]
 
 
 def vendedores_para_reatribuir(pool, conta_id: int, exceto_id: int) -> list[dict]:

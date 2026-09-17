@@ -126,6 +126,41 @@ def test_leads_todos_e_filtros(pool):
     f = cd.filtros_leads(pool, conta)
     assert {x["nome"] for x in f["vendedores"]} == {"Carlos", "Ana"}
     assert "novo" in f["etapas"] and "ganho" not in f["etapas"]
+    # os RÓTULOS vêm junto — é deles que a tela escreve a etapa de cada lead
+    assert f["rotulos"]["novo"] == "Novo"
+
+
+def test_o_app_escreve_a_etapa_com_o_nome_que_a_CONTA_deu(pool):
+    """CLAUDE.md §6, e um defeito de verdade até 17/09/2026: a tela do gestor no app
+    montava os nomes de uma tabela fixa de quatro no código. Numa conta que renomeou
+    o funil, o gestor lia no app um vocabulário e no painel outro — "Qualificado"
+    onde o painel dizia "Agendado Visita", e "Evento_Realizado" com sublinhado."""
+    from web import painel_cockpit as pc
+    with pool.connection() as c:
+        conta, dono, v1, v2, ab, an = _seed(c, "Vocabulario")
+        # o funil da Prime, com os apelidos que o dono deu
+        for chave, rot, ordem in [("novo", "Novo", 0), ("contatado", "Contatado", 10),
+                                  ("qualificado", "Agendado Visita", 30),
+                                  ("proposta", "Negociação", 50),
+                                  ("ganho", "Evento Realizado", 900),
+                                  ("perdido", "Perdido", 910),
+                                  ("evento_realizado", "Evento A Realizar", 920)]:
+            c.execute("insert into funil_etapas (conta_id, chave, rotulo, ordem) values (%s,%s,%s,%s)",
+                      (conta, chave, rot, ordem))
+        c.commit()
+    rots = cd.filtros_leads(pool, conta)["rotulos"]
+    assert rots.get("qualificado") == "Agendado Visita", "o apelido da conta não chegou na tela"
+    assert pc._rot_etapa(rots, "qualificado") == "Agendado Visita"
+    assert pc._rot_etapa(rots, "evento_realizado") == "Evento A Realizar"
+    assert pc._rot_etapa(rots, "proposta") == "Negociação"
+    # ganho e perdido entram nos rótulos mesmo ficando FORA do filtro: o filtro é
+    # sobre lead aberto, a lista mostra a etapa de qualquer um
+    assert rots.get("ganho") == "Evento Realizado"
+    assert "ganho" not in cd.filtros_leads(pool, conta)["etapas"]
+    # e o último recurso, pra etapa que sumiu do funil depois de o lead entrar nela:
+    # nunca devolver a chave crua, com sublinhado, pra tela
+    assert pc._rot_etapa({}, "evento_realizado") == "Evento Realizado"
+    assert pc._rot_etapa({}, "") == ""
 
 
 def test_reatribuir_e_pausar(pool):

@@ -27,6 +27,7 @@ from finance import raio_x_perfil as rxp
 # a barra de abas de Prospecção: o Follow-up virou uma delas em 07/09/2026, e a
 # barra tem que ser a MESMA — `_navbar` é fonte única desde que a cópia escrita à
 # mão no Funil divergiu e escondeu a aba "Quem atacar" de quem estava lá.
+from web import janela_lead as _jl
 from web.painel_prospeccao import NAVBAR_CSS, _navbar
 from web.portal import _env, _render, conta_logada, nicho_da_conta
 
@@ -116,14 +117,19 @@ def painel_follow_up(request: Request):
             etapas = [r[0] for r in c.execute(
                 """select chave from funil_etapas where conta_id=%s
                     and fase='venda' order by ordem, id""", (conta_id,)).fetchall()]
-            # (chave, rótulo) de TODAS as etapas, pro seletor da janela do lead.
-            # Difere do `etapas` acima de propósito: aquele é o FILTRO da tela, que
-            # só lista etapa de venda; este é pra onde o lead pode ir, e ganho e
-            # perdido têm que estar lá — "já fechou mas está como contato" é
-            # justamente a troca que o dono pediu. Mesma fonte do funil
-            # (`_etapas`), pra conta que renomeou etapa não ver dois vocabulários.
+            # TODAS as etapas, pro seletor da janela do lead. Difere do `etapas`
+            # acima de propósito: aquele é o FILTRO da tela, que só lista etapa de
+            # venda; este é pra onde o lead pode ir, e ganho e perdido têm que
+            # estar lá — "já fechou mas está como contato" é justamente a troca que
+            # o dono pediu. Mesma fonte do funil (`_etapas`), pra conta que
+            # renomeou etapa não ver dois vocabulários.
+            #
+            # E passa pela MESMA função que o funil usa (`lista_de_status`) desde
+            # 17/09/2026: as duas telas montavam a lista cada uma do seu jeito, e
+            # foi assim que o funil acabou oferecendo 6 situações onde esta oferece
+            # 9, na mesma janela e no mesmo lead.
             from web.painel_prospeccao import _etapas as _et
-            status_tpl = [(e["chave"], e["rotulo"]) for e in _et(c, conta_id)]
+            status_tpl = _jl.lista_de_status(_et(c, conta_id))
     except Exception:  # noqa: BLE001 — tela que não abre é pior que tela incompleta
         linhas = []
 
@@ -588,11 +594,12 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
   {% endif %}
 </div>
 <script>{{ balao_js }}</script>
-{#- `_KB_STATUS` é o que enche o seletor de situação da janela: [[chave, rótulo]]
-    das etapas DESTA conta, ganho e perdido inclusive — é exatamente a troca que o
-    dono pediu ("tem cliente que já fechou mais esta como contato"). Sem ela o
-    seletor sai vazio, e é por isso que a janela lê `window._KB_STATUS`: uma tela
-    que esqueça isto perde o seletor, não o clique inteiro. -#}
+{#- `_KB_STATUS` é o que enche o seletor de situação da janela: o que
+    `janela_lead.lista_de_status()` devolve pras etapas DESTA conta, ganho e perdido
+    inclusive — é exatamente a troca que o dono pediu ("tem cliente que já fechou
+    mais esta como contato"). Sem ela o seletor sai vazio, e é por isso que a janela
+    lê `window._KB_STATUS`: uma tela que esqueça isto perde o seletor, não o clique
+    inteiro. -#}
 <script>var _KB_STATUS={{ (status or [])|tojson }};
 // o portão do §6 dentro da janela: os campos do evento são declarados aqui, e
 // só pra quem vende data — a conta de mensalidade não recebe nem a palavra.

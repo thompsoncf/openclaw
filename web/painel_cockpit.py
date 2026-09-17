@@ -842,6 +842,10 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .etapas button{font-family:inherit;font-size:.78rem;padding:.32rem .7rem;border-radius:999px;
   border:1px solid var(--line);background:var(--surface);color:var(--text-dim);cursor:pointer}
 .etapas button.on{border-color:var(--neon);background:rgba(37,211,102,.12);color:var(--neon);font-weight:600}
+/* tracejado = ao entrar aqui o card sai do quadro do painel. Mesma convenção da
+   janela do lead no painel (web/janela_lead.py, `.lp-chip.sai`) — a pessoa que usa
+   as duas telas aprende o sinal uma vez só. */
+.etapas button.sai{border-style:dashed}
 .ficha-l{display:flex;justify-content:space-between;gap:1rem;padding:.4rem 0;
   border-bottom:1px solid var(--line);font-size:.84rem}
 .ficha-l span{color:var(--text-dim);flex-shrink:0}
@@ -5307,11 +5311,20 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
         + f"<a class=orc href='{_BASE}/lead/{lead_id}/orcamento'>{_ic('orc', 'ic p')} Orçamento</a>"
         + f"<a class=vis2 href='{_BASE}/lead/{lead_id}/visita'>{_ic('agenda', 'ic p')} Visita</a>")
 
-    etapas = "".join(
-        f"<form method=post action='{_BASE}/lead/{lead_id}/etapa'>"
-        f"<input type=hidden name=etapa value='{esc(e['chave'])}'>"
-        f"<button class='{'on' if d['status'] == e['chave'] else ''}' type=submit>{esc(e['rotulo'])}</button>"
-        "</form>" for e in d["etapas"])
+    # `sai` = ao entrar nesta etapa o card SAI DO QUADRO do painel. Elas voltaram
+    # pra lista em 17/09/2026 (ver o comentário em finance/cockpit.py) porque
+    # escondê-las tirava do vendedor o passo da qualificação — na Prime, "Agendado
+    # Visita". Voltaram TRACEJADAS: a escolha existe, e quem toca sabe o que faz.
+    _AVISO_SAI = " title='ao entrar aqui o card sai do quadro'"
+
+    def _bt_etapa(e):
+        cls = ("on " if d["status"] == e["chave"] else "") + ("sai" if e.get("sai") else "")
+        return (f"<form method=post action='{_BASE}/lead/{lead_id}/etapa'>"
+                f"<input type=hidden name=etapa value='{esc(e['chave'])}'>"
+                f"<button class='{cls.strip()}' type=submit"
+                f"{_AVISO_SAI if e.get('sai') else ''}>{esc(e['rotulo'])}</button></form>")
+
+    etapas = "".join(_bt_etapa(e) for e in d["etapas"])
 
     # A lista de perda vem pronta de `cockpit.lead_do_vendedor` — é a DA CONTA
     # (`funil_motivos_perda`, migração 235), lida no mesmo cursor da ficha e a mesma
@@ -5738,9 +5751,19 @@ def cockpit_atividade(request: Request):
     return _page("Atividade", corpo)
 
 
-_ETAPA_ROT = {"novo": "Novo", "contatado": "Contatado", "qualificado": "Qualificado",
-              "proposta": "Proposta"}
+# A TABELA FIXA DE NOMES MORREU EM 17/09/2026. Ela tinha quatro etapas — novo,
+# contatado, qualificado, proposta — e o resto caía num `.title()` da chave. Na
+# Prime, que renomeou o funil inteiro, o gestor lia aqui "Qualificado" onde o
+# painel diz "Agendado Visita" e "Evento_Realizado" com sublinhado no meio. Agora o
+# nome vem da conta, por `cockpit_dono.filtros_leads()["rotulos"]`.
 _TEMP_ROT = [("quente", "Quente"), ("morno", "Morno"), ("frio", "Frio")]
+
+
+def _rot_etapa(rotulos: dict, chave: str) -> str:
+    """O nome que a CONTA deu à etapa. Sem rótulo (etapa apagada depois de o lead
+    entrar nela), o último recurso ainda troca o sublinhado por espaço — nunca
+    devolver `evento_realizado` cru pra tela."""
+    return rotulos.get(chave) or (chave or "").replace("_", " ").title()
 
 
 @router.get("/cockpit/equipe/leads", response_class=HTMLResponse)
@@ -5752,6 +5775,7 @@ def cockpit_leads(request: Request, vend: str = "", etapa: str = "", temp: str =
     vend_i = int(vend) if vend.isdigit() else None
     lista = cd.leads(pool, g[0], vend_i, etapa, temp)
     filt = cd.filtros_leads(pool, g[0])
+    _rots = filt.get("rotulos") or {}
 
     def url(**over):
         p = {"vend": vend, "etapa": etapa, "temp": temp}
@@ -5767,7 +5791,7 @@ def cockpit_leads(request: Request, vend: str = "", etapa: str = "", temp: str =
         + "".join(chip(vend == str(v["id"]), v["nome"].split(" ")[0], url(vend=str(v["id"])))
                   for v in filt["vendedores"]) + "</div>"
         + "<div class=filt><span class=lbl>Etapa</span>" + chip(not etapa, "Todas", url(etapa=""))
-        + "".join(chip(etapa == e, _ETAPA_ROT.get(e, e.title()), url(etapa=e)) for e in filt["etapas"])
+        + "".join(chip(etapa == e, _rot_etapa(_rots, e), url(etapa=e)) for e in filt["etapas"])
         + "</div>"
         + "<div class=filt><span class=lbl>Temp</span>" + chip(not temp, "Todas", url(temp=""))
         + "".join(chip(temp == t, lab, url(temp=t)) for t, lab in _TEMP_ROT) + "</div>")
@@ -5778,7 +5802,7 @@ def cockpit_leads(request: Request, vend: str = "", etapa: str = "", temp: str =
         f"<span class=dot style='background:{_cor_temp(l.get('temp_cor'))}'></span>"
         f"<span class=mid><span class=top><span class=emp>{esc(l['empresa'])}</span>"
         + ("<span class='chip ia'>IA</span>" if l["ia"] else "<span class='chip voce'>vend.</span>")
-        + f"</span><span class=snip>{esc(l['vendedor'])} · {esc(_ETAPA_ROT.get(l['status'], l['status'].title()))}"
+        + f"</span><span class=snip>{esc(l['vendedor'])} · {esc(_rot_etapa(_rots, l['status']))}"
           "</span></span></a>" for l in lista)
     miolo = (f"<div class=fonte style='margin-top:.7rem'>{len(lista)} lead(s)</div>" + linhas) if lista else \
         ("<div class=vazio><div class=big>◌</div><b>Nenhum lead com esses filtros</b>"

@@ -23,6 +23,7 @@ import pytest
 # mas o menu cita telas que só existem quando o módulo foi importado)
 import web.painel_agenda  # noqa: F401
 import web.painel_conteudo  # noqa: F401
+import web.painel_apolices  # noqa: F401
 import web.painel_origens  # noqa: F401
 import web.painel_raio_x  # noqa: F401
 from contas import equipe as eq
@@ -42,9 +43,17 @@ _MEMBROS = ["gestor", "vendedor", "financeiro", "restrito", "membro", "convidado
 _LIVRES = {"/trocar", "/sair", "/painel/versao"}
 
 
-def _menu(papel: str) -> str:
-    perfil = {"chave": "eventos", "aplica": True,
-              "vocab": {"data": True, "compromisso": "visita"}}
+#: Os perfis de nicho que o menu conhece. O menu não é o mesmo pra todos (regra 6:
+#: cada tela segue o nicho), então renderizar só `eventos` mede metade do menu — e
+#: a metade que falta vira uma rota liberada que este arquivo acusa de não ter
+#: link, quando ela tem, em outro nicho. Foi o que aconteceu com Renovações
+#: (17/09/2026), que só existe na corretora de seguros.
+_PERFIS_DO_MENU = ("eventos", "recorrente", "seguros")
+
+
+def _menu(papel: str, chave: str = "eventos") -> str:
+    perfil = {"chave": chave, "aplica": True,
+              "vocab": {"data": chave == "eventos", "compromisso": "visita"}}
     return _env.get_template("base").render(
         logado=True, papel=papel, caps=eq.caps_do_papel(papel), conta=_CONTA_PJ,
         tem_pj=True, vende_servico=True, vende_produto=False, secao_ativa="",
@@ -77,8 +86,14 @@ def _abas_da_prospeccao(papel: str) -> str:
 
 def _links_do_menu(papel: str) -> set[str]:
     """Os destinos `/painel/...` que a NAVEGAÇÃO oferece a este papel — o menu
-    lateral mais a barra de abas de Prospecção, que é menu tanto quanto ele."""
-    fonte = _menu(papel) + _abas_da_prospeccao(papel)
+    lateral mais a barra de abas de Prospecção, que é menu tanto quanto ele.
+
+    A UNIÃO DOS NICHOS, e não um nicho só: a pergunta deste arquivo é "existe
+    algum caminho de clique pra esta rota?". Uma tela que só aparece na corretora
+    de seguros TEM caminho — só não na conta de festa. Cobrar o link em todo nicho
+    seria cobrar o contrário da regra 6.
+    """
+    fonte = "".join(_menu(papel, ch) for ch in _PERFIS_DO_MENU) + _abas_da_prospeccao(papel)
     achados = set(re.findall(r'href="(/painel/[a-z0-9\-/]*)"', fonte))
     return {a.rstrip("/") for a in achados} - _LIVRES
 

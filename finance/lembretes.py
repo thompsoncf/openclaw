@@ -44,7 +44,7 @@ def rodar(pool, agora=None) -> dict:
         return _rodar(pool, agora or ag.agora_brt())
     except Exception as e:  # noqa: BLE001
         _log.info("lembretes.rodar falhou: %s: %s", type(e).__name__, e)
-        return {"resumo": 0, "aviso": 0, "aniversario": 0}
+        return {"resumo": 0, "aviso": 0, "aniversario": 0, "renovacao": 0}
 
 
 def _expirar_pre_reservas(pool, agora) -> int:
@@ -73,10 +73,10 @@ def _expirar_pre_reservas(pool, agora) -> int:
 
 
 def _rodar(pool, agora) -> dict:
-    n_res = n_avi = n_ani = 0
+    n_res = n_avi = n_ani = n_ren = 0
     with pool.connection() as lockc:
         if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
-            return {"resumo": 0, "aviso": 0, "aniversario": 0}
+            return {"resumo": 0, "aviso": 0, "aniversario": 0, "renovacao": 0}
         try:
             _expirar_pre_reservas(pool, agora)
             with pool.connection() as c:
@@ -99,10 +99,17 @@ def _rodar(pool, agora) -> dict:
             except Exception as e:  # noqa: BLE001
                 _log.info("lembretes: aniversários falhou: %s: %s", type(e).__name__, e)
                 n_ani = 0
+            # A renovação da apólice, pelo MESMO motivo e com o mesmo try próprio:
+            # é a corretora de seguros que entra no ticker, e o tick não é dela.
+            try:
+                n_ren = _renovacoes(pool, agora)
+            except Exception as e:  # noqa: BLE001
+                _log.info("lembretes: renovações falhou: %s: %s", type(e).__name__, e)
+                n_ren = 0
         finally:
             lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
             lockc.commit()
-    return {"resumo": n_res, "aviso": n_avi, "aniversario": n_ani}
+    return {"resumo": n_res, "aviso": n_avi, "aniversario": n_ani, "renovacao": n_ren}
 
 
 # Hora do aviso de aniversário, em Brasília. Não é meia-noite de propósito: o push
@@ -152,6 +159,107 @@ def _aniversarios(pool, agora) -> int:
                        url=f"/cockpit/lead/{lead_id}")
         n += 1
     return n
+
+
+# Hora do alerta de renovação, em Brasília. Uma hora depois do aniversário de
+# propósito: quem é corretor e vendedor ao mesmo tempo receberia os dois pushes no
+# mesmo minuto, e duas notificações empilhadas às 8h viram uma só, deslizada pra
+# fora da tela sem ninguém ler.
+_HORA_RENOVACAO = 9
+
+
+def _renovacoes(pool, agora) -> int:
+    """Avisa o corretor das apólices que entraram na régua (60, 30 e 15 dias).
+
+    A RÉGUA É DECISÃO DO DONO (17/09/2026): "60/30/15". Três toques, não os cinco
+    da escada de mercado (90/60/45/30/15) — cinco avisos sobre a MESMA apólice
+    viram ruído até o corretor ignorar todos. Os 90 dias existem na TELA, como
+    lista; aqui só saem os três degraus.
+
+    O DESTINO É O CORRETOR da apólice (mesma decisão), com o dono e os gestores
+    como rede: apólice sem corretor responsável não pode virar aviso que não chega
+    a ninguém. O dono vê a carteira inteira pela tela — isto aqui é o empurrão.
+
+    Uma vez por apólice POR DEGRAU (dedup em `lembretes_enviados`, tipo
+    'renovacao', chave '<id>:<degrau>' — o CHECK que aceita esse tipo entrou na
+    migração 278; sem ele o insert levanta CheckViolation, que foi o incidente da
+    128 e de novo o da 171).
+    """
+    if agora.hour != _HORA_RENOVACAO:
+        return 0
+    from finance import apolices as ap
+    hoje = agora.date()
+    # a linha que o tempo já mudou passa a dizer que mudou. Roda antes da leitura
+    # pra 'vencida' não aparecer na régua do mesmo tick.
+    try:
+        ap.marcar_vencidas(pool, hoje)
+    except Exception as e:  # noqa: BLE001
+        _log.info("lembretes: marcar apólices vencidas falhou: %s: %s", type(e).__name__, e)
+    with pool.connection() as c:
+        contas = [r[0] for r in c.execute(
+            "select distinct conta_id from apolices where situacao = any(%s)",
+            (list(ap.VIVAS),)).fetchall()]
+    if not contas:
+        return 0
+
+    from finance import aviso_log as _al
+    from finance import cockpit as ck
+    n = 0
+    for conta_id in contas:
+        try:
+            # o primeiro degrau é o horizonte do alerta: nada além de 60 dias vira
+            # push. `a_vencer` traz o que já venceu junto, e `degrau_de` devolve
+            # None pra isso — a linha aparece na tela e não incomoda ninguém.
+            venc = ap.a_vencer(pool, conta_id, dias=ap.DEGRAUS[0], hoje=hoje)
+        except Exception as e:  # noqa: BLE001
+            _log.info("lembretes: carteira da conta %s falhou: %s: %s",
+                      conta_id, type(e).__name__, e)
+            continue
+        rede = None
+        for a in venc:
+            if a["degrau"] is None:
+                continue
+            if not _primeira_vez(pool, conta_id, "renovacao", f"{a['id']}:{a['degrau']}"):
+                continue
+            destinos = [a["corretor_id"]] if a["corretor_id"] else None
+            if destinos is None:
+                if rede is None:
+                    rede = _gestores(pool, conta_id)
+                destinos = rede
+            faltam = a["dias"]
+            quando = "vence hoje" if faltam == 0 else (
+                "vence amanhã" if faltam == 1 else f"faltam {faltam} dias")
+            titulo = f"🛡️ {a['cliente']} · {a['seguradora']} {a['ramo_txt'].lower()}"
+            corpo = f"A apólice {quando} ({a['vigencia_fim'].strftime('%d/%m')}). Hora de cotar."
+            for membro_id in destinos:
+                # best-effort, como todo push daqui: sem chave VAPID ou sem
+                # assinatura viva o enviar_push devolve 0 sem levantar. O dedup já
+                # foi gravado — repetir no próximo tick só repetiria a falha.
+                try:
+                    _n = ck.enviar_push(pool, conta_id, membro_id, titulo, corpo,
+                                        url=f"/painel/renovacoes#a{a['id']}")
+                    _al.registrar(pool, conta_id, origem="renovacao", canal="push",
+                                  membro_id=membro_id, assunto=titulo, n_leads=1,
+                                  ok=bool(_n),
+                                  motivo="" if _n else "nenhum aparelho com push")
+                except Exception as e:  # noqa: BLE001
+                    _al.registrar(pool, conta_id, origem="renovacao", canal="push",
+                                  membro_id=membro_id, assunto=titulo, n_leads=1,
+                                  ok=False, motivo=f"{type(e).__name__}: {e}")
+            n += 1
+    return n
+
+
+def _gestores(pool, conta_id: int) -> list[int]:
+    """A rede pra apólice sem corretor: dono e gestores. Lista vazia é resposta
+    possível, e aí o aviso não sai — melhor que escolher alguém no chute."""
+    try:
+        with pool.connection() as c:
+            return [r[0] for r in c.execute(
+                "select id from membros where conta_id=%s and coalesce(ativo,true) "
+                "and papel in ('dono','gestor')", (conta_id,)).fetchall()]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def _primeira_vez(pool, conta_id: int, tipo: str, chave: str) -> bool:

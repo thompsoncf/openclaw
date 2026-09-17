@@ -1,0 +1,275 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<title>A carteira de apólices da Liberal: o que a apólice entrega e como vira alerta</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:880px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:32px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.card{background:#fff;border:1px solid #E3DDD0;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden;margin-bottom:14px}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+
+/* ---------- réplica FIEL do painel escuro (web/painel_servicos) ---------- */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC}
+.pn .card2{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.55rem}
+.pn .cab{display:flex;align-items:center;gap:.6rem}
+.pn .seta{color:#7B8A99;font-size:.85rem}
+.pn .tit{font-weight:700;font-size:1rem}
+.pn .mut{color:#7B8A99;font-size:.78rem;margin-top:.1rem}
+.pn .selo{margin-left:auto;font-size:.68rem;font-weight:700;background:#3A2A10;color:#E0B458;border:1px solid #5C4418;border-radius:5px;padding:.1rem .38rem;white-space:nowrap}
+.pn .selo.ok{background:#10241d;color:#7EE7B8;border-color:#1c3a30}
+.pn .expl{color:#9AA7B4;font-size:.85rem;margin:.7rem 0 .8rem;line-height:1.6}
+.pn .expl b{color:#7EE7B8}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.4rem .55rem;font-size:.85rem;color:#DDE4EC;width:100%}
+.pn .ta{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.45rem .55rem;font-size:.78rem;color:#C6D2DE;width:100%;font-family:ui-monospace,Menlo,monospace;line-height:1.6}
+.pn .pill{display:inline-block;background:#1B2836;border:1px solid #2A3947;border-radius:99px;padding:.2rem .55rem;font-size:.75rem;color:#C6D2DE}
+.pn .pill.mono{font-family:ui-monospace,Menlo,monospace;font-size:.7rem;padding:.15rem .4rem}
+.pn .pill.novo{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .btnv{display:inline-block;background:#1F7A55;color:#EAFFF5;border-radius:8px;padding:.45rem .9rem;font-size:.85rem;font-weight:700}
+.pn .lbl{color:#7B8A99;font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:.2rem}
+.pn .bloco{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem}
+.pn .linha{display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem}
+.pn .mini{display:inline-flex;align-items:center;justify-content:center;background:#1B2836;border:1px solid #2A3947;border-radius:6px;width:26px;height:26px;font-size:.8rem;color:#9AA7B4;flex:0 0 auto}
+.pn .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.5rem}
+.eti{display:inline-block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;vertical-align:middle;margin-left:6px}
+.e-hoje{background:#FDECEA;color:#B4453C;border:1px solid #F5C6C0}
+.e-novo{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.card,.pn,.q{break-inside:avoid}}
+</style></head><body><div class="wrap">
+</head><body><div class="wrap">
+
+<h1>A carteira de apólices da Liberal</h1>
+<p class="lead">Você mandou a proposta da Allianz e perguntou se dá pra montar o banco de clientes
+com o que interessa pra gerar alerta. <b>Dá, e sobra.</b> Este documento é o inventário do que o
+papel entrega, o que ele <b>não</b> entrega (e é o buraco), a régua de quando avisar — pesquisada na
+lei e na prática do mercado — e a tabela que eu proponho.</p>
+
+<div class="perigo"><b>ANTES DE TUDO, UM CUIDADO COM O ARQUIVO QUE VOCÊ MANDOU.</b> Ele é de uma
+pessoa real e traz <b>CPF, endereço completo com apartamento, e-mail, telefone e número da conta
+bancária com agência</b>. Neste documento eu mascarei tudo — ele vai pro repositório e fica versionado
+pra sempre. Se for mandar exemplo de novo, um com os dados borrados basta: o que eu preciso é a
+ESTRUTURA, não a pessoa.</div>
+
+<div class="nota"><b>Duas observações sobre o documento, que mudam a leitura:</b><br>
+• É uma <b>PROPOSTA</b> (nº 139041981), não uma apólice. A seguradora tem 25 dias pra aceitar, e há
+cobertura provisória nesse meio-tempo. Ou seja, o ciclo tem <b>dois estados</b>, e o número da apólice
+ainda nem existe.<br>
+• O corretor dela é a <b>F.F. Apolinário</b>, não a Liberal. É exemplo de outra casa — serve
+perfeitamente pra modelar, mas não é carteira dela.</div>
+
+<h2><span class="n">01</span> O que o papel entrega</h2>
+<div class="sub">Sete páginas, e quase tudo é campo aproveitável</div>
+
+<table>
+<tr><th>Bloco</th><th>Campos</th><th>Pra que serve</th></tr>
+<tr><td><b>Identificação</b></td>
+    <td>Nº proposta · seguradora (Allianz, cód. 5177) · corretor (cód. 431818, SUSEP)</td>
+    <td>Chave da apólice e de quem recebe comissão</td></tr>
+<tr><td><b>Segurado</b></td>
+    <td>Nome · CPF · telefone · e-mail · endereço</td>
+    <td><span class="eti e-novo">liga na carteira</span> É o cliente. O telefone é o canal real dela</td></tr>
+<tr><td><b>Condutor principal</b></td>
+    <td>Nome · CPF · <b>idade (71)</b> · estado civil · faixa 18–25 · onde pernoita</td>
+    <td>É o que muda o preço na renovação — e o que precisa ser <b>reperguntado</b></td></tr>
+<tr><td><b>Vigência</b></td>
+    <td><b>24h de 23/07/2026 às 24h de 23/07/2027</b></td>
+    <td><span class="eti e-novo">o campo de ouro</span> Sozinho ele gera o alerta inteiro</td></tr>
+<tr><td><b>Veículo</b></td>
+    <td>Marca/modelo · ano · FIPE · chassi · placa · <b>0 km: sim</b> · CEP pernoite · kit gás</td>
+    <td>Identifica o bem; "0 km" e placa vazia dizem que é carro novo saindo da loja</td></tr>
+<tr><td><b>Classe de bônus</b></td>
+    <td><b>00</b></td>
+    <td>Sobe a cada ano sem sinistro e derruba o preço. <b>É o argumento da renovação</b></td></tr>
+<tr><td><b>Coberturas</b></td>
+    <td>10 linhas, cada uma com limite e prêmio próprio</td>
+    <td>Casco 100% FIPE, RCF 200/200/30 mil, APP, vidros, carro reserva 15 dias…</td></tr>
+<tr><td><b>Dinheiro</b></td>
+    <td>Líquido R$ 3.807,57 · IOF R$ 281,00 · <b>total R$ 4.088,57</b> · franquia R$ 4.088,88</td>
+    <td>O prêmio é a base da comissão (seção 3)</td></tr>
+<tr><td><b>Pagamento</b></td>
+    <td>Débito em conta · 4× R$ 1.022,14 · vencimento dia 5</td>
+    <td>Parcela que falha derruba a vigência (circular SUSEP 621) — é alerta também</td></tr>
+</table>
+
+<h2><span class="n">02</span> Quando avisar: a régua</h2>
+<div class="sub">O que a lei obriga, e o que o mercado faz</div>
+
+<div class="card">
+<p><b>A LEI NÃO OBRIGA O CORRETOR A AVISAR.</b> Pesquisei: não há dever legal do corretor nem da
+seguradora de lembrar o segurado do vencimento. Quem tem prazo é a <b>seguradora que NÃO quer
+renovar</b> — precisa comunicar com <b>30 dias</b> de antecedência (Lei 15.040/2024, em vigor desde
+10/12/2025).</p>
+<p style="margin-bottom:0"><b>E é exatamente por isso que o alerta vale dinheiro.</b> Ninguém é
+obrigado a avisar — então quem avisa, retém; quem não avisa, descobre que o cliente renovou com
+outro. A Lei 15.040 também acabou com a renovação automática em cadeia: ela vale <b>uma vez só</b>,
+pelo mesmo prazo, e depois tem que ser expressa. Silêncio não renova mais nada.</p>
+</div>
+
+<div class="sub" style="margin-top:16px">A escada que o mercado usa</div>
+<table>
+<tr><th>Quando</th><th>O que acontece</th><th>Quem faz</th></tr>
+<tr><td><b>90 dias antes</b></td><td>a apólice entra na fila de renovação; o corretor revisa</td><td>sistema</td></tr>
+<tr><td><b>60 dias</b></td><td>cotar de novo e mandar a proposta</td><td>corretor</td></tr>
+<tr><td><b>45 dias</b></td><td>"mudou alguma coisa?" — carro, endereço, condutor</td><td>corretor</td></tr>
+<tr><td><b>30 dias</b></td><td>follow-up de confirmação · é o prazo da seguradora recusar</td><td>corretor</td></tr>
+<tr><td><b>15 dias</b></td><td>confirmação final</td><td>corretor</td></tr>
+<tr><td><b>0</b></td><td>vence. Sem renovação, o cliente fica descoberto</td><td>—</td></tr>
+</table>
+<div class="alerta"><b>O erro que a pesquisa nomeia, e que o alerta existe pra evitar:</b>
+<i>"Se você liga faltando dois dias, você não está prestando consultoria — está emitindo uma guia de
+pagamento."</i> Contato tardio é o maior motivo de perda de renovação.</div>
+
+<h2><span class="n">03</span> O que o papel NÃO tem, e é o buraco</h2>
+
+<div class="perigo"><b>A COMISSÃO DO CORRETOR NÃO APARECE EM LUGAR NENHUM DO DOCUMENTO.</b> E faz
+sentido: é documento do cliente, e o cliente não vê quanto o corretor ganha. Mas é justamente o
+número em que eu apoiei o Raio-X dela — "Comissão proposta × fechada".<br><br>
+Então a comissão tem que vir de outro lugar, e são três caminhos:<br>
+<b>a)</b> digitada por apólice — exato, e trabalhoso;<br>
+<b>b)</b> um <b>percentual padrão por seguradora e ramo</b> (ex.: Allianz auto 20%), com opção de
+sobrescrever na apólice — <span class="rec">é o que eu recomendo</span>;<br>
+<b>c)</b> importada do extrato de comissão da seguradora — o mais fiel, e depende de cada uma
+entregar isso num formato legível.</div>
+
+<p>Também não tem: <b>número da apólice</b> (só existe depois do aceite) e <b>histórico de
+sinistro</b>, que é o que de fato move a classe de bônus.</p>
+
+<h2><span class="n">04</span> A tabela que eu proponho</h2>
+<div class="sub">Só o que tem uso; o resto do PDF fica no arquivo, não no banco</div>
+
+<div class="card">
+<p class="mono" style="font-size:12px;line-height:1.75">
+<b>apolices</b><br>
+conta_id · cliente_id → <i>liga na carteira que já existe</i><br>
+seguradora · ramo (auto/vida/residencial/…) · numero_proposta · numero_apolice<br>
+<b>vigencia_inicio · vigencia_fim</b> → <i>o que gera o alerta</i><br>
+situacao: proposta · vigente · renovada · vencida · cancelada<br>
+premio_centavos · iof_centavos · franquia_centavos<br>
+comissao_pct · comissao_centavos → <i>seção 3</i><br>
+classe_bonus · parcelas · dia_vencimento<br>
+bem (jsonb) → <i>o que está segurado: placa, chassi, FIPE, ano — ou o imóvel, ou a vida</i><br>
+condutor (jsonb) → <i>nome, idade, o que precisa ser reperguntado</i><br>
+coberturas (jsonb) → <i>as 10 linhas, com limite e prêmio</i><br>
+renovacao_de → <i>aponta pra apólice anterior: é a carteira contando a própria história</i>
+</p>
+</div>
+
+<div class="nota"><b>Por que <code>bem</code> e <code>coberturas</code> são jsonb e não colunas:</b>
+auto tem placa e chassi, residencial tem endereço e metragem, vida tem beneficiário. Uma coluna por
+campo de cada ramo viraria uma tabela com sessenta colunas nulas. O que é <b>igual em todo ramo</b>
+— vigência, prêmio, comissão, situação — é coluna de verdade, porque é por onde se consulta.</div>
+
+<div class="bom"><b>E o gancho já está reservado.</b> Quando entreguei o perfil de Raio-X da
+corretora, deixei <code>fu_festa_dias</code> nulo com este comentário: <i>"ela TEM segundo relógio, e
+é o melhor de todos — o fim da vigência. Mas o dado não é guardado em lugar nenhum ainda."</i> Esta
+tabela é o dado. O mecanismo que dispara 30 dias antes de uma festa passa a disparar 30 dias antes de
+uma apólice vencer — sem inventar motor novo.</div>
+
+<h2><span class="n">05</span> Como o alerta chega</h2>
+<div class="sub">Reaproveitando o que já roda</div>
+
+<div class="card">
+<p>O sistema já tem um motor de lembrete proativo (<code>finance/lembretes.py</code>): ticker a cada
+2 minutos, trava pra só um worker disparar, e uma tabela de deduplicação que garante <b>um aviso por
+evento, uma vez</b>. Ele hoje serve a agenda.</p>
+<p style="margin-bottom:0">A renovação encaixa nele: a apólice que entra na janela vira <b>compromisso
+na agenda</b> — do mesmo jeito que a festa fechada vira —, e o lembrete dispara. <b>Nada de motor
+novo</b>, e o dono já sabe onde desligar se encher o saco.</p>
+</div>
+
+<div class="sub" style="margin-top:16px">Como a tela ficaria</div>
+<div class="pn">
+  <div class="card2">
+    <div class="cab"><div><div class="tit">Renovações</div>
+      <div class="mut">o que vence nos próximos 90 dias</div></div>
+      <span class="selo">7</span></div>
+  </div>
+  <div class="card2">
+    <div class="cab"><span class="mini">⚠</span><div><div class="tit">M. F. C. P. · Allianz · auto</div>
+      <div class="mut">GEELY EX2 MAX 2026 · vence 23/07 · <b style="color:#E0B458">faltam 28 dias</b></div></div>
+      <span class="selo">cotar</span></div>
+    <div class="expl" style="margin-bottom:0">Prêmio atual R$ 4.088,57 · comissão estimada R$ 817,71 ·
+    classe de bônus <b>00 → 01</b> no ano sem sinistro</div>
+  </div>
+  <div class="card2" style="margin-bottom:0">
+    <div class="cab"><span class="mini">✓</span><div><div class="tit">Outro cliente · Porto · auto</div>
+      <div class="mut">vence 12/10 · faltam 87 dias</div></div>
+      <span class="selo ok">na fila</span></div>
+  </div>
+</div>
+<p style="font-size:12.5px;color:#5A6678">Os nomes estão abreviados aqui pelo mesmo motivo da tarja
+do topo. Na tela real aparece o nome inteiro — é a carteira dela.</p>
+
+<h2><span class="n">06</span> Como os dados entram</h2>
+
+<table>
+<tr><th>Caminho</th><th>Custo</th><th>Quando usar</th></tr>
+<tr><td><b>Digitar a apólice</b> na tela</td><td>~1 min por apólice</td>
+    <td>O começo. Funciona no primeiro dia, sem depender de nada</td></tr>
+<tr><td><b>Planilha (CSV)</b></td><td>montar o de-para uma vez</td>
+    <td>Pra carregar a carteira inteira de uma vez — é o arquivo que você ia me mandar</td></tr>
+<tr><td><b>Ler o PDF</b> da proposta</td><td>alto, e por seguradora</td>
+    <td><span class="eti e-hoje">depois</span> Cada seguradora tem um layout. A Allianz é
+    bem estruturada, mas Porto, Bradesco e Tokio são outros sete</td></tr>
+</table>
+
+<div class="alerta"><b>Eu NÃO começaria pelo PDF</b>, mesmo tendo lido este aqui inteiro sem
+dificuldade. Um leitor que acerta a Allianz e erra a Porto é pior que digitar: erra <b>calado</b>, e
+uma vigência lida errada é um alerta que não dispara. Digitação e planilha primeiro; leitor de PDF
+quando houver volume que justifique, e sempre com o humano conferindo antes de salvar.</div>
+
+<h2><span class="n">07</span> O que eu preciso que você decida</h2>
+
+<div class="q"><div class="qt">1. Qual a régua de alerta da Liberal?</div>
+<div class="qo"><span class="rec">Recomendo 60 / 30 / 15 dias</span> — três toques, não cinco. A
+escada de mercado tem 90/60/45/30/15, e cinco avisos sobre a mesma apólice viram ruído até o corretor
+ignorar todos. Os 90 dias servem pra <b>lista</b> ("o que vem por aí"), não pra alerta.</div></div>
+
+<div class="q"><div class="qt">2. A comissão: percentual por seguradora, ou digitada?</div>
+<div class="qo"><span class="rec">Recomendo percentual padrão por seguradora + ramo</span>, com
+sobrescrita na apólice. Ela cadastra "Allianz auto 20%" uma vez e o resto sai sozinho. Mas preciso
+saber se os percentuais dela variam muito por produto — se variarem, digitar é mais honesto que um
+padrão que engana.</div></div>
+
+<div class="q"><div class="qt">3. O alerta é do dono, do corretor dono do cliente, ou dos dois?</div>
+<div class="qo">Ela vai ter equipe (você me disse: dono + corretores). Se a apólice tem um corretor
+responsável, <span class="rec">recomendo avisar ele</span>, e o dono ver a lista inteira na tela — o
+mesmo desenho da Fila do vendedor.</div></div>
+
+<div class="q"><div class="qt">4. Começamos por auto, ou já por todos os ramos?</div>
+<div class="qo"><span class="rec">Recomendo desenhar pra todos e cadastrar só auto no começo</span>.
+A tabela acima já aguenta vida e residencial pelo <code>bem</code> jsonb; o que muda por ramo é o
+formulário. Auto é 100% do que você me mostrou e é onde ela vende.</div></div>
+
+<div class="ftr">Documento analisado: proposta Allianz nº 139041981, 7 páginas, 23/07/2026 (dados
+pessoais mascarados neste mockup). Pesquisa: Lei 15.040/2024 (renovação automática vale uma vez;
+aviso de 30 dias quando a seguradora não renova) e prática de mercado de corretoras sobre o
+escalonamento 90/60/45/30/15. Código lido: <code>finance/lembretes.py</code> (motor de lembrete com
+trava e dedup), <code>finance/funil_agenda.py</code> (a ponte etapa → compromisso),
+<code>finance/raio_x_perfil.py</code> (o <code>fu_festa_dias</code> reservado). Mockup — nada foi
+construído nem escrito no banco.</div>
+
+</div></body></html>

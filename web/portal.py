@@ -408,6 +408,9 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
       aqui como página inicial e não tem mais nada. Sem esta linha ele fica com o
       menu vazio na única tela que tem. -#}
   {% if tem_pj and caps.origens and not caps.vendas and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Origens') }}{% endif %}
+  {# Renovações (finance/apolices): a carteira de apólices e o relógio da vigência.
+     Regra 6 — só existe pra corretora de seguros, e some em todo o resto. #}
+  {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'seguros' %}{{ navi('renovacoes','/painel/renovacoes','agenda','Renovações') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
@@ -459,6 +462,9 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
       aqui como página inicial e não tem mais nada. Sem esta linha ele fica com o
       menu vazio na única tela que tem. -#}
   {% if tem_pj and caps.origens and not caps.vendas and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Origens') }}{% endif %}
+  {# Renovações (finance/apolices): a carteira de apólices e o relógio da vigência.
+     Regra 6 — só existe pra corretora de seguros, e some em todo o resto. #}
+  {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'seguros' %}{{ navi('renovacoes','/painel/renovacoes','agenda','Renovações') }}{% endif %}
   {# O Follow-up (finance/follow_up) é a fila de quem precisa ser contatado. O
      vendedor vê a dele; o dono e o gestor veem a conta inteira. Só nos perfis
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
@@ -7580,6 +7586,7 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                  ("financeiro", "/painel/financeiro"), ("empresa", "/painel/empresa"),
                  ("relatorios", "/painel/relatorios"), ("raio_x", "/painel/raio-x"),
                  ("origens", "/painel/origens"),
+                 ("renovacoes", "/painel/renovacoes"),
                  ("follow_up", "/painel/follow-up"),
                  ("novidades", "/painel/novidades"),
                  ("fornecedor", "/painel/fornecedor"), ("assinaturas", "/painel/assinaturas"),

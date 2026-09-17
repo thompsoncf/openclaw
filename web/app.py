@@ -125,6 +125,7 @@ from web.painel_conteudo import router as conteudo_router
 from web.painel_agenda import router as agenda_router
 from web.painel_cockpit import router as cockpit_router
 from web.painel_origens import router as origens_router
+from web.painel_apolices import router as apolices_router
 from web.painel_relatorios import router as relatorios_router
 from web.proposta import router as proposta_router
 # o contrato tem página e link PRÓPRIOS (/contrato/<token>) — não é bloco da folha
@@ -166,6 +167,7 @@ app.include_router(agenda_router)
 app.include_router(cockpit_router)
 app.include_router(relatorios_router)
 app.include_router(origens_router)
+app.include_router(apolices_router)
 app.include_router(proposta_router)
 app.include_router(contrato_pub_router)
 app.include_router(aditivo_pub_router)

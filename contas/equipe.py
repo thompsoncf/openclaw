@@ -146,6 +146,13 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     # só em 'eventos'), não a whitelist, que não conhece o nicho da conta.
     if caps["vendas"]:
         permitido += ["/painel/follow-up"]
+    # Renovações (a carteira de apólices da corretora): o corretor vê a fila dele,
+    # o dono e o gestor veem a carteira inteira — o recorte é da própria rota. Quem
+    # barra conta de outro nicho também é a rota (só o perfil `seguros` abre), não a
+    # whitelist, que não conhece o nicho. Mesmo erro do Follow-up e do Origens, que
+    # entraram no menu e ficaram de fora daqui.
+    if caps["vendas"]:
+        permitido += ["/painel/renovacoes"]
     # Origens: dono, gestor e o convidado da agência. Mesmo erro do Follow-up, meu,
     # no #650 — o link entrou no menu e a rota ficou de fora.
     if caps["origens"]:

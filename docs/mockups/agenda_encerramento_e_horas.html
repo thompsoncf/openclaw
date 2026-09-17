@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agenda: a hora que a festa encerra, e quantas horas ela dura</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --roxo:#C9A3E0;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo)}
+b{font-weight:600}
+.wrap{max-width:1120px;margin:0 auto;padding:2.6rem 1.25rem 5rem;display:flex;flex-direction:column;gap:2.8rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em;margin-bottom:.35rem;text-transform:uppercase}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.35rem);margin:.35rem 0 .6rem}
+.head p{color:var(--text-dim);max-width:74ch;margin:0}
+.sec>h2{font-size:1.2rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.1rem;max-width:76ch;font-size:.9rem}
+.sec>p.leg b{color:var(--text)}
+
+.medida{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:14px;padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.8rem}
+.medida h3{font-size:1rem;color:#F5C9C4}
+.medida .nums{display:grid;grid-template-columns:repeat(4,1fr);gap:.55rem}
+@media (max-width:820px){.medida .nums{grid-template-columns:repeat(2,1fr)}}
+.medida .n{border:1px solid var(--coral-borda);border-radius:10px;background:#1C0F0F;padding:.6rem .7rem}
+.medida .n b{display:block;font:600 1.5rem/1 var(--display);color:var(--coral);font-variant-numeric:tabular-nums}
+.medida .n span{display:block;font-size:.66rem;color:var(--text-dim);margin-top:.3rem;line-height:1.35}
+.medida p{margin:0;font-size:.84rem;color:#EED6D3}.medida p b{color:#fff}
+
+.tabwrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table.t{width:100%;border-collapse:collapse;font-size:.8rem;min-width:560px}
+table.t th{font:500 .61rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);text-align:left;padding:.55rem .7rem;border-bottom:1px solid var(--line)}
+table.t td{padding:.5rem .7rem;border-bottom:1px solid var(--line);color:var(--text-dim)}
+table.t tr:last-child td{border-bottom:none}
+table.t td:first-child{color:var(--text);font-weight:500;white-space:nowrap}
+table.t td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.t td b{color:var(--text)}
+.falta{color:var(--coral);font-family:var(--mono)}
+.ok{color:var(--neon-bright);font-family:var(--mono)}
+
+/* a caixa do dia, como ela é */
+.dia{border:1px solid var(--line);border-radius:16px;background:var(--bg-2);overflow:hidden;max-width:430px}
+.dia .cab{padding:.7rem .95rem;border-bottom:1px solid var(--line);background:var(--surface);display:flex;justify-content:space-between;align-items:baseline}
+.dia .cab b{font:600 .95rem var(--display)}
+.dia .cab span{font-size:.7rem;color:var(--text-faint)}
+.ev{padding:.75rem .95rem;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:.42rem}
+.ev:last-child{border-bottom:none}
+.ev .l1{display:flex;align-items:baseline;gap:.5rem}
+.ev .hr{font:600 .92rem var(--mono);color:var(--neon-bright);white-space:nowrap;font-variant-numeric:tabular-nums}
+.ev .hr .seta{color:var(--text-faint);margin:0 .12rem}
+.ev .hr .dur{font-size:.7rem;color:var(--text-dim);background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:.05rem .32rem;margin-left:.3rem}
+.ev .hr.falta{color:var(--ambar)}
+.ev .tt{font-size:.86rem;color:var(--text);font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev .meta{font-size:.72rem;color:var(--text-faint);display:flex;gap:.7rem;flex-wrap:wrap}
+.ev .meta b{color:var(--text-dim);font-weight:500}
+.ev .pedir{font:500 .68rem var(--body);border:1px solid var(--ambar-borda);background:var(--ambar-fundo);color:#F0DCA6;border-radius:7px;padding:.22rem .48rem;cursor:pointer;align-self:flex-start}
+.ev.vis .hr{color:var(--azul)}
+
+.grade2{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+@media (max-width:860px){.grade2{grid-template-columns:1fr}}
+.bloco{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.85rem .9rem;display:flex;flex-direction:column;gap:.5rem}
+.bloco h4{font-size:.92rem;display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
+.bloco h4 small{font:500 .6rem var(--mono);color:var(--text-faint)}
+.bloco p{margin:0;font-size:.79rem;color:var(--text-dim)}.bloco p b{color:var(--text)}
+.bloco ul{margin:0;padding-left:1.05rem;font-size:.79rem;color:var(--text-dim);display:flex;flex-direction:column;gap:.3rem}
+.bloco ul b{color:var(--text)}
+.bloco.alerta{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.bloco.alerta h4{color:#F0DCA6}.bloco.alerta p,.bloco.alerta ul{color:#E6D3AC}.bloco.alerta b{color:#fff}
+.bloco.pergunta{border-color:var(--azul-borda);background:var(--azul-fundo)}
+.bloco.pergunta h4{color:#BFE0F5}.bloco.pergunta p,.bloco.pergunta ul{color:#C9DCE8}.bloco.pergunta b{color:#fff}
+.bloco.ok{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.bloco.ok h4{color:var(--neon-bright)}.bloco.ok p,.bloco.ok ul{color:#C4EFD6}.bloco.ok b{color:#fff}
+.dado{font:500 .68rem var(--mono);color:var(--neon-bright);background:var(--neon-fundo);border:1px solid var(--neon-borda);border-radius:7px;padding:.35rem .5rem}
+.nota{font-size:.78rem;color:var(--text-faint);border-left:2px solid var(--line);padding-left:.7rem;margin:0}
+.nota b{color:var(--text-dim)}
+.fim{border-top:1px solid var(--line);padding-top:1.1rem;font-size:.76rem;color:var(--text-faint);display:flex;flex-direction:column;gap:.3rem}
+.fim b{color:var(--text-dim)}
+.porta{display:flex;gap:.6rem;align-items:stretch;flex-wrap:wrap}
+.porta .p{flex:1;min-width:230px;border:1px solid var(--line);border-radius:12px;padding:.8rem .85rem;background:var(--surface)}
+.porta .p h5{margin:0 0 .4rem;font:600 .82rem var(--display)}
+.porta .p.boa{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.porta .p.boa h5{color:var(--neon-bright)}
+.porta .p.ruim{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.porta .p.ruim h5{color:var(--coral)}
+.porta .p code{display:block;font-size:.68rem;color:var(--text-dim);margin-top:.4rem;line-height:1.5;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="head">
+    <div class="k">Mockup para aprovação · 16/09/2026 · nicho <span style="color:var(--neon)">eventos</span></div>
+    <h1>A hora que a festa encerra, e quantas horas ela dura</h1>
+    <p>Pedido do dono: <i>"em agenda aparece a hora do início do evento quando for fechando, clicando na data —
+    veja a possibilidade de trazer o horário de encerramento e quantidade de horas"</i>.</p>
+    <p style="margin-top:.8rem;font-size:.86rem"><b style="color:var(--ambar)">A resposta curta é desconfortável:</b>
+    mostrar é fácil — são poucas linhas, e a coluna <code>fim</code> já existe no banco há tempo. O problema é que
+    <b style="color:var(--text)">nas 24 festas futuras da Prime não há nada pra mostrar</b>. Todas as 24 estão sem
+    hora de encerramento. Então isto aqui não é uma entrega de tela: é um vazamento de dado, e a tela é só onde ele
+    aparece.</p>
+  </header>
+
+  <!-- ============ 1 ============ -->
+  <section class="sec">
+    <div class="k">1 · o que a produção diz</div>
+    <h2>Zero de 24</h2>
+    <p class="leg">Leitura da Prime Eventos (conta 34) em 16/09. Compromissos de empresa, ativos, daqui pra frente.</p>
+
+    <div class="medida">
+      <h3>As festas futuras da Prime</h3>
+      <div class="nums">
+        <div class="n"><b>24</b><span>festas marcadas daqui pra frente</span></div>
+        <div class="n"><b>0</b><span>com hora de encerramento</span></div>
+        <div class="n"><b>0</b><span>que dariam pra puxar do orçamento</span></div>
+        <div class="n"><b>6</b><span>com a hora de início também no palpite</span></div>
+      </div>
+      <p>E não é que o dado nunca exista: das 66 marcações de empresa da conta, <b>32 têm fim</b> — mas são as
+      <b>visitas</b> (30min a 1h) e as festas que entraram por outra porta. <b>Das 30 marcações com tipo de
+      evento — Casamento, Locação, Formatura —, só 1 tem hora de encerramento.</b></p>
+    </div>
+  </section>
+
+  <!-- ============ 2 ============ -->
+  <section class="sec">
+    <div class="k">2 · a causa</div>
+    <h2>Duas portas criam compromisso, e só uma guarda o horário</h2>
+    <p class="leg">Não é aleatório: dá pra saber por qual porta o compromisso entrou olhando o que falta nele.</p>
+
+    <div class="porta">
+      <div class="p boa">
+        <h5>✓ Pela proposta — guarda tudo</h5>
+        <p style="margin:0;font-size:.79rem;color:#C4EFD6">O orçamento tem os horários, e <code
+          style="color:#C4EFD6">agenda.janela_evento</code> monta a janela — inclusive virando a noite quando a
+          festa passa da meia-noite.</p>
+        <code>Aniversário — Renata Costa Silva
+27/09 · 18:00 → 23:00 · 5h
+orçamento: início 18h, fim 23h ✓</code>
+      </div>
+      <div class="p ruim">
+        <h5>✕ Pelo funil — perde o horário</h5>
+        <p style="margin:0;font-size:.79rem;color:#EED6D3">Quando o lead é fechado, <code
+          style="color:#EED6D3">funil_agenda.garantir</code> cria o compromisso com <b style="color:#fff">19h de
+          palpite e sem fim nenhum</b>. É esta porta que produz as 24.</p>
+        <code>Locação — Thayla Téssia Duarte
+10/10 · 19:00 → —
+orçamento: não vinculado</code>
+      </div>
+    </div>
+
+    <p class="nota" style="margin-top:.85rem">O código da porta ruim já sabe que está chutando — ele grava
+    <code>hora_sugerida</code> e escreve <i>"Criado pelo funil ao fechar o lead. Confira a hora."</i> na descrição.
+    O que falta é <b>pedir o horário</b> em vez de só avisar que chutou.</p>
+
+    <p class="leg" style="margin-top:1.1rem">As 12 próximas da agenda, como estão hoje:</p>
+    <div class="tabwrap">
+      <table class="t">
+        <tr><th>compromisso</th><th>começa</th><th>encerra</th><th>orçamento</th></tr>
+        <tr><td>Visita — Maria Clara Guimarães</td><td class="num">18/09 17:00</td><td class="num ok">18:00</td><td>—</td></tr>
+        <tr><td>Visita — Shirley Cristina</td><td class="num">19/09 10:00</td><td class="num ok">10:30</td><td>—</td></tr>
+        <tr><td>Visita — Andressa</td><td class="num">19/09 11:00</td><td class="num ok">12:00</td><td>—</td></tr>
+        <tr><td><b>Locação — Nágera Raquel Sousa</b></td><td class="num">19/09 20:30</td><td class="num falta">—</td><td class="falta">não vinculado</td></tr>
+        <tr><td>Visita — Elsinha</td><td class="num">21/09 18:00</td><td class="num ok">19:00</td><td>—</td></tr>
+        <tr><td><b>Locação — Maria Gardênia</b></td><td class="num">26/09 19:00</td><td class="num falta">—</td><td class="falta">não vinculado</td></tr>
+        <tr><td>Aniversário — Renata Costa</td><td class="num">27/09 18:00</td><td class="num ok">23:00</td><td class="ok">18h → 23h</td></tr>
+        <tr><td><b>Locação — Thayla Téssia</b></td><td class="num">10/10 19:00</td><td class="num falta">—</td><td class="falta">não vinculado</td></tr>
+        <tr><td><b>Locação — Pedro Ribeiro</b></td><td class="num">11/10 20:00</td><td class="num falta">—</td><td class="falta">não vinculado</td></tr>
+        <tr><td><b>Locação — Josipio Gonçalves</b></td><td class="num">17/10 20:00</td><td class="num falta">—</td><td class="falta">não vinculado</td></tr>
+        <tr><td><b>Locação — Ocilene Silva</b></td><td class="num">31/10 18:30</td><td class="num falta">—</td><td class="falta">não vinculado</td></tr>
+        <tr><td><b>Locação — Raquel Gomes</b></td><td class="num">19/11 20:00</td><td class="num falta">—</td><td class="falta">não vinculado</td></tr>
+      </table>
+    </div>
+    <p class="nota" style="margin-top:.7rem">Toda <b>visita</b> tem fim. Toda <b>locação</b> está sem. A única festa
+    completa é a que veio da proposta.</p>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section class="sec">
+    <div class="k">3 · como fica a caixa do dia</div>
+    <h2>A janela, e as horas do lado</h2>
+    <p class="leg">O que você pediu, exatamente: <b>18:00 → 23:00</b> e <b>5h</b>. Quando a festa vira a noite, a
+    janela diz o dia (<b>20:00 → 02:00 <span style="color:var(--text-faint)">+1</span></b>) — senão parece que
+    encerrou antes de começar.</p>
+
+    <div class="dia">
+      <div class="cab"><b>Sábado, 27 de setembro</b><span>2 compromissos</span></div>
+
+      <div class="ev vis">
+        <div class="l1"><span class="hr">11:00<span class="seta">→</span>12:00<span class="dur">1h</span></span>
+          <span class="tt">Visita — Andressa</span></div>
+        <div class="meta"><span>👤 <b>Pedro Yan</b></span><span>📍 Espaço Prime</span></div>
+      </div>
+
+      <div class="ev">
+        <div class="l1"><span class="hr">18:00<span class="seta">→</span>23:00<span class="dur">5h</span></span>
+          <span class="tt">Aniversário — Renata Costa</span></div>
+        <div class="meta"><span>👤 <b>Pedro Yan</b></span><span>🎉 100 convidados</span><span>📄 nº 21</span></div>
+      </div>
+    </div>
+
+    <p class="leg" style="margin-top:1.2rem">E o caso das 24 — o que a tela faz quando <b>não há</b> encerramento:</p>
+
+    <div class="dia">
+      <div class="cab"><b>Sexta, 10 de outubro</b><span>1 compromisso</span></div>
+      <div class="ev">
+        <div class="l1"><span class="hr falta">19:00<span class="seta">→</span>—</span>
+          <span class="tt">Locação — Thayla Téssia</span></div>
+        <div class="meta"><span>👤 <b>Jacqueline</b></span><span>⚠️ hora sugerida pelo sistema</span></div>
+        <button type="button" class="pedir">Informar encerramento</button>
+      </div>
+    </div>
+
+    <p class="nota" style="margin-top:.8rem">O botão não é enfeite: é a única coisa nesta tela que faz o número
+    aparecer amanhã. <b>Sem ele, 24 festas continuam sem horário pra sempre</b> — ninguém volta no formulário de
+    edição pra preencher um campo que a tela não cobra.</p>
+  </section>
+
+  <!-- ============ 4 ============ -->
+  <section class="sec">
+    <div class="k">4 · o que eu proponho</div>
+    <h2>Três peças, e só a primeira é a tela</h2>
+
+    <div class="grade2">
+      <div class="bloco ok">
+        <h4>1 · A tela mostra <small>pequeno, sem risco</small></h4>
+        <p>A caixa do dia passa a mostrar <b>início → fim · Nh</b> quando há fim, e <b>início → —</b> com o botão
+        quando não há. O <code>fim</code> já vem do banco; hoje a tela simplesmente não o lê.</p>
+        <p class="dado">muda ~10 linhas em painel_agenda</p>
+      </div>
+      <div class="bloco">
+        <h4>2 · A porta do funil para de chutar <small>é aqui que resolve</small></h4>
+        <p>Ao fechar o lead, se o orçamento tem horário, <b>usar</b> (via <code>janela_evento</code>, que já existe).
+        Se não tem, criar o compromisso e <b>marcar que falta horário</b> — que é o que acende o botão da peça 1.</p>
+        <p class="dado">muda funil_agenda.garantir</p>
+      </div>
+    </div>
+
+    <div class="bloco alerta" style="margin-top:.7rem">
+      <h4>3 · As 24 que já estão lá <small>e aqui eu NÃO faço nada sem você mandar</small></h4>
+      <p>As 24 festas futuras não se consertam sozinhas. Dá pra puxar do orçamento — mas <b>nenhuma das 24 está
+      vinculada a um orçamento</b>, então não há de onde puxar. Sobra preencher à mão, uma a uma, pelo botão.</p>
+      <p><b>Não vou escrever nada em compromisso de cliente por minha conta</b> (§0 do CLAUDE.md). Se você quiser
+      um preenchimento em lote — por exemplo "toda locação sem fim vira 6h" —, isso é decisão sua, e eu faço com
+      cópia de segurança antes e lista do que mudou.</p>
+    </div>
+  </section>
+
+  <!-- ============ 5 ============ -->
+  <section class="sec">
+    <div class="k">5 · o que eu preciso que você decida</div>
+    <h2>Quatro perguntas, e nenhuma eu chuto</h2>
+
+    <div class="grade2">
+      <div class="bloco pergunta">
+        <h4>a · A duração padrão existe?</h4>
+        <p>Nas festas que <b>têm</b> horário, a janela é de <b>5 a 6 horas</b>. Isso é o pacote da casa, ou varia
+        por contrato? Se for padrão, o sistema pode <b>sugerir</b> (marcado como sugestão, como já faz com a hora
+        de início) em vez de deixar em branco.</p>
+      </div>
+      <div class="bloco pergunta">
+        <h4>b · A hora importa pro dinheiro?</h4>
+        <p>Você pediu "quantidade de horas". Isso é pra <b>saber</b>, ou vocês <b>cobram hora extra</b>? Se cobra,
+        a duração deixa de ser enfeite da agenda e vira número de contrato — e aí ela precisa estar no orçamento,
+        não só no compromisso.</p>
+      </div>
+    </div>
+
+    <div class="grade2" style="margin-top:.7rem">
+      <div class="bloco pergunta">
+        <h4>c · Quem informa, e quando?</h4>
+        <p>O encerramento é combinado <b>no fechamento</b> (então o funil deve perguntar) ou <b>perto da data</b>
+        (então o lugar é a agenda, e o botão basta)?</p>
+      </div>
+      <div class="bloco pergunta">
+        <h4>d · Vale pros outros nichos?</h4>
+        <p>Minha leitura: <b>não</b>. Numa consultoria a reunião de 1h não precisa de "5h" no card. Proponho
+        mostrar a janela <b>só onde há fim</b> — o que naturalmente restringe a eventos — e o botão de cobrar o
+        horário <b>só no nicho de eventos</b>. Se discordar, é uma linha.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="fim">
+    <span><b>Medido em:</b> Prime Eventos (conta 34), leitura de produção de 16/09/2026. Só <code>select</code>.</span>
+    <span><b>Nada foi escrito</b> em nenhum compromisso pra montar este mockup.</span>
+    <span><b>Depende de aprovação:</b> as quatro perguntas da seção 5. A peça 1 (a tela) eu faço com qualquer
+    resposta; as peças 2 e 3 dependem de (a) e (c).</span>
+  </div>
+
+</div>
+</body>
+</html>

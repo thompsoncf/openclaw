@@ -283,6 +283,46 @@ def _titulo_dia(d: date) -> str:
     return f"{DIAS_SEM_EXT[idx]}, {d.day} de {MESES[d.month]}"
 
 
+def janela_do_evento(inicio, fim, hoje=None) -> dict:
+    """A janela do compromisso pra caixa do dia: {ini, fim, dur, vira}.
+
+    Pedido do dono em 16/09/2026: "em agenda aparece a hora do início do evento
+    quando for fechando, clicando na data — veja a possibilidade de trazer o
+    horário de encerramento e quantidade de horas".
+
+    `vira` é a festa que passa da meia-noite (19h→02h, a regra do ramo). Sem isso
+    a caixa mostraria "20:00 → 02:00" e quem lê rápido entende que acabou seis
+    horas ANTES de começar. O `+1` é curto de propósito: o card é estreito, e
+    "02:00 do dia seguinte" não cabe.
+
+    Sem `fim` devolve `fim` e `dur` vazios — e é o caso da maioria hoje: medido em
+    16/09, 24 das 24 festas futuras da Prime estavam sem encerramento. Quem
+    preenche é a pessoa, pelo botão; o sistema NÃO inventa duração (decisão do dono
+    em 17/09: sugerir 6h em 24 festas cria 24 números que ninguém conferiu).
+    """
+    if inicio is None:
+        return {"ini": "", "fim": "", "dur": "", "vira": False}
+    i = inicio.astimezone(ag.BRT)
+    fora = {"ini": i.strftime("%H:%M"), "fim": "", "dur": "", "vira": False}
+    if fim is None:
+        return fora
+    f = fim.astimezone(ag.BRT)
+    segundos = (f - i).total_seconds()
+    if segundos <= 0:
+        # fim antes do início não é janela nenhuma: mostra só o começo em vez de
+        # imprimir uma duração negativa na tela de quem está conferindo a festa
+        return fora
+    # "5h", "5h30", "30min" — e nunca "5.5h", que ninguém lê como cinco e meia,
+    # nem "0h30", que é como um relógio digital escreve e uma pessoa não.
+    total_min = int(round(segundos / 60))
+    inteiras, minutos = divmod(total_min, 60)
+    fora["fim"] = f.strftime("%H:%M")
+    fora["dur"] = (f"{minutos}min" if not inteiras
+                   else f"{inteiras}h{minutos:02d}" if minutos else f"{inteiras}h")
+    fora["vira"] = f.date() > i.date()
+    return fora
+
+
 def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | None = None,
                      agora=None, orcamentos: dict[int, dict] | None = None,
                      fichas: dict[int, dict] | None = None,
@@ -306,8 +346,13 @@ def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | No
             conv_lista.append({"nome": g.get("nome") or "", "contato": g.get("contato") or "",
                                "status": g["status"], "status_rot": g["status_rot"],
                                "wa": _wa_share(g["contato"], texto) if g.get("contato") else ""})
+        _j = janela_do_evento(e["inicio"], e.get("fim"))
         bucket["eventos"].append({
-            "id": e["id"], "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
+            "id": e["id"], "hora": _j["ini"],
+            # a janela e a duração (16/09/2026) — vazias quando não há encerramento,
+            # e é aí que a caixa oferece o botão de informar
+            "fim": _j["fim"], "dur": _j["dur"], "vira": _j["vira"],
+            "hora_sugerida": bool(e.get("hora_sugerida")),
             "titulo": e["titulo"], "tipo": e["tipo"], "tipo_rot": TIPO_ROT.get(e["tipo"], "Pessoal"),
             "local": e.get("local") or "", "descricao": e.get("descricao") or "",
             "convidados": conv_lista, "inicio_iso": e["inicio"].isoformat(),
@@ -1806,7 +1851,17 @@ _CSS_CRU = """
 .dev:last-of-type{border-bottom:0;padding-bottom:2px}
 .dev-dot{width:8px;height:8px;border-radius:50%;margin-top:6px;flex:0 0 8px}
 .dev-body{flex:1;min-width:0}
-.dev-hora{font-size:.72rem;color:var(--txt-mut);font-variant-numeric:tabular-nums;font-weight:700}
+.dev-hora{font-size:.72rem;color:var(--txt-mut);font-variant-numeric:tabular-nums;font-weight:700;
+  display:flex;align-items:baseline;gap:.18rem;flex-wrap:wrap}
+.dev-seta{opacity:.5;font-weight:400}
+.dev-vira{font-size:.62rem;opacity:.65;font-weight:600}
+.dev-dur{font-size:.64rem;font-weight:600;opacity:.85;border:1px solid var(--linha);border-radius:5px;
+  padding:0 .26rem;margin-left:.16rem}
+.dev-falta{color:var(--ambar);font-weight:700}
+.dev-sug{font-size:.66rem;margin-left:.1rem}
+.dev-pedir{font:500 .66rem inherit;border:1px solid var(--ambar);background:transparent;color:var(--ambar);
+  border-radius:7px;padding:.14rem .42rem;margin:.18rem 0 .1rem;cursor:pointer}
+.dev-pedir:hover{background:rgba(224,163,46,.12)}
 .dev-tt{font-size:.92rem;font-weight:600;margin-top:1px}
 .dev-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:.76rem;color:var(--txt-mut);margin-top:4px}
 .dev-desc{font-size:.8rem;color:var(--txt-mut);margin-top:6px;line-height:1.45;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:7px 9px}
@@ -2128,7 +2183,14 @@ function abrirDia(iso){
     var acaoTopo = passado ? '' : '<button class="px-rm" type="button" title="Remarcar" onclick="remToggleDia('+e.id+')">🔁</button>';
     html += '<div class="dev" data-ev="'+e.id+'"><div class="dev-dot d-'+e.tipo+(e.pre?' pre-dot':'')+'"></div><div class="dev-body">'
       + '<div class="dev-top"><div>'
-      + '<div class="dev-hora">'+e.hora+'</div>'
+      + '<div class="dev-hora">'+e.hora
+        + (e.fim ? '<span class="dev-seta">→</span>'+e.fim
+                   + (e.vira?'<span class="dev-vira" title="a festa vira a noite">+1</span>':'')
+                   + '<span class="dev-dur">'+e.dur+'</span>'
+                 : '<span class="dev-seta">→</span><span class="dev-falta">—</span>')
+        + (e.hora_sugerida?'<span class="dev-sug" title="hora sugerida pelo sistema — confira">⚠️</span>':'')
+        + '</div>'
+      + (e.fim ? '' : '<button class="dev-pedir" type="button" onclick="remToggleDia('+e.id+')">Informar encerramento</button>')
       + '<div class="dev-tt"'+(e.pre?' style="color:var(--ambar)"':'')+'>'+e.titulo+'</div>'
       + '<div class="dev-meta">'
       + '<span class="tpill tp-'+e.tipo+'">'+((e.ficha&&e.ficha.tipo)?_esc(e.ficha.tipo):(TPILL[e.tipo]||e.tipo_rot))+'</span>'

@@ -445,6 +445,28 @@ def _pode_campanha(ctx: dict, camp_id: int, c=None) -> bool:
     return ctx["gerencia"] or (r[0] is not None and r[0] == ctx["membro_id"])
 
 
+def _rs_max() -> int:
+    try:
+        from finance import resumo_semanal as _rs
+        return _rs.EMAILS_MAX
+    except Exception:  # noqa: BLE001
+        return 5
+
+
+def _resumo_cfg(pool, conta_id: int) -> dict:
+    """A config do resumo semanal pra tela. Tolerante: base sem a 274 mostra o card
+    desligado em vez de derrubar a aba inteira da Comunicação."""
+    try:
+        from finance import resumo_semanal as _rs
+        return _rs.config(pool, conta_id)
+    except Exception as e:  # noqa: BLE001
+        _log.warning("config do resumo semanal (conta %s): %s: %s",
+                     conta_id, type(e).__name__, e)
+        return {"resumo_semanal": False, "resumo_semanal_emails": "",
+                "resumo_semanal_vendedor": True, "resumo_semanal_dia": "segunda",
+                "emails": []}
+
+
 def _vendedor_destino(ctx: dict, vendedor_id: str, pool, conta_id: int):
     """Pra quem vai o alvo captado: dono e gestor escolhem (validando a conta);
     o vendedor sempre pra si mesmo."""
@@ -2573,6 +2595,9 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                    pode_atribuir=ctx["pode_atribuir"], chip=_wa_chip(ctx["conta_id"]), chip2=_wa_chip2(ctx["conta_id"]),
                    remetente=_ein_remetente(pool, ctx["conta_id"]), tem_ia=_tem_ia(),
                    ag_cfg=ag_cfg, ag_conhec=ag_conhec, perfil=perfil,
+                   # o resumo semanal por e-mail (274) mora na mesma aba: é
+                   # automação de conta, como o agente e o rodízio
+                   resumo=_resumo_cfg(pool, ctx["conta_id"]), resumo_max=_rs_max(),
                    dist_cfg=dist_cfg, dist_membros=dist_membros, dist_chips=dist_chips,
                    dist_qr=dist_qr,
                    abrir=abrir, embed=request.query_params.get("embed") == "1",
@@ -3997,6 +4022,23 @@ async def comunicacao_agente_config(request: Request):
                  atualizado_em=now()""",
             (ctx["conta_id"], *vals, agendar_modo))
         c.commit()
+    # O RESUMO SEMANAL POR E-MAIL (migração 274) salva no MESMO envio: o dono
+    # pediu o interruptor "lá na engrenagem da prospecção, em Agentes IA", e a aba
+    # é um formulário só. Um segundo "Salvar" na mesma tela é como se perde
+    # configuração — a pessoa mexe nos dois e salva um.
+    #
+    # Best-effort: o agente já foi gravado acima, e uma falha aqui não pode
+    # desfazer aquilo nem derrubar a tela.
+    try:
+        from finance import resumo_semanal as _rs
+        _rs.salvar_config(get_pool(), ctx["conta_id"],
+                          ativo=_b("resumo_semanal"),
+                          emails=(f.get("resumo_emails") or ""),
+                          vendedor=_b("resumo_vendedor"),
+                          dia=(f.get("resumo_dia") or "segunda"))
+    except Exception as e:  # noqa: BLE001
+        _log.warning("salvar resumo semanal da conta %s: %s: %s",
+                     ctx["conta_id"], type(e).__name__, e)
     request.session["prosp_aviso"] = "Agente atualizado ✓"
     return RedirectResponse(_AG_DESTINO, status_code=303)
 
@@ -12844,6 +12886,48 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <div style="flex:1"><b style="font-size:1rem">Agente de Atendimento</b><div class="mut" style="font-size:.8rem">Responde os leads, qualifica e te passa quando precisa.</div></div>
           <label class="sw"><input type="checkbox" name="ativo" {% if ag_cfg.ativo %}checked{% endif %}><span></span></label>
         </div>
+      </div>
+      {#- O RESUMO SEMANAL POR E-MAIL (migração 274). Aqui, e não numa tela nova,
+          porque o dono pediu assim em 17/09/2026 — "coloca lá na engrenagem da
+          prospecção, em Agentes IA, a automação pra ativação do botão pra esse
+          relatório, e os e-mails pra cadastrar um ou mais gestores" — e porque é
+          automação de conta, como o agente e o rodízio. Salva no MESMO botão. -#}
+      <div class="cx-card">
+        <div style="display:flex;align-items:center;gap:.7rem">
+          <div style="font-size:1.6rem">📬</div>
+          <div style="flex:1"><b style="font-size:1rem">Resumo semanal por e-mail</b><div class="mut" style="font-size:.8rem">O funil da semana, o que travou e os próximos 7 dias. Nasce desligado.</div></div>
+          <label class="sw"><input type="checkbox" name="resumo_semanal" {% if resumo.resumo_semanal %}checked{% endif %}><span></span></label>
+        </div>
+        <div class="agfield" style="margin-top:.7rem">
+          <label>E-mails de gestor (separados por vírgula)</label>
+          <input class="fld" name="resumo_emails" value="{{ resumo.resumo_semanal_emails }}"
+                 placeholder="gestor@empresa.com, socio@empresa.com" autocomplete="off">
+          <small class="mut" style="font-size:.74rem;display:block;margin-top:.3rem">
+            O dono sempre recebe, com o resultado de cada vendedor <b>pelo nome</b>.
+            Quem for cadastrado aqui recebe a mesma semana com o total da equipe.
+            Até {{ resumo_max }} e-mails.</small>
+          {%- if resumo.emails %}
+          <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.45rem">
+            {% for e in resumo.emails %}<span class="badge">{{ e }}</span>{% endfor %}
+          </div>{% endif %}
+          <small class="mut" style="font-size:.74rem;display:block;margin-top:.4rem;color:var(--ambar)">
+            ⚠️ E-mail cadastrado aqui <b>só recebe o resumo</b> — não entra no painel,
+            não vê lead, não vê conversa.</small>
+        </div>
+        <div class="aggrid">
+          <div class="agfield"><label>Cada vendedor recebe a parte dele</label>
+            <select class="fld" name="resumo_vendedor">
+              <option value="1" {% if resumo.resumo_semanal_vendedor %}selected{% endif %}>Sim — só a carteira dele</option>
+              <option value="" {% if not resumo.resumo_semanal_vendedor %}selected{% endif %}>Não</option>
+            </select></div>
+          <div class="agfield"><label>Quando</label>
+            <select class="fld" name="resumo_dia">
+              <option value="segunda" {% if resumo.resumo_semanal_dia == 'segunda' %}selected{% endif %}>Segunda, 9h</option>
+              <option value="sexta" {% if resumo.resumo_semanal_dia == 'sexta' %}selected{% endif %}>Sexta, 17h</option>
+            </select></div>
+        </div>
+        <small class="mut" style="font-size:.74rem;display:block;margin-top:.5rem">
+          Semana sem nenhum movimento não gera e-mail — nem pra você, nem pro vendedor.</small>
       </div>
       <div class="cx-card">
         <h3>⚙️ Comportamento</h3>

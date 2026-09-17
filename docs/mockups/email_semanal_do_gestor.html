@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="pt-br">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>A semana da sua empresa — e-mail do gestor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --ink:#062011;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo)}
+.wrap{max-width:1080px;margin:0 auto;padding:2.6rem 1rem 5rem;display:flex;flex-direction:column;gap:2.7rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.55rem,4vw,2.1rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:76ch}
+.marca{color:var(--neon)}
+.sec>h2{font-size:1.22rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.05rem;max-width:82ch;font-size:.9rem}
+.num{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em}
+
+.nota{border-left:2.5px solid var(--azul-borda);background:var(--azul-fundo);padding:.85rem 1rem;
+  border-radius:0 10px 10px 0;font-size:.88rem;color:var(--text-dim)}
+.nota b{color:var(--text)}
+.nota.mal{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.nota.amb{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.nota.ok{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.nota+.nota{margin-top:.6rem}
+
+.grade{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:.8rem}
+.cartao{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:1rem 1.1rem}
+.cartao h3{font-size:.95rem;margin-bottom:.35rem}
+.cartao p{margin:0;color:var(--text-dim);font-size:.86rem}
+.cartao .k{font-family:var(--mono);font-size:.66rem;color:var(--text-faint);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:.4rem}
+
+table.med{width:100%;border-collapse:collapse;font-size:.87rem;margin-top:.2rem}
+table.med th,table.med td{padding:.5rem .6rem;border-bottom:1px solid var(--line);text-align:left}
+table.med th{font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint);font-weight:600}
+table.med td.n{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+table.med tr.dest td{background:var(--coral-fundo)}
+table.med tr.bom td{background:var(--neon-fundo)}
+.rolar{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+/* ───────── o e-mail, como ele chega ─────────
+   CLARO de propósito, e não no tema escuro da marca: e-mail não é tela nossa. O
+   Gmail, o Outlook e o app do iPhone reescrevem cor de fundo por conta própria
+   no modo escuro, e um layout desenhado em cima de #0A0F0C vira texto ilegível
+   quando o cliente inverte só parte dele. Claro com contraste alto sobrevive nos
+   dois modos, que é o único critério que importa aqui. */
+.tela{background:var(--bg-2);border:1px solid var(--line);border-radius:16px;padding:1rem;display:flex;
+  flex-direction:column;gap:.7rem}
+.tela .barra{display:flex;gap:.5rem;align-items:center;font-size:.72rem;color:var(--text-faint);
+  font-family:var(--mono);padding:0 .3rem}
+.tela .barra b{color:var(--text-dim);font-weight:500}
+.email{background:#fff;color:#1b211e;border-radius:11px;padding:1.6rem 1.5rem;font-size:14px;line-height:1.6}
+.email *{box-sizing:border-box}
+.email .de{font-size:.72rem;color:#7a8a81;font-family:var(--mono);border-bottom:1px solid #e6ebe8;
+  padding-bottom:.7rem;margin-bottom:1.1rem}
+.email h1{font-family:var(--display);font-size:1.28rem;color:#0f1613;margin:0 0 .15rem;letter-spacing:-.02em}
+.email .sub{color:#6b7c73;font-size:.82rem;margin:0 0 1.15rem}
+.email .capa{background:#f2f7f4;border:1px solid #dbe7e0;border-radius:10px;padding:1rem 1.1rem;margin-bottom:1.2rem}
+.email .capa .linha{font-size:1.02rem;font-weight:600;color:#0f1613;margin:0}
+.email .capa .pq{margin:.4rem 0 0;font-size:.85rem;color:#556;line-height:1.5}
+.email .capa.alerta{background:#fdf4f3;border-color:#f0d7d4}
+.email h2{font-family:var(--display);font-size:.78rem;text-transform:uppercase;letter-spacing:.09em;
+  color:#8a9a91;margin:1.5rem 0 .55rem;font-weight:700}
+.email .placar{display:flex;gap:.55rem;flex-wrap:wrap}
+.email .kpi{flex:1;min-width:104px;border:1px solid #e6ebe8;border-radius:9px;padding:.65rem .7rem}
+.email .kpi .v{font-family:var(--display);font-size:1.5rem;font-weight:700;color:#0f1613;line-height:1.1}
+.email .kpi .r{font-size:.7rem;color:#7a8a81;text-transform:uppercase;letter-spacing:.05em;margin-top:.15rem}
+.email .kpi .d{font-size:.72rem;margin-top:.3rem;font-family:var(--mono)}
+.email .kpi .d.sobe{color:#1a8c4a}.email .kpi .d.desce{color:#c0392b}.email .kpi .d.igual{color:#96a59c}
+.email table{width:100%;border-collapse:collapse;font-size:.85rem}
+.email table th,.email table td{padding:.42rem .5rem;border-bottom:1px solid #eef2f0;text-align:left}
+.email table th{font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;color:#8a9a91;font-weight:600}
+.email table td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.email table tr.atencao td{background:#fdf4f3}
+/* POR VENDEDOR EM LINHAS, e não numa tabela de 5 colunas: medido no Chromium a
+   390px, a tabela estourava pra 443px. E-mail não rola de lado — o Gmail corta, o
+   Outlook encolhe a fonte até sumir. Cada vendedor vira um bloco com o nome em
+   cima e os números embaixo, que quebram sozinhos quando falta largura. */
+.email .vend{border:1px solid #eef2f0;border-radius:9px;padding:.6rem .7rem;margin-bottom:.4rem}
+.email .vend.atencao{background:#fdf4f3;border-color:#f0d7d4}
+.email .vend .q{font-weight:600;color:#0f1613;font-size:.9rem;display:flex;justify-content:space-between;gap:.5rem;align-items:baseline}
+.email .vend .q em{font-style:normal;font-size:.72rem;color:#8a9a91;font-family:var(--mono)}
+.email .vend .ns{display:flex;flex-wrap:wrap;gap:.1rem .9rem;margin-top:.3rem;font-size:.8rem;color:#556}
+.email .vend .ns b{font-family:var(--mono);color:#0f1613}
+.email .vend .ns .mal b{color:#c0392b}
+/* O CAMINHO DA SEMANA, etapa por etapa. Barra em largura proporcional ao topo do
+   funil: é ela que faz "66 entraram, 2 visitaram" virar imagem antes de virar
+   leitura. Feito com div e width em %, não com <table> nem SVG — os dois quebram
+   em cliente de e-mail. */
+.email .funil{display:flex;flex-direction:column;gap:.28rem}
+.email .f-l{display:grid;grid-template-columns:1fr 2.6rem 2.2rem;align-items:center;gap:.5rem;
+  position:relative;padding:.34rem .5rem;border-radius:7px;background:#f7faf8}
+.email .f-l .f-r{font-size:.84rem;color:#33403a;position:relative;z-index:1}
+.email .f-l .f-b{position:absolute;left:0;top:0;bottom:0;background:#dcebe2;border-radius:7px;z-index:0}
+.email .f-l.ok .f-b{background:#c9e7d3}
+.email .f-l.mal .f-b{background:#f6dcd9}
+.email .f-l .f-n{font-family:var(--mono);font-weight:600;text-align:right;color:#0f1613;position:relative;z-index:1}
+.email .f-l .f-d{font-family:var(--mono);font-size:.7rem;text-align:right;position:relative;z-index:1}
+.email .f-l .f-d.sobe{color:#1a8c4a}.email .f-l .f-d.desce{color:#c0392b}.email .f-l .f-d.igual{color:#96a59c}
+.email p.obs{font-size:.8rem;color:#6b7c73;margin:.55rem 0 0;line-height:1.5}
+.email .lista{margin:.1rem 0 0;padding:0;list-style:none}
+.email .lista li{padding:.45rem 0;border-bottom:1px solid #eef2f0;font-size:.85rem;display:flex;gap:.55rem;align-items:baseline}
+.email .lista li:last-child{border-bottom:0}
+.email .lista .tag{font-family:var(--mono);font-size:.66rem;padding:.1rem .4rem;border-radius:5px;flex:none}
+.email .lista .tag.q{background:#fdf4f3;color:#c0392b}
+.email .lista .tag.a{background:#fdf7ec;color:#9a6d10}
+.email .cta{display:inline-block;background:#128C4A;color:#fff;text-decoration:none;font-weight:600;
+  border-radius:8px;padding:.62rem 1.1rem;font-size:.86rem;margin-top:.3rem}
+.email .pe{margin-top:1.6rem;padding-top:.9rem;border-top:1px solid #e6ebe8;font-size:.74rem;color:#8a9a91;line-height:1.6}
+.email .pe a{color:#128C4A}
+.email .vazio{text-align:center;padding:.6rem 0 .2rem;color:#6b7c73;font-size:.9rem}
+
+/* a tela de configuração é NOSSA — tema escuro, igual ao painel de verdade */
+.cfg{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:1rem 1.1rem;margin-bottom:.7rem}
+.cfg .topo{display:flex;align-items:center;gap:.7rem}
+.cfg .ico{font-size:1.6rem}
+.cfg .topo b{font-size:1rem;display:block}
+.cfg .topo .mut{color:var(--text-dim);font-size:.8rem}
+.sw{width:42px;height:24px;border-radius:999px;background:var(--neon);position:relative;flex:none}
+.sw::after{content:"";position:absolute;right:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff}
+.sw.off{background:var(--line)}.sw.off::after{right:21px}
+.cfg h3{font-size:.86rem;margin:0 0 .5rem;color:var(--text-dim)}
+.cfg .campo{margin-bottom:.7rem}
+.cfg .campo label{display:block;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);margin-bottom:.25rem}
+.cfg .fld{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;
+  padding:.48rem .6rem;font-size:.86rem;font-family:var(--body)}
+.cfg .chips{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.4rem}
+.cfg .chip{display:inline-flex;align-items:center;gap:.35rem;font-size:.78rem;background:var(--bg);
+  border:1px solid var(--line);border-radius:999px;padding:.22rem .55rem;color:var(--text-dim)}
+.cfg .chip b{color:var(--text);font-weight:500}
+.cfg .chip .x{color:var(--text-faint)}
+.cfg .ajuda{font-size:.78rem;color:var(--text-faint);margin:.35rem 0 0;line-height:1.5}
+.cfg .dupla{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+@media(max-width:560px){.cfg .dupla{grid-template-columns:1fr}}
+.duas{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem;align-items:start}
+@media(max-width:860px){.duas{grid-template-columns:1fr}}
+.rot{font-size:.74rem;color:var(--text-faint);font-family:var(--mono);margin-bottom:.45rem;
+  text-transform:uppercase;letter-spacing:.07em}
+.perg{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:1rem 1.1rem}
+.perg h3{font-size:.95rem;margin-bottom:.3rem}
+.perg p{margin:0;color:var(--text-dim);font-size:.87rem}
+.perg .op{margin-top:.55rem;display:flex;gap:.4rem;flex-wrap:wrap}
+.perg .op span{font-size:.76rem;border:1px dashed var(--line);border-radius:999px;padding:.2rem .6rem;color:var(--text-dim)}
+</style>
+<div class="wrap">
+
+<header class="head">
+  <div class="eyebrow">Mockup · 17/09/2026 · <span class="marca">a semana da sua empresa</span></div>
+  <h1>Um e-mail por semana, pra quem gerencia</h1>
+  <p>Segunda de manhã, uma página: o que a semana passada produziu, o que está
+  travado e o que acontece nos próximos sete dias. Os números deste mockup são
+  <b>reais</b> — semana de 08 a 14/09, medidos na Prime (conta 34) e na ZAQ
+  (conta 3), que são os dois extremos em produção.</p>
+</header>
+
+<!-- ─────────────────────────────────────────────── o erro do 1º rascunho -->
+<section class="sec">
+  <div class="num">01</div>
+  <h2>O primeiro rascunho deste mockup estava errado</h2>
+  <p class="leg">Vale começar por aqui, porque o erro é o motivo de o e-mail ter a
+  forma que tem — e porque ele é o mesmo erro que o e-mail poderia cometer toda
+  segunda-feira, no nome de gente de verdade.</p>
+
+  <div class="nota mal"><b>A manchete que eu ia mandar:</b> "entraram 66 clientes e
+  saíram 2 propostas, nenhuma venda fechada — o Pedro e a Jacqueline receberam 44
+  juntos e não propuseram nenhum".</div>
+
+  <div class="nota ok"><b>A semana de verdade:</b> 4 contratos assinados,
+  <b>R$ 26.090</b> — a melhor do mês. O Pedro fechou dois (R$ 12.500) e a
+  Jacqueline, um (R$ 6.500).</div>
+
+  <div class="nota amb" style="margin-top:.9rem"><b>Por que eu errei:</b> medi
+  "fechou" por <code>funil_movimentos.para = 'ganho'</code>. A Prime não move o
+  card pra Ganho — ela assina o contrato e deixa o lead onde estava. Dos quatro
+  contratos assinados naquela semana, <b>dois têm o lead parado em "Proposta"</b>
+  (Renata Costa e Josiany Rayra) e dois estão em "Evento realizado". Nenhum em
+  Ganho.</div>
+
+  <div class="nota"><b>É a sua queixa do Follow-up, de novo, agora com número:</b>
+  "tem cliente que já fechou mas está como contato". O funil é o que a pessoa
+  lembra de arrastar; o contrato assinado é fato. <b>O e-mail mede pelo
+  contrato.</b></div>
+
+  <div class="nota mal"><b>E é por isso que a tabela por vendedor é perigosa.</b> Eu
+  ia nomear duas pessoas como improdutivas numa semana em que elas fecharam
+  R$ 19.000 entre as duas. Um número medido no lugar errado não erra sozinho — ele
+  acusa alguém.</div>
+</section>
+
+<!-- ─────────────────────────────────────────────── o funil completo -->
+<section class="sec">
+  <div class="num">02</div>
+  <h2>O funil inteiro, medido</h2>
+  <p class="leg">Prime Eventos, semana de 08 a 14/09 contra a de 01 a 07/09. Sete
+  etapas — e o pulo do lead pro contrato passa por visita, que era o que faltava no
+  meu rascunho.</p>
+
+  <div class="rolar">
+  <table class="med">
+    <thead><tr><th>Etapa do funil</th><th class="n">01–07/09</th><th class="n">08–14/09</th><th>o que isso diz</th></tr></thead>
+    <tbody>
+      <tr><td>Clientes que entraram</td><td class="n">51</td><td class="n">66</td><td>entra mais do que sai</td></tr>
+      <tr><td>Visitas ao espaço realizadas</td><td class="n">3</td><td class="n">2</td><td>o gargalo real</td></tr>
+      <tr><td>Propostas novas</td><td class="n">4</td><td class="n">2</td><td>e 14 em rascunho, nunca enviadas</td></tr>
+      <tr><td>Contratos enviados</td><td class="n">1</td><td class="n">5</td><td>de propostas de antes</td></tr>
+      <tr class="bom"><td><b>Contratos assinados</b></td><td class="n">1</td><td class="n"><b>4</b></td><td><b>R$ 26.090</b> contra R$ 7.750</td></tr>
+      <tr><td>Sinais pagos</td><td class="n">—</td><td class="n">2</td><td>dois assinaram e ainda não pagaram</td></tr>
+      <tr class="dest"><td>Perdidos</td><td class="n">2</td><td class="n">4</td><td>3 dos 4 sem motivo</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="nota amb" style="margin-top:.9rem"><b>A visita é o degrau que ninguém estava
+  olhando.</b> 66 pessoas entraram e <b>duas</b> visitaram o espaço. Num negócio de
+  festa, quem não pisa no salão raramente assina — e o e-mail sem essa linha
+  esconderia o estreitamento mais importante do funil.</div>
+
+  <div class="nota"><b>O que está travado agora</b> (não é da semana, é o acumulado
+  que pede decisão): 14 propostas em rascunho, 15 festas em menos de 30 dias sem
+  contrato, 227 leads sem data de festa, 1 contrato enviado sem assinatura e
+  1 título vencido de R$ 1.200.</div>
+</section>
+
+<!-- ─────────────────────────────────────────────── o e-mail, versão eventos -->
+<section class="sec">
+  <div class="num">02</div>
+  <h2>O e-mail — conta que vende festa</h2>
+  <p class="leg">É a Prime. O vocabulário é o do nicho (§6): festa, data, visita.
+  Numa conta de mensalidade nada disso aparece — a versão dela está no bloco 03.</p>
+
+  <div class="tela">
+    <div class="barra"><b>Para:</b> manoel@primeeventos.com &nbsp;·&nbsp; <b>Assunto:</b> Prime Eventos · 4 contratos assinados na semana</div>
+    <div class="email">
+      <div class="de">Zaq &lt;semana@zaq-ia.com&gt; · segunda-feira, 15/09, 09:00</div>
+
+      <h1>A semana da Prime Eventos</h1>
+      <p class="sub">08 a 14 de setembro · comparado com a semana anterior</p>
+
+      <div class="capa">
+        <p class="linha">4 contratos assinados, R$ 26.090. A melhor semana do mês.</p>
+        <p class="pq">Na semana anterior foi um contrato, R$ 7.750. Os três
+        vendedores fecharam: Pedro dois, Jacqueline um, Thiago um.</p>
+      </div>
+
+      <h2>O caminho da semana</h2>
+      <div class="funil">
+        <div class="f-l"><span class="f-r">Entraram</span><span class="f-b" style="width:100%"></span><span class="f-n">66</span><span class="f-d sobe">+15</span></div>
+        <div class="f-l"><span class="f-r">Visitaram o espaço</span><span class="f-b" style="width:4%"></span><span class="f-n">2</span><span class="f-d desce">−1</span></div>
+        <div class="f-l"><span class="f-r">Receberam proposta</span><span class="f-b" style="width:4%"></span><span class="f-n">2</span><span class="f-d desce">−2</span></div>
+        <div class="f-l"><span class="f-r">Receberam contrato</span><span class="f-b" style="width:8%"></span><span class="f-n">5</span><span class="f-d sobe">+4</span></div>
+        <div class="f-l ok"><span class="f-r">Assinaram</span><span class="f-b" style="width:7%"></span><span class="f-n">4</span><span class="f-d sobe">+3</span></div>
+        <div class="f-l"><span class="f-r">Pagaram o sinal</span><span class="f-b" style="width:4%"></span><span class="f-n">2</span><span class="f-d igual"></span></div>
+        <div class="f-l mal"><span class="f-r">Perderam</span><span class="f-b" style="width:7%"></span><span class="f-n">4</span><span class="f-d desce">+2</span></div>
+      </div>
+      <p class="obs">Entraram 66 e duas pessoas visitaram o salão. É o degrau mais
+      estreito do caminho — e num negócio de festa, quem não visita raramente assina.</p>
+
+      <h2>O que está travado</h2>
+      <ul class="lista">
+        <li><span class="tag q">agora</span><span><b>15 festas em menos de 30 dias</b> ainda sem contrato.
+          Depois da data não tem segunda chance.</span></li>
+        <li><span class="tag q">agora</span><span><b>14 propostas em rascunho</b>, nunca enviadas.
+          Trabalho já feito parado no meio do caminho.</span></li>
+        <li><span class="tag a">olhar</span><span><b>1 contrato enviado e não assinado</b> ·
+          <b>1 título vencido</b>, R$ 1.200.</span></li>
+        <li><span class="tag a">olhar</span><span><b>227 leads sem data de festa.</b> Sem a data,
+          ninguém sabe o que oferecer nem quando cobrar.</span></li>
+      </ul>
+
+      <h2>Por vendedor</h2>
+      <div class="vend">
+        <div class="q"><span>Pedro Yan</span><em>R$ 12.500 assinados</em></div>
+        <div class="ns"><span>entraram <b>23</b></span><span>visitas <b>1</b></span><span>fechou <b>2</b></span><span>carteira <b>154</b></span></div>
+      </div>
+      <div class="vend">
+        <div class="q"><span>Jacqueline</span><em>R$ 6.500 assinados</em></div>
+        <div class="ns"><span>entraram <b>21</b></span><span>visitas <b>1</b></span><span>fechou <b>1</b></span><span>carteira <b>125</b></span></div>
+      </div>
+      <div class="vend">
+        <div class="q"><span>Thiago</span><em>R$ 7.090 assinados</em></div>
+        <div class="ns"><span>entraram <b>22</b></span><span>visitas <b>0</b></span><span>fechou <b>1</b></span><span>carteira <b>94</b></span></div>
+      </div>
+
+      <h2>Os próximos 7 dias</h2>
+      <ul class="lista">
+        <li><span class="tag a">agenda</span><span><b>4 visitas marcadas</b> ao espaço.</span></li>
+        <li><span class="tag a">agenda</span><span><b>5 festas acontecem</b> entre 15 e 21/09.</span></li>
+      </ul>
+
+      <p style="margin-top:1.3rem"><a class="cta" href="#">Abrir o Raio-X da semana →</a></p>
+
+      <div class="pe">
+        Você recebe este resumo toda segunda porque é dono da conta.
+        <a href="#">Desligar o resumo semanal</a> · <a href="#">Ver no painel</a><br>
+        "Assinou" é contrato assinado, não etapa do funil — dois destes quatro
+        continuam em "Proposta" no quadro.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────── os três destinatários -->
+<section class="sec">
+  <div class="num">03</div>
+  <h2>Três destinatários, três e-mails</h2>
+  <p class="leg">Decisão do dono em 17/09: dono, gestor e vendedor recebem — e a
+  tabela com NOME só vai no e-mail do dono. O gestor vê o total da equipe; o
+  vendedor vê só a carteira dele, sem comparação com ninguém.</p>
+
+  <div class="duas">
+    <div>
+      <div class="rot">Gestor — mesmo e-mail, sem os nomes</div>
+      <div class="email">
+        <div class="de">Zaq &lt;semana@zaq-ia.com&gt; · segunda, 09:00</div>
+        <h1>A semana da Prime Eventos</h1>
+        <p class="sub">08 a 14 de setembro</p>
+        <div class="capa">
+          <p class="linha">4 contratos assinados, R$ 26.090. A melhor semana do mês.</p>
+          <p class="pq">Na semana anterior foi um contrato, R$ 7.750.</p>
+        </div>
+        <h2>A equipe</h2>
+        <div class="vend">
+          <div class="q"><span>3 vendedores ativos</span><em>R$ 26.090 assinados</em></div>
+          <div class="ns"><span>entraram <b>66</b></span><span>visitas <b>2</b></span><span>fecharam <b>4</b></span><span>carteira <b>373</b></span></div>
+        </div>
+        <div class="pe">O gestor vê o total. Quem tem o nome de cada um é o dono —
+        decisão dele, e o e-mail obedece a ela em vez de deixar no acaso de quem
+        encaminha pra quem.</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="rot">Vendedor — a carteira dele, e só</div>
+      <div class="email">
+        <div class="de">Zaq &lt;semana@zaq-ia.com&gt; · segunda, 09:00</div>
+        <h1>Sua semana, Pedro</h1>
+        <p class="sub">08 a 14 de setembro</p>
+        <div class="capa">
+          <p class="linha">Você fechou 2 contratos, R$ 12.500.</p>
+          <p class="pq">E tem 6 festas suas acontecendo em menos de 30 dias que ainda
+          não fecharam — é onde o dinheiro está mais perto.</p>
+        </div>
+        <h2>Sua semana</h2>
+        <div class="placar">
+          <div class="kpi"><div class="v">23</div><div class="r">chegaram pra você</div></div>
+          <div class="kpi"><div class="v">38</div><div class="r">falaram com você</div></div>
+          <div class="kpi"><div class="v">154</div><div class="r">na sua carteira</div></div>
+        </div>
+        <h2>O que pede você</h2>
+        <ul class="lista">
+          <li><span class="tag q">agora</span><span><b>6 festas em menos de 30 dias</b> sem contrato.</span></li>
+          <li><span class="tag a">olhar</span><span><b>15 leads parados na etapa Proposta</b> — inclusive
+            a Renata Costa, que já assinou.</span></li>
+          <li><span class="tag a">olhar</span><span><b>4 sem nenhuma mensagem há mais de 7 dias.</b></span></li>
+        </ul>
+        <p style="margin-top:1.1rem"><a class="cta" href="#">Abrir minha Fila →</a></p>
+        <div class="pe">Sem placar de comparação e sem o nome dos colegas. Abre pelo
+        que ele fez, não pelo que faltou.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota amb" style="margin-top:1rem"><b>O e-mail do vendedor é o mais fácil de errar —
+  e o bloco 01 é a prova.</b> A primeira versão abria com "você recebeu 23 e propôs 0",
+  numa semana em que o Pedro tinha fechado R$ 12.500. Chegando toda segunda, isso é
+  cobrança automática em cima de uma medição errada. O dele abre pelo que ele
+  <b>fez</b>, mostra só a carteira que ele controla, e não traz placar de comparação
+  nem o nome de colega nenhum.</div>
+
+  <div class="nota"><b>E ele também é o lugar de apontar o lead desencontrado:</b> a
+  Renata Costa assinou contrato e continua em "Proposta" no quadro do Pedro. O
+  e-mail dele diz isso de um jeito que é ajuda, não bronca — é um card pra
+  arrastar, não um erro pra explicar.</div>
+</section>
+
+<!-- ─────────────────────────────────────────────── as outras duas versões -->
+<section class="sec">
+  <div class="num">04</div>
+  <h2>O nicho, e a semana em que nada aconteceu</h2>
+  <p class="leg">À esquerda, a conta de mensalidade: nenhuma palavra de festa. À
+  direita, o caso difícil — a ZAQ teve exatamente isso na semana medida.</p>
+
+  <div class="duas">
+    <div>
+      <div class="rot">Conta recorrente (ZAQ, se tivesse tido movimento)</div>
+      <div class="email">
+        <div class="de">Zaq &lt;semana@zaq-ia.com&gt; · segunda, 09:00</div>
+        <h1>A semana da ZAQ</h1>
+        <p class="sub">08 a 14 de setembro · comparado com a semana anterior</p>
+        <div class="capa">
+          <p class="linha">3 propostas na rua, R$ 2.400 de mensalidade em jogo.</p>
+          <p class="pq">Duas reuniões marcadas pra esta semana. O ciclo médio até a
+          proposta caiu de 9 para 6 dias.</p>
+        </div>
+        <h2>O placar</h2>
+        <div class="placar">
+          <div class="kpi"><div class="v">14</div><div class="r">entraram</div><div class="d sobe">+3</div></div>
+          <div class="kpi"><div class="v">3</div><div class="r">propostas</div><div class="d sobe">+1</div></div>
+          <div class="kpi"><div class="v">R$ 2.4k</div><div class="r">mensalidade proposta</div><div class="d sobe">+800</div></div>
+        </div>
+        <h2>O que pede você</h2>
+        <ul class="lista">
+          <li><span class="tag a">olhar</span><span><b>2 reuniões</b> marcadas pra esta semana.</span></li>
+          <li><span class="tag q">agora</span><span><b>1 proposta sem retorno há 8 dias.</b></span></li>
+        </ul>
+        <div class="pe">Sem "festa", sem "convidados", sem "data do evento" —
+        essas palavras não existem nesta conta. (Números ilustrativos: a semana
+        real da ZAQ está ao lado.)</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="rot">A semana em que não aconteceu nada (ZAQ, 08–14/09 de verdade)</div>
+      <div class="email">
+        <div class="de">Zaq &lt;semana@zaq-ia.com&gt; · segunda, 09:00</div>
+        <h1>A semana da ZAQ</h1>
+        <p class="sub">08 a 14 de setembro</p>
+        <div class="capa">
+          <p class="linha">Semana sem movimento: nenhum lead novo, nenhuma proposta.</p>
+          <p class="pq">A carteira tem 259 leads abertos, e a maioria não recebe uma
+          mensagem há mais de 7 dias.</p>
+        </div>
+        <h2>O que pede você</h2>
+        <ul class="lista">
+          <li><span class="tag q">agora</span><span><b>A carteira parada.</b> Semana sem entrada é a
+            semana de trabalhar o que já está dentro.</span></li>
+        </ul>
+        <p style="margin-top:1.1rem"><a class="cta" href="#">Ver quem está parado →</a></p>
+        <div class="vazio">— sem placar esta semana, porque não haveria o que comparar —</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota" style="margin-top:1rem"><b>O e-mail da semana morta não some, mas encolhe.</b>
+  Ele perde o placar e o bloco por vendedor (zero contra zero não é informação) e
+  mantém a única coisa que importa quando nada entrou: o que já está dentro e
+  parado. Se nem isso houver — conta nova, carteira vazia —, aí ele <b>não é
+  enviado</b>.</div>
+</section>
+
+<!-- ─────────────────────────────────────────────── onde se liga -->
+<section class="sec">
+  <div class="num">05</div>
+  <h2>Onde se liga, e pra quem vai</h2>
+  <p class="leg">Pedido do dono em 17/09: "coloca lá na engrenagem da prospecção,
+  em Agentes IA, a automação pra ativação do botão pra esse relatório — e os
+  e-mails pra cadastrar um ou mais gestores".</p>
+  <p class="leg">Fica em <code>/painel/prospeccao/comunicacao?aba=agente</code>,
+  um card a mais no formulário que já existe ali. Mesmo interruptor, mesmo
+  "Salvar" — não nasce tela nova pra uma coisa que é configuração de automação
+  como as outras.</p>
+
+  <div class="cfg">
+    <div class="topo">
+      <div class="ico">📬</div>
+      <div style="flex:1"><b>Resumo semanal por e-mail</b>
+        <div class="mut">Toda segunda, 9h: o funil da semana, o que travou e os próximos 7 dias.</div></div>
+      <div class="sw"></div>
+    </div>
+  </div>
+
+  <div class="cfg">
+    <h3>⚙️ Quem recebe</h3>
+    <div class="campo">
+      <label>Gestores (um e-mail por linha, ou separados por vírgula)</label>
+      <input class="fld" value="gestor@primeeventos.com, financeiro@primeeventos.com">
+      <div class="chips">
+        <span class="chip"><b>MANOEL SOARES</b> · dono <span class="x">sempre recebe</span></span>
+        <span class="chip"><b>gestor@primeeventos.com</b> <span class="x">✕</span></span>
+        <span class="chip"><b>financeiro@primeeventos.com</b> <span class="x">✕</span></span>
+      </div>
+      <p class="ajuda">O dono recebe sempre, com a tabela por vendedor <b>com
+      nome</b>. Quem for cadastrado aqui recebe a mesma semana com o total da
+      equipe, sem os nomes — é a separação que você escolheu.</p>
+    </div>
+    <div class="dupla">
+      <div class="campo">
+        <label>Cada vendedor recebe a parte dele</label>
+        <select class="fld"><option>Sim — só a carteira dele</option><option>Não</option></select>
+      </div>
+      <div class="campo">
+        <label>Quando</label>
+        <select class="fld"><option>Segunda, 9h</option><option>Sexta, 17h</option></select>
+      </div>
+    </div>
+    <p class="ajuda">Semana sem nenhum movimento não gera e-mail — nem pra você,
+    nem pro vendedor. Ver o bloco 04.</p>
+  </div>
+
+  <div class="nota" style="margin-top:.9rem"><b>Por que o e-mail do gestor é digitado, e não escolhido numa lista:</b>
+  a Prime não tem ninguém com papel de <i>gestor</i> no sistema — e quem acompanha
+  a operação nem sempre tem login. O campo aceita quem você quiser, inclusive
+  sócio ou contador, sem precisar criar usuário pra isso.</div>
+
+  <div class="nota amb"><b>E o e-mail digitado não vira acesso.</b> Quem está
+  cadastrado aqui recebe o resumo e nada mais — não entra no painel, não vê lead,
+  não vê conversa. É uma lista de envio, não uma porta.</div>
+</section>
+
+<!-- ─────────────────────────────────────────────── as decisões -->
+<section class="sec">
+  <div class="num">06</div>
+  <h2>As decisões, e por que cada uma</h2>
+
+  <div class="grade">
+    <div class="cartao">
+      <span class="k">01 · uma conclusão, não um painel</span>
+      <h3>A primeira linha é uma frase</h3>
+      <p>"Entraram 66 e saíram 2 propostas." Quem abre no celular, de pé, lê uma
+      linha e decide se continua. Painel de números sem frase obriga a pessoa a
+      fazer a conta sozinha — e ela não faz.</p>
+    </div>
+    <div class="cartao">
+      <span class="k">02 · o remédio contra virar papel de parede</span>
+      <h3>Semana morta encolhe; semana vazia não vai</h3>
+      <p>A ZAQ teve 0, 0, 0, 0. Mandar essa tabela toda segunda é como os avisos
+      que ninguém lê — e esse erro eu acabei de cometer. A regra nasce junto com o
+      recurso, não depois da medição.</p>
+    </div>
+    <div class="cartao">
+      <span class="k">03 · número sozinho não diz nada</span>
+      <h3>Tudo contra a semana anterior</h3>
+      <p>"2 propostas" não é bom nem ruim. "2 propostas, −3" é uma queda. O Raio-X
+      já calcula o período anterior — o e-mail usa o mesmo cálculo.</p>
+    </div>
+    <div class="cartao">
+      <span class="k">04 · §6, o nicho</span>
+      <h3>Duas caras, uma fonte</h3>
+      <p>Festa, data e visita só existem em conta que vende festa. Mensalidade e
+      reunião só em conta que vende serviço recorrente. O perfil já existe em
+      <code>raio_x_perfil</code>; o e-mail lê dele, como as telas.</p>
+    </div>
+    <div class="cartao">
+      <span class="k">06 · medido, não suposto</span>
+      <h3>Nada de tabela larga</h3>
+      <p>A primeira versão tinha o "por vendedor" numa tabela de 5 colunas.
+      Medida a 390px no Chromium, ela estourava pra 443 — e e-mail não rola de
+      lado: o Gmail corta e o Outlook encolhe a fonte. Virou uma linha por pessoa,
+      com os números quebrando sozinhos.</p>
+    </div>
+    <div class="cartao">
+      <span class="k">05 · o botão de desligar vem no primeiro dia</span>
+      <h3>Em Empresa, junto do aviso da Fila</h3>
+      <p>Interruptor por conta, no mesmo lugar onde já se desliga a faixa de
+      novidades. Quem não quer, desliga — e o não-envio é um dado tão útil quanto
+      a abertura.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────── por baixo -->
+<section class="sec">
+  <div class="num">07</div>
+  <h2>Por baixo: nenhuma conta nova</h2>
+  <p class="leg">O que este e-mail precisa já está construído. Montá-lo com
+  consultas próprias seria criar uma segunda verdade.</p>
+
+  <div class="grade">
+    <div class="cartao">
+      <span class="k">os números</span>
+      <h3><code>raio_x_dono.dono()</code></h3>
+      <p>Já entrega placar, semana anterior, por vendedor, perdas com motivo,
+      ciclo e os blocos do nicho — tudo por período e já filtrado pelo perfil.
+      O e-mail pede a semana passada e escreve o que voltar.</p>
+    </div>
+    <div class="cartao">
+      <span class="k">o envio</span>
+      <h3><code>email_sender.enviar_email</code></h3>
+      <p>O mesmo caminho do convite de equipe e da recuperação de senha. SMTP já
+      configurado em produção.</p>
+    </div>
+    <div class="cartao">
+      <span class="k">o horário</span>
+      <h3>Cron de segunda, 09h BRT</h3>
+      <p>Como o <code>monitor_saldos</code> (<code>0 12 * * *</code>), só que
+      <code>0 12 * * 1</code>. Serviço novo no Render, gerenciado na mão como os
+      outros (§3 — o <code>render.yaml</code> é documentação).</p>
+    </div>
+    <div class="cartao">
+      <span class="k">quem recebe</span>
+      <h3>Dono e gestor, com e-mail confirmado</h3>
+      <p>O vendedor não recebe: o resumo fala da equipe dele, e a rotina dele é a
+      Fila. Mesmo corte do Raio-X.</p>
+    </div>
+  </div>
+
+  <div class="nota mal" style="margin-top:1rem"><b>Um risco que eu quero nomear agora.</b>
+  O número "0 fechadas" chega no e-mail do dono antes de o vendedor ter chance de
+  explicar. Isso é informação legítima e o dono tem direito a ela — mas é também o
+  tipo de coisa que, mal escrita, vira cobrança automática por e-mail toda segunda.
+  Por isso a tabela por vendedor mostra <b>o que ele recebeu ao lado do que ele
+  fez</b>: 23 leads e 0 propostas conta uma história diferente de 2 leads e 0
+  propostas. Sem o denominador, o número acusa.</div>
+</section>
+
+<!-- ─────────────────────────────────────────────── o que ele decidiu -->
+<section class="sec">
+  <div class="num">08</div>
+  <h2>O que o dono decidiu, em 17/09</h2>
+  <p class="leg">Três perguntas que os dados não respondiam. Ficam escritas aqui
+  porque são elas que explicam por que o e-mail tem três caras.</p>
+
+  <div class="grade">
+    <div class="perg">
+      <h3>Quem recebe</h3>
+      <p><b>Dono, gestor e cada vendedor com a parte dele.</b> São três e-mails
+      diferentes, não o mesmo encaminhado — ver o bloco 03.</p>
+    </div>
+    <div class="perg">
+      <h3>Quando</h3>
+      <p><b>Segunda, 9h.</b> A semana que começa: as festas de menos de 30 dias e
+      as que acontecem nos próximos sete viram plano, não retrospectiva.</p>
+    </div>
+    <div class="perg">
+      <h3>Com nome?</h3>
+      <p><b>Com nome, e só no e-mail do dono.</b> O gestor vê o total da equipe. É
+      o que separa informação de gestão de informação de operação.</p>
+    </div>
+  </div>
+
+  <div class="nota ok" style="margin-top:1rem"><b>O que ainda não está decidido, e não precisa estar hoje:</b>
+  se o e-mail do vendedor também vale pra conta que NÃO tem equipe (dono que vende
+  sozinho receberia dois e-mails no mesmo minuto), e se o resumo cabe no WhatsApp
+  além do e-mail. As duas coisas dá pra resolver depois que o primeiro envio real
+  acontecer e a gente vir o que as pessoas fazem com ele.</div>
+</section>
+
+</div>
+</html>

@@ -186,6 +186,30 @@ services:
   # Precisa de SMTP_* (e-mail) e do destino do alerta, que sai de
   # /admin/comunicacao (banco) ou, como fallback, das envs ADMIN_EMAIL /
   # ADMIN_TELEGRAM_ID daqui.
+  # O RESUMO SEMANAL POR E-MAIL (migração 274). Roda TODO DIA e pergunta ao banco
+  # quais contas pedem hoje: o dia é de cada conta (`contas.resumo_semanal_dia`),
+  # e dois crons pra uma pergunta que o banco responde seria dois serviços pra
+  # manter na mão. Nos outros dias ele custa uma consulta e sai.
+  #
+  # Precisa de SMTP_* (o mesmo do convite de equipe) e de DATABASE_URL.
+  - type: cron
+    # No Render, criar como "openclaw-resumo-semanal" (gerenciado manual — § 3).
+    name: openclaw-resumo-semanal
+    runtime: python
+    plan: standard
+    schedule: "0 12 * * *"   # 12:00 UTC (~09:00 BRT) todo dia
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m scripts.resumo_semanal
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+
   - type: cron
     # No Render, este cron e' o "openclaw-monitor-saldos-bcu3" (gerenciado manual).
     name: openclaw-monitor-saldos

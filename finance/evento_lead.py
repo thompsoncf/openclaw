@@ -27,6 +27,8 @@ import logging
 import re
 from datetime import date, datetime, timedelta, timezone
 
+from finance import fecho_de_conversa
+
 _log = logging.getLogger("evento_lead")
 
 # Dias sem mensagem (em nenhum sentido) pra um lead ir pra dobra "Parados". Decisão
@@ -276,10 +278,28 @@ def parado(card: dict, agora: datetime | None = None) -> bool:
 
 
 def esperando_resposta(card: dict) -> bool:
-    """O cliente falou por último e ninguém respondeu (resposta do agente conta como
-    resposta, como no Cockpit). É o que pede ação — vai pro topo da coluna."""
+    """O cliente falou por último, ninguém respondeu, E ELE PEDIU ALGUMA COISA.
+
+    (Resposta do agente conta como resposta, como no Cockpit.) É o que pede ação —
+    vai pro topo da coluna.
+
+    A TERCEIRA CONDIÇÃO É DE 17/09/2026 e nasceu do dono olhando o quadro: metade
+    do grupo "esperando resposta" da Prime eram conversas que o cliente tinha
+    ENCERRADO — "Ok", "Obrigada!", "Tá certo". 30 de 57, medidos um a um. Quem
+    agradece não está esperando nada; quem pergunta está, e os dois não podem
+    ocupar o mesmo topo de coluna.
+
+    `fecho_de_conversa` é a MESMA regra que o follow_up usa pro prazo e pra bola —
+    um lugar só, senão o card diz uma coisa e o selo dele diz outra.
+
+    O texto do card já vem resumido (`_resumo_msg`, 58 caracteres). Isso não
+    afrouxa nada: mensagem cortada termina em "…", não casa com fecho nenhum, e
+    o lead continua contando como esperando — que é o lado seguro de errar.
+    """
     ult = card.get("ult")
-    return bool(ult) and not ult.get("minha")
+    if not ult or ult.get("minha"):
+        return False
+    return not fecho_de_conversa.eh_fecho(ult.get("texto"))
 
 
 def _semana_chave(d: date) -> str:

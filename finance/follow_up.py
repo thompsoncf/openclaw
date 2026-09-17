@@ -50,6 +50,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, time, timedelta, timezone
 
+from finance import fecho_de_conversa as fc
 from finance import funil_regua as fr
 
 _log = logging.getLogger("openclaw.follow_up")
@@ -165,7 +166,7 @@ def toques_da_etapa(*, desde, toques: tuple, feitos: int, agora: datetime) -> li
 def prazo_automatico(*, status: str, ult_in, ult_out, criado_em, tentativas: int,
                      evento_em, cfg: dict, tem_data: bool, agora: datetime,
                      toques_fixos: tuple = (), desde=None,
-                     feitos_na_etapa: int = 0) -> tuple[datetime, str]:
+                     feitos_na_etapa: int = 0, ult_in_texto: str | None = None) -> tuple[datetime, str]:
     """(prazo, ação) que o sistema propõe pra este lead. Puro — sem banco.
 
     A ordem é a do mockup: a bola vem antes de tudo (cliente esperando é mais
@@ -182,7 +183,17 @@ def prazo_automatico(*, status: str, ult_in, ult_out, criado_em, tentativas: int
         # nunca falamos nada — nem pelo painel, nem pelo celular
         base = ult_in or criado_em or agora
         prazo, acao = base + timedelta(minutes=cfg["sem_resposta_min"]), "responder — ninguém falou com ele ainda"
-    elif ult_in is not None and ult_in > ult_out:
+    elif ult_in is not None and ult_in > ult_out and not fc.eh_fecho(ult_in_texto):
+        # A BOLA É NOSSA SÓ QUANDO ELE PEDIU ALGUMA COISA (16/09/2026). Antes esta
+        # linha olhava só o RELÓGIO — `ult_in > ult_out` —, e com isso um
+        # "Obrigada!" de sete dias atrás nascia com prazo vencido há sete dias e
+        # abria a coluna marcado 🚨 Crítico. Medido na conta 34: 30 dos 57 leads
+        # que o sistema dizia estarem esperando resposta nossa tinham cortesia como
+        # última mensagem — 53%. O porquê e as travas estão em `fecho_de_conversa`.
+        #
+        # Quem cai no fecho NÃO some: escorrega pro ramo de baixo (a proposta, ou a
+        # escada de toques), que é a verdade — estamos esperando ELE. E dos 189
+        # fechos da história da conta, em 161 (85%) o cliente voltou sozinho.
         prazo, acao = ult_in + timedelta(minutes=cfg["bola_nossa_min"]), "responder — o cliente está esperando"
     elif status == "proposta":
         prazo, acao = ult_out + timedelta(days=cfg["fu_proposta_dias"]), "cobrar retorno da proposta"
@@ -369,10 +380,15 @@ def leads(c, conta_id: int, perfil: dict | None = None,
         # festa que já passou e o lead segue aberto: não há o que propor
         sem_acao = bool(tem_data and evento_em and evento_em < hoje)
         fixos = toques_por_etapa.get(status) or ()
+        # o texto da última entrada, quando ela é a mensagem mais nova da conversa.
+        # `ultmsg` é a última de QUALQUER sentido; se ela for 'in', é a do cliente —
+        # e é exatamente o caso em que a bola poderia ser nossa.
+        texto_in = msg_txt if msg_dir == "in" else None
         prazo, acao = prazo_automatico(
             status=status, ult_in=ult_in, ult_out=ult_out, criado_em=criado,
             tentativas=tent, evento_em=evento_em, cfg=cfg, tem_data=tem_data, agora=agora,
-            toques_fixos=fixos, desde=na_etapa, feitos_na_etapa=saiu_na_etapa)
+            toques_fixos=fixos, desde=na_etapa, feitos_na_etapa=saiu_na_etapa,
+            ult_in_texto=texto_in)
         na_mao = False
         # A MÃO MANDA — mas só enquanto for a última palavra. A marcação vale se
         # foi feita DEPOIS da última mensagem; se o cliente voltou a falar, o fato
@@ -391,7 +407,13 @@ def leads(c, conta_id: int, perfil: dict | None = None,
             "estado": e, "atraso_h": (0 if (sem_acao or not prazo)
                                       else max(0, int((agora - prazo).total_seconds() // 3600))),
             "parado_h": (int((agora - ult).total_seconds() // 3600) if ult else None),
-            "bola": ("aguardando vendedor" if (ult_out is None or (ult_in and ult_in > ult_out))
+            # A MESMA REGRA do prazo, e de propósito: se o prazo deixou de dizer
+            # "responder", a bola não pode continuar dizendo que é nossa. Duas
+            # respostas pra mesma pergunta na mesma tela é como a Fila e o funil
+            # passam a discordar sem ninguém perceber.
+            "bola": ("aguardando vendedor"
+                     if (ult_out is None
+                         or (ult_in and ult_in > ult_out and not fc.eh_fecho(texto_in)))
                      else "aguardando cliente"),
             "faltam": ((evento_em - hoje).days if evento_em else None),
             "na_etapa": na_etapa,

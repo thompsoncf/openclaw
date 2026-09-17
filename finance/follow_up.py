@@ -730,17 +730,46 @@ def notificar(pool, conta_id: int, pendentes: list[dict]) -> None:
             else:
                 titulo = f"⏱️ {len(itens)} leads esperando follow-up"
                 corpo = " · ".join(i["quem"] for i in itens[:3])
+            # CADA CANAL DEIXA RASTRO (17/09/2026). Antes os dois `except: pass`
+            # daqui engoliam a falha inteira, e no primeiro dia com a cobrança ligada
+            # o dono perguntou "já mandou? me traz os logs" — e não havia log: só dava
+            # pra provar o que foi COBRADO (`funil_avisos`), nunca o que SAIU.
+            #
+            # O `pass` continua: aviso é best-effort e não pode derrubar o poller. O
+            # que muda é que agora a falha fica ESCRITA, com o erro, em `aviso_envios`.
+            from finance import aviso_log as _al
             try:
                 from finance import cockpit as _ck
-                _ck.enviar_push(pool, conta_id, membro_id, titulo, corpo, "/cockpit")
-            except Exception:  # noqa: BLE001
-                pass
+                _n = _ck.enviar_push(pool, conta_id, membro_id, titulo, corpo, "/cockpit")
+                # enviar_push devolve quantos aparelhos aceitaram. ZERO não é erro —
+                # é vendedor sem push instalado, e é exatamente o que o dono precisa
+                # ver pra saber que o aviso dele só chega por e-mail.
+                _al.registrar(pool, conta_id, origem="follow_up", canal="push",
+                              membro_id=membro_id, assunto=titulo, n_leads=len(itens),
+                              ok=bool(_n), motivo="" if _n else "nenhum aparelho com push")
+            except Exception as e:  # noqa: BLE001
+                _al.registrar(pool, conta_id, origem="follow_up", canal="push",
+                              membro_id=membro_id, assunto=titulo, n_leads=len(itens),
+                              ok=False, motivo=f"{type(e).__name__}: {e}")
             if email and "@" in email:
                 try:
                     from finance import email_sender as es
-                    es.enviar_aviso(email, titulo, corpo + ". Abra o Zaq pra responder.", nome=nome)
-                except Exception:  # noqa: BLE001
-                    pass
+                    _ok = es.enviar_aviso(email, titulo, corpo + ". Abra o Zaq pra responder.", nome=nome)
+                    _al.registrar(pool, conta_id, origem="follow_up", canal="email",
+                                  membro_id=membro_id, destino=email, assunto=titulo,
+                                  n_leads=len(itens), ok=bool(_ok),
+                                  motivo="" if _ok else "o envio devolveu falso (SMTP sem config ou recusa)")
+                except Exception as e:  # noqa: BLE001
+                    _al.registrar(pool, conta_id, origem="follow_up", canal="email",
+                                  membro_id=membro_id, destino=email, assunto=titulo,
+                                  n_leads=len(itens), ok=False, motivo=f"{type(e).__name__}: {e}")
+            else:
+                # SEM E-MAIL NÃO É SILÊNCIO. É o caso do dono da conta 34, que não tem
+                # endereço cadastrado: a cópia de gestor do degrau a48 caía no vazio e
+                # nada registrava isso. Agora registra.
+                _al.registrar(pool, conta_id, origem="follow_up", canal="email",
+                              membro_id=membro_id, assunto=titulo, n_leads=len(itens),
+                              ok=False, motivo="membro sem e-mail cadastrado")
         except Exception:  # noqa: BLE001
             _log.warning("aviso de follow-up falhou (membro %s)", membro_id, exc_info=True)
 

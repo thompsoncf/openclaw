@@ -745,4 +745,13 @@ def assinar(pool, conta_id: int, contrato_id: int, clausulas,
         except Exception as e:  # noqa: BLE001
             _log.warning("assinar %s: financeiro não abriu no orçamento %s: %s: %s",
                          contrato_id, orcamento_id, type(e).__name__, e)
+        # E O FUNIL ANDA (17/09/2026). Regra do dono: "só conta como venda quando
+        # assinar contrato". O financeiro já abria aqui e o Raio-X já contava a venda
+        # pelo contrato — só o CARD ficava parado. Na conta 34, dos 7 contratos
+        # assinados, três apareciam em "Negociação", e uma dessas clientes estava
+        # sendo cobrada pelo follow-up cinco dias depois de ter assinado.
+        #
+        # `funil_ganho` é tolerante por dentro e nunca anda pra trás — ver o módulo.
+        from finance import funil_ganho as _fg
+        _fg.marcar_por_assinatura(pool, conta_id, int(orcamento_id))
     return True

@@ -38,6 +38,10 @@ create table wa_contatos (conta_id bigint, numero8 text, nome text,
   da_agenda boolean default false, primary key (conta_id, numero8));
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true, whatsapp text,
+  -- `whatsapp_id` é o número de quem se cadastrou PELO WhatsApp, e faltava aqui.
+  -- Foi a coluna que denunciou o buraco de 17/09: a trava só lia `whatsapp`, e dos
+  -- 9 leads de membro medidos em produção SEIS casavam só por este campo.
+  whatsapp_id text,
   cockpit_pausado boolean default false);
 -- o rodízio roda DENTRO da transação da entrada (distribuicao.atribuir_se_sem_dono).
 -- Sem estas tabelas o erro aborta a transação inteira, o try/except do chamador
@@ -73,8 +77,12 @@ def pool():
     p.close()
 
 
-def _membro(c, nome, numero, *, conta=CONTA, ativo=True):
-    return c.execute("""insert into membros (conta_id, nome, whatsapp, ativo)
+def _membro(c, nome, numero, *, conta=CONTA, ativo=True, coluna="whatsapp"):
+    """`coluna` escolhe ONDE o número mora: `whatsapp` (digitado no convite) ou
+    `whatsapp_id` (cadastro pelo próprio WhatsApp). Os dois são do membro, e a trava
+    tem que olhar os dois — ver `test_a_trava_vale_pro_numero_que_veio_do_cadastro`."""
+    assert coluna in ("whatsapp", "whatsapp_id")
+    return c.execute(f"""insert into membros (conta_id, nome, {coluna}, ativo)
                         values (%s,%s,%s,%s) returning id""",
                      (conta, nome, numero, ativo)).fetchone()[0]
 
@@ -221,3 +229,144 @@ def test_membro_sem_whatsapp_nao_casa_com_ninguem(pool):
         _membro(c, "zaq teste", "")
         c.commit()
         assert _eh_numero_da_equipe(c, CONTA, CLIENTE) is False
+
+
+# ═══════════════════════════════════════════ os dois buracos da trava (17/09/2026)
+#
+# A trava é de 04/09 e estava de pé. Em 17/09, medindo a produção pra responder outra
+# pergunta do dono, apareceram NOVE leads de membro em CINCO contas, somando 4.309
+# mensagens — três deles recebendo mensagem ainda naquela semana. A trava não estava
+# quebrada: ela cobria menos do que parecia.
+
+def test_a_trava_vale_pro_numero_que_veio_do_CADASTRO_e_nao_do_convite(pool):
+    """BURACO 1: a checagem só lia `membros.whatsapp`.
+
+    `whatsapp_id` é o número de quem se cadastrou pelo próprio WhatsApp, e dos 9 casos
+    de produção SEIS casavam só por ele: o dono da conta 23 com 2.307 mensagens
+    penduradas num lead do funil dele, a dona da 35 com 1.150, o da 37 com 180.
+    """
+    with pool.connection() as c:
+        _membro(c, "MANOEL SOARES", VENDEDOR, coluna="whatsapp_id")
+        c.commit()
+        conv = _entrou(c, "55" + VENDEDOR, "vê esse orçamento aí", sid="w1")
+        c.commit()
+        assert _leads(c) == [], "número do cadastro virou lead — a trava olhou só o convite"
+        assert c.execute("select prospeccao_id from conversas where id=%s",
+                         (conv,)).fetchone()[0] is None
+
+
+def test_os_dois_campos_valem_ao_mesmo_tempo(pool):
+    """Um membro pode ter os DOIS preenchidos, com números diferentes — o do convite e
+    o do cadastro. Os dois são dele, então nenhum dos dois vira lead."""
+    outro = "86988887777"
+    with pool.connection() as c:
+        c.execute("""insert into membros (conta_id, nome, whatsapp, whatsapp_id, ativo)
+                     values (%s,'DOIS NUMEROS',%s,%s,true)""", (CONTA, VENDEDOR, outro))
+        c.commit()
+        _entrou(c, "55" + VENDEDOR, "oi", sid="w2")
+        _entrou(c, "55" + outro, "oi daqui também", sid="w3")
+        c.commit()
+        assert _leads(c) == []
+
+
+def test_lead_ANTIGO_de_membro_para_de_ser_promovido_e_de_entrar_no_rodizio(pool):
+    """BURACO 2, o pior: a trava morava dentro do `if not lead_id`.
+
+    Quem virou lead ANTES de a trava existir — ou antes de entrar na equipe —
+    continuava alimentando o funil pra sempre: cada mensagem promovia o lead de volta
+    pra 'lead', esquentava, e podia cair no rodízio pra um COLEGA. Na Prime eram três
+    vendedores assim, cada um dono do próprio lead, com 140 mensagens somadas.
+
+    A mensagem continua entrando — é a regra deste arquivo inteiro. O que para é o
+    funil tratar aquilo como cliente.
+    """
+    with pool.connection() as c:
+        _membro(c, "THIAGO PINHEIRO", VENDEDOR)
+        # o lead que já existia, do jeito que a produção tinha: em 'base', frio,
+        # sem dono — e com a conversa já vinculada a ele
+        lead = c.execute("""insert into prospeccao
+                              (conta_id, empresa, whatsapp, estagio, status, temperatura)
+                            values (%s,'Thiago Pinheiro',%s,'base','novo','frio')
+                            returning id""", (CONTA, "+55" + VENDEDOR)).fetchone()[0]
+        c.execute("""insert into conversas (conta_id, prospeccao_id, canal, contato_ref)
+                     values (%s,%s,'whatsapp',%s)""", (CONTA, lead, "55" + VENDEDOR))
+        c.commit()
+
+        _entrou(c, "55" + VENDEDOR, "cliente pediu o contrato", sid="w4")
+        c.commit()
+        r = c.execute("""select estagio, temperatura, vendedor_id from prospeccao where id=%s""",
+                      (lead,)).fetchone()
+        msgs = c.execute("""select count(*) from mensagens ms join conversas cv
+                              on cv.id = ms.conversa_id where cv.prospeccao_id=%s""",
+                         (lead,)).fetchone()[0]
+    assert r[0] == "base", "a mensagem do colega promoveu o lead dele pro funil"
+    assert r[1] == "frio", "a mensagem do colega esquentou o lead dele"
+    assert r[2] is None, "o lead do vendedor caiu no rodízio pra um colega"
+    assert msgs == 1, "a mensagem se perdeu — e perder mensagem é pior que o lead errado"
+
+
+def test_o_agente_nao_responde_o_colega_nem_na_conversa_que_ja_existia(pool):
+    """A IA atender o próprio vendedor não é atendimento. Na conversa NOVA isso já
+    valia (ela nasce com `agente_ativo=false`); na que já existia, a mensagem que
+    chegava religava o agente junto com a janela de 24h."""
+    with pool.connection() as c:
+        _membro(c, "THIAGO PINHEIRO", VENDEDOR)
+        lead = c.execute("""insert into prospeccao (conta_id, empresa, whatsapp, estagio)
+                            values (%s,'Thiago',%s,'base') returning id""",
+                         (CONTA, "+55" + VENDEDOR)).fetchone()[0]
+        conv = c.execute("""insert into conversas
+                              (conta_id, prospeccao_id, canal, contato_ref, agente_ativo)
+                            values (%s,%s,'whatsapp',%s,false) returning id""",
+                         (CONTA, lead, "55" + VENDEDOR)).fetchone()[0]
+        c.commit()
+        _entrou(c, "55" + VENDEDOR, "oi", sid="w5")   # o inbound chega com agente_on=True
+        c.commit()
+        on = c.execute("select agente_ativo from conversas where id=%s", (conv,)).fetchone()[0]
+    assert on is False, "o agente-mestre religou a IA na conversa de um colega"
+
+
+def test_cliente_de_verdade_com_lead_antigo_CONTINUA_sendo_promovido(pool):
+    """O contrapeso: a trava não pode virar um freio pra cliente. Lead de cliente na
+    base que responde continua sendo promovido e esquentando, como sempre foi."""
+    with pool.connection() as c:
+        _membro(c, "THIAGO PINHEIRO", VENDEDOR)
+        lead = c.execute("""insert into prospeccao
+                              (conta_id, empresa, whatsapp, estagio, status, temperatura)
+                            values (%s,'Poly Festas',%s,'base','novo','frio')
+                            returning id""", (CONTA, "+" + CLIENTE)).fetchone()[0]
+        c.execute("""insert into conversas (conta_id, prospeccao_id, canal, contato_ref)
+                     values (%s,%s,'whatsapp',%s)""", (CONTA, lead, CLIENTE))
+        c.commit()
+        _entrou(c, CLIENTE, "quero orçar", sid="w6")
+        c.commit()
+        r = c.execute("select estagio, temperatura from prospeccao where id=%s",
+                      (lead,)).fetchone()
+    assert r == ("lead", "quente")
+
+
+def test_lead_marcado_como_EQUIPE_nao_e_promovido_de_volta_pro_funil(pool):
+    """`estagio='equipe'` é onde os leads de membro foram parar quando a produção foi
+    limpa, em 17/09/2026 — três na conta 34. O valor não é mágico: o funil lista
+    `estagio='lead'` e a Base lista `estagio='base'`, então 'equipe' fica fora das
+    duas telas sem precisar de código novo, e a CONVERSA continua no inbox com as
+    mensagens todas.
+
+    O que este teste garante é que a mensagem seguinte não desfaz a limpeza. Sem a
+    trava do lead existente, o primeiro "oi" do vendedor devolvia o card pro funil.
+    """
+    with pool.connection() as c:
+        _membro(c, "THIAGO PINHEIRO", VENDEDOR)
+        lead = c.execute("""insert into prospeccao (conta_id, empresa, whatsapp, estagio, status)
+                            values (%s,'Thiago Pinheiro',%s,'equipe','contatado')
+                            returning id""", (CONTA, "+55" + VENDEDOR)).fetchone()[0]
+        c.execute("""insert into conversas (conta_id, prospeccao_id, canal, contato_ref)
+                     values (%s,%s,'whatsapp',%s)""", (CONTA, lead, "55" + VENDEDOR))
+        c.commit()
+        _entrou(c, "55" + VENDEDOR, "bom dia", sid="w7")
+        c.commit()
+        r = c.execute("select estagio from prospeccao where id=%s", (lead,)).fetchone()[0]
+        n = c.execute("""select count(*) from mensagens ms join conversas cv
+                           on cv.id = ms.conversa_id where cv.prospeccao_id=%s""",
+                      (lead,)).fetchone()[0]
+    assert r == "equipe", "a mensagem do vendedor devolveu o lead dele pro funil"
+    assert n == 1, "a mensagem se perdeu"

@@ -35,6 +35,7 @@ invisível por acidente.
 from __future__ import annotations
 
 import logging
+from datetime import date, datetime, timedelta, timezone
 
 from finance import nichos as _n
 
@@ -233,6 +234,119 @@ def para_papel(item: dict, papel: str | None) -> bool:
 #: um por vez: ninguém vai tocar 26 vezes. O prazo faz a pilha se resolver sozinha,
 #: sem apagar nada e sem depender de o dono lembrar de desligar a faixa.
 DIAS_NA_FAIXA = 14
+
+
+#: Fuso do Brasil, fixo. A semana de uma entrega é a semana de quem a recebeu, e
+#: um aviso publicado às 21h de sexta (meia-noite de sábado em UTC) não pode cair
+#: na semana seguinte só porque o servidor mora em Greenwich.
+_BR = timedelta(hours=-3)
+
+
+def semana_de(quando) -> str:
+    """A semana ISO de um aviso, em hora de Brasília: '2026-W38'.
+
+    Chave e não data porque é o que agrupa: duas entregas de terça e de sexta são
+    a MESMA novidade da semana pra quem recebe."""
+    if quando is None:
+        return ""
+    if getattr(quando, "tzinfo", None) is None:
+        quando = quando.replace(tzinfo=timezone.utc)
+    loc = quando.astimezone(timezone.utc) + _BR
+    ano, num, _ = loc.isocalendar()
+    return f"{ano}-W{num:02d}"
+
+
+def rotulo_semana(chave: str, *, agora=None) -> str:
+    """Como a semana se chama na tela: "esta semana", "semana passada", ou o
+    intervalo de dias. Data crua ("2026-W38") não diz nada a ninguém."""
+    agora = agora or datetime.now(timezone.utc)
+    hoje = semana_de(agora)
+    if chave == hoje:
+        return "esta semana"
+    try:
+        ano, num = int(chave[:4]), int(chave[6:])
+        seg = date.fromisocalendar(ano, num, 1)
+        dom = date.fromisocalendar(ano, num, 7)
+    except (ValueError, IndexError):
+        return "antes"
+    a_num = int(hoje[6:]) if hoje else 0
+    if chave[:4] == hoje[:4] and a_num - num == 1:
+        return "semana passada"
+    if seg.month == dom.month:
+        return f"{seg:%d} a {dom:%d/%m}"
+    return f"{seg:%d/%m} a {dom:%d/%m}"
+
+
+def por_semana(itens: list[dict], *, agora=None) -> list[dict]:
+    """Os avisos agrupados por SEMANA, da mais nova pra mais velha.
+
+    POR QUE ISTO EXISTE (17/09/2026). A regra 5 do CLAUDE.md manda todo PR que
+    muda tela escrever o aviso dele, e eu vinha cumprindo ao pé da letra: 30 avisos
+    em 7 dias. O efeito foi o contrário do que a regra quer — o dono abriu com 47
+    por ler e ZERO lidos, e a vendedora com mais leads, 28 por ler e zero lidos. A
+    faixa dizia "1 de 42": ninguém toca 42 vezes.
+
+    O prazo de 14 dias, que nasceu dois dias antes pra segurar exatamente isso, não
+    ajudou — 42 dos 47 eram dos últimos 14 dias. Ele foi desenhado contra aviso
+    VELHO, e o problema era aviso DEMAIS.
+
+    A escolha do dono: "um resumo por semana". Então a faixa passa a interromper
+    uma vez por semana, com o que a semana trouxe; cada aviso continua existindo,
+    inteiro, na lista e no site. Nada é agrupado no BANCO — o agrupamento é de
+    leitura, e juntar no banco tiraria de cada entrega o seu próprio registro.
+    """
+    grupos: dict[str, dict] = {}
+    for n in itens:
+        ch = semana_de(n.get("publicado_em"))
+        if not ch:
+            continue                      # sem data não entra em semana nenhuma
+        g = grupos.setdefault(ch, {"chave": ch, "itens": []})
+        g["itens"].append(n)
+    out = [{"chave": g["chave"], "rotulo": rotulo_semana(g["chave"], agora=agora),
+            "n": len(g["itens"]), "itens": g["itens"]}
+           for g in grupos.values()]
+    out.sort(key=lambda g: g["chave"], reverse=True)
+    return out
+
+
+def semanas_vistas(pool, conta_id: int, membro_id) -> set:
+    """Que semanas esta pessoa já dispensou da faixa (migração 272).
+
+    FALHA ABERTA, como `faixa_ligada`: sem a tabela ou com o banco fora, devolve
+    vazio — e vazio quer dizer "nada dispensado", ou seja, a faixa aparece. Um
+    registro que não pôde ser lido não pode CALAR um aviso.
+    """
+    try:
+        with pool.connection() as c:
+            rows = c.execute(
+                "select semana from novidade_semana_vista "
+                " where conta_id=%s and membro_id=%s",
+                (conta_id, membro_id)).fetchall()
+    except Exception as e:  # noqa: BLE001 — base sem a 272 ainda
+        _log.warning("semanas vistas de %s/%s: %s: %s", conta_id, membro_id,
+                     type(e).__name__, e)
+        return set()
+    return {r[0] for r in rows}
+
+
+def marcar_semana_vista(pool, conta_id: int, membro_id, semana: str) -> None:
+    """O ✕ da faixa semanal: para de interromper ESTA pessoa NESTA semana.
+
+    NÃO marca aviso nenhum como lido, e isso é o ponto — em 16/09/2026 o dono
+    barrou o ✕ que dispensava tudo, porque "não lido" é o que a bolinha conta e não
+    existe desmarcar. Aqui a faixa se cala e a verdade fica de pé.
+    """
+    if not (semana or "").strip():
+        return
+    try:
+        with pool.connection() as c:
+            c.execute("""insert into novidade_semana_vista (conta_id, membro_id, semana)
+                         values (%s,%s,%s) on conflict do nothing""",
+                      (conta_id, membro_id, semana.strip()))
+            c.commit()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("dispensar semana %s (%s/%s): %s: %s", semana, conta_id,
+                     membro_id, type(e).__name__, e)
 
 
 def para_faixa(itens: list[dict], *, agora=None) -> list[dict]:

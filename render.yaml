@@ -186,16 +186,21 @@ services:
   # Precisa de SMTP_* (e-mail) e do destino do alerta, que sai de
   # /admin/comunicacao (banco) ou, como fallback, das envs ADMIN_EMAIL /
   # ADMIN_TELEGRAM_ID daqui.
-  # O RESUMO SEMANAL POR E-MAIL (migração 274). Roda TODO DIA e pergunta ao banco
-  # quais contas pedem hoje: o dia é de cada conta (`contas.resumo_semanal_dia`),
-  # e dois crons pra uma pergunta que o banco responde seria dois serviços pra
-  # manter na mão. Nos outros dias ele custa uma consulta e sai.
+
+  # O RESUMO SEMANAL POR E-MAIL (migracoes 274/275). Roda TODO DIA e pergunta ao
+  # banco quais contas pedem hoje: o dia e de cada conta
+  # (`contas.resumo_semanal_dia`), e dois crons pra uma pergunta que o banco
+  # responde seria dois servicos pra manter na mao.
   #
-  # Precisa de DATABASE_URL e do SMTP (o mesmo do convite de equipe). Os nomes
-  # das variaveis sao os que `finance/email_sender._cfg` le — SMTP_SENHA, e nao
-  # SMTP_PASS: escrevi errado na primeira versao deste bloco, e um nome de
-  # variavel errado aqui nao falha, so nao envia (o modulo loga "envio
-  # desabilitado" e segue). Copie do servico web, que ja os tem.
+  # SO PRECISA DE DATABASE_URL. O e-mail sai pela CAIXA DA PROPRIA EMPRESA
+  # (`email_inbound.enviar_conta`, o mesmo canal que ja recebe e responde lead),
+  # entao nao ha SMTP pra configurar aqui — decisao do dono em 17/09/2026: "e
+  # melhor usar o que ja funciona por dentro do Zaq em vez de configurar toda
+  # hora". A Prime e a ZAQ ja tem caixa ativa em `canais_config`.
+  #
+  # As variaveis SMTP_* so entram se um dia a rede do `_mandar` precisar valer
+  # pra conta sem caixa propria; hoje ela cai no SMTP global do ambiente, que o
+  # servico web ja tem.
   - type: cron
     # No Render, criar como "openclaw-resumo-semanal" (gerenciado manual — § 3).
     name: openclaw-resumo-semanal
@@ -206,16 +211,6 @@ services:
     startCommand: python -m scripts.resumo_semanal
     envVars:
       - key: DATABASE_URL
-        sync: false
-      - key: SMTP_USER          # o remetente, ex contato@zaq-ia.com
-        sync: false
-      - key: SMTP_SENHA         # SENHA DE APP do Google, 16 caracteres sem espaco
-        sync: false
-      - key: SMTP_HOST          # opcional (default smtp.gmail.com)
-        sync: false
-      - key: SMTP_PORT          # opcional (default 587)
-        sync: false
-      - key: SMTP_FROM_NOME     # opcional (default "Zaq")
         sync: false
 
   - type: cron

@@ -10,11 +10,16 @@ No Render é um serviço `cron` como o `openclaw-monitor-saldos`:
     schedule: "0 12 * * *"      # 12:00 UTC = 09:00 BRT
     startCommand: python -m scripts.resumo_semanal
 
-As variaveis: DATABASE_URL, SMTP_USER e SMTP_SENHA (os nomes que
-`finance/email_sender._cfg` le — SMTP_SENHA, nao SMTP_PASS). Sem elas o modulo
-loga "envio desabilitado" e o cron termina com sucesso sem mandar nada: e por
-isso que a primeira rodada tem que ser conferida em `resumo_semanal_envio`, e
-nao no codigo de saida.
+SO PRECISA DE `DATABASE_URL`. O e-mail sai pela CAIXA DA PROPRIA EMPRESA — o
+mesmo canal que ja recebe e responde lead —, entao nao ha SMTP pra configurar
+neste servico. Decisao do dono em 17/09/2026, olhando o passo a passo que eu
+tinha escrito: "e melhor usar o que ja funciona por dentro do Zaq em vez de
+configurar toda hora".
+
+CONFIRA A PRIMEIRA RODADA EM `resumo_semanal_envio`, e nao no codigo de saida: o
+cron termina com sucesso mesmo quando nenhum e-mail sai (conta desligada, semana
+sem movimento, caixa fora do ar). A tabela guarda destino, tipo, se deu certo e
+POR ONDE saiu.
 
 A hora de sexta (17h BRT) sai de um segundo horário no mesmo serviço não — sai de
 o cron rodar às 12:00 UTC e a conta de sexta receber às 9h da sexta. Se alguém

@@ -95,6 +95,10 @@ create table titulos (id bigserial primary key, conta_id bigint, tipo text,
   status text default 'aberto', valor_centavos bigint default 0, vencimento date);
 create table funil_movimentos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   de text, para text, motivo text, membro_id bigint, criado_em timestamptz default now());
+create table canais_config (id bigserial primary key, conta_id bigint, canal text,
+  identificador text, imap_host text, imap_senha text, ativo boolean default true,
+  ultimo_uid bigint, atualizado_em timestamptz default now(),
+  unique (conta_id, canal));
 """
 
 AGORA = datetime(2026, 9, 17, 12, tzinfo=timezone.utc)   # quinta
@@ -295,9 +299,9 @@ def test_o_mesmo_resumo_nao_sai_duas_vezes(pool, cena, monkeypatch):
     recebe o mesmo e-mail outra vez."""
     _ligar(pool, cena["conta"])
     mandados = []
-    from finance import email_sender as es
-    monkeypatch.setattr(es, "enviar_email",
-                        lambda destino, assunto, html, **kw: mandados.append(destino) or True)
+    from finance import email_inbound as ei
+    monkeypatch.setattr(ei, "enviar_conta",
+                        lambda pool, cid, destino, *a, **kw: mandados.append(destino) or True)
     r1 = rs.enviar_conta(pool, cena["conta"], AGORA)
     assert r1["enviados"] >= 2
     n = len(mandados)
@@ -307,13 +311,16 @@ def test_o_mesmo_resumo_nao_sai_duas_vezes(pool, cena, monkeypatch):
 
 def test_falha_num_destinatario_nao_impede_os_outros(pool, cena, monkeypatch):
     _ligar(pool, cena["conta"])
+    from finance import email_inbound as ei
     from finance import email_sender as es
 
-    def _capenga(destino, assunto, html, **kw):
+    def _capenga(pool, cid, destino, *a, **kw):
         if destino == "pedro@prime.com":
-            raise RuntimeError("smtp fora")
+            raise RuntimeError("caixa fora")
         return True
-    monkeypatch.setattr(es, "enviar_email", _capenga)
+    monkeypatch.setattr(ei, "enviar_conta", _capenga)
+    # e a rede do SMTP global também falha, senão o Pedro seria salvo por ela
+    monkeypatch.setattr(es, "enviar_email", lambda *a, **k: False)
     r = rs.enviar_conta(pool, cena["conta"], AGORA)
     assert r["enviados"] >= 2 and "pedro@prime.com" in r["falhas"]
     with pool.connection() as c:
@@ -325,8 +332,8 @@ def test_falha_num_destinatario_nao_impede_os_outros(pool, cena, monkeypatch):
 
 def test_conta_desligada_nao_manda_nada(pool, cena, monkeypatch):
     _ligar(pool, cena["conta"], ativo=False)
-    from finance import email_sender as es
-    monkeypatch.setattr(es, "enviar_email",
+    from finance import email_inbound as ei
+    monkeypatch.setattr(ei, "enviar_conta",
                         lambda *a, **k: pytest.fail("mandou e-mail com a conta desligada"))
     assert rs.enviar_conta(pool, cena["conta"], AGORA)["motivo"] == "desligado"
 
@@ -381,3 +388,63 @@ def test_a_rota_do_agente_grava_o_resumo_junto():
     fonte = inspect.getsource(pp).split('comunicacao/agente-config")')[1][:5000]
     assert "resumo_semanal" in fonte and "salvar_config" in fonte, (
         "salvar o agente deixou de salvar o resumo — a tela mente sobre o que gravou")
+
+
+# ------------------------------------------- pela caixa da empresa (17/09/2026)
+# Decisão do dono ao ver o passo a passo do Render: "é melhor usar o que já
+# funciona por dentro do Zaq em vez de configurar toda hora — o Zaq usa o e-mail
+# da empresa pra esse tipo de relatório, e no caso da Prime já está configurado".
+
+def _com_caixa(pool, conta):
+    with pool.connection() as c:
+        c.execute("""insert into canais_config (conta_id, canal, identificador,
+                         imap_host, imap_senha, ativo)
+                     values (%s,'email','prime@empresa.com','imap.gmail.com','senha',true)
+                     on conflict (conta_id, canal) do nothing""", (conta,))
+        c.commit()
+
+
+def test_sai_pela_caixa_da_EMPRESA_e_nao_pelo_smtp_do_zaq(pool, cena, monkeypatch):
+    """É o que apaga um passo inteiro da instalação: o cron passa a precisar só de
+    DATABASE_URL, e o resumo chega com o rosto de quem ele fala."""
+    _com_caixa(pool, cena["conta"])
+    _ligar(pool, cena["conta"])
+    pela_empresa, pelo_zaq = [], []
+    from finance import email_inbound as ei
+    from finance import email_sender as es
+    monkeypatch.setattr(ei, "enviar_conta",
+                        lambda pool, cid, destino, *a, **kw: pela_empresa.append(destino) or True)
+    monkeypatch.setattr(es, "enviar_email",
+                        lambda destino, *a, **kw: pelo_zaq.append(destino) or True)
+    rs.enviar_conta(pool, cena["conta"], AGORA)
+    assert pela_empresa, "não usou a caixa da empresa"
+    assert not pelo_zaq, "caiu no SMTP do Zaq tendo caixa própria"
+
+
+def test_conta_sem_caixa_ainda_recebe_pelo_smtp_do_zaq(pool, cena, monkeypatch):
+    """A rede. `email_inbound.enviar_conta` se recusa a cair no SMTP global de
+    propósito — mas aquela regra é sobre e-mail que vai pro LEAD, que não pode sair
+    da caixa de outra conta. Aqui quem recebe é o dono da própria conta, e um
+    resumo que não chega porque a empresa ainda não ligou a caixa seria pior que um
+    resumo assinado pelo Zaq."""
+    _ligar(pool, cena["conta"])          # sem canais_config: a conta não tem caixa
+    pelo_zaq = []
+    from finance import email_sender as es
+    monkeypatch.setattr(es, "enviar_email",
+                        lambda destino, *a, **kw: pelo_zaq.append(destino) or True)
+    r = rs.enviar_conta(pool, cena["conta"], AGORA)
+    assert r["enviados"] >= 2 and pelo_zaq
+
+
+def test_fica_gravado_POR_ONDE_o_email_saiu(pool, cena, monkeypatch):
+    """"De qual caixa isso saiu" é a primeira pergunta quando alguém não recebe."""
+    _com_caixa(pool, cena["conta"])
+    _ligar(pool, cena["conta"])
+    from finance import email_inbound as ei
+    monkeypatch.setattr(ei, "enviar_conta", lambda *a, **kw: True)
+    rs.enviar_conta(pool, cena["conta"], AGORA)
+    with pool.connection() as c:
+        motivos = {r[0] for r in c.execute(
+            "select motivo from resumo_semanal_envio where conta_id=%s",
+            (cena["conta"],)).fetchall()}
+    assert motivos == {"caixa da empresa"}

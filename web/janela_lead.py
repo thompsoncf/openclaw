@@ -24,11 +24,21 @@ O QUE A TELA PRECISA TER, e as duas coisas são obrigatórias:
 
 1. um botão que chame `kbAbrirLead(evento, lead_id, elemento)` — o `elemento` é o
    que a janela mede pra se posicionar (o card no funil, o botão no Follow-up);
-2. `var _KB_STATUS = {{ status|tojson }}` — a lista `[[chave, rótulo], ...]` das
-   etapas DA CONTA. É ela que enche o seletor de situação. Sem ela o seletor sai
-   vazio e a janela vira só leitura; por isso a leitura aqui é `window._KB_STATUS`
-   e não `_KB_STATUS` cru, que estouraria um ReferenceError e mataria o clique
-   inteiro por causa de um seletor.
+2. `var _KB_STATUS = {{ status|tojson }}` — o que `lista_de_status()` aqui
+   embaixo devolve a partir das etapas DA CONTA: `[{c, r, sai, fim}, ...]`. É ela
+   que enche o seletor de situação. Sem ela o seletor sai vazio e a janela vira só
+   leitura; por isso a leitura aqui é `window._KB_STATUS` e não `_KB_STATUS` cru,
+   que estouraria um ReferenceError e mataria o clique inteiro por causa de um
+   seletor.
+
+   AS DUAS TELAS PASSAM A LISTA INTEIRA (17/09/2026). Até esse dia o funil montava
+   `_KB_STATUS` a partir da lista já filtrada pelo quadro — a mesma variável que
+   decide as COLUNAS —, e o Follow-up passava a lista completa. Resultado: a MESMA
+   janela, no MESMO lead, oferecia 6 situações abrindo pelo quadro e 9 abrindo pelo
+   Follow-up. Na Prime as três que sumiam eram "Agendado Visita", "Evento A
+   Realizar" e "Evento Realizado" — esta última é o `ganho` da conta, então quem
+   trabalhava pelo quadro NÃO TINHA COMO MARCAR A VENDA. Ver o comentário de
+   `etapas_todas` em `web/painel_prospeccao.py`.
 
 O GANCHO `window.kbDepoisDoStatus(d, id, novo)`, opcional: o que a tela faz depois
 de a situação mudar. O funil move o card pra coluna nova sem recarregar; quem não
@@ -40,6 +50,51 @@ no funil — o primeiro depende de uma variável que só aquela tela tem, e o se
 é um botão do cabeçalho do quadro, não da janela.
 """
 from markupsafe import Markup
+
+#: As duas etapas que NÃO são passo de funil, e sim desfecho. O rótulo é livre
+#: (a Prime chama `ganho` de "Evento Realizado"), a chave não — e é pela chave
+#: que o Raio-X conta venda e perda. Por isso a separação é por chave.
+DESFECHOS = ("ganho", "perdido")
+
+
+def lista_de_status(etapas) -> list[dict]:
+    """As situações que o vendedor pode escolher, a partir das etapas da conta.
+
+    Recebe o que `_etapas()` devolve (dicts com chave/rotulo/sai_do_quadro) e
+    entrega o que o JS consome:
+
+        {"c": chave, "r": rótulo, "sai": sai do quadro?, "fim": "" | "ganho" | "perdido"}
+
+    Nomes curtos de propósito: isto vai inteiro pro HTML de toda tela que abre a
+    janela, uma vez por página.
+
+    A LISTA VEM INTEIRA. Etapa marcada "sai do quadro" continua aqui — o que ela
+    faz é sumir com a COLUNA, não com a escolha; a janela a mostra tracejada e
+    avisa que o card vai sair dali. Filtrar aqui é o defeito que esta função
+    nasceu pra impedir de voltar.
+    """
+    saida = []
+    for e in etapas:
+        chave = e["chave"]
+        saida.append({"c": chave, "r": e["rotulo"],
+                      "sai": bool(e.get("sai_do_quadro")),
+                      "fim": chave if chave in DESFECHOS else ""})
+    return saida
+
+
+def parado_texto(desde, agora) -> str:
+    """"parado há 20 dias" — o tempo na situação atual, pro cabeçalho do bloco.
+
+    Devolve "" pra menos de um dia: "parado há 0 dias" num lead que chegou hoje é
+    cobrança errada, e o vendedor aprende a ignorar o rótulo inteiro.
+    """
+    if not desde:
+        return ""
+    dias = (agora - desde).days
+    if dias < 1:
+        return ""
+    return "parado há 1 dia" if dias == 1 else f"parado há {dias} dias"
+
 
 CSS = """/* o balão do LEAD — resumo pra decidir a próxima ação (contato, valor, situação,
    últimas atividades). Mesma engenharia do balão de chat: nasce fixed, medido
@@ -59,9 +114,39 @@ CSS = """/* o balão do LEAD — resumo pra decidir a próxima ação (contato, 
 .lp-ab{background:var(--neon-fundo);border:1px solid var(--neon-borda);border-radius:8px;padding:.32rem .65rem;
   font-size:.78rem;color:var(--txt);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:.3rem}
 .lp-ab:hover{border-color:var(--verde)}
-.lp-status{margin-left:auto}
-.lp-status select{background:var(--bg);border:1px solid var(--borda);color:var(--txt);border-radius:999px;
-  padding:.28rem .6rem;font-size:.76rem;width:auto;margin:0}
+/* O BLOCO DA SITUAÇÃO (17/09/2026). Era um <select> de .76rem encostado no canto
+   direito da fileira de ações: no celular, um toque abre a roleta do sistema, outro
+   escolhe, outro confirma — três toques e uma lista tampando a tela pra dizer
+   "este virou proposta". O app já resolvia isso com botão desde sempre; aqui só
+   chegou agora.
+
+   `margin:0` e `width:auto` em todo botão: o `button{width:100%;margin-top:1.4rem}`
+   global vaza pra dentro da janela — é a mesma armadilha que já pegou o ✕ de
+   excluir, o "✎ Editar" e os botões da folha de perda. */
+.lp-sit{padding:.6rem .85rem;border-bottom:1px solid var(--borda);flex:none}
+.lp-sit-h{display:flex;align-items:baseline;gap:.5rem;margin-bottom:.4rem}
+.lp-sit-h b{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-mut)}
+.lp-sit-h em{font-style:normal;font-size:.72rem;color:#e0b45f}
+.lp-sit-h.fim{margin-top:.55rem;padding-top:.55rem;border-top:1px solid var(--borda)}
+.lp-chips{display:flex;gap:.35rem;flex-wrap:wrap}
+.lp-chip{margin:0;width:auto;font:500 .76rem inherit;font-family:inherit;padding:.3rem .65rem;border-radius:999px;
+  border:1px solid var(--borda);background:var(--bg);color:var(--txt-mut);cursor:pointer;white-space:nowrap}
+.lp-chip:hover:not(:disabled){border-color:var(--verde);color:var(--txt)}
+.lp-chip:disabled{opacity:.5;cursor:default}
+.lp-chip.on{border-color:var(--verde);background:rgba(37,211,102,.12);color:var(--verde-claro);font-weight:600;cursor:default}
+/* o PASSO SEGUINTE — o que a pessoa quase sempre veio fazer. Sem isto ela relê a
+   fileira inteira pra achar o único chip que ia usar. */
+.lp-chip.prox{border-color:var(--neon-borda,#1E4A3A);background:var(--neon-fundo);color:var(--verde-claro);
+  box-shadow:0 0 0 1px rgba(62,224,166,.18)}
+.lp-chip.prox::after{content:" →";opacity:.65}
+/* tracejado = ao entrar aqui o CARD SAI DO QUADRO. A escolha continua existindo
+   (é o conserto de 17/09); o aviso é pra ninguém achar que o lead sumiu. */
+.lp-chip.sai{border-style:dashed}
+.lp-chip.fim.ganho{border-color:var(--verde);color:var(--verde-claro)}
+.lp-chip.fim.perdido{border-color:#5a2b2b;color:#f0a9a2}
+.lp-chip.fim.ganho.on{background:rgba(37,211,102,.14)}
+.lp-chip.fim.perdido.on{background:rgba(224,87,79,.14)}
+.lp-chip.indo{opacity:.6}
 .lp-body{padding:.7rem .85rem;overflow-y:auto;flex:1}
 .lp-sh{display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem}
 .lp-sh b{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-mut)}
@@ -189,19 +274,72 @@ function kbLeadHtml(d,id){
     d.canais_contato.forEach(function(ch){h+='<span class="lp-canal">'+cxEscK(ch.ic)+' '+cxEscK(ch.label)+(ch.respondeu?' ✓':'')+'</span>';});
     h+='</div>';
   }
-  h+='</div><div class="lp-acoes">';
-  if(d.tel_link)h+='<a class="lp-ab" href="'+cxEscK(d.tel_link)+'">📞 Ligar</a>';
-  if(d.zap_link)h+='<a class="lp-ab" href="'+cxEscK(d.zap_link)+'" target="_blank" rel="noopener">💬 WhatsApp</a>';
-  if(d.insta_url)h+='<a class="lp-ab" href="'+cxEscK(d.insta_url)+'" target="_blank" rel="noopener">📷 Instagram</a>';
-  if(d.maps_url)h+='<a class="lp-ab" href="'+cxEscK(d.maps_url)+'" target="_blank" rel="noopener">🗺️ Mapa</a>';
-  h+='<div class="lp-status"><select onchange="kbLeadStatus(this,'+id+')" data-prev="'+cxEscK(d.status||'')+'">';
-  (window._KB_STATUS||[]).forEach(function(s){h+='<option value="'+cxEscK(s[0])+'"'+(s[0]===d.status?' selected':'')+'>'+cxEscK(s[1])+'</option>';});
-  h+='</select></div></div><div class="lp-body">'
+  h+='</div>';
+  // A FILEIRA DE ATALHOS SÓ EXISTE SE TIVER ATALHO. Enquanto o seletor de situação
+  // morava aqui dentro ela nunca ficava vazia; agora que ele saiu, um lead sem
+  // telefone, WhatsApp, Instagram nem endereço deixaria na tela uma tarja com
+  // borda e nada dentro.
+  var at='';
+  if(d.tel_link)at+='<a class="lp-ab" href="'+cxEscK(d.tel_link)+'">📞 Ligar</a>';
+  if(d.zap_link)at+='<a class="lp-ab" href="'+cxEscK(d.zap_link)+'" target="_blank" rel="noopener">💬 WhatsApp</a>';
+  if(d.insta_url)at+='<a class="lp-ab" href="'+cxEscK(d.insta_url)+'" target="_blank" rel="noopener">📷 Instagram</a>';
+  if(d.maps_url)at+='<a class="lp-ab" href="'+cxEscK(d.maps_url)+'" target="_blank" rel="noopener">🗺️ Mapa</a>';
+  if(at)h+='<div class="lp-acoes">'+at+'</div>';
+  h+=kbLeadSitHtml(d,id)+'<div class="lp-body">'
     +'<div id="lp-view">'+kbLeadDadosHtml(d,id)+kbLeadHistHtml(d)+'</div>'
     +'<div id="lp-edit" style="display:none">'+kbLeadEditHtml(d,id)+'</div>'
     +'</div>'
     +'<a class="lp-mais" target="_blank" href="/painel/prospeccao/'+id+'">Ver ficha completa ↗</a>';
   return h;
+}
+// O BLOCO DA SITUAÇÃO: uma fileira de botões, não uma roleta.
+//
+// Três decisões, e as três vieram de medir o funil em produção em 17/09/2026
+// (este JS é servido a toda conta — nome de cliente fica no commit, não aqui):
+//
+//   1. A LISTA VEM INTEIRA (`lista_de_status` no Python). Até esse dia, abrindo
+//      pelo quadro, a etapa marcada "sai do quadro" não aparecia — e em duas das
+//      contas com o funil renomeado isso incluía o próprio `ganho`. O vendedor
+//      não conseguia marcar a venda de onde ele trabalha. Aqui elas voltam,
+//      tracejadas e com o aviso no title.
+//   2. O PASSO SEGUINTE nasce aceso (classe `prox`): é a etapa logo depois da
+//      atual no caminho, o toque que a pessoa quase sempre veio dar.
+//   3. GANHO E PERDIDO SAEM DA FILEIRA e vão pra uma linha própria, depois de um
+//      traço, em verde e vermelho. Numa lista única os dois ficavam encostados na
+//      etapa de fechamento: um dedo torto no celular marcava como perda um lead
+//      recém-ganho, disparava a pergunta do motivo e tirava o card do quadro.
+//
+// SEM PALAVRA DE NICHO AQUI DENTRO, nem em comentário (CLAUDE.md §6): este JS é
+// servido inteiro pra toda conta, e o teste do vocabulário em
+// tests/test_follow_up.py confere a PÁGINA RENDERIZADA, comentário incluído —
+// foi ele que pegou a primeira versão deste bloco, que citava um nicho só.
+function kbLeadSitHtml(d,id){
+  var lista=window._KB_STATUS||[];
+  if(!lista.length)return '';
+  // o caminho é tudo que NÃO é desfecho; o índice guardado é o da lista ORIGINAL,
+  // porque é por ele que o clique encontra a etapa de volta (número no onclick não
+  // precisa de escape, chave de texto precisaria)
+  var caminho=[],fins=[],atual=-1;
+  lista.forEach(function(s,i){ (s.fim?fins:caminho).push({s:s,i:i}); });
+  caminho.forEach(function(x,k){ if(x.s.c===d.status)atual=k; });
+  var prox=(atual>=0&&atual+1<caminho.length)?caminho[atual+1].s.c:null;
+  function chip(x,extra){
+    var s=x.s,cls='lp-chip'+(extra||'')+(s.c===d.status?' on':'')
+      +(s.c===prox?' prox':'')+(s.sai?' sai':'');
+    var t=s.sai?' title="ao entrar aqui o card sai do quadro"':'';
+    return '<button type="button" class="'+cls+'"'+t+' onclick="kbLeadIr(this,'+id+','+x.i+')">'
+      +(s.fim==='ganho'?'✓ ':s.fim==='perdido'?'✕ ':'')+cxEscK(s.r)+'</button>';
+  }
+  var h='<div class="lp-sit"><div class="lp-sit-h"><b>Situação</b>'
+    +(d.parado_txt?('<em>'+cxEscK(d.parado_txt)+'</em>'):'')+'</div><div class="lp-chips">';
+  caminho.forEach(function(x){h+=chip(x,'');});
+  h+='</div>';
+  if(fins.length){
+    h+='<div class="lp-sit-h fim"><b>Encerrar</b></div><div class="lp-chips">';
+    fins.forEach(function(x){h+=chip(x,' fim '+x.s.fim);});
+    h+='</div>';
+  }
+  return h+'</div>';
 }
 // "Dados" no resumo do balão: os mesmos campos que a seção "Dados" da ficha
 // completa mostra, MENOS o que é enriquecimento automático (sócio, regime,
@@ -377,28 +515,47 @@ function kbPerguntarMotivo(id, status, lista, quandoOk, quandoDesiste){
   });
   pop.querySelector('.pp-nao').addEventListener('click',function(){fecha();if(quandoDesiste)quandoDesiste();});
 }
-function kbLeadStatus(sel,id){
-  var novo=sel.value, prev=sel.getAttribute('data-prev')||'';
+// UM TOQUE MUDA A SITUAÇÃO. Substituiu o `kbLeadStatus(sel,id)` do <select> em
+// 17/09/2026 — o resto do caminho é o mesmo de antes, de propósito: a MESMA rota
+// da ficha completa, a MESMA folha de "por que perdeu" que o arrastar do quadro
+// usa, o MESMO gancho de depois.
+//
+// O ÍNDICE (e não a chave) vai no onclick porque número não precisa de escape:
+// rótulo e chave vêm do cliente, e uma aspa no meio quebraria o atributo.
+//
+// A FILEIRA INTEIRA TRAVA enquanto o servidor decide. Sem isso, dois toques
+// seguidos em chips diferentes mandam duas trocas e quem responder por último
+// vence — com a tela mostrando a primeira.
+function kbLeadIr(btn,id,idx){
+  var s=(window._KB_STATUS||[])[idx];
+  if(!s||btn.disabled||btn.classList.contains('on'))return;
+  var novo=s.c, caixa=btn.closest('.lp-sit');
+  function trava(v){ if(caixa)caixa.querySelectorAll('.lp-chip').forEach(function(b){b.disabled=v;}); }
+  function solta(){ trava(false); btn.classList.remove('indo'); }
+  trava(true); btn.classList.add('indo');
+  function pronto(d){
+    // O QUE ACONTECE DEPOIS é de cada tela, e por isso é um gancho e não um `if`
+    // por tela aqui dentro: no funil o card anda pra coluna nova sem recarregar
+    // nada; no Follow-up a troca pode TIRAR o lead da lista (ganho e perdido saem
+    // do funil) e mexe nos quatro números do topo, então a resposta honesta é
+    // recarregar. Tela sem gancho recarrega — o lado seguro de errar é mostrar o
+    // estado novo, nunca o antigo.
+    if(typeof window.kbDepoisDoStatus==='function'){window.kbDepoisDoStatus(d,id,novo);kbFecharLead();return;}
+    location.reload();
+  }
   var body=new URLSearchParams();body.append('status',novo);
   fetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
     .then(function(r){return r.json();}).then(function(d){
       if(!d.ok&&d.erro==='motivo_obrigatorio'){
-        kbPerguntarMotivo(id, novo, d.motivos, function(d2){
-          if(typeof window.kbDepoisDoStatus==='function'){window.kbDepoisDoStatus(d2,id,novo);kbFecharLead();return;}
-          location.reload();
-        }, function(){sel.value=prev;});
+        // desiste = a folha fechou sem escolher motivo. Não há o que desfazer:
+        // o chip antigo continua aceso porque nada mudou no servidor.
+        solta();
+        kbPerguntarMotivo(id, novo, d.motivos, pronto, function(){});
         return;
       }
-      if(!d.ok){alert(d.msg||'Não consegui mudar a situação.');sel.value=prev;return;}
-      // O QUE ACONTECE DEPOIS é de cada tela, e por isso é um gancho e não um
-      // `if` por tela aqui dentro: no funil o card anda pra coluna nova sem
-      // recarregar nada; no Follow-up a troca pode TIRAR o lead da lista (ganho e
-      // perdido saem do funil) e mexe nos quatro números do topo, então a resposta
-      // honesta é recarregar. Tela sem gancho recarrega — o lado seguro de errar é
-      // mostrar o estado novo, nunca o antigo.
-      if(typeof window.kbDepoisDoStatus==='function'){window.kbDepoisDoStatus(d,id,novo);kbFecharLead();return;}
-      location.reload();
-    }).catch(function(){alert('Falha de rede.');sel.value=prev;});
+      if(!d.ok){solta();alert(d.msg||'Não consegui mudar a situação.');return;}
+      pronto(d);
+    }).catch(function(){solta();alert('Falha de rede.');});
 }"""
 
 

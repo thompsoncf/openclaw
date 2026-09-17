@@ -767,17 +767,22 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
     except Exception:  # noqa: BLE001
         alvo["vende_data"] = False
     with pool.connection() as c:
-        # `sai_do_quadro` (migração 238) fica de fora: são as etapas de DEPOIS da
-        # venda — 'Festa realizada' e parecidas, que o quadro não desenha porque o
-        # funil acabou ali. No app elas viravam botão de um toque ao lado de
-        # 'Proposta', e um toque errado tirava o lead da fila do vendedor sem passar
-        # por fechamento nenhum: sem ganho, sem motivo, sem rastro de venda.
-        # A etapa ATUAL continua na lista, marcada — quem já está numa delas precisa
-        # ver onde está, e esconder isso deixaria a ficha sem etapa nenhuma acesa.
+        # `sai_do_quadro` (migração 238) VOLTOU PRA LISTA em 17/09/2026, marcada.
+        #
+        # Escondê-las aqui era proteção contra um toque errado: são etapas de depois
+        # da venda ('Festa realizada' e parecidas), viravam botão de um toque ao lado
+        # de 'Proposta', e o toque errado tirava o lead da fila sem passar por
+        # fechamento nenhum. A proteção custou caro. Na Prime, "Agendado Visita" está
+        # marcada assim — e ela é O PASSO DA QUALIFICAÇÃO. O vendedor que marcou a
+        # visita pelo celular não tinha por onde registrar, e em dois meses o funil
+        # inteiro (398 leads) teve 15 entradas nessa etapa.
+        #
+        # Agora elas aparecem com `sai: True`, e quem desenha avisa que o card sai do
+        # quadro. `ganho` e `perdido` continuam FORA daqui, e nisso a proteção estava
+        # certa: os dois têm botão próprio, com fechamento e motivo.
         atual = alvo.get("status")
-        etapas = [e for e in _etapas(c, conta_id)
-                  if e["chave"] not in ("ganho", "perdido")
-                  and (not e.get("sai_do_quadro") or e["chave"] == atual)]
+        etapas = [{**e, "sai": bool(e.get("sai_do_quadro"))}
+                  for e in _etapas(c, conta_id) if e["chave"] not in ("ganho", "perdido")]
         # A LISTA DE PERDA É DA CONTA (migração 235), e sai daqui — do mesmo cursor
         # que já está aberto — e não de uma constante na tela.
         #

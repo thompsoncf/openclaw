@@ -2133,37 +2133,48 @@ def test_a_folha_do_lead_oferece_os_motivos_DA_CONTA(pool, monkeypatch):
     assert "i.hidden=!(o&&o.hasAttribute('data-desc'))" in html
 
 
-def test_etapas_do_app_nao_oferecem_as_de_DEPOIS_da_venda(pool):
-    """`sai_do_quadro` (migração 238) marca as etapas de pós-venda — 'Festa
-    realizada' e parecidas —, que o quadro não desenha porque o funil já acabou ali.
+def test_o_app_oferece_a_etapa_que_sai_do_quadro_marcada_mas_nunca_ganho_ou_perdido(pool):
+    """`sai_do_quadro` (migração 238) marca as etapas que o QUADRO do painel não
+    desenha. De 12 a 17/09/2026 o app também as escondia, e o motivo era bom: elas
+    viravam botão de um toque ao lado de 'Proposta', e um toque errado tirava o lead
+    da fila do vendedor sem passar por fechamento nenhum.
 
-    No app elas viravam botão de um toque ao lado de 'Proposta'. Um toque errado
-    tirava o lead da fila do vendedor sem passar por fechamento nenhum: sem ganho,
-    sem motivo, sem rastro de venda — e o vendedor não tinha como desfazer, porque o
-    lead sumia da lista dele no mesmo instante.
+    A proteção custou mais do que evitou. Na Prime, quem está marcada assim é
+    "Agendado Visita" — O PASSO DA QUALIFICAÇÃO. O vendedor que marcava a visita pelo
+    celular não tinha onde registrar, e em dois meses o funil inteiro (398 leads)
+    teve 15 entradas nessa etapa.
+
+    Então elas voltam, com `sai=True` — e quem desenha põe a borda tracejada e o
+    aviso de que o card sai do quadro. O que NÃO volta é `ganho`/`perdido`: esses
+    dois continuam só no botão de fechar, que pede motivo e deixa rastro de venda.
+    É ali que estava o risco de verdade.
     """
     with pool.connection() as c:
         conta = _conta(c, "Pos"); vend = _membro(c, conta, email="pos@x.com")
         lead = _lead(c, conta, vend, "Aniversário")
         c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, sai_do_quadro)
                      values (%s,'proposta','Proposta',40,false),
+                            (%s,'qualificado','Agendado Visita',30,true),
                             (%s,'evento_realizado','Festa realizada',920,true)""",
-                  (conta, conta))
+                  (conta, conta, conta))
         c.commit()
     d = ck.lead_do_vendedor(pool, conta, vend, lead)
-    chaves = [e["chave"] for e in d["etapas"]]
-    assert "proposta" in chaves
-    assert "evento_realizado" not in chaves
-    assert all(k not in ("ganho", "perdido") for k in chaves)
+    por_chave = {e["chave"]: e for e in d["etapas"]}
+    assert "proposta" in por_chave and "qualificado" in por_chave
+    # e vêm MARCADAS, que é o que a tela usa pra tracejar e avisar
+    assert por_chave["qualificado"]["sai"] is True
+    assert por_chave["evento_realizado"]["sai"] is True
+    assert por_chave["proposta"]["sai"] is False
+    # o par de desfecho continua fora: ele é do botão de fechar, com motivo
+    assert all(k not in ("ganho", "perdido") for k in por_chave)
 
-    # MAS a etapa atual continua na lista: um lead que JÁ está em 'Festa realizada'
-    # precisa ver onde está. Escondê-la deixaria a ficha sem nenhuma etapa acesa, e
-    # o vendedor leria isso como "o lead não está em lugar nenhum".
+    # e a etapa ATUAL segue na lista, como sempre esteve: um lead que JÁ está em
+    # 'Festa realizada' precisa ver onde está, senão a ficha fica sem etapa acesa.
     with pool.connection() as c:
         c.execute("update prospeccao set status='evento_realizado' where id=%s", (lead,))
         c.commit()
     d = ck.lead_do_vendedor(pool, conta, vend, lead)
-    assert [e["chave"] for e in d["etapas"]] == ["proposta", "evento_realizado"]
+    assert "evento_realizado" in [e["chave"] for e in d["etapas"]]
 
 
 def test_perder_pelo_app_leva_o_texto_do_motivo_que_pede_texto(pool, monkeypatch):

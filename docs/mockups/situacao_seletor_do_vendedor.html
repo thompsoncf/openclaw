@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>A situação do lead: o seletor que o vendedor usa pra qualificar</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --roxo:#C9A3E0;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo)}
+b{font-weight:600}
+.wrap{max-width:1120px;margin:0 auto;padding:2.6rem 1.25rem 5rem;display:flex;flex-direction:column;gap:2.8rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em;margin-bottom:.35rem;text-transform:uppercase}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.35rem);margin:.35rem 0 .6rem}
+.head p{color:var(--text-dim);max-width:74ch;margin:0}
+.sec>h2{font-size:1.2rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.1rem;max-width:78ch;font-size:.9rem}
+.sec>p.leg b{color:var(--text)}
+
+/* medida */
+.medida{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:14px;padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.8rem}
+.medida h3{font-size:1rem;color:#F5C9C4}
+.medida .nums{display:grid;grid-template-columns:repeat(4,1fr);gap:.55rem}
+@media (max-width:820px){.medida .nums{grid-template-columns:repeat(2,1fr)}}
+.medida .n{border:1px solid var(--coral-borda);border-radius:10px;background:#1C0F0F;padding:.6rem .7rem}
+.medida .n b{display:block;font:600 1.5rem/1 var(--display);color:var(--coral);font-variant-numeric:tabular-nums}
+.medida .n span{display:block;font-size:.66rem;color:var(--text-dim);margin-top:.3rem;line-height:1.35}
+.medida p{margin:0;font-size:.84rem;color:#EED6D3}.medida p b{color:#fff}
+
+.tabwrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table.t{width:100%;border-collapse:collapse;font-size:.8rem;min-width:600px}
+table.t th{font:500 .61rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);text-align:left;padding:.55rem .7rem;border-bottom:1px solid var(--line)}
+table.t td{padding:.5rem .7rem;border-bottom:1px solid var(--line);color:var(--text-dim)}
+table.t tr:last-child td{border-bottom:none}
+table.t td:first-child{color:var(--text);font-weight:500;white-space:nowrap}
+table.t td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.t td b{color:var(--text)}
+.mono{font-family:var(--mono);font-size:.76rem}
+.ruim{color:var(--coral)} .bom{color:var(--neon-bright)} .aviso{color:var(--ambar)}
+.zero td{background:rgba(224,87,79,.07)}
+
+.grade2{display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start}
+@media (max-width:900px){.grade2{grid-template-columns:1fr}}
+.cx{border:1px solid var(--line);border-radius:14px;background:var(--bg-2);padding:.9rem 1rem;display:flex;flex-direction:column;gap:.7rem}
+.cx>h4{font-size:.9rem}
+.cx .nota{font-size:.78rem;color:var(--text-dim);margin:0}
+.cx .nota b{color:var(--text)}
+.tag{display:inline-block;font:500 .62rem var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:.15rem .45rem;border-radius:5px;border:1px solid var(--line);color:var(--text-faint)}
+.tag.hoje{border-color:var(--coral-borda);background:var(--coral-fundo);color:#F0A9A2}
+.tag.prop{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright)}
+.tag.app{border-color:var(--azul-borda);background:var(--azul-fundo);color:var(--azul)}
+
+/* a janela do lead, como ela é */
+.pop{border:1px solid var(--line);border-radius:14px;background:var(--surface);overflow:hidden;box-shadow:0 18px 46px rgba(0,0,0,.5);max-width:378px}
+.pop .ph{padding:.7rem .85rem .6rem;border-bottom:1px solid var(--line)}
+.pop .ph h3{font-size:1rem}
+.pop .ph .sub{color:var(--text-dim);font-size:.76rem;margin-top:.2rem}
+.pop .pa{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;padding:.6rem .85rem;border-bottom:1px solid var(--line)}
+.ab{background:var(--neon-fundo);border:1px solid var(--neon-borda);border-radius:8px;padding:.3rem .6rem;font-size:.76rem;color:var(--text);display:inline-flex;gap:.3rem;align-items:center}
+.selhoje{margin-left:auto;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:999px;
+  padding:.28rem 1.5rem .28rem .6rem;font-size:.76rem;position:relative}
+.selhoje::after{content:"▾";position:absolute;right:.5rem;top:.28rem;color:var(--text-faint)}
+.pop .pb{padding:.7rem .85rem;font-size:.78rem;color:var(--text-dim)}
+
+/* a lista que o select abre */
+.lista{border:1px solid var(--line);border-radius:10px;background:var(--bg);overflow:hidden;max-width:230px;font-size:.78rem}
+.lista div{padding:.3rem .6rem;border-bottom:1px solid rgba(30,42,35,.6);color:var(--text-dim)}
+.lista div:last-child{border-bottom:none}
+.lista div.on{background:var(--surface-2);color:var(--text)}
+.lista div.fim{color:#F0A9A2}
+.lista div.ganho{color:var(--neon-bright)}
+.lista .nota{color:var(--ambar);font-size:.68rem;padding:.25rem .6rem;background:var(--ambar-fundo)}
+
+/* chips — o desenho proposto e o que o app já faz */
+.sit{display:flex;flex-direction:column;gap:.5rem}
+.sit .lbl{font:500 .62rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);display:flex;gap:.5rem;align-items:baseline}
+.sit .lbl em{font-style:normal;color:var(--ambar);text-transform:none;letter-spacing:0;font-family:var(--body);font-size:.72rem}
+.chips{display:flex;gap:.35rem;flex-wrap:wrap;align-items:center}
+.chip{font:500 .76rem var(--body);padding:.3rem .65rem;border-radius:999px;border:1px solid var(--line);
+  background:var(--surface-2);color:var(--text-dim);white-space:nowrap}
+.chip.on{border-color:var(--neon);background:rgba(37,211,102,.12);color:var(--neon-bright);font-weight:600}
+.chip.prox{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright);
+  box-shadow:0 0 0 1px rgba(70,245,138,.18)}
+.chip.prox::after{content:" →";opacity:.7}
+.chip.some{border-style:dashed}
+.chip.g{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright)}
+.chip.p{border-color:var(--coral-borda);background:var(--coral-fundo);color:#F0A9A2}
+.divisor{height:1px;background:var(--line);margin:.15rem 0}
+.parado{font-size:.7rem;color:var(--ambar);font-family:var(--mono)}
+.lbl2{font:500 .66rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint);margin-bottom:.3rem}
+.lbl2 b{color:var(--text-dim)}
+
+.ok-lista{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:.55rem}
+.ok-lista li{padding-left:1.4rem;position:relative;font-size:.86rem;color:var(--text-dim)}
+.ok-lista li b{color:var(--text)}
+.ok-lista li::before{content:"";position:absolute;left:0;top:.45em;width:.5rem;height:.5rem;border-radius:2px;background:var(--neon)}
+.ok-lista li.nao::before{background:var(--coral)}
+
+.perg{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:14px;padding:1rem 1.1rem}
+.perg h3{font-size:1rem;color:#F0DCA6;margin-bottom:.6rem}
+.perg ol{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.7rem}
+.perg li{font-size:.86rem;color:#EFE0C0}
+.perg li b{color:#fff}
+.perg .mini{display:block;font-size:.77rem;color:#C9B78E;margin-top:.15rem}
+.rodape{border-top:1px solid var(--line);padding-top:1.1rem;color:var(--text-faint);font-size:.78rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="head sec">
+  <div class="k">Mockup · 17/09/2026 · pra aprovação</div>
+  <h1>A situação do lead: o seletor que o vendedor usa pra qualificar</h1>
+  <p>Pedido do dono: <i>“no follow-up, dentro do card tem um botão abrir ficha e dentro dele tem etapas do
+  funil; veja como elas estão e vamos criar um seletor mais fácil pro vendedor qualificar; analise também
+  como está no app e os nomes.”</i> Aqui está o que eu achei medindo a Prime (conta 34) e as outras
+  contas — e o desenho proposto. Nada foi mudado; tudo abaixo é leitura.</p>
+</header>
+
+<!-- ======================= 1. a medida ======================= -->
+<section class="sec">
+  <div class="k">1 · A medida</div>
+  <h2>O funil da Prime tem 8 etapas. Uma delas segura 83% dos leads.</h2>
+  <p class="leg">Antes de desenhar botão, a pergunta é se o problema é o botão. É. Em dois meses os três
+  vendedores moveram <b>54 cards no total</b> — e <b>duas etapas nunca foram usadas uma única vez</b>.</p>
+
+  <div class="medida">
+    <h3>Prime Eventos · 398 leads · movimentos desde 19/07/2026</h3>
+    <div class="nums">
+      <div class="n"><b>330</b><span>leads parados em <b>Contatado</b> — 83% do funil inteiro</span></div>
+      <div class="n"><b>54</b><span>cards movidos por vendedor em 2 meses (o resto é automático)</span></div>
+      <div class="n"><b>3</b><span>movimentos do Thiago no período. Jacqueline 13, Pedro 38</span></div>
+      <div class="n"><b>2</b><span>etapas com ZERO uso: <b>Follow-up</b> e <b>Fechado</b></span></div>
+    </div>
+    <p>389 leads entraram em <b>Contatado</b> (o sistema move sozinho no primeiro contato).
+    Saíram <b>46</b>. Os outros <b>ficaram lá</b>, hoje <b>330</b>, mediana de <b>20 dias parados</b> — e é dessa poça que a fila de follow-up
+    tira os 344 leads vencidos que estão cobrando a equipe agora.</p>
+  </div>
+
+  <div style="height:.9rem"></div>
+
+  <div class="tabwrap">
+    <table class="t">
+      <thead><tr><th>Etapa (nome que a Prime deu)</th><th>chave no banco</th><th class="num">leads hoje</th><th class="num">entradas em 2 meses</th><th>observação</th></tr></thead>
+      <tbody>
+        <tr><td>Novo</td><td class="mono">novo</td><td class="num">2</td><td class="num">—</td><td>porta de entrada</td></tr>
+        <tr><td>Contatado</td><td class="mono">contatado</td><td class="num"><b>330</b></td><td class="num">389</td><td class="ruim">o funil inteiro mora aqui</td></tr>
+        <tr class="zero"><td>Follow-up</td><td class="mono">follow_up</td><td class="num">0</td><td class="num">0</td><td class="ruim">nunca usada</td></tr>
+        <tr><td>Agendado Visita</td><td class="mono">qualificado</td><td class="num">3</td><td class="num">15</td><td class="aviso">sai do quadro</td></tr>
+        <tr><td>Negociação</td><td class="mono">proposta</td><td class="num">36</td><td class="num">38</td><td>—</td></tr>
+        <tr class="zero"><td>Fechado</td><td class="mono">fechado</td><td class="num">0</td><td class="num">0</td><td class="ruim">nunca usada</td></tr>
+        <tr><td>Evento Realizado</td><td class="mono">ganho</td><td class="num">2</td><td class="num">7</td><td class="aviso">sai do quadro · é o GANHO</td></tr>
+        <tr><td>Perdido</td><td class="mono">perdido</td><td class="num">20</td><td class="num">21</td><td>pede motivo</td></tr>
+        <tr><td>Evento A Realizar</td><td class="mono">evento_realizado</td><td class="num">5</td><td class="num">6</td><td class="ruim">ordem 920 — vem DEPOIS de Perdido na lista</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ======================= 2. como está hoje ======================= -->
+<section class="sec">
+  <div class="k">2 · Como está hoje</div>
+  <h2>No painel é uma listinha no canto. No app já são botões.</h2>
+  <p class="leg">As duas telas mudam a MESMA coisa, pela MESMA rota
+  (<code>/painel/prospeccao/&lt;id&gt;/status</code>) — e resolveram a interface de dois jeitos diferentes.
+  O app está certo e o painel está atrasado.</p>
+
+  <div class="grade2">
+    <div class="cx">
+      <h4><span class="tag hoje">hoje · painel</span> Abrir ficha → janela do lead</h4>
+      <div class="pop">
+        <div class="ph"><h3>Josiany Martins</h3>
+          <div class="sub">Aniversário · 12 convidados · 👤 THIAGO PINHEIRO</div></div>
+        <div class="pa">
+          <span class="ab">📞 Ligar</span><span class="ab">💬 WhatsApp</span>
+          <span class="selhoje">Contatado</span>
+        </div>
+        <div class="pb">Dados · Histórico · Ver ficha completa ↗</div>
+      </div>
+      <p class="nota">O seletor é aquela pílula cinza no canto direito, com <b>0,76rem</b> de letra.
+      É um <code>&lt;select&gt;</code> do navegador: no celular, um toque abre a roleta do sistema,
+      outro escolhe, outro confirma. <b>Três toques</b> e uma lista que tampa a tela.</p>
+      <h4 style="margin-top:.3rem">E a lista que ele abre — que NÃO é a mesma nas duas telas:</h4>
+      <div class="grade2" style="gap:.6rem">
+        <div>
+          <div class="lbl2">abrindo pelo <b>Follow-up</b> · 9 opções</div>
+          <div class="lista">
+            <div>Novo</div><div class="on">Contatado ✓</div><div>Follow-up</div>
+            <div>Agendado Visita</div><div>Negociação</div><div>Fechado</div>
+            <div class="ganho">Evento Realizado</div><div class="fim">Perdido</div>
+            <div>Evento A Realizar</div>
+            <div class="nota">↑ a festa que ainda vai acontecer fica DEPOIS de “Perdido”</div>
+          </div>
+        </div>
+        <div>
+          <div class="lbl2">abrindo pelo <b>quadro do funil</b> · 6 opções</div>
+          <div class="lista">
+            <div>Novo</div><div class="on">Contatado ✓</div><div>Follow-up</div>
+            <div>Negociação</div><div>Fechado</div><div class="fim">Perdido</div>
+            <div class="nota">↑ some “Evento Realizado” — que é o GANHO da conta</div>
+          </div>
+        </div>
+      </div>
+      <p class="nota">Sem separar <b>andar no funil</b> de <b>encerrar o lead</b>: “Perdido” fica
+      encostado em “Evento Realizado”, e um dedo torto no celular marca uma festa como perda — o que
+      dispara a pergunta do motivo e tira o card do quadro.</p>
+    </div>
+
+    <div class="cx">
+      <h4><span class="tag app">hoje · app</span> Lead → Etapa no funil</h4>
+      <div class="sit">
+        <div class="lbl">Etapa no funil</div>
+        <div class="chips">
+          <span class="chip">Novo</span><span class="chip on">Contatado</span>
+          <span class="chip">Follow-up</span><span class="chip">Negociação</span>
+        </div>
+      </div>
+      <p class="nota"><b>Um toque. Sem roleta.</b> O app já usa botões redondos, o atual aceso em verde —
+      e os nomes vêm da conta (“Negociação”, não “Proposta”).</p>
+      <p class="nota">O que o app <b>esconde</b> de propósito: <b>Agendado Visita</b> e
+      <b>Evento A Realizar</b> (as etapas marcadas “sai do quadro”) e o par ganho/perdido, que tem
+      botão próprio mais abaixo na tela. O vendedor que quer marcar a visita pelo celular <b>não tem
+      por onde</b> — e “Agendado Visita” é justamente o passo da qualificação que o dono quer ver acontecer.</p>
+      <div class="divisor"></div>
+      <h4><span class="tag app">hoje · app</span> Leads da equipe (tela do gestor)</h4>
+      <p class="nota ruim" style="color:#F0A9A2">Aqui tem um defeito de verdade: essa lista usa uma
+      tabela de nomes <b>fixa no código</b> (<code>_ETAPA_ROT</code>, quatro nomes genéricos), e não os
+      nomes da conta. Na Prime o gestor lê:</p>
+      <div class="tabwrap">
+        <table class="t" style="min-width:0">
+          <thead><tr><th>o painel diz</th><th>o app diz pro gestor</th></tr></thead>
+          <tbody>
+            <tr><td>Agendado Visita</td><td class="ruim">Qualificado</td></tr>
+            <tr><td>Negociação</td><td class="ruim">Proposta</td></tr>
+            <tr><td>Evento Realizado</td><td class="ruim">Ganho</td></tr>
+            <tr><td>Evento A Realizar</td><td class="ruim">Evento_Realizado</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="nota">Dois vocabulários pro mesmo lead, e um deles com sublinhado no meio da palavra.
+      Isso é a regra 6 do CLAUDE.md sendo furada por uma constante esquecida.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 2b. quatro portas ======================= -->
+<section class="sec">
+  <div class="k">2b · O defeito que estava escondido</div>
+  <h2>Quatro portas pro mesmo lead, quatro listas diferentes.</h2>
+  <p class="leg">A Prime tem <b>9 etapas</b> cadastradas. Nenhuma das telas mostra as 9 —
+  e cada uma corta um pedaço diferente. Isto não foi desenhado assim; foi acontecendo.</p>
+  <div class="tabwrap">
+    <table class="t">
+      <thead><tr><th>Por onde o vendedor abre</th><th>O que a lista corta</th><th class="num">opções na Prime</th><th>dá pra marcar o GANHO?</th></tr></thead>
+      <tbody>
+        <tr class="zero"><td>Quadro do funil → clicar no card</td><td>tira as etapas “sai do quadro”</td><td class="num"><b>6</b></td><td class="ruim">NÃO</td></tr>
+        <tr><td>Follow-up → Abrir ficha</td><td>não corta nada</td><td class="num">9</td><td class="bom">sim</td></tr>
+        <tr><td>Ficha completa</td><td>não corta nada</td><td class="num">9</td><td class="bom">sim</td></tr>
+        <tr><td>App → lead → Etapa no funil</td><td>tira ganho, perdido e “sai do quadro”</td><td class="num">5</td><td class="bom">sim, em botão separado</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="leg" style="margin-top:.9rem">A causa é uma variável fazendo dois trabalhos. No funil, a
+  lista de etapas é filtrada pra montar as COLUNAS do quadro (a etapa marcada “sai do quadro” não vira
+  coluna — foi um pedido seu, e está certo). Só que o seletor da janela do lead é montado <b>depois</b>,
+  a partir da mesma variável já filtrada. O quadro esconder a coluna virou, sem querer, o vendedor não
+  poder escolher a etapa.</p>
+  <p class="leg"><b>O efeito prático na Prime:</b> quem trabalha pelo quadro — que é a tela principal —
+  não tem como marcar <b>Evento Realizado</b>, <b>Agendado Visita</b> nem <b>Evento A Realizar</b>. As
+  três somem. É consistente com a medida: em dois meses entraram <b>7</b> leads em ganho e <b>15</b> em
+  Agendado Visita, num funil de 398.</p>
+  <p class="leg"><b>O conserto é uma linha</b> — montar o seletor a partir da lista inteira, não da
+  filtrada. O quadro continua escondendo as colunas; o vendedor volta a poder escolher. No desenho
+  proposto essas etapas aparecem com a borda tracejada e o aviso <i>“sai do quadro”</i>, pra ele saber
+  que o card vai sumir dali.</p>
+</section>
+
+<!-- ======================= 3. os nomes ======================= -->
+<section class="sec">
+  <div class="k">3 · Os nomes, conta por conta</div>
+  <h2>Uma conta chama “Entregue” o que o sistema grava como perda.</h2>
+  <p class="leg">O rótulo é livre, a chave não. Quem renomeia a etapa <b>não muda o significado</b>:
+  <code>ganho</code> continua contando como venda e <code>perdido</code> continua contando como perda,
+  seja qual for o nome na tela.</p>
+  <div class="tabwrap">
+    <table class="t">
+      <thead><tr><th>Conta</th><th>chave <code>ganho</code></th><th>chave <code>perdido</code></th><th class="num">leads em “perdido”</th><th>efeito</th></tr></thead>
+      <tbody>
+        <tr><td>34 · Prime Eventos</td><td>Evento Realizado</td><td>Perdido</td><td class="num">20</td><td class="bom">coerente</td></tr>
+        <tr><td>37 · Liberal Neto</td><td>Fechado</td><td>Perdido</td><td class="num">0</td><td class="bom">coerente</td></tr>
+        <tr><td>23 · Ramo Capital</td><td>Ganho</td><td>Perdido</td><td class="num">0</td><td class="bom">coerente</td></tr>
+        <tr class="zero"><td>3 · ZAQ (sua conta)</td><td class="ruim">Producao</td><td class="ruim">Entregue</td><td class="num">4</td>
+            <td class="ruim">4 leads “Entregues” estão gravados como PERDA</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="leg" style="margin-top:.9rem">Na sua conta o funil foi renomeado pra virar um fluxo de
+  produção — <b>Producao</b> e <b>Entregue</b> no lugar de ganho e perdido. Quem clicar em “Entregue”
+  leva a pergunta <b>“Por que perdeu?”</b> na cara, e o lead sai do quadro contado como venda perdida
+  no Raio-X e no relatório. São 4 leads hoje. <b>Não mexi</b> — é decisão sua se renomeia de volta
+  ou se o que você quer é uma etapa nova de verdade.</p>
+</section>
+
+<!-- ======================= 4. a proposta ======================= -->
+<section class="sec">
+  <div class="k">4 · A proposta</div>
+  <h2>O mesmo botão do app, no painel — com três coisas que nem um nem outro tem.</h2>
+  <p class="leg">Nada de tela nova, nada de rota nova. É trocar a pílula <code>&lt;select&gt;</code> da
+  janela do lead por uma fileira de botões, no módulo que <b>as duas telas já compartilham</b>
+  (<code>web/janela_lead.py</code>) — então funil e Follow-up ganham junto.</p>
+
+  <div class="cx" style="max-width:520px">
+    <h4><span class="tag prop">proposta</span> Janela do lead · bloco Situação</h4>
+    <div class="sit">
+      <div class="lbl">Situação <em>parado há 20 dias</em></div>
+      <div class="chips">
+        <span class="chip">Novo</span>
+        <span class="chip on">Contatado</span>
+        <span class="chip prox">Agendado Visita</span>
+        <span class="chip some">Negociação</span>
+      </div>
+      <div class="divisor"></div>
+      <div class="lbl">Encerrar</div>
+      <div class="chips">
+        <span class="chip g">✓ Evento Realizado</span>
+        <span class="chip p">✕ Perdido</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:1rem"></div>
+  <ul class="ok-lista">
+    <li><b>Um toque, não três.</b> Botão em vez de roleta — a mesma engenharia que o app já usa
+      há semanas, e que o vendedor já conhece de lá.</li>
+    <li><b>O passo seguinte vem destacado.</b> O chip imediatamente à frente do atual nasce aceso com
+      a seta. Hoje o vendedor precisa ler nove nomes pra achar o único que ele ia usar; a tela passa a
+      apontar pra ele. As três transições mais usadas na Prime — Negociação (38), Perdido (21) e
+      Agendado&nbsp;Visita (15) — todas saem de um chip que fica visível sem abrir lista nenhuma.</li>
+    <li><b>Encerrar fica embaixo, separado por uma linha.</b> Ganho em verde, perdido em vermelho,
+      com ✓ e ✕. Nunca mais “Perdido” encostado numa etapa de andamento.</li>
+    <li><b>“Parado há 20 dias” ao lado do rótulo.</b> É o empurrão pra qualificar: o vendedor vê o
+      tempo morto sem precisar abrir relatório nenhum.</li>
+    <li><b>As 9 etapas voltam a caber nas duas telas.</b> Hoje o seletor do quadro tem 6 e o do
+      Follow-up tem 9 — a mesma janela, o mesmo lead. Passa a ser uma lista só, com as que saem do
+      quadro marcadas em tracejado.</li>
+    <li class="nao"><b>O que NÃO muda:</b> a rota, a pergunta do motivo da perda, a lista de motivos da
+      conta, o gancho que move o card no quadro. Tudo isso já existe e continua igual.</li>
+  </ul>
+
+  <div style="height:1.2rem"></div>
+  <h3 style="font-size:1rem;margin-bottom:.5rem">E no app, dois consertos pequenos</h3>
+  <ul class="ok-lista">
+    <li><b>Os nomes da conta na tela do gestor.</b> Trocar a tabela fixa de quatro nomes pela lista
+      real da conta. É o mesmo <code>_etapas()</code> que a tela do lead já usa três telas ao lado.</li>
+    <li><b>Deixar marcar “Agendado Visita” pelo celular.</b> Hoje o app esconde as etapas que saem do
+      quadro, e some justamente com o passo da qualificação. Proposta: mostrar, com o chip tracejado
+      e o aviso “sai do quadro” — igual ao desenho acima.</li>
+  </ul>
+</section>
+
+<!-- ======================= 5. perguntas ======================= -->
+<section class="sec">
+  <div class="k">5 · O que eu preciso que você decida</div>
+  <div class="perg">
+    <h3>Quatro perguntas — as três primeiras são configuração da conta, não código</h3>
+    <ol>
+      <li><b>As duas etapas mortas da Prime.</b> “Follow-up” e “Fechado” têm zero lead e zero
+        movimento em dois meses. Apago, renomeio ou deixo?
+        <span class="mini">Um funil de 8 etapas em que 2 não existem na prática cansa o vendedor à toa —
+        e a etapa “Follow-up” ainda confunde com a TELA Follow-up, que é outra coisa.</span></li>
+      <li><b>“Evento A Realizar” está na ordem 920, depois de “Perdido”.</b> Pela lógica ela vem antes de
+        “Evento Realizado”. Mudo a ordem?
+        <span class="mini">Mexe só na posição na lista; não move lead nenhum.</span></li>
+      <li><b>A sua conta (3): “Producao” e “Entregue”.</b> Hoje “Entregue” é a etapa de PERDA. Renomeio
+        de volta pra Ganho/Perdido, ou você quer um fluxo de produção de verdade depois do ganho?
+        <span class="mini">São 4 leads contados como perda hoje. Enquanto não decidir, não toco.</span></li>
+      <li><b>Onde o vendedor vai ver isso primeiro:</b> só no painel, ou painel e app na mesma entrega?
+        <span class="mini">O painel é uma troca no módulo compartilhado (funil + Follow-up de uma vez).
+        O app são os dois consertos da seção 4. Dá pra fazer junto.</span></li>
+    </ol>
+  </div>
+</section>
+
+<p class="rodape">Medido em produção, só leitura, em 17/09/2026: <code>funil_etapas</code>,
+<code>funil_movimentos</code>, <code>prospeccao</code> e <code>membros</code> das contas 3, 23, 34 e 37.
+Código lido: <code>web/janela_lead.py</code>, <code>web/painel_follow_up.py</code>,
+<code>web/painel_prospeccao.py</code>, <code>web/painel_cockpit.py</code>, <code>finance/cockpit.py</code>.</p>
+
+</div>
+</body>
+</html>

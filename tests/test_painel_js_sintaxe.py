@@ -78,7 +78,18 @@ PAGINAS = {
     # ramo do selo virando BOTÃO (kbAbrirChat) — sem isso o {% if %} escondia
     # justamente o JS que o teste existe pra proteger.
     "prospeccao": dict(
-        status=[("novo", "Novo"), ("contatado", "Contatado")],
+        # `status` é o que enche os BOTÕES de situação da janela do lead — a lista
+        # inteira, no formato de `janela_lead.lista_de_status()`. `colunas_tpl` é
+        # outra coisa: as colunas do quadro, que não mostram a etapa escondida.
+        # Eram a mesma variável até 17/09/2026, e foi assim que o quadro deixou de
+        # oferecer etapa que ele não desenha — ver o comentário de `etapas_todas`
+        # em web/painel_prospeccao.py.
+        status=[{"c": "novo", "r": "Novo", "sai": False, "fim": ""},
+                {"c": "contatado", "r": "Contatado", "sai": False, "fim": ""},
+                {"c": "entregue", "r": "Entregue", "sai": True, "fim": ""},
+                {"c": "ganho", "r": "Ganho", "sai": False, "fim": "ganho"},
+                {"c": "perdido", "r": "Perdido", "sai": False, "fim": "perdido"}],
+        colunas_tpl=[("novo", "Novo"), ("contatado", "Contatado")],
         colunas={"novo": [_CARD], "contatado": []},
         # a coluna é desenhada em GRUPOS (evento_lead.agrupar, migração 197): é
         # daqui que o card sai. Sem data + conta que vende data = o ramo do
@@ -460,22 +471,40 @@ def test_clicar_no_card_abre_o_resumo_nao_a_ficha_inteira_numa_gaveta():
     assert "kb-dframe" not in js and "kb-drawer" not in js and "kb-dtit" not in js, (
         "a gaveta de 1080px com iframe da ficha inteira voltou"
     )
-    for fn in ("kbFecharLead", "kbLeadHtml", "kbLeadStatus"):
+    for fn in ("function kbFecharLead", "function kbLeadHtml", "function kbLeadIr",
+               "function kbLeadSitHtml"):
         assert fn in js, f"{fn} não está no JS servido"
 
 
 def test_o_balao_do_lead_segue_as_etapas_reais_do_funil():
     """Pedido explícito: a situação trocada no balão tem que seguir as etapas de
     verdade configuradas pela conta (as mesmas do board), não uma lista fixa
-    inventada no JS — cada conta pode ter etapas diferentes."""
+    inventada no JS — cada conta pode ter etapas diferentes.
+
+    E A LISTA VAI INTEIRA (17/09/2026): a etapa marcada "sai do quadro" tem que
+    chegar no JS, marcada, mesmo não sendo coluna. Era o contrário até esse dia, e
+    numa conta em que o `ganho` está marcado assim isso tirava do vendedor a única
+    forma de marcar a venda pelo quadro.
+    """
     js = "\n".join(_scripts(_render("prospeccao")))
     m = re.search(r"var _KB_STATUS=(\[.*?\]);", js)
     assert m, "_KB_STATUS não foi embutido no JS servido"
-    assert json.loads(m.group(1)) == [["novo", "Novo"], ["contatado", "Contatado"]], (
+    lista = json.loads(m.group(1))
+    assert [x["c"] for x in lista] == ["novo", "contatado", "entregue", "ganho", "perdido"], (
         "as etapas embutidas no JS não batem com as da conta (contexto `status`)")
-    corpo_kbleadhtml = js.split("function kbLeadHtml")[1].split("function kbLeadStatus")[0]
-    assert "_KB_STATUS" in corpo_kbleadhtml, (
-        "o <select> de situação do balão não usa a lista real de etapas")
+    por_chave = {x["c"]: x for x in lista}
+    assert por_chave["entregue"]["sai"] is True, (
+        "a etapa que sai do quadro não chegou marcada — a janela não tem como tracejar")
+    assert por_chave["ganho"]["fim"] == "ganho" and por_chave["perdido"]["fim"] == "perdido", (
+        "sem o `fim`, ganho e perdido voltam pra fileira das etapas de andamento")
+    assert por_chave["contatado"]["fim"] == ""
+
+    # as COLUNAS do quadro seguem sendo outra lista: a etapa escondida não vira aba
+    abas = re.findall(r'data-tab="([^"]+)"', _render("prospeccao"))
+    assert "entregue" not in abas, "a etapa escondida virou coluna — a 238 foi desfeita"
+    corpo = js.split("function kbLeadSitHtml")[1].split("function kbLeadDadosHtml")[0]
+    assert "_KB_STATUS" in corpo, (
+        "os botões de situação da janela não usam a lista real de etapas")
 
 
 def test_trocar_situacao_no_balao_move_o_card_e_fecha_o_balao():
@@ -491,7 +520,7 @@ def test_trocar_situacao_no_balao_move_o_card_e_fecha_o_balao():
     # que uma tela sem colunas também carrega. A janela chama um gancho; o funil
     # é quem define o gancho. O comportamento continua o mesmo, e é ele que se
     # confere aqui: a rota, o gancho, o card andando, o balão fechando.
-    fonte_status = _janela.JS.split("function kbLeadStatus")[1][:1400]
+    fonte_status = _janela.JS.split("function kbLeadIr")[1][:1600]
     assert "/status'" in fonte_status, "não usa a rota de status que já existe"
     assert "window.kbDepoisDoStatus" in fonte_status, (
         "a janela não avisa a tela depois de trocar a situação — o quadro ficaria mentindo")
@@ -539,7 +568,7 @@ def test_o_seletor_da_janela_tambem_pergunta_o_motivo():
     """A janela é a MESMA no funil e no Follow-up (web/janela_lead.py), e o seletor
     de situação dela é o outro caminho até Perdido. Antes ele dizia só "Não
     consegui mudar a situação" — que não diz o que fazer, e é um beco."""
-    fonte = _janela.JS.split("function kbLeadStatus")[1][:900]
+    fonte = _janela.JS.split("function kbLeadIr")[1][:2000]
     assert "motivo_obrigatorio" in fonte and "kbPerguntarMotivo(" in fonte
 
 

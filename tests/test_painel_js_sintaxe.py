@@ -507,6 +507,69 @@ def test_trocar_situacao_no_balao_move_o_card_e_fecha_o_balao():
         "o funil não move o card pra coluna nova depois de trocar a situação")
 
 
+def test_arrastar_pra_perdido_pergunta_o_motivo_em_vez_de_recarregar_calado():
+    """O achado de 17/09/2026, no Raio-X do dono: "3 de 5 sem motivo".
+
+    O servidor SEMPRE soube recusar — `/status` devolve `motivo_obrigatorio` com a
+    lista pronta em `d.motivos`. O painel jogava fora: o arrastar caía no
+    `_kbAposMoverStatus`, cujo `!d.ok` RECARREGA a página. Na tela isso é o card
+    voltando sozinho pra coluna de origem, sem uma palavra — e quem arrastou não
+    tem como saber que faltou dizer por quê.
+
+    O bloco do Raio-X dizia que o motivo é um toque numa lista de seis "no app e na
+    ficha". A frase era, sem querer, a confissão: no QUADRO não havia lista."""
+    fonte = _fonte_balao().split("function kbDrop")[1][:1200]
+    assert "motivo_obrigatorio" in fonte, (
+        "o arrastar voltou a engolir a recusa — o card volta calado")
+    assert "kbPerguntarMotivo(" in fonte, "não abre a lista de motivos"
+    assert "d.motivos" in fonte, (
+        "não usa a lista que o servidor mandou junto com a recusa")
+    # AS DUAS PONTAS NO MESMO TESTE, de propósito: `funil_perda` já prova que o
+    # motor recusa e devolve a lista, e a linha acima prova que o JS a consome —
+    # mas nada ligava as duas, e renomear a chave na rota deixaria os dois testes
+    # verdes com a tela quebrada. É o "pedaço do meio" que já me escapou antes.
+    rota = inspect.getsource(pp).split('@router.post("/painel/prospeccao/{alvo_id}/status")')[1][:3400]
+    assert '"motivos": lista' in rota, (
+        "a rota não manda mais a lista com esse nome — o JS lê `d.motivos`")
+    assert '"erro": val["erro"]' in rota, (
+        "a rota não devolve mais o código da recusa — o JS compara com 'motivo_obrigatorio'")
+
+
+def test_o_seletor_da_janela_tambem_pergunta_o_motivo():
+    """A janela é a MESMA no funil e no Follow-up (web/janela_lead.py), e o seletor
+    de situação dela é o outro caminho até Perdido. Antes ele dizia só "Não
+    consegui mudar a situação" — que não diz o que fazer, e é um beco."""
+    fonte = _janela.JS.split("function kbLeadStatus")[1][:900]
+    assert "motivo_obrigatorio" in fonte and "kbPerguntarMotivo(" in fonte
+
+
+def test_a_folha_de_motivo_manda_a_escolha_de_volta_pro_servidor():
+    """Perguntar sem gravar seria pior que não perguntar. E a segunda recusa —
+    `descricao_obrigatoria` — volta SEM lista: o motivo já está escolhido e o que
+    falta é a linha de texto, então a folha só abre o campo, não recomeça."""
+    fonte = _janela.JS.split("function kbPerguntarMotivo")[1][:3000]
+    assert "body.append('motivo'" in fonte, "a escolha não volta pro servidor"
+    assert "body.append('perda_descricao'" in fonte
+    assert "'/painel/prospeccao/'+id+'/status'" in fonte, "não regrava pela mesma rota"
+    # AS ASSERÇÕES OLHAM O CÓDIGO, não a palavra: `"descricao_obrigatoria" in
+    # fonte` passava com o `if` apagado, porque a palavra também está no comentário
+    # logo acima. Comentário não é comportamento — duas mutações sobreviveram assim
+    # antes de eu apertar isto.
+    assert "d2.erro==='descricao_obrigatoria'" in fonte, (
+        "a segunda recusa não é tratada — a pessoa recomeçaria do zero")
+    assert "if(quandoDesiste)quandoDesiste()" in fonte, (
+        "sem saída: quem não quer escolher motivo fica preso na folha")
+
+
+def test_a_folha_de_motivo_nao_herda_a_margem_do_button_global():
+    """A mesma armadilha que já pegou o ✕ de excluir e o "✎ Editar": o
+    `button{width:100%;margin-top:1.4rem}` global (dos formulários de login) vaza
+    pra qualquer botão que não zere os dois."""
+    for classe in (".perdapop .pp-ok{", ".perdapop .pp-nao{", ".perdapop .pp-op{"):
+        regra = _janela.CSS.split(classe)[1].split("}")[0]
+        assert "margin:0" in regra and ("width:auto" in regra or "width:100%" in regra), classe
+
+
 def test_abrir_o_chat_e_abrir_o_resumo_do_lead_se_excluem():
     """Só um balão por vez, do tipo que for — chat e resumo do lead não podem
     ficar abertos ao mesmo tempo (se sobrepõem e nenhum fica legível)."""

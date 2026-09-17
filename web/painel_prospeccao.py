@@ -11595,7 +11595,19 @@ function kbDrop(ev,status){ev.preventDefault();ev.currentTarget.classList.remove
   var drop=ev.currentTarget.querySelector('.kbdrop');var emp=drop.querySelector('.kbempty');if(emp)emp.remove();drop.appendChild(card);
   var body=new URLSearchParams();body.append('status',status);
   fetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
-    .then(function(r){return r.json();}).then(_kbAposMoverStatus).catch(function(){location.reload();});}
+    .then(function(r){return r.json();}).then(function(d){
+      // ARRASTAR PRA PERDIDO PEDE O MOTIVO (17/09/2026). Antes esta linha era só
+      // `.then(_kbAposMoverStatus)`, e o `!d.ok` de lá recarrega a página: o card
+      // voltava sozinho pra coluna de origem, sem uma palavra, e quem arrastou não
+      // tinha como saber que faltava dizer por quê. A lista vem do servidor, que
+      // sempre a mandou junto com a recusa — ver `kbPerguntarMotivo` em
+      // web/janela_lead.py, que o seletor da janela também usa.
+      if(!d.ok&&d.erro==='motivo_obrigatorio'){
+        kbPerguntarMotivo(id, status, d.motivos, _kbAposMoverStatus, function(){location.reload();});
+        return;
+      }
+      _kbAposMoverStatus(d);
+    }).catch(function(){location.reload();});}
 
 // ---- captação inline (sem reload) ----
 var TEMPCOR={frio:'#5b9bd5',morno:'var(--ambar)',quente:'var(--coral)'};

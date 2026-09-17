@@ -191,8 +191,12 @@ def corpo(dados: dict, tipo: str, *, nome: str = "", empresa: str = "",
                "carteira": sum(v["carteira"] for v in vs)}
         equipe = _bloco_vendedor(tot, vende_data) if vs else ""
 
+    # O rodapé segue o CADASTRO, e não o tipo: desde a 276 a versão com os nomes
+    # também vai pra e-mail de texto (o campo "Seu e-mail"), que não é membro de
+    # nada. Dizer "porque é dono da conta" pra quem não tem login é mentira de uma
+    # linha só — e é a linha que explica como sair da lista.
     quem = ("Você recebe este resumo toda segunda porque é dono da conta."
-            if tipo == "dono" else
+            if tipo == "dono" and membro_id else
             "Você recebe este resumo toda segunda porque seu e-mail foi cadastrado "
             "pela empresa. Ele não dá acesso ao painel.")
     nota_ctr = ('<br>"Assinou" é contrato assinado, não etapa do funil.'

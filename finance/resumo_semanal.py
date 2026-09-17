@@ -11,6 +11,14 @@ TRÊS DESTINATÁRIOS, TRÊS E-MAILS, escolha dele:
   equipe, sem os nomes;
 * o VENDEDOR recebe só a carteira dele, sem comparação com colega nenhum.
 
+DOIS CAMPOS DE E-MAIL, E NÃO UM (migração 276). "Seu e-mail" alimenta o primeiro
+tipo, "E-mails de gestor" o segundo. O campo do dono nasceu de um defeito medido
+em produção horas depois da 274: o dono da Prime tem o cadastro SEM E-MAIL — e não
+existe tela onde ele possa pôr um —, então os dois endereços que ele cadastrou
+entravam pelo único portão que sobrava, o de gestor, que é a versão SEM os nomes.
+Dos seis destinatários da primeira segunda, nenhum receberia o que ele pediu. Ver
+`docs/mockups/resumo_semanal_quem_ve_os_nomes.html` e a 276.
+
 "FECHOU" É CONTRATO ASSINADO, E NÃO ETAPA DO FUNIL. Isto não é detalhe: o primeiro
 rascunho deste resumo media pelo `funil_movimentos.para = 'ganho'` e ia anunciar
 "nenhuma venda fechada, o Pedro e a Jacqueline não propuseram nenhum" numa semana
@@ -51,8 +59,8 @@ _log = logging.getLogger(__name__)
 #: -3h fixo, como o resto do painel. O país não tem horário de verão desde 2019.
 _BR = timezone(timedelta(hours=-3))
 
-#: Quantos e-mails de gestor uma conta pode cadastrar. Não é limite técnico: é o
-#: ponto em que "quem acompanha a operação" vira lista de distribuição, e aí o
+#: Quantos e-mails uma conta pode cadastrar EM CADA campo. Não é limite técnico: é
+#: o ponto em que "quem acompanha a operação" vira lista de distribuição, e aí o
 #: resumo passa a ser boletim, que é outro produto.
 EMAILS_MAX = 5
 
@@ -63,7 +71,13 @@ DIAS = ("segunda", "sexta")
 _EMAIL_RE = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]{2,}$")
 
 _PADRAO = {"resumo_semanal": False, "resumo_semanal_emails": "",
+           "resumo_semanal_dono_emails": "",
            "resumo_semanal_vendedor": True, "resumo_semanal_dia": "segunda"}
+
+#: Quanto cada tipo de e-mail MOSTRA, do maior pro menor. É a régua do desempate em
+#: `destinatarios`: o mesmo endereço em dois lugares recebe UM e-mail, o de maior
+#: alcance. Dois quase iguais no mesmo minuto é o que faz a pessoa desligar tudo.
+ALCANCE = {"dono": 0, "gestor": 1, "vendedor": 2}
 
 
 # ------------------------------------------------------------------ a semana
@@ -99,7 +113,7 @@ def rotulo_periodo(ini: date, fim: date) -> str:
 # ------------------------------------------------------------------ configuração
 
 def parse_emails(texto: str | None) -> list[str]:
-    """Os e-mails de gestor, de um campo de texto livre.
+    """Os e-mails de um campo de texto livre (o do dono ou o de gestor).
 
     Aceita vírgula, ponto-e-vírgula e quebra de linha porque é assim que as
     pessoas colam — e o que não parece e-mail é DESCARTADO em silêncio em vez de
@@ -126,35 +140,46 @@ def config(pool, conta_id: int) -> dict:
         with pool.connection() as c:
             r = c.execute(
                 """select resumo_semanal, resumo_semanal_emails,
-                          resumo_semanal_vendedor, resumo_semanal_dia
+                          resumo_semanal_vendedor, resumo_semanal_dia,
+                          resumo_semanal_dono_emails
                      from contas where id=%s""", (conta_id,)).fetchone()
-    except Exception as e:  # noqa: BLE001 — base sem a 274 ainda
+    except Exception as e:  # noqa: BLE001 — base sem a 274/276 ainda
         _log.warning("config do resumo semanal da conta %s: %s: %s",
                      conta_id, type(e).__name__, e)
-        return dict(_PADRAO, emails=[])
+        return dict(_PADRAO, emails=[], emails_dono=[])
     if not r:
-        return dict(_PADRAO, emails=[])
+        return dict(_PADRAO, emails=[], emails_dono=[])
     return {"resumo_semanal": bool(r[0]), "resumo_semanal_emails": r[1] or "",
             "resumo_semanal_vendedor": bool(r[2]),
             "resumo_semanal_dia": r[3] if r[3] in DIAS else "segunda",
-            "emails": parse_emails(r[1])}
+            "resumo_semanal_dono_emails": r[4] or "",
+            "emails": parse_emails(r[1]), "emails_dono": parse_emails(r[4])}
 
 
 def salvar_config(pool, conta_id: int, *, ativo: bool, emails: str,
-                  vendedor: bool, dia: str) -> dict:
+                  vendedor: bool, dia: str, dono_emails: str = "") -> dict:
     """Grava o que a engrenagem mandou. Devolve a config já normalizada, pra tela
-    mostrar o que de fato ficou — e não o que a pessoa digitou."""
+    mostrar o que de fato ficou — e não o que a pessoa digitou.
+
+    `dono_emails` tem padrão vazio de propósito: a chamada que não passar o campo
+    novo LIMPA a lista do dono, e é o que se quer — a tela manda o formulário
+    inteiro, e um campo apagado lá tem que apagar aqui.
+    """
     limpos = parse_emails(emails)
+    do_dono = parse_emails(dono_emails)
     dia = dia if dia in DIAS else "segunda"
     with pool.connection() as c:
         c.execute("""update contas set resumo_semanal=%s, resumo_semanal_emails=%s,
-                            resumo_semanal_vendedor=%s, resumo_semanal_dia=%s
+                            resumo_semanal_vendedor=%s, resumo_semanal_dia=%s,
+                            resumo_semanal_dono_emails=%s
                       where id=%s""",
-                  (bool(ativo), ", ".join(limpos), bool(vendedor), dia, conta_id))
+                  (bool(ativo), ", ".join(limpos), bool(vendedor), dia,
+                   ", ".join(do_dono), conta_id))
         c.commit()
     return {"resumo_semanal": bool(ativo), "resumo_semanal_emails": ", ".join(limpos),
             "resumo_semanal_vendedor": bool(vendedor), "resumo_semanal_dia": dia,
-            "emails": limpos}
+            "resumo_semanal_dono_emails": ", ".join(do_dono),
+            "emails": limpos, "emails_dono": do_dono}
 
 
 # ------------------------------------------------------------------ os números
@@ -289,16 +314,40 @@ def montar(pool, conta_id: int, agora: datetime | None = None) -> dict | None:
 def destinatarios(pool, conta_id: int, cfg: dict | None = None) -> list[dict]:
     """Pra quem vai, e com qual cara. Três tipos — ver o docstring do módulo.
 
-    O DONO vem do cadastro (`membros.papel='dono'`), o GESTOR do campo de texto, e
-    o vendedor só se a conta tiver ligado. E-mail repetido entre eles fica com o
-    papel de MAIOR alcance: quem é dono e também está no campo de gestor recebe um
-    e-mail só, o do dono — dois e-mails quase iguais no mesmo minuto é o tipo de
-    coisa que faz a pessoa desligar tudo.
+    QUATRO FONTES, e nenhuma manda sozinha:
+
+    * o CADASTRO (`membros`): papel dono ou gestor → tipo `dono`; vendedor → tipo
+      `vendedor`, e só se a conta tiver ligado essa chave;
+    * o campo "Seu e-mail" (`emails_dono`) → tipo `dono`;
+    * o campo "E-mails de gestor" (`emails`) → tipo `gestor`.
+
+    O MESMO ENDEREÇO EM DUAS FONTES RECEBE UM E-MAIL SÓ, o de MAIOR alcance (ver
+    `ALCANCE`) — e não o da última fonte lida. A ordem em que se varre não pode
+    mudar o resultado: quem é vendedor no cadastro e está no campo do dono é o dono
+    da empresa que também vende, e o que ele pediu é ver a equipe inteira.
     """
     cfg = cfg or config(pool, conta_id)
     if not cfg.get("resumo_semanal"):
         return []
     fora: dict[str, dict] = {}
+
+    def _por(email: str, nome: str, tipo: str, membro_id) -> None:
+        e = (email or "").strip().lower()
+        if not e:
+            return
+        atual = fora.get(e)
+        if atual and ALCANCE[atual["tipo"]] <= ALCANCE[tipo]:
+            # já entrou com alcance igual ou maior; o nome e o membro do cadastro
+            # valem mais que os do campo de texto, que não tem nem um nem outro
+            if nome and not atual["nome"]:
+                atual["nome"] = nome
+            if membro_id and not atual["membro_id"]:
+                atual["membro_id"] = membro_id
+            return
+        fora[e] = {"email": e, "nome": nome or (atual or {}).get("nome") or "",
+                   "tipo": tipo,
+                   "membro_id": membro_id or (atual or {}).get("membro_id")}
+
     try:
         with pool.connection() as c:
             rows = c.execute(
@@ -314,14 +363,12 @@ def destinatarios(pool, conta_id: int, cfg: dict | None = None) -> list[dict]:
     for nome, email, papel, mid in rows:
         if papel == "vendedor" and not cfg.get("resumo_semanal_vendedor"):
             continue
-        tipo = "dono" if papel in ("dono", "gestor") else "vendedor"
-        fora[email.lower()] = {"email": email.lower(), "nome": nome, "tipo": tipo,
-                               "membro_id": mid}
+        _por(email, nome, "dono" if papel in ("dono", "gestor") else "vendedor", mid)
+    for e in cfg.get("emails_dono") or []:
+        _por(e, "", "dono", None)
     for e in cfg.get("emails") or []:
-        if e not in fora:            # quem já é dono/gestor no cadastro não vira gestor-texto
-            fora[e] = {"email": e, "nome": "", "tipo": "gestor", "membro_id": None}
-    ordem = {"dono": 0, "gestor": 1, "vendedor": 2}
-    return sorted(fora.values(), key=lambda x: (ordem[x["tipo"]], x["email"]))
+        _por(e, "", "gestor", None)
+    return sorted(fora.values(), key=lambda x: (ALCANCE[x["tipo"]], x["email"]))
 
 
 def ja_enviado(pool, conta_id: int, semana: str, destino: str) -> bool:

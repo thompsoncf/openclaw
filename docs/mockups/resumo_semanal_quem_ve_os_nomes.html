@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="pt-br">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Quem vê os nomes — A ou B</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --ink:#062011;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;
+  --body:"Inter",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo)}
+.wrap{max-width:1080px;margin:0 auto;padding:2.6rem 1rem 5rem;display:flex;flex-direction:column;gap:2.6rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.55rem,4vw,2.1rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:76ch}
+.marca{color:var(--neon)}
+.sec>h2{font-size:1.22rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.05rem;max-width:82ch;font-size:.9rem}
+.num{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em}
+.nota{border-left:2.5px solid var(--azul-borda);background:var(--azul-fundo);padding:.85rem 1rem;
+  border-radius:0 10px 10px 0;font-size:.88rem;color:var(--text-dim)}
+.nota b{color:var(--text)}
+.nota.mal{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.nota.amb{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.nota.ok{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.nota+.nota{margin-top:.6rem}
+
+/* a tela de configuração, como ela é no painel */
+.cfg{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:1rem 1.1rem}
+.cfg+.cfg{margin-top:.6rem}
+.cfg .topo{display:flex;align-items:center;gap:.7rem}
+.cfg .topo b{font-size:.98rem;display:block}
+.cfg .topo .mut{color:var(--text-dim);font-size:.78rem}
+.sw{width:42px;height:24px;border-radius:999px;background:var(--neon);position:relative;flex:none}
+.sw::after{content:"";position:absolute;right:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff}
+.cfg h3{font-size:.84rem;margin:0 0 .5rem;color:var(--text-dim)}
+.campo{margin-bottom:.75rem}
+.campo label{display:block;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);margin-bottom:.25rem}
+.fld{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;
+  padding:.5rem .6rem;font-size:.86rem;font-family:var(--body)}
+.fld.novo{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.ajuda{font-size:.76rem;color:var(--text-faint);margin:.3rem 0 0;line-height:1.5}
+.ajuda b{color:var(--text-dim)}
+.selo{display:inline-block;font:600 .62rem var(--mono);letter-spacing:.06em;text-transform:uppercase;
+  padding:.12rem .42rem;border-radius:5px;margin-left:.4rem;vertical-align:.1em}
+.selo.novo{background:var(--neon-fundo);color:var(--neon-bright);border:1px solid var(--neon-borda)}
+
+/* quem recebe o quê */
+.duas{display:grid;grid-template-columns:1fr 1fr;gap:1.3rem;align-items:start}
+@media(max-width:900px){.duas{grid-template-columns:1fr}}
+.op{border:1px solid var(--line);border-radius:14px;padding:1.1rem;background:var(--bg-2)}
+.op.a{border-color:var(--neon-borda)}
+.op>h3{font-size:1.05rem;margin-bottom:.15rem}
+.op>p.sub{color:var(--text-dim);font-size:.85rem;margin:.2rem 0 .9rem}
+.rot{font-size:.68rem;color:var(--text-faint);font-family:var(--mono);margin:1.1rem 0 .4rem;
+  text-transform:uppercase;letter-spacing:.07em}
+table.q{width:100%;border-collapse:collapse;font-size:.83rem}
+table.q th,table.q td{padding:.42rem .5rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;
+  overflow-wrap:anywhere}
+@media(max-width:560px){
+  table.q{font-size:.76rem}
+  table.q th,table.q td{padding:.4rem .3rem}
+}
+table.q th{font-size:.64rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);font-weight:600}
+table.q td.vc{color:var(--text)}
+table.q tr.eu td{background:var(--neon-fundo)}
+table.q tr.eu td.vc{color:var(--neon-bright);font-weight:600}
+.tag{font:600 .64rem var(--mono);padding:.1rem .4rem;border-radius:5px;white-space:nowrap}
+.tag.n{background:var(--neon-fundo);color:var(--neon-bright)}
+.tag.t{background:var(--surface-2);color:var(--text-dim)}
+.tag.v{background:var(--azul-fundo);color:var(--azul)}
+
+/* o pedaço do e-mail que muda */
+.pedaco{background:#fff;color:#1b211e;border-radius:10px;padding:.85rem .9rem;font-size:13px;margin-top:.45rem}
+.pedaco .h{font:700 .62rem var(--mono);text-transform:uppercase;letter-spacing:.09em;color:#8a9a91;margin-bottom:.45rem}
+.pedaco .v{border:1px solid #eef2f0;border-radius:8px;padding:.5rem .6rem;margin-bottom:.35rem}
+.pedaco .v:last-child{margin-bottom:0}
+.pedaco .v .q{display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;font-weight:600;color:#0f1613}
+.pedaco .v .q em{font-style:normal;font-size:.72rem;color:#8a9a91;font-family:var(--mono)}
+.pedaco .v .ns{margin-top:.25rem;font-size:.78rem;color:#556}
+.pedaco .v .ns b{font-family:var(--mono);color:#0f1613}
+</style>
+<div class="wrap">
+
+<header class="head">
+  <div class="eyebrow">Mockup · 17/09/2026 · <span class="marca">resumo semanal</span></div>
+  <h1>Quem vê o nome de cada vendedor</h1>
+  <p>Seu cadastro de dono está sem e-mail, e por isso os dois endereços que você
+  cadastrou entram como <b>gestor</b> — a versão sem os nomes. Estas são as duas
+  saídas. Os nomes e números abaixo são os reais da Prime.</p>
+</header>
+
+<!-- ────────────────────────────────────────────── o que acontece hoje -->
+<section class="sec">
+  <div class="num">00</div>
+  <h2>O que acontece na segunda, se ninguém mexer</h2>
+  <table class="q">
+    <thead><tr><th>Quem recebe</th><th>Versão</th><th>O que vê no bloco da equipe</th></tr></thead>
+    <tbody>
+      <tr class="eu"><td class="vc">c.dermatologicomanoelsoares@gmail.com</td><td><span class="tag t">gestor</span></td><td>"3 vendedores ativos · fecharam 4"</td></tr>
+      <tr class="eu"><td class="vc">1primelocacoes@gmail.com</td><td><span class="tag t">gestor</span></td><td>"3 vendedores ativos · fecharam 4"</td></tr>
+      <tr><td>jacquelinedsoares26@gmail.com</td><td><span class="tag v">vendedor</span></td><td>só a carteira dela</td></tr>
+      <tr><td>pedroyanximenes@hotmail.com</td><td><span class="tag v">vendedor</span></td><td>só a carteira dele</td></tr>
+      <tr><td>thiagocesar123321@hotmail.com</td><td><span class="tag v">vendedor</span></td><td>só a carteira dele</td></tr>
+      <tr><td>thompsoncf@hotmail.com <span style="color:var(--text-faint)">(zaq teste)</span></td><td><span class="tag v">vendedor</span></td><td>só a carteira dele</td></tr>
+    </tbody>
+  </table>
+  <div class="nota mal" style="margin-top:.9rem"><b>Ninguém recebe a versão com os
+  nomes</b> — que é justamente a que você escolheu pra si. É o que as duas opções
+  abaixo consertam.</div>
+</section>
+
+<!-- ────────────────────────────────────────────── A e B lado a lado -->
+<section class="sec">
+  <div class="num">01</div>
+  <h2>As duas saídas, na tela e no e-mail</h2>
+  <p class="leg">Mesma engrenagem (Prospecção → ⚙️ → 🤖 Agente IA), mesmo botão de
+  salvar. Muda só o que está no card.</p>
+
+  <div class="duas">
+
+    <!-- ───────── A ───────── -->
+    <div class="op a">
+      <h3>A · Um campo só pro seu e-mail</h3>
+      <p class="sub">Dois campos: o seu, que vê os nomes, e o dos outros, que vê o
+      total.</p>
+
+      <div class="cfg">
+        <div class="topo">
+          <div style="font-size:1.5rem">📬</div>
+          <div style="flex:1"><b>Resumo semanal por e-mail</b>
+            <div class="mut">Toda segunda, 9h.</div></div>
+          <div class="sw"></div>
+        </div>
+      </div>
+      <div class="cfg">
+        <div class="campo">
+          <label>Seu e-mail <span class="selo novo">novo</span></label>
+          <input class="fld novo" value="c.dermatologicomanoelsoares@gmail.com">
+          <p class="ajuda">Recebe o resumo completo, com <b>o resultado de cada
+          vendedor pelo nome</b>.</p>
+        </div>
+        <div class="campo">
+          <label>E-mails de gestor</label>
+          <input class="fld" value="1primelocacoes@gmail.com">
+          <p class="ajuda">Recebem a mesma semana com o <b>total da equipe</b>, sem
+          os nomes.</p>
+        </div>
+      </div>
+
+      <div class="rot">Quem recebe o quê</div>
+      <table class="q">
+        <tbody>
+          <tr class="eu"><td class="vc">você</td><td><span class="tag n">com nomes</span></td></tr>
+          <tr><td>1primelocacoes@</td><td><span class="tag t">total da equipe</span></td></tr>
+          <tr><td>os 4 vendedores</td><td><span class="tag v">a carteira de cada um</span></td></tr>
+        </tbody>
+      </table>
+
+      <div class="rot">No seu e-mail</div>
+      <div class="pedaco">
+        <div class="h">Por vendedor</div>
+        <div class="v"><div class="q"><span>Pedro Yan</span><em>R$ 12.500 assinados</em></div>
+          <div class="ns">entraram <b>23</b> &nbsp; visitas <b>1</b> &nbsp; fechou <b>2</b> &nbsp; carteira <b>154</b></div></div>
+        <div class="v"><div class="q"><span>Jacqueline</span><em>R$ 6.500 assinados</em></div>
+          <div class="ns">entraram <b>21</b> &nbsp; visitas <b>1</b> &nbsp; fechou <b>1</b> &nbsp; carteira <b>125</b></div></div>
+        <div class="v"><div class="q"><span>Thiago</span><em>R$ 7.090 assinados</em></div>
+          <div class="ns">entraram <b>22</b> &nbsp; visitas <b>0</b> &nbsp; fechou <b>1</b> &nbsp; carteira <b>94</b></div></div>
+      </div>
+
+      <div class="rot">No e-mail do 1primelocacoes@</div>
+      <div class="pedaco">
+        <div class="h">A equipe</div>
+        <div class="v"><div class="q"><span>3 vendedores ativos</span><em>R$ 26.090 assinados</em></div>
+          <div class="ns">entraram <b>66</b> &nbsp; visitas <b>2</b> &nbsp; fecharam <b>4</b> &nbsp; carteira <b>373</b></div></div>
+      </div>
+
+      <div class="nota ok" style="margin-top:.9rem;font-size:.84rem">Quando a Prime
+      contratar um gestor de verdade, é só somar o e-mail dele no segundo campo.
+      Nada pra decidir de novo.</div>
+    </div>
+
+    <!-- ───────── B ───────── -->
+    <div class="op">
+      <h3>B · Um campo só, todos veem os nomes</h3>
+      <p class="sub">Some a distinção: quem você cadastrar recebe o relatório
+      completo.</p>
+
+      <div class="cfg">
+        <div class="topo">
+          <div style="font-size:1.5rem">📬</div>
+          <div style="flex:1"><b>Resumo semanal por e-mail</b>
+            <div class="mut">Toda segunda, 9h.</div></div>
+          <div class="sw"></div>
+        </div>
+      </div>
+      <div class="cfg">
+        <div class="campo">
+          <label>Quem recebe o resumo da empresa</label>
+          <input class="fld" value="c.dermatologicomanoelsoares@gmail.com, 1primelocacoes@gmail.com">
+          <p class="ajuda">Todos recebem o resumo completo, com <b>o resultado de
+          cada vendedor pelo nome</b>.</p>
+        </div>
+      </div>
+
+      <div class="rot">Quem recebe o quê</div>
+      <table class="q">
+        <tbody>
+          <tr class="eu"><td class="vc">você</td><td><span class="tag n">com nomes</span></td></tr>
+          <tr class="eu"><td class="vc">1primelocacoes@</td><td><span class="tag n">com nomes</span></td></tr>
+          <tr><td>os 4 vendedores</td><td><span class="tag v">a carteira de cada um</span></td></tr>
+        </tbody>
+      </table>
+
+      <div class="rot">Nos dois e-mails, igual</div>
+      <div class="pedaco">
+        <div class="h">Por vendedor</div>
+        <div class="v"><div class="q"><span>Pedro Yan</span><em>R$ 12.500 assinados</em></div>
+          <div class="ns">entraram <b>23</b> &nbsp; visitas <b>1</b> &nbsp; fechou <b>2</b> &nbsp; carteira <b>154</b></div></div>
+        <div class="v"><div class="q"><span>Jacqueline</span><em>R$ 6.500 assinados</em></div>
+          <div class="ns">entraram <b>21</b> &nbsp; visitas <b>1</b> &nbsp; fechou <b>1</b> &nbsp; carteira <b>125</b></div></div>
+        <div class="v"><div class="q"><span>Thiago</span><em>R$ 7.090 assinados</em></div>
+          <div class="ns">entraram <b>22</b> &nbsp; visitas <b>0</b> &nbsp; fechou <b>1</b> &nbsp; carteira <b>94</b></div></div>
+      </div>
+
+      <div class="nota amb" style="margin-top:.9rem;font-size:.84rem">O dia em que
+      entrar um gestor contratado, ele vai receber o resultado de cada vendedor
+      pelo nome — e aí a separação volta a fazer falta, com uma tela pra mexer de
+      novo.</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ────────────────────────────────────────────── a diferença em uma linha -->
+<section class="sec">
+  <div class="num">02</div>
+  <h2>A diferença, em uma frase</h2>
+  <div class="nota"><b>A</b> — você separa <i>o seu e-mail</i> de <i>a lista de
+  quem acompanha</i>. Custa um campo a mais na tela, e a decisão fica tomada pra
+  sempre.</div>
+  <div class="nota"><b>B</b> — você tem uma lista só, e todo mundo nela vê tudo.
+  Custa nada agora, e custa uma conversa no dia em que alguém entrar nessa lista
+  sem você querer que veja o resultado individual.</div>
+  <div class="nota amb"><b>O que vale saber pra escolher:</b> a Prime não tem
+  ninguém com papel de gestor no sistema, então hoje as duas se comportam igual
+  pra você. A diferença só aparece quando você cadastrar um terceiro — um sócio,
+  um contador, um gerente. Em <b>A</b> ele entra sem ver nome; em <b>B</b>, vendo.</div>
+  <div class="nota ok"><b>O esforço é o mesmo</b> pra mim: as duas dão pra subir
+  hoje, antes de segunda.</div>
+</section>
+
+</div>
+</html>

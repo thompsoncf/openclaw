@@ -65,7 +65,9 @@ create table wa_qr_auth (conta_id bigint not null, arquivo text not null,
   primary key (conta_id, arquivo));
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text, ativo boolean default true,
-  whatsapp text);
+  -- `whatsapp_id` (cadastro pelo próprio WhatsApp) entra junto com `whatsapp`:
+  -- a trava do número da equipe olha os DOIS desde 17/09/2026
+  whatsapp text, whatsapp_id text);
 """
 
 

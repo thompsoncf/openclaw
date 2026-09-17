@@ -4542,16 +4542,30 @@ def _eh_numero_da_equipe(c, conta_id: int, numero: str) -> bool:
     com 1150 mensagens de conversa interna pendurada num lead do funil.
 
     Só a equipe ATIVA entra na regra: ex-funcionário pode virar cliente de verdade
-    um dia; quem está na equipe hoje, não."""
+    um dia; quem está na equipe hoje, não.
+
+    OS DOIS CAMPOS DE NÚMERO, desde 17/09/2026. `membros` guarda o WhatsApp em dois
+    lugares: `whatsapp`, digitado no convite da equipe, e `whatsapp_id`, que vem do
+    cadastro pelo próprio WhatsApp. Esta função só lia o primeiro — e medindo a
+    produção nesse dia, dos 9 leads de membro que existiam em 5 contas, SEIS tinham
+    casado só pelo `whatsapp_id`: o dono da 23 com 2.307 mensagens penduradas num
+    lead do funil dele, a dona da 35 com 1.150, o da 37 com 180. A trava estava de
+    pé e passando ao lado da maioria dos casos que ela existia pra impedir.
+
+    `coalesce` na ordem certa não serve aqui: um membro pode ter os DOIS campos
+    preenchidos com números diferentes (o do convite e o do cadastro), e os dois são
+    dele. Por isso a checagem é um `or` entre as duas colunas."""
     d = _so_digitos(numero)
     if len(d) < 8:
         return False
     r = c.execute(
         r"""select 1 from membros
              where conta_id=%s and ativo
-               and length(regexp_replace(coalesce(whatsapp,''), '\D', '', 'g')) >= 8
-               and right(regexp_replace(coalesce(whatsapp,''), '\D', '', 'g'), 8) = %s
-             limit 1""", (conta_id, d[-8:])).fetchone()
+               and (right(regexp_replace(coalesce(whatsapp,''), '\D', '', 'g'), 8) = %s
+                    and length(regexp_replace(coalesce(whatsapp,''), '\D', '', 'g')) >= 8
+                 or right(regexp_replace(coalesce(whatsapp_id,''), '\D', '', 'g'), 8) = %s
+                    and length(regexp_replace(coalesce(whatsapp_id,''), '\D', '', 'g')) >= 8)
+             limit 1""", (conta_id, d[-8:], d[-8:])).fetchone()
     return bool(r)
 
 
@@ -4677,12 +4691,22 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     # Cliente de casa cuja conversa foi REIMPORTADA, e não contato novo — ver o bloco
     # da órfã logo abaixo. Nasce falso e só o caminho da órfã liga.
     retomada = False
+    # DA CASA? A pergunta é feita UMA vez, aqui, porque a resposta governa dois
+    # caminhos diferentes — e até 17/09/2026 ela só governava o primeiro.
+    #
+    # O buraco: a trava morava dentro do `if not lead_id`, então só pegava número que
+    # ainda NÃO era lead. Quem virou lead antes de a trava existir (04/09), ou antes
+    # de entrar na equipe, continuava alimentando o funil pra sempre: cada mensagem
+    # promovia o lead de volta, esquentava, reativava se estivesse perdido e podia
+    # cair no rodízio pra um colega. Medido nesse dia: 9 leads de membro em 5 contas,
+    # com 4.309 mensagens — três deles recebendo mensagem ainda naquela semana.
+    da_equipe = _eh_numero_da_equipe(c, conta_id, remetente)
     if not lead_id:
         # ...a menos que o número seja DA CASA. Vendedor mandando mensagem pro chip da
         # empresa não é cliente, e virava lead quente com um colega de responsável —
         # ver _eh_numero_da_equipe pro que isso já produziu em produção. A conversa
         # entra igual; o funil é que não ganha ninguém.
-        if _eh_numero_da_equipe(c, conta_id, remetente):
+        if da_equipe:
             return _wa_conversa_da_equipe(c, conta_id, remetente, corpo, sid,
                                           nome_perfil, chip_id, midia,
                                           recebido_em=recebido_em)
@@ -4759,7 +4783,11 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         # na hora que o bot responde o alvo já é 'lead' — a trava nunca disparava. Quem
         # já engajou de verdade continua esquentando por `_ja_conversou`, que é o que
         # separa cliente ativo de alvo frio, e não depende do estágio.
-        if not (exigir_continuidade and de_prospeccao) or _ja_conversou(c, conta_id, lead_id):
+        # `not da_equipe`: mensagem de colega não promove, não esquenta e não tira o
+        # lead de onde ele está. É o lead que já existia de antes da trava — o
+        # caminho de criar já era barrado, este não era.
+        if not da_equipe and (not (exigir_continuidade and de_prospeccao)
+                              or _ja_conversou(c, conta_id, lead_id)):
             _promover_para_lead(c, conta_id, lead_id)
         _carimbar_origem(c, lead_id, codigo_anuncio)
         # O CLIENTE PERDIDO QUE VOLTA A FALAR (migração 236). Fica FORA da trava de
@@ -4770,8 +4798,9 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         # Não precisa de push próprio: o inbound já avisa o vendedor da mensagem, e o
         # card saindo de Perdido é o que ele vê. O registro fica em
         # `funil_movimentos` com motivo 'reativado', que é o que o relatório lê.
-        from finance import funil_perda as _fperda
-        _fperda.reativar(c, conta_id, lead_id)
+        if not da_equipe:
+            from finance import funil_perda as _fperda
+            _fperda.reativar(c, conta_id, lead_id)
     # Acha a conversa do lead OU qualquer uma do mesmo número (e vincula ela ao lead,
     # se estiver órfã). A conversa deste lead vem primeiro; depois as que já têm dono;
     # por último a mais recente. Exigir `prospeccao_id is null` pra casar por número,
@@ -4830,7 +4859,8 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
              agente_ativo = case when status='pendente' then agente_ativo
                                  when %s then true
                                  else agente_ativo end
-           where id=%s""", ((nome_perfil or "").strip()[:120], agente_on, conv_id))
+           where id=%s""", ((nome_perfil or "").strip()[:120],
+                            agente_on and not da_equipe, conv_id))
     # o nome que acabou de chegar desce pro lead, se ele ainda não tiver um de
     # verdade. Sem isto o lead fica com o texto provisório pra sempre, mesmo com o
     # nome ali do lado na conversa.
@@ -4847,7 +4877,9 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     try:
         with c.transaction():
             from finance import distribuicao as _dist
-            _mid = _dist.atribuir_se_sem_dono(c, conta_id, lead_id)
+            # da equipe não entra no rodízio: era assim que o recado de um vendedor
+            # virava "🔥 Novo lead pra você" no celular de um COLEGA.
+            _mid = None if da_equipe else _dist.atribuir_se_sem_dono(c, conta_id, lead_id)
             if _mid:
                 _emp = (c.execute("select coalesce(empresa,'') from prospeccao where id=%s",
                                   (lead_id,)).fetchone() or [""])[0]
@@ -4869,7 +4901,7 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     # Lead novo de verdade (não resposta de alguém que já tinha entrada na base) já
     # sai da caixa com um retorno agendado — assim ninguém esquece de responder.
     # Best-effort: nunca deixa a entrada da mensagem quebrar por isso.
-    if lead_novo:
+    if lead_novo and not da_equipe:
         try:
             from finance import agenda as _agenda
             _agenda.criar_evento(
@@ -4893,7 +4925,7 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     # `nova` pela mesma razão que o agente olha pra ela: a mesma mensagem chega mais
     # de uma vez (reentrega do provedor), e notificar de novo por uma entrega repetida
     # é avisar de algo que não aconteceu.
-    if nova and not _mid:
+    if nova and not _mid and not da_equipe:
         try:
             from finance import cockpit as _ck
             import threading

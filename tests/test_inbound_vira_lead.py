@@ -45,7 +45,9 @@ create table wa_contatos (conta_id bigint, numero8 text, nome text,
   da_agenda boolean default false, primary key (conta_id, numero8));
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text, ativo boolean default true, cockpit_pausado boolean default false,
-  whatsapp text);
+  -- `whatsapp_id` (cadastro pelo próprio WhatsApp) entra junto com `whatsapp`:
+  -- a trava do número da equipe olha os DOIS desde 17/09/2026
+  whatsapp text, whatsapp_id text);
 
 -- unicidade por CONVERSA, não global: o id do WhatsApp é o mesmo nas duas pontas
 -- da mensagem, e global fazia a conta que recebe perder a dela (migração 159)

@@ -40,7 +40,9 @@ create table canais_config (
   wa_phone_id text, desconectado_em timestamptz, rotulo text);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text, ativo boolean default true,
-  whatsapp text);
+  -- `whatsapp_id` (cadastro pelo próprio WhatsApp) entra junto com `whatsapp`:
+  -- a trava do número da equipe olha os DOIS desde 17/09/2026
+  whatsapp text, whatsapp_id text);
 create table prospeccao (id bigserial primary key, conta_id bigint, membro_id bigint,
   vendedor_id bigint, empresa text, contato text, decisor_nome text, socio text, cnpj text,
   segmento text, telefone text, whatsapp text, email text, cidade text, uf text,

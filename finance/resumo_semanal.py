@@ -29,6 +29,12 @@ no dia em que uma delas mudar — foi assim que o defeito do ticket por tipo (#7
 nasceu. O que este módulo acrescenta é só o que o Raio-X não tem por não ser
 pergunta de tela: o que está agendado pros PRÓXIMOS dias e o contrato por vendedor.
 
+SAI PELA CAIXA DA PRÓPRIA EMPRESA (`email_inbound.enviar_conta`), e não pelo SMTP
+do Zaq. Decisão do dono: "é melhor usar o que já funciona por dentro do Zaq em vez
+de configurar toda hora". Com isso o cron precisa só de `DATABASE_URL`, e o resumo
+chega com o rosto de quem ele fala. O SMTP global fica de rede pra conta que ainda
+não ligou caixa nenhuma — ver `_mandar`.
+
 NASCE DESLIGADO e a semana sem movimento não vira e-mail. Os dois são a mesma
 regra, aprendida no dia anterior com os avisos: 30 publicados em 7 dias, o dono com
 47 por ler e ZERO lidos. Canal que fala quando não tem o que dizer ensina a ser
@@ -361,6 +367,51 @@ def _nome_conta(pool, conta_id: int) -> str:
         return ""
 
 
+def _mandar(pool, conta_id: int, destino: str, assunto: str, html: str,
+            empresa: str) -> tuple[bool, str]:
+    """Manda, PELA CAIXA DA PRÓPRIA EMPRESA quando ela tem uma.
+
+    Decisão do dono em 17/09/2026, ao ver o passo a passo do Render que eu tinha
+    escrito: "é melhor usar o que já funciona por dentro do Zaq, em vez de
+    configurar toda hora — o Zaq usa o e-mail da empresa pra esse tipo de
+    relatório, e no caso da Prime já está configurado". Ele estava certo, e isso
+    apaga um passo inteiro da instalação:
+
+    * a Prime já tem `primeeventosthe@gmail.com` e a ZAQ, `thorconsultoria01@gmail.com`,
+      as duas ativas em `canais_config` — nada a configurar;
+    * o cron passa a precisar só de `DATABASE_URL`. Sem SMTP no serviço novo, sem
+      senha copiada de um lugar pro outro, sem o nome de variável errado que eu
+      mesmo documentei (era `SMTP_PASS`; o certo é `SMTP_SENHA`);
+    * e o resumo chega COM O ROSTO DA EMPRESA, que é de quem ele fala.
+
+    O SMTP GLOBAL É SÓ A REDE, e não o caminho normal. `email_inbound.enviar_conta`
+    se recusa a cair nele de propósito — mas aquela regra é sobre e-mail que vai
+    pro LEAD, que não pode sair da caixa de outra conta. Aqui quem recebe é o dono
+    da própria conta, e um resumo que não chega porque a empresa ainda não ligou a
+    caixa seria pior que um resumo que chega assinado pelo Zaq.
+
+    Devolve (ok, por_onde) — e o `por_onde` fica gravado em
+    `resumo_semanal_envio.motivo`, porque "de qual caixa isso saiu" é a primeira
+    pergunta quando alguém não recebe.
+    """
+    try:
+        from finance import email_inbound as _ei
+        if _ei.enviar_conta(pool, conta_id, destino, assunto, html,
+                            from_nome=empresa or "Zaq"):
+            return True, "caixa da empresa"
+    except Exception as e:  # noqa: BLE001 — cai na rede abaixo
+        _log.warning("resumo pela caixa da conta %s: %s: %s",
+                     conta_id, type(e).__name__, e)
+    try:
+        from finance import email_sender as _es
+        if _es.enviar_email(destino, assunto, html):
+            return True, "smtp do zaq"
+    except Exception as e:  # noqa: BLE001
+        _log.warning("resumo pelo smtp global (conta %s): %s: %s",
+                     conta_id, type(e).__name__, e)
+    return False, "sem caixa de e-mail"
+
+
 def enviar_conta(pool, conta_id: int, agora: datetime | None = None,
                  *, simular: bool = False) -> dict:
     """Manda o resumo da semana passada pra uma conta. Devolve o que aconteceu.
@@ -383,7 +434,6 @@ def enviar_conta(pool, conta_id: int, agora: datetime | None = None,
     if dados is None:
         return {"ok": True, "enviados": 0, "motivo": "semana_sem_movimento"}
 
-    from finance import email_sender as _es
     from finance import resumo_semanal_html as _html
     empresa = _nome_conta(pool, conta_id)
     semana = dados["semana"]
@@ -405,9 +455,8 @@ def enviar_conta(pool, conta_id: int, agora: datetime | None = None,
             if simular:
                 enviados += 1
                 continue
-            ok = bool(_es.enviar_email(d["email"], assunto, html))
-            anotar_envio(pool, conta_id, semana, d["email"], d["tipo"], ok,
-                         "" if ok else "smtp recusou")
+            ok, por_onde = _mandar(pool, conta_id, d["email"], assunto, html, empresa)
+            anotar_envio(pool, conta_id, semana, d["email"], d["tipo"], ok, por_onde)
             enviados += 1 if ok else 0
             if not ok:
                 falhas.append(d["email"])

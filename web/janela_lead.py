@@ -93,6 +93,30 @@ CSS = """/* o balão do LEAD — resumo pra decidir a próxima ação (contato, 
 .lp-ed-acoes button{width:auto;margin:0;font-size:.8rem;cursor:pointer}
 .lp-ed-salvar{background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.4rem .9rem;font-weight:600}
 .lp-ed-cancelar{background:none;border:1px solid var(--borda);color:var(--txt-mut);border-radius:8px;padding:.4rem .9rem}
+/* A FOLHA "por que perdeu" — a lista de seis que o painel não tinha. Centrada e
+   por cima de tudo (o arrastar acontece no quadro, sem janela aberta, então ela
+   não pode se ancorar em card nenhum). Os `margin:0;width:auto` nos botões vencem
+   o `button{width:100%;margin-top:1.4rem}` global, a mesma armadilha que já pegou
+   o ✕ de excluir e o "✎ Editar". */
+.perdapop{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.55);
+  display:flex;align-items:center;justify-content:center;padding:1rem}
+.perdapop .pp-cx{background:var(--card);border:1px solid var(--borda);border-radius:14px;
+  padding:1rem;width:340px;max-width:100%;box-shadow:0 18px 46px rgba(0,0,0,.5)}
+.perdapop .pp-t{font-weight:700;font-size:1rem}
+.perdapop .pp-sub{color:var(--txt-mut);font-size:.76rem;margin:.2rem 0 .7rem}
+.perdapop .pp-lista{display:flex;flex-direction:column;gap:.35rem}
+.perdapop .pp-op{width:100%;margin:0;text-align:left;background:var(--bg);color:var(--txt);
+  border:1px solid var(--borda);border-radius:9px;padding:.5rem .7rem;font-size:.84rem;cursor:pointer}
+.perdapop .pp-op:hover{border-color:var(--verde)}
+.perdapop .pp-op.on{border-color:var(--verde);background:var(--neon-fundo);color:var(--verde-claro)}
+.perdapop .pp-desc{width:100%;margin-top:.5rem;background:var(--bg);border:1px solid var(--borda);
+  color:var(--txt);border-radius:9px;padding:.5rem .7rem;font-size:.84rem}
+.perdapop .pp-bts{display:flex;gap:.5rem;margin-top:.8rem}
+.perdapop .pp-ok{width:auto;margin:0;background:var(--verde);color:var(--sobre-verde);border:0;
+  border-radius:9px;padding:.45rem 1rem;font-weight:600;cursor:pointer}
+.perdapop .pp-ok:disabled{opacity:.45;cursor:default}
+.perdapop .pp-nao{width:auto;margin:0;background:none;border:1px solid var(--borda);
+  color:var(--txt-mut);border-radius:9px;padding:.45rem .9rem;cursor:pointer}
 .lp-trecho{border-left:2px solid #1f3a4d;padding:.25rem .55rem;margin-top:.3rem;color:var(--txt-mut);font-style:italic;font-size:.78rem;background:var(--bg)}
 .lp-pista{margin-top:.3rem;font-size:.78rem;color:#e0b45f}
 .lp-evbts{display:flex;gap:.4rem;margin-top:.45rem}
@@ -288,12 +312,84 @@ function kbLeadSalvar(id){
 // e, se deu certo, move o card pra coluna nova no board por trás (mesma
 // varredura de contagem do drag-and-drop) e fecha o balão: o resultado
 // (card na coluna nova) já fica visível sem o balão flutuando desalinhado.
+// A LISTA QUE FALTAVA NO PAINEL (17/09/2026).
+//
+// O servidor sempre soube recusar: quando a etapa exige motivo, `/status` devolve
+// {ok:false, erro:'motivo_obrigatorio', motivos:[...]} — com a lista pronta. O
+// painel JOGAVA ISSO FORA. Arrastar o card pra Perdido recarregava a página em
+// silêncio (o card voltava sozinho, sem uma palavra); o seletor daqui dizia só
+// "Não consegui mudar a situação", que não diz o que fazer.
+//
+// Foi o dono quem viu o efeito, no Raio-X: "3 de 5 sem motivo". O bloco explicava
+// que o motivo é um toque numa lista de seis "no app e na ficha" — e essa frase
+// era, sem querer, a confissão: no QUADRO, que é onde o card se move, lista
+// nenhuma. Quem trabalha ali ou perdia o lead sem motivo (quando a exigência
+// estava desligada) ou batia numa parede muda (depois de ligada).
+//
+// Mora no módulo compartilhado porque as duas telas que abrem a janela precisam
+// dela, e porque o arrastar do quadro chama a MESMA função — uma cópia por tela
+// seria a terceira versão da mesma pergunta.
+function kbPerguntarMotivo(id, status, lista, quandoOk, quandoDesiste){
+  var ant=document.getElementById('perdapop'); if(ant)ant.remove();
+  var pop=document.createElement('div'); pop.className='perdapop'; pop.id='perdapop';
+  var h='<div class="pp-cx"><div class="pp-t">Por que perdeu?</div>'
+    +'<div class="pp-sub">Sem isto o relatório do dono não sabe dizer o que está derrubando as vendas.</div>'
+    +'<div class="pp-lista">';
+  (lista||[]).forEach(function(m){
+    h+='<button type="button" class="pp-op" data-chave="'+cxEscK(m.chave)+'" data-desc="'
+      +(m.exige_descricao?'1':'0')+'">'+cxEscK(m.rotulo)+'</button>';
+  });
+  h+='</div><input class="pp-desc" id="pp-desc" placeholder="Conte em uma linha o que houve" style="display:none">'
+    +'<div class="pp-bts"><button type="button" class="pp-ok" disabled>Confirmar</button>'
+    +'<button type="button" class="pp-nao">Deixar como estava</button></div></div>';
+  pop.innerHTML=h; document.body.appendChild(pop);
+  var escolhido=null, desc=pop.querySelector('#pp-desc'), ok=pop.querySelector('.pp-ok');
+  function fecha(){pop.remove();}
+  pop.querySelectorAll('.pp-op').forEach(function(b){
+    b.addEventListener('click',function(){
+      pop.querySelectorAll('.pp-op').forEach(function(o){o.classList.remove('on');});
+      b.classList.add('on'); escolhido=b.getAttribute('data-chave');
+      // O CAMPO DE TEXTO NASCE VISÍVEL só quando o motivo escolhido pede — e some
+      // quando não pede. Um campo sempre aberto vira ruído; sempre fechado esconde
+      // a exigência até o servidor recusar de novo.
+      desc.style.display = b.getAttribute('data-desc')==='1' ? 'block' : 'none';
+      ok.disabled=false;
+    });
+  });
+  ok.addEventListener('click',function(){
+    if(!escolhido)return;
+    ok.disabled=true; ok.textContent='Salvando…';
+    var body=new URLSearchParams();
+    body.append('status',status); body.append('motivo',escolhido);
+    body.append('perda_descricao', desc.style.display==='none' ? '' : desc.value);
+    fetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
+      .then(function(r){return r.json();}).then(function(d2){
+        if(!d2.ok){
+          ok.disabled=false; ok.textContent='Confirmar';
+          // `descricao_obrigatoria` volta SEM lista: o motivo já está escolhido e
+          // o que falta é a linha de texto. Mostrar a lista de novo aqui faria a
+          // pessoa recomeçar do zero por causa de um campo.
+          if(d2.erro==='descricao_obrigatoria'){desc.style.display='block';desc.focus();return;}
+          alert('Não consegui marcar como perdido.'); return;
+        }
+        fecha(); quandoOk(d2);
+      }).catch(function(){ok.disabled=false;ok.textContent='Confirmar';alert('Falha de rede.');});
+  });
+  pop.querySelector('.pp-nao').addEventListener('click',function(){fecha();if(quandoDesiste)quandoDesiste();});
+}
 function kbLeadStatus(sel,id){
   var novo=sel.value, prev=sel.getAttribute('data-prev')||'';
   var body=new URLSearchParams();body.append('status',novo);
   fetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
     .then(function(r){return r.json();}).then(function(d){
-      if(!d.ok){alert('Não consegui mudar a situação.');sel.value=prev;return;}
+      if(!d.ok&&d.erro==='motivo_obrigatorio'){
+        kbPerguntarMotivo(id, novo, d.motivos, function(d2){
+          if(typeof window.kbDepoisDoStatus==='function'){window.kbDepoisDoStatus(d2,id,novo);kbFecharLead();return;}
+          location.reload();
+        }, function(){sel.value=prev;});
+        return;
+      }
+      if(!d.ok){alert(d.msg||'Não consegui mudar a situação.');sel.value=prev;return;}
       // O QUE ACONTECE DEPOIS é de cada tela, e por isso é um gancho e não um
       // `if` por tela aqui dentro: no funil o card anda pra coluna nova sem
       // recarregar nada; no Follow-up a troca pode TIRAR o lead da lista (ganho e

@@ -98,6 +98,8 @@ table.t td b{color:var(--text)}
 .chip.p{border-color:var(--coral-borda);background:var(--coral-fundo);color:#F0A9A2}
 .divisor{height:1px;background:var(--line);margin:.15rem 0}
 .parado{font-size:.7rem;color:var(--ambar);font-family:var(--mono)}
+.lbl2{font:500 .66rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint);margin-bottom:.3rem}
+.lbl2 b{color:var(--text-dim)}
 
 .ok-lista{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:.55rem}
 .ok-lista li{padding-left:1.4rem;position:relative;font-size:.86rem;color:var(--text-dim)}
@@ -189,17 +191,30 @@ table.t td b{color:var(--text)}
       <p class="nota">O seletor é aquela pílula cinza no canto direito, com <b>0,76rem</b> de letra.
       É um <code>&lt;select&gt;</code> do navegador: no celular, um toque abre a roleta do sistema,
       outro escolhe, outro confirma. <b>Três toques</b> e uma lista que tampa a tela.</p>
-      <h4 style="margin-top:.3rem">E a lista que ele abre, na Prime:</h4>
-      <div class="lista">
-        <div>Novo</div><div class="on">Contatado ✓</div><div>Follow-up</div>
-        <div>Agendado Visita</div><div>Negociação</div><div>Fechado</div>
-        <div class="ganho">Evento Realizado</div><div class="fim">Perdido</div>
-        <div>Evento A Realizar</div>
-        <div class="nota">↑ a festa que ainda vai acontecer fica DEPOIS de “Perdido”</div>
+      <h4 style="margin-top:.3rem">E a lista que ele abre — que NÃO é a mesma nas duas telas:</h4>
+      <div class="grade2" style="gap:.6rem">
+        <div>
+          <div class="lbl2">abrindo pelo <b>Follow-up</b> · 9 opções</div>
+          <div class="lista">
+            <div>Novo</div><div class="on">Contatado ✓</div><div>Follow-up</div>
+            <div>Agendado Visita</div><div>Negociação</div><div>Fechado</div>
+            <div class="ganho">Evento Realizado</div><div class="fim">Perdido</div>
+            <div>Evento A Realizar</div>
+            <div class="nota">↑ a festa que ainda vai acontecer fica DEPOIS de “Perdido”</div>
+          </div>
+        </div>
+        <div>
+          <div class="lbl2">abrindo pelo <b>quadro do funil</b> · 6 opções</div>
+          <div class="lista">
+            <div>Novo</div><div class="on">Contatado ✓</div><div>Follow-up</div>
+            <div>Negociação</div><div>Fechado</div><div class="fim">Perdido</div>
+            <div class="nota">↑ some “Evento Realizado” — que é o GANHO da conta</div>
+          </div>
+        </div>
       </div>
-      <p class="nota">Nove opções em fila única, sem separar <b>andar no funil</b> de
-      <b>encerrar o lead</b>. “Perdido” fica encostado em “Evento Realizado”: um dedo torto no
-      celular marca uma festa como perda — e a perda dispara a pergunta do motivo e tira o card do quadro.</p>
+      <p class="nota">Sem separar <b>andar no funil</b> de <b>encerrar o lead</b>: “Perdido” fica
+      encostado em “Evento Realizado”, e um dedo torto no celular marca uma festa como perda — o que
+      dispara a pergunta do motivo e tira o card do quadro.</p>
     </div>
 
     <div class="cx">
@@ -237,6 +252,38 @@ table.t td b{color:var(--text)}
       Isso é a regra 6 do CLAUDE.md sendo furada por uma constante esquecida.</p>
     </div>
   </div>
+</section>
+
+<!-- ======================= 2b. quatro portas ======================= -->
+<section class="sec">
+  <div class="k">2b · O defeito que estava escondido</div>
+  <h2>Quatro portas pro mesmo lead, quatro listas diferentes.</h2>
+  <p class="leg">A Prime tem <b>9 etapas</b> cadastradas. Nenhuma das telas mostra as 9 —
+  e cada uma corta um pedaço diferente. Isto não foi desenhado assim; foi acontecendo.</p>
+  <div class="tabwrap">
+    <table class="t">
+      <thead><tr><th>Por onde o vendedor abre</th><th>O que a lista corta</th><th class="num">opções na Prime</th><th>dá pra marcar o GANHO?</th></tr></thead>
+      <tbody>
+        <tr class="zero"><td>Quadro do funil → clicar no card</td><td>tira as etapas “sai do quadro”</td><td class="num"><b>6</b></td><td class="ruim">NÃO</td></tr>
+        <tr><td>Follow-up → Abrir ficha</td><td>não corta nada</td><td class="num">9</td><td class="bom">sim</td></tr>
+        <tr><td>Ficha completa</td><td>não corta nada</td><td class="num">9</td><td class="bom">sim</td></tr>
+        <tr><td>App → lead → Etapa no funil</td><td>tira ganho, perdido e “sai do quadro”</td><td class="num">5</td><td class="bom">sim, em botão separado</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="leg" style="margin-top:.9rem">A causa é uma variável fazendo dois trabalhos. No funil, a
+  lista de etapas é filtrada pra montar as COLUNAS do quadro (a etapa marcada “sai do quadro” não vira
+  coluna — foi um pedido seu, e está certo). Só que o seletor da janela do lead é montado <b>depois</b>,
+  a partir da mesma variável já filtrada. O quadro esconder a coluna virou, sem querer, o vendedor não
+  poder escolher a etapa.</p>
+  <p class="leg"><b>O efeito prático na Prime:</b> quem trabalha pelo quadro — que é a tela principal —
+  não tem como marcar <b>Evento Realizado</b>, <b>Agendado Visita</b> nem <b>Evento A Realizar</b>. As
+  três somem. É consistente com a medida: em dois meses entraram <b>7</b> leads em ganho e <b>15</b> em
+  Agendado Visita, num funil de 398.</p>
+  <p class="leg"><b>O conserto é uma linha</b> — montar o seletor a partir da lista inteira, não da
+  filtrada. O quadro continua escondendo as colunas; o vendedor volta a poder escolher. No desenho
+  proposto essas etapas aparecem com a borda tracejada e o aviso <i>“sai do quadro”</i>, pra ele saber
+  que o card vai sumir dali.</p>
 </section>
 
 <!-- ======================= 3. os nomes ======================= -->
@@ -304,6 +351,9 @@ table.t td b{color:var(--text)}
       com ✓ e ✕. Nunca mais “Perdido” encostado numa etapa de andamento.</li>
     <li><b>“Parado há 20 dias” ao lado do rótulo.</b> É o empurrão pra qualificar: o vendedor vê o
       tempo morto sem precisar abrir relatório nenhum.</li>
+    <li><b>As 9 etapas voltam a caber nas duas telas.</b> Hoje o seletor do quadro tem 6 e o do
+      Follow-up tem 9 — a mesma janela, o mesmo lead. Passa a ser uma lista só, com as que saem do
+      quadro marcadas em tracejado.</li>
     <li class="nao"><b>O que NÃO muda:</b> a rota, a pergunta do motivo da perda, a lista de motivos da
       conta, o gancho que move o card no quadro. Tudo isso já existe e continua igual.</li>
   </ul>

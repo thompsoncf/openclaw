@@ -1169,3 +1169,52 @@ def test_o_aviso_da_visita_sai_no_site(pool):
 
 def test_reaplicar_a_260_nao_duplica(pool):
     assert _ia_visita(pool)["id"] == _ia_visita(pool)["id"]
+
+
+# ------------------------------------------------- o resumo por semana (17/09/2026)
+# A medição que motivou: 30 avisos publicados em 7 dias, o DONO com 47 por ler e
+# ZERO lidos, a vendedora com mais leads com 28 por ler e zero. A faixa dizia
+# "1 de 42". Escolha do dono: "um resumo por semana".
+
+def test_a_semana_e_a_de_brasilia_e_nao_a_do_servidor():
+    """O caso que separa os dois fusos é o DOMINGO À NOITE, e só ele: a entrega de
+    domingo 21h em Brasília é segunda 00h em UTC, e a semana ISO vira na segunda.
+    Pela hora do servidor ela cairia na semana seguinte — e na manhã de segunda a
+    pessoa veria "1 novidade esta semana" por uma entrega que, pra ela, foi ontem.
+
+    (Sexta à noite não serve de teste: sábado em UTC ainda é a mesma semana ISO.
+    Escrevi assim primeiro e a mutação passou incólume.)"""
+    from datetime import datetime, timezone
+    domingo_21h_brt = datetime(2026, 9, 21, 0, 0, tzinfo=timezone.utc)   # 20/09, 21h
+    quarta = datetime(2026, 9, 16, 20, 0, tzinfo=timezone.utc)
+    assert nv.semana_de(domingo_21h_brt) == "2026-W38", "a semana virou pela hora do servidor"
+    assert nv.semana_de(quarta) == "2026-W38"
+    # ...e a segunda seguinte, aí sim, é outra semana
+    assert nv.semana_de(datetime(2026, 9, 21, 15, 0, tzinfo=timezone.utc)) == "2026-W39"
+
+
+def test_avisos_da_mesma_semana_viram_um_grupo_so():
+    from datetime import datetime, timezone
+    itens = [{"id": i, "publicado_em": datetime(2026, 9, d, 12, tzinfo=timezone.utc)}
+             for i, d in enumerate((16, 17, 15), start=1)]
+    itens.append({"id": 9, "publicado_em": datetime(2026, 9, 8, 12, tzinfo=timezone.utc)})
+    grupos = nv.por_semana(itens)
+    assert [g["n"] for g in grupos] == [3, 1], "não agrupou por semana"
+    assert grupos[0]["chave"] > grupos[1]["chave"], "a semana mais nova vem primeiro"
+
+
+def test_aviso_sem_data_nao_entra_em_semana_nenhuma():
+    """Mesma regra da faixa: sem data não dá pra dizer de que semana é, e chutar
+    poria um aviso de dois meses atrás em "esta semana"."""
+    assert nv.por_semana([{"id": 1, "publicado_em": None}]) == []
+
+
+def test_o_rotulo_da_semana_fala_portugues_e_nao_ISO():
+    """"2026-W38" não diz nada a ninguém."""
+    from datetime import datetime, timezone
+    agora = datetime(2026, 9, 17, 12, tzinfo=timezone.utc)
+    assert nv.rotulo_semana("2026-W38", agora=agora) == "esta semana"
+    assert nv.rotulo_semana("2026-W37", agora=agora) == "semana passada"
+    assert nv.rotulo_semana("2026-W35", agora=agora) == "24 a 30/08"
+    # e não estoura com lixo
+    assert nv.rotulo_semana("nao-e-semana", agora=agora) == "antes"

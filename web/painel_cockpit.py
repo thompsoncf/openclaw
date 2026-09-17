@@ -1496,29 +1496,43 @@ def _novidades_vend(conta_id: int, membro_id: int) -> list[dict]:
         return []
 
 
-def _faixa_novidade(itens: list[dict], *, conta_id: int | None = None) -> str:
-    """A faixa em cima da Fila: o aviso mais novo que ele ainda não leu.
+def _faixa_novidade(itens: list[dict], *, conta_id: int | None = None,
+                    membro_id: int | None = None) -> str:
+    """A faixa em cima da Fila: A SEMANA que ele ainda não leu — não um aviso.
 
-    "Ver" abre o aviso (que marca lida ao abrir). O ✕ marca ESTE aviso, um só.
+    "Ver" abre a lista daquela semana. O ✕ dispensa A FAIXA daquela semana, sem
+    marcar nada como lido.
 
-    TRÊS PORTÕES, e cada um nasceu de um erro meu em 16/09/2026:
+    QUATRO PORTÕES, e cada um nasceu de um erro meu:
 
     1. O DONO PODE DESLIGAR (`novidades.faixa_ligada`, migração 266). Ele disse
        que não conseguia fechar o aviso; o ✕ funcionava — tocou quatro vezes e o
-       banco registrou as quatro — mas havia 26 por ler e a faixa mostra um por
+       banco registrou as quatro — mas havia 26 por ler e a faixa mostrava um por
        vez. Eu propus o ✕ dispensar TODOS, e ele barrou com argumento melhor:
        marcar 26 como lidos destrói informação ("não lido" é o que a bolinha do
        Perfil conta, e não existe desmarcar), enquanto um interruptor não apaga
-       nada e volta atrás. Por isso o ✕ aqui continua marcando UM.
+       nada e volta atrás.
 
     2. O PRAZO (`novidades.para_faixa`): aviso de mais de 14 dias não interrompe.
-       Dos oito vendedores em produção, QUATRO estavam em 27 de 27 — nunca tocaram
-       a faixa. Sem o prazo, o interruptor vira a única saída, e desligado uma vez
-       fica desligado pra sempre.
 
-    3. O CONTADOR "1 de 4": era a fila invisível que fazia o ✕ parecer quebrado —
-       fechava um, aparecia outro igual. Este é o que resolve o chamado, e é o
-       único dos três que não apaga nem esconde nada.
+    3. O CONTADOR: a fila invisível era o que fazia o ✕ parecer quebrado.
+
+    4. A SEMANA (17/09/2026), que é o que faltava pros três anteriores servirem
+       pra alguma coisa. Medido em produção no dia seguinte aos outros três: o
+       DONO com 47 por ler e ZERO lidos, a vendedora com mais leads com 28 por ler
+       e zero lidos, 30 avisos publicados em 7 dias. O prazo de 14 dias não segurou
+       nada porque 42 dos 47 eram recentes — ele foi feito contra aviso VELHO, e o
+       problema era aviso DEMAIS. Foi a regra 5 do CLAUDE.md funcionando bem
+       demais: todo PR escreve o seu aviso, e cinco entregas por dia viram cinco
+       interrupções por dia.
+
+       A escolha do dono: "um resumo por semana". Então a faixa interrompe UMA vez
+       por semana, dizendo quantas novidades ela trouxe, e cada aviso continua
+       inteiro na lista e no site — o agrupamento é de leitura, não de banco.
+
+    O ✕ AQUI NÃO MARCA LIDO (migração 272): com a faixa semanal, um toque apagaria
+    a semana inteira, que é exatamente o que o dono barrou em 16/09. Ele grava numa
+    tabela própria e a bolinha do Perfil continua dizendo a verdade.
     """
     por_ler = [n for n in itens if not n["lida"]]
     if not por_ler:
@@ -1533,18 +1547,32 @@ def _faixa_novidade(itens: list[dict], *, conta_id: int | None = None) -> str:
     na_faixa = nv.para_faixa(por_ler)
     if not na_faixa:
         return ""
-    n = na_faixa[0]
-    # o contador conta o que a FAIXA vai mostrar, não o que existe por ler: dizer
-    # "1 de 26" e parar de aparecer no quarto seria uma promessa quebrada
-    resto = len(na_faixa)
-    resumo = f" {esc(n['resumo'])}" if n.get("resumo") else ""
+    semanas = nv.por_semana(na_faixa)
+    if conta_id is not None and membro_id is not None:
+        vistas = nv.semanas_vistas(get_pool(), conta_id, membro_id)
+        semanas = [g for g in semanas if g["chave"] not in vistas]
+    if not semanas:
+        return ""
+    g = semanas[0]
+    # UMA novidade não vira "1 novidade desta semana": diz o título dela, que é o
+    # que a pessoa precisa pra decidir se abre. O agrupamento serve pra domar
+    # muitas, não pra esconder uma.
+    if g["n"] == 1:
+        n = g["itens"][0]
+        resumo = f" {esc(n['resumo'])}" if n.get("resumo") else ""
+        miolo = f"<span><b>{esc(n['titulo'])}</b>{resumo}</span>"
+        href = f"{_BASE}/novidades/{n['id']}"
+    else:
+        miolo = (f"<span><b>{g['n']} novidades</b> {esc(g['rotulo'])}</span>")
+        href = f"{_BASE}/novidades/semana/{esc(g['chave'])}"
+    # o contador conta SEMANAS por ler, não avisos: "1 de 42" foi o que ninguém
+    # tocou, e é a conta que este bloco inteiro existe pra não fazer mais
+    resto = len(semanas)
     conta = (f"<span class=qtos>1 de {resto}</span>" if resto > 1 else "")
-    return (f"<div class=faixa><a href='{_BASE}/novidades/{n['id']}'>✨ "
-            f"<span><b>{esc(n['titulo'])}</b>{resumo}</span>{conta}"
+    return (f"<div class=faixa><a href='{href}'>✨ {miolo}{conta}"
             f"<span class=ver>Ver →</span></a>"
-            f"<form method=post action='{_BASE}/novidades/{n['id']}/lida'>"
-            f"<input type=hidden name=volta value=fila>"
-            f"<button type=submit class=x aria-label='Fechar o aviso'>✕</button></form></div>")
+            f"<form method=post action='{_BASE}/novidades/semana/{esc(g['chave'])}/vista'>"
+            f"<button type=submit class=x aria-label='Dispensar os avisos desta semana'>✕</button></form></div>")
 
 
 def _faixa_recebidos(conta_id: int, membro_id: int) -> str:
@@ -2055,7 +2083,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     novas = sum(1 for n in novidades if not n["lida"])
     corpo = (_hdr("Meus leads", sub, inicial=_ini(p["nome"]), direita=_selo(conta_id))
              + _flash(request)
-             + _faixa_novidade(novidades, conta_id=conta_id)
+             + _faixa_novidade(novidades, conta_id=conta_id, membro_id=membro_id)
              # o repasse vem DEPOIS da novidade e antes do foco: é sobre um lead
              # que já é dele agora, então pertence ao trabalho, não ao noticiário.
              + ("" if gestor else _faixa_recebidos(conta_id, membro_id))
@@ -6202,6 +6230,68 @@ def cockpit_fechar(request: Request, lead_id: int, tipo: str = Form(...),
         return RedirectResponse(_BASE, status_code=303)
     request.session["ck_err"] = _erro(r)
     return RedirectResponse(f"{_BASE}/lead/{lead_id}", status_code=303)
+
+
+@router.get("/cockpit/novidades/semana/{chave}", response_class=HTMLResponse)
+def cockpit_novidades_semana(request: Request, chave: str):
+    """O que a semana trouxe, numa lista — a tela do "resumo por semana".
+
+    Pedido do dono em 17/09/2026, ao ver a medição: 30 avisos em 7 dias, ele com 47
+    por ler e zero lidos. "Um resumo por semana." Aqui é onde o resumo abre.
+
+    CADA AVISO CONTINUA INTEIRO: esta tela mostra título e resumo, e o toque leva
+    pro aviso completo, que é quem marca a leitura. Ela NÃO marca nada como lido —
+    ver a lista de títulos não é ter lido as cinco coisas, e inventar isso encheria
+    a base de leituras que não aconteceram.
+    """
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    from finance import novidades as nv
+    todos = _novidades_vend(conta_id, membro_id)
+    grupo = next((g for g in nv.por_semana(todos) if g["chave"] == chave), None)
+    if not grupo:
+        return RedirectResponse(f"{_BASE}/perfil", status_code=303)
+    por_ler = sum(1 for n in grupo["itens"] if not n["lida"])
+    linhas = ""
+    for n in grupo["itens"]:
+        cls = "nvc lida" if n["lida"] else "nvc nova"
+        dia = n["publicado_em"].strftime("%d/%m") if n.get("publicado_em") else ""
+        resumo = f"<p>{esc(n['resumo'])}</p>" if n.get("resumo") else ""
+        linhas += (f"<a class='{cls}' href='{_BASE}/novidades/{n['id']}'>"
+                   f"<div class=t><span>{esc(n['titulo'])}</span><small>{esc(dia)}</small></div>"
+                   f"{resumo}</a>")
+    sub = f"{grupo['n']} novidade{'' if grupo['n'] == 1 else 's'}"
+    if por_ler:
+        sub += f" · {por_ler} por ler"
+    corpo = (_hdr(esc(grupo["rotulo"]).capitalize(), sub, voltar=f"{_BASE}/perfil")
+             + "<div class=scroll><div class=bloco>" + linhas
+             + "<div class=fonte>Toque numa novidade pra ler e marcar como lida. "
+               "O ✕ da Fila só para de mostrar o aviso da semana — não marca nada "
+               "como lido.</div>"
+             + "</div></div>"
+             + _abas_vend("perfil", _pend_vend(conta_id, membro_id)))
+    return _page(f"Novidades — {grupo['rotulo']}", corpo)
+
+
+@router.post("/cockpit/novidades/semana/{chave}/vista")
+def cockpit_novidades_semana_vista(request: Request, chave: str):
+    """O ✕ da faixa semanal: para de interromper, sem marcar nada como lido.
+
+    A diferença não é sutil e é a razão de a tabela 272 existir. Em 16/09/2026 o
+    dono barrou o ✕ que dispensava a fila inteira, porque marcar como lido o que
+    ninguém leu destrói informação — "não lido" é o que a bolinha conta e não há
+    desmarcar. Com a faixa semanal isso seria pior: um toque apagaria a semana. Aqui
+    o toque diz "vi que teve novidade e não quero ser interrompido de novo por
+    esta semana", e é só isso que fica gravado.
+    """
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    from finance import novidades as nv
+    nv.marcar_semana_vista(get_pool(), sess[0], sess[1], chave)
+    return RedirectResponse(_BASE, status_code=303)
 
 
 @router.get("/cockpit/novidades/{nid}", response_class=HTMLResponse)

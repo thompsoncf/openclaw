@@ -73,8 +73,51 @@ def pendentes(c, conta_id: int, chaves: list[str]) -> list[dict]:
                                where e.conta_id = p.conta_id and e.prospeccao_id = p.id
                                  and coalesce(e.status,'ativo') <> 'cancelado')
             order by p.evento_em""", (conta_id, chaves)).fetchall()
-    return [{"id": r[0], "quem": r[1], "data": r[2], "tipo": r[3],
-             "convidados": r[4], "membro_id": r[5]} for r in linhas]
+    fila = [{"id": r[0], "quem": r[1], "data": r[2], "tipo": r[3],
+             "convidados": r[4], "membro_id": r[5],
+             "hora_inicio": None, "hora_fim": None} for r in linhas]
+    _horarios_do_orcamento(c, conta_id, fila)
+    return fila
+
+
+def _horarios_do_orcamento(c, conta_id: int, fila: list[dict]) -> None:
+    """Carimba `hora_inicio`/`hora_fim` na fila, lendo o orçamento de cada lead.
+
+    CONSULTA SEPARADA E TOLERANTE, e não um `left join` na de cima — que foi como
+    eu escrevi na primeira versão e o teste derrubou na hora. Numa base sem a
+    tabela `orcamentos` o join levava a PONTE INTEIRA junto, e o lead que fechou
+    não virava compromisso nenhum. O horário é enfeite; a ponte não. Mesma decisão
+    (e mesmo motivo) do `_com_orcamento` na agenda e da leitura da última mensagem
+    no funil.
+
+    SAVEPOINT, e não só try/except: no Postgres um erro aborta a transação inteira,
+    e sem o ponto de retorno as consultas seguintes desta mesma conexão morreriam
+    com "current transaction is aborted" — a ponte cairia do mesmo jeito.
+
+    SÓ O ORÇAMENTO DA MESMA DATA. Medido na conta 34 em 17/09: a Josiany tem festa
+    em 01/10 e o orçamento dela é de 19/12. Sem comparar a data, a agenda receberia
+    o horário de outra festa — pior que ficar sem horário nenhum.
+    """
+    ids = [x["id"] for x in fila]
+    if not ids:
+        return
+    try:
+        with c.transaction():
+            linhas = c.execute(
+                """select p.id,
+                          nullif(o.evento->>'inicio',''), nullif(o.evento->>'fim','')
+                     from prospeccao p
+                     join orcamentos o on o.id = p.orcamento_id and o.conta_id = p.conta_id
+                    where p.conta_id = %s and p.id = any(%s)
+                      and nullif(o.evento->>'data','') = p.evento_em::text""",
+                (conta_id, ids)).fetchall()
+    except Exception:  # noqa: BLE001 — a ponte funciona sem o horário
+        _log.warning("não deu pra ler o horário do orçamento na conta %s",
+                     conta_id, exc_info=True)
+        return
+    por_lead = {r[0]: (r[1], r[2]) for r in linhas}
+    for x in fila:
+        x["hora_inicio"], x["hora_fim"] = por_lead.get(x["id"], (None, None))
 
 
 def _ja_existe_no_dia(c, conta_id: int, lead: dict) -> int | None:
@@ -109,18 +152,37 @@ def garantir(pool, conta_id: int, lead: dict) -> str:
                       (lead["id"], achado, conta_id))
             c.commit()
             return "ligado"
-    # 19h de Brasília, convertido pra UTC como o resto do produto faz
-    inicio = (datetime.combine(lead["data"], _HORA_PADRAO)
-              .replace(tzinfo=timezone.utc) - _UTC_BR)
+    # O HORÁRIO VEM DO ORÇAMENTO QUANDO ELE EXISTE (17/09/2026). Antes esta porta
+    # chutava 19h e não gravava fim NENHUM — e era ela que produzia as festas sem
+    # encerramento: medido na conta 34 em 16/09, das 30 marcações com tipo de
+    # evento só UMA tinha `fim`, enquanto toda visita (que entra pela outra porta)
+    # tinha. Quem guarda a janela inteira é o `janela_evento`, que já sabe virar a
+    # noite: 20h→01h vira 5h no dia seguinte, e não um evento que acaba antes de
+    # começar.
+    #
+    # Sem orçamento (ou com orçamento de outra data — ver `pendentes`), segue o
+    # palpite de 19h SEM FIM. Não inventamos duração: 6h parece o padrão da casa,
+    # mas sugerir 6h em 24 festas cria 24 números que ninguém conferiu, e o dono
+    # decidiu em 17/09 que a agenda pede o horário em vez de adivinhar.
+    inicio, fim = ag.janela_evento(lead["data"], lead.get("hora_inicio"),
+                                   lead.get("hora_fim"))
+    do_orcamento = inicio is not None
+    if not do_orcamento:
+        # 19h de Brasília, convertido pra UTC como o resto do produto faz
+        inicio = (datetime.combine(lead["data"], _HORA_PADRAO)
+                  .replace(tzinfo=timezone.utc) - _UTC_BR)
+        fim = None
     titulo = f"{(lead['tipo'] or 'Evento').strip()} — {lead['quem']}"[:120]
     ag.criar_evento(pool, conta_id, titulo, inicio, membro_id=lead["membro_id"],
-                    tipo="empresa", prospeccao_id=lead["id"],
+                    tipo="empresa", prospeccao_id=lead["id"], fim=fim,
                     tipo_evento=(lead["tipo"] or None),
                     convidados=lead["convidados"],
                     # a hora é palpite nosso: o dono ajusta, e a agenda mostra que
                     # foi sugerida em vez de fingir que alguém escolheu 19h
-                    hora_sugerida=True,
-                    descricao="Criado pelo funil ao fechar o lead. Confira a hora.")
+                    hora_sugerida=not do_orcamento,
+                    descricao=("Criado pelo funil ao fechar o lead, com o horário do orçamento."
+                               if do_orcamento
+                               else "Criado pelo funil ao fechar o lead. Confira a hora."))
     return "criado"
 
 

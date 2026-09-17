@@ -204,3 +204,51 @@ def test_a_ponte_so_aceita_orcamento_da_MESMA_data():
         assert linhas["Sem orcamento"]["hora_fim"] is None
     finally:
         p.close()
+
+
+def test_a_ponte_funciona_numa_base_SEM_a_tabela_orcamentos():
+    """O defeito que a primeira versão deste PR introduziu, e que o
+    test_funil_agenda pegou com 6 falhas: eu li o horário com um `left join
+    orcamentos` na consulta principal, e numa base sem essa tabela o join levava
+    a PONTE INTEIRA junto — o lead que fechava não virava compromisso nenhum.
+
+    O horário é enfeite; a ponte não. Aqui a base nasce sem `orcamentos` de
+    propósito, e o que se exige é que a fila volte completa, só sem horário.
+    """
+    import os
+
+    from psycopg_pool import ConnectionPool
+    url = os.environ["TEST_DATABASE_URL"]
+    admin = ConnectionPool(url, min_size=1, max_size=1, open=True)
+    dbname = "zaq_agenda_sem_orcamentos_test"
+    with admin.connection() as c:
+        c.autocommit = True
+        c.execute("select pg_terminate_backend(pid) from pg_stat_activity where datname=%s", (dbname,))
+        c.execute(f"drop database if exists {dbname}")
+        c.execute(f"create database {dbname}")
+    admin.close()
+    p = ConnectionPool(url.rsplit("/", 1)[0] + "/" + dbname, min_size=1, max_size=2,
+                       open=True, kwargs={"prepare_threshold": None})
+    try:
+        with p.connection() as c:
+            c.execute("""
+                create table prospeccao (id bigserial primary key, conta_id bigint,
+                    contato text, empresa text, status text, estagio text,
+                    evento_em date, evento_tipo text, evento_convidados int,
+                    vendedor_id bigint, orcamento_id bigint);
+                create table eventos_agenda (id bigserial primary key, conta_id bigint,
+                    prospeccao_id bigint, status text);
+                insert into prospeccao (conta_id, contato, status, estagio, evento_em)
+                values (34, 'Sem tabela de orcamento', 'fechado', 'lead', date '2026-10-01');
+            """)   # sem `create table orcamentos`, de propósito
+            c.commit()
+            fila = fa.pendentes(c, 34, ["fechado"])
+            # e a conexão continua utilizável: sem SAVEPOINT, o erro teria abortado
+            # a transação e esta consulta morreria com "transaction is aborted"
+            viva = c.execute("select 1").fetchone()
+        assert len(fila) == 1, "a ponte tem que devolver o lead mesmo sem orcamentos"
+        assert fila[0]["quem"] == "Sem tabela de orcamento"
+        assert fila[0]["hora_fim"] is None
+        assert viva == (1,), "a transação tem que sobreviver — é pra isso que o savepoint existe"
+    finally:
+        p.close()

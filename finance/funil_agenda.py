@@ -65,27 +65,59 @@ def pendentes(c, conta_id: int, chaves: list[str]) -> list[dict]:
         return []
     linhas = c.execute(
         """select p.id, coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'Cliente'),
-                  p.evento_em, p.evento_tipo, p.evento_convidados, p.vendedor_id,
-                  -- O HORÁRIO DA FESTA, do orçamento do lead (17/09/2026). Só sai
-                  -- daqui quando o orçamento fala DA MESMA DATA: medido na conta
-                  -- 34, a Josiany tem festa em 01/10 e o orçamento dela é de
-                  -- 19/12 — sem esta comparação a agenda receberia o horário de
-                  -- outra festa, que é pior que ficar sem horário.
-                  case when nullif(o.evento->>'data','') = p.evento_em::text
-                       then nullif(o.evento->>'inicio','') end,
-                  case when nullif(o.evento->>'data','') = p.evento_em::text
-                       then nullif(o.evento->>'fim','') end
+                  p.evento_em, p.evento_tipo, p.evento_convidados, p.vendedor_id
              from prospeccao p
-             left join orcamentos o on o.id = p.orcamento_id and o.conta_id = p.conta_id
             where p.conta_id=%s and p.estagio='lead' and p.status = any(%s)
               and p.evento_em is not null
               and not exists (select 1 from eventos_agenda e
                                where e.conta_id = p.conta_id and e.prospeccao_id = p.id
                                  and coalesce(e.status,'ativo') <> 'cancelado')
             order by p.evento_em""", (conta_id, chaves)).fetchall()
-    return [{"id": r[0], "quem": r[1], "data": r[2], "tipo": r[3],
+    fila = [{"id": r[0], "quem": r[1], "data": r[2], "tipo": r[3],
              "convidados": r[4], "membro_id": r[5],
-             "hora_inicio": r[6], "hora_fim": r[7]} for r in linhas]
+             "hora_inicio": None, "hora_fim": None} for r in linhas]
+    _horarios_do_orcamento(c, conta_id, fila)
+    return fila
+
+
+def _horarios_do_orcamento(c, conta_id: int, fila: list[dict]) -> None:
+    """Carimba `hora_inicio`/`hora_fim` na fila, lendo o orçamento de cada lead.
+
+    CONSULTA SEPARADA E TOLERANTE, e não um `left join` na de cima — que foi como
+    eu escrevi na primeira versão e o teste derrubou na hora. Numa base sem a
+    tabela `orcamentos` o join levava a PONTE INTEIRA junto, e o lead que fechou
+    não virava compromisso nenhum. O horário é enfeite; a ponte não. Mesma decisão
+    (e mesmo motivo) do `_com_orcamento` na agenda e da leitura da última mensagem
+    no funil.
+
+    SAVEPOINT, e não só try/except: no Postgres um erro aborta a transação inteira,
+    e sem o ponto de retorno as consultas seguintes desta mesma conexão morreriam
+    com "current transaction is aborted" — a ponte cairia do mesmo jeito.
+
+    SÓ O ORÇAMENTO DA MESMA DATA. Medido na conta 34 em 17/09: a Josiany tem festa
+    em 01/10 e o orçamento dela é de 19/12. Sem comparar a data, a agenda receberia
+    o horário de outra festa — pior que ficar sem horário nenhum.
+    """
+    ids = [x["id"] for x in fila]
+    if not ids:
+        return
+    try:
+        with c.transaction():
+            linhas = c.execute(
+                """select p.id,
+                          nullif(o.evento->>'inicio',''), nullif(o.evento->>'fim','')
+                     from prospeccao p
+                     join orcamentos o on o.id = p.orcamento_id and o.conta_id = p.conta_id
+                    where p.conta_id = %s and p.id = any(%s)
+                      and nullif(o.evento->>'data','') = p.evento_em::text""",
+                (conta_id, ids)).fetchall()
+    except Exception:  # noqa: BLE001 — a ponte funciona sem o horário
+        _log.warning("não deu pra ler o horário do orçamento na conta %s",
+                     conta_id, exc_info=True)
+        return
+    por_lead = {r[0]: (r[1], r[2]) for r in linhas}
+    for x in fila:
+        x["hora_inicio"], x["hora_fim"] = por_lead.get(x["id"], (None, None))
 
 
 def _ja_existe_no_dia(c, conta_id: int, lead: dict) -> int | None:

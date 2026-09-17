@@ -8,7 +8,9 @@ O QUE ESTES TESTES PROTEGEM, em uma frase cada:
 * nasce desligado, e a config falha FECHADA (sem banco, não manda);
 * o mesmo resumo não sai duas vezes pra ninguém;
 * o dono vê nome, o gestor vê total, o vendedor vê só a carteira dele;
-* a semana é a de Brasília, e é sempre a FECHADA.
+* a semana é a de Brasília, e é sempre a FECHADA;
+* e (migração 276) QUEM vê os nomes sai do campo "Seu e-mail", e não de o cadastro
+  do dono ter e-mail — que era o defeito medido na Prime no dia seguinte à 274.
 """
 import os
 from datetime import date, datetime, timedelta, timezone
@@ -117,8 +119,9 @@ def pool():
     p = ConnectionPool(url, min_size=1, max_size=4, open=True, kwargs={"prepare_threshold": None})
     with p.connection() as c:
         c.execute(_SQL)
-        # a migração DE VERDADE: é ela que o Render vai aplicar
+        # as migrações DE VERDADE: são elas que o Render vai aplicar
         c.execute((MIG / "274_resumo_semanal.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "276_resumo_semanal_dono_emails.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -186,6 +189,7 @@ def cena(pool):
 def _ligar(pool, conta, **kw):
     return rs.salvar_config(pool, conta, ativo=kw.get("ativo", True),
                             emails=kw.get("emails", ""),
+                            dono_emails=kw.get("dono_emails", ""),
                             vendedor=kw.get("vendedor", True),
                             dia=kw.get("dia", "segunda"))
 
@@ -285,6 +289,83 @@ def test_quem_e_dono_nao_recebe_dois_emails(pool, cena):
     assert next(d for d in ds if d["email"] == "gestor@fora.com")["tipo"] == "gestor"
 
 
+# ------------------------------------ quem vê os nomes (migração 276, 17/09/2026)
+# O defeito que isto conserta foi medido na Prime HORAS depois da 274 subir: o dono
+# (membro 28, MANOEL SOARES) está sem e-mail no cadastro, e não existe tela onde ele
+# possa pôr um. Os dois endereços que ele cadastrou entravam pelo único portão que
+# sobrava — o de gestor —, que é a versão SEM os nomes. Dos seis destinatários da
+# primeira segunda, NENHUM receberia o que ele pediu.
+
+def _sem_email_no_cadastro(pool, membro_id):
+    with pool.connection() as c:
+        c.execute("update membros set email=null where id=%s", (membro_id,))
+        c.commit()
+
+
+def test_o_dono_SEM_email_no_cadastro_ainda_ve_os_nomes(pool, cena):
+    """O caso exato da Prime. Quem decide é o campo "Seu e-mail", não o cadastro."""
+    _sem_email_no_cadastro(pool, cena["dono"])
+    _ligar(pool, cena["conta"], dono_emails="manoel@prime.com")
+    ds = rs.destinatarios(pool, cena["conta"])
+    meu = next(d for d in ds if d["email"] == "manoel@prime.com")
+    assert meu["tipo"] == "dono", (
+        "o e-mail do dono entrou como gestor — é o defeito de 17/09 voltando")
+
+
+def test_o_campo_de_gestor_continua_SEM_os_nomes(pool, cena):
+    """Os dois campos existem justamente pra separar isso. Se o de gestor também
+    virasse 'dono', a migração 276 seria só um campo a mais sem efeito nenhum."""
+    _sem_email_no_cadastro(pool, cena["dono"])
+    _ligar(pool, cena["conta"], dono_emails="manoel@prime.com",
+           emails="contador@fora.com")
+    ds = {d["email"]: d["tipo"] for d in rs.destinatarios(pool, cena["conta"])}
+    assert ds["manoel@prime.com"] == "dono"
+    assert ds["contador@fora.com"] == "gestor"
+
+
+def test_o_mesmo_endereco_nos_DOIS_campos_recebe_um_email_so(pool, cena):
+    _ligar(pool, cena["conta"], dono_emails="manoel@prime.com",
+           emails="manoel@prime.com, contador@fora.com")
+    ds = rs.destinatarios(pool, cena["conta"])
+    assert [d["email"] for d in ds].count("manoel@prime.com") == 1
+    assert next(d for d in ds if d["email"] == "manoel@prime.com")["tipo"] == "dono"
+
+
+def test_vendedor_no_campo_do_dono_passa_a_ver_a_equipe(pool, cena):
+    """O dono que também vende: está no cadastro como vendedor E no campo "Seu
+    e-mail". Ganha o de MAIOR alcance — e não o da última fonte lida, senão a ordem
+    da varredura decidiria o que a pessoa vê."""
+    _ligar(pool, cena["conta"], dono_emails="pedro@prime.com")
+    ds = {d["email"]: d for d in rs.destinatarios(pool, cena["conta"])}
+    assert ds["pedro@prime.com"]["tipo"] == "dono"
+    # e o cadastro não se perde: o nome dele continua vindo de `membros`
+    assert ds["pedro@prime.com"]["nome"] == "Pedro Yan"
+
+
+def test_apagar_o_campo_na_tela_apaga_a_lista(pool, cena):
+    """A aba manda o formulário inteiro. Um campo esvaziado lá tem que esvaziar
+    aqui — senão a tela mostra vazio e o e-mail continua saindo."""
+    _ligar(pool, cena["conta"], dono_emails="manoel@prime.com")
+    assert rs.config(pool, cena["conta"])["emails_dono"] == ["manoel@prime.com"]
+    _ligar(pool, cena["conta"], dono_emails="")
+    assert rs.config(pool, cena["conta"])["emails_dono"] == []
+
+
+def test_o_rodape_nao_chama_de_dono_quem_nao_tem_login(pool, cena):
+    """A versão com os nomes agora vai também pra e-mail de texto, que não é membro
+    de nada. "Você recebe porque é dono da conta" seria mentira — e é justamente a
+    linha que explica como sair da lista."""
+    d = rs.montar(pool, cena["conta"], AGORA)
+    de_texto = rsh.corpo(d, "dono", nome="", empresa="Prime", membro_id=None)
+    do_cadastro = rsh.corpo(d, "dono", nome="Manoel", empresa="Prime",
+                            membro_id=cena["dono"])
+    assert "porque é dono da conta" in do_cadastro
+    assert "porque é dono da conta" not in de_texto
+    assert "cadastrado pela empresa" in de_texto
+    # e os dois veem os nomes: o rodapé muda, o conteúdo não
+    assert "Pedro Yan" in de_texto and "Pedro Yan" in do_cadastro
+
+
 def test_o_vendedor_so_entra_se_a_conta_ligou(pool, cena):
     _ligar(pool, cena["conta"], vendedor=False)
     tipos = {d["tipo"] for d in rs.destinatarios(pool, cena["conta"])}
@@ -365,6 +446,7 @@ def test_o_card_esta_na_aba_do_agente_e_salva_no_mesmo_formulario():
     miolo = tpl.split("{% elif aba=='agente' %}")[1].split("{% elif aba==")[0]
     assert 'name="resumo_semanal"' in miolo, "o interruptor não está na aba do agente"
     assert 'name="resumo_emails"' in miolo, "não dá pra cadastrar e-mail de gestor"
+    assert 'name="resumo_dono_emails"' in miolo, "não dá pra cadastrar o e-mail que vê os nomes"
     assert 'name="resumo_dia"' in miolo and 'name="resumo_vendedor"' in miolo
     # um form só: o card fica DENTRO do que posta pra agente-config
     antes = tpl.split('name="resumo_semanal"')[0]
@@ -382,12 +464,28 @@ def test_a_tela_avisa_que_email_cadastrado_nao_e_acesso():
     assert "não entra no painel" in miolo
 
 
+def test_a_tela_diz_qual_campo_ve_os_nomes(pool, cena):
+    """Dois campos de e-mail um embaixo do outro só funcionam se a tela disser o que
+    os separa. Se o texto sumir, a diferença vira adivinhação — e é a diferença
+    entre mostrar e não mostrar o resultado de uma pessoa com nome e sobrenome."""
+    from web.portal import _env
+    import web.painel_prospeccao  # noqa: F401
+    tpl = _env.loader.mapping["prospeccao_comunicacao"]
+    miolo = tpl.split("{% elif aba=='agente' %}")[1].split("{% elif aba==")[0]
+    do_dono = miolo.split('name="resumo_dono_emails"')[1].split('name="resumo_emails"')[0]
+    do_gestor = miolo.split('name="resumo_emails"')[1][:900]
+    assert "pelo nome" in do_dono, "o campo de cima não diz que mostra os nomes"
+    assert "total da equipe" in do_gestor, "o campo de baixo não diz que esconde"
+
+
 def test_a_rota_do_agente_grava_o_resumo_junto():
     import inspect
     from web import painel_prospeccao as pp
     fonte = inspect.getsource(pp).split('comunicacao/agente-config")')[1][:5000]
     assert "resumo_semanal" in fonte and "salvar_config" in fonte, (
         "salvar o agente deixou de salvar o resumo — a tela mente sobre o que gravou")
+    assert "resumo_dono_emails" in fonte, (
+        "o campo que decide quem vê os nomes não está sendo gravado")
 
 
 # ------------------------------------------- pela caixa da empresa (17/09/2026)

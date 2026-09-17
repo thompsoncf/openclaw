@@ -463,8 +463,9 @@ def _resumo_cfg(pool, conta_id: int) -> dict:
         _log.warning("config do resumo semanal (conta %s): %s: %s",
                      conta_id, type(e).__name__, e)
         return {"resumo_semanal": False, "resumo_semanal_emails": "",
+                "resumo_semanal_dono_emails": "",
                 "resumo_semanal_vendedor": True, "resumo_semanal_dia": "segunda",
-                "emails": []}
+                "emails": [], "emails_dono": []}
 
 
 def _vendedor_destino(ctx: dict, vendedor_id: str, pool, conta_id: int):
@@ -4034,6 +4035,7 @@ async def comunicacao_agente_config(request: Request):
         _rs.salvar_config(get_pool(), ctx["conta_id"],
                           ativo=_b("resumo_semanal"),
                           emails=(f.get("resumo_emails") or ""),
+                          dono_emails=(f.get("resumo_dono_emails") or ""),
                           vendedor=_b("resumo_vendedor"),
                           dia=(f.get("resumo_dia") or "segunda"))
     except Exception as e:  # noqa: BLE001
@@ -12898,21 +12900,36 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <div style="flex:1"><b style="font-size:1rem">Resumo semanal por e-mail</b><div class="mut" style="font-size:.8rem">O funil da semana, o que travou e os próximos 7 dias. Nasce desligado.</div></div>
           <label class="sw"><input type="checkbox" name="resumo_semanal" {% if resumo.resumo_semanal %}checked{% endif %}><span></span></label>
         </div>
+        {#- DOIS CAMPOS, e não um (migração 276). O de cima recebe COM o nome de
+            cada vendedor; o de baixo, com o total da equipe. Existe porque o
+            cadastro do dono pode estar sem e-mail — é o caso da Prime —, e aí não
+            sobrava nenhum jeito de alguém receber a versão com os nomes. -#}
+        <div class="agfield" style="margin-top:.7rem">
+          <label>Seu e-mail (vê o resultado de cada vendedor)</label>
+          <input class="fld" name="resumo_dono_emails" value="{{ resumo.resumo_semanal_dono_emails }}"
+                 placeholder="voce@empresa.com" autocomplete="off">
+          <small class="mut" style="font-size:.74rem;display:block;margin-top:.3rem">
+            Recebe o resumo completo, com o resultado de cada vendedor <b>pelo nome</b>.
+            Até {{ resumo_max }} e-mails.</small>
+          {%- if resumo.emails_dono %}
+          <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.45rem">
+            {% for e in resumo.emails_dono %}<span class="badge">{{ e }}</span>{% endfor %}
+          </div>{% endif %}
+        </div>
         <div class="agfield" style="margin-top:.7rem">
           <label>E-mails de gestor (separados por vírgula)</label>
           <input class="fld" name="resumo_emails" value="{{ resumo.resumo_semanal_emails }}"
                  placeholder="gestor@empresa.com, socio@empresa.com" autocomplete="off">
           <small class="mut" style="font-size:.74rem;display:block;margin-top:.3rem">
-            O dono sempre recebe, com o resultado de cada vendedor <b>pelo nome</b>.
-            Quem for cadastrado aqui recebe a mesma semana com o total da equipe.
+            Recebem a mesma semana com o <b>total da equipe</b>, sem os nomes.
             Até {{ resumo_max }} e-mails.</small>
           {%- if resumo.emails %}
           <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.45rem">
             {% for e in resumo.emails %}<span class="badge">{{ e }}</span>{% endfor %}
           </div>{% endif %}
           <small class="mut" style="font-size:.74rem;display:block;margin-top:.4rem;color:var(--ambar)">
-            ⚠️ E-mail cadastrado aqui <b>só recebe o resumo</b> — não entra no painel,
-            não vê lead, não vê conversa.</small>
+            ⚠️ E-mail cadastrado nos dois campos <b>só recebe o resumo</b>:
+            não entra no painel, não vê lead, não vê conversa.</small>
         </div>
         <div class="aggrid">
           <div class="agfield"><label>Cada vendedor recebe a parte dele</label>

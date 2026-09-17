@@ -1,0 +1,49 @@
+-- 276_resumo_semanal_dono_emails.sql
+-- O campo "Seu e-mail" do resumo semanal: quem recebe COM o nome de cada vendedor.
+--
+-- O DEFEITO QUE ISTO CONSERTA, medido em produção em 17/09/2026, horas depois da
+-- 274 subir. O dono da Prime escolheu, quando eu perguntei, "com nome, e só no
+-- e-mail do dono". Ele ligou o recurso e cadastrou os dois endereços dele. E o
+-- resumo de segunda ia sair errado pros dois:
+--
+--   `destinatarios` decide o tipo assim: DONO vem do cadastro
+--   (`membros.papel='dono'`) e GESTOR vem do campo de texto. O membro 28 da Prime
+--   (MANOEL SOARES, papel dono) está SEM E-MAIL no cadastro — e não há tela onde
+--   ele possa pôr um: `renomear_membro` mexe em nome e whatsapp, e se recusa a
+--   editar o dono. Então os dois endereços dele entravam pelo único portão que
+--   sobrava, o de gestor, que é justamente a versão SEM os nomes.
+--
+-- Resultado: dos seis destinatários da primeira segunda, NENHUM receberia a versão
+-- que ele pediu. O recurso funcionava; a resposta é que estava errada.
+--
+-- A SAÍDA, escolhida por ele no mockup `resumo_semanal_quem_ve_os_nomes.html`
+-- ("vamos de A"): um segundo campo de texto, ao lado do de gestor. Quem está aqui
+-- recebe o resumo COM o resultado de cada vendedor pelo nome; quem está no de
+-- gestor segue recebendo o total da equipe. Duas listas, dois alcances, e nada
+-- depende de o cadastro do dono ter e-mail.
+--
+-- POR QUE UM CAMPO NOVO E NÃO "deixa todo mundo ver os nomes" (a opção B): hoje as
+-- duas se comportam igual pra Prime, porque ela não tem ninguém com papel de
+-- gestor no sistema. A diferença aparece no dia em que entrar um terceiro — sócio,
+-- contador, gerente. Em A ele entra sem ver nome, que é o padrão seguro; em B, o
+-- resultado individual de cada vendedor vaza pra quem for cadastrado sem que
+-- ninguém repare.
+--
+-- MESMO TETO, MESMA LEITURA: o campo passa pelo `parse_emails`, com o mesmo
+-- `EMAILS_MAX`, e o que não parece e-mail é descartado em silêncio.
+--
+-- E CONTINUA NÃO SENDO ACESSO. Um e-mail aqui recebe o resumo e nada mais: não
+-- entra no painel, não vê lead, não vê conversa. A diferença entre os dois campos é
+-- SÓ o quanto o e-mail mostra.
+--
+-- NADA É PREENCHIDO POR MIGRAÇÃO. A coluna nasce vazia inclusive na Prime: quem
+-- diz qual dos endereços da empresa é "o seu" é o dono, na tela. Adivinhar isso
+-- por SQL é escrever configuração de cliente no chute.
+--
+-- Aditivo e idempotente.
+
+alter table public.contas
+  add column if not exists resumo_semanal_dono_emails text not null default '';
+
+-- rollback:
+--   alter table public.contas drop column if exists resumo_semanal_dono_emails;

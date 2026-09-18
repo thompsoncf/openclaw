@@ -1,0 +1,282 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<title>Renovações: o conserto do layout e o import da apólice em PDF</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:880px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:32px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.card{background:#fff;border:1px solid #E3DDD0;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden;margin-bottom:14px}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+
+/* ---------- réplica FIEL do painel escuro (web/painel_servicos) ---------- */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC}
+.pn .card2{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.55rem}
+.pn .cab{display:flex;align-items:center;gap:.6rem}
+.pn .seta{color:#7B8A99;font-size:.85rem}
+.pn .tit{font-weight:700;font-size:1rem}
+.pn .mut{color:#7B8A99;font-size:.78rem;margin-top:.1rem}
+.pn .selo{margin-left:auto;font-size:.68rem;font-weight:700;background:#3A2A10;color:#E0B458;border:1px solid #5C4418;border-radius:5px;padding:.1rem .38rem;white-space:nowrap}
+.pn .selo.ok{background:#10241d;color:#7EE7B8;border-color:#1c3a30}
+.pn .expl{color:#9AA7B4;font-size:.85rem;margin:.7rem 0 .8rem;line-height:1.6}
+.pn .expl b{color:#7EE7B8}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.4rem .55rem;font-size:.85rem;color:#DDE4EC;width:100%}
+.pn .ta{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.45rem .55rem;font-size:.78rem;color:#C6D2DE;width:100%;font-family:ui-monospace,Menlo,monospace;line-height:1.6}
+.pn .pill{display:inline-block;background:#1B2836;border:1px solid #2A3947;border-radius:99px;padding:.2rem .55rem;font-size:.75rem;color:#C6D2DE}
+.pn .pill.mono{font-family:ui-monospace,Menlo,monospace;font-size:.7rem;padding:.15rem .4rem}
+.pn .pill.novo{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .btnv{display:inline-block;background:#1F7A55;color:#EAFFF5;border-radius:8px;padding:.45rem .9rem;font-size:.85rem;font-weight:700}
+.pn .lbl{color:#7B8A99;font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:.2rem}
+.pn .bloco{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem}
+.pn .linha{display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem}
+.pn .mini{display:inline-flex;align-items:center;justify-content:center;background:#1B2836;border:1px solid #2A3947;border-radius:6px;width:26px;height:26px;font-size:.8rem;color:#9AA7B4;flex:0 0 auto}
+.pn .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.5rem}
+.eti{display:inline-block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;vertical-align:middle;margin-left:6px}
+.e-hoje{background:#FDECEA;color:#B4453C;border:1px solid #F5C6C0}
+.e-novo{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.card,.pn,.q{break-inside:avoid}}
+
+.gap{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.gap>div{background:#fff;border:1px solid #E3DDD0;border-radius:10px;padding:12px 14px}
+.gap h4{margin:0 0 6px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475}
+.gap.antes>div:first-child{border-left:3px solid #B4453C}
+.gap.antes>div:last-child{border-left:3px solid #1c7a4f}
+.num{font-size:26px;font-weight:700;line-height:1.1}
+.pn .tabs{display:flex;gap:.3rem;border-bottom:1px solid #22303C;margin:-4px -6px .7rem;padding:0 6px}
+.pn .tabs span{padding:.4rem .7rem;font-size:.82rem;color:#7B8A99;border-bottom:2px solid transparent}
+.pn .tabs span.on{color:#7EE7B8;border-bottom-color:#1F7A55;font-weight:600}
+.pn .drop{border:1.5px dashed #2C6E52;background:#0E1B16;border-radius:10px;padding:.9rem;text-align:center;color:#9AA7B4;font-size:.85rem}
+.pn .drop b{color:#7EE7B8;display:block;font-size:.95rem;margin-bottom:.15rem}
+.pn .conf{display:grid;grid-template-columns:auto 1fr auto;gap:.3rem .6rem;font-size:.82rem;align-items:baseline}
+.pn .conf .k{color:#7B8A99;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em}
+.pn .ck{color:#7EE7B8}.pn .cx{color:#E98A80}
+.pn .risco{border-left:3px solid #D9932B;padding-left:.6rem}
+.lista{margin:0 0 12px;padding-left:18px}
+.lista li{margin-bottom:7px;line-height:1.6}
+</style></head><body><div class="wrap">
+
+<h1>Renovações: o layout, e o PDF que se cadastra sozinho</h1>
+<p class="lead">Você abriu a tela com uma apólice cadastrada e viu uma página que fala muito e mostra
+pouco. Está certo. Este documento tem duas partes: <b>o que está errado no layout e como conserto</b>,
+e <b>o import do PDF</b> — que eu fui medir antes de desenhar, e a medição mudou o desenho.</p>
+
+<h2><span class="n">01</span> O que a tela faz de errado</h2>
+<div class="sub">Seis problemas, e o primeiro explica os outros cinco</div>
+
+<div class="perigo"><b>A página faz três trabalhos de frequências diferentes e dá o mesmo peso aos três.</b>
+Ver o que vence é <b>diário</b>. Cadastrar apólice é <b>eventual</b>. Configurar percentual de comissão
+é <b>uma vez na vida</b>. Os três estão empilhados na mesma rolagem, com o mesmo tamanho — então o
+trabalho de todo dia disputa espaço com a configuração que já foi feita.</p></div>
+
+<ol class="lista">
+<li><b>O estado vazio ocupa a tela inteira.</b> Hoje: três contadores zerados, um aviso de "cadastre a
+primeira", 120 palavras sobre a Lei 15.040, um formulário de 21 campos e um bloco de comissão — e a
+<b>única apólice que existe</b> aparece na última linha da página, numa tabela de uma linha.</li>
+<li><b>"Nenhuma apólice vencendo" esconde a verdade.</b> Existe uma apólice, e ela vence em
+23/07/2027. A tela poderia dizer isso; em vez disso diz que não há nada e manda cadastrar de novo —
+o que convida a cadastrar duplicado.</li>
+<li><b>21 campos num grid plano.</b> Placa, chassi e prêmio líquido têm o mesmo peso visual que o
+fim da vigência, que é o campo que faz a tela existir. Nada agrupa <i>quem é · o quê · quando · quanto</i>.</li>
+<li><b>O texto explicativo é permanente.</b> Ensina uma vez e atrapalha para sempre. Depois da
+terceira visita, é só rolagem.</li>
+<li><b>A Carteira não tem busca nem filtro.</b> Com uma apólice, tudo bem. Com trezentas, é ilegível —
+e trezentas é o tamanho de uma corretora pequena.</li>
+<li><b>Os contadores não somem quando são zero.</b> Três caixas grandes dizendo 0, 0, 0 ocupam a
+faixa mais nobre da página.</li>
+</ol>
+
+<h2><span class="n">02</span> O conserto</h2>
+<div class="sub">Uma tela, um trabalho</div>
+
+<div class="gap antes">
+  <div><h4>Hoje</h4>
+    <p style="margin:0;font-size:13px;line-height:1.7">Fila + cadastro + comissão + carteira,
+    empilhados. <b>Uma rolagem de 2.000 px</b> para ver uma apólice.</p></div>
+  <div><h4>Proposto</h4>
+    <p style="margin:0;font-size:13px;line-height:1.7">A tela é <b>a fila</b>. Cadastro vira botão
+    que abre painel. Comissão vira link. A carteira ganha busca.</p></div>
+</div>
+
+<p><b>Como fica na conta da Liberal hoje</b> — com uma apólice que vence daqui a 308 dias:</p>
+
+<div class="pn">
+  <div class="tabs"><span class="on">Renovações</span><span>Carteira (1)</span><span>Percentuais</span></div>
+  <div class="linha" style="justify-content:space-between">
+    <div><span class="tit">Renovações</span>
+      <div class="mut">nada vence nos próximos 90 dias</div></div>
+    <span class="btnv">+ Nova apólice</span>
+  </div>
+  <div class="card2" style="margin-top:.6rem">
+    <div class="mut" style="margin:0">A próxima é</div>
+    <div class="cab" style="margin-top:.2rem">
+      <div><span class="tit">Maria de Fátima Cavalcante Parente</span>
+        <div class="mut">Allianz · auto · GEELY EX2 MAX · vence 23/07/2027</div></div>
+      <span class="selo">faltam 308 dias</span>
+    </div>
+  </div>
+  <div class="expl" style="margin:.7rem 0 0">Entra na fila em <b>24/04/2027</b>; o primeiro aviso no
+  celular sai em <b>24/05/2027</b>. <span class="pill mono">por que 60/30/15?</span></div>
+</div>
+
+<div class="bom"><b>O que mudou:</b> o vazio virou informação. A tela não diz mais "não há nada" —
+diz <i>qual</i> é a próxima, <i>quando</i> entra na régua e <i>quando</i> avisa. Os três contadores
+zerados sumiram; voltam quando houver o que contar. As 120 palavras da lei viraram uma pílula que
+abre. E o cadastro virou um botão em vez de um formulário permanente.</div>
+
+<p style="margin-top:18px"><b>E quando houver fila</b>, o cartão fica mais denso e ganha ação:</p>
+
+<div class="pn">
+  <div class="card2 risco">
+    <div class="cab">
+      <div><span class="tit">Maria de Fátima C. P.</span>
+        <span class="pill mono">Allianz</span> <span class="pill mono">auto</span>
+        <div class="mut">GEELY EX2 MAX · ABC1D23 · vence 30/09 · classe de bônus 00 → 01</div>
+        <div class="mut" style="color:#C6D2DE">Prêmio R$ 3.807,57 · comissão estimada R$ 761,51</div></div>
+      <span class="selo">faltam 12 dias</span>
+    </div>
+    <div class="linha" style="margin:.5rem 0 0">
+      <span class="btnv" style="padding:.3rem .7rem;font-size:.78rem">Cotar</span>
+      <span class="pill">Renovada</span><span class="pill">Perdi</span>
+      <span class="pill mono" style="margin-left:auto">abrir conversa</span>
+    </div>
+  </div>
+</div>
+
+<div class="nota"><b>Por que ação no cartão.</b> Hoje a única coisa clicável é um seletor de situação.
+A pergunta que o corretor faz olhando essa linha é "já cotei?" — e a resposta precisa de um clique,
+não de um menu. "Cotar" abre a conversa no WhatsApp dela; "Renovada" fecha o ciclo e já cria a
+apólice do ano seguinte com as datas adiantadas em 12 meses.</div>
+
+<h2><span class="n">03</span> O import do PDF</h2>
+<div class="sub">Eu fui medir antes de desenhar — e a medição desmentiu metade do que eu ia propor</div>
+
+<p>No mockup de ontem eu escrevi: <i>"eu NÃO começaria pelo PDF... um leitor que acerta a Allianz e
+erra a Porto é pior que digitar: erra CALADO."</i> Hoje eu li a apólice da Maria de Fátima inteira e
+cadastrei sem erro, o que parecia me desmentir. Então fui medir de verdade.</p>
+
+<div class="perigo"><b>Tentei somar as 10 coberturas por extração automática. Três abordagens, três
+resultados — todos errados, e todos com cara de número:</b>
+<table style="margin:9px 0 0"><tr><th>abordagem</th><th>resultado</th><th>certo?</th></tr>
+<tr><td>regex sobre o texto corrido</td><td class="mono">R$ 493.807,57</td><td>não — pegou a coluna do limite junto</td></tr>
+<tr><td>agrupar por coordenada x</td><td class="mono">R$ 1.602,00</td><td>não — valor alinhado à direita, x varia</td></tr>
+<tr><td>último valor de cada linha</td><td class="mono">R$ 1.148,44</td><td>não — perdeu 2 linhas, inventou 1</td></tr>
+<tr><td><b>ler com o olho e somar</b></td><td class="mono"><b>R$ 3.807,57</b></td><td class="rec">confere com o Preço Líquido</td></tr>
+</table></div>
+
+<p>Ou seja: a tabela de coberturas <b>é exatamente a parte que não se extrai sozinha</b>. Foi o meu
+próprio alerta se confirmando, e eu quase caí nele — a primeira versão deste mockup ia dizer "o
+checksum das coberturas é a chave do desenho".</p>
+
+<div class="bom"><b>Mas os campos ROTULADOS saem perfeitos.</b> O documento da Allianz tem 25 campos no
+formato <code>Rótulo: valor</code>, e os 25 foram encontrados. Conferi 9 deles contra o que eu havia
+cadastrado à mão: <b>9 de 9 corretos</b> — vigência, nº da proposta, chassi, classe de bônus,
+ano/modelo, código FIPE, CEP pernoite, zero km, idade do condutor.</div>
+
+<p><b>E duas checagens fecham sozinhas</b>, sem depender da tabela:</p>
+<table>
+<tr><th>checagem</th><th>no documento</th><th>fecha?</th></tr>
+<tr><td>líquido + IOF/juros = total</td><td class="mono">3.807,57 + 281,00 = 4.088,57</td><td class="rec">sim</td></tr>
+<tr><td>soma das parcelas = total</td><td class="mono">4 × 1.022,14/15 = 4.088,57</td><td class="rec">sim</td></tr>
+</table>
+
+<div class="sub" style="margin-top:20px">Então o desenho é este</div>
+<p><b>Importa os escalares. Não importa a tabela de coberturas. Guarda o PDF anexado.</b> As
+coberturas não são necessárias nem para o alerta nem para a comissão — são detalhe de apólice, e
+detalhe de apólice mora no PDF, que fica junto. O que o sistema precisa (vigência, prêmio, IOF,
+franquia, classe de bônus, veículo, parcelas) é tudo campo rotulado.</p>
+
+<div class="pn">
+  <div class="drop"><b>Arraste a apólice em PDF</b>ou clique para escolher · Allianz reconhecida</div>
+  <div class="card2" style="margin-top:.7rem">
+    <div class="cab"><span class="tit">O que eu li</span>
+      <span class="selo ok">Allianz · 18 campos</span></div>
+    <div class="conf" style="margin-top:.6rem">
+      <span class="k">Segurado</span><span>MARIA DE FATIMA CAVALCANTE PARENTE</span><span class="ck">✓</span>
+      <span class="k">CPF</span><span>287.554.563-91 <span style="color:#7B8A99">· dígito verificador confere</span></span><span class="ck">✓</span>
+      <span class="k">Vigência</span><span>23/07/2026 → <b>23/07/2027</b></span><span class="ck">✓</span>
+      <span class="k">Seguradora</span><span>Allianz · ramo 31 — Automóvel</span><span class="ck">✓</span>
+      <span class="k">Proposta</span><span>139041981 · sem nº de apólice (ainda em proposta)</span><span class="ck">✓</span>
+      <span class="k">Veículo</span><span>GEELY EX2 MAX 2026 · chassi LB3EH1SFXTX044613 · zero km</span><span class="ck">✓</span>
+      <span class="k">Prêmio</span><span>líquido R$ 3.807,57 + IOF/juros R$ 281,00 = <b>R$ 4.088,57</b></span><span class="ck">✓</span>
+      <span class="k">Parcelas</span><span>4 × R$ 1.022,14 · dia 5</span><span class="ck">✓</span>
+      <span class="k">Bônus</span><span>classe 00</span><span class="ck">✓</span>
+      <span class="k">Comissão</span><span style="color:#E0B458">não vem no documento — usa o padrão da Allianz</span><span class="cx">—</span>
+    </div>
+  </div>
+  <div class="bloco">
+    <div class="mut" style="margin:0 0 .35rem">Confere sozinho</div>
+    <div style="font-size:.8rem;line-height:1.7">
+      <span class="ck">✓</span> líquido + IOF = total &nbsp;·&nbsp;
+      <span class="ck">✓</span> soma das parcelas = total<br>
+      <span style="color:#7B8A99">As 10 coberturas ficam no PDF anexado — não são lidas, e é de
+      propósito: é a parte que erra calado.</span>
+    </div>
+  </div>
+  <div class="linha" style="margin-top:.5rem">
+    <span class="btnv">Cadastrar</span>
+    <span class="pill">Corrigir antes</span>
+    <span class="pill mono" style="margin-left:auto">ver o PDF</span>
+  </div>
+</div>
+
+<div class="alerta"><b>Nada é salvo sem você olhar.</b> A tela de conferência não tem "importar e
+pronto". Um leitor que grava sozinho transforma erro de leitura em dado errado no banco — e vigência
+lida errada é alerta que não dispara, que é o pior defeito possível nesta tela: ela parece funcionando.</div>
+
+<div class="nota"><b>Seguradora que eu não conheço.</b> Porto, Bradesco, Tokio e as outras têm layout
+próprio. O leitor tenta os rótulos genéricos; o que achar, preenche; o que não achar, deixa em branco
+e diz <i>"não reconheci este layout — confira tudo"</i>. Nunca chuta. Cada seguradora nova é meia hora
+de trabalho depois que você me mandar um PDF dela.</div>
+
+<h2><span class="n">04</span> O que eu preciso que você decida</h2>
+
+<div class="q"><div class="qt">1. Faço o conserto do layout e o import juntos, ou o layout primeiro?</div>
+<div class="qo"><span class="rec">Recomendo o layout primeiro</span>, sozinho, num PR. É o que te
+incomoda hoje e não depende de nada. O import é maior (upload, armazenamento do PDF, leitor por
+seguradora, tela de conferência) e entra em seguida, já no layout novo.</div></div>
+
+<div class="q"><div class="qt">2. O PDF fica guardado junto da apólice?</div>
+<div class="qo"><span class="rec">Recomendo guardar</span> — é o documento do cliente, e é onde ficam
+as coberturas que eu não vou extrair. O sistema já tem cofre de mídia (<code>finance/midia_cofre</code>).
+Custa armazenamento e me obriga a pensar em quem pode baixar.</div></div>
+
+<div class="q"><div class="qt">3. "Renovada" cria a apólice do ano seguinte automaticamente?</div>
+<div class="qo"><span class="rec">Recomendo sim</span>, com as datas adiantadas em 12 meses e o
+<code>renovacao_de</code> apontando pra anterior — é a carteira contando a própria história, e evita
+redigitar tudo. Você confere e ajusta o prêmio novo.</div></div>
+
+<div class="q"><div class="qt">4. Começo o leitor só pela Allianz?</div>
+<div class="qo"><span class="rec">Recomendo sim.</span> É a única de que tenho documento. Me mande um
+PDF de cada seguradora que a Liberal usa e eu acrescento uma por uma — cada uma com a conferência
+dela, medida, não prometida.</div></div>
+
+<div class="ftr">Medições deste documento: extração da proposta Allianz nº 139041981 (7 páginas) com
+<code>pymupdf</code> — 25/25 campos rotulados encontrados, 9/9 conferidos contra o cadastro feito à
+mão, 3 tentativas de somar a tabela de coberturas (todas erradas), 2 checagens de consistência
+fechando. Tela atual medida na conta 37 (Liberal Seguros) com 1 apólice e 1 cliente cadastrados.
+Mockup — nada foi construído.</div>
+
+</div></body></html>

@@ -310,6 +310,90 @@ def test_apolice_sem_cliente_na_carteira_ainda_assim_grava(limpo):
     assert ap.a_vencer(limpo, CONTA, hoje=HOJE)[0]["cliente"] == "—"
 
 
+# ------------------------------------------------- o vazio que informa (tela)
+
+def test_a_proxima_e_a_que_vem_DEPOIS_do_horizonte(limpo):
+    """O caso real da Liberal: uma apólice na carteira, vencendo em 23/07/2027 —
+    309 dias a partir do HOJE deste arquivo (17/09). A fila fica vazia e a tela dizia "nenhuma apólice
+    vencendo", o que é verdade e é inútil: convida a cadastrar de novo o que já
+    está lá. `proxima` é o que transforma o vazio em informação."""
+    _apolice(limpo, vigencia_fim=date(2027, 7, 23), numero_apolice="A")
+    assert ap.a_vencer(limpo, CONTA, hoje=HOJE) == []
+    p = ap.proxima(limpo, CONTA, hoje=HOJE)
+    assert p is not None and p["dias"] == 309
+    # e responde a pergunta seguinte sem obrigar ninguém a fazer a conta de cabeça
+    assert p["entra_em"] == date(2027, 5, 24)      # 60 dias antes de vencer
+
+
+def test_a_proxima_ignora_o_que_ja_esta_na_fila(limpo):
+    """Ela é o que vem DEPOIS do horizonte. Devolver quem já está na lista faria a
+    tela mostrar a mesma apólice duas vezes."""
+    _apolice(limpo, vigencia_fim=HOJE + timedelta(days=30), numero_apolice="perto")
+    assert ap.proxima(limpo, CONTA, hoje=HOJE) is None
+
+
+def test_a_proxima_nao_traz_renovada_nem_vencida(limpo):
+    _apolice(limpo, vigencia_fim=date(2027, 1, 1), situacao="renovada", numero_apolice="R")
+    _apolice(limpo, vigencia_fim=date(2027, 6, 1), situacao="cancelada", numero_apolice="C")
+    assert ap.proxima(limpo, CONTA, hoje=HOJE) is None
+
+
+def test_a_proxima_respeita_o_corretor(limpo):
+    with limpo.connection() as c:
+        ana = c.execute("insert into membros (conta_id, nome, papel) "
+                        "values (%s,'Ana','vendedor') returning id", (CONTA,)).fetchone()[0]
+        c.commit()
+    _apolice(limpo, corretor_id=ana, vigencia_fim=date(2027, 7, 23), numero_apolice="A")
+    assert ap.proxima(limpo, CONTA, hoje=HOJE, corretor_id=ana) is not None
+    assert ap.proxima(limpo, CONTA, hoje=HOJE, corretor_id=ana + 999) is None
+
+
+# --------------------------------------------------------- a busca da carteira
+
+def test_a_busca_acha_por_nome_seguradora_placa_e_numero(limpo):
+    """Com trezentas apólices a tabela sem busca é ilegível — e trezentas é o
+    tamanho de uma corretora pequena."""
+    with limpo.connection() as c:
+        cli = c.execute("insert into clientes (dono_id, nome) values (%s,'Maria Fernanda') "
+                        "returning id", (CONTA,)).fetchone()[0]
+        c.commit()
+    _apolice(limpo, cliente_id=cli, numero_apolice="139041981",
+             bem={"placa": "ABC1D23", "modelo": "GEELY EX2 MAX"})
+    _apolice(limpo, seguradora="Porto", numero_apolice="999", bem={"placa": "XYZ9Z99"})
+    def acha(termo):
+        return [a["numero_apolice"] for a in ap.listar(limpo, CONTA, hoje=HOJE, busca=termo)]
+    assert acha("maria") == ["139041981"]          # nome do cliente
+    assert acha("porto") == ["999"]                # seguradora
+    assert acha("ABC1D23") == ["139041981"]        # placa, que está no jsonb
+    assert acha("geely") == ["139041981"]          # modelo, idem
+    assert acha("13904") == ["139041981"]          # número
+    assert acha("nao existe nada assim") == []
+
+
+def test_a_busca_vazia_traz_tudo(limpo):
+    _apolice(limpo, numero_apolice="A")
+    _apolice(limpo, numero_apolice="B")
+    assert len(ap.listar(limpo, CONTA, hoje=HOJE, busca="")) == 2
+    assert len(ap.listar(limpo, CONTA, hoje=HOJE, busca=None)) == 2
+    assert len(ap.listar(limpo, CONTA, hoje=HOJE)) == 2
+
+
+def test_a_busca_nao_atravessa_a_conta(limpo):
+    _apolice(limpo, conta_id=CONTA, seguradora="Allianz", numero_apolice="A")
+    assert ap.listar(limpo, OUTRA, hoje=HOJE, busca="allianz") == []
+
+
+def test_o_total_da_carteira_ignora_a_busca(limpo):
+    """A aba mostra o número de tudo mesmo com filtro ligado: "Carteira (1)" com uma
+    busca ativa faria a corretora achar que perdeu as outras 299."""
+    _apolice(limpo, seguradora="Allianz", numero_apolice="A")
+    _apolice(limpo, seguradora="Porto", numero_apolice="B")
+    assert ap.total_da_carteira(limpo, CONTA) == 2
+    assert len(ap.listar(limpo, CONTA, hoje=HOJE, busca="porto")) == 1
+    assert ap.total_da_carteira(limpo, CONTA) == 2
+    assert ap.total_da_carteira(limpo, OUTRA) == 0
+
+
 # ------------------------------------------------------------ marcar vencidas
 
 def test_marcar_vencidas_so_mexe_no_que_o_tempo_ja_mudou(limpo):

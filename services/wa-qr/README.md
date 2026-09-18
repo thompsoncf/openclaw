@@ -178,6 +178,46 @@ quem só aparece no histórico é descartado mesmo que o número seja aprendido 
 O conserto seria guardar o descartado e reprocessar quando o par for aprendido — trabalho
 grande e estado novo, que só vale se o número medido justificar. **Meça antes.**
 
+### Os dois zeros da limpeza cirúrgica (`SEM_SESSAO`)
+
+Não confunda com o `lid_sem_mapa` acima: aquele é do **histórico**; este é da mensagem
+**ao vivo**.
+
+`limparSessaoDoPeer` devolvia `0` para duas situações que pedem decisões opostas:
+
+| devolve | o que houve | o que fazer |
+|---|---|---|
+| `> 0` | apagou a sessão podre | não prende — a próxima já decifra (lição de 08/09) |
+| `0` | a trava de 1h ainda está de molho | **prende** — é enxurrada insistindo (lição de 07/09) |
+| `SEM_SESSAO` | não existe sessão gravada pra apagar | **deixa passar uma janela** |
+
+O terceiro caso era tratado como o segundo, e isso custava mensagem de cliente. Quando
+não há sessão, o que cura é a **próxima** mensagem do contato: um `PreKeyWhisperMessage`
+reconstrói a sessão e decifra. A quarentena descarta antes do `decryptMessageNode` — ou
+seja, jogava fora sem abrir justamente o que consertaria.
+
+**Medido na conta 38 (chip da Liberal), 16–18/09/2026**, com a conta 34 de controle e o
+mesmo volume de tráfego:
+
+| conta | entradas 48h | ids que falharam | nunca chegaram |
+|---|---|---|---|
+| 34 (chip antigo) | 172 | 1 | 1 — **0,6%** |
+| 38 (chip novo) | 182 | 27 | 13 — **7,1%** |
+
+Treze mensagens de cliente que ninguém viu, na conversa mais movimentada da corretora
+(538 mensagens desde 17/08). O log já dizia: 13× `não há sessão gravada pra apagar`,
+24× quarentena, e três `badSession(500)` em 16/09 como gatilho provável.
+
+A regra nova é **um perdão por contato por janela** (`peersSemSessao`, chaveado pelo
+conjunto expandido lid+número, igual à trava da limpeza). Voltando sem sessão dentro da
+janela, entra em quarentena como antes — então enxurrada tropeça no segundo passe em
+segundos, e a trava de 07/09 continua de pé. Naquele incidente, aliás, os contatos
+**tinham** sessão: a limpeza apagou três. Um perdão não segura enxurrada nenhuma.
+
+A decisão virou função própria, `decidirAposLimpeza`, porque era um `if` dentro de um
+`.then()` dentro do logger — lugar onde teste nenhum alcança, e onde os dois significados
+de `0` ficaram dez dias confundidos. Fixada em `teste-sessao-sem-registro.js`.
+
 O `restaurarSessoes` também passou a espaçar as contas em **30s** (`WA_QR_ESPACO_CONTAS_MS`),
 não 3s: cada conta trabalha pesado por minutos depois de conectar, e três delas sincronizando
 juntas era o amplificador do laço de crash.
@@ -197,6 +237,10 @@ createdb wa_qr_test
 WA_AUTH_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_test node teste-auth-db.js
 # caches em memória: lote de gravação do mapa @lid, teto de bytes, limpeza por conta
 WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_test node teste-lidmap.js
+# o contato SEM sessão gravada: o perdão do prekey e o que ele não afrouxa
+createdb wa_semreg_test
+WA_SEMREG_TEST_URL=postgresql://postgres@localhost:5432/wa_semreg_test \
+  node teste-sessao-sem-registro.js
 # histórico: gate das ondas + peneira mensagem a mensagem (não precisa de banco)
 node teste-historico.js
 # a conta é a mesma vindo do banco ('36') ou da rota (36) — não precisa de banco

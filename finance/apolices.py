@@ -269,15 +269,59 @@ def a_vencer(pool, conta_id: int, *, dias: int = HORIZONTE, hoje: date | None = 
     return saida
 
 
-def listar(pool, conta_id: int, *, hoje: date | None = None) -> list[dict]:
-    """A carteira inteira, viva e morta, pra tela de cadastro."""
+def proxima(pool, conta_id: int, *, hoje: date | None = None,
+            corretor_id: int | None = None) -> dict | None:
+    """A apólice viva mais próxima de vencer que ainda NÃO entrou no horizonte.
+
+    Existe pro vazio da tela informar em vez de mentir. "Nenhuma apólice vencendo
+    nos próximos 90 dias" é verdade e é inútil: a corretora tem uma carteira, e a
+    tela dizendo "não há nada" convida a cadastrar de novo o que já está lá. Com
+    isto ela diz QUAL é a próxima e QUANDO entra na régua.
+    """
     hoje = hoje or date.today()
+    sql = (f"select {_COLS}, coalesce(nullif(cl.nome,''), '') "
+           "  from apolices a left join clientes cl on cl.id = a.cliente_id "
+           " where a.conta_id = %s and a.situacao = any(%s) and a.vigencia_fim > %s")
+    args: list = [conta_id, list(VIVAS), hoje + timedelta(days=HORIZONTE)]
+    if corretor_id is not None:
+        sql += " and a.corretor_id = %s"
+        args.append(corretor_id)
+    sql += " order by a.vigencia_fim limit 1"
     with pool.connection() as c:
-        rows = c.execute(
-            f"select {_COLS}, coalesce(nullif(cl.nome,''), '') "
-            "  from apolices a left join clientes cl on cl.id = a.cliente_id "
-            " where a.conta_id = %s order by a.vigencia_fim desc, a.id desc",
-            (conta_id,)).fetchall()
+        r = c.execute(sql, tuple(args)).fetchone()
+        if r is None:
+            return None
+        d = _linha(r, hoje, pct_padrao(c, conta_id, r[3], r[4]))
+    d["cliente"] = r[23] or "—"
+    # quando ela entra na régua (o primeiro degrau) — é a pergunta seguinte de quem
+    # lê "faltam 308 dias", e responder aqui evita a conta de cabeça
+    d["entra_em"] = d["vigencia_fim"] - timedelta(days=DEGRAUS[0])
+    return d
+
+
+def listar(pool, conta_id: int, *, hoje: date | None = None,
+           busca: str | None = None) -> list[dict]:
+    """A carteira inteira, viva e morta, pra tela de cadastro.
+
+    `busca` casa nome do cliente, seguradora, número (proposta ou apólice) e o que
+    estiver no `bem` — placa e modelo, que é como a corretora procura um carro. Sem
+    ela, uma carteira de trezentas linhas é uma tabela que ninguém lê.
+    """
+    hoje = hoje or date.today()
+    termo = (busca or "").strip()
+    sql = (f"select {_COLS}, coalesce(nullif(cl.nome,''), '') "
+           "  from apolices a left join clientes cl on cl.id = a.cliente_id "
+           " where a.conta_id = %s")
+    args: list = [conta_id]
+    if termo:
+        sql += ("   and (coalesce(cl.nome,'') ilike %s or a.seguradora ilike %s "
+                "     or coalesce(a.numero_proposta,'') ilike %s "
+                "     or coalesce(a.numero_apolice,'') ilike %s "
+                "     or a.bem::text ilike %s)")
+        args += ["%" + termo + "%"] * 5
+    sql += " order by a.vigencia_fim desc, a.id desc"
+    with pool.connection() as c:
+        rows = c.execute(sql, tuple(args)).fetchall()
         padrao = {}
         saida = []
         for r in rows:
@@ -288,6 +332,17 @@ def listar(pool, conta_id: int, *, hoje: date | None = None) -> list[dict]:
             d["cliente"] = r[23] or "—"
             saida.append(d)
     return saida
+
+
+def total_da_carteira(pool, conta_id: int) -> int:
+    """Quantas apólices a conta tem, sem trazer nenhuma.
+
+    A aba mostra o número mesmo quando a busca filtrou a lista — senão "Carteira (1)"
+    com um filtro ligado faria a corretora achar que perdeu as outras 299.
+    """
+    with pool.connection() as c:
+        r = c.execute("select count(*) from apolices where conta_id=%s", (conta_id,)).fetchone()
+    return int(r[0]) if r else 0
 
 
 def uma(pool, conta_id: int, apolice_id: int, *, hoje: date | None = None) -> dict | None:

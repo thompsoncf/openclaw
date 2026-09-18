@@ -97,6 +97,8 @@ from tests.test_funil_por_mes import _SQL as _SQL_QUADRO  # noqa: E402
 
 _SQL = _SQL_QUADRO + """
 create table if not exists funil_regua (conta_id bigint primary key, follow_up_modo text,
+  -- `fu_zap` (migração 280): o aviso também no WhatsApp do vendedor, desligado por padrão
+  fu_zap boolean not null default false,
     fila_modo text, fu_proposta_dias int, fu_festa_dias int, fu_toques text,
     fu_teto_dia int);
 create table if not exists follow_up_marcacoes (id bigserial primary key, conta_id bigint,

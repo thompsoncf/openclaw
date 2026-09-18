@@ -87,6 +87,8 @@ create table funil_regua (conta_id bigint primary key,
   sem_resposta_min int, bola_nossa_min int, bola_cliente_min int,
   escala_min int, teto_avisos_dia int,
   follow_up_modo text not null default 'off', fu_proposta_dias int, fu_toques_dias text,
+  -- `fu_zap` (migração 280): o aviso também no WhatsApp do vendedor, desligado por padrão
+  fu_zap boolean not null default false,
   fu_festa_dias int, fu_teto_dia int,
   teto_modo text not null default 'off', teto_avisar_antes int,
   fila_modo text not null default 'prazo',

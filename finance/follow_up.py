@@ -88,7 +88,11 @@ _DEGRAU_TXT = {
 ADIAMENTOS_ATE_MOTIVO = 3
 
 _PADRAO = {"follow_up_modo": "off", "fu_proposta_dias": 3, "fu_toques": (2, 4, 7, 15),
-           "fu_festa_dias": 30, "fu_teto_dia": 15, "fila_modo": "prazo"}
+           "fu_festa_dias": 30, "fu_teto_dia": 15, "fila_modo": "prazo",
+           # o WhatsApp do aviso nasce DESLIGADO, como tudo que toca o celular de
+           # alguém. Ver a migração 280 pra por que ele não reusa o `aviso_zap` da
+           # distribuição.
+           "fu_zap": False}
 
 
 # ------------------------------------------------------------------ config
@@ -115,7 +119,7 @@ def config(c, conta_id: int) -> dict:
     base = fr.config(c, conta_id)
     r = c.execute(
         """select follow_up_modo, fu_proposta_dias, fu_toques_dias, fu_festa_dias, fu_teto_dia,
-                  coalesce(fila_modo, 'prazo')
+                  coalesce(fila_modo, 'prazo'), coalesce(fu_zap, false)
              from funil_regua where conta_id=%s""", (conta_id,)).fetchone()
     if not r:
         return dict(base, **_PADRAO)
@@ -125,7 +129,7 @@ def config(c, conta_id: int) -> dict:
     vals = {"fu_proposta_dias": r[1], "fu_toques_dias": r[2],
             "fu_festa_dias": r[3], "fu_teto_dia": r[4]}
     escolhidas |= {k for k, v in vals.items() if v is not None}
-    out = dict(base, follow_up_modo=r[0],
+    out = dict(base, follow_up_modo=r[0], fu_zap=bool(r[6]),
                **{k: v for k, v in vals.items() if v is not None})
     out["_escolhidas"] = escolhidas
     # `fu_festa_dias` é None no perfil recorrente — quem não vende festa não tem o
@@ -689,14 +693,84 @@ def avaliar(c, conta_id: int, agora: datetime | None = None,
     return out
 
 
+def _zap_do_membro(c, conta_id: int, membro_id: int) -> str:
+    """O WhatsApp do membro, olhando os DOIS campos.
+
+    `whatsapp` é o que alguém digitou no convite da equipe; `whatsapp_id` é o de
+    quem se cadastrou pelo próprio WhatsApp. A mesma dupla que a trava do número da
+    equipe lê — e aqui ela importa por um caso concreto: o dono da conta 34 não tem
+    e-mail nem push, só `whatsapp_id`. Lendo um campo só, a cópia de gestor dele
+    continuaria caindo no vazio pelos três canais.
+    """
+    r = c.execute(
+        "select coalesce(nullif(whatsapp,''), nullif(whatsapp_id,''), '') "
+        "  from membros where id=%s and conta_id=%s", (membro_id, conta_id)).fetchone()
+    return ((r[0] if r else "") or "").strip()
+
+
+def _texto_zap(titulo: str, corpo: str) -> str:
+    """A mensagem que chega no WhatsApp do vendedor.
+
+    DIFERENTE do e-mail de propósito, em duas coisas:
+
+    1. **Leva o link.** No e-mail o "abra o Zaq" é um convite; no WhatsApp, onde a
+       pessoa já está com o celular na mão, o link é o próprio botão. Sem ele o
+       aviso vira cobrança sem saída — o defeito que o push do rodízio já tinha
+       ("manda pra /cockpit e obriga o vendedor a procurar").
+    2. **Não repete o emoji do assunto no corpo.** No e-mail o título é a linha de
+       assunto, separada; aqui as duas viram um parágrafo só.
+
+    Sem negrito nem asterisco: a mesma mensagem pode sair por Twilio, Cloud API ou
+    QR, e a marcação que embeleza num vira lixo visível no outro.
+    """
+    try:
+        from finance.email_sender import _app_url
+        link = f"{_app_url()}/cockpit"
+    except Exception:  # noqa: BLE001
+        link = ""
+    linhas = [titulo.strip(), (corpo or "").strip()]
+    if link:
+        linhas.append(f"Abrir: {link}")
+    return "\n\n".join(x for x in linhas if x)
+
+
+def _mandar_zap(pool, conta_id: int, numero: str, texto: str) -> dict:
+    """Manda o aviso pelo chip da empresa. Devolve {ok, erro} — nunca levanta.
+
+    Sai pelo MESMO chip dos outros recados internos (`distribuicao.aviso_zap_chip_id`):
+    numa empresa com chip de campanha, é o que mantém o número que atende cliente
+    fora do tráfego interno.
+
+    Sem template, de propósito. O template existe onde há janela de 24h (Twilio,
+    Cloud API); no QR — que é o caso de todas as contas hoje — texto livre chega a
+    qualquer hora, e é isso que permite o aviso da manhã existir.
+    """
+    try:
+        from finance import distribuicao as _dist
+        from finance import whatsapp_out as wo
+        with pool.connection() as c:
+            chip = _dist.config(c, conta_id).get("aviso_zap_chip_id")
+            r = wo.enviar(c, conta_id, numero, texto, chip_id=chip) or {}
+        if r.get("ok"):
+            return {"ok": True, "erro": ""}
+        return {"ok": False, "erro": str(r.get("erro") or r.get("msg") or "o envio devolveu falso")}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "erro": f"{type(e).__name__}: {e}"}
+
+
 def notificar(pool, conta_id: int, pendentes: list[dict]) -> None:
-    """Push no app + e-mail, agrupado por pessoa. Best-effort inteiro: a cobrança
-    não pode derrubar o poller, e um aviso perdido custa menos que um ciclo que
-    não roda.
+    """Push no app + e-mail + (se a conta ligou) WhatsApp, agrupado por pessoa.
+    Best-effort inteiro: a cobrança não pode derrubar o poller, e um aviso perdido
+    custa menos que um ciclo que não roda.
 
     Agrupa de propósito: sete avisos separados viram sete notificações ignoradas;
     um "7 leads esperando você" é lido. Do degrau a48 em diante o gestor entra
     JUNTO — o vendedor continua sendo avisado, senão vira fofoca sobre ele.
+
+    O WHATSAPP É O TERCEIRO CANAL, e o último a ser tentado de propósito: ele é o
+    que sai do app e chega no celular pessoal de alguém. Nasce desligado por conta
+    (`fu_zap`, migração 280) e, mesmo ligado, o teto diário do motor continua
+    valendo — uma mensagem por pessoa por dia, não uma por lead.
     """
     if not pendentes:
         return
@@ -709,6 +783,17 @@ def notificar(pool, conta_id: int, pendentes: list[dict]) -> None:
                     "and papel in ('dono','gestor')", (conta_id,)).fetchall()]
         except Exception:  # noqa: BLE001
             gestores = []
+    # O INTERRUPTOR DO WHATSAPP, lido UMA vez pra conta inteira e não por pessoa:
+    # são N consultas iguais num laço que roda a cada ciclo, e a resposta não muda
+    # no meio dele. Falhar a leitura vale DESLIGADO — o canal que toca o celular de
+    # alguém não pode ligar por acidente de banco.
+    zap_on = False
+    try:
+        with pool.connection() as c:
+            zap_on = bool(config(c, conta_id).get("fu_zap"))
+    except Exception:  # noqa: BLE001
+        _log.warning("follow-up: não deu pra ler o fu_zap da conta %s — WhatsApp fica de fora",
+                     conta_id, exc_info=True)
     por_membro: dict = {}
     for p in pendentes:
         destinos = list({p["membro_id"], *(gestores if p["nivel"] == "gestor" else [])})
@@ -770,6 +855,22 @@ def notificar(pool, conta_id: int, pendentes: list[dict]) -> None:
                 _al.registrar(pool, conta_id, origem="follow_up", canal="email",
                               membro_id=membro_id, assunto=titulo, n_leads=len(itens),
                               ok=False, motivo="membro sem e-mail cadastrado")
+            # ── WHATSAPP (migração 280), só se a conta ligou
+            if zap_on:
+                try:
+                    with pool.connection() as c:
+                        numero = _zap_do_membro(c, conta_id, membro_id)
+                except Exception:  # noqa: BLE001
+                    numero = ""
+                if not numero:
+                    _al.registrar(pool, conta_id, origem="follow_up", canal="whatsapp",
+                                  membro_id=membro_id, assunto=titulo, n_leads=len(itens),
+                                  ok=False, motivo="membro sem WhatsApp cadastrado")
+                else:
+                    r = _mandar_zap(pool, conta_id, numero, _texto_zap(titulo, corpo))
+                    _al.registrar(pool, conta_id, origem="follow_up", canal="whatsapp",
+                                  membro_id=membro_id, destino=numero, assunto=titulo,
+                                  n_leads=len(itens), ok=r["ok"], motivo=r["erro"])
         except Exception:  # noqa: BLE001
             _log.warning("aviso de follow-up falhou (membro %s)", membro_id, exc_info=True)
 

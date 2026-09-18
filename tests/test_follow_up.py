@@ -136,6 +136,9 @@ def pool():
         # a migração de verdade, não uma cópia dela: é o único jeito de o teste
         # perceber que a coluna nova não chegou em produção
         c.execute((MIG / "218_follow_up.sql").read_text(encoding="utf-8"))
+        # e a 280, que acrescenta o `fu_zap` — a migração de verdade, não uma
+        # cópia dela, pelo mesmo motivo do comentário acima
+        c.execute((MIG / "280_follow_up_zap.sql").read_text(encoding="utf-8"))
         for ch, o, fase in _ETAPAS:
             c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fase)
                          values (%s,%s,%s,%s,%s)""", (CONTA, ch, ch.capitalize(), o, fase))
@@ -1328,3 +1331,34 @@ def test_os_campos_do_evento_so_chegam_na_conta_que_vende_data():
     assert "_KB_EVENTO={" not in sem
     for palavra in ("evento_convidados", "Convidados", "Casamento", "Tipo do evento"):
         assert palavra not in sem, palavra
+
+
+# ─────────────────────── o interruptor do WhatsApp (migração 280, 18/09/2026)
+#
+# Pedido do dono: "vamos implementar o whatsapp pra mandar pro vendedor, pro
+# número dele". O envio em si e seus casos de falha estão em
+# tests/test_aviso_log.py — aqui é só QUEM VÊ o botão, que é onde uma tela erra
+# caro: oferecer um canal que não devia, ou pra quem não decide.
+
+def test_o_botao_do_whatsapp_so_aparece_com_o_motor_LIGADO():
+    """Oferecer "mandar também no WhatsApp" com a cobrança desligada seria oferecer
+    canal pra um aviso que não existe."""
+    for modo in ("off", "observando"):
+        html = _tela(modo=modo, zap=False)
+        assert "/painel/follow-up/zap" not in html, modo
+    assert "/painel/follow-up/zap" in _tela(modo="ligado", zap=False)
+
+
+def test_o_vendedor_nao_ve_o_botao_do_whatsapp():
+    """Mesma regra do interruptor principal: o vendedor RECEBE, não decide o que
+    chega no celular da equipe inteira."""
+    assert "/painel/follow-up/zap" not in _tela(modo="ligado", papel="vendedor", zap=False)
+    assert "/painel/follow-up/zap" in _tela(modo="ligado", papel="gestor", zap=False)
+
+
+def test_a_tela_mostra_em_qual_estado_o_whatsapp_esta():
+    ligado = _tela(modo="ligado", zap=True)
+    assert 'value="1"' in ligado and "recados internos" in ligado
+    desligado = _tela(modo="ligado", zap=False)
+    assert "recados internos" not in desligado, (
+        "a explicação de por qual chip sai aparece com o canal desligado")

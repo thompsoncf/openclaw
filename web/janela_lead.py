@@ -184,35 +184,54 @@ CSS = """/* o balão do LEAD — resumo pra decidir a próxima ação (contato, 
    o `button{width:100%;margin-top:1.4rem}` global, a mesma armadilha que já pegou
    o ✕ de excluir e o "✎ Editar". */
 /* O MODO SEGURADO (18/09/2026, docs/mockups/ficha_segurado_janela.html): a mesma
-   moldura, com abas Cliente | Apólice e o conteúdo do nicho seguros. */
+   moldura, com abas Cliente | Apólice e o conteúdo do nicho seguros.
+   UMA VOZ SÓ (revisão do mesmo dia, depois de o dono ver a primeira versão: "não
+   está harmônico"). Numa coluna de 378px, sete vocabulários visuais — pílula, selo
+   em caixa-alta, cabeçalho em caixa-alta, grade rotulada, cartão de borda colorida,
+   barra, caixa tracejada — não formam uma voz. Aqui: TRÊS tamanhos de texto
+   (.92 / .82 / .72rem), rótulo silencioso sem caixa-alta, cor só onde é estado, e
+   a conversa nos MESMOS balões do chat (cx-m) que o produto já usa. */
 .lp-tabs{display:flex;border-bottom:1px solid var(--borda);flex:none;background:var(--card-2)}
-.lp-tabs button{flex:1;background:none;border:0;border-bottom:2px solid transparent;padding:.45rem .3rem;margin:0;width:auto;
-  color:var(--txt-mut);font-size:.74rem;font-weight:600;cursor:pointer}
+.lp-tabs button{flex:1;background:none;border:0;border-bottom:2px solid transparent;padding:.5rem .3rem;margin:0;width:auto;
+  color:var(--txt-mut);font-size:.78rem;font-weight:600;cursor:pointer}
 .lp-tabs button.on{color:var(--verde-claro);border-bottom-color:var(--verde)}
-.lp-body{overflow:auto;padding:.7rem .85rem .85rem;flex:1;min-height:0}
-.lp-ap{border:1px solid var(--borda);border-left:3px solid var(--amar);border-radius:10px;padding:.55rem .7rem;background:var(--card-2);cursor:pointer;margin-top:.3rem}
-.lp-ap:hover{border-color:var(--txt-mut);border-left-color:var(--amar)}
-.lp-ap.morta{border-left-color:var(--borda);opacity:.75}
-.lp-ap .t{display:flex;gap:.4rem;align-items:baseline;flex-wrap:wrap;font-weight:600;font-size:.86rem}
-.lp-ap .m{color:var(--txt-mut);font-size:.76rem;margin-top:.1rem}
-.lp-ap .d{font-size:.78rem;margin-top:.15rem}
-.lp-regua{display:flex;gap:.3rem;align-items:center;margin-top:.4rem;font-size:.68rem;color:var(--txt-mut)}
-.lp-regua i{flex:1;height:6px;border-radius:3px;background:var(--borda);position:relative;overflow:hidden}
-.lp-regua i b{position:absolute;left:0;top:0;bottom:0;background:var(--verde);opacity:.8}
-.lp-regua i s{position:absolute;top:-2px;bottom:-2px;width:1px;background:var(--amar);text-decoration:none}
-.lp-vazio{color:var(--txt-mut);font-size:.78rem;background:var(--card-2);border:1px dashed var(--borda);border-radius:9px;padding:.55rem .7rem}
-.lp-msg{display:grid;grid-template-columns:auto 1fr;gap:.2rem .6rem;font-size:.78rem}
-.lp-msg .de{color:var(--txt-mut);font-size:.66rem;text-transform:uppercase;letter-spacing:.04em}
-.lp-msg .de small{display:block;text-transform:none;letter-spacing:0}
-.lp-tl{border-left:2px solid var(--borda);margin:.2rem 0 0 .35rem;padding-left:.85rem}
-.lp-tl div{position:relative;padding:.1rem 0 .5rem;font-size:.78rem}
-.lp-tl div::before{content:'';position:absolute;left:-1.18rem;top:.42rem;width:8px;height:8px;border-radius:50%;background:var(--neon-fundo);border:1px solid var(--verde)}
-.lp-tl .q{color:var(--txt-mut);font-size:.68rem;font-family:var(--mono)}
-.lp-pdf{font-size:.66rem;font-weight:700;letter-spacing:.05em;padding:.08rem .4rem;border-radius:5px;background:var(--azul-fundo);border:1px solid var(--azul-borda);color:#8FC9E6;text-decoration:none}
-.lp-selo{font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:.08rem .4rem;border-radius:999px;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:#F0DCA6}
-.lp-selo.ok{background:var(--neon-fundo);border-color:var(--neon-borda);color:var(--verde-claro)}
-.lp-selo.mal{background:var(--coral-fundo);border-color:var(--coral-borda);color:#F0A8A2}
-.lp-foot{border-top:1px solid var(--borda);padding:.5rem .85rem;font-size:.72rem;color:var(--txt-mut);flex:none;display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap}
+.lp-body{overflow:auto;padding:.2rem .95rem .9rem;flex:1;min-height:0}
+.lp-sec{padding:.75rem 0 .2rem}
+.lp-sec+.lp-sec{border-top:1px solid var(--borda)}
+.lp-sec .st{display:flex;align-items:baseline;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);margin-bottom:.45rem}
+.lp-sec .st b{font-weight:600;color:var(--txt);font-size:.82rem}
+.lp-fato{display:grid;grid-template-columns:5.6rem 1fr;gap:.28rem .6rem;font-size:.82rem;line-height:1.45}
+.lp-fato .k{color:var(--txt-mut)}
+.lp-fato .v{overflow-wrap:anywhere}
+.lp-fato .v.mono{font-family:var(--mono);font-size:.76rem}
+.lp-estado{display:inline-block;font-size:.72rem;font-weight:600;padding:.12rem .55rem;border-radius:999px;
+  background:var(--card-2);border:1px solid var(--borda);color:var(--txt-mut);vertical-align:middle}
+.lp-estado.regua{background:var(--ambar-fundo);border-color:var(--ambar-borda);color:#F0DCA6}
+.lp-estado.ok{background:var(--neon-fundo);border-color:var(--neon-borda);color:var(--verde-claro)}
+.lp-estado.mal{background:var(--coral-fundo);border-color:var(--coral-borda);color:#F0A8A2}
+.lp-ap{padding:.55rem 0 .2rem;cursor:pointer;border-radius:8px}
+.lp-ap+.lp-ap{border-top:1px dashed var(--borda)}
+.lp-ap:hover .t{color:var(--verde-claro)}
+.lp-ap .t{display:flex;align-items:center;gap:.45rem;font-weight:600;font-size:.86rem}
+.lp-ap .t .lp-estado{margin-left:auto}
+.lp-ap .m{color:var(--txt-mut);font-size:.76rem;margin-top:.12rem}
+.lp-ap .d{font-size:.8rem;margin-top:.3rem;display:flex;gap:1rem;flex-wrap:wrap}
+.lp-ap .d span b{display:block;font-weight:600}
+.lp-ap .d span{color:var(--txt-mut);font-size:.7rem}
+.lp-regua{margin-top:.5rem}
+.lp-regua i{display:block;height:4px;border-radius:2px;background:var(--borda);position:relative;overflow:hidden}
+.lp-regua i b{position:absolute;left:0;top:0;bottom:0;background:var(--verde);opacity:.85}
+.lp-regua i s{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--amar);text-decoration:none}
+.lp-regua .dt{display:flex;justify-content:space-between;font-size:.68rem;color:var(--txt-mut);margin-top:.25rem;font-variant-numeric:tabular-nums}
+.lp-vazio{color:var(--txt-mut);font-size:.8rem;line-height:1.5;padding:.15rem 0 .3rem}
+.lp-chat{display:flex;flex-direction:column;gap:.35rem;padding:.1rem 0 .3rem}
+.lp-chat .cx-m{font-size:.8rem}
+.lp-tl{margin:.1rem 0 0;padding:0;list-style:none}
+.lp-tl li{display:grid;grid-template-columns:5.6rem 1fr;gap:.6rem;font-size:.8rem;padding:.18rem 0;line-height:1.45}
+.lp-tl li .q{color:var(--txt-mut);font-family:var(--mono);font-size:.7rem;padding-top:.1rem}
+.lp-pdf{font-size:.68rem;font-weight:700;letter-spacing:.04em;padding:.06rem .38rem;border-radius:5px;background:var(--azul-fundo);border:1px solid var(--azul-borda);color:#8FC9E6;text-decoration:none}
+.lp-chips{display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.15rem}
+.lp-foot{border-top:1px solid var(--borda);padding:.5rem .95rem;font-size:.72rem;color:var(--txt-mut);flex:none;display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap}
 .lp-foot a{color:var(--verde-claro);text-decoration:none}
 .perdapop{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.55);
   display:flex;align-items:center;justify-content:center;padding:1rem}
@@ -599,7 +618,7 @@ function kbLeadIr(btn,id,idx){
 // página nem carregue outra". Quem chama é a Carteira e a fila de Renovações
 // (web/painel_apolices): kbAbrirSegurado(ev, cliente_id, linha, 'cliente'|'apolice').
 // Precisa de `window._KB_MOTIVOS` (a lista de motivos de perda da conta) pra o
-// "Perdi" perguntar por quê — sem ela o chip perdi fica desabilitado, não quebra.
+// "Perdi" perguntar por quê — sem ela o chip perdi avisa, não quebra.
 function kbAbrirSegurado(ev,id,el,aba){
   if(ev)ev.stopPropagation();
   if(window.kbFecharChat)kbFecharChat();
@@ -633,86 +652,100 @@ function kbSegTrocar(aba){
   var pop=_leadPop; if(!pop||!pop._d)return; pop._aba=aba;
   pop.querySelector('.lp-body').innerHTML=(aba==='apolice'?kbSegApoliceHtml(pop._d):kbSegClienteHtml(pop._d));
   pop.querySelectorAll('.lp-tabs button').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-aba')===aba);});
+  pop.querySelector('.lp-body').scrollTop=0;
   kbSegLigarConversa(pop);
 }
-function kbSegHtml(d,aba){
-  var p=d.proxima, selo='';
-  if(p){selo = p.dias<=60 ? '<span class="lp-selo">faltam '+p.dias+' dias</span>' : '<span class="lp-selo ok">renova em '+cxEscK(p.vence)+'</span>';}
-  else if(d.n_vivas===0 && d.apolices.length){selo='<span class="lp-selo mal">sem apólice viva</span>';}
-  var zap = d.zap_link ? '<a class="lp-ab" style="border-color:var(--verde);color:var(--verde-claro)" href="'+cxEscK(d.zap_link)+'" target="_blank" rel="noopener">🟢 WhatsApp</a>' : '';
-  return '<button type="button" class="pop-close" title="Fechar" onclick="kbFecharLead()">✕</button>'
-   +'<div class="lp-h"><div class="top"><h3>'+cxEscK(d.nome)+'</h3><span class="lp-canal" style="border-color:var(--borda);background:none;color:var(--txt-mut)">'+cxEscK((d.tipo||'pf').toUpperCase())+'</span>'+selo+'</div>'
-   +'<div class="sub">'+(d.documento?cxEscK(d.documento)+' · ':'')+(d.desde?'cliente desde '+cxEscK(d.desde):'')+'</div></div>'
-   +'<div class="lp-acoes">'+zap+(d.telefone?'<span class="lp-ab">📞 '+cxEscK(d.telefone)+'</span>':'')
-   +'<a class="lp-ab" href="/painel/renovacoes#nova">📄 nova apólice</a></div>'
-   +'<div class="lp-tabs"><button type="button" data-aba="cliente" class="'+(aba!=='apolice'?'on':'')+'" onclick="kbSegTrocar(\'cliente\')">Cliente</button>'
-   +'<button type="button" data-aba="apolice" class="'+(aba==='apolice'?'on':'')+'" onclick="kbSegTrocar(\'apolice\')">Apólice'+(d.apolices.length>1?' ('+d.apolices.length+')':'')+'</button></div>'
-   +'<div class="lp-body">'+(aba==='apolice'?kbSegApoliceHtml(d):kbSegClienteHtml(d))+'</div>'
-   +'<div class="lp-foot"><span>Editar, arquivar e fundir repetidos ficam na ficha completa.</span><a href="/painel/clientes/'+d.id+'">ficha completa →</a></div>';
+// o estado da carteira, numa palavra: é o único lugar da janela onde a cor fala
+function kbSegEstado(d){
+  var p=d.proxima;
+  if(p&&p.dias<=60)return '<span class="lp-estado regua">renova em '+p.dias+' dias</span>';
+  if(p)return '<span class="lp-estado ok">renova '+cxEscK(p.vence)+'</span>';
+  if(d.apolices.length&&!d.n_vivas)return '<span class="lp-estado mal">sem apólice viva</span>';
+  return '';
 }
-function kbSegApCard(a){
+function kbSegHtml(d,aba){
+  var zap = d.zap_link ? '<a class="lp-ab" style="border-color:var(--verde);color:var(--verde-claro)" href="'+cxEscK(d.zap_link)+'" target="_blank" rel="noopener">🟢 WhatsApp</a>' : '';
+  var tel = d.telefone ? '<a class="lp-ab" href="tel:'+cxEscK((d.telefone||'').replace(/\D/g,''))+'">📞 '+cxEscK(d.telefone)+'</a>' : '';
+  var sub = [d.documento, (d.tipo||'pf').toUpperCase(), d.desde?('cliente desde '+d.desde):''].filter(Boolean).join(' · ');
+  return '<button type="button" class="pop-close" title="Fechar" onclick="kbFecharLead()">✕</button>'
+   +'<div class="lp-h"><div class="top"><h3>'+cxEscK(d.nome)+'</h3></div>'
+   +'<div class="sub">'+cxEscK(sub)+(kbSegEstado(d)?' &nbsp;'+kbSegEstado(d):'')+'</div></div>'
+   +(zap||tel?'<div class="lp-acoes">'+zap+tel+'</div>':'')
+   +'<div class="lp-tabs"><button type="button" data-aba="cliente" class="'+(aba!=='apolice'?'on':'')+'" onclick="kbSegTrocar(\'cliente\')">Cliente</button>'
+   +'<button type="button" data-aba="apolice" class="'+(aba==='apolice'?'on':'')+'" onclick="kbSegTrocar(\'apolice\')">Apólice'+(d.apolices.length>1?' · '+d.apolices.length:'')+'</button></div>'
+   +'<div class="lp-body">'+(aba==='apolice'?kbSegApoliceHtml(d):kbSegClienteHtml(d))+'</div>'
+   +'<div class="lp-foot"><span>Editar, arquivar e fundir ficam na ficha completa.</span><a href="/painel/clientes/'+d.id+'">ficha completa →</a></div>';
+}
+function kbSegApResumo(a){
+  var estado = a.viva ? (a.dias<0?'<span class="lp-estado mal">venceu</span>':(a.dias<=60?'<span class="lp-estado regua">'+a.dias+' dias</span>':''))
+                      : '<span class="lp-estado'+(a.situacao==='renovada'?' ok':(a.situacao==='perdida'?' mal':''))+'">'+cxEscK(a.situacao_txt)+'</span>';
   var pct = a.pct_vigencia==null ? 0 : Math.max(0,Math.min(100,a.pct_vigencia));
-  var com = a.comissao_fmt ? ' · comissão '+cxEscK(a.comissao_fmt) : ' · <span style="color:var(--amar)">cadastre o % da '+cxEscK(a.seguradora)+'</span>';
-  var viva = a.viva;
-  return '<div class="lp-ap'+(viva?'':' morta')+'" onclick="kbSegTrocar(\'apolice\')" title="abrir a apólice">'
-   +'<div class="t">'+cxEscK(a.seguradora)+' · '+cxEscK(a.ramo_txt).toLowerCase()+(a.tem_pdf?' <span class="lp-pdf">PDF</span>':'')
-   +(viva?'':' <span class="lp-selo'+(a.situacao==='renovada'?' ok':(a.situacao==='perdida'?' mal':''))+'">'+cxEscK(a.situacao_txt)+'</span>')+'</div>'
-   +'<div class="m">'+cxEscK(a.bem_txt||'')+(a.classe_bonus?' · classe de bônus '+cxEscK(a.classe_bonus):'')+'</div>'
-   +'<div class="d">vence <b>'+cxEscK(a.vence)+'</b> · prêmio '+cxEscK(a.premio_fmt)+(viva?com:'')+'</div>'
-   +(viva?'<div class="lp-regua"><span>'+cxEscK(a.inicio||'')+'</span><i><b style="width:'+pct+'%"></b><s style="left:83.6%"></s></i><span>'+cxEscK(a.vence)+'</span></div>':'')
+  var com = a.comissao_fmt ? cxEscK(a.comissao_fmt.replace(/ \(.*\)$/,'')) : '<span style="color:var(--amar)">falta o %</span>';
+  return '<div class="lp-ap" onclick="kbSegTrocar(\'apolice\')" title="abrir a apólice">'
+   +'<div class="t">'+cxEscK(a.seguradora)+' · '+cxEscK(a.ramo_txt).toLowerCase()+(a.tem_pdf?' <span class="lp-pdf">PDF</span>':'')+estado+'</div>'
+   +(a.bem_txt?'<div class="m">'+cxEscK(a.bem_txt)+(a.classe_bonus?' · bônus '+cxEscK(a.classe_bonus):'')+'</div>':'')
+   +'<div class="d"><span><b>'+cxEscK(a.vence)+'</b>vence</span><span><b>'+cxEscK(a.premio_fmt)+'</b>prêmio</span>'+(a.viva?'<span><b>'+com+'</b>comissão</span>':'')+'</div>'
+   +(a.viva&&a.inicio?'<div class="lp-regua"><i><b style="width:'+pct+'%"></b><s style="left:83.6%"></s></i><div class="dt"><span>'+cxEscK(a.inicio)+'</span><span>'+cxEscK(a.vence)+'</span></div></div>':'')
    +'</div>';
 }
 function kbSegClienteHtml(d){
-  var s='<div class="lp-sh"><b>Contato</b></div><div class="lp-grid">'
-   +'<span class="k">Tel</span><span>'+cxEscK(d.telefone||'—')+'</span>'
-   +'<span class="k">E-mail</span><span>'+cxEscK(d.email||'—')+'</span>'
-   +'<span class="k">Endereço</span><span>'+cxEscK(d.endereco_fmt||'—')+'</span></div>'
-   +'<div class="lp-sh"><b>Apólices</b><span class="lp-canal" style="border-color:var(--borda);background:none;color:var(--txt-mut)">'+d.n_vivas+' viva'+(d.n_vivas===1?'':'s')+'</span></div>';
+  var s='<div class="lp-sec"><div class="st"><b>Contato</b></div><div class="lp-fato">'
+   +'<span class="k">telefone</span><span class="v">'+cxEscK(d.telefone||'—')+'</span>'
+   +'<span class="k">e-mail</span><span class="v">'+cxEscK(d.email||'—')+'</span>'
+   +'<span class="k">endereço</span><span class="v">'+cxEscK(d.endereco_fmt||'—')+'</span></div></div>';
+  s+='<div class="lp-sec"><div class="st"><b>Apólices</b><span>'+(d.apolices.length?d.n_vivas+' viva'+(d.n_vivas===1?'':'s')+(d.premio_ano_fmt&&d.n_vivas?' · '+cxEscK(d.premio_ano_fmt)+'/ano':''):'')+'</span></div>';
   if(!d.apolices.length)s+='<div class="lp-vazio">Nenhuma apólice cadastrada pra este cliente.</div>';
-  d.apolices.forEach(function(a){s+=kbSegApCard(a);});
-  s+='<div class="lp-sh"><b>Conversa</b>'+(d.conversa.length?'<span class="lp-canal" style="border-color:var(--borda);background:none;color:var(--txt-mut)">últimas '+d.conversa.length+'</span>':'')+'</div>';
+  d.apolices.forEach(function(a){s+=kbSegApResumo(a);});
+  s+='</div>';
+  s+='<div class="lp-sec"><div class="st"><b>Conversa</b>'+(d.conversa.length?'<span>últimas '+d.conversa.length+'</span>':'')+'</div>';
   if(!d.conversa.length){s+='<div class="lp-vazio">Este número ainda não falou com o chip. Quando falar, as últimas mensagens aparecem aqui.</div>';}
   else{
-    s+='<div class="lp-msg">';
-    d.conversa.forEach(function(m){s+='<span class="de">'+cxEscK(m.de)+'<small>'+cxEscK(m.quando)+'</small></span><span>'+cxEscK(m.texto)+'</span>';});
+    s+='<div class="lp-chat">';
+    d.conversa.forEach(function(m){ s+='<div class="cx-m'+(m.de==='ele'?' cin':'')+'">'+cxEscK(m.texto)+'<span class="meta">'+cxEscK(m.quando)+'</span></div>'; });
     s+='</div>';
     if(d.conversa_id && window.kbAbrirChat){
       // SEM onclick inline, de propósito: o nome vai em data-attribute e o clique é
-      // ligado em kbSegLigarConversa. Além de dispensar JSON dentro de atributo (a
-      // armadilha do |forceescape do balão), evita que este JS — que o Follow-up
-      // também injeta — carregue a chamada inline do balão que aquela tela usa como
-      // prova de que lead sem conversa não virou botão (test_follow_up).
-      s+='<div style="margin-top:.4rem"><button type="button" class="lp-ab lp-abrir-conversa" style="margin:0;width:auto" data-conv="'+parseInt(d.conversa_id,10)+'" data-nome="'+cxEscK(d.nome||'')+'">💬 abrir conversa inteira</button></div>';
+      // ligado em kbSegLigarConversa. Dispensa JSON dentro de atributo e evita que
+      // este JS — que o Follow-up também injeta — carregue a chamada inline do balão
+      // que aquela tela usa como prova de que lead sem conversa não virou botão.
+      s+='<div style="margin-top:.35rem"><button type="button" class="lp-ab lp-abrir-conversa" style="margin:0;width:auto" data-conv="'+parseInt(d.conversa_id,10)+'" data-nome="'+cxEscK(d.nome||'')+'">💬 abrir conversa inteira</button></div>';
     }
   }
-  s+='<div class="lp-sh"><b>Linha do tempo</b></div>';
+  s+='</div>';
+  s+='<div class="lp-sec"><div class="st"><b>Linha do tempo</b></div>';
   if(!d.linha_do_tempo.length)s+='<div class="lp-vazio">Nada registrado ainda.</div>';
-  else{s+='<div class="lp-tl">';d.linha_do_tempo.forEach(function(t){s+='<div><span class="q">'+cxEscK(t.quando)+'</span><br>'+cxEscK(t.texto)+'</div>';});s+='</div>';}
+  else{s+='<ul class="lp-tl">';d.linha_do_tempo.forEach(function(t){s+='<li><span class="q">'+cxEscK(t.quando)+'</span><span>'+cxEscK(t.texto)+'</span></li>';});s+='</ul>';}
+  s+='</div>';
   return s;
 }
 function kbSegApoliceHtml(d){
-  if(!d.apolices.length)return '<div class="lp-vazio">Nenhuma apólice cadastrada pra este cliente.</div>';
+  if(!d.apolices.length)return '<div class="lp-sec"><div class="lp-vazio">Nenhuma apólice cadastrada pra este cliente.</div></div>';
   var s='';
-  d.apolices.forEach(function(a,i){
-    s+='<div class="lp-sh"'+(i?' style="margin-top:1rem"':'')+'><b>'+cxEscK(a.seguradora)+' · '+cxEscK(a.ramo_txt).toLowerCase()+'</b><span class="lp-canal" style="border-color:var(--borda);background:none;color:var(--txt-mut);font-family:var(--mono)">'+cxEscK(a.numero_txt||'')+'</span></div>'
-     +'<div class="lp-grid">'
-     +'<span class="k">Vigência</span><span>'+cxEscK(a.inicio||'?')+' → <b>'+cxEscK(a.vence)+'</b>'+(a.dias>=0?' · faltam '+a.dias+' dias':' · <b style="color:var(--coral)">venceu há '+(-a.dias)+' dias</b>')+'</span>'
-     +'<span class="k">Régua</span><span>'+cxEscK(a.regua_txt||'')+'</span>'
-     +'<span class="k">Prêmio</span><span>'+cxEscK(a.premio_fmt)+' líquido'+(a.iof_fmt?' + '+cxEscK(a.iof_fmt)+' IOF/juros':'')+(a.parcelas_txt?' · '+cxEscK(a.parcelas_txt):'')+'</span>'
-     +'<span class="k">Comissão</span><span>'+(a.comissao_fmt?cxEscK(a.comissao_fmt):'<span style="color:var(--amar)">sem percentual cadastrado para '+cxEscK(a.seguradora)+'</span>')+'</span>'
-     +'<span class="k">Bem</span><span>'+cxEscK(a.bem_txt||'—')+'</span>'
-     +(a.chassi?'<span class="k">Chassi</span><span style="font-family:var(--mono);font-size:.76rem">'+cxEscK(a.chassi)+'</span>':'')
-     +(a.classe_bonus?'<span class="k">Bônus</span><span>classe '+cxEscK(a.classe_bonus)+'</span>':'')
-     +'<span class="k">Documento</span><span>'+(a.tem_pdf?'<a class="lp-pdf" href="/painel/renovacoes/apolice/'+a.id+'/pdf" target="_blank">PDF</a> ver o PDF ↗ · coberturas ficam nele':'<span style="color:var(--txt-mut)">sem PDF — cadastrada à mão</span>')+'</span>'
-     +(a.perda_motivo_txt?'<span class="k">Perdida</span><span>'+cxEscK(a.perda_motivo_txt)+'</span>':'')
+  d.apolices.forEach(function(a){
+    var estado = a.viva ? (a.dias<0?'<span class="lp-estado mal">venceu há '+(-a.dias)+' dias</span>':(a.dias<=60?'<span class="lp-estado regua">faltam '+a.dias+' dias</span>':'<span class="lp-estado">faltam '+a.dias+' dias</span>'))
+                        : '<span class="lp-estado'+(a.situacao==='renovada'?' ok':(a.situacao==='perdida'?' mal':''))+'">'+cxEscK(a.situacao_txt)+'</span>';
+    s+='<div class="lp-sec"><div class="st"><b>'+cxEscK(a.seguradora)+' · '+cxEscK(a.ramo_txt).toLowerCase()+(a.tem_pdf?' <span class="lp-pdf">PDF</span>':'')+'</b>'+estado+'</div>'
+     +'<div class="lp-fato">'
+     +'<span class="k">vigência</span><span class="v">'+cxEscK(a.inicio||'?')+' → <b>'+cxEscK(a.vence)+'</b></span>'
+     +(a.regua_txt?'<span class="k">régua</span><span class="v">'+cxEscK(a.regua_txt)+'</span>':'')
+     +'<span class="k">prêmio</span><span class="v">'+cxEscK(a.premio_fmt)+(a.iof_fmt?' <span style="color:var(--txt-mut)">+ '+cxEscK(a.iof_fmt)+' IOF/juros</span>':'')+'</span>'
+     +(a.parcelas_txt?'<span class="k">parcelas</span><span class="v">'+cxEscK(a.parcelas_txt)+'</span>':'')
+     +'<span class="k">comissão</span><span class="v">'+(a.comissao_fmt?cxEscK(a.comissao_fmt):'<span style="color:var(--amar)">sem percentual cadastrado para '+cxEscK(a.seguradora)+'</span>')+'</span>'
+     +(a.numero_txt?'<span class="k">número</span><span class="v mono">'+cxEscK(a.numero_txt.replace(/^(apólice|proposta) /,''))+' <span style="font-family:inherit;color:var(--txt-mut)">'+cxEscK(a.numero_txt.split(' ')[0])+'</span></span>':'')
+     +(a.bem_txt?'<span class="k">bem</span><span class="v">'+cxEscK(a.bem_txt)+'</span>':'')
+     +(a.chassi?'<span class="k">chassi</span><span class="v mono">'+cxEscK(a.chassi)+'</span>':'')
+     +(a.classe_bonus?'<span class="k">bônus</span><span class="v">classe '+cxEscK(a.classe_bonus)+'</span>':'')
+     +'<span class="k">documento</span><span class="v">'+(a.tem_pdf?'<a class="lp-pdf" href="/painel/renovacoes/apolice/'+a.id+'/pdf" target="_blank">PDF</a> <a href="/painel/renovacoes/apolice/'+a.id+'/pdf" target="_blank" style="color:var(--verde-claro);text-decoration:none">ver o PDF ↗</a> <span style="color:var(--txt-mut)">· coberturas ficam nele</span>':'<span style="color:var(--txt-mut)">sem PDF — cadastrada à mão</span>')+'</span>'
+     +(a.perda_motivo_txt?'<span class="k">perdida</span><span class="v">'+cxEscK(a.perda_motivo_txt)+'</span>':'')
      +'</div>'
-     +'<div class="lp-sh"><b>Situação</b></div><div class="lp-sit-chips" data-ap="'+a.id+'">';
+     +'<div class="st" style="margin-top:.7rem"><b>Situação</b></div><div class="lp-chips" data-ap="'+a.id+'">';
     (window._KB_DECISOES||[]).forEach(function(x){
       var on = x.c===a.situacao;
-      s+='<button type="button" class="lp-chip'+(on?' on':'')+'" style="margin:0 .3rem .3rem 0;width:auto" '+(on?'disabled':'')+' onclick="kbSegSituacao(this,'+a.id+',\''+cxEscK(x.c)+'\')">'+cxEscK(x.r)+'</button>';
+      s+='<button type="button" class="lp-chip'+(on?' on':'')+'" style="margin:0;width:auto" '+(on?'disabled':'')+' onclick="kbSegSituacao(this,'+a.id+',\''+cxEscK(x.c)+'\')">'+cxEscK(x.r)+'</button>';
     });
-    s+='</div>';
+    s+='</div></div>';
   });
+  s+='<div class="lp-sec" style="text-align:center;padding-top:.6rem"><a class="lp-ab" href="/painel/renovacoes#nova" style="display:inline-flex">📄 nova apólice desta pessoa</a></div>';
   return s;
 }
 // O CHIP DE SITUAÇÃO DA APÓLICE. "perdi" abre a MESMA folha de "Por que perdeu?" do

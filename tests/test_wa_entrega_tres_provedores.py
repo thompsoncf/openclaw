@@ -208,3 +208,21 @@ def test_o_qr_nao_dispara_campanha_entao_nao_tem_essa_via(pool):
     quarta cópia da regra."""
     from finance import prospec_convite as pc
     assert pc.BLOQUEIO_ROT["provedor_qr"]
+
+
+def test_o_recibo_do_CLIENTE_sobrevive_a_base_sem_a_tabela_de_avisos(pool):
+    """O mesmo webhook passou a carimbar também o aviso interno (migração 284), e
+    este banco de teste NÃO tem `aviso_envios` — que é exatamente o estado de
+    produção no minuto entre o código subir e a migração rodar.
+
+    Sem o savepoint, o `try` pegaria a exceção do Python e o Postgres já teria
+    abortado a transação inteira: o recibo do cliente morreria junto com a medição
+    do aviso, com "current transaction is aborted". Este teste existe pra fixar que
+    a falha cabe só nela mesma."""
+    aid = _alvo(pool, "wamid.sem-tabela")
+    with pool.connection() as c:
+        for ent in meta_msg.parse_entrega_whatsapp(_meta_payload("wamid.sem-tabela", "read")):
+            pp.aplicar_status_wa(c, ent["sid"], ent["status"],
+                                 ent["erro_codigo"], ent["erro_msg"])
+        c.commit()
+    assert _estado(pool, aid)[0] == "lido"

@@ -87,6 +87,31 @@ def _tempo(horas) -> str:
     return _t(horas)
 
 
+def _entrega(pool, conta_id: int) -> dict | None:
+    """O resumo de entrega e leitura dos avisos, pronto pro card.
+
+    Devolve `None` quando NÃO HÁ NADA que ele possa dizer — conta que nunca mandou
+    aviso, ou base antes da migração 284. Card de zeros numa conta que acabou de
+    ligar o follow-up não informa nada e só ocupa o lugar da fila.
+
+    As porcentagens saem daqui e não do template: `width:{{ a / b * 100 }}%` em
+    Jinja com b=0 derruba a tela inteira por divisão por zero — e uma conta sem
+    envio nenhum é exatamente o caso b=0.
+    """
+    try:
+        from finance import aviso_log as _al
+        r = _al.resumo(pool, conta_id)
+    except Exception:  # noqa: BLE001 — o card é acessório; a fila é o produto
+        _log.info("follow-up: resumo de entrega falhou (ok)", exc_info=True)
+        return None
+    r["tem"] = any(r[ch]["tentativas"] for ch in _al.CANAIS)
+    for v in r["por_vendedor"]:
+        t = max(1, v["total"])
+        v["pct_lido"] = round(100 * v["lidos"] / t)
+        v["pct_entregue"] = round(100 * v["entregues"] / t)
+    return r
+
+
 @router.get("/painel/follow-up", response_class=HTMLResponse)
 def painel_follow_up(request: Request):
     conta, perfil, redir = _acesso(request)
@@ -137,6 +162,11 @@ def painel_follow_up(request: Request):
     except Exception:  # noqa: BLE001 — tela que não abre é pior que tela incompleta
         linhas = []
 
+    # COMO OS AVISOS CHEGARAM (migração 284). Só pra quem decide: o vendedor não vê
+    # o card. Fora do `with` de cima de propósito — é leitura independente, e uma
+    # falha dela não pode levar junto a fila, que é o produto da tela.
+    entrega = _entrega(pool, conta_id) if papel in ("dono", "gestor") else None
+
     minhas = [x for x in linhas if (not vend_f or x["vendedor_id"] == vend_f)]
     topo = fu.resumo(minhas)
     fila = [x for x in minhas
@@ -158,6 +188,7 @@ def painel_follow_up(request: Request):
                    status=status_tpl,
                    gestao=(fu.por_vendedor(linhas) if papel != "vendedor" else []),
                    modo=cfg["follow_up_modo"], zap=bool(cfg.get("fu_zap")),
+                   entrega=entrega,
                    rotulo=fu.ROTULO, emoji=fu.EMOJI,
                    por_temp=por_temp, rot_prio=fu.ROTULO_PRIORIDADE,
                    br=_br, tempo=_tempo, adia_max=fu.ADIAMENTOS_ATE_MOTIVO,
@@ -429,6 +460,44 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
 .fu-selo{font-size:.75rem;border:1px solid var(--line);border-radius:20px;padding:.15rem .55rem;color:var(--text-dim)}
 .fu-selo.ligado{color:var(--neon);border-color:var(--neon-borda);background:var(--neon-fundo)}
 .fu-selo.observando{color:var(--azul);border-color:var(--azul-borda);background:var(--azul-fundo)}
+/* ---- como os avisos chegaram (migração 284) ----
+   Um canal por LINHA, e não três colunas lado a lado, porque os três não medem a
+   mesma coisa: forçar a mesma grade faria o e-mail parecer que só vai mal. */
+.fu-ent{border:1px solid var(--line);border-radius:10px;background:var(--bg-2);margin:.7rem 0 .2rem}
+.fu-ent .cab{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;
+  padding:.6rem .85rem;border-bottom:1px solid var(--line)}
+.fu-ent .cab b{font-size:.88rem}
+.fu-ent .cab span{font-size:.75rem;color:var(--text-faint)}
+.fu-ent .linha{display:flex;gap:.7rem;align-items:center;padding:.6rem .85rem;
+  border-bottom:1px solid var(--line)}
+.fu-ent .linha:last-of-type{border-bottom:0}
+.fu-ent .ic{flex:0 0 auto;font-size:1.05rem;line-height:1}
+.fu-ent .cn{flex:1;min-width:0}
+.fu-ent .ct{font-size:.78rem;color:var(--text-dim);margin-bottom:.3rem}
+.fu-kpis{display:flex;gap:.4rem;flex-wrap:wrap}
+.fu-kpi{border:1px solid var(--line);border-radius:8px;padding:.3rem .55rem;min-width:4.6rem}
+.fu-kpi b{display:block;font:600 1.05rem var(--mono);font-variant-numeric:tabular-nums}
+.fu-kpi span{display:block;font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-faint);margin-top:.1rem}
+.fu-kpi.g b{color:var(--neon)}
+.fu-kpi.a b{color:var(--ambar)}
+.fu-kpi.r b{color:var(--coral)}
+/* o travessão do que NÃO SE MEDE. Zero aqui se leria como "ninguém abriu" — e o
+   que existe é ausência de medição, não ausência de leitura. */
+.fu-kpi.na b{color:var(--text-faint)}
+.fu-ent .nota{font-size:.73rem;color:var(--text-faint);padding:.5rem .85rem;border-top:1px solid var(--line)}
+.fu-pv{padding:.6rem .85rem;border-top:1px solid var(--line)}
+.fu-pv .l{display:flex;align-items:center;gap:.6rem;margin-top:.35rem;font-size:.78rem}
+.fu-pv .nome{flex:0 0 8.5rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fu-pv .barra{flex:1;min-width:6rem;height:.55rem;border-radius:4px;overflow:hidden;
+  display:flex;background:var(--line)}
+.fu-pv .barra i{display:block;height:100%}
+.fu-pv .barra i.l{background:var(--neon)}
+.fu-pv .barra i.e{background:var(--azul)}
+.fu-pv .num{flex:0 0 auto;font:500 .74rem var(--mono);color:var(--text-dim);
+  font-variant-numeric:tabular-nums}
+.fu-leg{display:flex;gap:.8rem;flex-wrap:wrap;font-size:.7rem;color:var(--text-faint);margin-top:.5rem}
+.fu-leg i{display:inline-block;width:.55rem;height:.55rem;border-radius:2px;margin-right:.25rem}
 /* ---- como funciona ---- */
 .fu-ajuda{border:1px solid var(--line);border-radius:10px;margin-top:1.4rem;background:var(--bg-2)}
 .fu-ajuda>summary{cursor:pointer;padding:.7rem .85rem;font-size:.86rem;font-weight:600;list-style:none}
@@ -517,6 +586,80 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
       }).catch(function(){b.disabled=false;b.textContent=t;r.textContent=' falha de rede';});
   }
   </script>{% endif %}
+
+  {#- COMO OS AVISOS CHEGARAM (migração 284). Só dono e gestor, por decisão do dono
+      em 18/09/2026: o vendedor ver a própria taxa é justo, ver a dos colegas vira
+      placar — e a régua tem o cuidado de não virar fofoca sobre ninguém.
+      Cada canal sabe dizer uma coisa diferente, e o card não finge o contrário. -#}
+  {% if entrega and entrega.tem %}
+  <div class="fu-ent">
+    <div class="cab"><b>Como os avisos chegaram</b><span>últimos {{ entrega.dias }} dias</span></div>
+
+    <div class="linha">
+      <div class="ic">💬</div>
+      <div class="cn">
+        <div class="ct">WhatsApp</div>
+        <div class="fu-kpis">
+          <div class="fu-kpi"><b>{{ entrega.whatsapp.ok }}</b><span>enviados</span></div>
+          <div class="fu-kpi g"><b>{{ entrega.whatsapp.entregues }}</b><span>entregues ✓✓</span></div>
+          <div class="fu-kpi g"><b>{{ entrega.whatsapp.lidos }}</b><span>lidos 👀</span></div>
+          <div class="fu-kpi a"><b>{{ entrega.whatsapp.sem_recibo }}</b><span>sem recibo</span></div>
+          <div class="fu-kpi r"><b>{{ entrega.whatsapp.falhas }}</b><span>não saíram</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="linha">
+      <div class="ic">🔔</div>
+      <div class="cn">
+        <div class="ct">Push no app</div>
+        <div class="fu-kpis">
+          <div class="fu-kpi"><b>{{ entrega.push.tentativas }}</b><span>enviados</span></div>
+          <div class="fu-kpi g"><b>{{ entrega.push.ok }}</b><span>aceitos</span></div>
+          <div class="fu-kpi g"><b>{{ entrega.push.clicados }}</b><span>abriram</span></div>
+          <div class="fu-kpi r"><b>{{ entrega.push.falhas }}</b><span>sem aparelho</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="linha">
+      <div class="ic">📧</div>
+      <div class="cn">
+        <div class="ct">E-mail</div>
+        <div class="fu-kpis">
+          <div class="fu-kpi"><b>{{ entrega.email.ok }}</b><span>enviados</span></div>
+          <div class="fu-kpi na" title="o servidor aceitar não é a caixa receber"><b>—</b><span>não se sabe</span></div>
+          <div class="fu-kpi na" title="abertura de e-mail só se mede com pixel, e o proxy do Gmail pré-carrega imagem: o número seria alto e falso"><b>—</b><span>não se mede</span></div>
+          <div class="fu-kpi r"><b>{{ entrega.email.falhas }}</b><span>sem endereço</span></div>
+        </div>
+      </div>
+    </div>
+
+    {% if entrega.por_vendedor %}
+    <div class="fu-pv">
+      <div class="ct">Leitura no WhatsApp, por vendedor</div>
+      {% for v in entrega.por_vendedor %}
+      <div class="l">
+        <span class="nome">{{ v.quem }}</span>
+        <span class="barra">
+          <i class="l" style="width:{{ v.pct_lido }}%"></i><i class="e" style="width:{{ v.pct_entregue }}%"></i>
+        </span>
+        <span class="num">{{ v.total }} · leu {{ v.lidos }}</span>
+      </div>
+      {% endfor %}
+      <div class="fu-leg">
+        <span><i style="background:var(--neon)"></i>lido</span>
+        <span><i style="background:var(--azul)"></i>entregue, sem leitura</span>
+        <span><i style="background:var(--line)"></i>sem recibo</span>
+      </div>
+    </div>
+    {% endif %}
+
+    <p class="nota">“Sem recibo” não quer dizer que não chegou — quem desliga a confirmação de
+    leitura no WhatsApp nunca gera o 👀. E o e-mail mostra travessão onde não há dado, em vez de
+    zero, que se leria como “ninguém abriu”.</p>
+  </div>
+  {% endif %}
   {% endif %}
 
   {% if erro == 'motivo_obrigatorio' %}

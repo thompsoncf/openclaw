@@ -69,6 +69,8 @@ def pool():
         # A MIGRAÇÃO DE VERDADE, não uma cópia: é o único jeito de o teste perceber
         # que a tabela nova não chegou em produção.
         c.execute((MIG / "276_aviso_envios.sql").read_text(encoding="utf-8"))
+        # e o degrau do recibo: sid, token e os três carimbos
+        c.execute((MIG / "284_aviso_envios_recibo.sql").read_text(encoding="utf-8"))
         c.execute("""insert into membros (id, conta_id, nome, email, whatsapp, whatsapp_id) values
                         (1,%s,'THIAGO','thiago@x.com','86988614189',null),
                         -- o MANOEL é o caso de produção: sem e-mail, sem push, e o
@@ -227,7 +229,7 @@ def _espiar_zap(monkeypatch):
 
     def _falso(pool, conta_id, numero, texto):
         saiu.append({"numero": numero, "texto": texto})
-        return {"ok": True, "erro": ""}
+        return {"ok": True, "erro": "", "sid": f"3EB0{len(saiu)}"}
 
     monkeypatch.setattr(fu, "_mandar_zap", _falso)
     return saiu
@@ -345,3 +347,239 @@ def test_regua_ilegivel_deixa_o_whatsapp_DESLIGADO(pool, monkeypatch):
         c.commit()
     fu.notificar(pool, CONTA, [_pendente(1)])
     assert saiu == [], "ligou o WhatsApp sem conseguir ler a régua"
+
+
+# ───────────────────────────────────── o recibo e o clique (migração 284)
+#
+# O DEGRAU SEGUINTE, pedido pelo dono em 18/09/2026 depois de ver o card de
+# desempenho da campanha: "se poder medir também se chegou e eles visualizaram".
+# O que cada canal SABE dizer é diferente, e estes testes fixam justamente isso —
+# um card que finge simetria mente em dois dos três canais.
+
+def _sid(pool, sid="3EB0AA", canal="whatsapp", ok=True, membro_id=1):
+    al.registrar(pool, CONTA, origem="follow_up", canal=canal, ok=ok,
+                 membro_id=membro_id, n_leads=10, sid=sid)
+
+
+def _carimbos(pool, sid="3EB0AA"):
+    with pool.connection() as c:
+        return c.execute("select entregue_em, lido_em, clicado_em from aviso_envios "
+                         " where sid=%s", (sid,)).fetchone()
+
+
+def test_o_recibo_de_entrega_e_de_leitura_carimba_o_aviso(pool):
+    _sid(pool)
+    with pool.connection() as c:
+        al.marcar_recibo(c, "3EB0AA", "entregue")
+        c.commit()
+    entregue, lido, _ = _carimbos(pool)
+    assert entregue is not None and lido is None
+    with pool.connection() as c:
+        al.marcar_recibo(c, "3EB0AA", "lido")
+        c.commit()
+    _, lido, _ = _carimbos(pool)
+    assert lido is not None
+
+
+def test_o_recibo_NUNCA_regride(pool):
+    """Os recibos chegam fora de ordem. Sem a trava, um 'lido' voltaria pra
+    'entregue' meia hora depois — e a tela mentiria pro dono."""
+    _sid(pool)
+    with pool.connection() as c:
+        al.marcar_recibo(c, "3EB0AA", "lido")
+        c.commit()
+    _, lido_antes, _ = _carimbos(pool)
+    with pool.connection() as c:
+        al.marcar_recibo(c, "3EB0AA", "entregue")   # o atrasado chega depois
+        al.marcar_recibo(c, "3EB0AA", "lido")       # e o repetido também
+        c.commit()
+    entregue, lido_depois, _ = _carimbos(pool)
+    assert lido_depois == lido_antes, "o carimbo de leitura foi reescrito"
+    assert entregue is not None, "ler sem ter recebido não existe"
+
+
+def test_lido_carimba_a_entrega_que_faltou(pool):
+    """O recibo de entrega se perde numa reconexão do chip. Quando o de leitura
+    chega sozinho, a entrega é fato — e o card não pode mostrar 'lido' com zero
+    entregues."""
+    _sid(pool)
+    with pool.connection() as c:
+        al.marcar_recibo(c, "3EB0AA", "lido")
+        c.commit()
+    entregue, lido, _ = _carimbos(pool)
+    assert entregue is not None and lido is not None
+
+
+def test_recibo_de_sid_desconhecido_nao_explode_nem_carimba_outro(pool):
+    _sid(pool)
+    with pool.connection() as c:
+        al.marcar_recibo(c, "SID-DE-OUTRA-MENSAGEM", "lido")
+        al.marcar_recibo(c, "", "lido")
+        al.marcar_recibo(c, "3EB0AA", "enviado")   # status que não é recibo
+        c.commit()
+    assert _carimbos(pool) == (None, None, None)
+
+
+def test_o_clique_do_push_conta_UMA_vez(pool):
+    """A mesma notificação pode ser tocada duas vezes; 'clicou de novo' não é
+    informação nova."""
+    tok = al.novo_token()
+    al.registrar(pool, CONTA, origem="follow_up", canal="push", ok=True,
+                 membro_id=1, n_leads=10, token=tok)
+    assert al.marcar_clique(pool, tok) is True
+    with pool.connection() as c:
+        primeiro = c.execute("select clicado_em from aviso_envios where token=%s",
+                             (tok,)).fetchone()[0]
+    assert al.marcar_clique(pool, tok) is False
+    with pool.connection() as c:
+        depois = c.execute("select clicado_em from aviso_envios where token=%s",
+                           (tok,)).fetchone()[0]
+    assert depois == primeiro
+
+
+def test_token_que_nao_existe_devolve_falso_sem_levantar(pool):
+    """Chega quando uma notificação velha sobrevive a um banco restaurado. E é o
+    mesmo caminho de quem tentasse chutar token: não pode virar oráculo."""
+    assert al.marcar_clique(pool, "nao-existe") is False
+    assert al.marcar_clique(pool, "") is False
+    assert al.marcar_clique(pool, "x" * 500) is False
+
+
+def test_dois_avisos_nao_podem_dividir_o_mesmo_token(pool):
+    """O token AUTENTICA o clique: repetido, o clique seria de qualquer um."""
+    import psycopg
+    tok = al.novo_token()
+    al.registrar(pool, CONTA, origem="follow_up", canal="push", ok=True, token=tok)
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        with pool.connection() as c:
+            c.execute("insert into aviso_envios (conta_id, origem, canal, ok, token) "
+                      "values (%s,'follow_up','push',true,%s)", (CONTA, tok))
+            c.commit()
+
+
+# ───────────────────────────────────────────────── o resumo que vira card
+def test_o_resumo_conta_cada_canal_pelo_que_ele_SABE_dizer(pool):
+    al.registrar(pool, CONTA, origem="follow_up", canal="whatsapp", ok=True,
+                 membro_id=1, sid="A1")
+    al.registrar(pool, CONTA, origem="follow_up", canal="whatsapp", ok=True,
+                 membro_id=1, sid="A2")
+    al.registrar(pool, CONTA, origem="follow_up", canal="whatsapp", ok=False,
+                 membro_id=3, motivo="membro sem WhatsApp cadastrado")
+    tok = al.novo_token()
+    al.registrar(pool, CONTA, origem="follow_up", canal="push", ok=True,
+                 membro_id=1, token=tok)
+    al.registrar(pool, CONTA, origem="follow_up", canal="push", ok=False,
+                 membro_id=2, motivo="nenhum aparelho com push")
+    al.registrar(pool, CONTA, origem="follow_up", canal="email", ok=True, membro_id=1)
+    with pool.connection() as c:
+        al.marcar_recibo(c, "A1", "lido")
+        c.commit()
+    al.marcar_clique(pool, tok)
+
+    r = al.resumo(pool, CONTA)
+    assert r["whatsapp"]["ok"] == 2 and r["whatsapp"]["falhas"] == 1
+    assert r["whatsapp"]["lidos"] == 1 and r["whatsapp"]["entregues"] == 1
+    # A2 saiu e nenhum recibo voltou: é coluna PRÓPRIA, não "não entregue". Quem
+    # desliga a confirmação de leitura no WhatsApp nunca gera o 👀.
+    assert r["whatsapp"]["sem_recibo"] == 1
+    assert r["push"]["ok"] == 1 and r["push"]["clicados"] == 1 and r["push"]["falhas"] == 1
+    # o e-mail não tem recibo nenhum, e o resumo não inventa um
+    assert r["email"]["ok"] == 1
+    assert r["email"]["entregues"] == 0 and r["email"]["lidos"] == 0
+
+
+def test_o_teste_de_canal_NAO_entra_na_estatistica_da_cobranca(pool):
+    """A origem nasceu separada pra isto: o botão "Testar agora" prova que o chip
+    fala, e não pode virar "os vendedores receberam 9 avisos esta semana"."""
+    al.registrar(pool, CONTA, origem="follow_up", canal="whatsapp", ok=True, membro_id=1)
+    al.registrar(pool, CONTA, origem="follow_up_teste", canal="whatsapp", ok=True, membro_id=1)
+    assert al.resumo(pool, CONTA)["whatsapp"]["ok"] == 1
+    assert al.resumo(pool, CONTA, origem="follow_up_teste")["whatsapp"]["ok"] == 1
+
+
+def test_o_resumo_separa_por_vendedor_porque_o_total_nao_diz_quem(pool):
+    """"16 de 21 lidos" não diz quem não está lendo — e é essa a pergunta de quem
+    cobra."""
+    al.registrar(pool, CONTA, origem="follow_up", canal="whatsapp", ok=True,
+                 membro_id=1, sid="T1")
+    al.registrar(pool, CONTA, origem="follow_up", canal="whatsapp", ok=True,
+                 membro_id=2, sid="M1")
+    with pool.connection() as c:
+        al.marcar_recibo(c, "T1", "lido")
+        al.marcar_recibo(c, "M1", "entregue")
+        c.commit()
+    por = {v["quem"]: v for v in al.resumo(pool, CONTA)["por_vendedor"]}
+    assert por["THIAGO"]["lidos"] == 1 and por["THIAGO"]["entregues"] == 0
+    assert por["MANOEL"]["lidos"] == 0 and por["MANOEL"]["entregues"] == 1
+
+
+def test_a_janela_do_resumo_corta_o_que_e_velho(pool):
+    al.registrar(pool, CONTA, origem="follow_up", canal="email", ok=True, membro_id=1)
+    with pool.connection() as c:
+        c.execute("update aviso_envios set criado_em = now() - interval '40 days'")
+        c.commit()
+    assert al.resumo(pool, CONTA)["email"]["ok"] == 0, "30 dias virou 'sempre'"
+    assert al.resumo(pool, CONTA, dias=90)["email"]["ok"] == 1
+
+
+def test_resumo_com_a_tabela_fora_do_ar_devolve_a_forma_vazia(pool):
+    """O card é acessório; a fila é o produto da tela. Um resumo que levanta
+    derrubaria a tela inteira do follow-up."""
+    with pool.connection() as c:
+        c.execute("drop table aviso_envios")
+        c.commit()
+    r = al.resumo(pool, CONTA)
+    assert r["whatsapp"] == r["push"] == r["email"] == {
+        "tentativas": 0, "ok": 0, "falhas": 0, "entregues": 0, "lidos": 0,
+        "sem_recibo": 0, "clicados": 0}
+    assert r["por_vendedor"] == []
+
+
+def test_o_aviso_de_whatsapp_guarda_o_id_da_mensagem(pool, monkeypatch):
+    """Sem o sid, "saiu" é tudo que se saberia dizer: é por ele que o recibo
+    encontra o aviso depois."""
+    from finance import cockpit as ck
+    from finance import email_sender as es
+    from finance import follow_up as fu
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 1)
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    _espiar_zap(monkeypatch)
+    _regua(pool, zap=True)
+
+    fu.notificar(pool, CONTA, [_pendente(1)])
+    with pool.connection() as c:
+        sid = c.execute("select sid from aviso_envios where canal='whatsapp'").fetchone()[0]
+    assert sid == "3EB01"
+
+
+def test_o_push_leva_o_token_do_clique_e_o_guarda(pool, monkeypatch):
+    """O token viaja NO push — gerar depois seria tarde, a notificação já saiu."""
+    from finance import cockpit as ck
+    from finance import email_sender as es
+    from finance import follow_up as fu
+    visto = {}
+
+    def _push(pool_, conta, membro, titulo, corpo, url="/cockpit", badge=None, token=""):
+        visto["token"] = token
+        return 1
+
+    monkeypatch.setattr(ck, "enviar_push", _push)
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    fu.notificar(pool, CONTA, [_pendente(1)])
+    with pool.connection() as c:
+        guardado = c.execute("select token from aviso_envios where canal='push'").fetchone()[0]
+    assert visto["token"] and guardado == visto["token"]
+
+
+def test_push_que_nao_alcancou_aparelho_nenhum_nao_guarda_token(pool, monkeypatch):
+    """Token guardado sem push no ar seria um clique impossível esperando pra
+    sempre — e uma linha a menos pro índice único cuidar."""
+    from finance import cockpit as ck
+    from finance import email_sender as es
+    from finance import follow_up as fu
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 0)
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    fu.notificar(pool, CONTA, [_pendente(1)])
+    with pool.connection() as c:
+        r = c.execute("select ok, token from aviso_envios where canal='push'").fetchone()
+    assert r == (False, None)

@@ -6873,7 +6873,7 @@ self.addEventListener('push',e=>{
   let d={title:'Novo lead',body:'Toque pra atender'};
   try{d=Object.assign(d,e.data.json());}catch(_){}
   const tarefas=[self.registration.showNotification(d.title,{body:d.body,icon:'/cockpit/icon.svg',
-    badge:'/cockpit/icon.svg',data:{url:d.url||'/cockpit'}})];
+    badge:'/cockpit/icon.svg',data:{url:d.url||'/cockpit',t:d.aviso_token||''}})];
   // A bolinha no ÍCONE do app. O service worker acorda com o push mesmo com o app
   // fechado, então é aqui — e só aqui — que dá pra marcar o ícone sem o vendedor
   // abrir nada. A notificação passa; a bolinha fica até ele responder.
@@ -6887,10 +6887,18 @@ self.addEventListener('push',e=>{
 });
 self.addEventListener('notificationclick',e=>{
   e.notification.close();
-  e.waitUntil(clients.matchAll({type:'window'}).then(ws=>{
+  const d=e.notification.data||{};
+  // O TOQUE VOLTA (migração 284). É o único sinal honesto de "viu" que existe num
+  // aviso: o navegador não conta quem leu na tela de bloqueio, mas quem TOCA abriu
+  // o painel. O token é o que identifica o aviso — não vai id de ninguém aqui.
+  // `.catch` mudo de propósito: um aviso não medido é melhor que um clique que não
+  // abre a tela, e sem sinal a janela abriria mesmo assim.
+  const avisa=d.t?fetch('/cockpit/aviso-visto?t='+encodeURIComponent(d.t),
+    {method:'POST',credentials:'include',keepalive:true}).catch(()=>{}):Promise.resolve();
+  e.waitUntil(Promise.all([avisa,clients.matchAll({type:'window'}).then(ws=>{
     for(const w of ws){if(w.url.includes('/cockpit')&&'focus'in w)return w.focus();}
-    return clients.openWindow((e.notification.data&&e.notification.data.url)||'/cockpit');
-  }));
+    return clients.openWindow(d.url||'/cockpit');
+  })]));
 });
 """
 
@@ -6899,6 +6907,30 @@ self.addEventListener('notificationclick',e=>{
 def cockpit_sw():
     return Response(_SW, media_type="application/javascript",
                     headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/cockpit"})
+
+
+@router.post("/cockpit/aviso-visto", include_in_schema=False)
+def cockpit_aviso_visto(t: str = ""):
+    """O vendedor tocou na notificação — carimba o clique do aviso (migração 284).
+
+    SEM LOGIN, e é de propósito: quem chama é o service worker, que acorda com o
+    push e pode rodar com o app fechado e a sessão expirada. Exigir sessão faria o
+    sinal sumir justamente em quem não abre o painel — que é quem a medição existe
+    pra encontrar.
+
+    O que substitui a sessão é o `token`: aleatório, único, e conhecido só por
+    quem recebeu aquele push. Ele não identifica pessoa nem conta pra quem chama —
+    a resposta é a mesma (204) pra token bom, ruim ou ausente, então isto não vira
+    um oráculo pra descobrir token de ninguém.
+
+    Não devolve conteúdo: o service worker não lê a resposta, e devolver algo só
+    daria o que vazar."""
+    try:
+        from finance import aviso_log as _al
+        _al.marcar_clique(get_pool(), t)
+    except Exception:  # noqa: BLE001 — medir não pode atrapalhar o toque
+        _log.info("aviso-visto: não deu pra marcar (ok)", exc_info=True)
+    return Response(status_code=204)
 
 
 # ------------------------------------------------------------------ gestor: gerar link

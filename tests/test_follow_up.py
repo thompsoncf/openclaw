@@ -145,6 +145,9 @@ def pool():
         # o registro de envio (276): o botão de teste do WhatsApp escreve nele,
         # e é por ele que se confere que o teste NÃO virou cobrança
         c.execute((MIG / "276_aviso_envios.sql").read_text(encoding="utf-8"))
+        # e a 284, que acrescentou o sid do WhatsApp e o token do push: o envio
+        # grava os dois, e sem as colunas o registro inteiro falha calado
+        c.execute((MIG / "284_aviso_envios_recibo.sql").read_text(encoding="utf-8"))
         for ch, o, fase in _ETAPAS:
             c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fase)
                          values (%s,%s,%s,%s,%s)""", (CONTA, ch, ch.capitalize(), o, fase))
@@ -1459,3 +1462,106 @@ def test_lead_no_prazo_nao_entra_no_teste(pool, monkeypatch):
     _conta_com_fila(pool, atraso_h=1)          # dentro do bola_nossa_min padrão
     monkeypatch.setattr(fu, "_mandar_zap", lambda *a, **k: {"ok": True, "erro": ""})
     assert fu.testar_zap(pool, CONTA, EVENTOS) == []
+
+
+# ─────────── o card "Como os avisos chegaram" (migração 284, 18/09/2026)
+#
+# Pedido do dono depois de ver o card de desempenho da campanha: "se poder medir
+# também se chegou e eles visualizaram, igual tem lá em campanha". Ele decidiu
+# TRINTA dias ("dá pra confiar nisso", em vez de "esta semana funcionou") e SÓ DONO
+# E GESTOR.
+#
+# O que estes testes protegem é o que o card diz — e, principalmente, o que ele NÃO
+# diz: e-mail com travessão em vez de zero, e "sem recibo" como coluna própria. Um
+# card que finge que os três canais medem a mesma coisa mente em dois deles.
+
+def _entrega(**kw):
+    base = {"tem": True, "dias": 30, "origem": "follow_up", "por_vendedor": [],
+            "whatsapp": {"tentativas": 21, "ok": 21, "falhas": 0, "entregues": 19,
+                         "lidos": 16, "sem_recibo": 2, "clicados": 0},
+            "push": {"tentativas": 21, "ok": 18, "falhas": 3, "entregues": 0,
+                     "lidos": 0, "sem_recibo": 0, "clicados": 9},
+            "email": {"tentativas": 21, "ok": 18, "falhas": 3, "entregues": 0,
+                      "lidos": 0, "sem_recibo": 0, "clicados": 0}}
+    base.update(kw)
+    return base
+
+
+def test_o_card_mostra_os_tres_canais_com_o_que_cada_um_SABE_dizer():
+    html = _tela(modo="ligado", zap=True, entrega=_entrega())
+    assert "Como os avisos chegaram" in html and "últimos 30 dias" in html
+    for pedaco in ("WhatsApp", "Push no app", "E-mail",
+                   "entregues ✓✓", "lidos 👀", "sem recibo", "abriram"):
+        assert pedaco in html, pedaco
+
+
+def test_o_email_mostra_TRAVESSAO_e_nunca_zero_no_que_nao_se_mede():
+    """Zero se leria como "ninguém abriu". O que existe é ausência de medição: o
+    pixel de leitura hoje mede o proxy do Gmail pré-carregando imagem, não gente."""
+    html = _tela(modo="ligado", zap=True, entrega=_entrega())
+    assert "não se mede" in html and "não se sabe" in html
+    assert "<b>—</b>" in html
+
+
+def test_o_vendedor_NAO_ve_o_card():
+    """Ver a própria taxa é justo; ver a dos colegas vira placar — e a régua toda
+    tem o cuidado de não virar fofoca sobre ninguém."""
+    assert "Como os avisos chegaram" not in _tela(modo="ligado", zap=True,
+                                                  papel="vendedor", entrega=None)
+
+
+def test_conta_que_nunca_mandou_aviso_nao_ganha_card_de_zeros():
+    """Card de zeros numa conta que acabou de ligar o follow-up não informa nada e
+    ocupa o lugar da fila, que é o produto da tela."""
+    assert "Como os avisos chegaram" not in _tela(modo="ligado", zap=True,
+                                                  entrega=_entrega(tem=False))
+    assert "Como os avisos chegaram" not in _tela(modo="ligado", zap=True, entrega=None)
+
+
+def test_a_leitura_por_vendedor_aparece_com_nome_e_barra():
+    """"16 de 21 lidos" não diz QUEM não está lendo — e é essa a pergunta de quem
+    cobra."""
+    html = _tela(modo="ligado", zap=True, entrega=_entrega(por_vendedor=[
+        {"quem": "THIAGO", "total": 7, "lidos": 6, "entregues": 1, "sem_recibo": 0,
+         "pct_lido": 86, "pct_entregue": 14}]))
+    assert "Leitura no WhatsApp, por vendedor" in html
+    assert "THIAGO" in html and "leu 6" in html and "width:86%" in html
+
+
+def test_a_ressalva_do_sem_recibo_fica_escrita_no_card():
+    """O WhatsApp deixa desligar a confirmação de leitura: quem desliga nunca gera
+    o 👀. Sem a frase, o dono cobraria alguém que leu."""
+    html = _tela(modo="ligado", zap=True, entrega=_entrega())
+    assert "não quer dizer que não chegou" in html
+
+
+def test_as_porcentagens_da_barra_saem_do_python_e_nao_do_template(monkeypatch):
+    """`width:{{ a / b * 100 }}%` em Jinja com b=0 derruba a tela inteira — e conta
+    sem envio nenhum é exatamente b=0."""
+    import web.painel_follow_up as pfu
+    from finance import aviso_log as al
+
+    vazio = {"tentativas": 0, "ok": 0, "falhas": 0, "entregues": 0,
+             "lidos": 0, "sem_recibo": 0, "clicados": 0}
+    monkeypatch.setattr(al, "resumo", lambda pool, conta_id, **kw: {
+        "dias": 30, "origem": "follow_up",
+        "por_vendedor": [{"quem": "NINGUÉM", "total": 0, "lidos": 0,
+                          "entregues": 0, "sem_recibo": 0}],
+        "email": dict(vazio), "push": dict(vazio), "whatsapp": dict(vazio)})
+
+    r = pfu._entrega(None, 1)
+    assert r["tem"] is False, "conta sem envio nenhum não ganha card"
+    assert r["por_vendedor"][0]["pct_lido"] == 0, "dividiu por zero em vez de mostrar 0%"
+
+
+def test_o_card_nao_derruba_a_tela_quando_a_leitura_falha(monkeypatch):
+    """O card é acessório; a fila é o produto. Resumo que levanta levaria junto a
+    tela inteira do follow-up."""
+    import web.painel_follow_up as pfu
+    from finance import aviso_log as al
+
+    def _explode(*a, **k):
+        raise RuntimeError("banco fora do ar")
+
+    monkeypatch.setattr(al, "resumo", _explode)
+    assert pfu._entrega(None, 1) is None

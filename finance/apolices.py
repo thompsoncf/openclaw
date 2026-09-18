@@ -207,12 +207,14 @@ _COLS = """a.id, a.cliente_id, a.corretor_id, a.seguradora, a.ramo,
            a.numero_proposta, a.numero_apolice, a.vigencia_inicio, a.vigencia_fim,
            a.situacao, a.premio_centavos, a.iof_centavos, a.franquia_centavos,
            a.comissao_pct, a.comissao_centavos, a.classe_bonus, a.parcelas,
-           a.dia_vencimento, a.bem, a.condutor, a.coberturas, a.renovacao_de, a.obs"""
+           a.dia_vencimento, a.bem, a.condutor, a.coberturas, a.renovacao_de, a.obs,
+           a.pdf_caminho, a.pdf_nome"""
 
 
 def _linha(r, hoje: date, pct_fallback=None) -> dict:
     (i, cli, cor, seg, ramo, n_prop, n_apol, v_ini, v_fim, sit, premio, iof, franquia,
-     pct, com, bonus, parcelas, dia_venc, bem, condutor, coberturas, renov, obs) = r[:23]
+     pct, com, bonus, parcelas, dia_venc, bem, condutor, coberturas, renov, obs,
+     pdf_caminho, pdf_nome) = r[:25]
     pct = Decimal(str(pct)) if pct is not None else pct_fallback
     dias = dias_para(v_fim, hoje)
     return {
@@ -230,6 +232,7 @@ def _linha(r, hoje: date, pct_fallback=None) -> dict:
         "classe_bonus": bonus, "parcelas": parcelas, "dia_vencimento": dia_venc,
         "bem": bem or {}, "condutor": condutor or {}, "coberturas": coberturas or [],
         "renovacao_de": renov, "obs": obs,
+        "pdf_caminho": pdf_caminho, "pdf_nome": pdf_nome, "tem_pdf": bool(pdf_caminho),
         "dias": dias, "degrau": degrau_de(dias),
     }
 
@@ -264,7 +267,7 @@ def a_vencer(pool, conta_id: int, *, dias: int = HORIZONTE, hoje: date | None = 
             if chave not in padrao:
                 padrao[chave] = pct_padrao(c, conta_id, r[3], r[4])
             d = _linha(r, hoje, padrao[chave])
-            d["cliente"] = r[23] or "—"
+            d["cliente"] = r[25] or "—"
             saida.append(d)
     return saida
 
@@ -292,7 +295,7 @@ def proxima(pool, conta_id: int, *, hoje: date | None = None,
         if r is None:
             return None
         d = _linha(r, hoje, pct_padrao(c, conta_id, r[3], r[4]))
-    d["cliente"] = r[23] or "—"
+    d["cliente"] = r[25] or "—"
     # quando ela entra na régua (o primeiro degrau) — é a pergunta seguinte de quem
     # lê "faltam 308 dias", e responder aqui evita a conta de cabeça
     d["entra_em"] = d["vigencia_fim"] - timedelta(days=DEGRAUS[0])
@@ -329,7 +332,7 @@ def listar(pool, conta_id: int, *, hoje: date | None = None,
             if chave not in padrao:
                 padrao[chave] = pct_padrao(c, conta_id, r[3], r[4])
             d = _linha(r, hoje, padrao[chave])
-            d["cliente"] = r[23] or "—"
+            d["cliente"] = r[25] or "—"
             saida.append(d)
     return saida
 
@@ -355,7 +358,7 @@ def uma(pool, conta_id: int, apolice_id: int, *, hoje: date | None = None) -> di
         if r is None:
             return None
         d = _linha(r, hoje, pct_padrao(c, conta_id, r[3], r[4]))
-    d["cliente"] = r[23] or "—"
+    d["cliente"] = r[25] or "—"
     return d
 
 
@@ -363,7 +366,9 @@ _CAMPOS = ("cliente_id", "corretor_id", "seguradora", "ramo", "numero_proposta",
            "numero_apolice", "vigencia_inicio", "vigencia_fim", "situacao",
            "premio_centavos", "iof_centavos", "franquia_centavos", "comissao_pct",
            "comissao_centavos", "classe_bonus", "parcelas", "dia_vencimento",
-           "bem", "condutor", "coberturas", "renovacao_de", "obs")
+           "bem", "condutor", "coberturas", "renovacao_de", "obs",
+           # o PDF guardado junto (migração 286) e o que o leitor leu dele
+           "pdf_caminho", "pdf_nome", "pdf_bytes", "pdf_lido", "pdf_lido_em")
 
 
 def salvar(pool, conta_id: int, dados: dict, apolice_id: int | None = None) -> int:
@@ -396,6 +401,10 @@ def salvar(pool, conta_id: int, dados: dict, apolice_id: int | None = None) -> i
     import json as _json
     for k, vazio in (("bem", {}), ("condutor", {}), ("coberturas", [])):
         d[k] = _json.dumps(d[k] if d[k] is not None else vazio)
+    # `pdf_lido` é jsonb mas NULO quando não veio de PDF — sem forçar '{}': a
+    # coluna vazia é a resposta honesta de "esta foi digitada à mão"
+    if d.get("pdf_lido") is not None and not isinstance(d["pdf_lido"], str):
+        d["pdf_lido"] = _json.dumps(d["pdf_lido"])
     with pool.connection() as c:
         with c.transaction():
             if apolice_id:

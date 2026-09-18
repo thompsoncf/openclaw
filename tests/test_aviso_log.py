@@ -32,7 +32,23 @@ MIG = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 
 _SQL = """
 create table membros (id bigserial primary key, conta_id bigint, nome text,
-  email text, papel text default 'vendedor', ativo boolean default true);
+  email text, papel text default 'vendedor', ativo boolean default true,
+  -- os DOIS campos de número: `whatsapp` vem do convite, `whatsapp_id` de quem se
+  -- cadastrou pelo próprio WhatsApp. O aviso lê os dois — ver `_zap_do_membro`.
+  whatsapp text, whatsapp_id text);
+-- a régua INTEIRA: `follow_up.config` chama `funil_regua.config`, que lê a janela
+-- de atendimento e os prazos de conversa. Um stub magro aqui passava por um caminho
+-- que produção não tem — e o erro sai como "column gatilhos_modo does not exist".
+create table funil_regua (conta_id bigint primary key,
+  gatilhos_modo text default 'off', cobranca_modo text default 'off',
+  janela_dias text default '1,2,3,4,5,6', janela_abre time default '08:00',
+  janela_fecha time default '19:00', sem_resposta_min int default 120,
+  bola_nossa_min int default 240, bola_cliente_min int default 4320,
+  escala_min int default 240, teto_avisos_dia int default 5,
+  follow_up_modo text default 'off', fu_proposta_dias int, fu_toques_dias text,
+  fu_festa_dias int, fu_teto_dia int, fila_modo text not null default 'prazo',
+  fu_zap boolean not null default false,
+  atualizado_em timestamptz not null default now());
 """
 
 
@@ -53,8 +69,12 @@ def pool():
         # A MIGRAÇÃO DE VERDADE, não uma cópia: é o único jeito de o teste perceber
         # que a tabela nova não chegou em produção.
         c.execute((MIG / "276_aviso_envios.sql").read_text(encoding="utf-8"))
-        c.execute("insert into membros (id, conta_id, nome, email) values "
-                  "(1,%s,'THIAGO','thiago@x.com'), (2,%s,'MANOEL',null)", (CONTA, CONTA))
+        c.execute("""insert into membros (id, conta_id, nome, email, whatsapp, whatsapp_id) values
+                        (1,%s,'THIAGO','thiago@x.com','86988614189',null),
+                        -- o MANOEL é o caso de produção: sem e-mail, sem push, e o
+                        -- número só no campo do cadastro
+                        (2,%s,'MANOEL',null,null,'+5599984996253'),
+                        (3,%s,'IRIS',null,null,null)""", (CONTA, CONTA, CONTA))
         c.commit()
     yield p
     p.close()
@@ -175,3 +195,153 @@ def test_membro_sem_email_deixa_o_motivo_escrito(pool, monkeypatch):
     # e o push sem aparelho: não é erro, mas também não é silêncio
     assert por_canal["push"][5] is False
     assert "aparelho" in por_canal["push"][6]
+
+
+# ═══════════════════════════════════════════ o WhatsApp do aviso (migração 280)
+#
+# Pedido do dono em 17/09/2026: "vamos implementar o whatsapp pra mandar pro
+# vendedor, pro número dele". O encanamento já existia (é o mesmo do aviso de lead
+# novo); o que faltava era a trava do número da equipe, consertada no mesmo dia.
+#
+# O que este bloco fixa é o que separa "mandar no WhatsApp" de "mandar no WhatsApp
+# de alguém sem ele ter pedido".
+
+def _regua(pool, *, zap):
+    with pool.connection() as c:
+        c.execute("""insert into funil_regua (conta_id, follow_up_modo, fu_zap)
+                     values (%s,'ligado',%s)
+                     on conflict (conta_id) do update set fu_zap=excluded.fu_zap""",
+                  (CONTA, zap))
+        c.commit()
+
+
+def _pendente(membro_id, quem="Talila"):
+    return {"lead_id": 1, "membro_id": membro_id, "quem": quem, "degrau": "venc",
+            "nivel": "vendedor", "acao": "responder", "atraso_h": 30}
+
+
+def _espiar_zap(monkeypatch):
+    """Troca o envio de verdade por um espião. Devolve a lista do que foi mandado."""
+    from finance import follow_up as fu
+    saiu = []
+
+    def _falso(pool, conta_id, numero, texto):
+        saiu.append({"numero": numero, "texto": texto})
+        return {"ok": True, "erro": ""}
+
+    monkeypatch.setattr(fu, "_mandar_zap", _falso)
+    return saiu
+
+
+def test_com_o_interruptor_DESLIGADO_nao_manda_nem_registra_whatsapp(pool, monkeypatch):
+    """O padrão. Mandar no WhatsApp de alguém não começa ligado — a régua inteira
+    segue essa regra desde a 218, e este canal é o que mais justifica ela."""
+    from finance import cockpit as ck
+    from finance import email_sender as es
+    from finance import follow_up as fu
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 1)
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    saiu = _espiar_zap(monkeypatch)
+    _regua(pool, zap=False)
+
+    fu.notificar(pool, CONTA, [_pendente(1)])
+    assert saiu == [], "mandou WhatsApp com o interruptor desligado"
+    assert [r[1] for r in _linhas(pool)] == ["push", "email"], "registrou canal que não existiu"
+
+
+def test_com_o_interruptor_LIGADO_manda_e_registra_o_numero(pool, monkeypatch):
+    from finance import cockpit as ck
+    from finance import email_sender as es
+    from finance import follow_up as fu
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 1)
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    saiu = _espiar_zap(monkeypatch)
+    _regua(pool, zap=True)
+
+    fu.notificar(pool, CONTA, [_pendente(1)])
+    assert len(saiu) == 1 and saiu[0]["numero"] == "86988614189"
+    zap = [r for r in _linhas(pool) if r[1] == "whatsapp"]
+    assert len(zap) == 1 and zap[0][5] is True
+    assert zap[0][2] == "86988614189", "o destino não ficou registrado"
+
+
+def test_o_MANOEL_recebe_pelo_numero_do_CADASTRO(pool, monkeypatch):
+    """O caso que motivou ler os dois campos. Na conta 34 o dono não tem e-mail nem
+    push: em 18/09 o log mostrou a cópia de gestor dele — 30 leads — falhando nos
+    dois canais. O número dele existe, mas só em `whatsapp_id`.
+
+    Lendo um campo só, o WhatsApp seria o terceiro canal a cair no vazio pra ele.
+    """
+    from finance import cockpit as ck
+    from finance import follow_up as fu
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 0)
+    saiu = _espiar_zap(monkeypatch)
+    _regua(pool, zap=True)
+
+    fu.notificar(pool, CONTA, [_pendente(2)])
+    assert [x["numero"] for x in saiu] == ["+5599984996253"]
+    por_canal = {r[1]: r for r in _linhas(pool)}
+    # e os outros dois continuam falhando, registrados — o WhatsApp não apaga isso
+    assert por_canal["email"][5] is False and "sem e-mail" in por_canal["email"][6]
+    assert por_canal["push"][5] is False
+    assert por_canal["whatsapp"][5] is True
+
+
+def test_membro_sem_numero_nenhum_deixa_o_motivo_escrito(pool, monkeypatch):
+    """Silêncio de novo não. Quem não tem número recebe só por e-mail e push, e a
+    linha diz isso — senão o dono lê "3 canais ligados" e acredita."""
+    from finance import cockpit as ck
+    from finance import follow_up as fu
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 0)
+    saiu = _espiar_zap(monkeypatch)
+    _regua(pool, zap=True)
+
+    fu.notificar(pool, CONTA, [_pendente(3)])
+    assert saiu == []
+    por_canal = {r[1]: r for r in _linhas(pool)}
+    assert por_canal["whatsapp"][5] is False
+    assert "sem WhatsApp" in por_canal["whatsapp"][6]
+
+
+def test_whatsapp_que_falha_nao_derruba_o_resto_e_fica_escrito(pool, monkeypatch):
+    """Chip fora do ar, número inválido, janela fechada: o aviso do dia não pode se
+    perder por causa do terceiro canal, e o erro tem que ficar legível."""
+    from finance import cockpit as ck
+    from finance import email_sender as es
+    from finance import follow_up as fu
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 2)
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    monkeypatch.setattr(fu, "_mandar_zap",
+                        lambda *a, **k: {"ok": False, "erro": "chip_desconectado"})
+    _regua(pool, zap=True)
+
+    fu.notificar(pool, CONTA, [_pendente(1)])      # não levanta
+    por_canal = {r[1]: r for r in _linhas(pool)}
+    assert por_canal["push"][5] is True and por_canal["email"][5] is True
+    assert por_canal["whatsapp"][5] is False
+    assert por_canal["whatsapp"][6] == "chip_desconectado"
+
+
+def test_o_texto_leva_titulo_corpo_e_link(pool):
+    """O link é o botão. Sem ele o aviso vira cobrança sem saída — o mesmo defeito
+    que o push do rodízio já teve."""
+    from finance import follow_up as fu
+    t = fu._texto_zap("⏱️ 10 leads esperando follow-up", "Talila · Renata")
+    assert t.startswith("⏱️ 10 leads esperando follow-up")
+    assert "Talila · Renata" in t
+    assert "/cockpit" in t
+    assert "*" not in t, "marcação de negrito vira lixo visível fora do WhatsApp"
+
+
+def test_regua_ilegivel_deixa_o_whatsapp_DESLIGADO(pool, monkeypatch):
+    """Falhar a leitura vale desligado: o canal que toca o celular de alguém não
+    pode ligar por acidente de banco."""
+    from finance import cockpit as ck
+    from finance import follow_up as fu
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 1)
+    saiu = _espiar_zap(monkeypatch)
+    with pool.connection() as c:
+        c.execute("drop table funil_regua")
+        c.commit()
+    fu.notificar(pool, CONTA, [_pendente(1)])
+    assert saiu == [], "ligou o WhatsApp sem conseguir ler a régua"

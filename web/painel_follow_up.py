@@ -153,7 +153,8 @@ def painel_follow_up(request: Request):
                    etapa_f=etapa_f, vendedores=vendedores, etapas=etapas,
                    status=status_tpl,
                    gestao=(fu.por_vendedor(linhas) if papel != "vendedor" else []),
-                   modo=cfg["follow_up_modo"], rotulo=fu.ROTULO, emoji=fu.EMOJI,
+                   modo=cfg["follow_up_modo"], zap=bool(cfg.get("fu_zap")),
+                   rotulo=fu.ROTULO, emoji=fu.EMOJI,
                    por_temp=por_temp, rot_prio=fu.ROTULO_PRIORIDADE,
                    br=_br, tempo=_tempo, adia_max=fu.ADIAMENTOS_ATE_MOTIVO,
                    resumo_msg=_resumo_msg, quando_curto=_quando_curto,
@@ -190,6 +191,32 @@ def follow_up_modo(request: Request, modo: str = Form("")):
         fu.config(c, conta[0])          # garante a linha da régua
         c.execute("update funil_regua set follow_up_modo=%s, atualizado_em=now() "
                   " where conta_id=%s", (modo, conta[0]))
+        c.commit()
+    return RedirectResponse("/painel/follow-up", status_code=303)
+
+
+@router.post("/painel/follow-up/zap")
+def follow_up_zap(request: Request, zap: str = Form("")):
+    """Liga ou desliga o WhatsApp do aviso de follow-up (migração 280).
+
+    Rota PRÓPRIA, e não um campo do interruptor de modo, pelo mesmo motivo que o
+    modo saiu da Régua em 07/09: são duas decisões diferentes, e juntá-las num
+    formulário faria ligar uma mexer na outra sem querer.
+
+    Só dono e gestor — o vendedor não decide o que chega no celular da equipe. E
+    `def`, não `async def`: escreve no banco de forma síncrona, e handler async
+    fazendo isso trava o event loop (ver `follow_up_modo` aqui em cima).
+    """
+    conta, _perfil, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if request.session.get("papel", "dono") not in ("dono", "gestor"):
+        return RedirectResponse("/painel/follow-up", status_code=303)
+    ligar = (zap or "").strip() == "1"
+    with get_pool().connection() as c:
+        fu.config(c, conta[0])          # garante a linha da régua
+        c.execute("update funil_regua set fu_zap=%s, atualizado_em=now() where conta_id=%s",
+                  (ligar, conta[0]))
         c.commit()
     return RedirectResponse("/painel/follow-up", status_code=303)
 
@@ -422,6 +449,25 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
   </div>
   {% if modo == 'off' %}<p class="lede" style="color:var(--ambar)">Está <b>desligado</b>: a tela mostra o quadro, mas ninguém recebe push nem e-mail.</p>
   {% elif modo == 'observando' %}<p class="lede" style="color:var(--azul)">Está em <b>ensaio</b>: o sistema calcula e grava o que mandaria, sem mandar nada a ninguém.</p>{% endif %}
+
+  {#- O TERCEIRO CANAL (migração 280). Só aparece com o motor LIGADO: oferecer
+      "mandar também no WhatsApp" com a cobrança desligada seria oferecer um canal
+      pra um aviso que não existe. E só pra dono/gestor, como o interruptor de cima —
+      o vendedor não decide o que chega no celular da equipe inteira. -#}
+  {% if modo == 'ligado' and papel in ('dono','gestor') %}
+  <div class="fu-modo">
+    <div class="txt">
+      <b>Avisar também no WhatsApp</b>
+      <small>a mesma mensagem do e-mail, no número de cada vendedor, uma vez por dia</small>
+    </div>
+    <form method="post" action="/painel/follow-up/zap" class="fu-seg">
+      {% for v, r in [(0,'Não'),(1,'Sim')] %}
+      <button type="submit" name="zap" value="{{ v }}" class="{{ 'ligado' if v else 'off' }}{% if (1 if zap else 0)==v %} on{% endif %}">{{ r }}</button>
+      {% endfor %}
+    </form>
+  </div>
+  {% if zap %}<p class="lede" style="color:var(--verde-claro)">Sai pelo chip que a empresa usa nos recados internos. Quem não tem número cadastrado continua recebendo só por e-mail e push.</p>{% endif %}
+  {% endif %}
 
   {% if erro == 'motivo_obrigatorio' %}
     <div class="fu-erro">Este lead já foi adiado {{ adia_max - 1 }} vezes sem ninguém falar com o cliente. Pra adiar de novo, escreva o motivo.</div>

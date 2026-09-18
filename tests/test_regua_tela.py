@@ -51,6 +51,8 @@ create table funil_regua (conta_id bigint primary key,
   -- coluna vazia quer dizer "herda o padrão do nicho", e um default aqui esconderia
   -- justamente o caso que a tela precisa saber mostrar.
   follow_up_modo text default 'off', fu_proposta_dias int, fu_toques_dias text,
+  -- `fu_zap` (migração 280): o aviso também no WhatsApp do vendedor, desligado por padrão
+  fu_zap boolean not null default false,
   fu_festa_dias int, fu_teto_dia int,
   -- o quarto modo (migração 230): um interruptor POR REGRA, não um geral
   teto_modo text not null default 'off', teto_avisar_antes int,

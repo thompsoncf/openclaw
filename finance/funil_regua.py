@@ -301,9 +301,24 @@ _SQL_EVENTO = {
     "sinal_pago": """
         select p.id, o.sinal_pago_em from prospeccao p join orcamentos o on o.id = p.orcamento_id
          where p.conta_id=%(conta)s and o.sinal_pago_em is not null""",
+    # A ASSINATURA MORA EM `contratos`, NÃO EM `orcamentos`.
+    #
+    # A versão original lia `orcamentos.contrato_assinado_em` — uma coluna que existe
+    # (painel_servicos a cria) e que NENHUM caminho do produto preenche. Medido na
+    # conta 34 em 18/09/2026: 25 orçamentos, ZERO com essa coluna; 7 contratos
+    # assinados em `contratos.assinado_em`. O gatilho aparecia "ligado" na Régua e
+    # nunca tinha disparado uma vez — quem movia o card era `funil_ganho`, chamado
+    # na hora da assinatura. Um gatilho que nunca dispara e nunca reclama é
+    # indistinguível de um que ninguém ligou; este ficou assim desde que nasceu.
+    #
+    # `min(assinado_em)`: o fato é a PRIMEIRA assinatura. Aditivo depois não muda a
+    # data da venda, e um instante que anda atravessaria a TRAVA 3.
     "contrato_assinado": """
-        select p.id, o.contrato_assinado_em from prospeccao p join orcamentos o on o.id = p.orcamento_id
-         where p.conta_id=%(conta)s and o.contrato_assinado_em is not null""",
+        select p.id, min(ct.assinado_em)
+          from prospeccao p
+          join contratos ct on ct.orcamento_id = p.orcamento_id and ct.conta_id = p.conta_id
+         where p.conta_id=%(conta)s and ct.assinado_em is not null
+         group by p.id""",
 }
 
 

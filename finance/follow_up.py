@@ -752,10 +752,14 @@ def _mandar_zap(pool, conta_id: int, numero: str, texto: str) -> dict:
             chip = _dist.config(c, conta_id).get("aviso_zap_chip_id")
             r = wo.enviar(c, conta_id, numero, texto, chip_id=chip) or {}
         if r.get("ok"):
-            return {"ok": True, "erro": ""}
-        return {"ok": False, "erro": str(r.get("erro") or r.get("msg") or "o envio devolveu falso")}
+            # O SID VOLTA JUNTO (migração 284). É o id da mensagem no WhatsApp, e é
+            # por ele que o recibo de entrega e de leitura encontra este aviso
+            # depois — sem ele, "saiu" é tudo que a gente saberia dizer.
+            return {"ok": True, "erro": "", "sid": str(r.get("sid") or "")}
+        return {"ok": False, "erro": str(r.get("erro") or r.get("msg") or "o envio devolveu falso"),
+                "sid": ""}
     except Exception as e:  # noqa: BLE001
-        return {"ok": False, "erro": f"{type(e).__name__}: {e}"}
+        return {"ok": False, "erro": f"{type(e).__name__}: {e}", "sid": ""}
 
 
 def notificar(pool, conta_id: int, pendentes: list[dict]) -> None:
@@ -823,15 +827,22 @@ def notificar(pool, conta_id: int, pendentes: list[dict]) -> None:
             # O `pass` continua: aviso é best-effort e não pode derrubar o poller. O
             # que muda é que agora a falha fica ESCRITA, com o erro, em `aviso_envios`.
             from finance import aviso_log as _al
+            # O TOKEN DO CLIQUE nasce ANTES do envio, porque ele VIAJA no push: é o
+            # que o service worker devolve quando o vendedor toca na notificação.
+            # Não existe "viu" no navegador; existe o toque, e quem toca abriu o
+            # painel. Gerar depois seria tarde — a notificação já teria saído.
+            _tok = _al.novo_token()
             try:
                 from finance import cockpit as _ck
-                _n = _ck.enviar_push(pool, conta_id, membro_id, titulo, corpo, "/cockpit")
+                _n = _ck.enviar_push(pool, conta_id, membro_id, titulo, corpo, "/cockpit",
+                                     token=_tok)
                 # enviar_push devolve quantos aparelhos aceitaram. ZERO não é erro —
                 # é vendedor sem push instalado, e é exatamente o que o dono precisa
                 # ver pra saber que o aviso dele só chega por e-mail.
                 _al.registrar(pool, conta_id, origem="follow_up", canal="push",
                               membro_id=membro_id, assunto=titulo, n_leads=len(itens),
-                              ok=bool(_n), motivo="" if _n else "nenhum aparelho com push")
+                              ok=bool(_n), motivo="" if _n else "nenhum aparelho com push",
+                              token=_tok if _n else "")
             except Exception as e:  # noqa: BLE001
                 _al.registrar(pool, conta_id, origem="follow_up", canal="push",
                               membro_id=membro_id, assunto=titulo, n_leads=len(itens),
@@ -870,7 +881,8 @@ def notificar(pool, conta_id: int, pendentes: list[dict]) -> None:
                     r = _mandar_zap(pool, conta_id, numero, _texto_zap(titulo, corpo))
                     _al.registrar(pool, conta_id, origem="follow_up", canal="whatsapp",
                                   membro_id=membro_id, destino=numero, assunto=titulo,
-                                  n_leads=len(itens), ok=r["ok"], motivo=r["erro"])
+                                  n_leads=len(itens), ok=r["ok"], motivo=r["erro"],
+                                  sid=r.get("sid", ""))
         except Exception:  # noqa: BLE001
             _log.warning("aviso de follow-up falhou (membro %s)", membro_id, exc_info=True)
 
@@ -956,7 +968,7 @@ def testar_zap(pool, conta_id: int, perfil: dict | None = None) -> list[dict]:
         _al.registrar(pool, conta_id, origem="follow_up_teste", canal="whatsapp",
                       membro_id=item["membro_id"], destino=item["numero"],
                       assunto=titulo, n_leads=item["n_leads"],
-                      ok=r["ok"], motivo=r["erro"])
+                      ok=r["ok"], motivo=r["erro"], sid=r.get("sid", ""))
     return saida
 
 

@@ -5245,6 +5245,23 @@ def aplicar_status_wa(c, sid: str, novo: str, erro_codigo: str = "", erro_msg: s
         return
     # guarda de rank: nunca rebaixa (erro=enviado < entregue < lido)
     rank = _WA_STATUS_RANK[novo]
+    # O MESMO RECIBO CARIMBA O AVISO INTERNO (migração 284). O aviso de follow-up
+    # sai pelo chip como qualquer mensagem, então o ✓✓ e o 👀 dele chegam por aqui
+    # — e antes morriam aqui, porque este caminho só conhecia `mensagens` e o alvo
+    # da campanha. É o que permite responder "o vendedor leu?", que é a pergunta
+    # seguinte a "o aviso saiu?".
+    #
+    # DENTRO DE UM SAVEPOINT, e isto não é zelo: o `try` sozinho pega a exceção do
+    # Python, mas o Postgres já abortou a transação INTEIRA — e as duas linhas
+    # abaixo, que são o recibo do CLIENTE, morreriam com "current transaction is
+    # aborted". Acontece de verdade no deploy em que o código sobe antes da
+    # migração. O savepoint é o que faz a falha caber só nela mesma.
+    try:
+        from finance import aviso_log as _al
+        with c.transaction():
+            _al.marcar_recibo(c, sid, novo)
+    except Exception:  # noqa: BLE001 — medir o aviso não derruba o recibo do cliente
+        _log.info("aviso_log: recibo não carimbou (ok)", exc_info=True)
     cur = c.execute(
         "update campanha_alvos set wa_status=%s, wa_em=now() "
         "where wa_sid=%s and coalesce(" + _SQL_RANK.replace("%s", "wa_status") +

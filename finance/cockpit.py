@@ -1784,7 +1784,8 @@ def remover_assinatura(pool, endpoint: str) -> None:
 
 
 def enviar_push(pool, conta_id: int, membro_id: int, titulo: str, corpo: str,
-                url: str = "/cockpit", badge: int | None = None) -> int:
+                url: str = "/cockpit", badge: int | None = None,
+                token: str = "") -> int:
     """Dispara push pra TODAS as assinaturas ativas do vendedor (se ele deixou o push
     ligado). Best-effort: nunca levanta; apaga assinatura morta (404/410). Devolve
     quantas foram entregues. Sem chaves VAPID no ambiente, não faz nada."""
@@ -1809,6 +1810,13 @@ def enviar_push(pool, conta_id: int, membro_id: int, titulo: str, corpo: str,
     # abrir nada. Só vai quando o chamador soube calcular — `None` é "não mexe".
     if badge is not None:
         dados["badge_n"] = int(badge)
+    # O TOKEN DO CLIQUE (migração 284), quando o chamador quer saber se a pessoa
+    # tocou. Vai junto porque é a ÚNICA volta que existe: o service worker roda sem
+    # sessão garantida, e é conhecer o token que prova de qual aviso foi o toque.
+    # Quem não passa token não é medido — e não pagar pelo que não usa é o motivo
+    # de ele ser opcional.
+    if token:
+        dados["aviso_token"] = str(token)
     for endpoint, p256dh, auth in subs:
         sub = {"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}}
         try:

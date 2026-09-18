@@ -1,0 +1,241 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<title>A ficha do segurado: o que a Carteira abre quando se clica no cliente</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:880px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:32px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.card{background:#fff;border:1px solid #E3DDD0;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden;margin-bottom:14px}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+
+/* ---------- réplica FIEL do painel escuro (web/painel_servicos) ---------- */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC}
+.pn .card2{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.55rem}
+.pn .cab{display:flex;align-items:center;gap:.6rem}
+.pn .seta{color:#7B8A99;font-size:.85rem}
+.pn .tit{font-weight:700;font-size:1rem}
+.pn .mut{color:#7B8A99;font-size:.78rem;margin-top:.1rem}
+.pn .selo{margin-left:auto;font-size:.68rem;font-weight:700;background:#3A2A10;color:#E0B458;border:1px solid #5C4418;border-radius:5px;padding:.1rem .38rem;white-space:nowrap}
+.pn .selo.ok{background:#10241d;color:#7EE7B8;border-color:#1c3a30}
+.pn .expl{color:#9AA7B4;font-size:.85rem;margin:.7rem 0 .8rem;line-height:1.6}
+.pn .expl b{color:#7EE7B8}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.4rem .55rem;font-size:.85rem;color:#DDE4EC;width:100%}
+.pn .ta{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.45rem .55rem;font-size:.78rem;color:#C6D2DE;width:100%;font-family:ui-monospace,Menlo,monospace;line-height:1.6}
+.pn .pill{display:inline-block;background:#1B2836;border:1px solid #2A3947;border-radius:99px;padding:.2rem .55rem;font-size:.75rem;color:#C6D2DE}
+.pn .pill.mono{font-family:ui-monospace,Menlo,monospace;font-size:.7rem;padding:.15rem .4rem}
+.pn .pill.novo{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .btnv{display:inline-block;background:#1F7A55;color:#EAFFF5;border-radius:8px;padding:.45rem .9rem;font-size:.85rem;font-weight:700}
+.pn .lbl{color:#7B8A99;font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:.2rem}
+.pn .bloco{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem}
+.pn .linha{display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem}
+.pn .mini{display:inline-flex;align-items:center;justify-content:center;background:#1B2836;border:1px solid #2A3947;border-radius:6px;width:26px;height:26px;font-size:.8rem;color:#9AA7B4;flex:0 0 auto}
+.pn .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.5rem}
+.eti{display:inline-block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:99px;vertical-align:middle;margin-left:6px}
+.e-hoje{background:#FDECEA;color:#B4453C;border:1px solid #F5C6C0}
+.e-novo{background:#E8F5EE;color:#1c7a4f;border:1px solid #BFE3D0}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.card,.pn,.q{break-inside:avoid}}
+
+.gap{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.gap>div{background:#fff;border:1px solid #E3DDD0;border-radius:10px;padding:12px 14px}
+.gap h4{margin:0 0 6px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475}
+.gap.antes>div:first-child{border-left:3px solid #B4453C}
+.gap.antes>div:last-child{border-left:3px solid #1c7a4f}
+.pn .kv{display:grid;grid-template-columns:auto 1fr;gap:.15rem .7rem;font-size:.82rem}
+.pn .kv .k{color:#7B8A99;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;padding-top:.1rem}
+.pn .duas{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+@media (max-width:640px){.pn .duas{grid-template-columns:1fr}}
+.pn .ap{border-left:3px solid #E0B458;padding-left:.6rem}
+.pn .ap.ok{border-left-color:#2C6E52}
+.pn .tl{border-left:2px solid #22303C;margin-left:.4rem;padding-left:.9rem}
+.pn .tl div{position:relative;padding:.15rem 0 .5rem;font-size:.8rem;color:#C6D2DE}
+.pn .tl div::before{content:'';position:absolute;left:-1.25rem;top:.45rem;width:8px;height:8px;border-radius:50%;background:#2C6E52}
+.pn .tl .q{color:#7B8A99;font-size:.72rem}
+.lista{margin:0 0 12px;padding-left:18px}.lista li{margin-bottom:7px;line-height:1.6}
+</style></head><body><div class="wrap">
+
+<h1>A ficha do segurado</h1>
+<p class="lead">Você pediu: na Carteira, clicar no cliente e ver <b>tudo</b> dele — a apólice junto — e
+ajeitar o layout. Fui medir o que existe. Existe uma ficha de cliente, e ela é o problema: foi
+desenhada para varejo, e a Carteira nem chega nela.</p>
+
+<h2><span class="n">01</span> O que acontece hoje quando se clica</h2>
+<div class="sub">Dois caminhos, nenhum leva onde você quer</div>
+
+<div class="gap antes">
+  <div><h4>Na Carteira (Renovações)</h4>
+    <p style="margin:0;font-size:13px;line-height:1.7">O nome do cliente é <b>texto</b>. Não é
+    clicável. A linha mostra seguradora, ramo, vencimento, prêmio — e para aí.</p></div>
+  <div><h4>Em Clientes/Fornecedores</h4>
+    <p style="margin:0;font-size:13px;line-height:1.7">Clicar <b>expande a linha</b> em duas abas:
+    Editar e Histórico (de vendas). A ficha completa em <code>/painel/clientes/{id}</code> existe,
+    mas <b>nenhum link chega nela</b>.</p></div>
+</div>
+
+<p>E a ficha que existe, renderizada hoje com a Maria de Fátima — a única cliente da Liberal, com uma
+apólice Allianz viva no banco:</p>
+
+<div class="pn">
+  <div class="mut" style="margin:0 0 .3rem">← Clientes</div>
+  <div class="tit" style="font-size:1.1rem">MARIA DE FATIMA CAVALCANTE PARENTE</div>
+  <div style="display:flex;gap:1.4rem;margin:.5rem 0 .7rem;font-size:.85rem">
+    <span><span class="lbl">Compras</span>0</span>
+    <span><span class="lbl">Total</span><span style="color:#7EE7B8">R$ 0,00</span></span>
+    <span><span class="lbl">Ticket médio</span>R$ 0,00</span>
+    <span><span class="lbl">Última</span>—</span>
+  </div>
+  <div class="mut">▸ ✏️ Editar cadastro</div>
+  <div class="tit" style="font-size:.95rem;margin-top:.7rem">Histórico de compras</div>
+  <div class="mut">Sem compras registradas ainda.</div>
+  <div class="pill" style="margin-top:.8rem;border-color:#5a2a2a;color:#d98a8a">Arquivar cliente</div>
+</div>
+
+<div class="perigo"><b>Tudo nessa tela é vocabulário de loja.</b> "Compras", "ticket médio", "histórico
+de compras", "fiado em aberto". Para uma corretora, a segurada com apólice viva aparece como cliente
+que <b>nunca comprou nada</b> — e a apólice, que é a única coisa que importa, não está em lugar nenhum.
+CPF, telefone e endereço só aparecem se abrir "Editar cadastro". É a regra 6 (toda tela segue o
+nicho) falhando numa tela que ninguém tinha olhado pelo nicho ainda.</div>
+
+<h2><span class="n">02</span> O que um segurado TEM nesta base</h2>
+<div class="sub">Medido, não suposto — regra 6</div>
+
+<table>
+<tr><th>dado</th><th>onde mora</th><th>Maria de Fátima hoje</th><th>na ficha?</th></tr>
+<tr><td>Identidade (CPF, tipo PF/PJ)</td><td><code>pessoas</code></td><td>PF, com CPF</td><td class="rec">sim, no topo</td></tr>
+<tr><td>Contato e endereço</td><td><code>clientes</code></td><td>tel, e-mail, Brasília/DF</td><td class="rec">sim, no topo</td></tr>
+<tr><td><b>Apólices</b> (vigência, prêmio, PDF, situação)</td><td><code>apolices.cliente_id</code></td><td>1 — Allianz auto, vence 23/07/2027</td><td class="rec"><b>sim, é o bloco principal</b></td></tr>
+<tr><td>Conversa no WhatsApp</td><td><code>conversas</code> pelo telefone</td><td>0 (o número dela nunca falou com o chip)</td><td class="rec">sim, quando houver</td></tr>
+<tr><td>Comissões a receber</td><td><code>titulos</code></td><td>0 — e é por desenho: a contraparte do título é a <b>seguradora</b>, não o segurado</td><td>não — fica no Financeiro</td></tr>
+<tr><td>Compras / fiado / ticket</td><td><code>lancamentos</code></td><td>0, e sempre será</td><td class="rec">some do nicho seguros</td></tr>
+</table>
+
+<div class="nota"><b>Um detalhe que muda uma decisão:</b> fui ver se a conversa de 538 mensagens que
+achei ontem era da Maria. <b>Não era</b> — era outro número com o mesmo prefixo (5586 94…). O telefone
+dela nunca falou com o chip da Liberal. Então a ficha tem que saber dizer "sem conversa ainda" com
+naturalidade, em vez de esconder o bloco: é a situação normal de quem foi importado pela apólice e
+ainda não foi contatado.</div>
+
+<h2><span class="n">03</span> A ficha proposta</h2>
+<div class="sub">Uma tela, o nicho certo, e a apólice no centro</div>
+
+<div class="pn">
+  <div class="linha" style="justify-content:space-between;align-items:flex-start">
+    <div><div class="mut" style="margin:0 0 .2rem">← Carteira</div>
+      <span class="tit" style="font-size:1.1rem">Maria de Fátima Cavalcante Parente</span>
+      <span class="pill mono">PF</span>
+      <div class="mut">CPF 287.•••.•••-91 · cliente desde 18/09/2026 · importada pela apólice</div></div>
+    <div style="display:flex;gap:.4rem"><span class="btnv" style="padding:.35rem .7rem;font-size:.8rem">🟢 WhatsApp</span>
+      <span class="pill">✏️ editar</span></div>
+  </div>
+
+  <div class="duas" style="margin-top:.8rem">
+    <div class="bloco"><div class="lbl">Contato</div>
+      <div class="kv"><span class="k">Tel</span><span>(86) 9••••-••56</span>
+        <span class="k">E-mail</span><span>si•••••@gmail.com</span>
+        <span class="k">Endereço</span><span>R. 5, 5, AP •••• — Águas Claras, Brasília/DF · 71937-180</span></div></div>
+    <div class="bloco"><div class="lbl">Resumo</div>
+      <div class="kv"><span class="k">Apólices</span><span><b>1</b> viva · 0 renovadas · 0 perdidas</span>
+        <span class="k">Prêmio/ano</span><span>R$ 3.807,57</span>
+        <span class="k">Comissão est.</span><span style="color:#E0B458">cadastre o % da Allianz</span>
+        <span class="k">Próx. renovação</span><span><b>23/07/2027</b> · faltam 308 dias</span></div></div>
+  </div>
+
+  <div class="tit" style="font-size:.95rem;margin:.9rem 0 .4rem">Apólices</div>
+  <div class="card2 ap">
+    <div class="cab"><span class="tit">Allianz · auto</span>
+      <span class="pill mono">proposta 139041981</span><span class="pill mono">PDF</span>
+      <span class="selo">proposta</span></div>
+    <div class="mut">GEELY EX2 MAX 2026 · zero km · chassi …TX044613 · classe de bônus 00</div>
+    <div class="mut" style="color:#C6D2DE">Vigência 23/07/2026 → <b>23/07/2027</b> · prêmio R$ 3.807,57 + IOF/juros R$ 281,00 · 4× R$ 1.022,14 dia 5</div>
+    <div class="mut">Entra na régua em 24/05/2027 · aviso ao corretor faltando 60, 30 e 15 dias</div>
+    <div class="linha" style="margin:.5rem 0 0"><span class="pill">Vigente</span><span class="pill">Renovada</span>
+      <span class="pill">Perdi</span><span class="pill mono" style="margin-left:auto">ver o PDF ↗</span></div>
+  </div>
+  <div class="mut" style="text-align:center;padding:.3rem 0 .6rem">+ nova apólice desta cliente <span class="pill mono">PDF</span></div>
+
+  <div class="tit" style="font-size:.95rem;margin:.6rem 0 .4rem">Conversa</div>
+  <div class="bloco"><div class="mut">Este número ainda não falou com o chip da Liberal. Quando falar,
+    as últimas mensagens aparecem aqui — e o "🟢 WhatsApp" ali em cima abre a conversa.</div></div>
+
+  <div class="tit" style="font-size:.95rem;margin:.8rem 0 .4rem">Linha do tempo</div>
+  <div class="tl">
+    <div><span class="q">18/09/2026 · 12:15</span><br>Cliente criada pela importação da apólice (proposta 139041981)</div>
+    <div><span class="q">23/07/2026</span><br>Início da vigência Allianz auto</div>
+  </div>
+</div>
+
+<div class="bom"><b>O que mudou, em uma frase por bloco.</b> O topo mostra quem é e como falar, sem
+abrir nada. O resumo fala de apólice, prêmio e renovação — nunca de compra. As apólices são o bloco
+principal, cada uma com vigência, régua, PDF e as três ações. A conversa aparece quando existe, e
+diz que não existe quando não existe. A linha do tempo junta o que aconteceu com essa pessoa, de
+qualquer tabela que seja. "Arquivar cliente" sai da frente: vai para dentro de "editar".</div>
+
+<h2><span class="n">04</span> Como se chega nela</h2>
+<div class="lista" style="padding-left:0"><ol class="lista">
+<li><b>Carteira:</b> o nome do cliente vira link. Uma apólice sem cliente (cadastrada solta) mostra "—" e um "ligar a um cliente".</li>
+<li><b>Fila de renovação:</b> o nome no cartão também vira link — quem vai cotar quer ver a pessoa inteira.</li>
+<li><b>Clientes/Fornecedores:</b> a linha ganha "abrir ficha →"; o expandir inline continua para editar rápido.</li>
+<li><b>Volta:</b> "← Carteira" ou "← Clientes", conforme de onde veio — a ficha lembra a origem.</li>
+</ol></div>
+
+<h2><span class="n">05</span> E nos outros nichos</h2>
+<div class="nota"><b>A ficha é uma só; os blocos seguem o perfil.</b> Na Prime (eventos), o bloco
+principal é "Festas" (orçamentos e contratos), a conversa e a agenda. Na ZAQ (recorrente), é
+"Contratos e mensalidades". No varejo, continua "Compras" e "Fiado" — que é o que a tela de hoje já
+faz e continua fazendo para quem vende produto. <b>Nada some para ninguém</b>: o que muda é qual
+bloco aparece e com que nome, lido de <code>raio_x_perfil</code>, como todas as outras telas.
+Este PR entrega o perfil <code>seguros</code> e mantém os outros exatamente como estão; os blocos de
+festa e mensalidade são a próxima rodada, se você quiser.</div>
+
+<h2><span class="n">06</span> O que eu preciso que você decida</h2>
+
+<div class="q"><div class="qt">1. Página ou gaveta?</div>
+<div class="qo"><span class="rec">Recomendo página</span> — <code>/painel/clientes/{id}</code>, que já
+existe, refeita por nicho. Gaveta (painel lateral sem sair da Carteira) é mais bonita e mais
+frágil: precisa de JS, não tem URL para mandar no WhatsApp para um colega, e quebra no celular.
+Página tem link, tem voltar, e funciona em tudo.</div></div>
+
+<div class="q"><div class="qt">2. A conversa do WhatsApp entra na ficha?</div>
+<div class="qo"><span class="rec">Recomendo as últimas 5 mensagens</span>, com "abrir conversa inteira".
+O corretor que vai cotar quer lembrar o que a pessoa disse. A conversa inteira fica onde está (Prospecção).</div></div>
+
+<div class="q"><div class="qt">3. Faço só o perfil seguros agora, ou já os três?</div>
+<div class="qo"><span class="rec">Recomendo só seguros</span>, neste PR. É o que você está usando hoje. A
+Prime e a ZAQ continuam vendo exatamente a ficha atual — e cada perfil novo é medido na conta
+dele antes de entrar, como manda a regra 6.</div></div>
+
+<div class="q"><div class="qt">4. "Perdi" na apólice pergunta o motivo?</div>
+<div class="qo"><span class="rec">Recomendo sim</span>, com a mesma lista de motivos do funil de seguros
+(<code>renovou_direto</code>, <code>cobertura_nao_atendeu</code>, <code>achou_caro</code>…). É o que alimenta o
+Raio-X de "por que perdemos renovação" — sem o motivo, o número existe e não ensina nada.</div></div>
+
+<div class="ftr">Medições: ficha atual renderizada com a cliente 87 da conta 37 (Liberal); FKs para
+<code>clientes.id</code> em produção: <code>apolices</code>, <code>lancamentos</code>, <code>titulos</code>,
+<code>clientes_fusao</code>; conversas pelo telefone da cliente: 0 (a de 538 mensagens era outro número
+com o mesmo prefixo). Código lido: <code>web/portal.py</code> (<code>_CLIENTES</code>, <code>_CLIENTE_DETALHE</code>,
+rota <code>/painel/clientes/{id}</code>), <code>finance/clientes.py</code>. Mockup — nada construído.</div>
+
+</div></body></html>

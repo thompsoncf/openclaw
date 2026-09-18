@@ -74,7 +74,10 @@ create table prospeccao (id bigserial primary key, conta_id bigint, empresa text
   proximo_contato_em timestamptz, atualizado_em timestamptz default now(),
   criado_em timestamptz default now());
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
-  papel text default 'vendedor', ativo boolean default true);
+  papel text default 'vendedor', ativo boolean default true,
+  -- os dois campos de número: o aviso no WhatsApp lê os DOIS (`_zap_do_membro`),
+  -- e é o que faz o caso do dono sem e-mail nem push funcionar
+  whatsapp text, whatsapp_id text);
 create table funil_avisos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   estado text, nivel text, etapa text default '', ref_em timestamptz, simulado boolean default false,
   membro_id bigint, criado_em timestamptz default now());
@@ -139,6 +142,9 @@ def pool():
         # e a 280, que acrescenta o `fu_zap` — a migração de verdade, não uma
         # cópia dela, pelo mesmo motivo do comentário acima
         c.execute((MIG / "280_follow_up_zap.sql").read_text(encoding="utf-8"))
+        # o registro de envio (276): o botão de teste do WhatsApp escreve nele,
+        # e é por ele que se confere que o teste NÃO virou cobrança
+        c.execute((MIG / "276_aviso_envios.sql").read_text(encoding="utf-8"))
         for ch, o, fase in _ETAPAS:
             c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fase)
                          values (%s,%s,%s,%s,%s)""", (CONTA, ch, ch.capitalize(), o, fase))
@@ -1362,3 +1368,94 @@ def test_a_tela_mostra_em_qual_estado_o_whatsapp_esta():
     desligado = _tela(modo="ligado", zap=False)
     assert "recados internos" not in desligado, (
         "a explicação de por qual chip sai aparece com o canal desligado")
+
+
+# ──────────────────── o botão "Testar agora" do WhatsApp (18/09/2026)
+#
+# O dono pediu pra ver o canal funcionando NO MESMO DIA: "vamos fazer um teste pra
+# ver se está funcionando pelo WhatsApp, pega o log do que foi enviado por e-mail e
+# reenvia". Reenviar não existe, e o motor não ajudava: o teto do dia já estava
+# gasto (30 leads cobrados às 08:02), então nem ligando o interruptor sairia
+# mensagem naquele dia.
+#
+# Daí o botão. O que estes testes protegem é a fronteira dele: um teste de CANAL
+# que não pode virar cobrança, nem gastar teto, nem sujar a estatística de amanhã.
+
+def _conta_com_fila(pool, *, atraso_h=30, n=3, vendedor=5, numero="86988614189"):
+    """Uma conta com `n` leads vencidos, todos do mesmo vendedor, e o motor ligado."""
+    with pool.connection() as c:
+        _modo(c, "ligado")
+        # o pool é de MÓDULO: sem limpar, o que um teste anterior gravou entra na
+        # conta deste. Foi o que fez a asserção do registro de envio ver 3 linhas.
+        c.execute("delete from aviso_envios where conta_id=%s", (CONTA,))
+        c.execute("delete from funil_avisos where conta_id=%s", (CONTA,))
+        c.execute("delete from prospeccao where conta_id=%s", (CONTA,))
+        c.execute("delete from membros where conta_id=%s", (CONTA,))
+        c.execute("""insert into membros (id, conta_id, nome, email, whatsapp, papel, ativo)
+                     values (%s,%s,'PEDRO','p@x.com',%s,'vendedor',true)""",
+                  (vendedor, CONTA, numero))
+        for i in range(n):
+            lid = c.execute(
+                """insert into prospeccao (conta_id, empresa, status, estagio, vendedor_id)
+                   values (%s,%s,'contatado','lead',%s) returning id""",
+                (CONTA, f"Cliente {i}", vendedor)).fetchone()[0]
+            cid = c.execute("insert into conversas (conta_id, prospeccao_id, canal) "
+                            "values (%s,%s,'whatsapp') returning id", (CONTA, lid)).fetchone()[0]
+            # o cliente falou por último e ninguém respondeu → a bola é nossa
+            c.execute("insert into mensagens (conversa_id, direcao, texto, criado_em) "
+                      "values (%s,'in','e aí?', now() - make_interval(hours => %s))",
+                      (cid, atraso_h))
+        c.commit()
+
+
+def test_o_teste_manda_a_mensagem_REAL_e_relata_por_pessoa(pool, monkeypatch):
+    _conta_com_fila(pool)
+    saiu = []
+    monkeypatch.setattr(fu, "_mandar_zap",
+                        lambda pool_, conta, numero, texto: saiu.append((numero, texto)) or
+                        {"ok": True, "erro": ""})
+    r = fu.testar_zap(pool, CONTA, EVENTOS)
+    assert len(r) == 1 and r[0]["ok"] is True and r[0]["n_leads"] == 3
+    assert len(saiu) == 1 and saiu[0][0] == "86988614189"
+    # a mensagem é a de verdade, não um "isto é um teste"
+    assert "3 leads esperando follow-up" in saiu[0][1]
+    assert "Cliente" in saiu[0][1] and "/cockpit" in saiu[0][1]
+
+
+def test_o_teste_NAO_gasta_o_teto_nem_marca_como_cobrado(pool, monkeypatch):
+    """A fronteira que importa: se o teste gravasse `funil_avisos`, o aviso de
+    verdade de amanhã não sairia — o dedup é por FATO, e o fato já estaria lá."""
+    _conta_com_fila(pool)
+    monkeypatch.setattr(fu, "_mandar_zap", lambda *a, **k: {"ok": True, "erro": ""})
+    fu.testar_zap(pool, CONTA, EVENTOS)
+    with pool.connection() as c:
+        n = c.execute("select count(*) from funil_avisos where conta_id=%s", (CONTA,)).fetchone()[0]
+    assert n == 0, "o teste gravou aviso e vai calar a cobrança de amanhã"
+
+
+def test_o_teste_fica_registrado_com_origem_PROPRIA(pool, monkeypatch):
+    """Separado do 'follow_up' pra o teste de hoje não virar estatística de
+    cobrança amanhã."""
+    _conta_com_fila(pool)
+    monkeypatch.setattr(fu, "_mandar_zap", lambda *a, **k: {"ok": True, "erro": ""})
+    fu.testar_zap(pool, CONTA, EVENTOS)
+    with pool.connection() as c:
+        rows = c.execute("select origem, canal, ok, n_leads from aviso_envios "
+                         "where conta_id=%s", (CONTA,)).fetchall()
+    assert rows == [("follow_up_teste", "whatsapp", True, 3)]
+
+
+def test_vendedor_sem_numero_aparece_no_relato_em_vez_de_sumir(pool, monkeypatch):
+    _conta_com_fila(pool, numero="")
+    monkeypatch.setattr(fu, "_mandar_zap", lambda *a, **k: {"ok": True, "erro": ""})
+    r = fu.testar_zap(pool, CONTA, EVENTOS)
+    assert len(r) == 1 and r[0]["ok"] is False
+    assert "sem WhatsApp" in r[0]["erro"]
+
+
+def test_lead_no_prazo_nao_entra_no_teste(pool, monkeypatch):
+    """O teste manda o que o motor mandaria — e o motor não cobra quem está no
+    prazo. Um teste que cobra mais que a realidade assusta a equipe à toa."""
+    _conta_com_fila(pool, atraso_h=1)          # dentro do bola_nossa_min padrão
+    monkeypatch.setattr(fu, "_mandar_zap", lambda *a, **k: {"ok": True, "erro": ""})
+    assert fu.testar_zap(pool, CONTA, EVENTOS) == []

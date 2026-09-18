@@ -875,6 +875,91 @@ def notificar(pool, conta_id: int, pendentes: list[dict]) -> None:
             _log.warning("aviso de follow-up falhou (membro %s)", membro_id, exc_info=True)
 
 
+def testar_zap(pool, conta_id: int, perfil: dict | None = None) -> list[dict]:
+    """Manda AGORA, no WhatsApp de cada vendedor, o aviso que ele receberia amanhã.
+    Devolve [{membro_id, nome, numero, n_leads, ok, erro}] — um por pessoa.
+
+    POR QUE ESTA FUNÇÃO EXISTE (18/09/2026). O dono pediu pra ver o canal
+    funcionando no mesmo dia: "vamos fazer um teste pra ver se está funcionando pelo
+    WhatsApp". Só que o motor não tem como atender isso — e as duas alternativas
+    eram piores:
+
+      * ESPERAR o ciclo da manhã. O teto do dia já estava gasto (30 leads cobrados
+        às 08:02), então nem ligando o interruptor sairia mensagem hoje. O teste só
+        aconteceria 24h depois, e "está funcionando?" é pergunta de agora.
+      * REENVIAR o que saiu por e-mail. Não existe reenvio, e inventar um mexendo
+        na fila ou na tabela de avisos seria fabricar estado de produção pra provar
+        que o sistema funciona — que é o contrário de provar.
+
+    Então: um teste de CANAL. Ele NÃO grava `funil_avisos`, NÃO gasta o teto do dia,
+    NÃO mexe em prazo e NÃO marca nada como cobrado. O que ele usa de verdade é o
+    caminho do envio — o mesmo `_texto_zap`, o mesmo `_mandar_zap`, o mesmo chip —
+    porque um teste que passa por outro caminho não responde o que ele existe pra
+    responder.
+
+    A mensagem é a REAL, montada da fila de agora: "⏱️ N leads esperando
+    follow-up" com os primeiros nomes. Mandar "isto é um teste" provaria que o chip
+    fala, não que o aviso presta.
+
+    Fica registrado em `aviso_envios` com `origem='follow_up_teste'` — separado do
+    'follow_up' de propósito, pra o teste de hoje não virar estatística de cobrança
+    amanhã.
+    """
+    from finance import aviso_log as _al
+    saida: list[dict] = []
+    with pool.connection() as c:
+        cfg = config(c, conta_id)
+        if perfil is None:
+            from finance import raio_x_perfil as rxp
+            perfil = rxp.perfil(None)
+        linhas = leads(c, conta_id, perfil, cfg=cfg)
+        # os mesmos que o motor cobraria: quem tem prazo e já venceu. Os estados de
+        # espera (andamento, agendado, sem_acao) ficam de fora aqui pelo mesmo motivo
+        # que ficam lá — não há o que cobrar de quem não está devendo resposta.
+        fila: dict = {}
+        for x in ordenar(linhas):
+            if x["estado"] in ("andamento", "agendado", "sem_acao") or not x["prazo"]:
+                continue
+            if (x.get("atraso_h") or 0) <= 0 or not x.get("vendedor_id"):
+                continue
+            fila.setdefault(x["vendedor_id"], []).append(x)
+        teto = int(cfg.get("fu_teto_dia") or 10)
+        for membro_id, itens in fila.items():
+            itens = itens[:teto]          # o mesmo número que sairia de verdade
+            nome, numero = "", ""
+            try:
+                r = c.execute(
+                    "select coalesce(nullif(nome,''), email, ''), "
+                    "       coalesce(nullif(whatsapp,''), nullif(whatsapp_id,''), '') "
+                    "  from membros where id=%s and conta_id=%s", (membro_id, conta_id)).fetchone()
+                nome, numero = (r[0] or ""), ((r[1] or "").strip())
+            except Exception:  # noqa: BLE001
+                pass
+            item = {"membro_id": membro_id, "nome": nome, "numero": numero,
+                    "n_leads": len(itens), "ok": False, "erro": ""}
+            if not numero:
+                item["erro"] = "membro sem WhatsApp cadastrado"
+            saida.append(item)
+    # o envio fica FORA do `with`: segurar a conexão do banco enquanto o WhatsApp
+    # responde é o jeito de uma tela lenta virar conexão presa (a mesma lição do
+    # `sincronizar`, que passou a commitar de lote em lote por isso).
+    for item in saida:
+        if item["erro"]:
+            _al.registrar(pool, conta_id, origem="follow_up_teste", canal="whatsapp",
+                          membro_id=item["membro_id"], n_leads=item["n_leads"],
+                          ok=False, motivo=item["erro"])
+            continue
+        titulo = f"⏱️ {item['n_leads']} leads esperando follow-up"
+        corpo = " · ".join(x["quem"] for x in fila[item["membro_id"]][:3])
+        r = _mandar_zap(pool, conta_id, item["numero"], _texto_zap(titulo, corpo))
+        item["ok"], item["erro"] = r["ok"], r["erro"]
+        _al.registrar(pool, conta_id, origem="follow_up_teste", canal="whatsapp",
+                      membro_id=item["membro_id"], destino=item["numero"],
+                      assunto=titulo, n_leads=item["n_leads"],
+                      ok=r["ok"], motivo=r["erro"])
+    return saida
+
+
 # ------------------------------------------------------------------ o motor
 _LOCK = 771148   # vizinho do lock da régua (771147)
 

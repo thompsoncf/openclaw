@@ -191,6 +191,11 @@ CSS = """/* o balão do LEAD — resumo pra decidir a próxima ação (contato, 
    barra, caixa tracejada — não formam uma voz. Aqui: TRÊS tamanhos de texto
    (.92 / .82 / .72rem), rótulo silencioso sem caixa-alta, cor só onde é estado, e
    a conversa nos MESMOS balões do chat (cx-m) que o produto já usa. */
+.lp-h-seg{padding:.8rem 2.3rem .7rem .95rem}
+.lp-h-seg .top{align-items:center;gap:.5rem}
+.lp-h-seg h3{font-size:.98rem;line-height:1.25;flex:1;min-width:0}
+.lp-h-seg .lp-estado{flex:none}
+.lp-h-seg .sub{margin-top:.3rem;font-size:.76rem}
 .lp-tabs{display:flex;border-bottom:1px solid var(--borda);flex:none;background:var(--card-2)}
 .lp-tabs button{flex:1;background:none;border:0;border-bottom:2px solid transparent;padding:.5rem .3rem;margin:0;width:auto;
   color:var(--txt-mut);font-size:.78rem;font-weight:600;cursor:pointer}
@@ -668,8 +673,8 @@ function kbSegHtml(d,aba){
   var tel = d.telefone ? '<a class="lp-ab" href="tel:'+cxEscK((d.telefone||'').replace(/\D/g,''))+'">📞 '+cxEscK(d.telefone)+'</a>' : '';
   var sub = [d.documento, (d.tipo||'pf').toUpperCase(), d.desde?('cliente desde '+d.desde):''].filter(Boolean).join(' · ');
   return '<button type="button" class="pop-close" title="Fechar" onclick="kbFecharLead()">✕</button>'
-   +'<div class="lp-h"><div class="top"><h3>'+cxEscK(d.nome)+'</h3></div>'
-   +'<div class="sub">'+cxEscK(sub)+(kbSegEstado(d)?' &nbsp;'+kbSegEstado(d):'')+'</div></div>'
+   +'<div class="lp-h lp-h-seg"><div class="top"><h3>'+cxEscK(d.nome)+'</h3>'+kbSegEstado(d)+'</div>'
+   +'<div class="sub">'+cxEscK(sub)+'</div></div>'
    +(zap||tel?'<div class="lp-acoes">'+zap+tel+'</div>':'')
    +'<div class="lp-tabs"><button type="button" data-aba="cliente" class="'+(aba!=='apolice'?'on':'')+'" onclick="kbSegTrocar(\'cliente\')">Cliente</button>'
    +'<button type="button" data-aba="apolice" class="'+(aba==='apolice'?'on':'')+'" onclick="kbSegTrocar(\'apolice\')">Apólice'+(d.apolices.length>1?' · '+d.apolices.length:'')+'</button></div>'

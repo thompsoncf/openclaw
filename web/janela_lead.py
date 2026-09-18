@@ -183,6 +183,37 @@ CSS = """/* o balão do LEAD — resumo pra decidir a próxima ação (contato, 
    não pode se ancorar em card nenhum). Os `margin:0;width:auto` nos botões vencem
    o `button{width:100%;margin-top:1.4rem}` global, a mesma armadilha que já pegou
    o ✕ de excluir e o "✎ Editar". */
+/* O MODO SEGURADO (18/09/2026, docs/mockups/ficha_segurado_janela.html): a mesma
+   moldura, com abas Cliente | Apólice e o conteúdo do nicho seguros. */
+.lp-tabs{display:flex;border-bottom:1px solid var(--borda);flex:none;background:var(--card-2)}
+.lp-tabs button{flex:1;background:none;border:0;border-bottom:2px solid transparent;padding:.45rem .3rem;margin:0;width:auto;
+  color:var(--txt-mut);font-size:.74rem;font-weight:600;cursor:pointer}
+.lp-tabs button.on{color:var(--verde-claro);border-bottom-color:var(--verde)}
+.lp-body{overflow:auto;padding:.7rem .85rem .85rem;flex:1;min-height:0}
+.lp-ap{border:1px solid var(--borda);border-left:3px solid var(--amar);border-radius:10px;padding:.55rem .7rem;background:var(--card-2);cursor:pointer;margin-top:.3rem}
+.lp-ap:hover{border-color:var(--txt-mut);border-left-color:var(--amar)}
+.lp-ap.morta{border-left-color:var(--borda);opacity:.75}
+.lp-ap .t{display:flex;gap:.4rem;align-items:baseline;flex-wrap:wrap;font-weight:600;font-size:.86rem}
+.lp-ap .m{color:var(--txt-mut);font-size:.76rem;margin-top:.1rem}
+.lp-ap .d{font-size:.78rem;margin-top:.15rem}
+.lp-regua{display:flex;gap:.3rem;align-items:center;margin-top:.4rem;font-size:.68rem;color:var(--txt-mut)}
+.lp-regua i{flex:1;height:6px;border-radius:3px;background:var(--borda);position:relative;overflow:hidden}
+.lp-regua i b{position:absolute;left:0;top:0;bottom:0;background:var(--verde);opacity:.8}
+.lp-regua i s{position:absolute;top:-2px;bottom:-2px;width:1px;background:var(--amar);text-decoration:none}
+.lp-vazio{color:var(--txt-mut);font-size:.78rem;background:var(--card-2);border:1px dashed var(--borda);border-radius:9px;padding:.55rem .7rem}
+.lp-msg{display:grid;grid-template-columns:auto 1fr;gap:.2rem .6rem;font-size:.78rem}
+.lp-msg .de{color:var(--txt-mut);font-size:.66rem;text-transform:uppercase;letter-spacing:.04em}
+.lp-msg .de small{display:block;text-transform:none;letter-spacing:0}
+.lp-tl{border-left:2px solid var(--borda);margin:.2rem 0 0 .35rem;padding-left:.85rem}
+.lp-tl div{position:relative;padding:.1rem 0 .5rem;font-size:.78rem}
+.lp-tl div::before{content:'';position:absolute;left:-1.18rem;top:.42rem;width:8px;height:8px;border-radius:50%;background:var(--neon-fundo);border:1px solid var(--verde)}
+.lp-tl .q{color:var(--txt-mut);font-size:.68rem;font-family:var(--mono)}
+.lp-pdf{font-size:.66rem;font-weight:700;letter-spacing:.05em;padding:.08rem .4rem;border-radius:5px;background:var(--azul-fundo);border:1px solid var(--azul-borda);color:#8FC9E6;text-decoration:none}
+.lp-selo{font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:.08rem .4rem;border-radius:999px;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:#F0DCA6}
+.lp-selo.ok{background:var(--neon-fundo);border-color:var(--neon-borda);color:var(--verde-claro)}
+.lp-selo.mal{background:var(--coral-fundo);border-color:var(--coral-borda);color:#F0A8A2}
+.lp-foot{border-top:1px solid var(--borda);padding:.5rem .85rem;font-size:.72rem;color:var(--txt-mut);flex:none;display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap}
+.lp-foot a{color:var(--verde-claro);text-decoration:none}
 .perdapop{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.55);
   display:flex;align-items:center;justify-content:center;padding:1rem}
 .perdapop .pp-cx{background:var(--card);border:1px solid var(--borda);border-radius:14px;
@@ -467,7 +498,11 @@ function kbLeadSalvar(id){
 // Mora no módulo compartilhado porque as duas telas que abrem a janela precisam
 // dela, e porque o arrastar do quadro chama a MESMA função — uma cópia por tela
 // seria a terceira versão da mesma pergunta.
-function kbPerguntarMotivo(id, status, lista, quandoOk, quandoDesiste){
+// `url` (opcional, 18/09/2026): a folha "Por que perdeu?" passou a servir também à
+// APÓLICE do segurado (web/painel_apolices), que perde renovação com a mesma lista
+// de motivos do funil. Sem `url` continua indo pro status do lead, como sempre —
+// copiar a folha pra mudar uma linha seria a segunda cópia que diverge.
+function kbPerguntarMotivo(id, status, lista, quandoOk, quandoDesiste, url){
   var ant=document.getElementById('perdapop'); if(ant)ant.remove();
   var pop=document.createElement('div'); pop.className='perdapop'; pop.id='perdapop';
   var h='<div class="pp-cx"><div class="pp-t">Por que perdeu?</div>'
@@ -500,7 +535,8 @@ function kbPerguntarMotivo(id, status, lista, quandoOk, quandoDesiste){
     var body=new URLSearchParams();
     body.append('status',status); body.append('motivo',escolhido);
     body.append('perda_descricao', desc.style.display==='none' ? '' : desc.value);
-    fetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
+    if(url)body.append('json','1');
+    fetch(url||('/painel/prospeccao/'+id+'/status'),{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
       .then(function(r){return r.json();}).then(function(d2){
         if(!d2.ok){
           ok.disabled=false; ok.textContent='Confirmar';
@@ -556,7 +592,140 @@ function kbLeadIr(btn,id,idx){
       if(!d.ok){solta();alert(d.msg||'Não consegui mudar a situação.');return;}
       pronto(d);
     }).catch(function(){solta();alert('Falha de rede.');});
-}"""
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// O MODO SEGURADO (18/09/2026). A mesma janela, o conteúdo do nicho seguros.
+// Aprovado em docs/mockups/ficha_segurado_janela.html: "não quero que mude de
+// página nem carregue outra". Quem chama é a Carteira e a fila de Renovações
+// (web/painel_apolices): kbAbrirSegurado(ev, cliente_id, linha, 'cliente'|'apolice').
+// Precisa de `window._KB_MOTIVOS` (a lista de motivos de perda da conta) pra o
+// "Perdi" perguntar por quê — sem ela o chip perdi fica desabilitado, não quebra.
+function kbAbrirSegurado(ev,id,el,aba){
+  if(ev)ev.stopPropagation();
+  if(window.kbFecharChat)kbFecharChat();
+  kbFecharLead();
+  var r=el.getBoundingClientRect();
+  var pop=document.createElement('div');
+  pop.className='leadpop'; pop.setAttribute('role','dialog');
+  var MARG=8, GAP=6, LARG=378;
+  var abaixo=window.innerHeight-r.bottom-GAP-MARG, acima=r.top-GAP-MARG;
+  if(abaixo>=260||abaixo>=acima){pop.style.top=(r.bottom+GAP)+'px';pop.style.maxHeight=Math.max(200,Math.min(560,abaixo))+'px';}
+  else{pop.style.bottom=(window.innerHeight-r.top+GAP)+'px';pop.style.maxHeight=Math.max(200,Math.min(560,acima))+'px';}
+  pop.style.left=Math.max(MARG,Math.min(r.left,window.innerWidth-LARG-MARG))+'px';
+  pop.innerHTML='<button type="button" class="pop-close" title="Fechar" onclick="kbFecharLead()">✕</button><div class="cx-empty">Carregando…</div>';
+  document.body.appendChild(pop);
+  _leadPop=pop;
+  setTimeout(function(){document.addEventListener('click',_leadPopFora,true);document.addEventListener('keydown',_leadPopEsc,true);
+    window.addEventListener('scroll',_leadPopRolou,true);},0);
+  fetch('/painel/renovacoes/cliente/'+id+'/resumo').then(function(r){return r.json();}).then(function(d){
+    if(_leadPop!==pop)return;
+    if(!d.ok){pop.innerHTML='<div class="cx-empty">Não consegui abrir.</div>';return;}
+    pop._d=d; pop._aba=aba||'cliente';
+    pop.innerHTML=kbSegHtml(d,pop._aba);
+  }).catch(function(){if(_leadPop===pop)pop.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
+}
+function kbSegTrocar(aba){
+  var pop=_leadPop; if(!pop||!pop._d)return; pop._aba=aba;
+  pop.querySelector('.lp-body').innerHTML=(aba==='apolice'?kbSegApoliceHtml(pop._d):kbSegClienteHtml(pop._d));
+  pop.querySelectorAll('.lp-tabs button').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-aba')===aba);});
+}
+function kbSegHtml(d,aba){
+  var p=d.proxima, selo='';
+  if(p){selo = p.dias<=60 ? '<span class="lp-selo">faltam '+p.dias+' dias</span>' : '<span class="lp-selo ok">renova em '+cxEscK(p.vence)+'</span>';}
+  else if(d.n_vivas===0 && d.apolices.length){selo='<span class="lp-selo mal">sem apólice viva</span>';}
+  var zap = d.zap_link ? '<a class="lp-ab" style="border-color:var(--verde);color:var(--verde-claro)" href="'+cxEscK(d.zap_link)+'" target="_blank" rel="noopener">🟢 WhatsApp</a>' : '';
+  return '<button type="button" class="pop-close" title="Fechar" onclick="kbFecharLead()">✕</button>'
+   +'<div class="lp-h"><div class="top"><h3>'+cxEscK(d.nome)+'</h3><span class="lp-canal" style="border-color:var(--borda);background:none;color:var(--txt-mut)">'+cxEscK((d.tipo||'pf').toUpperCase())+'</span>'+selo+'</div>'
+   +'<div class="sub">'+(d.documento?cxEscK(d.documento)+' · ':'')+(d.desde?'cliente desde '+cxEscK(d.desde):'')+'</div></div>'
+   +'<div class="lp-acoes">'+zap+(d.telefone?'<span class="lp-ab">📞 '+cxEscK(d.telefone)+'</span>':'')
+   +'<a class="lp-ab" href="/painel/renovacoes#nova">📄 nova apólice</a></div>'
+   +'<div class="lp-tabs"><button type="button" data-aba="cliente" class="'+(aba!=='apolice'?'on':'')+'" onclick="kbSegTrocar(\'cliente\')">Cliente</button>'
+   +'<button type="button" data-aba="apolice" class="'+(aba==='apolice'?'on':'')+'" onclick="kbSegTrocar(\'apolice\')">Apólice'+(d.apolices.length>1?' ('+d.apolices.length+')':'')+'</button></div>'
+   +'<div class="lp-body">'+(aba==='apolice'?kbSegApoliceHtml(d):kbSegClienteHtml(d))+'</div>'
+   +'<div class="lp-foot"><span>Editar, arquivar e fundir repetidos ficam na ficha completa.</span><a href="/painel/clientes/'+d.id+'">ficha completa →</a></div>';
+}
+function kbSegApCard(a){
+  var pct = a.pct_vigencia==null ? 0 : Math.max(0,Math.min(100,a.pct_vigencia));
+  var com = a.comissao_fmt ? ' · comissão '+cxEscK(a.comissao_fmt) : ' · <span style="color:var(--amar)">cadastre o % da '+cxEscK(a.seguradora)+'</span>';
+  var viva = a.viva;
+  return '<div class="lp-ap'+(viva?'':' morta')+'" onclick="kbSegTrocar(\'apolice\')" title="abrir a apólice">'
+   +'<div class="t">'+cxEscK(a.seguradora)+' · '+cxEscK(a.ramo_txt).toLowerCase()+(a.tem_pdf?' <span class="lp-pdf">PDF</span>':'')
+   +(viva?'':' <span class="lp-selo'+(a.situacao==='renovada'?' ok':(a.situacao==='perdida'?' mal':''))+'">'+cxEscK(a.situacao_txt)+'</span>')+'</div>'
+   +'<div class="m">'+cxEscK(a.bem_txt||'')+(a.classe_bonus?' · classe de bônus '+cxEscK(a.classe_bonus):'')+'</div>'
+   +'<div class="d">vence <b>'+cxEscK(a.vence)+'</b> · prêmio '+cxEscK(a.premio_fmt)+(viva?com:'')+'</div>'
+   +(viva?'<div class="lp-regua"><span>'+cxEscK(a.inicio||'')+'</span><i><b style="width:'+pct+'%"></b><s style="left:83.6%"></s></i><span>'+cxEscK(a.vence)+'</span></div>':'')
+   +'</div>';
+}
+function kbSegClienteHtml(d){
+  var s='<div class="lp-sh"><b>Contato</b></div><div class="lp-grid">'
+   +'<span class="k">Tel</span><span>'+cxEscK(d.telefone||'—')+'</span>'
+   +'<span class="k">E-mail</span><span>'+cxEscK(d.email||'—')+'</span>'
+   +'<span class="k">Endereço</span><span>'+cxEscK(d.endereco_fmt||'—')+'</span></div>'
+   +'<div class="lp-sh"><b>Apólices</b><span class="lp-canal" style="border-color:var(--borda);background:none;color:var(--txt-mut)">'+d.n_vivas+' viva'+(d.n_vivas===1?'':'s')+'</span></div>';
+  if(!d.apolices.length)s+='<div class="lp-vazio">Nenhuma apólice cadastrada pra este cliente.</div>';
+  d.apolices.forEach(function(a){s+=kbSegApCard(a);});
+  s+='<div class="lp-sh"><b>Conversa</b>'+(d.conversa.length?'<span class="lp-canal" style="border-color:var(--borda);background:none;color:var(--txt-mut)">últimas '+d.conversa.length+'</span>':'')+'</div>';
+  if(!d.conversa.length){s+='<div class="lp-vazio">Este número ainda não falou com o chip. Quando falar, as últimas mensagens aparecem aqui.</div>';}
+  else{
+    s+='<div class="lp-msg">';
+    d.conversa.forEach(function(m){s+='<span class="de">'+cxEscK(m.de)+'<small>'+cxEscK(m.quando)+'</small></span><span>'+cxEscK(m.texto)+'</span>';});
+    s+='</div>';
+    if(d.conversa_id && window.kbAbrirChat){
+      s+='<div style="margin-top:.4rem"><button type="button" class="lp-ab" style="margin:0;width:auto" onclick="kbAbrirChat(event,'+d.conversa_id+',\'conversas\',this,'+JSON.stringify(d.nome).replace(/</g,'\\u003c')+')">💬 abrir conversa inteira</button></div>';
+    }
+  }
+  s+='<div class="lp-sh"><b>Linha do tempo</b></div>';
+  if(!d.linha_do_tempo.length)s+='<div class="lp-vazio">Nada registrado ainda.</div>';
+  else{s+='<div class="lp-tl">';d.linha_do_tempo.forEach(function(t){s+='<div><span class="q">'+cxEscK(t.quando)+'</span><br>'+cxEscK(t.texto)+'</div>';});s+='</div>';}
+  return s;
+}
+function kbSegApoliceHtml(d){
+  if(!d.apolices.length)return '<div class="lp-vazio">Nenhuma apólice cadastrada pra este cliente.</div>';
+  var s='';
+  d.apolices.forEach(function(a,i){
+    s+='<div class="lp-sh"'+(i?' style="margin-top:1rem"':'')+'><b>'+cxEscK(a.seguradora)+' · '+cxEscK(a.ramo_txt).toLowerCase()+'</b><span class="lp-canal" style="border-color:var(--borda);background:none;color:var(--txt-mut);font-family:var(--mono)">'+cxEscK(a.numero_txt||'')+'</span></div>'
+     +'<div class="lp-grid">'
+     +'<span class="k">Vigência</span><span>'+cxEscK(a.inicio||'?')+' → <b>'+cxEscK(a.vence)+'</b>'+(a.dias>=0?' · faltam '+a.dias+' dias':' · <b style="color:var(--coral)">venceu há '+(-a.dias)+' dias</b>')+'</span>'
+     +'<span class="k">Régua</span><span>'+cxEscK(a.regua_txt||'')+'</span>'
+     +'<span class="k">Prêmio</span><span>'+cxEscK(a.premio_fmt)+' líquido'+(a.iof_fmt?' + '+cxEscK(a.iof_fmt)+' IOF/juros':'')+(a.parcelas_txt?' · '+cxEscK(a.parcelas_txt):'')+'</span>'
+     +'<span class="k">Comissão</span><span>'+(a.comissao_fmt?cxEscK(a.comissao_fmt):'<span style="color:var(--amar)">sem percentual cadastrado para '+cxEscK(a.seguradora)+'</span>')+'</span>'
+     +'<span class="k">Bem</span><span>'+cxEscK(a.bem_txt||'—')+'</span>'
+     +(a.chassi?'<span class="k">Chassi</span><span style="font-family:var(--mono);font-size:.76rem">'+cxEscK(a.chassi)+'</span>':'')
+     +(a.classe_bonus?'<span class="k">Bônus</span><span>classe '+cxEscK(a.classe_bonus)+'</span>':'')
+     +'<span class="k">Documento</span><span>'+(a.tem_pdf?'<a class="lp-pdf" href="/painel/renovacoes/apolice/'+a.id+'/pdf" target="_blank">PDF</a> ver o PDF ↗ · coberturas ficam nele':'<span style="color:var(--txt-mut)">sem PDF — cadastrada à mão</span>')+'</span>'
+     +(a.perda_motivo_txt?'<span class="k">Perdida</span><span>'+cxEscK(a.perda_motivo_txt)+'</span>':'')
+     +'</div>'
+     +'<div class="lp-sh"><b>Situação</b></div><div class="lp-sit-chips" data-ap="'+a.id+'">';
+    (window._KB_DECISOES||[]).forEach(function(x){
+      var on = x.c===a.situacao;
+      s+='<button type="button" class="lp-chip'+(on?' on':'')+'" style="margin:0 .3rem .3rem 0;width:auto" '+(on?'disabled':'')+' onclick="kbSegSituacao(this,'+a.id+',\''+cxEscK(x.c)+'\')">'+cxEscK(x.r)+'</button>';
+    });
+    s+='</div>';
+  });
+  return s;
+}
+// O CHIP DE SITUAÇÃO DA APÓLICE. "perdi" abre a MESMA folha de "Por que perdeu?" do
+// funil (kbPerguntarMotivo), apontada pra rota da apólice; o resto grava direto.
+// "Renovada" só fecha esta — a nova apólice chega como documento (decisão do
+// dono, 18/09: quem emite é a seguradora; nada é fabricado).
+function kbSegSituacao(btn,apId,sit){
+  var caixa=btn.parentNode, url='/painel/renovacoes/apolice/'+apId+'/situacao';
+  function trava(v){caixa.querySelectorAll('.lp-chip').forEach(function(b){b.disabled=v;});}
+  function depois(){ if(_leadPop&&_leadPop._d){ fetch('/painel/renovacoes/cliente/'+_leadPop._d.id+'/resumo').then(function(r){return r.json();})
+      .then(function(d){ if(!_leadPop||!d.ok)return; _leadPop._d=d; kbSegTrocar(_leadPop._aba||'apolice'); }); } }
+  if(sit==='perdida'){
+    var lista=window._KB_MOTIVOS||[];
+    if(!lista.length){alert('Cadastre os motivos de perda na Régua do funil antes de marcar como perdida.');return;}
+    kbPerguntarMotivo(apId,'perdida',lista,function(){depois();},null,url);
+    return;
+  }
+  trava(true);
+  var body=new URLSearchParams(); body.append('situacao',sit); body.append('json','1');
+  fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
+    .then(function(r){return r.json();}).then(function(d){ if(!d.ok){trava(false);alert('Não consegui mudar a situação.');return;} depois(); })
+    .catch(function(){trava(false);alert('Falha de rede.');});
+}
+"""
 
 
 #: Os rótulos dos três campos do evento, pra tela emitir DENTRO do seu próprio

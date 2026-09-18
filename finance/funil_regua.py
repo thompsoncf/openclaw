@@ -53,6 +53,7 @@ EVENTOS = {
     "orcamento_aprovado": "cliente aprovou a proposta no link público",
     "sinal_pago":        "sinal registrado como pago no orçamento",
     "contrato_assinado": "contrato assinado no link público",
+    "negociacao_valores": "orçamento enviado, OU a equipe passou preço na conversa e o cliente respondeu",
 }
 
 _PADRAO = {
@@ -249,6 +250,46 @@ def escolher_etapa(atual_ordem: int, candidatas: list[dict]) -> dict | None:
 # Cada consulta devolve (prospeccao_id, quando) — o instante em que o fato
 # aconteceu. Nada aqui foi inventado pro funil: são colunas que o produto já
 # preenchia antes desta régua existir.
+# O QUE É "PASSAR PREÇO". Regra do dono da Prime, 18/09/2026: "quando ainda não foi
+# mandado orçamento mas já tá tratando em valores" é Negociação. Medido na conta 34
+# nesse dia: 153 dos 317 leads em Contatado já tinham recebido preço da equipe — a
+# Prime manda o Pacote Experience com valores logo na primeira resposta. Por isso o
+# fato não é "a equipe passou preço" (isso é quase toda primeira resposta), e sim
+# "o CLIENTE RESPONDEU depois do preço": 107 dos 153. Preço no vácuo é Contatado.
+#
+# A expressão é a mesma que foi usada pra medir e pra recolocar os cards à mão, de
+# propósito: se a tela e o gatilho lessem "preço" de jeitos diferentes, o dono veria
+# um card no lugar errado sem ter como saber qual dos dois estava certo.
+# `\y` é borda de palavra no Postgres — `\b` NÃO é, e foi um erro real (Juliana,
+# "a partir de 5 mil", ficou de fora da primeira passada por isso).
+RE_PRECO = r"(R\$ ?\d|\d ?reais|\ymil\y|valores|pre[çc]o|pacote|investimento|à vista|a vista|parcel|desconto)"
+
+_SQL_ORCAMENTO_ENVIADO = """
+        select p.id as lead, coalesce(e.primeiro, o.atualizado_em) as quando
+          from prospeccao p
+          join orcamentos o on o.id = p.orcamento_id
+          left join (select orcamento_id, min(criado_em) as primeiro
+                       from orcamento_envios where conta_id=%(conta)s and ok
+                      group by orcamento_id) e on e.orcamento_id = o.id
+         where p.conta_id=%(conta)s
+           and (o.status in ('enviado','aprovada','fechado') or e.primeiro is not null)"""
+
+# a primeira resposta do cliente DEPOIS da primeira mensagem nossa com preço. Compara
+# ids, não datas — mesmo motivo da bola na trava: duas mensagens quase simultâneas
+# chegam fora de ordem.
+# Tabela derivada, e não CTE: este SQL entra como ramo de um UNION dentro de
+# subconsulta em `negociacao_valores`, e `WITH` não pode aparecer ali.
+_SQL_RESPONDEU_PRECO = """
+        select pr.lead, min(m.criado_em) as quando
+          from (select cv.prospeccao_id as lead, min(m.id) as mid
+                  from mensagens m join conversas cv on cv.id = m.conversa_id
+                 where cv.conta_id=%(conta)s and cv.prospeccao_id is not null
+                   and m.direcao='out' and m.texto ~* '""" + RE_PRECO + """'
+                 group by cv.prospeccao_id) pr
+          join conversas cv on cv.prospeccao_id = pr.lead and cv.conta_id=%(conta)s
+          join mensagens m on m.conversa_id = cv.id and m.direcao='in' and m.id > pr.mid
+         group by pr.lead"""
+
 _SQL_EVENTO = {
     "resposta_nossa": """
         select cv.prospeccao_id, min(m.criado_em)
@@ -286,15 +327,7 @@ _SQL_EVENTO = {
     # O `coalesce` preserva quem já funcionava: a proposta criada pelo app do
     # vendedor nasce com status 'enviado' e sem linha em `orcamento_envios`, e
     # continua disparando pelo `atualizado_em` como antes.
-    "orcamento_enviado": """
-        select p.id, coalesce(e.primeiro, o.atualizado_em)
-          from prospeccao p
-          join orcamentos o on o.id = p.orcamento_id
-          left join (select orcamento_id, min(criado_em) as primeiro
-                       from orcamento_envios where conta_id=%(conta)s and ok
-                      group by orcamento_id) e on e.orcamento_id = o.id
-         where p.conta_id=%(conta)s
-           and (o.status in ('enviado','aprovada','fechado') or e.primeiro is not null)""",
+    "orcamento_enviado": _SQL_ORCAMENTO_ENVIADO,
     "orcamento_aprovado": """
         select p.id, o.aprovada_em from prospeccao p join orcamentos o on o.id = p.orcamento_id
          where p.conta_id=%(conta)s and o.aprovada_em is not null""",
@@ -319,6 +352,13 @@ _SQL_EVENTO = {
           join contratos ct on ct.orcamento_id = p.orcamento_id and ct.conta_id = p.conta_id
          where p.conta_id=%(conta)s and ct.assinado_em is not null
          group by p.id""",
+    # UMA etapa tem UM gatilho (`funil_etapas.gatilho`). A regra do dono pra
+    # Negociação tem dois fatos — então o evento é a união deles, pelo primeiro que
+    # aconteceu. Quem liga este deixa `orcamento_enviado` implícito.
+    "negociacao_valores": """
+        select u.lead, min(u.quando) from (""" + _SQL_ORCAMENTO_ENVIADO + """
+        union all""" + _SQL_RESPONDEU_PRECO + """
+        ) u group by u.lead""",
 }
 
 

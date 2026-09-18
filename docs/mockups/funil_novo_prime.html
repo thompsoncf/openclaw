@@ -1,0 +1,287 @@
+<title>O funil novo da Prime</title>
+<style>
+:root{
+  --ground:#F4F6F4; --surface:#FFFFFF; --ink:#171C19; --ink-soft:#3C4640;
+  --muted:#626D66; --line:#DBE1DA; --line-strong:#BFC9BF;
+  --ok:#2C7A57; --ok-wash:#E5F1EA;
+  --novo:#8A5E12; --novo-wash:#F8EEDA;
+  --alerta:#A8402F; --alerta-wash:#F8E6E2;
+  --f-sans:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --f-serif:"Source Serif 4",Georgia,serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#101410;--surface:#181D19;--ink:#E5EBE6;--ink-soft:#C0CAC3;
+    --muted:#8B968F;--line:#272E28;--line-strong:#38423A;
+    --ok:#67C398;--ok-wash:#152E22;--novo:#D6A24F;--novo-wash:#31270E;
+    --alerta:#E2887A;--alerta-wash:#33150F;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#101410;--surface:#181D19;--ink:#E5EBE6;--ink-soft:#C0CAC3;
+  --muted:#8B968F;--line:#272E28;--line-strong:#38423A;
+  --ok:#67C398;--ok-wash:#152E22;--novo:#D6A24F;--novo-wash:#31270E;
+  --alerta:#E2887A;--alerta-wash:#33150F;
+}
+
+/* tokens do PRODUTO — web/tema.py. O painel é escuro sempre. */
+.tela,.quadro{
+  --bg:#0A0F0C; --bg2:#0E1512; --sup:#121A16; --ln:#1E2A23;
+  --txt:#EAF2ED; --dim:#8FA197; --faint:#5E6F66;
+  --neon:#25D366; --neon-b:#1E4A3A; --neon-f:rgba(37,211,102,.10); --sobre:#04150C;
+  --amb:#E0A32E; --amb-b:#5A4520; --amb-f:#241C0F;
+  --cor:#E0574F; --cor-b:#5A2B2B; --cor-f:#241313;
+  --azu:#229ED9; --azu-b:#1B3A4A; --azu-f:#0D1B23;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--ground);color:var(--ink);font-family:var(--f-sans);
+  font-size:16px;line-height:1.6;padding-inline:20px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px;margin:0 auto;padding-block:clamp(2.2rem,5vw,3.8rem) 4rem}
+
+h1,h2,h3{margin:0;font-family:var(--f-serif);font-weight:600;text-wrap:balance}
+h1{font-size:clamp(2rem,5vw,2.9rem);line-height:1.1;letter-spacing:-.015em}
+h2{font-size:clamp(1.3rem,3vw,1.62rem);line-height:1.2}
+h3{font-size:1rem;font-family:var(--f-sans);font-weight:700}
+p{margin:0}
+.lede{font-size:1.1rem;color:var(--ink-soft);max-width:62ch}
+.eyebrow{font-family:var(--f-mono);font-size:.68rem;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.mono{font-family:var(--f-mono);font-size:.84em;font-variant-numeric:tabular-nums}
+
+header{border-bottom:2px solid var(--line-strong);padding-bottom:1.6rem;
+  display:flex;flex-direction:column;gap:.9rem}
+.hlinha{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:baseline}
+section{margin-top:clamp(2.6rem,6vw,4rem)}
+.shead{display:flex;flex-direction:column;gap:.4rem;margin-bottom:1.3rem}
+.shead p{color:var(--muted);max-width:66ch;font-size:.95rem}
+.corpo{display:flex;flex-direction:column;gap:1.05rem;max-width:66ch;margin-top:1.1rem}
+.corpo p{font-size:.97rem;color:var(--ink-soft)}
+.corpo p b{color:var(--ink)}
+
+/* o quadro */
+.quadro{background:var(--bg);border:1px solid #263129;border-radius:12px;padding:1rem;
+  color:var(--txt);overflow-x:auto;box-shadow:0 16px 44px -30px rgba(0,0,0,.8)}
+.cap{font-family:var(--f-mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--faint);margin-bottom:.9rem;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.cols{display:grid;grid-template-columns:repeat(7,minmax(112px,1fr));gap:.45rem;min-width:820px}
+.col{background:var(--sup);border:1px solid var(--ln);border-radius:8px;padding:.6rem .55rem;
+  display:flex;flex-direction:column;gap:.35rem}
+.col .rot{font-size:.76rem;font-weight:700;line-height:1.25}
+.col .n{font-family:var(--f-mono);font-size:1.5rem;font-weight:700;line-height:1}
+.col .gat{font-size:.63rem;color:var(--faint);line-height:1.35}
+.col .gat.on{color:var(--neon)} .col .gat.off{color:var(--amb)}
+.col.ganha{border-color:var(--neon-b);background:var(--neon-f)}
+.col.erro{border-color:var(--cor);background:var(--cor-f)}
+.col.perd{border-color:var(--cor-b)}
+.selo{font-family:var(--f-mono);font-size:.55rem;font-weight:700;letter-spacing:.04em;
+  padding:.15rem .3rem;border-radius:3px;align-self:stretch;white-space:normal;
+  line-height:1.3;text-align:center}
+.selo.mau{background:#3a1512;color:#E2887A;border:1px solid #6b2a22}
+.selo.ok{background:var(--sobre);color:var(--neon);border:1px solid var(--neon-b)}
+.rodaq{margin-top:.8rem;padding-top:.6rem;border-top:1px solid var(--ln);
+  font-size:.74rem;color:var(--faint);display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+
+/* consequências */
+.conseq{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.8rem;margin-top:1.2rem}
+.cq{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:.85rem .95rem;
+  display:flex;flex-direction:column;gap:.25rem}
+.cq.mau{border-color:var(--alerta);box-shadow:inset 3px 0 0 var(--alerta)}
+.cq .t{font-size:.9rem;font-weight:700}
+.cq .d{font-size:.84rem;color:var(--muted);line-height:1.45}
+
+/* números */
+.nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.8rem;margin-top:1.2rem}
+.nu{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:.9rem;
+  display:flex;flex-direction:column;gap:.25rem}
+.nu .n{font-family:var(--f-mono);font-size:1.9rem;font-weight:700;line-height:1}
+.nu .q{font-size:.89rem;font-weight:700}
+.nu .d{font-size:.82rem;color:var(--muted);line-height:1.45}
+.nu.pode{border-color:var(--ok)} .nu.pode .n{color:var(--ok)}
+.nu.nunca{border-color:var(--alerta);box-shadow:inset 3px 0 0 var(--alerta)} .nu.nunca .n{color:var(--alerta)}
+
+/* caixa de destaque */
+.box{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--novo);
+  border-radius:0 8px 8px 0;padding:1rem 1.1rem;margin-top:1.2rem;font-size:.95rem;color:var(--ink-soft)}
+.box b{color:var(--ink)}
+.box.bom{border-left-color:var(--ok)}
+
+/* placar */
+.placar{background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.li{display:grid;grid-template-columns:1.6rem 1fr auto;gap:.3rem .9rem;padding:.8rem 1rem;
+  border-bottom:1px solid var(--line);align-items:baseline}
+.li:last-child{border-bottom:0}
+.li .ord{font-family:var(--f-mono);font-size:.8rem;color:var(--muted)}
+.li .t{font-size:.95rem;font-weight:700}
+.li .d{grid-column:2;font-size:.86rem;color:var(--muted);line-height:1.45}
+.li .tag{font-family:var(--f-mono);font-size:.6rem;font-weight:700;letter-spacing:.05em;
+  padding:.18rem .42rem;border-radius:4px;white-space:nowrap}
+.tag.urg{background:var(--alerta-wash);color:var(--alerta)}
+.tag.pr{background:var(--ok-wash);color:var(--ok)}
+.tag.sim{background:var(--novo-wash);color:var(--novo)}
+.tag.nao{background:transparent;color:var(--muted);border:1px solid var(--line-strong)}
+
+.perg{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:.4rem 1.1rem}
+.perg ol{margin:0;padding-left:1.1rem}
+.perg li{margin:.85rem 0;font-size:.95rem;color:var(--ink-soft)}
+.perg li b{color:var(--ink)}
+footer{margin-top:3.4rem;padding-top:1.2rem;border-top:1px solid var(--line);
+  font-size:.82rem;color:var(--muted);display:flex;gap:1.4rem;flex-wrap:wrap}
+@media (max-width:620px){.li{grid-template-columns:1.4rem 1fr}.li .tag{grid-column:2;justify-self:start}}
+</style>
+
+<div class="wrap">
+<header>
+  <span class="eyebrow">Prime Eventos · conta 34 · mockup para aprovação · 18/09/2026</span>
+  <h1>O funil novo, e os três ajustes que ele pede</h1>
+  <p class="lede">Você montou o funil e eu fui ler como ele ficou na Prime: as sete
+  colunas, os 404 leads e o que o sistema faz com cada etapa. <b>O quadro está certo.</b>
+  O que ainda segue o funil antigo é o que está por baixo dele — e um desses
+  pontos está contando venda que ainda não aconteceu.</p>
+</header>
+
+<section>
+  <div class="shead">
+    <span class="eyebrow">Medido em produção · 18/09/2026</span>
+    <h2>O quadro como ficou</h2>
+    <p>Nada se perdeu na mudança: conferi lead por lead e nenhum ficou apontando para
+    uma etapa que deixou de existir.</p>
+  </div>
+  <div class="quadro">
+    <div class="cap"><span>Painel › Prospecção › Funil</span><span>404 leads</span></div>
+    <div class="cols">
+      <div class="col"><span class="rot">Novo</span><span class="n">2</span>
+        <span class="gat">lead chegou</span></div>
+      <div class="col"><span class="rot">Contatado</span><span class="n">334</span>
+        <span class="gat on">▸ resposta nossa</span><span class="gat">teto 7 dias</span></div>
+      <div class="col"><span class="rot">Agendado Visita</span><span class="n">5</span>
+        <span class="gat off">◌ compromisso — desligado</span></div>
+      <div class="col"><span class="rot">Negociação</span><span class="n">33</span>
+        <span class="gat on">▸ orçamento enviado</span></div>
+      <div class="col erro"><span class="rot">ORÇAMENTO ASSINADO</span><span class="n">5</span>
+        <span class="selo mau">JÁ CONTA COMO VENDA</span><span class="gat">sem gatilho</span></div>
+      <div class="col ganha"><span class="rot">CONTRATO ASSINADO</span><span class="n">5</span>
+        <span class="selo ok">VENDA</span><span class="gat on">▸ contrato assinado</span></div>
+      <div class="col perd"><span class="rot">Perdido</span><span class="n">20</span>
+        <span class="gat">só na mão</span></div>
+    </div>
+    <div class="rodaq"><span>▸ gatilho ligado · ◌ gatilho desligado</span>
+      <span>nenhum lead órfão</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <span class="eyebrow">Ajuste 1 · o mais caro</span>
+    <h2>“Orçamento assinado” está marcada como venda fechada</h2>
+    <p>A etapa ficou na fase <span class="mono">pós-venda</span>. A própria tela do painel
+    descreve essa fase assim: “já é cliente — continua contando como fechado”.</p>
+  </div>
+  <div class="conseq">
+    <div class="cq mau"><span class="t">Conta como venda ganha</span>
+      <span class="d">Os 5 leads entram no total de vendas dos relatórios — sem contrato assinado.</span></div>
+    <div class="cq mau"><span class="t">Sai da temperatura</span>
+      <span class="d">Ninguém esfria, ninguém aparece como parado. O card congela.</span></div>
+    <div class="cq mau"><span class="t">Sai da Fila e do follow-up</span>
+      <span class="d">O vendedor deixa de ser cobrado justamente na etapa que falta fechar.</span></div>
+  </div>
+  <div class="corpo">
+    <p>No seu desenho a venda fecha no <b>CONTRATO ASSINADO</b>. Orçamento assinado
+    ainda é venda — e é onde a cobrança mais vale, porque falta só o contrato.
+    O conserto é de um campo: a etapa passa para <b>“na fase de venda”</b>.</p>
+  </div>
+  <div class="box"><b>Uma pergunta junto:</b> hoje entrar em Orçamento Assinado
+  <b>reserva a data na Agenda</b> — e entrar em Contrato Assinado reserva de novo.
+  A data fica bloqueada quando o cliente assina o orçamento, ou só no contrato?</div>
+</section>
+
+<section>
+  <div class="shead">
+    <span class="eyebrow">Ajuste 2</span>
+    <h2>Duas etapas só andam se alguém arrastar o card</h2>
+  </div>
+  <div class="corpo">
+    <p><b>Agendado Visita</b> tem o gatilho certo — “compromisso criado na agenda” —
+    e ele está <b>desligado</b>. Ligando, marcar a visita move o card sozinho.</p>
+    <p><b>Orçamento Assinado</b> não tem gatilho nenhum. Existe um pronto e sem uso:
+    <span class="mono">orçamento aprovado no link público</span>. É a etapa exata.</p>
+    <p><b>A prova de que isso importa:</b> em 17/09 três leads pularam de Negociação
+    direto para Contrato Assinado. A etapa nova não está no caminho real ainda.</p>
+  </div>
+  <div class="box bom"><b>De quebra, isso conserta o defeito que reportei dia 15.</b>
+  Marcar visita pelo app mandava o lead para uma coluna fixa no código. Com a volta do
+  Agendado Visita os três leads voltaram a aparecer — Laynne e Maria Clara na coluna,
+  e o Rône já andou para Negociação. Ligar o gatilho tira o código dessa decisão de vez.</div>
+</section>
+
+<section>
+  <div class="shead">
+    <span class="eyebrow">Ajuste 3 · o que ainda não existe</span>
+    <h2>O Perdido automático precisa ser construído</h2>
+    <p>Sua regra 7 é “não respondeu em 7 dias, ou não respondeu o follow”. Hoje
+    <b>nada no sistema marca perdido por tempo</b> — o teto de 7 dias só pede
+    justificativa ao vendedor. Perdido só entra na mão.</p>
+  </div>
+  <div class="nums">
+    <div class="nu pode"><span class="n">240</span><span class="q">passaram dos 7 dias</span>
+      <span class="d">e <b>nós</b> falamos por último — são estes que a sua regra quer fechar</span></div>
+    <div class="nu nunca"><span class="n">28</span><span class="q">o cliente está esperando</span>
+      <span class="d">passaram dos 7 dias, mas quem escreveu por último foi ele. Marcar de perdido é
+      chamar de desinteresse o silêncio que é nosso</span></div>
+    <div class="nu"><span class="n">238</span><span class="q">dos 240 já estão frios</span>
+      <span class="d">a temperatura já os separou — três tentativas sem resposta</span></div>
+  </div>
+  <div class="corpo">
+    <p><b>Por isso a regra que eu proponho não é só o calendário:</b> perdido automático
+    quando o lead passa do teto <b>e</b> a bola é nossa <b>e</b> a temperatura está fria.
+    Na Prime de hoje isso alcança 238 dos 240 — praticamente o mesmo, sem encostar em
+    ninguém que levantou a mão.</p>
+    <p>Todo perdido automático entra com <b>motivo registrado</b> (“não respondeu após o
+    follow-up”) e volta com um clique para Contatado — a reabertura já está configurada.</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="eyebrow">Resumo</span><h2>O que eu faria, nesta ordem</h2></div>
+  <div class="placar">
+    <div class="li"><span class="ord">1</span><span class="t">Orçamento Assinado volta para a fase de venda</span>
+      <span class="tag urg">URGENTE</span>
+      <span class="d">Um campo. Para de contar venda que não fechou e devolve os 5 leads à cobrança.</span></div>
+    <div class="li"><span class="ord">2</span><span class="t">Ligar o gatilho da visita</span>
+      <span class="tag pr">PRONTO</span>
+      <span class="d">Já existe, só está desligado. Marcar visita passa a mover o card sozinho.</span></div>
+    <div class="li"><span class="ord">3</span><span class="t">Gatilho “orçamento aprovado” na etapa nova</span>
+      <span class="tag pr">PRONTO</span>
+      <span class="d">O cliente aprova no link e o card anda. Sem isso a etapa depende de memória.</span></div>
+    <div class="li"><span class="ord">4</span><span class="t">Construir o Perdido automático</span>
+      <span class="tag sim">PRECISO DO SEU SIM</span>
+      <span class="d">Teto + bola nossa + frio, com motivo e reabertura. É código novo, com ensaio antes de ligar.</span></div>
+    <div class="li"><span class="ord">–</span><span class="t">Fechar os 240 de uma vez</span>
+      <span class="tag nao">SÓ COM SUA ORDEM</span>
+      <span class="d">Cabe fazer, mas é um mutirão que mexe em 240 cards de uma vez. Não faço por conta.</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="eyebrow">Para eu começar</span><h2>Três respostas suas</h2></div>
+  <div class="perg"><ol>
+    <li><b>Os 240 antigos viram Perdido agora, ou a regra vale só daqui pra frente?</b>
+    Fazer o mutirão limpa o quadro hoje; valer só daqui pra frente deixa a fila velha do jeito
+    que está e vai secando. Meu voto é ligar daqui pra frente e fazer o mutirão depois que
+    você vir a regra funcionando por uma semana.</li>
+    <li><b>A data fica bloqueada na Agenda quando assina o orçamento, ou só no contrato?</b>
+    Hoje as duas etapas reservam. Se o sinal segura a data, fica no orçamento; se não, sai de lá.</li>
+    <li><b>“Não respondeu o follow” são quantos toques?</b> O follow-up está ligado na Prime.
+    Preciso saber depois de quantas tentativas sem resposta o lead é dado por perdido — hoje
+    a temperatura usa três.</li>
+  </ol></div>
+</section>
+
+<footer>
+  <span>Prime Eventos · conta 34</span>
+  <span>Números medidos em produção em 18/09/2026, só leitura</span>
+  <span>404 leads · 334 em Contatado</span>
+</footer>
+</div>

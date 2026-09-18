@@ -58,7 +58,7 @@ create table funil_movimentos (id bigserial primary key, conta_id bigint,
   criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint, chip_id bigint, visto_ate_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
-  criado_em timestamptz default now(),
+  texto text default '', criado_em timestamptz default now(),
   midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   inicio timestamptz, fim timestamptz, status text default 'ativo', desfecho text,
@@ -354,6 +354,72 @@ def test_contrato_so_enviado_nao_e_venda(pool):
         c.commit()
         fr.aplicar_gatilhos(c, CONTA); c.commit()
         assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] != "ganho"
+
+
+def _conversa_com(c, lead, *mensagens):
+    """(direcao, texto) em ordem — ids crescentes, que é o que a regra compara."""
+    conv = c.execute("insert into conversas (conta_id, prospeccao_id) values (%s,%s) returning id",
+                     (CONTA, lead)).fetchone()[0]
+    for i, (direcao, texto) in enumerate(mensagens):
+        c.execute("insert into mensagens (conversa_id, direcao, texto, criado_em) values (%s,%s,%s,%s)",
+                  (conv, direcao, texto, AGORA + timedelta(minutes=i)))
+
+
+def _negociacao_por_valores(c):
+    c.execute("update funil_etapas set gatilho='negociacao_valores' where conta_id=%s and chave='proposta'",
+              (CONTA,))
+    _ligar(c, "proposta")
+
+
+def test_cliente_respondeu_ao_preco_e_negociacao(pool):
+    """A regra do dono: 'já tá tratando em valores'. Preço nosso, resposta dele."""
+    with pool.connection() as c:
+        lead = _lead(c, status="contatado")
+        _conversa_com(c, lead, ("in", "quero um orçamento"),
+                      ("out", "PACOTE EXPERIENCE R$ 6.840 à vista"),
+                      ("in", "dá pra parcelar em 3?"))
+        _negociacao_por_valores(c); c.commit()
+        fr.aplicar_gatilhos(c, CONTA); c.commit()
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "proposta"
+        assert c.execute("select motivo from funil_movimentos where prospeccao_id=%s and para='proposta'",
+                         (lead,)).fetchone()[0] == "gatilho:negociacao_valores"
+
+
+def test_preco_no_vacuo_nao_e_negociacao(pool):
+    """153 dos 317 leads da Prime tinham recebido preço; só 107 responderam. Os
+    outros 46 são Contatado: a Prime manda preço na primeira resposta, e preço
+    sem resposta não é ninguém tratando de valor nenhum."""
+    with pool.connection() as c:
+        lead = _lead(c, status="contatado")
+        _conversa_com(c, lead, ("in", "quero um orçamento"),
+                      ("out", "PACOTE EXPERIENCE R$ 6.840 à vista"),
+                      ("out", "conseguiu ver?"))
+        _negociacao_por_valores(c); c.commit()
+        fr.aplicar_gatilhos(c, CONTA); c.commit()
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "contatado"
+
+
+def test_mil_conta_como_preco(pool):
+    """'a partir de 5 mil' — a Juliana ficou de fora da primeira passada porque
+    `\\b` não é borda de palavra no Postgres. `\\y` é."""
+    with pool.connection() as c:
+        lead = _lead(c, status="contatado")
+        _conversa_com(c, lead, ("out", "Espaço 01 a partir de 5 mil"), ("in", "e o espaço 2?"))
+        _negociacao_por_valores(c); c.commit()
+        fr.aplicar_gatilhos(c, CONTA); c.commit()
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "proposta"
+
+
+def test_negociacao_por_valores_ainda_le_o_orcamento_enviado(pool):
+    """O evento é a UNIÃO: quem liga o novo não perde o antigo."""
+    with pool.connection() as c:
+        lead = _lead(c, status="contatado")
+        oid = c.execute("""insert into orcamentos (conta_id, status, atualizado_em)
+                           values (%s,'enviado',%s) returning id""", (CONTA, AGORA)).fetchone()[0]
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, lead))
+        _negociacao_por_valores(c); c.commit()
+        fr.aplicar_gatilhos(c, CONTA); c.commit()
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "proposta"
 
 
 def test_a_mao_do_vendedor_manda(pool):

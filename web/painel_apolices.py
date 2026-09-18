@@ -546,9 +546,16 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
    em 18/09, na única olhada antes de publicar). #}
 <style>{{ balao_css }}{{ janela_css }}</style>
 <style>
+/* A TELA TEM UMA LARGURA SÓ. O miolo da base centraliza cada bloco na largura
+   dele: o título e as abas saíam estreitos e centrados, e a tabela (que tem
+   min-width) vazava mais larga que tudo em cima dela. Este embrulho dá a mesma
+   medida pra tudo, alinhado à esquerda, como uma tela de trabalho. */
+.rn-pag{width:100%;max-width:1040px;margin:0 auto;padding:1.2rem 1rem 2.5rem;box-sizing:border-box}
 .rn-topo{display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap;margin-bottom:.2rem}
-.rn-topo h2{margin:0;font-size:1.25rem}
-.rn-abas{display:flex;gap:.15rem;border-bottom:1px solid var(--borda);margin:.7rem 0 1rem;overflow-x:auto}
+/* mesma medida do Raio-X e do Follow-up: h1 de 1.5rem e uma linha de leitura embaixo */
+.rn-topo h2{margin:0;font-size:1.5rem;line-height:1.15}
+.rn-topo .sub{color:var(--txt-mut);font-size:.88rem;margin-top:.25rem}
+.rn-abas{display:flex;gap:.15rem;border-bottom:1px solid var(--borda);margin:1.1rem 0 1.1rem;overflow-x:auto}
 .rn-abas a{padding:.45rem .8rem;font-size:.85rem;color:var(--txt-mut);text-decoration:none;
   border-bottom:2px solid transparent;white-space:nowrap}
 .rn-abas a.on{color:var(--verde-claro);border-bottom-color:var(--verde);font-weight:600}
@@ -573,8 +580,11 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 .rn-card .dinheiro{font-size:.79rem;color:var(--txt);opacity:.85;margin-top:.15rem}
 .rn-acoes{display:flex;gap:.35rem;align-items:center;flex-wrap:wrap;margin-top:.5rem}
 .rn-acoes form{display:inline-flex;gap:.3rem;align-items:center;margin:0}
-.rn-bt{background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;
-  padding:.35rem .8rem;font-size:.8rem;font-weight:700;cursor:pointer}
+/* `width:auto;margin:0` explícitos: o CSS global do app tem button{width:100%;
+   margin-top:1.4rem} pra botão de formulário, e o "Buscar" virava uma barra verde
+   de largura total embaixo da busca. Mesma armadilha que a janela do lead documenta. */
+.rn-bt{background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;width:auto;margin:0;
+  padding:.4rem .85rem;font-size:.8rem;font-weight:700;cursor:pointer;white-space:nowrap}
 .rn-bt.fraco{background:transparent;border:1px solid var(--borda);color:var(--txt-mut);font-weight:500}
 .rn-tag{font-size:.67rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
   padding:.1rem .42rem;border-radius:999px;border:1px solid var(--borda);color:var(--txt-mut)}
@@ -596,11 +606,11 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 .rn-campo input,.rn-campo select{background:var(--bg);border:1px solid var(--borda);
   border-radius:8px;padding:.38rem .5rem;color:var(--txt);font-size:.85rem;width:100%}
 .rn-campo.chave input{border-color:var(--neon-borda)}
-.rn-busca{display:flex;gap:.4rem;margin-bottom:.8rem;flex-wrap:wrap}
-.rn-busca input{flex:1;min-width:180px;background:var(--bg);border:1px solid var(--borda);
+.rn-busca{display:flex;gap:.5rem;margin-bottom:.8rem;align-items:center}
+.rn-busca input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--borda);
   border-radius:8px;padding:.42rem .6rem;color:var(--txt);font-size:.85rem}
 .rn-rol{overflow-x:auto;border:1px solid var(--borda);border-radius:11px}
-.rn-tab{border-collapse:collapse;width:100%;min-width:620px;font-size:.84rem}
+.rn-tab{border-collapse:collapse;width:100%;min-width:640px;font-size:.84rem;font-variant-numeric:tabular-nums}
 .rn-tab th{text-align:right;padding:.5rem .6rem;font-size:.66rem;text-transform:uppercase;
   letter-spacing:.05em;color:var(--txt-mut);font-weight:500;background:var(--card-2);
   border-bottom:1px solid var(--borda);white-space:nowrap}
@@ -613,11 +623,15 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 .rn-vazio{background:var(--card);border:1px solid var(--borda);border-radius:13px;padding:1.1rem 1rem;margin-bottom:1rem}
 .rn-vazio .t{font-weight:600;font-size:.95rem;margin-bottom:.15rem}
 .rn-vazio .s{font-size:.82rem;color:var(--txt-mut);line-height:1.6}
-.rn-abre{background:none;border:0;padding:0;margin:0;width:auto;font:inherit;color:var(--txt);font-weight:600;cursor:pointer;
-  text-decoration:underline dotted var(--txt-mut);text-underline-offset:3px}
-.rn-abre:hover,.rn-abre:focus-visible{color:var(--verde-claro);outline:none;text-decoration-color:var(--verde)}
+/* o nome abre a janela. Sem sublinhado pontilhado (lia como link quebrado): negrito,
+   mãozinha, e a linha inteira acende ao passar — é a linha que é clicável. */
+.rn-abre{background:none;border:0;padding:0;margin:0;width:auto;font:inherit;color:var(--txt);font-weight:600;cursor:pointer;text-align:left}
+.rn-abre:hover,.rn-abre:focus-visible{color:var(--verde-claro);outline:none}
 .rn-abre.fraco{font-weight:400;color:var(--txt-mut)}
 .rn-abre.fraco:hover{color:var(--txt)}
+.rn-tab tr.rn-linha{cursor:pointer}
+.rn-tab tr.rn-linha:hover td{background:rgba(37,211,102,.05)}
+.rn-tab td.rn-cli{white-space:normal;min-width:180px}
 details.rn-det{margin-bottom:1rem}
 details.rn-det > summary{cursor:pointer;font-size:.8rem;color:var(--txt-mut);list-style:none;
   display:inline-flex;gap:.3rem;align-items:center;padding:.3rem .65rem;border:1px solid var(--borda);
@@ -639,8 +653,10 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
   background:var(--azul-fundo);border:1px solid var(--azul-borda);color:#8FC9E6;text-decoration:none}
 </style>
 
+<div class="rn-pag">
 <div class="rn-topo">
-  <h2>Renovações</h2>
+  <div><h2>Renovações</h2>
+    <div class="sub">{% if aba == 'carteira' %}tudo que já foi cadastrado{% elif aba == 'percentuais' %}a comissão de cada seguradora{% else %}o que vence nos próximos {{ horizonte }} dias{% endif %}</div></div>
   {% if gerencia %}
   {# âncora não abre <details>; o onclick abre e a âncora leva até lá #}
   <a class="rn-bt" href="#nova" style="text-decoration:none"
@@ -873,8 +889,8 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     <tr><th>Cliente</th><th>Seguradora</th><th>Ramo</th><th>Vence</th><th>Situação</th>
         <th>Prêmio</th><th>Comissão</th></tr>
     {% for a in carteira %}
-    <tr>
-      <td>{% if a.cliente_id %}<button type="button" class="rn-abre" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this.closest('tr'),'cliente')">{{ a.cliente }}</button>
+    <tr {% if a.cliente_id %}class="rn-linha" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this,'cliente')"{% endif %}>
+      <td class="rn-cli">{% if a.cliente_id %}<button type="button" class="rn-abre" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this.closest('tr'),'cliente')">{{ a.cliente }}</button>
           {% else %}{{ a.cliente }} <span class="rn-pill" title="apólice sem cliente ligado">sem cliente</span>{% endif %}
           {% if a.bem.placa %} <span class="rn-pill">{{ a.bem.placa }}</span>{% endif %}
           {% if a.tem_pdf %} <a class="rn-pdf" href="/painel/renovacoes/apolice/{{ a.id }}/pdf" target="_blank">PDF</a>{% endif %}</td>
@@ -928,6 +944,7 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     </form>
   </div>
 {% endif %}
+</div>{# .rn-pag #}
 <script>var _KB_MOTIVOS = {{ motivos|tojson }}; var _KB_DECISOES = {{ decisoes|tojson }};</script>
 <script>{{ balao_js }}</script>
 <script>{{ janela_js }}</script>

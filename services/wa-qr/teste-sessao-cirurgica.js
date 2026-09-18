@@ -232,8 +232,15 @@ const espera = (ms) => new Promise((r) => setTimeout(r, ms))
   // justamente as mensagens que exercitariam a sessão nova. Conserta primeiro,
   // prende só se não deu — a trava de 1h garante que a enxurrada insistente caia
   // no `apagadas: 0` da rodada seguinte e aí sim seja contida.
+  //
+  // Em 18/09 a decisão saiu do `.then()` e virou `decidirAposLimpeza` (era um `if`
+  // aninhado dentro do logger, onde teste nenhum alcançava — e foi ali que os dois
+  // significados de `0` ficaram dez dias confundidos). A EXIGÊNCIA É A MESMA: quem
+  // curou não é preso. Só que agora ela se prova por comportamento também, em
+  // teste-sessao-sem-registro.js.
   t('a quarentena só entra se a limpeza NÃO consertou',
-    /\.then\(\(apagadas\) => \{[\s\S]{0,400}if \(apagadas > 0\) \{[\s\S]{0,300}return[\s\S]{0,200}porPeerEmQuarentena/.test(src))
+    /function decidirAposLimpeza[\s\S]{0,400}if \(apagadas > 0\) return 'curou'/.test(src) &&
+    /\.then\(\(apagadas\) => \{[\s\S]{0,300}decidirAposLimpeza\(contaId, peer[\s\S]{0,200}if \(decisao === 'curou'\)[\s\S]{0,300}return/.test(src))
   t('o usuário é validado como só-dígitos antes do SQL',
     /\/\^\[0-9\]\+\$\/\.test\(u\)/.test(src))
   t('o disjuntor continua contando (a limpeza não substitui o aviso)',

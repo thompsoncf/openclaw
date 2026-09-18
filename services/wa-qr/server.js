@@ -858,16 +858,23 @@ function comContaDoBaileys (contaId, base) {
         // quarentena entra, uma mensagem depois.
         limparSessaoDoPeer(contaId, peer, 'retry esgotado')
           .then((apagadas) => {
-            if (apagadas > 0) {
+            const decisao = decidirAposLimpeza(contaId, peer, apagadas, Date.now())
+            if (decisao === 'curou') {
               log.info({ contaId, jid: peer, apagadas },
                 'quarentena dispensada: a sessão deste contato foi refeita agora')
               return
             }
-            if (porPeerEmQuarentena(contaId, peer, Date.now(), QUARENTENA_PEER_MS)) {
+            if (decisao === 'espera-prekey') {
               log.warn({ contaId, jid: peer, minutos: Math.round(QUARENTENA_PEER_MS / 60000) },
-                'quarentena: este contato não decifra e não houve sessão pra refazer — ' +
-                'parando de ouvi-lo antes de decifrar, pra a enxurrada não travar o serviço')
+                'este contato não tem sessão gravada — deixando passar UMA janela pra ' +
+                'o prekey dele reconstruir a sessão (prender aqui descartaria antes de ' +
+                'decifrar justamente a mensagem que consertaria). Voltando sem sessão, ' +
+                'entra em quarentena')
+              return
             }
+            log.warn({ contaId, jid: peer, minutos: Math.round(QUARENTENA_PEER_MS / 60000) },
+              'quarentena: este contato não decifra e a limpeza não consertou — ' +
+              'parando de ouvi-lo antes de decifrar, pra a enxurrada não travar o serviço')
           })
           .catch((e) => log.error({ contaId, e: String(e) },
             'limpeza cirúrgica de sessão falhou'))
@@ -2121,6 +2128,36 @@ const QUARENTENA_PEER_MS = parseInt(
   process.env.WA_QR_QUARENTENA_PEER_MS || '1800000', 10)   // 30 min
 const peersEmQuarentena = new Map()   // 'contaId:usuario' -> instante em que sai
 
+// O CONTATO QUE NÃO TEM SESSÃO NENHUMA — o outro zero.
+//
+// Medido na conta 38 (chip da Liberal) entre 16 e 18/09/2026: 13 mensagens de
+// cliente perdidas em 48h, 7,1% do que entrou, contra 0,6% na conta 34 no mesmo
+// período e com o mesmo volume. O log dizia 13x 'não há sessão gravada pra apagar'
+// seguido de 24x quarentena, na conversa mais movimentada da corretora.
+//
+// `limparSessaoDoPeer` devolvia 0 pra duas coisas que pedem decisões OPOSTAS:
+//
+//   0            a trava de 1h está de molho  → é enxurrada insistindo, prende
+//   SEM_SESSAO   não existe sessão pra apagar → prender é o oposto do conserto
+//
+// No segundo caso o que curaria é a PRÓXIMA mensagem do contato: um
+// PreKeyWhisperMessage reconstrói a sessão e decifra. A quarentena descarta antes
+// do decryptMessageNode — ou seja, joga fora sem abrir justamente o que consertaria.
+//
+// O comentário da quarentena aceita o custo ("ela JÁ está sendo perdida"), e isso é
+// verdade pra sessão QUEBRADA. Pra contato SEM sessão não é: ali a mensagem não
+// está perdida, está sendo recusada na porta.
+//
+// A regra: UM perdão por contato por janela. Se ele voltar sem sessão dentro da
+// janela, entra em quarentena como antes — então enxurrada tropeça no segundo passe
+// em segundos, e a trava de 07/09 (dois contatos pararam o serviço três vezes em
+// três minutos) continua de pé. Naquele caso, aliás, os contatos TINHAM sessão: a
+// limpeza apagou três. Um perdão não segura enxurrada nenhuma.
+const SEM_SESSAO = -1
+// chave EXPANDIDA (lid + número), igual à trava da limpeza: alternar entre os dois
+// identificadores do mesmo contato renovaria o perdão pra sempre.
+const peersSemSessao = new Map()   // 'contaId:usuarios' -> instante em que o perdão vence
+
 function chaveDoPeer (contaId, jid) {
   const usuario = usuarioDoJid(jid)
   return usuario ? contaId + ':' + usuario : ''
@@ -2151,6 +2188,12 @@ function esquecerQuarentena (contaId) {
   const prefixo = contaId + ':'
   for (const k of peersEmQuarentena.keys()) {
     if (k.startsWith(prefixo)) peersEmQuarentena.delete(k)
+  }
+  // o perdão do SEM_SESSAO vai junto: a conta saiu daqui, e deixar a entrada seria
+  // guardar memória de uma conta que não existe mais — o mesmo descuido que os
+  // quatro caches do `esquecerConta` já pagaram uma vez.
+  for (const k of peersSemSessao.keys()) {
+    if (k.startsWith(prefixo)) peersSemSessao.delete(k)
   }
 }
 
@@ -2207,6 +2250,40 @@ function usuariosDoPeer (contaId, jid) {
   return [...fora]
 }
 
+// O QUE FAZER DEPOIS DA LIMPEZA. Existe como função própria porque era um `if`
+// dentro de um `.then()` dentro do logger — lugar onde nenhum teste alcança, e onde
+// a diferença entre os dois zeros passou despercebida por dez dias.
+//
+//   'curou'          apagou a sessão: a próxima mensagem já decifra, não prende
+//                    (é o conserto de 08/09 — prender aqui calaria a sessão nova)
+//   'espera-prekey'  não havia sessão: deixa passar UMA janela pro prekey chegar
+//   'quarentena'     enxurrada insistindo: cala o contato, como desde 07/09
+function decidirAposLimpeza (contaId, jid, apagadas, agora) {
+  agora = agora || Date.now()
+  if (apagadas > 0) return 'curou'
+  if (apagadas === SEM_SESSAO) {
+    const chave = contaId + ':' + usuariosDoPeer(contaId, jid).sort().join(',')
+    // limpa o que já venceu antes de decidir. Um contato que pega o perdão e some
+    // pra sempre deixaria a entrada aqui até o processo morrer — num serviço de
+    // instância única com 512 MB, mapa que só cresce é o vazamento clássico (é por
+    // isso que os caches de lid viraram `MapaPorConta`). A varredura sai barata:
+    // roda no esgotamento do retry, que já tem trava de 1h por contato.
+    for (const [k, v] of peersSemSessao) if (agora >= v) peersSemSessao.delete(k)
+    const ate = peersSemSessao.get(chave)
+    if (ate && agora < ate) {
+      // segunda vez sem sessão na mesma janela: o prekey não veio, e insistir custa
+      // cripto + Postgres a cada reentrega. Agora sim é enxurrada.
+      peersSemSessao.delete(chave)
+      porPeerEmQuarentena(contaId, jid, agora, QUARENTENA_PEER_MS)
+      return 'quarentena'
+    }
+    peersSemSessao.set(chave, agora + QUARENTENA_PEER_MS)
+    return 'espera-prekey'
+  }
+  porPeerEmQuarentena(contaId, jid, agora, QUARENTENA_PEER_MS)
+  return 'quarentena'
+}
+
 async function limparSessaoDoPeer (contaId, jid, motivo) {
   const usuarios = usuariosDoPeer(contaId, jid).sort()
   if (!usuarios.length) return 0
@@ -2225,7 +2302,10 @@ async function limparSessaoDoPeer (contaId, jid, motivo) {
     if (!arquivos.length) {
       log.warn({ contaId, jid, motivo, usuarios },
         'sessão deste contato não decifra, mas não há sessão gravada pra apagar')
-      return 0
+      // SEM_SESSAO, e não 0: quem chama precisa distinguir isto da trava de
+      // frequência pra não prender quem só precisa de um prekey. Ver a decisão em
+      // `decidirAposLimpeza` e o porquê no bloco do SEM_SESSAO.
+      return SEM_SESSAO
     }
     // APAGAR PELO KEY STORE, NÃO POR SQL.
     // O Baileys lê as chaves através do makeCacheableSignalKeyStore, que guarda o
@@ -4665,4 +4745,4 @@ module.exports = {
   comecouAPartida, terminouAPartida, quemEstaSubindo, partidas, usuariosDoPeer, agendaTrancadaPorChave, VALVULA_CHAVE_FALTANDO_MS, MARCA_CHAVE_FALTANDO,
   HIST_CONCORRENCIA, HIST_PAUSA_MS, HIST_RECUO_MS, HIST_TIMEOUT_MS, enviarHistorico, dormir,
   repassarPelaFila, drenarFila, horaDaMsg,
-  medindo, oQueEstaEmCurso, decifragemPorConta, emCurso, QUARENTENA_PEER_MS, porPeerEmQuarentena, peerEmQuarentena, esquecerQuarentena, peersEmQuarentena, avisarChipQuebrado, alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, IGNORAR_GRUPOS, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+  medindo, oQueEstaEmCurso, decifragemPorConta, emCurso, QUARENTENA_PEER_MS, porPeerEmQuarentena, peerEmQuarentena, esquecerQuarentena, peersEmQuarentena, SEM_SESSAO, peersSemSessao, decidirAposLimpeza, usuariosDoPeer, avisarChipQuebrado, alvoDoEnvio, jidDe, midiaDaMsg, textoDaMsg, LIMITE_MIDIA, contarFalhaDaMensagem, falhasPorMsg, deveSeguirNoHistorico, ondasDeHistorico, HIST_ONDAS_SEM_NADA, HIST_ONDAS_MAX, DISJUNTOR_AVISA_EM, deveIgnorarNoBaileys, IGNORAR_GRUPOS, ehConversaValida, MAX_RETRY_DECIFRAR, RETRY_DELAY_MS, contarFalhaDeDecifrar, abrirDisjuntor, falhasDeDecifrar, backoffGravado, restaurarSessoes, DECIFRAR_TETO, DECIFRAR_JANELA_MS, ESPERA_POS_440_MS, QR_TIMEOUT_MS, aprenderLid, gravarLidsPendentes, esquecerConta, apagarRetratoDaSessao, limparSessoesSignal, ultimaLimpezaDeSessao, LIMPAR_SESSAO_ESPERA_MS, limparSessaoDoPeer, ultimaLimpezaDePeer, usuarioDoJid, LIMPAR_TUDO_NO_500, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, emHandshake, HANDSHAKE_MS, esperarEco, confirmarEco, cobrarEcos, ecosPendentes, ECO_LIMITE_MS, ECO_AVISA_EM, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, contarSuprimida, _logSuprimidas, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

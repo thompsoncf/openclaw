@@ -622,12 +622,18 @@ function kbAbrirSegurado(ev,id,el,aba){
     if(!d.ok){pop.innerHTML='<div class="cx-empty">Não consegui abrir.</div>';return;}
     pop._d=d; pop._aba=aba||'cliente';
     pop.innerHTML=kbSegHtml(d,pop._aba);
+    kbSegLigarConversa(pop);
   }).catch(function(){if(_leadPop===pop)pop.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
+}
+function kbSegLigarConversa(pop){
+  var b=pop.querySelector('.lp-abrir-conversa'); if(!b)return;
+  b.addEventListener('click',function(ev){ kbAbrirChat(ev, parseInt(b.getAttribute('data-conv'),10), 'conversas', b, b.getAttribute('data-nome')); });
 }
 function kbSegTrocar(aba){
   var pop=_leadPop; if(!pop||!pop._d)return; pop._aba=aba;
   pop.querySelector('.lp-body').innerHTML=(aba==='apolice'?kbSegApoliceHtml(pop._d):kbSegClienteHtml(pop._d));
   pop.querySelectorAll('.lp-tabs button').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-aba')===aba);});
+  kbSegLigarConversa(pop);
 }
 function kbSegHtml(d,aba){
   var p=d.proxima, selo='';
@@ -671,7 +677,12 @@ function kbSegClienteHtml(d){
     d.conversa.forEach(function(m){s+='<span class="de">'+cxEscK(m.de)+'<small>'+cxEscK(m.quando)+'</small></span><span>'+cxEscK(m.texto)+'</span>';});
     s+='</div>';
     if(d.conversa_id && window.kbAbrirChat){
-      s+='<div style="margin-top:.4rem"><button type="button" class="lp-ab" style="margin:0;width:auto" onclick="kbAbrirChat(event,'+d.conversa_id+',\'conversas\',this,'+JSON.stringify(d.nome).replace(/</g,'\\u003c')+')">💬 abrir conversa inteira</button></div>';
+      // SEM onclick inline, de propósito: o nome vai em data-attribute e o clique é
+      // ligado em kbSegLigarConversa. Além de dispensar JSON dentro de atributo (a
+      // armadilha do |forceescape do balão), evita que este JS — que o Follow-up
+      // também injeta — carregue a chamada inline do balão que aquela tela usa como
+      // prova de que lead sem conversa não virou botão (test_follow_up).
+      s+='<div style="margin-top:.4rem"><button type="button" class="lp-ab lp-abrir-conversa" style="margin:0;width:auto" data-conv="'+parseInt(d.conversa_id,10)+'" data-nome="'+cxEscK(d.nome||'')+'">💬 abrir conversa inteira</button></div>';
     }
   }
   s+='<div class="lp-sh"><b>Linha do tempo</b></div>';

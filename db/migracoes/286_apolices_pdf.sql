@@ -30,7 +30,17 @@ alter table public.apolices add column if not exists pdf_bytes   integer;
 alter table public.apolices add column if not exists pdf_lido    jsonb;
 alter table public.apolices add column if not exists pdf_lido_em timestamptz;
 
+-- A MESMA PROPOSTA NÃO ENTRA DUAS VEZES. O índice da 278 protege pelo nº da
+-- APÓLICE — e uma proposta ainda não tem esse número (é NULL, e NULL não colide).
+-- Com o import por PDF isso vira buraco de verdade: reimportar o mesmo documento
+-- cadastraria a mesma proposta de novo, dobrando prêmio e alerta. A Maria de
+-- Fátima (apólice 1 da conta 37) é exatamente esse caso hoje.
+create unique index if not exists ux_apolices_proposta
+    on public.apolices (conta_id, lower(seguradora), numero_proposta)
+    where numero_proposta is not null and numero_proposta <> '';
+
 -- rollback:
+--   drop index if exists public.ux_apolices_proposta;
 --   alter table public.apolices drop column if exists pdf_lido_em;
 --   alter table public.apolices drop column if exists pdf_lido;
 --   alter table public.apolices drop column if exists pdf_bytes;

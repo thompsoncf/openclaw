@@ -224,6 +224,20 @@ def test_a_mesma_apolice_nao_entra_duas_vezes(limpo):
         _apolice(limpo, numero_apolice="139041981")
 
 
+def test_a_mesma_PROPOSTA_nao_entra_duas_vezes(limpo):
+    """Migração 286. O índice da 278 protege pelo nº da APÓLICE, que uma proposta
+    ainda não tem (NULL não colide). Reimportar o mesmo PDF cadastraria a mesma
+    proposta de novo — a Maria de Fátima em produção é esse caso."""
+    _apolice(limpo, situacao="proposta", numero_proposta="139041981")
+    with pytest.raises(UniqueViolation):
+        _apolice(limpo, situacao="proposta", numero_proposta="139041981")
+    # seguradora diferente com o mesmo número é OUTRA proposta (numeração é da seguradora)
+    _apolice(limpo, situacao="proposta", numero_proposta="139041981", seguradora="Porto")
+    # e caixa não separa: "allianz" e "Allianz" são a mesma casa
+    with pytest.raises(UniqueViolation):
+        _apolice(limpo, situacao="proposta", numero_proposta="139041981", seguradora="allianz")
+
+
 def test_duas_PROPOSTAS_sem_numero_convivem(limpo):
     """Na fase de proposta o número da apólice ainda não foi emitido — e a trava de
     duplicidade não pode impedir a corretora de cadastrar duas propostas."""

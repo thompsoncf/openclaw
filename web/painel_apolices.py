@@ -28,6 +28,7 @@ from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from psycopg.errors import UniqueViolation as _UniqueViolation
 
 from db.conexao import get_pool
 from finance import apolice_pdf as apdf
@@ -340,6 +341,12 @@ def salvar_apolice(request: Request,
         ap.salvar(pool, conta[0], dados, _int(apolice_id))
     except ValueError as e:
         return RedirectResponse(f"/painel/renovacoes?erro={e}", status_code=303)
+    except _UniqueViolation:
+        # o índice da 278 (nº da apólice) ou o da 286 (nº da proposta): é a mesma
+        # apólice sendo cadastrada de novo — o caso comum é reimportar o mesmo PDF.
+        # "não deu pra salvar" esconderia o motivo; este diz o que fazer.
+        return RedirectResponse("/painel/renovacoes?aba=carteira&erro=esta apólice já está "
+                                "cadastrada — procure pelo número na Carteira", status_code=303)
     except Exception as e:  # noqa: BLE001
         _log.warning("apólice não salvou (conta %s): %s: %s", conta[0], type(e).__name__, e)
         return RedirectResponse("/painel/renovacoes?erro=não deu pra salvar", status_code=303)

@@ -590,7 +590,18 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
   {#- COMO OS AVISOS CHEGARAM (migração 284). Só dono e gestor, por decisão do dono
       em 18/09/2026: o vendedor ver a própria taxa é justo, ver a dos colegas vira
       placar — e a régua tem o cuidado de não virar fofoca sobre ninguém.
-      Cada canal sabe dizer uma coisa diferente, e o card não finge o contrário. -#}
+      Cada canal sabe dizer uma coisa diferente, e o card não finge o contrário.
+
+      "ENVIADOS" QUER DIZER A MESMA COISA NAS TRÊS LINHAS: quantos SAÍRAM. Nasceu
+      torto — o WhatsApp contava só o que saiu, o push contava as tentativas
+      (somando o que falhou) e o e-mail escondia as falhas — e o dono pegou no
+      mesmo dia: "acho que não tá batendo o número". Três contas diferentes na
+      mesma tabela não dá pra conferir de cabeça.
+
+      A conta que fecha agora, em qualquer linha:
+          enviados + a última coluna (vermelha) = tudo que o sistema tentou.
+      O "aceitos" do push saiu: era o mesmo número de "enviados", porque push que
+      não alcança aparelho nenhum já conta como falha. -#}
   {% if entrega and entrega.tem %}
   <div class="fu-ent">
     <div class="cab"><b>Como os avisos chegaram</b><span>últimos {{ entrega.dias }} dias</span></div>
@@ -614,9 +625,9 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
       <div class="cn">
         <div class="ct">Push no app</div>
         <div class="fu-kpis">
-          <div class="fu-kpi"><b>{{ entrega.push.tentativas }}</b><span>enviados</span></div>
-          <div class="fu-kpi g"><b>{{ entrega.push.ok }}</b><span>aceitos</span></div>
-          <div class="fu-kpi g"><b>{{ entrega.push.clicados }}</b><span>abriram</span></div>
+          <div class="fu-kpi"><b>{{ entrega.push.ok }}</b><span>enviados</span></div>
+          <div class="fu-kpi na" title="o serviço de push aceitar não é o aparelho mostrar"><b>—</b><span>não se sabe</span></div>
+          <div class="fu-kpi g" title="tocou na notificação — quem toca abriu o painel"><b>{{ entrega.push.clicados }}</b><span>abriram</span></div>
           <div class="fu-kpi r"><b>{{ entrega.push.falhas }}</b><span>sem aparelho</span></div>
         </div>
       </div>
@@ -655,9 +666,11 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
     </div>
     {% endif %}
 
-    <p class="nota">“Sem recibo” não quer dizer que não chegou — quem desliga a confirmação de
-    leitura no WhatsApp nunca gera o 👀. E o e-mail mostra travessão onde não há dado, em vez de
-    zero, que se leria como “ninguém abriu”.</p>
+    <p class="nota"><b>Enviados</b> é o que saiu de verdade, nas três linhas; a última coluna é o
+    que não saiu, e por quê — somando as duas você tem tudo que o sistema tentou.
+    “Sem recibo” não quer dizer que não chegou: quem desliga a confirmação de leitura no WhatsApp
+    nunca gera o 👀. E o travessão é onde não há dado — em vez de zero, que se leria como
+    “ninguém abriu”.</p>
   </div>
   {% endif %}
   {% endif %}

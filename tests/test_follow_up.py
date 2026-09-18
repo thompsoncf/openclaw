@@ -1495,6 +1495,37 @@ def test_o_card_mostra_os_tres_canais_com_o_que_cada_um_SABE_dizer():
         assert pedaco in html, pedaco
 
 
+def test_ENVIADOS_conta_a_mesma_coisa_nas_tres_linhas():
+    """O card nasceu torto e o dono pegou no mesmo dia: "acho que não tá batendo o
+    número". O WhatsApp contava só o que saiu (1 de 3), o push contava as tentativas
+    (7, somando as 2 que falharam) e o e-mail escondia as falhas — três contas
+    diferentes na mesma tabela, impossível conferir de cabeça.
+
+    A regra agora: enviados = SAIU, e a última coluna é o que não saiu. Somando as
+    duas dá tudo que o sistema tentou, em qualquer linha."""
+    r = _entrega(
+        whatsapp={"tentativas": 3, "ok": 1, "falhas": 2, "entregues": 0, "lidos": 0,
+                  "sem_recibo": 1, "clicados": 0},
+        push={"tentativas": 7, "ok": 5, "falhas": 2, "entregues": 0, "lidos": 0,
+              "sem_recibo": 0, "clicados": 3},
+        email={"tentativas": 7, "ok": 5, "falhas": 2, "entregues": 0, "lidos": 0,
+               "sem_recibo": 0, "clicados": 0})
+    html = _tela(modo="ligado", zap=True, entrega=r)
+    # o 7 das tentativas do push não pode aparecer como "enviados": ele soma o que
+    # falhou, e a linha do lado já mostra essas 2 falhas
+    import re
+    enviados = re.findall(r"<b>(\d+)</b><span>enviados</span>", html)
+    assert enviados == ["1", "5", "5"], (
+        f"enviados devia ser o que SAIU em cada linha (1, 5, 5), veio {enviados}")
+
+
+def test_o_push_nao_mostra_mais_ACEITOS_repetindo_enviados():
+    """"Aceitos" era o mesmo número de "enviados" — push que não alcança aparelho
+    nenhum já conta como falha. Coluna que repete a vizinha não informa, atrapalha."""
+    html = _tela(modo="ligado", zap=True, entrega=_entrega())
+    assert "aceitos" not in html
+
+
 def test_o_email_mostra_TRAVESSAO_e_nunca_zero_no_que_nao_se_mede():
     """Zero se leria como "ninguém abriu". O que existe é ausência de medição: o
     pixel de leitura hoje mede o proxy do Gmail pré-carregando imagem, não gente."""

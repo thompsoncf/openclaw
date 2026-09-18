@@ -325,6 +325,19 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — teto falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
+                # O Perdido automático: o lead que passou do prazo da etapa E levou
+                # os toques sem responder sai do quadro sozinho, com motivo. Nunca
+                # fecha quem está esperando resposta NOSSA. Inerte por padrão.
+                from finance import funil_perdido as _fperd
+                _p = _fperd.rodar(pool)
+                if _p["contas"]:
+                    log.info("poller: ciclo #%d — perdido: %d conta(s), %d fechado(s), "
+                             "%d simulado(s)",
+                             ciclo, _p["contas"], _p["fechados"], _p["simulados"])
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — perdido falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
+            try:
                 # A ponte com a Agenda: o lead que fecha vira compromisso pela data
                 # do evento. Roda aqui, e não no caminho que move o card, porque o
                 # lead chega em "Fechado" por quatro portas diferentes — pendurar em

@@ -66,6 +66,10 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint, prospecc
 create table orcamentos (id bigserial primary key, conta_id bigint, status text,
   atualizado_em timestamptz, aprovada_em timestamptz, sinal_pago_em timestamptz,
   contrato_assinado_em timestamptz);
+-- migração 164: a assinatura de verdade. `orcamentos.contrato_assinado_em` existe e
+-- ninguém preenche — o gatilho que lia dela ficou cego desde que nasceu.
+create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
+  status text default 'enviado', assinado_em timestamptz, criado_em timestamptz default now());
 -- migração 178: é ela que sabe que a proposta SAIU, por qual canal e quando. O
 -- gatilho `orcamento_enviado` lê daqui — sem a tabela ele fica cego pro e-mail,
 -- pra conversa do app e pro link copiado, que é o estado que este trabalho corrige.
@@ -310,6 +314,46 @@ def test_sinal_pago_leva_direto_pro_fechamento(pool):
         c.commit()
         fr.aplicar_gatilhos(c, CONTA); c.commit()
         assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "ganho"
+
+
+def test_contrato_assinado_le_a_tabela_de_contratos(pool):
+    """O gatilho do contrato lia `orcamentos.contrato_assinado_em`, coluna que nada
+    preenche: 7 contratos assinados na Prime, 0 disparos. Aqui o orçamento fica
+    exatamente como a produção o deixa — sem a coluna morta — e a assinatura está
+    onde de fato mora."""
+    with pool.connection() as c:
+        lead = _lead(c)
+        oid = c.execute("""insert into orcamentos (conta_id, status, atualizado_em)
+                           values (%s,'fechado',%s) returning id""", (CONTA, AGORA)).fetchone()[0]
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, lead))
+        c.execute("""insert into contratos (conta_id, orcamento_id, status, assinado_em)
+                     values (%s,%s,'assinado',%s)""", (CONTA, oid, AGORA))
+        c.execute("update funil_etapas set gatilho='contrato_assinado' where conta_id=%s and chave='ganho'",
+                  (CONTA,))
+        _ligar(c, "ganho")
+        c.commit()
+        fr.aplicar_gatilhos(c, CONTA); c.commit()
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "ganho"
+        assert c.execute("select motivo from funil_movimentos where prospeccao_id=%s and para='ganho'",
+                         (lead,)).fetchone()[0] == "gatilho:contrato_assinado"
+
+
+def test_contrato_so_enviado_nao_e_venda(pool):
+    """Contrato mandado e não assinado é o estado de dois leads da Prime hoje
+    (Carolina Costa, Rône Rodrigues): estão em Orçamento Assinado, e é lá mesmo."""
+    with pool.connection() as c:
+        lead = _lead(c)
+        oid = c.execute("""insert into orcamentos (conta_id, status, atualizado_em)
+                           values (%s,'aprovada',%s) returning id""", (CONTA, AGORA)).fetchone()[0]
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, lead))
+        c.execute("""insert into contratos (conta_id, orcamento_id, status)
+                     values (%s,%s,'enviado')""", (CONTA, oid))
+        c.execute("update funil_etapas set gatilho='contrato_assinado' where conta_id=%s and chave='ganho'",
+                  (CONTA,))
+        _ligar(c, "ganho")
+        c.commit()
+        fr.aplicar_gatilhos(c, CONTA); c.commit()
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] != "ganho"
 
 
 def test_a_mao_do_vendedor_manda(pool):

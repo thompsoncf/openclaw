@@ -75,7 +75,14 @@ SITUACOES = (
     ("renovada", "Renovada"),
     ("vencida", "Vencida"),
     ("cancelada", "Cancelada"),
+    # o cliente NÃO renovou comigo, e disse por quê (migração 287). É outro estado
+    # que 'vencida' (o tempo passou e ninguém marcou) e que 'cancelada' (encerrou
+    # no meio): é o que o Raio-X conta como renovação perdida.
+    ("perdida", "Perdida"),
 )
+#: os chips que a janela oferece — o que a pessoa DECIDE. 'vencida' não está aqui
+#: porque não é decisão de ninguém: é o calendário, e `marcar_vencidas` grava sozinho.
+DECISOES = ("proposta", "vigente", "renovada", "perdida")
 _SITUACOES = dict(SITUACOES)
 
 #: As que ainda contam pro relógio. As outras já acabaram a vida útil delas e não
@@ -208,13 +215,13 @@ _COLS = """a.id, a.cliente_id, a.corretor_id, a.seguradora, a.ramo,
            a.situacao, a.premio_centavos, a.iof_centavos, a.franquia_centavos,
            a.comissao_pct, a.comissao_centavos, a.classe_bonus, a.parcelas,
            a.dia_vencimento, a.bem, a.condutor, a.coberturas, a.renovacao_de, a.obs,
-           a.pdf_caminho, a.pdf_nome"""
+           a.pdf_caminho, a.pdf_nome, a.perda_motivo, a.perdida_em"""
 
 
 def _linha(r, hoje: date, pct_fallback=None) -> dict:
     (i, cli, cor, seg, ramo, n_prop, n_apol, v_ini, v_fim, sit, premio, iof, franquia,
      pct, com, bonus, parcelas, dia_venc, bem, condutor, coberturas, renov, obs,
-     pdf_caminho, pdf_nome) = r[:25]
+     pdf_caminho, pdf_nome, perda_motivo, perdida_em) = r[:27]
     pct = Decimal(str(pct)) if pct is not None else pct_fallback
     dias = dias_para(v_fim, hoje)
     return {
@@ -233,6 +240,7 @@ def _linha(r, hoje: date, pct_fallback=None) -> dict:
         "bem": bem or {}, "condutor": condutor or {}, "coberturas": coberturas or [],
         "renovacao_de": renov, "obs": obs,
         "pdf_caminho": pdf_caminho, "pdf_nome": pdf_nome, "tem_pdf": bool(pdf_caminho),
+        "perda_motivo": perda_motivo, "perdida_em": perdida_em,
         "dias": dias, "degrau": degrau_de(dias),
     }
 
@@ -267,7 +275,7 @@ def a_vencer(pool, conta_id: int, *, dias: int = HORIZONTE, hoje: date | None = 
             if chave not in padrao:
                 padrao[chave] = pct_padrao(c, conta_id, r[3], r[4])
             d = _linha(r, hoje, padrao[chave])
-            d["cliente"] = r[25] or "—"
+            d["cliente"] = r[27] or "—"
             saida.append(d)
     return saida
 
@@ -295,7 +303,7 @@ def proxima(pool, conta_id: int, *, hoje: date | None = None,
         if r is None:
             return None
         d = _linha(r, hoje, pct_padrao(c, conta_id, r[3], r[4]))
-    d["cliente"] = r[25] or "—"
+    d["cliente"] = r[27] or "—"
     # quando ela entra na régua (o primeiro degrau) — é a pergunta seguinte de quem
     # lê "faltam 308 dias", e responder aqui evita a conta de cabeça
     d["entra_em"] = d["vigencia_fim"] - timedelta(days=DEGRAUS[0])
@@ -332,7 +340,7 @@ def listar(pool, conta_id: int, *, hoje: date | None = None,
             if chave not in padrao:
                 padrao[chave] = pct_padrao(c, conta_id, r[3], r[4])
             d = _linha(r, hoje, padrao[chave])
-            d["cliente"] = r[25] or "—"
+            d["cliente"] = r[27] or "—"
             saida.append(d)
     return saida
 
@@ -358,7 +366,7 @@ def uma(pool, conta_id: int, apolice_id: int, *, hoje: date | None = None) -> di
         if r is None:
             return None
         d = _linha(r, hoje, pct_padrao(c, conta_id, r[3], r[4]))
-    d["cliente"] = r[25] or "—"
+    d["cliente"] = r[27] or "—"
     return d
 
 
@@ -419,6 +427,118 @@ def salvar(pool, conta_id: int, dados: dict, apolice_id: int | None = None) -> i
                           f"values (%s, {marks}) returning id",
                           (conta_id,) + tuple(d[k] for k in _CAMPOS)).fetchone()
             return int(r[0])
+
+
+def perder(pool, conta_id: int, apolice_id: int, *, motivo: str, descricao: str = "",
+           motivos_validos=None) -> None:
+    """O cliente não renovou comigo. Grava a situação E o porquê, juntos.
+
+    O motivo é obrigatório de propósito — é o que faz "perdida" valer alguma coisa
+    no Raio-X. `motivos_validos` é a lista da conta (`funil_perda.motivos`): um
+    motivo fora dela é digitação, não decisão, e é recusado antes do banco.
+    """
+    m = (motivo or "").strip()
+    if not m:
+        raise ValueError("motivo é obrigatório pra marcar como perdida")
+    if motivos_validos is not None:
+        por_chave = {x["chave"]: x for x in motivos_validos}
+        if m not in por_chave:
+            raise ValueError("motivo desconhecido")
+        if por_chave[m].get("exige_descricao") and not (descricao or "").strip():
+            raise ValueError("descricao_obrigatoria")
+    with pool.connection() as c:
+        with c.transaction():
+            c.execute(
+                """update apolices set situacao = 'perdida', perda_motivo = %s,
+                          perda_descricao = %s, perdida_em = now(), atualizado_em = now()
+                    where id = %s and conta_id = %s""",
+                (m, (descricao or "").strip() or None, apolice_id, conta_id))
+
+
+def _digitos(txt) -> str:
+    return "".join(ch for ch in str(txt or "") if ch.isdigit())
+
+
+def ficha_do_cliente(pool, conta_id: int, cliente_id: int, *, hoje: date | None = None,
+                     n_msgs: int = 5) -> dict | None:
+    """Tudo que a JANELA do segurado mostra, num JSON só.
+
+    Medido antes de escrito (docs/mockups/ficha_do_segurado.html): o que um
+    segurado TEM nesta base é identidade e contato (`clientes` + `pessoas`), as
+    apólices (`apolices.cliente_id`) e a conversa pelo telefone (`conversas`).
+    Compras, fiado e ticket ficam de fora — são de loja, e aqui seriam sempre zero.
+
+    A CONVERSA CASA PELOS ÚLTIMOS 11 DÍGITOS. `contato_ref` guarda o número com o
+    55 na frente (10 a 13 dígitos); `clientes.telefone` costuma vir sem. Medido em
+    18/09 na conta 37: 39 de 39 leads casam por 11 dígitos. Oito dígitos casariam
+    também — e casariam gente errada.
+    """
+    hoje = hoje or date.today()
+    with pool.connection() as c:
+        cl = c.execute(
+            """select c.id, c.nome, c.telefone, c.email, c.endereco, c.cidade, c.uf, c.cep,
+                      c.obs, c.criado_em, p.cpf, p.cnpj, coalesce(p.tipo, case when p.cnpj is not null then 'pj' else 'pf' end)
+                 from clientes c left join pessoas p on p.id = c.pessoa_id
+                where c.id = %s and c.dono_id = %s and c.ativo""", (cliente_id, conta_id)).fetchone()
+        if cl is None:
+            return None
+        (cid, nome, tel, email, end_, cid_, uf, cep, obs, criado_em, cpf, cnpj, tipo) = cl
+        rows = c.execute(
+            f"select {_COLS}, '' from apolices a where a.conta_id = %s and a.cliente_id = %s "
+            " order by a.vigencia_fim desc, a.id desc", (conta_id, cliente_id)).fetchall()
+        padrao = {}
+        apolices = []
+        for r in rows:
+            chave = ((r[3] or "").lower(), (r[4] or "").lower())
+            if chave not in padrao:
+                padrao[chave] = pct_padrao(c, conta_id, r[3], r[4])
+            apolices.append(_linha(r, hoje, padrao[chave]))
+        conversa, conversa_id = [], None
+        d = _digitos(tel)
+        if len(d) >= 10:
+            n = 11 if len(d) >= 11 else 10
+            cv = c.execute(
+                "select id from conversas where conta_id = %s and right(contato_ref, %s) = right(%s, %s) "
+                " order by ultima_msg_em desc nulls last, id desc limit 1",
+                (conta_id, n, d, n)).fetchone()
+            if cv:
+                conversa_id = int(cv[0])
+                msgs = c.execute(
+                    "select direcao, texto, criado_em from mensagens where conversa_id = %s "
+                    "   and coalesce(texto,'') <> '' order by criado_em desc limit %s",
+                    (conversa_id, n_msgs)).fetchall()
+                conversa = [{"de": ("ele" if dr == "in" else "você"), "texto": tx, "quando": q}
+                            for (dr, tx, q) in reversed(msgs)]
+    from finance import validadoc
+    doc = cnpj or cpf
+    vivas = [a for a in apolices if a["situacao"] in VIVAS]
+    proxima = min((a for a in vivas if a["dias"] is not None and a["dias"] >= 0),
+                  key=lambda a: a["dias"], default=None)
+    linha_do_tempo = []
+    for a in apolices:
+        if a["vigencia_inicio"]:
+            linha_do_tempo.append((a["vigencia_inicio"], f"Início da vigência {a['seguradora']} {a['ramo_txt'].lower()}"))
+        if a["perdida_em"]:
+            linha_do_tempo.append((a["perdida_em"].date(), f"Renovação perdida — {a['seguradora']}"
+                                   + (f" ({rotulo_motivo_perda(a['perda_motivo'])})" if a["perda_motivo"] else "")))
+    if criado_em:
+        linha_do_tempo.append((criado_em.date(), "Cliente entrou na carteira"
+                               + (" pela importação da apólice" if "apólice" in (obs or "").lower() else "")))
+    linha_do_tempo.sort(key=lambda x: x[0], reverse=True)
+    return {
+        "id": cid, "nome": nome, "tipo": tipo, "documento": validadoc.formatar(doc) if doc else None,
+        "telefone": tel, "email": email, "endereco": end_, "cidade": cid_, "uf": uf, "cep": cep,
+        "obs": obs, "desde": criado_em.date() if criado_em else None,
+        "apolices": apolices, "n_vivas": len(vivas), "proxima": proxima,
+        "premio_ano_centavos": sum(a["premio_centavos"] for a in vivas),
+        "conversa": conversa, "conversa_id": conversa_id,
+        "linha_do_tempo": linha_do_tempo,
+    }
+
+
+def rotulo_motivo_perda(chave: str | None) -> str:
+    from finance import raio_x_perfil as _rxp
+    return _rxp.rotulo_motivo(chave)
 
 
 def marcar_vencidas(pool, hoje: date | None = None) -> int:

@@ -34,6 +34,7 @@ from db.conexao import get_pool
 from finance import apolice_pdf as apdf
 from finance import apolices as ap
 from finance import comprovantes as _cofre
+from finance import funil_perda as _fp
 from finance import raio_x_perfil as rxp
 from web.portal import _env, _render, conta_logada, nicho_da_conta
 
@@ -158,6 +159,10 @@ def _contexto(request: Request, conta, gerencia: bool, *, aba: str = "fila",
                 # o import só aparece se o cofre estiver ligado — melhor não ter botão
                 # do que botão que engole a apólice do cliente (mesma regra do midia_cofre)
                 cofre_ok=_cofre.configurado(),
+                # a janela do segurado (web/janela_lead.kbAbrirSegurado) precisa da
+                # lista de motivos de perda DA CONTA e dos chips de decisão
+                motivos=_motivos(pool, conta_id),
+                decisoes=[{"c": c_, "r": dict(ap.SITUACOES)[c_]} for c_ in ap.DECISOES],
                 conferir=None, form=apdf.para_formulario(apdf.Leitura()),
                 erro=(request.query_params.get("erro") or "").strip())
 
@@ -171,6 +176,116 @@ def painel_renovacoes(request: Request):
     ctx = _contexto(request, conta, gerencia, aba=(q.get("aba") or "fila").strip(),
                     busca=(q.get("busca") or "").strip())
     return _render("renovacoes", request, **ctx)
+
+
+def _motivos(pool, conta_id: int) -> list[dict]:
+    """A lista de motivos de perda da conta, semeada pelo perfil `seguros` se for a
+    primeira vez — a MESMA do funil (`funil_perda.motivos`). Uma segunda lista seria
+    uma segunda verdade sobre a mesma perda."""
+    try:
+        with pool.connection() as c:
+            with c.transaction():
+                return [{"chave": m["chave"], "rotulo": m["rotulo"],
+                         "exige_descricao": bool(m["exige_descricao"])}
+                        for m in _fp.motivos(c, conta_id, "seguros")]
+    except Exception as e:  # noqa: BLE001
+        _log.warning("motivos de perda da conta %s falharam: %s: %s", conta_id, type(e).__name__, e)
+        return []
+
+
+def _fmt_data(d) -> str:
+    return d.strftime("%d/%m/%Y") if d else ""
+
+
+def _pct_txt(pct) -> str:
+    """Decimal('20.00') -> '20%'; Decimal('12.50') -> '12,5%'. O Decimal vazava com
+    duas casas na janela ("20.00%") — foi a única olhada antes de publicar que pegou."""
+    from decimal import Decimal
+    d = Decimal(str(pct)).normalize()
+    txt = format(d, "f").replace(".", ",")
+    return txt + "%"
+
+
+def _fone_txt(tel) -> str:
+    """'86994801456' -> '(86) 99480-1456'; com 55 na frente, tira. O que não tiver
+    10 ou 11 dígitos volta como veio — melhor torto do que sumido."""
+    d = "".join(ch for ch in str(tel or "") if ch.isdigit())
+    if len(d) in (12, 13) and d.startswith("55"):
+        d = d[2:]
+    if len(d) == 11:
+        return f"({d[:2]}) {d[2:7]}-{d[7:]}"
+    if len(d) == 10:
+        return f"({d[:2]}) {d[2:6]}-{d[6:]}"
+    return str(tel or "")
+
+
+def _apolice_para_janela(a: dict) -> dict:
+    """O que a janela mostra de cada apólice — formatado aqui, não no JS."""
+    bem = a.get("bem") or {}
+    bem_txt = " · ".join(x for x in (bem.get("modelo"), bem.get("ano"), bem.get("placa"),
+                                     "zero km" if str(bem.get("zero_km", "")).lower() in ("sim", "true") else "")
+                         if x)
+    vi, vf, dias = a.get("vigencia_inicio"), a.get("vigencia_fim"), a.get("dias")
+    pct = None
+    if vi and vf and vf > vi:
+        pct = round(100 * max(0, min((vf - vi).days, (date.today() - vi).days)) / (vf - vi).days)
+    if dias is None:
+        regua = ""
+    elif dias > ap.DEGRAUS[0]:
+        regua = f"entra em {_fmt_data(vf - __import__('datetime').timedelta(days=ap.DEGRAUS[0]))} · avisos 60/30/15"
+    elif dias >= 0:
+        regua = "em andamento · avisos 60/30/15"
+    else:
+        regua = "encerrada"
+    return {
+        "id": a["id"], "seguradora": a["seguradora"], "ramo_txt": a["ramo_txt"],
+        "situacao": a["situacao"], "situacao_txt": a["situacao_txt"], "viva": a["situacao"] in ap.VIVAS,
+        "numero_txt": (f"apólice {a['numero_apolice']}" if a.get("numero_apolice")
+                       else (f"proposta {a['numero_proposta']}" if a.get("numero_proposta") else "")),
+        "inicio": _fmt_data(vi), "vence": _fmt_data(vf), "dias": dias, "pct_vigencia": pct, "regua_txt": regua,
+        "premio_fmt": _brl(a["premio_centavos"]),
+        "iof_fmt": _brl(a["iof_centavos"]) if a.get("iof_centavos") else "",
+        "parcelas_txt": (f"{a['parcelas']}×" + (f" · dia {a['dia_vencimento']}" if a.get("dia_vencimento") else "")) if a.get("parcelas") else "",
+        "comissao_fmt": (_brl(a["comissao_estimada"]) + ("" if a.get("comissao_fechada") else
+                         (f" ({_pct_txt(a['comissao_pct'])}, estimada)" if a.get("comissao_pct") is not None else " (estimada)")))
+                        if a.get("comissao_estimada") is not None else "",
+        "bem_txt": bem_txt, "chassi": bem.get("chassi") or "", "classe_bonus": a.get("classe_bonus") or "",
+        "tem_pdf": bool(a.get("tem_pdf")),
+        "perda_motivo_txt": (ap.rotulo_motivo_perda(a["perda_motivo"]) if a.get("perda_motivo") else ""),
+    }
+
+
+@router.get("/painel/renovacoes/cliente/{cliente_id}/resumo")
+def resumo_do_cliente(request: Request, cliente_id: int):
+    """O JSON da JANELA do segurado — `kbAbrirSegurado` em web/janela_lead.py.
+
+    Mora sob /painel/renovacoes de propósito: é o prefixo que o gate já libera pro
+    corretor (papel vendedor). /painel/clientes é do dono; o corretor que clica no
+    nome na fila dele levaria 303 e a janela diria "não consegui abrir".
+    """
+    conta, _g, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "acesso"}, status_code=403)
+    d = ap.ficha_do_cliente(get_pool(), conta[0], cliente_id)
+    if d is None:
+        return JSONResponse({"ok": False, "erro": "nao_encontrado"}, status_code=404)
+    tel = "".join(ch for ch in (d["telefone"] or "") if ch.isdigit())
+    end_ = " · ".join(x for x in (d["endereco"], f"{d['cidade']}/{d['uf']}" if d.get("cidade") else None,
+                                  d.get("cep")) if x)
+    prox = d["proxima"]
+    return JSONResponse({
+        "ok": True, "id": d["id"], "nome": d["nome"], "tipo": d["tipo"], "documento": d["documento"],
+        "desde": _fmt_data(d["desde"]), "telefone": _fone_txt(d["telefone"]), "email": d["email"],
+        "endereco_fmt": end_,
+        "zap_link": (f"https://wa.me/{tel if tel.startswith('55') else '55' + tel}" if len(tel) >= 10 else ""),
+        "n_vivas": d["n_vivas"], "premio_ano_fmt": _brl(d["premio_ano_centavos"]),
+        "proxima": ({"vence": _fmt_data(prox["vigencia_fim"]), "dias": prox["dias"]} if prox else None),
+        "apolices": [_apolice_para_janela(a) for a in d["apolices"]],
+        "conversa": [{"de": m["de"], "texto": m["texto"],
+                      "quando": m["quando"].strftime("%d/%m %H:%M") if m["quando"] else ""} for m in d["conversa"]],
+        "conversa_id": d["conversa_id"],
+        "linha_do_tempo": [{"quando": _fmt_data(q), "texto": t} for (q, t) in d["linha_do_tempo"]],
+    })
 
 
 # ---------------------------------------------------------------- o import
@@ -354,19 +469,48 @@ def salvar_apolice(request: Request,
 
 
 @router.post("/painel/renovacoes/apolice/{apolice_id}/situacao")
-def mudar_situacao(request: Request, apolice_id: int, situacao: str = Form("")):
-    """Move a apólice de estado num toque — é o caminho de "proposta → vigente" e
-    de "vigente → renovada", que é o que acontece o tempo todo."""
+def mudar_situacao(request: Request, apolice_id: int, situacao: str = Form(""),
+                   status: str = Form(""), motivo: str = Form(""),
+                   perda_descricao: str = Form(""),
+                   # no fio o campo chama `json` (é o que a folha do funil manda); o nome
+                   # Python é outro porque `json` sombreia `BaseModel.json` no pydantic
+                   quer_json_txt: str = Form("", alias="json")):
+    """Move a apólice de estado — pelo seletor da fila ou pelo chip da janela.
+
+    'perdida' EXIGE MOTIVO, da lista da conta (`funil_perda.motivos`, perfil
+    seguros). É o que faz o estado valer alguma coisa no Raio-X. A janela manda
+    `status`/`motivo`/`perda_descricao` no formato da folha "Por que perdeu?" do
+    funil (`kbPerguntarMotivo`) e `json=1`; o seletor da fila manda `situacao` e
+    espera redirect. Os dois caminhos passam pelo mesmo `ap.perder`.
+
+    "Renovada" só fecha esta apólice. A nova chega como documento (decisão do
+    dono, 18/09: quem emite é a seguradora; nada é fabricado).
+    """
     conta, _g, redir = _acesso(request)
+    quer_json = (quer_json_txt or "").strip() == "1"
     if redir is not None:
-        return redir
-    sit = (situacao or "").strip().lower()
+        return JSONResponse({"ok": False, "erro": "acesso"}, status_code=403) if quer_json else redir
+    sit = ((situacao or status) or "").strip().lower()
     if sit not in dict(ap.SITUACOES):
-        return RedirectResponse("/painel/renovacoes", status_code=303)
-    with get_pool().connection() as c:
-        with c.transaction():
-            c.execute("update apolices set situacao=%s, atualizado_em=now() "
-                      " where id=%s and conta_id=%s", (sit, apolice_id, conta[0]))
+        return JSONResponse({"ok": False, "erro": "situacao"}, status_code=400) if quer_json \
+            else RedirectResponse("/painel/renovacoes", status_code=303)
+    pool = get_pool()
+    if sit == "perdida":
+        try:
+            ap.perder(pool, conta[0], apolice_id, motivo=motivo, descricao=perda_descricao,
+                      motivos_validos=_motivos(pool, conta[0]))
+        except ValueError as e:
+            erro = str(e)
+            if quer_json:
+                return JSONResponse({"ok": False, "erro": erro}, status_code=400)
+            return RedirectResponse(f"/painel/renovacoes?erro=perdida precisa de motivo ({erro})", status_code=303)
+    else:
+        with pool.connection() as c:
+            with c.transaction():
+                c.execute("update apolices set situacao=%s, atualizado_em=now() "
+                          " where id=%s and conta_id=%s", (sit, apolice_id, conta[0]))
+    if quer_json:
+        return JSONResponse({"ok": True, "situacao": sit})
     return RedirectResponse("/painel/renovacoes", status_code=303)
 
 
@@ -397,6 +541,10 @@ def apagar_comissao(request: Request, cid: int):
 
 
 _TPL = r"""{% extends "base" %}{% block conteudo %}
+{# CSS e JS da janela/balão são strings CRUAS (Markup) — o embrulho é da tela, como no
+   funil e no Follow-up. Soltas, viram um muro de texto no topo da Carteira (visto
+   em 18/09, na única olhada antes de publicar). #}
+<style>{{ balao_css }}{{ janela_css }}</style>
 <style>
 .rn-topo{display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap;margin-bottom:.2rem}
 .rn-topo h2{margin:0;font-size:1.25rem}
@@ -465,6 +613,11 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 .rn-vazio{background:var(--card);border:1px solid var(--borda);border-radius:13px;padding:1.1rem 1rem;margin-bottom:1rem}
 .rn-vazio .t{font-weight:600;font-size:.95rem;margin-bottom:.15rem}
 .rn-vazio .s{font-size:.82rem;color:var(--txt-mut);line-height:1.6}
+.rn-abre{background:none;border:0;padding:0;margin:0;width:auto;font:inherit;color:var(--txt);font-weight:600;cursor:pointer;
+  text-decoration:underline dotted var(--txt-mut);text-underline-offset:3px}
+.rn-abre:hover,.rn-abre:focus-visible{color:var(--verde-claro);outline:none;text-decoration-color:var(--verde)}
+.rn-abre.fraco{font-weight:400;color:var(--txt-mut)}
+.rn-abre.fraco:hover{color:var(--txt)}
 details.rn-det{margin-bottom:1rem}
 details.rn-det > summary{cursor:pointer;font-size:.8rem;color:var(--txt-mut);list-style:none;
   display:inline-flex;gap:.3rem;align-items:center;padding:.3rem .65rem;border:1px solid var(--borda);
@@ -526,7 +679,8 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     {% set passou = (a.dias is not none and a.dias < 0) %}
     <div class="rn-card {% if passou %}passou{% elif a.degrau %}d{{ a.degrau }}{% endif %}" id="a{{ a.id }}">
       <div class="cab">
-        <span class="quem">{{ a.cliente }}</span>
+        {% if a.cliente_id %}<button type="button" class="quem rn-abre" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this.closest('.rn-card'),'cliente')">{{ a.cliente }}</button>
+        {% else %}<span class="quem">{{ a.cliente }}</span>{% endif %}
         <span class="rn-pill">{{ a.seguradora }}</span>
         <span class="rn-pill">{{ a.ramo_txt|lower }}</span>
         {% if a.tem_pdf %}<a class="rn-pdf" href="/painel/renovacoes/apolice/{{ a.id }}/pdf" target="_blank">PDF</a>{% endif %}
@@ -550,12 +704,15 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         <form method="post" action="/painel/renovacoes/apolice/{{ a.id }}/situacao">
           <select name="situacao" onchange="this.form.submit()"
                   style="background:var(--bg);border:1px solid var(--borda);border-radius:8px;padding:.28rem .45rem;color:var(--txt);font-size:.78rem">
-            {% for chave, rot in situacoes %}
+            {% for chave, rot in situacoes %}{% if chave != 'perdida' or chave == a.situacao %}
             <option value="{{ chave }}" {% if chave == a.situacao %}selected{% endif %}>{{ rot }}</option>
-            {% endfor %}
+            {% endif %}{% endfor %}
           </select>
           <noscript><button class="rn-bt fraco">ok</button></noscript>
         </form>
+        {% if a.cliente_id and a.situacao in ('proposta','vigente','vencida') %}
+        <button type="button" class="rn-bt fraco" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this.closest('.rn-card'),'apolice')">perdi…</button>
+        {% endif %}
       </div>
     </div>
     {% endfor %}
@@ -717,9 +874,12 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         <th>Prêmio</th><th>Comissão</th></tr>
     {% for a in carteira %}
     <tr>
-      <td>{{ a.cliente }}{% if a.bem.placa %} <span class="rn-pill">{{ a.bem.placa }}</span>{% endif %}
+      <td>{% if a.cliente_id %}<button type="button" class="rn-abre" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this.closest('tr'),'cliente')">{{ a.cliente }}</button>
+          {% else %}{{ a.cliente }} <span class="rn-pill" title="apólice sem cliente ligado">sem cliente</span>{% endif %}
+          {% if a.bem.placa %} <span class="rn-pill">{{ a.bem.placa }}</span>{% endif %}
           {% if a.tem_pdf %} <a class="rn-pdf" href="/painel/renovacoes/apolice/{{ a.id }}/pdf" target="_blank">PDF</a>{% endif %}</td>
-      <td>{{ a.seguradora }}</td><td>{{ a.ramo_txt }}</td>
+      <td>{{ a.seguradora }}</td>
+      <td>{% if a.cliente_id %}<button type="button" class="rn-abre fraco" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this.closest('tr'),'apolice')">{{ a.ramo_txt }}</button>{% else %}{{ a.ramo_txt }}{% endif %}</td>
       <td>{{ a.vigencia_fim.strftime('%d/%m/%Y') }}{% if a.dias is not none and a.dias >= 0 %}
           <span class="rn-pill">{{ a.dias }}d</span>{% endif %}</td>
       <td>{{ a.situacao_txt }}</td>
@@ -768,6 +928,9 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     </form>
   </div>
 {% endif %}
+<script>var _KB_MOTIVOS = {{ motivos|tojson }}; var _KB_DECISOES = {{ decisoes|tojson }};</script>
+<script>{{ balao_js }}</script>
+<script>{{ janela_js }}</script>
 {% endblock %}"""
 
 _env.loader.mapping["renovacoes"] = _TPL

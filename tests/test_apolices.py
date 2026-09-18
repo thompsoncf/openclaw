@@ -34,8 +34,16 @@ _BASE = """
 create table contas (id bigint primary key, nome text);
 create table membros (id bigserial primary key, conta_id bigint references contas(id),
   nome text, email text, papel text not null default 'membro', ativo boolean not null default true);
+create table pessoas (id bigserial primary key, cpf text, cnpj text, tipo text, celular text,
+  nome text, email text);
 create table clientes (id bigserial primary key, dono_id bigint references contas(id),
-  nome text not null, ativo boolean not null default true);
+  pessoa_id bigint references pessoas(id), nome text not null, telefone text, email text,
+  endereco text, cidade text, uf text, cep text, obs text,
+  ativo boolean not null default true, criado_em timestamptz not null default now());
+create table conversas (id bigserial primary key, conta_id bigint, contato_ref text,
+  contato_nome text, ultima_msg_em timestamptz);
+create table mensagens (id bigserial primary key, conversa_id bigint, direcao text, texto text,
+  criado_em timestamptz not null default now());
 create table lembretes_enviados (id bigserial primary key,
   conta_id bigint not null references contas(id) on delete cascade,
   tipo text not null check (tipo in ('resumo','aviso')),
@@ -62,6 +70,7 @@ def pool():
         c.execute(_BASE)
         c.execute((MIG / "278_apolices.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "286_apolices_pdf.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "287_apolice_perdida.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -74,7 +83,10 @@ def limpo(pool):
         c.execute("delete from seguros_comissao")
         c.execute("delete from lembretes_enviados")
         c.execute("delete from clientes")
+        c.execute("delete from pessoas")
         c.execute("delete from membros")
+        c.execute("delete from mensagens")
+        c.execute("delete from conversas")
         c.commit()
     return pool
 
@@ -428,6 +440,115 @@ def test_o_pdf_vai_e_volta_e_quem_foi_digitada_nao_tem(limpo):
         nulo = c.execute("select pdf_lido from apolices where id=%s", (sem,)).fetchone()[0]
     assert lido["campos"]["vigencia_fim"] == "2027-07-23" and lido_em is not None
     assert nulo is None
+
+
+# ------------------------------------------------------------ perdida, com motivo
+
+MOTIVOS = [{"chave": "renovou_direto", "rotulo": "Renovou direto", "exige_descricao": False},
+           {"chave": "outro", "rotulo": "Outro", "exige_descricao": True}]
+
+
+def test_perdida_e_um_estado_proprio_e_sai_da_fila(limpo):
+    """Migração 287. 'vencida' é o calendário; 'cancelada' é encerrar no meio.
+    'perdida' é "o cliente NÃO renovou comigo" — e é o que o Raio-X conta."""
+    i = _apolice(limpo, vigencia_fim=HOJE + timedelta(days=20))
+    ap.perder(limpo, CONTA, i, motivo="renovou_direto", motivos_validos=MOTIVOS)
+    a = ap.uma(limpo, CONTA, i, hoje=HOJE)
+    assert a["situacao"] == "perdida" and a["perda_motivo"] == "renovou_direto"
+    assert a["perdida_em"] is not None
+    assert ap.a_vencer(limpo, CONTA, hoje=HOJE) == []          # saiu da fila
+    assert "perdida" not in ap.VIVAS and "perdida" in dict(ap.SITUACOES)
+
+
+def test_perdida_sem_motivo_e_recusada(limpo):
+    """É o motivo que faz o estado valer alguma coisa."""
+    i = _apolice(limpo)
+    with pytest.raises(ValueError):
+        ap.perder(limpo, CONTA, i, motivo="", motivos_validos=MOTIVOS)
+    with pytest.raises(ValueError, match="desconhecido"):
+        ap.perder(limpo, CONTA, i, motivo="inventado", motivos_validos=MOTIVOS)
+    with pytest.raises(ValueError, match="descricao_obrigatoria"):
+        ap.perder(limpo, CONTA, i, motivo="outro", descricao="", motivos_validos=MOTIVOS)
+    assert ap.uma(limpo, CONTA, i, hoje=HOJE)["situacao"] == "vigente"   # nada mudou
+    ap.perder(limpo, CONTA, i, motivo="outro", descricao="mudou de cidade", motivos_validos=MOTIVOS)
+    assert ap.uma(limpo, CONTA, i, hoje=HOJE)["situacao"] == "perdida"
+
+
+def test_as_decisoes_nao_incluem_vencida():
+    """'vencida' não é decisão de ninguém — é o calendário, e `marcar_vencidas`
+    grava sozinho. Chip de 'vencida' na janela seria a pessoa fingindo ser o tempo."""
+    assert "vencida" not in ap.DECISOES
+    assert set(ap.DECISOES) == {"proposta", "vigente", "renovada", "perdida"}
+
+
+# ------------------------------------------------------------ a ficha na janela
+
+def _cliente(pool, nome="Maria Fernanda", telefone="86994800000"):
+    with pool.connection() as c:
+        cid = c.execute("insert into clientes (dono_id, nome, telefone) values (%s,%s,%s) returning id",
+                        (CONTA, nome, telefone)).fetchone()[0]
+        c.commit()
+    return cid
+
+
+def test_a_ficha_junta_identidade_apolices_e_conversa(limpo):
+    cid = _cliente(limpo)
+    viva = _apolice(limpo, cliente_id=cid, vigencia_fim=HOJE + timedelta(days=300), numero_apolice="V")
+    _apolice(limpo, cliente_id=cid, vigencia_fim=HOJE - timedelta(days=400), situacao="renovada", numero_apolice="R")
+    with limpo.connection() as c:
+        cv = c.execute("insert into conversas (conta_id, contato_ref, ultima_msg_em) values (%s,'5586994800000', now()) "
+                       "returning id", (CONTA,)).fetchone()[0]
+        for i, (d, t) in enumerate([("in", "oi"), ("out", "olá"), ("in", "meu seguro vence?"),
+                                    ("out", "vence em julho"), ("in", "ok"), ("out", "te aviso antes")]):
+            c.execute("insert into mensagens (conversa_id, direcao, texto, criado_em) "
+                      "values (%s,%s,%s, now() + (%s || ' minutes')::interval)", (cv, d, t, i))
+        c.commit()
+    f = ap.ficha_do_cliente(limpo, CONTA, cid, hoje=HOJE)
+    assert f["nome"] == "Maria Fernanda" and f["tipo"] == "pf"
+    assert [a["id"] for a in f["apolices"]] == [viva, f["apolices"][1]["id"]]   # a viva primeiro (vence depois)
+    assert f["n_vivas"] == 1 and f["proxima"]["id"] == viva
+    assert f["premio_ano_centavos"] == 380757                  # só as vivas somam
+    # a conversa: as ÚLTIMAS 5, em ordem cronológica, e quem falou
+    assert f["conversa_id"] == cv
+    assert [m["texto"] for m in f["conversa"]] == ["olá", "meu seguro vence?", "vence em julho", "ok", "te aviso antes"]
+    assert [m["de"] for m in f["conversa"]][:2] == ["você", "ele"]
+    assert any("entrou na carteira" in t for _, t in f["linha_do_tempo"])
+
+
+def test_a_conversa_casa_pelos_ultimos_11_digitos_e_nao_por_8(limpo):
+    """Medido na conta 37 em 18/09: 39/39 leads casam por 11 dígitos. Por 8 também
+    casariam — e casariam gente errada. O `contato_ref` tem o 55 na frente; o
+    telefone do cliente costuma não ter."""
+    cid = _cliente(limpo, telefone="(86) 99480-0000")           # com máscara, sem 55
+    with limpo.connection() as c:
+        c.execute("insert into conversas (conta_id, contato_ref) values (%s,'5586994800000')", (CONTA,))
+        # outro número que compartilha os 8 finais mas não os 11
+        c.execute("insert into conversas (conta_id, contato_ref) values (%s,'5511994800000')", (CONTA,))
+        c.execute("insert into mensagens (conversa_id, direcao, texto) select id, 'in', 'errado' "
+                  "  from conversas where contato_ref='5511994800000'")
+        c.commit()
+    f = ap.ficha_do_cliente(limpo, CONTA, cid, hoje=HOJE)
+    assert f["conversa"] == []                                  # não pegou a do 11
+    assert f["conversa_id"] is not None                         # pegou a certa (sem mensagens)
+
+
+def test_a_conversa_nao_atravessa_a_conta(limpo):
+    cid = _cliente(limpo)
+    with limpo.connection() as c:
+        c.execute("insert into conversas (conta_id, contato_ref) values (%s,'5586994800000')", (OUTRA,))
+        c.commit()
+    assert ap.ficha_do_cliente(limpo, CONTA, cid, hoje=HOJE)["conversa_id"] is None
+
+
+def test_cliente_sem_telefone_nao_quebra_a_ficha(limpo):
+    cid = _cliente(limpo, telefone=None)
+    f = ap.ficha_do_cliente(limpo, CONTA, cid, hoje=HOJE)
+    assert f is not None and f["conversa"] == [] and f["apolices"] == []
+
+
+def test_ficha_de_cliente_de_outra_conta_e_None(limpo):
+    cid = _cliente(limpo)
+    assert ap.ficha_do_cliente(limpo, OUTRA, cid, hoje=HOJE) is None
 
 
 # ------------------------------------------------------------ marcar vencidas

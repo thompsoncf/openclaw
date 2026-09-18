@@ -61,6 +61,7 @@ def pool():
     with p.connection() as c:
         c.execute(_BASE)
         c.execute((MIG / "278_apolices.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "286_apolices_pdf.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -221,6 +222,20 @@ def test_a_mesma_apolice_nao_entra_duas_vezes(limpo):
     _apolice(limpo, numero_apolice="139041981")
     with pytest.raises(UniqueViolation):
         _apolice(limpo, numero_apolice="139041981")
+
+
+def test_a_mesma_PROPOSTA_nao_entra_duas_vezes(limpo):
+    """Migração 286. O índice da 278 protege pelo nº da APÓLICE, que uma proposta
+    ainda não tem (NULL não colide). Reimportar o mesmo PDF cadastraria a mesma
+    proposta de novo — a Maria de Fátima em produção é esse caso."""
+    _apolice(limpo, situacao="proposta", numero_proposta="139041981")
+    with pytest.raises(UniqueViolation):
+        _apolice(limpo, situacao="proposta", numero_proposta="139041981")
+    # seguradora diferente com o mesmo número é OUTRA proposta (numeração é da seguradora)
+    _apolice(limpo, situacao="proposta", numero_proposta="139041981", seguradora="Porto")
+    # e caixa não separa: "allianz" e "Allianz" são a mesma casa
+    with pytest.raises(UniqueViolation):
+        _apolice(limpo, situacao="proposta", numero_proposta="139041981", seguradora="allianz")
 
 
 def test_duas_PROPOSTAS_sem_numero_convivem(limpo):
@@ -392,6 +407,27 @@ def test_o_total_da_carteira_ignora_a_busca(limpo):
     assert len(ap.listar(limpo, CONTA, hoje=HOJE, busca="porto")) == 1
     assert ap.total_da_carteira(limpo, CONTA) == 2
     assert ap.total_da_carteira(limpo, OUTRA) == 0
+
+
+# --------------------------------------------------------- o PDF guardado junto
+
+def test_o_pdf_vai_e_volta_e_quem_foi_digitada_nao_tem(limpo):
+    """Migração 286: a apólice importada guarda o caminho no cofre e o que o leitor
+    leu; a digitada à mão fica com tudo NULO — é a resposta honesta, não '{}'."""
+    com = _apolice(limpo, numero_apolice="PDF", pdf_caminho="apolice/37/x.pdf",
+                   pdf_nome="allianz.pdf", pdf_bytes=61234,
+                   pdf_lido={"reconhecida": True, "campos": {"vigencia_fim": "2027-07-23"}},
+                   pdf_lido_em=datetime(2026, 9, 18, 14, 0, tzinfo=timezone.utc))
+    sem = _apolice(limpo, numero_apolice="MAO")
+    por_id = {a["id"]: a for a in ap.listar(limpo, CONTA, hoje=HOJE)}
+    assert por_id[com]["tem_pdf"] is True and por_id[com]["pdf_nome"] == "allianz.pdf"
+    assert por_id[sem]["tem_pdf"] is False and por_id[sem]["pdf_caminho"] is None
+    with limpo.connection() as c:
+        lido, lido_em = c.execute("select pdf_lido, pdf_lido_em from apolices where id=%s",
+                                  (com,)).fetchone()
+        nulo = c.execute("select pdf_lido from apolices where id=%s", (sem,)).fetchone()[0]
+    assert lido["campos"]["vigencia_fim"] == "2027-07-23" and lido_em is not None
+    assert nulo is None
 
 
 # ------------------------------------------------------------ marcar vencidas

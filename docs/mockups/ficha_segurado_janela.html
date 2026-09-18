@@ -1,0 +1,242 @@
+<title>Ficha na Janela</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Bricolage+Grotesque:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* ── o tema do painel, tal como em web/tema.py — dark de propósito e explícito ── */
+:root{--bg:#0A0F0C;--bg-2:#0E1512;--card:#121A16;--line:#1E2A23;--txt:#EAF2ED;--dim:#8FA197;--faint:#5E6F66;
+  --neon:#25D366;--neon-b:#46F58A;--neon-fundo:#10241A;--neon-borda:#1E4A3A;--sobre:#04150C;
+  --ambar:#E0A32E;--ambar-f:#241C0F;--ambar-b:#5A4520;--azul:#229ED9;--azul-f:#0D1B23;--azul-b:#1B3A4A;
+  --coral:#E0574F;--coral-f:#241313;--coral-b:#5A2B2B;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace}
+html,body{background:var(--bg)}
+body{color:var(--txt);font:14px/1.5 var(--body);margin:0;padding-block:18px;padding-inline:16px}
+*{box-sizing:border-box}
+.wrap{max-width:960px;margin:0 auto}
+h1{font:700 1.35rem/1.2 var(--display);margin:0 0 .2rem;text-wrap:balance}
+.lead{color:var(--dim);font-size:.86rem;margin:0 0 1rem;max-width:64ch}
+.lead b{color:var(--txt)}
+.nota{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:.75rem .9rem;font-size:.84rem;color:var(--dim);margin:1rem 0}
+.nota b{color:var(--txt)}
+.nota.ex{border-color:var(--ambar-b);background:var(--ambar-f);color:#E7CFA0}
+.nota.ex b{color:#F4DFB0}
+kbd{font:500 .74rem var(--mono);background:var(--bg-2);border:1px solid var(--line);border-radius:5px;padding:.05rem .35rem;color:var(--txt)}
+
+/* ── a réplica da tela Renovações › Carteira ── */
+.tela{background:var(--bg-2);border:1px solid var(--line);border-radius:16px;padding:1rem;margin:.6rem 0 1.2rem}
+.rn-topo{display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap}
+.rn-topo h2{margin:0;font:700 1.15rem var(--display)}
+.rn-bt{background:var(--neon);color:var(--sobre);border:0;border-radius:8px;padding:.35rem .8rem;font:700 .8rem var(--body);cursor:pointer}
+.rn-bt.fraco{background:transparent;border:1px solid var(--line);color:var(--dim);font-weight:500}
+.rn-abas{display:flex;gap:.15rem;border-bottom:1px solid var(--line);margin:.7rem 0 .9rem;overflow-x:auto}
+.rn-abas span{padding:.45rem .8rem;font-size:.85rem;color:var(--dim);border-bottom:2px solid transparent;white-space:nowrap}
+.rn-abas span.on{color:var(--neon-b);border-bottom-color:var(--neon);font-weight:600}
+.rn-busca{display:flex;gap:.4rem;margin-bottom:.8rem;flex-wrap:wrap}
+.rn-busca input{flex:1;min-width:180px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:.42rem .6rem;color:var(--txt);font:.85rem var(--body)}
+.rn-rol{overflow-x:auto;border:1px solid var(--line);border-radius:11px}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:.84rem;font-variant-numeric:tabular-nums}
+th{text-align:right;padding:.5rem .6rem;font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);font-weight:500;background:var(--card);border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td{text-align:right;padding:.5rem .6rem;border-bottom:1px solid var(--line);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+tr.linha:hover td{background:rgba(37,211,102,.04)}
+.quem{color:var(--txt);font-weight:600;background:none;border:0;padding:0;font:inherit;cursor:pointer;text-decoration:underline dotted var(--faint);text-underline-offset:3px}
+.quem:hover,.quem:focus-visible{color:var(--neon-b);outline:none;text-decoration-color:var(--neon)}
+.apo{background:none;border:0;padding:0;font:inherit;color:var(--dim);cursor:pointer;text-decoration:underline dotted var(--faint);text-underline-offset:3px}
+.apo:hover{color:var(--txt)}
+.pill{font-size:.7rem;color:var(--dim);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:.06rem .42rem}
+.pdf{font:700 .66rem var(--body);letter-spacing:.05em;padding:.08rem .4rem;border-radius:5px;background:var(--azul-f);border:1px solid var(--azul-b);color:#8FC9E6}
+.ex{font-size:.64rem;color:var(--faint);font-style:italic}
+
+/* ── A JANELA: a mesma .leadpop de web/janela_lead.py, no modo segurado ── */
+.leadpop{position:fixed;z-index:90;width:378px;max-width:calc(100vw - 16px);max-height:70vh;
+  background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;
+  box-shadow:0 18px 46px rgba(0,0,0,.5);display:flex;flex-direction:column;
+  animation:pop .14s ease-out}
+@keyframes pop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.leadpop{animation:none}}
+.pop-close{position:absolute;right:.45rem;top:.45rem;width:26px;height:26px;border-radius:7px;background:var(--bg);border:1px solid var(--line);color:var(--dim);cursor:pointer;font-size:.8rem;line-height:1}
+.pop-close:hover{color:var(--txt);border-color:var(--dim)}
+.lp-h{padding:.75rem 2.3rem .6rem .85rem;border-bottom:1px solid var(--line);flex:none}
+.lp-h .top{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap}
+.lp-h h3{font:700 .98rem var(--display);margin:0}
+.lp-h .sub{color:var(--dim);font-size:.76rem;margin-top:.15rem}
+.lp-acoes{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;padding:.55rem .85rem;border-bottom:1px solid var(--line);flex:none}
+.lp-ab{background:var(--neon-fundo);border:1px solid var(--neon-borda);border-radius:8px;padding:.3rem .6rem;font-size:.76rem;color:var(--txt);cursor:pointer;display:inline-flex;gap:.3rem;align-items:center}
+.lp-ab:hover{border-color:var(--neon)}
+.lp-ab.zap{border-color:var(--neon);color:var(--neon-b)}
+.lp-tabs{display:flex;border-bottom:1px solid var(--line);flex:none;background:var(--bg-2)}
+.lp-tabs button{flex:1;background:none;border:0;border-bottom:2px solid transparent;padding:.45rem .3rem;color:var(--dim);font:600 .74rem var(--body);cursor:pointer}
+.lp-tabs button.on{color:var(--neon-b);border-bottom-color:var(--neon)}
+.lp-body{overflow:auto;padding:.7rem .85rem .85rem;flex:1;min-height:0}
+.lp-sh{display:flex;align-items:baseline;justify-content:space-between;margin:.55rem 0 .35rem}
+.lp-sh b{font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;color:var(--dim)}
+.lp-sh:first-child{margin-top:0}
+.lp-grid{display:grid;grid-template-columns:auto 1fr;gap:.18rem .7rem;font-size:.8rem}
+.lp-grid .k{color:var(--dim);font-size:.66rem;text-transform:uppercase;letter-spacing:.04em;padding-top:.15rem}
+.lp-grid .v{overflow-wrap:anywhere}
+.lp-grid .v.mono{font:500 .78rem var(--mono)}
+.ap-card{border:1px solid var(--line);border-left:3px solid var(--ambar);border-radius:10px;padding:.55rem .7rem;background:var(--bg-2);cursor:pointer}
+.ap-card:hover{border-color:var(--dim);border-left-color:var(--ambar)}
+.ap-card .t{display:flex;gap:.4rem;align-items:baseline;flex-wrap:wrap;font-weight:600;font-size:.86rem}
+.ap-card .m{color:var(--dim);font-size:.76rem;margin-top:.1rem}
+.ap-card .d{font-size:.78rem;margin-top:.15rem}
+.selo{font:700 .62rem var(--body);text-transform:uppercase;letter-spacing:.05em;padding:.08rem .4rem;border-radius:999px;background:var(--ambar-f);border:1px solid var(--ambar-b);color:#F0DCA6}
+.selo.ok{background:var(--neon-fundo);border-color:var(--neon-borda);color:var(--neon-b)}
+.chips{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.45rem}
+.chip{background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:.18rem .55rem;font-size:.72rem;color:var(--txt);cursor:pointer}
+.chip.on{border-color:var(--neon);color:var(--neon-b);background:var(--neon-fundo)}
+.chip:hover{border-color:var(--dim)}
+.vazio{color:var(--dim);font-size:.78rem;background:var(--bg-2);border:1px dashed var(--line);border-radius:9px;padding:.55rem .7rem}
+.tl{border-left:2px solid var(--line);margin:.2rem 0 0 .35rem;padding-left:.85rem}
+.tl div{position:relative;padding:.1rem 0 .5rem;font-size:.78rem}
+.tl div::before{content:'';position:absolute;left:-1.18rem;top:.42rem;width:8px;height:8px;border-radius:50%;background:var(--neon-borda);border:1px solid var(--neon)}
+.tl .q{color:var(--dim);font-size:.68rem;font-family:var(--mono)}
+.regua{display:flex;gap:.3rem;align-items:center;margin-top:.4rem;font-size:.7rem;color:var(--dim)}
+.regua i{flex:1;height:6px;border-radius:3px;background:var(--line);position:relative;overflow:hidden}
+.regua i b{position:absolute;left:0;top:0;bottom:0;background:var(--neon);opacity:.8}
+.regua i s{position:absolute;top:-2px;bottom:-2px;width:1px;background:var(--ambar);text-decoration:none}
+.lp-foot{border-top:1px solid var(--line);padding:.5rem .85rem;font-size:.72rem;color:var(--dim);flex:none;display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap}
+.lp-foot a{color:var(--neon-b);text-decoration:none}
+.leg{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.6rem;margin:.6rem 0 0}
+.leg div{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.6rem .75rem;font-size:.8rem;color:var(--dim)}
+.leg b{display:block;color:var(--txt);margin-bottom:.15rem;font-size:.82rem}
+</style>
+
+<div class="wrap">
+<h1>A ficha do segurado abre em cima da Carteira</h1>
+<p class="lead">Clique no <b>nome</b> de um cliente ou na <b>apólice</b> na tabela abaixo. A janela que abre é a
+<b>mesma janela do lead</b> que o funil e o Follow-up já usam — 378px, ancorada na linha, fecha com
+<kbd>Esc</kbd> ou clicando fora. Nada de página nova, nada de recarregar.</p>
+
+<div class="tela" id="tela">
+  <div class="rn-topo"><h2>Renovações</h2><span class="rn-bt">+ Nova apólice</span></div>
+  <div class="rn-abas"><span>Renovações</span><span class="on">Carteira (4)</span><span>Percentuais</span></div>
+  <div class="rn-busca"><input id="busca" placeholder="nome, seguradora, placa, modelo ou número…" aria-label="Buscar na carteira"><span class="rn-bt">Buscar</span></div>
+  <div class="rn-rol"><table>
+    <tr><th>Cliente</th><th>Seguradora</th><th>Ramo</th><th>Vence</th><th>Situação</th><th>Prêmio</th><th>Comissão</th></tr>
+    <tr class="linha"><td><button class="quem" data-cli="maria" onclick="abrirSegurado(event,'maria',this.closest('tr'),'cliente')">MARIA DE FATIMA CAVALCANTE PARENTE</button> <span class="pdf">PDF</span></td>
+      <td>Allianz</td><td><button class="apo" onclick="abrirSegurado(event,'maria',this.closest('tr'),'apolice')">Auto</button></td><td>23/07/2027 <span class="pill">308d</span></td><td>Proposta</td><td>R$ 3.807,57</td><td>—</td></tr>
+    <tr class="linha"><td><button class="quem" onclick="abrirSegurado(event,'jose',this.closest('tr'),'cliente')">José Ribamar</button> <span class="ex">exemplo</span></td>
+      <td>Bradesco</td><td><button class="apo" onclick="abrirSegurado(event,'jose',this.closest('tr'),'apolice')">Auto</button></td><td>30/09/2026 <span class="pill">12d</span></td><td>Vigente</td><td>R$ 2.543,00</td><td>—</td></tr>
+    <tr class="linha"><td><button class="quem" onclick="abrirSegurado(event,'const',this.closest('tr'),'cliente')">Construtora Apolinário</button> <span class="ex">exemplo</span></td>
+      <td>Porto</td><td><button class="apo" onclick="abrirSegurado(event,'const',this.closest('tr'),'apolice')">Frota</button></td><td>29/10/2026 <span class="pill">41d</span></td><td>Vigente</td><td>R$ 12.840,00</td><td>R$ 1.926,00</td></tr>
+    <tr class="linha"><td><button class="quem" onclick="abrirSegurado(event,'carlos',this.closest('tr'),'cliente')">Carlos Mendes</button> <span class="ex">exemplo</span></td>
+      <td>Tokio</td><td><button class="apo" onclick="abrirSegurado(event,'carlos',this.closest('tr'),'apolice')">Auto</button></td><td>12/09/2026 <span class="pill" style="color:var(--coral);border-color:var(--coral-b)">venceu</span></td><td>Vigente</td><td>R$ 2.984,00</td><td>R$ 596,80</td></tr>
+  </table></div>
+</div>
+
+<div class="nota ex"><b>O que é real e o que é exemplo.</b> A Maria de Fátima é o dado de produção (1 apólice, sem
+conversa pelo telefone dela, CPF mascarado aqui). As outras três linhas são <b>exemplos</b> para você ver
+a janela em estados diferentes: vigente, com comissão, vencida.</div>
+
+<div class="leg">
+  <div><b>Por que janela e não página</b>Você pediu; e o produto já tinha decidido isso duas vezes
+    (balão de conversa em 07/09, janela do lead em 16/09) pelo mesmo motivo: voltar recarrega e perde o lugar.</div>
+  <div><b>Por que 378px</b>É a largura da janela do lead. Um segundo tamanho seria uma segunda janela,
+    e duas janelas divergem. O que muda é o conteúdo, não a moldura.</div>
+  <div><b>Duas abas dentro</b>Cliente (quem é, contato, apólices, conversa, linha do tempo) e Apólice
+    (o papel inteiro: vigência, régua, prêmio, veículo, PDF, situação). Clicar numa apólice abre direto na aba dela.</div>
+  <div><b>O que fica na ficha completa</b>Editar cadastro, arquivar, fundir repetidos. A janela decide o
+    pequeno; o link do rodapé leva ao grande.</div>
+</div>
+
+<div class="nota"><b>Por trás, sem inventar mecanismo:</b> <code>kbAbrirSegurado(ev, cliente_id, linha)</code> ao
+lado de <code>kbAbrirLead</code> em <code>web/janela_lead.py</code>, buscando um JSON em
+<code>/painel/clientes/{id}/resumo</code> — identidade, contato, apólices (de <code>apolices</code>), últimas
+5 mensagens (de <code>conversas</code> pelo telefone), e a linha do tempo. Só no perfil <code>seguros</code>; os
+outros nichos seguem com a janela que têm.</div>
+</div>
+
+<script>
+(function(){
+var D={
+ maria:{nome:'Maria de Fátima Cavalcante Parente',tipo:'PF',cpf:'287.•••.•••-91',desde:'18/09/2026',origem:'importada pela apólice',
+  tel:'(86) 9••••-••56',email:'si•••••@gmail.com',end:'R. 5, 5, AP •••• — Águas Claras · Brasília/DF · 71937-180',
+  conversa:null,
+  ap:{seg:'Allianz',ramo:'auto',num:'proposta 139041981',sit:'proposta',bem:'GEELY EX2 MAX 2026 · zero km',chassi:'…TX044613',bonus:'00',
+      vi:'23/07/2026',vf:'23/07/2027',faltam:308,premio:'R$ 3.807,57',iof:'R$ 281,00',parc:'4× R$ 1.022,14 · dia 5',com:null,pdf:true,pct:0.15},
+  tl:[['18/09/2026 12:15','Cliente criada pela importação da apólice (proposta 139041981)'],['23/07/2026','Início da vigência Allianz auto']]},
+ jose:{nome:'José Ribamar',tipo:'PF',cpf:'•••.•••.•••-••',desde:'02/03/2026',origem:'WhatsApp',tel:'(86) 9••••-••11',email:'—',end:'Teresina/PI',
+  conversa:[['ele','ontem 18:40','Boa tarde, meu seguro tá pra vencer né?'],['você','ontem 18:52','Vence dia 30, José. Já estou cotando a renovação, te mando amanhã.']],
+  ap:{seg:'Bradesco',ramo:'auto',num:'apólice 0088.221.9',sit:'vigente',bem:'HB20 2023 · XYZ4E56',chassi:'…',bonus:'07',vi:'30/09/2025',vf:'30/09/2026',faltam:12,
+      premio:'R$ 2.543,00',iof:'R$ 187,00',parc:'10× · dia 10',com:null,pdf:false,pct:0.97},
+  tl:[['hoje 09:00','Aviso de renovação ao corretor — faltam 15 dias'],['02/03/2026','Lead entrou pelo WhatsApp']]},
+ const:{nome:'Construtora Apolinário',tipo:'PJ',cpf:'CNPJ ••.•••.•••/0001-••',desde:'11/2025',origem:'indicação',tel:'(86) 3•••-••00',email:'fi•••@•••.com.br',end:'Teresina/PI',
+  conversa:[['você','12/09 10:10','Segue a proposta da renovação da frota. Três veículos, mesma cobertura.']],
+  ap:{seg:'Porto',ramo:'frota',num:'apólice 531.998.2',sit:'vigente',bem:'3 veículos',chassi:'—',bonus:'04',vi:'29/10/2025',vf:'29/10/2026',faltam:41,
+      premio:'R$ 12.840,00',iof:'R$ 948,00',parc:'12× · dia 15',com:'R$ 1.926,00 (15%)',pdf:true,pct:0.89},
+  tl:[['12/09/2026','Proposta de renovação enviada'],['11/2025','Primeira apólice da frota']]},
+ carlos:{nome:'Carlos Mendes',tipo:'PF',cpf:'•••.•••.•••-••',desde:'09/2025',origem:'WhatsApp',tel:'(86) 9••••-••77',email:'—',end:'Timon/MA',
+  conversa:[['você','05/09 11:00','Carlos, sua apólice vence dia 12. Renovamos?'],['ele','05/09 11:34','Vou ver e te falo']],
+  ap:{seg:'Tokio',ramo:'auto',num:'apólice 77.410.0',sit:'vigente',bem:'Strada 2022 · JKL2M34',chassi:'…',bonus:'01',vi:'12/09/2025',vf:'12/09/2026',faltam:-6,
+      premio:'R$ 2.984,00',iof:'R$ 220,00',parc:'6× · dia 20',com:'R$ 596,80 (20%)',pdf:false,pct:1},
+  tl:[['12/09/2026','Vigência terminou — ninguém marcou renovada nem perdida'],['05/09/2026','Aviso ao corretor — faltam 7 dias']]}
+};
+var pop=null;
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function fechar(){if(pop){pop.remove();pop=null;}document.removeEventListener('keydown',onEsc,true);document.removeEventListener('click',onFora,true);}
+function onEsc(e){if(e.key==='Escape')fechar();}
+function onFora(e){if(pop&&!pop.contains(e.target))fechar();}
+window.abrirSegurado=function(ev,id,el,aba){
+  if(ev)ev.stopPropagation(); fechar();
+  var d=D[id], r=el.getBoundingClientRect();
+  pop=document.createElement('div'); pop.className='leadpop'; pop.setAttribute('role','dialog'); pop.setAttribute('aria-label','Ficha de '+d.nome);
+  var MARG=8,GAP=6,LARG=378, abaixo=window.innerHeight-r.bottom-GAP-MARG, acima=r.top-GAP-MARG;
+  if(abaixo>=260||abaixo>=acima){pop.style.top=(r.bottom+GAP)+'px';pop.style.maxHeight=Math.max(200,Math.min(560,abaixo))+'px';}
+  else{pop.style.bottom=(window.innerHeight-r.top+GAP)+'px';pop.style.maxHeight=Math.max(200,Math.min(560,acima))+'px';}
+  pop.style.left=Math.max(MARG,Math.min(r.left,window.innerWidth-LARG-MARG))+'px';
+  pop.innerHTML=html(d,aba||'cliente');
+  document.body.appendChild(pop);
+  setTimeout(function(){document.addEventListener('keydown',onEsc,true);document.addEventListener('click',onFora,true);},0);
+  pop.querySelector('.pop-close').focus();
+};
+function trocar(aba){var d=pop._d;pop.querySelector('.lp-body').innerHTML=(aba==='apolice'?corpoApolice(d):corpoCliente(d));
+  pop.querySelectorAll('.lp-tabs button').forEach(function(b){b.classList.toggle('on',b.dataset.aba===aba);});}
+function html(d,aba){
+  var a=d.ap, situ=a.faltam<0?'<span class="selo" style="background:var(--coral-f);border-color:var(--coral-b);color:#F0A8A2">venceu há '+(-a.faltam)+' dias</span>'
+      :(a.faltam<=60?'<span class="selo">faltam '+a.faltam+' dias</span>':'<span class="selo ok">renova em '+a.vf+'</span>');
+  var h='<button type="button" class="pop-close" title="Fechar" onclick="(function(){document.dispatchEvent(new KeyboardEvent(\'keydown\',{key:\'Escape\'}))})()">✕</button>'
+   +'<div class="lp-h"><div class="top"><h3>'+esc(d.nome)+'</h3><span class="pill">'+d.tipo+'</span>'+situ+'</div>'
+   +'<div class="sub">'+esc(d.cpf)+' · cliente desde '+d.desde+' · '+esc(d.origem)+'</div></div>'
+   +'<div class="lp-acoes"><span class="lp-ab zap">🟢 WhatsApp</span><span class="lp-ab">📞 '+esc(d.tel)+'</span><span class="lp-ab">📄 nova apólice</span></div>'
+   +'<div class="lp-tabs"><button data-aba="cliente" class="'+(aba==='cliente'?'on':'')+'">Cliente</button><button data-aba="apolice" class="'+(aba==='apolice'?'on':'')+'">Apólice</button></div>'
+   +'<div class="lp-body">'+(aba==='apolice'?corpoApolice(d):corpoCliente(d))+'</div>'
+   +'<div class="lp-foot"><span>Editar cadastro, arquivar e fundir repetidos ficam na ficha completa.</span><a href="#" onclick="return false">abrir ficha completa →</a></div>';
+  setTimeout(function(){pop._d=d;pop.querySelectorAll('.lp-tabs button').forEach(function(b){b.onclick=function(){trocar(b.dataset.aba);};});
+    var c=pop.querySelector('.ap-card');if(c)c.onclick=function(){trocar('apolice');};},0);
+  return h;
+}
+function corpoCliente(d){
+  var a=d.ap;
+  var s='<div class="lp-sh"><b>Contato</b></div><div class="lp-grid"><span class="k">Tel</span><span class="v">'+esc(d.tel)+'</span>'
+   +'<span class="k">E-mail</span><span class="v">'+esc(d.email)+'</span><span class="k">Endereço</span><span class="v">'+esc(d.end)+'</span></div>'
+   +'<div class="lp-sh"><b>Apólices</b><span class="pill">1 viva</span></div>'
+   +'<div class="ap-card" title="abrir a apólice"><div class="t">'+a.seg+' · '+a.ramo+(a.pdf?' <span class="pdf">PDF</span>':'')+'</div>'
+   +'<div class="m">'+esc(a.bem)+' · classe de bônus '+a.bonus+'</div>'
+   +'<div class="d">vence <b>'+a.vf+'</b> · prêmio '+a.premio+(a.com?' · comissão '+a.com:' · <span style="color:var(--ambar)">cadastre o % da '+a.seg+'</span>')+'</div>'
+   +'<div class="regua"><span>'+a.vi+'</span><i><b style="width:'+Math.round(a.pct*100)+'%"></b><s style="left:83.6%"></s></i><span>'+a.vf+'</span></div></div>'
+   +'<div class="lp-sh"><b>Conversa</b>'+(d.conversa?'<span class="pill">últimas '+d.conversa.length+'</span>':'')+'</div>';
+  if(!d.conversa){s+='<div class="vazio">Este número ainda não falou com o chip da Liberal. Quando falar, as últimas mensagens aparecem aqui.</div>';}
+  else{s+='<div class="lp-grid" style="grid-template-columns:auto 1fr">';d.conversa.forEach(function(m){s+='<span class="k">'+m[0]+'<br><span style="text-transform:none;letter-spacing:0">'+m[1]+'</span></span><span class="v">'+esc(m[2])+'</span>';});s+='</div>';}
+  s+='<div class="lp-sh"><b>Linha do tempo</b></div><div class="tl">';
+  d.tl.forEach(function(t){s+='<div><span class="q">'+t[0]+'</span><br>'+esc(t[1])+'</div>';}); s+='</div>';
+  return s;
+}
+function corpoApolice(d){
+  var a=d.ap, marks=['proposta','vigente','renovada','perdi'];
+  var s='<div class="lp-sh"><b>'+a.seg+' · '+a.ramo+'</b><span class="pill" style="font-family:var(--mono)">'+esc(a.num)+'</span></div>'
+   +'<div class="lp-grid"><span class="k">Vigência</span><span class="v">'+a.vi+' → <b>'+a.vf+'</b>'+(a.faltam>=0?' · faltam '+a.faltam+' dias':' · <b style="color:var(--coral)">venceu há '+(-a.faltam)+' dias</b>')+'</span>'
+   +'<span class="k">Régua</span><span class="v">'+(a.faltam>60?'entra em '+dias(a.vf,60)+' · avisos 60/30/15':a.faltam>=0?'em andamento · avisos 60/30/15':'encerrada')+'</span>'
+   +'<span class="k">Prêmio</span><span class="v">'+a.premio+' líquido + '+a.iof+' IOF/juros · '+a.parc+'</span>'
+   +'<span class="k">Comissão</span><span class="v">'+(a.com?a.com:'<span style="color:var(--ambar)">sem percentual cadastrado para '+a.seg+'</span>')+'</span>'
+   +'<span class="k">Bem</span><span class="v">'+esc(a.bem)+'</span><span class="k">Chassi</span><span class="v mono">'+a.chassi+'</span>'
+   +'<span class="k">Bônus</span><span class="v">classe '+a.bonus+'</span>'
+   +'<span class="k">Documento</span><span class="v">'+(a.pdf?'<span class="pdf">PDF</span> ver o PDF ↗ · coberturas ficam nele':'<span style="color:var(--dim)">sem PDF — cadastrada à mão</span>')+'</span></div>'
+   +'<div class="lp-sh"><b>Situação</b></div><div class="chips">';
+  marks.forEach(function(m){s+='<span class="chip'+(m===a.sit?' on':'')+'" onclick="this.parentNode.querySelectorAll(\'.chip\').forEach(function(c){c.classList.remove(\'on\')});this.classList.add(\'on\')">'+m+'</span>';});
+  s+='</div><div class="vazio" style="margin-top:.5rem">"Perdi" pergunta o motivo (renovou direto, achou caro, cobertura não atendeu…) — é o que alimenta o Raio-X. "Renovada" fecha esta e espera a nova apólice chegar como documento; nada é fabricado.</div>';
+  return s;
+}
+function dias(vf,n){var p=vf.split('/');var d=new Date(p[2],p[1]-1,p[0]);d.setDate(d.getDate()-n);return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear();}
+})();
+</script>

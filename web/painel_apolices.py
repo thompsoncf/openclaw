@@ -308,7 +308,10 @@ def _ler_e_guardar(conta_id: int, conteudo: bytes, nome: str) -> dict:
 
 
 @router.post("/painel/renovacoes/importar", response_class=HTMLResponse)
-async def importar_pdf(request: Request, arquivo: UploadFile = File(...)):
+async def importar_pdf(request: Request, arquivo: UploadFile = File(...),
+                       # no fio o campo chama `json`; o nome em Python é outro porque
+                       # `json` colide com `BaseModel.json` na assinatura do FastAPI
+                       quer_json_txt: str = Form("", alias="json")):
     """Recebe a apólice em PDF e devolve a CONFERÊNCIA — nunca grava direto.
 
     `async def` que só lê o corpo; leitura do PDF, Storage e banco vão pra
@@ -324,31 +327,50 @@ async def importar_pdf(request: Request, arquivo: UploadFile = File(...)):
     conta, gerencia, redir = _acesso(request)
     if redir is not None:
         return redir
+    # A JANELA PEDE JSON; a página antiga (sem JavaScript) continua esperando um 303
+    # com o recado na URL. Devolver o 303 pra quem pediu JSON é pior que um erro: o
+    # `fetch` segue o redirecionamento, recebe HTML e a janela diz "não respondeu".
+    quer_json = bool((quer_json_txt or "").strip())
+
+    def _falhou(msg: str):
+        if quer_json:
+            return JSONResponse({"ok": False, "erro": msg})
+        return RedirectResponse(f"/painel/renovacoes?erro={msg}", status_code=303)
+
     if not gerencia:
-        return RedirectResponse("/painel/renovacoes", status_code=303)
+        return _falhou("só o dono e o gestor cadastram apólice")
     from starlette.concurrency import run_in_threadpool
     if not await run_in_threadpool(_cofre.configurado):
-        return RedirectResponse("/painel/renovacoes?erro=o cofre de documentos não está "
-                                "configurado nesta instalação", status_code=303)
+        return _falhou("o cofre de documentos não está configurado nesta instalação")
     conteudo = await arquivo.read()
     nome = arquivo.filename or ""
     try:
         r = await run_in_threadpool(_ler_e_guardar, conta[0], conteudo, nome)
     except ValueError as e:
-        return RedirectResponse(f"/painel/renovacoes?erro={e}", status_code=303)
+        return _falhou(str(e))
     except Exception as e:  # noqa: BLE001
         _log.warning("import de apólice falhou (conta %s): %s: %s", conta[0], type(e).__name__, e)
-        return RedirectResponse("/painel/renovacoes?erro=não consegui ler este PDF",
-                                status_code=303)
+        return _falhou("não consegui ler este PDF")
     L = r["leitura"]
-    ctx = await run_in_threadpool(_contexto, request, conta, gerencia)
-    ctx["conferir"] = {
+    conferir = {
         "seguradora": L.seguradora, "reconhecida": L.reconhecida, "paginas": L.paginas,
         "checagens": L.checagens, "avisos": L.avisos, "nao_achou": L.nao_achou,
         "n_campos": len(L.campos), "ok": L.ok(), "pdf_nome": r["nome"],
         "pdf_caminho": r["caminho"], "pdf_bytes": r["bytes"],
         "pdf_lido": apdf.resumo_para_guardar(L),
     }
+    if quer_json:
+        # sem `_contexto`: a janela já está montada na tela, e são seis consultas a
+        # menos entre soltar o PDF e a conferência aparecer
+        return JSONResponse({
+            "ok": True,
+            "form": apdf.para_formulario(L),
+            "conf_html": _env.get_template("renovacoes_conf").render(conferir=conferir),
+            "pdf": {"caminho": r["caminho"], "nome": r["nome"], "bytes": r["bytes"],
+                    "lido": conferir["pdf_lido"]},
+        })
+    ctx = await run_in_threadpool(_contexto, request, conta, gerencia)
+    ctx["conferir"] = conferir
     ctx["form"] = apdf.para_formulario(L)
     return _render("renovacoes", request, **ctx)
 
@@ -391,7 +413,9 @@ def salvar_apolice(request: Request,
                    email: str = Form(""), endereco: str = Form(""),
                    # o PDF guardado pela conferência
                    pdf_caminho: str = Form(""), pdf_nome: str = Form(""),
-                   pdf_bytes: str = Form(""), pdf_lido: str = Form("")):
+                   pdf_bytes: str = Form(""), pdf_lido: str = Form(""),
+                   # a janela manda `json=1` e espera a LINHA da tabela de volta
+                   quer_json_txt: str = Form("", alias="json")):
     """Cadastra ou edita uma apólice.
 
     `def` e não `async def`: o handler escreve no banco de forma síncrona, e
@@ -405,6 +429,14 @@ def salvar_apolice(request: Request,
     conta, gerencia, redir = _acesso(request)
     if redir is not None:
         return redir
+    quer_json = bool((quer_json_txt or "").strip())
+
+    def _falhou(msg: str, aba: str = ""):
+        if quer_json:
+            return JSONResponse({"ok": False, "erro": msg})
+        destino = f"/painel/renovacoes?aba={aba}&erro={msg}" if aba else f"/painel/renovacoes?erro={msg}"
+        return RedirectResponse(destino, status_code=303)
+
     pool = get_pool()
     # O CLIENTE PELO CPF. Se a pessoa escolheu um cliente no seletor, ele manda; se
     # não escolheu e o CPF veio (do PDF ou digitado), acha ou cria pelo MESMO caminho
@@ -421,7 +453,7 @@ def salvar_apolice(request: Request,
                 email=email or None, endereco=endereco or None,
                 obs="Segurado — cadastrado pela apólice" if pdf_caminho else None)
         except ValueError as e:
-            return RedirectResponse(f"/painel/renovacoes?erro=cliente: {e}", status_code=303)
+            return _falhou(f"cliente: {e}")
     bem = {k: v.strip() for k, v in (("placa", placa), ("modelo", modelo),
                                      ("ano", ano), ("chassi", chassi)) if v.strip()}
     pct = (comissao_pct or "").strip().replace(",", ".")
@@ -453,18 +485,33 @@ def salvar_apolice(request: Request,
                       "pdf_bytes": _int(pdf_bytes), "pdf_lido": lido,
                       "pdf_lido_em": datetime.now(timezone.utc)})
     try:
-        ap.salvar(pool, conta[0], dados, _int(apolice_id))
+        aid = ap.salvar(pool, conta[0], dados, _int(apolice_id))
     except ValueError as e:
-        return RedirectResponse(f"/painel/renovacoes?erro={e}", status_code=303)
+        return _falhou(str(e))
     except _UniqueViolation:
         # o índice da 278 (nº da apólice) ou o da 286 (nº da proposta): é a mesma
         # apólice sendo cadastrada de novo — o caso comum é reimportar o mesmo PDF.
         # "não deu pra salvar" esconderia o motivo; este diz o que fazer.
-        return RedirectResponse("/painel/renovacoes?aba=carteira&erro=esta apólice já está "
-                                "cadastrada — procure pelo número na Carteira", status_code=303)
+        return _falhou("esta apólice já está cadastrada — procure pelo número na Carteira",
+                       aba="carteira")
     except Exception as e:  # noqa: BLE001
         _log.warning("apólice não salvou (conta %s): %s: %s", conta[0], type(e).__name__, e)
-        return RedirectResponse("/painel/renovacoes?erro=não deu pra salvar", status_code=303)
+        return _falhou("não deu pra salvar")
+    if quer_json:
+        # A LINHA VOLTA PRONTA, do mesmo template que a tabela usa. O JavaScript só
+        # a encaixa na ordem certa — nada de recarregar a página pra ver o que
+        # acabou de ser cadastrado.
+        linha = ap.uma(pool, conta[0], aid)
+        resumo = ""
+        if linha:
+            resumo = (f"{linha['cliente']} · {linha['seguradora']} {linha['ramo_txt']} · "
+                      f"vence {_fmt_data(linha['vigencia_fim'])}")
+        return JSONResponse({
+            "ok": True, "id": aid, "resumo": resumo,
+            "linha_html": (_env.get_template("renovacoes_linha").render(a=linha, brl=_brl)
+                           if linha else ""),
+            "n_carteira": ap.total_da_carteira(pool, conta[0]),
+        })
     return RedirectResponse("/painel/renovacoes", status_code=303)
 
 
@@ -538,6 +585,54 @@ def apagar_comissao(request: Request, cid: int):
     if gerencia:
         ap.apagar_comissao(get_pool(), conta[0], cid)
     return RedirectResponse("/painel/renovacoes?aba=percentuais", status_code=303)
+
+
+_TPL_LINHA = r"""{# UMA linha da carteira. Vive sozinha porque o cadastro devolve ela
+   pronta em JSON e o JavaScript a insere na tabela sem recarregar — duas
+   marcações pra mesma linha divergiriam no primeiro conserto. #}
+<tr data-id="{{ a.id }}" data-vence="{{ a.vigencia_fim.isoformat() }}"
+    {% if a.cliente_id %}class="rn-linha" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this,'cliente')"{% endif %}>
+  <td class="rn-cli">{% if a.cliente_id %}<button type="button" class="rn-abre" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this.closest('tr'),'cliente')">{{ a.cliente }}</button>
+      {% else %}{{ a.cliente }} <span class="rn-pill" title="apólice sem cliente ligado">sem cliente</span>{% endif %}
+      {% if a.bem.placa %} <span class="rn-pill">{{ a.bem.placa }}</span>{% endif %}
+      {% if a.tem_pdf %} <a class="rn-pdf" href="/painel/renovacoes/apolice/{{ a.id }}/pdf" target="_blank">PDF</a>{% endif %}</td>
+  <td>{{ a.seguradora }}</td>
+  <td>{% if a.cliente_id %}<button type="button" class="rn-abre fraco" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this.closest('tr'),'apolice')">{{ a.ramo_txt }}</button>{% else %}{{ a.ramo_txt }}{% endif %}</td>
+  <td>{{ a.vigencia_fim.strftime('%d/%m/%Y') }}{% if a.dias is not none and a.dias >= 0 %}
+      <span class="rn-pill">{{ a.dias }}d</span>{% endif %}</td>
+  <td>{{ a.situacao_txt }}</td>
+  <td>{{ brl(a.premio_centavos) }}</td>
+  <td>{% if a.comissao_estimada is not none %}{{ brl(a.comissao_estimada) }}{% else %}—{% endif %}</td>
+</tr>
+"""
+
+
+_TPL_CONF = r"""{# O que o leitor achou no PDF. Template próprio porque o mesmo painel
+   é renderizado de dois jeitos: na página (quando o POST veio sem JavaScript) e
+   dentro da janela, devolvido em JSON pela importação. #}
+<div class="rn-conf">
+  <div class="cab">
+    <h3>O que eu li de <b>{{ conferir.pdf_nome }}</b></h3>
+    {% if conferir.reconhecida %}<span class="rn-tag d60">{{ conferir.seguradora }} · {{ conferir.n_campos }} campos</span>
+    {% else %}<span class="rn-tag d15">layout não reconhecido</span>{% endif %}
+    <span class="rn-pill">{{ conferir.paginas }} pág.</span>
+  </div>
+  {% if conferir.checagens %}
+  <div class="chk">
+    {% for nome, ok, det in conferir.checagens %}
+    <span class="{% if ok %}ok{% else %}no{% endif %}">{% if ok %}✓{% else %}✗{% endif %}</span>
+    <span>{{ nome }} <span style="color:var(--txt-mut)">· {{ det }}</span></span>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% for av in conferir.avisos %}<div class="rn-aviso ambar" style="margin:.5rem 0 0">{{ av }}</div>{% endfor %}
+  {% if conferir.nao_achou %}
+  <div class="falt">Não achei no papel: {{ conferir.nao_achou|join(', ') }} — preencha o que souber.</div>
+  {% endif %}
+  <div class="falt">As coberturas não são lidas, de propósito: ficam no PDF anexado, que é a parte
+    que erra calado quando se tenta extrair. <b>Nada é salvo sem você conferir abaixo.</b></div>
+</div>
+"""
 
 
 _TPL = r"""{% extends "base" %}{% block conteudo %}
@@ -638,19 +733,77 @@ details.rn-det > summary{cursor:pointer;font-size:.8rem;color:var(--txt-mut);lis
   border-radius:999px;background:var(--card)}
 details.rn-det > summary::-webkit-details-marker{display:none}
 details.rn-det[open] > summary{margin-bottom:.6rem}
-.rn-drop{border:1.5px dashed var(--neon-borda);background:var(--neon-fundo);border-radius:10px;
-  padding:.8rem .9rem;margin-bottom:.8rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
-.rn-drop .t{font-weight:600;font-size:.9rem;color:var(--verde-claro)}
-.rn-drop .s{font-size:.76rem;color:var(--txt-mut)}
-.rn-drop input[type=file]{font-size:.8rem;color:var(--txt-mut);max-width:100%}
+/* SOLTAR O ARQUIVO AQUI é o caminho principal (o dono: "importar a apólice em PDF
+   e jogar aqui"). O input nativo fica escondido mas alcançável pelo teclado — quem
+   navega sem mouse chega nele pelo <label>, e sem JavaScript o botão de baixo
+   ainda envia o formulário do jeito antigo. */
+.rn-drop{position:relative;border:1.5px dashed var(--neon-borda);background:var(--neon-fundo);
+  border-radius:12px;padding:1.5rem 1rem;margin-bottom:.8rem;text-align:center}
+.rn-drop.sobre{border-color:var(--verde);background:rgba(37,211,102,.12)}
+.rn-drop .t{font-weight:600;font-size:.95rem;color:var(--verde-claro)}
+.rn-drop .s{font-size:.78rem;color:var(--txt-mut);line-height:1.55;margin:.3rem auto .8rem;max-width:44ch}
+.rn-drop input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.rn-drop input[type=file]:focus-visible + label{outline:2px solid var(--verde);outline-offset:2px}
+.rn-drop label{display:inline-block;cursor:pointer}
+.rn-drop .semjs{display:block;margin:.6rem auto 0;font-size:.74rem}
 .rn-conf{background:var(--card);border:1px solid var(--neon-borda);border-radius:13px;padding:.85rem 1rem;margin-bottom:.8rem}
 .rn-conf .cab{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap;margin-bottom:.5rem}
 .rn-conf h3{margin:0;font-size:.95rem}
 .rn-conf .chk{display:grid;grid-template-columns:auto 1fr;gap:.2rem .6rem;font-size:.82rem}
-.rn-conf .ok{color:var(--verde-claro)}.rn-conf .no{color:#E98A80}
+/* `.ok` colide com um `.ok` GLOBAL do portal (caixa verde de status, portal.py:214).
+   Sem zerar a casca aqui, cada ✓ da conferência vira um quadradinho com borda e a
+   lista fica com o dobro da altura — foi assim que ela nasceu em 18/09. */
+.rn-conf .ok,.rn-conf .no{background:none;border:0;border-radius:0;padding:0;font-weight:700;line-height:1.5}
+.rn-conf .ok{color:var(--verde-claro)}
+.rn-conf .no{color:#E98A80}
 .rn-conf .falt{font-size:.78rem;color:var(--txt-mut);margin-top:.5rem}
 .rn-pdf{font-size:.68rem;font-weight:700;letter-spacing:.05em;padding:.08rem .4rem;border-radius:5px;
   background:var(--azul-fundo);border:1px solid var(--azul-borda);color:#8FC9E6;text-decoration:none}
+/* o chip que abre a janela — mesma casca do <summary> dos outros blocos */
+.rn-chip{background:var(--card);border:1px solid var(--borda);color:var(--txt-mut);border-radius:999px;
+  width:auto;margin:0 0 1rem;padding:.3rem .65rem;font-size:.8rem;cursor:pointer}
+.rn-chip:hover{color:var(--txt);border-color:var(--neon-borda)}
+
+/* ── A JANELA DO CADASTRO ──────────────────────────────────────────────────
+   Antes o cadastro era um bloco dobrável DENTRO da aba "Renovações", e o botão
+   do topo era uma âncora pra ele: nas abas Carteira e Percentuais o destino não
+   existia e o botão não fazia NADA (o dono viu em 18/09). Agora a janela mora
+   fora das abas, abre em cima da tela e não troca de página — subir o PDF,
+   conferir e cadastrar acontecem todos aqui, por fetch. */
+.rn-jan{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;padding:1rem}
+.rn-jan[hidden]{display:none}
+.rn-jan [hidden]{display:none !important}
+.rn-jan .fundo{position:absolute;inset:0;background:rgba(0,0,0,.6)}
+.rn-jan .cx{position:relative;background:var(--card);border:1px solid var(--borda);border-radius:14px;
+  width:100%;max-width:720px;max-height:min(86vh,760px);display:flex;flex-direction:column;
+  box-shadow:0 18px 50px rgba(0,0,0,.5);overflow:hidden}
+.rn-jan .cab{display:flex;align-items:center;gap:.6rem;flex:none;
+  padding:.75rem 1rem;border-bottom:1px solid var(--borda);background:var(--card-2)}
+.rn-jan .cab h3{margin:0;font-size:1rem}
+.rn-jan .cab .passo{font-size:.72rem;color:var(--txt-mut);flex:1;min-width:0}
+.rn-jan .cab .x{background:none;border:0;color:var(--txt-mut);font-size:1rem;cursor:pointer;
+  width:auto;margin:0;padding:.2rem .35rem;line-height:1}
+.rn-jan .cab .x:hover{color:var(--txt)}
+.rn-jan .corpo{padding:.9rem 1rem 1.1rem;overflow-y:auto;flex:1}
+.rn-jan .corpo .sub{font-size:.79rem;color:var(--txt-mut);line-height:1.55;margin-bottom:.7rem}
+.rn-lendo{display:flex;align-items:center;gap:.6rem;font-size:.87rem;color:var(--txt-mut);padding:1.6rem .2rem}
+.rn-lendo .bola{width:14px;height:14px;border-radius:50%;flex:none;
+  border:2px solid var(--neon-borda);border-top-color:var(--verde);animation:rn-gira .7s linear infinite}
+@keyframes rn-gira{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.rn-lendo .bola{animation:none}}
+.rn-ok{text-align:center;padding:1.3rem .4rem}
+.rn-ok .marca{font-size:1.6rem;color:var(--verde-claro);line-height:1}
+.rn-ok .t{font-weight:700;font-size:1rem;margin:.35rem 0 .15rem}
+.rn-ok .s{font-size:.84rem;color:var(--txt-mut);line-height:1.6}
+.rn-ok .bts{display:flex;gap:.45rem;justify-content:center;margin-top:1rem;flex-wrap:wrap}
+.rn-erro{background:rgba(224,108,108,.12);border:1px solid #5A2B2B;color:#E9A0A0;
+  border-radius:10px;padding:.55rem .75rem;font-size:.82rem;margin-bottom:.8rem}
+/* a linha recém-cadastrada, pra pessoa achar onde ela caiu na tabela */
+.rn-tab tr.novata td{background:var(--neon-fundo)}
+@media (max-width:640px){
+  .rn-jan{padding:0;align-items:flex-end}
+  .rn-jan .cx{max-width:none;max-height:92vh;border-radius:14px 14px 0 0}
+}
 </style>
 
 <div class="rn-pag">
@@ -658,16 +811,14 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
   <div><h2>Renovações</h2>
     <div class="sub">{% if aba == 'carteira' %}tudo que já foi cadastrado{% elif aba == 'percentuais' %}a comissão de cada seguradora{% else %}o que vence nos próximos {{ horizonte }} dias{% endif %}</div></div>
   {% if gerencia %}
-  {# âncora não abre <details>; o onclick abre e a âncora leva até lá #}
-  <a class="rn-bt" href="#nova" style="text-decoration:none"
-     onclick="var d=document.getElementById('nova');if(d)d.open=true">+ Nova apólice</a>
+  <button type="button" class="rn-bt" onclick="rnAbrir(event)">+ Nova apólice</button>
   {% endif %}
 </div>
 
 <nav class="rn-abas">
   {% for chave, rot in abas %}
     {% if chave != 'percentuais' or gerencia %}
-    <a href="/painel/renovacoes?aba={{ chave }}" class="{% if aba == chave %}on{% endif %}">{{ rot }}{% if chave == 'carteira' and n_carteira %} ({{ n_carteira }}){% endif %}</a>
+    <a href="/painel/renovacoes?aba={{ chave }}" class="{% if aba == chave %}on{% endif %}">{{ rot }}{% if chave == 'carteira' %}<span id="rn-conta-carteira">{% if n_carteira %} ({{ n_carteira }}){% endif %}</span>{% endif %}</a>
     {% endif %}
   {% endfor %}
 </nav>
@@ -771,57 +922,119 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
   </details>
 
   {% if gerencia %}
-  <details class="rn-det" id="nova" {% if conferir or not n_carteira %}open{% endif %}>
-    <summary>+ cadastrar uma apólice</summary>
+  <button type="button" class="rn-chip" onclick="rnAbrir(event)">+ cadastrar uma apólice</button>
+  {% endif %}
 
-    {% if cofre_ok and not conferir %}
-    {# O CAMINHO PRINCIPAL É O PDF (decisão do dono, 18/09). Digitar continua
-       existindo — é o caminho quando não há PDF ou o layout não é reconhecido. #}
-    <form class="rn-drop" method="post" action="/painel/renovacoes/importar" enctype="multipart/form-data">
-      <div style="flex:1;min-width:200px"><div class="t">Tem a apólice em PDF? Comece por ela.</div>
-        <div class="s">Eu leio os campos e você confere antes de salvar. Allianz reconhecida;
-          outras seguradoras entram à medida que os PDFs chegarem.</div></div>
-      <input type="file" name="arquivo" accept="application/pdf" required>
-      <button class="rn-bt">Ler o PDF</button>
+{# ────────────────────────── ABA: a carteira ────────────────────────── #}
+{% elif aba == 'carteira' %}
+  <form class="rn-busca" method="get" action="/painel/renovacoes">
+    <input type="hidden" name="aba" value="carteira">
+    <input name="busca" value="{{ busca }}" placeholder="nome, seguradora, placa, modelo ou número…">
+    <button class="rn-bt">Buscar</button>
+    {% if busca %}<a class="rn-bt fraco" style="text-decoration:none;padding:.35rem .8rem"
+       href="/painel/renovacoes?aba=carteira">limpar</a>{% endif %}
+  </form>
+  {% if carteira %}
+  <div class="rn-rol"><table class="rn-tab">
+    <thead><tr><th>Cliente</th><th>Seguradora</th><th>Ramo</th><th>Vence</th><th>Situação</th>
+        <th>Prêmio</th><th>Comissão</th></tr></thead>
+    {# `tbody` com id porque a linha nova entra AQUI depois do cadastro, sem
+       recarregar a página — e é o mesmo template que o servidor devolve. #}
+    <tbody id="rn-corpo">
+    {% for a in carteira %}{% include "renovacoes_linha" %}{% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="rn-vazio"><div class="t">
+    {% if busca %}Nada encontrado para “{{ busca }}”.{% else %}A carteira está vazia.{% endif %}</div>
+    <div class="s">{% if busca %}A busca olha nome do cliente, seguradora, placa, modelo e número da
+      apólice.{% else %}<button type="button" class="rn-abre" style="color:var(--verde-claro)"
+      onclick="rnAbrir(event)">Cadastre a primeira</button> — leva um PDF ou o que você souber.{% endif %}</div>
+  </div>
+  {% endif %}
+
+{# ───────────────────────── ABA: os percentuais ───────────────────────── #}
+{% else %}
+  <div class="rn-bloco">
+    <h3>Comissão por seguradora</h3>
+    <div class="sub">A comissão não vem escrita na apólice — é papel do cliente, e o cliente
+      não vê quanto o corretor ganha. Cadastre o percentual uma vez e toda apólice daquela
+      seguradora passa a mostrar a comissão estimada. Deixe o ramo em “todos” pra valer no
+      geral, e cadastre por ramo só onde o percentual foge.
+      <br>O percentual incide sobre o <b>prêmio líquido</b>, sem o IOF — o IOF é imposto
+      repassado ao governo e não entra em comissão.</div>
+    {% if comissoes %}
+    <div class="rn-rol" style="margin-bottom:.8rem"><table class="rn-tab" style="min-width:420px">
+      <tr><th>Seguradora</th><th>Ramo</th><th>%</th><th></th></tr>
+      {% for cm in comissoes %}
+      <tr><td>{{ cm.seguradora }}</td><td>{{ cm.ramo_txt }}</td><td>{{ cm.pct }}%</td>
+        <td><form method="post" action="/painel/renovacoes/comissao/{{ cm.id }}/apagar">
+          <button class="rn-bt fraco" style="padding:.18rem .5rem">apagar</button></form></td></tr>
+      {% endfor %}
+    </table></div>
+    {% endif %}
+    <form method="post" action="/painel/renovacoes/comissao">
+      <div class="rn-grade">
+        <div class="rn-campo"><label>Seguradora</label><input name="seguradora" required placeholder="Allianz"></div>
+        <div class="rn-campo"><label>Ramo</label>
+          <select name="ramo"><option value="">todos os ramos</option>
+            {% for chave, rot in ramos %}<option value="{{ chave }}">{{ rot }}</option>{% endfor %}</select></div>
+        <div class="rn-campo"><label>Percentual</label><input name="pct" required placeholder="20"></div>
+      </div>
+      <button class="rn-bt" style="margin-top:.6rem">Salvar percentual</button>
     </form>
-    {% endif %}
+  </div>
+{% endif %}
+</div>{# .rn-pag #}
 
-    {% if conferir %}
-    <div class="rn-conf">
-      <div class="cab">
-        <h3>O que eu li de <b>{{ conferir.pdf_nome }}</b></h3>
-        {% if conferir.reconhecida %}<span class="rn-tag d60">{{ conferir.seguradora }} · {{ conferir.n_campos }} campos</span>
-        {% else %}<span class="rn-tag d15">layout não reconhecido</span>{% endif %}
-        <span class="rn-pill">{{ conferir.paginas }} pág.</span>
-      </div>
-      {% if conferir.checagens %}
-      <div class="chk">
-        {% for nome, ok, det in conferir.checagens %}
-        <span class="{% if ok %}ok{% else %}no{% endif %}">{% if ok %}✓{% else %}✗{% endif %}</span>
-        <span>{{ nome }} <span style="color:var(--txt-mut)">· {{ det }}</span></span>
-        {% endfor %}
-      </div>
-      {% endif %}
-      {% for av in conferir.avisos %}<div class="rn-aviso ambar" style="margin:.5rem 0 0">{{ av }}</div>{% endfor %}
-      {% if conferir.nao_achou %}
-      <div class="falt">Não achei no papel: {{ conferir.nao_achou|join(', ') }} — preencha o que souber.</div>
-      {% endif %}
-      <div class="falt">As coberturas não são lidas, de propósito: ficam no PDF anexado, que é a parte
-        que erra calado quando se tenta extrair. <b>Nada é salvo sem você conferir abaixo.</b></div>
+{% if gerencia %}
+{# A JANELA DO CADASTRO fica FORA das abas de propósito: o botão "+ Nova apólice"
+   existe nas três, e enquanto o cadastro morava dentro da aba "Renovações" o
+   botão apontava pra um destino que as outras duas não tinham — clicar não fazia nada.
+   Aqui dentro nada navega: o PDF sobe por fetch, a leitura volta em JSON e o
+   cadastro devolve a linha pronta pra tabela. Sem trocar de página, sem refresh. #}
+<div class="rn-jan" id="rn-jan" {% if not conferir %}hidden{% endif %}>
+  <div class="fundo" onclick="rnFechar()"></div>
+  <div class="cx" role="dialog" aria-modal="true" aria-labelledby="rn-jan-tit">
+    <div class="cab">
+      <h3 id="rn-jan-tit">Nova apólice</h3>
+      <span class="passo" id="rn-passo"></span>
+      <button type="button" class="x" onclick="rnFechar()" aria-label="Fechar">✕</button>
     </div>
-    {% endif %}
+    <div class="corpo">
+      <div class="rn-erro" id="rn-erro" hidden></div>
 
-    <div class="rn-bloco" style="margin:0">
-      <h3>{% if conferir %}Confira e cadastre{% else %}Cadastrar apólice{% endif %}</h3>
-      <div class="sub">Auto por enquanto — é o que a carteira tem hoje. Os outros ramos já
-        gravam; o que falta pra eles é o formulário, não o cadastro.</div>
-      <form method="post" action="/painel/renovacoes/apolice">
-        {% if conferir %}
-        <input type="hidden" name="pdf_caminho" value="{{ conferir.pdf_caminho }}">
-        <input type="hidden" name="pdf_nome" value="{{ conferir.pdf_nome }}">
-        <input type="hidden" name="pdf_bytes" value="{{ conferir.pdf_bytes }}">
-        <input type="hidden" name="pdf_lido" value='{{ conferir.pdf_lido|tojson|forceescape }}'>
+      {# 1 · o documento #}
+      <div id="rn-p-pdf" {% if conferir %}hidden{% endif %}>
+        {% if cofre_ok %}
+        <form class="rn-drop" id="rn-drop" method="post" action="/painel/renovacoes/importar"
+              enctype="multipart/form-data" onsubmit="return rnLerPdf(this)">
+          <div class="t">Solte a apólice em PDF aqui</div>
+          <div class="s">Eu leio os campos e você confere antes de salvar. Allianz é reconhecida;
+            as outras seguradoras entram à medida que os PDFs chegarem.</div>
+          <input type="file" id="rn-arq" name="arquivo" accept="application/pdf" required
+                 onchange="rnLerPdf(this.form)">
+          <label class="rn-bt" for="rn-arq">escolher o arquivo</label>
+          <button class="rn-bt fraco semjs">Ler o PDF</button>
+        </form>
         {% endif %}
+        <button type="button" class="rn-bt fraco" onclick="rnMao()">não tenho o PDF — digitar à mão</button>
+      </div>
+
+      {# 2 · lendo (o servidor trabalha; a janela continua aqui) #}
+      <div class="rn-lendo" id="rn-p-lendo" hidden><span class="bola"></span>
+        <span>Lendo a apólice… são alguns segundos. Pode deixar a janela aberta.</span></div>
+
+      {# 3 · conferir e cadastrar #}
+      <div id="rn-p-form" {% if not conferir %}hidden{% endif %}>
+        <div id="rn-conf">{% if conferir %}{% include "renovacoes_conf" %}{% endif %}</div>
+        <div class="sub">Auto por enquanto — é o que a carteira tem hoje. Os outros ramos já
+          gravam; o que falta pra eles é o formulário, não o cadastro.</div>
+        <form method="post" action="/painel/renovacoes/apolice" id="rn-form" onsubmit="return rnSalvar(this)">
+          <input type="hidden" name="pdf_caminho" value="{{ conferir.pdf_caminho if conferir else '' }}">
+          <input type="hidden" name="pdf_nome" value="{{ conferir.pdf_nome if conferir else '' }}">
+          <input type="hidden" name="pdf_bytes" value="{{ conferir.pdf_bytes if conferir else '' }}">
+          <input type="hidden" name="pdf_lido" value='{% if conferir %}{{ conferir.pdf_lido|tojson|forceescape }}{% endif %}'>
         <div class="rn-grupo"><div class="t">Quem</div><div class="rn-grade">
           <div class="rn-campo"><label>Cliente já na carteira</label>
             <select name="cliente_id"><option value="">— achar pelo CPF abaixo, ou nenhum —</option>
@@ -867,87 +1080,245 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
           <div class="rn-campo"><label>Chassi</label><input name="chassi" value="{{ form.chassi }}"></div>
           <div class="rn-campo"><label>Classe de bônus</label><input name="classe_bonus" value="{{ form.classe_bonus }}" placeholder="00"></div>
         </div></div>
-
-        <button class="rn-bt">{% if conferir %}Está certo — cadastrar{% else %}Cadastrar apólice{% endif %}</button>
-        {% if conferir %}<a class="rn-bt fraco" href="/painel/renovacoes" style="text-decoration:none;margin-left:.4rem">descartar</a>{% endif %}
-      </form>
-    </div>
-  </details>
-  {% endif %}
-
-{# ────────────────────────── ABA: a carteira ────────────────────────── #}
-{% elif aba == 'carteira' %}
-  <form class="rn-busca" method="get" action="/painel/renovacoes">
-    <input type="hidden" name="aba" value="carteira">
-    <input name="busca" value="{{ busca }}" placeholder="nome, seguradora, placa, modelo ou número…">
-    <button class="rn-bt">Buscar</button>
-    {% if busca %}<a class="rn-bt fraco" style="text-decoration:none;padding:.35rem .8rem"
-       href="/painel/renovacoes?aba=carteira">limpar</a>{% endif %}
-  </form>
-  {% if carteira %}
-  <div class="rn-rol"><table class="rn-tab">
-    <tr><th>Cliente</th><th>Seguradora</th><th>Ramo</th><th>Vence</th><th>Situação</th>
-        <th>Prêmio</th><th>Comissão</th></tr>
-    {% for a in carteira %}
-    <tr {% if a.cliente_id %}class="rn-linha" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this,'cliente')"{% endif %}>
-      <td class="rn-cli">{% if a.cliente_id %}<button type="button" class="rn-abre" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this.closest('tr'),'cliente')">{{ a.cliente }}</button>
-          {% else %}{{ a.cliente }} <span class="rn-pill" title="apólice sem cliente ligado">sem cliente</span>{% endif %}
-          {% if a.bem.placa %} <span class="rn-pill">{{ a.bem.placa }}</span>{% endif %}
-          {% if a.tem_pdf %} <a class="rn-pdf" href="/painel/renovacoes/apolice/{{ a.id }}/pdf" target="_blank">PDF</a>{% endif %}</td>
-      <td>{{ a.seguradora }}</td>
-      <td>{% if a.cliente_id %}<button type="button" class="rn-abre fraco" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this.closest('tr'),'apolice')">{{ a.ramo_txt }}</button>{% else %}{{ a.ramo_txt }}{% endif %}</td>
-      <td>{{ a.vigencia_fim.strftime('%d/%m/%Y') }}{% if a.dias is not none and a.dias >= 0 %}
-          <span class="rn-pill">{{ a.dias }}d</span>{% endif %}</td>
-      <td>{{ a.situacao_txt }}</td>
-      <td>{{ brl(a.premio_centavos) }}</td>
-      <td>{% if a.comissao_estimada is not none %}{{ brl(a.comissao_estimada) }}{% else %}—{% endif %}</td>
-    </tr>
-    {% endfor %}
-  </table></div>
-  {% else %}
-  <div class="rn-vazio"><div class="t">
-    {% if busca %}Nada encontrado para “{{ busca }}”.{% else %}A carteira está vazia.{% endif %}</div>
-    <div class="s">{% if busca %}A busca olha nome do cliente, seguradora, placa, modelo e número da
-      apólice.{% else %}Cadastre a primeira em <a href="/painel/renovacoes#nova">Renovações</a>.{% endif %}</div>
-  </div>
-  {% endif %}
-
-{# ───────────────────────── ABA: os percentuais ───────────────────────── #}
-{% else %}
-  <div class="rn-bloco">
-    <h3>Comissão por seguradora</h3>
-    <div class="sub">A comissão não vem escrita na apólice — é papel do cliente, e o cliente
-      não vê quanto o corretor ganha. Cadastre o percentual uma vez e toda apólice daquela
-      seguradora passa a mostrar a comissão estimada. Deixe o ramo em “todos” pra valer no
-      geral, e cadastre por ramo só onde o percentual foge.
-      <br>O percentual incide sobre o <b>prêmio líquido</b>, sem o IOF — o IOF é imposto
-      repassado ao governo e não entra em comissão.</div>
-    {% if comissoes %}
-    <div class="rn-rol" style="margin-bottom:.8rem"><table class="rn-tab" style="min-width:420px">
-      <tr><th>Seguradora</th><th>Ramo</th><th>%</th><th></th></tr>
-      {% for cm in comissoes %}
-      <tr><td>{{ cm.seguradora }}</td><td>{{ cm.ramo_txt }}</td><td>{{ cm.pct }}%</td>
-        <td><form method="post" action="/painel/renovacoes/comissao/{{ cm.id }}/apagar">
-          <button class="rn-bt fraco" style="padding:.18rem .5rem">apagar</button></form></td></tr>
-      {% endfor %}
-    </table></div>
-    {% endif %}
-    <form method="post" action="/painel/renovacoes/comissao">
-      <div class="rn-grade">
-        <div class="rn-campo"><label>Seguradora</label><input name="seguradora" required placeholder="Allianz"></div>
-        <div class="rn-campo"><label>Ramo</label>
-          <select name="ramo"><option value="">todos os ramos</option>
-            {% for chave, rot in ramos %}<option value="{{ chave }}">{{ rot }}</option>{% endfor %}</select></div>
-        <div class="rn-campo"><label>Percentual</label><input name="pct" required placeholder="20"></div>
+          <div class="rn-acoes" style="margin-top:.8rem">
+            <button class="rn-bt rn-salvar">{% if conferir %}Está certo — cadastrar{% else %}Cadastrar apólice{% endif %}</button>
+            <button type="button" class="rn-bt fraco" onclick="rnFechar()">cancelar</button>
+          </div>
+        </form>
       </div>
-      <button class="rn-bt" style="margin-top:.6rem">Salvar percentual</button>
-    </form>
+
+      {# 4 · cadastrada #}
+      <div class="rn-ok" id="rn-p-ok" hidden>
+        <div class="marca">✓</div>
+        <div class="t">Cadastrada</div>
+        <div class="s" id="rn-ok-txt"></div>
+        <div class="bts">
+          <button type="button" class="rn-bt" onclick="rnOutra()">cadastrar outra</button>
+          <button type="button" class="rn-bt fraco" onclick="rnFechar()">fechar</button>
+        </div>
+      </div>
+    </div>
   </div>
+</div>
 {% endif %}
-</div>{# .rn-pag #}
+<script>
+/* A JANELA DO CADASTRO — três regras que o dono deu em 18/09: não trocar de
+   página, não recarregar, e a tela responder na hora enquanto o servidor
+   trabalha. Por isso nada aqui navega: o PDF sobe por fetch e a leitura volta em
+   JSON; o cadastro devolve a LINHA já renderizada pelo mesmo template da tabela,
+   e ela entra na carteira no lugar certo (a tabela é ordenada por vencimento).
+
+   Sem JavaScript os dois formulários continuam funcionando pelo caminho antigo —
+   `method="post"` e o servidor responde a página inteira. É por isso que o
+   painel de conferência é template, e não HTML montado aqui: uma marcação só. */
+(function(){
+  var PASSOS = ['pdf', 'lendo', 'form', 'ok'];
+  function jan(){ return document.getElementById('rn-jan'); }
+  function el(id){ return document.getElementById(id); }
+
+  function passo(qual, rotulo){
+    PASSOS.forEach(function(nome){
+      var d = el('rn-p-' + nome);
+      if(d) d.hidden = (nome !== qual);
+    });
+    var r = el('rn-passo');
+    if(r) r.textContent = rotulo || '';
+  }
+
+  function erro(txt){
+    var e = el('rn-erro');
+    if(!e) return;
+    e.textContent = txt || '';
+    e.hidden = !txt;
+  }
+
+  window.rnAbrir = function(ev){
+    if(ev){ ev.preventDefault(); ev.stopPropagation(); }
+    var j = jan();
+    if(!j) return false;
+    j.hidden = false;
+    erro('');
+    // reabrir no meio de uma conferência não joga fora o que já foi lido
+    var f = el('rn-p-form');
+    if(!f || f.hidden) passo('pdf', '1 de 2 · o documento');
+    var arq = j.querySelector('input[type=file]');
+    if(arq){ try { arq.focus(); } catch(_e){} }
+    return false;
+  };
+
+  window.rnFechar = function(){
+    var j = jan();
+    if(j) j.hidden = true;
+  };
+
+  window.rnMao = function(){
+    erro('');
+    passo('form', 'à mão');
+  };
+
+  document.addEventListener('keydown', function(e){
+    if(e.key !== 'Escape') return;
+    var j = jan();
+    if(j && !j.hidden) window.rnFechar();
+  });
+
+  function preencher(d){
+    var form = el('rn-form');
+    if(!form) return;
+    var c = el('rn-conf');
+    if(c) c.innerHTML = d.conf_html || '';
+    var campos = d.form || {};
+    Object.keys(campos).forEach(function(k){
+      var campo = form.querySelector('[name="' + k + '"]');
+      // só escreve o que o leitor achou: campo vazio não apaga o padrão do select
+      if(campo && campos[k]) campo.value = campos[k];
+    });
+    var pdf = d.pdf || {};
+    ['caminho', 'nome', 'bytes'].forEach(function(k){
+      var campo = form.querySelector('[name="pdf_' + k + '"]');
+      if(campo) campo.value = pdf[k] || '';
+    });
+    var lido = form.querySelector('[name="pdf_lido"]');
+    if(lido) lido.value = pdf.lido ? JSON.stringify(pdf.lido) : '';
+    var bt = form.querySelector('.rn-salvar');
+    if(bt) bt.textContent = 'Está certo — cadastrar';
+  }
+
+  window.rnLerPdf = function(form){
+    var arq = form.querySelector('input[type=file]');
+    var f = arq && arq.files && arq.files[0];
+    if(!f) return false;
+    window.rnSubir(f);
+    return false;
+  };
+
+  window.rnSubir = function(f){
+    erro('');
+    passo('lendo', 'lendo o documento');
+    var fd = new FormData();
+    fd.append('arquivo', f);
+    fd.append('json', '1');
+    fetch('/painel/renovacoes/importar', { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d || !d.ok){
+          passo('pdf', '1 de 2 · o documento');
+          erro((d && d.erro) || 'não consegui ler este PDF.');
+          return;
+        }
+        preencher(d);
+        passo('form', '2 de 2 · confira e cadastre');
+      })
+      .catch(function(){
+        passo('pdf', '1 de 2 · o documento');
+        erro('a leitura não respondeu. Tente de novo.');
+      });
+  };
+
+  function entrar(d){
+    var corpo = el('rn-corpo');
+    if(corpo && d.linha_html){
+      var caixa = document.createElement('tbody');
+      caixa.innerHTML = d.linha_html;
+      var nova = caixa.querySelector('tr');
+      if(nova){
+        nova.className = nova.className + ' novata';
+        // a tabela desce por vencimento: a linha entra no lugar dela, não no topo
+        var venc = nova.getAttribute('data-vence') || '';
+        var alvo = null;
+        Array.prototype.forEach.call(corpo.querySelectorAll('tr[data-vence]'), function(tr){
+          if(alvo === null && (tr.getAttribute('data-vence') || '') < venc) alvo = tr;
+        });
+        if(alvo) corpo.insertBefore(nova, alvo); else corpo.appendChild(nova);
+      }
+    }
+    var conta = el('rn-conta-carteira');
+    if(conta && d.n_carteira) conta.textContent = ' (' + d.n_carteira + ')';
+    var t = el('rn-ok-txt');
+    if(t) t.textContent = d.resumo || '';
+    passo('ok', '');
+  }
+
+  window.rnSalvar = function(form){
+    erro('');
+    var bt = form.querySelector('.rn-salvar');
+    var rotulo = bt ? bt.textContent : '';
+    if(bt){ bt.disabled = true; bt.textContent = 'cadastrando…'; }
+    function volta(){ if(bt){ bt.disabled = false; bt.textContent = rotulo; } }
+    var fd = new FormData(form);
+    fd.append('json', '1');
+    fetch('/painel/renovacoes/apolice', { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        volta();
+        if(!d || !d.ok){ erro((d && d.erro) || 'não consegui cadastrar.'); return; }
+        entrar(d);
+      })
+      .catch(function(){
+        volta();
+        // o pedido pode ter chegado: mandar tentar de novo criaria a apólice duas vezes
+        erro('não consegui confirmar o cadastro. Procure pelo número na Carteira antes de repetir.');
+      });
+    return false;
+  };
+
+  // com JavaScript o arquivo sobe assim que é escolhido; o botão de enviar só
+  // existe pra quem está sem JavaScript, e some aqui
+  var semjs = document.querySelector('.rn-drop .semjs');
+  if(semjs) semjs.hidden = true;
+
+  var alvo = document.getElementById('rn-drop');
+  if(alvo){
+    ['dragenter', 'dragover'].forEach(function(nome){
+      alvo.addEventListener(nome, function(e){
+        e.preventDefault(); e.stopPropagation();
+        alvo.className = 'rn-drop sobre';
+      });
+    });
+    ['dragleave', 'drop'].forEach(function(nome){
+      alvo.addEventListener(nome, function(e){
+        e.preventDefault(); e.stopPropagation();
+        alvo.className = 'rn-drop';
+      });
+    });
+    alvo.addEventListener('drop', function(e){
+      var arqs = e.dataTransfer && e.dataTransfer.files;
+      if(!arqs || !arqs.length) return;
+      var campo = document.getElementById('rn-arq');
+      if(campo){
+        try { campo.files = arqs; } catch(_e){}
+      }
+      // o input pode recusar a atribuição em navegador antigo: o arquivo do
+      // evento é o que sobe de qualquer jeito
+      window.rnSubir(arqs[0]);
+    });
+  }
+
+  window.rnOutra = function(){
+    var form = el('rn-form');
+    if(form){
+      form.reset();
+      ['pdf_caminho', 'pdf_nome', 'pdf_bytes', 'pdf_lido'].forEach(function(n){
+        var campo = form.querySelector('[name="' + n + '"]');
+        if(campo) campo.value = '';
+      });
+      var bt = form.querySelector('.rn-salvar');
+      if(bt) bt.textContent = 'Cadastrar apólice';
+    }
+    var c = el('rn-conf');
+    if(c) c.innerHTML = '';
+    var arq = document.querySelector('#rn-p-pdf input[type=file]');
+    if(arq) arq.value = '';
+    erro('');
+    passo('pdf', '1 de 2 · o documento');
+  };
+})();
+</script>
 <script>var _KB_MOTIVOS = {{ motivos|tojson }}; var _KB_DECISOES = {{ decisoes|tojson }};</script>
 <script>{{ balao_js }}</script>
 <script>{{ janela_js }}</script>
 {% endblock %}"""
 
 _env.loader.mapping["renovacoes"] = _TPL
+_env.loader.mapping["renovacoes_linha"] = _TPL_LINHA
+_env.loader.mapping["renovacoes_conf"] = _TPL_CONF

@@ -166,6 +166,16 @@ def painel_follow_up(request: Request):
     # o card. Fora do `with` de cima de propósito — é leitura independente, e uma
     # falha dela não pode levar junto a fila, que é o produto da tela.
     entrega = _entrega(pool, conta_id) if papel in ("dono", "gestor") else None
+    # QUEM NÃO ESTÁ SENDO AVISADO (18/09/2026). Vem junto do card e pelo mesmo
+    # motivo dele: medir o envio só serve se alguém for avisado quando o envio
+    # parar. Também só pra quem decide — é ele que corrige cadastro.
+    sem_aviso = []
+    if papel in ("dono", "gestor"):
+        try:
+            from finance import aviso_saude as _as
+            sem_aviso = _as.alertas(pool, conta_id)
+        except Exception:  # noqa: BLE001 — a fila é o produto; o vigia é acessório
+            _log.info("follow-up: vigia do canal falhou (ok)", exc_info=True)
 
     minhas = [x for x in linhas if (not vend_f or x["vendedor_id"] == vend_f)]
     topo = fu.resumo(minhas)
@@ -188,7 +198,7 @@ def painel_follow_up(request: Request):
                    status=status_tpl,
                    gestao=(fu.por_vendedor(linhas) if papel != "vendedor" else []),
                    modo=cfg["follow_up_modo"], zap=bool(cfg.get("fu_zap")),
-                   entrega=entrega,
+                   entrega=entrega, sem_aviso=sem_aviso,
                    rotulo=fu.ROTULO, emoji=fu.EMOJI,
                    por_temp=por_temp, rot_prio=fu.ROTULO_PRIORIDADE,
                    br=_br, tempo=_tempo, adia_max=fu.ADIAMENTOS_ATE_MOTIVO,
@@ -460,6 +470,16 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
 .fu-selo{font-size:.75rem;border:1px solid var(--line);border-radius:20px;padding:.15rem .55rem;color:var(--text-dim)}
 .fu-selo.ligado{color:var(--neon);border-color:var(--neon-borda);background:var(--neon-fundo)}
 .fu-selo.observando{color:var(--azul);border-color:var(--azul-borda);background:var(--azul-fundo)}
+/* ---- quem não está sendo avisado ----
+   Fica ACIMA do card de entrega de propósito: o card responde "como foi", e isto
+   responde "tem alguém fora?" — que é a pergunta que muda o que a pessoa faz agora. */
+.fu-mudo{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:10px;
+  padding:.6rem .8rem;margin:.9rem 0 .2rem}
+.fu-mudo .tit{font-size:.82rem;font-weight:600;color:#F2BDB9;margin-bottom:.3rem}
+.fu-mudo ul{margin:0;padding:0;list-style:none}
+.fu-mudo li{font-size:.8rem;color:var(--text-dim);padding:.16rem 0}
+.fu-mudo b{color:var(--text)}
+.fu-mudo .comof{font-size:.73rem;color:var(--text-faint);margin:.35rem 0 0}
 /* ---- como os avisos chegaram (migração 284) ----
    Um canal por LINHA, e não três colunas lado a lado, porque os três não medem a
    mesma coisa: forçar a mesma grade faria o e-mail parecer que só vai mal. */
@@ -586,6 +606,23 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
       }).catch(function(){b.disabled=false;b.textContent=t;r.textContent=' falha de rede';});
   }
   </script>{% endif %}
+
+  {#- QUEM NÃO ESTÁ SENDO AVISADO. Três motivos, e o terceiro é o que ficou dois
+      dias escondido na Prime: o WhatsApp aceita o envio e o aparelho nunca
+      confirma, então o registro diz "enviado ✓" e ninguém desconfia. -#}
+  {% if sem_aviso %}
+  <div class="fu-mudo">
+    <div class="tit">⚠️ {{ sem_aviso|length }} pessoa{{ 's' if sem_aviso|length > 1 }} não
+      {{ 'estão' if sem_aviso|length > 1 else 'está' }} recebendo o aviso</div>
+    <ul>
+      {% for a in sem_aviso %}
+      <li><b>{{ a.quem }}</b> — {{ a.detalhe }}</li>
+      {% endfor %}
+    </ul>
+    <p class="comof">Corrige em <a href="/painel/equipe" style="color:var(--azul)">Empresa → Equipe</a>:
+      e-mail e WhatsApp da pessoa. O push depende de ela abrir o app e aceitar as notificações.</p>
+  </div>
+  {% endif %}
 
   {#- COMO OS AVISOS CHEGARAM (migração 284). Só dono e gestor, por decisão do dono
       em 18/09/2026: o vendedor ver a própria taxa é justo, ver a dos colegas vira

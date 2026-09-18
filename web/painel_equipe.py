@@ -72,12 +72,28 @@ def painel_equipe(request: Request):
     return _render("equipe", request, tem_pj=True,
                    raiox=raiox, grupos=grupos, raiox_qr=raiox_qr,
                    membros=eq.listar_equipe(pool, conta[0]),
+                   # QUEM NÃO ESTÁ SENDO AVISADO (18/09/2026). É aqui que se
+                   # corrige — e-mail e WhatsApp estão nesta mesma linha —, então é
+                   # aqui que o problema tem que aparecer. Best-effort: a Equipe é
+                   # a tela que dá acesso a todo mundo e não pode deixar de abrir.
+                   sem_aviso=_sem_aviso(pool, conta[0]),
                    papeis=[(p, eq.rotulo(p)) for p in eq.PAPEIS_PJ],
                    novo_link=request.session.pop("equipe_link", None),
                    novo_link_cap=request.session.pop("equipe_link_cap", None),
                    senha_temp=request.session.pop("equipe_senha_temp", None),
                    aviso=request.session.pop("equipe_aviso", None),
                    erro=request.session.pop("equipe_erro", None))
+
+
+def _sem_aviso(pool, conta_id: int) -> dict:
+    """{membro_id: alerta} de quem não está recebendo aviso. Vazio quando não dá
+    pra saber — ausência de alerta nunca é afirmação de que está tudo bem, e é por
+    isso que o texto na tela fala do problema encontrado, nunca da saúde geral."""
+    try:
+        from finance import aviso_saude as _as
+        return _as.por_membro(pool, conta_id)
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _raiox_contexto(pool, conta_id: int):
@@ -386,6 +402,10 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
 .mtag.on{color:var(--verde-claro);border-color:var(--neon-borda);background:var(--neon-fundo)}
 .mtag.pend{color:#e0b25a;border-color:var(--ambar-borda);background:var(--ambar-fundo)}
 .mtag.off{color:#e07a5f;border-color:var(--coral-borda);background:var(--coral-fundo)}
+/* o selo de quem não recebe aviso: mesma família dos outros, mas com o ponto
+   vermelho — é o único da linha que pede ação de quem está lendo */
+.mtag.mudo{color:#F2BDB9;border-color:var(--coral-borda);background:var(--coral-fundo)}
+.mmotivo{display:block;font-size:.74rem;color:var(--txt-mut);margin-top:.15rem}
 @media (max-width:640px){.macts{width:100%}}
 /* legenda: o que cada papel acessa */
 .papeis{margin-top:1rem;border:1px solid var(--borda);border-radius:12px;background:var(--card-2);padding:.85rem 1rem}
@@ -476,7 +496,10 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
           {% if m.pendente %}<span class="mtag pend">convite pendente</span>
           {% elif not m.ativo %}<span class="mtag off">desativado</span>
           {% else %}<span class="mtag on">ativo</span>{% endif %}
+          {% set al = (sem_aviso or {}).get(m.id) %}
+          {% if al %}<span class="mtag mudo" title="{{ al.detalhe }}">● não recebe aviso</span>{% endif %}
           <span>{{ m.email }} · {{ m.rotulo }}</span>
+          {% if al %}<span class="mmotivo">{{ al.detalhe }}</span>{% endif %}
         </div>
       </div>
       <div class="macts">

@@ -25,6 +25,7 @@ import logging
 import time
 import uuid
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -40,6 +41,9 @@ from web.portal import _env, _render, conta_logada, nicho_da_conta
 
 router = APIRouter()
 _log = logging.getLogger("openclaw.painel_apolices")
+
+# a tela é lida no Brasil, como o resto do Cockpit e do Raio-X
+_TZ = ZoneInfo("America/Sao_Paulo")
 
 _PAPEIS_OK = ("dono", "gestor", "vendedor")
 
@@ -351,28 +355,120 @@ async def importar_pdf(request: Request, arquivo: UploadFile = File(...),
     except Exception as e:  # noqa: BLE001
         _log.warning("import de apólice falhou (conta %s): %s: %s", conta[0], type(e).__name__, e)
         return _falhou("não consegui ler este PDF")
-    L = r["leitura"]
-    conferir = {
-        "seguradora": L.seguradora, "reconhecida": L.reconhecida, "paginas": L.paginas,
-        "checagens": L.checagens, "avisos": L.avisos, "nao_achou": L.nao_achou,
-        "n_campos": len(L.campos), "ok": L.ok(), "pdf_nome": r["nome"],
-        "pdf_caminho": r["caminho"], "pdf_bytes": r["bytes"],
-        "pdf_lido": apdf.resumo_para_guardar(L),
-    }
+    conferir = _conferir_de(r)
     if quer_json:
         # sem `_contexto`: a janela já está montada na tela, e são seis consultas a
         # menos entre soltar o PDF e a conferência aparecer
-        return JSONResponse({
-            "ok": True,
-            "form": apdf.para_formulario(L),
-            "conf_html": _env.get_template("renovacoes_conf").render(conferir=conferir),
-            "pdf": {"caminho": r["caminho"], "nome": r["nome"], "bytes": r["bytes"],
-                    "lido": conferir["pdf_lido"]},
-        })
+        return _leitura_em_json(r["leitura"], conferir)
     ctx = await run_in_threadpool(_contexto, request, conta, gerencia)
     ctx["conferir"] = conferir
-    ctx["form"] = apdf.para_formulario(L)
+    ctx["form"] = apdf.para_formulario(r["leitura"])
     return _render("renovacoes", request, **ctx)
+
+
+def _conferir_de(r: dict, *, origem: dict | None = None) -> dict:
+    """O que a conferência mostra, venha o PDF de onde vier.
+
+    `origem` é a marca de quem entrou pelo WhatsApp: fica guardada dentro de
+    `apolices.pdf_lido` e é o que tira a mensagem da lista depois de cadastrada.
+    """
+    L = r["leitura"]
+    lido = apdf.resumo_para_guardar(L)
+    if origem:
+        lido["origem"] = origem
+    return {
+        "seguradora": L.seguradora, "reconhecida": L.reconhecida, "paginas": L.paginas,
+        "checagens": L.checagens, "avisos": L.avisos, "nao_achou": L.nao_achou,
+        "n_campos": len(L.campos), "ok": L.ok(), "pdf_nome": r["nome"],
+        "pdf_caminho": r["caminho"], "pdf_bytes": r["bytes"], "pdf_lido": lido,
+    }
+
+
+def _leitura_em_json(L, conferir: dict) -> JSONResponse:
+    """A resposta que a janela espera — a MESMA pro PDF solto e pro do WhatsApp."""
+    return JSONResponse({
+        "ok": True,
+        "form": apdf.para_formulario(L),
+        "conf_html": _env.get_template("renovacoes_conf").render(conferir=conferir),
+        "pdf": {"caminho": conferir["pdf_caminho"], "nome": conferir["pdf_nome"],
+                "bytes": conferir["pdf_bytes"], "lido": conferir["pdf_lido"]},
+    })
+
+
+@router.get("/painel/renovacoes/whatsapp")
+def pdfs_do_whatsapp(request: Request):
+    """Os PDFs que já chegaram no número vinculado, pra janela listar.
+
+    SÓ LISTA. Quem decide que aquilo é uma apólice é a pessoa — na medição de
+    18/09 a maioria dos PDFs da conta era boleto, extrato e petição. Ler tudo e
+    cadastrar sozinho encheria a carteira de lixo, e vigência errada é alerta que
+    não dispara.
+    """
+    conta, gerencia, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "sessão expirada"}, status_code=401)
+    if not gerencia:
+        return JSONResponse({"ok": False, "erro": "só o dono e o gestor cadastram apólice"})
+    itens = ap.pdfs_do_whatsapp(get_pool(), conta[0])
+    return JSONResponse({"ok": True, "itens": [
+        {"id": i["mensagem_id"], "de": i["de"], "nome": i["nome"],
+         "quando": _quando_txt(i["quando"]), "kb": round(i["bytes"] / 1024) if i["bytes"] else 0,
+         "parece": i["parece_apolice"], "ja": i["ja_cadastrada"]}
+        for i in itens]})
+
+
+def _quando_txt(quando) -> str:
+    """Data curta, no fuso de quem olha a tela."""
+    if not quando:
+        return ""
+    try:
+        return quando.astimezone(_TZ).strftime("%d/%m")
+    except Exception:  # noqa: BLE001
+        return quando.strftime("%d/%m")
+
+
+@router.post("/painel/renovacoes/whatsapp/{mensagem_id}")
+def ler_pdf_do_whatsapp(request: Request, mensagem_id: int):
+    """Busca UM PDF no CDN do WhatsApp e cai na mesma conferência do PDF solto.
+
+    `def` e não `async def`: busca na rede e escreve no cofre, e o FastAPI roda
+    handler síncrono na threadpool (`tests/test_event_loop_nao_trava.py`).
+
+    Nada é gravado como apólice aqui — o caminho de salvar continua sendo um só.
+    """
+    conta, gerencia, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "sessão expirada"}, status_code=401)
+    if not gerencia:
+        return JSONResponse({"ok": False, "erro": "só o dono e o gestor cadastram apólice"})
+    if not _cofre.configurado():
+        return JSONResponse({"ok": False, "erro": "o cofre de documentos não está "
+                                                  "configurado nesta instalação"})
+    achado = ap.ref_do_pdf(get_pool(), conta[0], mensagem_id)
+    if not achado:
+        return JSONResponse({"ok": False, "erro": "não achei este documento"})
+    from finance import wa_midia as _wm
+    try:
+        conteudo = b"".join(_wm.buscar(achado["ref"], achado["tipo"]))
+    except _wm.Expirou:
+        # o recado exato importa: o arquivo não sumiu por erro nosso, e a saída é
+        # pedir de novo — não adianta tentar outra vez
+        return JSONResponse({"ok": False, "erro": "o WhatsApp já apagou este arquivo. "
+                                                  "Peça de novo a quem mandou."})
+    except Exception as e:  # noqa: BLE001
+        _log.warning("pdf do whatsapp %s falhou (conta %s): %s: %s",
+                     mensagem_id, conta[0], type(e).__name__, e)
+        return JSONResponse({"ok": False, "erro": "não consegui baixar este arquivo agora"})
+    try:
+        r = _ler_e_guardar(conta[0], conteudo, achado["nome"])
+    except ValueError as e:
+        return JSONResponse({"ok": False, "erro": str(e)})
+    except Exception as e:  # noqa: BLE001
+        _log.warning("leitura do pdf do whatsapp falhou (conta %s): %s: %s",
+                     conta[0], type(e).__name__, e)
+        return JSONResponse({"ok": False, "erro": "não consegui ler este PDF"})
+    return _leitura_em_json(r["leitura"],
+                            _conferir_de(r, origem={"whatsapp_msg": mensagem_id}))
 
 
 @router.get("/painel/renovacoes/apolice/{apolice_id}/pdf")
@@ -786,6 +882,20 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
 .rn-jan .cab .x:hover{color:var(--txt)}
 .rn-jan .corpo{padding:.9rem 1rem 1.1rem;overflow-y:auto;flex:1}
 .rn-jan .corpo .sub{font-size:.79rem;color:var(--txt-mut);line-height:1.55;margin-bottom:.7rem}
+/* a segunda porta: o que já chegou no WhatsApp vinculado */
+.rn-wpp{margin-top:1rem}
+.rn-wpp .cab{display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap;margin-bottom:.45rem}
+.rn-wpp .cab .t{font-size:.82rem;font-weight:600}
+.rn-wpp .cab .s{font-size:.74rem;color:var(--txt-mut)}
+.rn-wpp .lista{display:flex;flex-direction:column;gap:.3rem;max-height:216px;overflow-y:auto}
+.rn-wpp .item{display:flex;gap:.5rem;align-items:center;text-align:left;width:auto;margin:0;
+  background:var(--bg-2);border:1px solid var(--borda);border-radius:9px;padding:.45rem .6rem;
+  cursor:pointer;color:var(--txt);font:inherit}
+.rn-wpp .item:hover:not([disabled]){border-color:var(--neon-borda);background:var(--neon-fundo)}
+.rn-wpp .item[disabled]{opacity:.45;cursor:default}
+.rn-wpp .item .nome{flex:1;min-width:0;font-size:.82rem;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.rn-wpp .item .quem{font-size:.72rem;color:var(--txt-mut);white-space:nowrap}
 .rn-lendo{display:flex;align-items:center;gap:.6rem;font-size:.87rem;color:var(--txt-mut);padding:1.6rem .2rem}
 .rn-lendo .bola{width:14px;height:14px;border-radius:50%;flex:none;
   border:2px solid var(--neon-borda);border-top-color:var(--verde);animation:rn-gira .7s linear infinite}
@@ -1017,6 +1127,14 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
           <label class="rn-bt" for="rn-arq">escolher o arquivo</label>
           <button class="rn-bt fraco semjs">Ler o PDF</button>
         </form>
+        {# O que JÁ chegou no número vinculado. A lista é montada por JavaScript e o
+           bloco fica escondido enquanto não houver nada — bloco vazio dizendo
+           "nenhum documento" é ruído no caminho principal. #}
+        <div class="rn-wpp" id="rn-wpp" hidden>
+          <div class="cab"><span class="t">…ou um que já chegou no WhatsApp</span>
+            <span class="s" id="rn-wpp-sub"></span></div>
+          <div class="lista" id="rn-wpp-lista"></div>
+        </div>
         {% endif %}
         <button type="button" class="rn-bt fraco" onclick="rnMao()">não tenho o PDF — digitar à mão</button>
       </div>
@@ -1143,6 +1261,7 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     if(!f || f.hidden) passo('pdf', '1 de 2 · o documento');
     var arq = j.querySelector('input[type=file]');
     if(arq){ try { arq.focus(); } catch(_e){} }
+    wppCarregar();
     return false;
   };
 
@@ -1236,6 +1355,7 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     if(conta && d.n_carteira) conta.textContent = ' (' + d.n_carteira + ')';
     var t = el('rn-ok-txt');
     if(t) t.textContent = d.resumo || '';
+    wppLida = false;          // o documento usado sai da lista na próxima abertura
     passo('ok', '');
   }
 
@@ -1294,6 +1414,66 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     });
   }
 
+  // ── os PDFs que já chegaram no WhatsApp ──────────────────────────────────
+  var wppLida = false;
+
+  function wppCarregar(){
+    var caixa = el('rn-wpp');
+    if(!caixa || wppLida) return;
+    wppLida = true;
+    fetch('/painel/renovacoes/whatsapp', { credentials: 'same-origin' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        // sem documento nenhum o bloco continua escondido: o caminho principal
+        // é soltar o arquivo, e uma lista vazia só atrapalharia
+        if(!d || !d.ok || !d.itens || !d.itens.length) return;
+        var lista = el('rn-wpp-lista');
+        if(!lista) return;
+        lista.innerHTML = '';
+        d.itens.forEach(function(it){
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'item';
+          var nome = document.createElement('span');
+          nome.className = 'nome';
+          nome.textContent = it.nome;
+          if(it.parece && !it.ja) nome.textContent = '📄 ' + it.nome;
+          var quem = document.createElement('span');
+          quem.className = 'quem';
+          quem.textContent = it.ja ? 'já cadastrada' : (it.de + ' · ' + it.quando);
+          b.appendChild(nome);
+          b.appendChild(quem);
+          if(it.ja){ b.disabled = true; }
+          else { b.onclick = function(){ window.rnDoWhats(it.id); }; }
+          lista.appendChild(b);
+        });
+        var sub = el('rn-wpp-sub');
+        if(sub) sub.textContent = d.itens.length + (d.itens.length === 1 ? ' documento' : ' documentos') + ' nos últimos 90 dias';
+        caixa.hidden = false;
+      })
+      .catch(function(){ /* sem a lista a janela continua inteira */ });
+  }
+
+  window.rnDoWhats = function(id){
+    erro('');
+    passo('lendo', 'buscando no WhatsApp');
+    fetch('/painel/renovacoes/whatsapp/' + id, { method: 'POST', credentials: 'same-origin' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d || !d.ok){
+          passo('pdf', '1 de 2 · o documento');
+          erro((d && d.erro) || 'não consegui ler este PDF.');
+          return;
+        }
+        preencher(d);
+        passo('form', '2 de 2 · confira e cadastre');
+      })
+      .catch(function(){
+        passo('pdf', '1 de 2 · o documento');
+        erro('a busca não respondeu. Tente de novo.');
+      });
+  };
+
   window.rnOutra = function(){
     var form = el('rn-form');
     if(form){
@@ -1310,6 +1490,7 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     var arq = document.querySelector('#rn-p-pdf input[type=file]');
     if(arq) arq.value = '';
     erro('');
+    wppCarregar();
     passo('pdf', '1 de 2 · o documento');
   };
 })();

@@ -22,6 +22,15 @@ PA = (RAIZ / "painel_apolices.py").read_text(encoding="utf-8")
 PORTAL = (RAIZ / "portal.py").read_text(encoding="utf-8")
 
 
+def corpo_de(nome: str) -> str:
+    """Só ESTA função. Fatiar até o fim do arquivo varre o módulo inteiro e faz
+    o teste passar (ou falhar) por causa de outra rota."""
+    i = PA.index(f"def {nome}(")
+    resto = PA[i + 1:]
+    fins = [resto.index(m) for m in ("\n@router.", "\ndef ", "\n_TPL") if m in resto]
+    return PA[i:i + 1 + min(fins)] if fins else PA[i:]
+
+
 def test_o_botao_do_topo_abre_a_janela_e_nao_uma_ancora():
     """A âncora era o defeito: `#nova` só existia numa das três abas."""
     assert 'href="#nova"' not in PA
@@ -102,8 +111,7 @@ def test_o_visto_da_conferencia_nao_herda_a_caixa_verde_global():
 @pytest.mark.parametrize("rota", ["importar_pdf", "salvar_apolice"])
 def test_as_rotas_respondem_json_quando_a_janela_pede(rota):
     """Um 303 pra quem pediu JSON vira HTML no `fetch` e a janela mente "não respondeu"."""
-    corpo = PA[PA.index(f"def {rota}("):]
-    corpo = corpo[:corpo.index("\n@router.")] if "\n@router." in corpo else corpo
+    corpo = corpo_de(rota)
     assert 'alias="json"' in corpo
     assert "def _falhou(msg: str" in corpo
     assert "JSONResponse({\"ok\": False, \"erro\": msg})" in corpo
@@ -114,3 +122,50 @@ def test_o_botao_da_janela_vence_o_css_global_de_formulario():
     """`button{width:100%}` do portal transformaria cada botão numa barra verde."""
     assert ".rn-bt{background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;width:auto;margin:0;" in PA
     assert ".rn-chip{" in PA and "width:auto" in PA
+
+
+# ───────────── a segunda porta: o PDF que já chegou no WhatsApp ─────────────
+
+
+def test_a_lista_do_whatsapp_nao_cadastra_nada_sozinha():
+    """Ler tudo e gravar encheria a carteira de boleto — e vigência errada é
+    alerta que não dispara, o pior defeito desta tela."""
+    corpo = corpo_de("ler_pdf_do_whatsapp")
+    assert "ap.salvar(" not in corpo
+    assert "_leitura_em_json(" in corpo          # termina na conferência, e só
+
+
+def test_o_pdf_do_whatsapp_passa_pela_mesma_conferencia_e_pelo_mesmo_salvar():
+    """Dois caminhos de entrada, uma saída: `_conferir_de` + `_leitura_em_json`."""
+    assert PA.count("def _conferir_de(") == 1
+    assert PA.count("def _leitura_em_json(") == 1
+    assert PA.count("_leitura_em_json(") == 3    # a definição e os dois caminhos
+    assert PA.count('_env.get_template("renovacoes_conf")') == 1
+
+
+def test_o_escopo_do_documento_e_da_conta():
+    """O id da mensagem é sequencial: sem o casamento com a conta, trocar o número
+    na URL leria o documento do cliente de outra corretora."""
+    import inspect
+
+    from finance import apolices as ap
+    fonte = inspect.getsource(ap.ref_do_pdf) + inspect.getsource(ap.pdfs_do_whatsapp)
+    assert "cv.conta_id = %s" in fonte
+    assert "join conversas cv on cv.id = m.conversa_id" in fonte
+    # e a rota não monta consulta própria — usa a função que já tem o escopo
+    corpo = corpo_de("ler_pdf_do_whatsapp")
+    assert "ap.ref_do_pdf(get_pool(), conta[0], mensagem_id)" in corpo
+    assert "select" not in corpo.lower()
+
+
+def test_o_recado_de_arquivo_expirado_e_o_certo():
+    """O CDN do WhatsApp apaga. Mandar tentar de novo seria mentira."""
+    assert "except _wm.Expirou:" in PA
+    assert "o WhatsApp já apagou este arquivo" in PA
+
+
+def test_a_marca_de_origem_e_o_que_tira_o_documento_da_lista():
+    assert '"whatsapp_msg": mensagem_id' in PA
+    from finance import apolices as ap
+    import inspect
+    assert "pdf_lido->'origem'->>'whatsapp_msg'" in inspect.getsource(ap.pdfs_do_whatsapp)

@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>O aviso chegou? Ele viu? — os três canais, e o que cada um sabe dizer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --roxo:#C9A3E0;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo)}
+b{font-weight:600}
+.wrap{max-width:1100px;margin:0 auto;padding:2.6rem 1.25rem 5rem;display:flex;flex-direction:column;gap:2.6rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em;margin-bottom:.35rem;text-transform:uppercase}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.3rem);margin:.35rem 0 .6rem}
+.head p{color:var(--text-dim);max-width:74ch;margin:0}
+.sec>h2{font-size:1.2rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.1rem;max-width:78ch;font-size:.9rem}
+.sec>p.leg b{color:var(--text)}
+
+.prova{border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:14px;padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.8rem}
+.prova h3{font-size:1rem;color:var(--neon-bright)}
+.prova .nums{display:grid;grid-template-columns:repeat(4,1fr);gap:.55rem}
+@media (max-width:820px){.prova .nums{grid-template-columns:repeat(2,1fr)}}
+.prova .n{border:1px solid var(--neon-borda);border-radius:10px;background:#0C1C14;padding:.6rem .7rem}
+.prova .n b{display:block;font:600 1.5rem/1 var(--display);color:var(--neon-bright);font-variant-numeric:tabular-nums}
+.prova .n span{display:block;font-size:.66rem;color:var(--text-dim);margin-top:.3rem;line-height:1.35}
+.prova p{margin:0;font-size:.84rem;color:#CFEBDC}.prova p b{color:#fff}
+
+.tabwrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table.t{width:100%;border-collapse:collapse;font-size:.8rem;min-width:560px}
+table.t th{font:500 .61rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);text-align:left;padding:.55rem .7rem;border-bottom:1px solid var(--line)}
+table.t td{padding:.5rem .7rem;border-bottom:1px solid var(--line);color:var(--text-dim)}
+table.t tr:last-child td{border-bottom:none}
+table.t td:first-child{color:var(--text);font-weight:500;white-space:nowrap}
+table.t td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.t td b{color:var(--text)}
+.ok{color:var(--neon-bright)} .ruim{color:var(--coral)} .meio{color:var(--ambar)}
+
+/* o card, como ficaria */
+.card{border:1px solid var(--line);border-radius:16px;background:var(--bg-2);padding:1rem 1.1rem;max-width:640px}
+.card .cab{display:flex;align-items:baseline;gap:.6rem;margin-bottom:.7rem}
+.card .cab b{font:600 .95rem var(--display)}
+.card .cab span{font-size:.72rem;color:var(--text-faint)}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:.55rem}
+@media (max-width:640px){.kpis{grid-template-columns:repeat(3,1fr)}}
+.kpi{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.55rem .6rem;text-align:center}
+.kpi b{display:block;font:600 1.35rem/1 var(--display);font-variant-numeric:tabular-nums}
+.kpi span{display:block;font-size:.63rem;color:var(--text-dim);margin-top:.3rem}
+.kpi.g b{color:var(--neon-bright)} .kpi.a b{color:var(--ambar)} .kpi.r b{color:var(--coral)}
+.linhac{display:flex;gap:.7rem;align-items:flex-start;padding:.55rem 0;border-bottom:1px solid var(--line)}
+.linhac:last-of-type{border-bottom:none}
+.linhac .ic{font-size:1.1rem;line-height:1.6;width:1.4rem;text-align:center;flex:none}
+.linhac .cn{flex:1;min-width:0}
+.ct{font:600 .78rem var(--display);color:var(--text-dim);margin-bottom:.35rem}
+.kpis3{display:grid;grid-template-columns:repeat(5,1fr);gap:.45rem}
+@media (max-width:640px){.kpis3{grid-template-columns:repeat(3,1fr)}}
+.kpi.na b{color:var(--text-faint)}
+.kpi.na span{color:var(--text-faint)}
+.notac{font-size:.72rem;color:var(--text-faint);margin:.55rem 0 0}
+.porvend{margin-top:.8rem;border-top:1px solid var(--line);padding-top:.7rem}
+.pv{display:flex;align-items:center;gap:.6rem;padding:.32rem 0;font-size:.82rem}
+.pv .nome{min-width:120px;color:var(--text)}
+.pv .barra{flex:1;height:7px;border-radius:99px;background:var(--surface-2);overflow:hidden;display:flex}
+.pv .barra i{display:block;height:100%}
+.pv .barra .l{background:var(--neon)} .pv .barra .e{background:var(--azul)} .pv .barra .s{background:var(--text-faint)}
+.pv .zz{font-family:var(--mono);font-size:.74rem;color:var(--text-dim);white-space:nowrap}
+.leg2{display:flex;gap:.9rem;flex-wrap:wrap;margin-top:.55rem;font-size:.7rem;color:var(--text-faint)}
+.leg2 i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:.28rem;vertical-align:-1px}
+
+.ok-lista{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:.55rem}
+.ok-lista li{padding-left:1.4rem;position:relative;font-size:.86rem;color:var(--text-dim)}
+.ok-lista li b{color:var(--text)}
+.ok-lista li::before{content:"";position:absolute;left:0;top:.45em;width:.5rem;height:.5rem;border-radius:2px;background:var(--neon)}
+.ok-lista li.nao::before{background:var(--coral)}
+
+.cuidado{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:14px;padding:1rem 1.1rem}
+.cuidado h3{font-size:1rem;color:#F0DCA6;margin-bottom:.5rem}
+.cuidado p{font-size:.86rem;color:#EFE0C0;margin:.45rem 0}
+.cuidado p b{color:#fff}
+.perg{border:1px solid var(--azul-borda);background:var(--azul-fundo);border-radius:14px;padding:1rem 1.1rem}
+.perg h3{font-size:1rem;color:#BBD9F0;margin-bottom:.6rem}
+.perg ol{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.7rem}
+.perg li{font-size:.86rem;color:#D6E6F2}.perg li b{color:#fff}
+.perg .mini{display:block;font-size:.77rem;color:#9FBACF;margin-top:.15rem}
+.rodape{border-top:1px solid var(--line);padding-top:1.1rem;color:var(--text-faint);font-size:.78rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="head sec">
+  <div class="k">Mockup · 18/09/2026 · pra aprovação</div>
+  <h1>O aviso chegou? Ele viu?</h1>
+  <p>Dois pedidos do dono, no mesmo dia: <i>“se puder medir também se chegou e eles visualizaram,
+  igual tem lá em campanha no card desempenho”</i> e, depois, <i>“aproveita e refaz como e-mail
+  também e o push se der, que aí fica completo — concorda?”</i></p>
+  <p style="margin-top:.7rem"><b>Concordo com juntar os três. Não concordo com “fica completo”</b>, e a
+  seção 1 é o motivo: os três canais não sabem dizer as mesmas coisas, e um card que finge que sim
+  mente num deles. O desenho abaixo mostra o que cada um <i>de fato</i> entrega.</p>
+</header>
+
+<!-- 1. o que cada canal sabe -->
+<section class="sec">
+  <div class="k">1 · O que cada canal SABE dizer</div>
+  <h2>Os três não são simétricos, e forçar simetria é mentir em dois deles.</h2>
+  <p class="leg">Esta é a tabela que eu queria ter olhado antes de prometer qualquer coisa.
+  “Entregue” e “lido” significam coisas diferentes em cada canal — e num deles não significam nada.</p>
+  <div class="tabwrap">
+    <table class="t">
+      <thead><tr><th>Canal</th><th>“Chegou?”</th><th>“Viu?”</th><th>Custo pra ter</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>💬 WhatsApp</td>
+          <td class="ok">✓✓ recibo do aparelho — real</td>
+          <td class="ok">👀 recibo de leitura — real</td>
+          <td>3 fios, seção 4</td>
+        </tr>
+        <tr>
+          <td>🔔 Push</td>
+          <td class="meio">aceito pelo serviço de push<br><span style="font-size:.74rem">(já sabemos hoje)</span></td>
+          <td class="ok">CLICOU — e clique é melhor que “viu”</td>
+          <td>~6 linhas no service worker</td>
+        </tr>
+        <tr>
+          <td>📧 E-mail</td>
+          <td class="meio">o SMTP aceitou<br><span style="font-size:.74rem">(já sabemos hoje)</span></td>
+          <td class="ruim">NÃO DÁ honestamente</td>
+          <td>ver a seção 2</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="leg" style="margin-top:.9rem"><b>Repare que metade da tabela a gente já tem.</b> O
+  <code>aviso_envios</code> que subiu ontem já registra “saiu / não saiu, e por quê” nos três — foi ele
+  que mostrou hoje de manhã que o dono não recebia nada. O que este mockup acrescenta é o <b>degrau
+  seguinte</b>, e ele só existe inteiro no WhatsApp.</p>
+</section>
+
+<!-- 2. o e-mail -->
+<section class="sec">
+  <a id="s2"></a><div class="k">2 · Por que o e-mail não entra no “viu”</div>
+  <div class="cuidado">
+    <h3>Só dá pra saber que alguém abriu um e-mail com pixel — e o pixel hoje mente</h3>
+    <p>A técnica é uma imagem de 1x1 no corpo, e o servidor anota quem pediu a imagem. Ela funcionava
+    bem quando os programas de e-mail baixavam imagem na hora em que a pessoa abria.</p>
+    <p>Hoje não é assim. <b>O Gmail busca as imagens antes</b>, no proxy dele, para todo e-mail que
+    chega — o pixel dispara com ninguém tendo aberto. <b>O Apple Mail faz o mesmo</b> por padrão, com o
+    nome de proteção de privacidade. Ou seja: o número que viria não seria “quem leu”, seria “quantos
+    provedores pré-carregaram”, e ele seria ALTO — perto de 100%.</p>
+    <p>Um número alto e falso é pior que número nenhum: você olharia “os três leem tudo” e tiraria o
+    dedo do canal que realmente precisa de atenção. <b>Minha recomendação é não medir leitura de
+    e-mail</b>, e dizer isso no card em vez de deixar a coluna vazia.</p>
+    <p style="margin-top:.7rem">O que <b>daria</b> pra ter no e-mail, se um dia fizer falta, é o
+    <b>retorno</b> (bounce): o servidor devolvendo “esse endereço não existe”. Isso é informação de
+    verdade e resolveria um caso concreto — e-mail de vendedor digitado errado no convite, que hoje
+    aparece como “enviado ✓” pra sempre. Mas exige caixa de retorno e leitura por IMAP: é obra
+    própria, não um fio solto. <b>Fica como item separado</b>, e eu não o incluiria agora.</p>
+  </div>
+</section>
+
+<!-- 3. a prova -->
+<section class="sec">
+  <div class="k">3 · O WhatsApp: o dado já existe</div>
+  <h2>O WhatsApp por QR já manda recibo de entrega e de leitura.</h2>
+  <p class="leg">O serviço escuta o <code>messages.update</code> do Baileys e traduz o status
+  (3 = entregue, 4 e 5 = lido) pro painel. Isso roda desde sempre — é o que faz o ✓✓ e o 👀
+  aparecerem no inbox. <b>Medido na Prime, últimos 30 dias:</b></p>
+
+  <div class="prova">
+    <h3>Mensagens que a Prime mandou pelo WhatsApp</h3>
+    <div class="nums">
+      <div class="n"><b>2.031</b><span>com recibo de <b>leitura</b> 👀</span></div>
+      <div class="n"><b>757</b><span>com recibo de <b>entrega</b> ✓✓</span></div>
+      <div class="n"><b>280</b><span>sem recibo nenhum</span></div>
+      <div class="n"><b>18</b><span>só “enviado”</span></div>
+    </div>
+    <p>Ou seja: das que têm recibo, <b>73% foram lidas</b>. O canal reporta, e reporta bem.</p>
+  </div>
+
+  <div style="height:.9rem"></div>
+  <p class="leg">E o mais próximo do que a gente quer medir — as mensagens que a empresa mandou
+  <b>pros próprios vendedores</b>, nas conversas deles:</p>
+  <div class="tabwrap">
+    <table class="t">
+      <thead><tr><th>Mensagens da empresa pros 3 vendedores</th><th class="num">quantas</th><th>o que diz</th></tr></thead>
+      <tbody>
+        <tr><td>Lidas 👀</td><td class="num ok">54</td><td>recibo de leitura chegou</td></tr>
+        <tr><td>Entregues ✓✓</td><td class="num">4</td><td>chegou no aparelho, sem confirmação de leitura</td></tr>
+        <tr><td>Sem recibo</td><td class="num meio">21</td><td>ver a ressalva da seção 6</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="leg" style="margin-top:.7rem">Das que tiveram recibo, <b>93% foram lidas</b>. É a melhor
+  evidência de que o aviso de follow-up vai ser medível: o caminho é exatamente o mesmo.</p>
+</section>
+
+<!-- 4. o que falta -->
+<section class="sec">
+  <div class="k">4 · O que falta, canal por canal</div>
+  <h2>Três fios no WhatsApp, seis linhas no push, nada no e-mail.</h2>
+  <p class="leg">Hoje o recibo do WhatsApp chega e atualiza a tabela <code>mensagens</code> e o alvo da
+  campanha, casando pelo <b>id da mensagem no WhatsApp</b>. O aviso de follow-up não passa por nenhuma
+  das duas — ele manda direto pelo chip e registra em <code>aviso_envios</code>, que não guarda esse
+  id. É esse o buraco, e ele é pequeno.</p>
+
+  <h3 style="margin:1.1rem 0 .4rem">💬 WhatsApp — três fios soltos</h3>
+  <ul class="ok-lista">
+    <li><b>Guardar o id.</b> O envio já DEVOLVE o id da mensagem; ninguém o guardava. Vira coluna em
+      <code>aviso_envios</code>, junto com “entregue em” e “lido em”.</li>
+    <li><b>O recibo passa a atualizar também o aviso.</b> O mesmo webhook que hoje mexe em
+      <code>mensagens</code> e no alvo da campanha — com a mesma trava de <b>nunca regredir</b>, porque
+      os recibos chegam fora de ordem e sem ela um “lido” volta pra “entregue” na tela.</li>
+    <li><b>O card na tela.</b> Só leitura do que ficou guardado.</li>
+  </ul>
+
+  <h3 style="margin:1.3rem 0 .4rem">🔔 Push — o clique, e ele é real</h3>
+  <p class="leg">No push, “chegou” já está medido: <code>cockpit.notificar_push</code> conta quantos
+  aparelhos aceitaram. O que falta é o <b>viu</b> — e aqui, diferente do e-mail, existe um sinal
+  honesto: <b>o vendedor tocou na notificação</b>. Quem toca abriu o painel; não tem proxy nem
+  pré-carregamento no meio.</p>
+  <ul class="ok-lista">
+    <li><b>O id do aviso viaja no payload.</b> O <code>dados</code> que vai pro aparelho já leva
+      <code>title</code>, <code>body</code>, <code>url</code> e <code>badge_n</code> — entra
+      <code>aviso_id</code> junto.</li>
+    <li><b>Seis linhas no service worker.</b> O <code>notificationclick</code> em
+      <code>web/painel_cockpit.py</code> (<code>_SW</code>) hoje só fecha a notificação e foca a janela.
+      Ganha um <code>fetch</code> pra uma rota nova que carimba “clicou em”, antes do
+      <code>focus()</code>.</li>
+    <li class="nao"><b>Não dá pra saber se ele só VIU na tela de bloqueio e ignorou.</b> Isso não existe
+      no navegador. Então o rótulo no card é <b>“abriu”</b>, não “leu” — a palavra tem que dizer
+      exatamente o que foi medido.</li>
+  </ul>
+
+  <h3 style="margin:1.3rem 0 .4rem">📧 E-mail — nada, de propósito</h3>
+  <p class="leg">Pelo motivo da <a href="#s2">seção 2</a>: o único jeito de medir abertura é o pixel, e o
+  pixel hoje mede o proxy do Gmail, não a pessoa. Fica o que já é verdade — <b>o servidor aceitou</b> —
+  e travessão no lugar do “viu”. O que <i>seria</i> real é a <b>devolução</b> (e-mail digitado errado
+  que aparece como “enviado ✓” pra sempre); isso pede caixa de retorno e leitura por IMAP, e proponho
+  como item separado, não agora.</p>
+</section>
+
+<!-- 3. o card -->
+<section class="sec">
+  <div class="k">5 · O card, na aba Follow-up</div>
+  <h2>Abaixo do interruptor do WhatsApp.</h2>
+  <p class="leg">Mesmo espírito do card de campanha, com uma diferença: aqui cada canal tem a sua linha, e o que não se mede honestamente aparece como travessão, não como zero.</p>
+
+  <div class="card">
+    <div class="cab"><b>Como os avisos chegaram</b><span>últimos 7 dias</span></div>
+
+    <div class="linhac">
+      <div class="ic">💬</div>
+      <div class="cn">
+        <div class="ct">WhatsApp</div>
+        <div class="kpis3">
+          <div class="kpi"><b>21</b><span>ENVIADOS</span></div>
+          <div class="kpi g"><b>19</b><span>ENTREGUES ✓✓</span></div>
+          <div class="kpi g"><b>16</b><span>LIDOS 👀</span></div>
+          <div class="kpi a"><b>2</b><span>SEM RECIBO</span></div>
+          <div class="kpi r"><b>0</b><span>NÃO SAÍRAM</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="linhac">
+      <div class="ic">🔔</div>
+      <div class="cn">
+        <div class="ct">Push no app</div>
+        <div class="kpis3">
+          <div class="kpi"><b>21</b><span>ENVIADOS</span></div>
+          <div class="kpi g"><b>18</b><span>ACEITOS</span></div>
+          <div class="kpi g"><b>9</b><span>CLICADOS</span></div>
+          <div class="kpi"><b>—</b><span>&nbsp;</span></div>
+          <div class="kpi r"><b>3</b><span>SEM APARELHO</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="linhac">
+      <div class="ic">📧</div>
+      <div class="cn">
+        <div class="ct">E-mail</div>
+        <div class="kpis3">
+          <div class="kpi"><b>18</b><span>ENVIADOS</span></div>
+          <div class="kpi na" title="o SMTP aceitar não é a caixa receber"><b>—</b><span>NÃO SE SABE</span></div>
+          <div class="kpi na" title="ver a seção 2: pixel de leitura hoje mede pré-carregamento, não gente"><b>—</b><span>NÃO SE MEDE</span></div>
+          <div class="kpi"><b>—</b><span>&nbsp;</span></div>
+          <div class="kpi r"><b>3</b><span>SEM ENDEREÇO</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="notac">O e-mail mostra travessão onde não há dado — em vez de zero, que se leria como
+    “ninguém abriu”. <a href="#s2" style="color:var(--azul)">Por quê</a>.</p>
+
+    <div class="porvend">
+      <div class="ct" style="margin-bottom:.4rem">Leitura no WhatsApp, por vendedor</div>
+      <div class="pv">
+        <span class="nome">THIAGO</span>
+        <span class="barra"><i class="l" style="width:86%"></i><i class="e" style="width:14%"></i></span>
+        <span class="zz">7 · leu 6</span>
+      </div>
+      <div class="pv">
+        <span class="nome">PEDRO YAN</span>
+        <span class="barra"><i class="l" style="width:100%"></i></span>
+        <span class="zz">7 · leu 7</span>
+      </div>
+      <div class="pv">
+        <span class="nome">JACQUELINE</span>
+        <span class="barra"><i class="l" style="width:43%"></i><i class="e" style="width:28%"></i><i class="s" style="width:29%"></i></span>
+        <span class="zz">7 · leu 3</span>
+      </div>
+      <div class="leg2">
+        <span><i style="background:var(--neon)"></i>lido</span>
+        <span><i style="background:var(--azul)"></i>entregue, sem leitura</span>
+        <span><i style="background:var(--text-faint)"></i>sem recibo</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:1rem"></div>
+  <ul class="ok-lista">
+    <li><b>Por vendedor, não só o total.</b> “16 de 21 lidos” não diz quem não está lendo — e é
+      exatamente essa a pergunta de quem cobra.</li>
+    <li><b>Sete dias, não “sempre”.</b> A régua muda, a equipe muda; uma taxa histórica esconde o que
+      mudou esta semana.</li>
+    <li class="nao"><b>Não vira cobrança automática.</b> O número é pro dono olhar e conversar. Ninguém
+      é notificado por não ter lido — isso seria vigiar, não avisar.</li>
+  </ul>
+</section>
+
+<!-- 4. a ressalva -->
+<section class="sec">
+  <div class="k">6 · A ressalva do “sem recibo”</div>
+  <div class="cuidado">
+    <h3>“Sem recibo” não é “não recebeu”</h3>
+    <p>Na Prime, <b>280 de 3.086</b> mensagens dos últimos 30 dias não têm recibo nenhum. Pros
+    vendedores, <b>21 de 79</b>. Isso acontece por motivos que não são do sistema: aparelho desligado
+    por muito tempo, mensagem que saiu pelo celular e não pelo Zaq, ou recibo que se perdeu numa
+    reconexão do chip.</p>
+    <p>E tem um caso que vai aparecer com certeza: <b>o WhatsApp deixa a pessoa desligar a confirmação
+    de leitura</b>. Quem desliga nunca gera o 👀 — só o ✓✓. O aviso chegou e foi lido; o recibo é que
+    não existe.</p>
+    <p><b>Por isso “sem recibo” é uma coluna própria no card</b>, e não some dentro de “não entregue”.
+    O card de campanha hoje não faz essa distinção — ele soma o sem-status dentro de “enviados”, e
+    quem lê conclui coisa errada. Aqui vale fazer melhor.</p>
+    <p style="margin-top:.7rem">A frase que eu poria embaixo do card, em letra pequena:
+    <i>“Sem recibo não quer dizer que não chegou — pode ser confirmação de leitura desligada no
+    aparelho.”</i></p>
+  </div>
+</section>
+
+<!-- 7. perguntas -->
+<section class="sec">
+  <div class="k">7 · O que eu preciso que você decida</div>
+  <div class="perg">
+    <h3>Quatro perguntas</h3>
+    <ol>
+      <li><b>Os três canais de uma vez, ou só o WhatsApp agora?</b>
+        <span class="mini">Meu palpite: os três. O WhatsApp é o trabalho de verdade; o push é o id no
+        payload mais seis linhas no service worker; o e-mail não é trabalho nenhum — é só mostrar o que
+        <code>aviso_envios</code> já guarda e travessão no resto. Fazer o push depois custa mexer duas
+        vezes no mesmo card.</span></li>
+      <li><b>Entra no mesmo PR do botão de teste, ou num PR separado?</b>
+        <span class="mini">Se for junto, eu seguro o #722 e entrego os dois de uma vez — o envio muda
+        pra devolver o id, e mesclar agora pra mexer no mesmo lugar amanhã é retrabalho. Se for
+        separado, mesclo o #722 hoje e este vem depois.</span></li>
+      <li><b>Sete dias está bom, ou você prefere ver o mês?</b>
+        <span class="mini">Sete dias responde “esta semana funcionou”. Trinta responde “dá pra confiar
+        nisso”. Dá pra ter os dois, mas aí o card cresce.</span></li>
+      <li><b>O card aparece pro vendedor também, ou só pra dono e gestor?</b>
+        <span class="mini">Meu palpite: só dono e gestor. O vendedor ver a própria taxa de leitura é
+        justo; ver a dos colegas vira placar — e a régua já tem o cuidado de não virar fofoca sobre
+        ninguém (é por isso que o gestor entra JUNTO no aviso, e não no lugar do vendedor).</span></li>
+    </ol>
+  </div>
+</section>
+
+<p class="rodape">Medido em produção, só leitura, em 18/09/2026: <code>mensagens</code> e
+<code>conversas</code> da conta 34. Código lido: <code>services/wa-qr/server.js</code>
+(<code>repassarStatus</code>, <code>STATUS_RECIBO</code>), <code>web/painel_prospeccao.py</code>
+(<code>aplicar_status_wa</code>, <code>webhook_wa_qr_status</code>), <code>finance/whatsapp_qr.py</code>,
+<code>finance/follow_up.py</code>, <code>finance/aviso_log.py</code>, <code>finance/cockpit.py</code>
+(<code>notificar_push</code>) e <code>web/painel_cockpit.py</code> (<code>_SW</code>,
+<code>notificationclick</code>).</p>
+
+</div>
+</body>
+</html>

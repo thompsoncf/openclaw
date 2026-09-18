@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from db.conexao import get_pool
 from finance import follow_up as fu
@@ -30,6 +30,10 @@ from finance import raio_x_perfil as rxp
 from web import janela_lead as _jl
 from web.painel_prospeccao import NAVBAR_CSS, _navbar
 from web.portal import _env, _render, conta_logada, nicho_da_conta
+
+import logging
+
+_log = logging.getLogger("openclaw.painel_follow_up")
 
 router = APIRouter()
 
@@ -219,6 +223,32 @@ def follow_up_zap(request: Request, zap: str = Form("")):
                   (ligar, conta[0]))
         c.commit()
     return RedirectResponse("/painel/follow-up", status_code=303)
+
+
+@router.post("/painel/follow-up/zap-testar")
+def follow_up_zap_testar(request: Request):
+    """Manda AGORA o aviso no WhatsApp de cada vendedor, e relata pessoa a pessoa.
+
+    Relato SEPARADO por pessoa, e não um "deu certo" agregado, pelo mesmo motivo do
+    `enviar_alerta_teste` do admin: um vendedor sem número ou um chip que recusou
+    ficariam escondidos atrás dos que funcionaram — exatamente o que um teste existe
+    pra revelar.
+
+    Só dono e gestor: o botão manda mensagem no celular da equipe.
+    """
+    conta, perfil, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if request.session.get("papel", "dono") not in ("dono", "gestor"):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    try:
+        r = fu.testar_zap(get_pool(), conta[0], perfil)
+    except Exception:  # noqa: BLE001 — botão de teste não derruba a tela
+        _log.warning("teste do WhatsApp falhou na conta %s", conta[0], exc_info=True)
+        return JSONResponse({"ok": False, "erro": "Falha no teste."})
+    return JSONResponse({"ok": True, "envios": [
+        {"nome": x["nome"], "n_leads": x["n_leads"], "ok": x["ok"], "erro": x["erro"]}
+        for x in r]})
 
 
 @router.post("/painel/follow-up/reagendar")
@@ -466,7 +496,27 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
       {% endfor %}
     </form>
   </div>
-  {% if zap %}<p class="lede" style="color:var(--verde-claro)">Sai pelo chip que a empresa usa nos recados internos. Quem não tem número cadastrado continua recebendo só por e-mail e push.</p>{% endif %}
+  {% if zap %}<p class="lede" style="color:var(--verde-claro)">Sai pelo chip que a empresa usa nos recados internos. Quem não tem número cadastrado continua recebendo só por e-mail e push.
+    <button type="button" id="zaptest" onclick="fuTestarZap(this)" style="width:auto;margin:0 0 0 .5rem;font-size:.76rem;padding:.2rem .6rem;background:none;border:1px solid var(--borda);color:var(--txt-mut);border-radius:7px;cursor:pointer">Testar agora</button>
+    <span id="zaptest-r" class="mut" style="font-size:.76rem"></span></p>
+  <script>
+  // Manda o aviso REAL de cada vendedor, agora. Não gasta o teto do dia nem marca
+  // nada como cobrado — ver `follow_up.testar_zap`. O relato vem pessoa a pessoa
+  // porque um "deu certo" agregado esconderia quem ficou de fora.
+  function fuTestarZap(b){
+    var t=b.textContent, r=document.getElementById('zaptest-r');
+    b.disabled=true; b.textContent='Mandando…'; r.textContent='';
+    fetch('/painel/follow-up/zap-testar',{method:'POST',headers:{'X-Requested-With':'fetch'}})
+      .then(function(x){return x.json();}).then(function(d){
+        b.disabled=false; b.textContent=t;
+        if(!d.ok){r.textContent=' '+(d.erro||'não deu');return;}
+        if(!(d.envios||[]).length){r.textContent=' ninguém com lead vencido agora';return;}
+        r.textContent=' ' + d.envios.map(function(e){
+          return e.nome+': '+(e.ok?('enviado ('+e.n_leads+' leads)'):('NÃO saiu — '+(e.erro||'?')));
+        }).join(' · ');
+      }).catch(function(){b.disabled=false;b.textContent=t;r.textContent=' falha de rede';});
+  }
+  </script>{% endif %}
   {% endif %}
 
   {% if erro == 'motivo_obrigatorio' %}

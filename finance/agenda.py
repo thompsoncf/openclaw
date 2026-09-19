@@ -169,6 +169,59 @@ PRE_RESERVADO = "pre_reservado"
 PRE_RESERVA_DIAS = 3
 _ATIVO_OU_PRE = ("ativo", PRE_RESERVADO)
 
+# Quanto tempo antes da festa a data tem que voltar pro ar se o sinal não vier.
+# Sessenta dias é a folga que o dono escolheu em 19/09/2026 — tempo de revender um
+# sábado, que é 57% do que a casa vende.
+FOLGA_REVENDA_DIAS = 60
+
+
+def prazo_da_pre_reserva(inicio: datetime | None, *, dias_config: int | None = None,
+                         agora: datetime | None = None,
+                         folga_dias: int = FOLGA_REVENDA_DIAS) -> datetime:
+    """Até quando a data fica segurada esperando o sinal.
+
+    O PRAZO ACOMPANHA A FESTA, não o relógio de hoje. Até 19/09/2026 esta conta
+    fazia `agora + dias_config` e pronto — e isso cancelou NOVE datas sozinho, sem
+    ninguém desistir de nada. O prazo dado era sempre de 4 a 6 dias, qualquer que
+    fosse a distância da festa:
+
+        Casamento — Maria Carolina · festa 24/07/27 · venceu 312 dias antes
+        Aniversário — Larissa Rakel · festa 05/02/28 · venceu 505 dias antes
+        Confraternização — Flavia   · festa 03/12/26 · venceu  79 dias antes
+
+    Cinco dias de relógio numa festa daqui a dez meses vence antes de qualquer
+    cliente pagar sinal. Três dessas nove o dono ainda dava como negociação viva ou
+    venda fechada — quer dizer, a expiração automática estava DESFAZENDO venda.
+
+    A regra nova tem três degraus, nesta ordem:
+
+    1. `dias_config` é o PISO. É o que a empresa configurou no card ⏳ Data segurada,
+       e continua valendo pra festa que está logo aí. Nunca se segura menos que isso.
+    2. Havendo espaço, a data fica segurada até `folga_dias` ANTES da festa — o
+       tempo de revender se o sinal não vier.
+    3. O prazo nunca passa da festa. Data que já aconteceu não se revende, e segurar
+       além dela só produziria cancelamento depois do fato.
+
+    Festa no passado (remarcação, digitação retroativa) cai no comportamento antigo,
+    `agora + dias_config`: a regra da folga não tem o que calcular, e mudar isso
+    faria a pré-reserva nascer vencida.
+
+    `folga_dias=0` quer dizer "solta zero dias antes da festa" — ou seja, segura até
+    ela. É o limite da regra, não um jeito de voltar ao comportamento antigo; quem
+    quiser o antigo passa `inicio=None`.
+
+    `dias_config` zero ou nulo cai em `PRE_RESERVA_DIAS`, que é a mesma leitura que
+    o painel e a proposta já faziam da configuração da conta (`x or PADRÃO`).
+    """
+    agora = agora or agora_brt()
+    dias = max(1, int(dias_config or PRE_RESERVA_DIAS))
+    piso = agora + timedelta(days=dias)
+    if inicio is None or inicio <= agora:
+        return piso
+    if inicio <= piso:
+        return inicio
+    return max(piso, inicio - timedelta(days=max(0, int(folga_dias))))
+
 
 # ---------------------------------------------------------------------------
 # A DATA ESTÁ VENDIDA? — a pergunta nº 1 de quem vende espaço

@@ -846,7 +846,8 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    mes_prev=_vizinho(ano, mes, -1), mes_next=_vizinho(ano, mes, +1),
                    mes_hoje=f"{hoje.year:04d}-{hoje.month:02d}",
                    hoje_iso=hoje.isoformat(), abrir_novo=(novo == "1"),
-                   cfg=cfg, feed_url=feed_url, share=share, seguradas=seguradas,
+                   cfg=cfg, folga_revenda_dias=ag.FOLGA_REVENDA_DIAS,
+                   feed_url=feed_url, share=share, seguradas=seguradas,
                    # LISTA DE ESPERA POR DATA (finance/lista_espera): quem quer um dia
                    # que a empresa já vendeu. Só aparece pra conta que usa a lista
                    # (contas.festas_por_dia preenchido) — pras outras, `espera` é []
@@ -1056,7 +1057,10 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
         ate = ag.parse_datahora(segurar_ate) if segurar_ate else None
         if ate is None:
             dias = ag.get_config(pool, ctx["conta_id"]).get("pre_reserva_dias") or ag.PRE_RESERVA_DIAS
-            ate = ag.agora_brt() + timedelta(days=int(dias))
+            # o prazo acompanha a festa, não o relógio de hoje: ver
+            # agenda.prazo_da_pre_reserva, nascida das nove datas que o prazo
+            # curto cancelou sozinho.
+            ate = ag.prazo_da_pre_reserva(inicio, dias_config=dias)
         else:
             ate = ate.replace(hour=23, minute=59)   # a data digitada vale até o fim do dia
         sinal_cent = _centavos(sinal_esperado)
@@ -2646,13 +2650,33 @@ function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.
   var box = document.getElementById('segBox');
   var ate = document.getElementById('fSegAte');
   var dias = PRE_RESERVA_DIAS;
+  // ESPELHO de agenda.prazo_da_pre_reserva. Tem que ser espelho, e não aproximação:
+  // o que este campo preencher é o prazo que o servidor GRAVA (ele só calcula
+  // sozinho quando o campo vem vazio). Errar aqui é reintroduzir o prazo curto que
+  // cancelou nove datas sozinho.
+  function prazoSugerido(){
+    var hoje = new Date();
+    var piso = new Date(hoje); piso.setDate(piso.getDate() + dias);
+    var fd = document.getElementById('fData');
+    if(!fd || !fd.value) return piso;
+    var festa = new Date(fd.value + 'T23:59:00');
+    if(isNaN(festa) || festa <= hoje) return piso;      // sem data ou data passada
+    if(festa <= piso) return festa;                     // festa perto: segura até ela
+    var alvo = new Date(festa); alvo.setDate(alvo.getDate() - FOLGA_REVENDA_DIAS);
+    return alvo > piso ? alvo : piso;
+  }
+  function preencherPrazo(){
+    if(chk && chk.checked && ate && !ate.value){
+      var d = prazoSugerido();
+      // fuso local, não toISOString: o UTC empurra a noite pro dia seguinte
+      ate.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0')
+                + '-' + String(d.getDate()).padStart(2,'0');
+    }
+  }
   if(chk && box){
     chk.addEventListener('change', function(){
       box.classList.toggle('on', chk.checked);
-      if(chk.checked && ate && !ate.value){
-        var d = new Date(); d.setDate(d.getDate() + dias);
-        ate.value = d.toISOString().slice(0,10);   // prazo padrão da conta, já preenchido
-      }
+      preencherPrazo();
     });
   }
   var fd = document.getElementById('fData'), fh = document.getElementById('fHora');
@@ -3987,6 +4011,7 @@ var TPILL = {pessoal:'Pessoal', empresa:'Empresa', fornecedor:'Fornecedor'};
 var HIST_STATE = {dias: 7, falhas: false, q: '', itens: {{ historico|tojson }},
                   total: {{ historico_total }}};
 var PRE_RESERVA_DIAS = {{ (cfg.pre_reserva_dias or 3)|tojson }};
+var FOLGA_REVENDA_DIAS = {{ folga_revenda_dias|default(60, true)|tojson }};
 // A DATA ESTÁ VENDIDA? — o estado de cada dia, do servidor. Fica AQUI, e não
 // derivado dos eventos no navegador, porque a régua é uma só
 // (finance.agenda.estado_da_data) e derivá-la de novo em JavaScript seria a

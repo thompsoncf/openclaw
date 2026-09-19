@@ -1331,3 +1331,99 @@ def test_fechar_evento_duas_vezes_nao_duplica_titulos(pool, conta_id):
         n = c.execute("select count(*) from titulos where conta_id=%s and descricao like 'Evento%%'",
                       (conta_id,)).fetchone()[0]
     assert n == 2      # os 2 da primeira vez; a segunda não somou nada
+
+
+# ---------------------------------------------- o prazo acompanha a festa (19/09/2026)
+def test_festa_longe_nao_ganha_prazo_de_poucos_dias(pool, conta_id):
+    """O buraco que cancelou nove datas da Prime sozinho: o prazo era `agora + dias`
+    qualquer que fosse a distância da festa. O casamento da Maria Carolina venceu
+    312 dias ANTES dela."""
+    festa = (ag.agora_brt() + timedelta(days=300)).date()
+    _, tok = _semear(pool, conta_id, evento={**EVENTO, "data": festa.isoformat()})
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    with pool.connection() as c:
+        inicio, ate = c.execute(
+            "select inicio, pre_reserva_ate from eventos_agenda where id=%s",
+            (ev_id,)).fetchone()
+    assert (inicio - ate).days == ag.FOLGA_REVENDA_DIAS      # solta 60 dias antes
+    assert (ate - ag.agora_brt()).days > 200                  # e não em 3 dias
+
+
+def test_festa_perto_continua_com_o_prazo_da_conta(pool, conta_id):
+    """A regra nova é um PISO, não uma troca: festa logo aí segue como sempre foi."""
+    festa = (ag.agora_brt() + timedelta(days=10)).date()
+    _, tok = _semear(pool, conta_id, evento={**EVENTO, "data": festa.isoformat()})
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    with pool.connection() as c:
+        ate = c.execute("select pre_reserva_ate from eventos_agenda where id=%s",
+                        (ev_id,)).fetchone()[0]
+    assert (ate - ag.agora_brt()).days == ag.PRE_RESERVA_DIAS - 1
+
+
+# -------------------------------------- a data aprovada nasce COM vendedor (19/09/2026)
+def _vendedor(pool, conta_id, nome="PEDRO YAN PRIME"):
+    with pool.connection() as c:
+        mid = c.execute("insert into membros (conta_id, nome, papel) "
+                        "values (%s,%s,'vendedor') returning id", (conta_id, nome)).fetchone()[0]
+        c.commit()
+    return mid
+
+
+def _membro_do_evento(pool, ev_id):
+    with pool.connection() as c:
+        return c.execute("select membro_id from eventos_agenda where id=%s",
+                         (ev_id,)).fetchone()[0]
+
+
+def test_a_data_nasce_com_o_vendedor_do_orcamento(pool, conta_id):
+    """Nove orçamentos da Prime viraram data e os nove nasceram SEM vendedor — cada
+    um virando uma linha no card de pendências. O vendedor estava em `criado_por`."""
+    mid = _vendedor(pool, conta_id)
+    _, tok = _semear(pool, conta_id, criado_por=str(mid))
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    assert _membro_do_evento(pool, ev_id) == mid
+
+
+def test_criado_por_dono_resolve_pro_dono_da_conta(pool, conta_id):
+    """`criado_por` guarda o membro_id OU a palavra 'dono' — a folha da proposta já
+    lê os dois assim pra imprimir o nome do vendedor."""
+    _, tok = _semear(pool, conta_id, criado_por="dono")
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    with pool.connection() as c:
+        dono = c.execute("select id from membros where conta_id=%s and papel='dono'",
+                         (conta_id,)).fetchone()[0]
+    assert _membro_do_evento(pool, ev_id) == dono
+
+
+def test_vendedor_de_outra_conta_nao_entra(pool, conta_id):
+    """Isolamento: `criado_por` é texto e podia apontar pra qualquer id."""
+    with pool.connection() as c:
+        outra = c.execute("insert into contas (tipo, nome) values ('pj','Outra') "
+                          "returning id").fetchone()[0]
+        intruso = c.execute("insert into membros (conta_id, nome, papel) "
+                            "values (%s,'Intruso','vendedor') returning id",
+                            (outra,)).fetchone()[0]
+        c.commit()
+    _, tok = _semear(pool, conta_id, criado_por=str(intruso))
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    assert _membro_do_evento(pool, ev_id) is None
+
+
+def test_criado_por_vazio_ou_lixo_nao_derruba_a_aprovacao(pool, conta_id):
+    """Tolerante como `vende_data`: o pior caso é nascer sem dono — que é o que já
+    acontecia. Derrubar a aprovação por causa disso trocaria incômodo por prejuízo."""
+    for n, ruim in enumerate(("", "   ", "fulano", "99999999"), start=90):
+        _, tok = _semear(pool, conta_id, criado_por=ruim, numero=n)
+        ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+        assert ev_id, ruim
+        assert _membro_do_evento(pool, ev_id) is None, ruim
+
+
+def test_o_caminho_normal_e_ter_vendedor(pool, conta_id):
+    """`criado_por` NULO não é o caso comum e o fixture reflete isso: ele grava o
+    primeiro membro da conta, que é o que o sistema real faz ao criar o orçamento.
+    Os nove orçamentos da Prime tinham criado_por numérico — o vendedor nunca
+    faltou no dado, faltava na passagem."""
+    _, tok = _semear(pool, conta_id)          # sem dizer criado_por
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    assert _membro_do_evento(pool, ev_id) is not None

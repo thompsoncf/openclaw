@@ -52,6 +52,14 @@ create table aviso_envios (id bigserial primary key, conta_id bigint, membro_id 
   origem text, canal text, destino text, assunto text, n_leads int, ok boolean,
   motivo text, criado_em timestamptz not null default now(),
   sid text, token text, entregue_em timestamptz, lido_em timestamptz, clicado_em timestamptz);
+-- o parâmetro dos e-mails de gestão (migrações 274 e 276): é de onde o fecho do
+-- dia tira o endereço do dono que não tem e-mail no cadastro de membro
+create table contas (id bigint primary key, nome text,
+  resumo_semanal boolean not null default false,
+  resumo_semanal_emails text not null default '',
+  resumo_semanal_vendedor boolean not null default true,
+  resumo_semanal_dia text not null default 'segunda',
+  resumo_semanal_dono_emails text not null default '');
 create table funil_regua (conta_id bigint primary key,
   gatilhos_modo text not null default 'off', cobranca_modo text not null default 'off',
   janela_dias text, janela_abre time, janela_fecha time,
@@ -102,6 +110,11 @@ def c(pool):
         for t in ("follow_up_esteira", "funil_movimentos", "mensagens", "conversas",
                   "prospeccao", "funil_regua", "aviso_envios"):
             con.execute(f"delete from {t}")
+        con.execute("update membros set email=null where conta_id=%s and papel='vendedor'", (CONTA,))
+        con.execute("update membros set email='dono@x.com' where conta_id=%s and papel='dono'", (CONTA,))
+        con.execute("""insert into contas (id, nome) values (%s,'Prime')
+                       on conflict (id) do update set resumo_semanal_emails='',
+                                                      resumo_semanal_dono_emails=''""", (CONTA,))
         con.execute("""insert into funil_regua (conta_id, esteira_modo, fu_teto_dia, fu_toques_dias,
                                                 janela_dias, janela_abre, janela_fecha)
                        values (%s,'ligado',10,'1,3,7','1,2,3,4,5,6','08:00','19:00')""", (CONTA,))
@@ -401,7 +414,8 @@ def test_o_fecho_do_dia_sai_pro_dono_nos_dois_canais(pool, c, monkeypatch):
     with pool.connection() as con:
         canais = {x[0] for x in con.execute(
             "select canal from aviso_envios where origem='esteira_fecho'").fetchall()}
-    assert canais == {"email", "whatsapp"}, "o fecho mandou push"
+    # os TRÊS canais desde 19/09/2026 — o push entrou por decisão de quem recebe
+    assert canais == {"email", "whatsapp", "push"}, canais
     assert lead
 
 
@@ -465,3 +479,237 @@ def test_o_texto_do_fecho_diz_o_que_NAO_enxerga():
     assert "Ligação e conversa pessoal não aparecem" in corpo
     for palavra in ("atenção", "urgente", "relapso", "!"):
         assert palavra not in corpo.lower(), palavra
+
+
+# ------------------------------------------------------------------ a hora do aviso
+# O DIA DA ESTEIRA VIRA À MEIA-NOITE, e o poller roda de minuto em minuto. A trava
+# do aviso era só "já saiu hoje?" — então o primeiro ciclo depois da meia-noite
+# mandava a cobrança no WhatsApp do vendedor às 00:0x, inclusive no domingo. Estes
+# testes fixam a segunda trava: dentro da janela de atendimento, como a régua.
+
+def _madrugada():
+    """00:30 em Brasília do dia seguinte — o dia da esteira já virou."""
+    return AGORA.replace(hour=3, minute=30) + timedelta(days=1)
+
+
+def _domingo(hora_utc=13):
+    """Domingo 20/09/2026, fora de `janela_dias` ('1,2,3,4,5,6')."""
+    return AGORA.replace(hour=hora_utc, minute=0) + timedelta(days=1)
+
+
+def test_o_aviso_NAO_sai_de_madrugada(pool, c):
+    c.commit()
+    assert es._e_hora_do_aviso(AGORA, CONTA, pool) is True, "às 10h da manhã tem que sair"
+    assert es._e_hora_do_aviso(_madrugada(), CONTA, pool) is False
+
+
+def test_o_aviso_NAO_sai_no_domingo(pool, c):
+    """Domingo não está em `janela_dias` — e a esteira não acorda ninguém no
+    descanso só porque o calendário virou."""
+    c.commit()
+    assert es._e_hora_do_aviso(_domingo(), CONTA, pool) is False
+
+
+def test_o_aviso_sai_uma_vez_e_so_uma(pool, c):
+    _cobrou_hoje(c, 1)
+    c.commit()
+    assert es._e_hora_do_aviso(AGORA, CONTA, pool) is False
+
+
+def test_ninguem_entra_fora_do_expediente(c):
+    """Quem entrasse de madrugada teria o dia 1 num dia sem cobrança, e na manhã
+    seguinte já seria dia 2 — a primeira das três chances, gasta calada."""
+    _com_bola_nossa(c)
+    assert es.avaliar(c, CONTA, _madrugada())["entraram"] == 0
+    assert es.avaliar(c, CONTA, _domingo())["entraram"] == 0
+    assert es.avaliar(c, CONTA, AGORA)["entraram"] == 1
+
+
+def test_nao_fecha_no_domingo(c):
+    """19h de domingo não é fim de expediente: ninguém foi cobrado naquele dia."""
+    lid = _com_bola_nossa(c)
+    es.entrar(c, CONTA, AGORA)
+    _entrou_ha(c, lid, 6)
+    assert es.fechar_vencidos(c, CONTA, _domingo(hora_utc=22)) == []
+    assert len(es.fechar_vencidos(c, CONTA, _fim_do_dia(dias_depois=2))) == 1
+
+
+def test_o_fecho_do_dia_NAO_sai_no_domingo(pool, c, monkeypatch):
+    from finance import email_sender as _es
+    from finance import esteira as est
+    monkeypatch.setattr(_es, "enviar_aviso", lambda *a, **k: True)
+    _cobrou_hoje(c)
+    c.commit()
+    assert est.fecho_do_dia(pool, CONTA, _domingo(hora_utc=22)) == []
+
+
+# ------------------------------------------------------------------ os três canais
+# "sempre nos 3 canais de comunicação ok?? whatts + email + push" — o dono, em
+# 19/09/2026. A esteira nasceu mandando dois: o push ficou de fora porque o
+# follow-up antigo é que o usava, e quando a esteira tomou o lugar dele o canal
+# ficou órfão — montado, medido no card, e sem nada passando.
+
+def _tres_canais(monkeypatch):
+    """Intercepta os três canais. Devolve (zaps, pushes, emails)."""
+    from finance import cockpit as ck
+    from finance import email_sender as mail
+    from finance import follow_up as fu
+    zaps, pushes, emails = [], [], []
+    monkeypatch.setattr(fu, "_zap_do_membro", lambda *a, **k: "86999990000")
+    monkeypatch.setattr(fu, "_mandar_zap",
+                        lambda *a, **k: zaps.append(a) or {"ok": True, "erro": "", "sid": "S1"})
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: pushes.append((a, k)) or 1)
+    monkeypatch.setattr(mail, "enviar_aviso", lambda *a, **k: emails.append((a, k)) or True)
+    return zaps, pushes, emails
+
+
+def _canais_registrados(c, origem):
+    return dict(c.execute(
+        "select canal, count(*) from aviso_envios where origem=%s group by canal",
+        (origem,)).fetchall())
+
+
+def test_a_cobranca_do_vendedor_sai_nos_TRES_canais(pool, c, monkeypatch):
+    zaps, pushes, emails = _tres_canais(monkeypatch)
+    c.execute("update membros set email='vendedor@x.com' where id=%s", (VEND,))
+    _com_bola_nossa(c)
+    cob = es.avaliar(c, CONTA, AGORA)["cobrancas"]
+    c.commit()
+
+    es.notificar(pool, CONTA, cob)
+    assert zaps and pushes and emails, (zaps, pushes, emails)
+    assert _canais_registrados(c, "esteira") == {"whatsapp": 1, "push": 1, "email": 1}
+    # o push leva o token do clique — sem ele, o toque na notificação não volta
+    linha = c.execute("select token from aviso_envios where canal='push'").fetchone()
+    assert linha[0], "o push foi registrado sem token; o clique não teria como voltar"
+    assert pushes[0][1]["token"] == linha[0]
+
+
+def test_o_push_do_vendedor_leva_pra_fila_dele(pool, c, monkeypatch):
+    _, pushes, _ = _tres_canais(monkeypatch)
+    _com_bola_nossa(c)
+    cob = es.avaliar(c, CONTA, AGORA)["cobrancas"]
+    c.commit()
+    es.notificar(pool, CONTA, cob)
+    assert "/painel/follow-up?estado=atrasado" in pushes[0][0][5]
+
+
+def test_zero_aparelho_com_push_nao_e_erro_e_fica_registrado(pool, c, monkeypatch):
+    """O vendedor sem push instalado tem que APARECER no card — é como o dono
+    descobre que o aviso daquela pessoa só chega por e-mail e WhatsApp."""
+    from finance import cockpit as ck
+    _tres_canais(monkeypatch)
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 0)
+    _com_bola_nossa(c)
+    cob = es.avaliar(c, CONTA, AGORA)["cobrancas"]
+    c.commit()
+    es.notificar(pool, CONTA, cob)
+    ok, motivo = c.execute(
+        "select ok, motivo from aviso_envios where origem='esteira' and canal='push'").fetchone()
+    assert ok is False and motivo == "nenhum aparelho com push"
+
+
+# --------------------------------------------------- o fecho e o e-mail da conta
+
+def test_o_fecho_tambem_sai_no_push(pool, c, monkeypatch):
+    _, pushes, _ = _tres_canais(monkeypatch)
+    _cobrou_hoje(c)
+    c.commit()
+    r = es.fecho_do_dia(pool, CONTA, _fim_do_expediente())
+    assert r and r[0]["push"] is True
+    assert _canais_registrados(c, es.ORIGEM_FECHO).get("push") == 1
+
+
+def test_o_fecho_vai_pro_EMAIL_CADASTRADO_NA_CONTA(pool, c, monkeypatch):
+    """O MANOEL é dono sem e-mail no cadastro de membro. O endereço da empresa já
+    está no parâmetro do resumo semanal — é de lá que o fecho o tira."""
+    _, _, emails = _tres_canais(monkeypatch)
+    c.execute("update membros set email=null where papel='dono'")
+    c.execute("""update contas set resumo_semanal_emails='gestor@prime.com',
+                        resumo_semanal_dono_emails='dono@prime.com' where id=%s""", (CONTA,))
+    _cobrou_hoje(c)
+    c.commit()
+
+    es.fecho_do_dia(pool, CONTA, _fim_do_expediente())
+    destinos = [a[0] for a, _ in emails]
+    assert destinos == ["dono@prime.com", "gestor@prime.com"], destinos
+    # e ficam registrados sem membro por trás — são endereços da conta, não pessoas
+    linhas = c.execute("""select destino, membro_id from aviso_envios
+                           where origem=%s and canal='email' and ok
+                           order by destino""", (es.ORIGEM_FECHO,)).fetchall()
+    assert linhas == [("dono@prime.com", None), ("gestor@prime.com", None)]
+
+
+def test_o_mesmo_endereco_nao_recebe_o_fecho_duas_vezes(pool, c, monkeypatch):
+    """O dono é membro com e-mail E está no parâmetro. Dois e-mails iguais no mesmo
+    minuto é o que faz a pessoa criar regra de lixeira pro nosso remetente."""
+    _, _, emails = _tres_canais(monkeypatch)
+    c.execute("update contas set resumo_semanal_dono_emails='DONO@x.com' where id=%s", (CONTA,))
+    _cobrou_hoje(c)
+    c.commit()
+    es.fecho_do_dia(pool, CONTA, _fim_do_expediente())
+    assert [a[0] for a, _ in emails] == ["dono@x.com"]
+
+
+def test_sem_o_parametro_o_fecho_segue_pelos_membros(pool, c, monkeypatch):
+    """Parâmetro vazio não pode impedir o fecho de sair pra quem é membro."""
+    _, _, emails = _tres_canais(monkeypatch)
+    _cobrou_hoje(c)
+    c.commit()
+    es.fecho_do_dia(pool, CONTA, _fim_do_expediente())
+    assert [a[0] for a, _ in emails] == ["dono@x.com"]
+
+
+# --------------------------------------------------- quantos fecham amanhã
+# "1 - pode fazer os quantos fecham amanha" — o dono, em 19/09/2026. Ele lia "7 na
+# esteira" e não sabia quais somem antes da próxima cobrança; é a única parte do
+# placar sobre a qual ainda dá pra fazer alguma coisa hoje.
+
+def test_o_resumo_conta_quem_fecha_amanha(c):
+    lid = _com_bola_nossa(c, nome="Vespera")
+    outro = _com_bola_nossa(c, nome="Novo")
+    es.entrar(c, CONTA, AGORA)
+    _entrou_ha(c, lid, 5)        # amanhã ele está no dia 7 — o prazo final
+    _entrou_ha(c, outro, 0)      # entrou hoje: amanhã é dia 2
+    r = es.resumo(c, CONTA, None, AGORA)
+    assert (r["na_esteira"], r["fecham_amanha"]) == (2, 1)
+
+
+def test_quem_ja_fechou_nao_conta_como_fecha_amanha(c):
+    lid = _com_bola_nossa(c)
+    es.entrar(c, CONTA, AGORA)
+    _entrou_ha(c, lid, 6)
+    es.fechar_vencidos(c, CONTA, _fim_do_dia())
+    assert es.resumo(c, CONTA, None, _fim_do_dia())["fecham_amanha"] == 0
+
+
+def test_o_texto_do_fecho_diz_quantos_fecham_amanha():
+    titulo, corpo = es.texto_fecho(
+        {"tratou": 3, "na_esteira": 7, "fechados_sem_tratativa": 0, "fecham_amanha": 2},
+        [("THIAGO", {"tratou": 1, "na_esteira": 4, "fecham_amanha": 2}),
+         ("PEDRO", {"tratou": 2, "na_esteira": 3, "fecham_amanha": 0})])
+    assert titulo == "📋 O dia fechou: 3 tratados, 7 na esteira, 2 fecham amanhã"
+    assert corpo.split("\n")[0] == "· THIAGO — 1 tratados, 4 na esteira (2 fecham amanhã)"
+    # quem não tem nada fechando amanhã não ganha um "(0 fecham amanhã)" pendurado
+    assert corpo.split("\n")[1] == "· PEDRO — 2 tratados, 3 na esteira"
+    assert "Fecham amanhã sem tratativa: 2." in corpo
+
+
+def test_dia_sem_ninguem_vencendo_nao_fala_de_amanha():
+    titulo, corpo = es.texto_fecho(
+        {"tratou": 3, "na_esteira": 7, "fechados_sem_tratativa": 0, "fecham_amanha": 0},
+        [("THIAGO", {"tratou": 1, "na_esteira": 4, "fecham_amanha": 0})])
+    assert "amanhã" not in titulo and "amanhã" not in corpo
+
+
+# --------------------------------------------------- o histórico é do vendedor
+
+def test_o_aviso_manda_o_vendedor_escrever_o_historico():
+    """"vendedor tem que criar o historico e bom notificar ele disso tambem" — o
+    dono, 19/09/2026. É o mesmo buraco que o placar dele carrega: ligação e
+    conversa pessoal não existem no sistema, e quem resolveu no telefone sem
+    escrever aparece como quem não fez nada."""
+    _, corpo = es.texto("THIAGO", [{"quem": "Isa", "dia": 1, "ultimo_dia": False}],
+                        {"tratou": 2, "na_esteira": 8})
+    assert "Escreva no histórico do lead" in corpo
+    assert "o que não está escrito não conta" in corpo

@@ -170,13 +170,22 @@ _VAZIO = {"tentativas": 0, "ok": 0, "falhas": 0, "entregues": 0, "lidos": 0,
           "sem_recibo": 0, "clicados": 0}
 
 
+#: As origens que o card CONTA: a cobrança de verdade, venha do motor que vier.
+#: Nasceu como um único 'follow_up' e quebrou no dia em que a esteira tomou o lugar
+#: dele (#747): o card continuou medindo o motor calado e a Prime via um card
+#: definhando enquanto a esteira mandava aviso todo dia. O que fica de fora é o que
+#: termina em '_teste' — e é por isso que a lista é explícita, e não um "tudo menos".
+ORIGENS_REAIS = ("follow_up", "esteira", "esteira_fecho")
+
+
 def resumo(pool, conta_id: int, *, dias: int = DIAS_CARD,
-           origem: str = "follow_up") -> dict:
+           origem: str | tuple[str, ...] = ORIGENS_REAIS) -> dict:
     """Como os avisos chegaram, por canal, nos últimos `dias`.
 
     A ORIGEM FILTRA DE PROPÓSITO. O botão "Testar agora" grava com
     `origem='follow_up_teste'`, e um teste de canal não pode entrar na estatística
-    de cobrança — foi pra isso que a origem nasceu separada.
+    de cobrança — foi pra isso que a origem nasceu separada. Aceita uma origem só
+    (é assim que o teste de um canal se isola) ou a lista das reais, que é o padrão.
 
     O QUE CADA CANAL SABE DIZER é diferente, e este resumo não finge o contrário:
 
@@ -195,6 +204,7 @@ def resumo(pool, conta_id: int, *, dias: int = DIAS_CARD,
     porque isto alimenta uma tela que não pode cair por causa de um card.
     """
     d = max(1, min(int(dias or DIAS_CARD), 365))
+    ori = [origem] if isinstance(origem, str) else list(origem)
     fora = {"dias": d, "origem": origem, "por_vendedor": [],
             **{ch: dict(_VAZIO) for ch in CANAIS}}
     try:
@@ -211,9 +221,9 @@ def resumo(pool, conta_id: int, *, dias: int = DIAS_CARD,
                                                    and lido_em is null),
                               count(*) filter (where clicado_em is not null)
                          from aviso_envios
-                        where conta_id=%s and origem=%s
+                        where conta_id=%s and origem = any(%s)
                           and criado_em >= now() - make_interval(days => %s)
-                        group by canal""", (conta_id, origem, d)).fetchall()
+                        group by canal""", (conta_id, ori, d)).fetchall()
                 vend = c.execute(
                     """select coalesce(nullif(m.nome,''), m.email, '(sem membro)'),
                               count(*),
@@ -224,11 +234,11 @@ def resumo(pool, conta_id: int, *, dias: int = DIAS_CARD,
                                                  and e.lido_em is null)
                          from aviso_envios e
                          left join membros m on m.id = e.membro_id
-                        where e.conta_id=%s and e.origem=%s and e.canal='whatsapp'
+                        where e.conta_id=%s and e.origem = any(%s) and e.canal='whatsapp'
                           and e.ok
                           and e.criado_em >= now() - make_interval(days => %s)
                         group by 1 order by 2 desc, 1""",
-                    (conta_id, origem, d)).fetchall()
+                    (conta_id, ori, d)).fetchall()
     except Exception as e:  # noqa: BLE001
         _log.warning("aviso_log: resumo falhou (conta=%s): %s: %s",
                      conta_id, type(e).__name__, e)

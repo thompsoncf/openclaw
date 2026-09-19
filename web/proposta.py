@@ -493,13 +493,24 @@ def _linhas_evento(d: dict) -> list[dict]:
         # que o cliente não vê não vende — e some da conta dele sem explicação.
         liq = dsc.liquido_do_item(it)
         d_cent = (total * 100) - liq["setup"]
+        # INCLUSO NO PACOTE não é desconto. Era impresso como "R$ 4.000 riscado,
+        # R$ 0,00" — o cliente lia um abatimento de quatro mil que ninguém deu, e
+        # o vendedor perdia a frase que ele de fato quer dizer: isto vem junto.
+        # Ver `finance.desconto.eh_incluso`: em 122 das 217 linhas da Prime o
+        # campo de desconto estava sendo usado pra dizer exatamente isso.
+        incluso = dsc.eh_incluso(it)
         linhas.append({"n": i, "nome": it.get("nome") or "", "desc": it.get("desc") or "",
                        "qtd": qtd, "unit": _num(unit * 100),
+                       "incluso": incluso,
                        "subtotal": _num(liq["setup"]),
-                       "cheio": _num(total * 100) if d_cent > 0 else "",
-                       "desconto": _brl(d_cent) if d_cent > 0 else "",
+                       # o valor de tabela continua à vista quando é incluso: é o
+                       # que mostra o tamanho do que veio junto. Mas sem a tarja
+                       # de riscado, que é linguagem de desconto.
+                       "cheio": _num(total * 100) if (d_cent > 0 and not incluso) else "",
+                       "tabela": _num(total * 100) if incluso else "",
+                       "desconto": _brl(d_cent) if (d_cent > 0 and not incluso) else "",
                        "desconto_pct": (f"{liq['pct']:.0f}%".replace(".0", "")
-                                        if d_cent > 0 else ""),
+                                        if (d_cent > 0 and not incluso) else ""),
                        "categoria": it.get("categoria") or "",
                        "icone": ics.svg(ics.escolher(it.get("nome"), it.get("categoria"),
                                                      it.get("icone")), px=24)})
@@ -736,6 +747,12 @@ table.itens td.n{color:#14213D}
 /* o cheio riscado por cima do que o cliente paga: desconto que ele não vê
    some da conta dele sem explicação */
 .risc{display:block;font-size:.78em;color:#8A8475;text-decoration:line-through}
+/* INCLUSO NO PACOTE. Verde discreto e sem tarja de riscado: riscar é linguagem
+   de desconto, e isto não é desconto — é o que já vem junto. O valor de tabela
+   embaixo, em cinza, mostra o tamanho do que veio. Sai bem no papel: cor escura
+   o bastante pra impressão em preto e branco não virar mancha clara. */
+.incl{display:block;font-weight:600;color:#1F7A4D}
+.tab{display:block;font-size:.72em;color:#8A8475;font-weight:400}
 table.pag th{background:#FBFAF7;color:#8A8475;border-bottom:1px solid #ECE7DC}
 /* A soma do plano. Fecha a tabela: documento que não soma não pode sair calado.
    Quando diverge do total do evento, a diferença sai ao lado — em coral, porque
@@ -915,7 +932,10 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
              linha de cabeçalho some, então cada número precisa se apresentar. #}
           <td class="q" data-r="Qtd">{{ l.qtd }}</td>
           <td class="q" data-r="Vr. unit.">{{ l.unit }}</td>
-          <td class="q" data-r="Subtotal">{% if l.cheio %}<span class="risc">{{ l.cheio }}</span>{% endif %}{{ l.subtotal }}</td></tr>{% endfor %}
+          {# INCLUSO: a palavra no lugar do "0,00", e o valor de tabela embaixo em
+             cinza. É o que o vendedor já queria dizer com 100% de desconto — e
+             vende melhor do que um zero. #}
+          <td class="q" data-r="Subtotal">{% if l.incluso %}<span class="incl">Incluso</span>{% if l.tabela %}<small class="tab">{{ l.tabela }}</small>{% endif %}{% else %}{% if l.cheio %}<span class="risc">{{ l.cheio }}</span>{% endif %}{{ l.subtotal }}{% endif %}</td></tr>{% endfor %}
       </table>
       {% endif %}
       {% if prop.subtotais or prop.tem_desconto_final %}

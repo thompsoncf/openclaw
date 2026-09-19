@@ -75,6 +75,42 @@ def quanto_desconta(base: int, tipo, pct, valor) -> int:
 
 # ------------------------------------------------------------------- por item
 
+def eh_incluso(item) -> bool:
+    """Esta linha entra na proposta mas NÃO é cobrada — vem junto no pacote.
+
+    POR QUE ISTO EXISTE. Em 18/09/2026, medindo a Prime (conta 34): de 217 linhas
+    de orçamento, **122 têm desconto de 100%** e exatamente UMA tem desconto
+    percentual de verdade. Não é desconto — é o vendedor dizendo "isto vem junto
+    no Pacote Prime" com a única ferramenta que a tela oferecia. No orçamento nº
+    23 são 10 das 11 linhas: mesas, vasos, poltronas, cozinha, climatizadores,
+    gerador, utensílios, leds, freezer.
+
+    O preço disso era a tela mentir: o resumo anunciava "Economia de R$ 14.850"
+    numa proposta onde ninguém descontou nada, e o funil guardava R$ 22.900 de
+    bruto pra um negócio de R$ 8.050.
+
+    ESTA FUNÇÃO NÃO MUDA DINHEIRO NENHUM. Cem por cento de desconto já zera a
+    linha em `liquido_do_item`, e continua zerando. O que ela faz é LER a
+    intenção, pra a tela e a folha pararem de chamar isso de desconto.
+
+    Dois jeitos de dizer a mesma coisa, de propósito:
+
+    * `incluso: true` — o que a tela nova grava;
+    * `desc_tipo='pct'` com `desc_val >= 100` — o que as 122 linhas já gravadas
+      dizem, e o que uma tela antiga continuaria gravando.
+
+    A tela nova grava OS DOIS. Assim o dinheiro sai igual em qualquer leitor —
+    inclusive num deploy antigo que não conheça a marca — e a intenção viaja
+    junto. É o mesmo cuidado do `unitario`, que conviveu com o `setup` das
+    propostas anteriores a ele.
+    """
+    if not isinstance(item, dict):
+        return False
+    if item.get("incluso"):
+        return True
+    return _tipo(item.get("desc_tipo")) == "pct" and _pct(item.get("desc_val")) >= 100
+
+
 def contribuicao(item) -> int:
     """O que esta linha soma ao primeiro ano, em centavos — a base do desconto dela.
 
@@ -118,6 +154,12 @@ def somar_itens(itens) -> dict:
     """Os itens somados, em centavos: bruto, desconto e líquido, com setup e
     mensalidade sempre separados."""
     b_s = b_m = l_s = l_m = 0
+    # o que está na proposta SEM ser cobrado, pelo valor de tabela. Sai separado
+    # pra o resumo poder dizer "9 itens inclusos, R$ 13.850 de tabela" em vez de
+    # chamar aquilo de "economia" — ver `eh_incluso`. Nenhum total muda por causa
+    # disto: a linha incluída já entra líquida em zero, como sempre entrou.
+    inc_s = inc_m = 0
+    n_inc = 0
     for it in (itens or []):
         if not isinstance(it, dict):
             continue
@@ -126,10 +168,21 @@ def somar_itens(itens) -> dict:
         liq = liquido_do_item(it)
         l_s += liq["setup"]
         l_m += liq["mensal"]
+        if eh_incluso(it):
+            n_inc += 1
+            inc_s += max(0, _int(it.get("setup"))) * 100
+            inc_m += max(0, _int(it.get("mensal"))) * 100
     return {"bruto_setup": b_s, "bruto_mensal": b_m,
             "setup": l_s, "mensal": l_m,
             "desconto_setup": b_s - l_s, "desconto_mensal": b_m - l_m,
-            "desconto": (b_s - l_s) + (b_m - l_m) * MESES_ANO1}
+            "desconto": (b_s - l_s) + (b_m - l_m) * MESES_ANO1,
+            "inclusos": n_inc, "incluso_setup": inc_s, "incluso_mensal": inc_m,
+            "incluso": inc_s + inc_m * MESES_ANO1,
+            # o desconto que é desconto DE VERDADE: o que sobra depois de tirar o
+            # que só está incluso. É este número que pode ir pra tela com a
+            # palavra "desconto" sem mentir.
+            "desconto_real": max(0, ((b_s - l_s) + (b_m - l_m) * MESES_ANO1)
+                                 - (inc_s + inc_m * MESES_ANO1))}
 
 
 # --------------------------------------------------------------- total do doc

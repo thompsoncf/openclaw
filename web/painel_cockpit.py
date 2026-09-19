@@ -4744,6 +4744,12 @@ _ANEXO_JS = r"""
         d.classList.remove("subindo");
         var b=d.querySelector(".barra"); if(b) b.remove();
         if(rot) rot.remove();
+        // A CORRIDA (19/09/2026, foto de teste do dono saiu duas vezes na tela):
+        // a mensagem é gravada ANTES desta resposta voltar — o servidor ainda
+        // espera o WhatsApp receber o arquivo. Se o polling passou nesse meio
+        // tempo, a de verdade JÁ está no chat; aí quem sai é esta, a local.
+        var ja=chat && chat.querySelector('.bub[data-id="'+j.id+'"]');
+        if(ja && ja!==d){ soltar(d); d.remove(); return; }
         d.setAttribute("data-id", j.id);
         // avisa o polling que esta mensagem já está na tela, senão ela voltaria
         // pela outra ponta e o vendedor veria a mesma foto duas vezes
@@ -5584,6 +5590,9 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            # se o vendedor subiu pra ler o histórico, a posição dele é preservada
            "var perto=(chat.scrollHeight-chat.scrollTop-chat.clientHeight)<80;"
            "j.msgs.forEach(function(m){"
+           # já está na tela com este id (o anexo que acabou de subir se marca
+           # assim): não desenha de novo, só anda o marcador
+           "if(chat.querySelector('.bub[data-id=\"'+m.id+'\"]')){if(m.id>ultimo)ultimo=m.id;return;}"
            # a tarja do dia também no polling: quem deixa a conversa aberta e vira
            # a meia-noite veria as duas datas coladas sem isto
            "if(m.dia&&m.dia!==diaAtual){var sep=document.createElement('div');"

@@ -1789,6 +1789,10 @@ _FILA_JS = r"""
   function larg(row){var a=row.querySelector(".actions");return a?a.offsetWidth:168;}
 
   function ligar(row){
+    // a fila troca a lista sem recarregar (ver _sinal_js): os cards novos entram
+    // depois desta linha rodar, e religar um card já ligado daria dois ouvintes
+    // no mesmo gesto — o deslize andaria dobrado.
+    if(row.__ligado)return; row.__ligado=1;
     var front=row.querySelector(".front"), id=row.getAttribute("data-id");
     var sx=0,sy=0,base=0,arrastando=false,decidiu=false,horiz=false,mexeu=false;
     front.addEventListener("pointerdown",function(e){
@@ -1856,7 +1860,19 @@ _FILA_JS = r"""
       toast(a==="assumir"?"É a sua vez — agente desligado":"Devolvido pro agente");
     }).catch(function(){toast("Falha de conexão");fecha(front);});
   }
-  document.querySelectorAll(".swipe").forEach(ligar);
+  // O "perguntar"/"confirmar" mora DENTRO do link do card: para o clique no card e
+  // vai pra conversa com o texto (ou o aviso) pronto.
+  function ligaPerg(b){
+    if(b.__ligado)return; b.__ligado=1;
+    b.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();
+      location.href=b.getAttribute("data-href");});
+  }
+  // exposto porque a lista é trocada sem recarregar: quem troca religa o que entrou
+  window.__ligaFila=function(){
+    document.querySelectorAll(".swipe").forEach(ligar);
+    document.querySelectorAll(".perg").forEach(ligaPerg);
+  };
+  window.__ligaFila();
 
   // ---- push ----
   // O botão do Perfil só marca a preferência no banco. Quem realmente assina é
@@ -1911,7 +1927,7 @@ def _acoes_card(ia: bool) -> str:
 
 def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = False,
           entrou: str = "", fora: str | None = None, q: str = "",
-          ordem: str = "") -> HTMLResponse:
+          ordem: str = "", fragmento: bool = False):
     pool = get_pool()
     from finance import evento_lead as _evl
     from urllib.parse import quote as _quote
@@ -2163,25 +2179,31 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     # recebe os dele no painel, e a faixa aqui seria de outra pessoa.
     novidades = [] if gestor else _novidades_vend(conta_id, membro_id)
     novas = sum(1 for n in novidades if not n["lida"])
+    abas = _abas_vend("fila", total_pend, novas, 0 if gestor else _raiox_n(conta_id, membro_id))
+    sig = ck.sinal_fila(pool, conta_id, membro_id)
+    # As PARTES QUE MUDAM sozinhas: o topo (busca, ordem, pílulas), a lista, o
+    # subtítulo e as abas com os selos. É o que a tela troca quando chega mensagem,
+    # em vez de recarregar a página inteira (ver `_sinal_js`).
+    if fragmento:
+        # `_flash` fica de fora de propósito: ele CONSOME o recado da sessão, e
+        # engoli-lo aqui faria o vendedor nunca ver o "Mensagem enviada ✓" da ação
+        # que ele acabou de fazer.
+        return JSONResponse({"ok": True, "sig": sig, "sub": sub, "foco": foco,
+                             "lista": pushcard + lista + dica + volta, "abas": abas})
     corpo = (_hdr("Meus leads", sub, inicial=_ini(p["nome"]), direita=_selo(conta_id))
              + _flash(request)
              + _faixa_novidade(novidades, conta_id=conta_id, membro_id=membro_id)
              # o repasse vem DEPOIS da novidade e antes do foco: é sobre um lead
              # que já é dele agora, então pertence ao trabalho, não ao noticiário.
              + ("" if gestor else _faixa_recebidos(conta_id, membro_id))
-             + foco
-             + f"<div class=scroll>{pushcard}{lista}{dica}{volta}</div>"
-             # o "perguntar"/"confirmar" mora dentro do link do card: para o clique
-             # no card e vai pra conversa com o texto (ou o aviso) pronto
-             + "<script>document.querySelectorAll('.perg').forEach(function(b){"
-               "b.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();"
-               "location.href=b.getAttribute('data-href');});});</script>"
+             + f"<div id=filafoco>{foco}</div>"
+             + f"<div class=scroll id=filalista>{pushcard}{lista}{dica}{volta}</div>"
              + (f"<a class=fab href='{_BASE}/lead/novo' aria-label='Novo lead'>+</a>"
                 if not gestor else "")
              + "<div class=toast id=toast></div>"
-             + _abas_vend("fila", total_pend, novas, 0 if gestor else _raiox_n(conta_id, membro_id))
+             + f"<div id=filaabas>{abas}</div>"
              + f'<script>window.CKBASE="{_BASE}";</script>' + vapid_js + _FILA_JS
-             + _sinal_js(ck.sinal_fila(pool, conta_id, membro_id))
+             + _sinal_js(sig)
              + _badge_js(total_pend))
     return _page("Meus leads", corpo)
 
@@ -2208,6 +2230,29 @@ def _sinal_js(sig: str) -> str:
     aberto no deslize, ou campo em foco, adiam pro próximo tique."""
     import json as _json          # local, como no resto do arquivo
     return ("<script>(function(){var sig=" + _json.dumps(sig) + ",ocupado=false;"
+            "function partes(){return {foco:document.getElementById('filafoco'),"
+            "lista:document.getElementById('filalista'),abas:document.getElementById('filaabas'),"
+            "sub:document.querySelector('.hdr .tt small')};}"
+            # TROCA SÓ O QUE MUDOU (19/09/2026). Antes era `location.reload()`: a
+            # tela inteira de novo, ~1 s de branco, a rolagem voltando pro topo e o
+            # teclado fechando — a cada mensagem que chegasse. Agora vem só a lista,
+            # o topo e os selos das abas, e a rolagem fica onde estava.
+            #
+            # Recarregar continua sendo o plano B: se a resposta vier torta ou a
+            # tela não tiver os pedaços esperados, a tela velha não pode ficar.
+            "function troca(){"
+            "fetch(window.CKBASE+'/fila/fragmento'+location.search,"
+            "{headers:{'x-cockpit':'1'}}).then(function(r){return r.json();})"
+            ".then(function(j){"
+            "var p=partes();"
+            "if(!j||!j.ok||!p.foco||!p.lista||!p.abas){location.reload();return;}"
+            "var topo=p.lista.scrollTop;"
+            "p.foco.innerHTML=j.foco;p.lista.innerHTML=j.lista;p.abas.innerHTML=j.abas;"
+            "if(p.sub)p.sub.textContent=j.sub;"
+            "p.lista.scrollTop=topo;"                    # a rolagem fica onde estava
+            "if(window.__ligaFila)window.__ligaFila();"  # religa deslize e "perguntar"
+            "sig=j.sig;ocupado=false;})"
+            ".catch(function(){ocupado=false;});}"
             "function tique(){"
             "if(ocupado||document.visibilityState!=='visible')return;"
             "if(document.querySelector('.front.open'))return;"          # deslize aberto
@@ -2215,7 +2260,7 @@ def _sinal_js(sig: str) -> str:
             "if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return;"
             "ocupado=true;"
             "fetch(window.CKBASE+'/fila/sinal').then(function(r){return r.json();})"
-            ".then(function(j){ocupado=false;if(j&&j.ok&&j.sig!==sig)location.reload();})"
+            ".then(function(j){if(j&&j.ok&&j.sig!==sig){troca();return;}ocupado=false;})"
             ".catch(function(){ocupado=false;});}"
             "setInterval(tique,8000);"
             "document.addEventListener('visibilitychange',function(){"
@@ -6294,6 +6339,25 @@ def cockpit_midia(request: Request, lead_id: int, mensagem_id: int):
     return StreamingResponse(_corpo(),
                              media_type=(ref.get("mimetype") or "").split(";")[0].strip()
                              or "application/octet-stream", headers=cab)
+
+
+@router.get("/cockpit/fila/fragmento")
+def cockpit_fila_fragmento(request: Request, entrou: str = "", fora: str | None = None,
+                           q: str = "", ordem: str = ""):
+    """As partes da fila que mudam sozinhas, em JSON: topo, lista, subtítulo e abas.
+
+    É a mesma `_fila` que desenha a tela — os mesmos filtros, a mesma ordem, os
+    mesmos selos. Ter duas montagens seria ter duas filas, e a que ninguém abre é a
+    que sai errada.
+
+    Os parâmetros vêm da barra de endereço da tela (o JS manda `location.search`),
+    pra atualização respeitar o mês, a busca e a ordem que o vendedor escolheu.
+    """
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    return _fila(request, sess[0], sess[1], gestor=bool(_gerencia(request)),
+                 entrou=entrou, fora=fora, q=q, ordem=ordem, fragmento=True)
 
 
 @router.get("/cockpit/fila/sinal")

@@ -297,7 +297,16 @@ function _leadPopEsc(e){if(e.key==='Escape')kbFecharLead();}
 function _leadPopRolou(e){if(_leadPop&&_leadPop.contains(e.target))return;kbFecharLead();}
 function kbAbrirLead(ev,id,cardEl){
   if(ev)ev.stopPropagation();
-  kbFecharChat();
+  // O BALÃO DE CONVERSA PODE NÃO EXISTIR NESTA PÁGINA (19/09/2026). Era
+  // `kbFecharChat()` cru, e funcionava enquanto as únicas telas que abriam a
+  // janela — funil e Follow-up — também carregavam web/balao_conversa.py. A
+  // Comunicação tem o chat PRÓPRIO dela e carrega só a janela: ali o nome não
+  // existe, e um `ReferenceError` na PRIMEIRA linha matava a função inteira. O
+  // botão parecia morto — nada abria, nada aparecia no console de quem usa.
+  // O `kbAbrirSegurado`, mais novo, já nasceu com esta guarda; esta linha é a
+  // que ficou para trás. Dois popovers independentes: fechar o outro é cortesia,
+  // não pré-requisito.
+  if(window.kbFecharChat)kbFecharChat();
   kbFecharLead();
   var r=cardEl.getBoundingClientRect();
   var pop=document.createElement('div');
@@ -661,7 +670,18 @@ function kbAbrirSegurado(ev,id,el,aba){
 }
 function kbSegLigarConversa(pop){
   var b=pop.querySelector('.lp-abrir-conversa'); if(!b)return;
-  b.addEventListener('click',function(ev){ kbAbrirChat(ev, parseInt(b.getAttribute('data-conv'),10), 'conversas', b, b.getAttribute('data-nome')); });
+  b.addEventListener('click',function(ev){
+    var cid=parseInt(b.getAttribute('data-conv'),10);
+    // MESMA ARMADILHA DO `kbFecharChat` (19/09/2026), achada pelo teste que
+    // nasceu daquela: `kbAbrirChat` mora no balão de conversa, e hoje quem abre
+    // a janela do segurado (Renovações) carrega os dois módulos. Se um dia ela
+    // abrir de uma tela que carrega só a janela, este clique seria um
+    // ReferenceError — botão morto, sem aviso nenhum.
+    // Sem o balão, a conversa ainda tem casa: a Comunicação abre pelo id
+    // (`?abrir=`). Trocar o balão por uma página é pior; por nada é bem pior.
+    if(window.kbAbrirChat){ kbAbrirChat(ev, cid, 'conversas', b, b.getAttribute('data-nome')); return; }
+    if(cid) location.href='/painel/prospeccao/comunicacao?abrir='+cid;
+  });
 }
 function kbSegTrocar(aba){
   var pop=_leadPop; if(!pop||!pop._d)return; pop._aba=aba;

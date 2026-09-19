@@ -555,6 +555,12 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
    O `margin-left` impede que ela encoste na última palavra. */
 .bub .hora{float:right;font-size:.6rem;line-height:1.9;opacity:.55;
   margin:0 0 -.15rem .5rem;font-family:var(--mono);white-space:nowrap}
+/* ✓ enviado · ✓✓ entregue · ✓✓ azul lido — o carimbo do WhatsApp, colado na hora.
+   O banco já guardava (`mensagens.status`, 2.660 carimbos em 7 dias) e a tela não
+   mostrava: o vendedor abria o WhatsApp do celular só pra saber se chegou.
+   O azul é o mesmo do WhatsApp; fora do lido, o tom segue o da hora. */
+.bub .hora .ck{font-style:normal;margin-left:.2rem;letter-spacing:-.08em}
+.bub .hora .ck.lido{color:#53BDEB;opacity:1}
 /* A TARJA DO DIA. Fica fora das bolhas, centralizada, e é o que impede a conversa
    de virar uma fila sem tempo: sem ela "20:28" pode ser hoje ou de três semanas
    atrás, e o vendedor abriria o WhatsApp do celular só pra saber. */
@@ -5167,6 +5173,25 @@ def _guardar_html(mensagem_id: int, d: dict) -> str:
             f"guardar</button>")
 
 
+def _ticks(status: str) -> str:
+    """O carimbo de entrega da NOSSA mensagem: ✓ saiu, ✓✓ chegou, ✓✓ azul foi lido.
+
+    Vazio quando não há status: é o caso das mensagens antigas (o carimbo só passou
+    a ser guardado depois) e das do cliente. Um ✓ inventado ali diria que saiu algo
+    que talvez não tenha saído — e este selo só serve se for confiável.
+
+    Mesma tabela do `tk()` do JS, que desenha as que chegam com a tela aberta. As
+    duas têm que produzir o mesmo HTML.
+    """
+    if status == "lido":
+        return "<i class='ck lido' title='lido'>✓✓</i>"
+    if status == "entregue":
+        return "<i class=ck title='entregue'>✓✓</i>"
+    if status == "enviado":
+        return "<i class=ck title='enviado'>✓</i>"
+    return ""
+
+
 def _hora_br(dt) -> str:
     """HH:MM em horário de Brasília — a hora que vai na bolha, como no WhatsApp.
 
@@ -5340,7 +5365,8 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
             bolhas.append(f"<div class=diadia>{esc(dia)}</div>")
             dia_atual = dia
         hora = _hora_br(m.get("quando"))
-        selo = f"<span class=hora>{esc(hora)}</span>" if hora else ""
+        selo = (f"<span class=hora>{esc(hora)}{_ticks(m.get('status') or '')}</span>"
+                if hora else "")
         bolhas.append(f"<div class='bub {esc(who)}' data-id='{m.get('id') or 0}'>"
                       f"{rot}{_midia_html(lead_id, m)}{esc(m['texto'])}{selo}</div>")
     if d["ia"]:
@@ -5577,6 +5603,10 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "function rot(w){return w==='ia'?'<div class=who>Agente</div>':"
            "w==='out'?'<div class=who>Você</div>':'';}"
            "function txt(s){var e=document.createElement('div');e.textContent=s;return e.innerHTML;}"
+           # a mesma tabela do `_ticks` do servidor: ✓ saiu, ✓✓ chegou, ✓✓ azul lido
+           "function tk(s){return s==='lido'?'<i class=\"ck lido\" title=lido>✓✓</i>':"
+           "s==='entregue'?'<i class=ck title=entregue>✓✓</i>':"
+           "s==='enviado'?'<i class=ck title=enviado>✓</i>':'';}"
            # A LUPA. Delegação no chat inteiro, e não um onclick por imagem: as fotos
            # que chegam pelo polling nascem depois desta linha rodar, e um handler
            # amarrado na criação não pegaria elas.
@@ -5655,6 +5685,15 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            # quem responde mudou (o agente assumiu, ou um colega assumiu por você):
            # o composer inteiro é outro, então recarregar é mais honesto que remendar
            "if(j.ia!==ia){location.reload();return;}"
+           # OS ✓✓ DAS QUE JÁ ESTÃO NA TELA. "Entregue" e "lido" chegam minutos
+           # depois, como mudança de status — não como mensagem nova. Sem isto o ✓
+           # ficaria parado até recarregar, e o vendedor iria conferir no celular.
+           "(j.estados||[]).forEach(function(e){"
+           "var b=chat.querySelector('.bub[data-id=\"'+e.id+'\"]');if(!b)return;"
+           "var h=b.querySelector('.hora');if(!h)return;"
+           "var novo=tk(e.status);if(!novo)return;"
+           "var i=h.querySelector('.ck');"
+           "if(i)i.outerHTML=novo;else h.insertAdjacentHTML('beforeend',novo);});"
            "if(!j.msgs||!j.msgs.length)return;"
            # a regra que o inbox do gestor já acertou: no rodapé, segue a conversa;
            # se o vendedor subiu pra ler o histórico, a posição dele é preservada
@@ -5675,7 +5714,7 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "{vs[k].remove();break;}}}"
            "var d=document.createElement('div');d.className='bub '+m.who;"
            "d.setAttribute('data-id',m.id);d.innerHTML=rot(m.who)+mid(m)+txt(m.texto)"
-           "+(m.hora?('<span class=hora>'+txt(m.hora)+'</span>'):'');"
+           "+(m.hora?('<span class=hora>'+txt(m.hora)+tk(m.status)+'</span>'):'');"
            "chat.appendChild(d);ultimo=m.id;});"
            "if(perto)fim();"
            "}).catch(function(){ocupado=false;});}"
@@ -6263,9 +6302,13 @@ def cockpit_lead_mensagens(request: Request, lead_id: int, desde: int = 0):
     # errada), e a conversa tem que mostrar o mesmo horário pra todo mundo.
     novas = [{"id": m["id"], "who": m["who"], "texto": m["texto"],
               "hora": _hora_br(m.get("quando")), "dia": _dia_br(m.get("quando")),
+              "status": m.get("status") or "",
               **({"midia": m["midia"]} if m.get("midia") else {})}
              for m in d["mensagens"] if (m.get("id") or 0) > desde]
-    return JSONResponse({"ok": True, "ia": bool(d["ia"]), "msgs": novas})
+    # `estados` são os ✓✓ das mensagens que JÁ ESTÃO na tela: o carimbo de entrega
+    # e de leitura chega depois, num update, e sem isto o ✓ ficaria congelado.
+    return JSONResponse({"ok": True, "ia": bool(d["ia"]), "msgs": novas,
+                         "estados": d.get("estados") or []})
 
 
 @router.get("/cockpit/lead/{lead_id}/midia/{mensagem_id}")

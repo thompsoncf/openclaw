@@ -2389,19 +2389,18 @@ function _respondidoHtml(e){
     +   'Desfazer</button></div>';
 }
 function responderOcupa(id, resposta){
-  // zapFetch, e não fetch cru: ele é que distingue as cinco causas de falha em
-  // vez de dizer "Falha de rede." pra todas, e avisa a aba que ficou velha
-  // depois de um deploy. A trava que exige isso é test_zap_fetch.py.
-  zapFetch('/painel/agenda/ocupa', {
-    method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'},
-    body: 'evento_id='+encodeURIComponent(id)+'&resposta='+encodeURIComponent(resposta)
-  }).then(function(d){ if(!d) return;      // zapFetch já falou com a pessoa
-    if(!d.ok){ zapAviso('Não deu pra gravar a resposta. Tente de novo.'); return; }
-    // a página inteira volta porque a resposta muda o CALENDÁRIO, não só esta
-    // caixa: o dia pode sair de "a conferir" pra ocupado, e a faixa do ano
-    // reconta os sábados. Redesenhar só a caixa deixaria as duas discordando.
-    window.location.href = '/painel/agenda?m=' + encodeURIComponent(MES_ATUAL);
-  });
+  var fd = new FormData();
+  fd.append('evento_id', id); fd.append('resposta', resposta);
+  zapFetch('/painel/agenda/ocupa', {method:'POST', body: fd})
+    .then(function(d){
+      // `d` nulo = o zapFetch já disse o que houve, com a causa certa
+      if(!d) return;
+      if(!d.ok){ zapAviso('Não deu pra gravar a resposta.', {tipo:'mal'}); return; }
+      // a página inteira volta porque a resposta muda o CALENDÁRIO, não só esta
+      // caixa: o dia pode sair de "a conferir" pra ocupado, e a faixa do ano
+      // reconta os sábados. Redesenhar só a caixa deixaria as duas discordando.
+      window.location.href = '/painel/agenda?m=' + encodeURIComponent(MES_ATUAL);
+    });
 }
 var AG_DIA_ABERTO = '';
 function abrirDia(iso){

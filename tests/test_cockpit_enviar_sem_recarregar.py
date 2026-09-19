@@ -206,8 +206,10 @@ def _tela_da_conversa(texto_pre: str = "") -> str:
          "evento_fmt": "", "status": "novo", "ia": False, "trava": None, "zap_link": "",
          "etapas": [{"chave": "novo", "rotulo": "Novo"}], "motivos_perda": [],
          "aviso_conversa": {}, "evento_pista": None,
-         "mensagens": [{"id": 10, "who": "in", "texto": "Oi, tem data?", "quando": agora},
-                       {"id": 11, "who": "out", "texto": "Tem sim!", "quando": agora}]}
+         "mensagens": [{"id": 10, "who": "in", "texto": "Oi, tem data?", "quando": agora,
+                        "status": ""},
+                       {"id": 11, "who": "out", "texto": "Tem sim!", "quando": agora,
+                        "status": "lido"}]}
     req = SimpleNamespace(session={}, query_params=QueryParams(
         f"texto={texto_pre}" if texto_pre else ""))
     # pode_voz: com o microfone e o clipe na tela, que é o caso da conta QR — é
@@ -249,6 +251,23 @@ def test_foto_enviada_nao_aparece_duas_vezes():
     html = _tela_da_conversa()
     assert "ja && ja!==d" in html and "d.remove(); return;" in html
     assert """if(chat.querySelector('.bub[data-id="'+m.id+'"]'))""" in html
+
+
+def test_o_carimbo_de_entrega_aparece_colado_na_hora():
+    """Como no WhatsApp: ✓ saiu, ✓✓ chegou, ✓✓ azul foi lido — ao lado da hora, e
+    só nas NOSSAS mensagens."""
+    assert pc._ticks("enviado") == "<i class=ck title='enviado'>✓</i>"
+    assert pc._ticks("entregue") == "<i class=ck title='entregue'>✓✓</i>"
+    assert "lido" in pc._ticks("lido") and "✓✓" in pc._ticks("lido")
+    assert pc._ticks("") == "" and pc._ticks("qualquer_coisa") == ""
+
+    html = _tela_da_conversa()
+    dela, minha = html.split("Oi, tem data?")[1], html.split("Tem sim!")[1]
+    assert "ck lido" in minha[:120], "a minha leva o carimbo"
+    assert "ck" not in dela[:80], "a do cliente, não"
+    # e o polling desenha igual: a tabela do JS é a mesma do servidor
+    assert "s==='lido'" in html and "s==='entregue'" in html and "s==='enviado'" in html
+    assert "j.estados||[]" in html, "o ✓ vira ✓✓ sem mensagem nova"
 
 
 def test_a_folha_de_acoes_nao_empurra_a_tela_pra_cima():

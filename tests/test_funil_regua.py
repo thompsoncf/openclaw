@@ -883,3 +883,60 @@ def test_a_escala_nao_depende_da_hora_REAL_em_que_o_teste_roda(pool):
         carimbos = c.execute("select nivel, criado_em from funil_avisos order by id").fetchall()
         assert dict(carimbos) == {"vendedor": AGORA, "gestor": AGORA + timedelta(hours=6)}
 
+
+
+# ------------------------------------------------ o custo não cresce com a carteira
+
+class _Contando:
+    """Conexão que conta os `execute` e repassa tudo pro banco de verdade.
+
+    O que este arquivo mede em toda parte é COMPORTAMENTO; aqui o que importa é o
+    CUSTO — e custo de banco não aparece em asserção de resultado.
+    """
+
+    def __init__(self, c):
+        self._c, self.n = c, 0
+
+    def execute(self, *a, **k):
+        self.n += 1
+        return self._c.execute(*a, **k)
+
+    def __getattr__(self, nome):
+        return getattr(self._c, nome)
+
+
+def test_o_gatilho_nao_consulta_uma_vez_por_lead(pool):
+    """A TRAVA DO CUSTO. Até 19/09/2026 o laço perguntava ao banco, POR LEAD, qual
+    foi o último movimento manual e se o salto já tinha sido anotado: 7,4 milhões
+    de execuções em 100 dias (pg_stat_statements), a cada 2 minutos, por conta — e
+    tudo isso dentro da transação que segura as linhas de `prospeccao`, que é o que
+    fazia o vendedor esperar pra mudar a etapa de um card.
+
+    Dez vezes mais leads não pode custar dez vezes mais consultas.
+    """
+    with pool.connection() as c:
+        _ligar(c, "contatado", "observando")
+        for i in range(3):
+            conv = _conversa(c, _lead(c, empresa=f"Lead {i}"))
+            _msg(c, conv, "out", AGORA)
+        c.commit()
+        poucos = _Contando(c)
+        assert fr.aplicar_gatilhos(poucos, CONTA)["simulados"] == 3
+        c.commit()
+
+    with pool.connection() as c:
+        c.execute("delete from funil_movimentos where conta_id=%s", (CONTA,))
+        for i in range(3, 33):
+            conv = _conversa(c, _lead(c, empresa=f"Lead {i}"))
+            _msg(c, conv, "out", AGORA)
+        c.commit()
+        muitos = _Contando(c)
+        assert fr.aplicar_gatilhos(muitos, CONTA)["simulados"] == 33
+        c.commit()
+
+    # 11x mais leads, e o número de consultas mal se move: o que cresce é o INSERT
+    # do histórico (um por salto), não a decisão.
+    cresceu = muitos.n - poucos.n
+    assert cresceu <= 33 + 3, (
+        f"{poucos.n} consultas pra 3 leads e {muitos.n} pra 33: a decisão voltou a "
+        "ser uma consulta por lead")

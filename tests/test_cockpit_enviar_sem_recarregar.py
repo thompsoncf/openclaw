@@ -91,6 +91,14 @@ globalThis.fetch = function(url, opt){
     ? Promise.reject(new Error("offline"))
     : Promise.resolve({json: function(){ return Promise.resolve(resposta); }});
 };
+// O zapFetch (web/zap_fetch.py) entrega o CORPO, não a Response — e `null`
+// quando a troca falhou, já tendo avisado a pessoa. Mesmo log: o que estes
+// testes medem é o que foi PEDIDO, e isso não mudou com o caminho.
+globalThis.zapFetch = function(url, opt){
+  opt = opt || {};
+  log.fetch.push({url: url, headers: opt.headers, corpo: String(opt.body)});
+  return Promise.resolve(resposta === "rede" ? null : resposta);
+};
 
 function envia(txt){
   campo.value = txt;

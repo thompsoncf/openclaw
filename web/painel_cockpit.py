@@ -52,6 +52,9 @@ from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse, Res
 
 from db.conexao import get_pool
 from web import tema as _tema
+from web import versao as _versao
+from web import zap_fetch as _zap    # o app monta o próprio <head>: o módulo entra na mão
+from web import estaticos as _estaticos
 from finance import cockpit as ck
 from finance import cockpit_dono as cd
 
@@ -133,6 +136,11 @@ def _gerencia(request: Request):
 # bloco que o portal, o admin e a agenda usam. Aqui embaixo fica só o CSS de
 # layout deste app (app shell, abas, folha de ações), que não existe em outro lugar.
 _CSS = _tema.FONTES + """<style>""" + _tema.variaveis(com_base=False) + """
+/* O AVISO DO ZAPFETCH (20/09/2026). `--zap-baixo` é a altura do rodapé fixo
+   deste app: é a MESMA de `.toast{bottom:88px}` logo abaixo, e sem ela o aviso
+   cobriria justamente o botão que a pessoa precisa apertar. */
+:root{--zap-baixo:88px}
+""" + _zap.CSS + """
 *{box-sizing:border-box}html,body{margin:0}
 /* A FAIXA DE BAIXO QUE NÃO DÁ PRA USAR.
    `viewport-fit=cover` (ver _page) manda desenhar por baixo das barras do sistema —
@@ -1299,6 +1307,21 @@ def _page(title: str, corpo: str) -> HTMLResponse:
         # Assim a fonte começa a vir no primeiro quadro.
         f"<title>{esc(title)} · Zaq</title>{_tema.FONTES}"
         f"<link rel=stylesheet href='{_BASE}/app.css?v={_CSS_VER}'>"
+        # O ZAPFETCH (20/09/2026). Este app monta o próprio <head> e por isso
+        # ficou de fora das duas primeiras levas — o módulo entra pelo template
+        # BASE do painel, que aqui não existe. Migrar sem trazê-lo junto daria
+        # `ReferenceError` em 13 lugares no celular do vendedor.
+        #
+        # O CSS do aviso vai junto com o resto na FOLHA (`app.css`), não aqui: a
+        # regra desta tela é que a folha não viaja dentro do documento — ela é
+        # arquivo versionado e o service worker a guarda. Foi o
+        # test_cockpit_estatico que me lembrou, e com razão.
+        #
+        # `ZAQ_VERSAO` importa MAIS aqui que no painel: isto é um app instalado
+        # no telefone, que fica dias aberto na mesma aba. É o lugar onde "a aba
+        # é de antes do deploy" deixa de ser hipótese.
+        f"<script>window.ZAQ_VERSAO={_json_mod.dumps(_versao.VERSAO or '')};</script>"
+        f'<script src="{_ZAP_URL}" defer></script>'
         "</head><body>" + _ICONES + _ABERTURA_HTML +
         f"<div class=wrap><div class=glow></div>{_ZPROG}{corpo}</div>"
         "<script>if('serviceWorker' in navigator)"
@@ -1311,6 +1334,15 @@ def _page(title: str, corpo: str) -> HTMLResponse:
 #: O traço do logo, sozinho — o mesmo `d` do _ICON_SVG. Some a moldura: na cortina
 #: o fundo já é o da marca, e no indicador ela viraria um quadrado no meio da tela.
 _Z_PATH = "<path class=zdraw d='M170 150 h150 L190 362 h150'/>"
+
+#: O MÓDULO DO ZAPFETCH COMO ARQUIVO, e não embutido (20/09/2026).
+#: Este app é form + redirect: todo toque numa aba, num card ou no enviar é uma
+#: NAVEGAÇÃO inteira. 5 KB embutidos seriam 5 KB a cada toque, e o
+#: test_cockpit_estatico existe justamente porque o HTML por navegação já
+#: inchou uma vez (38.880 bytes, 85% a mesma folha repetida). Como arquivo, o
+#: navegador busca uma vez e o service worker guarda.
+#: `defer` porque ninguém o chama durante o parse — só em clique.
+_ZAP_URL = _estaticos.registrar("zapfetch.js", _zap.JS)
 
 #: o Z pequeno que substitui o fio de progresso ao trocar de aba
 _ZPROG = f"<svg class=zprog id=zprog viewBox='0 0 512 512' aria-hidden=true>{_Z_PATH}</svg>"
@@ -1445,10 +1477,8 @@ _ESPERA_JS = """<script>(function(){
     var corpo=new URLSearchParams(new FormData(f));
     campo.value='';if(campo.style)campo.style.height='';
     recado('');
-    fetch(f.action,{method:'POST',credentials:'same-origin',
-      headers:{'x-cockpit':'1','Content-Type':'application/x-www-form-urlencoded'},body:corpo})
-    .then(function(r){return r.json();})
-    .then(function(j){
+    zapFetch(f.action,{method:'POST',credentials:'same-origin',
+      headers:{'x-cockpit':'1','Content-Type':'application/x-www-form-urlencoded'},body:corpo}).then(function(j){if(!j){falhou('Sem conexão agora — a mensagem não saiu.');return;}
       if(j&&j.ok){
         var t=d&&d.querySelector('.tick');if(t)t.textContent='✓';
         if(window.__puxa)window.__puxa();
@@ -1460,8 +1490,7 @@ _ESPERA_JS = """<script>(function(){
         location.href=location.pathname+'?texto='+encodeURIComponent(txt);return;
       }
       falhou(j&&j.erro);
-    })
-    .catch(function(){falhou('Sem conexão agora — a mensagem não saiu.');});
+    });
     function falhou(msg){
       if(d)d.remove();
       // o texto volta pra caixa: redigitar é o que manda o vendedor pro WhatsApp
@@ -1841,7 +1870,7 @@ _FILA_JS = r"""
     var opt={method:"POST",headers:{"x-cockpit":"1"}};
     if(a==="ganho"){opt.headers["Content-Type"]="application/x-www-form-urlencoded";
       opt.body="tipo=ganho";}
-    fetch(url,opt).then(function(r){return r.json();}).then(function(j){
+    zapFetch(url,opt).then(function(j){if(!j){toast("Falha de conexão");fecha(front);return;}
       if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");fecha(front);return;}
       if(a==="ganho"){
         row.style.height=row.offsetHeight+"px";row.style.overflow="hidden";
@@ -1858,7 +1887,7 @@ _FILA_JS = r"""
       liga_acoes(row,front,id);
       fecha(front);
       toast(a==="assumir"?"É a sua vez — agente desligado":"Devolvido pro agente");
-    }).catch(function(){toast("Falha de conexão");fecha(front);});
+    });
   }
   // O "perguntar"/"confirmar" mora DENTRO do link do card: para o clique no card e
   // vai pra conversa com o texto (ou o aviso) pronto.
@@ -2241,9 +2270,9 @@ def _sinal_js(sig: str) -> str:
             # Recarregar continua sendo o plano B: se a resposta vier torta ou a
             # tela não tiver os pedaços esperados, a tela velha não pode ficar.
             "function troca(){"
-            "fetch(window.CKBASE+'/fila/fragmento'+location.search,"
-            "{headers:{'x-cockpit':'1'}}).then(function(r){return r.json();})"
-            ".then(function(j){"
+            "zapFetch(window.CKBASE+'/fila/fragmento'+location.search,"
+            "{silencioso:true,headers:{'x-cockpit':'1'}})"
+            ".then(function(j){if(!j){ocupado=false;return;}"
             "var p=partes();"
             "if(!j||!j.ok||!p.foco||!p.lista||!p.abas){location.reload();return;}"
             "var topo=p.lista.scrollTop;"
@@ -2251,17 +2280,15 @@ def _sinal_js(sig: str) -> str:
             "if(p.sub)p.sub.textContent=j.sub;"
             "p.lista.scrollTop=topo;"                    # a rolagem fica onde estava
             "if(window.__ligaFila)window.__ligaFila();"  # religa deslize e "perguntar"
-            "sig=j.sig;ocupado=false;})"
-            ".catch(function(){ocupado=false;});}"
+            "sig=j.sig;ocupado=false;});}"
             "function tique(){"
             "if(ocupado||document.visibilityState!=='visible')return;"
             "if(document.querySelector('.front.open'))return;"          # deslize aberto
             "var a=document.activeElement;"
             "if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return;"
             "ocupado=true;"
-            "fetch(window.CKBASE+'/fila/sinal').then(function(r){return r.json();})"
-            ".then(function(j){if(j&&j.ok&&j.sig!==sig){troca();return;}ocupado=false;})"
-            ".catch(function(){ocupado=false;});}"
+            "zapFetch(window.CKBASE+'/fila/sinal',{silencioso:true})"
+            ".then(function(j){if(j&&j.ok&&j.sig!==sig){troca();return;}ocupado=false;});}"
             "setInterval(tique,8000);"
             "document.addEventListener('visibilitychange',function(){"
             "if(document.visibilityState==='visible')tique();});"
@@ -2289,11 +2316,15 @@ _JS_DESFECHO = """<script>
           b.disabled = true;
         });
         bt.textContent = 'salvando...';
-        fetch('/painel/agenda/desfecho', {
+        zapFetch('/painel/agenda/desfecho', {
           method: 'POST', credentials: 'same-origin',
           headers: {'Content-Type': 'application/x-www-form-urlencoded'},
           body: 'evento_id=' + encodeURIComponent(id) + '&desfecho=' + encodeURIComponent(d)
-        }).then(function(r){ return r.json(); }).then(function(j){
+        }).then(function(j){if(!j){Array.prototype.forEach.call(box.querySelectorAll('.pb'), function(b){
+            b.disabled = false;
+          });
+          bt.textContent = (d === 'realizado') ? 'Apareceu' : 'Nao apareceu';
+          cartaoAviso(box);return;}
           if(!j || !j.ok) throw new Error('falhou');
           var cartao = box.parentNode;
           cartao.className = 'pend feito';
@@ -2317,12 +2348,6 @@ _JS_DESFECHO = """<script>
               if(cartao.parentNode) cartao.parentNode.removeChild(cartao);
             }, 1200);
           }
-        }).catch(function(){
-          Array.prototype.forEach.call(box.querySelectorAll('.pb'), function(b){
-            b.disabled = false;
-          });
-          bt.textContent = (d === 'realizado') ? 'Apareceu' : 'Nao apareceu';
-          cartaoAviso(box);
         });
       });
     });
@@ -3353,17 +3378,16 @@ _ORC_JS = r"""
     g.disabled=true;g.textContent="Gerando…";
     // manda o BRUTO e o que foi digitado: o servidor refaz a conta do desconto.
     // Mandar o já descontado faria ele descontar de novo.
-    fetch(O.base+"/lead/"+O.leadId+"/orcamento",{method:"POST",
+    zapFetch(O.base+"/lead/"+O.leadId+"/orcamento",{method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({itens:itens(),desconto:{tipo:dFim.t,pct:dFim.v,valor:dFim.v},
                            evento:coletarEvento(),parcelas:parcelas,
-                           orcamento_id:O.orcId||0})})
-      .then(function(r){return r.json();}).then(function(j){
+                           orcamento_id:O.orcId||0})}).then(function(j){if(!j){toast("Falha de conexão");g.disabled=false;
+        g.textContent="Gerar proposta e link";return;}
         if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");g.disabled=false;
           g.textContent="Gerar proposta e link";return;}
         pronto(j);
-      }).catch(function(){toast("Falha de conexão");g.disabled=false;
-        g.textContent="Gerar proposta e link";});
+      });
   };
   function pronto(j){
     $("build").style.display="none";$("rodape").style.display="none";
@@ -3383,13 +3407,11 @@ _ORC_JS = r"""
       function(){toast("Link copiado");},function(){toast("Selecione e copie");});};
     $("naconversa").onclick=function(){
       var b=this;b.disabled=true;b.textContent="Enviando…";
-      fetch(O.base+"/lead/"+O.leadId+"/orcamento/enviar",{method:"POST",
-        headers:{"Content-Type":"application/json"},body:JSON.stringify({link:j.link})})
-        .then(function(r){return r.json();}).then(function(x){
+      zapFetch(O.base+"/lead/"+O.leadId+"/orcamento/enviar",{method:"POST",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify({link:j.link})}).then(function(x){if(!x){toast("Falha de conexão");b.disabled=false;
+          b.textContent="Enviar na conversa do lead";return;}
           toast(x&&x.ok?"Enviado na conversa":(x&&x.erro)||"Não consegui enviar agora");
-          b.disabled=false;b.textContent="Enviar na conversa do lead";})
-        .catch(function(){toast("Falha de conexão");b.disabled=false;
-          b.textContent="Enviar na conversa do lead";});};
+          b.disabled=false;b.textContent="Enviar na conversa do lead";});};
   }
   // exposto pro teste de paridade rodar a MESMA conta que a tela roda
   window.__orc={conta:conta,itens:itens,sel:sel,avulsos:avulsos,dFim:dFim,
@@ -3609,15 +3631,14 @@ _VISITA_JS = r"""
   };
   $("agendar").onclick=function(){
     var b=this;b.disabled=true;b.textContent="Agendando…";
-    fetch(V.base+"/lead/"+V.leadId+"/visita",{method:"POST",
+    zapFetch(V.base+"/lead/"+V.leadId+"/visita",{method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({data:st.dia,hora:st.hora,dur:st.dur,lembrete:st.lembr,
-        local:$("endereco").value,avisar:!$("avisar").classList.contains("off")})})
-      .then(function(r){return r.json();}).then(function(j){
+        local:$("endereco").value,avisar:!$("avisar").classList.contains("off")})}).then(function(j){if(!j){toast("Falha de conexão");b.disabled=false;b.textContent="Agendar visita";return;}
         if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");b.disabled=false;
           b.textContent="Agendar visita";return;}
         pronto(j);
-      }).catch(function(){toast("Falha de conexão");b.disabled=false;b.textContent="Agendar visita";});
+      });
   };
   function pronto(j){
     $("build").style.display="none";$("rodape").style.display="none";
@@ -3775,7 +3796,9 @@ _CEP_JS = """<script>(function(){
     if(d===ultimo) return;                               // não repete a consulta
     ultimo=d;
     diz('buscando…');
-    fetch('/api/cep/'+d).then(function(r){return r.json();}).then(function(j){
+    zapFetch('/api/cep/'+d).then(function(j){if(!j){// `ultimo` volta pro vazio pra dar pra tentar de novo: engolir o erro em
+      // silêncio, como era antes, é o que fazia falha e sucesso serem idênticos.
+      ultimo=''; diz('não deu pra buscar agora — toque no CEP pra tentar de novo','ruim');return;}
       if(!j||!j.ok){ ultimo=''; diz('CEP não encontrado — confira ou preencha à mão','ruim'); return; }
       po('fic-endereco',j.rua); po('fic-bairro',j.bairro);
       po('fic-cidade',j.cidade); po('fic-uf',j.uf);
@@ -3785,10 +3808,6 @@ _CEP_JS = """<script>(function(){
           ? j.cidade+'/'+j.uf+' — CEP amplo, complete a rua'
           : j.cidade+'/'+j.uf+' ✓', 'bom');
       var n=document.getElementById('fic-numero'); if(n&&!n.value.trim()) n.focus();
-    }).catch(function(){
-      // `ultimo` volta pro vazio pra dar pra tentar de novo: engolir o erro em
-      // silêncio, como era antes, é o que fazia falha e sucesso serem idênticos.
-      ultimo=''; diz('não deu pra buscar agora — toque no CEP pra tentar de novo','ruim');
     });
   });
 })();</script>"""
@@ -4389,17 +4408,15 @@ def _js_comprovante(orc_id: int) -> str:
       "    var f=inp.files&&inp.files[0]; if(!f)return;"
       "    var lb=inp.parentNode, t0=lb.textContent;"
       "    lb.textContent='Enviando...'; lb.classList.add('on');"
-      "    fetch(BASE+'/orcamentos/'+ORC+'/comprovante/'+inp.getAttribute('data-px'),{"
+      "    zapFetch(BASE+'/orcamentos/'+ORC+'/comprovante/'+inp.getAttribute('data-px'),{"
       "      method:'POST',body:f,"
       "      headers:{'x-nome':btoa(unescape(encodeURIComponent(f.name||'comprovante'))),"
       "               'content-type':f.type||'application/octet-stream'}})"
-      "    .then(function(r){return r.json();})"
       "    .then(function(d){"
-      "      if(d&&d.ok){location.reload();}"
+      "      if(!d){lb.textContent=t0;lb.classList.remove('on');return;}"
+      "      if(d.ok){location.reload();}"
       "      else{lb.textContent=t0;lb.classList.remove('on');"
-      "           alert((d&&d.erro)||'Não deu pra anexar.');}})"
-      "    .catch(function(){lb.textContent=t0;lb.classList.remove('on');"
-      "           alert('Sem conexão. Tente de novo.');});"
+      "           zapAviso(d.erro||'Não deu pra anexar.',{tipo:'mal'});}});"
       "  });});"
       "})();</script>")
 
@@ -5057,9 +5074,10 @@ _VOZ_JS = r"""
     blob.arrayBuffer().then(function(buf){
       var h={"Content-Type": blob.type || tipoAtual};
       if(onda) h["X-Onda"]=b64(onda);
-      return fetch(BASE+"/lead/"+LEAD+"/audio?seg="+seg,{method:"POST",headers:h,body:buf});
-    }).then(function(r){ return r.json(); }).then(function(j){
-      if(j && j.ok){
+      return zapFetch(BASE+"/lead/"+LEAD+"/audio?seg="+seg,{method:"POST",headers:h,body:buf});
+    }).then(function(j){
+      if(!j){ sair(); return; }
+      if(j.ok){
         sair();
         // a conversa já se atualiza sozinha (puxa): recarregar a página inteira
         // custava ~1s de tela branca logo depois de enviar
@@ -5604,9 +5622,9 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "window.vpDecide=function(id,acao){"
            "var cx=document.getElementById('vp-'+id);if(!cx)return;"
            "cx.querySelectorAll('button').forEach(function(b){b.disabled=true;});"
-           "fetch(location.pathname+'/visita-proposta/'+id+'/'+acao,"
+           "zapFetch(location.pathname+'/visita-proposta/'+id+'/'+acao,"
            "{method:'POST',headers:{'X-Requested-With':'fetch'}})"
-           ".then(function(r){return r.json();}).then(function(d){"
+           ".then(function(d){if(!d)return;"
            "if(d&&d.ok){cx.outerHTML=acao==='confirmar'"
            "?'<div class=vp><div class=vp-tt>\\u2705 Visita confirmada</div>"
            "<div class=vp-q>O cliente j\\u00e1 recebeu o aviso.</div></div>':'';return;}"
@@ -5639,8 +5657,9 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "var b=e.target.closest&&e.target.closest('.guardar');if(!b)return;"
            "var id=b.getAttribute('data-msg');if(!id||b.disabled)return;"
            "b.disabled=true;b.textContent='guardando…';"
-           f"fetch('{_BASE}/lead/{lead_id}/guardar/'+id,{{method:'POST'}})"
-           ".then(function(r){return r.json();}).then(function(j){"
+           f"zapFetch('{_BASE}/lead/{lead_id}/guardar/'+id,{{method:'POST'}})"
+           ".then(function(j){"
+           "if(!j){b.disabled=false;b.textContent='guardar';return;}"
            # vira SELO, não volta a ser botão: guardado é estado final
            "if(j&&j.ok){var s2=document.createElement('span');s2.className='guardado';"
            "s2.textContent='🔒 guardado';b.parentNode.replaceChild(s2,b);return;}"
@@ -5649,8 +5668,8 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "}).catch(function(){b.disabled=false;b.textContent='guardar';});});"
            "function puxa(){"
            "if(ocupado||document.visibilityState!=='visible')return;ocupado=true;"
-           f"fetch('{_BASE}/lead/{lead_id}/mensagens?desde='+ultimo)"
-           ".then(function(r){return r.json();}).then(function(j){"
+           f"zapFetch('{_BASE}/lead/{lead_id}/mensagens?desde='+ultimo,{{silencioso:true}})"
+           ".then(function(j){"
            "ocupado=false;if(!j||!j.ok)return;"
            # quem responde mudou (o agente assumiu, ou um colega assumiu por você):
            # o composer inteiro é outro, então recarregar é mais honesto que remendar

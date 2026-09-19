@@ -100,8 +100,10 @@ def test_a_ficha_tem_endereco_e_aniversario():
 
 def test_o_cep_puxa_o_endereco_pela_rota_que_ja_existe():
     """Nada de rota nova: /api/cep/{cep} já existe no portal e usa a BrasilAPI."""
-    assert "fetch('/api/cep/'+d)" in pc._CEP_JS
-    assert ".catch(" in pc._CEP_JS, "API fora do ar não pode travar a ficha"
+    assert "zapFetch('/api/cep/'+d)" in pc._CEP_JS
+    # desde 20/09/2026 quem trata a falha é o zapFetch: a guarda `if(!j)` faz o
+    # papel do antigo `.catch`, e com a vantagem de o recado dizer a CAUSA
+    assert "if(!j){" in pc._CEP_JS, "API fora do ar não pode travar a ficha"
     for alvo in ("fic-endereco", "fic-bairro", "fic-cidade", "fic-uf"):
         assert alvo in pc._CEP_JS
 
@@ -133,9 +135,15 @@ def test_o_cep_diz_o_que_aconteceu_em_todos_os_desfechos():
 
 def test_erro_de_rede_permite_tentar_de_novo():
     """`ultimo` evita repetir a consulta do mesmo CEP. Se ele não voltasse a zero na
-    falha, o vendedor ficaria preso: digitar o mesmo CEP não tentaria mais nada."""
-    trecho = pc._CEP_JS[pc._CEP_JS.index(".catch("):]
-    assert "ultimo=''" in trecho, "erro de rede tem que liberar nova tentativa"
+    falha, o vendedor ficaria preso: digitar o mesmo CEP não tentaria mais nada.
+
+    O recorte é a GUARDA do zapFetch (`if(!j){…}`), que substituiu o `.catch` em
+    20/09/2026 — e é só ela, não o corpo inteiro: `ultimo=''` aparece também no
+    caminho de "CEP não encontrado", e procurar no arquivo todo faria o teste
+    passar com a guarda vazia."""
+    i = pc._CEP_JS.index("if(!j){")
+    guarda = pc._CEP_JS[i:pc._CEP_JS.index("return;}", i)]
+    assert "ultimo=''" in guarda, "erro de rede tem que liberar nova tentativa"
 
 
 def test_a_rota_de_salvar_aceita_os_campos_novos():

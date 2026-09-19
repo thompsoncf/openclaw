@@ -13733,7 +13733,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           _apsOcupado=true;
           var b=document.getElementById('wa-aps-btn');
           if(b){b.disabled=true;b.textContent='Perguntando…';}
-          zapFetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos?perguntar=1')
+          zapFetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos?perguntar=1',{silencioso:true})
             .then(function(d){if(d)apsPinta(d);})
             .then(function(){_apsOcupado=false;
               if(b){b.disabled=false;b.textContent='Conferir aparelhos ligados';}});
@@ -13741,7 +13741,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         // a saída por fora vem do BANCO: não toca no WhatsApp, então pode carregar
         // junto com a página e ficar sempre à vista
         document.addEventListener('DOMContentLoaded',function(){
-          zapFetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos')
+          zapFetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos',{silencioso:true})
             .then(function(d){if(d)apsPinta(d);});
         });
         var _qrTimer=null;
@@ -13992,7 +13992,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             btn.title=conectado?'A sessão está de pé. Clique só se desconfiar do status — verifica sem derrubar nada.':'';
             btn.disabled=false;}
           if(d.status==='desconectado'||conectado){if(_c2Timer){clearInterval(_c2Timer);_c2Timer=null;}}}
-        function c2Poll(){zapFetch('/painel/prospeccao/comunicacao/whatsapp-qr-status?chip='+encodeURIComponent(c2Chip()))
+        function c2Poll(){zapFetch('/painel/prospeccao/comunicacao/whatsapp-qr-status?chip='+encodeURIComponent(c2Chip()),{silencioso:true})
           .then(function(d){c2Show(d||null);});}
         function c2Iniciar(){var btn=document.getElementById('c2-btn'),msg=document.getElementById('c2-msg');
           btn.disabled=true;btn.textContent='Gerando…';if(msg)msg.textContent='';
@@ -14062,7 +14062,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               if(b){b.disabled=false;b.textContent='Conferir aparelhos ligados';}});
         }
         function qrPoll(){qrEsperando();
-          zapFetch('/painel/prospeccao/comunicacao/whatsapp-qr-status')
+          zapFetch('/painel/prospeccao/comunicacao/whatsapp-qr-status',{silencioso:true})
             .then(function(d){if(d)qrShow(d);else qrIndefinido();});}
         function qrIniciar(){var btn=document.getElementById('qr-btn'),msg=document.getElementById('qr-msg');
           btn.disabled=true;var t=btn.textContent;btn.textContent='Gerando…';if(msg)msg.textContent='';
@@ -14568,7 +14568,7 @@ function cxOpen(el,id){
 }
 function cxPollThread(){
   if(!_cxConv)return;var id=_cxConv;
-  zapFetch('/painel/prospeccao/comunicacao/thread/'+id).then(function(d){if(!d)return;
+  zapFetch('/painel/prospeccao/comunicacao/thread/'+id,{silencioso:true}).then(function(d){if(!d)return;
     if(!d.ok||_cxConv!==id)return;
     // recarga TOTAL do painel só quando muda algo estrutural (agente ligado/
     // desligado ou o canal parou/voltou a poder responder) — nunca por causa do
@@ -14747,7 +14747,7 @@ function cxLote(campos,bt){
 }
 function cxPollList(){
   var box=document.getElementById('cx-list');if(!box)return;
-  zapFetch('/painel/prospeccao/comunicacao/lista?'+cxParams()).then(function(d){if(!d)return;
+  zapFetch('/painel/prospeccao/comunicacao/lista?'+cxParams(),{silencioso:true}).then(function(d){if(!d)return;
     if(!d.ok)return;
     // aviso de importação: mostra o total já importado subindo, que é o que
     // realmente responde "ainda está vindo mais?"
@@ -15329,7 +15329,7 @@ function kpiAbre(sinal, el){
   var timer=null;
   function tick(){
     if(document.hidden)return;
-    zapFetch('/painel/prospeccao/campanhas/metricas',{headers:{'Accept':'application/json'}})
+    zapFetch('/painel/prospeccao/campanhas/metricas',{silencioso:true,headers:{'Accept':'application/json'}})
       .then(function(d){ if(d&&d.ok){ (d.camps||[]).forEach(paint); if(d.totais)paintTot(d.totais); } });
   }
   function start(){ if(timer)return; timer=setInterval(tick,10000); }

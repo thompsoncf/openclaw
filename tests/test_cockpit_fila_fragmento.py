@@ -59,6 +59,12 @@ globalThis.fetch = function(url){
   return corpo === "rede" ? Promise.reject(new Error("offline"))
     : Promise.resolve({json: function(){ return Promise.resolve(corpo); }});
 };
+// o zapFetch entrega o corpo, e `null` quando a troca falhou
+globalThis.zapFetch = function(url){
+  log.urls.push(url);
+  var corpo = url.indexOf("/fila/sinal") >= 0 ? sinal : fragmento;
+  return Promise.resolve(corpo === "rede" ? null : corpo);
+};
 function depois(fn){ setTimeout(fn, 0); }
 """
 

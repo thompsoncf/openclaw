@@ -65,8 +65,14 @@ from markupsafe import Markup
 
 CSS = """/* O AVISO — canto de baixo, por cima de tudo, sem travar a tela.
    z-index acima dos popovers (90) porque ele fala SOBRE o que acontece dentro
-   deles: um aviso atrás da janela do lead é um aviso que não existe. */
-.zap-avisos{position:fixed;left:50%;transform:translateX(-50%);bottom:1rem;z-index:200;
+   deles: um aviso atrás da janela do lead é um aviso que não existe.
+
+   `--zap-baixo` existe porque o COCKPIT tem rodapé fixo (20/09/2026). O toast
+   próprio dele já nasce a 88px do fundo justamente pra não cobrir o botão de
+   ação; o nosso, a 1rem, cobriria — e um aviso em cima do botão que a pessoa
+   precisa apertar é pior que aviso nenhum. Quem tem rodapé declara a altura
+   dele; o painel, que não tem, fica no padrão. */
+.zap-avisos{position:fixed;left:50%;transform:translateX(-50%);bottom:var(--zap-baixo,1rem);z-index:200;
   display:flex;flex-direction:column;gap:.4rem;align-items:center;pointer-events:none;
   width:min(30rem,calc(100vw - 1.5rem))}
 .zap-aviso{pointer-events:auto;display:flex;align-items:center;gap:.6rem;max-width:100%;
@@ -160,6 +166,17 @@ if(!window.zapFetch){
     op = op || {};
     var metodo = (op.method || 'GET').toUpperCase();
     var tentativa = 0;
+    // QUEM NÃO FOI PEDIDO NÃO AVISA (20/09/2026). Um `setInterval` que falha
+    // avisa a cada volta: a Comunicação bate de 4 em 4 segundos, o QR de 3 em 3,
+    // o Cockpit de 8 em 8. Com sinal fraco — a rua, o elevador, o salão de
+    // festa — isso vira um aviso a cada três segundos, e a pessoa aprende a
+    // fechar tudo sem ler.
+    //
+    // Defeito MEU, no #762: migrei os cinco laços do painel sem pensar nisso, e
+    // subiu assim. O `silencioso` cala o AVISO e mantém o REGISTRO: erro de
+    // servidor num poll continua virando linha em `erro_cliente` — é justamente
+    // onde a falha aparece primeiro, e ninguém está olhando.
+    var avisar = op.silencioso ? function(){} : zapAviso;
 
     function _vai(){
       return fetch(url, op).then(function(r){
@@ -170,13 +187,13 @@ if(!window.zapFetch){
         var vs = r.headers.get('X-Zaq-Versao');
         var minha = _versaoDaAba();
         if(vs && minha && vs !== minha){
-          zapAviso('Esta aba está desatualizada.', {tipo:'esp', icone:'🧭',
+          avisar('Esta aba está desatualizada.', {tipo:'esp', icone:'🧭',
             detalhe:'O Zaq foi atualizado enquanto ela estava aberta.',
             acao:{texto:'Recarregar', fn:function(){ location.reload(); }}, some:0});
           return null;
         }
         if(r.status === 401){
-          zapAviso('Sua sessão expirou.', {tipo:'mal', icone:'🔑',
+          avisar('Sua sessão expirou.', {tipo:'mal', icone:'🔑',
             detalhe:'Entre de novo pra continuar de onde parou.',
             acao:{texto:'Entrar de novo', fn:function(){ location.href = '/login'; }}, some:0});
           return null;
@@ -207,11 +224,11 @@ if(!window.zapFetch){
         // o `fetch` nem saiu: ou não há rede, ou o servidor não atendeu.
         if(tentativa < _ESPERAS.length && (_REPETIVEL[metodo] || op.repetivel)) return _dePois();
         if(navigator.onLine === false){
-          zapAviso('Você está sem internet.', {tipo:'mal', icone:'📡',
+          avisar('Você está sem internet.', {tipo:'mal', icone:'📡',
             detalhe:'Nada foi perdido — tente de novo quando voltar.', some:0});
           return null;
         }
-        zapAviso('Não consegui falar com o Zaq.', {tipo:'mal', icone:'📡',
+        avisar('Não consegui falar com o Zaq.', {tipo:'mal', icone:'📡',
           detalhe:'Pode ser a sua conexão ou uma atualização em andamento.', some:0});
         return null;
       });
@@ -220,7 +237,7 @@ if(!window.zapFetch){
     function _dePois(){
       var espera = _ESPERAS[tentativa++];
       if(tentativa === 1){
-        zapAviso('Estamos atualizando o Zaq. Tentando de novo…',
+        avisar('Estamos atualizando o Zaq. Tentando de novo…',
                  {tipo:'esp', icone:'🔄', some:espera + 1500});
       }
       return new Promise(function(ok){ setTimeout(function(){ ok(_vai()); }, espera); });
@@ -231,10 +248,10 @@ if(!window.zapFetch){
       _registrar({url:String(url), metodo:metodo, status:r.status,
                   corpo:trecho, versao_aba:_versaoDaAba()});
       if(r.status >= 500){
-        zapAviso('Deu um erro do nosso lado.', {tipo:'mal',
+        avisar('Deu um erro do nosso lado.', {tipo:'mal',
           detalhe:'O ocorrido ficou registrado. Tente de novo em instantes.', some:0});
       }else{
-        zapAviso('Não consegui completar essa ação.', {tipo:'mal',
+        avisar('Não consegui completar essa ação.', {tipo:'mal',
           detalhe:'A resposta veio num formato que esta tela não entende.', some:0});
       }
       return null;

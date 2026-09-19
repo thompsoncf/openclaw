@@ -119,6 +119,11 @@ globalThis.fetch=function(url,o){
   envios.push({url:url, headers:(o&&o.headers)||{}});
   return Promise.resolve({json:function(){ return Promise.resolve(globalThis.__resposta); }});
 };
+// o zapFetch entrega o corpo direto — o envio do áudio passa por ele desde 20/09
+globalThis.zapFetch=function(url,o){
+  envios.push({url:url, headers:(o&&o.headers)||{}});
+  return Promise.resolve(globalThis.__resposta);
+};
 globalThis.__resposta={ok:true};
 globalThis.__puxa=function(){ globalThis.__puxou=true; };
 globalThis.__tipoAceito="audio/webm;codecs=opus";

@@ -1422,7 +1422,8 @@ def test_o_teste_manda_a_mensagem_REAL_e_relata_por_pessoa(pool, monkeypatch):
     assert len(saiu) == 1 and saiu[0][0] == "86988614189"
     # a mensagem é a de verdade, não um "isto é um teste"
     assert "3 leads esperando follow-up" in saiu[0][1]
-    assert "Cliente" in saiu[0][1] and "/cockpit" in saiu[0][1]
+    assert "Cliente" in saiu[0][1]
+    assert "/painel/follow-up" in saiu[0][1], "o link do teste tem que ser o mesmo do aviso real"
 
 
 def test_o_teste_NAO_gasta_o_teto_nem_marca_como_cobrado(pool, monkeypatch):

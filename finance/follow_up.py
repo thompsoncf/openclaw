@@ -708,7 +708,19 @@ def _zap_do_membro(c, conta_id: int, membro_id: int) -> str:
     return ((r[0] if r else "") or "").strip()
 
 
-def _texto_zap(titulo: str, corpo: str) -> str:
+def link_da_fila(estado: str = "") -> str:
+    """O link do aviso: a FILA do que venceu, não o painel inteiro.
+
+    Mandava pra `/cockpit` e obrigava a pessoa a procurar — o mesmo defeito que o
+    push do rodízio já teve. Com `estado`, cai no filtro que interessa; sem ele (o
+    caso de quem lê o placar da casa), cai na tela da equipe.
+    """
+    from finance.email_sender import _app_url
+    base = f"{_app_url()}/painel/follow-up"
+    return f"{base}?estado={estado}" if estado else base
+
+
+def _texto_zap(titulo: str, corpo: str, *, estado: str = "atrasado") -> str:
     """A mensagem que chega no WhatsApp do vendedor.
 
     DIFERENTE do e-mail de propósito, em duas coisas:
@@ -724,13 +736,12 @@ def _texto_zap(titulo: str, corpo: str) -> str:
     QR, e a marcação que embeleza num vira lixo visível no outro.
     """
     try:
-        from finance.email_sender import _app_url
-        link = f"{_app_url()}/cockpit"
+        link = link_da_fila(estado)
     except Exception:  # noqa: BLE001
         link = ""
     linhas = [titulo.strip(), (corpo or "").strip()]
     if link:
-        linhas.append(f"Abrir: {link}")
+        linhas.append(f"Abrir a fila: {link}")
     return "\n\n".join(x for x in linhas if x)
 
 
@@ -778,6 +789,27 @@ def notificar(pool, conta_id: int, pendentes: list[dict]) -> None:
     """
     if not pendentes:
         return
+    # A ESTEIRA MANDA, E ESTE CALA (19/09/2026). Em 19/09 a Prime passou o dia com
+    # os DOIS motores ligados: o follow-up cobrou às 08:00 em três canais e a
+    # esteira cobrou os MESMOS leads às 09:19 em dois — cinco avisos por vendedor,
+    # duas mensagens dizendo a mesma coisa com meia hora de diferença.
+    #
+    # A esteira é o desenho mais novo e mais completo (relógio na entrada do lead,
+    # três chances em sete dias, resumo do que ficou de ontem e fechamento no dia
+    # 7). Então, onde ela está ligada, a cobrança é dela.
+    #
+    # O que continua aqui: a FILA na tela, o cálculo da próxima ação e o registro em
+    # `funil_avisos`. O que para é só o envio — a tela não perde nada, e ninguém
+    # recebe duas cobranças do mesmo sistema.
+    try:
+        from finance import esteira as _est
+        with pool.connection() as c:
+            if _est.config(c, conta_id).get("esteira_modo", "off") != "off":
+                _log.info("follow-up: a esteira está ligada na conta %s — "
+                          "o aviso da cobrança é dela", conta_id)
+                return
+    except Exception:  # noqa: BLE001 — sem saber, o follow-up avisa (é o estado antigo)
+        _log.info("follow-up: não deu pra ler o modo da esteira (ok)", exc_info=True)
     gestores = []
     if any(p["nivel"] == "gestor" for p in pendentes):
         try:

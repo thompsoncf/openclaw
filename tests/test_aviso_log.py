@@ -47,6 +47,8 @@ create table funil_regua (conta_id bigint primary key,
   escala_min int default 240, teto_avisos_dia int default 5,
   follow_up_modo text default 'off', fu_proposta_dias int, fu_toques_dias text,
   fu_festa_dias int, fu_teto_dia int, fila_modo text not null default 'prazo',
+  -- a esteira (migração 292): é ela que decide se o follow-up ainda avisa
+  esteira_modo text not null default 'off',
   fu_zap boolean not null default false,
   atualizado_em timestamptz not null default now());
 """
@@ -331,7 +333,10 @@ def test_o_texto_leva_titulo_corpo_e_link(pool):
     t = fu._texto_zap("⏱️ 10 leads esperando follow-up", "Talila · Renata")
     assert t.startswith("⏱️ 10 leads esperando follow-up")
     assert "Talila · Renata" in t
-    assert "/cockpit" in t
+    # o link mudou em 19/09/2026: era /cockpit, a tela inteira, e a pessoa tinha que
+    # procurar o que venceu. Agora cai na fila do atrasado — e a esteira, que reusa
+    # esta função, ganhou o mesmo link
+    assert "/painel/follow-up?estado=atrasado" in t
     assert "*" not in t, "marcação de negrito vira lixo visível fora do WhatsApp"
 
 
@@ -664,3 +669,59 @@ def test_historico_com_a_tabela_fora_do_ar_devolve_vazio(pool):
         c.execute("drop table aviso_envios")
         c.commit()
     assert al.historico(pool, CONTA) == []
+
+
+# ──────────── a esteira manda, e o follow-up cala (19/09/2026)
+#
+# Em 19/09 a Prime passou o dia com os DOIS motores ligados: o follow-up cobrou às
+# 08:00 em três canais e a esteira cobrou os MESMOS leads às 09:19 em dois. Cinco
+# avisos por vendedor, duas mensagens dizendo a mesma coisa com meia hora de
+# diferença. A esteira é o desenho mais novo e mais completo, então onde ela está
+# ligada a cobrança é dela.
+
+def _esteira(pool, modo):
+    with pool.connection() as c:
+        c.execute("update funil_regua set esteira_modo=%s where conta_id=%s", (modo, CONTA))
+        c.commit()
+
+
+def test_com_a_esteira_LIGADA_o_follow_up_nao_manda_nada(pool, monkeypatch):
+    from finance import cockpit as ck
+    from finance import email_sender as es
+    from finance import follow_up as fu
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 1)
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    saiu = _espiar_zap(monkeypatch)
+    _regua(pool, zap=True)
+    _esteira(pool, "ligado")
+
+    fu.notificar(pool, CONTA, [_pendente(1)])
+    assert _linhas(pool) == [], "o follow-up avisou por cima da esteira"
+    assert saiu == []
+
+
+def test_com_a_esteira_em_ENSAIO_o_follow_up_tambem_cala(pool, monkeypatch):
+    """'observando' já cobra e resume — só não fecha ninguém no dia 7. Duas
+    cobranças continuariam sendo duas."""
+    from finance import cockpit as ck
+    from finance import email_sender as es
+    from finance import follow_up as fu
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 1)
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    _regua(pool, zap=False)
+    _esteira(pool, "observando")
+    fu.notificar(pool, CONTA, [_pendente(1)])
+    assert _linhas(pool) == []
+
+
+def test_sem_esteira_o_follow_up_continua_avisando(pool, monkeypatch):
+    """Conta que não ligou a esteira não pode ficar sem cobrança nenhuma."""
+    from finance import cockpit as ck
+    from finance import email_sender as es
+    from finance import follow_up as fu
+    monkeypatch.setattr(ck, "enviar_push", lambda *a, **k: 1)
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    _regua(pool, zap=False)
+    _esteira(pool, "off")
+    fu.notificar(pool, CONTA, [_pendente(1)])
+    assert [x[1] for x in _linhas(pool)] == ["push", "email"]

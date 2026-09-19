@@ -12,6 +12,7 @@ import secrets
 
 from fastapi import APIRouter, Request, Form, Body, BackgroundTasks, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.concurrency import run_in_threadpool
 from jinja2 import Environment, DictLoader, select_autoescape
 from datetime import date as _date
 
@@ -544,6 +545,14 @@ function maisToggle(v){var sh=document.getElementById('mais-sheet'),bg=document.
 })();
 </script>
 {% endif %}
+{#- O zapFetch entra no BASE, e não tela a tela: toda tela do painel fala com o
+    servidor, e em 19/09 duas quebraram no mesmo dia por usarem algo que só
+    existia porque OUTRA tela tinha carregado o módulo. `ZAQ_VERSAO` é a versão
+    que ESTA aba carregou — o zapFetch compara com o carimbo `X-Zaq-Versao` que
+    vem em toda resposta pra saber se o deploy aconteceu com ela aberta. -#}
+<style>{{ zap_css }}</style>
+<script>window.ZAQ_VERSAO={{ (versao_app or '')|tojson }};</script>
+<script>{{ zap_js }}</script>
 {% block conteudo %}{% endblock %}
 <a href="https://wa.me/5586981885930?text={% if conta %}Oi%20Thompson%21%20Estou%20no%20Zaq%20%28conta%20%23{{ conta[0] }}%29%20e%20preciso%20de%20ajuda%20com%3A%20{% else %}Oi%20Thompson%21%20Estou%20no%20Zaq%20e%20preciso%20de%20ajuda%20com%3A%20{% endif %}"
    target="_blank" rel="noopener" class="wa-suporte" aria-label="Falar com Thompson no WhatsApp">
@@ -7436,6 +7445,8 @@ _env.globals["brl"] = brl
 _env.filters["brl"] = brl
 from finance import marca as _marca
 _marca.registrar_jinja(_env)   # marca_avatar / marca_cabecalho nos templates
+from web import zap_fetch as _zap
+_zap.registrar_jinja(_env)     # zap_css / zap_js: TODA tela fala com o servidor
 from web import balao_conversa as _balao
 _balao.registrar_jinja(_env)   # balao_css / balao_js: o funil e o Raio-X usam o MESMO balão
 from web import janela_lead as _janela
@@ -7702,6 +7713,80 @@ def painel_versao(request: Request):
     if not request.session.get("conta_id"):
         return JSONResponse({}, status_code=401)
     return JSONResponse({"v": _versao.VERSAO})
+
+
+#: Teto por processo e por minuto. Não é proteção contra ataque — é contra LAÇO:
+#: uma tela que entre em erro dentro de um `setInterval` mandaria um registro a
+#: cada segundo, e o que era pra ser a trilha do incidente vira o incidente.
+_ERRO_TETO = 30
+_erro_janela: dict[int, int] = {}
+
+
+@router.post("/painel/erro-cliente")
+async def painel_erro_cliente(request: Request):
+    """Guarda um ocorrido que a TELA viu (migração 297).
+
+    Quem chama é o `zapFetch`, e só quando o servidor não respondeu algo que a
+    tela saiba ler — 5xx ou corpo que não é JSON. Resposta normal com
+    `{ok:false}` não passa por aqui; ver o comentário da migração.
+
+    TOLERA TUDO E NUNCA ESTOURA. Esta rota existe pra explicar falha; se ela
+    própria virar uma fonte de erro, o navegador tenta registrar o erro do
+    registro. Por isso: sem `raise`, sem validação que recuse, e `{"ok": True}`
+    em qualquer caso — inclusive quando não gravou nada.
+
+    `async` só pra LER O CORPO; a gravação vai pro threadpool. A primeira versão
+    escrevia no banco aqui dentro e o `test_event_loop_nao_trava` barrou — com
+    razão: um `insert` síncrono no event loop trava TODAS as requisições do
+    processo enquanto espera o banco. Numa rota que só existe quando algo já deu
+    errado, isso seria transformar um erro de uma tela em lentidão pra todo mundo.
+    """
+    try:
+        d = await request.json()
+    except Exception:  # noqa: BLE001 — corpo ilegível não vira erro de servidor
+        return JSONResponse({"ok": True})
+    if not isinstance(d, dict):
+        return JSONResponse({"ok": True})
+
+    import time
+    minuto = int(time.time() // 60)
+    if minuto not in _erro_janela:
+        _erro_janela.clear()          # só o minuto corrente interessa
+    n = _erro_janela[minuto] = _erro_janela.get(minuto, 0) + 1
+    if n > _ERRO_TETO:
+        return JSONResponse({"ok": True, "teto": True})
+
+    conta_id = request.session.get("conta_id")
+    membro_id = request.session.get("membro_id")
+    agente = request.headers.get("user-agent")
+    await run_in_threadpool(_gravar_erro_cliente, d, conta_id, membro_id, agente)
+    return JSONResponse({"ok": True})
+
+
+def _gravar_erro_cliente(d: dict, conta_id, membro_id, agente) -> None:
+    """A gravação em si, já fora do event loop."""
+    def _t(v, lim):
+        return (str(v) if v is not None else "")[:lim] or None
+
+    status = d.get("status")
+    try:
+        status = int(status) if status is not None else None
+    except (TypeError, ValueError):
+        status = None
+    try:
+        with get_pool().connection() as c:
+            c.execute(
+                """insert into erro_cliente
+                     (conta_id, membro_id, url, metodo, status, corpo,
+                      versao_aba, versao_app, agente)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (conta_id, membro_id,
+                 _t(d.get("url"), 400) or "?", _t(d.get("metodo"), 10), status,
+                 _t(d.get("corpo"), 300), _t(d.get("versao_aba"), 40),
+                 _versao.VERSAO or None, _t(agente, 200)))
+            c.commit()
+    except Exception as e:  # noqa: BLE001
+        log.warning("não deu pra registrar o erro de tela: %s: %s", type(e).__name__, e)
 
 
 @router.get("/painel/novidades")

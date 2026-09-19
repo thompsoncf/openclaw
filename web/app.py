@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from db.conexao import get_pool, init_schema
 from web import tema as _tema
+from web import versao as _versao
 from contas import contas as ct
 from contas.contas import URL_CADASTRO
 from core.brain import Brain
@@ -220,6 +221,14 @@ async def _cabecalhos_seguranca(request: Request, call_next):
     resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     if os.environ.get("PORTAL_COOKIE_SECURE", "1") == "1":
         resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    # A VERSÃO EM TODA RESPOSTA (19/09/2026), pro `zapFetch` saber quando a aba
+    # ficou pra trás. A faixa de "tem versão nova" pergunta isso a cada 5 minutos
+    # (`GET /painel/versao`), e até ela aparecer a aba roda o JS antigo contra o
+    # servidor novo — foi um dos cinco casos que viravam "Falha de rede.". Aqui a
+    # resposta do próprio toque já traz o carimbo: o desencontro aparece no
+    # primeiro clique, não no próximo minuto redondo.
+    if _versao.VERSAO:
+        resp.headers.setdefault("X-Zaq-Versao", _versao.VERSAO)
     return resp
 # ESTÁTICOS PRIMEIRO: rota curta e sem sessão, e nenhum outro router tem
 # /estatico/*. Serve o CSS e o JS que saíram de dentro das páginas (ver

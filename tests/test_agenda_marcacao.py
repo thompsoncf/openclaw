@@ -138,9 +138,25 @@ def _render_agenda(vende_data: bool) -> str:
     cfg = {"lembrete_ativo": False, "resumo_ativo": False, "hora_resumo": 7,
            "aviso_antes_min": None, "feed_token": None, "avisar_convidados": True,
            "enviar_confirmacao": True, "pre_reserva_dias": 3}
-    semanas = [[{"dia": d, "fora": False, "hoje": False, "iso": f"2026-08-{d:02d}",
-                 "eventos": [], "tem_seg": False, "urg": False} for d in range(15, 22)]]
+    # Uma semana de 15 a 21 de agosto de 2026: o 15 é sábado. A célula carrega
+    # o VEREDITO do dia desde 19/09/2026 — é ele que diz se dá pra vender.
+    def _cel(d):
+        sabado = d in (15, 21)
+        vendido = "Casamento — Eva" if d == 21 else ""
+        estado = "ocupa" if vendido else ("a_conferir" if d == 18 else "livre")
+        return {"dia": d, "fora": False, "hoje": False, "iso": f"2026-08-{d:02d}",
+                "eventos": [], "tem_seg": False, "urg": False,
+                "estado": estado, "vendido": vendido, "sabado": sabado,
+                "livre": estado == "livre", "visitas": 2 if d == 17 else 0}
+    semanas = [[_cel(d) for d in range(15, 22)]]
+    faixa = [{"mes": "2026-08", "rotulo": "ago/26", "ocupados": 3, "a_conferir": 1,
+              "sabados": 5, "sabados_livres": 2},
+             {"mes": "2026-09", "rotulo": "set/26", "ocupados": 4, "a_conferir": 0,
+              "sabados": 4, "sabados_livres": 0}]
     return _env.get_template("agenda").render(
+        faixa=(faixa if vende_data else []), mes_atual="2026-08",
+        estado_dia_js=({c["iso"]: {k: c[k] for k in ("estado", "vendido", "sabado", "livre")}
+                        for c in semanas[0]} if vende_data else {}),
         titulo="Agenda", secao_ativa="agenda", historico=[], historico_total=0, fila=[],
         ano=2026, mes=8, mes_nome="Agosto", dias_sem=pa.DIAS_SEM, semanas=semanas,
         proximos=[], tipo_rot=pa.TIPO_ROT, eventos_dia={}, status_rot={}, reaproveitar=[],
@@ -246,6 +262,65 @@ def test_agenda_dos_outros_nichos_segue_como_estava():
     # o aviso de choque de horário NÃO é de nicho nenhum: some sozinho quando não há
     # conflito, e marcar duas coisas no mesmo horário é problema de qualquer agenda.
     assert "choqueBox" in outros
+
+
+# ============================================ o calendário diz livre ou ocupado
+#
+# Regra do dono, 19/09/2026: "a visita não implica no dia que o espaço tá locado
+# ou ocupado, porque é só pra mostrar". A régua está em `finance.agenda`
+# (test_agenda_ocupa_espaco.py); aqui se prende o que a TELA faz com ela.
+
+def test_o_dia_vendido_mostra_de_quem_e():
+    """Tarja com o nome. O vendedor não precisa abrir o dia pra saber."""
+    tela = _render_agenda(True)
+    assert 'class="cal-tarja ocupa"' in tela
+    assert "Casamento — Eva" in tela
+
+
+def test_o_sabado_livre_e_anunciado_como_estoque():
+    """24 dos 42 dias vendidos da Prime são sábado. Sábado vago é venda esperando;
+    terça vaga não é notícia — e por isso só o sábado ganha tarja."""
+    tela = _render_agenda(True)
+    assert "Sábado livre" in tela
+    assert 'class="cal-tarja livre"' in tela
+
+
+def test_o_que_ninguem_classificou_pergunta_em_vez_de_chutar():
+    tela = _render_agenda(True)
+    assert 'class="cal-tarja conf"' in tela and "a conferir" in tela
+
+
+def test_a_visita_aparece_sem_ocupar_o_dia():
+    tela = _render_agenda(True)
+    assert "2 visitas" in tela and 'class="cal-vis"' in tela
+
+
+def test_o_sabado_tem_coluna_propria():
+    tela = _render_agenda(True)
+    assert "est-livre sab" in tela or "est-ocupa sab" in tela
+
+
+def test_a_faixa_do_ano_mostra_sabado_livre_e_grita_o_mes_lotado():
+    """set/26 está com 0 de 4 sábados: é argumento de venda ("dezembro já foi"),
+    então a faixa o pinta em coral em vez de sussurrar."""
+    tela = _render_agenda(True)
+    assert "Sábados livres" in tela
+    assert 'class="ag-faixa"' in tela
+    assert "lotado" in tela
+    assert "agf cheio" in tela or "cheio" in tela
+
+
+# ---------------------------------------------------- e nada disso vaza (§6)
+
+def test_fora_do_nicho_de_eventos_o_calendario_nao_muda():
+    """A ZAQ tem a Agenda parada desde 08/09 e nada disto foi medido nela. Numa
+    clínica "sábado livre" não quer dizer coisa nenhuma."""
+    outros = _render_agenda(False)
+    for marca in ("cal-tarja", "Sábado livre", "a conferir", "ag-faixa",
+                  "Sábados livres", "cal-vis"):
+        assert marca not in outros, marca
+    # e as duas linhas de compromisso de sempre continuam sendo o miolo da célula
+    assert "As cores separam" in outros
 
 
 # =========================================================== banco / rotas
@@ -537,17 +612,29 @@ def test_centavos_le_o_que_o_dono_digita():
 # `renderizarCelula` do navegador, com os dados daqui.
 
 def test_o_mes_vem_em_json_com_a_grade_e_os_eventos(cliente):
+    # festa de verdade: `tipo='empresa'` com o tipo de festa escolhido. O padrão
+    # de `criar_evento` é 'pessoal', que é agenda interna e NÃO ocupa o espaço.
     ev = ag.criar_evento(cliente.pool, CONTA, "Casamento",
-                         ag.agora_brt().replace(day=15) + timedelta(days=0))
+                         ag.agora_brt().replace(day=15) + timedelta(days=0),
+                         tipo="empresa", tipo_evento="Casamento")
     m = ag.agora_brt().strftime("%Y-%m")
     d = cliente.get(f"/painel/agenda/mes?m={m}").json()
     assert d["m"] == m and d["mes_nome"]
     # a grade vem SEM os eventos: as células se preenchem no navegador, pela mesma
-    # função que já redesenhava célula depois de cancelar e remarcar
+    # função que já redesenhava célula depois de cancelar e remarcar.
+    #
+    # Desde 19/09/2026 ela traz também o VEREDITO do dia — livre, ocupado,
+    # segurado ou a conferir. Sem isso a pintura de livre/ocupado sumia no
+    # primeiro clique na seta: a grade é remontada no navegador, e ele não teria
+    # como saber o que o servidor sabe. Este conjunto é o contrato entre as duas
+    # pontas; se ele mudar de um lado só, o calendário passa a discordar de si.
     celula = d["dias"][0][0]
-    assert set(celula) == {"dia", "fora", "hoje", "iso"}
+    assert set(celula) == {"dia", "fora", "hoje", "iso",
+                           "estado", "vendido", "sabado", "livre", "visitas"}
     iso = ev["inicio"].astimezone(ag.BRT).date().isoformat()
     assert [e["id"] for e in d["eventos_dia"][iso]["eventos"]] == [ev["id"]]
+    # e o mapa por dia, que é o que o JS lê pra repintar depois de filtrar
+    assert d["estado_dia"][iso]["estado"] == "ocupa"
 
 
 def test_a_seta_sabe_pra_onde_ir_depois(cliente):

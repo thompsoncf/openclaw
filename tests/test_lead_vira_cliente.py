@@ -72,7 +72,7 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_i
   status text default 'ativo', criado_em timestamptz default now(),
   prospeccao_id bigint, ics_token text, pre_reserva_ate timestamptz,
   sinal_centavos int, tipo_evento text, convidados int,
-  hora_sugerida boolean default false,
+  hora_sugerida boolean default false, ocupa_espaco boolean,
   cliente_id bigint, sem_cliente boolean not null default false);
 create table funil_etapas (id bigserial primary key,
   -- 254: de onde veio o rótulo — a semente do ramo, ou o dono

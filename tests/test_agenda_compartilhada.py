@@ -38,7 +38,7 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_i
   ics_token text, pre_reserva_ate timestamptz, sinal_centavos int,
   -- 179: a agenda do app mostra o tipo da festa e marca o horário que o sistema
   -- chutou; sem as colunas a consulta estoura com UndefinedColumn
-  tipo_evento text, convidados int, hora_sugerida boolean default false);
+  tipo_evento text, convidados int, hora_sugerida boolean default false, ocupa_espaco boolean);
 """
 
 

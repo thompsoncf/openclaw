@@ -148,12 +148,16 @@ def _fmt_evento(row) -> dict:
             # horário é palpite do sistema esperando confirmação.
             "tipo_evento": row[15] if len(row) > 15 else None,
             "convidados": row[16] if len(row) > 16 else None,
-            "hora_sugerida": bool(row[17]) if len(row) > 17 else False}
+            "hora_sugerida": bool(row[17]) if len(row) > 17 else False,
+            # A RESPOSTA HUMANA sobre ocupar o espaço (migração 298). `None` é o
+            # estado normal: ninguém disse, e `estado_da_data` deriva. Preenchido,
+            # vence a derivação inteira.
+            "ocupa_espaco": row[18] if len(row) > 18 else None}
 
 
 _COLS = ("id, titulo, inicio, fim, local, descricao, lembrete_min, criado_em, tipo, "
         "desfecho, link_online, status, pre_reserva_ate, sinal_centavos, membro_id, "
-        "tipo_evento, convidados, hora_sugerida")
+        "tipo_evento, convidados, hora_sugerida, ocupa_espaco")
 
 # Data SEGURADA, ainda não vendida: o cliente aprovou o orçamento mas o sinal não
 # entrou. Fica de fora de tudo que trata compromisso como certo — lembrete, resumo
@@ -1076,6 +1080,59 @@ def sem_vendedor(pool, conta_id: int, de: datetime | None = None) -> list[dict]:
     return [_fmt_evento(r) for r in rows]
 
 
+def datas_a_conferir(pool, conta_id: int, de: datetime | None = None) -> list[dict]:
+    """Compromissos futuros que o sistema NÃO sabe se ocupam o espaço.
+
+    A quarta pendência da agenda, irmã de `horas_a_conferir` e `sem_vendedor`, e
+    pelo mesmo motivo delas: um palpite nunca pode ter a mesma cara de um dado
+    escolhido.
+
+    `estado_da_data` decide por quatro sinais (pré-reserva, tipo interno, visita,
+    orçamento ou tipo de festa). O que nenhum deles alcança cai aqui — e a tela
+    PERGUNTA, em vez de chutar. Na Prime, em 19/09/2026, são cinco de 84 ativos.
+
+    Chutar pelo título já se provou errado na mesma base: "REUNIÃO COM
+    ENGENHEIRA" não ocupa o espaço e "Reunião Política - Bianca - Pedro" ocupa
+    (teve sinal de R$ 750). Marcar a primeira como vendida tiraria um dia do ar.
+
+    O `_com_orcamento` no meio não é enfeite: sem ele, os compromissos que só têm
+    o orçamento (oito, na Prime) viriam parar nesta lista, e o dono veria oito
+    perguntas no lugar de oito datas vendidas.
+
+    A linha some sozinha quando alguém responde — é `ocupa_espaco` deixando de
+    ser nulo, exatamente como `hora_sugerida` faz na irmã.
+    """
+    de = de or agora_brt()
+    with pool.connection() as c:
+        rows = c.execute(
+            "select " + _COLS + " from eventos_agenda "
+            " where conta_id=%s and status = any(%s) and inicio >= %s "
+            "   and ocupa_espaco is null "
+            " order by inicio",
+            (conta_id, list(_ATIVO_OU_PRE), de)).fetchall()
+    eventos = _com_orcamento(pool, conta_id, [_fmt_evento(r) for r in rows])
+    return [e for e in eventos if estado_da_data(e) == A_CONFERIR]
+
+
+def responder_ocupa(pool, conta_id: int, evento_id: int, ocupa: bool | None) -> bool:
+    """Grava a resposta humana: este compromisso ocupa o espaço?
+
+    Escopado por conta, e só isso muda na linha — nem título, nem data, nem
+    status. É a escrita mais estreita que resolve a pergunta.
+
+    `None` desfaz a resposta e devolve o compromisso pra derivação, que é o
+    caminho de volta de quem clicou errado. Sem ele, um toque sem querer viraria
+    um fato permanente sobre uma data.
+    """
+    with pool.connection() as c:
+        r = c.execute(
+            "update eventos_agenda set ocupa_espaco=%s "
+            " where id=%s and conta_id=%s returning id",
+            (ocupa, evento_id, conta_id)).fetchone()
+        c.commit()
+    return bool(r)
+
+
 def pendencias(pool, conta_id: int, de: datetime | None = None) -> dict:
     """Tudo que a agenda tem pra alguém conferir, num lugar só.
 
@@ -1088,14 +1145,15 @@ def pendencias(pool, conta_id: int, de: datetime | None = None) -> dict:
     aviso não pode derrubar a agenda inteira — a agenda é o que a pessoa veio ver;
     o aviso é enfeite útil."""
     de = de or agora_brt()
-    out: dict = {"choques": [], "horas": [], "sem_vendedor": []}
+    out: dict = {"choques": [], "horas": [], "sem_vendedor": [], "a_conferir": []}
     for chave, fn in (("choques", choques_de_data), ("horas", horas_a_conferir),
-                      ("sem_vendedor", sem_vendedor)):
+                      ("sem_vendedor", sem_vendedor), ("a_conferir", datas_a_conferir)):
         try:
             out[chave] = fn(pool, conta_id, de)
         except Exception as e:  # noqa: BLE001 — aviso não derruba a tela
             _log.warning("pendencias.%s conta=%s: %s", chave, conta_id, e)
-    out["total"] = len(out["choques"]) + len(out["horas"]) + len(out["sem_vendedor"])
+    out["total"] = (len(out["choques"]) + len(out["horas"])
+                    + len(out["sem_vendedor"]) + len(out["a_conferir"]))
     return out
 
 

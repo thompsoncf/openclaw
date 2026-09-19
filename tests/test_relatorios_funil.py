@@ -41,7 +41,7 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_i
   tipo_evento text, prospeccao_id bigint, criado_em timestamptz not null default now(),
   -- as colunas que a agenda do Cockpit lê junto (finance/cockpit.agenda_da_conta)
   local text, ics_token text, pre_reserva_ate timestamptz,
-  hora_sugerida boolean default false, convidados int, sinal_centavos int);
+  hora_sugerida boolean default false, ocupa_espaco boolean, convidados int, sinal_centavos int);
 """
 
 #: base de tempo fixa — "já passou" tem que ser decidido pelo dado, não pelo relógio

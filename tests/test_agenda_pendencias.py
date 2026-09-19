@@ -43,7 +43,8 @@ def pool():
         for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "130_evento_desfecho.sql",
                      "131_evento_link_online.sql", "160_agenda_pre_reserva.sql",
                      "163_evento_sinal_esperado.sql",
-                     "179_agenda_tipo_e_hora_sugerida.sql"):
+                     "179_agenda_tipo_e_hora_sugerida.sql",
+                     "298_agenda_ocupa_espaco.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -321,11 +322,16 @@ def test_pendencias_junta_as_tres_e_soma(pool, conta_id, membro_id):
 
 
 def test_agenda_limpa_nao_tem_pendencia(pool, conta_id, membro_id):
-    """`total` zero é o que faz o card sumir da tela."""
-    ag.criar_evento(pool, conta_id, "Locação — Jonas", _daqui(1, 21), membro_id=membro_id)
+    """`total` zero é o que faz o card sumir da tela.
+
+    `tipo_evento` preenchido tira a linha de "a conferir" (a quarta pendência,
+    desde 20/09/2026): sem ele o compromisso seria justamente o caso que o
+    sistema não sabe classificar, e a agenda não estaria limpa."""
+    ag.criar_evento(pool, conta_id, "Locação — Jonas", _daqui(1, 21), membro_id=membro_id,
+                    tipo="empresa", tipo_evento="Locação")
     p = ag.pendencias(pool, conta_id)
     assert p["total"] == 0
-    assert p == {"choques": [], "horas": [], "sem_vendedor": [], "total": 0}
+    assert p == {"choques": [], "horas": [], "sem_vendedor": [], "a_conferir": [], "total": 0}
 
 
 def test_pendencias_nao_derruba_a_agenda_quando_uma_consulta_falha(pool, conta_id,

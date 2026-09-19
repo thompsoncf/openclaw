@@ -36,7 +36,7 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_i
   titulo text, inicio timestamptz, fim timestamptz, local text, descricao text,
   lembrete_min int, tipo text default 'pessoal', link_online text,
   status text default 'ativo', pre_reserva_ate timestamptz, sinal_centavos int,
-  prospeccao_id bigint, tipo_evento text, convidados int, hora_sugerida boolean default false,
+  prospeccao_id bigint, tipo_evento text, convidados int, hora_sugerida boolean default false, ocupa_espaco boolean,
   cliente_id bigint, ics_token text, desfecho text, criado_em timestamptz default now());
 """
 

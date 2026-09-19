@@ -47,7 +47,7 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint,
   criado_em timestamptz default now(), tipo text, desfecho text, link_online text,
   prospeccao_id bigint, ics_token text, pre_reserva_ate timestamptz,
   sinal_centavos bigint, tipo_evento text, convidados int,
-  hora_sugerida boolean default false, cliente_id bigint,
+  hora_sugerida boolean default false, ocupa_espaco boolean, cliente_id bigint,
   sem_cliente boolean default false);
 create table orcamentos (id bigserial primary key, conta_id bigint, cliente text,
   empresa text, segmento text, escopo text, itens jsonb, whatsapp text, email text,

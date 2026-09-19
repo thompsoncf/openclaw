@@ -2588,7 +2588,19 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
             perfil = {"instagram": prow[0], "cargo": prow[1], "material": prow[2],
                       "material_tipo": prow[3]}
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
+    # O QUE A JANELA DO LEAD PRECISA (19/09/2026): as situações desta conta e o
+    # portão do §6 dos campos do evento. `perfil`, aqui em cima, é outra coisa — é
+    # o perfil de PROSPECÇÃO da conta (instagram, cargo, material), e não o do
+    # nicho; por isso o portão é o `modo_evento`, o mesmo do quadro.
+    with pool.connection() as c:
+        status_tpl = _jl.lista_de_status(_etapas(c, ctx["conta_id"]))
+    try:
+        from finance import vendas as _vendas
+        modo_evento = bool(_vendas.vende_data(pool, ctx["conta_id"]))
+    except Exception:  # noqa: BLE001 — sem nicho a tela abre sem os campos do evento
+        modo_evento = False
     return _render("prospeccao_comunicacao", request, titulo="Comunicação",
+                   status=status_tpl, modo_evento=modo_evento,
                    secao_ativa="prospeccao", aba=aba, convs=convs, escopo=escopo, canal=canal,
                    canais=_canais_status(pool, ctx["conta_id"]), canal_rot=CANAL_ROT,
                    gerencia=ctx["gerencia"], vendedores=vends, filtro_vend=filtro_vend,
@@ -8959,7 +8971,11 @@ def prospeccao_ficha(request: Request, alvo_id: int):
         origem_ch = {"ic": ch0["ic"], "label": ch0["label"], "em": ch0["primeiro_in"]}
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
     with pool.connection() as c:
-        status_ficha = [(e["chave"], e["rotulo"]) for e in _etapas(c, ctx["conta_id"])]
+        # A MESMA LISTA DA JANELA (19/09/2026). Era `[(chave, rotulo)]`, que só servia
+        # pro <select> que a ficha tinha. Agora é `lista_de_status`, que carrega
+        # também o `sai` (etapa que tira o card do quadro) e o `fim` (ganho/perdido)
+        # — o que a fileira de botões precisa pra tracejar uma e separar as outras.
+        status_ficha = _jl.lista_de_status(_etapas(c, ctx["conta_id"]))
         # o mesmo número atendido pelo outro chip. O aviso está no card do funil, mas o
         # card some assim que o vendedor abre a ficha (é a ficha que abre na gaveta) —
         # e é aqui, com o telefone na mão pra ligar, que saber disso muda o que ele faz.
@@ -12093,6 +12109,25 @@ function captAll(el){document.querySelectorAll('input[name=itens]').forEach(func
 {% endblock %}"""
 
 _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
+{#- A FILEIRA DE SITUAÇÃO É A MESMA DA JANELA (19/09/2026, pedido do dono:
+    "melhor colocar o status com o botão pra alterar, fica mais fácil pro
+    vendedor, igual está no cockpit"). Vem inteira de web/janela_lead.py — o CSS
+    dos chips e o `kbLeadIr` que já sabe pedir o motivo. O <select> que morava
+    aqui era o TERCEIRO jeito de mudar a situação no produto, e o único que não
+    aprendeu a perguntar por quê. -#}
+<style>{{ janela_css }}
+/* a janela é flutuante e a ficha não: aqui a caixa não tem borda de baixo nem
+   recuo de popover — só os botões, alinhados com o nome do lead. */
+.fsec .lp-sit{padding:0;border-bottom:0}
+.fsec .lp-sit-h{margin-bottom:.35rem}
+</style>
+{#- `janela_evento_js` NÃO entra aqui, e é de propósito: ele declara os campos do
+    evento pro formulário de correção DA JANELA, e a ficha não abre janela — ela
+    já tem a seção "Dados" inteira, com os mesmos campos servidos pelo portão do
+    §6 que ela sempre teve. Carregar o vocabulário de um nicho numa tela que não
+    o usa é exatamente o vazamento que a regra 6 existe pra impedir. -#}
+<script>var _KB_STATUS={{ (status or [])|tojson }};</script>
+<script>{{ janela_js }}</script>
 <div class="pw" style="max-width:920px">
   <a href="/painel/prospeccao" class="mut" style="text-decoration:none;font-size:.85rem">‹ Prospecção</a>
 
@@ -12110,9 +12145,11 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {% for ch in canais_contato %}<span title="{% if ch.respondeu %}{{ ch.ins }} mensagem(ns) recebida(s){% if ch.primeiro_in %} · 1ª em {{ ch.primeiro_in.strftime('%d/%m/%Y') }}{% endif %}{% else %}só enviado — ainda sem resposta{% endif %}" style="display:inline-flex;align-items:center;gap:.3rem;font-size:.76rem;padding:.2rem .55rem;border-radius:999px;border:1px solid {% if ch.respondeu %}var(--verde){% else %}var(--borda){% endif %};background:{% if ch.respondeu %}rgba(62,224,166,.10){% else %}transparent{% endif %};color:{% if ch.respondeu %}var(--verde-claro){% else %}var(--mut){% endif %}">{{ ch.ic }} {{ ch.label }}{% if ch.respondeu %} ✓{% endif %}</span>{% endfor %}
         </div>{% endif %}
       </div>
-      <select onchange="fichaStatus(this,{{ a.id }})" data-prev="{{ a.status }}" class="spill" style="width:auto;padding:.25rem .6rem;border-radius:999px" title="Mudar a situação no funil">
-        {% for s,rot in status %}<option value="{{ s }}" {% if s==a.status %}selected{% endif %}>{{ rot }}</option>{% endfor %}
-      </select>
+      {#- vazio no HTML servido: quem desenha é o `kbLeadSitHtml` da janela, com a
+          etapa atual acesa e a seguinte destacada. Uma cópia em Jinja aqui seria a
+          segunda versão da mesma fileira, e as duas divergiriam na primeira
+          etapa nova que alguém criasse. -#}
+      <div id="ficha-sit" style="flex:1 1 100%"></div>
     </div>
     <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:.8rem">
       {% if a.tel_link %}<a class="pbtn ghost" href="{{ a.tel_link }}">📞 Ligar</a>{% endif %}
@@ -12147,15 +12184,25 @@ function perdaDesc(sel){
   var inp=box.querySelector('input'); if(inp) inp.required=!!exige;
 }
 
-    function fichaStatus(sel,id){
-      var prev=sel.getAttribute('data-prev')||'';
-      var body=new URLSearchParams();body.append('status',sel.value);
-      fetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/x-www-form-urlencoded'},body:body})
-        .then(function(r){return r.json();}).then(function(d){
-          if(!d.ok){alert('Não consegui mudar a situação ('+(d.erro||'?')+').');if(prev)sel.value=prev;return;}
-          sel.setAttribute('data-prev',sel.value);
-        }).catch(function(){alert('Falha de rede.');if(prev)sel.value=prev;});
+    // O `fichaStatus` MORREU EM 19/09/2026, e com ele o último <select> de
+    // situação do produto. Ele mandava pro mesmo `/status` de todo mundo, mas
+    // jogava fora a recusa mais importante que o servidor sabe dar: quando a
+    // etapa exige motivo, a resposta vem com a LISTA de motivos pronta — e a
+    // ficha imprimia "Não consegui mudar a situação (motivo_obrigatorio)" e
+    // voltava o seletor sozinho. Na prática, quem tentasse perder um lead pela
+    // ficha completa não conseguia; pelo quadro e pela janela, conseguia desde o
+    // #712. Agora os três usam o MESMO `kbLeadIr`, e não existe mais um terceiro
+    // lugar pra esquecer de consertar.
+    var _FICHA_ID={{ a.id }}, _FICHA_ST={{ a.status|tojson }};
+    function fichaPintaSit(){
+      var cx=document.getElementById('ficha-sit');
+      if(cx)cx.innerHTML=kbLeadSitHtml({status:_FICHA_ST,parado_txt:''},_FICHA_ID);
     }
+    // O GANCHO DA JANELA. Sem ele o `kbLeadIr` recarrega a página — que é o certo
+    // pra uma FILA (a troca pode tirar o lead dela), e é desperdício aqui: a ficha
+    // continua sendo a mesma, e o que mudou cabe em repintar seis botões.
+    function kbDepoisDoStatus(d,id,novo){ _FICHA_ST=novo; fichaPintaSit(); }
+    fichaPintaSit();
     function convidarZaq(id){var b=document.getElementById('cvz-btn');if(b){b.disabled=true;b.textContent='Enviando…';}
       fetch('/painel/prospeccao/'+id+'/convidar-zaq',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
         if(!d.ok){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}alert(d.erro||'Não consegui enviar.');return;}
@@ -12533,6 +12580,16 @@ function enviarConviteWa(){var b=document.getElementById('wa-tpl-btn');
 {% endblock %}"""
 
 _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
+{#- A JANELA DO LEAD, TAMBÉM AQUI (19/09/2026). "Abrir ficha" no topo da conversa
+    era um <a href> que NAVEGAVA: quem estava lendo a conversa perdia a conversa
+    pra ver de quem ela era, e voltava sem o lugar onde estava. É a mesma queixa
+    que tirou a navegação do Follow-up no #709 — e o mesmo botão, que só não tinha
+    sido trocado aqui.
+    Esta tela NÃO carrega o balão de conversa (`balao_css`/`balao_js`): ela tem o
+    chat dela, com `.cx-empty` e `.cx-m` próprios, que é de onde a janela herda
+    esses dois. Por isso o `cxEscK` passou a vir de dentro do próprio
+    web/janela_lead.py. -#}
+<style>{{ janela_css }}</style>
 <style>
 .cx-wrap{max-width:1180px;margin:0 auto;padding:0 .3rem}
 .cx-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap}
@@ -14492,7 +14549,7 @@ function cxOpen(el,id){
       // o dono do lead no cabeçalho: quem atende pelo inbox precisa saber de quem é
       // a conversa sem abrir o painel do lado nem a ficha
       +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+cxEsc(L.canal_rot||'')+(L.cidade?(' · '+cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):'')):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+(L.id?(L.vendedor?(' · 👤 '+cxEsc(L.vendedor)):' · <span style=\\'color:#e0b45f\\'>👤 sem responsável</span>'):'')+(d.agente_ativo?' · <span style=\\'color:#c9a3e0\\'>🤖 no automático</span>':'')+'</small></div>'
-      +'<span style="flex:1"></span>'+agBtn+(L.id?(' <a class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" href="/painel/prospeccao/'+L.id+'">Abrir ficha</a>'):(' <button class="pbtn" style="padding:.35rem .7rem;font-size:.78rem" onclick="cxVirarLead('+d.conversa_id+')" title="Criar um lead a partir deste contato">➕ Levar para o lead</button>'))+'</div>'
+      +'<span style="flex:1"></span>'+agBtn+(L.id?(' <button type="button" class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" onclick="kbAbrirLead(event,'+L.id+',this)" title="ver os dados, o histórico e mudar a situação sem sair da conversa">Abrir ficha</button>'):(' <button class="pbtn" style="padding:.35rem .7rem;font-size:.78rem" onclick="cxVirarLead('+d.conversa_id+')" title="Criar um lead a partir deste contato">➕ Levar para o lead</button>'))+'</div>'
       // mesmo número, outro chip: as duas conversas são separadas de propósito (cada
       // chip responde pelo seu número). O aviso é pra quem digita aqui não repetir —
       // ou contradizer — o que a outra campanha já combinou com a mesma pessoa.
@@ -14520,7 +14577,7 @@ function cxOpen(el,id){
     }
     cx.innerHTML=''
       +'<div class="cx-sec"><h4>Lead</h4>'+kv('Empresa',L.empresa)+kv('Segmento',L.segmento)+kv('Cidade',(L.cidade||'')+(L.uf?'/'+L.uf:''))+kv('WhatsApp',L.whatsapp)+kv('E-mail',L.email)+resp+kv('Status',L.status_rot)+'</div>'
-      +(L.id?('<div class="cx-sec"><a class="pbtn" style="width:100%;text-align:center" href="/painel/prospeccao/'+L.id+'">Abrir ficha do lead</a></div>'):('<div class="cx-sec"><button class="pbtn" style="width:100%" onclick="cxVirarLead('+d.conversa_id+')">➕ Levar para o lead</button><div class="mut" style="font-size:.74rem;margin-top:.4rem">Este contato ainda não é um lead. Crie o lead quando fizer sentido.</div></div>'));
+      +(L.id?('<div class="cx-sec"><button type="button" class="pbtn" style="width:100%" onclick="kbAbrirLead(event,'+L.id+',this)" title="ver os dados, o histórico e mudar a situação sem sair da conversa">Abrir ficha do lead</button></div>'):('<div class="cx-sec"><button class="pbtn" style="width:100%" onclick="cxVirarLead('+d.conversa_id+')">➕ Levar para o lead</button><div class="mut" style="font-size:.74rem;margin-top:.4rem">Este contato ainda não é um lead. Crie o lead quando fizer sentido.</div></div>'));
   }).catch(function(){th.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
 }
 function cxPollThread(){
@@ -14921,6 +14978,13 @@ function cxPoll(){cxPollList();cxPollThread();}
   document.addEventListener('visibilitychange',function(){if(!document.hidden)cxPoll();});
   window.addEventListener('focus',cxPoll);}})();
 </script>
+{#- A janela do lead, no fim porque quem a chama é um `onclick` montado em tempo
+    de execução — o navegador só procura `kbAbrirLead` no clique, não ao desenhar
+    o botão. Mesmo trio do funil e do Follow-up: a lista de situações da conta, os
+    campos do evento atrás do portão do §6, e o módulo. -#}
+<script>var _KB_STATUS={{ (status or [])|tojson }};
+{% if modo_evento %}{{ janela_evento_js }}{% endif %}</script>
+<script>{{ janela_js }}</script>
 {% endblock %}"""
 
 _CPILL_CSS = """<style>

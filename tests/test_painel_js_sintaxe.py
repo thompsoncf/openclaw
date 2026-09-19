@@ -67,13 +67,34 @@ _CARD = {"id": 1, "empresa": "Padaria Bom Pão", "segmento": "Varejo",
          "conv_whatsapp": 501, "conv_email": None, "conv_instagram": None,
          "evento_em": None, "evento_tipo": None, "evento_convidados": None,
          "passou": False, "zap_pergunta": ""}
+# As situações da conta, no formato de `janela_lead.lista_de_status()`. Constante
+# porque em 19/09/2026 passou a ser a MESMA lista em três telas — quadro, ficha e
+# Comunicação —, e uma cópia por página escondia justamente a diferença entre elas.
+_STATUS_JANELA = [{"c": "novo", "r": "Novo", "sai": False, "fim": ""},
+                  {"c": "contatado", "r": "Contatado", "sai": False, "fim": ""},
+                  {"c": "entregue", "r": "Entregue", "sai": True, "fim": ""},
+                  {"c": "ganho", "r": "Ganho", "sai": False, "fim": "ganho"},
+                  {"c": "perdido", "r": "Perdido", "sai": False, "fim": "perdido"}]
+
 PAGINAS = {
     # 'gerencia' e provedor 'qr': é o ramo que traz o bloco do QR, que foi o que
     # quebrou em 17/08.
+    # `status`/`modo_evento` entraram em 19/09/2026: esta tela passou a carregar a
+    # janela do lead ("Abrir ficha" virou pop-up em vez de navegar).
     "prospeccao_comunicacao": dict(
-        gerencia=True,
+        gerencia=True, status=_STATUS_JANELA, modo_evento=True,
         canais={"whatsapp": True, "wa_provedor": "qr",
                 "numeros": {"whatsapp": "+5586999999999"}, "tokens_set": {}}),
+    # A FICHA DO LEAD. Entrou em 19/09/2026, junto com a fileira de situação que
+    # substituiu o <select> — e devia ter entrado antes: é a tela com mais JS
+    # próprio do arquivo (Credify, enriquecimento, convite, WhatsApp) e estava fora
+    # da única rede que confere se esse JS compila depois do render.
+    "prospeccao_ficha": dict(
+        a={"id": 7, "status": "contatado", "empresa": "Padaria Bom Pão",
+           "temperatura": "quente", "email": "a@b.com", "site_url": "https://b.com"},
+        status=_STATUS_JANELA, gerencia=True, pode_atribuir=True, vendedores=[],
+        motivos_conta=[], vende_servico=True,
+        temp_cor={"quente": "#e0574f"}, temp_pill={"quente": ("#241313", "#F0A8A2")}),
     # o kanban: um card com conv_whatsapp/conv_email preenchidos é o que abre o
     # ramo do selo virando BOTÃO (kbAbrirChat) — sem isso o {% if %} escondia
     # justamente o JS que o teste existe pra proteger.
@@ -84,11 +105,7 @@ PAGINAS = {
         # Eram a mesma variável até 17/09/2026, e foi assim que o quadro deixou de
         # oferecer etapa que ele não desenha — ver o comentário de `etapas_todas`
         # em web/painel_prospeccao.py.
-        status=[{"c": "novo", "r": "Novo", "sai": False, "fim": ""},
-                {"c": "contatado", "r": "Contatado", "sai": False, "fim": ""},
-                {"c": "entregue", "r": "Entregue", "sai": True, "fim": ""},
-                {"c": "ganho", "r": "Ganho", "sai": False, "fim": "ganho"},
-                {"c": "perdido", "r": "Perdido", "sai": False, "fim": "perdido"}],
+        status=_STATUS_JANELA,
         colunas_tpl=[("novo", "Novo"), ("contatado", "Contatado")],
         colunas={"novo": [_CARD], "contatado": []},
         # a coluna é desenhada em GRUPOS (evento_lead.agrupar, migração 197): é
@@ -881,3 +898,67 @@ def test_selo_de_campanha_so_aparece_no_template_quando_tem_campanha_ou_chip():
         "o selo no card Jinja precisa aparecer com campanha OU chip, não só com campanha")
     assert '(l.campanha||l.chip_apelido)?(\'<div class="camp">\'' in fonte, (
         "o addCard() em JS (lead capturado sem recarregar a página) precisa da mesma condição")
+
+
+# ─────────────────────── um jeito só de mudar a situação (19/09/2026) ────────
+# Pedido do dono, olhando o seletor da ficha: "é melhor colocar o status com o
+# botão pra alterar, fica mais fácil pro vendedor, igual está no cockpit".
+#
+# Por trás do pedido havia um defeito: o <select> da ficha era o TERCEIRO jeito de
+# mudar a situação no produto, e o único que não aprendeu a perguntar o motivo. O
+# servidor recusa certo — devolve `motivo_obrigatorio` COM a lista pronta —, o
+# quadro e a janela usam a lista desde o #712, e o `fichaStatus` imprimia o nome
+# técnico do erro e voltava o seletor sozinho. Quem tentasse perder um lead pela
+# ficha completa não conseguia.
+
+def test_a_ficha_nao_tem_mais_select_de_situacao():
+    """O caminho que não sabia pedir o motivo não pode voltar por distração."""
+    fonte = inspect.getsource(pp)
+    assert "function fichaStatus(" not in fonte, (
+        "o fichaStatus voltou — e com ele o único caminho que engole a lista de motivos")
+    html = _render("prospeccao_ficha")
+    assert 'onchange="fichaStatus(' not in html
+
+
+def test_a_ficha_usa_a_MESMA_fileira_de_botoes_da_janela():
+    html = _render("prospeccao_ficha")
+    assert 'id="ficha-sit"' in html, "a ficha não tem onde desenhar a fileira"
+    # é o widget da janela que desenha, e não uma segunda cópia em Jinja
+    assert "kbLeadSitHtml(" in html
+    # e o clique vai pro mesmo kbLeadIr, que é quem sabe abrir a folha do motivo
+    assert "function kbLeadIr(" in html and "function kbPerguntarMotivo(" in html
+
+
+def test_a_ficha_troca_a_situacao_sem_recarregar():
+    """Sem o gancho, o `kbLeadIr` cai no `location.reload()` — que é o certo pra
+    uma FILA (a troca pode tirar o lead dela) e desperdício aqui: a ficha continua
+    a mesma, e o que mudou cabe em repintar seis botões."""
+    fonte = inspect.getsource(pp)
+    ficha = fonte.split("_FICHA_TPL = ")[1].split("_COMUNICACAO_TPL = ")[0]
+    assert "function kbDepoisDoStatus(" in ficha, (
+        "a ficha não define o gancho — cada toque na situação recarrega a página")
+    assert "fichaPintaSit()" in ficha
+
+
+def test_a_comunicacao_abre_a_ficha_em_POP_UP_e_nao_navega():
+    """"Abrir ficha" no topo da conversa era um <a href> que levava embora: quem
+    estava lendo perdia a conversa pra ver de quem ela era. Mesma queixa que tirou
+    a navegação do Follow-up no #709 — e o mesmo botão, que só não tinha sido
+    trocado aqui."""
+    html = _render("prospeccao_comunicacao")
+    assert "kbAbrirLead(event," in html, "o botão não abre a janela"
+    assert 'href="/painel/prospeccao/\'+L.id+\'"' not in html, (
+        "sobrou link que navega pra ficha no lugar do pop-up")
+    # e a janela tem que estar na página, senão o onclick chama uma função que não existe
+    assert "function kbAbrirLead(" in html and "var _KB_STATUS=" in html
+
+
+def test_a_janela_escapa_sozinha_sem_o_balao_de_conversa():
+    """A Comunicação carrega SÓ a janela (tem o chat próprio dela). Enquanto o
+    `cxEscK` vinha emprestado do balão, uma aspa no nome de um lead quebraria o
+    HTML da janela inteira nessa tela — e em nenhuma das outras duas, porque lá os
+    dois módulos carregam juntos."""
+    assert "window.cxEscK = window.cxEscK ||" in _janela.JS, (
+        "a janela voltou a depender do balão pro escape")
+    html = _render("prospeccao_comunicacao")
+    assert "cxEscK" in html and "{{ balao_js }}" not in html

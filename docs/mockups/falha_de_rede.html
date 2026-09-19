@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="pt-br">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Falha de rede — o que está por trás</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --roxo:#C9A3E0; --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;
+  --body:"Inter",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo);overflow-wrap:anywhere}
+.wrap{max-width:1000px;margin:0 auto;padding:2.6rem 1rem 5rem;display:flex;flex-direction:column;gap:2.8rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.55rem,4vw,2.1rem);margin:.35rem 0 .55rem}
+.head p{margin:0;color:var(--text-dim);max-width:74ch}
+.marca{color:var(--neon)}
+.sec>h2{font-size:1.22rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.05rem;max-width:80ch;font-size:.9rem}
+.num{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em}
+.nota{border-left:2.5px solid var(--azul-borda);background:var(--azul-fundo);padding:.85rem 1rem;
+  border-radius:0 10px 10px 0;font-size:.88rem;color:var(--text-dim)}
+.nota b{color:var(--text)}
+.nota.mal{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.nota.amb{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.nota.ok{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.nota+.nota{margin-top:.6rem}
+
+/* o alerta do navegador, como ele aparece */
+.alerta{background:#d9d9d9;color:#111;border-radius:12px;padding:.85rem 1rem;max-width:100%;width:380px;
+  box-shadow:0 14px 34px rgba(0,0,0,.5);font-family:system-ui,sans-serif}
+.alerta .u{font-size:.82rem;color:#333;margin-bottom:.5rem}
+.alerta .m{font-size:.95rem;font-weight:500}
+.alerta .b{text-align:right;margin-top:.9rem;color:#1a73e8;font-weight:600;font-size:.9rem}
+
+/* código */
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;
+  padding:.8rem .9rem;overflow-x:auto;margin:.5rem 0 0;font-size:.76rem;line-height:1.6}
+pre code{color:var(--text-dim);font-size:1em}
+pre .hl{color:var(--coral);font-weight:600}
+pre .good{color:var(--neon-bright);font-weight:600}
+pre .cm{color:var(--text-faint);font-style:italic}
+
+/* contadores */
+.placar{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7rem}
+.pc{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:.85rem .9rem}
+.pc>b{display:block;font-family:var(--display);font-size:1.75rem;line-height:1.1;letter-spacing:-.02em}
+.pc.mal>b{color:var(--coral)}
+.pc.ok>b{color:var(--neon-bright)}
+.pc span{display:block;font-size:.76rem;color:var(--text-dim);margin-top:.25rem;line-height:1.4}
+
+/* tabelas */
+table.q{width:100%;border-collapse:collapse;font-size:.83rem;margin-top:.3rem}
+table.q th,table.q td{padding:.45rem .5rem;border-bottom:1px solid var(--line);text-align:left;
+  vertical-align:top;overflow-wrap:anywhere}
+table.q th{font-size:.64rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);font-weight:600}
+table.q td.vc{color:var(--text);font-weight:600}
+@media(max-width:560px){table.q{font-size:.77rem}table.q th,table.q td{padding:.4rem .3rem}}
+.tag{font:600 .64rem var(--mono);padding:.1rem .4rem;border-radius:5px;white-space:nowrap;display:inline-block}
+.tag.n{background:var(--neon-fundo);color:var(--neon-bright)}
+.tag.m{background:var(--coral-fundo);color:#F0A8A2}
+.tag.a{background:var(--ambar-fundo);color:#F0DCA6}
+
+/* antes/depois */
+.duas{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem;align-items:start}
+.duas>*{min-width:0}
+@media(max-width:860px){.duas{grid-template-columns:1fr}}
+.op{border:1px solid var(--line);border-radius:14px;padding:1rem;background:var(--bg-2)}
+.op.ruim{border-color:var(--coral-borda)}
+.op.bom{border-color:var(--neon-borda)}
+.op>h3{font-size:.95rem;margin-bottom:.4rem}
+.op>h3 .q{font:600 .62rem var(--mono);text-transform:uppercase;letter-spacing:.07em;
+  padding:.1rem .4rem;border-radius:5px;margin-right:.4rem;vertical-align:.12em}
+.op.ruim>h3 .q{background:var(--coral-fundo);color:#F0A8A2}
+.op.bom>h3 .q{background:var(--neon-fundo);color:var(--neon-bright)}
+
+/* as mensagens propostas */
+.msgs{display:flex;flex-direction:column;gap:.45rem;margin-top:.5rem}
+.msg{display:flex;gap:.6rem;align-items:flex-start;background:var(--surface);border:1px solid var(--line);
+  border-radius:10px;padding:.55rem .7rem}
+.msg .ic{font-size:1.05rem;line-height:1.3;flex:none}
+.msg .tx{flex:1;min-width:0}
+.msg .tx b{display:block;font-size:.85rem}
+.msg .tx small{display:block;color:var(--text-faint);font-size:.73rem;margin-top:.15rem;line-height:1.45}
+
+/* o toast proposto */
+.toast{display:inline-flex;align-items:center;gap:.55rem;background:#1b2520;border:1px solid var(--coral-borda);
+  border-left:3px solid var(--coral);border-radius:10px;padding:.6rem .85rem;font-size:.84rem;
+  box-shadow:0 10px 26px rgba(0,0,0,.45);max-width:100%}
+.toast.amb{border-color:var(--ambar-borda);border-left-color:var(--ambar)}
+.toast.ok{border-color:var(--neon-borda);border-left-color:var(--neon)}
+.toast .acao{color:var(--neon-bright);font-weight:600;cursor:pointer;white-space:nowrap}
+
+/* a fileira do follow-up */
+.fu{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:.7rem .85rem;font-size:.84rem}
+.fu+.fu{margin-top:.45rem}
+.fu.saindo{opacity:.42}
+.fu .n{font-weight:700}
+.fu .mt{color:var(--text-dim);font-size:.76rem;margin-top:.2rem}
+.fu .st{font:600 .64rem var(--mono);padding:.1rem .4rem;border-radius:5px;background:var(--surface-2);
+  color:var(--text-dim);margin-left:.4rem}
+.fu .st.ok{background:var(--neon-fundo);color:var(--neon-bright)}
+.passo{font-family:var(--mono);font-size:.68rem;color:var(--text-faint);letter-spacing:.06em;
+  text-transform:uppercase;margin:.9rem 0 .35rem}
+</style>
+<div class="wrap">
+
+<header class="head">
+  <div class="eyebrow">Diagnóstico · 19/09/2026 · <span class="marca">"Falha de rede."</span></div>
+  <h1>O que essa frase está escondendo</h1>
+  <p>Ela apareceu ao mudar a situação de um lead. Não é diagnóstico: é a frase que o
+  painel diz quando <b>qualquer coisa</b> dá errado — e hoje ele não consegue
+  distinguir cinco problemas muito diferentes, dois dos quais não têm nada a ver
+  com rede.</p>
+</header>
+
+<!-- ─────────────────────────────────────────── 00 · o que a frase esconde -->
+<section class="sec">
+  <div class="num">00</div>
+  <h2>A frase mente, e o código explica por quê</h2>
+  <p class="leg">Este é o pedaço que roda quando você toca na situação. O
+  <code>.catch</code> da última linha é quem imprime a frase.</p>
+
+  <div class="duas">
+    <div>
+      <div class="alerta">
+        <div class="u">app.zaq-ia.com diz</div>
+        <div class="m">Falha de rede.</div>
+        <div class="b">OK</div>
+      </div>
+      <div class="nota mal" style="margin-top:.9rem;font-size:.84rem">
+        O <code>.catch</code> de um <code>fetch</code> dispara em duas situações
+        completamente diferentes: a rede caiu <b>ou</b> o servidor respondeu uma
+        coisa que não é JSON. O código não olha qual das duas foi — só imprime
+        "Falha de rede".</div>
+    </div>
+    <div>
+<pre><code><span class="cm">// web/janela_lead.py — kbLeadIr</span>
+fetch('/painel/prospeccao/'+id+'/status',{…})
+  .then(function(r){<span class="hl">return r.json();</span>})   <span class="cm">← não olha se deu certo</span>
+  .then(function(d){
+     if(!d.ok&&d.erro==='motivo_obrigatorio'){…}
+     if(!d.ok){alert(d.msg||'Não consegui…');return;}
+     pronto(d);
+  })
+  <span class="hl">.catch(function(){alert('Falha de rede.');});</span>
+</code></pre>
+    </div>
+  </div>
+
+  <div class="passo">as cinco coisas que caem nesse mesmo catch</div>
+  <table class="q">
+    <thead><tr><th>O que realmente aconteceu</th><th>O que devia aparecer</th><th>Aparece</th></tr></thead>
+    <tbody>
+      <tr><td class="vc">A internet caiu de verdade</td><td>"Você está sem internet"</td><td><span class="tag n">certo</span></td></tr>
+      <tr><td class="vc">O Zaq estava subindo uma versão (deploy)</td><td>"Estamos atualizando o sistema — tente de novo em alguns segundos"</td><td><span class="tag m">Falha de rede</span></td></tr>
+      <tr><td class="vc">A sessão expirou</td><td>"Sua sessão expirou. Entre de novo"</td><td><span class="tag m">Falha de rede</span></td></tr>
+      <tr><td class="vc">Deu erro no servidor (500)</td><td>"Deu um erro do nosso lado — já ficou registrado"</td><td><span class="tag m">Falha de rede</span></td></tr>
+      <tr><td class="vc">A aba está aberta desde antes do deploy, com o código antigo</td><td>"Esta aba está desatualizada — recarregue"</td><td><span class="tag m">Falha de rede</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="nota amb" style="margin-top:.9rem"><b>A hipótese mais provável no seu
+  caso:</b> ontem o Zaq subiu <b>cinco versões</b> (16:22, 16:27, 16:37, 17:06 e
+  20:30). Cada uma derruba e sobe o serviço; um toque que caia nessa janela recebe
+  uma página de erro do Render em vez de JSON — e vira "Falha de rede". Não dá pra
+  provar depois do fato, porque <b>nada disso fica registrado</b>. É o segundo
+  problema: o painel não guarda o que deu errado.</div>
+</section>
+
+<!-- ─────────────────────────────────────────── 01 · o tamanho -->
+<section class="sec">
+  <div class="num">01</div>
+  <h2>Não é um lugar. São cento e dezenove.</h2>
+  <p class="leg">Procurei o mesmo padrão no painel inteiro — todo botão que salva,
+  todo card que carrega, toda busca.</p>
+
+  <div class="placar">
+    <div class="pc mal"><b>119</b><span>lugares que pedem JSON <b>sem conferir</b> se a resposta deu certo</span></div>
+    <div class="pc mal"><b>68</b><span>alertas escritos "Falha de rede"</span></div>
+    <div class="pc ok"><b>1</b><span>lugar que faz do jeito certo — a faixa de "tem versão nova"</span></div>
+    <div class="pc"><b>14</b><span>telas afetadas (Prospecção, Serviços, Agenda, Follow-up, Renovações…)</span></div>
+  </div>
+
+  <div class="nota ok" style="margin-top:.9rem">O único lugar que acertou já está no
+  código, e é de uma linha: <code>return r.ok ? r.json() : null;</code> — a faixa
+  que avisa que saiu versão nova (<code>web/portal.py</code>). Não é um recurso a
+  inventar; é um que existe em 1 de 120 lugares.</div>
+</section>
+
+<!-- ─────────────────────────────────────────── 02 · a solução -->
+<section class="sec">
+  <div class="num">02</div>
+  <h2>A solução: um caminho só pra falar com o servidor</h2>
+  <p class="leg">Em vez de consertar 119 lugares um a um, um único
+  <code>zapFetch</code> por onde todos passam. Quem chama não muda quase nada; o
+  que muda é que existe UM lugar que sabe o que aconteceu.</p>
+
+  <div class="duas">
+    <div class="op ruim">
+      <h3><span class="q">hoje</span> cada tela adivinha</h3>
+<pre><code>fetch(url,{…})
+  .then(function(r){return r.json();})
+  .then(function(d){ … })
+  .catch(function(){
+    <span class="hl">alert('Falha de rede.');</span>
+  });</code></pre>
+      <div class="nota mal" style="margin-top:.7rem;font-size:.82rem">Trava a tela
+      com um <code>alert</code>, some sem deixar rastro, e não oferece o que
+      fazer.</div>
+    </div>
+    <div class="op bom">
+      <h3><span class="q">proposta</span> um lugar só decide</h3>
+<pre><code>zapFetch(url,{…})
+  .then(function(d){ … })
+  <span class="cm">// sem catch: o zapFetch já</span>
+  <span class="cm">// mostrou o aviso certo,</span>
+  <span class="cm">// com a ação certa</span></code></pre>
+      <div class="nota ok" style="margin-top:.7rem;font-size:.82rem">Confere
+      <code>r.ok</code>, lê o corpo uma vez, classifica pelo código HTTP e mostra a
+      mensagem daquele caso.</div>
+    </div>
+  </div>
+
+  <div class="passo">o que cada caso passa a dizer</div>
+  <div class="msgs">
+    <div class="msg"><span class="ic">📡</span><span class="tx">
+      <b>Você está sem internet.</b>
+      <small>O <code>fetch</code> nem saiu do navegador. Único caso em que "rede" é a palavra certa.</small></span></div>
+    <div class="msg"><span class="ic">🔄</span><span class="tx">
+      <b>Estamos atualizando o Zaq. Tentando de novo…</b>
+      <small>502/503/504 — a janela do deploy. <b>Tenta sozinho 2 vezes</b>, com 2s e 5s de espera: na maioria das vezes a pessoa nem vê o aviso, o toque só demora um pouco mais.</small></span></div>
+    <div class="msg"><span class="ic">🔑</span><span class="tx">
+      <b>Sua sessão expirou. <span style="color:var(--neon-bright)">Entrar de novo</span></b>
+      <small>401/403 ou a página de login vindo no lugar do JSON. Hoje isso também vira "Falha de rede".</small></span></div>
+    <div class="msg"><span class="ic">⚠️</span><span class="tx">
+      <b>Não consegui salvar — o erro ficou registrado.</b>
+      <small>500. O aviso diz o número do ocorrido, pra você me mandar e eu achar no log em vez de adivinhar.</small></span></div>
+    <div class="msg"><span class="ic">🧭</span><span class="tx">
+      <b>Esta aba está desatualizada. <span style="color:var(--neon-bright)">Recarregar</span></b>
+      <small>A resposta veio de uma versão diferente da que esta aba carregou.</small></span></div>
+  </div>
+
+  <div class="passo">e o aviso deixa de travar a tela</div>
+  <div style="display:flex;flex-direction:column;gap:.5rem;align-items:flex-start">
+    <div class="toast amb"><span>🔄</span><span>Estamos atualizando o Zaq. Tentando de novo…</span></div>
+    <div class="toast"><span>⚠️</span><span>Não consegui mudar a situação.</span><span class="acao">Tentar de novo</span></div>
+    <div class="toast ok"><span>✓</span><span>Manuel Prada agora está em Negociação.</span></div>
+  </div>
+  <div class="nota" style="margin-top:.8rem"><b>Por que não é mais
+  <code>alert</code>:</b> o alerta do navegador para tudo até alguém clicar em OK,
+  não cabe botão de "tentar de novo" e, no celular, cobre a tela inteira. O aviso
+  aparece no canto, some sozinho quando deu certo e fica até você mandar embora
+  quando deu errado.</div>
+</section>
+
+<!-- ─────────────────────────────────────────── 03 · a ficha ficou pra trás -->
+<section class="sec">
+  <div class="num">03</div>
+  <h2>Achei um segundo defeito no caminho: a ficha não sabe pedir o motivo</h2>
+  <p class="leg">O seletor que você circulou é o único dos três lugares que mudam a
+  situação que ficou de fora do conserto de 17/09.</p>
+
+  <table class="q">
+    <thead><tr><th>Onde se muda a situação</th><th>Ao mandar pra Perdido…</th><th></th></tr></thead>
+    <tbody>
+      <tr><td class="vc">Quadro (arrastar o card)</td><td>abre a lista dos 6 motivos</td><td><span class="tag n">ok</span></td></tr>
+      <tr><td class="vc">Janela do lead (Follow-up e quadro)</td><td>abre a lista dos 6 motivos</td><td><span class="tag n">ok</span></td></tr>
+      <tr><td class="vc">Ficha completa (o seletor circulado)</td><td>"Não consegui mudar a situação (motivo_obrigatorio)" e volta sozinho</td><td><span class="tag m">quebrado</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="nota mal" style="margin-top:.9rem">O servidor responde certo: manda a
+  recusa <b>com a lista de motivos pronta</b>. O quadro e a janela usam essa lista;
+  a ficha joga fora e imprime o nome técnico do erro na cara da pessoa. É o mesmo
+  defeito que o #712 consertou — nos outros dois lugares.</div>
+
+  <div class="passo">a proposta</div>
+  <div class="nota ok">Trocar o <code>&lt;select&gt;</code> da ficha pela <b>mesma
+  fileira de botões</b> que a janela já usa. Passam a ser <b>um</b> jeito de mudar
+  a situação no produto inteiro, em vez de três parecidos — e a ficha ganha de
+  graça a lista de motivos, a trava contra clique duplo e o aviso certo.</div>
+</section>
+
+<!-- ─────────────────────────────────────────── 04 · o follow-up recarrega -->
+<section class="sec">
+  <div class="num">04</div>
+  <h2>E o terceiro: no Follow-up, mudar a situação recarrega a página inteira</h2>
+  <p class="leg">"Abrir ficha" já abre a caixinha sem sair da fila — isso está
+  certo. O que sai da fila é o <b>depois</b>: assim que você muda a situação, a
+  página recarrega e você volta pro topo da lista de 376.</p>
+
+  <div class="duas">
+    <div class="op ruim">
+      <h3><span class="q">hoje</span></h3>
+      <ol style="margin:.3rem 0 0;padding-left:1.1rem;font-size:.84rem;color:var(--text-dim);line-height:1.7">
+        <li>Você abre a ficha do 14º lead da fila</li>
+        <li>Toca em "Negociação"</li>
+        <li><b style="color:var(--coral)">A página inteira recarrega</b></li>
+        <li>Você volta pro topo e procura onde estava</li>
+      </ol>
+<pre style="margin-top:.7rem"><code><span class="cm">// janela_lead.py — kbLeadIr</span>
+if(typeof window.kbDepoisDoStatus==='function'){…}
+<span class="hl">location.reload();</span>  <span class="cm">← o Follow-up cai aqui</span></code></pre>
+      <div class="nota mal" style="margin-top:.7rem;font-size:.82rem">O quadro tem
+      o gancho <code>kbDepoisDoStatus</code> e move o card sem recarregar. O
+      Follow-up nunca ganhou o dele.</div>
+    </div>
+    <div class="op bom">
+      <h3><span class="q">proposta</span></h3>
+      <ol style="margin:.3rem 0 0;padding-left:1.1rem;font-size:.84rem;color:var(--text-dim);line-height:1.7">
+        <li>Você abre a ficha do 14º lead</li>
+        <li>Toca em "Negociação"</li>
+        <li><b style="color:var(--neon-bright)">A própria fileira muda</b>, ali mesmo</li>
+        <li>Você continua no 14º, e segue pro 15º</li>
+      </ol>
+      <div class="passo" style="margin-top:.8rem">mudou de etapa — fica na fila</div>
+      <div class="fu"><span class="n">Manuel Prada</span><span class="st ok">negociação</span>
+        <div class="mt">Festa 29/11 · 30 convidados · PEDRO YAN PRIME</div></div>
+      <div class="passo">virou ganho ou perdido — sai da fila</div>
+      <div class="fu saindo"><span class="n">Roberta Benigno</span><span class="st">saiu da fila ✓</span>
+        <div class="mt">a fileira apaga devagar e os 4 números do topo descem 1</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────── 05 · ordem -->
+<section class="sec">
+  <div class="num">05</div>
+  <h2>Em que ordem eu faria</h2>
+  <table class="q">
+    <thead><tr><th>#</th><th>O quê</th><th>Por quê primeiro</th></tr></thead>
+    <tbody>
+      <tr><td class="vc">1</td><td class="vc">O <code>zapFetch</code> + o registro do erro</td>
+        <td>Enquanto nada é registrado, todo diagnóstico é chute. Este é o único que me deixa responder "o que houve às 19:33" da próxima vez.</td></tr>
+      <tr><td class="vc">2</td><td class="vc">A ficha ganha a fileira de situação</td>
+        <td>É um defeito com efeito hoje: quem tenta perder um lead pela ficha não consegue.</td></tr>
+      <tr><td class="vc">3</td><td class="vc">O Follow-up para de recarregar</td>
+        <td>Não quebra nada — só custa a fila toda de volta, 376 linhas, a cada toque.</td></tr>
+    </tbody>
+  </table>
+  <div class="nota amb" style="margin-top:.9rem"><b>O que eu faria diferente do
+  pedido:</b> você falou dos três como um conserto só, e o 1 é bem maior que os
+  outros dois juntos — mexe em 14 telas. Se você quiser ver resultado hoje, eu faço
+  <b>2 e 3</b>, que são pequenos e fechados, e o 1 com o zapFetch entrando
+  primeiro só nos lugares que mudam a situação (5 chamadas), espalhando pro resto
+  numa segunda leva.</div>
+  <div class="nota ok" style="margin-top:.6rem">Nada aqui depende do nicho: é
+  encanamento. A lista de motivos de perda já é de cada conta, e continua sendo.</div>
+</section>
+
+</div>
+</html>

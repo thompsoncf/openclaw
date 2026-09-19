@@ -352,6 +352,150 @@ def resumo(c, conta_id: int, membro_id: int | None, agora: datetime | None = Non
             "tratou": falou + moveu + fechou}
 
 
+#: A origem do fecho do dia em `aviso_envios`. Separada da cobrança da manhã pelo
+#: mesmo motivo do botão de teste: são dois avisos diferentes, e somá-los faria o
+#: card dizer que a conta manda o dobro do que manda.
+ORIGEM_FECHO = "esteira_fecho"
+
+
+def fecho_do_dia(pool, conta_id: int, agora: datetime | None = None) -> list[dict]:
+    """O fecho do dia pro DONO e pro GESTOR: o que a esteira produziu hoje.
+
+    Pedido do dono em 19/09/2026 ("4 - sim"). A esteira cobra o VENDEDOR de manhã e
+    conta pra ele o que ficou de ontem; quem decide não recebia nada — e a medição
+    daquele dia mostrou por que isso importa: dos 30 leads cobrados no dia anterior,
+    ZERO tiveram mensagem, resposta ou movimento em 24 horas. Sem alguém lendo o
+    placar, a cobrança vira um ritual que ninguém confere.
+
+    TRÊS TRAVAS, porque um segundo aviso diário é exatamente o tipo de coisa que
+    vira ruído e faz a pessoa desligar os dois:
+
+    1. **Só depois que a janela fecha** — às 15h o dia ainda está acontecendo.
+    2. **Uma vez por dia**, com a memória no próprio registro de envio (o poller
+       roda de minuto em minuto; sem isso seriam dezenas).
+    3. **Só em dia que teve cobrança** — aviso que chega dizendo nada é o que
+       ensina a ignorar o próximo.
+
+    Sem push, de propósito: é leitura de fim de dia, não interrupção.
+    """
+    agora = agora or datetime.now(timezone.utc)
+    saida: list[dict] = []
+    try:
+        with pool.connection() as c:
+            cfg = config(c, conta_id)
+            if cfg.get("esteira_modo") != "ligado" or not _fim_da_janela(agora, cfg):
+                return saida
+            if _ja_fechou_hoje(c, conta_id, agora):
+                return saida
+            cobrados = c.execute(
+                """select count(*) from aviso_envios
+                    where conta_id=%s and origem='esteira' and canal='whatsapp'
+                      and criado_em >= %s""",
+                (conta_id, _inicio_do_dia(agora))).fetchone()
+            if not cobrados or not cobrados[0]:
+                return saida
+            vendedores = c.execute(
+                """select distinct e.membro_id, coalesce(nullif(m.nome,''), m.email, '?')
+                     from follow_up_esteira e
+                     join membros m on m.id = e.membro_id
+                    where e.conta_id=%s and m.papel='vendedor' and coalesce(m.ativo,true)""",
+                (conta_id,)).fetchall()
+            placar = [(nome, resumo(c, conta_id, mid, agora)) for mid, nome in vendedores]
+            casa = resumo(c, conta_id, None, agora)
+            chefes = c.execute(
+                "select id, coalesce(nullif(nome,''), email), email from membros "
+                " where conta_id=%s and coalesce(ativo,true) and papel in ('dono','gestor')",
+                (conta_id,)).fetchall()
+        titulo, corpo = texto_fecho(casa, placar)
+        for mid, nome, email in chefes:
+            saida.append(_mandar_fecho(pool, conta_id, mid, nome, email, titulo, corpo))
+    except Exception:  # noqa: BLE001 — o fecho do dia não derruba o poller
+        _log.warning("esteira: fecho do dia falhou na conta %s", conta_id, exc_info=True)
+    return saida
+
+
+def texto_fecho(casa: dict, placar: list[tuple[str, dict]]) -> tuple[str, str]:
+    """O texto do fecho: o placar da casa, depois por pessoa.
+
+    FACTUAL E SEM ADJETIVO, de propósito. Ligação por telefone e conversa pessoal
+    não aparecem no sistema — se o vendedor resolveu no telefone, o placar vai
+    dizer que ele não tratou, e estará errado sobre ele. Um aviso que chama de
+    relapso quem trabalhou perde a equipe no primeiro dia; o número serve pra
+    conversar em cima, não pra julgar.
+    """
+    titulo = (f"📋 O dia fechou: {casa.get('tratou', 0)} tratados,"
+              f" {casa.get('na_esteira', 0)} na esteira")
+    linhas = [f"· {nome} — {r.get('tratou', 0)} tratados, {r.get('na_esteira', 0)} na esteira"
+              for nome, r in sorted(placar, key=lambda x: -x[1].get("na_esteira", 0))]
+    if casa.get("fechados_sem_tratativa"):
+        linhas.append("")
+        linhas.append(f"Fechados hoje sem tratativa: {casa['fechados_sem_tratativa']}.")
+    linhas.append("")
+    linhas.append("Conta como tratado: mensagem nossa (inclusive pelo WhatsApp Web),"
+                  " o card movido à mão, ou o cliente voltando a falar."
+                  " Ligação e conversa pessoal não aparecem aqui.")
+    return titulo, "\n".join(linhas)
+
+
+def _ja_fechou_hoje(c, conta_id: int, agora: datetime) -> bool:
+    """Já saiu hoje? A memória é o próprio registro de envio — sem tabela nova e
+    sem estado em processo, que dois workers no Render não compartilham.
+
+    Base sem `aviso_envios` devolve True, ou seja, NÃO manda: errar pro lado de não
+    mandar é o lado barato; o outro é um aviso por minuto."""
+    try:
+        r = c.execute(
+            """select 1 from aviso_envios
+                where conta_id=%s and origem=%s and criado_em >= %s limit 1""",
+            (conta_id, ORIGEM_FECHO, _inicio_do_dia(agora))).fetchone()
+        return bool(r)
+    except Exception:  # noqa: BLE001
+        _log.info("esteira: não deu pra ler o registro do fecho (ok)", exc_info=True)
+        return True
+
+
+def _mandar_fecho(pool, conta_id: int, membro_id: int, nome: str, email: str,
+                  titulo: str, corpo: str) -> dict:
+    """Manda o fecho pra UMA pessoa, nos dois canais de leitura (e-mail e WhatsApp,
+    decisão do dono em 19/09). Cada canal deixa rastro, como o resto dos avisos."""
+    from finance import aviso_log as _al
+    from finance import follow_up as _fu
+    r = {"membro_id": membro_id, "nome": nome, "email": False, "whatsapp": False}
+    if email and "@" in email:
+        try:
+            from finance import email_sender as es_mail
+            r["email"] = bool(es_mail.enviar_aviso(
+                email, titulo, corpo, nome=nome,
+                link=_fu.link_da_fila(), link_texto="Ver a equipe"))
+            _al.registrar(pool, conta_id, origem=ORIGEM_FECHO, canal="email",
+                          membro_id=membro_id, destino=email, assunto=titulo,
+                          ok=r["email"], motivo="" if r["email"] else "o envio devolveu falso")
+        except Exception as e:  # noqa: BLE001
+            _al.registrar(pool, conta_id, origem=ORIGEM_FECHO, canal="email",
+                          membro_id=membro_id, destino=email, assunto=titulo,
+                          ok=False, motivo=f"{type(e).__name__}: {e}")
+    else:
+        _al.registrar(pool, conta_id, origem=ORIGEM_FECHO, canal="email",
+                      membro_id=membro_id, assunto=titulo, ok=False,
+                      motivo="membro sem e-mail cadastrado")
+    try:
+        with pool.connection() as c:
+            numero = _fu._zap_do_membro(c, conta_id, membro_id)
+    except Exception:  # noqa: BLE001
+        numero = ""
+    if not numero:
+        _al.registrar(pool, conta_id, origem=ORIGEM_FECHO, canal="whatsapp",
+                      membro_id=membro_id, assunto=titulo, ok=False,
+                      motivo="membro sem WhatsApp cadastrado")
+        return r
+    env = _fu._mandar_zap(pool, conta_id, numero, _fu._texto_zap(titulo, corpo, estado=""))
+    r["whatsapp"] = env["ok"]
+    _al.registrar(pool, conta_id, origem=ORIGEM_FECHO, canal="whatsapp",
+                  membro_id=membro_id, destino=numero, assunto=titulo,
+                  ok=env["ok"], motivo=env["erro"], sid=env.get("sid", ""))
+    return r
+
+
 # ------------------------------------------------------------------ o motor
 
 def avaliar(c, conta_id: int, agora: datetime | None = None) -> dict:
@@ -411,6 +555,9 @@ def rodar(pool, agora: datetime | None = None) -> dict:
                     # o aviso sai DEPOIS do commit: mensagem não tem como ser desfeita
                     if r["cobrancas"] and _e_hora_do_aviso(agora, conta_id, pool):
                         notificar(pool, conta_id, r["cobrancas"])
+                    # e, depois que a janela fecha, o placar do dia pra quem decide.
+                    # Ele mesmo confere se é hora e se já saiu hoje.
+                    fecho_do_dia(pool, conta_id, agora)
                 except Exception:  # noqa: BLE001
                     _log.warning("esteira falhou na conta %s", conta_id, exc_info=True)
         finally:
@@ -492,7 +639,12 @@ def notificar(pool, conta_id: int, cobrancas_hoje: list[dict]) -> None:
             if email and "@" in email:
                 try:
                     from finance import email_sender as es_mail
-                    ok = es_mail.enviar_aviso(email, titulo, corpo, nome=nome)
+                    # com BOTÃO (19/09/2026): era o único canal de onde não dava
+                    # pra chegar a lugar nenhum — o WhatsApp leva link e o push abre
+                    # no toque, e aqui o texto pedia pra pessoa ir procurar a tela.
+                    ok = es_mail.enviar_aviso(email, titulo, corpo, nome=nome,
+                                              link=_fu.link_da_fila("atrasado"),
+                                              link_texto="Abrir a fila")
                     _al.registrar(pool, conta_id, origem="esteira", canal="email",
                                   membro_id=membro_id, destino=email, assunto=titulo,
                                   n_leads=len(itens), ok=bool(ok),

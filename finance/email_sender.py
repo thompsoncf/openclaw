@@ -310,10 +310,27 @@ def enviar_confirmacao_email(destino: str, link_confirma: str,
 
 
 def enviar_aviso(destino: str, titulo: str, mensagem: str,
-                 nome: str | None = None) -> bool:
-    """Email de aviso generico (cobranca, lista pronta, etc)."""
+                 nome: str | None = None, link: str = "",
+                 link_texto: str = "Abrir o Zaq") -> bool:
+    """Email de aviso generico (cobranca, lista pronta, etc).
+
+    COM BOTAO quando quem chama passa `link` (19/09/2026). O e-mail era o unico
+    canal de aviso de onde nao dava pra chegar a lugar nenhum: o WhatsApp leva
+    link, o push abre no toque, e aqui o texto dizia "abra o Zaq" — e a pessoa
+    tinha que largar o e-mail e ir procurar a tela.
+
+    As quebras de linha viram <br>: o aviso da esteira manda a lista de leads, uma
+    por linha, e sem isso os dez chegariam grudados num paragrafo so.
+    """
+    import html as _html
     saudacao = f"Ola, {nome}!" if nome else "Ola!"
-    corpo = f"<p>{saudacao}</p><p>{mensagem}</p>"
-    texto = f"{saudacao}\n\n{mensagem}"
+    corpo_html = _html.escape(mensagem).replace("\n", "<br>")
+    corpo = f"<p>{saudacao}</p><p>{corpo_html}</p>"
+    if link:
+        corpo += (f'<p style="margin-top:20px"><a href="{link}" '
+                  'style="display:inline-block;background:#0f766e;color:#fff;'
+                  'text-decoration:none;border-radius:8px;padding:12px 22px;'
+                  f'font-weight:bold;font-size:15px">{link_texto}</a></p>')
+    texto = f"{saudacao}\n\n{mensagem}" + (f"\n\n{link_texto}: {link}" if link else "")
     return enviar_email(destino, f"{titulo} - Zaq",
                         _layout(titulo, corpo), texto)

@@ -46,6 +46,12 @@ create table funil_movimentos (id bigserial primary key, conta_id bigint, prospe
 create table funil_etapas (id bigserial primary key, semeado_de text, conta_id bigint, chave text,
   rotulo text, ordem int default 0, fixa boolean default false, fase text default 'venda',
   prazo_min integer, gatilho text, gatilho_ativo boolean default false);
+-- o registro de envio (276 e 284): é a memória do "já mandei o fecho hoje", e é
+-- onde cada canal do aviso deixa rastro
+create table aviso_envios (id bigserial primary key, conta_id bigint, membro_id bigint,
+  origem text, canal text, destino text, assunto text, n_leads int, ok boolean,
+  motivo text, criado_em timestamptz not null default now(),
+  sid text, token text, entregue_em timestamptz, lido_em timestamptz, clicado_em timestamptz);
 create table funil_regua (conta_id bigint primary key,
   gatilhos_modo text not null default 'off', cobranca_modo text not null default 'off',
   janela_dias text, janela_abre time, janela_fecha time,
@@ -82,6 +88,9 @@ def pool():
                   (CONTA,))
         for mid, nome in ((VEND, "Vendedor"), (OUTRO, "Outro")):
             c.execute("insert into membros (id, conta_id, nome) values (%s,%s,%s)", (mid, CONTA, nome))
+        # o DONO, que é quem recebe o fecho do dia (19/09/2026)
+        c.execute("insert into membros (id, conta_id, nome, email, papel) "
+                  "values (99,%s,'MANOEL','dono@x.com','dono')", (CONTA,))
         c.commit()
     yield p
     p.close()
@@ -91,7 +100,7 @@ def pool():
 def c(pool):
     with pool.connection() as con:
         for t in ("follow_up_esteira", "funil_movimentos", "mensagens", "conversas",
-                  "prospeccao", "funil_regua"):
+                  "prospeccao", "funil_regua", "aviso_envios"):
             con.execute(f"delete from {t}")
         con.execute("""insert into funil_regua (conta_id, esteira_modo, fu_teto_dia, fu_toques_dias,
                                                 janela_dias, janela_abre, janela_fecha)
@@ -348,3 +357,111 @@ def test_modo_off_nao_faz_nada(c):
     r = es.avaliar(c, CONTA, AGORA)
     assert r["entraram"] == 0 and r["cobrancas"] == []
     assert c.execute("select count(*) from follow_up_esteira").fetchone()[0] == 0
+
+
+# ───────────────── o fecho do dia pra quem decide (19/09/2026)
+#
+# A esteira cobra o VENDEDOR de manhã e conta pra ele o que ficou de ontem. Quem
+# decide não recebia nada — e a medição daquele dia mostrou por que isso importa:
+# dos 30 leads cobrados no dia anterior, ZERO tiveram mensagem, resposta ou
+# movimento em 24 horas. Sem alguém lendo o placar, a cobrança vira um ritual que
+# ninguém confere.
+
+def _fim_do_expediente():
+    """Um instante depois das 19h de Brasília (a janela fecha 19:00)."""
+    return AGORA.replace(hour=23, minute=30, second=0, microsecond=0)
+
+
+def _cobrou_hoje(c, quantos=2):
+    """Deixa a conta com cobrança da esteira registrada hoje."""
+    for n in range(quantos):
+        c.execute("""insert into aviso_envios (conta_id, membro_id, origem, canal, ok, criado_em)
+                     values (%s,%s,'esteira','whatsapp',true,%s)""", (CONTA, VEND, AGORA))
+    c.connection.commit() if hasattr(c, "connection") else None
+
+
+def test_o_fecho_do_dia_sai_pro_dono_nos_dois_canais(pool, c, monkeypatch):
+    from finance import email_sender as es
+    from finance import follow_up as fu
+    from finance import esteira as est
+    enviados, zaps = [], []
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: enviados.append((a, k)) or True)
+    monkeypatch.setattr(fu, "_mandar_zap",
+                        lambda *a, **k: zaps.append(a) or {"ok": True, "erro": "", "sid": "S1"})
+    monkeypatch.setattr(fu, "_zap_do_membro", lambda *a, **k: "86999990000")
+    lead = _lead(c, nome="Ana")
+    est.avaliar(c, CONTA, AGORA)
+    _cobrou_hoje(c)
+    c.commit()
+
+    r = est.fecho_do_dia(pool, CONTA, _fim_do_expediente())
+    assert r and r[0]["email"] is True and r[0]["whatsapp"] is True
+    assert "O dia fechou" in enviados[0][0][1]
+    assert zaps, "o dono não recebeu o fecho no WhatsApp"
+    with pool.connection() as con:
+        canais = {x[0] for x in con.execute(
+            "select canal from aviso_envios where origem='esteira_fecho'").fetchall()}
+    assert canais == {"email", "whatsapp"}, "o fecho mandou push"
+    assert lead
+
+
+def test_o_fecho_NAO_sai_antes_da_janela_fechar(pool, c, monkeypatch):
+    from finance import email_sender as es
+    from finance import esteira as est
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    _cobrou_hoje(c)
+    c.commit()
+    meio_dia = AGORA.replace(hour=15, minute=0)
+    assert est.fecho_do_dia(pool, CONTA, meio_dia) == []
+
+
+def test_o_fecho_sai_UMA_vez_por_dia(pool, c, monkeypatch):
+    """O poller roda de minuto em minuto: sem a trava seriam dezenas."""
+    from finance import email_sender as es
+    from finance import follow_up as fu
+    from finance import esteira as est
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    monkeypatch.setattr(fu, "_zap_do_membro", lambda *a, **k: "")
+    _cobrou_hoje(c)
+    c.commit()
+    est.fecho_do_dia(pool, CONTA, _fim_do_expediente())
+    with pool.connection() as con:
+        n1 = con.execute("select count(*) from aviso_envios where origem='esteira_fecho'").fetchone()[0]
+    est.fecho_do_dia(pool, CONTA, _fim_do_expediente())
+    with pool.connection() as con:
+        n2 = con.execute("select count(*) from aviso_envios where origem='esteira_fecho'").fetchone()[0]
+    assert n1 == n2 and n1 > 0
+
+
+def test_dia_SEM_cobranca_nao_gera_fecho(pool, c, monkeypatch):
+    """Aviso que chega dizendo nada é o que ensina a ignorar o próximo."""
+    from finance import email_sender as es
+    from finance import esteira as est
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    c.commit()
+    assert est.fecho_do_dia(pool, CONTA, _fim_do_expediente()) == []
+
+
+def test_o_fecho_nao_sai_com_a_esteira_em_ensaio(pool, c, monkeypatch):
+    from finance import email_sender as es
+    from finance import esteira as est
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    c.execute("update funil_regua set esteira_modo='observando' where conta_id=%s", (CONTA,))
+    _cobrou_hoje(c)
+    c.commit()
+    assert est.fecho_do_dia(pool, CONTA, _fim_do_expediente()) == []
+
+
+def test_o_texto_do_fecho_diz_o_que_NAO_enxerga():
+    """Ligação e conversa pessoal não aparecem. Sem essa linha, quem resolveu no
+    telefone vira relapso na leitura de quem cobra."""
+    from finance import esteira as est
+    titulo, corpo = est.texto_fecho(
+        {"tratou": 3, "na_esteira": 7, "fechados_sem_tratativa": 0},
+        [("THIAGO", {"tratou": 1, "na_esteira": 4}),
+         ("PEDRO", {"tratou": 2, "na_esteira": 3})])
+    assert titulo == "📋 O dia fechou: 3 tratados, 7 na esteira"
+    assert corpo.split("\n")[0] == "· THIAGO — 1 tratados, 4 na esteira", corpo
+    assert "Ligação e conversa pessoal não aparecem" in corpo
+    for palavra in ("atenção", "urgente", "relapso", "!"):
+        assert palavra not in corpo.lower(), palavra

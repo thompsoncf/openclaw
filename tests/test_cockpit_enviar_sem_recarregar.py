@@ -251,6 +251,21 @@ def test_foto_enviada_nao_aparece_duas_vezes():
     assert """if(chat.querySelector('.bub[data-id="'+m.id+'"]'))""" in html
 
 
+def test_a_folha_de_acoes_nao_empurra_a_tela_pra_cima():
+    """19/09/2026, iPhone: tocar em "Ficha, funil e fechamento" jogava a tela
+    inteira pra cima — o topo da conversa sumia, sobrava preto embaixo e a folha
+    mostrava o FIM do conteúdo.
+
+    O salto de âncora é a causa: `#acoes` é a própria folha, e trazer o alvo à
+    vista faz o navegador rolar o `.wrap` (rolagem programática atravessa o
+    `overflow:hidden`). O `:target` continua abrindo a folha sem JS; o script só
+    desfaz a rolagem."""
+    html = _tela_da_conversa()
+    assert "id=acoes" in html and ".folha:target" in pc._CSS_TEXTO
+    assert "w.scrollTop=0" in html and "fo.scrollTop=0" in html
+    assert "hashchange" in html
+
+
 def test_a_bolha_de_verdade_toma_o_lugar_da_otimista():
     """O polling traz a mensagem gravada; a otimista, com o mesmo texto, sai."""
     fonte = __import__("inspect").getsource(pc._lead_vendedor)

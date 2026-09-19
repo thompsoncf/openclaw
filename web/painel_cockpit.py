@@ -4827,6 +4827,31 @@ _ANEXO_JS = r"""
 # o vendedor sem JS ficaria sem onde escrever. Aqui é o oposto: sem JS os dois
 # campos aparecem, e o `required` do rádio já garante que ele escolha um motivo.
 # Mostrar dois campos a mais é feio; esconder um campo obrigatório é um beco.
+# A FOLHA ABRINDO TORTA (relatado em 19/09/2026, iPhone): tocar em "Ficha, funil e
+# fechamento" jogava a tela inteira pra cima — o topo da conversa sumia e sobrava
+# preto embaixo, com a folha mostrando o FIM do conteúdo.
+#
+# A causa é o salto de âncora. `#acoes` é a própria folha, e o navegador rola o que
+# for preciso pra trazer o alvo à vista: `overflow:hidden` NÃO impede rolagem
+# programática, então ele rola o `.wrap` — que tem a altura da tela — e tudo sobe.
+# Como a folha é `position:absolute` dentro dele, ela sobe junto.
+#
+# O `:target` continua sendo quem abre (sem JS a folha abre como sempre). Isto aqui
+# só desfaz a rolagem que o salto causou, no quadro seguinte: a folha volta a
+# começar do começo e a tela fica onde estava.
+_FOLHA_JS = (
+    "<script>(function(){"
+    "var w=document.querySelector('.wrap'),fo=document.getElementById('acoes');"
+    "if(!w||!fo)return;"
+    "function endireita(){requestAnimationFrame(function(){"
+    "w.scrollTop=0;if(location.hash==='#acoes')fo.scrollTop=0;});}"
+    "window.addEventListener('hashchange',endireita);"
+    "document.addEventListener('click',function(e){"
+    "var a=e.target.closest&&e.target.closest('a[href^=\"#\"]');if(a)endireita();},true);"
+    # já entrou na tela com #acoes (voltar do histórico, link compartilhado)
+    "endireita();})();</script>")
+
+
 _TRAVA_JS = (
     "<script>(function(){"
     "var f=document.getElementById('comp'); if(!f)return;"
@@ -5483,7 +5508,7 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "function v(){var o=s.options[s.selectedIndex];i.hidden=!(o&&o.hasAttribute('data-desc'));}"
            "s.addEventListener('change',v);v();})();</script>" if pede_desc else "")
         + "</form>"
-        + "</div><a class=fbg href='#fechar' aria-label='Fechar'></a>")
+        + "</div><a class=fbg href='#fechar' aria-label='Fechar'></a>" + _FOLHA_JS)
 
     # Conversa abre no fim, na mensagem mais recente — é onde o trabalho está.
     # Sem 'smooth' de propósito: tem que JÁ NASCER embaixo, e não descer na frente

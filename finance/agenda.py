@@ -167,6 +167,118 @@ _ATIVO_OU_PRE = ("ativo", PRE_RESERVADO)
 
 
 # ---------------------------------------------------------------------------
+# A DATA ESTÁ VENDIDA? — a pergunta nº 1 de quem vende espaço
+# ---------------------------------------------------------------------------
+#
+# Regra do dono, dada em 19/09/2026, sobre a visita ao espaço:
+#
+#   > "a visita não implica no dia que o espaço tá locado ou ocupado, porque é
+#   > só pra mostrar"
+#
+# Até aqui o calendário pintava a bolinha por TIPO (pessoal, empresa,
+# fornecedor). Visita e casamento são os dois "empresa", então eram a mesma
+# bolinha azul — e a tela não respondia a única pergunta que o vendedor faz o
+# dia inteiro no WhatsApp: esse dia está livre?
+#
+# Medido na Prime (conta 34) em 19/09/2026: setembro tinha 28 marcas no
+# calendário e só 8 ocupavam o espaço. Dos 84 compromissos ativos da conta, 39
+# ocupam, 38 não ocupam e 2 estão segurados.
+#
+# QUEM DECIDE, EM ORDEM:
+#
+#   1. `ocupa_espaco` preenchido — é a resposta do dono, e ela vence tudo.
+#      A COLUNA AINDA NÃO EXISTE: ela chega junto com a tela de responder os
+#      "a conferir". O gancho já está aqui de propósito — quando a coluna nascer,
+#      nada nesta função muda, e o teste que fixa isso já está escrito.
+#   2. `pre_reservado` — a data está segurada esperando o sinal. Ocupa hoje e
+#      pode cair amanhã; é um estado próprio, não um "sim" nem um "não".
+#   3. pessoal e fornecedor — agenda interna da casa. Reunião com o contador não
+#      impede vender o sábado.
+#   4. VISITA — a régua é a MESMA de `web/painel_relatorios._E_VISITA`, e é
+#      importada de lá em espírito de propósito: duas cópias da mesma pergunta
+#      acertam no primeiro dia e divergem no terceiro.
+#   5. tem orçamento vinculado OU tem tipo de festa — é venda.
+#   6. o que sobra é A CONFERIR, e a tela PERGUNTA em vez de chutar.
+#
+# O passo 6 existe porque os dados provaram que palpite não serve. Na Prime
+# sobram CINCO de 84 (6%), e dois deles têm a mesma palavra no título e respostas
+# opostas:
+# "REUNIÃO COM ENGENHEIRA" não ocupa; "Reunião Política - Bianca - Pedro" ocupa
+# (teve sinal de R$ 750). Adivinhar pelo título marcaria a reunião com a
+# engenheira como data vendida, e o vendedor perderia aquele sábado achando que
+# já era de alguém. Cinco perguntas uma vez valem mais que um chute para sempre.
+
+#: Os estados de um dia, do ponto de vista de quem VENDE a data.
+OCUPA = "ocupa"            #: o espaço é de alguém nesse dia
+SEGURADO = "segurado"      #: pré-reserva correndo — ocupa, mas ainda pode cair
+LIVRE = "livre"            #: o compromisso não impede vender o dia
+A_CONFERIR = "a_conferir"  #: sem sinal nenhum; a tela pergunta
+
+#: Tipos de compromisso que são agenda interna da casa, nunca venda de data.
+_TIPOS_INTERNOS = ("pessoal", "fornecedor")
+
+
+def eh_visita(*, titulo=None, tipo_evento=None) -> bool:
+    """A visita ao espaço — cliente vindo conhecer, o dia continua à venda.
+
+    A MESMA régua de `web/painel_relatorios._E_VISITA`, em Python:
+
+        (e.titulo ilike 'visita%' and e.tipo_evento is null)
+
+    O prefixo é marca do próprio sistema: o Cockpit batiza "Visita — {quem}"
+    (`finance.cockpit`), e a equipe digita "VISITA TÉCNICA - PEDRO" na mão. O
+    `tipo_evento` vazio é o desempate: quando ele vem preenchido (Casamento,
+    Locação...) o compromisso é a FESTA do cliente, não a visita dele.
+    """
+    if (tipo_evento or "").strip():
+        return False
+    return (titulo or "").strip().lower().startswith("visita")
+
+
+def estado_da_data(ev: dict) -> str:
+    """OCUPA, SEGURADO, LIVRE ou A_CONFERIR — a leitura de um compromisso.
+
+    Função pura: recebe o dicionário do evento (o de `_fmt_evento`, com
+    `orcamento_id` colado por `_com_orcamento` quando houver) e não toca o banco.
+    A ordem das perguntas está no comentário acima deste bloco.
+    """
+    ev = ev or {}
+    # 1. a resposta do dono vence a derivação inteira.
+    resposta = ev.get("ocupa_espaco")
+    if resposta is not None:
+        return OCUPA if resposta else LIVRE
+    # 2. segurado é estado próprio: ocupa hoje, pode cair amanhã.
+    if ev.get("status") == PRE_RESERVADO:
+        return SEGURADO
+    # 3. agenda interna da casa.
+    if (ev.get("tipo") or "pessoal") in _TIPOS_INTERNOS:
+        return LIVRE
+    # 4. visita: o cliente vem conhecer, o dia continua à venda.
+    if eh_visita(titulo=ev.get("titulo"), tipo_evento=ev.get("tipo_evento")):
+        return LIVRE
+    # 5. veio de orçamento, ou alguém escolheu o tipo de festa: é venda.
+    if ev.get("orcamento_id") or (ev.get("tipo_evento") or "").strip():
+        return OCUPA
+    # 6. sem sinal nenhum. A tela pergunta.
+    return A_CONFERIR
+
+
+def estado_do_dia(eventos) -> str:
+    """O estado de um DIA a partir dos compromissos dele.
+
+    O pior estado manda, porque é o que decide se dá pra vender: um dia com uma
+    festa e três visitas está ocupado, não livre. `A_CONFERIR` fica acima de
+    LIVRE (não dá pra prometer o que não se sabe) e abaixo de OCUPA e SEGURADO
+    (esses já são certeza).
+    """
+    estados = {estado_da_data(e) for e in (eventos or [])}
+    for e in (OCUPA, SEGURADO, A_CONFERIR):
+        if e in estados:
+            return e
+    return LIVRE
+
+
+# ---------------------------------------------------------------------------
 # O nome do cliente escondido dentro do título
 # ---------------------------------------------------------------------------
 #
@@ -1103,6 +1215,76 @@ def feed_ics(eventos: list[dict]) -> str:
 def fmt_hora(ev: dict) -> str:
     """dd/mm HH:MM em Brasília, pra mostrar pro usuário."""
     return ev["inicio"].astimezone(BRT).strftime("%d/%m %H:%M")
+
+
+# ---------- a faixa do ano: onde ainda dá pra vender ----------
+
+#: Rótulo curto do mês, pro quadradinho da faixa.
+_MES_CURTO = ("", "jan", "fev", "mar", "abr", "mai", "jun",
+              "jul", "ago", "set", "out", "nov", "dez")
+
+#: O dia que a casa vende. Medido na Prime em 19/09/2026: dos 42 dias vendidos,
+#: VINTE E QUATRO são sábado — 57%. Sexta 7, quinta 5, segunda 3, domingo 3.
+#: Por isso a faixa conta sábado livre e não "dia livre": terça vaga não é
+#: estoque, sábado vago é. `isoweekday` 6 = sábado.
+_DIA_DE_VENDER = 6
+
+
+def ocupacao_por_mes(pool, conta_id: int, *, de=None, meses: int = 13) -> list[dict]:
+    """Mês a mês, o que ainda dá pra vender. Uma consulta só, régua num lugar só.
+
+    POR QUE ISTO EXISTE. O calendário mostra UM mês e a Prime vende de agosto de
+    2026 a fevereiro de 2028 — dezenove meses de seta pra doze meses com evento,
+    e sete cliques caindo em mês vazio. Pra saber o que tem vendido em julho de
+    2027 eram dez cliques.
+
+    A CONTA É FEITA EM PYTHON, de propósito. A pergunta "isto ocupa o espaço?"
+    mora em `estado_da_data`, e reescrevê-la em SQL criaria a segunda cópia que
+    acerta no primeiro dia e diverge no terceiro — foi exatamente o que o
+    comentário de `_E_VISITA` (web/painel_relatorios) já avisava. Os eventos da
+    janela inteira cabem numa consulta: na Prime, a conta mais cheia em produção,
+    são 97 linhas.
+
+    Sábado que já passou não conta como livre: ninguém vende ontem.
+    """
+    de = de or agora_brt()
+    ini = datetime(de.year, de.month, 1, tzinfo=BRT)
+    ano, mes = ini.year, ini.month + meses
+    fim = datetime(ano + (mes - 1) // 12, (mes - 1) % 12 + 1, 1, tzinfo=BRT)
+    eventos = listar_eventos(pool, conta_id, ini, fim, incluir_pre_reserva=True)
+    eventos = _com_orcamento(pool, conta_id, eventos)
+
+    # o pior estado de cada DIA — é o dia que se vende, não o compromisso.
+    por_dia: dict[date, list[dict]] = {}
+    for ev in eventos:
+        por_dia.setdefault(ev["inicio"].astimezone(BRT).date(), []).append(ev)
+    tomado = {d for d, evs in por_dia.items() if estado_do_dia(evs) in (OCUPA, SEGURADO)}
+    conferir = {d for d, evs in por_dia.items() if estado_do_dia(evs) == A_CONFERIR}
+
+    hoje = de.date()
+    saida, cur = [], ini.date()
+    while cur < fim.date():
+        prox = date(cur.year + 1, 1, 1) if cur.month == 12 else date(cur.year, cur.month + 1, 1)
+        sabados = [d for d in _dias_do_mes(cur, prox) if d.isoweekday() == _DIA_DE_VENDER]
+        # "livre" é o que dá pra vender HOJE: sábado que já passou não conta.
+        vendaveis = [d for d in sabados if d >= hoje]
+        saida.append({
+            "mes": f"{cur.year:04d}-{cur.month:02d}",
+            "rotulo": f"{_MES_CURTO[cur.month]}/{cur.year % 100:02d}",
+            "ocupados": sum(1 for d in tomado if d.year == cur.year and d.month == cur.month),
+            "a_conferir": sum(1 for d in conferir if d.year == cur.year and d.month == cur.month),
+            "sabados": len(vendaveis),
+            "sabados_livres": sum(1 for d in vendaveis if d not in tomado),
+        })
+        cur = prox
+    return saida
+
+
+def _dias_do_mes(ini: date, fim: date):
+    d = ini
+    while d < fim:
+        yield d
+        d += timedelta(days=1)
 
 
 # ---------- calendário do mês (pro portal) ----------

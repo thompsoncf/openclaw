@@ -255,26 +255,81 @@ def _monta_semanas(ano: int, mes: int, eventos: list[dict], hoje: date,
             for e in evs:
                 pz = _prazo(e, agora)
                 pg = _pg_estado(fichas.get(e["id"]))
+                # O VÍNCULO COM O ORÇAMENTO sem consulta nova: `fichas` já foi
+                # carregada pra esta mesma lista de eventos, e é ela que sabe que
+                # a Locação da Nágera nasceu do orçamento nº 17. Sem isto, os 8
+                # compromissos da Prime que só têm o orçamento (sem tipo de festa
+                # preenchido) cairiam em "a conferir" — e o dono veria oito
+                # perguntas no lugar de oito datas vendidas.
+                ficha = fichas.get(e["id"]) or {}
+                if ficha.get("orcamento_id") and not e.get("orcamento_id"):
+                    e = {**e, "orcamento_id": ficha["orcamento_id"]}
                 linhas_ev.append({
                     "id": e["id"], "titulo": e["titulo"], "tipo": e["tipo"],
                     "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
                     "pre": e.get("status") == ag.PRE_RESERVADO,
                     "prazo": pz["rot"], "urgente": pz["urgente"],
                     "pg": pg["rot"], "pg_classe": pg["classe"],
+                    # A DATA ESTÁ VENDIDA? (finance.agenda.estado_da_data) — é a
+                    # pergunta que o vendedor faz o dia inteiro no WhatsApp, e até
+                    # 19/09/2026 a tela não respondia: a bolinha era pintada por
+                    # tipo, e visita e casamento são os dois "empresa".
+                    "estado": ag.estado_da_data(e),
+                    "visita": ag.eh_visita(titulo=e.get("titulo"),
+                                           tipo_evento=e.get("tipo_evento")),
                     # quem marcou: é por ele que o filtro por pessoa esconde e mostra
                     # sem voltar ao servidor (ver o JS do .ag-pessoas).
                     "membro_id": e.get("membro_id") or "",
                 })
             # a célula inteira se pinta: é o que se enxerga do mês sem ler linha
             # nenhuma — âmbar quando tem data segurada, coral quando alguma aperta.
+            #
+            # `estado` é o do DIA, e o pior manda: um dia com uma festa e três
+            # visitas está ocupado. É o que decide se dá pra vender.
+            estado_dia = ag.estado_do_dia([
+                {**e, "orcamento_id": (fichas.get(e["id"]) or {}).get("orcamento_id")}
+                for e in evs])
+            # o nome da venda, pra tarja: o primeiro compromisso que ocupa o dia.
+            vendido = next((x for x in linhas_ev
+                            if x["estado"] in (ag.OCUPA, ag.SEGURADO)), None)
             linha.append({
                 "dia": d.day, "fora": d.month != mes, "hoje": d == hoje,
                 "iso": d.isoformat(), "eventos": linhas_ev,
                 "tem_seg": any(x["pre"] for x in linhas_ev),
                 "urg": any(x["pre"] and x["urgente"] for x in linhas_ev),
+                "estado": estado_dia,
+                "vendido": (vendido or {}).get("titulo", ""),
+                # o SÁBADO é o produto: 24 dos 42 dias vendidos da Prime são
+                # sábado. Sábado vago é estoque; terça vaga não é notícia.
+                "sabado": d.isoweekday() == ag._DIA_DE_VENDER,
+                "livre": estado_dia == ag.LIVRE and d.month == mes,
+                # quantas VISITAS o dia tem. Contadas à parte porque elas não
+                # ocupam nada: é informação de rotina, não de estoque.
+                "visitas": sum(1 for x in linhas_ev if x["visita"]),
             })
         semanas.append(linha)
     return semanas
+
+
+#: As chaves da célula que o NAVEGADOR precisa pra redesenhar o mês igual ao
+#: servidor. `/painel/agenda/mes` manda as mesmas, e `montarGrade` lê daqui:
+#: uma célula desenhada em dois lugares com regras diferentes é um calendário
+#: que discorda de si mesmo — o próprio comentário da rota /mes já avisava.
+_CHAVES_CELULA = ("dia", "fora", "hoje", "iso", "estado", "vendido",
+                  "sabado", "livre", "visitas")
+
+
+def _estado_por_dia(semanas) -> dict:
+    """{iso: {estado, vendido, sabado, livre}} — o veredito de cada dia.
+
+    Sai do MESMO `_monta_semanas` que desenhou a grade, e é o que o JS usa pra
+    repintar depois de filtrar por pessoa. O filtro por pessoa não mexe nisto de
+    propósito: ocupar o espaço é fato do ESPAÇO, não de quem marcou. Esconder a
+    festa da Jacqueline ao filtrar "Pedro Yan" faria o sábado dela parecer livre
+    — e alguém venderia a data duas vezes.
+    """
+    return {c["iso"]: {k: c[k] for k in ("estado", "vendido", "sabado", "livre")}
+            for semana in semanas for c in semana if not c["fora"]}
 
 
 def _titulo_dia(d: date) -> str:
@@ -353,6 +408,10 @@ def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | No
             # e é aí que a caixa oferece o botão de informar
             "fim": _j["fim"], "dur": _j["dur"], "vira": _j["vira"],
             "hora_sugerida": bool(e.get("hora_sugerida")),
+            # VISITA não ocupa o espaço (regra do dono, 19/09/2026: "é só pra
+            # mostrar"). Vai marcado pra a célula do mês poder contar as visitas
+            # do dia depois de o filtro por pessoa esconder algumas.
+            "visita": ag.eh_visita(titulo=e.get("titulo"), tipo_evento=e.get("tipo_evento")),
             "titulo": e["titulo"], "tipo": e["tipo"], "tipo_rot": TIPO_ROT.get(e["tipo"], "Pessoal"),
             "local": e.get("local") or "", "descricao": e.get("descricao") or "",
             "convidados": conv_lista, "inicio_iso": e["inicio"].isoformat(),
@@ -741,6 +800,21 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     # mede ou não existem (tipo de festa, hora chutada) ou não são problema (dois
     # compromissos no mesmo dia é o normal de quem marca reunião).
     pend = _pendencias_rot(ag.pendencias(pool, conta_id, agora), nomes) if vende_data else None
+    # A FAIXA DO ANO — onde ainda dá pra vender, mês a mês. Só pra quem vende
+    # data: numa clínica "sábado livre" não quer dizer nada (seção 6 do CLAUDE.md).
+    #
+    # Existe porque o calendário mostra UM mês e a Prime vende de ago/2026 a
+    # fev/2028. Eram dezenove meses de seta pra doze meses com evento, e sete
+    # cliques caindo em mês vazio; julho de 2027 ficava a dez cliques.
+    #
+    # Tolerante: a faixa é orientação, não o trabalho. Se ela falhar, a agenda
+    # abre sem ela — como as fichas logo acima.
+    faixa = []
+    if vende_data:
+        try:
+            faixa = ag.ocupacao_por_mes(pool, conta_id, de=agora)
+        except Exception:  # noqa: BLE001 — a faixa é leitura extra; a agenda abre sem ela
+            _log_ag.warning("agenda: não deu pra montar a faixa do ano", exc_info=True)
     hist = cv.listar_historico(pool, conta_id, dias=7)
     historico = _preparar_historico(hist["itens"], hoje)
     fila = _preparar_fila(cv.listar_fila(pool, conta_id, agora), agora)
@@ -760,7 +834,9 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    # (contas.festas_por_dia preenchido) — pras outras, `espera` é []
                    # e o card nem existe.
                    espera=_espera_por_data(pool, conta_id),
-                   confirmadas=confirmadas, pend=pend,
+                   confirmadas=confirmadas, pend=pend, faixa=faixa,
+                   mes_atual=f"{ano:04d}-{mes:02d}",
+                   estado_dia_js=(_estado_por_dia(semanas) if vende_data else {}),
                    vende_data=vende_data, pessoas=pessoas, p_id=p_id,
                    # A lista canônica das festas mora em finance.servicos_catalogo
                    # (a 179 fez questão de NÃO virar check no banco pra não haver
@@ -830,13 +906,18 @@ def agenda_mes(request: Request, m: str = ""):
             (conta_id,)).fetchall())
     orcs = {ev["id"]: ev for ev in ag.pre_reservas(pool, conta_id)}
     # a grade sem os eventos: as células se preenchem sozinhas no navegador
-    dias = [[{k: cel[k] for k in ("dia", "fora", "hoje", "iso")} for cel in semana]
-            for semana in _monta_semanas(ano, mes, eventos, hoje, agora, fichas)]
+    semanas = _monta_semanas(ano, mes, eventos, hoje, agora, fichas)
+    dias = [[{k: cel[k] for k in _CHAVES_CELULA} for cel in semana]
+            for semana in semanas]
     return JSONResponse({
         "ano": ano, "mes": mes, "mes_nome": MESES[mes],
         "m": f"{ano:04d}-{mes:02d}",
         "mes_prev": _vizinho(ano, mes, -1), "mes_next": _vizinho(ano, mes, +1),
         "dias": dias,
+        # o veredito de cada dia, pro navegador redesenhar o mês igualzinho. Sem
+        # isto a pintura de livre/ocupado sumia ao clicar na seta — a grade é
+        # remontada no JS, e ele não tinha como saber o que o servidor sabia.
+        "estado_dia": _estado_por_dia(semanas),
         "eventos_dia": _eventos_por_dia(eventos, convidados, agora, orcs, fichas, nomes),
     })
 
@@ -1555,6 +1636,71 @@ _CSS_CRU = """
 .ev-line .h{font-size:.6rem;font-weight:700;color:var(--txt-mut);flex:0 0 auto;font-variant-numeric:tabular-nums}
 .ev-line .n{font-size:.62rem;color:var(--txt);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ev-more{font-size:.58rem;color:var(--txt-mut);padding-left:10px}
+
+/* ======================= A DATA ESTÁ VENDIDA? (só no nicho que vende data)
+   Até 19/09/2026 a célula pintava a bolinha por TIPO — pessoal, empresa,
+   fornecedor. Visita e casamento são os dois "empresa", então eram a mesma
+   bolinha azul, e o mês não respondia a pergunta que o vendedor faz o dia
+   inteiro no WhatsApp. Em setembro a Prime tinha 28 marcas no calendário e só
+   8 ocupavam o espaço.
+   Agora a célula diz o ESTADO: âmbar é vendido, âmbar tracejado é segurado,
+   verde é sábado vago (o estoque), coral é "ninguém disse". */
+.cal-tarja{display:block; font-size:.6rem; font-weight:700; line-height:1.25;
+  border-radius:5px; padding:2px 5px; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap}
+.cal-tarja.ocupa{background:var(--ambar-fundo); border:1px solid var(--ambar-borda); color:var(--amar)}
+/* tracejado = provisório, o mesmo par sólido/tracejado que a marca de estado já
+   usa pra separar reservado de segurado: quem não distingue cor lê pela forma. */
+.cal-tarja.segurado{background:var(--ambar-fundo); border:1px dashed var(--ambar-borda); color:var(--amar)}
+.cal-tarja.conf{background:var(--coral-fundo); border:1px solid var(--coral-borda); color:var(--verm)}
+.cal-tarja.livre{background:var(--neon-fundo); border:1px solid var(--neon-borda); color:var(--verde)}
+/* a VISITA não ocupa: fica discreta, e o dia continua à venda. */
+.cal-vis{display:flex; align-items:center; gap:4px; font-size:.58rem; color:var(--txt-mut); font-weight:600}
+/* o SÁBADO tem coluna própria — 24 dos 42 dias vendidos da Prime caem nele. */
+.cal-cell.sab{background:rgba(37,211,102,.022)}
+.cal-cell.sab.fora{background:rgba(255,255,255,.012)}
+.cal-hd span:last-child{color:var(--verde)}
+
+/* ============================================== A FAIXA DO ANO
+   Doze meses numa linha, pra parar de clicar na seta atrás de mês vazio. */
+.ag-faixa{margin:-.4rem 0 1rem}
+.agf-rot{font-size:.6rem; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--text-faint); font-weight:700; margin-bottom:.35rem}
+.agf-linha{display:flex; gap:.35rem; overflow-x:auto; scrollbar-width:thin;
+  padding-bottom:.2rem}
+.agf{flex:1 0 54px; text-align:center; text-decoration:none; border-radius:9px;
+  border:1px solid var(--borda); background:var(--card); padding:.3rem 0 .25rem}
+.agf .m{display:block; font-size:.6rem; font-weight:700; color:var(--txt-mut)}
+.agf .n{display:block; font-size:1rem; font-weight:700; color:var(--txt);
+  line-height:1.15; font-variant-numeric:tabular-nums}
+.agf .s{display:block; font-size:.52rem; font-weight:600; color:var(--text-faint)}
+.agf:hover{border-color:var(--verde)}
+.agf.on{border-color:var(--verde); background:var(--neon-fundo)}
+.agf.on .m,.agf.on .n{color:var(--verde)}
+/* LOTADO: nenhum sábado sobrando. É argumento de venda ("dezembro já foi"), e
+   por isso grita em vez de sussurrar. */
+.agf.cheio{border-color:var(--coral-borda); background:var(--coral-fundo)}
+.agf.cheio .m,.agf.cheio .n,.agf.cheio .s{color:var(--verm)}
+/* mês sem nada marcado: apagado, pra o olho pular direto pros que têm. */
+.agf.vazio{background:transparent}
+.agf.vazio .m,.agf.vazio .n,.agf.vazio .s{color:#2A332D}
+
+/* ============================================== O CELULAR, que é onde se vende
+   A Agenda não tinha UMA regra de celular pro calendário: a grade seguia com
+   sete colunas de 84px de altura e, num aparelho de 390px, cada célula ficava
+   com ~50px. Dentro dela o código punha bolinha (6px) + hora (~30px) + o nome
+   do cliente, com corte — sobravam ~6px pro nome, e o vendedor via a bolinha e
+   a hora. Quem responde "tem data livre?" é ele, no telefone. */
+@media(max-width:560px){
+  .cal-cell{height:68px; padding:4px 3px; gap:2px}
+  .cal-cell .cal-num{font-size:.72rem}
+  /* a tarja vira bloco sem texto: a cor responde livre/ocupado, e o nome fica
+     na caixa do dia, a um toque. Texto de 6px não é informação, é sujeira. */
+  .cal-tarja{font-size:0; padding:0; height:11px; border-radius:3px}
+  .cal-vis{font-size:0; gap:0; justify-content:center}
+  .cal-vis .dot{width:5px; height:5px}
+  .agf{flex:0 0 52px}
+}
 /* MARCA DE ESTADO — a barra da esquerda responde "essa data já é minha?", que é a
    pergunta que vem antes de "que tipo de compromisso é" (a bolinha, que fica).
    Forma, não cor: cheia = fixado, pontilhada = segurado. Quem não distingue verde
@@ -2225,6 +2371,30 @@ function agDoFiltro(e){
 }
 // Reconstrói o conteúdo de UMA célula (linhas de compromisso + "+N mais") a partir
 // de EVENTOS_DIA — mesma fonte de dados da caixa do dia, pra nunca desalinhar.
+// A TARJA DO DIA — o mesmo desenho que o Jinja faz no primeiro carregamento.
+// Existe porque o calendário é montado em dois lugares (servidor e navegador) e
+// a regra de QUE desenhar tem que ser uma só; o que ela desenha vem pronto do
+// servidor (`estado`, `vendido`), nunca é deduzido aqui.
+function tarjaDoDia(c){
+  if(!c) return '';
+  if(c.vendido){
+    return '<span class="cal-tarja '+_esc(c.estado)+'" title="'+_esc(c.vendido)+'">'
+         + _esc(c.vendido)+'</span>';
+  }
+  if(c.estado === 'a_conferir'){
+    return '<span class="cal-tarja conf" title="Ninguém disse se este compromisso ocupa o espaço">a conferir</span>';
+  }
+  if(c.livre && c.sabado){
+    return '<span class="cal-tarja livre">Sábado livre</span>';
+  }
+  return '';
+}
+function visitasDoDia(n){
+  if(!n) return '';
+  return '<span class="cal-vis"><span class="dot d-empresa"></span>'
+       + n + ' visita' + (n !== 1 ? 's' : '') + '</span>';
+}
+
 function renderizarCelula(iso){
   var cel = document.querySelector('.cal-cell[data-iso="'+iso+'"]');
   if(!cel) return;
@@ -2239,7 +2409,20 @@ function renderizarCelula(iso){
     // deixaria a célula morta pra sempre — limpar o filtro não a traria de volta.
     if(REAPROVEITAR.length || todos.length){ cel.classList.add('clicavel'); }
     else { cel.removeAttribute('tabindex'); cel.removeAttribute('role'); cel.removeAttribute('data-iso'); }
-    cel.innerHTML = '<div class="cal-head">'+numHtml+'</div>';
+    cel.innerHTML = '<div class="cal-head">'+numHtml+'</div>'
+                  + (VENDE_DATA ? tarjaDoDia(ESTADO_DIA[iso]) : '');
+    return;
+  }
+  // QUEM VENDE DATA: a célula diz o estado do dia, não a lista. A tarja vem do
+  // servidor (ESTADO_DIA) e NÃO muda com o filtro por pessoa — ocupar o espaço é
+  // fato do espaço. O que muda é a contagem de visitas, que é rotina de gente.
+  if(VENDE_DATA){
+    cel.classList.add('tem-evento');
+    cel.classList.toggle('temseg', evs.some(function(e){return e.pre;}));
+    cel.classList.toggle('urg', evs.some(function(e){return e.pre && e.urgente;}));
+    var nv = evs.filter(function(e){ return e.visita; }).length;
+    cel.innerHTML = '<div class="cal-head">'+numHtml+'</div>'
+                  + tarjaDoDia(ESTADO_DIA[iso]) + visitasDoDia(nv);
     return;
   }
   var count = evs.length > 2 ? '<span class="cal-count">'+evs.length+'</span>' : '';
@@ -2755,9 +2938,11 @@ function montarGrade(dias){
   dias.forEach(function(semana){
     html += '<div class="cal-wk">';
     semana.forEach(function(c){
-      html += '<div class="cal-cell'+(c.fora?' fora':'')+(c.hoje?' hoje':'')+'"'
+      html += '<div class="cal-cell'+(c.fora?' fora':'')+(c.hoje?' hoje':'')
+            + (VENDE_DATA?(' est-'+(c.estado||'livre')+(c.sabado?' sab':'')):'')+'"'
             + ' data-iso="'+c.iso+'" tabindex="0" role="button">'
-            + '<div class="cal-head"><span class="cal-num">'+c.dia+'</span></div></div>';
+            + '<div class="cal-head"><span class="cal-num">'+c.dia+'</span></div>'
+            + (VENDE_DATA?tarjaDoDia(c):'') + '</div>';
     });
     html += '</div>';
   });
@@ -2772,11 +2957,15 @@ function irParaMes(m, push){
     .then(function(r){ if(!r.ok) throw new Error('http'); return r.json(); })
     .then(function(d){
       EVENTOS_DIA = d.eventos_dia || {};
+      // o veredito de cada dia vem junto: sem isto a pintura de livre/ocupado
+      // sumia na primeira seta, porque a grade é remontada aqui no navegador.
+      ESTADO_DIA = d.estado_dia || {};
       MES_ATUAL = CUR_MES = d.m;
       montarGrade(d.dias || []);
       Object.keys(EVENTOS_DIA).forEach(renderizarCelula);
       var h1 = document.querySelector('.ag-mes h1');
       if(h1) h1.textContent = d.mes_nome + ' de ' + d.ano;
+      marcarMesNaFaixa(d.m);
       var setas = document.querySelectorAll('.ag-nav a');
       if(setas.length === 2){
         setas[0].setAttribute('data-m', d.mes_prev);
@@ -2798,6 +2987,25 @@ function irParaMes(m, push){
       window.location.href = '/painel/agenda?m=' + encodeURIComponent(m);
     })
     .finally(function(){ AG_INDO = false; if(cal) cal.style.opacity = ''; });
+}
+// A FAIXA DO ANO troca o mês pela mesma porta das setas. Continua <a> de
+// verdade: sem JS o servidor entrega o mês igual a antes.
+(function(){
+  var faixa = document.querySelector('.ag-faixa');
+  if(!faixa) return;
+  faixa.addEventListener('click', function(ev){
+    var a = ev.target.closest && ev.target.closest('a.agf');
+    if(!a) return;
+    var m = a.getAttribute('data-m');
+    if(!m) return;
+    ev.preventDefault();
+    irParaMes(m);
+  });
+})();
+function marcarMesNaFaixa(m){
+  document.querySelectorAll('.ag-faixa a.agf').forEach(function(a){
+    a.classList.toggle('on', a.getAttribute('data-m') === m);
+  });
 }
 (function(){
   var nav = document.querySelector('.ag-top');
@@ -3015,6 +3223,28 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   </div>
   {% endif %}
 
+  {# A FAIXA DO ANO. Um quadradinho por mês com os SÁBADOS LIVRES — 24 dos 42
+     dias vendidos da Prime são sábado, então é ele o estoque. Mês sem sábado
+     livre vem em coral (está lotado); mês inteiro vago vem apagado.
+     São <a> de verdade: sem JS o servidor troca o mês igual a antes. Com JS o
+     clique é interceptado e vai pela rota /painel/agenda/mes, que já existe. #}
+  {% if faixa %}
+  <div class="ag-faixa" aria-label="Sábados livres por mês">
+    <div class="agf-rot">Sábados livres — é o dia que a casa vende</div>
+    <div class="agf-linha">
+      {% for f in faixa %}
+      <a href="/painel/agenda?m={{ f.mes }}" data-m="{{ f.mes }}"
+         class="agf{% if f.mes == mes_atual %} on{% endif %}{% if f.sabados and not f.sabados_livres %} cheio{% endif %}{% if not f.ocupados and not f.a_conferir %} vazio{% endif %}"
+         title="{{ f.ocupados }} dia{{ 's' if f.ocupados != 1 }} com o espaço ocupado">
+        <span class="m">{{ f.rotulo }}</span>
+        <span class="n">{{ f.sabados_livres }}</span>
+        <span class="s">{% if f.sabados and not f.sabados_livres %}lotado{% else %}de {{ f.sabados }}{% endif %}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <div class="ag-grid">
     <div>
       <div class="cal{% if vende_data %} marca-estado{% endif %}">
@@ -3022,13 +3252,29 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% for semana in semanas %}
         <div class="cal-wk">
           {% for c in semana %}
-          <div class="cal-cell{% if c.fora %} fora{% endif %}{% if c.hoje %} hoje{% endif %}{% if c.eventos %} tem-evento{% endif %}{% if c.tem_seg %} temseg{% endif %}{% if c.urg %} urg{% endif %}{% if not c.eventos and reaproveitar %} clicavel{% endif %}"
+          <div class="cal-cell{% if c.fora %} fora{% endif %}{% if c.hoje %} hoje{% endif %}{% if c.eventos %} tem-evento{% endif %}{% if c.tem_seg %} temseg{% endif %}{% if c.urg %} urg{% endif %}{% if not c.eventos and reaproveitar %} clicavel{% endif %}{% if vende_data %} est-{{ c.estado }}{% if c.sabado %} sab{% endif %}{% endif %}"
                {% if c.eventos or reaproveitar %}data-iso="{{ c.iso }}" tabindex="0" role="button" aria-label="{% if c.eventos %}Ver os {{ c.eventos|length }} compromisso{{ 's' if c.eventos|length != 1 }} do dia {{ c.dia }}{% else %}Ver sugestões pro dia {{ c.dia }}{% endif %}"{% endif %}>
             <div class="cal-head">
               <span class="cal-num">{{ c.dia }}</span>
               {% if c.eventos|length > 2 %}<span class="cal-count">{{ c.eventos|length }}</span>{% endif %}
             </div>
-            {% if c.eventos %}
+            {# QUEM VENDE DATA lê o dia por ESTADO, não por lista de compromissos.
+               A pergunta é uma só — dá pra vender esse dia? — e ela não se
+               responde lendo "19:00 Visita — Andressa". A lista completa continua
+               a um toque, na caixa do dia. Clínica e escritório seguem com as
+               duas linhas de sempre, logo abaixo. #}
+            {% if vende_data %}
+              {% if c.vendido %}
+              <span class="cal-tarja {{ c.estado }}" title="{{ c.vendido }}">{{ c.vendido }}</span>
+              {% elif c.estado == 'a_conferir' %}
+              <span class="cal-tarja conf" title="Ninguém disse se este compromisso ocupa o espaço">a conferir</span>
+              {% elif c.livre and c.sabado %}
+              <span class="cal-tarja livre">Sábado livre</span>
+              {% endif %}
+              {% if c.visitas %}
+              <span class="cal-vis"><span class="dot d-empresa"></span>{{ c.visitas }} visita{{ 's' if c.visitas != 1 }}</span>
+              {% endif %}
+            {% elif c.eventos %}
             <div class="evs">
               {% for e in c.eventos[:2] %}
               <div class="ev-line{% if e.pre %} pre{% endif %}" data-ev="{{ e.id }}" data-membro="{{ e.membro_id }}"{% if e.pre %} title="Data segurada — esperando o sinal ({{ e.prazo }})"{% endif %}><span class="dot d-{{ e.tipo }}"></span><span class="h">{{ e.hora }}</span><span class="n">{{ e.titulo }}</span>{% if e.prazo %}<span class="ev-prazo{% if e.urgente %} urg{% endif %}">{{ e.prazo }}</span>{% endif %}{% if e.pg %}<span class="ev-pg {{ e.pg_classe }}">{{ e.pg }}</span>{% endif %}</div>
@@ -3640,6 +3886,15 @@ var TPILL = {pessoal:'Pessoal', empresa:'Empresa', fornecedor:'Fornecedor'};
 var HIST_STATE = {dias: 7, falhas: false, q: '', itens: {{ historico|tojson }},
                   total: {{ historico_total }}};
 var PRE_RESERVA_DIAS = {{ (cfg.pre_reserva_dias or 3)|tojson }};
+// A DATA ESTÁ VENDIDA? — o estado de cada dia, do servidor. Fica AQUI, e não
+// derivado dos eventos no navegador, porque a régua é uma só
+// (finance.agenda.estado_da_data) e derivá-la de novo em JavaScript seria a
+// segunda cópia que um dia discorda da primeira.
+var VENDE_DATA = {{ vende_data|default(false, true)|tojson }};
+// `default({})` de propósito: a faixa e o mapa de estado são leitura EXTRA, e a
+// rota já devolve vazio quando a consulta deles falha (a agenda abre sem eles).
+// Um template que estoura por falta de enfeite derruba a tela inteira.
+var ESTADO_DIA = {{ estado_dia_js|default({}, true)|tojson }};
 </script>""" + _JS_TAG + """
 
 {% endblock %}"""

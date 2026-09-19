@@ -56,7 +56,8 @@ def cli(monkeypatch):
                      "132_convidado_canal_resposta.sql", "139_agenda_mensagens_log.sql",
                      "146_agenda_enviar_confirmacao.sql", "160_agenda_pre_reserva.sql",
                      "163_evento_sinal_esperado.sql",
-                     "179_agenda_tipo_e_hora_sugerida.sql"):
+                     "179_agenda_tipo_e_hora_sugerida.sql",
+                     "298_agenda_ocupa_espaco.sql"):
             c.execute((BASE / nome).read_text(encoding="utf-8"))
         c.execute("insert into contas (id, tipo, nome) values (%s,'pj','Prime')", (CONTA,))
         c.execute("insert into membros (id, conta_id, nome, papel) "

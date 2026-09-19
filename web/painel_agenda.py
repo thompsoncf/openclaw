@@ -172,7 +172,17 @@ def _pendencias_rot(p: dict, nomes: dict[int, str]) -> dict | None:
         "data_iso": e["inicio"].astimezone(ag.BRT).date().isoformat(),
     } for e in p["sem_vendedor"]]
 
-    return {"total": p["total"], "choques": choques, "horas": horas, "sem_vendedor": orfas}
+    # A DATA QUE NINGUÉM CLASSIFICOU. Diferente das outras três, esta pendência
+    # não é um dado faltando — é uma PERGUNTA, e a linha traz o dia pra caixa do
+    # dia abrir com os dois botões já à vista.
+    conferir = [{
+        "id": e["id"], "titulo": e["titulo"], "mes": _mes(e),
+        "quando": ag.fmt_hora(e), "quem": _quem(e),
+        "data_iso": e["inicio"].astimezone(ag.BRT).date().isoformat(),
+    } for e in p.get("a_conferir", [])]
+
+    return {"total": p["total"], "choques": choques, "horas": horas,
+            "sem_vendedor": orfas, "a_conferir": conferir}
 
 
 def _ficha_rot(f: dict | None) -> dict | None:
@@ -412,6 +422,14 @@ def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | No
             # mostrar"). Vai marcado pra a célula do mês poder contar as visitas
             # do dia depois de o filtro por pessoa esconder algumas.
             "visita": ag.eh_visita(titulo=e.get("titulo"), tipo_evento=e.get("tipo_evento")),
+            # O VEREDITO deste compromisso, e a resposta humana se houver. É o
+            # que faz a caixa do dia oferecer os dois botões quando o sistema não
+            # sabe — e mostrar o "desfazer" quando alguém já respondeu.
+            # O orçamento vem de `fichas` (já carregada) pelo mesmo motivo do
+            # calendário: sem ele, quem só tem orçamento cairia em "a conferir".
+            "estado": ag.estado_da_data({
+                **e, "orcamento_id": (fichas.get(e["id"]) or {}).get("orcamento_id")}),
+            "ocupa_espaco": e.get("ocupa_espaco"),
             "titulo": e["titulo"], "tipo": e["tipo"], "tipo_rot": TIPO_ROT.get(e["tipo"], "Pessoal"),
             "local": e.get("local") or "", "descricao": e.get("descricao") or "",
             "convidados": conv_lista, "inicio_iso": e["inicio"].isoformat(),
@@ -1169,6 +1187,29 @@ def agenda_desfecho(request: Request, evento_id: int = Form(...), desfecho: str 
         return JSONResponse({"ok": False, "erro": "auth"}, status_code=401)
     ok = ag.marcar_desfecho(get_pool(), ctx["conta_id"], evento_id, desfecho, ag.agora_brt())
     return JSONResponse({"ok": ok})
+
+
+@router.post("/painel/agenda/ocupa")
+def agenda_ocupa(request: Request, evento_id: int = Form(...), resposta: str = Form(...)):
+    """A resposta humana: este compromisso ocupa o espaço?
+
+    Nasceu em 20/09/2026, junto com a coluna `ocupa_espaco` (migração 298). É o
+    outro lado do "a conferir" que o #757 passou a mostrar: lá a tela admite que
+    não sabe; aqui alguém diz.
+
+    Três respostas, e a terceira importa tanto quanto as outras: `limpar` devolve
+    o compromisso pra derivação. Sem ela, um toque sem querer viraria um fato
+    permanente sobre uma data — e data errada, nesta tela, é venda perdida ou
+    venda dobrada.
+    """
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "auth"}, status_code=401)
+    mapa = {"ocupa": True, "livre": False, "limpar": None}
+    if resposta not in mapa:
+        return JSONResponse({"ok": False, "erro": "resposta invalida"}, status_code=400)
+    ok = ag.responder_ocupa(get_pool(), ctx["conta_id"], evento_id, mapa[resposta])
+    return JSONResponse({"ok": ok, "estado": resposta})
 
 
 # ================================================================ EXCLUIR
@@ -2019,6 +2060,19 @@ _CSS_CRU = """
 .dev-pre.urg b{color:var(--coral)}
 /* ações da data segurada: firmar, soltar, ver de onde veio */
 .segacts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+/* A PERGUNTA QUE O SISTEMA NÃO SABE RESPONDER, e a resposta depois de dada.
+   Coral porque é pendência de verdade: enquanto ninguém responde, o calendário
+   não promete o dia nem o vende — e num espaço que vende sábado, dia no limbo é
+   dinheiro parado. Já respondida, vira cinza: virou fato, não é mais aviso. */
+.dev-conf{font-size:.78rem;color:var(--verm);margin-top:6px;line-height:1.45;
+  background:var(--coral-fundo);border:1px solid var(--coral-borda);border-radius:8px;padding:8px 10px}
+.dev-conf .dev-conf-p{color:var(--txt)}
+.dev-conf .dev-conf-p b{color:var(--verm)}
+.dev-conf.resp{background:var(--card-2);border:1px solid var(--borda);color:var(--txt-mut);
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dev-conf.resp .dev-conf-p{flex:1 1 auto;color:var(--txt-mut)}
+.dev-conf.resp .dev-conf-p b{color:var(--txt)}
+.dev-conf.resp .sbtn{margin:0}
 .segacts form{display:inline}
 .sbtn{font-size:.7rem;font-weight:650;border-radius:7px;padding:.34rem .62rem;cursor:pointer;
       border:1px solid var(--borda);background:transparent;color:var(--txt);width:auto;margin:0}
@@ -2301,6 +2355,49 @@ function _seguradaHtml(e){
     +   verOrc
     + '</div></div>';
 }
+// A PERGUNTA QUE O SISTEMA NÃO SABE RESPONDER. Desde o #757 a tela diz "a
+// conferir" quando nenhum sinal alcança o compromisso; aqui é onde alguém
+// responde. Fica na caixa do dia de propósito: a pergunta é sobre UM DIA, e a
+// caixa do dia é a tela que já abre ao tocar nele — uma tela nova seria um
+// segundo lugar mostrando os mesmos compromissos.
+function _aConferirHtml(e){
+  return '<div class="dev-conf">'
+    + '<div class="dev-conf-p"><b>Este compromisso ocupa o espaço?</b> '
+    + 'Enquanto ninguém responde, o calendário não promete o dia nem o vende.</div>'
+    + '<div class="segacts">'
+    +   '<button class="sbtn amb" type="button" onclick="responderOcupa('+e.id+',\\'ocupa\\')">'
+    +     'Ocupa — não pode vender</button>'
+    +   '<button class="sbtn ok" type="button" onclick="responderOcupa('+e.id+',\\'livre\\')">'
+    +     'Não ocupa — o dia segue à venda</button>'
+    + '</div></div>';
+}
+// A resposta já respondida, com o caminho de volta. Sem o "desfazer", um toque
+// sem querer viraria um fato permanente sobre uma data — e data errada aqui é
+// venda perdida ou venda dobrada.
+function _respondidoHtml(e){
+  var ocupa = e.ocupa_espaco === true;
+  return '<div class="dev-conf resp">'
+    + '<div class="dev-conf-p">' + (ocupa
+        ? 'Marcado como <b>ocupa o espaço</b>.'
+        : 'Marcado como <b>não ocupa</b> — o dia segue à venda.')
+    + '</div>'
+    + '<button class="sbtn gh" type="button" onclick="responderOcupa('+e.id+',\\'limpar\\')">'
+    +   'Desfazer</button></div>';
+}
+function responderOcupa(id, resposta){
+  var fd = new FormData();
+  fd.append('evento_id', id); fd.append('resposta', resposta);
+  fetch('/painel/agenda/ocupa', {method:'POST', body: fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d.ok) throw new Error('falhou');
+      // a página inteira volta porque a resposta muda o CALENDÁRIO, não só esta
+      // caixa: o dia pode sair de "a conferir" pra ocupado, e a faixa do ano
+      // reconta os sábados. Redesenhar só a caixa deixaria as duas discordando.
+      window.location.href = '/painel/agenda?m=' + encodeURIComponent(MES_ATUAL);
+    })
+    .catch(function(){ alert('Não deu pra gravar a resposta. Tente de novo.'); });
+}
 var AG_DIA_ABERTO = '';
 function abrirDia(iso){
   AG_DIA_ABERTO = iso;
@@ -2350,6 +2447,8 @@ function abrirDia(iso){
       // ninguém, até quando, e — o que faltava — decidir aqui mesmo. Antes, firmar
       // exigia sair da agenda, abrir Serviços e achar a proposta no funil.
       + (e.pre?_seguradaHtml(e):'')
+      + (e.estado==='a_conferir' ? _aConferirHtml(e) : '')
+      + (e.ocupa_espaco===true||e.ocupa_espaco===false ? _respondidoHtml(e) : '')
       + _fichaHtml(e.ficha)
       + (e.descricao&&!e.ficha?'<div class="dev-desc">'+e.descricao+'</div>':'')
       + conv
@@ -3183,6 +3282,20 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <small>ninguém está tocando: {% for o in pend.sem_vendedor[:4] %}{{ o.quando }} {{ o.titulo }}{% if o.pre %} (segurado){% endif %}{% if not loop.last %} · {% endif %}{% endfor %}{% if pend.sem_vendedor|length > 4 %} · +{{ pend.sem_vendedor|length - 4 }}{% endif %}</small>
       </div>
       <a class="pend-b" href="/painel/agenda?m={{ pend.sem_vendedor[0].mes }}#d{{ pend.sem_vendedor[0].data_iso }}">Ver o primeiro</a>
+    </div>
+    {% endif %}
+    {# A DATA QUE NINGUÉM CLASSIFICOU. As outras três pendências são dado
+       faltando; esta é uma PERGUNTA, e por isso o botão diz "Responder" e não
+       "Ver". Enquanto ela estiver aqui, o calendário não promete o dia nem o
+       vende — num espaço que vive de sábado, isso é dinheiro parado. #}
+    {% if pend.a_conferir %}
+    <div class="pend-l">
+      <span class="pend-ic" aria-hidden="true">❔</span>
+      <div class="pend-t">
+        <b>{{ pend.a_conferir|length }} data{{ 's' if pend.a_conferir|length != 1 }} a conferir</b>
+        <small>o sistema não sabe se ocupam o espaço: {% for o in pend.a_conferir[:4] %}{{ o.quando }} {{ o.titulo }}{% if not loop.last %} · {% endif %}{% endfor %}{% if pend.a_conferir|length > 4 %} · +{{ pend.a_conferir|length - 4 }}{% endif %}</small>
+      </div>
+      <a class="pend-b" href="/painel/agenda?m={{ pend.a_conferir[0].mes }}#d{{ pend.a_conferir[0].data_iso }}">Responder</a>
     </div>
     {% endif %}
   </div>

@@ -33,6 +33,7 @@ _MIGRACOES = ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sq
               "132_convidado_canal_resposta.sql", "139_agenda_mensagens_log.sql",
               "146_agenda_enviar_confirmacao.sql", "160_agenda_pre_reserva.sql",
               "163_evento_sinal_esperado.sql", "179_agenda_tipo_e_hora_sugerida.sql",
+                     "298_agenda_ocupa_espaco.sql",
               "064_clientes_lojista.sql", "066_pessoas_identidade.sql",
               "131_pessoa_cnpj.sql", "149_cliente_cidade_uf.sql",
               "182_clientes_papel.sql", "192_evento_cliente.sql",

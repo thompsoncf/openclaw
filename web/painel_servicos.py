@@ -3361,10 +3361,7 @@ _JS_CRU = r"""(function(){
     var idv=document.getElementById('svc-id').value;
     var body={id:idv?parseInt(idv,10):null,nome:nome,descricao:document.getElementById('svc-desc').value||'',setup:num(document.getElementById('svc-setup')),mensal:num(document.getElementById('svc-mensal')),custo:num(document.getElementById('svc-custo')),categoria:((document.getElementById('svc-cat')||{}).value)||'',icone:((document.getElementById('svc-icone')||{}).value||'').trim()};
     var b=this; b.disabled=true;
-    fetch('/painel/servicos/catalogo/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-      .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
-      .then(function(res){b.disabled=false; if(!res.ok){document.getElementById('svc-msg').textContent=(res.d&&res.d.erro)||'Não consegui salvar.';return;} fecharForm(); carregarCatalogo(true);})
-      .catch(function(){b.disabled=false; document.getElementById('svc-msg').textContent='Erro de conexão.';});
+    zapFetch('/painel/servicos/catalogo/salvar',{comStatus:true,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(res){if(!res){b.disabled=false;return;}b.disabled=false; if(!res.ok){document.getElementById('svc-msg').textContent=(res.d&&res.d.erro)||'Não consegui salvar.';return;} fecharForm(); carregarCatalogo(true);});
   });
   var ocImport=document.getElementById('oc-import');
   if(ocImport)ocImport.addEventListener('click',function(){
@@ -3396,9 +3393,7 @@ _JS_CRU = r"""(function(){
     var msg=document.getElementById('oc-cnpj-msg');
     if(dig.length!==14){msg.textContent='Digite os 14 dígitos do CNPJ.'; return;}
     var btn=this, t0=btn.textContent; btn.disabled=true; btn.textContent='Buscando...'; msg.textContent='';
-    fetch('/painel/servicos/cnpj?cnpj='+encodeURIComponent(dig))
-      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
-      .then(function(res){
+    zapFetch('/painel/servicos/cnpj?cnpj='+encodeURIComponent(dig),{comStatus:true}).then(function(res){if(!res)return;
         if(!res.ok){msg.textContent=(res.d&&res.d.erro)||'Não encontrei esse CNPJ.'; return;}
         var d=res.d;
         function set(id,v){if(v){document.getElementById(id).value=v;}}
@@ -3409,7 +3404,6 @@ _JS_CRU = r"""(function(){
         msg.textContent='Preenchido pela Receita'+(loc?' — '+loc:'')+'. Confira e ajuste se precisar.';
         if(SERVICO_AVULSO)atualizarChip();
       })
-      .catch(function(){msg.textContent='Erro de conexão ao consultar.';})
       .finally(function(){btn.disabled=false; btn.textContent=t0;});
   });
 
@@ -3788,13 +3782,10 @@ _JS_CRU = r"""(function(){
         +(dif>0?'as parcelas passam R$ ':'faltam R$ ')+fmtc(Math.abs(dif))+'.\n\n'
         +'Os títulos a receber vão sair pelo valor das PARCELAS. Fechar assim mesmo?')){return;}
     btn.disabled=true; btn.textContent='Fechando...';
-    fetch('/painel/servicos/fechar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
-      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
-      .then(function(res){
+    zapFetch('/painel/servicos/fechar',{comStatus:true,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}).then(function(res){if(!res){btn.disabled=false; btn.textContent='Fechar contrato';return;}
         if(!res.ok){alert((res.d&&res.d.erro)||'Não consegui fechar.'); btn.disabled=false; btn.textContent='Fechar contrato'; return;}
         carregarHist();
-      })
-      .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent='Fechar contrato';});
+      });
   }
   // Confirma que o sinal caiu: a data segurada vira compromisso firme na agenda.
   // Confirma antes porque é dinheiro — e nomeia o cliente pelo mesmo motivo do
@@ -3802,9 +3793,7 @@ _JS_CRU = r"""(function(){
   function sinalRecebido(id,nome,btn){
     if(!confirm('Confirmar que o sinal de '+nome+' foi recebido?\\n\\nA data deixa de ser provisória e vira compromisso firme na agenda. Se o contrato já estiver fechado, o título dessa parcela entra como recebido no livro-caixa, com a data de hoje.')){return;}
     btn.disabled=true; btn.textContent='Confirmando...';
-    fetch('/painel/servicos/sinal-recebido',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
-      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
-      .then(function(res){
+    zapFetch('/painel/servicos/sinal-recebido',{comStatus:true,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}).then(function(res){if(!res){btn.disabled=false; btn.textContent='Sinal recebido';return;}
         if(!res.ok){alert((res.d&&res.d.erro)||'Não consegui confirmar.'); btn.disabled=false; btn.textContent='Sinal recebido'; return;}
         // o pagamento gravou; se a agenda não firmou, dizemos — o botão volta e
         // apertar de novo só tenta a agenda (o sinal já está registrado).
@@ -3818,21 +3807,17 @@ _JS_CRU = r"""(function(){
         abrirPagamentos(id,nome);
         pgMsg('Sinal confirmado. Se tiver o comprovante aí, anexa agora — '
              +'depois vira caça ao print.','ok');
-      })
-      .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent='Sinal recebido';});
+      });
   }
   // Põe na agenda a data que ficou de fora, ou segura de novo a que foi liberada.
   // Sem confirmação de propósito: marcar uma data que deveria estar marcada não
   // destrói nada, e o botão só aparece quando há de fato o que consertar.
   function marcarData(id,btn){
     var t=btn.textContent; btn.disabled=true; btn.textContent='Marcando...';
-    fetch('/painel/servicos/marcar-data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
-      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
-      .then(function(res){
+    zapFetch('/painel/servicos/marcar-data',{comStatus:true,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}).then(function(res){if(!res){btn.disabled=false; btn.textContent=t;return;}
         if(!res.ok){alert((res.d&&res.d.erro)||'Não consegui marcar.'); btn.disabled=false; btn.textContent=t; return;}
         carregarHist();
-      })
-      .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent=t;});
+      });
   }
   // ---------------------------------------------- mandar a proposta por e-mail
   //
@@ -3859,9 +3844,7 @@ _JS_CRU = r"""(function(){
     ['env-para','env-assunto','env-texto'].forEach(function(k){
       document.getElementById(k).value='';});
     fundo.classList.add('on');
-    fetch('/painel/servicos/email/'+id+'?alvo='+encodeURIComponent(ENV_ALVO))
-      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
-      .then(function(res){
+    zapFetch('/painel/servicos/email/'+id+'?alvo='+encodeURIComponent(ENV_ALVO),{comStatus:true}).then(function(res){if(!res)return;
         if(!res.ok){envMsg(esc((res.d&&res.d.erro)||'Não consegui abrir.'),'cor'); return;}
         var d=res.d;
         ENV_LINK=d.link||'';
@@ -3892,21 +3875,18 @@ _JS_CRU = r"""(function(){
                 +'Escreva aqui e ele fica salvo no orçamento — da próxima vez já vem preenchido.</span>','amb');
           document.getElementById('env-para').focus();
         }
-      })
-      .catch(function(){envMsg('Erro de conexão.','cor');});
+      });
   }
   function enviarEmail(){
     if(!ENV_ID) return;
     var b=document.getElementById('env-enviar'), t=b.textContent;
     b.disabled=true; b.textContent='Enviando...';
-    fetch('/painel/servicos/enviar-email',{method:'POST',
+    zapFetch('/painel/servicos/enviar-email',{comStatus:true,method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({id:ENV_ID, alvo:ENV_ALVO,
         para:document.getElementById('env-para').value,
         assunto:document.getElementById('env-assunto').value,
-        mensagem:document.getElementById('env-texto').value})})
-      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
-      .then(function(res){
+        mensagem:document.getElementById('env-texto').value})}).then(function(res){if(!res){b.disabled=false; b.textContent=t;return;}
         b.disabled=false; b.textContent=t;
         if(!res.ok){
           // O LINK VAI JUNTO DO ERRO. O vendedor tem um cliente esperando: mandar
@@ -3924,8 +3904,7 @@ _JS_CRU = r"""(function(){
         envMsg('✓ Enviado para '+esc(res.d.para||'')+'.','ok');
         carregarHist();
         setTimeout(envFechar, 1400);
-      })
-      .catch(function(){b.disabled=false; b.textContent=t; envMsg('Erro de conexão.','cor');});
+      });
   }
   document.getElementById('env-enviar').addEventListener('click',enviarEmail);
   document.getElementById('env-cancelar').addEventListener('click',envFechar);
@@ -4072,9 +4051,7 @@ _JS_CRU = r"""(function(){
     pgCarregar();
   }
   function pgCarregar(){
-    fetch('/painel/servicos/pagamentos/'+PG_ID)
-      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
-      .then(function(res){
+    zapFetch('/painel/servicos/pagamentos/'+PG_ID,{comStatus:true}).then(function(res){if(!res)return;
         if(!res.ok){pgMsg(esc((res.d&&res.d.erro)||'Não consegui abrir.'),'cor'); return;}
         var d=res.d;
         var n=(d.parcelas||[]).length;
@@ -4124,8 +4101,7 @@ _JS_CRU = r"""(function(){
           pgMsg('O guardador de arquivos não está configurado nesta instalação, '
                +'então não dá pra anexar comprovante ainda.','amb');
         }
-      })
-      .catch(function(){pgMsg('Erro de conexão.','cor');});
+      });
   }
   function pgEscolher(idx){
     PG_IDX=idx;
@@ -4139,15 +4115,12 @@ _JS_CRU = r"""(function(){
     pgMsg('Enviando '+esc(f.name)+'...','amb');
     var fd=new FormData();
     fd.append('orcamento_id',PG_ID); fd.append('parcela_idx',PG_IDX); fd.append('arquivo',f);
-    fetch('/painel/servicos/comprovante',{method:'POST',body:fd})
-      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
-      .then(function(res){
+    zapFetch('/painel/servicos/comprovante',{comStatus:true,method:'POST',body:fd}).then(function(res){if(!res)return;
         if(!res.ok){pgMsg(esc((res.d&&res.d.erro)||'Não consegui anexar.'),'cor'); return;}
         pgMsg('✓ Comprovante anexado.','ok');
         pgCarregar();       // a linha vira "ver" sozinha
         carregarHist();     // e o selo do funil acompanha
-      })
-      .catch(function(){pgMsg('Erro de conexão.','cor');});
+      });
   });
   document.getElementById('pg-x').addEventListener('click',pgFechar);
   document.getElementById('pg-fundo').addEventListener('click',function(ev){
@@ -4161,13 +4134,10 @@ _JS_CRU = r"""(function(){
   function excluir(id,nome,btn){
     if(!confirm('Apagar a proposta de '+nome+'? Isso não tem volta.')){return;}
     btn.disabled=true;
-    fetch('/painel/servicos/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
-      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
-      .then(function(res){
+    zapFetch('/painel/servicos/excluir',{comStatus:true,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}).then(function(res){if(!res){btn.disabled=false;return;}
         if(!res.ok){alert((res.d&&res.d.erro)||'Não consegui apagar.'); btn.disabled=false; return;}
         carregarHist();
-      })
-      .catch(function(){alert('Erro de conexão.'); btn.disabled=false;});
+      });
   }
   // O FUNIL VIRA A PRIMEIRA COISA DA TELA (no nicho de eventos), com três abas.
   //
@@ -4580,14 +4550,12 @@ _JS_CRU = r"""(function(){
 
     function salvar(){
       var b=document.getElementById('ct-salvar'), t=b.textContent; b.textContent='Salvando...';
-      fetch('/painel/servicos/contrato/salvar',{method:'POST',
+      zapFetch('/painel/servicos/contrato/salvar',{comStatus:true,method:'POST',
         headers:{'Content-Type':'application/json'},
         // o valor VAI SEMPRE, mesmo sem ter sido tocado: o servidor tem default
         // false, e omitir o campo desligaria a ordem que o dono ligou ontem.
         body:JSON.stringify({clausulas:clausulas(),regras:regras(),
-          assinar_antes_do_sinal:!!(document.getElementById('ct-antes')||{}).checked})})
-        .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
-        .then(function(res){
+          assinar_antes_do_sinal:!!(document.getElementById('ct-antes')||{}).checked})}).then(function(res){if(!res){b.textContent=t;msg('<p style="color:var(--verm);font-size:.85rem">Erro de conexão.</p>');return;}
           b.textContent=t;
           if(!res.ok){msg('<p style="color:var(--verm);font-size:.85rem">'+esc((res.d&&res.d.erro)||'Não consegui salvar.')+'</p>');return;}
           msg('<p style="color:var(--verde-claro);font-size:.85rem">✓ Contrato salvo — '+res.d.clausulas+' cláusulas. Vale para os próximos contratos; os já assinados não mudam.</p>');
@@ -4597,21 +4565,19 @@ _JS_CRU = r"""(function(){
           setTimeout(function(){
             zapFetch('/painel/servicos/contrato').then(function(d){if(!d){abrir(false);return;}resumir(d);abrir(false);});
           }, 1600);
-        }).catch(function(){b.textContent=t;msg('<p style="color:var(--verm);font-size:.85rem">Erro de conexão.</p>');});
+        });
     }
 
     // A prévia usa um orçamento REAL da conta. É o que revela a falta que
     // importa: o campo que não resolve porque o item saiu do catálogo.
     function previa(){
       var b=document.getElementById('ct-previa'), t=b.textContent; b.textContent='Montando...';
-      fetch('/painel/servicos/contrato/previa',{method:'POST',
+      zapFetch('/painel/servicos/contrato/previa',{comStatus:true,method:'POST',
         headers:{'Content-Type':'application/json'},
         // o valor VAI SEMPRE, mesmo sem ter sido tocado: o servidor tem default
         // false, e omitir o campo desligaria a ordem que o dono ligou ontem.
         body:JSON.stringify({clausulas:clausulas(),regras:regras(),
-          assinar_antes_do_sinal:!!(document.getElementById('ct-antes')||{}).checked})})
-        .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
-        .then(function(res){
+          assinar_antes_do_sinal:!!(document.getElementById('ct-antes')||{}).checked})}).then(function(res){if(!res){b.textContent=t;msg('<p style="color:var(--verm);font-size:.85rem">Erro de conexão.</p>');return;}
           b.textContent=t;
           if(!res.ok){msg('<p class="mut" style="font-size:.85rem">'+esc((res.d&&res.d.erro)||'Não consegui montar.')+'</p>');return;}
           var h='';
@@ -4642,7 +4608,7 @@ _JS_CRU = r"""(function(){
           });
           h+='</div>';
           msg(h);
-        }).catch(function(){b.textContent=t;msg('<p style="color:var(--verm);font-size:.85rem">Erro de conexão.</p>');});
+        });
     }
 
     zapFetch('/painel/servicos/contrato').then(function(d){if(!d){document.getElementById('ct-resumo').textContent='Erro ao carregar.';
@@ -4764,16 +4730,14 @@ _JS_CRU = r"""(function(){
 
     function salvar(){
       var b=document.getElementById('ad-salvar'), t=b.textContent; b.textContent='Salvando...';
-      fetch('/painel/servicos/aditivo-modelo/salvar',{method:'POST',
+      zapFetch('/painel/servicos/aditivo-modelo/salvar',{comStatus:true,method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({textos:textos()})})
-        .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
-        .then(function(res){
+        body:JSON.stringify({textos:textos()})}).then(function(res){if(!res){b.textContent=t;admsg('<span style="color:var(--coral)">Não consegui salvar.</span>');return;}
           b.textContent=t;
           admsg(res.ok?'<span style="color:var(--verde-claro)">Salvo.</span>'
                      :'<span style="color:var(--coral)">'+esc((res.d&&res.d.erro)||'Não consegui salvar.')+'</span>');
           if(res.ok) carregar();
-        }).catch(function(){b.textContent=t;admsg('<span style="color:var(--coral)">Não consegui salvar.</span>');});
+        });
     }
 
     function previa(){

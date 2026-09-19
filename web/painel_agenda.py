@@ -2387,16 +2387,16 @@ function _respondidoHtml(e){
 function responderOcupa(id, resposta){
   var fd = new FormData();
   fd.append('evento_id', id); fd.append('resposta', resposta);
-  fetch('/painel/agenda/ocupa', {method:'POST', body: fd})
-    .then(function(r){ return r.json(); })
+  zapFetch('/painel/agenda/ocupa', {method:'POST', body: fd})
     .then(function(d){
-      if(!d.ok) throw new Error('falhou');
+      // `d` nulo = o zapFetch já disse o que houve, com a causa certa
+      if(!d) return;
+      if(!d.ok){ zapAviso('Não deu pra gravar a resposta.', {tipo:'mal'}); return; }
       // a página inteira volta porque a resposta muda o CALENDÁRIO, não só esta
       // caixa: o dia pode sair de "a conferir" pra ocupado, e a faixa do ano
       // reconta os sábados. Redesenhar só a caixa deixaria as duas discordando.
       window.location.href = '/painel/agenda?m=' + encodeURIComponent(MES_ATUAL);
-    })
-    .catch(function(){ alert('Não deu pra gravar a resposta. Tente de novo.'); });
+    });
 }
 var AG_DIA_ABERTO = '';
 function abrirDia(iso){

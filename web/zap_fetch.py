@@ -46,6 +46,13 @@ A ÚNICA EXCEÇÃO É O 401: o corpo é JSON (`{ok:false, erro:'login'}`), mas d
 isso faria a tela dizer "não consegui salvar (login)" — técnico e inútil. Sessão
 expirada tem um caminho só, e ele é um botão: entrar de novo.
 
+QUEM DECIDE PELO STATUS HTTP pede `comStatus: true` e recebe `{ok, status, d}` no
+lugar do corpo pelado. É o caso da aba de Serviços: as rotas dela sinalizam falha
+com `{erro:…}` + 4xx e sucesso com o resultado puro, **sem `ok` dentro do corpo**.
+Sem esse modo, migrar aquelas chamadas faria `res.ok` virar um campo inexistente —
+e todo salvamento bem-sucedido passaria a dizer "não consegui salvar", na tela do
+dinheiro. O padrão continua sendo o corpo pelado: é o que 152 chamadas usam.
+
 TENTA DE NOVO SOZINHO no 502/503/504 e na queda de conexão, duas vezes (2s e 5s).
 Essa é a janela do deploy: o Render derruba e sobe o serviço em segundos, e na
 maioria das vezes a pessoa não vê aviso nenhum — o toque só demora um pouco mais.
@@ -184,7 +191,16 @@ if(!window.zapFetch){
           // CORPO QUE É JSON VOLTA, seja qual for o status: `{ok:false,
           // erro:'motivo_obrigatorio', motivos:[…]}` vem com 400 e é justamente
           // o que a folha "por que perdeu" precisa ler.
-          if(d !== null && typeof d === 'object') return d;
+          if(d !== null && typeof d === 'object'){
+            // `comStatus` (20/09/2026): entrega {ok, status, d} em vez do corpo
+            // pelado. É pra quem decide pelo STATUS HTTP e não por um campo do
+            // corpo — o caso da aba de Serviços, cujas rotas sinalizam falha com
+            // `{erro:…}` + 4xx e sucesso com o resultado puro, SEM `ok` dentro.
+            // Sem este modo, migrar aquelas chamadas faria `res.ok` virar um
+            // campo que não existe: todo salvamento BEM-SUCEDIDO passaria a
+            // dizer "não consegui salvar", e na tela do dinheiro.
+            return op.comStatus ? {ok: r.ok, status: r.status, d: d} : d;
+          }
           return _semResposta(r, corpo);
         });
       }, function(){

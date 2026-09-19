@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib as _hashlib
 import html as _html
+import json as _json_mod
 import logging as _logging
 import os as _os
 
@@ -790,10 +791,18 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .dupla.info a{color:var(--neon)}
 .rodape{flex-shrink:0;border-top:1px solid var(--line);background:var(--bg);padding:.7rem 1.1rem;
   padding-bottom:calc(.7rem + var(--fundo-seguro));position:relative;z-index:2}
-.composer{display:flex;gap:.5rem;align-items:center}
-.composer input{flex:1;min-width:0;background:var(--surface);border:1px solid var(--line);
+/* flex-end: com o campo crescendo pra várias linhas, os botões ficam embaixo, do
+   lado da linha que está sendo escrita — como no WhatsApp */
+.composer{display:flex;gap:.5rem;align-items:flex-end}
+.composer input,.composer textarea{flex:1;min-width:0;background:var(--surface);border:1px solid var(--line);
   border-radius:999px;color:var(--text);padding:.65rem .95rem;font-family:inherit;font-size:.9rem}
-.composer input:focus{outline:none;border-color:var(--neon)}
+.composer input:focus,.composer textarea:focus{outline:none;border-color:var(--neon)}
+/* o campo de resposta: uma linha que cresce até ~5, e depois rola por dentro */
+.composer textarea{border-radius:21px;resize:none;line-height:1.35;max-height:7.4rem;
+  overflow-y:auto;display:block}
+/* o recado de quando a mensagem NÃO saiu: mora em cima do form, fora dele, pra não
+   mexer no alinhamento do campo com os botões */
+.envio-err{margin:0 0 .45rem;font-size:.8rem;color:var(--coral);line-height:1.4}
 .composer button{width:42px;height:42px;flex-shrink:0;border:0;border-radius:50%;cursor:pointer;
   background:var(--neon);color:var(--ink);font-size:1.1rem;display:grid;place-items:center}
 /* ficha/funil viram uma folha que sobe — antes isso empilhava ACIMA do chat
@@ -1011,7 +1020,7 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .composer .mic:active{background:var(--bg-2)}
 .gravando{display:none;align-items:center;gap:.7rem;padding:.5rem .3rem}
 .gravando.on{display:flex}
-.composer.gravando-on input,.composer.gravando-on button[type=submit],
+.composer.gravando-on input,.composer.gravando-on textarea,.composer.gravando-on button[type=submit],
 .composer.gravando-on .mic{display:none}
 /* O microfone responde ao TOQUE, não ao getUserMedia: ele afunda na hora e a
    barra já aparece em "preparando". Sem isso a tela fica parada de 0,3 a 2s (a
@@ -1368,28 +1377,97 @@ _ESPERA_JS = """<script>(function(){
   // A bolha entra na hora e o campo esvazia. O campo CHEIO depois de tocar em
   // enviar é o sinal universal de "não foi" — e aqui a dúvida não é sobre uma
   // tela, é sobre o cliente ter recebido.
+  //
+  // SEM RECARREGAR (19/09/2026). Até aqui enviar era POST + redirect + a conversa
+  // inteira de novo: ~1 s de tela piscando por mensagem, o teclado fechando, e o
+  // vendedor comparando com o WhatsApp, onde nada disso acontece. Agora a mensagem
+  // vai por fetch, o teclado fica aberto, e a bolha otimista vira ✓ quando o
+  // servidor confirma — a de verdade chega pelo polling e toma o lugar dela.
+  //
+  // O caminho antigo (form + redirect) continua sendo o de reserva: navegador sem
+  // fetch, e a TRAVA da insistência na tela (os rádios obrigatórios e a volta com
+  // o motivo são do fluxo do form, e reescrevê-los aqui seria duplicar a regra).
   var f=document.querySelector('form.composer');
-  if(f) f.addEventListener('submit',function(){
-    var campo=f.querySelector('input[name=texto]');
+  function bolhaOtimista(txt){
+    var chat=document.querySelector('.chat');
+    if(!chat)return null;
+    var d=document.createElement('div');
+    d.className='bub out voando';
+    d.setAttribute('data-txt',txt);
+    d.textContent=txt;
+    var s=document.createElement('span');s.className='tick';s.textContent='enviando…';
+    d.appendChild(s);chat.appendChild(d);chat.scrollTop=chat.scrollHeight;
+    return d;
+  }
+  function recado(msg){
+    var r=f.parentNode, e=r.querySelector('.envio-err');
+    if(!msg){if(e)e.remove();return;}
+    if(!e){e=document.createElement('div');e.className='envio-err';r.insertBefore(e,f);}
+    e.textContent=msg;
+  }
+  if(f){
+    var campo0=f.querySelector('textarea[name=texto]');
+    // o campo cresce com o texto, até o teto do CSS
+    function cresce(){if(!campo0)return;campo0.style.height='auto';
+      campo0.style.height=Math.min(campo0.scrollHeight,118)+'px';}
+    if(campo0){
+      campo0.addEventListener('input',cresce);cresce();
+      // no computador, Enter manda e Shift+Enter quebra a linha; no celular o
+      // Enter é quebra de linha e quem manda é o botão — igual ao WhatsApp
+      campo0.addEventListener('keydown',function(e){
+        if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&
+           window.matchMedia&&window.matchMedia('(pointer:fine)').matches){
+          e.preventDefault();
+          if(f.requestSubmit)f.requestSubmit();else f.dispatchEvent(new Event('submit',{cancelable:true}));
+        }
+      });
+    }
+  }
+  if(f) f.addEventListener('submit',function(ev){
+    var campo=f.querySelector('[name=texto]');
     if(!campo)return;
     var txt=(campo.value||'').trim();
-    if(!txt)return;
-    // o valor migra pra um hidden ANTES de esvaziar o visível: limpar o campo
-    // que carrega o name mandaria texto vazio pro servidor.
-    var hid=document.createElement('input');
-    hid.type='hidden';hid.name='texto';hid.value=txt;
-    f.appendChild(hid);campo.removeAttribute('name');campo.value='';campo.blur();
-    var b=f.querySelector('button');
-    if(b){b.disabled=true;b.innerHTML='<i class=girando></i>';}
-    var chat=document.querySelector('.chat');
-    if(chat){
-      var d=document.createElement('div');
-      d.className='bub out voando';
-      d.textContent=txt;
-      var s=document.createElement('span');s.className='tick';s.textContent='enviando…';
-      d.appendChild(s);chat.appendChild(d);chat.scrollTop=chat.scrollHeight;
+    if(!txt){ev.preventDefault();return;}
+    var b=f.querySelector('button[type=submit]');
+    var d=bolhaOtimista(txt);
+    if(!window.fetch||!window.URLSearchParams||!window.FormData||f.querySelector('.travabl')){
+      // o caminho de reserva, como sempre foi: o valor migra pra um hidden ANTES
+      // de esvaziar o visível — limpar o campo que carrega o name mandaria texto
+      // vazio pro servidor
+      var hid=document.createElement('input');
+      hid.type='hidden';hid.name='texto';hid.value=txt;
+      f.appendChild(hid);campo.removeAttribute('name');campo.value='';campo.blur();
+      if(b){b.disabled=true;b.innerHTML='<i class=girando></i>';}
+      corre();
+      return;
     }
-    corre();
+    ev.preventDefault();
+    var corpo=new URLSearchParams(new FormData(f));
+    campo.value='';if(campo.style)campo.style.height='';
+    recado('');
+    fetch(f.action,{method:'POST',credentials:'same-origin',
+      headers:{'x-cockpit':'1','Content-Type':'application/x-www-form-urlencoded'},body:corpo})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(j&&j.ok){
+        var t=d&&d.querySelector('.tick');if(t)t.textContent='✓';
+        if(window.__puxa)window.__puxa();
+        return;
+      }
+      // A TRAVA engatou agora: a tela precisa dos rádios do motivo, que só o
+      // servidor desenha. Recarrega com o texto de volta na caixa (`?texto=`).
+      if(j&&j.codigo&&j.codigo.indexOf('trava')===0){
+        location.href=location.pathname+'?texto='+encodeURIComponent(txt);return;
+      }
+      falhou(j&&j.erro);
+    })
+    .catch(function(){falhou('Sem conexão agora — a mensagem não saiu.');});
+    function falhou(msg){
+      if(d)d.remove();
+      // o texto volta pra caixa: redigitar é o que manda o vendedor pro WhatsApp
+      if(!campo.value)campo.value=txt;
+      recado(msg||'Não consegui enviar. Tente de novo.');
+    }
   });
 })();</script>"""
 
@@ -4726,7 +4804,7 @@ _ANEXO_JS = r"""
     }
     // a legenda é o que já estiver escrito na caixa: no WhatsApp ela chega colada
     // na foto, que é como as pessoas mandam de verdade
-    var cx=comp && comp.querySelector("input[name=texto]");
+    var cx=comp && comp.querySelector("[name=texto]");
     var legenda=(cx && cx.value || "").trim();
     if(cx) cx.value="";
     // O CLIPE NÃO É DESABILITADO e a caixa de texto segue livre: o upload corre por
@@ -5282,8 +5360,11 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                 "</div>" + _TRAVA_JS)
         acao = (f"<form class=composer id=comp method=post action='{_BASE}/lead/{lead_id}/mensagem'>"
                 + trava_html
-                + f"<input name=texto placeholder='Responder…' required autocomplete=off value='{esc(texto_pre)}'"
-                f"{' autofocus' if texto_pre else ''}>"
+                # TEXTAREA, e não input: resposta de venda tem parágrafo (o pacote, o
+                # valor, as condições), e o <input> de uma linha juntava tudo numa
+                # tira só — no WhatsApp o vendedor quebra linha à vontade.
+                + f"<textarea name=texto rows=1 placeholder='Responder…' required autocomplete=off"
+                f"{' autofocus' if texto_pre else ''}>{esc(texto_pre)}</textarea>"
                 + clipe + mic +
                 "<button type=submit aria-label=Enviar>&#10148;</button>"
                 + barra + "</form>")
@@ -5508,6 +5589,11 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "if(m.dia&&m.dia!==diaAtual){var sep=document.createElement('div');"
            "sep.className='diadia';sep.textContent=m.dia;chat.appendChild(sep);"
            "diaAtual=m.dia;}"
+           # a bolha OTIMISTA do enviar sem recarregar (ver _ESPERA_JS) sai quando a
+           # de verdade chega — senão o vendedor veria a própria mensagem duas vezes
+           "if(m.who==='out'){var vs=chat.querySelectorAll('.bub.voando[data-txt]');"
+           "for(var k=0;k<vs.length;k++){if(vs[k].getAttribute('data-txt')===m.texto)"
+           "{vs[k].remove();break;}}}"
            "var d=document.createElement('div');d.className='bub '+m.who;"
            "d.setAttribute('data-id',m.id);d.innerHTML=rot(m.who)+mid(m)+txt(m.texto)"
            "+(m.hora?('<span class=hora>'+txt(m.hora)+'</span>'):'');"
@@ -5906,7 +5992,10 @@ def _agir(request: Request, lead_id: int, fn, destino: str):
         return RedirectResponse("/cockpit/login", status_code=303)
     r = fn(get_pool(), sess[0], sess[1], lead_id)
     if swipe:
-        return JSONResponse({"ok": bool(r.get("ok")), "erro": "" if r.get("ok") else _erro(r)})
+        # `codigo` é a chave crua do erro, pra tela decidir o que fazer (a trava da
+        # insistência pede recarregar com os rádios do motivo); `erro` é a frase.
+        return JSONResponse({"ok": bool(r.get("ok")), "erro": "" if r.get("ok") else _erro(r),
+                             "codigo": "" if r.get("ok") else (r.get("erro") or "")})
     # o texto que não saiu volta pra caixa da conversa (ver `texto_pre`). Guardado
     # no banco pela `enviar_mensagem`; isto aqui é só o caminho de volta pra tela.
     if r.get("texto_perdido"):
@@ -6080,12 +6169,14 @@ def cockpit_lead_passar(request: Request, lead_id: int, para: str = Form(""),
 @router.get("/cockpit/lead/{lead_id}/mensagens")
 def cockpit_lead_mensagens(request: Request, lead_id: int, desde: int = 0):
     """O que chegou depois da mensagem `desde`. Alimenta a conversa que se atualiza
-    sozinha. Passa por `lead_do_vendedor` de propósito: é ele quem revalida a posse,
-    e nenhuma rota daqui pode devolver conversa de outro vendedor."""
+    sozinha. A posse é revalidada a cada chamada (`ck.mensagens_desde`, a mesma
+    regra do `lead_do_vendedor`): nenhuma rota daqui pode devolver conversa de
+    outro vendedor. O que mudou é o custo — duas consultas em vez da tela inteira
+    do lead a cada 8 s."""
     sess = _sessao(request)
     if not sess:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    d = ck.lead_do_vendedor(get_pool(), sess[0], sess[1], lead_id)
+    d = ck.mensagens_desde(get_pool(), sess[0], sess[1], lead_id, desde)
     if not d:
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
     # `hora` e `dia` vão prontos do servidor: o fuso é resolvido AQUI, e não no
@@ -6116,20 +6207,10 @@ def cockpit_midia(request: Request, lead_id: int, mensagem_id: int):
     if not sess:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     conta_id, membro_id = sess[0], sess[1]
-    with get_pool().connection() as c:
-        r = c.execute(
-            """select m.midia_ref, m.midia_tipo, coalesce(m.midia_meta,'{}'::jsonb),
-                      m.midia_arquivo
-                 from mensagens m
-                 join conversas cv on cv.id = m.conversa_id
-                where m.id=%s and cv.conta_id=%s and cv.prospeccao_id=%s
-                  and m.midia_ref is not null""",
-            (mensagem_id, conta_id, lead_id)).fetchone()
+    # UMA consulta responde as duas perguntas: a mensagem é DESTE lead, e o lead é
+    # DESTE vendedor. Ver `ck.midia_do_vendedor`.
+    r = ck.midia_do_vendedor(get_pool(), conta_id, membro_id, lead_id, mensagem_id)
     if not r:
-        return Response(status_code=404)
-    # ...e só agora a posse: a consulta acima diz que a mensagem é DESTE lead, o
-    # lead_do_vendedor diz que o lead é DESTE vendedor.
-    if not ck.lead_do_vendedor(get_pool(), conta_id, membro_id, lead_id):
         return Response(status_code=404)
     ref, tipo, meta, arquivo = r[0], r[1], (r[2] or {}), r[3]
 
@@ -6831,8 +6912,31 @@ def cockpit_manifest():
 # reserva: quem instalou o app antigo tem o shell antigo guardado, e sem trocar a
 # chave ele voltaria do cache na primeira vez que a rede falhasse — o visual velho
 # reaparecendo sozinho. Chave nova, cache velho descartado no activate.
+#
+# v4 (19/09/2026): O QUE É PRIVADO NÃO FICA NO APARELHO. Até a v3 toda resposta
+# GET passava pelo cache — a fila, cada conversa aberta e cada FOTO de cliente —,
+# guardada no Cache Storage sem prazo e sem ser apagada no Sair. Num celular
+# perdido, trocado ou emprestado, abrir o app sem rede mostrava a última conversa
+# de cada lead, mesmo depois do vendedor sair da conta. Agora só o estático entra
+# no cache; o resto vai direto à rede, e sem rede a tela diz isso em vez de mostrar
+# dado velho. A troca da chave pra v4 é o que APAGA o que a v3 guardou: o
+# `activate` descarta todo cache com outro nome, então cada aparelho se limpa
+# sozinho na primeira abertura depois do deploy.
+_SW_OFFLINE = ("<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
+               "<meta name=viewport content='width=device-width,initial-scale=1'>"
+               "<title>Sem conexão · Zaq</title></head>"
+               "<body style='margin:0;min-height:100vh;display:grid;place-items:center;"
+               "background:#0A0F0C;color:#E8EFEA;font:16px system-ui,sans-serif;text-align:center'>"
+               "<div style='padding:2rem'><div style='font-size:2rem'>📶</div>"
+               "<p style='margin:.6rem 0 1.2rem'>Sem conexão agora.<br>"
+               "Assim que a internet voltar, a tela abre.</p>"
+               "<button onclick='location.reload()' style='background:#25D366;color:#0A0F0C;"
+               "border:0;border-radius:999px;padding:.7rem 1.4rem;font:inherit;font-weight:600'>"
+               "Tentar de novo</button></div></body></html>")
+
 _SW = """
-const CACHE='cockpit-v3';
+const CACHE='cockpit-v4';
+const OFFLINE=""" + _json_mod.dumps(_SW_OFFLINE) + """;
 self.addEventListener('install',e=>{self.skipWaiting();});
 self.addEventListener('activate',e=>{e.waitUntil(
   caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k))))
@@ -6848,14 +6952,16 @@ const ESTATICO=/^\\/(cockpit\\/(app\\.css|icon\\.svg|splash\\/|manifest\\.webman
 self.addEventListener('fetch',e=>{
   const r=e.request; if(r.method!=='GET'){return;}
 
-  // HTML segue REDE-PRIMEIRO, de propósito: a fila, a conversa e os contadores
-  // mudam a cada minuto, e servir uma tela velha do disco seria pior que esperar.
-  // O cache continua sendo a reserva pra quando a rede falha.
+  // TUDO QUE NÃO É ESTÁTICO VAI DIRETO À REDE E NÃO É GUARDADO: a fila, a
+  // conversa e as fotos são dado de cliente (ver a nota da v4 acima). Só a
+  // NAVEGAÇÃO ganha uma resposta quando a rede falha — a tela de "sem conexão",
+  // que não tem dado de ninguém. O resto (fetch do polling, mídia) falha como
+  // falharia sem service worker, e quem chamou já trata.
   if(!ESTATICO.test(new URL(r.url).pathname)){
-    e.respondWith(fetch(r).then(res=>{
-      try{const cp=res.clone();caches.open(CACHE).then(c=>c.put(r,cp));}catch(_){}
-      return res;
-    }).catch(()=>caches.match(r)));
+    if(r.mode==='navigate'){
+      e.respondWith(fetch(r).catch(()=>new Response(OFFLINE,
+        {headers:{'Content-Type':'text/html; charset=utf-8'}})));
+    }
     return;
   }
 

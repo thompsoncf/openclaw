@@ -24,6 +24,8 @@ class _PoolComConta(ConnectionPool):
     def getconn(self, timeout: float | None = None):
         conn = super().getconn(timeout)
         try:
+            from db import medicao as _m
+            _m.contar_conexao()
             from db import tenant as _t
             _t.aplicar(conn)
         except Exception:  # noqa: BLE001 - nunca impedir a entrega da conexao
@@ -45,8 +47,11 @@ def get_pool() -> ConnectionPool:
         # se ela esta viva (o pooler do Supabase fecha conexoes ociosas). Se
         # estiver morta, o pool descarta e abre outra - some o "connection is bad".
         # max_idle: fecha conexoes paradas ha mais de 2 min, antes do Supabase.
+        # connection_class: a conexão que soma as próprias consultas na medição
+        # por requisição (db/medicao.py). Fora de requisição medida é um `if`.
+        from db.medicao import ConexaoMedida
         _pool = _PoolComConta(
-            url, min_size=1, max_size=10, open=True,
+            url, connection_class=ConexaoMedida, min_size=1, max_size=10, open=True,
             max_idle=120,
             check=ConnectionPool.check_connection,
             kwargs={"prepare_threshold": None},

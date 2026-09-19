@@ -318,6 +318,84 @@ def test_conversa_longa_traz_as_ultimas_mensagens(pool):
     assert [m["texto"] for m in msgs] == [f"msg {i}" for i in range(50, 250)]   # ordem de leitura
 
 
+def _conversa_com(c, conta, lead, textos, *, agente=False):
+    conv = c.execute("insert into conversas (conta_id, prospeccao_id, canal, agente_ativo) "
+                     "values (%s,%s,'whatsapp',%s) returning id", (conta, lead, agente)).fetchone()[0]
+    base = datetime.now(timezone.utc) - timedelta(hours=1)
+    ids = []
+    for i, t in enumerate(textos):
+        ids.append(c.execute(
+            "insert into mensagens (conversa_id, canal, direcao, autor, texto, criado_em) "
+            "values (%s,'whatsapp','in','lead',%s,%s) returning id",
+            (conv, t, base + timedelta(minutes=i))).fetchone()[0])
+    return conv, ids
+
+
+def test_polling_da_conversa_traz_so_o_que_chegou_depois(pool):
+    """O polling de 8 s pergunta "o que chegou depois da mensagem N". Tem que
+    devolver só as de depois, em ordem de leitura, e o `ia` de quem responde."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="pold@x.com")
+        lead = _lead(c, conta, vend, "Polling")
+        _, ids = _conversa_com(c, conta, lead, ["um", "dois", "tres"])
+        c.commit()
+    d = ck.mensagens_desde(pool, conta, vend, lead, ids[0])
+    assert [m["texto"] for m in d["mensagens"]] == ["dois", "tres"]
+    assert [m["id"] for m in d["mensagens"]] == ids[1:]
+    assert d["ia"] is False
+    assert ck.mensagens_desde(pool, conta, vend, lead, ids[-1])["mensagens"] == []
+
+
+def test_polling_da_conversa_revalida_a_posse(pool):
+    """A mesma regra do `lead_do_vendedor`: lead de colega não devolve nada — nem a
+    lista vazia, que diria que o lead existe."""
+    with pool.connection() as c:
+        conta = _conta(c)
+        v1 = _membro(c, conta, nome="V1", email="posp1@x.com")
+        v2 = _membro(c, conta, nome="V2", email="posp2@x.com")
+        alheio = _lead(c, conta, v2, "Alheio")
+        _conversa_com(c, conta, alheio, ["segredo"])
+        outra = _conta(c)
+        c.commit()
+    assert ck.mensagens_desde(pool, conta, v1, alheio, 0) is None
+    assert ck.mensagens_desde(pool, outra, v2, alheio, 0) is None      # outra conta
+    assert ck.mensagens_desde(pool, conta, v2, alheio, 0)["mensagens"][0]["texto"] == "segredo"
+
+
+def test_polling_da_conversa_bate_com_a_tela(pool):
+    """As duas listas desenham a mesma bolha: o que o polling traz tem que ser
+    idêntico ao que a tela traria pras mesmas mensagens."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="bate@x.com")
+        lead = _lead(c, conta, vend, "Bate")
+        _conversa_com(c, conta, lead, ["a", "b"], agente=True)
+        c.commit()
+    tela = ck.lead_do_vendedor(pool, conta, vend, lead)
+    poll = ck.mensagens_desde(pool, conta, vend, lead, 0)
+    assert poll["mensagens"] == tela["mensagens"]
+    assert poll["ia"] == tela["ia"] is True
+
+
+def test_midia_so_do_lead_do_proprio_vendedor(pool):
+    """A rota de mídia decide a posse numa consulta só. Colega, outro lead ou
+    mensagem sem mídia: nada."""
+    with pool.connection() as c:
+        conta = _conta(c)
+        v1 = _membro(c, conta, nome="V1", email="mid1@x.com")
+        v2 = _membro(c, conta, nome="V2", email="mid2@x.com")
+        meu = _lead(c, conta, v1, "Meu")
+        outro = _lead(c, conta, v1, "Outro")
+        _, ids = _conversa_com(c, conta, meu, ["foto"])
+        c.execute("update mensagens set midia_ref='{\"directPath\":\"x\"}'::jsonb, "
+                  "midia_tipo='imagem' where id=%s", (ids[0],))
+        _, sem = _conversa_com(c, conta, outro, ["texto puro"])
+        c.commit()
+    assert ck.midia_do_vendedor(pool, conta, v1, meu, ids[0])[1] == "imagem"
+    assert ck.midia_do_vendedor(pool, conta, v2, meu, ids[0]) is None       # colega
+    assert ck.midia_do_vendedor(pool, conta, v1, outro, ids[0]) is None     # lead errado
+    assert ck.midia_do_vendedor(pool, conta, v1, outro, sem[0]) is None     # sem mídia
+
+
 # ------------------------------------------------------------------ ficha do cliente
 def test_salvar_ficha_preenche_e_nao_apaga(pool):
     """O lead entra pelo WhatsApp só com número; quem conversa é quem descobre nome,
@@ -1801,7 +1879,8 @@ def test_a_tela_do_lead_preenche_a_caixa_e_avisa_a_pista(pool, monkeypatch):
     d = ck.lead_do_vendedor(pool, conta, vend, lid)
     req = SimpleNamespace(session={}, query_params=QueryParams("texto=Pra%20qual%20data%20voc%C3%AA%20est%C3%A1%20pensando%3F"))
     html = bytes(pc._lead_vendedor(req, lid, d).body).decode("utf-8")
-    assert "value='Pra qual data você está pensando?' autofocus" in html
+    # a caixa é textarea desde 19/09/2026: o texto vai entre as tags, não em value=
+    assert " autofocus>Pra qual data você está pensando?</textarea>" in html
     assert "O cliente <b>falou de março</b> na conversa. Confirmar a data?" in html
     assert f"href='/cockpit/lead/{lid}/ficha'>Abrir a ficha</a>" in html
     assert f"href='/cockpit/lead/{lid}?texto=Pra%20qual%20data" in html

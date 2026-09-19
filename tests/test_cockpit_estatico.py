@@ -119,4 +119,20 @@ def test_service_worker_so_cacheia_o_que_e_imutavel():
     corpo = sw.text
     assert "app\\.css" in corpo and "estatico\\/fontes\\/" in corpo
     assert "splash" in corpo and "icon\\.svg" in corpo
-    assert "cockpit-v3" in corpo          # chave nova descarta o cache da versão anterior
+    assert "cockpit-v4" in corpo          # chave nova descarta o cache da versão anterior
+
+
+def test_service_worker_nao_guarda_dado_de_cliente():
+    """Até a v3 a fila, as conversas e as FOTOS dos clientes ficavam no Cache
+    Storage do celular sem prazo, e o Sair não apagava: sem rede, o app mostrava a
+    última conversa de cada lead a quem pegasse o aparelho. Agora o único
+    `cache.put` é o do ramo estático, e navegação sem rede vira a tela de "sem
+    conexão", que não tem dado de ninguém."""
+    corpo = cliente.get("/cockpit/sw.js").text
+    assert corpo.count("c.put(") == 1, "só o estático pode entrar no cache"
+    privado = corpo.split("if(!ESTATICO.test(")[1].split("// Estático:")[0]
+    assert "caches" not in privado and "put(" not in privado
+    assert "r.mode==='navigate'" in privado and "OFFLINE" in privado
+    assert "Sem conexão" in corpo
+    # a v3 guardou conversa no aparelho: o activate apaga todo cache de outro nome
+    assert "k!==CACHE" in corpo and "caches.delete(k)" in corpo

@@ -42,17 +42,21 @@ def test_a_rota_de_midia_existe_e_e_do_cockpit():
 def test_a_mensagem_tem_que_ser_da_conversa_daquele_lead():
     """Sem o `cv.prospeccao_id=%s`, o id da mensagem — sequencial e adivinhável —
     seria a única coisa entre um vendedor e a foto do cliente de outro."""
-    fonte = inspect.getsource(pc.cockpit_midia)
+    fonte = inspect.getsource(ck.midia_do_vendedor)
     assert "cv.prospeccao_id=%s" in fonte
     assert "cv.conta_id=%s" in fonte
 
 
 def test_e_o_lead_tem_que_ser_daquele_vendedor():
-    """A consulta diz que a mensagem é daquele lead; o `lead_do_vendedor` diz que o
-    lead é daquele vendedor. As duas coisas, não uma."""
-    fonte = inspect.getsource(pc.cockpit_midia)
-    assert "ck.lead_do_vendedor(" in fonte
-    assert "_sessao(request)" in fonte
+    """A mensagem é daquele lead E o lead é daquele vendedor — as duas coisas, não
+    uma. Desde 19/09/2026 numa consulta só (`ck.midia_do_vendedor`), em vez da
+    consulta da mensagem mais o `lead_do_vendedor` inteiro por foto."""
+    fonte = inspect.getsource(ck.midia_do_vendedor)
+    assert "p.vendedor_id=%s" in fonte
+    assert "p.conta_id = cv.conta_id" in fonte
+    rota = inspect.getsource(pc.cockpit_midia)
+    assert "ck.midia_do_vendedor(" in rota
+    assert "_sessao(request)" in rota
 
 
 def test_sem_sessao_nao_passa():
@@ -94,6 +98,13 @@ def test_o_polling_repassa_a_midia():
     """Sem isto, a foto que chega com a tela aberta só apareceria ao recarregar."""
     fonte = inspect.getsource(pc.cockpit_lead_mensagens)
     assert '"midia": m["midia"]' in fonte
+    # ...e quem alimenta o polling devolve a mídia no mesmo formato da tela, sem o
+    # ponteiro: o `mensagens_desde` é a segunda porta pra mesma bolha
+    poll = inspect.getsource(ck.mensagens_desde)
+    assert 'item["midia"] = {"tipo": midia_tipo, **(midia_meta or {}),' in poll
+    depois = poll.split('item["midia"]')[1][:250]
+    assert "directPath" not in depois and "midia_ref" not in depois
+    assert "midia_arquivo" not in depois
 
 
 # ------------------------------------------------- as duas cópias da bolha
@@ -378,7 +389,8 @@ def test_a_tela_confere_o_tamanho_antes_de_subir():
 
 def test_a_legenda_sai_da_caixa_de_resposta():
     """No WhatsApp a legenda chega colada na foto — é assim que as pessoas mandam."""
-    assert 'input[name=texto]' in pc._ANEXO_JS
+    # `[name=texto]` sem o `input`: a caixa virou textarea (várias linhas) em 19/09
+    assert '[name=texto]' in pc._ANEXO_JS
     assert "legenda" in pc._ANEXO_JS
 
 

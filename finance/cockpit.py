@@ -893,6 +893,92 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
     return alvo
 
 
+def mensagens_desde(pool, conta_id: int, membro_id: int, lead_id: int,
+                    desde: int) -> dict | None:
+    """O que chegou na conversa depois da mensagem `desde` — o polling da conversa.
+
+    POR QUE NÃO USA MAIS O `lead_do_vendedor`. Até 19/09/2026 a conversa aberta
+    pedia isto a cada 8 s e a rota respondia montando a TELA INTEIRA do lead: ficha,
+    etapas do funil, motivos de perda, a trava da insistência, as 200 últimas
+    mensagens e as outras conversas do mesmo número — umas dez consultas — pra no
+    fim filtrar em Python as poucas (quase sempre nenhuma) com id acima de `desde`.
+    Com três vendedores de conversa aberta, eram ~225 consultas por minuto pra
+    responder "nada novo".
+
+    Aqui são duas, numa conexão só: a POSSE e a conversa numa, as mensagens novas
+    na outra. A posse é a MESMA regra do `lead_do_vendedor` (lead da conta, com
+    `vendedor_id` = quem pergunta) e a conversa é a mesma que a tela abriu (a de
+    `ultima_msg_em` mais recente) — senão o polling traria mensagens de uma
+    conversa diferente da que está desenhada.
+
+    Devolve None quando o lead não é dele. `ia` vai junto porque a tela recarrega
+    quando quem responde muda (o agente assumiu, ou um colega assumiu por ele).
+    """
+    with pool.connection() as c:
+        r = c.execute(
+            """select cv.id, coalesce(cv.agente_ativo, true)
+                 from prospeccao p
+                 left join lateral (
+                   select id, agente_ativo from conversas
+                    where prospeccao_id = p.id and conta_id = p.conta_id
+                    order by ultima_msg_em desc limit 1) cv on true
+                where p.id=%s and p.conta_id=%s and p.vendedor_id=%s""",
+            (lead_id, conta_id, membro_id)).fetchone()
+        if not r:
+            return None
+        # sem conversa o `coalesce` já dá true: lead sem conversa é da IA, como no
+        # `lead_do_vendedor`
+        conversa_id, ia = r[0], bool(r[1])
+        msgs = []
+        if conversa_id:
+            # mesmas colunas e mesma regra de mídia do `lead_do_vendedor`: as duas
+            # listas desenham a mesma bolha, e uma divergência aqui faria a foto que
+            # chega pelo polling sair diferente da que veio na primeira carga
+            rows = c.execute(
+                """select id, direcao, autor, texto, criado_em, midia_tipo,
+                          case when midia_ref is null then null
+                               else coalesce(midia_meta, '{}'::jsonb) end,
+                          (midia_arquivo is not null)
+                     from mensagens
+                    where conversa_id=%s and id > %s
+                    order by criado_em asc, id asc
+                    limit 200""", (conversa_id, int(desde or 0))).fetchall()
+            for mid, d, autor, texto, quando, midia_tipo, midia_meta, guardada in rows:
+                item = {"id": mid, "who": "ia" if autor == "bot" else ("out" if d == "out" else "in"),
+                        "texto": texto or "", "quando": quando}
+                if midia_tipo and midia_meta is not None:
+                    item["midia"] = {"tipo": midia_tipo, **(midia_meta or {}),
+                                     "guardada": bool(guardada)}
+                msgs.append(item)
+    return {"ia": ia, "mensagens": msgs}
+
+
+def midia_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
+                      mensagem_id: int):
+    """A mídia de UMA mensagem, se ela é de uma conversa de um lead DESTE vendedor.
+
+    Devolve (midia_ref, midia_tipo, midia_meta, midia_arquivo) ou None.
+
+    Uma consulta que já responde as duas perguntas da rota de mídia: a mensagem é
+    deste lead, e o lead é deste vendedor. Antes eram a consulta da mensagem MAIS o
+    `lead_do_vendedor` inteiro por foto — numa conversa com 15 fotos na tela, ~150
+    consultas só pra decidir que sim, ele pode ver as fotos do próprio cliente.
+
+    A regra de posse é a do `lead_do_vendedor` (conta + `vendedor_id`), escrita no
+    `join` com `prospeccao`.
+    """
+    with pool.connection() as c:
+        return c.execute(
+            """select m.midia_ref, m.midia_tipo, coalesce(m.midia_meta,'{}'::jsonb),
+                      m.midia_arquivo
+                 from mensagens m
+                 join conversas cv on cv.id = m.conversa_id
+                 join prospeccao p on p.id = cv.prospeccao_id and p.conta_id = cv.conta_id
+                where m.id=%s and cv.conta_id=%s and cv.prospeccao_id=%s
+                  and p.vendedor_id=%s and m.midia_ref is not null""",
+            (mensagem_id, conta_id, lead_id, membro_id)).fetchone()
+
+
 def perfil(pool, conta_id: int, membro_id: int) -> dict:
     """Dados do vendedor + KPIs simples pro cabeçalho do perfil."""
     with pool.connection() as c:

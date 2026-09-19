@@ -325,6 +325,20 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — teto falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
+                # A esteira da cobrança: 10 leads por vendedor por dia, cobrança no
+                # dia 1, 3 e 7, e o vendedor decide (com aviso no último dia). O
+                # relógio é a ENTRADA na esteira, não o prazo vencido da etapa.
+                # Inerte por padrão.
+                from finance import esteira as _est
+                _e = _est.rodar(pool)
+                if _e["contas"]:
+                    log.info("poller: ciclo #%d — esteira: %d conta(s), %d entrou(ram), "
+                             "%d resolvido(s), %d fechado(s)",
+                             ciclo, _e["contas"], _e["entraram"], _e["resolvidos"], _e["fechados"])
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — esteira falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
+            try:
                 # O Perdido automático: o lead que passou do prazo da etapa E levou
                 # os toques sem responder sai do quadro sozinho, com motivo. Nunca
                 # fecha quem está esperando resposta NOSSA. Inerte por padrão.

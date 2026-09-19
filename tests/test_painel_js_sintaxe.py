@@ -155,7 +155,40 @@ def _render(nome: str, **over) -> str:
         env.filters.setdefault(k, v)
     for k, v in pp._env.globals.items():
         env.globals.setdefault(k, v)
-    return env.get_template(nome).render(**{**PAGINAS[nome], **over})
+    return _com_estaticos(env.get_template(nome).render(**{**PAGINAS[nome], **over}))
+
+
+def _com_estaticos(html: str) -> str:
+    """Traz de volta pra dentro do HTML o CSS e o JS que saíram pra `/estatico/`.
+
+    Desde 19/09/2026 a aba de Serviços serve 135 KB de CSS+JS como ARQUIVO com
+    cache de um ano (`web/estaticos.py`, o mesmo caminho que a Agenda abriu em
+    19/08) em vez de embutir na página. Pro navegador não mudou nada: ele busca o
+    arquivo e executa. Pros testes daqui mudaria tudo, porque eles leem o texto
+    do render.
+
+    Então o render de teste refaz o que o navegador faz. Sem isto, todo teste
+    deste arquivo passaria a olhar uma página sem JS nenhum — e ficaria VERDE sem
+    ter olhado nada, que é exatamente o modo de falhar que este arquivo existe
+    pra evitar.
+    """
+    from web import estaticos as _est
+
+    def _corpo(url: str) -> str:
+        arquivo = url.rsplit("/", 1)[-1]
+        achado = _est._ARQUIVOS.get(arquivo)
+        assert achado is not None, (
+            f"a página aponta pra {url}, que não está registrado em web/estaticos")
+        return achado[0].decode("utf-8")
+
+    # função de substituição, e não string: numa string, `\n` e `\1` do corpo do
+    # JS seriam reinterpretados pelo re — justo o tipo de estrago de escape que
+    # este arquivo inteiro veio caçar.
+    html = re.sub(r'<script src="(/estatico/[^"]+\.js)"[^>]*></script>',
+                  lambda m: "<script>" + _corpo(m.group(1)) + "</script>", html)
+    html = re.sub(r'<link rel="stylesheet" href="(/estatico/[^"]+\.css)">',
+                  lambda m: "<style>" + _corpo(m.group(1)) + "</style>", html)
+    return html
 
 
 def _scripts(html: str) -> list[str]:

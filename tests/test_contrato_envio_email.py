@@ -75,12 +75,20 @@ def test_sem_nome_do_cliente_nao_sai_ola_virgula():
 
 def _grupo_contrato() -> str:
     """O trecho do JS entre `if(it.contrato_token){` e o fechamento do bloco."""
-    src = ps._SERVICOS_TPL if hasattr(ps, "_SERVICOS_TPL") else _tpl_de_servicos()
+    src = _js_da_aba()
     i = src.index("if(it.contrato_token){")
     return src[i:src.index("if(it.pgto", i)]
 
 
-def _tpl_de_servicos() -> str:
+def _js_da_aba() -> str:
+    """O JavaScript da aba de Serviços, que é onde o menu do funil é montado.
+
+    Desde 19/09/2026 ele não mora mais dentro do template: saiu pra arquivo com
+    cache de um ano (`web/estaticos.py`), e a página só carrega a tag. O
+    `_SERVICOS_TPL` continua no fallback porque é de graça e porque o que estes
+    testes protegem é o COMPORTAMENTO do menu, não o endereço dele."""
+    if hasattr(ps, "_JS_CRU"):
+        return ps._JS_CRU
     from web.portal import _env
     return _env.loader.mapping["servicos"]
 
@@ -108,7 +116,7 @@ def test_o_menu_diz_se_o_contrato_ja_foi_mandado():
 def test_o_grupo_proposta_continua_com_o_envio_dele():
     """Trilho: o envio da PROPOSTA é o que já funcionava, e não pode ter sido
     trocado pelo do contrato."""
-    src = _tpl_de_servicos()
+    src = _js_da_aba()
     i = src.index("_mgrupo('Proposta'")
     trecho = src[i:src.index("if(it.contrato_token){", i)]
     assert "abrirEnvio(it.id)" in trecho

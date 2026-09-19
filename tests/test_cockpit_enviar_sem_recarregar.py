@@ -210,7 +210,9 @@ def _tela_da_conversa(texto_pre: str = "") -> str:
                        {"id": 11, "who": "out", "texto": "Tem sim!", "quando": agora}]}
     req = SimpleNamespace(session={}, query_params=QueryParams(
         f"texto={texto_pre}" if texto_pre else ""))
-    return bytes(pc._lead_vendedor(req, 7, d).body).decode("utf-8")
+    # pode_voz: com o microfone e o clipe na tela, que é o caso da conta QR — é
+    # assim que o JS do anexo entra no render e é compilado junto
+    return bytes(pc._lead_vendedor(req, 7, d, pode_voz=True).body).decode("utf-8")
 
 
 def test_todo_script_da_tela_da_conversa_compila(tmp_path):
@@ -232,6 +234,21 @@ def test_a_caixa_de_resposta_e_textarea_e_devolve_o_texto():
     assert "<textarea name=texto rows=1" in html
     assert " autofocus>Pra qual data?</textarea>" in html
     assert "<input name=texto" not in html
+
+
+def test_foto_enviada_nao_aparece_duas_vezes():
+    """19/09/2026, logo depois do deploy: o dono mandou uma foto de teste e ela
+    apareceu DUAS vezes. No banco era uma só (id 165561). A corrida: a mensagem é
+    gravada antes da resposta do upload voltar (o servidor espera o WhatsApp
+    receber o arquivo), e o polling que passa nesse meio tempo a traz de novo.
+
+    As duas ordens de chegada têm guarda:
+      * polling primeiro → quando o upload responde, a bolha LOCAL sai;
+      * upload primeiro  → a bolha local ganha o id, e o polling pula quem já tem.
+    """
+    html = _tela_da_conversa()
+    assert "ja && ja!==d" in html and "d.remove(); return;" in html
+    assert """if(chat.querySelector('.bub[data-id="'+m.id+'"]'))""" in html
 
 
 def test_a_bolha_de_verdade_toma_o_lugar_da_otimista():

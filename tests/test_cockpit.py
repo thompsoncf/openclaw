@@ -378,6 +378,50 @@ def test_polling_da_conversa_bate_com_a_tela(pool):
     assert poll["ia"] == tela["ia"] is True
 
 
+def test_o_envio_de_texto_nao_segura_a_conexao_durante_a_rede(pool, monkeypatch):
+    """A conexão volta pro pool ANTES da chamada ao WhatsApp.
+
+    O app tem 10 conexões por processo. Segurando uma durante a rede, alguns
+    envios simultâneos com o WhatsApp lento esgotavam o pool e a tela de TODO
+    MUNDO parava — medido em 15/09/2026: conexões `idle in transaction` por 89
+    segundos e o webhook de entrada estourando o timeout de 15 s.
+
+    O teste usa um pool de UMA conexão: se o envio ainda a segurasse, pegar outra
+    durante a "rede" estouraria o tempo. O áudio e o anexo já faziam assim; o
+    texto era o que faltava.
+    """
+    from psycopg_pool import ConnectionPool
+    from finance import whatsapp_out as wo
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="livre@x.com")
+        lead = _lead(c, conta, vend, "Livre", wa="+5586999990000")
+        c.execute("insert into canais_config (conta_id, canal, provedor, ativo, identificador) "
+                  "values (%s,'whatsapp','qr',true,'qr:x')", (conta,))
+        c.commit()
+
+    um_so = ConnectionPool(pool.conninfo, min_size=1, max_size=1, open=True,
+                           kwargs={"prepare_threshold": None})
+    tentou = {}
+
+    def _durante_a_rede(destino, numero, texto, *, chip_id=None):
+        try:
+            with um_so.connection(timeout=3) as outra:      # a outra tela do app
+                outra.execute("select 1")
+            tentou["livre"] = True
+        except Exception as e:                              # noqa: BLE001
+            tentou["livre"] = False
+            tentou["erro"] = f"{type(e).__name__}: {e}"
+        return {"ok": True, "sid": "SM-LIVRE"}
+
+    monkeypatch.setattr(wo, "enviar_pronto", _durante_a_rede)
+    try:
+        assert ck.enviar_mensagem(um_so, conta, vend, lead, "oi")["ok"] is True
+    finally:
+        um_so.close()
+    assert tentou.get("livre") is True, (
+        "a conexão ficou presa durante a rede: " + tentou.get("erro", ""))
+
+
 def test_o_carimbo_de_entrega_chega_na_tela(pool):
     """✓ saiu, ✓✓ chegou, ✓✓ azul foi lido. O banco já guardava (`mensagens.status`)
     e a tela não mostrava — o vendedor abria o WhatsApp do celular só pra saber se
@@ -663,8 +707,8 @@ def test_enviar_mensagem_grava_e_pausa(pool, monkeypatch):
     # a assinatura do dublê segue a real: enviar(c, conta_id, numero, texto, *, chip_id).
     # Sem o `chip_id` aqui o dublê não bate com o que finance/cockpit.py chama, e o
     # teste morre de TypeError em vez de testar o cockpit.
-    monkeypatch.setattr(wo, "enviar",
-                        lambda c, cid, num, txt, *, chip_id=None: {"ok": True, "sid": "SM1"})
+    monkeypatch.setattr(wo, "enviar_pronto",
+                        lambda destino, num, txt, *, chip_id=None: {"ok": True, "sid": "SM1"})
     with pool.connection() as c:
         conta = _conta(c)
         v1 = _membro(c, conta, nome="V1", email="m1@x.com")
@@ -1138,8 +1182,8 @@ def test_cooldown_zera_quando_o_vendedor_responde(pool, monkeypatch):
     from web import painel_prospeccao as pp
     monkeypatch.setattr(webpush, "configurado", lambda: True)
     monkeypatch.setattr(webpush, "enviar", lambda sub, dados, ttl=3600: True)
-    monkeypatch.setattr(whatsapp_out, "enviar",
-                        lambda c, ci, num, txt, *, chip_id=None: {"ok": True, "sid": "SM1"})
+    monkeypatch.setattr(whatsapp_out, "enviar_pronto",
+                        lambda destino, num, txt, *, chip_id=None: {"ok": True, "sid": "SM1"})
     with pool.connection() as c:
         conta = _conta(c); vend = _membro(c, conta, email="resp@x.com")
         lead = _lead(c, conta, vend, "Valeria")
@@ -1493,7 +1537,7 @@ def test_a_mensagem_que_nao_saiu_fica_guardada_com_o_texto(pool, monkeypatch):
     from finance import whatsapp_out as wo
     with pool.connection() as c:
         conta, vend, lead = _cena_envio(c)
-    monkeypatch.setattr(wo, "enviar",
+    monkeypatch.setattr(wo, "enviar_pronto",
                         lambda *a, **k: {"ok": False, "erro": "desconectado"})
     r = ck.enviar_mensagem(pool, conta, vend, lead, "Boa tarde Sheila, o local fica na Av. Fátima")
     assert r["ok"] is False
@@ -1524,7 +1568,8 @@ def test_a_falha_guardada_sobrevive_a_um_erro_depois_dela(pool, monkeypatch):
     from finance import cockpit as _ck
     with pool.connection() as c:
         conta, vend, lead = _cena_envio(c, provedor="qr")
-    monkeypatch.setattr(wo, "enviar", lambda *a, **k: {"ok": False, "erro": "qr_indisponivel"})
+    monkeypatch.setattr(wo, "enviar_pronto",
+                        lambda *a, **k: {"ok": False, "erro": "qr_indisponivel"})
 
     def _explode(*a, **k):
         raise RuntimeError("500 depois de gravar a falha")
@@ -1544,7 +1589,8 @@ def test_o_recado_do_erro_segue_o_provedor_e_nao_inventa_janela_de_24h(pool, mon
     qualquer número, sempre. O recado único que existia até 16/09 mandava o
     vendedor do QR caçar uma regra que o canal dele não tem."""
     from finance import whatsapp_out as wo
-    monkeypatch.setattr(wo, "enviar", lambda *a, **k: {"ok": False, "erro": "http_502"})
+    monkeypatch.setattr(wo, "enviar_pronto",
+                        lambda *a, **k: {"ok": False, "erro": "http_502"})
     with pool.connection() as c:
         conta_q, v_q, l_q = _cena_envio(c, provedor="qr")
         conta_t, v_t, l_t = _cena_envio(c, provedor="twilio")
@@ -1553,7 +1599,8 @@ def test_o_recado_do_erro_segue_o_provedor_e_nao_inventa_janela_de_24h(pool, mon
     assert "24h" not in r_qr["erro"] and "guardada" in r_qr["erro"]
     assert "24h" in r_tw["erro"]
     # e os erros com nome próprio continuam falando por si, em qualquer provedor
-    monkeypatch.setattr(wo, "enviar", lambda *a, **k: {"ok": False, "erro": "numero_invalido"})
+    monkeypatch.setattr(wo, "enviar_pronto",
+                        lambda *a, **k: {"ok": False, "erro": "numero_invalido"})
     assert ck.enviar_mensagem(pool, conta_q, v_q, l_q, "oi")["erro"] == "Número do lead inválido."
 
 
@@ -1561,7 +1608,8 @@ def test_envio_que_deu_certo_nao_vira_linha_de_falha(pool, monkeypatch):
     from finance import whatsapp_out as wo
     with pool.connection() as c:
         conta, vend, lead = _cena_envio(c)
-    monkeypatch.setattr(wo, "enviar", lambda *a, **k: {"ok": True, "sid": "3EB0FEITO"})
+    monkeypatch.setattr(wo, "enviar_pronto",
+                        lambda *a, **k: {"ok": True, "sid": "3EB0FEITO"})
     assert ck.enviar_mensagem(pool, conta, vend, lead, "saiu")["ok"] is True
     with pool.connection() as c:
         assert c.execute("select count(*) from envio_falha where conta_id=%s",
@@ -2449,8 +2497,8 @@ def test_enviar_sem_justificar_e_recusado_e_com_motivo_passa(pool, monkeypatch):
     em vez de um erro seco que deixaria o vendedor sem saída."""
     from finance import funil_trava as tv
     from finance import whatsapp_out as wo
-    monkeypatch.setattr(wo, "enviar",
-                        lambda c, cid, num, txt, *, chip_id=None: {"ok": True, "sid": "SM9"})
+    monkeypatch.setattr(wo, "enviar_pronto",
+                        lambda destino, num, txt, *, chip_id=None: {"ok": True, "sid": "SM9"})
     monkeypatch.setattr(wo, "chip_da_conversa", lambda c, cid, conv: None)
     with pool.connection() as c:
         conta = _conta(c, "Trava2"); vend = _membro(c, conta, email="trava2@x.com")

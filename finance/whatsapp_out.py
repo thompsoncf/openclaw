@@ -61,6 +61,37 @@ def chip_da_conversa(c, conta_id, conversa_id) -> int | None:
     return int(r[0]) if (r and r[0]) else None
 
 
+def preparar(c, conta_id) -> dict | None:
+    """Tudo o que o envio precisa saber do BANCO, lido de uma vez. None = sem canal.
+
+    Existe pra separar as duas metades do envio: esta lê o banco (rápido), e o
+    `enviar_pronto` fala com o WhatsApp (pode demorar segundos). Quem chama pode
+    então DEVOLVER A CONEXÃO antes da parte lenta — o app tem 10 por processo, e
+    segurá-las durante a rede é o que trava a tela de todo mundo quando o WhatsApp
+    está lento (medido em 15/09/2026: conexões presas por 89 segundos).
+
+    O conteúdo é opaco de propósito: quem chama só repassa pro `enviar_pronto`.
+    """
+    r = _row(c, conta_id)
+    if not r:
+        return None
+    return {"conta_id": conta_id, "provedor": r[0], "identificador": r[1],
+            "wa_phone_id": r[2], "token": r[3]}
+
+
+def enviar_pronto(destino: dict | None, numero, texto, *, chip_id=None) -> dict:
+    """A metade que fala com o WhatsApp. NÃO toca no banco — ver `preparar`."""
+    if not destino:
+        return {"ok": False, "erro": "sem_numero_empresa"}
+    prov = destino["provedor"]
+    if prov == "cloud":
+        return _cloud.enviar_texto(destino["wa_phone_id"], destino["token"], numero, texto)
+    if prov == "qr":
+        from finance import whatsapp_qr as _qr
+        return _qr.enviar_texto(chip_id or destino["conta_id"], numero, texto)
+    return _twilio.enviar_texto(destino["identificador"], numero, texto)
+
+
 def enviar(c, conta_id, numero, texto, *, chip_id=None) -> dict:
     """Manda um texto pro `numero` do lead pelo provedor configurado da empresa.
 
@@ -69,17 +100,12 @@ def enviar(c, conta_id, numero, texto, *, chip_id=None) -> dict:
     própria empresa, exatamente como sempre saiu. Quem responde a uma CONVERSA
     deveria passar o chip dela (ver `chip_da_conversa`): sem isso o lead escreve pra
     um número e é respondido por outro, que do lado dele parece outra empresa.
+
+    Continua existindo pros chamadores que já estão numa transação curta (agente,
+    campanhas, avisos). Quem segura a conexão por causa da REDE deve usar o par
+    `preparar` + `enviar_pronto`.
     """
-    r = _row(c, conta_id)
-    if not r:
-        return {"ok": False, "erro": "sem_numero_empresa"}
-    prov = r[0]
-    if prov == "cloud":
-        return _cloud.enviar_texto(r[2], r[3], numero, texto)
-    if prov == "qr":
-        from finance import whatsapp_qr as _qr
-        return _qr.enviar_texto(chip_id or conta_id, numero, texto)
-    return _twilio.enviar_texto(r[1], numero, texto)
+    return enviar_pronto(preparar(c, conta_id), numero, texto, chip_id=chip_id)
 
 
 def enviar_template(c, conta_id, numero, content_sid, variaveis, mmlite=False) -> dict:

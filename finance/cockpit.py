@@ -1157,18 +1157,30 @@ def enviar_mensagem(pool, conta_id: int, membro_id: int, lead_id: int, texto: st
                         "motivos": _tv.motivos()}
             c.commit()   # a renovação e o movimento ficam mesmo se o envio falhar
                          # depois: o vendedor justificou, e justificar é um fato
-        # responde pelo mesmo chip que recebeu. `_conversa_id` já é chamado logo
-        # abaixo pra gravar no inbox; aqui ele vem antes porque o chip precisa ser
-        # decidido ANTES do envio.
-        res = whatsapp_out.enviar(
-            c, conta_id, numero, texto,
-            chip_id=whatsapp_out.chip_da_conversa(
-                c, conta_id, _conversa_id(c, conta_id, lead_id, "whatsapp")))
+        # responde pelo mesmo chip que recebeu — o chip precisa ser decidido ANTES
+        # do envio. E o `preparar` lê aqui, com a conexão na mão, tudo o que o
+        # envio precisa saber do banco.
+        conv = _conversa_id(c, conta_id, lead_id, "whatsapp")
+        chip = whatsapp_out.chip_da_conversa(c, conta_id, conv)
+        destino = whatsapp_out.preparar(c, conta_id)
+        c.commit()
+    # ---------------------------------------------------------------- a REDE
+    # FORA DA CONEXÃO, de propósito. Esta chamada espera o serviço do WhatsApp, e
+    # isso pode levar segundos — no dia ruim, o timeout inteiro. O app tem 10
+    # conexões por processo: segurando uma aqui, alguns envios simultâneos com o
+    # WhatsApp lento esgotavam o pool e a TELA DE TODO MUNDO parava (medido em
+    # 15/09/2026: conexões `idle in transaction` por 89 segundos e webhook de
+    # entrada estourando o timeout de 15 s).
+    #
+    # O áudio e o anexo já faziam assim desde que nasceram; o texto era o que
+    # faltava. A ordem que importa não muda: a mensagem só é GRAVADA depois de o
+    # WhatsApp dizer que saiu.
+    res = whatsapp_out.enviar_pronto(destino, numero, texto, chip_id=chip)
+    with pool.connection() as c:
         if not res.get("ok"):
             _registrar_falha_envio(c, conta_id, membro_id, lead_id, numero, texto, res)
             return {"ok": False, "erro": _recado_da_falha(c, conta_id, res),
                     "texto_perdido": texto}
-        conv = _conversa_id(c, conta_id, lead_id, "whatsapp")
         _add_msg(c, conv, "whatsapp", "out", "humano", texto, membro_id, res.get("sid"))
         # `push_avisado_em=null` zera o cooldown: quem acabou de responder está EM DIA,
         # e a próxima mensagem do cliente tem que tocar na hora. Ver `pos_visto`.

@@ -693,6 +693,88 @@ def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
     return {"selos": selos, "acao": escolhida, "resumo": " · ".join(feito)}
 
 
+# ---------------------------------------------- EM QUAL ABA DO FUNIL A LINHA CAI
+#
+# POR QUE ISTO EXISTE. Em 18/09/2026 a Prime tinha 27 propostas numa lista só, sem
+# filtro e sem busca — e QUINZE delas eram rascunho, a mais velha de 19/08. O que
+# precisa de alguém hoje ficava misturado com o que já fechou e com o que está
+# esperando o cliente decidir, e a única forma de separar era ler as 27.
+
+GRUPO_MEU = "precisa_de_mim"
+GRUPO_CLIENTE = "com_o_cliente"
+GRUPO_FECHADA = "fechada"
+
+#: os rótulos das abas, no lugar onde a tela vai buscá-los. Aqui e não no
+#: template porque quem decide o grupo é esta função — rótulo longe da regra é
+#: como se escreve "Fechadas" numa aba que mostra outra coisa.
+GRUPOS = (
+    (GRUPO_MEU, "Precisa de mim"),
+    (GRUPO_CLIENTE, "Com o cliente"),
+    (GRUPO_FECHADA, "Fechadas"),
+)
+
+
+def grupo_do_funil(*, status, painel=None) -> str:
+    """Em qual das três abas esta linha entra.
+
+    A regra é DERIVADA do que a própria linha já mostra, e isso é de propósito:
+    a aba "Precisa de mim" tem que conter exatamente as linhas que exibem um
+    botão verde ou um selo coral. Uma segunda régua, escrita à parte, divergiria
+    da primeira no dia em que alguém mexesse numa delas — e aí a aba prometeria
+    uma coisa e a lista mostraria outra.
+
+    A pendência GANHA do status, inclusive em orçamento fechado: um contrato
+    assinado com parcela paga sem comprovante é trabalho meu hoje, e "Fechadas"
+    tem que querer dizer "não preciso olhar". Por isso a ordem abaixo.
+    """
+    pn = painel or {}
+    if pn.get("acao"):
+        return GRUPO_MEU
+    if any((s or {}).get("tom") == "coral" for s in (pn.get("selos") or ())):
+        return GRUPO_MEU
+    if (status or "") == "fechado":
+        return GRUPO_FECHADA
+    return GRUPO_CLIENTE
+
+
+# ------------------------------------------- A DATA QUE ABRE A LINHA (eventos)
+
+_MESES_CURTOS = ("jan", "fev", "mar", "abr", "mai", "jun",
+                 "jul", "ago", "set", "out", "nov", "dez")
+
+
+def data_da_linha(evento, *, modo="evento") -> dict | None:
+    """O bloco de data que abre a linha do funil — só no nicho de eventos.
+
+    No evento a DATA é a identidade do negócio: é ela que o dono procura, é ela
+    que não pode ser vendida duas vezes, e é ela que falta quando alguma coisa
+    deu errado. A linha abria com a inicial do nome, que é o que se usa quando
+    não se tem nada melhor — e aqui se tem (seção 6 do CLAUDE.md: a tela segue o
+    nicho).
+
+    Devolve None fora do modo evento: no recorrente não existe data de festa, e
+    inventar uma coluna vazia pra ZAQ é exatamente o erro que o Raio-X cometeu.
+
+    `sem_data` é o caso que mais importa — é a proposta nº 22 da Prime, enviada
+    ao cliente por R$ 9.650 sem tipo e sem data. Ela sai marcada, porque hoje
+    passa despercebida no meio das outras.
+    """
+    if (modo or "") != "evento":
+        return None
+    iso = ""
+    if isinstance(evento, dict):
+        iso = str(evento.get("data") or "")[:10]
+    try:
+        d = datetime.strptime(iso, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return {"dia": "—", "mes": "sem data", "titulo": "Sem data marcada",
+                "iso": "", "sem_data": True}
+    return {"dia": f"{d.day:02d}",
+            "mes": f"{_MESES_CURTOS[d.month - 1]} {d.year % 100:02d}",
+            "titulo": d.strftime("%d/%m/%Y"),
+            "iso": d.isoformat(), "sem_data": False}
+
+
 # ------------------------------------------------- o ESTADO DA DATA no funil
 #
 # POR QUE ISSO EXISTE. A data de um evento aprovado tem quatro estados, e até

@@ -1157,17 +1157,22 @@ def painel_servicos_lista(request: Request):
             # pagamento mora em `parcelas` (evento) ou em setup + mensalidade
             # (recorrente). `titulo_do_funil`, logo abaixo, já usava o mesmo campo.
             modo=it["modo"])
-        # o NOME, resolvido no servidor pela mesma função pura que os testes cobrem.
-        # A tela não decide mais quem é o cliente desta linha.
-        it.update(vendas.titulo_do_funil(
-            cadastro=it["_cadastro"], empresa=it["empresa"], cliente=it["cliente"],
-            modo=it["modo"], evento=it.get("evento"), numero=it["numero"]))
         # EM QUAL ABA A LINHA CAI e O BLOCO DE DATA que abre ela. Os dois saem de
         # funções puras (`finance.vendas`), pelo mesmo motivo do painel e do
         # título: a tela desenha, não decide. E a aba é DERIVADA do painel que
         # acabou de ser montado, então ela nunca discorda do que a linha mostra.
+        # Vêm ANTES do título porque o título depende do bloco de data (abaixo).
         it["grupo"] = vendas.grupo_do_funil(status=it["status"], painel=it["painel"])
         it["data_linha"] = vendas.data_da_linha(it.get("evento"), modo=it["modo"])
+        # o NOME, resolvido no servidor pela mesma função pura que os testes cobrem.
+        # A tela não decide mais quem é o cliente desta linha.
+        # `com_data` OFF quando a linha abre com o bloco de data: senão a mesma
+        # data aparece duas vezes, a meio centímetro de distância ("04 SET 27" e
+        # "Casamento · 04/09/2027 · 150 convidados").
+        it.update(vendas.titulo_do_funil(
+            cadastro=it["_cadastro"], empresa=it["empresa"], cliente=it["cliente"],
+            modo=it["modo"], evento=it.get("evento"), numero=it["numero"],
+            com_data=not it["data_linha"]))
         for _k in ("_cadastro", "_contrato_enviado_em"):
             it.pop(_k, None)
     # a CONTAGEM POR ABA vem do servidor: a tela mostra "Precisa de mim (4)" antes
@@ -1947,9 +1952,13 @@ def painel_servicos_excluir(request: Request, dados: OrcDelIn):
 # rodam durante a análise da página; o `defer` faz o código rodar depois — a
 # ordem que o IIFE precisa continua sendo a mesma.
 _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizing:border-box}
-/* orçamento de evento tem uma coluna a mais na linha (qtd, valor e subtotal):
-   a tela abre um pouco pra o nome do serviço não virar uma coluna de 3 letras. */
-.sv-wrap.evento{max-width:1120px}
+/* O EVENTO USA A LARGURA INTEIRA, como o Raio-X.
+   O `.rx` não tem trava nenhuma — ele preenche a área de conteúdo. Aqui a trava
+   era 1120px, e com o funil na frente (com data, valor, selos, ação e menu na
+   mesma linha) sobrava faixa vazia à direita enquanto o texto da linha quebrava.
+   O `max-width` do `.sv-wrap` sem a classe continua valendo: o recorrente não
+   foi medido nesta mudança. */
+.sv-wrap.evento{max-width:none}
 .sv-wrap .card{max-width:none;margin:0 0 1rem}
 /* o base do painel força button{width:100%;margin-top:1.4rem} — reseta aqui e
    reaplica largura cheia só onde faz sentido (os CTAs do resumo). */
@@ -2185,6 +2194,28 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
 /* azul = falta um passo seu, sem prazo nem prejuízo (nunca enviada ao cliente) */
 .oc-badge.pend.azul{background:var(--azul-fundo); color:var(--azul); border-color:var(--azul-borda)}
 .oc-nada{font-size:.72rem; color:var(--txt-mut); white-space:nowrap}
+
+/* QUANDO A PROPOSTA FOI CRIADA — coluna própria, à direita do nome.
+   Antes era "gerada 16/09/2026" no meio de "nº 27 · gerada … · vendido por …".
+   O dado estava certo e ilegível: data no meio de frase não se compara com a da
+   linha de baixo. Em coluna, as 27 datas viram uma leitura só.
+   Com ANO SEMPRE, a pedido do dono: proposta de evento atravessa a virada do
+   ano, e "16/09" sem ano é ambíguo justamente no funil, que guarda 2026, 2027 e
+   2028 ao mesmo tempo. */
+.oc-criada{flex:none; text-align:right; padding-left:.9rem; line-height:1.25}
+.oc-criada .rot{font-size:.6rem; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--text-faint); font-weight:700}
+.oc-criada .dt{font-size:.84rem; color:var(--txt); white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+@media(max-width:600px){
+  /* No celular a linha já quebra sozinha. A coluna vira uma faixa própria, à
+     esquerda como o resto e numa linha só ("CRIADA EM 16/09/2026"), logo abaixo
+     do nome e ANTES da barra de ações: o verde continua sendo a última coisa da
+     linha, que é onde o polegar procura. */
+  .oc-criada{text-align:left; padding-left:0; width:100%; order:1;
+    display:flex; align-items:baseline; gap:.35rem; margin-top:.15rem}
+  .oc-hist .oc-acoes{order:2}
+}
 
 /* A AÇÃO. Uma só por linha, verde, com o nome do que falta fazer. Verde deixou
    de ser enfeite: onde ele estiver, é ali que se clica. */
@@ -4206,8 +4237,13 @@ _JS_CRU = r"""(function(){
         // A linha virou DUAS: quem é o cliente/nº/vendedor em cima, valor e o que
         // já aconteceu embaixo — a de cima tinha virado um parágrafo só, cada vez
         // mais difícil de escanear.
+        // A DATA DE CRIAÇÃO SAI DAQUI no evento: ela ganhou coluna própria à
+        // direita (ver `criada`, logo abaixo). Enterrada entre o nº e o vendedor
+        // ela era o dado certo no lugar errado — ninguém compara datas que estão
+        // no meio de frases diferentes. No recorrente continua onde estava: a
+        // tela da ZAQ não foi medida nesta mudança.
         var sub1=[esc(it.sub||''), (it.numero?('nº '+it.numero):''),
-                  (it.data?('gerada '+esc(it.data)):''),
+                  ((!SERVICO_AVULSO && it.data)?('gerada '+esc(it.data)):''),
                   (it.vendedor?('vendido por '+esc(it.vendedor)):'')]
                  .filter(Boolean).join(' · ');
         var sub2=[esc(it.total), esc(pn.resumo||'')].filter(Boolean).join(' · ');
@@ -4227,6 +4263,18 @@ _JS_CRU = r"""(function(){
           +'<div class="mut" style="font-size:.78rem">'+sub2+'</div></div>';
         left.addEventListener('click',function(){abrir(it.id);});
         el.appendChild(left);
+
+        // QUANDO A PROPOSTA FOI CRIADA, em coluna própria e alinhada. A data
+        // COMPLETA, com ano: é o dado que se procura, e 27 linhas alinhadas em
+        // coluna viram uma leitura só (16/09 · 09/09 · 31/08 · 28/08) — dá pra
+        // ver a idade da carteira de cima pra baixo, coisa que a data no meio da
+        // frase não permitia.
+        if(SERVICO_AVULSO && it.data){
+          var criada=document.createElement('div');
+          criada.className='oc-criada';
+          criada.innerHTML='<div class="rot">Criada em</div><div class="dt">'+esc(it.data)+'</div>';
+          el.appendChild(criada);
+        }
 
         var right=document.createElement('div'); right.className='oc-acoes';
 

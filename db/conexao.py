@@ -11,6 +11,26 @@ from psycopg_pool import ConnectionPool
 _pool: ConnectionPool | None = None
 
 
+class _PoolComConta(ConnectionPool):
+    """Pool que ANUNCIA de quem e a requisicao (app.conta_id) na conexao.
+
+    O gancho fica aqui, no unico lugar onde conexao e entregue, em vez de nas
+    centenas de `pool.connection()` espalhadas pelo app.
+
+    Com RLS_SET_CONTA desligado (o padrao) isto e' um `if` e nada mais: mesmo
+    caminho de antes. Ver db/tenant.py pro porque.
+    """
+
+    def getconn(self, timeout: float | None = None):
+        conn = super().getconn(timeout)
+        try:
+            from db import tenant as _t
+            _t.aplicar(conn)
+        except Exception:  # noqa: BLE001 - nunca impedir a entrega da conexao
+            pass
+        return conn
+
+
 def get_pool() -> ConnectionPool:
     global _pool
     if _pool is None:
@@ -25,7 +45,7 @@ def get_pool() -> ConnectionPool:
         # se ela esta viva (o pooler do Supabase fecha conexoes ociosas). Se
         # estiver morta, o pool descarta e abre outra - some o "connection is bad".
         # max_idle: fecha conexoes paradas ha mais de 2 min, antes do Supabase.
-        _pool = ConnectionPool(
+        _pool = _PoolComConta(
             url, min_size=1, max_size=10, open=True,
             max_idle=120,
             check=ConnectionPool.check_connection,

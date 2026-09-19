@@ -96,7 +96,15 @@ def parado_texto(desde, agora) -> str:
     return "parado há 1 dia" if dias == 1 else f"parado há {dias} dias"
 
 
-CSS = """/* o balão do LEAD — resumo pra decidir a próxima ação (contato, valor, situação,
+from web.balao_conversa import COMUM as _COMUM_POPOVER
+
+#: `_COMUM_POPOVER` (o ✕ de fechar, o vazio e o balão de mensagem) vem do módulo
+#: do balão de conversa porque é DOS DOIS popovers, e uma cópia aqui divergiria.
+#: Entrou em 19/09/2026: a Comunicação carrega só esta janela, e sem o
+#: `.pop-close` o ✕ virava uma barra verde da largura inteira — o
+#: `button{width:100%}` global vencendo por falta de quem o vencesse. Ver o
+#: comentário do `COMUM` lá, que guarda o caso.
+CSS = _COMUM_POPOVER + """/* o balão do LEAD — resumo pra decidir a próxima ação (contato, valor, situação,
    últimas atividades). Mesma engenharia do balão de chat: nasce fixed, medido
    do próprio card, sem carregar a ficha inteira num iframe. Edição de cadastro,
    IA, decisor e orçamento continuam só na ficha completa (link no rodapé). */
@@ -285,6 +293,15 @@ function kbLeadConfirmarEvento(id){
 // "Ver ficha completa". Mesmo mecanismo de posicionamento/fechar do balão de
 // chat (ver comentário em kbAbrirChat) — duplicado de propósito, não
 // compartilhado: são popovers independentes, cada um fecha só o que é seu.
+// O ✕ SOBREVIVE AO ERRO (19/09/2026). Os quatro caminhos de erro faziam
+// `pop.innerHTML='<div class=cx-empty>…</div>'`, o que APAGAVA o botão de fechar
+// junto com o "Carregando…": quem batia num erro ficava com um popover que só
+// sai no Esc ou no clique fora — e ninguém adivinha isso olhando uma caixa com
+// uma frase dentro. O recado entra junto do ✕, não no lugar dele.
+function _leadPopErro(txt){
+  return '<button type="button" class="pop-close" title="Fechar" onclick="kbFecharLead()">✕</button>'
+    + '<div class="cx-empty">' + txt + '</div>';
+}
 var _leadPop=null;
 function kbFecharLead(){
   if(_leadPop){_leadPop.remove();_leadPop=null;}
@@ -328,10 +345,10 @@ function kbAbrirLead(ev,id,cardEl){
     window.addEventListener('scroll',_leadPopRolou,true);},0);
   fetch('/painel/prospeccao/'+id+'/resumo').then(function(r){return r.json();}).then(function(d){
     if(_leadPop!==pop)return;
-    if(!d.ok){pop.innerHTML='<div class="cx-empty">Não consegui abrir.</div>';return;}
+    if(!d.ok){pop.innerHTML=_leadPopErro('Não consegui abrir.');return;}
     pop._d=d;
     pop.innerHTML=kbLeadHtml(d,id);
-  }).catch(function(){if(_leadPop===pop)pop.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
+  }).catch(function(){if(_leadPop===pop)pop.innerHTML=_leadPopErro('Falha de rede.');});
 }
 function kbLeadHtml(d,id){
   var h='<button type="button" class="pop-close" title="Fechar" onclick="kbFecharLead()">✕</button>'
@@ -662,11 +679,11 @@ function kbAbrirSegurado(ev,id,el,aba){
     window.addEventListener('scroll',_leadPopRolou,true);},0);
   fetch('/painel/renovacoes/cliente/'+id+'/resumo').then(function(r){return r.json();}).then(function(d){
     if(_leadPop!==pop)return;
-    if(!d.ok){pop.innerHTML='<div class="cx-empty">Não consegui abrir.</div>';return;}
+    if(!d.ok){pop.innerHTML=_leadPopErro('Não consegui abrir.');return;}
     pop._d=d; pop._aba=aba||'cliente';
     pop.innerHTML=kbSegHtml(d,pop._aba);
     kbSegLigarConversa(pop);
-  }).catch(function(){if(_leadPop===pop)pop.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
+  }).catch(function(){if(_leadPop===pop)pop.innerHTML=_leadPopErro('Falha de rede.');});
 }
 function kbSegLigarConversa(pop){
   var b=pop.querySelector('.lp-abrir-conversa'); if(!b)return;

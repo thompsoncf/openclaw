@@ -187,10 +187,15 @@ services:
   # /admin/comunicacao (banco) ou, como fallback, das envs ADMIN_EMAIL /
   # ADMIN_TELEGRAM_ID daqui.
 
-  # O RESUMO SEMANAL POR E-MAIL (migracoes 274/275). Roda TODO DIA e pergunta ao
-  # banco quais contas pedem hoje: o dia e de cada conta
-  # (`contas.resumo_semanal_dia`), e dois crons pra uma pergunta que o banco
-  # responde seria dois servicos pra manter na mao.
+  # O RESUMO SEMANAL POR E-MAIL (migracoes 274/275). Dispara TODO DIA, nos DOIS
+  # horarios, e pergunta ao banco de quem e a vez: o quando e de cada conta
+  # (`contas.resumo_semanal_dia` -> `resumo_semanal.QUANDO`), e um servico por
+  # horario seria quatro pra manter na mao.
+  #
+  # A SEGUNDA HORA ENTROU EM 19/09/2026. Ate entao o schedule era so "0 12 * * *"
+  # e o `contas_do_dia` olhava so o DIA — entao a conta que escolhesse "Sexta,
+  # 17h" na tela receberia as 9h, oito horas antes do prometido. Ninguem tinha
+  # escolhido sexta, entao o defeito nunca apareceu; o dono mandou acertar.
   #
   # SO PRECISA DE DATABASE_URL. O e-mail sai pela CAIXA DA PROPRIA EMPRESA
   # (`email_inbound.enviar_conta`, o mesmo canal que ja recebe e responde lead),
@@ -202,11 +207,22 @@ services:
   # pra conta sem caixa propria; hoje ela cai no SMTP global do ambiente, que o
   # servico web ja tem.
   - type: cron
-    # No Render, criar como "openclaw-resumo-semanal" (gerenciado manual — § 3).
-    name: openclaw-resumo-semanal
+    # No Render este cron JA EXISTE e se chama "openclaw-relatorios-semanais-
+    # follow-up" (Service ID crn-dam2fln40ujc73fdhnpg), gerenciado na mao — § 3.
+    # O nome aqui dizia "openclaw-resumo-semanal", que era como eu tinha sugerido
+    # criar; o dono criou com outro nome, e este arquivo ficou apontando pra um
+    # servico que nao existe. Documentacao que nao bate com o Render e pior que
+    # documentacao nenhuma: manda a proxima sessao procurar no lugar errado.
+    name: openclaw-relatorios-semanais-follow-up
     runtime: python
-    plan: standard
-    schedule: "0 12 * * *"   # 12:00 UTC (~09:00 BRT) todo dia
+    # 0.5 CPU / 512 MB e' o plano que esta la, e da' folga: o trabalho e' uma
+    # consulta por conta e um e-mail por destinatario.
+    plan: starter
+    # 12:00 UTC = 09:00 BRT (a opcao "segunda") e 20:00 UTC = 17:00 BRT (a opcao
+    # "sexta"). ATENCAO (§ 3): mudar esta linha NAO muda o Render. O campo
+    # Schedule do servico esta em "0 12 * * *" ate alguem editar na mao — e ate
+    # la a segunda sai certa e a sexta simplesmente nao sai.
+    schedule: "0 12,20 * * *"
     buildCommand: pip install -r requirements.txt
     startCommand: python -m scripts.resumo_semanal
     envVars:

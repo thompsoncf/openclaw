@@ -37,24 +37,50 @@ O QUE NÃO ESTÁ AQUI, de propósito: o balão do LEAD (`kbAbrirLead`), o
 """
 from markupsafe import Markup
 
-CSS = """/* o balão do chat — SÓ mensagens, nada do resto do hub de Comunicação. Nasce em
-   fixed (calculado em JS a partir do botão), então o CSS aqui não precisa
-   posicionar nada em relação ao card — só desenhar o balão em si. */
-.chatpop{position:fixed;z-index:90;width:336px;max-width:calc(100vw - 16px);max-height:70vh;
-  background:var(--card);border:1px solid var(--borda);border-radius:14px;overflow:hidden;
-  box-shadow:0 18px 46px rgba(0,0,0,.5);display:flex;flex-direction:column}
-/* ✕ de fechar — fora do fluxo do cabeçalho, cravado no canto (não empurrado por
-   flex): o título nunca o empurra pra baixo/quebra de linha, e fica no mesmo
-   lugar sempre, em qualquer balão (chat ou resumo do lead). `margin:0` vence o
-   `button{width:100%;margin-top:1.4rem}` global (pros botões de formulário de
-   login/cadastro) — sem isso o botão herdava 1.4rem de margem e nascia ~22px
-   mais abaixo do canto. Mesma causa da busca da Comunicação (✕ que esmagava
-   o campo) — dessa vez pegou ANTES de virar bug visível. */
+#: O QUE OS DOIS POPOVERS DIVIDEM — e que por isso não pode morar só num deles.
+#:
+#: Saiu daqui em 19/09/2026, depois de o dono mandar o print: na Comunicação o ✕
+#: de fechar da janela do lead era uma BARRA VERDE ocupando a largura inteira do
+#: popover. A causa é a mesma que o comentário do `.pop-close` já descreve — o
+#: `button{width:100%;margin-top:1.4rem}` global —, só que num lugar novo: a
+#: Comunicação carrega `janela_css` e NÃO carrega `balao_css`, e o `.pop-close`
+#: estava escrito só aqui. Sem a regra, o botão caía no padrão global e esticava.
+#:
+#: É o mesmo defeito do `kbFecharChat` no mesmo dia, uma camada abaixo: a janela
+#: usando algo do balão que só existia porque as duas telas antigas carregavam os
+#: dois. Em JS deu botão morto; em CSS, barra verde.
+#:
+#: UMA definição, incluída pelos dois. Duplicar o texto nos dois arquivos
+#: resolveria hoje e divergiria no primeiro ajuste — e um ✕ que muda num popover
+#: e não no outro é exatamente o tipo de coisa que ninguém nota até virar print.
+COMUM = """/* ✕ de fechar — fora do fluxo do cabeçalho, cravado no canto (não
+   empurrado por flex): o título nunca o empurra pra baixo nem quebra a linha, e
+   ele fica no mesmo lugar em qualquer popover (chat ou janela do lead).
+   `margin:0` e `width:24px` vencem o `button{width:100%;margin-top:1.4rem}`
+   global, que existe pros formulários de login/cadastro. Sem isso o ✕ vira uma
+   faixa da largura inteira — foi o que apareceu na Comunicação em 19/09/2026. */
 .pop-close{position:absolute;top:.5rem;right:.5rem;z-index:2;width:24px;height:24px;
   margin:0;display:flex;align-items:center;justify-content:center;padding:0;
   background:var(--card-2);border:1px solid var(--borda);border-radius:50%;
   color:var(--txt-mut);cursor:pointer;font-size:.72rem;line-height:1}
 .pop-close:hover{color:var(--txt);border-color:var(--coral);background:rgba(224,87,79,.14)}
+/* o vazio e o balão de mensagem: a janela do lead desenha os dois (o "Carregando…",
+   o "Não consegui abrir" e a conversa do segurado) e não pode depender de a tela
+   ter carregado o chat pra eles existirem. */
+.cx-empty{padding:1.6rem 1rem;text-align:center;color:var(--txt-mut);font-size:.84rem}
+.cx-m{max-width:85%;align-self:flex-end;background:#123028;border:1px solid #1d5741;border-radius:12px;
+  border-bottom-right-radius:4px;padding:.42rem .6rem;font-size:.82rem;line-height:1.42}
+.cx-m .meta{display:block;color:var(--txt-mut);font-size:.64rem;margin-top:.25rem;text-align:right}
+.cx-m.cin{align-self:flex-start;background:var(--card-2);border-color:var(--borda)}
+.cx-m.cbot{align-self:flex-start;background:#1c1428;border-color:#4a3163}
+"""
+
+CSS = COMUM + """/* o balão do chat — SÓ mensagens, nada do resto do hub de Comunicação. Nasce em
+   fixed (calculado em JS a partir do botão), então o CSS aqui não precisa
+   posicionar nada em relação ao card — só desenhar o balão em si. */
+.chatpop{position:fixed;z-index:90;width:336px;max-width:calc(100vw - 16px);max-height:70vh;
+  background:var(--card);border:1px solid var(--borda);border-radius:14px;overflow:hidden;
+  box-shadow:0 18px 46px rgba(0,0,0,.5);display:flex;flex-direction:column}
 .cp-h{display:flex;align-items:center;gap:.5rem;padding:.55rem 2.1rem .55rem .7rem;border-bottom:1px solid var(--borda);flex:none}
 .cp-h .av{width:26px;height:26px;border-radius:8px;background:#13251d;color:var(--verde-claro);
   display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.68rem;flex:none}
@@ -63,13 +89,7 @@ CSS = """/* o balão do chat — SÓ mensagens, nada do resto do hub de Comunica
 .cp-mais{display:block;text-align:center;padding:.42rem;font-size:.72rem;color:var(--txt-mut);
   border-top:1px solid var(--borda);text-decoration:none;flex:none}
 .cp-mais:hover{color:var(--verde-claro)}
-.cx-empty{padding:1.6rem 1rem;text-align:center;color:var(--txt-mut);font-size:.84rem}
 .cx-msgs{flex:1;overflow-y:auto;padding:.7rem;display:flex;flex-direction:column;gap:.45rem;min-height:120px}
-.cx-m{max-width:85%;align-self:flex-end;background:#123028;border:1px solid #1d5741;border-radius:12px;
-  border-bottom-right-radius:4px;padding:.42rem .6rem;font-size:.82rem;line-height:1.42}
-.cx-m .meta{display:block;color:var(--txt-mut);font-size:.64rem;margin-top:.25rem;text-align:right}
-.cx-m.cin{align-self:flex-start;background:var(--card-2);border-color:var(--borda)}
-.cx-m.cbot{align-self:flex-start;background:#1c1428;border-color:#4a3163}
 .cx-comp{border-top:1px solid var(--borda);padding:.5rem .6rem;display:flex;gap:.4rem;align-items:flex-end;flex:none}
 .cx-comp textarea{flex:1;resize:none;background:var(--bg);border:1px solid var(--borda);color:var(--txt);
   border-radius:9px;padding:.4rem .55rem;font:inherit;font-size:.8rem;height:2.1rem;margin:0;width:auto}

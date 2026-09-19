@@ -131,6 +131,32 @@ from web.proposta import router as proposta_router
 # o contrato tem página e link PRÓPRIOS (/contrato/<token>) — não é bloco da folha
 from web.contrato_publico import router as contrato_pub_router
 from web.aditivo_publico import router as aditivo_pub_router
+@app.middleware("http")
+async def _marca_conta_da_requisicao(request: Request, call_next):
+    """PASSO A do plano de RLS: anuncia de quem é a requisição (ver db/tenant.py).
+
+    Declarado ANTES do SessionMiddleware de propósito: no Starlette o middleware
+    adicionado depois fica por FORA, então declarar antes é o que deixa este
+    aqui por DENTRO — e só por dentro dá pra ler request.session.
+
+    Inerte enquanto RLS_SET_CONTA não valer 1: sem a flag nem toca na sessão.
+    """
+    from db import tenant as _t
+    marca = None
+    if _t.ligado():
+        try:
+            _cid = request.session.get("conta_id")
+        except Exception:  # noqa: BLE001 - rota sem sessão (webhook, estático)
+            _cid = None
+        marca = _t.CONTA_ATUAL.set(int(_cid) if _cid else None)
+    try:
+        return await call_next(request)
+    finally:
+        # devolve o ContextVar ao valor anterior — a thread volta pro pool limpa
+        if marca is not None:
+            _t.CONTA_ATUAL.reset(marca)
+
+
 def _segredo_sessao() -> str:
     """O segredo que ASSINA a sessão — e a sessão carrega o conta_id.
 

@@ -109,7 +109,66 @@ def _entrega(pool, conta_id: int) -> dict | None:
         t = max(1, v["total"])
         v["pct_lido"] = round(100 * v["lidos"] / t)
         v["pct_entregue"] = round(100 * v["entregues"] / t)
+    r["hist"] = _historico(pool, conta_id)
     return r
+
+
+#: O selo da linha fechada, por tipo de alerta do vigia. Um só vocabulário nas duas
+#: telas: o que a Equipe chama de "não recebe aviso" não pode virar outra palavra
+#: aqui — a pessoa que lê as duas é a mesma.
+_SELO = {"sem_cadastro": ("ruim", "não recebe"),
+         "sem_canal": ("ruim", "não recebe"),
+         "numero_sem_recibo": ("alerta", "sem recibo")}
+
+
+def _sinal(evs: list[dict]) -> tuple[str, str]:
+    """O sinal MAIS FORTE que voltou, pra caber na linha fechada.
+
+    A ordem é a da confiança, não a do tempo: leu > entregue > abriu (o toque no
+    push) > saiu > não saiu. É o que responde "chegou nele?" sem abrir nada — e é
+    por isso que a linha fechada já serve pro dono bater o olho na equipe inteira.
+    """
+    if not evs:
+        return ("", "sem aviso ainda")
+    if any(e["lido_em"] for e in evs):
+        return ("g", "👀 leu")
+    if any(e["entregue_em"] for e in evs):
+        return ("g", "✓✓ entregue")
+    if any(e["clicado_em"] for e in evs):
+        return ("g", "abriu o push")
+    if any(e["ok"] for e in evs):
+        return ("a", "enviado, sem recibo")
+    return ("r", "não saiu")
+
+
+def _historico(pool, conta_id: int) -> list[dict]:
+    """A lista de pessoas do card, cada uma com o histórico pronto pra abrir.
+
+    Junta três leituras que já existem: o histórico (`aviso_log.historico`), o
+    alerta do vigia (`aviso_saude.por_membro`, o MESMO da tela de Equipe) e o
+    último sinal. Ordena por problema primeiro — a lista existe pra mostrar quem
+    precisa de ação, e quem precisa de ação não pode estar no fim.
+    """
+    try:
+        from finance import aviso_log as _al
+        from finance import aviso_saude as _as
+        pessoas = _al.historico(pool, conta_id)
+        alertas = _as.por_membro(pool, conta_id)
+    except Exception:  # noqa: BLE001 — o histórico é enfeite; a fila é o produto
+        _log.info("follow-up: histórico do aviso falhou (ok)", exc_info=True)
+        return []
+    for p in pessoas:
+        evs = [e for ch in p["canais"].values() for e in ch["recentes"] + ch["antigos"]]
+        al = alertas.get(p["membro_id"])
+        p["alerta"] = al
+        p["selo_cls"], p["selo"] = _SELO.get((al or {}).get("tipo"), ("ok", "recebendo"))
+        p["sinal_cls"], p["sinal"] = _sinal(evs)
+        ult = max(evs, key=lambda e: e["quando"]) if evs else None
+        p["n_leads"] = (ult or {}).get("n_leads")
+        p["quando"] = (ult or {}).get("quando")
+        p["tem_antigos"] = any(ch["antigos"] for ch in p["canais"].values())
+    pessoas.sort(key=lambda x: (x["selo"] == "recebendo", x["quem"]))
+    return pessoas
 
 
 @router.get("/painel/follow-up", response_class=HTMLResponse)
@@ -506,18 +565,51 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
    que existe é ausência de medição, não ausência de leitura. */
 .fu-kpi.na b{color:var(--text-faint)}
 .fu-ent .nota{font-size:.73rem;color:var(--text-faint);padding:.5rem .85rem;border-top:1px solid var(--line)}
-.fu-pv{padding:.6rem .85rem;border-top:1px solid var(--line)}
-.fu-pv .l{display:flex;align-items:center;gap:.6rem;margin-top:.35rem;font-size:.78rem}
-.fu-pv .nome{flex:0 0 8.5rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fu-pv .barra{flex:1;min-width:6rem;height:.55rem;border-radius:4px;overflow:hidden;
-  display:flex;background:var(--line)}
-.fu-pv .barra i{display:block;height:100%}
-.fu-pv .barra i.l{background:var(--neon)}
-.fu-pv .barra i.e{background:var(--azul)}
-.fu-pv .num{flex:0 0 auto;font:500 .74rem var(--mono);color:var(--text-dim);
+/* ---- o histórico do aviso, pessoa por pessoa (19/09/2026) ----
+   Pedido do dono, mostrando o card do lead na campanha: "quero que lá no
+   follow-up fique assim". Mesma ideia — hora e estado de cada passo — com o DIA
+   no lugar do passo da régua e três canais em vez de dois.
+   `details/summary` e não JS: a linha abre sem script, funciona com a página
+   ainda carregando, e o estado aberto não se perde num refresh acidental. */
+.fu-hist{border-top:1px solid var(--line)}
+.fu-hist>.ct{padding:.6rem .85rem .2rem}
+.fu-p{border-top:1px solid var(--line)}
+.fu-p:first-of-type{border-top:0}
+.fu-p>summary{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;cursor:pointer;
+  padding:.55rem .85rem;list-style:none}
+.fu-p>summary::-webkit-details-marker{display:none}
+.fu-p>summary::before{content:"▸";color:var(--text-faint);font-size:.7rem;flex:none}
+.fu-p[open]>summary::before{content:"▾";color:var(--neon)}
+.fu-p .nome{flex:1;min-width:11rem}
+.fu-p .nome b{display:block;font-size:.84rem}
+.fu-p .nome span{display:block;font-size:.71rem;color:var(--text-faint)}
+.fu-selo2{font:500 .68rem var(--mono);border-radius:999px;padding:.1rem .5rem;
+  border:1px solid var(--line);color:var(--text-dim);white-space:nowrap}
+.fu-selo2.ok{color:var(--verde-claro);border-color:var(--neon-borda);background:var(--neon-fundo)}
+.fu-selo2.alerta{color:var(--ambar);border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.fu-selo2.ruim{color:#F2BDB9;border-color:var(--coral-borda);background:var(--coral-fundo)}
+.fu-p .ult{font:500 .73rem var(--mono);color:var(--text-dim);white-space:nowrap;
   font-variant-numeric:tabular-nums}
-.fu-leg{display:flex;gap:.8rem;flex-wrap:wrap;font-size:.7rem;color:var(--text-faint);margin-top:.5rem}
-.fu-leg i{display:inline-block;width:.55rem;height:.55rem;border-radius:2px;margin-right:.25rem}
+.fu-p .ult .g{color:var(--neon)}.fu-p .ult .a{color:var(--ambar)}.fu-p .ult .r{color:var(--coral)}
+.fu-cols{display:grid;grid-template-columns:repeat(3,1fr);gap:1.1rem;padding:.2rem .85rem .9rem 1.9rem;
+  background:var(--bg)}
+@media (max-width:760px){.fu-cols{grid-template-columns:1fr;gap:.8rem}}
+.fu-col h5{font:600 .74rem var(--display);color:var(--text-dim);margin:0 0 .3rem}
+.fu-ev{display:flex;gap:.6rem;font-size:.76rem;padding:.2rem 0}
+.fu-ev .h{font-family:var(--mono);font-size:.7rem;color:var(--text-faint);white-space:nowrap;
+  font-variant-numeric:tabular-nums;flex:none;width:5.6rem}
+.fu-ev .t{color:var(--text-dim)}
+.fu-ev .t b{color:var(--text)}
+.fu-ev.g .t b{color:var(--neon)}
+.fu-ev.a .t b{color:var(--ambar)}
+.fu-ev.r .t b{color:var(--coral)}
+.fu-ev .nota{display:block;font-size:.69rem;color:var(--text-faint)}
+.fu-ev .tag{font:500 .61rem var(--mono);border:1px solid var(--line);border-radius:4px;
+  padding:0 .25rem;color:var(--text-faint);margin-left:.25rem}
+.fu-mais{font-size:.72rem;color:var(--text-faint)}
+.fu-mais>summary{cursor:pointer;list-style:none;color:var(--azul)}
+.fu-mais>summary::-webkit-details-marker{display:none}
+.fu-nada{font-size:.73rem;color:var(--text-faint);padding:.2rem 0}
 /* ---- como funciona ---- */
 .fu-ajuda{border:1px solid var(--line);border-radius:10px;margin-top:1.4rem;background:var(--bg-2)}
 .fu-ajuda>summary{cursor:pointer;padding:.7rem .85rem;font-size:.86rem;font-weight:600;list-style:none}
@@ -683,23 +775,69 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
       </div>
     </div>
 
-    {% if entrega.por_vendedor %}
-    <div class="fu-pv">
-      <div class="ct">Leitura no WhatsApp, por vendedor</div>
-      {% for v in entrega.por_vendedor %}
-      <div class="l">
-        <span class="nome">{{ v.quem }}</span>
-        <span class="barra">
-          <i class="l" style="width:{{ v.pct_lido }}%"></i><i class="e" style="width:{{ v.pct_entregue }}%"></i>
-        </span>
-        <span class="num">{{ v.total }} · leu {{ v.lidos }}</span>
-      </div>
+    {#- UMA LINHA DO HISTÓRICO. Cada canal diz o que SABE dizer, e nada além:
+        o WhatsApp tem entrega e leitura de verdade; o push tem o toque; o e-mail
+        tem só "saiu". O "Abriu 👁" que a campanha mostra no e-mail NÃO entra aqui
+        de propósito — 62 das 69 "aberturas" desta base aconteceram em menos de um
+        minuto, que é o proxy do Gmail buscando o pixel, não gente lendo (a conta
+        está escrita na nota do `_RADAR_BALDES`, em web/painel_prospeccao). -#}
+  {% macro ev(e, canal) %}
+    {% if not e.ok %}
+    <div class="fu-ev r"><span class="h">{{ br(e.quando) }}</span><span class="t"><b>Não saiu</b>
+      {% if e.motivo %}<span class="nota">{{ e.motivo }}</span>{% endif %}</span></div>
+    {% else %}
+    <div class="fu-ev"><span class="h">{{ br(e.quando) }}</span><span class="t"><b>Enviado</b>{% if e.teste %}<span class="tag">teste</span>{% endif %}
+      {% if e.n_leads %}<span class="nota">{{ e.n_leads }} lead{{ 's' if e.n_leads > 1 }}</span>{% endif %}</span></div>
+      {% if e.entregue_em %}
+      <div class="fu-ev g"><span class="h">{{ br(e.entregue_em) }}</span><span class="t"><b>Entregue ✓✓</b></span></div>
+      {% endif %}
+      {% if e.lido_em %}
+      <div class="fu-ev g"><span class="h">{{ br(e.lido_em) }}</span><span class="t"><b>Leu 👀</b></span></div>
+      {% endif %}
+      {% if e.clicado_em %}
+      <div class="fu-ev g"><span class="h">{{ br(e.clicado_em) }}</span><span class="t"><b>Abriu</b>
+        <span class="nota">tocou na notificação</span></span></div>
+      {% endif %}
+      {% if canal == 'whatsapp' and not e.entregue_em and not e.lido_em %}
+      <div class="fu-ev a"><span class="h">—</span><span class="t"><b>Sem recibo</b>
+        <span class="nota">pode ser confirmação de leitura desligada no aparelho</span></span></div>
+      {% endif %}
+    {% endif %}
+  {% endmacro %}
+
+    {#- O HISTÓRICO, pessoa por pessoa. Substituiu a barra de leitura por vendedor:
+        a barra dizia a taxa e escondia o caminho, e o dono pediu o caminho —
+        "quero que fique assim", mostrando o card do lead na campanha.
+        A linha FECHADA já responde "chegou nele?"; abrir é pra ver como. -#}
+    {% if entrega.hist %}
+    <div class="fu-hist">
+      <div class="ct">O aviso de cada pessoa</div>
+      {% for p in entrega.hist %}
+      <details class="fu-p">
+        <summary>
+          <span class="nome"><b>{{ p.quem }}</b>
+            <span>{{ p.email or 'sem e-mail' }}{% if p.numero %} · {{ p.numero }}{% endif %}</span></span>
+          <span class="fu-selo2 {{ p.selo_cls }}">{{ p.selo }}</span>
+          <span class="ult">{% if p.n_leads %}{{ p.n_leads }} lead{{ 's' if p.n_leads > 1 }} · {% endif %}<span class="{{ p.sinal_cls }}">{{ p.sinal }}</span></span>
+        </summary>
+        {% if p.alerta %}<p class="fu-nada" style="padding:0 0 .3rem 1.9rem;color:var(--ambar)">{{ p.alerta.detalhe }}</p>{% endif %}
+        <div class="fu-cols">
+          {% for canal, titulo in [('whatsapp','💬 WhatsApp'), ('push','🔔 Push no app'), ('email','📧 E-mail')] %}
+          {% set ch = p.canais.get(canal) or {'recentes': [], 'antigos': []} %}
+          <div class="fu-col">
+            <h5>{{ titulo }}</h5>
+            {% for e in ch.recentes %}{{ ev(e, canal) }}{% else %}
+            <div class="fu-nada">nada nos últimos 7 dias</div>{% endfor %}
+            {% if ch.antigos %}
+            <details class="fu-mais"><summary>ver os 30 dias ({{ ch.antigos|length }} a mais)</summary>
+              {% for e in ch.antigos %}{{ ev(e, canal) }}{% endfor %}
+            </details>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </details>
       {% endfor %}
-      <div class="fu-leg">
-        <span><i style="background:var(--neon)"></i>lido</span>
-        <span><i style="background:var(--azul)"></i>entregue, sem leitura</span>
-        <span><i style="background:var(--line)"></i>sem recibo</span>
-      </div>
     </div>
     {% endif %}
 

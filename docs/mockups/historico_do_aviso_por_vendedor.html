@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>O histórico do aviso, vendedor por vendedor</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --roxo:#C9A3E0;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo)}
+b{font-weight:600}
+.wrap{max-width:1100px;margin:0 auto;padding:2.6rem 1.25rem 5rem;display:flex;flex-direction:column;gap:2.6rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em;margin-bottom:.35rem;text-transform:uppercase}
+.head h1{font-size:clamp(1.7rem,4.4vw,2.3rem);margin:.35rem 0 .6rem}
+.head p{color:var(--text-dim);max-width:74ch;margin:0}
+.sec>h2{font-size:1.2rem;margin-bottom:.15rem}
+.sec>p.leg{color:var(--text-dim);margin:.3rem 0 1.1rem;max-width:78ch;font-size:.9rem}
+.sec>p.leg b{color:var(--text)}
+
+.prova{border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:14px;padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.8rem}
+.prova h3{font-size:1rem;color:var(--neon-bright)}
+.prova .nums{display:grid;grid-template-columns:repeat(4,1fr);gap:.55rem}
+@media (max-width:820px){.prova .nums{grid-template-columns:repeat(2,1fr)}}
+.prova .n{border:1px solid var(--neon-borda);border-radius:10px;background:#0C1C14;padding:.6rem .7rem}
+.prova .n b{display:block;font:600 1.5rem/1 var(--display);color:var(--neon-bright);font-variant-numeric:tabular-nums}
+.prova .n span{display:block;font-size:.66rem;color:var(--text-dim);margin-top:.3rem;line-height:1.35}
+.prova p{margin:0;font-size:.84rem;color:#CFEBDC}.prova p b{color:#fff}
+
+.tabwrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table.t{width:100%;border-collapse:collapse;font-size:.8rem;min-width:560px}
+table.t th{font:500 .61rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);text-align:left;padding:.55rem .7rem;border-bottom:1px solid var(--line)}
+table.t td{padding:.5rem .7rem;border-bottom:1px solid var(--line);color:var(--text-dim)}
+table.t tr:last-child td{border-bottom:none}
+table.t td:first-child{color:var(--text);font-weight:500;white-space:nowrap}
+table.t td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.t td b{color:var(--text)}
+.ok{color:var(--neon-bright)} .ruim{color:var(--coral)} .meio{color:var(--ambar)}
+
+/* o card, como ficaria */
+.card{border:1px solid var(--line);border-radius:16px;background:var(--bg-2);padding:1rem 1.1rem;max-width:640px}
+.card .cab{display:flex;align-items:baseline;gap:.6rem;margin-bottom:.7rem}
+.card .cab b{font:600 .95rem var(--display)}
+.card .cab span{font-size:.72rem;color:var(--text-faint)}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:.55rem}
+@media (max-width:640px){.kpis{grid-template-columns:repeat(3,1fr)}}
+.kpi{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.55rem .6rem;text-align:center}
+.kpi b{display:block;font:600 1.35rem/1 var(--display);font-variant-numeric:tabular-nums}
+.kpi span{display:block;font-size:.63rem;color:var(--text-dim);margin-top:.3rem}
+.kpi.g b{color:var(--neon-bright)} .kpi.a b{color:var(--ambar)} .kpi.r b{color:var(--coral)}
+.linhac{display:flex;gap:.7rem;align-items:flex-start;padding:.55rem 0;border-bottom:1px solid var(--line)}
+.linhac:last-of-type{border-bottom:none}
+.linhac .ic{font-size:1.1rem;line-height:1.6;width:1.4rem;text-align:center;flex:none}
+.linhac .cn{flex:1;min-width:0}
+.ct{font:600 .78rem var(--display);color:var(--text-dim);margin-bottom:.35rem}
+.kpis3{display:grid;grid-template-columns:repeat(5,1fr);gap:.45rem}
+@media (max-width:640px){.kpis3{grid-template-columns:repeat(3,1fr)}}
+.kpi.na b{color:var(--text-faint)}
+.kpi.na span{color:var(--text-faint)}
+.notac{font-size:.72rem;color:var(--text-faint);margin:.55rem 0 0}
+.porvend{margin-top:.8rem;border-top:1px solid var(--line);padding-top:.7rem}
+.pv{display:flex;align-items:center;gap:.6rem;padding:.32rem 0;font-size:.82rem}
+.pv .nome{min-width:120px;color:var(--text)}
+.pv .barra{flex:1;height:7px;border-radius:99px;background:var(--surface-2);overflow:hidden;display:flex}
+.pv .barra i{display:block;height:100%}
+.pv .barra .l{background:var(--neon)} .pv .barra .e{background:var(--azul)} .pv .barra .s{background:var(--text-faint)}
+.pv .zz{font-family:var(--mono);font-size:.74rem;color:var(--text-dim);white-space:nowrap}
+.leg2{display:flex;gap:.9rem;flex-wrap:wrap;margin-top:.55rem;font-size:.7rem;color:var(--text-faint)}
+.leg2 i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:.28rem;vertical-align:-1px}
+
+.ok-lista{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:.55rem}
+.ok-lista li{padding-left:1.4rem;position:relative;font-size:.86rem;color:var(--text-dim)}
+.ok-lista li b{color:var(--text)}
+.ok-lista li::before{content:"";position:absolute;left:0;top:.45em;width:.5rem;height:.5rem;border-radius:2px;background:var(--neon)}
+.ok-lista li.nao::before{background:var(--coral)}
+
+.cuidado{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:14px;padding:1rem 1.1rem}
+.cuidado h3{font-size:1rem;color:#F0DCA6;margin-bottom:.5rem}
+.cuidado p{font-size:.86rem;color:#EFE0C0;margin:.45rem 0}
+.cuidado p b{color:#fff}
+.perg{border:1px solid var(--azul-borda);background:var(--azul-fundo);border-radius:14px;padding:1rem 1.1rem}
+.perg h3{font-size:1rem;color:#BBD9F0;margin-bottom:.6rem}
+.perg ol{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.7rem}
+.perg li{font-size:.86rem;color:#D6E6F2}.perg li b{color:#fff}
+.perg .mini{display:block;font-size:.77rem;color:#9FBACF;margin-top:.15rem}
+.rodape{border-top:1px solid var(--line);padding-top:1.1rem;color:var(--text-faint);font-size:.78rem}
+
+/* ── a linha do vendedor, fechada e aberta ─────────────────────────── */
+.tl{border:1px solid var(--line);border-radius:14px;background:var(--bg-2);overflow:hidden;max-width:960px}
+.tl .pessoa{display:flex;align-items:center;gap:.8rem;padding:.7rem .9rem;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tl .pessoa:last-child{border-bottom:none}
+.tl .quem{flex:1;min-width:220px}
+.tl .quem b{font:600 .92rem var(--display);display:block}
+.tl .quem span{font-size:.75rem;color:var(--text-faint);display:block;margin-top:.1rem}
+.selo{font:500 .68rem var(--mono);border-radius:999px;padding:.12rem .55rem;border:1px solid var(--line);color:var(--text-dim);white-space:nowrap}
+.selo.ok{color:var(--neon-bright);border-color:var(--neon-borda);background:var(--neon-fundo)}
+.selo.alerta{color:var(--ambar);border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.selo.ruim{color:#F2BDB9;border-color:var(--coral-borda);background:var(--coral-fundo)}
+.ult{font:500 .74rem var(--mono);color:var(--text-dim);white-space:nowrap;font-variant-numeric:tabular-nums}
+.ult .g{color:var(--neon-bright)}.ult .a{color:var(--ambar)}.ult .r{color:var(--coral)}
+.chev{width:1.9rem;height:1.9rem;border:1px solid var(--line);border-radius:9px;display:grid;place-items:center;
+  color:var(--text-faint);font-size:.8rem;flex:none}
+.chev.on{border-color:var(--neon-borda);color:var(--neon-bright)}
+.tl .corpo{background:var(--bg);border-bottom:1px solid var(--line);padding:.85rem .9rem 1rem;
+  display:grid;grid-template-columns:repeat(3,1fr);gap:1.4rem}
+@media (max-width:820px){.tl .corpo{grid-template-columns:1fr;gap:1rem}}
+.col h4{font:600 .78rem var(--display);color:var(--text-dim);margin-bottom:.4rem;
+  display:flex;align-items:center;gap:.35rem}
+.ev{display:flex;gap:.7rem;font-size:.79rem;padding:.26rem 0;border-bottom:1px solid #141C18}
+.ev:last-child{border-bottom:none}
+.ev .h{font-family:var(--mono);font-size:.72rem;color:var(--text-faint);white-space:nowrap;
+  font-variant-numeric:tabular-nums;flex:none;width:4.3rem}
+.ev .t{color:var(--text-dim)}
+.ev .t b{color:var(--text);font-weight:600}
+.ev.g .t b{color:var(--neon-bright)}
+.ev.a .t b{color:var(--ambar)}
+.ev.r .t b{color:var(--coral)}
+.ev .nota{display:block;font-size:.7rem;color:var(--text-faint)}
+.vazio{font-size:.76rem;color:var(--text-faint);padding:.3rem 0}
+.tag{font:500 .62rem var(--mono);border:1px solid var(--line);border-radius:5px;padding:0 .28rem;
+  color:var(--text-faint);margin-left:.3rem;vertical-align:middle}
+.cuidado{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:14px;padding:1rem 1.1rem}
+.cuidado h3{font-size:1rem;color:var(--ambar);margin-bottom:.5rem}
+.cuidado p{margin:.4rem 0;font-size:.86rem;color:#E8D7B4}
+.cuidado p b{color:#fff}
+.ok-lista{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:.5rem}
+.ok-lista li{font-size:.86rem;color:var(--text-dim);padding-left:1.4rem;position:relative}
+.ok-lista li::before{content:"✓";position:absolute;left:0;color:var(--neon);font-weight:600}
+.ok-lista li.nao::before{content:"✕";color:var(--coral)}
+.ok-lista li b{color:var(--text)}
+.perg{border:1px solid var(--azul-borda);background:var(--azul-fundo);border-radius:14px;padding:1rem 1.1rem}
+.perg h3{font-size:1rem;color:var(--azul);margin-bottom:.6rem}
+.perg ol{margin:0;padding-left:1.2rem;color:#CFE4F2;font-size:.88rem}
+.perg li{margin:.5rem 0}
+.perg .mini{display:block;font-size:.79rem;color:var(--text-dim);margin-top:.15rem}
+.rodape{font-size:.74rem;color:var(--text-faint);border-top:1px solid var(--line);padding-top:1rem;max-width:80ch}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="head">
+  <div class="k">Mockup · 18/09/2026 · pra aprovação</div>
+  <h1>O mesmo histórico que você tem do lead, agora do vendedor</h1>
+  <p>Você mandou o card da campanha — a linha do contato que abre e mostra e-mail de um lado, WhatsApp
+  do outro, com hora e estado em cada passo — e pediu isso na tela de Follow-up, com as notificações do
+  vendedor. É o desenho abaixo. <b>Três mudanças foram necessárias</b>, e as três estão explicadas:
+  são três canais e não dois, o eixo é o DIA e não o passo da régua, e o e-mail tem um item que eu
+  recomendo não copiar.</p>
+</header>
+
+<!-- 1 · o que muda do modelo -->
+<section class="sec">
+  <div class="k">1 · O que muda do seu modelo</div>
+  <h2>Mesma ideia, três ajustes.</h2>
+  <div class="tabwrap">
+    <table class="t">
+      <thead><tr><th>No card do lead (o seu modelo)</th><th>Na linha do vendedor</th><th>Por quê</th></tr></thead>
+      <tbody>
+        <tr><td>2 colunas: e-mail e WhatsApp</td><td class="ok">3 colunas: WhatsApp, push e e-mail</td>
+            <td>o aviso do vendedor sai nos três, e o push é o único que o lead não tem</td></tr>
+        <tr><td>D0 · D1 · D2 · D3 (o passo da régua)</td><td class="ok">o DIA do aviso</td>
+            <td>a régua do lead tem passos; o aviso do vendedor é diário e agrupa N leads</td></tr>
+        <tr><td>“Concluído”</td><td class="ok">“Recebendo” / “Sem recibo” / “Não recebe”</td>
+            <td>não existe fim: o que interessa é se ele <b>está</b> recebendo hoje</td></tr>
+        <tr><td>“Abriu 👁” no e-mail</td><td class="ruim">não copiar — ver a seção 3</td>
+            <td>medido nesta base: 62 de 69 “aberturas” em menos de 1 minuto</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 2 · o desenho -->
+<section class="sec">
+  <div class="k">2 · O desenho, com os dados de hoje</div>
+  <h2>A lista de vendedores abre, um por vez.</h2>
+  <p class="leg">Fica no lugar da barra “Leitura no WhatsApp, por vendedor” que já está no card — a mesma
+  lista, agora clicável. <b>Estes são os dados reais da Prime hoje</b>, com os buracos reais: onde não
+  houve carimbo, não inventei hora.</p>
+
+  <div class="tl">
+
+    <div class="pessoa">
+      <div class="quem"><b>PEDRO YAN PRIME</b>
+        <span>pedroyanximenes@hotmail.com · (86) 99545-4554</span></div>
+      <span class="selo ok">recebendo</span>
+      <span class="ult">10 leads · <span class="g">👀 leu 09:41</span></span>
+      <span class="chev on">▾</span>
+    </div>
+    <div class="corpo">
+      <div class="col">
+        <h4>💬 WhatsApp</h4>
+        <div class="ev"><span class="h">09:41</span><span class="t"><b>Enviado</b><span class="tag">teste</span></span></div>
+        <div class="ev g"><span class="h">09:41</span><span class="t"><b>Entregue ✓✓</b></span></div>
+        <div class="ev g"><span class="h">—</span><span class="t"><b>Leu 👀</b>
+          <span class="nota">o WhatsApp confirmou a leitura; a HORA não foi guardada — este saiu pelo
+          botão de teste, antes do deploy que carimba o instante</span></span></div>
+      </div>
+      <div class="col">
+        <h4>🔔 Push no app</h4>
+        <div class="ev"><span class="h">08:02</span><span class="t"><b>Enviado</b>
+          <span class="nota">2 aparelhos aceitaram</span></span></div>
+        <div class="ev"><span class="h">—</span><span class="t">Não abriu
+          <span class="nota">“abriu” = tocou na notificação; só passa a contar a partir de agora</span></span></div>
+      </div>
+      <div class="col">
+        <h4>📧 E-mail</h4>
+        <div class="ev"><span class="h">08:02</span><span class="t"><b>Enviado</b>
+          <span class="nota">⏱️ 10 leads esperando follow-up</span></span></div>
+      </div>
+    </div>
+
+    <div class="pessoa">
+      <div class="quem"><b>JACQUELINE PRIME</b>
+        <span>jacquelinedsoares26@gmail.com · (86) 99504-6886</span></div>
+      <span class="selo ok">recebendo</span>
+      <span class="ult">10 leads · <span class="g">👀 leu 09:41</span></span>
+      <span class="chev">▸</span>
+    </div>
+
+    <div class="pessoa">
+      <div class="quem"><b>THIAGO PINHEIRO</b>
+        <span>thiagocesar123321@hotmail.com · (86) 98861-4189</span></div>
+      <span class="selo ok">recebendo</span>
+      <span class="ult">10 leads · <span class="g">👀 leu 09:41</span></span>
+      <span class="chev">▸</span>
+    </div>
+
+    <div class="pessoa">
+      <div class="quem"><b>MANOEL SOARES</b> <span>dono · (99) 98499-6253 · sem e-mail cadastrado</span></div>
+      <span class="selo alerta">sem recibo</span>
+      <span class="ult">30 leads · <span class="a">enviado 11:56, sem ✓✓ há 7h</span></span>
+      <span class="chev on">▾</span>
+    </div>
+    <div class="corpo">
+      <div class="col">
+        <h4>💬 WhatsApp</h4>
+        <div class="ev"><span class="h">11:56</span><span class="t"><b>Enviado</b>
+          <span class="nota">para 55 99 8499-6253</span></span></div>
+        <div class="ev a"><span class="h">—</span><span class="t"><b>Sem recibo</b>
+          <span class="nota">7 horas sem ✓✓. As outras 49 mensagens que o chip mandou hoje receberam
+          recibo — esta é a única que não</span></span></div>
+      </div>
+      <div class="col">
+        <h4>🔔 Push no app</h4>
+        <div class="ev r"><span class="h">11:56</span><span class="t"><b>Não saiu</b>
+          <span class="nota">nenhum aparelho com push</span></span></div>
+      </div>
+      <div class="col">
+        <h4>📧 E-mail</h4>
+        <div class="ev r"><span class="h">11:56</span><span class="t"><b>Não saiu</b>
+          <span class="nota">membro sem e-mail cadastrado</span></span></div>
+      </div>
+    </div>
+
+    <div class="pessoa">
+      <div class="quem"><b>zaq teste</b> <span>thompsoncf@hotmail.com · sem WhatsApp cadastrado</span></div>
+      <span class="selo ok">recebendo</span>
+      <span class="ult">1 lead · <span class="g">enviado 11:56</span></span>
+      <span class="chev">▸</span>
+    </div>
+
+  </div>
+
+  <p class="leg" style="margin-top:.9rem"><b>Repare no que a linha fechada já entrega</b>, sem abrir nada:
+  quem está recebendo, quantos leads o aviso de hoje cobrou dele, e qual foi o sinal mais forte que voltou.
+  O Manoel é o único em amarelo — e é o único que precisa de ação.</p>
+</section>
+
+<!-- 3 · o e-mail -->
+<section class="sec">
+  <div class="k">3 · O “Abriu 👁” do e-mail, que eu não recomendo copiar</div>
+  <div class="cuidado">
+    <h3>Ele existe na campanha — e o próprio sistema já decidiu não confiar nele</h3>
+    <p>O card que você mandou mostra <b>“Abriu 👁 17/08 15:27 (3x)”</b>. Isso vem de um pixel escondido
+    no e-mail, que existe e funciona. Só que <b>o proxy de imagem do Gmail e do Apple Mail busca esse
+    pixel sozinho</b>, sem ninguém abrir nada.</p>
+    <p>Não é teoria: está medido <b>nesta base</b>, e o número está escrito no código do Radar —
+    <b>62 das 69 “aberturas” aconteceram em menos de 1 minuto</b> depois do envio, com 2,9 aberturas em
+    média por e-mail. Por isso a abertura de e-mail <b>não entra em nenhum balde do “Quem atacar”</b>:
+    a regra escrita lá diz que usar isso mandaria o vendedor ligar pra quem nunca leu nada.</p>
+    <p>No card do lead o número ainda tem alguma serventia (ordem de grandeza entre criativos). Na linha
+    do vendedor ele teria uma serventia só: <b>fazer você achar que o Manoel leu</b>. Então eu mostro
+    “Enviado” e paro aí — a menos que você prefira ver assim mesmo, e aí eu marco a linha com a
+    ressalva.</p>
+  </div>
+</section>
+
+<!-- 4 · de onde sai -->
+<section class="sec">
+  <div class="k">4 · De onde sai cada linha, e por que é pouco trabalho</div>
+  <h2>O banco já guarda tudo isto desde ontem.</h2>
+  <ul class="ok-lista">
+    <li><b>Hora do envio, canal, destino, se saiu e o motivo</b> — <code>aviso_envios</code>, que subiu
+      anteontem. É de lá que vêm as linhas “Enviado” e “Não saiu”.</li>
+    <li><b>Entregue e lido, com o INSTANTE de cada um</b> — <code>entregue_em</code> e <code>lido_em</code>,
+      que subiram ontem. Detalhe que importa: a tabela de mensagens guarda só o estado FINAL (“lido”), e
+      é por isso que o histórico por hora só existe para o aviso, não para as mensagens antigas.</li>
+    <li><b>O toque na notificação</b> — <code>clicado_em</code>, do push.</li>
+    <li class="nao"><b>Nada de tabela nova, nada de migração.</b> O trabalho é uma consulta e a linha que
+      abre — o mesmo padrão da janela do lead, que já existe e já é clicável.</li>
+  </ul>
+</section>
+
+<!-- 5 · perguntas -->
+<section class="sec">
+  <div class="k">5 · O que eu preciso que você decida</div>
+  <div class="perg">
+    <h3>Três perguntas</h3>
+    <ol>
+      <li><b>Quantos dias o histórico mostra ao abrir?</b>
+        <span class="mini">Meu palpite: <b>7 dias</b>, com “ver mais” pro resto dos 30. O aviso é diário —
+        30 dias abertos viram 90 linhas por pessoa, e ninguém lê 90 linhas.</span></li>
+      <li><b>O teste entra na linha do tempo?</b>
+        <span class="mini">Meu palpite: <b>sim, marcado com a etiqueta “teste”</b>, como no desenho. Ele
+        não conta na estatística (isso continua separado), mas esconder dele o que chegou no celular do
+        vendedor seria esconder metade da história de hoje.</span></li>
+      <li><b>O vendedor vê a linha dele?</b>
+        <span class="mini">Meu palpite: <b>não, por enquanto</b> — mesma decisão do card. Se um dia ele
+        vir, que seja só a própria, nunca a dos colegas.</span></li>
+    </ol>
+  </div>
+</section>
+
+<p class="rodape">Dados reais, lidos de produção em 18/09/2026 (conta 34): <code>aviso_envios</code>,
+<code>mensagens</code>, <code>conversas</code> e <code>membros</code>. Horas em Teresina (UTC−3).
+O “62 de 69” do e-mail está medido e escrito em <code>web/painel_prospeccao.py</code>, na nota do
+<code>_RADAR_BALDES</code>. Onde não houve carimbo, a linha mostra travessão — nenhuma hora foi inventada
+neste desenho.</p>
+
+</div>
+</body>
+</html>

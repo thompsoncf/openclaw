@@ -583,3 +583,84 @@ def test_push_que_nao_alcancou_aparelho_nenhum_nao_guarda_token(pool, monkeypatc
     with pool.connection() as c:
         r = c.execute("select ok, token from aviso_envios where canal='push'").fetchone()
     assert r == (False, None)
+
+
+# ──────────────────────────── o histórico, pessoa por pessoa (19/09/2026)
+#
+# Pedido do dono, mostrando o card do lead na campanha: "quero que lá no follow-up
+# fique assim, só que adapte as informações do vendedor com as notificações".
+# Mockup: docs/mockups/historico_do_aviso_por_vendedor.html.
+
+def test_o_historico_agrupa_por_pessoa_e_por_canal(pool):
+    al.registrar(pool, CONTA, origem="follow_up", canal="whatsapp", ok=True,
+                 membro_id=1, n_leads=10, sid="H1")
+    al.registrar(pool, CONTA, origem="follow_up", canal="push", ok=True, membro_id=1)
+    al.registrar(pool, CONTA, origem="follow_up", canal="email", ok=True, membro_id=1)
+    al.registrar(pool, CONTA, origem="follow_up", canal="email", ok=False, membro_id=2,
+                 motivo="membro sem e-mail cadastrado")
+    with pool.connection() as c:
+        al.marcar_recibo(c, "H1", "lido")
+        c.commit()
+
+    por = {p["quem"]: p for p in al.historico(pool, CONTA)}
+    assert set(por) == {"THIAGO", "MANOEL"}
+    zap = por["THIAGO"]["canais"]["whatsapp"]["recentes"]
+    assert len(zap) == 1 and zap[0]["lido_em"] is not None and zap[0]["n_leads"] == 10
+    assert por["THIAGO"]["canais"]["push"]["recentes"][0]["ok"] is True
+    manoel = por["MANOEL"]["canais"]["email"]["recentes"][0]
+    assert manoel["ok"] is False and "sem e-mail" in manoel["motivo"]
+    # o contato vem junto: a linha fechada mostra pra onde o aviso vai
+    assert por["THIAGO"]["email"] == "thiago@x.com"
+    assert por["MANOEL"]["numero"] == "+5599984996253"
+
+
+def test_o_historico_separa_os_7_dias_visiveis_do_resto(pool):
+    """Sete dias abertos, o resto atrás de "ver os 30 dias": o aviso é diário, e 30
+    dias escancarados viram quase 90 linhas por pessoa."""
+    al.registrar(pool, CONTA, origem="follow_up", canal="email", ok=True, membro_id=1)
+    al.registrar(pool, CONTA, origem="follow_up", canal="email", ok=True, membro_id=1)
+    with pool.connection() as c:
+        c.execute("update aviso_envios set criado_em = now() - interval '20 days' "
+                  " where id = (select min(id) from aviso_envios)")
+        c.commit()
+    (p,) = al.historico(pool, CONTA)
+    assert len(p["canais"]["email"]["recentes"]) == 1
+    assert len(p["canais"]["email"]["antigos"]) == 1
+
+
+def test_o_teste_de_canal_APARECE_no_historico_marcado(pool):
+    """Ele fica FORA da estatística (o card só olha origem='follow_up') e DENTRO da
+    linha do tempo: esconder o que chegou no celular do vendedor seria esconder
+    metade da história do dia."""
+    al.registrar(pool, CONTA, origem="follow_up_teste", canal="whatsapp", ok=True,
+                 membro_id=1, n_leads=10)
+    (p,) = al.historico(pool, CONTA)
+    assert p["canais"]["whatsapp"]["recentes"][0]["teste"] is True
+    assert al.resumo(pool, CONTA)["whatsapp"]["ok"] == 0, "o teste virou estatística"
+
+
+def test_o_historico_nao_lista_membro_de_outra_conta_nem_desativado(pool):
+    al.registrar(pool, CONTA, origem="follow_up", canal="email", ok=True, membro_id=1)
+    al.registrar(pool, 999, origem="follow_up", canal="email", ok=True, membro_id=2)
+    with pool.connection() as c:
+        c.execute("update membros set ativo=false where id=3")
+        c.execute("insert into aviso_envios (conta_id, membro_id, origem, canal, ok) "
+                  "values (%s,3,'follow_up','email',true)", (CONTA,))
+        c.commit()
+    assert [p["quem"] for p in al.historico(pool, CONTA)] == ["THIAGO"]
+
+
+def test_o_historico_tem_teto_por_canal(pool):
+    """Pro dia em que alguém ligar um aviso por hora: a tela não pode virar despejo
+    de log."""
+    for _ in range(al.MAX_EVENTOS + 5):
+        al.registrar(pool, CONTA, origem="follow_up", canal="email", ok=True, membro_id=1)
+    (p,) = al.historico(pool, CONTA)
+    assert len(p["canais"]["email"]["recentes"]) == al.MAX_EVENTOS
+
+
+def test_historico_com_a_tabela_fora_do_ar_devolve_vazio(pool):
+    with pool.connection() as c:
+        c.execute("drop table aviso_envios")
+        c.commit()
+    assert al.historico(pool, CONTA) == []

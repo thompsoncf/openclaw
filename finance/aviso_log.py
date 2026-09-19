@@ -240,3 +240,78 @@ def resumo(pool, conta_id: int, *, dias: int = DIAS_CARD,
     fora["por_vendedor"] = [{"quem": v[0], "total": v[1], "lidos": v[2],
                              "entregues": v[3], "sem_recibo": v[4]} for v in vend]
     return fora
+
+
+#: Quantos dias do histórico ficam ABERTOS ao expandir a pessoa. O aviso é
+#: diário: 30 dias escancarados viram quase 90 linhas por vendedor, e ninguém lê
+#: 90 linhas. O resto continua lá, atrás de "ver os 30 dias".
+DIAS_VISIVEIS = 7
+
+#: Teto de linhas por canal, por pessoa. Existe pro dia em que alguém ligar um
+#: aviso por hora: a tela não pode virar um despejo de log.
+MAX_EVENTOS = 60
+
+
+def historico(pool, conta_id: int, *, dias: int = DIAS_CARD,
+              dias_visiveis: int = DIAS_VISIVEIS) -> list[dict]:
+    """O histórico do aviso, pessoa por pessoa e canal por canal.
+
+    Pedido do dono em 18/09/2026, mostrando o card do lead na campanha: "quero que
+    lá no follow-up fique assim, só que adapte as informações do vendedor com as
+    notificações". É a mesma ideia — hora e estado de cada passo — com três
+    diferenças que estão no mockup `docs/mockups/historico_do_aviso_por_vendedor.html`:
+    três canais em vez de dois, o DIA no lugar do passo da régua, e sem o
+    "Abriu 👁" do e-mail (ver o `_RADAR_BALDES` em web/painel_prospeccao: 62 das 69
+    "aberturas" desta base aconteceram em menos de 1 minuto — é o proxy do Gmail
+    buscando o pixel, não gente lendo).
+
+    Devolve, por membro, `{membro_id, quem, email, numero, canais}`, onde cada canal
+    traz `{"recentes": [...], "antigos": [...]}` — o corte dos `dias_visiveis` é
+    feito AQUI e não no template, porque a régua do que se mostra é decisão de
+    produto e template não é lugar de decisão.
+
+    Cada evento é `{quando, ok, motivo, n_leads, teste, entregue_em, lido_em,
+    clicado_em}`. `teste` marca o que saiu pelo botão "Testar agora": ele aparece na
+    linha do tempo (esconder o que chegou no celular do vendedor seria esconder
+    metade da história) e continua FORA da estatística do card, que só olha
+    `origem='follow_up'`.
+
+    Tolerante: qualquer falha devolve lista vazia — isto enfeita um card, e card
+    não derruba tela.
+    """
+    d = max(1, min(int(dias or DIAS_CARD), 365))
+    vis = max(1, min(int(dias_visiveis or DIAS_VISIVEIS), d))
+    try:
+        with pool.connection() as c:
+            with c.transaction():
+                linhas = c.execute(
+                    """select e.membro_id,
+                              coalesce(nullif(m.nome,''), m.email, '(sem nome)'),
+                              coalesce(m.email,''),
+                              coalesce(nullif(m.whatsapp,''), m.whatsapp_id, ''),
+                              e.canal, e.criado_em, e.ok, coalesce(e.motivo,''),
+                              e.n_leads, e.origem, e.entregue_em, e.lido_em, e.clicado_em,
+                              e.criado_em >= now() - make_interval(days => %s)
+                         from aviso_envios e
+                         join membros m on m.id = e.membro_id
+                        where e.conta_id=%s and coalesce(m.ativo,true)
+                          and e.criado_em >= now() - make_interval(days => %s)
+                        order by e.membro_id, e.canal, e.criado_em desc""",
+                    (vis, conta_id, d)).fetchall()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("aviso_log: histórico falhou (conta=%s): %s: %s",
+                     conta_id, type(e).__name__, e)
+        return []
+    por: dict = {}
+    for r in linhas:
+        p = por.setdefault(r[0], {
+            "membro_id": r[0], "quem": r[1], "email": r[2], "numero": r[3],
+            "canais": {ch: {"recentes": [], "antigos": []} for ch in CANAIS}})
+        alvo = p["canais"].setdefault(r[4], {"recentes": [], "antigos": []})
+        faixa = alvo["recentes"] if r[13] else alvo["antigos"]
+        if len(faixa) >= MAX_EVENTOS:
+            continue
+        faixa.append({"quando": r[5], "ok": r[6], "motivo": r[7], "n_leads": r[8],
+                      "teste": str(r[9] or "").endswith("_teste"),
+                      "entregue_em": r[10], "lido_em": r[11], "clicado_em": r[12]})
+    return list(por.values())

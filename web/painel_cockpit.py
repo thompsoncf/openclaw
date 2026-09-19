@@ -582,6 +582,10 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   border:1px solid rgba(255,255,255,.09);background:rgba(0,0,0,.2);max-width:220px}
 .bub .mid img,.bub .mid video{display:block;width:100%;height:auto;max-height:260px;
   object-fit:cover}
+/* o áudio que o vendedor acabou de gravar toca na própria bolha: o arquivo está
+   no aparelho dele, então ouvir de volta não custa download nenhum */
+.bub .mid.som{max-width:220px;border:0;background:none}
+.bub .mid.som audio{display:block;width:100%;height:34px}
 .bub .mid.fig{max-width:110px;border:0;background:none}
 .bub .mid.fig img{max-height:110px;object-fit:contain}
 .bub .doc{display:flex;align-items:center;gap:.45rem;padding:.45rem .55rem;
@@ -1049,13 +1053,15 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   display:none}
 .gravando.st-grav .rel,.gravando.st-env .rel{display:block}
 .gravando.st-env .rel{color:var(--text-dim)}
-/* medidor ao vivo: é ele que prova que o microfone está ouvindo. Um relógio
-   correndo sozinho não distingue "gravando" de "gravando mudo". */
-.gravando .nivel{display:none;flex:1;height:4px;border-radius:2px;background:var(--bg-2);
-  overflow:hidden}
-.gravando.st-grav .nivel{display:block}
-.gravando .nivel i{display:block;height:100%;width:2%;background:var(--neon);
-  border-radius:2px;transition:width .09s linear}
+/* A ONDA AO VIVO: é ela que prova que o microfone está ouvindo. Um relógio
+   correndo sozinho não distingue "gravando" de "gravando mudo", e a barrinha
+   única que havia aqui antes (19/09/2026) dizia o volume do instante sem mostrar
+   o que já foi falado — no WhatsApp a pessoa vê a fala DESENHANDO.
+   As barras andam da direita pra esquerda: a mais nova entra no fim. */
+.gravando .nivel{display:none;flex:1;align-items:center;gap:2px;height:24px;overflow:hidden}
+.gravando.st-grav .nivel{display:flex}
+.gravando .nivel i{flex:1 1 0;min-width:2px;height:8%;background:var(--neon);
+  border-radius:1px;opacity:.85;transition:height .08s linear}
 .gravando .dica{flex:1;font-size:.82rem;color:var(--text-dim)}
 .gravando.st-grav .dica{display:none}
 .gravando .cancela{background:none;border:0;color:var(--text-dim);font-size:.85rem;
@@ -4963,7 +4969,7 @@ _VOZ_JS = r"""
     comp.classList.remove("gravando-on"); grav.classList.remove("on");
     if(fluxo){ fluxo.getTracks().forEach(function(t){t.stop();}); fluxo=null; }
     if(ctx){ try{ ctx.close(); }catch(e){} ctx=null; an=null; }
-    mr=null; pedacos=[]; niveis=[]; enviando=false;
+    mr=null; pedacos=[]; niveis=[]; enviando=false; abrindo=false;
     $("manda").disabled=false; $("cancela").disabled=false;
   }
   function mmss(s){return Math.floor(s/60)+":"+("0"+Math.floor(s%60)).slice(-2);}
@@ -4980,6 +4986,21 @@ _VOZ_JS = r"""
   // inteiro acontecia DEPOIS de a pessoa apertar enviar — quanto mais longo o
   // áudio, mais tempo de tela parada. Aqui a amplitude é lida ao vivo, o que de
   // quebra alimenta o medidor: o vendedor VÊ que o microfone está ouvindo.
+  // as barras da onda ao vivo. Nascem no primeiro uso e são reaproveitadas.
+  var BARRAS=28, barras=[];
+  function montarBarras(){
+    if(barras.length) return;
+    for(var i=0;i<BARRAS;i++){ var b=document.createElement("i"); nivel.appendChild(b); barras.push(b); }
+  }
+  function desenhar(m){
+    // a mais nova entra no fim: as anteriores andam uma casa pra esquerda, que é
+    // o desenho da fala acontecendo (e não só o volume do instante)
+    for(var i=0;i<BARRAS-1;i++) barras[i].style.height=barras[i+1].style.height||"8%";
+    // 8% de piso: barra zerada parece desligada, e microfone mudo não é isso
+    barras[BARRAS-1].style.height=Math.max(8,Math.min(100,Math.round(m*380)))+"%";
+    // o medidor antigo continua valendo como número: é ele que o teste de tela lê
+    nivel.style.setProperty("--m", Math.max(2,Math.min(100,Math.round(m*380))));
+  }
   function ouvir(st){
     var Ctx=window.AudioContext||window.webkitAudioContext;
     if(!Ctx) return;
@@ -4988,6 +5009,7 @@ _VOZ_JS = r"""
       if(ctx.state==="suspended") ctx.resume();   // iOS sobe suspenso
       an=ctx.createAnalyser(); an.fftSize=512;
       ctx.createMediaStreamSource(st).connect(an);
+      montarBarras();
       var buf=new Uint8Array(an.fftSize);
       (function passo(){
         if(!an) return;
@@ -4996,8 +5018,7 @@ _VOZ_JS = r"""
         for(var i=0;i<buf.length;i++){ var v=(buf[i]-128)/128; soma+=Math.abs(v); }
         var m=soma/buf.length;
         niveis.push(m);
-        // 2% de piso: barra zerada parece desligada, e microfone mudo não é isso
-        nivel.style.width=Math.max(2,Math.min(100,Math.round(m*380)))+"%";
+        desenhar(m);
         medir=requestAnimationFrame(passo);
       })();
     }catch(e){ ctx=null; an=null; }
@@ -5024,7 +5045,15 @@ _VOZ_JS = r"""
   }
   function b64(u8){ var s2=""; for(var i=0;i<u8.length;i++) s2+=String.fromCharCode(u8[i]); return btoa(s2); }
 
-  $("mic").onclick=function(){
+  // O DEDO ENCOSTANDO JÁ PEDE O MICROFONE. Entre o `pointerdown` e o `click` há
+  // o tempo do toque (uns 100–250 ms num celular), e a permissão + o hardware
+  // levam de 0,3 a 2 s. Começar no encostar adianta esse pedaço de graça — e o
+  // `click` continua valendo sozinho pra quem chega por teclado ou navegador sem
+  // ponteiro. `abrindo` é o que impede os dois de abrirem duas gravações.
+  var abrindo=false;
+  function comecar(){
+    if(abrindo) return;
+    abrindo=true;
     var tipo=tipoBom();
     if(!tipo){ alert("Este navegador não grava áudio. Responda por texto."); return; }
     tipoAtual=tipo;
@@ -5052,7 +5081,9 @@ _VOZ_JS = r"""
       sair();
       alert("Não consegui acessar o microfone. Confira a permissão do navegador.");
     });
-  };
+  }
+  $("mic").onclick=comecar;
+  try{ $("mic").addEventListener("pointerdown", comecar, {passive:true}); }catch(e){}
 
   // ---- os dois botões respondem no toque, e só depois param o gravador ----
   function pedirEnvio(){
@@ -5072,31 +5103,77 @@ _VOZ_JS = r"""
     catch(e){ sair(); }
   };
 
-  function mandar(){
-    var seg=Math.max(1,Math.round((Date.now()-t0)/1000));
-    var blob=new Blob(pedacos,{type:tipoAtual});
-    var onda=ondaPronta();                      // já está pronta: zero espera
-    if(fluxo){ fluxo.getTracks().forEach(function(t){t.stop();}); fluxo=null; }
-    if(ctx){ try{ ctx.close(); }catch(e){} ctx=null; an=null; }
+  // A BOLHA ENTRA ANTES DA VIAGEM (20/09/2026). O que sobrava de espera depois de
+  // "envia primeiro, transcreve depois" era a subida em si: o dedo tocava em
+  // enviar e a barra ficava em "enviando…" até o servidor responder — upload no
+  // 4G mais a ida e volta até os EUA. Agora a bolha aparece na hora, com o áudio
+  // TOCÁVEL (o arquivo está no próprio aparelho), e o upload corre por baixo.
+  // Mesmo desenho do anexo, que já fazia assim.
+  function bolhaLocal(blob, seg){
+    var chat=document.querySelector(".chat");
+    if(!chat) return null;
+    var d=document.createElement("div");
+    d.className="bub out subindo";
+    var url=URL.createObjectURL(blob);
+    var agora=new Date();
+    var hh=("0"+agora.getHours()).slice(-2)+":"+("0"+agora.getMinutes()).slice(-2);
+    d.innerHTML='<div class=who>Você</div>'
+      + '<span class="mid som"><audio controls preload=metadata src="'+url+'"></audio></span>'
+      + "🎤 Áudio ("+mmss(seg)+")"
+      + '<span class=hora>'+hh+'</span>'
+      + '<span class=subiu>enviando…</span>';
+    chat.appendChild(d);
+    chat.scrollTop=chat.scrollHeight;
+    d.__url=url;
+    return d;
+  }
+  function pronto(d, j){
+    if(d){
+      d.classList.remove("subindo");
+      var s=d.querySelector(".subiu"); if(s) s.remove();
+      // o id faz o polling reconhecer a bolha que já está na tela em vez de
+      // desenhar a mesma mensagem de novo (mesma guarda do anexo)
+      if(j && j.id){ d.setAttribute("data-id", j.id); if(window.__viu) window.__viu(j.id); }
+    }
+    // puxa assim mesmo: é por ele que chegam os ✓✓ e a transcrição
+    if(window.__puxa) window.__puxa(); else if(!d) location.reload();
+  }
+  function ruim(d, blob, onda, seg, msg){
+    if(!d){ alert(msg); return; }
+    d.classList.remove("subindo"); d.classList.add("ruim");
+    var s=d.querySelector(".subiu");
+    if(s){
+      s.textContent=msg+" ";
+      var bt=document.createElement("button");
+      bt.type="button"; bt.className="repetir"; bt.textContent="tentar de novo";
+      bt.onclick=function(){
+        s.textContent="enviando…"; d.classList.remove("ruim"); d.classList.add("subindo");
+        subir(blob, onda, seg, d);
+      };
+      s.appendChild(bt);
+    }
+  }
+  function subir(blob, onda, seg, d){
     blob.arrayBuffer().then(function(buf){
       var h={"Content-Type": blob.type || tipoAtual};
       if(onda) h["X-Onda"]=b64(onda);
       return zapFetch(BASE+"/lead/"+LEAD+"/audio?seg="+seg,{method:"POST",headers:h,body:buf});
     }).then(function(j){
-      if(!j){ sair(); return; }
-      if(j.ok){
-        sair();
-        // a conversa já se atualiza sozinha (puxa): recarregar a página inteira
-        // custava ~1s de tela branca logo depois de enviar
-        if(window.__puxa) window.__puxa(); else location.reload();
-        return;
-      }
-      alert((j && j.erro) || "Não consegui enviar o áudio.");
-      sair();
+      // `j` nulo é o zapFetch dizendo que já avisou (sessão, aba velha, rede)
+      if(j && j.ok){ pronto(d, j); return; }
+      ruim(d, blob, onda, seg, (j && j.erro) || "Não enviado");
     }).catch(function(){
-      alert("Falha de conexão ao enviar o áudio.");
-      sair();
+      ruim(d, blob, onda, seg, "Falha de conexão");
     });
+  }
+
+  function mandar(){
+    var seg=Math.max(1,Math.round((Date.now()-t0)/1000));
+    var blob=new Blob(pedacos,{type:tipoAtual});
+    var onda=ondaPronta();                      // já está pronta: zero espera
+    var d=bolhaLocal(blob, seg);
+    sair();                                     // a barra fecha AQUI, não no fim
+    subir(blob, onda, seg, d);
   }
 })();
 </script>"""

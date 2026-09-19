@@ -34,7 +34,6 @@ ROTA = ("get", "post", "put", "delete", "api_route")
 PENDENTES = {
     ("app.py", "webhook_asaas"),
     ("app.py", "pesquisa_salvar"),
-    ("painel_cockpit.py", "cockpit_lead_audio"),
     ("painel_prospeccao.py", "prospeccao_base_add_campanha"),
     ("painel_prospeccao.py", "prospeccao_base_explorium"),
     ("painel_prospeccao.py", "prospeccao_explorium_importar"),

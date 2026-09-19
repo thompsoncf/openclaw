@@ -46,6 +46,7 @@ import logging as _logging
 import os as _os
 
 from fastapi import APIRouter, Body, Form, Request
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse, Response,
                                StreamingResponse)
@@ -5709,6 +5710,18 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            # ficaria parado até recarregar, e o vendedor iria conferir no celular.
            "(j.estados||[]).forEach(function(e){"
            "var b=chat.querySelector('.bub[data-id=\"'+e.id+'\"]');if(!b)return;"
+           # o TEXTO que mudou depois de a bolha nascer — hoje é a transcrição do
+           # áudio, que alcança a mensagem já enviada. Troca só os nós de texto
+           # soltos da bolha, preservando rótulo, mídia e a hora com os ✓✓.
+           "if(e.texto){var atual='';"
+           "for(var q=0;q<b.childNodes.length;q++){if(b.childNodes[q].nodeType===3)"
+           "atual+=b.childNodes[q].nodeValue;}"
+           "if(atual!==e.texto){"
+           "var fora=[];"
+           "for(var w=0;w<b.childNodes.length;w++){if(b.childNodes[w].nodeType===3)fora.push(b.childNodes[w]);}"
+           "fora.forEach(function(n){b.removeChild(n);});"
+           "var no=document.createTextNode(e.texto),hh=b.querySelector('.hora');"
+           "if(hh)b.insertBefore(no,hh);else b.appendChild(no);}}"
            "var h=b.querySelector('.hora');if(!h)return;"
            "var novo=tk(e.status);if(!novo)return;"
            "var i=h.querySelector('.ck');"
@@ -6169,8 +6182,30 @@ async def cockpit_lead_audio(request: Request, lead_id: int, seg: int = 0):
         except Exception:  # noqa: BLE001 — onda é enfeite; sem ela o áudio vai igual
             onda = None
     tipo = (request.headers.get("content-type") or "audio/webm").split(",")[0].strip()
-    r = ck.enviar_audio(get_pool(), sess[0], sess[1], lead_id, dados, tipo, seg, onda)
-    return JSONResponse(r)
+    # FORA DO EVENT LOOP. `enviar_audio` converte, fala com o serviço de WhatsApp e
+    # grava — tudo bloqueante. Rodando aqui dentro, ele parava TODAS as requisições
+    # deste processo enquanto durasse. Mesmo desenho do `_anexo_sync`.
+    r = await run_in_threadpool(_audio_sync, sess[0], sess[1], lead_id, dados, tipo, seg, onda)
+    # A TRANSCRIÇÃO VAI DEPOIS DA RESPOSTA. Ela é um extra que fala com o serviço de
+    # voz e levava segundos — com o áudio esperando por ela pra sair. Agora o
+    # vendedor recebe o "enviado" na hora, e o texto alcança a bolha no tique
+    # seguinte (o polling traz o texto junto dos ✓✓).
+    pendente = r.pop("_pendente", None)
+    tarefa = BackgroundTask(_transcrever_sync, pendente) if pendente else None
+    return JSONResponse(r, background=tarefa)
+
+
+def _audio_sync(conta_id, membro_id, lead_id, dados, tipo, seg, onda):
+    """O envio do áudio, síncrono, fora do event loop (ver `_anexo_sync`)."""
+    return ck.enviar_audio(get_pool(), conta_id, membro_id, lead_id, dados, tipo, seg, onda)
+
+
+def _transcrever_sync(pendente: dict):
+    """A transcrição, depois da resposta. Best-effort inteiro: o áudio já saiu."""
+    try:
+        ck.transcrever_audio(get_pool(), **pendente)
+    except Exception:  # noqa: BLE001
+        _log.warning("transcrição do áudio falhou", exc_info=True)
 
 
 def _anexo_sync(conta_id, membro_id, lead_id, dados, nome, mime, legenda):

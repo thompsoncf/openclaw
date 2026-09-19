@@ -278,6 +278,26 @@ def test_o_carimbo_de_entrega_aparece_colado_na_hora():
     assert "j.estados||[]" in html, "o ✓ vira ✓✓ sem mensagem nova"
 
 
+def test_o_audio_sai_na_hora_e_a_transcricao_alcanca_depois():
+    """O áudio esperava a transcrição pra sair: o vendedor gravava, tocava em
+    enviar e ficava olhando a barra enquanto o servidor falava com o serviço de
+    voz. Agora o envio responde primeiro, a transcrição roda depois da resposta, e
+    o texto alcança a bolha que já está na tela."""
+    import inspect
+    from finance import cockpit as ck
+    rota = inspect.getsource(pc.cockpit_lead_audio)
+    assert "run_in_threadpool(_audio_sync" in rota, "o envio sai do event loop"
+    assert "BackgroundTask(_transcrever_sync" in rota, "a transcrição vai DEPOIS da resposta"
+    assert '_pendente' in rota and "r.pop(" in rota, "os bytes não vão pra tela"
+    # e o envio em si não fala mais com o STT
+    envio = inspect.getsource(ck.enviar_audio)
+    assert "transcritor_se_configurado" not in envio
+    assert "transcritor_se_configurado" in inspect.getsource(ck.transcrever_audio)
+    # a tela sabe trocar o texto de uma bolha que já existe
+    html = _tela_da_conversa()
+    assert "if(e.texto)" in html and "createTextNode(e.texto)" in html
+
+
 def test_a_folha_de_acoes_nao_empurra_a_tela_pra_cima():
     """19/09/2026, iPhone: tocar em "Ficha, funil e fechamento" jogava a tela
     inteira pra cima — o topo da conversa sumia, sobrava preto embaixo e a folha

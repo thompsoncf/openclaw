@@ -444,12 +444,34 @@ def test_o_carimbo_de_entrega_chega_na_tela(pool):
     # sem mensagem nova: é uma alteração de status, não uma linha nova
     poll = ck.mensagens_desde(pool, conta, vend, lead, env)
     assert poll["mensagens"] == []
-    assert {"id": env, "status": "lido"} in poll["estados"]
+    assert {"id": env, "status": "lido", "texto": "resposta"} in poll["estados"]
     with pool.connection() as c:
         c.execute("update mensagens set status='entregue' where id=%s", (env,))
         c.commit()
     assert ck.mensagens_desde(pool, conta, vend, lead, env)["estados"] == \
-        [{"id": env, "status": "entregue"}]
+        [{"id": env, "status": "entregue", "texto": "resposta"}]
+
+
+def test_a_transcricao_alcanca_a_bolha_que_ja_esta_na_tela(pool):
+    """O áudio sai na hora e o texto vem depois (ver `transcrever_audio`). O texto
+    viaja junto dos ✓✓ porque entra numa mensagem que JÁ está desenhada: sem isso,
+    a bolha ficaria só com "🎤 Áudio (0:06)" até alguém recarregar."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="transc@x.com")
+        lead = _lead(c, conta, vend, "Transcrição")
+        conv, _ = _conversa_com(c, conta, lead, ["oi"])
+        aud = c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                        "values (%s,'whatsapp','out','humano','🎤 Áudio (0:06)') returning id",
+                        (conv,)).fetchone()[0]
+        c.commit()
+    estados = ck.mensagens_desde(pool, conta, vend, lead, aud)["estados"]
+    assert [e for e in estados if e["id"] == aud][0]["texto"] == "🎤 Áudio (0:06)"
+    with pool.connection() as c:
+        c.execute("update mensagens set texto=%s where id=%s",
+                  ("🎤 Áudio (0:06)\nbom dia, fechei o salão", aud))
+        c.commit()
+    estados = ck.mensagens_desde(pool, conta, vend, lead, aud)["estados"]
+    assert [e for e in estados if e["id"] == aud][0]["texto"].endswith("fechei o salão")
 
 
 def test_midia_so_do_lead_do_proprio_vendedor(pool):

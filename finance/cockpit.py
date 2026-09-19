@@ -959,11 +959,16 @@ def mensagens_desde(pool, conta_id: int, membro_id: int, lead_id: int,
         # depois da mensagem, num update — e o polling só pede o que tem id NOVO,
         # então sem isto o ✓ ficaria congelado até o vendedor recarregar a tela.
         # As últimas 25 saídas bastam: ninguém acompanha o ✓✓ de ontem.
+        #
+        # O TEXTO VAI JUNTO pelo mesmo motivo: a transcrição do áudio agora chega
+        # DEPOIS do envio (ver `transcrever_audio`) e entra na mensagem que já está
+        # na tela. Sem isto, a bolha ficaria só com "🎤 Áudio (0:06)" até recarregar.
         estados = []
         if conversa_id:
-            estados = [{"id": r[0], "status": r[1] or ""} for r in c.execute(
-                """select id, status from (
-                     select id, status from mensagens
+            estados = [{"id": r[0], "status": r[1] or "", "texto": r[2] or ""}
+                       for r in c.execute(
+                """select id, status, texto from (
+                     select id, status, texto from mensagens
                       where conversa_id=%s and direcao='out'
                       order by id desc limit 25) t
                    order by id""", (conversa_id,)).fetchall()]
@@ -1472,7 +1477,7 @@ def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes
     do que a Prime manda ao cliente chega sem nome, porque sai do celular.
     """
     from finance import audio_voz as av, whatsapp_out
-    from web.painel_prospeccao import _add_msg, _conversa_id
+    from web.painel_prospeccao import _conversa_id
     if not dados:
         return {"ok": False, "erro": "Áudio vazio."}
     if len(dados) > av.LIMITE_BYTES:
@@ -1507,18 +1512,6 @@ def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes
         _log.warning("áudio da conta %s não converteu (%s) — vai como veio",
                      conta_id, pronto["erro"])
 
-    # A transcrição é um EXTRA: se o STT falhar, o áudio sai do mesmo jeito. O que
-    # não pode é o vendedor ficar sem mandar porque a transcrição caiu.
-    texto = ""
-    try:
-        from core.transcribe import transcritor_se_configurado
-        tr = transcritor_se_configurado()
-        if tr is not None:
-            nome = "audio.ogg" if pronto["mimetype"].startswith("audio/ogg") else "audio.mp4"
-            texto = (tr.transcrever(pronto["bytes"], nome) or "").strip()[:4000]
-    except Exception as e:  # noqa: BLE001
-        _log.warning("não deu pra transcrever o áudio da conta %s: %s", conta_id, e)
-
     from finance import whatsapp_qr as _qr
     # `chip_id or conta_id` é a mesma escolha do texto (whatsapp_out.enviar): o
     # chip quando a conversa tem um, o da própria empresa quando não tem.
@@ -1536,12 +1529,56 @@ def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes
     marca = "🎤 Áudio (%d:%02d)" % (segundos // 60, segundos % 60)
     with pool.connection() as c:
         conv = _conversa_id(c, conta_id, lead_id, "whatsapp")
-        _add_msg(c, conv, "whatsapp", "out", "humano",
-                 (marca + "\n" + texto) if texto else marca, membro_id, res.get("sid"))
-        c.execute("update conversas set status='pendente', agente_ativo=false, "
-                  "push_avisado_em=null where id=%s", (conv,))
+        msg_id = c.execute(
+            """insert into mensagens (conversa_id, canal, direcao, autor, membro_id,
+                                      texto, provider_sid)
+               values (%s,'whatsapp','out','humano',%s,%s,%s) returning id""",
+            (conv, membro_id, marca, res.get("sid"))).fetchone()[0]
+        c.execute("update conversas set ultima_msg_em=now(), status='pendente', "
+                  "agente_ativo=false, push_avisado_em=null where id=%s", (conv,))
         c.commit()
-    return {"ok": True, "texto": texto, "convertido": pronto["convertido"]}
+    # A TRANSCRIÇÃO NÃO SEGURA MAIS O ENVIO (19/09/2026). Ela era feita ANTES de
+    # mandar: o vendedor gravava, tocava em enviar e ficava olhando a barra
+    # enquanto o servidor falava com o serviço de voz — e só então o áudio saía.
+    # Agora o áudio vai na hora e o texto alcança depois (ver `transcrever_audio`),
+    # aparecendo na bolha no tique seguinte. `_pendente` sai do dicionário antes de
+    # virar JSON: são os bytes, que não vão pra tela.
+    return {"ok": True, "id": msg_id, "conversa_id": conv,
+            "convertido": pronto["convertido"],
+            "_pendente": {"mensagem_id": msg_id, "conta_id": conta_id, "marca": marca,
+                          "dados": pronto["bytes"], "mimetype": pronto["mimetype"]}}
+
+
+def transcrever_audio(pool, *, mensagem_id: int, conta_id: int, marca: str,
+                      dados: bytes, mimetype: str) -> str:
+    """Transcreve o áudio JÁ ENVIADO e escreve o texto embaixo da marca.
+
+    É um EXTRA, e roda depois da resposta ao vendedor (ver a rota): o serviço de
+    voz fora do ar, lento ou sem chave não pode atrasar — nem impedir — o áudio de
+    sair. Devolve o texto (vazio quando não deu).
+
+    O `update` só escreve se a mensagem ainda estiver com a marca sozinha: se algo
+    já mexeu no texto dela, quem chegou primeiro manda.
+    """
+    texto = ""
+    try:
+        from core.transcribe import transcritor_se_configurado
+        tr = transcritor_se_configurado()
+        if tr is not None:
+            nome = "audio.ogg" if (mimetype or "").startswith("audio/ogg") else "audio.mp4"
+            texto = (tr.transcrever(dados, nome) or "").strip()[:4000]
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra transcrever o áudio da conta %s: %s", conta_id, e)
+    if not texto:
+        return ""
+    try:
+        with pool.connection() as c:
+            c.execute("update mensagens set texto=%s where id=%s and texto=%s",
+                      ((marca + "\n" + texto)[:8000], mensagem_id, marca))
+            c.commit()
+    except Exception as e:  # noqa: BLE001 — o áudio já saiu; o texto é o extra
+        _log.warning("não deu pra gravar a transcrição da mensagem %s: %s", mensagem_id, e)
+    return texto
 
 
 def assumir(pool, conta_id: int, membro_id: int, lead_id: int) -> dict:

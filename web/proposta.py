@@ -97,6 +97,41 @@ def _avisar_conflito(pool, conta_id: int, titulo: str, inicio, choques: list[dic
         pass
 
 
+def _vendedor_do_orcamento(pool, conta_id: int, criado_por) -> int | None:
+    """Quem vendeu — pra data aprovada nascer COM dono na agenda.
+
+    Até 19/09/2026 o compromisso nascia sem `membro_id`, e o efeito era medível:
+    dos nove orçamentos da Prime que viraram data, os NOVE ficaram sem vendedor e
+    foram parar no card de pendências da agenda, um a um. Não era dado faltando —
+    o vendedor estava em `orcamentos.criado_por` o tempo todo, e ninguém passava.
+
+    `criado_por` guarda o membro_id como TEXTO, ou a palavra 'dono' — é a mesma
+    leitura que o cockpit já faz (`m.id::text = o.criado_por`) e que a própria
+    proposta faz pra imprimir o nome do vendedor na folha.
+
+    TOLERANTE de propósito, como `vende_data`: o pior caso aqui é o compromisso
+    nascer sem dono — que é exatamente o que já acontecia. Derrubar a aprovação de
+    um orçamento por causa disso seria trocar um incômodo por um prejuízo.
+    """
+    s = str(criado_por or "").strip()
+    if not s:
+        return None
+    try:
+        with pool.connection() as c:
+            if s.isdigit():
+                r = c.execute("select id from membros where id=%s and conta_id=%s",
+                              (int(s), conta_id)).fetchone()
+            elif s == "dono":
+                r = c.execute("select id from membros where conta_id=%s and papel='dono' "
+                              "order by id limit 1", (conta_id,)).fetchone()
+            else:
+                return None
+        return r[0] if r else None
+    except Exception as e:  # noqa: BLE001 — vendedor não derruba aprovação
+        _log.warning("vendedor do orçamento conta=%s criado_por=%r: %s", conta_id, criado_por, e)
+        return None
+
+
 def _reservar_na_agenda(d: dict, pool=None) -> int | None:
     """Cliente aprovou o orçamento de EVENTO -> a data entra na agenda da empresa.
 
@@ -138,7 +173,9 @@ def _reservar_na_agenda(d: dict, pool=None) -> int | None:
     if sinal:
         dias = (ag.get_config(pool, d["conta_id"]).get("pre_reserva_dias")
                 or ag.PRE_RESERVA_DIAS)
-        ate = ag.agora_brt() + timedelta(days=int(dias))
+        # o prazo acompanha a festa, não o relógio de hoje — é por AQUI que as nove
+        # datas canceladas sozinhas nasceram (ver agenda.prazo_da_pre_reserva).
+        ate = ag.prazo_da_pre_reserva(inicio, dias_config=dias)
     descricao = " · ".join(x for x in [
         f"Orçamento {d.get('doc_num') or ''}".strip(),
         (f"{conv} convidados" if conv else ""),
@@ -154,7 +191,9 @@ def _reservar_na_agenda(d: dict, pool=None) -> int | None:
         choques = []
     novo = ag.criar_evento(pool, d["conta_id"], titulo, inicio, fim=fim,
                            local=(ev.get("local") or None), descricao=descricao,
-                           tipo="empresa", pre_reserva_ate=ate)
+                           tipo="empresa", pre_reserva_ate=ate,
+                           membro_id=_vendedor_do_orcamento(pool, d["conta_id"],
+                                                            d.get("criado_por")))
     if choques:
         _avisar_conflito(pool, d["conta_id"], titulo, inicio, choques)
     with pool.connection() as c:

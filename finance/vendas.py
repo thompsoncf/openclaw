@@ -427,7 +427,7 @@ def nome_do_orcamento(*, cadastro="", empresa="", cliente="", numero=None,
 
 
 def titulo_do_funil(*, cadastro="", empresa="", cliente="", modo="recorrente",
-                    evento=None, numero=None) -> dict:
+                    evento=None, numero=None, com_data=True) -> dict:
     """{titulo, sub} de uma linha — a redação do NOME, testável sem tela.
 
     O título vem do cadastro do cliente primeiro: dos três campos, é o único que
@@ -453,8 +453,15 @@ def titulo_do_funil(*, cadastro="", empresa="", cliente="", modo="recorrente",
     sub = ""
     if (modo or "") == "evento":
         ev = evento if isinstance(evento, dict) else {}
+        # `com_data=False` quando quem chama JÁ MOSTRA a data em outro lugar.
+        # É o caso do funil de Serviços desde 19/09/2026: a linha abre com o
+        # bloco "04 SET 27" e o subtítulo dizia "Casamento · 04/09/2027 · 150
+        # convidados" logo ao lado — a mesma data duas vezes, a meio centímetro
+        # de distância. Fica fora aqui, e não no JavaScript da tela, porque a
+        # redação do subtítulo é desta função; recortar texto pronto lá seria
+        # duas regras pro mesmo campo.
         partes = [str(ev.get("tipo") or "").strip(),
-                  _data_br(str(ev.get("data") or "")),
+                  _data_br(str(ev.get("data") or "")) if com_data else "",
                   (f"{ev['convidados']} convidados" if str(ev.get("convidados") or "").strip() else "")]
         sub = " · ".join(p for p in partes if p)
     else:

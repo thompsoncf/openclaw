@@ -1177,6 +1177,25 @@ def test_a_linha_do_funil_diz_a_data_com_ANO(cliente):
     assert _item(cliente, oid)["data"] == "18/11/2025"
 
 
+def test_a_linha_nao_repete_a_data_da_festa_no_subtitulo(cliente):
+    """19/09/2026: a linha abre com o bloco de data ("24 JUL 27") e o subtítulo
+    dizia "Casamento · 24/07/2027 · 150 convidados" a meio centímetro dali.
+
+    Passa pela ROTA de propósito. A primeira versão desta mudança foi coberta só
+    por um teste que lia o código-fonte, e o que escapou foi um `KeyError:
+    data_linha` — o subtítulo consultava o bloco de data ANTES de ele ser
+    montado, e o funil inteiro respondia 500. Ler a ordem das atribuições é o
+    que um teste de fonte não faz; chamar a rota, faz.
+    """
+    oid = _orcamento_pra_mandar(cliente, numero=31)
+    it = _item(cliente, oid)
+    # o bloco da esquerda carrega a data...
+    assert it["data_linha"] and it["data_linha"]["iso"] == FESTA_ISO
+    # ...e por isso o subtítulo não repete
+    assert FESTA_BR not in it["sub"]
+    assert it["sub"] == "Casamento"
+
+
 def test_o_editor_tambem_diz_quando_foi_gerada(cliente):
     oid = _orcamento_pra_mandar(cliente, numero=22)
     with cliente.pool.connection() as cx:

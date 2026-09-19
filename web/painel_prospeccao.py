@@ -10795,29 +10795,33 @@ def _captura_panel(default_tab, voltar):
 # JS da captação da Base (recarrega a lista após adicionar; sem addCard do kanban).
 _CAPTURA_JS = """<script>
 function capTab(t){document.querySelectorAll('.caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('.captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
-function capFetch(url,fd){return fetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();});}
+// Desde 20/09/2026 o embrulho é o zapFetch: quem chama recebe o CORPO, e
+// recebe `null` quando a troca falhou — com o aviso certo já na tela. Por
+// isso todo `capFetch(...).then` daqui pra baixo começa com `if(!d)return;`
+// e nenhum deles tem mais `.catch` com a frase única.
+function capFetch(url,fd){return zapFetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd});}
 function _capReload(msg){capToast(msg||'Adicionado à base ✓');setTimeout(function(){location.reload();},700);}
-function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}f.reset();_capReload(d.msg||'Lead adicionado à base ✓');}).catch(function(){capToast('Falha de rede');});return false;}
+function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d)return;if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}f.reset();_capReload(d.msg||'Lead adicionado à base ✓');});return false;}
 function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.querySelector('[name=documento]').value.replace(/\\D/g,'');if(cnpj.length!==14){capToast('Pra puxar da Receita, o CNPJ precisa ter 14 dígitos');return;}
   capToast('Consultando Receita…');
-  fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d)return;
     if(!d.ok){capToast('CNPJ não encontrado ('+(d.erro||'')+')');return;}var x=d.dados;
     function put(n,v,forca){var el=f.querySelector('[name='+n+']');if(el&&v&&(forca||!el.value))el.value=v;}
     put('empresa',x.nome_fantasia||x.razao_social,false);put('segmento',x.segmento,true);put('cidade',x.cidade,true);put('uf',x.uf,true);
     put('telefone',x.telefone,true);put('email',x.email,true);
     var rc=f.querySelector('[name=receita]');if(rc){try{rc.value=JSON.stringify(x);}catch(e){}}
     capToast('Dados da Receita preenchidos ✓');
-  }).catch(function(){capToast('Falha de rede');});}
-function capCsv(ev){ev.preventDefault();capFetch('/painel/prospeccao/captar/csv',new FormData(ev.target)).then(function(d){if(!d.ok){capToast('Erro no CSV');return;}_capReload(d.msg||'Importado ✓');}).catch(function(){capToast('Falha de rede');});return false;}
+  });}
+function capCsv(ev){ev.preventDefault();capFetch('/painel/prospeccao/captar/csv',new FormData(ev.target)).then(function(d){if(!d)return;if(!d.ok){capToast('Erro no CSV');return;}_capReload(d.msg||'Importado ✓');});return false;}
 function capBuscar(ev){ev.preventDefault();var f=ev.target;var btn=document.getElementById('cap-g-btn');if(btn){btn.disabled=true;btn.textContent='Buscando…';}
-  capFetch('/painel/prospeccao/captar/buscar',new FormData(f)).then(function(d){if(btn){btn.disabled=false;btn.textContent='🔍 Buscar';}var box=document.getElementById('cap-res');
+  capFetch('/painel/prospeccao/captar/buscar',new FormData(f)).then(function(d){if(!d){if(btn){btn.disabled=false;btn.textContent='🔍 Buscar';}return;}if(btn){btn.disabled=false;btn.textContent='🔍 Buscar';}var box=document.getElementById('cap-res');
     if(!d.ok){box.innerHTML='<div class="mut" style="color:var(--ambar)">Não consegui buscar ('+(d.erro||'?')+'). Confira a chave/billing e tente de novo.</div>';return;}
     if(!d.itens.length){box.innerHTML='<div class="mut">Nada encontrado'+(d.n_redes?(' ('+d.n_redes+' rede(s) oculta(s))'):'')+'. Tente outro termo/cidade.</div>';return;}
     var TP={quente:'#f0917f',morno:'#e0b25a',frio:'#7bb8e6'};
     var h='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem"><div class="mut" style="font-size:.82rem">'+d.itens.length+' encontrado(s)'+(d.n_redes?(' · '+d.n_redes+' oculta(s)'):'')+'</div><label class="mut" style="font-size:.8rem;cursor:pointer"><input type="checkbox" onclick="capAll(this)" style="width:auto;vertical-align:middle;accent-color:var(--verde)"> marcar todos</label></div><div class="rlist" id="cap-list">';
     d.itens.forEach(function(it){var loc=(it.cidade?(' · '+jsEsc(it.cidade)+(it.uf?('/'+jsEsc(it.uf)):'')):'');var dupB=it.dup_campanha?(' <span class="dupb">🚫 já em campanha: '+jsEsc(it.dup_campanha)+'</span>'):(it.dup?' <span class="dupb">⚠️ já na base</span>':'');h+='<label class="rrow" style="cursor:pointer"><input type="checkbox" name="itens" value="'+it.pack+'"><span style="flex:1"><span style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap"><b style="font-size:.88rem">'+jsEsc(it.empresa)+'</b>'+dupB+'</span><span class="mut" style="font-size:.76rem">'+(it.segmento?(jsEsc(it.segmento)+' · '):'')+(it.telefone?jsEsc(it.telefone):'')+(it.rating?(' · nota '+it.rating):'')+(it.tem_site?'':' · sem site')+loc+'</span></span><span class="tpill" style="background:transparent;border:1px solid '+(TP[it.temperatura]||'#7bb8e6')+';color:'+(TP[it.temperatura]||'#7bb8e6')+'">'+it.temperatura+'</span></label>';});
     h+='</div><div style="margin-top:.8rem"><button type="button" class="pbtn" onclick="capImport()">＋ Adicionar selecionados à base</button></div>';box.innerHTML=h;
-  }).catch(function(){if(btn){btn.disabled=false;btn.textContent='🔍 Buscar';}capToast('Falha de rede');});return false;}
+  });return false;}
 /* ---------------- cercar área no mapa (Google Maps JS API, lazy-carregada) ---------------- */
 var GOOGLE_MAPS_JS_KEY = {{ maps_js_key|tojson }};
 var _cercaCarregado = false, _cercaMap = null, _cercaCircle = null, _cercaMarker = null;
@@ -10873,15 +10877,15 @@ function cercaMapaInit(){
 function capAll(el){document.querySelectorAll('#cap-list input[name=itens]').forEach(function(c){c.checked=el.checked;});}
 function capImport(){var packs=[];document.querySelectorAll('#cap-list input[name=itens]:checked').forEach(function(c){packs.push(c.value);});if(!packs.length){capToast('Marque ao menos um');return;}
   var fd=new FormData();packs.forEach(function(p){fd.append('itens',p);});var vs=document.getElementById('cap-g-vend');if(vs)fd.append('vendedor_id',vs.value);
-  capFetch('/painel/prospeccao/captar/importar',fd).then(function(d){if(!d.ok){capToast('Erro ao importar');return;}_capReload((d.msg||'Adicionados')+' ✓');}).catch(function(){capToast('Falha de rede');});}
+  capFetch('/painel/prospeccao/captar/importar',fd).then(function(d){if(!d)return;if(!d.ok){capToast('Erro ao importar');return;}_capReload((d.msg||'Adicionados')+' ✓');});}
 function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
 function capToast(msg,link){var t=document.getElementById('cap-toast');if(!t){t=document.createElement('div');t.id='cap-toast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s;display:flex;align-items:center;gap:.7rem';document.body.appendChild(t);}
   t.textContent='';var span=document.createElement('span');span.textContent=msg;t.appendChild(span);
   if(link&&link.url){var a=document.createElement('a');a.href=link.url;a.textContent=link.label||'Ver ›';a.style.cssText='color:#fff;font-weight:700;text-decoration:underline;white-space:nowrap;flex-shrink:0';t.appendChild(a);}
   t.style.opacity='1';clearTimeout(window._captoastT);window._captoastT=setTimeout(function(){t.style.opacity='0';},link&&link.url?7000:2600);}
 function _exForm(){var b=new URLSearchParams();var cat=document.getElementById('ex-cat');if(cat&&cat.value.trim())b.append('categoria',cat.value.trim());var ct=document.getElementById('ex-cattipo');if(ct)b.append('cat_tipo',ct.value);var p=document.getElementById('ex-pais');b.append('pais',(p&&p.value.trim())||'br');var rg=document.getElementById('ex-reg');if(rg&&rg.value.trim())b.append('regioes',rg.value.trim());document.querySelectorAll('.ex-size:checked').forEach(function(c){b.append('tamanho',c.value);});document.querySelectorAll('.ex-cargo:checked').forEach(function(c){b.append('cargo',c.value);});return b;}
-function exEstimar(){var b=_exForm();capToast('Estimando…');fetch('/painel/prospeccao/base/explorium-estimar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:b}).then(function(r){return r.json();}).then(function(d){var el=document.getElementById('ex-total');if(!d.ok){if(el)el.textContent='';alert('⚠️ Explorium: '+(d.erro||'erro'));return;}if(el)el.innerHTML='<b style="color:var(--verde-claro)">'+(d.total||0)+'</b> empresas no filtro';capToast((d.total||0)+' empresas no filtro');}).catch(function(){capToast('Falha de rede.');});}
-function exImportar(){var q=document.getElementById('ex-qtd');var qtd=(q&&parseInt(q.value,10))||5;if(qtd>10)qtd=10;if(!confirm('Importar '+qtd+' empresa(s) da Explorium com decisor + contato?\\nConsome crédito (fetch + enrich por lead).'))return;var b=_exForm();b.append('qtd',qtd);capToast('Importando da Explorium… (alguns segundos)');fetch('/painel/prospeccao/base/explorium-importar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:b}).then(function(r){return r.json();}).then(function(d){if(!d.ok){alert('⚠️ Explorium: '+(d.erro||'erro'));return;}alert('🔮 Explorium: '+(d.n||0)+' lead(s) importado(s) com decisor'+(d.ja_tinha?(' · '+d.ja_tinha+' já existiam'):'')+'.\\n(de '+(d.empresas||0)+' empresas · '+(d.prospects||0)+' decisores achados)');location.reload();}).catch(function(){capToast('Falha de rede.');});}
+function exEstimar(){var b=_exForm();capToast('Estimando…');zapFetch('/painel/prospeccao/base/explorium-estimar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:b}).then(function(d){if(!d)return;var el=document.getElementById('ex-total');if(!d.ok){if(el)el.textContent='';alert('⚠️ Explorium: '+(d.erro||'erro'));return;}if(el)el.innerHTML='<b style="color:var(--verde-claro)">'+(d.total||0)+'</b> empresas no filtro';capToast((d.total||0)+' empresas no filtro');});}
+function exImportar(){var q=document.getElementById('ex-qtd');var qtd=(q&&parseInt(q.value,10))||5;if(qtd>10)qtd=10;if(!confirm('Importar '+qtd+' empresa(s) da Explorium com decisor + contato?\\nConsome crédito (fetch + enrich por lead).'))return;var b=_exForm();b.append('qtd',qtd);capToast('Importando da Explorium… (alguns segundos)');zapFetch('/painel/prospeccao/base/explorium-importar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:b}).then(function(d){if(!d)return;if(!d.ok){alert('⚠️ Explorium: '+(d.erro||'erro'));return;}alert('🔮 Explorium: '+(d.n||0)+' lead(s) importado(s) com decisor'+(d.ja_tinha?(' · '+d.ja_tinha+' já existiam'):'')+'.\\n(de '+(d.empresas||0)+' empresas · '+(d.prospects||0)+' decisores achados)');location.reload();});}
 </script>"""
 
 
@@ -11039,11 +11043,10 @@ function baseCampSel(s){var i=document.getElementById('base-novo-nome');if(!i)re
 function baseChecked(){var a=[];document.querySelectorAll('.bt-ck:checked').forEach(function(c){a.push(c.value);});return a;}
 function baseExcluir(id,btn){
   if(!confirm('Excluir este lead da base? Sai também de qualquer campanha e não dá pra desfazer.'))return;
-  fetch('/painel/prospeccao/'+id+'/excluir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/'+id+'/excluir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(d){if(!d)return;
       if(!d.ok){alert('Não consegui excluir ('+(d.erro||'?')+').');return;}
       var tr=btn.closest('tr');if(tr)tr.remove();
-    }).catch(function(){alert('Falha de rede.');});
+    });
 }
 function baseHistorico(btn){
   var p=document.getElementById('historico');
@@ -11051,7 +11054,7 @@ function baseHistorico(btn){
   p.style.display='block';
   if(p.getAttribute('data-loaded')==='1')return;
   p.innerHTML='<div class="mut" style="font-size:.82rem">Carregando…</div>';
-  fetch('/painel/prospeccao/base/historico').then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/base/historico').then(function(d){if(!d){p.innerHTML='<div class="mut" style="font-size:.82rem">Não deu pra carregar.</div>';return;}
     if(!d.ok){p.innerHTML='<div class="mut" style="font-size:.82rem">Não consegui carregar.</div>';return;}
     if(!d.dias.length){p.innerHTML='<div class="mut" style="font-size:.82rem">Nenhum envio a campanha ainda.</div>';return;}
     var h='';
@@ -11063,17 +11066,17 @@ function baseHistorico(btn){
       h+='</details>';
     });
     p.innerHTML=h;p.setAttribute('data-loaded','1');
-  }).catch(function(){p.innerHTML='<div class="mut" style="font-size:.82rem">Falha de rede.</div>';});
+  });
 }
 function baseExplorium(){
   var ids=baseChecked();
   if(!ids.length){alert('Marque um lead pra testar o Explorium.');return;}
   var body=new URLSearchParams();body.append('ids',ids[0]);
   capToast('Consultando Explorium…');
-  fetch('/painel/prospeccao/base/explorium',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/base/explorium',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(d){if(!d)return;
     if(!d.ok){alert('⚠️ Explorium: '+(d.erro||'erro'));return;}
     alert('🔮 Explorium — '+(d.empresa||'')+' ('+(d.dominio||'sem domínio')+')\\n\\n'+JSON.stringify(d.resposta,null,2).slice(0,1600));
-  }).catch(function(){capToast('Falha de rede.');});
+  });
 }
 function baseEnriquecer(tipo){
   var ids=baseChecked();
@@ -11082,7 +11085,7 @@ function baseEnriquecer(tipo){
   if(tipo==='cnpj' && !confirm('Buscar o CNPJ de '+ids.length+' lead(s) sem CNPJ ainda, por nome + cidade (CNPJá)?\\nÉ consulta paga — aplica sozinho quando acha 1 candidato só; achando mais de um ou nenhum, mostra aqui mesmo pra você resolver.'))return;
   var body=new URLSearchParams();ids.forEach(function(i){body.append('ids',i);});body.append('tipo',tipo);
   capToast(tipo==='decisor'?'Buscando decisores… (alguns segundos)':tipo==='cnpj'?'Buscando CNPJ… (alguns segundos)':'Verificando os sites… (alguns segundos)');
-  fetch('/painel/prospeccao/base/qualificar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/base/qualificar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(d){if(!d)return;
     if(!d.ok){alert('⚠️ '+(d.erro||'Não consegui rodar.'));return;}
     var msg;
     if(tipo==='decisor'){
@@ -11104,7 +11107,7 @@ function baseEnriquecer(tipo){
       try{sessionStorage.setItem('cnpjPendentes',JSON.stringify({ambiguos:d.ambiguos||[],sem_leads:d.sem_leads||[]}));}catch(e){}
     }
     location.reload();
-  }).catch(function(){capToast('Falha de rede — tente de novo.');});
+  });
 }
 function cnpjResolverAbrir(leads,semLeads){
   var box=document.getElementById('cnpj-resolver');
@@ -11165,7 +11168,7 @@ function cnpjResolverAbrir(leads,semLeads){
 function cnpjResolverUsar(id,cnpj,btn){
   btn.disabled=true;btn.textContent='...';
   var body=new URLSearchParams();body.append('cnpj',cnpj);
-  fetch('/painel/prospeccao/'+id+'/aplicar-cnpj',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/'+id+'/aplicar-cnpj',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(d){if(!d){btn.disabled=false;btn.textContent='usar';return;}
     if(!d.ok){alert('⚠️ '+(d.erro||'Não consegui aplicar.'));btn.disabled=false;btn.textContent='usar';return;}
     var card=document.getElementById('cnpj-res-lead-'+id)||document.getElementById('cnpj-sem-lead-'+id);
     if(card)card.outerHTML='<div class="ok" style="margin-top:.6rem">✓ '+jsEsc(d.msg||'CNPJ aplicado')+'</div>';
@@ -11192,7 +11195,7 @@ function cnpjResolverUsar(id,cnpj,btn){
     if(box && !box.querySelector('[id^="cnpj-res-lead-"]') && !box.querySelector('[id^="cnpj-sem-lead-"]')){
       setTimeout(function(){location.reload();},900);
     }
-  }).catch(function(){alert('Falha de rede — tente de novo.');btn.disabled=false;btn.textContent='usar';});
+  });
 }
 function cnpjResolverColar(id,inputId,btn){
   var v=(document.getElementById(inputId).value||'').replace(/\\D/g,'');
@@ -11746,11 +11749,10 @@ var _KB_STATUS={{ status|tojson }};
 {{ balao_js }}
 // "Ler as conversas": o acervo do leitor, em 2º plano — o botão vira o aviso
 function kbLerConversas(btn){btn.disabled=true;var t=btn.textContent;btn.textContent='Lendo…';
-  fetch('/painel/prospeccao/evento/ler',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/evento/ler',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(d){if(!d){btn.disabled=false;btn.textContent=t;return;}
       if(!d.ok){btn.disabled=false;btn.textContent=t;alert(d.erro||'Não consegui.');return;}
       btn.textContent=d.n?('Lendo '+d.n+' conversa'+(d.n===1?'':'s')+' em 2º plano — recarregue em ~1 min'):'Nada pra ler';
-    }).catch(function(){btn.disabled=false;btn.textContent=t;alert('Falha de rede.');});}
+    });}
 window.KB_VISTA={{ ('mes' if vista_mes else '')|tojson }};
 var KB_PERGUNTA_DATA={{ (pergunta_data or '')|tojson }};
 function kbPerguntarData(ev,convId,btn){_cpPrefill=KB_PERGUNTA_DATA;kbAbrirChat(ev,convId,'conversas',btn);}
@@ -11806,8 +11808,7 @@ function kbDrop(ev,status){ev.preventDefault();ev.currentTarget.classList.remove
   var id=ev.dataTransfer.getData('text/plain');var card=window._kbDragEl;if(!id||!card)return;window._kbMoved=true;
   var drop=ev.currentTarget.querySelector('.kbdrop');var emp=drop.querySelector('.kbempty');if(emp)emp.remove();drop.appendChild(card);
   var body=new URLSearchParams();body.append('status',status);
-  fetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body}).then(function(d){if(!d){location.reload();return;}
       // ARRASTAR PRA PERDIDO PEDE O MOTIVO (17/09/2026). Antes esta linha era só
       // `.then(_kbAposMoverStatus)`, e o `!d.ok` de lá recarrega a página: o card
       // voltava sozinho pra coluna de origem, sem uma palavra, e quem arrastou não
@@ -11819,7 +11820,7 @@ function kbDrop(ev,status){ev.preventDefault();ev.currentTarget.classList.remove
         return;
       }
       _kbAposMoverStatus(d);
-    }).catch(function(){location.reload();});}
+    });}
 
 // ---- captação inline (sem reload) ----
 var TEMPCOR={frio:'#5b9bd5',morno:'var(--ambar)',quente:'var(--coral)'};
@@ -11827,15 +11828,14 @@ function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&am
 function jsBrl(c){c=c||0;var s=(c/100).toFixed(2).split('.');var i=s[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');return 'R$ '+i+','+s[1];}
 function cardGo(ev,id,el){if(!window._kbMoved)kbAbrirLead(ev,id,el);}
 function enrqLote(){var b=document.getElementById('enrq-btn'),m=document.getElementById('enrq-msg');if(!b)return;b.disabled=true;var t=b.textContent;b.textContent='Verificando…';m.textContent='';
-  fetch('/painel/prospeccao/enriquecer-lote',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
+  zapFetch('/painel/prospeccao/enriquecer-lote',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(d){if(!d){b.disabled=false;b.textContent=t;return;}b.disabled=false;b.textContent=t;
     if(!d.ok){m.textContent=d.erro||'Não consegui.';return;}
-    m.textContent=d.n?('Verificando '+d.n+' lead(s) em 2º plano — recarregue em ~1 min pra ver os canais.'):'Nada pra verificar (leads sem site ou já verificados).';}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';});}
+    m.textContent=d.n?('Verificando '+d.n+' lead(s) em 2º plano — recarregue em ~1 min pra ver os canais.'):'Nada pra verificar (leads sem site ou já verificados).';});}
 function kbExcluir(ev,id){ev.stopPropagation();ev.preventDefault();
   if(!confirm('Excluir este lead? A conversa/e-mail dele continua no inbox — só sai do funil.'))return;
-  fetch('/painel/prospeccao/'+id+'/excluir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()})
-    .then(function(r){return r.json();}).then(function(d){if(!d.ok){alert(d.erro||'Não consegui excluir.');return;}
+  zapFetch('/painel/prospeccao/'+id+'/excluir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(d){if(!d)return;if(!d.ok){alert(d.erro||'Não consegui excluir.');return;}
       var card=document.querySelector('.kbcard[data-id="'+id+'"]');if(card&&card.parentNode)card.parentNode.removeChild(card);
-      updCounts();}).catch(function(){alert('Falha de rede.');});}
+      updCounts();});}
 function updCounts(){var tot=0;document.querySelectorAll('.kbcol').forEach(function(col){var n=col.querySelectorAll('.kbcard').length;tot+=n;var chip=col.querySelector('.kbcnt');if(chip)chip.textContent=n;var tc=document.querySelector('.kbtab[data-tab="'+col.getAttribute('data-status')+'"] .c');if(tc)tc.textContent=n;});var tn=document.getElementById('kb-total-n');if(tn)tn.textContent=tot;}
 // esfumado da borda direita do quadro (.transborda) — só liga quando sobra
 // coluna pra rolar E ainda não chegou no fim; sem isso a última coluna
@@ -11854,11 +11854,10 @@ function kbCheckScroll(){var el=document.getElementById('kbrow');if(!el)return;
 function kbAtribuirVendedor(sel,id){
   var novo=sel.value, prev=sel.getAttribute('data-prev')||'';
   var fd=new FormData();fd.append('vendedor_id',novo);
-  fetch('/painel/prospeccao/'+id+'/atribuir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/'+id+'/atribuir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d){sel.value=prev;return;}
       if(!d.ok){alert(d.erro||'Não consegui trocar o vendedor.');sel.value=prev;return;}
       sel.setAttribute('data-prev',novo);
-    }).catch(function(){alert('Falha de rede.');sel.value=prev;});
+    });
 }
 function addCard(l){var col=document.querySelector('.kbcol[data-status="novo"]');if(!col)return;var drop=col.querySelector('.kbdrop');var e=drop.querySelector('.kbempty');if(e)e.remove();
   var cor=TEMPCOR[l.temperatura]||'#5b9bd5';
@@ -11871,28 +11870,32 @@ function addCard(l){var col=document.querySelector('.kbcol[data-status="novo"]')
   drop.insertAdjacentHTML('afterbegin',html);updCounts();}
 function capToggle(){var e=document.getElementById('captar');var vis=e.style.display!=='none';e.style.display=vis?'none':'block';if(!vis){var i=e.querySelector('.captab[data-tab=manual] input[name=empresa]');if(i)i.focus();e.scrollIntoView({behavior:'smooth',block:'nearest'});}}
 function capTab(t){document.querySelectorAll('#captar .caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('#captar .captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
-function capFetch(url,fd){return fetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();});}
-function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}if(d.estagio==='lead')addCard(d.lead);f.reset();capToast(d.msg||'Lead adicionado ao funil');}).catch(function(){capToast('Falha de rede');});return false;}
+// Desde 20/09/2026 o embrulho é o zapFetch: quem chama recebe o CORPO, e
+// recebe `null` quando a troca falhou — com o aviso certo já na tela. Por
+// isso todo `capFetch(...).then` daqui pra baixo começa com `if(!d)return;`
+// e nenhum deles tem mais `.catch` com a frase única.
+function capFetch(url,fd){return zapFetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd});}
+function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d)return;if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}if(d.estagio==='lead')addCard(d.lead);f.reset();capToast(d.msg||'Lead adicionado ao funil');});return false;}
 function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.querySelector('[name=documento]').value.replace(/\\D/g,'');if(cnpj.length!==14){capToast('Pra puxar da Receita, o CNPJ precisa ter 14 dígitos');return;}
   capToast('Consultando Receita…');
-  fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d)return;
     if(!d.ok){capToast('CNPJ não encontrado ('+(d.erro||'')+')');return;}var x=d.dados;
     function put(n,v,forca){var el=f.querySelector('[name='+n+']');if(el&&v&&(forca||!el.value))el.value=v;}
     put('empresa',x.nome_fantasia||x.razao_social,false);put('segmento',x.segmento,true);put('cidade',x.cidade,true);put('uf',x.uf,true);
     put('telefone',x.telefone,true);put('email',x.email,true);put('socio',x.socio,true);put('regime_tributario',x.regime_tributario,true);put('porte',x.porte,true);
     var rc=f.querySelector('[name=receita]');if(rc){try{rc.value=JSON.stringify(x);}catch(e){}}
     capToast('Dados da Receita preenchidos ✓');
-  }).catch(function(){capToast('Falha de rede');});}
-function capCsv(ev){ev.preventDefault();capFetch('/painel/prospeccao/captar/csv',new FormData(ev.target)).then(function(d){if(!d.ok){capToast('Erro no CSV');return;}capToast(d.msg||'Importado');setTimeout(function(){location.reload();},800);}).catch(function(){capToast('Falha de rede');});return false;}
+  });}
+function capCsv(ev){ev.preventDefault();capFetch('/painel/prospeccao/captar/csv',new FormData(ev.target)).then(function(d){if(!d)return;if(!d.ok){capToast('Erro no CSV');return;}capToast(d.msg||'Importado');setTimeout(function(){location.reload();},800);});return false;}
 function capBuscar(ev){ev.preventDefault();var f=ev.target;var btn=document.getElementById('cap-g-btn');if(btn){btn.disabled=true;btn.textContent='Buscando…';}
-  capFetch('/painel/prospeccao/captar/buscar',new FormData(f)).then(function(d){if(btn){btn.disabled=false;btn.textContent='Buscar';}var box=document.getElementById('cap-res');
+  capFetch('/painel/prospeccao/captar/buscar',new FormData(f)).then(function(d){if(!d){if(btn){btn.disabled=false;btn.textContent='Buscar';}return;}if(btn){btn.disabled=false;btn.textContent='Buscar';}var box=document.getElementById('cap-res');
     if(!d.ok){box.innerHTML='<div class="mut" style="color:var(--ambar)">Não consegui buscar ('+(d.erro||'?')+'). Confira a chave/billing e tente de novo.</div>';return;}
     if(!d.itens.length){box.innerHTML='<div class="mut">Nada encontrado'+(d.n_redes?(' ('+d.n_redes+' rede(s) oculta(s))'):'')+'. Tente outro termo/cidade.</div>';return;}
     var TP={quente:'#f0917f',morno:'#e0b25a',frio:'#7bb8e6'};
     var h='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem"><div class="mut" style="font-size:.82rem">'+d.itens.length+' encontrado(s)'+(d.n_redes?(' · '+d.n_redes+' oculta(s)'):'')+'</div><label class="mut" style="font-size:.8rem;cursor:pointer"><input type="checkbox" onclick="capAll(this)" style="width:auto;vertical-align:middle;accent-color:var(--verde)"> marcar todos</label></div><div class="rlist" id="cap-list">';
     d.itens.forEach(function(it){var loc=(it.cidade?(' · '+jsEsc(it.cidade)+(it.uf?('/'+jsEsc(it.uf)):'')):'');var dupB=it.dup_campanha?(' <span class="dupb">🚫 já em campanha: '+jsEsc(it.dup_campanha)+'</span>'):(it.dup?' <span class="dupb">⚠️ já na base</span>':'');h+='<label class="rrow" style="cursor:pointer"><input type="checkbox" name="itens" value="'+it.pack+'"><span style="flex:1"><span style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap"><span class="tdot" style="background:'+(TEMPCOR[it.temperatura]||'#5b9bd5')+'"></span><b style="font-size:.88rem">'+jsEsc(it.empresa)+'</b>'+(it.aberto===false?' <span style=\\'color:var(--coral);font-size:.7rem\\'>(fechado)</span>':'')+dupB+'</span><span class="mut" style="font-size:.76rem">'+(it.segmento?(jsEsc(it.segmento)+' · '):'')+(it.telefone?jsEsc(it.telefone):'')+(it.rating?(' · nota '+it.rating):'')+(it.tem_site?'':' · <span style=\\'color:var(--coral)\\'>sem site</span>')+loc+'</span></span><span class="tpill" style="background:transparent;border:1px solid '+(TP[it.temperatura]||'#7bb8e6')+';color:'+(TP[it.temperatura]||'#7bb8e6')+'">'+it.temperatura+'</span></label>';});
     h+='</div><div style="margin-top:.8rem"><button type="button" class="pbtn" onclick="capImport()">Adicionar selecionados</button></div>';box.innerHTML=h;
-  }).catch(function(){if(btn){btn.disabled=false;btn.textContent='Buscar';}capToast('Falha de rede');});return false;}
+  });return false;}
 /* ---------------- cercar área no mapa (Google Maps JS API, lazy-carregada) ---------------- */
 var GOOGLE_MAPS_JS_KEY = {{ maps_js_key|tojson }};
 var _cercaCarregado = false, _cercaMap = null, _cercaCircle = null, _cercaMarker = null;
@@ -11948,7 +11951,7 @@ function cercaMapaInit(){
 function capAll(el){document.querySelectorAll('#cap-list input[name=itens]').forEach(function(c){c.checked=el.checked;});}
 function capImport(){var packs=[];document.querySelectorAll('#cap-list input[name=itens]:checked').forEach(function(c){packs.push(c.value);});if(!packs.length){capToast('Marque ao menos um');return;}
   var fd=new FormData();packs.forEach(function(p){fd.append('itens',p);});var vs=document.getElementById('cap-g-vend');if(vs)fd.append('vendedor_id',vs.value);
-  capFetch('/painel/prospeccao/captar/importar',fd).then(function(d){if(!d.ok){capToast('Erro ao importar');return;}(d.leads||[]).forEach(addCard);capToast(d.msg||'Adicionados');document.getElementById('cap-res').innerHTML='';var gf=document.getElementById('cap-google');if(gf)gf.reset();}).catch(function(){capToast('Falha de rede');});}
+  capFetch('/painel/prospeccao/captar/importar',fd).then(function(d){if(!d)return;if(!d.ok){capToast('Erro ao importar');return;}(d.leads||[]).forEach(addCard);capToast(d.msg||'Adicionados');document.getElementById('cap-res').innerHTML='';var gf=document.getElementById('cap-google');if(gf)gf.reset();});}
 function capToast(msg,link){var t=document.getElementById('cap-toast');if(!t){t=document.createElement('div');t.id='cap-toast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s;display:flex;align-items:center;gap:.7rem';document.body.appendChild(t);}
   t.textContent='';var span=document.createElement('span');span.textContent=msg;t.appendChild(span);
   if(link&&link.url){var a=document.createElement('a');a.href=link.url;a.textContent=link.label||'Ver ›';a.style.cssText='color:#fff;font-weight:700;text-decoration:underline;white-space:nowrap;flex-shrink:0';t.appendChild(a);}
@@ -12204,14 +12207,14 @@ function perdaDesc(sel){
     function kbDepoisDoStatus(d,id,novo){ _FICHA_ST=novo; fichaPintaSit(); }
     fichaPintaSit();
     function convidarZaq(id){var b=document.getElementById('cvz-btn');if(b){b.disabled=true;b.textContent='Enviando…';}
-      fetch('/painel/prospeccao/'+id+'/convidar-zaq',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+      zapFetch('/painel/prospeccao/'+id+'/convidar-zaq',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}return;}
         if(!d.ok){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}alert(d.erro||'Não consegui enviar.');return;}
-        if(b){b.textContent='✓ Convite enviado';}}).catch(function(){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}alert('Falha de rede.');});}
+        if(b){b.textContent='✓ Convite enviado';}});}
     function identificarNumero(){var b=document.getElementById('idn-btn'),m=document.getElementById('idn-msg'),n=document.getElementById('idn-num');
       var num=(n&&n.value||'').trim();if(!num){if(m){m.textContent='Digite o número com DDD.';m.style.color='var(--ambar)';}return;}
       if(b){b.disabled=true;var t=b.textContent;b.textContent='Consultando…';}if(m){m.textContent='Consultando o titular na Credify…';m.style.color='';}
       var fd=new FormData();fd.append('numero',num);
-      fetch('/painel/prospeccao/identificar-numero',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+      zapFetch('/painel/prospeccao/identificar-numero',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d){if(b){b.disabled=false;b.textContent=t;}if(m){m.style.color='var(--ambar)';}return;}
         if(b){b.disabled=false;b.textContent=t;}
         if(!d.ok){if(m){m.textContent=d.erro||'Não consegui.';m.style.color='var(--ambar)';}return;}
         if(!d.titulares||!d.titulares.length){if(m){m.textContent='Nenhum titular encontrado.';m.style.color='var(--ambar)';}return;}
@@ -12223,20 +12226,20 @@ function perdaDesc(sel){
             +'<div style=\\'font-weight:700;color:var(--verde-claro);margin-bottom:.15rem\\'>'+esc(t.nome||'—')+'</div>'
             +ln('CPF',t.cpf_mask)+ln('Endereço',t.endereco)+ln('Bairro',t.bairro)
             +ln('Cidade/UF',loc)+ln('CEP',t.cep)+'</div>';}).join('');
-        if(m){m.innerHTML=h;m.style.color='';}}).catch(function(){if(b){b.disabled=false;b.textContent=t;}if(m){m.textContent='Falha de rede.';m.style.color='var(--ambar)';}});}
+        if(m){m.innerHTML=h;m.style.color='';}});}
     function buscarDecisor(id){var b=document.getElementById('dec-btn'),m=document.getElementById('dec-msg');if(b){b.disabled=true;var t=b.textContent;b.textContent='Consultando…';}if(m){m.textContent='Consultando o quadro societário na Credify…';m.style.color='';}
-      fetch('/painel/prospeccao/'+id+'/decisor-credify',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){if(b){b.disabled=false;b.textContent=t;}
+      zapFetch('/painel/prospeccao/'+id+'/decisor-credify',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d){if(b){b.disabled=false;b.textContent=t;}if(m){m.style.color='var(--ambar)';}return;}if(b){b.disabled=false;b.textContent=t;}
         if(!d.ok){if(m){m.textContent=d.erro||'Não consegui.';m.style.color='var(--ambar)';}return;}
         var msg='Decisor: '+d.nome+(d.cargo?(' ('+d.cargo+')'):'');
         msg+=d.n_telefones?(' · '+d.n_telefones+' telefone(s)'):' · telefone não liberado na sua conta Credify';
         if(m){m.textContent=msg+' — recarregando…';m.style.color='var(--verde-claro)';}
-        setTimeout(function(){location.reload();},1200);}).catch(function(){if(b){b.disabled=false;b.textContent=t;}if(m){m.textContent='Falha de rede.';m.style.color='var(--ambar)';}});}
+        setTimeout(function(){location.reload();},1200);});}
     function enrqLead(id){var b=document.getElementById('enrqf-btn'),m=document.getElementById('enrqf-msg');if(b){b.disabled=true;b.textContent='Verificando…';}if(m)m.textContent='Raspando o site…';
-      fetch('/painel/prospeccao/'+id+'/enriquecer-canais',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){if(b){b.disabled=false;b.textContent='🔎 Verificar canais';}
+      zapFetch('/painel/prospeccao/'+id+'/enriquecer-canais',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d){if(b){b.disabled=false;b.textContent='🔎 Verificar canais';}if(m)return;}if(b){b.disabled=false;b.textContent='🔎 Verificar canais';}
         if(!d.ok){if(m)m.textContent=d.erro||'Não consegui.';return;}
         var p=[];if(d.whatsapp)p.push('💬 '+d.whatsapp);if(d.email)p.push('✉️ '+d.email+(d.email_ok?' ✓':' (não validou)'));if(d.instagram)p.push('📸 '+d.instagram);
         if(m)m.textContent=p.length?('Achei: '+p.join('  ·  ')+' — recarregando…'):'Não achei canais no site.';
-        if(p.length)setTimeout(function(){location.reload();},1400);}).catch(function(){if(b){b.disabled=false;b.textContent='🔎 Verificar canais';}if(m)m.textContent='Falha de rede.';});}
+        if(p.length)setTimeout(function(){location.reload();},1400);});}
     </script>
   </div>
 
@@ -12495,7 +12498,7 @@ function cnpjManualBox(id){
     +'<button class="pbtn" style="padding:.35rem .8rem;font-size:.78rem;margin:0">usar</button></form>';
 }
 function acharCnpj(id,btn){var box=document.getElementById('cnpj-cands');var endLead=(btn&&btn.getAttribute('data-endereco'))||'';box.innerHTML='<div class="mut" style="font-size:.8rem">Procurando CNPJ…</div>';
-  fetch('/painel/prospeccao/'+id+'/buscar-cnpj',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/'+id+'/buscar-cnpj',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d){box.innerHTML='<div class="mut" style="font-size:.8rem;color:var(--ambar)">Não deu pra consultar.</div>'+cnpjManualBox(id);return;}
     var webBtn=d.web?('<a class="pbtn" style="padding:.35rem .8rem;font-size:.8rem;margin-top:.4rem;display:inline-flex" target="_blank" rel="noopener" href="'+d.web+'">🔎 buscar na web</a>'):'';
     var manual=cnpjManualBox(id);
     if(!d.ok){box.innerHTML='<div class="mut" style="font-size:.8rem;color:var(--ambar)">Não achei ('+(d.erro||'?')+').</div>'+webBtn+manual;return;}
@@ -12517,11 +12520,11 @@ function acharCnpj(id,btn){var box=document.getElementById('cnpj-cands');var end
     if(d.web){h+='<div style="margin-top:.4rem"><a class="mut" style="font-size:.76rem" target="_blank" rel="noopener" href="'+d.web+'">nenhuma bate? buscar na web →</a></div>';}
     h+=manual;
     box.innerHTML=h;
-  }).catch(function(){box.innerHTML='<div class="mut" style="font-size:.8rem;color:var(--ambar)">Falha de rede.</div>'+cnpjManualBox(id);});}
+  });}
 function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
 function fichaCnpj(){var f=document.getElementById('edit-dados');var cnpj=f.querySelector('[name=documento]').value.replace(/\\D/g,'');if(cnpj.length!==14){fToast('Pra puxar da Receita, o CNPJ precisa ter 14 dígitos');return;}
   fToast('Consultando Receita…');
-  fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d)return;
     if(!d.ok){fToast('CNPJ não encontrado ('+(d.erro||'')+')');return;}var x=d.dados;
     function put(n,v){var el=f.querySelector('[name='+n+']');if(el&&v)el.value=v;}
     // o nome só entra se estiver vazio — quem já batizou o lead não perde o nome dele
@@ -12530,11 +12533,11 @@ function fichaCnpj(){var f=document.getElementById('edit-dados');var cnpj=f.quer
     put('segmento',x.segmento);put('cidade',x.cidade);put('uf',x.uf);put('telefone',x.telefone);
     put('email',x.email);put('socio',x.socio);put('regime_tributario',x.regime_tributario);put('porte',x.porte);
     fToast('Preenchido pela Receita ✓ confira e salve');
-  }).catch(function(){fToast('Falha de rede');});}
+  });}
 function iaMsg(canal){var box=document.getElementById('ia-box');var eb=document.getElementById('ia-btn-email'),wb=document.getElementById('ia-btn-wpp');
   if(eb)eb.disabled=true;if(wb)wb.disabled=true;box.style.display='block';box.innerHTML='<div class="mut" style="font-size:.82rem">✨ Gerando com IA…</div>';
   var fd=new FormData();fd.append('canal',canal);
-  fetch('/painel/prospeccao/{{ a.id }}/mensagem-ia',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/{{ a.id }}/mensagem-ia',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d){if(eb)eb.disabled=false;if(wb)wb.disabled=false;box.innerHTML='<div class="mut" style="color:var(--ambar)">Não deu pra consultar.</div>';return;}
     if(eb)eb.disabled=false;if(wb)wb.disabled=false;
     if(!d.ok){box.innerHTML='<div class="mut" style="color:var(--ambar);font-size:.82rem">'+(d.erro==='sem_ia'?'IA não configurada (falta a chave da IA).':'Não consegui gerar ('+(d.erro||'?')+').')+'</div>';return;}
     if(d.canal==='whatsapp'){
@@ -12551,31 +12554,31 @@ function iaMsg(canal){var box=document.getElementById('ia-box');var eb=document.
         +'<div class="mut" style="font-size:.74rem;margin-top:.35rem">Envia pra {{ a.email }} · resposta volta pro seu e-mail · registra no histórico.</div>';
       document.getElementById('ia-assunto').value=d.assunto||'';document.getElementById('ia-corpo').value=d.corpo||'';
     }
-  }).catch(function(){if(eb)eb.disabled=false;if(wb)wb.disabled=false;box.innerHTML='<div class="mut" style="color:var(--ambar)">Falha de rede.</div>';});}
+  });}
 function iaSendEmail(){var a=document.getElementById('ia-assunto').value,c=document.getElementById('ia-corpo').value;if(!c.trim()){fToast('Escreva a mensagem');return;}
   fToast('Enviando…');var fd=new FormData();fd.append('assunto',a);fd.append('corpo',c);
-  fetch('/painel/prospeccao/{{ a.id }}/enviar-email',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/{{ a.id }}/enviar-email',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d)return;
     if(!d.ok){fToast(d.erro==='envio_falhou'?'Não consegui enviar (confira a config de e-mail).':d.erro==='sem_email'?'Lead sem e-mail.':'Erro ao enviar');return;}
-    fToast('E-mail enviado ✓');setTimeout(function(){location.reload();},900);}).catch(function(){fToast('Falha de rede');});}
+    fToast('E-mail enviado ✓');setTimeout(function(){location.reload();},900);});}
 function iaWhats(){var t=(document.getElementById('ia-texto')||{}).value||'';if(!t.trim()){fToast('Escreva a mensagem');return;}
   var b=document.getElementById('ia-wa-btn');if(b){b.disabled=true;b.textContent='Enviando…';}
   var ns=document.getElementById('wa-numero');
   var fd=new FormData();fd.append('texto',t);if(ns&&ns.value)fd.append('numero',ns.value);
-  fetch('/painel/prospeccao/{{ a.id }}/enviar-whatsapp',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/{{ a.id }}/enviar-whatsapp',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d){if(b){b.disabled=false;b.textContent='💬 Enviar pelo sistema';}return;}
     if(b){b.disabled=false;b.textContent='💬 Enviar pelo sistema';}
     if(!d.ok){fToast(d.msg||'Não consegui enviar');return;}
     fToast('Mensagem enviada ✓');setTimeout(function(){location.reload();},900);
-  }).catch(function(){if(b){b.disabled=false;b.textContent='💬 Enviar pelo sistema';}fToast('Falha de rede');});}
+  });}
 function enviarConviteWa(){var b=document.getElementById('wa-tpl-btn');
   var ns=document.getElementById('wa-numero');var alvo=ns&&ns.value?ns.value:'este lead';
   if(!confirm('Enviar o convite de 1º contato por WhatsApp (mensagem aprovada) para '+alvo+'?'))return;
   if(b){b.disabled=true;b.textContent='Enviando…';}
   var fd=new FormData();if(ns&&ns.value)fd.append('numero',ns.value);
-  fetch('/painel/prospeccao/{{ a.id }}/enviar-convite-wa',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/{{ a.id }}/enviar-convite-wa',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d){if(b){b.disabled=false;b.textContent='📨 Convite WhatsApp';}return;}
     if(b){b.disabled=false;b.textContent='📨 Convite WhatsApp';}
     if(!d.ok){fToast(d.msg||'Não consegui enviar');return;}
     fToast('Convite enviado ✓');setTimeout(function(){location.reload();},900);
-  }).catch(function(){if(b){b.disabled=false;b.textContent='📨 Convite WhatsApp';}fToast('Falha de rede');});}
+  });}
 </script>
 {% endblock %}"""
 
@@ -13021,9 +13024,9 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   </div>
   <script>
   function emailSync(){var b=document.getElementById('esync-btn'),m=document.getElementById('esync-msg');if(!b)return;b.disabled=true;var t=b.textContent;b.textContent='Sincronizando…';m.textContent='';
-    fetch('/painel/prospeccao/comunicacao/email-sync',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
+    zapFetch('/painel/prospeccao/comunicacao/email-sync',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d){b.disabled=false;b.textContent=t;return;}b.disabled=false;b.textContent=t;
       if(!d.ok){m.textContent=d.erro||'Não consegui.';return;}
-      if(d.novos){m.textContent='+'+d.novos+' novo(s) — recarregando…';setTimeout(function(){location.reload();},900);}else{m.textContent=d.detalhe||'Nenhum e-mail novo.';}}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';});}
+      if(d.novos){m.textContent='+'+d.novos+' novo(s) — recarregando…';setTimeout(function(){location.reload();},900);}else{m.textContent=d.detalhe||'Nenhum e-mail novo.';}});}
   </script>
 
   {% elif aba=='agente' %}
@@ -13444,8 +13447,8 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       function toggleEmail2(){var w=document.getElementById('email2-wrap');if(w)w.style.display=(w.style.display==='none'||!w.style.display)?'block':'none';}
       function emailTestar(slot){var b=document.getElementById('etest-'+slot+'-btn'),m=document.getElementById('etest-'+slot+'-msg');if(!b)return;b.disabled=true;var t=b.textContent;b.textContent='Testando…';m.textContent='';m.style.color='';
         var body=new URLSearchParams();body.append('slot',slot);
-        fetch('/painel/prospeccao/comunicacao/email-testar',{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/x-www-form-urlencoded'},body:body}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
-          m.textContent=d.msg||d.erro||'—';m.style.color=d.ok?'var(--verde-claro)':'var(--ambar)';}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';m.style.color='var(--ambar)';});}
+        zapFetch('/painel/prospeccao/comunicacao/email-testar',{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/x-www-form-urlencoded'},body:body}).then(function(d){if(!d){b.disabled=false;b.textContent=t;m.style.color='var(--ambar)';return;}b.disabled=false;b.textContent=t;
+          m.textContent=d.msg||d.erro||'—';m.style.color=d.ok?'var(--verde-claro)':'var(--ambar)';});}
       </script>
       <script>
       // Olhinho dos campos de senha/token. O valor salvo NÃO vem no HTML — só é
@@ -13467,11 +13470,10 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         }
         var original = btn.textContent; btn.textContent = '…'; btn.disabled = true;
         var body = new URLSearchParams(); body.append('campo', campo);
-        fetch('/painel/prospeccao/comunicacao/revelar-segredo',
+        zapFetch('/painel/prospeccao/comunicacao/revelar-segredo',
               {method:'POST', headers:{'X-Requested-With':'fetch',
-               'Content-Type':'application/x-www-form-urlencoded'}, body:body})
-          .then(function(r){ return r.json(); })
-          .then(function(d){
+               'Content-Type':'application/x-www-form-urlencoded'}, body:body}).then(function(d){if(!d){btn.disabled = false; btn.textContent = original;
+            if(aviso){  aviso.style.color = 'var(--ambar)'; }return;}
             btn.disabled = false;
             if(!d.ok){ btn.textContent = original;
               if(aviso){ aviso.textContent = d.erro || 'Não consegui mostrar.';
@@ -13482,9 +13484,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             inp.focus(); inp.select();                 // pronto pra copiar
             if(aviso){ aviso.textContent = 'Cuidado: senha à mostra. Clique no 🙈 pra esconder.';
                        aviso.style.color = 'var(--mut)'; }
-          })
-          .catch(function(){ btn.disabled = false; btn.textContent = original;
-            if(aviso){ aviso.textContent = 'Falha de rede.'; aviso.style.color = 'var(--ambar)'; } });
+          });
       }
       </script>
       {% else %}<div class="mut" style="margin-top:.4rem;font-size:.8rem">SMTP (Google Workspace). Prospecção fria ✓</div>{% endif %}
@@ -13556,8 +13556,8 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         function waTestar(){var b=document.getElementById('watest-btn'),m=document.getElementById('watest-msg'),n=document.getElementById('watest-num');if(!b)return;
           var num=(n&&n.value||'').trim();b.disabled=true;var t=b.textContent;b.textContent='Enviando…';m.textContent='';m.style.color='';
           var fd=new FormData();fd.append('numero',num);
-          fetch('/painel/prospeccao/comunicacao/whatsapp-testar',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
-            b.disabled=false;b.textContent=t;m.textContent=d.msg||d.erro||'—';m.style.color=d.ok?'var(--verde-claro)':'var(--ambar)';}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';m.style.color='var(--ambar)';});}
+          zapFetch('/painel/prospeccao/comunicacao/whatsapp-testar',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d){b.disabled=false;b.textContent=t;m.style.color='var(--ambar)';return;}
+            b.disabled=false;b.textContent=t;m.textContent=d.msg||d.erro||'—';m.style.color=d.ok?'var(--verde-claro)':'var(--ambar)';});}
         </script>
         {% endif %}
         <div class="mut" style="margin-top:.4rem;font-size:.78rem">Pega o <b>Phone Number ID</b> e o <b>token</b> em developers.facebook.com → seu app → WhatsApp → API Setup. Assine <code>messages</code>.</div>
@@ -13733,17 +13733,16 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           _apsOcupado=true;
           var b=document.getElementById('wa-aps-btn');
           if(b){b.disabled=true;b.textContent='Perguntando…';}
-          fetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos?perguntar=1')
-            .then(function(r){return r.json();}).then(apsPinta)
-            .catch(function(){})
+          zapFetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos?perguntar=1')
+            .then(function(d){if(d)apsPinta(d);})
             .then(function(){_apsOcupado=false;
               if(b){b.disabled=false;b.textContent='Conferir aparelhos ligados';}});
         }
         // a saída por fora vem do BANCO: não toca no WhatsApp, então pode carregar
         // junto com a página e ficar sempre à vista
         document.addEventListener('DOMContentLoaded',function(){
-          fetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos')
-            .then(function(r){return r.json();}).then(apsPinta).catch(function(){});
+          zapFetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos')
+            .then(function(d){if(d)apsPinta(d);});
         });
         var _qrTimer=null;
         // ═══ RELÓGIO DO QR — chip 1 ════════════════════════════════════════════
@@ -13993,19 +13992,17 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             btn.title=conectado?'A sessão está de pé. Clique só se desconfiar do status — verifica sem derrubar nada.':'';
             btn.disabled=false;}
           if(d.status==='desconectado'||conectado){if(_c2Timer){clearInterval(_c2Timer);_c2Timer=null;}}}
-        function c2Poll(){fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status?chip='+encodeURIComponent(c2Chip()))
-          .then(function(r){return r.json();}).then(c2Show).catch(function(){c2Show(null);});}
+        function c2Poll(){zapFetch('/painel/prospeccao/comunicacao/whatsapp-qr-status?chip='+encodeURIComponent(c2Chip()))
+          .then(function(d){c2Show(d||null);});}
         function c2Iniciar(){var btn=document.getElementById('c2-btn'),msg=document.getElementById('c2-msg');
           btn.disabled=true;btn.textContent='Gerando…';if(msg)msg.textContent='';
           c2RelPara();   // lote novo: o próximo QR volta a valer 60s, não 20s
           var fd=new FormData();fd.append('chip',c2Chip());
-          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
-            .then(function(r){return r.json();}).then(function(d){
+          zapFetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d){btn.disabled=false;btn.textContent='📱 Gerar QR';
+              if(msg){msg.style.color='var(--ambar)';}return;}
               c2Show(d);
               if(!d.ok&&msg){msg.textContent=d.msg||d.erro||'Falha.';msg.style.color='var(--ambar)';return;}
-              if(_c2Timer)clearInterval(_c2Timer);_c2Timer=setInterval(c2Poll,3000);})
-            .catch(function(){btn.disabled=false;btn.textContent='📱 Gerar QR';
-              if(msg){msg.textContent='Falha de rede.';msg.style.color='var(--ambar)';}});}
+              if(_c2Timer)clearInterval(_c2Timer);_c2Timer=setInterval(c2Poll,3000);});}
         // Mesmo aviso do chip 1, e pelo mesmo motivo: este botão APAGA a credencial.
         // A diferença é que aqui ele apaga a DESTE chip — o chip 1 não sente nada.
         function c2Sair(){if(!confirm('⚠️ Isto NÃO é só desconectar.\\n\\n'
@@ -14024,35 +14021,29 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             + 'Deixe o WhatsApp já aberto em Aparelhos conectados › Conectar aparelho.\\n\\n'
             + 'Pode desconectar agora?'))return;
           var fd=new FormData();fd.append('chip',c2Chip());
-          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
-            .then(function(r){return r.json();}).then(function(d){
+          zapFetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d){var m=document.getElementById('c2-msg');
+              if(m){m.style.color='var(--ambar)';}return;}
               var m=document.getElementById('c2-msg');
               if(d&&d.ok===false){if(m){m.textContent='Não deu pra desconectar ('+(d.erro||'falha')+').';m.style.color='var(--ambar)';}return;}
               if(_c2Timer){clearInterval(_c2Timer);_c2Timer=null;}
-              c2Show({status:'desconectado',msg:'Desconectado.'});})
-            .catch(function(){var m=document.getElementById('c2-msg');
-              if(m){m.textContent='Falha de rede ao desconectar.';m.style.color='var(--ambar)';}});}
+              c2Show({status:'desconectado',msg:'Desconectado.'});});}
         function chipNovo(){
           var i=document.getElementById('c2-novo-nome'),m=document.getElementById('c2-novo-msg');
           var nome=(i&&i.value||'').trim();
           if(!nome){if(m){m.textContent='Dê um apelido pro chip.';m.style.color='var(--ambar)';}return;}
           var fd=new FormData();fd.append('apelido',nome);
-          fetch('/painel/prospeccao/comunicacao/chip-novo',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
-            .then(function(r){return r.json();}).then(function(d){
+          zapFetch('/painel/prospeccao/comunicacao/chip-novo',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d){if(m){m.style.color='var(--ambar)';}return;}
               if(!d||!d.ok){if(m){m.textContent=(d&&(d.msg||d.erro))||'Falha.';m.style.color='var(--ambar)';}return;}
               // recarrega pra tela nascer com o cartão do chip 2 — é uma vez só, e
               // evita duplicar em JS o bloco que o template já sabe desenhar
-              location.reload();})
-            .catch(function(){if(m){m.textContent='Falha de rede.';m.style.color='var(--ambar)';}});}
+              location.reload();});}
         function chipApelido(chip,campo){
           var i=document.getElementById(campo);if(!i)return;
           var fd=new FormData();fd.append('chip',chip||'');fd.append('apelido',i.value||'');
           var antes=i.style.borderColor;
-          fetch('/painel/prospeccao/comunicacao/chip-apelido',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
-            .then(function(r){return r.json();}).then(function(d){
+          zapFetch('/painel/prospeccao/comunicacao/chip-apelido',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d){i.style.borderColor='var(--ambar)';
+              setTimeout(function(){i.style.borderColor=antes;},1400);return;}
               i.style.borderColor=(d&&d.ok)?'var(--verde)':'var(--ambar)';
-              setTimeout(function(){i.style.borderColor=antes;},1400);})
-            .catch(function(){i.style.borderColor='var(--ambar)';
               setTimeout(function(){i.style.borderColor=antes;},1400);});}
         // NÃO consulta no load: a aba do chip 2 nasce escondida, e perguntar o
         // estado de uma sessão que ninguém está olhando é tráfego à toa no serviço.
@@ -14066,25 +14057,23 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           _aps2Ocupado=true;
           var b=document.getElementById('c2-aps-btn');
           if(b){b.disabled=true;b.textContent='Perguntando…';}
-          fetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos?perguntar=1&chip='+encodeURIComponent(c2Chip()))
-            .then(function(r){return r.json();}).then(function(j){apsPinta(j,'c2-aps-n','c2-aps-dica');})
-            .catch(function(){})
+          zapFetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos?perguntar=1&chip='+encodeURIComponent(c2Chip())).then(function(j){if(!j)return;apsPinta(j,'c2-aps-n','c2-aps-dica');})
             .then(function(){_aps2Ocupado=false;
               if(b){b.disabled=false;b.textContent='Conferir aparelhos ligados';}});
         }
         function qrPoll(){qrEsperando();
-          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status').then(function(r){return r.json();})
-            .then(qrShow).catch(qrIndefinido);}
+          zapFetch('/painel/prospeccao/comunicacao/whatsapp-qr-status')
+            .then(function(d){if(d)qrShow(d);else qrIndefinido();});}
         function qrIniciar(){var btn=document.getElementById('qr-btn'),msg=document.getElementById('qr-msg');
           btn.disabled=true;var t=btn.textContent;btn.textContent='Gerando…';if(msg)msg.textContent='';
           // pedido novo = lote novo de códigos: o próximo QR volta a ser o "primeiro"
           // (60s), senão ele herdaria os 20s do fim da tentativa anterior
           qrRelPara();
-          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+          zapFetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d){btn.disabled=false;btn.textContent=t;if(msg){msg.style.color='var(--ambar)';}return;}
             btn.disabled=false;btn.textContent=t;qrShow(d);
             if(!d.ok&&msg){msg.textContent=d.msg||d.erro||'Falha.';msg.style.color='var(--ambar)';return;}
             if(_qrTimer)clearInterval(_qrTimer);_qrTimer=setInterval(qrPoll,3000);
-          }).catch(function(){btn.disabled=false;btn.textContent=t;if(msg){msg.textContent='Falha de rede.';msg.style.color='var(--ambar)';}});}
+          });}
         // O texto é longo de propósito. "Desconectar o WhatsApp por QR desta empresa?"
         // fazia parecer um liga/desliga, e não é: o botão APAGA a credencial e o cofre
         // de chaves (wa_qr_auth inteira). Medido na conta 35 em 17/08 — um clique às
@@ -14121,21 +14110,20 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             + 'WhatsApp até alguém escanear.\\n\\n'
             + 'Deixe o WhatsApp já aberto em Aparelhos conectados › Conectar aparelho.\\n\\n'
             + 'Pode desconectar agora?'))return;
-          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+          zapFetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d){var m=document.getElementById('qr-msg');
+              if(m){m.style.color='var(--ambar)';}return;}
             // só declara desconectado se REALMENTE desconectou — senão o usuário ia
             // escanear um QR novo achando que a sessão antiga tinha caído
             if(d&&d.ok===false){var m=document.getElementById('qr-msg');
               if(m){m.textContent='Não deu pra desconectar ('+(d.erro||'falha')+'). Tente de novo.';m.style.color='var(--ambar)';}
               return;}
-            if(_qrTimer){clearInterval(_qrTimer);_qrTimer=null;}qrShow({status:'desconectado',msg:'Desconectado.'});})
-            .catch(function(){var m=document.getElementById('qr-msg');
-              if(m){m.textContent='Falha de rede ao desconectar. Tente de novo.';m.style.color='var(--ambar)';}});}
+            if(_qrTimer){clearInterval(_qrTimer);_qrTimer=null;}qrShow({status:'desconectado',msg:'Desconectado.'});});}
         // Apagar é irreversível, então a confirmação diz NÚMEROS REAIS (buscados
         // agora) em vez de um "tem certeza?" genérico. Quem lê "2.394 mensagens de
         // 14/07 a 17/08" decide de verdade; quem lê "tem certeza?" só clica em OK.
         function qrApagar(){
           var m=document.getElementById('qr-msg');
-          fetch('/painel/prospeccao/comunicacao/historico-resumo').then(function(r){return r.json();}).then(function(d){
+          zapFetch('/painel/prospeccao/comunicacao/historico-resumo').then(function(d){if(!d){if(m){m.style.color='var(--ambar)';}return;}
             if(!d||!d.ok){if(m){m.textContent='Não deu pra ler o histórico. Tente de novo.';m.style.color='var(--ambar)';}return;}
             if(!d.mensagens&&!d.conversas&&!d.contatos){
               if(m){m.textContent='Não há histórico de WhatsApp pra apagar.';m.style.color='';}return;}
@@ -14156,16 +14144,16 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               +' pareamento.\\n\\nApagar mesmo assim?';
             if(!confirm(txt))return;
             var b=document.getElementById('qr-apagar');if(b){b.disabled=true;b.textContent='Apagando…';}
-            fetch('/painel/prospeccao/comunicacao/historico-apagar',{method:'POST',headers:{'X-Requested-With':'fetch'}})
-              .then(function(r){return r.json();}).then(function(res){
+            zapFetch('/painel/prospeccao/comunicacao/historico-apagar',{method:'POST',headers:{'X-Requested-With':'fetch'}})
+              .then(function(res){
                 if(b){b.disabled=false;b.textContent='🗑️ Apagar histórico';}
+                if(!res)return;
                 if(!res||!res.ok){if(m){m.textContent=res&&res.erro?res.erro:'Não deu pra apagar.';m.style.color='var(--ambar)';}return;}
                 if(m){m.textContent='Histórico apagado: '+res.mensagens+' mensagens e '+res.conversas+' conversas.';
                       m.style.color='var(--verde-claro)';}
                 if(b)b.style.display='none';
-              }).catch(function(){if(b){b.disabled=false;b.textContent='🗑️ Apagar histórico';}
-                if(m){m.textContent='Falha de rede ao apagar.';m.style.color='var(--ambar)';}});
-          }).catch(function(){if(m){m.textContent='Falha de rede.';m.style.color='var(--ambar)';}});}
+              });
+          });}
         // Ao abrir a página, tenta reconectar sozinho em vez de só checar o status —
         // o serviço Node reinicia a cada deploy (perde a sessão da memória, mas as
         // credenciais continuam salvas), e sem isso o usuário via "Desconectado" e
@@ -14176,9 +14164,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           // com prazo: este POST é o que mais demora (religa antes de responder), e
           // era ele que deixava o "Verificando…" preso na abertura da tela.
           qrEsperando();
-          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'}})
-            .then(function(r){return r.json();}).then(function(d){qrShow(d);})
-            .catch(function(){qrPoll();})
+          zapFetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d){qrPoll();return;}qrShow(d);})
             .then(function(){if(_qrTimer)clearInterval(_qrTimer);_qrTimer=setInterval(qrPoll,3000);});
         }
         {% if canais.wa_provedor=='qr' %}qrAutoReconectar();{% endif %}
@@ -14331,11 +14317,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" id="detfb-msg" style="font-size:.8rem;margin-top:.35rem"></div>
       <script>
       function detectarFB(b){var m=document.getElementById('detfb-msg');b.disabled=true;var t=b.textContent;b.textContent='Detectando…';m.textContent='';m.style.color='';
-        fetch('/painel/prospeccao/comunicacao/detectar-fb',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
+        zapFetch('/painel/prospeccao/comunicacao/detectar-fb',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d){b.disabled=false;b.textContent=t;m.style.color='var(--ambar)';return;}b.disabled=false;b.textContent=t;
           if(!d.ok){m.style.color='var(--ambar)';m.textContent='⚠ '+(d.erro||'Não consegui.');return;}
           if(d.assinado){m.style.color='var(--verde-claro)';m.textContent='✓ Página "'+(d.nome||'?')+'" (ID '+d.page_id+') detectada e INSCRITA no webhook.'+(d.varias?' (usei a 1ª — você tem mais de uma Página)':'')+' Recarregando…';}
           else{m.style.color='var(--ambar)';m.textContent='Página "'+(d.nome||'?')+'" (ID '+d.page_id+') salva, mas a inscrição falhou: '+(d.assinar_erro||'?');}
-          setTimeout(function(){location.reload();},2400);}).catch(function(){b.disabled=false;b.textContent=t;m.style.color='var(--ambar)';m.textContent='Falha de rede.';});}
+          setTimeout(function(){location.reload();},2400);});}
       </script>{% endif %}
       <div class="mut" style="margin-top:.4rem;font-size:.8rem">No app da Meta, aponte o webhook pra <code>/webhooks/meta</code> (verify token = META_VERIFY_TOKEN) e assine <code>messages</code>.</div>
     </div>
@@ -14359,11 +14345,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" id="detig-msg" style="font-size:.8rem;margin-top:.35rem"></div>
       <script>
       function detectarIG(b){var m=document.getElementById('detig-msg');b.disabled=true;var t=b.textContent;b.textContent='Detectando…';m.textContent='';m.style.color='';
-        fetch('/painel/prospeccao/comunicacao/detectar-ig',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
+        zapFetch('/painel/prospeccao/comunicacao/detectar-ig',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d){b.disabled=false;b.textContent=t;m.style.color='var(--ambar)';return;}b.disabled=false;b.textContent=t;
           if(!d.ok){m.style.color='var(--ambar)';m.textContent='⚠ '+(d.erro||'Não consegui.');return;}
           if(d.assinado){m.style.color='var(--verde-claro)';m.textContent='✓ Conta @'+(d.username||'?')+' (ID '+d.user_id+') detectada e INSCRITA no webhook'+(d.token_longo?' · token de 60 dias ✓':'')+'. Recarregando…';}
           else{m.style.color='var(--ambar)';m.textContent='Conta @'+(d.username||'?')+' salva, mas a inscrição falhou: '+(d.assinar_erro||'?')+'. (token pode ter expirado)';}
-          setTimeout(function(){location.reload();},2200);}).catch(function(){b.disabled=false;b.textContent=t;m.style.color='var(--ambar)';m.textContent='Falha de rede.';});}
+          setTimeout(function(){location.reload();},2200);});}
       </script>{% endif %}
       <div class="mut" style="margin-top:.4rem;font-size:.8rem">Webhook: <code>/webhooks/meta</code> · assine <code>messages</code> no produto Instagram do app.</div>
     </div>
@@ -14535,7 +14521,7 @@ function cxOpen(el,id){
   document.querySelectorAll('.cx-conv').forEach(function(x){x.classList.remove('on');});
   var lb=document.getElementById('cxc-'+id);if(lb){lb.classList.add('on');var dt=lb.querySelector('.cx-undot');if(dt)dt.remove();}
   th.innerHTML='<div class="cx-empty">Carregando…</div>';
-  fetch('/painel/prospeccao/comunicacao/thread/'+id).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/comunicacao/thread/'+id).then(function(d){if(!d){th.innerHTML='<div class="cx-empty">Não deu pra abrir.</div>';return;}
     if(_cxConv!==id)return;
     if(!d.ok){th.innerHTML='<div class="cx-empty">Não consegui abrir.</div>';return;}
     var L=d.lead;_cxSig=cxSig(d);_cxAg=d.agente_ativo?1:0;_cxPr=d.pode_responder?1:0;
@@ -14578,11 +14564,11 @@ function cxOpen(el,id){
     cx.innerHTML=''
       +'<div class="cx-sec"><h4>Lead</h4>'+kv('Empresa',L.empresa)+kv('Segmento',L.segmento)+kv('Cidade',(L.cidade||'')+(L.uf?'/'+L.uf:''))+kv('WhatsApp',L.whatsapp)+kv('E-mail',L.email)+resp+kv('Status',L.status_rot)+'</div>'
       +(L.id?('<div class="cx-sec"><button type="button" class="pbtn" style="width:100%" onclick="kbAbrirLead(event,'+L.id+',this)" title="ver os dados, o histórico e mudar a situação sem sair da conversa">Abrir ficha do lead</button></div>'):('<div class="cx-sec"><button class="pbtn" style="width:100%" onclick="cxVirarLead('+d.conversa_id+')">➕ Levar para o lead</button><div class="mut" style="font-size:.74rem;margin-top:.4rem">Este contato ainda não é um lead. Crie o lead quando fizer sentido.</div></div>'));
-  }).catch(function(){th.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
+  });
 }
 function cxPollThread(){
   if(!_cxConv)return;var id=_cxConv;
-  fetch('/painel/prospeccao/comunicacao/thread/'+id).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/comunicacao/thread/'+id).then(function(d){if(!d)return;
     if(!d.ok||_cxConv!==id)return;
     // recarga TOTAL do painel só quando muda algo estrutural (agente ligado/
     // desligado ou o canal parou/voltou a poder responder) — nunca por causa do
@@ -14597,7 +14583,7 @@ function cxPollThread(){
       b.innerHTML=cxMsgsHtml(d);
       b.scrollTop=perto?b.scrollHeight:st;
     }
-  }).catch(function(){});
+  });
 }
 function cxParams(){var q=new URLSearchParams(location.search);return 'canal='+(q.get('canal')||'')+'&vendedor='+(q.get('vendedor')||'')+'&escopo='+encodeURIComponent(_cxEscopo||'msg')+'&q='+encodeURIComponent(cxTermo());}
 // ------------------------------------------------------------------ a busca
@@ -14702,12 +14688,11 @@ function cxDonoMenu(ev,leadId,donoId,el){
 function cxDonoEscolher(leadId,vendId){
   cxDonoFechar();
   var fd=new FormData();fd.append('vendedor_id',vendId?String(vendId):'');
-  fetch('/painel/prospeccao/'+leadId+'/atribuir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/'+leadId+'/atribuir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d)return;
       if(!d.ok){alert(d.erro||'Não consegui trocar o responsável.');return;}
       cxPollList();                       // a lista se redesenha com o dono novo
       if(_cxConv)cxOpen(document.getElementById('cxc-'+_cxConv),_cxConv);
-    }).catch(function(){alert('Falha de rede.');});
+    });
 }
 // A faixa dos leads sem dono. Dois estados: fora do filtro ela CONTA e leva pra lá;
 // dentro do filtro ela AGE. Some quando não há órfão — nada de faixa permanente
@@ -14750,20 +14735,19 @@ function cxLote(campos,bt){
   var rot=bt.textContent;bt.disabled=true;bt.textContent='Atribuindo…';
   var fd=new FormData();fd.append('escopo',_cxEscopo||'msg');
   Object.keys(campos).forEach(function(k){fd.append(k,campos[k]);});
-  fetch('/painel/prospeccao/comunicacao/atribuir-lote',
-        {method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/comunicacao/atribuir-lote',
+        {method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d){bt.disabled=false;bt.textContent=rot;return;}
       bt.disabled=false;bt.textContent=rot;
       if(!d.ok){alert(d.erro||'Não consegui atribuir.');return;}
       // o aviso do rodízio desligado é o que impede a conta de acumular órfãos de
       // novo — vale interromper pra ler.
       if(d.aviso)alert(d.aviso);
       _cxSemDonoN=-1;cxPollList();
-    }).catch(function(){bt.disabled=false;bt.textContent=rot;alert('Falha de rede.');});
+    });
 }
 function cxPollList(){
   var box=document.getElementById('cx-list');if(!box)return;
-  fetch('/painel/prospeccao/comunicacao/lista?'+cxParams()).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/comunicacao/lista?'+cxParams()).then(function(d){if(!d)return;
     if(!d.ok)return;
     // aviso de importação: mostra o total já importado subindo, que é o que
     // realmente responde "ainda está vindo mais?"
@@ -14803,7 +14787,7 @@ function cxPollList(){
     var perto=box.scrollTop<40;var st=box.scrollTop;
     box.innerHTML=h;
     box.scrollTop=perto?0:st;
-  }).catch(function(){});
+  });
 }
 // Tirar o filtro de canal SEM perder o termo. O filtro mora na URL (é um form GET
 // de sempre) e o termo mora no campo — então recarrega com o canal vazio e leva o
@@ -14815,8 +14799,7 @@ function cxTodosOsCanais(){
 }
 function cxAgente(convId,on){
   var fd=new FormData();fd.append('conversa_id',convId);fd.append('ativar',on?'1':'0');
-  fetch('/painel/prospeccao/comunicacao/agente-conversa',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
-    .then(function(r){return r.json();}).then(function(d){if(!d.ok){alert(d.erro||'Não consegui.');return;}cxOpen(document.getElementById('cxc-'+convId),convId);}).catch(function(){alert('Falha de rede.');});
+  zapFetch('/painel/prospeccao/comunicacao/agente-conversa',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d)return;if(!d.ok){alert(d.erro||'Não consegui.');return;}cxOpen(document.getElementById('cxc-'+convId),convId);});
 }
 // Trocar o responsável sem sair da conversa. Mesma rota da ficha do lead
 // (/atribuir), que responde JSON quando vem por fetch — o guard de quem pode
@@ -14826,14 +14809,13 @@ function cxAtribuir(leadId,sel){
   var antes=sel.getAttribute('data-antes')||'';
   sel.disabled=true;
   var fd=new FormData();fd.append('vendedor_id',sel.value);
-  fetch('/painel/prospeccao/'+leadId+'/atribuir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/'+leadId+'/atribuir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d){sel.disabled=false;sel.value=antes;return;}
       sel.disabled=false;
       if(!d.ok){sel.value=antes;alert(d.erro||'Não consegui trocar o responsável.');return;}
       sel.setAttribute('data-antes',sel.value);
       // recarrega a conversa pro cabeçalho e a lista mostrarem o dono novo
       if(_cxConv)cxOpen(document.getElementById('cxc-'+_cxConv),_cxConv);
-    }).catch(function(){sel.disabled=false;sel.value=antes;alert('Falha de rede.');});
+    });
 }
 // "Levar para o lead" agora CONFIRMA antes de criar. Sem isso o clique gravava na
 // hora com o número cru no lugar do nome — e o funil enchia de lead chamado "5586…"
@@ -14843,12 +14825,11 @@ var _cxVlTemp='morno',_cxVlTipo='pf';
 function cxVlFechar(){var m=document.getElementById('cx-vl');if(m)m.parentNode.removeChild(m);
   document.removeEventListener('keydown',cxVlEsc);}
 function cxVirarLead(convId){
-  fetch('/painel/prospeccao/comunicacao/virar-lead/'+convId,{headers:{'X-Requested-With':'fetch'}})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/comunicacao/virar-lead/'+convId,{headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d)return;
       if(!d.ok){alert(d.erro||'Não consegui.');return;}
       if(d.ja_lead){location.href='/painel/prospeccao/'+d.lead_id;return;}
       cxVlAbrir(convId,d);
-    }).catch(function(){alert('Falha de rede.');});
+    });
 }
 function cxVlAbrir(convId,d){
   cxVlFechar();
@@ -14910,11 +14891,9 @@ function cxVlCriar(convId){
   fd.append('telefone',(document.getElementById('vl-tel').value||'').trim());
   fd.append('email',(document.getElementById('vl-mail').value||'').trim());
   fd.append('temperatura',_cxVlTemp);fd.append('vendedor_id',vd?vd.value:'');
-  fetch('/painel/prospeccao/comunicacao/virar-lead',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/comunicacao/virar-lead',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d){b.disabled=false;b.textContent='Criar lead';return;}
       if(!d.ok){b.disabled=false;b.textContent='Criar lead';alert(d.erro||'Não consegui.');return;}
-      location.href='/painel/prospeccao/'+d.lead_id;})
-    .catch(function(){b.disabled=false;b.textContent='Criar lead';alert('Falha de rede.');});
+      location.href='/painel/prospeccao/'+d.lead_id;});
 }
 // Envio NÃO BLOQUEIA. A mensagem aparece na hora, o campo fica livre pra
 // escrever a próxima e o envio corre por trás. Antes o botão ficava desabilitado
@@ -14938,14 +14917,13 @@ function cxEnviarPend(pid){
   var p=null;_cxPend.forEach(function(x){if(x.id===pid)p=x;});
   if(!p)return;
   var fd=new FormData();fd.append('conversa_id',p.conv);fd.append('texto',p.texto);
-  fetch('/painel/prospeccao/comunicacao/responder',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/comunicacao/responder',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(d){if(!d){cxPendFalhou(pid,'falha de rede');return;}
       if(d&&d.ok){
         // some da lista de pendentes; o balão de verdade vem no próximo desenho
         _cxPend=_cxPend.filter(function(x){return x.id!==pid;});
         _cxSig='';cxPollThread();cxPollList();
       }else{cxPendFalhou(pid,d&&d.erro);}
-    }).catch(function(){cxPendFalhou(pid,'falha de rede');});
+    });
 }
 function cxPendFalhou(pid,motivo){
   _cxPend.forEach(function(x){if(x.id===pid){x.erro=true;x.motivo=motivo||'';}});
@@ -15351,10 +15329,8 @@ function kpiAbre(sinal, el){
   var timer=null;
   function tick(){
     if(document.hidden)return;
-    fetch('/painel/prospeccao/campanhas/metricas',{headers:{'Accept':'application/json'}})
-      .then(function(r){return r.ok?r.json():null;})
-      .then(function(d){ if(d&&d.ok){ (d.camps||[]).forEach(paint); if(d.totais)paintTot(d.totais); } })
-      .catch(function(){});
+    zapFetch('/painel/prospeccao/campanhas/metricas',{headers:{'Accept':'application/json'}})
+      .then(function(d){ if(d&&d.ok){ (d.camps||[]).forEach(paint); if(d.totais)paintTot(d.totais); } });
   }
   function start(){ if(timer)return; timer=setInterval(tick,10000); }
   document.addEventListener('visibilitychange',function(){
@@ -15860,12 +15836,11 @@ function mtab(btn,tipo){
 function campRemLead(btn,camp,pid){
   if(!confirm('Remover este lead da campanha? Ele volta pra Base e pode ser reenviado depois.'))return;
   var body=new URLSearchParams();body.append('prospeccao_id',pid);
-  fetch('/painel/prospeccao/campanhas/'+camp+'/remover-lead',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/campanhas/'+camp+'/remover-lead',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(d){if(!d)return;
       if(!d.ok){alert('Não consegui remover ('+(d.erro||'?')+').');return;}
       var tr=btn.closest('tr');if(tr){var nx=tr.nextElementSibling;if(nx&&nx.classList.contains('histrow'))nx.remove();tr.remove();}
       clUpd();
-    }).catch(function(){alert('Falha de rede.');});
+    });
 }
 function clChecked(){var a=[];document.querySelectorAll('.cl-ck:checked').forEach(function(c){a.push(c.value);});return a;}
 function rvAb(id){document.getElementById(id).classList.toggle('open');}
@@ -15886,12 +15861,11 @@ function rvFila(camp){
   if(!confirm(aviso))return;
   var body=new URLSearchParams();ids.forEach(function(id){body.append('ids',id);});
   var btn=document.getElementById('rv-btn');if(btn)btn.disabled=true;
-  fetch('/painel/prospeccao/campanhas/'+camp+'/recolocar-na-fila',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/campanhas/'+camp+'/recolocar-na-fila',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(d){if(!d){rvUpd();return;}
       if(!d.ok){alert('Não consegui recolocar ('+(d.erro||'?')+').');rvUpd();return;}
       ids.forEach(function(id){var el=document.getElementById('rv'+id);if(el)el.remove();});
       rvUpd();
-    }).catch(function(){alert('Falha de rede.');rvUpd();});
+    });
 }
 function clToggleAll(el){document.querySelectorAll('.cl-ck').forEach(function(c){c.checked=el.checked;});clUpd();}
 function clUpd(){
@@ -15910,15 +15884,14 @@ function clRemSelecionados(camp){
   if(!confirm('Remover '+ids.length+' lead(s) da campanha? Eles voltam pra Base e podem ser reenviados depois.'))return;
   var body=new URLSearchParams();ids.forEach(function(id){body.append('ids',id);});
   var btn=document.getElementById('cl-rem-btn');if(btn)btn.disabled=true;
-  fetch('/painel/prospeccao/campanhas/'+camp+'/remover-leads',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/campanhas/'+camp+'/remover-leads',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(d){if(!d){clUpd();return;}
       if(!d.ok){alert('Não consegui remover ('+(d.erro||'?')+').');clUpd();return;}
       ids.forEach(function(id){
         var cb=document.querySelector('.cl-ck[value="'+id+'"]');if(!cb)return;
         var tr=cb.closest('tr');if(tr){var nx=tr.nextElementSibling;if(nx&&nx.classList.contains('histrow'))nx.remove();tr.remove();}
       });
       clUpd();
-    }).catch(function(){alert('Falha de rede.');clUpd();});
+    });
 }
 function hEsc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 function campHist(camp,pid,btn){
@@ -15929,8 +15902,7 @@ function campHist(camp,pid,btn){
   var row=document.createElement('tr');row.className='histrow';
   row.innerHTML='<td colspan="'+ncols+'"><div class="mut" style="padding:.6rem;font-size:.8rem">carregando histórico…</div></td>';
   tr.parentNode.insertBefore(row,tr.nextSibling);
-  fetch('/painel/prospeccao/campanhas/'+camp+'/lead/'+pid+'/historico',{headers:{'X-Requested-With':'fetch'}})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/campanhas/'+camp+'/lead/'+pid+'/historico',{headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d){row.firstChild.innerHTML='<div class="mut" style="padding:.6rem">falha de rede</div>';return;}
       if(!d.ok){row.firstChild.innerHTML='<div class="mut" style="padding:.6rem">não consegui carregar</div>';return;}
       function col(titulo,arr){
         var h='<div class="histcol"><h5>'+titulo+'</h5>';
@@ -15941,7 +15913,7 @@ function campHist(camp,pid,btn){
         return h+'</div>';
       }
       row.firstChild.innerHTML='<div class="histbox">'+col('📧 E-mail',d.email)+col('💬 WhatsApp',d.whatsapp)+'</div>';
-    }).catch(function(){row.firstChild.innerHTML='<div class="mut" style="padding:.6rem">falha de rede</div>';});
+    });
 }
 function mfile(inp){
   var f=inp.files&&inp.files[0]; if(!f)return;
@@ -15957,28 +15929,26 @@ function aplicarModelo(id){
   var sel=document.getElementById('modelo-sel');var cod=sel.value,nome=sel.options[sel.selectedIndex].text;
   if(!confirm('Aplicar o modelo "'+nome+'"? Isso substitui a sequência atual (você ainda pode editar e salvar).'))return;
   var body=new URLSearchParams();body.append('codigo',cod);
-  fetch('/painel/prospeccao/campanhas/'+id+'/usar-modelo',{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/x-www-form-urlencoded'},body:body})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/campanhas/'+id+'/usar-modelo',{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/x-www-form-urlencoded'},body:body}).then(function(d){if(!d)return;
       if(!d.ok){alert('Não consegui aplicar ('+(d.erro||'?')+').');return;}
       location.reload();
-    }).catch(function(){alert('Falha de rede.');});
+    });
 }
 function salvarModelo(id){
   var nome=prompt('Nome do modelo (ex.: Pet shop · meu jeito):');
   if(!nome||!nome.trim())return;
   var body=new URLSearchParams();body.append('nome',nome.trim());
-  fetch('/painel/prospeccao/campanhas/'+id+'/salvar-modelo',{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/x-www-form-urlencoded'},body:body})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/campanhas/'+id+'/salvar-modelo',{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/x-www-form-urlencoded'},body:body}).then(function(d){if(!d)return;
       if(!d.ok){alert('Não consegui salvar ('+(d.erro||'?')+').');return;}
       alert('Modelo salvo ✓ — já aparece na lista.');location.reload();
-    }).catch(function(){alert('Falha de rede.');});
+    });
 }
 function addPasso(){document.getElementById('passos').insertAdjacentHTML('beforeend',novoPasso());}
 function remPasso(b){var ps=document.querySelectorAll('#passos .passo');if(ps.length<=1){alert('Deixe ao menos 1 passo.');return;}b.closest('.passo').remove();}
 function previaIA(id){var b=document.getElementById('pia-btn');if(b){b.disabled=true;b.textContent='Gerando…';}
-  fetch('/painel/prospeccao/campanhas/'+id+'/previa-ia',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(r){return r.json();}).then(function(d){if(b){b.disabled=false;b.textContent='🤖 Gerar';}
+  zapFetch('/painel/prospeccao/campanhas/'+id+'/previa-ia',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(d){if(!d){if(b){b.disabled=false;b.textContent='🤖 Gerar';}return;}if(b){b.disabled=false;b.textContent='🤖 Gerar';}
     if(!d.ok){alert(d.erro||'Não consegui.');return;}
-    document.getElementById('pv-assunto').textContent=d.assunto;document.getElementById('pv-corpo').textContent=d.corpo;}).catch(function(){if(b){b.disabled=false;b.textContent='🤖 Gerar';}alert('Falha de rede.');});}
+    document.getElementById('pv-assunto').textContent=d.assunto;document.getElementById('pv-corpo').textContent=d.corpo;});}
 </script>
 {% endblock %}"""
 
@@ -16140,10 +16110,7 @@ _RADAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 function radarFalei(pid, desfazer){
   var b = new URLSearchParams(); b.set('pid', pid);
   if(desfazer) b.set('desfazer','1');
-  fetch('/painel/prospeccao/radar/contatado',{method:'POST',headers:{'X-Requested-With':'fetch'},body:b})
-    .then(function(r){return r.json()})
-    .then(function(d){ if(d.ok){ location.reload(); } else { alert('Não consegui marcar ('+(d.erro||'?')+').'); } })
-    .catch(function(){ alert('Não consegui marcar.'); });
+  zapFetch('/painel/prospeccao/radar/contatado',{method:'POST',headers:{'X-Requested-With':'fetch'},body:b}).then(function(d){if(!d){alert('Não consegui marcar.');return;} if(d.ok){ location.reload(); } else { alert('Não consegui marcar ('+(d.erro||'?')+').'); } });
 }
 // "tempo real" aqui é recarregar sozinho: os webhooks escrevem na hora e o poller
 // roda a cada 2min, então 60s de atraso é menos que a granularidade do dado.
@@ -16599,12 +16566,10 @@ function rgToast(msg,erro){var t=document.getElementById('rg-toast');
   t.textContent=msg;t.style.opacity='1';clearTimeout(t._t);t._t=setTimeout(function(){t.style.opacity='0';},2600);}
 function rgDia(el){setTimeout(function(){el.classList.toggle('on',el.querySelector('input').checked);},0);}
 function rgSalvar(ev){ev.preventDefault();var f=ev.target;
-  fetch(f.action,{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData(f)})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch(f.action,{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData(f)}).then(function(d){if(!d){return;}
       rgToast(d.ok?(d.recarrega?'Fase alterada — reordenando…':'Etapa salva ✓')
                   :(d.erro||'Não consegui salvar'),!d.ok);
-      if(d.ok&&d.recarrega){setTimeout(function(){location.reload();},900);}})
-    .catch(function(){rgToast('Falha de rede',true);});
+      if(d.ok&&d.recarrega){setTimeout(function(){location.reload();},900);}});
   return false;}
 </script>
 {% endblock %}"""

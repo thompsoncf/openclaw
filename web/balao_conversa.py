@@ -178,7 +178,7 @@ function kbAbrirChat(ev,convId,aba,btn,nome){
   // "fora" e fecharia o balão antes de ele aparecer.
   setTimeout(function(){document.addEventListener('click',_chatPopFora,true);document.addEventListener('keydown',_chatPopEsc,true);
     window.addEventListener('scroll',_chatPopRolou,true);},0);
-  fetch('/painel/prospeccao/comunicacao/thread/'+convId).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/comunicacao/thread/'+convId).then(function(d){if(!d){if(_chatPop===pop)pop.querySelector('#cp-msgs').innerHTML='<div class="cx-empty">Não deu pra carregar.</div>';return;}
     if(_chatPop!==pop)return;   // o popover foi trocado/fechado antes da resposta chegar
     var box=pop.querySelector('#cp-msgs');
     box.innerHTML=d.ok?kbMsgsHtml(d):'<div class="cx-empty">Não consegui abrir.</div>';
@@ -195,8 +195,6 @@ function kbAbrirChat(ev,convId,aba,btn,nome){
       comp.innerHTML='<div class="cx-stub">Responder por aqui <span class="lbl2">em breve</span></div>';
     }
     _cpPrefill='';
-  }).catch(function(){
-    if(_chatPop===pop)pop.querySelector('#cp-msgs').innerHTML='<div class="cx-empty">Falha de rede.</div>';
   });
 }
 var _cpPrefill='';
@@ -207,17 +205,17 @@ function kbResponderChat(convId){
   if(!texto)return;
   ta.disabled=true;
   var body=new URLSearchParams();body.append('conversa_id',convId);body.append('texto',texto);
-  fetch('/painel/prospeccao/comunicacao/responder',{method:'POST',body:body}).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/comunicacao/responder',{method:'POST',body:body}).then(function(d){if(!d){if(ta)ta.disabled=false;return;}
     if(!_chatPop)return;
     ta.disabled=false;
     if(!d.ok){alert(d.erro||'Não consegui enviar.');return;}
     ta.value='';
-    fetch('/painel/prospeccao/comunicacao/thread/'+convId).then(function(r){return r.json();}).then(function(d2){
-      if(!_chatPop)return;
+    zapFetch('/painel/prospeccao/comunicacao/thread/'+convId).then(function(d2){
+      if(!d2||!_chatPop)return;
       var box=_chatPop.querySelector('#cp-msgs');
       if(box&&d2.ok){box.innerHTML=kbMsgsHtml(d2);box.scrollTop=box.scrollHeight;}
     });
-  }).catch(function(){if(ta)ta.disabled=false;alert('Erro de conexão.');});
+  });
 }"""
 
 

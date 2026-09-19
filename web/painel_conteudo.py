@@ -1256,7 +1256,7 @@ _LISTA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + _EXTRA_CSS 
 </div>
 
 <script>
-fetch('/painel/prospeccao/ia-insta/diagnostico').then(function(r){ return r.json(); }).then(function(d){
+zapFetch('/painel/prospeccao/ia-insta/diagnostico').then(function(d){if(!d){document.getElementById('diag').textContent = '';return;}
   var el = document.getElementById('diag');
   if (d.ok) {
     el.textContent = '● Conectado a ' + (d.pagina || 'sua Página')
@@ -1266,7 +1266,7 @@ fetch('/painel/prospeccao/ia-insta/diagnostico').then(function(r){ return r.json
     el.textContent = d.erro || 'sem conexão com a Meta';
     el.style.color = '#e0b25a';
   }
-}).catch(function(){ document.getElementById('diag').textContent = ''; });
+});
 </script>
 {% endblock %}"""
 
@@ -1493,20 +1493,15 @@ _POST_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + _EXTRA_CSS +
 <script>
 function salvarLegenda(){
   var fd = new FormData(); fd.append('legenda', document.getElementById('legenda').value);
-  fetch('/painel/prospeccao/ia-insta/{{ post.id }}/legenda', {method:'POST', body:fd})
-    .then(function(r){ return r.json(); })
-    .then(function(d){ document.getElementById('leg-ok').textContent = d.ok ? 'salvo' : 'não salvou'; });
+  zapFetch('/painel/prospeccao/ia-insta/{{ post.id }}/legenda', {method:'POST', body:fd}).then(function(d){if(!d)return; document.getElementById('leg-ok').textContent = d.ok ? 'salvo' : 'não salvou'; });
 }
 function publicar(){
   var b = document.getElementById('btn-pub');
   b.disabled = true; b.textContent = 'Publicando…';
-  fetch('/painel/prospeccao/ia-insta/{{ post.id }}/publicar', {method:'POST'})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
+  zapFetch('/painel/prospeccao/ia-insta/{{ post.id }}/publicar', {method:'POST'}).then(function(d){if(!d){b.disabled = false; b.textContent = 'Publicar agora';return;}
       if (d.ok) { location.href = '/painel/prospeccao/ia-insta'; }
       else { b.disabled = false; b.textContent = 'Publicar agora'; alert(d.erro || 'Não consegui publicar.'); }
-    })
-    .catch(function(){ b.disabled = false; b.textContent = 'Publicar agora'; });
+    });
 }
 </script>
 {% endblock %}"""

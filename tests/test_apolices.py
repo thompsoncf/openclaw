@@ -16,6 +16,7 @@ voltar:
   128 e 171, pela terceira vez: o CHECK que não conhece o tipo novo derruba o
   tick INTEIRO do ticker, não só o aviso da corretora.
 """
+import json
 import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -43,7 +44,10 @@ create table clientes (id bigserial primary key, dono_id bigint references conta
 create table conversas (id bigserial primary key, conta_id bigint, contato_ref text,
   contato_nome text, ultima_msg_em timestamptz);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text, texto text,
-  criado_em timestamptz not null default now());
+  criado_em timestamptz not null default now(),
+  -- o ponteiro da mídia (migração 187): é por ele que o PDF que chegou no
+  -- WhatsApp vira candidato a apólice, sem o arquivo encostar no banco
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text);
 create table lembretes_enviados (id bigserial primary key,
   conta_id bigint not null references contas(id) on delete cascade,
   tipo text not null check (tipo in ('resumo','aviso')),
@@ -672,3 +676,70 @@ def test_o_que_esta_alem_de_60_dias_nao_vira_push(limpo, monkeypatch):
     enviados = _espiao(monkeypatch)
     assert lb._renovacoes(limpo, _agora()) == 0
     assert enviados == []
+
+
+# ───────────────── OS PDFs QUE CHEGAM PELO WHATSAPP VINCULADO ─────────────────
+#
+# O que estes testes seguram: o escopo (o id da mensagem é adivinhável) e a
+# recusa em cadastrar sozinho. Na conta da Liberal, medido em 18/09/2026, a
+# maioria dos PDFs que chegam não é apólice — é boleto, extrato e petição.
+
+
+def _msg_com_pdf(limpo, conta_id, *, nome, de="Corretor", direcao="in",
+                 tipo="documento", mimetype="application/pdf", dias=1):
+    with limpo.connection() as c:
+        cv = c.execute(
+            "insert into conversas (conta_id, contato_ref, contato_nome, ultima_msg_em) "
+            "values (%s, '5586999990000', %s, now()) returning id",
+            (conta_id, de)).fetchone()[0]
+        mid = c.execute(
+            "insert into mensagens (conversa_id, direcao, texto, criado_em, midia_ref, "
+            "  midia_tipo, midia_meta) "
+            "values (%s, %s, %s, now() - make_interval(days => %s), %s, %s, %s) returning id",
+            (cv, direcao, "documento", dias,
+             json.dumps({"directPath": "/x", "mediaKey": "aaaa", "mimetype": mimetype}),
+             tipo, json.dumps({"nome": nome, "bytes": 120000}))).fetchone()[0]
+        c.commit()
+    return mid
+
+
+def test_lista_os_pdfs_que_chegaram(limpo):
+    _msg_com_pdf(limpo, CONTA, nome="PROPOSTA DENISE.pdf")
+    itens = ap.pdfs_do_whatsapp(limpo, CONTA)
+    assert [i["nome"] for i in itens] == ["PROPOSTA DENISE.pdf"]
+    assert itens[0]["parece_apolice"] is True
+    assert itens[0]["ja_cadastrada"] is False
+
+
+def test_boleto_tambem_aparece_mas_sem_a_marca(limpo):
+    """Marcar é palpite; esconder seria decidir pela pessoa."""
+    _msg_com_pdf(limpo, CONTA, nome="invoice-2000017755025792.pdf")
+    itens = ap.pdfs_do_whatsapp(limpo, CONTA)
+    assert len(itens) == 1 and itens[0]["parece_apolice"] is False
+
+
+def test_nao_vaza_pdf_de_outra_conta(limpo):
+    outra = _msg_com_pdf(limpo, 38, nome="APOLICE DE OUTRA CORRETORA.pdf")
+    assert ap.pdfs_do_whatsapp(limpo, CONTA) == []
+    assert ap.ref_do_pdf(limpo, CONTA, outra) is None
+    assert ap.ref_do_pdf(limpo, 38, outra) is not None
+
+
+def test_so_entrada_e_so_documento(limpo):
+    _msg_com_pdf(limpo, CONTA, nome="mandei eu.pdf", direcao="out")
+    _msg_com_pdf(limpo, CONTA, nome="foto.jpg", tipo="imagem", mimetype="image/jpeg")
+    assert ap.pdfs_do_whatsapp(limpo, CONTA) == []
+
+
+def test_o_que_ja_virou_apolice_sai_da_lista(limpo):
+    mid = _msg_com_pdf(limpo, CONTA, nome="PROPOSTA JOSE.pdf")
+    assert ap.pdfs_do_whatsapp(limpo, CONTA)[0]["ja_cadastrada"] is False
+    _apolice(limpo, pdf_caminho="apolice/37/x.pdf",
+             pdf_lido={"origem": {"whatsapp_msg": mid}})
+    assert ap.pdfs_do_whatsapp(limpo, CONTA)[0]["ja_cadastrada"] is True
+
+
+def test_pdf_velho_demais_nao_entra(limpo):
+    _msg_com_pdf(limpo, CONTA, nome="PROPOSTA ANTIGA.pdf", dias=200)
+    assert ap.pdfs_do_whatsapp(limpo, CONTA) == []
+    assert len(ap.pdfs_do_whatsapp(limpo, CONTA, dias=365)) == 1

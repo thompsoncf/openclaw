@@ -556,3 +556,90 @@ def marcar_vencidas(pool, hoje: date | None = None) -> int:
                 "update apolices set situacao = 'vencida', atualizado_em = now() "
                 " where situacao = any(%s) and vigencia_fim < %s", (list(VIVAS), hoje))
             return cur.rowcount or 0
+
+
+# ─────────────────────── OS PDFs QUE JÁ CHEGARAM NO WHATSAPP ───────────────────────
+#
+# A corretora não precisa mudar de hábito: o documento JÁ chega no número
+# vinculado. Medido na Liberal (conta 37) em 18/09/2026, nos últimos 90 dias,
+# 36 PDFs — entre eles "PROPOSTA DENISE BARROS DE SOUSA SANTOS.pdf" e
+# "Orçamento MARIA IRACI CORREIA DE SANTANA.pdf", mandados pelo próprio corretor.
+#
+# POR QUE NÃO CADASTRAR SOZINHO. Na mesma medição, a maioria dos PDFs não era
+# apólice: uma dúzia de boletos, extrato bancário do mês, um agravo de
+# instrumento. Ler tudo e gravar viraria lixo na carteira — e vigência lida
+# errada é alerta que não dispara, o pior defeito que esta tela pode ter. Por
+# isso aqui só se LISTA; quem escolhe é a pessoa, e a conferência é a mesma do
+# PDF solto.
+#
+# O ARQUIVO NÃO ESTÁ AQUI, só o ponteiro (`mensagens.midia_ref`, migração 187):
+# quem busca no CDN é `finance.wa_midia`, e o CDN expira. Escolher um PDF é,
+# de quebra, o que faz ele virar cópia nossa no cofre da apólice.
+
+_PISTAS_APOLICE = ("apolice", "apólice", "proposta", "orcamento", "orçamento",
+                   "endosso", "renovacao", "renovação", "seguro", "certificado")
+
+
+def _parece_apolice(nome: str) -> bool:
+    return any(p in (nome or "").lower() for p in _PISTAS_APOLICE)
+
+
+def pdfs_do_whatsapp(pool, conta_id: int, *, dias: int = 90,
+                     limite: int = 40) -> list[dict]:
+    """Os PDFs recebidos no WhatsApp vinculado, do mais novo pro mais velho.
+
+    `ja_cadastrada` olha a marca que o cadastro deixa em `apolices.pdf_lido`
+    (`origem.whatsapp_msg`): sem ela a mesma proposta apareceria pra sempre na
+    lista, e cadastrar duas vezes seria o caminho mais fácil.
+
+    Só entrada (`direcao='in'`): o que a corretora MANDOU pelo painel não volta
+    pra lista como se fosse documento novo.
+    """
+    sql = """
+        select m.id,
+               m.criado_em,
+               coalesce(nullif(cv.contato_nome, ''), cv.contato_ref, '') as de,
+               coalesce(m.midia_meta->>'nome', '') as nome,
+               coalesce((m.midia_meta->>'bytes')::bigint, 0) as bytes,
+               exists (select 1 from apolices a
+                        where a.conta_id = %s
+                          and a.pdf_lido->'origem'->>'whatsapp_msg' = m.id::text)
+          from mensagens m
+          join conversas cv on cv.id = m.conversa_id
+         where cv.conta_id = %s
+           and m.direcao = 'in'
+           and m.midia_tipo = 'documento'
+           and m.midia_ref is not null
+           and (coalesce(m.midia_ref->>'mimetype', '') like 'application/pdf%%'
+                or lower(coalesce(m.midia_meta->>'nome', '')) like '%%.pdf')
+           and m.criado_em > now() - make_interval(days => %s)
+         order by m.criado_em desc
+         limit %s
+    """
+    with pool.connection() as c:
+        rows = c.execute(sql, (conta_id, conta_id, int(dias), int(limite))).fetchall()
+    return [{"mensagem_id": r[0], "quando": r[1], "de": r[2] or "—",
+             "nome": r[3] or "documento.pdf", "bytes": int(r[4] or 0),
+             "parece_apolice": _parece_apolice(r[3] or ""),
+             "ja_cadastrada": bool(r[5])}
+            for r in rows]
+
+
+def ref_do_pdf(pool, conta_id: int, mensagem_id: int) -> dict | None:
+    """O ponteiro de UM PDF, preso à conta.
+
+    O id da mensagem é sequencial e adivinhável — o mesmo cuidado da mídia do
+    funil. Sem o casamento `mensagens -> conversas -> conta_id`, trocar um número
+    na URL leria o documento do cliente de outra corretora.
+    """
+    with pool.connection() as c:
+        r = c.execute(
+            """select m.midia_ref, m.midia_tipo, coalesce(m.midia_meta->>'nome', '')
+                 from mensagens m
+                 join conversas cv on cv.id = m.conversa_id
+                where m.id = %s and cv.conta_id = %s and m.midia_ref is not null
+                  and m.midia_tipo = 'documento'""",
+            (mensagem_id, conta_id)).fetchone()
+    if not r:
+        return None
+    return {"ref": r[0] or {}, "tipo": r[1] or "documento", "nome": r[2] or "documento.pdf"}

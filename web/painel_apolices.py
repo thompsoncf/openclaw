@@ -409,12 +409,70 @@ def pdfs_do_whatsapp(request: Request):
         return JSONResponse({"ok": False, "erro": "sessão expirada"}, status_code=401)
     if not gerencia:
         return JSONResponse({"ok": False, "erro": "só o dono e o gestor cadastram apólice"})
-    itens = ap.pdfs_do_whatsapp(get_pool(), conta[0])
-    return JSONResponse({"ok": True, "itens": [
-        {"id": i["mensagem_id"], "de": i["de"], "nome": i["nome"],
-         "quando": _quando_txt(i["quando"]), "kb": round(i["bytes"] / 1024) if i["bytes"] else 0,
-         "parece": i["parece_apolice"], "ja": i["ja_cadastrada"]}
-        for i in itens]})
+    pool = get_pool()
+    itens = ap.pdfs_do_whatsapp(pool, conta[0])
+    # a mesma consulta dá os dois números de que a tela precisa pro estado vazio:
+    # quantos remetentes existem e quantos estão liberados
+    quem = ap.quem_mandou_pdf(pool, conta[0])
+    return JSONResponse({
+        "ok": True,
+        "remetentes": len(quem),
+        "liberados": sum(1 for q in quem if q["liberado"]),
+        "itens": [
+            {"id": i["mensagem_id"], "de": i["de"], "nome": i["nome"],
+             "quando": _quando_txt(i["quando"]), "kb": round(i["bytes"] / 1024) if i["bytes"] else 0,
+             "parece": i["parece_apolice"], "ja": i["ja_cadastrada"]}
+            for i in itens]})
+
+
+@router.get("/painel/renovacoes/remetentes")
+def remetentes_do_whatsapp(request: Request):
+    """Quem pode mandar apólice, e quem anda mandando PDF pro número da empresa.
+
+    As duas listas juntas porque a tela é uma só: liberar é reconhecer um nome
+    que já está ali, não digitar telefone.
+    """
+    conta, gerencia, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "sessão expirada"}, status_code=401)
+    if not gerencia:
+        return JSONResponse({"ok": False, "erro": "só o dono e o gestor mexem nisto"})
+    pool = get_pool()
+    return JSONResponse({"ok": True, "tipos": [{"c": c_, "r": r_} for c_, r_ in ap.TIPOS_REMETENTE],
+                         "liberados": [{"ref": f["contato_ref"], "nome": f["rotulo"],
+                                        "tipo": f["tipo"], "tipo_txt": f["tipo_txt"]}
+                                       for f in ap.remetentes(pool, conta[0])],
+                         "mandaram": [{"ref": q["contato_ref"], "nome": q["nome"],
+                                       "quantos": q["quantos"], "ultimo": _quando_txt(q["ultimo"]),
+                                       "liberado": q["liberado"]}
+                                      for q in ap.quem_mandou_pdf(pool, conta[0])]})
+
+
+@router.post("/painel/renovacoes/remetentes")
+def mudar_remetente(request: Request, acao: str = Form(""), ref: str = Form(""),
+                    nome: str = Form(""), tipo: str = Form("corretor")):
+    """Libera ou tira um número da lista de quem pode mandar apólice.
+
+    Tirar não apaga apólice nenhuma — só para de sugerir os PDFs daquele número.
+    """
+    conta, gerencia, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "sessão expirada"}, status_code=401)
+    if not gerencia:
+        return JSONResponse({"ok": False, "erro": "só o dono e o gestor mexem nisto"})
+    pool = get_pool()
+    try:
+        if acao == "tirar":
+            ap.tirar_remetente(pool, conta[0], ref)
+        else:
+            ap.liberar_remetente(pool, conta[0], ref, rotulo=nome, tipo=tipo,
+                                 membro_id=_membro_logado(request))
+    except ValueError as e:
+        return JSONResponse({"ok": False, "erro": str(e)})
+    except Exception as e:  # noqa: BLE001
+        _log.warning("remetente não mudou (conta %s): %s: %s", conta[0], type(e).__name__, e)
+        return JSONResponse({"ok": False, "erro": "não deu pra salvar"})
+    return JSONResponse({"ok": True})
 
 
 def _quando_txt(quando) -> str:
@@ -896,6 +954,21 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
 .rn-wpp .item .nome{flex:1;min-width:0;font-size:.82rem;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 .rn-wpp .item .quem{font-size:.72rem;color:var(--txt-mut);white-space:nowrap}
+.rn-wpp .vazio{font-size:.79rem;color:var(--txt-mut);line-height:1.55}
+.rn-wpp .pe{margin-top:.5rem;font-size:.74rem;padding:.24rem .6rem}
+/* quem pode mandar: liberar é reconhecer um nome que já está ali */
+.rn-fonte{display:flex;gap:.5rem;align-items:center;background:var(--bg-2);
+  border:1px solid var(--borda);border-radius:9px;padding:.45rem .6rem;margin-bottom:.3rem}
+.rn-fonte .nome{flex:1;min-width:0;font-size:.83rem;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.rn-fonte .meta{font-size:.72rem;color:var(--txt-mut);white-space:nowrap}
+.rn-fonte .bts{display:flex;gap:.25rem;flex:none}
+.rn-fonte .mini{width:auto;margin:0;padding:.2rem .5rem;font-size:.72rem;border-radius:7px;
+  cursor:pointer;background:transparent;border:1px solid var(--borda);color:var(--txt-mut)}
+.rn-fonte .mini:hover{color:var(--txt);border-color:var(--neon-borda)}
+.rn-secao{font-size:.67rem;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-mut);
+  font-weight:700;margin:1rem 0 .4rem}
+.rn-secao:first-child{margin-top:0}
 .rn-lendo{display:flex;align-items:center;gap:.6rem;font-size:.87rem;color:var(--txt-mut);padding:1.6rem .2rem}
 .rn-lendo .bola{width:14px;height:14px;border-radius:50%;flex:none;
   border:2px solid var(--neon-borda);border-top-color:var(--verde);animation:rn-gira .7s linear infinite}
@@ -1134,6 +1207,8 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
           <div class="cab"><span class="t">…ou um que já chegou no WhatsApp</span>
             <span class="s" id="rn-wpp-sub"></span></div>
           <div class="lista" id="rn-wpp-lista"></div>
+          <div class="vazio" id="rn-wpp-vazio" hidden></div>
+          <button type="button" class="rn-bt fraco pe" onclick="rnFontes()">quem pode mandar</button>
         </div>
         {% endif %}
         <button type="button" class="rn-bt fraco" onclick="rnMao()">não tenho o PDF — digitar à mão</button>
@@ -1205,6 +1280,17 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         </form>
       </div>
 
+      {# 3b · quem pode mandar #}
+      <div id="rn-p-fontes" hidden>
+        <div class="sub">Só entra na lista o PDF que vier destes números. O nome é o que o
+          WhatsApp mostra e pode mudar; o que vale é o número. Tirar alguém daqui não
+          apaga apólice nenhuma.</div>
+        <div id="rn-fontes-corpo"></div>
+        <div class="rn-acoes" style="margin-top:.9rem">
+          <button type="button" class="rn-bt fraco" onclick="rnVoltar()">voltar</button>
+        </div>
+      </div>
+
       {# 4 · cadastrada #}
       <div class="rn-ok" id="rn-p-ok" hidden>
         <div class="marca">✓</div>
@@ -1230,7 +1316,7 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
    `method="post"` e o servidor responde a página inteira. É por isso que o
    painel de conferência é template, e não HTML montado aqui: uma marcação só. */
 (function(){
-  var PASSOS = ['pdf', 'lendo', 'form', 'ok'];
+  var PASSOS = ['pdf', 'lendo', 'form', 'ok', 'fontes'];
   function jan(){ return document.getElementById('rn-jan'); }
   function el(id){ return document.getElementById(id); }
 
@@ -1424,12 +1510,27 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     fetch('/painel/renovacoes/whatsapp', { credentials: 'same-origin' })
       .then(function(r){ return r.json(); })
       .then(function(d){
-        // sem documento nenhum o bloco continua escondido: o caminho principal
-        // é soltar o arquivo, e uma lista vazia só atrapalharia
-        if(!d || !d.ok || !d.itens || !d.itens.length) return;
+        // ninguém nunca mandou PDF pra este número: o bloco continua escondido,
+        // porque o caminho principal é soltar o arquivo
+        if(!d || !d.ok || !d.remetentes) return;
         var lista = el('rn-wpp-lista');
-        if(!lista) return;
+        var vazio = el('rn-wpp-vazio');
+        if(!lista || !vazio) return;
+        caixa.hidden = false;
         lista.innerHTML = '';
+        // alguém já mandou, mas ninguém foi liberado ainda
+        if(!d.itens.length){
+          vazio.hidden = false;
+          vazio.textContent = d.liberados
+            ? 'Nada novo de quem você liberou nos últimos 90 dias.'
+            : ('Ninguém liberado ainda. ' + d.remetentes
+               + (d.remetentes === 1 ? ' número mandou PDF' : ' números mandaram PDF')
+               + ' pra este WhatsApp nos últimos 90 dias.');
+          var sub0 = el('rn-wpp-sub');
+          if(sub0) sub0.textContent = '';
+          return;
+        }
+        vazio.hidden = true;
         d.itens.forEach(function(it){
           var b = document.createElement('button');
           b.type = 'button';
@@ -1448,8 +1549,7 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
           lista.appendChild(b);
         });
         var sub = el('rn-wpp-sub');
-        if(sub) sub.textContent = d.itens.length + (d.itens.length === 1 ? ' documento' : ' documentos') + ' nos últimos 90 dias';
-        caixa.hidden = false;
+        if(sub) sub.textContent = d.itens.length + (d.itens.length === 1 ? ' documento' : ' documentos') + ' de quem você liberou';
       })
       .catch(function(){ /* sem a lista a janela continua inteira */ });
   }
@@ -1472,6 +1572,107 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         passo('pdf', '1 de 2 · o documento');
         erro('a busca não respondeu. Tente de novo.');
       });
+  };
+
+  // ── quem pode mandar ─────────────────────────────────────────────────────
+  var voltarPara = 'pdf';
+
+  function linhaFonte(nome, meta, bts){
+    var li = document.createElement('div');
+    li.className = 'rn-fonte';
+    var n = document.createElement('span');
+    n.className = 'nome';
+    n.textContent = nome;
+    var m = document.createElement('span');
+    m.className = 'meta';
+    m.textContent = meta;
+    var caixa = document.createElement('span');
+    caixa.className = 'bts';
+    bts.forEach(function(b){
+      var bt = document.createElement('button');
+      bt.type = 'button';
+      bt.className = 'mini';
+      bt.textContent = b.rotulo;
+      bt.onclick = b.quando;
+      caixa.appendChild(bt);
+    });
+    li.appendChild(n);
+    li.appendChild(m);
+    li.appendChild(caixa);
+    return li;
+  }
+
+  function fontesDesenhar(d){
+    var corpo = el('rn-fontes-corpo');
+    if(!corpo) return;
+    corpo.innerHTML = '';
+    var t1 = document.createElement('div');
+    t1.className = 'rn-secao';
+    t1.textContent = 'Podem mandar';
+    corpo.appendChild(t1);
+    if(!d.liberados.length){
+      var nada = document.createElement('div');
+      nada.className = 'rn-wpp';
+      nada.innerHTML = '<div class="vazio">Ninguém ainda. Libere abaixo quem manda apólice.</div>';
+      corpo.appendChild(nada);
+    }
+    d.liberados.forEach(function(f){
+      corpo.appendChild(linhaFonte(f.nome, f.tipo_txt, [
+        { rotulo: 'tirar', quando: function(){ fontesMudar({ acao: 'tirar', ref: f.ref }); } }]));
+    });
+    var novos = d.mandaram.filter(function(q){ return !q.liberado; });
+    if(novos.length){
+      var t2 = document.createElement('div');
+      t2.className = 'rn-secao';
+      t2.textContent = 'Mandaram PDF nos últimos 90 dias';
+      corpo.appendChild(t2);
+      novos.forEach(function(q){
+        var quantos = q.quantos + (q.quantos === 1 ? ' documento' : ' documentos');
+        corpo.appendChild(linhaFonte(q.nome, quantos + ' · ' + q.ultimo,
+          d.tipos.map(function(t){
+            return { rotulo: t.r.toLowerCase(), quando: function(){
+              fontesMudar({ acao: 'liberar', ref: q.ref, nome: q.nome, tipo: t.c }); } };
+          })));
+      });
+    }
+  }
+
+  function fontesMudar(dados){
+    var fd = new FormData();
+    Object.keys(dados).forEach(function(k){ fd.append(k, dados[k]); });
+    fetch('/painel/renovacoes/remetentes', { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d || !d.ok){ erro((d && d.erro) || 'não deu pra salvar.'); return; }
+        wppLida = false;          // a lista de PDFs muda junto
+        window.rnFontes(true);
+      })
+      .catch(function(){ erro('não consegui salvar agora.'); });
+  }
+
+  window.rnFontes = function(recarregando){
+    erro('');
+    if(!recarregando){
+      var atual = PASSOS.filter(function(nome){
+        var d = el('rn-p-' + nome);
+        return d && !d.hidden;
+      })[0];
+      if(atual && atual !== 'fontes') voltarPara = atual;
+    }
+    passo('fontes', 'quem pode mandar');
+    fetch('/painel/renovacoes/remetentes', { credentials: 'same-origin' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d || !d.ok){ erro((d && d.erro) || 'não consegui carregar a lista.'); return; }
+        fontesDesenhar(d);
+      })
+      .catch(function(){ erro('não consegui carregar a lista.'); });
+  };
+
+  window.rnVoltar = function(){
+    erro('');
+    wppCarregar();
+    passo(voltarPara, voltarPara === 'pdf' ? '1 de 2 · o documento' : '');
   };
 
   window.rnOutra = function(){

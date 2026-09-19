@@ -75,6 +75,7 @@ def pool():
         c.execute((MIG / "278_apolices.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "286_apolices_pdf.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "287_apolice_perdida.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "289_apolice_remetentes.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -83,6 +84,7 @@ def pool():
 @pytest.fixture
 def limpo(pool):
     with pool.connection() as c:
+        c.execute("delete from apolice_remetentes")
         c.execute("delete from apolices")
         c.execute("delete from seguros_comissao")
         c.execute("delete from lembretes_enviados")
@@ -685,13 +687,16 @@ def test_o_que_esta_alem_de_60_dias_nao_vira_push(limpo, monkeypatch):
 # maioria dos PDFs que chegam não é apólice — é boleto, extrato e petição.
 
 
-def _msg_com_pdf(limpo, conta_id, *, nome, de="Corretor", direcao="in",
-                 tipo="documento", mimetype="application/pdf", dias=1):
+def _msg_com_pdf(limpo, conta_id, *, nome, de="Corretor", ref="5586999990000",
+                 direcao="in", tipo="documento", mimetype="application/pdf", dias=1,
+                 liberado=True):
+    """Um PDF chegando no WhatsApp da conta. `liberado` é o padrão porque quase
+    todo teste quer olhar a lista, e a lista só mostra quem foi liberado."""
     with limpo.connection() as c:
         cv = c.execute(
             "insert into conversas (conta_id, contato_ref, contato_nome, ultima_msg_em) "
-            "values (%s, '5586999990000', %s, now()) returning id",
-            (conta_id, de)).fetchone()[0]
+            "values (%s, %s, %s, now()) returning id",
+            (conta_id, ref, de)).fetchone()[0]
         mid = c.execute(
             "insert into mensagens (conversa_id, direcao, texto, criado_em, midia_ref, "
             "  midia_tipo, midia_meta) "
@@ -700,6 +705,8 @@ def _msg_com_pdf(limpo, conta_id, *, nome, de="Corretor", direcao="in",
              json.dumps({"directPath": "/x", "mediaKey": "aaaa", "mimetype": mimetype}),
              tipo, json.dumps({"nome": nome, "bytes": 120000}))).fetchone()[0]
         c.commit()
+    if liberado:
+        ap.liberar_remetente(limpo, conta_id, ref, rotulo=de)
     return mid
 
 
@@ -743,3 +750,81 @@ def test_pdf_velho_demais_nao_entra(limpo):
     _msg_com_pdf(limpo, CONTA, nome="PROPOSTA ANTIGA.pdf", dias=200)
     assert ap.pdfs_do_whatsapp(limpo, CONTA) == []
     assert len(ap.pdfs_do_whatsapp(limpo, CONTA, dias=365)) == 1
+
+
+# ─────────────── SÓ CORRETOR E SEGURADORA ENTRAM NA LISTA ───────────────
+#
+# Pedido do dono em 19/09/2026: "limita a lista só pros numeros de corretor e
+# seguradora". Prender ao número da EMPRESA já tirava o WhatsApp pessoal de
+# todo mundo; isto tira o fornecedor de boleto, que escreve pro mesmo número.
+
+
+def test_so_entra_pdf_de_quem_foi_liberado(limpo):
+    _msg_com_pdf(limpo, CONTA, nome="PROPOSTA DO CORRETOR.pdf", de="Cássio",
+                 ref="5586911111111")
+    _msg_com_pdf(limpo, CONTA, nome="invoice-20000177.pdf", de="Fornecedor",
+                 ref="5586922222222", liberado=False)
+    assert [i["nome"] for i in ap.pdfs_do_whatsapp(limpo, CONTA)] == ["PROPOSTA DO CORRETOR.pdf"]
+
+
+def test_sem_ninguem_liberado_a_lista_vem_vazia(limpo):
+    _msg_com_pdf(limpo, CONTA, nome="PROPOSTA.pdf", liberado=False)
+    assert ap.pdfs_do_whatsapp(limpo, CONTA) == []
+    # mas a tela ainda sabe quem anda mandando, pra oferecer a liberação
+    quem = ap.quem_mandou_pdf(limpo, CONTA)
+    assert len(quem) == 1 and quem[0]["liberado"] is False and quem[0]["quantos"] == 1
+
+
+def test_tirar_o_remetente_esconde_os_pdfs_dele(limpo):
+    _msg_com_pdf(limpo, CONTA, nome="PROPOSTA.pdf", ref="5586911111111")
+    assert len(ap.pdfs_do_whatsapp(limpo, CONTA)) == 1
+    ap.tirar_remetente(limpo, CONTA, "5586911111111")
+    assert ap.pdfs_do_whatsapp(limpo, CONTA) == []
+    assert ap.remetentes(limpo, CONTA) == []
+
+
+def test_nao_libera_numero_que_nao_tem_conversa_na_conta(limpo):
+    """Senão daria pra liberar um número qualquer mandando outro id na requisição."""
+    with pytest.raises(ValueError):
+        ap.liberar_remetente(limpo, CONTA, "5511999998888", rotulo="Estranho")
+
+
+def test_nao_libera_numero_de_conversa_de_outra_conta(limpo):
+    _msg_com_pdf(limpo, 38, nome="PROPOSTA DA OUTRA.pdf", ref="5586933333333",
+                 liberado=False)
+    with pytest.raises(ValueError):
+        ap.liberar_remetente(limpo, CONTA, "5586933333333")
+
+
+def test_liberar_de_novo_atualiza_em_vez_de_duplicar(limpo):
+    _msg_com_pdf(limpo, CONTA, nome="PROPOSTA.pdf", de="Cássio", ref="5586911111111")
+    ap.liberar_remetente(limpo, CONTA, "5586911111111", rotulo="Cássio Liberal",
+                         tipo="seguradora")
+    libs = ap.remetentes(limpo, CONTA)
+    assert len(libs) == 1
+    assert libs[0]["rotulo"] == "Cássio Liberal" and libs[0]["tipo"] == "seguradora"
+
+
+def test_tipo_desconhecido_nao_entra(limpo):
+    _msg_com_pdf(limpo, CONTA, nome="PROPOSTA.pdf", ref="5586911111111", liberado=False)
+    with pytest.raises(ValueError):
+        ap.liberar_remetente(limpo, CONTA, "5586911111111", tipo="amigo")
+
+
+def test_quem_mandou_conta_por_numero_e_poe_o_liberado_na_frente(limpo):
+    _msg_com_pdf(limpo, CONTA, nome="a.pdf", de="Fornecedor", ref="5586922222222",
+                 liberado=False)
+    _msg_com_pdf(limpo, CONTA, nome="b.pdf", de="Fornecedor", ref="5586922222222",
+                 liberado=False)
+    _msg_com_pdf(limpo, CONTA, nome="PROPOSTA.pdf", de="Cássio", ref="5586911111111")
+    quem = ap.quem_mandou_pdf(limpo, CONTA)
+    assert [q["nome"] for q in quem] == ["Cássio", "Fornecedor"]
+    assert quem[0]["liberado"] is True and quem[0]["quantos"] == 1
+    assert quem[1]["liberado"] is False and quem[1]["quantos"] == 2
+
+
+def test_o_remetente_nao_vaza_entre_contas(limpo):
+    _msg_com_pdf(limpo, 38, nome="PROPOSTA DA OUTRA.pdf", ref="5586933333333")
+    assert ap.remetentes(limpo, CONTA) == []
+    assert len(ap.remetentes(limpo, 38)) == 1
+    assert ap.quem_mandou_pdf(limpo, CONTA) == []

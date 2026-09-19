@@ -221,6 +221,47 @@ async def _cabecalhos_seguranca(request: Request, call_next):
     if os.environ.get("PORTAL_COOKIE_SECURE", "1") == "1":
         resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
     return resp
+
+
+# O que é arquivo fixo do app não interessa medir: não toca no banco e só
+# encheria o log.
+_COCKPIT_ESTATICO = ("/cockpit/app.css", "/cockpit/sw.js", "/cockpit/icon.svg",
+                     "/cockpit/manifest.webmanifest", "/cockpit/splash/")
+_log_tempo = logging.getLogger("openclaw.tempo")
+
+
+@app.middleware("http")
+async def _mede_cockpit(request: Request, call_next):
+    """Uma linha de log por tela do app do vendedor: tempo, consultas e conexões.
+
+    É a régua do antes/depois das otimizações do Cockpit (ver db/medicao.py). O
+    número vai também no cabeçalho `Server-Timing`, que o DevTools do navegador
+    mostra na aba Rede — dá pra conferir do próprio celular, sem abrir o log.
+
+    O caminho sai com os números trocados por {id}: /cockpit/lead/812 e
+    /cockpit/lead/90 são a MESMA tela, e é por tela que se compara.
+    """
+    p = request.url.path
+    if not p.startswith("/cockpit") or p.startswith(_COCKPIT_ESTATICO):
+        return await call_next(request)
+    import re as _re
+    import time as _time
+    from db import medicao as _med
+    t0 = _time.perf_counter()
+    token = _med.abrir()
+    try:
+        resp = await call_next(request)
+    finally:
+        m = _med.fechar(token)
+    total = (_time.perf_counter() - t0) * 1000
+    tela = _re.sub(r"/\d+", "/{id}", p)
+    _log_tempo.info("tela=%s %s status=%s total_ms=%d banco_ms=%d consultas=%d conexoes=%d",
+                    tela, request.method, resp.status_code, total, m["ms"],
+                    m["consultas"], m["conexoes"])
+    resp.headers.setdefault(
+        "Server-Timing",
+        f'total;dur={total:.0f}, banco;dur={m["ms"]:.0f};desc="{m["consultas"]} consultas"')
+    return resp
 # ESTÁTICOS PRIMEIRO: rota curta e sem sessão, e nenhum outro router tem
 # /estatico/*. Serve o CSS e o JS que saíram de dentro das páginas (ver
 # web/estaticos.py) — é o que faz o navegador parar de rebaixar 76 KB a cada

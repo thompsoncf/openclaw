@@ -61,8 +61,65 @@ def _garantir_tabela(c):
                              lambda: _criar_orcamentos(c))
 
 
+#: O que o DDL abaixo garante, pra conferir no catálogo ANTES de rodá-lo. Ver
+#: `_orcamentos_em_dia`. A lista de colunas é LIDA DO PRÓPRIO DDL (regex sobre o
+#: fonte de `_criar_orcamentos`), então coluna nova entra aqui sozinha: uma lista
+#: escrita à mão envelheceria, e o sintoma seria o DDL voltar a rodar calado.
+_INDICES_ORCAMENTOS = ("idx_orcamentos_status", "idx_orcamentos_conta", "idx_orcamentos_token",
+                       "uq_orcamentos_conta_numero", "idx_orc_envios_orcamento",
+                       "uq_orc_comprovante", "idx_orc_comprovante_conta")
+
+
+def _colunas_do_ddl() -> list[str]:
+    import inspect
+    import re
+    return re.findall(r"alter table orcamentos add column if not exists\s+(\w+)",
+                      inspect.getsource(_criar_orcamentos))
+
+
+def _orcamentos_em_dia(c) -> bool:
+    """O banco JÁ TEM tudo o que `_criar_orcamentos` criaria? Só leitura de catálogo.
+
+    POR QUE ISTO EXISTE (medido em 19/09/2026). "Uma vez por processo" não bastou:
+    a cada deploy ou reinício, cada processo novo rodava os 57 comandos, e dois
+    deles são DROP/ADD CONSTRAINT, que pegam ACCESS EXCLUSIVE em `orcamentos`. O
+    pedido de lock ENFILEIRA todo mundo que chega depois — até SELECT —, então a aba
+    Propostas do app e o funil congelavam enquanto ele esperava. O log do Postgres
+    mostrou a espera: 24 s às 11:25 e 7,6 s às 12:16 daquele dia, nos reinícios.
+
+    Em produção quem cria o esquema é a migração (preDeployCommand), então isto
+    responde True e nenhum ALTER roda. Num banco novo (testes, ambiente local) as
+    peças faltam, a resposta é False e o DDL roda como sempre rodou.
+
+    Ler o catálogo não disputa lock com ninguém: `pg_attribute`, `pg_constraint` e
+    `to_regclass` não tocam na tabela `orcamentos`.
+    """
+    cols = _colunas_do_ddl()
+    r = c.execute(
+        """select
+             (select count(*) from pg_attribute
+               where attrelid = to_regclass('orcamentos') and attnum > 0
+                 and not attisdropped and attname = any(%s)),
+             (select count(*) from unnest(%s::text[]) i where to_regclass(i) is not null),
+             exists(select 1 from pg_constraint
+                     where conrelid = to_regclass('orcamentos')
+                       and conname = 'orcamentos_status_check'
+                       and pg_get_constraintdef(oid) like '%%aprovada%%'),
+             exists(select 1 from pg_constraint
+                     where conrelid = to_regclass('orcamentos')
+                       and conname = 'orcamentos_modo_check'),
+             to_regclass('orcamento_envios') is not null
+               and to_regclass('orcamento_comprovantes') is not null""",
+        (cols, list(_INDICES_ORCAMENTOS))).fetchone()
+    return bool(r and r[0] == len(cols) and r[1] == len(_INDICES_ORCAMENTOS)
+                and r[2] and r[3] and r[4])
+
+
 def _criar_orcamentos(c):
-    """O DDL em si. Chamado uma vez por processo, via _garantir_tabela."""
+    """O DDL em si. Chamado uma vez por processo, via _garantir_tabela — e só roda
+    quando falta alguma peça (ver `_orcamentos_em_dia`)."""
+    if _orcamentos_em_dia(c):
+        return
     c.execute("""
         create table if not exists orcamentos (
             id                     bigserial primary key,

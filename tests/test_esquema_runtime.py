@@ -25,8 +25,21 @@ class ConexaoFalsa:
         self.info = self._Info(host, port, dbname)
         self.comandos = []
 
+    #: o que um SELECT devolve. None = "o catálogo não achou nada", que é o banco
+    #: novo: a checagem de `painel_servicos._orcamentos_em_dia` manda rodar o DDL.
+    linha = None
+
     def execute(self, sql, *a, **k):
         self.comandos.append(" ".join(sql.split())[:60])
+        linha = self.linha
+
+        class _Res:
+            def fetchone(self):
+                return linha
+
+            def fetchall(self):
+                return [linha] if linha else []
+        return _Res()
 
     def commit(self):
         pass
@@ -123,6 +136,42 @@ def test_painel_servicos_so_manda_ddl_uma_vez():
     _garantir_tabela(c)
     _garantir_tabela(c)
     assert len(c.comandos) == primeira, "DDL repetido depois da primeira chamada"
+
+
+def test_painel_servicos_nao_manda_ddl_quando_o_banco_ja_esta_em_dia():
+    """O deploy que reinicia o processo NÃO pode mandar ALTER em `orcamentos` num
+    banco que a migração já pôs em dia.
+
+    Uma vez por processo não bastou: em 19/09/2026 o log do Postgres mostrou o
+    ACCESS EXCLUSIVE esperando 24 s e 7,6 s nos reinícios — e, na fila do lock, a
+    aba Propostas inteira esperando junto. Com o catálogo dizendo que está tudo lá,
+    a única coisa que chega no banco é a leitura do catálogo."""
+    from web import painel_servicos as ps
+    c = ConexaoFalsa()
+    c.linha = (len(ps._colunas_do_ddl()), len(ps._INDICES_ORCAMENTOS), True, True, True)
+    ps._garantir_tabela(c)
+    assert len(c.comandos) == 1, c.comandos
+    assert c.comandos[0].startswith("select"), "só a leitura do catálogo"
+    assert not any("alter table" in x for x in c.comandos)
+
+
+def test_painel_servicos_roda_o_ddl_se_falta_uma_coluna():
+    """Faltando UMA peça, roda o bloco inteiro — como sempre rodou."""
+    from web import painel_servicos as ps
+    c = ConexaoFalsa()
+    c.linha = (len(ps._colunas_do_ddl()) - 1, len(ps._INDICES_ORCAMENTOS), True, True, True)
+    ps._garantir_tabela(c)
+    assert any("alter table orcamentos" in x for x in c.comandos)
+
+
+def test_a_lista_de_colunas_sai_do_proprio_ddl():
+    """Coluna nova no DDL entra na checagem sozinha — senão o DDL voltaria a rodar
+    calado a cada reinício, que é o defeito que a checagem existe pra evitar."""
+    from web import painel_servicos as ps
+    cols = ps._colunas_do_ddl()
+    assert len(cols) >= 40
+    assert "contrato_assinado_ip" in cols and "cnpj" in cols
+    assert len(cols) == len(set(cols))
 
 
 def test_equipe_so_manda_ddl_uma_vez():

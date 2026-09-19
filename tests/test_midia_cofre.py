@@ -256,7 +256,10 @@ def test_a_rota_serve_do_bucket_quando_ha_arquivo():
     fonte = inspect.getsource(pc.cockpit_midia)
     i, k = fonte.index("if arquivo:"), fonte.index("_wm.buscar")
     assert i < k, "o bucket vem antes do CDN"
-    assert "m.midia_arquivo" in fonte
+    # a consulta mora em `ck.midia_do_vendedor` desde 19/09/2026 (posse e mídia
+    # numa consulta só) — o caminho no bucket continua vindo dela
+    assert "ck.midia_do_vendedor(" in fonte
+    assert "m.midia_arquivo" in inspect.getsource(ck.midia_do_vendedor)
 
 
 def test_bucket_ilegivel_cai_pro_cdn_em_vez_de_falhar():

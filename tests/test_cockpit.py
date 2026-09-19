@@ -1389,6 +1389,57 @@ def test_a_fila_abre_no_mes_atual_com_pilulas_grupos_e_a_linha_do_evento(pool, m
     assert "4 abertos · " in html4 and "sua vez <b>" not in html4.split("class=scroll")[0].split("class=foco")[1]
 
 
+def test_a_fila_se_atualiza_em_pedacos_e_nao_recarregando(pool, monkeypatch):
+    """Até 19/09/2026 a fila fazia `location.reload()` quando chegava mensagem: a
+    tela inteira de novo, ~1 s de branco e a rolagem voltando pro topo — a cada
+    mensagem. Agora troca só o topo, a lista e os selos das abas.
+
+    O fragmento sai da MESMA `_fila` que desenha a tela: duas montagens seriam
+    duas filas, e a que ninguém abre é a que sai errada."""
+    import json
+    from types import SimpleNamespace
+    from starlette.datastructures import QueryParams
+    from web import painel_cockpit as pc
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Ana", email="frag@x.com")
+        lead = _lead(c, conta, vend, "Fragmento")
+        _conv_msg(c, conta, lead, texto="Oi, tem data?")
+        c.commit()
+
+    html, req = _fila_html(monkeypatch, pool, conta, vend)
+    # os pedaços que a tela troca têm endereço próprio
+    assert "id=filafoco" in html and "class=scroll id=filalista" in html and "id=filaabas" in html
+    assert "location.reload()" in html, "recarregar continua sendo o plano B"
+
+    req2 = SimpleNamespace(session=dict(req.session), query_params=QueryParams(""))
+    frag = pc._fila(req2, conta, vend, fragmento=True)
+    j = json.loads(bytes(frag.body).decode("utf-8"))
+    assert j["ok"] and j["sig"] and j["sub"]
+    assert "Fragmento" in j["lista"] and "class=swipe" in j["lista"]
+    assert "class=tabs" in j["abas"] and "class=busca" in j["foco"]
+    # o que a tela mostra e o que o fragmento manda são o mesmo HTML
+    assert j["lista"].split("<div class=dica-swipe")[0] in html
+    assert j["abas"] in html
+
+
+def test_o_fragmento_da_fila_nao_engole_o_recado_da_sessao(pool, monkeypatch):
+    """`_flash` CONSOME o recado. Se o fragmento o lesse, o "Mensagem enviada ✓" da
+    ação que o vendedor acabou de fazer sumiria antes de ele ver."""
+    from types import SimpleNamespace
+    from starlette.datastructures import QueryParams
+    from web import painel_cockpit as pc
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Bia", email="flash@x.com")
+        c.commit()
+    req = SimpleNamespace(session={"ck_ok": "Mensagem enviada ✓"}, query_params=QueryParams(""))
+    _fila_html(monkeypatch, pool, conta, vend, req=req, fragmento=True)
+    assert req.session.get("ck_ok") == "Mensagem enviada ✓", "o fragmento não pode consumir"
+    html, _ = _fila_html(monkeypatch, pool, conta, vend, req=req)
+    assert "Mensagem enviada ✓" in html and "ck_ok" not in req.session
+
+
 # ------------------------------------- a mensagem que não saiu não se perde
 #
 # 15/09/2026, 19:33: o Thiago respondeu a Sheila pelo app, a mensagem não chegou

@@ -282,9 +282,8 @@ window.cxEscK = window.cxEscK || function(s){
   var d=document.createElement('div'); d.textContent=(s==null?'':s); return d.innerHTML; };
 // confirmar o que o leitor achou: vira "✓ confirmado" no card
 function kbLeadConfirmarEvento(id){
-  fetch('/painel/prospeccao/'+id+'/evento/confirmar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()})
-    .then(function(r){return r.json();}).then(function(d){if(!d.ok){alert(d.erro||'Não consegui confirmar.');return;}location.reload();})
-    .catch(function(){alert('Falha de rede.');});}
+  zapFetch('/painel/prospeccao/'+id+'/evento/confirmar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()})
+    .then(function(d){if(!d)return;if(!d.ok){zapAviso(d.erro||'Não consegui confirmar.',{tipo:'mal'});return;}location.reload();});}
 // O balão do LEAD — resumo pra decidir a próxima ação (ligar, chamar no
 // WhatsApp, mudar a situação, ver o que aconteceu por último). Antes o clique
 // no card abria uma gaveta de 1080px com a ficha INTEIRA num iframe (edição de
@@ -343,12 +342,14 @@ function kbAbrirLead(ev,id,cardEl){
   _leadPop=pop;
   setTimeout(function(){document.addEventListener('click',_leadPopFora,true);document.addEventListener('keydown',_leadPopEsc,true);
     window.addEventListener('scroll',_leadPopRolou,true);},0);
-  fetch('/painel/prospeccao/'+id+'/resumo').then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/'+id+'/resumo').then(function(d){
     if(_leadPop!==pop)return;
-    if(!d.ok){pop.innerHTML=_leadPopErro('Não consegui abrir.');return;}
+    // `d` nulo = o zapFetch já explicou o que houve, com o recado daquele caso.
+    // A caixa aqui só diz que a janela não tem o que mostrar.
+    if(!d||!d.ok){pop.innerHTML=_leadPopErro(d?'Não consegui abrir.':'Não deu pra carregar.');return;}
     pop._d=d;
     pop.innerHTML=kbLeadHtml(d,id);
-  }).catch(function(){if(_leadPop===pop)pop.innerHTML=_leadPopErro('Falha de rede.');});
+  });
 }
 function kbLeadHtml(d,id){
   var h='<button type="button" class="pop-close" title="Fechar" onclick="kbFecharLead()">✕</button>'
@@ -526,16 +527,20 @@ function kbLeadSalvar(id){
    ['email','email'],['instagram','instagram'],['site_url','site'],['valor','valor'],['obs','obs']
   ].concat(((window._KB_EVENTO||{}).campos||[]).map(function(c){return [c.k,c.id];})
   ).forEach(function(p){var el=document.getElementById('lp-ed-'+p[1]);if(el)body.append(p[0],el.value);});
-  fetch('/painel/prospeccao/'+id+'/editar-rapido',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/'+id+'/editar-rapido',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
+    .then(function(d){
       if(!_leadPop)return;
-      if(!d.ok){if(btn){btn.disabled=false;btn.textContent='Salvar';}alert('Não consegui salvar.');return;}
-      return fetch('/painel/prospeccao/'+id+'/resumo').then(function(r){return r.json();}).then(function(d2){
-        if(!_leadPop||!d2.ok)return;
+      if(!d||!d.ok){
+        if(btn){btn.disabled=false;btn.textContent='Salvar';}
+        if(d)zapAviso('Não consegui salvar.',{tipo:'mal'});
+        return;
+      }
+      return zapFetch('/painel/prospeccao/'+id+'/resumo').then(function(d2){
+        if(!_leadPop||!d2||!d2.ok)return;
         _leadPop._d=d2;
         _leadPop.innerHTML=kbLeadHtml(d2,id);
       });
-    }).catch(function(){if(btn){btn.disabled=false;btn.textContent='Salvar';}alert('Falha de rede.');});
+    });
 }
 // A mesma rota da ficha completa (fichaStatus lá dentro) — só troca a situação
 // e, se deu certo, move o card pra coluna nova no board por trás (mesma
@@ -596,18 +601,19 @@ function kbPerguntarMotivo(id, status, lista, quandoOk, quandoDesiste, url){
     body.append('status',status); body.append('motivo',escolhido);
     body.append('perda_descricao', desc.style.display==='none' ? '' : desc.value);
     if(url)body.append('json','1');
-    fetch(url||('/painel/prospeccao/'+id+'/status'),{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
-      .then(function(r){return r.json();}).then(function(d2){
+    zapFetch(url||('/painel/prospeccao/'+id+'/status'),{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
+      .then(function(d2){
+        if(!d2){ok.disabled=false;ok.textContent='Confirmar';return;}
         if(!d2.ok){
           ok.disabled=false; ok.textContent='Confirmar';
           // `descricao_obrigatoria` volta SEM lista: o motivo já está escolhido e
           // o que falta é a linha de texto. Mostrar a lista de novo aqui faria a
           // pessoa recomeçar do zero por causa de um campo.
           if(d2.erro==='descricao_obrigatoria'){desc.style.display='block';desc.focus();return;}
-          alert('Não consegui marcar como perdido.'); return;
+          zapAviso('Não consegui marcar como perdido.',{tipo:'mal'}); return;
         }
         fecha(); quandoOk(d2);
-      }).catch(function(){ok.disabled=false;ok.textContent='Confirmar';alert('Falha de rede.');});
+      });
   });
   pop.querySelector('.pp-nao').addEventListener('click',function(){fecha();if(quandoDesiste)quandoDesiste();});
 }
@@ -640,8 +646,9 @@ function kbLeadIr(btn,id,idx){
     location.reload();
   }
   var body=new URLSearchParams();body.append('status',novo);
-  fetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
+    .then(function(d){
+      if(!d){solta();return;}
       if(!d.ok&&d.erro==='motivo_obrigatorio'){
         // desiste = a folha fechou sem escolher motivo. Não há o que desfazer:
         // o chip antigo continua aceso porque nada mudou no servidor.
@@ -649,9 +656,9 @@ function kbLeadIr(btn,id,idx){
         kbPerguntarMotivo(id, novo, d.motivos, pronto, function(){});
         return;
       }
-      if(!d.ok){solta();alert(d.msg||'Não consegui mudar a situação.');return;}
+      if(!d.ok){solta();zapAviso(d.msg||'Não consegui mudar a situação.',{tipo:'mal'});return;}
       pronto(d);
-    }).catch(function(){solta();alert('Falha de rede.');});
+    });
 }
 // ─────────────────────────────────────────────────────────────────────────────
 // O MODO SEGURADO (18/09/2026). A mesma janela, o conteúdo do nicho seguros.
@@ -677,13 +684,13 @@ function kbAbrirSegurado(ev,id,el,aba){
   _leadPop=pop;
   setTimeout(function(){document.addEventListener('click',_leadPopFora,true);document.addEventListener('keydown',_leadPopEsc,true);
     window.addEventListener('scroll',_leadPopRolou,true);},0);
-  fetch('/painel/renovacoes/cliente/'+id+'/resumo').then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/renovacoes/cliente/'+id+'/resumo').then(function(d){
     if(_leadPop!==pop)return;
-    if(!d.ok){pop.innerHTML=_leadPopErro('Não consegui abrir.');return;}
+    if(!d||!d.ok){pop.innerHTML=_leadPopErro(d?'Não consegui abrir.':'Não deu pra carregar.');return;}
     pop._d=d; pop._aba=aba||'cliente';
     pop.innerHTML=kbSegHtml(d,pop._aba);
     kbSegLigarConversa(pop);
-  }).catch(function(){if(_leadPop===pop)pop.innerHTML=_leadPopErro('Falha de rede.');});
+  });
 }
 function kbSegLigarConversa(pop){
   var b=pop.querySelector('.lp-abrir-conversa'); if(!b)return;
@@ -807,8 +814,8 @@ function kbSegApoliceHtml(d){
 function kbSegSituacao(btn,apId,sit){
   var caixa=btn.parentNode, url='/painel/renovacoes/apolice/'+apId+'/situacao';
   function trava(v){caixa.querySelectorAll('.lp-chip').forEach(function(b){b.disabled=v;});}
-  function depois(){ if(_leadPop&&_leadPop._d){ fetch('/painel/renovacoes/cliente/'+_leadPop._d.id+'/resumo').then(function(r){return r.json();})
-      .then(function(d){ if(!_leadPop||!d.ok)return; _leadPop._d=d; kbSegTrocar(_leadPop._aba||'apolice'); }); } }
+  function depois(){ if(_leadPop&&_leadPop._d){ zapFetch('/painel/renovacoes/cliente/'+_leadPop._d.id+'/resumo')
+      .then(function(d){ if(!_leadPop||!d||!d.ok)return; _leadPop._d=d; kbSegTrocar(_leadPop._aba||'apolice'); }); } }
   if(sit==='perdida'){
     var lista=window._KB_MOTIVOS||[];
     if(!lista.length){alert('Cadastre os motivos de perda na Régua do funil antes de marcar como perdida.');return;}
@@ -817,9 +824,9 @@ function kbSegSituacao(btn,apId,sit){
   }
   trava(true);
   var body=new URLSearchParams(); body.append('situacao',sit); body.append('json','1');
-  fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
-    .then(function(r){return r.json();}).then(function(d){ if(!d.ok){trava(false);alert('Não consegui mudar a situação.');return;} depois(); })
-    .catch(function(){trava(false);alert('Falha de rede.');});
+  zapFetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
+    .then(function(d){ if(!d){trava(false);return;}
+      if(!d.ok){trava(false);zapAviso('Não consegui mudar a situação.',{tipo:'mal'});return;} depois(); });
 }
 """
 

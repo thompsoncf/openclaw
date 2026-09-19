@@ -56,8 +56,18 @@ _RESUMO = {
 _ROTEIRO = """(resumo) => {
   window.__erros = [];
   window.onerror = function(m){ window.__erros.push(String(m)); };
+  // O dublê responde como uma Response DE VERDADE: desde 19/09 quem consome isto
+  // é o `zapFetch`, que olha o status, o cabeçalho da versão e o corpo como
+  // TEXTO (pra distinguir "não é JSON" de "é JSON dizendo não"). Um dublê com só
+  // `{ok, json}` faz a janela cair na caixa de erro — e o teste mediria a caixa
+  // de erro achando que mediu a janela.
   window.fetch = function(){
-    return Promise.resolve({ok:true, json:function(){ return Promise.resolve(resumo); }});
+    return Promise.resolve({
+      ok: true, status: 200,
+      headers: {get: function(){ return null; }},
+      text: function(){ return Promise.resolve(JSON.stringify(resumo)); },
+      json: function(){ return Promise.resolve(resumo); },
+    });
   };
   var d = document.createElement('div');
   d.style.cssText = 'position:fixed;top:120px;left:120px';

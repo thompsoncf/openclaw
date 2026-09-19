@@ -360,3 +360,109 @@ def test_um_laco_na_tela_nao_vira_um_laco_no_banco(banco):
     for _ in range(_portal._ERRO_TETO + 15):
         c.post("/painel/erro-cliente", json={"url": "/x", "status": 500})
     assert len(_linhas(banco)) == _portal._ERRO_TETO
+
+
+# ── a segunda leva: o painel inteiro (20/09/2026) ────────────────────────────
+# A primeira leva migrou só a janela do lead. Esta migrou 125 chamadas em 9
+# arquivos. O que segura daqui pra frente é a varredura abaixo: um `fetch` cru
+# novo numa tela que TEM o zapFetch volta a ser um "Falha de rede." sem causa.
+
+#: Onde o zapFetch EXISTE: telas servidas pelo template BASE do painel
+#: (web/portal.py), mais os módulos e blobs de JS que só são injetados nelas.
+ARQUIVOS_DO_PAINEL = (
+    "painel_prospeccao", "portal", "painel_servicos", "painel_agenda",
+    "painel_apolices", "painel_conteudo", "balao_conversa", "painel_follow_up",
+    "painel_aditivo", "janela_lead",
+)
+
+#: Onde ele NÃO existe — e por isso o `fetch` cru ali é o certo, não uma dívida.
+#: Cada um destes monta o próprio HTML ou vive noutro Environment do Jinja.
+#: Migrar sem levar o módulo junto daria `ReferenceError: zapFetch is not
+#: defined`, que é o botão morto de 19/09 outra vez.
+FORA_DO_PAINEL = {
+    "painel_cockpit": "o app do vendedor monta o HTML na mão e tem service worker",
+    "admin": 'vive noutro Environment do Jinja (o "abase")',
+    "admin_precos": 'idem — noutro Environment, com o "abase"',
+}
+
+#: Blocos com shell próprio DENTRO do portal: a loja pública, o holerite, a
+#: etiqueta, o PDF e a tela de revisão não passam pelo BASE do painel.
+BLOCOS_SEM_BASE = {"_LOJA", "_REVISAR", "_HOLERITE", "_ETIQUETA_FORN", "_RELATORIO_PDF"}
+
+#: Formas que NÃO são "pede JSON e usa": sonda de cabeçalho, corpo em texto,
+#: `await`. Não têm o `.catch` com a frase única e não ganham nada com a troca.
+_OUTRAS_FORMAS = ("method:'HEAD'", ".text()", "await ")
+
+#: O QUE FICOU DE FORA DA SEGUNDA LEVA, por linha e com o motivo escrito. Não é
+#: lista de dívida a ser encolhida no susto: cada uma destas tem uma razão de
+#: continuar crua, e tirar uma daqui sem tratar a razão é reintroduzir um defeito.
+FORA_COM_MOTIVO = {
+    ("portal", "/painel/versao"):
+        "a FAIXA de 'tem versão nova'. O zapFetch compara a versão da aba com o "
+        "carimbo da resposta pra avisar 'aba desatualizada' — e é justamente "
+        "quando as versões DIFEREM que esta chamada precisa responder em paz, "
+        "pra a faixa (que é gentil, com 'Depois') fazer o trabalho dela. "
+        "Passá-la pelo zapFetch trocaria a faixa por um aviso de erro.",
+    ("painel_servicos", "{ok:r.ok"):
+        "a família `{ok:r.ok, d:d}` da aba de Serviços — 11 chamadas. Aqui `res.ok` "
+        "é o STATUS HTTP, e o corpo dessas rotas NÃO traz `ok`: elas sinalizam "
+        "falha por status + `{erro:…}` e sucesso por `JSONResponse(r)`. Trocar "
+        "por zapFetch faria `res.ok` virar um campo que não existe — e todo "
+        "salvamento bem-sucedido passaria a dizer 'não consegui salvar'. O "
+        "caminho certo é dar ao zapFetch um jeito de devolver o status, ou pôr "
+        "`ok` no corpo dessas rotas. Uma coisa ou outra, não de carona nesta leva.",
+}
+
+
+def _sitios_crus(mod: str):
+    """Os `fetch(` crus de um módulo, com o bloco em que caíram."""
+    import importlib
+    import re
+
+    m = importlib.import_module(f"web.{mod}")
+    txt = open(m.__file__, encoding="utf-8").read()
+    defs = [(x.start(), x.group(1))
+            for x in re.finditer(r"^(_[A-Z0-9_]+)\s*=\s*(?:r?\"\"\"|r?'''|\()", txt, re.M)]
+    fora = []
+    for x in re.finditer(r"(?<![.\w])fetch\s*\(", txt):
+        bloco = max([(i, n) for i, n in defs if i < x.start()], default=(0, "(topo)"))[1]
+        if bloco in BLOCOS_SEM_BASE:
+            continue
+        trecho = txt[x.start():x.start() + 300]
+        if ".json()" not in trecho or any(f in trecho for f in _OUTRAS_FORMAS):
+            continue
+        if any(m == mod and marca in trecho for (m, marca) in FORA_COM_MOTIVO):
+            continue
+        linha = txt[:x.start()].count("\n") + 1
+        fora.append(f"{mod}.py:{linha} ({bloco}) {trecho.splitlines()[0][:80]}")
+    return fora
+
+
+def test_nenhuma_tela_do_painel_volta_a_usar_fetch_cru():
+    """A trava da segunda leva.
+
+    `fetch(url).then(r => r.json())` numa tela que tem o zapFetch é uma chamada
+    que, quando falhar, vai dizer "Falha de rede." pras cinco causas de novo —
+    ou, pior, não dizer nada: metade delas nem tinha `.catch`.
+    """
+    achados = []
+    for mod in ARQUIVOS_DO_PAINEL:
+        achados += _sitios_crus(mod)
+    assert not achados, (
+        f"{len(achados)} chamada(s) crua(s) numa tela que tem o zapFetch:\n  "
+        + "\n  ".join(achados)
+        + "\n\nTroque por `zapFetch(url, op).then(function(d){ if(!d) return; … })`.")
+
+
+def test_o_que_ficou_de_fora_ficou_por_um_motivo():
+    """As três telas fora da leva não são esquecimento, e este teste é onde o
+    motivo mora. Se um dia uma delas passar a carregar o módulo, é aqui que o
+    registro sai — e aí ela entra na varredura de cima."""
+    from web import portal as _portal
+    for mod, motivo in FORA_DO_PAINEL.items():
+        assert motivo, mod
+        assert _sitios_crus(mod), (
+            f"{mod} não tem mais `fetch` cru — ou ela ganhou o zapFetch (e "
+            f"então mude de lista), ou o recorte desta varredura mudou.")
+    # e a razão de elas estarem fora: o módulo entra por UM lugar só
+    assert "{{ zap_js }}" in _portal._BASE

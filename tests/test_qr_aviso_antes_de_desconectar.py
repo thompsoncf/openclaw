@@ -62,6 +62,11 @@ var _perguntas = [], _fetches = 0;
 var _respostas = %s, _i = 0;
 global.confirm = function(txt){ _perguntas.push(txt); return _respostas[_i++]; };
 global.fetch = function(){ _fetches++; return Promise.resolve({json:function(){return Promise.resolve({ok:true});}}); };
+// O zapFetch (web/zap_fetch.py) é quem a tela usa desde 19/09/2026: ele já
+// entrega o CORPO, não a Response. Conta como o mesmo toque — o que este
+// arquivo mede é "perguntou duas vezes antes de apagar a credencial", e isso
+// não muda com o caminho que leva o POST até o servidor.
+global.zapFetch = function(){ _fetches++; return Promise.resolve({ok:true}); };
 var _els = {};
 ["qr-msg","c2-msg","qr-box","qr-img","qr-sair","qr-btn","c2-box","c2-img","c2-sair","c2-btn","c2-card"]
   .forEach(function(id){ _els[id]={id:id,style:{},classList:{toggle:function(){},remove:function(){}},

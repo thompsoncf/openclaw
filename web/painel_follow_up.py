@@ -687,15 +687,14 @@ button.fu-msg:focus-visible{outline:1px solid var(--neon-borda);outline-offset:2
   function fuTestarZap(b){
     var t=b.textContent, r=document.getElementById('zaptest-r');
     b.disabled=true; b.textContent='Mandando…'; r.textContent='';
-    fetch('/painel/follow-up/zap-testar',{method:'POST',headers:{'X-Requested-With':'fetch'}})
-      .then(function(x){return x.json();}).then(function(d){
+    zapFetch('/painel/follow-up/zap-testar',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(d){if(!d){b.disabled=false;b.textContent=t;return;}
         b.disabled=false; b.textContent=t;
         if(!d.ok){r.textContent=' '+(d.erro||'não deu');return;}
         if(!(d.envios||[]).length){r.textContent=' ninguém com lead vencido agora';return;}
         r.textContent=' ' + d.envios.map(function(e){
           return e.nome+': '+(e.ok?('enviado ('+e.n_leads+' leads)'):('NÃO saiu — '+(e.erro||'?')));
         }).join(' · ');
-      }).catch(function(){b.disabled=false;b.textContent=t;r.textContent=' falha de rede';});
+      });
   }
   </script>{% endif %}
 

@@ -3222,7 +3222,7 @@ _JS_CRU = r"""(function(){
     pinta();
   }
   function carregarCatalogo(preserva){
-    return fetch('/painel/servicos/catalogo').then(function(r){return r.json();}).then(function(d){
+    return zapFetch('/painel/servicos/catalogo').then(function(d){if(!d)return;
       CATALOGO=d.itens||[];
       var selCat=document.getElementById('svc-cat');
       if(selCat&&selCat.options.length<2){
@@ -3245,7 +3245,7 @@ _JS_CRU = r"""(function(){
       } else {
         renderCatalogo(preserva);
       }
-    }).catch(function(){});
+    });
   }
   if(SERVICO_AVULSO){
     var ocBusca=document.getElementById('oc-busca'), ocDrop=document.getElementById('oc-drop');
@@ -3324,11 +3324,8 @@ _JS_CRU = r"""(function(){
   function svcSugerirIcone(){
     var nome=(document.getElementById('svc-nome')||{}).value||'';
     var cat=((document.getElementById('svc-cat')||{}).value)||'';
-    fetch('/painel/servicos/catalogo/icone-sugerido?nome='+encodeURIComponent(nome)
-          +'&categoria='+encodeURIComponent(cat))
-      .then(function(r){return r.json();})
-      .then(function(d){ svcIconeSugerido=(d&&d.chave)||'outros'; svcPintarIcones(); })
-      .catch(function(){});
+    zapFetch('/painel/servicos/catalogo/icone-sugerido?nome='+encodeURIComponent(nome)
+          +'&categoria='+encodeURIComponent(cat)).then(function(d){if(!d)return; svcIconeSugerido=(d&&d.chave)||'outros'; svcPintarIcones(); });
   }
 
   var svcNome=document.getElementById('svc-nome');
@@ -3382,9 +3379,7 @@ _JS_CRU = r"""(function(){
     if(!desc){return;}
     var btn=this, msg=document.getElementById('oc-ia-msg');
     btn.disabled=true; var t0=btn.textContent; btn.textContent='Analisando...'; msg.textContent='';
-    fetch('/painel/servicos/sugerir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({descricao:desc})})
-      .then(function(r){return r.json();})
-      .then(function(d){
+    zapFetch('/painel/servicos/sugerir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({descricao:desc})}).then(function(d){if(!d)return;
         if(d.erro){msg.textContent='Não consegui gerar agora. Tente de novo.'; return;}
         var ids=d.modules||[];
         if(ids.length){rows().forEach(function(r){var on=ids.indexOf(r.getAttribute('data-id'))>=0; r.setAttribute('data-on',on?'1':'0'); r.classList.toggle('off',!on); r.querySelector('.oc-tog').classList.toggle('on',on);});}
@@ -3393,7 +3388,6 @@ _JS_CRU = r"""(function(){
         if(d.escopo){out.style.display='block'; out.textContent=d.escopo; out.setAttribute('data-escopo',d.escopo);}
         pinta();
       })
-      .catch(function(){msg.textContent='Erro de conexão.';})
       .finally(function(){btn.disabled=false; btn.textContent=t0;});
   });
 
@@ -3492,10 +3486,7 @@ _JS_CRU = r"""(function(){
       clearTimeout(cliTimer);
       if(q.length<2){cliDrop.style.display='none'; cliDrop.innerHTML=''; return;}
       cliTimer=setTimeout(function(){
-        fetch('/painel/servicos/leads/buscar?q='+encodeURIComponent(q))
-          .then(function(r){return r.json();})
-          .then(function(d){cliRenderDrop(d.itens||[]);})
-          .catch(function(){});
+        zapFetch('/painel/servicos/leads/buscar?q='+encodeURIComponent(q)).then(function(d){if(!d)return;cliRenderDrop(d.itens||[]);});
       },250);
     });
     document.addEventListener('click',function(e){
@@ -3568,9 +3559,7 @@ _JS_CRU = r"""(function(){
     return {id:EDIT_ID,lead_id:LEAD_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}).filter(function(id){return id.indexOf('orfao:')!==0;}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setupBruto),mensal:Math.round(c.mensalBruto),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods,desconto_tipo:descTipoTot(),desconto_pct:(descTipoTot()==='pct'?num(document.getElementById('oc-desconto')):0),desconto_valor:(descTipoTot()==='valor'?num(document.getElementById('oc-desconto')):0)};
   }
   function salvarProposta(cb){
-    fetch('/painel/servicos/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(coletarBody())})
-      .then(function(r){return r.json();}).then(function(d){if(d&&d.id){EDIT_ID=d.id;} if(cb)cb(d);})
-      .catch(function(){if(cb)cb(null);});
+    zapFetch('/painel/servicos/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(coletarBody())}).then(function(d){if(!d){if(cb)cb(null);return;}if(d&&d.id){EDIT_ID=d.id;} if(cb)cb(d);});
   }
   document.getElementById('oc-salvar').addEventListener('click',function(){
     var btn=this; btn.textContent='Salvando...';
@@ -3704,7 +3693,7 @@ _JS_CRU = r"""(function(){
     pinta();
   }
   function abrir(id){
-    fetch('/painel/servicos/item/'+id).then(function(r){return r.json();}).then(function(d){
+    zapFetch('/painel/servicos/item/'+id).then(function(d){if(!d)return;
       if(d.erro){alert('Não consegui abrir essa proposta.'); return;}
       EDIT_ID=d.id;
       setv('oc-empresa',d.empresa); setv('oc-contato',d.cliente); setv('oc-cnpj',d.cnpj);
@@ -3775,7 +3764,7 @@ _JS_CRU = r"""(function(){
       // e a rolagem passa a ser pro editor (o topo agora é o funil).
       if(SERVICO_AVULSO){ abrirEditor(); }
       else { window.scrollTo({top:0,behavior:'smooth'}); }
-    }).catch(function(){alert('Erro de conexão.');});
+    });
   }
   document.getElementById('oc-novo').addEventListener('click',function(){
     novo();
@@ -4238,12 +4227,12 @@ _JS_CRU = r"""(function(){
   })();
 
   function carregarHist(){
-    fetch('/painel/servicos/lista').then(function(r){return r.json();}).then(function(d){
+    zapFetch('/painel/servicos/lista').then(function(d){if(!d){document.getElementById('oc-hist-box').innerHTML='<p class="mut">Erro ao carregar.</p>';return;}
       FUNIL = d.itens || [];
       fnPintarAbas(d.grupos);
       fnPintarVendedores(d.vendedores);
       fnDesenhar();
-    }).catch(function(){document.getElementById('oc-hist-box').innerHTML='<p class="mut">Erro ao carregar.</p>';});
+    });
   }
 
   function fnDesenhar(){
@@ -4583,8 +4572,7 @@ _JS_CRU = r"""(function(){
       document.getElementById('ct-previa').addEventListener('click',previa);
       document.getElementById('ct-padrao').addEventListener('click',function(){
         if(!confirm('Trocar o texto atual pelo modelo padrão? O que você escreveu será perdido.')) return;
-        fetch('/painel/servicos/contrato?padrao=1').then(function(r){return r.json();})
-          .then(function(d){d.novo=true;desenhar(d);});
+        zapFetch('/painel/servicos/contrato?padrao=1').then(function(d){if(!d)return;d.novo=true;desenhar(d);});
       });
     }
 
@@ -4607,8 +4595,7 @@ _JS_CRU = r"""(function(){
           // aberto obriga a fechar à mão. Relê pra o resumo (e o selo de falta)
           // refletirem o que ACABOU de ser salvo.
           setTimeout(function(){
-            fetch('/painel/servicos/contrato').then(function(r){return r.json();})
-              .then(function(d){resumir(d);abrir(false);}).catch(function(){abrir(false);});
+            zapFetch('/painel/servicos/contrato').then(function(d){if(!d){abrir(false);return;}resumir(d);abrir(false);});
           }, 1600);
         }).catch(function(){b.textContent=t;msg('<p style="color:var(--verm);font-size:.85rem">Erro de conexão.</p>');});
     }
@@ -4658,16 +4645,12 @@ _JS_CRU = r"""(function(){
         }).catch(function(){b.textContent=t;msg('<p style="color:var(--verm);font-size:.85rem">Erro de conexão.</p>');});
     }
 
-    fetch('/painel/servicos/contrato').then(function(r){return r.json();})
-      .then(function(d){
+    zapFetch('/painel/servicos/contrato').then(function(d){if(!d){document.getElementById('ct-resumo').textContent='Erro ao carregar.';
+        ctBox.innerHTML='<p class="mut">Erro ao carregar o contrato.</p>';return;}
         desenhar(d);
         var lembrado=false;
         try{ lembrado = localStorage.getItem(LEMBRA)==='1'; }catch(e){}
         abrir(!!d.novo || lembrado);
-      })
-      .catch(function(){
-        document.getElementById('ct-resumo').textContent='Erro ao carregar.';
-        ctBox.innerHTML='<p class="mut">Erro ao carregar o contrato.</p>';
       });
   })(); }
 
@@ -4773,9 +4756,7 @@ _JS_CRU = r"""(function(){
       document.getElementById('ad-previa').addEventListener('click',previa);
       document.getElementById('ad-padrao').addEventListener('click',function(){
         if(!confirm('Trocar o texto atual pelo modelo padrão? O que você escreveu será perdido.')) return;
-        fetch('/painel/servicos/aditivo-modelo/padrao',{method:'POST'})
-          .then(function(r){return r.json();})
-          .then(function(x){x.campos=CAMPOS;x.ordem=ORDEM;x.rotulos=ROTULOS;desenhar(x);});
+        zapFetch('/painel/servicos/aditivo-modelo/padrao',{method:'POST'}).then(function(x){if(!x)return;x.campos=CAMPOS;x.ordem=ORDEM;x.rotulos=ROTULOS;desenhar(x);});
       });
     }
 
@@ -4797,11 +4778,9 @@ _JS_CRU = r"""(function(){
 
     function previa(){
       var b=document.getElementById('ad-previa'), t=b.textContent; b.textContent='Montando...';
-      fetch('/painel/servicos/aditivo-modelo/previa',{method:'POST',
+      zapFetch('/painel/servicos/aditivo-modelo/previa',{method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({textos:textos()})})
-        .then(function(r){return r.json();})
-        .then(function(d){
+        body:JSON.stringify({textos:textos()})}).then(function(d){if(!d){b.textContent=t;admsg('<span style="color:var(--coral)">Não consegui montar.</span>');return;}
           b.textContent=t;
           if(d.erro){admsg('<span class="mut">'+esc(d.erro)+'</span>');return;}
           admsg('<div class="mut" style="font-size:.72rem;margin-bottom:.4rem">'
@@ -4812,13 +4791,15 @@ _JS_CRU = r"""(function(){
                           +'</b><div style="font-size:.82rem;line-height:1.6;white-space:pre-wrap;color:var(--mut)">'
                           +esc(c.corpo)+'</div></div>';}).join('')
                 +'</div>');
-        }).catch(function(){b.textContent=t;admsg('<span style="color:var(--coral)">Não consegui montar.</span>');});
+        });
     }
 
     function carregar(){
-      fetch('/painel/servicos/aditivo-modelo').then(function(r){return r.json();})
-        .then(desenhar)
-        .catch(function(){adBox.innerHTML='<p class="mut">Não consegui carregar.</p>';});
+      zapFetch('/painel/servicos/aditivo-modelo')
+        .then(function(d){
+          if(!d){adBox.innerHTML='<p class="mut">Não consegui carregar.</p>';return;}
+          desenhar(d);
+        });
     }
     carregar();
   })();

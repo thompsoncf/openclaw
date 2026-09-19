@@ -512,9 +512,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   function conferir(){
     if(!kData.checked || !fData.value){ av.style.display='none'; return; }
     var fd = new FormData(); fd.append('nova_data', fData.value);
-    fetch('/painel/servicos/aditivo/'+CT+'/conferir', {method:'POST', body:fd})
-      .then(function(r){ return r.json(); })
-      .then(function(j){
+    zapFetch('/painel/servicos/aditivo/'+CT+'/conferir', {method:'POST', body:fd}).then(function(j){if(!j){av.style.display='none';return;}
         av.style.display='';
         av.innerHTML = '<b>Cláusula 7 — o que o contrato pede:</b><br>' +
           (j.avisos||[]).map(function(a){
@@ -522,7 +520,7 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
                    + '<b>'+a.regra+'</b> ' + a.texto;
           }).join('<br>') +
           '<br><span style="opacity:.8">Isto é aviso, não trava: você decide e segue.</span>';
-      }).catch(function(){ av.style.display='none'; });
+      });
   }
   kData.addEventListener('change', function(){ recalcTaxa(); conferir(); });
   fData.addEventListener('change', conferir);

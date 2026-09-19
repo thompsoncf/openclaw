@@ -2171,10 +2171,10 @@ function _desfechoHtml(e){
     + '<button type="button" class="desf-btn nao" onclick="marcarDesfecho('+e.id+',\\'nao_realizado\\')">❌ Não rolou</button></div>';
 }
 function marcarDesfecho(id, valor){
-  fetch('/painel/agenda/desfecho', {
+  zapFetch('/painel/agenda/desfecho', {
     method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'},
     body: 'evento_id='+id+'&desfecho='+valor
-  }).then(function(r){ return r.json(); }).then(function(d){
+  }).then(function(d){if(!d)return;
     if(!d.ok) return;
     var ask = document.getElementById('desfAsk-'+id);
     if(ask) ask.outerHTML = valor==='realizado'
@@ -2496,9 +2496,7 @@ function cliBusca(q){
   var sug = cliSug(); if(!sug) return;
   if(q.length < 2){ sug.style.display='none'; return; }
   CLI_T = setTimeout(function(){
-    fetch('/painel/clientes/buscar?q='+encodeURIComponent(q))
-      .then(function(r){ return r.json(); })
-      .then(function(d){
+    zapFetch('/painel/clientes/buscar?q='+encodeURIComponent(q)).then(function(d){if(!d)return;
         CLI_RES = d.clientes || [];
         var h = '';
         CLI_RES.forEach(function(c, i){
@@ -2509,7 +2507,7 @@ function cliBusca(q){
         // de alguém novo não devia ter que sair da tela pra cadastrar antes.
         h += '<div class="novo" onclick="cliNovo()">＋ cadastrar “'+_esc(q)+'” como cliente novo</div>';
         sug.innerHTML = h; sug.style.display='block';
-      }).catch(function(){});
+      });
   }, 250);
 }
 function cliPick(i){
@@ -2567,11 +2565,9 @@ function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.
     if(!fd.value){ cx.classList.remove('on'); return; }
     // manda o FIM junto: sem ele a janela vira 1h e duas festas na mesma noite
     // nunca acusam choque — que é justamente o caso de quem vende data.
-    fetch('/painel/agenda/conflitos?data='+encodeURIComponent(fd.value)
+    zapFetch('/painel/agenda/conflitos?data='+encodeURIComponent(fd.value)
           +'&hora='+encodeURIComponent(fh ? fh.value : '')
-          +'&fim='+encodeURIComponent(ff ? ff.value : ''))
-      .then(function(r){ return r.json(); })
-      .then(function(d){
+          +'&fim='+encodeURIComponent(ff ? ff.value : '')).then(function(d){if(!d){cx.classList.remove('on');return;}
         var itens = (d && d.itens) || [];
         if(!itens.length){ cx.classList.remove('on'); return; }
         var linhas = itens.slice(0,3).map(function(i){
@@ -2581,8 +2577,7 @@ function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.
         ct.innerHTML = '<b>Esse horário já tem coisa marcada:</b> '+linhas+resto
           +' Dá pra marcar assim mesmo — só confira se cabe.';
         cx.classList.add('on');
-      })
-      .catch(function(){ cx.classList.remove('on'); });
+      });
   }
   function agendar(){ clearTimeout(timer); timer = setTimeout(checar, 350); }
   fd.addEventListener('change', agendar);
@@ -2631,7 +2626,7 @@ function _histQS(offset){
 }
 function _histFetch(reset){
   var offset = reset ? 0 : HIST_STATE.itens.length;
-  fetch('/painel/agenda/historico?'+_histQS(offset)).then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/agenda/historico?'+_histQS(offset)).then(function(d){if(!d)return;
     if(!d.ok) return;
     HIST_STATE.itens = reset ? d.itens : HIST_STATE.itens.concat(d.itens);
     HIST_STATE.total = d.total;
@@ -2661,12 +2656,11 @@ function histToggleFalhas(){
 function histMais(){ _histFetch(false); }
 function histReenviar(id, btn){
   btn.disabled = true; var orig = btn.textContent; btn.textContent = '⏳';
-  fetch('/painel/agenda/historico/reenviar', {method:'POST',
-    headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'log_id='+id})
-    .then(function(r){return r.json();}).then(function(d){
+  zapFetch('/painel/agenda/historico/reenviar', {method:'POST',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'log_id='+id}).then(function(d){if(!d){btn.disabled = false; btn.textContent = orig;return;}
       if(d.ok){ _histFetch(true); }
       else { btn.disabled = false; btn.textContent = orig; zaqToast('Não consegui reenviar agora.', false); }
-    }).catch(function(){ btn.disabled = false; btn.textContent = orig; });
+    });
 }
 (function(){
   var q = document.getElementById('histQ');
@@ -2756,9 +2750,7 @@ function histReenviar(id, btn){
   function buscar(termo){
     var url = '/painel/agenda/buscar-local?q=' + encodeURIComponent(termo);
     if(geoCoords) url += '&lat=' + geoCoords.lat + '&lng=' + geoCoords.lng;
-    fetch(url)
-      .then(function(r){ return r.json(); })
-      .then(function(d){
+    zapFetch(url).then(function(d){if(!d){addrDrop.classList.remove('show');return;}
         if(addrInput.value.trim() !== termo) return;   // resposta atrasada de uma busca antiga
         if(!d.ok && d.erro === 'sem_chave'){
           addrDrop.classList.remove('show');
@@ -2781,8 +2773,7 @@ function histReenviar(id, btn){
           });
         }
         addrDrop.classList.add('show');
-      })
-      .catch(function(){ addrDrop.classList.remove('show'); });
+      });
   }
 
   // `daEmpresa` só troca a frase da dica. Dizer "confirmado pelo Google" num endereço
@@ -2953,9 +2944,9 @@ function irParaMes(m, push){
   AG_INDO = true;
   var cal = document.querySelector('.cal');
   if(cal) cal.style.opacity = '.55';
-  fetch('/painel/agenda/mes?m='+encodeURIComponent(m), {headers:{'Accept':'application/json'}})
-    .then(function(r){ if(!r.ok) throw new Error('http'); return r.json(); })
+  zapFetch('/painel/agenda/mes?m='+encodeURIComponent(m), {headers:{'Accept':'application/json'}})
     .then(function(d){
+      if(!d) return;
       EVENTOS_DIA = d.eventos_dia || {};
       // o veredito de cada dia vem junto: sem isto a pintura de livre/ocupado
       // sumia na primeira seta, porque a grade é remontada aqui no navegador.
@@ -3090,9 +3081,7 @@ document.addEventListener('submit', function(ev){
   var orig=btn?btn.innerHTML:'';
   if(btn){ btn.disabled=true; btn.classList.add('is-busy'); if(btn.getAttribute('data-busy')) btn.innerHTML=btn.getAttribute('data-busy'); }
   function restore(){ if(btn){ btn.disabled=false; btn.classList.remove('is-busy'); btn.innerHTML=orig; } }
-  fetch(f.action, {method:'POST', headers:{'X-Zaq-Ajax':'1'}, body:new FormData(f)})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
+  zapFetch(f.action, {method:'POST', headers:{'X-Zaq-Ajax':'1'}, body:new FormData(f)}).then(function(d){if(!d){restore(); zaqToast('Erro de conexão — tenta de novo.', false);return;}
       if(tipo==='excluir'){
         // some a linha igual ao cancelar. A diferença está no servidor: aqui a
         // linha não volta, e por isso o erro DIZ O MOTIVO em vez de "não deu".
@@ -3113,8 +3102,7 @@ document.addEventListener('submit', function(ev){
         if(d && d.ok){ zaqToast(d.msg||'Convite enviado! ✅'); if(btn){ btn.innerHTML='✓ Enviado'; btn.classList.remove('is-busy'); } }
         else { restore(); zaqToast((d && d.msg)||'Não consegui enviar.', false); }
       }
-    })
-    .catch(function(){ restore(); zaqToast('Erro de conexão — tenta de novo.', false); });
+    });
 }, false);
 """
 _JS_TAG = f'<script src="{_estaticos.registrar("agenda.js", _JS_CRU)}" defer></script>'

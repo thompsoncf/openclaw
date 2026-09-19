@@ -1403,9 +1403,8 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     var fd = new FormData();
     fd.append('arquivo', f);
     fd.append('json', '1');
-    fetch('/painel/renovacoes/importar', { method: 'POST', body: fd, credentials: 'same-origin' })
-      .then(function(r){ return r.json(); })
-      .then(function(d){
+    zapFetch('/painel/renovacoes/importar', { method: 'POST', body: fd, credentials: 'same-origin' }).then(function(d){if(!d){passo('pdf', '1 de 2 · o documento');
+        erro('a leitura não respondeu. Tente de novo.');return;}
         if(!d || !d.ok){
           passo('pdf', '1 de 2 · o documento');
           erro((d && d.erro) || 'não consegui ler este PDF.');
@@ -1413,10 +1412,6 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         }
         preencher(d);
         passo('form', '2 de 2 · confira e cadastre');
-      })
-      .catch(function(){
-        passo('pdf', '1 de 2 · o documento');
-        erro('a leitura não respondeu. Tente de novo.');
       });
   };
 
@@ -1453,17 +1448,12 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     function volta(){ if(bt){ bt.disabled = false; bt.textContent = rotulo; } }
     var fd = new FormData(form);
     fd.append('json', '1');
-    fetch('/painel/renovacoes/apolice', { method: 'POST', body: fd, credentials: 'same-origin' })
-      .then(function(r){ return r.json(); })
-      .then(function(d){
+    zapFetch('/painel/renovacoes/apolice', { method: 'POST', body: fd, credentials: 'same-origin' }).then(function(d){if(!d){volta();
+        // o pedido pode ter chegado: mandar tentar de novo criaria a apólice duas vezes
+        erro('não consegui confirmar o cadastro. Procure pelo número na Carteira antes de repetir.');return;}
         volta();
         if(!d || !d.ok){ erro((d && d.erro) || 'não consegui cadastrar.'); return; }
         entrar(d);
-      })
-      .catch(function(){
-        volta();
-        // o pedido pode ter chegado: mandar tentar de novo criaria a apólice duas vezes
-        erro('não consegui confirmar o cadastro. Procure pelo número na Carteira antes de repetir.');
       });
     return false;
   };
@@ -1507,9 +1497,7 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     var caixa = el('rn-wpp');
     if(!caixa || wppLida) return;
     wppLida = true;
-    fetch('/painel/renovacoes/whatsapp', { credentials: 'same-origin' })
-      .then(function(r){ return r.json(); })
-      .then(function(d){
+    zapFetch('/painel/renovacoes/whatsapp', { credentials: 'same-origin' }).then(function(d){if(!d){/* sem a lista a janela continua inteira */return;}
         // ninguém nunca mandou PDF pra este número: o bloco continua escondido,
         // porque o caminho principal é soltar o arquivo
         if(!d || !d.ok || !d.remetentes) return;
@@ -1550,16 +1538,14 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         });
         var sub = el('rn-wpp-sub');
         if(sub) sub.textContent = d.itens.length + (d.itens.length === 1 ? ' documento' : ' documentos') + ' de quem você liberou';
-      })
-      .catch(function(){ /* sem a lista a janela continua inteira */ });
+      });
   }
 
   window.rnDoWhats = function(id){
     erro('');
     passo('lendo', 'buscando no WhatsApp');
-    fetch('/painel/renovacoes/whatsapp/' + id, { method: 'POST', credentials: 'same-origin' })
-      .then(function(r){ return r.json(); })
-      .then(function(d){
+    zapFetch('/painel/renovacoes/whatsapp/' + id, { method: 'POST', credentials: 'same-origin' }).then(function(d){if(!d){passo('pdf', '1 de 2 · o documento');
+        erro('a busca não respondeu. Tente de novo.');return;}
         if(!d || !d.ok){
           passo('pdf', '1 de 2 · o documento');
           erro((d && d.erro) || 'não consegui ler este PDF.');
@@ -1567,10 +1553,6 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         }
         preencher(d);
         passo('form', '2 de 2 · confira e cadastre');
-      })
-      .catch(function(){
-        passo('pdf', '1 de 2 · o documento');
-        erro('a busca não respondeu. Tente de novo.');
       });
   };
 
@@ -1640,14 +1622,11 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
   function fontesMudar(dados){
     var fd = new FormData();
     Object.keys(dados).forEach(function(k){ fd.append(k, dados[k]); });
-    fetch('/painel/renovacoes/remetentes', { method: 'POST', body: fd, credentials: 'same-origin' })
-      .then(function(r){ return r.json(); })
-      .then(function(d){
+    zapFetch('/painel/renovacoes/remetentes', { method: 'POST', body: fd, credentials: 'same-origin' }).then(function(d){if(!d){erro('não consegui salvar agora.');return;}
         if(!d || !d.ok){ erro((d && d.erro) || 'não deu pra salvar.'); return; }
         wppLida = false;          // a lista de PDFs muda junto
         window.rnFontes(true);
-      })
-      .catch(function(){ erro('não consegui salvar agora.'); });
+      });
   }
 
   window.rnFontes = function(recarregando){
@@ -1660,13 +1639,10 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
       if(atual && atual !== 'fontes') voltarPara = atual;
     }
     passo('fontes', 'quem pode mandar');
-    fetch('/painel/renovacoes/remetentes', { credentials: 'same-origin' })
-      .then(function(r){ return r.json(); })
-      .then(function(d){
+    zapFetch('/painel/renovacoes/remetentes', { credentials: 'same-origin' }).then(function(d){if(!d){erro('não consegui carregar a lista.');return;}
         if(!d || !d.ok){ erro((d && d.erro) || 'não consegui carregar a lista.'); return; }
         fontesDesenhar(d);
-      })
-      .catch(function(){ erro('não consegui carregar a lista.'); });
+      });
   };
 
   window.rnVoltar = function(){

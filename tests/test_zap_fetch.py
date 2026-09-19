@@ -373,6 +373,8 @@ ARQUIVOS_DO_PAINEL = (
     "painel_prospeccao", "portal", "painel_servicos", "painel_agenda",
     "painel_apolices", "painel_conteudo", "balao_conversa", "painel_follow_up",
     "painel_aditivo", "janela_lead",
+    # o app do vendedor entrou em 20/09/2026, com o módulo no <head> próprio dele
+    "painel_cockpit",
 )
 
 #: Onde ele NÃO existe — e por isso o `fetch` cru ali é o certo, não uma dívida.
@@ -380,14 +382,17 @@ ARQUIVOS_DO_PAINEL = (
 #: Migrar sem levar o módulo junto daria `ReferenceError: zapFetch is not
 #: defined`, que é o botão morto de 19/09 outra vez.
 FORA_DO_PAINEL = {
-    "painel_cockpit": "o app do vendedor monta o HTML na mão e tem service worker",
     "admin": 'vive noutro Environment do Jinja (o "abase")',
     "admin_precos": 'idem — noutro Environment, com o "abase"',
 }
 
 #: Blocos com shell próprio DENTRO do portal: a loja pública, o holerite, a
 #: etiqueta, o PDF e a tela de revisão não passam pelo BASE do painel.
-BLOCOS_SEM_BASE = {"_LOJA", "_REVISAR", "_HOLERITE", "_ETIQUETA_FORN", "_RELATORIO_PDF"}
+BLOCOS_SEM_BASE = {"_LOJA", "_REVISAR", "_HOLERITE", "_ETIQUETA_FORN", "_RELATORIO_PDF",
+                   # o service worker do Cockpit roda noutro contexto, sem
+                   # `window`: o `fetch` dele É a rede, e é quem serve a tela de
+                   # "sem conexão" quando ela cai.
+                   "_SW"}
 
 #: Formas que NÃO são "pede JSON e usa": sonda de cabeçalho, corpo em texto,
 #: `await`. Não têm o `.catch` com a frase única e não ganham nada com a troca.
@@ -397,6 +402,12 @@ _OUTRAS_FORMAS = ("method:'HEAD'", ".text()", "await ")
 #: lista de dívida a ser encolhida no susto: cada uma destas tem uma razão de
 #: continuar crua, e tirar uma daqui sem tratar a razão é reintroduzir um defeito.
 FORA_COM_MOTIVO = {
+    ("painel_cockpit", "/push/assinar"):
+        "sonda de assinatura do push, dentro de um `.then(()=>true).catch(()=>false)`: "
+        "o valor dela É o booleano. Não há pessoa esperando resposta nem tela pra avisar.",
+    ("painel_cockpit", "link-copiado"):
+        "telemetria de 'copiou o link', com `keepalive:true` e `.catch(function(){})`. "
+        "Dispara e esquece de propósito — ela sai enquanto a página já está indo embora.",
     ("portal", "/painel/versao"):
         "a FAIXA de 'tem versão nova'. O zapFetch compara a versão da aba com o "
         "carimbo da resposta pra avisar 'aba desatualizada' — e é justamente "
@@ -520,3 +531,126 @@ def test_a_aba_de_servicos_usa_o_modo_em_todas(roda):
     assert fonte.count("comStatus:true") == 13, (
         f"esperava 13 chamadas com comStatus, achei {fonte.count('comStatus:true')}")
     assert "ok:r.ok" not in fonte, "voltou a família `{ok:r.ok, d:d}` crua"
+
+
+# ── quem não foi pedido não avisa (20/09/2026) ───────────────────────────────
+# DEFEITO MEU, no #762: migrei os cinco laços de relógio do painel — a
+# Comunicação de 4 em 4 segundos, o QR de 3 em 3 — sem pensar que cada volta
+# falhada mostraria um aviso. Com sinal fraco (a rua, o elevador, o salão), isso
+# vira um recado a cada três segundos, e a pessoa aprende a fechar tudo sem ler.
+# Subiu assim e ficou no ar. `silencioso` cala o AVISO e mantém o REGISTRO.
+
+def test_silencioso_nao_mostra_aviso(roda):
+    # GET é repetível: a promessa só fecha depois das duas retentativas (2s e 5s)
+    r = roda([{"erro": 1}], op={"silencioso": True}, espera_ms=9000)
+    assert r["d"] is None
+    assert r["aviso"] == "", "um laço de relógio não pode avisar a cada volta"
+
+
+def test_silencioso_AINDA_registra_o_erro_do_servidor(roda):
+    """A parte que não se abre mão: um 500 num poll é onde a falha aparece
+    PRIMEIRO, e é o único lugar onde ninguém está olhando."""
+    r = roda([{"status": 500, "corpo": "boom"}], op={"silencioso": True, "method": "POST"})
+    assert r["aviso"] == ""
+    assert len(r["registros"]) == 1, "o poll calou o aviso E o registro"
+
+
+def test_silencioso_cala_ate_a_sessao_expirada(roda):
+    """Um poll que descobre a sessão expirada não sequestra a tela: o próximo
+    toque de verdade mostra o aviso, e esse a pessoa pediu."""
+    r = roda([{"status": 401, "corpo": "{}"}], op={"silencioso": True})
+    assert r["d"] is None and r["aviso"] == ""
+
+
+def _corpo_da_funcao(fonte: str, nome: str) -> str:
+    """O corpo de uma função JS, por chaves balanceadas."""
+    i = fonte.find(f"function {nome}(")
+    if i < 0:
+        return ""
+    j = fonte.index("{", i)
+    n, k = 0, j
+    while k < len(fonte):
+        c = fonte[k]
+        if c in "\"'`":
+            asp, k = c, k + 1
+            while k < len(fonte) and fonte[k] != asp:
+                k += 2 if fonte[k] == "\\" else 1
+        elif c == "{":
+            n += 1
+        elif c == "}":
+            n -= 1
+            if n == 0:
+                return fonte[j:k]
+        k += 1
+    return ""
+
+
+def test_todo_laco_de_relogio_do_painel_e_silencioso():
+    """A varredura: `setInterval` que dispara um zapFetch sem `silencioso` é o
+    defeito do #762 voltando.
+
+    SEGUE A CHAMADA, e não só a função do `setInterval` — a primeira versão
+    disto olhava um nível e passou na mutação, porque `setInterval(cxPoll,4000)`
+    chama `cxPoll`, que chama `cxPollList`, que é quem faz o pedido. Uma
+    varredura que para no primeiro nível é uma varredura que não varre.
+    """
+    import re
+
+    from web import painel_prospeccao as pp
+    fonte = open(pp.__file__, encoding="utf-8").read()
+    alvos = set(re.findall(r"setInterval\(\s*(\w+)\s*,", fonte))
+    vistos, faltando = set(), []
+    while alvos:
+        fn = alvos.pop()
+        if fn in vistos:
+            continue
+        vistos.add(fn)
+        corpo = _corpo_da_funcao(fonte, fn)
+        if not corpo:
+            continue
+        for ch in re.finditer(r"zapFetch\([^;]*?\)\s*\.then", corpo):
+            if "silencioso" not in ch.group(0):
+                faltando.append(f"{fn}: {ch.group(0)[:80]}")
+        # e o que ESTA função chama também é do laço
+        for chamada in re.findall(r"(?<![.\w])(\w+)\s*\(\s*\)", corpo):
+            if chamada not in vistos and f"function {chamada}(" in fonte:
+                alvos.add(chamada)
+    assert not faltando, (
+        "laço de relógio avisando a cada volta:\n  " + "\n  ".join(faltando))
+
+
+# ── o Cockpit (20/09/2026) ───────────────────────────────────────────────────
+# O app do vendedor monta o próprio <head> e por isso ficou de fora das duas
+# primeiras levas. Entrou agora, com duas coisas que só ele precisa.
+
+def test_o_cockpit_carrega_o_modulo():
+    """Sem isto, migrar lá dentro daria `ReferenceError` em 13 lugares no
+    celular de quem está na rua — o botão morto de 19/09, multiplicado."""
+    import inspect
+
+    from web import painel_cockpit as pc
+    fonte = inspect.getsource(pc)
+    assert "_zap.JS" in fonte and "_zap.CSS" in fonte
+    assert "window.ZAQ_VERSAO=" in fonte, (
+        "o app fica DIAS aberto na mesma aba: é onde 'a aba é de antes do "
+        "deploy' deixa de ser hipótese")
+
+
+def test_o_aviso_nao_cobre_o_botao_do_rodape_do_cockpit():
+    """O app tem rodapé fixo. O toast próprio dele já nasce a 88px do fundo pra
+    não cobrir o botão de ação; o nosso, a 1rem, cobriria justamente o que a
+    pessoa precisa apertar."""
+    import inspect
+
+    from web import painel_cockpit as pc
+    from web import zap_fetch as zf
+    assert "--zap-baixo,1rem" in zf.CSS, "o aviso não deixa a altura ser ajustada"
+    assert "--zap-baixo:88px" in inspect.getsource(pc), "o app não declara o rodapé dele"
+
+
+def test_o_service_worker_do_cockpit_NAO_usa_zapFetch():
+    """Ele roda noutro contexto, sem `window` — e o `fetch` dele É a rede de
+    verdade: é ele que serve a tela de 'sem conexão'."""
+    from web import painel_cockpit as pc
+    assert "zapFetch" not in pc._SW, "o service worker não tem window; ali é fetch cru"
+    assert "fetch(r)" in pc._SW

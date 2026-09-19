@@ -1417,7 +1417,7 @@ def test_a_fila_se_atualiza_em_pedacos_e_nao_recarregando(pool, monkeypatch):
     j = json.loads(bytes(frag.body).decode("utf-8"))
     assert j["ok"] and j["sig"] and j["sub"]
     assert "Fragmento" in j["lista"] and "class=swipe" in j["lista"]
-    assert "class=tabs" in j["abas"] and "class=busca" in j["foco"]
+    assert "class=tabs" in j["abas"] and "class='busca'" in j["foco"]
     # o que a tela mostra e o que o fragmento manda são o mesmo HTML
     assert j["lista"].split("<div class=dica-swipe")[0] in html
     assert j["abas"] in html

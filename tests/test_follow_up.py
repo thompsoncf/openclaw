@@ -1476,7 +1476,7 @@ def test_lead_no_prazo_nao_entra_no_teste(pool, monkeypatch):
 # card que finge que os três canais medem a mesma coisa mente em dois deles.
 
 def _entrega(**kw):
-    base = {"tem": True, "dias": 30, "origem": "follow_up", "por_vendedor": [],
+    base = {"tem": True, "dias": 30, "origem": "follow_up", "por_vendedor": [], "hist": [],
             "whatsapp": {"tentativas": 21, "ok": 21, "falhas": 0, "entregues": 19,
                          "lidos": 16, "sem_recibo": 2, "clicados": 0},
             "push": {"tentativas": 21, "ok": 18, "falhas": 3, "entregues": 0,
@@ -1549,14 +1549,110 @@ def test_conta_que_nunca_mandou_aviso_nao_ganha_card_de_zeros():
     assert "Como os avisos chegaram" not in _tela(modo="ligado", zap=True, entrega=None)
 
 
-def test_a_leitura_por_vendedor_aparece_com_nome_e_barra():
-    """"16 de 21 lidos" não diz QUEM não está lendo — e é essa a pergunta de quem
-    cobra."""
-    html = _tela(modo="ligado", zap=True, entrega=_entrega(por_vendedor=[
-        {"quem": "THIAGO", "total": 7, "lidos": 6, "entregues": 1, "sem_recibo": 0,
-         "pct_lido": 86, "pct_entregue": 14}]))
-    assert "Leitura no WhatsApp, por vendedor" in html
-    assert "THIAGO" in html and "leu 6" in html and "width:86%" in html
+def _pessoa(**kw):
+    """Uma pessoa do histórico, no formato que `_historico` entrega."""
+    from datetime import datetime, timezone
+    t = datetime(2026, 9, 18, 11, 2, tzinfo=timezone.utc)
+    base = {"membro_id": 1, "quem": "THIAGO", "email": "t@x.com", "numero": "86988614189",
+            "selo": "recebendo", "selo_cls": "ok", "sinal": "👀 leu", "sinal_cls": "g",
+            "alerta": None, "n_leads": 10, "quando": t, "tem_antigos": False,
+            "canais": {"whatsapp": {"recentes": [
+                          {"quando": t, "ok": True, "motivo": "", "n_leads": 10,
+                           "teste": False, "entregue_em": t, "lido_em": t,
+                           "clicado_em": None}], "antigos": []},
+                       "push": {"recentes": [
+                          {"quando": t, "ok": True, "motivo": "", "n_leads": 10,
+                           "teste": False, "entregue_em": None, "lido_em": None,
+                           "clicado_em": None}], "antigos": []},
+                       "email": {"recentes": [
+                          {"quando": t, "ok": True, "motivo": "", "n_leads": 10,
+                           "teste": False, "entregue_em": None, "lido_em": None,
+                           "clicado_em": None}], "antigos": []}}}
+    base.update(kw)
+    return base
+
+
+def test_o_historico_abre_pessoa_por_pessoa_com_os_tres_canais():
+    """Pedido do dono, mostrando o card do lead na campanha: "quero que lá no
+    follow-up fique assim". Mesma ideia — hora e estado de cada passo."""
+    html = _tela(modo="ligado", zap=True, entrega=_entrega(hist=[_pessoa()]))
+    assert "O aviso de cada pessoa" in html and "THIAGO" in html
+    for pedaco in ("💬 WhatsApp", "🔔 Push no app", "📧 E-mail",
+                   "Enviado", "Entregue ✓✓", "Leu 👀"):
+        assert pedaco in html, pedaco
+
+
+def test_a_linha_FECHADA_ja_responde_se_chegou():
+    """Sem abrir nada: quantos leads e o sinal mais forte que voltou. É o que
+    permite bater o olho na equipe inteira."""
+    html = _tela(modo="ligado", zap=True, entrega=_entrega(hist=[_pessoa()]))
+    assert "10 leads" in html and "👀 leu" in html and "recebendo" in html
+
+
+def test_o_email_NAO_ganha_linha_de_abertura():
+    """O card do lead mostra "Abriu 👁" no e-mail; aqui não. 62 das 69 "aberturas"
+    desta base aconteceram em menos de 1 minuto — é o proxy do Gmail buscando o
+    pixel, não gente lendo, e a própria base já não usa isso em balde nenhum."""
+    html = _tela(modo="ligado", zap=True, entrega=_entrega(hist=[_pessoa()]))
+    assert "Abriu 👁" not in html
+
+
+def test_o_push_mostra_o_TOQUE_quando_ele_existe():
+    from datetime import datetime, timezone
+    t = datetime(2026, 9, 18, 11, 2, tzinfo=timezone.utc)
+    p = _pessoa()
+    p["canais"]["push"]["recentes"][0]["clicado_em"] = t
+    html = _tela(modo="ligado", zap=True, entrega=_entrega(hist=[p]))
+    assert "tocou na notificação" in html
+
+
+def test_o_whatsapp_sem_recibo_aparece_como_linha_propria():
+    """"Sem recibo" não é "não chegou" — e some se virar ausência de linha."""
+    p = _pessoa()
+    p["canais"]["whatsapp"]["recentes"][0].update(entregue_em=None, lido_em=None)
+    html = _tela(modo="ligado", zap=True, entrega=_entrega(hist=[p]))
+    assert "Sem recibo" in html and "confirmação de leitura desligada" in html
+
+
+def test_o_que_NAO_saiu_aparece_com_o_motivo():
+    p = _pessoa(quem="MANOEL", selo="não recebe", selo_cls="ruim")
+    p["canais"]["email"]["recentes"][0].update(ok=False, motivo="membro sem e-mail cadastrado")
+    html = _tela(modo="ligado", zap=True, entrega=_entrega(hist=[p]))
+    assert "Não saiu" in html and "membro sem e-mail cadastrado" in html
+
+
+def test_o_teste_aparece_MARCADO_na_linha_do_tempo():
+    """Ele não conta na estatística (origem própria), mas esconder o que chegou no
+    celular do vendedor seria esconder metade da história do dia."""
+    p = _pessoa()
+    p["canais"]["whatsapp"]["recentes"][0]["teste"] = True
+    html = _tela(modo="ligado", zap=True, entrega=_entrega(hist=[p]))
+    assert ">teste<" in html
+
+
+def test_ver_os_30_dias_so_aparece_quando_ha_o_que_ver():
+    """Sete dias abertos; o resto atrás do link. 30 dias escancarados viram quase
+    90 linhas por pessoa, e ninguém lê 90 linhas."""
+    from datetime import datetime, timezone
+    velho = {"quando": datetime(2026, 9, 1, 11, 2, tzinfo=timezone.utc), "ok": True,
+             "motivo": "", "n_leads": 4, "teste": False, "entregue_em": None,
+             "lido_em": None, "clicado_em": None}
+    sem = _tela(modo="ligado", zap=True, entrega=_entrega(hist=[_pessoa()]))
+    assert "ver os 30 dias" not in sem
+    p = _pessoa()
+    p["canais"]["email"]["antigos"] = [velho]
+    com = _tela(modo="ligado", zap=True, entrega=_entrega(hist=[p]))
+    assert "ver os 30 dias (1 a mais)" in com
+
+
+def test_o_alerta_do_vigia_aparece_na_linha_da_pessoa():
+    """Mesmo vocabulário das duas telas: o que a Equipe chama de "não recebe aviso"
+    não pode virar outra palavra aqui."""
+    p = _pessoa(quem="MANOEL", selo="sem recibo", selo_cls="alerta",
+                alerta={"tipo": "numero_sem_recibo",
+                        "detalhe": "2 avisos para 5599984996253 sem nenhum ✓✓"})
+    html = _tela(modo="ligado", zap=True, entrega=_entrega(hist=[p]))
+    assert "sem recibo" in html and "sem nenhum ✓✓" in html
 
 
 def test_a_ressalva_do_sem_recibo_fica_escrita_no_card():

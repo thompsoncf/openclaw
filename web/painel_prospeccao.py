@@ -6406,6 +6406,26 @@ def _webhook_wa_qr_status_sync(corpo: bytes):
                 + ") < (" + _SQL_RANK + "))",
                 (novo, conta_id, sid, novo, novo))
             n += r.rowcount or 0
+            # O MESMO RECIBO CARIMBA O AVISO INTERNO (migração 284).
+            #
+            # ESTA LINHA FALTAVA, e a produção mostrou em 19/09/2026: no primeiro
+            # ciclo com o WhatsApp ligado, os quatro avisos saíram, os quatro
+            # recibos chegaram, `mensagens` subiu pra entregue/lido — e
+            # `aviso_envios` ficou com tudo em branco. O carimbo tinha sido posto
+            # só em `aplicar_status_wa`, que é o caminho do Twilio e do Cloud API;
+            # o QR, que é o provedor de TODAS as contas hoje, tem o seu próprio
+            # update aqui e nunca passava por lá. A medição do card dependia de um
+            # caminho que nenhuma conta usa.
+            #
+            # No savepoint pelo mesmo motivo do vizinho: base sem a tabela (deploy
+            # em que o código sobe antes da migração) abortaria a transação inteira
+            # e levaria junto o recibo do CLIENTE, que é o que não pode faltar.
+            try:
+                from finance import aviso_log as _al
+                with c.transaction():
+                    _al.marcar_recibo(c, sid, novo)
+            except Exception:  # noqa: BLE001
+                log.info("aviso_log: recibo do QR não carimbou (ok)", exc_info=True)
         c.commit()
     if n:
         log.info("webhook_wa_qr_status: conta_id=%s %s mensagens atualizadas", conta_id, n)

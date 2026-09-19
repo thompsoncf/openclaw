@@ -133,6 +133,7 @@ def test_service_worker_nao_guarda_dado_de_cliente():
     privado = corpo.split("if(!ESTATICO.test(")[1].split("// Estático:")[0]
     assert "caches" not in privado and "put(" not in privado
     assert "r.mode==='navigate'" in privado and "OFFLINE" in privado
-    assert "Sem conexão" in corpo
+    # dentro do JS a tela vai como string JSON, com o acento escapado
+    assert "Sem conexão" in pc._SW_OFFLINE and "Sem conex" in corpo
     # a v3 guardou conversa no aparelho: o activate apaga todo cache de outro nome
     assert "k!==CACHE" in corpo and "caches.delete(k)" in corpo

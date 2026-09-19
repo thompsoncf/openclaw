@@ -262,7 +262,17 @@ CSS = """/* o balão do LEAD — resumo pra decidir a próxima ação (contato, 
 .lp-evbts{display:flex;gap:.4rem;margin-top:.45rem}
 .lp-evbts .pbtn{width:auto;margin:0;padding:.35rem .7rem;font-size:.78rem}"""
 
-JS = r"""// confirmar o que o leitor achou: vira "✓ confirmado" no card
+JS = r"""// O ESCAPE, SEM DEPENDER DO BALÃO DE CONVERSA (19/09/2026). `cxEscK` nasceu em
+// web/balao_conversa.py, e este módulo o usava emprestado — o que funcionava só
+// porque as duas telas que abriam a janela (funil e Follow-up) carregam os DOIS
+// módulos. A Comunicação carrega só este, e sem o escape uma aspa no nome de um
+// lead quebraria o HTML da janela inteira.
+// `||` e não redeclaração: onde o balão já definiu o dele, o dele continua
+// valendo — é a MESMA função, e duas declarações do mesmo nome numa página só
+// pedem confusão na hora de achar quem está no ar.
+window.cxEscK = window.cxEscK || function(s){
+  var d=document.createElement('div'); d.textContent=(s==null?'':s); return d.innerHTML; };
+// confirmar o que o leitor achou: vira "✓ confirmado" no card
 function kbLeadConfirmarEvento(id){
   fetch('/painel/prospeccao/'+id+'/evento/confirmar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()})
     .then(function(r){return r.json();}).then(function(d){if(!d.ok){alert(d.erro||'Não consegui confirmar.');return;}location.reload();})

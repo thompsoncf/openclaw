@@ -8228,6 +8228,14 @@ def regua_pagina(request: Request):
                 cfg_temp = _tmp.config(c, ctx["conta_id"])
         except Exception:  # noqa: BLE001
             cfg_temp = {"temperatura_modo": "off"}
+        # a esteira da cobrança (migração 292) — mesmo padrão da temperatura e do
+        # perdido: config própria, savepoint, e 'off' se a coluna ainda não chegou
+        try:
+            with c.transaction():
+                from finance import esteira as _est
+                cfg_est = _est.config(c, ctx["conta_id"])
+        except Exception:  # noqa: BLE001
+            cfg_est = {"esteira_modo": "off"}
         # o perdido automático (migração 282) também tem config própria, e pelo
         # mesmo motivo: a config da régua não conhece as colunas novas. O savepoint
         # é o que impede um deploy pela metade de derrubar a tela inteira.
@@ -8288,6 +8296,7 @@ def regua_pagina(request: Request):
     janela_herda = not ({"janela_dias", "janela_abre", "janela_fecha"} & escolhidas)
     cfg = dict(cfg, **{k: v for k, v in cfg_temp.items() if k.startswith("temp")})
     cfg = dict(cfg, **{k: v for k, v in cfg_perd.items() if k.startswith("perdido")})
+    cfg = dict(cfg, **{k: v for k, v in cfg_est.items() if k.startswith("esteira")})
     escolhidas |= {k for k in ("temp_quente_h", "temp_morno_dias", "temp_frio_tentativas")
                    if cfg_temp.get("_escolhidas_temp") and k in cfg_temp["_escolhidas_temp"]}
     padrao = dict(padrao, **{k: _rxp.funil_padrao(perfil_chave).get(k)
@@ -8340,6 +8349,8 @@ async def regua_config(request: Request):
         c.execute("update funil_regua set fila_modo=%s where conta_id=%s",
                   (fila_modo if fila_modo in ("prazo", "temperatura") else "prazo",
                    ctx["conta_id"]))
+        c.execute("update funil_regua set esteira_modo=%s where conta_id=%s",
+                  (modo("esteira_modo"), ctx["conta_id"]))
         # o perdido automático mexe em CARD de cliente, então a chave de desligar
         # dele fica na mesma tela das outras — nunca só no banco.
         c.execute("update funil_regua set perdido_modo=%s where conta_id=%s",
@@ -16107,7 +16118,8 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         ('gatilhos_modo','Gatilhos das etapas','movem o card sozinhos quando o fato acontece'),
         ('cobranca_modo','Cobrança por prazo','avisa o vendedor e escala pro gestor'),
         ('teto_modo','Teto de dias na etapa','avisa antes de vencer e trava a renovação sem justificativa'),
-        ('perdido_modo','Perdido automático','fecha quem passou do prazo E não respondeu aos toques — nunca fecha quem está esperando você')] %}
+        ('perdido_modo','Perdido automático','fecha quem passou do prazo E não respondeu aos toques — nunca fecha quem está esperando você'),
+        ('esteira_modo','Esteira da cobrança','10 leads por vendedor por dia, com os nomes no WhatsApp · cobra no dia 1, 3 e 7 e avisa no último')] %}
     {#- O Follow-up automático SAIU daqui em 07/09/2026, por decisão do dono: ele
         se liga na própria aba Follow-up. A tela de lá dizia "ligue na Régua do
         funil" — mandava a pessoa embora pra ligar o que ela estava olhando. -#}

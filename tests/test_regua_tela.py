@@ -94,6 +94,8 @@ def pool():
         # a 282 traz o Perdido automático pro mesmo bloco Estado — e foi ESTE teste
         # que pegou a coluna faltando no POST, que é pra isso que o replay existe
         c.execute((MIG / "282_perdido_automatico.sql").read_text(encoding="utf-8"))
+        # a 292 traz a esteira pro mesmo bloco Estado
+        c.execute((MIG / "292_esteira_da_cobranca.sql").read_text(encoding="utf-8"))
         for chave, rot, ordem, fixa, fase in [("novo", "Novo", 0, True, "venda"),
                                               ("contatado", "Contatado", 10, False, "venda"),
                                               ("ganho", "Sinal Pago", 900, True, "fechamento"),

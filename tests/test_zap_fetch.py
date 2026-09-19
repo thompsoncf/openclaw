@@ -403,14 +403,6 @@ FORA_COM_MOTIVO = {
         "quando as versões DIFEREM que esta chamada precisa responder em paz, "
         "pra a faixa (que é gentil, com 'Depois') fazer o trabalho dela. "
         "Passá-la pelo zapFetch trocaria a faixa por um aviso de erro.",
-    ("painel_servicos", "{ok:r.ok"):
-        "a família `{ok:r.ok, d:d}` da aba de Serviços — 11 chamadas. Aqui `res.ok` "
-        "é o STATUS HTTP, e o corpo dessas rotas NÃO traz `ok`: elas sinalizam "
-        "falha por status + `{erro:…}` e sucesso por `JSONResponse(r)`. Trocar "
-        "por zapFetch faria `res.ok` virar um campo que não existe — e todo "
-        "salvamento bem-sucedido passaria a dizer 'não consegui salvar'. O "
-        "caminho certo é dar ao zapFetch um jeito de devolver o status, ou pôr "
-        "`ok` no corpo dessas rotas. Uma coisa ou outra, não de carona nesta leva.",
 }
 
 
@@ -466,3 +458,65 @@ def test_o_que_ficou_de_fora_ficou_por_um_motivo():
             f"então mude de lista), ou o recorte desta varredura mudou.")
     # e a razão de elas estarem fora: o módulo entra por UM lugar só
     assert "{{ zap_js }}" in _portal._BASE
+
+
+# ── o modo `comStatus` (20/09/2026) ──────────────────────────────────────────
+# A aba de Serviços — propostas, contratos, pagamentos — decide pelo STATUS
+# HTTP, porque as rotas dela sinalizam falha com `{erro:…}` + 4xx e sucesso com
+# o resultado puro, SEM `ok` dentro do corpo. `comStatus` entrega
+# `{ok, status, d}` e é o que deixou aquelas 13 chamadas entrarem sem virar
+# mentira. Era o item que faltava da segunda leva.
+
+def test_comStatus_entrega_o_status_e_o_corpo_separados(roda):
+    r = roda([{"status": 200, "corpo": json.dumps({"parcelas": [1, 2]})}],
+             op={"comStatus": True})
+    assert r["d"]["ok"] is True and r["d"]["status"] == 200
+    assert r["d"]["d"] == {"parcelas": [1, 2]}
+
+
+def test_comStatus_ve_SUCESSO_em_corpo_que_nao_tem_ok(roda):
+    """O caso que discrimina, e a razão de o modo existir.
+
+    `/painel/servicos/fechar` responde 200 com o resultado puro — sem `ok`
+    nenhum lá dentro. Sem `comStatus`, `res.ok` seria `undefined`, e o contrato
+    que ACABOU de ser fechado diria "não consegui fechar". Na tela do dinheiro.
+    """
+    corpo = json.dumps({"id": 12, "numero": 8, "titulos": 3})     # repare: sem `ok`
+    r = roda([{"status": 200, "corpo": corpo}], op={"comStatus": True})
+    assert r["d"]["ok"] is True, "200 sem `ok` no corpo tem que ser sucesso"
+    assert r["d"]["d"]["numero"] == 8
+    # e o mesmo corpo SEM o modo seria lido como falha pela tela — é o defeito
+    # que este modo existe pra impedir
+    r2 = roda([{"status": 200, "corpo": corpo}])
+    assert r2["d"].get("ok") is None
+
+
+def test_comStatus_ve_FALHA_com_o_erro_do_servidor(roda):
+    r = roda([{"status": 400, "corpo": json.dumps({"erro": "orçamento já fechado"})}],
+             op={"comStatus": True})
+    assert r["d"]["ok"] is False and r["d"]["status"] == 400
+    assert r["d"]["d"]["erro"] == "orçamento já fechado"
+
+
+def test_comStatus_nao_muda_o_que_e_falha_de_verdade(roda):
+    """Sessão expirada, deploy e 500 continuam sendo do zapFetch — `comStatus`
+    muda a FORMA do que volta, não quem decide o que é erro de troca."""
+    assert roda([{"status": 401, "corpo": "{}"}], op={"comStatus": True})["d"] is None
+    r = roda([{"status": 500, "corpo": "boom"}], op={"comStatus": True, "method": "POST"})
+    assert r["d"] is None and len(r["registros"]) == 1
+
+
+def test_a_aba_de_servicos_usa_o_modo_em_todas(roda):
+    """Se uma chamada de lá perder o `comStatus`, ela volta a ler `res.ok` de um
+    corpo que não tem — e o sucesso vira fracasso em silêncio."""
+    import re
+
+    from web import painel_servicos as ps
+    fonte = open(ps.__file__, encoding="utf-8").read()
+    sem = [l.strip()[:90] for l in fonte.splitlines()
+           if "res.ok" in l and "comStatus" not in l
+           and "zapFetch" not in l and "//" not in l.split("res.ok")[0]]
+    # toda cadeia que usa `res.ok` tem que nascer de um zapFetch com comStatus
+    assert fonte.count("comStatus:true") == 13, (
+        f"esperava 13 chamadas com comStatus, achei {fonte.count('comStatus:true')}")
+    assert "ok:r.ok" not in fonte, "voltou a família `{ok:r.ok, d:d}` crua"

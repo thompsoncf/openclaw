@@ -41,7 +41,8 @@ globalThis.window = globalThis;
 
 // ---- DOM de mentira: só o que o gravador toca ----
 function No(id){
-  this.id=id; this.style={}; this.textContent=""; this.disabled=false; this.onclick=null;
+  this.id=id; this.style={setProperty:function(){}}; this.textContent=""; this.disabled=false;
+  this.onclick=null; this.innerHTML=""; this.filhos=[]; this.attrs={}; this.scrollTop=0;
   var c={};
   this.classList={
     add:function(){for(var i=0;i<arguments.length;i++)c[arguments[i]]=1;},
@@ -49,9 +50,24 @@ function No(id){
     contains:function(x){return !!c[x];},
     _todas:function(){return Object.keys(c);}
   };
+  this.appendChild=function(f){ f.pai=this; this.filhos.push(f); return f; };
+  this.setAttribute=function(k,v){ this.attrs[k]=String(v); };
+  this.getAttribute=function(k){ return k in this.attrs ? this.attrs[k] : null; };
+  this.remove=function(){ if(this.pai) this.pai.filhos.splice(this.pai.filhos.indexOf(this),1); };
+  // só o que a bolha do áudio procura
+  this.querySelector=function(sel){
+    if(sel===".subiu") return this.subiu||null;
+    return null;
+  };
 }
 var nos={};
-globalThis.document={getElementById:function(id){return nos[id]||(nos[id]=new No(id));}};
+var chat=new No("chat");
+globalThis.document={
+  getElementById:function(id){return nos[id]||(nos[id]=new No(id));},
+  createElement:function(tag){var n=new No(tag); if(tag==="span") n.className=""; return n;},
+  querySelector:function(sel){ return sel===".chat" ? chat : null; }
+};
+globalThis.URL={createObjectURL:function(){return "blob:audio";}};
 function el(id){return document.getElementById(id);}
 
 // ---- relógio e animação sob controle ----
@@ -124,7 +140,8 @@ globalThis.zapFetch=function(url,o){
   envios.push({url:url, headers:(o&&o.headers)||{}});
   return Promise.resolve(globalThis.__resposta);
 };
-globalThis.__resposta={ok:true};
+globalThis.__resposta={ok:true, id:4242};
+globalThis.__viu=function(id){ globalThis.__viuId=id; };
 globalThis.__puxa=function(){ globalThis.__puxou=true; };
 globalThis.__tipoAceito="audio/webm;codecs=opus";
 globalThis.__envios=envios;
@@ -157,13 +174,20 @@ var flush=function(){ return new Promise(function(r){ process.nextTick(r); }); }
   // O que interessa aqui é ela SEGUIR a voz — barra parada num valor qualquer
   // enganaria igual a uma barra parada em zero.
   function rodar(n){ for(var i=0;i<n;i++){ var q=quadros.shift(); if(q) q(); } }
-  function larg(){ return parseInt(el("nivel").style.width,10); }
-  globalThis.__amplitude=1;  rodar(20); var quieto=larg();
-  globalThis.__amplitude=30; rodar(20); var falando=larg();
-  globalThis.__amplitude=1;  rodar(20); var quieto2=larg();
-  ok(falando > quieto + 20, "a barra não subiu com a voz: " + quieto + "% → " + falando + "%");
-  ok(quieto2 < falando - 20, "a barra não desceu no silêncio: " + falando + "% → " + quieto2 + "%");
-  ok(quieto >= 2, "a barra não pode zerar: parece desligada (" + quieto + "%)");
+  // a ONDA: 28 barrinhas, a mais nova no fim. É ela que mostra a fala
+  // desenhando, em vez de só o volume do instante.
+  var barras=el("nivel").filhos;
+  function alt(){ return parseInt(barras[barras.length-1].style.height,10); }
+  ok(barras.length===28, "a onda devia ter 28 barras, veio " + barras.length);
+  globalThis.__amplitude=1;  rodar(20); var quieto=alt();
+  globalThis.__amplitude=30; rodar(20); var falando=alt();
+  globalThis.__amplitude=1;  rodar(20); var quieto2=alt();
+  ok(falando > quieto + 20, "a onda não subiu com a voz: " + quieto + "% → " + falando + "%");
+  ok(quieto2 < falando - 20, "a onda não desceu no silêncio: " + falando + "% → " + quieto2 + "%");
+  ok(quieto >= 8, "a onda não pode zerar: parece desligada (" + quieto + "%)");
+  // e as barras ANDAM: o que foi falado continua desenhado atrás da mais nova
+  globalThis.__amplitude=30; rodar(3);
+  ok(parseInt(barras[barras.length-2].style.height,10) > 8, "a onda não anda pra trás");
 
   // ── 4. o TOQUE em enviar muda a tela na hora ─────────────────
   agora += 9000;
@@ -191,6 +215,15 @@ var flush=function(){ return new Promise(function(r){ process.nextTick(r); }); }
   ok(!globalThis.__recarregou, "recarregou a página inteira");
   ok(!el("grav").classList.contains("on"), "a barra não fechou");
   ok(globalThis.__ctxFechado, "não fechou o AudioContext");
+  // A BOLHA ENTRA ANTES DA VIAGEM: o dedo toca em enviar e o áudio já está na
+  // conversa, tocável, com o upload correndo por baixo.
+  ok(chat.filhos.length===1, "a bolha do áudio não entrou na conversa");
+  var bolha=chat.filhos[0];
+  ok(/<audio/.test(bolha.innerHTML), "a bolha não toca o áudio gravado");
+  ok(/Áudio \(0:09\)/.test(bolha.innerHTML), "a marca do áudio saiu errada: " + bolha.innerHTML);
+  ok(!bolha.classList.contains("subindo"), "a bolha ficou presa em 'enviando'");
+  ok(bolha.getAttribute("data-id")==="4242", "a bolha não recebeu o id da mensagem");
+  ok(globalThis.__viuId===4242, "o polling não foi avisado — a mensagem sairia duplicada");
 
   // ── 7. cancelar também responde no toque ───────────────────
   globalThis.__pediuStop=false;
@@ -273,4 +306,5 @@ def test_o_medidor_so_aparece_gravando():
     que medir, e uma barra parada sugeriria que travou."""
     css = pc._CSS
     assert ".gravando .nivel{" in css and "display:none" in css.split(".gravando .nivel{")[1][:120]
-    assert ".gravando.st-grav .nivel{display:block}" in css
+    # `flex` desde 20/09: a onda é uma fileira de barrinhas, não mais uma barra só
+    assert ".gravando.st-grav .nivel{display:flex}" in css

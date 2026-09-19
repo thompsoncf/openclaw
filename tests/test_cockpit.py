@@ -54,6 +54,8 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text, direcao text,
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now(),
+  -- o carimbo de entrega ('enviado' → 'entregue' → 'lido'), que vira o ✓✓ da bolha
+  status text,
   midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 -- o histórico do funil (migração 177). Faltava aqui, e a falta ESCONDIA o defeito:
 -- `_historico` é best-effort de propósito (savepoint + except), então sem a tabela
@@ -374,6 +376,36 @@ def test_polling_da_conversa_bate_com_a_tela(pool):
     poll = ck.mensagens_desde(pool, conta, vend, lead, 0)
     assert poll["mensagens"] == tela["mensagens"]
     assert poll["ia"] == tela["ia"] is True
+
+
+def test_o_carimbo_de_entrega_chega_na_tela(pool):
+    """✓ saiu, ✓✓ chegou, ✓✓ azul foi lido. O banco já guardava (`mensagens.status`)
+    e a tela não mostrava — o vendedor abria o WhatsApp do celular só pra saber se
+    a mensagem tinha chegado."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="tick@x.com")
+        lead = _lead(c, conta, vend, "Carimbo")
+        conv, ids = _conversa_com(c, conta, lead, ["pergunta do cliente"])
+        env = c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto, status) "
+                        "values (%s,'whatsapp','out','humano','resposta','lido') returning id",
+                        (conv,)).fetchone()[0]
+        c.commit()
+
+    tela = ck.lead_do_vendedor(pool, conta, vend, lead)
+    por_id = {m["id"]: m for m in tela["mensagens"]}
+    assert por_id[env]["status"] == "lido"
+    assert por_id[ids[0]]["status"] == "", "a mensagem do cliente não tem carimbo"
+
+    # ...e o carimbo que MUDA depois (entregue → lido) chega pelo polling, mesmo
+    # sem mensagem nova: é uma alteração de status, não uma linha nova
+    poll = ck.mensagens_desde(pool, conta, vend, lead, env)
+    assert poll["mensagens"] == []
+    assert {"id": env, "status": "lido"} in poll["estados"]
+    with pool.connection() as c:
+        c.execute("update mensagens set status='entregue' where id=%s", (env,))
+        c.commit()
+    assert ck.mensagens_desde(pool, conta, vend, lead, env)["estados"] == \
+        [{"id": env, "status": "entregue"}]
 
 
 def test_midia_so_do_lead_do_proprio_vendedor(pool):

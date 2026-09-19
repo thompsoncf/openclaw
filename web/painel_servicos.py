@@ -38,6 +38,7 @@ from finance.cnpj_info import consultar_cnpj
 from finance import (agenda as ag, comprovantes as comprov, contrato as ctr,
                      desconto as dsc, empresa as emp, icones_servico as ics,
                      proposta_email as pmail, vendas, servicos_catalogo as scat)
+from web import estaticos as _estaticos
 from web.portal import _render, _env, conta_logada, brl
 
 router = APIRouter()
@@ -855,6 +856,128 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     return JSONResponse(resp)
 
 
+# OS DOIS `left join lateral` ABAIXO no lugar de sete subconsultas
+# correlacionadas que liam as MESMAS duas linhas: cinco em `contratos`
+# (token, número, assinado, enviado, id) e duas em `eventos_agenda` (o
+# prazo da pré-reserva e o status). Cada uma era uma busca própria POR
+# LINHA do funil — numa lista de cinquenta, 350 buscas pra trazer cem
+# linhas. O `ux_contratos_orcamento` (migração 164) já garante UM contrato
+# vivo por orçamento, então o `order by ct.id desc limit 1` continua aqui
+# como cinto e suspensório; o que muda é rodar uma vez por orçamento em
+# vez de cinco.
+#
+# As colunas de `orcamentos` vão TODAS qualificadas. Com join no meio, um
+# nome solto que amanhã também exista do outro lado derruba a lista
+# inteira com "column reference is ambiguous" — foi exatamente assim que
+# o `criado_em` sem apelido já derrubou este funil uma vez.
+_COLS_FUNIL = """select orcamentos.id, orcamentos.cliente, orcamentos.empresa,
+                  orcamentos.setup_centavos, orcamentos.mensal_centavos,
+                  orcamentos.primeiro_ano_centavos, orcamentos.n_modulos,
+                  orcamentos.criado_em, orcamentos.status,
+                  orcamentos.token, orcamentos.aprovada_por,
+                  orcamentos.aprovada_em, orcamentos.numero,
+                  coalesce(orcamentos.modo,'recorrente'),
+                  orcamentos.sinal_centavos, orcamentos.sinal_pago_em,
+                  orcamentos.parcelas,
+                  ctr.ct_token,
+                  ctr.ct_numero,
+                  ctr.ct_assinado,
+                  -- só vem preenchido enquanto a data está SEGURADA
+                  -- esperando o sinal: virou firme ou foi cancelada, é null
+                  -- e o botão "Sinal recebido" some sozinho.
+                  evt.ev_pre_reserva_ate,
+                  orcamentos.evento,
+                  evt.ev_status,
+                  -- o último ENVIO da proposta por e-mail. Sem isto, "será
+                  -- que já mandei pra Carla?" só se responde abrindo o
+                  -- Gmail — e na dúvida se manda duas vezes.
+                  -- o APELIDO não é enfeite: sem ele a saída fica com duas
+                  -- colunas chamadas `criado_em` (esta e a do orçamento) e o
+                  -- `order by criado_em` de baixo vira ambíguo — a lista
+                  -- inteira do funil devolvia 500.
+                  (select ev.criado_em from orcamento_envios ev
+                    where ev.orcamento_id = orcamentos.id and ev.ok
+                    order by ev.criado_em desc limit 1) as enviado_em,
+                  -- O NOME DO CADASTRO. `cliente` e `empresa` são dois
+                  -- campos livres pra mesma coisa e divergiram: em 25/08,
+                  -- de 26 orçamentos, 19 apareciam como "−" e 2 como
+                  -- TELEFONE. Este é o único que estava certo nas 26.
+                  (select cl.nome from clientes cl
+                    where cl.id = orcamentos.cliente_id) as cadastro_nome,
+                  coalesce(orcamentos.whatsapp, orcamentos.telefone, '') as zap,
+                  -- desde quando o contrato está na mão do cliente
+                  -- esperando assinatura — não desde quando foi CRIADO.
+                  ctr.ct_enviado_em,
+                  -- O ID do contrato, no FIM da lista de propósito: inserir
+                  -- coluna no meio empurraria todos os r[n] de baixo, e o
+                  -- `_fmt_item` lê por posição.
+                  --
+                  -- Precisa do id, e não do token: o token abre a folha
+                  -- pública do cliente; a tela de termo aditivo é rota
+                  -- interna, endereçada por id.
+                  ctr.ct_id,
+                  -- QUEM VENDEU. `criado_por` guarda o id do membro OU a
+                  -- palavra 'dono' (conta sem vendedor específico) — mesma
+                  -- leitura de `finance.vendas._membro_id_de` e a mesma
+                  -- redação que Relatórios → Vendas já usa pra essa coluna
+                  -- (web/painel_relatorios.py): sem o 2º ramo, todo
+                  -- orçamento do dono ficava "—", como se não tivesse
+                  -- autor nenhum.
+                  coalesce(
+                    (select mm.nome from membros mm
+                      where mm.id::text = orcamentos.criado_por
+                        and mm.conta_id = orcamentos.conta_id),
+                    case when orcamentos.criado_por = 'dono' then %s end,
+                    '—') as vendedor"""
+# o FROM com os dois laterais. Fica separado do SELECT porque as duas
+# consultas abaixo (vendedor × dono) só diferem no WHERE.
+_DE_FUNIL = """ from orcamentos
+          left join lateral (
+            select ct.id                          as ct_id,
+                   ct.token                       as ct_token,
+                   ct.numero                      as ct_numero,
+                   (ct.assinado_em is not null)   as ct_assinado,
+                   ct.enviado_em                  as ct_enviado_em
+              from contratos ct
+             where ct.orcamento_id = orcamentos.id
+               and ct.substitui_id is null
+             order by ct.id desc limit 1) ctr on true
+          left join lateral (
+            select e.status as ev_status,
+                   case when e.status = 'pre_reservado'
+                        then e.pre_reserva_ate end as ev_pre_reserva_ate
+              from eventos_agenda e
+             where e.id = orcamentos.evento_agenda_id) evt on true"""
+
+
+def _curar_tokens(c, conta_id: int, linhas) -> dict[int, str]:
+    """Gera o token das propostas desta página do funil que ainda não têm.
+
+    O token é a chave do link público (a folha que o cliente abre) e do PDF.
+    `salvar` já grava um no INSERT e no UPDATE desde que a coluna existe, então
+    quem chega aqui sem token é proposta anterior à migração — em produção,
+    nenhuma.
+
+    A versão antiga desta cura era um `update ... where conta_id=%s and token is
+    null` MAIS um commit rodando antes de toda leitura do funil, e a tela relê o
+    funil em nove pontos. Eram nove transações de escrita pra atualizar zero
+    linhas. Aqui a pergunta "tem o que curar?" é respondida pelo SELECT que já
+    rodou: sem linha sem token, não se toca no banco.
+
+    Devolve {id: token} só do que foi curado agora — o chamador costura no JSON.
+    """
+    sem = [r[0] for r in linhas if not r[9]]
+    if not sem:
+        return {}
+    novos = dict(c.execute(
+        """update orcamentos set token = substr(md5(random()::text || id::text
+             || clock_timestamp()::text), 1, 22)
+           where conta_id=%s and id = any(%s) and token is null
+           returning id, token""", (conta_id, sem)).fetchall())
+    c.commit()
+    return novos
+
+
 @router.get("/painel/servicos/lista")
 def painel_servicos_lista(request: Request):
     # importado AQUI dentro, e não no topo: `painel_prospeccao` importa deste
@@ -868,94 +991,33 @@ def painel_servicos_lista(request: Request):
     membro_id, papel = _ator(request)
     with get_pool().connection() as c:
         _garantir_tabela(c)
-        # auto-cura: toda proposta precisa de um token pro link/PDF (as antigas
-        # foram salvas antes do token existir). Gera pra quem está sem, uma vez.
-        c.execute(
-            """update orcamentos set token = substr(md5(random()::text || id::text
-                 || clock_timestamp()::text), 1, 22)
-               where conta_id=%s and token is null""", (conta[0],))
-        c.commit()
+        # A AUTO-CURA DO TOKEN SAIU DAQUI — ver `_curar_tokens`, chamada DEPOIS do
+        # SELECT. Aqui em cima ela era um UPDATE da conta inteira mais um commit em
+        # TODA leitura do funil, e o funil é relido em nove pontos da tela (salvar,
+        # fechar, sinal, marcar data, enviar, comprovante, excluir, gerar, abrir).
+        # Nove transações de escrita por sessão de trabalho pra, em produção,
+        # atualizar zero linhas: `salvar` já grava o token no INSERT e no UPDATE
+        # (`token=coalesce(token, %s)`), então só proposta anterior à coluna nasce
+        # sem. Agora a cura só toca no banco quando o próprio SELECT mostra que há
+        # o que curar.
         # vendedor vê só as propostas dele; dono/gestor veem o funil inteiro.
         # o prazo da pré-reserva vem da agenda, não do orçamento: quem manda na
         # data é o compromisso. Se ele já virou firme (ou foi cancelado), a
         # subconsulta devolve null e o botão "Sinal recebido" some sozinho.
-        _cols = """select id, cliente, empresa, setup_centavos, mensal_centavos,
-                          primeiro_ano_centavos, n_modulos, criado_em, status,
-                          token, aprovada_por, aprovada_em, numero,
-                          coalesce(modo,'recorrente'), sinal_centavos, sinal_pago_em,
-                          parcelas,
-                          (select ct.token from contratos ct
-                            where ct.orcamento_id = orcamentos.id and ct.substitui_id is null
-                            order by ct.id desc limit 1),
-                          (select ct.numero from contratos ct
-                            where ct.orcamento_id = orcamentos.id and ct.substitui_id is null
-                            order by ct.id desc limit 1),
-                          (select ct.assinado_em is not null from contratos ct
-                            where ct.orcamento_id = orcamentos.id and ct.substitui_id is null
-                            order by ct.id desc limit 1),
-                          (select e.pre_reserva_ate from eventos_agenda e
-                            where e.id = orcamentos.evento_agenda_id
-                              and e.status = 'pre_reservado'),
-                          evento,
-                          (select e.status from eventos_agenda e
-                            where e.id = orcamentos.evento_agenda_id),
-                          -- o último ENVIO da proposta por e-mail. Sem isto, "será
-                          -- que já mandei pra Carla?" só se responde abrindo o
-                          -- Gmail — e na dúvida se manda duas vezes.
-                          -- o APELIDO não é enfeite: sem ele a saída fica com duas
-                          -- colunas chamadas `criado_em` (esta e a do orçamento) e o
-                          -- `order by criado_em` de baixo vira ambíguo — a lista
-                          -- inteira do funil devolvia 500.
-                          (select ev.criado_em from orcamento_envios ev
-                            where ev.orcamento_id = orcamentos.id and ev.ok
-                            order by ev.criado_em desc limit 1) as enviado_em,
-                          -- O NOME DO CADASTRO. `cliente` e `empresa` são dois
-                          -- campos livres pra mesma coisa e divergiram: em 25/08,
-                          -- de 26 orçamentos, 19 apareciam como "−" e 2 como
-                          -- TELEFONE. Este é o único que estava certo nas 26.
-                          (select cl.nome from clientes cl
-                            where cl.id = orcamentos.cliente_id) as cadastro_nome,
-                          coalesce(whatsapp, telefone, '') as zap,
-                          -- desde quando o contrato está na mão do cliente
-                          -- esperando assinatura — não desde quando foi CRIADO.
-                          -- O APELIDO aqui é pela mesma razão do `enviado_em`
-                          -- acima: sem ele esta coluna também se chama `enviado_em`
-                          -- e derruba o `order by` de baixo com ORDER BY ambíguo.
-                          (select ct.enviado_em from contratos ct
-                            where ct.orcamento_id = orcamentos.id and ct.substitui_id is null
-                            order by ct.id desc limit 1) as contrato_enviado_em,
-                          -- O ID do contrato, no FIM da lista de propósito: inserir
-                          -- coluna no meio empurraria todos os r[n] de baixo, e o
-                          -- `_fmt_item` lê por posição.
-                          --
-                          -- Precisa do id, e não do token: o token abre a folha
-                          -- pública do cliente; a tela de termo aditivo é rota
-                          -- interna, endereçada por id.
-                          (select ct.id from contratos ct
-                            where ct.orcamento_id = orcamentos.id and ct.substitui_id is null
-                            order by ct.id desc limit 1) as contrato_id,
-                          -- QUEM VENDEU. `criado_por` guarda o id do membro OU a
-                          -- palavra 'dono' (conta sem vendedor específico) — mesma
-                          -- leitura de `finance.vendas._membro_id_de` e a mesma
-                          -- redação que Relatórios → Vendas já usa pra essa coluna
-                          -- (web/painel_relatorios.py): sem o 2º ramo, todo
-                          -- orçamento do dono ficava "—", como se não tivesse
-                          -- autor nenhum.
-                          coalesce(
-                            (select mm.nome from membros mm
-                              where mm.id::text = orcamentos.criado_por
-                                and mm.conta_id = orcamentos.conta_id),
-                            case when orcamentos.criado_por = 'dono' then %s end,
-                            '—') as vendedor"""
         if papel == "vendedor" and membro_id:
             rows = c.execute(
-                _cols + """ from orcamentos where conta_id=%s and criado_por=%s
-                   order by criado_em desc limit 50""",
+                _COLS_FUNIL + _DE_FUNIL + """ where orcamentos.conta_id=%s
+                     and orcamentos.criado_por=%s
+                   order by orcamentos.criado_em desc limit 50""",
                 (conta[2], conta[0], str(membro_id))).fetchall()
         else:
             rows = c.execute(
-                _cols + """ from orcamentos where conta_id=%s
-                   order by criado_em desc limit 50""", (conta[2], conta[0])).fetchall()
+                _COLS_FUNIL + _DE_FUNIL + """ where orcamentos.conta_id=%s
+                   order by orcamentos.criado_em desc limit 50""",
+                (conta[2], conta[0])).fetchall()
+        # a cura do token, agora depois do SELECT e só sobre as linhas que vieram
+        # sem: no caso normal não abre transação nenhuma.
+        tokens_novos = _curar_tokens(c, conta[0], rows)
     # OS PAGAMENTOS DE TODAS AS LINHAS, em dois SELECTs. Por linha seriam cem
     # consultas numa lista de cinquenta — o mesmo N+1 que já custou caro na Agenda.
     ids = [r[0] for r in rows]
@@ -996,7 +1058,9 @@ def painel_servicos_lista(request: Request):
         # por deste mês.
         "data": r[7].strftime("%d/%m/%Y") if r[7] else "",
         "status": r[8] or "rascunho",
-        "token": r[9] or "",
+        # o curado agora entra no lugar do vazio: sem isto a linha recém-curada
+        # ficaria sem "Abrir proposta" até o próximo carregamento.
+        "token": r[9] or tokens_novos.get(r[0], ""),
         "aprovada_por": r[10] or "",
         "aprovada_em": r[11].strftime("%d/%m/%Y") if r[11] else "",
         "numero": r[12], "modo": r[13] or "recorrente",
@@ -1841,20 +1905,22 @@ def painel_servicos_excluir(request: Request, dados: OrcDelIn):
 
 
 # ---------------------------------------------------------------- template
-_SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
-<div class="sv-wrap{% if servico_avulso %} evento{% endif %}">
-<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.4rem">
-  <h1 style="margin:.2rem 0">Vendas de Serviços</h1>
-  <span class="mut" style="font-size:.85rem">{{ empresa_nome }}</span>
-</div>
-<p class="mut" style="margin-top:0">{{ 'Monte a proposta, salve no funil e feche o contrato — ao fechar, vira título a receber no módulo Empresa.' if servico_avulso else 'Monte a proposta, salve no funil e feche o contrato — ao fechar, vira título a receber (setup + mensalidade) no módulo Empresa.' }}</p>
-<div id="oc-editando" style="display:none;align-items:center;justify-content:space-between;gap:.6rem;background:#10241d;border:1px solid #1c3a30;border-radius:10px;padding:.5rem .8rem;margin-bottom:.8rem">
-  <span class="t" style="font-size:.85rem;color:var(--verde-claro)"></span>
-  <button id="oc-novo" type="button" class="oc-pill">Nova proposta</button>
-</div>
-
-{% raw %}<style>
-.sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizing:border-box}
+# ---------------------------------------------------------------- estáticos
+# A FOLHA E O SCRIPT SAEM DE DENTRO DA PÁGINA. Eram 23 KB de CSS e 112 KB de JS
+# viajando dentro do HTML em TODA carga da aba — e o HTML muda (nome da empresa,
+# nicho, paleta de ícones), então o navegador não tinha como reaproveitar nada:
+# baixava e reinterpretava os 135 KB a cada F5 e a cada volta pro funil.
+#
+# É o mesmo conserto que a Agenda fez em 19/08 (ver web/estaticos.py): o endereço
+# carrega o resumo do conteúdo, o navegador guarda por um ano, e um caractere
+# mudado já é outro endereço — não existe versão velha grudada.
+#
+# O que NÃO pode vir pra cá é o que tem {{ }} dentro. Aqui não tem: os dois
+# dados que a tela precisa do servidor (`SERVICO_AVULSO` e a paleta de ícones)
+# já moravam em duas linhas `<script>` próprias, que continuam inline. Elas
+# rodam durante a análise da página; o `defer` faz o código rodar depois — a
+# ordem que o IIFE precisa continua sendo a mesma.
+_CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizing:border-box}
 /* orçamento de evento tem uma coluna a mais na linha (qtd, valor e subtotal):
    a tela abre um pouco pra o nome do serviço não virar uma coluna de 3 letras. */
 .sv-wrap.evento{max-width:1120px}
@@ -1931,6 +1997,13 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-nome-linha{display:flex;gap:.5rem;align-items:center;min-width:0}
 .oc-cat{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
   color:var(--verde-claro);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* serviço que a proposta tem e o catálogo não tem mais: a linha vale igual, e o
+   selo explica por que a busca não acha esse nome. Âmbar, não coral: não é
+   prejuízo, é uma informação que faltava. */
+.oc-fora{display:inline-block;margin-left:.4rem;font-size:.62rem;font-weight:700;
+  letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;
+  border-radius:5px;padding:.05rem .35rem;
+  color:var(--amar);border:1px solid var(--ambar-borda);background:var(--ambar-fundo)}
 .oc-mod.off{opacity:.5}
 .oc-mod .oc-nome,.oc-browse-row .oc-nome{cursor:default; min-width:0}
 .oc-desc-preview{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%}
@@ -2165,412 +2238,67 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   .sv-wrap .oc-browse-row .oc-rowacts{order:3; margin-left:auto}
   .sv-wrap .oc-browse-row .oc-num{order:4; flex:1 1 40%}
   .sv-wrap .oc-browse-row .oc-num input{text-align:left}
-}
-</style>{% endraw %}
+}"""
 
-{% if pode_contrato %}
-{# Contrato de locação: nicho de eventos E só pro DONO — ele define o que a
-   empresa se compromete a cumprir, e isso não é decisão de quem vende. O gate
-   de verdade está nas rotas (ver _conta_evento): esconder o card não impede
-   um POST direto.
+_CSS = f'<link rel="stylesheet" href="{_estaticos.registrar("servicos.css", _CSS_CRU)}">'
 
-   PRIMEIRO CARD DA PÁGINA. Era o último, depois do Funil — quem ia gerar a
-   proposta não passava por ele, e campo sem valor só aparecia no documento do
-   cliente. Fechado ocupa uma linha: o selo responde "está tudo certo?" sem
-   tirar espaço de quem só quer montar o orçamento, que é o trabalho diário. #}
-<div class="card" id="ct-card">
-  {# Cabeçalho clicável INTEIRO, não só a seta: alvo de 12px no celular é o que
-     faz o dono achar que a tela travou. #}
-  <div id="ct-cab" style="display:flex;align-items:center;gap:.6rem;cursor:pointer;user-select:none">
-    <span id="ct-seta" style="color:var(--mut);font-size:.85rem;transition:transform .18s">▸</span>
-    <div style="min-width:0">
-      <div style="font-weight:700;font-size:1rem">Contrato de locação</div>
-      <div id="ct-resumo" class="mut" style="font-size:.78rem;margin-top:.1rem">Carregando...</div>
-    </div>
-    <div id="ct-selo" style="margin-left:auto;flex-shrink:0"></div>
-  </div>
-  {# O QUE FAZER, não quais campos. O selo diz que há problema; esta linha diz o
-     conserto e onde fica — é o que separa um aviso de uma tarefa. Fora do cabeçalho
-     porque a frase é larga e espremer ao lado do selo cortaria a informação. #}
-  <div id="ct-faltas" style="display:none;cursor:pointer;margin-top:.5rem;font-size:.74rem;
-       line-height:1.5;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);
-       border-radius:8px;padding:.4rem .55rem;color:var(--amar)"></div>
-  <div id="ct-corpo" style="display:none;margin-top:.85rem;padding-top:.85rem;border-top:1px solid var(--borda)">
-    <p class="mut" style="margin-top:0;font-size:.86rem">
-      As cláusulas são suas — escreva como quiser. Onde entra um valor, use um
-      <b style="color:var(--verde-claro)">campo</b>: ele é preenchido na hora com o preço do
-      catálogo e os dados do orçamento, então o contrato nunca diz um número diferente da proposta.
-    </p>
-    <div id="ct-box"><p class="mut">Carregando...</p></div>
-  </div>
-</div>
+# A REGRA QUE DECIDE DE ONDE VEM CADA LINHA DO ORÇAMENTO DE EVENTO — sozinha,
+# sem DOM, porque é a única parte desta tela que, errada, APAGA coisa do cliente
+# (regra 0 do CLAUDE.md). Fora do IIFE e com nome próprio pra `tests/
+# test_servicos_orfaos.py` poder rodá-la no node; o CI desta base só roda pytest,
+# então o teste chama o node de dentro do pytest.
+#
+# O problema que ela resolve: a linha era montada cruzando `modulos` (lista de
+# slugs) com o catálogo ATIVO. Se o serviço saiu do catálogo, ou se a proposta
+# não tem `modulos` (o orçamento nº 22 da Prime tem OITO itens e `modulos` nulo),
+# a linha sumia da tela — e o "Salvar no funil" seguinte grava `itens` a partir
+# da TELA, apagando o que o cliente já tinha recebido.
+_JS_PAREAR_CRU = r"""window.ZAQ_PAREAR = function (mods, itens, catalogo) {
+  mods = mods || []; itens = itens || []; catalogo = catalogo || [];
 
-{# TERMO ADITIVO: o mesmo card, pro documento que ALTERA o contrato acima.
-   Pedido do dono em 05/09/2026 — "deixar o aditivo igual o contrato, podendo
-   alterar alguma coisa nas cláusulas... e a gente replica". A incoerência que
-   ele apontou: o contrato era escrito por ele e o aditivo saía com texto escrito
-   dentro do código, no mesmo negócio e pro mesmo cliente.
+  var noCatalogo = {}, contagemNome = {}, slugDoNome = {};
+  catalogo.forEach(function (s) {
+    noCatalogo[s.slug] = true;
+    var n = s.nome || '';
+    contagemNome[n] = (contagemNome[n] || 0) + 1;
+    slugDoNome[n] = s.slug;
+  });
 
-   Vem DEPOIS do contrato porque é o que emenda o de cima, e o mesmo gate
-   (`pode_contrato` = eventos + gerir): FAZER aditivo é dos três papéis, mas
-   ESCREVER o texto é do dono, igual ao contrato. #}
-<div class="card" id="ad-card">
-  <div id="ad-cab" style="display:flex;align-items:center;gap:.6rem;cursor:pointer;user-select:none">
-    <span id="ad-seta" style="color:var(--mut);font-size:.85rem;transition:transform .18s">▸</span>
-    <div style="min-width:0">
-      <div style="font-weight:700;font-size:1rem">Termo aditivo</div>
-      <div id="ad-resumo" class="mut" style="font-size:.78rem;margin-top:.1rem">Carregando...</div>
-    </div>
-  </div>
-  <div id="ad-corpo" style="display:none;margin-top:.85rem;padding-top:.85rem;border-top:1px solid var(--borda)">
-    <p class="mut" style="margin-top:0;font-size:.86rem">
-      O texto de cada alteração é seu. Os <b style="color:var(--verde-claro)">campos</b> trazem o
-      número novo e o antigo — é o que faz o documento dizer “passa a ser 140, em substituição a
-      115” sem ninguém digitar 140 nem 115.
-    </p>
-    <div id="ad-box"><p class="mut">Carregando...</p></div>
-  </div>
-</div>
-{% endif %}
+  // Sem itens gravados (proposta anterior à coluna `itens`), o slug é tudo que
+  // existe: continua valendo o que sempre valeu.
+  if (!itens.length) {
+    return mods.map(function (slug) {
+      return { slug: slug, item: null, orfao: !noCatalogo[slug] };
+    });
+  }
 
-<div class="card"{% if servico_avulso %} style="display:none"{% endif %}>
-  <h2 style="margin-top:0">Escopo automático · IA</h2>
-  <p class="mut" style="margin-top:0">Cole o site ou a descrição do cliente. A IA escolhe os módulos e escreve o escopo da proposta.</p>
-  <textarea id="oc-desc" class="oc-inp" rows="3" placeholder="Ex.: clínica com 3 unidades, muito WhatsApp, quer reduzir faltas e organizar leads..."></textarea>
-  <div style="display:flex; align-items:center; gap:.8rem; margin-top:.6rem">
-    <button id="oc-sugerir" class="oc-btn-g" style="border:none; border-radius:8px; padding:.55rem 1rem; cursor:pointer; font-weight:600; width:auto; margin:0">Sugerir escopo</button>
-    <span id="oc-ia-msg" class="mut" style="font-size:.85rem"></span>
-  </div>
-  <div id="oc-escopo-out" class="mut" style="display:none; margin-top:.8rem; padding:.8rem; background:var(--bg); border:1px solid var(--borda); border-radius:8px; line-height:1.6"></div>
-</div>
+  // `coletarBody` monta `modulos` e `itens` varrendo as MESMAS linhas, na mesma
+  // ordem. Mesmo tamanho, então, quer dizer que o índice casa e o slug é
+  // confiável. Tamanho diferente só acontece quando algum slug se perdeu no
+  // caminho (o servidor filtra `modulos` contra o catálogo ativo em `salvar`),
+  // e aí parear por índice trocaria o serviço de uma linha pelo de outra —
+  // pior do que não parear.
+  var porIndice = mods.length === itens.length;
 
-{% if servico_avulso %}
-<div class="card">
-  <h2 style="margin-top:0">O evento</h2>
-  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:.8rem">
-    <div class="oc-field"><label>Data</label><input id="ev-data" class="oc-inp" type="date"></div>
-    <div class="oc-field"><label>Convidados</label><input id="ev-conv" class="oc-inp" inputmode="numeric" placeholder="50"></div>
-    <div class="oc-field"><label>Início</label><input id="ev-ini" class="oc-inp" placeholder="19:00"></div>
-    <div class="oc-field"><label>Encerramento</label><input id="ev-fim" class="oc-inp" placeholder="24:00"></div>
-  </div>
-  {# A HORA DE INÍCIO É O QUE SEGURA A DATA. Sem ela a aprovação do cliente não
-     vira compromisso na agenda — e saía calada: o vendedor prometia a data, o
-     cliente assinava, e ninguém ficava sabendo que ela nunca foi reservada.
-     AVISA, não bloqueia: às vezes se fecha a proposta com a hora ainda a
-     combinar, e travar o botão travaria a venda. #}
-  <div id="ev-sem-hora" style="display:none;margin-top:.6rem;font-size:.8rem;line-height:1.5;
-       background:var(--ambar-fundo);border:1px solid var(--ambar-borda);
-       border-radius:8px;padding:.45rem .6rem;color:var(--amar)">
-    <b id="ev-sem-hora-t">Sem a hora de início, esta data não entra na agenda.</b>
-    <div style="opacity:.85;margin-top:.15rem" id="ev-sem-hora-d">Pode salvar assim — mas a data só fica
-      segurada quando você preencher o Início.</div>
-  </div>
-  <div class="oc-field"><label>Tipo de evento</label>
-    <div style="display:flex; gap:.4rem; flex-wrap:wrap" id="ev-tipos">
-      {% for t in tipos_evento %}<button type="button" class="oc-pill ev-tipo">{{ t }}</button>{% endfor %}
-    </div>
-  </div>
-  <div class="oc-field"><label>Tipo de contrato</label>
-    <div style="display:flex; gap:.4rem; flex-wrap:wrap" id="ev-contratos">
-      {% for ct in tipos_contrato %}<button type="button" class="oc-pill ev-ct" data-on="0">{{ ct }}</button>{% endfor %}
-    </div>
-  </div>
-  <div class="oc-field" style="margin-bottom:.3rem"><label>Local</label><input id="ev-local" class="oc-inp" value="{{ local_padrao }}" data-padrao="{{ local_padrao }}" placeholder="Espaço 01 — Rua Deoclécio Brito, 3399"></div>
-  <p class="mut" style="font-size:.78rem;margin:0">Festa que encerra às <b>24:00</b> termina 00:00 do dia seguinte — quando o cliente aprovar, o compromisso entra na agenda já com essa virada.</p>
-</div>
-{% endif %}
+  return itens.map(function (it, i) {
+    var slug = porIndice ? mods[i] : '';
+    if (!slug) {
+      var nome = it.nome || '';
+      // o nome só serve quando é ÚNICO no catálogo. Dois serviços com o mesmo
+      // nome não dizem qual é qual, e chutar aqui colocaria o slug do errado em
+      // `modulos` — o preço de um item viraria o do outro na próxima abertura.
+      if (contagemNome[nome] === 1) slug = slugDoNome[nome];
+    }
+    // id sintético: só existe dentro desta tela. `coletarBody` não o manda pro
+    // banco, então ele nunca polui `modulos`.
+    if (!slug) slug = 'orfao:' + i + ':' + (it.nome || '');
+    return { slug: slug, item: it, orfao: !noCatalogo[slug] };
+  });
+};
+"""
 
-<div class="card">
-  <h2 style="margin-top:0">Cliente</h2>
 
-  {% if servico_avulso %}
-  <div style="position:relative">
-    <input id="cli-busca" class="oc-inp" placeholder="🔍 Buscar cliente já cadastrado na Base… (nome, empresa)" autocomplete="off">
-    <div id="cli-drop" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 6px); background:var(--card-2); border:1px solid var(--borda); border-radius:10px; max-height:280px; overflow-y:auto; z-index:5; box-shadow:0 12px 30px rgba(0,0,0,.4)"></div>
-  </div>
-  <a id="cli-novo-link" href="#" style="font-size:.78rem; color:var(--verde-claro); text-decoration:none; display:inline-block; margin-top:.5rem">✏️ ou cadastrar um cliente novo, sem vínculo com lead</a>
-
-  <div id="cli-chip" style="display:none; align-items:center; gap:.8rem; padding:.7rem .9rem; border:1px solid var(--borda); border-radius:12px; background:var(--card-2); margin-top:.8rem">
-    <div id="cli-chip-av" style="width:38px; height:38px; border-radius:10px; background:#10241d; border:1px solid #1c3a30; color:var(--verde-claro); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1rem; flex-shrink:0">?</div>
-    <div style="flex:1; min-width:0">
-      <b id="cli-chip-nome"></b>
-      <div class="mut" id="cli-chip-sub" style="font-size:.78rem; margin-top:.1rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis"></div>
-    </div>
-    <span id="cli-chip-tipo" class="tipo-badge"></span>
-    <button type="button" class="oc-pill" id="cli-ver-dados" style="padding:.3rem .6rem; font-size:.78rem">Ver dados</button>
-    <button type="button" class="oc-pill" id="cli-trocar" style="padding:.3rem .6rem; font-size:.78rem">Trocar</button>
-  </div>
-  {% endif %}
-
-  <div id="cli-form-full"{% if servico_avulso %} style="display:none; margin-top:.8rem; border-top:1px dashed var(--borda); padding-top:.8rem"{% endif %}>
-    {% if servico_avulso %}
-    <div style="display:flex; gap:.4rem; margin-bottom:.8rem">
-      <button type="button" class="oc-pill" id="btn-tipo-pj" data-tipo="pj">🏢 Pessoa Jurídica</button>
-      <button type="button" class="oc-pill" id="btn-tipo-pf" data-tipo="pf">🧑 Pessoa Física</button>
-    </div>
-    {% endif %}
-    <div class="oc-field" style="margin-bottom:.7rem">
-      <label id="oc-cnpj-label">CNPJ <span id="oc-cnpj-dica" style="color:var(--txt-mut);font-size:.78rem">— preenche empresa, segmento e contato automaticamente</span></label>
-      <div style="display:flex; gap:.5rem; align-items:center">
-        <input id="oc-cnpj" class="oc-inp" placeholder="00.000.000/0000-00" inputmode="numeric" style="flex:1">
-        <button id="oc-cnpj-btn" type="button" style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.55rem 1.1rem;font-weight:600;cursor:pointer;white-space:nowrap">Buscar</button>
-      </div>
-      <span id="oc-cnpj-msg" style="font-size:.8rem;color:var(--txt-mut);display:block;margin-top:.25rem"></span>
-    </div>
-    <div style="display:grid; grid-template-columns:{{ '1fr 1fr 1fr' if servico_avulso else '1fr 1fr' }}; gap:.8rem">
-      <div class="oc-field"><label id="oc-empresa-label">Empresa</label><input id="oc-empresa" class="oc-inp" placeholder="Nome da empresa"></div>
-      {# UM CAMPO SÓ NO EVENTO. Pedir "Empresa" e "Contato" pra uma noiva foi a
-         origem da bagunça: `empresa` recebia o nome e `contato` recebia o que
-         sobrasse — em produção, telefone e nome pela metade. No recorrente os dois
-         seguem, porque ali são coisas diferentes: a empresa e quem fala com você. #}
-      <div class="oc-field" id="campo-oc-contato"{% if servico_avulso %} style="display:none"{% endif %}><label>Contato</label><input id="oc-contato" class="oc-inp" placeholder="Responsável"></div>
-      <div class="oc-field" id="campo-oc-cargo"{% if servico_avulso %} style="display:none"{% endif %}><label>Cargo</label><input id="oc-cargo" class="oc-inp" placeholder="Cargo do contato"></div>
-      <div class="oc-field" id="campo-oc-socio"{% if servico_avulso %} style="display:none"{% endif %}><label>Sócio</label><input id="oc-socio" class="oc-inp" placeholder="Sócio / dono"></div>
-      <div class="oc-field"><label>WhatsApp</label><input id="oc-whats" class="oc-inp" placeholder="(86) 9 9999-9999"></div>
-      <div class="oc-field"{% if servico_avulso %} style="display:none"{% endif %}><label>Telefone</label><input id="oc-tel" class="oc-inp" placeholder="(86) 3333-0000"></div>
-      <div class="oc-field"><label>E-mail</label><input id="oc-email" class="oc-inp" placeholder="contato@empresa.com.br"></div>
-      <div class="oc-field"{% if servico_avulso %} style="display:none"{% endif %}><label>Site</label><input id="oc-site" class="oc-inp" inputmode="url" placeholder="site.com.br"></div>
-      <div class="oc-field"{% if not servico_avulso %} style="display:none"{% endif %}><label>Endereço</label><input id="oc-endereco" class="oc-inp" placeholder="Rua, nº, bairro"></div>
-      <div class="oc-field"{% if not servico_avulso %} style="display:none"{% endif %}><label>CEP</label><input id="oc-cep" class="oc-inp" inputmode="numeric" placeholder="64000-000"></div>
-      <div class="oc-field"><label>Cidade</label><input id="oc-cidade" class="oc-inp" placeholder="Teresina"></div>
-      <div class="oc-field"><label>UF</label><input id="oc-uf" class="oc-inp" maxlength="2" placeholder="PI"></div>
-      <div class="oc-field"{% if servico_avulso %} style="display:none"{% endif %}><label>Segmento</label><input id="oc-segmento" class="oc-inp" placeholder="Saúde, Varejo, Logística..."></div>
-    </div>
-  </div>
-</div>
-
-<div class="oc-grid">
-  <div>
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.4rem">
-        <h2 style="margin:0">Meus serviços</h2>
-        <div style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:center">
-          {% if servico_avulso %}<span class="oc-contador"><b id="oc-contador-n">0</b> de <span id="oc-contador-total">0</span> na proposta</span>{% endif %}
-          <button id="oc-add" class="oc-pill" type="button">+ Adicionar serviço</button>
-          <button id="oc-margin" class="oc-pill" type="button">Modo margem</button>
-        </div>
-      </div>
-
-      <!-- formulário de add/editar serviço do catálogo -->
-      <div id="oc-svc-form" class="oc-svcform" style="display:none">
-        <input type="hidden" id="svc-id">
-        <div style="display:grid; grid-template-columns:2fr 3fr; gap:.6rem">
-          <div class="oc-field" style="margin-bottom:.4rem"><label>Nome do serviço</label><input id="svc-nome" class="oc-inp" placeholder="Ex.: Consultoria de SEO"></div>
-          <div class="oc-field" style="margin-bottom:.4rem"><label>Descrição</label><textarea id="svc-desc" class="oc-inp" rows="2" placeholder="O que está incluso — pode escrever a lista inteira, sai igual no orçamento"></textarea></div>
-        </div>
-        {% if servico_avulso %}
-        <div style="display:grid; grid-template-columns:1fr auto; gap:.6rem; align-items:end; margin-bottom:.4rem">
-          <div class="oc-field" style="margin-bottom:0"><label>Categoria <span style="color:var(--txt-mut);font-size:.78rem">— agrupa e soma por categoria no orçamento</span></label>
-            <select id="svc-cat" class="oc-inp"><option value="">Sem categoria</option></select>
-          </div>
-          <div class="oc-field" style="margin-bottom:0"><label>Ícone
-            <span style="color:var(--txt-mut);font-size:.78rem">— escolhido sozinho pelo nome; clique pra trocar</span></label>
-            <input type="hidden" id="svc-icone">
-            <div id="svc-icones" class="svc-icones"></div>
-          </div>
-        </div>
-        {% endif %}
-        <div style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end">
-          <div class="oc-field" style="margin-bottom:0"><label>{{ 'Valor (R$)' if servico_avulso else 'Setup (R$)' }}</label><input id="svc-setup" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
-          <div class="oc-field" style="margin-bottom:0{% if servico_avulso %};display:none{% endif %}"><label>Mensal (R$)</label><input id="svc-mensal" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
-          <div class="oc-field" style="margin-bottom:0"><label>Custo (R$)</label><input id="svc-custo" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
-          <div style="flex:1; display:flex; gap:.4rem; justify-content:flex-end">
-            <button id="svc-salvar" class="oc-btn-g" type="button" style="border:0; border-radius:8px; padding:.5rem 1rem; font-weight:600; cursor:pointer">Salvar</button>
-            <button id="svc-cancelar" class="oc-pill" type="button">Cancelar</button>
-          </div>
-        </div>
-        <div id="svc-msg" class="mut" style="font-size:.8rem; margin-top:.4rem"></div>
-      </div>
-
-      {% if servico_avulso %}
-      <div class="oc-buscabox" id="oc-buscabox" style="position:relative; margin-top:.8rem; display:none">
-        <span class="oc-buscaic">🔍</span>
-        <input id="oc-busca" class="oc-inp" placeholder="Buscar serviço pra adicionar… (ex.: drinks, dj, buffet)" autocomplete="off" style="padding-left:2.2rem">
-        <div id="oc-drop" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 6px); background:var(--card-2); border:1px solid var(--borda); border-radius:10px; max-height:280px; overflow-y:auto; z-index:5; box-shadow:0 12px 30px rgba(0,0,0,.4)"></div>
-      </div>
-      <div id="oc-sel-empty" class="oc-empty" style="display:none">
-        <b>Nenhum serviço nesta proposta ainda</b>
-        <p class="mut" style="margin:.3rem 0 0; font-size:.85rem">Busque acima e clique pra adicionar — só o que você escolher aparece aqui embaixo.</p>
-      </div>
-      {% endif %}
-      <div class="oc-head{% if servico_avulso %} avulso{% endif %}" id="oc-head" style="margin-top:.8rem; display:none">
-        <span></span><span>Serviço</span><span style="text-align:right">{{ 'Valor' if servico_avulso else 'Setup' }}</span>{% if not servico_avulso %}<span style="text-align:right">Mensal</span>{% endif %}<span style="text-align:right">{{ 'Custo' if servico_avulso else 'Custo/Margem' }}</span><span style="text-align:right">Desconto</span><span></span>
-      </div>
-      <div id="oc-mods"{% if servico_avulso %} style="display:none"{% endif %}></div>
-      {% if servico_avulso %}
-      <a id="oc-vertodos" href="#" class="oc-vertodos-link" style="display:none">📋 ver os <span id="oc-vertodos-n">0</span> serviços em ordem alfabética ›</a>
-      <div id="oc-catalogo-completo" class="oc-catalogo-completo"></div>
-      {% endif %}
-      <div id="oc-mods-empty" class="oc-empty" style="display:none">
-        <b>Você ainda não cadastrou seus serviços</b>
-        <p class="mut" style="margin:.3rem 0 0">{{ 'Adicione o que a sua empresa vende — nome e valor. Isso vira o seu catálogo pra montar orçamentos.' if servico_avulso else 'Adicione o que a sua empresa vende — nome, setup e mensalidade. Isso vira o seu catálogo pra montar orçamentos.' }}</p>
-        <div style="display:flex; gap:.5rem; justify-content:center; margin-top:.8rem; flex-wrap:wrap">
-          <button id="oc-add2" class="oc-btn-g" type="button" style="border:0; border-radius:8px; padding:.5rem 1rem; font-weight:600; cursor:pointer">+ Adicionar serviço</button>
-          {% if not servico_avulso %}<button id="oc-import" class="oc-pill" type="button">Usar modelo de tecnologia</button>{% endif %}
-        </div>
-      </div>
-      <div style="display:flex; justify-content:space-between; margin-top:.6rem">
-        <button id="oc-todos" class="oc-pill" type="button" style="display:none">Marcar todos</button>
-        <button id="oc-limpar" class="oc-pill" type="button" style="display:none">Limpar seleção</button>
-      </div>
-    </div>
-
-    {% if servico_avulso %}
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.4rem">
-        <h2 style="margin:0">Plano de pagamento</h2>
-        <div style="display:flex; gap:.5rem; flex-wrap:wrap">
-          <button id="pg-gerar" class="oc-pill" type="button">Sinal + parcelas…</button>
-          <button id="pg-add" class="oc-pill" type="button">+ Parcela</button>
-        </div>
-      </div>
-      <p class="mut" style="margin:.3rem 0 .6rem; font-size:.85rem">Cada linha vira um título a receber, no vencimento, quando você fechar o contrato.</p>
-
-      <div id="pg-gerador" style="display:none; background:var(--bg); border:1px solid var(--borda); border-radius:10px; padding:.7rem .8rem; margin-bottom:.7rem">
-        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:.6rem">
-          <div class="oc-field" style="margin-bottom:0"><label>Sinal (R$)</label><input id="pg-entrada" class="oc-inp" placeholder="0,00"></div>
-          <div class="oc-field" style="margin-bottom:0"><label>Nº de parcelas</label><input id="pg-n" class="oc-inp" inputmode="numeric" value="12"></div>
-          <div class="oc-field" style="margin-bottom:0"><label>1º vencimento</label><input id="pg-venc" class="oc-inp" type="date"></div>
-          <div class="oc-field" style="margin-bottom:0"><label>Forma</label><input id="pg-forma" class="oc-inp" placeholder="Cartão de crédito"></div>
-        </div>
-        <div style="display:flex; gap:.5rem; margin-top:.6rem">
-          <button id="pg-gerar-ok" class="oc-btn-g" type="button" style="border:0;border-radius:8px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Gerar</button>
-          <button id="pg-gerar-cc" class="oc-pill" type="button">Cancelar</button>
-        </div>
-      </div>
-
-      <div id="pg-linhas"></div>
-      <div id="pg-vazio" class="oc-empty"><b>Sem parcelas ainda</b>
-        <p class="mut" style="margin:.3rem 0 0; font-size:.85rem">Sem plano de pagamento, fechar o contrato gera um título só, com o total.</p></div>
-      <div class="mut" id="pg-resumo" style="font-size:.82rem; margin-top:.6rem"></div>
-    </div>
-    {% endif %}
-
-    {% if not servico_avulso %}
-    <div class="card">
-      <h2 style="margin-top:0">Parâmetros</h2>
-      <div class="oc-field"><label>Infraestrutura</label>
-        <div class="oc-seg" style="display:flex; gap:.4rem; flex-wrap:wrap">
-          <button data-grupo="infra" data-val="compartilhada" class="on">Compartilhada</button>
-          <button data-grupo="infra" data-val="dedicada">Dedicada</button>
-          <button data-grupo="infra" data-val="onpremise">On-premise</button>
-        </div>
-      </div>
-      <div class="oc-field"><label>Volume mensal</label>
-        <div class="oc-seg" style="display:flex; gap:.4rem; flex-wrap:wrap">
-          <button data-grupo="volume" data-val="baixo">Baixo</button>
-          <button data-grupo="volume" data-val="medio" class="on">Médio</button>
-          <button data-grupo="volume" data-val="alto">Alto</button>
-        </div>
-      </div>
-      <div style="display:flex; gap:1.5rem; flex-wrap:wrap; align-items:flex-end">
-        <div class="oc-field" style="margin-bottom:0"><label>Integrações externas</label>
-          <div class="oc-step"><button type="button" data-step="-1">-</button><span class="v" id="oc-integ-v">0</span><button type="button" data-step="1">+</button></div>
-          <input type="hidden" id="oc-integ" value="0">
-        </div>
-        <div class="oc-field" style="margin-bottom:0"><label>Suporte 24h</label>
-          <button id="oc-sup" class="oc-pill" data-on="0" type="button">Atendimento dedicado</button>
-        </div>
-      </div>
-      <div class="oc-field" style="margin-top:.8rem"><label>Canais</label>
-        <div style="display:flex; gap:.4rem; flex-wrap:wrap">
-          <button class="oc-canal oc-pill" data-on="0">WhatsApp</button>
-          <button class="oc-canal oc-pill" data-on="0">Site</button>
-          <button class="oc-canal oc-pill" data-on="0">Instagram</button>
-          <button class="oc-canal oc-pill" data-on="0">Telegram</button>
-          <button class="oc-canal oc-pill" data-on="0">E-mail</button>
-          <button class="oc-canal oc-pill" data-on="0">Voz</button>
-        </div>
-      </div>
-    </div>
-    {% endif %}
-  </div>
-
-  <div class="oc-ledger">
-    <div class="card" style="margin:0">
-      <div class="mut" style="font-size:.78rem; letter-spacing:.1em; text-transform:uppercase; color:var(--verde-claro)">Resumo · ao vivo</div>
-      <div class="oc-ll"><span class="mut">Investimento inicial</span><b id="oc-r-setup">R$ 0</b></div>
-      {% if not servico_avulso %}<div class="oc-ll"><span class="mut">Mensalidade</span><b id="oc-r-mensal" style="color:var(--verde-claro)">R$ 0</b></div>{% endif %}
-      <div class="oc-ll" id="oc-r-margem-l" style="display:none"><span class="mut">{{ 'Margem' if servico_avulso else 'Margem/mês' }}</span><b id="oc-r-margem" style="color:var(--verde-claro); font-size:.95rem">-</b></div>
-      <div class="oc-total"><div class="mut" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color:var(--verde-claro)">{{ 'Total' if servico_avulso else 'Total 1º ano' }}</div><div class="v" id="oc-r-ano">R$ 0</div><div class="mut" id="oc-r-eco" style="display:none; font-size:.8rem; color:var(--verde-claro); margin-top:.3rem"></div></div>
-      <div class="oc-ll oc-dline" id="oc-r-descitens-l" style="display:none"><span class="mut">Descontos por item</span><b id="oc-r-descitens">R$ 0</b></div>
-      <div class="oc-ll" id="oc-r-sub-l" style="display:none"><span class="mut">Subtotal com descontos</span><b id="oc-r-sub">R$ 0</b></div>
-      <div class="oc-ll oc-dline" id="oc-r-descfim-l" style="display:none"><span class="mut">Desconto no total</span><b id="oc-r-descfim">R$ 0</b></div>
-      <!-- o desconto do TOTAL vale nos dois modos: consultoria e advocacia vendem
-           por orçamento igual, e só não tinham desconto porque ele morava dentro
-           do jsonb do evento. -->
-      <div class="oc-field" style="margin-top:.7rem; margin-bottom:0">
-        <label class="mut" style="font-size:.76rem">Desconto no total</label>
-        <div class="oc-dpar oc-dpar-tot" data-tipo="pct">
-          <input id="oc-desconto" class="oc-inp oc-desc-inp" inputmode="numeric" value="0">
-          <span class="oc-dtog">
-            <button type="button" data-t="pct" class="on">%</button>
-            <button type="button" data-t="valor">R$</button>
-          </span>
-        </div>
-        <button id="oc-desc-zerar" class="oc-dzero" type="button">zerar desconto</button>
-      </div>
-      {% if not servico_avulso %}
-      <button id="oc-anual" class="oc-pill" data-on="0" type="button" style="width:100%; margin-top:.7rem; text-align:left; display:flex; justify-content:space-between; align-items:center">Pagamento anual (-15%) <span id="oc-anual-mk">↻</span></button>
-      {% endif %}
-      <button id="oc-gerar" class="oc-btn oc-btn-g">Gerar proposta</button>
-      <button id="oc-salvar" class="oc-btn oc-btn-o">Salvar no funil</button>
-    </div>
-  </div>
-</div>
-
-<div class="card">
-  <h2 style="margin-top:0">Funil</h2>
-  <div id="oc-hist-box"><p class="mut">Carregando...</p></div>
-</div>
-
-</div>
-
-{# A TELA DE ENVIO. Nasce vazia e é preenchida pelo servidor ao abrir — o assunto,
-   a mensagem e o e-mail do cliente já vêm prontos, e por qual caixa vai sair é
-   dito ANTES de apertar. Fora do .oc-wrap pra o fundo escuro cobrir a página. #}
-<div class="env-fundo" id="env-fundo" role="dialog" aria-modal="true" aria-labelledby="env-tt">
-  <div class="env-cx">
-    <div class="env-hd">
-      <h3 id="env-tt">Mandar por e-mail</h3>
-      <button type="button" class="env-x" id="env-x" aria-label="Fechar">✕</button>
-    </div>
-    <div class="env-msg" id="env-msg"></div>
-    <div class="env-campo"><label for="env-para">Para</label>
-      <input id="env-para" type="email" inputmode="email" autocomplete="off" placeholder="email@do-cliente.com"></div>
-    <div class="env-campo"><label for="env-assunto">Assunto</label>
-      <input id="env-assunto" type="text"></div>
-    <div class="env-campo"><label for="env-texto">Mensagem</label>
-      <textarea id="env-texto"></textarea></div>
-    <div class="env-de" id="env-de"></div>
-    <div class="env-acoes">
-      <button type="button" class="oc-btn oc-btn-g" style="width:auto;margin:0" id="env-enviar">Enviar</button>
-      <button type="button" class="oc-pill" id="env-cancelar">Cancelar</button>
-      <span class="env-hist" id="env-hist"></span>
-    </div>
-  </div>
-</div>
-
-{# PAGAMENTOS. Reusa a caixa do envio (.env-fundo/.env-cx): a mesma forma de abrir
-   e fechar, o mesmo Esc, o mesmo clique no fundo. Duas caixas com comportamentos
-   diferentes seriam duas coisas pra aprender. #}
-<div class="env-fundo" id="pg-fundo" role="dialog" aria-modal="true" aria-labelledby="pg-tt">
-  <div class="env-cx">
-    <div class="env-hd">
-      <h3 id="pg-tt">Pagamentos</h3>
-      <button type="button" class="env-x" id="pg-x" aria-label="Fechar">✕</button>
-    </div>
-    <div class="env-msg" id="pg-msg"></div>
-    <div class="pg-tot" id="pg-tot"></div>
-    <div id="pg-lista"><p class="mut" style="font-size:.85rem">Carregando...</p></div>
-    <input type="file" id="pg-arquivo" accept="application/pdf,image/*" style="display:none">
-  </div>
-</div>
-
-<script>window.SERVICO_AVULSO = {{ 'true' if servico_avulso else 'false' }};</script>
-<script>window.ZAQ_ICONES = {{ icones_paleta|tojson }};</script>
-{% raw %}<script>
-(function(){
+_JS_CRU = r"""(function(){
   var SERVICO_AVULSO = window.SERVICO_AVULSO;
   var INFRA={compartilhada:{s:0,m:0},dedicada:{s:1500,m:800},onpremise:{s:6000,m:1500}};
   function fmt(n){return 'R$ '+Math.round(n||0).toLocaleString('pt-BR');}
@@ -3009,7 +2737,29 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   // ---- catálogo de serviços por conta (Meus serviços) ----
   var CATALOGO=[];
   var SELECIONADOS={};   // eventos (servico_avulso): slugs marcados nesta proposta
+  // OS ÓRFÃOS: serviços que a proposta TEM e o catálogo NÃO tem mais.
+  //
+  // A linha do editor era montada cruzando `modulos` (a lista de slugs) com o
+  // catálogo ATIVO. Duas maneiras de a linha simplesmente sumir da tela:
+  //   1. o serviço foi excluído do catálogo depois (a exclusão é soft, mas
+  //      `scat.listar` só devolve ativo=true);
+  //   2. a proposta não tem `modulos` — é o caso do orçamento nº 22 da Prime,
+  //      salvo com `modulos` nulo e OITO itens gravados.
+  // Em qualquer um dos dois a folha do cliente continua certa (ela lê `itens`),
+  // mas o editor abria sem a linha — e o "Salvar no funil" seguinte grava
+  // `itens` a partir do que está na TELA, ou seja, apaga o que o cliente já
+  // recebeu. Regra 0 do CLAUDE.md: informação do cliente não se perde.
+  //
+  // Agora o que o catálogo não sabe explicar vem do próprio item salvo, e a
+  // linha aparece do mesmo jeito — marcada, pra quem edita saber por que aquele
+  // serviço não está na busca.
+  var ORFAOS={};         // slug (ou id sintético) -> serviço reconstruído do item
   var VERTODOS_OPEN=false;
+  // o serviço de um slug, venha ele do catálogo ou do item salvo.
+  function servicoPorSlug(slug){
+    for(var i=0;i<CATALOGO.length;i++){ if(CATALOGO[i].slug===slug) return CATALOGO[i]; }
+    return ORFAOS[slug]||null;
+  }
   function ec(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 
   // A célula de desconto da LINHA. Mesmo par do desconto do total — a forma se
@@ -3035,10 +2785,16 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   // sempre visíveis.
   function buildRowAvulso(s){
     var thumb='<div class="svc-thumb">'+(s.icone_svg||'')+'</div>';
+    // o selo do órfão: a linha vale e é editável como qualquer outra, mas quem
+    // procurar esse serviço na busca não vai achar — e é melhor dizer isso do
+    // que deixar a pessoa procurando.
+    var selo=s.orfao
+      ? '<span class="oc-fora" title="Este serviço saiu do seu catálogo. A linha continua valendo nesta proposta.">fora do catálogo</span>'
+      : '';
     return '<button class="oc-tog on" type="button" title="Remover da proposta"></button>'
       +'<div class="oc-nome oc-nome-linha">'+thumb+'<div style="min-width:0">'
       +(s.categoria?'<div class="oc-cat">'+ec(s.categoria)+'</div>':'')
-      +'<b>'+ec(s.nome)+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div></div>'
+      +'<b>'+ec(s.nome)+'</b>'+selo+'<div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div></div>'
       +'<div class="oc-num"><span>Qtd</span><input class="oc-qtd" inputmode="numeric" value="1"></div>'
       +'<div class="oc-num"><span>Vr. unit.</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
       +'<div class="oc-num oc-custo-col"><span>Custo</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
@@ -3051,7 +2807,12 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     var valores={};
     rows().forEach(function(r){valores[r.getAttribute('data-id')]={setup:r.querySelector('.oc-setup').value,custo:r.querySelector('.oc-custo').value,qtd:r.querySelector('.oc-qtd').value};});
     box.innerHTML='';
+    // catálogo primeiro (ordem alfabética, como sempre); os órfãos entram no fim,
+    // porque não têm lugar na ordem de uma lista onde não estão mais.
     var itens=CATALOGO.filter(function(s){return SELECIONADOS[s.slug];});
+    Object.keys(ORFAOS).forEach(function(k){
+      if(SELECIONADOS[k] && !CATALOGO.some(function(s){return s.slug===k;})) itens.push(ORFAOS[k]);
+    });
     itens.forEach(function(s){
       var r=document.createElement('div'); r.className='oc-mod avulso';
       r.setAttribute('data-id',s.slug); r.setAttribute('data-on','1');
@@ -3065,7 +2826,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     var vazioTotal=CATALOGO.length===0;
     box.style.display=itens.length?'block':'none';
     document.getElementById('oc-sel-empty').style.display=(itens.length||vazioTotal)?'none':'block';
-    document.getElementById('oc-mods-empty').style.display=vazioTotal?'block':'none';
+    // "você ainda não cadastrou seus serviços" só quando não há MESMO nada na
+    // tela: uma proposta antiga cheia de órfãos tem catálogo vazio e linhas.
+    document.getElementById('oc-mods-empty').style.display=(vazioTotal&&!itens.length)?'block':'none';
     var busca=document.getElementById('oc-buscabox'); if(busca)busca.style.display=vazioTotal?'none':'block';
     var vt=document.getElementById('oc-vertodos');
     if(vt){
@@ -3129,7 +2892,15 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       }
       if(SERVICO_AVULSO){
         CATALOGO.sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'','pt-BR');});
-        Object.keys(SELECIONADOS).forEach(function(id){if(!CATALOGO.some(function(s){return s.slug===id;}))delete SELECIONADOS[id];});
+        // A PURGA AGORA POUPA O ÓRFÃO. Esta linha apagava da seleção tudo que não
+        // estivesse no catálogo ativo — e ela roda a cada recarga (salvar ou
+        // excluir um serviço). Com a proposta aberta, excluir QUALQUER serviço do
+        // catálogo tirava calado da tela o item que a proposta tinha, e o próximo
+        // "Salvar no funil" gravava a proposta sem ele.
+        Object.keys(SELECIONADOS).forEach(function(id){
+          if(CATALOGO.some(function(s){return s.slug===id;})){ delete ORFAOS[id]; return; }
+          if(!ORFAOS[id]) delete SELECIONADOS[id];
+        });
         renderCatalogoAvulso();
       } else {
         renderCatalogo(preserva);
@@ -3436,7 +3207,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     // unitário viajam junto pra o orçamento poder mostrar "10 × R$ 25,00".
     var itens=sel.map(function(r){
       var q=qtd(r), u=num(r.querySelector('.oc-setup'));
-      var cat=CATALOGO.filter(function(x){return x.slug===r.getAttribute('data-id');})[0]||{};
+      // `servicoPorSlug` e não `CATALOGO.filter`: a linha órfã também tem
+      // categoria e ícone (vieram do item salvo), e perdê-los aqui faria a folha
+      // do cliente sair sem o subtotal da categoria na primeira regravação.
+      var cat=servicoPorSlug(r.getAttribute('data-id'))||{};
       var par=r.querySelector('.oc-dpar');
       return {nome:r.getAttribute('data-nome'),desc:r.getAttribute('data-desc')||'',
               setup:u*q,mensal:num(r.querySelector('.oc-mensal')),qtd:q,unitario:u,
@@ -3445,7 +3219,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
               desc_val:num(r.querySelector('.oc-desc'))};
     });
     var escEl=document.getElementById('oc-escopo-out');
-    return {id:EDIT_ID,lead_id:LEAD_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setupBruto),mensal:Math.round(c.mensalBruto),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods,desconto_tipo:descTipoTot(),desconto_pct:(descTipoTot()==='pct'?num(document.getElementById('oc-desconto')):0),desconto_valor:(descTipoTot()==='valor'?num(document.getElementById('oc-desconto')):0)};
+    return {id:EDIT_ID,lead_id:LEAD_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}).filter(function(id){return id.indexOf('orfao:')!==0;}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setupBruto),mensal:Math.round(c.mensalBruto),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods,desconto_tipo:descTipoTot(),desconto_pct:(descTipoTot()==='pct'?num(document.getElementById('oc-desconto')):0),desconto_valor:(descTipoTot()==='valor'?num(document.getElementById('oc-desconto')):0)};
   }
   function salvarProposta(cb){
     fetch('/painel/servicos/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(coletarBody())})
@@ -3474,10 +3248,30 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 
   function esc(s){var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML;}
   function setv(id,v){var e=document.getElementById(id); if(e){e.value=v||'';}}
-  function marcaMods(ids){
+  // `itensSalvos` é o que está GRAVADO no orçamento — a folha que o cliente já
+  // recebeu. É dele que a linha sai quando o catálogo não sabe mais explicá-la.
+  function marcaMods(ids, itensSalvos){
     if(SERVICO_AVULSO){
-      SELECIONADOS={};
-      (ids||[]).forEach(function(id){SELECIONADOS[id]=true;});
+      SELECIONADOS={}; ORFAOS={};
+      // quem decide de onde vem cada linha é `window.ZAQ_PAREAR` — função pura,
+      // definida fora deste IIFE porque é ela que os testes exercitam.
+      window.ZAQ_PAREAR(ids, itensSalvos, CATALOGO).forEach(function(p){
+        SELECIONADOS[p.slug]=true;
+        if(!p.orfao || !p.item) return;
+        // o catálogo não explica esta linha: ela vem do item GRAVADO, que é o
+        // mesmo que a folha do cliente imprime.
+        var it=p.item;
+        ORFAOS[p.slug]={
+          slug:p.slug, id:null, orfao:true,
+          nome: it.nome||'(sem nome)', descricao: it.desc||'',
+          // proposta antiga não tem `unitario`: ali o `setup` salvo ERA o
+          // unitário (é o mesmo cuidado que a restauração de valores já toma).
+          setup: (it.unitario!=null&&it.unitario>0)?it.unitario:(it.setup||0),
+          mensal: it.mensal||0, custo: 0,
+          categoria: it.categoria||'', icone: it.icone||'', icone_svg:'',
+          desc_tipo: it.desc_tipo||'pct', desc_val: it.desc_val||0
+        };
+      });
       renderCatalogoAvulso();
       return;
     }
@@ -3514,7 +3308,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         var pgb=document.getElementById('pg-linhas');
         if(pgb){pgb.innerHTML=''; (d.parcelas||[]).forEach(addParcela); pintaParcelas();}
       }
-      marcaMods(d.modulos);
+      // os `itens` vão junto: é deles que sai a linha que o catálogo não tem mais.
+      marcaMods(d.modulos, d.itens);
       // restaura os valores EXATOS que estavam salvos (não recalcula pelo catálogo)
       (d.itens||[]).forEach(function(it){
         var r=rows().filter(function(x){return x.getAttribute('data-nome')===it.nome;})[0];
@@ -4488,8 +4283,429 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     }
     carregar();
   })();
+"""
 
-</script>{% endraw %}
+_JS_TAG = ('<script src="'
+           + _estaticos.registrar("servicos.js", _JS_PAREAR_CRU + "\n" + _JS_CRU)
+           + '" defer></script>')
+
+
+_SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
+<div class="sv-wrap{% if servico_avulso %} evento{% endif %}">
+<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.4rem">
+  <h1 style="margin:.2rem 0">Vendas de Serviços</h1>
+  <span class="mut" style="font-size:.85rem">{{ empresa_nome }}</span>
+</div>
+<p class="mut" style="margin-top:0">{{ 'Monte a proposta, salve no funil e feche o contrato — ao fechar, vira título a receber no módulo Empresa.' if servico_avulso else 'Monte a proposta, salve no funil e feche o contrato — ao fechar, vira título a receber (setup + mensalidade) no módulo Empresa.' }}</p>
+<div id="oc-editando" style="display:none;align-items:center;justify-content:space-between;gap:.6rem;background:#10241d;border:1px solid #1c3a30;border-radius:10px;padding:.5rem .8rem;margin-bottom:.8rem">
+  <span class="t" style="font-size:.85rem;color:var(--verde-claro)"></span>
+  <button id="oc-novo" type="button" class="oc-pill">Nova proposta</button>
+</div>
+
+""" + _CSS + r"""
+
+{% if pode_contrato %}
+{# Contrato de locação: nicho de eventos E só pro DONO — ele define o que a
+   empresa se compromete a cumprir, e isso não é decisão de quem vende. O gate
+   de verdade está nas rotas (ver _conta_evento): esconder o card não impede
+   um POST direto.
+
+   PRIMEIRO CARD DA PÁGINA. Era o último, depois do Funil — quem ia gerar a
+   proposta não passava por ele, e campo sem valor só aparecia no documento do
+   cliente. Fechado ocupa uma linha: o selo responde "está tudo certo?" sem
+   tirar espaço de quem só quer montar o orçamento, que é o trabalho diário. #}
+<div class="card" id="ct-card">
+  {# Cabeçalho clicável INTEIRO, não só a seta: alvo de 12px no celular é o que
+     faz o dono achar que a tela travou. #}
+  <div id="ct-cab" style="display:flex;align-items:center;gap:.6rem;cursor:pointer;user-select:none">
+    <span id="ct-seta" style="color:var(--mut);font-size:.85rem;transition:transform .18s">▸</span>
+    <div style="min-width:0">
+      <div style="font-weight:700;font-size:1rem">Contrato de locação</div>
+      <div id="ct-resumo" class="mut" style="font-size:.78rem;margin-top:.1rem">Carregando...</div>
+    </div>
+    <div id="ct-selo" style="margin-left:auto;flex-shrink:0"></div>
+  </div>
+  {# O QUE FAZER, não quais campos. O selo diz que há problema; esta linha diz o
+     conserto e onde fica — é o que separa um aviso de uma tarefa. Fora do cabeçalho
+     porque a frase é larga e espremer ao lado do selo cortaria a informação. #}
+  <div id="ct-faltas" style="display:none;cursor:pointer;margin-top:.5rem;font-size:.74rem;
+       line-height:1.5;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);
+       border-radius:8px;padding:.4rem .55rem;color:var(--amar)"></div>
+  <div id="ct-corpo" style="display:none;margin-top:.85rem;padding-top:.85rem;border-top:1px solid var(--borda)">
+    <p class="mut" style="margin-top:0;font-size:.86rem">
+      As cláusulas são suas — escreva como quiser. Onde entra um valor, use um
+      <b style="color:var(--verde-claro)">campo</b>: ele é preenchido na hora com o preço do
+      catálogo e os dados do orçamento, então o contrato nunca diz um número diferente da proposta.
+    </p>
+    <div id="ct-box"><p class="mut">Carregando...</p></div>
+  </div>
+</div>
+
+{# TERMO ADITIVO: o mesmo card, pro documento que ALTERA o contrato acima.
+   Pedido do dono em 05/09/2026 — "deixar o aditivo igual o contrato, podendo
+   alterar alguma coisa nas cláusulas... e a gente replica". A incoerência que
+   ele apontou: o contrato era escrito por ele e o aditivo saía com texto escrito
+   dentro do código, no mesmo negócio e pro mesmo cliente.
+
+   Vem DEPOIS do contrato porque é o que emenda o de cima, e o mesmo gate
+   (`pode_contrato` = eventos + gerir): FAZER aditivo é dos três papéis, mas
+   ESCREVER o texto é do dono, igual ao contrato. #}
+<div class="card" id="ad-card">
+  <div id="ad-cab" style="display:flex;align-items:center;gap:.6rem;cursor:pointer;user-select:none">
+    <span id="ad-seta" style="color:var(--mut);font-size:.85rem;transition:transform .18s">▸</span>
+    <div style="min-width:0">
+      <div style="font-weight:700;font-size:1rem">Termo aditivo</div>
+      <div id="ad-resumo" class="mut" style="font-size:.78rem;margin-top:.1rem">Carregando...</div>
+    </div>
+  </div>
+  <div id="ad-corpo" style="display:none;margin-top:.85rem;padding-top:.85rem;border-top:1px solid var(--borda)">
+    <p class="mut" style="margin-top:0;font-size:.86rem">
+      O texto de cada alteração é seu. Os <b style="color:var(--verde-claro)">campos</b> trazem o
+      número novo e o antigo — é o que faz o documento dizer “passa a ser 140, em substituição a
+      115” sem ninguém digitar 140 nem 115.
+    </p>
+    <div id="ad-box"><p class="mut">Carregando...</p></div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card"{% if servico_avulso %} style="display:none"{% endif %}>
+  <h2 style="margin-top:0">Escopo automático · IA</h2>
+  <p class="mut" style="margin-top:0">Cole o site ou a descrição do cliente. A IA escolhe os módulos e escreve o escopo da proposta.</p>
+  <textarea id="oc-desc" class="oc-inp" rows="3" placeholder="Ex.: clínica com 3 unidades, muito WhatsApp, quer reduzir faltas e organizar leads..."></textarea>
+  <div style="display:flex; align-items:center; gap:.8rem; margin-top:.6rem">
+    <button id="oc-sugerir" class="oc-btn-g" style="border:none; border-radius:8px; padding:.55rem 1rem; cursor:pointer; font-weight:600; width:auto; margin:0">Sugerir escopo</button>
+    <span id="oc-ia-msg" class="mut" style="font-size:.85rem"></span>
+  </div>
+  <div id="oc-escopo-out" class="mut" style="display:none; margin-top:.8rem; padding:.8rem; background:var(--bg); border:1px solid var(--borda); border-radius:8px; line-height:1.6"></div>
+</div>
+
+{% if servico_avulso %}
+<div class="card">
+  <h2 style="margin-top:0">O evento</h2>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:.8rem">
+    <div class="oc-field"><label>Data</label><input id="ev-data" class="oc-inp" type="date"></div>
+    <div class="oc-field"><label>Convidados</label><input id="ev-conv" class="oc-inp" inputmode="numeric" placeholder="50"></div>
+    <div class="oc-field"><label>Início</label><input id="ev-ini" class="oc-inp" placeholder="19:00"></div>
+    <div class="oc-field"><label>Encerramento</label><input id="ev-fim" class="oc-inp" placeholder="24:00"></div>
+  </div>
+  {# A HORA DE INÍCIO É O QUE SEGURA A DATA. Sem ela a aprovação do cliente não
+     vira compromisso na agenda — e saía calada: o vendedor prometia a data, o
+     cliente assinava, e ninguém ficava sabendo que ela nunca foi reservada.
+     AVISA, não bloqueia: às vezes se fecha a proposta com a hora ainda a
+     combinar, e travar o botão travaria a venda. #}
+  <div id="ev-sem-hora" style="display:none;margin-top:.6rem;font-size:.8rem;line-height:1.5;
+       background:var(--ambar-fundo);border:1px solid var(--ambar-borda);
+       border-radius:8px;padding:.45rem .6rem;color:var(--amar)">
+    <b id="ev-sem-hora-t">Sem a hora de início, esta data não entra na agenda.</b>
+    <div style="opacity:.85;margin-top:.15rem" id="ev-sem-hora-d">Pode salvar assim — mas a data só fica
+      segurada quando você preencher o Início.</div>
+  </div>
+  <div class="oc-field"><label>Tipo de evento</label>
+    <div style="display:flex; gap:.4rem; flex-wrap:wrap" id="ev-tipos">
+      {% for t in tipos_evento %}<button type="button" class="oc-pill ev-tipo">{{ t }}</button>{% endfor %}
+    </div>
+  </div>
+  <div class="oc-field"><label>Tipo de contrato</label>
+    <div style="display:flex; gap:.4rem; flex-wrap:wrap" id="ev-contratos">
+      {% for ct in tipos_contrato %}<button type="button" class="oc-pill ev-ct" data-on="0">{{ ct }}</button>{% endfor %}
+    </div>
+  </div>
+  <div class="oc-field" style="margin-bottom:.3rem"><label>Local</label><input id="ev-local" class="oc-inp" value="{{ local_padrao }}" data-padrao="{{ local_padrao }}" placeholder="Espaço 01 — Rua Deoclécio Brito, 3399"></div>
+  <p class="mut" style="font-size:.78rem;margin:0">Festa que encerra às <b>24:00</b> termina 00:00 do dia seguinte — quando o cliente aprovar, o compromisso entra na agenda já com essa virada.</p>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2 style="margin-top:0">Cliente</h2>
+
+  {% if servico_avulso %}
+  <div style="position:relative">
+    <input id="cli-busca" class="oc-inp" placeholder="🔍 Buscar cliente já cadastrado na Base… (nome, empresa)" autocomplete="off">
+    <div id="cli-drop" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 6px); background:var(--card-2); border:1px solid var(--borda); border-radius:10px; max-height:280px; overflow-y:auto; z-index:5; box-shadow:0 12px 30px rgba(0,0,0,.4)"></div>
+  </div>
+  <a id="cli-novo-link" href="#" style="font-size:.78rem; color:var(--verde-claro); text-decoration:none; display:inline-block; margin-top:.5rem">✏️ ou cadastrar um cliente novo, sem vínculo com lead</a>
+
+  <div id="cli-chip" style="display:none; align-items:center; gap:.8rem; padding:.7rem .9rem; border:1px solid var(--borda); border-radius:12px; background:var(--card-2); margin-top:.8rem">
+    <div id="cli-chip-av" style="width:38px; height:38px; border-radius:10px; background:#10241d; border:1px solid #1c3a30; color:var(--verde-claro); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1rem; flex-shrink:0">?</div>
+    <div style="flex:1; min-width:0">
+      <b id="cli-chip-nome"></b>
+      <div class="mut" id="cli-chip-sub" style="font-size:.78rem; margin-top:.1rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis"></div>
+    </div>
+    <span id="cli-chip-tipo" class="tipo-badge"></span>
+    <button type="button" class="oc-pill" id="cli-ver-dados" style="padding:.3rem .6rem; font-size:.78rem">Ver dados</button>
+    <button type="button" class="oc-pill" id="cli-trocar" style="padding:.3rem .6rem; font-size:.78rem">Trocar</button>
+  </div>
+  {% endif %}
+
+  <div id="cli-form-full"{% if servico_avulso %} style="display:none; margin-top:.8rem; border-top:1px dashed var(--borda); padding-top:.8rem"{% endif %}>
+    {% if servico_avulso %}
+    <div style="display:flex; gap:.4rem; margin-bottom:.8rem">
+      <button type="button" class="oc-pill" id="btn-tipo-pj" data-tipo="pj">🏢 Pessoa Jurídica</button>
+      <button type="button" class="oc-pill" id="btn-tipo-pf" data-tipo="pf">🧑 Pessoa Física</button>
+    </div>
+    {% endif %}
+    <div class="oc-field" style="margin-bottom:.7rem">
+      <label id="oc-cnpj-label">CNPJ <span id="oc-cnpj-dica" style="color:var(--txt-mut);font-size:.78rem">— preenche empresa, segmento e contato automaticamente</span></label>
+      <div style="display:flex; gap:.5rem; align-items:center">
+        <input id="oc-cnpj" class="oc-inp" placeholder="00.000.000/0000-00" inputmode="numeric" style="flex:1">
+        <button id="oc-cnpj-btn" type="button" style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.55rem 1.1rem;font-weight:600;cursor:pointer;white-space:nowrap">Buscar</button>
+      </div>
+      <span id="oc-cnpj-msg" style="font-size:.8rem;color:var(--txt-mut);display:block;margin-top:.25rem"></span>
+    </div>
+    <div style="display:grid; grid-template-columns:{{ '1fr 1fr 1fr' if servico_avulso else '1fr 1fr' }}; gap:.8rem">
+      <div class="oc-field"><label id="oc-empresa-label">Empresa</label><input id="oc-empresa" class="oc-inp" placeholder="Nome da empresa"></div>
+      {# UM CAMPO SÓ NO EVENTO. Pedir "Empresa" e "Contato" pra uma noiva foi a
+         origem da bagunça: `empresa` recebia o nome e `contato` recebia o que
+         sobrasse — em produção, telefone e nome pela metade. No recorrente os dois
+         seguem, porque ali são coisas diferentes: a empresa e quem fala com você. #}
+      <div class="oc-field" id="campo-oc-contato"{% if servico_avulso %} style="display:none"{% endif %}><label>Contato</label><input id="oc-contato" class="oc-inp" placeholder="Responsável"></div>
+      <div class="oc-field" id="campo-oc-cargo"{% if servico_avulso %} style="display:none"{% endif %}><label>Cargo</label><input id="oc-cargo" class="oc-inp" placeholder="Cargo do contato"></div>
+      <div class="oc-field" id="campo-oc-socio"{% if servico_avulso %} style="display:none"{% endif %}><label>Sócio</label><input id="oc-socio" class="oc-inp" placeholder="Sócio / dono"></div>
+      <div class="oc-field"><label>WhatsApp</label><input id="oc-whats" class="oc-inp" placeholder="(86) 9 9999-9999"></div>
+      <div class="oc-field"{% if servico_avulso %} style="display:none"{% endif %}><label>Telefone</label><input id="oc-tel" class="oc-inp" placeholder="(86) 3333-0000"></div>
+      <div class="oc-field"><label>E-mail</label><input id="oc-email" class="oc-inp" placeholder="contato@empresa.com.br"></div>
+      <div class="oc-field"{% if servico_avulso %} style="display:none"{% endif %}><label>Site</label><input id="oc-site" class="oc-inp" inputmode="url" placeholder="site.com.br"></div>
+      <div class="oc-field"{% if not servico_avulso %} style="display:none"{% endif %}><label>Endereço</label><input id="oc-endereco" class="oc-inp" placeholder="Rua, nº, bairro"></div>
+      <div class="oc-field"{% if not servico_avulso %} style="display:none"{% endif %}><label>CEP</label><input id="oc-cep" class="oc-inp" inputmode="numeric" placeholder="64000-000"></div>
+      <div class="oc-field"><label>Cidade</label><input id="oc-cidade" class="oc-inp" placeholder="Teresina"></div>
+      <div class="oc-field"><label>UF</label><input id="oc-uf" class="oc-inp" maxlength="2" placeholder="PI"></div>
+      <div class="oc-field"{% if servico_avulso %} style="display:none"{% endif %}><label>Segmento</label><input id="oc-segmento" class="oc-inp" placeholder="Saúde, Varejo, Logística..."></div>
+    </div>
+  </div>
+</div>
+
+<div class="oc-grid">
+  <div>
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.4rem">
+        <h2 style="margin:0">Meus serviços</h2>
+        <div style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:center">
+          {% if servico_avulso %}<span class="oc-contador"><b id="oc-contador-n">0</b> de <span id="oc-contador-total">0</span> na proposta</span>{% endif %}
+          <button id="oc-add" class="oc-pill" type="button">+ Adicionar serviço</button>
+          <button id="oc-margin" class="oc-pill" type="button">Modo margem</button>
+        </div>
+      </div>
+
+      <!-- formulário de add/editar serviço do catálogo -->
+      <div id="oc-svc-form" class="oc-svcform" style="display:none">
+        <input type="hidden" id="svc-id">
+        <div style="display:grid; grid-template-columns:2fr 3fr; gap:.6rem">
+          <div class="oc-field" style="margin-bottom:.4rem"><label>Nome do serviço</label><input id="svc-nome" class="oc-inp" placeholder="Ex.: Consultoria de SEO"></div>
+          <div class="oc-field" style="margin-bottom:.4rem"><label>Descrição</label><textarea id="svc-desc" class="oc-inp" rows="2" placeholder="O que está incluso — pode escrever a lista inteira, sai igual no orçamento"></textarea></div>
+        </div>
+        {% if servico_avulso %}
+        <div style="display:grid; grid-template-columns:1fr auto; gap:.6rem; align-items:end; margin-bottom:.4rem">
+          <div class="oc-field" style="margin-bottom:0"><label>Categoria <span style="color:var(--txt-mut);font-size:.78rem">— agrupa e soma por categoria no orçamento</span></label>
+            <select id="svc-cat" class="oc-inp"><option value="">Sem categoria</option></select>
+          </div>
+          <div class="oc-field" style="margin-bottom:0"><label>Ícone
+            <span style="color:var(--txt-mut);font-size:.78rem">— escolhido sozinho pelo nome; clique pra trocar</span></label>
+            <input type="hidden" id="svc-icone">
+            <div id="svc-icones" class="svc-icones"></div>
+          </div>
+        </div>
+        {% endif %}
+        <div style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end">
+          <div class="oc-field" style="margin-bottom:0"><label>{{ 'Valor (R$)' if servico_avulso else 'Setup (R$)' }}</label><input id="svc-setup" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
+          <div class="oc-field" style="margin-bottom:0{% if servico_avulso %};display:none{% endif %}"><label>Mensal (R$)</label><input id="svc-mensal" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
+          <div class="oc-field" style="margin-bottom:0"><label>Custo (R$)</label><input id="svc-custo" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
+          <div style="flex:1; display:flex; gap:.4rem; justify-content:flex-end">
+            <button id="svc-salvar" class="oc-btn-g" type="button" style="border:0; border-radius:8px; padding:.5rem 1rem; font-weight:600; cursor:pointer">Salvar</button>
+            <button id="svc-cancelar" class="oc-pill" type="button">Cancelar</button>
+          </div>
+        </div>
+        <div id="svc-msg" class="mut" style="font-size:.8rem; margin-top:.4rem"></div>
+      </div>
+
+      {% if servico_avulso %}
+      <div class="oc-buscabox" id="oc-buscabox" style="position:relative; margin-top:.8rem; display:none">
+        <span class="oc-buscaic">🔍</span>
+        <input id="oc-busca" class="oc-inp" placeholder="Buscar serviço pra adicionar… (ex.: drinks, dj, buffet)" autocomplete="off" style="padding-left:2.2rem">
+        <div id="oc-drop" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 6px); background:var(--card-2); border:1px solid var(--borda); border-radius:10px; max-height:280px; overflow-y:auto; z-index:5; box-shadow:0 12px 30px rgba(0,0,0,.4)"></div>
+      </div>
+      <div id="oc-sel-empty" class="oc-empty" style="display:none">
+        <b>Nenhum serviço nesta proposta ainda</b>
+        <p class="mut" style="margin:.3rem 0 0; font-size:.85rem">Busque acima e clique pra adicionar — só o que você escolher aparece aqui embaixo.</p>
+      </div>
+      {% endif %}
+      <div class="oc-head{% if servico_avulso %} avulso{% endif %}" id="oc-head" style="margin-top:.8rem; display:none">
+        <span></span><span>Serviço</span><span style="text-align:right">{{ 'Valor' if servico_avulso else 'Setup' }}</span>{% if not servico_avulso %}<span style="text-align:right">Mensal</span>{% endif %}<span style="text-align:right">{{ 'Custo' if servico_avulso else 'Custo/Margem' }}</span><span style="text-align:right">Desconto</span><span></span>
+      </div>
+      <div id="oc-mods"{% if servico_avulso %} style="display:none"{% endif %}></div>
+      {% if servico_avulso %}
+      <a id="oc-vertodos" href="#" class="oc-vertodos-link" style="display:none">📋 ver os <span id="oc-vertodos-n">0</span> serviços em ordem alfabética ›</a>
+      <div id="oc-catalogo-completo" class="oc-catalogo-completo"></div>
+      {% endif %}
+      <div id="oc-mods-empty" class="oc-empty" style="display:none">
+        <b>Você ainda não cadastrou seus serviços</b>
+        <p class="mut" style="margin:.3rem 0 0">{{ 'Adicione o que a sua empresa vende — nome e valor. Isso vira o seu catálogo pra montar orçamentos.' if servico_avulso else 'Adicione o que a sua empresa vende — nome, setup e mensalidade. Isso vira o seu catálogo pra montar orçamentos.' }}</p>
+        <div style="display:flex; gap:.5rem; justify-content:center; margin-top:.8rem; flex-wrap:wrap">
+          <button id="oc-add2" class="oc-btn-g" type="button" style="border:0; border-radius:8px; padding:.5rem 1rem; font-weight:600; cursor:pointer">+ Adicionar serviço</button>
+          {% if not servico_avulso %}<button id="oc-import" class="oc-pill" type="button">Usar modelo de tecnologia</button>{% endif %}
+        </div>
+      </div>
+      <div style="display:flex; justify-content:space-between; margin-top:.6rem">
+        <button id="oc-todos" class="oc-pill" type="button" style="display:none">Marcar todos</button>
+        <button id="oc-limpar" class="oc-pill" type="button" style="display:none">Limpar seleção</button>
+      </div>
+    </div>
+
+    {% if servico_avulso %}
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.4rem">
+        <h2 style="margin:0">Plano de pagamento</h2>
+        <div style="display:flex; gap:.5rem; flex-wrap:wrap">
+          <button id="pg-gerar" class="oc-pill" type="button">Sinal + parcelas…</button>
+          <button id="pg-add" class="oc-pill" type="button">+ Parcela</button>
+        </div>
+      </div>
+      <p class="mut" style="margin:.3rem 0 .6rem; font-size:.85rem">Cada linha vira um título a receber, no vencimento, quando você fechar o contrato.</p>
+
+      <div id="pg-gerador" style="display:none; background:var(--bg); border:1px solid var(--borda); border-radius:10px; padding:.7rem .8rem; margin-bottom:.7rem">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:.6rem">
+          <div class="oc-field" style="margin-bottom:0"><label>Sinal (R$)</label><input id="pg-entrada" class="oc-inp" placeholder="0,00"></div>
+          <div class="oc-field" style="margin-bottom:0"><label>Nº de parcelas</label><input id="pg-n" class="oc-inp" inputmode="numeric" value="12"></div>
+          <div class="oc-field" style="margin-bottom:0"><label>1º vencimento</label><input id="pg-venc" class="oc-inp" type="date"></div>
+          <div class="oc-field" style="margin-bottom:0"><label>Forma</label><input id="pg-forma" class="oc-inp" placeholder="Cartão de crédito"></div>
+        </div>
+        <div style="display:flex; gap:.5rem; margin-top:.6rem">
+          <button id="pg-gerar-ok" class="oc-btn-g" type="button" style="border:0;border-radius:8px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Gerar</button>
+          <button id="pg-gerar-cc" class="oc-pill" type="button">Cancelar</button>
+        </div>
+      </div>
+
+      <div id="pg-linhas"></div>
+      <div id="pg-vazio" class="oc-empty"><b>Sem parcelas ainda</b>
+        <p class="mut" style="margin:.3rem 0 0; font-size:.85rem">Sem plano de pagamento, fechar o contrato gera um título só, com o total.</p></div>
+      <div class="mut" id="pg-resumo" style="font-size:.82rem; margin-top:.6rem"></div>
+    </div>
+    {% endif %}
+
+    {% if not servico_avulso %}
+    <div class="card">
+      <h2 style="margin-top:0">Parâmetros</h2>
+      <div class="oc-field"><label>Infraestrutura</label>
+        <div class="oc-seg" style="display:flex; gap:.4rem; flex-wrap:wrap">
+          <button data-grupo="infra" data-val="compartilhada" class="on">Compartilhada</button>
+          <button data-grupo="infra" data-val="dedicada">Dedicada</button>
+          <button data-grupo="infra" data-val="onpremise">On-premise</button>
+        </div>
+      </div>
+      <div class="oc-field"><label>Volume mensal</label>
+        <div class="oc-seg" style="display:flex; gap:.4rem; flex-wrap:wrap">
+          <button data-grupo="volume" data-val="baixo">Baixo</button>
+          <button data-grupo="volume" data-val="medio" class="on">Médio</button>
+          <button data-grupo="volume" data-val="alto">Alto</button>
+        </div>
+      </div>
+      <div style="display:flex; gap:1.5rem; flex-wrap:wrap; align-items:flex-end">
+        <div class="oc-field" style="margin-bottom:0"><label>Integrações externas</label>
+          <div class="oc-step"><button type="button" data-step="-1">-</button><span class="v" id="oc-integ-v">0</span><button type="button" data-step="1">+</button></div>
+          <input type="hidden" id="oc-integ" value="0">
+        </div>
+        <div class="oc-field" style="margin-bottom:0"><label>Suporte 24h</label>
+          <button id="oc-sup" class="oc-pill" data-on="0" type="button">Atendimento dedicado</button>
+        </div>
+      </div>
+      <div class="oc-field" style="margin-top:.8rem"><label>Canais</label>
+        <div style="display:flex; gap:.4rem; flex-wrap:wrap">
+          <button class="oc-canal oc-pill" data-on="0">WhatsApp</button>
+          <button class="oc-canal oc-pill" data-on="0">Site</button>
+          <button class="oc-canal oc-pill" data-on="0">Instagram</button>
+          <button class="oc-canal oc-pill" data-on="0">Telegram</button>
+          <button class="oc-canal oc-pill" data-on="0">E-mail</button>
+          <button class="oc-canal oc-pill" data-on="0">Voz</button>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="oc-ledger">
+    <div class="card" style="margin:0">
+      <div class="mut" style="font-size:.78rem; letter-spacing:.1em; text-transform:uppercase; color:var(--verde-claro)">Resumo · ao vivo</div>
+      <div class="oc-ll"><span class="mut">Investimento inicial</span><b id="oc-r-setup">R$ 0</b></div>
+      {% if not servico_avulso %}<div class="oc-ll"><span class="mut">Mensalidade</span><b id="oc-r-mensal" style="color:var(--verde-claro)">R$ 0</b></div>{% endif %}
+      <div class="oc-ll" id="oc-r-margem-l" style="display:none"><span class="mut">{{ 'Margem' if servico_avulso else 'Margem/mês' }}</span><b id="oc-r-margem" style="color:var(--verde-claro); font-size:.95rem">-</b></div>
+      <div class="oc-total"><div class="mut" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color:var(--verde-claro)">{{ 'Total' if servico_avulso else 'Total 1º ano' }}</div><div class="v" id="oc-r-ano">R$ 0</div><div class="mut" id="oc-r-eco" style="display:none; font-size:.8rem; color:var(--verde-claro); margin-top:.3rem"></div></div>
+      <div class="oc-ll oc-dline" id="oc-r-descitens-l" style="display:none"><span class="mut">Descontos por item</span><b id="oc-r-descitens">R$ 0</b></div>
+      <div class="oc-ll" id="oc-r-sub-l" style="display:none"><span class="mut">Subtotal com descontos</span><b id="oc-r-sub">R$ 0</b></div>
+      <div class="oc-ll oc-dline" id="oc-r-descfim-l" style="display:none"><span class="mut">Desconto no total</span><b id="oc-r-descfim">R$ 0</b></div>
+      <!-- o desconto do TOTAL vale nos dois modos: consultoria e advocacia vendem
+           por orçamento igual, e só não tinham desconto porque ele morava dentro
+           do jsonb do evento. -->
+      <div class="oc-field" style="margin-top:.7rem; margin-bottom:0">
+        <label class="mut" style="font-size:.76rem">Desconto no total</label>
+        <div class="oc-dpar oc-dpar-tot" data-tipo="pct">
+          <input id="oc-desconto" class="oc-inp oc-desc-inp" inputmode="numeric" value="0">
+          <span class="oc-dtog">
+            <button type="button" data-t="pct" class="on">%</button>
+            <button type="button" data-t="valor">R$</button>
+          </span>
+        </div>
+        <button id="oc-desc-zerar" class="oc-dzero" type="button">zerar desconto</button>
+      </div>
+      {% if not servico_avulso %}
+      <button id="oc-anual" class="oc-pill" data-on="0" type="button" style="width:100%; margin-top:.7rem; text-align:left; display:flex; justify-content:space-between; align-items:center">Pagamento anual (-15%) <span id="oc-anual-mk">↻</span></button>
+      {% endif %}
+      <button id="oc-gerar" class="oc-btn oc-btn-g">Gerar proposta</button>
+      <button id="oc-salvar" class="oc-btn oc-btn-o">Salvar no funil</button>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">Funil</h2>
+  <div id="oc-hist-box"><p class="mut">Carregando...</p></div>
+</div>
+
+</div>
+
+{# A TELA DE ENVIO. Nasce vazia e é preenchida pelo servidor ao abrir — o assunto,
+   a mensagem e o e-mail do cliente já vêm prontos, e por qual caixa vai sair é
+   dito ANTES de apertar. Fora do .oc-wrap pra o fundo escuro cobrir a página. #}
+<div class="env-fundo" id="env-fundo" role="dialog" aria-modal="true" aria-labelledby="env-tt">
+  <div class="env-cx">
+    <div class="env-hd">
+      <h3 id="env-tt">Mandar por e-mail</h3>
+      <button type="button" class="env-x" id="env-x" aria-label="Fechar">✕</button>
+    </div>
+    <div class="env-msg" id="env-msg"></div>
+    <div class="env-campo"><label for="env-para">Para</label>
+      <input id="env-para" type="email" inputmode="email" autocomplete="off" placeholder="email@do-cliente.com"></div>
+    <div class="env-campo"><label for="env-assunto">Assunto</label>
+      <input id="env-assunto" type="text"></div>
+    <div class="env-campo"><label for="env-texto">Mensagem</label>
+      <textarea id="env-texto"></textarea></div>
+    <div class="env-de" id="env-de"></div>
+    <div class="env-acoes">
+      <button type="button" class="oc-btn oc-btn-g" style="width:auto;margin:0" id="env-enviar">Enviar</button>
+      <button type="button" class="oc-pill" id="env-cancelar">Cancelar</button>
+      <span class="env-hist" id="env-hist"></span>
+    </div>
+  </div>
+</div>
+
+{# PAGAMENTOS. Reusa a caixa do envio (.env-fundo/.env-cx): a mesma forma de abrir
+   e fechar, o mesmo Esc, o mesmo clique no fundo. Duas caixas com comportamentos
+   diferentes seriam duas coisas pra aprender. #}
+<div class="env-fundo" id="pg-fundo" role="dialog" aria-modal="true" aria-labelledby="pg-tt">
+  <div class="env-cx">
+    <div class="env-hd">
+      <h3 id="pg-tt">Pagamentos</h3>
+      <button type="button" class="env-x" id="pg-x" aria-label="Fechar">✕</button>
+    </div>
+    <div class="env-msg" id="pg-msg"></div>
+    <div class="pg-tot" id="pg-tot"></div>
+    <div id="pg-lista"><p class="mut" style="font-size:.85rem">Carregando...</p></div>
+    <input type="file" id="pg-arquivo" accept="application/pdf,image/*" style="display:none">
+  </div>
+</div>
+
+<script>window.SERVICO_AVULSO = {{ 'true' if servico_avulso else 'false' }};</script>
+<script>window.ZAQ_ICONES = {{ icones_paleta|tojson }};</script>
+""" + _JS_TAG + r"""
 {% endblock %}"""
 
 # Registra o template no env do portal (reusa base/nav/gate do painel).

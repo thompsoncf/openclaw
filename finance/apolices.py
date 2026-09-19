@@ -594,6 +594,13 @@ def pdfs_do_whatsapp(pool, conta_id: int, *, dias: int = 90,
 
     Só entrada (`direcao='in'`): o que a corretora MANDOU pelo painel não volta
     pra lista como se fosse documento novo.
+
+    E SÓ DE QUEM FOI LIBERADO (migração 289, pedido do dono em 19/09/2026:
+    "limita a lista só pros numeros de corretor e seguradora"). Prender a lista ao
+    número da empresa já tirava o WhatsApp pessoal de todo mundo; isto tira o
+    fornecedor de boleto, que escreve pro MESMO número. Sem ninguém liberado a
+    lista vem vazia de propósito — a tela então mostra quem anda mandando, pra
+    liberar num toque.
     """
     sql = """
         select m.id,
@@ -613,6 +620,9 @@ def pdfs_do_whatsapp(pool, conta_id: int, *, dias: int = 90,
            and (coalesce(m.midia_ref->>'mimetype', '') like 'application/pdf%%'
                 or lower(coalesce(m.midia_meta->>'nome', '')) like '%%.pdf')
            and m.criado_em > now() - make_interval(days => %s)
+           and exists (select 1 from apolice_remetentes r
+                        where r.conta_id = cv.conta_id
+                          and r.contato_ref = cv.contato_ref)
          order by m.criado_em desc
          limit %s
     """
@@ -643,3 +653,88 @@ def ref_do_pdf(pool, conta_id: int, mensagem_id: int) -> dict | None:
     if not r:
         return None
     return {"ref": r[0] or {}, "tipo": r[1] or "documento", "nome": r[2] or "documento.pdf"}
+
+
+TIPOS_REMETENTE = (("corretor", "Corretor"), ("seguradora", "Seguradora"))
+
+
+def remetentes(pool, conta_id: int) -> list[dict]:
+    """Quem está liberado pra mandar apólice, do mais novo pro mais velho."""
+    with pool.connection() as c:
+        rows = c.execute(
+            "select contato_ref, rotulo, tipo, criado_em from apolice_remetentes "
+            " where conta_id = %s order by criado_em desc", (conta_id,)).fetchall()
+    return [{"contato_ref": r[0], "rotulo": r[1] or r[0], "tipo": r[2],
+             "tipo_txt": dict(TIPOS_REMETENTE).get(r[2], r[2]), "criado_em": r[3]}
+            for r in rows]
+
+
+def liberar_remetente(pool, conta_id: int, contato_ref: str, *, rotulo: str = "",
+                      tipo: str = "corretor", membro_id: int | None = None) -> bool:
+    """Libera um número. Liberar de novo só atualiza o rótulo e o tipo.
+
+    O número tem que ter CONVERSA nesta conta: é o mesmo cerco da lista, e sem
+    ele daria pra liberar um número qualquer digitando o id na requisição.
+    """
+    ref = "".join(ch for ch in (contato_ref or "") if ch.isdigit())
+    if not ref:
+        raise ValueError("número vazio")
+    if tipo not in dict(TIPOS_REMETENTE):
+        raise ValueError("tipo desconhecido")
+    with pool.connection() as c:
+        existe = c.execute(
+            "select 1 from conversas where conta_id = %s and contato_ref = %s limit 1",
+            (conta_id, ref)).fetchone()
+        if not existe:
+            raise ValueError("este número não tem conversa nesta conta")
+        c.execute(
+            """insert into apolice_remetentes (conta_id, contato_ref, rotulo, tipo, criado_por)
+                    values (%s, %s, %s, %s, %s)
+               on conflict (conta_id, contato_ref)
+                    do update set rotulo = excluded.rotulo, tipo = excluded.tipo""",
+            (conta_id, ref, (rotulo or "")[:120], tipo, membro_id))
+        c.commit()
+    return True
+
+
+def tirar_remetente(pool, conta_id: int, contato_ref: str) -> None:
+    """Tira da lista. Não apaga apólice nenhuma — só para de sugerir PDF dele."""
+    with pool.connection() as c:
+        c.execute("delete from apolice_remetentes where conta_id = %s and contato_ref = %s",
+                  (conta_id, "".join(ch for ch in (contato_ref or "") if ch.isdigit())))
+        c.commit()
+
+
+def quem_mandou_pdf(pool, conta_id: int, *, dias: int = 90,
+                    limite: int = 30) -> list[dict]:
+    """Quem andou mandando PDF pro número da empresa, com quantos e quando.
+
+    É o que faz a liberação ser um toque em vez de digitar telefone: a pessoa
+    reconhece o nome, vê quantos documentos vieram daquele número, e libera.
+    Mostra também quem JÁ está liberado, pra tela poder tirar.
+    """
+    sql = """
+        select cv.contato_ref,
+               coalesce(nullif(max(cv.contato_nome), ''), cv.contato_ref, '') as nome,
+               count(*) as quantos,
+               max(m.criado_em) as ultimo,
+               exists (select 1 from apolice_remetentes r
+                        where r.conta_id = cv.conta_id and r.contato_ref = cv.contato_ref) as liberado
+          from mensagens m
+          join conversas cv on cv.id = m.conversa_id
+         where cv.conta_id = %s
+           and m.direcao = 'in'
+           and m.midia_tipo = 'documento'
+           and m.midia_ref is not null
+           and (coalesce(m.midia_ref->>'mimetype', '') like 'application/pdf%%'
+                or lower(coalesce(m.midia_meta->>'nome', '')) like '%%.pdf')
+           and m.criado_em > now() - make_interval(days => %s)
+           and cv.contato_ref is not null
+         group by cv.conta_id, cv.contato_ref
+         order by liberado desc, quantos desc, ultimo desc
+         limit %s
+    """
+    with pool.connection() as c:
+        rows = c.execute(sql, (conta_id, int(dias), int(limite))).fetchall()
+    return [{"contato_ref": r[0], "nome": r[1] or "—", "quantos": int(r[2]),
+             "ultimo": r[3], "liberado": bool(r[4])} for r in rows]

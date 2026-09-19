@@ -169,3 +169,57 @@ def test_a_marca_de_origem_e_o_que_tira_o_documento_da_lista():
     from finance import apolices as ap
     import inspect
     assert "pdf_lido->'origem'->>'whatsapp_msg'" in inspect.getsource(ap.pdfs_do_whatsapp)
+
+
+# ────────── quem pode mandar: a lista é limitada por remetente ──────────
+
+
+def test_a_lista_so_mostra_pdf_de_quem_foi_liberado():
+    """Pedido do dono em 19/09: o número da empresa não bastava, porque o
+    fornecedor de boleto escreve pro mesmo número."""
+    import inspect
+
+    from finance import apolices as ap
+    fonte = inspect.getsource(ap.pdfs_do_whatsapp)
+    assert "exists (select 1 from apolice_remetentes r" in fonte
+    assert "r.contato_ref = cv.contato_ref" in fonte
+
+
+def test_liberar_exige_conversa_na_propria_conta():
+    """Sem isso, mandar outro número na requisição liberaria quem quisesse."""
+    import inspect
+
+    from finance import apolices as ap
+    fonte = inspect.getsource(ap.liberar_remetente)
+    assert "select 1 from conversas where conta_id = %s and contato_ref = %s" in fonte
+    assert "este número não tem conversa nesta conta" in fonte
+
+
+def test_as_rotas_de_remetente_sao_de_gerencia():
+    for rota in ("remetentes_do_whatsapp", "mudar_remetente"):
+        corpo = corpo_de(rota)
+        assert "if not gerencia:" in corpo
+        assert "só o dono e o gestor" in corpo
+
+
+def test_o_painel_de_remetentes_vive_na_mesma_janela():
+    """Uma segunda tela pra isso seria um lugar a mais pra esquecer."""
+    assert 'id="rn-p-fontes"' in PA
+    assert "'fontes'" in PA and "PASSOS = ['pdf', 'lendo', 'form', 'ok', 'fontes']" in PA
+    assert 'onclick="rnFontes()"' in PA
+
+
+def test_o_estado_vazio_diz_o_que_fazer():
+    """Lista vazia sem explicação pareceria defeito; ela tem dois motivos."""
+    assert "Ninguém liberado ainda. " in PA
+    assert "Nada novo de quem você liberou" in PA
+
+
+def test_a_migracao_nasce_vazia_e_e_reversivel():
+    import pathlib
+    sql = (pathlib.Path(__file__).resolve().parent.parent
+           / "db" / "migracoes" / "289_apolice_remetentes.sql").read_text(encoding="utf-8")
+    assert "create table if not exists public.apolice_remetentes" in sql
+    assert "create unique index if not exists ux_apolice_remetentes" in sql
+    assert "insert into public.apolice_remetentes" not in sql      # nada semeado
+    assert "-- rollback:" in sql

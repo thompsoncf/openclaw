@@ -64,9 +64,28 @@ _BR = timezone(timedelta(hours=-3))
 #: resumo passa a ser boletim, que é outro produto.
 EMAILS_MAX = 5
 
-#: Os dias possíveis. 'segunda' é o padrão e a escolha do dono: a semana que começa
-#: — as festas dos próximos dias viram plano, não retrospectiva.
-DIAS = ("segunda", "sexta")
+#: QUANDO cada opção manda: (dia da semana em Python, hora de Brasília).
+#: 'segunda' é o padrão e a escolha do dono: a semana que começa — as festas dos
+#: próximos dias viram plano, não retrospectiva.
+#:
+#: A HORA ENTROU EM 19/09/2026, e o motivo é que a tela mentia. Ela oferece
+#: "Sexta, 17h" desde a 274, mas quem decidia era só o cron: um disparo às 12:00
+#: UTC (09:00 BRT), e `contas_do_dia` olhava apenas o DIA. Conta que escolhesse
+#: sexta receberia às 9h — oito horas antes do que a tela prometeu. Ninguém tinha
+#: escolhido sexta ainda, então o defeito nunca apareceu; o dono mandou acertar
+#: junto com o nome do serviço no render.yaml.
+QUANDO = {"segunda": (0, 9), "sexta": (4, 17)}
+
+#: As chaves, pra validação e pro `in`. Continua sendo o que a migração 274 aceita
+#: no check de `contas.resumo_semanal_dia`.
+DIAS = tuple(QUANDO)
+
+#: Quanto o disparo pode atrasar e ainda contar como "a hora certa". O Render não
+#: promete o minuto, e um cron que saia às 11:58 UTC cairia em 8h de Brasília — com
+#: igualdade exata, ninguém receberia nada e o log diria "nenhuma conta hoje".
+#: Uma hora de folga não confunde as duas janelas: 9h e 17h são oito horas
+#: distantes.
+FOLGA_HORAS = 1
 
 _EMAIL_RE = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]{2,}$")
 
@@ -518,11 +537,27 @@ def enviar_conta(pool, conta_id: int, agora: datetime | None = None,
             "simulado": simular}
 
 
-def contas_do_dia(pool, agora: datetime | None = None) -> list[int]:
-    """As contas que devem receber HOJE. O dia de cada uma está na configuração
-    dela — o cron roda todo dia e pergunta, em vez de existirem dois crons."""
+def escolha_de_agora(agora: datetime | None = None) -> str:
+    """Qual das opções de `QUANDO` bate com este instante — "" se nenhuma.
+
+    DIA **E** HORA, e é a hora que é nova. O cron dispara mais de uma vez por dia
+    (ver o docstring de `scripts/resumo_semanal.py`) e pergunta ao banco de quem é
+    a vez; sem olhar a hora, o disparo das 17h mandaria de novo o que o das 9h já
+    mandou — ou melhor: não mandaria, porque `ja_enviado` barra a repetição, e a
+    conta de sexta continuaria recebendo às 9h, que é o defeito original.
+    """
     agora = (agora or datetime.now(timezone.utc)).astimezone(_BR)
-    hoje = DIAS[0] if agora.weekday() == 0 else (DIAS[1] if agora.weekday() == 4 else "")
+    for chave, (dia, hora) in QUANDO.items():
+        if agora.weekday() == dia and abs(agora.hour - hora) <= FOLGA_HORAS:
+            return chave
+    return ""
+
+
+def contas_do_dia(pool, agora: datetime | None = None) -> list[int]:
+    """As contas que devem receber AGORA. O dia e a hora de cada uma estão na
+    configuração dela — o cron dispara e pergunta, em vez de existir um serviço
+    no Render por horário."""
+    hoje = escolha_de_agora(agora)
     if not hoje:
         return []
     try:

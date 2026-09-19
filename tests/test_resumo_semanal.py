@@ -419,17 +419,69 @@ def test_conta_desligada_nao_manda_nada(pool, cena, monkeypatch):
     assert rs.enviar_conta(pool, cena["conta"], AGORA)["motivo"] == "desligado"
 
 
+# ── quando o cron pega cada conta ────────────────────────────────────────────
+# Em hora de Brasília, pra ler sem contar nos dedos:
+#   12:00 UTC = 09:00 BRT  → a janela da opção "Segunda, 9h"
+#   20:00 UTC = 17:00 BRT  → a janela da opção "Sexta, 17h"
+SEG_9H = datetime(2026, 9, 21, 12, tzinfo=timezone.utc)
+SEX_17H = datetime(2026, 9, 25, 20, tzinfo=timezone.utc)
+SEX_9H = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
+QUA_9H = datetime(2026, 9, 23, 12, tzinfo=timezone.utc)
+
+
 def test_o_cron_so_pega_a_conta_no_dia_dela(pool, cena):
     _ligar(pool, cena["conta"], dia="segunda")
-    segunda = datetime(2026, 9, 21, 12, tzinfo=timezone.utc)
-    sexta = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
-    quarta = datetime(2026, 9, 23, 12, tzinfo=timezone.utc)
-    assert cena["conta"] in rs.contas_do_dia(pool, segunda)
-    assert rs.contas_do_dia(pool, sexta) == []
-    assert rs.contas_do_dia(pool, quarta) == []
+    assert cena["conta"] in rs.contas_do_dia(pool, SEG_9H)
+    assert rs.contas_do_dia(pool, SEX_17H) == []
+    assert rs.contas_do_dia(pool, QUA_9H) == []
     _ligar(pool, cena["conta"], dia="sexta")
-    assert cena["conta"] in rs.contas_do_dia(pool, sexta)
-    assert rs.contas_do_dia(pool, segunda) == []
+    assert cena["conta"] in rs.contas_do_dia(pool, SEX_17H)
+    assert rs.contas_do_dia(pool, SEG_9H) == []
+
+
+def test_quem_escolheu_SEXTA_17H_nao_recebe_as_9H(pool, cena):
+    """O defeito de 19/09/2026, e o único caso que distingue o conserto.
+
+    A tela oferece "Sexta, 17h" desde a 274, mas quem decidia era só o cron: um
+    disparo às 12:00 UTC e um `contas_do_dia` que olhava apenas o DIA. A conta de
+    sexta receberia às 9h — oito horas antes do que a tela prometeu.
+
+    Sexta às 9h é o instante que passa no dia e falha na hora. Testar só "sexta às
+    17h funciona" passaria verde com o código velho, que mandava a sexta inteira.
+    """
+    _ligar(pool, cena["conta"], dia="sexta")
+    assert rs.contas_do_dia(pool, SEX_9H) == [], (
+        "a conta de sexta foi pega às 9h — a tela promete 17h")
+    assert cena["conta"] in rs.contas_do_dia(pool, SEX_17H)
+
+
+def test_o_disparo_atrasado_ainda_conta(pool, cena):
+    """O Render não promete o minuto. Com igualdade exata na hora, um disparo às
+    11:58 UTC cairia em 8h de Brasília e NINGUÉM receberia — e o log diria
+    "nenhuma conta hoje", que parece normal. A folga de uma hora cobre isso sem
+    confundir as duas janelas, que são oito horas distantes."""
+    _ligar(pool, cena["conta"], dia="segunda")
+    adiantado = datetime(2026, 9, 21, 11, 58, tzinfo=timezone.utc)   # 08:58 BRT
+    atrasado = datetime(2026, 9, 21, 13, 5, tzinfo=timezone.utc)     # 10:05 BRT
+    assert cena["conta"] in rs.contas_do_dia(pool, adiantado)
+    assert cena["conta"] in rs.contas_do_dia(pool, atrasado)
+    # mas a folga não é elástica: meio-dia de Brasília não é a janela de ninguém
+    meio_dia = datetime(2026, 9, 21, 15, tzinfo=timezone.utc)        # 12:00 BRT
+    assert rs.contas_do_dia(pool, meio_dia) == []
+
+
+def test_a_tela_e_o_cron_dizem_a_MESMA_hora():
+    """A tela escreve "Segunda, 9h" e "Sexta, 17h" à mão, no template. Se um dia
+    alguém mudar `QUANDO` e esquecer o texto, a tela volta a prometer o que o cron
+    não cumpre — que é exatamente o defeito que esta leva conserta."""
+    import inspect
+
+    from web import painel_prospeccao as pp
+    fonte = inspect.getsource(pp)
+    miolo = fonte.split('name="resumo_dia"')[1][:500]
+    for chave, (_dia, hora) in rs.QUANDO.items():
+        assert f"{hora}h" in miolo, (
+            f"a opção '{chave}' manda às {hora}h, e a tela não diz isso")
 
 
 # ------------------------------------------------- o card na engrenagem (§ tela)

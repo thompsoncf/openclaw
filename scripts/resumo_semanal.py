@@ -1,14 +1,26 @@
-"""Manda o resumo semanal das contas que pediram (roda como cron, todo dia).
+"""Manda o resumo semanal das contas que pediram (roda como cron).
 
-TODO DIA, e não só na segunda, porque o DIA é da conta: uma escolhe segunda 9h,
-outra sexta 17h (`contas.resumo_semanal_dia`). Um cron por dia da semana seria
-dois serviços no Render pra uma pergunta que o banco responde — e o `contas_do_dia`
-devolve vazio nos outros cinco dias, o que custa uma consulta.
+TODO DIA E EM DOIS HORÁRIOS, porque o QUANDO é da conta: uma escolhe segunda 9h,
+outra sexta 17h (`contas.resumo_semanal_dia`, traduzido em `resumo_semanal.QUANDO`).
+Um serviço por horário seria quatro serviços no Render pra uma pergunta que o
+banco responde — e `contas_do_dia` devolve vazio fora da janela de alguém, o que
+custa uma consulta.
 
-No Render é um serviço `cron` como o `openclaw-monitor-saldos`:
+No Render é um serviço `cron` — hoje o `openclaw-relatorios-semanais-follow-up`
+(Service ID `crn-dam2fln40ujc73fdhnpg`):
 
-    schedule: "0 12 * * *"      # 12:00 UTC = 09:00 BRT
+    schedule: "0 12,20 * * *"   # 12:00 UTC = 09:00 BRT · 20:00 UTC = 17:00 BRT
     startCommand: python -m scripts.resumo_semanal
+
+A SEGUNDA HORA ENTROU EM 19/09/2026. Até então o cron disparava só às 12:00 UTC e
+`contas_do_dia` olhava apenas o dia da semana: a conta que escolhesse "Sexta, 17h"
+na tela receberia às 9h, oito horas antes do prometido. Ninguém tinha escolhido
+sexta ainda, então o defeito nunca apareceu.
+
+E VALE LEMBRAR (CLAUDE.md §3): o `render.yaml` é DOCUMENTAÇÃO, não Blueprint.
+Mudar o `schedule` aqui ou lá não muda o Render — o campo Schedule do serviço tem
+que ser editado na mão. Enquanto ele estiver em `0 12 * * *`, a segunda continua
+saindo certa e a sexta simplesmente não sai; nada quebra, só não chega.
 
 SO PRECISA DE `DATABASE_URL`. O e-mail sai pela CAIXA DA PROPRIA EMPRESA — o
 mesmo canal que ja recebe e responde lead —, entao nao ha SMTP pra configurar
@@ -21,14 +33,10 @@ cron termina com sucesso mesmo quando nenhum e-mail sai (conta desligada, semana
 sem movimento, caixa fora do ar). A tabela guarda destino, tipo, se deu certo e
 POR ONDE saiu.
 
-A hora de sexta (17h BRT) sai de um segundo horário no mesmo serviço não — sai de
-o cron rodar às 12:00 UTC e a conta de sexta receber às 9h da sexta. Se alguém
-escolher sexta esperando 17h, é a primeira coisa a acertar aqui; hoje o dono
-escolheu segunda e a diferença não aparece.
-
 NÃO REPETE: `resumo_semanal_envio` tem chave primária (conta, semana, destino), e
 `ja_enviado` é consultado antes de montar. Rodar duas vezes no mesmo dia — deploy
-no meio, retry do Render — não manda o mesmo e-mail duas vezes.
+no meio, retry do Render, ou os dois horários do `schedule` — não manda o mesmo
+e-mail duas vezes.
 
 Uma conta que estourar não derruba as outras: cada uma é um try.
 """

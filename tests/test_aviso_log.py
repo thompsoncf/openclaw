@@ -502,6 +502,21 @@ def test_o_teste_de_canal_NAO_entra_na_estatistica_da_cobranca(pool):
     assert al.resumo(pool, CONTA, origem="follow_up_teste")["whatsapp"]["ok"] == 1
 
 
+def test_o_card_conta_a_ESTEIRA_e_o_FECHO_tambem(pool):
+    """O card mediu só `origem='follow_up'` até 19/09/2026, e no dia em que a
+    esteira tomou o lugar do follow-up (#747) ele passou a medir o motor calado:
+    a Prime recebia aviso todo dia e via o card definhar. Conta o que é cobrança
+    de verdade, venha do motor que vier."""
+    al.registrar(pool, CONTA, origem="esteira", canal="whatsapp", ok=True, membro_id=1)
+    al.registrar(pool, CONTA, origem="esteira", canal="push", ok=True, membro_id=1)
+    al.registrar(pool, CONTA, origem="esteira_fecho", canal="email", ok=True, membro_id=1)
+    al.registrar(pool, CONTA, origem="esteira_teste", canal="whatsapp", ok=True, membro_id=1)
+    r = al.resumo(pool, CONTA)
+    assert (r["whatsapp"]["ok"], r["push"]["ok"], r["email"]["ok"]) == (1, 1, 1)
+    # e o ensaio continua fora, que é o motivo de a lista ser explícita
+    assert al.resumo(pool, CONTA, origem="esteira_teste")["whatsapp"]["ok"] == 1
+
+
 def test_o_resumo_separa_por_vendedor_porque_o_total_nao_diz_quem(pool):
     """"16 de 21 lidos" não diz quem não está lendo — e é essa a pergunta de quem
     cobra."""
@@ -634,7 +649,7 @@ def test_o_historico_separa_os_7_dias_visiveis_do_resto(pool):
 
 
 def test_o_teste_de_canal_APARECE_no_historico_marcado(pool):
-    """Ele fica FORA da estatística (o card só olha origem='follow_up') e DENTRO da
+    """Ele fica FORA da estatística (o card só olha as origens REAIS) e DENTRO da
     linha do tempo: esconder o que chegou no celular do vendedor seria esconder
     metade da história do dia."""
     al.registrar(pool, CONTA, origem="follow_up_teste", canal="whatsapp", ok=True,

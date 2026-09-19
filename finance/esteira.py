@@ -317,17 +317,27 @@ def fechar_vencidos(c, conta_id: int, agora: datetime | None = None,
 
 
 def _fim_da_janela(agora: datetime, cfg: dict) -> bool:
-    """Passou da hora de fechar o expediente? Usa a MESMA janela da régua."""
+    """Passou da hora de fechar o expediente? Usa a MESMA janela da régua.
+
+    DIA DE TRABALHO TAMBÉM CONTA. Sem isso, o domingo tinha 19h como qualquer
+    outro dia: a esteira fechava lead num dia em que ninguém foi cobrado, e o
+    fecho do dia chegava ao dono de domingo à noite. Quem vence no domingo espera
+    a segunda — um dia a mais, e nenhum fechamento em dia que o vendedor não
+    trabalhou.
+    """
     fecha = cfg.get("janela_fecha")
     if not fecha:
         return False
     br = agora + timedelta(hours=-3)
+    if br.isoweekday() not in fr._dias(cfg):
+        return False
     return (br.hour, br.minute) >= (fecha.hour, fecha.minute)
 
 
 # ------------------------------------------------------------------ o resumo do dia
 
-def resumo(c, conta_id: int, membro_id: int | None, agora: datetime | None = None) -> dict:
+def resumo(c, conta_id: int, membro_id: int | None, agora: datetime | None = None,
+           cfg: dict | None = None) -> dict:
     """O que este vendedor fez e não fez — é o "resumo do dia" que o dono pediu.
 
     A janela é o dia de ontem pra frente: o aviso da manhã fala do que ficou de
@@ -335,20 +345,32 @@ def resumo(c, conta_id: int, membro_id: int | None, agora: datetime | None = Non
     """
     agora = agora or datetime.now(timezone.utc)
     desde = _inicio_do_dia(agora) - timedelta(days=1)
+    final = prazo_final(cfg["dias"] if cfg else config(c, conta_id)["dias"])
+    # "quantos fecham amanhã" (pedido do dono em 19/09/2026). O corte é a DATA de
+    # amanhã, contada como a esteira conta: quem amanhã estiver no dia do prazo
+    # final e continuar sem tratativa é fechado às 19h. Sem esta linha o dono lia
+    # "7 na esteira" e não sabia quais somem antes da próxima cobrança.
+    amanha = agora + timedelta(days=1)
     r = c.execute(
         """select count(*) filter (where e.resolvido_em >= %(desde)s and e.resolucao='falou'),
                   count(*) filter (where e.resolvido_em >= %(desde)s and e.resolucao='moveu'),
                   count(*) filter (where e.resolvido_em >= %(desde)s and e.resolucao='fechou'),
                   count(*) filter (where e.resolvido_em >= %(desde)s and e.resolucao='cliente_voltou'),
                   count(*) filter (where e.fechado_em >= %(desde)s),
-                  count(*) filter (where e.resolvido_em is null and e.fechado_em is null)
+                  count(*) filter (where e.resolvido_em is null and e.fechado_em is null),
+                  count(*) filter (where e.resolvido_em is null and e.fechado_em is null
+                                     and (%(amanha)s::date - (e.entrou_em - interval '3 hours')::date) + 1
+                                         >= %(final)s)
              from follow_up_esteira e
             where e.conta_id=%(conta)s
               and (%(membro)s::bigint is null or e.membro_id = %(membro)s)""",
-        {"conta": conta_id, "membro": membro_id, "desde": desde}).fetchone()
-    falou, moveu, fechou, voltou, vencidos, abertos = [int(x or 0) for x in (r or (0,) * 6)]
+        {"conta": conta_id, "membro": membro_id, "desde": desde,
+         "amanha": _dia_br(amanha), "final": final}).fetchone()
+    falou, moveu, fechou, voltou, vencidos, abertos, amanha_n = [
+        int(x or 0) for x in (r or (0,) * 7)]
     return {"falou": falou, "moveu": moveu, "fechou": fechou, "cliente_voltou": voltou,
             "fechados_sem_tratativa": vencidos, "na_esteira": abertos,
+            "fecham_amanha": amanha_n,
             "tratou": falou + moveu + fechou}
 
 
@@ -376,7 +398,11 @@ def fecho_do_dia(pool, conta_id: int, agora: datetime | None = None) -> list[dic
     3. **Só em dia que teve cobrança** — aviso que chega dizendo nada é o que
        ensina a ignorar o próximo.
 
-    Sem push, de propósito: é leitura de fim de dia, não interrupção.
+    NOS TRÊS CANAIS (19/09/2026, decisão do dono): WhatsApp, e-mail e push. Nasceu
+    sem push por um argumento meu — "é leitura de fim de dia, não interrupção" — e
+    quem recebe decidiu o contrário. O e-mail sai pros chefes E pros endereços
+    cadastrados na conta (`_emails_da_conta`), que é como ele chega ao dono que não
+    tem e-mail no próprio cadastro.
     """
     agora = agora or datetime.now(timezone.utc)
     saida: list[dict] = []
@@ -400,15 +426,29 @@ def fecho_do_dia(pool, conta_id: int, agora: datetime | None = None) -> list[dic
                      join membros m on m.id = e.membro_id
                     where e.conta_id=%s and m.papel='vendedor' and coalesce(m.ativo,true)""",
                 (conta_id,)).fetchall()
-            placar = [(nome, resumo(c, conta_id, mid, agora)) for mid, nome in vendedores]
-            casa = resumo(c, conta_id, None, agora)
+            placar = [(nome, resumo(c, conta_id, mid, agora, cfg)) for mid, nome in vendedores]
+            casa = resumo(c, conta_id, None, agora, cfg)
             chefes = c.execute(
                 "select id, coalesce(nullif(nome,''), email), email from membros "
                 " where conta_id=%s and coalesce(ativo,true) and papel in ('dono','gestor')",
                 (conta_id,)).fetchall()
         titulo, corpo = texto_fecho(casa, placar)
+        ja = set()
         for mid, nome, email in chefes:
             saida.append(_mandar_fecho(pool, conta_id, mid, nome, email, titulo, corpo))
+            if email and "@" in email:
+                ja.add(email.strip().lower())
+        # E os e-mails cadastrados na conta, que não são membros: é como o fecho
+        # chega ao dono que não tem e-mail no cadastro dele. Quem já recebeu como
+        # membro não recebe duas vezes — dois e-mails iguais no mesmo minuto é o
+        # que faz a pessoa criar regra de lixeira pro nosso remetente.
+        for destino in _emails_da_conta(pool, conta_id):
+            if destino in ja:
+                continue
+            ja.add(destino)
+            saida.append({"membro_id": None, "nome": destino, "email":
+                          _mandar_fecho_email(pool, conta_id, destino, titulo, corpo),
+                          "whatsapp": False, "push": False})
     except Exception:  # noqa: BLE001 — o fecho do dia não derruba o poller
         _log.warning("esteira: fecho do dia falhou na conta %s", conta_id, exc_info=True)
     return saida
@@ -425,8 +465,20 @@ def texto_fecho(casa: dict, placar: list[tuple[str, dict]]) -> tuple[str, str]:
     """
     titulo = (f"📋 O dia fechou: {casa.get('tratou', 0)} tratados,"
               f" {casa.get('na_esteira', 0)} na esteira")
-    linhas = [f"· {nome} — {r.get('tratou', 0)} tratados, {r.get('na_esteira', 0)} na esteira"
-              for nome, r in sorted(placar, key=lambda x: -x[1].get("na_esteira", 0))]
+    if casa.get("fecham_amanha"):
+        titulo += f", {casa['fecham_amanha']} fecham amanhã"
+    linhas = []
+    for nome, r in sorted(placar, key=lambda x: -x[1].get("na_esteira", 0)):
+        linha = f"· {nome} — {r.get('tratou', 0)} tratados, {r.get('na_esteira', 0)} na esteira"
+        # QUANTOS FECHAM AMANHÃ, por pessoa (pedido do dono em 19/09/2026). "7 na
+        # esteira" não diz o que é urgente; "2 fecham amanhã" diz — e é a única
+        # parte do placar sobre a qual ainda dá pra fazer alguma coisa hoje.
+        if r.get("fecham_amanha"):
+            linha += f" ({r['fecham_amanha']} fecham amanhã)"
+        linhas.append(linha)
+    if casa.get("fecham_amanha"):
+        linhas.append("")
+        linhas.append(f"Fecham amanhã sem tratativa: {casa['fecham_amanha']}.")
     if casa.get("fechados_sem_tratativa"):
         linhas.append("")
         linhas.append(f"Fechados hoje sem tratativa: {casa['fechados_sem_tratativa']}.")
@@ -460,7 +512,8 @@ def _mandar_fecho(pool, conta_id: int, membro_id: int, nome: str, email: str,
     decisão do dono em 19/09). Cada canal deixa rastro, como o resto dos avisos."""
     from finance import aviso_log as _al
     from finance import follow_up as _fu
-    r = {"membro_id": membro_id, "nome": nome, "email": False, "whatsapp": False}
+    r = {"membro_id": membro_id, "nome": nome, "email": False, "whatsapp": False,
+         "push": False}
     if email and "@" in email:
         try:
             from finance import email_sender as es_mail
@@ -478,6 +531,7 @@ def _mandar_fecho(pool, conta_id: int, membro_id: int, nome: str, email: str,
         _al.registrar(pool, conta_id, origem=ORIGEM_FECHO, canal="email",
                       membro_id=membro_id, assunto=titulo, ok=False,
                       motivo="membro sem e-mail cadastrado")
+    r["push"] = _push_do_fecho(pool, conta_id, membro_id, titulo, corpo)
     try:
         with pool.connection() as c:
             numero = _fu._zap_do_membro(c, conta_id, membro_id)
@@ -496,6 +550,80 @@ def _mandar_fecho(pool, conta_id: int, membro_id: int, nome: str, email: str,
     return r
 
 
+def _push_do_fecho(pool, conta_id: int, membro_id: int, titulo: str, corpo: str) -> bool:
+    """O terceiro canal do fecho. O dono pediu os três em 19/09/2026.
+
+    O fecho nasceu sem push de propósito ("é leitura de fim de dia, não
+    interrupção") — quem decidiu o contrário foi quem recebe. Fica a diferença de
+    tom: o texto é o mesmo, mas o toque leva pra tela da equipe, não pra fila de
+    cobrança de ninguém.
+    """
+    from finance import aviso_log as _al
+    from finance import follow_up as _fu
+    tok = _al.novo_token()
+    try:
+        from finance import cockpit as _ck
+        n = _ck.enviar_push(pool, conta_id, membro_id, titulo, corpo,
+                            _fu.link_da_fila(), token=tok)
+        _al.registrar(pool, conta_id, origem=ORIGEM_FECHO, canal="push",
+                      membro_id=membro_id, assunto=titulo, ok=bool(n),
+                      motivo="" if n else "nenhum aparelho com push",
+                      token=tok if n else "")
+        return bool(n)
+    except Exception as e:  # noqa: BLE001
+        _al.registrar(pool, conta_id, origem=ORIGEM_FECHO, canal="push",
+                      membro_id=membro_id, assunto=titulo, ok=False,
+                      motivo=f"{type(e).__name__}: {e}")
+        return False
+
+
+def _emails_da_conta(pool, conta_id: int) -> list[str]:
+    """Os e-mails de gestão cadastrados na conta — o parâmetro que já existe.
+
+    São os campos do resumo semanal (`resumo_semanal_emails` e
+    `resumo_semanal_dono_emails`, migrações 274 e 276): a lista que a empresa já
+    preencheu com quem acompanha a operação. O dono mandou usá-la aqui em
+    19/09/2026, e o motivo é concreto: o MANOEL, dono da conta 34, é membro sem
+    e-mail — o fecho registrava "membro sem e-mail cadastrado" e ia embora só pelo
+    WhatsApp. O endereço da empresa está cadastrado há semanas, num campo ao lado.
+
+    Um segundo campo dizendo a mesma coisa sairia de sincronia no primeiro ajuste;
+    por isso aqui se LÊ o que existe, em vez de pedir de novo.
+    """
+    try:
+        from finance import resumo_semanal as _rs
+        cfg = _rs.config(pool, conta_id)
+        vistos, fora = set(), []
+        for e in list(cfg.get("emails_dono") or []) + list(cfg.get("emails") or []):
+            e = (e or "").strip().lower()
+            if e and e not in vistos:
+                vistos.add(e)
+                fora.append(e)
+        return fora
+    except Exception:  # noqa: BLE001 — sem o parâmetro, o fecho segue pelos membros
+        _log.warning("esteira: não deu pra ler os e-mails da conta %s", conta_id, exc_info=True)
+        return []
+
+
+def _mandar_fecho_email(pool, conta_id: int, destino: str, titulo: str, corpo: str) -> bool:
+    """O fecho num endereço avulso (o parâmetro da conta), sem membro por trás."""
+    from finance import aviso_log as _al
+    from finance import follow_up as _fu
+    try:
+        from finance import email_sender as es_mail
+        ok = bool(es_mail.enviar_aviso(destino, titulo, corpo,
+                                       link=_fu.link_da_fila(), link_texto="Ver a equipe"))
+        _al.registrar(pool, conta_id, origem=ORIGEM_FECHO, canal="email",
+                      destino=destino, assunto=titulo, ok=ok,
+                      motivo="" if ok else "o envio devolveu falso")
+        return ok
+    except Exception as e:  # noqa: BLE001
+        _al.registrar(pool, conta_id, origem=ORIGEM_FECHO, canal="email",
+                      destino=destino, assunto=titulo, ok=False,
+                      motivo=f"{type(e).__name__}: {e}")
+        return False
+
+
 # ------------------------------------------------------------------ o motor
 
 def avaliar(c, conta_id: int, agora: datetime | None = None) -> dict:
@@ -508,22 +636,35 @@ def avaliar(c, conta_id: int, agora: datetime | None = None) -> dict:
     if cfg.get("esteira_modo") == "off":
         return vazio
     resolvidos = resolver(c, conta_id, agora)
-    novos = entrar(c, conta_id, agora, cfg)
+    # SÓ ENTRA EM DIA DE TRABALHO. Quem entrasse num domingo teria o dia 1 num dia
+    # em que a cobrança não sai — e na segunda já seria dia 2, que não é dia de
+    # cobrança nenhuma. O lead gastaria a primeira das três chances calado.
+    novos = entrar(c, conta_id, agora, cfg) if fr.dentro_da_janela(agora, cfg) else []
     return {"modo": cfg["esteira_modo"], "resolvidos": resolvidos, "entraram": len(novos),
             "cobrancas": cobrancas(c, conta_id, agora, cfg),
             "fechados": fechar_vencidos(c, conta_id, agora, cfg)}
 
 
 def _e_hora_do_aviso(agora: datetime | None, conta_id: int, pool) -> bool:
-    """Um aviso por dia, na abertura da janela — não um por ciclo do poller.
+    """Um aviso por dia, DENTRO do expediente — não um por ciclo do poller.
 
-    A guarda é o próprio registro do envio: se já saiu aviso da esteira pra esta
-    conta hoje, não sai outro. Contador à parte seria um segundo estado pra sair
-    de sincronia com o que de fato foi mandado.
+    São duas guardas, e a segunda faltava:
+
+    1. **Uma vez por dia**, pelo próprio registro do envio: se já saiu aviso da
+       esteira pra esta conta hoje, não sai outro. Contador à parte seria um
+       segundo estado pra sair de sincronia com o que de fato foi mandado.
+    2. **Dentro da janela de atendimento** (08:00–19:00, seg a sáb na Prime). O
+       poller roda de minuto em minuto e o dia da esteira vira à meia-noite de
+       Brasília — sem esta linha, o primeiro ciclo depois da meia-noite mandava a
+       cobrança no WhatsApp do vendedor às 00:0x, inclusive no domingo. Isto aqui
+       é "o aviso da manhã"; a régua já respeitava a mesma janela pelo mesmo
+       motivo, e a esteira nasceu sem herdar.
     """
     agora = agora or datetime.now(timezone.utc)
     try:
         with pool.connection() as c:
+            if not fr.dentro_da_janela(agora, config(c, conta_id)):
+                return False
             r = c.execute(
                 """select count(*) from aviso_envios
                     where conta_id=%s and origem='esteira' and criado_em >= %s""",
@@ -595,6 +736,13 @@ def texto(nome: str, itens: list[dict], resumo_ontem: dict) -> tuple[str, str]:
     linhas.append("")
     linhas.append("Responda pelo WhatsApp da empresa, ou marque como perdido "
                   "escrevendo o motivo.")
+    # O HISTÓRICO É DO VENDEDOR, e ele precisa ouvir isso (dono, 19/09/2026:
+    # "vendedor tem que criar o histórico e é bom notificar ele disso também").
+    # O motivo é o mesmo que o placar do dono carrega: ligação e conversa pessoal
+    # não existem no sistema. Quem resolveu no telefone e não escreveu aparece como
+    # quem não fez nada — e o lead fecha no dia 7 dizendo "sem tratativa".
+    linhas.append("Resolveu por telefone ou pessoalmente? Escreva no histórico do "
+                  "lead — o que não está escrito não conta.")
     return titulo, "\n".join(linhas)
 
 
@@ -636,6 +784,27 @@ def notificar(pool, conta_id: int, cobrancas_hoje: list[dict]) -> None:
                 _al.registrar(pool, conta_id, origem="esteira", canal="whatsapp",
                               membro_id=membro_id, assunto=titulo, n_leads=len(itens),
                               ok=False, motivo="membro sem WhatsApp cadastrado")
+            # O PUSH, o terceiro canal (19/09/2026, pedido do dono: "sempre nos 3
+            # canais"). Vem depois do WhatsApp e antes do e-mail porque é o mais
+            # barato dos três e o único que já chega com o app aberto no bolso —
+            # mas é o que menos prova: `enviar_push` devolve quantos APARELHOS
+            # aceitaram, e zero não é erro, é vendedor sem push instalado. O token
+            # nasce antes do envio porque viaja dentro da notificação: é ele que o
+            # service worker devolve quando o vendedor toca, e é a única prova de
+            # leitura que este canal tem.
+            _tok = _al.novo_token()
+            try:
+                from finance import cockpit as _ck
+                _n = _ck.enviar_push(pool, conta_id, membro_id, titulo, corpo,
+                                     _fu.link_da_fila("atrasado"), token=_tok)
+                _al.registrar(pool, conta_id, origem="esteira", canal="push",
+                              membro_id=membro_id, assunto=titulo, n_leads=len(itens),
+                              ok=bool(_n), motivo="" if _n else "nenhum aparelho com push",
+                              token=_tok if _n else "")
+            except Exception as e:  # noqa: BLE001
+                _al.registrar(pool, conta_id, origem="esteira", canal="push",
+                              membro_id=membro_id, assunto=titulo, n_leads=len(itens),
+                              ok=False, motivo=f"{type(e).__name__}: {e}")
             if email and "@" in email:
                 try:
                     from finance import email_sender as es_mail

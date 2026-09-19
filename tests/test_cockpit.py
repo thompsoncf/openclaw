@@ -376,6 +376,36 @@ def test_polling_da_conversa_bate_com_a_tela(pool):
     assert poll["ia"] == tela["ia"] is True
 
 
+def test_o_carimbo_de_entrega_chega_na_tela(pool):
+    """✓ saiu, ✓✓ chegou, ✓✓ azul foi lido. O banco já guardava (`mensagens.status`)
+    e a tela não mostrava — o vendedor abria o WhatsApp do celular só pra saber se
+    a mensagem tinha chegado."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="tick@x.com")
+        lead = _lead(c, conta, vend, "Carimbo")
+        conv, ids = _conversa_com(c, conta, lead, ["pergunta do cliente"])
+        env = c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto, status) "
+                        "values (%s,'whatsapp','out','humano','resposta','lido') returning id",
+                        (conv,)).fetchone()[0]
+        c.commit()
+
+    tela = ck.lead_do_vendedor(pool, conta, vend, lead)
+    por_id = {m["id"]: m for m in tela["mensagens"]}
+    assert por_id[env]["status"] == "lido"
+    assert por_id[ids[0]]["status"] == "", "a mensagem do cliente não tem carimbo"
+
+    # ...e o carimbo que MUDA depois (entregue → lido) chega pelo polling, mesmo
+    # sem mensagem nova: é uma alteração de status, não uma linha nova
+    poll = ck.mensagens_desde(pool, conta, vend, lead, env)
+    assert poll["mensagens"] == []
+    assert {"id": env, "status": "lido"} in poll["estados"]
+    with pool.connection() as c:
+        c.execute("update mensagens set status='entregue' where id=%s", (env,))
+        c.commit()
+    assert ck.mensagens_desde(pool, conta, vend, lead, env)["estados"] == \
+        [{"id": env, "status": "entregue"}]
+
+
 def test_midia_so_do_lead_do_proprio_vendedor(pool):
     """A rota de mídia decide a posse numa consulta só. Colega, outro lead ou
     mensagem sem mídia: nada."""

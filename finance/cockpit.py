@@ -852,8 +852,8 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
             # Corta pelas últimas e devolve em ordem de leitura.
             rows = c.execute(
                 """select id, direcao, autor, texto, criado_em, midia_tipo, midia_meta,
-                          guardada from (
-                     select id, direcao, autor, texto, criado_em, midia_tipo,
+                          guardada, status from (
+                     select id, direcao, autor, texto, criado_em, midia_tipo, status,
                             -- só quando HÁ ponteiro: é ele que diz pra tela desenhar
                             -- bolha de imagem em vez de texto (migração 187)
                             case when midia_ref is null then null
@@ -865,11 +865,15 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
                        from mensagens
                       where conversa_id=%s order by criado_em desc limit 200
                    ) t order by criado_em asc""", (cv[0],)).fetchall()
-            for mid, d, autor, texto, quando, midia_tipo, midia_meta, guardada in rows:
+            for mid, d, autor, texto, quando, midia_tipo, midia_meta, guardada, status in rows:
                 who = "ia" if autor == "bot" else ("out" if d == "out" else "in")
                 # o id vai junto porque a tela do lead se atualiza sozinha e precisa
                 # saber a partir de onde pedir o que é novo
-                item = {"id": mid, "who": who, "texto": texto or "", "quando": quando}
+                item = {"id": mid, "who": who, "texto": texto or "", "quando": quando,
+                        # ✓ / ✓✓ / ✓✓ azul: o carimbo do WhatsApp, que o banco já
+                        # guardava e a tela não mostrava (só nas NOSSAS mensagens —
+                        # a do cliente chega sem status)
+                        "status": (status or "") if d == "out" else ""}
                 # O PONTEIRO NÃO VAI PRA TELA: só o tipo e o tamanho. O endereço no
                 # CDN e a chave ficam no servidor, e quem busca é a rota de mídia.
                 if midia_tipo and midia_meta is not None:
@@ -938,19 +942,32 @@ def mensagens_desde(pool, conta_id: int, membro_id: int, lead_id: int,
                 """select id, direcao, autor, texto, criado_em, midia_tipo,
                           case when midia_ref is null then null
                                else coalesce(midia_meta, '{}'::jsonb) end,
-                          (midia_arquivo is not null)
+                          (midia_arquivo is not null), status
                      from mensagens
                     where conversa_id=%s and id > %s
                     order by criado_em asc, id asc
                     limit 200""", (conversa_id, int(desde or 0))).fetchall()
-            for mid, d, autor, texto, quando, midia_tipo, midia_meta, guardada in rows:
+            for mid, d, autor, texto, quando, midia_tipo, midia_meta, guardada, status in rows:
                 item = {"id": mid, "who": "ia" if autor == "bot" else ("out" if d == "out" else "in"),
-                        "texto": texto or "", "quando": quando}
+                        "texto": texto or "", "quando": quando,
+                        "status": (status or "") if d == "out" else ""}
                 if midia_tipo and midia_meta is not None:
                     item["midia"] = {"tipo": midia_tipo, **(midia_meta or {}),
                                      "guardada": bool(guardada)}
                 msgs.append(item)
-    return {"ia": ia, "mensagens": msgs}
+        # O ✓ VIRA ✓✓ DEPOIS. O carimbo de entrega e de leitura chega minutos
+        # depois da mensagem, num update — e o polling só pede o que tem id NOVO,
+        # então sem isto o ✓ ficaria congelado até o vendedor recarregar a tela.
+        # As últimas 25 saídas bastam: ninguém acompanha o ✓✓ de ontem.
+        estados = []
+        if conversa_id:
+            estados = [{"id": r[0], "status": r[1] or ""} for r in c.execute(
+                """select id, status from (
+                     select id, status from mensagens
+                      where conversa_id=%s and direcao='out'
+                      order by id desc limit 25) t
+                   order by id""", (conversa_id,)).fetchall()]
+    return {"ia": ia, "mensagens": msgs, "estados": estados}
 
 
 def midia_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,

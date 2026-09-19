@@ -25,6 +25,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# No Windows o console entrega stdin/stdout na codepage local (cp1252), o que
+# corrompe acento/emoji ao pipar arquivo. Força UTF-8 nos três fluxos.
+for _f in (sys.stdin, sys.stdout, sys.stderr):
+    try:
+        _f.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):  # já é UTF-8, ou fluxo sem reconfigure
+        pass
+
 MODELO = os.environ.get("OPENAI_MODEL", "gpt-5.4")
 
 INSTRUCAO = (

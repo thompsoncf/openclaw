@@ -8000,15 +8000,39 @@ def login_form(request: Request):
     return _render("login", request, erro=None, aviso=None)
 
 
+def _ip_req(request: Request) -> str:
+    """IP real do cliente. Atrás do proxy do Render, request.client é o proxy."""
+    xf = (request.headers.get("x-forwarded-for") or "") if request else ""
+    if xf:
+        return xf.split(",")[0].strip()[:60]
+    return ((request.client.host if (request and request.client) else "") or "")[:60]
+
+
 @router.post("/login", response_class=HTMLResponse)
 def login_envia(request: Request, email: str = Form(...), senha: str = Form(...)):
+    # TRAVA DE BRUTE-FORCE (em memória, não toca o banco). A senha provisória da
+    # equipe é curta de propósito — pra ser ditada no WhatsApp —, então quem a
+    # protege é o LIMITE DE TENTATIVAS, não o tamanho dela. A chave é IP+e-mail:
+    # travar só por e-mail deixaria qualquer um derrubar a conta de outra pessoa
+    # errando a senha de fora (lockout viraria DoS).
+    # Vem ANTES do get_pool() de propósito: quem está bloqueado não gasta nem uma
+    # conexão do banco — senão a trava contra brute-force viraria o próprio DoS.
+    from core.rate_limit import LOGIN as _lim
+    _chave = (_ip_req(request), (email or "").strip().casefold())
+    _espera = _lim.segundos_bloqueado(_chave)
+    if _espera:
+        return _render("login", request, aviso=None,
+                       erro=f"Muitas tentativas. Tente de novo em "
+                            f"{max(1, _espera // 60)} min.")
     pool = get_pool()
     # Identidade unificada por e-mail: a pessoa pode ter a conta dela + ser membro
     # de várias empresas. Uma senha, vários contextos.
     from contas import equipe as _equipe
     ctxs = _equipe.contextos_de_login(pool, email, senha)
     if not ctxs:
+        _lim.registrar_falha(_chave)
         return _render("login", request, erro="E-mail ou senha incorretos.", aviso=None)
+    _lim.limpar(_chave)
     request.session["contextos"] = ctxs
     if len(ctxs) > 1:
         # mais de um lugar pra trabalhar — deixa escolher.

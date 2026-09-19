@@ -476,7 +476,12 @@ def test_o_texto_do_fecho_diz_o_que_NAO_enxerga():
          ("PEDRO", {"tratou": 2, "na_esteira": 3})])
     assert titulo == "📋 O dia fechou: 3 tratados, 7 na esteira"
     assert corpo.split("\n")[0] == "· THIAGO — 1 tratados, 4 na esteira", corpo
-    assert "Ligação e conversa pessoal não aparecem" in corpo
+    assert "Ligação e conversa pessoal só aparecem se o vendedor escrever" in corpo
+    # O TEXTO BATE COM A CONTA. Ele dizia que o cliente voltar a falar contava, e
+    # `resumo` nunca somou isso (`tratou` é falou + moveu + fechou). Duas verdades
+    # no mesmo aviso fazem alguém conferir na mão e parar de confiar no número.
+    assert "Cliente que voltou a falar sai da esteira, mas não entra nesta conta" in corpo
+    assert "ou o cliente voltando a falar" not in corpo
     for palavra in ("atenção", "urgente", "relapso", "!"):
         assert palavra not in corpo.lower(), palavra
 

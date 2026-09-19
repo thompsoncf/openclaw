@@ -457,6 +457,13 @@ def fecho_do_dia(pool, conta_id: int, agora: datetime | None = None) -> list[dic
 def texto_fecho(casa: dict, placar: list[tuple[str, dict]]) -> tuple[str, str]:
     """O texto do fecho: o placar da casa, depois por pessoa.
 
+    O TEXTO TEM QUE BATER COM A CONTA. Até 19/09/2026 ele dizia que o cliente voltar
+    a falar contava como tratado — e `resumo` nunca somou isso: `tratou` é
+    falou + moveu + fechou. O 'cliente_voltou' tira o lead da esteira (quem
+    respondeu deixou de ser lead parado), mas não é crédito do vendedor, que é o
+    que a linha do placar mede. Duas verdades no mesmo aviso é o que faz alguém
+    conferir na mão e parar de confiar no número.
+
     FACTUAL E SEM ADJETIVO, de propósito. Ligação por telefone e conversa pessoal
     não aparecem no sistema — se o vendedor resolveu no telefone, o placar vai
     dizer que ele não tratou, e estará errado sobre ele. Um aviso que chama de
@@ -484,8 +491,11 @@ def texto_fecho(casa: dict, placar: list[tuple[str, dict]]) -> tuple[str, str]:
         linhas.append(f"Fechados hoje sem tratativa: {casa['fechados_sem_tratativa']}.")
     linhas.append("")
     linhas.append("Conta como tratado: mensagem nossa (inclusive pelo WhatsApp Web),"
-                  " o card movido à mão, ou o cliente voltando a falar."
-                  " Ligação e conversa pessoal não aparecem aqui.")
+                  " o card movido à mão, ou a venda fechada."
+                  " Cliente que voltou a falar sai da esteira, mas não entra nesta conta"
+                  " — quem respondeu deixou de ser lead parado sozinho."
+                  " Ligação e conversa pessoal só aparecem se o vendedor escrever"
+                  " no histórico do lead.")
     return titulo, "\n".join(linhas)
 
 

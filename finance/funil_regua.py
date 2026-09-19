@@ -226,11 +226,42 @@ def registrar_movimento(c, conta_id: int, lead_id: int, de: str | None, para: st
                  values (%s,%s,%s,%s,%s,%s)""", (conta_id, lead_id, de, para, motivo, membro_id))
 
 
-def _ultimo_manual(c, lead_id: int):
-    r = c.execute("""select criado_em from funil_movimentos
-                      where prospeccao_id=%s and motivo='manual'
-                      order by criado_em desc limit 1""", (lead_id,)).fetchone()
-    return r[0] if r else None
+def _ultimos_manuais(c, ids: list[int]) -> dict:
+    """O último movimento MANUAL de cada lead, numa consulta só (TRAVA 3).
+
+    Era `_ultimo_manual` por lead, dentro do laço: 7,4 MILHÕES de execuções em 100
+    dias (medido em pg_stat_statements, 19/09/2026). Cada uma é rápida; o custo é a
+    ida e volta ao banco vezes o número de leads, a cada 2 minutos, por conta — e
+    ela acontece dentro da transação que segura as linhas de `prospeccao`, que é o
+    que fazia o vendedor esperar pra mudar a etapa de um card.
+    """
+    if not ids:
+        return {}
+    linhas = c.execute(
+        """select prospeccao_id, max(criado_em) from funil_movimentos
+            where motivo='manual' and prospeccao_id = any(%s)
+            group by prospeccao_id""", (list(ids),)).fetchall()
+    return dict(linhas)
+
+
+def _ja_registrados(c, ids: list[int]) -> set:
+    """{(lead, etapa, motivo)} dos saltos que este ciclo já anotou — numa consulta.
+
+    Mesma história do `_ultimos_manuais`: era uma consulta por lead candidato. Sem
+    esta guarda o modo observação reescreveria a mesma linha a cada 2 minutos, para
+    sempre; com ela por lead, o custo crescia com o tamanho da carteira.
+
+    Só os motivos do automático (`gatilho:` e `simulado:`): é o que a guarda
+    pergunta, e trazer 'manual' junto engordaria o retorno à toa.
+    """
+    if not ids:
+        return set()
+    linhas = c.execute(
+        """select prospeccao_id, para, motivo from funil_movimentos
+            where prospeccao_id = any(%s)
+              and (motivo like 'gatilho:%%' or motivo like 'simulado:%%')""",
+        (list(ids),)).fetchall()
+    return {(r[0], r[1], r[2]) for r in linhas}
 
 
 def escolher_etapa(atual_ordem: int, candidatas: list[dict]) -> dict | None:
@@ -439,11 +470,10 @@ def chaves_fechadas(etapas_: list[dict]) -> list[str]:
             if e["fase"] in ("fechamento", "pos") and e["chave"] != "perdido"]
 
 
-def _ja_registrado(c, lead_id: int, para: str, motivo: str) -> bool:
-    return bool(c.execute(
-        """select 1 from funil_movimentos
-            where prospeccao_id=%s and para=%s and motivo=%s limit 1""",
-        (lead_id, para, motivo)).fetchone())
+#: De quantos em quantos leads o gatilho fecha a transação. Irmão do
+#: `follow_up.FU_SINC_LOTE`, e pelo mesmo motivo: é o tempo que uma linha de
+#: `prospeccao` fica travada — ver o comentário dentro do laço.
+GATILHO_LOTE = 20
 
 
 def aplicar_gatilhos(c, conta_id: int) -> dict:
@@ -495,7 +525,14 @@ def aplicar_gatilhos(c, conta_id: int) -> dict:
             where conta_id=%s and estagio='lead' and id = any(%s)""",
         (conta_id, list(candidatos))).fetchall())
 
+    # As duas perguntas do laço, respondidas de uma vez ANTES dele (ver
+    # `_ultimos_manuais` e `_ja_registrados`): o laço não fala mais com o banco
+    # pra decidir nada — só pra gravar o que mudou.
+    manuais = _ultimos_manuais(c, list(atuais))
+    registrados = _ja_registrados(c, list(atuais))
+
     movidos = simulados = 0
+    desde_o_commit = 0
     for lead_id, cands in candidatos.items():
         atual = atuais.get(lead_id)
         if atual is None:                       # saiu do funil entre uma consulta e outra
@@ -504,7 +541,7 @@ def aplicar_gatilhos(c, conta_id: int) -> dict:
         # de quem mexeu no card. Sem isto, o vendedor que puxa um lead de volta pra
         # "Contatado" vê o card saltar pra frente de novo no ciclo seguinte, por
         # causa de um orçamento enviado semana passada.
-        corte = _ultimo_manual(c, lead_id)
+        corte = manuais.get(lead_id)
         if corte:
             cands = [x for x in cands if x["quando"] > corte]
         alvo = escolher_etapa(ordem_de.get(atual, -1), cands)   # TRAVAS 1 e 2
@@ -514,7 +551,7 @@ def aplicar_gatilhos(c, conta_id: int) -> dict:
         # Sem esta guarda o modo observação reescreveria a mesma linha a cada 2
         # minutos, para sempre — e o relatório de "o que teria acontecido" viraria
         # um contador de ciclos do poller.
-        if _ja_registrado(c, lead_id, alvo["chave"], motivo):
+        if (lead_id, alvo["chave"], motivo) in registrados:
             continue
         if modo == "ligado":
             c.execute("""update prospeccao set status=%s, atualizado_em=now()
@@ -523,6 +560,23 @@ def aplicar_gatilhos(c, conta_id: int) -> dict:
         else:
             simulados += 1
         registrar_movimento(c, conta_id, lead_id, atual, alvo["chave"], motivo)
+        # COMMITA DE LOTE EM LOTE, pelo mesmo motivo do `follow_up.sincronizar`
+        # (15/09/2026): o que este número controla é por quanto TEMPO as linhas de
+        # `prospeccao` ficam travadas, e quem esbarra nelas é o vendedor mudando a
+        # etapa pelo app e o WhatsApp de ENTRADA gravando a mensagem do cliente.
+        # Medido antes: `update prospeccao set status` com média de 1,2 s e PIOR
+        # CASO DE 83 SEGUNDOS.
+        #
+        # Commitar no meio é seguro AQUI: cada lead é independente, o salto e a
+        # linha do histórico vão juntos na mesma transação, e a guarda
+        # `_ja_registrados` impede o ciclo seguinte de repetir o que já entrou. Se
+        # a passada morrer na metade, a próxima termina o serviço.
+        desde_o_commit += 1
+        if desde_o_commit >= GATILHO_LOTE:
+            c.commit()
+            desde_o_commit = 0
+    if desde_o_commit:
+        c.commit()
     return {"movidos": movidos, "simulados": simulados}
 
 

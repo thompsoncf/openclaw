@@ -167,6 +167,15 @@ def test_cliente_esperando_nunca_entra(c):
     assert es.entrar(c, CONTA, AGORA) == []
 
 
+def test_so_entra_quem_esta_atrasado(c):
+    """Regra do dono: "os 10 leads é só os que estão atrasados". Dentro do prazo
+    da etapa (7 dias), o lead não deve nada a ninguém."""
+    _com_bola_nossa(c, nome="Dentro do prazo", dias=3)
+    assert es.entrar(c, CONTA, AGORA) == []
+    atrasado = _com_bola_nossa(c, nome="Atrasado", dias=9)
+    assert [n["id"] for n in es.entrar(c, CONTA, AGORA)] == [atrasado]
+
+
 def test_etapa_sem_prazo_nao_entra(c):
     _com_bola_nossa(c, etapa="novo")
     assert es.entrar(c, CONTA, AGORA) == []
@@ -224,21 +233,31 @@ def test_a_temperatura_nao_conta_como_acao(c):
 # ------------------------------------------------------------------ as cobranças
 
 def test_cobra_no_dia_1_3_e_7_e_so_neles(c):
+    """O dia da ENTRADA é o dia 1 — "cobrar os 10 leads do dia" quer dizer hoje."""
     lid = _com_bola_nossa(c)
     es.entrar(c, CONTA, AGORA)
     vistos = []
-    for d in range(0, 9):
-        _entrou_ha(c, lid, d)
+    for corridos in range(0, 9):
+        _entrou_ha(c, lid, corridos)
         vistos.append(bool(es.cobrancas(c, CONTA, AGORA)))
-    assert [i for i, v in enumerate(vistos) if v] == [1, 3, 7]
+    # dias corridos desde a entrada → dia da esteira = corridos + 1
+    assert [i + 1 for i, v in enumerate(vistos) if v] == [1, 3, 7]
+
+
+def test_quem_entrou_hoje_e_cobrado_hoje(c):
+    lid = _com_bola_nossa(c)
+    es.entrar(c, CONTA, AGORA)
+    hoje = es.cobrancas(c, CONTA, AGORA)
+    assert [i["id"] for i in hoje] == [lid]
+    assert hoje[0]["dia"] == 1 and hoje[0]["ultimo_dia"] is False
 
 
 def test_o_dia_7_e_o_ultimo(c):
     lid = _com_bola_nossa(c)
     es.entrar(c, CONTA, AGORA)
-    _entrou_ha(c, lid, 3)
+    _entrou_ha(c, lid, 2)
     assert es.cobrancas(c, CONTA, AGORA)[0]["ultimo_dia"] is False
-    _entrou_ha(c, lid, 7)
+    _entrou_ha(c, lid, 6)
     assert es.cobrancas(c, CONTA, AGORA)[0]["ultimo_dia"] is True
 
 
@@ -252,7 +271,7 @@ def _fim_do_dia(dias_depois=0):
 def test_fecha_no_dia_7_depois_da_janela(c):
     lid = _com_bola_nossa(c)
     es.entrar(c, CONTA, AGORA)
-    _entrou_ha(c, lid, 7)
+    _entrou_ha(c, lid, 6)
     fechados = es.fechar_vencidos(c, CONTA, _fim_do_dia())
     assert len(fechados) == 1
     assert c.execute("select status from prospeccao where id=%s", (lid,)).fetchone()[0] == "perdido"
@@ -270,7 +289,7 @@ def test_nao_fecha_antes_da_janela_terminar(c):
     """O aviso diz 'resolva ou fecha hoje às 19h'. Fechar às 13h seria mentira."""
     lid = _com_bola_nossa(c)
     es.entrar(c, CONTA, AGORA)
-    _entrou_ha(c, lid, 7)
+    _entrou_ha(c, lid, 6)
     assert es.fechar_vencidos(c, CONTA, AGORA) == []
     assert c.execute("select status from prospeccao where id=%s", (lid,)).fetchone()[0] == "contatado"
 
@@ -278,7 +297,7 @@ def test_nao_fecha_antes_da_janela_terminar(c):
 def test_nao_fecha_antes_do_dia_7(c):
     lid = _com_bola_nossa(c)
     es.entrar(c, CONTA, AGORA)
-    _entrou_ha(c, lid, 6)
+    _entrou_ha(c, lid, 5)
     assert es.fechar_vencidos(c, CONTA, _fim_do_dia()) == []
 
 
@@ -286,7 +305,7 @@ def test_observando_cobra_mas_nao_fecha(c):
     c.execute("update funil_regua set esteira_modo='observando' where conta_id=%s", (CONTA,))
     lid = _com_bola_nossa(c)
     es.entrar(c, CONTA, AGORA)
-    _entrou_ha(c, lid, 7)
+    _entrou_ha(c, lid, 6)
     assert es.cobrancas(c, CONTA, AGORA)[0]["ultimo_dia"] is True
     assert es.fechar_vencidos(c, CONTA, _fim_do_dia()) == []
     assert c.execute("select status from prospeccao where id=%s", (lid,)).fetchone()[0] == "contatado"
@@ -295,7 +314,7 @@ def test_observando_cobra_mas_nao_fecha(c):
 def test_quem_agiu_no_ultimo_dia_nao_fecha(c):
     lid = _com_bola_nossa(c)
     es.entrar(c, CONTA, AGORA)
-    _entrou_ha(c, lid, 7)
+    _entrou_ha(c, lid, 6)
     _msg(c, lid, "out", membro=None, quando=_fim_do_dia() - timedelta(hours=2))
     es.resolver(c, CONTA, _fim_do_dia())
     assert es.fechar_vencidos(c, CONTA, _fim_do_dia()) == []
@@ -306,7 +325,7 @@ def test_pessoa_ganha_da_esteira(c):
     """Alguém moveu o card entre a leitura e o fechamento: a esteira se cala."""
     lid = _com_bola_nossa(c)
     es.entrar(c, CONTA, AGORA)
-    _entrou_ha(c, lid, 7)
+    _entrou_ha(c, lid, 6)
     c.execute("update prospeccao set status='proposta' where id=%s", (lid,))
     assert es.fechar_vencidos(c, CONTA, _fim_do_dia()) == []
 

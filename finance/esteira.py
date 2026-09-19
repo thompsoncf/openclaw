@@ -97,6 +97,18 @@ def prazo_final(dias: tuple[int, ...]) -> int:
     return max(dias) if dias else max(DIAS_PADRAO)
 
 
+def dia_da_esteira(entrou: datetime, agora: datetime) -> int:
+    """Em que DIA da esteira este lead está. O dia da entrada é o dia 1.
+
+    Contar a partir de zero seria dizer ao vendedor "seus dez de hoje" e cobrá-lo
+    deles só amanhã — o dono pediu o contrário, com estas palavras: "cobrar os 10
+    leads do dia". Então dia 1 é hoje, dia 3 é depois de amanhã, e o dia 7 (o
+    prazo final) cai seis dias corridos depois da entrada: sete dias contando o
+    primeiro, que é como uma pessoa conta prazo.
+    """
+    return (_dia_br(agora) - _dia_br(entrou)).days + 1
+
+
 # ------------------------------------------------------------------ quem já agiu
 
 def resolver(c, conta_id: int, agora: datetime | None = None) -> int:
@@ -154,13 +166,21 @@ def entrar(c, conta_id: int, agora: datetime | None = None, cfg: dict | None = N
     por_dia = max(0, int(cfg.get("por_dia") or POR_DIA_PADRAO))
     if not por_dia:
         return []
-    etapas = [r[0] for r in c.execute(
-        "select chave from funil_etapas where conta_id=%s and teto_dias is not null and teto_dias > 0",
-        (conta_id,)).fetchall()]
-    if not etapas:
+    # {chave: teto_dias} — a esteira só cobra quem JÁ passou do prazo da etapa.
+    # Regra do dono em 19/09: "os 10 leads é só os que estão atrasados". Um lead
+    # dentro do prazo não está devendo nada; cobrá-lo gastaria a vaga do dia com
+    # quem ainda tem tempo, e ensinaria o vendedor a ignorar a lista.
+    tetos = dict(c.execute(
+        "select chave, teto_dias from funil_etapas "
+        " where conta_id=%s and teto_dias is not null and teto_dias > 0",
+        (conta_id,)).fetchall())
+    if not tetos:
         return []
+    etapas = list(tetos)
     linhas = c.execute(
-        """with ja_hoje as (
+        """with tetos as (
+             select * from unnest(%(etapas)s::text[], %(dias)s::int[]) as t(chave, dias)),
+           ja_hoje as (
              select membro_id, count(*) as n from follow_up_esteira
               where conta_id = %(conta)s and entrou_em >= %(inicio)s group by membro_id),
            fila as (
@@ -174,7 +194,14 @@ def entrar(c, conta_id: int, agora: datetime | None = None, cfg: dict | None = N
                                                            where fm.prospeccao_id = p.id and fm.para = p.status),
                                                          p.criado_em)) as pos
                from prospeccao p
-              where p.conta_id = %(conta)s and p.estagio = 'lead' and p.status = any(%(etapas)s)
+               join tetos t on t.chave = p.status
+              where p.conta_id = %(conta)s and p.estagio = 'lead'
+                -- ATRASADO: já passou do prazo da própria etapa. O relógio é o
+                -- mesmo do teto (`funil_teto`): a entrada na etapa, nunca
+                -- `atualizado_em`, que qualquer automação encosta.
+                and %(agora)s > coalesce((select max(fm.criado_em) from funil_movimentos fm
+                                           where fm.prospeccao_id = p.id and fm.para = p.status),
+                                         p.criado_em) + make_interval(days => t.dias)
                 and not exists (select 1 from follow_up_esteira e
                                  where e.conta_id = %(conta)s and e.prospeccao_id = p.id
                                    and e.resolvido_em is null and e.fechado_em is null)
@@ -189,7 +216,8 @@ def entrar(c, conta_id: int, agora: datetime | None = None, cfg: dict | None = N
              from fila f left join ja_hoje j on j.membro_id is not distinct from f.vendedor_id
             where f.pos <= (%(por_dia)s - coalesce(j.n, 0))
             order by f.vendedor_id, f.pos""",
-        {"conta": conta_id, "etapas": etapas, "por_dia": por_dia,
+        {"conta": conta_id, "etapas": etapas, "dias": [int(tetos[e]) for e in etapas],
+         "por_dia": por_dia, "agora": agora,
          "inicio": _inicio_do_dia(agora)}).fetchall()
     novos = []
     for lead_id, vend, etapa, quem in linhas:
@@ -230,10 +258,9 @@ def cobrancas(c, conta_id: int, agora: datetime | None = None, cfg: dict | None 
              from follow_up_esteira e join prospeccao p on p.id = e.prospeccao_id
             where e.conta_id=%s and e.resolvido_em is null and e.fechado_em is null
             order by e.membro_id, e.entrou_em""", (conta_id,)).fetchall()
-    hoje = _dia_br(agora)
     fora = []
     for eid, lead, membro, entrou, etapa, quem, festa in linhas:
-        d = (hoje - _dia_br(entrou)).days
+        d = dia_da_esteira(entrou, agora)
         if d in dias:
             fora.append({"esteira_id": eid, "id": lead, "membro_id": membro, "quem": quem,
                          "dia": d, "ultimo_dia": d >= final, "etapa": etapa,
@@ -259,7 +286,6 @@ def fechar_vencidos(c, conta_id: int, agora: datetime | None = None,
     if cfg.get("esteira_modo") != "ligado" or not _fim_da_janela(agora, cfg):
         return []
     final = prazo_final(cfg["dias"])
-    hoje = _dia_br(agora)
     linhas = c.execute(
         """select e.id, e.prospeccao_id, e.membro_id, e.entrou_em, e.etapa, p.status,
                   coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'Lead')
@@ -268,7 +294,7 @@ def fechar_vencidos(c, conta_id: int, agora: datetime | None = None,
               and p.status <> 'perdido'""", (conta_id,)).fetchall()
     fechados = []
     for eid, lead, membro, entrou, etapa, status_hoje, quem in linhas:
-        if (hoje - _dia_br(entrou)).days < final:
+        if dia_da_esteira(entrou, agora) < final:
             continue
         # A MÃO DE QUEM MEXEU MANDA. A etapa comparada é a de quando o lead ENTROU
         # na esteira, não a de agora: ler o status atual e compará-lo consigo mesmo

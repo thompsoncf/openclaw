@@ -41,6 +41,12 @@ create table mensagens (id bigserial primary key, conversa_id bigint, canal text
   direcao text, autor text, texto text, provider_sid text, status text,
   midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 create table wa_contatos (id bigserial primary key, conta_id bigint, numero text, nome text);
+-- o registro de aviso (migrações 276 e 284): é ele que guarda o sid do aviso
+-- interno, e é por ele que o MESMO recibo responde "o vendedor leu?"
+create table aviso_envios (id bigserial primary key, conta_id bigint, membro_id bigint,
+  origem text, canal text, destino text, assunto text, n_leads int, ok boolean,
+  motivo text, criado_em timestamptz not null default now(),
+  sid text, token text, entregue_em timestamptz, lido_em timestamptz, clicado_em timestamptz);
 create table canais_config (
   id bigserial primary key, conta_id bigint, canal text, identificador text,
   ativo boolean not null default true, token text, provedor text not null default 'twilio',
@@ -226,6 +232,82 @@ def test_status_atualiza_conta_no_qr(pool):
         st = c.execute("""select m.status from mensagens m join conversas cv
                             on cv.id=m.conversa_id where cv.conta_id=%s""", (conta,)).fetchone()[0]
     assert st == "lido"
+
+
+def test_o_recibo_do_QR_carimba_TAMBEM_o_aviso_interno(pool):
+    """O defeito que a produção mostrou em 19/09/2026, no primeiro ciclo com o
+    WhatsApp ligado: os quatro avisos saíram, os quatro recibos chegaram, a tabela
+    `mensagens` subiu pra entregue/lido — e `aviso_envios` ficou com tudo em branco.
+
+    A causa: o carimbo do aviso tinha sido posto em `aplicar_status_wa`, que é o
+    caminho do Twilio e do Cloud API. O QR — que é o provedor de TODAS as contas
+    hoje — tem o seu próprio UPDATE aqui dentro e nunca passou por lá. A medição
+    inteira do card dependia de um caminho que nenhuma conta usa."""
+    conta = _conta_com_historico(pool, "QR recibo do aviso", "qr")
+    with pool.connection() as c:
+        c.execute("""update mensagens m set provider_sid='AVISO1'
+                       from conversas cv where cv.id=m.conversa_id and cv.conta_id=%s""",
+                  (conta,))
+        c.execute("""insert into aviso_envios (conta_id, membro_id, origem, canal, ok, sid)
+                     values (%s, 7, 'follow_up', 'whatsapp', true, 'AVISO1')""", (conta,))
+        c.commit()
+
+    asyncio.run(pp.webhook_wa_qr_status(
+        _FakeRequest({"conta_id": conta, "itens": [{"id": "AVISO1", "status": "entregue"}]})))
+    with pool.connection() as c:
+        r = c.execute("select entregue_em, lido_em from aviso_envios where sid='AVISO1'").fetchone()
+    assert r[0] is not None and r[1] is None, "o recibo do QR não carimbou o aviso"
+
+    asyncio.run(pp.webhook_wa_qr_status(
+        _FakeRequest({"conta_id": conta, "itens": [{"id": "AVISO1", "status": "lido"}]})))
+    with pool.connection() as c:
+        r2 = c.execute("select entregue_em, lido_em from aviso_envios where sid='AVISO1'").fetchone()
+    assert r2[1] is not None and r2[0] == r[0], "a leitura chegou e reescreveu a entrega"
+
+
+def test_o_recibo_do_QR_nao_regride_no_aviso(pool):
+    """Recibo fora de ordem é regra, não exceção: o 'entregue' atrasado não pode
+    apagar o 'lido' que já chegou."""
+    conta = _conta_com_historico(pool, "QR recibo fora de ordem", "qr")
+    with pool.connection() as c:
+        c.execute("""update mensagens m set provider_sid='AVISO2'
+                       from conversas cv where cv.id=m.conversa_id and cv.conta_id=%s""",
+                  (conta,))
+        c.execute("""insert into aviso_envios (conta_id, membro_id, origem, canal, ok, sid)
+                     values (%s, 7, 'follow_up', 'whatsapp', true, 'AVISO2')""", (conta,))
+        c.commit()
+    asyncio.run(pp.webhook_wa_qr_status(
+        _FakeRequest({"conta_id": conta, "itens": [{"id": "AVISO2", "status": "lido"}]})))
+    with pool.connection() as c:
+        antes = c.execute("select lido_em from aviso_envios where sid='AVISO2'").fetchone()[0]
+    asyncio.run(pp.webhook_wa_qr_status(
+        _FakeRequest({"conta_id": conta, "itens": [{"id": "AVISO2", "status": "entregue"}]})))
+    with pool.connection() as c:
+        depois = c.execute("select lido_em from aviso_envios where sid='AVISO2'").fetchone()[0]
+    assert depois == antes
+
+
+def test_o_recibo_do_cliente_sobrevive_a_base_sem_aviso_envios(pool):
+    """Deploy em que o código sobe antes da migração: sem savepoint, o erro abortaria
+    a transação inteira e o recibo do CLIENTE morreria junto."""
+    conta = _conta_com_historico(pool, "QR sem a tabela", "qr")
+    with pool.connection() as c:
+        c.execute("""update mensagens m set provider_sid='MSG3'
+                       from conversas cv where cv.id=m.conversa_id and cv.conta_id=%s""",
+                  (conta,))
+        c.execute("alter table aviso_envios rename to aviso_envios_guardada")
+        c.commit()
+    try:
+        asyncio.run(pp.webhook_wa_qr_status(
+            _FakeRequest({"conta_id": conta, "itens": [{"id": "MSG3", "status": "lido"}]})))
+        with pool.connection() as c:
+            st = c.execute("""select m.status from mensagens m join conversas cv
+                                on cv.id=m.conversa_id where cv.conta_id=%s""", (conta,)).fetchone()[0]
+        assert st == "lido"
+    finally:
+        with pool.connection() as c:
+            c.execute("alter table aviso_envios_guardada rename to aviso_envios")
+            c.commit()
 
 
 def test_audio_so_transcreve_em_conta_no_qr(pool, monkeypatch):

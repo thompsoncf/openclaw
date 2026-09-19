@@ -54,6 +54,8 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text, direcao text,
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now(),
+  -- o carimbo de entrega ('enviado' → 'entregue' → 'lido'), que vira o ✓✓ da bolha
+  status text,
   midia_ref jsonb, midia_tipo text, midia_meta jsonb, midia_arquivo text, midia_guardada_em timestamptz, midia_guardada_por bigint);
 -- o histórico do funil (migração 177). Faltava aqui, e a falta ESCONDIA o defeito:
 -- `_historico` é best-effort de propósito (savepoint + except), então sem a tabela

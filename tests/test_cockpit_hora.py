@@ -77,7 +77,8 @@ def test_a_hora_aparece_nas_DUAS_cargas():
     depois (ou o contrário) — e ninguém entende por quê."""
     fonte = inspect.getsource(pc)
     assert "<span class=hora>" in fonte, "primeira carga (servidor)"
-    assert "'<span class=hora>'+txt(m.hora)+'</span>'" in fonte, "polling (JS)"
+    # desde 19/09/2026 o carimbo de entrega (✓ / ✓✓) vai colado na hora, nas duas
+    assert "'<span class=hora>'+txt(m.hora)+tk(m.status)+'</span>'" in fonte, "polling (JS)"
 
 
 def test_a_tarja_aparece_nas_DUAS_cargas():
@@ -108,7 +109,7 @@ def test_a_hora_nao_atropela_o_texto_nem_a_midia():
     fonte = inspect.getsource(pc._lead_vendedor)
     i = fonte.index("{rot}{_midia_html(lead_id, m)}")
     assert "{esc(m['texto'])}{selo}" in fonte[i:i + 120]
-    assert 'selo = f"<span class=hora>' in fonte
+    assert 'selo = (f"<span class=hora>' in fonte
     assert 'if hora else ""' in fonte, "sem data, sem selo — e a bolha fica como era"
 
 

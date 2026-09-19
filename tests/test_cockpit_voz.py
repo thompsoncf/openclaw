@@ -220,7 +220,11 @@ def test_o_texto_transcrito_entra_embaixo_da_marca(pool, envios, monkeypatch):
     import core.transcribe as tr
     monkeypatch.setattr(tr, "transcritor_se_configurado", lambda: _Tr())
     r = ck.enviar_audio(pool, CONTA_QR, 7, LEAD, WEBM, "audio/webm", 8)
-    assert r["texto"] == "bom dia, fechei o salão pro dia 12"
+    # O ÁUDIO SAI PRIMEIRO. A bolha nasce só com a marca, e a transcrição alcança
+    # depois: a rota chama `transcrever_audio` DEPOIS de responder ao vendedor,
+    # senão ele ficaria olhando a barra enquanto o servidor fala com o STT.
+    assert _msgs(pool)[0][3] == "🎤 Áudio (0:08)"
+    assert ck.transcrever_audio(pool, **r["_pendente"]) == "bom dia, fechei o salão pro dia 12"
     assert _msgs(pool)[0][3] == "🎤 Áudio (0:08)\nbom dia, fechei o salão pro dia 12"
 
 
@@ -233,6 +237,7 @@ def test_o_stt_caindo_nao_impede_o_envio(pool, envios, monkeypatch):
     monkeypatch.setattr(tr, "transcritor_se_configurado", lambda: _Tr())
     r = ck.enviar_audio(pool, CONTA_QR, 7, LEAD, WEBM, "audio/webm", 8)
     assert r["ok"] and len(envios) == 1
+    assert ck.transcrever_audio(pool, **r["_pendente"]) == ""      # o STT caiu
     assert _msgs(pool)[0][3] == "🎤 Áudio (0:08)"
 
 
@@ -246,7 +251,8 @@ def test_a_transcricao_le_o_audio_CONVERTIDO(pool, envios, monkeypatch):
             return "oi"
     import core.transcribe as tr
     monkeypatch.setattr(tr, "transcritor_se_configurado", lambda: _Tr())
-    ck.enviar_audio(pool, CONTA_QR, 7, LEAD, WEBM, "audio/webm", 8)
+    r = ck.enviar_audio(pool, CONTA_QR, 7, LEAD, WEBM, "audio/webm", 8)
+    ck.transcrever_audio(pool, **r["_pendente"])
     assert visto["bytes"][:4] == b"OggS" and visto["bytes"] is envios[0]["bytes"]
 
 

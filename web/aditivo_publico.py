@@ -121,7 +121,10 @@ def aditivo_publico(request: Request, token: str, erro: str = ""):
     try:
         d = carregar(token)
     except Exception:  # noqa: BLE001
-        _log.warning("não deu pra montar o aditivo do token %s", token, exc_info=True)
+        # só o PREFIXO: o token cru é a credencial do link público — quem lesse o
+        # log entraria no aditivo. 6 chars bastam pra casar com a requisição.
+        _log.warning("não deu pra montar o aditivo do token %s…",
+                     (token or "")[:6], exc_info=True)
         d = None
     html = _env.get_template(_TPL_NOME).render(d=d, token=token, erro=erro)
     return HTMLResponse(html, status_code=200 if d else 404)

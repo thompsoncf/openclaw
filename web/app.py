@@ -131,9 +131,36 @@ from web.proposta import router as proposta_router
 # o contrato tem página e link PRÓPRIOS (/contrato/<token>) — não é bloco da folha
 from web.contrato_publico import router as contrato_pub_router
 from web.aditivo_publico import router as aditivo_pub_router
+def _segredo_sessao() -> str:
+    """O segredo que ASSINA a sessão — e a sessão carrega o conta_id.
+
+    Quem conhece o segredo forja o cookie, escreve qualquer conta_id e entra em
+    QUALQUER conta: é a chave do isolamento entre clientes. Por isso, em produção
+    não existe fallback — melhor o deploy falhar alto e visível do que o app subir
+    calado assinando sessão com uma string que está publicada neste repositório.
+
+    Fora de produção o default de sempre continua, de propósito: o ambiente local
+    e a suíte dependem dele (tests/test_novidades_tela.py assina um cookie válido
+    com esta mesma string). Chave conhecida na máquina do dev é inofensiva; no
+    Render seria o fim do multi-tenant.
+    """
+    s = (os.environ.get("PORTAL_SECRET") or "").strip()
+    if os.environ.get("RENDER") and len(s) < 32:   # RENDER: injetado pela plataforma
+        raise RuntimeError(
+            "PORTAL_SECRET ausente ou fraco (<32 chars) em produção. A sessão "
+            "assina o conta_id — sem segredo forte, qualquer um forja o cookie e "
+            "entra em qualquer conta. Defina PORTAL_SECRET no Render "
+            "(python -c \"import secrets; print(secrets.token_urlsafe(32))\")."
+        )
+    if not s:
+        log.warning("PORTAL_SECRET não definido — usando o default de DEV. "
+                    "Isto nunca pode acontecer em produção.")
+    return s or "troque-isto-em-producao"
+
+
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.environ.get("PORTAL_SECRET", "troque-isto-em-producao"),
+    secret_key=_segredo_sessao(),
     same_site="lax",
     https_only=os.environ.get("PORTAL_COOKIE_SECURE", "1") == "1",
     max_age=60 * 60 * 24 * 7,
@@ -144,6 +171,30 @@ app.add_middleware(
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
 )
+
+
+@app.middleware("http")
+async def _cabecalhos_seguranca(request: Request, call_next):
+    """Fecha brechas do NAVEGADOR. Não muda nada do que o app faz.
+
+    SEM Content-Security-Policy de propósito: as telas montam HTML com <script>
+    (105), <style> (81) e onclick (429) INLINE. Uma CSP restritiva derrubaria o
+    painel inteiro; fazer CSP direito aqui exige tirar o inline do front antes, e
+    o primeiro passo honesto é subir em Report-Only pra medir o estrago. Fica
+    pra uma leva própria.
+
+    HSTS só quando PORTAL_COOKIE_SECURE=1 (o mesmo sinal de "isto é HTTPS"), e
+    SEM includeSubDomains: um subdomínio que ainda fale HTTP ficaria inacessível,
+    e o navegador guarda essa ordem por um ano.
+    """
+    resp = await call_next(request)
+    # setdefault: se alguma rota já definiu o seu, não atropela
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if os.environ.get("PORTAL_COOKIE_SECURE", "1") == "1":
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return resp
 # ESTÁTICOS PRIMEIRO: rota curta e sem sessão, e nenhum outro router tem
 # /estatico/*. Serve o CSS e o JS que saíram de dentro das páginas (ver
 # web/estaticos.py) — é o que faz o navegador parar de rebaixar 76 KB a cada

@@ -204,9 +204,15 @@ body{margin:0;min-height:100vh;font-family:var(--body);
    375px e encostava nas duas bordas, com o canto de 14px arredondando contra a
    moldura da tela. `min()` desconta a margem ANTES de medir a largura, e o
    `auto` centraliza sem depender do alinhamento do pai. */
-.card{width:min(430px,100% - 2rem);background:var(--card);border:1px solid var(--borda);
- border-radius:14px;padding:2rem;margin:1.5rem auto;box-sizing:border-box}
-.card.larga{width:min(720px,100% - 2rem)}
+.card{width:100%;max-width:min(430px,100% - 2rem);background:var(--card);
+ border:1px solid var(--borda);border-radius:14px;padding:2rem;margin:1.5rem auto;
+ box-sizing:border-box}
+/* O teto continua em 720px — `.card.larga` é usado por Equipe, Fornecedor,
+   Portal e outras, e alargar aqui estragaria oito telas (tests/
+   test_relatorios_largura.py guarda exatamente isso). A media query só DEVOLVE
+   a margem lateral em tela estreita: nunca passa dos 720. */
+.card.larga{max-width:720px}
+@media (max-width:760px){.card.larga{max-width:calc(100% - 2rem)}}
 h1{font-size:1.35rem;font-weight:500;margin:0 0 1.2rem}
 label{display:block;font-size:.85rem;color:var(--txt-mut);margin:.9rem 0 .3rem}
 /* 48px de altura: o mínimo de alvo de toque. Os campos tinham 40px e o botão

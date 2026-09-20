@@ -714,7 +714,7 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
    segura o toque repetido, nunca o `disabled`, que tiraria o name/value do
    botão do envio do form.
    O `.front` do card fica DE FORA: ele precisa de `pan-y` pro deslize. */
-button,.btn,.act,.tabs a,.pil,.opt,.fab,.lead,.linha,.acoes a{touch-action:manipulation}
+button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulation}
 .ocupado{opacity:.62;pointer-events:none}
 .act.ocupado{opacity:.5}
 .aviso{margin:.2rem 0;padding:.55rem .7rem;border-radius:11px;font-size:.78rem;text-align:center;
@@ -1034,7 +1034,7 @@ button,.btn,.act,.tabs a,.pil,.opt,.fab,.lead,.linha,.acoes a{touch-action:manip
 .fab{position:fixed;right:16px;bottom:84px;z-index:40;width:52px;height:52px;
   border-radius:50%;background:var(--neon);color:#04150c;display:flex;align-items:center;
   justify-content:center;font-size:1.7rem;font-weight:400;line-height:1;text-decoration:none;
-  box-shadow:0 6px 20px rgba(0,0,0,.45)}
+  box-shadow:0 6px 20px rgba(0,0,0,.45);touch-action:manipulation}
 .fab:active{transform:scale(.94)}
 .toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%) translateY(12px);z-index:60;
   background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:.5rem .95rem;

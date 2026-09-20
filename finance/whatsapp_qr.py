@@ -143,7 +143,12 @@ def enviar_audio(conta_id: int, numero: str, dados: bytes, mimetype: str,
         avaliar_falha_provedor(e, servico="WhatsApp (QR)", canal="whatsapp")
         return {"ok": False, "erro": str(e)[:180]}
     if resp.get("ok"):
-        return {"ok": True, "sid": resp.get("id") or ""}
+        # `midia` é o PONTEIRO do áudio que acabou de subir (20/09/2026). Sem
+        # repassar aqui, ele morria neste return e a bolha voltava a ser só
+        # "🎤 Áudio (0:08)" escrito depois de recarregar a tela — foi exatamente
+        # o que o banco mostrou nos primeiros envios: entrada com ponteiro, saída
+        # sem. Serviço antigo devolve None, e aí a mensagem sai como sempre saiu.
+        return {"ok": True, "sid": resp.get("id") or "", "midia": resp.get("midia")}
     return {"ok": False, "erro": resp.get("erro") or "falha"}
 
 

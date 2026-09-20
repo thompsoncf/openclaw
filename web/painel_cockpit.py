@@ -872,6 +872,12 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   border-radius:18px 18px 0 0;padding:.6rem .9rem 1rem;
   padding-bottom:calc(1rem + var(--fundo-seguro));max-height:76%;
   display:flex;flex-direction:column;gap:.5rem}
+/* SEM ISTO A FOLHA NUNCA FECHA. O atributo `hidden` esconde pelo estilo do
+   navegador (display:none), e QUALQUER `display` escrito aqui ganha dele — a
+   folha nasceu aberta por cima da caixa de mensagem, o ✕ não fechava nada e o
+   vendedor digitava na busca achando que era o campo de responder (20/09/2026).
+   A `.lupa` e a `.abertura` já carregavam esta mesma linha; foi esquecê-la. */
+.resp[hidden],.respfundo[hidden]{display:none}
 .resphdr{display:flex;align-items:center;justify-content:space-between}
 .resphdr b{font-family:var(--display);font-size:.95rem}
 .respfecha{background:none;border:0;color:var(--text-dim);font-size:1rem;cursor:pointer}
@@ -4984,12 +4990,32 @@ _RAPIDAS_JS = r"""
   var itens=null, podeEquipe=false, carregando=false, deBarra=false;
 
   function esc(s){var e=document.createElement("div");e.textContent=s||"";return e.innerHTML;}
+  // O botão de salvar mostra O QUE vai ser salvo, e fica apagado quando a caixa
+  // está vazia. Com a folha por cima da conversa, o vendedor não vê mais o que
+  // escreveu — um botão que só responde com um aviso é um botão que mente.
+  function acertarSalvar(){
+    var s=document.getElementById("respsalvar");
+    if(!s) return;
+    var txt=(caixa.value||"").trim();
+    s.disabled=!txt;
+    s.textContent = txt ? ('Salvar: “' + (txt.length>38?txt.slice(0,38)+"…":txt) + '”')
+                        : "Escreva na caixa pra salvar";
+  }
   function abrir(filtro){
     folha.hidden=false; document.body.classList.add("com-resp");
+    var fundo0=document.getElementById("respfundo");
+    if(fundo0) fundo0.hidden=false;
     if(busca){ busca.value=filtro||""; }
+    acertarSalvar();
     carregar().then(function(){ pintar(filtro||""); if(busca&&!filtro) busca.focus(); });
   }
-  function fechar(){ folha.hidden=true; document.body.classList.remove("com-resp"); deBarra=false; }
+  function fechar(){
+    folha.hidden=true;
+    var fundo0=document.getElementById("respfundo");
+    if(fundo0) fundo0.hidden=true;
+    document.body.classList.remove("com-resp"); deBarra=false;
+    caixa.focus();                       // devolve o teclado pra caixa de responder
+  }
   function carregar(){
     if(itens||carregando) return Promise.resolve();
     carregando=true;
@@ -5059,6 +5085,7 @@ _RAPIDAS_JS = r"""
   // A BARRA. Digitar "/" no fim do que está escrito abre a lista já filtrada —
   // é o atalho de quem tem as mãos no teclado e não quer procurar botão.
   caixa.addEventListener("input",function(){
+    acertarSalvar();
     var v=caixa.value||"", m=v.match(/(?:^|\s)\/([^\/\s][^\/]*)?$/);
     if(m){ deBarra=true; abrir((m[1]||"").trim()); }
     else if(deBarra && folha.hidden===false){ fechar(); }
@@ -5068,7 +5095,7 @@ _RAPIDAS_JS = r"""
   var salvar=document.getElementById("respsalvar");
   if(salvar) salvar.addEventListener("click",function(){
     var txt=(caixa.value||"").trim();
-    if(!txt){ alert("Escreva a mensagem na caixa e toque em salvar."); return; }
+    if(!txt) return;                      // o botão já nasce apagado sem texto
     var corpo=new URLSearchParams();
     corpo.set("texto", txt);
     var eq=document.getElementById("respequipe");
@@ -5077,12 +5104,11 @@ _RAPIDAS_JS = r"""
     zapFetch(BASE.replace(/\/lead.*$/,"")+"/respostas",
       {method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded","x-cockpit":"1"},
        body:corpo}).then(function(j){
-      salvar.disabled=false;
-      if(!j){ return; }                       // o zapFetch já avisou
-      if(!j.ok){ alert(j.erro||"Não deu pra salvar."); return; }
+      if(!j){ acertarSalvar(); return; }      // o zapFetch já avisou
+      if(!j.ok){ acertarSalvar(); alert(j.erro||"Não deu pra salvar."); return; }
       itens=null;                       // recarrega com a nova no lugar certo
-      carregar().then(function(){ pintar(busca?busca.value:""); });
-    }).catch(function(){ salvar.disabled=false; alert("Falha de conexão."); });
+      carregar().then(function(){ pintar(busca?busca.value:""); acertarSalvar(); });
+    }).catch(function(){ acertarSalvar(); alert("Falha de conexão."); });
   });
 })();
 </script>"""
@@ -5781,10 +5807,16 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
             "<div class=resp id=resp hidden>"
             "<div class=resphdr><b>Respostas rápidas</b>"
             "<button type=button class=respfecha id=respfecha aria-label=Fechar>✕</button></div>"
-            f"<input class=respbusca id=respbusca placeholder='Procurar…' autocomplete=off>"
+            # "Procurar nas respostas" e não "Procurar…": com a folha por cima da
+            # conversa, um campo vazio no topo é lido como a caixa de responder —
+            # foi o que aconteceu no primeiro teste.
+            f"<input class=respbusca id=respbusca placeholder='🔎 Procurar nas respostas' autocomplete=off>"
             "<div class=resplista id=resplista></div>"
             "<div class=resppe>"
-            "<button type=button class='btn ghost' id=respsalvar>Salvar o que está escrito</button>"
+            # nasce DESLIGADO e o JS acende quando há texto na caixa: o botão que
+            # só responde com um aviso ("escreva a mensagem") é um botão que mente
+            "<button type=button class='btn ghost' id=respsalvar disabled>"
+            "Escreva na caixa pra salvar</button>"
             + ("<label class=respeq><input type=checkbox id=respequipe> pra equipe inteira</label>"
                if _manda_na_conta(request) else "")
             + "</div></div>")

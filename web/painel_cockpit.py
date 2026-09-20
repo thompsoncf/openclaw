@@ -706,6 +706,27 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   .tabs .ic{transition:none}
   .girando{animation-duration:1.6s}
 }
+/* VELOCIDADE: onde o tempo de cada tela foi parar. A barra é a soma de três
+   pedaços que se explicam sozinhos — servidor, rede e aparelho —, e a cor do
+   número é o veredito: verde abre rápido, âmbar incomoda, coral o vendedor
+   toca de novo achando que travou. */
+.velnum{font-family:var(--display);font-size:1.9rem;font-weight:700;line-height:1}
+.velnum.bom{color:var(--neon)}
+.velnum.meio{color:var(--ambar)}
+.velnum.ruim{color:var(--coral)}
+.velbar{display:flex;height:7px;border-radius:99px;overflow:hidden;background:var(--bg-2);margin:.5rem 0 .3rem}
+.velbar i{display:block;height:100%}
+.velbar .sv{background:var(--neon)}
+.velbar .rd{background:var(--ambar)}
+.velbar .ap{background:var(--roxo)}
+.vellg{display:flex;flex-wrap:wrap;gap:.1rem .9rem;font-size:.72rem;color:var(--text-dim)}
+.vellg b{color:var(--text);font-weight:600}
+.veltela{display:flex;align-items:center;gap:.7rem;padding:.55rem 0;border-bottom:1px solid var(--line)}
+.veltela:last-child{border-bottom:0}
+.veltela .nm{flex:1;min-width:0;font-size:.8rem;overflow-wrap:anywhere}
+.veltela .nm small{display:block;color:var(--text-faint);font-size:.68rem}
+.veltela .tp{text-align:right;font-family:var(--display);font-weight:700;font-size:.95rem}
+.veltela .tp small{display:block;font-weight:400;font-size:.66rem;color:var(--text-faint)}
 /* O TOQUE RESPONDE NO PRIMEIRO TOQUE (20/09/2026).
    O vendedor tocava, nada acontecia por ~1 s e ele tocava de novo — e o segundo
    toque cancelava a navegação do primeiro, deixando o app mais lento ainda.
@@ -1534,6 +1555,29 @@ _ESPERA_JS = r"""(function(){
 
   // voltar pelo histórico devolve a página do cache com o Z congelado e o botão
   // ainda apagado da ida
+  // QUANTO DEMOROU, DO LADO DE CÁ. O servidor já se cronometra e manda o número
+  // no `Server-Timing`; aqui o aparelho lê esse cabeçalho, soma o que ELE gastou
+  // (conexão, viagem, desenho) e devolve uma linha só. Ver finance/velocidade.py.
+  // `load` + sendBeacon: nada disso concorre com a tela abrindo.
+  window.addEventListener('load',function(){setTimeout(function(){try{
+    var n=performance.getEntriesByType&&performance.getEntriesByType('navigation')[0];
+    if(!n||!navigator.sendBeacon)return;
+    var srv=0,bco=0,cons=0,st=n.serverTiming||[];
+    for(var i=0;i<st.length;i++){
+      if(st[i].name==='total')srv=st[i].duration;
+      else if(st[i].name==='banco'){bco=st[i].duration;cons=parseInt(st[i].description,10)||0;}
+    }
+    var d={tela:location.pathname,servidor:Math.round(srv),banco:Math.round(bco),consultas:cons,
+      conexao:Math.round(n.connectEnd-n.domainLookupStart),
+      // o que sobra do 1o byte depois de tirar o servidor é a viagem
+      espera:Math.round(Math.max(0,(n.responseStart-n.requestStart)-srv)),
+      render:Math.round(n.domContentLoadedEventEnd-n.responseEnd),
+      total:Math.round(n.domContentLoadedEventEnd-n.startTime),
+      rede:(navigator.connection&&navigator.connection.effectiveType)||''};
+    navigator.sendBeacon((window.CKBASE||'/cockpit')+'/tempo',
+      new Blob([JSON.stringify(d)],{type:'application/json'}));
+  }catch(_){}},0);});
+
   window.addEventListener('pageshow',function(){
     para();
     var oc=document.querySelectorAll('.ocupado');
@@ -4982,6 +5026,8 @@ def _perfil_dono(conta_id: int, membro_id: int | None) -> HTMLResponse:
              + "<div class=eyebrow>Atalhos</div><div class=bloco>"
              + "<a class='btn ghost' style='margin-bottom:.5rem' href='/painel/equipe'>Gerir a equipe no painel</a>"
              + "<a class='btn ghost' style='margin-bottom:.5rem' href='/painel/prospeccao'>Abrir o funil completo</a>"
+             # a pergunta "por que o app está lento" agora tem onde ser respondida
+             + f"<a class='btn ghost' style='margin-bottom:.5rem' href='{_BASE}/velocidade'>Velocidade do app</a>"
              + minha_caixa + "</div>"
              + f"<div class=bloco><a class='btn ghost' href='/cockpit/sair'>{_ic('sair', 'ic p')} Sair</a></div>"
              + "</div>" + _abas_dono("perfil"))
@@ -7134,6 +7180,125 @@ def cockpit_fila_fragmento(request: Request, entrou: str = "", fora: str | None 
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     return _fila(request, sess[0], sess[1], gestor=bool(_gerencia(request)),
                  entrou=entrou, fora=fora, q=q, ordem=ordem, fragmento=True)
+
+
+@router.post("/cockpit/tempo")
+def cockpit_tempo(request: Request, dados: dict = Body(default=None)):
+    """O aparelho devolvendo quanto a tela demorou pra ele (ver finance/velocidade).
+
+    Chega por `sendBeacon`, que é disparado e esquecido: ninguém lê a resposta, e
+    por isso nada aqui pode custar caro nem falar alto. Sem sessão, some calado —
+    é telemetria, não um pedido do vendedor.
+    """
+    sess = _sessao(request)
+    if sess:
+        conta_id, membro_id = sess[0], sess[1]
+    else:
+        g = _gerencia(request)
+        if not g:
+            # 204 SEM corpo: `sendBeacon` não lê resposta nenhuma, e 204 com
+            # conteúdo é resposta inválida
+            return Response(status_code=204)
+        conta_id, membro_id = g[0], g[1]
+    try:
+        from finance import velocidade as _vel
+        _vel.gravar(get_pool(), conta_id, membro_id, dados or {})
+    except Exception:  # noqa: BLE001 - medir não pode derrubar tela de ninguém
+        _log.exception("tempo_tela")
+    return JSONResponse({"ok": True})
+
+
+def _vel_cor(ms: int) -> str:
+    from finance import velocidade as _vel
+    return "bom" if ms <= _vel.BOM_MS else ("meio" if ms < _vel.RUIM_MS else "ruim")
+
+
+@router.get("/cockpit/velocidade", response_class=HTMLResponse)
+def cockpit_velocidade(request: Request, dias: int = 7):
+    """O que o app demora, do jeito que o celular sentiu (migração 302).
+
+    É a tela do DONO: a pergunta "por que está lento" é de quem decide o que
+    otimizar, e a resposta só serve se vier quebrada — servidor, rede e aparelho
+    são três culpados diferentes, com três consertos diferentes.
+
+    A régua é a MEDIANA, nunca a média: uma tela que abre em 300 ms noventa vezes
+    e em 9 s uma vez tem média de 387 ms — e é a de 9 s que faz o vendedor tocar
+    de novo.
+    """
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    from finance import velocidade as _vel
+    dias = dias if dias in (1, 7, 30) else 7
+    pool = get_pool()
+    res = _vel.resumo(pool, g[0], dias)
+    telas = _vel.por_tela(pool, g[0], dias)
+    marca = _marca_conta(g[0])
+
+    def _aba(d, rot):
+        on = " on" if d == dias else ""
+        return f"<a class='opt{on}' href='{_BASE}/velocidade?dias={d}'>{rot}</a>"
+    periodo = ("<div class=ordem>" + _aba(1, "Hoje") + _aba(7, "7 dias")
+               + _aba(30, "30 dias") + "</div>")
+
+    if not res["n"]:
+        corpo = (_hdr("Velocidade", "sem medida ainda", inicial=marca["iniciais"],
+                      href_inicial=f"{_BASE}/perfil")
+                 + periodo
+                 + "<div class=scroll><div class=bloco><div class=card>"
+                 + "<b style='font-size:.9rem'>Nada medido neste período</b>"
+                 + "<p class=mut style='font-size:.78rem;margin:.4rem 0 0'>Cada tela aberta no "
+                   "app manda o próprio tempo quando termina de abrir. Use o app alguns "
+                   "minutos e volte aqui.</p></div></div></div>"
+                 + _abas_dono("perfil"))
+        return _page("Velocidade", corpo)
+
+    barra = (f"<div class=velbar><i class=sv style='width:{res['pct_servidor']}%'></i>"
+             f"<i class=rd style='width:{res['pct_rede']}%'></i>"
+             f"<i class=ap style='width:{res['pct_render']}%'></i></div>"
+             f"<div class=vellg><span><b>{res['pct_servidor']}%</b> servidor</span>"
+             f"<span><b>{res['pct_rede']}%</b> rede</span>"
+             f"<span><b>{res['pct_render']}%</b> aparelho</span></div>")
+
+    topo = ("<div class=bloco><div class=card>"
+            f"<span class='velnum {_vel_cor(res['mediana'])}'>{_vel_ms(res['mediana'])}</span>"
+            "<div class=mut style='font-size:.76rem;margin-top:.15rem'>"
+            f"mediana de {res['n']} aberturas de tela · p95 {_vel_ms(res['p95'])}</div>"
+            + barra
+            + (f"<div class=mut style='font-size:.74rem;margin-top:.45rem'>"
+               f"<b style='color:var(--coral)'>{res['ruins']}</b> passaram de "
+               f"{_vel.RUIM_MS // 1000} s — é onde o vendedor toca de novo</div>"
+               if res["ruins"] else "")
+            + "</div></div>")
+
+    linhas = "".join(
+        "<div class=veltela>"
+        f"<div class=nm>{esc(t['tela'].replace('/cockpit', '') or '/')}"
+        f"<small>{t['n']}× · servidor {_vel_ms(t['servidor'])}"
+        f" ({t['consultas']} consultas, banco {_vel_ms(t['banco'])})"
+        f" · rede {_vel_ms(t['rede'])} · aparelho {_vel_ms(t['render'])}</small></div>"
+        f"<div class=tp><span class='{_vel_cor(t['mediana'])}' "
+        f"style='color:var(--{'neon' if _vel_cor(t['mediana']) == 'bom' else 'ambar' if _vel_cor(t['mediana']) == 'meio' else 'coral'})'>"
+        f"{_vel_ms(t['mediana'])}</span><small>p95 {_vel_ms(t['p95'])}</small></div>"
+        "</div>" for t in telas)
+
+    corpo = (_hdr("Velocidade", f"{res['n']} aberturas · {dias} dia{'s' if dias > 1 else ''}",
+                  inicial=marca["iniciais"], href_inicial=f"{_BASE}/perfil")
+             + periodo
+             + "<div class=scroll>" + topo
+             + "<div class=eyebrow>Por tela, da mais lenta</div>"
+             + f"<div class=bloco><div class=card>{linhas}</div></div>"
+             + "<p class=dica style='padding:0 1.1rem .8rem'>Servidor alto é código nosso. "
+               "Rede alta é a conexão do vendedor. Aparelho alto é a tela pesada demais "
+               "pro celular dele.</p>"
+             + "</div>" + _abas_dono("perfil"))
+    return _page("Velocidade", corpo)
+
+
+def _vel_ms(ms: int) -> str:
+    """980 ms vira \"0,98 s\" só quando passa de 1 s — abaixo disso o milissegundo
+    é a unidade de quem vai otimizar."""
+    return f"{ms} ms" if ms < 1000 else f"{ms / 1000:.1f}".replace(".", ",") + " s"
 
 
 @router.get("/cockpit/fila/sinal")

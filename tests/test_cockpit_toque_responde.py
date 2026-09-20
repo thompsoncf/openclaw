@@ -28,7 +28,7 @@ def _script() -> str:
 
 _HARNESS = r"""
 globalThis.window = globalThis;
-var log = {ouvintes: {}};
+var log = {ouvintes: {}, win: {}, beacon: null};
 
 function El(tag, cls){
   this.tagName = tag; this.className = cls || ""; this.attrs = {}; this.parentNode = null;
@@ -56,9 +56,30 @@ globalThis.document = {
   querySelector: function(){ return null; },
   addEventListener: function(t, fn){ (log.ouvintes[t] = log.ouvintes[t] || []).push(fn); }
 };
-window.addEventListener = function(){};
+window.addEventListener = function(t, fn){ (log.win[t] = log.win[t] || []).push(fn); };
 window.matchMedia = function(){ return {matches: false}; };
-globalThis.location = {pathname: "/cockpit"};
+globalThis.location = {pathname: "/cockpit/lead/812"};
+
+// o relógio do navegador: o `load` devolve a navegação já cronometrada, e o
+// Server-Timing é o que o servidor contou de si mesmo
+globalThis.navegacao = {
+  domainLookupStart: 0, connectEnd: 120,       // conexão: 120 ms
+  requestStart: 120, responseStart: 800,       // 1º byte: 680 ms depois do pedido
+  responseEnd: 900, domContentLoadedEventEnd: 1500, startTime: 0,
+  serverTiming: [{name: "total", duration: 430, description: ""},
+                 {name: "banco", duration: 310, description: "12 consultas"}]
+};
+// `performance` e `navigator` EXISTEM no node e não aceitam atribuição simples —
+// a cópia nativa ficaria no lugar e o beacon nunca sairia (o teste passaria vazio)
+function global_(nome, valor){
+  Object.defineProperty(globalThis, nome, {value: valor, configurable: true, writable: true});
+}
+global_("performance", {getEntriesByType: function(t){
+  return t === "navigation" ? [navegacao] : []; }});
+globalThis.Blob = function(partes){ this.corpo = partes.join(""); };
+global_("navigator", {sendBeacon: function(url, b){
+  log.beacon = {url: url, d: JSON.parse(b.corpo)}; return true; }});
+window.CKBASE = "/cockpit";
 
 function Evento(alvo){
   this.target = alvo; this.defaultPrevented = false;
@@ -155,3 +176,34 @@ def test_form_que_virou_fetch_nao_e_marcado():
       });
     """)
     assert out["botao"] == "" and "on" not in out["z"]
+
+
+def test_o_aparelho_devolve_quanto_a_tela_demorou_pra_ele():
+    """O servidor se cronometra desde 19/09/2026, mas o numero ia pro log e morria
+    la — e o log nao sabe o que acontece DEPOIS da resposta, quando o aparelho
+    ainda precisa desenhar. O beacon fecha o outro lado: conexao, viagem,
+    servidor e desenho na mesma linha (ver finance/velocidade.py)."""
+    out = _roda(r"""
+      (log.win.load || []).forEach(function(fn){ fn(); });
+      setTimeout(function(){ console.log(JSON.stringify(log.beacon)); }, 0);
+    """)
+    assert out["url"] == "/cockpit/tempo"
+    d = out["d"]
+    assert d["tela"] == "/cockpit/lead/812"
+    assert d["servidor"] == 430 and d["banco"] == 310 and d["consultas"] == 12
+    assert d["conexao"] == 120
+    # 680 ms ate o 1o byte, dos quais 430 foram do servidor: o resto e viagem
+    assert d["espera"] == 250
+    assert d["render"] == 600          # do fim do download ate a tela pronta
+    assert d["total"] == 1500
+
+
+def test_sem_sendBeacon_a_medicao_some_calada():
+    """Navegador sem a API: medir nao pode quebrar a tela de quem so quer
+    trabalhar."""
+    out = _roda(r"""
+      navigator.sendBeacon = undefined;
+      (log.win.load || []).forEach(function(fn){ fn(); });
+      setTimeout(function(){ console.log(JSON.stringify({beacon: log.beacon, vivo: true})); }, 0);
+    """)
+    assert out["beacon"] is None and out["vivo"] is True

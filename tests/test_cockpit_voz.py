@@ -785,3 +785,39 @@ def test_sem_ponteiro_de_volta_a_mensagem_ainda_e_gravada(pool, monkeypatch):
     _, _, membro, texto, sid, tipo, ref, _ = _ultima(pool)
     assert sid == "SEMPTR" and membro == 7 and texto == "📷 Foto"
     assert tipo is None and ref is None
+
+
+# ═══════════════════════════════ o ponteiro atravessa o cliente do QR
+
+def test_o_cliente_do_qr_repassa_o_ponteiro_do_audio(monkeypatch):
+    """Achado em produção em 20/09/2026, meia hora depois do deploy: os áudios que
+    CHEGAVAM já vinham com arquivo e onda, e os que SAÍAM continuavam sem. O
+    serviço devolvia o ponteiro; era este `return` que o jogava fora.
+
+    Serviço antigo (sem `midia` na resposta) devolve None e a mensagem sai igual.
+    """
+    import io
+    import json as _js
+    from finance import whatsapp_qr as qr
+
+    resposta = {"ok": True, "id": "3EB0X", "midia": {"tipo": "audio",
+                "ref": {"directPath": "/v/x", "mediaKey": "aw=="}, "meta": {"segundos": 8}}}
+
+    class _Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(qr, "configurado", lambda: True)
+    monkeypatch.setattr(qr, "_base", lambda: "http://x")
+    monkeypatch.setattr(qr, "_segredo", lambda: "s")
+    monkeypatch.setattr(qr.urllib.request, "urlopen",
+                        lambda *a, **k: _Resp(_js.dumps(resposta).encode()))
+    r = qr.enviar_audio(1, "5586", b"ogg", "audio/ogg", 8)
+    assert r["ok"] and r["sid"] == "3EB0X"
+    assert r["midia"]["ref"]["directPath"] == "/v/x", "o ponteiro tem que atravessar"
+
+    resposta = {"ok": True, "id": "3EB0Y"}            # serviço antigo
+    assert qr.enviar_audio(1, "5586", b"ogg", "audio/ogg", 8)["midia"] is None

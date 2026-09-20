@@ -5,10 +5,61 @@ A URL do banco vem da variavel de ambiente DATABASE_URL, por exemplo:
     postgresql://openclaw:senha@localhost:5432/openclaw
 """
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
+
 from psycopg_pool import ConnectionPool
 
 _pool: ConnectionPool | None = None
+
+# UMA CONEXAO POR REQUISICAO (20/09/2026).
+#
+# Medido no celular do dono: a Fila abria 16 CONEXOES pra desenhar uma tela. Cada
+# uma paga um `SELECT 1` de verificacao (o `check` do pool, mais abaixo) — e como
+# o servico esta em Oregon e o banco em us-east-1, essa verificacao custa os
+# mesmos ~100 ms de qualquer consulta. Eram ~1,6 s dos 4,0 s de banco da Fila
+# gastos so em pedagio de conexao, sem desenhar nada.
+#
+# Agora a requisicao pega UMA conexao na primeira vez que alguem pede e devolve
+# ao pool no fim. Os `with pool.connection()` espalhados pelo app continuam
+# escritos do mesmo jeito — quem muda e o que eles recebem.
+#
+# O QUE NAO MUDA, de proposito: cada bloco continua CONFIRMANDO o proprio
+# trabalho ao sair, como o pool fazia. Sem isso, uma falha no fim da requisicao
+# desfaria o que ja tinha sido salvo no comeco — o tipo de mudanca que quebra em
+# silencio e so aparece no dia ruim.
+#
+# Dict MUTAVEL dentro do ContextVar pelo mesmo motivo do db/medicao.py: as rotas
+# sao `def`, o Starlette as roda numa thread com uma COPIA do contexto, e um
+# `.set()` feito la dentro morreria na copia. Mexer no mesmo dict funciona dos
+# dois lados.
+_REQ: ContextVar[dict | None] = ContextVar("conexao_da_requisicao", default=None)
+
+#: porta de saida sem deploy: `PG_CONEXAO_POR_REQUISICAO=0` volta ao de antes
+def _ligado() -> bool:
+    return os.environ.get("PG_CONEXAO_POR_REQUISICAO", "1") != "0"
+
+
+def abrir_requisicao():
+    """Comeca a reaproveitar conexao. Devolve o token pro `fechar_requisicao`."""
+    return _REQ.set({"conn": None, "cm": None}) if _ligado() else None
+
+
+def fechar_requisicao(token) -> None:
+    """Devolve a conexao da requisicao ao pool. Nunca levanta: uma falha aqui
+    viraria erro 500 numa tela que ja tinha sido desenhada."""
+    if token is None:
+        return
+    cofre = _REQ.get() or {}
+    _REQ.reset(token)
+    cm = cofre.get("cm")
+    if cm is None:
+        return
+    try:
+        cm.__exit__(None, None, None)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 class _PoolComConta(ConnectionPool):
@@ -31,6 +82,30 @@ class _PoolComConta(ConnectionPool):
         except Exception:  # noqa: BLE001 - nunca impedir a entrega da conexao
             pass
         return conn
+
+    @contextmanager
+    def connection(self, timeout: float | None = None):
+        """A conexao da REQUISICAO, quando ha uma; senao, o caminho de sempre.
+
+        Fora de requisicao (poller, crons, scripts, suite) `_REQ` e None e isto e
+        literalmente o comportamento anterior."""
+        cofre = _REQ.get()
+        if cofre is None:
+            with super().connection(timeout) as conn:
+                yield conn
+            return
+        conn = cofre.get("conn")
+        if conn is None:
+            # segura a conexao ate o fim da requisicao (ver `fechar_requisicao`)
+            cm = super().connection(timeout)
+            conn = cm.__enter__()
+            cofre["cm"], cofre["conn"] = cm, conn
+        try:
+            yield conn
+            conn.commit()      # cada bloco confirma o seu, como o pool fazia
+        except BaseException:
+            conn.rollback()
+            raise
 
 
 def get_pool() -> ConnectionPool:

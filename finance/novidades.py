@@ -418,11 +418,15 @@ def listar(pool, conta_id: int, membro_id=None, papel: str | None = None) -> lis
       (`vende_servico`, `tem_contrato`) e duplicá-los em SQL seria a segunda
       leitura que este módulo inteiro existe pra evitar.
     """
+    from db.conexao import memo as _memo
     with pool.connection() as c:
-        nicho = c.execute(
+        # o nicho e a data de criação da conta são cadastro, não lista: lembrados
+        # por requisição (ver `db.conexao.memo`), porque a mesma tela já lê a
+        # tabela `contas` noutro lugar e cada leitura custa a travessia até o banco
+        nicho = _memo(("conta_nicho", conta_id), lambda: c.execute(
             """select n.slug, ct.criado_em from contas ct
                  left join nichos n on n.id = ct.nicho_id
-                where ct.id=%s""", (conta_id,)).fetchone()
+                where ct.id=%s""", (conta_id,)).fetchone())
         if not nicho:
             return []
         slug, criada_em = nicho

@@ -1806,7 +1806,7 @@ def _abas(itens, ativo: str, selos: dict | None = None, verdes: tuple = ("perfil
         rotulo_selo = "por ler" if verde else "sem resposta"
         selo = (f"<span class={classe} aria-label='{n} {rotulo_selo}'>"
                 f"{n if n < 10 else '9+'}</span>") if n else ""
-        out.append(f"<a{on} href='{esc(href)}'>{_ic(icone)}{selo}"
+        out.append(f"<a{on} data-aba={chave} href='{esc(href)}'>{_ic(icone)}{selo}"
                    f"<span>{esc(rotulo)}</span></a>")
     return "<div class=tabs>" + "".join(out) + "</div>"
 
@@ -2232,8 +2232,8 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     # buscando, o recorte sai do caminho: quem digita um nome quer procurar em TUDO
     leads = ck.leads_do_vendedor(pool, conta_id, membro_id, busca=termo,
                                  recorte="" if termo else recorte)
-    cont = ck.contagens_fila(pool, conta_id, membro_id)
-    p = ck.perfil(pool, conta_id, membro_id)
+    cont, sig = ck.contagens_e_sinal(pool, conta_id, membro_id)
+    nome_vend = ck.nome_do_vendedor(pool, conta_id, membro_id)
     vez = sum(1 for l in leads if l["sua_vez"])
 
     # a fila já tem os leads em mão: soma daqui, sem uma consulta a mais só pra aba.
@@ -2459,8 +2459,13 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     # recebe os dele no painel, e a faixa aqui seria de outra pessoa.
     novidades = [] if gestor else _novidades_vend(conta_id, membro_id)
     novas = sum(1 for n in novidades if not n["lida"])
-    abas = _abas_vend("fila", total_pend, novas, 0 if gestor else _raiox_n(conta_id, membro_id))
-    sig = ck.sinal_fila(pool, conta_id, membro_id)
+    # O SELO DO RAIO-X NÃO SEGURA O HTML (20/09/2026). Ele custava 3 consultas —
+    # ~330 ms com o banco do outro lado do país — pra escrever UM número numa aba
+    # que o vendedor talvez nem olhe agora. A tela sai sem ele e o número chega
+    # por `/raio-x/selo` depois do `load` (ver `_selo_js`). Zero aqui não é "não
+    # tem": é "ainda não sei", e a aba nasce sem selo em vez de com um errado.
+    abas = _abas_vend("fila", total_pend, novas, 0)
+
     # As PARTES QUE MUDAM sozinhas: o topo (busca, ordem, pílulas), a lista, o
     # subtítulo e as abas com os selos. É o que a tela troca quando chega mensagem,
     # em vez de recarregar a página inteira (ver `_sinal_js`).
@@ -2470,7 +2475,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
         # que ele acabou de fazer.
         return JSONResponse({"ok": True, "sig": sig, "sub": sub, "foco": foco,
                              "lista": pushcard + lista + dica + volta, "abas": abas})
-    corpo = (_hdr("Meus leads", sub, inicial=_ini(p["nome"]), direita=_selo(conta_id))
+    corpo = (_hdr("Meus leads", sub, inicial=_ini(nome_vend), direita=_selo(conta_id))
              + _flash(request)
              + _faixa_novidade(novidades, conta_id=conta_id, membro_id=membro_id)
              # o repasse vem DEPOIS da novidade e antes do foco: é sobre um lead
@@ -2485,6 +2490,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
              + f"<div id=filaabas>{abas}</div>"
              + f'<script>window.CKBASE="{_BASE}";</script>' + vapid_js + _FILA_JS
              + _busca_js()
+             + _selo_js()
              + _sinal_js(sig)
              + _badge_js(total_pend))
     return _page("Meus leads", corpo)
@@ -2558,6 +2564,30 @@ def _busca_js() -> str:
             "})();</script>")
 
 
+def _selo_js() -> str:
+    """O selo do Raio-X chega DEPOIS da tela, e some se for zero.
+
+    Pintado no cliente porque o número custa 3 consultas com regra de negócio
+    dentro: tirá-lo do caminho crítico é mais honesto que reescrever a regra em
+    SQL só pra ele caber no primeiro byte."""
+    return ("<script>(function(){"
+            "var B=window.CKBASE||'/cockpit';"
+            "window.__selo=function(){"
+            "var a=document.querySelector('.tabs a[data-aba=resultado]');"
+            "if(!a||!window.zapFetch)return;"
+            "zapFetch(B+'/raio-x/selo',{silencioso:true}).then(function(j){"
+            "if(!j||!j.ok)return;"
+            "var s=a.querySelector('.tsel');"
+            "if(!j.n){if(s)s.remove();return;}"
+            "if(!s){s=document.createElement('span');s.className='tsel ok';"
+            "a.insertBefore(s,a.firstChild.nextSibling);}"
+            "s.setAttribute('aria-label',j.n+' por ler');"
+            "s.textContent=j.n<10?j.n:'9+';});};"
+            # depois do `load`: a tela inteira primeiro, o número depois
+            "window.addEventListener('load',function(){setTimeout(window.__selo,0);});"
+            "})();</script>")
+
+
 def _sinal_js(sig: str) -> str:
     """A fila se atualiza sozinha: lead novo caindo no rodízio, ou mensagem chegando
     numa conversa da lista, aparecem sem o vendedor recarregar.
@@ -2593,6 +2623,7 @@ def _sinal_js(sig: str) -> str:
             "if(p.sub)p.sub.textContent=j.sub;"
             "p.lista.scrollTop=topo;"                    # a rolagem fica onde estava
             "if(window.__ligaFila)window.__ligaFila();"  # religa deslize e "perguntar"
+            "if(window.__selo)window.__selo();"          # o selo do Raio-X vem por fora
             "sig=j.sig;ocupado=false;});}"
             "function tique(){"
             "if(ocupado||document.visibilityState!=='visible')return;"
@@ -4399,10 +4430,9 @@ def cockpit_orcamentos(request: Request, s: str = "", v: str = ""):
                  + _flash(request) + filtros
                  + f"<div class=scroll>{miolo}</div>" + _abas_dono("orcamentos"))
     else:
-        p = ck.perfil(pool, conta_id, sess[1])
         corpo = (
                    _hdr("Minhas propostas", "manda pro cliente por aqui",
-                        inicial=_ini(p["nome"]))
+                        inicial=_ini(ck.nome_do_vendedor(pool, conta_id, sess[1])))
                  + _flash(request) + filtros
                  + f"<div class=scroll>{miolo}</div>"
                  + _abas_vend("orcamentos", 0 if gestao else _pend_vend(conta_id, sess[1])))
@@ -7301,6 +7331,20 @@ def _vel_ms(ms: int) -> str:
     """980 ms vira \"0,98 s\" só quando passa de 1 s — abaixo disso o milissegundo
     é a unidade de quem vai otimizar."""
     return f"{ms} ms" if ms < 1000 else f"{ms / 1000:.1f}".replace(".", ",") + " s"
+
+
+@router.get("/cockpit/raio-x/selo")
+def cockpit_raiox_selo(request: Request):
+    """Quantos no "responda hoje" — só o número, pedido pela tela depois de pronta.
+
+    As três consultas que produzem esse número carregam a REGRA de quem entra no
+    responda-hoje (ver `finance.raio_x.responda_hoje`). Reescrevê-las como um
+    `count` enxuto duplicaria a regra em dois lugares — o jeito de não pagar por
+    elas não é copiá-las, é tirá-las do caminho de desenhar a tela."""
+    sess = _sessao(request)
+    if not sess:
+        return Response(status_code=204)
+    return JSONResponse({"ok": True, "n": _raiox_n(sess[0], sess[1])})
 
 
 @router.get("/cockpit/fila/sinal")

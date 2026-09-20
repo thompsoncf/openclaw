@@ -46,6 +46,27 @@ def abrir_requisicao():
     return _REQ.set({"conn": None, "cm": None}) if _ligado() else None
 
 
+def memo(chave, produtor):
+    """Lembra o resultado de uma leitura DENTRO da requisicao.
+
+    So pra dado de CONFIGURACAO que a tela le mais de uma vez — o cadastro da
+    conta, o nicho — nunca pra lista que muda. A Fila lia a tabela `contas` duas
+    vezes por carga (uma no cadastro da empresa, outra pro nicho das novidades):
+    ~110 ms cross-region pra buscar a mesma linha de novo.
+
+    A lembranca morre com a requisicao: fora dela (poller, crons, scripts) isto e
+    uma chamada direta, sem cache nenhum — dado velho preso na memoria de um
+    processo que vive dias seria bem pior que uma consulta a mais.
+    """
+    cofre = _REQ.get()
+    if cofre is None:
+        return produtor()
+    lembradas = cofre.setdefault("memo", {})
+    if chave not in lembradas:
+        lembradas[chave] = produtor()
+    return lembradas[chave]
+
+
 def fechar_requisicao(token) -> None:
     """Devolve a conexao da requisicao ao pool. Nunca levanta: uma falha aqui
     viraria erro 500 numa tela que ja tinha sido desenhada."""
@@ -129,7 +150,15 @@ def get_pool() -> ConnectionPool:
             url, connection_class=ConexaoMedida, min_size=1, max_size=10, open=True,
             max_idle=120,
             check=ConnectionPool.check_connection,
-            kwargs={"prepare_threshold": None},
+            # REDE DE SEGURANCA DA CONEXAO POR REQUISICAO (20/09/2026).
+            # Agora a conexao atravessa a requisicao inteira; se algum caminho
+            # deixar uma transacao aberta, ela ficaria pendurada segurando a
+            # conexao (o classico "idle in transaction") ate o pooler cansar.
+            # 60 s e folgado pra qualquer tela e curto pra qualquer vazamento.
+            # NAO poe statement_timeout aqui: o mesmo `get_pool` serve os crons,
+            # e relatorio pesado tem direito de demorar.
+            kwargs={"prepare_threshold": None,
+                    "options": "-c idle_in_transaction_session_timeout=60s"},
         )
     return _pool
 

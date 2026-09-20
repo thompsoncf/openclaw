@@ -1503,10 +1503,14 @@ def test_a_fila_nao_pode_voltar_a_conversar_46_vezes_com_o_banco(pool, monkeypat
     assert m["consultas"] < antes["consultas"], (
         f"reaproveitar a conexão tinha que economizar as verificações: "
         f"{m['consultas']} contra {antes['consultas']}")
-    # 15 = as 14 que desenham a tela + a única verificação que sobrou
-    assert m["consultas"] <= 15, (
+    # 15 -> 8 (20/09/2026): o nome do vendedor deixou de custar os 4 selects do
+    # `perfil()`, contagens e assinatura viraram uma consulta só, o cadastro da
+    # conta é lembrado dentro da requisição, e o selo do Raio-X (3 consultas com
+    # regra de negócio dentro) saiu do caminho crítico — chega por `/raio-x/selo`
+    # depois da tela pronta. 8 = 7 de trabalho + 1 verificação.
+    assert m["consultas"] <= 8, (
         f"a Fila fez {m['consultas']} consultas em {m['conexoes']} conexões "
-        f"(teto: 15). Cada uma custa ~90 ms em produção — {m['consultas'] * 90} ms "
+        f"(teto: 8). Cada uma custa ~90 ms em produção — {m['consultas'] * 90} ms "
         f"só de viagem. O que rodou:" + chr(10) + detalhe)
 
 
@@ -2178,7 +2182,8 @@ def test_abrir_o_aviso_marca_lida_e_a_faixa_some(pool, monkeypatch):
     assert "Entendi" not in html            # novidade: abrir já basta
     assert _lidas_de(pool, vend) == {"nv2-vend"}
     fila, _ = _fila_html(monkeypatch, pool, conta, vend)
-    assert "class=faixa" not in fila and "tsel ok" not in fila
+    assert "class=faixa" not in fila
+    assert "<span class='tsel ok'" not in fila, "nenhum selo verde desenhado no HTML"
 
 
 def test_o_x_da_faixa_marca_lida_sem_abrir_e_volta_pra_fila(pool, monkeypatch):
@@ -2370,7 +2375,18 @@ def test_fila_leva_o_selo_do_raio_x_so_pro_vendedor(pool, monkeypatch):
         _msg_rx(c, conv, "in", "tem pra sábado?", 3)
         c.commit()
     html, _ = _fila_html(monkeypatch, pool, conta, vend)
-    assert "href='/cockpit/raio-x'" in html and "aria-label='1 por ler'" in html
+    # O NÚMERO NÃO SEGURA MAIS O HTML (20/09/2026): ele custava 3 consultas com
+    # regra de negócio dentro (`raio_x.responda_hoje`) pra escrever um dígito numa
+    # aba. A tela sai sem ele e o app busca em `/raio-x/selo` depois do `load`.
+    assert "href='/cockpit/raio-x'" in html
+    assert "<span class='tsel ok'" not in html, "o selo voltou pro caminho crítico"
+    assert "/raio-x/selo" in html, "a tela precisa saber onde buscar o número"
+
+    from web import painel_cockpit as pc
+    import json as _json
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    r = pc.cockpit_raiox_selo(_req_vend(conta, vend))
+    assert _json.loads(bytes(r.body).decode())["n"] == 1
 
 
 # ------------------------------------------------------------------ por que perdeu · de onde veio (migração 209)

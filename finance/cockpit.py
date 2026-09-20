@@ -431,6 +431,39 @@ def sinal_fila(pool, conta_id: int, membro_id: int) -> str:
     return f"{r[0]}:{r[1]}:{r[2]}" if r else "0:0:0"
 
 
+def contagens_e_sinal(pool, conta_id: int, membro_id: int) -> tuple[dict, str]:
+    """As contagens das pílulas E a assinatura da fila, numa consulta só.
+
+    São duas perguntas sobre exatamente as MESMAS linhas — os leads abertos do
+    vendedor — e até 20/09/2026 eram duas viagens ao banco por carga da Fila. Com
+    o servidor em Oregon e o banco em us-east-1, a segunda viagem custava ~110 ms
+    pra reler o que a primeira já tinha em mãos.
+
+    `contagens_fila` e `sinal_fila` continuam existindo e sozinhas: a rota do
+    tique (`/fila/sinal`) pede SÓ a assinatura a cada 8 s, e carregá-la de
+    contagens que ninguém vai ler seria trocar um desperdício por outro."""
+    with pool.connection() as c:
+        r = c.execute(
+            """select count(*),
+                      count(*) filter (where p.orcamento_id is not null),
+                      count(*) filter (where p.evento_em is not null),
+                      coalesce(max(ult.mid), 0), coalesce(max(ult.visto), 0)
+                 from prospeccao p
+                 left join lateral (
+                   select max(m.id) mid, max(coalesce(cv.visto_ate_id, 0)) visto
+                     from conversas cv
+                     join mensagens m on m.conversa_id = cv.id
+                    where cv.conta_id = p.conta_id and cv.prospeccao_id = p.id
+                 ) ult on true
+                where p.conta_id=%s and p.vendedor_id=%s
+                  and coalesce(p.estagio,'lead')='lead'
+                  and """ + _ABERTO_P, (conta_id, membro_id)).fetchone()
+    if not r:
+        return {"total": 0, "prop": 0, "data": 0}, "0:0:0"
+    return ({"total": int(r[0] or 0), "prop": int(r[1] or 0), "data": int(r[2] or 0)},
+            f"{r[0]}:{r[3]}:{r[4]}")
+
+
 def leads_do_vendedor(pool, conta_id: int, membro_id: int, *,
                       busca: str = "", recorte: str = "") -> list[dict]:
     from web.painel_prospeccao import _zap_link, TEMP_COR
@@ -999,6 +1032,18 @@ def midia_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
                 where m.id=%s and cv.conta_id=%s and cv.prospeccao_id=%s
                   and p.vendedor_id=%s and m.midia_ref is not null""",
             (mensagem_id, conta_id, lead_id, membro_id)).fetchone()
+
+
+def nome_do_vendedor(pool, conta_id: int, membro_id: int) -> str:
+    """Só o nome — uma consulta.
+
+    A Fila e a Agenda chamavam `perfil()` pra desenhar a INICIAL no avatar do
+    cabeçalho, e `perfil()` faz quatro consultas: o cadastro mais três KPIs que
+    essas telas não mostram. Cross-region (Oregon↔us-east-1) eram ~330 ms por
+    abertura de tela pra escrever uma letra."""
+    with pool.connection() as c:
+        m = _conta_membro(c, conta_id, membro_id)
+    return (m[0] if m and m[0] else "Vendedor")
 
 
 def perfil(pool, conta_id: int, membro_id: int) -> dict:

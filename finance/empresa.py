@@ -2417,7 +2417,16 @@ def cadastro_pj_ok(pool, conta_id: int) -> bool:
 
 
 def obter_dados_empresa(pool, conta_id: int) -> dict:
-    """Devolve os dados cadastrais atuais da empresa (pra pré-preencher a tela)."""
+    """Devolve os dados cadastrais atuais da empresa (pra pré-preencher a tela).
+
+    Lembrado por requisição (`db.conexao.memo`): é cadastro, não lista, e a
+    mesma tela costuma pedir de novo — no Cockpit isso era uma leitura inteira
+    da tabela de contas a mais, ~110 ms com o banco do outro lado do país."""
+    from db.conexao import memo as _memo
+    return _memo(("empresa", conta_id), lambda: _obter_dados_empresa(pool, conta_id))
+
+
+def _obter_dados_empresa(pool, conta_id: int) -> dict:
     with pool.connection() as c:
         r = c.execute(
             """select coalesce(ct.documento,''), coalesce(ct.razao_social,''),

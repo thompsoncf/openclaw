@@ -21,7 +21,9 @@ pytestmark = pytest.mark.skipif(not shutil.which("node"), reason="sem node no am
 
 
 def _script() -> str:
-    return re.findall(r"<script>(.*?)</script>", pc._ESPERA_JS, re.S)[0]
+    # desde 20/09/2026 a constante é o JS puro: ele virou arquivo servido
+    # (`_ESPERA_URL`) em vez de viajar dentro de cada navegação.
+    return pc._ESPERA_JS
 
 
 _HARNESS = r"""
@@ -232,6 +234,9 @@ def test_todo_script_da_tela_da_conversa_compila(tmp_path):
     SyntaxError só DEPOIS do render — e derruba o bloco inteiro, envio incluído."""
     html = _tela_da_conversa()
     scripts = re.findall(r"<script>(.*?)</script>", html, re.S)
+    # o espera.js não está mais no documento (virou arquivo servido), mas é ele
+    # que leva o envio — continua entrando na checagem
+    scripts.append(pc._ESPERA_JS)
     assert len(scripts) >= 3
     for i, s in enumerate(scripts):
         arq = tmp_path / f"s{i}.js"

@@ -706,6 +706,17 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   .tabs .ic{transition:none}
   .girando{animation-duration:1.6s}
 }
+/* O TOQUE RESPONDE NO PRIMEIRO TOQUE (20/09/2026).
+   O vendedor tocava, nada acontecia por ~1 s e ele tocava de novo — e o segundo
+   toque cancelava a navegação do primeiro, deixando o app mais lento ainda.
+   `touch-action:manipulation` tira a espera de duplo-toque que alguns
+   navegadores ainda cobram, e `.ocupado` é a cara de "já estou indo": só ela
+   segura o toque repetido, nunca o `disabled`, que tiraria o name/value do
+   botão do envio do form.
+   O `.front` do card fica DE FORA: ele precisa de `pan-y` pro deslize. */
+button,.btn,.act,.tabs a,.pil,.opt,.fab,.lead,.linha,.acoes a{touch-action:manipulation}
+.ocupado{opacity:.62;pointer-events:none}
+.act.ocupado{opacity:.5}
 .aviso{margin:.2rem 0;padding:.55rem .7rem;border-radius:11px;font-size:.78rem;text-align:center;
   background:var(--surface);border:1px solid var(--line);color:var(--text-dim)}
 /* NOVIDADES no app (migração 199, mockup novidades_tres_lugares): a faixa em
@@ -1399,7 +1410,13 @@ def _page(title: str, corpo: str) -> HTMLResponse:
         "<script>if('serviceWorker' in navigator)"
         "navigator.serviceWorker.register('/cockpit/sw.js',{scope:'/cockpit'})"
         ".catch(function(){});</script>"
-        + _ESPERA_JS +
+        # O ESPERA.JS TAMBÉM SAI DO DOCUMENTO (20/09/2026), pelo mesmo motivo do
+        # zapfetch: eram 7,6 KB repetidos em CADA navegação — e navegação, neste
+        # app, é todo toque em aba, card ou salvar. Como arquivo versionado o
+        # navegador busca uma vez e guarda pra sempre (`immutable`), e o que
+        # sobra aqui é o HTML da tela. `defer` mantém a ordem: o zapfetch, que
+        # ele usa, é o script de cima.
+        f'<script src="{_ESPERA_URL}" defer></script>'
         "</body></html>")
 
 
@@ -1450,7 +1467,31 @@ _ABERTURA_HTML = (
 #
 # Nada aqui altera o que é enviado nem para onde: sem JS, tudo funciona como
 # antes. É só o app parando de esconder que está trabalhando.
-_ESPERA_JS = """<script>(function(){
+# O TOQUE RESPONDE NO PRIMEIRO TOQUE (20/09/2026).
+#
+# O vendedor tocava, a tela ficava igual até a página nova chegar (~1 s), e ele
+# tocava de novo. O segundo toque CANCELAVA a navegação do primeiro e recomeçava
+# do zero: o app ficava mais lento justamente pra quem já achava lento. Em form
+# era pior — dois toques em "Salvar" mandavam o form duas vezes (uma visita
+# marcada duas vezes, um orçamento enviado duas vezes).
+#
+# Três peças, e nenhuma delas muda o que é enviado ou pra onde:
+#   `indo`      — o mesmo link tocado de novo em menos de 3,5 s é ignorado. A
+#                 trava só é ARMADA no `setTimeout`, DEPOIS dos outros ouvintes:
+#                 clique que ninguém aproveitou (o toque que só fecha um card
+#                 deslizado) não navega, e travar por causa dele prenderia o
+#                 toque seguinte, que é de verdade.
+#   submit      — mesma trava no form, e o botão ganha `.ocupado`. A decisão
+#                 também espera o `setTimeout`: form que virou `fetch` (o
+#                 composer, a busca) chama `preventDefault()` e NÃO troca de
+#                 tela — apagar o botão dele seria mentir sobre uma navegação
+#                 que não existe.
+#   `.ocupado`  — e não `disabled`: `disabled` tira o name/value do botão do que
+#                 é enviado.
+#
+# Os comentários aqui embaixo são curtos de propósito: este script vai INTEIRO
+# no HTML de cada navegação (ver test_html_por_navegacao_ficou_pequeno).
+_ESPERA_JS = r"""(function(){
   // O Z se desenhando no lugar do fio: mesma função, cara da marca. Ele fica em
   // laço enquanto a tela nova não chega e some junto com o documento — nunca
   // segura nada, porque quem faz esperar é a rede, não a animação.
@@ -1458,12 +1499,15 @@ _ESPERA_JS = """<script>(function(){
   function corre(){ if(prog)prog.classList.add('on'); }
   function para(){ if(prog)prog.classList.remove('on'); }
 
+  var indo=null,indoQuando=0;   // o mesmo link tocado de novo: ver o comentário do módulo
   document.addEventListener('click',function(e){
     var a=e.target.closest&&e.target.closest('a');
     if(!a||e.defaultPrevented||e.metaKey||e.ctrlKey||a.target==='_blank')return;
     var h=a.getAttribute('href')||'';
     // só navegação DENTRO do app: âncora (#acoes, #fechar), tel: e wa.me ficam de fora
     if(h.charAt(0)!=='/'||h.indexOf('/cockpit')!==0)return;
+    if(a===indo&&(Date.now()-indoQuando)<3500){e.preventDefault();return;}
+    setTimeout(function(){if(!e.defaultPrevented){indo=a;indoQuando=Date.now();}},0);
     var abas=a.parentNode&&a.parentNode.classList&&a.parentNode.classList.contains('tabs');
     if(abas){
       // a aba destino acende AGORA, antes de qualquer rede
@@ -1474,8 +1518,27 @@ _ESPERA_JS = """<script>(function(){
     corre();
   },true);
 
-  // voltar pelo histórico devolve a página do cache com a barra congelada no meio
-  window.addEventListener('pageshow',para);
+  // o form também diz que está indo, e não vai duas vezes
+  document.addEventListener('submit',function(e){
+    var f=e.target;
+    if(!f||!f.tagName||f.tagName!=='FORM')return;
+    if(f.__indo&&(Date.now()-f.__indo)<3500){e.preventDefault();return;}
+    setTimeout(function(){
+      if(e.defaultPrevented)return;
+      f.__indo=Date.now();
+      var b=f.querySelector('button[type=submit],input[type=submit],button:not([type])');
+      if(b)b.classList.add('ocupado');
+      corre();
+    },0);
+  },true);
+
+  // voltar pelo histórico devolve a página do cache com o Z congelado e o botão
+  // ainda apagado da ida
+  window.addEventListener('pageshow',function(){
+    para();
+    var oc=document.querySelectorAll('.ocupado');
+    for(var i=0;i<oc.length;i++){oc[i].classList.remove('ocupado');}
+  });
 
   // ---- o enviar ----
   // A bolha entra na hora e o campo esvazia. O campo CHEIO depois de tocar em
@@ -1570,7 +1633,10 @@ _ESPERA_JS = """<script>(function(){
       recado(msg||'Não consegui enviar. Tente de novo.');
     }
   });
-})();</script>"""
+})();"""
+
+#: o arquivo que o `_page` aponta — versionado pelo conteúdo, como o zapfetch
+_ESPERA_URL = _estaticos.registrar("espera.js", _ESPERA_JS)
 
 
 def _brl(centavos, *, centavos_visiveis: bool = False) -> str:
@@ -1934,16 +2000,24 @@ _FILA_JS = r"""
   function liga_acoes(row,front,id){
     row.querySelectorAll(".act").forEach(function(b){
       b.addEventListener("click",function(ev){
-        ev.stopPropagation();agir(row,front,id,b.getAttribute("data-a"));});
+        ev.stopPropagation();
+        // o POST já saiu: o segundo toque marcaria o mesmo lead como Ganho duas
+        // vezes. `.ocupado` apaga o botão e segura o toque até a resposta.
+        if(b.classList.contains("ocupado"))return;
+        b.classList.add("ocupado");
+        agir(row,front,id,b.getAttribute("data-a"));});
     });
+  }
+  function libera(row){
+    row.querySelectorAll(".act").forEach(function(b){b.classList.remove("ocupado");});
   }
   function agir(row,front,id,a){
     var url=B+"/lead/"+id+(a==="ganho"?"/fechar":a==="devolver"?"/devolver":"/assumir");
     var opt={method:"POST",headers:{"x-cockpit":"1"}};
     if(a==="ganho"){opt.headers["Content-Type"]="application/x-www-form-urlencoded";
       opt.body="tipo=ganho";}
-    zapFetch(url,opt).then(function(j){if(!j){toast("Falha de conexão");fecha(front);return;}
-      if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");fecha(front);return;}
+    zapFetch(url,opt).then(function(j){if(!j){toast("Falha de conexão");libera(row);fecha(front);return;}
+      if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");libera(row);fecha(front);return;}
       if(a==="ganho"){
         row.style.height=row.offsetHeight+"px";row.style.overflow="hidden";
         row.style.transition="height .25s,opacity .25s";
@@ -1953,7 +2027,7 @@ _FILA_JS = r"""
       }
       var ia=(a!=="assumir");   // assumir → sai da IA; devolver → volta pra IA
       var tmp=document.createElement("div");tmp.innerHTML=acoesHTML(ia);
-      row.querySelector(".actions").replaceWith(tmp.firstChild);
+      row.querySelector(".actions").replaceWith(tmp.firstChild);   // já nascem livres
       var chip=front.querySelector(".chip");
       if(chip){chip.className="chip "+(ia?"ia":"voce");chip.textContent=ia?"IA":"sua vez";}
       liga_acoes(row,front,id);

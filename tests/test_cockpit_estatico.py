@@ -63,6 +63,20 @@ def test_html_por_navegacao_ficou_pequeno():
     assert len(html) < 12_000, f"o HTML voltou a inchar: {len(html)} bytes"
 
 
+def test_o_espera_js_nao_viaja_mais_dentro_de_cada_navegacao():
+    """Eram 7,6 KB repetidos em toda navegação — e navegação, neste app, é todo
+    toque em aba, card ou salvar. Como arquivo versionado, o navegador busca uma
+    vez e guarda (`immutable`), que é o mesmo trato do zapfetch e da folha."""
+    html = pc._page("x", "<i>y</i>").body.decode()
+    assert "bolhaOtimista" not in html, "o script voltou pra dentro do documento"
+    assert f'src="{pc._ESPERA_URL}"' in html and "defer" in html
+
+    r = cliente.get(pc._ESPERA_URL)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/javascript") or         r.headers["content-type"].startswith("application/javascript")
+    assert b"bolhaOtimista" in r.content and b"zprog" in r.content
+
+
 def test_splash_cobre_os_iphones_em_uso():
     html = pc._page("x", "<i>y</i>").body.decode()
     assert html.count("apple-touch-startup-image") == len(pc._SPLASH) == 8

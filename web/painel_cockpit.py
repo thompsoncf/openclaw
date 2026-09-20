@@ -881,6 +881,12 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .resphdr{display:flex;align-items:center;justify-content:space-between}
 .resphdr b{font-family:var(--display);font-size:.95rem}
 .respfecha{background:none;border:0;color:var(--text-dim);font-size:1rem;cursor:pointer}
+/* o aviso de quem é o quê: a folha mistura as da empresa com as do vendedor, e
+   sem uma linha explicando ele lê a diferença (umas com ✕, outras com 🔒) como
+   defeito em vez de regra */
+.respdica{font-size:.7rem;color:var(--text-dim);line-height:1.45;
+  border-left:2px solid var(--line);padding-left:.5rem}
+.respdica b{color:var(--text)}
 .respbusca{background:var(--surface);border:1px solid var(--line);border-radius:999px;
   color:var(--text);padding:.5rem .85rem;font-family:inherit;font-size:.85rem}
 .resplista{overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:.35rem}
@@ -5819,10 +5825,20 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
             "<div class=resp id=resp hidden>"
             "<div class=resphdr><b>Respostas rápidas</b>"
             "<button type=button class=respfecha id=respfecha aria-label=Fechar>✕</button></div>"
+            # O AVISO DE QUEM É O QUÊ. Sem ele, o vendedor via umas linhas com ✕ e
+            # outras sem e lia aquilo como defeito (relatado com print). Duas
+            # frases, e cada uma responde uma pergunta dele: o que é isso, e o que
+            # eu posso mexer.
+            + ("<div class=respdica><b>equipe</b> são as da empresa, iguais pra "
+               "todo mundo — <b>você usa, mas não apaga</b> (🔒). As sem selo são "
+               "<b>suas</b>: só você vê e só você apaga.</div>"
+               if not _manda_na_conta(request) else
+               "<div class=respdica><b>equipe</b> valem pra todos os vendedores — "
+               "você pode apagar. As sem selo são <b>suas</b>: ninguém mais vê.</div>")
             # "Procurar nas respostas" e não "Procurar…": com a folha por cima da
             # conversa, um campo vazio no topo é lido como a caixa de responder —
             # foi o que aconteceu no primeiro teste.
-            f"<input class=respbusca id=respbusca placeholder='🔎 Procurar nas respostas' autocomplete=off>"
+            + "<input class=respbusca id=respbusca placeholder='🔎 Procurar nas respostas' autocomplete=off>"
             "<div class=resplista id=resplista></div>"
             "<div class=resppe>"
             # nasce DESLIGADO e o JS acende quando há texto na caixa: o botão que

@@ -203,7 +203,7 @@ def test_vazio_nao_envia():
     assert out == {"prevenido": True, "fetch": 0, "bolhas": 0}
 
 
-def _tela_da_conversa(texto_pre: str = "") -> str:
+def _tela_da_conversa(texto_pre: str = "", papel: str = "dono") -> str:
     """A tela do lead renderizada de verdade, sem banco: `d` é o que o
     `lead_do_vendedor` devolveria pra um lead simples com duas mensagens."""
     from datetime import datetime, timezone
@@ -218,7 +218,9 @@ def _tela_da_conversa(texto_pre: str = "") -> str:
                         "status": ""},
                        {"id": 11, "who": "out", "texto": "Tem sim!", "quando": agora,
                         "status": "lido"}]}
-    req = SimpleNamespace(session={}, query_params=QueryParams(
+    # o papel decide o que a folha de respostas rápidas oferece: quem manda na
+    # conta apaga as da equipe, o vendedor só usa
+    req = SimpleNamespace(session={"papel": papel}, query_params=QueryParams(
         f"texto={texto_pre}" if texto_pre else ""))
     # pode_voz: com o microfone e o clipe na tela, que é o caso da conta QR — é
     # assim que o JS do anexo entra no render e é compilado junto
@@ -366,6 +368,19 @@ def test_quem_nasce_hidden_precisa_da_regra_hidden_no_css():
         "estes nascem escondidos mas o CSS manda desenhar: "
         + ", ".join(sorted(set(achados)))
         + " — falta `.classe[hidden]{display:none}`")
+
+
+def test_a_folha_explica_o_que_e_da_empresa_e_o_que_e_seu():
+    """A folha mistura as da empresa com as do vendedor. Sem uma linha dizendo
+    qual é qual, ele lê a diferença (umas com ✕, outras com 🔒) como defeito."""
+    vendedor = _tela_da_conversa(papel="vendedor").split("class=respdica")[1][:340]
+    assert "da empresa" in vendedor and "não apaga" in vendedor and "🔒" in vendedor
+    assert "suas" in vendedor and "só você" in vendedor
+
+    dono = _tela_da_conversa(papel="dono").split("class=respdica")[1][:340]
+    assert "pode apagar" in dono, "quem manda na conta precisa saber que pode"
+    assert "ninguém mais vê" in dono
+    assert ".respdica{" in pc._CSS_TEXTO
 
 
 def test_a_resposta_da_equipe_mostra_cadeado_em_vez_de_buraco():

@@ -4994,8 +4994,9 @@ _RAPIDAS_JS = r"""
     if(itens||carregando) return Promise.resolve();
     carregando=true;
     lista.innerHTML='<div class=respvazio>Carregando…</div>';
-    return fetch(BASE+"/lead/"+LEAD+"/respostas",{headers:{"x-cockpit":"1"}})
-      .then(function(r){return r.json();})
+    // zapFetch e não fetch cru: as cinco causas de falha viram cinco recados, e
+    // o erro fica registrado (ver web/zap_fetch.py). `j` nulo = ele já avisou.
+    return zapFetch(BASE+"/lead/"+LEAD+"/respostas",{headers:{"x-cockpit":"1"}})
       .then(function(j){ carregando=false;
         if(j&&j.ok){ itens=j.itens||[]; podeEquipe=!!j.equipe; } else { itens=[]; } })
       .catch(function(){ carregando=false; itens=[]; });
@@ -5039,8 +5040,8 @@ _RAPIDAS_JS = r"""
     var id=Number(it.getAttribute("data-id")), x=(itens||[]).filter(function(y){return y.id===id;})[0];
     if(e.target.closest(".respdel")){
       if(!confirm("Apagar esta resposta?")) return;
-      fetch(BASE.replace(/\/lead.*$/,"")+"/respostas/"+id+"/apagar",
-        {method:"POST",headers:{"x-cockpit":"1"}}).then(function(r){return r.json();})
+      zapFetch(BASE.replace(/\/lead.*$/,"")+"/respostas/"+id+"/apagar",
+        {method:"POST",headers:{"x-cockpit":"1"}})
         .then(function(j){ if(j&&j.ok){ itens=(itens||[]).filter(function(y){return y.id!==id;});
           pintar(busca?busca.value:""); } });
       return;
@@ -5073,11 +5074,12 @@ _RAPIDAS_JS = r"""
     var eq=document.getElementById("respequipe");
     if(eq&&eq.checked) corpo.set("equipe","1");
     salvar.disabled=true;
-    fetch(BASE.replace(/\/lead.*$/,"")+"/respostas",
+    zapFetch(BASE.replace(/\/lead.*$/,"")+"/respostas",
       {method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded","x-cockpit":"1"},
-       body:corpo}).then(function(r){return r.json();}).then(function(j){
+       body:corpo}).then(function(j){
       salvar.disabled=false;
-      if(!j||!j.ok){ alert((j&&j.erro)||"Não deu pra salvar."); return; }
+      if(!j){ return; }                       // o zapFetch já avisou
+      if(!j.ok){ alert(j.erro||"Não deu pra salvar."); return; }
       itens=null;                       // recarrega com a nova no lugar certo
       carregar().then(function(){ pintar(busca?busca.value:""); });
     }).catch(function(){ salvar.disabled=false; alert("Falha de conexão."); });

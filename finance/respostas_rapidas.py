@@ -101,7 +101,11 @@ def _titulo_do_texto(texto: str) -> str:
     Título é o que a pessoa lê na lista correndo; pedir pra escrever um antes de
     salvar é o atrito que faz ninguém salvar nada."""
     limpo = " ".join(str(texto or "").split())
-    return limpo[:LIMITE_TITULO].rstrip() + ("…" if len(limpo) > LIMITE_TITULO else "")
+    if len(limpo) <= LIMITE_TITULO:
+        return limpo
+    # as reticências contam no teto: cortar DEPOIS de juntá-las comia justamente
+    # elas, e o título saía parecendo uma frase que acabou no meio
+    return limpo[:LIMITE_TITULO - 1].rstrip() + "…"
 
 
 def criar(pool, conta_id: int, membro_id: int, texto: str, *,

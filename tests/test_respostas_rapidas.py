@@ -114,7 +114,11 @@ def test_o_titulo_sai_do_proprio_texto(pool):
     """Pedir um título antes de salvar é o atrito que faz ninguém salvar nada."""
     rr.criar(pool, CONTA, VEND, "Bom dia! " + "x" * 200)
     t = rr.listar(pool, CONTA, VEND)[0]["titulo"]
-    assert t.startswith("Bom dia!") and len(t) <= rr.LIMITE_TITULO + 1 and t.endswith("…")
+    assert t.startswith("Bom dia!") and t.endswith("…")
+    assert len(t) <= rr.LIMITE_TITULO, "as reticências contam no teto"
+    # frase curta não ganha reticências nem corte
+    rr.criar(pool, CONTA, COLEGA, "Chegou?")
+    assert rr.listar(pool, CONTA, COLEGA)[0]["titulo"] == "Chegou?"
 
 
 def test_salvar_a_mesma_frase_duas_vezes_nao_duplica(pool):

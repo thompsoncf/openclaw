@@ -1562,12 +1562,13 @@ _ESPERA_JS = r"""(function(){
   window.addEventListener('load',function(){setTimeout(function(){try{
     var n=performance.getEntriesByType&&performance.getEntriesByType('navigation')[0];
     if(!n||!navigator.sendBeacon)return;
-    var srv=0,bco=0,cons=0,st=n.serverTiming||[];
+    var srv=0,bco=0,cons=0,cnx=0,st=n.serverTiming||[];
     for(var i=0;i<st.length;i++){
       if(st[i].name==='total')srv=st[i].duration;
       else if(st[i].name==='banco'){bco=st[i].duration;cons=parseInt(st[i].description,10)||0;}
+      else if(st[i].name==='conexoes')cnx=st[i].duration;
     }
-    var d={tela:location.pathname,servidor:Math.round(srv),banco:Math.round(bco),consultas:cons,
+    var d={tela:location.pathname,servidor:Math.round(srv),banco:Math.round(bco),consultas:cons,conexoes:cnx,
       conexao:Math.round(n.connectEnd-n.domainLookupStart),
       // o que sobra do 1o byte depois de tirar o servidor é a viagem
       espera:Math.round(Math.max(0,(n.responseStart-n.requestStart)-srv)),
@@ -7275,7 +7276,8 @@ def cockpit_velocidade(request: Request, dias: int = 7):
         "<div class=veltela>"
         f"<div class=nm>{esc(t['tela'].replace('/cockpit', '') or '/')}"
         f"<small>{t['n']}× · servidor {_vel_ms(t['servidor'])}"
-        f" ({t['consultas']} consultas, banco {_vel_ms(t['banco'])})"
+        f" ({t['consultas']} consultas em {t['conexoes']} conexões,"
+        f" banco {_vel_ms(t['banco'])})"
         f" · rede {_vel_ms(t['rede'])} · aparelho {_vel_ms(t['render'])}</small></div>"
         f"<div class=tp><span class='{_vel_cor(t['mediana'])}' "
         f"style='color:var(--{'neon' if _vel_cor(t['mediana']) == 'bom' else 'ambar' if _vel_cor(t['mediana']) == 'meio' else 'coral'})'>"

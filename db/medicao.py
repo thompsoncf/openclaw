@@ -49,11 +49,13 @@ def fechar(token) -> dict:
 
 
 def resumir_sql(sql) -> str:
-    """A consulta em uma linha, sem os valores: `select p.id, p.empresa from
-    prospeccao p where ...` vira `select … from prospeccao`.
+    """A consulta em uma linha, sem os valores: fica o verbo e a tabela, e some
+    todo o resto — uma leitura longa da tabela de leads vira `select … prospeccao`.
 
     É o suficiente pra reconhecer a repetida — e é justamente a repetida que se
-    corta."""
+    corta. (Sem exemplo literal de SQL aqui: `test_escopo_conta` varre este
+    arquivo atrás de consulta a tabela multi-tenant sem filtro de dono, e um
+    exemplo em docstring é indistinguível de uma consulta de verdade.)"""
     texto = " ".join(str(sql).split())[:400].lower()
     verbo = texto.split(" ", 1)[0] if texto else "?"
     alvo = ""

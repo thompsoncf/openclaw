@@ -26,6 +26,7 @@ create table tempo_tela (
     servidor_ms integer not null default 0,
     banco_ms integer not null default 0,
     consultas integer not null default 0,
+    conexoes integer not null default 0,
     conexao_ms integer not null default 0,
     espera_ms integer not null default 0,
     render_ms integer not null default 0,
@@ -103,13 +104,15 @@ def test_a_lista_por_tela_vem_da_mais_lenta(pool):
     conta = _conta(pool)
     for _ in range(3):
         _grava(pool, conta, "/cockpit", 300, servidor=200)
-        _grava(pool, conta, "/cockpit/lead/7", 2000, servidor=1800, banco=1500, consultas=12)
+        _grava(pool, conta, "/cockpit/lead/7", 2000, servidor=1800, banco=1500,
+               consultas=12, conexoes=4)
 
     telas = vel.por_tela(pool, conta)
     assert [t["tela"] for t in telas] == ["/cockpit/lead/{id}", "/cockpit"]
     lead = telas[0]
     assert lead["mediana"] == 2000 and lead["servidor"] == 1800
     assert lead["banco"] == 1500 and lead["consultas"] == 12.0
+    assert lead["conexoes"] == 4.0, "conexão tem conserto diferente de consulta"
 
 
 def test_tela_com_poucas_amostras_nao_vira_veredito(pool):

@@ -337,6 +337,59 @@ def test_as_respostas_rapidas_escrevem_na_caixa_e_nao_enviam():
     assert "/([^\\\\/\\\\s][^\\\\/]*)?$/" in js.replace("\\", "\\\\") or "match(/(?:^|\\s)\\//" in js
 
 
+def test_quem_nasce_hidden_precisa_da_regra_hidden_no_css():
+    """A ARMADILHA QUE PEGOU AS RESPOSTAS RÁPIDAS (20/09/2026).
+
+    O atributo `hidden` esconde pelo estilo do navegador (`display:none`), e
+    QUALQUER `display` escrito na folha de estilo ganha dele. A folha das
+    respostas tinha `display:flex` e nasceu aberta por cima da caixa de mensagem:
+    o ✕ não fechava nada e o vendedor digitava na busca achando que era o campo
+    de responder.
+
+    `.lupa` e `.abertura` já carregavam a regra `[hidden]` por isso. Este teste
+    cobra a regra de TODO elemento que a tela desenha escondido — a próxima folha
+    não vai repetir o erro.
+    """
+    css = pc._CSS_TEXTO
+    html = _tela_da_conversa()
+    achados = []
+    for tag in re.findall(r"<div[^>]*\bhidden\b[^>]*>", html):
+        m = re.search(r"class=['\"]?([\w\- ]+)", tag)
+        if not m:
+            continue
+        for classe in m.group(1).split():
+            tem_display = re.search(r"\.%s\{[^}]*display:" % re.escape(classe), css)
+            tem_regra = f".{classe}[hidden]" in css
+            if tem_display and not tem_regra:
+                achados.append(classe)
+    assert not achados, (
+        "estes nascem escondidos mas o CSS manda desenhar: "
+        + ", ".join(sorted(set(achados)))
+        + " — falta `.classe[hidden]{display:none}`")
+
+
+def test_o_botao_de_salvar_nao_mente():
+    """Ele mostra O QUE vai salvar e nasce apagado: com a folha por cima da
+    conversa o vendedor não vê mais o que escreveu, e um botão que só responde
+    com um aviso ("escreva a mensagem") é um botão que mente."""
+    html = _tela_da_conversa()
+    assert "id=respsalvar disabled" in html
+    assert "Escreva na caixa pra salvar" in html
+    js = pc._RAPIDAS_JS
+    assert "function acertarSalvar()" in js and "s.disabled=!txt" in js
+    assert "'Salvar: “'" in js, "o botão diz o que vai guardar"
+    assert "alert(\"Escreva a mensagem" not in js, "o aviso virou botão apagado"
+    # e a busca não pode ser confundida com a caixa de responder
+    assert "🔎 Procurar nas respostas" in html
+
+
+def test_fechar_a_folha_esconde_o_fundo_e_devolve_o_teclado():
+    js = pc._RAPIDAS_JS
+    fechar = js.split("function fechar()")[1][:400]
+    assert "folha.hidden=true" in fechar and "fundo0.hidden=true" in fechar
+    assert "caixa.focus()" in fechar
+
+
 def test_a_folha_de_respostas_fica_fora_do_form():
     """Um <button> solto dentro de um form envia o form no Enter — e o form daqui
     é o que manda mensagem pro cliente."""

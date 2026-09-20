@@ -1509,13 +1509,18 @@ def test_a_fila_se_atualiza_em_pedacos_e_nao_recarregando(pool, monkeypatch):
     # os pedaços que a tela troca têm endereço próprio
     assert "id=filafoco" in html and "class=scroll id=filalista" in html and "id=filaabas" in html
     assert "location.reload()" in html, "recarregar continua sendo o plano B"
+    # a CAIXA DE BUSCA fica fora dos pedaços trocados (20/09/2026): ela vivia
+    # dentro do `foco`, e o tique de 8s apagava o que o vendedor estava digitando.
+    assert "id=filabusca" in html and "class='busca'" in html
 
     req2 = SimpleNamespace(session=dict(req.session), query_params=QueryParams(""))
     frag = pc._fila(req2, conta, vend, fragmento=True)
     j = json.loads(bytes(frag.body).decode("utf-8"))
     assert j["ok"] and j["sig"] and j["sub"]
     assert "Fragmento" in j["lista"] and "class=swipe" in j["lista"]
-    assert "class=tabs" in j["abas"] and "class='busca'" in j["foco"]
+    assert "class=tabs" in j["abas"]
+    assert "class=ordem" in j["foco"], "o topo trocável continua sendo ordem + pílulas"
+    assert "class='busca'" not in j["foco"],         "o fragmento NÃO pode trazer a caixa: trocá-la apaga o que está sendo digitado"
     # o que a tela mostra e o que o fragmento manda são o mesmo HTML
     assert j["lista"].split("<div class=dica-swipe")[0] in html
     assert j["abas"] in html

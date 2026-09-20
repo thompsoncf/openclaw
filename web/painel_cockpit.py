@@ -1555,6 +1555,37 @@ _ESPERA_JS = r"""(function(){
   // fetch, e a TRAVA da insistência na tela (os rádios obrigatórios e a volta com
   // o motivo são do fluxo do form, e reescrevê-los aqui seria duplicar a regra).
   var f=document.querySelector('form.composer');
+
+  // ---- O RASCUNHO ----
+  // O que ele escreveu e não mandou fica guardado NO APARELHO, por conversa. Sem
+  // isso, sair da tela pra conferir a agenda ou a ficha apagava o texto — e quem
+  // redigita uma vez, na segunda responde pelo WhatsApp do celular, que é o que
+  // este app inteiro existe pra evitar.
+  //
+  // No aparelho, e não no servidor, de propósito: é texto não enviado, rascunho
+  // de quem escreveu. Some quando ele cai na tela de entrada (ver
+  // _LIMPA_RASCUNHOS_JS) e nunca viaja pra lugar nenhum.
+  //
+  // Sem regex pra achar o id: este arquivo nasce de uma string Python, e uma
+  // barra invertida num literal JS vira escape inválido (test_painel_js_sintaxe).
+  var LEAD_DO_FORM = "";
+  if(f && f.action){
+    var _pedacos = String(f.action).split("/lead/");
+    if(_pedacos[1]) LEAD_DO_FORM = _pedacos[1].split("/")[0];
+  }
+  var CHAVE_RASC = LEAD_DO_FORM ? ("ck_rasc_" + LEAD_DO_FORM) : "";
+  function guardarRascunho(txt){
+    if(!CHAVE_RASC) return;
+    try{
+      if(txt) localStorage.setItem(CHAVE_RASC, txt.slice(0, 2000));
+      else localStorage.removeItem(CHAVE_RASC);
+    }catch(e){}
+  }
+  function lerRascunho(){
+    if(!CHAVE_RASC) return "";
+    try{ return localStorage.getItem(CHAVE_RASC) || ""; }catch(e){ return ""; }
+  }
+
   function bolhaOtimista(txt){
     var chat=document.querySelector('.chat');
     if(!chat)return null;
@@ -1578,6 +1609,14 @@ _ESPERA_JS = r"""(function(){
     function cresce(){if(!campo0)return;campo0.style.height='auto';
       campo0.style.height=Math.min(campo0.scrollHeight,118)+'px';}
     if(campo0){
+      // o rascunho volta ao abrir a conversa. Só quando a caixa está VAZIA: o
+      // texto que veio do servidor (a pergunta pronta da Fila, o que não saiu)
+      // manda mais que o guardado aqui.
+      if(!campo0.value){
+        var guardado=lerRascunho();
+        if(guardado){ campo0.value=guardado; }
+      }
+      campo0.addEventListener('input',function(){ guardarRascunho(campo0.value); });
       campo0.addEventListener('input',cresce);cresce();
       // no computador, Enter manda e Shift+Enter quebra a linha; no celular o
       // Enter é quebra de linha e quem manda é o botão — igual ao WhatsApp
@@ -1604,6 +1643,7 @@ _ESPERA_JS = r"""(function(){
       var hid=document.createElement('input');
       hid.type='hidden';hid.name='texto';hid.value=txt;
       f.appendChild(hid);campo.removeAttribute('name');campo.value='';campo.blur();
+      guardarRascunho('');
       if(b){b.disabled=true;b.innerHTML='<i class=girando></i>';}
       corre();
       return;
@@ -1611,6 +1651,7 @@ _ESPERA_JS = r"""(function(){
     ev.preventDefault();
     var corpo=new URLSearchParams(new FormData(f));
     campo.value='';if(campo.style)campo.style.height='';
+    guardarRascunho('');                    // saiu da caixa: o rascunho morre aqui
     recado('');
     zapFetch(f.action,{method:'POST',credentials:'same-origin',
       headers:{'x-cockpit':'1','Content-Type':'application/x-www-form-urlencoded'},body:corpo}).then(function(j){if(!j){falhou('Sem conexão agora — a mensagem não saiu.');return;}
@@ -1630,6 +1671,7 @@ _ESPERA_JS = r"""(function(){
       if(d)d.remove();
       // o texto volta pra caixa: redigitar é o que manda o vendedor pro WhatsApp
       if(!campo.value)campo.value=txt;
+      guardarRascunho(campo.value);         // e volta a ser rascunho guardado
       recado(msg||'Não consegui enviar. Tente de novo.');
     }
   });
@@ -1637,6 +1679,20 @@ _ESPERA_JS = r"""(function(){
 
 #: o arquivo que o `_page` aponta — versionado pelo conteúdo, como o zapfetch
 _ESPERA_URL = _estaticos.registrar("espera.js", _ESPERA_JS)
+
+
+#: OS RASCUNHOS MORREM NA TELA DE ENTRADA. O texto não enviado fica no aparelho
+#: (ver o rascunho no espera.js), e aparelho de vendedor é trocado, emprestado e
+#: perdido. Quem chega aqui ou saiu pelo Sair, ou a sessão caiu: nos dois casos o
+#: que estava escrito pra um cliente não pode esperar o próximo dono do aparelho.
+#: É a mesma ideia do cache do service worker, que também deixou de guardar
+#: conversa (v4).
+_LIMPA_RASCUNHOS_JS = (
+    "<script>(function(){try{"
+    "for(var i=localStorage.length-1;i>=0;i--){"
+    "var k=localStorage.key(i);"
+    "if(k&&k.indexOf('ck_rasc_')===0)localStorage.removeItem(k);}"
+    "}catch(e){}})();</script>")
 
 
 def _brl(centavos, *, centavos_visiveis: bool = False) -> str:
@@ -7364,7 +7420,7 @@ def _tela_login(titulo: str, sub: str, email: str = "", erro: str = "",
              "<button class=go2 type=submit name=so_link value=1>"
              "Entrar por link no e-mail</button></form>"
              "<small>Esqueceu a senha? Use o link por e-mail e crie outra ao entrar.</small>"
-             "</div>")
+             "</div>" + _LIMPA_RASCUNHOS_JS)
     return _page("Zaq — entrar", corpo)
 
 

@@ -256,12 +256,17 @@ async def _mede_cockpit(request: Request, call_next):
         return await call_next(request)
     import re as _re
     import time as _time
+    from db import conexao as _cx
     from db import medicao as _med
     t0 = _time.perf_counter()
     token = _med.abrir()
+    # e aqui que a tela passa a usar UMA conexao em vez de uma por bloco (ver
+    # db/conexao.py): 16 conexoes viravam 16 verificacoes de ~100 ms na Fila
+    tok_cx = _cx.abrir_requisicao()
     try:
         resp = await call_next(request)
     finally:
+        _cx.fechar_requisicao(tok_cx)
         m = _med.fechar(token)
     total = (_time.perf_counter() - t0) * 1000
     tela = _re.sub(r"/\d+", "/{id}", p)

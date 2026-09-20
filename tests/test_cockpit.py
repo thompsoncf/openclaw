@@ -1465,17 +1465,27 @@ def test_a_fila_nao_pode_voltar_a_conversar_46_vezes_com_o_banco(pool, monkeypat
             _conv_msg(c, conta, lead, texto="Oi, tem data?")
         c.commit()
 
-    # o pool da suíte é comum; a medição mora na CONEXÃO (db/conexao.py faz o
-    # mesmo em produção), então aqui ela precisa ser pedida de propósito
-    medido = ConnectionPool(pool.conninfo, connection_class=medicao.ConexaoMedida,
-                            min_size=1, max_size=3, open=True,
-                            kwargs={"prepare_threshold": None})
-    try:
+    # o pool da suíte é comum; aqui ele é montado como o de PRODUÇÃO — a medição
+    # mora na conexão, e `check` verifica a conexão a cada entrega (db/conexao.py),
+    # que é justamente o pedágio que esta tela pagava 16 vezes
+    from db import conexao as cx
+    medido = cx._PoolComConta(pool.conninfo, connection_class=medicao.ConexaoMedida,
+                              min_size=1, max_size=3, open=True,
+                              check=ConnectionPool.check_connection,
+                              kwargs={"prepare_threshold": None})
+    def _desenha(reaproveitando: bool):
+        tok_cx = cx.abrir_requisicao() if reaproveitando else None
         token = medicao.abrir(detalhe=True)
         try:
             _fila_html(monkeypatch, medido, conta, vend)
         finally:
-            m = medicao.fechar(token)
+            medida = medicao.fechar(token)
+            cx.fechar_requisicao(tok_cx)
+        return medida
+
+    try:
+        antes = _desenha(False)     # uma conexão por bloco, como era até hoje
+        m = _desenha(True)          # uma conexão pra tela inteira
     finally:
         medido.close()
 
@@ -1485,9 +1495,18 @@ def test_a_fila_nao_pode_voltar_a_conversar_46_vezes_com_o_banco(pool, monkeypat
     # 14 é o que a Fila faz HOJE nesta suíte (produção faz 46, com mais dados e
     # caminhos que aqui não existem). O teto nasce no valor de hoje e é catraca:
     # quem cortar, baixa o número junto; quem acrescentar consulta, esbarra aqui.
-    assert m["consultas"] <= 14, (
+    # UMA conexão pra tela inteira (20/09/2026). Cada conexão a mais paga uma
+    # verificação, e cross-region isso é ~100 ms cada — a Fila pagava 16.
+    assert antes["conexoes"] > m["conexoes"] == 1, (
+        f"a Fila pegou {m['conexoes']} conexões (sem reaproveitar: "
+        f"{antes['conexoes']}). Cada uma além da primeira é ~100 ms em produção")
+    assert m["consultas"] < antes["consultas"], (
+        f"reaproveitar a conexão tinha que economizar as verificações: "
+        f"{m['consultas']} contra {antes['consultas']}")
+    # 15 = as 14 que desenham a tela + a única verificação que sobrou
+    assert m["consultas"] <= 15, (
         f"a Fila fez {m['consultas']} consultas em {m['conexoes']} conexões "
-        f"(teto: 14). Cada uma custa ~90 ms em produção — {m['consultas'] * 90} ms "
+        f"(teto: 15). Cada uma custa ~90 ms em produção — {m['consultas'] * 90} ms "
         f"só de viagem. O que rodou:" + chr(10) + detalhe)
 
 

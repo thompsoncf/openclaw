@@ -136,3 +136,23 @@ def test_nao_atropela_quem_esta_no_meio_de_um_gesto():
       depois(function(){ console.log(JSON.stringify({urls: log.urls})); });
     """)
     assert out["urls"] == [], "nenhuma das três situações pode buscar"
+
+
+def test_campo_focado_no_meio_do_voo_nao_perde_o_que_foi_digitado():
+    """A guarda do gesto valia SÓ no começo do tique — e entre ele e a troca há duas
+    idas ao servidor. Quem tocasse na busca nesse intervalo via o `innerHTML` chegar
+    por cima: o texto sumia e o teclado fechava no meio da palavra (20/09/2026).
+
+    Aqui o tique começa com o BODY em foco, como sempre, e o vendedor toca no campo
+    enquanto a resposta está no ar. A tela não pode ser trocada."""
+    out = _roda(r"""
+      sinal = {ok: true, sig: "v2"};
+      log.tique();                       // começa liberado: nada em foco
+      focado = {tagName: "INPUT"};       // o vendedor tocou na busca no meio do voo
+      depois(function(){ depois(function(){ depois(function(){
+        console.log(JSON.stringify({lista: lista.innerHTML, foco: foco.innerHTML,
+                                    reload: log.reload}));
+      }); }); });
+    """)
+    assert out["lista"] == "" and out["foco"] == "", "nada foi trocado por cima de quem digita"
+    assert out["reload"] == 0, "e muito menos recarregar a tela"

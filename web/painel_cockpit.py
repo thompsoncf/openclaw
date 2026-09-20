@@ -2124,7 +2124,11 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
         if vende:
             pil += (f"<a class='pil fora{' on' if 'festa30' in fora_on else ''}' href='{_tog('festa30')}'>"
                     f"🎉 30 dias <b>{fc['festa30']}</b></a>")
-    foco = caixa + ordem_html + (f"<div class=foco>{pil}</div>" if pil else "")
+    # a caixa NÃO entra no `foco` (20/09/2026): o `foco` é trocado inteiro pelo
+    # tique de 8s (ver `_sinal_js`), e trocar o <form> por baixo de quem está
+    # digitando apaga o que ele escreveu e fecha o teclado do celular. Ela vive
+    # sozinha em `#filabusca`, que nada re-renderiza.
+    foco = ordem_html + (f"<div class=foco>{pil}</div>" if pil else "")
 
     def _linha_evento(l):
         """A linha do evento no card do celular, como no funil."""
@@ -2297,6 +2301,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
              # o repasse vem DEPOIS da novidade e antes do foco: é sobre um lead
              # que já é dele agora, então pertence ao trabalho, não ao noticiário.
              + ("" if gestor else _faixa_recebidos(conta_id, membro_id))
+             + f"<div id=filabusca>{caixa}</div>"
              + f"<div id=filafoco>{foco}</div>"
              + f"<div class=scroll id=filalista>{pushcard}{lista}{dica}{volta}</div>"
              + (f"<a class=fab href='{_BASE}/lead/novo' aria-label='Novo lead'>+</a>"
@@ -2304,6 +2309,7 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
              + "<div class=toast id=toast></div>"
              + f"<div id=filaabas>{abas}</div>"
              + f'<script>window.CKBASE="{_BASE}";</script>' + vapid_js + _FILA_JS
+             + _busca_js()
              + _sinal_js(sig)
              + _badge_js(total_pend))
     return _page("Meus leads", corpo)
@@ -2320,6 +2326,61 @@ def _badge_js(total: int) -> str:
             "if(!navigator.setAppBadge)return;"        # navegador sem a API: nem tenta
             "try{(n>0?navigator.setAppBadge(n):navigator.clearAppBadge())"
             ".catch(function(){});}catch(_){}})();</script>")
+
+
+def _busca_js() -> str:
+    """A busca acontece AO DIGITAR (20/09/2026).
+
+    Antes o `<form>` era um GET pelado sem botão: a única coisa que chamava o
+    servidor era a tecla "Ir" do teclado — e teclado de celular que não faz o
+    envio implícito deixava o vendedor com o nome escrito na caixa e a fila
+    inteira na tela, parecendo que a busca não existe.
+
+    O GET continua de pé por baixo: onde este script não rodar, "Ir" busca como
+    sempre buscou. Aqui ele só é interceptado pra não recarregar a tela.
+
+    Quem responde continua sendo o BANCO, pelo mesmo `/fila/fragmento?q=` do
+    tique — filtrar na tela esconderia o lead de agosto que a fila nem carregou
+    (ver `ck.busca_leads_where`). E a URL acompanha por `replaceState`, senão o
+    tique de 8s (que pede `location.search`) traria a fila inteira de volta por
+    cima do resultado."""
+    return ("<script>(function(){"
+            "var cx=document.getElementById('filabusca');if(!cx)return;"
+            "var fm=cx.querySelector('form'),i=cx.querySelector('input[name=q]');"
+            "if(!fm||!i||!window.zapFetch)return;"
+            "var B=window.CKBASE||'/cockpit',t=null,ult=(i.value||'').trim(),pedido=0;"
+            # o ✕ e a borda acesa são estado de tela: quem busca sem recarregar
+            # precisa deles aqui, senão limpar vira recarregar a página na mão.
+            "function pinta(tem){"
+            "fm.className=tem?'busca on':'busca';"
+            "var x=fm.querySelector('.lm');"
+            "if(tem&&!x){x=document.createElement('a');x.className='lm';x.href=B;"
+            "x.setAttribute('aria-label','Limpar busca');x.textContent='✕';"
+            "fm.appendChild(x);}else if(!tem&&x){x.remove();}}"
+            "function busca(){"
+            "var v=(i.value||'').trim();if(v===ult)return;ult=v;"
+            "var qs=v?'?q='+encodeURIComponent(v):'';"
+            "try{history.replaceState(null,'',B+qs);}catch(_){}"
+            # a resposta de uma tecla velha não pode cair por cima da nova: quem
+            # digita rápido tem três viagens no ar e elas não voltam em ordem.
+            "var meu=++pedido;"
+            "zapFetch(B+'/fila/fragmento'+qs,{silencioso:true,headers:{'x-cockpit':'1'}})"
+            ".then(function(j){"
+            "if(meu!==pedido||!j||!j.ok)return;"
+            "var fo=document.getElementById('filafoco'),"
+            "li=document.getElementById('filalista'),"
+            "ab=document.getElementById('filaabas'),"
+            "sb=document.querySelector('.hdr .tt small');"
+            "if(!fo||!li||!ab)return;"
+            "fo.innerHTML=j.foco;li.innerHTML=j.lista;ab.innerHTML=j.abas;"
+            "if(sb)sb.textContent=j.sub;li.scrollTop=0;pinta(!!v);"
+            "if(window.__ligaFila)window.__ligaFila();});}"
+            "i.addEventListener('input',function(){clearTimeout(t);t=setTimeout(busca,300);});"
+            # "Ir" não espera os 300ms, e fecha o teclado — é o gesto de quem
+            # terminou de escrever.
+            "fm.addEventListener('submit',function(e){"
+            "e.preventDefault();clearTimeout(t);i.blur();busca();});"
+            "})();</script>")
 
 
 def _sinal_js(sig: str) -> str:
@@ -2347,6 +2408,11 @@ def _sinal_js(sig: str) -> str:
             ".then(function(j){if(!j){ocupado=false;return;}"
             "var p=partes();"
             "if(!j||!j.ok||!p.foco||!p.lista||!p.abas){location.reload();return;}"
+            # a guarda do `tique` valeu ANTES de duas viagens ao servidor. Entre
+            # elas o vendedor pode ter tocado num campo — então ela vale de novo
+            # aqui, agora encostada no innerHTML que destruiria o que ele digitou.
+            "var af=document.activeElement;"
+            "if(af&&/^(INPUT|TEXTAREA|SELECT)$/.test(af.tagName)){ocupado=false;return;}"
             "var topo=p.lista.scrollTop;"
             "p.foco.innerHTML=j.foco;p.lista.innerHTML=j.lista;p.abas.innerHTML=j.abas;"
             "if(p.sub)p.sub.textContent=j.sub;"

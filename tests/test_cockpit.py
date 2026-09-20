@@ -1440,6 +1440,57 @@ def test_fila_agrupada_por_o_que_o_lead_pede():
     assert [l["id"] for l in f3["grupos"][-1]["leads"]] == [5]
 
 
+def test_a_fila_nao_pode_voltar_a_conversar_46_vezes_com_o_banco(pool, monkeypatch):
+    """TETO DE CONSULTAS da tela mais aberta do app (20/09/2026).
+
+    Medido em produção pelo celular do dono: a Fila levava 6,6 s, dos quais 4,6 s
+    eram BANCO — 46 consultas a ~90 ms cada. Noventa milissegundos não é consulta
+    lenta, é distância: o servidor está em Oregon e o banco em us-east-1, e cada
+    `select` paga a travessia do continente.
+
+    Enquanto os dois não moram juntos, cada consulta a menos vale ~90 ms na mão do
+    vendedor. Este teto existe pra isso: ele não deixa a conta subir de novo, e a
+    mensagem de falha entrega a lista do que repetiu — que é por onde se corta.
+
+    O número do teste é menor que o de produção (aqui a conta tem 3 leads e não
+    tem novidade nem repasse); o que se guarda é a ORDEM DE GRANDEZA e a direção.
+    """
+    from db import medicao
+    from psycopg_pool import ConnectionPool
+    with pool.connection() as c:
+        conta = _conta(c)
+        vend = _membro(c, conta, nome="Ana", email="conta@x.com")
+        for i in range(3):
+            lead = _lead(c, conta, vend, f"Lead {i}")
+            _conv_msg(c, conta, lead, texto="Oi, tem data?")
+        c.commit()
+
+    # o pool da suíte é comum; a medição mora na CONEXÃO (db/conexao.py faz o
+    # mesmo em produção), então aqui ela precisa ser pedida de propósito
+    medido = ConnectionPool(pool.conninfo, connection_class=medicao.ConexaoMedida,
+                            min_size=1, max_size=3, open=True,
+                            kwargs={"prepare_threshold": None})
+    try:
+        token = medicao.abrir(detalhe=True)
+        try:
+            _fila_html(monkeypatch, medido, conta, vend)
+        finally:
+            m = medicao.fechar(token)
+    finally:
+        medido.close()
+
+    from collections import Counter
+    repetidas = Counter(sql for sql, _ in m["sqls"])
+    detalhe = chr(10).join(f"    {n}x  {sql}" for sql, n in repetidas.most_common())
+    # 14 é o que a Fila faz HOJE nesta suíte (produção faz 46, com mais dados e
+    # caminhos que aqui não existem). O teto nasce no valor de hoje e é catraca:
+    # quem cortar, baixa o número junto; quem acrescentar consulta, esbarra aqui.
+    assert m["consultas"] <= 14, (
+        f"a Fila fez {m['consultas']} consultas em {m['conexoes']} conexões "
+        f"(teto: 14). Cada uma custa ~90 ms em produção — {m['consultas'] * 90} ms "
+        f"só de viagem. O que rodou:" + chr(10) + detalhe)
+
+
 def _fila_html(monkeypatch, pool, conta, vend, req=None, vende=True, **kw):
     from types import SimpleNamespace
     from starlette.datastructures import QueryParams

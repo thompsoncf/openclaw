@@ -56,12 +56,12 @@ def gravar(pool, conta_id: int, membro_id: int | None, dados: dict) -> bool:
     with pool.connection() as c:
         c.execute(
             """insert into tempo_tela (conta_id, membro_id, tela, servidor_ms, banco_ms,
-                                       consultas, conexao_ms, espera_ms, render_ms,
-                                       total_ms, rede)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                                       consultas, conexoes, conexao_ms, espera_ms,
+                                       render_ms, total_ms, rede)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (conta_id, membro_id, tela, _ms(dados.get("servidor")), _ms(dados.get("banco")),
-             _ms(dados.get("consultas")), _ms(dados.get("conexao")), _ms(dados.get("espera")),
-             _ms(dados.get("render")), _ms(dados.get("total")), rede))
+             _ms(dados.get("consultas")), _ms(dados.get("conexoes")), _ms(dados.get("conexao")),
+             _ms(dados.get("espera")), _ms(dados.get("render")), _ms(dados.get("total")), rede))
         c.commit()
     return True
 
@@ -76,7 +76,7 @@ def por_tela(pool, conta_id: int, dias: int = 7, limite: int = 12) -> list[dict]
             """select tela, count(*),
                       percentile_cont(0.5) within group (order by total_ms),
                       percentile_cont(0.95) within group (order by total_ms),
-                      avg(servidor_ms), avg(banco_ms), avg(consultas),
+                      avg(servidor_ms), avg(banco_ms), avg(consultas), avg(conexoes),
                       avg(conexao_ms + espera_ms), avg(render_ms)
                  from tempo_tela
                 where conta_id = %s and criado_em > now() - make_interval(days => %s)
@@ -86,8 +86,11 @@ def por_tela(pool, conta_id: int, dias: int = 7, limite: int = 12) -> list[dict]
                 limit %s""", (conta_id, dias, limite)).fetchall()
     return [{"tela": t, "n": n, "mediana": int(p50 or 0), "p95": int(p95 or 0),
              "servidor": int(srv or 0), "banco": int(bco or 0), "consultas": round(cons or 0, 1),
-             "rede": int(rd or 0), "render": int(rnd or 0)}
-            for t, n, p50, p95, srv, bco, cons, rd, rnd in linhas]
+             # conexões ao lado de consultas: cada conexão entregue paga um
+             # `SELECT 1` de verificação, que entra no mesmo balde e tem conserto
+             # diferente (ver a migração 303)
+             "conexoes": round(cnx or 0, 1), "rede": int(rd or 0), "render": int(rnd or 0)}
+            for t, n, p50, p95, srv, bco, cons, cnx, rd, rnd in linhas]
 
 
 def resumo(pool, conta_id: int, dias: int = 7) -> dict:

@@ -268,9 +268,14 @@ async def _mede_cockpit(request: Request, call_next):
     _log_tempo.info("tela=%s %s status=%s total_ms=%d banco_ms=%d consultas=%d conexoes=%d",
                     tela, request.method, resp.status_code, total, m["ms"],
                     m["consultas"], m["conexoes"])
+    # `conexoes` vai junto porque cada conexão entregue paga um `SELECT 1` de
+    # verificação (ver db/conexao.py) — que entra no mesmo balde de "consultas" e
+    # custa a mesma travessia. Sem os dois números lado a lado, não dá pra saber
+    # se o conserto é juntar consulta ou reaproveitar conexão.
     resp.headers.setdefault(
         "Server-Timing",
-        f'total;dur={total:.0f}, banco;dur={m["ms"]:.0f};desc="{m["consultas"]} consultas"')
+        f'total;dur={total:.0f}, banco;dur={m["ms"]:.0f};desc="{m["consultas"]} consultas"'
+        f', conexoes;dur={m["conexoes"]}')
     return resp
 # ESTÁTICOS PRIMEIRO: rota curta e sem sessão, e nenhum outro router tem
 # /estatico/*. Serve o CSS e o JS que saíram de dentro das páginas (ver

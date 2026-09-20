@@ -298,6 +298,39 @@ def test_o_audio_sai_na_hora_e_a_transcricao_alcanca_depois():
     assert "if(e.texto)" in html and "createTextNode(e.texto)" in html
 
 
+def test_o_audio_toca_na_bolha_com_onda_e_tempo():
+    """O controle nativo do navegador saía diferente em cada aparelho — no iPhone
+    do dono virou "00:08 ——— 00:00", que não diz nada. Agora a bolha tem tocar,
+    onda e duração, e a onda é a DE VERDADE quando ela existe."""
+    som = pc._som_html("/cockpit/lead/7/midia/99", 6, [10, 90, 50])
+    assert "class=toca" in som and "aria-label='Tocar áudio'" in som
+    assert som.count("<i style='height:") == 3 and "height:90%" in som
+    assert "<span class=dur>0:06</span>" in som
+    assert "<audio preload=none src='/cockpit/lead/7/midia/99'>" in som
+    # sem onda, as barras ficam iguais: régua de progresso, não fala inventada
+    lisa = pc._som_html("/x", 3)
+    assert lisa.count("height:34%") == len(pc._ONDA_LISA)
+    # e a bolha de mídia do tipo áudio usa o tocador
+    assert "class='mid som'" in pc._midia_html(7, {"id": 5, "midia": {"tipo": "audio", "segundos": 6}})
+
+    html = _tela_da_conversa()
+    assert "function som(s,seg,onda)" in html, "o polling desenha o mesmo tocador"
+    assert "window.__som=som" in html, "o gravador reaproveita o tocador"
+    assert "closest('.som .toca')" in html and "a.play()" in html
+    assert "if(o!==a&&!o.paused){o.pause()" in html, "um áudio de cada vez"
+    # o gravador desenha a bolha com a onda que acabou de medir
+    assert "window.__som?window.__som(url, seg, pontos)" in pc._VOZ_JS
+
+
+def test_o_microfone_e_um_microfone_desenhado_cheio():
+    """O traço fino sumia no botão de 40px: no celular do dono aparecia um
+    retângulo sem o arco, com cara de ícone quebrado."""
+    html = _tela_da_conversa()
+    bt = html.split("id=mic")[1][:600]
+    assert "fill=currentColor" in bt and "stroke" not in bt
+    assert bt.count("<path") == 2, "corpo do microfone + a base"
+
+
 def test_a_folha_de_acoes_nao_empurra_a_tela_pra_cima():
     """19/09/2026, iPhone: tocar em "Ficha, funil e fechamento" jogava a tela
     inteira pra cima — o topo da conversa sumia, sobrava preto embaixo e a folha

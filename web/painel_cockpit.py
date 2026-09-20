@@ -582,10 +582,23 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   border:1px solid rgba(255,255,255,.09);background:rgba(0,0,0,.2);max-width:220px}
 .bub .mid img,.bub .mid video{display:block;width:100%;height:auto;max-height:260px;
   object-fit:cover}
-/* o áudio que o vendedor acabou de gravar toca na própria bolha: o arquivo está
-   no aparelho dele, então ouvir de volta não custa download nenhum */
-.bub .mid.som{max-width:220px;border:0;background:none}
-.bub .mid.som audio{display:block;width:100%;height:34px}
+/* O ÁUDIO NA BOLHA: tocar, a onda e o tempo — no lugar do controle nativo, que
+   sai diferente em cada aparelho e ocupa a bolha inteira (no iPhone do dono
+   apareceu como "00:08 ——— 00:00", que não diz nada). A onda é a de verdade
+   quando existe; sem ela, as barras viram uma régua de progresso. */
+.bub .mid.som{display:flex;align-items:center;gap:.5rem;max-width:232px;
+  border:0;background:none;padding:0;overflow:visible}
+.bub .mid.som .toca{width:30px;height:30px;flex:0 0 auto;border:0;border-radius:50%;
+  background:rgba(255,255,255,.16);color:inherit;display:grid;place-items:center;
+  cursor:pointer;font-size:.72rem;line-height:1;padding:0}
+.bub .mid.som .toca:active{transform:scale(.93)}
+.bub .mid.som .onda{flex:1;display:flex;align-items:center;gap:2px;height:22px;min-width:0}
+.bub .mid.som .onda i{flex:1 1 0;min-width:2px;background:currentColor;opacity:.35;
+  border-radius:1px}
+.bub .mid.som .onda i.on{opacity:1}
+.bub .mid.som .dur{font-family:var(--mono);font-size:.62rem;opacity:.75;
+  min-width:30px;text-align:right}
+.bub .mid.som audio{display:none}
 .bub .mid.fig{max-width:110px;border:0;background:none}
 .bub .mid.fig img{max-height:110px;object-fit:contain}
 .bub .doc{display:flex;align-items:center;gap:.45rem;padding:.45rem .55rem;
@@ -5109,7 +5122,7 @@ _VOZ_JS = r"""
   // 4G mais a ida e volta até os EUA. Agora a bolha aparece na hora, com o áudio
   // TOCÁVEL (o arquivo está no próprio aparelho), e o upload corre por baixo.
   // Mesmo desenho do anexo, que já fazia assim.
-  function bolhaLocal(blob, seg){
+  function bolhaLocal(blob, seg, onda){
     var chat=document.querySelector(".chat");
     if(!chat) return null;
     var d=document.createElement("div");
@@ -5117,8 +5130,13 @@ _VOZ_JS = r"""
     var url=URL.createObjectURL(blob);
     var agora=new Date();
     var hh=("0"+agora.getHours()).slice(-2)+":"+("0"+agora.getMinutes()).slice(-2);
+    // o MESMO tocador das outras bolhas, e com a onda QUE ELE ACABOU DE FALAR —
+    // ela já foi medida durante a gravação, então sai de graça
+    var pontos=onda?Array.prototype.slice.call(onda):null;
+    var player=window.__som?window.__som(url, seg, pontos)
+      :('<span class="mid som"><audio controls src="'+url+'"></audio></span>');
     d.innerHTML='<div class=who>Você</div>'
-      + '<span class="mid som"><audio controls preload=metadata src="'+url+'"></audio></span>'
+      + player
       + "🎤 Áudio ("+mmss(seg)+")"
       + '<span class=hora>'+hh+'</span>'
       + '<span class=subiu>enviando…</span>';
@@ -5171,7 +5189,7 @@ _VOZ_JS = r"""
     var seg=Math.max(1,Math.round((Date.now()-t0)/1000));
     var blob=new Blob(pedacos,{type:tipoAtual});
     var onda=ondaPronta();                      // já está pronta: zero espera
-    var d=bolhaLocal(blob, seg);
+    var d=bolhaLocal(blob, seg, onda);
     sair();                                     // a barra fecha AQUI, não no fim
     subir(blob, onda, seg, d);
   }
@@ -5216,6 +5234,32 @@ def _tam_br(b) -> str:
     return "%d B" % b
 
 
+#: A onda quando não há onda: barras iguais, que viram régua de progresso. Não é
+#: fala desenhada e não finge ser — inventar um relevo aqui seria mostrar um tom
+#: que ninguém falou.
+_ONDA_LISA = [34] * 26
+
+
+def _som_html(src: str, segundos: int = 0, onda=None) -> str:
+    """O tocador de áudio da bolha: tocar, onda e duração.
+
+    `onda` é a lista de 0 a 100 que o WhatsApp manda junto do áudio (e a mesma que
+    o Cockpit calcula ao gravar). Existindo, a bolha mostra a FALA desenhada, como
+    no WhatsApp; faltando, as barras ficam iguais e servem só de progresso.
+
+    O `<audio>` fica escondido: quem desenha é o CSS, e o controle nativo sai
+    diferente em cada aparelho.
+    """
+    pontos = [max(8, min(100, int(x))) for x in (onda or _ONDA_LISA)][:40] or _ONDA_LISA
+    barras = "".join(f"<i style='height:{p}%'></i>" for p in pontos)
+    dur = "%d:%02d" % (int(segundos or 0) // 60, int(segundos or 0) % 60) if segundos else ""
+    return (f"<span class='mid som'>"
+            f"<button type=button class=toca aria-label='Tocar áudio'>▶</button>"
+            f"<span class=onda>{barras}</span>"
+            f"<span class=dur>{esc(dur)}</span>"
+            f"<audio preload=none src='{esc(src)}'></audio></span>")
+
+
 def _midia_html(lead_id: int, m: dict) -> str:
     """A bolha de mídia, montada no SERVIDOR pra primeira carga.
 
@@ -5235,6 +5279,8 @@ def _midia_html(lead_id: int, m: dict) -> str:
         return ""
     src = f"{_BASE}/lead/{lead_id}/midia/{mid}"
     guardar = _guardar_html(mid, d)
+    if tipo == "audio":
+        return _som_html(src, d.get("segundos") or 0, d.get("onda")) + guardar
     if tipo == "documento":
         peso = f"<br><span class=pz>{esc(_tam_br(d.get('bytes')))}</span>" if d.get("bytes") else ""
         return (f"<a class='mid doc' href='{esc(src)}' target=_blank rel=noopener>"
@@ -5487,10 +5533,18 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
     else:
         # `pode_voz` chega de fora (o microfone só existe no canal QR): quem
         # monta a tela não vai buscar sessão nem banco pra decidir isso.
+        # O MICROFONE, DESENHADO CHEIO (20/09/2026). O traço fino de antes sumia
+        # no botão de 40px — no celular do dono aparecia um retângulo sem o arco,
+        # que é a cara de ícone quebrado. Cheio, lê-se de primeira em qualquer
+        # tamanho, e é como o WhatsApp desenha o dele.
         mic = ("<button type=button class=mic id=mic aria-label='Gravar áudio'>"
-               "<svg width=20 height=20 viewBox='0 0 24 24' fill=none stroke=currentColor "
-               "stroke-width=1.8 stroke-linecap=round><rect x=9 y=3 width=6 height=11 rx=3/>"
-               "<path d='M5 11a7 7 0 0014 0M12 18v3'/></svg></button>") if pode_voz else ""
+               "<svg width=21 height=21 viewBox='0 0 24 24' fill=currentColor aria-hidden=true>"
+               "<path d='M12 14.6a3.4 3.4 0 0 0 3.4-3.4V5.4a3.4 3.4 0 1 0-6.8 0v5.8"
+               "a3.4 3.4 0 0 0 3.4 3.4z'/>"
+               "<path d='M17.9 11.2a.95.95 0 0 0-1.9 0 4 4 0 0 1-8 0 .95.95 0 0 0-1.9 0"
+               " 5.95 5.95 0 0 0 4.95 5.86V19.2H9.2a.95.95 0 0 0 0 1.9h5.6a.95.95 0 0 0 0-1.9"
+               "h-1.85v-2.14A5.95 5.95 0 0 0 17.9 11.2z'/>"
+               "</svg></button>") if pode_voz else ""
         # a barra de gravação também é gateada: sem microfone ela seria marcação
         # morta em toda tela de conversa de todo vendedor
         barra = ("<div class=gravando id=grav>"
@@ -5744,6 +5798,44 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            # A MESMA bolha de mídia do _midia_html, pro que chega pelo polling. O
            # arquivo não está no nosso disco: o src busca no CDN e decifra na hora, e
            # o loading=lazy faz a foto que ninguém abre não custar nada.
+           # O TOCADOR DE ÁUDIO, gêmeo do `_som_html` do servidor: as duas cópias
+           # têm que desenhar a mesma bolha (primeira carga e polling), e o
+           # gravador usa esta aqui pela `window.__som`.
+           "function som(s,seg,onda){"
+           "var pts=(onda&&onda.length)?onda:null,b='';"
+           "if(!pts){pts=[];for(var z=0;z<26;z++)pts.push(34);}"
+           "for(var i=0;i<pts.length&&i<40;i++){"
+           "var h=Math.max(8,Math.min(100,pts[i]|0));b+='<i style=\"height:'+h+'%\"></i>';}"
+           "var dd=seg?(Math.floor(seg/60)+':'+('0'+Math.floor(seg%60)).slice(-2)):'';"
+           "return '<span class=\"mid som\">'"
+           "+'<button type=button class=toca aria-label=\"Tocar audio\">\\u25B6</button>'"
+           "+'<span class=onda>'+b+'</span><span class=dur>'+dd+'</span>'"
+           "+'<audio preload=none src=\"'+s+'\"></audio></span>';}"
+           "window.__som=som;"
+           # tocar, parar e pintar a onda conforme anda. Delegação no chat, como a
+           # lupa: as bolhas que chegam depois nascem já funcionando.
+           "function pinta(sm,a){"
+           "var bs=sm.querySelectorAll('.onda i');"
+           "var p=(a.duration&&isFinite(a.duration))?(a.currentTime/a.duration):0;"
+           "var k=Math.round(p*bs.length);"
+           "for(var i=0;i<bs.length;i++){if(i<k)bs[i].classList.add('on');"
+           "else bs[i].classList.remove('on');}"
+           "var dd=sm.querySelector('.dur');"
+           "if(dd&&a.currentTime)dd.textContent=Math.floor(a.currentTime/60)+':'"
+           "+('0'+Math.floor(a.currentTime%60)).slice(-2);}"
+           "chat.addEventListener('click',function(e){"
+           "var bt=e.target.closest&&e.target.closest('.som .toca');if(!bt)return;"
+           "var sm=bt.parentNode,a=sm.querySelector('audio');if(!a)return;"
+           "if(a.paused){"
+           # um de cada vez: começar um áudio para o que estava tocando
+           "chat.querySelectorAll('.som audio').forEach(function(o){"
+           "if(o!==a&&!o.paused){o.pause();var ob=o.parentNode.querySelector('.toca');"
+           "if(ob)ob.textContent='\\u25B6';}});"
+           "if(!a.__lig){a.__lig=1;"
+           "a.addEventListener('timeupdate',function(){pinta(sm,a);});"
+           "a.addEventListener('ended',function(){bt.textContent='\\u25B6';pinta(sm,a);});}"
+           "a.play();bt.textContent='\\u23F8';"
+           "}else{a.pause();bt.textContent='\\u25B6';}});"
            "function tam(b){b=Number(b)||0;"
            "if(b>=1048576)return (b/1048576).toFixed(1).replace('.',',')+' MB';"
            "if(b>=1024)return Math.round(b/1024)+' KB';return b+' B';}"
@@ -5752,6 +5844,9 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            # o mesmo botão do _guardar_html — as duas cópias têm que dar o mesmo HTML
            "var g=d.guardada?'<span class=guardado>🔒 guardado</span>':"
            "('<button type=button class=guardar data-msg=\"'+m.id+'\">guardar</button>');"
+           # o áudio: o mesmo tocador do servidor (ver _som_html), desenhado aqui
+           # pro que chega com a tela aberta
+           "if(d.tipo==='audio')return som(s,d.segundos,d.onda)+g;"
            "if(d.tipo==='documento')return '<a class=\"mid doc\" href=\"'+s+'\" target=_blank "
            "rel=noopener><span>📄</span><span><span class=nm>'+txt(d.nome||'arquivo')+'</span>'"
            "+(d.bytes?('<br><span class=pz>'+tam(d.bytes)+'</span>'):'')+'</span></a>'+g;"

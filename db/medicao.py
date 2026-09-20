@@ -27,9 +27,18 @@ import psycopg
 MEDIDA: ContextVar[dict | None] = ContextVar("medida_banco", default=None)
 
 
-def abrir():
-    """Começa a medir a requisição corrente. Devolve o token pro `fechar`."""
-    return MEDIDA.set({"conexoes": 0, "consultas": 0, "ms": 0.0})
+def abrir(detalhe: bool = False):
+    """Começa a medir a requisição corrente. Devolve o token pro `fechar`.
+
+    `detalhe=True` guarda também QUAIS consultas foram — o "46 consultas" do
+    cabeçalho diz que a tela está cara, mas não diz o que cortar. Fica desligado
+    em produção: guardar uma lista por requisição é barato, mas o que ela serve é
+    pra quem está otimizando, e isso se faz na suíte (ver
+    `test_a_fila_nao_pode_voltar_a_conversar_46_vezes_com_o_banco`)."""
+    m = {"conexoes": 0, "consultas": 0, "ms": 0.0}
+    if detalhe:
+        m["sqls"] = []
+    return MEDIDA.set(m)
 
 
 def fechar(token) -> dict:
@@ -37,6 +46,22 @@ def fechar(token) -> dict:
     m = MEDIDA.get() or {"conexoes": 0, "consultas": 0, "ms": 0.0}
     MEDIDA.reset(token)
     return m
+
+
+def resumir_sql(sql) -> str:
+    """A consulta em uma linha, sem os valores: `select p.id, p.empresa from
+    prospeccao p where ...` vira `select … from prospeccao`.
+
+    É o suficiente pra reconhecer a repetida — e é justamente a repetida que se
+    corta."""
+    texto = " ".join(str(sql).split())[:400].lower()
+    verbo = texto.split(" ", 1)[0] if texto else "?"
+    alvo = ""
+    for marca in (" from ", " into ", " update "):
+        if marca in texto:
+            alvo = texto.split(marca, 1)[1].split(" ")[0].strip("(,")
+            break
+    return f"{verbo} … {alvo}".strip() if alvo else texto[:60]
 
 
 def contar_conexao() -> None:
@@ -61,5 +86,8 @@ class ConexaoMedida(psycopg.Connection):
         try:
             return super().execute(*args, **kwargs)
         finally:
+            gasto = (time.perf_counter() - t0) * 1000
             m["consultas"] += 1
-            m["ms"] += (time.perf_counter() - t0) * 1000
+            m["ms"] += gasto
+            if "sqls" in m:
+                m["sqls"].append((resumir_sql(args[0] if args else ""), round(gasto, 1)))

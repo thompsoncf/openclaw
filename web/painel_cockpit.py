@@ -881,6 +881,12 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .resphdr{display:flex;align-items:center;justify-content:space-between}
 .resphdr b{font-family:var(--display);font-size:.95rem}
 .respfecha{background:none;border:0;color:var(--text-dim);font-size:1rem;cursor:pointer}
+/* o aviso de quem é o quê: a folha mistura as da empresa com as do vendedor, e
+   sem uma linha explicando ele lê a diferença (umas com ✕, outras com 🔒) como
+   defeito em vez de regra */
+.respdica{font-size:.7rem;color:var(--text-dim);line-height:1.45;
+  border-left:2px solid var(--line);padding-left:.5rem}
+.respdica b{color:var(--text)}
 .respbusca{background:var(--surface);border:1px solid var(--line);border-radius:999px;
   color:var(--text);padding:.5rem .85rem;font-family:inherit;font-size:.85rem}
 .resplista{overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:.35rem}
@@ -894,7 +900,11 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .respx{display:block;font-size:.74rem;color:var(--text-dim);line-height:1.35;
   overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .respdel{flex:0 0 auto;width:32px;background:none;border:1px solid var(--line);border-radius:11px;
-  color:var(--text-faint);cursor:pointer;font-size:.75rem}
+  color:var(--text-faint);cursor:pointer;font-size:.75rem;
+  display:grid;place-items:center;align-self:stretch}
+/* o cadeado ocupa o MESMO lugar do ✕: sem ele a linha da equipe ficava com um
+   buraco mudo do lado, que parece defeito em vez de regra */
+.respdel[data-trava]{cursor:default;opacity:.45;border-style:dashed}
 .respvazio{font-size:.78rem;color:var(--text-dim);line-height:1.5;padding:.8rem .2rem;text-align:center}
 .resppe{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
 .resppe .btn{width:auto;flex:1;padding:.55rem .8rem;font-size:.82rem}
@@ -5044,7 +5054,13 @@ _RAPIDAS_JS = r"""
         +   '<span class=respt>'+esc(x.titulo||x.texto.slice(0,60))+(x.equipe?' <em>equipe</em>':'')+'</span>'
         +   '<span class=respx>'+esc(x.texto)+'</span>'
         + '</button>'
-        + ((x.equipe&&!podeEquipe)?'':'<button type=button class=respdel aria-label="Apagar">✕</button>')
+        // Sem o ✕, o lugar dele ficava um BURACO MUDO e parecia defeito (relatado
+        // com print em 20/09/2026). O cadeado ocupa o mesmo lugar e diz por quê:
+        // a resposta da equipe é a mesma pros quatro vendedores, e apagá-la some
+        // com ela pra todo mundo — por isso só o dono ou gestor apaga.
+        + ((x.equipe&&!podeEquipe)
+            ? '<span class=respdel data-trava=1 title="Da equipe: só o dono ou o gestor apaga">🔒</span>'
+            : '<button type=button class=respdel aria-label="Apagar">✕</button>')
         + '</div>';
     }).join("");
   }
@@ -5064,7 +5080,9 @@ _RAPIDAS_JS = r"""
   lista.addEventListener("click",function(e){
     var it=e.target.closest&&e.target.closest(".respit"); if(!it) return;
     var id=Number(it.getAttribute("data-id")), x=(itens||[]).filter(function(y){return y.id===id;})[0];
-    if(e.target.closest(".respdel")){
+    var alvo=e.target.closest(".respdel");
+    if(alvo&&alvo.getAttribute("data-trava")) return;   // o cadeado não pergunta nada
+    if(alvo){
       if(!confirm("Apagar esta resposta?")) return;
       zapFetch(BASE.replace(/\/lead.*$/,"")+"/respostas/"+id+"/apagar",
         {method:"POST",headers:{"x-cockpit":"1"}})
@@ -5807,10 +5825,20 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
             "<div class=resp id=resp hidden>"
             "<div class=resphdr><b>Respostas rápidas</b>"
             "<button type=button class=respfecha id=respfecha aria-label=Fechar>✕</button></div>"
+            # O AVISO DE QUEM É O QUÊ. Sem ele, o vendedor via umas linhas com ✕ e
+            # outras sem e lia aquilo como defeito (relatado com print). Duas
+            # frases, e cada uma responde uma pergunta dele: o que é isso, e o que
+            # eu posso mexer.
+            + ("<div class=respdica><b>equipe</b> são as da empresa, iguais pra "
+               "todo mundo — <b>você usa, mas não apaga</b> (🔒). As sem selo são "
+               "<b>suas</b>: só você vê e só você apaga.</div>"
+               if not _manda_na_conta(request) else
+               "<div class=respdica><b>equipe</b> valem pra todos os vendedores — "
+               "você pode apagar. As sem selo são <b>suas</b>: ninguém mais vê.</div>")
             # "Procurar nas respostas" e não "Procurar…": com a folha por cima da
             # conversa, um campo vazio no topo é lido como a caixa de responder —
             # foi o que aconteceu no primeiro teste.
-            f"<input class=respbusca id=respbusca placeholder='🔎 Procurar nas respostas' autocomplete=off>"
+            + "<input class=respbusca id=respbusca placeholder='🔎 Procurar nas respostas' autocomplete=off>"
             "<div class=resplista id=resplista></div>"
             "<div class=resppe>"
             # nasce DESLIGADO e o JS acende quando há texto na caixa: o botão que

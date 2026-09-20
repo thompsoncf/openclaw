@@ -7591,7 +7591,13 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
     ctx.setdefault("titulo", nome.capitalize())
     # A rota atual, pro `base` esconder o link que aponta pra própria página
     # (o "Entrar" no /login) — e a barra inteira, no /login.
-    ctx.setdefault("rota", request.url.path)
+    #
+    # `getattr` e não `request.url.path` direto: os testes montam o request como
+    # SimpleNamespace, com `session` e mais nada. O `request.url.path` que já
+    # existia aqui embaixo nunca quebrou porque mora dentro de um `if` que os
+    # testes pulam passando `secao_ativa` pronto — esta linha roda sempre.
+    # Sem rota, o `base` cai no caminho de fora do login, que é o certo.
+    ctx.setdefault("rota", getattr(getattr(request, "url", None), "path", ""))
     if "secao_ativa" not in ctx:
         _p = request.url.path
         _secs = [("caixa", "/painel/pdv"), ("abastecimento", "/painel/produtos/abastecimento"),

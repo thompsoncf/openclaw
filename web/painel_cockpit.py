@@ -2528,7 +2528,7 @@ def _busca_js() -> str:
     return ("<script>(function(){"
             "var cx=document.getElementById('filabusca');if(!cx)return;"
             "var fm=cx.querySelector('form'),i=cx.querySelector('input[name=q]');"
-            "if(!fm||!i||!window.zapFetch)return;"
+            "if(!fm||!i)return;"
             "var B=window.CKBASE||'/cockpit',t=null,ult=(i.value||'').trim(),pedido=0;"
             # o ✕ e a borda acesa são estado de tela: quem busca sem recarregar
             # precisa deles aqui, senão limpar vira recarregar a página na mão.
@@ -2539,7 +2539,18 @@ def _busca_js() -> str:
             "x.setAttribute('aria-label','Limpar busca');x.textContent='✕';"
             "fm.appendChild(x);}else if(!tem&&x){x.remove();}}"
             "function busca(){"
-            "var v=(i.value||'').trim();if(v===ult)return;ult=v;"
+            "var v=(i.value||'').trim();if(v===ult)return;"
+            # UMA LETRA NÃO É BUSCA: "a" traz a fila inteira de volta e custa uma
+            # viagem ao banco por tecla. Da segunda em diante vale; e o campo
+            # VAZIO sempre vale, porque limpar tem que devolver a fila.
+            "if(v&&v.length<2)return;"
+            "ult=v;"
+            # o zapFetch vem de um arquivo com `defer`, que roda DEPOIS de todo
+            # script inline — inclusive este. Conferir a existência dele na
+            # montagem desligava a busca ao digitar por completo, e sobrava só o
+            # Enter do form (20/09/2026). Aqui ele já existe: quem digita é gente,
+            # e gente digita depois da tela pronta.
+            "if(!window.zapFetch){fm.submit();return;}"
             "var qs=v?'?q='+encodeURIComponent(v):'';"
             "try{history.replaceState(null,'',B+qs);}catch(_){}"
             # a resposta de uma tecla velha não pode cair por cima da nova: quem

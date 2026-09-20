@@ -322,6 +322,29 @@ def test_o_audio_toca_na_bolha_com_onda_e_tempo():
     assert "window.__som?window.__som(url, seg, pontos)" in pc._VOZ_JS
 
 
+def test_as_respostas_rapidas_escrevem_na_caixa_e_nao_enviam():
+    """Mandar no toque economizaria um segundo e custaria o dia em que o preço de
+    uma festa sai pro cliente de outra."""
+    html = _tela_da_conversa()
+    assert "id=rapidas" in html and "Respostas rápidas" in html
+    assert "id=resplista" in html and "Salvar o que está escrito" in html
+    js = pc._RAPIDAS_JS
+    assert "caixa.value=(atual" in js, "escreve na caixa"
+    assert "form.composer" in js and ".submit()" not in js and "requestSubmit" not in js
+    # a folha abre por JS, não por âncora: `:target` rola o .wrap e empurra a tela
+    assert ":target" not in js and "folha.hidden=false" in js
+    # o atalho da barra
+    assert "/([^\\\\/\\\\s][^\\\\/]*)?$/" in js.replace("\\", "\\\\") or "match(/(?:^|\\s)\\//" in js
+
+
+def test_a_folha_de_respostas_fica_fora_do_form():
+    """Um <button> solto dentro de um form envia o form no Enter — e o form daqui
+    é o que manda mensagem pro cliente."""
+    html = _tela_da_conversa()
+    depois_do_form = html.split("</form>")[1]
+    assert "id=resp " in depois_do_form or "id=resp>" in depois_do_form
+
+
 def test_o_microfone_e_um_microfone_desenhado_cheio():
     """O traço fino sumia no botão de 40px: no celular do dono aparecia um
     retângulo sem o arco, com cara de ícone quebrado."""

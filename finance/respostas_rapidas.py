@@ -95,6 +95,42 @@ def listar(pool, conta_id: int, membro_id: int | None) -> list[dict]:
              "equipe": bool(r[3]), "usos": int(r[4] or 0)} for r in linhas]
 
 
+def da_equipe(pool, conta_id: int) -> list[dict]:
+    """Só as DA CONTA — o que a empresa diz ao cliente. É o que a tela do painel
+    gere: as pessoais de cada vendedor não passam por aqui, nem pro dono."""
+    try:
+        with pool.connection() as c:
+            linhas = c.execute(
+                """select id, titulo, texto, usos, criado_em
+                     from respostas_rapidas
+                    where conta_id=%s and membro_id is null
+                    order by usos desc, id desc""", (conta_id,)).fetchall()
+    except Exception as e:  # noqa: BLE001
+        _log.info("respostas da equipe indisponíveis (conta %s): %s", conta_id, e)
+        return []
+    return [{"id": r[0], "titulo": r[1] or "", "texto": r[2],
+             "usos": int(r[3] or 0), "criado_em": r[4]} for r in linhas]
+
+
+def contagem_por_membro(pool, conta_id: int) -> dict:
+    """{membro_id: quantas}. A CONTAGEM das pessoais, nunca o texto.
+
+    O dono precisa saber que a equipe está usando a ferramenta; o que cada um
+    escreveu pra si é dele. Prometido na tela do vendedor com estas palavras:
+    "As sem selo são suas: só você vê".
+    """
+    try:
+        with pool.connection() as c:
+            linhas = c.execute(
+                """select membro_id, count(*) from respostas_rapidas
+                    where conta_id=%s and membro_id is not null
+                    group by membro_id""", (conta_id,)).fetchall()
+    except Exception as e:  # noqa: BLE001
+        _log.info("contagem de respostas pessoais (conta %s): %s", conta_id, e)
+        return {}
+    return {r[0]: int(r[1]) for r in linhas}
+
+
 def _titulo_do_texto(texto: str) -> str:
     """O título quando ninguém deu um: as primeiras palavras da frase.
 

@@ -863,6 +863,36 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .grade a:last-child:nth-child(odd),.grade .off:last-child:nth-child(odd){grid-column:1/-1}
 .grade a.orc{border-color:#1e4a3a;color:var(--neon);background:rgba(37,211,102,.08);font-weight:600}
 .grade a.vis2{border-color:#1b3a4a;color:var(--azul);background:#0d1b23;font-weight:600}
+/* AS RESPOSTAS RÁPIDAS (migração 301): a folha que sobe do rodapé com o que o
+   vendedor manda o dia inteiro. Abre por JS, não por `:target` — o salto de
+   âncora rola o `.wrap` e empurra a tela (foi o defeito do #759). */
+.respfundo{position:fixed;inset:0;z-index:29;background:rgba(0,0,0,.5)}
+.resp{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:520px;
+  z-index:30;background:var(--bg-2);border-top:1px solid var(--line);
+  border-radius:18px 18px 0 0;padding:.6rem .9rem 1rem;
+  padding-bottom:calc(1rem + var(--fundo-seguro));max-height:76%;
+  display:flex;flex-direction:column;gap:.5rem}
+.resphdr{display:flex;align-items:center;justify-content:space-between}
+.resphdr b{font-family:var(--display);font-size:.95rem}
+.respfecha{background:none;border:0;color:var(--text-dim);font-size:1rem;cursor:pointer}
+.respbusca{background:var(--surface);border:1px solid var(--line);border-radius:999px;
+  color:var(--text);padding:.5rem .85rem;font-family:inherit;font-size:.85rem}
+.resplista{overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:.35rem}
+.respit{display:flex;align-items:stretch;gap:.3rem}
+.respusar{flex:1;min-width:0;text-align:left;background:var(--surface);border:1px solid var(--line);
+  border-radius:11px;padding:.5rem .7rem;color:var(--text);cursor:pointer;display:block}
+.respusar:active{background:var(--bg)}
+.respt{display:block;font-size:.82rem;font-weight:600;margin-bottom:.1rem}
+.respt em{font-style:normal;font-size:.6rem;color:var(--neon);border:1px solid #1e4a3a;
+  border-radius:999px;padding:0 .35rem;margin-left:.3rem;vertical-align:middle}
+.respx{display:block;font-size:.74rem;color:var(--text-dim);line-height:1.35;
+  overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.respdel{flex:0 0 auto;width:32px;background:none;border:1px solid var(--line);border-radius:11px;
+  color:var(--text-faint);cursor:pointer;font-size:.75rem}
+.respvazio{font-size:.78rem;color:var(--text-dim);line-height:1.5;padding:.8rem .2rem;text-align:center}
+.resppe{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+.resppe .btn{width:auto;flex:1;padding:.55rem .8rem;font-size:.82rem}
+.respeq{font-size:.72rem;color:var(--text-dim);display:flex;align-items:center;gap:.3rem}
 /* a trava da insistência (migração 257), grudada no composer */
 .travabl{background:var(--surface);border:1px solid var(--ambar-borda);border-radius:10px;
   padding:.6rem .7rem;margin:0 0 .5rem;display:flex;flex-direction:column;gap:.4rem}
@@ -4940,6 +4970,124 @@ _FOLHA_JS = (
     "endireita();})();</script>")
 
 
+#: A FOLHA DAS RESPOSTAS RÁPIDAS. Abre por JS (e não por `:target`, como a de
+#: ações): o salto de âncora rola o `.wrap` e empurra a tela — foi o defeito que
+#: o #759 consertou, e não vale repetir num lugar novo.
+_RAPIDAS_JS = r"""
+<script>
+(function(){
+  var BASE="__BASE__", LEAD=__LEAD__;
+  var caixa=document.querySelector("form.composer [name=texto]");
+  var folha=document.getElementById("resp"), lista=document.getElementById("resplista");
+  var busca=document.getElementById("respbusca"), bt=document.getElementById("rapidas");
+  if(!caixa||!folha||!lista) return;
+  var itens=null, podeEquipe=false, carregando=false, deBarra=false;
+
+  function esc(s){var e=document.createElement("div");e.textContent=s||"";return e.innerHTML;}
+  function abrir(filtro){
+    folha.hidden=false; document.body.classList.add("com-resp");
+    if(busca){ busca.value=filtro||""; }
+    carregar().then(function(){ pintar(filtro||""); if(busca&&!filtro) busca.focus(); });
+  }
+  function fechar(){ folha.hidden=true; document.body.classList.remove("com-resp"); deBarra=false; }
+  function carregar(){
+    if(itens||carregando) return Promise.resolve();
+    carregando=true;
+    lista.innerHTML='<div class=respvazio>Carregando…</div>';
+    // zapFetch e não fetch cru: as cinco causas de falha viram cinco recados, e
+    // o erro fica registrado (ver web/zap_fetch.py). `j` nulo = ele já avisou.
+    return zapFetch(BASE+"/lead/"+LEAD+"/respostas",{headers:{"x-cockpit":"1"}})
+      .then(function(j){ carregando=false;
+        if(j&&j.ok){ itens=j.itens||[]; podeEquipe=!!j.equipe; } else { itens=[]; } })
+      .catch(function(){ carregando=false; itens=[]; });
+  }
+  function pintar(filtro){
+    var f=(filtro||"").trim().toLowerCase();
+    var vis=(itens||[]).filter(function(x){
+      return !f || (x.titulo+" "+x.texto).toLowerCase().indexOf(f)>=0; });
+    if(!vis.length){
+      lista.innerHTML='<div class=respvazio>'
+        + ((itens&&itens.length)?'Nada com esse termo.'
+           :'Nenhuma resposta guardada ainda.<br>Escreva uma mensagem e toque em <b>Salvar o que está escrito</b>.')
+        + '</div>';
+      return;
+    }
+    lista.innerHTML=vis.map(function(x){
+      return '<div class=respit data-id="'+x.id+'">'
+        + '<button type=button class=respusar>'
+        +   '<span class=respt>'+esc(x.titulo||x.texto.slice(0,60))+(x.equipe?' <em>equipe</em>':'')+'</span>'
+        +   '<span class=respx>'+esc(x.texto)+'</span>'
+        + '</button>'
+        + ((x.equipe&&!podeEquipe)?'':'<button type=button class=respdel aria-label="Apagar">✕</button>')
+        + '</div>';
+    }).join("");
+  }
+  function usar(id, texto){
+    // ESCREVE NA CAIXA, não envia: mandar no toque economizaria um segundo e
+    // custaria o dia em que o preço de uma festa sai pro cliente de outra.
+    var atual=caixa.value||"";
+    if(deBarra){ atual=atual.replace(/\/[^\/]*$/, ""); }
+    caixa.value=(atual && !/\s$/.test(atual) ? atual+" " : atual) + texto;
+    fechar();
+    caixa.focus();
+    try{ caixa.setSelectionRange(caixa.value.length, caixa.value.length); }catch(e){}
+    caixa.dispatchEvent(new Event("input"));
+    fetch(BASE.replace(/\/lead.*$/,"")+"/respostas/"+id+"/uso",
+      {method:"POST",headers:{"x-cockpit":"1"}}).catch(function(){});
+  }
+  lista.addEventListener("click",function(e){
+    var it=e.target.closest&&e.target.closest(".respit"); if(!it) return;
+    var id=Number(it.getAttribute("data-id")), x=(itens||[]).filter(function(y){return y.id===id;})[0];
+    if(e.target.closest(".respdel")){
+      if(!confirm("Apagar esta resposta?")) return;
+      zapFetch(BASE.replace(/\/lead.*$/,"")+"/respostas/"+id+"/apagar",
+        {method:"POST",headers:{"x-cockpit":"1"}})
+        .then(function(j){ if(j&&j.ok){ itens=(itens||[]).filter(function(y){return y.id!==id;});
+          pintar(busca?busca.value:""); } });
+      return;
+    }
+    if(x) usar(id, x.texto);
+  });
+  if(busca) busca.addEventListener("input",function(){ pintar(busca.value); });
+  if(bt) bt.addEventListener("click",function(){ folha.hidden?abrir(""):fechar(); });
+  var fundo=document.getElementById("respfundo");
+  if(fundo) fundo.addEventListener("click",fechar);
+  var fecha=document.getElementById("respfecha");
+  if(fecha) fecha.addEventListener("click",fechar);
+  document.addEventListener("keydown",function(e){ if(e.key==="Escape"&&!folha.hidden) fechar(); });
+
+  // A BARRA. Digitar "/" no fim do que está escrito abre a lista já filtrada —
+  // é o atalho de quem tem as mãos no teclado e não quer procurar botão.
+  caixa.addEventListener("input",function(){
+    var v=caixa.value||"", m=v.match(/(?:^|\s)\/([^\/\s][^\/]*)?$/);
+    if(m){ deBarra=true; abrir((m[1]||"").trim()); }
+    else if(deBarra && folha.hidden===false){ fechar(); }
+  });
+
+  // "salvar o que está escrito": é assim que a lista se enche
+  var salvar=document.getElementById("respsalvar");
+  if(salvar) salvar.addEventListener("click",function(){
+    var txt=(caixa.value||"").trim();
+    if(!txt){ alert("Escreva a mensagem na caixa e toque em salvar."); return; }
+    var corpo=new URLSearchParams();
+    corpo.set("texto", txt);
+    var eq=document.getElementById("respequipe");
+    if(eq&&eq.checked) corpo.set("equipe","1");
+    salvar.disabled=true;
+    zapFetch(BASE.replace(/\/lead.*$/,"")+"/respostas",
+      {method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded","x-cockpit":"1"},
+       body:corpo}).then(function(j){
+      salvar.disabled=false;
+      if(!j){ return; }                       // o zapFetch já avisou
+      if(!j.ok){ alert(j.erro||"Não deu pra salvar."); return; }
+      itens=null;                       // recarrega com a nova no lugar certo
+      carregar().then(function(){ pintar(busca?busca.value:""); });
+    }).catch(function(){ salvar.disabled=false; alert("Falha de conexão."); });
+  });
+})();
+</script>"""
+
+
 _TRAVA_JS = (
     "<script>(function(){"
     "var f=document.getElementById('comp'); if(!f)return;"
@@ -5559,6 +5707,12 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
         # manda faria o vendedor escolher o arquivo, esperar, e receber erro.
         # `accept` aberto de propósito — PDF, planilha e comprovante são o que ele
         # mais precisa mandar, e uma lista de tipos envelhece contra o vendedor.
+        # AS RESPOSTAS RÁPIDAS (migração 301). O raio fica ao lado do clipe porque
+        # é da mesma família: coisas que entram na mensagem sem ser digitadas.
+        rapidas = ("<button type=button class=mic id=rapidas aria-label='Respostas rápidas'>"
+                   "<svg width=20 height=20 viewBox='0 0 24 24' fill=currentColor "
+                   "aria-hidden=true><path d='M13 2 4.5 13.2a.8.8 0 0 0 .64 1.3H10l-1 7.5 "
+                   "8.5-11.2a.8.8 0 0 0-.64-1.3H12z'/></svg></button>")
         clipe = ("<button type=button class=mic id=clipe aria-label='Anexar arquivo'>"
                  "<svg width=20 height=20 viewBox='0 0 24 24' fill=none stroke=currentColor "
                  "stroke-width=1.8 stroke-linecap=round stroke-linejoin=round>"
@@ -5617,9 +5771,24 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                 # tira só — no WhatsApp o vendedor quebra linha à vontade.
                 + f"<textarea name=texto rows=1 placeholder='Responder…' required autocomplete=off"
                 f"{' autofocus' if texto_pre else ''}>{esc(texto_pre)}</textarea>"
-                + clipe + mic +
+                + rapidas + clipe + mic +
                 "<button type=submit aria-label=Enviar>&#10148;</button>"
                 + barra + "</form>")
+        # a folha das respostas rápidas mora FORA do form: ela tem botões próprios,
+        # e um <button> solto dentro de um form envia o form no Enter
+        acao += (
+            "<div class=respfundo id=respfundo hidden></div>"
+            "<div class=resp id=resp hidden>"
+            "<div class=resphdr><b>Respostas rápidas</b>"
+            "<button type=button class=respfecha id=respfecha aria-label=Fechar>✕</button></div>"
+            f"<input class=respbusca id=respbusca placeholder='Procurar…' autocomplete=off>"
+            "<div class=resplista id=resplista></div>"
+            "<div class=resppe>"
+            "<button type=button class='btn ghost' id=respsalvar>Salvar o que está escrito</button>"
+            + ("<label class=respeq><input type=checkbox id=respequipe> pra equipe inteira</label>"
+               if _manda_na_conta(request) else "")
+            + "</div></div>")
+        acao += _RAPIDAS_JS.replace("__BASE__", _BASE).replace("__LEAD__", str(lead_id))
         if pode_voz:
             acao += _VOZ_JS.replace("__BASE__", _BASE).replace("__LEAD__", str(lead_id))
             acao += _ANEXO_JS.replace("__BASE__", _BASE).replace("__LEAD__", str(lead_id))
@@ -6608,6 +6777,88 @@ def cockpit_midia(request: Request, lead_id: int, mensagem_id: int):
     return StreamingResponse(_corpo(),
                              media_type=(ref.get("mimetype") or "").split(";")[0].strip()
                              or "application/octet-stream", headers=cab)
+
+
+def _manda_na_conta(request: Request) -> bool:
+    """Dono ou gestor? É quem pode escrever e apagar a resposta DA EQUIPE — a que
+    todo mundo vê. Vendedor mexe só nas dele."""
+    return (request.session.get("papel") or "dono") in ("dono", "gestor")
+
+
+@router.get("/cockpit/lead/{lead_id}/respostas")
+def cockpit_respostas(request: Request, lead_id: int):
+    """As respostas rápidas desta conversa, com as variáveis JÁ TROCADAS.
+
+    Trocar aqui, e não na tela, é o que faz o que ele LÊ na lista ser exatamente o
+    que vai entrar na caixa: `{nome}` vira o nome deste cliente, `{vendedor}` o
+    nome dele, `{empresa}` o da empresa. Duas trocas em dois lugares dariam duas
+    frases diferentes pro mesmo toque.
+    """
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    conta_id, membro_id = sess
+    d = ck.lead_do_vendedor(get_pool(), conta_id, membro_id, lead_id)
+    if not d:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
+    from finance import respostas_rapidas as rr
+    p = ck.perfil(get_pool(), conta_id, membro_id)
+    vals = rr.variaveis(cliente=d.get("contato") or d.get("empresa") or "",
+                        vendedor=p.get("nome") or "",
+                        empresa=_marca_conta(conta_id)["nome"])
+    itens = [{**x, "texto": rr.aplicar(x["texto"], vals)}
+             for x in rr.listar(get_pool(), conta_id, membro_id)]
+    return JSONResponse({"ok": True, "itens": itens, "equipe": _manda_na_conta(request)})
+
+
+@router.post("/cockpit/respostas")
+def cockpit_respostas_criar(request: Request, texto: str = Form(""),
+                            equipe: str = Form("")):
+    """Guarda o que está escrito na caixa como resposta rápida.
+
+    É assim que a lista se enche: o vendedor manda a frase uma vez, salva, e na
+    segunda é um toque. Pedir pra ele abrir uma tela de cadastro antes seria o
+    atrito que faz ninguém salvar nada.
+
+    `equipe` só é obedecido pra dono/gestor — senão um vendedor publicaria o preço
+    dele como se fosse o da empresa.
+    """
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    from finance import respostas_rapidas as rr
+    r = rr.criar(get_pool(), sess[0], sess[1], texto,
+                 da_equipe=bool(equipe) and _manda_na_conta(request))
+    if not r.get("ok"):
+        return JSONResponse({"ok": False, "erro": _RECADO_RESP.get(r.get("erro"), "Não deu pra salvar.")})
+    return JSONResponse(r)
+
+
+@router.post("/cockpit/respostas/{resposta_id}/uso")
+def cockpit_respostas_uso(request: Request, resposta_id: int):
+    """Conta o uso — é o que põe as mais usadas no topo da lista."""
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance import respostas_rapidas as rr
+    return JSONResponse(rr.usar(get_pool(), sess[0], sess[1], resposta_id))
+
+
+@router.post("/cockpit/respostas/{resposta_id}/apagar")
+def cockpit_respostas_apagar(request: Request, resposta_id: int):
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance import respostas_rapidas as rr
+    return JSONResponse(rr.apagar(get_pool(), sess[0], sess[1], resposta_id,
+                                  manda_na_conta=_manda_na_conta(request)))
+
+
+#: os recados de quando não dá pra salvar
+_RECADO_RESP = {
+    "vazio": "Escreva a mensagem antes de salvar.",
+    "cheio": "Sua lista está cheia (60). Apague uma pra guardar outra.",
+}
 
 
 @router.get("/cockpit/fila/fragmento")

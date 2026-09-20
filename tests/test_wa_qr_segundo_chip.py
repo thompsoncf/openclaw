@@ -572,3 +572,99 @@ def test_a_etiqueta_diz_o_chip_de_cada_conversa(pool):
     por_chip = {l["chip_id"]: l["chip_rot"] for l in linhas}
     assert por_chip[None] == "Agência Alfa", "a que entrou pelo principal"
     assert por_chip[chip] == "Agência Beta", "a que entrou pelo chip 2"
+
+
+# ═════════════════════════ 8. a empresa cujo único chip é a conta FILHA
+#
+# A Liberal Seguros é assim em produção: a empresa (37) não tem linha em
+# `canais_config` e o WhatsApp dela é a conta filha (38, `chip_de=37`), conectada
+# e entregando. A faixa de Comunicação olhava só a própria conta, não achava nada
+# e escrevia "Nenhum chip de WhatsApp conectado", sem número. O dono viu em
+# 20/09/2026, com o chip de pé e 139 conversas no ar.
+
+
+def _empresa_sem_canal(pool, nome="Liberal Neto"):
+    """Empresa sem linha própria em canais_config — o chip vem depois, na filha."""
+    with pool.connection() as c:
+        cid = c.execute("insert into contas (tipo, nome) values ('pj',%s) returning id",
+                        (nome,)).fetchone()[0]
+        c.commit()
+    return cid
+
+
+def _creds(pool, conta_id, numero="558694557463", nome="Liberal Seguros"):
+    with pool.connection() as c:
+        c.execute("""insert into wa_qr_auth (conta_id, arquivo, conteudo)
+                     values (%s,'creds',%s)""",
+                  (conta_id, '{"me":{"id":"%s:53@s.whatsapp.net","name":"%s"}}' % (numero, nome)))
+        c.commit()
+
+
+def _qr_ligado(monkeypatch, status="conectado"):
+    from finance import whatsapp_qr as _qr
+    monkeypatch.setattr(pp, "_WA_CHIP_CACHE", {})
+    monkeypatch.setattr(pp, "_WA_CHIP2_CACHE", {})
+    monkeypatch.setattr(_qr, "configurado", lambda: True)
+    monkeypatch.setattr(_qr, "status", lambda cid: {"status": status})
+
+
+def test_a_faixa_acha_o_chip_que_mora_na_conta_filha(pool, monkeypatch):
+    emp = _empresa_sem_canal(pool)
+    chip = _chip2(pool, emp, nome="cp liberal")
+    _creds(pool, chip)
+    _qr_ligado(monkeypatch)
+    c1 = pp._wa_chip(emp)
+    assert c1["estado"] == "conectado", "o chip está de pé; a faixa dizia que não havia chip"
+    assert c1["id"] == chip
+    assert c1["provedor"] == "qr"
+
+
+def test_a_faixa_mostra_o_numero_do_chip_por_qr(pool, monkeypatch):
+    """Em `canais_config` o identificador de um chip por QR é "qr:<id>", não o
+    telefone. O número real só existe no cofre das credenciais."""
+    emp = _empresa_sem_canal(pool)
+    chip = _chip2(pool, emp, nome="cp liberal")
+    with pool.connection() as c:
+        c.execute("update canais_config set identificador=%s where conta_id=%s",
+                  ("qr:%d" % chip, chip))
+        c.commit()
+    _creds(pool, chip)
+    _qr_ligado(monkeypatch)
+    assert "9455-7463" in pp._wa_chip(emp)["numero"]
+
+
+def test_o_chip_da_filha_nao_aparece_duas_vezes(pool, monkeypatch):
+    """Virando o chip 1, ele não pode voltar como chip 2 — seria o mesmo número
+    em duas faixas, uma dizendo o que a outra já disse."""
+    emp = _empresa_sem_canal(pool)
+    chip = _chip2(pool, emp, nome="cp liberal")
+    _creds(pool, chip)
+    _qr_ligado(monkeypatch)
+    c1 = pp._wa_chip(emp)
+    assert pp._wa_chip2(emp, c1["id"]) is None
+
+
+def test_a_empresa_com_canal_proprio_continua_vindo_primeiro(pool, monkeypatch):
+    """O caso de 21 das 22 contas: o canal é da própria empresa, e a filha segue
+    sendo o chip 2."""
+    emp = _empresa(pool)
+    chip = _chip2(pool, emp, nome="Agência Beta")
+    _qr_ligado(monkeypatch)
+    c1 = pp._wa_chip(emp)
+    assert c1["id"] == emp, "a própria conta vence a filha"
+    c2 = pp._wa_chip2(emp, c1["id"])
+    assert c2 and c2["id"] == chip
+
+
+def test_chips_da_conta_traz_o_numero_do_cofre(pool):
+    """A aba Canais dizia "sem número pareado" num chip pareado e entregando."""
+    emp = _empresa(pool)
+    with pool.connection() as c:
+        c.execute("update canais_config set identificador=%s where conta_id=%s",
+                  ("qr:%d" % emp, emp))
+        c.commit()
+    _creds(pool, emp, numero="558694557463")
+    with pool.connection() as c:
+        chips = pp.chips_da_conta(c, emp)
+    assert chips and "9455-7463" in chips[0]["numero"]
+    assert chips[0]["pareado"] is True

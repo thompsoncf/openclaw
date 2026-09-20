@@ -2386,26 +2386,48 @@ def _wa_chip(conta_id) -> dict:
     hit = _WA_CHIP_CACHE.get(conta_id)
     if hit and (agora - hit[0]) < 15:
         return hit[1]
-    chip = {"provedor": "", "nome": "", "numero": "", "estado": "sem_chip", "apelido": ""}
+    chip = {"provedor": "", "nome": "", "numero": "", "estado": "sem_chip",
+            "apelido": "", "id": None}
     try:
         with get_pool().connection() as c:
-            r = c.execute("""select coalesce(provedor,'twilio'), coalesce(identificador,''),
-                                    coalesce(rotulo,'')
-                               from canais_config
-                              where conta_id=%s and canal='whatsapp' and ativo""",
-                          (conta_id,)).fetchone()
+            # QUAL CONTA CARREGA O CANAL. Quase sempre é a própria empresa, e era só
+            # isso que esta consulta olhava. Na Liberal não é: a empresa (37) não tem
+            # linha em `canais_config` e o único chip é a conta FILHA (38, com
+            # `chip_de=37`). Sem achar linha nenhuma, a faixa escrevia "Nenhum chip de
+            # WhatsApp conectado" e não mostrava número — com o chip conectado,
+            # entregando e com 139 conversas. O dono viu em 20/09/2026.
+            #
+            # A própria conta vem primeiro; a filha é a reserva. `chips_da_conta` já
+            # enxergava as duas, e é a mesma leitura que se faz aqui.
+            # sem `join contas`: a linha da PRÓPRIA conta tem que aparecer mesmo
+            # que `contas` não a acompanhe, que é o caminho de sempre e o que os
+            # testes de inbox montam. A filha entra pela subconsulta.
+            r = c.execute("""select cc.conta_id, coalesce(cc.provedor,'twilio'),
+                                    coalesce(cc.identificador,''), coalesce(cc.rotulo,'')
+                               from canais_config cc
+                              where cc.canal='whatsapp' and cc.ativo
+                                and (cc.conta_id = %s
+                                     or cc.conta_id in (select id from contas
+                                                         where chip_de = %s))
+                              order by (cc.conta_id <> %s), cc.conta_id
+                              limit 1""",
+                          (conta_id, conta_id, conta_id)).fetchone()
             if r:
-                chip["provedor"] = r[0]
+                chip["id"] = r[0]
+                chip["provedor"] = r[1]
                 # o APELIDO que a pessoa digitou em Canais vence o nome do perfil do
                 # WhatsApp. É ele que aparece no inbox e que o relatório agrupa —
                 # dois nomes pro mesmo chip em telas diferentes é o começo da confusão
-                chip["apelido"] = (r[2] or "").strip()[:60]
-                if r[0] == "qr":
+                chip["apelido"] = (r[3] or "").strip()[:60]
+                if r[1] == "qr":
+                    # o número REAL do chip só existe aqui: em `canais_config` o
+                    # identificador de um chip por QR é o texto "qr:<id>", não o
+                    # telefone. Quem sabe o número é o cofre das credenciais.
                     cred = c.execute(
                         """select conteudo::json->'me'->>'name',
                                   conteudo::json->'me'->>'id'
                              from wa_qr_auth where conta_id=%s and arquivo='creds'""",
-                        (conta_id,)).fetchone()
+                        (r[0],)).fetchone()
                     if cred:
                         # o nome do perfil vira reserva: vale enquanto ninguém batizou
                         chip["nome"] = chip.get("apelido") or (cred[0] or "").strip()[:60]
@@ -2413,12 +2435,14 @@ def _wa_chip(conta_id) -> dict:
                         chip["numero"] = _tel_fmt_br((cred[1] or "").split(":")[0].split("@")[0])
                 else:
                     # twilio/cloud: o identificador É o número da empresa
-                    chip["numero"] = _tel_fmt_br(r[1])
+                    chip["numero"] = _tel_fmt_br(r[2])
         if chip["provedor"] == "qr":
             from finance import whatsapp_qr as _qr
             if _qr.configurado():
-                st = (_qr.status(conta_id) or {}).get("status") or ""
-                chip["estado"] = ("sincronizando" if _wa_qr_sincronizando(conta_id)
+                # o estado é do CHIP, não da empresa: perguntar pela conta 37 devolve
+                # "não existe sessão" enquanto a sessão viva é a da 38
+                st = (_qr.status(chip["id"]) or {}).get("status") or ""
+                chip["estado"] = ("sincronizando" if _wa_qr_sincronizando(chip["id"])
                                   else "conectado" if st == "conectado" else "caido")
             else:
                 chip["estado"] = "caido"
@@ -2429,7 +2453,8 @@ def _wa_chip(conta_id) -> dict:
         if chip["estado"] == "conectado":
             chip["sem_receber"] = _ha_quanto(_wa_minutos_sem_receber(conta_id))
     except Exception:  # noqa: BLE001
-        chip = {"provedor": "", "nome": "", "numero": "", "estado": "sem_chip", "apelido": ""}
+        chip = {"provedor": "", "nome": "", "numero": "", "estado": "sem_chip",
+                "apelido": "", "id": None}
     _WA_CHIP_CACHE[conta_id] = (agora, chip)
     return chip
 
@@ -2437,7 +2462,7 @@ def _wa_chip(conta_id) -> dict:
 _WA_CHIP2_CACHE: dict = {}   # conta_id -> (quando, dict|None)
 
 
-def _wa_chip2(conta_id) -> dict | None:
+def _wa_chip2(conta_id, exceto_id=None) -> dict | None:
     """O SEGUNDO chip da empresa, no mesmo formato do `_wa_chip` — ou None.
 
     None é a resposta das 22 contas de hoje, e a faixa desenha uma linha discreta
@@ -2449,7 +2474,10 @@ def _wa_chip2(conta_id) -> dict | None:
     """
     import time
     agora = time.time()
-    hit = _WA_CHIP2_CACHE.get(conta_id)
+    # `exceto_id` entra na chave: a empresa cujo único chip é a conta filha usa
+    # essa filha como chip 1, e aí o chip 2 dela é outro (ou nenhum)
+    chave = (conta_id, exceto_id)
+    hit = _WA_CHIP2_CACHE.get(chave)
     if hit and (agora - hit[0]) < 15:
         return hit[1]
     chip = None
@@ -2464,8 +2492,9 @@ def _wa_chip2(conta_id) -> dict | None:
                      left join canais_config cc
                             on cc.conta_id=ct.id and cc.canal='whatsapp'
                            and coalesce(cc.provedor,'twilio')='qr'
-                    where ct.chip_de=%s
-                    order by ct.id limit 1""", (conta_id,)).fetchone()
+                    where ct.chip_de=%s and (%s::bigint is null or ct.id <> %s::bigint)
+                    order by ct.id limit 1""",
+                (conta_id, exceto_id, exceto_id)).fetchone()
         if r:
             chip = {"id": r[0], "provedor": "qr", "apelido": (r[1] or "").strip()[:60],
                     "nome": (r[1] or "").strip()[:60],
@@ -2492,7 +2521,7 @@ def _wa_chip2(conta_id) -> dict | None:
                 chip["sem_receber"] = _ha_quanto(int(m[0]) if m and m[0] is not None else None)
     except Exception:  # noqa: BLE001
         chip = None
-    _WA_CHIP2_CACHE[conta_id] = (agora, chip)
+    _WA_CHIP2_CACHE[chave] = (agora, chip)
     return chip
 
 
@@ -2599,13 +2628,17 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
         modo_evento = bool(_vendas.vende_data(pool, ctx["conta_id"]))
     except Exception:  # noqa: BLE001 — sem nicho a tela abre sem os campos do evento
         modo_evento = False
+    # o chip 1 é resolvido antes: o chip 2 precisa saber qual foi, pra não repetir
+    # o mesmo número nas duas faixas quando o único chip mora na conta filha
+    _chip1 = _wa_chip(ctx["conta_id"])
     return _render("prospeccao_comunicacao", request, titulo="Comunicação",
                    status=status_tpl, modo_evento=modo_evento,
                    secao_ativa="prospeccao", aba=aba, convs=convs, escopo=escopo, canal=canal,
                    canais=_canais_status(pool, ctx["conta_id"]), canal_rot=CANAL_ROT,
                    gerencia=ctx["gerencia"], vendedores=vends, filtro_vend=filtro_vend,
                    busca=busca, total_convs=total_convs,
-                   pode_atribuir=ctx["pode_atribuir"], chip=_wa_chip(ctx["conta_id"]), chip2=_wa_chip2(ctx["conta_id"]),
+                   pode_atribuir=ctx["pode_atribuir"], chip=_chip1,
+                   chip2=_wa_chip2(ctx["conta_id"], _chip1.get("id")),
                    remetente=_ein_remetente(pool, ctx["conta_id"]), tem_ia=_tem_ia(),
                    ag_cfg=ag_cfg, ag_conhec=ag_conhec, perfil=perfil,
                    # o resumo semanal por e-mail (274) mora na mesma aba: é
@@ -3053,7 +3086,13 @@ def chips_da_conta(c, conta_id: int) -> list[dict]:
                   (select extract(epoch from now() - max(m.criado_em))/60
                      from mensagens m join conversas cv on cv.id = m.conversa_id
                     where coalesce(cv.chip_id, cv.conta_id) = ct.id
-                      and cv.canal='whatsapp' and m.direcao='in') min_sem
+                      and cv.canal='whatsapp' and m.direcao='in') min_sem,
+                  -- o número REAL do chip por QR. Em `canais_config` o identificador
+                  -- é o texto "qr:<id>", não o telefone; quem sabe o número é o cofre
+                  -- das credenciais, e sem ler dali a tela dizia "sem número pareado"
+                  -- num chip pareado e entregando.
+                  (select conteudo::json->'me'->>'id' from wa_qr_auth
+                    where conta_id = ct.id and arquivo='creds') me_id
              from contas ct
              left join canais_config cc
                     on cc.conta_id = ct.id and cc.canal='whatsapp'
@@ -3062,12 +3101,15 @@ def chips_da_conta(c, conta_id: int) -> list[dict]:
             order by (ct.chip_de is not null), ct.id""",
         (conta_id, conta_id)).fetchall()
     saida = []
-    for i, (cid, nome, chip_de, ident, ativo, rotulo, ultima, min_sem) in enumerate(linhas):
+    for i, (cid, nome, chip_de, ident, ativo, rotulo, ultima, min_sem, me_id) in enumerate(linhas):
         principal = chip_de is None
         # o apelido do principal mora no canal (migração 172); o do secundário, em
         # contas.nome da linha dele — ver o cabeçalho da 172 pro porquê
         apelido = (rotulo or "").strip() if principal else (nome or "").strip()
-        numero = "" if ident.startswith("qr:") else ident
+        if me_id:
+            numero = _tel_fmt_br(str(me_id).split(":")[0].split("@")[0])
+        else:
+            numero = "" if ident.startswith("qr:") else ident
         saida.append({"id": cid, "principal": principal, "apelido": apelido,
                       "rotulo": apelido or f"Chip {i + 1}",
                       "numero": numero, "ativo": bool(ativo),

@@ -95,10 +95,30 @@ conferir(midiaDaMsg(msg({ conversation: 'oi' })) === null, 'texto puro não é m
 conferir(midiaDaMsg(msg({})) === null, 'mensagem vazia não estoura')
 conferir(midiaDaMsg({ key: {} }) === null, 'sem message não estoura')
 
-console.log('\náudio continua no caminho dele')
-conferir(midiaDaMsg(msg({ audioMessage: {
-  directPath: CAMINHO, mediaKey: CHAVE, ptt: true, seconds: 9 } })) === null,
-'áudio NÃO vira ponteiro — ele já é baixado e transcrito, e mexer nisso quebraria o que funciona')
+console.log('\náudio: ponteiro TAMBÉM, desde 20/09/2026')
+// Até aqui o áudio era o único tipo de fora: ele é baixado e transcrito, e o texto
+// bastava. Parou de bastar quando o vendedor passou a trabalhar dentro do app —
+// "não consigo escutar o áudio do cliente" foi o pedido do dono. A transcrição
+// segue pelo caminho dela; isto aqui só guarda O ENDEREÇO do arquivo.
+const au = midiaDaMsg(msg({ audioMessage: {
+  directPath: CAMINHO, mediaKey: CHAVE, ptt: true, seconds: 9,
+  waveform: Buffer.from([0, 50, 100, 25]) } }))
+conferir(au && au.tipo === 'audio', 'áudio tem que virar ponteiro pra poder tocar na bolha')
+conferir(au && au.ref.directPath === CAMINHO && !!au.ref.mediaKey,
+  'sem directPath + mediaKey não há como buscar e decifrar depois')
+conferir(au && au.meta.segundos === 9, 'a duração vai no meta (é ela que o tocador mostra)')
+conferir(au && Array.isArray(au.meta.onda) && au.meta.onda.length === 4 &&
+  au.meta.onda[2] === 100,
+'a ONDA de quem falou vem junto: é o desenho que a bolha mostra, no tom da fala')
+conferir(au && au.marca === '🎤 Áudio (0:09)', 'marca do áudio gravado: ' + (au && au.marca))
+
+const musica = midiaDaMsg(msg({ audioMessage: {
+  directPath: CAMINHO, mediaKey: CHAVE, seconds: 200 } }))
+conferir(musica && musica.marca === '🎵 Áudio (3:20)' && musica.meta.musica === true,
+'sem ptt é arquivo de música, não áudio gravado — a marca distingue, como no texto')
+
+conferir(midiaDaMsg(msg({ audioMessage: { ptt: true, seconds: 9 } })) === null,
+  'áudio sem ponteiro nenhum continua fora: bolha que nunca carrega é pior que texto')
 
 // ------------------------------------------------------------- legenda e marca
 

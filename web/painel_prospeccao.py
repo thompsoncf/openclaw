@@ -5667,7 +5667,9 @@ def _chip_gravavel(chip_id, empresa_id):
 # Os tipos de mídia que o Zaq sabe desenhar. Um tipo que a gente não conhece não
 # vira ponteiro: a bolha ficaria prometendo uma coisa que a tela não sabe mostrar, e
 # o texto da marca já conta o que chegou.
-_MIDIA_TIPOS = ("imagem", "video", "documento", "figurinha")
+#: `audio` entrou em 20/09/2026: até então o áudio virava só texto (era baixado e
+#: transcrito no serviço), e o vendedor não conseguia OUVIR o que o cliente mandou.
+_MIDIA_TIPOS = ("imagem", "video", "documento", "figurinha", "audio")
 
 
 def _midia_do_payload(m):
@@ -5699,9 +5701,23 @@ def _midia_do_payload(m):
             limpa[k] = v
     if meta.get("nome"):
         limpa["nome"] = str(meta["nome"])[:160]
-    for k in ("gif", "animada"):
+    for k in ("gif", "animada", "musica"):
         if meta.get(k):
             limpa[k] = True
+    # A ONDA da fala (64 pontos de 0 a 100) — o desenho que a bolha mostra. Vem de
+    # rede como o resto: teto de pontos, cada um cortado pro intervalo. Uma lista
+    # de 100 mil números viraria linha gigante no banco; um ponto de 10^9 viraria
+    # barra fora da tela.
+    onda = meta.get("onda")
+    if isinstance(onda, (list, tuple)) and onda:
+        pontos = []
+        for x in list(onda)[:64]:
+            try:
+                pontos.append(max(0, min(100, int(x))))
+            except (TypeError, ValueError):
+                pontos.append(0)
+        if any(pontos):
+            limpa["onda"] = pontos
     return {"tipo": tipo, "meta": limpa,
             "ref": {"directPath": caminho, "mediaKey": chave,
                     "mimetype": str(ref.get("mimetype") or "")[:100]}}

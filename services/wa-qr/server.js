@@ -2448,7 +2448,15 @@ const MIDIA_DE = [
   ['imageMessage', 'imagem', '📷 Foto'],
   ['videoMessage', 'video', '🎬 Vídeo'],
   ['documentMessage', 'documento', '📄 Documento'],
-  ['stickerMessage', 'figurinha', '🩷 Figurinha']
+  ['stickerMessage', 'figurinha', '🩷 Figurinha'],
+  // O ÁUDIO ENTROU EM 20/09/2026, e até aqui estava FORA de propósito: ele era
+  // baixado, transcrito e virava texto, e o ponteiro se perdia. Deu certo
+  // enquanto o texto bastava; parou de bastar quando o vendedor passou a
+  // trabalhar dentro do app — "não consigo escutar o áudio do cliente" foi o
+  // pedido do dono no mesmo dia. A transcrição continua igual, pelo caminho
+  // dela (transcreverAudio): isto aqui só GUARDA O ENDEREÇO do arquivo, os
+  // mesmos ~200 bytes das outras mídias, pra bolha poder tocar.
+  ['audioMessage', 'audio', '🎤 Áudio']
 ]
 
 function _b64 (v) {
@@ -2473,10 +2481,17 @@ function midiaDaMsg (m) {
     if (md.height) meta.altura = Number(md.height) || 0
     if (md.gifPlayback) meta.gif = true
     if (md.isAnimated) meta.animada = true
+    // A ONDA DE QUEM FALOU. O WhatsApp manda a forma da fala junto do áudio (64
+    // pontos de 0 a 100) — é o desenho que aparece na bolha dele. Guardando,
+    // a bolha do Cockpit mostra a MESMA onda, em vez de barras iguais.
+    if (md.waveform && md.waveform.length) {
+      try { meta.onda = Array.from(md.waveform).slice(0, 64).map(Number) } catch (_) {}
+    }
+    if (tipo === 'audio' && !md.ptt) meta.musica = true
     return {
       tipo,
-      marca: tipo === 'video' && meta.segundos
-        ? marca + ' (' + duracao(meta.segundos) + ')'
+      marca: (tipo === 'video' || tipo === 'audio') && meta.segundos
+        ? (tipo === 'audio' && !md.ptt ? '🎵 Áudio' : marca) + ' (' + duracao(meta.segundos) + ')'
         : marca,
       ref: { directPath: md.directPath, mediaKey: _b64(md.mediaKey),
         mimetype: md.mimetype || '' },
@@ -4392,8 +4407,18 @@ const servidor = http.createServer(async (req, res) => {
             if (onda) conteudo.waveform = onda
             const r = await s.sock.sendMessage(alvo2.jid, conteudo)
             guardarEnviada(contaId, r)
-            log.info({ contaId, id: r && r.key && r.key.id, seg }, 'enviar-audio: sucesso ✓')
-            return json(res, 200, { ok: true, id: (r && r.key && r.key.id) || '' })
+            // O PONTEIRO DE VOLTA, como no `enviar-midia`: sem ele o áudio que o
+            // vendedor mandou some do tocador assim que a tela recarrega — ficava
+            // só "🎤 Áudio (0:06)" escrito, e conferir o que mandou virava motivo
+            // pra pegar o celular.
+            const ponteiro = midiaDaMsg(r)
+            log.info({ contaId, id: r && r.key && r.key.id, seg, ponteiro: !!ponteiro },
+              'enviar-audio: sucesso ✓')
+            return json(res, 200, {
+              ok: true,
+              id: (r && r.key && r.key.id) || '',
+              midia: ponteiro || null
+            })
           } catch (e) {
             log.warn({ contaId, e: String(e) }, 'enviar-audio: sendMessage falhou')
             return json(res, 200, { ok: false, erro: String(e).slice(0, 180) })

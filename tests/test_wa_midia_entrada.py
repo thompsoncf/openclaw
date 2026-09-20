@@ -51,9 +51,30 @@ def test_o_ponteiro_completo_passa():
     assert m["meta"]["bytes"] == 184320
 
 
-@pytest.mark.parametrize("tipo", ["imagem", "video", "documento", "figurinha"])
-def test_os_quatro_tipos_que_a_tela_sabe_desenhar(tipo):
+@pytest.mark.parametrize("tipo", ["imagem", "video", "documento", "figurinha", "audio"])
+def test_os_tipos_que_a_tela_sabe_desenhar(tipo):
+    """`audio` entrou em 20/09/2026: até então o áudio do cliente virava só texto,
+    e o vendedor não tinha como OUVIR o que ele mandou."""
     assert pp._midia_do_payload(_midia(tipo=tipo))["tipo"] == tipo
+
+
+def test_a_onda_da_fala_passa_peneirada():
+    """A onda é o desenho que a bolha mostra, e vem de REDE: 64 pontos no máximo,
+    cada um entre 0 e 100. Uma lista de 100 mil números viraria linha gigante no
+    banco; um ponto de 10^9 viraria barra fora da tela."""
+    m = pp._midia_do_payload(_midia(tipo="audio", meta={"segundos": 9, "onda": [0, 50, 100]}))
+    assert m["meta"]["onda"] == [0, 50, 100] and m["meta"]["segundos"] == 9
+
+    grande = pp._midia_do_payload(_midia(tipo="audio", meta={"onda": list(range(500))}))
+    assert len(grande["meta"]["onda"]) == 64
+
+    torta = pp._midia_do_payload(_midia(tipo="audio",
+                                        meta={"onda": [-5, 10 ** 9, "x", None, 40]}))
+    assert torta["meta"]["onda"] == [0, 100, 0, 0, 40]
+
+    # onda vazia, zerada ou que não é lista simplesmente não entra
+    for v in ([], [0, 0, 0], "onda", 7, None):
+        assert "onda" not in pp._midia_do_payload(_midia(tipo="audio", meta={"onda": v}))["meta"]
 
 
 def test_tipo_desconhecido_nao_vira_ponteiro():

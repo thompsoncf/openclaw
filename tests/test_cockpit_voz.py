@@ -113,7 +113,13 @@ def envios(monkeypatch):
     def _falso(conta_id, numero, dados, mimetype, segundos, onda=None):
         caixa.append({"conta": conta_id, "numero": numero, "bytes": dados,
                       "mimetype": mimetype, "seg": segundos, "onda": onda})
-        return {"ok": True, "sid": "SID%d" % len(caixa)}
+        # o serviço devolve o PONTEIRO do áudio que acabou de subir (como no
+        # enviar-midia): é ele que deixa a bolha tocável depois de recarregar
+        return {"ok": True, "sid": "SID%d" % len(caixa),
+                "midia": {"tipo": "audio",
+                          "ref": {"directPath": "/v/t62.7117-24/abc",
+                                  "mediaKey": "Y2hhdmU=", "mimetype": mimetype},
+                          "meta": {"segundos": segundos}}}
 
     from finance import whatsapp_qr as qr
     monkeypatch.setattr(qr, "enviar_audio", _falso)
@@ -208,6 +214,38 @@ def test_a_conversa_sai_do_automatico_ao_mandar_audio(pool, envios, sem_stt):
     with pool.connection() as c:
         est = c.execute("select status, agente_ativo, push_avisado_em from conversas").fetchone()
     assert est[0] == "pendente" and est[1] is False and est[2] is None
+
+
+# ══════════════════════════════════════ o áudio enviado continua tocável
+
+def test_o_audio_enviado_guarda_o_ponteiro_e_a_onda(pool, envios, sem_stt):
+    """Sem o ponteiro, o áudio que o vendedor mandou vira "🎤 Áudio (0:08)" escrito
+    assim que a tela recarrega — e conferir o que mandou volta a ser motivo pra
+    pegar o celular. A onda vai junto: é a fala DELE, medida na gravação."""
+    onda = bytes([0, 60, 100, 30])
+    r = ck.enviar_audio(pool, CONTA_QR, 7, LEAD, WEBM, "audio/webm", 8, onda)
+    assert r["ok"]
+    with pool.connection() as c:
+        tipo, ref, meta = c.execute(
+            "select midia_tipo, midia_ref, midia_meta from mensagens order by id desc limit 1"
+        ).fetchone()
+    assert tipo == "audio"
+    assert ref["directPath"] == "/v/t62.7117-24/abc" and ref["mediaKey"] == "Y2hhdmU="
+    assert meta["segundos"] == 8
+    assert meta["onda"] == [0, 60, 100, 30], "a onda da fala tem que chegar na bolha"
+
+
+def test_sem_ponteiro_do_servico_a_mensagem_sai_igual(pool, envios, sem_stt, monkeypatch):
+    """Serviço antigo (sem o ponteiro de volta) não pode impedir o envio: a bolha
+    fica sem tocador, como era antes, e a mensagem vai do mesmo jeito."""
+    from finance import whatsapp_qr as qr
+    monkeypatch.setattr(qr, "enviar_audio",
+                        lambda *a, **k: {"ok": True, "sid": "SEMPONTEIRO"})
+    assert ck.enviar_audio(pool, CONTA_QR, 7, LEAD, WEBM, "audio/webm", 8)["ok"]
+    with pool.connection() as c:
+        tipo, texto = c.execute(
+            "select midia_tipo, texto from mensagens order by id desc limit 1").fetchone()
+    assert tipo is None and texto == "🎤 Áudio (0:08)"
 
 
 # ══════════════════════════════════════════════ a transcrição é extra

@@ -1476,8 +1476,9 @@ def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes
     E a mensagem nasce com `membro_id`. É o ganho que sobrevive a tudo: hoje 98%
     do que a Prime manda ao cliente chega sem nome, porque sai do celular.
     """
+    import json as _json
     from finance import audio_voz as av, whatsapp_out
-    from web.painel_prospeccao import _conversa_id
+    from web.painel_prospeccao import _conversa_id, _midia_do_payload
     if not dados:
         return {"ok": False, "erro": "Áudio vazio."}
     if len(dados) > av.LIMITE_BYTES:
@@ -1527,13 +1528,25 @@ def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes
     # a marca é a MESMA que o serviço Node escreve pro áudio que chega do celular
     # (ver textoDaMsg), então as duas origens ficam iguais na conversa.
     marca = "🎤 Áudio (%d:%02d)" % (segundos // 60, segundos % 60)
+    # O PONTEIRO do áudio que acabou de sair (o serviço devolve o mesmo formato da
+    # foto). É ele que faz a bolha continuar TOCÁVEL depois de recarregar a tela —
+    # sem isso sobrava só "🎤 Áudio (0:06)" escrito. A onda vai junto: é a que o
+    # vendedor acabou de falar, medida na gravação.
+    midia = _midia_do_payload(res.get("midia"))
+    if midia and onda and not (midia["meta"] or {}).get("onda"):
+        midia["meta"] = {**(midia["meta"] or {}), "onda": list(onda)}
+    if midia and not (midia["meta"] or {}).get("segundos"):
+        midia["meta"] = {**(midia["meta"] or {}), "segundos": segundos}
     with pool.connection() as c:
         conv = _conversa_id(c, conta_id, lead_id, "whatsapp")
         msg_id = c.execute(
             """insert into mensagens (conversa_id, canal, direcao, autor, membro_id,
-                                      texto, provider_sid)
-               values (%s,'whatsapp','out','humano',%s,%s,%s) returning id""",
-            (conv, membro_id, marca, res.get("sid"))).fetchone()[0]
+                                      texto, provider_sid, midia_ref, midia_tipo, midia_meta)
+               values (%s,'whatsapp','out','humano',%s,%s,%s,%s,%s,%s) returning id""",
+            (conv, membro_id, marca, res.get("sid"),
+             _json.dumps(midia["ref"]) if midia else None,
+             midia["tipo"] if midia else None,
+             _json.dumps(midia["meta"]) if midia else None)).fetchone()[0]
         c.execute("update conversas set ultima_msg_em=now(), status='pendente', "
                   "agente_ativo=false, push_avisado_em=null where id=%s", (conv,))
         c.commit()

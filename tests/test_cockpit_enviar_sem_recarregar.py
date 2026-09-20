@@ -368,6 +368,19 @@ def test_quem_nasce_hidden_precisa_da_regra_hidden_no_css():
         + " — falta `.classe[hidden]{display:none}`")
 
 
+def test_a_resposta_da_equipe_mostra_cadeado_em_vez_de_buraco():
+    """Relatado com print: "o ✕ só aparece na primeira". Era a regra funcionando —
+    a resposta da equipe é a mesma pros quatro vendedores, e apagá-la some com ela
+    pra todo mundo, então só dono ou gestor apaga. O que faltava era a tela DIZER
+    isso: sem o ✕ sobrava um buraco mudo do lado, que parece defeito."""
+    js = pc._RAPIDAS_JS
+    assert "data-trava=1" in js and "só o dono ou o gestor apaga" in js
+    assert 'alvo.getAttribute("data-trava")' in js, "o cadeado não abre o confirm"
+    assert ".respdel[data-trava]" in pc._CSS_TEXTO
+    # e quem manda na conta continua vendo o ✕ em todas
+    assert "(x.equipe&&!podeEquipe)" in js
+
+
 def test_o_botao_de_salvar_nao_mente():
     """Ele mostra O QUE vai salvar e nasce apagado: com a folha por cima da
     conversa o vendedor não vê mais o que escreveu, e um botão que só responde

@@ -894,7 +894,11 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .respx{display:block;font-size:.74rem;color:var(--text-dim);line-height:1.35;
   overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .respdel{flex:0 0 auto;width:32px;background:none;border:1px solid var(--line);border-radius:11px;
-  color:var(--text-faint);cursor:pointer;font-size:.75rem}
+  color:var(--text-faint);cursor:pointer;font-size:.75rem;
+  display:grid;place-items:center;align-self:stretch}
+/* o cadeado ocupa o MESMO lugar do ✕: sem ele a linha da equipe ficava com um
+   buraco mudo do lado, que parece defeito em vez de regra */
+.respdel[data-trava]{cursor:default;opacity:.45;border-style:dashed}
 .respvazio{font-size:.78rem;color:var(--text-dim);line-height:1.5;padding:.8rem .2rem;text-align:center}
 .resppe{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
 .resppe .btn{width:auto;flex:1;padding:.55rem .8rem;font-size:.82rem}
@@ -5044,7 +5048,13 @@ _RAPIDAS_JS = r"""
         +   '<span class=respt>'+esc(x.titulo||x.texto.slice(0,60))+(x.equipe?' <em>equipe</em>':'')+'</span>'
         +   '<span class=respx>'+esc(x.texto)+'</span>'
         + '</button>'
-        + ((x.equipe&&!podeEquipe)?'':'<button type=button class=respdel aria-label="Apagar">✕</button>')
+        // Sem o ✕, o lugar dele ficava um BURACO MUDO e parecia defeito (relatado
+        // com print em 20/09/2026). O cadeado ocupa o mesmo lugar e diz por quê:
+        // a resposta da equipe é a mesma pros quatro vendedores, e apagá-la some
+        // com ela pra todo mundo — por isso só o dono ou gestor apaga.
+        + ((x.equipe&&!podeEquipe)
+            ? '<span class=respdel data-trava=1 title="Da equipe: só o dono ou o gestor apaga">🔒</span>'
+            : '<button type=button class=respdel aria-label="Apagar">✕</button>')
         + '</div>';
     }).join("");
   }
@@ -5064,7 +5074,9 @@ _RAPIDAS_JS = r"""
   lista.addEventListener("click",function(e){
     var it=e.target.closest&&e.target.closest(".respit"); if(!it) return;
     var id=Number(it.getAttribute("data-id")), x=(itens||[]).filter(function(y){return y.id===id;})[0];
-    if(e.target.closest(".respdel")){
+    var alvo=e.target.closest(".respdel");
+    if(alvo&&alvo.getAttribute("data-trava")) return;   // o cadeado não pergunta nada
+    if(alvo){
       if(!confirm("Apagar esta resposta?")) return;
       zapFetch(BASE.replace(/\/lead.*$/,"")+"/respostas/"+id+"/apagar",
         {method:"POST",headers:{"x-cockpit":"1"}})

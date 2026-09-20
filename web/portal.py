@@ -417,7 +417,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes/Fornecedores') }}{% endif %}
-  {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
+  {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{{ navi('respostas','/painel/respostas','caixa','Respostas rápidas') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
   {% if _dono and _tem_app %}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
@@ -471,7 +471,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
      que já ganharam a tela (CLAUDE.md §6: eventos primeiro, combinado 07/09). #}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes/Fornecedores') }}{% endif %}
-  {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
+  {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{{ navi('respostas','/painel/respostas','caixa','Respostas rápidas') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
   {% if _dono and _tem_app %}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
@@ -7561,6 +7561,7 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                  ("produtos", "/painel/produtos"), ("clientes", "/painel/clientes"),
                  ("servicos", "/painel/servicos"), ("prospeccao", "/painel/prospeccao"),
                  ("agenda", "/painel/agenda"), ("equipe", "/painel/equipe"),
+                 ("respostas", "/painel/respostas"),
                  ("financeiro", "/painel/financeiro"), ("empresa", "/painel/empresa"),
                  ("relatorios", "/painel/relatorios"), ("raio_x", "/painel/raio-x"),
                  ("origens", "/painel/origens"),

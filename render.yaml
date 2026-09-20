@@ -3,11 +3,22 @@
 # Os servicos no Render sao gerenciados MANUALMENTE e deployam por git (auto-
 # deploy na branch main). Os nomes REAIS la' (confirmados via API do Render em
 # 15/08/2026 — nem todos batem com o `name:` deste arquivo):
-#     openclaw-web-bcu3            (este web; webhook Telegram + app.zaq-ia.com)
-#     zaq-waqr                     (o WhatsApp por QR; aqui embaixo esta' como
+#     openclaw-web-bcu3-va         (este web; webhook Telegram + app.zaq-ia.com)
+#     zaq-waqr-va                  (o WhatsApp por QR; aqui embaixo esta' como
 #                                   "openclaw-waqr", que NAO existe no Render)
-#     openclaw-monitor-saldos-bcu3 (o cron de saldos)
-#     openclaw-cron-diario         (cron a parte)
+#     openclaw-monitor-saldos-bcu3-va (o cron de saldos)
+#     openclaw-cron-diario-va      (cron a parte)
+#     openclaw-relatorios-semanais-follow-up-va
+#
+# O SUFIXO -va E' A REGIAO (20/09/2026): os servicos foram recriados em VIRGINIA
+# (US East), a mesma do banco. O Render nao muda a regiao de um servico no lugar,
+# entao "mudar de regiao" e recriar e apontar o dominio — os nomes sem -va sao os
+# antigos, de Oregon, e nao devem voltar a rodar (dois crons ativos mandam tudo
+# em dobro pro cliente).
+#
+# POR QUE: medido pela tela de Velocidade, cada consulta custava ~100 ms de
+# travessia Oregon->us-east-1 e passou a custar ~6 ms. A Fila caiu de 5,8 s para
+# 0,67 s; o Raio-X, de 6,4 s para 0,59 s, sem mudar uma linha de codigo.
 # Fora deste repo, o mesmo workspace ainda tem zaq-landing, gestora-capital e
 # gestora-admin. Isso importa porque o webhook do Render e' do WORKSPACE: os
 # eventos deles TAMBEM caem na nossa tabela render_evento.

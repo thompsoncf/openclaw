@@ -955,10 +955,14 @@ def test_shell_leva_o_retorno_visual_de_espera():
     from web import painel_cockpit as pc
     html = pc._page("x", "<div>y</div>").body.decode()
     assert "id=zprog" in html                    # o Z que se desenha enquanto carrega
-    assert "form.composer" in html               # o enviar otimista
+    # o script desceu pra arquivo versionado (20/09/2026): eram 7,6 KB repetidos em
+    # CADA navegação. O shell aponta pra ele; o conteúdo se cobra no próprio script.
+    assert f'src="{pc._ESPERA_URL}"' in html
+    js = pc._ESPERA_JS
+    assert "form.composer" in js                 # o enviar otimista
     # o valor tem que migrar pro hidden ANTES de esvaziar o visível, senão o POST
     # vai com texto vazio — foi o erro que quase passou
-    assert "hid.value=txt" in html and "campo.removeAttribute('name')" in html
+    assert "hid.value=txt" in js and "campo.removeAttribute('name')" in js
     assert ".tabs a:active" in pc._CSS           # resposta ao toque, sem rede e sem JS
 
 

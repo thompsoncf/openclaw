@@ -124,6 +124,7 @@ def _leitura(**kw):
     L = apdf.Leitura()
     L.seguradora = kw.get("seguradora", "Allianz")
     L.reconhecida = kw.get("reconhecida", True)
+    L.e_apolice = kw.get("e_apolice", L.reconhecida)
     L.paginas = 7
     L.campos = kw.get("campos", {"nome": "MARIA DE FATIMA", "numero_proposta": "139041981"})
     L.checagens = [("CPF", True, "dígito bate")]
@@ -282,7 +283,7 @@ def test_dois_pdfs_do_telegram_convivem(limpo, monkeypatch):
     _finge(monkeypatch, leitura=_leitura())
     al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf", origem="telegram", de="Cássio")
     al.ler_bytes(limpo, CONTA, b"%PDF b", "B.pdf", origem="telegram", de="Cássio")
-    assert len(al.do_telegram(limpo, CONTA)) == 2
+    assert len(al.sem_mensagem(limpo, CONTA)) == 2
 
 
 def test_o_que_veio_do_telegram_aparece_na_lista_com_o_resumo(limpo, monkeypatch):
@@ -290,7 +291,7 @@ def test_o_que_veio_do_telegram_aparece_na_lista_com_o_resumo(limpo, monkeypatch
     _finge(monkeypatch, leitura=_leitura(campos={"nome": "JOSE ALVES",
                                                  "vigencia_fim": date(2027, 1, 30)}))
     al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf", origem="telegram", de="Cássio")
-    itens = al.do_telegram(limpo, CONTA)
+    itens = al.sem_mensagem(limpo, CONTA)
     assert len(itens) == 1 and itens[0]["de"] == "Cássio"
     assert "JOSE ALVES" in al.resumo(itens[0]) and "30/01/2027" in al.resumo(itens[0])
 
@@ -306,7 +307,7 @@ def test_depois_de_cadastrada_some_da_lista_do_telegram(limpo, monkeypatch):
                      values (%s,'Allianz','auto',date '2027-01-30','vigente',%s)""",
                   (CONTA, caminho))
         c.commit()
-    assert al.do_telegram(limpo, CONTA) == []
+    assert al.sem_mensagem(limpo, CONTA) == []
 
 
 def test_por_id_devolve_a_leitura_guardada(limpo, monkeypatch):
@@ -323,3 +324,77 @@ def test_pdf_que_o_leitor_nao_entende_nao_some(limpo, monkeypatch):
     monkeypatch.setattr(al.apdf, "ler", lambda b: (_ for _ in ()).throw(ValueError("PDF vazio")))
     r = al.ler_bytes(limpo, CONTA, b"xx", "A.pdf", origem="telegram", de="Cássio")
     assert r["ok"] is False and r["erro"] == "PDF vazio"
+
+
+# ────────── 5. quem fica com o documento (21/09/2026) ──────────
+#
+# O caso: o corretor mandou a apólice da Azul pro número do assistente e o sistema
+# marcou um LEMBRETE DE PAGAR PARCELA. Duas causas, e estes testes seguram as duas:
+# a porta escolhia pelo LAYOUT (e o único medido é o da Allianz), e o assistente
+# não tinha porta nenhuma.
+
+
+def test_a_porta_pega_apolice_de_seguradora_que_eu_nao_sei_ler():
+    """`tomou` olha `e_apolice`, não `reconhecida`. Ler pouco de uma apólice é um
+    formulário pela metade; ler ela como cupom é o dado na gaveta errada."""
+    L = _leitura(reconhecida=False, seguradora=None, e_apolice=True)
+    assert al.tomou({"ok": True, "leitura": L})
+
+
+def test_a_porta_devolve_o_comprovante_pro_caixa():
+    """O que NÃO pode quebrar: a corretora usa o mesmo número pras duas coisas."""
+    L = _leitura(reconhecida=False, seguradora=None, e_apolice=False)
+    assert not al.tomou({"ok": True, "leitura": L})
+
+
+def test_leitura_que_falhou_nao_e_assumida():
+    assert not al.tomou({"ok": False, "leitura": None, "erro": "não é PDF"})
+    assert not al.tomou({"ok": True, "leitura": None})
+
+
+def test_o_aviso_diz_a_seguradora_achada_sem_layout():
+    from datetime import date
+    L = _leitura(reconhecida=False, seguradora=None, e_apolice=True,
+                 campos={"seguradora": "Azul Seguros", "nome": "LUZIA AUREA",
+                         "vigencia_fim": date(2027, 9, 26), "placa": "QRQ4H54"})
+    pares = dict(al.campos_do_aviso(L))
+    assert pares["Seguradora"] == "Azul Seguros"
+    assert pares["Segurado"] == "LUZIA AUREA"
+    assert pares["Vence"] == "26/09/2027"
+    assert pares["Placa"] == "QRQ4H54"
+
+
+def test_o_rodape_avisa_quando_o_modelo_e_desconhecido():
+    """A diferença entre 'confira' e 'preencha' é o que a pessoa precisa saber."""
+    assert "preencher" in al.rodape_do_aviso(_leitura(reconhecida=False, e_apolice=True))
+    assert "conferir" in al.rodape_do_aviso(_leitura(reconhecida=True))
+
+
+def test_a_apolice_que_veio_pelo_assistente_aparece_na_lista(limpo, monkeypatch):
+    """O recorte de `sem_mensagem` é `mensagem_id is null`, e não a origem: origem
+    'whatsapp' sem mensagem é exatamente a terceira porta, e por origem ela ficaria
+    invisível nas duas listas."""
+    _finge(monkeypatch, leitura=_leitura())
+    al.ler_bytes(limpo, CONTA, b"%PDF a", "APOLICE.pdf", origem="whatsapp", de="Cássio")
+    itens = al.sem_mensagem(limpo, CONTA)
+    assert len(itens) == 1
+    assert itens[0]["de"] == "Cássio" and itens[0]["porta"] == "assistente"
+
+
+def test_cada_porta_tem_o_proprio_rotulo_na_lista(limpo, monkeypatch):
+    _finge(monkeypatch, leitura=_leitura())
+    al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf", origem="telegram", de="Cássio")
+    al.ler_bytes(limpo, CONTA, b"%PDF b", "B.pdf", origem="whatsapp", de="Cássio")
+    assert {i["porta"] for i in al.sem_mensagem(limpo, CONTA)} == {"Telegram", "assistente"}
+
+
+def test_a_seguradora_achada_sem_layout_e_guardada(limpo, monkeypatch):
+    """Sem isto a lista mostraria o nome do arquivo no lugar de 'Azul Seguros'."""
+    _finge(monkeypatch, leitura=_leitura(reconhecida=False, seguradora=None,
+                                         e_apolice=True,
+                                         campos={"seguradora": "Azul Seguros",
+                                                 "nome": "LUZIA AUREA"}))
+    al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf", origem="whatsapp", de="Cássio")
+    itens = al.sem_mensagem(limpo, CONTA)
+    assert itens[0]["seguradora"] == "Azul Seguros"
+    assert "Azul Seguros" in al.resumo(itens[0])

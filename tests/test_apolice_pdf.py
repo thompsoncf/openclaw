@@ -246,3 +246,98 @@ def test_bytes_que_nao_sao_pdf_dao_erro_legivel():
 def test_arquivo_grande_demais_e_recusado_antes_de_abrir():
     with pytest.raises(ValueError, match="16 MB"):
         ap.texto_do_pdf(b"x" * (ap.TETO_BYTES + 1))
+
+
+# ────────── é apólice? de quem? (21/09/2026) ──────────
+#
+# O caso que trouxe estes testes: o corretor da Liberal mandou a apólice de um
+# Jeep Renegade da Azul pro assistente, e o sistema registrou um LEMBRETE DE PAGAR
+# PARCELA. O leitor sabia dizer "não conheço este layout"; não sabia dizer "mas
+# isto é uma apólice" — e é a segunda pergunta que decide a gaveta.
+
+AZUL = """AZUL SEGUROS
+Companhia de seguros do grupo Porto Seguro
+Processo SUSEP nº 15414.900123/2026-11
+APÓLICE DE SEGURO DE AUTOMÓVEL
+Nº da Apólice: 09 26 0531 2875389
+Vigência: das 24H de 26/09/2026 às 24H de 26/09/2027
+SUAS INFORMAÇÕES
+Nome: LUZIA AUREA EXEMPLO
+Veículo: JEEP RENEGADE 1.3 T270
+Placa: QRQ4H54
+Prêmio Líquido
+R$ 2.665,76
+Franquia: 4.000,00
+Coberturas contratadas
+"""
+
+PIX = """Comprovante de transferência
+Pix enviado
+Valor: R$ 250,00
+Data: 20/09/2026
+Destinatário: FULANO DE TAL
+Instituição: BANCO EXEMPLO S.A.
+ID da transação: E1234567820260920
+"""
+
+
+def test_a_apolice_da_azul_e_reconhecida_como_apolice():
+    """Sem o layout dela — só pelas marcas que todo seguro tem."""
+    assert ap.e_apolice(AZUL)
+
+
+def test_o_comprovante_de_pix_nao_e_apolice():
+    """O que este teste protege é o caixa: a corretora usa o MESMO número pras duas
+    coisas, e assumir o Pix como apólice quebraria o uso de todo dia."""
+    assert not ap.e_apolice(PIX)
+
+
+def test_a_proposta_allianz_passa_pelo_layout_e_nao_pelas_marcas():
+    """Ela não escreve SUSEP nem "apólice" — é proposta. Reconhecer o layout é a
+    prova mais forte que existe, e vale mais que a contagem de marcas."""
+    assert not ap.e_apolice(papel()), "as marcas sozinhas não a pegam"
+    L = ap.ler_texto(papel())
+    assert L.reconhecida and L.e_apolice
+
+
+def test_uma_marca_sozinha_nao_basta():
+    assert not ap.e_apolice("Recibo de pagamento do seguro do carro")
+
+
+def test_o_nome_da_seguradora_sai_sem_o_layout():
+    L = ap.ler_texto(AZUL)
+    assert not L.reconhecida, "o layout da Azul ainda não está medido"
+    assert L.e_apolice
+    assert L.campos["seguradora"] == "Azul Seguros"
+
+
+def test_ganha_a_seguradora_que_aparece_mais_no_alto():
+    """A apólice da Azul cita o grupo Porto Seguro na linha seguinte. Quem emite
+    está no cabeçalho, e é um palpite — quem corrige é a conferência."""
+    nome, _ = ap.nomear_seguradora(AZUL)
+    assert nome == "Azul Seguros"
+
+
+def test_papel_sem_seguradora_conhecida_nao_chuta():
+    nome, trecho = ap.nomear_seguradora("APÓLICE\nSUSEP\nSegurado: FULANO\nVigência: 01/01/2027")
+    assert nome is None and trecho is None
+
+
+def test_o_aviso_de_layout_desconhecido_diz_qual_seguradora():
+    L = ap.ler_texto(AZUL)
+    assert any("Azul Seguros" in a and "layout" in a for a in L.avisos)
+
+
+def test_o_que_da_pra_ler_da_azul_e_lido():
+    """Rótulo é rótulo em qualquer seguradora: o genérico pega o que estiver
+    marcado, e o resto fica em branco de propósito."""
+    L = ap.ler_texto(AZUL)
+    assert L.campos["nome"] == "LUZIA AUREA EXEMPLO"
+    assert L.campos["vigencia_fim"] == date(2027, 9, 26)
+    assert L.campos["placa"] == "QRQ4H54"
+
+
+def test_o_resumo_guardado_leva_a_marca_e_o_nome_achado():
+    d = ap.resumo_para_guardar(ap.ler_texto(AZUL))
+    assert d["e_apolice"] is True and d["reconhecida"] is False
+    assert d["seguradora"] == "Azul Seguros"

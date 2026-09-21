@@ -112,7 +112,10 @@ def _gravar(c, conta_id: int, mensagem_id, *, nome: str, caminho: str = "",
               "origem": origem, "de": (de or "")[:120] or None}
     if leitura is not None:
         campos.update({
-            "seguradora": leitura.seguradora or None,
+            # a seguradora pode ter saído SÓ do nome no papel, sem layout conhecido
+            # (`apolice_pdf.nomear_seguradora`): é o que faz a linha da lista dizer
+            # "Azul Seguros · LUZIA AUREA" em vez de mostrar o nome do arquivo.
+            "seguradora": leitura.seguradora or leitura.campos.get("seguradora") or None,
             "reconhecida": bool(leitura.reconhecida),
             "segurado": (leitura.campos.get("nome") or None),
             "numero_proposta": (leitura.campos.get("numero_proposta") or None),
@@ -154,6 +157,59 @@ def ler_bytes(pool, conta_id: int, conteudo: bytes, nome: str, *,
                           bytes_=tam, leitura=leitura, erro=erro, origem=origem, de=de)
         c.commit()
     return {"ok": not erro, "id": lida_id, "leitura": leitura, "erro": erro}
+
+
+def tomou(r: dict) -> bool:
+    """A porta de conversa fica com este documento — ou deixa o caixa seguir?
+
+    O critério é `e_apolice` (as marcas de um seguro no papel), NÃO `reconhecida`
+    (o layout que eu sei ler). Era `reconhecida` até 21/09/2026, e o preço disso
+    apareceu no mesmo dia: a apólice da Azul que o Cássio mandou virou lembrete de
+    pagar parcela, porque o único layout que eu conheço é o da Allianz. Ler pouco
+    de uma apólice é um formulário pela metade; ler ela como cupom é o dado na
+    gaveta errada.
+
+    Documento que não tem as marcas continua caindo no caixa — é o comprovante de
+    Pix de quem usa o mesmo número pras duas coisas, e ele não pode parar.
+    """
+    L = r.get("leitura")
+    return bool(r.get("ok") and L is not None and L.e_apolice)
+
+
+def campos_do_aviso(leitura) -> list[tuple[str, str]]:
+    """Os pares (rótulo, valor) que a resposta no WhatsApp/Telegram mostra.
+
+    Um só lugar porque as duas portas têm que dizer a MESMA coisa; o que muda
+    entre elas é só o negrito."""
+    c = leitura.campos
+    pares = []
+    seg = leitura.seguradora or c.get("seguradora")
+    if seg:
+        pares.append(("Seguradora", seg))
+    if c.get("nome"):
+        pares.append(("Segurado", c["nome"]))
+    if c.get("vigencia_fim"):
+        pares.append(("Vence", c["vigencia_fim"].strftime("%d/%m/%Y")))
+    if c.get("numero_apolice"):
+        pares.append(("Apólice", c["numero_apolice"]))
+    elif c.get("numero_proposta"):
+        pares.append(("Proposta", c["numero_proposta"]))
+    if c.get("placa"):
+        pares.append(("Placa", c["placa"]))
+    return pares
+
+
+def rodape_do_aviso(leitura) -> str:
+    """A última linha: o que ainda falta a pessoa fazer, dito sem enfeite.
+
+    Layout desconhecido aparece aqui e não some: é a diferença entre 'confira' e
+    'preencha', e quem lê precisa saber qual dos dois é."""
+    if not leitura.reconhecida:
+        return ("Não conheço o modelo desta seguradora, então li só o que estava "
+                "rotulado — o resto ficou em branco pra você preencher em Renovações. "
+                "Nada foi cadastrado ainda.")
+    return ("Ela está esperando você conferir em Renovações — nada foi cadastrado "
+            "ainda.")
 
 
 def ler_pendentes(pool, conta_id: int, conversa_id: int | None = None) -> dict:
@@ -243,20 +299,31 @@ def uma(pool, conta_id: int, mensagem_id: int) -> dict | None:
             "form": r[8] or {}, "lido": r[9] or {}, "erro": r[10] or ""}
 
 
-def do_telegram(pool, conta_id: int, dias: int = 30, limite: int = 30) -> list[dict]:
-    """Os pré-cadastros que chegaram pelo Telegram e ainda não viraram apólice.
+#: como a lista da tela chama cada porta de conversa
+PORTAS = {"telegram": "Telegram", "whatsapp": "assistente"}
+
+
+def sem_mensagem(pool, conta_id: int, dias: int = 30, limite: int = 30) -> list[dict]:
+    """Os pré-cadastros que NÃO vieram de mensagem do chip e ainda não viraram apólice.
+
+    O recorte é `mensagem_id is null`, e não a origem. Foi `origem = 'telegram'` até
+    21/09/2026, e no dia em que a terceira porta abriu (o assistente no número da
+    ZAQ, que grava origem `whatsapp` sem mensagem) esse filtro teria deixado o
+    documento invisível: fora daqui por causa da origem, e fora de
+    `apolices.pdfs_do_whatsapp` por não ter mensagem. Pré-cadastro que ninguém vê é
+    pior que pré-cadastro que não existe.
 
     A marca de "já cadastrada" é o CAMINHO DO PDF: quando a pessoa confirma, a
-    apólice guarda o mesmo arquivo do pré-cadastro. Serve pras duas origens e não
+    apólice guarda o mesmo arquivo do pré-cadastro. Serve pras três portas e não
     precisa de marcador novo.
     """
     with pool.connection() as c:
         rows = c.execute(
             """select l.id, l.criado_em, coalesce(l.de,''), coalesce(l.pdf_nome,''),
                       coalesce(l.pdf_bytes,0), l.seguradora, l.segurado, l.vigencia_fim,
-                      coalesce(l.erro,'')
+                      coalesce(l.erro,''), coalesce(l.origem,'')
                  from apolice_lida l
-                where l.conta_id = %s and l.origem = 'telegram'
+                where l.conta_id = %s and l.mensagem_id is null
                   and l.criado_em > now() - make_interval(days => %s)
                   and not exists (select 1 from apolices a
                                    where a.conta_id = l.conta_id
@@ -267,7 +334,8 @@ def do_telegram(pool, conta_id: int, dias: int = 30, limite: int = 30) -> list[d
     return [{"lida_id": r[0], "quando": r[1], "de": r[2] or "—",
              "nome": r[3] or "documento.pdf", "bytes": int(r[4] or 0),
              "seguradora": r[5], "segurado": r[6], "vigencia_fim": r[7],
-             "erro_leitura": r[8], "lida": True}
+             "erro_leitura": r[8], "porta": PORTAS.get(r[9], r[9] or "assistente"),
+             "lida": True}
             for r in rows]
 
 

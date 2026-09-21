@@ -436,8 +436,8 @@ async def _tentar_apolice(update: Update, dados: bytes, nome: str) -> bool:
     é um MEMBRO autenticado da conta.
 
     Devolve True quando assumiu o documento. False deixa o caminho antigo seguir —
-    é o que acontece em toda conta que não é corretora, e no PDF cujo layout o
-    leitor não reconhece.
+    é o que acontece em toda conta que não é corretora, e no PDF que não tem as
+    marcas de um seguro (`apolice_leitor.tomou`).
 
     Best-effort: qualquer falha aqui devolve False. O comprovante do caixa não pode
     parar de funcionar porque a leitura de apólice teve um problema.
@@ -453,23 +453,13 @@ async def _tentar_apolice(update: Update, dados: bytes, nome: str) -> bool:
         quem = (getattr(membro, "nome", "") or "").strip() or "pelo Telegram"
         r = await asyncio.to_thread(_apl.ler_bytes, _pool, conta.id, dados, nome,
                                     origem="telegram", de=quem)
-        leitura = r.get("leitura")
-        # LAYOUT NÃO RECONHECIDO NÃO É APÓLICE PRA ESTA PORTA. Assumir aqui
-        # sequestraria o comprovante de banco de quem também usa o caixa.
-        if not r["ok"] or leitura is None or not leitura.reconhecida:
+        if not _apl.tomou(r):
             return False
-        c = leitura.campos
+        leitura = r["leitura"]
         linhas = ["📄 Apólice lida e guardada!", ""]
-        if leitura.seguradora:
-            linhas.append(f"*Seguradora:* {leitura.seguradora}")
-        if c.get("nome"):
-            linhas.append(f"*Segurado:* {c['nome']}")
-        if c.get("vigencia_fim"):
-            linhas.append(f"*Vence:* {c['vigencia_fim'].strftime('%d/%m/%Y')}")
-        if c.get("numero_proposta"):
-            linhas.append(f"*Proposta:* {c['numero_proposta']}")
-        linhas += ["", "Ela está esperando você conferir em *Renovações* — nada foi "
-                   "cadastrado ainda.", "https://app.zaq-ia.com/painel/renovacoes"]
+        linhas += [f"*{rot}:* {val}" for rot, val in _apl.campos_do_aviso(leitura)]
+        linhas += ["", _apl.rodape_do_aviso(leitura),
+                   "https://app.zaq-ia.com/painel/renovacoes"]
         await update.message.reply_text("\n".join(linhas), parse_mode="Markdown")
         return True
     except Exception as e:  # noqa: BLE001

@@ -204,11 +204,14 @@ def test_texto_vale_em_qualquer_tipo():
 @pytest.fixture()
 def render_api_falsa(monkeypatch):
     """Simula a API do Render. Devolve o dict de cenario, que o teste ajusta."""
-    cenario = {"status": "live", "status_num": 2, "alertas": []}
+    # `nome` é ajustável porque o serviço PODE ser renomeado no Render, e a busca
+    # do histórico precisa continuar achando (ver o teste do sufixo `-va`)
+    cenario = {"status": "live", "status_num": 2, "alertas": [],
+               "nome": "openclaw-web-bcu3"}
     monkeypatch.setattr(re_, "_detalhes_evento", lambda eid: {
         "id": eid, "details": {"deployId": "dep-111", "status": cenario["status_num"]}})
     monkeypatch.setattr(re_, "_servico", lambda sid: {
-        "id": sid, "name": "openclaw-web-bcu3", "ownerId": "own-1"})
+        "id": sid, "name": cenario["nome"], "ownerId": "own-1"})
     monkeypatch.setattr(re_, "_deploy", lambda sid, did: {
         "id": did, "status": cenario["status"],
         "commit": {"id": "abc123def456", "message": "Ajusta o funil\n\ncorpo"}})
@@ -413,6 +416,26 @@ def test_historico_filtra_e_ordena(limpo, render_api_falsa, monkeypatch):
     assert len(re_.historico(pool=limpo, servico="openclaw-web-bcu3")) == 2
     assert len(re_.historico(pool=limpo, servico="srv-xyz")) == 2
     assert re_.historico(pool=limpo, servico="nao-existe") == []
+
+
+def test_historico_acha_o_servico_renomeado(limpo, render_api_falsa, monkeypatch):
+    """Em 21/09/2026 os serviços do Render ganharam o sufixo `-va`. A busca exata
+    passou a devolver zero — e zero aqui se parece com "não deployou"."""
+    render_api_falsa.update(nome="openclaw-web-bcu3-va")
+    re_.processar(_corpo(evento="e1"), {"webhook-id": "m1"}, pool=limpo)
+
+    # o nome VELHO continua achando o evento gravado com o nome novo
+    assert len(re_.historico(pool=limpo, servico="openclaw-web-bcu3")) == 1
+    # e o nome NOVO acha também, que é o caminho de quem já sabe da troca
+    assert len(re_.historico(pool=limpo, servico="openclaw-web-bcu3-va")) == 1
+
+
+def test_historico_continua_sendo_filtro(limpo, render_api_falsa, monkeypatch):
+    """Casar por prefixo não pode virar "acha tudo": o cron não é o web."""
+    render_api_falsa.update(nome="openclaw-cron-diario-va")
+    re_.processar(_corpo(evento="e1"), {"webhook-id": "m1"}, pool=limpo)
+    assert re_.historico(pool=limpo, servico="openclaw-web") == []
+    assert len(re_.historico(pool=limpo, servico="openclaw-cron")) == 1
 
 
 def test_historico_limita_teto(limpo, render_api_falsa):

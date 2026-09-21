@@ -451,8 +451,20 @@ def historico(pool=None, servico: str = "", limite: int = 20,
 
     onde, args = [], []
     if servico:
-        onde.append("(servico_nome = %s or servico_id = %s)")
-        args += [servico, servico]
+        # O SERVIÇO PODE SER RENOMEADO, e o nome é o que todo mundo digita. Em
+        # 21/09/2026 os serviços do Render ganharam o sufixo `-va`: a busca exata
+        # por "openclaw-web-bcu3" passou a devolver ZERO, e zero aqui se parece com
+        # "não deployou" — foi assim que um deploy que tinha subido normalmente
+        # pareceu não ter acontecido.
+        #
+        # Casa nos dois sentidos, porque a renomeação pode ter ido pra qualquer
+        # lado: o nome guardado começa com o que se pediu ("openclaw-web-bcu3"
+        # acha "openclaw-web-bcu3-va"), ou o que se pediu começa com o guardado
+        # (pedir o nome novo ainda acha o evento velho). Continua sendo filtro:
+        # "openclaw-web" não passa a achar "openclaw-cron".
+        onde.append("(servico_nome = %s or servico_id = %s"
+                    " or servico_nome like %s or %s like servico_nome || '%%')")
+        args += [servico, servico, servico + "%", servico]
     if so_falhas:
         onde.append("sucesso is false")
     filtro = ("where " + " and ".join(onde)) if onde else ""

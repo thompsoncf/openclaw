@@ -163,6 +163,13 @@ def _contexto(request: Request, conta, gerencia: bool, *, aba: str = "fila",
                 # o import só aparece se o cofre estiver ligado — melhor não ter botão
                 # do que botão que engole a apólice do cliente (mesma regra do midia_cofre)
                 cofre_ok=_cofre.configurado(),
+                # QUANTOS ESTÃO ESPERANDO CONFERÊNCIA. Sem este número a tela de
+                # Renovações não diz nada sobre o que o leitor já leu: a lista
+                # mora DENTRO da janela "+ nova apólice", que é um fluxo de
+                # CRIAR. Em 21/09/2026 o dono recebeu no WhatsApp "está esperando
+                # você conferir em Renovações", abriu a tela e não viu nada — a
+                # mensagem apontava pra um lugar que não mostrava.
+                esperando=ap.esperando_conferencia(pool, conta_id) if gerencia else 0,
                 # a janela do segurado (web/janela_lead.kbAbrirSegurado) precisa da
                 # lista de motivos de perda DA CONTA e dos chips de decisão
                 motivos=_motivos(pool, conta_id),
@@ -1033,6 +1040,20 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
 .rn-jan .corpo{padding:.9rem 1rem 1.1rem;overflow-y:auto;flex:1}
 .rn-jan .corpo .sub{font-size:.79rem;color:var(--txt-mut);line-height:1.55;margin-bottom:.7rem}
 /* a segunda porta: o que já chegou no WhatsApp vinculado */
+/* A faixa do que está esperando conferência. `width:auto` e `margin` explícitos
+   vencem o `button{width:100%;margin-top:1.4rem}` global — a mesma armadilha que
+   já esticou o ✕ de fechar. */
+.rn-espera{display:flex;align-items:center;gap:.6rem;width:100%;margin:0 0 .9rem;
+  text-align:left;padding:.7rem .85rem;border-radius:10px;cursor:pointer;
+  background:var(--neon-fundo);border:1px solid var(--verde);color:var(--txt);
+  font:inherit;font-size:.86rem}
+.rn-espera:hover{border-color:var(--verde-claro,#46f58a)}
+.rn-espera .ic{flex:none;font-size:1.05rem;line-height:1}
+.rn-espera .tx{flex:1;min-width:0}
+.rn-espera .vai{flex:none;font-size:.78rem;font-weight:600;color:var(--verde-claro,#46f58a);
+  white-space:nowrap}
+@media (max-width:420px){.rn-espera{flex-wrap:wrap}.rn-espera .vai{margin-left:auto}}
+
 .rn-wpp{margin-top:1rem}
 .rn-wpp .cab{display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap;margin-bottom:.45rem}
 .rn-wpp .cab .t{font-size:.82rem;font-weight:600}
@@ -1099,6 +1120,19 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
 </nav>
 
 {% if erro %}<div class="rn-aviso ambar"><b>Não salvou:</b> {{ erro }}</div>{% endif %}
+
+{# O QUE O LEITOR JÁ LEU E NINGUÉM CONFERIU. Fica no topo das TRÊS abas, porque
+   é a única coisa desta tela que tem alguém esperando do outro lado — o
+   documento já chegou, já foi lido, e só falta um clique. Some sozinha quando
+   não há nada, como as faixas de contagem. #}
+{% if esperando %}
+<button type="button" class="rn-espera" onclick="rnAbrir(event)">
+  <span class="ic">📄</span>
+  <span class="tx"><b>{{ esperando }}</b> apólice{{ 's' if esperando > 1 }}
+    lida{{ 's' if esperando > 1 }} esperando você conferir</span>
+  <span class="vai">conferir →</span>
+</button>
+{% endif %}
 
 {# ─────────────────────────── ABA: a fila ─────────────────────────── #}
 {% if aba == 'fila' %}

@@ -353,3 +353,73 @@ def test_o_pre_cadastro_sem_mensagem_entra_na_lista_seja_qual_for_a_porta():
     corpo = corpo[:corpo.index("\ndef ")]
     assert "where l.conta_id = %s and l.mensagem_id is null" in corpo
     assert "l.origem = " not in corpo, "a origem não pode voltar a ser o filtro"
+
+
+# ────────── a saída da conferência e o descarte (21/09/2026) ──────────
+#
+# "quando abri e clico na apólice para aprovar não consigo sair caso não guarde, e
+# como tem apólice repetida lá tenho que ver uma forma de resolver isso".
+#
+# Eram dois becos. O passo do formulário só tinha "cancelar", que FECHA a janela —
+# e `rnAbrir` preserva a conferência em andamento de propósito, então reabrir caía
+# no mesmo formulário. E a fila só esvaziava CADASTRANDO.
+
+
+def test_o_formulario_tem_saida_pra_lista():
+    """Sem isto, quem abriu o documento errado só saía cadastrando ou recarregando."""
+    assert 'onclick="rnParaLista()"' in PA
+    assert "window.rnParaLista = function()" in PA
+
+
+def test_voltar_pra_lista_limpa_o_rascunho():
+    """Sem limpar, a conferência antiga reaparece por cima da próxima."""
+    corpo = PA[PA.index("window.rnParaLista = function()"):]
+    corpo = corpo[:corpo.index("\n  window.")]
+    assert "c.innerHTML = ''" in corpo
+    assert "f.reset()" in corpo
+    assert "wppLida = false" in corpo, "a lista pode ter mudado enquanto se conferia"
+    assert "passo('pdf'" in corpo
+
+
+def test_cada_pre_cadastro_tem_como_sair_da_fila():
+    assert "x.className = 'rn-descartar'" in PA
+    assert "'/painel/renovacoes/lida/' + id + '/descartar'" in PA
+    assert "function wppDescartar(id, linha)" in PA
+    assert ".rn-descartar{" in PA, "o botão global é width:100%; sem o próprio, estica"
+
+
+def test_o_descarte_nao_dispara_a_abertura_do_documento():
+    """O ✕ vive DENTRO da linha clicável; sem parar a propagação, descartar abriria
+    a conferência do que acabou de sair da fila."""
+    corpo = PA[PA.index("if(it.fonte === 'lida'){"):]
+    corpo = corpo[:corpo.index("lista.appendChild(b);")]
+    assert "ev.stopPropagation()" in corpo
+
+
+def test_o_descarte_oferece_desfazer():
+    corpo = PA[PA.index("function wppDescartar(id, linha)"):]
+    corpo = corpo[:corpo.index("\n  // a faixa do topo")]
+    assert "desfazer" in corpo and "fd.append('desfazer', '1')" in corpo
+
+
+def test_a_faixa_do_topo_acompanha_sem_recarregar():
+    """Ela conta a MESMA fila: descartar ali e a faixa continuar dizendo 4 é a tela
+    mentindo."""
+    assert "function faixaAtualizar(quantos)" in PA
+    corpo = PA[PA.index("function faixaAtualizar(quantos)"):]
+    corpo = corpo[:corpo.index("\n  window.")]
+    assert ".rn-espera" in corpo and "f.hidden = true" in corpo
+
+
+def test_a_rota_de_descarte_e_de_gerencia():
+    corpo = corpo_de("descartar_pre_cadastro")
+    assert "if not gerencia:" in corpo
+    assert "_apl.descartar(" in corpo and "_apl.voltar_da_lixeira(" in corpo
+
+
+def test_cadastrar_limpa_as_irmas_da_fila():
+    """Casar por `pdf_caminho` tira só o documento confirmado; as outras leituras
+    do mesmo papel têm cada uma o seu caminho no cofre."""
+    corpo = corpo_de("salvar_apolice")
+    assert "_apl.descartar_irmas(pool, conta[0], numero_apolice" in corpo
+    assert "except Exception" in corpo, "limpar a fila não pode derrubar o cadastro"

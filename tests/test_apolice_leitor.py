@@ -72,6 +72,7 @@ def pool():
         c.execute((MIG / "304_apolice_lida.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "305_apolice_lida_telegram.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "306_apolice_lida_hash.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "307_apolice_lida_descartada.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -503,3 +504,97 @@ def test_o_recado_da_repetida_diz_onde_ela_esta():
     assert "já li" in fila and "21/09" in fila and "Renovações" in fila
     carteira = al.aviso_de_repetida({"onde": "carteira", "quando": q, "resumo": "Porto · JOSE"})
     assert "já tenho cadastrada" in carteira and "Renovações" not in carteira
+
+
+# ────────── 7. dá pra sair da fila sem cadastrar (21/09/2026) ──────────
+#
+# "quando abri e clico na apólice para aprovar não consigo sair caso não guarde, e
+# como tem apólice repetida lá tenho que ver uma forma de resolver isso".
+#
+# A fila só esvaziava CADASTRANDO. Naquele dia a conta 37 tinha quatro linhas:
+# três eram o mesmo PDF da Mapfre (11:08, 13:56, 14:39, lidas enquanto o leitor
+# era consertado) e a quarta era a Porto lida antes do layout dela existir. Só uma
+# prestava, e não havia como tirar as outras.
+
+
+def test_descartado_some_da_fila(limpo, monkeypatch):
+    _finge(monkeypatch, leitura=_leitura())
+    r = al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf", origem="whatsapp", de="Cássio")
+    assert len(al.sem_mensagem(limpo, CONTA)) == 1
+    assert al.descartar(limpo, CONTA, r["id"], membro_id=45) is True
+    assert al.sem_mensagem(limpo, CONTA) == []
+
+
+def test_descartar_nao_apaga(limpo, monkeypatch):
+    """Regra 0: a linha fica, o PDF fica no cofre, a leitura fica auditável."""
+    _finge(monkeypatch, leitura=_leitura())
+    r = al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf")
+    al.descartar(limpo, CONTA, r["id"], membro_id=45)
+    with limpo.connection() as c:
+        linha = c.execute("""select pdf_caminho, descartado_por, descartado_em is not null
+                               from apolice_lida where id=%s""", (r["id"],)).fetchone()
+    assert linha[0] and linha[1] == 45 and linha[2] is True
+
+
+def test_desfazer_traz_de_volta(limpo, monkeypatch):
+    """Descartar é um toque, e errar também."""
+    _finge(monkeypatch, leitura=_leitura())
+    r = al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf")
+    al.descartar(limpo, CONTA, r["id"])
+    assert al.voltar_da_lixeira(limpo, CONTA, r["id"]) is True
+    assert len(al.sem_mensagem(limpo, CONTA)) == 1
+
+
+def test_descartar_duas_vezes_nao_mente(limpo, monkeypatch):
+    _finge(monkeypatch, leitura=_leitura())
+    r = al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf")
+    assert al.descartar(limpo, CONTA, r["id"]) is True
+    assert al.descartar(limpo, CONTA, r["id"]) is False
+
+
+def test_nao_se_descarta_documento_de_outra_conta(limpo, monkeypatch):
+    _finge(monkeypatch, leitura=_leitura())
+    r = al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf")
+    assert al.descartar(limpo, OUTRA, r["id"]) is False
+    assert len(al.sem_mensagem(limpo, CONTA)) == 1
+
+
+def test_o_descartado_nao_bloqueia_o_reenvio(limpo, monkeypatch):
+    """Descartei por engano e mandei de novo: a trava de duplicidade não pode
+    transformar o descarte numa porta fechada."""
+    _finge(monkeypatch, leitura=_leitura())
+    r = al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf")
+    al.descartar(limpo, CONTA, r["id"])
+    de_novo = al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf")
+    assert de_novo.get("repetida"), "ele avisa em vez de criar uma segunda linha"
+    assert de_novo["repetida"]["onde"] == "fila"
+
+
+def test_cadastrar_uma_tira_as_irmas_da_fila(limpo, monkeypatch):
+    """O caso exato: três leituras do MESMO papel, cada uma com seu caminho no
+    cofre. Casar por `pdf_caminho` tira só a confirmada e deixa duas convidando a
+    cadastrar de novo."""
+    _finge(monkeypatch, leitura=_leitura(campos={"numero_apolice": "0330433570731"}))
+    a = al.ler_bytes(limpo, CONTA, b"%PDF um", "A.pdf")
+    al.ler_bytes(limpo, CONTA, b"%PDF dois", "B.pdf")
+    al.ler_bytes(limpo, CONTA, b"%PDF tres", "C.pdf")
+    assert len(al.sem_mensagem(limpo, CONTA)) == 3
+    assert al.descartar_irmas(limpo, CONTA, "0330 433 570731", menos=a["id"]) == 2
+    resta = al.sem_mensagem(limpo, CONTA)
+    assert [i["lida_id"] for i in resta] == [a["id"]]
+
+
+def test_irmas_sem_numero_nao_varrem_a_fila(limpo, monkeypatch):
+    """Número vazio casaria com toda leitura que também não tem número — e limparia
+    a fila inteira ao cadastrar uma apólice sem número."""
+    _finge(monkeypatch, leitura=_leitura(campos={}))
+    al.ler_bytes(limpo, CONTA, b"%PDF um", "A.pdf")
+    assert al.descartar_irmas(limpo, CONTA, "") == 0
+    assert len(al.sem_mensagem(limpo, CONTA)) == 1
+
+
+def test_irmas_de_outra_apolice_ficam(limpo, monkeypatch):
+    _finge(monkeypatch, leitura=_leitura(campos={"numero_apolice": "111"}))
+    al.ler_bytes(limpo, CONTA, b"%PDF um", "A.pdf")
+    assert al.descartar_irmas(limpo, CONTA, "999") == 0
+    assert len(al.sem_mensagem(limpo, CONTA)) == 1

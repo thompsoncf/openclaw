@@ -336,15 +336,35 @@ def _fim_da_janela(agora: datetime, cfg: dict) -> bool:
 
 # ------------------------------------------------------------------ o resumo do dia
 
+def ultima_cobranca(c, conta_id: int, agora: datetime) -> datetime | None:
+    """Quando saiu o último aviso da esteira ANTES de hoje. None se nunca saiu.
+
+    É o marco do saldo do vendedor, e a razão é um caso de produção: a Prime
+    cobrou no sábado 19/09, o PEDRO tratou 3 leads naquela tarde, o domingo não
+    teve cobrança (a esteira respeita o expediente) — e na segunda o aviso dele
+    abria com "Ontem você tratou 0", porque a janela era literalmente ontem. O
+    trabalho do sábado sumiu do placar dele. Entre uma cobrança e a seguinte não
+    pode haver buraco: é o mesmo princípio do dia 1 ser hoje.
+    """
+    r = c.execute(
+        """select max(criado_em) from aviso_envios
+            where conta_id=%s and origem='esteira' and criado_em < %s""",
+        (conta_id, _inicio_do_dia(agora))).fetchone()
+    return r[0] if r and r[0] else None
+
+
 def resumo(c, conta_id: int, membro_id: int | None, agora: datetime | None = None,
-           cfg: dict | None = None) -> dict:
+           cfg: dict | None = None, desde: datetime | None = None) -> dict:
     """O que este vendedor fez e não fez — é o "resumo do dia" que o dono pediu.
 
-    A janela é o dia de ontem pra frente: o aviso da manhã fala do que ficou de
-    ontem, e o que entrou hoje ainda não teve tempo de ser feito.
+    `desde` é a janela, e quem chama escolhe porque as duas perguntas são
+    diferentes: o aviso da manhã conta o que houve DESDE A ÚLTIMA COBRANÇA (senão
+    o fim de semana engole o trabalho do vendedor), e o fecho do dia conta o que
+    houve HOJE — "o dia fechou" não pode somar ontem. Sem `desde`, a janela é o
+    dia de ontem pra frente, que era o comportamento antigo dos dois.
     """
     agora = agora or datetime.now(timezone.utc)
-    desde = _inicio_do_dia(agora) - timedelta(days=1)
+    desde = desde or (_inicio_do_dia(agora) - timedelta(days=1))
     final = prazo_final(cfg["dias"] if cfg else config(c, conta_id)["dias"])
     # "quantos fecham amanhã" (pedido do dono em 19/09/2026). O corte é a DATA de
     # amanhã, contada como a esteira conta: quem amanhã estiver no dia do prazo
@@ -426,8 +446,12 @@ def fecho_do_dia(pool, conta_id: int, agora: datetime | None = None) -> list[dic
                      join membros m on m.id = e.membro_id
                     where e.conta_id=%s and m.papel='vendedor' and coalesce(m.ativo,true)""",
                 (conta_id,)).fetchall()
-            placar = [(nome, resumo(c, conta_id, mid, agora, cfg)) for mid, nome in vendedores]
-            casa = resumo(c, conta_id, None, agora, cfg)
+            # O DIA, e só ele: "O dia fechou: 7 tratados" somava ontem junto,
+            # porque a janela padrão do resumo nasceu pro aviso da manhã.
+            hoje = _inicio_do_dia(agora)
+            placar = [(nome, resumo(c, conta_id, mid, agora, cfg, desde=hoje))
+                      for mid, nome in vendedores]
+            casa = resumo(c, conta_id, None, agora, cfg, desde=hoje)
             chefes = c.execute(
                 "select id, coalesce(nullif(nome,''), email), email from membros "
                 " where conta_id=%s and coalesce(ativo,true) and papel in ('dono','gestor')",
@@ -718,6 +742,23 @@ def rodar(pool, agora: datetime | None = None) -> dict:
 
 # ------------------------------------------------------------------ o aviso
 
+#: Quantos nomes cabem numa lista do aviso. Vinte nomes no WhatsApp viram um
+#: paredão que ninguém lê — e o vendedor tem 10 entrando por dia de qualquer jeito.
+TETO_NOMES = 10
+
+
+def _e_mais(quantos: int) -> list[str]:
+    """A linha que o teto exigia e não existia.
+
+    Medido na Prime em 21/09/2026: a cobrança dizia "THIAGO PINHEIRO, 20 para hoje"
+    e listava 10 nomes — o lote do sábado fazendo dia 3 mais os 10 que entraram na
+    segunda. Quem conta os nomes e acha 10 conclui que o número está errado, e a
+    partir daí não confia em mais nenhum.
+    """
+    sobra = quantos - TETO_NOMES
+    return [f"...e mais {sobra} na fila."] if sobra > 0 else []
+
+
 def texto(nome: str, itens: list[dict], resumo_ontem: dict) -> tuple[str, str]:
     """O aviso da manhã: o que ficou de ontem, o que vence hoje, e os nomes.
 
@@ -734,15 +775,18 @@ def texto(nome: str, itens: list[dict], resumo_ontem: dict) -> tuple[str, str]:
     linhas = []
     tratou, total = resumo_ontem.get("tratou", 0), resumo_ontem.get("na_esteira", 0)
     if tratou or total:
-        linhas.append(f"Ontem você tratou {tratou}. Na sua esteira: {total}.")
+        rotulo = resumo_ontem.get("rotulo") or "Ontem"
+        linhas.append(f"{rotulo} você tratou {tratou}. Na sua esteira: {total}.")
     if ultimos:
         linhas.append("")
         linhas.append("ÚLTIMO DIA — resolvem hoje ou fecham às 19h:")
-        linhas += [f"• {i['quem']}" for i in ultimos[:10]]
+        linhas += [f"• {i['quem']}" for i in ultimos[:TETO_NOMES]]
+        linhas += _e_mais(len(ultimos))
     if resto:
         linhas.append("")
         linhas.append("Cobrança de hoje:")
-        linhas += [f"• {i['quem']} (dia {i['dia']})" for i in resto[:10]]
+        linhas += [f"• {i['quem']} (dia {i['dia']})" for i in resto[:TETO_NOMES]]
+        linhas += _e_mais(len(resto))
     linhas.append("")
     linhas.append("Responda pelo WhatsApp da empresa, ou marque como perdido "
                   "escrevendo o motivo.")
@@ -754,6 +798,20 @@ def texto(nome: str, itens: list[dict], resumo_ontem: dict) -> tuple[str, str]:
     linhas.append("Resolveu por telefone ou pessoalmente? Escreva no histórico do "
                   "lead — o que não está escrito não conta.")
     return titulo, "\n".join(linhas)
+
+
+def _rotulo_do_saldo(ultima: datetime | None, agora: datetime) -> str:
+    """Como chamar a janela do saldo na primeira linha do aviso.
+
+    "Ontem" só quando foi ontem mesmo. Depois de um domingo o aviso dizia "ontem"
+    sobre o sábado — e o vendedor que trabalhou no sábado lia um zero.
+    """
+    if not ultima:
+        return "Ontem"
+    dias = (_dia_br(agora) - _dia_br(ultima)).days
+    if dias <= 1:
+        return "Ontem"
+    return "Desde a última cobrança"
 
 
 def notificar(pool, conta_id: int, cobrancas_hoje: list[dict]) -> None:
@@ -778,7 +836,13 @@ def notificar(pool, conta_id: int, cobrancas_hoje: list[dict]) -> None:
             with pool.connection() as c:
                 m = c.execute("select coalesce(nullif(nome,''), email), email from membros "
                               " where id=%s and conta_id=%s", (membro_id, conta_id)).fetchone()
-                r_ontem = resumo(c, conta_id, membro_id)
+                # DESDE A ÚLTIMA COBRANÇA, não desde ontem: no dia seguinte a um
+                # domingo (ou a um feriado) "ontem" é um dia em que ninguém foi
+                # cobrado, e o trabalho do sábado sumia do saldo do vendedor.
+                agora = datetime.now(timezone.utc)
+                ultima = ultima_cobranca(c, conta_id, agora)
+                r_ontem = resumo(c, conta_id, membro_id, agora, desde=ultima)
+                r_ontem["rotulo"] = _rotulo_do_saldo(ultima, agora)
                 numero = _fu._zap_do_membro(c, conta_id, membro_id)
             if not m:
                 continue

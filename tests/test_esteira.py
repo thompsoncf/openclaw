@@ -718,3 +718,90 @@ def test_o_aviso_manda_o_vendedor_escrever_o_historico():
                         {"tratou": 2, "na_esteira": 8})
     assert "Escreva no histórico do lead" in corpo
     assert "o que não está escrito não conta" in corpo
+
+
+# ------------------------------------------------- o saldo não pode pular um dia
+# Medido na Prime em 21/09/2026: o PEDRO tratou 3 leads no sábado à tarde, o
+# domingo não teve cobrança (a esteira respeita o expediente desde o #751) e na
+# segunda o aviso dele abria com "Ontem você tratou 0". A janela era literalmente
+# ontem — e ontem foi um dia em que ninguém foi cobrado.
+
+def _segunda():
+    """09:00 de segunda, 21/09/2026 — dois dias depois do AGORA (sábado)."""
+    return AGORA.replace(hour=12, minute=0) + timedelta(days=2)
+
+
+def test_o_saldo_vai_ATE_a_ultima_cobranca_e_nao_ate_ontem(c):
+    lid = _com_bola_nossa(c, nome="Isa")
+    es.entrar(c, CONTA, AGORA)
+    # a cobrança saiu no sábado, e o vendedor agiu depois dela
+    _cobrou_hoje(c)
+    c.execute("update follow_up_esteira set resolvido_em=%s, resolucao='falou' where prospeccao_id=%s",
+              (AGORA + timedelta(hours=3), lid))
+
+    # a janela padrão (ontem pra frente) perde o sábado quando se olha da segunda
+    assert es.resumo(c, CONTA, None, _segunda())["tratou"] == 0
+    # a janela da última cobrança, não
+    ultima = es.ultima_cobranca(c, CONTA, _segunda())
+    assert ultima is not None
+    assert es.resumo(c, CONTA, None, _segunda(), desde=ultima)["tratou"] == 1
+
+
+def test_o_rotulo_do_saldo_so_diz_ontem_quando_foi_ontem():
+    assert es._rotulo_do_saldo(AGORA, AGORA + timedelta(days=1)) == "Ontem"
+    assert es._rotulo_do_saldo(AGORA, AGORA) == "Ontem"
+    assert es._rotulo_do_saldo(AGORA, _segunda()) == "Desde a última cobrança"
+    assert es._rotulo_do_saldo(None, AGORA) == "Ontem"
+
+
+def test_sem_cobranca_anterior_nao_tem_ultima(c):
+    assert es.ultima_cobranca(c, CONTA, AGORA) is None
+
+
+def test_a_cobranca_de_hoje_nao_conta_como_ultima(c):
+    """Senão o saldo começaria no aviso que está saindo agora, e seria sempre 0."""
+    _cobrou_hoje(c)
+    assert es.ultima_cobranca(c, CONTA, AGORA) is None
+
+
+def test_o_fecho_conta_o_DIA_e_nao_ontem_junto(c):
+    """"O dia fechou: 7 tratados" somava o dia anterior — a janela padrão do
+    resumo nasceu pro aviso da manhã, e o fecho herdou sem querer."""
+    lid = _com_bola_nossa(c, nome="Ontem")
+    es.entrar(c, CONTA, AGORA)
+    c.execute("update follow_up_esteira set resolvido_em=%s, resolucao='falou' where prospeccao_id=%s",
+              (AGORA - timedelta(days=1), lid))
+    assert es.resumo(c, CONTA, None, AGORA)["tratou"] == 1, "a janela padrão pega ontem"
+    assert es.resumo(c, CONTA, None, AGORA, desde=es._inicio_do_dia(AGORA))["tratou"] == 0
+
+
+# ------------------------------------------------- o teto dos nomes diz que há mais
+
+def _itens(n, *, ultimo=False):
+    return [{"quem": f"Lead {i}", "dia": 7 if ultimo else 1, "ultimo_dia": ultimo}
+            for i in range(n)]
+
+
+def test_a_lista_avisa_quantos_nomes_ficaram_de_fora():
+    """A Prime recebeu "THIAGO PINHEIRO, 20 para hoje" com 10 nomes. Quem conta os
+    nomes e acha 10 conclui que o número está errado."""
+    titulo, corpo = es.texto("THIAGO", _itens(20), {"tratou": 0, "na_esteira": 20})
+    assert titulo == "⏱️ THIAGO, 20 para hoje"
+    assert corpo.count("• Lead") == 10
+    assert "...e mais 10 na fila." in corpo
+
+
+def test_lista_curta_nao_ganha_a_linha_do_resto():
+    _, corpo = es.texto("THIAGO", _itens(3), {"tratou": 0, "na_esteira": 3})
+    assert "na fila." not in corpo
+
+
+def test_o_ultimo_dia_tambem_avisa_o_resto(c):
+    _, corpo = es.texto("THIAGO", _itens(12, ultimo=True), {"tratou": 0, "na_esteira": 12})
+    assert "...e mais 2 na fila." in corpo
+
+
+def test_o_rotulo_do_saldo_aparece_no_texto():
+    _, corpo = es.texto("THIAGO", _itens(1),
+                        {"tratou": 3, "na_esteira": 8, "rotulo": "Desde a última cobrança"})
+    assert corpo.startswith("Desde a última cobrança você tratou 3. Na sua esteira: 8.")

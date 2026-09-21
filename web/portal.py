@@ -200,15 +200,36 @@ body{margin:0;min-height:100vh;font-family:var(--body);
   .topo{position:relative;padding:1.1rem 1rem 1.3rem}
 }
 .logo{font-weight:600;color:var(--txt);font-size:1.1rem}
-.card{width:100%;max-width:430px;background:var(--card);border:1px solid var(--borda);
- border-radius:14px;padding:2rem;margin:1.5rem 1rem;box-sizing:border-box}
+/* `width:100%` ANULAVA a margem lateral: num celular de 375px o cartão media
+   375px e encostava nas duas bordas, com o canto de 14px arredondando contra a
+   moldura da tela. `min()` desconta a margem ANTES de medir a largura, e o
+   `auto` centraliza sem depender do alinhamento do pai. */
+.card{width:100%;max-width:min(430px,100% - 2rem);background:var(--card);
+ border:1px solid var(--borda);border-radius:14px;padding:2rem;margin:1.5rem auto;
+ box-sizing:border-box}
+/* O teto continua em 720px — `.card.larga` é usado por Equipe, Fornecedor,
+   Portal e outras, e alargar aqui estragaria oito telas (tests/
+   test_relatorios_largura.py guarda exatamente isso). A media query só DEVOLVE
+   a margem lateral em tela estreita: nunca passa dos 720. */
 .card.larga{max-width:720px}
+@media (max-width:760px){.card.larga{max-width:calc(100% - 2rem)}}
 h1{font-size:1.35rem;font-weight:500;margin:0 0 1.2rem}
 label{display:block;font-size:.85rem;color:var(--txt-mut);margin:.9rem 0 .3rem}
-input,select{width:100%;padding:.65rem .8rem;border-radius:8px;border:1px solid #333;
- background:var(--bg);color:var(--txt);box-sizing:border-box;font-size:.95rem}
-button{width:100%;margin-top:1.4rem;padding:.75rem;border:0;border-radius:8px;
- background:var(--verde);color:var(--sobre-verde);font-size:1rem;cursor:pointer}
+/* 48px de altura: o mínimo de alvo de toque. Os campos tinham 40px e o botão
+   42px — abaixo dos 44px que iOS e Android pedem, e o cockpit já respeita.
+   `font-size:1rem` não é estética: abaixo de 16px o Safari do iPhone dá zoom
+   sozinho ao focar o campo, e a tela pula. */
+input,select{width:100%;min-height:48px;padding:.6rem .85rem;border-radius:8px;
+ border:1px solid #333;background:var(--bg);color:var(--txt);box-sizing:border-box;
+ font-size:1rem}
+button{width:100%;margin-top:1.4rem;min-height:48px;padding:.75rem;border:0;
+ border-radius:8px;background:var(--verde);color:var(--sobre-verde);font-size:1rem;
+ cursor:pointer}
+/* Link que age como botão (entrar, criar conta): alvo de 44px, não 17px. */
+.link-alvo{display:inline-flex;align-items:center;justify-content:center;min-height:44px;
+ padding:0 .9rem;border-radius:10px;color:var(--verde-claro);font-size:.9rem;
+ text-decoration:none}
+.link-alvo:hover{background:var(--card-2)}
 button:hover{background:var(--verde-hover)}
 .erro{background:#3a1d1d;border:1px solid #6e2b2b;color:#f0b8b8;border-radius:8px;
  padding:.6rem .8rem;font-size:.88rem;margin-bottom:.6rem}
@@ -485,7 +506,12 @@ function navTap(el){var p=el.closest('nav');if(p){var A=p.querySelectorAll('a');
 function maisToggle(v){var sh=document.getElementById('mais-sheet'),bg=document.querySelector('.mais-bg');if(sh)sh.classList.toggle('open',v);if(bg)bg.classList.toggle('open',v);}
 </script>
 {% else %}
-<div class="topo"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span><span id="menu-links"><a href="/login">Entrar</a><a href="/cadastro">Criar conta</a></span></div>
+{# No /login a barra some inteira: a marca grande no meio da tela já identifica
+   a página, e "Entrar" apontando pra própria página é ruído. "Criar conta" vai
+   pro rodapé do cartão, junto de "Esqueci minha senha". #}
+{% if rota != '/login' %}
+<div class="topo"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span><span id="menu-links"><a href="/login">Entrar</a>{% if rota != '/cadastro' %}<a href="/cadastro">Criar conta</a>{% endif %}</span></div>
+{% endif %}
 {% endif %}
 {% if logado and plano_aviso %}
 <div class="plano-banner {% if plano_aviso.nivel == 'vencido' %}pb-vencido{% else %}pb-avencer{% endif %}">
@@ -616,16 +642,30 @@ _CADASTRO = """{% extends "base" %}{% block conteudo %}
 </form></div>{% endblock %}"""
 
 _LOGIN = """{% extends "base" %}{% block conteudo %}
-<div class="card"><h1>Entrar</h1>
-{% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
-{% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
-<form method="post" action="/login">
-<label>E-mail</label><input name="email" type="email" required>
-<label>Senha</label><input name="senha" type="password" required>
-<button>Entrar</button></form>
-<p style="text-align:center;margin-top:.8rem">
-  <a href="/esqueci-senha" style="color:var(--verde-claro);font-size:.88rem;text-decoration:none">Esqueci minha senha</a>
-</p>
+{# `margin-block:auto` centraliza na altura que sobra. Em flex, margem auto come
+   o espaço livre — e quando não há livre (tela baixa, teclado aberto) ela vira
+   zero sozinha, então nada fica cortado. Antes sobravam 458px mortos embaixo. #}
+<div style="flex:1 0 auto;display:flex;flex-direction:column;justify-content:center;
+            align-items:center;width:100%;box-sizing:border-box;padding:1.5rem 0">
+  <div style="text-align:center;margin-bottom:1.2rem">
+    <div style="font-family:var(--display);font-size:2rem;font-weight:800;
+                color:var(--verde);line-height:1">Zaq</div>
+    <div style="font-size:1.3rem;font-weight:700;color:var(--txt);margin-top:.4rem">Sua Empresa, no bolso</div>
+    <div style="font-size:.95rem;color:var(--txt-mut);margin-top:.3rem">Entre com seu e-mail e senha.</div>
+  </div>
+  <div class="card" style="margin-top:0;margin-bottom:0">
+  {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+  {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+  <form method="post" action="/login">
+  <label for="li-email">E-mail</label><input id="li-email" name="email" type="email" required autocomplete="email">
+  <label for="li-senha">Senha</label><input id="li-senha" name="senha" type="password" required autocomplete="current-password">
+  <button>Entrar</button></form>
+  <div style="display:flex;justify-content:center;align-items:center;gap:.2rem;margin-top:.6rem">
+    <a class="link-alvo" href="/esqueci-senha">Esqueci minha senha</a>
+    <span aria-hidden="true" style="color:var(--txt-faint)">·</span>
+    <a class="link-alvo" href="/cadastro">Criar conta</a>
+  </div>
+  </div>
 </div>{% endblock %}"""
 
 _BEMVINDO = """{% extends "base" %}{% block conteudo %}
@@ -7555,6 +7595,15 @@ def _plano_aviso(conta_row, beta_ativo, avisar=True) -> dict | None:
 def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
     ctx.setdefault("logado", bool(request.session.get("conta_id")))
     ctx.setdefault("titulo", nome.capitalize())
+    # A rota atual, pro `base` esconder o link que aponta pra própria página
+    # (o "Entrar" no /login) — e a barra inteira, no /login.
+    #
+    # `getattr` e não `request.url.path` direto: os testes montam o request como
+    # SimpleNamespace, com `session` e mais nada. O `request.url.path` que já
+    # existia aqui embaixo nunca quebrou porque mora dentro de um `if` que os
+    # testes pulam passando `secao_ativa` pronto — esta linha roda sempre.
+    # Sem rota, o `base` cai no caminho de fora do login, que é o certo.
+    ctx.setdefault("rota", getattr(getattr(request, "url", None), "path", ""))
     if "secao_ativa" not in ctx:
         _p = request.url.path
         _secs = [("caixa", "/painel/pdv"), ("abastecimento", "/painel/produtos/abastecimento"),

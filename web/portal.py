@@ -340,7 +340,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
 .wa-suporte:active{transform:scale(.96)}
 .wa-tooltip{position:absolute;right:68px;background:var(--card-2);color:var(--txt);padding:.45rem .8rem;border-radius:6px;font-size:.85rem;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s;border:1px solid var(--borda)}
 .wa-suporte:hover .wa-tooltip{opacity:1}
-@media (max-width:600px){.wa-suporte{bottom:16px;right:16px;width:52px;height:52px}.wa-tooltip{display:none}.fin-cards{grid-template-columns:1fr}.fin-cards>div:first-child{display:grid !important;grid-template-columns:1fr 1fr;gap:.6rem}.fin-cards>div:first-child>div:last-child{margin-top:0 !important;padding-top:0 !important;border-top:0 !important;border-left:1px solid #1e1e20;padding-left:.6rem !important}}
+@media (max-width:600px){.wa-suporte{bottom:16px;right:16px;width:52px;height:52px}.wa-tooltip{display:none}.fin-cards{grid-template-columns:1fr}.fin-cards>div:first-child b{font-size:1.25rem}}
 
 #navprog{position:fixed;top:0;left:0;height:3px;width:0;background:var(--verde-claro);z-index:100;transition:width .35s ease;opacity:0}
 #navprog.run{width:92%;opacity:1;transition:width 9s cubic-bezier(.1,.7,.2,1)}

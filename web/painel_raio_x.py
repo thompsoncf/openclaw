@@ -101,7 +101,17 @@ def painel_raio_x(request: Request):
 
 _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
 <style>
-.rx{display:flex;flex-direction:column;gap:1rem}
+/* max-width:100% NÃO É ENFEITE. O `body` do painel é `display:flex` com
+   `align-items:center` — que NÃO estica os filhos: cada um nasce do tamanho do
+   próprio conteúdo. Um `overflow-x:auto` zera o min-content do filho, mas o
+   MAX-content continua sendo a tabela inteira: medido em 21/09/2026, a tabela
+   por vendedor pede 611px e fazia o `.rx` inteiro nascer com 611px numa tela de
+   390. O efeito não era a tabela rolar — era a PÁGINA rolar, levando junto o
+   título, os filtros e os cards, com o nome do vendedor saindo pela esquerda.
+   O teto devolve a largura da tela ao `.rx` e deixa a rolagem onde ela deve
+   ficar: dentro do `.rx-tab`. Desktop não muda (lá o conteúdo pede 1147px e o
+   teto não morde). */
+.rx{display:flex;flex-direction:column;gap:1rem;max-width:100%}
 .rx h1{font-size:1.5rem;margin:0}
 .rx .lede{color:var(--text-dim);font-size:.88rem;margin:.2rem 0 0;max-width:64ch}
 .rx-bar{display:flex;flex-wrap:wrap;gap:.4rem;padding:.7rem .8rem;border:1px solid var(--line);border-radius:12px;background:var(--bg-2);align-items:center}

@@ -213,7 +213,8 @@ def ja_conheco(pool, conta_id: int, pdf_hash: str, numero_apolice: str = "") -> 
         if num:
             r = c.execute(
                 """select id, criado_em, coalesce(seguradora,''),
-                          coalesce((select nome from clientes where id=a.cliente_id),''),
+                          coalesce((select nome from clientes
+                                      where id=a.cliente_id and dono_id=a.conta_id),''),
                           vigencia_fim
                      from apolices a
                     where conta_id=%s and numero_apolice is not null

@@ -638,3 +638,92 @@ def test_a_mapfre_nao_deixa_campo_em_branco():
 
 def test_a_apolice_emitida_e_vigente_e_nao_proposta():
     assert ap.ler_texto(mapfre()).campos["situacao"] == "vigente"
+
+
+# ────────── o bloco fecha, e a casa não é o cliente (21/09/2026, Porto Seguro) ──────────
+#
+# Terceiro caso do mesmo dia, e o que mostrou a causa raiz. A apólice Porto Seguro
+# saiu com segurado "LIBERAL NETO CONS E CORG DE SEGS LTDA" — a PRÓPRIA CORRETORA
+# — e o e-mail do corretor junto, enquanto CPF e telefone ficaram vazios.
+#
+# Aquilo não era a âncora errada: era o bloco SEM FIM. `_bloco_do_segurado`
+# devolvia da âncora até o fim do papel, então um rótulo que falta no bloco certo
+# era buscado nos blocos seguintes até achar. Bloco fechado transforma isso em
+# campo vazio, que é o comportamento certo.
+#
+# E a segunda rede é genérica de verdade: nenhuma lista de seguradoras pega a
+# corretora, porque a corretora é outra em cada instalação. A conta sabe o próprio
+# nome, e nada que é dela pode ser o cliente.
+
+PORTO = """PORTO SEGURO CIA DE SEGUROS GERAIS
+Processo SUSEP 15414.000000/2026-00
+APÓLICE DE SEGURO DE AUTOMÓVEL
+Vigência: 13/08/2026 a 13/08/2027
+DADOS DO SEGURADO
+Razão Social: FULANA DE TAL EXEMPLO
+Placa: PIH0G84
+DADOS DO CORRETOR
+Nome: LIBERAL NETO CONS E CORG DE SEGS LTDA
+E-mail: corretor@exemplo.com
+Endereço: R Jaime Da Silveira, 725
+COBERTURAS CONTRATADAS
+Casco 100% FIPE
+"""
+
+CASA = ("Liberal Neto", "LIBERAL NETO CONS E CORG DE SEGS LTDA",
+        "06.324.020/0001-02", "corretor@exemplo.com")
+
+
+def test_o_bloco_do_segurado_termina_no_proximo_cabecalho():
+    """A causa raiz: o bloco ia até o FIM do papel, e o "Nome:" que faltava era
+    emprestado do bloco do corretor, três cabeçalhos adiante."""
+    trecho, _anc = ap._bloco_do_segurado(PORTO)
+    assert "Placa: PIH0G84" in trecho, "o bloco certo entra inteiro"
+    assert "LIBERAL NETO" not in trecho, "e para antes do bloco do corretor"
+
+
+def test_rotulo_que_falta_fica_faltando_e_nao_vem_do_vizinho():
+    L = ap.ler_texto(PORTO)
+    assert L.campos.get("nome") != "LIBERAL NETO CONS E CORG DE SEGS LTDA"
+    assert "nome" in L.nao_achou, "a Porto rotula 'Razão Social', que ainda não leio"
+
+
+def test_a_corretora_nao_entra_como_cliente_nem_com_o_bloco_aberto():
+    """A segunda rede, pro papel em que a âncora leva mesmo ao bloco errado."""
+    papel = PORTO.replace("Razão Social: FULANA DE TAL EXEMPLO",
+                          "Nome: LIBERAL NETO CONS E CORG DE SEGS LTDA")
+    L = ap.ler_texto(papel, proibidos=CASA)
+    assert "nome" not in L.campos
+    assert any("própria corretora" in a for a in L.avisos)
+
+
+def test_o_email_do_corretor_derruba_o_bloco_inteiro():
+    """O campo que denuncia pode não ser o nome: na Porto de verdade o que vazou
+    primeiro foi o e-mail."""
+    papel = PORTO.replace("DADOS DO CORRETOR\n", "")
+    L = ap.ler_texto(papel, proibidos=CASA)
+    assert "email" not in L.campos and "nome" not in L.campos
+
+
+def test_cliente_de_verdade_passa_com_a_lista_ligada():
+    """A trava não pode recusar quem não é da casa."""
+    L = ap.ler_texto(mapfre(), proibidos=CASA)
+    assert L.campos["nome"] == "FULANA DE TAL EXEMPLO"
+    assert L.avisos == []
+
+
+def test_a_casa_e_reconhecida_por_nome_parcial_e_por_documento():
+    assert ap._e_a_propria_casa("LIBERAL NETO CONS E CORG DE SEGS LTDA", CASA)
+    assert ap._e_a_propria_casa("06324020000102", CASA)
+    assert ap._e_a_propria_casa("Corretor@Exemplo.COM", CASA)
+    assert not ap._e_a_propria_casa("SOLANGE MARIA LIMA MELO", CASA)
+
+
+def test_nome_curto_nao_vira_trava_larga():
+    """Um nome de conta de três letras casaria dentro de qualquer palavra."""
+    assert not ap._e_a_propria_casa("MARIA APARECIDA", ("ZAQ",))
+
+
+def test_sem_lista_de_proibidos_nada_muda():
+    """A lista é rede extra; sem ela o leitor tem que continuar igual."""
+    assert ap.ler_texto(mapfre()).campos["nome"] == "FULANA DE TAL EXEMPLO"

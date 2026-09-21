@@ -132,6 +132,40 @@ def _gravar(c, conta_id: int, mensagem_id, *, nome: str, caminho: str = "",
     return r[0] if r else None
 
 
+def _a_propria_casa(pool, conta_id: int) -> tuple[str, ...]:
+    """Nome, documento e e-mail da CORRETORA e dos membros dela.
+
+    A trava que não depende de conhecer o layout. Toda apólice traz um bloco com
+    os dados de quem VENDEU — a corretora —, com os mesmos rótulos do bloco de
+    quem COMPROU, e quando o leitor erra de bloco é quase sempre esse que ele
+    pega. Em 21/09/2026 a Porto Seguro saiu com "LIBERAL NETO CONS E CORG DE SEGS
+    LTDA" no lugar da cliente, e o e-mail do corretor junto.
+
+    Nenhuma lista de terceiros resolve isso, porque o corretor é diferente em cada
+    instalação. Mas a conta sabe o próprio nome — e nada do que é dela pode ser o
+    cliente.
+
+    Só leitura, e tolerante: sem isto o leitor continua funcionando, só perde uma
+    rede de proteção.
+    """
+    try:
+        with pool.connection() as c:
+            r = c.execute("select coalesce(nome,''), coalesce(documento,'') "
+                          "  from contas where id=%s", (conta_id,)).fetchone()
+            ms = c.execute("select coalesce(nome,''), coalesce(email,'') "
+                           "  from membros where conta_id=%s and coalesce(ativo,true)",
+                           (conta_id,)).fetchall()
+    except Exception as e:  # noqa: BLE001
+        _log.info("não consegui montar a lista da própria casa (conta %s): %s: %s",
+                  conta_id, type(e).__name__, e)
+        return ()
+    fora = list(r or ())
+    for m in ms or ():
+        fora.extend(m)
+    # nome curto demais casa com meio mundo ("ZAQ" dentro de qualquer palavra)
+    return tuple(v for v in fora if len((v or "").strip()) >= 5)
+
+
 def ler_bytes(pool, conta_id: int, conteudo: bytes, nome: str, *,
               origem: str = "whatsapp", de: str = "", mensagem_id=None) -> dict:
     """Lê UM PDF que já está na mão e deixa o pré-cadastro pronto.
@@ -144,7 +178,7 @@ def ler_bytes(pool, conta_id: int, conteudo: bytes, nome: str, *,
     """
     erro, leitura, caminho, tam = "", None, "", 0
     try:
-        leitura = apdf.ler(conteudo)
+        leitura = apdf.ler(conteudo, _a_propria_casa(pool, conta_id))
         caminho, tam = _guardar(conta_id, conteudo, nome)
     except ValueError as e:
         erro = str(e)

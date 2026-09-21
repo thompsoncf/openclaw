@@ -192,11 +192,17 @@ def nomear_seguradora(texto: str) -> tuple[str | None, str | None]:
 #
 # A âncora da Allianz (`SUAS INFORMAÇÕES`) nasceu do mesmo defeito, em 18/09, com
 # o e-mail do corretor. Era específica demais: valia pra um layout só.
+#
+# O `(?!RA)` aparece em TODO padrão que termina em SEGURADO, e não só no rótulo
+# solto: a apólice Mapfre abre com o cabeçalho "DADOS DA SEGURADORA", e sem a
+# guarda o padrão "DADOS D[OA] SEGURAD[OA]" casa com o prefixo dele — a âncora
+# pousaria justamente no bloco que ela existe pra evitar. Achado ao ler o PDF de
+# verdade, depois de o conserto já estar escrito.
 _ANCORAS_SEGURADO = (
     r"SUAS\s+INFORMA[ÇC][ÕO]ES",
-    r"DADOS\s+D[OA]\s+SEGURAD[OA]",
+    r"DADOS\s+D[OA]\s+SEGURAD[OA](?!RA)",
     r"DADOS\s+D[OA]\s+CLIENTE",
-    r"IDENTIFICA[ÇC][ÃA]O\s+D[OA]\s+SEGURAD[OA]",
+    r"IDENTIFICA[ÇC][ÃA]O\s+D[OA]\s+SEGURAD[OA](?!RA)",
     r"\bSEGURAD[OA]\b(?!RA)",          # o rótulo solto, nunca "SEGURADORA"
 )
 
@@ -343,9 +349,104 @@ def _allianz(texto: str, L: Leitura) -> None:
     c["situacao"] = "proposta" if re.search(r"\bPROPOSTA\b", texto) and not c.get("numero_apolice") else "vigente"
 
 
+def _mapfre(texto: str, L: Leitura) -> None:
+    """A apólice Mapfre Auto — medida em 21/09/2026, na de 11 páginas que o
+    corretor mandou (apólice 0330433570731, emitida 17/09/2026).
+
+    O papel é organizado em blocos com cabeçalho em caixa alta, e CADA UM tem
+    "Nome:", "CPF:" e "Endereço:" — seguradora, sucursal, corretor, segurado. Por
+    isso aqui nada é lido do texto solto: tudo sai do bloco certo. Foi este layout
+    que mostrou o preço de ler sem bloco — o genérico devolveu a MAPFRE no nome e
+    o CNPJ da própria LIBERAL (o corretor) no CPF.
+    """
+    c, t = L.campos, L.trechos
+    c["seguradora"], c["ramo"] = "Mapfre", "auto"
+
+    def bloco(cabecalho: str, ate: tuple[str, ...]) -> str:
+        i = texto.find(cabecalho)
+        if i < 0:
+            return ""
+        resto = texto[i + len(cabecalho):]
+        fins = [resto.find(x) for x in ate if resto.find(x) > 0]
+        return resto[:min(fins)] if fins else resto
+
+    def pega(chave, rotulo, onde=None, conv=lambda v: v):
+        v, tr = _rotulo(onde if onde is not None else texto, rotulo)
+        val = conv(v) if v is not None else None
+        if val is None:
+            L.nao_achou.append(chave)
+            return None
+        c[chave], t[chave] = val, tr
+        return val
+
+    pega("numero_apolice", "Nº Apólice", conv=lambda v: _digitos(v) or None)
+    pega("numero_proposta", "Nº Proposta", conv=lambda v: _digitos(v) or None)
+    # a vigência vem em DOIS rótulos, um por data — não numa linha só como a Allianz
+    vi = pega("vigencia_inicio", "Vigência início 24h do dia", conv=_data)
+    vf = pega("vigencia_fim", "Término 24h do dia", conv=_data)
+    if vi and vf:
+        t["vigencia_fim"] = f"Vigência {vi:%d/%m/%Y} → {vf:%d/%m/%Y}"
+
+    seg = bloco("DADOS DO SEGURADO", ("QUESTIONÁRIO", "DADOS DO"))
+    pega("nome", "Nome", seg, lambda v: re.sub(r"\s+", " ", v).strip().upper() or None)
+    pega("cpf", "CPF", seg, lambda v: _digitos(v) or None)
+    pega("endereco", "Endereço", seg)
+    pega("telefone", "Telefone celular", seg, lambda v: _digitos(v) or None)
+
+    vei = bloco("DADOS DO VEÍCULO", ("VALOR DA INDENIZAÇÃO", "REVISTA DO CARRO"))
+    pega("modelo", "Marca/Modelo", vei, lambda v: re.sub(r"\s+", " ", v).strip() or None)
+    pega("ano", "Ano do modelo", vei, lambda v: _digitos(v)[:4] or None)
+    pega("placa", "Placa", vei, lambda v: v.strip().upper().replace("-", "") or None)
+    pega("chassi", "Nº Chassi", vei, lambda v: v.strip().upper() or None)
+    pega("zero_km", "0 KM", vei, lambda v: v.strip().upper().startswith("S"))
+    pega("fipe", "Código na Tabela de Referência")
+    pega("cep_pernoite", "CEP do local onde o veículo pernoita",
+         conv=lambda v: _digitos(v) or None)
+
+    # o dinheiro vem rotulado e com dois-pontos — e o IOF vem em LINHA PRÓPRIA,
+    # ao contrário da Allianz, onde ele é derivado. Aqui é lido, não calculado.
+    pega("premio_centavos", "Prêmio líquido", conv=_dinheiro)
+    pega("iof_centavos", "IOF", conv=_dinheiro)
+    pega("total_centavos", "Prêmio total", conv=_dinheiro)
+    pega("parcelas", "Nº de parcela", conv=lambda v: int(_digitos(v)) if _digitos(v) else None)
+    pega("dia_vencimento", "Vencimento da 1ª parcela",
+         conv=lambda v: int(_digitos(v)[:2]) if _digitos(v) else None)
+
+    # AS PARCELAS FECHAM A CONTA. A 1ª vem rotulada; da 2ª em diante vêm numa
+    # tabela de DUAS COLUNAS (02 … 08 … na mesma linha do papel), que o texto
+    # extraído desenrola em trios número/data/valor.
+    primeira, _tr = _rotulo(texto, "Valor da 1ª parcela")
+    valores = [_dinheiro(primeira)] if _dinheiro(primeira) is not None else []
+    valores += [_dinheiro(v) for _n, _d, v in
+                re.findall(r"\n(\d{2})\n(\d{2}/\d{2}/\d{4})\n([\d.]*\d,\d{2})", texto)]
+    if len(valores) > 1:
+        c["parcelas_centavos"] = valores
+
+    # a franquia do casco: a primeira linha da tabela, e a única que importa aqui
+    m = re.search(r"CASCO DEDUTÍVEL\n[^\n]*\n\s*(\d{1,3}(?:\.\d{3})*,\d{2})", texto)
+    if m:
+        c["franquia_centavos"], t["franquia_centavos"] = _dinheiro(m.group(1)), m.group(0)
+    else:
+        L.nao_achou.append("franquia_centavos")
+
+    risco = bloco("QUESTIONÁRIO DE AVALIAÇÃO DE RISCO", ("IMPORTANTE:", "DADOS DO"))
+    nasc = _rotulo(risco, "Data de nascimento")[0]
+    if _data(nasc):
+        c["condutor_idade"] = (date.today() - _data(nasc)).days // 365
+        t["condutor_idade"] = f"Data de nascimento: {nasc}"
+    pega("condutor_estado_civil", "Estado Civil", risco,
+         lambda v: re.sub(r"\s+", " ", v).strip() or None)
+
+    c["situacao"] = "vigente" if c.get("numero_apolice") else "proposta"
+
+
 _LAYOUTS = (
     # (nome, teste de reconhecimento, leitor)
     ("Allianz", lambda t: bool(re.search(r"\bALLIANZ\b", t, re.I)) and "Nº da Proposta" in t, _allianz),
+    # a Mapfre escreve o próprio nome no bloco DADOS DA SEGURADORA; os dois
+    # rótulos juntos separam a apólice dela de um e-mail que só a mencione.
+    ("Mapfre", lambda t: bool(re.search(r"\bMAPFRE\b", t, re.I))
+                         and "Nº Apólice" in t and "DADOS DO SEGURADO" in t, _mapfre),
 )
 
 

@@ -107,6 +107,14 @@ services:
       #   finance/relogio.py, que faz a conta na mão. Ver tests/test_relogio.py.
       - key: TZ
         value: America/Sao_Paulo
+      # --- Cotação de seguro (finance/cotacao_provedores.py) ---
+      # COTACAO_PROVEDOR: qual conector usa. Ausente ou desconhecida = 'manual',
+      #   em que a corretora digita as ofertas na tela e o resto do fluxo é
+      #   idêntico — é o padrão enquanto não houver multicálculo contratado.
+      #   Cada conector lê as próprias credenciais em COTACAO_<CHAVE>_*
+      #   (BASE_URL, API_KEY ou o trio OAuth2, TENANT). Ver docs/API_COTACAO.md.
+      - key: COTACAO_PROVEDOR
+        sync: false
       # --- WhatsApp por QR Code (serviço Node à parte, services/wa-qr) ---
       # WA_QR_SERVICE_URL: URL pública do serviço wa-qr (ex.:
       #   https://zaq-waqr.onrender.com). Sem ela, a via QR fica inerte.

@@ -311,6 +311,20 @@ def criar_agente_financeiro(brain: Brain, livro: LivroCaixa,
             persona = persona + _BLOCO_AGENDA
         except Exception:
             pass  # agenda nunca derruba o agente
+    # COTAÇÃO DE SEGURO: só pra CORRETORA (regra 6 do CLAUDE.md — a tela e a
+    # ferramenta seguem o nicho da conta). Numa conta de festa, estas ferramentas
+    # nem existem: o agente não pode oferecer o que a conta não tem.
+    if pool is not None and conta_id is not None:
+        try:
+            from .raio_x_perfil import perfil_por_nicho as _perfil
+            from .tools_pj import _nicho_da_conta
+            if _perfil(_nicho_da_conta(pool, conta_id)) == "seguros":
+                from .cotacao_tools import BLOCO_COTACAO, construir_ferramentas_cotacao
+                ferramentas = ferramentas + construir_ferramentas_cotacao(
+                    pool, conta_id, getattr(livro, "membro_id", None))
+                persona = persona + BLOCO_COTACAO
+        except Exception:
+            pass  # cotação nunca derruba o agente
     return criar_agente(
         nome="Financeiro",
         persona=persona,

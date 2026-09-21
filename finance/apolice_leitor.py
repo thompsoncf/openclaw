@@ -470,6 +470,7 @@ def sem_mensagem(pool, conta_id: int, dias: int = 30, limite: int = 30) -> list[
                       coalesce(l.erro,''), coalesce(l.origem,'')
                  from apolice_lida l
                 where l.conta_id = %s and l.mensagem_id is null
+                  and l.descartado_em is null
                   and l.criado_em > now() - make_interval(days => %s)
                   and not exists (select 1 from apolices a
                                    where a.conta_id = l.conta_id
@@ -483,6 +484,60 @@ def sem_mensagem(pool, conta_id: int, dias: int = 30, limite: int = 30) -> list[
              "erro_leitura": r[8], "porta": PORTAS.get(r[9], r[9] or "assistente"),
              "lida": True}
             for r in rows]
+
+
+def descartar(pool, conta_id: int, lida_id: int, membro_id=None) -> bool:
+    """Tira um documento da fila de conferência sem cadastrar nada.
+
+    A fila só esvaziava CADASTRANDO, e uma fila que só cresce para de ser fila. O
+    que não deveria virar apólice — a mesma lida três vezes, um boleto que passou,
+    uma leitura obsoleta depois que o layout entrou — não tinha saída.
+
+    NÃO APAGA (regra 0): a linha fica com quem descartou e quando, o PDF continua
+    no cofre e a leitura continua auditável. `voltar_da_lixeira` desfaz.
+    """
+    with pool.connection() as c:
+        r = c.execute("""update apolice_lida set descartado_em = now(), descartado_por = %s
+                          where conta_id = %s and id = %s and descartado_em is null
+                          returning id""", (membro_id, conta_id, lida_id)).fetchone()
+        c.commit()
+    return bool(r)
+
+
+def voltar_da_lixeira(pool, conta_id: int, lida_id: int) -> bool:
+    """Desfaz o descarte. Existe porque descartar é um toque e errar também."""
+    with pool.connection() as c:
+        r = c.execute("""update apolice_lida set descartado_em = null, descartado_por = null
+                          where conta_id = %s and id = %s returning id""",
+                      (conta_id, lida_id)).fetchone()
+        c.commit()
+    return bool(r)
+
+
+def descartar_irmas(pool, conta_id: int, numero_apolice: str, *, menos=None) -> int:
+    """Depois de cadastrar, some da fila TODO pré-cadastro da mesma apólice.
+
+    O caminho já existente — casar `apolices.pdf_caminho` com `apolice_lida.
+    pdf_caminho` — só pega o documento exato que foi confirmado. As IRMÃS são as
+    outras leituras do mesmo papel, cada uma com seu caminho no cofre: em 21/09 a
+    Mapfre tinha três, e cadastrar uma deixava duas na fila convidando a cadastrar
+    de novo.
+
+    A chave é o número da apólice, comparado só pelos DÍGITOS.
+    """
+    num = "".join(ch for ch in (numero_apolice or "") if ch.isdigit())
+    if not num:
+        return 0
+    with pool.connection() as c:
+        rs = c.execute(
+            """update apolice_lida set descartado_em = now()
+                where conta_id = %s and descartado_em is null
+                  and (%s::bigint is null or id <> %s::bigint)
+                  and regexp_replace(coalesce(form->>'numero_apolice',''),'\\D','','g') = %s
+                returning id""",
+            (conta_id, menos, menos, num)).fetchall()
+        c.commit()
+    return len(rs)
 
 
 def por_id(pool, conta_id: int, lida_id: int) -> dict | None:

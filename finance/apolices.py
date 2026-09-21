@@ -729,6 +729,7 @@ def esperando_conferencia(pool, conta_id: int, *, dias: int = 30) -> int:
         r = c.execute(
             """select count(*) from apolice_lida l
                 where l.conta_id = %s and l.mensagem_id is null
+                  and l.descartado_em is null
                   and coalesce(l.erro,'') = '' and l.pdf_caminho is not null
                   and l.criado_em > now() - make_interval(days => %s)
                   and not exists (select 1 from apolices a

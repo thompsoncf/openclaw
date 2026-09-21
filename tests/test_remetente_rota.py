@@ -59,7 +59,9 @@ def cliente(monkeypatch):
                        reconhecida boolean default false, segurado text,
                        numero_proposta text, vigencia_fim date, form jsonb,
                        lido jsonb, erro text, origem text default 'whatsapp',
-                       de text, criado_em timestamptz not null default now())""")
+                       de text, pdf_hash text, descartado_em timestamptz,
+                       descartado_por bigint,
+                       criado_em timestamptz not null default now())""")
         c.execute("""create table apolices (id bigserial primary key, conta_id bigint,
                        seguradora text, ramo text, vigencia_fim date, situacao text,
                        pdf_caminho text)""")
@@ -266,3 +268,16 @@ def test_a_faixa_aparece_na_tela_e_abre_a_janela():
     assert "esperando=ap.esperando_conferencia(pool, conta_id)" in pa
     # o botão global é width:100%; sem o próprio a faixa estica torto
     assert ".rn-espera{" in pa and "margin:0 0 .9rem" in pa
+
+
+def test_a_faixa_nao_conta_o_que_foi_descartado(cliente):
+    """A faixa e a lista contam a MESMA fila. Descartar na lista e a faixa
+    continuar dizendo 4 é a tela mentindo."""
+    from finance import apolices as _ap
+    _lida(cliente, pdf_caminho="apolice/37/a.pdf")
+    _lida(cliente, pdf_caminho="apolice/37/b.pdf")
+    with cliente.pool.connection() as cx:
+        cx.execute("update apolice_lida set descartado_em=now() "
+                   " where pdf_caminho='apolice/37/b.pdf'")
+        cx.commit()
+    assert _ap.esperando_conferencia(cliente.pool, CONTA) == 1

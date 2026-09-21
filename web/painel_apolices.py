@@ -508,6 +508,32 @@ def mudar_remetente(request: Request, acao: str = Form(""), ref: str = Form(""),
     return JSONResponse({"ok": True})
 
 
+@router.post("/painel/renovacoes/lida/{lida_id}/descartar")
+def descartar_pre_cadastro(request: Request, lida_id: int, desfazer: str = Form("")):
+    """Tira um documento da fila sem cadastrar — e desfaz, se foi engano.
+
+    Pedido do dono em 21/09/2026, com quatro linhas na fila das quais três eram o
+    mesmo PDF lido enquanto o leitor era consertado: a fila só esvaziava
+    cadastrando, e não cadastrar não era uma saída.
+
+    Não apaga nada (regra 0): o PDF fica no cofre e a leitura fica auditável.
+    """
+    conta, gerencia, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "sessão expirada"}, status_code=401)
+    if not gerencia:
+        return JSONResponse({"ok": False, "erro": "só o dono e o gestor mexem nisto"})
+    from finance import apolice_leitor as _apl
+    pool, membro = get_pool(), _membro_logado(request)
+    if (desfazer or "").strip():
+        ok = _apl.voltar_da_lixeira(pool, conta[0], lida_id)
+    else:
+        ok = _apl.descartar(pool, conta[0], lida_id, membro)
+    if not ok:
+        return JSONResponse({"ok": False, "erro": "não achei este documento"})
+    return JSONResponse({"ok": True, "esperando": ap.esperando_conferencia(pool, conta[0])})
+
+
 def _apl_resumo(i: dict) -> str:
     """A linha que a janela mostra embaixo do nome quando o leitor já passou."""
     from finance import apolice_leitor as _apl
@@ -750,6 +776,17 @@ def salvar_apolice(request: Request,
     except Exception as e:  # noqa: BLE001
         _log.warning("apólice não salvou (conta %s): %s: %s", conta[0], type(e).__name__, e)
         return _falhou("não deu pra salvar")
+    # AS IRMÃS SOMEM DA FILA. Casar `apolices.pdf_caminho` com o do pré-cadastro só
+    # tira o documento EXATO que foi confirmado; as outras leituras do mesmo papel
+    # têm cada uma o seu caminho no cofre. Em 21/09 a Mapfre tinha três, e
+    # cadastrar uma deixava duas na fila convidando a cadastrar de novo.
+    try:
+        from finance import apolice_leitor as _apl
+        _apl.descartar_irmas(pool, conta[0], numero_apolice or "")
+    except Exception as e:  # noqa: BLE001
+        _log.info("não deu pra limpar a fila (conta %s): %s: %s",
+                  conta[0], type(e).__name__, e)
+
     if quer_json:
         # A LINHA VOLTA PRONTA, do mesmo template que a tabela usa. O JavaScript só
         # a encaixa na ordem certa — nada de recarregar a página pra ver o que
@@ -1067,6 +1104,13 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
 .rn-wpp .item .nome{flex:1;min-width:0;font-size:.82rem;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 .rn-wpp .item .quem{font-size:.72rem;color:var(--txt-mut);white-space:nowrap}
+/* `width:auto;margin:0` vencem o `button{width:100%;margin-top:1.4rem}` global */
+.rn-item-linha{display:flex;gap:.3rem;align-items:stretch}
+.rn-item-linha .item{flex:1;min-width:0}
+.rn-descartar{flex:none;width:auto;margin:0;padding:0 .55rem;border-radius:8px;
+  background:none;border:1px solid var(--borda);color:var(--txt-mut);
+  font:inherit;font-size:.8rem;cursor:pointer;line-height:1}
+.rn-descartar:hover{border-color:var(--coral);color:var(--coral)}
 .rn-wpp .vazio{font-size:.79rem;color:var(--txt-mut);line-height:1.55}
 .rn-wpp .pe{margin-top:.5rem;font-size:.74rem;padding:.24rem .6rem}
 /* quem pode mandar: liberar é reconhecer um nome que já está ali */
@@ -1401,6 +1445,12 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         </div></div>
           <div class="rn-acoes" style="margin-top:.8rem">
             <button class="rn-bt rn-salvar">{% if conferir %}Está certo — cadastrar{% else %}Cadastrar apólice{% endif %}</button>
+            {# A SAÍDA. Antes daqui o passo do formulário só tinha "cancelar", que
+               FECHA a janela — e reabrir caía no mesmo formulário, porque `rnAbrir`
+               preserva a conferência em andamento de propósito. Quem abriu o
+               documento errado ficava presso: ou cadastrava, ou recarregava a
+               página. Este botão devolve pra lista e limpa o rascunho. #}
+            <button type="button" class="rn-bt fraco" onclick="rnParaLista()">← voltar pra lista</button>
             <button type="button" class="rn-bt fraco" onclick="rnFechar()">cancelar</button>
           </div>
         </form>
@@ -1671,11 +1721,59 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
           // clicar não levaria a lugar nenhum
           if(it.ja || it.erro){ b.disabled = true; }
           else { b.onclick = function(){ window.rnDoWhats(it.fonte, it.id); }; }
+          // DESCARTAR, só pro que tem pré-cadastro (fonte 'lida'): é o que dá
+          // saída pra fila. O que ainda não foi lido sai tirando o remetente.
+          if(it.fonte === 'lida'){
+            var linha = document.createElement('div');
+            linha.className = 'rn-item-linha';
+            var x = document.createElement('button');
+            x.type = 'button';
+            x.className = 'rn-descartar';
+            x.title = 'Tirar da fila sem cadastrar';
+            x.textContent = '✕';
+            x.onclick = function(ev){ ev.stopPropagation(); wppDescartar(it.id, linha); };
+            linha.appendChild(b);
+            linha.appendChild(x);
+            lista.appendChild(linha);
+            return;
+          }
           lista.appendChild(b);
         });
         var sub = el('rn-wpp-sub');
         if(sub) sub.textContent = d.itens.length + (d.itens.length === 1 ? ' documento' : ' documentos') + ' de quem você liberou';
       });
+  }
+
+  function wppDescartar(id, linha){
+    zapFetch('/painel/renovacoes/lida/' + id + '/descartar',
+             { method: 'POST', body: new FormData(), credentials: 'same-origin' })
+      .then(function(d){
+        if(!d) return;
+        if(!d.ok){ erro(d.erro || 'não consegui tirar da fila.'); return; }
+        linha.remove();
+        faixaAtualizar(d.esperando);
+        // DESFAZER, porque descartar é um toque e errar também. O aviso do
+        // zapFetch já tem lugar pra ação; é o mesmo componente do resto do painel.
+        if(window.zapAviso){
+          zapAviso('Tirei da fila.', { tipo: 'ok', some: 8000,
+            acao: { texto: 'desfazer', fn: function(){
+              var fd = new FormData(); fd.append('desfazer', '1');
+              zapFetch('/painel/renovacoes/lida/' + id + '/descartar',
+                       { method: 'POST', body: fd, credentials: 'same-origin' })
+                .then(function(v){ if(v && v.ok){ wppLida = false; wppCarregar();
+                                                  faixaAtualizar(v.esperando); } });
+            } } });
+        }
+      });
+  }
+
+  // a faixa do topo conta a mesma fila; mudou aqui, muda lá — sem recarregar
+  function faixaAtualizar(quantos){
+    var f = document.querySelector('.rn-espera');
+    if(!f) return;
+    if(!quantos){ f.hidden = true; return; }
+    var tx = f.querySelector('.tx b');
+    if(tx) tx.textContent = String(quantos);
   }
 
   window.rnDoWhats = function(fonte, id){
@@ -1783,6 +1881,18 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         if(!d || !d.ok){ erro((d && d.erro) || 'não consegui carregar a lista.'); return; }
         fontesDesenhar(d);
       });
+  };
+
+  window.rnParaLista = function(){
+    erro('');
+    var c = el('rn-conf');
+    if(c) c.innerHTML = '';         // sem isto a conferência antiga reaparece
+    var f = el('rn-form');
+    if(f) try { f.reset(); } catch(_e){}
+    voltarPara = 'pdf';
+    wppLida = false;                // a lista pode ter mudado enquanto se conferia
+    wppCarregar();
+    passo('pdf', '1 de 2 · o documento');
   };
 
   window.rnVoltar = function(){

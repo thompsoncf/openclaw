@@ -927,15 +927,85 @@ _DASH = """{% extends "base" %}{% block conteudo %}
   .miss-dot{width:8px;height:8px;border-radius:50%;background:#f0c05a;display:inline-block;vertical-align:middle;margin-right:.25rem;box-shadow:0 0 0 3px #f0c05a22;flex:none}
   .pc-edit.miss{border-color:#f0c05a66 !important}
   .pc-edit.done{border-color:var(--verde-claro) !important}
+
+  /* ---------- A CARA DA TELA ----------
+     Os blocos e a ordem são os mesmos de sempre: título+filtros, natureza,
+     avisos, os três cartões, categorias, fatura, lançamentos. O que muda aqui é
+     só o desenho de cada um — cartão arredondado, ícone, e o miudinho de .68rem
+     virando lista legível. Tudo sob `.fin2` de propósito: `.metric`, `.aba` e
+     `.barra` são compartilhados com Relatórios, Admin e mais seis telas, e
+     mexer neles lá fora estragaria todas. */
+  .fin2 .fin-sel{width:auto;min-height:48px;border-radius:14px;background:var(--card);
+    border:1px solid var(--borda);font-size:.9rem;padding:.5rem .8rem}
+  /* o pontinho colorido no lugar do emoji: mesma informação, sem o desenho de
+     cada sistema operacional entrando na tela do dono */
+  .fin2 .pt{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+  .fin-nat{display:flex;flex-wrap:wrap;gap:8px}
+  .fin-nat a{display:inline-flex;align-items:center;gap:.45rem;min-height:44px;
+    padding:.5rem 1rem;border-radius:999px;border:1px solid var(--borda);
+    background:var(--card);color:var(--txt-mut);font-size:.85rem;text-decoration:none}
+  .fin-nat a.on{background:var(--neon-fundo);border-color:var(--neon-borda);
+    color:var(--txt);font-weight:600}
+  .fin-nat .n{background:var(--ambar-fundo);color:var(--ambar);font-size:.68rem;
+    padding:1px 7px;border-radius:8px}
+  /* os avisos: um cartão cada, com a ação dentro. Empilhados, e não lado a lado,
+     porque a coluna tem 720px e três botões aqui nasceriam espremidos. */
+  .fin-avisos{display:flex;flex-direction:column;gap:.6rem;margin:.9rem 0 0}
+  .fin-aviso{display:flex;align-items:center;gap:.9rem;background:var(--ambar-fundo);
+    border:1px solid var(--ambar-borda);border-radius:18px;padding:.85rem 1rem}
+  .fin-aviso .ic{width:40px;height:40px;border-radius:12px;background:#2e2312;
+    display:flex;align-items:center;justify-content:center;flex:none}
+  .fin-aviso .tx{flex:1;min-width:0;font-size:.88rem;line-height:1.45;color:var(--txt)}
+  .fin-aviso .tx small{display:block;color:#c9ae7e;font-size:.78rem;margin-top:.1rem}
+  .fin-aviso .bt{width:auto;margin:0;min-height:44px;padding:.5rem 1rem;border:0;
+    border-radius:12px;background:var(--ambar);color:#241c0f;font-size:.82rem;
+    font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none;
+    display:inline-flex;align-items:center;flex:none}
+  /* os três cartões. O `.68rem` da quebra por natureza era o tamanho de nota de
+     rodapé pra três números que o dono usa pra decidir. */
+  .fin2 .fin-cards{gap:12px}
+  .fin2 .fin-cards .metric{background:var(--card);border-radius:20px;padding:1.15rem 1.25rem}
+  .fin2 .metric .ic{width:40px;height:40px;border-radius:13px;background:var(--bg);
+    display:flex;align-items:center;justify-content:center;margin-bottom:.7rem}
+  .fin2 .metric span{font-size:.85rem}
+  .fin2 .metric b{font-size:1.5rem;font-family:var(--mono);font-weight:600;letter-spacing:-.02em}
+  .fin-quebra{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--borda);
+    font-size:.82rem;line-height:1.9}
+  .fin-quebra>div{display:flex;justify-content:space-between;align-items:center;gap:.4rem}
+  .fin-quebra .rot{display:inline-flex;align-items:center;gap:.4rem;color:var(--txt-mut)}
+  .fin-quebra .val{font-family:var(--mono)}
+  .fin2 .barra,.fin2 .barra-fill{height:12px;border-radius:999px}
+  /* lançamentos e fatura */
+  .fin-cab-ic{width:40px;height:40px;border-radius:13px;background:var(--azul-fundo);
+    display:flex;align-items:center;justify-content:center;flex:none}
+  .fin2 .dep{border-radius:16px}
+  .fin2 .dep-cab{padding:.85rem 1.05rem;min-height:56px;font-size:.95rem}
+  .fin2 .abas{padding:4px;border-radius:14px}
+  .fin2 .aba{min-height:44px;padding:.5rem 1.1rem;border-radius:11px;font-size:.88rem}
+  .fin2 input[type=search]{min-height:48px;border-radius:14px}
+  .fin-bt-ofx{width:auto;margin:0;min-height:44px;display:inline-flex;align-items:center;
+    gap:.4rem;padding:.5rem 1rem;border:0;border-radius:14px;background:var(--verde);
+    color:var(--sobre-verde);font-size:.85rem;font-weight:600;cursor:pointer;white-space:nowrap}
 </style>
-<div class="card larga">
+{# Os ícones como MACRO, e não como variável no contexto: macro devolve Markup,
+   então desenha igual com autoescape ligado ou desligado — e a rota não precisa
+   saber que a tela tem ícone. Traço, nunca emoji: emoji é desenhado pelo sistema
+   operacional de cada um e muda de cara entre o iPhone do dono e o Android do
+   vendedor. #}
+{% macro ic(d, cor) %}<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{{ cor }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ d }}</svg>{% endmacro %}
+{% macro ic_aviso() %}{{ ic('<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>'|safe, 'var(--ambar)') }}{% endmacro %}
+{% macro ic_carteira() %}{{ ic('<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"></path><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"></path><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"></path>'|safe, 'var(--txt)') }}{% endmacro %}
+{% macro ic_entrou() %}{{ ic('<circle cx="12" cy="12" r="10"></circle><path d="M12 8v8"></path><path d="m8 12 4 4 4-4"></path>'|safe, 'var(--verde)') }}{% endmacro %}
+{% macro ic_saiu() %}{{ ic('<circle cx="12" cy="12" r="10"></circle><path d="M12 16V8"></path><path d="m8 12 4-4 4 4"></path>'|safe, 'var(--coral)') }}{% endmacro %}
+{% macro ic_cartao() %}{{ ic('<rect x="2" y="5" width="20" height="14" rx="3"></rect><path d="M2 10h20"></path>'|safe, 'var(--azul)') }}{% endmacro %}
+<div class="card larga fin2">
 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.5rem">
 <h1 style="margin:0">Financeiro</h1>
 <form method="get" action="/painel/financeiro" style="margin:0; display:flex; gap:.5rem; align-items:center">
-<select name="mes" onchange="this.form.submit()">
+<select class="fin-sel" name="mes" onchange="this.form.submit()">
 {% for v,rotulo in meses %}<option value="{{ v }}" {% if v==mes_sel %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
 </select>
-{% if pessoas|length > 1 %}<select name="membro" onchange="this.form.submit()">
+{% if pessoas|length > 1 %}<select class="fin-sel" name="membro" onchange="this.form.submit()">
 <option value="">Todos</option>
 {% for mid,nome in pessoas %}<option value="{{ mid }}" {% if mid==membro_sel %}selected{% endif %}>{{ nome }}</option>{% endfor %}
 </select>{% endif %}
@@ -943,17 +1013,27 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% if eh_pj %}
 <div style="margin:.8rem 0 .2rem">
 <div style="color:#888780;font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.35rem">Ver lançamentos de</div>
-<div style="display:inline-flex;background:var(--card);border:1px solid var(--borda);border-radius:9px;padding:3px;gap:2px;flex-wrap:wrap">
-<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if not natureza_sel and not sem_conta_sel %}background:var(--verde);color:var(--sobre-verde);font-weight:600{% else %}color:#b4b2a9{% endif %}">Todos</a>
-<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=pessoal" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='pessoal' %}background:#f0c05a;color:#1a1409;font-weight:600{% else %}color:#b4b2a9{% endif %}">👤 Pessoal</a>
-<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=empresa" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='empresa' %}background:var(--verde);color:var(--sobre-verde);font-weight:600{% else %}color:#b4b2a9{% endif %}">🏢 Empresa</a>
-<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=a_definir" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;display:inline-flex;align-items:center;gap:.35rem;{% if natureza_sel=='a_definir' %}background:#3a2c1d;color:#f0c05a;font-weight:600{% else %}color:#f0c05a{% endif %}">⏳ A definir{% if n_a_definir %} <span style="background:#3a2c1d;color:#f0c05a;font-size:.62rem;padding:1px 6px;border-radius:8px">{{ n_a_definir }}</span>{% endif %}</a>
-{% if eh_pj and (n_sem_conta or sem_conta_sel) %}<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&sem_conta=1" title="lançamentos de empresa sem conta contábil (fora da DRE por conta)" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;display:inline-flex;align-items:center;gap:.35rem;{% if sem_conta_sel %}background:#3a2c1d;color:#f0c05a;font-weight:600{% else %}color:#f0c05a{% endif %}">⚠ sem conta{% if n_sem_conta %} <span style="background:#3a2c1d;color:#f0c05a;font-size:.62rem;padding:1px 6px;border-radius:8px">{{ n_sem_conta }}</span>{% endif %}</a>{% endif %}
+<div class="fin-nat">
+<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}" class="{% if not natureza_sel and not sem_conta_sel %}on{% endif %}">Todos</a>
+<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=pessoal" class="{% if natureza_sel=='pessoal' %}on{% endif %}"><span class="pt" style="background:var(--txt-mut)"></span>Pessoal</a>
+<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=empresa" class="{% if natureza_sel=='empresa' %}on{% endif %}"><span class="pt" style="background:var(--azul)"></span>Empresa</a>
+<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=a_definir" class="{% if natureza_sel=='a_definir' %}on{% endif %}"><span class="pt" style="background:var(--ambar)"></span>A definir{% if n_a_definir %} <span class="n">{{ n_a_definir }}</span>{% endif %}</a>
+{% if eh_pj and (n_sem_conta or sem_conta_sel) %}<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&sem_conta=1" title="lançamentos de empresa sem conta contábil (fora da DRE por conta)" class="{% if sem_conta_sel %}on{% endif %}"><span class="pt" style="background:var(--coral)"></span>Sem conta{% if n_sem_conta %} <span class="n">{{ n_sem_conta }}</span>{% endif %}</a>{% endif %}
 </div>
 </div>
 {% endif %}
-{% if sem_conta_sel %}<div style="background:#2b2416;border:1px solid #f0c05a44;border-radius:8px;padding:.55rem .9rem;margin:.4rem 0 0;color:#f0c05a;font-size:.83rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem"><span>⚠ Filtro ligado: vendo só lançamentos de <b>empresa sem conta contábil</b>. Os pessoais e os "a definir" estão escondidos.</span> <a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}" style="background:#f0c05a;color:#1a1409;border-radius:6px;padding:.35rem .9rem;font-size:.8rem;font-weight:600;text-decoration:none;white-space:nowrap">ver todos</a></div>{% endif %}
-{% if eh_pj and n_a_definir %}<div style="background:#2b2416;border:1px solid #f0c05a44;border-radius:8px;padding:.55rem .9rem;margin:.4rem 0 0;color:#f0c05a;font-size:.83rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem"><span>🏢 <b>{{ n_a_definir }}</b> lançamento(s) sem classificar (pessoal ou empresa).</span> <button type="button" onclick="abrirClassificador()" style="background:#f0c05a;color:#1a1409;border:0;border-radius:6px;padding:.35rem .9rem;font-size:.8rem;font-weight:600;cursor:pointer">classificar em lote</button></div>{% endif %}
+<div class="fin-avisos">
+{% if sem_conta_sel %}<div class="fin-aviso">
+  <span class="ic">{{ ic_aviso() }}</span>
+  <span class="tx">Filtro ligado: vendo só lançamentos de <b>empresa sem conta contábil</b>.<small>Os pessoais e os "a definir" estão escondidos.</small></span>
+  <a class="bt" href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}">ver todos</a>
+</div>{% endif %}
+{% if eh_pj and n_a_definir %}<div class="fin-aviso">
+  <span class="ic">{{ ic_aviso() }}</span>
+  <span class="tx"><b>{{ n_a_definir }}</b> lançamento(s) sem classificar<small>até classificar, não entram em nenhum total por natureza</small></span>
+  <button type="button" class="bt" onclick="abrirClassificador()">classificar em lote</button>
+</div>{% endif %}
+</div>
 
 {% if eh_pj %}<div id="modal-classif" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center;padding:1rem">
 <div style="background:var(--bg);border:1px solid var(--borda);border-radius:12px;max-width:560px;width:100%;max-height:85vh;display:flex;flex-direction:column;padding:1.1rem 1.2rem">
@@ -962,7 +1042,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <div style="display:flex;gap:.4rem;align-items:center;margin-bottom:.7rem;flex-wrap:wrap">
 <span style="color:#888780;font-size:.7rem">atalhos:</span>
 <button type="button" onclick="classifTodos('pessoal')" style="font-size:.7rem;color:#f0c05a;background:#3a2c1d;border:0;padding:.25rem .7rem;border-radius:6px;cursor:pointer">todos pessoal</button>
-<button type="button" onclick="classifTodos('empresa')" style="font-size:.7rem;color:var(--verde-claro);background:#1d3a2e;border:0;padding:.25rem .7rem;border-radius:6px;cursor:pointer">todos 🏢 empresa</button>
+<button type="button" onclick="classifTodos('empresa')" style="font-size:.7rem;color:var(--verde-claro);background:#1d3a2e;border:0;padding:.25rem .7rem;border-radius:6px;cursor:pointer">todos empresa</button>
 <button type="button" onclick="classifTodos('')" style="font-size:.7rem;color:#b4b2a9;background:#1c1c1e;border:0;padding:.25rem .7rem;border-radius:6px;cursor:pointer">limpar</button>
 </div>
 <div id="classif-lista" style="background:#131316;border-radius:9px;overflow-y:auto;flex:1;margin-bottom:.8rem"></div>
@@ -1032,17 +1112,17 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </div>
 
 <div class="fin-cards">
-<div class="metric" style="display:flex;flex-direction:column;justify-content:space-between"><div><span>Saldo anterior</span><b style="white-space:nowrap;color:{% if resumo.anterior < 0 %}#e07a5f{% else %}var(--verde-claro){% endif %}">{{ brl(resumo.anterior) }}</b>{% if eh_pj and natureza_sel in ['empresa','pessoal','a_definir'] and resumo.anterior == 0 %}<small style="display:block;color:#6a7178;font-size:.62rem;margin-top:.3rem;line-height:1.3">sem histórico de {{ {'empresa':'empresa','pessoal':'pessoal','a_definir':'lançamentos a definir'}[natureza_sel] }} antes deste mês</small>{% endif %}</div>
-<div style="margin-top:1rem;padding-top:.9rem;border-top:1px solid #1e1e20"><span>= {% if eh_pj and natureza_sel %}Resultado{% else %}Saldo{% endif %} {% if q_search %}da busca{% else %}do mês{% endif %}</span><b style="white-space:nowrap;color:var(--verde-claro)">{{ brl(resumo.saldo) }}</b></div></div>
-<div class="metric"><span>+ Receitas {% if q_search %}da busca{% else %}do mês{% endif %}{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b class="nowrap">{{ brl(resumo.receitas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.68rem;line-height:1.85">
-<div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a9a8a"><span class="nowrap">🏢 Empresa</span><span class="nowrap">{{ (quebra.receitas.empresa/100)|n2 }}</span></div>
-<div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a7a75"><span class="nowrap">👤 Pessoal</span><span class="nowrap">{{ (quebra.receitas.pessoal/100)|n2 }}</span></div>
-<div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a7a75"><span class="nowrap">⏳ A definir</span><span class="nowrap">{{ (quebra.receitas.a_definir/100)|n2 }}</span></div>
+<div class="metric" style="display:flex;flex-direction:column;justify-content:space-between"><div><span class="ic">{{ ic_carteira() }}</span><span>Saldo anterior</span><b style="white-space:nowrap;color:{% if resumo.anterior < 0 %}#e07a5f{% else %}var(--verde-claro){% endif %}">{{ brl(resumo.anterior) }}</b>{% if eh_pj and natureza_sel in ['empresa','pessoal','a_definir'] and resumo.anterior == 0 %}<small style="display:block;color:#6a7178;font-size:.62rem;margin-top:.3rem;line-height:1.3">sem histórico de {{ {'empresa':'empresa','pessoal':'pessoal','a_definir':'lançamentos a definir'}[natureza_sel] }} antes deste mês</small>{% endif %}</div>
+<div style="margin-top:1rem;padding-top:.9rem;border-top:1px solid var(--borda)"><span>= {% if eh_pj and natureza_sel %}Resultado{% else %}Saldo{% endif %} {% if q_search %}da busca{% else %}do mês{% endif %}</span><b style="white-space:nowrap;color:var(--verde-claro)">{{ brl(resumo.saldo) }}</b></div></div>
+<div class="metric"><span class="ic">{{ ic_entrou() }}</span><span>+ Receitas {% if q_search %}da busca{% else %}do mês{% endif %}{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b class="nowrap">{{ brl(resumo.receitas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div class="fin-quebra">
+<div><span class="rot"><span class="pt" style="background:var(--azul)"></span>Empresa</span><span class="val nowrap">{{ (quebra.receitas.empresa/100)|n2 }}</span></div>
+<div><span class="rot"><span class="pt" style="background:var(--txt-mut)"></span>Pessoal</span><span class="val nowrap">{{ (quebra.receitas.pessoal/100)|n2 }}</span></div>
+<div><span class="rot"><span class="pt" style="background:var(--ambar)"></span>A definir</span><span class="val nowrap">{{ (quebra.receitas.a_definir/100)|n2 }}</span></div>
 </div>{% endif %}</div>
-<div class="metric"><span>− Despesas {% if q_search %}da busca{% else %}do mês{% endif %}{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b class="nowrap">{{ brl(resumo.despesas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.68rem;line-height:1.85">
-<div style="display:flex;justify-content:space-between;gap:.4rem;color:#9a8a7a"><span class="nowrap">🏢 Empresa</span><span class="nowrap">{{ (quebra.despesas.empresa/100)|n2 }}</span></div>
-<div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a7a75"><span class="nowrap">👤 Pessoal</span><span class="nowrap">{{ (quebra.despesas.pessoal/100)|n2 }}</span></div>
-<div style="display:flex;justify-content:space-between;gap:.4rem;{% if quebra.despesas.a_definir %}color:#f0c05a{% else %}color:#7a7a75{% endif %}"><span class="nowrap">⏳ A definir{% if quebra.despesas.a_definir %} ⚠{% endif %}</span><span class="nowrap">{{ (quebra.despesas.a_definir/100)|n2 }}</span></div>
+<div class="metric"><span class="ic">{{ ic_saiu() }}</span><span>− Despesas {% if q_search %}da busca{% else %}do mês{% endif %}{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b class="nowrap">{{ brl(resumo.despesas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div class="fin-quebra">
+<div><span class="rot"><span class="pt" style="background:var(--azul)"></span>Empresa</span><span class="val nowrap">{{ (quebra.despesas.empresa/100)|n2 }}</span></div>
+<div><span class="rot"><span class="pt" style="background:var(--txt-mut)"></span>Pessoal</span><span class="val nowrap">{{ (quebra.despesas.pessoal/100)|n2 }}</span></div>
+<div{% if quebra.despesas.a_definir %} style="color:var(--ambar)"{% endif %}><span class="rot"{% if quebra.despesas.a_definir %} style="color:var(--ambar)"{% endif %}><span class="pt" style="background:var(--ambar)"></span>A definir</span><span class="val nowrap">{{ (quebra.despesas.a_definir/100)|n2 }}</span></div>
 </div>{% endif %}</div>
 </div>
 
@@ -1091,10 +1171,11 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% endfor %}{% endif %}
 
 {% if not q_search and prev_cartao and prev_cartao.pontos %}
-<div class="card" style="margin-top:1.4rem;border:1px solid #2a3a33">
-  <div style="display:flex;justify-content:space-between;align-items:center;gap:.6rem">
-    <strong style="font-size:.95rem">💳 Previsão da fatura do cartão</strong>
-    <b style="color:#f0c05a;white-space:nowrap">{{ prev_cartao.total_centavos|brl }}</b>
+<div class="card" style="margin-top:1.4rem;border:1px solid var(--borda);border-radius:20px;padding:1.15rem 1.25rem">
+  <div style="display:flex;align-items:center;gap:.8rem">
+    <span class="fin-cab-ic">{{ ic_cartao() }}</span>
+    <strong style="font-size:.95rem;flex:1">Previsão da fatura do cartão</strong>
+    <b style="color:#f0c05a;white-space:nowrap;font-family:var(--mono)">{{ prev_cartao.total_centavos|brl }}</b>
   </div>
   <div class="mut" style="font-size:.72rem;margin:.15rem 0 .6rem">parcelas que ainda vão cair nos próximos meses</div>
   <table style="width:100%;font-size:.85rem">
@@ -1107,7 +1188,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% endif %}
 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;margin-top:1.6rem">
 <h1 style="font-size:1.05rem;margin:0">Lançamentos</h1>
-<button type="button" onclick="abrirImportOfx()" style="width:auto;margin:0;font-size:.78rem;color:var(--verde-claro);background:#1d3a2e;border:0;padding:.4rem .8rem;border-radius:7px;cursor:pointer;white-space:nowrap">📄 Importar extrato</button>
+<button type="button" class="fin-bt-ofx" onclick="abrirImportOfx()">Importar extrato</button>
 </div>
 <form method="get" action="/painel/financeiro" style="margin:.5rem 0 1rem">
 <input type="search" name="q" value="{{ q_search or '' }}" placeholder="🔎 Buscar lançamento..."
@@ -1159,7 +1240,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}" data-cat="{{ canon(l.categoria, l.tipo) }}" data-desc="{{ l.descricao }}" data-valor="{{ brl(l.valor) }}">
 <td>{% if eh_pj and l.natureza=='empresa' and not l.plano_conta_id %}<span class="miss-dot" title="sem conta contábil — classifique abaixo"></span>{% endif %}{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}
 {% if l.forma_pagamento %}<span class="fpag-tag" style="font-size:.62rem;background:var(--card-2);color:#9aa39a;padding:1px 7px;border-radius:8px;margin-left:.3rem;white-space:nowrap">💳 {{ forma_pag_label(l.forma_pagamento) }}</span>{% endif %}
-{% if eh_pj %}{% if l.natureza=='empresa' %}<span class="nat-tag" style="font-size:.62rem;background:#1d3a2e;color:var(--verde-claro);padding:1px 7px;border-radius:8px;margin-left:.3rem">🏢 empresa</span>{% elif l.natureza=='pessoal' %}<span class="nat-tag" style="font-size:.62rem;background:#3a2c1d;color:#f0c05a;padding:1px 7px;border-radius:8px;margin-left:.3rem">👤 pessoal</span>{% else %}<span style="display:inline-flex;gap:.25rem;margin-left:.3rem"><button type="button" onclick="marcarNat({{ l.id }},'pessoal',this)" style="font-size:.6rem;padding:1px 6px;background:#3a2c1d;color:#f0c05a;border:0;border-radius:7px;cursor:pointer">pessoal?</button><button type="button" onclick="marcarNat({{ l.id }},'empresa',this)" style="font-size:.6rem;padding:1px 6px;background:#1d3a2e;color:var(--verde-claro);border:0;border-radius:7px;cursor:pointer">empresa?</button></span>{% endif %}{% endif %}</td>
+{% if eh_pj %}{% if l.natureza=='empresa' %}<span class="nat-tag" style="font-size:.68rem;background:var(--azul-fundo);color:var(--azul);padding:2px 9px;border-radius:999px;margin-left:.3rem;display:inline-flex;align-items:center;gap:.3rem"><span class="pt" style="background:var(--azul)"></span>empresa</span>{% elif l.natureza=='pessoal' %}<span class="nat-tag" style="font-size:.68rem;background:var(--card-2);color:var(--txt-mut);padding:2px 9px;border-radius:999px;margin-left:.3rem;display:inline-flex;align-items:center;gap:.3rem"><span class="pt" style="background:var(--txt-mut)"></span>pessoal</span>{% else %}<span style="display:inline-flex;gap:.25rem;margin-left:.3rem"><button type="button" onclick="marcarNat({{ l.id }},'pessoal',this)" style="font-size:.6rem;padding:1px 6px;background:#3a2c1d;color:#f0c05a;border:0;border-radius:7px;cursor:pointer">pessoal?</button><button type="button" onclick="marcarNat({{ l.id }},'empresa',this)" style="font-size:.6rem;padding:1px 6px;background:#1d3a2e;color:var(--verde-claro);border:0;border-radius:7px;cursor:pointer">empresa?</button></span>{% endif %}{% endif %}</td>
 <td class="nowrap">
 <span style="display:inline-flex;align-items:center;gap:.4rem">
 <select class="cat-edit" data-id="{{ l.id }}" data-orig="{{ canon(l.categoria, l.tipo) }}" onchange="catMudou(this)"
@@ -1512,7 +1593,7 @@ function marcarNat(id, nat, btn){
       if(nat==='empresa'){
         // sem recarregar: troca os botões pela tag e revela os pickers na hora
         var wrap = btn.parentElement;
-        if(wrap){ wrap.outerHTML = '<span class="nat-tag" style="font-size:.62rem;background:#1d3a2e;color:var(--verde-claro);padding:1px 7px;border-radius:8px;margin-left:.3rem">🏢 empresa</span>'; }
+        if(wrap){ wrap.outerHTML = '<span class="nat-tag" style="font-size:.68rem;background:var(--azul-fundo);color:var(--azul);padding:2px 9px;border-radius:999px;margin-left:.3rem;display:inline-flex;align-items:center;gap:.3rem"><span class="pt" style="background:var(--azul)"></span>empresa</span>'; }
         var box = document.getElementById('pcbox-'+id);
         if(box){ box.style.display='flex';
           var pc = box.querySelector('.pc-edit'); if(pc){ pc.classList.add('miss'); pc.focus(); } }

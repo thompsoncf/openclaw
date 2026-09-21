@@ -384,15 +384,22 @@ def _conferir_de(r: dict, *, origem: dict | None = None) -> dict:
     }
 
 
-def _leitura_em_json(L, conferir: dict) -> JSONResponse:
-    """A resposta que a janela espera — a MESMA pro PDF solto e pro do WhatsApp."""
+def _conferencia_em_json(form: dict, conferir: dict) -> JSONResponse:
+    """A resposta que a janela espera. UMA só pros três caminhos que chegam nela:
+    o PDF solto, o PDF do WhatsApp lido na hora, e o que o leitor automático já
+    tinha lido. Três montagens da mesma resposta divergiriam no primeiro conserto."""
     return JSONResponse({
         "ok": True,
-        "form": apdf.para_formulario(L),
+        "form": form,
         "conf_html": _env.get_template("renovacoes_conf").render(conferir=conferir),
         "pdf": {"caminho": conferir["pdf_caminho"], "nome": conferir["pdf_nome"],
                 "bytes": conferir["pdf_bytes"], "lido": conferir["pdf_lido"]},
     })
+
+
+def _leitura_em_json(L, conferir: dict) -> JSONResponse:
+    """O caminho de quem acabou de ler o PDF."""
+    return _conferencia_em_json(apdf.para_formulario(L), conferir)
 
 
 @router.get("/painel/renovacoes/whatsapp")
@@ -421,7 +428,9 @@ def pdfs_do_whatsapp(request: Request):
         "itens": [
             {"id": i["mensagem_id"], "de": i["de"], "nome": i["nome"],
              "quando": _quando_txt(i["quando"]), "kb": round(i["bytes"] / 1024) if i["bytes"] else 0,
-             "parece": i["parece_apolice"], "ja": i["ja_cadastrada"]}
+             "parece": i["parece_apolice"], "ja": i["ja_cadastrada"],
+             # o que o leitor automático já sabe deste documento
+             "lida": i["lida"], "resumo": _apl_resumo(i), "erro": i["erro_leitura"]}
             for i in itens]})
 
 
@@ -475,6 +484,25 @@ def mudar_remetente(request: Request, acao: str = Form(""), ref: str = Form(""),
     return JSONResponse({"ok": True})
 
 
+def _apl_resumo(i: dict) -> str:
+    """A linha que a janela mostra embaixo do nome quando o leitor já passou."""
+    from finance import apolice_leitor as _apl
+    return _apl.resumo(i) if i.get("lida") else ""
+
+
+def _checagens_de(lido) -> list:
+    """As checagens voltam do banco como lista de dicionários; o painel espera
+    trios. Uma conversão só, aqui, pra a conferência guardada desenhar igual à
+    conferência recém-lida."""
+    saida = []
+    for ch in (lido or {}).get("checagens") or []:
+        if isinstance(ch, dict):
+            saida.append((ch.get("nome", ""), bool(ch.get("ok")), ch.get("detalhe", "")))
+        elif isinstance(ch, (list, tuple)) and len(ch) == 3:
+            saida.append(tuple(ch))
+    return saida
+
+
 def _quando_txt(quando) -> str:
     """Data curta, no fuso de quem olha a tela."""
     if not quando:
@@ -502,6 +530,28 @@ def ler_pdf_do_whatsapp(request: Request, mensagem_id: int):
     if not _cofre.configurado():
         return JSONResponse({"ok": False, "erro": "o cofre de documentos não está "
                                                   "configurado nesta instalação"})
+    # SE O LEITOR AUTOMÁTICO JÁ PASSOU (migração 304), a conferência sai daqui:
+    # nada é baixado de novo e o toque é instantâneo. É o caso normal desde que o
+    # leitor entrou; o caminho de baixar na hora fica pro documento antigo, pro que
+    # chegou antes do leitor existir e pro reprocesso.
+    from finance import apolice_leitor as _apl
+    ja = _apl.uma(get_pool(), conta[0], mensagem_id)
+    if ja and not ja["erro"] and ja["pdf_caminho"]:
+        conferir = {
+            "seguradora": ja["seguradora"] or "", "reconhecida": ja["reconhecida"],
+            "paginas": (ja["lido"] or {}).get("paginas") or 0,
+            "checagens": [tuple(x) if isinstance(x, list) else x
+                          for x in _checagens_de(ja["lido"])],
+            "avisos": (ja["lido"] or {}).get("avisos") or [],
+            "nao_achou": (ja["lido"] or {}).get("nao_achou") or [],
+            "n_campos": len((ja["lido"] or {}).get("campos") or {}), "ok": True,
+            "pdf_nome": ja["pdf_nome"] or "apolice.pdf", "pdf_caminho": ja["pdf_caminho"],
+            "pdf_bytes": ja["pdf_bytes"] or 0,
+            "pdf_lido": dict(ja["lido"] or {}, origem={"whatsapp_msg": mensagem_id}),
+        }
+        return _conferencia_em_json(ja["form"] or {}, conferir)
+    if ja and ja["erro"]:
+        return JSONResponse({"ok": False, "erro": ja["erro"]})
     achado = ap.ref_do_pdf(get_pool(), conta[0], mensagem_id)
     if not achado:
         return JSONResponse({"ok": False, "erro": "não achei este documento"})
@@ -1523,16 +1573,27 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
           var b = document.createElement('button');
           b.type = 'button';
           b.className = 'item';
+          // o LEITOR AUTOMÁTICO já passou: a linha diz seguradora, segurado e
+          // vencimento, e o nome do arquivo vira o título do hover. Sem leitura,
+          // o nome do arquivo continua sendo a melhor informação que existe.
           var nome = document.createElement('span');
           nome.className = 'nome';
-          nome.textContent = it.nome;
-          if(it.parece && !it.ja) nome.textContent = '📄 ' + it.nome;
+          if(it.resumo && !it.erro){
+            nome.textContent = it.resumo;
+            b.title = it.nome;
+          } else {
+            nome.textContent = (it.parece && !it.ja ? '📄 ' : '') + it.nome;
+          }
           var quem = document.createElement('span');
           quem.className = 'quem';
-          quem.textContent = it.ja ? 'já cadastrada' : (it.de + ' · ' + it.quando);
+          if(it.ja) quem.textContent = 'já cadastrada';
+          else if(it.erro) quem.textContent = it.erro;
+          else quem.textContent = it.de + ' · ' + it.quando;
           b.appendChild(nome);
           b.appendChild(quem);
-          if(it.ja){ b.disabled = true; }
+          // documento já cadastrado, ou que o WhatsApp apagou antes de eu ler:
+          // clicar não levaria a lugar nenhum
+          if(it.ja || it.erro){ b.disabled = true; }
           else { b.onclick = function(){ window.rnDoWhats(it.id); }; }
           lista.appendChild(b);
         });
@@ -1543,7 +1604,7 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
 
   window.rnDoWhats = function(id){
     erro('');
-    passo('lendo', 'buscando no WhatsApp');
+    passo('lendo', 'abrindo o documento');
     zapFetch('/painel/renovacoes/whatsapp/' + id, { method: 'POST', credentials: 'same-origin' }).then(function(d){if(!d){passo('pdf', '1 de 2 · o documento');
         erro('a busca não respondeu. Tente de novo.');return;}
         if(!d || !d.ok){

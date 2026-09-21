@@ -1,0 +1,250 @@
+"""O PRÉ-CADASTRO LÊ O DOCUMENTO — o gêmeo do leitor de eventos no nicho seguros.
+
+Pedido do dono em 21/09/2026, depois de eu levantar que nem o agente do WhatsApp
+nem o bot do Telegram liam apólice: "pode fazer o leitor automatico".
+
+O que este arquivo segura, em ordem de importância:
+
+1. ELE NÃO CADASTRA. Gravar sozinho transformaria erro de leitura em dado errado
+   no banco, e vigência lida errada é alerta que não dispara.
+2. OS DOIS PORTÕES. Conta do nicho seguros, remetente liberado. Sem eles o leitor
+   baixaria os boletos que o fornecedor manda pro mesmo número.
+3. NÃO RELÊ. Uma leitura por mensagem, inclusive quando o wa-qr reentrega.
+4. A FALHA FICA GRAVADA. Sem isso ele tentaria pra sempre o PDF que o CDN apagou.
+"""
+import json
+import os
+from pathlib import Path
+
+import pytest
+from psycopg_pool import ConnectionPool
+
+from finance import apolice_leitor as al
+
+MIG = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+CONTA = 37          # a Liberal, nicho seguros
+OUTRA = 39          # uma conta que não é corretora
+
+_BASE = """
+create table contas (id bigint primary key, tipo text, nome text, nicho_id bigint);
+create table nichos (id bigint primary key, slug text, nome text);
+create table conversas (id bigserial primary key, conta_id bigint, contato_ref text,
+  contato_nome text, canal text default 'whatsapp', ultima_msg_em timestamptz);
+create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
+  texto text, provider_sid text, criado_em timestamptz not null default now(),
+  midia_ref jsonb, midia_tipo text, midia_meta jsonb);
+create table clientes (id bigserial primary key, dono_id bigint, nome text);
+-- o que a migração 278 exige pra criar `apolices`: o corretor e o dedup do alerta
+create table membros (id bigserial primary key, conta_id bigint, nome text,
+  papel text default 'membro', ativo boolean default true);
+create table lembretes_enviados (id bigserial primary key,
+  conta_id bigint not null references contas(id) on delete cascade,
+  tipo text not null check (tipo in ('resumo','aviso')),
+  chave text not null, enviado_em timestamptz not null default now(),
+  unique (conta_id, tipo, chave));
+insert into nichos values (23,'corretora-seguros','Corretora de Seguros'),
+                          (7,'buffet','Buffet');
+insert into contas values (37,'pj','Liberal Neto',23), (39,'pj','Festa Boa',7);
+"""
+
+
+@pytest.fixture(scope="module")
+def pool():
+    """BANCO PRÓPRIO, como `tests/test_apolices.py` faz. Derrubar tabela no banco de
+    teste compartilhado levou 485 erros em outros módulos na primeira tentativa —
+    `contas`, `mensagens` e `conversas` são de todo mundo."""
+    admin = ConnectionPool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=1, open=True)
+    dbname = "zaq_apolice_leitor_test"
+    with admin.connection() as c:
+        c.autocommit = True
+        c.execute(f"drop database if exists {dbname}")
+        c.execute(f"create database {dbname}")
+    admin.close()
+    url = os.environ["TEST_DATABASE_URL"].rsplit("/", 1)[0] + "/" + dbname
+    p = ConnectionPool(url, min_size=1, max_size=3, open=True,
+                       kwargs={"prepare_threshold": None})
+    with p.connection() as c:
+        c.execute(_BASE)
+        c.execute((MIG / "278_apolices.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "286_apolices_pdf.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "287_apolice_perdida.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "289_apolice_remetentes.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "304_apolice_lida.sql").read_text(encoding="utf-8"))
+        c.commit()
+    yield p
+    p.close()
+
+
+@pytest.fixture
+def limpo(pool):
+    with pool.connection() as c:
+        for t in ("apolice_lida", "apolice_remetentes", "apolices", "mensagens", "conversas"):
+            c.execute(f"delete from {t}")
+        c.commit()
+    return pool
+
+
+def _pdf(limpo, conta_id, *, nome="PROPOSTA.pdf", ref="5586911111111",
+         liberado=True, mime="application/pdf", direcao="in", tipo="documento"):
+    with limpo.connection() as c:
+        cv = c.execute("insert into conversas (conta_id, contato_ref, contato_nome) "
+                       "values (%s,%s,'Cássio') returning id", (conta_id, ref)).fetchone()[0]
+        mid = c.execute(
+            "insert into mensagens (conversa_id, direcao, texto, midia_ref, midia_tipo, midia_meta) "
+            "values (%s,%s,'documento',%s,%s,%s) returning id",
+            (cv, direcao, json.dumps({"directPath": "/x", "mediaKey": "aa", "mimetype": mime}),
+             tipo, json.dumps({"nome": nome, "bytes": 1000}))).fetchone()[0]
+        if liberado:
+            c.execute("insert into apolice_remetentes (conta_id, contato_ref, rotulo) "
+                      "values (%s,%s,'Cássio') on conflict do nothing", (conta_id, ref))
+        c.commit()
+    return cv, mid
+
+
+def _finge(monkeypatch, *, conteudo=b"%PDF-1.4 fake", leitura=None, expira=False,
+           seguros=True, cofre=True):
+    """Troca o que sai da máquina: CDN, leitor de PDF e cofre."""
+    from finance import wa_midia as wm
+
+    def buscar(ref, tipo, **kw):
+        if expira:
+            raise wm.Expirou(404)
+        yield conteudo
+    monkeypatch.setattr(wm, "buscar", buscar)
+    monkeypatch.setattr(al, "_e_seguros", lambda pool, cid: seguros)
+    monkeypatch.setattr(al._cofre, "configurado", lambda: cofre)
+    monkeypatch.setattr(al, "_guardar", lambda cid, b, n: (f"apolice/{cid}/x.pdf", len(b)))
+    if leitura is not None:
+        monkeypatch.setattr(al.apdf, "ler", lambda b: leitura)
+
+
+def _leitura(**kw):
+    from finance import apolice_pdf as apdf
+    L = apdf.Leitura()
+    L.seguradora = kw.get("seguradora", "Allianz")
+    L.reconhecida = kw.get("reconhecida", True)
+    L.paginas = 7
+    L.campos = kw.get("campos", {"nome": "MARIA DE FATIMA", "numero_proposta": "139041981"})
+    L.checagens = [("CPF", True, "dígito bate")]
+    L.nao_achou, L.avisos = [], []
+    return L
+
+
+# ───────────────────────────── 1. ele não cadastra ─────────────────────────────
+
+def test_o_leitor_nao_cadastra_apolice(limpo, monkeypatch):
+    _pdf(limpo, CONTA)
+    _finge(monkeypatch, leitura=_leitura())
+    assert al.ler_pendentes(limpo, CONTA)["lidas"] == 1
+    with limpo.connection() as c:
+        assert c.execute("select count(*) from apolices").fetchone()[0] == 0
+        assert c.execute("select count(*) from apolice_lida").fetchone()[0] == 1
+
+
+def test_o_que_ele_guarda_e_o_bastante_pra_lista_e_pro_formulario(limpo, monkeypatch):
+    from datetime import date
+    _pdf(limpo, CONTA)
+    _finge(monkeypatch, leitura=_leitura(campos={"nome": "MARIA DE FATIMA",
+                                                 "seguradora": "Allianz",
+                                                 "vigencia_fim": date(2027, 7, 23)}))
+    al.ler_pendentes(limpo, CONTA)
+    with limpo.connection() as c:
+        mid = c.execute("select mensagem_id from apolice_lida").fetchone()[0]
+    d = al.uma(limpo, CONTA, mid)
+    assert d["seguradora"] == "Allianz" and d["segurado"] == "MARIA DE FATIMA"
+    assert d["vigencia_fim"] == date(2027, 7, 23)
+    assert d["form"]["vigencia_fim"] == "2027-07-23", "o formulário já vem pronto"
+    assert "Allianz" in al.resumo(d) and "23/07/2027" in al.resumo(d)
+
+
+# ───────────────────────────── 2. os dois portões ──────────────────────────────
+
+def test_conta_que_nao_e_corretora_nao_entra(limpo, monkeypatch):
+    _pdf(limpo, OUTRA)
+    _finge(monkeypatch, leitura=_leitura(), seguros=False)
+    r = al.ler_pendentes(limpo, OUTRA)
+    assert r["lidas"] == 0 and r["motivo"] == "conta não é de seguros"
+
+
+def test_remetente_nao_liberado_nao_e_baixado(limpo, monkeypatch):
+    _pdf(limpo, CONTA, nome="invoice-200017.pdf", ref="5586922222222", liberado=False)
+    _finge(monkeypatch, leitura=_leitura())
+    assert al.ler_pendentes(limpo, CONTA)["lidas"] == 0
+    with limpo.connection() as c:
+        assert c.execute("select count(*) from apolice_lida").fetchone()[0] == 0
+
+
+def test_sem_cofre_ele_nao_tenta(limpo, monkeypatch):
+    """Ler sem ter onde guardar o PDF perderia o arquivo quando o CDN expirasse."""
+    _pdf(limpo, CONTA)
+    _finge(monkeypatch, leitura=_leitura(), cofre=False)
+    r = al.ler_pendentes(limpo, CONTA)
+    assert r["lidas"] == 0 and r["motivo"] == "cofre não configurado"
+
+
+def test_so_entrada_e_so_pdf(limpo, monkeypatch):
+    _pdf(limpo, CONTA, nome="mandei eu.pdf", ref="5586911111111", direcao="out")
+    _pdf(limpo, CONTA, nome="foto.jpg", ref="5586911111111", tipo="imagem", mime="image/jpeg")
+    _finge(monkeypatch, leitura=_leitura())
+    assert al.ler_pendentes(limpo, CONTA)["lidas"] == 0
+
+
+# ───────────────────────────── 3. não relê ─────────────────────────────────────
+
+def test_a_mesma_mensagem_nao_e_lida_duas_vezes(limpo, monkeypatch):
+    cv, _ = _pdf(limpo, CONTA)
+    _finge(monkeypatch, leitura=_leitura())
+    assert al.ler_pendentes(limpo, CONTA, cv)["lidas"] == 1
+    assert al.ler_pendentes(limpo, CONTA, cv)["lidas"] == 0, "reentrega não relê"
+    with limpo.connection() as c:
+        assert c.execute("select count(*) from apolice_lida").fetchone()[0] == 1
+
+
+def test_le_so_a_conversa_que_recebeu(limpo, monkeypatch):
+    cv1, _ = _pdf(limpo, CONTA, ref="5586911111111")
+    _pdf(limpo, CONTA, ref="5586911111111")
+    _finge(monkeypatch, leitura=_leitura())
+    assert al.ler_pendentes(limpo, CONTA, cv1)["lidas"] == 1
+    with limpo.connection() as c:
+        assert c.execute("select count(*) from apolice_lida").fetchone()[0] == 1
+
+
+# ───────────────────────────── 4. a falha fica gravada ─────────────────────────
+
+def test_arquivo_que_o_whatsapp_apagou_vira_erro_gravado(limpo, monkeypatch):
+    _pdf(limpo, CONTA)
+    _finge(monkeypatch, expira=True)
+    r = al.ler_pendentes(limpo, CONTA)
+    assert r["falhas"] == 1 and r["lidas"] == 0
+    with limpo.connection() as c:
+        erro = c.execute("select erro from apolice_lida").fetchone()[0]
+    assert "apagou" in erro
+    # e não tenta de novo: repetir só gastaria banda pra receber 404
+    assert al.ler_pendentes(limpo, CONTA)["falhas"] == 0
+
+
+def test_pdf_ilegivel_tambem_fica_registrado(limpo, monkeypatch):
+    _pdf(limpo, CONTA)
+    _finge(monkeypatch)
+    monkeypatch.setattr(al.apdf, "ler", lambda b: (_ for _ in ()).throw(ValueError("PDF vazio")))
+    assert al.ler_pendentes(limpo, CONTA)["falhas"] == 1
+    with limpo.connection() as c:
+        assert c.execute("select erro from apolice_lida").fetchone()[0] == "PDF vazio"
+
+
+def test_o_resumo_de_uma_falha_e_a_propria_falha(limpo):
+    assert al.resumo({"erro": "o WhatsApp já apagou este arquivo"}) == \
+        "o WhatsApp já apagou este arquivo"
+
+
+def test_sem_seguradora_reconhecida_o_resumo_nao_inventa(limpo):
+    assert al.resumo({"seguradora": None, "segurado": None, "vigencia_fim": None}) == ""
+
+
+# ───────────────────────────── 5. nunca estoura pro webhook ────────────────────
+
+def test_o_caminho_do_webhook_engole_a_falha(limpo, monkeypatch):
+    def explode(*a, **kw):
+        raise RuntimeError("banco caiu")
+    monkeypatch.setattr(al, "ler_pendentes", explode)
+    al.ler_pendentes_bg(limpo, CONTA, 1)      # não levanta

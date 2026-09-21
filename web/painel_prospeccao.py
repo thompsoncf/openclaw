@@ -5927,6 +5927,12 @@ def _webhook_wa_qr_sync(corpo: bytes, background_tasks: BackgroundTasks):
         # o card lê a conversa (198): toda mensagem nova, com ou sem agente
         from finance import evento_leitor as _leitor
         background_tasks.add_task(_leitor.ler_conversa_bg, get_pool(), empresa_id, conv_id)
+        # e o pré-cadastro lê o DOCUMENTO (304). O gêmeo do leitor de eventos no
+        # nicho seguros: ele mesmo confere se a conta é de corretora e se o
+        # remetente está liberado, e não grava apólice nenhuma — deixa a
+        # conferência pronta. Fora do nicho sai na primeira linha.
+        from finance import apolice_leitor as _apl
+        background_tasks.add_task(_apl.ler_pendentes_bg, get_pool(), empresa_id, conv_id)
     if atender:
         from finance import agente as _ag
         background_tasks.add_task(_ag.atender, get_pool(), empresa_id, conv_id)

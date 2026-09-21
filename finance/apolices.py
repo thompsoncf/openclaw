@@ -610,9 +610,14 @@ def pdfs_do_whatsapp(pool, conta_id: int, *, dias: int = 90,
                coalesce((m.midia_meta->>'bytes')::bigint, 0) as bytes,
                exists (select 1 from apolices a
                         where a.conta_id = %s
-                          and a.pdf_lido->'origem'->>'whatsapp_msg' = m.id::text)
+                          and a.pdf_lido->'origem'->>'whatsapp_msg' = m.id::text),
+               -- o que o leitor automático já tirou do documento (migração 304):
+               -- é o que faz a lista dizer "Allianz · Maria · vence 23/07/2027" em
+               -- vez de repetir o nome do arquivo
+               l.seguradora, l.segurado, l.vigencia_fim, l.erro, (l.id is not null)
           from mensagens m
           join conversas cv on cv.id = m.conversa_id
+          left join apolice_lida l on l.mensagem_id = m.id and l.conta_id = cv.conta_id
          where cv.conta_id = %s
            and m.direcao = 'in'
            and m.midia_tipo = 'documento'
@@ -631,7 +636,10 @@ def pdfs_do_whatsapp(pool, conta_id: int, *, dias: int = 90,
     return [{"mensagem_id": r[0], "quando": r[1], "de": r[2] or "—",
              "nome": r[3] or "documento.pdf", "bytes": int(r[4] or 0),
              "parece_apolice": _parece_apolice(r[3] or ""),
-             "ja_cadastrada": bool(r[5])}
+             "ja_cadastrada": bool(r[5]),
+             # o pré-cadastro, quando o leitor já passou por este documento
+             "lida": bool(r[10]), "seguradora": r[6], "segurado": r[7],
+             "vigencia_fim": r[8], "erro_leitura": r[9] or ""}
             for r in rows]
 
 

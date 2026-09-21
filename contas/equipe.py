@@ -153,6 +153,12 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     # entraram no menu e ficaram de fora daqui.
     if caps["vendas"]:
         permitido += ["/painel/renovacoes"]
+    # Cotações: mesma história de Renovações — o corretor vê as dele, a gerência
+    # vê as da corretora, e quem barra conta de outro nicho é a própria rota.
+    # Fora daqui, o link apareceria no menu e o gate devolveria 303 (o erro do
+    # Follow-up no #644 e do Origens no #650, pela terceira vez).
+    if caps["vendas"]:
+        permitido += ["/painel/cotacoes"]
     # Origens: dono, gestor e o convidado da agência. Mesmo erro do Follow-up, meu,
     # no #650 — o link entrou no menu e a rota ficou de fora.
     if caps["origens"]:

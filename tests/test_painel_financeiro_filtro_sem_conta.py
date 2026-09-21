@@ -16,8 +16,11 @@ import jinja2
 
 from web.portal import _env
 
-# Marca de "aba ativa" no template (fundo verde + negrito).
-_ATIVA = "background:var(--verde)"
+# Marca de "aba ativa" no template. Era o estilo inline `background:var(--verde)`
+# até a tela virar cartão (PR #788): agora a pílula acesa é a classe `on`, e o
+# fundo mora no CSS. O que este arquivo guarda não é a cor — é "Todos" não poder
+# parecer aceso enquanto a lista esconde os pessoais.
+_ATIVA = 'class="on"'
 
 
 def _fonte_dash() -> str:
@@ -25,7 +28,14 @@ def _fonte_dash() -> str:
 
 
 def _render(trecho: str, **ctx) -> str:
-    """Renderiza um pedaço do template real, isolado do resto da página."""
+    """Renderiza um pedaço do template real, isolado do resto da página.
+
+    `ic_aviso` entra como função de mentira: na página ele é uma MACRO do
+    próprio template (o ícone de traço do aviso), e macro não existe num trecho
+    recortado. Aqui o ícone não é o assunto — o assunto é o texto do aviso e a
+    saída em um clique.
+    """
+    ctx.setdefault("ic_aviso", lambda: "")
     return jinja2.Environment(autoescape=True).from_string(trecho).render(**ctx)
 
 
@@ -37,11 +47,22 @@ def _linha_aba_todos() -> str:
 
 
 def _bloco_aviso_filtro() -> str:
-    # o aviso mora em UMA linha do template (tem {% if %} aninhado no href, então
-    # casar por regex até o primeiro {% endif %} truncaria o bloco no meio).
+    """O bloco do aviso, da abertura do `{% if sem_conta_sel %}` até o `{% endif %}`.
+
+    Ele morava em uma linha só; virou cartão de várias (PR #788). Contar os
+    `{% if %}`/`{% endif %}` é o que faz a colheita parar no lugar certo: tem
+    `{% if membro_sel %}` aninhado no href, e cortar no primeiro `endif`
+    devolveria o bloco pela metade — que foi o motivo de ele ser uma linha só.
+    """
+    linhas, dentro, abertos = [], False, 0
     for linha in _fonte_dash().splitlines():
-        if linha.lstrip().startswith("{% if sem_conta_sel %}"):
-            return linha
+        if not dentro and linha.lstrip().startswith("{% if sem_conta_sel %}"):
+            dentro = True
+        if dentro:
+            linhas.append(linha)
+            abertos += linha.count("{% if ") - linha.count("{% endif %}")
+            if abertos <= 0:
+                return "\n".join(linhas)
     raise AssertionError("não achei o aviso de filtro 'sem conta' no template dash")
 
 

@@ -64,7 +64,8 @@ def pendentes(c, conta_id: int, conversa_id: int | None = None,
     caminho normal. Sem ele vale a conta inteira, que é o caminho do reprocesso.
     """
     sql = """
-        select m.id, coalesce(m.midia_meta->>'nome',''), m.midia_ref, m.midia_tipo
+        select m.id, coalesce(m.midia_meta->>'nome',''), m.midia_ref, m.midia_tipo,
+               coalesce(nullif(cv.contato_nome,''), cv.contato_ref, '')
           from mensagens m
           join conversas cv on cv.id = m.conversa_id
          where cv.conta_id = %s
@@ -86,7 +87,7 @@ def pendentes(c, conta_id: int, conversa_id: int | None = None,
     sql += " order by m.criado_em desc limit %s"
     args.append(int(limite))
     return [{"mensagem_id": r[0], "nome": r[1] or "documento.pdf",
-             "ref": r[2] or {}, "tipo": r[3] or "documento"}
+             "ref": r[2] or {}, "tipo": r[3] or "documento", "de": r[4] or ""}
             for r in c.execute(sql, tuple(args)).fetchall()]
 
 
@@ -98,13 +99,17 @@ def _guardar(conta_id: int, conteudo: bytes, nome: str) -> tuple[str, int]:
     return caminho, len(conteudo)
 
 
-def _gravar(c, conta_id: int, mensagem_id: int, *, nome: str, caminho: str = "",
-            bytes_: int = 0, leitura=None, erro: str = "") -> None:
-    """Uma linha por mensagem. `on conflict do nothing`: duas entregas da mesma
-    mensagem não viram duas leituras, e a primeira é a que vale."""
+def _gravar(c, conta_id: int, mensagem_id, *, nome: str, caminho: str = "",
+            bytes_: int = 0, leitura=None, erro: str = "",
+            origem: str = "whatsapp", de: str = "") -> int | None:
+    """Uma linha por documento. `on conflict do nothing`: duas entregas da mesma
+    mensagem do WhatsApp não viram duas leituras, e a primeira é a que vale.
+
+    Devolve o id da linha (ou None quando o conflito cortou a inserção)."""
     campos = {"conta_id": conta_id, "mensagem_id": mensagem_id, "pdf_nome": nome[:120],
               "pdf_caminho": caminho or None, "pdf_bytes": bytes_ or None,
-              "erro": (erro or "")[:300] or None}
+              "erro": (erro or "")[:300] or None,
+              "origem": origem, "de": (de or "")[:120] or None}
     if leitura is not None:
         campos.update({
             "seguradora": leitura.seguradora or None,
@@ -117,8 +122,38 @@ def _gravar(c, conta_id: int, mensagem_id: int, *, nome: str, caminho: str = "",
         })
     cols = ", ".join(campos)
     marcas = ", ".join(["%s"] * len(campos))
-    c.execute(f"insert into apolice_lida ({cols}) values ({marcas}) "
-              f"on conflict (mensagem_id) do nothing", tuple(campos.values()))
+    # o índice é PARCIAL (305) — o `on conflict` precisa apontar pro mesmo recorte
+    r = c.execute(f"insert into apolice_lida ({cols}) values ({marcas}) "
+                  f"on conflict (mensagem_id) where mensagem_id is not null "
+                  f"do nothing returning id", tuple(campos.values())).fetchone()
+    return r[0] if r else None
+
+
+def ler_bytes(pool, conta_id: int, conteudo: bytes, nome: str, *,
+              origem: str = "whatsapp", de: str = "", mensagem_id=None) -> dict:
+    """Lê UM PDF que já está na mão e deixa o pré-cadastro pronto.
+
+    É o miolo das duas portas: o WhatsApp chega aqui depois de baixar do CDN, o
+    Telegram chega aqui com os bytes que o membro subiu. Nenhuma das duas cadastra
+    apólice — as duas param na conferência.
+
+    Devolve {ok, id, leitura, erro}.
+    """
+    erro, leitura, caminho, tam = "", None, "", 0
+    try:
+        leitura = apdf.ler(conteudo)
+        caminho, tam = _guardar(conta_id, conteudo, nome)
+    except ValueError as e:
+        erro = str(e)
+    except Exception as e:  # noqa: BLE001
+        _log.info("leitura de apólice falhou (conta %s, %s): %s: %s",
+                  conta_id, origem, type(e).__name__, e)
+        erro = "não consegui ler este PDF"
+    with pool.connection() as c:
+        lida_id = _gravar(c, conta_id, mensagem_id, nome=nome, caminho=caminho,
+                          bytes_=tam, leitura=leitura, erro=erro, origem=origem, de=de)
+        c.commit()
+    return {"ok": not erro, "id": lida_id, "leitura": leitura, "erro": erro}
 
 
 def ler_pendentes(pool, conta_id: int, conversa_id: int | None = None) -> dict:
@@ -140,25 +175,30 @@ def ler_pendentes(pool, conta_id: int, conversa_id: int | None = None) -> dict:
     from finance import wa_midia as _wm
     placar = {"lidas": 0, "falhas": 0, "puladas": 0}
     for alvo in alvos:
-        erro, leitura, caminho, tam = "", None, "", 0
         try:
             conteudo = b"".join(_wm.buscar(alvo["ref"], alvo["tipo"]))
-            leitura = apdf.ler(conteudo)
-            caminho, tam = _guardar(conta_id, conteudo, alvo["nome"])
         except _wm.Expirou:
-            # não é falha nossa e não adianta repetir: o arquivo não existe mais
-            erro = "o WhatsApp já apagou este arquivo"
-        except ValueError as e:
-            erro = str(e)
+            # não é falha nossa e não adianta repetir: o arquivo não existe mais.
+            # Fica registrado JUSTAMENTE pra não tentar de novo.
+            with pool.connection() as c:
+                _gravar(c, conta_id, alvo["mensagem_id"], nome=alvo["nome"],
+                        erro="o WhatsApp já apagou este arquivo", de=alvo.get("de", ""))
+                c.commit()
+            placar["falhas"] += 1
+            continue
         except Exception as e:  # noqa: BLE001
-            _log.info("apólice do whatsapp %s falhou (conta %s): %s: %s",
+            _log.info("download da apólice %s falhou (conta %s): %s: %s",
                       alvo["mensagem_id"], conta_id, type(e).__name__, e)
-            erro = "não consegui ler este PDF"
-        with pool.connection() as c:
-            _gravar(c, conta_id, alvo["mensagem_id"], nome=alvo["nome"],
-                    caminho=caminho, bytes_=tam, leitura=leitura, erro=erro)
-            c.commit()
-        placar["falhas" if erro else "lidas"] += 1
+            with pool.connection() as c:
+                _gravar(c, conta_id, alvo["mensagem_id"], nome=alvo["nome"],
+                        erro="não consegui baixar este arquivo", de=alvo.get("de", ""))
+                c.commit()
+            placar["falhas"] += 1
+            continue
+        r = ler_bytes(pool, conta_id, conteudo, alvo["nome"],
+                      origem="whatsapp", de=alvo.get("de", ""),
+                      mensagem_id=alvo["mensagem_id"])
+        placar["lidas" if r["ok"] else "falhas"] += 1
     return placar
 
 
@@ -195,6 +235,51 @@ def uma(pool, conta_id: int, mensagem_id: int) -> dict | None:
                       segurado, numero_proposta, vigencia_fim, form, lido, erro
                  from apolice_lida where conta_id=%s and mensagem_id=%s""",
             (conta_id, mensagem_id)).fetchone()
+    if not r:
+        return None
+    return {"pdf_caminho": r[0], "pdf_nome": r[1], "pdf_bytes": r[2],
+            "seguradora": r[3], "reconhecida": bool(r[4]), "segurado": r[5],
+            "numero_proposta": r[6], "vigencia_fim": r[7],
+            "form": r[8] or {}, "lido": r[9] or {}, "erro": r[10] or ""}
+
+
+def do_telegram(pool, conta_id: int, dias: int = 30, limite: int = 30) -> list[dict]:
+    """Os pré-cadastros que chegaram pelo Telegram e ainda não viraram apólice.
+
+    A marca de "já cadastrada" é o CAMINHO DO PDF: quando a pessoa confirma, a
+    apólice guarda o mesmo arquivo do pré-cadastro. Serve pras duas origens e não
+    precisa de marcador novo.
+    """
+    with pool.connection() as c:
+        rows = c.execute(
+            """select l.id, l.criado_em, coalesce(l.de,''), coalesce(l.pdf_nome,''),
+                      coalesce(l.pdf_bytes,0), l.seguradora, l.segurado, l.vigencia_fim,
+                      coalesce(l.erro,'')
+                 from apolice_lida l
+                where l.conta_id = %s and l.origem = 'telegram'
+                  and l.criado_em > now() - make_interval(days => %s)
+                  and not exists (select 1 from apolices a
+                                   where a.conta_id = l.conta_id
+                                     and a.pdf_caminho is not null
+                                     and a.pdf_caminho = l.pdf_caminho)
+                order by l.criado_em desc limit %s""",
+            (conta_id, int(dias), int(limite))).fetchall()
+    return [{"lida_id": r[0], "quando": r[1], "de": r[2] or "—",
+             "nome": r[3] or "documento.pdf", "bytes": int(r[4] or 0),
+             "seguradora": r[5], "segurado": r[6], "vigencia_fim": r[7],
+             "erro_leitura": r[8], "lida": True}
+            for r in rows]
+
+
+def por_id(pool, conta_id: int, lida_id: int) -> dict | None:
+    """A leitura já feita, pelo id do pré-cadastro. O caminho do Telegram, que não
+    tem mensagem pra procurar por ela."""
+    with pool.connection() as c:
+        r = c.execute(
+            """select pdf_caminho, pdf_nome, pdf_bytes, seguradora, reconhecida,
+                      segurado, numero_proposta, vigencia_fim, form, lido, erro
+                 from apolice_lida where conta_id=%s and id=%s""",
+            (conta_id, lida_id)).fetchone()
     if not r:
         return None
     return {"pdf_caminho": r[0], "pdf_nome": r[1], "pdf_bytes": r[2],

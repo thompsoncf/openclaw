@@ -142,7 +142,11 @@ def test_o_pdf_do_whatsapp_passa_pela_mesma_conferencia_e_pelo_mesmo_salvar():
     # o PDF solto, o do WhatsApp lido na hora, e o que o leitor automático já leu
     assert PA.count("def _conferencia_em_json(") == 1
     assert PA.count('_env.get_template("renovacoes_conf")') == 1
-    assert PA.count("_conferencia_em_json(") == 3
+    # a definição e as TRÊS portas: PDF solto, WhatsApp já lido, pré-cadastro do
+    # Telegram. O que o teste guarda é não existir uma quarta montagem da resposta
+    assert PA.count("return _conferencia_em_json(") == 3
+    # e uma montagem só da conferência guardada, pras duas origens que a usam
+    assert PA.count("def _conferir_guardado(") == 1
 
 
 def test_o_escopo_do_documento_e_da_conta():
@@ -225,3 +229,59 @@ def test_a_migracao_nasce_vazia_e_e_reversivel():
     assert "create unique index if not exists ux_apolice_remetentes" in sql
     assert "insert into public.apolice_remetentes" not in sql      # nada semeado
     assert "-- rollback:" in sql
+
+
+# ────────── a segunda porta: o Telegram entra na mesma lista ──────────
+
+
+def test_o_telegram_nao_ganha_tela_propria():
+    """Duas entradas pro mesmo lugar; separar faria a pessoa procurar em dois
+    cantos o documento que ela acabou de mandar."""
+    assert "do_telegram(pool, conta[0])" in PA
+    assert '"fonte": "lida"' in PA and '"fonte": "msg"' in PA
+    assert "já chegou no WhatsApp ou no Telegram" in PA
+
+
+def test_cada_fonte_tem_o_proprio_endereco():
+    assert '"/painel/renovacoes/lida/{lida_id}"' in PA      # a rota
+    assert "'/painel/renovacoes/lida/'" in PA                 # o endereço no JavaScript
+    assert "window.rnDoWhats = function(fonte, id)" in PA
+    assert "rnDoWhats(it.fonte, it.id)" in PA
+
+
+def test_o_pre_cadastro_do_telegram_nao_baixa_nada():
+    """Ele não tem mensagem pra procurar, e a leitura já está guardada."""
+    corpo = corpo_de("abrir_pre_cadastro")
+    assert "_apl.por_id(get_pool(), conta[0], lida_id)" in corpo
+    assert "wa_midia" not in corpo and "buscar(" not in corpo
+
+
+def test_a_porta_do_telegram_e_de_gerencia():
+    corpo = corpo_de("abrir_pre_cadastro")
+    assert "if not gerencia:" in corpo
+
+
+def test_o_bot_do_telegram_nao_sequestra_o_comprovante():
+    """Layout não reconhecido volta pro caminho do caixa: quem usa o bot pra
+    comprovante não pode perder isso porque a conta virou corretora."""
+    import pathlib
+    bot = (pathlib.Path(__file__).resolve().parent.parent
+           / "telegram_bot.py").read_text(encoding="utf-8")
+    assert "async def _tentar_apolice(" in bot
+    assert "not leitura.reconhecida" in bot
+    assert "_e_seguros" in bot, "só corretora entra nesta porta"
+    # e a falha da leitura devolve False, deixando o caminho antigo seguir
+    corpo = bot[bot.index("async def _tentar_apolice("):]
+    corpo = corpo[:corpo.index("\nasync def ")]
+    assert "return False" in corpo and "except Exception" in corpo
+
+
+def test_o_agente_sabe_o_que_e_documento_numa_corretora():
+    """O agente só enxerga texto: um anexo chega como a palavra 'Documento'."""
+    import pathlib
+    ag = (pathlib.Path(__file__).resolve().parent.parent
+          / "finance" / "agente.py").read_text(encoding="utf-8")
+    assert 'perfil_por_nicho(_slug_n[0] if _slug_n else "") == "seguros"' in ag
+    assert "seguros_txt" in ag and "{seguros_txt}" in ag
+    assert "NUNCA diga que leu" in ag
+    assert "Nunca fale de festa" in ag

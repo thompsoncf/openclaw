@@ -70,6 +70,7 @@ def pool():
         c.execute((MIG / "287_apolice_perdida.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "289_apolice_remetentes.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "304_apolice_lida.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "305_apolice_lida_telegram.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -248,3 +249,77 @@ def test_o_caminho_do_webhook_engole_a_falha(limpo, monkeypatch):
         raise RuntimeError("banco caiu")
     monkeypatch.setattr(al, "ler_pendentes", explode)
     al.ler_pendentes_bg(limpo, CONTA, 1)      # não levanta
+
+
+# ═══════════════ 6. a segunda porta: o Telegram (migração 305) ═══════════════
+#
+# O portão aqui é MAIS forte que o do WhatsApp: lá o remetente é um número que
+# alguém liberou; aqui é um membro autenticado da conta. Por isso `ler_bytes` não
+# pede remetente liberado — quem chama é que já provou quem é.
+
+
+def test_o_telegram_grava_pre_cadastro_sem_mensagem(limpo, monkeypatch):
+    _finge(monkeypatch, leitura=_leitura())
+    r = al.ler_bytes(limpo, CONTA, b"%PDF fake", "APOLICE.pdf",
+                     origem="telegram", de="Cássio")
+    assert r["ok"] and r["id"]
+    with limpo.connection() as c:
+        origem, msg, de = c.execute(
+            "select origem, mensagem_id, de from apolice_lida").fetchone()
+    assert origem == "telegram" and msg is None and de == "Cássio"
+
+
+def test_o_telegram_nao_cadastra_apolice(limpo, monkeypatch):
+    _finge(monkeypatch, leitura=_leitura())
+    al.ler_bytes(limpo, CONTA, b"%PDF fake", "APOLICE.pdf", origem="telegram", de="Cássio")
+    with limpo.connection() as c:
+        assert c.execute("select count(*) from apolices").fetchone()[0] == 0
+
+
+def test_dois_pdfs_do_telegram_convivem(limpo, monkeypatch):
+    """Sem mensagem os dois têm `mensagem_id` nulo; o índice é parcial justamente
+    pra isso não virar colisão."""
+    _finge(monkeypatch, leitura=_leitura())
+    al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf", origem="telegram", de="Cássio")
+    al.ler_bytes(limpo, CONTA, b"%PDF b", "B.pdf", origem="telegram", de="Cássio")
+    assert len(al.do_telegram(limpo, CONTA)) == 2
+
+
+def test_o_que_veio_do_telegram_aparece_na_lista_com_o_resumo(limpo, monkeypatch):
+    from datetime import date
+    _finge(monkeypatch, leitura=_leitura(campos={"nome": "JOSE ALVES",
+                                                 "vigencia_fim": date(2027, 1, 30)}))
+    al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf", origem="telegram", de="Cássio")
+    itens = al.do_telegram(limpo, CONTA)
+    assert len(itens) == 1 and itens[0]["de"] == "Cássio"
+    assert "JOSE ALVES" in al.resumo(itens[0]) and "30/01/2027" in al.resumo(itens[0])
+
+
+def test_depois_de_cadastrada_some_da_lista_do_telegram(limpo, monkeypatch):
+    """A marca é o CAMINHO DO PDF: a apólice confirmada guarda o mesmo arquivo."""
+    _finge(monkeypatch, leitura=_leitura())
+    al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf", origem="telegram", de="Cássio")
+    with limpo.connection() as c:
+        caminho = c.execute("select pdf_caminho from apolice_lida").fetchone()[0]
+        c.execute("""insert into apolices (conta_id, seguradora, ramo, vigencia_fim,
+                                           situacao, pdf_caminho)
+                     values (%s,'Allianz','auto',date '2027-01-30','vigente',%s)""",
+                  (CONTA, caminho))
+        c.commit()
+    assert al.do_telegram(limpo, CONTA) == []
+
+
+def test_por_id_devolve_a_leitura_guardada(limpo, monkeypatch):
+    _finge(monkeypatch, leitura=_leitura())
+    r = al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf", origem="telegram", de="Cássio")
+    d = al.por_id(limpo, CONTA, r["id"])
+    assert d and d["seguradora"] == "Allianz" and d["form"]
+    assert al.por_id(limpo, OUTRA, r["id"]) is None, "não vaza entre contas"
+
+
+def test_pdf_que_o_leitor_nao_entende_nao_some(limpo, monkeypatch):
+    """A falha fica gravada também pelo Telegram — quem chamou decide o que fazer."""
+    _finge(monkeypatch)
+    monkeypatch.setattr(al.apdf, "ler", lambda b: (_ for _ in ()).throw(ValueError("PDF vazio")))
+    r = al.ler_bytes(limpo, CONTA, b"xx", "A.pdf", origem="telegram", de="Cássio")
+    assert r["ok"] is False and r["erro"] == "PDF vazio"

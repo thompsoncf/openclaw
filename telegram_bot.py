@@ -410,6 +410,12 @@ async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     b64 = base64.b64encode(dados).decode("ascii")
     if "pdf" in mime or nome.endswith(".pdf"):
+        # A APÓLICE TEM PREFERÊNCIA NA CORRETORA. Numa conta de seguros o PDF que
+        # chega aqui é quase sempre apólice, não comprovante de banco — e o leitor
+        # só assume quando RECONHECE o layout da seguradora. Não reconheceu, segue
+        # o caminho de sempre e vira comprovante no caixa; nada se perde.
+        if await _tentar_apolice(update, bytes(dados), doc.file_name or "apolice.pdf"):
+            return
         _disparar_qr(update, bytes(dados), "application/pdf")
         await _processar(update, legenda, imagem_b64=b64, media_type="application/pdf")
     elif mime.startswith("image/") or nome.endswith((".jpg", ".jpeg", ".png", ".webp")):
@@ -420,6 +426,55 @@ async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "Recebi o arquivo, mas só consigo ler PDF ou imagem. "
             "Pode mandar o comprovante em PDF ou foto? 📄📸")
+
+
+async def _tentar_apolice(update: Update, dados: bytes, nome: str) -> bool:
+    """O PDF é uma apólice de uma corretora? Então vira pré-cadastro.
+
+    A SEGUNDA PORTA do leitor automático (migração 305). O portão aqui é mais
+    forte que o do WhatsApp: lá o remetente é um número que alguém liberou, aqui
+    é um MEMBRO autenticado da conta.
+
+    Devolve True quando assumiu o documento. False deixa o caminho antigo seguir —
+    é o que acontece em toda conta que não é corretora, e no PDF cujo layout o
+    leitor não reconhece.
+
+    Best-effort: qualquer falha aqui devolve False. O comprovante do caixa não pode
+    parar de funcionar porque a leitura de apólice teve um problema.
+    """
+    try:
+        achado = ct.membro_por_telegram(_pool, update.effective_user.id)
+        if achado is None:
+            return False
+        membro, conta = achado
+        from finance import apolice_leitor as _apl
+        if not _apl._e_seguros(_pool, conta.id) or not _apl._cofre.configurado():
+            return False
+        quem = (getattr(membro, "nome", "") or "").strip() or "pelo Telegram"
+        r = await asyncio.to_thread(_apl.ler_bytes, _pool, conta.id, dados, nome,
+                                    origem="telegram", de=quem)
+        leitura = r.get("leitura")
+        # LAYOUT NÃO RECONHECIDO NÃO É APÓLICE PRA ESTA PORTA. Assumir aqui
+        # sequestraria o comprovante de banco de quem também usa o caixa.
+        if not r["ok"] or leitura is None or not leitura.reconhecida:
+            return False
+        c = leitura.campos
+        linhas = ["📄 Apólice lida e guardada!", ""]
+        if leitura.seguradora:
+            linhas.append(f"*Seguradora:* {leitura.seguradora}")
+        if c.get("nome"):
+            linhas.append(f"*Segurado:* {c['nome']}")
+        if c.get("vigencia_fim"):
+            linhas.append(f"*Vence:* {c['vigencia_fim'].strftime('%d/%m/%Y')}")
+        if c.get("numero_proposta"):
+            linhas.append(f"*Proposta:* {c['numero_proposta']}")
+        linhas += ["", "Ela está esperando você conferir em *Renovações* — nada foi "
+                   "cadastrado ainda.", "https://app.zaq-ia.com/painel/renovacoes"]
+        await update.message.reply_text("\n".join(linhas), parse_mode="Markdown")
+        return True
+    except Exception as e:  # noqa: BLE001
+        logging.warning("apólice pelo Telegram falhou: %s: %s", type(e).__name__, e)
+        return False
 
 
 async def on_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):

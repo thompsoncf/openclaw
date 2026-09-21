@@ -94,30 +94,75 @@ Um conector novo é uma subclasse de `ProvedorHTTP` com dois métodos —
 `_payload(risco)` e `_ofertas(resposta)` — e `registrar(MeuProvedor())`. A
 mecânica comum (token, cabeçalhos, tempo limite, erro) já está na base.
 
-## ⚠️ O que falta pra plugar a InsureMO
+## InsureMO — o que já está ligado, e o que falta
 
-Em 21/09/2026 `docs.insuremo.com` e `insuremo.com` estavam **bloqueados pela
-política de egresso** da máquina em que isto foi escrito (`EGRESS_BLOCKED` no
-proxy), então a documentação não pôde ser lida e **o conector dela não foi
-escrito**: mapa de campos de memória é contrato inventado, que passa no teste e
-falha na primeira chamada real.
+Em 21/09/2026 a página **Policy Rating API** foi lida (colada à mão: o domínio
+está bloqueado pela política de egresso desta máquina). Com ela, o conector
+`finance/cotacao_insuremo.py` existe e cobre a cotação.
 
-As quatro perguntas que a doc precisa responder — com elas, o conector é um
-arquivo:
+### A chamada que dá preço
 
-1. **Autenticação** — URL do token, se é OAuth2 `client_credentials`, e quais
-   cabeçalhos de tenant/produto acompanham cada chamada.
-2. **Cotação** — caminho do endpoint e o JSON do risco. Em especial: como o
-   veículo é identificado (FIPE? placa? código interno do produto?).
-3. **Resposta** — onde está o prêmio e **se o IOF vem separado**. Isto decide se
-   a comissão pode ser estimada: sem a separação, `finance/cotacao.py` deixa a
-   estimativa em branco de propósito, porque rachar o total por um IOF chutado
-   inventaria comissão.
-4. **Emissão** — se existe endpoint de proposta e o que ele devolve.
+```
+POST {server}/quotation/core/quotation/v1/calculate   (sem persistir cotação)
+POST {server}/proposal/core/proposal/v1/calculateEx   (sem persistir proposta)
+```
 
-Vale o mesmo pra Segfy, Quiver e TEx/Teleport, que são o caminho mais provável no
-Brasil: a InsureMO é middleware vendido pra seguradora/MGA, e pra corretora usar
-alguém precisa ter os produtos configurados lá dentro.
+O pedido é um objeto de apólice (`ProductCode`, vigência, moeda, `OrgCode`,
+`AgentCode`) com o risco em `PolicyLobList[].PolicyRiskList[]`. A resposta é o
+mesmo objeto com os prêmios preenchidos em cada nível.
+
+### O mapeamento do dinheiro — e a armadilha
+
+A InsureMO **separa o imposto**, então a comissão sai exata, sem estimativa:
+
+| Campo da InsureMO | Vira | Observação |
+|---|---|---|
+| `BeforeVatPremium` | `premio_liquido_centavos` | é sobre ele que a comissão incide |
+| `Vat` | `iof_centavos` | o imposto |
+| `DuePremium` | `premio_total_centavos` | **o total** |
+| `CommissionRate` | `comissao_pct` | `0.1` = 10% |
+| `ProposalNo` | `ref_externa` | o que a emissão manda de volta |
+
+⚠️ **Não leia o total de `GrossPremium`.** Na mesma página da doc ele troca de
+significado: 10.8 **com** imposto no exemplo de proposta, 300 **sem** imposto no
+de endosso (onde `Vat` é 24 e `DuePremium` 324). Lê-lo daria prêmio 8% menor e
+comissão 8% maior, sem nenhum sinal na tela. `TotalPremium` também não serve:
+traz o **juro de parcelamento** (340.2 = 324 + 16.2), e juro não é prêmio.
+
+`tests/test_cotacao_insuremo.py` prende isso com as amostras da própria doc.
+
+### Não é multicálculo — e isso muda a configuração
+
+A Calculate API precifica **um produto de um tenant**. Não existe chamada que
+devolva Porto, Allianz e HDI lado a lado. Por isso
+`COTACAO_INSUREMO_PRODUTOS` é uma **lista**: o conector faz uma chamada por
+produto e cada uma vira uma oferta; falha de um não derruba os outros.
+
+```
+COTACAO_PROVEDOR=insuremo
+COTACAO_INSUREMO_BASE_URL=https://...
+COTACAO_INSUREMO_API_KEY=...          # ou o trio OAuth2 (TOKEN_URL/CLIENT_ID/CLIENT_SECRET)
+COTACAO_INSUREMO_ORG=10002
+COTACAO_INSUREMO_AGENTE=...           # AgentCode da corretora
+COTACAO_INSUREMO_MOEDA=BRL
+COTACAO_INSUREMO_PRODUTOS=[{"codigo":"AUTO_BR","versao":"1.0","seguradora":"...",
+  "risco":"R10007","coberturas":[{"codigo":"C100692","soma_segurada":100000}],
+  "campos_veiculo":{"placa":"LicensePlateNo","fipe":"FipeCode","ano_modelo":"ModelYear"}}]
+```
+
+### O que ainda falta da doc
+
+1. **Autenticação.** A página usa `{{server}}` e não descreve token nem tenant.
+   A mecânica dos dois modelos já está em `ProvedorHTTP`; falta saber qual e
+   quais cabeçalhos. → páginas **Introduction to Policy API** / Getting Started.
+2. **Os códigos do produto de auto.** `ProductCode`, o `ProductElementCode` do
+   risco e os das coberturas saem da configuração do tenant — a doc diz
+   explicitamente que campos e valores vêm da DataTable do projeto. O schema
+   genérico não tem placa, chassi nem FIPE: por isso `campos_veiculo` é um mapa,
+   e sem ele o conector **avisa no log** que o prêmio não vale pra auto.
+3. **Emissão.** A página de rating não emite. → **Policy Persistence and Query
+   API** e **Quotation**. Até lá, `suporta_emissao = False` e a emissão segue no
+   roteiro pro portal.
 
 ## Emissão: o que o botão faz hoje
 

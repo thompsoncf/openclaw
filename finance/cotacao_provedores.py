@@ -238,6 +238,17 @@ def provedor_ativo(pool=None, conta_id: int | None = None) -> Provedor:
     """
     chave = (os.environ.get("COTACAO_PROVEDOR") or "manual").strip().lower()
     p = _REGISTRO.get(chave)
+    if p is None and chave.isidentifier():
+        # O conector mora em `finance/cotacao_<chave>.py` e se registra no import.
+        # Carregar sob demanda, e não com um import no topo deste arquivo, é o que
+        # evita a circular (o conector importa daqui) e o que faz um arquivo novo
+        # entrar em operação sem ninguém editar esta função.
+        try:
+            import importlib
+            importlib.import_module(f".cotacao_{chave}", __package__)
+            p = _REGISTRO.get(chave)
+        except ImportError as e:
+            _log.warning("não achei o conector 'cotacao_%s': %s", chave, e)
     if p is None:
         _log.warning("COTACAO_PROVEDOR=%r não está registrado — usando o manual", chave)
         return _REGISTRO["manual"]

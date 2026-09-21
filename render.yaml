@@ -113,6 +113,8 @@ services:
       #   idêntico — é o padrão enquanto não houver multicálculo contratado.
       #   Cada conector lê as próprias credenciais em COTACAO_<CHAVE>_*
       #   (BASE_URL, API_KEY ou o trio OAuth2, TENANT). Ver docs/API_COTACAO.md.
+      #   'insuremo' pede ainda ORG, AGENTE e PRODUTOS (a lista JSON de produtos
+      #   configurados no tenant — uma chamada de preço por item dela).
       - key: COTACAO_PROVEDOR
         sync: false
       # --- WhatsApp por QR Code (serviço Node à parte, services/wa-qr) ---

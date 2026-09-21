@@ -185,6 +185,12 @@ class ProvedorHTTP(Provedor):
             r = c.post(url, json=payload, headers=self._cabecalhos())
         if r.status_code >= 300:
             raise ProvedorErro(f"{self.nome} {r.status_code} em {caminho}: {r.text[:300]}")
+        # 204 SEM CORPO É SUCESSO, não resposta quebrada. A validação da InsureMO
+        # responde exatamente assim quando passa ("If validation passes, it will
+        # return the 204. No content will be returned") — e um `r.json()` aqui
+        # transformaria "está tudo certo" em erro de provedor.
+        if r.status_code == 204 or not (r.content or b"").strip():
+            return {}
         try:
             return r.json()
         except ValueError:

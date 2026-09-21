@@ -150,19 +150,57 @@ COTACAO_INSUREMO_PRODUTOS=[{"codigo":"AUTO_BR","versao":"1.0","seguradora":"..."
   "campos_veiculo":{"placa":"LicensePlateNo","fipe":"FipeCode","ano_modelo":"ModelYear"}}]
 ```
 
-### O que ainda falta da doc
+### A autenticação (CAS)
 
-1. **Autenticação.** A página usa `{{server}}` e não descreve token nem tenant.
-   A mecânica dos dois modelos já está em `ProvedorHTTP`; falta saber qual e
-   quais cabeçalhos. → páginas **Introduction to Policy API** / Getting Started.
-2. **Os códigos do produto de auto.** `ProductCode`, o `ProductElementCode` do
-   risco e os das coberturas saem da configuração do tenant — a doc diz
-   explicitamente que campos e valores vêm da DataTable do projeto. O schema
-   genérico não tem placa, chassi nem FIPE: por isso `campos_veiculo` é um mapa,
-   e sem ele o conector **avisa no log** que o prêmio não vale pra auto.
-3. **Emissão.** A página de rating não emite. → **Policy Persistence and Query
-   API** e **Quotation**. Até lá, `suporta_emissao = False` e a emissão segue no
-   roteiro pro portal.
+```
+POST {server}/cas/ebao/v2/json/tickets    ← usuário e senha, devolve o token
+```
+
+É CAS do eBao: **usuário e senha**, não `client_id`/`client_secret`. O token vale
+para todas as chamadas do gateway e fica guardado em memória até expirar.
+
+⚠️ A doc diz que o token é *"appended"* às chamadas e **não dá o nome do
+cabeçalho**. O conector usa `Authorization: Bearer <token>`, que é o padrão do
+gateway — e deixa isso em variável (`COTACAO_INSUREMO_HEADER_TOKEN` e
+`_PREFIXO_TOKEN`), então confirmar na coleção do Postman é trocar uma variável,
+não mexer em código.
+
+### A emissão — até a proposta, e só
+
+```
+POST {server}/proposal/core/proposal/v1/validate    204 = passou · 422 = as mensagens
+POST {server}/proposal/core/proposal/v1/createEx    monta a proposta (devolve ProposalNo)
+POST {server}/proposal/core/proposal/v1/updateEx    SALVA e sobe a versão
+```
+
+`issuePolicyEx` **existe e não é chamado**: emitir a apólice em nome da corretora
+é decisão que o dono ainda não tomou ("só proposta, com fallback"). A linha está
+a um método de distância.
+
+A validação vem primeiro porque a doc garante o que ela devolve: **204 sem corpo**
+quando passa, **422 com as mensagens campo a campo** quando não ("field
+EffectiveDate is mandatory"). Uma proposta recusada chega na tela do corretor
+dizendo o que falta — e `enviar_para_emissao` cai no roteiro pro portal.
+
+### Por que a cotação usa `calculate` e não `calculateWithPersistence`
+
+A página Quotation dá três caminhos: `calculate` (só preço), `create` (só salva) e
+`calculateWithPersistence` (preço + salva + **converte pra apólice**). A tela usa
+o primeiro: quem guarda a cotação é esta base, e converter pra apólice a cada
+preço consultado criaria lixo no sistema da seguradora toda vez que o corretor
+compara opções.
+
+### O que ainda falta
+
+**Uma coisa só: os códigos do produto de auto.** `ProductCode`, o
+`ProductElementCode` do risco e os das coberturas saem da configuração do tenant
+— a doc é explícita ("you must create your own policy model in data dictionary").
+O schema genérico não tem placa, chassi nem FIPE: por isso `campos_veiculo` é um
+mapa, e sem ele o conector **avisa no log** que o prêmio não vale pra auto.
+
+O caminho pra obtê-los está na própria doc: **"Create the Data Model for Technical
+Product"** e **"Generating Policy API Request Payload"**. Com o payload gerado do
+produto de auto em mãos, é preencher um JSON de configuração — nada de código.
 
 ## Emissão: o que o botão faz hoje
 

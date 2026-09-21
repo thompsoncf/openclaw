@@ -220,14 +220,179 @@ def test_produtos_com_json_quebrado_nao_passa_por_valido(monkeypatch):
         ProvedorInsureMO().cotar(RISCO)
 
 
-def test_a_emissao_ainda_nao_esta_documentada(prov):
-    """Enquanto a página de emissão não for lida, o corretor segue no roteiro pro
-    portal — que funciona. Ligar isto sem a doc seria inventar o contrato."""
-    assert prov.suporta_emissao is False
-
-
 def test_o_conector_e_carregado_pelo_nome_na_variavel(monkeypatch):
     """`COTACAO_PROVEDOR=insuremo` tem que achar `finance/cotacao_insuremo.py`
     sozinho — sem ninguém editar a lista de provedores."""
     monkeypatch.setenv("COTACAO_PROVEDOR", "insuremo")
     assert cp.provedor_ativo().chave == "insuremo"
+
+
+# ════════════════════════════════════════════════════════════════════════
+# A AUTENTICAÇÃO (CAS) e a EMISSÃO — páginas "Policy Lifecycle API Hands-on",
+# "Policy Persistence & Query API" e "Quotation", lidas em 21/09/2026.
+# ════════════════════════════════════════════════════════════════════════
+
+#: Resposta de `/quotation/core/quotation/v1/calculate` da página Quotation.
+#: Vale por si: é o TERCEIRO exemplo independente em que a comissão é o
+#: percentual sobre o LÍQUIDO — 930 × 30% = 279, o `Commission` que ela manda.
+AMOSTRA_QUOTATION = {
+    "AdjustedPremium": 1004.4, "AnnualPremium": 930, "BeforeVatPremium": 930,
+    "Commission": 279, "CommissionRate": 0.3, "DuePremium": 1004.4,
+    "GrossPremium": 1004.4, "IsPremiumCalcSuccess": "Y", "ProductCode": "TBTI",
+    "QuotationNo": "QTBTI000001790127", "TotalInterest": 50.22,
+    "TotalPremium": 1054.62, "Vat": 74.4, "VatRate": 0.08,
+}
+
+#: Resposta de `/proposal/core/proposal/v1/createEx` (Policy Persistence API).
+AMOSTRA_CRIAR = {
+    "ProductCode": "TBTI", "ProductVersion": "1.0",
+    "PolicyId": "10019269467,D8EAF6E6320D6DECBEAA19535E8597D9",
+    "PolicyElementId": 10019269467, "ProposalNo": "PABTBTI0001302269",
+    "ProposalStatus": "1", "PolicyStatus": 1, "VersionSeq": 1,
+}
+#: E a de `updateEx` — mesmo objeto, versão nova.
+AMOSTRA_SALVAR = dict(AMOSTRA_CRIAR, VersionSeq=2)
+
+
+def test_a_comissao_do_exemplo_da_QUOTATION_tambem_bate(prov):
+    """Terceira amostra, outra página, mesmo resultado: 930 × 30% = 279."""
+    o = prov._oferta_de(AMOSTRA_QUOTATION, PRODUTO)
+    assert o.premio_liquido_centavos == 93000 and o.iof_centavos == 7440
+    assert o.premio_total_centavos == 100440       # DuePremium, não TotalPremium
+    assert o.comissao_estimada() == 27900          # = o `Commission: 279` da doc
+
+
+def test_o_juro_da_amostra_da_quotation_fica_de_fora(prov):
+    """TotalPremium 1054.62 = 1004.40 + 50.22 de juro. Juro não é prêmio."""
+    o = prov._oferta_de(AMOSTRA_QUOTATION, PRODUTO)
+    assert o.premio_total_centavos != 105462
+
+
+# ─────────────────────────────────────────────────────── o token do CAS
+
+def test_o_token_sai_do_CAS_e_vai_no_cabecalho(prov, monkeypatch):
+    """`POST /cas/ebao/v2/json/tickets` — usuário e senha, não client_id/secret."""
+    monkeypatch.delenv("COTACAO_INSUREMO_API_KEY", raising=False)
+    monkeypatch.setenv("COTACAO_INSUREMO_USUARIO", "corretora")
+    monkeypatch.setenv("COTACAO_INSUREMO_SENHA", "segredo")
+    chamadas = []
+    monkeypatch.setattr(prov, "_pedir_ticket", lambda: (chamadas.append(1), ("tk-123", 3600))[1])
+    assert prov._cabecalhos()["Authorization"] == "Bearer tk-123"
+    prov._cabecalhos()
+    assert len(chamadas) == 1, "o token tem que ficar guardado até expirar"
+
+
+def test_a_chave_fixa_dispensa_o_CAS(prov, monkeypatch):
+    """Quem já tem token não precisa mandar usuário e senha pela rede."""
+    def _nunca():
+        raise AssertionError("não devia pedir ticket com API_KEY configurada")
+    monkeypatch.setattr(prov, "_pedir_ticket", _nunca)
+    assert prov._cabecalhos()["Authorization"] == "Bearer chave-de-teste"
+
+
+def test_o_nome_do_cabecalho_e_configuravel(prov, monkeypatch):
+    """A doc diz que o token é "appended" e não dá o nome do header. Confirmar na
+    coleção do Postman tem que ser trocar uma variável, não mexer em código."""
+    monkeypatch.setenv("COTACAO_INSUREMO_HEADER_TOKEN", "X-Auth-Token")
+    monkeypatch.setenv("COTACAO_INSUREMO_PREFIXO_TOKEN", "")
+    h = prov._cabecalhos()
+    assert h["X-Auth-Token"] == "chave-de-teste" and "Authorization" not in h
+
+
+def test_token_expirado_e_pedido_de_novo(prov, monkeypatch):
+    monkeypatch.delenv("COTACAO_INSUREMO_API_KEY", raising=False)
+    monkeypatch.setenv("COTACAO_INSUREMO_USUARIO", "u")
+    monkeypatch.setenv("COTACAO_INSUREMO_SENHA", "s")
+    n = []
+    monkeypatch.setattr(prov, "_pedir_ticket", lambda: (n.append(1), (f"tk{len(n)}", 30))[1])
+    assert prov._cabecalhos()["Authorization"] == "Bearer tk1"
+    assert prov._cabecalhos()["Authorization"] == "Bearer tk2"   # vida < margem de 60s
+
+
+# ──────────────────────────────────────────────── a emissão até a proposta
+
+def _gravador(monkeypatch, prov, respostas=None):
+    """Troca o `_post` por um que anota a ordem das chamadas."""
+    passos = []
+    respostas = respostas or {}
+
+    def _post(caminho, payload):
+        passos.append(caminho)
+        if caminho in respostas:
+            r = respostas[caminho]
+            if isinstance(r, Exception):
+                raise r
+            return r
+        return {}
+    monkeypatch.setattr(prov, "_post", _post)
+    return passos
+
+
+def test_emitir_faz_validate_create_save_nessa_ordem(prov, monkeypatch):
+    from finance.cotacao_insuremo import (CAMINHO_CRIAR, CAMINHO_SALVAR,
+                                          CAMINHO_VALIDAR)
+    passos = _gravador(monkeypatch, prov, {CAMINHO_CRIAR: AMOSTRA_CRIAR,
+                                           CAMINHO_SALVAR: AMOSTRA_SALVAR})
+    r = prov.emitir(RISCO, {"seguradora": "Seguradora X", "produto": "AUTO_BR"})
+    assert passos == [CAMINHO_VALIDAR, CAMINHO_CRIAR, CAMINHO_SALVAR]
+    assert r["numero_proposta"] == "PABTBTI0001302269"
+    assert r["policy_id"].startswith("10019269467")
+
+
+def test_a_apolice_NAO_e_emitida(prov, monkeypatch):
+    """Decisão do dono: "só proposta". `issuePolicyEx` existe e fica de fora —
+    emitir apólice em nome da corretora é outra conversa."""
+    from finance.cotacao_insuremo import (CAMINHO_CRIAR, CAMINHO_EMITIR_APOLICE,
+                                          CAMINHO_SALVAR)
+    passos = _gravador(monkeypatch, prov, {CAMINHO_CRIAR: AMOSTRA_CRIAR,
+                                           CAMINHO_SALVAR: AMOSTRA_SALVAR})
+    prov.emitir(RISCO, {"seguradora": "Seguradora X", "produto": "AUTO_BR"})
+    assert CAMINHO_EMITIR_APOLICE not in passos
+
+
+def test_validacao_reprovada_para_antes_de_criar_lixo(prov, monkeypatch):
+    """A doc: 204 quando passa, 422 com as mensagens quando não. O 422 vira erro
+    com o texto dentro — e é esse texto que o corretor lê na tela."""
+    from finance.cotacao_insuremo import CAMINHO_CRIAR, CAMINHO_VALIDAR
+    erro = cp.ProvedorErro('InsureMO 422 em /validate: {"messages":[{"message":'
+                           '"field \\"EffectiveDate\\" is mandatory"}]}')
+    passos = _gravador(monkeypatch, prov, {CAMINHO_VALIDAR: erro})
+    with pytest.raises(cp.ProvedorErro, match="EffectiveDate"):
+        prov.emitir(RISCO, {"seguradora": "Seguradora X", "produto": "AUTO_BR"})
+    assert CAMINHO_CRIAR not in passos, "não pode criar proposta que a validação recusou"
+
+
+def test_proposta_sem_numero_e_erro_e_nao_sucesso_mudo(prov, monkeypatch):
+    """Sem `ProposalNo` ninguém acha essa proposta depois — nem a corretora, nem a
+    seguradora. Melhor cair no roteiro do portal do que fingir que deu certo."""
+    from finance.cotacao_insuremo import CAMINHO_CRIAR, CAMINHO_SALVAR
+    _gravador(monkeypatch, prov, {CAMINHO_CRIAR: {"PolicyId": "1,X"},
+                                  CAMINHO_SALVAR: {"PolicyId": "1,X"}})
+    with pytest.raises(cp.ProvedorErro, match="ProposalNo"):
+        prov.emitir(RISCO, {"seguradora": "Seguradora X", "produto": "AUTO_BR"})
+
+
+def test_a_oferta_escolhida_decide_o_produto(prov, monkeypatch):
+    """Errar o produto mandaria a proposta pro plano errado da seguradora certa."""
+    import json as _json
+    produtos = [dict(PRODUTO, codigo="P1", seguradora="Alfa"),
+                dict(PRODUTO, codigo="P2", seguradora="Beta")]
+    monkeypatch.setenv("COTACAO_INSUREMO_PRODUTOS", _json.dumps(produtos))
+    from finance.cotacao_insuremo import CAMINHO_CRIAR
+    vistos = []
+
+    def _post(caminho, payload):
+        vistos.append((caminho, payload.get("ProductCode")))
+        return AMOSTRA_CRIAR if caminho == CAMINHO_CRIAR else AMOSTRA_SALVAR
+    monkeypatch.setattr(prov, "_post", _post)
+    prov.emitir(RISCO, {"seguradora": "Beta", "produto": "P2"})
+    assert vistos[0][1] == "P2"
+
+
+def test_oferta_de_produto_que_nao_existe_e_recusada(prov):
+    with pytest.raises(cp.ProvedorErro, match="não casa"):
+        prov.emitir(RISCO, {"seguradora": "Outra", "produto": "XPTO"})
+
+
+def test_o_conector_declara_que_emite(prov):
+    assert prov.suporta_emissao is True

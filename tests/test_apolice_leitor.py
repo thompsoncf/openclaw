@@ -116,7 +116,10 @@ def _finge(monkeypatch, *, conteudo=b"%PDF-1.4 fake", leitura=None, expira=False
     monkeypatch.setattr(al._cofre, "configurado", lambda: cofre)
     monkeypatch.setattr(al, "_guardar", lambda cid, b, n: (f"apolice/{cid}/x.pdf", len(b)))
     if leitura is not None:
-        monkeypatch.setattr(al.apdf, "ler", lambda b: leitura)
+        # a assinatura ESPELHA a de verdade (`ler(conteudo, proibidos)`): stub com
+        # menos parâmetros que a função vira TypeError engolido pelo `except` do
+        # `ler_bytes`, e o teste falha dizendo "não leu" em vez de "chamou errado".
+        monkeypatch.setattr(al.apdf, "ler", lambda b, proibidos=(): leitura)
 
 
 def _leitura(**kw):
@@ -228,7 +231,7 @@ def test_arquivo_que_o_whatsapp_apagou_vira_erro_gravado(limpo, monkeypatch):
 def test_pdf_ilegivel_tambem_fica_registrado(limpo, monkeypatch):
     _pdf(limpo, CONTA)
     _finge(monkeypatch)
-    monkeypatch.setattr(al.apdf, "ler", lambda b: (_ for _ in ()).throw(ValueError("PDF vazio")))
+    monkeypatch.setattr(al.apdf, "ler", lambda b, proibidos=(): (_ for _ in ()).throw(ValueError("PDF vazio")))
     assert al.ler_pendentes(limpo, CONTA)["falhas"] == 1
     with limpo.connection() as c:
         assert c.execute("select erro from apolice_lida").fetchone()[0] == "PDF vazio"
@@ -321,7 +324,7 @@ def test_por_id_devolve_a_leitura_guardada(limpo, monkeypatch):
 def test_pdf_que_o_leitor_nao_entende_nao_some(limpo, monkeypatch):
     """A falha fica gravada também pelo Telegram — quem chamou decide o que fazer."""
     _finge(monkeypatch)
-    monkeypatch.setattr(al.apdf, "ler", lambda b: (_ for _ in ()).throw(ValueError("PDF vazio")))
+    monkeypatch.setattr(al.apdf, "ler", lambda b, proibidos=(): (_ for _ in ()).throw(ValueError("PDF vazio")))
     r = al.ler_bytes(limpo, CONTA, b"xx", "A.pdf", origem="telegram", de="Cássio")
     assert r["ok"] is False and r["erro"] == "PDF vazio"
 

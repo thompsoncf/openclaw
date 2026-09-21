@@ -52,6 +52,8 @@ class Leitura:
     #: o papel tem as marcas de um seguro (SUSEP, apólice, segurado, vigência)?
     #: É INDEPENDENTE de `reconhecida`: dá True na Azul, cujo layout eu não leio.
     e_apolice: bool = False
+    #: nome, documento e e-mail da própria corretora — nada disso é o segurado
+    proibidos: tuple = ()
 
     def ok(self) -> bool:
         """Tem o mínimo pro alerta existir: seguradora e fim da vigência."""
@@ -207,21 +209,71 @@ _ANCORAS_SEGURADO = (
 )
 
 
-def _bloco_do_segurado(texto: str) -> tuple[str | None, str | None]:
-    """O pedaço do papel onde estão os dados de QUEM comprou. (None, None) se não achar.
+#: uma linha inteira em CAIXA ALTA é cabeçalho de bloco. É a estrutura que TODA
+#: apólice brasileira usa — Mapfre, Porto, Allianz —, e é o que fecha o bloco.
+_CABECALHO = re.compile(r"^[A-ZÀ-Ü0-9][A-ZÀ-Ü0-9 ºª/\.\-\(\)&,'ºÇÃÕÉÊÍÓÚÂÔ]{5,}$", re.M)
 
-    Devolve o trecho a partir da âncora que aparecer MAIS CEDO — âncora tardia
-    pegaria o bloco do beneficiário ou o das condições gerais.
+
+def _bloco_do_segurado(texto: str) -> tuple[str | None, str | None]:
+    """O bloco onde estão os dados de QUEM comprou. (None, None) se não achar.
+
+    O BLOCO TERMINA NO PRÓXIMO CABEÇALHO, e é essa a diferença que importa. Até
+    21/09/2026 isto devolvia da âncora até o FIM DO PAPEL, e o efeito apareceu na
+    apólice Porto Seguro: o bloco do segurado dela não traz "Nome:" com esse
+    rótulo, então a busca seguiu adiante e trouxe o nome do bloco do CORRETOR — a
+    própria Liberal saiu como segurada, com o e-mail do Cássio junto.
+
+    Bloco fechado transforma esse erro em campo VAZIO, que é o comportamento certo:
+    o que falta, a pessoa preenche; o que vem errado, ela confirma sem ver.
+
+    Vence a âncora que aparecer MAIS CEDO — âncora tardia pegaria o bloco do
+    beneficiário ou o das condições gerais.
     """
     achados = []
     for padrao in _ANCORAS_SEGURADO:
         m = re.search(padrao, texto, re.I)
         if m:
-            achados.append((m.start(), m.group(0)))
+            achados.append((m.start(), m.end(), m.group(0)))
     if not achados:
         return None, None
-    achados.sort()
-    return texto[achados[0][0]:], achados[0][1]
+    ini, fim_ancora, ancora = min(achados)
+    # o próximo cabeçalho DEPOIS da âncora fecha o bloco
+    prox = _CABECALHO.search(texto, fim_ancora)
+    return texto[ini:prox.start() if prox else len(texto)], ancora
+
+
+def _e_a_propria_casa(valor: str, proibidos: tuple[str, ...]) -> bool:
+    """O que saiu é da própria corretora — nome, e-mail ou documento dela?
+
+    A GENERALIZAÇÃO do teste da seguradora, e a que resolve o caso Porto: nenhuma
+    lista de terceiros dá conta, porque o bloco que vaza é o do CORRETOR, e o
+    corretor é diferente em cada instalação. Mas cada conta sabe o próprio nome, o
+    dos membros e os e-mails deles — e nada disso pode ser o cliente.
+
+    Compara por dígitos quando o valor é documento ou telefone, e por texto
+    normalizado no resto: "LIBERAL NETO CONS E CORG DE SEGS LTDA" tem que bater
+    com a conta chamada "Liberal Neto".
+    """
+    v = _achatar(valor)
+    if not v:
+        return False
+    so_num = _digitos(valor)
+    for p in proibidos:
+        pd = _digitos(p)
+        if so_num and pd and len(pd) >= 10 and so_num == pd:
+            return True
+        pv = _achatar(p)
+        if pv and len(pv) >= 5 and (pv in v or v in pv):
+            return True
+    return False
+
+
+def _achatar(txt: str) -> str:
+    """Minúsculo, sem acento e sem pontuação — pra comparar nome de empresa."""
+    import unicodedata
+    t = unicodedata.normalize("NFKD", (txt or "").lower())
+    t = "".join(ch for ch in t if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", " ", t).strip()
 
 
 def _e_a_propria_seguradora(nome: str) -> bool:
@@ -328,25 +380,46 @@ def _allianz(texto: str, L: Leitura) -> None:
         pega_seg("telefone", "Tel", lambda v: _digitos(v) or None)
         pega_seg("email", "E-mail", lambda v: v.strip().lower() or None)
         pega_seg("endereco", "Endereço")
-        # A ÚLTIMA CONFERÊNCIA, porque a âncora sozinha não basta: se o que saiu
-        # foi o nome de uma seguradora, o bloco inteiro é de outra gente, e
-        # CPF/telefone/endereço vieram junto. Vai tudo fora — não só o nome.
-        if _e_a_propria_seguradora(c.get("nome", "")):
-            lido = c["nome"]
-            for chave in DO_SEGURADO:
-                c.pop(chave, None)
-                t.pop(chave, None)
-                if chave not in L.nao_achou:
-                    L.nao_achou.append(chave)
-            L.avisos.append(f"O nome que saiu do papel foi \"{lido}\" — é a própria "
-                            "seguradora, não o cliente. Apaguei os dados do segurado "
-                            "pra não cadastrar errado; preencha olhando o PDF.")
+        _conferir_o_segurado(L, DO_SEGURADO)
     # o condutor (só o que muda o preço na renovação)
     pega("condutor_idade", "Idade", lambda v: int(_digitos(v)) if _digitos(v) else None)
     pega("condutor_estado_civil", "Estado Civil")
 
     # a situação: o documento diz o que é
     c["situacao"] = "proposta" if re.search(r"\bPROPOSTA\b", texto) and not c.get("numero_apolice") else "vigente"
+
+
+def _conferir_o_segurado(L: Leitura, chaves: tuple[str, ...]) -> None:
+    """O bloco lido é mesmo do CLIENTE? Se não for, vai tudo fora.
+
+    A âncora sozinha não basta, e este é o lugar onde isso ficou provado duas
+    vezes em 21/09/2026: na Mapfre saiu a SEGURADORA, na Porto Seguro saiu a
+    CORRETORA, com o e-mail do corretor junto. São blocos diferentes vazando pelo
+    mesmo buraco, e a resposta é a mesma.
+
+    JOGA FORA O BLOCO INTEIRO, não só o campo que denunciou: CPF, telefone e
+    endereço vieram do mesmo lugar errado, e um deles sozinho no formulário é
+    exatamente o tipo de dado que alguém confirma sem olhar.
+    """
+    c, t = L.campos, L.trechos
+    culpado, quem = "", ""
+    if _e_a_propria_seguradora(c.get("nome", "")):
+        culpado, quem = c["nome"], "a própria seguradora"
+    else:
+        for chave in ("nome", "email", "cpf", "telefone"):
+            if c.get(chave) and _e_a_propria_casa(str(c[chave]), L.proibidos):
+                culpado, quem = str(c[chave]), "da própria corretora"
+                break
+    if not culpado:
+        return
+    for chave in chaves:
+        c.pop(chave, None)
+        t.pop(chave, None)
+        if chave not in L.nao_achou:
+            L.nao_achou.append(chave)
+    L.avisos.append(f"O que saiu do papel no lugar do cliente foi \"{culpado}\" — é "
+                    f"{quem}, não o segurado. Apaguei os dados do segurado pra não "
+                    "cadastrar errado; preencha olhando o PDF.")
 
 
 def _mapfre(texto: str, L: Leitura) -> None:
@@ -392,6 +465,8 @@ def _mapfre(texto: str, L: Leitura) -> None:
     pega("cpf", "CPF", seg, lambda v: _digitos(v) or None)
     pega("endereco", "Endereço", seg)
     pega("telefone", "Telefone celular", seg, lambda v: _digitos(v) or None)
+
+    _conferir_o_segurado(L, ("nome", "cpf", "telefone", "email", "endereco"))
 
     vei = bloco("DADOS DO VEÍCULO", ("VALOR DA INDENIZAÇÃO", "REVISTA DO CARRO"))
     pega("modelo", "Marca/Modelo", vei, lambda v: re.sub(r"\s+", " ", v).strip() or None)
@@ -507,8 +582,12 @@ def texto_do_pdf(conteudo: bytes) -> tuple[str, int]:
     return texto, doc.page_count
 
 
-def ler_texto(texto: str, paginas: int = 0) -> Leitura:
+def ler_texto(texto: str, paginas: int = 0, proibidos: tuple[str, ...] = ()) -> Leitura:
+    """`proibidos`: nome, documento e e-mail da PRÓPRIA corretora e dos membros
+    dela. Nada disso pode ser o segurado, e é a trava que não depende de conhecer
+    o layout — ver `_e_a_propria_casa`."""
     L = Leitura(paginas=paginas)
+    L.proibidos = tuple(proibidos)
     for nome, reconhece, leitor in _LAYOUTS:
         if reconhece(texto):
             L.seguradora, L.reconhecida = nome, True
@@ -537,9 +616,9 @@ def ler_texto(texto: str, paginas: int = 0) -> Leitura:
     return L
 
 
-def ler(conteudo: bytes) -> Leitura:
+def ler(conteudo: bytes, proibidos: tuple[str, ...] = ()) -> Leitura:
     texto, paginas = texto_do_pdf(conteudo)
-    return ler_texto(texto, paginas)
+    return ler_texto(texto, paginas, proibidos)
 
 
 def para_formulario(L: Leitura) -> dict:

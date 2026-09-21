@@ -94,6 +94,40 @@ Um conector novo é uma subclasse de `ProvedorHTTP` com dois métodos —
 `_payload(risco)` e `_ofertas(resposta)` — e `registrar(MeuProvedor())`. A
 mecânica comum (token, cabeçalhos, tempo limite, erro) já está na base.
 
+## A decisão: Segfy (21/09/2026)
+
+**A Liberal não tem tenant na InsureMO**, e sem tenant aquela API não dá preço
+nenhum: ela é o núcleo da seguradora, e precisa dos produtos configurados lá
+dentro. Decisão do dono, 21/09/2026: **multicálculo brasileiro, e o escolhido é a
+Segfy.**
+
+O que foi comparado antes de escolher:
+
+| | Seguradoras | API | Observação |
+|---|---|---|---|
+| **Segfy** ← escolhido | 19 | API, extensão e robô | Diz não exigir autorização das seguradoras |
+| TEx / Teleport | 20+, 50+ produtos | API oficial homologada, precisão garantida em contrato | Serasa Experian; homologação mais lenta |
+| Quiver / Agger (ONE) | 40+ | existe, parte dela anunciada como "prevista" | confirmar antes de contratar pensando na API |
+
+**E o plano B já está decidido**: se a Segfy só oferecer API em plano caro, ou só
+extensão/robô (que roda no navegador e não dá pra chamar de servidor), **a
+corretora fica no modo manual e a gente espera**. A tela funciona hoje: o corretor
+digita as ofertas, compara, escolhe e vira proposta na carteira. Quando a API
+chegar, nada muda pra ele — as ofertas só passam a chegar sozinhas.
+
+O que falta é fora do código: **contrato, credencial e a documentação da API**.
+Nenhum multicálculo brasileiro publica isso aberto. O conector vira
+`finance/cotacao_segfy.py` no dia em que a doc chegar, e `COTACAO_PROVEDOR=segfy`
+o liga — o resto da base não muda uma linha.
+
+### O que a InsureMO continua fazendo aqui
+
+O conector dela (`finance/cotacao_insuremo.py`) fica, e não custa nada: só
+acorda com `COTACAO_PROVEDOR=insuremo`. Ele já autentica (CAS), cota e cria
+proposta, e está testado contra as amostras da doc — se um dia uma seguradora ou
+MGA da carteira rodar em InsureMO, está pronto. O que falta nele é só a
+configuração de produto do tenant.
+
 ## InsureMO — o que já está ligado, e o que falta
 
 Em 21/09/2026 a página **Policy Rating API** foi lida (colada à mão: o domínio

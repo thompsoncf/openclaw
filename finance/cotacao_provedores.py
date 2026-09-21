@@ -37,6 +37,13 @@ quatro coisas que a doc precisa responder, e que fecham o conector num arquivo:
 
 Com isso, o conector é uma subclasse de `ProvedorHTTP` com `_payload` e `_ofertas`.
 
+O PROVEDOR ESCOLHIDO (dono, 21/09/2026): **Segfy**. A Liberal não tem tenant na
+InsureMO — e sem tenant aquela API não dá preço, porque ela é o núcleo da
+seguradora e precisa dos produtos configurados lá dentro. O conector da Segfy
+nasce como `finance/cotacao_segfy.py` quando contrato, credencial e documentação
+chegarem; até lá a corretora opera no modo manual, que é decisão tomada e não
+espera passiva (ver `docs/API_COTACAO.md`).
+
 O PADRÃO É 'manual', E ISSO NÃO É PLACEHOLDER. Sem provedor contratado, o
 corretor digita na tela as ofertas que ele mesmo levantou e o comparativo, o
 histórico e a conversão em proposta funcionam igual. É o que faz a corretora usar

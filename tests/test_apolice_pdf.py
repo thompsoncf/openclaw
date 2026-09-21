@@ -341,3 +341,300 @@ def test_o_resumo_guardado_leva_a_marca_e_o_nome_achado():
     d = ap.resumo_para_guardar(ap.ler_texto(AZUL))
     assert d["e_apolice"] is True and d["reconhecida"] is False
     assert d["seguradora"] == "Azul Seguros"
+
+
+# ────────── o segurado é quem comprou, não quem vendeu (21/09/2026) ──────────
+#
+# Medido na apólice Mapfre de 11 páginas que o corretor mandou pelo assistente. O
+# genérico devolveu segurado "MAPFRE SEGUROS GERAIS S/A", CNPJ 06.324.020/0001-02
+# e "AV DAS NACOES UNIDAS, 14.261" — a sede da seguradora, com cara de dado bom.
+# Confirmar aquilo criaria um CLIENTE chamado Mapfre.
+
+MAPFRE = """MAPFRE SEGUROS GERAIS S/A
+Nome: MAPFRE SEGUROS GERAIS S/A
+CPF/CNPJ: 06.324.020/0001-02
+Endereço: AV DAS NACOES UNIDAS, 14.261 - ALA A
+Processo SUSEP 15414.900000/2026-00
+APÓLICE DE SEGURO DE AUTOMÓVEL
+Placa: PIR5077
+Chassi: 9BFZH55L8J8038259
+Coberturas contratadas
+Prêmio Líquido
+R$ 1.200,00
+"""
+
+MAPFRE_COM_BLOCO = MAPFRE + """
+DADOS DO SEGURADO
+Nome: JOAO BATISTA MACHADO
+CPF/CNPJ: 111.444.777-35
+Endereço: RUA DAS FLORES, 100 - TERESINA
+"""
+
+
+def test_a_seguradora_nao_vira_a_segurada():
+    """O defeito que este teste existe pra impedir: um cliente chamado Mapfre."""
+    L = ap.ler_texto(MAPFRE)
+    assert "nome" not in L.campos
+    assert "cpf" not in L.campos
+    assert "endereco" not in L.campos
+    assert "nome" in L.nao_achou
+
+
+def test_o_bloco_inteiro_cai_junto_com_o_nome():
+    """CPF e endereço vieram do MESMO bloco errado — jogar fora só o nome deixaria
+    a apólice com o CNPJ da Mapfre no campo do cliente."""
+    L = ap.ler_texto(MAPFRE)
+    assert not any(k in L.campos for k in ("nome", "cpf", "telefone", "email", "endereco"))
+
+
+def test_o_aviso_diz_o_que_saiu_e_por_que_foi_apagado():
+    """A segunda rede, pro papel que TEM âncora e mesmo assim entrega a
+    seguradora: a âncora diz onde o bloco começa, não de quem ele é."""
+    L = ap.ler_texto(MAPFRE + "\nDADOS DO SEGURADO\n"
+                     "Nome: MAPFRE SEGUROS GERAIS S/A\nCPF/CNPJ: 06.324.020/0001-02\n")
+    assert any("MAPFRE SEGUROS GERAIS S/A" in a and "própria" in a for a in L.avisos)
+    assert "nome" not in L.campos and "cpf" not in L.campos
+
+
+def test_o_que_da_pra_ler_da_mapfre_continua_lido():
+    """Apagar o bloco do segurado não pode levar junto o que estava certo."""
+    L = ap.ler_texto(MAPFRE)
+    assert L.e_apolice and L.campos["seguradora"] == "Mapfre"
+    assert L.campos["placa"] == "PIR5077"
+    assert L.campos["chassi"] == "9BFZH55L8J8038259"
+
+
+def test_com_o_bloco_do_segurado_o_cliente_certo_sai():
+    """A âncora genérica: 'DADOS DO SEGURADO' vale onde 'SUAS INFORMAÇÕES' não existe."""
+    L = ap.ler_texto(MAPFRE_COM_BLOCO)
+    assert L.campos["nome"] == "JOAO BATISTA MACHADO"
+    assert L.campos["cpf"] == "11144477735"
+    assert "RUA DAS FLORES" in L.campos["endereco"]
+
+
+def test_a_ancora_nao_casa_com_seguradora():
+    """'SEGURADORA' aparece antes de 'SEGURADO' em quase toda apólice. Casar com
+    ela colocaria a âncora no bloco errado — que é o defeito de origem."""
+    trecho, ancora = ap._bloco_do_segurado("SEGURADORA: MAPFRE\nDADOS DO SEGURADO\nNome: FULANO")
+    assert ancora and "SEGURADORA" not in ancora.upper().replace("SEGURADO", "")
+    assert "Nome: FULANO" in trecho
+
+
+def test_o_papel_sem_ancora_avisa_em_vez_de_chutar():
+    L = ap.ler_texto(MAPFRE)
+    assert any("em branco de propósito" in a for a in L.avisos)
+
+
+def test_a_allianz_continua_lendo_a_segurada_certa():
+    """A âncora nova não pode tirar o que já funcionava."""
+    L = ap.ler_texto(papel())
+    assert L.campos["nome"] == "FULANA DE TAL EXEMPLO"
+    assert L.campos["email"] == "fulana@exemplo.com"
+
+
+def test_segurado_pessoa_juridica_nao_e_recusado():
+    """Recusar todo LTDA jogaria fora metade das apólices de frota. O teste é o
+    nome de uma seguradora conhecida dentro do nome, não 'parece empresa'."""
+    assert not ap._e_a_propria_seguradora("TRANSPORTES BOA VIAGEM LTDA")
+    assert ap._e_a_propria_seguradora("MAPFRE SEGUROS GERAIS S/A")
+
+
+# ────────── o layout da Mapfre (21/09/2026) ──────────
+#
+# Medido na apólice de 11 páginas que o corretor mandou pelo assistente. O texto
+# abaixo imita a ESTRUTURA do papel — os cabeçalhos em caixa alta e os rótulos —
+# com nome, CPF, telefone e endereço inventados: dado de cliente não entra no
+# repositório (regra 0).
+#
+# O que este layout ensinou, e a Allianz não tinha ensinado:
+#
+# * CADA BLOCO tem "Nome:", "CPF:" e "Endereço:" — seguradora, sucursal, corretor
+#   e segurado. Ler do texto solto devolve o primeiro, que é a seguradora.
+# * "DADOS DA SEGURADORA" casa com o padrão de âncora "DADOS D[OA] SEGURAD[OA]"
+#   por prefixo. Sem `(?!RA)` a âncora pousa no bloco errado — o defeito que ela
+#   existe pra evitar.
+# * a vigência vem em DOIS rótulos, um por data, e o IOF vem em LINHA PRÓPRIA
+#   (na Allianz ele é derivado de total − líquido).
+
+MAPFRE_PAPEL = """APÓLICE DE SEGURO AUTO
+DADOS GERAIS
+Processo SUSEP Automóvel Nº: 15414.100326/2004-83
+Nº Apólice: 0330433570731
+Vigência início 24h do dia: 10/09/2026
+Término 24h do dia: 10/09/2027
+Nº Proposta: 2310313044698
+DADOS DA SEGURADORA
+Nome: MAPFRE SEGUROS GERAIS S/A
+CNPJ: 61.074.175/0001-38
+Endereço: AV DAS NACOES UNIDAS, 14.261 - ALA A
+DADOS DO CORRETOR
+Código interno e nome: 42161 - CORRETORA EXEMPLO LTDA
+CPF/CNPJ: 06.324.020/0001-02
+Telefone: 8632150747
+Endereço: SENADOR AREA LEAO 2185
+DADOS DO SEGURADO
+Nome: FULANA DE TAL EXEMPLO
+Tipo de pessoa: FÍSICA
+CPF: {cpf}
+Endereço: RUA DAS FLORES 3929
+Cidade: TERESINA
+Telefone celular: 86999990000
+QUESTIONÁRIO DE AVALIAÇÃO DE RISCO
+Nome do principal condutor: FULANA DE TAL EXEMPLO
+Data de nascimento: 11/05/1958
+Estado Civil: CASADO
+CEP do local onde o veículo pernoita: 64064-210
+IMPORTANTE: Declarações inverídicas implicarão a perda da garantia.
+DADOS DO VEÍCULO
+Marca/Modelo: FORD KA HATCH 1.0 SE/SE PLUS TIVCT (FL
+Ano do modelo: 2018
+Placa: PIR5077
+0 KM: NÃO
+Nº Chassi: 9BFZH55L8J8038259
+VALOR DA INDENIZAÇÃO DA COBERTURA BÁSICA DE CASCO
+Código na Tabela de Referência: 003408-8
+FRANQUIA
+Descrição
+Tipo
+Valor (R$)
+CASCO DEDUTÍVEL
+REDUZIDA 50%
+3.234,20
+PARA-BRISA
+150,00
+DEMONSTRATIVO DE PRÊMIO - VALORES EM R$
+Prêmio líquido: 2.613,01
+IOF: 192,84
+Prêmio total: 2.805,85
+PAGAMENTO DO PRÊMIO - VALORES EM R$
+Nº de parcela: 12
+Vencimento da 1ª parcela: 16/10/2026
+Valor da 1ª parcela: 233,82
+VENCIMENTO DAS PARCELAS - VALORES EM R$
+Parcela
+Data
+Valor
+02
+15/11/2026
+233,82
+08
+14/05/2027
+233,82
+03
+15/12/2026
+233,82
+09
+13/06/2027
+233,82
+04
+14/01/2027
+233,82
+10
+13/07/2027
+233,82
+05
+13/02/2027
+233,82
+11
+12/08/2027
+233,82
+06
+15/03/2027
+233,82
+12
+10/09/2027
+233,83
+07
+14/04/2027
+233,82
+"""
+
+
+def _so_digitos(v):
+    return "".join(ch for ch in v if ch.isdigit())
+
+
+def mapfre(**kw):
+    return MAPFRE_PAPEL.format(**dict({"cpf": CPF_OK}, **kw))
+
+
+def test_a_mapfre_e_reconhecida_pelo_layout():
+    L = ap.ler_texto(mapfre())
+    assert L.reconhecida and L.seguradora == "Mapfre" and L.e_apolice
+
+
+def test_a_segurada_vem_do_bloco_dela_e_nao_do_primeiro_nome_do_papel():
+    """Três blocos antes do dela têm "Nome:" — seguradora, sucursal e corretor."""
+    L = ap.ler_texto(mapfre())
+    assert L.campos["nome"] == "FULANA DE TAL EXEMPLO"
+    assert L.campos["cpf"] == _so_digitos(CPF_OK)
+    assert L.campos["endereco"] == "RUA DAS FLORES 3929"
+    assert L.campos["telefone"] == "86999990000"
+
+
+def test_o_cnpj_do_corretor_nao_entra_no_cpf_da_segurada():
+    """O genérico pegou "CPF/CNPJ:" do bloco do CORRETOR — o CNPJ da própria
+    corretora no campo do cliente."""
+    L = ap.ler_texto(mapfre())
+    assert "06324020000102" not in L.campos["cpf"]
+
+
+def test_a_ancora_nao_pousa_em_dados_da_seguradora():
+    """"DADOS DA SEGURADORA" é prefixo de "DADOS DA SEGURADO" + RA. Sem o `(?!RA)`
+    a âncora casa com ela e o bloco lido é o da seguradora."""
+    trecho, ancora = ap._bloco_do_segurado(mapfre())
+    assert ancora == "DADOS DO SEGURADO"
+    # e o primeiro "Nome:" DEPOIS da âncora é o da cliente, não o da seguradora
+    import re as _re
+    assert _re.search(r"Nome: *(.+)", trecho).group(1).strip() == "FULANA DE TAL EXEMPLO"
+
+
+def test_a_vigencia_vem_dos_dois_rotulos():
+    L = ap.ler_texto(mapfre())
+    assert L.campos["vigencia_inicio"] == date(2026, 9, 10)
+    assert L.campos["vigencia_fim"] == date(2027, 9, 10)
+
+
+def test_o_iof_da_mapfre_e_lido_e_nao_derivado():
+    """Na Allianz o IOF é total − líquido; aqui ele tem linha própria."""
+    L = ap.ler_texto(mapfre())
+    assert L.campos["premio_centavos"] == 261301
+    assert L.campos["iof_centavos"] == 19284
+    assert L.campos["total_centavos"] == 280585
+
+
+def test_as_doze_parcelas_fecham_o_total():
+    """A 1ª vem rotulada; da 2ª em diante, numa tabela de duas colunas. A soma é a
+    única checagem com fonte independente do papel."""
+    L = ap.ler_texto(mapfre())
+    assert L.campos["parcelas"] == 12
+    assert len(L.campos["parcelas_centavos"]) == 12
+    assert sum(L.campos["parcelas_centavos"]) == L.campos["total_centavos"]
+    assert ("soma das parcelas = total", True) in [(n, ok) for n, ok, _ in L.checagens]
+
+
+def test_a_franquia_e_a_do_casco_e_nao_a_do_para_brisa():
+    """A tabela lista uma dúzia de franquias; a que importa é a primeira linha."""
+    L = ap.ler_texto(mapfre())
+    assert L.campos["franquia_centavos"] == 323420
+
+
+def test_o_veiculo_sai_do_bloco_do_veiculo():
+    L = ap.ler_texto(mapfre())
+    assert L.campos["placa"] == "PIR5077"
+    assert L.campos["chassi"] == "9BFZH55L8J8038259"
+    assert L.campos["ano"] == "2018"
+    assert L.campos["zero_km"] is False
+    assert L.campos["fipe"] == "003408-8"
+
+
+def test_a_mapfre_nao_deixa_campo_em_branco():
+    """A medição do PDF real: 25 campos, nenhum `nao_achou`, três checagens
+    fechando. Este teste é o que impede o layout de regredir em silêncio."""
+    L = ap.ler_texto(mapfre())
+    assert L.nao_achou == [], L.nao_achou
+    assert all(ok for _n, ok, _d in L.checagens)
+
+
+def test_a_apolice_emitida_e_vigente_e_nao_proposta():
+    assert ap.ler_texto(mapfre()).campos["situacao"] == "vigente"

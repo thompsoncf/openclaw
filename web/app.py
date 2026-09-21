@@ -866,8 +866,25 @@ def _nome_do_pdf_wpp(media_ctype: str, legenda: str) -> str:
     return "apolice-recebida.pdf"
 
 
+def _quem_mandou(membro, numero: str) -> str:
+    """O nome de quem mandou, pra lista de Renovações dizer de quem é o documento.
+
+    O nome do membro nem sempre é nome: quando o acesso nasce do próprio chip, ele
+    vem com o TELEFONE no lugar (a conta 37 tem um membro chamado "86994557463").
+    Medido em 21/09/2026, no primeiro pré-cadastro que entrou por aqui — a lista
+    mostrou "86994557463" e o dono reclamou que o nome não aparece. Número cru é
+    pior que número formatado, e os dois são piores que o nome; então é nesta
+    ordem, e nunca em branco.
+    """
+    nome = (getattr(membro, "nome", "") or "").strip()
+    if nome and not nome.lstrip("+").replace(" ", "").isdigit():
+        return nome
+    from web.painel_apolices import _fone_txt
+    return _fone_txt(nome or numero) or "pelo WhatsApp"
+
+
 def _tentar_apolice_wpp(to: str, pool, membro, conta, dados: bytes,
-                        media_ctype: str, legenda: str) -> bool:
+                        media_ctype: str, legenda: str, numero: str = "") -> bool:
     """O PDF que chegou neste número é uma apólice? Então vira pré-cadastro.
 
     Gêmea de `telegram_bot._tentar_apolice`, e com o mesmo portão: quem manda é um
@@ -886,10 +903,9 @@ def _tentar_apolice_wpp(to: str, pool, membro, conta, dados: bytes,
         from finance import apolice_leitor as _apl
         if not _apl._e_seguros(pool, conta.id) or not _apl._cofre.configurado():
             return False
-        quem = (getattr(membro, "nome", "") or "").strip() or "pelo WhatsApp"
         r = _apl.ler_bytes(pool, conta.id, dados,
                            _nome_do_pdf_wpp(media_ctype, legenda),
-                           origem="whatsapp", de=quem)
+                           origem="whatsapp", de=_quem_mandou(membro, numero))
         if not _apl.tomou(r):
             return False
         leitura = r["leitura"]
@@ -1091,7 +1107,7 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                 # Ela só existia no Telegram e no webhook do chip. Este número é o
                 # terceiro caminho por onde um PDF entra, e era o único sem ela.
                 if _tentar_apolice_wpp(to, pool, membro, conta, dados,
-                                       media_ctype or "", body or ""):
+                                       media_ctype or "", body or "", numero):
                     return
                 imagem_b64 = base64.b64encode(dados).decode("ascii")
                 media_type = "application/pdf"

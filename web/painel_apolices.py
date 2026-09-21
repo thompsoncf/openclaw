@@ -424,16 +424,17 @@ def pdfs_do_whatsapp(request: Request):
          "parece": i["parece_apolice"], "ja": i["ja_cadastrada"],
          "lida": i["lida"], "resumo": _apl_resumo(i), "erro": i["erro_leitura"]}
         for i in ap.pdfs_do_whatsapp(pool, conta[0])]
-    # A SEGUNDA PORTA (305): o que o corretor mandou pelo Telegram entra na MESMA
-    # lista. São duas entradas pro mesmo lugar, e separar em duas telas faria a
-    # pessoa procurar em dois cantos o documento que ela acabou de mandar.
+    # AS OUTRAS PORTAS (305 e a do assistente): o que o corretor mandou pelo
+    # Telegram ou pro número do assistente entra na MESMA lista. São três entradas
+    # pro mesmo lugar, e separar em três telas faria a pessoa procurar em três
+    # cantos o documento que ela acabou de mandar. O rótulo diz por onde veio.
     itens += [
-        {"fonte": "lida", "id": i["lida_id"], "de": i["de"] + " · Telegram",
+        {"fonte": "lida", "id": i["lida_id"], "de": i["de"] + " · " + i["porta"],
          "nome": i["nome"], "quando": i["quando"],
          "kb": round(i["bytes"] / 1024) if i["bytes"] else 0,
          "parece": True, "ja": False, "lida": True,
          "resumo": _apl_resumo(i), "erro": i["erro_leitura"]}
-        for i in _apl.do_telegram(pool, conta[0])]
+        for i in _apl.sem_mensagem(pool, conta[0])]
     itens.sort(key=lambda i: i["quando"] or datetime.min.replace(tzinfo=timezone.utc),
                reverse=True)
     for i in itens:
@@ -443,8 +444,8 @@ def pdfs_do_whatsapp(request: Request):
     quem = ap.quem_mandou_pdf(pool, conta[0])
     return JSONResponse({
         "ok": True,
-        # o Telegram conta como porta aberta: com documento vindo de lá, a lista
-        # existe mesmo sem ninguém liberado no WhatsApp
+        # Telegram e assistente contam como porta aberta: com documento vindo de
+        # lá, a lista existe mesmo sem ninguém liberado no WhatsApp
         "remetentes": len(quem) + sum(1 for i in itens if i["fonte"] == "lida"),
         "liberados": sum(1 for q in quem if q["liberado"]),
         "itens": itens})

@@ -856,6 +856,54 @@ def _disparar_qr_whatsapp(numero: str, dados: bytes, media_type: str) -> None:
         pass
 
 
+def _nome_do_pdf_wpp(media_ctype: str, legenda: str) -> str:
+    """O Twilio não manda o nome do arquivo. Então: a legenda, quando ela tem cara
+    de nome de documento, ou um nome neutro — nunca inventado a partir do conteúdo,
+    porque o nome é o que a pessoa vai procurar na lista de Renovações."""
+    leg = (legenda or "").strip()
+    if leg and len(leg) <= 80 and "\n" not in leg:
+        return leg if leg.lower().endswith(".pdf") else leg + ".pdf"
+    return "apolice-recebida.pdf"
+
+
+def _tentar_apolice_wpp(to: str, pool, membro, conta, dados: bytes,
+                        media_ctype: str, legenda: str) -> bool:
+    """O PDF que chegou neste número é uma apólice? Então vira pré-cadastro.
+
+    Gêmea de `telegram_bot._tentar_apolice`, e com o mesmo portão: quem manda é um
+    MEMBRO autenticado de uma conta do nicho seguros. Não usa a lista de remetentes
+    liberados (migração 289) porque ali o remetente é um número qualquer que
+    escreve pro chip; aqui já passou pelo `membro_por_whatsapp`.
+
+    Devolve True quando assumiu. False devolve o documento pro caixa — é o que
+    acontece em toda conta que não é corretora e em todo PDF sem as marcas de um
+    seguro, e é o comportamento que NÃO pode quebrar: o comprovante de Pix do
+    cliente que usa o mesmo número pras duas coisas passa por aqui.
+
+    Best-effort: qualquer falha devolve False.
+    """
+    try:
+        from finance import apolice_leitor as _apl
+        if not _apl._e_seguros(pool, conta.id) or not _apl._cofre.configurado():
+            return False
+        quem = (getattr(membro, "nome", "") or "").strip() or "pelo WhatsApp"
+        r = _apl.ler_bytes(pool, conta.id, dados,
+                           _nome_do_pdf_wpp(media_ctype, legenda),
+                           origem="whatsapp", de=quem)
+        if not _apl.tomou(r):
+            return False
+        leitura = r["leitura"]
+        linhas = ["📄 Apólice lida e guardada!", ""]
+        linhas += [f"*{rot}:* {val}" for rot, val in _apl.campos_do_aviso(leitura)]
+        linhas += ["", _apl.rodape_do_aviso(leitura),
+                   "https://app.zaq-ia.com/painel/renovacoes"]
+        _responder_whatsapp(to, "\n".join(linhas))
+        return True
+    except Exception as e:  # noqa: BLE001
+        log.warning("apólice pelo WhatsApp falhou: %s: %s", type(e).__name__, e)
+        return False
+
+
 def processar_whatsapp(numero: str, nome: str | None, body: str,
                        media_url: str | None, media_ctype: str):
     """Roda em background: identifica o MEMBRO, checa a CONTA, agente, responde."""
@@ -1034,6 +1082,17 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                 except Exception:  # noqa: BLE001
                     pass  # trava falha gracefully, segue o fluxo normal
             elif "pdf" in ctype:
+                # A TERCEIRA PORTA DO LEITOR DE APÓLICE. Antes do caixa, porque
+                # depois dele já é tarde: em 21/09/2026 o corretor da Liberal
+                # mandou "APOLICE LUZIA AUREA.pdf" pra cá e o assistente marcou um
+                # LEMBRETE DE PAGAR PARCELA — leu o carnê da apólice e guardou o
+                # documento na gaveta do caixa, que é a gaveta errada.
+                #
+                # Ela só existia no Telegram e no webhook do chip. Este número é o
+                # terceiro caminho por onde um PDF entra, e era o único sem ela.
+                if _tentar_apolice_wpp(to, pool, membro, conta, dados,
+                                       media_ctype or "", body or ""):
+                    return
                 imagem_b64 = base64.b64encode(dados).decode("ascii")
                 media_type = "application/pdf"
                 texto = body or "Segue o comprovante para registrar."

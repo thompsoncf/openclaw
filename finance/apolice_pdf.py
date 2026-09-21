@@ -49,6 +49,9 @@ class Leitura:
     nao_achou: list = field(default_factory=list)  # chaves que ficaram vazias
     paginas: int = 0
     avisos: list = field(default_factory=list)
+    #: o papel tem as marcas de um seguro (SUSEP, apólice, segurado, vigência)?
+    #: É INDEPENDENTE de `reconhecida`: dá True na Azul, cujo layout eu não leio.
+    e_apolice: bool = False
 
     def ok(self) -> bool:
         """Tem o mínimo pro alerta existir: seguradora e fim da vigência."""
@@ -99,6 +102,81 @@ def _rotulo(texto: str, rotulo: str, ate: str = r"[^\n]+") -> tuple[str | None, 
         return None, None
     v = m.group(1).strip()
     return (v or None), m.group(0).strip()
+
+
+# --------------------------------------------------- é apólice? de quem?
+
+# AS MARCAS DE UM SEGURO, que independem de seguradora. Nasceram do caso de
+# 21/09/2026: o Cássio mandou "APOLICE LUZIA AUREA.pdf" (Azul/Porto, Jeep
+# Renegade) pro assistente e ele registrou um LEMBRETE DE PAGAR PARCELA — leu o
+# carnê e guardou a apólice na gaveta do caixa. O leitor até então só dizia "é
+# apólice" quando reconhecia o LAYOUT, e o único layout medido é o da Allianz.
+#
+# Reconhecer o layout e reconhecer o DOCUMENTO são perguntas diferentes: a
+# primeira decide quanto dá pra ler, a segunda decide em qual gaveta ele cai. Esta
+# é a segunda, e por isso é frouxa no rótulo e exigente no conjunto.
+_MARCAS_APOLICE = (
+    r"\bSUSEP\b",                                  # o registro do regulador
+    r"\bAP[ÓO]LICE\b",
+    r"PROPOSTA DE SEGURO|CERTIFICADO DE SEGURO|SEGURO AUTO|SEGURO DE AUTOM[ÓO]VEL",
+    r"\bSEGURAD[OA]\b|\bSEGURADORA\b|\bESTIPULANTE\b",
+    r"\bVIG[ÊE]NCIA\b",
+    r"\bPR[ÊE]MIO\b|\bFRANQUIA\b|\bCOBERTURAS?\b",
+)
+
+#: quantas marcas bastam. Três porque comprovante de Pix, boleto de fornecedor e
+#: nota fiscal não têm NENHUMA — o risco não é o falso positivo raro, é sequestrar
+#: o caixa de quem usa o mesmo número pras duas coisas.
+_MINIMO_MARCAS = 3
+
+
+def e_apolice(texto: str) -> bool:
+    """O documento é uma apólice/proposta de seguro? Sem olhar a seguradora."""
+    return sum(bool(re.search(m, texto, re.I)) for m in _MARCAS_APOLICE) >= _MINIMO_MARCAS
+
+
+# O NOME da seguradora é achável mesmo quando o layout não é. São coisas
+# separadas de propósito: dizer "Azul Seguros" no aviso do WhatsApp é o que faz a
+# pessoa reconhecer o documento de relance, e não custa nada ler errado — o campo
+# vai pro formulário de conferência, que é onde alguém confirma.
+_NOMES_SEGURADORA = (
+    (r"PORTO\s*SEGURO", "Porto Seguro"),
+    (r"\bAZUL\s+SEGUROS?\b", "Azul Seguros"),
+    (r"\bALLIANZ\b", "Allianz"),
+    (r"\bBRADESCO\s+SEGUROS?\b|\bBRADESCO\s+AUTO", "Bradesco Seguros"),
+    (r"\bTOKIO\s*MARINE\b", "Tokio Marine"),
+    (r"\bMAPFRE\b", "Mapfre"),
+    (r"\bSOMPO\b", "Sompo"),
+    (r"\bHDI\b", "HDI"),
+    (r"\bZURICH\b", "Zurich"),
+    (r"\bLIBERTY\b", "Liberty"),
+    (r"\bSUHAI\b", "Suhai"),
+    (r"\bALFA\s+SEGURADORA\b", "Alfa"),
+    (r"\bYELUM\b", "Yelum"),
+    (r"\bIT[AÁ]U\b", "Itaú"),
+    (r"\bSULAM[ÉE]RICA\b", "SulAmérica"),
+    (r"\bAKAD\b", "Akad"),
+    (r"\bEZZE\b", "Ezze"),
+)
+
+
+def nomear_seguradora(texto: str) -> tuple[str | None, str | None]:
+    """(nome, trecho) da seguradora citada mais no ALTO do papel. (None, None) se nenhuma.
+
+    Mais no alto e não primeira-da-tabela porque o cabeçalho é onde a emissora se
+    identifica; o resto do documento cita corretora, resseguradora e grupo. Ainda
+    assim isto é um PALPITE de nome — quando a apólice cita duas marcas do mesmo
+    grupo, ganha a que aparece antes, e quem corrige é a pessoa na conferência.
+    """
+    achados = []
+    for padrao, nome in _NOMES_SEGURADORA:
+        m = re.search(padrao, texto, re.I)
+        if m:
+            achados.append((m.start(), nome, m.group(0).strip()))
+    if not achados:
+        return None, None
+    achados.sort()
+    return achados[0][1], achados[0][2]
 
 
 # ---------------------------------------------------------------- os layouts
@@ -269,8 +347,21 @@ def ler_texto(texto: str, paginas: int = 0) -> Leitura:
         # layout desconhecido: tenta o genérico, e AVISA
         _allianz(texto, L)           # os rótulos genéricos são os mesmos por enquanto
         L.campos.pop("seguradora", None)
-        L.avisos.append("Não reconheci o layout desta seguradora — o que achei está "
-                        "preenchido, o resto ficou em branco. Confira tudo.")
+        # o NOME sai mesmo sem o layout, e é o que deixa o aviso reconhecível
+        nome, trecho = nomear_seguradora(texto)
+        if nome:
+            L.campos["seguradora"], L.trechos["seguradora"] = nome, trecho
+            L.avisos.append(f"Achei {nome} no papel, mas não conheço o layout dela — "
+                            "o que achei está preenchido, o resto ficou em branco. "
+                            "Confira tudo.")
+        else:
+            L.avisos.append("Não reconheci o layout desta seguradora — o que achei está "
+                            "preenchido, o resto ficou em branco. Confira tudo.")
+    # LAYOUT RECONHECIDO JÁ É A PROVA. Sem esta linha, a proposta Allianz enxuta
+    # (que não escreve SUSEP nem a palavra "apólice", por ser proposta) reprovava
+    # nas marcas e caía no caixa — o defeito que este arquivo existe pra evitar,
+    # com o único layout que eu sei ler.
+    L.e_apolice = L.reconhecida or e_apolice(texto)
     _checar(L)
     return L
 
@@ -318,7 +409,8 @@ def resumo_para_guardar(L: Leitura) -> dict:
             return str(v)
         return v
     return {
-        "seguradora": L.seguradora, "reconhecida": L.reconhecida, "paginas": L.paginas,
+        "seguradora": L.seguradora or L.campos.get("seguradora"),
+        "reconhecida": L.reconhecida, "e_apolice": L.e_apolice, "paginas": L.paginas,
         "campos": {k: s(v) for k, v in L.campos.items()},
         "checagens": [{"nome": n, "ok": ok, "detalhe": d} for n, ok, d in L.checagens],
         "nao_achou": L.nao_achou, "avisos": L.avisos,

@@ -237,7 +237,7 @@ def test_a_migracao_nasce_vazia_e_e_reversivel():
 def test_o_telegram_nao_ganha_tela_propria():
     """Duas entradas pro mesmo lugar; separar faria a pessoa procurar em dois
     cantos o documento que ela acabou de mandar."""
-    assert "do_telegram(pool, conta[0])" in PA
+    assert "sem_mensagem(pool, conta[0])" in PA
     assert '"fonte": "lida"' in PA and '"fonte": "msg"' in PA
     assert "já chegou no WhatsApp ou no Telegram" in PA
 
@@ -262,13 +262,13 @@ def test_a_porta_do_telegram_e_de_gerencia():
 
 
 def test_o_bot_do_telegram_nao_sequestra_o_comprovante():
-    """Layout não reconhecido volta pro caminho do caixa: quem usa o bot pra
-    comprovante não pode perder isso porque a conta virou corretora."""
+    """Documento sem as marcas de um seguro volta pro caminho do caixa: quem usa o
+    bot pra comprovante não pode perder isso porque a conta virou corretora."""
     import pathlib
     bot = (pathlib.Path(__file__).resolve().parent.parent
            / "telegram_bot.py").read_text(encoding="utf-8")
     assert "async def _tentar_apolice(" in bot
-    assert "not leitura.reconhecida" in bot
+    assert "if not _apl.tomou(r):" in bot
     assert "_e_seguros" in bot, "só corretora entra nesta porta"
     # e a falha da leitura devolve False, deixando o caminho antigo seguir
     corpo = bot[bot.index("async def _tentar_apolice("):]
@@ -285,3 +285,71 @@ def test_o_agente_sabe_o_que_e_documento_numa_corretora():
     assert "seguros_txt" in ag and "{seguros_txt}" in ag
     assert "NUNCA diga que leu" in ag
     assert "Nunca fale de festa" in ag
+
+
+# ────────── a terceira porta: o assistente no número da ZAQ (21/09/2026) ──────────
+
+
+def _app() -> str:
+    return (RAIZ / "app.py").read_text(encoding="utf-8")
+
+
+def test_o_assistente_tenta_apolice_antes_do_caixa():
+    """Depois do caixa já é tarde. Em 21/09/2026 a apólice da Azul mandada pra este
+    número virou lembrete de pagar parcela — leu o carnê e guardou o documento na
+    gaveta errada."""
+    app = _app()
+    i = app.index('elif "pdf" in ctype:')
+    trecho = app[i:i + 1600]
+    assert "_tentar_apolice_wpp(" in trecho
+    assert trecho.index("_tentar_apolice_wpp(") < trecho.index("imagem_b64 = base64")
+    assert "return" in trecho
+
+
+def test_a_porta_do_assistente_tem_o_mesmo_portao_do_telegram():
+    app = _app()
+    corpo = app[app.index("def _tentar_apolice_wpp("):]
+    corpo = corpo[:corpo.index("\ndef ")]
+    assert "_e_seguros" in corpo, "só corretora entra nesta porta"
+    assert "_cofre.configurado()" in corpo
+    assert "_apl.tomou(r)" in corpo
+
+
+def test_a_porta_do_assistente_devolve_o_comprovante_pro_caixa():
+    """O que NÃO pode quebrar: o comprovante de Pix de quem usa o mesmo número
+    pras duas coisas. Qualquer saída que não seja apólice devolve False."""
+    app = _app()
+    corpo = app[app.index("def _tentar_apolice_wpp("):]
+    corpo = corpo[:corpo.index("\ndef ")]
+    assert corpo.count("return False") >= 3
+    assert "except Exception" in corpo
+
+
+def test_a_porta_do_assistente_nao_cadastra_apolice():
+    app = _app()
+    corpo = app[app.index("def _tentar_apolice_wpp("):]
+    corpo = corpo[:corpo.index("\ndef ")]
+    assert "ler_bytes" in corpo
+    assert "salvar_apolice" not in corpo and "insert into apolices" not in corpo
+
+
+def test_as_tres_portas_dizem_a_mesma_coisa():
+    """Um só lugar monta o aviso; o que muda entre as portas é o negrito."""
+    app = _app()
+    bot = (pathlib.Path(__file__).resolve().parent.parent
+           / "telegram_bot.py").read_text(encoding="utf-8")
+    for texto in (app, bot):
+        assert "_apl.campos_do_aviso(leitura)" in texto
+        assert "_apl.rodape_do_aviso(leitura)" in texto
+
+
+def test_o_pre_cadastro_sem_mensagem_entra_na_lista_seja_qual_for_a_porta():
+    """Por origem, o que chega pelo assistente (origem 'whatsapp', sem mensagem)
+    ficaria invisível: fora de `sem_mensagem` e fora de `pdfs_do_whatsapp`."""
+    import pathlib as _p
+    leitor = (_p.Path(__file__).resolve().parent.parent
+              / "finance" / "apolice_leitor.py").read_text(encoding="utf-8")
+    corpo = leitor[leitor.index("def sem_mensagem("):]
+    corpo = corpo[:corpo.index("\ndef ")]
+    assert "where l.conta_id = %s and l.mensagem_id is null" in corpo
+    assert "l.origem = " not in corpo, "a origem não pode voltar a ser o filtro"

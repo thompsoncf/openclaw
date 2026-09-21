@@ -727,3 +727,182 @@ def test_nome_curto_nao_vira_trava_larga():
 def test_sem_lista_de_proibidos_nada_muda():
     """A lista é rede extra; sem ela o leitor tem que continuar igual."""
     assert ap.ler_texto(mapfre()).campos["nome"] == "FULANA DE TAL EXEMPLO"
+
+
+# ────────── o layout da Porto Seguro (21/09/2026) ──────────
+#
+# Medida na apólice de 15 páginas que o corretor mandou. Três coisas que só ela
+# tem, e cada uma quebrou uma suposição do módulo:
+#
+# 1. os cabeçalhos NÃO são em caixa alta — são "Dados cadastrais", "Dados do
+#    Corretor". O fechamento genérico de bloco não vê nenhum;
+# 2. o E-MAIL DO CORRETOR está no bloco do cliente, porque foi ele quem preencheu
+#    a proposta. Derrubar o bloco por isso jogaria fora o nome e o CPF certos;
+# 3. é MARCA LICENCIADA: "Itaú Seguro Auto" emitido pela Porto.
+#
+# Texto sintético com a estrutura do papel; nome, CPF e contatos inventados.
+
+PORTO_PAPEL = """Sua apólice chegou!
+Itaú Seguro Auto Compacto
+Fulana De Tal Exemplo
+Hyundai Hb20S Comfort Plus 1.6 16V Flex
+Válida até 13/08/2027
+Itaú Seguro Auto é uma marca licenciada para uso da Porto Seguro Companhia de Seguros
+Gerais. Apólice emitida pela Porto Seguro Companhia de Seguros Gerais.
+Dados Gerais
+  Dados da sua apólice
+  Apólice:  0531 09 2835980
+Item:  19
+  Classe de bônus:  0
+  Proposta:  20 33165281
+Data de emissão:  17/08/2026
+  Vigência:  Das 24h do dia 13/08/2026 às 24h do dia 13/08/2027 Processo SUSEP Nº.
+15414.900656/2016-13
+  Dados cadastrais
+  Nome do segurado(a):  Fulana De Tal Exemplo
+  CPF:  {cpf}
+Data de nasc.:  08/05/1990
+  Endereço:  R Das Flores, 725
+  Celular:  (86) 999990000
+E-mail:  corretor@exemplo.com
+  Dados do veículo segurado
+  Veículo:  Hyundai Hb20S Comfort Plus 1.6 16V Flex
+  Ano: 2015
+   Modelo: 2015
+Chassi:  9BHBG41DAFP458463
+  Placa:  PIH0G84
+Código Tabela FIPE:  151009
+Dados do Corretor
+  Nome:  Corretora Exemplo Ltda
+  Email: contato@corretoraexemplo.com.br
+Telefone:  (86) 32150747
+  Endereço: Av Senador Area Leao 2185
+Valores do seu seguro
+  Prêmio líquido
+R$ 4.567,46
+  IOF
+R$ 337,08
+  Total do Seguro
+R$ 4.904,54
+  Franquias do seu veículo
+Valor (R$)
+  Parabrisa
+R$ 240,00
+Dados do pagamento
+Parcela
+Valor
+Vencimento
+1
+R$ 490,45
+27/08/2026
+7
+R$ 490,45
+27/02/2027
+2
+R$ 490,45
+27/09/2026
+8
+R$ 490,45
+27/03/2027
+3
+R$ 490,45
+27/10/2026
+9
+R$ 490,45
+27/04/2027
+4
+R$ 490,45
+27/11/2026
+10
+R$ 490,49
+27/05/2027
+5
+R$ 490,45
+27/12/2026
+6
+R$ 490,45
+27/01/2027
+"""
+
+PORTO_CASA = ("Corretora Exemplo Ltda", "corretor@exemplo.com",
+              "contato@corretoraexemplo.com.br")
+
+
+def porto(**kw):
+    return PORTO_PAPEL.format(**dict({"cpf": CPF_OK}, **kw))
+
+
+def test_a_porto_e_reconhecida_pelo_layout():
+    L = ap.ler_texto(porto())
+    assert L.reconhecida and L.seguradora == "Porto Seguro" and L.e_apolice
+
+
+def test_a_segurada_sai_do_bloco_dela_com_cabecalho_em_title_case():
+    """Três blocos com "Nome" antes: a capa, o rodapé e o corretor."""
+    L = ap.ler_texto(porto())
+    assert L.campos["nome"] == "FULANA DE TAL EXEMPLO"
+    assert L.campos["cpf"] == _so_digitos(CPF_OK)
+    assert L.campos["endereco"] == "R Das Flores, 725"
+
+
+def test_o_email_do_corretor_no_bloco_do_cliente_some_sozinho():
+    """E NÃO derruba o bloco: o nome e o CPF ali são os certos. A Porto traz o
+    e-mail de quem preencheu a proposta, e isso é comum, não erro de bloco."""
+    L = ap.ler_texto(porto(), proibidos=PORTO_CASA)
+    assert "email" not in L.campos and "email" in L.nao_achou
+    assert L.campos["nome"] == "FULANA DE TAL EXEMPLO", "o resto do bloco fica"
+    assert L.campos["cpf"] == _so_digitos(CPF_OK)
+
+
+def test_nome_da_casa_continua_derrubando_o_bloco_inteiro():
+    """A distinção: contato pode ser do corretor; NOME diz de quem é o bloco."""
+    papel = porto().replace("Nome do segurado(a):  Fulana De Tal Exemplo",
+                            "Nome do segurado(a):  Corretora Exemplo Ltda")
+    L = ap.ler_texto(papel, proibidos=PORTO_CASA)
+    assert "nome" not in L.campos and "cpf" not in L.campos
+
+
+def test_o_dinheiro_da_porto_vem_em_duas_linhas():
+    L = ap.ler_texto(porto())
+    assert L.campos["premio_centavos"] == 456746
+    assert L.campos["iof_centavos"] == 33708
+    assert L.campos["total_centavos"] == 490454
+
+
+def test_as_dez_parcelas_fecham_o_total():
+    """Na Porto a tabela é número / VALOR / data; na Mapfre é número / data /
+    valor. Detalhe pequeno e silencioso — a soma é quem denuncia."""
+    L = ap.ler_texto(porto())
+    assert L.campos["parcelas"] == 10
+    assert sum(L.campos["parcelas_centavos"]) == L.campos["total_centavos"]
+    assert L.campos["dia_vencimento"] == 27
+
+
+def test_a_franquia_do_para_brisa_nao_vira_a_do_casco():
+    """Numa apólice de Indenização Integral não existe franquia de casco, e a
+    primeira linha da tabela é o para-brisa. Ficar vazio é a resposta certa —
+    R$ 240,00 num campo de franquia de casco é número errado com cara de certo."""
+    L = ap.ler_texto(porto())
+    assert "franquia_centavos" not in L.campos
+    assert "franquia_centavos" in L.nao_achou
+
+
+def test_marca_licenciada_preenche_a_emissora_e_avisa():
+    """Quem emite é a Porto; o corretor pode registrar pela marca. O leitor não
+    escolhe calado."""
+    L = ap.ler_texto(porto())
+    assert L.campos["seguradora"] == "Porto Seguro"
+    assert any("Itaú Seguro Auto" in a and "troque o campo" in a for a in L.avisos)
+
+
+def test_a_porto_so_deixa_em_branco_o_que_o_papel_nao_tem():
+    L = ap.ler_texto(porto())
+    assert set(L.nao_achou) <= {"franquia_centavos"}, L.nao_achou
+    assert all(ok for _n, ok, _d in L.checagens)
+
+
+def test_as_outras_seguradoras_nao_regridem():
+    """A Porto entrou depois da Mapfre em `_LAYOUTS`; reconhecimento novo não pode
+    roubar papel alheio."""
+    assert ap.ler_texto(mapfre()).seguradora == "Mapfre"
+    assert ap.ler_texto(papel()).seguradora == "Allianz"

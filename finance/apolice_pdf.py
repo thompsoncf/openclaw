@@ -402,11 +402,25 @@ def _conferir_o_segurado(L: Leitura, chaves: tuple[str, ...]) -> None:
     exatamente o tipo de dado que alguém confirma sem olhar.
     """
     c, t = L.campos, L.trechos
+
+    # CONTATO DA CORRETORA NO BLOCO DO CLIENTE É COMUM, e não é erro de bloco: a
+    # apólice Porto Seguro traz o e-mail do corretor em "Dados cadastrais", porque
+    # foi ele quem preencheu a proposta. Derrubar o bloco por causa disso jogaria
+    # fora o nome e o CPF CERTOS da segurada. Some só o campo.
+    for chave in ("email", "telefone"):
+        if c.get(chave) and _e_a_propria_casa(str(c[chave]), L.proibidos):
+            c.pop(chave, None)
+            t.pop(chave, None)
+            if chave not in L.nao_achou:
+                L.nao_achou.append(chave)
+
+    # NOME E DOCUMENTO são outra coisa: são eles que dizem DE QUEM é o bloco. Se
+    # um deles é da casa ou da seguradora, o bloco inteiro é de outra gente.
     culpado, quem = "", ""
     if _e_a_propria_seguradora(c.get("nome", "")):
         culpado, quem = c["nome"], "a própria seguradora"
     else:
-        for chave in ("nome", "email", "cpf", "telefone"):
+        for chave in ("nome", "cpf"):
             if c.get(chave) and _e_a_propria_casa(str(c[chave]), L.proibidos):
                 culpado, quem = str(c[chave]), "da própria corretora"
                 break
@@ -515,6 +529,121 @@ def _mapfre(texto: str, L: Leitura) -> None:
     c["situacao"] = "vigente" if c.get("numero_apolice") else "proposta"
 
 
+def _porto(texto: str, L: Leitura) -> None:
+    """A apólice Porto Seguro Auto — medida em 21/09/2026, na de 15 páginas que o
+    corretor mandou (apólice 0531 09 2835980, emitida 17/08/2026).
+
+    TRÊS COISAS QUE SÓ ELA TEM, e cada uma quebrou uma suposição do módulo:
+
+    1. OS CABEÇALHOS NÃO SÃO EM CAIXA ALTA — são "Dados cadastrais", "Dados do
+       Corretor", "Dados do veículo segurado". O fechamento genérico de bloco
+       (linha em caixa alta) não vê nenhum, e por isso este layout recorta os
+       blocos pelo nome, como o da Mapfre.
+    2. O E-MAIL DO CORRETOR ESTÁ NO BLOCO DO CLIENTE. Não é erro de leitura: foi
+       ele quem preencheu a proposta. Quem resolve é `_conferir_o_segurado`, que
+       apaga o campo sem derrubar o nome e o CPF certos.
+    3. É MARCA LICENCIADA: "Itaú Seguro Auto" emitido pela Porto Seguro. Quem
+       emite é a Porto; quem o corretor chama pelo nome pode ser a outra. O leitor
+       preenche a emissora e AVISA, em vez de escolher calado.
+    """
+    c, t = L.campos, L.trechos
+    c["seguradora"], c["ramo"] = "Porto Seguro", "auto"
+
+    def bloco(cabecalho: str, ate: tuple[str, ...]) -> str:
+        i = texto.find(cabecalho)
+        if i < 0:
+            return ""
+        resto = texto[i + len(cabecalho):]
+        fins = [resto.find(x) for x in ate if resto.find(x) > 0]
+        return resto[:min(fins)] if fins else resto
+
+    def pega(chave, rotulo, onde=None, conv=lambda v: v):
+        v, tr = _rotulo(onde if onde is not None else texto, rotulo)
+        val = conv(v) if v is not None else None
+        if val is None:
+            L.nao_achou.append(chave)
+            return None
+        c[chave], t[chave] = val, tr
+        return val
+
+    dados = bloco("Dados da sua apólice", ("Dados cadastrais", "Dados do"))
+    pega("numero_apolice", "Apólice", dados, lambda v: _digitos(v) or None)
+    pega("numero_proposta", "Proposta", dados, lambda v: _digitos(v) or None)
+    pega("classe_bonus", "Classe de bônus", dados, lambda v: v.strip()[:4])
+    # "Das 24h do dia 13/08/2026 às 24h do dia 13/08/2027" — duas datas na linha
+    vig, tr = _rotulo(dados or texto, "Vigência")
+    datas = re.findall(r"\d{2}/\d{2}/\d{4}", vig or "")
+    if len(datas) >= 2:
+        c["vigencia_inicio"], c["vigencia_fim"] = _data(datas[0]), _data(datas[1])
+        t["vigencia_fim"] = tr
+    else:
+        L.nao_achou.append("vigencia_fim")
+
+    seg = bloco("Dados cadastrais", ("Dados do veículo", "Dados do Corretor"))
+    pega("nome", "Nome do segurado(a)", seg,
+         lambda v: re.sub(r"\s+", " ", v).strip().upper() or None)
+    pega("cpf", "CPF", seg, lambda v: _digitos(v) or None)
+    pega("endereco", "Endereço", seg)
+    pega("telefone", "Celular", seg, lambda v: _digitos(v) or None)
+    pega("email", "E-mail", seg, lambda v: v.strip().lower() or None)
+    nasc = _rotulo(seg, "Data de nasc.")[0]
+    if _data(nasc):
+        c["condutor_idade"] = (date.today() - _data(nasc)).days // 365
+        t["condutor_idade"] = f"Data de nasc.: {nasc}"
+
+    _conferir_o_segurado(L, ("nome", "cpf", "telefone", "email", "endereco"))
+
+    vei = bloco("Dados do veículo segurado", ("Dados do Corretor", "Valores do seu"))
+    pega("modelo", "Veículo", vei, lambda v: re.sub(r"\s+", " ", v).strip() or None)
+    pega("ano", "Ano", vei, lambda v: _digitos(v)[:4] or None)
+    pega("placa", "Placa", vei, lambda v: v.strip().upper().replace("-", "") or None)
+    pega("chassi", "Chassi", vei, lambda v: v.strip().upper() or None)
+    pega("fipe", "Código Tabela FIPE", vei)
+
+    # o dinheiro vem em DUAS LINHAS: o rótulo, depois "R$ valor". Mesma âncora da
+    # Allianz, e pelo mesmo motivo — tabela não põe dois-pontos.
+    for chave, rotulo in (("premio_centavos", "Prêmio líquido"),
+                          ("iof_centavos", "IOF"),
+                          ("total_centavos", "Total do Seguro")):
+        m = re.search(re.escape(rotulo) + r"[^\n]*\n\s*R\$ ?(\d{1,3}(?:\.\d{3})*,\d{2})", texto)
+        if m:
+            c[chave], t[chave] = _dinheiro(m.group(1)), m.group(0).strip()
+        else:
+            L.nao_achou.append(chave)
+
+    # as parcelas: tabela de duas colunas, na ordem número / valor / data — a
+    # Mapfre usa número / data / valor. Detalhe pequeno e silencioso.
+    par = re.findall(r"\n(\d{1,2})\nR\$ ?(\d{1,3}(?:\.\d{3})*,\d{2})\n(\d{2}/\d{2}/\d{4})",
+                     texto)
+    if par:
+        c["parcelas"] = max(int(n) for n, _v, _d in par)
+        c["parcelas_centavos"] = [_dinheiro(v) for _n, v, _d in par]
+        primeira = min(par, key=lambda x: int(x[0]))
+        c["dia_vencimento"] = int(primeira[2][:2])
+        t["dia_vencimento"] = f"1ª parcela vence {primeira[2]}"
+    else:
+        L.nao_achou += ["parcelas", "dia_vencimento"]
+
+    # A FRANQUIA DO CASCO NÃO É LIDA de propósito. O que a Porto lista em
+    # "Franquias do seu veículo" é vidro, farol e lanterna; numa apólice de
+    # Indenização Integral não existe franquia de casco, e pegar a primeira linha
+    # da tabela devolveria R$ 240,00 do para-brisa como se fosse ela. Foi o que
+    # aconteceu na leitura de 14:52 daquele dia.
+    L.nao_achou.append("franquia_centavos")
+
+    if re.search(r"marca licenciada para uso da Porto Seguro", texto, re.I):
+        # `[uú]` porque a palavra é "Itaú" — o 'u' É o acentuado. Sem isto o
+        # aviso saía sem o nome da marca, que é justamente o que ele tem de dizer.
+        marca = re.search(r"^\s*((?:It[aá][uú]|[A-ZÀ-Ú][\w]+)[^\n]{0,40}Seguro\s+Auto[^\n]*)",
+                          texto, re.M)
+        L.avisos.append(
+            "Esta apólice é EMITIDA pela Porto Seguro"
+            + (f' com a marca "{marca.group(1).strip()}"' if marca else " com marca licenciada")
+            + ". Preenchi a emissora; se você registra pela marca, troque o campo.")
+
+    c["situacao"] = "vigente" if c.get("numero_apolice") else "proposta"
+
+
 _LAYOUTS = (
     # (nome, teste de reconhecimento, leitor)
     ("Allianz", lambda t: bool(re.search(r"\bALLIANZ\b", t, re.I)) and "Nº da Proposta" in t, _allianz),
@@ -522,6 +651,11 @@ _LAYOUTS = (
     # rótulos juntos separam a apólice dela de um e-mail que só a mencione.
     ("Mapfre", lambda t: bool(re.search(r"\bMAPFRE\b", t, re.I))
                          and "Nº Apólice" in t and "DADOS DO SEGURADO" in t, _mapfre),
+    # a Porto se identifica no rodapé da capa; os dois rótulos juntos separam a
+    # apólice dela de um e-mail que só a mencione.
+    ("Porto Seguro", lambda t: bool(re.search(r"PORTO\s*SEGURO", t, re.I))
+                               and "Nome do segurado(a)" in t
+                               and "Dados da sua apólice" in t, _porto),
 )
 
 

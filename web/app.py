@@ -908,6 +908,11 @@ def _tentar_apolice_wpp(to: str, pool, membro, conta, dados: bytes,
                            origem="whatsapp", de=_quem_mandou(membro, numero))
         if not _apl.tomou(r):
             return False
+        if r.get("repetida"):
+            # JÁ CONHEÇO ESTE DOCUMENTO. Assumir e avisar é o certo: devolver pro
+            # caixa faria a apólice repetida virar despesa.
+            _responder_whatsapp(to, _apl.aviso_de_repetida(r["repetida"]))
+            return True
         leitura = r["leitura"]
         linhas = ["📄 Apólice lida e guardada!", ""]
         linhas += [f"*{rot}:* {val}" for rot, val in _apl.campos_do_aviso(leitura)]

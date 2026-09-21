@@ -71,6 +71,7 @@ def pool():
         c.execute((MIG / "289_apolice_remetentes.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "304_apolice_lida.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "305_apolice_lida_telegram.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "306_apolice_lida_hash.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -401,3 +402,104 @@ def test_a_seguradora_achada_sem_layout_e_guardada(limpo, monkeypatch):
     itens = al.sem_mensagem(limpo, CONTA)
     assert itens[0]["seguradora"] == "Azul Seguros"
     assert "Azul Seguros" in al.resumo(itens[0])
+
+
+# ────────── 6. a mesma apólice duas vezes (21/09/2026) ──────────
+#
+# Pedido do dono: "faz a checagem de duplicidade caso mande o mesma apolice nao
+# salvar e avisar". O `mensagem_id` já impedia reler a mesma MENSAGEM, mas as três
+# portas de conversa gravam `mensagem_id` nulo — reenviar o arquivo criava uma
+# linha nova a cada vez. Ele mandou o PDF da Mapfre três vezes testando, e ficaram
+# três pré-cadastros do mesmo documento na fila. Conferir em duplicata é o caminho
+# mais curto pra cadastrar em duplicata.
+
+
+def test_o_mesmo_arquivo_nao_vira_dois_pre_cadastros(limpo, monkeypatch):
+    _finge(monkeypatch, leitura=_leitura())
+    a = al.ler_bytes(limpo, CONTA, b"%PDF igual", "A.pdf", origem="whatsapp", de="Cássio")
+    b = al.ler_bytes(limpo, CONTA, b"%PDF igual", "outro-nome.pdf",
+                     origem="whatsapp", de="Cássio")
+    assert a.get("repetida") is None and b.get("repetida")
+    with limpo.connection() as c:
+        assert c.execute("select count(*) from apolice_lida").fetchone()[0] == 1
+
+
+def test_a_chave_e_o_conteudo_e_nao_o_nome(limpo, monkeypatch):
+    """O assistente não recebe nome de arquivo do WhatsApp, e o corretor renomeia."""
+    _finge(monkeypatch, leitura=_leitura())
+    al.ler_bytes(limpo, CONTA, b"%PDF x", "apolice-recebida.pdf")
+    r = al.ler_bytes(limpo, CONTA, b"%PDF x", "APOLICE MARIA 2026.pdf")
+    assert r["repetida"]["onde"] == "fila"
+
+
+def test_arquivo_diferente_continua_entrando(limpo, monkeypatch):
+    _finge(monkeypatch, leitura=_leitura())
+    al.ler_bytes(limpo, CONTA, b"%PDF um", "A.pdf")
+    al.ler_bytes(limpo, CONTA, b"%PDF dois", "B.pdf")
+    with limpo.connection() as c:
+        assert c.execute("select count(*) from apolice_lida").fetchone()[0] == 2
+
+
+def test_a_repetida_nao_sobe_nada_pro_cofre(limpo, monkeypatch):
+    """Não é só não gravar: reenviar dez vezes não pode encher o cofre."""
+    subiu = []
+    _finge(monkeypatch, leitura=_leitura())
+    monkeypatch.setattr(al, "_guardar",
+                        lambda cid, b, n: (subiu.append(n), (f"apolice/{cid}/x.pdf", len(b)))[1])
+    al.ler_bytes(limpo, CONTA, b"%PDF x", "A.pdf")
+    al.ler_bytes(limpo, CONTA, b"%PDF x", "A.pdf")
+    assert subiu == ["A.pdf"], "a segunda passada não toca no cofre"
+
+
+def test_o_numero_da_apolice_pega_o_pdf_reemitido(limpo, monkeypatch):
+    """O hash não pega: a seguradora reemite, os bytes mudam, a apólice é a mesma."""
+    from datetime import date
+    _finge(monkeypatch, leitura=_leitura(campos={"numero_apolice": "0531092835980"}))
+    with limpo.connection() as c:
+        c.execute("""insert into apolices (conta_id, seguradora, ramo, vigencia_fim,
+                                           situacao, numero_apolice)
+                     values (%s,'Porto Seguro','auto',date '2027-08-13','vigente',
+                             '0531 09 2835980')""", (CONTA,))
+        c.commit()
+    r = al.ler_bytes(limpo, CONTA, b"%PDF reemitido", "A.pdf")
+    assert r["repetida"]["onde"] == "carteira"
+    with limpo.connection() as c:
+        assert c.execute("select count(*) from apolice_lida").fetchone()[0] == 0
+
+
+def test_o_numero_compara_so_os_digitos(limpo):
+    """'0531 09 2835980' na carteira e '0531092835980' no papel são a mesma."""
+    with limpo.connection() as c:
+        c.execute("""insert into apolices (conta_id, seguradora, ramo, vigencia_fim,
+                                           situacao, numero_apolice)
+                     values (%s,'Porto Seguro','auto',date '2027-08-13','vigente',
+                             '0531 09 2835980')""", (CONTA,))
+        c.commit()
+    assert al.ja_conheco(limpo, CONTA, "", "0531092835980")["onde"] == "carteira"
+    assert al.ja_conheco(limpo, CONTA, "", "999") is None
+
+
+def test_a_conta_vizinha_nao_e_afetada(limpo, monkeypatch):
+    """A trava é por conta: duas corretoras podem ter o mesmo documento."""
+    _finge(monkeypatch, leitura=_leitura())
+    al.ler_bytes(limpo, CONTA, b"%PDF x", "A.pdf")
+    r = al.ler_bytes(limpo, OUTRA, b"%PDF x", "A.pdf")
+    assert r.get("repetida") is None
+
+
+def test_a_porta_assume_a_repetida_em_vez_de_devolver_pro_caixa(limpo, monkeypatch):
+    """Se `tomou` dissesse não, a apólice repetida viraria despesa no caixa."""
+    _finge(monkeypatch, leitura=_leitura())
+    al.ler_bytes(limpo, CONTA, b"%PDF x", "A.pdf")
+    r = al.ler_bytes(limpo, CONTA, b"%PDF x", "A.pdf")
+    assert al.tomou(r) is True
+
+
+def test_o_recado_da_repetida_diz_onde_ela_esta():
+    from datetime import datetime, timezone
+    q = datetime(2026, 9, 21, 17, 8, tzinfo=timezone.utc)
+    fila = al.aviso_de_repetida({"onde": "fila", "quando": q,
+                                 "resumo": "Mapfre · MARIA · vence 10/09/2027"})
+    assert "já li" in fila and "21/09" in fila and "Renovações" in fila
+    carteira = al.aviso_de_repetida({"onde": "carteira", "quando": q, "resumo": "Porto · JOSE"})
+    assert "já tenho cadastrada" in carteira and "Renovações" not in carteira

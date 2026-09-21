@@ -179,6 +179,55 @@ def nomear_seguradora(texto: str) -> tuple[str | None, str | None]:
     return achados[0][1], achados[0][2]
 
 
+# ------------------------------------------------- o bloco de QUEM comprou
+
+# ONDE COMEÇAM OS DADOS DO SEGURADO. A apólice traz VÁRIOS blocos com os mesmos
+# rótulos — a seguradora se identifica, a corretora se identifica, e só depois vem
+# o cliente. Sem âncora, o primeiro "Nome:" do papel é o da SEGURADORA.
+#
+# Medido em 21/09/2026, na apólice Mapfre de 11 páginas que o corretor mandou: o
+# genérico devolveu segurado "MAPFRE SEGUROS GERAIS S/A", CNPJ 06.324.020/0001-02
+# e endereço "AV DAS NACOES UNIDAS, 14.261" — a sede da seguradora em São Paulo,
+# com cara de dado bom. Salvar aquilo criaria um CLIENTE chamado Mapfre.
+#
+# A âncora da Allianz (`SUAS INFORMAÇÕES`) nasceu do mesmo defeito, em 18/09, com
+# o e-mail do corretor. Era específica demais: valia pra um layout só.
+_ANCORAS_SEGURADO = (
+    r"SUAS\s+INFORMA[ÇC][ÕO]ES",
+    r"DADOS\s+D[OA]\s+SEGURAD[OA]",
+    r"DADOS\s+D[OA]\s+CLIENTE",
+    r"IDENTIFICA[ÇC][ÃA]O\s+D[OA]\s+SEGURAD[OA]",
+    r"\bSEGURAD[OA]\b(?!RA)",          # o rótulo solto, nunca "SEGURADORA"
+)
+
+
+def _bloco_do_segurado(texto: str) -> tuple[str | None, str | None]:
+    """O pedaço do papel onde estão os dados de QUEM comprou. (None, None) se não achar.
+
+    Devolve o trecho a partir da âncora que aparecer MAIS CEDO — âncora tardia
+    pegaria o bloco do beneficiário ou o das condições gerais.
+    """
+    achados = []
+    for padrao in _ANCORAS_SEGURADO:
+        m = re.search(padrao, texto, re.I)
+        if m:
+            achados.append((m.start(), m.group(0)))
+    if not achados:
+        return None, None
+    achados.sort()
+    return texto[achados[0][0]:], achados[0][1]
+
+
+def _e_a_propria_seguradora(nome: str) -> bool:
+    """O nome lido é o da seguradora, e não o do cliente?
+
+    O teste é o nome de uma seguradora CONHECIDA dentro dele — e não "parece
+    empresa": segurado pessoa jurídica existe, e recusar todo LTDA jogaria fora
+    metade das apólices de frota.
+    """
+    return any(re.search(p, nome or "", re.I) for p, _ in _NOMES_SEGURADORA)
+
+
 # ---------------------------------------------------------------- os layouts
 
 def _allianz(texto: str, L: Leitura) -> None:
@@ -246,25 +295,46 @@ def _allianz(texto: str, L: Leitura) -> None:
         c["parcelas_centavos"] = [_dinheiro(v) for _, v in parcelas]
     # o papel diz só "Vencimento: 5" — sem "Dia de". Medido, não suposto.
     pega("dia_vencimento", "Vencimento", lambda v: int(_digitos(v)[:2]) if _digitos(v) else None)
-    # O SEGURADO — lido só DEPOIS de "SUAS INFORMAÇÕES". O bloco do corretor vem
-    # antes no papel e tem "E-mail:" também: sem este corte o primeiro casamento
-    # devolvia o e-mail da F.F. Apolinário como se fosse o da segurada. Rótulo
-    # igual em bloco diferente é o jeito mais silencioso de errar.
-    i = texto.find("SUAS INFORMAÇÕES")
-    seg = texto[i:] if i >= 0 else texto
-    def pega_seg(chave, rotulo, conv=lambda v: v):
-        v, tr = _rotulo(seg, rotulo)
-        val = conv(v) if v is not None else None
-        if val is None:
-            L.nao_achou.append(chave)
-            return None
-        c[chave], t[chave] = val, tr
-        return val
-    pega_seg("nome", "Nome", lambda v: re.sub(r"\s+", " ", v).strip().upper() or None)
-    pega_seg("cpf", "CPF/CNPJ", lambda v: _digitos(v) or None)
-    pega_seg("telefone", "Tel", lambda v: _digitos(v) or None)
-    pega_seg("email", "E-mail", lambda v: v.strip().lower() or None)
-    pega_seg("endereco", "Endereço")
+    # O SEGURADO — lido só DEPOIS da âncora do bloco dele. Rótulo igual em bloco
+    # diferente é o jeito mais silencioso de errar: sem o corte, "Nome:" devolve a
+    # SEGURADORA e "E-mail:" devolve o do corretor.
+    DO_SEGURADO = ("nome", "cpf", "telefone", "email", "endereco")
+    seg, ancora = _bloco_do_segurado(texto)
+    if seg is None:
+        # SEM ÂNCORA NÃO SE LÊ O SEGURADO. Em branco a pessoa digita; errado ela
+        # confirma sem ver, e o cadastro ganha um cliente que não existe.
+        L.nao_achou.extend(DO_SEGURADO)
+        L.avisos.append("Não achei onde começam os dados do segurado neste papel — "
+                        "deixei nome, CPF, telefone e endereço em branco de propósito. "
+                        "Preencha olhando o PDF.")
+        seg = None
+    if seg is not None:
+        def pega_seg(chave, rotulo, conv=lambda v: v):
+            v, tr = _rotulo(seg, rotulo)
+            val = conv(v) if v is not None else None
+            if val is None:
+                L.nao_achou.append(chave)
+                return None
+            c[chave], t[chave] = val, tr
+            return val
+        pega_seg("nome", "Nome", lambda v: re.sub(r"\s+", " ", v).strip().upper() or None)
+        pega_seg("cpf", "CPF/CNPJ", lambda v: _digitos(v) or None)
+        pega_seg("telefone", "Tel", lambda v: _digitos(v) or None)
+        pega_seg("email", "E-mail", lambda v: v.strip().lower() or None)
+        pega_seg("endereco", "Endereço")
+        # A ÚLTIMA CONFERÊNCIA, porque a âncora sozinha não basta: se o que saiu
+        # foi o nome de uma seguradora, o bloco inteiro é de outra gente, e
+        # CPF/telefone/endereço vieram junto. Vai tudo fora — não só o nome.
+        if _e_a_propria_seguradora(c.get("nome", "")):
+            lido = c["nome"]
+            for chave in DO_SEGURADO:
+                c.pop(chave, None)
+                t.pop(chave, None)
+                if chave not in L.nao_achou:
+                    L.nao_achou.append(chave)
+            L.avisos.append(f"O nome que saiu do papel foi \"{lido}\" — é a própria "
+                            "seguradora, não o cliente. Apaguei os dados do segurado "
+                            "pra não cadastrar errado; preencha olhando o PDF.")
     # o condutor (só o que muda o preço na renovação)
     pega("condutor_idade", "Idade", lambda v: int(_digitos(v)) if _digitos(v) else None)
     pega("condutor_estado_civil", "Estado Civil")

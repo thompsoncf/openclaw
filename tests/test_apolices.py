@@ -77,6 +77,7 @@ def pool():
         c.execute((MIG / "287_apolice_perdida.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "289_apolice_remetentes.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "304_apolice_lida.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "305_apolice_lida_telegram.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()

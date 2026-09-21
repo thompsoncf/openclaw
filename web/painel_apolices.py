@@ -417,21 +417,37 @@ def pdfs_do_whatsapp(request: Request):
     if not gerencia:
         return JSONResponse({"ok": False, "erro": "só o dono e o gestor cadastram apólice"})
     pool = get_pool()
-    itens = ap.pdfs_do_whatsapp(pool, conta[0])
+    from finance import apolice_leitor as _apl
+    itens = [
+        {"fonte": "msg", "id": i["mensagem_id"], "de": i["de"], "nome": i["nome"],
+         "quando": i["quando"], "kb": round(i["bytes"] / 1024) if i["bytes"] else 0,
+         "parece": i["parece_apolice"], "ja": i["ja_cadastrada"],
+         "lida": i["lida"], "resumo": _apl_resumo(i), "erro": i["erro_leitura"]}
+        for i in ap.pdfs_do_whatsapp(pool, conta[0])]
+    # A SEGUNDA PORTA (305): o que o corretor mandou pelo Telegram entra na MESMA
+    # lista. São duas entradas pro mesmo lugar, e separar em duas telas faria a
+    # pessoa procurar em dois cantos o documento que ela acabou de mandar.
+    itens += [
+        {"fonte": "lida", "id": i["lida_id"], "de": i["de"] + " · Telegram",
+         "nome": i["nome"], "quando": i["quando"],
+         "kb": round(i["bytes"] / 1024) if i["bytes"] else 0,
+         "parece": True, "ja": False, "lida": True,
+         "resumo": _apl_resumo(i), "erro": i["erro_leitura"]}
+        for i in _apl.do_telegram(pool, conta[0])]
+    itens.sort(key=lambda i: i["quando"] or datetime.min.replace(tzinfo=timezone.utc),
+               reverse=True)
+    for i in itens:
+        i["quando"] = _quando_txt(i["quando"])
     # a mesma consulta dá os dois números de que a tela precisa pro estado vazio:
     # quantos remetentes existem e quantos estão liberados
     quem = ap.quem_mandou_pdf(pool, conta[0])
     return JSONResponse({
         "ok": True,
-        "remetentes": len(quem),
+        # o Telegram conta como porta aberta: com documento vindo de lá, a lista
+        # existe mesmo sem ninguém liberado no WhatsApp
+        "remetentes": len(quem) + sum(1 for i in itens if i["fonte"] == "lida"),
         "liberados": sum(1 for q in quem if q["liberado"]),
-        "itens": [
-            {"id": i["mensagem_id"], "de": i["de"], "nome": i["nome"],
-             "quando": _quando_txt(i["quando"]), "kb": round(i["bytes"] / 1024) if i["bytes"] else 0,
-             "parece": i["parece_apolice"], "ja": i["ja_cadastrada"],
-             # o que o leitor automático já sabe deste documento
-             "lida": i["lida"], "resumo": _apl_resumo(i), "erro": i["erro_leitura"]}
-            for i in itens]})
+        "itens": itens})
 
 
 @router.get("/painel/renovacoes/remetentes")
@@ -513,6 +529,42 @@ def _quando_txt(quando) -> str:
         return quando.strftime("%d/%m")
 
 
+@router.post("/painel/renovacoes/lida/{lida_id}")
+def abrir_pre_cadastro(request: Request, lida_id: int):
+    """A conferência de um pré-cadastro, pelo id dele.
+
+    É o caminho do que chegou pelo Telegram, que não tem mensagem pra procurar.
+    Nada é baixado: a leitura já está guardada."""
+    conta, gerencia, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "sessão expirada"}, status_code=401)
+    if not gerencia:
+        return JSONResponse({"ok": False, "erro": "só o dono e o gestor cadastram apólice"})
+    from finance import apolice_leitor as _apl
+    ja = _apl.por_id(get_pool(), conta[0], lida_id)
+    if not ja:
+        return JSONResponse({"ok": False, "erro": "não achei este documento"})
+    if ja["erro"]:
+        return JSONResponse({"ok": False, "erro": ja["erro"]})
+    return _conferencia_em_json(ja["form"] or {}, _conferir_guardado(ja, {"lida": lida_id}))
+
+
+def _conferir_guardado(ja: dict, origem: dict) -> dict:
+    """A conferência montada a partir do que o leitor já guardou. Mesmo formato do
+    `_conferir_de`, que monta a partir de uma leitura recém-feita."""
+    lido = ja["lido"] or {}
+    return {
+        "seguradora": ja["seguradora"] or "", "reconhecida": ja["reconhecida"],
+        "paginas": lido.get("paginas") or 0,
+        "checagens": _checagens_de(lido),
+        "avisos": lido.get("avisos") or [], "nao_achou": lido.get("nao_achou") or [],
+        "n_campos": len(lido.get("campos") or {}), "ok": True,
+        "pdf_nome": ja["pdf_nome"] or "apolice.pdf", "pdf_caminho": ja["pdf_caminho"],
+        "pdf_bytes": ja["pdf_bytes"] or 0,
+        "pdf_lido": dict(lido, origem=origem),
+    }
+
+
 @router.post("/painel/renovacoes/whatsapp/{mensagem_id}")
 def ler_pdf_do_whatsapp(request: Request, mensagem_id: int):
     """Busca UM PDF no CDN do WhatsApp e cai na mesma conferência do PDF solto.
@@ -537,19 +589,8 @@ def ler_pdf_do_whatsapp(request: Request, mensagem_id: int):
     from finance import apolice_leitor as _apl
     ja = _apl.uma(get_pool(), conta[0], mensagem_id)
     if ja and not ja["erro"] and ja["pdf_caminho"]:
-        conferir = {
-            "seguradora": ja["seguradora"] or "", "reconhecida": ja["reconhecida"],
-            "paginas": (ja["lido"] or {}).get("paginas") or 0,
-            "checagens": [tuple(x) if isinstance(x, list) else x
-                          for x in _checagens_de(ja["lido"])],
-            "avisos": (ja["lido"] or {}).get("avisos") or [],
-            "nao_achou": (ja["lido"] or {}).get("nao_achou") or [],
-            "n_campos": len((ja["lido"] or {}).get("campos") or {}), "ok": True,
-            "pdf_nome": ja["pdf_nome"] or "apolice.pdf", "pdf_caminho": ja["pdf_caminho"],
-            "pdf_bytes": ja["pdf_bytes"] or 0,
-            "pdf_lido": dict(ja["lido"] or {}, origem={"whatsapp_msg": mensagem_id}),
-        }
-        return _conferencia_em_json(ja["form"] or {}, conferir)
+        return _conferencia_em_json(
+            ja["form"] or {}, _conferir_guardado(ja, {"whatsapp_msg": mensagem_id}))
     if ja and ja["erro"]:
         return JSONResponse({"ok": False, "erro": ja["erro"]})
     achado = ap.ref_do_pdf(get_pool(), conta[0], mensagem_id)
@@ -1254,7 +1295,7 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
            bloco fica escondido enquanto não houver nada — bloco vazio dizendo
            "nenhum documento" é ruído no caminho principal. #}
         <div class="rn-wpp" id="rn-wpp" hidden>
-          <div class="cab"><span class="t">…ou um que já chegou no WhatsApp</span>
+          <div class="cab"><span class="t">…ou um que já chegou no WhatsApp ou no Telegram</span>
             <span class="s" id="rn-wpp-sub"></span></div>
           <div class="lista" id="rn-wpp-lista"></div>
           <div class="vazio" id="rn-wpp-vazio" hidden></div>
@@ -1594,7 +1635,7 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
           // documento já cadastrado, ou que o WhatsApp apagou antes de eu ler:
           // clicar não levaria a lugar nenhum
           if(it.ja || it.erro){ b.disabled = true; }
-          else { b.onclick = function(){ window.rnDoWhats(it.id); }; }
+          else { b.onclick = function(){ window.rnDoWhats(it.fonte, it.id); }; }
           lista.appendChild(b);
         });
         var sub = el('rn-wpp-sub');
@@ -1602,10 +1643,13 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
       });
   }
 
-  window.rnDoWhats = function(id){
+  window.rnDoWhats = function(fonte, id){
     erro('');
     passo('lendo', 'abrindo o documento');
-    zapFetch('/painel/renovacoes/whatsapp/' + id, { method: 'POST', credentials: 'same-origin' }).then(function(d){if(!d){passo('pdf', '1 de 2 · o documento');
+    // duas portas, dois endereços: a do WhatsApp ainda pode precisar baixar o
+    // arquivo; a do pré-cadastro (Telegram, ou WhatsApp já lido) só devolve
+    var url = (fonte === 'lida' ? '/painel/renovacoes/lida/' : '/painel/renovacoes/whatsapp/') + id;
+    zapFetch(url, { method: 'POST', credentials: 'same-origin' }).then(function(d){if(!d){passo('pdf', '1 de 2 · o documento');
         erro('a busca não respondeu. Tente de novo.');return;}
         if(!d || !d.ok){
           passo('pdf', '1 de 2 · o documento');

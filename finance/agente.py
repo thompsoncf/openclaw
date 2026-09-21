@@ -17,6 +17,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from finance import agente_visita as _av
+from finance import raio_x_perfil as _rxp
 from finance import servicos_catalogo as scat
 
 _log = logging.getLogger("agente")
@@ -365,6 +366,31 @@ def _atender(pool, conta_id, conversa_id):
             visita_txt = ("\n\nVISITA AO ESPAÇO: a empresa recebe visita, mas você NÃO pode "
                           "marcar agora. Se o cliente pedir, diga que vai passar pra equipe "
                           "confirmar o horário — nunca ofereça nem confirme dia e hora.")
+        # O NICHO MUDA O QUE UM DOCUMENTO SIGNIFICA (regra 6). O agente só enxerga
+        # TEXTO: um anexo chega pra ele como a palavra "Documento", e sem instrução
+        # ele responde em cima dela como se fosse uma frase do cliente. Numa
+        # corretora isso é pior que inútil — o PDF quase sempre é apólice, proposta
+        # ou endosso, e o pior desfecho possível é a IA falar de cobertura, prêmio
+        # ou vencimento de um papel que ela NÃO leu.
+        #
+        # O leitor automático (migração 304) é quem lê o documento de verdade, e
+        # ele não conversa: deixa o pré-cadastro pronto pra corretora conferir.
+        seguros_txt = ""
+        _slug_n = c.execute("""select coalesce(n.slug,'') from contas ct
+                                 left join nichos n on n.id = ct.nicho_id
+                                where ct.id=%s""", (conta_id,)).fetchone()
+        if _rxp.perfil_por_nicho(_slug_n[0] if _slug_n else "") == "seguros":
+            seguros_txt = (
+                "\n\nESTA EMPRESA É UMA CORRETORA DE SEGUROS. Nunca fale de festa, "
+                "evento, convidados ou data de festa — esse vocabulário não existe aqui.\n"
+                "DOCUMENTO ANEXADO: quando a mensagem do cliente for só '📄 Documento' "
+                "(ou parecida), ele MANDOU UM ARQUIVO e você NÃO consegue lê-lo. "
+                "Confirme que chegou, diga que a equipe vai conferir e retornar, e siga "
+                "a conversa. NUNCA diga que leu, nem cite seguradora, cobertura, prêmio, "
+                "franquia, placa ou data de vencimento a partir de um anexo — nada disso "
+                "está na sua frente, e errar esse número custa a renovação do cliente.\n"
+                "RENOVAÇÃO: se o cliente perguntar quando vence a apólice dele, não "
+                "arrisque a data. Diga que vai confirmar com a equipe.")
         tom = "informal e próximo" if cfg["tom"] == "informal" else "formal e profissional"
         system = (
             "Você é o atendente virtual da empresa, no WhatsApp. Fala em português do "
@@ -418,7 +444,7 @@ def _atender(pool, conta_id, conversa_id):
                 "com a equipe e NÃO feche nada por conta própria.")
 
         pedir = (
-            f"Conversa com {lead_empresa}:\n{historico}{gemeo_nota}{visita_txt}\n\n"
+            f"Conversa com {lead_empresa}:\n{historico}{gemeo_nota}{visita_txt}{seguros_txt}\n\n"
             "Responda a última mensagem do cliente. Retorne APENAS JSON:\n"
             '{"acao":"responder|orcamento|visita","resposta":"texto pra mandar ao cliente",'
             '"visita":{"data":"AAAA-MM-DD","hora":"HH:MM"},'

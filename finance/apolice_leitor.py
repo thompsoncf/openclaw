@@ -27,16 +27,22 @@ sobe o PDF pro cofre. O prazo real de tudo isto é esse.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
 import uuid
+
+from zoneinfo import ZoneInfo
 
 from finance import apolice_pdf as apdf
 from finance import comprovantes as _cofre
 from finance import raio_x_perfil as rxp
 
 _log = logging.getLogger("apolice_leitor")
+
+#: o recado sai no WhatsApp de quem está em Teresina, não em UTC
+_TZ = ZoneInfo("America/Sao_Paulo")
 
 # Quantos PDFs uma passada olha. A passada roda por mensagem que chega, então o
 # normal é achar um; o teto existe pro caso de o serviço ter ficado fora do ar e
@@ -101,12 +107,13 @@ def _guardar(conta_id: int, conteudo: bytes, nome: str) -> tuple[str, int]:
 
 def _gravar(c, conta_id: int, mensagem_id, *, nome: str, caminho: str = "",
             bytes_: int = 0, leitura=None, erro: str = "",
-            origem: str = "whatsapp", de: str = "") -> int | None:
+            origem: str = "whatsapp", de: str = "", pdf_hash: str = "") -> int | None:
     """Uma linha por documento. `on conflict do nothing`: duas entregas da mesma
     mensagem do WhatsApp não viram duas leituras, e a primeira é a que vale.
 
     Devolve o id da linha (ou None quando o conflito cortou a inserção)."""
     campos = {"conta_id": conta_id, "mensagem_id": mensagem_id, "pdf_nome": nome[:120],
+              "pdf_hash": pdf_hash or None,
               "pdf_caminho": caminho or None, "pdf_bytes": bytes_ or None,
               "erro": (erro or "")[:300] or None,
               "origem": origem, "de": (de or "")[:120] or None}
@@ -166,6 +173,65 @@ def _a_propria_casa(pool, conta_id: int) -> tuple[str, ...]:
     return tuple(v for v in fora if len((v or "").strip()) >= 5)
 
 
+def _hash(conteudo: bytes) -> str:
+    """A identidade do documento. É o CONTEÚDO e não o nome: o assistente não
+    recebe nome de arquivo do WhatsApp (vira "apolice-recebida.pdf") e o corretor
+    renomeia à vontade."""
+    return hashlib.sha256(conteudo).hexdigest()
+
+
+def ja_conheco(pool, conta_id: int, pdf_hash: str, numero_apolice: str = "") -> dict | None:
+    """Este documento já passou por aqui? Devolve o que se sabe dele, ou None.
+
+    Pedido do dono em 21/09/2026: "faz a checagem de duplicidade caso mande o mesma
+    apolice nao salvar e avisar". Sem isto, reenviar o mesmo arquivo criava um
+    pré-cadastro novo a cada vez — e três linhas iguais na fila de conferência são
+    o caminho mais curto pra cadastrar a mesma apólice três vezes.
+
+    Duas perguntas, nesta ordem:
+
+    1. o MESMO ARQUIVO já foi lido (`pdf_hash`)? É a pergunta barata e exata.
+    2. o número da apólice já está na CARTEIRA? Pega o caso que o hash não pega:
+       a seguradora reemite o PDF, os bytes mudam, a apólice é a mesma.
+
+    Devolve `{onde, quando, resumo, lida_id?}`. `onde` é 'fila' (lida, esperando
+    conferência) ou 'carteira' (já cadastrada) — as duas coisas pedem recados
+    diferentes.
+    """
+    with pool.connection() as c:
+        if pdf_hash:
+            r = c.execute(
+                """select id, criado_em, coalesce(seguradora,''), coalesce(segurado,''),
+                          vigencia_fim
+                     from apolice_lida
+                    where conta_id=%s and pdf_hash=%s order by criado_em limit 1""",
+                (conta_id, pdf_hash)).fetchone()
+            if r:
+                return {"onde": "fila", "lida_id": r[0], "quando": r[1],
+                        "resumo": _linha(r[2], r[3], r[4])}
+        num = "".join(ch for ch in (numero_apolice or "") if ch.isdigit())
+        if num:
+            r = c.execute(
+                """select id, criado_em, coalesce(seguradora,''),
+                          coalesce((select nome from clientes where id=a.cliente_id),''),
+                          vigencia_fim
+                     from apolices a
+                    where conta_id=%s and numero_apolice is not null
+                      and regexp_replace(numero_apolice,'\\D','','g') = %s
+                    order by criado_em limit 1""", (conta_id, num)).fetchone()
+            if r:
+                return {"onde": "carteira", "apolice_id": r[0], "quando": r[1],
+                        "resumo": _linha(r[2], r[3], r[4])}
+    return None
+
+
+def _linha(seguradora: str, quem: str, vence) -> str:
+    partes = [p for p in (seguradora, quem) if p]
+    if vence:
+        partes.append("vence " + vence.strftime("%d/%m/%Y"))
+    return " · ".join(partes)
+
+
 def ler_bytes(pool, conta_id: int, conteudo: bytes, nome: str, *,
               origem: str = "whatsapp", de: str = "", mensagem_id=None) -> dict:
     """Lê UM PDF que já está na mão e deixa o pré-cadastro pronto.
@@ -174,8 +240,18 @@ def ler_bytes(pool, conta_id: int, conteudo: bytes, nome: str, *,
     Telegram chega aqui com os bytes que o membro subiu. Nenhuma das duas cadastra
     apólice — as duas param na conferência.
 
-    Devolve {ok, id, leitura, erro}.
+    NÃO SALVA DUAS VEZES. O mesmo arquivo reenviado devolve `repetida` com o que já
+    se sabe dele, e nada novo entra no banco — nem linha, nem cópia no cofre. Quem
+    chamou usa isso pra AVISAR em vez de fingir que leu de novo.
+
+    Devolve {ok, id, leitura, erro, repetida?}.
     """
+    pdf_hash = _hash(conteudo)
+    ja = ja_conheco(pool, conta_id, pdf_hash)
+    if ja:
+        return {"ok": True, "id": ja.get("lida_id"), "leitura": None,
+                "erro": "", "repetida": ja}
+
     erro, leitura, caminho, tam = "", None, "", 0
     try:
         leitura = apdf.ler(conteudo, _a_propria_casa(pool, conta_id))
@@ -186,9 +262,22 @@ def ler_bytes(pool, conta_id: int, conteudo: bytes, nome: str, *,
         _log.info("leitura de apólice falhou (conta %s, %s): %s: %s",
                   conta_id, origem, type(e).__name__, e)
         erro = "não consegui ler este PDF"
+
+    # a SEGUNDA pergunta, que só dá pra fazer depois de ler: o número desta
+    # apólice já está na carteira? Pega o caso que o hash não pega — a seguradora
+    # reemite o PDF, os bytes mudam, a apólice é a mesma. O documento já subiu pro
+    # cofre aqui; deixar subir é mais barato que ler duas vezes, e o cofre
+    # desduplica pelo caminho.
+    if leitura is not None:
+        ja = ja_conheco(pool, conta_id, "", leitura.campos.get("numero_apolice") or "")
+        if ja:
+            return {"ok": True, "id": None, "leitura": leitura, "erro": "",
+                    "repetida": ja}
+
     with pool.connection() as c:
         lida_id = _gravar(c, conta_id, mensagem_id, nome=nome, caminho=caminho,
-                          bytes_=tam, leitura=leitura, erro=erro, origem=origem, de=de)
+                          bytes_=tam, leitura=leitura, erro=erro, origem=origem,
+                          de=de, pdf_hash=pdf_hash)
         c.commit()
     return {"ok": not erro, "id": lida_id, "leitura": leitura, "erro": erro}
 
@@ -206,8 +295,30 @@ def tomou(r: dict) -> bool:
     Documento que não tem as marcas continua caindo no caixa — é o comprovante de
     Pix de quem usa o mesmo número pras duas coisas, e ele não pode parar.
     """
+    if r.get("repetida"):
+        return True          # é apólice sim, e eu já a conheço — o recado é outro
     L = r.get("leitura")
     return bool(r.get("ok") and L is not None and L.e_apolice)
+
+
+def aviso_de_repetida(ja: dict) -> str:
+    """O recado quando o documento já é conhecido. Diz ONDE ele está, porque as
+    duas situações pedem coisas diferentes da pessoa: na fila falta conferir, na
+    carteira não falta nada."""
+    quando = ""
+    try:
+        quando = " em " + ja["quando"].astimezone(_TZ).strftime("%d/%m")
+    except Exception:  # noqa: BLE001
+        pass
+    resumo = ja.get("resumo") or ""
+    if ja.get("onde") == "carteira":
+        return ("📄 Essa apólice eu já tenho cadastrada"
+                + (f": {resumo}." if resumo else ".")
+                + " Não salvei de novo.")
+    return ("📄 Essa apólice eu já li" + quando
+            + (f": {resumo}." if resumo else ".")
+            + " Ela continua esperando conferência em Renovações — não salvei de novo.\n"
+            "https://app.zaq-ia.com/painel/renovacoes")
 
 
 def campos_do_aviso(leitura) -> list[tuple[str, str]]:

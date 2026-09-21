@@ -455,6 +455,11 @@ async def _tentar_apolice(update: Update, dados: bytes, nome: str) -> bool:
                                     origem="telegram", de=quem)
         if not _apl.tomou(r):
             return False
+        if r.get("repetida"):
+            # JÁ CONHEÇO ESTE DOCUMENTO. Assumir e avisar é o certo: devolver pro
+            # caixa faria a apólice repetida virar despesa.
+            await update.message.reply_text(_apl.aviso_de_repetida(r["repetida"]))
+            return True
         leitura = r["leitura"]
         linhas = ["📄 Apólice lida e guardada!", ""]
         linhas += [f"*{rot}:* {val}" for rot, val in _apl.campos_do_aviso(leitura)]

@@ -51,6 +51,18 @@ def cliente(monkeypatch):
                        criado_em timestamptz not null default now(), criado_por bigint)""")
         c.execute("""create unique index ux_apolice_remetentes
                        on apolice_remetentes (conta_id, contato_ref)""")
+        # o bastante pra faixa do topo contar: o pré-cadastro e a apólice que o
+        # apaga da conta (a marca é o CAMINHO DO PDF, não um marcador novo)
+        c.execute("""create table apolice_lida (id bigserial primary key,
+                       conta_id bigint, mensagem_id bigint, pdf_nome text,
+                       pdf_caminho text, pdf_bytes bigint, seguradora text,
+                       reconhecida boolean default false, segurado text,
+                       numero_proposta text, vigencia_fim date, form jsonb,
+                       lido jsonb, erro text, origem text default 'whatsapp',
+                       de text, criado_em timestamptz not null default now())""")
+        c.execute("""create table apolices (id bigserial primary key, conta_id bigint,
+                       seguradora text, ramo text, vigencia_fim date, situacao text,
+                       pdf_caminho text)""")
         c.execute("insert into contas values (%s,'Liberal Neto')", (CONTA,))
         cv = c.execute("""insert into conversas (conta_id, contato_ref, contato_nome)
                           values (%s,%s,'Cássio Liberal Seguros') returning id""",
@@ -189,3 +201,68 @@ def test_membro_sem_nome_cai_no_numero_da_conversa():
     class M:
         nome = ""
     assert _quem_mandou(M(), "5586994020683") == "(86) 99402-0683"
+
+
+# ────────── a faixa do que está esperando conferência (21/09/2026) ──────────
+#
+# O WhatsApp avisava "está esperando você conferir em Renovações" e a tela não
+# dizia nada: a lista mora DENTRO da janela "+ nova apólice", que é um fluxo de
+# CRIAR. O dono recebeu a mensagem, abriu a tela e respondeu "n vi no sistema".
+
+
+def _lida(c, **kw):
+    campos = dict(conta_id=CONTA, origem="whatsapp", pdf_nome="A.pdf",
+                  pdf_caminho="apolice/37/x.pdf", erro=None)
+    campos.update(kw)
+    cols = ", ".join(campos)
+    with c.pool.connection() as cx:
+        cx.execute(f"insert into apolice_lida ({cols}) values "
+                   f"({', '.join(['%s'] * len(campos))})", tuple(campos.values()))
+        cx.commit()
+
+
+def test_a_faixa_conta_o_que_espera(cliente):
+    from finance import apolices as _ap
+    _lida(cliente, pdf_caminho="apolice/37/a.pdf")
+    _lida(cliente, pdf_caminho="apolice/37/b.pdf")
+    assert _ap.esperando_conferencia(cliente.pool, CONTA) == 2
+
+
+def test_leitura_que_falhou_nao_entra_na_conta(cliente):
+    """Clicar nela não leva a lugar nenhum — a janela desabilita o item."""
+    from finance import apolices as _ap
+    _lida(cliente, pdf_caminho=None, erro="o WhatsApp já apagou este arquivo")
+    assert _ap.esperando_conferencia(cliente.pool, CONTA) == 0
+
+
+def test_depois_de_cadastrada_a_faixa_desce(cliente):
+    from finance import apolices as _ap
+    _lida(cliente, pdf_caminho="apolice/37/a.pdf")
+    with cliente.pool.connection() as cx:
+        cx.execute("""insert into apolices (conta_id, seguradora, ramo, vigencia_fim,
+                                            situacao, pdf_caminho)
+                      values (%s,'Mapfre','auto',date '2027-09-10','vigente',
+                              'apolice/37/a.pdf')""", (CONTA,))
+        cx.commit()
+    assert _ap.esperando_conferencia(cliente.pool, CONTA) == 0
+
+
+def test_o_que_veio_de_mensagem_do_chip_nao_entra(cliente):
+    """Esse tem caminho próprio na lista (`pdfs_do_whatsapp`); contá-lo aqui faria
+    a faixa prometer mais do que a janela mostra."""
+    from finance import apolices as _ap
+    _lida(cliente, pdf_caminho="apolice/37/a.pdf", mensagem_id=99)
+    assert _ap.esperando_conferencia(cliente.pool, CONTA) == 0
+
+
+def test_a_faixa_aparece_na_tela_e_abre_a_janela():
+    """Ela fica FORA das abas, porque é a única coisa desta tela com alguém
+    esperando do outro lado."""
+    import pathlib
+    pa = (pathlib.Path(__file__).resolve().parent.parent
+          / "web" / "painel_apolices.py").read_text(encoding="utf-8")
+    assert "{% if esperando %}" in pa
+    assert 'class="rn-espera" onclick="rnAbrir(event)"' in pa
+    assert "esperando=ap.esperando_conferencia(pool, conta_id)" in pa
+    # o botão global é width:100%; sem o próprio a faixa estica torto
+    assert ".rn-espera{" in pa and "margin:0 0 .9rem" in pa

@@ -713,6 +713,32 @@ def tirar_remetente(pool, conta_id: int, contato_ref: str) -> None:
         c.commit()
 
 
+def esperando_conferencia(pool, conta_id: int, *, dias: int = 30) -> int:
+    """Quantos documentos o leitor já leu e ninguém conferiu ainda.
+
+    É o número da faixa no topo de Renovações. Conta só o que dá pra CONFERIR:
+    leitura sem erro, com o PDF guardado, e que ainda não virou apólice — o mesmo
+    recorte de `apolice_leitor.sem_mensagem`, que é a lista pra onde a faixa leva.
+    Contar diferente da lista faria a faixa prometer o que a janela não mostra.
+
+    Nasceu em 21/09/2026: o WhatsApp avisava "está esperando você conferir em
+    Renovações" e a tela não dizia nada — a lista mora dentro da janela de
+    cadastrar, e quem chega pela mensagem não abre uma janela de CRIAR.
+    """
+    with pool.connection() as c:
+        r = c.execute(
+            """select count(*) from apolice_lida l
+                where l.conta_id = %s and l.mensagem_id is null
+                  and coalesce(l.erro,'') = '' and l.pdf_caminho is not null
+                  and l.criado_em > now() - make_interval(days => %s)
+                  and not exists (select 1 from apolices a
+                                   where a.conta_id = l.conta_id
+                                     and a.pdf_caminho is not null
+                                     and a.pdf_caminho = l.pdf_caminho)""",
+            (conta_id, int(dias))).fetchone()
+    return int(r[0] or 0)
+
+
 def quem_mandou_pdf(pool, conta_id: int, *, dias: int = 90,
                     limite: int = 30) -> list[dict]:
     """Quem andou mandando PDF pro número da empresa, com quantos e quando.

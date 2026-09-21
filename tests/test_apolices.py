@@ -76,6 +76,7 @@ def pool():
         c.execute((MIG / "286_apolices_pdf.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "287_apolice_perdida.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "289_apolice_remetentes.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "304_apolice_lida.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -84,6 +85,7 @@ def pool():
 @pytest.fixture
 def limpo(pool):
     with pool.connection() as c:
+        c.execute("delete from apolice_lida")
         c.execute("delete from apolice_remetentes")
         c.execute("delete from apolices")
         c.execute("delete from seguros_comissao")

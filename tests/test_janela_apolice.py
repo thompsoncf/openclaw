@@ -138,9 +138,11 @@ def test_a_lista_do_whatsapp_nao_cadastra_nada_sozinha():
 def test_o_pdf_do_whatsapp_passa_pela_mesma_conferencia_e_pelo_mesmo_salvar():
     """Dois caminhos de entrada, uma saída: `_conferir_de` + `_leitura_em_json`."""
     assert PA.count("def _conferir_de(") == 1
-    assert PA.count("def _leitura_em_json(") == 1
-    assert PA.count("_leitura_em_json(") == 3    # a definição e os dois caminhos
+    # uma montagem só da resposta, pros TRÊS caminhos que chegam na conferência:
+    # o PDF solto, o do WhatsApp lido na hora, e o que o leitor automático já leu
+    assert PA.count("def _conferencia_em_json(") == 1
     assert PA.count('_env.get_template("renovacoes_conf")') == 1
+    assert PA.count("_conferencia_em_json(") == 3
 
 
 def test_o_escopo_do_documento_e_da_conta():

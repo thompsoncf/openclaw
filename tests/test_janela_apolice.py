@@ -475,3 +475,94 @@ def test_reler_recarrega_a_lista_e_a_faixa():
     assert "wppLida = false" in corpo and "wppCarregar()" in corpo
     assert "faixaAtualizar(d.esperando)" in corpo
     assert "bt.disabled = true" in corpo, "sem travar o botão, dois cliques relêem duas vezes"
+
+
+# ────────── a linha da carteira ganha ações (22/09/2026) ──────────
+#
+# "la no final coloca uma seta com o botão igual tem na aba serviços no funil pra
+# aparecer os comandos editar, excluir e demais funções" — e, no mesmo pedido, "a
+# página ficar tamanho do raio-x" e "colocar a placa do Vicente que não aparece".
+
+
+def test_a_largura_da_pagina_vem_do_token():
+    """O painel tinha CINCO larguras (960, 1040, 1120, 1180 e o Raio-X sem teto).
+    A resposta pra "ficar do tamanho do Raio-X" não é acertar uma tela: é ter um
+    lugar só onde a largura é decidida."""
+    import pathlib
+    tema = (pathlib.Path(__file__).resolve().parent.parent
+            / "web" / "tema.py").read_text(encoding="utf-8")
+    assert "--pag:" in tema
+    assert "max-width:var(--pag" in PA
+    assert "max-width:1040px" not in PA, "o número solto voltou"
+
+
+def test_a_placa_vem_antes_do_modelo():
+    """O modelo da Ranger do Vicente tem 58 caracteres, e a placa ia no fim —
+    aparecia onde ninguém olha. Placa é como a corretora procura um carro."""
+    import pathlib
+    pa_py = (pathlib.Path(__file__).resolve().parent.parent
+             / "web" / "painel_apolices.py").read_text(encoding="utf-8")
+    i = pa_py.index("bem_txt = \" · \".join(")
+    trecho = pa_py[i:i + 200]
+    assert trecho.index('bem.get("placa")') < trecho.index('bem.get("modelo")')
+
+
+def test_a_placa_do_card_nao_depende_do_modelo():
+    """Estava aninhada dentro do `if modelo`: apólice sem modelo cadastrado
+    deixava de mostrar a placa junto."""
+    assert "{%- if a.bem.placa %}<b>{{ a.bem.placa }}</b> · {% endif -%}" in PA
+
+
+def test_a_linha_tem_o_menu_de_acoes():
+    assert 'onclick="rnMenu(event,{{ a.id }},this)"' in PA
+    assert "window.rnMenu = function(ev, id, bt)" in PA
+    assert ".rn-menu-bt{" in PA and ".rn-menu{" in PA
+
+
+def test_o_menu_abre_um_por_vez_e_fecha_no_esc():
+    """Dois menus abertos disputam a mesma tela — o mesmo cuidado do funil."""
+    corpo = PA[PA.index("var _menuLinha = null;"):]
+    corpo = corpo[:corpo.index("window.rnEditar")]
+    assert "function fecharMenuLinha()" in corpo
+    assert "ev.key === 'Escape'" in corpo
+    assert "if(jaEra) return;" in corpo, "clicar de novo no mesmo botão fecha"
+
+
+def test_editar_manda_o_apolice_id():
+    """Sem o campo, salvar CRIA outra apólice em vez de atualizar a que está
+    aberta — `salvar_apolice` decide por ele desde a 278."""
+    assert '<input type="hidden" name="apolice_id" value="">' in PA
+    assert '"apolice_id": str(a["id"])' in PA
+
+
+def test_voltar_pra_lista_zera_o_apolice_id():
+    """Um id esquecido faz o PRÓXIMO cadastro sobrescrever a apólice de outro."""
+    corpo = PA[PA.index("window.rnParaLista = function()"):]
+    corpo = corpo[:corpo.index("\n  window.")]
+    assert "aid.value = ''" in corpo
+
+
+def test_editar_limpa_o_formulario_antes():
+    """Na conferência campo vazio não apaga o padrão; numa EDIÇÃO é o contrário —
+    manter o valor de um documento conferido antes encheria o formulário com dado
+    de outro cliente."""
+    corpo = PA[PA.index("function preencher(d, editando)"):]
+    corpo = corpo[:corpo.index("\n  window.rnLerPdf")]
+    assert "if(editando){ try { form.reset(); }" in corpo
+    assert "editando ? 'Salvar alterações'" in corpo
+
+
+def test_excluir_e_de_gerencia_e_oferece_desfazer():
+    corpo = corpo_de("excluir_apolice")
+    assert "if not gerencia:" in corpo
+    assert "ap.excluir(" in corpo and "ap.voltar_apolice(" in corpo
+    js = PA[PA.index("window.rnExcluir = function(id, tr)"):]
+    js = js[:js.index("\n  // o contador da aba")]
+    assert "desfazer" in js and "f2.append('desfazer', '1')" in js
+
+
+def test_excluir_atualiza_o_contador_da_aba():
+    """"Carteira (4)" continuar dizendo 4 depois de excluir é a tela mentindo."""
+    corpo = PA[PA.index("function contarCarteira(n)"):]
+    corpo = corpo[:corpo.index("\n  window.rnReler")]
+    assert "rn-conta-carteira" in corpo, "escrever no <a> apagaria a palavra Carteira"

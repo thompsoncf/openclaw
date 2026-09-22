@@ -73,6 +73,7 @@ def pool():
         c.execute((MIG / "305_apolice_lida_telegram.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "306_apolice_lida_hash.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "307_apolice_lida_descartada.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "308_apolice_excluida.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()

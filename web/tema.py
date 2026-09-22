@@ -52,6 +52,15 @@ _TOKENS = """
   --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 
+  /* ---- a largura da página ----
+     Um token porque em 22/09/2026 o painel tinha CINCO larguras diferentes: 960
+     (Serviços e o topo), 1040 (Renovações), 1120 (o cadastro), 1180 (o Cockpit) e
+     o Raio-X sem teto nenhum, do tamanho do próprio conteúdo. O dono reparou
+     trocando de tela — "a página ficar tamanho do raio-x" —, e a resposta certa
+     pra isso não é acertar uma tela: é ter um lugar só onde a largura é decidida.
+     1180 é a maior que já existia, e é o que o Raio-X pede no desktop. */
+  --pag:1180px;
+
   /* ---- apelidos: o vocabulário que o código já usa ---- */
   --card:var(--surface); --card-2:var(--bg-2); --card2:var(--bg-2);
   --borda:var(--line); --bord:var(--line);

@@ -14,6 +14,7 @@ O que este arquivo segura, em ordem de importância:
 """
 import json
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -876,3 +877,111 @@ def test_a_leitura_guardada_sai_carimbada(limpo, monkeypatch):
     with limpo.connection() as c:
         lida_id = c.execute("select id from apolice_lida").fetchone()[0]
     assert al.esta_velha(al.por_id(limpo, CONTA, lida_id)["lido"]) is False
+
+
+# ────────── 11. a fila se põe em dia sozinha (22/09/2026) ──────────
+#
+# Abrir cada documento já o relia (#808), e não bastou. O dono abriu quatro dos
+# seis; os dois que ele não abriu continuaram na lista com a leitura de antes do
+# leitor novo — um deles dizendo só "HDI" — e ele perguntou por que aquelas não
+# tinham layout. "Porque você não clicou nelas" não é resposta.
+
+
+def _pre(pool, monkeypatch, nome, versao=None):
+    """Um pré-cadastro na fila, com o carimbo do leitor que se quiser."""
+    _finge(monkeypatch, leitura=_leitura(campos={"nome": nome}))
+    r = al.ler_bytes(pool, CONTA, b"%PDF " + nome.encode(), nome + ".pdf",
+                     origem="telegram", de="Cássio")
+    if versao is not None:
+        with pool.connection() as c:
+            c.execute("update apolice_lida set lido = jsonb_set(lido,'{versao}',to_jsonb(%s::int))"
+                      " where id=%s", (versao, r["id"]))
+            c.commit()
+    return r["id"]
+
+
+def test_velhas_traz_so_quem_ficou_pra_tras(limpo, monkeypatch):
+    atrasada = _pre(limpo, monkeypatch, "ATRASADA", versao=apdf.VERSAO - 1)
+    _pre(limpo, monkeypatch, "EM DIA", versao=apdf.VERSAO)
+    assert al.velhas(limpo, CONTA) == [atrasada]
+
+
+def test_leitura_sem_carimbo_nenhum_conta_como_velha(limpo, monkeypatch):
+    """As que estavam na fila antes de o carimbo existir."""
+    lid = _pre(limpo, monkeypatch, "SEM CARIMBO")
+    with limpo.connection() as c:
+        c.execute("update apolice_lida set lido = lido - 'versao' where id=%s", (lid,))
+        c.commit()
+    assert al.velhas(limpo, CONTA) == [lid]
+
+
+def test_velhas_nao_pergunta_ao_cofre(limpo, monkeypatch):
+    """A pergunta é feita no BANCO: baixar trinta PDFs pra descobrir que vinte e
+    oito estavam em dia seria pagar rede por nada."""
+    _pre(limpo, monkeypatch, "QUALQUER", versao=apdf.VERSAO - 1)
+
+    def explode(*a, **k):
+        raise AssertionError("velhas() não pode tocar no cofre")
+
+    monkeypatch.setattr(al._cofre, "ler", explode)
+    assert len(al.velhas(limpo, CONTA)) == 1
+
+
+def test_a_varredura_so_rele_quem_esta_atrasado(limpo, monkeypatch):
+    atrasada = _pre(limpo, monkeypatch, "ATRASADA", versao=apdf.VERSAO - 1)
+    _pre(limpo, monkeypatch, "EM DIA", versao=apdf.VERSAO)
+    relidas = []
+    monkeypatch.setattr(al, "reler", lambda p, c, i: relidas.append(i) or {"ok": True})
+    assert al.reler_a_fila(limpo, CONTA, so_velhas=True) == {"relidas": 1, "falhas": 0}
+    assert relidas == [atrasada]
+
+
+def test_a_varredura_inteira_continua_pegando_todas(limpo, monkeypatch):
+    """O botão "reler com o leitor de hoje" não olha carimbo: quem clica está
+    dizendo que quer refazer."""
+    _pre(limpo, monkeypatch, "UMA", versao=apdf.VERSAO)
+    _pre(limpo, monkeypatch, "OUTRA", versao=apdf.VERSAO)
+    monkeypatch.setattr(al, "reler", lambda p, c, i: {"ok": True})
+    assert al.reler_a_fila(limpo, CONTA)["relidas"] == 2
+
+
+def test_a_varredura_de_fundo_diz_quantas_e_nao_segura_a_tela(limpo, monkeypatch):
+    _pre(limpo, monkeypatch, "ATRASADA", versao=apdf.VERSAO - 1)
+    _pre(limpo, monkeypatch, "OUTRA ATRASADA", versao=apdf.VERSAO - 1)
+    monkeypatch.setattr(al, "reler", lambda p, c, i: {"ok": True})
+    assert al.varrer_em_segundo_plano(limpo, CONTA) == 2
+    for _ in range(100):                      # a thread termina sozinha
+        if CONTA not in al._VARRENDO:
+            break
+        time.sleep(0.02)
+    assert al.velhas(limpo, CONTA) == [] or CONTA not in al._VARRENDO
+
+
+def test_fila_em_dia_nao_levanta_varredura(limpo, monkeypatch):
+    _pre(limpo, monkeypatch, "EM DIA", versao=apdf.VERSAO)
+    assert al.varrer_em_segundo_plano(limpo, CONTA) == 0
+
+
+def test_abrir_a_janela_duas_vezes_nao_vira_dois_mutiroes(limpo, monkeypatch):
+    _pre(limpo, monkeypatch, "ATRASADA", versao=apdf.VERSAO - 1)
+    al._VARRENDO.add(CONTA)
+    try:
+        assert al.varrer_em_segundo_plano(limpo, CONTA) == 0
+    finally:
+        al._VARRENDO.discard(CONTA)
+
+
+def test_varredura_que_estoura_nao_derruba_a_tela(limpo, monkeypatch):
+    """Best-effort como o resto do leitor: a próxima abertura tenta de novo."""
+    _pre(limpo, monkeypatch, "ATRASADA", versao=apdf.VERSAO - 1)
+
+    def explode(*a, **k):
+        raise RuntimeError("o cofre caiu")
+
+    monkeypatch.setattr(al, "reler_a_fila", explode)
+    assert al.varrer_em_segundo_plano(limpo, CONTA) == 1
+    for _ in range(100):
+        if CONTA not in al._VARRENDO:
+            break
+        time.sleep(0.02)
+    assert CONTA not in al._VARRENDO

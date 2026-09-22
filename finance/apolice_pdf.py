@@ -28,6 +28,7 @@ seguradora nova é um bloco em `_LAYOUTS`, depois que um PDF dela chegar.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
@@ -80,14 +81,33 @@ def _dinheiro(txt: str | None) -> int | None:
     return int(m.group(1).replace(".", "")) * 100 + int(m.group(2))
 
 
+#: MÊS POR EXTENSO, pelas TRÊS PRIMEIRAS LETRAS. A Zurich escreve a vigência como
+#: "24hs do dia 31 de Março de 2026" — e escreve com a codificação estragada, que
+#: chega aqui como "MarÃ§o". Casar pelo prefixo ASCII atravessa o estrago sem
+#: precisar adivinhar a codificação original do arquivo.
+_MESES = ("jan", "fev", "mar", "abr", "mai", "jun",
+          "jul", "ago", "set", "out", "nov", "dez")
+_POR_EXTENSO = re.compile(r"(\d{1,2})\s+de\s+([A-Za-zÀ-ÿ\u0080-\uffff]{3,})\s+de\s+(\d{4})",
+                          re.IGNORECASE)
+
+
 def _data(txt: str | None) -> date | None:
     if not txt:
         return None
     m = re.search(r"(\d{2})/(\d{2})/(\d{4})", txt)
+    if m:
+        try:
+            return datetime.strptime(m.group(0), "%d/%m/%Y").date()
+        except ValueError:
+            return None
+    m = _POR_EXTENSO.search(txt)
     if not m:
         return None
+    pref = m.group(2)[:3].lower()
+    if pref not in _MESES:
+        return None
     try:
-        return datetime.strptime(m.group(0), "%d/%m/%Y").date()
+        return date(int(m.group(3)), _MESES.index(pref) + 1, int(m.group(1)))
     except ValueError:
         return None
 
@@ -107,7 +127,10 @@ def _rotulo(texto: str, rotulo: str, ate: str = r"[^\n]+") -> tuple[str | None, 
     # ("Placa: \n") devolvia o rótulo seguinte como se fosse o valor — a placa da
     # Maria de Fátima saiu 'CONDIÇÕES GERAIS: 07/2026'. Carro zero km não tem placa,
     # e a resposta certa pra isso é None.
-    m = re.search(re.escape(rotulo) + r"[ \t]*:[ \t]*(" + ate + ")", texto)
+    # IGNORECASE: a Zurich escreve "Nome Completo:" e a tabela dizia "Nome
+    # completo" — o mesmo rótulo com outra caixa é o mesmo rótulo, e essa
+    # diferença sozinha custou o nome do segurado numa apólice inteira.
+    m = re.search(re.escape(rotulo) + r"[ \t]*:[ \t]*(" + ate + ")", texto, re.IGNORECASE)
     if not m:
         return None, None
     v = m.group(1).strip()
@@ -692,6 +715,191 @@ def _porto(texto: str, L: Leitura) -> None:
 # O QUE O GENÉRICO NÃO FAZ continua valendo: não soma tabela, não chuta, e não lê
 # o bloco do segurado sem âncora. Campo vazio é resposta; campo errado não é.
 
+# ────────────────── O PAPEL TEM DUAS DIMENSÕES, O TEXTO TEM UMA ──────────────────
+#
+# Medido em 22/09/2026, nos cinco PDFs que o dono mandou. Três deles — Yelum,
+# Tokio Marine e Bradesco — saíam com TRÊS campos: só o ramo, a seguradora e a
+# situação. Não era falta de sinônimo. Era que nesses papéis o rótulo não fica na
+# mesma LINHA do valor: fica EM CIMA dele, numa tabela de duas faixas.
+#
+# Extrair o texto achata a página lendo de cima pra baixo, e uma faixa de rótulos
+# seguida de uma faixa de valores vira isto:
+#
+#     Nome do(a) Segurado(a)                 <- rótulo, x=17.6  y=126.9
+#     CPF/CNPJ                               <- rótulo, x=298.2 y=126.9
+#     CLAUDIA FERNANDA DO SOCORRO NUNES      <- valor,  x=17.6  y=143.9
+#     372.584.513-15                         <- valor,  x=298.2 y=143.9
+#
+# Nenhuma regra sobre o texto achatado recupera isso, porque a informação que
+# liga rótulo e valor — estarem na MESMA COLUNA — foi jogada fora no achatamento.
+# As coordenadas ainda estão no PDF; é só não descartá-las.
+#
+# O pareamento é por SOBREPOSIÇÃO HORIZONTAL com a linha de baixo, e não por x
+# igual: assim funciona com coluna alinhada à esquerda, ao centro ou à direita
+# (dinheiro quase sempre vem à direita do rótulo dele).
+#
+# AS TRAVAS, porque parear por desenho pode inventar par onde não há:
+#
+#   * o par só vale se a sobreposição do escolhido for ESTRITAMENTE maior que a
+#     do segundo colocado — empate é ambiguidade, e ambiguidade não vira dado;
+#   * valor que é ele mesmo um rótulo conhecido não é valor (duas faixas de
+#     rótulo seguidas, que acontece em cabeçalho de duas linhas);
+#   * a linha de baixo tem que estar logo abaixo (até 26pt), não do outro lado da
+#     página;
+#   * e nada disso ENTRA POR CIMA: o desenho só preenche campo que a leitura do
+#     texto deixou vazio. Onde os dois sabem, vence quem leu o rótulo com
+#     dois-pontos, que é a forma sem ambiguidade nenhuma.
+
+
+def _chave_rotulo(txt: str) -> str:
+    """O rótulo reduzido ao que ele é, pra comparar com os sinônimos.
+
+    Sem acento, sem caixa, sem o que vem entre parênteses ("(R$)", "(a)", "(%)")
+    e sem pontuação nas pontas. É o que faz "Prêmio Líquido (R$)" da Yelum bater
+    com "Prêmio líquido" da tabela, e "Nome do(a) Segurado(a)" com "Nome do
+    segurado(a)".
+    """
+    t = unicodedata.normalize("NFKD", txt).encode("ascii", "ignore").decode()
+    t = re.sub(r"\([^)]*\)", " ", t)
+    t = re.sub(r"[^A-Za-z0-9/ ]+", " ", t).lower()
+    return re.sub(r"\s+", " ", t).strip()
+
+
+#: todo rótulo que este módulo conhece — usado pra recusar um "valor" que na
+#: verdade é o rótulo da faixa seguinte
+def _todos_os_rotulos() -> frozenset:
+    fora = set()
+    for tab in (_SINONIMOS, _SINONIMOS_SEGURADO, _SINONIMOS_DINHEIRO):
+        for rots in tab.values():
+            fora.update(_chave_rotulo(r) for r in rots)
+    fora.update(_chave_rotulo(r) for r in _ROTULOS_VIGENCIA)
+    return frozenset(fora)
+
+
+#: quanto o valor pode estar abaixo do rótulo, em pontos de PDF
+_ABAIXO = 26.0
+#: duas caixas na mesma faixa horizontal
+_MESMA_FAIXA = 2.0
+#: texto comprido demais é parágrafo, não valor de campo
+_VALOR_MAX = 120
+
+
+def pares_do_desenho(doc) -> dict:
+    """{rótulo → valor} lidos pela POSIÇÃO, pareando cada caixa com a de baixo.
+
+    O primeiro par de cada rótulo vence: rótulo de cabeçalho se repete página a
+    página, e a primeira ocorrência é a do corpo do documento.
+    """
+    proibidos = _todos_os_rotulos()
+    pares: dict = {}
+    for pg in doc:
+        caixas = []
+        try:
+            blocos = pg.get_text("dict")["blocks"]
+        except Exception:  # noqa: BLE001
+            continue
+        for b in blocos:
+            for ln in b.get("lines", []):
+                for sp in ln.get("spans", []):
+                    t = (sp.get("text") or "").strip()
+                    if not t:
+                        continue
+                    x0, y0, x1, y1 = sp["bbox"]
+                    caixas.append((y0, x0, x1, y1, t))
+        caixas.sort()
+        faixas: list = []
+        for cx in caixas:
+            if faixas and abs(cx[0] - faixas[-1][0][0]) <= _MESMA_FAIXA:
+                faixas[-1].append(cx)
+            else:
+                faixas.append([cx])
+        for i, faixa in enumerate(faixas[:-1]):
+            baixo = faixas[i + 1]
+            if baixo[0][0] - max(c[3] for c in faixa) > _ABAIXO:
+                continue
+            for (_y0, x0, x1, _y1, rot) in faixa:
+                chave = _chave_rotulo(rot)
+                if not chave or chave in pares:
+                    continue
+                melhor = segunda = 0.0
+                valor = None
+                for c in baixo:
+                    ov = min(x1, c[2]) - max(x0, c[1])
+                    if ov <= 0:
+                        continue
+                    if ov > melhor:
+                        melhor, segunda, valor = ov, melhor, c[4]
+                    elif ov > segunda:
+                        segunda = ov
+                if valor is None or melhor <= segunda:
+                    continue          # empate é ambiguidade, e ambiguidade não vira dado
+                if len(valor) > _VALOR_MAX or _chave_rotulo(valor) in proibidos:
+                    continue
+                pares[chave] = valor
+    return pares
+
+
+# ───────────────────────── O VALOR TEM QUE TER A CARA DO CAMPO ─────────────────
+#
+# Medido em 22/09/2026 na "Capa Frota LION MINING", uma cotação de frota do
+# Bradesco: é um formulário de caixinhas, e o pareamento por desenho devolveu
+# `email = "questionário de avaliação de risco"`, `endereco = "Bairro:"` e
+# `modelo = "Diária:"`. Ler pela diagramação acerta muito e erra feio, e dado
+# errado num campo é pior que campo vazio — vigência lida errada é alerta que não
+# dispara, que é o pior defeito que a tela de Renovações pode ter.
+#
+# Então todo valor passa por uma prova de formato antes de virar campo. A prova é
+# do CAMPO, não da origem: vale pro que veio do desenho e pro que veio do texto.
+
+def _e_rotulo_solto(v: str) -> bool:
+    """Termina em dois-pontos: é rótulo de outra caixa, não valor."""
+    return v.strip().endswith(":")
+
+
+def _palavras(v: str, minimo: int = 2) -> bool:
+    return len([p for p in re.split(r"\s+", v.strip()) if len(p) > 1]) >= minimo
+
+
+_FORMATOS = {
+    "nome":            lambda v: _palavras(v) and 5 <= len(v) <= 80
+                                 and re.fullmatch(r"[^\d:;|]+", v) is not None,
+    "cpf":             lambda v: len(_digitos(v)) in (11, 14),
+    "telefone":        lambda v: 10 <= len(_digitos(v)) <= 13,
+    "email":           lambda v: re.fullmatch(r"[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}", v.strip())
+                                 is not None,
+    "endereco":        lambda v: len(v.strip()) >= 8 and any(c.isalpha() for c in v),
+    "placa":           lambda v: re.fullmatch(r"[A-Z]{3}-?\d[A-Z0-9]\d{2}", v.strip().upper())
+                                 is not None,
+    "chassi":          lambda v: re.fullmatch(r"[A-HJ-NPR-Z0-9]{17}", v.strip().upper())
+                                 is not None,
+    "modelo":          lambda v: _palavras(v) and 3 <= len(v) <= 90,
+    "ano":             lambda v: re.search(r"\b(19|20)\d{2}\b", v) is not None,
+    "cep_pernoite":    lambda v: len(_digitos(v)) == 8,
+    "fipe":            lambda v: 5 <= len(_digitos(v)) <= 8,
+    "numero_apolice":  lambda v: 4 <= len(_digitos(v)) <= 25,
+    "numero_proposta": lambda v: 4 <= len(_digitos(v)) <= 25,
+    "classe_bonus":    lambda v: re.fullmatch(r"\d{1,2}", v.strip()) is not None,
+    "parcelas":        lambda v: re.search(r"\d", v) is not None,
+    "dia_vencimento":  lambda v: re.search(r"\d", v) is not None,
+}
+
+
+def _tem_a_cara(chave: str, bruto: str) -> bool:
+    if bruto is None or _e_rotulo_solto(bruto):
+        return False
+    prova = _FORMATOS.get(chave)
+    return True if prova is None else bool(prova(bruto))
+
+
+def _do_desenho(pares: dict, rotulos: tuple[str, ...]):
+    """O primeiro dos sinônimos que o desenho da página souber responder."""
+    for r in rotulos or ():
+        v = (pares or {}).get(_chave_rotulo(r))
+        if v:
+            return v, f"{r}\n{v}"
+    return None, None
+
+
 #: rótulo → variantes. A ordem importa: a primeira que casar vence, e as mais
 #: específicas vêm antes ("Nome do segurado" antes de "Nome").
 _SINONIMOS = {
@@ -703,6 +911,8 @@ _SINONIMOS = {
     "placa":           ("Placa",),
     "chassi":          ("Nº Chassi", "Chassi", "Nº do Chassi"),
     "modelo":          ("Marca/Modelo", "Veículo", "Marca / Modelo", "Modelo do veículo"),
+    # a Tokio escreve o ano em "Ano modelo" e o carro em "Veículo"; a Zurich
+    # escreve "Ano / Modelo: 2019", que é só o ano
     "ano":             ("Ano do modelo", "Ano/Modelo", "Ano Modelo", "Ano"),
     "fipe":            ("Código Tabela FIPE", "Cód. FIPE", "Código FIPE",
                         "Código na Tabela de Referência"),
@@ -712,10 +922,40 @@ _SINONIMOS = {
     "parcelas":        ("Nº de parcela", "Nº de parcelas", "Parcelas", "Quantidade de parcelas"),
 }
 
+#: A VIGÊNCIA, em tabela como os outros — o leitor por desenho precisa da lista.
+#: "Vigência do Endosso" é da Yelum: num endosso o que vale é a vigência dele.
+_ROTULOS_VIGENCIA = ("Vigência do Seguro", "Vigência do Endosso", "Período de vigência",
+                     "Vigência", "Vigencia")
+#: Zurich: "Início: 24hs do dia 31 de Março de 2026" / "Término: 24hs do dia ..."
+_ROTULOS_INICIO = ("Vigência início 24h do dia", "Início de vigência",
+                   "Início da vigência", "Data de início", "Início")
+_ROTULOS_FIM = ("Término 24h do dia", "Fim de vigência", "Fim da vigência",
+                "Término da vigência", "Fim de Vigência", "Válida até",
+                "Data de término", "Término")
+
+
+def _duas_datas(txt: str | None):
+    """(início, fim) quando o trecho traz duas datas. None quando não traz.
+
+    Serve tanto pro "das 24h de 13/08/2026 às 24h de 13/08/2027" da Porto quanto
+    pro "19/09/2026 - 19/09/2027" da Tokio.
+    """
+    if not txt:
+        return None
+    ds = re.findall(r"\d{2}/\d{2}/\d{4}", txt)
+    if len(ds) < 2:
+        return None
+    a, b = _data(ds[0]), _data(ds[1])
+    return (a, b) if a and b and b > a else None
+
+
 #: os do BLOCO do segurado — lidos só depois da âncora (`_bloco_do_segurado`)
 _SINONIMOS_SEGURADO = {
-    "nome":     ("Nome do segurado(a)", "Nome do Segurado", "Nome/Razão Social",
-                 "Razão Social", "Nome completo", "Segurado", "Nome"),
+    # "Nome do(a) Segurado(a)" é da Yelum e "Nome Completo" da Zurich — as duas
+    # entraram em 22/09/2026, cada uma trazida por um PDF de verdade.
+    "nome":     ("Nome do(a) Segurado(a)", "Nome do segurado(a)", "Nome do Segurado",
+                 "Nome/Razão Social", "Razão Social", "Nome completo",
+                 "Proponente", "Segurado", "Nome"),
     "cpf":      ("CPF/CNPJ", "CPF / CNPJ", "CNPJ/CPF", "CPF", "CNPJ"),
     "telefone": ("Telefone celular", "Celular", "Tel. celular", "Telefone", "Tel"),
     "email":    ("E-mail", "Email", "E-Mail"),
@@ -727,6 +967,8 @@ _SINONIMOS_DINHEIRO = {
     "premio_centavos": ("Prêmio líquido", "Prêmio Líquido", "Preço Líquido",
                         "Premio liquido", "Prêmio Net"),
     "iof_centavos":    ("IOF", "I.O.F."),
+    # "Custo Apólice" e "Adic. Franc" são da Yelum: não entram em nenhum campo
+    # hoje, e ficam aqui escritas pra não serem confundidas com o prêmio
     "total_centavos":  ("Prêmio total", "Prêmio Total", "Preço Total", "Total do Seguro",
                         "Prêmio Total do Seguro", "Valor Total"),
 }
@@ -757,9 +999,14 @@ def _dinheiro_rotulado(texto: str, rotulos: tuple[str, ...]):
         # avesso: a palavra "IOF" mora DENTRO daquele parêntese, e sem a âncora o
         # rótulo "IOF" casava ali e devolvia o valor do TOTAL como se fosse imposto.
         # Nos três papéis medidos todo rótulo de dinheiro abre a linha.
+        # O SÍMBOLO PODE MORAR NUMA LINHA SÓ DELE. A Zurich quebra o dinheiro em
+        # TRÊS linhas — "Prêmio Total\nR$\n 2.772,28" —, e a regra de uma quebra
+        # só perdia o prêmio, o IOF e o total de uma apólice inteira. Duas
+        # quebras no máximo, e entre elas só espaço ou "R$": o teto é o que
+        # impede o rótulo de alcançar um número de outro bloco.
         m = re.search(r"^[ \t]*" + re.escape(r)
-                      + r"[^\n]{0,60}?[ \t]*:?[ \t]*\n?[ \t]*R?\$? ?"
-                      r"(\d{1,3}(?:\.\d{3})*,\d{2})", texto, re.M)
+                      + r"[^\n]{0,60}?[ \t]*:?[ \t]*\n?[ \t]*(?:R\$)?[ \t]*\n?[ \t]*R?\$? ?"
+                      r"(\d{1,3}(?:\.\d{3})*,\d{2})", texto, re.M | re.I)
         if m:
             return _dinheiro(m.group(1)), m.group(0).strip()
     return None, None
@@ -794,7 +1041,7 @@ def _achou_o_bastante(L: Leitura) -> bool:
     return any(L.campos.get(k) for k in _IDENTIFICAM)
 
 
-def _generico(texto: str, L: Leitura) -> None:
+def _generico(texto: str, L: Leitura, pares: dict | None = None) -> None:
     """Lê o que estiver ROTULADO, seja qual for a seguradora.
 
     Substitui o antigo caminho genérico, que usava os rótulos da Allianz e por isso
@@ -803,8 +1050,19 @@ def _generico(texto: str, L: Leitura) -> None:
     c, t = L.campos, L.trechos
     c["ramo"] = "auto"
 
-    def pega(chave, rotulos, onde=None, conv=lambda v: v):
+    def pega(chave, rotulos, onde=None, conv=lambda v: v, desenho=True):
+        """O texto primeiro; o DESENHO só quando o texto não souber responder.
+
+        Nessa ordem porque as duas formas não valem o mesmo: "CPF: 705…" é sem
+        ambiguidade nenhuma, e "a caixa de baixo" é uma leitura da diagramação.
+        Onde os dois sabem, vence o rótulo com dois-pontos."""
         v, tr = _primeiro_rotulo(onde if onde is not None else texto, rotulos)
+        if not _tem_a_cara(chave, v):
+            v, tr = (None, None)
+        if v is None and desenho:
+            v, tr = _do_desenho(pares, rotulos)
+            if not _tem_a_cara(chave, v):
+                v, tr = (None, None)
         val = conv(v) if v is not None else None
         if val is None:
             L.nao_achou.append(chave)
@@ -816,19 +1074,21 @@ def _generico(texto: str, L: Leitura) -> None:
     pega("numero_proposta", _SINONIMOS["numero_proposta"], conv=lambda v: _digitos(v) or None)
     pega("classe_bonus", _SINONIMOS["classe_bonus"], conv=lambda v: v.strip()[:4] or None)
 
-    # A VIGÊNCIA, nas duas formas: uma linha com duas datas (Allianz, Porto) ou
-    # dois rótulos separados (Mapfre).
-    vig, tr = _primeiro_rotulo(texto, ("Vigência", "Vigencia", "Período de vigência"))
-    datas = re.findall(r"\d{2}/\d{2}/\d{4}", vig or "")
-    if len(datas) >= 2:
-        c["vigencia_inicio"], c["vigencia_fim"] = _data(datas[0]), _data(datas[1])
+    # A VIGÊNCIA, nas duas formas: uma linha com as duas datas (Allianz, Porto,
+    # Yelum, Tokio) ou dois rótulos separados (Mapfre, Zurich).
+    vig, tr = _primeiro_rotulo(texto, _ROTULOS_VIGENCIA)
+    if vig is None:
+        vig, tr = _do_desenho(pares, _ROTULOS_VIGENCIA)
+    datas = _duas_datas(vig)
+    if datas:
+        c["vigencia_inicio"], c["vigencia_fim"] = datas
         t["vigencia_fim"] = tr
     else:
-        vi = _primeiro_rotulo(texto, ("Vigência início 24h do dia", "Início de vigência",
-                                      "Início da vigência", "Data de início"))[0]
-        vf, trf = _primeiro_rotulo(texto, ("Término 24h do dia", "Fim de vigência",
-                                           "Fim da vigência", "Término da vigência",
-                                           "Válida até", "Data de término"))
+        vi = (_primeiro_rotulo(texto, _ROTULOS_INICIO)[0]
+              or _do_desenho(pares, _ROTULOS_INICIO)[0])
+        vf, trf = _primeiro_rotulo(texto, _ROTULOS_FIM)
+        if vf is None:
+            vf, trf = _do_desenho(pares, _ROTULOS_FIM)
         if _data(vi):
             c["vigencia_inicio"] = _data(vi)
         if _data(vf):
@@ -840,18 +1100,25 @@ def _generico(texto: str, L: Leitura) -> None:
     # `_bloco_do_segurado`, que também FECHA o bloco no próximo cabeçalho.
     DO_SEGURADO = ("nome", "cpf", "telefone", "email", "endereco")
     seg, _ancora = _bloco_do_segurado(texto)
-    if seg is None:
+    if seg is None and not pares:
         L.nao_achou.extend(DO_SEGURADO)
         L.avisos.append("Não achei onde começam os dados do segurado neste papel — "
                         "deixei nome, CPF, telefone e endereço em branco de propósito. "
                         "Preencha olhando o PDF.")
     else:
-        pega("nome", _SINONIMOS_SEGURADO["nome"], seg,
+        # SEM ÂNCORA NO TEXTO, o desenho ainda responde: nos papéis de duas faixas
+        # a âncora ("DADOS DO(A) SEGURADO(A)") existe e é o rótulo de CIMA — o que
+        # o achatamento desmanchou foi o bloco, não o título dele. `onde=seg or ''`
+        # mantém a regra de sempre: no TEXTO, nada de segurado se lê fora do bloco.
+        pega("nome", _SINONIMOS_SEGURADO["nome"], seg or "",
              lambda v: re.sub(r"\s+", " ", v).strip().upper() or None)
-        pega("cpf", _SINONIMOS_SEGURADO["cpf"], seg, lambda v: _digitos(v) or None)
-        pega("telefone", _SINONIMOS_SEGURADO["telefone"], seg, lambda v: _digitos(v) or None)
-        pega("email", _SINONIMOS_SEGURADO["email"], seg, lambda v: v.strip().lower() or None)
-        pega("endereco", _SINONIMOS_SEGURADO["endereco"], seg)
+        pega("cpf", _SINONIMOS_SEGURADO["cpf"], seg or "", lambda v: _digitos(v) or None)
+        pega("telefone", _SINONIMOS_SEGURADO["telefone"], seg or "",
+             lambda v: _digitos(v) or None)
+        pega("email", _SINONIMOS_SEGURADO["email"], seg or "",
+             lambda v: v.strip().lower() or None)
+        pega("endereco", _SINONIMOS_SEGURADO["endereco"], seg or "")
+        # a MESMA guarda de sempre: nada que seja da própria corretora é o cliente
         _conferir_o_segurado(L, DO_SEGURADO)
 
     # O VEÍCULO. Sem bloco próprio aqui: os rótulos de carro (placa, chassi) não se
@@ -865,6 +1132,9 @@ def _generico(texto: str, L: Leitura) -> None:
 
     for chave, rotulos in _SINONIMOS_DINHEIRO.items():
         v, tr = _dinheiro_rotulado(texto, rotulos)
+        if v is None:
+            bruto, tr = _do_desenho(pares, rotulos)
+            v = _dinheiro(bruto)
         if v is None:
             L.nao_achou.append(chave)
         else:
@@ -980,6 +1250,33 @@ def texto_do_pdf(conteudo: bytes) -> tuple[str, int]:
     return texto, doc.page_count
 
 
+def texto_e_desenho(conteudo: bytes) -> tuple[str, int, dict]:
+    """(texto, páginas, pares do desenho). O que `ler` usa.
+
+    Abre o PDF UMA vez pras duas leituras. O desenho é best-effort: PDF de que o
+    pymupdf não consegue tirar coordenada continua sendo lido pelo texto, que é
+    como era antes dele existir.
+    """
+    if len(conteudo) > TETO_BYTES:
+        raise ValueError("Arquivo grande demais pra ser uma apólice (limite 16 MB).")
+    try:
+        import pymupdf
+        doc = pymupdf.open(stream=conteudo, filetype="pdf")
+    except Exception as e:  # noqa: BLE001
+        raise ValueError(f"Não consegui abrir como PDF: {type(e).__name__}.")
+    if doc.page_count > TETO_PAGINAS:
+        raise ValueError(f"PDF com {doc.page_count} páginas não parece uma apólice.")
+    texto = "\n".join(p.get_text() for p in doc)
+    if len(texto.strip()) < 200:
+        raise ValueError("O PDF não tem texto — parece imagem escaneada. "
+                         "Este leitor não faz OCR; cadastre à mão.")
+    try:
+        pares = pares_do_desenho(doc)
+    except Exception:  # noqa: BLE001
+        pares = {}
+    return texto, doc.page_count, pares
+
+
 #: A VERSÃO DO LEITOR. Sobe de um toda vez que o leitor aprende alguma coisa —
 #: layout novo, sinônimo novo, conserto de âncora. Fica carimbada em
 #: `apolice_lida.lido->>'versao'`, e é o que deixa o painel saber que uma leitura
@@ -993,13 +1290,20 @@ def texto_do_pdf(conteudo: bytes) -> tuple[str, int]:
 #:  1 — só a Allianz, com o genérico falando Allianzês
 #:  2 — Mapfre e Porto, bloco do segurado limitado, guarda da própria corretora
 #:  3 — o genérico por sinônimos (#804)
-VERSAO = 3
+#:  4 — o leitor por DESENHO (rótulo em cima do valor), data por extenso e rótulo
+#:      sem caixa fixa: Yelum, Tokio Marine e Zurich saíam com três campos
+VERSAO = 4
 
 
-def ler_texto(texto: str, paginas: int = 0, proibidos: tuple[str, ...] = ()) -> Leitura:
+def ler_texto(texto: str, paginas: int = 0, proibidos: tuple[str, ...] = (),
+              pares: dict | None = None) -> Leitura:
     """`proibidos`: nome, documento e e-mail da PRÓPRIA corretora e dos membros
     dela. Nada disso pode ser o segurado, e é a trava que não depende de conhecer
-    o layout — ver `_e_a_propria_casa`."""
+    o layout — ver `_e_a_propria_casa`.
+
+    `pares`: o que a POSIÇÃO na página disse (`pares_do_desenho`). Opcional — sem
+    ele o leitor se comporta exatamente como antes do desenho existir, que é o que
+    os testes que alimentam texto puro exercitam."""
     L = Leitura(paginas=paginas)
     L.proibidos = tuple(proibidos)
     for nome, reconhece, leitor in _LAYOUTS:
@@ -1011,7 +1315,7 @@ def ler_texto(texto: str, paginas: int = 0, proibidos: tuple[str, ...] = ()) -> 
         # layout desconhecido: o GENÉRICO, que lê por sinônimos em vez de falar
         # Allianzês. Era `_allianz` aqui, e por isso seguradora desconhecida vinha
         # quase vazia — sete delas numa manhã em 22/09/2026.
-        _generico(texto, L)
+        _generico(texto, L, pares)
         L.campos.pop("seguradora", None)
         # o NOME sai mesmo sem o layout, e é o que deixa o aviso reconhecível
         nome, trecho = nomear_seguradora(texto)
@@ -1040,8 +1344,8 @@ def ler_texto(texto: str, paginas: int = 0, proibidos: tuple[str, ...] = ()) -> 
 
 
 def ler(conteudo: bytes, proibidos: tuple[str, ...] = ()) -> Leitura:
-    texto, paginas = texto_do_pdf(conteudo)
-    return ler_texto(texto, paginas, proibidos)
+    texto, paginas, pares = texto_e_desenho(conteudo)
+    return ler_texto(texto, paginas, proibidos, pares)
 
 
 def para_formulario(L: Leitura) -> dict:

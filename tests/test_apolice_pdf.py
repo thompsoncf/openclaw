@@ -1041,3 +1041,167 @@ def test_o_generico_nao_inventa_o_que_nao_esta_rotulado():
                   "Coberturas contratadas\nPrêmio\n")
     assert "nome" not in L.campos and "premio_centavos" not in L.campos
     assert L.campos["vigencia_fim"] == date(2027, 1, 1)
+
+
+# ══════════ O PAPEL TEM DUAS DIMENSÕES (22/09/2026) ══════════
+#
+# Cinco PDFs do dono, de cinco seguradoras. Três deles — Yelum, Tokio Marine e
+# Bradesco — saíam com TRÊS campos, e não era falta de sinônimo: nesses papéis o
+# rótulo não fica na mesma LINHA do valor, fica EM CIMA dele. Achatar a página
+# pra texto joga fora justamente o que liga os dois.
+#
+#   Nome do(a) Segurado(a)                 <- x=17.6  y=126.9
+#   CPF/CNPJ                               <- x=298.2 y=126.9
+#   CLAUDIA FERNANDA DO SOCORRO NUNES      <- x=17.6  y=143.9
+#   372.584.513-15                         <- x=298.2 y=143.9
+
+
+class _Span:
+    """Uma caixa de texto com posição, como o pymupdf devolve."""
+    def __init__(self, x0, y0, txt, larg=90.0, alt=11.0):
+        self.d = {"text": txt, "bbox": (x0, y0, x0 + larg, y0 + alt)}
+
+
+class _Pagina:
+    def __init__(self, spans):
+        self._spans = spans
+
+    def get_text(self, _modo):
+        return {"blocks": [{"lines": [{"spans": [s.d for s in self._spans]}]}]}
+
+
+def _desenho(*linhas):
+    """[(x, y, texto[, largura]), ...] → os pares que o desenho tira dali."""
+    return ap.pares_do_desenho(
+        [_Pagina([_Span(*c) for c in linhas])])
+
+
+def test_o_valor_embaixo_do_rotulo_e_o_valor_dele():
+    """O caso da Yelum, medido: dois rótulos numa faixa, dois valores na de baixo."""
+    pares = _desenho((17.6, 126.9, "Nome do(a) Segurado(a)"),
+                     (298.2, 126.9, "CPF/CNPJ"),
+                     (17.6, 143.9, "CLAUDIA FERNANDA DO SOCORRO NUNES"),
+                     (298.2, 143.9, "372.584.513-15"))
+    assert pares["nome do segurado"] == "CLAUDIA FERNANDA DO SOCORRO NUNES"
+    assert pares["cpf/cnpj"] == "372.584.513-15"
+
+
+def test_o_pareamento_e_por_sobreposicao_e_nao_por_x_igual():
+    """Dinheiro vem alinhado à direita, embaixo de um rótulo alinhado à esquerda."""
+    pares = _desenho((40.0, 100.0, "Prêmio Líquido (R$)"),
+                     (95.0, 118.0, "266,03"))
+    assert pares["premio liquido"] == "266,03"
+
+
+def test_empate_de_sobreposicao_nao_vira_dado():
+    """Duas caixas embaixo cobrindo o rótulo igualzinho: ambiguidade não se
+    resolve chutando."""
+    pares = _desenho((0.0, 100.0, "Prêmio", 100.0),
+                     (0.0, 118.0, "111,11", 50.0),
+                     (50.0, 118.0, "222,22", 50.0))
+    assert "premio" not in pares
+
+
+def test_rotulo_embaixo_de_rotulo_conhecido_nao_e_par():
+    """Cabeçalho de duas faixas: o de baixo é rótulo, não valor.
+
+    A recusa vale pros rótulos que ESTE módulo conhece — é o que dá pra afirmar
+    sem inventar uma gramática de "o que parece rótulo". O resto é barrado
+    depois, pela prova de formato do campo (`_tem_a_cara`)."""
+    pares = _desenho((10.0, 100.0, "Endereço"), (10.0, 118.0, "Placa"))
+    assert "endereco" not in pares
+
+
+def test_caixa_longe_demais_nao_e_o_valor():
+    """Do outro lado da página não é "embaixo"."""
+    pares = _desenho((10.0, 100.0, "Placa"), (10.0, 400.0, "QRO6093"))
+    assert "placa" not in pares
+
+
+def test_o_rotulo_se_reduz_ao_que_ele_e():
+    """É o que faz "Prêmio Líquido (R$)" bater com "Prêmio líquido" da tabela."""
+    assert ap._chave_rotulo("Prêmio Líquido (R$)") == "premio liquido"
+    assert ap._chave_rotulo("Nome do(a) Segurado(a)") == "nome do segurado"
+    assert ap._chave_rotulo("Nº da Apólice:") == "no da apolice"
+
+
+# ── o valor tem que ter a cara do campo ───────────────────────────────────────
+#
+# A "Capa Frota LION MINING" do Bradesco é um formulário de caixinhas, e parear
+# por desenho devolveu dali `email = "questionário de avaliação de risco"`,
+# `endereco = "Bairro:"` e `modelo = "Diária:"`. Ler pela diagramação acerta
+# muito e erra feio; campo vazio é melhor que campo errado.
+
+
+def test_rotulo_solto_nunca_e_valor():
+    assert ap._tem_a_cara("endereco", "Bairro:") is False
+    assert ap._tem_a_cara("modelo", "Diária:") is False
+
+
+def test_email_tem_que_ser_email():
+    assert ap._tem_a_cara("email", "questionário de avaliação de risco") is False
+    assert ap._tem_a_cara("email", "araujolimapi@bol.com.br") is True
+
+
+def test_placa_chassi_e_cpf_tem_formato():
+    assert ap._tem_a_cara("placa", "QRO6093") is True
+    assert ap._tem_a_cara("placa", "Não possui") is False
+    assert ap._tem_a_cara("chassi", "9BGKS48U0KG376785") is True
+    assert ap._tem_a_cara("chassi", "Sim") is False
+    assert ap._tem_a_cara("cpf", "372.584.513-15") is True
+    assert ap._tem_a_cara("cpf", "Jurídica") is False
+
+
+def test_nome_com_digito_nao_e_nome():
+    """"QD RAIMUNDO PORTELA, 4" é endereço; nome de gente não tem número."""
+    assert ap._tem_a_cara("nome", "MARIO JOSE VANDERLEI") is True
+    assert ap._tem_a_cara("nome", "RUA DAVID CALDAS , 3082") is False
+
+
+def test_campo_sem_prova_de_formato_passa():
+    """A prova é uma trava, não uma lista de permissões: o que não tem prova
+    definida continua valendo."""
+    assert ap._tem_a_cara("obs", "qualquer coisa") is True
+
+
+# ── data por extenso, e dinheiro em três linhas ───────────────────────────────
+
+
+def test_data_por_extenso():
+    """A Zurich escreve "24hs do dia 31 de Março de 2026"."""
+    assert ap._data("24hs do dia 31 de Março de 2026") == date(2026, 3, 31)
+
+
+def test_data_por_extenso_com_a_codificacao_estragada():
+    """O mesmo PDF chega aqui com "MarÃ§o" — casar pelo prefixo ASCII atravessa
+    o estrago sem precisar adivinhar a codificação do arquivo."""
+    assert ap._data("24hs do dia 31 de MarÃ§o de 2026") == date(2026, 3, 31)
+
+
+def test_mes_que_nao_existe_nao_vira_data():
+    assert ap._data("31 de Brumário de 2026") is None
+
+
+def test_a_data_com_barra_continua_vencendo():
+    assert ap._data("das 24h de 13/08/2026 às 24h de 13/08/2027") == date(2026, 8, 13)
+
+
+def test_dinheiro_com_o_simbolo_numa_linha_so_dele():
+    """A Zurich quebra em três: "Prêmio Total\\nR$\\n 2.772,28". A regra de uma
+    quebra só perdia o prêmio, o IOF e o total de uma apólice inteira."""
+    v, _tr = ap._dinheiro_rotulado("Prêmio Total\nR$\n 2.772,28\n", ("Prêmio total",))
+    assert v == 277228
+
+
+def test_o_mesmo_rotulo_com_outra_caixa_e_o_mesmo_rotulo():
+    """A tabela dizia "Nome completo" e a Zurich escreve "Nome Completo:"."""
+    v, _tr = ap._rotulo("Nome Completo: MARIO JOSE VANDERLEI", "Nome completo")
+    assert v == "MARIO JOSE VANDERLEI"
+
+
+def test_sem_desenho_o_leitor_continua_o_de_antes():
+    """`pares` é opcional: texto puro tem que se comportar como sempre se
+    comportou — é o que todos os testes deste arquivo exercitam."""
+    L = ap.ler_texto(papel())
+    assert L.reconhecida is True and L.como == "layout"
+    assert L.campos["nome"] == "FULANA DE TAL EXEMPLO"

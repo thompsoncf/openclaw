@@ -1015,18 +1015,28 @@ _TPL_LINHA = r"""{# UMA linha da carteira. Vive sozinha porque o cadastro devolv
     {% if a.cliente_id %}class="rn-linha" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this,'cliente')"{% endif %}>
   <td class="rn-cli">{% if a.cliente_id %}<button type="button" class="rn-abre" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this.closest('tr'),'cliente')">{{ a.cliente }}</button>
       {% else %}{{ a.cliente }} <span class="rn-pill" title="apólice sem cliente ligado">sem cliente</span>{% endif %}
-      {% if a.bem.placa %} <span class="rn-pill">{{ a.bem.placa }}</span>{% endif %}
       {% if a.tem_pdf %} <a class="rn-pdf" href="/painel/renovacoes/apolice/{{ a.id }}/pdf" target="_blank">PDF</a>{% endif %}</td>
+  {# A PLACA É COLUNA, e não mais uma etiqueta grudada no nome. É por ela que a
+     corretora procura um carro — coluna se lê de cima a baixo, etiqueta no meio
+     do nome se procura uma por uma. Carro zero km ainda não tem placa: aí vale o
+     fim do chassi, que é como ele é identificado até a placa sair. #}
+  <td class="rn-placa">{% if a.bem.placa %}{{ a.bem.placa }}
+      {%- elif a.bem.chassi %}<span class="fraco" title="{{ a.bem.chassi }}">chassi …{{ a.bem.chassi[-6:] }}</span>
+      {%- else %}—{% endif %}</td>
   <td>{{ a.seguradora }}</td>
   <td>{% if a.cliente_id %}<button type="button" class="rn-abre fraco" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this.closest('tr'),'apolice')">{{ a.ramo_txt }}</button>{% else %}{{ a.ramo_txt }}{% endif %}</td>
-  {# O SELO DE DIAS só até o horizonte. Fora dele ele marcava toda linha com um
-     "304d", "353d" que ninguém ia usar pra nada e que fazia a coluna parecer
-     desalinhada — dentro do horizonte é o aviso de que a renovação chegou. #}
-  <td>{{ a.vigencia_fim.strftime('%d/%m/%Y') }}{% if a.dias is not none and 0 <= a.dias <= horizonte %}
-      <span class="rn-pill">{{ a.dias }}d</span>{% endif %}</td>
+  <td>{{ a.vigencia_fim.strftime('%d/%m/%Y') }}</td>
+  {# DIAS DE VOLTA, e agora como COLUNA. Eu tinha tirado o selo por achar que
+     "304d" era ruído; o dono: "não achei vantagem, tirou a coluna de dias de
+     vencimento, colocar de novo". Numa coluna o número ordena a leitura da
+     carteira inteira de cima a baixo, que é o contrário de ruído. Dentro do
+     horizonte ele acende. #}
+  <td class="num rn-dias">{% if a.dias is none %}—
+      {%- elif a.dias < 0 %}<span class="venceu">venceu</span>
+      {%- elif a.dias <= horizonte %}<span class="perto">{{ a.dias }}</span>
+      {%- else %}{{ a.dias }}{% endif %}</td>
   <td>{{ a.situacao_txt }}</td>
   <td class="num">{{ brl(a.premio_centavos) }}</td>
-  <td class="num">{% if a.comissao_estimada is not none %}{{ brl(a.comissao_estimada) }}{% else %}—{% endif %}</td>
   {# AÇÕES ▾ — o mesmo desenho da aba Serviços: a palavra escrita, não um ícone.
      A carteira não tinha ação nenhuma na linha; corrigir um dígito no prêmio
      exigia cadastrar de novo, e aí o índice do número batia e nem isso dava. #}
@@ -1143,8 +1153,24 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 .rn-busca{display:flex;gap:.5rem;margin-bottom:.8rem;align-items:center}
 .rn-busca input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--borda);
   border-radius:8px;padding:.42rem .6rem;color:var(--txt);font-size:.85rem}
-.rn-rol{overflow-x:auto;border:1px solid var(--borda);border-radius:11px}
-.rn-tab{border-collapse:collapse;width:100%;min-width:640px;font-size:.84rem;font-variant-numeric:tabular-nums}
+/* A TABELA É A PÁGINA, e não um objeto dentro de uma caixa. A carteira morava
+   numa caixa com borda, canto arredondado e rolagem própria: uma lista de quatro
+   linhas parecia um cartão perdido no meio de uma página larga, e a rolagem
+   lateral existia num lugar onde nada precisava rolar. O dono: "você colocou
+   limitador dentro de uma caixa com a lista da carteira".
+   A rolagem sobrou só onde ela é necessária — telas estreitas, onde as nove
+   colunas não cabem —, e aí a caixa volta a aparecer, porque aí ela informa que
+   há mais coisa pro lado. */
+.rn-rol{overflow-x:auto}
+@media (max-width:860px){.rn-rol{border:1px solid var(--borda);border-radius:11px}}
+.rn-tab{border-collapse:collapse;width:100%;min-width:720px;font-size:.84rem;font-variant-numeric:tabular-nums}
+/* a placa é o segundo jeito de achar um carro, depois do nome: monoespaçada, que
+   é como se confere caractere por caractere */
+.rn-tab td.rn-placa{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.8rem;letter-spacing:.02em}
+.rn-tab td.rn-placa .fraco{color:var(--txt-mut);font-size:.74rem;letter-spacing:0}
+.rn-tab td.rn-dias .perto{color:#F0DCA6;font-weight:700}
+.rn-tab td.rn-dias .venceu{color:#E9A0A0;font-weight:700;font-size:.74rem;
+  text-transform:uppercase;letter-spacing:.05em}
 /* TEXTO À ESQUERDA, DINHEIRO À DIREITA. A tabela alinhava TUDO à direita menos a
    primeira coluna, e três coisas saíam tortas de uma vez: "Allianz" e "Porto
    Seguro" flutuavam grudados no dinheiro; o cabeçalho RAMO ficava na direita
@@ -1156,7 +1182,8 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   border-bottom:1px solid var(--borda);white-space:nowrap}
 .rn-tab td{text-align:left;padding:.45rem .6rem;border-bottom:1px solid var(--borda);white-space:nowrap}
 .rn-tab th.num,.rn-tab td.num{text-align:right}
-.rn-tab tr:last-child td{border-bottom:0}
+.rn-tab thead th{border-top:1px solid var(--borda)}
+.rn-tab tr:last-child td{border-bottom:1px solid var(--borda)}
 .rn-aviso{border-radius:10px;padding:.7rem .85rem;font-size:.84rem;line-height:1.55;margin-bottom:.9rem}
 .rn-aviso.azul{background:var(--azul-fundo);border:1px solid var(--azul-borda);color:#8FC9E6}
 .rn-aviso.ambar{background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:#F0DCA6}
@@ -1479,8 +1506,11 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
   </form>
   {% if carteira %}
   <div class="rn-rol"><table class="rn-tab">
-    <thead><tr><th>Cliente</th><th>Seguradora</th><th>Ramo</th><th>Vence</th><th>Situação</th>
-        <th class="num">Prêmio</th><th class="num">Comissão</th>
+    {# A COMISSÃO SAIU: a conta não cadastrou percentual de nenhuma seguradora, e
+       a coluna era um traço em toda linha ocupando o lugar da placa. Ela continua
+       na aba Percentuais e na janela do segurado, que é onde se decide sobre ela. #}
+    <thead><tr><th>Cliente</th><th>Placa</th><th>Seguradora</th><th>Ramo</th><th>Vence</th>
+        <th class="num">Dias</th><th>Situação</th><th class="num">Prêmio</th>
         <th class="rn-col-acoes"><span class="rn-oculto">Ações</span></th></tr></thead>
     {# `tbody` com id porque a linha nova entra AQUI depois do cadastro, sem
        recarregar a página — e é o mesmo template que o servidor devolve. #}

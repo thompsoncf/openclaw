@@ -623,24 +623,8 @@ def test_a_caixa_de_soltar_nao_promete_mais_so_a_allianz():
     assert "Allianz é reconhecida" not in PA
 
 
-def test_so_premio_e_comissao_sao_coluna_de_numero():
-    """A tabela alinhava tudo à direita menos a primeira coluna: o cabeçalho
-    RAMO ficava na direita e o 'Auto' debaixo dele na esquerda."""
-    assert ".rn-tab th.num,.rn-tab td.num{text-align:right}" in PA
-    linha = PA[PA.index("_TPL_LINHA = "):PA.index("_TPL_CONF = ")]
-    assert linha.count('<td class="num">') == 2
-
-
-def test_o_selo_de_dias_so_aparece_dentro_do_horizonte():
-    """Fora dele todo mundo ganhava um '304d' que não serve pra nada."""
-    linha = PA[PA.index("_TPL_LINHA = "):PA.index("_TPL_CONF = ")]
-    assert "0 <= a.dias <= horizonte" in linha
-
-
-def test_a_linha_sozinha_acha_o_horizonte_sem_ninguem_passar():
-    """Quem renderiza a linha depois do cadastro não monta contexto de tela — e o
-    `<=` contra um Undefined estoura. O horizonte é global do ambiente."""
-    assert '_env.globals.setdefault("horizonte", ap.HORIZONTE)' in PA
+def _linha_html(**muda):
+    """A linha da carteira renderizada sozinha, como o JavaScript a recebe."""
     from datetime import date
 
     import web.painel_apolices  # noqa: F401
@@ -649,8 +633,69 @@ def test_a_linha_sozinha_acha_o_horizonte_sem_ninguem_passar():
          "ramo_txt": "Auto", "vigencia_fim": date(2027, 7, 23), "dias": 308,
          "situacao_txt": "Proposta", "premio_centavos": 380757,
          "comissao_estimada": 76151, "bem": {"placa": "ABC1D23"}, "tem_pdf": True}
-    html = _env.get_template("renovacoes_linha").render(a=a, brl=lambda c: f"R$ {c/100:.2f}")
-    assert "308d" not in html          # 308 dias está muito além do horizonte
-    a["dias"] = 44
-    html = _env.get_template("renovacoes_linha").render(a=a, brl=lambda c: f"R$ {c/100:.2f}")
-    assert "44d" in html
+    a.update(muda)
+    return _env.get_template("renovacoes_linha").render(
+        a=a, brl=lambda c: f"R$ {c/100:.2f}")
+
+
+def test_texto_a_esquerda_e_numero_a_direita():
+    """A tabela alinhava tudo à direita menos a primeira coluna: o cabeçalho
+    RAMO ficava na direita e o 'Auto' debaixo dele na esquerda."""
+    assert ".rn-tab th.num,.rn-tab td.num{text-align:right}" in PA
+    linha = PA[PA.index("_TPL_LINHA = "):PA.index("_TPL_CONF = ")]
+    assert linha.count('class="num') == 2          # dias e prêmio
+
+
+def test_a_placa_e_uma_coluna_e_nao_uma_etiqueta_no_nome():
+    """Pedido do dono em 22/09: "tira a coluna comissão e coloca placa do carro".
+    Era uma etiqueta grudada no nome, que se procura uma por uma; coluna se lê de
+    cima a baixo, que é como a corretora acha um carro."""
+    assert "<th>Placa</th>" in PA
+    assert 'ABC1D23' in _linha_html()
+    corpo = PA[PA.index("_TPL_LINHA = "):PA.index("_TPL_CONF = ")]
+    assert corpo.count('class="rn-placa"') == 1
+
+
+def test_carro_zero_km_mostra_o_fim_do_chassi_no_lugar_da_placa():
+    """Zero km não tem placa ainda, e é pelo chassi que ele é identificado —
+    coluna em branco parece dado faltando."""
+    html = _linha_html(bem={"placa": "", "chassi": "LB3EH1SFXTX044613"})
+    assert "044613" in html and "chassi" in html
+
+
+def test_a_comissao_saiu_da_carteira():
+    """Era um traço em toda linha, ocupando o lugar da placa. Ela continua na aba
+    Percentuais e na janela do segurado, que é onde se decide sobre ela."""
+    assert "<th class=\"num\">Comissão</th>" not in PA
+    assert "comissao_estimada" not in PA[PA.index("_TPL_LINHA = "):PA.index("_TPL_CONF = ")]
+    assert "Comissão por seguradora" in PA          # a aba Percentuais continua
+
+
+def test_a_coluna_de_dias_voltou():
+    """Eu tinha tirado o selo por achar que "304d" era ruído. O dono: "não achei
+    vantagem, tirou a coluna de dias de vencimento, colocar de novo"."""
+    assert "<th class=\"num\">Dias</th>" in PA
+    assert ">308<" in _linha_html() or "308" in _linha_html()
+
+
+def test_dentro_do_horizonte_o_numero_de_dias_acende():
+    """É a diferença entre uma coluna que ordena a leitura e um alerta."""
+    assert "perto" not in _linha_html()             # 308 dias: só o número
+    assert "perto" in _linha_html(dias=44)
+    assert "venceu" in _linha_html(dias=-3)
+
+
+def test_a_carteira_nao_mora_mais_numa_caixa_com_rolagem_propria():
+    """O dono: "você colocou limitador dentro de uma caixa com a lista da
+    carteira". A caixa só volta em tela estreita, onde ela informa que há mais
+    coisa pro lado."""
+    css = PA[PA.index(".rn-rol{"):]
+    assert css[:css.index("}") + 1] == ".rn-rol{overflow-x:auto}"
+    assert "@media (max-width:860px){.rn-rol{border:" in PA
+
+
+def test_a_linha_sozinha_acha_o_horizonte_sem_ninguem_passar():
+    """Quem renderiza a linha depois do cadastro não monta contexto de tela — e o
+    `<=` contra um Undefined estoura. O horizonte é global do ambiente."""
+    assert '_env.globals.setdefault("horizonte", ap.HORIZONTE)' in PA
+    _linha_html(dias=44)          # não estoura: é o teste

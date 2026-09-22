@@ -16,10 +16,33 @@ from finance import whatsapp_twilio as _twilio
 
 
 def _row(c, conta_id):
+    """O canal de WhatsApp desta empresa — o dela OU o do CHIP dela.
+
+    O CHIP PODE MORAR EM OUTRA CONTA. `contas.chip_de` liga uma conta-chip à
+    empresa dona: na Liberal (37) o canal está na conta 38 ("cp liberal"), e a 37
+    não tem linha nenhuma em `canais_config`. Esta consulta procurava só por
+    `conta_id = 37`, achava nada, e todo envio devolvia `sem_numero_empresa` —
+    "está conectado mas não consigo mandar mensagem pelo canal de comunicação",
+    22/09/2026.
+
+    O #781 consertou essa mesma pergunta na TELA (o status do chip em
+    `painel_prospeccao._wa_chip`) e não aqui. Consertar a tela e não a função é
+    como o painel passou a dizer "conectado" enquanto o envio dizia "sem número".
+
+    O `order by (cc.conta_id <> %s)` põe o canal da PRÓPRIA conta na frente: quem
+    tem chip próprio não muda de comportamento, e empresa com chip próprio E
+    conta-chip filha continua saindo pelo dela.
+    """
     return c.execute(
-        """select coalesce(provedor,'twilio'), identificador, wa_phone_id, token
-             from canais_config where conta_id=%s and canal='whatsapp' and ativo""",
-        (conta_id,)).fetchone()
+        """select coalesce(cc.provedor,'twilio'), cc.identificador,
+                  cc.wa_phone_id, cc.token, cc.conta_id
+             from canais_config cc
+            where cc.canal='whatsapp' and cc.ativo
+              and (cc.conta_id = %s
+                   or cc.conta_id in (select id from contas where chip_de = %s))
+            order by (cc.conta_id <> %s), cc.conta_id
+            limit 1""",
+        (conta_id, conta_id, conta_id)).fetchone()
 
 
 def provedor_da_conta(c, conta_id) -> str:
@@ -75,8 +98,11 @@ def preparar(c, conta_id) -> dict | None:
     r = _row(c, conta_id)
     if not r:
         return None
-    return {"conta_id": conta_id, "provedor": r[0], "identificador": r[1],
-            "wa_phone_id": r[2], "token": r[3]}
+    # `conta_id` é a conta DO CANAL, que no provedor 'qr' é o chip por onde a
+    # mensagem sai — e pode ser uma conta-chip filha, não a empresa. `empresa_id`
+    # guarda quem pediu, pra quem precisar dos dois.
+    return {"conta_id": r[4], "empresa_id": conta_id, "provedor": r[0],
+            "identificador": r[1], "wa_phone_id": r[2], "token": r[3]}
 
 
 def enviar_pronto(destino: dict | None, numero, texto, *, chip_id=None) -> dict:

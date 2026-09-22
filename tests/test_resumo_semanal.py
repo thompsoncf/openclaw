@@ -69,8 +69,13 @@ def test_a_lista_de_gestores_tem_teto():
 
 _SQL = """
 create table nichos (id bigserial primary key, nome text, slug text unique, tipo text);
+-- `chip_de` existe em produção e a fixture não tinha: o chip de uma empresa pode
+-- morar numa conta filha, e QUALQUER consulta que resolve canal passa por esta
+-- coluna. Sem ela aqui, o teste só passava em banco sujo — foi assim que o CI
+-- reprovou em 22/09/2026 o que a máquina local dizia verde.
 create table contas (id bigserial primary key, nome text, nome_fantasia text,
-  nicho_id bigint references nichos(id), criado_em timestamptz default now());
+  nicho_id bigint references nichos(id), chip_de bigint,
+  criado_em timestamptz default now());
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,

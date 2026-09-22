@@ -683,9 +683,14 @@ def test_o_bloco_do_segurado_termina_no_proximo_cabecalho():
 
 
 def test_rotulo_que_falta_fica_faltando_e_nao_vem_do_vizinho():
+    """O invariante é o BLOCO, não o rótulo: `Razão Social` hoje é lido (entrou nos
+    sinônimos do genérico em 22/09/2026), e o que não pode acontecer é o valor vir
+    do bloco do corretor, três cabeçalhos adiante."""
     L = ap.ler_texto(PORTO)
+    assert L.campos.get("nome") == "FULANA DE TAL EXEMPLO"
     assert L.campos.get("nome") != "LIBERAL NETO CONS E CORG DE SEGS LTDA"
-    assert "nome" in L.nao_achou, "a Porto rotula 'Razão Social', que ainda não leio"
+    # o bloco do segurado deste papel não tem telefone: some, não é emprestado
+    assert "telefone" not in L.campos and "telefone" in L.nao_achou
 
 
 def test_a_corretora_nao_entra_como_cliente_nem_com_o_bloco_aberto():
@@ -697,12 +702,15 @@ def test_a_corretora_nao_entra_como_cliente_nem_com_o_bloco_aberto():
     assert any("própria corretora" in a for a in L.avisos)
 
 
-def test_o_email_do_corretor_derruba_o_bloco_inteiro():
-    """O campo que denuncia pode não ser o nome: na Porto de verdade o que vazou
-    primeiro foi o e-mail."""
+def test_o_email_do_corretor_some_sem_levar_o_nome_junto():
+    """A distinção que a Porto de verdade ensinou (22/09/2026): o contato do
+    corretor DENTRO do bloco do cliente é comum — foi ele quem preencheu a
+    proposta — e não quer dizer bloco errado. Some o campo; o nome e o CPF, que
+    são os certos, ficam."""
     papel = PORTO.replace("DADOS DO CORRETOR\n", "")
     L = ap.ler_texto(papel, proibidos=CASA)
-    assert "email" not in L.campos and "nome" not in L.campos
+    assert "email" not in L.campos, "o e-mail da casa não fica"
+    assert L.campos.get("nome") == "FULANA DE TAL EXEMPLO", "e não leva o nome junto"
 
 
 def test_cliente_de_verdade_passa_com_a_lista_ligada():
@@ -906,3 +914,106 @@ def test_as_outras_seguradoras_nao_regridem():
     roubar papel alheio."""
     assert ap.ler_texto(mapfre()).seguradora == "Mapfre"
     assert ap.ler_texto(papel()).seguradora == "Allianz"
+
+
+# ────────── o leitor genérico, por sinônimos (22/09/2026) ──────────
+#
+# "tem 7 apólices novas sem layout também, dá uma olhada lá e já trata" — sete
+# seguradoras numa manhã: HDI, Azul, Allianz, Tokio Marine, Bradesco, Zurich e
+# Yelum. Layout por seguradora não escala; a corretora trabalha com umas vinte, e
+# cada uma tem apólice, proposta e endosso.
+#
+# A evidência de que dá pra generalizar são os três layouts JÁ MEDIDOS: eles
+# escrevem o mesmo rótulo de três jeitos. `_SINONIMOS` é essa tabela, e não um
+# chute — cada linha nova entra depois que um PDF a justifica.
+#
+# Estes testes rodam o genérico à força (`ap._generico`) contra os papéis dos
+# layouts conhecidos: se ele dá conta de Mapfre e Porto SEM o layout delas, dá
+# conta da seguradora que eu nunca vi.
+
+
+def _generico(texto, proibidos=()):
+    L = ap.Leitura()
+    L.proibidos = proibidos
+    ap._generico(texto, L)
+    ap._checar(L)
+    return L
+
+
+def test_o_generico_le_a_mapfre_sem_o_layout_dela():
+    L = _generico(mapfre())
+    assert L.campos["nome"] == "FULANA DE TAL EXEMPLO"
+    assert L.campos["cpf"] == _so_digitos(CPF_OK)
+    assert L.campos["numero_apolice"] == "0330433570731"
+    assert L.campos["vigencia_fim"] == date(2027, 9, 10)
+    assert L.campos["premio_centavos"] == 261301
+
+
+def test_o_generico_le_a_porto_sem_o_layout_dela():
+    """A Porto rotula o cliente como "Nome do segurado(a)" e o bloco como "Dados
+    cadastrais" — nada disso é Allianzês, que era tudo o que o genérico falava."""
+    L = _generico(porto())
+    assert L.campos["nome"] == "FULANA DE TAL EXEMPLO"
+    assert L.campos["numero_apolice"] == "0531092835980"
+    assert L.campos["total_centavos"] == 490454
+
+
+def test_a_soma_das_parcelas_fecha_nos_dois_papeis():
+    """A conta com fonte independente. A 1ª parcela vem ROTULADA À PARTE nos dois
+    (a tabela começa na 02); sem ela a soma não fecha e o dia do vencimento sai da
+    parcela 2 — dia 15 no lugar de 16, medido no PDF da Mapfre."""
+    for papel, total in ((mapfre(), 280585), (porto(), 490454)):
+        L = _generico(papel)
+        assert sum(L.campos["parcelas_centavos"]) == total
+        assert ("soma das parcelas = total", True) in [(n, ok) for n, ok, _ in L.checagens]
+    assert _generico(mapfre()).campos["dia_vencimento"] == 16
+
+
+def test_o_generico_acha_o_dinheiro_nas_duas_formas():
+    """"Prêmio líquido: 2.613,01" (Mapfre) e "Prêmio líquido\\nR$ 4.567,46" (Porto)
+    são o mesmo campo escrito de dois jeitos."""
+    assert _generico(mapfre()).campos["premio_centavos"] == 261301
+    assert _generico(porto()).campos["premio_centavos"] == 456746
+
+
+def test_o_iof_e_derivado_quando_o_papel_nao_traz():
+    """A Allianz não tem linha de IOF; tem líquido e total. Derivar ali é honesto —
+    o que não pode é derivar por cima de um IOF que o papel declarou."""
+    L = _generico(papel())
+    assert L.campos["iof_centavos"] == L.campos["total_centavos"] - L.campos["premio_centavos"]
+    assert _generico(mapfre()).campos["iof_centavos"] == 19284, "a Mapfre declara, e vence"
+
+
+def test_a_ancora_do_segurado_nao_casa_no_meio_de_uma_frase():
+    """A capa da Porto diz "consulte o manual do segurado" na página 2. Sem prender
+    a âncora ao começo da linha, o bloco do cliente começava num aviso legal — e o
+    nome, o CPF e o endereço sumiam todos."""
+    texto = ("consulte o manual do segurado e as condições gerais\n"
+             "Dados cadastrais\nNome do segurado(a): FULANA DE TAL\n")
+    trecho, ancora = ap._bloco_do_segurado(texto)
+    assert ancora.upper() == "DADOS CADASTRAIS"
+    assert "manual do segurado" not in trecho
+
+
+def test_o_bloco_fecha_em_cabecalho_de_caixa_de_titulo():
+    """A Mapfre usa CAIXA ALTA; a Porto usa "Dados do Corretor". As duas formas
+    fecham o bloco, senão o da Porto ia até o fim do papel."""
+    texto = ("Dados cadastrais\nNome do segurado(a): FULANA\n"
+             "Dados do Corretor\nNome: CORRETORA EXEMPLO LTDA\n")
+    trecho, _a = ap._bloco_do_segurado(texto)
+    assert "CORRETORA EXEMPLO" not in trecho
+
+
+def test_a_apolice_allianz_emitida_e_reconhecida():
+    """O teste exigia "Nº da Proposta", e a APÓLICE emitida traz "Nº da Apólice" —
+    uma Allianz que eu já sabia ler caía no genérico."""
+    emitida = papel().replace("Nº Proposta:", "Nº da Apólice:")
+    assert ap.ler_texto(emitida).seguradora == "Allianz"
+
+
+def test_o_generico_nao_inventa_o_que_nao_esta_rotulado():
+    """O eixo do módulo inteiro: campo vazio é resposta, campo errado não é."""
+    L = _generico("APÓLICE DE SEGURO\nSUSEP 123\nVigência: 01/01/2026 a 01/01/2027\n"
+                  "Coberturas contratadas\nPrêmio\n")
+    assert "nome" not in L.campos and "premio_centavos" not in L.campos
+    assert L.campos["vigencia_fim"] == date(2027, 1, 1)

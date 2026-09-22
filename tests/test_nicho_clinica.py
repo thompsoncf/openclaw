@@ -137,5 +137,7 @@ def test_clinica_nao_e_evento():
     assert modo_por_nicho("clinica") == "recorrente"
 
 
-def test_o_perfil_do_raio_x_e_recorrente():
-    assert rxp.perfil_por_nicho("clinica") == "recorrente"
+def test_o_perfil_do_raio_x_e_o_da_clinica():
+    """Até 22/09 caía em recorrente, e o funil falava de reunião e mensalidade.
+    Os detalhes do perfil estão em tests/test_raio_x_clinica.py."""
+    assert rxp.perfil_por_nicho("clinica") == "clinica"

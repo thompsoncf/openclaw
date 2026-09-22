@@ -28,7 +28,7 @@ from datetime import time
 
 from finance import nichos as _n
 
-PERFIS = ("eventos", "recorrente", "seguros", "produto")
+PERFIS = ("eventos", "recorrente", "seguros", "clinica", "produto")
 
 #: por que perdeu — a lista completa (check da migração 213). O perfil escolhe seis.
 MOTIVOS_TODOS = (
@@ -47,6 +47,8 @@ _MOTIVOS_POR_PERFIL = {
     # ("renovou direto com a seguradora") não existe em MOTIVOS_TODOS, que é a
     # lista LEGADA — nasce só na semente abaixo, que é de onde a conta parte hoje.
     "seguros": ("sumiu_apos_proposta", "ficou_com_atual", "achou_caro", "fora_do_escopo", "sem_interesse", "outro"),
+    # clínica também: o que ela tem de próprio nasce só na semente abaixo
+    "clinica": ("sumiu_apos_proposta", "ficou_com_atual", "achou_caro", "fora_do_escopo", "sem_interesse", "outro"),
     "produto": (),
 }
 
@@ -95,6 +97,21 @@ _SEMENTE_MOTIVOS = {
         ("sumiu_apos_proposta", "Sumiu depois da cotação", False),
         ("nao_tem_perfil", "Não tem perfil / recusado pela seguradora", False),
         ("condicao_pagamento", "Condição de pagamento", False),
+        ("outro", "Outro", True),
+    ),
+    # Os da clínica: o paciente não troca de "fornecedor", ele faz EM OUTRA
+    # CLÍNICA; e dois motivos só existem aqui — ADIAR o tratamento (não é perda
+    # pra concorrente, é o paciente que ainda não decidiu) e o procedimento NÃO
+    # SER INDICADO, que é decisão do médico e não falha de venda.
+    "clinica": (
+        ("nao_respondeu", "Não respondeu — após as tentativas de follow-up", False),
+        ("achou_caro", "Preço — acima do que queria investir", False),
+        ("fechou_concorrente", "Fez em outra clínica", False),
+        ("sumiu_apos_proposta", "Sumiu depois do plano de tratamento", False),
+        ("adiou_tratamento", "Adiou o tratamento, sem nova data", False),
+        ("nao_indicado", "Procedimento não indicado pelo médico", False),
+        ("condicao_pagamento", "Condição de pagamento", False),
+        ("sem_interesse", "Sem interesse", False),
         ("outro", "Outro", True),
     ),
     # produto não tem funil nem vendedor: não há perda de lead pra motivar
@@ -149,6 +166,28 @@ _PERFIS = {
         # bloco idêntico. Chave é o que o código guarda, rótulo é o que se lê —
         # a mesma razão pela qual a etapa "Agendado Visita" se chama `qualificado`.
         "blocos": ("comissao", "segmentos", "servicos", "reunioes", "ciclo", "perdas", "hora"),
+        "faixas": ("pergunta", "proposta", "toque", "visita"),
+    },
+    # CLÍNICA (nicho `clinica`, migração 309). A primeira foi a Espaço Pelle,
+    # clínica dermatológica (conta 39), que em 22/09/2026 salvou o nicho e viu o
+    # funil de quem vende mensalidade pra empresa: "Reunião marcada", filtro de
+    # porte e segmento do CNPJ, valor em "/mês".
+    #
+    # AS DUAS RESPOSTAS DO DONO (22/09): as colunas do meio são "Consulta agendada"
+    # e "Plano de tratamento"; e o compromisso, nas telas, se chama AVALIAÇÃO.
+    #
+    # O que sai em relação ao recorrente, e por quê: `segmento`, `porte` e `uf`
+    # vêm do CNPJ, e o paciente é pessoa física; `mrr` soma mensalidade, e
+    # tratamento é valor fechado. Sem `mrr` e sem `comissao` (que fala de apólice),
+    # o valor aparece no placar como total proposto e fechado — o ramo de fora de
+    # `perfil.chave == 'recorrente'` no template, que é o certo aqui.
+    "clinica": {
+        "chave": "clinica", "rotulo": "clínica",
+        "vocab": {"data": False, "compromisso": "avaliação", "compromissos": "avaliações",
+                  "compromisso_kpi": "avaliações que aconteceram", "pedido": "tratamento",
+                  "oferta": "procedimento"},
+        "filtros": ("periodo", "vendedor", "servico", "origem", "hora"),
+        "blocos": ("servicos", "reunioes", "ciclo", "perdas", "hora"),
         "faixas": ("pergunta", "proposta", "toque", "visita"),
     },
     "produto": {
@@ -220,6 +259,16 @@ _FUNIL_POR_PERFIL = {
         # mais rápido que venda de mensalidade, mas isso é palpite meu — não há um
         # lead de corretora na base pra medir. A conta sobrescreve sem deploy, e a
         # hora de mudar o padrão é com dado, não agora.
+        "temp_quente_h": 72, "temp_morno_dias": 14, "temp_frio_tentativas": 4,
+    },
+    # Os mesmos do recorrente, pelo motivo que a corretora deu: não há lead de
+    # clínica na base pra medir. A conta sobrescreve sem deploy.
+    "clinica": {
+        "janela_dias": "1,2,3,4,5", "janela_abre": time(8, 0), "janela_fecha": time(19, 0),
+        "sem_resposta_min": 120, "bola_nossa_min": 240, "bola_cliente_min": 4320,
+        "escala_min": 240, "teto_avisos_dia": 5,
+        "fu_proposta_dias": 3, "fu_toques_dias": "2,4,7,15", "fu_festa_dias": None,
+        "fu_teto_dia": 15,
         "temp_quente_h": 72, "temp_morno_dias": 14, "temp_frio_tentativas": 4,
     },
     # produto não tem funil nem vendedor (ver o docstring): nada a herdar.
@@ -307,6 +356,20 @@ _ETAPAS_POR_PERFIL = {
         ("ganho", "Fechado", 900, True, True, False),
         ("perdido", "Perdido", 910, True, False, False),
     ),
+    "clinica": (
+        ("novo", "Novo", 0, True, False, False),
+        ("contatado", "Contatado", 10, False, False, False),
+        ("follow_up", "Follow-up", 20, False, False, False),
+        # as duas colunas que o dono escolheu em 22/09. As CHAVES seguem
+        # `qualificado` e `proposta` pelo mesmo motivo de "Agendado Visita": é o
+        # que fica gravado em `prospeccao.status`, e o modelo muda só o rótulo.
+        ("qualificado", "Consulta agendada", 30, False, False, False),
+        ("proposta", "Plano de tratamento", 40, False, False, False),
+        # sai do quadro (paciente fechado não é prospecção) e NÃO agenda: a data
+        # da sessão não mora no cadastro do lead, e a ponte não teria o que ler.
+        ("ganho", "Fechado", 900, True, True, False),
+        ("perdido", "Perdido", 910, True, False, False),
+    ),
     # produto não tem funil nem vendedor (ver o docstring). Recebe o genérico de
     # sempre: nada muda pra quem já está assim, e ninguém ganha uma coluna de
     # "Agendado Visita" numa tela que vende caixa.
@@ -348,6 +411,10 @@ def funil_resolvido(chave_perfil: str, da_conta: dict) -> tuple[dict, set]:
     return dict(base, **{k: da_conta[k] for k in escolhidas}), escolhidas
 
 
+#: nichos com perfil próprio (slug -> chave do perfil). Os demais saem dos portões.
+_PERFIL_DO_NICHO = {"seguros": "seguros", "clinica": "clinica"}
+
+
 def perfil_por_nicho(slug: str | None) -> str:
     """eventos · recorrente · produto. Sem nicho → recorrente (ver o docstring)."""
     from finance.vendas import modo_por_nicho
@@ -356,12 +423,11 @@ def perfil_por_nicho(slug: str | None) -> str:
         return "recorrente"
     if modo_por_nicho(s) == "evento":
         return "eventos"
-    # Corretora vem ANTES de `vende_servico`, que a pegaria como recorrente — foi
-    # exatamente o que a medição de 13/09 flagrou. É o único perfil casado com um
-    # nicho só; se um dia entrar corretora de imóveis ou consórcio, isto vira um
-    # conjunto, como NICHOS_EVENTO em finance/vendas.
-    if s == "seguros":
-        return "seguros"
+    # Os perfis de UM nicho só vêm ANTES de `vende_servico`, que os pegaria como
+    # recorrente — foi o que a medição de 13/09 flagrou na corretora, e o que a
+    # clínica viu em 22/09.
+    if s in _PERFIL_DO_NICHO:
+        return _PERFIL_DO_NICHO[s]
     if _n.vende_servico(s):
         return "recorrente"
     return "produto"

@@ -206,6 +206,25 @@ NICHOS: dict[str, dict] = {
                        "barra_snack", "bebida", "marmita", "insumo", "acessorio",
                        "outro"],
     },
+    # Clínica (primeira conta: Espaço Pelle Clínica Dermatológica, conta 39,
+    # Pedreiras-MA). Nenhum dos 24 nichos descrevia isso: 'salao' é serviço de
+    # beleza sem ato de saúde, 'farmacia' é balcão de remédio sem atendimento.
+    #
+    # É MISTO por decisão do dono (22/09/2026): a clínica atende (consulta,
+    # procedimento) e TAMBÉM vende produto de beleza — dermocosmético, protetor —
+    # junto com o atendimento ou separado, no balcão. Sem `vende_produto` o
+    # dermocosmético não tem estoque onde morar.
+    #
+    # A ORDEM: `consulta` é a porta de entrada de toda clínica, então é o padrão
+    # do formulário. As categorias de produto vêm depois das de serviço.
+    "clinica": {
+        "label": "Clínica / Saúde",
+        "vende_produto": True, "vende_servico": True,
+        "unidades": ["consulta", "sessao", "procedimento", "pacote",
+                     "unidade", "frasco", "kit"],
+        "categorias": ["consulta", "procedimento", "estetica", "retorno",
+                       "dermocosmetico", "cosmetico", "outro"],
+    },
 }
 
 # União de TODAS as unidades de todos os nichos. Serve pra validação frouxa no
@@ -328,6 +347,7 @@ _UNIDADE_LABEL = {
     "licenca": "licença", "etapa": "etapa", "medicao": "medição", "m2": "m²",
     "campanha": "campanha", "convidado": "convidado",
     "pote": "pote", "sache": "sachê", "marmita": "marmita",
+    "consulta": "consulta", "procedimento": "procedimento",
 }
 
 
@@ -497,6 +517,38 @@ _PERSONAS_NICHO: dict[str, str] = {
         "nem \"posso tomar com tal remédio\". Isso é com nutricionista ou médico — "
         "diga isso em uma linha e siga ajudando na loja."
     ),
+    # NÃO usa _molde_servico: o molde ensina que mensalidade é o forte, e clínica
+    # vive de atendimento avulso e pacote de sessões. As duas frases que só
+    # existem aqui: NADA DE CONSELHO MÉDICO (o agente é do caixa, não do
+    # consultório) e DADO DE SAÚDE NÃO ENTRA NO LANÇAMENTO — diagnóstico é dado
+    # sensível na LGPD, e descrição de título a receber não é prontuário.
+    "clinica": (
+        "RAMO DA EMPRESA: CLÍNICA (atende paciente e também vende produto de "
+        "beleza/dermocosmético, junto com o atendimento ou separado). Você fala "
+        "com o dono ou a gestão da clínica — vá direto. Você é o braço "
+        "OPERACIONAL do caixa e da agenda de recebimentos, não do consultório.\n"
+        "- DUAS RECEITAS, DUAS CATEGORIAS: consulta e procedimento -> "
+        "'Honorarios'; produto vendido (dermocosmético, protetor, kit) -> "
+        "'Vendas'. Quando o paciente leva produto na mesma visita, são DOIS "
+        "lançamentos — é essa separação que mostra quanto a clínica fatura com "
+        "atendimento e quanto com produto.\n"
+        "- PACOTE DE SESSÕES: vendido de uma vez e usado ao longo das semanas. "
+        "Parcelado -> títulos a RECEBER (um por parcela), com o paciente na "
+        "contraparte. Ao receber de um paciente que ainda não está na base, "
+        "ofereça cadastrá-lo (cadastrar_cliente).\n"
+        "- CONVÊNIO, se houver, é quem paga: título a receber com o CONVÊNIO na "
+        "contraparte, não o paciente.\n"
+        "- A PAGAR (só custos DELA): material de procedimento (ácido, toxina, "
+        "descartáveis) -> 'Insumos'; produto comprado pra revenda -> 'Compras'; "
+        "anuidade de conselho (CRM/CRO), alvará da vigilância e impostos -> "
+        "'Impostos'; sistema de agenda/prontuário -> 'Assinaturas'.\n"
+        "- DADO DE SAÚDE NÃO ENTRA NO LANÇAMENTO: na descrição vai o serviço "
+        "(\"consulta\", \"peeling\", \"sessão 3/6\"), nunca diagnóstico, doença "
+        "ou queixa do paciente. Prontuário é outro sistema.\n"
+        "- NADA DE CONSELHO MÉDICO. Não indique tratamento, procedimento, dose "
+        "nem produto pra problema de pele, e não interprete exame. Isso é com o "
+        "médico da clínica — diga isso em uma linha e siga ajudando no caixa."
+    ),
     "construcao": _molde_servico(
         "CONSTRUÇÃO CIVIL / OBRAS", "um construtor/engenheiro de obras",
         "o faturamento é por MEDIÇÃO/ETAPA da obra (o cliente paga conforme a obra "
@@ -525,6 +577,8 @@ _ROTULO_RECEBER = {
     "agencia": "Mensalidades",
     "tecnologia": "Mensalidades",
     "construcao": "Medições",
+    # vende produto, mas paciente não compra "fiado" — deve consulta e pacote
+    "clinica": "A receber",
 }
 
 

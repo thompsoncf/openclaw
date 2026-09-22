@@ -54,6 +54,14 @@ class Leitura:
     e_apolice: bool = False
     #: nome, documento e e-mail da própria corretora — nada disso é o segurado
     proibidos: tuple = ()
+    #: COMO esta leitura saiu, que é diferente de quanto ela achou:
+    #: 'layout'  — o bloco da seguradora, que sabe onde cada campo mora;
+    #: 'rotulos' — o genérico, que leu pelos rótulos do papel e achou coisa;
+    #: 'nada'    — passou o genérico e não achou nada que identifique a apólice.
+    #: A tela mostrava "layout não reconhecido" em vermelho pros DOIS últimos, e o
+    #: dono leu isso como "o sistema não está reconhecendo" num papel do qual eu
+    #: tinha acabado de tirar treze campos (22/09/2026).
+    como: str = "nada"
 
     def ok(self) -> bool:
         """Tem o mínimo pro alerta existir: seguradora e fim da vigência."""
@@ -775,6 +783,17 @@ def _parcelas_da_tabela(texto: str):
     return []
 
 
+#: O que faz uma leitura sem layout valer a pena. Não é a CONTAGEM de campos: o
+#: genérico sempre grava `ramo`, e um papel de que só saiu "auto" não foi lido. É
+#: ter achado ao menos uma coisa que IDENTIFICA a apólice.
+_IDENTIFICAM = ("nome", "vigencia_fim", "numero_apolice", "numero_proposta",
+                "placa", "chassi", "premio_centavos")
+
+
+def _achou_o_bastante(L: Leitura) -> bool:
+    return any(L.campos.get(k) for k in _IDENTIFICAM)
+
+
 def _generico(texto: str, L: Leitura) -> None:
     """Lê o que estiver ROTULADO, seja qual for a seguradora.
 
@@ -961,6 +980,22 @@ def texto_do_pdf(conteudo: bytes) -> tuple[str, int]:
     return texto, doc.page_count
 
 
+#: A VERSÃO DO LEITOR. Sobe de um toda vez que o leitor aprende alguma coisa —
+#: layout novo, sinônimo novo, conserto de âncora. Fica carimbada em
+#: `apolice_lida.lido->>'versao'`, e é o que deixa o painel saber que uma leitura
+#: guardada é mais velha que o leitor de hoje e refazê-la sozinho.
+#:
+#: Nasceu em 22/09/2026, do mesmo problema duas vezes: sete apólices lidas de
+#: manhã, o leitor genérico no ar às 12h45, e a fila continuando a mostrar a
+#: leitura das 8h porque a releitura dependia de alguém achar e clicar um botão.
+#: Ferramenta que melhora sozinha não pode pedir licença pra aplicar a melhora.
+#:
+#:  1 — só a Allianz, com o genérico falando Allianzês
+#:  2 — Mapfre e Porto, bloco do segurado limitado, guarda da própria corretora
+#:  3 — o genérico por sinônimos (#804)
+VERSAO = 3
+
+
 def ler_texto(texto: str, paginas: int = 0, proibidos: tuple[str, ...] = ()) -> Leitura:
     """`proibidos`: nome, documento e e-mail da PRÓPRIA corretora e dos membros
     dela. Nada disso pode ser o segurado, e é a trava que não depende de conhecer
@@ -969,7 +1004,7 @@ def ler_texto(texto: str, paginas: int = 0, proibidos: tuple[str, ...] = ()) -> 
     L.proibidos = tuple(proibidos)
     for nome, reconhece, leitor in _LAYOUTS:
         if reconhece(texto):
-            L.seguradora, L.reconhecida = nome, True
+            L.seguradora, L.reconhecida, L.como = nome, True, "layout"
             leitor(texto, L)
             break
     if not L.reconhecida:
@@ -982,12 +1017,19 @@ def ler_texto(texto: str, paginas: int = 0, proibidos: tuple[str, ...] = ()) -> 
         nome, trecho = nomear_seguradora(texto)
         if nome:
             L.campos["seguradora"], L.trechos["seguradora"] = nome, trecho
-            L.avisos.append(f"Achei {nome} no papel, mas não conheço o layout dela — "
-                            "o que achei está preenchido, o resto ficou em branco. "
-                            "Confira tudo.")
+        # O AVISO DEPENDE DO QUE SAIU, não de conhecer o layout. Ele dizia "não
+        # reconheci o layout desta seguradora" mesmo quando o genérico tinha tirado
+        # treze campos do papel — a pessoa lia "não leu" e ia digitar tudo à mão.
+        L.como = "rotulos" if _achou_o_bastante(L) else "nada"
+        quem = nome or "esta seguradora"
+        if L.como == "rotulos":
+            L.avisos.append(f"Li este papel pelos rótulos dele, sem um layout próprio "
+                            f"da {quem}. O que achei está preenchido; confira, "
+                            "principalmente os valores.")
         else:
-            L.avisos.append("Não reconheci o layout desta seguradora — o que achei está "
-                            "preenchido, o resto ficou em branco. Confira tudo.")
+            L.avisos.append(f"Não achei rótulo nenhum que eu conheça neste papel "
+                            f"({quem}). Cadastre à mão, e me manda o PDF que eu "
+                            "aprendo os rótulos dele.")
     # LAYOUT RECONHECIDO JÁ É A PROVA. Sem esta linha, a proposta Allianz enxuta
     # (que não escreve SUSEP nem a palavra "apólice", por ser proposta) reprovava
     # nas marcas e caía no caixa — o defeito que este arquivo existe pra evitar,
@@ -1042,6 +1084,8 @@ def resumo_para_guardar(L: Leitura) -> dict:
     return {
         "seguradora": L.seguradora or L.campos.get("seguradora"),
         "reconhecida": L.reconhecida, "e_apolice": L.e_apolice, "paginas": L.paginas,
+        # o carimbo do leitor que produziu isto — ver `VERSAO`
+        "versao": VERSAO, "como": L.como,
         "campos": {k: s(v) for k, v in L.campos.items()},
         "checagens": [{"nome": n, "ok": ok, "detalhe": d} for n, ok, d in L.checagens],
         "nao_achou": L.nao_achou, "avisos": L.avisos,

@@ -439,13 +439,48 @@ def ler_pendentes_bg(pool, conta_id: int, conversa_id: int) -> None:
 
 
 def resumo(d: dict) -> str:
-    """A linha que a lista mostra no lugar do nome do arquivo.
+    """A UMA linha que um aviso de WhatsApp cabe: marca, pessoa e prazo.
 
-    Só diz o que foi lido de verdade: sem seguradora reconhecida, o nome do arquivo
-    continua sendo a melhor informação que existe."""
+    É o que `aviso_de_repetida` manda de volta pra quem reenviou uma apólice que já
+    está na casa. A LISTA da janela não usa mais isto — ela tem duas linhas, e o que
+    ela mostra em cada uma está em `titulo` e `detalhe`, logo abaixo."""
     if d.get("erro"):
         return d["erro"]
     partes = [p for p in (d.get("seguradora"), d.get("segurado")) if p]
+    if d.get("vigencia_fim"):
+        partes.append("vence " + d["vigencia_fim"].strftime("%d/%m/%Y"))
+    return " · ".join(partes)
+
+
+def titulo(d: dict) -> str:
+    """DE QUEM É o documento — a primeira linha da lista, e o que a pessoa procura.
+
+    O segurado quando o leitor achou; senão o nome do arquivo, sem a extensão.
+
+    POR QUE NÃO A SEGURADORA. Até 22/09/2026 a lista mostrava `resumo`, que começa
+    pela marca. Nos sete PDFs que chegaram naquela manhã o leitor reconhecia a
+    seguradora e mais nada — e a fila virou sete linhas dizendo "HDI", "Azul
+    Seguros", "Tokio Marine", "Zurich", "Yelum", uma embaixo da outra, sem um nome
+    de cliente em nenhuma. O nome do arquivo, que o resumo tinha substituído, era
+    justamente o que dizia de quem era o papel ("APÓLICE MARIO JOSE VANDERLEI.pdf").
+    A marca não sumiu: desceu pra segunda linha, em `detalhe`, que é o lugar de
+    contexto. Identidade em cima, contexto embaixo."""
+    if d.get("segurado"):
+        return str(d["segurado"]).strip()
+    nome = str(d.get("nome") or d.get("pdf_nome") or "").strip()
+    if nome.lower().endswith(".pdf"):
+        nome = nome[:-4].strip()
+    return nome
+
+
+def detalhe(d: dict) -> str:
+    """A segunda linha: a marca e o prazo. Contexto, não identidade.
+
+    Vazia quando não se leu nada — linha em branco é melhor que linha inventada, e
+    a lista já encolhe sozinha (o CSS não reserva altura pra `.det` vazia)."""
+    partes = []
+    if d.get("seguradora"):
+        partes.append(str(d["seguradora"]))
     if d.get("vigencia_fim"):
         partes.append("vence " + d["vigencia_fim"].strftime("%d/%m/%Y"))
     return " · ".join(partes)
@@ -575,6 +610,43 @@ def reler(pool, conta_id: int, lida_id: int) -> dict:
                       (*campos.values(), conta_id, lida_id))
             c.commit()
     return {"ok": not erro, "leitura": leitura, "erro": erro}
+
+
+def esta_velha(lido: dict | None) -> bool:
+    """Esta leitura guardada saiu de um leitor mais velho que o de hoje?
+
+    O carimbo é `lido->>'versao'` (ver `apolice_pdf.VERSAO`). Leitura sem carimbo é
+    anterior ao carimbo, logo velha — que é exatamente o caso das que estavam na
+    fila quando isto nasceu.
+
+    POR QUE O PAINEL PERGUNTA ISSO. O leitor melhora a cada seguradora nova, e até
+    22/09/2026 a melhora só alcançava a fila se alguém achasse o botão "reler com o
+    leitor de hoje" e clicasse. Naquele dia o genérico subiu ao meio-dia e as sete
+    apólices lidas de manhã continuaram mostrando a leitura das 8h — o dono viu a
+    tela e disse, com razão, que "o sistema ainda não tá reconhecendo o layout".
+    Ferramenta que melhora sozinha não pede licença pra aplicar a melhora.
+    """
+    try:
+        return int((lido or {}).get("versao") or 0) < apdf.VERSAO
+    except (TypeError, ValueError):
+        return True
+
+
+def reler_se_velha(pool, conta_id: int, lida_id: int, lido: dict | None) -> bool:
+    """Relê quando a leitura guardada é mais velha que o leitor. Devolve se releu.
+
+    Best-effort de propósito: o cofre pode estar fora do ar, e uma releitura que
+    falha não pode impedir a pessoa de abrir a conferência que já existe. Pior
+    leitura vale mais que tela que não abre.
+    """
+    if not esta_velha(lido):
+        return False
+    try:
+        return bool(reler(pool, conta_id, lida_id).get("ok"))
+    except Exception as e:  # noqa: BLE001
+        _log.info("releitura automática falhou (conta %s, lida %s): %s: %s",
+                  conta_id, lida_id, type(e).__name__, e)
+        return False
 
 
 def reler_a_fila(pool, conta_id: int, limite: int = 30) -> dict:

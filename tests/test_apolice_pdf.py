@@ -196,13 +196,37 @@ def test_cpf_invalido_vira_aviso():
 
 
 def test_layout_desconhecido_avisa_e_nao_chuta():
+    """Sem layout e sem nome no papel: não inventa a seguradora, e avisa.
+
+    O AVISO MUDOU EM 22/09/2026, e o que ele diz agora é o que saiu. Dizia "Não
+    reconheci o layout desta seguradora" mesmo quando o genérico tinha tirado o
+    papel inteiro pelos rótulos — e quem lia isso ia digitar tudo à mão achando
+    que nada tinha sido lido. O que este teste continua segurando é o essencial:
+    seguradora não se chuta, e leitura sem layout sempre pede conferência.
+    """
     texto = papel().replace("ALLIANZ", "OUTRA SEGURADORA")
     L = ap.ler_texto(texto)
     assert L.reconhecida is False and L.seguradora is None
     assert "seguradora" not in L.campos                     # não inventa quem é
-    assert any("Não reconheci" in a for a in L.avisos)
-    # mas o que os rótulos genéricos acharam, preenche
+    assert L.como == "rotulos"                              # leu, só que sem layout
+    assert any("rótulos" in a and "onfira" in a for a in L.avisos)
+    # e o que os rótulos genéricos acharam, preenche
     assert L.campos["vigencia_fim"] == date(2027, 7, 23)
+
+
+def test_papel_que_nao_tem_rotulo_nenhum_diz_que_nao_leu():
+    """O outro lado do mesmo selo: sem nada identificável, `como` é 'nada' e o
+    aviso manda cadastrar à mão em vez de fingir que leu."""
+    L = ap.ler_texto("Prezado cliente, segue em anexo o documento solicitado. "
+                     * 20)
+    assert L.como == "nada" and L.reconhecida is False
+    assert any("à mão" in a for a in L.avisos)
+
+
+def test_toda_leitura_sai_carimbada_com_a_versao_do_leitor():
+    """É o carimbo que deixa o painel saber que uma leitura guardada envelheceu."""
+    g = ap.resumo_para_guardar(ap.ler_texto(papel()))
+    assert g["versao"] == ap.VERSAO and g["como"] == "layout"
 
 
 def test_sem_vigencia_nao_esta_ok():

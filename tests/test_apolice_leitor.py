@@ -20,6 +20,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from finance import apolice_leitor as al
+from finance import apolice_pdf as apdf
 
 MIG = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 CONTA = 37          # a Liberal, nicho seguros
@@ -716,3 +717,162 @@ def test_reler_nao_toca_no_que_foi_descartado(limpo, monkeypatch):
     al.descartar(limpo, CONTA, r["id"])
     _no_cofre(monkeypatch)
     assert al.reler_a_fila(limpo, CONTA) == {"relidas": 0, "falhas": 0}
+
+
+# ────────── 9. a lista tem duas linhas: quem é, e o resto (22/09/2026) ──────────
+#
+# O dono, depois de ver a fila com as sete seguradoras novas: "não ficou legal,
+# dá uma olhada pra ajustar o layout". A fila mostrava `resumo`, que começa pela
+# SEGURADORA — e naquela manhã o leitor reconhecia a marca de todos os sete PDFs
+# e o nome de nenhum. Deu sete linhas dizendo "HDI", "Azul Seguros", "Tokio
+# Marine", "Bradesco Seguros", "Zurich", "Yelum", uma embaixo da outra, e o nome
+# do arquivo — que trazia o nome do cliente — tinha sido jogado fora pra caber a
+# marca. `titulo` é quem é; `detalhe` é o contexto.
+
+
+def test_o_titulo_e_o_segurado_quando_o_leitor_achou():
+    assert al.titulo({"segurado": "JOSE ALVES", "nome": "A.pdf"}) == "JOSE ALVES"
+
+
+def test_sem_segurado_o_titulo_e_o_nome_do_arquivo_sem_a_extensao():
+    """O caso exato dos sete de 22/09: a marca foi lida, o nome não."""
+    d = {"segurado": None, "seguradora": "Zurich",
+         "nome": "APÓLICE MARIO JOSE VANDERLEI.pdf"}
+    assert al.titulo(d) == "APÓLICE MARIO JOSE VANDERLEI"
+
+
+def test_o_titulo_nunca_e_a_seguradora():
+    """A regressão que o dono viu: a linha dizia 'Zurich' e mais nada."""
+    d = {"segurado": None, "seguradora": "Zurich", "nome": "MARIO.pdf"}
+    assert al.titulo(d) != "Zurich" and "MARIO" in al.titulo(d)
+
+
+def test_o_titulo_aguenta_a_extensao_em_caixa_alta():
+    assert al.titulo({"nome": "PROPOSTA ANACELIA.PDF"}) == "PROPOSTA ANACELIA"
+
+
+def test_o_titulo_de_um_documento_sem_nome_nenhum_e_vazio():
+    assert al.titulo({}) == ""
+
+
+def test_o_detalhe_leva_a_marca_e_o_prazo():
+    from datetime import date
+    d = {"seguradora": "Mapfre", "vigencia_fim": date(2027, 9, 10)}
+    assert al.detalhe(d) == "Mapfre · vence 10/09/2027"
+
+
+def test_o_detalhe_de_quem_so_teve_a_marca_lida_e_so_a_marca():
+    assert al.detalhe({"seguradora": "HDI", "vigencia_fim": None}) == "HDI"
+
+
+def test_sem_nada_lido_o_detalhe_e_vazio_e_a_linha_some():
+    assert al.detalhe({"seguradora": None, "vigencia_fim": None}) == ""
+
+
+def test_o_detalhe_nao_repete_o_segurado_que_ja_esta_no_titulo():
+    d = {"seguradora": "Mapfre", "segurado": "SOLANGE", "vigencia_fim": None}
+    assert "SOLANGE" not in al.detalhe(d)
+
+
+def test_o_resumo_de_uma_linha_continua_inteiro_pro_aviso_de_repetida():
+    """`resumo` não é mais da lista, mas é do recado que volta no WhatsApp."""
+    from datetime import date
+    d = {"seguradora": "Mapfre", "segurado": "SOLANGE", "vigencia_fim": date(2027, 9, 10)}
+    assert al.resumo(d) == "Mapfre · SOLANGE · vence 10/09/2027"
+
+
+def test_titulo_e_detalhe_saem_do_que_a_lista_devolve(limpo, monkeypatch):
+    """De ponta a ponta: o que `sem_mensagem` devolve alimenta os dois."""
+    from datetime import date
+    _finge(monkeypatch, leitura=_leitura(reconhecida=False, seguradora=None,
+                                         e_apolice=True,
+                                         campos={"seguradora": "Tokio Marine",
+                                                 "vigencia_fim": date(2027, 3, 4)}))
+    al.ler_bytes(limpo, CONTA, b"%PDF a", "PROPOSTA DENISE.pdf",
+                 origem="whatsapp", de="Cássio")
+    it = al.sem_mensagem(limpo, CONTA)[0]
+    assert al.titulo(it) == "PROPOSTA DENISE"
+    assert al.detalhe(it) == "Tokio Marine · vence 04/03/2027"
+
+
+# ────────── 10. o leitor melhora e a fila aproveita sozinha (22/09/2026) ──────────
+#
+# "o sistema ainda não tá reconhecendo o layout das 7 novas apólices que estão lá,
+# ajeite logo". Ele tinha razão e o leitor também: o genérico subiu ao meio-dia e
+# as sete foram lidas às 8h. A releitura existia desde o #801 — como BOTÃO. Quem
+# precisa achar um botão pra receber a melhora não recebe a melhora.
+
+
+def test_leitura_sem_carimbo_e_velha():
+    """As que já estavam na fila quando o carimbo nasceu."""
+    assert al.esta_velha({}) is True
+    assert al.esta_velha(None) is True
+
+
+def test_leitura_de_um_leitor_anterior_e_velha():
+    assert al.esta_velha({"versao": apdf.VERSAO - 1}) is True
+
+
+def test_leitura_do_leitor_de_hoje_nao_e_velha():
+    assert al.esta_velha({"versao": apdf.VERSAO}) is False
+
+
+def test_carimbo_estragado_conta_como_velho():
+    """Falha fechada: na dúvida relê, que é a operação segura — o PDF está no
+    cofre e a releitura não perde nada."""
+    assert al.esta_velha({"versao": "que?"}) is True
+
+
+def test_abrir_uma_leitura_velha_a_refaz(limpo, monkeypatch):
+    from datetime import date
+    _finge(monkeypatch, leitura=_leitura(campos={"nome": "ANTIGO"}))
+    al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf", origem="telegram", de="Cássio")
+    with limpo.connection() as c:
+        lida_id = c.execute("select id from apolice_lida").fetchone()[0]
+        # envelhece a leitura à mão, como estavam as sete de 22/09
+        c.execute("update apolice_lida set lido = lido - 'versao' where id=%s", (lida_id,))
+        c.commit()
+    ja = al.por_id(limpo, CONTA, lida_id)
+    _no_cofre(monkeypatch)
+    monkeypatch.setattr(al.apdf, "ler", lambda b, proibidos=(): _leitura(
+        campos={"nome": "NOVO", "vigencia_fim": date(2027, 5, 6)}))
+    assert al.reler_se_velha(limpo, CONTA, lida_id, ja["lido"]) is True
+    assert al.por_id(limpo, CONTA, lida_id)["segurado"] == "NOVO"
+
+
+def test_abrir_uma_leitura_de_hoje_nao_gasta_uma_releitura(limpo, monkeypatch):
+    """Releitura baixa o PDF do cofre: fazer isso a cada abertura seria pagar
+    rede toda vez pra chegar exatamente na mesma leitura."""
+    _finge(monkeypatch, leitura=_leitura(campos={"nome": "IGUAL"}))
+    al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf", origem="telegram", de="Cássio")
+    with limpo.connection() as c:
+        lida_id = c.execute("select id from apolice_lida").fetchone()[0]
+    ja = al.por_id(limpo, CONTA, lida_id)
+    chamou = []
+    monkeypatch.setattr(al, "reler", lambda *a, **k: chamou.append(a) or {"ok": True})
+    assert al.reler_se_velha(limpo, CONTA, lida_id, ja["lido"]) is False
+    assert chamou == []
+
+
+def test_releitura_que_falha_nao_impede_a_tela_de_abrir(limpo, monkeypatch):
+    """Pior leitura vale mais que tela que não abre."""
+    _finge(monkeypatch, leitura=_leitura(campos={"nome": "ANTIGO"}))
+    al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf", origem="telegram", de="Cássio")
+    with limpo.connection() as c:
+        lida_id = c.execute("select id from apolice_lida").fetchone()[0]
+
+    def explode(*a, **k):
+        raise RuntimeError("o cofre caiu")
+
+    monkeypatch.setattr(al, "reler", explode)
+    assert al.reler_se_velha(limpo, CONTA, lida_id, {}) is False
+    assert al.por_id(limpo, CONTA, lida_id)["segurado"] == "ANTIGO"
+
+
+def test_a_leitura_guardada_sai_carimbada(limpo, monkeypatch):
+    """Ponta a ponta: quem lê hoje não volta a ser relido amanhã à toa."""
+    _finge(monkeypatch, leitura=_leitura(campos={"nome": "JOSE"}))
+    al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf", origem="telegram", de="Cássio")
+    with limpo.connection() as c:
+        lida_id = c.execute("select id from apolice_lida").fetchone()[0]
+    assert al.esta_velha(al.por_id(limpo, CONTA, lida_id)["lido"]) is False

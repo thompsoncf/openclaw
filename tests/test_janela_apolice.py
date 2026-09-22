@@ -423,3 +423,55 @@ def test_cadastrar_limpa_as_irmas_da_fila():
     corpo = corpo_de("salvar_apolice")
     assert "_apl.descartar_irmas(pool, conta[0], numero_apolice" in corpo
     assert "except Exception" in corpo, "limpar a fila não pode derrubar o cadastro"
+
+
+# ────────── reler com o leitor de hoje (22/09/2026) ──────────
+#
+# "ver a questão do layout logo". Cada seguradora nova entra em `_LAYOUTS` DEPOIS
+# que o primeiro PDF dela chega, e quem já estava na fila ficava com a leitura
+# velha pra sempre: a Liberal tinha duas Mapfre lidas antes do layout da Mapfre e
+# uma Porto lida antes do layout da Porto. O documento certo estava guardado o
+# tempo todo; o que estava velho era a leitura.
+
+
+def test_a_fila_pode_ser_relida_da_propria_tela():
+    assert 'onclick="rnReler(this)"' in PA
+    assert "window.rnReler = function(bt)" in PA
+    assert '"/painel/renovacoes/reler"' in PA
+
+
+def test_reler_nao_baixa_nada_de_fora():
+    """O arquivo já está no cofre. Ir ao CDN do WhatsApp de novo seria pedir um
+    arquivo que pode ter expirado, pra ler o que já está guardado."""
+    import pathlib
+    leitor = (pathlib.Path(__file__).resolve().parent.parent
+              / "finance" / "apolice_leitor.py").read_text(encoding="utf-8")
+    corpo = leitor[leitor.index("def reler(pool"):]
+    corpo = corpo[:corpo.index("\ndef reler_a_fila")]
+    assert "_cofre.ler(" in corpo
+    assert "wa_midia" not in corpo and "buscar(" not in corpo
+
+
+def test_reler_atualiza_em_vez_de_inserir():
+    """Criar linha nova daria uma quarta cópia do que já está na fila."""
+    import pathlib
+    leitor = (pathlib.Path(__file__).resolve().parent.parent
+              / "finance" / "apolice_leitor.py").read_text(encoding="utf-8")
+    corpo = leitor[leitor.index("def reler(pool"):]
+    corpo = corpo[:corpo.index("\ndef reler_a_fila")]
+    assert "update apolice_lida set" in corpo
+    assert "insert into apolice_lida" not in corpo
+
+
+def test_a_rota_de_reler_e_de_gerencia_e_exige_cofre():
+    corpo = corpo_de("reler_a_fila")
+    assert "if not gerencia:" in corpo
+    assert "_cofre.configurado()" in corpo
+
+
+def test_reler_recarrega_a_lista_e_a_faixa():
+    corpo = PA[PA.index("window.rnReler = function(bt)"):]
+    corpo = corpo[:corpo.index("\n  function wppDescartar")]
+    assert "wppLida = false" in corpo and "wppCarregar()" in corpo
+    assert "faixaAtualizar(d.esperando)" in corpo
+    assert "bt.disabled = true" in corpo, "sem travar o botão, dois cliques relêem duas vezes"

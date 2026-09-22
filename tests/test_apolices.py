@@ -78,6 +78,7 @@ def pool():
         c.execute((MIG / "289_apolice_remetentes.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "304_apolice_lida.sql").read_text(encoding="utf-8"))
         c.execute((MIG / "305_apolice_lida_telegram.sql").read_text(encoding="utf-8"))
+        c.execute((MIG / "308_apolice_excluida.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -831,3 +832,73 @@ def test_o_remetente_nao_vaza_entre_contas(limpo):
     assert ap.remetentes(limpo, CONTA) == []
     assert len(ap.remetentes(limpo, 38)) == 1
     assert ap.quem_mandou_pdf(limpo, CONTA) == []
+
+
+# ────────── excluir sem perder o registro (22/09/2026) ──────────
+#
+# "la no final coloca uma seta com o botão igual tem na aba serviços no funil pra
+# aparecer os comandos editar, excluir e demais funções".
+#
+# A carteira não tinha ação nenhuma na linha: cadastrar era o único verbo da tela.
+# Corrigir um dígito no prêmio exigia cadastrar de novo — e aí o índice do número
+# da apólice batia, e nem isso dava.
+
+
+def test_excluir_tira_da_carteira(limpo):
+    aid = _apolice(limpo)
+    assert ap.total_da_carteira(limpo, CONTA) == 1
+    assert ap.excluir(limpo, CONTA, aid, membro_id=45) is True
+    assert ap.total_da_carteira(limpo, CONTA) == 0
+    assert ap.listar(limpo, CONTA) == []
+
+
+def test_excluir_nao_apaga_o_registro(limpo):
+    """Regra 0: o que sai é da carteira, não do banco. Desfazer um `delete` é
+    restaurar backup; desfazer isto é um update."""
+    aid = _apolice(limpo)
+    ap.excluir(limpo, CONTA, aid, membro_id=45)
+    with limpo.connection() as c:
+        r = c.execute("""select seguradora, excluida_por, excluida_em is not null
+                           from apolices where id=%s""", (aid,)).fetchone()
+    assert r == ("Allianz", 45, True)
+
+
+def test_desfazer_devolve_pra_carteira(limpo):
+    aid = _apolice(limpo)
+    ap.excluir(limpo, CONTA, aid)
+    assert ap.voltar_apolice(limpo, CONTA, aid) is True
+    assert ap.total_da_carteira(limpo, CONTA) == 1
+
+
+def test_excluir_duas_vezes_nao_mente(limpo):
+    aid = _apolice(limpo)
+    assert ap.excluir(limpo, CONTA, aid) is True
+    assert ap.excluir(limpo, CONTA, aid) is False
+
+
+def test_nao_se_exclui_apolice_de_outra_conta(limpo):
+    aid = _apolice(limpo)
+    assert ap.excluir(limpo, CONTA + 9999, aid) is False
+    assert ap.total_da_carteira(limpo, CONTA) == 1
+
+
+def test_a_excluida_some_da_fila_de_renovacao(limpo):
+    """`a_vencer` alimenta o alerta no celular. Apólice excluída continuar
+    avisando é o pior jeito de descobrir que ela ainda existe."""
+    from datetime import date, timedelta
+    venc = date.today() + timedelta(days=30)
+    aid = _apolice(limpo, vigencia_fim=venc)
+    assert len(ap.a_vencer(limpo, CONTA, dias=90)) == 1
+    ap.excluir(limpo, CONTA, aid)
+    assert ap.a_vencer(limpo, CONTA, dias=90) == []
+
+
+def test_excluida_nao_e_perdida(limpo):
+    """São coisas diferentes: 'perdida' é desfecho de negócio e alimenta o funil
+    de perda; 'excluída' é erro de cadastro. Misturar envenenaria a medição."""
+    aid = _apolice(limpo)
+    ap.excluir(limpo, CONTA, aid)
+    with limpo.connection() as c:
+        r = c.execute("select perda_motivo, perdida_em from apolices where id=%s",
+                      (aid,)).fetchone()
+    assert r == (None, None)

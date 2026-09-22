@@ -233,7 +233,13 @@ def _fone_txt(tel) -> str:
 def _apolice_para_janela(a: dict) -> dict:
     """O que a janela mostra de cada apólice — formatado aqui, não no JS."""
     bem = a.get("bem") or {}
-    bem_txt = " · ".join(x for x in (bem.get("modelo"), bem.get("ano"), bem.get("placa"),
+    # A PLACA VEM PRIMEIRO. Era a última, depois do modelo — e o modelo da Ranger
+    # do Vicente tem 58 caracteres ("FORD NOVA RANGER CAB DUPLA XLS 2.0 TURBO 4X4
+    # AUT. 4 PORTAS"), então a placa ia parar no fim da segunda linha e sumia de
+    # vista. O dono reclamou que "a placa do Vicente não aparece": ela aparecia,
+    # só que onde ninguém olha. Placa é como a corretora procura um carro; o
+    # modelo é a descrição, e descrição pode truncar.
+    bem_txt = " · ".join(x for x in (bem.get("placa"), bem.get("modelo"), bem.get("ano"),
                                      "zero km" if str(bem.get("zero_km", "")).lower() in ("sim", "true") else "")
                          if x)
     vi, vf, dias = a.get("vigencia_inicio"), a.get("vigencia_fim"), a.get("dias")
@@ -700,6 +706,89 @@ def ver_pdf(request: Request, apolice_id: int):
         "Content-Disposition": f'inline; filename="{nome}"', "Cache-Control": "no-store"})
 
 
+def _form_da_apolice(a: dict) -> dict:
+    """Uma apólice da carteira no formato que o formulário da janela recebe.
+
+    A PONTE COM O CADASTRO: editar abre o MESMO formulário que cadastrar, com os
+    campos cheios, e salvar passa pelo MESMO `salvar_apolice` (que já aceitava
+    `apolice_id` desde a 278 — só faltava alguém mandar). Um segundo formulário de
+    edição divergiria do primeiro no dia seguinte.
+    """
+    bem = a.get("bem") or {}
+    cent = lambda k: (f"{a[k]/100:.2f}".replace(".", ",") if a.get(k) is not None else "")
+    return {
+        "apolice_id": str(a["id"]), "cliente_id": str(a.get("cliente_id") or ""),
+        "corretor_id": str(a.get("corretor_id") or ""),
+        "seguradora": a.get("seguradora") or "", "ramo": a.get("ramo") or "auto",
+        "situacao": a.get("situacao") or "vigente",
+        "numero_proposta": a.get("numero_proposta") or "",
+        "numero_apolice": a.get("numero_apolice") or "",
+        "vigencia_inicio": a["vigencia_inicio"].isoformat() if a.get("vigencia_inicio") else "",
+        "vigencia_fim": a["vigencia_fim"].isoformat() if a.get("vigencia_fim") else "",
+        "premio": cent("premio_centavos"), "iof": cent("iof_centavos"),
+        "franquia": cent("franquia_centavos"),
+        "classe_bonus": a.get("classe_bonus") or "",
+        "parcelas": str(a["parcelas"]) if a.get("parcelas") else "",
+        "dia_vencimento": str(a["dia_vencimento"]) if a.get("dia_vencimento") else "",
+        "placa": bem.get("placa") or "", "modelo": bem.get("modelo") or "",
+        "ano": bem.get("ano") or "", "chassi": bem.get("chassi") or "",
+        "obs": a.get("obs") or "",
+        # o segurado já existe; o formulário não recria cliente numa edição
+        "nome": "", "cpf": "", "telefone": "", "email": "", "endereco": "",
+    }
+
+
+@router.get("/painel/renovacoes/apolice/{apolice_id}")
+def abrir_para_editar(request: Request, apolice_id: int):
+    """A apólice cadastrada, pronta pro formulário da janela — pra EDITAR.
+
+    Pedido do dono em 22/09/2026: a carteira não tinha ação nenhuma na linha.
+    Cadastrar era o único verbo da tela; corrigir um dígito errado no prêmio
+    exigia cadastrar de novo, e aí o índice do número batia e nem isso dava.
+    """
+    conta, gerencia, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "sessão expirada"}, status_code=401)
+    if not gerencia:
+        return JSONResponse({"ok": False, "erro": "só o dono e o gestor editam apólice"})
+    a = ap.uma(get_pool(), conta[0], apolice_id)
+    if not a:
+        return JSONResponse({"ok": False, "erro": "não achei esta apólice"})
+    return JSONResponse({"ok": True, "form": _form_da_apolice(a),
+                         "quem": a.get("cliente") or ""})
+
+
+@router.post("/painel/renovacoes/apolice/{apolice_id}/excluir")
+def excluir_apolice(request: Request, apolice_id: int, desfazer: str = Form("")):
+    """Tira a apólice da carteira — e devolve, se foi engano.
+
+    Não apaga (regra 0): a linha fica com quem excluiu e quando. E não é a mesma
+    coisa que "perdida", que é desfecho de negócio e alimenta o funil de perda.
+    """
+    conta, gerencia, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "sessão expirada"}, status_code=401)
+    if not gerencia:
+        return JSONResponse({"ok": False, "erro": "só o dono e o gestor excluem apólice"})
+    pool = get_pool()
+    if (desfazer or "").strip():
+        ok = ap.voltar_apolice(pool, conta[0], apolice_id)
+    else:
+        ok = ap.excluir(pool, conta[0], apolice_id, _membro_logado(request))
+    if not ok:
+        return JSONResponse({"ok": False, "erro": "não achei esta apólice"})
+    # o DESFAZER devolve a LINHA PRONTA, do mesmo template que a tabela usa. Nada
+    # dentro desta janela navega nem recarrega — é a regra que o dono deu em 18/09
+    # ("nada de refresh") e que `test_nada_dentro_da_janela_navega` cobra.
+    linha_html = ""
+    if (desfazer or "").strip():
+        a = ap.uma(pool, conta[0], apolice_id)
+        if a:
+            linha_html = _env.get_template("renovacoes_linha").render(a=a, brl=_brl)
+    return JSONResponse({"ok": True, "linha_html": linha_html,
+                         "n_carteira": ap.total_da_carteira(pool, conta[0])})
+
+
 @router.post("/painel/renovacoes/apolice")
 def salvar_apolice(request: Request,
                    apolice_id: str = Form(""), cliente_id: str = Form(""),
@@ -919,6 +1008,13 @@ _TPL_LINHA = r"""{# UMA linha da carteira. Vive sozinha porque o cadastro devolv
   <td>{{ a.situacao_txt }}</td>
   <td>{{ brl(a.premio_centavos) }}</td>
   <td>{% if a.comissao_estimada is not none %}{{ brl(a.comissao_estimada) }}{% else %}—{% endif %}</td>
+  {# AÇÕES ▾ — o mesmo desenho da aba Serviços: a palavra escrita, não um ícone.
+     A carteira não tinha ação nenhuma na linha; corrigir um dígito no prêmio
+     exigia cadastrar de novo, e aí o índice do número batia e nem isso dava. #}
+  <td class="rn-col-acoes"><span class="rn-acx">
+    <button type="button" class="rn-menu-bt" aria-haspopup="menu"
+            onclick="rnMenu(event,{{ a.id }},this)">Ações <span class="cv">▾</span></button>
+  </span></td>
 </tr>
 """
 
@@ -961,7 +1057,10 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
    dele: o título e as abas saíam estreitos e centrados, e a tabela (que tem
    min-width) vazava mais larga que tudo em cima dela. Este embrulho dá a mesma
    medida pra tudo, alinhado à esquerda, como uma tela de trabalho. */
-.rn-pag{width:100%;max-width:1040px;margin:0 auto;padding:1.2rem 1rem 2.5rem;box-sizing:border-box}
+/* `--pag` e não um número aqui: a largura da página é decidida em `web/tema.py`,
+   um lugar só. Ver o comentário do token. */
+.rn-pag{width:100%;max-width:var(--pag,1180px);margin:0 auto;
+  padding:1.2rem 1rem 2.5rem;box-sizing:border-box}
 .rn-topo{display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap;margin-bottom:.2rem}
 /* mesma medida do Raio-X e do Follow-up: h1 de 1.5rem e uma linha de leitura embaixo */
 .rn-topo h2{margin:0;font-size:1.5rem;line-height:1.15}
@@ -1043,6 +1142,28 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
 .rn-tab tr.rn-linha{cursor:pointer}
 .rn-tab tr.rn-linha:hover td{background:rgba(37,211,102,.05)}
 .rn-tab td.rn-cli{white-space:normal;min-width:180px}
+/* AÇÕES ▾ — o mesmo desenho da aba Serviços (`.oc-menu-btn`), de propósito: duas
+   telas do painel com o mesmo gesto têm que ter a mesma cara. `width:auto` e
+   `margin:0` vencem o `button{width:100%;margin-top:1.4rem}` global. */
+.rn-col-acoes{width:1%;white-space:nowrap}
+.rn-oculto{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.rn-acx{position:relative;display:inline-block}
+.rn-menu-bt{width:auto;margin:0;background:var(--bg);border:1px solid var(--borda);
+  color:var(--txt-mut);border-radius:8px;padding:.3rem .55rem;font:inherit;font-size:.76rem;
+  font-weight:600;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:.3rem}
+.rn-menu-bt:hover{color:var(--txt);border-color:var(--verde)}
+.rn-menu-bt .cv{font-size:.65rem;opacity:.8}
+/* ancorado na direita da PRÓPRIA linha, não no canto da tela */
+.rn-menu{position:absolute;top:calc(100% + 6px);right:0;z-index:50;
+  min-width:210px;max-width:min(300px,calc(100vw - 2rem));
+  background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.3rem;
+  display:flex;flex-direction:column;box-shadow:0 12px 32px rgba(0,0,0,.5);text-align:left}
+.rn-mi{display:flex;align-items:center;gap:.5rem;width:auto;margin:0;text-align:left;
+  background:none;border:0;border-radius:8px;padding:.44rem .55rem;cursor:pointer;
+  font-size:.83rem;font-family:inherit;color:var(--txt)}
+.rn-mi:hover{background:var(--card-2)}
+.rn-mi .e{flex:none;width:1.15rem;text-align:center;font-size:.85rem}
+.rn-mi.mal{color:var(--coral)}
 details.rn-det{margin-bottom:1rem}
 details.rn-det > summary{cursor:pointer;font-size:.8rem;color:var(--txt-mut);list-style:none;
   display:inline-flex;gap:.3rem;align-items:center;padding:.3rem .65rem;border:1px solid var(--borda);
@@ -1234,7 +1355,10 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         {% elif a.degrau %}<span class="rn-tag d{{ a.degrau }}">faltam {{ a.dias }} dias</span>{% endif %}
       </div>
       <div class="meta">
-        {%- if a.bem.modelo %}{{ a.bem.modelo }}{% if a.bem.placa %} · {{ a.bem.placa }}{% endif %} · {% endif -%}
+        {#- a placa PRIMEIRO e FORA do `if modelo`: apólice sem modelo cadastrado
+            deixava de mostrar a placa junto, e é a placa que identifica o carro -#}
+        {%- if a.bem.placa %}<b>{{ a.bem.placa }}</b> · {% endif -%}
+        {%- if a.bem.modelo %}{{ a.bem.modelo }} · {% endif -%}
         vence {{ a.vigencia_fim.strftime('%d/%m/%Y') }}
         {%- if a.dias == 0 %} · <b>é hoje</b>{% elif a.dias == 1 %} · <b>é amanhã</b>
         {%- elif a.dias < 0 %} · <b>há {{ -a.dias }} dias</b>{% endif %}
@@ -1316,7 +1440,7 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
   {% if carteira %}
   <div class="rn-rol"><table class="rn-tab">
     <thead><tr><th>Cliente</th><th>Seguradora</th><th>Ramo</th><th>Vence</th><th>Situação</th>
-        <th>Prêmio</th><th>Comissão</th></tr></thead>
+        <th>Prêmio</th><th>Comissão</th><th class="rn-col-acoes"><span class="rn-oculto">Ações</span></th></tr></thead>
     {# `tbody` com id porque a linha nova entra AQUI depois do cadastro, sem
        recarregar a página — e é o mesmo template que o servidor devolve. #}
     <tbody id="rn-corpo">
@@ -1424,6 +1548,10 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         <div class="sub">Auto por enquanto — é o que a carteira tem hoje. Os outros ramos já
           gravam; o que falta pra eles é o formulário, não o cadastro.</div>
         <form method="post" action="/painel/renovacoes/apolice" id="rn-form" onsubmit="return rnSalvar(this)">
+          {# SEM ISTO, EDITAR CRIA OUTRA. `salvar_apolice` aceita `apolice_id` desde
+             a 278 pra decidir entre inserir e atualizar — só que nenhum formulário
+             mandava o campo, então o caminho de edição existia e não tinha porta. #}
+          <input type="hidden" name="apolice_id" value="">
           <input type="hidden" name="pdf_caminho" value="{{ conferir.pdf_caminho if conferir else '' }}">
           <input type="hidden" name="pdf_nome" value="{{ conferir.pdf_nome if conferir else '' }}">
           <input type="hidden" name="pdf_bytes" value="{{ conferir.pdf_bytes if conferir else '' }}">
@@ -1573,16 +1701,21 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     if(j && !j.hidden) window.rnFechar();
   });
 
-  function preencher(d){
+  function preencher(d, editando){
     var form = el('rn-form');
     if(!form) return;
     var c = el('rn-conf');
     if(c) c.innerHTML = d.conf_html || '';
+    // EDITAR LIMPA ANTES. Na conferência de um PDF, campo vazio não pode apagar o
+    // padrão do select — o leitor preenche o que achou e o resto fica como está.
+    // Numa EDIÇÃO é o contrário: o que não vem é porque está vazio na apólice, e
+    // manter o valor de um documento conferido antes encheria o formulário com
+    // dado de outro cliente.
+    if(editando){ try { form.reset(); } catch(_e){} }
     var campos = d.form || {};
     Object.keys(campos).forEach(function(k){
       var campo = form.querySelector('[name="' + k + '"]');
-      // só escreve o que o leitor achou: campo vazio não apaga o padrão do select
-      if(campo && campos[k]) campo.value = campos[k];
+      if(campo && (campos[k] || editando)) campo.value = campos[k];
     });
     var pdf = d.pdf || {};
     ['caminho', 'nome', 'bytes'].forEach(function(k){
@@ -1592,7 +1725,7 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     var lido = form.querySelector('[name="pdf_lido"]');
     if(lido) lido.value = pdf.lido ? JSON.stringify(pdf.lido) : '';
     var bt = form.querySelector('.rn-salvar');
-    if(bt) bt.textContent = 'Está certo — cadastrar';
+    if(bt) bt.textContent = editando ? 'Salvar alterações' : 'Está certo — cadastrar';
   }
 
   window.rnLerPdf = function(form){
@@ -1621,23 +1754,28 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
       });
   };
 
-  function entrar(d){
+  // SÓ A LINHA. Separada de `entrar` porque o desfazer da exclusão acontece com a
+  // JANELA FECHADA — e `entrar` termina trocando o passo dela pro "cadastrada",
+  // que ali não faz sentido nenhum.
+  function encaixarLinha(html){
     var corpo = el('rn-corpo');
-    if(corpo && d.linha_html){
-      var caixa = document.createElement('tbody');
-      caixa.innerHTML = d.linha_html;
-      var nova = caixa.querySelector('tr');
-      if(nova){
-        nova.className = nova.className + ' novata';
-        // a tabela desce por vencimento: a linha entra no lugar dela, não no topo
-        var venc = nova.getAttribute('data-vence') || '';
-        var alvo = null;
-        Array.prototype.forEach.call(corpo.querySelectorAll('tr[data-vence]'), function(tr){
-          if(alvo === null && (tr.getAttribute('data-vence') || '') < venc) alvo = tr;
-        });
-        if(alvo) corpo.insertBefore(nova, alvo); else corpo.appendChild(nova);
-      }
-    }
+    if(!corpo || !html) return;
+    var caixa = document.createElement('tbody');
+    caixa.innerHTML = html;
+    var nova = caixa.querySelector('tr');
+    if(!nova) return;
+    nova.className = nova.className + ' novata';
+    // a tabela desce por vencimento: a linha entra no lugar dela, não no topo
+    var venc = nova.getAttribute('data-vence') || '';
+    var alvo = null;
+    Array.prototype.forEach.call(corpo.querySelectorAll('tr[data-vence]'), function(tr){
+      if(alvo === null && (tr.getAttribute('data-vence') || '') < venc) alvo = tr;
+    });
+    if(alvo) corpo.insertBefore(nova, alvo); else corpo.appendChild(nova);
+  }
+
+  function entrar(d){
+    encaixarLinha(d.linha_html);
     var conta = el('rn-conta-carteira');
     if(conta && d.n_carteira) conta.textContent = ' (' + d.n_carteira + ')';
     var t = el('rn-ok-txt');
@@ -1772,6 +1910,105 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         var sub = el('rn-wpp-sub');
         if(sub) sub.textContent = d.itens.length + (d.itens.length === 1 ? ' documento' : ' documentos') + ' de quem você liberou';
       });
+  }
+
+  // ── AÇÕES ▾ na linha da carteira ────────────────────────────────────────
+  // Mesmo comportamento do funil: um menu aberto por vez, some no clique de fora
+  // e no Esc. Sem isso dois menus abertos disputam a mesma tela.
+  var _menuLinha = null;
+  function fecharMenuLinha(){ if(_menuLinha){ _menuLinha.remove(); _menuLinha = null; } }
+  document.addEventListener('click', fecharMenuLinha);
+  document.addEventListener('keydown', function(ev){ if(ev.key === 'Escape') fecharMenuLinha(); });
+
+  function _mi(texto, emoji, aoClicar, classe){
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'rn-mi' + (classe ? ' ' + classe : '');
+    var e = document.createElement('span'); e.className = 'e'; e.textContent = emoji;
+    var t = document.createElement('span'); t.textContent = texto;
+    b.appendChild(e); b.appendChild(t);
+    b.addEventListener('click', function(ev){
+      ev.stopPropagation(); fecharMenuLinha(); aoClicar();
+    });
+    return b;
+  }
+
+  window.rnMenu = function(ev, id, bt){
+    ev.preventDefault(); ev.stopPropagation();
+    var jaEra = _menuLinha && _menuLinha.dataset.id === String(id);
+    fecharMenuLinha();
+    if(jaEra) return;            // clicar de novo no mesmo botão fecha
+    var tr = bt.closest('tr');
+    var m = document.createElement('div');
+    m.className = 'rn-menu';
+    m.dataset.id = String(id);
+    m.setAttribute('role', 'menu');
+    m.addEventListener('click', function(e2){ e2.stopPropagation(); });
+
+    m.appendChild(_mi('Editar', '✏️', function(){ rnEditar(id); }));
+    var pdf = tr && tr.querySelector('.rn-pdf');
+    if(pdf){
+      m.appendChild(_mi('Abrir o PDF', '📄', function(){ window.open(pdf.href, '_blank'); }));
+    }
+    var quem = tr && tr.querySelector('.rn-abre');
+    if(quem){
+      m.appendChild(_mi('Ver o segurado', '👤', function(){ quem.click(); }));
+    }
+    m.appendChild(_mi('Excluir', '🗑', function(){ rnExcluir(id, tr); }, 'mal'));
+    bt.parentNode.appendChild(m);
+    _menuLinha = m;
+  };
+
+  window.rnEditar = function(id){
+    erro('');
+    zapFetch('/painel/renovacoes/apolice/' + id, { credentials: 'same-origin' })
+      .then(function(d){
+        if(!d) return;
+        if(!d.ok){ erro(d.erro || 'não consegui abrir esta apólice.'); return; }
+        var j = jan();
+        if(j) j.hidden = false;
+        var c = el('rn-conf');
+        if(c) c.innerHTML = '';
+        preencher(d, true);
+        voltarPara = 'pdf';
+        passo('form', 'editando' + (d.quem ? ' · ' + d.quem : ''));
+      });
+  };
+
+  window.rnExcluir = function(id, tr){
+    var fd = new FormData();
+    zapFetch('/painel/renovacoes/apolice/' + id + '/excluir',
+             { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function(d){
+        if(!d) return;
+        if(!d.ok){ erro(d.erro || 'não consegui excluir.'); return; }
+        if(tr) tr.remove();
+        contarCarteira(d.n_carteira);
+        // DESFAZER, porque excluir é um toque e errar também — e aqui o que sai
+        // da tela é uma apólice do cliente, não um rascunho.
+        if(window.zapAviso){
+          zapAviso('Apólice tirada da carteira.', { tipo: 'ok', some: 10000,
+            acao: { texto: 'desfazer', fn: function(){
+              var f2 = new FormData(); f2.append('desfazer', '1');
+              zapFetch('/painel/renovacoes/apolice/' + id + '/excluir',
+                       { method: 'POST', body: f2, credentials: 'same-origin' })
+                .then(function(v){
+                  if(!v || !v.ok) return;
+                  encaixarLinha(v.linha_html);   // volta pro lugar dela, por vencimento
+                  contarCarteira(v.n_carteira);
+                });
+            } } });
+        }
+      });
+  };
+
+  // o contador da aba: "Carteira (4)" continuar dizendo 4 depois de excluir é a
+  // tela mentindo — o mesmo cuidado da faixa do topo.
+  // O alvo é o `<span id="rn-conta-carteira">`, que já existe pra isto: escrever
+  // no <a> inteiro apagaria a palavra "Carteira" junto com o número.
+  function contarCarteira(n){
+    var e = el('rn-conta-carteira');
+    if(e && n != null) e.textContent = n ? (' (' + n + ')') : '';
   }
 
   window.rnReler = function(bt){
@@ -1940,6 +2177,11 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
     if(c) c.innerHTML = '';         // sem isto a conferência antiga reaparece
     var f = el('rn-form');
     if(f) try { f.reset(); } catch(_e){}
+    // `reset()` devolve o value do ATRIBUTO, que é '' — mas quem editou deixou o
+    // id ali por JavaScript, e um `apolice_id` esquecido faz o PRÓXIMO cadastro
+    // sobrescrever a apólice de outro cliente.
+    var aid = f && f.querySelector('[name="apolice_id"]');
+    if(aid) aid.value = '';
     voltarPara = 'pdf';
     wppLida = false;                // a lista pode ter mudado enquanto se conferia
     wppCarregar();

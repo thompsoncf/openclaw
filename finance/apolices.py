@@ -259,7 +259,7 @@ def a_vencer(pool, conta_id: int, *, dias: int = HORIZONTE, hoje: date | None = 
     hoje = hoje or date.today()
     sql = (f"select {_COLS}, coalesce(nullif(cl.nome,''), '') "
            "  from apolices a left join clientes cl on cl.id = a.cliente_id "
-           " where a.conta_id = %s and a.situacao = any(%s) "
+           " where a.conta_id = %s and a.excluida_em is null and a.situacao = any(%s) "
            "   and a.vigencia_fim <= %s")
     args: list = [conta_id, list(VIVAS), hoje + timedelta(days=int(dias))]
     if corretor_id is not None:
@@ -292,7 +292,7 @@ def proxima(pool, conta_id: int, *, hoje: date | None = None,
     hoje = hoje or date.today()
     sql = (f"select {_COLS}, coalesce(nullif(cl.nome,''), '') "
            "  from apolices a left join clientes cl on cl.id = a.cliente_id "
-           " where a.conta_id = %s and a.situacao = any(%s) and a.vigencia_fim > %s")
+           " where a.conta_id = %s and a.excluida_em is null and a.situacao = any(%s) and a.vigencia_fim > %s")
     args: list = [conta_id, list(VIVAS), hoje + timedelta(days=HORIZONTE)]
     if corretor_id is not None:
         sql += " and a.corretor_id = %s"
@@ -322,7 +322,7 @@ def listar(pool, conta_id: int, *, hoje: date | None = None,
     termo = (busca or "").strip()
     sql = (f"select {_COLS}, coalesce(nullif(cl.nome,''), '') "
            "  from apolices a left join clientes cl on cl.id = a.cliente_id "
-           " where a.conta_id = %s")
+           " where a.conta_id = %s and a.excluida_em is null")
     args: list = [conta_id]
     if termo:
         sql += ("   and (coalesce(cl.nome,'') ilike %s or a.seguradora ilike %s "
@@ -345,6 +345,35 @@ def listar(pool, conta_id: int, *, hoje: date | None = None,
     return saida
 
 
+def excluir(pool, conta_id: int, apolice_id: int, membro_id=None) -> bool:
+    """Tira uma apólice da carteira SEM apagar o registro dela.
+
+    NÃO É `delete` (regra 0): informação de cliente não se perde. Uma apólice
+    cadastrada errado precisa sair da carteira; o registro de que ela existiu, do
+    PDF que a originou e de quem a criou, não precisa sumir junto — e desfazer um
+    `delete` é restaurar backup, enquanto desfazer isto é um update.
+
+    NÃO SE CONFUNDE COM `perdida`, que é desfecho de NEGÓCIO (o cliente renovou
+    com outra corretora) e é o que a tela de perda mede. Esta é erro de cadastro.
+    """
+    with pool.connection() as c:
+        r = c.execute("""update apolices set excluida_em = now(), excluida_por = %s
+                          where conta_id = %s and id = %s and excluida_em is null
+                          returning id""", (membro_id, conta_id, apolice_id)).fetchone()
+        c.commit()
+    return bool(r)
+
+
+def voltar_apolice(pool, conta_id: int, apolice_id: int) -> bool:
+    """Desfaz a exclusão. Excluir é um toque e errar também."""
+    with pool.connection() as c:
+        r = c.execute("""update apolices set excluida_em = null, excluida_por = null
+                          where conta_id = %s and id = %s returning id""",
+                      (conta_id, apolice_id)).fetchone()
+        c.commit()
+    return bool(r)
+
+
 def total_da_carteira(pool, conta_id: int) -> int:
     """Quantas apólices a conta tem, sem trazer nenhuma.
 
@@ -352,7 +381,8 @@ def total_da_carteira(pool, conta_id: int) -> int:
     com um filtro ligado faria a corretora achar que perdeu as outras 299.
     """
     with pool.connection() as c:
-        r = c.execute("select count(*) from apolices where conta_id=%s", (conta_id,)).fetchone()
+        r = c.execute("select count(*) from apolices "
+                      " where conta_id=%s and excluida_em is null", (conta_id,)).fetchone()
     return int(r[0]) if r else 0
 
 
@@ -484,7 +514,7 @@ def ficha_do_cliente(pool, conta_id: int, cliente_id: int, *, hoje: date | None 
             return None
         (cid, nome, tel, email, end_, cid_, uf, cep, obs, criado_em, cpf, cnpj, tipo) = cl
         rows = c.execute(
-            f"select {_COLS}, '' from apolices a where a.conta_id = %s and a.cliente_id = %s "
+            f"select {_COLS}, '' from apolices a where a.conta_id = %s and a.excluida_em is null and a.cliente_id = %s "
             " order by a.vigencia_fim desc, a.id desc", (conta_id, cliente_id)).fetchall()
         padrao = {}
         apolices = []

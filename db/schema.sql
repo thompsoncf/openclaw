@@ -16,6 +16,15 @@ create table if not exists contas (
                          check (status in ('trial','ativa','inadimplente','suspensa','cancelada')),
     vencimento           date,
     limite_mensagens_dia int not null default 50,
+    -- Nulo = empresa de verdade. Preenchido = esta linha não é cliente, é um CHIP
+    -- de WhatsApp da empresa apontada (migração 171). Aqui embaixo porque este
+    -- arquivo é a base de todo schema NOVO — e ficar de fora dele fez 30+ testes
+    -- rodarem contra uma `contas` que não existe em produção: em 22/09/2026 o CI
+    -- reprovou uma consulta que passa por esta coluna, e a máquina local disse
+    -- verde porque lá o banco tinha a coluna, deixada por outro módulo.
+    -- `create table if not exists` não altera tabela que já existe: produção
+    -- continua recebendo a coluna pela 171, e este arquivo serve os bancos novos.
+    chip_de              bigint references contas(id) on delete cascade,
     criado_em            timestamptz not null default now()
 );
 

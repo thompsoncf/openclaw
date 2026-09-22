@@ -249,11 +249,25 @@ def test_cada_fonte_tem_o_proprio_endereco():
     assert "rnDoWhats(it.fonte, it.id)" in PA
 
 
-def test_o_pre_cadastro_do_telegram_nao_baixa_nada():
-    """Ele não tem mensagem pra procurar, e a leitura já está guardada."""
+def test_o_pre_cadastro_nao_vai_atras_do_cdn_do_whatsapp():
+    """Ele não tem mensagem pra procurar: o que ele abre já está guardado.
+
+    Em 22/09/2026 esta rota passou a RELER do cofre quando a leitura guardada é
+    mais velha que o leitor — então "não baixa nada" deixou de ser verdade ao pé
+    da letra. O que não pode voltar é o outro caminho: sair procurando o arquivo
+    no CDN do WhatsApp, que para um pré-cadastro do Telegram nem existe.
+    """
     corpo = corpo_de("abrir_pre_cadastro")
-    assert "_apl.por_id(get_pool(), conta[0], lida_id)" in corpo
+    assert "_apl.por_id(pool, conta[0], lida_id)" in corpo
     assert "wa_midia" not in corpo and "buscar(" not in corpo
+
+
+def test_abrir_um_pre_cadastro_velho_o_rele_com_o_leitor_de_hoje():
+    """O dono não tem que achar um botão pra receber a melhora do leitor."""
+    corpo = corpo_de("abrir_pre_cadastro")
+    assert "_apl.reler_se_velha(pool, conta[0], lida_id, ja[\"lido\"])" in corpo
+    # e relê a linha depois, senão a tela mostra a leitura velha que acabou de sair
+    assert corpo.count("_apl.por_id(pool") == 2
 
 
 def test_a_porta_do_telegram_e_de_gerencia():
@@ -566,3 +580,77 @@ def test_excluir_atualiza_o_contador_da_aba():
     corpo = PA[PA.index("function contarCarteira(n)"):]
     corpo = corpo[:corpo.index("\n  window.rnReler")]
     assert "rn-conta-carteira" in corpo, "escrever no <a> apagaria a palavra Carteira"
+
+
+# ── O LAYOUT DA LISTA E DA CARTEIRA (22/09/2026) ───────────────────────────────
+#
+# "não ficou legal, dá uma olhada pra ajustar o layout", depois de abrir a tela
+# com os sete pré-cadastros novos. Quatro coisas concretas, todas medidas numa
+# renderização da tela com os dados de produção da conta 37.
+
+
+def test_o_item_da_lista_tem_duas_linhas_e_a_de_cima_e_quem_e():
+    """Era uma linha com `it.resumo`, que começa pela SEGURADORA: sete linhas
+    dizendo 'HDI', 'Zurich', 'Yelum' e nenhum nome de cliente."""
+    js = PA[PA.index("function wppCarregar()"):]
+    js = js[:js.index("\n  // ──")]
+    assert "textContent = it.resumo" not in js       # o que a linha mostrava antes
+    assert "it.titulo" in js and "it.detalhe" in js
+
+
+def test_o_nome_do_arquivo_nunca_deixa_de_ser_alcancavel():
+    """Sobra no `title` do item quando o título veio do segurado lido."""
+    js = PA[PA.index("function wppCarregar()"):]
+    assert "b.title = it.nome" in js
+
+
+def test_a_lista_nao_rola_por_dentro_de_uma_janela_que_ja_rola():
+    """`max-height:216px` cortava a quarta linha ao meio e escondia quatro."""
+    css = PA[PA.index(".rn-wpp .lista{"):]
+    css = css[:css.index("}") + 1]
+    assert "max-height" not in css and "overflow-y" not in css
+
+
+def test_a_rota_da_lista_manda_titulo_e_detalhe_nos_dois_tipos_de_item():
+    """São duas montagens — a que vem de mensagem e a que não vem."""
+    corpo = corpo_de("pdfs_do_whatsapp")
+    assert corpo.count('"titulo"') == 2 and corpo.count('"detalhe"') == 2
+    assert '"resumo"' not in corpo
+
+
+def test_a_caixa_de_soltar_nao_promete_mais_so_a_allianz():
+    """O texto envelheceu no dia em que o leitor genérico subiu."""
+    assert "Allianz é reconhecida" not in PA
+
+
+def test_so_premio_e_comissao_sao_coluna_de_numero():
+    """A tabela alinhava tudo à direita menos a primeira coluna: o cabeçalho
+    RAMO ficava na direita e o 'Auto' debaixo dele na esquerda."""
+    assert ".rn-tab th.num,.rn-tab td.num{text-align:right}" in PA
+    linha = PA[PA.index("_TPL_LINHA = "):PA.index("_TPL_CONF = ")]
+    assert linha.count('<td class="num">') == 2
+
+
+def test_o_selo_de_dias_so_aparece_dentro_do_horizonte():
+    """Fora dele todo mundo ganhava um '304d' que não serve pra nada."""
+    linha = PA[PA.index("_TPL_LINHA = "):PA.index("_TPL_CONF = ")]
+    assert "0 <= a.dias <= horizonte" in linha
+
+
+def test_a_linha_sozinha_acha_o_horizonte_sem_ninguem_passar():
+    """Quem renderiza a linha depois do cadastro não monta contexto de tela — e o
+    `<=` contra um Undefined estoura. O horizonte é global do ambiente."""
+    assert '_env.globals.setdefault("horizonte", ap.HORIZONTE)' in PA
+    from datetime import date
+
+    import web.painel_apolices  # noqa: F401
+    from web.portal import _env
+    a = {"id": 7, "cliente_id": 3, "cliente": "Fulano", "seguradora": "Allianz",
+         "ramo_txt": "Auto", "vigencia_fim": date(2027, 7, 23), "dias": 308,
+         "situacao_txt": "Proposta", "premio_centavos": 380757,
+         "comissao_estimada": 76151, "bem": {"placa": "ABC1D23"}, "tem_pdf": True}
+    html = _env.get_template("renovacoes_linha").render(a=a, brl=lambda c: f"R$ {c/100:.2f}")
+    assert "308d" not in html          # 308 dias está muito além do horizonte
+    a["dias"] = 44
+    html = _env.get_template("renovacoes_linha").render(a=a, brl=lambda c: f"R$ {c/100:.2f}")
+    assert "44d" in html

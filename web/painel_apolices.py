@@ -390,7 +390,8 @@ def _conferir_de(r: dict, *, origem: dict | None = None) -> dict:
     if origem:
         lido["origem"] = origem
     return {
-        "seguradora": L.seguradora, "reconhecida": L.reconhecida, "paginas": L.paginas,
+        "seguradora": L.seguradora or L.campos.get("seguradora") or "",
+        "reconhecida": L.reconhecida, "como": L.como, "paginas": L.paginas,
         "checagens": L.checagens, "avisos": L.avisos, "nao_achou": L.nao_achou,
         "n_campos": len(L.campos), "ok": L.ok(), "pdf_nome": r["nome"],
         "pdf_caminho": r["caminho"], "pdf_bytes": r["bytes"], "pdf_lido": lido,
@@ -435,7 +436,8 @@ def pdfs_do_whatsapp(request: Request):
         {"fonte": "msg", "id": i["mensagem_id"], "de": i["de"], "nome": i["nome"],
          "quando": i["quando"], "kb": round(i["bytes"] / 1024) if i["bytes"] else 0,
          "parece": i["parece_apolice"], "ja": i["ja_cadastrada"],
-         "lida": i["lida"], "resumo": _apl_resumo(i), "erro": i["erro_leitura"]}
+         "lida": i["lida"], "titulo": _apl.titulo(i), "detalhe": _apl_detalhe(i),
+         "erro": i["erro_leitura"]}
         for i in ap.pdfs_do_whatsapp(pool, conta[0])]
     # AS OUTRAS PORTAS (305 e a do assistente): o que o corretor mandou pelo
     # Telegram ou pro número do assistente entra na MESMA lista. São três entradas
@@ -446,7 +448,7 @@ def pdfs_do_whatsapp(request: Request):
          "nome": i["nome"], "quando": i["quando"],
          "kb": round(i["bytes"] / 1024) if i["bytes"] else 0,
          "parece": True, "ja": False, "lida": True,
-         "resumo": _apl_resumo(i), "erro": i["erro_leitura"]}
+         "titulo": _apl.titulo(i), "detalhe": _apl_detalhe(i), "erro": i["erro_leitura"]}
         for i in _apl.sem_mensagem(pool, conta[0])]
     itens.sort(key=lambda i: i["quando"] or datetime.min.replace(tzinfo=timezone.utc),
                reverse=True)
@@ -566,10 +568,13 @@ def descartar_pre_cadastro(request: Request, lida_id: int, desfazer: str = Form(
     return JSONResponse({"ok": True, "esperando": ap.esperando_conferencia(pool, conta[0])})
 
 
-def _apl_resumo(i: dict) -> str:
-    """A linha que a janela mostra embaixo do nome quando o leitor já passou."""
+def _apl_detalhe(i: dict) -> str:
+    """A SEGUNDA linha do item da lista: seguradora e vencimento, quando lidos.
+
+    Só existe depois que o leitor passou. Antes disso o item tem uma linha só — o
+    nome do arquivo —, que é tudo o que se sabe."""
     from finance import apolice_leitor as _apl
-    return _apl.resumo(i) if i.get("lida") else ""
+    return _apl.detalhe(i) if i.get("lida") else ""
 
 
 def _checagens_de(lido) -> list:
@@ -607,9 +612,17 @@ def abrir_pre_cadastro(request: Request, lida_id: int):
     if not gerencia:
         return JSONResponse({"ok": False, "erro": "só o dono e o gestor cadastram apólice"})
     from finance import apolice_leitor as _apl
-    ja = _apl.por_id(get_pool(), conta[0], lida_id)
+    pool = get_pool()
+    ja = _apl.por_id(pool, conta[0], lida_id)
     if not ja:
         return JSONResponse({"ok": False, "erro": "não achei este documento"})
+    # RELÊ SOZINHO se o leitor melhorou desde que isto foi lido. O PDF já está no
+    # cofre; o que estava velho era a leitura. Antes disso a melhora só chegava na
+    # fila se alguém achasse o botão "reler com o leitor de hoje" — e em 22/09/2026
+    # o dono abriu a tela depois do leitor genérico subir e viu, corretamente, a
+    # leitura de antes dele. `por_id` de novo porque a releitura trocou a linha.
+    if _apl.reler_se_velha(pool, conta[0], lida_id, ja["lido"]):
+        ja = _apl.por_id(pool, conta[0], lida_id) or ja
     if ja["erro"]:
         return JSONResponse({"ok": False, "erro": ja["erro"]})
     return _conferencia_em_json(ja["form"] or {}, _conferir_guardado(ja, {"lida": lida_id}))
@@ -621,6 +634,9 @@ def _conferir_guardado(ja: dict, origem: dict) -> dict:
     lido = ja["lido"] or {}
     return {
         "seguradora": ja["seguradora"] or "", "reconhecida": ja["reconhecida"],
+        # leitura guardada ANTES do carimbo não sabe dizer como saiu; `reconhecida`
+        # é o que se tem, e é o que ela era antes desta tela existir
+        "como": lido.get("como") or ("layout" if ja["reconhecida"] else "nada"),
         "paginas": lido.get("paginas") or 0,
         "checagens": _checagens_de(lido),
         "avisos": lido.get("avisos") or [], "nao_achou": lido.get("nao_achou") or [],
@@ -1003,11 +1019,14 @@ _TPL_LINHA = r"""{# UMA linha da carteira. Vive sozinha porque o cadastro devolv
       {% if a.tem_pdf %} <a class="rn-pdf" href="/painel/renovacoes/apolice/{{ a.id }}/pdf" target="_blank">PDF</a>{% endif %}</td>
   <td>{{ a.seguradora }}</td>
   <td>{% if a.cliente_id %}<button type="button" class="rn-abre fraco" onclick="kbAbrirSegurado(event,{{ a.cliente_id }},this.closest('tr'),'apolice')">{{ a.ramo_txt }}</button>{% else %}{{ a.ramo_txt }}{% endif %}</td>
-  <td>{{ a.vigencia_fim.strftime('%d/%m/%Y') }}{% if a.dias is not none and a.dias >= 0 %}
+  {# O SELO DE DIAS só até o horizonte. Fora dele ele marcava toda linha com um
+     "304d", "353d" que ninguém ia usar pra nada e que fazia a coluna parecer
+     desalinhada — dentro do horizonte é o aviso de que a renovação chegou. #}
+  <td>{{ a.vigencia_fim.strftime('%d/%m/%Y') }}{% if a.dias is not none and 0 <= a.dias <= horizonte %}
       <span class="rn-pill">{{ a.dias }}d</span>{% endif %}</td>
   <td>{{ a.situacao_txt }}</td>
-  <td>{{ brl(a.premio_centavos) }}</td>
-  <td>{% if a.comissao_estimada is not none %}{{ brl(a.comissao_estimada) }}{% else %}—{% endif %}</td>
+  <td class="num">{{ brl(a.premio_centavos) }}</td>
+  <td class="num">{% if a.comissao_estimada is not none %}{{ brl(a.comissao_estimada) }}{% else %}—{% endif %}</td>
   {# AÇÕES ▾ — o mesmo desenho da aba Serviços: a palavra escrita, não um ícone.
      A carteira não tinha ação nenhuma na linha; corrigir um dígito no prêmio
      exigia cadastrar de novo, e aí o índice do número batia e nem isso dava. #}
@@ -1025,8 +1044,13 @@ _TPL_CONF = r"""{# O que o leitor achou no PDF. Template próprio porque o mesmo
 <div class="rn-conf">
   <div class="cab">
     <h3>O que eu li de <b>{{ conferir.pdf_nome }}</b></h3>
-    {% if conferir.reconhecida %}<span class="rn-tag d60">{{ conferir.seguradora }} · {{ conferir.n_campos }} campos</span>
-    {% else %}<span class="rn-tag d15">layout não reconhecido</span>{% endif %}
+    {#- TRÊS ESTADOS, e não dois. Era `reconhecida` ou "layout não reconhecido" em
+        vermelho — e o genérico, que lê pelos rótulos do papel, caía no vermelho
+        mesmo tirando treze campos. O dono leu a tela e disse que o sistema não
+        estava reconhecendo; a leitura estava lá, o selo é que negava. -#}
+    {% if conferir.como == 'layout' %}<span class="rn-tag d60">{{ conferir.seguradora }} · {{ conferir.n_campos }} campos</span>
+    {% elif conferir.como == 'rotulos' %}<span class="rn-tag d30">{% if conferir.seguradora %}{{ conferir.seguradora }} · {% endif %}{{ conferir.n_campos }} campos · lido pelos rótulos</span>
+    {% else %}<span class="rn-tag d15">não achei rótulo que eu conheça</span>{% endif %}
     <span class="rn-pill">{{ conferir.paginas }} pág.</span>
   </div>
   {% if conferir.checagens %}
@@ -1121,11 +1145,17 @@ _TPL = r"""{% extends "base" %}{% block conteudo %}
   border-radius:8px;padding:.42rem .6rem;color:var(--txt);font-size:.85rem}
 .rn-rol{overflow-x:auto;border:1px solid var(--borda);border-radius:11px}
 .rn-tab{border-collapse:collapse;width:100%;min-width:640px;font-size:.84rem;font-variant-numeric:tabular-nums}
-.rn-tab th{text-align:right;padding:.5rem .6rem;font-size:.66rem;text-transform:uppercase;
+/* TEXTO À ESQUERDA, DINHEIRO À DIREITA. A tabela alinhava TUDO à direita menos a
+   primeira coluna, e três coisas saíam tortas de uma vez: "Allianz" e "Porto
+   Seguro" flutuavam grudados no dinheiro; o cabeçalho RAMO ficava na direita
+   enquanto o "Auto" debaixo dele (um <button>, que traz o próprio text-align)
+   ficava na esquerda; e a data, que vem seguida do selo de dias, empurrava cada
+   linha pra um lugar diferente. Só prêmio e comissão são coluna de número. */
+.rn-tab th{text-align:left;padding:.5rem .6rem;font-size:.66rem;text-transform:uppercase;
   letter-spacing:.05em;color:var(--txt-mut);font-weight:500;background:var(--card-2);
   border-bottom:1px solid var(--borda);white-space:nowrap}
-.rn-tab th:first-child,.rn-tab td:first-child{text-align:left}
-.rn-tab td{text-align:right;padding:.45rem .6rem;border-bottom:1px solid var(--borda);white-space:nowrap}
+.rn-tab td{text-align:left;padding:.45rem .6rem;border-bottom:1px solid var(--borda);white-space:nowrap}
+.rn-tab th.num,.rn-tab td.num{text-align:right}
 .rn-tab tr:last-child td{border-bottom:0}
 .rn-aviso{border-radius:10px;padding:.7rem .85rem;font-size:.84rem;line-height:1.55;margin-bottom:.9rem}
 .rn-aviso.azul{background:var(--azul-fundo);border:1px solid var(--azul-borda);color:#8FC9E6}
@@ -1242,15 +1272,25 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
 .rn-wpp .cab{display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap;margin-bottom:.45rem}
 .rn-wpp .cab .t{font-size:.82rem;font-weight:600}
 .rn-wpp .cab .s{font-size:.74rem;color:var(--txt-mut)}
-.rn-wpp .lista{display:flex;flex-direction:column;gap:.3rem;max-height:216px;overflow-y:auto}
-.rn-wpp .item{display:flex;gap:.5rem;align-items:center;text-align:left;width:auto;margin:0;
+/* SEM ROLAGEM PRÓPRIA. Era `max-height:216px` com `overflow-y:auto`: uma área de
+   rolagem DENTRO de uma janela que já rola. A fila de 22/09 tinha oito
+   documentos, cabiam três e meia, e a quarta linha aparecia cortada ao meio a
+   meio caminho de uma barra que ninguém procura. Quem rola agora é a janela —
+   uma barra só, e a lista inteira passa por ela. */
+.rn-wpp .lista{display:flex;flex-direction:column;gap:.3rem}
+/* DUAS LINHAS: em cima quem é (e quando chegou), embaixo a seguradora, o
+   vencimento e quem mandou. A de baixo some quando não há nada lido. */
+.rn-wpp .item{display:flex;flex-direction:column;gap:.1rem;text-align:left;width:auto;margin:0;
   background:var(--bg-2);border:1px solid var(--borda);border-radius:9px;padding:.45rem .6rem;
   cursor:pointer;color:var(--txt);font:inherit}
 .rn-wpp .item:hover:not([disabled]){border-color:var(--neon-borda);background:var(--neon-fundo)}
 .rn-wpp .item[disabled]{opacity:.45;cursor:default}
-.rn-wpp .item .nome{flex:1;min-width:0;font-size:.82rem;overflow:hidden;
+.rn-wpp .item .l1{display:flex;gap:.5rem;align-items:baseline}
+.rn-wpp .item .nome{flex:1;min-width:0;font-size:.84rem;font-weight:600;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 .rn-wpp .item .quem{font-size:.72rem;color:var(--txt-mut);white-space:nowrap}
+.rn-wpp .item .det{font-size:.74rem;color:var(--txt-mut);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
 /* `width:auto;margin:0` vencem o `button{width:100%;margin-top:1.4rem}` global */
 .rn-item-linha{display:flex;gap:.3rem;align-items:stretch}
 .rn-item-linha .item{flex:1;min-width:0}
@@ -1440,7 +1480,8 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
   {% if carteira %}
   <div class="rn-rol"><table class="rn-tab">
     <thead><tr><th>Cliente</th><th>Seguradora</th><th>Ramo</th><th>Vence</th><th>Situação</th>
-        <th>Prêmio</th><th>Comissão</th><th class="rn-col-acoes"><span class="rn-oculto">Ações</span></th></tr></thead>
+        <th class="num">Prêmio</th><th class="num">Comissão</th>
+        <th class="rn-col-acoes"><span class="rn-oculto">Ações</span></th></tr></thead>
     {# `tbody` com id porque a linha nova entra AQUI depois do cadastro, sem
        recarregar a página — e é o mesmo template que o servidor devolve. #}
     <tbody id="rn-corpo">
@@ -1513,8 +1554,8 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         <form class="rn-drop" id="rn-drop" method="post" action="/painel/renovacoes/importar"
               enctype="multipart/form-data" onsubmit="return rnLerPdf(this)">
           <div class="t">Solte a apólice em PDF aqui</div>
-          <div class="s">Eu leio os campos e você confere antes de salvar. Allianz é reconhecida;
-            as outras seguradoras entram à medida que os PDFs chegarem.</div>
+          <div class="s">Eu leio os campos e você confere antes de salvar — de qualquer
+            seguradora, pelos rótulos do papel. Nada é salvo sem você olhar.</div>
           <input type="file" id="rn-arq" name="arquivo" accept="application/pdf" required
                  onchange="rnLerPdf(this.form)">
           <label class="rn-bt" for="rn-arq">escolher o arquivo</label>
@@ -1867,24 +1908,38 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
           var b = document.createElement('button');
           b.type = 'button';
           b.className = 'item';
-          // o LEITOR AUTOMÁTICO já passou: a linha diz seguradora, segurado e
-          // vencimento, e o nome do arquivo vira o título do hover. Sem leitura,
-          // o nome do arquivo continua sendo a melhor informação que existe.
+          // DUAS LINHAS, identidade em cima. A de cima é DE QUEM é o documento —
+          // o segurado, ou o nome do arquivo quando o leitor não achou nome. A de
+          // baixo é o contexto: seguradora, vencimento, quem mandou.
+          //
+          // Era UMA linha, com `it.resumo`, que começa pela seguradora. Em
+          // 22/09/2026 chegaram sete PDFs de sete seguradoras e o leitor
+          // reconheceu a marca de todas e o nome de nenhuma: a fila virou sete
+          // linhas dizendo "HDI", "Zurich", "Yelum"… e o nome do arquivo, que
+          // trazia o nome do cliente, tinha sido jogado fora pra caber a marca.
+          var topo = document.createElement('span');
+          topo.className = 'l1';
           var nome = document.createElement('span');
           nome.className = 'nome';
-          if(it.resumo && !it.erro){
-            nome.textContent = it.resumo;
-            b.title = it.nome;
-          } else {
-            nome.textContent = (it.parece && !it.ja ? '📄 ' : '') + it.nome;
-          }
+          nome.textContent = (it.parece && !it.ja && !it.detalhe ? '📄 ' : '')
+                             + (it.titulo || it.nome);
+          b.title = it.nome;
           var quem = document.createElement('span');
           quem.className = 'quem';
           if(it.ja) quem.textContent = 'já cadastrada';
           else if(it.erro) quem.textContent = it.erro;
-          else quem.textContent = it.de + ' · ' + it.quando;
-          b.appendChild(nome);
-          b.appendChild(quem);
+          else quem.textContent = it.quando;
+          topo.appendChild(nome);
+          topo.appendChild(quem);
+          b.appendChild(topo);
+          // a segunda linha só existe quando há o que dizer nela
+          var det = [it.detalhe, (it.ja || it.erro) ? '' : it.de].filter(Boolean).join(' · ');
+          if(det){
+            var d2 = document.createElement('span');
+            d2.className = 'det';
+            d2.textContent = det;
+            b.appendChild(d2);
+          }
           // documento já cadastrado, ou que o WhatsApp apagou antes de eu ler:
           // clicar não levaria a lugar nenhum
           if(it.ja || it.erro){ b.disabled = true; }
@@ -2220,6 +2275,14 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
 <script>{{ janela_js }}</script>
 {% endblock %}"""
 
+# O HORIZONTE COMO GLOBAL, e não só no contexto da página. A linha da carteira é
+# renderizada SOZINHA depois do cadastro e depois da mudança de situação — o
+# JavaScript encaixa o `<tr>` pronto na tabela —, e quem renderiza ali não monta
+# contexto de tela nenhum. Enquanto o horizonte era só do contexto, o primeiro uso
+# dele dentro da linha estourava `'horizonte' is undefined` nesses dois caminhos.
+# `setdefault` porque `_contexto` continua passando o mesmo número: contexto vence
+# global no Jinja, e os dois valem `ap.HORIZONTE`.
+_env.globals.setdefault("horizonte", ap.HORIZONTE)
 _env.loader.mapping["renovacoes"] = _TPL
 _env.loader.mapping["renovacoes_linha"] = _TPL_LINHA
 _env.loader.mapping["renovacoes_conf"] = _TPL_CONF

@@ -598,3 +598,120 @@ def test_irmas_de_outra_apolice_ficam(limpo, monkeypatch):
     al.ler_bytes(limpo, CONTA, b"%PDF um", "A.pdf")
     assert al.descartar_irmas(limpo, CONTA, "999") == 0
     assert len(al.sem_mensagem(limpo, CONTA)) == 1
+
+
+# ────────── 8. reler com o leitor de hoje (22/09/2026) ──────────
+#
+# "de uma olhada na lista tem 2 da mapfre repetida, se não é a mesma apólice checa
+# se é duplicada já apaga uma, e ver a questão do layout logo".
+#
+# Duas coisas no mesmo problema. As três linhas Mapfre da Liberal tinham a MESMA
+# placa (PIR5077), o MESMO chassi e 11 páginas — a mesma apólice —, mas bytes
+# diferentes (276.050 e 273.567): o hash não via. E o número também não, porque as
+# duas primeiras foram lidas ANTES do layout da Mapfre existir e saíram sem número.
+#
+# O chassi é o que sobrevive aos dois casos. E reler é o que conserta a leitura
+# velha sem pedir pro corretor reenviar nada: o documento certo já está no cofre.
+
+
+def _no_cofre(monkeypatch, conteudo=b"%PDF guardado"):
+    monkeypatch.setattr(al._cofre, "ler", lambda caminho: (conteudo, "application/pdf"))
+
+
+def test_o_chassi_pega_o_reenvio_que_o_hash_nao_pega(limpo, monkeypatch):
+    """Bytes diferentes, mesma apólice — o caso exato das duas Mapfre."""
+    _finge(monkeypatch, leitura=_leitura(campos={"chassi": "9BFZH55L8J8038259"}))
+    al.ler_bytes(limpo, CONTA, b"%PDF exportado de um jeito", "A.pdf")
+    r = al.ler_bytes(limpo, CONTA, b"%PDF exportado de outro", "B.pdf")
+    assert r["repetida"]["onde"] == "fila"
+    with limpo.connection() as c:
+        assert c.execute("select count(*) from apolice_lida").fetchone()[0] == 1
+
+
+def test_chassi_curto_nao_vira_trava(limpo, monkeypatch):
+    """Lixo de leitura casaria com lixo de leitura e prenderia a fila."""
+    _finge(monkeypatch, leitura=_leitura(campos={"chassi": "ABC"}))
+    al.ler_bytes(limpo, CONTA, b"%PDF um", "A.pdf")
+    r = al.ler_bytes(limpo, CONTA, b"%PDF dois", "B.pdf")
+    assert r.get("repetida") is None
+
+
+def test_chassi_descartado_nao_bloqueia(limpo, monkeypatch):
+    """Descartei e mandei de novo: o descarte não pode virar porta fechada."""
+    _finge(monkeypatch, leitura=_leitura(campos={"chassi": "9BFZH55L8J8038259"}))
+    r = al.ler_bytes(limpo, CONTA, b"%PDF um", "A.pdf")
+    al.descartar(limpo, CONTA, r["id"])
+    de_novo = al.ler_bytes(limpo, CONTA, b"%PDF dois", "B.pdf")
+    assert de_novo.get("repetida") is None
+    assert len(al.sem_mensagem(limpo, CONTA)) == 1
+
+
+def test_reler_troca_a_leitura_velha_sem_criar_linha(limpo, monkeypatch):
+    """O id é o mesmo e o caminho no cofre é o mesmo: a fila não ganha uma quarta
+    cópia do que já estava lá."""
+    from datetime import date
+    _finge(monkeypatch, leitura=_leitura(reconhecida=False, seguradora=None,
+                                         campos={"nome": "MAPFRE SEGUROS GERAIS S/A"}))
+    r = al.ler_bytes(limpo, CONTA, b"%PDF x", "A.pdf")
+    _no_cofre(monkeypatch)
+    monkeypatch.setattr(al.apdf, "ler", lambda b, proibidos=(): _leitura(
+        seguradora="Mapfre", campos={"nome": "SOLANGE MARIA LIMA MELO",
+                                     "numero_apolice": "0330433570731",
+                                     "vigencia_fim": date(2027, 9, 10)}))
+    assert al.reler(limpo, CONTA, r["id"])["ok"] is True
+    itens = al.sem_mensagem(limpo, CONTA)
+    assert len(itens) == 1 and itens[0]["lida_id"] == r["id"]
+    assert itens[0]["segurado"] == "SOLANGE MARIA LIMA MELO"
+    assert itens[0]["vigencia_fim"] == date(2027, 9, 10)
+
+
+def test_reler_atualiza_o_formulario_tambem(limpo, monkeypatch):
+    """Sem isso a lista mostraria o novo e a conferência abriria com o velho."""
+    from datetime import date
+    _finge(monkeypatch, leitura=_leitura(campos={"nome": "ERRADO"}))
+    r = al.ler_bytes(limpo, CONTA, b"%PDF x", "A.pdf")
+    _no_cofre(monkeypatch)
+    monkeypatch.setattr(al.apdf, "ler", lambda b, proibidos=(): _leitura(
+        campos={"nome": "CERTO", "vigencia_fim": date(2027, 9, 10)}))
+    al.reler(limpo, CONTA, r["id"])
+    assert al.por_id(limpo, CONTA, r["id"])["form"]["nome"] == "CERTO"
+
+
+def test_reler_sem_pdf_guardado_nao_estoura(limpo, monkeypatch):
+    """A leitura que falhou não tem arquivo no cofre — e é justamente a que alguém
+    vai querer reler."""
+    _finge(monkeypatch, expira=True)
+    _pdf(limpo, CONTA)
+    al.ler_pendentes(limpo, CONTA)
+    with limpo.connection() as c:
+        lid = c.execute("select id from apolice_lida").fetchone()[0]
+    r = al.reler(limpo, CONTA, lid)
+    assert r["ok"] is False and "cofre" in r["erro"] or "PDF guardado" in r["erro"]
+
+
+def test_reler_o_cofre_fora_do_ar_nao_apaga_a_leitura(limpo, monkeypatch):
+    """Falhar relendo não pode deixar a linha pior do que estava."""
+    _finge(monkeypatch, leitura=_leitura())
+    r = al.ler_bytes(limpo, CONTA, b"%PDF x", "A.pdf")
+
+    def explode(caminho):
+        raise RuntimeError("cofre fora do ar")
+    monkeypatch.setattr(al._cofre, "ler", explode)
+    assert al.reler(limpo, CONTA, r["id"])["ok"] is False
+    assert al.sem_mensagem(limpo, CONTA)[0]["seguradora"] == "Allianz"
+
+
+def test_reler_a_fila_devolve_o_placar(limpo, monkeypatch):
+    _finge(monkeypatch, leitura=_leitura())
+    al.ler_bytes(limpo, CONTA, b"%PDF um", "A.pdf")
+    al.ler_bytes(limpo, CONTA, b"%PDF dois", "B.pdf")
+    _no_cofre(monkeypatch)
+    assert al.reler_a_fila(limpo, CONTA) == {"relidas": 2, "falhas": 0}
+
+
+def test_reler_nao_toca_no_que_foi_descartado(limpo, monkeypatch):
+    _finge(monkeypatch, leitura=_leitura())
+    r = al.ler_bytes(limpo, CONTA, b"%PDF um", "A.pdf")
+    al.descartar(limpo, CONTA, r["id"])
+    _no_cofre(monkeypatch)
+    assert al.reler_a_fila(limpo, CONTA) == {"relidas": 0, "falhas": 0}

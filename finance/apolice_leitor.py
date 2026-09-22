@@ -180,7 +180,8 @@ def _hash(conteudo: bytes) -> str:
     return hashlib.sha256(conteudo).hexdigest()
 
 
-def ja_conheco(pool, conta_id: int, pdf_hash: str, numero_apolice: str = "") -> dict | None:
+def ja_conheco(pool, conta_id: int, pdf_hash: str, numero_apolice: str = "",
+               chassi: str = "") -> dict | None:
     """Este documento já passou por aqui? Devolve o que se sabe dele, ou None.
 
     Pedido do dono em 21/09/2026: "faz a checagem de duplicidade caso mande o mesma
@@ -188,11 +189,18 @@ def ja_conheco(pool, conta_id: int, pdf_hash: str, numero_apolice: str = "") -> 
     pré-cadastro novo a cada vez — e três linhas iguais na fila de conferência são
     o caminho mais curto pra cadastrar a mesma apólice três vezes.
 
-    Duas perguntas, nesta ordem:
+    Três perguntas, nesta ordem:
 
     1. o MESMO ARQUIVO já foi lido (`pdf_hash`)? É a pergunta barata e exata.
     2. o número da apólice já está na CARTEIRA? Pega o caso que o hash não pega:
        a seguradora reemite o PDF, os bytes mudam, a apólice é a mesma.
+    3. o mesmo CHASSI já está na fila? Esta nasceu em 22/09/2026, olhando a fila
+       da Liberal: três linhas Mapfre, todas com placa PIR5077 e chassi
+       9BFZH55L8J8038259 — a mesma apólice —, mas com BYTES DIFERENTES (276.050 e
+       273.567). O hash não via, e o número também não, porque as duas primeiras
+       leituras foram feitas antes de eu conhecer o layout e saíram sem número. O
+       chassi é o que não muda nem quando o PDF é reexportado nem quando o leitor
+       ainda não sabe ler o resto.
 
     Devolve `{onde, quando, resumo, lida_id?}`. `onde` é 'fila' (lida, esperando
     conferência) ou 'carteira' (já cadastrada) — as duas coisas pedem recados
@@ -222,6 +230,18 @@ def ja_conheco(pool, conta_id: int, pdf_hash: str, numero_apolice: str = "") -> 
                     order by criado_em limit 1""", (conta_id, num)).fetchone()
             if r:
                 return {"onde": "carteira", "apolice_id": r[0], "quando": r[1],
+                        "resumo": _linha(r[2], r[3], r[4])}
+        ch = (chassi or "").strip().upper()
+        if len(ch) >= 11:          # chassi é 17; abaixo disso é lixo de leitura
+            r = c.execute(
+                """select id, criado_em, coalesce(seguradora,''), coalesce(segurado,''),
+                          vigencia_fim
+                     from apolice_lida
+                    where conta_id=%s and descartado_em is null
+                      and upper(coalesce(lido->'campos'->>'chassi','')) = %s
+                    order by criado_em limit 1""", (conta_id, ch)).fetchone()
+            if r:
+                return {"onde": "fila", "lida_id": r[0], "quando": r[1],
                         "resumo": _linha(r[2], r[3], r[4])}
     return None
 
@@ -270,7 +290,9 @@ def ler_bytes(pool, conta_id: int, conteudo: bytes, nome: str, *,
     # cofre aqui; deixar subir é mais barato que ler duas vezes, e o cofre
     # desduplica pelo caminho.
     if leitura is not None:
-        ja = ja_conheco(pool, conta_id, "", leitura.campos.get("numero_apolice") or "")
+        ja = ja_conheco(pool, conta_id, "",
+                        leitura.campos.get("numero_apolice") or "",
+                        leitura.campos.get("chassi") or "")
         if ja:
             return {"ok": True, "id": None, "leitura": leitura, "erro": "",
                     "repetida": ja}
@@ -484,6 +506,88 @@ def sem_mensagem(pool, conta_id: int, dias: int = 30, limite: int = 30) -> list[
              "erro_leitura": r[8], "porta": PORTAS.get(r[9], r[9] or "assistente"),
              "lida": True}
             for r in rows]
+
+
+def reler(pool, conta_id: int, lida_id: int) -> dict:
+    """Lê de novo um pré-cadastro, do PDF que já está no cofre, com os layouts de HOJE.
+
+    POR QUE ISTO EXISTE. Cada seguradora nova é um bloco em `apolice_pdf._LAYOUTS`,
+    e ela entra DEPOIS que o primeiro PDF dela chega. Quem já estava na fila
+    continuava com a leitura velha pra sempre: em 22/09/2026 a Liberal tinha duas
+    Mapfre lidas antes do layout da Mapfre existir (saíram com "MAPFRE SEGUROS
+    GERAIS S/A" no lugar da segurada) e uma Porto lida antes do layout da Porto
+    (saiu com a própria corretora). O documento certo estava guardado o tempo
+    todo; o que estava velho era a leitura.
+
+    Sem isto a única saída era pedir pro corretor reenviar o arquivo — pedir pro
+    cliente refazer o que o sistema pode refazer sozinho.
+
+    ATUALIZA A LINHA, não cria outra: o `id` é o mesmo, o caminho no cofre é o
+    mesmo, e a fila não ganha uma quarta cópia do que já estava lá. Devolve
+    {ok, leitura, erro}.
+    """
+    with pool.connection() as c:
+        r = c.execute("""select pdf_caminho, coalesce(pdf_nome,'') from apolice_lida
+                          where conta_id=%s and id=%s""", (conta_id, lida_id)).fetchone()
+    if not r or not r[0]:
+        return {"ok": False, "erro": "este documento não tem PDF guardado"}
+    try:
+        conteudo, _ct = _cofre.ler(r[0])
+    except Exception as e:  # noqa: BLE001
+        _log.info("reler falhou ao buscar no cofre (conta %s, lida %s): %s: %s",
+                  conta_id, lida_id, type(e).__name__, e)
+        return {"ok": False, "erro": "não consegui buscar o arquivo no cofre"}
+
+    erro, leitura = "", None
+    try:
+        leitura = apdf.ler(conteudo, _a_propria_casa(pool, conta_id))
+    except ValueError as e:
+        erro = str(e)
+    except Exception as e:  # noqa: BLE001
+        _log.info("releitura falhou (conta %s, lida %s): %s: %s",
+                  conta_id, lida_id, type(e).__name__, e)
+        erro = "não consegui ler este PDF"
+
+    campos = {"erro": erro or None, "pdf_hash": _hash(conteudo)}
+    if leitura is not None:
+        campos.update({
+            "seguradora": leitura.seguradora or leitura.campos.get("seguradora") or None,
+            "reconhecida": bool(leitura.reconhecida),
+            "segurado": leitura.campos.get("nome") or None,
+            "numero_proposta": leitura.campos.get("numero_proposta") or None,
+            "vigencia_fim": leitura.campos.get("vigencia_fim"),
+            "form": json.dumps(apdf.para_formulario(leitura)),
+            "lido": json.dumps(apdf.resumo_para_guardar(leitura)),
+        })
+    sets = ", ".join(f"{k} = %s" for k in campos)
+    with pool.connection() as c:
+        # o hash pode colidir com OUTRA linha que já tinha o mesmo arquivo; a
+        # releitura não é lugar de resolver isso, então ela cede o hash.
+        try:
+            c.execute(f"update apolice_lida set {sets} where conta_id=%s and id=%s",
+                      (*campos.values(), conta_id, lida_id))
+            c.commit()
+        except Exception:  # noqa: BLE001
+            c.rollback()
+            campos.pop("pdf_hash", None)
+            sets = ", ".join(f"{k} = %s" for k in campos)
+            c.execute(f"update apolice_lida set {sets} where conta_id=%s and id=%s",
+                      (*campos.values(), conta_id, lida_id))
+            c.commit()
+    return {"ok": not erro, "leitura": leitura, "erro": erro}
+
+
+def reler_a_fila(pool, conta_id: int, limite: int = 30) -> dict:
+    """Relê tudo que está esperando conferência. O placar: {relidas, falhas}.
+
+    É o que se roda depois de acrescentar um layout — a fila inteira aproveita,
+    sem ninguém reenviar nada.
+    """
+    placar = {"relidas": 0, "falhas": 0}
+    for i in sem_mensagem(pool, conta_id, limite=limite):
+        r = reler(pool, conta_id, i["lida_id"])
+        placar["relidas" if r["ok"] else "falhas"] += 1
+    return placar
 
 
 def descartar(pool, conta_id: int, lida_id: int, membro_id=None) -> bool:

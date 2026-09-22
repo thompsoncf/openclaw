@@ -508,6 +508,32 @@ def mudar_remetente(request: Request, acao: str = Form(""), ref: str = Form(""),
     return JSONResponse({"ok": True})
 
 
+@router.post("/painel/renovacoes/reler")
+def reler_a_fila(request: Request):
+    """Relê a fila inteira com os layouts de hoje, do PDF que já está no cofre.
+
+    Cada seguradora nova entra em `_LAYOUTS` DEPOIS que o primeiro PDF dela chega,
+    e quem já estava na fila ficava com a leitura velha pra sempre. Em 22/09/2026
+    a Liberal tinha duas Mapfre lidas antes do layout da Mapfre e uma Porto lida
+    antes do layout da Porto — o documento certo estava guardado o tempo todo; o
+    que estava velho era a leitura.
+
+    Não baixa nada de fora e não cria linha nova: mesmo id, mesmo arquivo.
+    """
+    conta, gerencia, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "sessão expirada"}, status_code=401)
+    if not gerencia:
+        return JSONResponse({"ok": False, "erro": "só o dono e o gestor mexem nisto"})
+    from finance import apolice_leitor as _apl
+    pool = get_pool()
+    if not _cofre.configurado():
+        return JSONResponse({"ok": False, "erro": "o cofre não está configurado"})
+    placar = _apl.reler_a_fila(pool, conta[0])
+    return JSONResponse({"ok": True, **placar,
+                         "esperando": ap.esperando_conferencia(pool, conta[0])})
+
+
 @router.post("/painel/renovacoes/lida/{lida_id}/descartar")
 def descartar_pre_cadastro(request: Request, lida_id: int, desfazer: str = Form("")):
     """Tira um documento da fila sem cadastrar — e desfaz, se foi engano.
@@ -1379,6 +1405,10 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
           <div class="lista" id="rn-wpp-lista"></div>
           <div class="vazio" id="rn-wpp-vazio" hidden></div>
           <button type="button" class="rn-bt fraco pe" onclick="rnFontes()">quem pode mandar</button>
+          {# RELER. Cada seguradora nova entra no leitor depois que o primeiro PDF
+             dela chega; quem já estava na fila ficava com a leitura velha. O
+             arquivo certo já está no cofre — o que estava velho era a leitura. #}
+          <button type="button" class="rn-bt fraco pe" onclick="rnReler(this)">reler com o leitor de hoje</button>
         </div>
         {% endif %}
         <button type="button" class="rn-bt fraco" onclick="rnMao()">não tenho o PDF — digitar à mão</button>
@@ -1743,6 +1773,27 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         if(sub) sub.textContent = d.itens.length + (d.itens.length === 1 ? ' documento' : ' documentos') + ' de quem você liberou';
       });
   }
+
+  window.rnReler = function(bt){
+    var rotulo = bt ? bt.textContent : '';
+    if(bt){ bt.disabled = true; bt.textContent = 'relendo…'; }
+    function volta(){ if(bt){ bt.disabled = false; bt.textContent = rotulo; } }
+    zapFetch('/painel/renovacoes/reler',
+             { method: 'POST', body: new FormData(), credentials: 'same-origin' })
+      .then(function(d){
+        volta();
+        if(!d) return;
+        if(!d.ok){ erro(d.erro || 'não consegui reler.'); return; }
+        wppLida = false;
+        wppCarregar();
+        faixaAtualizar(d.esperando);
+        if(window.zapAviso){
+          zapAviso(d.relidas + (d.relidas === 1 ? ' documento relido' : ' documentos relidos')
+                   + (d.falhas ? ' · ' + d.falhas + ' não deu' : ''),
+                   { tipo: d.falhas ? 'esp' : 'ok' });
+        }
+      });
+  };
 
   function wppDescartar(id, linha){
     zapFetch('/painel/renovacoes/lida/' + id + '/descartar',

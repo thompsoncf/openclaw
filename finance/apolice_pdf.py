@@ -200,13 +200,29 @@ def nomear_seguradora(texto: str) -> tuple[str | None, str | None]:
 # guarda o padrão "DADOS D[OA] SEGURAD[OA]" casa com o prefixo dele — a âncora
 # pousaria justamente no bloco que ela existe pra evitar. Achado ao ler o PDF de
 # verdade, depois de o conserto já estar escrito.
+#
+# TODA ÂNCORA É PRESA AO COMEÇO DA LINHA (`^\s*`). Sem isso a última delas — o
+# rótulo solto — casava com a palavra "segurado" NO MEIO DE UMA FRASE: na capa da
+# Porto Seguro está escrito "consulte o manual do segurado", na página 2, e o
+# bloco do cliente passava a começar ali, num parágrafo de aviso legal. Medido em
+# 22/09/2026, ao rodar o leitor genérico contra o PDF de verdade.
 _ANCORAS_SEGURADO = (
-    r"SUAS\s+INFORMA[ÇC][ÕO]ES",
-    r"DADOS\s+D[OA]\s+SEGURAD[OA](?!RA)",
-    r"DADOS\s+D[OA]\s+CLIENTE",
-    r"IDENTIFICA[ÇC][ÃA]O\s+D[OA]\s+SEGURAD[OA](?!RA)",
-    r"\bSEGURAD[OA]\b(?!RA)",          # o rótulo solto, nunca "SEGURADORA"
+    r"^\s*SUAS\s+INFORMA[ÇC][ÕO]ES",
+    r"^\s*DADOS\s+D[OA]\s+SEGURAD[OA](?!RA)",
+    r"^\s*DADOS\s+D[OA]\s+CLIENTE",
+    r"^\s*DADOS\s+CADASTRAIS",          # a Porto Seguro chama assim
+    r"^\s*IDENTIFICA[ÇC][ÃA]O\s+D[OA]\s+SEGURAD[OA](?!RA)",
+    r"^\s*SEGURAD[OA]\s*:",             # o rótulo solto, e só quando é rótulo
 )
+
+#: onde um bloco TERMINA. A linha em caixa alta serve pra Mapfre e Allianz; a
+#: Porto Seguro escreve os cabeçalhos em Caixa de Título ("Dados do Corretor",
+#: "Valores do seu seguro"), e sem esta segunda forma o bloco dela ia até o fim do
+#: papel — que é justamente o defeito que fechar o bloco veio resolver.
+_FIM_DE_BLOCO = re.compile(
+    r"^(?:[A-ZÀ-Ü0-9][A-ZÀ-Ü0-9 ºª/\.\-\(\)&,\']{5,}"
+    r"|\s*(?:Dados|Valores|Coberturas|Question[áa]rio|Informa[çc][õo]es)\b[^\n]*)$",
+    re.M)
 
 
 #: uma linha inteira em CAIXA ALTA é cabeçalho de bloco. É a estrutura que TODA
@@ -231,14 +247,13 @@ def _bloco_do_segurado(texto: str) -> tuple[str | None, str | None]:
     """
     achados = []
     for padrao in _ANCORAS_SEGURADO:
-        m = re.search(padrao, texto, re.I)
+        m = re.search(padrao, texto, re.I | re.M)
         if m:
-            achados.append((m.start(), m.end(), m.group(0)))
+            achados.append((m.start(), m.end(), m.group(0).strip()))
     if not achados:
         return None, None
     ini, fim_ancora, ancora = min(achados)
-    # o próximo cabeçalho DEPOIS da âncora fecha o bloco
-    prox = _CABECALHO.search(texto, fim_ancora)
+    prox = _FIM_DE_BLOCO.search(texto, fim_ancora)
     return texto[ini:prox.start() if prox else len(texto)], ancora
 
 
@@ -644,9 +659,239 @@ def _porto(texto: str, L: Leitura) -> None:
     c["situacao"] = "vigente" if c.get("numero_apolice") else "proposta"
 
 
+# ───────────────────────── o leitor genérico ─────────────────────────
+#
+# POR QUE ELE EXISTE, e por que ele importa mais que qualquer layout novo: em
+# 22/09/2026 chegaram SETE apólices de SETE seguradoras diferentes numa manhã —
+# HDI, Azul, Allianz, Tokio Marine, Bradesco, Zurich e Yelum. A corretora trabalha
+# com umas vinte, e cada uma tem apólice, proposta e endosso. Layout por
+# seguradora não escala: seriam sete medições, e amanhã a oitava.
+#
+# A EVIDÊNCIA de que dá pra generalizar são os TRÊS layouts já medidos. Eles
+# escrevem o MESMO rótulo de três jeitos:
+#
+#   campo      Allianz            Mapfre                  Porto
+#   segurado   Nome               Nome                    Nome do segurado(a)
+#   CPF        CPF/CNPJ           CPF                     CPF
+#   apólice    Nº da Apólice      Nº Apólice              Apólice
+#   proposta   Nº da Proposta     Nº Proposta             Proposta
+#   prêmio     Preço Líquido      Prêmio líquido          Prêmio líquido
+#   total      Preço Total        Prêmio total            Total do Seguro
+#
+# Então a tabela abaixo não é chute: é o que três documentos de verdade mostraram,
+# e cada linha nova entra depois que um PDF a justifica.
+#
+# O QUE O GENÉRICO NÃO FAZ continua valendo: não soma tabela, não chuta, e não lê
+# o bloco do segurado sem âncora. Campo vazio é resposta; campo errado não é.
+
+#: rótulo → variantes. A ordem importa: a primeira que casar vence, e as mais
+#: específicas vêm antes ("Nome do segurado" antes de "Nome").
+_SINONIMOS = {
+    "numero_apolice":  ("Nº da Apólice", "Nº Apólice", "No. da Apólice", "Numero da Apolice",
+                        "Número da Apólice", "Apólice nº", "Apólice"),
+    "numero_proposta": ("Nº da Proposta", "Nº Proposta", "Número da Proposta",
+                        "Numero da Proposta", "Proposta nº", "Proposta"),
+    "classe_bonus":    ("Classe de bônus", "Classe Bônus", "Classe de Bonus", "Bônus"),
+    "placa":           ("Placa",),
+    "chassi":          ("Nº Chassi", "Chassi", "Nº do Chassi"),
+    "modelo":          ("Marca/Modelo", "Veículo", "Marca / Modelo", "Modelo do veículo"),
+    "ano":             ("Ano do modelo", "Ano/Modelo", "Ano Modelo", "Ano"),
+    "fipe":            ("Código Tabela FIPE", "Cód. FIPE", "Código FIPE",
+                        "Código na Tabela de Referência"),
+    "cep_pernoite":    ("CEP Pernoite", "CEP do local onde o veículo pernoita",
+                        "CEP de pernoite"),
+    "dia_vencimento":  ("Vencimento da 1ª parcela", "Dia de vencimento", "Vencimento"),
+    "parcelas":        ("Nº de parcela", "Nº de parcelas", "Parcelas", "Quantidade de parcelas"),
+}
+
+#: os do BLOCO do segurado — lidos só depois da âncora (`_bloco_do_segurado`)
+_SINONIMOS_SEGURADO = {
+    "nome":     ("Nome do segurado(a)", "Nome do Segurado", "Nome/Razão Social",
+                 "Razão Social", "Nome completo", "Segurado", "Nome"),
+    "cpf":      ("CPF/CNPJ", "CPF / CNPJ", "CNPJ/CPF", "CPF", "CNPJ"),
+    "telefone": ("Telefone celular", "Celular", "Tel. celular", "Telefone", "Tel"),
+    "email":    ("E-mail", "Email", "E-Mail"),
+    "endereco": ("Endereço", "Endereco", "Logradouro"),
+}
+
+#: dinheiro: o rótulo pode vir com dois-pontos OU com o valor na linha de baixo
+_SINONIMOS_DINHEIRO = {
+    "premio_centavos": ("Prêmio líquido", "Prêmio Líquido", "Preço Líquido",
+                        "Premio liquido", "Prêmio Net"),
+    "iof_centavos":    ("IOF", "I.O.F."),
+    "total_centavos":  ("Prêmio total", "Prêmio Total", "Preço Total", "Total do Seguro",
+                        "Prêmio Total do Seguro", "Valor Total"),
+}
+
+
+def _primeiro_rotulo(texto: str, rotulos: tuple[str, ...]):
+    """O primeiro rótulo da lista que existir no papel. (valor, trecho) ou (None, None)."""
+    for r in rotulos:
+        v, tr = _rotulo(texto, r)
+        if v is not None:
+            return v, tr
+    return None, None
+
+
+def _dinheiro_rotulado(texto: str, rotulos: tuple[str, ...]):
+    """O valor em dinheiro depois do rótulo, com dois-pontos OU na linha de baixo.
+
+    As duas formas aparecem nos três layouts medidos: a Mapfre escreve
+    "Prêmio líquido: 2.613,01" e a Porto escreve "Prêmio líquido\nR$ 4.567,46".
+    """
+    for r in rotulos:
+        # `[^\n]{0,60}?` porque o rótulo pode carregar um parêntese antes do valor:
+        # a Allianz escreve "Preço Total (IOF + Juros inclusos)\nR$ 4.088,57". Sem
+        # isso o genérico achava o líquido e perdia o total — e aí o IOF, que é
+        # derivado dos dois, também sumia.
+        #
+        # E `^[ \t]*`, o rótulo no COMEÇO DA LINHA, por causa do mesmo exemplo pelo
+        # avesso: a palavra "IOF" mora DENTRO daquele parêntese, e sem a âncora o
+        # rótulo "IOF" casava ali e devolvia o valor do TOTAL como se fosse imposto.
+        # Nos três papéis medidos todo rótulo de dinheiro abre a linha.
+        m = re.search(r"^[ \t]*" + re.escape(r)
+                      + r"[^\n]{0,60}?[ \t]*:?[ \t]*\n?[ \t]*R?\$? ?"
+                      r"(\d{1,3}(?:\.\d{3})*,\d{2})", texto, re.M)
+        if m:
+            return _dinheiro(m.group(1)), m.group(0).strip()
+    return None, None
+
+
+def _parcelas_da_tabela(texto: str):
+    """Os valores das parcelas, nas DUAS ordens que os papéis usam.
+
+    Mapfre: número / data / valor. Porto: número / valor / data. O mesmo dado em
+    ordem trocada — e ler na ordem errada devolve data no lugar de dinheiro, que a
+    checagem da soma denuncia mas o formulário já mostrou.
+    """
+    num_data_valor = re.findall(
+        r"\n(\d{1,2})\n(\d{2}/\d{2}/\d{4})\n\s*R?\$? ?(\d{1,3}(?:\.\d{3})*,\d{2})", texto)
+    num_valor_data = re.findall(
+        r"\n(\d{1,2})\n\s*R?\$? ?(\d{1,3}(?:\.\d{3})*,\d{2})\n(\d{2}/\d{2}/\d{4})", texto)
+    if len(num_data_valor) >= len(num_valor_data) and num_data_valor:
+        return [(int(n), _dinheiro(v), d) for n, d, v in num_data_valor]
+    if num_valor_data:
+        return [(int(n), _dinheiro(v), d) for n, v, d in num_valor_data]
+    return []
+
+
+def _generico(texto: str, L: Leitura) -> None:
+    """Lê o que estiver ROTULADO, seja qual for a seguradora.
+
+    Substitui o antigo caminho genérico, que usava os rótulos da Allianz e por isso
+    só achava campo em papel que falasse Allianzês.
+    """
+    c, t = L.campos, L.trechos
+    c["ramo"] = "auto"
+
+    def pega(chave, rotulos, onde=None, conv=lambda v: v):
+        v, tr = _primeiro_rotulo(onde if onde is not None else texto, rotulos)
+        val = conv(v) if v is not None else None
+        if val is None:
+            L.nao_achou.append(chave)
+            return None
+        c[chave], t[chave] = val, tr
+        return val
+
+    pega("numero_apolice", _SINONIMOS["numero_apolice"], conv=lambda v: _digitos(v) or None)
+    pega("numero_proposta", _SINONIMOS["numero_proposta"], conv=lambda v: _digitos(v) or None)
+    pega("classe_bonus", _SINONIMOS["classe_bonus"], conv=lambda v: v.strip()[:4] or None)
+
+    # A VIGÊNCIA, nas duas formas: uma linha com duas datas (Allianz, Porto) ou
+    # dois rótulos separados (Mapfre).
+    vig, tr = _primeiro_rotulo(texto, ("Vigência", "Vigencia", "Período de vigência"))
+    datas = re.findall(r"\d{2}/\d{2}/\d{4}", vig or "")
+    if len(datas) >= 2:
+        c["vigencia_inicio"], c["vigencia_fim"] = _data(datas[0]), _data(datas[1])
+        t["vigencia_fim"] = tr
+    else:
+        vi = _primeiro_rotulo(texto, ("Vigência início 24h do dia", "Início de vigência",
+                                      "Início da vigência", "Data de início"))[0]
+        vf, trf = _primeiro_rotulo(texto, ("Término 24h do dia", "Fim de vigência",
+                                           "Fim da vigência", "Término da vigência",
+                                           "Válida até", "Data de término"))
+        if _data(vi):
+            c["vigencia_inicio"] = _data(vi)
+        if _data(vf):
+            c["vigencia_fim"], t["vigencia_fim"] = _data(vf), trf
+    if "vigencia_fim" not in c:
+        L.nao_achou.append("vigencia_fim")
+
+    # O SEGURADO, só depois da âncora. Sem âncora não se lê — ver
+    # `_bloco_do_segurado`, que também FECHA o bloco no próximo cabeçalho.
+    DO_SEGURADO = ("nome", "cpf", "telefone", "email", "endereco")
+    seg, _ancora = _bloco_do_segurado(texto)
+    if seg is None:
+        L.nao_achou.extend(DO_SEGURADO)
+        L.avisos.append("Não achei onde começam os dados do segurado neste papel — "
+                        "deixei nome, CPF, telefone e endereço em branco de propósito. "
+                        "Preencha olhando o PDF.")
+    else:
+        pega("nome", _SINONIMOS_SEGURADO["nome"], seg,
+             lambda v: re.sub(r"\s+", " ", v).strip().upper() or None)
+        pega("cpf", _SINONIMOS_SEGURADO["cpf"], seg, lambda v: _digitos(v) or None)
+        pega("telefone", _SINONIMOS_SEGURADO["telefone"], seg, lambda v: _digitos(v) or None)
+        pega("email", _SINONIMOS_SEGURADO["email"], seg, lambda v: v.strip().lower() or None)
+        pega("endereco", _SINONIMOS_SEGURADO["endereco"], seg)
+        _conferir_o_segurado(L, DO_SEGURADO)
+
+    # O VEÍCULO. Sem bloco próprio aqui: os rótulos de carro (placa, chassi) não se
+    # repetem em outros blocos do papel, ao contrário de "Nome" e "CPF".
+    pega("placa", _SINONIMOS["placa"], conv=lambda v: v.strip().upper().replace("-", "") or None)
+    pega("chassi", _SINONIMOS["chassi"], conv=lambda v: v.strip().upper() or None)
+    pega("modelo", _SINONIMOS["modelo"], conv=lambda v: re.sub(r"\s+", " ", v).strip() or None)
+    pega("ano", _SINONIMOS["ano"], conv=lambda v: _digitos(v)[:4] or None)
+    pega("fipe", _SINONIMOS["fipe"])
+    pega("cep_pernoite", _SINONIMOS["cep_pernoite"], conv=lambda v: _digitos(v) or None)
+
+    for chave, rotulos in _SINONIMOS_DINHEIRO.items():
+        v, tr = _dinheiro_rotulado(texto, rotulos)
+        if v is None:
+            L.nao_achou.append(chave)
+        else:
+            c[chave], t[chave] = v, tr
+    # o IOF pode ser DERIVADO quando o papel não o traz em linha própria
+    if c.get("iof_centavos") is None and c.get("premio_centavos") is not None \
+            and c.get("total_centavos") is not None:
+        c["iof_centavos"] = c["total_centavos"] - c["premio_centavos"]
+
+    par = _parcelas_da_tabela(texto)
+    if par:
+        # A 1ª PARCELA VEM ROTULADA À PARTE, fora da tabela — é assim na Mapfre
+        # ("Valor da 1ª parcela: 233,82", e a tabela começa na 02) e na Porto. Sem
+        # ela a soma não fecha com o total, e o `dia_vencimento` sai da parcela 2:
+        # dia 15 no lugar de 16, medido no PDF da Mapfre em 22/09/2026.
+        v1, _tr1 = _primeiro_rotulo(texto, ("Valor da 1ª parcela", "Valor da 1a parcela",
+                                            "Valor da primeira parcela"))
+        d1, tr1 = _primeiro_rotulo(texto, ("Vencimento da 1ª parcela",
+                                           "Vencimento da 1a parcela"))
+        valores = [v for _n, v, _d in par]
+        if _dinheiro(v1) is not None and not any(n == 1 for n, _v, _d in par):
+            valores.insert(0, _dinheiro(v1))
+        c["parcelas"] = max(max(n for n, _v, _d in par), len(valores))
+        c["parcelas_centavos"] = valores
+        if _data(d1):
+            c["dia_vencimento"], t["dia_vencimento"] = _data(d1).day, tr1
+        else:
+            primeira = min(par)
+            c["dia_vencimento"] = int(primeira[2][:2])
+            t["dia_vencimento"] = f"1ª parcela vence {primeira[2]}"
+    else:
+        pega("parcelas", _SINONIMOS["parcelas"],
+             conv=lambda v: int(_digitos(v)) if _digitos(v) else None)
+        pega("dia_vencimento", _SINONIMOS["dia_vencimento"],
+             conv=lambda v: int(_digitos(v)[:2]) if _digitos(v) else None)
+
+    c["situacao"] = "vigente" if c.get("numero_apolice") else "proposta"
+
+
 _LAYOUTS = (
     # (nome, teste de reconhecimento, leitor)
-    ("Allianz", lambda t: bool(re.search(r"\bALLIANZ\b", t, re.I)) and "Nº da Proposta" in t, _allianz),
+    # `Nº da Proposta` OU `Nº da Apólice`: o teste exigia só o primeiro, e por isso
+    # a APÓLICE EMITIDA da Allianz (que traz o segundo) caía no genérico — visto em
+    # 22/09/2026, numa Allianz que eu já sabia ler.
+    ("Allianz", lambda t: bool(re.search(r"\bALLIANZ\b", t, re.I))
+                          and ("Nº da Proposta" in t or "Nº da Apólice" in t), _allianz),
     # a Mapfre escreve o próprio nome no bloco DADOS DA SEGURADORA; os dois
     # rótulos juntos separam a apólice dela de um e-mail que só a mencione.
     ("Mapfre", lambda t: bool(re.search(r"\bMAPFRE\b", t, re.I))
@@ -728,8 +973,10 @@ def ler_texto(texto: str, paginas: int = 0, proibidos: tuple[str, ...] = ()) -> 
             leitor(texto, L)
             break
     if not L.reconhecida:
-        # layout desconhecido: tenta o genérico, e AVISA
-        _allianz(texto, L)           # os rótulos genéricos são os mesmos por enquanto
+        # layout desconhecido: o GENÉRICO, que lê por sinônimos em vez de falar
+        # Allianzês. Era `_allianz` aqui, e por isso seguradora desconhecida vinha
+        # quase vazia — sete delas numa manhã em 22/09/2026.
+        _generico(texto, L)
         L.campos.pop("seguradora", None)
         # o NOME sai mesmo sem o layout, e é o que deixa o aviso reconhecível
         nome, trecho = nomear_seguradora(texto)

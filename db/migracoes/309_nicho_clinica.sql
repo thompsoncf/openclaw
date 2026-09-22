@@ -1,4 +1,4 @@
--- 308_nicho_clinica.sql
+-- 309_nicho_clinica.sql
 -- Nicho 'clinica': MISTO — atende (consulta, procedimento, pacote de sessões) e
 -- vende produto de beleza (dermocosmético, protetor), junto com o atendimento ou
 -- separado. Casa o slug com finance/nichos.py e com o ramo Clinica de

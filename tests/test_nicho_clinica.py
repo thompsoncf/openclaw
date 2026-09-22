@@ -34,13 +34,13 @@ def test_o_nicho_existe_e_e_misto():
 def test_o_nome_da_tabela_e_o_label_do_codigo_sao_o_mesmo():
     """O painel lê o label do CÓDIGO; o admin lê o nome da TABELA."""
     sql = (Path(__file__).resolve().parent.parent / "db" / "migracoes"
-           / "308_nicho_clinica.sql").read_text(encoding="utf-8")
+           / "309_nicho_clinica.sql").read_text(encoding="utf-8")
     assert f"select '{nichos.label_do_nicho('clinica')}', 'clinica'" in sql
 
 
 def test_a_migracao_nao_atropela_a_escolha_da_conta():
     sql = (Path(__file__).resolve().parent.parent / "db" / "migracoes"
-           / "308_nicho_clinica.sql").read_text(encoding="utf-8")
+           / "309_nicho_clinica.sql").read_text(encoding="utf-8")
     assert "where id = 39\n       and nicho_id is null;" in sql
 
 

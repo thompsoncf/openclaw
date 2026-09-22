@@ -41,7 +41,7 @@ def test_o_nome_da_tabela_e_o_label_do_codigo_sao_o_mesmo():
 def test_a_migracao_nao_atropela_a_escolha_da_conta():
     sql = (Path(__file__).resolve().parent.parent / "db" / "migracoes"
            / "308_nicho_clinica.sql").read_text(encoding="utf-8")
-    assert "where id = 39\n   and nicho_id is null;" in sql
+    assert "where id = 39\n       and nicho_id is null;" in sql
 
 
 def test_a_consulta_e_o_padrao():

@@ -28,10 +28,19 @@ insert into nichos (nome, slug, tipo)
 select 'Clínica / Saúde', 'clinica', 'produto'
 where not exists (select 1 from nichos n where n.slug = 'clinica');
 
-update contas
-   set nicho_id = (select id from nichos where slug = 'clinica')
- where id = 39
-   and nicho_id is null;
+-- Guardado pela coluna: tests/test_blindagem_migracoes.py aplica tudo a partir
+-- da 088 num esqueleto de `contas` sem nicho_id. Em produção a coluna existe.
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'contas'
+                and column_name = 'nicho_id') then
+    update contas
+       set nicho_id = (select id from nichos where slug = 'clinica')
+     where id = 39
+       and nicho_id is null;
+  end if;
+end $$;
 
 -- rollback:
 --   update contas set nicho_id = null

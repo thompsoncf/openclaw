@@ -97,6 +97,13 @@ _RAMOS = [
                       "atacadista de alimentos", "alimentos")),
     ("Vestuario",    ("vestuario", "roupas", "confeccao", "artigos do vestuario",
                       "calcados", "moda", "boutique", "acessorios do vestuario")),
+    # Clínica / atividade de saúde. Vem ANTES de Salao porque a chave "estetica"
+    # de lá pegaria uma clínica que cita estética. Sem "veterin" de propósito:
+    # clínica veterinária é do petshop. As chaves são as palavras que a Receita
+    # usa nos CNAEs 8630-5 (atividade médica ambulatorial) e vizinhos.
+    ("Clinica",      ("atividade medica", "atencao ambulatorial", "clinica",
+                      "consultorio", "odontolog", "fisioterap", "psicolog",
+                      "complementacao diagnostica")),
     # SERVICO de beleza (atende a pessoa) — vem ANTES de Beleza(produto) porque
     # "salao/cabeleireiro/manicure" é serviço, nao venda de cosmético.
     ("Salao",        ("salao", "cabelei", "manicure", "pedicure", "estetica",
@@ -159,6 +166,7 @@ _RAMO_NICHO = {
     "Suplementos":  "suplementos",
     "Supermercado": "minimercado",
     "Vestuario":    "vestuario",
+    "Clinica":      "clinica",
     "Salao":        "salao",
     "Beleza":       "beleza",
     "Seguros":      "seguros",

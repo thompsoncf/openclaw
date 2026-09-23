@@ -1,4 +1,4 @@
--- 315_novidade_servicos_inativar.sql
+-- 316_novidade_servicos_inativar.sql
 -- O "excluir" do catálogo de serviços virou "inativar" — e agora dá pra voltar.
 --
 -- O QUE MUDOU NA TELA:

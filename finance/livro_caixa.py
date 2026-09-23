@@ -579,6 +579,47 @@ class LivroCaixa:
         total["saldo"] = total["anterior"] + total["receitas"] - total["despesas"]
         return {"total": total, **blocos}
 
+    def despesas_empresa_por_centro(self, ano: int, mes: int,
+                                    membro_id: int | None = None) -> dict:
+        """As despesas de EMPRESA do mês, por centro de custo — e o que ficou sem.
+
+        Pedido 2 do dono em 23/09/2026: "um card com 3 tipos de despesas — fixa,
+        eventual, investimento". Os três já existiam como CENTROS DE CUSTO da
+        Prime, criados por ele; o que faltava era o card mostrar.
+
+        Só EMPRESA, e não o total do mês: centro de custo é classificação de
+        empresa (o gasto pessoal não tem), e assim a soma desta quebra fecha com
+        a linha "Empresa" que fica logo acima dela no card — em vez de parecer que
+        falta dinheiro.
+
+        `sem_centro` é devolvido À PARTE e nunca some: é a linha que mostra o
+        tamanho do que escapou da classificação. Em 23/09/2026 era a maior de
+        todas — e esconder isso deixaria a soma dos centros parecer o total.
+
+        Só LEITURA. Nenhum centro é criado nem alterado ("não mexer em centro de
+        custos", regra do dono no mesmo dia).
+        """
+        cond = "l.conta_id = %s"
+        base: list = [self.conta_id]
+        if membro_id is not None:
+            cond += " and l.membro_id = %s"; base.append(membro_id)
+        ini, prox = _intervalo_mes(ano, mes)
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                f"""select cc.nome, coalesce(sum(l.valor_centavos), 0)
+                      from lancamentos l
+                      left join centros_custo cc on cc.id = l.centro_custo_id
+                                                 and cc.conta_id = l.conta_id
+                     where {cond} and l.tipo = 'despesa' and l.natureza = 'empresa'
+                       and l.data >= %s and l.data < %s
+                     group by cc.nome""",
+                base + [ini, prox]).fetchall()
+        centros = sorted(((n, int(v)) for n, v in rows if n and v),
+                         key=lambda x: (-x[1], x[0]))
+        sem = sum(int(v) for n, v in rows if not n)
+        return {"centros": centros, "sem_centro": sem,
+                "total": sum(v for _, v in centros) + sem}
+
     def despesas_por_categoria(self, ano: int, mes: int, membro_id: int | None = None,
                                natureza: str | None = None) -> list[tuple[str, int]]:
         return self._por_categoria("despesa", ano, mes, membro_id, natureza)

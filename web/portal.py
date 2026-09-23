@@ -974,6 +974,10 @@ _DASH = """{% extends "base" %}{% block conteudo %}
   .fin-quebra>div{display:flex;justify-content:space-between;align-items:center;gap:.4rem}
   .fin-quebra .rot{display:inline-flex;align-items:center;gap:.4rem;color:var(--txt-mut)}
   .fin-quebra .val{font-family:var(--mono)}
+  /* a sub-quebra por centro: título discreto, e a linha dela alinhada com as
+     de cima pra ler como "a Empresa, aberta" e não como um quarto cartão */
+  .fin-quebra-cc .cc-tit{font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  .fin-quebra-cc .cc-tit .rot,.fin-quebra-cc .cc-tit .val{color:var(--txt-mut)}
   .fin2 .barra,.fin2 .barra-fill{height:12px;border-radius:999px}
   /* lançamentos e fatura */
   .fin-cab-ic{width:40px;height:40px;border-radius:13px;background:var(--azul-fundo);
@@ -1123,6 +1127,14 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <div><span class="rot"><span class="pt" style="background:var(--azul)"></span>Empresa</span><span class="val nowrap">{{ (quebra.despesas.empresa/100)|n2 }}</span></div>
 <div><span class="rot"><span class="pt" style="background:var(--txt-mut)"></span>Pessoal</span><span class="val nowrap">{{ (quebra.despesas.pessoal/100)|n2 }}</span></div>
 <div{% if quebra.despesas.a_definir %} style="color:var(--ambar)"{% endif %}><span class="rot"{% if quebra.despesas.a_definir %} style="color:var(--ambar)"{% endif %}><span class="pt" style="background:var(--ambar)"></span>A definir</span><span class="val nowrap">{{ (quebra.despesas.a_definir/100)|n2 }}</span></div>
+</div>{% endif %}{#- EMPRESA POR CENTRO (pedido 2, 23/09/2026 — "fixa, eventual,
+   investimento", que o dono já tinha criado como centros de custo). Quebra a
+   linha "Empresa" de cima, e só ela: é por isso que soma com ela. "Sem centro"
+   em âmbar e SEMPRE que existir — é o tamanho do que escapou, e sem ela a
+   soma dos centros pareceria o total. -#}{% if quebra_centro and quebra_centro.total %}<div class="fin-quebra fin-quebra-cc" title="as despesas de EMPRESA do mês, por centro de custo">
+<div class="cc-tit"><span class="rot">Empresa por centro</span><span class="val nowrap">{{ (quebra_centro.total/100)|n2 }}</span></div>
+{% for nome, v in quebra_centro.centros %}<div><span class="rot"><span class="pt" style="background:var(--verde-claro)"></span>{{ nome|e }}</span><span class="val nowrap">{{ (v/100)|n2 }}</span></div>
+{% endfor %}{% if quebra_centro.sem_centro %}<div style="color:var(--ambar)"><span class="rot" style="color:var(--ambar)"><span class="pt" style="background:var(--ambar)"></span>Sem centro</span><span class="val nowrap">{{ (quebra_centro.sem_centro/100)|n2 }}</span></div>{% endif %}
 </div>{% endif %}</div>
 </div>
 
@@ -4176,6 +4188,69 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   <div class="mut" style="font-size:.75rem;margin-top:.8rem">Relatório do contador: <a href="/painel/empresa/contador.csv?ano={{ dre.ano }}&mes={{ dre.mes }}" style="color:var(--verde-claro)">baixar planilha ({{ '%02d'|format(dre.mes) }}/{{ dre.ano }}) ↓</a></div>
 </div>
 
+{#- O PLANEJAMENTO DA SEMANA — etapa A do pedido 3 do dono (23/09/2026: "open
+   finance — saldo da conta para planejamento de contas a pagar"). O saldo é
+   DIGITADO por ele, banco a banco; os números das contas são os mesmos da pílula
+   "⚠️ Atrasadas" logo abaixo (ver finance/saldo_informado.py). Sem saldo não há
+   sobra: a linha diz "informe", em vez de calcular um rombo contra zero. -#}
+{% if planej %}
+<style>
+  .plj-l{display:flex;justify-content:space-between;align-items:baseline;gap:.6rem;padding:.3rem 0;font-size:.88rem}
+  .plj-l span i{display:block;font-style:normal;font-size:.7rem;color:var(--txt-mut)}
+  .plj-l b{font-family:var(--mono);font-weight:600;white-space:nowrap}
+  .plj-l.ruim b,.plj-l.ruim span{color:#e07a5f}
+  .plj-l.aviso b,.plj-l.aviso span{color:#f0c05a}
+  .plj-l.tot{border-top:1px solid var(--borda);margin-top:.3rem;padding-top:.55rem;font-weight:600}
+  .plj-l.tot.bom b{color:var(--verde-claro)}
+  .plj-l .falta{color:var(--txt-mut);font-weight:400}
+  .plj-dica{margin:.5rem 0 0;font-size:.8rem;color:#f0c05a;line-height:1.4}
+  .plj-bancos{margin-top:.8rem;border-top:1px dashed var(--borda);padding-top:.6rem;display:flex;flex-direction:column;gap:.4rem}
+  .plj-banco{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .6rem;font-size:.8rem;margin:0}
+  .plj-banco .nome{font-weight:600;min-width:7rem}
+  .plj-banco .idade{flex:1 1 9rem;color:var(--txt-mut);font-size:.72rem}
+  .plj-banco.velho .idade{color:#f0c05a}
+  .plj-banco.velho .nome{color:var(--txt-mut)}
+  .plj-banco input{width:auto;flex:0 1 9rem;min-width:0;font-size:.8rem;padding:.3rem .45rem}
+  .plj-banco button{width:auto;background:none;border:1px solid var(--borda);border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;color:var(--txt)}
+  .plj-banco button.pr{border-color:#1E4A3A;color:var(--verde-claro)}
+  .plj-banco button.tira{color:#c98080}
+  .plj-banco.novo input[name=banco]{flex:1 1 9rem}
+</style>
+<div class="card larga" id="planejamento">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.3rem">
+    <strong>Planejamento da semana</strong>
+    <span class="mut" style="font-size:.72rem">o saldo é o que você informa · as contas vêm dos títulos abaixo</span></div>
+  <div style="margin-top:.5rem">
+    <div class="plj-l"><span>Saldo nos bancos{% if planej.saldos %}<i>{{ planej.saldos|length }} banco{{ 's' if planej.saldos|length != 1 }}{% if planej.algum_velho %} · algum saldo está desatualizado{% endif %}</i>{% endif %}</span>
+      <b>{% if planej.saldo_centavos is not none %}{{ planej.saldo_centavos|brl }}{% else %}<span class="falta">— informe abaixo</span>{% endif %}</b></div>
+    <div class="plj-l ruim"><span>− Atrasadas<i>{{ planej.n_atrasadas }} conta{{ 's' if planej.n_atrasadas != 1 }} a pagar</i></span><b>{{ planej.atrasadas_centavos|brl }}</b></div>
+    <div class="plj-l aviso"><span>− A vencer em {{ planej.dias }} dias<i>{{ planej.n_a_vencer }} conta{{ 's' if planej.n_a_vencer != 1 }} a pagar</i></span><b>{{ planej.a_vencer_centavos|brl }}</b></div>
+    <div class="plj-l tot{% if planej.sobra_centavos is not none %}{{ ' ruim' if planej.sobra_centavos < 0 else ' bom' }}{% endif %}"><span>Sobra depois de tudo</span>
+      <b>{% if planej.sobra_centavos is not none %}{{ '− ' if planej.sobra_centavos < 0 }}{{ (planej.sobra_centavos if planej.sobra_centavos >= 0 else -planej.sobra_centavos)|brl }}{% else %}<span class="falta">precisa do saldo</span>{% endif %}</b></div>
+  </div>
+  {% if planej.sobra_centavos is not none and planej.sobra_centavos < 0 %}
+  <p class="plj-dica">Falta {{ (-planej.sobra_centavos)|brl }} pra cobrir a semana.{% if planej.n_receber_vencidas %} Você tem {{ planej.n_receber_vencidas }} conta{{ 's' if planej.n_receber_vencidas != 1 }} a receber vencida{{ 's' if planej.n_receber_vencidas != 1 }}, somando {{ planej.receber_vencidas_centavos|brl }}{% if planej.cobrar_cobre %} — cobrar cobre a diferença{% endif %}.{% endif %}</p>
+  {% endif %}
+  <div class="plj-bancos">
+    {% for s in planej.saldos %}
+    <form method="post" action="/painel/empresa/saldo" class="plj-banco{{ ' velho' if s.velho }}">
+      <input type="hidden" name="banco" value="{{ s.banco|e }}">
+      <span class="nome">{{ s.banco|e }}</span>
+      <span class="idade">{% if s.dias <= 0 %}informado hoje, {{ s.informado_em.strftime('%H:%M') }}{% elif s.dias == 1 %}informado ontem{% else %}informado há {{ s.dias }} dias{% endif %}{% if s.velho %} — atualize{% endif %}</span>
+      <input name="valor" inputmode="decimal" value="{{ (s.valor_centavos/100)|n2 }}" aria-label="saldo do {{ s.banco|e }}">
+      <button class="pr">atualizar</button>
+      <button class="tira" formaction="/painel/empresa/saldo/arquivar" data-msg="Tirar {{ s.banco|e }} da soma? O histórico dele fica guardado, e informar de novo traz ele de volta." onclick="return confirm(this.dataset.msg)">tirar ✕</button>
+    </form>
+    {% endfor %}
+    <form method="post" action="/painel/empresa/saldo" class="plj-banco novo">
+      <input name="banco" required maxlength="60" placeholder="{{ 'Outro banco' if planej.saldos else 'Banco (ex: Sicoob)' }}">
+      <input name="valor" required inputmode="decimal" placeholder="saldo R$ (pode ser negativo)">
+      <button class="pr">+ informar</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center" id="titulos"><strong>Títulos a pagar e receber</strong>
     {% if n_aguardando %}<span class="selo esp">{{ n_aguardando }} esperando liberação</span>{% endif %}</div>
@@ -4272,7 +4347,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       {% if centros_ativos %}<label>Centro de custo
         <select name="centro_custo_id" id="tit-centro">
           <option value="">— sem —</option>
-          {% for c in centros_ativos %}<option value="{{ c.id }}">{{ c.nome }}</option>{% endfor %}
+          {% for c in centros_ativos %}<option value="{{ c.id }}">{{ c.nome|e }}</option>{% endfor %}
         </select></label>{% endif %}
       <span class="mut" id="tit-mem-dica"></span>
     </div>
@@ -4487,7 +4562,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span> · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}{% if t.criado_nome %} · lançado por {{ t.criado_nome }}{% endif %}{% if t.aprovacao=='autorizado' and t.aprovado_nome %} · liberado por {{ t.aprovado_nome }}{% endif %}{% if t.aprovacao_motivo %} · <span style="color:#e07a5f">"{{ t.aprovacao_motivo }}"</span>{% endif %}{#- a próxima só é prometida em título ABERTO: em título pago ela já
       nasceu (ou foi barrada pela trava de duplicata), e repetir a promessa ali
       seria anunciar uma segunda. -#}{% if t.proxima %} · <span style="color:#9b8fd6" title="nasce sozinha quando você der baixa nesta">próxima: {{ t.proxima.strftime('%d/%m') }}</span>{% endif %}{#- a CLASSIFICAÇÃO (317), quando existe. Quando não existe, nada: um
-      "sem centro" em 13 linhas seria parede, e o lugar de pôr é o editar ✎. -#}{% if t.plano_codigo or t.centro_nome %} · <span class="tit-cls" title="classificação — vai junto pro caixa na baixa">{% if t.plano_codigo %}{{ t.plano_codigo }} {{ t.plano_nome }}{% endif %}{% if t.plano_codigo and t.centro_nome %} · {% endif %}{% if t.centro_nome %}{{ t.centro_nome }}{% endif %}</span>{% endif %}</div>
+      "sem centro" em 13 linhas seria parede, e o lugar de pôr é o editar ✎. -#}{% if t.plano_codigo or t.centro_nome %} · <span class="tit-cls" title="classificação — vai junto pro caixa na baixa">{% if t.plano_codigo %}{{ t.plano_codigo|e }} {{ t.plano_nome|e }}{% endif %}{% if t.plano_codigo and t.centro_nome %} · {% endif %}{% if t.centro_nome %}{{ t.centro_nome|e }}{% endif %}</span>{% endif %}</div>
     </div>
     {#- R$ 0,00 seria mentira de dois jeitos: diz que a conta é de graça e some
        na soma da lista. A conta de valor variável (196) nasce sem valor de
@@ -4613,7 +4688,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         <select name="categoria" title="categoria">
           {% set _cats = (CAT_TITULO or {})[t.tipo] or [] %}
           {% for c in _cats %}<option value="{{ c }}"{{ ' selected' if c == t.categoria }}>{{ c }}</option>{% endfor %}
-          {% if t.categoria and t.categoria not in _cats %}<option value="{{ t.categoria }}" selected>{{ t.categoria }}</option>{% endif %}
+          {% if t.categoria and t.categoria not in _cats %}<option value="{{ t.categoria|e }}" selected>{{ t.categoria|e }}</option>{% endif %}
         </select>
         {#- `tem_plano`/`tem_centro` dizem que o select ESTAVA na tela: conta sem
            plano ligado não o desenha, e o campo ausente chegaria vazio — que
@@ -4624,13 +4699,13 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
           {#- conta do plano DESLIGADA depois de escolhida: sem esta opção o select
              cairia em "— sem —" e salvar a edição apagaria a classificação calado.
              O servidor recusa o id desligado e mantém o que estava. -#}
-          {% if t.plano_conta_id and t.plano_conta_id not in (plano_opcoes|map(attribute='contas')|sum(start=[])|map(attribute='id')|list) %}<option value="{{ t.plano_conta_id }}" selected>{{ t.plano_codigo }} {{ t.plano_nome }} (desligada)</option>{% endif %}
+          {% if t.plano_conta_id and t.plano_conta_id not in (plano_opcoes|map(attribute='contas')|sum(start=[])|map(attribute='id')|list) %}<option value="{{ t.plano_conta_id }}" selected>{{ t.plano_codigo|e }} {{ t.plano_nome|e }} (desligada)</option>{% endif %}
         </select>{% endif %}
         {% if centros_ativos %}<input type="hidden" name="tem_centro" value="1"><select name="centro_custo_id" title="centro de custo">
           <option value="">centro: — sem —</option>
-          {% for c in centros_ativos %}<option value="{{ c.id }}"{{ ' selected' if c.id == t.centro_custo_id }}>{{ c.nome }}</option>{% endfor %}
+          {% for c in centros_ativos %}<option value="{{ c.id }}"{{ ' selected' if c.id == t.centro_custo_id }}>{{ c.nome|e }}</option>{% endfor %}
           {#- mesmo cuidado pro centro DESATIVADO depois de escolhido -#}
-          {% if t.centro_custo_id and t.centro_custo_id not in (centros_ativos|map(attribute='id')|list) %}<option value="{{ t.centro_custo_id }}" selected>{{ t.centro_nome }} (inativo)</option>{% endif %}
+          {% if t.centro_custo_id and t.centro_custo_id not in (centros_ativos|map(attribute='id')|list) %}<option value="{{ t.centro_custo_id }}" selected>{{ t.centro_nome|e }} (inativo)</option>{% endif %}
         </select>{% endif %}
       </div>
       <button style="background:var(--verde);color:var(--sobre-verde);border:0">salvar</button>
@@ -11213,6 +11288,14 @@ def painel_empresa(request: Request):
          "dica": "sem liberação: ninguém autoriza dinheiro entrando" if _receber else ""},
     ]
     tit_atrasadas = _lente_atrasadas(tit_blocos)
+    # O PLANEJAMENTO DA SEMANA (etapa A do pedido 3). Tolerante: se a tabela da
+    # 320 ainda não existir, a aba abre sem a faixa em vez de cair.
+    try:
+        from finance import saldo_informado as _si
+        planej = _si.planejamento(pool, conta[0])
+    except Exception:  # noqa: BLE001
+        log.warning("planejamento da semana falhou", exc_info=True)
+        planej = None
     # Os PAGOS numa seção à parte, recolhida. A tela mostrava só 'aberto', então título
     # baixado sumia do app inteiro — e o que tinha sido baixado por engano (ou cujo
     # lançamento foi apagado no financeiro) ficava preso pra sempre, sem caminho nenhum.
@@ -11251,7 +11334,7 @@ def painel_empresa(request: Request):
                    RITMO_SELO={"quinzenal": "quinzenal", "mensal": "mensal",
                                "anual": "anual"},
                    dre=dre, titulos=titulos, tit_blocos=tit_blocos,
-                   tit_atrasadas=tit_atrasadas,
+                   tit_atrasadas=tit_atrasadas, planej=planej,
                    CAT_TITULO={"pagar": emp.categorias_titulo("pagar"),
                                "receber": emp.categorias_titulo("receber")},
                    titulos_pagos=titulos_pagos,
@@ -11801,6 +11884,41 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
         except Exception:
             pass
     return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/saldo")
+def empresa_saldo_informar(request: Request, banco: str = Form(""),
+                           valor: str = Form("")):
+    """O dono informa o saldo de um banco (etapa A do pedido 3, 23/09/2026).
+
+    Valor COM SINAL: cheque especial é saldo de verdade, e é por isso que o
+    conversor é o do acréscimo, que aceita o menos. Campo sem nenhum dígito é
+    recusado — "0" é saldo legítimo, texto em branco não."""
+    from finance import saldo_informado as si
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    if not any(ch.isdigit() for ch in (valor or "")):
+        request.session["emp_aviso"] = "Informe o valor do saldo (pode ser 0 ou negativo)."
+    else:
+        r = si.informar(pool, conta[0], banco, _acrescimo_para_centavos(valor),
+                        membro_id=request.session.get("membro_id"))
+        if not r.get("ok"):
+            request.session["emp_aviso"] = r.get("erro")
+    return RedirectResponse("/painel/empresa#planejamento", status_code=303)
+
+
+@router.post("/painel/empresa/saldo/arquivar")
+def empresa_saldo_arquivar(request: Request, banco: str = Form("")):
+    """Tira um banco da soma sem apagar o histórico dele."""
+    from finance import saldo_informado as si
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    si.arquivar(pool, conta[0], banco, membro_id=request.session.get("membro_id"))
+    return RedirectResponse("/painel/empresa#planejamento", status_code=303)
 
 
 @router.get("/painel/empresa/memoria-fornecedor")
@@ -12425,6 +12543,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         maior_rec = 0
         n_a_definir = 0
         quebra = None
+        quebra_centro = None
     else:
         # natureza (pessoal/empresa/a_definir) só filtra em conta PJ; PF ignora
         nat = natureza if (eh_pj and natureza in ("pessoal", "empresa", "a_definir")) else None
@@ -12441,6 +12560,21 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
             }
         else:
             resumo = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza=nat)
+        # A QUEBRA POR CENTRO (pedido 2 do dono, 23/09/2026: "fixa, eventual,
+        # investimento" — que já existiam como centros de custo dele). Só PJ, só
+        # quando a conta TEM centro, e só com o filtro em "tudo" ou "empresa":
+        # ela quebra as despesas de EMPRESA, e noutro filtro a soma dela não
+        # fecharia com o número grande do card.
+        quebra_centro = None
+        if eh_pj and nat in (None, "empresa") and not _sem_conta:
+            try:
+                from finance import plano_contas as _pc_q
+                if _pc_q.listar_centros(pool, conta[0]):
+                    quebra_centro = livro.despesas_empresa_por_centro(
+                        ano_sel, mes_num, membro_sel)
+            except Exception:  # noqa: BLE001 — a quebra nunca derruba o Financeiro
+                log.warning("quebra por centro falhou", exc_info=True)
+                quebra_centro = None
         categorias = livro.despesas_por_categoria(ano_sel, mes_num, membro_sel, natureza=nat)
         maior_cat = max((v for _, v in categorias), default=0)
         _rec = livro.receitas_em_dois_blocos(ano_sel, mes_num, membro_sel, natureza=nat)
@@ -12516,7 +12650,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
                    natureza_sel=(natureza if eh_pj else ""),
                    sem_conta_sel=_sem_conta, n_sem_conta=n_sem_conta,
                    n_a_definir=n_a_definir,
-                   quebra=quebra,
+                   quebra=quebra, quebra_centro=quebra_centro,
                    prev_cartao=prev_cartao,
                    eh_pj=eh_pj,
                    plano_opcoes=plano_opcoes, centros_custo=centros_custo,

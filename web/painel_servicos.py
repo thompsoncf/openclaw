@@ -3744,6 +3744,32 @@ _JS_CRU = r"""(function(){
       setTimeout(function(){btn.textContent='Salvar no funil';},1500);
     });
   });
+  /* "Salvar cliente", no card do Cliente. Grava a proposta inteira — é nela que o
+     cliente mora — e fecha o formulário no chip. Sem nome não há o que salvar:
+     avisa ali mesmo, em vez de gravar uma proposta sem dono. */
+  var cliSalvar=document.getElementById('cli-salvar');
+  if(cliSalvar)cliSalvar.addEventListener('click',function(){
+    var btn=this, msg=document.getElementById('cli-salvar-msg');
+    if(!(document.getElementById('oc-empresa').value||'').trim()){
+      msg.textContent='Preencha o nome ('+(document.getElementById('oc-empresa-label').textContent||'Empresa')+') pra salvar.';
+      document.getElementById('oc-empresa').focus();
+      return;
+    }
+    msg.textContent=''; btn.disabled=true; btn.textContent='Salvando...';
+    salvarProposta(function(d){
+      btn.disabled=false; btn.textContent='Salvar cliente';
+      if(d && d.aditivo_url){
+        if(confirm((d.erro||'Contrato assinado.')+'.\n\nAbrir a tela de termo aditivo agora?')){
+          window.location = d.aditivo_url;
+        }
+        return;
+      }
+      if(!d || d.erro || !d.id){ msg.textContent=(d&&d.erro)||'Não consegui salvar. Tente de novo.'; return; }
+      atualizarChip(); carregarHist();
+      var ok=document.getElementById('cli-salvo');
+      if(ok){ ok.style.display='block'; setTimeout(function(){ok.style.display='none';},6000); }
+    });
+  });
 
   function esc(s){var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML;}
   function setv(id,v){var e=document.getElementById(id); if(e){e.value=v||'';}}
@@ -5195,7 +5221,17 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       <div class="oc-field"><label>UF</label><input id="oc-uf" class="oc-inp" maxlength="2" placeholder="PI"></div>
       <div class="oc-field"{% if servico_avulso %} style="display:none"{% endif %}><label>Segmento</label><input id="oc-segmento" class="oc-inp" placeholder="Saúde, Varejo, Logística..."></div>
     </div>
+    {# O CARD NÃO TINHA SALVAR. O cliente só era gravado junto com a proposta, pelo
+       "Salvar no funil" do Resumo — e em 23/09/2026 o dono preencheu o cliente na
+       ZAQ, procurou o botão aqui, não achou, e o que digitou se perdeu. Este botão
+       salva a PROPOSTA (é nela que o cliente mora), mesmo sem serviço ainda: ela
+       fica no funil como rascunho, e o cliente não se perde mais. #}
+    <div style="display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; margin-top:.9rem">
+      <button type="button" id="cli-salvar" class="oc-btn-g" style="border:0; border-radius:8px; padding:.55rem 1.1rem; font-weight:600; cursor:pointer">Salvar cliente</button>
+      <span id="cli-salvar-msg" class="mut" style="font-size:.8rem"></span>
+    </div>
   </div>
+  <div id="cli-salvo" class="mut" style="display:none; font-size:.8rem; margin-top:.5rem; color:var(--verde-claro)">✓ Cliente salvo — a proposta está no funil como rascunho. Agora escolha os serviços.</div>
 </div>
 
 <div class="oc-grid">

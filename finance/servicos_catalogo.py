@@ -16,6 +16,8 @@ Valores sempre em CENTAVOS aqui dentro (a tela converte de/para reais).
 from __future__ import annotations
 
 import re
+import unicodedata
+
 from core import esquema_runtime
 
 # Categorias do serviço no nicho EVENTOS. Servem pra agrupar os itens e mostrar
@@ -184,14 +186,84 @@ def salvar(pool, conta_id: int, *, id: int | None = None, nome: str,
 
 
 def excluir(pool, conta_id: int, id: int) -> dict:
-    """Soft-delete: some da tela mas não quebra orçamento antigo que usa o slug."""
+    """Inativa o serviço. Nome histórico — nunca apagou nada, e é por isso que a
+    tela passou a chamar de "inativar" (ver `listar_inativos`)."""
+    return definir_ativo(pool, conta_id, id, False)
+
+
+def definir_ativo(pool, conta_id: int, id: int, ativo: bool) -> dict:
+    """Liga ou desliga um serviço do catálogo DESTA conta.
+
+    O `and ativo <> %s` no WHERE não é zelo: ele é o que faz a função devolver
+    False quando não houve mudança — reativar o que já está ativo não é sucesso
+    silencioso, é sinal de que a tela está desatualizada e precisa recarregar."""
     with pool.connection() as c:
         r = c.execute(
-            """update servicos_catalogo set ativo=false
-                where id=%s and conta_id=%s and ativo returning id""",
-            (id, conta_id)).fetchone()
+            """update servicos_catalogo set ativo=%s
+                where id=%s and conta_id=%s and ativo <> %s returning id""",
+            (bool(ativo), int(id), conta_id, bool(ativo))).fetchone()
         c.commit()
     return {"ok": bool(r)}
+
+
+# Palavras que não distinguem um serviço de outro. Sem tirá-las, "LOCAÇÃO DE
+# GERADOR DE ENERGIA" e "LOCAÇÃO GERADOR DE ENERGIA" seriam nomes diferentes —
+# e essas duas são o caso REAL que motivou tudo isto (ver `listar_inativos`).
+_VAZIAS = {"de", "da", "do", "das", "dos", "e", "a", "o", "os", "as",
+           "para", "por", "com", "em", "no", "na"}
+
+
+def _assinatura(nome: str) -> frozenset:
+    """As palavras que importam no nome, sem acento, caixa nem ordem."""
+    n = _norm_txt(nome)
+    return frozenset(p for p in n.replace("-", " ").replace("/", " ").split()
+                     if p and p not in _VAZIAS)
+
+
+def _norm_txt(s: str) -> str:
+    s = (s or "").strip().lower()
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9/\- ]+", " ", s)
+
+
+def listar_inativos(pool, conta_id: int) -> list[dict]:
+    """Os serviços inativos da conta, com o aviso do homônimo ativo.
+
+    POR QUE ESTA FUNÇÃO EXISTE
+
+    O botão do catálogo se chamava "excluir" e nunca excluiu nada: sempre foi
+    `ativo=false`, pra não quebrar o orçamento antigo que aponta pro slug. Só que
+    o inativo sumia da tela e não havia como trazê-lo de volta — então quem
+    desativasse por engano não tinha caminho nenhum.
+
+    Medido na Prime (conta 34) em 23/09/2026: quatro serviços inativos — OUTROS,
+    LOCAÇÃO, LOCAÇÃO DE GERADOR DE ENERGIA e SEGURANÇA —, e DOIS deles existem de
+    novo entre os 42 ativos, recadastrados na mão. O dono desativou, não achou
+    mais, e refez do zero.
+
+    `parecido` é o conserto desse segundo passo: reativar um que já tem homônimo
+    ativo colocaria os dois na mesma lista de orçamento, e a pessoa escolheria um
+    dos dois sem saber que são o mesmo. A tela avisa; quem decide é ela.
+    """
+    with pool.connection() as c:
+        rows = c.execute(
+            """select id, slug, nome, descricao, setup_centavos, mensal_centavos,
+                      custo_centavos, categoria
+                 from servicos_catalogo
+                where conta_id=%s and not ativo
+                order by nome""", (conta_id,)).fetchall()
+    if not rows:
+        return []
+    vivos = {_assinatura(s["nome"]): s["nome"] for s in listar(pool, conta_id)}
+    out = []
+    for r in rows:
+        gemeo = vivos.get(_assinatura(r[2]))
+        out.append({"id": r[0], "slug": r[1], "nome": r[2], "descricao": r[3] or "",
+                    "setup_centavos": int(r[4] or 0), "mensal_centavos": int(r[5] or 0),
+                    "custo_centavos": int(r[6] or 0), "categoria": r[7] or "",
+                    "parecido": gemeo or ""})
+    return out
 
 
 def importar_modelo(pool, conta_id: int, itens: list[dict] | None = None) -> dict:

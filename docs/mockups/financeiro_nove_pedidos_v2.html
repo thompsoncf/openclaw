@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Os nove pedidos — versão 2, com as suas respostas</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --roxo:#C9A3E0;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-wrap:anywhere}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo)}
+b{font-weight:600}
+.wrap{max-width:1060px;margin:0 auto;padding:2.4rem 1rem 5rem;display:flex;flex-direction:column;gap:2.2rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em;margin-bottom:.35rem;text-transform:uppercase}
+.head h1{font-size:clamp(1.5rem,4.4vw,2.2rem);margin:.3rem 0 .6rem}
+.head p{color:var(--text-dim);max-width:76ch;margin:0 0 .5rem}
+.head p b{color:var(--text)}
+
+.item{border:1px solid var(--line);border-radius:16px;background:var(--bg-2);padding:1rem 1.05rem;display:flex;flex-direction:column;gap:.8rem;scroll-margin-top:1rem}
+.item>header{display:flex;gap:.65rem;align-items:flex-start;flex-wrap:wrap}
+.item .num{font:700 1rem/1 var(--display);color:var(--bg);background:var(--neon);border-radius:9px;
+  min-width:34px;height:32px;padding:0 .4rem;display:flex;align-items:center;justify-content:center;flex:none}
+.item h2{font-size:1.08rem;flex:1 1 300px;min-width:0}
+.item .voce{display:block;font:400 .74rem/1.4 var(--body);color:var(--neon-bright);margin-top:.25rem}
+.bl{display:flex;flex-direction:column;gap:.3rem}
+.bl>h4{font:600 .66rem/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--text-faint)}
+.bl>p{margin:0;font-size:.87rem;color:var(--text-dim)}
+.bl>p b{color:var(--text)}
+.bl.prop>h4{color:var(--azul)} .bl.risco>h4{color:var(--coral)}
+
+.medida{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:12px;padding:.75rem .9rem;display:flex;flex-direction:column;gap:.6rem}
+.medida h4{font:600 .66rem/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:#F0A9A2}
+.medida .nums{display:grid;grid-template-columns:repeat(4,1fr);gap:.45rem}
+@media (max-width:740px){.medida .nums{grid-template-columns:repeat(2,1fr)}}
+.medida .n{border:1px solid var(--coral-borda);border-radius:9px;background:#1C0F0F;padding:.5rem .55rem}
+.medida .n b{display:block;font:600 1.3rem/1 var(--display);color:var(--coral);font-variant-numeric:tabular-nums}
+.medida .n span{display:block;font-size:.63rem;color:var(--text-dim);margin-top:.28rem;line-height:1.35}
+.medida p{margin:0;font-size:.83rem;color:#EED6D3}.medida p b{color:#fff}
+.medida.verde{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.medida.verde h4{color:var(--neon-bright)}
+.medida.verde .n{border-color:var(--neon-borda);background:#0C1A12}
+.medida.verde .n b{color:var(--neon-bright)}
+.medida.verde p{color:#CFE7D8}
+
+.tabwrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table.t{width:100%;border-collapse:collapse;font-size:.79rem;min-width:560px}
+table.t th{font:500 .6rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);text-align:left;padding:.5rem .65rem;border-bottom:1px solid var(--line)}
+table.t td{padding:.5rem .65rem;border-bottom:1px solid var(--line);color:var(--text-dim);vertical-align:top}
+table.t tr:last-child td{border-bottom:none}
+table.t td:first-child{color:var(--text);font-weight:500}
+table.t td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mono{font-family:var(--mono);font-size:.76rem}
+.ruim{color:var(--coral)} .bom{color:var(--neon-bright)} .aviso{color:var(--ambar)} .inf{color:var(--azul)}
+
+.grade2{display:grid;grid-template-columns:1fr 1fr;gap:.85rem;align-items:start}
+@media (max-width:860px){.grade2{grid-template-columns:1fr}}
+.cx{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.75rem .85rem;display:flex;flex-direction:column;gap:.5rem}
+.cx>h4{font-size:.85rem}
+.cx .nota{font-size:.78rem;color:var(--text-dim);margin:0}
+.cx .nota b{color:var(--text)}
+
+.tela{border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden}
+.tela .tt{padding:.45rem .75rem;border-bottom:1px solid var(--line);font:500 .68rem var(--mono);
+  letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint);background:var(--bg-2)}
+.tela .tc{padding:.75rem}
+
+/* pílulas da aba Empresa */
+.pils{display:flex;flex-wrap:wrap;gap:.35rem}
+.pil{flex:1 1 auto;min-width:96px;text-align:center;padding:.45rem .55rem;border-radius:9px;
+  border:1px solid var(--line);background:var(--surface-2);color:var(--text-dim);font-size:.74rem;line-height:1.3}
+.pil b{display:block;font-family:var(--mono);font-size:.84rem;color:var(--text)}
+.pil.on{background:var(--ambar-fundo);border-color:var(--ambar-borda);color:#f0dca6}
+.pil.on b{color:#f0dca6}
+.pil.novo{background:var(--coral-fundo);border-color:var(--coral);color:#F0A9A2}
+.pil.novo b{color:var(--coral)}
+
+.linha{display:flex;gap:.55rem;align-items:center;padding:.45rem .1rem;border-bottom:1px solid var(--line);font-size:.79rem}
+.linha:last-child{border-bottom:none}
+.linha .d{flex:1 1 auto;min-width:0}
+.linha .d i{display:block;font-style:normal;font-size:.69rem;color:var(--text-faint);margin-top:.1rem}
+.linha .v{font-family:var(--mono);white-space:nowrap;font-variant-numeric:tabular-nums}
+.bt{display:inline-flex;align-items:center;gap:.3rem;border-radius:8px;padding:.3rem .65rem;font-size:.76rem;
+  border:1px solid var(--line);background:var(--bg-2);color:var(--text-dim);white-space:nowrap}
+.bt.pr{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright)}
+.bt.am{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
+
+.zap{border:1px solid var(--line);border-radius:14px;background:#0B1410;padding:.75rem;display:flex;flex-direction:column;gap:.4rem}
+.bolha{border-radius:12px;padding:.5rem .7rem;font-size:.79rem;max-width:90%;line-height:1.45}
+.bolha.dele{background:var(--surface-2);align-self:flex-start;border-bottom-left-radius:4px}
+.bolha.zaq{background:#0F3024;align-self:flex-end;border-bottom-right-radius:4px;color:#DFF3E7}
+.bolha .bts{display:flex;gap:.3rem;margin-top:.45rem;flex-wrap:wrap}
+.bolha .bts .bt{font-size:.71rem;padding:.24rem .5rem}
+
+.papel{background:#fff;color:#111;border-radius:8px;padding:.9rem 1rem;font-family:Arial,Helvetica,sans-serif;font-size:.76rem;line-height:1.5}
+.papel .cab{display:flex;justify-content:space-between;gap:.7rem;border-bottom:2px solid #000;padding-bottom:.45rem;margin-bottom:.6rem;flex-wrap:wrap}
+.papel .cab .e{font-weight:700;font-size:.92rem}
+.papel .cab .e small{display:block;font-weight:400;font-size:.64rem;color:#444}
+.papel .cab .n{text-align:right;font-size:.66rem;color:#333;white-space:nowrap}
+.papel .cab .n b{display:block;font-size:.9rem;color:#111}
+.papel .val{font-size:1.1rem;font-weight:700;margin:.45rem 0 .15rem}
+.papel .ext{font-size:.7rem;color:#333;font-style:italic;margin-bottom:.6rem}
+.papel .ass{margin-top:1.2rem;border-top:1px solid #000;padding-top:.25rem;font-size:.66rem;color:#333;max-width:250px}
+.papel .rod{margin-top:.7rem;padding-top:.45rem;border-top:1px dashed #bbb;font-size:.64rem;color:#555}
+
+.dec{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:12px;padding:.7rem .85rem}
+.dec h4{font:600 .66rem/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--ambar);margin-bottom:.35rem}
+.dec p{margin:0;font-size:.84rem;color:#F2E2C4}
+.dec p b{color:#fff}
+.dec p+p{margin-top:.4rem}
+
+.ordem{border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:16px;padding:1rem}
+.ordem h2{font-size:1.12rem;color:var(--neon-bright);margin-bottom:.4rem}
+.ordem>p{color:#CFE7D8;margin:.2rem 0 0;font-size:.86rem}
+.pr{border:1px solid var(--neon-borda);border-radius:11px;background:#0C1A12;padding:.65rem .8rem;margin-top:.6rem}
+.pr h3{font-size:.92rem;color:#fff;display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap}
+.pr h3 em{font-style:normal;font:500 .64rem var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--neon)}
+.pr p{margin:.3rem 0 0;font-size:.82rem;color:#9FC2AC}
+.pr p b{color:#DFF3E7}
+hr.sep{border:0;border-top:1px solid var(--line);margin:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="head">
+  <div class="k">Versão 2 · 23/09/2026 · substitui o mockup anterior</div>
+  <h1>Os nove pedidos, com as suas cinco respostas dentro</h1>
+  <p>Você respondeu tudo o que eu precisava. Isto aqui é mais curto de propósito:
+     saíram as hipóteses que morreram, entrou o desenho do que ficou decidido.
+     <b>Três pedidos mudaram de forma</b> por causa das suas respostas, e um <b>saiu da lista</b>
+     porque já está pronto.</p>
+
+  <div class="tabwrap" style="margin-top:.9rem">
+    <table class="t">
+      <thead><tr><th>Pedido</th><th>O que você respondeu</th><th>O que virou</th></tr></thead>
+      <tbody>
+        <tr><td>4 · data na baixa</td>
+          <td class="bom">"tá certo, não era o vencimento, é data que pagou"</td>
+          <td><b class="bom">Nada a fazer</b> — já está no ar desde 04/09. Sai da lista.</td></tr>
+        <tr><td>5 · card das atrasadas</td>
+          <td class="inf">"dentro da aba Empresa tem 3 card lá, só falta esse"</td>
+          <td>Muda de lugar: era no relatório, vai ser a <b>4ª pílula</b> da aba Empresa.</td></tr>
+        <tr><td>1 · recibo</td>
+          <td class="inf">"quando der baixa abre um botão pra nascer o recibo"</td>
+          <td>Não nasce sozinho: <b>botão depois da baixa</b>. Some a pergunta do automático.</td></tr>
+        <tr><td>8 · comprovante</td>
+          <td class="bom">"sim"</td>
+          <td>A pergunta vai <b>sempre pra você ou o gestor</b>, nunca pra quem mandou o arquivo.</td></tr>
+        <tr><td>3 · Open Finance</td>
+          <td class="inf">"os 2" (Sicoob e Banco do Nordeste)</td>
+          <td>Os dois são participantes do Open Finance. Etapa A primeiro; etapa B quando você decidir o custo.</td></tr>
+        <tr><td>2 e 6 · classificação</td>
+          <td class="aviso">"não mexer em centro de custos"</td>
+          <td><b>Nenhum centro é criado, renomeado ou mexido.</b> Leia a caixa do item 6.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</header>
+
+<hr class="sep">
+
+<!-- ══════════ 5 ══ -->
+<section class="item" id="i5">
+  <header><span class="num">5</span>
+    <h2>A 4ª pílula da aba Empresa: Atrasadas
+      <span class="voce">Você: "e dentro da aba empresas tem 3 card lá, só falta esse"</span></h2></header>
+
+  <div class="medida verde"><h4>Achei os seus três — e são três mesmo, com um detalhe</h4>
+    <p>A aba Empresa tem quatro pílulas no código: <span class="mono">✅ Liberadas · ⏳ Esperando ·
+      A receber · Tudo</span>. Mas pílula sem conta nenhuma <b>não é desenhada</b> — e hoje
+      "✅ Liberadas — pode pagar" está <b>zerada</b>: das 13 contas a pagar, 12 estão esperando
+      liberação e 1 foi recusada. <b>Nenhuma liberada.</b> Por isso você vê três.</p>
+    <p>Vale a pena olhar esse número por ele mesmo: a fila de liberação tem 13 contas paradas,
+      R$ 20.444,30, e <b>ninguém liberou nenhuma</b>. A pílula das atrasadas vai te mostrar que
+      7 delas já venceram.</p></div>
+
+  <div class="tela">
+    <div class="tt">Aba Empresa · Títulos — como fica</div>
+    <div class="tc" style="display:flex;flex-direction:column;gap:.7rem">
+      <div class="pils">
+        <span class="pil novo"><b>7</b>⚠️ Atrasadas</span>
+        <span class="pil on"><b>13</b>⏳ Esperando liberação</span>
+        <span class="pil"><b>31</b>A receber</span>
+        <span class="pil"><b>44</b>Tudo</span>
+      </div>
+      <p style="margin:0;font-size:.74rem;color:var(--text-faint)">
+        "✅ Liberadas" volta a aparecer assim que você liberar a primeira. A nova vem <b>na frente</b>:
+        é a única que custa dinheiro por dia parado.</p>
+      <div style="border-top:1px solid var(--line);padding-top:.4rem">
+        <div class="linha"><span class="d">ENERGIA SOLAR <i>NORDESTE ENERGIA SOLAR · venceu há 18 dias</i></span><span class="v ruim">2.877,77</span></div>
+        <div class="linha"><span class="d">CARTÃO DE CRÉDITO <i>SICOOB · venceu ontem</i></span><span class="v ruim">5.676,05</span></div>
+        <div class="linha"><span class="d">BANCO DO NORDESTE <i>venceu há 8 dias</i></span><span class="v ruim">2.400,00</span></div>
+        <div class="linha"><span class="d">ZARB CONSULTORIA <i>ZARB ASSESSORIA · há 8 dias</i></span><span class="v ruim">2.200,00</span></div>
+        <div class="linha"><span class="d">1 QUINZENA SETEMBRO/26 JAQUELINE <i>há 8 dias</i></span><span class="v ruim">1.621,00</span></div>
+        <div class="linha"><span class="d">1 QUINZENA SETEMBRO/26 INSIGHT <i>há 8 dias</i></span><span class="v ruim">810,50</span></div>
+        <div class="linha"><span class="d">ÁGUAS DE TERESINA <i>há 2 dias</i></span><span class="v ruim">86,22</span></div>
+        <div class="linha" style="border-top:1px solid var(--line);font-weight:600">
+          <span class="d">7 contas atrasadas</span><span class="v ruim">R$ 15.671,54</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bl prop"><h4>A diferença que eu tive que resolver no desenho</h4>
+    <p>As três pílulas de hoje <b>dividem</b> a lista: cada conta cai em uma só.
+      "Atrasada" não é assim — uma conta atrasada também é liberada, ou esperando. Se eu fizesse um
+      quarto bloco, as mesmas 7 linhas apareceriam <b>duas vezes</b> na tela e a soma de "Tudo"
+      deixaria de fechar.</p>
+    <p style="margin-top:.35rem">Então ela é uma <b>lente</b>, não um bloco: mostra as atrasadas
+      de onde elas estiverem. "Tudo" continua somando 44 e a conta continua batendo.</p></div>
+
+  <div class="dec"><h4>Uma escolha que eu tomei, pra você derrubar se quiser</h4>
+    <p>A pílula conta <b>só as a pagar</b> (7). Existem 2 contas <b>a receber</b> vencidas,
+      R$ 3.540,00 — mas "atrasada a receber" não é uma conta que você esqueceu de pagar,
+      é um cliente que te deve, e isso já tem casa própria no card <b>Carteira de clientes</b>,
+      logo abaixo na mesma tela. Misturar as duas na mesma pílula faria "R$ 19.211,54 atrasados"
+      parecer dívida sua.</p></div>
+</section>
+
+<!-- ══════════ 1 ══ -->
+<section class="item" id="i1">
+  <header><span class="num">1</span>
+    <h2>O recibo nasce de um botão, depois da baixa
+      <span class="voce">Você: "quando der baixa abre um botão pra nascer o recibo"</span></h2></header>
+
+  <div class="bl prop"><h4>O que a sua resposta resolveu</h4>
+    <p>Some a pergunta do automático, e some o risco junto: recibo que dispara sozinho no WhatsApp
+      viraria spam no dia em que você der dez baixas seguidas. <b>Dois cliques, nenhum susto:</b>
+      confirma a baixa, aparece o botão; aperta o botão, nasce o recibo; aí você decide se manda.</p></div>
+
+  <div class="grade2">
+    <div style="display:flex;flex-direction:column;gap:.75rem">
+      <div class="tela">
+        <div class="tt">1 · logo depois de confirmar a baixa</div>
+        <div class="tc" style="display:flex;flex-direction:column;gap:.5rem">
+          <div style="border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:9px;padding:.55rem .7rem;font-size:.8rem;color:#CFE7D8">
+            ✓ Recebido em 21/09/2026 · R$ 750,00 lançados no caixa
+            <div style="display:flex;gap:.35rem;margin-top:.5rem;flex-wrap:wrap">
+              <span class="bt pr">📄 gerar recibo</span></div>
+          </div>
+          <p style="margin:0;font-size:.73rem;color:var(--text-faint)">
+            O botão fica também na linha da conta já baixada — quem não gerou na hora gera depois.</p>
+        </div>
+      </div>
+      <div class="tela">
+        <div class="tt">2 · o recibo nasceu</div>
+        <div class="tc" style="display:flex;flex-direction:column;gap:.5rem">
+          <div class="linha" style="border:none"><span class="d">Recibo nº 0007/2026
+            <i>Bianca Oliveira · Sinal · R$ 750,00</i></span></div>
+          <div style="display:flex;gap:.35rem;flex-wrap:wrap">
+            <span class="bt">abrir / imprimir</span>
+            <span class="bt">copiar link</span>
+            <span class="bt pr">mandar pro cliente</span></div>
+          <p style="margin:0;font-size:.73rem;color:var(--text-faint)">
+            "mandar" usa o canal que <b>esta conta</b> tem ligado — WhatsApp QR, Cloud API ou Twilio.
+            Os três continuam três caminhos distintos; o recibo só entrega o link ao que estiver de pé.</p>
+        </div>
+      </div>
+      <div class="cx">
+        <h4>Recibo é de dinheiro que ENTRA</h4>
+        <p class="nota">Por isso o botão aparece na baixa de <b>título a receber</b> — o sinal, a parcela,
+          a mensalidade. Numa conta <b>a pagar</b> ele não aparece: quem emite recibo ali é o fornecedor,
+          não você. É a mesma tela, com o botão seguindo o tipo da conta.</p>
+      </div>
+    </div>
+    <div class="tela">
+      <div class="tt">O papel · /recibo/a7f3…</div>
+      <div class="tc">
+        <div class="papel">
+          <div class="cab">
+            <div class="e">PRIME BUFFET E EVENTOS LTDA
+              <small>CNPJ 00.000.000/0001-00 · Teresina/PI</small></div>
+            <div class="n">RECIBO<b>nº 0007/2026</b>21/09/2026</div>
+          </div>
+          <div>Recebemos de <b>BIANCA OLIVEIRA DA SILVA</b> a importância de</div>
+          <div class="val">R$ 750,00</div>
+          <div class="ext">setecentos e cinquenta reais</div>
+          <div>referente ao <b>Sinal</b> — parcela 1 de 2 do orçamento nº 6, locação do espaço para o
+            evento do dia <b>18/10/2026</b>. Forma de pagamento: Pix.</div>
+          <div style="margin-top:.45rem">Dando plena e geral quitação <b>desta parcela</b>.
+            Permanecem em aberto R$ 750,00 do total de R$ 1.500,00.</div>
+          <div class="ass">PRIME BUFFET E EVENTOS LTDA</div>
+          <div class="rod">Emitido pelo Zaq em 21/09/2026 20:41 · zaq-ia.com/recibo/a7f3…</div>
+        </div>
+        <p style="margin:.55rem 0 0;font-size:.74rem;color:var(--text-dim)">
+          O texto do "referente a" muda com o nicho: <b>eventos</b> fala do evento e da data,
+          <b>recorrente</b> fala da mensalidade do mês. Sai de <code>raio_x_perfil</code>,
+          que já decide isso nas outras telas.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="dec"><h4>O CPF — a única coisa que ficou solta</h4>
+    <p>Você não respondeu e eu não vou travar a entrega por isso. <b>Minha decisão, até você dizer
+      o contrário:</b> o CPF <b>entra quando existir no cadastro</b> e a linha some quando não existir.
+      Sem campo obrigatório novo, sem recibo bloqueado por falta de documento — e quem precisar do CPF
+      no papel completa a ficha do cliente e gera de novo.</p></div>
+</section>
+
+<!-- ══════════ 6 + 2 ══ -->
+<section class="item" id="i6">
+  <header><span class="num">6+2</span>
+    <h2>As portas perguntam, e o card mostra — sem tocar nos centros
+      <span class="voce">Você: "não mexer em centro de custos"</span></h2></header>
+
+  <div class="medida verde"><h4>Deixa eu ser explícito sobre o que "não mexer" quer dizer aqui</h4>
+    <p><b>Nenhum centro de custo é criado, renomeado, desativado ou reclassificado.</b> Os seus 13
+      continuam exatamente como estão, com os mesmos nomes e os mesmos 41 lançamentos já marcados.
+      Aquela minha observação sobre as três famílias misturadas <b>morre aqui</b> — não volto nela.</p>
+    <p style="margin-top:.4rem">O que o pedido 6 faz é <b>perguntar</b>, nas portas que hoje não
+      perguntam, qual dos centros <b>que você já criou</b> é aquele. É uso, não mudança.
+      Se mesmo assim você quiser que eu não encoste no assunto, me diga e eu paro — mas aí o pedido 2
+      não tem o que somar, e é justo você saber disso antes.</p></div>
+
+  <div class="medida"><h4>O número que faz os dois pedidos serem um só</h4>
+    <div class="nums">
+      <div class="n"><b>71%</b><span>das despesas de agosto tinham centro</span></div>
+      <div class="n"><b>0%</b><span>das de setembro têm</span></div>
+      <div class="n"><b>69</b><span>despesas em setembro, nenhuma classificada</span></div>
+      <div class="n"><b>R$ 50.903</b><span>fora de todo relatório</span></div>
+    </div>
+    <p>Não foi você que desistiu — foi a porta que mudou. São quatro portas por onde entra despesa, e
+      <b>só uma pergunta o centro de custo</b>: a importação de extrato. Agosto teve extrato
+      (19 das 24 vieram classificadas); setembro não teve nenhum, e tudo entrou por comprovante (43),
+      conta a pagar (20) e na mão (6). Nenhuma dessas três pergunta.</p></div>
+
+  <div class="tabwrap">
+    <table class="t">
+      <thead><tr><th>Porta</th><th class="num">Setembro</th><th>Pergunta hoje?</th><th>O que muda</th></tr></thead>
+      <tbody>
+        <tr><td>Comprovante no WhatsApp</td><td class="num">43</td><td class="ruim">não</td>
+          <td>O Zaq <b>propõe</b> o centro na mesma pergunta do item 8, pela memória do fornecedor.
+            Um toque confirma os dois.</td></tr>
+        <tr><td>Conta a pagar</td><td class="num">20</td><td class="ruim">não</td>
+          <td>Três campos no formulário — categoria, plano de contas e centro — <b>opcionais</b> e
+            pré-preenchidos. E a baixa passa a <b>carregar</b> os três pro caixa.</td></tr>
+        <tr><td>Lançamento na mão</td><td class="num">6</td><td class="ruim">não</td>
+          <td>Ganha os mesmos três campos, do mesmo jeito.</td></tr>
+        <tr><td>Importação de extrato</td><td class="num">0</td><td class="bom">sim</td>
+          <td>Nada muda — é o modelo que as outras três vão copiar.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grade2">
+    <div class="tela">
+      <div class="tt">Nova conta a pagar — os três campos que faltam</div>
+      <div class="tc" style="display:flex;flex-direction:column;gap:.45rem">
+        <div class="linha" style="border:none"><span class="d">ENERGIA SOLAR
+          <i>NORDESTE ENERGIA SOLAR · vence 05/09</i></span><span class="v">R$ 2.877,77</span></div>
+        <div style="border-top:1px solid var(--neon-borda);padding-top:.5rem;display:flex;flex-direction:column;gap:.45rem">
+          <div><div style="font-size:.66rem;color:var(--text-dim);margin-bottom:.25rem">Categoria</div>
+            <span class="bt">Construção ▾</span></div>
+          <div><div style="font-size:.66rem;color:var(--text-dim);margin-bottom:.25rem">Plano de contas</div>
+            <span class="bt">7.1.01 Imobilizado ▾</span></div>
+          <div><div style="font-size:.66rem;color:var(--text-dim);margin-bottom:.25rem">Centro de custo — os seus, só os de despesa</div>
+            <div style="display:flex;gap:.3rem;flex-wrap:wrap">
+              <span class="bt">DESPESA FIXA</span><span class="bt">DESPESA EVENTUAL</span>
+              <span class="bt pr">INVESTIMENTO</span><span class="bt">DESPESA COM EVENTO</span></div></div>
+        </div>
+        <p style="margin:.2rem 0 0;font-size:.73rem;color:var(--neon-bright)">
+          São os seus centros, com os seus nomes. Os outros nove (locação, buffet, aporte…) não aparecem
+          numa conta a pagar — não se paga uma conta para um centro de receita.</p>
+      </div>
+    </div>
+    <div class="tela">
+      <div class="tt">Financeiro · o card do pedido 2, depois disso</div>
+      <div class="tc">
+        <div style="border:1px solid var(--line);border-radius:11px;background:var(--bg-2);padding:.65rem .7rem">
+          <div style="font-size:.7rem;color:var(--text-dim)">− Despesas do mês</div>
+          <div style="font:600 1.3rem/1.2 var(--display);margin:.25rem 0 .5rem">R$ 50.903,91</div>
+          <div style="border-top:1px solid var(--line);padding-top:.4rem">
+            <div class="linha" style="padding:.22rem 0;border:none"><span class="d">● Empresa</span><span class="v">50.903,91</span></div>
+            <div class="linha" style="padding:.22rem 0;border:none"><span class="d">● Pessoal</span><span class="v">0,00</span></div>
+          </div>
+          <div style="border-top:1px solid var(--neon-borda);padding-top:.4rem;margin-top:.4rem">
+            <div class="linha" style="padding:.22rem 0;border:none"><span class="d bom">● DESPESA FIXA</span><span class="v bom">21.140,00</span></div>
+            <div class="linha" style="padding:.22rem 0;border:none"><span class="d">● DESPESA EVENTUAL</span><span class="v">11.014,06</span></div>
+            <div class="linha" style="padding:.22rem 0;border:none"><span class="d inf">● INVESTIMENTO</span><span class="v inf">2.877,77</span></div>
+            <div class="linha" style="padding:.22rem 0;border:none"><span class="d aviso">● Sem centro</span><span class="v aviso">15.872,08</span></div>
+          </div>
+        </div>
+        <p style="margin:.55rem 0 0;font-size:.74rem;color:var(--text-dim)">
+          Ilustrativo: é <b>setembro de verdade</b> (R$ 50.903,91), repartido como ficaria se as portas
+          já perguntassem. A linha <b>"Sem centro"</b> em âmbar é obrigatória — ela mostra o que escapou,
+          em vez de deixar a soma dos três parecer o total.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="dec"><h4>O histórico não é tocado</h4>
+    <p>As 69 despesas de setembro que já nasceram sem centro <b>continuam sem</b>. Não saio carimbando
+      lançamento de produção por adivinhação — é dinheiro de cliente e a regra §0 não abre exceção para
+      "é só classificação". Se um dia você quiser acertar setembro, é uma <b>tela de mutirão</b>
+      (a lista das 69, com o Zaq propondo e você confirmando uma por uma), e é pedido separado.</p></div>
+</section>
+
+<!-- ══════════ 8 ══ -->
+<section class="item" id="i8">
+  <header><span class="num">8</span>
+    <h2>O comprovante fecha a conta — e a pergunta é sempre sua
+      <span class="voce">Você: "sim" (a pergunta vai pra você ou o gestor)</span></h2></header>
+
+  <div class="medida"><h4>Metade já funciona, e é por isso que o buraco é grande</h4>
+    <div class="nums">
+      <div class="n"><b>85<span style="font-size:.8rem">/165</span></b><span>lançamentos nasceram de comprovante</span></div>
+      <div class="n"><b>9<span style="font-size:.8rem">/13</span></b><span>contas abertas já têm pagamento igual no caixa</span></div>
+      <div class="n"><b>6</b><span>deles vieram de comprovante</span></div>
+      <div class="n"><b>0</b><span>títulos fechados por isso</span></div>
+    </div>
+    <p>O comprovante que você manda pro Zaq <b>já vira lançamento no caixa</b> — é a maior fonte da Prime.
+      O que ele não faz é <b>fechar a conta a pagar</b>. O dinheiro saiu, o documento foi lido,
+      e a conta continua aberta, contando como dívida e aparecendo entre as 7 atrasadas do item 5.</p></div>
+
+  <div class="bl risco"><h4>Por que casar por valor não serve — três casos reais</h4></div>
+  <div class="tabwrap">
+    <table class="t">
+      <thead><tr><th>A conta aberta</th><th>O que o valor encontrou</th><th>Veredito</th></tr></thead>
+      <tbody>
+        <tr><td>2 QUINZENA SET · PEDRO YAN<br><span class="mono">R$ 1.500,00</span></td>
+          <td>DOIS lançamentos de R$ 1.500 no mesmo dia — um do Pedro, outro do Thiago</td>
+          <td class="ruim">ambíguo</td></tr>
+        <tr><td>1 QUINZENA SET · JAQUELINE<br><span class="mono">R$ 1.621,00</span></td>
+          <td>um lançamento de R$ 1.621 descrito como <b>"2 QUINZENA AGOSTO"</b></td>
+          <td class="ruim">quinzena errada</td></tr>
+        <tr><td>BANCO DO NORDESTE<br><span class="mono">R$ 2.400,00</span></td>
+          <td>um comprovante de R$ 2.400 dizendo <b>"venc. 15/08/2026"</b></td>
+          <td class="ruim">mês errado</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grade2">
+    <div class="zap">
+      <div class="bolha dele">📄 comprovante-pix-jaqueline.pdf</div>
+      <div class="bolha zaq">Li o comprovante: <b>R$ 1.621,00</b> para <b>Jaqueline Duarte</b>,
+        pago em 21/09 pelo Sicoob. Já lancei no caixa ✓<br><br>
+        Tem uma conta em aberto que bate:<br>
+        <b>1ª quinzena setembro/26 — Jaqueline</b><br>
+        R$ 1.621,00 · venceu 15/09 · 8 dias de atraso<br>
+        Centro: <b>DESPESA FIXA</b> (como das outras vezes)<br>
+        É esta?
+        <div class="bts"><span class="bt pr">✓ é essa</span><span class="bt">✍️ é outra</span>
+          <span class="bt">✕ não é conta</span></div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:.7rem">
+      <div class="cx"><h4>O "✓ é essa" faz quatro coisas de uma vez</h4>
+        <p class="nota">Amarra o lançamento que já existe ao título e fecha a conta <b>sem lançar o
+          dinheiro de novo</b> (esse caminho já existe, é o "já foi paga"). Guarda o comprovante.
+          Usa a data do documento, não a de hoje. E grava o centro de custo — que é a maior porta
+          do item 6 entrando de carona.</p></div>
+      <div class="cx"><h4>Quem recebe a pergunta — a sua resposta</h4>
+        <p class="nota">Sempre <b>você ou o gestor</b>. Se a Insight passar a mandar comprovante direto,
+          o arquivo entra e o lançamento nasce, mas <b>quem fecha a conta é você</b>. Quem apenas
+          enviou o arquivo não decide o que está pago.</p></div>
+      <div class="cx"><h4>O que ele nunca faz</h4>
+        <p class="nota"><b>Fechar sozinho.</b> Nem com valor exato, nem com nome exato. Com dois
+          candidatos iguais — o caso do Pedro e do Thiago — ele mostra os dois e pergunta qual.
+          Conta e não escolhe. Um toque é barato; dívida escondida não.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ 3 ══ -->
+<section class="item" id="i3">
+  <header><span class="num">3</span>
+    <h2>Saldo pra planejar — etapa A agora, etapa B quando você quiser
+      <span class="voce">Você: "os 2" — Sicoob e Banco do Nordeste</span></h2></header>
+
+  <div class="bl"><h4>O que a sua resposta muda</h4>
+    <p>Os dois são participantes do Open Finance, então a etapa B é <b>possível</b> — não é o banco que
+      trava. O que trava é o resto: agregador autorizado (mensalidade por conta conectada),
+      certificado, e <b>consentimento que o titular renova a cada 12 meses</b>. Se vencer, a conexão
+      morre e o número da tela congela sem avisar. Isso é decisão de custo, e é sua.</p>
+    <p style="margin-top:.35rem">Eu não vou te dar preço de cabeça. Se você mandar, eu levanto com os
+      agregadores e volto com número — mas isso é conversa de fornecedor, não de código, e não precisa
+      segurar o resto.</p></div>
+
+  <div class="grade2">
+    <div class="tela">
+      <div class="tt">Etapa A · a faixa, na aba Empresa</div>
+      <div class="tc" style="display:flex;flex-direction:column;gap:.4rem">
+        <div class="linha" style="border:none;padding:.2rem 0">
+          <span class="d">Saldo no banco <i>você informou hoje, 08:12</i></span>
+          <span class="v bom">R$ 18.400,00</span></div>
+        <div class="linha" style="border:none;padding:.2rem 0">
+          <span class="d ruim">− Atrasadas <i>7 contas</i></span><span class="v ruim">15.671,54</span></div>
+        <div class="linha" style="border:none;padding:.2rem 0">
+          <span class="d aviso">− A vencer em 7 dias <i>3 contas</i></span><span class="v aviso">6.008,95</span></div>
+        <div class="linha" style="border-top:1px solid var(--line);border-bottom:none;padding:.45rem 0 .2rem">
+          <span class="d"><b>Sobra depois de tudo</b></span><span class="v ruim"><b>− R$ 3.280,49</b></span></div>
+        <p style="margin:.25rem 0 0;font-size:.75rem;color:var(--ambar)">
+          Falta R$ 3.280,49 pra cobrir a semana. As 2 contas a receber vencidas somam R$ 3.540,00 —
+          cobrar uma delas resolve.</p>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:.7rem">
+      <div class="cx"><h4>Dez segundos por dia, zero fornecedor</h4>
+        <p class="nota">Um campo onde você digita o saldo e a data. O Zaq marca <b>quando</b> foi
+          informado e envelhece o aviso — "saldo de 3 dias atrás" em cinza é honesto;
+          fingir que é de hoje não é.</p></div>
+      <div class="cx"><h4>A etapa A não é trabalho jogado fora</h4>
+        <p class="nota">A tela da etapa B é <b>a mesma</b> — só muda de onde vem o número e some o campo
+          de digitar. E ela continua servindo de plano B no dia em que o consentimento vencer,
+          que é quando a integração deixa de responder.</p></div>
+      <div class="cx"><h4>Ela usa as suas 7 atrasadas</h4>
+        <p class="nota">Os números da faixa saem do mesmo lugar da pílula do item 5.
+          Por isso os dois entram no mesmo PR: é a mesma conta, dita de duas formas.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ 7 e 9, curtos ══ -->
+<section class="grade2">
+  <div class="item" id="i7" style="gap:.7rem">
+    <header><span class="num">7</span><h2 style="font-size:1rem">Inativar o serviço</h2></header>
+    <div class="medida" style="padding:.6rem .75rem">
+      <p>O botão "excluir" <b>nunca apagou nada</b> — já é inativação. A Prime tem <b>4 serviços
+        inativos</b> (<span class="mono">OUTROS · LOCAÇÃO · LOCAÇÃO DE GERADOR DE ENERGIA ·
+        SEGURANÇA</span>) e <b>recadastrou 2 deles idênticos</b>. Você desativou, não achou mais, refez.</p></div>
+    <div class="tela">
+      <div class="tt">Serviços · o fim da lista</div>
+      <div class="tc">
+        <div class="linha"><span class="d">TAXA DE LIMPEZA</span><span class="bt">inativar</span></div>
+        <div style="border:1px solid var(--line);border-radius:9px;background:var(--bg-2);padding:.5rem .6rem;margin-top:.4rem">
+          <div style="font-size:.79rem">▸ <b>4 serviços inativos</b>
+            <span style="color:var(--text-faint);font-size:.71rem">— fora dos orçamentos novos</span></div>
+          <div style="margin-top:.45rem;border-top:1px solid var(--line);padding-top:.35rem;opacity:.8">
+            <div class="linha" style="padding:.3rem 0"><span class="d">OUTROS</span><span class="bt pr">reativar</span></div>
+            <div class="linha" style="padding:.3rem 0"><span class="d">SEGURANÇA
+              <i class="aviso">já existe um ativo com nome parecido</i></span><span class="bt pr">reativar</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="bl" style="margin:0;font-size:.82rem;color:var(--text-dim)">
+      Botão vira <b>"inativar"</b> com a frase do que acontece, seção recolhida no fim,
+      e o aviso âmbar que evita o item duplicado na reativação — que é o erro que já aconteceu duas vezes.</p>
+  </div>
+
+  <div class="item" id="i9" style="gap:.7rem">
+    <header><span class="num">9</span><h2 style="font-size:1rem">Sinal pago diferente</h2></header>
+    <div class="medida verde" style="padding:.6rem .75rem">
+      <p>Conferi os <b>8 orçamentos com sinal pago</b> da Prime: todos bateram com o valor gerado.
+        <b>Nunca aconteceu.</b> É prevenção, não conserto — e é honesto dizer, porque muda a prioridade.</p></div>
+    <div class="tela">
+      <div class="tt">"Sinal recebido" — com o painel</div>
+      <div class="tc" style="display:flex;flex-direction:column;gap:.45rem">
+        <div class="linha" style="border:none"><span class="d">Sinal · Bianca Oliveira</span>
+          <span class="v">esperado R$ 750,00</span></div>
+        <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+          <span class="bt">Recebi em · 21/09/2026</span><span class="bt am">Valor · 600,00</span></div>
+        <div style="border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:9px;padding:.5rem .6rem">
+          <p style="margin:0;font-size:.77rem;color:#F2E2C4">Entraram <b style="color:#fff">R$ 150,00 a
+            menos</b>. O que faço com a diferença?</p>
+          <div style="display:flex;gap:.3rem;margin-top:.45rem;flex-wrap:wrap">
+            <span class="bt">foi desconto</span><span class="bt pr">continua devendo</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="bl" style="margin:0;font-size:.82rem;color:var(--text-dim)">
+      <b>Respondendo o que você perguntou:</b> não dá pra automatizar, e não é limitação técnica.
+      Quando entra menos, ou foi desconto combinado (a diferença some) ou o cliente pagou a menos
+      (continua devendo) — e o sistema não tem como saber qual. Escolher sozinho seria
+      inventar um acordo que ninguém fez.</p>
+  </div>
+</section>
+
+<!-- ══════════ plano ══ -->
+<section class="ordem">
+  <h2>O plano, em cinco entregas</h2>
+  <p>Cada uma é um PR que fecha sozinho, com o aviso da novidade junto (regra §5).
+    A ordem é buraco medido dividido por tamanho do conserto — e nenhuma delas toca
+    em conexão, canal ou centro de custo existente.</p>
+
+  <div class="pr"><h3>1 · A tela que dói hoje <em>sem risco · só tela</em></h3>
+    <p><b>Pílula "⚠️ Atrasadas"</b> na aba Empresa (7 contas, R$ 15.671,54) como lente, sem duplicar
+      linha. <b>+ inativar/reativar serviço</b>, com a seção dos 4 inativos. Duas coisas pequenas,
+      nenhuma mexe em dinheiro, as duas você sente no mesmo dia.</p></div>
+
+  <div class="pr"><h3>2 · As portas passam a perguntar <em>o maior buraco medido</em></h3>
+    <p>Categoria, plano de contas e centro de custo <b>na conta a pagar e no lançamento manual</b>,
+      opcionais e pré-preenchidos pela memória do fornecedor — e a baixa <b>carregando</b> os três
+      pro caixa. <b>Nenhum centro é criado ou alterado.</b> É o que destrava o card do pedido 2.</p></div>
+
+  <div class="pr"><h3>3 · O comprovante fecha a conta <em>maior ganho de dinheiro</em></h3>
+    <p>O Zaq pergunta na hora em que lê o documento, com o centro já proposto, e <b>você ou o gestor</b>
+      respondem. Fecha o título sem lançar o dinheiro de novo. <b>Nunca fecha sozinho.</b>
+      Traz de carona a maior porta da entrega 2 — 43 despesas em setembro.</p></div>
+
+  <div class="pr"><h3>4 · O card e a faixa <em>a leitura do que foi classificado</em></h3>
+    <p><b>Quebra por centro no card de Despesas</b> (pedido 2) com a linha "Sem centro" em âmbar,
+      <b>+ saldo informado e a faixa do planejamento</b> (pedido 3, etapa A). Os dois leem o que as
+      entregas 2 e 3 passaram a gravar — por isso vêm depois, não antes.</p></div>
+
+  <div class="pr"><h3>5 · Os documentos <em>precisam do seu ok no texto</em></h3>
+    <p><b>Recibo por botão</b> depois da baixa, com link público e envio pelo canal da conta
+      <b>+ o painel do sinal com valor diferente</b>, que mexe na mesma tela. Antes de virar código,
+      eu te mando o texto exato do recibo pra você aprovar palavra por palavra.</p></div>
+
+  <p style="margin-top:.9rem"><b>Fora do plano:</b> o pedido 4 (data na baixa) já está no ar e
+    o Open Finance de verdade (etapa B) espera você escolher o agregador.
+    <b>Nenhuma pergunta em aberto</b> — o CPF do recibo eu decidi sozinho e está escrito lá no item 1,
+    pra você derrubar se discordar.</p>
+</section>
+
+<p style="color:var(--text-faint);font-size:.78rem;margin:0">
+  Nada implementado. Todos os números saíram de consultas de leitura nas contas 34 e 3, em 23/09/2026.
+  Medido no Chromium em 390, 768 e 1280px.</p>
+
+</div>
+</body>
+</html>

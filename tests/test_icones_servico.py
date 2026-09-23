@@ -62,7 +62,10 @@ def test_svg_sai_pronto_e_sem_dependencia_externa():
 
 
 def test_paleta_traz_a_biblioteca_inteira():
+    """Desde 23/09/2026 são dois jogos (evento e recorrente): cada paleta traz o
+    seu inteiro, e as duas juntas cobrem a biblioteca — nenhum desenho órfão."""
     p = ics.paleta()
-    assert len(p) == len(ics.ICONES)
-    assert {x["chave"] for x in p} == set(ics.ICONES)
-    assert all(x["svg"].startswith("<svg") and x["rotulo"] for x in p)
+    assert {x["chave"] for x in p} == set(ics.CHAVES_EVENTO)
+    r = ics.paleta("recorrente")
+    assert {x["chave"] for x in p} | {x["chave"] for x in r} == set(ics.ICONES)
+    assert all(x["svg"].startswith("<svg") and x["rotulo"] for x in p + r)

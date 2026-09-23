@@ -1637,3 +1637,59 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
     return {"ok": True, "modo": "evento", "titulos": evento_ids,
             "setup_titulo_id": None, "mensal_titulo_id": None,
             "sinal_titulo_id": sinal_baixado}
+
+
+def aplicar_forma_recorrente(pool, token: str, anual: bool) -> bool:
+    """O CLIENTE escolheu a forma de pagamento ao aprovar a proposta recorrente.
+
+    Desde 23/09/2026 a folha mostra as duas formas (mensal e anual à vista) e ele
+    marca uma (pedido do dono, olhando a proposta da HLED). Se for diferente da
+    que o vendedor deixou marcada, os valores do orçamento são REFEITOS pela mesma
+    conta do salvar (`desconto.formas_recorrente`): a mensalidade bruta (que a
+    coluna guarda já com o anual), as pontas líquidas e o 1º ano. É daí que o
+    contrato e `fechar_orcamento` leem — então o que o cliente escolheu é o que
+    vai ser cobrado.
+
+    Só antes da aprovação (`aprovada_em is null`) e nunca num fechado: depois
+    disso a proposta é documento. Devolve True se mudou alguma coisa.
+
+    TOLERANTE: base sem a 311, orçamento de evento ou qualquer erro → False, e a
+    aprovação segue com a forma que estava. Escolha que não pôde ser gravada não
+    pode impedir o cliente de aprovar."""
+    from finance import desconto as dsc
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                """select id, conta_id, itens, setup_centavos, mensal_centavos,
+                          coalesce((to_jsonb(o)->>'pagamento_anual')::boolean, false),
+                          coalesce(desconto_tipo,'pct'), coalesce(desconto_pct,0),
+                          coalesce((to_jsonb(o)->>'desconto_centavos')::bigint, 0),
+                          coalesce(modo,'recorrente')
+                     from orcamentos o
+                    where token=%s and aprovada_em is null
+                      and coalesce(status,'') <> 'fechado'""", (token,)).fetchone()
+            if not r or r[9] == "evento" or bool(r[5]) == bool(anual):
+                return False
+            oid, conta_id, itens, setup_c, mensal_c, era_anual, dtipo, dpct, dcent, _m = r
+            f = dsc.formas_recorrente(itens, setup_centavos=setup_c or 0,
+                                      mensal_centavos=mensal_c or 0, anual=era_anual,
+                                      tipo=dtipo, pct=float(dpct or 0), valor=int(dcent or 0))
+            alvo = f["anual" if anual else "mensal"]
+            cheio = int(round((mensal_c or 0) / dsc.FATOR_ANUAL)) if era_anual else int(mensal_c or 0)
+            bruto_novo = int(round(cheio * dsc.FATOR_ANUAL)) if anual else cheio
+            c.execute(
+                """update orcamentos
+                      set pagamento_anual=%s, mensal_centavos=%s,
+                          setup_liquido_centavos=%s, mensal_liquido_centavos=%s,
+                          primeiro_ano_centavos=%s, atualizado_em=now()
+                    where id=%s and conta_id=%s and aprovada_em is null""",
+                (bool(anual), bruto_novo, alvo["setup"], alvo["mensal"], alvo["ano1"],
+                 oid, conta_id))
+            c.commit()
+        return True
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning(
+            "forma de pagamento escolhida pelo cliente não gravada (token %s…): %s: %s",
+            (token or "")[:6], type(e).__name__, e)
+        return False

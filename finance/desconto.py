@@ -16,12 +16,14 @@ DUAS REGRAS, e elas são as decisões que este módulo existe pra fixar:
    quando dois caminhos plausíveis divergem em silêncio, vale o que a pessoa vê:
    ela deu 10% no que restou depois de negociar item a item.
 
-2. NO ITEM, O DESCONTO É SEMPRE UM PERCENTUAL. No modo recorrente cada linha tem
+2. NO ITEM, O DESCONTO É UM PERCENTUAL (com uma exceção, `por_mes`). No modo recorrente cada linha tem
    setup E mensalidade, e `fechar_orcamento` gera um título de cada — se o
    desconto virasse um valor único, dividir de volta entre as duas pontas seria
    chute. Então R$ digitado no item é convertido no percentual equivalente da
    contribuição daquele item ao primeiro ano, e esse percentual cai igual nos
    dois. A proporção entre setup e mensal é preservada por construção.
+   A exceção: no recorrente, desde 23/09/2026, R$ no item é R$ POR MÊS e sai
+   só da mensalidade — ver `por_mes`.
 
 No TOTAL o desconto pode ser valor mesmo: ali existe um número só pra descontar.
 """
@@ -121,6 +123,27 @@ def contribuicao(item) -> int:
         max(0, _int(item.get("mensal")) * 100) * MESES_ANO1
 
 
+def por_mes(item) -> bool:
+    """O desconto em R$ desta linha é POR MÊS — tira da mensalidade, todo mês.
+
+    Recorrente, desde 23/09/2026. Na proposta da HLED (ZAQ) o dono digitou R$ 500
+    de desconto numa mensalidade de R$ 1.500 querendo R$ 1.000 por mês; a regra
+    antiga (R$ = fatia do primeiro ano) tirou R$ 41,67 por mês e a proposta saiu
+    com R$ 5.474,99 no lugar de R$ 3.000. Perguntado, o dono confirmou: no
+    recorrente, R$ de desconto é por mês.
+
+    É uma MARCA no item (`desc_mes`), não um tipo novo, de propósito: um leitor
+    que não conheça a marca lê o item como `valor` à moda antiga — desconto menor,
+    nunca uma linha zerada. E item gravado antes dela segue valendo o que valia,
+    até alguém abrir e salvar a proposta de novo (a tela do recorrente grava a
+    marca sempre que o desconto é em R$).
+
+    O desconto por mês não toca a implantação: quem quer descontar as duas pontas
+    juntas usa o %, que continua caindo igual nas duas."""
+    return (isinstance(item, dict) and bool(item.get("desc_mes"))
+            and _tipo(item.get("desc_tipo")) == "valor")
+
+
 def percentual_do_item(item) -> float:
     """O desconto da linha COMO PERCENTUAL, sempre — mesmo quando foi digitado em
     reais. É a conversão que permite descontar setup e mensalidade na mesma
@@ -130,6 +153,12 @@ def percentual_do_item(item) -> float:
         return 0.0
     if _tipo(item.get("desc_tipo")) == "pct":
         return min(100.0, max(0.0, _pct(item.get("desc_val"))))
+    if por_mes(item):
+        # o equivalente, só pra quem quiser ler um percentual: a conta de verdade
+        # do por-mês está em `liquido_do_item`
+        mensal = max(0, _int(item.get("mensal"))) * 100
+        reais = min(mensal, max(0, _int(item.get("desc_val"))) * 100) * MESES_ANO1
+        return min(100.0, 100.0 * reais / base)
     # digitado em reais: vira o percentual equivalente da contribuição da linha
     reais = max(0, _int(item.get("desc_val"))) * 100
     return min(100.0, 100.0 * reais / base)
@@ -142,8 +171,14 @@ def liquido_do_item(item) -> dict:
     p = percentual_do_item(item)
     setup = max(0, _int(item.get("setup"))) * 100
     mensal = max(0, _int(item.get("mensal"))) * 100
-    setup_liq = int(round(setup * (100.0 - p) / 100.0))
-    mensal_liq = int(round(mensal * (100.0 - p) / 100.0))
+    if por_mes(item):
+        # R$ por mês: sai inteiro da mensalidade (nunca abaixo de zero) e a
+        # implantação fica cheia — ver `por_mes`.
+        setup_liq = setup
+        mensal_liq = max(0, mensal - max(0, _int(item.get("desc_val"))) * 100)
+    else:
+        setup_liq = int(round(setup * (100.0 - p) / 100.0))
+        mensal_liq = int(round(mensal * (100.0 - p) / 100.0))
     return {"pct": p, "setup": setup_liq, "mensal": mensal_liq,
             "desconto_setup": setup - setup_liq,
             "desconto_mensal": mensal - mensal_liq,
@@ -232,3 +267,55 @@ def totais(itens, *, tipo="pct", pct=0, valor=0,
         "setup": setup_liq,
         "mensal": mensal_liq,
     }
+
+
+# ------------------------------------------------------ as duas formas do recorrente
+
+# O "anual à vista" do recorrente: -15% na mensalidade, o ano pago de uma vez. É o
+# mesmo 0.85 do botão da tela e do salvar (web/painel_servicos).
+FATOR_ANUAL = 0.85
+
+
+def formas_recorrente(itens, *, setup_centavos=0, mensal_centavos=0, anual=False,
+                      tipo="pct", pct=0, valor=0) -> dict:
+    """As DUAS formas de pagar a mesma proposta recorrente, refeitas da linha
+    gravada: mensal e anual à vista.
+
+    Por que existe: desde 23/09/2026 a folha mostra as duas lado a lado e é o
+    CLIENTE quem escolhe, ao aprovar (pedido do dono, olhando a proposta da HLED).
+    A linha do orçamento só guarda a forma que o vendedor marcou — então a outra
+    precisa ser refeita, e refeita pela MESMA conta do salvar (`totais`, na mesma
+    ordem: linha, anual, total), senão a folha anunciaria um número e o
+    financeiro cobraria outro.
+
+    `setup_centavos`/`mensal_centavos` são as colunas do orçamento: o BRUTO, e a
+    mensalidade bruta JÁ com o anual quando `anual` (é assim que o salvar grava,
+    pro funil e o cockpit lerem a coluna como sempre). O que não é linha
+    (infraestrutura, integrações) sai da diferença entre elas e os itens, como
+    no salvar. `valor` é o desconto do total em CENTAVOS.
+
+    Devolve, pra cada forma: `setup` e `mensal` líquidos, `ano1`, e `total_anual`
+    (as doze mensalidades), mais o que o cliente economiza no anual.
+    """
+    lista = [it for it in (itens or []) if isinstance(it, dict)]
+    itens_setup = sum(max(0, _int(i.get("setup"))) for i in lista) * 100
+    itens_mensal = sum(max(0, _int(i.get("mensal"))) for i in lista) * 100
+    mensal_cheio = max(0, _int(mensal_centavos))
+    if anual:
+        mensal_cheio = int(round(mensal_cheio / FATOR_ANUAL))
+    extra_setup = max(0, max(0, _int(setup_centavos)) - itens_setup)
+    extra_mensal = max(0, mensal_cheio - itens_mensal)
+    out = {}
+    for nome, fator in (("mensal", 1.0), ("anual", FATOR_ANUAL)):
+        t = totais(lista, tipo=tipo, pct=pct, valor=valor, extra_setup=extra_setup,
+                   extra_mensal=extra_mensal, fator_mensal=fator)
+        out[nome] = {"setup": t["setup"], "mensal": t["mensal"], "ano1": t["total"],
+                     "total_anual": t["mensal"] * MESES_ANO1}
+    out["economia_anual"] = max(0, out["mensal"]["total_anual"] - out["anual"]["total_anual"])
+    # o bruto das mensalidades (tabela) e o que os descontos de linha tiram por mês
+    it = somar_itens(lista)
+    out["tabela_mensal"] = it["bruto_mensal"] + extra_mensal
+    out["tabela_setup"] = it["bruto_setup"] + extra_setup
+    out["desconto_itens_mensal"] = it["bruto_mensal"] - it["mensal"]
+    out["desconto_itens_setup"] = it["bruto_setup"] - it["setup"]
+    return out

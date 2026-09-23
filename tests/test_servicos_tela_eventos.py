@@ -145,8 +145,10 @@ def test_a_linha_do_recorrente_tem_uma_coluna_por_caixa():
     corpo = corpo[:corpo.index("function renderCatalogoAvulso")]
     for peca in ("oc-setup", "oc-mensal", "oc-custo-col", "celDesc(", "oc-rm"):
         assert peca in corpo, peca
-    # nada de festa na linha da mensalidade
-    for peca in ("oc-cob", "oc-qtd", "svc-thumb", "Incluso"):
+    # nada de festa na linha da mensalidade. O ÍCONE (svc-thumb) entrou em
+    # 23/09/2026, mas com o jogo PRÓPRIO do recorrente — quem garante que nenhum
+    # desenho de festa vaza pra cá é tests/test_proposta_recorrente.py.
+    for peca in ("oc-cob", "oc-qtd", "Incluso"):
         assert peca not in corpo, peca
 
 

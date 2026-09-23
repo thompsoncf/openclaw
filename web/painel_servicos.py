@@ -2009,13 +2009,13 @@ def painel_servicos_excluir(request: Request, dados: OrcDelIn):
 # rodam durante a análise da página; o `defer` faz o código rodar depois — a
 # ordem que o IIFE precisa continua sendo a mesma.
 _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizing:border-box}
-/* O EVENTO USA A LARGURA INTEIRA, como o Raio-X.
+/* A TELA USA A LARGURA INTEIRA, como o Raio-X.
    O `.rx` não tem trava nenhuma — ele preenche a área de conteúdo. Aqui a trava
    era 1120px, e com o funil na frente (com data, valor, selos, ação e menu na
    mesma linha) sobrava faixa vazia à direita enquanto o texto da linha quebrava.
-   O `max-width` do `.sv-wrap` sem a classe continua valendo: o recorrente não
-   foi medido nesta mudança. */
-.sv-wrap.evento{max-width:none}
+   Nasceu na Prime e passou pro recorrente em 23/09/2026 junto com o resto do
+   layout (`.funil`). */
+.sv-wrap.funil{max-width:none}
 .sv-wrap .card{max-width:none;margin:0 0 1rem}
 /* o base do painel força button{width:100%;margin-top:1.4rem} — reseta aqui e
    reaplica largura cheia só onde faz sentido (os CTAs do resumo). */
@@ -2036,12 +2036,21 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
 .oc-inp{padding:.55rem .7rem; border-radius:8px; background:var(--bg); color:var(--txt); border:1px solid var(--borda); font-size:.95rem; width:100%; box-sizing:border-box}
 .oc-inp:focus{border-color:var(--verde); outline:none}
 .oc-mod{display:grid; grid-template-columns:auto 1fr 84px 84px 84px 104px auto; gap:.55rem; align-items:center; padding:.6rem 0; border-bottom:1px solid var(--borda)}
-.oc-mod.avulso,.oc-head.avulso{grid-template-columns:auto minmax(0,1fr) 56px 96px 104px 92px auto}
-.sv-wrap.oc-margin .oc-mod.avulso,.sv-wrap.oc-margin .oc-head.avulso{grid-template-columns:auto minmax(0,1fr) 56px 96px 88px 104px 92px auto}
+.oc-mod.avulso{grid-template-columns:auto minmax(0,1fr) 56px 96px 104px 92px auto}
+.sv-wrap.oc-margin .oc-mod.avulso{grid-template-columns:auto minmax(0,1fr) 56px 96px 88px 104px 92px auto}
 /* no orçamento de evento o rótulo vai EM CIMA do campo: "7200" e "10" precisam
    da largura inteira da caixinha, senão o número sai cortado. */
-.oc-mod.avulso .oc-num{flex-direction:column; align-items:stretch; gap:1px; padding:.25rem .45rem}
-.oc-mod.avulso .oc-num span{font-size:.58rem; text-align:right}
+.oc-mod.avulso .oc-num,.oc-mod.rec .oc-num{flex-direction:column; align-items:stretch; gap:1px; padding:.25rem .45rem}
+.oc-mod.avulso .oc-num span,.oc-mod.rec .oc-num span{font-size:.58rem; text-align:right}
+/* A LINHA DO RECORRENTE: nome | setup | mensal | (custo) | desconto | 🗑.
+   Uma coluna por caixa que APARECE. A grade antiga tinha 7 colunas pra 6 caixas
+   (o custo fica escondido fora do Modo margem), então tudo escorregava uma casa:
+   o desconto caía numa coluna de 84px e invadia o ✎/🗑, e o nome era espremido
+   até quebrar no meio da palavra ("Atendimen"). O Modo margem acrescenta a
+   coluna do custo em vez de reaproveitar uma que já estava ocupada. */
+.oc-mod.rec{grid-template-columns:minmax(0,1fr) 96px 96px 138px auto}
+.sv-wrap.oc-margin .oc-mod.rec{grid-template-columns:minmax(0,1fr) 96px 96px 88px 138px auto}
+.oc-mod.rec .oc-nome b{display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 /* celular: a linha do serviço vira duas — nome em cima (com a foto e o
    toggle), números embaixo. Em grade de 6 colunas num telefone os campos caem
    em qualquer lugar. */
@@ -2058,11 +2067,13 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
   .oc-mod.avulso .oc-sub{order:6; flex:1 1 86px; justify-content:flex-end}
 }
 @media(max-width:700px){
-  /* recorrente no estreito: a grade de 7 colunas não cabe, então vira lista */
-  .oc-mod:not(.avulso){display:flex; flex-wrap:wrap; align-items:flex-start; gap:.5rem .55rem}
-  .oc-mod:not(.avulso) .oc-nome{flex:1 1 140px; min-width:0}
-  .oc-mod:not(.avulso) .oc-num{flex:1 1 86px}
-  .oc-mod:not(.avulso) .oc-desc-col{flex:1 1 118px}
+  /* recorrente no estreito: nome e 🗑 em cima, setup e mensal lado a lado, o
+     desconto na linha inteira embaixo — é o par que precisa de largura. */
+  .oc-mod.rec{display:flex; flex-wrap:wrap; align-items:flex-start; gap:.5rem .55rem}
+  .oc-mod.rec .oc-nome{order:1; flex:1 1 140px; min-width:0}
+  .oc-mod.rec .oc-rowacts{order:2; flex:0 0 auto}
+  .oc-mod.rec .oc-num{order:3; flex:1 1 86px}
+  .oc-mod.rec .oc-desc-col{order:4; flex:1 1 100%}
 }
 /* subtotal da linha: valor calculado, não campo — o vendedor lê enquanto monta */
 .oc-sub{display:flex;flex-direction:column;gap:.15rem;text-align:right}
@@ -2166,7 +2177,6 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
 .oc-num input:focus{outline:none}
 .oc-custo-col{display:none}
 .sv-wrap.oc-margin .oc-custo-col{display:flex}
-.oc-head{display:grid; grid-template-columns:auto 1fr 84px 84px 84px 104px auto; gap:.55rem; font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--txt-mut); padding-bottom:.4rem; border-bottom:1px solid var(--borda)}
 .oc-pill{padding:.4rem .8rem; border-radius:99px; border:1px solid var(--borda); background:var(--bg); color:var(--txt); cursor:pointer; font-size:.85rem}
 .oc-pill.on{border-color:var(--verde-claro); background:#10241d; color:var(--verde-claro)}
 .tipo-badge{font-size:.62rem; font-weight:700; letter-spacing:.02em; border-radius:5px; padding:.05rem .35rem; flex-shrink:0}
@@ -2193,6 +2203,7 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
 .oc-catalogo-completo.open{display:block}
 .oc-browse-row{display:grid; grid-template-columns:auto 1fr 90px auto; gap:.55rem; align-items:center; padding:.5rem 0; border-bottom:1px solid var(--borda)}
 .oc-browse-row:last-child{border-bottom:0}
+.oc-browse-row.rec{grid-template-columns:auto 1fr 150px auto}
 .oc-seg button{padding:.45rem .7rem; border:1px solid var(--borda); background:var(--bg); color:var(--txt); cursor:pointer; font-size:.85rem; border-radius:7px}
 .oc-seg button.on{border-color:var(--verde-claro); background:#10241d; color:var(--verde-claro)}
 .oc-step{display:inline-flex; align-items:center; gap:0}
@@ -2339,7 +2350,6 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
      pendurados sozinhos no canto direito. */
   .oc-hist .oc-acoes{width:100%; margin-left:0; justify-content:flex-start}
   .sv-wrap{padding-left:.6rem; padding-right:.6rem}
-  .sv-wrap .oc-head{display:none!important}   /* o JS seta display:grid inline; !important vence no mobile */
   .sv-wrap .oc-mod{display:flex; flex-wrap:wrap; align-items:center; gap:.4rem .5rem; padding:.7rem 0}
   .sv-wrap .oc-mod .oc-tog{order:1}
   .sv-wrap .oc-mod .oc-nome{order:2; flex:1 1 60%; min-width:0}
@@ -2354,28 +2364,33 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
   .sv-wrap .oc-browse-row .oc-num input{text-align:left}
 }
 
-/* ================================ O FUNIL NA FRENTE (só no nicho de eventos)
-   A ordem vem da FOLHA e não da marcação: assim o recorrente continua com o
-   editor em cima, como sempre esteve, e a ZAQ não é mexida por uma decisão
-   tomada olhando a Prime (seção 6 do CLAUDE.md). */
-.sv-wrap.evento{display:flex; flex-direction:column}
-.sv-wrap.evento > .sv-topo{order:-2}
-.sv-wrap.evento > #oc-funil{order:-1}
-/* fora do evento o editor abre junto com a página, como sempre */
-.sv-wrap.evento #oc-editor{display:none}
-.sv-wrap.evento #oc-editor.on{display:flex; flex-direction:column}
+/* ================================ O FUNIL NA FRENTE
+   A ordem vem da FOLHA e não da marcação. Nasceu na Prime (eventos) e passou pro
+   recorrente em 23/09/2026, a pedido do dono ("deixa o mesmo modelo que já tem
+   na Prime eventos, as ordens, botões e tudo"). A classe `.funil` é a FORMA da
+   tela; o que é de festa (card do evento, plano de parcelas, cobrar × incluso)
+   continua preso a `.evento` e ao `servico_avulso` do template. */
+.sv-wrap.funil{display:flex; flex-direction:column}
+.sv-wrap.funil > .sv-topo{order:-2}
+.sv-wrap.funil > #oc-funil{order:-1}
+/* o editor abre sob demanda: "+ Nova proposta" ou clique numa linha do funil */
+.sv-wrap.funil #oc-editor{display:none}
+.sv-wrap.funil #oc-editor.on{display:flex; flex-direction:column}
 /* A ORDEM DENTRO DO EDITOR, tambem pela folha.
    Duas mudancas, as duas medidas na Prime:
    1. CLIENTE ANTES DO EVENTO. Na conversa real pergunta-se quem e antes de
       quando e; a tela pedia a data da festa antes de saber de quem era.
    2. CONTRATO E ADITIVO PRO FIM. Sao configuracao — escrevem-se uma vez e
       abriam a tela todo dia, na frente do trabalho diario. */
-.sv-wrap.evento #oc-editando{order:0}
-.sv-wrap.evento #oc-cli-card{order:1}
-.sv-wrap.evento #oc-ev-card{order:2}
-.sv-wrap.evento .oc-grid{order:3}
-.sv-wrap.evento #ct-card{order:4}
-.sv-wrap.evento #ad-card{order:5}
+.sv-wrap.funil #oc-editando{order:0}
+.sv-wrap.funil #oc-cli-card{order:1}
+.sv-wrap.funil #oc-ev-card{order:2}
+/* no recorrente, o lugar do card do evento é o do escopo pela IA: é ali que se
+   descreve o que o cliente precisa, depois de saber quem ele é. */
+.sv-wrap.funil #oc-esc-card{order:2}
+.sv-wrap.funil .oc-grid{order:3}
+.sv-wrap.funil #ct-card{order:4}
+.sv-wrap.funil #ad-card{order:5}
 
 .fn-cab{display:flex; align-items:center; justify-content:space-between; gap:.6rem;
   flex-wrap:wrap; margin-bottom:.7rem}
@@ -2466,7 +2481,7 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
     font-size:.85rem; cursor:pointer; padding:0 .9rem; width:auto; margin:0}
   .oc-barra .g{border:0; background:var(--verde); color:var(--sobre-verde)}
   .oc-barra .o{border:1px solid var(--borda); background:var(--bg); color:var(--txt)}
-  .sv-wrap.evento{padding-bottom:5.5rem}
+  .sv-wrap.funil{padding-bottom:5.5rem}
 }
 @media(max-width:640px){
   .fn-cab .fn-novo{width:100%}
@@ -2703,8 +2718,11 @@ _JS_CRU = r"""(function(){
     if(bt){
       bt.textContent=fmt(c.ano1);
       var leg=document.getElementById('barra-leg');
-      if(leg) leg.textContent=(c.cobrados||0)+' cobrados'
-        +((c.inclusos||0)?' · '+c.inclusos+' inclusos':'');
+      // a legenda fala a língua de cada nicho: no evento, o que é cobrado e o
+      // que vem no pacote; no recorrente, quantos serviços e a mensalidade.
+      if(leg) leg.textContent=SERVICO_AVULSO
+        ? (c.cobrados||0)+' cobrados'+((c.inclusos||0)?' · '+c.inclusos+' inclusos':'')
+        : (c.mods||0)+(c.mods===1?' serviço':' serviços')+' · '+fmt(c.mensal)+'/mês'+(c.anual?' · anual':'');
     }
     // mudou item/desconto -> o plano de pagamento pode ter deixado de fechar
     if(SERVICO_AVULSO) pintaParcelas();
@@ -2740,7 +2758,9 @@ _JS_CRU = r"""(function(){
   });
 
   MODS.addEventListener('click',function(e){
-    if(SERVICO_AVULSO){
+    // Cobrar × Incluso só existe na linha do evento; a do recorrente cai direto
+    // no 🗑, que é o mesmo nos dois.
+    {
       var cb=e.target.closest('.oc-cob button');
       if(cb){
         var rowc=cb.closest('.oc-mod'); if(!rowc) return;
@@ -2764,10 +2784,19 @@ _JS_CRU = r"""(function(){
       renderCatalogoAvulso();
       return;
     }
-    var tog=e.target.closest('.oc-tog'); if(!tog) return;
-    var r=tog.closest('.oc-mod'); var on=r.getAttribute('data-on')==='1';
-    r.setAttribute('data-on',on?'0':'1'); r.classList.toggle('off',on); tog.classList.toggle('on',!on); pinta();
   });
+  // PONTO DE MILHAR NA LINHA DO RECORRENTE: "1.200", não "1200" — é como o
+  // resumo ao lado escreve, e "MENSAL 1200" numa caixa estreita já foi lido
+  // como 120. Só ao SAIR do campo (formatar enquanto digita pularia o cursor),
+  // e `num()` descarta o ponto na leitura, então a conta não muda.
+  function milhar(root){
+    if(SERVICO_AVULSO) return;
+    (root||MODS).querySelectorAll('.oc-mod.rec .oc-setup,.oc-mod.rec .oc-mensal,.oc-mod.rec .oc-custo').forEach(function(i){
+      if(document.activeElement===i) return;
+      i.value=num(i).toLocaleString('pt-BR');
+    });
+  }
+  MODS.addEventListener('focusout',function(){ milhar(); });
   MODS.addEventListener('input',function(e){
     if(e.target.classList.contains('oc-setup')||e.target.classList.contains('oc-mensal')
        ||e.target.classList.contains('oc-custo')||e.target.classList.contains('oc-qtd')
@@ -3122,10 +3151,30 @@ _JS_CRU = r"""(function(){
         +(inc?'Incluso':fmt(s.setup))+'</b></div>'
       +'<div class="oc-rowacts"><button class="oc-ic oc-rm" type="button" title="Remover da proposta">🗑</button></div>';
   }
+  // recorrente: a mesma lista "só o que está nesta proposta" do evento, com as
+  // duas pontas do dinheiro (setup e mensalidade) no lugar de qtd × unitário.
+  // Sem ícone e sem Cobrar × Incluso: a paleta de ícones e a palavra "incluso"
+  // foram desenhadas pro pacote de festa (seção 6 do CLAUDE.md).
+  function buildRowRec(s){
+    var selo=s.orfao
+      ? '<span class="oc-fora" title="Este serviço saiu do seu catálogo. A linha continua valendo nesta proposta.">fora do catálogo</span>'
+      : '';
+    return '<div class="oc-nome"><b title="'+ec(s.nome)+'">'+ec(s.nome)+'</b>'+selo
+      +'<div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div>'
+      +'<div class="oc-num"><span>Setup</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
+      +'<div class="oc-num"><span>Mensal</span><input class="oc-mensal" inputmode="numeric" value="'+s.mensal+'"></div>'
+      +'<div class="oc-num oc-custo-col"><span>Custo/mês</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
+      +celDesc(s.desc_tipo,s.desc_val)
+      +'<div class="oc-rowacts"><button class="oc-ic oc-rm" type="button" title="Remover da proposta">🗑</button></div>';
+  }
+  // o nome ficou por razões históricas: desde 23/09/2026 é a lista dos DOIS
+  // nichos (o recorrente passou a usar o mesmo "busca pra adicionar").
   function renderCatalogoAvulso(){
     var box=document.getElementById('oc-mods');
     var valores={};
-    rows().forEach(function(r){valores[r.getAttribute('data-id')]={setup:r.querySelector('.oc-setup').value,custo:r.querySelector('.oc-custo').value,qtd:r.querySelector('.oc-qtd').value,incluso:r.getAttribute('data-incluso')==='1',desc:(r.querySelector('.oc-desc')||{}).value};});
+    // `|| {}` em cada campo: a linha do recorrente não tem qtd, e a do evento
+    // não tem mensalidade.
+    rows().forEach(function(r){valores[r.getAttribute('data-id')]={setup:(r.querySelector('.oc-setup')||{}).value,mensal:(r.querySelector('.oc-mensal')||{}).value,custo:(r.querySelector('.oc-custo')||{}).value,qtd:(r.querySelector('.oc-qtd')||{}).value,incluso:r.getAttribute('data-incluso')==='1',desc:(r.querySelector('.oc-desc')||{}).value,tipo:((r.querySelector('.oc-dpar')||{getAttribute:function(){return 'pct';}}).getAttribute('data-tipo'))};});
     box.innerHTML='';
     // catálogo primeiro (ordem alfabética, como sempre); os órfãos entram no fim,
     // porque não têm lugar na ordem de uma lista onde não estão mais.
@@ -3138,18 +3187,26 @@ _JS_CRU = r"""(function(){
       // o "incluso" sobrevive à re-renderização junto com os valores: perder ele
       // ao adicionar outro serviço poria de volta no total o que vem no pacote.
       var inc0 = v0 ? !!v0.incluso : !!s.incluso;
-      var r=document.createElement('div'); r.className='oc-mod avulso'+(inc0?' incluso':'');
+      var r=document.createElement('div');
+      r.className='oc-mod '+(SERVICO_AVULSO?'avulso':'rec')+(inc0?' incluso':'');
       r.setAttribute('data-id',s.slug); r.setAttribute('data-on','1');
       r.setAttribute('data-incluso', inc0?'1':'0');
       s = Object.assign({}, s, {incluso: inc0});
       r.setAttribute('data-nome',s.nome); r.setAttribute('data-desc',s.descricao||''); r.setAttribute('data-cid',s.id);
-      r.innerHTML=buildRowAvulso(s);
+      r.innerHTML=SERVICO_AVULSO?buildRowAvulso(s):buildRowRec(s);
       box.appendChild(r);
       var v=valores[s.slug];
-      if(v){ r.querySelector('.oc-setup').value=v.setup; r.querySelector('.oc-custo').value=v.custo;
-             if(v.qtd) r.querySelector('.oc-qtd').value=v.qtd;
-             var di=r.querySelector('.oc-desc'); if(di && v.desc!==undefined) di.value=v.desc; }
+      if(v){ var volta=function(sel,val){var el=r.querySelector(sel); if(el&&val!==undefined&&val!==null) el.value=val;};
+             volta('.oc-setup',v.setup); volta('.oc-mensal',v.mensal); volta('.oc-custo',v.custo);
+             if(v.qtd) volta('.oc-qtd',v.qtd);
+             volta('.oc-desc',v.desc);
+             // o % × R$ da linha volta junto com o número: "200" em reais
+             // relido como 200% viraria desconto total.
+             var pr=r.querySelector('.oc-dpar');
+             if(pr && v.tipo){ pr.setAttribute('data-tipo',v.tipo);
+               pr.querySelectorAll('.oc-dtog button').forEach(function(x){x.classList.toggle('on',x.getAttribute('data-t')===v.tipo);}); } }
     });
+    milhar(box);
     var vazioTotal=CATALOGO.length===0;
     box.style.display=itens.length?'block':'none';
     document.getElementById('oc-sel-empty').style.display=(itens.length||vazioTotal)?'none':'block';
@@ -3186,41 +3243,17 @@ _JS_CRU = r"""(function(){
     if(!VERTODOS_OPEN){box.innerHTML=''; return;}
     box.innerHTML=CATALOGO.map(function(s){
       var on=!!SELECIONADOS[s.slug];
-      return '<div class="oc-browse-row" data-id="'+ec(s.slug)+'"><button class="oc-tog'+(on?' on':'')+'" type="button" title="'+(on?'Remover da proposta':'Adicionar à proposta')+'"></button>'
+      // o preço de vitrine: um valor no evento, as duas pontas no recorrente
+      var preco=SERVICO_AVULSO
+        ? '<div class="oc-num"><span>Valor</span><input value="'+s.setup+'" readonly></div>'
+        : '<div class="oc-num"><span>Setup · mensal</span><input value="'+s.setup+' · '+s.mensal+'/mês" readonly></div>';
+      return '<div class="oc-browse-row'+(SERVICO_AVULSO?'':' rec')+'" data-id="'+ec(s.slug)+'"><button class="oc-tog'+(on?' on':'')+'" type="button" title="'+(on?'Remover da proposta':'Adicionar à proposta')+'"></button>'
         +'<div class="oc-nome"><b>'+ec(s.nome)+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div>'
-        +'<div class="oc-num"><span>Valor</span><input value="'+s.setup+'" readonly></div>'
+        +preco
         +'<div class="oc-rowacts"><button class="oc-ic oc-edit" type="button" title="Editar serviço">✎</button><button class="oc-ic oc-del" type="button" title="Excluir serviço">🗑</button></div></div>';
     }).join('');
   }
 
-  function renderCatalogo(preserva){
-    var box=document.getElementById('oc-mods'), onset={};
-    if(preserva){rows().forEach(function(r){onset[r.getAttribute('data-id')]=r.getAttribute('data-on');});}
-    box.innerHTML='';
-    CATALOGO.forEach(function(s){
-      // orçamento começa LIMPO: nenhum serviço marcado. O vendedor marca (ou a IA
-      // sugere). Ao re-renderizar (add/editar), preserva o que já estava marcado.
-      var on = preserva ? (onset[s.slug]!==undefined?onset[s.slug]:'0') : '0';
-      var r=document.createElement('div'); r.className='oc-mod'+(SERVICO_AVULSO?' avulso':'')+(on==='1'?'':' off');
-      r.setAttribute('data-id',s.slug); r.setAttribute('data-on',on);
-      r.setAttribute('data-nome',s.nome); r.setAttribute('data-desc',s.descricao||''); r.setAttribute('data-cid',s.id);
-      var lblValor=SERVICO_AVULSO?'Valor':'Setup';
-      r.innerHTML='<button class="oc-tog'+(on==='1'?' on':'')+'" type="button" title="Entra nesta proposta"></button>'
-        +'<div class="oc-nome"><b>'+ec(s.nome)+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div>'
-        +'<div class="oc-num"><span>'+lblValor+'</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
-        +(SERVICO_AVULSO?'':'<div class="oc-num"><span>Mensal</span><input class="oc-mensal" inputmode="numeric" value="'+s.mensal+'"></div>')
-        +'<div class="oc-num'+(SERVICO_AVULSO?'':' oc-custo-col')+'"><span>Custo</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
-        +celDesc('pct',0)
-        +'<div class="oc-rowacts"><button class="oc-ic oc-edit" type="button" title="Editar serviço">✎</button><button class="oc-ic oc-del" type="button" title="Excluir serviço">🗑</button></div>';
-      box.appendChild(r);
-    });
-    var vazio=CATALOGO.length===0;
-    document.getElementById('oc-mods-empty').style.display=vazio?'block':'none';
-    document.getElementById('oc-head').style.display=vazio?'none':'grid';
-    document.getElementById('oc-todos').style.display=vazio?'none':'inline-block';
-    document.getElementById('oc-limpar').style.display=vazio?'none':'inline-block';
-    pinta();
-  }
   function carregarCatalogo(preserva){
     return zapFetch('/painel/servicos/catalogo').then(function(d){if(!d)return;
       CATALOGO=d.itens||[];
@@ -3230,7 +3263,9 @@ _JS_CRU = r"""(function(){
           var o=document.createElement('option'); o.value=nome; o.textContent=nome; selCat.appendChild(o);
         });
       }
-      if(SERVICO_AVULSO){
+      // A-Z e a purga que poupa o órfão valem pros DOIS nichos desde 23/09/2026:
+      // a lista do recorrente passou a ser a mesma "só o que está na proposta".
+      {
         CATALOGO.sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'','pt-BR');});
         // A PURGA AGORA POUPA O ÓRFÃO. Esta linha apagava da seleção tudo que não
         // estivesse no catálogo ativo — e ela roda a cada recarga (salvar ou
@@ -3242,19 +3277,17 @@ _JS_CRU = r"""(function(){
           if(!ORFAOS[id]) delete SELECIONADOS[id];
         });
         renderCatalogoAvulso();
-      } else {
-        renderCatalogo(preserva);
       }
     });
   }
-  if(SERVICO_AVULSO){
+  {
     var ocBusca=document.getElementById('oc-busca'), ocDrop=document.getElementById('oc-drop');
     var renderDropBusca=function(){
       var q=(ocBusca.value||'').trim().toLowerCase();
       if(!q){ocDrop.style.display='none'; ocDrop.innerHTML=''; return;}
       var m=CATALOGO.filter(function(s){return !SELECIONADOS[s.slug] && (s.nome||'').toLowerCase().indexOf(q)>=0;});
       ocDrop.innerHTML = m.length
-        ? m.slice(0,8).map(function(s){return '<div class="oc-drop-item" data-id="'+ec(s.slug)+'"><span class="nome">'+ec(s.nome)+'</span><span class="preco">'+fmt(s.setup)+'</span></div>';}).join('')
+        ? m.slice(0,8).map(function(s){return '<div class="oc-drop-item" data-id="'+ec(s.slug)+'"><span class="nome">'+ec(s.nome)+'</span><span class="preco">'+fmt(s.setup)+(SERVICO_AVULSO?'':' + '+fmt(s.mensal)+'/mês')+'</span></div>';}).join('')
         : '<div class="oc-drop-empty">Nenhum serviço com esse nome.</div>';
       ocDrop.style.display='block';
     }
@@ -3368,8 +3401,6 @@ _JS_CRU = r"""(function(){
     var b=this; b.disabled=true; b.textContent='Importando...';
     fetch('/painel/servicos/catalogo/importar-modelo',{method:'POST'}).then(function(){return carregarCatalogo(false);}).finally(function(){b.disabled=false; b.textContent='Usar modelo de tecnologia';});
   });
-  document.getElementById('oc-todos').addEventListener('click',function(){rows().forEach(function(r){r.setAttribute('data-on','1');r.classList.remove('off');r.querySelector('.oc-tog').classList.add('on');});pinta();});
-  document.getElementById('oc-limpar').addEventListener('click',function(){rows().forEach(function(r){r.setAttribute('data-on','0');r.classList.add('off');r.querySelector('.oc-tog').classList.remove('on');});pinta();});
 
   document.getElementById('oc-sugerir').addEventListener('click',function(){
     var desc=document.getElementById('oc-desc').value.trim();
@@ -3379,7 +3410,16 @@ _JS_CRU = r"""(function(){
     zapFetch('/painel/servicos/sugerir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({descricao:desc})}).then(function(d){if(!d)return;
         if(d.erro){msg.textContent='Não consegui gerar agora. Tente de novo.'; return;}
         var ids=d.modules||[];
-        if(ids.length){rows().forEach(function(r){var on=ids.indexOf(r.getAttribute('data-id'))>=0; r.setAttribute('data-on',on?'1':'0'); r.classList.toggle('off',!on); r.querySelector('.oc-tog').classList.toggle('on',on);});}
+        // a IA ESCOLHE os serviços: vira a seleção da proposta (só o que existe
+        // no catálogo — um slug inventado não tem preço pra mostrar).
+        if(ids.length){
+          // o órfão (serviço que a proposta tem e o catálogo não) FICA: a IA não
+          // o conhece, e sumir com ele apagaria o que o cliente já recebeu.
+          var antes=SELECIONADOS; SELECIONADOS={};
+          Object.keys(ORFAOS).forEach(function(k){ if(antes[k]) SELECIONADOS[k]=true; });
+          ids.forEach(function(id){ if(CATALOGO.some(function(x){return x.slug===id;})) SELECIONADOS[id]=true; });
+          renderCatalogoAvulso();
+        }
         if(d.segmento){document.getElementById('oc-segmento').value=d.segmento;}
         var out=document.getElementById('oc-escopo-out');
         if(d.escopo){out.style.display='block'; out.textContent=d.escopo; out.setAttribute('data-escopo',d.escopo);}
@@ -3402,7 +3442,7 @@ _JS_CRU = r"""(function(){
         set('oc-cidade',d.cidade); set('oc-uf',d.uf);
         var loc=[d.cidade,d.uf].filter(Boolean).join('/');
         msg.textContent='Preenchido pela Receita'+(loc?' — '+loc:'')+'. Confira e ajuste se precisar.';
-        if(SERVICO_AVULSO)atualizarChip();
+        atualizarChip();
       })
       .finally(function(){btn.disabled=false; btn.textContent=t0;});
   });
@@ -3590,7 +3630,7 @@ _JS_CRU = r"""(function(){
   // `itensSalvos` é o que está GRAVADO no orçamento — a folha que o cliente já
   // recebeu. É dele que a linha sai quando o catálogo não sabe mais explicá-la.
   function marcaMods(ids, itensSalvos){
-    if(SERVICO_AVULSO){
+    {
       SELECIONADOS={}; ORFAOS={};
       // quem decide de onde vem cada linha é `window.ZAQ_PAREAR` — função pura,
       // definida fora deste IIFE porque é ela que os testes exercitam.
@@ -3613,26 +3653,20 @@ _JS_CRU = r"""(function(){
         };
       });
       renderCatalogoAvulso();
-      return;
     }
-    rows().forEach(function(r){
-      var on=(ids||[]).indexOf(r.getAttribute('data-id'))>=0;
-      r.setAttribute('data-on',on?'1':'0'); r.classList.toggle('off',!on);
-      r.querySelector('.oc-tog').classList.toggle('on',on);
-    });
   }
   var EDIT_ID=null;
 
-  // O EDITOR ABRE SOB DEMANDA (só no nicho de eventos). Quem chega na aba vem
+  // O EDITOR ABRE SOB DEMANDA (nos dois nichos desde 23/09/2026). Quem chega na aba vem
   // ver o funil; o editor de orçamento é o que se faz DEPOIS de decidir em qual
   // proposta mexer. Antes ele estava sempre aberto e o funil era o rodapé.
   var EDITOR = document.getElementById('oc-editor');
   var BARRA = document.getElementById('oc-barra');
 
-  function editorAberto(){ return !SERVICO_AVULSO || (EDITOR && EDITOR.classList.contains('on')); }
+  function editorAberto(){ return !!(EDITOR && EDITOR.classList.contains('on')); }
 
   function abrirEditor(rolar){
-    if(!SERVICO_AVULSO || !EDITOR) return;
+    if(!EDITOR) return;
     EDITOR.classList.add('on');
     if(BARRA) BARRA.classList.add('on');
     // `pinta` de novo com o editor VISÍVEL: enquanto estava escondido os campos
@@ -3642,7 +3676,7 @@ _JS_CRU = r"""(function(){
   }
 
   function fecharEditor(){
-    if(!SERVICO_AVULSO || !EDITOR) return;
+    if(!EDITOR) return;
     EDITOR.classList.remove('on');
     if(BARRA) BARRA.classList.remove('on');
     var fn = document.getElementById('oc-funil');
@@ -3683,7 +3717,7 @@ _JS_CRU = r"""(function(){
     var out=document.getElementById('oc-escopo-out'); out.style.display='none'; out.removeAttribute('data-escopo'); out.textContent='';
     document.getElementById('oc-editando').style.display='none';
     marcaMods([]);   // proposta nova começa sem nenhum serviço marcado
-    if(SERVICO_AVULSO)atualizarChip();
+    atualizarChip();
     pinta();
   }
   function abrir(id){
@@ -3744,6 +3778,7 @@ _JS_CRU = r"""(function(){
         });
         setv('oc-desconto', String(dt==='valor'?(d.desconto_valor||0):(d.desconto_pct||0)));
       }
+      milhar();
       var out=document.getElementById('oc-escopo-out');
       if(d.escopo){out.style.display='block'; out.textContent=d.escopo; out.setAttribute('data-escopo',d.escopo);}
       else{out.style.display='none'; out.removeAttribute('data-escopo');}
@@ -3752,19 +3787,18 @@ _JS_CRU = r"""(function(){
       var aviso=(d.status==='aprovada')?' · ⚠ editar vai pedir nova aprovação do cliente':'';
       var quando=d.gerado_em?(' · gerada em '+d.gerado_em):'';
       bn.querySelector('.t').textContent='Editando proposta #'+d.id+' · '+d.status+quando+aviso+' — salve pra atualizar o link do cliente.';
-      if(SERVICO_AVULSO)atualizarChip();
+      atualizarChip();
       pinta();
-      // no evento o editor estava fechado: abrir a proposta é abrir ele junto,
-      // e a rolagem passa a ser pro editor (o topo agora é o funil).
-      if(SERVICO_AVULSO){ abrirEditor(); }
-      else { window.scrollTo({top:0,behavior:'smooth'}); }
+      // o editor estava fechado: abrir a proposta é abrir ele junto, e a
+      // rolagem passa a ser pro editor (o topo agora é o funil).
+      abrirEditor();
     });
   }
   document.getElementById('oc-novo').addEventListener('click',function(){
     novo();
-    // no evento, "Nova proposta" a partir da faixa mantém o editor aberto — quem
-    // apertou já está editando.
-    if(SERVICO_AVULSO) abrirEditor(false);
+    // "Nova proposta" a partir da faixa mantém o editor aberto — quem apertou já
+    // está editando.
+    abrirEditor(false);
   });
   // os dois botões da barra do celular são atalhos pros que já existem: um
   // segundo caminho pro mesmo código, nunca uma segunda implementação.
@@ -4256,10 +4290,9 @@ _JS_CRU = r"""(function(){
         // A DATA DE CRIAÇÃO SAI DAQUI no evento: ela ganhou coluna própria à
         // direita (ver `criada`, logo abaixo). Enterrada entre o nº e o vendedor
         // ela era o dado certo no lugar errado — ninguém compara datas que estão
-        // no meio de frases diferentes. No recorrente continua onde estava: a
-        // tela da ZAQ não foi medida nesta mudança.
+        // no meio de frases diferentes. Vale pros dois nichos desde 23/09/2026,
+        // quando o recorrente ganhou o funil da Prime.
         var sub1=[esc(it.sub||''), (it.numero?('nº '+it.numero):''),
-                  ((!SERVICO_AVULSO && it.data)?('gerada '+esc(it.data)):''),
                   (it.vendedor?('vendido por '+esc(it.vendedor)):'')]
                  .filter(Boolean).join(' · ');
         var sub2=[esc(it.total), esc(pn.resumo||'')].filter(Boolean).join(' · ');
@@ -4285,7 +4318,7 @@ _JS_CRU = r"""(function(){
         // coluna viram uma leitura só (16/09 · 09/09 · 31/08 · 28/08) — dá pra
         // ver a idade da carteira de cima pra baixo, coisa que a data no meio da
         // frase não permitia.
-        if(SERVICO_AVULSO && it.data){
+        if(it.data){
           var criada=document.createElement('div');
           criada.className='oc-criada';
           criada.innerHTML='<div class="rot">Criada em</div><div class="dt">'+esc(it.data)+'</div>';
@@ -4775,7 +4808,7 @@ _JS_TAG = ('<script src="'
 
 
 _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
-<div class="sv-wrap{% if servico_avulso %} evento{% endif %}">
+<div class="sv-wrap funil{% if servico_avulso %} evento{% endif %}">
 <div class="sv-topo">
   <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.4rem">
     <h1 style="margin:.2rem 0">Vendas de Serviços</h1>
@@ -4797,13 +4830,11 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
    2. quem só veio olhar o funil não precisa do editor aberto. Ele abre em
       "Nova proposta" ou ao clicar numa linha.  #}
 <div id="oc-editor">
-{% if servico_avulso %}
 {# O CAMINHO DE VOLTA. O funil agora é o topo da tela, então o editor precisa
    dizer como se sai dele — senão a única saída é rolar. #}
 <div class="fn-cab" style="margin-bottom:.6rem">
   <button type="button" class="oc-pill" id="oc-voltar">&#8592; Funil</button>
 </div>
-{% endif %}
 <div id="oc-editando" style="display:none;align-items:center;justify-content:space-between;gap:.6rem;background:#10241d;border:1px solid #1c3a30;border-radius:10px;padding:.5rem .8rem;margin-bottom:.8rem">
   <span class="t" style="font-size:.85rem;color:var(--verde-claro)"></span>
   <button id="oc-novo" type="button" class="oc-pill">Nova proposta</button>
@@ -4874,7 +4905,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 </div>
 {% endif %}
 
-<div class="card"{% if servico_avulso %} style="display:none"{% endif %}>
+<div class="card" id="oc-esc-card"{% if servico_avulso %} style="display:none"{% endif %}>
   <h2 style="margin-top:0">Escopo automático · IA</h2>
   <p class="mut" style="margin-top:0">Cole o site ou a descrição do cliente. A IA escolhe os módulos e escreve o escopo da proposta.</p>
   <textarea id="oc-desc" class="oc-inp" rows="3" placeholder="Ex.: clínica com 3 unidades, muito WhatsApp, quer reduzir faltas e organizar leads..."></textarea>
@@ -4924,7 +4955,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 <div class="card" id="oc-cli-card">
   <h2 style="margin-top:0">Cliente</h2>
 
-  {% if servico_avulso %}
+  {# A BUSCA NA BASE vale pros dois nichos (pedido do dono em 23/09/2026: "o
+     mesmo modelo que já tem na Prime"). O que muda de nicho pra nicho são os
+     CAMPOS do formulário abaixo, não o caminho até ele. #}
   <div style="position:relative">
     <input id="cli-busca" class="oc-inp" placeholder="🔍 Buscar cliente já cadastrado na Base… (nome, empresa)" autocomplete="off">
     <div id="cli-drop" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 6px); background:var(--card-2); border:1px solid var(--borda); border-radius:10px; max-height:280px; overflow-y:auto; z-index:5; box-shadow:0 12px 30px rgba(0,0,0,.4)"></div>
@@ -4941,15 +4974,12 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     <button type="button" class="oc-pill" id="cli-ver-dados" style="padding:.3rem .6rem; font-size:.78rem">Ver dados</button>
     <button type="button" class="oc-pill" id="cli-trocar" style="padding:.3rem .6rem; font-size:.78rem">Trocar</button>
   </div>
-  {% endif %}
 
-  <div id="cli-form-full"{% if servico_avulso %} style="display:none; margin-top:.8rem; border-top:1px dashed var(--borda); padding-top:.8rem"{% endif %}>
-    {% if servico_avulso %}
+  <div id="cli-form-full" style="display:none; margin-top:.8rem; border-top:1px dashed var(--borda); padding-top:.8rem">
     <div style="display:flex; gap:.4rem; margin-bottom:.8rem">
       <button type="button" class="oc-pill" id="btn-tipo-pj" data-tipo="pj">🏢 Pessoa Jurídica</button>
       <button type="button" class="oc-pill" id="btn-tipo-pf" data-tipo="pf">🧑 Pessoa Física</button>
     </div>
-    {% endif %}
     <div class="oc-field" style="margin-bottom:.7rem">
       <label id="oc-cnpj-label">CNPJ <span id="oc-cnpj-dica" style="color:var(--txt-mut);font-size:.78rem">— preenche empresa, segmento e contato automaticamente</span></label>
       <div style="display:flex; gap:.5rem; align-items:center">
@@ -4986,7 +5016,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.4rem">
         <h2 style="margin:0">Meus serviços</h2>
         <div style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:center">
-          {% if servico_avulso %}<span class="oc-contador"><b id="oc-contador-n">0</b> de <span id="oc-contador-total">0</span> na proposta</span>{% endif %}
+          <span class="oc-contador"><b id="oc-contador-n">0</b> de <span id="oc-contador-total">0</span> na proposta</span>
           <button id="oc-add" class="oc-pill" type="button">+ Adicionar serviço</button>
           <button id="oc-margin" class="oc-pill" type="button">Modo margem</button>
         </div>
@@ -5023,21 +5053,23 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         <div id="svc-msg" class="mut" style="font-size:.8rem; margin-top:.4rem"></div>
       </div>
 
-      {% if servico_avulso %}
+      {# BUSCA PRA ADICIONAR, nos dois nichos: a lista mostra só o que está NESTA
+         proposta, e o resto do catálogo fica atrás da busca ou do "ver todos".
+         Era assim só na Prime; na ZAQ a grade listava o catálogo inteiro com um
+         interruptor por linha, e foi nela que as colunas se sobrepuseram. #}
       <div class="oc-buscabox" id="oc-buscabox" style="position:relative; margin-top:.8rem; display:none">
         <span class="oc-buscaic">🔍</span>
-        <input id="oc-busca" class="oc-inp" placeholder="Buscar serviço pra adicionar… (ex.: drinks, dj, buffet)" autocomplete="off" style="padding-left:2.2rem">
+        <input id="oc-busca" class="oc-inp" placeholder="{{ 'Buscar serviço pra adicionar… (ex.: drinks, dj, buffet)' if servico_avulso else 'Buscar serviço pra adicionar…' }}" autocomplete="off" style="padding-left:2.2rem">
         <div id="oc-drop" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 6px); background:var(--card-2); border:1px solid var(--borda); border-radius:10px; max-height:280px; overflow-y:auto; z-index:5; box-shadow:0 12px 30px rgba(0,0,0,.4)"></div>
       </div>
       <div id="oc-sel-empty" class="oc-empty" style="display:none">
         <b>Nenhum serviço nesta proposta ainda</b>
         <p class="mut" style="margin:.3rem 0 0; font-size:.85rem">Busque acima e clique pra adicionar — só o que você escolher aparece aqui embaixo.</p>
       </div>
-      {% endif %}
-      <div class="oc-head{% if servico_avulso %} avulso{% endif %}" id="oc-head" style="margin-top:.8rem; display:none">
-        <span></span><span>Serviço</span><span style="text-align:right">{{ 'Valor' if servico_avulso else 'Setup' }}</span>{% if not servico_avulso %}<span style="text-align:right">Mensal</span>{% endif %}<span style="text-align:right">{{ 'Custo' if servico_avulso else 'Custo/Margem' }}</span><span style="text-align:right">Desconto</span><span></span>
-      </div>
-      <div id="oc-mods"{% if servico_avulso %} style="display:none"{% endif %}></div>
+      {# SEM CABEÇALHO DE COLUNAS: cada caixa traz o rótulo em cima do número. Era
+         o cabeçalho que desalinhava a grade do recorrente — "Custo/Margem" ficava
+         na tela com a coluna escondida embaixo, e tudo escorregava uma casa. #}
+      <div id="oc-mods" style="display:none"></div>
       {% if servico_avulso %}
       {# SERVIÇO SEM CATEGORIA. A folha do cliente só imprime subtotal por
          categoria quando TODOS os itens têm uma (ver `_subtotais` em
@@ -5048,9 +5080,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           <span style="opacity:.85">A folha do cliente sai sem os subtotais por categoria.</span></div>
         <button type="button" id="oc-sem-cat-b">Ver o catálogo</button>
       </div>
+      {% endif %}
       <a id="oc-vertodos" href="#" class="oc-vertodos-link" style="display:none">📋 ver os <span id="oc-vertodos-n">0</span> serviços em ordem alfabética ›</a>
       <div id="oc-catalogo-completo" class="oc-catalogo-completo"></div>
-      {% endif %}
       <div id="oc-mods-empty" class="oc-empty" style="display:none">
         <b>Você ainda não cadastrou seus serviços</b>
         <p class="mut" style="margin:.3rem 0 0">{{ 'Adicione o que a sua empresa vende — nome e valor. Isso vira o seu catálogo pra montar orçamentos.' if servico_avulso else 'Adicione o que a sua empresa vende — nome, setup e mensalidade. Isso vira o seu catálogo pra montar orçamentos.' }}</p>
@@ -5058,10 +5090,6 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           <button id="oc-add2" class="oc-btn-g" type="button" style="border:0; border-radius:8px; padding:.5rem 1rem; font-weight:600; cursor:pointer">+ Adicionar serviço</button>
           {% if not servico_avulso %}<button id="oc-import" class="oc-pill" type="button">Usar modelo de tecnologia</button>{% endif %}
         </div>
-      </div>
-      <div style="display:flex; justify-content:space-between; margin-top:.6rem">
-        <button id="oc-todos" class="oc-pill" type="button" style="display:none">Marcar todos</button>
-        <button id="oc-limpar" class="oc-pill" type="button" style="display:none">Limpar seleção</button>
       </div>
     </div>
 
@@ -5192,9 +5220,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 <div class="card" id="oc-funil">
   <div class="fn-cab">
     <h2 style="margin:0">Funil</h2>
-    {% if servico_avulso %}<button id="fn-novo" class="oc-btn-g fn-novo" type="button">+ Nova proposta</button>{% endif %}
+    <button id="fn-novo" class="oc-btn-g fn-novo" type="button">+ Nova proposta</button>
   </div>
-  {% if servico_avulso %}
   {# AS TRÊS ABAS. Quem decide em qual delas a linha cai é `vendas.grupo_do_funil`,
      derivada do mesmo painel que desenha os selos — a aba nunca discorda da
      linha. Os rótulos e a contagem vêm do servidor. #}
@@ -5208,18 +5235,16 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     </label>
     {% endif %}
   </div>
-  {% endif %}
   <div id="oc-hist-box"><p class="mut">Carregando...</p></div>
   <p class="mut fn-vazio" id="fn-vazio" style="display:none"></p>
 </div>
 
-{% if servico_avulso %}
 {# A BARRA DE TOTAL DO CELULAR. Fixa no rodapé enquanto o editor está aberto e a
    tela é estreita — é onde o vendedor monta o orçamento. Some junto com o
    editor; no desktop o Resumo grudado à direita continua sendo o que manda. #}
 <div class="oc-barra" id="oc-barra">
   <div class="vl">
-    <div class="rot">Total</div>
+    <div class="rot">{{ 'Total' if servico_avulso else 'Total 1º ano' }}</div>
     <div class="num" id="barra-total">R$ 0</div>
     <div class="leg" id="barra-leg"></div>
   </div>
@@ -5227,7 +5252,6 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <button type="button" class="o" id="barra-salvar">Salvar</button>
   <button type="button" class="g" id="barra-gerar">Gerar</button>
 </div>
-{% endif %}
 
 </div>
 

@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZAQ — Serviços e contrato</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* TOKENS — cópia de web/tema.py (_TOKENS). A fonte da verdade é o tema.py. */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A; --azul-fundo:#0D1B23;
+  --papel:#FBFAF7; --tinta:#1C1F1D; --tinta-2:#5B625E; --papel-linha:#E3E0D8;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;
+  --body:"Inter",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  --card:var(--surface); --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim); --verde:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);max-width:1180px;margin:0 auto;
+  padding:34px 16px 100px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.8rem;font-weight:700;line-height:1.15}
+h2{font-size:1.2rem;font-weight:700;margin-bottom:.2rem}
+h3{font-size:.95rem;font-weight:600}
+code{font-family:var(--mono);font-size:.82em;background:var(--bg-2);padding:.1rem .35rem;border-radius:4px;color:var(--text-dim)}
+.sub{color:var(--txt-mut);margin-top:.5rem;max-width:80ch}
+.sec{margin-top:48px}
+.num{font-family:var(--mono);font-size:.72rem;color:var(--verde);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:80ch;margin-top:.4rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);padding:.7rem .9rem;border-radius:0 8px 8px 0;
+  font-size:.86rem;margin-top:1rem;color:var(--txt-mut);max-width:84ch}
+.nota b{color:var(--txt)}
+.nota.amb{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)} .nota.amb b{color:var(--ambar)}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.chip{font-size:.75rem;padding:.2rem .6rem;border-radius:99px;border:1px solid var(--borda);color:var(--txt-mut);background:var(--bg-2)}
+.chip b{color:var(--txt)}
+
+/* ---------- antes / depois ---------- */
+.ad-wrap{display:grid;grid-template-columns:1fr;gap:18px;margin-top:1.1rem}
+.ad{border:1px solid var(--borda);border-radius:12px;overflow:hidden;background:var(--card)}
+.ad>.t{padding:.45rem .85rem;font-size:.72rem;font-family:var(--mono);letter-spacing:.05em;text-transform:uppercase;border-bottom:1px solid var(--borda)}
+.ad.ruim>.t{background:var(--coral-fundo);color:var(--coral);border-bottom-color:var(--coral-borda)}
+.ad.bom>.t{background:var(--neon-fundo);color:var(--neon);border-bottom-color:var(--neon-borda)}
+.ad>.c{padding:16px;overflow-x:auto}
+.bar{display:flex;justify-content:space-between;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.8rem}
+.bar h3{font-size:1.05rem}
+.pill{padding:.38rem .8rem;border-radius:99px;border:1px solid var(--borda);background:var(--bg);color:var(--txt);font-size:.82rem}
+.pill.on{border-color:var(--verde);color:var(--verde);background:#10241d}
+
+/* linha "antes" — reprodução do defeito */
+.v-head,.v-row{display:grid;grid-template-columns:44px 1fr 84px 84px 84px 104px 20px;gap:.55rem;align-items:center;min-width:620px}
+.v-head{font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--txt-mut);padding-bottom:.4rem;border-bottom:1px solid var(--borda)}
+.v-row{padding:.55rem 0;border-bottom:1px solid var(--borda)}
+.v-row .nm b{font-size:1rem;line-height:1.1;display:block;word-break:break-word;overflow:hidden;max-width:100px}
+.v-box{border:1px solid var(--borda);background:var(--bg);border-radius:8px;padding:.5rem .45rem;font-size:.72rem;color:var(--txt-mut);
+  white-space:nowrap;overflow:hidden}
+.v-box b{color:var(--txt);font-weight:500;font-size:.86rem}
+.v-desc{display:flex;align-items:center;gap:2px;border:1px solid var(--borda);background:var(--bg);border-radius:8px;padding:.45rem .4rem;
+  font-size:.66rem;color:var(--txt-mut);width:138px;white-space:nowrap}
+.v-desc i{font-style:normal;background:var(--verde);color:var(--sobre-verde);padding:.15rem .3rem;border-radius:4px}
+.tog{width:40px;height:40px;border-radius:50%;background:#1d2a33;position:relative}
+.tog::after{content:"";position:absolute;width:14px;height:14px;border-radius:50%;background:#aab;top:8px;left:8px}
+.tog.on{background:var(--verde)} .tog.on::after{background:#fff;left:auto;right:8px}
+.off{opacity:.55}
+.marca{position:relative}
+.marca::before{content:attr(data-n);position:absolute;top:-8px;left:-8px;width:18px;height:18px;border-radius:50%;
+  background:var(--coral);color:#fff;font:700 .65rem/18px var(--mono);text-align:center;z-index:2}
+
+/* linha "depois" — a proposta */
+.n-head,.n-row{display:grid;grid-template-columns:36px minmax(0,1fr) 96px 96px 138px 34px;gap:.7rem;align-items:center;min-width:640px}
+.n-head.mg,.n-row.mg{grid-template-columns:36px minmax(0,1fr) 96px 96px 96px 138px 34px}
+.n-head{font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-mut);padding-bottom:.45rem;border-bottom:1px solid var(--borda)}
+.n-head .r{text-align:right}
+.n-row{padding:.65rem 0;border-bottom:1px solid var(--borda)}
+.n-row .tog{width:32px;height:18px;border-radius:99px}
+.n-row .tog::after{width:12px;height:12px;top:3px;left:3px}
+.n-row .tog.on::after{right:3px}
+.n-nm{min-width:0}
+.n-nm b{display:block;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.n-nm span{display:block;font-size:.76rem;color:var(--txt-mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.n-box{border:1px solid var(--borda);background:var(--bg);border-radius:8px;padding:.25rem .5rem;text-align:right}
+.n-box small{display:block;font-size:.56rem;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-mut)}
+.n-box b{font-family:var(--mono);font-size:.86rem;font-weight:500}
+.n-box.mgm b{color:var(--verde)}
+.n-desc{display:flex;border:1px solid var(--borda);border-radius:8px;overflow:hidden;background:var(--bg)}
+.n-desc b{flex:1;text-align:right;padding:.42rem .5rem;font:500 .86rem var(--mono)}
+.n-desc span{display:flex}
+.n-desc span i{font-style:normal;font-size:.7rem;font-weight:600;padding:.42rem .45rem;color:var(--txt-mut);background:var(--bg-2);border-left:1px solid var(--borda)}
+.n-desc span i.on{background:var(--verde);color:var(--sobre-verde)}
+.menu{color:var(--txt-mut);text-align:center;font-size:1.1rem}
+.cel{max-width:360px;border:1px solid var(--borda);border-radius:22px;padding:14px;background:var(--card);margin-top:1rem}
+.cel .row{padding:.7rem 0;border-bottom:1px solid var(--borda)}
+.cel .top{display:flex;gap:.6rem;align-items:center}
+.cel .nums{display:grid;grid-template-columns:1fr 1fr;gap:.45rem;margin-top:.5rem}
+.cel .nums .n-desc{grid-column:1/-1}
+
+.lista{margin-top:1rem;display:grid;gap:.55rem;max-width:84ch}
+.lista li{list-style:none;display:grid;grid-template-columns:24px 1fr;gap:.6rem;font-size:.9rem;color:var(--txt-mut)}
+.lista li b{color:var(--txt)}
+.lista li .k{width:22px;height:22px;border-radius:50%;background:var(--coral-fundo);border:1px solid var(--coral-borda);color:var(--coral);
+  font:700 .7rem/20px var(--mono);text-align:center}
+.lista.ok li .k{background:var(--neon-fundo);border-color:var(--neon-borda);color:var(--verde)}
+
+/* ---------- fluxo ---------- */
+.fluxo{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:1.1rem}
+.passo{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:.8rem;position:relative}
+.passo .e{font-family:var(--mono);font-size:.68rem;color:var(--verde);letter-spacing:.08em}
+.passo h3{margin:.2rem 0 .3rem}
+.passo p{font-size:.8rem;color:var(--txt-mut)}
+.passo.fora{border-style:dashed;opacity:.6}
+.passo.fora .e{color:var(--txt-mut)}
+.passo.novo{border-color:var(--neon-borda);box-shadow:0 0 0 1px var(--neon-borda) inset}
+.tag{display:inline-block;font-size:.62rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:.1rem .45rem;border-radius:5px;margin-top:.45rem}
+.tag.igual{background:var(--bg-2);color:var(--txt-mut);border:1px solid var(--borda)}
+.tag.novo{background:var(--neon-fundo);color:var(--verde);border:1px solid var(--neon-borda)}
+.tag.fora{background:var(--bg-2);color:var(--txt-mut);border:1px dashed var(--borda)}
+
+/* ---------- configuração do contrato (tela do dono) ---------- */
+.telas{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;margin-top:1.1rem;align-items:start}
+.quadro{background:var(--card);border:1px solid var(--borda);border-radius:14px;overflow:hidden}
+.quadro>.cap{background:var(--bg-2);padding:.5rem .85rem;font-size:.7rem;font-family:var(--mono);color:var(--txt-mut);border-bottom:1px solid var(--borda);
+  letter-spacing:.04em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quadro>.miolo{padding:16px}
+.liga{display:flex;justify-content:space-between;align-items:center;gap:.8rem;padding:.7rem .8rem;border:1px solid var(--neon-borda);
+  background:var(--neon-fundo);border-radius:10px;font-size:.86rem}
+.liga .sw{width:38px;height:22px;border-radius:99px;background:var(--verde);position:relative;flex:none}
+.liga .sw::after{content:"";position:absolute;right:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff}
+.regras{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.5rem;margin-top:.9rem}
+.rg{border:1px solid var(--borda);background:var(--bg);border-radius:8px;padding:.4rem .55rem}
+.rg small{display:block;font-size:.66rem;color:var(--txt-mut)}
+.rg b{font-family:var(--mono);font-size:.86rem;font-weight:500}
+.rg.vazio b{color:var(--ambar)}
+.cl{border:1px solid var(--borda);border-radius:8px;padding:.5rem .65rem;margin-top:.45rem;background:var(--bg);font-size:.8rem}
+.cl b{display:block;font-size:.82rem}
+.cl span{color:var(--txt-mut)}
+.cl code{font-size:.72rem;color:var(--verde);background:transparent;padding:0}
+.falta{margin-top:.9rem;border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:10px;padding:.6rem .75rem;font-size:.8rem;color:var(--txt-mut)}
+.falta b{color:var(--ambar)}
+
+/* ---------- folha do cliente (papel) ---------- */
+.folha{background:var(--papel);color:var(--tinta);border-radius:6px;padding:26px 26px 30px;font-size:.8rem;line-height:1.55;
+  box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.folha h4{font-family:var(--display);font-size:1.05rem;text-align:center;letter-spacing:-.01em}
+.folha .cab{text-align:center;color:var(--tinta-2);font-size:.72rem;margin-bottom:1rem}
+.folha .partes{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:.6rem 0 1rem}
+.folha .partes div{border:1px solid var(--papel-linha);border-radius:6px;padding:.5rem .6rem}
+.folha .partes small{display:block;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;color:var(--tinta-2)}
+.folha table{width:100%;border-collapse:collapse;margin:.3rem 0 .8rem;font-size:.76rem}
+.folha th,.folha td{padding:.32rem .4rem;border-bottom:1px solid var(--papel-linha);text-align:left}
+.folha th{font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--tinta-2)}
+.folha td.r,.folha th.r{text-align:right;font-variant-numeric:tabular-nums}
+.folha .tot td{font-weight:700;border-bottom:0}
+.folha p{margin:.35rem 0}
+.folha p b{font-weight:600}
+.ph{background:#FFF1C9;color:#7A5A00;border-radius:3px;padding:0 .25rem;font-family:var(--mono);font-size:.7rem;white-space:nowrap}
+.folha .ass{margin-top:1rem;border:1px solid var(--papel-linha);border-radius:8px;padding:.7rem}
+.folha .ass .campo{border:1px solid #cfcac0;border-radius:6px;padding:.4rem .5rem;color:#9a958c;margin-top:.35rem;font-size:.76rem}
+.folha .btn{margin-top:.6rem;background:#1F8F4E;color:#fff;border-radius:8px;padding:.55rem;text-align:center;font-weight:600}
+
+/* ---------- tabelas de decisão ---------- */
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em}
+.tw{overflow-x:auto}
+.sim{color:var(--verde)} .nao{color:var(--coral)} .meio{color:var(--ambar)}
+.perg{margin-top:1rem;display:grid;gap:.7rem}
+.perg div{background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.75rem .9rem}
+.perg b{display:block;margin-bottom:.15rem}
+.perg span{font-size:.84rem;color:var(--txt-mut)}
+.perg em{font-style:normal;color:var(--verde);font-size:.8rem}
+.rodape{margin-top:56px;padding-top:18px;border-top:1px solid var(--borda);font-size:.78rem;color:var(--txt-mut)}
+
+@media(max-width:900px){
+  .fluxo{grid-template-columns:1fr 1fr}
+  .telas{grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:560px){
+  .fluxo{grid-template-columns:1fr}
+  .folha{padding:18px 14px}
+  .folha .partes{grid-template-columns:1fr}
+  h1{font-size:1.45rem}
+}
+</style>
+</head>
+<body>
+
+<div class="num">Mockup para aprovação · 23/09/2026</div>
+<h1>ZAQ – Sistemas IAs: tela de Serviços arrumada e contrato de prestação de serviços</h1>
+<p class="sub">Duas entregas. <b>(1)</b> Arrumar a grade dos serviços, que está sobrepondo os campos. <b>(2)</b> Levar pra ZAQ
+o fluxo que já roda na Prime (orçamento → proposta → contrato assinado → financeiro), <b>sem o termo aditivo</b>. O contrato
+é escrito pro que a ZAQ vende (setup e mensalidade), e não pra locação de espaço. Os campos da empresa ficam em
+branco até você mandar os dados do contrato.</p>
+<div class="chips">
+  <span class="chip">conta <b>3</b> · ZAQ – Sistemas IAs</span>
+  <span class="chip">nicho <b>consultoria</b> → perfil <b>recorrente</b></span>
+  <span class="chip">referência: conta <b>34</b> · Prime (eventos) · 11 contratos assinados</span>
+  <span class="chip">ZAQ hoje: <b>15</b> orçamentos · 13 rascunhos · 1 aprovado · 1 fechado · <b>0</b> contratos</span>
+</div>
+
+<!-- ============================================================ 1 -->
+<section class="sec">
+  <div class="num">1 · O que está bagunçado na sua tela</div>
+  <h2>A grade tem 7 colunas, mas a linha recorrente só preenche 6</h2>
+  <p class="lede">Na tela, a coluna <b>Custo</b> fica escondida enquanto o Modo margem está desligado, e o título dela
+  continua lá. Aí tudo que vem depois escorrega uma casa pra esquerda. Reproduzi o defeito abaixo, com as mesmas
+  larguras do código (<code>web/painel_servicos.py</code>, <code>.oc-mod</code>).</p>
+
+  <div class="ad-wrap">
+    <div class="ad ruim"><div class="t">Antes · como está em app.zaq-ia.com/painel/servicos</div><div class="c">
+      <div class="v-head"><span></span><span>Serviço</span><span>Setup</span><span>Mensal</span><span class="marca" data-n="1">Custo/Margem</span><span>Desconto</span><span></span></div>
+      <div class="v-row">
+        <div class="tog on"></div>
+        <div class="nm marca" data-n="2"><b>Agente de Atendimen</b><span style="font-size:.74rem;color:var(--txt-mut)">Atendimen…</span></div>
+        <div class="v-box">SETUP <b>4500</b></div>
+        <div class="v-box marca" data-n="3">MENSAL <b>12(</b></div>
+        <div class="v-desc marca" data-n="4">DESCONTO <i>%</i> ✎ 🗑</div>
+        <div></div><div></div>
+      </div>
+      <div class="v-row off">
+        <div class="tog"></div>
+        <div class="nm"><b>Automaçã de Processos</b></div>
+        <div class="v-box">SETUP <b>6000</b></div>
+        <div class="v-box">MENSAL <b>15(</b></div>
+        <div class="v-desc">DESCONTO <i>%</i> ✎ 🗑</div>
+        <div></div><div></div>
+      </div>
+    </div></div>
+  </div>
+  <ul class="lista">
+    <li><span class="k">1</span><span><b>Título “Custo/Margem” sem coluna embaixo.</b> O título aparece mesmo com o Modo margem desligado. Por isso
+      “Desconto” fica em cima do espaço vazio, e não do campo de desconto.</span></li>
+    <li><span class="k">2</span><span><b>O nome é espremido até quebrar no meio da palavra</b> (“Atendimen”, “Automaçã”, “Documentc”). A coluna do nome
+      é a única flexível, e os campos de 84px, junto com o desconto estourando, tomam o espaço dela.</span></li>
+    <li><span class="k">3</span><span><b>“MENSAL 120” vira “MENSAL 12(”.</b> O rótulo fica do lado do número, numa caixa de 84px. Não cabe
+      “mensal” e mais 4 dígitos, e ninguém sabe se o valor é 120 ou 1.200.</span></li>
+    <li><span class="k">4</span><span><b>O desconto caiu numa coluna de 84px, mas precisa de ~138px</b> (campo + alternador %/R$). Ele invade o ✎ e
+      o 🗑, que ficam cortados e em cima um do outro.</span></li>
+  </ul>
+</section>
+
+<!-- ============================================================ 2 -->
+<section class="sec">
+  <div class="num">2 · Como fica</div>
+  <h2>Uma coluna pra cada coisa, com o rótulo em cima do número</h2>
+  <p class="lede">A grade passa a ter só as colunas que aparecem. A coluna Custo entra quando você liga o Modo margem.
+  O rótulo vai pra cima do número, como já é na tela de evento da Prime. O nome fica em uma linha, com reticências
+  e o nome inteiro ao passar o mouse. O ✎ e o 🗑 passam pra um menu <b>⋯</b>.</p>
+
+  <div class="ad-wrap">
+    <div class="ad bom"><div class="t">Depois · Modo margem desligado</div><div class="c">
+      <div class="bar"><h3>Meus serviços</h3><div style="display:flex;gap:.4rem"><span class="pill">+ Adicionar serviço</span><span class="pill">Modo margem</span></div></div>
+      <div class="n-head"><span></span><span>Serviço</span><span class="r">Setup</span><span class="r">Mensal</span><span class="r">Desconto</span><span></span></div>
+      <div class="n-row"><div class="tog on"></div><div class="n-nm"><b>Agente de Atendimento</b><span>Atendimento automático no WhatsApp 24h</span></div>
+        <div class="n-box"><small>setup</small><b>4.500</b></div><div class="n-box"><small>mensal</small><b>1.200</b></div>
+        <div class="n-desc"><b>0</b><span><i class="on">%</i><i>R$</i></span></div><div class="menu">⋯</div></div>
+      <div class="n-row off"><div class="tog"></div><div class="n-nm"><b>Automação de Processos</b><span>Workflows entre sistemas</span></div>
+        <div class="n-box"><small>setup</small><b>6.000</b></div><div class="n-box"><small>mensal</small><b>1.500</b></div>
+        <div class="n-desc"><b>0</b><span><i class="on">%</i><i>R$</i></span></div><div class="menu">⋯</div></div>
+      <div class="n-row off"><div class="tog"></div><div class="n-nm"><b>CRM / Leads</b><span>Pipeline e acompanhamento de leads</span></div>
+        <div class="n-box"><small>setup</small><b>3.500</b></div><div class="n-box"><small>mensal</small><b>900</b></div>
+        <div class="n-desc"><b>0</b><span><i class="on">%</i><i>R$</i></span></div><div class="menu">⋯</div></div>
+      <div class="n-row off"><div class="tog"></div><div class="n-nm"><b>Análise de Documentos</b><span>Extração e conferência automática</span></div>
+        <div class="n-box"><small>setup</small><b>4.000</b></div><div class="n-box"><small>mensal</small><b>1.100</b></div>
+        <div class="n-desc"><b>0</b><span><i class="on">%</i><i>R$</i></span></div><div class="menu">⋯</div></div>
+    </div></div>
+
+    <div class="ad bom"><div class="t">Depois · Modo margem ligado: a coluna Custo entra no lugar certo</div><div class="c">
+      <div class="n-head mg"><span></span><span>Serviço</span><span class="r">Setup</span><span class="r">Mensal</span><span class="r">Custo/mês</span><span class="r">Desconto</span><span></span></div>
+      <div class="n-row mg"><div class="tog on"></div><div class="n-nm"><b>Agente de Atendimento</b><span>Atendimento automático no WhatsApp 24h</span></div>
+        <div class="n-box"><small>setup</small><b>4.500</b></div><div class="n-box"><small>mensal</small><b>1.200</b></div>
+        <div class="n-box mgm"><small>custo · margem 71%</small><b>350</b></div>
+        <div class="n-desc"><b>0</b><span><i class="on">%</i><i>R$</i></span></div><div class="menu">⋯</div></div>
+    </div></div>
+  </div>
+
+  <div class="cel">
+    <div style="font:500 .68rem var(--mono);color:var(--txt-mut);letter-spacing:.06em;text-transform:uppercase;margin-bottom:.3rem">Celular</div>
+    <div class="row"><div class="top"><div class="tog on" style="width:32px;height:18px;border-radius:99px"></div>
+      <div class="n-nm" style="flex:1"><b>Agente de Atendimento</b><span>Atendimento automático no WhatsApp 24h</span></div><div class="menu">⋯</div></div>
+      <div class="nums"><div class="n-box"><small>setup</small><b>4.500</b></div><div class="n-box"><small>mensal</small><b>1.200</b></div>
+        <div class="n-desc"><b>0</b><span><i class="on">%</i><i>R$</i></span></div></div></div>
+  </div>
+
+  <ul class="lista ok">
+    <li><span class="k">✓</span><span><b>Os números ganham separador de milhar</b> (1.200, e não 1200), porque é assim que o resumo ao lado já mostra.
+      O campo continua aceitando o número digitado do jeito de hoje.</span></li>
+    <li><span class="k">✓</span><span><b>Nada muda no que é gravado.</b> A mudança é só de CSS e da ordem das colunas. O orçamento, o desconto por linha
+      e o total do 1º ano calculam do mesmo jeito.</span></li>
+    <li><span class="k">✓</span><span><b>Vale pras 8 contas que vendem serviço recorrente</b> (3, 16, 21, 23, 30, 33, 37, 39), já que
+      todas têm a mesma grade quebrada. A tela de evento da Prime não é tocada, porque tem uma grade própria (<code>.avulso</code>).</span></li>
+  </ul>
+</section>
+
+<!-- ============================================================ 3 -->
+<section class="sec">
+  <div class="num">3 · O fluxo da Prime, na ZAQ</div>
+  <h2>O mesmo caminho, trocando “festa” por “serviço contratado”</h2>
+  <p class="lede">Hoje o orçamento da ZAQ termina num botão “Fechar”, sem nada assinado. Com a mudança, ele passa pelo
+  mesmo trilho da Prime. A única diferença está no conteúdo do contrato: prestação de serviço, e não locação.</p>
+
+  <div class="fluxo">
+    <div class="passo"><div class="e">01</div><h3>Orçamento</h3><p>Monta setup + mensalidade na tela de Serviços. Pagamento mensal ou anual (-15%).</p><span class="tag igual">já existe</span></div>
+    <div class="passo"><div class="e">02</div><h3>Proposta</h3><p>Link pro cliente com os serviços, os valores e o total do 1º ano. O cliente aprova com nome e CPF/CNPJ.</p><span class="tag igual">já existe</span></div>
+    <div class="passo novo"><div class="e">03</div><h3>Contrato</h3><p>Nasce da proposta aprovada, preenchido com os dados do cliente e os valores. Mesmo link e mesma assinatura da Prime.</p><span class="tag novo">novo pra ZAQ</span></div>
+    <div class="passo novo"><div class="e">04</div><h3>Financeiro</h3><p>Na assinatura abrem os títulos: o setup (à vista ou parcelado) e as mensalidades. Igual ao “Fechar” de hoje, só que disparado pela assinatura.</p><span class="tag novo">gatilho muda</span></div>
+    <div class="passo fora"><div class="e">—</div><h3>Termo aditivo</h3><p>Fica de fora por enquanto, como você pediu. Entra depois, quando houver o primeiro caso de upgrade de plano.</p><span class="tag fora">não entra</span></div>
+  </div>
+
+  <div class="nota"><b>Por que só a ZAQ, e não as 8 contas recorrentes.</b> Na Prime o contrato é ligado pelo nicho (evento = tem
+  contrato). Se eu seguisse a mesma regra aqui, o contrato apareceria de uma vez em clínica, seguros, construção,
+  suplementos e em outras 3 consultorias, com um texto que ninguém dessas contas escreveu. Por isso, pro recorrente, o
+  contrato fica atrás de uma <b>chave por conta</b>, ligada só na conta 3. As outras continuam fechando pelo botão, como
+  hoje, até alguém ligar a chave delas.</div>
+</section>
+
+<!-- ============================================================ 4 -->
+<section class="sec">
+  <div class="num">4 · O modelo de contrato</div>
+  <h2>O mesmo motor da Prime, com cláusulas e “números da casa” de prestação de serviço</h2>
+  <p class="lede">O motor é o de <code>finance/contrato.py</code>. As cláusulas não guardam números: guardam <b>campos</b>, e
+  o valor é puxado do catálogo e do orçamento. Mudou o preço no catálogo, o contrato muda junto. Os campos que ainda
+  não têm dado ficam <span class="ph" style="font-size:.72rem">{assim}</span>, à vista, e o contrato <b>não sai pra assinatura</b>
+  enquanto faltar algum. Nenhum dado da Prime é copiado.</p>
+
+  <div class="telas">
+    <div class="quadro">
+      <div class="cap">Painel · Serviços · card “Contrato” (tela do dono)</div>
+      <div class="miolo">
+        <div class="liga"><span><b>Pedir assinatura de contrato</b><br><span style="color:var(--txt-mut);font-size:.78rem">A proposta aprovada vira contrato. O financeiro abre na assinatura.</span></span><span class="sw"></span></div>
+
+        <h3 style="margin-top:1rem">Números da casa</h3>
+        <div class="regras">
+          <div class="rg vazio"><small>Fidelidade</small><b>— meses</b></div>
+          <div class="rg vazio"><small>Dia de vencimento</small><b>dia —</b></div>
+          <div class="rg vazio"><small>Reajuste anual</small><b>índice —</b></div>
+          <div class="rg vazio"><small>Aviso prévio p/ cancelar</small><b>— dias</b></div>
+          <div class="rg vazio"><small>Multa rescisória</small><b>—% do restante</b></div>
+          <div class="rg vazio"><small>Prazo de implantação</small><b>— dias úteis</b></div>
+          <div class="rg vazio"><small>Suporte</small><b>— h às — h</b></div>
+          <div class="rg"><small>Multa por atraso</small><b>2%</b></div>
+          <div class="rg"><small>Juros de mora</small><b>1% a.m.</b></div>
+          <div class="rg vazio"><small>Setup: parcelas</small><b>—x</b></div>
+        </div>
+        <p style="font-size:.74rem;color:var(--txt-mut);margin-top:.5rem">Os valores em âmbar ficam em branco até você mandar os dados. Multa de 2% e juros de 1% ao mês são os limites do CDC e da prática bancária, e dá pra mudar.</p>
+
+        <h3 style="margin-top:1rem">Cláusulas (esboço, editáveis)</h3>
+        <div class="cl"><b>1 — Do objeto</b><span>Prestação dos serviços listados em </span><code>{valor.itens}</code><span>, na modalidade SaaS…</span></div>
+        <div class="cl"><b>2 — Da implantação</b><span>Setup de </span><code>{valor.setup}</code><span>, entregue em até </span><code>{regra.implantacao_dias}</code><span> dias úteis…</span></div>
+        <div class="cl"><b>3 — Da mensalidade e do pagamento</b><code>{valor.mensal}</code><span> por mês, com vencimento no dia </span><code>{regra.dia_vencimento}</code><span>…</span></div>
+        <div class="cl"><b>4 — Do reajuste</b><span>Anual, pelo </span><code>{regra.indice_reajuste}</code><span>…</span></div>
+        <div class="cl"><b>5 — Da vigência e da fidelidade</b><code>{regra.fidelidade_meses}</code><span> meses, renovação automática…</span></div>
+        <div class="cl"><b>6 — Do suporte e do nível de serviço</b><span>…</span></div>
+        <div class="cl"><b>7 — Da proteção de dados (LGPD)</b><span>A ZAQ como operadora, o cliente como controlador…</span></div>
+        <div class="cl"><b>8 — Do cancelamento</b><span>Aviso de </span><code>{regra.aviso_previo_dias}</code><span> dias; multa de </span><code>{regra.multa_rescisao}</code><span>…</span></div>
+        <div class="cl"><b>9 — Das disposições gerais e do foro</b><span>Foro de </span><code>{empresa.cidade}</code><span>…</span></div>
+
+        <div class="falta"><b>7 campos da empresa sem valor</b>: preencha os números da casa acima. Razão social, CNPJ e endereço vêm da aba Empresa (já estão lá).</div>
+      </div>
+    </div>
+
+    <div class="quadro">
+      <div class="cap">Link do cliente · app.zaq-ia.com/contrato/…</div>
+      <div class="miolo" style="background:#1a1f1c">
+        <div class="folha">
+          <h4>Contrato de Prestação de Serviços de Tecnologia</h4>
+          <div class="cab">Proposta nº <span class="ph">{valor.numero}</span> · emitido em <span class="ph">{data}</span></div>
+          <div class="partes">
+            <div><small>Contratada</small><span class="ph">{empresa.razao}</span><br>CNPJ <span class="ph">{empresa.cnpj}</span><br><span class="ph">{empresa.endereco}</span></div>
+            <div><small>Contratante</small><span class="ph">{cliente.nome}</span><br>CPF/CNPJ <span class="ph">{cliente.doc}</span><br><span class="ph">{cliente.endereco}</span></div>
+          </div>
+          <table>
+            <thead><tr><th>Serviço contratado</th><th class="r">Setup</th><th class="r">Mensal</th></tr></thead>
+            <tbody>
+              <tr><td><span class="ph">{item 1}</span></td><td class="r">—</td><td class="r">—</td></tr>
+              <tr><td><span class="ph">{item 2}</span></td><td class="r">—</td><td class="r">—</td></tr>
+              <tr class="tot"><td>Total</td><td class="r"><span class="ph">{valor.setup}</span></td><td class="r"><span class="ph">{valor.mensal}</span></td></tr>
+            </tbody>
+          </table>
+          <p><b>Forma de pagamento:</b> <span class="ph">{valor.forma}</span>. Total do 1º ano: <span class="ph">{valor.ano1}</span>.</p>
+          <p><b>Cláusula 3 — Da mensalidade.</b> O CONTRATANTE pagará <span class="ph">{valor.mensal}</span> mensais, com vencimento
+            no dia <span class="ph">{regra.dia_vencimento}</span> de cada mês. Em caso de atraso incidirão multa de 2% e juros de 1% ao mês…</p>
+          <p><b>Cláusula 5 — Da vigência.</b> Este contrato vigora por <span class="ph">{regra.fidelidade_meses}</span> meses a
+            partir da assinatura, renovando-se automaticamente…</p>
+          <p style="color:var(--tinta-2)">… cláusulas 1 a 9 na íntegra …</p>
+          <div class="ass">
+            <b style="font-size:.82rem">Aceite eletrônico</b>
+            <div class="campo">Nome completo de quem assina</div>
+            <div class="campo">CPF</div>
+            <div class="btn">Li e aceito o contrato</div>
+            <p style="font-size:.66rem;color:var(--tinta-2);margin-top:.4rem">Registra nome, CPF, data, hora e IP, igual ao da Prime. O texto é congelado no momento do aceite.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota amb"><b>O texto das cláusulas é um esboço de estrutura, e não o seu contrato.</b> Quando você mandar os dados
+  contratuais (e, se tiver, o contrato que a ZAQ já usa em papel), eu troco o esboço pelo seu texto, com os números
+  virando campos, como foi feito com o contrato da Prime. O modelo é da conta: dá pra editar cada cláusula na tela
+  depois.</div>
+</section>
+
+<!-- ============================================================ 5 -->
+<section class="sec">
+  <div class="num">5 · O que muda e o que não muda</div>
+  <h2>Quem é afetado</h2>
+  <div class="tw"><table class="diag">
+    <thead><tr><th>Quem</th><th>Grade de serviços</th><th>Contrato</th><th>Aditivo</th></tr></thead>
+    <tbody>
+      <tr><td><b>ZAQ</b> (conta 3)</td><td class="sim">arrumada</td><td class="sim">liga, com modelo de prestação de serviço</td><td class="nao">não entra</td></tr>
+      <tr><td>Outras 7 contas recorrentes<br><span style="color:var(--txt-mut);font-size:.8rem">16, 21, 23, 30, 33, 37, 39</span></td><td class="sim">arrumada</td><td class="meio">desligado (chave existe, fica em “não”)</td><td>—</td></tr>
+      <tr><td><b>Prime</b> (conta 34) e demais contas de eventos</td><td>sem mudança (grade própria)</td><td>sem mudança</td><td>sem mudança</td></tr>
+      <tr><td>Orçamentos da ZAQ já existentes (15)</td><td>—</td><td class="meio">só os aprovados <b>depois</b> de ligar a chave viram contrato. O que já foi fechado continua fechado.</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+  <div class="nota"><b>Aviso de Novidade:</b> como a tela muda, a migração do aviso vai no mesmo PR. A grade arrumada vai
+  pro público <code>recorrente</code>, pra dono e gestor. O contrato não tem aviso público, porque é uma chave que só a ZAQ tem
+  ligada.</div>
+</section>
+
+<!-- ============================================================ 6 -->
+<section class="sec">
+  <div class="num">6 · Pra você decidir antes de eu construir</div>
+  <h2>Perguntas</h2>
+  <div class="perg">
+    <div><b>1. A grade (seções 1 e 2) pode ir já, separada do contrato?</b><span>É só CSS e a ordem das colunas. Não mexe em nada que é gravado.</span><br><em>Sugestão: sim, num PR próprio e pequeno.</em></div>
+    <div><b>2. A ZAQ já tem um contrato em papel ou em PDF?</b><span>Se tiver, mande junto com os dados. Eu converto o seu texto, em vez de usar o esboço.</span></div>
+    <div><b>3. Quem assina primeiro?</b><span>Na Prime, o cliente assina e o financeiro abre. A ZAQ assina junto, com o nome do representante legal no contrato, ou só o cliente assina?</span><br><em>Sugestão: igual à Prime, com o representante da ZAQ impresso no contrato.</em></div>
+    <div><b>4. O setup é cobrado antes ou depois da assinatura?</b><span>Na Prime, o sinal pode vir antes da assinatura (chave <code>assina_antes_do_sinal</code>).</span><br><em>Sugestão: assina primeiro, e o boleto ou Pix do setup sai na hora.</em></div>
+    <div><b>5. O pagamento anual (-15%) exige fidelidade de 12 meses?</b><span>Isso muda a cláusula de cancelamento: devolve proporcional ou não devolve.</span></div>
+    <div><b>6. Os números da casa (fidelidade, dia de vencimento, índice de reajuste, aviso prévio, multa rescisória, prazo de implantação, horário de suporte).</b><span>Vêm com os dados que você vai mandar.</span></div>
+  </div>
+</section>
+
+<div class="rodape">Mockup: <code>docs/mockups/zaq_servicos_contrato_recorrente.html</code> · medido em produção, só leitura, em 23/09/2026 ·
+motor do contrato: <code>finance/contrato.py</code> · grade: <code>web/painel_servicos.py</code> (<code>.oc-mod</code>, <code>.oc-head</code>)</div>
+</body>
+</html>

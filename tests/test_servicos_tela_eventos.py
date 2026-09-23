@@ -66,44 +66,95 @@ def test_o_filtro_de_vendedor_e_so_de_quem_ve_o_funil_inteiro():
     assert 'id="fn-abas"' in _render(ve_todos=False), "as abas continuam pra ele"
 
 
-# ------------------------------------- o que a conta recorrente NÃO pode receber
+# ------------------------------------- o recorrente ganha a FORMA, não a festa
+#
+# Até 23/09/2026 esta seção proibia o funil em abas, a barra do celular e o
+# editor sob demanda no recorrente — a ZAQ não tinha sido medida. Nesse dia o
+# dono pediu, olhando a tela da ZAQ desalinhada: "deixa o mesmo modelo que já tem
+# na Prime eventos do layout da página, as ordens, botões e tudo". Então a FORMA
+# da tela passou a ser uma só (`.funil`), e o que continua proibido é o que é de
+# FESTA: o card do evento, o plano de parcelas, Cobrar × Incluso, as categorias.
 
 @pytest.mark.parametrize("marca", [
     'id="fn-abas"', 'id="fn-busca"', 'id="fn-vendedor"', 'id="fn-novo"',
-    'id="oc-barra"', 'id="oc-inclusos"', 'id="pg-sem-venc"',
+    'id="oc-barra"', 'id="oc-voltar"', 'id="oc-buscabox"', 'id="cli-busca"',
+    'id="oc-vertodos"',
 ])
-def test_nada_do_evento_vaza_pro_recorrente(recorrente, marca):
-    """Seção 6: a ZAQ vende mensalidade. Nem o funil em abas nem a barra de total
-    do celular foram medidos nela, então ela continua com a tela de sempre."""
+def test_o_recorrente_tem_a_mesma_forma_da_prime(recorrente, marca):
+    assert marca in recorrente
+
+
+@pytest.mark.parametrize("marca", [
+    'id="oc-ev-card"',      # data, convidados, tipo de festa
+    'id="oc-inclusos"',     # "incluso no pacote"
+    'id="pg-sem-venc"',     # aviso de parcela
+    'id="pg-linhas"',       # o plano de parcelas
+    'id="oc-sem-cat"',      # categorias do catálogo de festa
+    'id="svc-cat"',
+    'drinks, dj, buffet',   # o exemplo da busca
+])
+def test_nada_de_festa_vaza_pro_recorrente(recorrente, marca):
+    """Seção 6: a ZAQ vende mensalidade. A forma é a mesma; o vocabulário não."""
     assert marca not in recorrente
 
 
-def test_o_recorrente_continua_com_o_editor_aberto(recorrente):
-    """A ordem nova (funil na frente, editor sob demanda) vem da FOLHA, e só sob
-    `.sv-wrap.evento`. Sem essa classe, a página é a de sempre."""
-    assert 'class="sv-wrap"' in recorrente
-    assert 'class="sv-wrap evento"' not in recorrente
+def test_o_recorrente_continua_com_o_que_e_dele(recorrente):
+    """Mensalidade, pagamento anual, os parâmetros da proposta e a IA de escopo."""
+    for marca in ('id="oc-anual"', 'id="oc-r-mensal"', 'id="oc-integ"',
+                  'id="oc-esc-card"', "Total 1º ano"):
+        assert marca in recorrente, marca
 
 
-def test_a_conta_de_eventos_ganha_a_classe_que_liga_a_ordem_nova(evento):
-    assert 'class="sv-wrap evento"' in evento
+def test_a_classe_da_forma_vale_pros_dois_e_a_da_festa_so_pro_evento(evento, recorrente):
+    assert 'class="sv-wrap funil"' in recorrente
+    assert 'class="sv-wrap funil evento"' in evento
+
+
+def test_a_grade_antiga_do_recorrente_saiu(recorrente):
+    """O cabeçalho "Custo/Margem" sobre uma coluna escondida era o que
+    desalinhava a linha inteira; "Marcar todos" pertencia à lista com
+    interruptor, que virou busca pra adicionar."""
+    for marca in ('id="oc-head"', "Custo/Margem", 'id="oc-todos"', 'id="oc-limpar"'):
+        assert marca not in recorrente, marca
 
 
 # ------------------------------------------------ a folha de estilo e o script
 
-def test_a_ordem_nova_e_da_folha_e_so_vale_no_evento():
-    """Uma marcação só, duas ordens: é o que impede o recorrente de ser mexido
-    por uma decisão tomada olhando a Prime."""
+def test_a_ordem_e_da_folha_e_vale_pela_classe_da_forma():
     css = ps._CSS_CRU
-    assert ".sv-wrap.evento > #oc-funil{order:-1}" in css
-    assert ".sv-wrap.evento #oc-cli-card{order:1}" in css   # cliente antes
-    assert ".sv-wrap.evento #oc-ev-card{order:2}" in css    # ...do evento
-    assert ".sv-wrap.evento #ct-card{order:4}" in css       # contrato pro fim
-    # e nada disso pode valer sem a classe do nicho
+    assert ".sv-wrap.funil > #oc-funil{order:-1}" in css
+    assert ".sv-wrap.funil #oc-cli-card{order:1}" in css   # cliente antes
+    assert ".sv-wrap.funil #oc-ev-card{order:2}" in css    # ...do evento
+    assert ".sv-wrap.funil #oc-esc-card{order:2}" in css   # ...ou do escopo
+    assert ".sv-wrap.funil #ct-card{order:4}" in css       # contrato pro fim
     for regra in ("#oc-funil{order", "#oc-cli-card{order", "#ct-card{order"):
         for linha in css.splitlines():
             if regra in linha:
-                assert ".sv-wrap.evento" in linha, linha
+                assert ".sv-wrap.funil" in linha, linha
+
+
+def test_a_linha_do_recorrente_tem_uma_coluna_por_caixa():
+    """nome | setup | mensal | desconto | 🗑 — e o custo entra como coluna NOVA
+    no Modo margem, em vez de ocupar uma que já tinha dono."""
+    css = ps._CSS_CRU
+    assert ".oc-mod.rec{grid-template-columns:minmax(0,1fr) 96px 96px 138px auto}" in css
+    assert (".sv-wrap.oc-margin .oc-mod.rec{grid-template-columns:"
+            "minmax(0,1fr) 96px 96px 88px 138px auto}") in css
+    js = ps._JS_CRU
+    corpo = js[js.index("function buildRowRec(s)"):]
+    corpo = corpo[:corpo.index("function renderCatalogoAvulso")]
+    for peca in ("oc-setup", "oc-mensal", "oc-custo-col", "celDesc(", "oc-rm"):
+        assert peca in corpo, peca
+    # nada de festa na linha da mensalidade
+    for peca in ("oc-cob", "oc-qtd", "svc-thumb", "Incluso"):
+        assert peca not in corpo, peca
+
+
+def test_a_ia_de_escopo_nao_apaga_o_orfao():
+    """Regra 0: a sugestão da IA troca a seleção, mas o serviço que a proposta
+    tem e o catálogo não conhece mais fica — senão o próximo Salvar apagaria."""
+    js = ps._JS_CRU
+    assert "Object.keys(ORFAOS).forEach(function(k){ if(antes[k]) SELECIONADOS[k]=true; });" in js
 
 
 @pytest.mark.parametrize("fn", [

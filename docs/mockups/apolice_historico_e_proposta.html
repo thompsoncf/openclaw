@@ -1,0 +1,351 @@
+<title>Histórico da Apólice</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Tokens de web/tema.py — os mesmos nomes do Cockpit. Escuro único, como o painel. */
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F; --ambar-txt:#F0DCA6;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313; --coral-txt:#E9A0A0;
+  --azul:#7bb8e6; --azul-borda:#23415A; --azul-fundo:#0F1A24;
+  --roxo:#C9A3E0; --ink:#062011;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo)}
+b.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.wrap{max-width:1120px;margin:0 auto;padding:2.6rem 1.25rem 5rem;display:flex;flex-direction:column;gap:3rem}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.11em;color:var(--text-faint);font-weight:600}
+.head h1{font-size:clamp(1.7rem,4vw,2.3rem);margin:.35rem 0 .6rem}
+.head p{margin:0;color:var(--text-dim);max-width:70ch}
+.sec > h2{font-size:1.2rem;margin-bottom:.15rem}
+.sec > p.leg{color:var(--text-dim);margin:.35rem 0 1.2rem;max-width:74ch;font-size:.92rem}
+.num{display:inline-flex;align-items:center;justify-content:center;width:1.5rem;height:1.5rem;
+  border-radius:50%;background:var(--neon-fundo);border:1px solid var(--neon-borda);
+  color:var(--neon-bright);font-family:var(--mono);font-size:.78rem;font-weight:600;margin-right:.5rem}
+
+/* a citação do dono, que é o que manda */
+.fala{border-left:3px solid var(--neon-borda);padding:.15rem 0 .15rem 1rem;margin:0 0 1.2rem;
+  color:var(--text-dim);font-size:.93rem;max-width:74ch}
+.fala b{color:var(--text)}
+
+/* --- a maquete de tela --- */
+.tela{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;max-width:720px}
+.tela .cab{display:flex;align-items:center;gap:.6rem;padding:.7rem 1rem;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.tela .cab h3{font-size:.95rem}
+.tela .cab .passo{font-size:.72rem;color:var(--text-dim);margin-left:auto}
+.tela .corpo{padding:1rem}
+.tela + .legenda{color:var(--text-faint);font-size:.82rem;margin:.6rem 0 0;max-width:70ch}
+
+.tag{font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+  padding:.12rem .45rem;border-radius:999px;border:1px solid var(--line);color:var(--text-dim);white-space:nowrap}
+.tag.ok{background:var(--neon-fundo);border-color:var(--neon-borda);color:var(--neon-bright)}
+.tag.am{background:var(--ambar-fundo);border-color:var(--ambar-borda);color:var(--ambar-txt)}
+.tag.co{background:var(--coral-fundo);border-color:var(--coral-borda);color:var(--coral-txt)}
+.tag.az{background:var(--azul-fundo);border-color:var(--azul-borda);color:var(--azul)}
+
+.aviso{border-radius:10px;padding:.7rem .85rem;font-size:.86rem;line-height:1.55;margin-bottom:.9rem}
+.aviso.am{background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:var(--ambar-txt)}
+.aviso.az{background:var(--azul-fundo);border:1px solid var(--azul-borda);color:var(--azul)}
+.aviso b{color:inherit}
+
+/* a escolha: dois caminhos, um recomendado */
+.escolhas{display:flex;flex-direction:column;gap:.5rem}
+.esc{display:flex;gap:.7rem;align-items:flex-start;padding:.7rem .85rem;border-radius:10px;
+  border:1px solid var(--line);background:var(--bg-2)}
+.esc.rec{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.esc .bolha{flex:none;width:1.05rem;height:1.05rem;border-radius:50%;border:2px solid var(--text-faint);margin-top:.15rem}
+.esc.rec .bolha{border-color:var(--neon-bright);background:radial-gradient(circle,var(--neon-bright) 0 40%,transparent 41%)}
+.esc > span:last-child{min-width:0}
+/* `display:block`: eram spans dentro de span, e as duas linhas corriam grudadas */
+.esc .t{display:block;font-weight:600;font-size:.9rem}
+.esc .s{display:block;font-size:.81rem;color:var(--text-dim);margin-top:.15rem}
+.esc.rec .t{color:var(--neon-bright)}
+
+/* candidato de apólice pra anexar */
+.cand{display:flex;gap:.6rem;align-items:center;padding:.55rem .7rem;border:1px solid var(--line);
+  border-radius:9px;background:var(--bg-2);margin-top:.45rem}
+.cand .placa{font-family:var(--mono);font-size:.8rem}
+.cand .quem{flex:1;min-width:0;font-size:.86rem;font-weight:600}
+.cand .meta{font-size:.76rem;color:var(--text-dim)}
+
+/* --- a linha do tempo --- */
+.linha{position:relative;padding-left:1.5rem;margin:0}
+.linha::before{content:"";position:absolute;left:.36rem;top:.5rem;bottom:.5rem;width:1px;background:var(--line)}
+.ev{position:relative;padding:.55rem 0}
+.ev::before{content:"";position:absolute;left:-1.5rem;top:.95rem;width:.72rem;height:.72rem;border-radius:50%;
+  background:var(--surface);border:2px solid var(--text-faint);margin-left:0}
+.ev.viva::before{border-color:var(--neon-bright);background:var(--neon-bright)}
+.ev.ends::before{border-color:var(--ambar)}
+.ev .top{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap}
+.ev .quando{font-family:var(--mono);font-size:.76rem;color:var(--text-faint);white-space:nowrap}
+.ev .titulo{font-weight:600;font-size:.89rem}
+.ev .mudou{font-size:.81rem;color:var(--text-dim);margin-top:.15rem}
+.ev .mudou i{font-style:normal;color:var(--coral-txt);text-decoration:line-through;opacity:.75}
+.ev .mudou em{font-style:normal;color:var(--neon-bright)}
+
+/* tabelas de comparação */
+table.cmp{border-collapse:collapse;width:100%;max-width:900px;font-size:.87rem}
+table.cmp th{text-align:left;padding:.5rem .7rem;font-size:.66rem;text-transform:uppercase;
+  letter-spacing:.05em;color:var(--text-faint);font-weight:600;border-bottom:1px solid var(--line)}
+table.cmp td{padding:.55rem .7rem;border-bottom:1px solid var(--line);vertical-align:top}
+table.cmp tr:last-child td{border-bottom:0}
+table.cmp td.k{color:var(--text-dim);white-space:nowrap;width:1%}
+
+/* as três opções da proposta */
+.ops{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem;max-width:1000px}
+@media (max-width:820px){.ops{grid-template-columns:1fr}}
+.op{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:.9rem 1rem;display:flex;flex-direction:column;gap:.4rem}
+.op.rec{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.op h4{font-size:.94rem}
+.op.rec h4{color:var(--neon-bright)}
+.op p{margin:0;font-size:.84rem;color:var(--text-dim);line-height:1.5}
+/* recuo pendurado em vez de flex: com flex, um <b> no meio da frase virava item
+   do flex e a frase se desmontava ("O Raio-X passa a proposta → de medir") */
+.op .pro,.op .con{display:block;font-size:.8rem;padding-left:1rem;text-indent:-1rem;line-height:1.45}
+.op .pro::before{content:"+ ";color:var(--neon-bright);font-weight:700}
+.op .con::before{content:"− ";color:var(--coral-txt);font-weight:700}
+
+.perg{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:12px;
+  padding:1rem 1.15rem;max-width:860px}
+.perg h3{font-size:1rem;color:var(--ambar-txt);margin-bottom:.5rem}
+.perg ol{margin:0;padding-left:1.2rem;color:var(--ambar-txt);font-size:.89rem}
+.perg li{margin-bottom:.45rem}
+.perg li:last-child{margin-bottom:0}
+.perg li b{color:#F6E9C6}
+
+hr.sep{border:0;border-top:1px solid var(--line);margin:0}
+</style>
+
+<div class="wrap">
+
+<div class="head">
+  <div class="eyebrow">Renovações · mockup pra aprovação · 23/09/2026</div>
+  <h1>Histórico da apólice, e onde mora a proposta</h1>
+  <p>Três decisões que saíram da fila da Liberal: o endosso do Manoel que não tem apólice
+  de origem, o histórico que a carteira ainda não guarda, e onde a proposta deve cair
+  quando a API começar a mandá-la. Nada aqui está construído — é pra você aprovar,
+  corrigir ou descartar.</p>
+</div>
+
+<hr class="sep">
+
+<!-- ═══════════════ 1 ═══════════════ -->
+<section class="sec">
+  <h2><span class="num">1</span>O endosso que chega sem a apólice</h2>
+  <p class="leg">Um endosso altera uma apólice que já existe. Hoje a fila trata todo documento
+  como candidato a virar linha nova na carteira — e é assim que o mesmo carro ganha duas
+  apólices.</p>
+
+  <p class="fala">“o Manoel não tem a apólice inicial, então temos que cadastrar o endosso
+  como sendo a <b>1ª apólice</b> e criar o histórico nas demais que vierem”</p>
+
+  <div class="tela">
+    <div class="cab"><h3>Conferir documento</h3><span class="passo">2 de 2 · confira e cadastre</span></div>
+    <div class="corpo">
+      <div style="display:flex;gap:.45rem;align-items:baseline;flex-wrap:wrap;margin-bottom:.7rem">
+        <b style="font-size:.95rem">APÓLICE ENDOSSO HAVAL Manoel Rodrigues De Sousa.pdf</b>
+        <span class="tag am">Azul Seguros · 9 campos · lido pelos rótulos</span>
+        <span class="tag co">endosso</span>
+      </div>
+
+      <div class="aviso am"><b>Isto é um endosso</b> — ele altera uma apólice que já existe.
+        Procurei na carteira por <b>Manoel Rodrigues de Sousa</b> e pela placa, e
+        <b>não achei a apólice de origem</b>.</div>
+
+      <div class="escolhas">
+        <div class="esc rec">
+          <span class="bolha"></span>
+          <span><span class="t">Cadastrar como a primeira apólice deste cliente</span>
+          <span class="s">A carteira ganha uma linha, marcada como <span class="tag">origem: endosso</span>.
+          O que vier depois — renovação ou outro endosso — entra no histórico dela.</span></span>
+        </div>
+        <div class="esc">
+          <span class="bolha"></span>
+          <span><span class="t">Anexar a uma apólice que já está na carteira</span>
+          <span class="s">Nenhuma candidata encontrada. Você pode procurar pelo nome ou pela placa.</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="legenda">Quando a apólice de origem <b>existe</b>, a segunda opção vem marcada e
+  com as candidatas listadas:</p>
+
+  <div class="tela" style="margin-top:.7rem">
+    <div class="cab"><h3>Conferir documento</h3><span class="passo">endosso · Yelum</span></div>
+    <div class="corpo">
+      <div class="aviso az">Achei <b>1 apólice</b> que este endosso pode estar alterando.</div>
+      <div class="esc rec" style="margin-bottom:.45rem">
+        <span class="bolha"></span>
+        <span><span class="t">Anexar ao histórico desta apólice</span>
+        <span class="s">A linha da carteira continua uma só. O que o endosso muda é aplicado, e o
+        documento fica guardado na linha do tempo.</span></span>
+      </div>
+      <div class="cand">
+        <span class="placa">QRW5F97</span>
+        <span class="quem">CLAUDIA FERNANDA DO SOCORRO NUNES</span>
+        <span class="meta">Yelum · vence 05/02/2027</span>
+      </div>
+    </div>
+  </div>
+  <p class="legenda">Como ele acha a candidata, nesta ordem: <b>número da apólice</b> escrito no
+  endosso, depois <b>placa ou chassi</b>, depois <b>CPF do segurado</b>. Só oferece; quem
+  decide é a pessoa.</p>
+</section>
+
+<hr class="sep">
+
+<!-- ═══════════════ 2 ═══════════════ -->
+<section class="sec">
+  <h2><span class="num">2</span>A apólice é única; os documentos são muitos</h2>
+  <p class="leg">Esta é a regra que resolve o resto. Uma linha viva na carteira por contrato —
+  e, pendurada nela, a linha do tempo dos papéis que passaram por aquele contrato.</p>
+
+  <table class="cmp">
+    <tr><th>documento</th><th>o que ele faz com a carteira</th></tr>
+    <tr><td class="k"><span class="tag az">proposta</span></td>
+        <td>Não entra na carteira. Fica no funil, na etapa Proposta — ver o item 3.</td></tr>
+    <tr><td class="k"><span class="tag ok">apólice</span></td>
+        <td><b>Cria</b> a linha viva. É o contrato.</td></tr>
+    <tr><td class="k"><span class="tag co">endosso</span></td>
+        <td><b>Altera</b> a linha existente e entra no histórico dela. Não cria linha —
+        exceto quando a de origem não existe, e aí ele vira a primeira (item 1).</td></tr>
+    <tr><td class="k"><span class="tag am">renovação</span></td>
+        <td><b>Cria uma linha nova</b> e aposenta a anterior, ligada por <code>renovacao_de</code>,
+        que a tabela já tem. Vigência nova, número novo: é outro contrato.</td></tr>
+    <tr><td class="k"><span class="tag">cotação</span></td>
+        <td>Não entra em lugar nenhum. Não é seguro contratado.</td></tr>
+  </table>
+
+  <p class="leg" style="margin-top:1.4rem">E é assim que o histórico aparece na janela do
+  segurado, embaixo da apólice:</p>
+
+  <div class="tela">
+    <div class="cab"><h3>CLAUDIA FERNANDA DO SOCORRO NUNES</h3><span class="passo">apólice</span></div>
+    <div class="corpo">
+      <div style="display:flex;gap:.45rem;align-items:baseline;flex-wrap:wrap;margin-bottom:.2rem">
+        <b style="font-size:.95rem">Yelum · auto</b><span class="tag ok">vigente</span>
+        <span class="meta" style="margin-left:auto;font-size:.8rem;color:var(--text-dim)">vence 05/02/2027</span>
+      </div>
+      <div style="font-size:.81rem;color:var(--text-dim);margin-bottom:.9rem">
+        QRW5F97 · HAVAL · prêmio R$ 2.660,30</div>
+
+      <div class="eyebrow" style="margin-bottom:.35rem">Histórico</div>
+      <div class="linha">
+        <div class="ev viva">
+          <div class="top"><span class="quando">22/07/2026</span>
+            <span class="titulo">Endosso</span><span class="tag co">endosso</span>
+            <span class="tag">PDF</span></div>
+          <div class="mudou">Troca de veículo · <i>QRW5F97 HAVAL H6</i> → <em>QRW5F97 HAVAL H6 GT</em>
+            · prêmio <i>R$ 2.394,27</i> → <em>R$ 2.660,30</em></div>
+        </div>
+        <div class="ev">
+          <div class="top"><span class="quando">05/02/2026</span>
+            <span class="titulo">Apólice emitida</span><span class="tag ok">apólice</span>
+            <span class="tag">PDF</span></div>
+          <div class="mudou">Nº 31.88.2026.0346799 · vigência 05/02/2026 a 05/02/2027</div>
+        </div>
+        <div class="ev ends">
+          <div class="top"><span class="quando">28/01/2026</span>
+            <span class="titulo">Proposta aceita</span><span class="tag az">proposta</span></div>
+          <div class="mudou">Veio do funil · lead fechado por Cássio</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="legenda">O que isso pede no banco: <b>uma tabela nova</b>, <code>apolice_doc</code> —
+  apólice, tipo, PDF, data, o que mudou, quem confirmou. A linha viva continua em
+  <code>apolices</code>, sem mudar de forma. Nenhuma apólice de hoje se perde: as que já
+  estão lá viram o primeiro evento da própria linha do tempo.</p>
+</section>
+
+<hr class="sep">
+
+<!-- ═══════════════ 3 ═══════════════ -->
+<section class="sec">
+  <h2><span class="num">3</span>Onde a proposta deve cair</h2>
+  <p class="leg">Você está integrando uma API pra isso e ainda não decidiu. Aqui vão as três
+  saídas que eu vejo, e qual eu recomendo — mas a escolha depende de duas ou três coisas
+  que só você sabe, e elas estão no fim.</p>
+
+  <div class="ops">
+    <div class="op rec">
+      <h4>A · A proposta é do funil</h4>
+      <p>Proposta cria ou atualiza o lead na etapa <b>Proposta</b>, com valor, ramo e seguradora.
+      Quando ela vira apólice, o lead é <b>ganho</b> e a apólice entra na carteira já ligada a ele.</p>
+      <span class="pro">Usa as duas telas que já existem, sem inventar uma terceira.</span>
+      <span class="pro">O Raio-X passa a medir <b>proposta → apólice</b> de graça.</span>
+      <span class="pro">A carteira continua sendo só contrato: nada de “vigente” que não foi contratado.</span>
+      <span class="con">Precisa casar o lead com o segurado pelo CPF.</span>
+    </div>
+    <div class="op">
+      <h4>B · A proposta na carteira, marcada</h4>
+      <p>Entra como linha na carteira com situação <b>proposta</b>, e vira <b>vigente</b> quando
+      a apólice sair.</p>
+      <span class="pro">Um lugar só pra olhar.</span>
+      <span class="con">Mistura o que é contrato com o que é tentativa — e a régua de
+      renovação (60/30/15) passa a avisar sobre vigência que não existe.</span>
+      <span class="con">Proposta perdida vira lixo na carteira.</span>
+    </div>
+    <div class="op">
+      <h4>C · Uma aba só de propostas</h4>
+      <p>Uma quarta aba em Renovações, separada da carteira e do funil.</p>
+      <span class="pro">Não contamina nada.</span>
+      <span class="con">Terceiro lugar pra procurar a mesma pessoa, e o funil já é o lugar
+      de acompanhar quem ainda não fechou.</span>
+    </div>
+  </div>
+
+  <p class="leg" style="margin-top:1.3rem"><b>Eu recomendo a A.</b> O funil da corretora já
+  chama a venda de “apólice” e o compromisso de “cotação” (<code>raio_x_perfil.seguros</code>);
+  a etapa Proposta já existe lá. Pôr a proposta na carteira seria dizer que o cliente tem uma
+  cobertura que ele ainda não tem — e é exatamente o que a régua de renovação lê pra disparar
+  aviso no celular do corretor.</p>
+
+  <div class="perg" style="margin-top:1.6rem">
+    <h3>O que eu preciso saber antes de construir</h3>
+    <ol>
+      <li><b>Que API é?</b> Multicálculo (Segfy, Quiver, TEx…) ou direto de uma seguradora?
+        Muda quem é o dono do número da proposta e se dá pra perguntar “virou apólice?”.</li>
+      <li><b>Ela empurra ou a gente puxa?</b> Se manda webhook quando a proposta muda de estado,
+        a apólice entra sozinha. Se é só consulta, precisa de uma varredura.</li>
+      <li><b>A proposta nasce lá ou aqui?</b> Se o corretor cota no site da seguradora, o
+        painel só recebe. Se ele quer cotar pelo painel, aí é uma tela de cotação — e isso
+        é bem maior que este mockup.</li>
+      <li><b>Uma cotação vira quantas propostas?</b> Multicálculo devolve cinco seguradoras
+        pra um carro. São cinco linhas no funil ou uma com cinco preços?</li>
+    </ol>
+  </div>
+</section>
+
+<hr class="sep">
+
+<section class="sec">
+  <h2>O que eu faria primeiro</h2>
+  <p class="leg">Na ordem, e cada um sozinho já vale de pé:</p>
+  <table class="cmp">
+    <tr><th>ordem</th><th>o quê</th><th>por quê agora</th></tr>
+    <tr><td class="k"><b class="n">1</b></td>
+        <td>Endosso sem origem vira a 1ª apólice</td>
+        <td>É o caso do Manoel, que está parado na fila hoje.</td></tr>
+    <tr><td class="k"><b class="n">2</b></td>
+        <td><code>apolice_doc</code> e a linha do tempo</td>
+        <td>Sem ela o endosso número dois some, e ele vem em fevereiro.</td></tr>
+    <tr><td class="k"><b class="n">3</b></td>
+        <td>Endosso achando a apólice de origem</td>
+        <td>Precisa da tabela acima pra ter onde anexar.</td></tr>
+    <tr><td class="k"><b class="n">4</b></td>
+        <td>Proposta no funil</td>
+        <td>Depois que você responder as quatro perguntas — sem elas eu construiria a tela errada.</td></tr>
+  </table>
+</section>
+
+</div>

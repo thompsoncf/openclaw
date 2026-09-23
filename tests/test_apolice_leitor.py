@@ -985,3 +985,24 @@ def test_varredura_que_estoura_nao_derruba_a_tela(limpo, monkeypatch):
             break
         time.sleep(0.02)
     assert CONTA not in al._VARRENDO
+
+
+def test_o_detalhe_da_fila_diz_quando_nao_e_apolice():
+    """"veja também se é só proposta" — a fila não dizia. Endosso principalmente:
+    ele não se cadastra, se edita a apólice que ele altera."""
+    from datetime import date
+    d = {"seguradora": "Yelum", "tipo": "endosso", "vigencia_fim": date(2027, 2, 5)}
+    assert al.detalhe(d) == "Yelum · endosso · vence 05/02/2027"
+
+
+def test_o_detalhe_nao_escreve_apolice_numa_tela_de_apolices():
+    d = {"seguradora": "Mapfre", "tipo": "apolice"}
+    assert al.detalhe(d) == "Mapfre"
+
+
+def test_a_lista_traz_o_tipo_de_cada_pre_cadastro(limpo, monkeypatch):
+    _finge(monkeypatch, leitura=_leitura())
+    monkeypatch.setattr(al.apdf, "ler", lambda b, proibidos=(): (
+        lambda L: (setattr(L, "tipo", "proposta"), L)[1])(_leitura()))
+    al.ler_bytes(limpo, CONTA, b"%PDF a", "A.pdf", origem="telegram", de="Cássio")
+    assert al.sem_mensagem(limpo, CONTA)[0]["tipo"] == "proposta"

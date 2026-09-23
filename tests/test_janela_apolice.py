@@ -716,3 +716,18 @@ def test_a_janela_volta_uma_vez_pra_mostrar_o_resultado_da_varredura():
     assert "if(d.relendo && !wppRevisitou)" in js
     assert "wppRevisitou = true" in js
     assert PA.count("wppRevisitou = false") == 1        # zera por carga de página
+
+
+def test_a_conferencia_mostra_que_papel_e_quando_nao_e_apolice():
+    """"veja também se é só proposta" — a tela não dizia."""
+    assert "conferir.tipo_txt" in PA
+    import web.painel_apolices as pa
+    assert pa._tipo_txt("apolice") == ""          # o caso normal não leva selo
+    assert pa._tipo_txt("endosso") == "endosso"
+    assert pa._tipo_txt("cotacao") == "cotação"
+
+
+def test_os_dois_caminhos_da_conferencia_sabem_o_tipo():
+    """O que foi lido agora e o que já estava guardado — uma tela só."""
+    assert corpo_de("_conferir_de").count('"tipo_txt"') == 1
+    assert corpo_de("_conferir_guardado").count('"tipo_txt"') == 1

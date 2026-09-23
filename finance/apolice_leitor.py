@@ -475,13 +475,21 @@ def titulo(d: dict) -> str:
 
 
 def detalhe(d: dict) -> str:
-    """A segunda linha: a marca e o prazo. Contexto, não identidade.
+    """A segunda linha: a marca, QUE PAPEL É e o prazo. Contexto, não identidade.
+
+    O tipo só aparece quando NÃO é apólice emitida. Escrever "apólice" em toda
+    linha de uma fila de apólices não informa nada; escrever "proposta" ou
+    "endosso" muda o que a pessoa vai fazer com aquele documento — o endosso,
+    principalmente, não se cadastra: se edita a apólice que ele altera.
 
     Vazia quando não se leu nada — linha em branco é melhor que linha inventada, e
     a lista já encolhe sozinha (o CSS não reserva altura pra `.det` vazia)."""
     partes = []
     if d.get("seguradora"):
         partes.append(str(d["seguradora"]))
+    tipo = d.get("tipo") or "apolice"
+    if tipo != "apolice":
+        partes.append(apdf.TIPOS.get(tipo, (tipo, ""))[0])
     if d.get("vigencia_fim"):
         partes.append("vence " + d["vigencia_fim"].strftime("%d/%m/%Y"))
     return " · ".join(partes)
@@ -525,7 +533,8 @@ def sem_mensagem(pool, conta_id: int, dias: int = 30, limite: int = 30) -> list[
         rows = c.execute(
             """select l.id, l.criado_em, coalesce(l.de,''), coalesce(l.pdf_nome,''),
                       coalesce(l.pdf_bytes,0), l.seguradora, l.segurado, l.vigencia_fim,
-                      coalesce(l.erro,''), coalesce(l.origem,'')
+                      coalesce(l.erro,''), coalesce(l.origem,''),
+                      coalesce(l.lido->>'tipo','apolice')
                  from apolice_lida l
                 where l.conta_id = %s and l.mensagem_id is null
                   and l.descartado_em is null
@@ -540,7 +549,7 @@ def sem_mensagem(pool, conta_id: int, dias: int = 30, limite: int = 30) -> list[
              "nome": r[3] or "documento.pdf", "bytes": int(r[4] or 0),
              "seguradora": r[5], "segurado": r[6], "vigencia_fim": r[7],
              "erro_leitura": r[8], "porta": PORTAS.get(r[9], r[9] or "assistente"),
-             "lida": True}
+             "tipo": r[10], "lida": True}
             for r in rows]
 
 

@@ -63,6 +63,8 @@ class Leitura:
     #: dono leu isso como "o sistema não está reconhecendo" num papel do qual eu
     #: tinha acabado de tirar treze campos (22/09/2026).
     como: str = "nada"
+    #: QUE PAPEL É ESTE: apolice | proposta | endosso | cotacao. Ver `TIPOS`.
+    tipo: str = "apolice"
 
     def ok(self) -> bool:
         """Tem o mínimo pro alerta existir: seguradora e fim da vigência."""
@@ -1214,6 +1216,24 @@ def _checar(L: Leitura) -> None:
         ok = soma == c["total_centavos"]
         L.checagens.append(("soma das parcelas = total", ok,
                             f"{len(c['parcelas_centavos'])} parcelas = {soma/100:,.2f}"))
+    elif c.get("parcelas_centavos") and c.get("premio_centavos") is not None:
+        # SEM TOTAL a checagem acima não roda, e um prêmio absurdo passava calado.
+        # Foi o que aconteceu no endosso da Azul (id 6 da conta 37, 22/09/2026):
+        # prêmio lido R$ 16,91 com quatro parcelas de R$ 284,25. Nenhuma conta
+        # batia porque nenhuma conta era feita. Aqui a comparação é grosseira de
+        # propósito — num endosso o prêmio adicional PODE ser bem menor que as
+        # parcelas da apólice de origem, e o que se quer pegar é a ordem de
+        # grandeza absurda, não o centavo.
+        soma = sum(c["parcelas_centavos"])
+        ok = soma <= max(1, c["premio_centavos"]) * 3
+        L.checagens.append(("as parcelas cabem no prêmio", ok,
+                            f"{len(c['parcelas_centavos'])} parcelas = {soma/100:,.2f}"
+                            f" · prêmio = {c['premio_centavos']/100:,.2f}"))
+        if not ok:
+            L.avisos.append(
+                f"O prêmio que eu li ({c['premio_centavos']/100:,.2f}) não cabe nas "
+                f"parcelas ({soma/100:,.2f}). Um dos dois está errado — confira os "
+                "dois no PDF antes de salvar.")
     if c.get("cpf"):
         from finance import validadoc
         ok = validadoc.valida_cpf(c["cpf"])
@@ -1277,6 +1297,79 @@ def texto_e_desenho(conteudo: bytes) -> tuple[str, int, dict]:
     return texto, doc.page_count, pares
 
 
+# ─────────────────── QUE PAPEL É ESTE? (23/09/2026) ───────────────────
+#
+# Pergunta do dono, olhando os três que sobraram na fila: "veja também se é só
+# proposta". É, e é mais que isso — dos três, NENHUM é a apólice emitida de um
+# carro:
+#
+#   HDI      "PROPOSTA Anacelia Viana Lima.pdf"        uma PROPOSTA
+#   Azul     "APÓLICE ENDOSSO HAVAL Manoel..."         um ENDOSSO
+#   Bradesco "Capa Frota LION MINING..."               uma COTAÇÃO de frota
+#
+# E isso muda o que a tela deve fazer com cada um, não só o que ela escreve:
+#
+#   * PROPOSTA ainda não é contrato. A vigência dela é pretendida, e o número de
+#     apólice não existe — por isso esses papéis "faltam campo": o campo não está
+#     no papel.
+#   * ENDOSSO altera uma apólice que JÁ ESTÁ na carteira. Cadastrar cria uma
+#     SEGUNDA linha pro mesmo carro, e duplicar a apólice de um cliente é perder
+#     informação do mesmo jeito que apagar (regra 0).
+#   * COTAÇÃO não é seguro nenhum. A do Bradesco diz, no rodapé dela: "Este
+#     demonstrativo de cotação não implica na aceitação desta frota".
+#
+# O papel se identifica no começo. Medido nos oito PDFs que a Liberal mandou,
+# esta ordem separa os quatro tipos sem um erro.
+_CABECALHO = 2500
+
+_MARCAS_TIPO = (
+    ("cotacao", (r"demonstrativo de cota[çc][ãa]o",
+                 r"^[ \t]*RESULTADO DA FROTA[ \t]*$",
+                 r"n[ãa]o implica na aceita[çc][ãa]o")),
+    # o endosso vem ANTES da apólice: todo endosso traz o número da apólice que
+    # ele altera, e sem esta ordem ele se apresentaria como aquela apólice
+    ("endosso", (r"^[ \t]*DADOS DO ENDOSSO[ \t]*$",
+                 r"Vig[êe]ncia do Endosso",
+                 r"^[ \t]*Endosso[ \t]+[-–]",
+                 r"^[ \t]*Opera[çc][ãa]o[ \t]*:[ \t]*Endosso")),
+    # `Endosso: 0000000` NÃO entra aqui: é o campo vazio que a Zurich e a Mapfre
+    # imprimem numa apólice sem endosso nenhum
+    ("apolice", (r"^[ \t]*Opera[çc][ãa]o[ \t]*:[ \t]*Emiss[ãa]o da ap[óo]lice",
+                 r"Sua ap[óo]lice chegou",
+                 r"^[ \t]*AP[ÓO]LICE DE SEGURO",
+                 r"Esta [ée] sua ap[óo]lice",
+                 r"^[ \t]*N[ºo°][ \t]*Ap[óo]lice[ \t]*:[ \t]*[0-9]*[1-9]")),
+    ("proposta", (r"^[ \t]*PROPOSTA\b",
+                  r"^[ \t]*Proposta[ \t]+[A-ZÀ-Ý]",
+                  r"Aceita[çc][ãa]o sujeita a an[áa]lise",
+                  r"dados da sua proposta antes de contratar")),
+)
+
+#: como cada tipo se chama na tela, e o que ele significa pra quem vai conferir
+TIPOS = {
+    "apolice":  ("apólice", ""),
+    "proposta": ("proposta", "Isto é uma PROPOSTA, não a apólice emitida: a "
+                             "vigência é a pretendida e o número da apólice ainda "
+                             "não existe. Confira quando a apólice sair."),
+    "endosso":  ("endosso", "Isto é um ENDOSSO — ele ALTERA uma apólice que já "
+                            "existe. Se essa apólice já está na carteira, cadastrar "
+                            "aqui cria uma segunda linha pro mesmo carro; o certo é "
+                            "editar a que já está lá."),
+    "cotacao":  ("cotação", "Isto é uma COTAÇÃO, não um seguro contratado. Não há "
+                            "apólice, vigência nem segurado definitivos pra guardar."),
+}
+
+
+def tipo_do_documento(texto: str) -> str:
+    """'apolice' | 'proposta' | 'endosso' | 'cotacao'. O padrão é 'apolice'."""
+    cab = texto[:_CABECALHO]
+    for tipo, marcas in _MARCAS_TIPO:
+        for m in marcas:
+            if re.search(m, cab, re.M | re.I):
+                return tipo
+    return "apolice"
+
+
 #: A VERSÃO DO LEITOR. Sobe de um toda vez que o leitor aprende alguma coisa —
 #: layout novo, sinônimo novo, conserto de âncora. Fica carimbada em
 #: `apolice_lida.lido->>'versao'`, e é o que deixa o painel saber que uma leitura
@@ -1292,7 +1385,9 @@ def texto_e_desenho(conteudo: bytes) -> tuple[str, int, dict]:
 #:  3 — o genérico por sinônimos (#804)
 #:  4 — o leitor por DESENHO (rótulo em cima do valor), data por extenso e rótulo
 #:      sem caixa fixa: Yelum, Tokio Marine e Zurich saíam com três campos
-VERSAO = 4
+#:  5 — o tipo do papel (apólice, proposta, endosso, cotação) e a conferência das
+#:      parcelas contra o prêmio quando não há total
+VERSAO = 5
 
 
 def ler_texto(texto: str, paginas: int = 0, proibidos: tuple[str, ...] = (),
@@ -1334,6 +1429,18 @@ def ler_texto(texto: str, paginas: int = 0, proibidos: tuple[str, ...] = (),
             L.avisos.append(f"Não achei rótulo nenhum que eu conheça neste papel "
                             f"({quem}). Cadastre à mão, e me manda o PDF que eu "
                             "aprendo os rótulos dele.")
+    # QUE PAPEL É ESTE, e o que isso muda pra quem vai conferir. Vale pros dois
+    # caminhos: layout reconhecido também pode ser proposta (a Allianz da Maria
+    # de Fátima é) ou endosso.
+    L.tipo = tipo_do_documento(texto)
+    _rotulo_tipo, recado = TIPOS.get(L.tipo, ("", ""))
+    if recado:
+        L.avisos.insert(0, recado)
+    # proposta e cotação ainda não são contrato: nenhuma das duas entra na
+    # carteira como "vigente"
+    if L.tipo in ("proposta", "cotacao"):
+        L.campos["situacao"] = "proposta"
+
     # LAYOUT RECONHECIDO JÁ É A PROVA. Sem esta linha, a proposta Allianz enxuta
     # (que não escreve SUSEP nem a palavra "apólice", por ser proposta) reprovava
     # nas marcas e caía no caixa — o defeito que este arquivo existe pra evitar,
@@ -1389,7 +1496,7 @@ def resumo_para_guardar(L: Leitura) -> dict:
         "seguradora": L.seguradora or L.campos.get("seguradora"),
         "reconhecida": L.reconhecida, "e_apolice": L.e_apolice, "paginas": L.paginas,
         # o carimbo do leitor que produziu isto — ver `VERSAO`
-        "versao": VERSAO, "como": L.como,
+        "versao": VERSAO, "como": L.como, "tipo": L.tipo,
         "campos": {k: s(v) for k, v in L.campos.items()},
         "checagens": [{"nome": n, "ok": ok, "detalhe": d} for n, ok, d in L.checagens],
         "nao_achou": L.nao_achou, "avisos": L.avisos,

@@ -457,8 +457,13 @@ def pdfs_do_whatsapp(request: Request):
     # a mesma consulta dá os dois números de que a tela precisa pro estado vazio:
     # quantos remetentes existem e quantos estão liberados
     quem = ap.quem_mandou_pdf(pool, conta[0])
+    # A FILA SE PÕE EM DIA SOZINHA. Abrir cada documento já o relia (#808), e não
+    # bastou: quem não foi aberto continuou mostrando na lista a leitura de antes
+    # do leitor novo. Aqui a varredura sai por trás — a lista responde na hora com
+    # o que existe, e a janela busca de novo quando a varredura termina.
+    relendo = _apl.varrer_em_segundo_plano(pool, conta[0])
     return JSONResponse({
-        "ok": True,
+        "ok": True, "relendo": relendo,
         # Telegram e assistente contam como porta aberta: com documento vindo de
         # lá, a lista existe mesmo sem ninguém liberado no WhatsApp
         "remetentes": len(quem) + sum(1 for i in itens if i["fonte"] == "lida"),
@@ -1907,6 +1912,9 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
 
   // ── os PDFs que já chegaram no WhatsApp ──────────────────────────────────
   var wppLida = false;
+  // uma revisita por abertura da janela: a varredura que põe a fila em dia roda
+  // atrás, e a lista volta UMA vez pra mostrar o resultado dela
+  var wppRevisitou = false;
 
   function wppCarregar(){
     var caixa = el('rn-wpp');
@@ -1994,6 +2002,14 @@ details.rn-det[open] > summary{margin-bottom:.6rem}
         });
         var sub = el('rn-wpp-sub');
         if(sub) sub.textContent = d.itens.length + (d.itens.length === 1 ? ' documento' : ' documentos') + ' de quem você liberou';
+        // A VARREDURA ESTÁ RODANDO ATRÁS: a lista já apareceu com o que existe, e
+        // daqui a pouco ela volta com as leituras em dia. Uma só — se ainda não
+        // tiver terminado, a próxima abertura da janela pega o resto.
+        if(d.relendo && !wppRevisitou){
+          wppRevisitou = true;
+          if(sub) sub.textContent += ' · pondo ' + d.relendo + ' em dia com o leitor de hoje…';
+          setTimeout(function(){ wppLida = false; wppCarregar(); }, 7000);
+        }
       });
   }
 

@@ -699,3 +699,20 @@ def test_a_linha_sozinha_acha_o_horizonte_sem_ninguem_passar():
     `<=` contra um Undefined estoura. O horizonte é global do ambiente."""
     assert '_env.globals.setdefault("horizonte", ap.HORIZONTE)' in PA
     _linha_html(dias=44)          # não estoura: é o teste
+
+
+def test_a_lista_poe_a_fila_em_dia_sem_segurar_a_janela():
+    """"por que não tem layout pra essas aqui?" — porque ele não tinha aberto
+    aquelas duas, e só abrir relia. A varredura sai por trás; a lista responde
+    na hora com o que existe."""
+    corpo = corpo_de("pdfs_do_whatsapp")
+    assert "_apl.varrer_em_segundo_plano(pool, conta[0])" in corpo
+    assert '"relendo": relendo' in corpo
+
+
+def test_a_janela_volta_uma_vez_pra_mostrar_o_resultado_da_varredura():
+    """Uma só: se não tiver terminado, a próxima abertura pega o resto."""
+    js = PA[PA.index("function wppCarregar()"):]
+    assert "if(d.relendo && !wppRevisitou)" in js
+    assert "wppRevisitou = true" in js
+    assert PA.count("wppRevisitou = false") == 1        # zera por carga de página

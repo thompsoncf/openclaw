@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 import time
 import uuid
 
@@ -649,17 +650,85 @@ def reler_se_velha(pool, conta_id: int, lida_id: int, lido: dict | None) -> bool
         return False
 
 
-def reler_a_fila(pool, conta_id: int, limite: int = 30) -> dict:
-    """Relê tudo que está esperando conferência. O placar: {relidas, falhas}.
+def velhas(pool, conta_id: int, limite: int = 30) -> list:
+    """Os ids da fila cuja leitura é mais velha que o leitor de hoje.
 
-    É o que se roda depois de acrescentar um layout — a fila inteira aproveita,
-    sem ninguém reenviar nada.
+    A pergunta é feita no BANCO — `lido->>'versao'` — pra não baixar trinta PDFs
+    do cofre só pra descobrir que vinte e oito já estavam em dia.
+    """
+    with pool.connection() as c:
+        return [r[0] for r in c.execute(
+            """select l.id from apolice_lida l
+                where l.conta_id = %s and l.mensagem_id is null
+                  and l.descartado_em is null
+                  and l.pdf_caminho is not null
+                  and coalesce((l.lido->>'versao')::int, 0) < %s
+                  and not exists (select 1 from apolices a
+                                   where a.conta_id = l.conta_id
+                                     and a.pdf_caminho = l.pdf_caminho)
+                order by l.criado_em desc limit %s""",
+            (conta_id, apdf.VERSAO, int(limite))).fetchall()]
+
+
+def reler_a_fila(pool, conta_id: int, limite: int = 30, so_velhas: bool = False) -> dict:
+    """Relê o que está esperando conferência. O placar: {relidas, falhas}.
+
+    É o que se roda depois de o leitor aprender alguma coisa — a fila inteira
+    aproveita, sem ninguém reenviar nada.
+
+    `so_velhas` recorta pelo carimbo do leitor. É o que a tela usa ao abrir a
+    janela: releitura baixa PDF do cofre, e refazer o que já está em dia é pagar
+    rede pra chegar na mesma leitura.
     """
     placar = {"relidas": 0, "falhas": 0}
-    for i in sem_mensagem(pool, conta_id, limite=limite):
-        r = reler(pool, conta_id, i["lida_id"])
+    if so_velhas:
+        alvos = velhas(pool, conta_id, limite)
+    else:
+        alvos = [i["lida_id"] for i in sem_mensagem(pool, conta_id, limite=limite)]
+    for lida_id in alvos:
+        r = reler(pool, conta_id, lida_id)
         placar["relidas" if r["ok"] else "falhas"] += 1
     return placar
+
+
+#: contas com uma varredura em andamento. Abrir a janela duas vezes seguidas não
+#: pode virar dois mutirões baixando os mesmos PDFs em cima um do outro.
+_VARRENDO: set = set()
+
+
+def varrer_em_segundo_plano(pool, conta_id: int) -> int:
+    """Põe a fila em dia SEM segurar quem está abrindo a janela. Devolve quantas.
+
+    POR QUE NÃO NA HORA. Cada releitura baixa um PDF do cofre: sete documentos
+    seriam uns quinze segundos de janela parada, e a janela existe justamente pra
+    não fazer ninguém esperar.
+
+    POR QUE NÃO SÓ AO ABRIR CADA UMA. Era assim até 22/09/2026, e não bastou: o
+    dono abriu quatro das seis, e as duas que ele não abriu continuaram mostrando
+    na lista a leitura de antes do leitor novo — uma delas dizendo só "HDI". Ele
+    perguntou, com razão, por que aquelas não tinham layout. A resposta não podia
+    ser "porque você não clicou nelas".
+
+    Best-effort, como todo o resto do leitor: falhou, a fila continua como está e
+    a próxima abertura tenta de novo.
+    """
+    alvos = velhas(pool, conta_id)
+    if not alvos or conta_id in _VARRENDO:
+        return 0
+    _VARRENDO.add(conta_id)
+
+    def trabalho():
+        try:
+            placar = reler_a_fila(pool, conta_id, so_velhas=True)
+            _log.info("fila posta em dia sozinha: conta=%s %s", conta_id, placar)
+        except Exception as e:  # noqa: BLE001
+            _log.info("varredura da fila falhou (conta %s): %s: %s",
+                      conta_id, type(e).__name__, e)
+        finally:
+            _VARRENDO.discard(conta_id)
+
+    threading.Thread(target=trabalho, daemon=True).start()
+    return len(alvos)
 
 
 def descartar(pool, conta_id: int, lida_id: int, membro_id=None) -> bool:

@@ -44,6 +44,8 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql",
               "195_titulo_aprovacao.sql",
               "196_titulo_recorrencia.sql",
               "197_titulo_acrescimo.sql",
+              "132_plano_contas_centros_custo.sql",   # plano e centros (a 317 aponta pra eles)
+              "317_titulo_classificacao.sql",       # plano e centro no título
               "057_natureza_lancamento.sql",
               "064_clientes_lojista.sql",
               "066_pessoas_identidade.sql",

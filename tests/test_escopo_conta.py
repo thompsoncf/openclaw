@@ -281,7 +281,6 @@ BASELINE: set[str] = {
     "finance/empresa.py:clientes",
     "finance/empresa.py:funcionario_salarios",
     "finance/empresa.py:funcionarios",
-    "finance/empresa.py:membros",
     "finance/empresa.py:titulos",
     "finance/estatisticas.py:lancamentos",
     "finance/estatisticas.py:precos_observados",

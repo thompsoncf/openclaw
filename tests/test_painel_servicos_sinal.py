@@ -75,7 +75,13 @@ def cliente(monkeypatch):
         # tabela, o erro seria engolido pelo try/except da rota e `titulo_baixado`
         # viria None por motivo errado. Nestes casos o contrato nunca é fechado, então
         # o certo é não achar título nenhum — e é isso que se quer provar.
-        c.execute("""create table titulos (id bigserial primary key, conta_id bigint,
+        c.execute("""create table if not exists plano_contas (id bigserial primary key, codigo text,
+  nome text, grupo int, natureza text, ordem int not null default 0);
+create table if not exists centros_custo (id bigserial primary key,
+  conta_id bigint, nome text, ativo boolean not null default true,
+  ordem int not null default 0);
+create table titulos (id bigserial primary key, conta_id bigint,
+            plano_conta_id bigint, centro_custo_id bigint,
             tipo text, descricao text, contraparte text default '', valor_centavos int,
             vencimento date, status text default 'aberto', recorrente boolean default false, periodicidade text, valor_variavel boolean not null default false, acrescimo_centavos int not null default 0, lancamento_acrescimo_id bigint,
             categoria text default '', lancamento_id bigint, pago_em date,

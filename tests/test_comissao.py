@@ -38,7 +38,12 @@ create table lancamentos (id bigserial primary key, conta_id bigint, membro_id b
   forma_pagamento text default '', origem text default 'manual', comprovante text default '',
   chave text, natureza text default 'empresa', plano_conta_id bigint, centro_custo_id bigint,
   criado_em timestamptz default now());
-create table titulos (id bigserial primary key, conta_id bigint, tipo text not null,
+create table if not exists plano_contas (id bigserial primary key, codigo text,
+  nome text, grupo int, natureza text, ordem int not null default 0);
+create table if not exists centros_custo (id bigserial primary key,
+  conta_id bigint, nome text, ativo boolean not null default true,
+  ordem int not null default 0);
+create table titulos (plano_conta_id bigint, centro_custo_id bigint,id bigserial primary key, conta_id bigint, tipo text not null,
   descricao text not null, contraparte text not null default '',
   valor_centavos int not null, vencimento date not null, status text default 'aberto',
   recorrente boolean default false, periodicidade text, valor_variavel boolean not null default false, acrescimo_centavos int not null default 0, lancamento_acrescimo_id bigint, categoria text default '', lancamento_id bigint,

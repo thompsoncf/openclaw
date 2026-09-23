@@ -4247,12 +4247,46 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         <input type="checkbox" name="valor_variavel" style="width:auto"> 💧 o valor muda todo mês</label>
       <span class="mut">Marcado, quando você der baixa a próxima já nasce sozinha.</span>
     </div>
+    {#- A CLASSIFICAÇÃO (migração 317) — pedido do dono em 23/09/2026: "no
+       lançamento do contas a pagar já colocar o centro de custo e plano de
+       contas e categoria". Os três são OPCIONAIS: quem nunca usou continua não
+       usando, e a conta entra igual. A baixa leva os três pro caixa.
+
+       Os centros são os DA CONTA, com os nomes que o dono deu, na ordem dele —
+       nenhum é criado nem mexido daqui ("não mexer em centro de custos",
+       23/09/2026). E a memória (`titMemoria`, abaixo) só preenche campo VAZIO:
+       o que a pessoa já escolheu não é trocado por lembrança. -#}
+    <div class="tit-classe-nova">
+      <label>Categoria
+        <select name="categoria" id="tit-cat-pagar">
+          {% for c in (CAT_TITULO or {}).pagar or ['Fornecedores'] %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select>
+        <select name="categoria" id="tit-cat-receber" disabled style="display:none">
+          {% for c in (CAT_TITULO or {}).receber or ['Vendas'] %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select></label>
+      {% if plano_opcoes %}<label>Plano de contas
+        <select name="plano_conta_id" id="tit-plano">
+          <option value="">— sem —</option>
+          {% for g in plano_opcoes %}<optgroup label="{{ g.grupo }} · {{ g.nome }}">{% for c in g.contas %}<option value="{{ c.id }}">{{ c.codigo }} {{ c.nome }}</option>{% endfor %}</optgroup>{% endfor %}
+        </select></label>{% endif %}
+      {% if centros_ativos %}<label>Centro de custo
+        <select name="centro_custo_id" id="tit-centro">
+          <option value="">— sem —</option>
+          {% for c in centros_ativos %}<option value="{{ c.id }}">{{ c.nome }}</option>{% endfor %}
+        </select></label>{% endif %}
+      <span class="mut" id="tit-mem-dica"></span>
+    </div>
   </form>
   <style>
     .tit-rep-nova{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;font-size:.76rem;color:#8a938a}
     .tit-rep-nova label{display:flex;align-items:center;gap:.35rem;color:var(--txt)}
     .tit-rep-nova select{font-size:.76rem;padding:.2rem .35rem;width:auto}
     .tit-rep-nova .mut{font-size:.72rem}
+    .tit-classe-nova{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:flex-end;gap:.4rem .8rem;font-size:.72rem;color:#8a938a}
+    .tit-classe-nova label{display:flex;flex-direction:column;gap:.15rem;flex:1 1 170px;min-width:0}
+    .tit-classe-nova select{width:100%;font-size:.78rem;padding:.3rem .4rem}
+    .tit-classe-nova select.lembrado{border-color:#1E4A3A;background:#10241A}
+    .tit-classe-nova .mut{flex:1 1 100%;font-size:.7rem;color:#9fe8c9;min-height:1em}
   </style>
   <datalist id="tit-cli-dl">{% for c in clientes_lista or [] %}<option value="{{ c.nome }}">{% endfor %}</datalist>
   <datalist id="tit-forn-dl">{% for c in fornecedores_lista or [] %}<option value="{{ c.nome }}">{% endfor %}</datalist>
@@ -4263,7 +4297,70 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     lbl.firstChild.textContent = pagar ? 'Fornecedor' : 'Cliente';
     lbl.title = pagar ? 'opcional — liga o título à ficha do fornecedor' : 'opcional — liga o título à ficha do cliente (honorário/venda a prazo)';
     inp.setAttribute('list', pagar ? 'tit-forn-dl' : 'tit-cli-dl');
+    // a categoria troca de vocabulário com o tipo: "Fornecedores" e "Mercado" não
+    // servem pra dinheiro entrando. O select desligado não vai no POST.
+    var cp = document.getElementById('tit-cat-pagar'), cr = document.getElementById('tit-cat-receber');
+    if(cp && cr){ cp.disabled = !pagar; cp.style.display = pagar ? '' : 'none';
+                  cr.disabled = pagar;  cr.style.display = pagar ? 'none' : ''; }
+    titMemoria();
   }
+  // A MEMÓRIA DO FORNECEDOR. Pergunta ao servidor como este fornecedor foi
+  // classificado da última vez PRA ESTE TIPO DE CONTA (fornecedor + forma da
+  // descrição — ver `emp.memoria_do_fornecedor`) e preenche SÓ o campo que está
+  // vazio. O que a pessoa já escolheu nunca é trocado por lembrança, e o campo
+  // lembrado fica verde pra ela saber que não foi ela quem escolheu.
+  var _titMemSeq = 0;
+  function titMemoria(){
+    var f = document.getElementById('tit-cli-input');
+    if(!f || !window.zapFetch) return;
+    var form = f.form, cp = f.value.trim();
+    var dica = document.getElementById('tit-mem-dica');
+    if(!cp){ if(dica) dica.textContent=''; return; }
+    var seq = ++_titMemSeq;
+    var q = '?contraparte=' + encodeURIComponent(cp)
+          + '&descricao=' + encodeURIComponent(form.descricao.value || '')
+          + '&tipo=' + encodeURIComponent(form.tipo.value);
+    zapFetch('/painel/empresa/memoria-fornecedor' + q, {silencioso: true}).then(function(d){
+      if(!d || seq !== _titMemSeq) return;          // resposta velha: ignora
+      var m = d.memoria, usou = false;
+      // o que foi LEMBRADO pro fornecedor anterior sai antes: trocar de
+      // fornecedor e ficar com a classe do outro é sugestão errada com cara de
+      // escolha — exatamente o que a memória existe pra não fazer
+      ['tit-plano','tit-centro','tit-cat-pagar','tit-cat-receber'].forEach(function(id){
+        var sel = document.getElementById(id);
+        if(sel && sel.classList.contains('lembrado')){ sel.selectedIndex = 0; sel.classList.remove('lembrado'); }
+      });
+      function poe(id, v){
+        var sel = document.getElementById(id);
+        if(!sel || sel.disabled || v === null || v === undefined || v === '') return;
+        // o critério é "a pessoa não mexeu", e não "está vazio": a categoria
+        // nunca fica vazia (a primeira opção é o padrão), e com "vazio" a
+        // memória nunca a preencheria
+        if(sel.dataset.daPessoa) return;
+        if(![].some.call(sel.options, function(o){ return o.value === String(v); })) return;
+        sel.value = String(v); sel.classList.add('lembrado'); usou = true;
+      }
+      if(m){
+        poe('tit-plano', m.plano_conta_id);
+        poe('tit-centro', m.centro_custo_id);
+        poe(form.tipo.value === 'pagar' ? 'tit-cat-pagar' : 'tit-cat-receber', m.categoria);
+      }
+      if(dica) dica.textContent = usou ? ('Preenchido como da última vez: “' + m.de + '”. Confira.') : '';
+    });
+  }
+  // escolher na mão tira o verde: a partir dali o campo é da pessoa
+  document.addEventListener('change', function(e){
+    var el = e.target;
+    if(el && el.closest && el.closest('.tit-classe-nova')){
+      el.classList.remove('lembrado'); el.dataset.daPessoa = '1';
+    }
+  });
+  (function(){
+    var f = document.getElementById('tit-cli-input');
+    if(!f) return;
+    f.addEventListener('change', titMemoria);
+    f.form.descricao.addEventListener('change', titMemoria);
+  })();
   </script>
   <label style="font-size:.72rem;color:#8a938a;display:flex;gap:.4rem;align-items:center;margin-bottom:.6rem"><input type="checkbox" form="_nada" disabled style="width:auto"> <span class="mut">Vincule um cliente ou fornecedor pra o título aparecer na ficha dele.</span></label>
   {% if titulos %}
@@ -4274,6 +4371,9 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .tit-id{flex:1 1 200px;min-width:0}
     .tit-desc{font-size:.9rem}
     .tit-meta{font-size:.7rem;margin-top:3px;color:var(--txt-mut)}
+    .tit-classe{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.35rem}
+    .tit-classe select{flex:1 1 150px;min-width:0;font-size:.74rem;padding:.25rem .35rem}
+    .tit-cls{color:#9fb8ad}
     .tit-val{flex:0 0 auto;margin-left:auto;text-align:right;white-space:nowrap;font-weight:600;font-variant-numeric:tabular-nums}
     .tit-acoes{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.15rem}
     .tit-acoes button,.tit-acoes a{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;text-decoration:none}
@@ -4386,7 +4486,8 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         {% if t.sem_fornecedor %} <span class="selo falta">sem fornecedor</span>{% endif %}</div>
       <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span> · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}{% if t.criado_nome %} · lançado por {{ t.criado_nome }}{% endif %}{% if t.aprovacao=='autorizado' and t.aprovado_nome %} · liberado por {{ t.aprovado_nome }}{% endif %}{% if t.aprovacao_motivo %} · <span style="color:#e07a5f">"{{ t.aprovacao_motivo }}"</span>{% endif %}{#- a próxima só é prometida em título ABERTO: em título pago ela já
       nasceu (ou foi barrada pela trava de duplicata), e repetir a promessa ali
-      seria anunciar uma segunda. -#}{% if t.proxima %} · <span style="color:#9b8fd6" title="nasce sozinha quando você der baixa nesta">próxima: {{ t.proxima.strftime('%d/%m') }}</span>{% endif %}</div>
+      seria anunciar uma segunda. -#}{% if t.proxima %} · <span style="color:#9b8fd6" title="nasce sozinha quando você der baixa nesta">próxima: {{ t.proxima.strftime('%d/%m') }}</span>{% endif %}{#- a CLASSIFICAÇÃO (317), quando existe. Quando não existe, nada: um
+      "sem centro" em 13 linhas seria parede, e o lugar de pôr é o editar ✎. -#}{% if t.plano_codigo or t.centro_nome %} · <span class="tit-cls" title="classificação — vai junto pro caixa na baixa">{% if t.plano_codigo %}{{ t.plano_codigo }} {{ t.plano_nome }}{% endif %}{% if t.plano_codigo and t.centro_nome %} · {% endif %}{% if t.centro_nome %}{{ t.centro_nome }}{% endif %}</span>{% endif %}</div>
     </div>
     {#- R$ 0,00 seria mentira de dois jeitos: diz que a conta é de graça e some
        na soma da lista. A conta de valor variável (196) nasce sem valor de
@@ -4503,6 +4604,35 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
              list="{{ 'tit-forn-dl' if t.tipo=='pagar' else 'tit-cli-dl' }}"
              placeholder="{{ 'fornecedor' if t.tipo=='pagar' else 'cliente' }}"
              style="flex:1.4 1 120px;min-width:0">
+      {#- A CLASSIFICAÇÃO (317), na mesma edição — é por aqui que a conta que já
+         existia ganha centro e plano antes de ser paga (as 13 abertas da Prime
+         em 23/09/2026 não tinham nenhum). `tem_classe` pelo mesmo motivo do
+         `tem_cliente`: separa "escolhi — sem —" de "o campo nem veio". -#}
+      <input type="hidden" name="tem_classe" value="1">
+      <div class="tit-classe">
+        <select name="categoria" title="categoria">
+          {% set _cats = (CAT_TITULO or {})[t.tipo] or [] %}
+          {% for c in _cats %}<option value="{{ c }}"{{ ' selected' if c == t.categoria }}>{{ c }}</option>{% endfor %}
+          {% if t.categoria and t.categoria not in _cats %}<option value="{{ t.categoria }}" selected>{{ t.categoria }}</option>{% endif %}
+        </select>
+        {#- `tem_plano`/`tem_centro` dizem que o select ESTAVA na tela: conta sem
+           plano ligado não o desenha, e o campo ausente chegaria vazio — que
+           aqui significa "apagar". -#}
+        {% if plano_opcoes %}<input type="hidden" name="tem_plano" value="1"><select name="plano_conta_id" title="plano de contas">
+          <option value="">plano: — sem —</option>
+          {% for g in plano_opcoes %}<optgroup label="{{ g.grupo }} · {{ g.nome }}">{% for c in g.contas %}<option value="{{ c.id }}"{{ ' selected' if c.id == t.plano_conta_id }}>{{ c.codigo }} {{ c.nome }}</option>{% endfor %}</optgroup>{% endfor %}
+          {#- conta do plano DESLIGADA depois de escolhida: sem esta opção o select
+             cairia em "— sem —" e salvar a edição apagaria a classificação calado.
+             O servidor recusa o id desligado e mantém o que estava. -#}
+          {% if t.plano_conta_id and t.plano_conta_id not in (plano_opcoes|map(attribute='contas')|sum(start=[])|map(attribute='id')|list) %}<option value="{{ t.plano_conta_id }}" selected>{{ t.plano_codigo }} {{ t.plano_nome }} (desligada)</option>{% endif %}
+        </select>{% endif %}
+        {% if centros_ativos %}<input type="hidden" name="tem_centro" value="1"><select name="centro_custo_id" title="centro de custo">
+          <option value="">centro: — sem —</option>
+          {% for c in centros_ativos %}<option value="{{ c.id }}"{{ ' selected' if c.id == t.centro_custo_id }}>{{ c.nome }}</option>{% endfor %}
+          {#- mesmo cuidado pro centro DESATIVADO depois de escolhido -#}
+          {% if t.centro_custo_id and t.centro_custo_id not in (centros_ativos|map(attribute='id')|list) %}<option value="{{ t.centro_custo_id }}" selected>{{ t.centro_nome }} (inativo)</option>{% endif %}
+        </select>{% endif %}
+      </div>
       <button style="background:var(--verde);color:var(--sobre-verde);border:0">salvar</button>
       <button type="button" onclick="titEditToggle(this)" style="color:#8a938a">cancelar</button>
     </form>
@@ -11122,6 +11252,8 @@ def painel_empresa(request: Request):
                                "anual": "anual"},
                    dre=dre, titulos=titulos, tit_blocos=tit_blocos,
                    tit_atrasadas=tit_atrasadas,
+                   CAT_TITULO={"pagar": emp.categorias_titulo("pagar"),
+                               "receber": emp.categorias_titulo("receber")},
                    titulos_pagos=titulos_pagos,
                    folha=folha, clientes_lista=clientes_lista,
                    fornecedores_lista=fornecedores_lista, carteira=carteira,
@@ -11595,7 +11727,10 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
                          vencimento: str = Form(""), contraparte: str = Form(""),
                          recorrente: str = Form(""), cliente: str = Form(""),
                          periodicidade: str = Form(""),
-                         valor_variavel: str = Form("")):
+                         valor_variavel: str = Form(""),
+                         categoria: str = Form(""),
+                         plano_conta_id: str = Form(""),
+                         centro_custo_id: str = Form("")):
     from finance import empresa as emp, clientes as cli
     g = _guard_pj(request)
     if not g:
@@ -11646,16 +11781,49 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
         # Prime só o dono abre o financeiro, então "aguarda quem não é dono"
         # nunca acendia — e o agente do WhatsApp, que também cria título, não
         # tinha cópia nenhuma dessa regra.
+        # A CLASSIFICAÇÃO (317). Categoria fora do vocabulário do tipo cai no
+        # padrão (string vazia = `criar_titulo` escolhe), e plano/centro passam
+        # pela validação dentro de `criar_titulo` — um lugar só, pra todas as
+        # portas que criam título.
+        cat = categoria.strip()
+        if cat not in emp.categorias_titulo(tipo_ok):
+            cat = ""
         try:
             emp.criar_titulo(pool, conta[0], tipo_ok,
                              descricao, cent, _date.fromisoformat(vencimento),
                              contraparte=contraparte or nome_cli,
+                             categoria=cat,
                              recorrente=bool(recorrente), periodicidade=ritmo,
                              valor_variavel=varia, criado_por=membro_id,
-                             cliente_id=cli_id)
+                             cliente_id=cli_id,
+                             plano_conta_id=plano_conta_id.strip() or None,
+                             centro_custo_id=centro_custo_id.strip() or None)
         except Exception:
             pass
     return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.get("/painel/empresa/memoria-fornecedor")
+def empresa_memoria_fornecedor(request: Request, contraparte: str = "",
+                               descricao: str = "", tipo: str = "pagar"):
+    """Como este fornecedor foi classificado da última vez, pra este tipo de conta.
+
+    Só LEITURA, e só da conta logada. A regra (fornecedor + forma da descrição)
+    mora em `emp.memoria_do_fornecedor`; a tela só pergunta e preenche o que
+    estiver vazio."""
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    conta, pool = g
+    tipo_ok = tipo if tipo in ("pagar", "receber") else "pagar"
+    try:
+        m = emp.memoria_do_fornecedor(pool, conta[0], contraparte[:200],
+                                      descricao[:200], tipo_ok)
+    except Exception:  # noqa: BLE001 — sem memória a tela só não preenche
+        log.warning("memoria_fornecedor: falhou", exc_info=True)
+        m = None
+    return JSONResponse({"memoria": m})
 
 
 @router.post("/painel/empresa/avisos-na-fila")
@@ -11844,7 +12012,10 @@ def empresa_titulo_cobrar(request: Request, titulo_id: int):
 @router.post("/painel/empresa/titulo/{titulo_id}/descricao")
 def empresa_titulo_descricao(request: Request, titulo_id: int,
                              descricao: str = Form(""), valor: str = Form(""),
-                             cliente: str = Form(""), tem_cliente: str = Form("")):
+                             cliente: str = Form(""), tem_cliente: str = Form(""),
+                             categoria: str = Form(""), plano_conta_id: str = Form(""),
+                             centro_custo_id: str = Form(""), tem_classe: str = Form(""),
+                             tem_plano: str = Form(""), tem_centro: str = Form("")):
     """Edita descrição, valor e/ou FORNECEDOR. valor vazio = não mexe no valor.
 
     O FORNECEDOR só entrou aqui em 03/09/2026, e a falta dele era o buraco que o
@@ -11877,10 +12048,21 @@ def empresa_titulo_descricao(request: Request, titulo_id: int,
                 except Exception:  # noqa: BLE001 — sem ficha o nome ainda fica salvo
                     achado = None
             cli_id = achado or 0
-    if nova_desc is not None or novo_val is not None or nova_cp is not None:
+    # A CLASSIFICAÇÃO (317). Só entra quando o formulário a trouxe — form antigo
+    # aberto numa aba de antes do deploy não pode apagar o centro de ninguém.
+    # Dentro dela, "" é "— sem —" e APAGA (mesma regra do fornecedor).
+    cat = plano = centro = None
+    if tem_classe in ("1", "on", "true"):
+        cat = categoria.strip() or None
+        plano = plano_conta_id.strip() if tem_plano else None
+        centro = centro_custo_id.strip() if tem_centro else None
+    if (nova_desc is not None or novo_val is not None or nova_cp is not None
+            or tem_classe in ("1", "on", "true")):
         emp.editar_titulo(pool, conta[0], titulo_id,
                           descricao=nova_desc, valor_centavos=novo_val,
-                          contraparte=nova_cp, cliente_id=cli_id)
+                          contraparte=nova_cp, cliente_id=cli_id,
+                          categoria=cat, plano_conta_id=plano,
+                          centro_custo_id=centro)
     return RedirectResponse("/painel/empresa", status_code=303)
 
 

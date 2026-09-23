@@ -1573,3 +1573,41 @@ def test_no_recorrente_salvar_a_proposta_tambem_cadastra_o_cliente(cliente, monk
         modo, cid = cx.execute("select modo, cliente_id from orcamentos where id=%s",
                                (d["id"],)).fetchone()
     assert modo != "evento" and cid == 4242
+
+
+# ------------------------------------------------ R$ de desconto por mês (recorrente)
+# Proposta da HLED (ZAQ, 23/09/2026): R$ 500 de desconto numa mensalidade de
+# R$ 1.500 devia dar R$ 1.000/mês e deu R$ 1.458,33. O dono confirmou: no
+# recorrente, R$ é por mês. A marca `desc_mes` só vale lá.
+
+def _item_rs(desc_mes=True):
+    return {"nome": "Criação de Conteúdo", "desc": "", "setup": 0, "mensal": 1500,
+            "qtd": 1, "unitario": 0, "desc_tipo": "valor", "desc_val": 500,
+            "desc_mes": desc_mes}
+
+
+def test_no_recorrente_o_salvar_grava_o_desconto_por_mes(cliente):
+    with cliente.pool.connection() as cx:
+        cx.execute("update contas set nicho_id=null where id=%s", (CONTA,))  # → recorrente
+        cx.commit()
+    r = cliente.post("/painel/servicos/salvar",
+                     json={"empresa": "HLED", "modulos": [], "itens": [_item_rs()],
+                           "mensal": 1500})
+    assert r.status_code == 200, r.text
+    with cliente.pool.connection() as cx:
+        itens, liq = cx.execute(
+            "select itens, to_jsonb(o)->>'mensal_liquido_centavos' from orcamentos o "
+            "where id=%s", (r.json()["id"],)).fetchone()
+    assert itens[0]["desc_mes"] is True
+    if liq is not None:                  # base com a 311
+        assert int(liq) == 100000
+
+
+def test_no_evento_a_marca_do_por_mes_nao_entra(cliente):
+    r = cliente.post("/painel/servicos/salvar",
+                     json={"empresa": "Ana", "modulos": [], "itens": [_item_rs()]})
+    assert r.status_code == 200, r.text
+    with cliente.pool.connection() as cx:
+        itens = cx.execute("select itens from orcamentos where id=%s",
+                           (r.json()["id"],)).fetchone()[0]
+    assert "desc_mes" not in itens[0]

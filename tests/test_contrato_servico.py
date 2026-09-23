@@ -490,3 +490,33 @@ def test_o_fechamento_divide_a_implantacao_pelo_numero_da_casa():
 def test_o_suporte_esta_incluido_na_mensalidade():
     texto = json.dumps(ctr.modelo_padrao(ctr.MODO_SERVICO), ensure_ascii=False)
     assert "sem custo adicional: ele está incluído na mensalidade" in texto
+
+
+def test_o_contrato_de_servico_abre_com_o_cabecalho_da_proposta(pool, monkeypatch):
+    """Pedido do dono em 23/09/2026 (pergunta 4 do mockup da proposta): o nome
+    comercial no alto, a razão social com CNPJ embaixo, e quem responde pelo
+    contratante."""
+    monkeypatch.setattr(cp, "get_pool", lambda: pool)
+    with pool.connection() as c:
+        c.execute("update contas set nome_fantasia='ZAQ - SISTEMAS IAs' where id=%s", (ZAQ,))
+        c.commit()
+    _ligar(pool)
+    oid = _orcamento(pool)
+    _com_contrato(pool, oid)
+    html = cp.contrato_publico(None, CT_TOKEN).body.decode()
+    cab = html.split('<div class="bd">', 1)[0]
+    assert '<div class="lg">ZAQ - SISTEMAS IAs</div>' in cab
+    assert "T CAVALCANTE FERNANDES LTDA" in cab and "CNPJ 12.345.678/0001-90" in cab
+    assert "A/C Ana" in html
+
+
+def test_o_cabecalho_da_prime_nao_muda(pool, monkeypatch):
+    """O contrato de locação segue com a razão social no alto, sem a linha nova."""
+    html = cp._env.get_template(cp._TPL_NOME).render(d={
+        "numero": 1, "criado_em": "", "servico": False, "aditivo": None,
+        "contratada": {"nome": "PRIME LTDA", "fantasia": "Prime Eventos", "doc": "",
+                       "endereco": "", "contato": "", "logo": ""},
+        "contratante": {"nome": "Ana", "doc": "", "endereco": "", "contato": ""},
+        "evento": {}, "clausulas": [], "faltam": []})
+    cab = html.split('<div class="bd">', 1)[0]
+    assert '<div class="lg">PRIME LTDA</div>' in cab and 'class="emit"' not in cab

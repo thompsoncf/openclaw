@@ -426,10 +426,22 @@ def painel_servicos(request: Request):
                    pode_contrato=pode_contrato, tipo_padrao=tipo_padrao,
                    tipos_evento=scat.TIPOS_EVENTO, tipos_contrato=scat.TIPOS_CONTRATO,
                    local_padrao=_local_padrao(dados_emp) if servico_avulso else "",
-                   icones_paleta=ics.paleta())
+                   # cada nicho com o SEU jogo de ícones (finance/icones_servico)
+                   icones_paleta=ics.paleta("evento" if servico_avulso else "recorrente"))
 
 
 # ---------------------------------------------------------------- catálogo (por conta)
+def _modo_dos_icones(pool, conta_id: int) -> str:
+    """Qual jogo de ícones a conta usa. Tolerante, ao contrário de
+    `vendas.modo_do_orcamento`: aqui errar custa um desenho, não um orçamento no
+    modo errado — e a lista do catálogo não pode cair por isso. Na dúvida, o
+    jogo do evento, que é o que a tela sempre mostrou."""
+    try:
+        return vendas.modo_do_orcamento(pool, conta_id)
+    except Exception:  # noqa: BLE001
+        return "evento"
+
+
 @router.get("/painel/servicos/catalogo")
 def painel_servicos_catalogo(request: Request):
     conta, redir = _conta_servico(request)
@@ -437,6 +449,7 @@ def painel_servicos_catalogo(request: Request):
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
     pool = get_pool()
     scat.garantir_tabela(pool)
+    modo = _modo_dos_icones(pool, conta[0])
     itens = [{
         "id": s["id"], "slug": s["slug"], "nome": s["nome"],
         "descricao": s["descricao"],
@@ -447,7 +460,8 @@ def painel_servicos_catalogo(request: Request):
         # `icone` é o que o vendedor fixou (pode ser vazio); `icone_svg` é o que
         # a tela desenha — já resolvido pelo nome/categoria quando não fixaram.
         "icone": s["icone"],
-        "icone_svg": ics.svg(ics.escolher(s["nome"], s["categoria"], s["icone"]), px=20),
+        "icone_svg": ics.svg(ics.escolher(s["nome"], s["categoria"], s["icone"],
+                                          modo=modo), px=20),
     } for s in scat.listar(pool, conta[0])]
     return JSONResponse({"itens": itens, "categorias": scat.CATEGORIAS_EVENTOS})
 
@@ -495,7 +509,8 @@ def painel_servicos_icone_sugerido(request: Request, nome: str = "", categoria: 
     conta, redir = _conta_servico(request)
     if redir is not None:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
-    return JSONResponse({"chave": ics.escolher(nome, categoria)})
+    modo = _modo_dos_icones(get_pool(), conta[0])
+    return JSONResponse({"chave": ics.escolher(nome, categoria, modo=modo)})
 
 
 @router.post("/painel/servicos/catalogo/excluir")
@@ -641,6 +656,8 @@ class ItemIn(BaseModel):
     # `desc_val` e não `desc`: `desc` já é a DESCRIÇÃO do item, logo acima.
     desc_tipo: str = "pct"    # 'pct' | 'valor'
     desc_val: int = 0         # % ou REAIS, conforme desc_tipo
+    # recorrente: o R$ é POR MÊS (finance.desconto.por_mes). Só vale com 'valor'.
+    desc_mes: bool = False
 
 
 class EventoIn(BaseModel):
@@ -714,19 +731,26 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
     validos = scat.slugs_validos(get_pool(), conta[0])
     modulos = [i for i in (dados.modulos or []) if i in validos]
-    # a descrição do item é o que o cliente lê ("o espaço inclui: ..."): num
-    # orçamento de evento ela tem parágrafos inteiros, então o corte é largo.
-    itens = [{"nome": (it.nome or "")[:120], "desc": (it.desc or "")[:2000],
-              "setup": int(it.setup or 0), "mensal": int(it.mensal or 0),
-              "qtd": max(1, int(it.qtd or 1)), "unitario": int(it.unitario or 0),
-              "categoria": (it.categoria or "")[:60], "icone": (it.icone or "")[:30],
-              "desc_tipo": "valor" if (it.desc_tipo or "") == "valor" else "pct",
-              "desc_val": max(0, int(it.desc_val or 0))}
-             for it in (dados.itens or [])[:50]]
-    itens_json = json.dumps(itens)
     # o MODO vem do nicho da conta, não do navegador: quem vende evento emite
     # orçamento de evento, e só. (mesma regra do servico_avulso da tela)
     modo = vendas.modo_do_orcamento(get_pool(), conta[0])
+    # a descrição do item é o que o cliente lê ("o espaço inclui: ..."): num
+    # orçamento de evento ela tem parágrafos inteiros, então o corte é largo.
+    itens = []
+    for it in (dados.itens or [])[:50]:
+        linha = {"nome": (it.nome or "")[:120], "desc": (it.desc or "")[:2000],
+                 "setup": int(it.setup or 0), "mensal": int(it.mensal or 0),
+                 "qtd": max(1, int(it.qtd or 1)), "unitario": int(it.unitario or 0),
+                 "categoria": (it.categoria or "")[:60], "icone": (it.icone or "")[:30],
+                 "desc_tipo": "valor" if (it.desc_tipo or "") == "valor" else "pct",
+                 "desc_val": max(0, int(it.desc_val or 0))}
+        # R$ POR MÊS só existe no recorrente (finance.desconto.por_mes). A marca só
+        # entra quando vale, pra item de evento e desconto em % saírem iguais aos
+        # de sempre.
+        if modo != "evento" and it.desc_mes and linha["desc_tipo"] == "valor":
+            linha["desc_mes"] = True
+        itens.append(linha)
+    itens_json = json.dumps(itens)
     evento_dic = dados.evento.model_dump() if (modo == "evento" and dados.evento) else None
     evento_json = json.dumps(evento_dic) if evento_dic is not None else None
     parcelas_json = json.dumps(
@@ -2460,6 +2484,9 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
 /* DESCONTO: campo + alternador %/R$. O mesmo par se repete na linha do item e no
    total, de propósito — dois controles diferentes pra mesma ideia viram duas ideias. */
 .oc-dpar{display:flex; align-items:stretch; width:100%}
+/* recorrente: o que a linha cobra por mês depois do desconto dela */
+.oc-rliq{display:block; font-size:.72rem; color:var(--verde-claro); margin-top:.2rem; text-align:right; white-space:nowrap}
+.oc-rliq:empty{display:none}
 .oc-dpar > input{flex:1; min-width:0; text-align:right; border-radius:8px 0 0 8px; border-right:0}
 .oc-dtog{display:flex; border:1px solid var(--linha); border-left:0; border-radius:0 8px 8px 0; overflow:hidden}
 .oc-dtog button{border:0; background:var(--fundo-2); color:var(--txt-mut); font-size:.72rem;
@@ -2709,6 +2736,20 @@ _JS_CRU = r"""(function(){
     var base=num(r.querySelector('.oc-setup'))*qtd(r)+num(r.querySelector('.oc-mensal'))*12;
     return base>0?Math.min(100,100*v/base):0;
   }
+  // RECORRENTE: R$ no item é POR MÊS (finance/desconto.por_mes, 23/09/2026). Sai
+  // inteiro da mensalidade e não toca a implantação. O % continua como sempre.
+  function porMes(r){
+    if(SERVICO_AVULSO) return false;
+    var par=r.querySelector('.oc-dpar');
+    return !!par && par.getAttribute('data-tipo')==='valor';
+  }
+  // setup e mensal da linha depois do desconto dela — a MESMA conta de
+  // `finance.desconto.liquido_do_item`
+  function liqLinha(r, sb, mb){
+    if(porMes(r)) return {s:sb, m:Math.max(0, mb-num(r.querySelector('.oc-desc')))};
+    var p=pctLinha(r);
+    return {s:Math.round(sb*(100-p)/100), m:Math.round(mb*(100-p)/100)};
+  }
   // o desconto do TOTAL, já resolvido em reais sobre a base que recebe
   function descFinal(base){
     var par=document.querySelector('.oc-dpar-tot'); if(!par||base<=0) return 0;
@@ -2743,9 +2784,8 @@ _JS_CRU = r"""(function(){
           custo+=num(r.querySelector('.oc-custo'))*q;
           return;
         }
-        var p=pctLinha(r);
         var sb=sbTodo, mb=num(r.querySelector('.oc-mensal'));
-        var sl=Math.round(sb*(100-p)/100), ml=Math.round(mb*(100-p)/100);
+        var lq=liqLinha(r, sb, mb), sl=lq.s, ml=lq.m;
         descItens+=(sb-sl)+(mb-ml)*12;
         setupBruto+=sb; mensalBruto+=mb;
         setup+=sl;
@@ -2793,6 +2833,13 @@ _JS_CRU = r"""(function(){
     var c=calc();
     // subtotal de cada linha (qtd × valor unitário), ao vivo
     rows().forEach(function(r){
+      // RECORRENTE: o que a linha cobra por mês depois do desconto dela. Na HLED
+      // o dono deu R$ 500 esperando R$ 1.000/mês e não tinha onde conferir.
+      var rl=r.querySelector('.oc-rliq');
+      if(rl){
+        var mb=num(r.querySelector('.oc-mensal')), lq=liqLinha(r, 0, mb);
+        rl.textContent=(lq.m<mb)?('= '+fmt(lq.m)+'/mês'):'';
+      }
       var el=r.querySelector('.oc-sub-v');
       if(!el) return;
       if(r.getAttribute('data-incluso')==='1'){
@@ -3245,8 +3292,10 @@ _JS_CRU = r"""(function(){
       +'<input class="oc-desc" inputmode="numeric" value="'+(parseInt(val,10)||0)+'">'
       +'<span class="oc-dtog">'
       +'<button type="button" data-t="pct" class="'+(t==='pct'?'on':'')+'">%</button>'
-      +'<button type="button" data-t="valor" class="'+(t==='valor'?'on':'')+'">R$</button>'
-      +'</span></div></div>';
+      +'<button type="button" data-t="valor" class="'+(t==='valor'?'on':'')+'"'
+      +(SERVICO_AVULSO?'>R$':' title="Reais a menos na mensalidade, todo mês">R$/mês')+'</button>'
+      +'</span></div>'
+      +(SERVICO_AVULSO?'':'<small class="oc-rliq"></small>')+'</div>';
   }
 
   // eventos: catálogo ordenado A-Z + "busca pra adicionar" — a lista só mostra
@@ -3287,14 +3336,16 @@ _JS_CRU = r"""(function(){
   }
   // recorrente: a mesma lista "só o que está nesta proposta" do evento, com as
   // duas pontas do dinheiro (setup e mensalidade) no lugar de qtd × unitário.
-  // Sem ícone e sem Cobrar × Incluso: a paleta de ícones e a palavra "incluso"
-  // foram desenhadas pro pacote de festa (seção 6 do CLAUDE.md).
+  // Sem Cobrar × Incluso: a palavra "incluso" foi desenhada pro pacote de festa
+  // (seção 6 do CLAUDE.md). O ícone entrou em 23/09/2026, com o jogo PRÓPRIO do
+  // recorrente (anúncio, redes, vídeo, IA...), o mesmo que sai na folha.
   function buildRowRec(s){
     var selo=s.orfao
       ? '<span class="oc-fora" title="Este serviço saiu do seu catálogo. A linha continua valendo nesta proposta.">fora do catálogo</span>'
       : '';
-    return '<div class="oc-nome"><b title="'+ec(s.nome)+'">'+ec(s.nome)+'</b>'+selo
-      +'<div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div>'
+    var thumb=s.icone_svg?'<div class="svc-thumb">'+s.icone_svg+'</div>':'';
+    return '<div class="oc-nome oc-nome-linha">'+thumb+'<div style="min-width:0"><b title="'+ec(s.nome)+'">'+ec(s.nome)+'</b>'+selo
+      +'<div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div></div>'
       +'<div class="oc-num"><span>Setup</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
       +'<div class="oc-num"><span>Mensal</span><input class="oc-mensal" inputmode="numeric" value="'+s.mensal+'"></div>'
       +'<div class="oc-num oc-custo-col"><span>Custo/mês</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
@@ -3721,7 +3772,8 @@ _JS_CRU = r"""(function(){
               categoria:cat.categoria||'',icone:cat.icone||'',
               incluso:incl,
               desc_tipo:incl?'pct':(par?(par.getAttribute('data-tipo')||'pct'):'pct'),
-              desc_val:incl?100:num(r.querySelector('.oc-desc'))};
+              desc_val:incl?100:num(r.querySelector('.oc-desc')),
+              desc_mes:porMes(r)};
     });
     var escEl=document.getElementById('oc-escopo-out');
     return {id:EDIT_ID,lead_id:LEAD_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}).filter(function(id){return id.indexOf('orfao:')!==0;}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setupBruto),mensal:Math.round(SERVICO_AVULSO?c.mensalBruto:c.mensalBrutoCheio),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods,desconto_tipo:descTipoTot(),desconto_pct:(descTipoTot()==='pct'?num(document.getElementById('oc-desconto')):0),desconto_valor:(descTipoTot()==='valor'?num(document.getElementById('oc-desconto')):0),anual:!!c.anual};
@@ -5257,18 +5309,21 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           <div class="oc-field" style="margin-bottom:.4rem"><label>Nome do serviço</label><input id="svc-nome" class="oc-inp" placeholder="Ex.: Consultoria de SEO"></div>
           <div class="oc-field" style="margin-bottom:.4rem"><label>Descrição</label><textarea id="svc-desc" class="oc-inp" rows="2" placeholder="O que está incluso — pode escrever a lista inteira, sai igual no orçamento"></textarea></div>
         </div>
-        {% if servico_avulso %}
-        <div style="display:grid; grid-template-columns:1fr auto; gap:.6rem; align-items:end; margin-bottom:.4rem">
+        {# O ÍCONE vale pros dois nichos desde 23/09/2026, cada um com o seu jogo
+           (a paleta vem por nicho). A CATEGORIA continua só no evento: é o
+           subtotal por categoria da festa. #}
+        <div style="display:grid; grid-template-columns:{{ '1fr auto' if servico_avulso else 'auto' }}; gap:.6rem; align-items:end; margin-bottom:.4rem">
+          {% if servico_avulso %}
           <div class="oc-field" style="margin-bottom:0"><label>Categoria <span style="color:var(--txt-mut);font-size:.78rem">— agrupa e soma por categoria no orçamento</span></label>
             <select id="svc-cat" class="oc-inp"><option value="">Sem categoria</option></select>
           </div>
+          {% endif %}
           <div class="oc-field" style="margin-bottom:0"><label>Ícone
             <span style="color:var(--txt-mut);font-size:.78rem">— escolhido sozinho pelo nome; clique pra trocar</span></label>
             <input type="hidden" id="svc-icone">
             <div id="svc-icones" class="svc-icones"></div>
           </div>
         </div>
-        {% endif %}
         <div style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end">
           <div class="oc-field" style="margin-bottom:0"><label>{{ 'Valor (R$)' if servico_avulso else 'Setup (R$)' }}</label><input id="svc-setup" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
           <div class="oc-field" style="margin-bottom:0{% if servico_avulso %};display:none{% endif %}"><label>Mensal (R$)</label><input id="svc-mensal" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>

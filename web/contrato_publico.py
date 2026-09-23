@@ -81,7 +81,9 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
     Devolve None quando o orçamento não existe."""
     with pool.connection() as c:
         r = c.execute(
-            """select o.cliente, o.empresa, o.cnpj, o.whatsapp, o.email, o.telefone,
+            """select o.cliente, o.empresa,
+                      -- sem CNPJ, o CPF (coluna própria desde 29/08/2026)
+                      coalesce(nullif(o.cnpj,''), to_jsonb(o)->>'cpf'), o.whatsapp, o.email, o.telefone,
                       o.endereco, o.cep, o.cidade, o.uf, o.numero, o.evento,
                       coalesce(o.primeiro_ano_centavos, o.setup_centavos, 0),
                       o.parcelas, o.status, o.sinal_pago_em,
@@ -156,6 +158,10 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
                                    empresa["cep"]),
             "contato": _linha_end(_fone(empresa["telefone"]), empresa["email_empresa"]),
             "logo": empresa["logo_url"],
+            # o NOME COMERCIAL, pro cabeçalho do contrato de serviço: é o nome que o
+            # cliente conhece (ZAQ - SISTEMAS IAs), e a razão social vem embaixo,
+            # como na proposta (pedido do dono, 23/09/2026)
+            "fantasia": empresa["nome_fantasia"],
         },
         "contratante": {
             "nome": orcamento["cliente"], "doc": _doc(orcamento["cnpj"]),
@@ -164,6 +170,9 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
                                    orcamento["cep"]),
             "contato": _linha_end(_fone(orcamento["telefone"] or orcamento["whatsapp"]),
                                   orcamento["email"]),
+            # quem responde pela empresa contratante ("A/C"), quando é outra pessoa
+            "responsavel": (cli or "").strip() if (cli or "").strip()
+                           and (cli or "").strip() != (emp_nome or "").strip() else "",
         },
         "evento": {
             "tipo": evento.get("tipo") or "Evento",
@@ -384,6 +393,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
 .lgo img{height:44px;width:auto;max-width:160px;object-fit:contain;display:block}
 .hd .lg{font-size:20px;font-weight:600;line-height:1.2}
 .hd .sub{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#9FA8BC;margin-top:5px}
+.hd .emit{font-size:10.5px;color:#B5BDCD;line-height:1.6;margin-top:7px}
 .hd .mt{text-align:right;font-size:11px;color:#9FA8BC;flex:0 0 auto;white-space:nowrap}
 .hd .mt b{display:block;color:#E0B458;font-size:10px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px}
 @media screen and (max-width:560px){.hd{flex-wrap:wrap}.hdl{flex:1 1 100%;flex-wrap:wrap}
@@ -433,7 +443,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
   .bar,.sign{display:none!important}
   .pg{box-shadow:none;border-radius:0}
   .hd{background:#fff;color:#14213D;border-bottom:2px solid #14213D;padding:0 0 14px}
-  .hd .sub,.hd .mt{color:#5A6678}.hd .mt b{color:#B8862E}
+  .hd .sub,.hd .mt,.hd .emit{color:#5A6678}.hd .mt b{color:#B8862E}
   .lgo{background:transparent;padding:0}
   .bd{padding:16px 0 0}
   .wrapc{max-width:none}
@@ -450,8 +460,18 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
       <div class="hdl">
         {% if d.contratada.logo %}<span class="lgo"><img src="{{ d.contratada.logo }}" alt=""></span>{% endif %}
         <div>
+          {% if d.servico %}
+          {# SERVIÇO: o mesmo cabeçalho da proposta — nome comercial, e a razão
+             social com CNPJ, endereço e contato embaixo (23/09/2026). #}
+          <div class="lg">{{ d.contratada.fantasia or d.contratada.nome }}</div>
+          <div class="sub">Contrato de prestação de serviços</div>
+          <div class="emit">{% if d.contratada.fantasia and d.contratada.fantasia != d.contratada.nome %}{{ d.contratada.nome }} · {% endif %}{% if d.contratada.doc %}CNPJ {{ d.contratada.doc }}{% endif %}
+            {%- if d.contratada.endereco %}<br>{{ d.contratada.endereco }}{% endif %}
+            {%- if d.contratada.contato %}<br>{{ d.contratada.contato }}{% endif %}</div>
+          {% else %}
           <div class="lg">{{ d.contratada.nome }}</div>
-          <div class="sub">{{ 'Contrato de prestação de serviços' if d.servico else 'Contrato de locação de espaço' }}</div>
+          <div class="sub">Contrato de locação de espaço</div>
+          {% endif %}
         </div>
       </div>
       <div class="mt"><b>Contrato</b>nº {{ d.numero }}<br>{{ d.criado_em }}</div>
@@ -484,6 +504,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
           <div class="p">{{ 'Contratante' if d.servico else 'Contratante (locatário)' }}</div>
           <b>{{ d.contratante.nome }}</b>
           {% if d.contratante.doc %}<small>CPF/CNPJ {{ d.contratante.doc }}</small>{% endif %}
+          {% if d.servico and d.contratante.responsavel %}<small>A/C {{ d.contratante.responsavel }}</small>{% endif %}
           {% if d.contratante.endereco %}<small>{{ d.contratante.endereco }}</small>{% endif %}
           {% if d.contratante.contato %}<small>{{ d.contratante.contato }}</small>{% endif %}
         </div>

@@ -400,6 +400,11 @@ def _carregar(token: str, pool=None):
                       -- o contrato saiu daqui pra tabela própria (164): as colunas
                       -- velhas ficam na base pra rollback e não são mais lidas.
                       , o.desconto_tipo, o.desconto_pct
+                      -- RECORRENTE (23/09/2026): a forma marcada, o desconto do total
+                      -- em R$ e o CPF. Pelo jsonb da linha, pra uma base sem a 311
+                      -- (ou sem a coluna cpf) não derrubar a folha.
+                      , to_jsonb(o)->>'pagamento_anual', to_jsonb(o)->>'desconto_centavos',
+                      to_jsonb(o)->>'cpf'
                  from orcamentos o join contas c on c.id = o.conta_id
                 where o.token=%s""", (token,)).fetchone()
     if not r:
@@ -411,7 +416,10 @@ def _carregar(token: str, pool=None):
      cli_email, cli_tel, agenda_id,
      em_razao, em_doc, em_end, em_cep, em_bairro, em_cidade, em_uf, em_tel, em_email,
      cliente_id, sinal_centavos, sinal_pago_em, pre_reserva_ate, evento_status,
-     vendedor_nome, desc_tipo, desc_pct) = r
+     vendedor_nome, desc_tipo, desc_pct, pag_anual, desc_cent, cli_cpf) = r
+    # CPF mora na coluna própria desde 29/08/2026 (antes tudo caía em `cnpj`): sem
+    # CNPJ, o documento do cliente é o CPF.
+    cli_doc = cli_doc or cli_cpf
     # ASSINOU, CONGELOU: enquanto o orçamento não foi aprovado, a aba Clientes é
     # quem manda — corrigiu o nome/endereço lá, reimprimiu, saiu certo, sem
     # precisar refazer a proposta. Depois de assinado fica exatamente o que o
@@ -444,6 +452,9 @@ def _carregar(token: str, pool=None):
         # cru, em centavos: o contrato calcula entrada e saldo a partir daqui, e
         # não dá pra fazer conta em cima de "R$ 8.900,00"
         "setup_centavos_cru": int(setup_c or 0),
+        # e a mensalidade bruta, crua: `desconto.formas_recorrente` refaz as duas
+        # formas de pagamento a partir dela
+        "mensal_centavos_cru": int(mensal_c or 0),
         "total": _brl(ano1_c if (ano1_c or 0) > 0 else (setup_c or 0)),
         # o mesmo total, CRU: a folha precisa somar o plano de pagamento e comparar,
         # e comparar string formatada seria pedir bug.
@@ -467,8 +478,12 @@ def _carregar(token: str, pool=None):
         # nome de quem abriu a conta (vira "MANOEL SOARES" no papel do cliente);
         # o nome fantasia/razão social é o que a empresa vende. Na proposta
         # recorrente nada muda — segue `contas.nome`, como sempre foi.
-        "vendedor": ((conta_fantasia or em_razao or conta_nome) if modo == "evento"
-                     else conta_nome) or "Proposta",
+        # Desde 23/09/2026 vale pro recorrente também: a proposta da HLED saiu com
+        # "Thompson Cavalcante Fernandes" no alto, no lugar de ZAQ - SISTEMAS IAs.
+        "vendedor": (conta_fantasia or em_razao or conta_nome) or "Proposta",
+        "pagamento_anual": str(pag_anual or "").lower() in ("true", "t", "1"),
+        "desconto_tipo": (desc_tipo or "pct"), "desconto_pct_num": float(desc_pct or 0),
+        "desconto_centavos": int(float(desc_cent or 0)),
         "conta_id": conta_id, "criado_por": criado_por, "logo_url": logo_url,
         "modo": modo or "recorrente",
         "evento": evento, "dia_evento": dia_evento,
@@ -573,6 +588,124 @@ def _subtotais(itens: list[dict]) -> list[dict]:
     return [{"nome": k, "valor": _brl(v)} for k, v in soma.items()]
 
 
+def _incluso_em_lista(desc: str) -> list[dict]:
+    """A descrição do serviço vira a LISTA do que está incluso.
+
+    O catálogo da ZAQ guarda o "o que vem no serviço" separado por " · " (é o
+    único jeito de caber numa linha do catálogo), e a folha imprimia isso como um
+    parágrafo corrido. Quebra também por linha e por "•"/";", que é como se
+    escreve à mão. Texto sem separador nenhum continua sendo um parágrafo só.
+
+    O que diz o que NÃO está incluso ("verba de anúncios não inclusa") sai
+    marcado: é justamente a linha que o cliente não pode deixar de ler."""
+    import re as _re
+    partes = [x.strip(" .") for x in _re.split(r"\s+·\s+|\n+|\s*•\s*|;\s+", desc or "")]
+    partes = [x for x in partes if x]
+    return [{"t": x, "obs": bool(_re.search(r"n[ãa]o\s+inclu", x, _re.I))} for x in partes]
+
+
+def _condicoes_servico(pool, conta_id: int, tem_setup: bool) -> tuple[list[str], bool]:
+    """As condições da proposta recorrente, tiradas dos NÚMEROS DA CASA do
+    contrato de serviço — pra proposta e contrato nunca dizerem coisas
+    diferentes (pedido do dono, 23/09/2026). Número em branco não vira frase.
+
+    Devolve (frases, pede_contrato). Tolerante: sem modelo, sem a 311 ou com o
+    banco fora, sai sem condições — a proposta continua saindo."""
+    from finance import contrato as ctr   # local: é como o resto deste módulo o importa
+    try:
+        m = ctr.carregar_modelo(pool, conta_id, modo=ctr.MODO_SERVICO)
+    except Exception:  # noqa: BLE001
+        return [], False
+    rg = m.get("regras") or {}
+    frases = []
+    aviso = str(rg.get("aviso_previo_dias") or "").strip()
+    if aviso:
+        frases.append(f"Sem fidelidade: o cancelamento é feito com aviso prévio de "
+                      f"{aviso}{'' if 'dia' in aviso else ' dias'}.")
+    idx = str(rg.get("indice_reajuste") or "").strip()
+    if idx:
+        frases.append(f"Reajuste anual pelo {idx}.")
+    sup = str(rg.get("suporte_horario") or "").strip()
+    if sup:
+        frases.append(f"Suporte {sup}, incluído na mensalidade.")
+    if tem_setup:
+        prazo = str(rg.get("implantacao_dias") or "").strip()
+        parc = str(rg.get("setup_parcelas") or "").strip()
+        if prazo or parc:
+            txt = "Implantação"
+            if prazo:
+                txt += f" em {prazo}{'' if 'dia' in prazo else ' dias'}"
+            if parc:
+                txt += f", paga em {ctr._regra_txt('setup_parcelas', parc)}"
+            frases.append(txt + ".")
+    pede = bool(m.get("pedir_assinatura")) and not m.get("novo")
+    if pede:
+        frases.append("Depois da aprovação, o contrato de prestação de serviços é "
+                      "enviado para assinatura eletrônica.")
+    return frases, pede
+
+
+def _folha_recorrente(d: dict, pool) -> dict:
+    """Tudo o que a folha do RECORRENTE mostra, montado de uma vez.
+
+    Nasceu da proposta da HLED (ZAQ, 23/09/2026): a folha antiga mostrava o valor
+    cheio de cada serviço, "Mensalidade R$ 5.700" (o bruto) e "Total 1º ano
+    R$ 65.699" (já com desconto) — dois números que não fechavam, e o valor
+    combinado, R$ 3.000/mês, em lugar nenhum.
+
+    O DINHEIRO SAI DE `desconto.formas_recorrente`, a mesma conta do salvar: a
+    folha mostra as duas formas (mensal e anual à vista) e é o cliente quem
+    escolhe ao aprovar."""
+    itens = d["itens"]
+    linhas = []
+    tem_setup = False
+    for i, it in enumerate(itens, 1):
+        if not isinstance(it, dict):
+            continue
+        liq = dsc.liquido_do_item(it)
+        s_b = max(0, int(it.get("setup") or 0)) * 100
+        m_b = max(0, int(it.get("mensal") or 0)) * 100
+        tem_setup = tem_setup or s_b > 0
+        linhas.append({
+            "n": i, "nome": it.get("nome") or "",
+            "icone": ics.svg(ics.escolher(it.get("nome"), it.get("categoria"),
+                                          it.get("icone"), modo="recorrente"), px=23),
+            "inclui": _incluso_em_lista(it.get("desc") or ""),
+            "setup": _brl(liq["setup"]) if liq["setup"] else "—",
+            "setup_cheio": _brl(s_b) if liq["setup"] < s_b else "",
+            "mensal": _brl(liq["mensal"]),
+            "mensal_cheio": _brl(m_b) if liq["mensal"] < m_b else "",
+            "desc_mensal": _brl(m_b - liq["mensal"]) if liq["mensal"] < m_b else "",
+        })
+    f = dsc.formas_recorrente(
+        itens, setup_centavos=d.get("setup_centavos_cru") or 0,
+        mensal_centavos=d.get("mensal_centavos_cru") or 0,
+        anual=d.get("pagamento_anual"), tipo=d.get("desconto_tipo") or "pct",
+        pct=d.get("desconto_pct_num") or 0, valor=d.get("desconto_centavos") or 0)
+    mensal, anual = f["mensal"], f["anual"]
+    # o desconto do TOTAL, por mês: o que sobrou entre as linhas já descontadas e
+    # a mensalidade final (o desconto final cai proporcional nas duas pontas).
+    pos_itens = f["tabela_mensal"] - f["desconto_itens_mensal"]
+    desc_total_mes = max(0, pos_itens - mensal["mensal"])
+    condicoes, pede_contrato = _condicoes_servico(pool, d["conta_id"], tem_setup)
+    return {
+        "linhas": linhas, "tem_setup": tem_setup,
+        "tabela_mensal": _brl(f["tabela_mensal"]),
+        "desc_itens_mensal": _brl(f["desconto_itens_mensal"]) if f["desconto_itens_mensal"] else "",
+        "desc_total_mensal": _brl(desc_total_mes) if desc_total_mes else "",
+        "desc_total_pct": d.get("desconto_pct") or "",
+        "mensal": _brl(mensal["mensal"]),
+        "doze": _brl(mensal["total_anual"]),
+        "setup": _brl(mensal["setup"]) if mensal["setup"] else "",
+        "anual_total": _brl(anual["total_anual"]),
+        "anual_mensal": _brl(anual["mensal"]),
+        "economia": _brl(f["economia_anual"]) if f["economia_anual"] else "",
+        "tem_anual": anual["total_anual"] > 0 and f["economia_anual"] > 0,
+        "escolhido": "anual" if d.get("pagamento_anual") else "mensal",
+        "condicoes": condicoes, "pede_contrato": pede_contrato,
+    }
+
+
 def emp_dados(pool, conta_id):
     from finance import empresa as _emp
     return _emp.obter_dados_empresa(pool, conta_id) or {}
@@ -621,6 +754,7 @@ def proposta_publica(request: Request, token: str, erro: str = ""):
         linhas = [{"nome": (it.get("nome") or ""), "desc": (it.get("desc") or ""),
                    "setup": _reais(it.get("setup")), "mensal": _reais(it.get("mensal"))}
                   for it in d["itens"]]
+        d["rec"] = _folha_recorrente(d, get_pool())
     _MES = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",
             "agosto", "setembro", "outubro", "novembro", "dezembro"]
     d["data_str"] = f"{d['criado'].day} de {_MES[d['criado'].month]} de {d['criado'].year}"
@@ -665,10 +799,18 @@ def proposta_publica(request: Request, token: str, erro: str = ""):
 
 @router.post("/proposta/{token}/assinar")
 def proposta_assinar(request: Request, background: BackgroundTasks, token: str,
-                     nome: str = Form(""), doc: str = Form(""), aceite: str = Form("")):
+                     nome: str = Form(""), doc: str = Form(""), aceite: str = Form(""),
+                     forma: str = Form("")):
     if not (nome or "").strip() or aceite != "on":
         return RedirectResponse(
             f"/proposta/{token}?erro=Preencha+seu+nome+e+marque+o+aceite.", status_code=303)
+    # RECORRENTE: a forma de pagamento que o cliente marcou (mensal × anual à
+    # vista) é gravada ANTES da aprovação — é a aprovação que cria o contrato, e
+    # ele precisa nascer com a forma escolhida. Só no recorrente e só antes de
+    # aprovar (ver `vendas.aplicar_forma_recorrente`).
+    if forma in ("mensal", "anual"):
+        from finance import vendas as _vendas
+        _vendas.aplicar_forma_recorrente(get_pool(), token, forma == "anual")
     if registrar_assinatura(get_pool(), token, nome, doc, _ip(request)):
         d = _carregar(token)
         if d:
@@ -837,6 +979,35 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
   table.pag td::before{content:attr(data-r) " ";font-size:10px;letter-spacing:.06em;
     text-transform:uppercase;color:#8A8475}
 }
+/* ---- recorrente (23/09/2026) ---- */
+.nw{white-space:nowrap}
+.cli .k{color:#8A8475;font-size:11.5px}
+.cli .g2{display:grid;grid-template-columns:1fr 1fr;gap:1px 18px;margin-top:5px;font-size:13px}
+.cli .g2 .w{grid-column:1/-1}
+.inc{list-style:none;margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:2px 14px}
+.inc li{font-size:11.5px;color:#5A6678;line-height:1.45;padding-left:15px;position:relative}
+.inc li::before{content:"";position:absolute;left:1px;top:5px;width:7px;height:4px;border-left:1.6px solid #1F7A4D;border-bottom:1.6px solid #1F7A4D;transform:rotate(-45deg)}
+.inc li.obs{color:#8A6A2A;grid-column:1/-1}
+.inc li.obs::before{border:0;content:"!";transform:none;top:0;left:3px;font-weight:700;color:#B8862E;font-size:11px}
+table.rec .selo svg{width:23px;height:23px}
+.liq{display:block;font-weight:700;font-size:14px;color:#14213D}
+.pm{font-size:10px;color:#8A8475;font-weight:400;font-family:system-ui,sans-serif;margin-left:2px}
+.dtag{display:inline-block;margin-top:3px;font-size:10px;font-weight:700;color:#0b7a56;background:#EAF6EF;border-radius:5px;padding:1px 6px;font-family:system-ui,sans-serif}
+.fin .l small{display:block;letter-spacing:0;text-transform:none;color:#9FA8BC;font-weight:400;font-size:11.5px;margin-top:3px}
+.fin .pm2{font-size:13px;color:#9FA8BC;font-weight:500}
+.formas{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fm{border:1px solid #ECE7DC;border-radius:11px;padding:12px 14px;font-size:12px;color:#5A6678;line-height:1.5}
+.fm .t{font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:#8A8475}
+.fm .v{font-family:var(--mono);font-size:18px;font-weight:700;color:#14213D;margin:3px 0 2px}
+.fm.eco{border-color:#C6E4D2;background:#F4FAF6}.fm.eco .t{color:#1F7A4D}
+.fm.on{border-color:#14213D;box-shadow:inset 0 0 0 1px #14213D}
+.cond-l{white-space:normal}
+.cond-l div{padding-left:14px;position:relative}
+.cond-l div::before{content:"•";position:absolute;left:2px;color:#B8862E}
+.sign .forma{display:grid;gap:6px;margin-bottom:12px}
+.sign .forma label{display:flex;gap:8px;align-items:center;font-size:13px;color:#cdece0;border:1px solid #2a6b4c;border-radius:9px;padding:9px 12px;cursor:pointer}
+.sign .forma label b{color:#fff}
+@media screen and (max-width:560px){.cli .g2,.inc,.formas{grid-template-columns:1fr}}
 .assp{display:none}
 @media print{
   body{background:#fff;padding:0}
@@ -911,7 +1082,9 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
       <div class="hdl">{% if prop.logo_url %}<span class="lgo"><img src="{{ prop.logo_url }}" alt=""></span>{% endif %}<div>
         <div class="lg">{{ prop.vendedor }} <span>·</span></div>
         <div class="sub">{{ 'Orçamento de evento' if evento else 'Proposta comercial' }}</div>
-        {% if evento %}<div class="emit">
+        {#- os dados da empresa nos DOIS modos desde 23/09/2026: a proposta da ZAQ
+            saía sem razão social, CNPJ, endereço nem contato. #}
+        <div class="emit">
           {%- if prop.emitente.razao and prop.emitente.razao != prop.vendedor %}{{ prop.emitente.razao }}{% endif %}
           {%- if prop.emitente.doc %}{% if prop.emitente.razao and prop.emitente.razao != prop.vendedor %} · {% endif %}CNPJ {{ prop.emitente.doc }}{% endif %}
           {%- if prop.emitente.endereco %}<br>{{ prop.emitente.endereco }}
@@ -920,15 +1093,15 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
             {%- if prop.emitente.cep %} · CEP {{ prop.emitente.cep }}{% endif %}{% endif %}
           {%- if prop.emitente.telefone or prop.emitente.email %}<br>
             {{- prop.emitente.telefone }}{% if prop.emitente.telefone and prop.emitente.email %} · {% endif %}{{ prop.emitente.email }}{% endif %}
-          {%- if prop.vendedor_nome %}<br>Vendedor: {{ prop.vendedor_nome }}{% endif %}
-        </div>{% endif %}
+          {%- if prop.vendedor_nome %}<br>{{ 'Vendedor' if evento else 'Responsável' }}: {{ prop.vendedor_nome }}{% endif %}
+        </div>
       </div></div>
       <div class="mt"><b>{{ 'Orçamento' if evento else 'Proposta comercial' }}</b>{{ prop.doc_num }}<br>
         {%- if evento %}Emitido em {{ prop.criado.strftime('%d/%m/%Y') }}<br><span style="color:#E0B458">Válido até {{ prop.validade_str }}</span>
         {#- a data sem rótulo lia como enfeite. A folha do evento já dizia "Emitido em";
             aqui dizia só "12 de agosto de 2026", e quem recebe não sabia se aquilo era
             a data de emissão, de validade ou do serviço. #}
-        {%- else %}Emitida em {{ prop.data_str }}{% endif %}</div>
+        {%- else %}Emitida em {{ prop.criado.strftime('%d/%m/%Y') }}<br><span style="color:#E0B458">Válida até {{ prop.validade_str }}</span>{% endif %}</div>
     </div>
     <div class="bd">
       {% if evento and prop.tem_evento %}
@@ -947,8 +1120,8 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
       </div>{% endif %}
       {% if prop.ev.local %}<div class="local">📍 {{ prop.ev.local }}</div>{% endif %}
       {% endif %}
-      <div class="eb">{{ 'Dados do cliente' if evento else 'Preparada para' }}</div>
       {% if evento %}
+      <div class="eb">Dados do cliente</div>
       <div class="cli"><b>{{ prop.empresa }}</b>{% if prop.cliente.doc %} · {{ prop.cliente.doc }}{% endif %}
         {%- if prop.contato and prop.contato != prop.empresa %}<br><span style="color:#A8A192">A/C {{ prop.contato }}</span>{% endif %}
         {%- if prop.cliente.endereco or prop.cliente.cidade %}<br>{{ prop.cliente.endereco }}
@@ -1001,19 +1174,56 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
       {% endif %}
       {% if prop.escopo %}<div class="eb">Condições</div><div class="cond">{{ prop.escopo }}</div>{% endif %}
       {% else %}
-      <div class="cli"><b>{{ prop.empresa }}</b>{% if prop.contato %} · {{ prop.contato }}{% endif %}{% if prop.whats %} · {{ prop.whats }}{% endif %}{% if prop.segmento %}<br><span style="color:#A8A192">Segmento: {{ prop.segmento }}</span>{% endif %}</div>
+      {# RECORRENTE, redesenhado em 23/09/2026 a partir da proposta da HLED (ZAQ):
+         o contratante inteiro, cada serviço com ícone e a lista do que inclui, o
+         cheio riscado, e a conta que fecha — tabela, desconto, mensalidade. Ver
+         `_folha_recorrente` e docs/mockups/zaq_proposta_recorrente.html. #}
+      {% set rec = prop.rec %}
+      <div class="eb">Contratante</div>
+      <div class="cli"><b style="font-size:15px">{{ prop.empresa }}</b>{% if prop.cliente.doc %} · <span class="nw">{{ 'CNPJ' if prop.cliente.doc|length > 14 else 'CPF' }} {{ prop.cliente.doc }}</span>{% endif %}
+        {%- if prop.segmento %}<br><span class="k">Segmento:</span> {{ prop.segmento }}{% endif %}
+        <div class="g2">
+          {%- if prop.contato and prop.contato != prop.empresa %}<div><span class="k">A/C</span> {{ prop.contato }}</div>{% endif %}
+          {%- if prop.whats or prop.cliente.telefone %}<div><span class="k">WhatsApp</span> {{ prop.whats or prop.cliente.telefone }}</div>{% endif %}
+          {%- if prop.cliente.email %}<div><span class="k">E-mail</span> {{ prop.cliente.email }}</div>{% endif %}
+          {%- if prop.cliente.cidade %}<div><span class="k">Cidade</span> {{ prop.cliente.cidade }}{% if prop.cliente.uf %}/{{ prop.cliente.uf }}{% endif %}</div>{% endif %}
+          {%- if prop.cliente.endereco %}<div class="w"><span class="k">Endereço</span> {{ prop.cliente.endereco }}{% if prop.cliente.cep %} · CEP {{ prop.cliente.cep }}{% endif %}</div>{% endif %}
+        </div></div>
       {% if prop.escopo %}<div class="eb">Escopo da solução</div><p class="es">{{ prop.escopo }}</p>{% endif %}
-      {% if linhas %}
+      {% if rec.linhas %}
       <div class="eb">Serviços contratados</div>
-      <table><tr><th>Serviço</th><th class="r">Setup</th><th class="r">Mensal</th></tr>
-        {% for l in linhas %}<tr><td><b>{{ l.nome }}</b>{% if l.desc %}<small>{{ l.desc }}</small>{% endif %}</td><td class="r">{{ l.setup }}</td><td class="r">{{ l.mensal }}</td></tr>{% endfor %}
+      <table class="itens rec"><tr><th style="width:24px">#</th><th>Serviço</th>
+          {% if rec.tem_setup %}<th class="r" style="width:104px">Implantação</th>{% endif %}
+          <th class="r" style="width:112px">Mensal</th></tr>
+        {% for l in rec.linhas %}<tr><td class="n">{{ l.n }}</td>
+          <td><div class="item-l"><span class="selo">{{ l.icone|safe }}</span>
+            <div style="min-width:0"><b>{{ l.nome }}</b>
+              {%- if l.inclui|length > 1 %}<ul class="inc">{% for x in l.inclui %}<li{% if x.obs %} class="obs"{% endif %}>{{ x.t }}</li>{% endfor %}</ul>
+              {%- elif l.inclui %}<small>{{ l.inclui[0].t }}</small>{% endif %}
+            </div></div></td>
+          {% if rec.tem_setup %}<td class="q" data-r="Implantação">{% if l.setup_cheio %}<span class="risc">{{ l.setup_cheio }}</span>{% endif %}{{ l.setup }}</td>{% endif %}
+          <td class="q" data-r="Mensal">{% if l.mensal_cheio %}<span class="risc">{{ l.mensal_cheio }}</span>{% endif %}<b class="liq">{{ l.mensal }}<span class="pm">/mês</span></b>
+            {%- if l.desc_mensal %}<span class="dtag">− {{ l.desc_mensal }}</span>{% endif %}</td></tr>{% endfor %}
       </table>
       {% endif %}
-      <div class="tot">
-        <div class="bx"><div class="l">Investimento inicial</div><div class="v">{{ prop.setup }}</div></div>
-        <div class="bx"><div class="l">Mensalidade</div><div class="v">{{ prop.mensal }}</div></div>
-      </div>
-      <div class="fin"><div class="l">Total estimado · 1º ano</div><div class="v">{{ prop.ano1 }}</div></div>
+      {% if rec.desc_itens_mensal or rec.desc_total_mensal %}
+      <div class="subs">
+        <div class="sub-cat"><span>Mensalidade de tabela</span><b>{{ rec.tabela_mensal }}</b></div>
+        {% if rec.desc_itens_mensal %}<div class="sub-cat desconto"><span>Desconto nos serviços</span><b>− {{ rec.desc_itens_mensal }}</b></div>{% endif %}
+        {% if rec.desc_total_mensal %}<div class="sub-cat desconto"><span>Desconto na proposta{% if rec.desc_total_pct %} ({{ rec.desc_total_pct }}%){% endif %}</span><b>− {{ rec.desc_total_mensal }}</b></div>{% endif %}
+      </div>{% endif %}
+      <div class="fin"><div class="l">Investimento mensal<small>{% if rec.setup %}Implantação {{ rec.setup }}{% else %}Sem taxa de implantação{% endif %} · 12 meses: {{ rec.doze }}</small></div>
+        <div class="v">{{ rec.mensal }}<span class="pm2"> /mês</span></div></div>
+      {% if rec.tem_anual %}
+      <div class="eb">Forma de pagamento</div>
+      <div class="formas">
+        <div class="fm{% if rec.escolhido == 'mensal' %} on{% endif %}"><div class="t">Mensal</div><div class="v">{{ rec.mensal }}</div>todo mês{% if rec.pede_contrato %}, no dia que você escolher ao assinar o contrato{% endif %}</div>
+        <div class="fm eco{% if rec.escolhido == 'anual' %} on{% endif %}"><div class="t">Anual à vista · −15%</div><div class="v">{{ rec.anual_total }}</div>as 12 mensalidades de uma vez{% if rec.economia %}: economia de {{ rec.economia }}{% endif %}</div>
+      </div>{% endif %}
+      {% if rec.condicoes %}
+      <div class="eb">Condições</div>
+      <div class="cond cond-l">{% for c in rec.condicoes %}<div>{{ c }}</div>{% endfor %}</div>
+      {% endif %}
       {% endif %}
     </div>
     {% if evento %}
@@ -1068,8 +1278,16 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
     <label class="ck"><input type="checkbox" name="aceite"> Li e concordo com os termos e valores deste orçamento.</label>
     <button class="go" type="submit">✓ Aprovar e reservar a data</button>
     {% else %}
-    <p>Ao aprovar, você aceita esta proposta e autoriza o início. Fica registrado com seu nome, data/hora e IP.</p>
+    <p>Ao aprovar, você aceita esta proposta{% if prop.rec and prop.rec.pede_contrato %}; em seguida chega o contrato para você assinar, e só depois da assinatura a primeira cobrança é gerada{% else %} e autoriza o início{% endif %}. Fica registrado com seu nome, data/hora e IP.</p>
     {% if erro %}<div class="err">{{ erro }}</div>{% endif %}
+    {# A FORMA É ESCOLHA DO CLIENTE (dono, 23/09/2026): as duas estão na folha e
+       ele marca aqui. `proposta_assinar` refaz os valores da forma escolhida
+       antes de registrar a aprovação. #}
+    {% if prop.rec and prop.rec.tem_anual %}
+    <div class="forma">
+      <label><input type="radio" name="forma" value="mensal"{% if prop.rec.escolhido == 'mensal' %} checked{% endif %}> <b>Mensal</b> · {{ prop.rec.mensal }}/mês</label>
+      <label><input type="radio" name="forma" value="anual"{% if prop.rec.escolhido == 'anual' %} checked{% endif %}> <b>Anual à vista</b> · {{ prop.rec.anual_total }}{% if prop.rec.economia %} (economia de {{ prop.rec.economia }}){% endif %}</label>
+    </div>{% endif %}
     <div class="row">
       <input type="text" name="nome" placeholder="Seu nome completo" required>
       <input type="text" name="doc" placeholder="CPF (opcional)">

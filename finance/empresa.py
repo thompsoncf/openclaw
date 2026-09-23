@@ -1245,6 +1245,79 @@ def pagamentos_candidatos(pool, conta_id, titulos, tipo) -> dict:
     return achados
 
 
+def contas_que_o_pagamento_quita(pool, conta_id: int, lancamento_id: int) -> list[dict]:
+    """As contas em aberto que ESTE pagamento pode quitar — a régua ao contrário.
+
+    `pagamentos_candidatos` parte das contas e procura o pagamento: é a pergunta
+    da tela. Esta parte do pagamento e procura a conta: é a pergunta do momento em
+    que o comprovante CHEGA pelo WhatsApp (entrega 3 do plano de 23/09/2026). É
+    ali que o contexto é máximo — nome, período, banco e valor acabaram de ser
+    lidos do documento — e por isso é ali que a pergunta custa um "sim" e acerta.
+
+    A régua é A MESMA, peça por peça, pra que o que o WhatsApp oferece seja
+    exatamente o que `conciliar_titulo` aceita: `pagamento_serve_pro_titulo`
+    (valor com o acréscimo que o atraso explica, janela, período e nome no texto),
+    mais as duas travas de `pagamentos_candidatos` que moram fora dela — o
+    pagamento que já quita uma conta não quita outra, e o eco de uma baixa (mesmo
+    dia e valor de um lançamento `origem='titulo'`) não é dinheiro novo.
+
+    Medido na Prime em 23/09/2026 com os comprovantes do dia 21: a 1ª quinzena do
+    Pedro Yan NÃO é oferecida pra 2ª, a quinzena de agosto da Irisnalva NÃO é
+    oferecida pra de setembro, e o Thiago não fecha o Pedro. O "Águas de Teresina"
+    de R$ 86,22 que chegou às 20:57 é oferecido pra conta de R$ 86,22 vencida em
+    21/09 — que é o caso que este caminho existe pra resolver.
+
+    NÃO FECHA NADA. Devolve a lista; quem decide é o dono, respondendo.
+    """
+    with pool.connection() as c:
+        l = c.execute(
+            """select id, data, valor_centavos, tipo, origem, descricao
+                 from lancamentos where id=%s and conta_id=%s""",
+            (lancamento_id, conta_id)).fetchone()
+        if not l:
+            return []
+        lanc = {"id": l[0], "data": l[1], "valor_centavos": int(l[2] or 0),
+                "tipo": l[3], "origem": l[4], "descricao": l[5]}
+        if c.execute("select 1 from titulos where lancamento_id=%s and conta_id=%s",
+                     (lancamento_id, conta_id)).fetchone():
+            return []
+        if lanc["origem"] != "titulo" and c.execute(
+                """select 1 from lancamentos
+                    where conta_id=%s and origem='titulo' and tipo=%s and data=%s
+                      and valor_centavos=%s and id <> %s limit 1""",
+                (conta_id, lanc["tipo"], lanc["data"], lanc["valor_centavos"],
+                 lancamento_id)).fetchone():
+            return []
+        tipo = "pagar" if lanc["tipo"] == "despesa" else "receber"
+        if not lanc["data"]:
+            return []
+        rows = c.execute(
+            """select t.id, t.tipo, t.descricao, t.contraparte, t.valor_centavos,
+                      t.vencimento, t.status, t.aprovacao, t.centro_custo_id, cc.nome
+                 from titulos t
+                 left join centros_custo cc on cc.id = t.centro_custo_id
+                                            and cc.conta_id = t.conta_id
+                where t.conta_id=%s and t.tipo=%s and t.status='aberto'
+                  and t.valor_centavos > 0
+                  and t.vencimento between %s and %s""",
+            (conta_id, tipo,
+             lanc["data"] - timedelta(days=JANELA_ATRASO_DIAS),
+             lanc["data"] + timedelta(days=JANELA_CONCILIACAO_DIAS))).fetchall()
+    achados = []
+    for r in rows:
+        t = {"id": r[0], "tipo": r[1], "descricao": r[2], "contraparte": r[3],
+             "valor_centavos": int(r[4] or 0), "vencimento": r[5], "status": r[6],
+             "aprovacao": r[7], "centro_custo_id": r[8], "centro_nome": r[9] or ""}
+        if pagamento_serve_pro_titulo(t, lanc) is None:
+            t["acrescimo_centavos"] = acrescimo_do_pagamento(t, lanc) or 0
+            achados.append(t)
+    # o mais provável primeiro: o mais perto do vencimento e, empatado, o que
+    # precisa de menos acréscimo pra explicar o valor — a mesma ordem da tela
+    achados.sort(key=lambda t: (abs((lanc["data"] - t["vencimento"]).days),
+                                t["acrescimo_centavos"]))
+    return achados
+
+
 def conciliar_titulo(pool, conta_id: int, titulo_id: int, lancamento_id: int) -> dict:
     """Amarra um pagamento QUE JÁ EXISTE a um título aberto, e fecha o título.
 

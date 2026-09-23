@@ -40,6 +40,22 @@ def bloco_persona_pj(pool, conta_id: int, empresa_nome: str = "") -> str:
     except Exception:
         res, funcs = {}, []
     nomes = ", ".join(f["nome"] for f in funcs[:8]) or "nenhum cadastrado"
+    # OS CENTROS DE CUSTO DA CONTA, com os nomes que o dono deu. Até 23/09/2026 o
+    # agente só aceitava centro "se a pessoa disser de qual unidade foi" e nunca
+    # sabia quais existiam — por isso "foi investimento" não virava INVESTIMENTO.
+    # Só LEITURA: nenhum centro é criado nem mexido daqui ("não mexer em centro
+    # de custos", regra do dono no mesmo dia).
+    try:
+        from . import plano_contas as _pc
+        centros = [c["nome"] for c in _pc.listar_centros(pool, conta_id)]
+    except Exception:
+        centros = []
+    linha_centros = (
+        f"CENTROS DE CUSTO desta empresa: {', '.join(centros)}.\n"
+        "  Ao registrar gasto/receita de EMPRESA, passe centro_custo com o nome EXATO\n"
+        "  de um deles QUANDO A PESSOA DISSER qual é ('foi investimento' -> o\n"
+        "  centro que tem esse nome). Não escolha por conta própria.\n"
+        if centros else "")
     a_pagar = formatar_brl(res.get("a_pagar_centavos", 0))
     a_receber = formatar_brl(res.get("a_receber_centavos", 0))
     atrasados = res.get("n_atrasados", 0)
@@ -70,6 +86,19 @@ O QUE FAZER (use as ferramentas de empresa):
 - "boleto/conta da luz R$ X vence dia Y", "tenho que pagar Z" -> criar_titulo (tipo=pagar).
 - "fulano me deve X", "vou receber Y de cliente" -> criar_titulo (tipo=receber).
 - "paguei o boleto X", "quita o título Y", "deu baixa no aluguel" -> dar_baixa_titulo.
+  EXCETO se o pagamento JÁ foi registrado (comprovante, foto, extrato): aí o
+  dinheiro já está no caixa, e dar_baixa_titulo o lançaria DUAS vezes.
+
+COMPROVANTE QUE QUITA CONTA:
+- Quando o lancar_despesa/lancar_receita devolver "CONTA EM ABERTO QUE ESTE
+  PAGAMENTO PODE QUITAR", faça a pergunta que ele pede NA MESMA resposta em que
+  confirma o registro. Ex.: "Tem uma conta aberta que bate: Águas de Teresina,
+  R$ 86,22, venceu 21/09 — centro DESPESA FIXA. Esse pagamento quita ela?"
+- SÓ com o "sim" dele chame quitar_conta_com_pagamento (titulo_id e
+  lancamento_id da pergunta). Com duas ou mais contas, ele escolhe QUAL.
+- "Não", silêncio ou outro assunto: não faça nada. A conta continua aberta e
+  aparece na tela da Empresa pra ele fechar depois.
+{linha_centros}
 - "dei um vale de X pro fulano", "adiantei Y pro João" -> registrar_vale.
 - "como está a folha?", "quanto devo de salário?", "qual meu saldo/fluxo?",
   "o que tenho a pagar?" -> consultar_empresa.
@@ -195,6 +224,45 @@ def construir_ferramentas_pj(pool, conta_id: int,
                     + "; ".join(f"{t['descricao']} ({formatar_brl(t['valor_centavos'])})"
                                 for t in cand[:5]) + ". Qual deles?")
         return "Não achei esse título em aberto. Pode dizer o valor ou a descrição exata?"
+
+    def quitar_conta_com_pagamento(e: dict) -> str:
+        """Liga um pagamento QUE JÁ ESTÁ NO CAIXA a uma conta aberta, e a fecha.
+
+        É a metade que faltava do comprovante (entrega 3, 23/09/2026): o
+        comprovante vira lançamento sozinho, e a conta ficava aberta. A irmã
+        `dar_baixa_titulo` NÃO serve aqui — ela lança o dinheiro de novo.
+
+        Quem garante que o par é válido é `emp.conciliar_titulo`, com a mesma
+        régua da tela: um id trocado pelo modelo esbarra lá, e a resposta diz por
+        quê em vez de fechar a conta errada."""
+        try:
+            tid, lid = int(e.get("titulo_id")), int(e.get("lancamento_id"))
+        except (TypeError, ValueError):
+            return "Preciso do titulo_id e do lancamento_id que vieram na pergunta."
+        r = emp.conciliar_titulo(pool, conta_id, tid, lid)
+        if not r.get("ok"):
+            return f"NÃO quitei: {r.get('erro')} A conta continua aberta."
+        # O CENTRO que foi proposto na pergunta e o dono confirmou. Só preenche o
+        # que o lançamento não tem — a mesma regra da conciliação pela tela.
+        cen_txt = ""
+        nome_centro = (e.get("centro_custo") or "").strip()
+        if nome_centro:
+            from . import plano_contas as _pc
+            cid = _pc.centro_por_nome(pool, conta_id, nome_centro)
+            if cid:
+                with pool.connection() as c:
+                    feito = c.execute(
+                        """update lancamentos set centro_custo_id=%s
+                            where id=%s and conta_id=%s and centro_custo_id is null
+                        returning id""", (cid, lid, conta_id)).fetchone()
+                    c.commit()
+                if feito:
+                    cen_txt = f" Centro de custo: {nome_centro}."
+        quando = r["pago_em"].strftime("%d/%m/%Y") if r.get("pago_em") else ""
+        return (f"Conta quitada ✅ '{r['descricao']}' "
+                f"({formatar_brl(r['valor_centavos'])}), paga em {quando}. O "
+                "pagamento que já estava no caixa foi ligado a ela — nenhum "
+                f"dinheiro novo foi lançado.{cen_txt}")
 
     def registrar_vale(e: dict) -> str:
         nome = (e.get("funcionario") or "").strip()
@@ -371,6 +439,24 @@ def construir_ferramentas_pj(pool, conta_id: int,
                 },
             },
             executar=dar_baixa_titulo,
+        ),
+        Ferramenta(
+            nome="quitar_conta_com_pagamento",
+            descricao=("Fecha uma conta aberta LIGANDO a ela um pagamento que JÁ ESTÁ "
+                       "no caixa (o comprovante que acabou de ser registrado). Use SÓ "
+                       "depois de o lancar ter perguntado 'CONTA EM ABERTO QUE ESTE "
+                       "PAGAMENTO PODE QUITAR' e de a pessoa CONFIRMAR. Não lança "
+                       "dinheiro novo — ao contrário do dar_baixa_titulo."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "titulo_id": {"type": "integer", "description": "o titulo_id da pergunta"},
+                    "lancamento_id": {"type": "integer", "description": "o lancamento_id da pergunta"},
+                    "centro_custo": {"type": "string", "description": "o centro proposto na pergunta, ou outro que a pessoa disser; vazio se nenhum"},
+                },
+                "required": ["titulo_id", "lancamento_id"],
+            },
+            executar=quitar_conta_com_pagamento,
         ),
         Ferramenta(
             nome="registrar_vale",

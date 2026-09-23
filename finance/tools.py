@@ -109,6 +109,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     f"Se este comprovante for de OUTRO pagamento, pergunte ao usuario "
                     f"e chame de novo com forcar: true. Se for o mesmo, avise que ja' "
                     f"estava registrado.")
+        proposta = "" if _nat == "pessoal" else _proposta_de_quitacao(salvo.id)
         rotulo = "Despesa" if tipo == Tipo.DESPESA else "Receita"
         forma_txt = f", {forma}" if forma else ""
         cc_txt = ""
@@ -118,7 +119,85 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                 cc_txt += f", centro {entrada.get('centro_custo')}"
         return (f"{rotulo} registrada: {formatar_brl(salvo.valor_centavos)} em "
                 f"{salvo.categoria}{forma_txt}{cc_txt} "
-                f"({salvo.data.strftime('%d/%m/%Y')}). id={salvo.id}")
+                f"({salvo.data.strftime('%d/%m/%Y')}). id={salvo.id}{proposta}")
+
+    def _proposta_de_quitacao(lancamento_id: int) -> str:
+        """O pedaço da resposta que PERGUNTA se este pagamento quita uma conta.
+
+        Entrega 3 do plano aprovado em 23/09/2026. O comprovante que o dono manda
+        já vira lançamento (85 dos 165 da Prime vieram assim) — mas a conta a
+        pagar ficava aberta, contando como dívida: em 23/09, 9 das 13 contas
+        abertas tinham o pagamento igual já no caixa.
+
+        SÓ PRO DONO, e com o módulo Empresa. É dele a ferramenta que quita, e é
+        dele a decisão — resposta do dono em 23/09: a pergunta vai pra ele, nunca
+        pra quem só mandou o arquivo.
+
+        E SÓ PERGUNTA. A régua que escolhe os candidatos é a da tela
+        (`contas_que_o_pagamento_quita`), e mesmo acertando o valor ela não sabe
+        se o Pix de R$ 2.400,00 é a parcela de agosto ou a de setembro do banco:
+        quem sabe é quem pagou. Fechar a conta errada esconde dívida.
+        """
+        if papel != "dono":
+            return ""
+        try:
+            from . import empresa as _emp
+            if not _emp.modulo_pj_ativo(livro.pool, livro.conta_id):
+                return ""
+            contas = _emp.contas_que_o_pagamento_quita(livro.pool, livro.conta_id,
+                                                       lancamento_id)
+            if not contas:
+                return ""
+            centros = _centros_propostos(_emp, contas)
+        except Exception:  # noqa: BLE001 — a pergunta nunca derruba o registro
+            return ""
+        linhas = []
+        for t in contas[:4]:
+            quem = f" · {t['contraparte']}" if (t.get("contraparte") or "").strip() else ""
+            venc = t["vencimento"].strftime("%d/%m/%Y")
+            acr = (f" · o pagamento tem {formatar_brl(t['acrescimo_centavos'])} a mais "
+                   f"(fica como multa e juros)" if t.get("acrescimo_centavos") else "")
+            cen = centros.get(t["id"])
+            cen_txt = f" · centro proposto: {cen}" if cen else ""
+            linhas.append(f"- titulo_id={t['id']} · {t['descricao']}{quem} · "
+                          f"{formatar_brl(t['valor_centavos'])} · vence {venc}{acr}{cen_txt}")
+        if len(contas) == 1:
+            pergunta = (
+                "PERGUNTE ao usuario, NESTA MESMA resposta, se este pagamento quita "
+                "essa conta (diga a descricao, o valor e o vencimento dela"
+                + (" e o centro proposto" if centros else "") + "). ")
+        else:
+            pergunta = (
+                f"Sao {len(contas)} contas que podem ser este pagamento: liste TODAS "
+                "e pergunte QUAL delas ele quita. NAO escolha. ")
+        return (
+            f"\n\nCONTA EM ABERTO QUE ESTE PAGAMENTO PODE QUITAR "
+            f"(lancamento_id={lancamento_id}):\n" + "\n".join(linhas) + "\n"
+            + pergunta
+            + "SO' se ele confirmar, chame quitar_conta_com_pagamento com o titulo_id "
+              "e este lancamento_id (e o centro_custo proposto, se ele nao disser "
+              "outro). Se disser que nao, ou mudar de assunto, NAO faca nada: a conta "
+              "continua aberta. NUNCA quite sem a resposta dele, e NUNCA use "
+              "dar_baixa_titulo pra esta conta — o dinheiro ja' esta' no caixa e a "
+              "baixa lancaria a despesa DUAS vezes.")
+
+    def _centros_propostos(_emp, contas) -> dict:
+        """{titulo_id: nome do centro} — o da própria conta ou, sem ele, o que a
+        memória do fornecedor lembra (`memoria_do_fornecedor`, entrega 2). A
+        proposta vai NA pergunta: o "sim" do dono confirma os dois de uma vez."""
+        from . import plano_contas as _pc
+        nomes = {c["id"]: c["nome"] for c in _pc.listar_centros(livro.pool, livro.conta_id)}
+        out = {}
+        for t in contas:
+            cid = t.get("centro_custo_id")
+            if not cid:
+                m = _emp.memoria_do_fornecedor(livro.pool, livro.conta_id,
+                                               t.get("contraparte") or "",
+                                               t.get("descricao") or "", t["tipo"])
+                cid = m and m.get("centro_custo_id")
+            if cid and cid in nomes:
+                out[t["id"]] = nomes[cid]
+        return out
 
     def lancar_despesa(entrada: dict) -> str:
         return lancar(Tipo.DESPESA, entrada)
@@ -437,7 +516,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     "origem": {"type": "string", "enum": ["manual", "foto"]},
                     "natureza": {"type": "string", "enum": ["pessoal", "empresa"], "description": "só para conta PJ que mistura pessoal e empresa: se a pessoa já disse que foi pessoal ou da empresa, passe aqui na hora do registro (evita 2º passo)"},
                     "plano_conta": {"type": "string", "description": "SÓ quando natureza=empresa: código da conta contábil do plano (ex: '5.1.03'). Escolha a mais adequada à categoria/descrição pra já entrar na DRE certa. Se não souber os códigos habilitados desta conta, chame a ferramenta plano_de_contas. Se não tiver certeza, deixe vazio (a pessoa classifica depois)."},
-                    "centro_custo": {"type": "string", "description": "SÓ quando natureza=empresa: nome do centro de custo (ex: 'Unidade Centro'), se a pessoa disser de qual unidade/projeto foi. Opcional."},
+                    "centro_custo": {"type": "string", "description": "SÓ quando natureza=empresa: o nome EXATO de um dos CENTROS DE CUSTO listados no MODO EMPRESA, quando a pessoa disser qual é ('foi investimento' -> o centro INVESTIMENTO). Não escolha por conta própria: na dúvida, deixe vazio. Opcional."},
                     "forcar": {"type": "boolean", "description": "SÓ depois de a ferramenta ter respondido 'NAO registrei — ja existe um lancamento igual' E de a pessoa CONFIRMAR que é outro pagamento. Aí sim mande forcar: true pra registrar os dois. Nunca mande por conta própria: é assim que o mesmo dinheiro entra duas vezes."},
                 },
                 "required": ["valor", "categoria"],
@@ -458,7 +537,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     "origem": {"type": "string", "enum": ["manual", "foto"]},
                     "natureza": {"type": "string", "enum": ["pessoal", "empresa"], "description": "só para conta PJ que mistura pessoal e empresa: se a pessoa já disse que foi pessoal ou da empresa, passe aqui na hora do registro (evita 2º passo)"},
                     "plano_conta": {"type": "string", "description": "SÓ quando natureza=empresa: código da conta contábil do plano (ex: '5.1.03'). Escolha a mais adequada à categoria/descrição pra já entrar na DRE certa. Se não souber os códigos habilitados desta conta, chame a ferramenta plano_de_contas. Se não tiver certeza, deixe vazio (a pessoa classifica depois)."},
-                    "centro_custo": {"type": "string", "description": "SÓ quando natureza=empresa: nome do centro de custo (ex: 'Unidade Centro'), se a pessoa disser de qual unidade/projeto foi. Opcional."},
+                    "centro_custo": {"type": "string", "description": "SÓ quando natureza=empresa: o nome EXATO de um dos CENTROS DE CUSTO listados no MODO EMPRESA, quando a pessoa disser qual é ('foi investimento' -> o centro INVESTIMENTO). Não escolha por conta própria: na dúvida, deixe vazio. Opcional."},
                     "forcar": {"type": "boolean", "description": "SÓ depois de a ferramenta ter respondido 'NAO registrei — ja existe um lancamento igual' E de a pessoa CONFIRMAR que é outro pagamento. Aí sim mande forcar: true pra registrar os dois. Nunca mande por conta própria: é assim que o mesmo dinheiro entra duas vezes."},
                 },
                 "required": ["valor", "categoria"],

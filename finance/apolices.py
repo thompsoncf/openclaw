@@ -644,7 +644,8 @@ def pdfs_do_whatsapp(pool, conta_id: int, *, dias: int = 90,
                -- o que o leitor automático já tirou do documento (migração 304):
                -- é o que faz a lista dizer "Allianz · Maria · vence 23/07/2027" em
                -- vez de repetir o nome do arquivo
-               l.seguradora, l.segurado, l.vigencia_fim, l.erro, (l.id is not null)
+               l.seguradora, l.segurado, l.vigencia_fim, l.erro, (l.id is not null),
+               coalesce(l.lido->>'tipo','apolice')
           from mensagens m
           join conversas cv on cv.id = m.conversa_id
           left join apolice_lida l on l.mensagem_id = m.id and l.conta_id = cv.conta_id
@@ -669,7 +670,8 @@ def pdfs_do_whatsapp(pool, conta_id: int, *, dias: int = 90,
              "ja_cadastrada": bool(r[5]),
              # o pré-cadastro, quando o leitor já passou por este documento
              "lida": bool(r[10]), "seguradora": r[6], "segurado": r[7],
-             "vigencia_fim": r[8], "erro_leitura": r[9] or ""}
+             "vigencia_fim": r[8], "erro_leitura": r[9] or "",
+             "tipo": r[11] if len(r) > 11 else "apolice"}
             for r in rows]
 
 

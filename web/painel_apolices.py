@@ -379,6 +379,12 @@ async def importar_pdf(request: Request, arquivo: UploadFile = File(...),
     return _render("renovacoes", request, **ctx)
 
 
+def _tipo_txt(tipo: str) -> str:
+    """O rótulo do tipo pra tela — vazio quando é a apólice emitida, que é o caso
+    normal e não precisa de selo."""
+    return "" if (tipo or "apolice") == "apolice" else apdf.TIPOS.get(tipo, (tipo, ""))[0]
+
+
 def _conferir_de(r: dict, *, origem: dict | None = None) -> dict:
     """O que a conferência mostra, venha o PDF de onde vier.
 
@@ -392,6 +398,7 @@ def _conferir_de(r: dict, *, origem: dict | None = None) -> dict:
     return {
         "seguradora": L.seguradora or L.campos.get("seguradora") or "",
         "reconhecida": L.reconhecida, "como": L.como, "paginas": L.paginas,
+        "tipo": L.tipo, "tipo_txt": _tipo_txt(L.tipo),
         "checagens": L.checagens, "avisos": L.avisos, "nao_achou": L.nao_achou,
         "n_campos": len(L.campos), "ok": L.ok(), "pdf_nome": r["nome"],
         "pdf_caminho": r["caminho"], "pdf_bytes": r["bytes"], "pdf_lido": lido,
@@ -642,6 +649,8 @@ def _conferir_guardado(ja: dict, origem: dict) -> dict:
         # leitura guardada ANTES do carimbo não sabe dizer como saiu; `reconhecida`
         # é o que se tem, e é o que ela era antes desta tela existir
         "como": lido.get("como") or ("layout" if ja["reconhecida"] else "nada"),
+        "tipo": lido.get("tipo") or "apolice",
+        "tipo_txt": _tipo_txt(lido.get("tipo") or "apolice"),
         "paginas": lido.get("paginas") or 0,
         "checagens": _checagens_de(lido),
         "avisos": lido.get("avisos") or [], "nao_achou": lido.get("nao_achou") or [],
@@ -1066,6 +1075,10 @@ _TPL_CONF = r"""{# O que o leitor achou no PDF. Template próprio porque o mesmo
     {% if conferir.como == 'layout' %}<span class="rn-tag d60">{{ conferir.seguradora }} · {{ conferir.n_campos }} campos</span>
     {% elif conferir.como == 'rotulos' %}<span class="rn-tag d30">{% if conferir.seguradora %}{{ conferir.seguradora }} · {% endif %}{{ conferir.n_campos }} campos · lido pelos rótulos</span>
     {% else %}<span class="rn-tag d15">não achei rótulo que eu conheça</span>{% endif %}
+    {#- QUE PAPEL É ESTE. Só aparece quando NÃO é a apólice emitida: escrever
+        "apólice" numa tela de apólices não informa nada, e "endosso" muda o que
+        a pessoa vai fazer — endosso não se cadastra, se edita o que ele altera. -#}
+    {% if conferir.tipo_txt %}<span class="rn-tag d15">{{ conferir.tipo_txt }}</span>{% endif %}
     <span class="rn-pill">{{ conferir.paginas }} pág.</span>
   </div>
   {% if conferir.checagens %}

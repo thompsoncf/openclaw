@@ -1205,3 +1205,115 @@ def test_sem_desenho_o_leitor_continua_o_de_antes():
     L = ap.ler_texto(papel())
     assert L.reconhecida is True and L.como == "layout"
     assert L.campos["nome"] == "FULANA DE TAL EXEMPLO"
+
+
+# ══════════ QUE PAPEL É ESTE (23/09/2026) ══════════
+#
+# Pergunta do dono sobre os três que sobraram na fila: "veja também se é só
+# proposta". É — e é mais que isso: dos três, NENHUM é a apólice emitida de um
+# carro. Um é proposta, um é endosso, um é cotação de frota. Por isso "faltava
+# campo": o campo não está no papel, porque o papel ainda não é o contrato.
+#
+# Os trechos abaixo são os cabeçalhos REAIS dos oito PDFs medidos.
+
+
+def test_a_apolice_emitida_se_identifica():
+    """Zurich: o papel diz o que ele é numa linha própria."""
+    assert ap.tipo_do_documento("Apólice / Endosso Pessoa Física\n"
+                                "Operação: Emissão da apólice\n") == "apolice"
+
+
+def test_endosso_zerado_nao_faz_de_uma_apolice_um_endosso():
+    """A Zurich e a Mapfre imprimem `Endosso: 0000000` numa apólice SEM endosso
+    nenhum — foi o campo vazio que quase virou o tipo do documento."""
+    assert ap.tipo_do_documento("APÓLICE DE SEGURO AUTO\nEndosso: 0000000\n") == "apolice"
+
+
+def test_o_endosso_se_identifica():
+    """Yelum."""
+    assert ap.tipo_do_documento("Yelum Auto Perfil\n"
+                                "Endosso - Ramo 31 Automovel - Casco\n") == "endosso"
+    assert ap.tipo_do_documento("qualquer coisa\nDADOS DO ENDOSSO\n") == "endosso"
+
+
+def test_o_endosso_vence_a_apolice_que_ele_altera():
+    """Todo endosso traz o número da apólice que ele modifica. Sem esta ordem ele
+    se apresentaria como aquela apólice — e cadastrá-lo criaria uma SEGUNDA linha
+    na carteira pro mesmo carro."""
+    assert ap.tipo_do_documento("DADOS DO ENDOSSO\n"
+                                "Nº Apólice: 31.88.2026.0346799\n") == "endosso"
+
+
+def test_a_proposta_se_identifica():
+    """Tokio Marine e Allianz."""
+    assert ap.tipo_do_documento("Proposta Tokio Marine Auto\n"
+                                "Aceitação sujeita a análise da Seguradora\n") == "proposta"
+    assert ap.tipo_do_documento("PROPOSTA\nOlá FULANA\n") == "proposta"
+
+
+def test_a_cotacao_se_identifica():
+    """Bradesco: "Este demonstrativo de cotação não implica na aceitação"."""
+    assert ap.tipo_do_documento("RESULTADO DA FROTA\n") == "cotacao"
+    assert ap.tipo_do_documento("Este demonstrativo de cotação não implica\n") == "cotacao"
+
+
+def test_a_apolice_vence_a_proposta_que_deu_origem_a_ela():
+    """A Porto traz "Proposta: 2033165281" na apólice já emitida."""
+    assert ap.tipo_do_documento("Sua apólice chegou!\n"
+                                "Proposta:  20 33165281\n") == "apolice"
+
+
+def test_papel_sem_marca_nenhuma_e_tratado_como_apolice():
+    """O padrão é o caso normal da tela — e a conferência é de gente, de todo jeito."""
+    assert ap.tipo_do_documento("um papel qualquer sem marca") == "apolice"
+
+
+def test_proposta_e_cotacao_nao_entram_como_vigentes():
+    """Nenhuma das duas é contrato: pôr na carteira como "vigente" seria dizer
+    que o cliente tem uma cobertura que ele não contratou."""
+    L = ap.ler_texto("Proposta Tokio Marine Auto\nAceitação sujeita a análise\n" + papel())
+    assert L.tipo == "proposta" and L.campos["situacao"] == "proposta"
+
+
+def test_o_endosso_avisa_que_cadastrar_duplica():
+    L = ap.ler_texto("DADOS DO ENDOSSO\n" + papel())
+    assert L.tipo == "endosso"
+    assert any("ALTERA uma apólice que já existe" in a for a in L.avisos)
+
+
+def test_o_tipo_vai_carimbado_com_a_leitura():
+    g = ap.resumo_para_guardar(ap.ler_texto("RESULTADO DA FROTA\n" + papel()))
+    assert g["tipo"] == "cotacao"
+
+
+# ── a conferência que faltava no prêmio ──────────────────────────────────────
+#
+# O endosso da Azul (conta 37, id 6) saiu com prêmio R$ 16,91 e quatro parcelas
+# de R$ 284,25. Nenhuma conta batia porque nenhuma conta era feita: a checagem
+# das parcelas só rodava quando havia TOTAL, e ali não havia.
+
+
+def test_parcelas_que_nao_cabem_no_premio_sao_denunciadas():
+    L = ap.Leitura()
+    L.campos = {"parcelas_centavos": [28425, 28425, 28425, 28417], "premio_centavos": 1691}
+    ap._checar(L)
+    nome, ok, _det = L.checagens[0]
+    assert nome == "as parcelas cabem no prêmio" and ok is False
+    assert any("não cabe nas parcelas" in a for a in L.avisos)
+
+
+def test_um_endosso_com_premio_menor_que_as_parcelas_nao_e_denunciado_a_toa():
+    """Num endosso o prêmio adicional PODE ser menor que as parcelas da apólice
+    de origem. A comparação é de ordem de grandeza, não de centavo."""
+    L = ap.Leitura()
+    L.campos = {"parcelas_centavos": [10000, 10000], "premio_centavos": 9000}
+    ap._checar(L)
+    assert L.checagens[0][1] is True
+
+
+def test_havendo_total_a_checagem_exata_continua_sendo_a_que_vale():
+    L = ap.Leitura()
+    L.campos = {"parcelas_centavos": [5000, 5000], "total_centavos": 10000,
+                "premio_centavos": 1}
+    ap._checar(L)
+    assert L.checagens[0][0] == "soma das parcelas = total" and L.checagens[0][1] is True

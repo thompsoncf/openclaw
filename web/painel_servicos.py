@@ -182,6 +182,9 @@ def _criar_orcamentos(c):
         alter table orcamentos add column if not exists contrato_assinado_por text;
         alter table orcamentos add column if not exists contrato_assinado_doc text;
         alter table orcamentos add column if not exists contrato_assinado_ip  text;
+        alter table orcamentos add column if not exists pagamento_anual boolean not null default false;
+        alter table orcamentos add column if not exists setup_liquido_centavos bigint;
+        alter table orcamentos add column if not exists mensal_liquido_centavos bigint;
         create index if not exists idx_orcamentos_status on orcamentos (status, criado_em desc);
         create index if not exists idx_orcamentos_conta on orcamentos (conta_id, status, criado_em desc);
         create unique index if not exists idx_orcamentos_token on orcamentos (token) where token is not null;
@@ -402,7 +405,10 @@ def painel_servicos(request: Request):
     # só o dono tem); usar ela evita criar uma segunda régua de permissão que
     # amanhã diverge da primeira.
     from contas import equipe as _equipe
-    pode_contrato = servico_avulso and _equipe.caps_do_papel(
+    # Desde 23/09/2026 o recorrente também tem card: o contrato de PRESTAÇÃO DE
+    # SERVIÇOS, que o dono liga por conta. O aditivo continua só no evento
+    # ("contrato sem o aditivo ainda", pediu o dono pra ZAQ).
+    pode_contrato = _equipe.caps_do_papel(
         request.session.get("papel", "dono"))["gerir"]
     # A tela abre no tipo que ESTA empresa mais cadastra, em vez de sempre em PJ.
     # Ver clientes.tipo_predominante: na Prime, 23 de 23 clientes são PF.
@@ -695,6 +701,9 @@ class SalvarIn(BaseModel):
     desconto_tipo: str = "pct"    # 'pct' | 'valor' — desconto do TOTAL
     desconto_pct: float = 0       # 0–100
     desconto_valor: int = 0       # em REAIS
+    # recorrente: o botão "Pagamento anual (-15%)". Só existia na tela — reabrir a
+    # proposta trazia ele desligado e o próximo Salvar mudava o preço (311).
+    anual: bool = False
 
 
 @router.post("/painel/servicos/salvar")
@@ -733,6 +742,13 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     bruto_mensal = max(0, int(dados.mensal or 0)) * 100
     itens_setup = sum(max(0, int(i["setup"] or 0)) for i in itens) * 100
     itens_mensal = sum(max(0, int(i["mensal"] or 0)) for i in itens) * 100
+    # O PAGAMENTO ANUAL (311). A tela que conhece o campo `anual` manda a
+    # mensalidade CHEIA, e o -15% é aplicado aqui, na mesma ordem da tela (depois
+    # do desconto da linha, antes do desconto no total). Aba antiga aberta
+    # durante o deploy não manda o campo: segue com a mensalidade já reduzida
+    # que ela sempre mandou, e fator 1 — o mesmo resultado de ontem.
+    anual = bool(dados.anual) and modo != "evento"
+    fator_mensal = 0.85 if anual else 1.0
     tot = dsc.totais(
         itens,
         tipo="valor" if (dados.desconto_tipo or "") == "valor" else "pct",
@@ -740,7 +756,11 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
         valor=max(0, int(dados.desconto_valor or 0)) * 100,
         extra_setup=max(0, bruto_setup - itens_setup),
         extra_mensal=max(0, bruto_mensal - itens_mensal),
+        fator_mensal=fator_mensal,
     )
+    # `mensal_centavos` continua querendo dizer o que sempre disse — a mensalidade
+    # bruta, já com o anual —, porque funil, cockpit e Raio-X leem a coluna assim.
+    bruto_mensal = int(round(bruto_mensal * fator_mensal))
     # O documento chega num campo só (a tela tem um input) e é roteado por TAMANHO:
     # 11 dígitos é CPF, 14 é CNPJ — a mesma régua que `criar_cliente` já usa pra
     # gravar em `pessoas`. Até 29/08/2026 tudo caía na coluna `cnpj`, e por isso os
@@ -861,6 +881,30 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
         if oid is not None:
             from finance import evento_lead as _evl
             _evl.sincronizar_do_orcamento(c, conta[0], oid)
+            # o ANUAL fica gravado (311). Aqui, e não no UPDATE/INSERT de cima, pra
+            # não empurrar as posições dos `vals` que as duas consultas dividem.
+            # No evento é sempre false: lá não existe mensalidade pra descontar.
+            # E AS PONTAS LÍQUIDAS: implantação e mensalidade depois de TODOS os
+            # descontos (linha, anual, total). É delas que o contrato de serviço
+            # tira os números e o financeiro abre os títulos — antes os títulos
+            # saíam do BRUTO, e com desconto o cliente seria cobrado a mais do
+            # que aprovou.
+            #
+            # SAVEPOINT: base sem a 311 não pode derrubar o salvamento da proposta
+            # inteira por causa de um botão — perde-se o anual, não a proposta.
+            try:
+                with c.transaction():
+                    c.execute("update orcamentos set pagamento_anual=%s, "
+                              "setup_liquido_centavos=%s, mensal_liquido_centavos=%s "
+                              "where id=%s and conta_id=%s",
+                              (anual,
+                               tot["setup"] if modo != "evento" else None,
+                               tot["mensal"] if modo != "evento" else None,
+                               oid, conta[0]))
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger("servicos.salvar").warning(
+                    "orçamento %s: não gravei o pagamento anual: %s: %s",
+                    oid, type(e).__name__, e)
         c.commit()
     if oid is None:
         return JSONResponse({"erro": "proposta não encontrada ou já fechada"}, status_code=400)
@@ -1208,7 +1252,10 @@ def painel_servicos_lista(request: Request):
             contrato_assinado=it["contrato_assinado"],
             plano_difere=it["plano_difere"], aprovada_por=it["aprovada_por"],
             nunca_enviada=not it["enviado_em"],
-            contrato_enviado_em=it["_contrato_enviado_em"], tem_contrato=_nicho_tem_contrato,
+            contrato_enviado_em=it["_contrato_enviado_em"],
+            # no recorrente o contrato é da CONTA (311), e só prende a linha que
+            # já tem um: proposta aprovada antes de ligar fecha pelo botão.
+            tem_contrato=_nicho_tem_contrato or bool(it["contrato_numero"]),
             assinar_antes_do_sinal=_assina_antes,
             # o modo do ORÇAMENTO, não o da conta: é ele que diz se o plano de
             # pagamento mora em `parcelas` (evento) ou em setup + mensalidade
@@ -1267,7 +1314,8 @@ def painel_servicos_item(request: Request, orc_id: int):
                       telefone, cidade, uf, site, cargo, socio,
                       endereco, cep, evento, parcelas, numero,
                       coalesce(modo,'recorrente'),
-                      desconto_tipo, desconto_pct, desconto_centavos, criado_em
+                      desconto_tipo, desconto_pct, desconto_centavos, criado_em,
+                      coalesce((to_jsonb(orcamentos)->>'pagamento_anual')::boolean, false)
                  from orcamentos where id=%s and conta_id=%s""" + dono_filtro,
             args).fetchone()
     if not r:
@@ -1302,6 +1350,9 @@ def painel_servicos_item(request: Request, orc_id: int):
         # ("Emitido em"); quem vende, não — nem no funil nem aqui no editor. E é
         # quem vende que precisa saber se aquilo ainda está de pé.
         "gerado_em": r[30].strftime("%d/%m/%Y") if r[30] else "",
+        # o anual volta ligado (311) — sem isto o editor reabria com a mensalidade
+        # cheia e o próximo Salvar subia o preço que o cliente recebeu
+        "anual": bool(r[31]),
     })
 
 
@@ -1789,7 +1840,13 @@ def painel_servicos_marcar_data(request: Request, dados: MarcarDataIn):
 
 
 def _conta_evento(request: Request):
-    """Gate do CONTRATO: além do gate da aba, a conta precisa ser de eventos.
+    """Gate do CONTRATO: além do gate da aba, só o dono.
+
+    Até 23/09/2026 a conta também precisava ser de eventos. Desde então o
+    recorrente escreve o contrato de PRESTAÇÃO DE SERVIÇOS (ver finance/contrato,
+    "DOIS CONTRATOS, UM MOTOR") — então a porta do nicho saiu daqui, e quem decide
+    QUAL documento a tela mostra é `contrato.modo_da_conta`. O nome ficou pra não
+    mexer nas três rotas que o chamam.
 
     A trava vive aqui e não só no template porque a rota é POST e o navegador não
     é fonte confiável: esconder o card não impede ninguém de chamar a URL. E quem
@@ -1806,14 +1863,10 @@ def _conta_evento(request: Request):
     if not _equipe.caps_do_papel(request.session.get("papel", "dono"))["gerir"]:
         return None, JSONResponse(
             {"erro": "só o dono da empresa configura o contrato"}, status_code=403)
-    nicho = (emp.obter_dados_empresa(get_pool(), conta[0]) or {}).get("nicho")
-    if not ctr.tem_contrato(nicho):
-        return None, JSONResponse({"erro": "contrato de locação é do nicho de eventos"},
-                                  status_code=404)
     return conta, None
 
 
-def _contexto_de_exemplo(pool, conta_id: int):
+def _contexto_de_exemplo(pool, conta_id: int, modo: str = "locacao"):
     """(contexto, rótulo) montado com um orçamento REAL da conta, ou (None, "").
 
     O mais recente que tenha data de evento. Serve a duas coisas — a prévia da
@@ -1823,7 +1876,12 @@ def _contexto_de_exemplo(pool, conta_id: int):
 
     `regras` vem de fora porque a prévia precisa refletir o que está NO
     FORMULÁRIO, não o que está gravado — é assim que o dono experimenta uma multa
-    diferente antes de salvar."""
+    diferente antes de salvar.
+
+    No contrato de SERVIÇO o exemplo é o orçamento recorrente mais recente que
+    tenha serviço — não existe data de evento pra procurar."""
+    if modo == ctr.MODO_SERVICO:
+        return _exemplo_servico(pool, conta_id)
     with pool.connection() as c:
         _garantir_tabela(c)
         r = c.execute(
@@ -1849,6 +1907,36 @@ def _contexto_de_exemplo(pool, conta_id: int):
     return orcamento, f"orçamento nº {r[4] or '—'} · {r[0] or ''}"
 
 
+def _exemplo_servico(pool, conta_id: int):
+    """O orçamento recorrente de exemplo — o mesmo desenho do de eventos, com as
+    duas pontas do dinheiro no lugar da data. Mesmo dicionário que a folha pública
+    monta (`contrato_publico.qualificacao`), pra prévia e documento lerem igual."""
+    with pool.connection() as c:
+        _garantir_tabela(c)
+        r = c.execute(
+            """select cliente, cnpj, whatsapp, coalesce(primeiro_ano_centavos, 0), numero,
+                      empresa, endereco, cep, cidade, uf, cliente_id,
+                      coalesce((to_jsonb(orcamentos)->>'setup_liquido_centavos')::bigint, setup_centavos),
+                      coalesce((to_jsonb(orcamentos)->>'mensal_liquido_centavos')::bigint, mensal_centavos),
+                      itens,
+                      coalesce((to_jsonb(orcamentos)->>'pagamento_anual')::boolean, false)
+                 from orcamentos
+                where conta_id=%s and coalesce(modo,'recorrente') <> 'evento'
+                  and jsonb_array_length(coalesce(itens,'[]'::jsonb)) > 0
+                order by id desc limit 1""", (conta_id,)).fetchone()
+    if not r:
+        return None, ""
+    orcamento = {"cliente": r[5] or r[0] or "", "empresa": r[5], "cnpj": r[1],
+                 "whatsapp": r[2], "setup_centavos": r[3], "numero": r[4],
+                 "endereco": r[6], "cep": r[7], "cidade": r[8], "uf": r[9],
+                 "recorrente": {"setup_centavos": int(r[11] or 0),
+                                "mensal_centavos": int(r[12] or 0),
+                                "ano1_centavos": int(r[3] or 0), "anual": bool(r[14]),
+                                "itens": r[13] if isinstance(r[13], list) else []}}
+    orcamento = ctr.completar_do_cadastro(pool, conta_id, orcamento, r[10])
+    return orcamento, f"orçamento nº {r[4] or '—'} · {r[5] or r[0] or ''}"
+
+
 @router.get("/painel/servicos/contrato")
 def painel_servicos_contrato(request: Request, padrao: int = 0):
     """O modelo da conta + a paleta de campos que a tela oferece.
@@ -1861,24 +1949,38 @@ def painel_servicos_contrato(request: Request, padrao: int = 0):
     if erro is not None:
         return erro
     pool = get_pool()
-    modelo = ({"clausulas": ctr.modelo_padrao(), "regras": dict(ctr.REGRAS_PADRAO), "novo": True,
-               "atualizado_em": None, "atualizado_por": ""}
-              if padrao else ctr.carregar_modelo(pool, conta[0]))
+    # QUAL DOS DOIS DOCUMENTOS: locação (eventos) ou prestação de serviços
+    # (recorrente). Quem decide é o nicho, pela mesma porta do modo do orçamento.
+    modo = ctr.modo_da_conta(pool, conta[0])
+    salvo = ctr.carregar_modelo(pool, conta[0], modo)
+    modelo = ({"clausulas": ctr.modelo_padrao(modo), "regras": ctr.regras_padrao(modo),
+               "novo": True, "atualizado_em": None, "atualizado_por": ""}
+              if padrao else salvo)
     catalogo = scat.listar(pool, conta[0])
+    empresa = emp.obter_dados_empresa(pool, conta[0])
     # O QUE AJUSTAR no resumo do card fechado. Custa uma consulta a mais por
     # carregamento e vale: um campo sem valor não aparece em lugar nenhum até
     # sair no contrato DO CLIENTE — é o único erro deste fluxo que estreia na
     # frente dele. Melhor o dono ver com o card recolhido.
-    orcamento, exemplo = _contexto_de_exemplo(pool, conta[0])
+    orcamento, exemplo = _contexto_de_exemplo(pool, conta[0], modo)
     diag = {"ajustes": [], "da_proposta": []}
     if orcamento and not modelo["novo"]:
         ctx = ctr.contexto(catalogo=catalogo, orcamento=orcamento, modelo=modelo,
-                           empresa=emp.obter_dados_empresa(pool, conta[0]))
+                           empresa=empresa, modo=modo)
         _doc, faltas = ctr.montar(modelo["clausulas"], ctx)
         diag = ctr.diagnostico(faltas, ctx, catalogo)
+    elif modo == ctr.MODO_SERVICO:
+        # sem orçamento de exemplo, o de serviço ainda sabe o que é do DONO: os
+        # números da casa em branco. É justo o que a ZAQ vai ver no primeiro dia.
+        diag["ajustes"] = ctr.pendencias_pra_ligar(modelo["clausulas"], modelo["regras"],
+                                                   empresa)
     return JSONResponse({
+        "modo": modo,
+        # a chave do recorrente (311). No de eventos o contrato é do nicho e
+        # esta chave não existe na tela.
+        "pedir_assinatura": bool(salvo.get("pedir_assinatura")) if modo == ctr.MODO_SERVICO else None,
         "clausulas": modelo["clausulas"], "regras": modelo["regras"],
-        "novo": modelo["novo"], "campos": ctr.campos_disponiveis(catalogo),
+        "novo": modelo["novo"], "campos": ctr.campos_disponiveis(catalogo, modo),
         # `padrao=1` é o botão "restaurar", e ele mexe só nas CLÁUSULAS — a ordem
         # que a empresa escolheu não é texto de contrato e não se restaura junto.
         "assinar_antes_do_sinal": ctr.assina_antes_do_sinal(pool, conta[0]),
@@ -1901,6 +2003,9 @@ class ContratoIn(BaseModel):
     # uma porta antiga que não mande o campo não desliga o que o dono ligou... e é
     # por isso que a tela SEMPRE manda o valor atual, nunca só quando muda.
     assinar_antes_do_sinal: bool = False
+    # a chave do contrato de SERVIÇO (311). None = a tela não mandou (a de eventos
+    # nunca manda): não mexe no que está gravado.
+    pedir_assinatura: bool | None = None
 
 
 @router.post("/painel/servicos/contrato/salvar")
@@ -1909,9 +2014,27 @@ def painel_servicos_contrato_salvar(request: Request, dados: ContratoIn):
     if erro is not None:
         return erro
     membro_id, _papel = _ator(request)
-    r = ctr.salvar_modelo(get_pool(), conta[0], dados.clausulas, dados.regras,
+    pool = get_pool()
+    modo = ctr.modo_da_conta(pool, conta[0])
+    pedir = dados.pedir_assinatura if modo == ctr.MODO_SERVICO else None
+    # LIGAR COM NÚMERO EM BRANCO NÃO SALVA. Ligado, a próxima proposta aprovada
+    # vira contrato na hora — e com `{regra.fidelidade_meses}` cru no texto, o
+    # cliente receberia uma fidelidade que não diz quanto tempo. Recusa o salvar
+    # inteiro (e não só a chave): salvar metade e dizer "salvo" faria o dono sair
+    # achando que ligou.
+    if pedir:
+        pend = ctr.pendencias_pra_ligar(dados.clausulas, dados.regras,
+                                        emp.obter_dados_empresa(pool, conta[0]))
+        if pend:
+            return JSONResponse(
+                {"erro": "Pra pedir assinatura, preencha antes: "
+                         + "; ".join(f"{p['titulo']} ({p['detalhe']})" for p in pend[:6])
+                         + ("…" if len(pend) > 6 else ""),
+                 "pendencias": pend}, status_code=409)
+    r = ctr.salvar_modelo(pool, conta[0], dados.clausulas, dados.regras,
                           por=str(membro_id or "dono"),
-                          assinar_antes_do_sinal=dados.assinar_antes_do_sinal)
+                          assinar_antes_do_sinal=dados.assinar_antes_do_sinal,
+                          pedir_assinatura=pedir)
     return JSONResponse(r)
 
 
@@ -1927,14 +2050,17 @@ def painel_servicos_contrato_previa(request: Request, dados: ContratoIn):
     if erro is not None:
         return erro
     pool = get_pool()
-    orcamento, exemplo = _contexto_de_exemplo(pool, conta[0])
+    modo = ctr.modo_da_conta(pool, conta[0])
+    orcamento, exemplo = _contexto_de_exemplo(pool, conta[0], modo)
     if not orcamento:
-        return JSONResponse({"erro": "nenhum orçamento com data de evento para usar de exemplo"},
+        return JSONResponse({"erro": ("nenhum orçamento com serviço para usar de exemplo"
+                                      if modo == ctr.MODO_SERVICO else
+                                      "nenhum orçamento com data de evento para usar de exemplo")},
                             status_code=404)
     catalogo = scat.listar(pool, conta[0])
     ctx = ctr.contexto(catalogo=catalogo, orcamento=orcamento,
                        modelo={"regras": dados.regras},
-                       empresa=emp.obter_dados_empresa(pool, conta[0]))
+                       empresa=emp.obter_dados_empresa(pool, conta[0]), modo=modo)
     doc, faltas = ctr.montar(dados.clausulas, ctx)
     diag = ctr.diagnostico(faltas, ctx, catalogo)
     return JSONResponse({"clausulas": doc, "exemplo": exemplo,
@@ -2652,7 +2778,10 @@ _JS_CRU = r"""(function(){
             margemPct:margemPct,mods:mods,anual:anual,subtotal:sub,
             descItens:descItens,descFim:dFim,economia:descItens+dFim,
             inclusos:inclusos,inclusoValor:inclusoValor,cobrados:mods-inclusos,
-            setupBruto:setupBruto,mensalBruto:(anual?mensalBruto*0.85:mensalBruto)};
+            setupBruto:setupBruto,mensalBruto:(anual?mensalBruto*0.85:mensalBruto),
+            // a CHEIA, que é o que vai pro servidor desde a 311: ele aplica o -15%
+            // sabendo que é anual, em vez de receber o número já reduzido
+            mensalBrutoCheio:mensalBruto};
   }
 
   function pinta(){
@@ -3590,7 +3719,7 @@ _JS_CRU = r"""(function(){
               desc_val:incl?100:num(r.querySelector('.oc-desc'))};
     });
     var escEl=document.getElementById('oc-escopo-out');
-    return {id:EDIT_ID,lead_id:LEAD_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}).filter(function(id){return id.indexOf('orfao:')!==0;}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setupBruto),mensal:Math.round(c.mensalBruto),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods,desconto_tipo:descTipoTot(),desconto_pct:(descTipoTot()==='pct'?num(document.getElementById('oc-desconto')):0),desconto_valor:(descTipoTot()==='valor'?num(document.getElementById('oc-desconto')):0)};
+    return {id:EDIT_ID,lead_id:LEAD_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}).filter(function(id){return id.indexOf('orfao:')!==0;}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setupBruto),mensal:Math.round(SERVICO_AVULSO?c.mensalBruto:c.mensalBrutoCheio),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods,desconto_tipo:descTipoTot(),desconto_pct:(descTipoTot()==='pct'?num(document.getElementById('oc-desconto')):0),desconto_valor:(descTipoTot()==='valor'?num(document.getElementById('oc-desconto')):0),anual:!!c.anual};
   }
   function salvarProposta(cb){
     zapFetch('/painel/servicos/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(coletarBody())}).then(function(d){if(!d){if(cb)cb(null);return;}if(d&&d.id){EDIT_ID=d.id;} if(cb)cb(d);});
@@ -3708,8 +3837,15 @@ _JS_CRU = r"""(function(){
     if(v) v.addEventListener('click', fecharEditor);
   })();
 
+  // o botão "Pagamento anual" no estado gravado (311). Só existe no recorrente.
+  function marcaAnual(on){
+    var b=document.getElementById('oc-anual'); if(!b) return;
+    b.setAttribute('data-on',on?'1':'0'); b.classList.toggle('on',on);
+    var mk=document.getElementById('oc-anual-mk'); if(mk) mk.textContent=on?'✓':'↻';
+  }
   function novo(){
     EDIT_ID=null;
+    marcaAnual(false);
     ['oc-empresa','oc-contato','oc-cnpj','oc-segmento','oc-whats','oc-email','oc-tel','oc-cidade','oc-uf','oc-site','oc-cargo','oc-socio','oc-desc','oc-endereco','oc-cep'].forEach(function(id){setv(id,'');});
     aplicarEvento({});
     var pgb=document.getElementById('pg-linhas');
@@ -3779,6 +3915,7 @@ _JS_CRU = r"""(function(){
         setv('oc-desconto', String(dt==='valor'?(d.desconto_valor||0):(d.desconto_pct||0)));
       }
       milhar();
+      marcaAnual(!!d.anual);
       var out=document.getElementById('oc-escopo-out');
       if(d.escopo){out.style.display='block'; out.textContent=d.escopo; out.setAttribute('data-escopo',d.escopo);}
       else{out.style.display='none'; out.removeAttribute('data-escopo');}
@@ -4475,6 +4612,17 @@ _JS_CRU = r"""(function(){
       tolerancia_min:'Tolerância (min)',quitacao_dias:'Quitar até (dias antes)',
       reagenda_dias:'Remarcar com (dias)',reagenda_prazo:'Nova data em até (dias)',
       retirada_horas:'Retirar materiais (h)',acesso_montagem:'Montagem a partir de'};
+    // os números do contrato de SERVIÇO (recorrente). Nascem em branco — ver
+    // finance/contrato.REGRAS_SERVICO_PADRAO — e o placeholder mostra o formato.
+    var ROTULO_REGRA_SERVICO={fidelidade_meses:['Fidelidade (meses)','12'],
+      dia_vencimento:['Dia de vencimento','10'],indice_reajuste:['Índice de reajuste','IPCA'],
+      aviso_previo_dias:['Aviso prévio p/ cancelar (dias)','30'],
+      multa_rescisao:['Multa rescisória (% do restante)','30'],
+      implantacao_dias:['Implantação (dias úteis)','30'],
+      suporte_horario:['Suporte','de segunda a sexta, das 8h às 18h'],
+      setup_parcelas:['Implantação paga em','parcela única'],
+      multa_atraso_pct:['Multa por atraso (%)','2'],juros_mora_pct_mes:['Juros de mora (% ao mês)','1']};
+    var MODO='locacao', PEDIR=false;
 
     // O resumo do card fechado. Responde "está no ar e é o meu?" sem abrir —
     // e o selo âmbar conta os ajustes pendentes, que é o único erro deste fluxo
@@ -4486,7 +4634,9 @@ _JS_CRU = r"""(function(){
         selo.innerHTML=''; return;
       }
       res.textContent=(r.n||0)+' cláusula'+((r.n||0)===1?'':'s')
-        +(r.em?' · alterado em '+r.em:'')+(r.por?' por '+r.por:'');
+        +(r.em?' · alterado em '+r.em:'')+(r.por?' por '+r.por:'')
+        // no serviço, o card fechado responde também "está pedindo assinatura?"
+        +(d.modo==='servico'?(d.pedir_assinatura?' · pedindo assinatura':' · assinatura desligada'):'');
       var lista=(r.ajustes||[]), f=lista.length;
       selo.innerHTML = f
         ? '<span style="font-size:.68rem;font-weight:700;background:var(--ambar-fundo);color:var(--amar);border:1px solid var(--ambar-borda);border-radius:5px;padding:.1rem .38rem;white-space:nowrap">⚠ '+f+(f===1?' ajuste':' ajustes')+'</span>'
@@ -4518,9 +4668,34 @@ _JS_CRU = r"""(function(){
 
     function desenhar(d){
       CAMPOS=d.campos||[]; REGRAS=d.regras||{}; ANTES=!!d.assinar_antes_do_sinal;
+      MODO=d.modo||'locacao'; PEDIR=!!d.pedir_assinatura;
+      var SERV=MODO==='servico';
       resumir(d);
+      // O BLOCO DE BAIXO MUDA COM O DOCUMENTO. Na locação é a ORDEM (assinar
+      // antes ou depois do sinal); no serviço não existe sinal, e o que o dono
+      // decide é se a proposta aprovada vira contrato — a chave da 311.
+      var blocoOrdem = SERV
+        ? '<div style="background:var(--card-2);border:1px solid var(--neon-borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.8rem">'
+          +'<label style="display:flex;gap:.5rem;align-items:flex-start;cursor:pointer">'
+          +'<input type="checkbox" id="ct-pedir" style="margin-top:.25rem;width:auto;flex:none;padding:0"'+(PEDIR?' checked':'')+'>'
+          +'<span style="font-size:.85rem"><b>Pedir assinatura de contrato</b>'
+          +'<span class="mut" style="display:block;font-size:.76rem;margin-top:.15rem">'
+          +'A proposta aprovada vira contrato, com link próprio pro cliente assinar. '
+          +'A implantação e as mensalidades entram no financeiro quando ele assinar. '
+          +'Só dá pra ligar com os números da casa preenchidos. Propostas aprovadas antes '
+          +'de ligar continuam fechando pelo botão.</span></span></label></div>'
+        : '<div style="background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.8rem">'
+          +'<div class="mut" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.5rem">Ordem de cobrança</div>'
+          +'<label style="display:flex;gap:.5rem;align-items:flex-start;cursor:pointer">'
+          +'<input type="checkbox" id="ct-antes" style="margin-top:.25rem"'+(ANTES?' checked':'')+'>'
+          +'<span style="font-size:.85rem">Pedir a <b>assinatura do contrato antes</b> da entrada'
+          +'<span class="mut" style="display:block;font-size:.76rem;margin-top:.15rem">'
+          +'O funil passa a mostrar “Mandar o contrato pra assinar” antes de “Sinal recebido”, '
+          +'e a folha do cliente diz que a entrada vem depois de assinar. '
+          +'A data continua só ficando reservada com a entrada (cláusula 4.1), e o prazo da '
+          +'pré-reserva segue contando da aprovação.</span></span></label></div>';
       ctBox.innerHTML=
-        (d.novo?'<p class="mut" style="font-size:.84rem;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:.5rem .7rem">Este é um modelo inicial de contrato de locação. Ajuste ao que a sua empresa pratica e salve.</p>':'')
+        (d.novo?'<p class="mut" style="font-size:.84rem;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:.5rem .7rem">Este é um modelo inicial de contrato de '+(SERV?'prestação de serviços':'locação')+'. Ajuste ao que a sua empresa pratica e salve.</p>':'')
         +'<div id="ct-lista"></div>'
         +'<button type="button" id="ct-add" class="oc-pill" style="margin-bottom:.9rem">+ Cláusula</button>'
         +'<div id="ct-campos" style="background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.8rem">'
@@ -4529,19 +4704,10 @@ _JS_CRU = r"""(function(){
         +'<div style="background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.8rem">'
         +'<div class="mut" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.5rem">Números da casa — é daqui que os campos {regra.*} saem</div>'
         +'<div id="ct-regras" class="mini-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.5rem"></div></div>'
-        // A ORDEM (194) fica FORA do bloco dos números: aquilo é o que preenche
-        // {regra.*} nas cláusulas, isto muda o que o funil pede primeiro. Junto,
-        // pareceria mais um campo de texto do contrato.
-        +'<div style="background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.8rem">'
-        +'<div class="mut" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.5rem">Ordem de cobrança</div>'
-        +'<label style="display:flex;gap:.5rem;align-items:flex-start;cursor:pointer">'
-        +'<input type="checkbox" id="ct-antes" style="margin-top:.25rem"'+(ANTES?' checked':'')+'>'
-        +'<span style="font-size:.85rem">Pedir a <b>assinatura do contrato antes</b> da entrada'
-        +'<span class="mut" style="display:block;font-size:.76rem;margin-top:.15rem">'
-        +'O funil passa a mostrar “Mandar o contrato pra assinar” antes de “Sinal recebido”, '
-        +'e a folha do cliente diz que a entrada vem depois de assinar. '
-        +'A data continua só ficando reservada com a entrada (cláusula 4.1), e o prazo da '
-        +'pré-reserva segue contando da aprovação.</span></span></label></div>'
+        // A ORDEM (194) — ou, no serviço, a chave (311) — fica FORA do bloco dos
+        // números: aquilo é o que preenche {regra.*} nas cláusulas, isto muda o
+        // que o funil pede. Junto, pareceria mais um campo de texto do contrato.
+        +blocoOrdem
         +'<div style="display:flex;gap:.45rem;flex-wrap:wrap"><button type="button" id="ct-salvar" class="oc-btn oc-btn-g" style="width:auto">Salvar contrato</button>'
         +'<button type="button" id="ct-previa" class="oc-pill">Pré-visualizar</button>'
         +'<button type="button" id="ct-padrao" class="oc-pill">Restaurar modelo padrão</button></div>'
@@ -4562,12 +4728,23 @@ _JS_CRU = r"""(function(){
       });
 
       var gr=document.getElementById('ct-regras');
+      if(SERV){
+        Object.keys(ROTULO_REGRA_SERVICO).forEach(function(k){
+          var rr=ROTULO_REGRA_SERVICO[k], w=document.createElement('div');
+          var vazio=(REGRAS[k]===undefined||REGRAS[k]===null||REGRAS[k]==='');
+          w.innerHTML='<label class="mut" style="font-size:.68rem">'+esc(rr[0])+'</label>'
+            +'<input class="ct-rg oc-inp" data-k="'+k+'" style="width:100%'+(vazio?';border-color:var(--ambar-borda)':'')+'"'
+            +' placeholder="ex.: '+esc(rr[1])+'" value="'+esc(vazio?'':REGRAS[k])+'">';
+          gr.appendChild(w);
+        });
+      } else {
       Object.keys(ROTULO_REGRA).forEach(function(k){
         var w=document.createElement('div');
         w.innerHTML='<label class="mut" style="font-size:.68rem">'+esc(ROTULO_REGRA[k])+'</label>'
           +'<input class="ct-rg oc-inp" data-k="'+k+'" style="width:100%" value="'+esc(REGRAS[k])+'">';
         gr.appendChild(w);
       });
+      }
 
       document.getElementById('ct-add').addEventListener('click',function(){
         lista.appendChild(linhaClausula({titulo:'',corpo:''}));});
@@ -4581,14 +4758,22 @@ _JS_CRU = r"""(function(){
 
     function msg(html){document.getElementById('ct-msg').innerHTML=html;}
 
+    // o que vai no Salvar. A chave do serviço (311) só vai quando o card é de
+    // serviço: a tela de eventos não conhece a chave e não pode desligá-la.
+    function corpoSalvar(){
+      var b={clausulas:clausulas(),regras:regras(),
+             assinar_antes_do_sinal:!!(document.getElementById('ct-antes')||{}).checked};
+      if(MODO==='servico') b.pedir_assinatura=!!(document.getElementById('ct-pedir')||{}).checked;
+      return b;
+    }
+
     function salvar(){
       var b=document.getElementById('ct-salvar'), t=b.textContent; b.textContent='Salvando...';
       zapFetch('/painel/servicos/contrato/salvar',{comStatus:true,method:'POST',
         headers:{'Content-Type':'application/json'},
         // o valor VAI SEMPRE, mesmo sem ter sido tocado: o servidor tem default
         // false, e omitir o campo desligaria a ordem que o dono ligou ontem.
-        body:JSON.stringify({clausulas:clausulas(),regras:regras(),
-          assinar_antes_do_sinal:!!(document.getElementById('ct-antes')||{}).checked})}).then(function(res){if(!res){b.textContent=t;msg('<p style="color:var(--verm);font-size:.85rem">Erro de conexão.</p>');return;}
+        body:JSON.stringify(corpoSalvar())}).then(function(res){if(!res){b.textContent=t;msg('<p style="color:var(--verm);font-size:.85rem">Erro de conexão.</p>');return;}
           b.textContent=t;
           if(!res.ok){msg('<p style="color:var(--verm);font-size:.85rem">'+esc((res.d&&res.d.erro)||'Não consegui salvar.')+'</p>');return;}
           msg('<p style="color:var(--verde-claro);font-size:.85rem">✓ Contrato salvo — '+res.d.clausulas+' cláusulas. Vale para os próximos contratos; os já assinados não mudam.</p>');
@@ -4856,7 +5041,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div id="ct-cab" style="display:flex;align-items:center;gap:.6rem;cursor:pointer;user-select:none">
     <span id="ct-seta" style="color:var(--mut);font-size:.85rem;transition:transform .18s">▸</span>
     <div style="min-width:0">
-      <div style="font-weight:700;font-size:1rem">Contrato de locação</div>
+      <div style="font-weight:700;font-size:1rem">{{ 'Contrato de locação' if servico_avulso else 'Contrato de prestação de serviços' }}</div>
       <div id="ct-resumo" class="mut" style="font-size:.78rem;margin-top:.1rem">Carregando...</div>
     </div>
     <div id="ct-selo" style="margin-left:auto;flex-shrink:0"></div>
@@ -4886,6 +5071,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
    Vem DEPOIS do contrato porque é o que emenda o de cima, e o mesmo gate
    (`pode_contrato` = eventos + gerir): FAZER aditivo é dos três papéis, mas
    ESCREVER o texto é do dono, igual ao contrato. #}
+{% if servico_avulso %}
 <div class="card" id="ad-card">
   <div id="ad-cab" style="display:flex;align-items:center;gap:.6rem;cursor:pointer;user-select:none">
     <span id="ad-seta" style="color:var(--mut);font-size:.85rem;transition:transform .18s">▸</span>
@@ -4903,6 +5089,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     <div id="ad-box"><p class="mut">Carregando...</p></div>
   </div>
 </div>
+{% endif %}
 {% endif %}
 
 <div class="card" id="oc-esc-card"{% if servico_avulso %} style="display:none"{% endif %}>

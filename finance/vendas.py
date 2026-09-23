@@ -1454,8 +1454,10 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
     # a porta do nicho primeiro: conta recorrente nem chega a perguntar por contrato
     if not por_assinatura:
         from finance import contrato as ctr
-        if ctr.exige_assinatura(pool, conta_id) and not ctr.assinado_do_orcamento(
-                pool, conta_id, int(orcamento_id)):
+        # `exige_assinatura_do_orcamento`: no recorrente com contrato de serviço
+        # (311) a trava é a mesma — nasceu contrato, só a assinatura fecha.
+        if ctr.exige_assinatura_do_orcamento(pool, conta_id, int(orcamento_id)) \
+                and not ctr.assinado_do_orcamento(pool, conta_id, int(orcamento_id)):
             return {"ok": False, "erro": "O cliente ainda não assinou o contrato. "
                                          "O financeiro abre quando ele assinar."}
     with pool.connection() as c:
@@ -1464,7 +1466,15 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
         orc = c.execute(
             """update orcamentos set status='fechado', atualizado_em=now()
                 where id=%s and conta_id=%s and status <> 'fechado'
-             returning empresa, cliente, setup_centavos, mensal_centavos,
+             returning empresa, cliente,
+                       -- as pontas LÍQUIDAS (311) quando existem: é o que o cliente
+                       -- aprovou e o que o contrato de serviço diz. Orçamento salvo
+                       -- antes da 311 não as tem e segue no bruto, como sempre.
+                       -- Pelo jsonb da linha: base sem a coluna continua fechando.
+                       coalesce((to_jsonb(orcamentos)->>'setup_liquido_centavos')::bigint,
+                                setup_centavos),
+                       coalesce((to_jsonb(orcamentos)->>'mensal_liquido_centavos')::bigint,
+                                mensal_centavos),
                        coalesce(modo,'recorrente'), parcelas, primeiro_ano_centavos,
                        sinal_pago_em, criado_por""",
             (orcamento_id, conta_id),

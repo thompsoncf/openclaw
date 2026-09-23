@@ -32,12 +32,19 @@ cláusula de multa e ninguém percebe até precisar dela. Quem chama decide o qu
 fazer com as faltas — a tela do dono avisa, e a geração do documento assinável
 se recusa a seguir.
 
-SÓ NICHO EVENTO
+DOIS CONTRATOS, UM MOTOR
 
-Contrato de locação de espaço é do nicho de eventos. Uma conta recorrente teria
-um contrato de serviço, que é outro documento — então a porta é a mesma que
-decide o modo do orçamento (vendas.modo_por_nicho), e não uma regra nova que
-pudesse divergir dela.
+Contrato de locação de espaço é do nicho de eventos, e lá ele existe por NICHO: a
+porta é a mesma que decide o modo do orçamento (vendas.modo_por_nicho).
+
+Desde 23/09/2026 existe o segundo: PRESTAÇÃO DE SERVIÇOS, pro recorrente (setup
+e mensalidade). Pedido do dono pra ZAQ, conta 3 — "o mesmo modelo que já roda na
+Prime ... com orçamento e contrato, sem o aditivo". O motor é este mesmo (campos,
+`preencher`, `montar`, assinatura congelada); mudam o texto padrão, os "números da
+casa" e a PORTA: no recorrente o contrato é uma chave por conta
+(`contrato_modelo.pedir_assinatura`, migração 311), que nasce desligada. Oito
+contas são recorrentes, e ligar pelo nicho poria um contrato que ninguém escreveu
+na frente de clínica, seguros e construção de uma vez.
 """
 from __future__ import annotations
 
@@ -81,6 +88,40 @@ REGRAS_PADRAO = {
 }
 
 
+# Os dois documentos. É o NICHO que escolhe o texto padrão e os números da casa;
+# a chave por conta (`pedir_assinatura`) só decide se o de serviço está ligado.
+MODO_LOCACAO = "locacao"
+MODO_SERVICO = "servico"
+
+# Os números da casa do contrato de SERVIÇO. Em branco de propósito, e é o oposto
+# do de locação: lá os padrões são os do contrato vigente da Prime; aqui não existe
+# contrato vigente nenhum ("ainda não", disse o dono da ZAQ em 23/09/2026). Um
+# número inventado — fidelidade de 12 meses, multa de 30% — iria pro cliente como
+# se fosse da empresa. Em branco, ele fica à vista no texto e a tela recusa ligar
+# o contrato até alguém preencher. Multa e juros de atraso têm padrão porque 2% e
+# 1% ao mês são o teto que o CDC e a prática bancária já dão.
+REGRAS_SERVICO_PADRAO = {
+    "fidelidade_meses":  "",   # prazo mínimo (cláusula 5.1)
+    "dia_vencimento":    "",   # vencimento da mensalidade (cláusula 3.2)
+    "indice_reajuste":   "",   # IPCA, IGP-M... (cláusula 4.1)
+    "aviso_previo_dias": "",   # antecedência pra cancelar (cláusula 9.1)
+    "multa_rescisao":    "",   # % das mensalidades restantes da fidelidade (9.2)
+    "implantacao_dias":  "",   # prazo da implantação, dias úteis (cláusula 2.2)
+    "suporte_horario":   "",   # "de segunda a sexta, das 8h às 18h" (cláusula 6.1)
+    "setup_parcelas":    "",   # "parcela única", "3 parcelas mensais" (cláusula 2.1)
+    "multa_atraso_pct":   2,   # % sobre o valor em atraso (cláusula 3.4)
+    "juros_mora_pct_mes": 1,   # % ao mês (cláusula 3.4)
+}
+
+# o que vira porcentagem na hora de preencher — o resto entra como está escrito
+_REGRAS_PCT = {"sinal_pct", "multa_cancelamento", "taxa_reagendamento",
+               "multa_atraso_pct", "juros_mora_pct_mes", "multa_rescisao"}
+
+
+def regras_padrao(modo: str = MODO_LOCACAO) -> dict:
+    return dict(REGRAS_SERVICO_PADRAO if modo == MODO_SERVICO else REGRAS_PADRAO)
+
+
 def reais(centavos) -> str:
     """R$ 8.900,00 — com centavos, porque é documento e não conversa de WhatsApp."""
     v = int(centavos or 0) / 100
@@ -113,11 +154,12 @@ def pct(n) -> str:
     return (f"{int(v)}%" if v == int(v) else f"{v}%".replace(".", ","))
 
 
-def _regras(modelo) -> dict:
+def _regras(modelo, modo: str = MODO_LOCACAO) -> dict:
     """As regras da conta por cima dos padrões — conta que nunca configurou usa
     os números do contrato vigente em vez de zeros, que num contrato seriam
-    piores que a falta."""
-    r = dict(REGRAS_PADRAO)
+    piores que a falta. No de serviço os padrões são brancos (ver
+    REGRAS_SERVICO_PADRAO): a falta fica à vista em vez de um número inventado."""
+    r = regras_padrao(modo)
     for k, v in ((modelo or {}).get("regras") or {}).items():
         if v not in (None, ""):
             r[k] = v
@@ -184,7 +226,8 @@ def completar_do_cadastro(pool, conta_id: int, orcamento: dict, cliente_id) -> d
     return o
 
 
-def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None) -> dict:
+def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None,
+             modo: str = MODO_LOCACAO) -> dict:
     """Monta o que `preencher` vai consultar, um dicionário por grupo.
 
     Recebe o que já existe no sistema — a lista do catálogo, a linha do orçamento
@@ -193,11 +236,13 @@ def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None) -> dic
     montar um contexto de mentira sem tocar em produção."""
     o = orcamento or {}
     ev = o.get("evento") or {}
-    reg = _regras(modelo)
+    reg = _regras(modelo, modo)
     emp = empresa or {}
 
     total = int(o.get("setup_centavos") or 0)
-    entrada = round(total * float(reg["sinal_pct"]) / 100)
+    # entrada/saldo são do contrato de locação; o de serviço não tem sinal
+    entrada = (round(total * float(reg["sinal_pct"]) / 100)
+               if reg.get("sinal_pct") not in (None, "") else 0)
 
     return {
         # preço vem por SLUG: a cláusula cita o item, não uma cópia do número
@@ -239,21 +284,12 @@ def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None) -> dic
             "entrada": reais(entrada),
             "saldo": reais(total - entrada),
             "numero": str(o.get("numero") or ""),
+            **(_valor_servico(o.get("recorrente") or {}) if modo == MODO_SERVICO else {}),
         },
-        "regra": {
-            "sinal_pct": pct(reg["sinal_pct"]),
-            "multa_cancelamento": pct(reg["multa_cancelamento"]),
-            "taxa_reagendamento": pct(reg["taxa_reagendamento"]),
-            "duracao_horas": str(reg["duracao_horas"]),
-            "tolerancia_min": str(reg["tolerancia_min"]),
-            "quitacao_dias": str(reg["quitacao_dias"]),
-            "reagenda_dias": str(reg["reagenda_dias"]),
-            "reagenda_prazo": str(reg["reagenda_prazo"]),
-            "retirada_horas": str(reg["retirada_horas"]),
-            "acesso_montagem": str(reg["acesso_montagem"]),
-            "multa_atraso_pct": pct(reg["multa_atraso_pct"]),
-            "juros_mora_pct_mes": pct(reg["juros_mora_pct_mes"]),
-        },
+        # SÓ AS REGRAS DESTE DOCUMENTO. Número em branco sai como "" — e `preencher`
+        # deixa o campo à vista no texto, que é o que impede de ir pro cliente.
+        "regra": {k: _regra_txt(k, v) for k, v in reg.items()
+                  if k in regras_padrao(modo)},
         "empresa": {
             "razao": emp.get("razao_social") or emp.get("nome_fantasia") or "",
             # `obter_dados_empresa` devolve a chave `documento`; ler "cnpj" fazia
@@ -268,6 +304,33 @@ def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None) -> dic
             "telefone": emp.get("telefone") or "",
             "email": emp.get("email_empresa") or "",
         },
+    }
+
+
+def _regra_txt(chave, valor) -> str:
+    if valor in (None, ""):
+        return ""
+    return pct(valor) if chave in _REGRAS_PCT else str(valor)
+
+
+def _valor_servico(r: dict) -> dict:
+    """O dinheiro do contrato de SERVIÇO, lido do orçamento recorrente.
+
+    `mensal_centavos` já vem com o desconto do anual aplicado (é assim que a tela
+    grava e que `fechar_orcamento` gera o título recorrente), então o contrato diz
+    o mesmo número que o financeiro vai cobrar."""
+    anual = bool(r.get("anual"))
+    nomes = [str((i or {}).get("nome") or "").strip() for i in (r.get("itens") or [])]
+    nomes = [n for n in nomes if n]
+    return {
+        "setup": reais(r.get("setup_centavos")),
+        "mensal": reais(r.get("mensal_centavos")),
+        "ano1": reais(r.get("ano1_centavos")),
+        "forma": ("anual, com 15% de desconto na mensalidade, vinculado ao período de "
+                  "fidelidade" if anual else "mensal"),
+        # a lista vira texto corrido: "A; B e C" é como um contrato enumera
+        "itens": ("; ".join(nomes[:-1]) + " e " + nomes[-1]) if len(nomes) > 1
+                 else (nomes[0] if nomes else ""),
     }
 
 
@@ -423,15 +486,46 @@ _CAMPOS_FIXOS = [
     ("empresa.telefone", "telefone"), ("empresa.email", "e-mail"),
 ]
 
-_ROTULO = dict(_CAMPOS_FIXOS)
+# A paleta do contrato de SERVIÇO: nada de evento, entrada ou saldo (seção 6 do
+# CLAUDE.md — "festa" não aparece pra quem vende mensalidade).
+_CAMPOS_SERVICO = [
+    ("cliente.nome", "nome de quem assina"), ("cliente.doc", "CPF/CNPJ"),
+    ("cliente.endereco", "endereço do cliente"), ("cliente.cidade", "cidade do cliente"),
+    ("cliente.uf", "UF do cliente"), ("cliente.cep", "CEP do cliente"),
+    ("cliente.telefone", "telefone do cliente"), ("cliente.email", "e-mail do cliente"),
+    ("valor.itens", "serviços contratados"), ("valor.setup", "valor da implantação"),
+    ("valor.mensal", "mensalidade"), ("valor.forma", "forma de pagamento"),
+    ("valor.ano1", "total do 1º ano"), ("valor.numero", "nº do orçamento"),
+    ("regra.fidelidade_meses", "meses de fidelidade"),
+    ("regra.dia_vencimento", "dia de vencimento"),
+    ("regra.indice_reajuste", "índice de reajuste"),
+    ("regra.aviso_previo_dias", "dias de aviso prévio"),
+    ("regra.multa_rescisao", "% da multa rescisória"),
+    ("regra.implantacao_dias", "dias úteis de implantação"),
+    ("regra.suporte_horario", "horário do suporte"),
+    ("regra.setup_parcelas", "parcelas da implantação"),
+    ("regra.multa_atraso_pct", "% da multa por atraso"),
+    ("regra.juros_mora_pct_mes", "% de juros ao mês"),
+    ("empresa.razao", "razão social"), ("empresa.cnpj", "CNPJ"),
+    ("empresa.endereco", "endereço"), ("empresa.bairro", "bairro"),
+    ("empresa.cidade", "cidade"), ("empresa.uf", "UF"),
+    ("empresa.telefone", "telefone"), ("empresa.email", "e-mail"),
+]
+
+_ROTULO = {**dict(_CAMPOS_SERVICO), **dict(_CAMPOS_FIXOS)}
 
 
-def campos_disponiveis(catalogo=None) -> list[dict]:
+def campos_disponiveis(catalogo=None, modo: str = MODO_LOCACAO) -> list[dict]:
     """A paleta de campos que a tela do dono mostra, na ordem em que ele pensa.
 
     Os {preco.*} são gerados a partir do catálogo REAL da conta — é assim que ele
     descobre que pode citar qualquer item, e com o slug certo. Escrever o slug de
-    cabeça é a forma mais fácil de criar uma falta silenciosa."""
+    cabeça é a forma mais fácil de criar uma falta silenciosa.
+
+    No de SERVIÇO não há {preco.*}: o preço de cada serviço entra pelo orçamento
+    ({valor.itens}, {valor.setup}, {valor.mensal}), que é o que o cliente aprovou."""
+    if modo == MODO_SERVICO:
+        return [{"campo": c, "rotulo": r, "grupo": c.split(".")[0]} for c, r in _CAMPOS_SERVICO]
     saida = [{"campo": c, "rotulo": r, "grupo": c.split(".")[0]} for c, r in _CAMPOS_FIXOS]
     for s in (catalogo or []):
         if s.get("slug"):
@@ -450,9 +544,47 @@ def tem_contrato(nicho: str | None) -> bool:
     return modo_por_nicho(nicho) == "evento"
 
 
+def modo_do_nicho(nicho: str | None) -> str:
+    """Qual dos dois documentos esta conta escreve: locação (eventos) ou serviço.
+    A mesma porta de `tem_contrato`, pra os dois nunca discordarem."""
+    return MODO_LOCACAO if tem_contrato(nicho) else MODO_SERVICO
+
+
+def modo_da_conta(pool, conta_id: int) -> str:
+    from finance import empresa as emp
+    return modo_do_nicho((emp.obter_dados_empresa(pool, conta_id) or {}).get("nicho"))
+
+
+def pede_assinatura_servico(pool, conta_id: int) -> bool:
+    """A chave do recorrente (migração 311): esta conta ligou o contrato de serviço?
+
+    FALHA FECHADA NO COMPORTAMENTO DE HOJE: sem a coluna, sem linha ou com o banco
+    fora, devolve False — a proposta aprovada fecha pelo botão, como sempre fechou.
+    O contrario (assumir ligado) travaria o financeiro de uma conta que nunca pediu
+    contrato, esperando uma assinatura que ninguém vai mandar."""
+    try:
+        with pool.connection() as c:
+            r = c.execute("select pedir_assinatura from contrato_modelo where conta_id=%s",
+                          (conta_id,)).fetchone()
+    except Exception as e:  # noqa: BLE001 — base sem a 311 ainda
+        _log.warning("não deu pra ler pedir_assinatura da conta %s: %s: %s",
+                     conta_id, type(e).__name__, e)
+        return False
+    return bool(r and r[0])
+
+
+def conta_tem_contrato(pool, conta_id: int) -> bool:
+    """Nesta conta, a proposta aprovada vira contrato?
+
+    Eventos: sempre (é do nicho). Recorrente: só com a chave ligada."""
+    if modo_da_conta(pool, conta_id) == MODO_LOCACAO:
+        return True
+    return pede_assinatura_servico(pool, conta_id)
+
+
 # ---------------------------------------------------------------- persistência
 
-def carregar_modelo(pool, conta_id: int) -> dict:
+def carregar_modelo(pool, conta_id: int, modo: str | None = None) -> dict:
     """O modelo da conta. Quem nunca editou recebe o modelo padrão — assim a
     tela abre com um contrato inteiro pra editar em vez de uma página em branco,
     que é o que faz o dono desistir na primeira visita.
@@ -460,7 +592,13 @@ def carregar_modelo(pool, conta_id: int) -> dict:
     `atualizado_em`/`atualizado_por` alimentam o resumo do card recolhido: o
     contrato se escreve uma vez e some da frente, e é esse resumo que responde
     "está no ar e é o meu?" sem obrigar a abrir. O nome sai do membro; 'dono'
-    (quem abriu a conta) não tem linha em `membros` e vira o nome da conta."""
+    (quem abriu a conta) não tem linha em `membros` e vira o nome da conta.
+
+    `modo` escolhe o modelo padrão e os números da casa (locação × serviço); sem
+    ele, sai do nicho da conta. `pedir_assinatura` é a chave do recorrente (311),
+    lida à parte pra uma base sem a coluna não derrubar o contrato da Prime."""
+    modo = modo or modo_da_conta(pool, conta_id)
+    pedir = pede_assinatura_servico(pool, conta_id) if modo == MODO_SERVICO else True
     with pool.connection() as c:
         r = c.execute(
             """select m.clausulas, m.regras, m.atualizado_em,
@@ -474,12 +612,12 @@ def carregar_modelo(pool, conta_id: int) -> dict:
     # escreveu cláusula nenhuma continua com a ordem que escolheu.
     antes = bool(r[4]) if r else False
     if not r or not r[0]:
-        return {"clausulas": modelo_padrao(), "regras": dict(REGRAS_PADRAO), "novo": True,
+        return {"clausulas": modelo_padrao(modo), "regras": regras_padrao(modo), "novo": True,
                 "atualizado_em": None, "atualizado_por": "",
-                "assinar_antes_do_sinal": antes}
-    return {"clausulas": r[0], "regras": _regras({"regras": r[1]}), "novo": False,
+                "assinar_antes_do_sinal": antes, "modo": modo, "pedir_assinatura": pedir}
+    return {"clausulas": r[0], "regras": _regras({"regras": r[1]}, modo), "novo": False,
             "atualizado_em": r[2], "atualizado_por": r[3] or "",
-            "assinar_antes_do_sinal": antes}
+            "assinar_antes_do_sinal": antes, "modo": modo, "pedir_assinatura": pedir}
 
 
 def assina_antes_do_sinal(pool, conta_id: int) -> bool:
@@ -506,13 +644,19 @@ def assina_antes_do_sinal(pool, conta_id: int) -> bool:
 
 
 def salvar_modelo(pool, conta_id: int, clausulas, regras, por: str = "",
-                  assinar_antes_do_sinal: bool = False) -> dict:
+                  assinar_antes_do_sinal: bool = False,
+                  pedir_assinatura: bool | None = None) -> dict:
     """Grava o modelo inteiro. Não versiona de propósito: o histórico que importa
     é o dos contratos ASSINADOS, e esse mora congelado em cada orçamento.
 
     `assinar_antes_do_sinal` é a ORDEM que a empresa escolheu (194) e vem junto
     porque é o mesmo botão Salvar da mesma tela — pedir um segundo clique pra ela
-    faria o dono ligar a ordem nova e sair achando que ligou, quando não salvou."""
+    faria o dono ligar a ordem nova e sair achando que ligou, quando não salvou.
+
+    `pedir_assinatura` (311) é a chave do recorrente, pelo mesmo motivo. None =
+    não mexe (a tela de eventos não manda o campo, e não pode desligar nada).
+    QUEM LIGA A CHAVE CONFERE ANTES — ver `pendencias_pra_ligar` —, porque ligada
+    com número em branco o contrato iria pro cliente com o campo cru no texto."""
     limpas = [{"titulo": str((c or {}).get("titulo") or "")[:200],
                "corpo": str((c or {}).get("corpo") or "")[:20000]}
               for c in (clausulas or []) if (c or {}).get("titulo") or (c or {}).get("corpo")]
@@ -527,16 +671,35 @@ def salvar_modelo(pool, conta_id: int, clausulas, regras, por: str = "",
                       assinar_antes_do_sinal=excluded.assinar_antes_do_sinal""",
             (conta_id, json.dumps(limpas), json.dumps(regras or {}), (por or "")[:120],
              bool(assinar_antes_do_sinal)))
+        if pedir_assinatura is not None:
+            c.execute("update contrato_modelo set pedir_assinatura=%s where conta_id=%s",
+                      (bool(pedir_assinatura), conta_id))
         c.commit()
     return {"ok": True, "clausulas": len(limpas)}
 
 
-def modelo_padrao() -> list[dict]:
+def pendencias_pra_ligar(clausulas, regras, empresa=None) -> list[dict]:
+    """O que impede de ligar o contrato de SERVIÇO: número da casa ou dado da
+    empresa em branco que alguma cláusula cita.
+
+    Só olha o que é do DONO (regra.*, empresa.*) e campo inexistente — dado de
+    cada proposta (cliente, valor) chega com a proposta. É a mesma régua do
+    `diagnostico`, aplicada a um contexto sem proposta nenhuma."""
+    ctx = contexto(modelo={"regras": regras or {}}, empresa=empresa, modo=MODO_SERVICO)
+    _doc, faltas = montar(clausulas, ctx)
+    return diagnostico(faltas, ctx)["ajustes"]
+
+
+def modelo_padrao(modo: str = MODO_LOCACAO) -> list[dict]:
     """Contrato de locação de espaço, genérico, já com os campos no lugar.
 
     É o ponto de partida de toda conta de eventos — inclusive da Prime, cujo
     contrato vigente foi a base deste texto. Quem tem o contrato próprio
-    substitui; quem não tem sai daqui com algo utilizável."""
+    substitui; quem não tem sai daqui com algo utilizável.
+
+    `modo=servico` devolve o de prestação de serviços (ver `modelo_padrao_servico`)."""
+    if modo == MODO_SERVICO:
+        return modelo_padrao_servico()
     return [
         {"titulo": "Cláusula 1 — Do objeto",
          "corpo": "1.1. O presente contrato tem por objeto a locação temporária do espaço da "
@@ -597,6 +760,103 @@ def modelo_padrao() -> list[dict]:
                   "formalizados por escrito.\n"
                   "9.3. Aplica-se a legislação brasileira, especialmente o Código Civil, o Código "
                   "de Defesa do Consumidor e a Lei Geral de Proteção de Dados."},
+    ]
+
+
+
+def modelo_padrao_servico() -> list[dict]:
+    """Contrato de PRESTAÇÃO DE SERVIÇOS de tecnologia, genérico, com os campos no
+    lugar. É o ponto de partida das contas recorrentes que ligam o contrato — a
+    primeira foi a ZAQ (conta 3), em 23/09/2026, sem contrato próprio ainda ("você
+    tenta fazer da melhor forma", disse o dono).
+
+    As mesmas regras do modelo de locação: nenhum número escrito no texto — setup,
+    mensalidade, fidelidade e multa saem do orçamento e dos "números da casa" — e
+    nada de festa (seção 6 do CLAUDE.md)."""
+    return [
+        {"titulo": "Cláusula 1 — Do objeto",
+         "corpo": "1.1. O presente contrato tem por objeto a prestação, pela {empresa.razao}, "
+                  "CNPJ {empresa.cnpj}, dos seguintes serviços ao(à) CONTRATANTE "
+                  "{cliente.nome}, CPF/CNPJ {cliente.doc}: {valor.itens}.\n"
+                  "1.2. Os serviços são prestados na modalidade de software como serviço "
+                  "(SaaS), com acesso pela internet, sem cessão de código-fonte ou licença de "
+                  "uso perpétua.\n"
+                  "1.3. O Orçamento nº {valor.numero}, aprovado pelo(a) CONTRATANTE, integra "
+                  "este contrato e contém o escopo detalhado da contratação."},
+        {"titulo": "Cláusula 2 — Da implantação",
+         "corpo": "2.1. Pela implantação, configuração e treinamento inicial, o(a) CONTRATANTE "
+                  "pagará o valor de {valor.setup}, em {regra.setup_parcelas}.\n"
+                  "2.2. A implantação será concluída em até {regra.implantacao_dias} dias úteis "
+                  "contados da assinatura deste contrato e do envio, pelo(a) CONTRATANTE, das "
+                  "informações e acessos necessários.\n"
+                  "2.3. Atrasos causados pela falta de informações, acessos ou aprovações do(a) "
+                  "CONTRATANTE suspendem o prazo acima pelo mesmo período."},
+        {"titulo": "Cláusula 3 — Da mensalidade e do pagamento",
+         "corpo": "3.1. Pela disponibilidade e manutenção dos serviços, o(a) CONTRATANTE pagará "
+                  "a mensalidade de {valor.mensal}, na forma de pagamento {valor.forma}.\n"
+                  "3.2. A mensalidade vence todo dia {regra.dia_vencimento} de cada mês, a "
+                  "partir do mês seguinte à assinatura.\n"
+                  "3.3. O valor total do primeiro ano, somando implantação e mensalidades, é de "
+                  "{valor.ano1}.\n"
+                  "3.4. O atraso no pagamento sujeitará o(a) CONTRATANTE à multa de "
+                  "{regra.multa_atraso_pct} sobre o valor em atraso, acrescida de juros de mora "
+                  "de {regra.juros_mora_pct_mes} ao mês, proporcionais aos dias de atraso.\n"
+                  "3.5. Atraso superior a 30 (trinta) dias autoriza a CONTRATADA a suspender o "
+                  "acesso aos serviços, mediante aviso prévio de 5 (cinco) dias, até a "
+                  "regularização."},
+        {"titulo": "Cláusula 4 — Do reajuste",
+         "corpo": "4.1. Os valores deste contrato serão reajustados a cada 12 (doze) meses, "
+                  "contados da assinatura, pela variação acumulada do {regra.indice_reajuste} "
+                  "no período.\n"
+                  "4.2. Na falta ou extinção do índice, será adotado o índice oficial que o "
+                  "substituir."},
+        {"titulo": "Cláusula 5 — Da vigência e da fidelidade",
+         "corpo": "5.1. Este contrato vigora por prazo mínimo de {regra.fidelidade_meses} meses "
+                  "a partir da assinatura (período de fidelidade), renovando-se "
+                  "automaticamente por prazo indeterminado ao final desse período.\n"
+                  "5.2. No pagamento anual, o desconto concedido sobre as mensalidades está "
+                  "vinculado ao cumprimento integral do período de fidelidade."},
+        {"titulo": "Cláusula 6 — Do suporte e do nível de serviço",
+         "corpo": "6.1. O suporte técnico será prestado {regra.suporte_horario}, pelos canais "
+                  "informados pela CONTRATADA.\n"
+                  "6.2. A CONTRATADA empregará os melhores esforços para manter os serviços "
+                  "disponíveis, ressalvadas as manutenções programadas, comunicadas com "
+                  "antecedência, e as indisponibilidades de serviços de terceiros "
+                  "(provedores de nuvem, operadoras e plataformas de mensagem).\n"
+                  "6.3. A CONTRATADA não responde por resultados comerciais do(a) CONTRATANTE "
+                  "nem pelo conteúdo das mensagens e dados que ele(a) inserir nos serviços."},
+        {"titulo": "Cláusula 7 — Das obrigações do(a) CONTRATANTE",
+         "corpo": "7.1. Fornecer as informações e acessos necessários à implantação e mantê-los "
+                  "atualizados.\n"
+                  "7.2. Utilizar os serviços de acordo com a lei e com as políticas das "
+                  "plataformas integradas, inclusive as regras de envio de mensagens.\n"
+                  "7.3. Manter em sigilo as senhas e acessos sob sua responsabilidade."},
+        {"titulo": "Cláusula 8 — Da proteção de dados (LGPD)",
+         "corpo": "8.1. Em relação aos dados pessoais tratados por meio dos serviços, o(a) "
+                  "CONTRATANTE atua como controlador e a CONTRATADA como operadora, nos termos "
+                  "da Lei nº 13.709/2018.\n"
+                  "8.2. A CONTRATADA tratará esses dados apenas para executar este contrato, "
+                  "adotará medidas de segurança adequadas e comunicará ao(à) CONTRATANTE "
+                  "qualquer incidente relevante.\n"
+                  "8.3. Encerrado o contrato, os dados serão disponibilizados ao(à) CONTRATANTE "
+                  "por 30 (trinta) dias e depois eliminados, salvo obrigação legal de guarda."},
+        {"titulo": "Cláusula 9 — Do cancelamento",
+         "corpo": "9.1. Qualquer das partes poderá cancelar este contrato mediante aviso por "
+                  "escrito com antecedência mínima de {regra.aviso_previo_dias} dias.\n"
+                  "9.2. O cancelamento pelo(a) CONTRATANTE durante o período de fidelidade "
+                  "sujeita-o(a) à multa de {regra.multa_rescisao} do valor das mensalidades "
+                  "restantes até o fim desse período.\n"
+                  "9.3. No pagamento anual, o cancelamento durante a fidelidade implica também "
+                  "a devolução do desconto concedido sobre as mensalidades já pagas.\n"
+                  "9.4. O valor da implantação não é restituído depois de concluída a "
+                  "implantação."},
+        {"titulo": "Cláusula 10 — Das disposições gerais e do foro",
+         "corpo": "10.1. O Orçamento nº {valor.numero} integra este contrato. Alterações, "
+                  "descontos e condições especiais só valem quando formalizados por escrito.\n"
+                  "10.2. Este contrato é assinado eletronicamente, com validade jurídica "
+                  "conforme a MP nº 2.200-2/2001.\n"
+                  "10.3. Fica eleito o foro da comarca de {empresa.cidade}/{empresa.uf} para "
+                  "dirimir as questões oriundas deste contrato."},
     ]
 
 
@@ -661,6 +921,20 @@ def exige_assinatura(pool, conta_id: int) -> bool:
     return tem_contrato((emp.obter_dados_empresa(pool, conta_id) or {}).get("nicho"))
 
 
+def exige_assinatura_do_orcamento(pool, conta_id: int, orcamento_id: int) -> bool:
+    """ESTE orçamento só fecha com o contrato assinado?
+
+    Eventos: sempre — a mesma `exige_assinatura` de antes, não tolerante.
+    Recorrente: quando EXISTE contrato pra ele. É o contrato nascido que prende o
+    fechamento, não a chave da conta: proposta aprovada antes de o dono ligar o
+    contrato de serviço não tem contrato nenhum, e ficaria presa pra sempre
+    esperando uma assinatura que não vai chegar. Essa fecha pelo botão, como
+    fechava ontem."""
+    if exige_assinatura(pool, conta_id):
+        return True
+    return por_orcamento(pool, conta_id, int(orcamento_id)) is not None
+
+
 def criar_para_orcamento(pool, conta_id: int, orcamento_id: int,
                          valor_centavos: int | None = None,
                          criado_por: str = "") -> dict | None:
@@ -672,13 +946,15 @@ def criar_para_orcamento(pool, conta_id: int, orcamento_id: int,
     sinal pago) deixam de ser uma pergunta e viram um fato. A partir daqui o
     contrato existe e tem estado próprio.
 
-    Devolve None quando a conta não tem contrato de locação (nicho != eventos) —
-    mesma porta de `tem_contrato`, pra não nascer contrato onde não existe."""
+    Devolve None quando a conta não tem contrato: nem é de eventos, nem ligou o
+    contrato de serviço (`conta_tem_contrato`) — pra não nascer contrato onde não
+    existe. No recorrente ele nasce na APROVAÇÃO (`proposta._pos_assinatura`): lá
+    não há sinal, e a ordem é a da Prime com a assinatura antes da entrada —
+    orçamento, contrato, e só então a cobrança (dono, 23/09/2026)."""
     ja = por_orcamento(pool, conta_id, orcamento_id)
     if ja:
         return ja
-    from finance import empresa as emp
-    if not tem_contrato((emp.obter_dados_empresa(pool, conta_id) or {}).get("nicho")):
+    if not conta_tem_contrato(pool, conta_id):
         return None
     with pool.connection() as c:
         r = c.execute(

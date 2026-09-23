@@ -413,7 +413,10 @@ def test_a_baixa_de_receber_pergunta_quanto_entrou_sem_escolha_marcada():
     f = _form_da_baixa(html, 1)
     assert 'name="recebido"' in f and 'value="2.340,00"' in f
     assert 'value="restante"' in f and 'value="abater"' in f and 'value="juros"' in f
-    assert "checked" not in f
+    # nenhuma opção vem marcada ("sempre pergunta pro gestor"). O `r.checked`
+    # do onchange do select não conta: ele só marca quando a pessoa escolhe.
+    import re
+    assert not re.search(r"<input[^>]*\schecked", f)
     assert "Parcela &lt;1/5&gt;" in f
     p = _form_da_baixa(html, 2)
     assert 'name="acrescimo"' in p and 'name="recebido"' not in p

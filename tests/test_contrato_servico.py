@@ -8,8 +8,12 @@ de locação; o que este arquivo fixa é o que muda — e o que NÃO pode mudar:
   pelo nicho poria um contrato que ninguém escreveu na frente de todas. Desligada,
   nada muda: a proposta aprovada fecha pelo botão, como ontem.
 * **Número da casa em branco não vai pro cliente.** O de serviço nasce sem
-  fidelidade, vencimento ou reajuste — a ZAQ não tem contrato vigente pra copiar.
-  A chave não liga com falta, e a folha pública não deixa assinar com falta.
+  reajuste, aviso prévio ou prazo de implantação — a ZAQ não tem contrato vigente
+  pra copiar. A chave não liga com falta, e a folha pública não deixa assinar com
+  falta.
+* **Sem fidelidade; o cliente escolhe o dia; anual é à vista** (dono, 23/09/2026):
+  "sem fidelidade, cliente só tem que avisar 30 antes de rescindir o contrato e
+  desconto só pagando à vista o ano todo"; "cliente escolhe a melhor data".
 * **Nada de festa** (seção 6 do CLAUDE.md): nem no texto padrão, nem na paleta de
   campos, nem na folha do cliente.
 * **A Prime não muda**: o contexto do contrato de locação sai idêntico.
@@ -40,7 +44,7 @@ create table orcamentos (id bigserial primary key, conta_id bigint, cliente text
   primeiro_ano_centavos bigint default 0, status text default 'rascunho',
   numero int, modo text default 'recorrente', evento jsonb, parcelas jsonb,
   sinal_pago_em timestamptz, cliente_id bigint,
-  pagamento_anual boolean not null default false);
+  pagamento_anual boolean not null default false, dia_vencimento smallint);
 create table membros (id bigserial primary key, conta_id bigint, nome text);
 create table pessoas (id bigserial primary key, nome text, cpf text, cnpj text);
 create table clientes (id bigserial primary key, dono_id bigint, pessoa_id bigint,
@@ -64,11 +68,10 @@ create table servicos_catalogo (id bigserial primary key, conta_id bigint, slug 
 """
 
 # os números que a ZAQ vai mandar — aqui, inventados pelo teste
-_REGRAS_CHEIAS = {"fidelidade_meses": "12", "dia_vencimento": "10",
-                  "indice_reajuste": "IPCA", "aviso_previo_dias": "30",
-                  "multa_rescisao": "30", "implantacao_dias": "30",
-                  "suporte_horario": "de segunda a sexta, das 8h às 18h",
-                  "setup_parcelas": "parcela única"}
+_REGRAS_CHEIAS = {"indice_reajuste": "reajuste do salário mínimo vigente",
+                  "aviso_previo_dias": "30", "implantacao_dias": "60 a 90",
+                  "suporte_horario": "24 horas por dia",
+                  "setup_parcelas": "3"}
 
 _ITENS = [{"nome": "Agente de Atendimento", "desc": "WhatsApp 24h", "setup": 4500,
            "mensal": 1200},
@@ -185,10 +188,12 @@ def test_o_fechamento_pergunta_pelo_orcamento_e_nao_pelo_nicho():
 
 def test_o_modelo_nasce_com_os_numeros_da_casa_em_branco():
     r = ctr.regras_padrao(ctr.MODO_SERVICO)
-    for k in ("fidelidade_meses", "dia_vencimento", "indice_reajuste",
-              "aviso_previo_dias", "multa_rescisao", "implantacao_dias",
+    for k in ("indice_reajuste", "aviso_previo_dias", "implantacao_dias",
               "suporte_horario", "setup_parcelas"):
         assert r[k] == "", k
+    # sem fidelidade, sem multa rescisória, e o dia é do cliente
+    for k in ("fidelidade_meses", "multa_rescisao", "dia_vencimento"):
+        assert k not in r, k
     # o teto do CDC e da prática bancária pode vir pronto
     assert r["multa_atraso_pct"] == 2 and r["juros_mora_pct_mes"] == 1
 
@@ -198,7 +203,7 @@ def test_nao_liga_com_numero_em_branco():
                                     {"razao_social": "ZAQ LTDA", "documento": "1",
                                      "cidade": "Teresina", "uf": "PI"})
     campos = {p["campo"] for p in pend}
-    assert "regra.fidelidade_meses" in campos and "regra.dia_vencimento" in campos
+    assert "regra.aviso_previo_dias" in campos and "regra.indice_reajuste" in campos
     # e diz ONDE consertar, não só o nome do campo
     assert all("Números da casa" in p["detalhe"] for p in pend if p["campo"].startswith("regra."))
 
@@ -211,12 +216,12 @@ def test_com_tudo_preenchido_nao_ha_pendencia():
 
 
 def test_a_folha_nao_deixa_assinar_com_numero_em_branco(pool):
-    _ligar(pool, regras={"fidelidade_meses": "12"})    # o resto em branco
+    _ligar(pool, regras={"aviso_previo_dias": "30"})    # o resto em branco
     oid = _orcamento(pool)
     _com_contrato(pool, oid)
     d = cp.carregar(CT_TOKEN, pool)
     assert d["servico"] is True
-    assert "regra.dia_vencimento" in d["faltas"]
+    assert "regra.indice_reajuste" in d["faltas"]
     assert d["pode_assinar"] is False
 
 
@@ -240,16 +245,22 @@ def test_o_contrato_diz_os_numeros_do_orcamento(pool):
     assert "R$ 8.000,00" in texto          # implantação
     assert "R$ 2.100,00" in texto          # mensalidade (já com o -15% do anual)
     assert "R$ 33.200,00" in texto         # total do 1º ano
-    assert "anual, com 15% de desconto" in texto
-    assert "12 meses" in texto and "IPCA" in texto and "30%" in texto
+    assert "anual à vista" in texto and "R$ 25.200,00" in texto   # 12 × 2.100
+    assert "salário mínimo vigente" in texto and "60 a 90 dias" in texto
+    assert "antecedência mínima de 30 dias" in texto
+    assert "prazo indeterminado" in texto and "fidelidade" not in texto
 
 
 def test_no_mensal_a_forma_e_mensal(pool):
     _ligar(pool)
     oid = _orcamento(pool, anual=False)
     _com_contrato(pool, oid)
-    texto = " ".join(c["corpo"] for c in cp.carregar(CT_TOKEN, pool)["clausulas"])
-    assert "na forma de pagamento mensal" in texto
+    d = cp.carregar(CT_TOKEN, pool)
+    texto = " ".join(c["corpo"] for c in d["clausulas"])
+    # antes de o cliente escolher, o texto diz que é ELE quem escolhe — e isso
+    # não é campo em branco: não pode travar a assinatura que vai preenchê-lo
+    assert "no dia do mês escolhido pelo(a) CONTRATANTE" in texto
+    assert d["pede_dia"] is True and d["faltas"] == [] and d["pode_assinar"] is True
 
 
 @pytest.mark.parametrize("festa", ["evento", "festa", "convidados", "locação",
@@ -263,7 +274,8 @@ def test_a_paleta_de_campos_do_servico_nao_tem_evento():
     campos = {c["campo"] for c in ctr.campos_disponiveis([{"slug": "x", "nome": "X"}],
                                                          ctr.MODO_SERVICO)}
     assert not any(c.startswith(("evento.", "preco.")) for c in campos)
-    assert {"valor.setup", "valor.mensal", "valor.itens", "regra.fidelidade_meses"} <= campos
+    assert {"valor.setup", "valor.mensal", "valor.itens", "regra.aviso_previo_dias"} <= campos
+    assert not any("fidelidade" in c or "multa_rescisao" in c for c in campos)
 
 
 def test_todo_campo_do_modelo_padrao_existe_na_paleta():
@@ -373,3 +385,108 @@ def test_o_titulo_do_recorrente_sai_do_liquido():
     fonte = inspect.getsource(vendas.fechar_orcamento)
     assert "'mensal_liquido_centavos')::bigint" in fonte
     assert "'setup_liquido_centavos')::bigint" in fonte
+
+
+
+# ------------------------------------------------- o dia que o cliente escolhe
+
+def test_o_cliente_escolhe_o_dia_e_ele_entra_no_texto_assinado(pool, monkeypatch):
+    monkeypatch.setattr(cp, "get_pool", lambda: pool)
+    monkeypatch.setattr(ctr, "assinar", lambda *a, **k: True)   # o congelamento é de outro teste
+    _ligar(pool)
+    oid = _orcamento(pool, anual=False)
+    _com_contrato(pool, oid)
+    cp.contrato_assinar(_Req(), CT_TOKEN, nome="Ana", doc="000", aceite="on", dia="10")
+    with pool.connection() as c:
+        assert c.execute("select dia_vencimento from orcamentos where id=%s",
+                         (oid,)).fetchone()[0] == 10
+    texto = " ".join(c["corpo"] for c in cp.carregar(CT_TOKEN, pool)["clausulas"])
+    assert "vencimento todo dia 10" in texto
+
+
+@pytest.mark.parametrize("dia", ["", "0", "29", "x"])
+def test_sem_dia_valido_o_mensal_nao_assina(pool, monkeypatch, dia):
+    monkeypatch.setattr(cp, "get_pool", lambda: pool)
+    chamou = []
+    monkeypatch.setattr(ctr, "assinar", lambda *a, **k: chamou.append(1))
+    _ligar(pool)
+    oid = _orcamento(pool, anual=False)
+    _com_contrato(pool, oid)
+    r = cp.contrato_assinar(_Req(), CT_TOKEN, nome="Ana", doc="000", aceite="on", dia=dia)
+    assert "erro=" in r.headers["location"] and not chamou
+
+
+def test_no_anual_a_vista_nao_se_pede_dia(pool):
+    _ligar(pool)
+    oid = _orcamento(pool, anual=True)
+    _com_contrato(pool, oid)
+    assert cp.carregar(CT_TOKEN, pool)["pede_dia"] is False
+
+
+def test_a_folha_mostra_o_seletor_de_dia_so_no_mensal(pool, monkeypatch):
+    monkeypatch.setattr(cp, "get_pool", lambda: pool)
+    _ligar(pool)
+    oid = _orcamento(pool, anual=False)
+    _com_contrato(pool, oid)
+    html = cp.contrato_publico(None, CT_TOKEN).body.decode()
+    assert 'name="dia"' in html and "Melhor dia para o vencimento" in html
+
+
+# ------------------------------------------------------- e o que vira cobrança
+
+def test_o_primeiro_vencimento_e_no_dia_escolhido_do_mes_seguinte():
+    from datetime import date
+
+    from finance import vendas
+    assert vendas._primeiro_vencimento(date(2026, 9, 23), 10) == date(2026, 10, 10)
+    assert vendas._primeiro_vencimento(date(2026, 12, 5), 28) == date(2027, 1, 28)
+    # sem dia (anual, orçamento antigo): um mês depois, como sempre
+    assert vendas._primeiro_vencimento(date(2026, 9, 23), None) == date(2026, 10, 23)
+
+
+def test_o_anual_a_vista_vira_um_titulo_so_e_nao_recorrente():
+    """"Desconto só pagando à vista o ano todo": antes, o anual virava uma
+    mensalidade recorrente com 15% a menos — o desconto sem o ano adiantado."""
+    import inspect
+
+    from finance import vendas
+    fonte = inspect.getsource(vendas.fechar_orcamento)
+    corpo = fonte[fonte.index("if mensal_cent > 0 and anual:"):]
+    corpo = corpo[:corpo.index("elif mensal_cent > 0:")]
+    assert "mensal_cent * 12" in corpo
+    assert "CAT_SERVICOS, False" in corpo           # não recorrente
+    assert "_primeiro_vencimento(hoje, dia_venc)" in fonte
+
+
+class _Req:
+    headers: dict = {}
+
+    class client:
+        host = "203.0.113.7"
+
+
+# ------------------------------------------- implantação em parcelas e suporte
+
+@pytest.mark.parametrize("valor, n, texto", [
+    ("3", 3, "3 parcelas mensais e iguais"), ("1", 1, "parcela única"),
+    ("", 1, ""), ("três", 1, "parcela única"), ("40", 12, "12 parcelas mensais e iguais"),
+])
+def test_o_numero_de_parcelas_da_implantacao(valor, n, texto):
+    """O MESMO número escreve o contrato e abre os títulos: "em 3 parcelas" no
+    papel e três títulos no financeiro (ZAQ, 23/09/2026: "em 3 vezes")."""
+    assert ctr.parcelas_do_setup(valor) == n
+    assert ctr._regra_txt("setup_parcelas", valor) == texto
+
+
+def test_o_fechamento_divide_a_implantacao_pelo_numero_da_casa():
+    import inspect
+
+    from finance import vendas
+    fonte = inspect.getsource(vendas.fechar_orcamento)
+    assert "n_setup = _parcelas_do_setup_da_conta(pool, conta_id)" in fonte
+    assert "base, resto = divmod(setup_cent, n)" in fonte
+
+
+def test_o_suporte_esta_incluido_na_mensalidade():
+    texto = json.dumps(ctr.modelo_padrao(ctr.MODO_SERVICO), ensure_ascii=False)
+    assert "sem custo adicional: ele está incluído na mensalidade" in texto

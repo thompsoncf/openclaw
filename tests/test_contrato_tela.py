@@ -141,7 +141,7 @@ def test_conta_recorrente_recebe_o_contrato_de_servico(cliente):
     assert "locação" not in str(d["clausulas"])
     assert not any(c["campo"].startswith(("evento.", "preco.")) for c in d["campos"])
     # sem orçamento de exemplo, os números em branco já aparecem como ajuste
-    assert any(a["campo"] == "regra.fidelidade_meses" for a in d["resumo"]["ajustes"])
+    assert any(a["campo"] == "regra.aviso_previo_dias" for a in d["resumo"]["ajustes"])
 
 
 def test_a_conta_de_eventos_nao_ve_a_chave_do_servico(cliente):
@@ -154,7 +154,7 @@ def test_nao_liga_a_chave_com_numero_em_branco(cliente):
                      json={"clausulas": ctr.modelo_padrao(ctr.MODO_SERVICO), "regras": {},
                            "pedir_assinatura": True})
     assert r.status_code == 409
-    assert "Fidelidade" in r.json()["erro"] or "fidelidade" in r.json()["erro"]
+    assert "aviso prévio" in r.json()["erro"]
     with cliente.pool.connection() as c:
         n = c.execute("select count(*) from contrato_modelo").fetchone()[0]
     assert n == 0                                   # nem metade do salvar
@@ -162,9 +162,9 @@ def test_nao_liga_a_chave_com_numero_em_branco(cliente):
 
 def test_com_os_numeros_preenchidos_a_chave_liga(cliente):
     cliente.estado["conta"] = CONTA_REC
-    regras = {"fidelidade_meses": "12", "dia_vencimento": "10", "indice_reajuste": "IPCA",
-              "aviso_previo_dias": "30", "multa_rescisao": "30", "implantacao_dias": "30",
-              "suporte_horario": "de segunda a sexta", "setup_parcelas": "parcela única"}
+    regras = {"indice_reajuste": "reajuste do salário mínimo vigente",
+              "aviso_previo_dias": "30", "implantacao_dias": "60 a 90",
+              "suporte_horario": "24 horas por dia", "setup_parcelas": "parcela única"}
     r = cliente.post("/painel/servicos/contrato/salvar",
                      json={"clausulas": ctr.modelo_padrao(ctr.MODO_SERVICO), "regras": regras,
                            "pedir_assinatura": True})

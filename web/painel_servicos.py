@@ -185,6 +185,7 @@ def _criar_orcamentos(c):
         alter table orcamentos add column if not exists pagamento_anual boolean not null default false;
         alter table orcamentos add column if not exists setup_liquido_centavos bigint;
         alter table orcamentos add column if not exists mensal_liquido_centavos bigint;
+        alter table orcamentos add column if not exists dia_vencimento smallint;
         create index if not exists idx_orcamentos_status on orcamentos (status, criado_em desc);
         create index if not exists idx_orcamentos_conta on orcamentos (conta_id, status, criado_em desc);
         create unique index if not exists idx_orcamentos_token on orcamentos (token) where token is not null;
@@ -2018,8 +2019,8 @@ def painel_servicos_contrato_salvar(request: Request, dados: ContratoIn):
     modo = ctr.modo_da_conta(pool, conta[0])
     pedir = dados.pedir_assinatura if modo == ctr.MODO_SERVICO else None
     # LIGAR COM NÚMERO EM BRANCO NÃO SALVA. Ligado, a próxima proposta aprovada
-    # vira contrato na hora — e com `{regra.fidelidade_meses}` cru no texto, o
-    # cliente receberia uma fidelidade que não diz quanto tempo. Recusa o salvar
+    # vira contrato na hora — e com `{regra.aviso_previo_dias}` cru no texto, o
+    # cliente receberia um aviso prévio que não diz quantos dias. Recusa o salvar
     # inteiro (e não só a chave): salvar metade e dizer "salvo" faria o dono sair
     # achando que ligou.
     if pedir:
@@ -4614,13 +4615,13 @@ _JS_CRU = r"""(function(){
       retirada_horas:'Retirar materiais (h)',acesso_montagem:'Montagem a partir de'};
     // os números do contrato de SERVIÇO (recorrente). Nascem em branco — ver
     // finance/contrato.REGRAS_SERVICO_PADRAO — e o placeholder mostra o formato.
-    var ROTULO_REGRA_SERVICO={fidelidade_meses:['Fidelidade (meses)','12'],
-      dia_vencimento:['Dia de vencimento','10'],indice_reajuste:['Índice de reajuste','IPCA'],
+    // Sem fidelidade, sem multa rescisória e sem dia fixo: o dia de vencimento é
+    // o CLIENTE quem escolhe, ao assinar (dono da ZAQ, 23/09/2026).
+    var ROTULO_REGRA_SERVICO={indice_reajuste:['Reajuste anual pelo','reajuste do salário mínimo vigente'],
       aviso_previo_dias:['Aviso prévio p/ cancelar (dias)','30'],
-      multa_rescisao:['Multa rescisória (% do restante)','30'],
-      implantacao_dias:['Implantação (dias úteis)','30'],
-      suporte_horario:['Suporte','de segunda a sexta, das 8h às 18h'],
-      setup_parcelas:['Implantação paga em','parcela única'],
+      implantacao_dias:['Prazo da implantação (dias)','60 a 90'],
+      suporte_horario:['Suporte','24 horas por dia'],
+      setup_parcelas:['Implantação em (nº de parcelas)','3'],
       multa_atraso_pct:['Multa por atraso (%)','2'],juros_mora_pct_mes:['Juros de mora (% ao mês)','1']};
     var MODO='locacao', PEDIR=false;
 
@@ -5394,7 +5395,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         <button id="oc-desc-zerar" class="oc-dzero" type="button">zerar desconto</button>
       </div>
       {% if not servico_avulso %}
-      <button id="oc-anual" class="oc-pill" data-on="0" type="button" style="width:100%; margin-top:.7rem; text-align:left; display:flex; justify-content:space-between; align-items:center">Pagamento anual (-15%) <span id="oc-anual-mk">↻</span></button>
+      <button id="oc-anual" class="oc-pill" data-on="0" type="button" style="width:100%; margin-top:.7rem; text-align:left; display:flex; justify-content:space-between; align-items:center">Pagamento anual à vista (-15%) <span id="oc-anual-mk">↻</span></button>
       {% endif %}
       <button id="oc-gerar" class="oc-btn oc-btn-g">Gerar proposta</button>
       <button id="oc-salvar" class="oc-btn oc-btn-o">Salvar no funil</button>

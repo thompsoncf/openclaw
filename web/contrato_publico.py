@@ -96,7 +96,8 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
                       o.itens,
                       -- lido pelo jsonb da linha, não pela coluna: base sem a 311
                       -- (ou tabela montada à mão) continua abrindo o contrato
-                      coalesce((to_jsonb(o)->>'pagamento_anual')::boolean, false)
+                      coalesce((to_jsonb(o)->>'pagamento_anual')::boolean, false),
+                      (to_jsonb(o)->>'dia_vencimento')::int
                  from orcamentos o join contas ct on ct.id = o.conta_id
                 where o.id=%s and o.conta_id=%s""",
             (orcamento_id, conta_id)).fetchone()
@@ -106,7 +107,7 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
      cli_uf, numero, evento, total, parcelas, orc_status, sinal_pago_em,
      c_nome, c_razao, c_fantasia, c_doc, c_end, c_bairro, c_cep, c_cid, c_uf,
      c_tel, c_email, c_logo, cliente_id, modo_orc, setup_c, mensal_c, itens,
-     anual) = r
+     anual, dia_venc) = r
     evento = evento if isinstance(evento, dict) else {}
     empresa = {"razao_social": c_razao or c_fantasia or c_nome or "",
                "nome_fantasia": c_fantasia or "", "documento": c_doc or "",
@@ -131,6 +132,7 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
                  "recorrente": {"setup_centavos": int(setup_c or 0),
                                 "mensal_centavos": int(mensal_c or 0),
                                 "ano1_centavos": int(total or 0), "anual": bool(anual),
+                                "dia_vencimento": dia_venc,
                                 "itens": itens if isinstance(itens, list) else []}}
     # O CADASTRO COMPLETA O QUE O ORÇAMENTO NÃO TEM — documento e endereço. É o
     # que o `cliente_id` sempre prometeu ("a folha relê o cadastro depois", em
@@ -185,6 +187,7 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
         "setup": ctr.reais(int(setup_c or 0)),
         "mensal": ctr.reais(int(mensal_c or 0)),
         "anual": bool(anual),
+        "dia_vencimento": dia_venc,
     }
 
 
@@ -267,14 +270,31 @@ def carregar(token: str, pool=None) -> dict | None:
         # NO DE SERVIÇO, CAMPO SEM VALOR NÃO ASSINA. O de locação só avisa (a
         # tarja amarela, "avise a empresa antes de assinar"), e é assim desde
         # sempre na Prime. O de serviço nasceu com números em branco de propósito
-        # (ver REGRAS_SERVICO_PADRAO): aceitar "{regra.fidelidade_meses} meses"
-        # seria o cliente assinar uma fidelidade que não diz quanto tempo.
+        # (ver REGRAS_SERVICO_PADRAO): aceitar "{regra.aviso_previo_dias} dias"
+        # seria o cliente assinar um aviso prévio que não diz quanto tempo.
         "pode_assinar": (orc_status in ("aprovada", "fechado") and not assinado
                          and not (servico and faltas)),
         "servico": servico,
         "servicos": q["servicos"], "setup": q["setup"], "mensal": q["mensal"],
         "anual": q["anual"],
+        # "cliente escolhe a melhor data": no serviço MENSAL o formulário pede o
+        # dia; no anual à vista não há mensalidade pra vencer.
+        "pede_dia": servico and not q["anual"],
+        "dia_vencimento": q["dia_vencimento"],
+        "dias": DIAS_VENCIMENTO,
     }
+
+
+# Os dias que o cliente pode escolher. Até 28 porque fevereiro existe — é o mesmo
+# teto que o título recorrente já usa (`empresa._mes_seguinte`).
+DIAS_VENCIMENTO = tuple(range(1, 29))
+
+
+def _gravar_dia(pool, conta_id: int, orcamento_id: int, dia: int) -> None:
+    with pool.connection() as c:
+        c.execute("update orcamentos set dia_vencimento=%s where id=%s and conta_id=%s",
+                  (int(dia), int(orcamento_id), int(conta_id)))
+        c.commit()
 
 
 def _aditivo_aviso(pool, ct) -> dict | None:
@@ -305,7 +325,7 @@ def contrato_publico(request: Request, token: str, erro: str = ""):
 
 @router.post("/contrato/{token}/assinar")
 def contrato_assinar(request: Request, token: str, nome: str = Form(""),
-                     doc: str = Form(""), aceite: str = Form("")):
+                     doc: str = Form(""), aceite: str = Form(""), dia: str = Form("")):
     """O aceite das cláusulas — separado do aceite da proposta, de propósito.
 
     Congela o texto no ato: grava o que o cliente LEU, não uma referência ao
@@ -318,6 +338,22 @@ def contrato_assinar(request: Request, token: str, nome: str = Form(""),
     # as travas revalidadas AQUI e não só na tela
     if not d or not d["pode_assinar"]:
         return RedirectResponse(f"/contrato/{token}", status_code=303)
+    # O DIA DE VENCIMENTO entra ANTES de congelar: é gravado no orçamento e o
+    # contrato é remontado com ele, pra o texto assinado dizer "todo dia 10" e
+    # não "no dia escolhido". Sem dia válido, não assina.
+    if d.get("pede_dia"):
+        try:
+            dia_i = int(dia or 0)
+        except ValueError:
+            dia_i = 0
+        if dia_i not in DIAS_VENCIMENTO:
+            return RedirectResponse(
+                f"/contrato/{token}?erro=Escolha+o+melhor+dia+para+o+vencimento.",
+                status_code=303)
+        _gravar_dia(pool, d["contrato"]["conta_id"], d["contrato"]["orcamento_id"], dia_i)
+        d = carregar(token, pool)
+        if not d or not d["pode_assinar"]:
+            return RedirectResponse(f"/contrato/{token}", status_code=303)
     ctr.assinar(pool, d["contrato"]["conta_id"], d["contrato"]["id"], d["clausulas"],
                 nome, doc, _ip(request))
     return RedirectResponse(f"/contrato/{token}", status_code=303)
@@ -383,6 +419,8 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
 .row{display:flex;gap:9px;margin:12px 0 9px;flex-wrap:wrap}
 .row input{flex:1;min-width:170px;padding:10px 12px;border:1px solid #DCD5C6;border-radius:8px;font-size:14px;font-family:inherit}
 .ck{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;color:#3B4757;line-height:1.45}
+.dia{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:13px;color:#3B4757;margin:0 0 11px}
+.dia select{padding:9px 10px;border:1px solid #DCD5C6;border-radius:8px;font-size:14px;font-family:inherit;background:#fff}
 .go{margin-top:12px;width:100%;background:#14213D;color:#F4F1EA;border:0;border-radius:9px;padding:12px;font-size:14px;font-weight:600;cursor:pointer}
 .err{background:#FDECEA;border:1px solid #F5C6C0;color:#B4453C;border-radius:8px;padding:9px 11px;font-size:12.5px;margin-bottom:9px}
 .ok{margin-top:22px;background:#0e2a1f;border:1px solid #1c5c40;border-radius:10px;padding:16px 18px;color:#eafff5}
@@ -461,10 +499,10 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
         {% for s in d.servicos %}<tr><td><b>{{ s.nome }}</b>{% if s.desc %}<small>{{ s.desc }}</small>{% endif %}</td></tr>{% endfor %}
         </tbody>
       </table>
-      <div class="ev" style="margin-top:8px;grid-template-columns:1fr 1fr 1fr 1fr">
+      <div class="ev" style="margin-top:8px">
         <div><div class="k">Implantação</div><div class="v">{{ d.setup }}</div></div>
         <div><div class="k">Mensalidade</div><div class="v">{{ d.mensal }}</div></div>
-        <div><div class="k">Pagamento</div><div class="v">{{ 'Anual (-15%)' if d.anual else 'Mensal' }}</div></div>
+        <div><div class="k">Pagamento</div><div class="v">{{ 'Anual à vista (-15%)' if d.anual else ('Mensal · dia ' ~ d.dia_vencimento if d.dia_vencimento else 'Mensal') }}</div></div>
         <div><div class="k">Total 1º ano</div><div class="v">{{ d.valor }}</div></div>
       </div>
       {% else %}
@@ -512,7 +550,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
       <form class="sign" method="post" action="/contrato/{{ token }}/assinar">
         <h3>✍️ Assinar o contrato</h3>
         <p>Ao assinar, você aceita todas as cláusulas acima — inclusive as de
-        {{ 'fidelidade, reajuste e cancelamento' if d.servico else 'cancelamento, reagendamento e utilização excedente' }}. Fica registrado com
+        {{ 'reajuste, vencimento e cancelamento' if d.servico else 'cancelamento, reagendamento e utilização excedente' }}. Fica registrado com
         nome, CPF, data/hora e IP.</p>
         {# A ASSINATURA NÃO É A RESERVA. Antes o sinal travava o botão, e a ordem
            dizia isso sozinha; agora dá pra assinar antes de pagar, então quem
@@ -539,6 +577,16 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
           <input type="text" name="nome" placeholder="Seu nome completo" required>
           <input type="text" name="doc" placeholder="CPF">
         </div>
+        {% if d.pede_dia %}
+        {# "cliente escolhe a melhor data" — o dia vai pro texto do contrato, que
+           é congelado na assinatura, e é o dia do título recorrente. #}
+        <label class="dia">Melhor dia para o vencimento da mensalidade
+          <select name="dia" required>
+            <option value="">escolha</option>
+            {% for n in d.dias %}<option value="{{ n }}"{% if d.dia_vencimento == n %} selected{% endif %}>dia {{ n }}</option>{% endfor %}
+          </select>
+        </label>
+        {% endif %}
         <label class="ck"><input type="checkbox" name="aceite">
           <span>Li e concordo com todas as cláusulas deste contrato.</span></label>
         <button class="go" type="submit">✓ Assinar contrato</button>

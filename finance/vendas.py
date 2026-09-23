@@ -132,6 +132,33 @@ def vende_data(pool, conta_id: int) -> bool:
 # SQL do título a receber (reusa a tabela titulos do módulo Empresa).
 # orcamento_id/parcela_idx (migração 162) só vêm preenchidos no modo evento: são
 # eles que deixam voltar do título pra parcela sem casar por texto de descrição.
+def _parcelas_do_setup_da_conta(pool, conta_id: int) -> int:
+    """Em quantas vezes esta conta cobra a implantação — o número da casa do
+    contrato de serviço (`regras.setup_parcelas`). Tolerante: sem modelo, sem a
+    tabela ou ilegível, 1 — a implantação à vista de sempre."""
+    try:
+        from finance import contrato as ctr
+        with pool.connection() as c:
+            r = c.execute("select regras->>'setup_parcelas' from contrato_modelo "
+                          "where conta_id=%s", (conta_id,)).fetchone()
+        return ctr.parcelas_do_setup(r[0] if r else None)
+    except Exception:  # noqa: BLE001
+        return 1
+
+
+def _primeiro_vencimento(hoje: date, dia) -> date:
+    """A primeira mensalidade: no mês seguinte ao fechamento, no dia que o cliente
+    escolheu. Sem dia (anual, orçamento antigo), o de sempre: `_mes_seguinte`."""
+    try:
+        d = int(dia or 0)
+    except (TypeError, ValueError):
+        d = 0
+    if not 1 <= d <= 28:
+        return _mes_seguinte(hoje)
+    ano, mes = (hoje.year + 1, 1) if hoje.month == 12 else (hoje.year, hoje.month + 1)
+    return date(ano, mes, d)
+
+
 _SQL_TITULO = """insert into titulos
     (conta_id, tipo, descricao, contraparte, valor_centavos, vencimento,
      categoria, recorrente, criado_por, orcamento_id, parcela_idx)
@@ -1451,6 +1478,8 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
     navegador, e navegador não é fonte confiável.
     """
     hoje = date.today()
+    # lido ANTES da transação de baixo, que não pode ser abortada por uma leitura
+    n_setup = _parcelas_do_setup_da_conta(pool, conta_id)
     # a porta do nicho primeiro: conta recorrente nem chega a perguntar por contrato
     if not por_assinatura:
         from finance import contrato as ctr
@@ -1476,7 +1505,10 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
                        coalesce((to_jsonb(orcamentos)->>'mensal_liquido_centavos')::bigint,
                                 mensal_centavos),
                        coalesce(modo,'recorrente'), parcelas, primeiro_ano_centavos,
-                       sinal_pago_em, criado_por""",
+                       sinal_pago_em, criado_por,
+                       -- 311: anual à vista e o dia que o cliente escolheu
+                       coalesce((to_jsonb(orcamentos)->>'pagamento_anual')::boolean, false),
+                       (to_jsonb(orcamentos)->>'dia_vencimento')::int""",
             (orcamento_id, conta_id),
         ).fetchone()
         if not orc:
@@ -1489,7 +1521,7 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
             return {"ok": False, "erro": f"Orçamento já está '{estado[0]}'."}
 
         (empresa, cliente, setup_cent, mensal_cent, modo, parcelas_raw, total_cent,
-         sinal_pago_em, criado_por_orc) = orc
+         sinal_pago_em, criado_por_orc, anual, dia_venc) = orc
         contraparte = (empresa or cliente or "").strip()
         # De quem é a venda: quem FEZ a proposta, não quem apertou "Fechar
         # contrato" — mesma regra de `_vendedor_do_orcamento`, mas sem outra ida
@@ -1541,18 +1573,44 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
             evento_ids = None
             setup_id = mensal_id = None
             if setup_cent > 0:
-                setup_id = c.execute(
+                # EM QUANTAS VEZES (número da casa do contrato de serviço, 311): a
+                # ZAQ cobra a implantação em 3. O mesmo número escreve "em 3
+                # parcelas mensais e iguais" no contrato, então o título e o
+                # papel não discordam. Sem o número, à vista, como sempre foi.
+                n = n_setup
+                base, resto = divmod(setup_cent, n)
+                venc = hoje + timedelta(days=dias_setup)
+                for i in range(n):
+                    rot = f"Setup — {contraparte}".strip(" —")
+                    if n > 1:
+                        rot += f" · parcela {i + 1}/{n}"
+                    tid = c.execute(
+                        _SQL_TITULO,
+                        (conta_id, rot, contraparte, base + (resto if i == 0 else 0),
+                         venc, CAT_SERVICOS, False, criado_por, None, None),
+                    ).fetchone()[0]
+                    setup_id = setup_id or tid
+                    venc = _mes_seguinte(venc)
+            if mensal_cent > 0 and anual:
+                # ANUAL À VISTA (dono, 23/09/2026: "desconto só pagando à vista o
+                # ano todo"): as doze mensalidades, já com os 15%, num título só,
+                # junto com a implantação — e NÃO recorrente. Era um título mensal
+                # recorrente com a mensalidade reduzida, que dava o desconto sem
+                # receber o ano adiantado.
+                mensal_id = c.execute(
                     _SQL_TITULO,
-                    (conta_id, f"Setup — {contraparte}".strip(" —"), contraparte,
-                     setup_cent, hoje + timedelta(days=dias_setup), CAT_SERVICOS,
-                     False, criado_por, None, None),
+                    (conta_id, f"Anuidade (à vista) — {contraparte}".strip(" —"),
+                     contraparte, mensal_cent * 12, hoje + timedelta(days=dias_setup),
+                     CAT_SERVICOS, False, criado_por, None, None),
                 ).fetchone()[0]
-            if mensal_cent > 0:
+            elif mensal_cent > 0:
+                # o DIA que o cliente escolheu ao assinar (311); sem ele, um mês
+                # depois do fechamento, como sempre foi
                 mensal_id = c.execute(
                     _SQL_TITULO,
                     (conta_id, f"Mensalidade — {contraparte}".strip(" —"), contraparte,
-                     mensal_cent, _mes_seguinte(hoje), CAT_SERVICOS, True, criado_por,
-                     None, None),
+                     mensal_cent, _primeiro_vencimento(hoje, dia_venc), CAT_SERVICOS, True,
+                     criado_por, None, None),
                 ).fetchone()[0]
             c.commit()
 

@@ -96,26 +96,30 @@ MODO_SERVICO = "servico"
 # Os números da casa do contrato de SERVIÇO. Em branco de propósito, e é o oposto
 # do de locação: lá os padrões são os do contrato vigente da Prime; aqui não existe
 # contrato vigente nenhum ("ainda não", disse o dono da ZAQ em 23/09/2026). Um
-# número inventado — fidelidade de 12 meses, multa de 30% — iria pro cliente como
+# número inventado — reajuste pelo IPCA, implantação em 30 dias — iria pro cliente como
 # se fosse da empresa. Em branco, ele fica à vista no texto e a tela recusa ligar
 # o contrato até alguém preencher. Multa e juros de atraso têm padrão porque 2% e
 # 1% ao mês são o teto que o CDC e a prática bancária já dão.
+#
+# SEM FIDELIDADE E SEM DIA FIXO (dono da ZAQ, 23/09/2026): "sem fidelidade,
+# cliente só tem que avisar 30 antes de rescindir o contrato, e desconto só
+# pagando à vista o ano todo"; "cliente escolhe a melhor data". Por isso não há
+# número de fidelidade nem de multa rescisória, e o dia de vencimento não é da
+# casa: é do CLIENTE, escolhido na assinatura (ver `_valor_servico`).
 REGRAS_SERVICO_PADRAO = {
-    "fidelidade_meses":  "",   # prazo mínimo (cláusula 5.1)
-    "dia_vencimento":    "",   # vencimento da mensalidade (cláusula 3.2)
     "indice_reajuste":   "",   # IPCA, IGP-M... (cláusula 4.1)
     "aviso_previo_dias": "",   # antecedência pra cancelar (cláusula 9.1)
-    "multa_rescisao":    "",   # % das mensalidades restantes da fidelidade (9.2)
-    "implantacao_dias":  "",   # prazo da implantação, dias úteis (cláusula 2.2)
+    "implantacao_dias":  "",   # prazo da implantação — "30", "60 a 90" (cláusula 2.2)
     "suporte_horario":   "",   # "de segunda a sexta, das 8h às 18h" (cláusula 6.1)
-    "setup_parcelas":    "",   # "parcela única", "3 parcelas mensais" (cláusula 2.1)
+    "setup_parcelas":    "",   # nº de parcelas da implantação: 1, 3... (cláusula 2.1;
+                               # é também quantos títulos `fechar_orcamento` abre)
     "multa_atraso_pct":   2,   # % sobre o valor em atraso (cláusula 3.4)
     "juros_mora_pct_mes": 1,   # % ao mês (cláusula 3.4)
 }
 
 # o que vira porcentagem na hora de preencher — o resto entra como está escrito
 _REGRAS_PCT = {"sinal_pct", "multa_cancelamento", "taxa_reagendamento",
-               "multa_atraso_pct", "juros_mora_pct_mes", "multa_rescisao"}
+               "multa_atraso_pct", "juros_mora_pct_mes"}
 
 
 def regras_padrao(modo: str = MODO_LOCACAO) -> dict:
@@ -307,9 +311,23 @@ def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None,
     }
 
 
+def parcelas_do_setup(valor) -> int:
+    """Em quantas vezes a implantação é paga — o número da casa, lido como número.
+    O mesmo número vira o texto do contrato e os títulos do financeiro, então os
+    dois nunca discordam. Qualquer coisa ilegível conta como 1 (à vista)."""
+    try:
+        n = int(str(valor or "").strip().split()[0])
+    except (ValueError, IndexError):
+        return 1
+    return max(1, min(12, n))
+
+
 def _regra_txt(chave, valor) -> str:
     if valor in (None, ""):
         return ""
+    if chave == "setup_parcelas":
+        n = parcelas_do_setup(valor)
+        return "parcela única" if n == 1 else f"{n} parcelas mensais e iguais"
     return pct(valor) if chave in _REGRAS_PCT else str(valor)
 
 
@@ -317,17 +335,35 @@ def _valor_servico(r: dict) -> dict:
     """O dinheiro do contrato de SERVIÇO, lido do orçamento recorrente.
 
     `mensal_centavos` já vem com o desconto do anual aplicado (é assim que a tela
-    grava e que `fechar_orcamento` gera o título recorrente), então o contrato diz
-    o mesmo número que o financeiro vai cobrar."""
+    grava e que `fechar_orcamento` gera o título), então o contrato diz o mesmo
+    número que o financeiro vai cobrar.
+
+    A FORMA é uma frase só, porque ela carrega o vencimento — e o vencimento
+    depende dela:
+      * anual: o ano inteiro À VISTA, com 15% de desconto, numa cobrança só;
+      * mensal: todo dia `dia_vencimento`, que o CLIENTE escolhe na assinatura.
+        Antes de ele escolher, a frase diz que é ele quem escolhe — e não deixa
+        campo em branco, que travaria a própria assinatura que vai preenchê-lo."""
     anual = bool(r.get("anual"))
+    dia = r.get("dia_vencimento")
     nomes = [str((i or {}).get("nome") or "").strip() for i in (r.get("itens") or [])]
     nomes = [n for n in nomes if n]
+    if anual:
+        mensal = int(r.get("mensal_centavos") or 0)
+        forma = ("anual à vista: as doze mensalidades com 15% de desconto, "
+                 f"somando {reais(mensal * 12)}, pagas em parcela única com "
+                 "vencimento junto com o da implantação")
+    elif dia:
+        forma = (f"mensal, com vencimento todo dia {int(dia)}, a partir do mês "
+                 "seguinte à assinatura")
+    else:
+        forma = ("mensal, com vencimento no dia do mês escolhido pelo(a) CONTRATANTE "
+                 "ao assinar este contrato, a partir do mês seguinte à assinatura")
     return {
         "setup": reais(r.get("setup_centavos")),
         "mensal": reais(r.get("mensal_centavos")),
         "ano1": reais(r.get("ano1_centavos")),
-        "forma": ("anual, com 15% de desconto na mensalidade, vinculado ao período de "
-                  "fidelidade" if anual else "mensal"),
+        "forma": forma,
         # a lista vira texto corrido: "A; B e C" é como um contrato enumera
         "itens": ("; ".join(nomes[:-1]) + " e " + nomes[-1]) if len(nomes) > 1
                  else (nomes[0] if nomes else ""),
@@ -496,12 +532,9 @@ _CAMPOS_SERVICO = [
     ("valor.itens", "serviços contratados"), ("valor.setup", "valor da implantação"),
     ("valor.mensal", "mensalidade"), ("valor.forma", "forma de pagamento"),
     ("valor.ano1", "total do 1º ano"), ("valor.numero", "nº do orçamento"),
-    ("regra.fidelidade_meses", "meses de fidelidade"),
-    ("regra.dia_vencimento", "dia de vencimento"),
     ("regra.indice_reajuste", "índice de reajuste"),
     ("regra.aviso_previo_dias", "dias de aviso prévio"),
-    ("regra.multa_rescisao", "% da multa rescisória"),
-    ("regra.implantacao_dias", "dias úteis de implantação"),
+    ("regra.implantacao_dias", "prazo da implantação (dias)"),
     ("regra.suporte_horario", "horário do suporte"),
     ("regra.setup_parcelas", "parcelas da implantação"),
     ("regra.multa_atraso_pct", "% da multa por atraso"),
@@ -782,7 +815,7 @@ def modelo_padrao_servico() -> list[dict]:
     tenta fazer da melhor forma", disse o dono).
 
     As mesmas regras do modelo de locação: nenhum número escrito no texto — setup,
-    mensalidade, fidelidade e multa saem do orçamento e dos "números da casa" — e
+    mensalidade, reajuste e aviso prévio saem do orçamento e dos "números da casa" — e
     nada de festa (seção 6 do CLAUDE.md)."""
     return [
         {"titulo": "Cláusula 1 — Do objeto",
@@ -797,7 +830,7 @@ def modelo_padrao_servico() -> list[dict]:
         {"titulo": "Cláusula 2 — Da implantação",
          "corpo": "2.1. Pela implantação, configuração e treinamento inicial, o(a) CONTRATANTE "
                   "pagará o valor de {valor.setup}, em {regra.setup_parcelas}.\n"
-                  "2.2. A implantação será concluída em até {regra.implantacao_dias} dias úteis "
+                  "2.2. A implantação será concluída no prazo de {regra.implantacao_dias} dias "
                   "contados da assinatura deste contrato e do envio, pelo(a) CONTRATANTE, das "
                   "informações e acessos necessários.\n"
                   "2.3. Atrasos causados pela falta de informações, acessos ou aprovações do(a) "
@@ -805,31 +838,29 @@ def modelo_padrao_servico() -> list[dict]:
         {"titulo": "Cláusula 3 — Da mensalidade e do pagamento",
          "corpo": "3.1. Pela disponibilidade e manutenção dos serviços, o(a) CONTRATANTE pagará "
                   "a mensalidade de {valor.mensal}, na forma de pagamento {valor.forma}.\n"
-                  "3.2. A mensalidade vence todo dia {regra.dia_vencimento} de cada mês, a "
-                  "partir do mês seguinte à assinatura.\n"
-                  "3.3. O valor total do primeiro ano, somando implantação e mensalidades, é de "
+                  "3.2. O valor total do primeiro ano, somando implantação e mensalidades, é de "
                   "{valor.ano1}.\n"
-                  "3.4. O atraso no pagamento sujeitará o(a) CONTRATANTE à multa de "
+                  "3.3. O atraso no pagamento sujeitará o(a) CONTRATANTE à multa de "
                   "{regra.multa_atraso_pct} sobre o valor em atraso, acrescida de juros de mora "
                   "de {regra.juros_mora_pct_mes} ao mês, proporcionais aos dias de atraso.\n"
-                  "3.5. Atraso superior a 30 (trinta) dias autoriza a CONTRATADA a suspender o "
+                  "3.4. Atraso superior a 30 (trinta) dias autoriza a CONTRATADA a suspender o "
                   "acesso aos serviços, mediante aviso prévio de 5 (cinco) dias, até a "
                   "regularização."},
         {"titulo": "Cláusula 4 — Do reajuste",
          "corpo": "4.1. Os valores deste contrato serão reajustados a cada 12 (doze) meses, "
-                  "contados da assinatura, pela variação acumulada do {regra.indice_reajuste} "
-                  "no período.\n"
+                  "contados da assinatura, pelo {regra.indice_reajuste}.\n"
                   "4.2. Na falta ou extinção do índice, será adotado o índice oficial que o "
                   "substituir."},
-        {"titulo": "Cláusula 5 — Da vigência e da fidelidade",
-         "corpo": "5.1. Este contrato vigora por prazo mínimo de {regra.fidelidade_meses} meses "
-                  "a partir da assinatura (período de fidelidade), renovando-se "
-                  "automaticamente por prazo indeterminado ao final desse período.\n"
-                  "5.2. No pagamento anual, o desconto concedido sobre as mensalidades está "
-                  "vinculado ao cumprimento integral do período de fidelidade."},
+        {"titulo": "Cláusula 5 — Da vigência",
+         "corpo": "5.1. Este contrato vigora por prazo indeterminado a partir da assinatura, sem "
+                  "período mínimo de permanência.\n"
+                  "5.2. No pagamento anual à vista, o período pago corresponde aos 12 (doze) "
+                  "meses seguintes à assinatura; ao final dele, a forma de pagamento do período "
+                  "seguinte será combinada entre as partes."},
         {"titulo": "Cláusula 6 — Do suporte e do nível de serviço",
          "corpo": "6.1. O suporte técnico será prestado {regra.suporte_horario}, pelos canais "
-                  "informados pela CONTRATADA.\n"
+                  "informados pela CONTRATADA, sem custo adicional: ele está incluído na "
+                  "mensalidade.\n"
                   "6.2. A CONTRATADA empregará os melhores esforços para manter os serviços "
                   "disponíveis, ressalvadas as manutenções programadas, comunicadas com "
                   "antecedência, e as indisponibilidades de serviços de terceiros "
@@ -852,13 +883,14 @@ def modelo_padrao_servico() -> list[dict]:
                   "8.3. Encerrado o contrato, os dados serão disponibilizados ao(à) CONTRATANTE "
                   "por 30 (trinta) dias e depois eliminados, salvo obrigação legal de guarda."},
         {"titulo": "Cláusula 9 — Do cancelamento",
-         "corpo": "9.1. Qualquer das partes poderá cancelar este contrato mediante aviso por "
-                  "escrito com antecedência mínima de {regra.aviso_previo_dias} dias.\n"
-                  "9.2. O cancelamento pelo(a) CONTRATANTE durante o período de fidelidade "
-                  "sujeita-o(a) à multa de {regra.multa_rescisao} do valor das mensalidades "
-                  "restantes até o fim desse período.\n"
-                  "9.3. No pagamento anual, o cancelamento durante a fidelidade implica também "
-                  "a devolução do desconto concedido sobre as mensalidades já pagas.\n"
+         "corpo": "9.1. Qualquer das partes poderá cancelar este contrato a qualquer tempo, sem "
+                  "multa, mediante aviso por escrito com antecedência mínima de "
+                  "{regra.aviso_previo_dias} dias.\n"
+                  "9.2. Durante o prazo do aviso os serviços continuam sendo prestados, e as "
+                  "mensalidades desse período continuam devidas.\n"
+                  "9.3. No pagamento anual à vista, o cancelamento produz efeito ao fim do "
+                  "período já pago, até o qual os serviços continuam disponíveis; o valor pago "
+                  "antecipadamente, com desconto, não é restituído.\n"
                   "9.4. O valor da implantação não é restituído depois de concluída a "
                   "implantação."},
         {"titulo": "Cláusula 10 — Das disposições gerais e do foro",

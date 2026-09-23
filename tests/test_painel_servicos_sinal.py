@@ -1546,3 +1546,30 @@ def test_a_data_da_festa_esta_sempre_no_futuro():
     folga = _FESTA - _agora_brt().date()
     assert folga.days > 30, (
         f"FESTA_ISO precisa estar bem à frente do relógio; está {folga.days} dia(s)")
+
+
+# ---------------------------------------------- o cliente entra em Clientes nos dois modos
+# Era só no evento: na ZAQ (recorrente) o cliente ficava preso na proposta e não
+# aparecia na aba Clientes. O dono pediu em 23/09/2026 que fosse como na Prime.
+
+def test_no_recorrente_salvar_a_proposta_tambem_cadastra_o_cliente(cliente, monkeypatch):
+    with cliente.pool.connection() as cx:
+        cx.execute("update contas set nicho_id=null where id=%s", (CONTA,))  # → recorrente
+        cx.commit()
+    chamadas = []
+
+    def _espelho(pool, conta_id, dados):
+        chamadas.append((conta_id, dados.empresa))
+        return 4242
+    monkeypatch.setattr(ps, "_espelhar_cliente", _espelho)
+    r = cliente.post("/painel/servicos/salvar",
+                     json={"empresa": "Flash Car", "whatsapp": "86 99434-8180",
+                           "modulos": [], "itens": []})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert chamadas == [(CONTA, "Flash Car")]
+    assert d["cliente_id"] == 4242
+    with cliente.pool.connection() as cx:
+        modo, cid = cx.execute("select modo, cliente_id from orcamentos where id=%s",
+                               (d["id"],)).fetchone()
+    assert modo != "evento" and cid == 4242

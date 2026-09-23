@@ -181,3 +181,24 @@ def test_voltar_pra_cobrar_zera_o_desconto_da_linha():
     com 100% gravado — valendo zero e parecendo cobrada."""
     assert "if(!vira){ var di=rowc.querySelector('.oc-desc'); if(di) di.value='0'; }" \
         in ps._JS_CRU
+
+
+# ------------------------------------------------ o card do Cliente tem o salvar
+# Em 23/09/2026 o dono cadastrou um cliente na proposta da ZAQ e não achou onde
+# salvar: o único botão era o "Salvar no funil", no Resumo. O que ele digitou não
+# chegou ao banco.
+
+@pytest.mark.parametrize("modo", ["evento", "recorrente"])
+def test_o_card_do_cliente_tem_o_proprio_salvar(modo, evento, recorrente):
+    html = evento if modo == "evento" else recorrente
+    form = html.split('id="cli-form-full"', 1)[1].split('class="oc-grid"', 1)[0]
+    assert 'id="cli-salvar"' in form
+    assert ">Salvar cliente<" in form
+
+
+def test_o_salvar_do_cliente_grava_a_proposta_e_exige_o_nome():
+    js = ps._JS_CRU.split("var cliSalvar=", 1)[1].split("function esc(", 1)[0]
+    assert "salvarProposta(" in js       # o cliente mora na proposta
+    assert "'oc-empresa'" in js          # sem nome, não grava
+    assert "atualizarChip()" in js       # fecha no cartão do cliente
+    assert "aditivo_url" in js           # contrato assinado: mesmo caminho do Salvar no funil

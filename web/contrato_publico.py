@@ -1,4 +1,5 @@
-"""Contrato de locação — DOCUMENTO PRÓPRIO, com link próprio.
+"""Contrato de locação (eventos) ou de prestação de serviços (recorrente) —
+DOCUMENTO PRÓPRIO, com link próprio.
 
 /contrato/<token>  (SEM login): o cliente abre, lê, imprime e ASSINA.
 
@@ -16,6 +17,11 @@ cláusula. As cláusulas vêm por cima disso.
 
 Escopo de leitura por TOKEN, não por conta: quem tem o link vê aquele contrato e
 só ele — mesmo desenho da proposta.
+
+O DE SERVIÇO (23/09/2026, ZAQ) é a mesma página com outro OBJETO: no lugar do
+quadro do evento (data, horário, convidados, local), os serviços contratados e as
+duas pontas do dinheiro — implantação e mensalidade. E uma trava a mais: com campo
+sem valor, não assina (ver `carregar`).
 """
 from __future__ import annotations
 
@@ -82,7 +88,16 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
                       ct.nome, ct.razao_social, ct.nome_fantasia, ct.documento,
                       ct.endereco, ct.bairro, ct.cep, ct.cidade, ct.uf,
                       ct.telefone, ct.email_empresa, ct.logo_url,
-                      o.cliente_id
+                      o.cliente_id, coalesce(o.modo,'recorrente'),
+                      -- as pontas LÍQUIDAS (311): o número que o financeiro vai
+                      -- cobrar. Sem elas (salvo antes da 311), o bruto de sempre.
+                      coalesce((to_jsonb(o)->>'setup_liquido_centavos')::bigint, o.setup_centavos),
+                      coalesce((to_jsonb(o)->>'mensal_liquido_centavos')::bigint, o.mensal_centavos),
+                      o.itens,
+                      -- lido pelo jsonb da linha, não pela coluna: base sem a 311
+                      -- (ou tabela montada à mão) continua abrindo o contrato
+                      coalesce((to_jsonb(o)->>'pagamento_anual')::boolean, false),
+                      (to_jsonb(o)->>'dia_vencimento')::int
                  from orcamentos o join contas ct on ct.id = o.conta_id
                 where o.id=%s and o.conta_id=%s""",
             (orcamento_id, conta_id)).fetchone()
@@ -91,7 +106,8 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
     (cli, emp_nome, cli_doc, whats, cli_email, cli_tel, cli_end, cli_cep, cli_cid,
      cli_uf, numero, evento, total, parcelas, orc_status, sinal_pago_em,
      c_nome, c_razao, c_fantasia, c_doc, c_end, c_bairro, c_cep, c_cid, c_uf,
-     c_tel, c_email, c_logo, cliente_id) = r
+     c_tel, c_email, c_logo, cliente_id, modo_orc, setup_c, mensal_c, itens,
+     anual, dia_venc) = r
     evento = evento if isinstance(evento, dict) else {}
     empresa = {"razao_social": c_razao or c_fantasia or c_nome or "",
                "nome_fantasia": c_fantasia or "", "documento": c_doc or "",
@@ -109,7 +125,15 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
                  "cnpj": cli_doc or "", "whatsapp": whats or "", "email": cli_email or "",
                  "telefone": cli_tel or "", "endereco": cli_end or "", "cep": cli_cep or "",
                  "cidade": cli_cid or "", "uf": cli_uf or "", "numero": numero,
-                 "setup_centavos": int(total or 0), "evento": evento}
+                 "setup_centavos": int(total or 0), "evento": evento,
+                 # o recorrente, pro contrato de serviço: as duas pontas do dinheiro
+                 # e os serviços que o cliente aprovou (os `itens` gravados, não o
+                 # catálogo de hoje — é a folha que ele assinou)
+                 "recorrente": {"setup_centavos": int(setup_c or 0),
+                                "mensal_centavos": int(mensal_c or 0),
+                                "ano1_centavos": int(total or 0), "anual": bool(anual),
+                                "dia_vencimento": dia_venc,
+                                "itens": itens if isinstance(itens, list) else []}}
     # O CADASTRO COMPLETA O QUE O ORÇAMENTO NÃO TEM — documento e endereço. É o
     # que o `cliente_id` sempre prometeu ("a folha relê o cadastro depois", em
     # web/painel_servicos) e ninguém consumia: a Prime tinha contrato emitido
@@ -151,6 +175,19 @@ def qualificacao(pool, conta_id: int, orcamento_id) -> dict | None:
             "convidados": evento.get("convidados") or "",
         },
         "valor": ctr.reais(int(total or 0)),
+        "modo_orcamento": modo_orc,
+        # SÓ O NOME E O QUE INCLUI, sem preço por linha: o `itens` guarda o valor
+        # de TABELA de cada serviço, antes do desconto da linha, do desconto do
+        # total e do -15% do anual. Uma coluna de preços que não soma o total
+        # logo abaixo seria o contrato discordando dele mesmo.
+        "servicos": [{"nome": str((i or {}).get("nome") or ""),
+                      "desc": str((i or {}).get("desc") or "")}
+                     for i in (itens if isinstance(itens, list) else [])
+                     if (i or {}).get("nome")],
+        "setup": ctr.reais(int(setup_c or 0)),
+        "mensal": ctr.reais(int(mensal_c or 0)),
+        "anual": bool(anual),
+        "dia_vencimento": dia_venc,
     }
 
 
@@ -179,9 +216,13 @@ def carregar(token: str, pool=None) -> dict | None:
         modelo = ctr.carregar_modelo(pool, ct["conta_id"])
         ctx = ctr.contexto(catalogo=scat.listar(pool, ct["conta_id"]),
                            orcamento=q["orcamento"], modelo=modelo,
-                           empresa=q["empresa"])
+                           empresa=q["empresa"], modo=modelo["modo"])
         clausulas, faltas = ctr.montar(modelo["clausulas"], ctx)
     orc_status = q["orc_status"]
+    # O DOCUMENTO SEGUE O ORÇAMENTO: contrato de serviço é o do orçamento
+    # recorrente. Lido do orçamento e não da conta, porque o assinado não muda
+    # de cara se a conta mudar de nicho depois.
+    servico = q["modo_orcamento"] != "evento"
     return {
         "contrato": ct, "clausulas": clausulas, "faltas": faltas, "assinado": assinado,
         "numero": ct["numero"], "token": ct["token"],
@@ -226,8 +267,34 @@ def carregar(token: str, pool=None) -> dict | None:
         # a ordem que a empresa escolheu (194) — muda o que a folha promete DEPOIS
         # da assinatura, não a cláusula 4.1, que é a mesma nos dois casos
         "assinar_antes": ctr.assina_antes_do_sinal(pool, ct["conta_id"]),
-        "pode_assinar": (orc_status in ("aprovada", "fechado") and not assinado),
+        # NO DE SERVIÇO, CAMPO SEM VALOR NÃO ASSINA. O de locação só avisa (a
+        # tarja amarela, "avise a empresa antes de assinar"), e é assim desde
+        # sempre na Prime. O de serviço nasceu com números em branco de propósito
+        # (ver REGRAS_SERVICO_PADRAO): aceitar "{regra.aviso_previo_dias} dias"
+        # seria o cliente assinar um aviso prévio que não diz quanto tempo.
+        "pode_assinar": (orc_status in ("aprovada", "fechado") and not assinado
+                         and not (servico and faltas)),
+        "servico": servico,
+        "servicos": q["servicos"], "setup": q["setup"], "mensal": q["mensal"],
+        "anual": q["anual"],
+        # "cliente escolhe a melhor data": no serviço MENSAL o formulário pede o
+        # dia; no anual à vista não há mensalidade pra vencer.
+        "pede_dia": servico and not q["anual"],
+        "dia_vencimento": q["dia_vencimento"],
+        "dias": DIAS_VENCIMENTO,
     }
+
+
+# Os dias que o cliente pode escolher. Até 28 porque fevereiro existe — é o mesmo
+# teto que o título recorrente já usa (`empresa._mes_seguinte`).
+DIAS_VENCIMENTO = tuple(range(1, 29))
+
+
+def _gravar_dia(pool, conta_id: int, orcamento_id: int, dia: int) -> None:
+    with pool.connection() as c:
+        c.execute("update orcamentos set dia_vencimento=%s where id=%s and conta_id=%s",
+                  (int(dia), int(orcamento_id), int(conta_id)))
+        c.commit()
 
 
 def _aditivo_aviso(pool, ct) -> dict | None:
@@ -258,7 +325,7 @@ def contrato_publico(request: Request, token: str, erro: str = ""):
 
 @router.post("/contrato/{token}/assinar")
 def contrato_assinar(request: Request, token: str, nome: str = Form(""),
-                     doc: str = Form(""), aceite: str = Form("")):
+                     doc: str = Form(""), aceite: str = Form(""), dia: str = Form("")):
     """O aceite das cláusulas — separado do aceite da proposta, de propósito.
 
     Congela o texto no ato: grava o que o cliente LEU, não uma referência ao
@@ -271,6 +338,22 @@ def contrato_assinar(request: Request, token: str, nome: str = Form(""),
     # as travas revalidadas AQUI e não só na tela
     if not d or not d["pode_assinar"]:
         return RedirectResponse(f"/contrato/{token}", status_code=303)
+    # O DIA DE VENCIMENTO entra ANTES de congelar: é gravado no orçamento e o
+    # contrato é remontado com ele, pra o texto assinado dizer "todo dia 10" e
+    # não "no dia escolhido". Sem dia válido, não assina.
+    if d.get("pede_dia"):
+        try:
+            dia_i = int(dia or 0)
+        except ValueError:
+            dia_i = 0
+        if dia_i not in DIAS_VENCIMENTO:
+            return RedirectResponse(
+                f"/contrato/{token}?erro=Escolha+o+melhor+dia+para+o+vencimento.",
+                status_code=303)
+        _gravar_dia(pool, d["contrato"]["conta_id"], d["contrato"]["orcamento_id"], dia_i)
+        d = carregar(token, pool)
+        if not d or not d["pode_assinar"]:
+            return RedirectResponse(f"/contrato/{token}", status_code=303)
     ctr.assinar(pool, d["contrato"]["conta_id"], d["contrato"]["id"], d["clausulas"],
                 nome, doc, _ip(request))
     return RedirectResponse(f"/contrato/{token}", status_code=303)
@@ -319,6 +402,10 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
 .ev>div{background:#fff;padding:10px 12px}
 .ev .k{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:600}
 .ev .v{font-size:14px;font-weight:600;margin-top:2px}
+.sv{width:100%;border-collapse:collapse;font-size:13px;border:1px solid #ECE7DC;border-radius:9px;overflow:hidden}
+.sv th,.sv td{padding:8px 12px;border-bottom:1px solid #ECE7DC;text-align:left}
+.sv th{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:600;background:#FBFAF7}
+.sv td small{display:block;color:#5A6678;font-size:12px;margin-top:2px;white-space:pre-wrap}
 .ctrc{margin-bottom:13px;break-inside:avoid}
 .ctrt{font-size:12.5px;font-weight:700;color:#14213D;margin-bottom:3px}
 .ctrb{font-size:13px;line-height:1.6;color:#3B4757;white-space:pre-wrap}
@@ -332,6 +419,8 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
 .row{display:flex;gap:9px;margin:12px 0 9px;flex-wrap:wrap}
 .row input{flex:1;min-width:170px;padding:10px 12px;border:1px solid #DCD5C6;border-radius:8px;font-size:14px;font-family:inherit}
 .ck{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;color:#3B4757;line-height:1.45}
+.dia{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:13px;color:#3B4757;margin:0 0 11px}
+.dia select{padding:9px 10px;border:1px solid #DCD5C6;border-radius:8px;font-size:14px;font-family:inherit;background:#fff}
 .go{margin-top:12px;width:100%;background:#14213D;color:#F4F1EA;border:0;border-radius:9px;padding:12px;font-size:14px;font-weight:600;cursor:pointer}
 .err{background:#FDECEA;border:1px solid #F5C6C0;color:#B4453C;border-radius:8px;padding:9px 11px;font-size:12.5px;margin-bottom:9px}
 .ok{margin-top:22px;background:#0e2a1f;border:1px solid #1c5c40;border-radius:10px;padding:16px 18px;color:#eafff5}
@@ -362,7 +451,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
         {% if d.contratada.logo %}<span class="lgo"><img src="{{ d.contratada.logo }}" alt=""></span>{% endif %}
         <div>
           <div class="lg">{{ d.contratada.nome }}</div>
-          <div class="sub">Contrato de locação de espaço</div>
+          <div class="sub">{{ 'Contrato de prestação de serviços' if d.servico else 'Contrato de locação de espaço' }}</div>
         </div>
       </div>
       <div class="mt"><b>Contrato</b>nº {{ d.numero }}<br>{{ d.criado_em }}</div>
@@ -385,14 +474,14 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
       <div class="eb">Partes</div>
       <div class="partes">
         <div class="parte">
-          <div class="p">Contratada (locadora)</div>
+          <div class="p">{{ 'Contratada (prestadora)' if d.servico else 'Contratada (locadora)' }}</div>
           <b>{{ d.contratada.nome }}</b>
           {% if d.contratada.doc %}<small>CNPJ {{ d.contratada.doc }}</small>{% endif %}
           {% if d.contratada.endereco %}<small>{{ d.contratada.endereco }}</small>{% endif %}
           {% if d.contratada.contato %}<small>{{ d.contratada.contato }}</small>{% endif %}
         </div>
         <div class="parte">
-          <div class="p">Contratante (locatário)</div>
+          <div class="p">{{ 'Contratante' if d.servico else 'Contratante (locatário)' }}</div>
           <b>{{ d.contratante.nome }}</b>
           {% if d.contratante.doc %}<small>CPF/CNPJ {{ d.contratante.doc }}</small>{% endif %}
           {% if d.contratante.endereco %}<small>{{ d.contratante.endereco }}</small>{% endif %}
@@ -401,6 +490,22 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
       </div>
 
       <div class="eb">Objeto</div>
+      {% if d.servico %}
+      {# O OBJETO DO SERVIÇO: o que foi contratado e as duas pontas do dinheiro.
+         Nada de data, horário ou convidados — seção 6 do CLAUDE.md. #}
+      <table class="sv">
+        <thead><tr><th>Serviços contratados</th></tr></thead>
+        <tbody>
+        {% for s in d.servicos %}<tr><td><b>{{ s.nome }}</b>{% if s.desc %}<small>{{ s.desc }}</small>{% endif %}</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      <div class="ev" style="margin-top:8px">
+        <div><div class="k">Implantação</div><div class="v">{{ d.setup }}</div></div>
+        <div><div class="k">Mensalidade</div><div class="v">{{ d.mensal }}</div></div>
+        <div><div class="k">Pagamento</div><div class="v">{{ 'Anual à vista (-15%)' if d.anual else ('Mensal · dia ' ~ d.dia_vencimento if d.dia_vencimento else 'Mensal') }}</div></div>
+        <div><div class="k">Total 1º ano</div><div class="v">{{ d.valor }}</div></div>
+      </div>
+      {% else %}
       <div class="ev">
         <div><div class="k">Evento</div><div class="v">{{ d.evento.tipo }}</div></div>
         <div><div class="k">Data</div><div class="v">{{ d.evento.data or '—' }}</div></div>
@@ -414,11 +519,13 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
         <div><div class="k">Orçamento</div><div class="v">nº {{ d.orcamento_numero or '—' }}</div></div>
       </div>
       {% endif %}
+      {% endif %}
 
       <div class="eb">Cláusulas</div>
       {% if d.faltas %}
       <div class="falta">⚠️ Campos sem valor neste contrato: {{ d.faltas|join(', ') }}.
-        Avise a {{ d.contratada.nome }} antes de assinar.</div>
+        {% if d.servico %}A assinatura fica liberada quando a {{ d.contratada.nome }} completar esses dados.
+        {% else %}Avise a {{ d.contratada.nome }} antes de assinar.{% endif %}</div>
       {% endif %}
       {% for c in d.clausulas %}
       <div class="ctrc"><div class="ctrt">{{ c.titulo }}</div><div class="ctrb">{{ c.corpo }}</div></div>
@@ -433,15 +540,17 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
         "Baixar / imprimir" no topo da página.</p>
       </div>
       {% elif not d.pode_assinar %}
-      {# só sobra UM motivo pra não poder assinar: o orçamento ainda não foi
-         aprovado. O sinal deixou de ser porteiro em 01/09/2026. #}
+      {# dois motivos pra não poder assinar: o orçamento ainda não foi aprovado
+         (o sinal deixou de ser porteiro em 01/09/2026), ou — só no de serviço —
+         falta número no texto. #}
       <div class="carimbo">Você já pode ler o contrato inteiro.
-        <b>A assinatura é liberada</b> quando o orçamento for aprovado.</div>
+        {% if d.servico and d.faltas and d.aprovada %}<b>A assinatura é liberada</b> quando os dados acima estiverem completos.
+        {% else %}<b>A assinatura é liberada</b> quando o orçamento for aprovado.{% endif %}</div>
       {% else %}
       <form class="sign" method="post" action="/contrato/{{ token }}/assinar">
         <h3>✍️ Assinar o contrato</h3>
         <p>Ao assinar, você aceita todas as cláusulas acima — inclusive as de
-        cancelamento, reagendamento e utilização excedente. Fica registrado com
+        {{ 'reajuste, vencimento e cancelamento' if d.servico else 'cancelamento, reagendamento e utilização excedente' }}. Fica registrado com
         nome, CPF, data/hora e IP.</p>
         {# A ASSINATURA NÃO É A RESERVA. Antes o sinal travava o botão, e a ordem
            dizia isso sozinha; agora dá pra assinar antes de pagar, então quem
@@ -468,6 +577,16 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
           <input type="text" name="nome" placeholder="Seu nome completo" required>
           <input type="text" name="doc" placeholder="CPF">
         </div>
+        {% if d.pede_dia %}
+        {# "cliente escolhe a melhor data" — o dia vai pro texto do contrato, que
+           é congelado na assinatura, e é o dia do título recorrente. #}
+        <label class="dia">Melhor dia para o vencimento da mensalidade
+          <select name="dia" required>
+            <option value="">escolha</option>
+            {% for n in d.dias %}<option value="{{ n }}"{% if d.dia_vencimento == n %} selected{% endif %}>dia {{ n }}</option>{% endfor %}
+          </select>
+        </label>
+        {% endif %}
         <label class="ck"><input type="checkbox" name="aceite">
           <span>Li e concordo com todas as cláusulas deste contrato.</span></label>
         <button class="go" type="submit">✓ Assinar contrato</button>

@@ -1,16 +1,18 @@
 """A tela onde a empresa escreve o próprio contrato — e quem pode abri-la.
 
 O contrato de locação de espaço é do NICHO DE EVENTOS. Uma conta recorrente
-(tecnologia, consórcio) teria um contrato de serviço, que é outro documento e
-outra conversa; oferecer a ela um contrato de locação de salão seria pior que
-não oferecer nada.
+(tecnologia, consórcio) tem outro documento: desde 23/09/2026, o contrato de
+PRESTAÇÃO DE SERVIÇOS (migração 311, pedido do dono pra ZAQ). Oferecer a ela um
+contrato de locação de salão seria pior que não oferecer nada — então a mesma
+tela serve os dois, e quem escolhe o documento é o nicho.
 
 O que estes testes prendem:
 
-* **A trava do nicho está no SERVIDOR.** O card some do template numa conta
-  recorrente, mas esconder botão não é controle de acesso: as rotas são POST e
-  qualquer um monta a chamada. Cada uma das três responde 404 para quem não é de
-  eventos.
+* **Cada nicho recebe o SEU documento.** Até 23/09 a conta recorrente levava 404
+  nas três rotas; agora ela recebe o modelo de serviço, e nunca o de locação.
+* **A chave do serviço não liga com número em branco** — a resposta é 409 e nada
+  é gravado. Ligada assim, a próxima proposta aprovada viraria contrato com o
+  campo cru no texto.
 * **Restaurar o padrão não apaga nada.** O botão troca o texto NA TELA; o que
   está gravado só morre no salvar. Um clique curioso não pode apagar o contrato
   da empresa sem chance de desistir.
@@ -65,7 +67,9 @@ def cliente(monkeypatch):
                        atualizado_por text not null default '',
                        -- 194: a ordem entre o sinal e a assinatura do contrato,
                        -- escolhida por conta. Sai desta mesma tela, no Salvar.
-                       assinar_antes_do_sinal boolean not null default false)""")
+                       assinar_antes_do_sinal boolean not null default false,
+                       -- 311: a chave do contrato de serviço (recorrente)
+                       pedir_assinatura boolean not null default false)""")
         c.execute("""create table servicos_catalogo (id bigserial primary key, conta_id bigint,
                        slug text, nome text, descricao text,
                        setup_centavos bigint default 0, mensal_centavos bigint default 0,
@@ -83,7 +87,8 @@ def cliente(monkeypatch):
     # o nicho é o que decide tudo aqui
     monkeypatch.setattr(ps.emp, "obter_dados_empresa",
                         lambda pool, cid: {"nicho": "eventos" if cid == CONTA_EV else "tecnologia",
-                                           "razao_social": "PRIME LTDA", "cnpj": "52.752.898/0001-58"})
+                                           "razao_social": "PRIME LTDA", "cnpj": "52.752.898/0001-58",
+                                           "cidade": "Teresina", "uf": "PI"})
 
     estado = {"conta": CONTA_EV}
 
@@ -127,28 +132,45 @@ def test_conta_de_eventos_abre_a_tela(cliente):
     assert len(d["clausulas"]) >= 5
 
 
-@pytest.mark.parametrize("metodo, url", [
-    ("get", "/painel/servicos/contrato"),
-    ("post", "/painel/servicos/contrato/salvar"),
-    ("post", "/painel/servicos/contrato/previa"),
-])
-def test_conta_recorrente_nao_alcanca_nenhuma_rota(cliente, metodo, url):
-    """Esconder o card no template não é controle de acesso — as rotas são POST
-    e qualquer um monta a chamada."""
+def test_conta_recorrente_recebe_o_contrato_de_servico(cliente):
     cliente.estado["conta"] = CONTA_REC
-    r = (cliente.get(url) if metodo == "get"
-         else cliente.post(url, json={"clausulas": _clausulas(), "regras": {}}))
-    assert r.status_code == 404
-    assert "eventos" in r.json()["erro"]
+    d = cliente.get("/painel/servicos/contrato").json()
+    assert d["modo"] == ctr.MODO_SERVICO
+    assert d["pedir_assinatura"] is False           # nasce desligada
+    assert d["clausulas"] == ctr.modelo_padrao(ctr.MODO_SERVICO)
+    assert "locação" not in str(d["clausulas"])
+    assert not any(c["campo"].startswith(("evento.", "preco.")) for c in d["campos"])
+    # sem orçamento de exemplo, os números em branco já aparecem como ajuste
+    assert any(a["campo"] == "regra.aviso_previo_dias" for a in d["resumo"]["ajustes"])
 
 
-def test_conta_recorrente_nao_grava_nada(cliente):
+def test_a_conta_de_eventos_nao_ve_a_chave_do_servico(cliente):
+    assert cliente.get("/painel/servicos/contrato").json()["pedir_assinatura"] is None
+
+
+def test_nao_liga_a_chave_com_numero_em_branco(cliente):
     cliente.estado["conta"] = CONTA_REC
-    cliente.post("/painel/servicos/contrato/salvar",
-                 json={"clausulas": _clausulas(), "regras": {}})
+    r = cliente.post("/painel/servicos/contrato/salvar",
+                     json={"clausulas": ctr.modelo_padrao(ctr.MODO_SERVICO), "regras": {},
+                           "pedir_assinatura": True})
+    assert r.status_code == 409
+    assert "aviso prévio" in r.json()["erro"]
     with cliente.pool.connection() as c:
         n = c.execute("select count(*) from contrato_modelo").fetchone()[0]
-    assert n == 0
+    assert n == 0                                   # nem metade do salvar
+
+
+def test_com_os_numeros_preenchidos_a_chave_liga(cliente):
+    cliente.estado["conta"] = CONTA_REC
+    regras = {"indice_reajuste": "reajuste do salário mínimo vigente",
+              "aviso_previo_dias": "30", "implantacao_dias": "60 a 90",
+              "suporte_horario": "24 horas por dia", "setup_parcelas": "parcela única"}
+    r = cliente.post("/painel/servicos/contrato/salvar",
+                     json={"clausulas": ctr.modelo_padrao(ctr.MODO_SERVICO), "regras": regras,
+                           "pedir_assinatura": True})
+    assert r.status_code == 200
+    d = cliente.get("/painel/servicos/contrato").json()
+    assert d["pedir_assinatura"] is True and d["resumo"]["ajustes"] == []
 
 
 # ------------------------------------------------------------ salvar e voltar

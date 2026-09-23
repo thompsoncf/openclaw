@@ -188,7 +188,8 @@ def somar_itens(itens) -> dict:
 # --------------------------------------------------------------- total do doc
 
 def totais(itens, *, tipo="pct", pct=0, valor=0,
-           extra_setup: int = 0, extra_mensal: int = 0) -> dict:
+           extra_setup: int = 0, extra_mensal: int = 0,
+           fator_mensal: float = 1.0) -> dict:
     """A conta inteira, na ordem que a tela mostra.
 
     `extra_setup`/`extra_mensal` (centavos) são o que o modo recorrente soma fora
@@ -198,10 +199,18 @@ def totais(itens, *, tipo="pct", pct=0, valor=0,
 
     Devolve tudo em centavos, incluindo as pontas separadas: é delas que saem os
     títulos de setup e de mensalidade.
+
+    `fator_mensal` é o PAGAMENTO ANUAL do recorrente (0.85 = -15% na mensalidade),
+    aplicado depois do desconto de cada linha e ANTES do desconto no total — a
+    mesma ordem da tela (`calc()` em web/painel_servicos). Sem ele o servidor
+    gravava um "Total 1º ano" que ignorava o anual: a tela dizia R$ 29.420 e o
+    banco R$ 33.200 (medido em 23/09/2026).
     """
     it = somar_itens(itens)
     setup = it["setup"] + max(0, _int(extra_setup))
     mensal = it["mensal"] + max(0, _int(extra_mensal))
+    if fator_mensal != 1.0:
+        mensal = int(round(mensal * float(fator_mensal)))
     subtotal = setup + mensal * MESES_ANO1
 
     desc_final = quanto_desconta(subtotal, tipo, pct, valor)

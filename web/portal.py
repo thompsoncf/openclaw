@@ -4332,12 +4332,37 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .tit-filtro a.ok.on b{color:#9fe8c9}
     .tit-filtro a.rec.on{background:var(--card-2);border-color:var(--verde-claro);color:var(--verde-claro)}
     .tit-filtro a.rec.on b{color:var(--verde-claro)}
+    /* A LENTE DAS ATRASADAS. A pílula nasce coral mesmo DESLIGADA — as outras só
+       ganham cor quando selecionadas. É de propósito: as outras três dizem em que
+       gaveta a conta está, esta diz que tem dinheiro vencido, e isso não depende
+       de alguém clicar pra ser verdade. */
+    .tit-filtro a.atr{border-color:#5A2B2B;background:#1C0F0F;color:#c98a85}
+    .tit-filtro a.atr b{color:#E0574F}
+    .tit-filtro a.atr.on{background:#241313;border-color:#E0574F;color:#F0A9A2}
+    /* Ligada, o bloco continua inteiro e só as linhas atrasadas ficam — ver o
+       comentário de `_atrasadas` na rota: elas atravessam os três blocos. */
+    .tit-bloco.so-atr .tit-lin:not(.atr){display:none}
+    .tit-bcab .bs-atr{display:none}
+    .tit-bloco.so-atr .tit-bcab .bs-atr{display:inline}
+    .tit-bloco.so-atr .tit-bcab .bs-tudo{display:none}
   </style>
   {% set ns = namespace(ativo='') %}
   {% for bloco in tit_blocos if bloco.decide and bloco.itens %}{% if not ns.ativo %}{% set ns.ativo = bloco.cor %}{% endif %}{% endfor %}
   {% for bloco in tit_blocos if bloco.itens %}{% if not ns.ativo %}{% set ns.ativo = bloco.cor %}{% endif %}{% endfor %}
-  {% if tit_blocos|selectattr('itens')|list|length > 1 %}
+  {#- `or {}`: quem renderiza este trecho sem a lente (os testes antigos, que
+     montam só os três blocos) tem que continuar vendo a tela de antes, não um
+     UndefinedError. -#}
+  {% set atr_n = (tit_atrasadas or {}).n or 0 %}
+  {% if tit_blocos|selectattr('itens')|list|length > 1 or atr_n %}
   <div class="tit-filtro">
+    {#- A das atrasadas vem PRIMEIRO, e não na ordem em que a tela é usada como
+       as outras três: ela é a única que custa dinheiro por dia parado. Não nasce
+       selecionada, porém — quem decide isso continua sendo "o bloco que pede uma
+       decisão", que é o Esperando liberação. -#}
+    {% if atr_n %}
+    <a href="#" class="atr" data-alvo="@atr" onclick="titFiltroClicar(this);return false"
+       title="contas a pagar que já venceram — elas estão espalhadas pelos outros blocos"><b>{{ atr_n }}</b>⚠️ Atrasadas</a>
+    {% endif %}
     {% for bloco in tit_blocos if bloco.itens %}
     <a href="#" class="{{ bloco.cor }}{{ ' on' if bloco.cor == ns.ativo }}" data-alvo="tbl-{{ bloco.cor }}"
        onclick="titFiltroClicar(this);return false"><b>{{ bloco.itens|length }}</b>{{ bloco.titulo }}</a>
@@ -4346,7 +4371,10 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   </div>
   {% endif %}
 {% macro tit_linha(t, pode_decidir) %}
-  <div class="tit-lin">
+  {#- `atr` é o que a lente das atrasadas enxerga. Só em conta A PAGAR: ver o
+     comentário de `_atrasadas` na rota — a receber vencida é cliente devendo,
+     não dívida do dono. -#}
+  <div class="tit-lin{% if t.atrasado and t.tipo=='pagar' %} atr{% endif %}">
     <div class="tit-id">
       <div class="tit-desc">{% if pode_decidir and pode_liberar and t.aprovacao=='aguardando' %}<input class="tit-ck" type="checkbox" name="ids" value="{{ t.id }}" form="tit-lote-form">{% endif %}{{ t.descricao }}{#- o fornecedor saía DUAS vezes na mesma linha: aqui e no 👤
         de baixo, porque o cadastro vinculado tem o mesmo nome da contraparte
@@ -4501,9 +4529,13 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   {% for bloco in tit_blocos if bloco.decide and bloco.itens %}{% if not ns.ativo %}{% set ns.ativo = bloco.cor %}{% endif %}{% endfor %}
   {% for bloco in tit_blocos if bloco.itens %}{% if not ns.ativo %}{% set ns.ativo = bloco.cor %}{% endif %}{% endfor %}
   {% for bloco in tit_blocos %}{% if bloco.itens %}
-  <div class="tit-bloco {{ bloco.cor }}" id="tbl-{{ bloco.cor }}"{% if bloco.cor != ns.ativo %} style="display:none"{% endif %}>
+  <div class="tit-bloco {{ bloco.cor }}" id="tbl-{{ bloco.cor }}" data-atr="{{ bloco.n_atrasadas or 0 }}"{% if bloco.cor != ns.ativo %} style="display:none"{% endif %}>
+    {#- Dois subtítulos, e um por vez (CSS). Com a lente ligada o bloco mostra só
+       parte das linhas, e continuar anunciando o total do bloco seria um número
+       que não bate com o que está na tela. -#}
     <div class="tit-bcab"><span class="tit-bt">{{ bloco.titulo }}</span>
-      <span class="tit-bs">{{ bloco.itens|length }} · {{ bloco.centavos|brl }}</span>
+      <span class="tit-bs bs-tudo">{{ bloco.itens|length }} · {{ bloco.centavos|brl }}</span>
+      <span class="tit-bs bs-atr">{{ bloco.n_atrasadas or 0 }} atrasada{{ 's' if (bloco.n_atrasadas or 0) != 1 }} · {{ (bloco.atrasadas_centavos or 0)|brl }}</span>
       {% if bloco.dica %}<span class="tit-bd">{{ bloco.dica }}</span>{% endif %}</div>
     {% for t in bloco.itens %}{{ tit_linha(t, bloco.decide) }}{% endfor %}
   </div>
@@ -4512,12 +4544,22 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   <script>
   // A pílula troca qual bloco (Liberadas/Esperando/A receber) fica visível —
   // o resto da tela (título, botões, forms) não muda, só a exibição.
+  //
+  // '@atr' é a exceção, e é exceção de propósito: as atrasadas não são um bloco,
+  // são uma LENTE por cima dos três (ver `_atrasadas` na rota). Nela os blocos
+  // ficam TODOS visíveis — menos os que não têm nenhuma atrasada — e quem some
+  // são as linhas. Assim nenhuma linha aparece duas vezes e "Tudo" continua
+  // somando o que sempre somou.
   function titFiltroClicar(a){
     document.querySelectorAll('.tit-filtro a').forEach(function(x){x.classList.remove('on')});
     a.classList.add('on');
     var alvo = a.getAttribute('data-alvo');
+    var lente = (alvo === '@atr');
     document.querySelectorAll('.tit-bloco').forEach(function(b){
-      b.style.display = (!alvo || b.id === alvo) ? '' : 'none';
+      b.classList.toggle('so-atr', lente);
+      b.style.display = lente
+        ? ((parseInt(b.getAttribute('data-atr') || '0', 10) > 0) ? '' : 'none')
+        : ((!alvo || b.id === alvo) ? '' : 'none');
     });
   }
   function titEditToggle(btn, campo){
@@ -10891,6 +10933,39 @@ def painel_pdv_venda(request: Request, lancamento_id: int):
                    erro=request.session.pop("erro", None))
 
 
+def _lente_atrasadas(tit_blocos: list[dict]) -> dict:
+    """A LENTE DAS ATRASADAS: marca em cada bloco quantas contas vencidas ele tem,
+    e devolve o total pra pílula. Muda os blocos NO LUGAR.
+
+    Pedido do dono em 23/09/2026 — "dentro da aba empresas tem 3 card lá, só
+    falta esse". Medido na Prime naquele dia: das 13 contas a pagar, 7 já tinham
+    vencido (R$ 15.671,54, uma delas havia 18 dias) e nenhuma se destacava —
+    estavam espalhadas pelos blocos, com a data em âmbar no meio da meta-linha.
+
+    ELA NÃO É UM QUARTO BLOCO. Os três blocos PARTICIONAM a lista: cada título cai
+    em exatamente um, e é disso que "Tudo" tira o direito de somar tudo.
+    "Atrasada" corta na transversal — uma conta atrasada também está liberada, ou
+    esperando. Um quarto bloco faria as mesmas 7 linhas aparecerem DUAS vezes na
+    tela e a soma de "Tudo" parar de fechar. Por isso cada bloco só carrega
+    quantas atrasadas tem, e quem esconde as outras linhas é a tela.
+
+    SÓ AS A PAGAR. Existem a receber vencidas (2 na Prime, R$ 3.540,00), mas
+    "atrasada a receber" não é conta que o dono esqueceu de pagar: é cliente
+    devendo a ele, e isso já tem casa no card Carteira de clientes, logo abaixo
+    na mesma tela. Somar as duas faria a pílula anunciar uma dívida que não é dele.
+
+    Pura e fora da rota pra que o teste a exercite sem banco.
+    """
+    n = centavos = 0
+    for b in tit_blocos:
+        venc = [t for t in b["itens"] if t.get("atrasado") and t.get("tipo") == "pagar"]
+        b["n_atrasadas"] = len(venc)
+        b["atrasadas_centavos"] = sum(int(t.get("valor_centavos") or 0) for t in venc)
+        n += b["n_atrasadas"]
+        centavos += b["atrasadas_centavos"]
+    return {"n": n, "centavos": centavos}
+
+
 @router.get("/painel/empresa", response_class=HTMLResponse)
 def painel_empresa(request: Request):
     """Visão geral do módulo Empresa (PJ). Só pra conta com o módulo ativo."""
@@ -11007,6 +11082,7 @@ def painel_empresa(request: Request):
          "itens": _receber, "centavos": _soma(_receber),
          "dica": "sem liberação: ninguém autoriza dinheiro entrando" if _receber else ""},
     ]
+    tit_atrasadas = _lente_atrasadas(tit_blocos)
     # Os PAGOS numa seção à parte, recolhida. A tela mostrava só 'aberto', então título
     # baixado sumia do app inteiro — e o que tinha sido baixado por engano (ou cujo
     # lançamento foi apagado no financeiro) ficava preso pra sempre, sem caminho nenhum.
@@ -11045,6 +11121,7 @@ def painel_empresa(request: Request):
                    RITMO_SELO={"quinzenal": "quinzenal", "mensal": "mensal",
                                "anual": "anual"},
                    dre=dre, titulos=titulos, tit_blocos=tit_blocos,
+                   tit_atrasadas=tit_atrasadas,
                    titulos_pagos=titulos_pagos,
                    folha=folha, clientes_lista=clientes_lista,
                    fornecedores_lista=fornecedores_lista, carteira=carteira,

@@ -528,8 +528,10 @@ def test_a_aba_de_servicos_usa_o_modo_em_todas(roda):
            if "res.ok" in l and "comStatus" not in l
            and "zapFetch" not in l and "//" not in l.split("res.ok")[0]]
     # toda cadeia que usa `res.ok` tem que nascer de um zapFetch com comStatus
-    assert fonte.count("comStatus:true") == 13, (
-        f"esperava 13 chamadas com comStatus, achei {fonte.count('comStatus:true')}")
+    # 14 desde 23/09/2026: o "reativar" da gaveta dos serviços inativos entrou,
+    # e a rota dele diz a falha com {erro} + 404, como as outras daqui.
+    assert fonte.count("comStatus:true") == 14, (
+        f"esperava 14 chamadas com comStatus, achei {fonte.count('comStatus:true')}")
     assert "ok:r.ok" not in fonte, "voltou a família `{ok:r.ok, d:d}` crua"
 
 

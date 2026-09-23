@@ -192,7 +192,10 @@ def test_a_linha_e_um_macro_e_nao_tres_copias():
     # só na região dos ABERTOS: a lista de títulos pagos é outra seção, com
     # marcação própria, e não faz parte destes três blocos.
     abertos = pt._EMPRESA[:pt._EMPRESA.index("{% for t in titulos_pagos %}")]
-    assert abertos.count('<div class="tit-lin">') == 1, \
+    # sem o `">` no fim: desde 23/09/2026 a linha carrega a marca `atr` da lente
+    # das atrasadas (`class="tit-lin{% if … %} atr{% endif %}"`). A pergunta
+    # continua a mesma — quantas vezes a marcação da linha existe.
+    assert abertos.count('<div class="tit-lin') == 1, \
         "a linha foi copiada por bloco — seriam três lugares pra cada conserto"
 
 

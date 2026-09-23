@@ -463,7 +463,19 @@ def painel_servicos_catalogo(request: Request):
         "icone_svg": ics.svg(ics.escolher(s["nome"], s["categoria"], s["icone"],
                                           modo=modo), px=20),
     } for s in scat.listar(pool, conta[0])]
-    return JSONResponse({"itens": itens, "categorias": scat.CATEGORIAS_EVENTOS})
+    # Os INATIVOS viajam junto, e não numa rota própria: são poucos (4 na Prime,
+    # contra 42 ativos) e a tela precisa dos dois na mesma renderização — a lista
+    # ativa e a gaveta recolhida no fim dela. Uma segunda viagem só pra desenhar
+    # uma gaveta fechada seria pedágio por nada.
+    inativos = [{
+        "id": s["id"], "slug": s["slug"], "nome": s["nome"],
+        "descricao": s["descricao"],
+        "setup": round(s["setup_centavos"] / 100),
+        "mensal": round(s["mensal_centavos"] / 100),
+        "parecido": s["parecido"],
+    } for s in scat.listar_inativos(pool, conta[0])]
+    return JSONResponse({"itens": itens, "inativos": inativos,
+                         "categorias": scat.CATEGORIAS_EVENTOS})
 
 
 class ServicoIn(BaseModel):
@@ -515,12 +527,28 @@ def painel_servicos_icone_sugerido(request: Request, nome: str = "", categoria: 
 
 @router.post("/painel/servicos/catalogo/excluir")
 def painel_servicos_catalogo_excluir(request: Request, dados: ServicoDelIn):
+    """INATIVA o serviço. A rota mantém o nome antigo de propósito — trocar a URL
+    quebraria a aba que alguém deixou aberta, e o que mudou não foi o efeito
+    (sempre foi `ativo=false`) e sim o nome que a tela dá pra ele."""
     conta, redir = _conta_servico(request)
     if redir is not None:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
     r = scat.excluir(get_pool(), conta[0], int(dados.id))
     if not r.get("ok"):
         return JSONResponse({"erro": "serviço não encontrado"}, status_code=404)
+    return JSONResponse(r)
+
+
+@router.post("/painel/servicos/catalogo/reativar")
+def painel_servicos_catalogo_reativar(request: Request, dados: ServicoDelIn):
+    """Traz de volta um serviço inativo. A metade que faltava desde sempre."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    r = scat.definir_ativo(get_pool(), conta[0], int(dados.id), True)
+    if not r.get("ok"):
+        return JSONResponse({"erro": "serviço não encontrado ou já está ativo"},
+                            status_code=404)
     return JSONResponse(r)
 
 
@@ -2270,6 +2298,29 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
 .oc-ic:hover{color:var(--txt); border-color:var(--verde); background:var(--card)}
 .oc-del:hover{color:#e0857a; border-color:#5c2a27}
 
+/* A GAVETA DOS INATIVOS — fim da lista completa, fechada por padrão. Fechada
+   porque ela não é trabalho do dia: quem abre a lista está montando orçamento,
+   e o inativo só interessa no dia em que se procura o que sumiu. Na Prime são 4
+   contra 42 ativos; aberta, ela empurraria a lista toda pra baixo por nada. */
+.oc-inativos{margin-top:.9rem; border-top:1px dashed var(--borda); padding-top:.6rem}
+.oc-inativos-cab{display:flex; justify-content:space-between; align-items:center; gap:.6rem;
+  width:100%; background:none; border:0; padding:.45rem .2rem; cursor:pointer;
+  color:var(--txt-mut); font:inherit; font-size:.82rem; text-align:left}
+.oc-inativos-cab:hover{color:var(--txt)}
+.oc-inativos-cab b{color:var(--txt); font-weight:600}
+.oc-inativos-cab .mut{font-size:.72rem}
+.oc-inativos-corpo{display:none}
+.oc-inativos.open .oc-inativos-corpo{display:block}
+.oc-inativo-row{display:flex; align-items:center; gap:.6rem; padding:.5rem .2rem;
+  border-top:1px solid var(--card-2)}
+.oc-inativo-row .oc-nome{flex:1 1 auto; min-width:0; opacity:.7}
+.oc-inativo-av{font-size:.72rem; color:#f0c05a; margin-top:.15rem; opacity:1}
+.oc-reativar{background:none; border:1px solid #1E4A3A; color:var(--verde-claro);
+  border-radius:8px; padding:.3rem .7rem; font-size:.78rem; cursor:pointer;
+  width:auto; white-space:nowrap}
+.oc-reativar:hover{background:#10241A}
+.oc-reativar:disabled{opacity:.5; cursor:default}
+
 /* A TELA DE ENVIO. Modal por cima do funil: o caminho de quem só quer mandar é
    abrir e apertar Enviar — tudo já vem preenchido. */
 .env-fundo{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:60;
@@ -3272,6 +3323,7 @@ _JS_CRU = r"""(function(){
   // serviço não está na busca.
   var ORFAOS={};         // slug (ou id sintético) -> serviço reconstruído do item
   var VERTODOS_OPEN=false;
+  var INATIVOS=[], INATIVOS_OPEN=false;
   // o serviço de um slug, venha ele do catálogo ou do item salvo.
   function servicoPorSlug(slug){
     for(var i=0;i<CATALOGO.length;i++){ if(CATALOGO[i].slug===slug) return CATALOGO[i]; }
@@ -3435,13 +3487,32 @@ _JS_CRU = r"""(function(){
       return '<div class="oc-browse-row'+(SERVICO_AVULSO?'':' rec')+'" data-id="'+ec(s.slug)+'"><button class="oc-tog'+(on?' on':'')+'" type="button" title="'+(on?'Remover da proposta':'Adicionar à proposta')+'"></button>'
         +'<div class="oc-nome"><b>'+ec(s.nome)+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div>'
         +preco
-        +'<div class="oc-rowacts"><button class="oc-ic oc-edit" type="button" title="Editar serviço">✎</button><button class="oc-ic oc-del" type="button" title="Excluir serviço">🗑</button></div></div>';
+        +'<div class="oc-rowacts"><button class="oc-ic oc-edit" type="button" title="Editar serviço">✎</button><button class="oc-ic oc-del" type="button" title="Inativar serviço">⊘</button></div></div>';
     }).join('');
+    // A GAVETA DOS INATIVOS, no fim da lista e fechada. O botão sempre foi
+    // inativação (`ativo=false`, pra não quebrar orçamento antigo que aponta
+    // pro slug), mas se chamava "excluir" e o item sumia sem volta. Na Prime
+    // isso custou dois serviços recadastrados iguais — ver `listar_inativos`.
+    if(INATIVOS.length){
+      box.innerHTML += '<div class="oc-inativos'+(INATIVOS_OPEN?' open':'')+'">'
+        +'<button type="button" class="oc-inativos-cab">'
+        +'<span>'+(INATIVOS_OPEN?'▾':'▸')+' <b>'+INATIVOS.length+' serviço'+(INATIVOS.length===1?'':'s')+' inativo'+(INATIVOS.length===1?'':'s')+'</b></span>'
+        +'<span class="mut">fora dos orçamentos novos</span></button>'
+        +'<div class="oc-inativos-corpo">'
+        +INATIVOS.map(function(s){
+          return '<div class="oc-inativo-row" data-iid="'+s.id+'">'
+            +'<div class="oc-nome"><b>'+ec(s.nome)+'</b>'
+            +(s.parecido?'<div class="oc-inativo-av">⚠ já existe um ativo com nome parecido: “'+ec(s.parecido)+'”</div>':'')
+            +'</div><button type="button" class="oc-reativar">reativar</button></div>';
+        }).join('')
+        +'</div></div>';
+    }
   }
 
   function carregarCatalogo(preserva){
     return zapFetch('/painel/servicos/catalogo').then(function(d){if(!d)return;
       CATALOGO=d.itens||[];
+      INATIVOS=d.inativos||[];
       var selCat=document.getElementById('svc-cat');
       if(selCat&&selCat.options.length<2){
         (d.categorias||[]).forEach(function(nome){
@@ -3499,16 +3570,40 @@ _JS_CRU = r"""(function(){
         renderCatalogoAvulso();
         return;
       }
+      var cab=e.target.closest('.oc-inativos-cab');
+      if(cab){ INATIVOS_OPEN=!INATIVOS_OPEN; renderCatalogoCompleto(); return; }
+      var rea=e.target.closest('.oc-reativar');
+      if(rea){
+        var linha=rea.closest('.oc-inativo-row');
+        var iid=parseInt(linha.getAttribute('data-iid'),10);
+        var inat=INATIVOS.filter(function(x){return x.id===iid;})[0];
+        if(inat && inat.parecido && !confirm('Reativar "'+inat.nome+'"?\n\nJá existe um serviço ATIVO com nome parecido: "'+inat.parecido+'". Os dois vão aparecer juntos na lista dos orçamentos novos.')) return;
+        rea.disabled=true;
+        zapFetch('/painel/servicos/catalogo/reativar',{comStatus:true,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:iid})}).then(function(res){
+          if(!res||!res.ok){rea.disabled=false;return;}
+          INATIVOS_OPEN=true; carregarCatalogo(true);
+        });
+        return;
+      }
       var ed=e.target.closest('.oc-edit'), dl=e.target.closest('.oc-del');
       if(ed){var row2=ed.closest('.oc-browse-row'); var s=CATALOGO.filter(function(x){return x.slug===row2.getAttribute('data-id');})[0]; if(s)abrirForm({id:s.id,nome:s.nome,descricao:s.descricao,setup:s.setup,mensal:s.mensal,custo:s.custo,categoria:s.categoria,icone:s.icone});}
-      else if(dl){var row3=dl.closest('.oc-browse-row'); var s2=CATALOGO.filter(function(x){return x.slug===row3.getAttribute('data-id');})[0]; if(s2&&confirm('Excluir "'+s2.nome+'" do seu catálogo?')){fetch('/painel/servicos/catalogo/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:s2.id})}).then(function(){carregarCatalogo(true);});}}
+      else if(dl){var row3=dl.closest('.oc-browse-row'); var s2=CATALOGO.filter(function(x){return x.slug===row3.getAttribute('data-id');})[0]; if(s2&&confirm(txtInativar(s2.nome))){fetch('/painel/servicos/catalogo/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:s2.id})}).then(function(){carregarCatalogo(true);});}}
     });
+  }
+  // O texto do confirm mora num lugar só porque as DUAS listas (a completa e a
+  // dos itens da proposta) fazem a mesma coisa pelo mesmo botão — e dizer
+  // "excluir" numa e "inativar" na outra seria prometer dois efeitos diferentes
+  // pra mesma rota.
+  function txtInativar(nome){
+    return 'Inativar "'+nome+'"?\n\nEle sai da lista e dos orçamentos NOVOS. '
+      +'Os orçamentos já feitos não mudam, e dá pra reativar depois — '
+      +'a gaveta "serviços inativos" fica no fim da lista completa.';
   }
   // editar / excluir (delegação)
   document.getElementById('oc-mods').addEventListener('click',function(e){
     var ed=e.target.closest('.oc-edit'), dl=e.target.closest('.oc-del');
     if(ed){var r=ed.closest('.oc-mod'); var sc=CATALOGO.filter(function(x){return x.slug===r.getAttribute('data-id');})[0]||{}; abrirForm({id:r.getAttribute('data-cid'),nome:r.getAttribute('data-nome'),descricao:r.getAttribute('data-desc'),setup:num(r.querySelector('.oc-setup')),mensal:num(r.querySelector('.oc-mensal')),custo:num(r.querySelector('.oc-custo')),categoria:sc.categoria,icone:sc.icone});}
-    else if(dl){var r2=dl.closest('.oc-mod'); if(confirm('Excluir "'+r2.getAttribute('data-nome')+'" do seu catálogo?')){fetch('/painel/servicos/catalogo/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:parseInt(r2.getAttribute('data-cid'),10)})}).then(function(){carregarCatalogo(true);});}}
+    else if(dl){var r2=dl.closest('.oc-mod'); if(confirm(txtInativar(r2.getAttribute('data-nome')))){fetch('/painel/servicos/catalogo/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:parseInt(r2.getAttribute('data-cid'),10)})}).then(function(){carregarCatalogo(true);});}}
   });
   // form de add/editar serviço do catálogo — PALETA DE ÍCONES (no lugar da foto)
   // Serviço não tem embalagem pra fotografar: metade dos itens ficava sem foto

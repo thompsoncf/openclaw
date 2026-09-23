@@ -37,14 +37,10 @@ def _render(**over):
 
 # ------------------------------------------------------- 1. a largura da tela
 
-def test_o_evento_nao_tem_mais_trava_de_largura():
-    """Como o `.rx` do Raio-X, que não tem `max-width` nenhum."""
-    assert ".sv-wrap.evento{max-width:none}" in ps._CSS_CRU
-
-
-def test_o_recorrente_continua_com_a_largura_de_sempre():
-    """A ZAQ não foi medida nesta mudança — a trava base fica onde estava."""
-    assert "max-width:960px" in ps._CSS_CRU
+def test_a_tela_nao_tem_mais_trava_de_largura():
+    """Como o `.rx` do Raio-X, que não tem `max-width` nenhum. Vale pros dois
+    nichos desde 23/09/2026 (`.funil`)."""
+    assert ".sv-wrap.funil{max-width:none}" in ps._CSS_CRU
 
 
 # --------------------------------------------- 2. a data que aparecia duas vezes
@@ -130,9 +126,11 @@ def test_a_coluna_mostra_a_data_completa_e_nao_o_tempo_decorrido():
     assert "_ha(" not in js
 
 
-def test_a_data_de_criacao_sai_do_meio_da_frase_so_no_evento():
-    """No recorrente ela continua em `sub1`, onde sempre esteve."""
-    assert "((!SERVICO_AVULSO && it.data)?('gerada '+esc(it.data)):'')" in ps._JS_CRU
+def test_a_data_de_criacao_sai_do_meio_da_frase_nos_dois_nichos():
+    """Desde 23/09/2026 o recorrente usa o funil da Prime, com a coluna própria."""
+    js = ps._JS_CRU
+    assert "'gerada '" not in js
+    assert "if(it.data){\n          var criada" in js
 
 
 def test_a_coluna_tem_estilo_e_nao_nasce_invisivel():
@@ -157,6 +155,6 @@ def test_o_servidor_manda_a_data_formatada_com_ano():
 
 @pytest.mark.parametrize("marca", ["oc-criada"])
 def test_a_coluna_nao_aparece_na_marcacao_do_recorrente(marca):
-    """Ela é criada pelo JS só sob `SERVICO_AVULSO`; o HTML não a traz pra
-    nenhum dos dois, e é o teste acima que garante o gate."""
+    """Ela é criada pelo JS, linha a linha; o HTML não a traz pra nenhum dos
+    dois nichos."""
     assert marca not in _render(servico_avulso=False, pode_contrato=False)

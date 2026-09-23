@@ -725,8 +725,14 @@ def prazo_do_vencimento(vencimento, hoje) -> tuple[str, str]:
 def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                      data_pagto: date | None = None,
                      membro_id: int | None = None,
-                     acrescimo_centavos: int = 0) -> dict:
+                     acrescimo_centavos: int = 0, conn=None) -> dict:
     """Marca o título como pago e LANÇA no livro-caixa (fonte única).
+
+    `conn` (opcional) faz a baixa rodar DENTRO da transação de quem chama, sem
+    commit aqui: é o que deixa `recebido_diferente` mexer nas outras parcelas e
+    dar a baixa como uma coisa só — o crédito só abate se o dinheiro entrou.
+    Quem passa `conn` é dono do commit e do rollback, inclusive quando a baixa
+    volta com erro. Sem `conn`, tudo exatamente como sempre foi.
 
     pagar → despesa; receber → receita. Se a conta repete, já cria a próxima —
     no ritmo dela (quinzenal, mensal ou anual), sem o valor quando o valor é
@@ -756,7 +762,8 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
     # lock da linha até o commit; a 2ª chamada reavalia o WHERE já com 'pago' e
     # volta vazia, sem lançar.
     proximo_id = None
-    with pool.connection() as c:
+    from contextlib import nullcontext
+    with (nullcontext(conn) if conn is not None else pool.connection()) as c:
         # CONTA SEM VALOR NÃO SE PAGA. Uma conta de valor variável (196) nasce
         # com zero esperando o boleto — dar baixa nela lançaria R$ 0,00 no
         # livro-caixa, e uma despesa de zero real é pior que despesa nenhuma:
@@ -896,7 +903,8 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                      bool(t[11]), t[7], t[9], t[12], t[13]),
                 ).fetchone()
                 proximo_id = r[0]
-        c.commit()
+        if conn is None:
+            c.commit()
     return {"ok": True, "lancamento_id": salvo.id, "proximo_titulo_id": proximo_id,
             "lancamento_acrescimo_id": acr_id,
             "acrescimo_centavos": acrescimo_centavos,

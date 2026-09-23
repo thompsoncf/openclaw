@@ -4255,6 +4255,28 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;justify-content:space-between;align-items:center" id="titulos"><strong>Títulos a pagar e receber</strong>
     {% if n_aguardando %}<span class="selo esp">{{ n_aguardando }} esperando liberação</span>{% endif %}</div>
   {% if emp_aviso %}<div class="ok" style="margin:.5rem 0">{{ emp_aviso }}</div>{% endif %}
+  {#- O RECIBO (pedido 1): "quando der baixa abre um botão pra nascer o recibo".
+     Dois cliques e nenhum susto — nada vai pro cliente sem alguém apertar. -#}
+  {% if recebido_flash %}<div class="rcb-faixa" id="rcb-recebido">
+    ✓ Recebido em {{ recebido_flash.data }} · {{ recebido_flash.valor_centavos|brl }} lançados no caixa
+    <form method="post" action="/painel/empresa/titulo/{{ recebido_flash.titulo_id }}/recibo"><button class="pr">📄 gerar recibo</button></form>
+  </div>{% endif %}
+  {% if recibo_flash %}<div class="rcb-faixa" id="rcb-nasceu">
+    <div><b>Recibo nº {{ recibo_flash.rotulo }}</b> <span class="mut">· {{ recibo_flash.dados.pagador.nome|e }} · {{ recibo_flash.dados.valor }}</span></div>
+    <div class="rcb-acoes">
+      <a href="{{ recibo_flash.link }}" target="_blank" rel="noopener">abrir / imprimir</a>
+      <button type="button" data-link="{{ recibo_flash.link }}" onclick="navigator.clipboard&&navigator.clipboard.writeText(this.dataset.link).then(()=>{this.textContent='link copiado ✓'})">copiar link</button>
+      {% if recibo_flash.pode_mandar %}<form method="post" action="/painel/empresa/titulo/{{ recibo_flash.titulo_id }}/recibo/mandar" data-confirmar="Mandar o recibo nº {{ recibo_flash.rotulo }} pro WhatsApp do cliente?"><button class="pr">mandar pro cliente{% if recibo_flash.enviado_em %} de novo{% endif %}</button></form>
+      {% else %}<span class="mut" style="font-size:.72rem">sem conversa no Zaq: copie o link e mande por onde preferir</span>{% endif %}
+    </div>
+  </div>{% endif %}
+  <style>
+    .rcb-faixa{border:1px solid #1E4A3A;background:rgba(62,207,142,.07);border-radius:9px;padding:.55rem .75rem;margin:.5rem 0;font-size:.82rem;display:flex;flex-wrap:wrap;gap:.45rem .8rem;align-items:center;justify-content:space-between}
+    .rcb-faixa form{margin:0}
+    .rcb-faixa button,.rcb-acoes a{border:1px solid #2f2f31;border-radius:7px;padding:.3rem .65rem;font-size:.76rem;cursor:pointer;width:auto;background:none;color:var(--txt);text-decoration:none;display:inline-block}
+    .rcb-faixa button.pr{border-color:#1E4A3A;color:var(--verde-claro)}
+    .rcb-acoes{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center}
+  </style>
   <style>
     /* Selos da linha do título. Eles são LIDOS das três perguntas (dinheiro,
        prazo, liberação do dono — ver migração 195), nunca escolhidos: por isso
@@ -4463,6 +4485,17 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .tit-baixa{flex:1 1 100%;flex-wrap:wrap;gap:.5rem .8rem;margin-top:.4rem;align-items:end;
       background:var(--card-2);border:1px solid #5A4520;border-radius:9px;padding:.6rem .7rem}
     .tit-bx{display:flex;flex-direction:column;gap:.15rem;font-size:.68rem;color:#8a938a}
+    .tit-dif{flex:1 1 100%;min-width:0;max-width:100%;box-sizing:border-box;flex-direction:column;gap:.35rem;border:1px solid #5a4a22;background:rgba(240,192,90,.07);border-radius:8px;padding:.5rem .65rem;font-size:.78rem}
+    .tit-dif p{margin:0;color:#F2E2C4}
+    .tit-dif p.falta{color:#f0c05a;font-weight:600}
+    .tit-dif-menos,.tit-dif-mais{flex-direction:column;gap:.3rem}
+    .tit-dif label{display:flex;flex-wrap:nowrap;align-items:flex-start;gap:.45rem;cursor:pointer;margin:0;font-size:.8rem;color:var(--txt);line-height:1.35}
+    .tit-dif input[type=radio]{width:auto;min-height:0;height:auto;margin:.15rem 0 0;padding:0;border:0;flex:0 0 auto;max-width:none}
+    .tit-dif select{font-size:.76rem;width:calc(100% - 1.4rem);max-width:calc(100% - 1.4rem);min-height:0;padding:.3rem .45rem;margin-left:1.4rem;box-sizing:border-box;text-overflow:ellipsis}
+    .tit-dif-nota{font-size:.7rem}
+    .tit-cred{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .5rem;margin:.3rem 0;font-size:.74rem;color:#F2E2C4;border:1px solid #5a4a22;background:rgba(240,192,90,.07);border-radius:7px;padding:.35rem .5rem}
+    .tit-cred select{font-size:.72rem;max-width:100%;min-width:0;width:auto;min-height:0;padding:.25rem .4rem}
+    .tit-cred button{border:1px solid #5a4a22;border-radius:7px;padding:.25rem .6rem;font-size:.74rem;cursor:pointer;width:auto;background:none;color:#f0c05a}
     .tit-baixa input{font-size:.8rem;padding:.32rem .5rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt);width:auto;max-width:140px}
     .tit-baixa button{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
     .tit-bx-dica{flex:1 1 100%;font-size:.72rem;color:#8a938a;order:9}
@@ -4562,7 +4595,8 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span> · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}{% if t.criado_nome %} · lançado por {{ t.criado_nome }}{% endif %}{% if t.aprovacao=='autorizado' and t.aprovado_nome %} · liberado por {{ t.aprovado_nome }}{% endif %}{% if t.aprovacao_motivo %} · <span style="color:#e07a5f">"{{ t.aprovacao_motivo }}"</span>{% endif %}{#- a próxima só é prometida em título ABERTO: em título pago ela já
       nasceu (ou foi barrada pela trava de duplicata), e repetir a promessa ali
       seria anunciar uma segunda. -#}{% if t.proxima %} · <span style="color:#9b8fd6" title="nasce sozinha quando você der baixa nesta">próxima: {{ t.proxima.strftime('%d/%m') }}</span>{% endif %}{#- a CLASSIFICAÇÃO (317), quando existe. Quando não existe, nada: um
-      "sem centro" em 13 linhas seria parede, e o lugar de pôr é o editar ✎. -#}{% if t.plano_codigo or t.centro_nome %} · <span class="tit-cls" title="classificação — vai junto pro caixa na baixa">{% if t.plano_codigo %}{{ t.plano_codigo|e }} {{ t.plano_nome|e }}{% endif %}{% if t.plano_codigo and t.centro_nome %} · {% endif %}{% if t.centro_nome %}{{ t.centro_nome|e }}{% endif %}</span>{% endif %}</div>
+      "sem centro" em 13 linhas seria parede, e o lugar de pôr é o editar ✎. -#}{% if t.plano_codigo or t.centro_nome %} · <span class="tit-cls" title="classificação — vai junto pro caixa na baixa">{% if t.plano_codigo %}{{ t.plano_codigo|e }} {{ t.plano_nome|e }}{% endif %}{% if t.plano_codigo and t.centro_nome %} · {% endif %}{% if t.centro_nome %}{{ t.centro_nome|e }}{% endif %}</span>{% endif %}{#- o PORQUÊ de um valor mexido pelo painel da diferença (323): sem isto,
+      "por que outubro é R$ 1.067 e não R$ 1.142?" não teria resposta na tela. -#}{% set _aj = (ajustes or {}).get(t.id) %}{% if _aj and _aj.tipo == 'abatimento' %} · <span class="selo jur" title="valor combinado: {{ _aj.antes|brl }}">− {{ (_aj.antes - _aj.depois)|brl }} de crédito abatido</span>{% elif _aj and _aj.tipo == 'restante' %} · <span class="selo jur">o que faltou de um recebimento</span>{% endif %}</div>
     </div>
     {#- R$ 0,00 seria mentira de dois jeitos: diz que a conta é de graça e some
        na soma da lista. A conta de valor variável (196) nasce sem valor de
@@ -4657,11 +4691,36 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       {%- if t.tipo=='pagar' and t.aprovacao!='autorizado' %} onsubmit="return confirm('Esta conta {{ 'foi RECUSADA' if t.aprovacao=='recusado' else 'ainda não foi liberada' }} pelo dono. Dar baixa mesmo assim? Fica registrado que ela foi paga sem autorização.')"{% endif %}>
       <label class="tit-bx">{{ 'Paguei em' if t.tipo=='pagar' else 'Recebi em' }}
         <input type="date" name="pago_em" value="{{ hoje_iso }}" oninput="titBaixaConta(this)"></label>
-      <label class="tit-bx">{{ 'Multa e juros' if t.tipo=='pagar' else 'Juros recebidos' }}
+      {% if t.tipo=='pagar' %}
+      <label class="tit-bx">Multa e juros
         <input name="acrescimo" inputmode="decimal" placeholder="0,00" oninput="titBaixaConta(this)"
                title="negativo é desconto: quem pagou adiantado escreve -20,00"></label>
       <span class="tit-bx-dica"></span>
       <span class="tit-bx-tot"></span>
+      {% else %}
+      {#- CONTA A RECEBER: pergunta QUANTO ENTROU (pedido 9, 23/09/2026). Igual à
+         parcela, é a baixa de sempre. Diferente, abre o painel e o gestor escolhe
+         — "sempre pergunta pro gestor": nenhuma opção vem marcada, e sem escolha
+         o servidor recusa (ver finance/recebido_diferente.py). -#}
+      {% set _alv = (alvos_credito or {}).get(t.id) or [] %}
+      <label class="tit-bx">Valor recebido
+        <input name="recebido" inputmode="decimal" value="{{ (t.valor_centavos/100)|n2 }}" oninput="titRecebido(this)"></label>
+      <span class="tit-bx-dica"></span>
+      <div class="tit-dif" style="display:none">
+        <p class="tit-dif-txt"></p>
+        <div class="tit-dif-menos">
+          <label><input type="radio" name="destino" value="restante"><span>continua devendo — nasce uma conta de <b class="tit-dif-val"></b> com vencimento {{ t.vencimento.strftime('%d/%m') if t.vencimento else '' }}</span></label>
+          <label><input type="radio" name="destino" value="desconto"><span>foi desconto combinado</span></label>
+        </div>
+        <div class="tit-dif-mais">
+          {% if _alv %}<label><input type="radio" name="destino" value="abater"><span>fica de crédito e abate da parcela:</span></label>
+          <select name="alvo_id" aria-label="parcela que recebe o crédito" onchange="var r=this.form.querySelector('input[value=abater]'); if(r) r.checked=true">{% for a in _alv %}<option value="{{ a.id }}">{{ a.vencimento.strftime('%d/%m') if a.vencimento else '' }} · {{ a.valor_centavos|brl }} · {{ a.descricao|e }}</option>{% endfor %}</select>
+          <span class="mut tit-dif-nota" style="margin-left:1.4rem">se passar do valor dela, o resto abate das seguintes</span>
+          {% else %}<span class="mut tit-dif-nota">este cliente não tem outra parcela em aberto pra abater o crédito</span>{% endif %}
+          <label><input type="radio" name="destino" value="juros"><span>foi multa e juros do atraso</span></label>
+        </div>
+      </div>
+      {% endif %}
       <button style="color:var(--verde-claro);border-color:#1E4A3A">confirmar baixa</button>
       <button type="button" onclick="titBaixaToggle(this)" style="color:#8a938a">cancelar</button>
     </form>
@@ -4783,7 +4842,38 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     if(!f) return;
     var aberto = f.style.display === 'flex';
     f.style.display = aberto ? 'none' : 'flex';
-    if(!aberto) titBaixaConta(f.querySelector('input[name=pago_em]'));
+    if(!aberto){
+      if(f.querySelector('input[name=acrescimo]')) titBaixaConta(f.querySelector('input[name=pago_em]'));
+      else titRecebido(f.querySelector('input[name=recebido]'));
+    }
+  }
+  // O PAINEL DA DIFERENÇA (pedido 9). Só abre quando o que entrou não é a
+  // parcela, e mostra só o lado que vale: a menos (restante ou desconto) ou a
+  // mais (abater ou juros). A escolha que ficou do outro lado é desmarcada —
+  // senão um "abater" esquecido iria junto com um valor a menos.
+  function titRecebido(el){
+    var f = el && el.closest('.tit-baixa'); if(!f) return;
+    var base = parseInt(f.dataset.base, 10) || 0;
+    var rec = Math.round(parseFloat((el.value || '0').replace(/\\./g,'').replace(',','.')) * 100) || 0;
+    var dif = rec - base, box = f.querySelector('.tit-dif');
+    var dica = f.querySelector('.tit-bx-dica');
+    if(!box) return;
+    if(!rec || !dif){
+      box.style.display = 'none';
+      f.querySelectorAll('input[name=destino]').forEach(function(r){ r.checked = false; });
+      dica.textContent = rec ? '' : 'Diga quanto entrou.';
+      return;
+    }
+    box.style.display = 'flex';
+    var menos = dif < 0;
+    f.querySelector('.tit-dif-menos').style.display = menos ? 'flex' : 'none';
+    f.querySelector('.tit-dif-mais').style.display = menos ? 'none' : 'flex';
+    f.querySelectorAll('.tit-dif-' + (menos ? 'mais' : 'menos') + ' input[name=destino]')
+     .forEach(function(r){ r.checked = false; });
+    f.querySelector('.tit-dif-txt').innerHTML = 'Entraram <b>' + titBrl(Math.abs(dif))
+      + (menos ? ' a menos' : ' a mais') + '</b> que a parcela. O que faço com a diferença?';
+    f.querySelector('.tit-dif-val').textContent = titBrl(Math.abs(dif));
+    dica.textContent = '';
   }
   function titBrl(c){
     var n = (Math.abs(c)/100).toFixed(2).replace('.', ',');
@@ -4801,6 +4891,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     var base = parseInt(f.dataset.base, 10) || 0;
     var venc = f.dataset.venc;
     var campo = f.querySelector('input[name=acrescimo]');
+    if(!campo) return;   // conta a receber: quem fala é o "valor recebido"
     var quando = f.querySelector('input[name=pago_em]').value;
     var dias = 0;
     if(venc && quando){
@@ -4830,6 +4921,16 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     var f = e.target.closest && e.target.closest('form[data-confirmar]');
     if (f && !confirm(f.getAttribute('data-confirmar'))) { e.preventDefault(); }
   });
+  // "Sempre pergunta pro gestor": com o painel da diferença aberto, a baixa não
+  // sai sem uma escolha. O servidor recusa igual — isto só poupa a viagem.
+  document.addEventListener('submit', function (e) {
+    var f = e.target.closest && e.target.closest('form.tit-baixa');
+    var box = f && f.querySelector('.tit-dif');
+    if (box && box.style.display !== 'none' && !f.querySelector('input[name=destino]:checked')) {
+      e.preventDefault();
+      f.querySelector('.tit-dif-txt').classList.add('falta');
+    }
+  });
   </script>
   {# Os PAGOS, recolhidos: histórico não é operação — quem abre a tela quer o que
      ainda está em aberto. O "apagar" aqui só aparece pro título cujo lançamento
@@ -4845,10 +4946,23 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         <div class="tit-desc" style="opacity:.75">{{ t.descricao }}{% if t.contraparte %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}{#- o que o atraso custou fica NA LINHA, e não só no caixa: quem
           abre esta lista está perguntando "quanto essa conta me custou", e a
           resposta com juros é diferente da face. -#}{% if t.acrescimo_centavos %} <span class="selo jur">{{ '+' if t.acrescimo_centavos > 0 else '−' }} {{ (t.acrescimo_centavos if t.acrescimo_centavos > 0 else -t.acrescimo_centavos)|brl }} de {{ 'juros' if t.acrescimo_centavos > 0 else 'desconto' }}</span>{% endif %}</div>
+        {% set _cp = (creditos_pendentes or {}).get(t.id) %}{% if _cp %}
+        {#- CRÉDITO SOLTO (pedido 9): a parcela foi baixada por mais do que o
+           orçamento combinava e a diferença não abateu nada — o caso do nº 23.
+           O gestor escolhe onde abater; o valor vem do servidor. -#}
+        <form method="post" action="/painel/empresa/titulo/{{ t.id }}/credito" class="tit-cred"
+              data-confirmar="Abater {{ _cp.credito|brl }} da parcela escolhida?">
+          <span>Entrou {{ _cp.credito|brl }} a mais que o combinado ({{ _cp.combinado|brl }}). Abater da parcela</span>
+          <select name="alvo_id">{% for a in _cp.alvos %}<option value="{{ a.id }}">{{ a.vencimento.strftime('%d/%m') if a.vencimento else '' }} · {{ a.valor_centavos|brl }} · {{ a.descricao|e }}</option>{% endfor %}</select>
+          <button>abater</button>
+        </form>{% endif %}
         <div class="tit-meta">baixado {% if t.pago_em %}{{ t.pago_em.strftime('%d/%m/%Y') }}{% else %}—{% endif %}{% if t.acrescimo_centavos and t.pago_em and t.vencimento and t.pago_em > t.vencimento %} · <span style="color:#f0c05a">{{ (t.pago_em - t.vencimento).days }} dias de atraso</span>{% endif %} · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">pago</span>{% else %}<span style="color:var(--verde-claro)">recebido</span>{% endif %}</div>
       </div>
       <div class="tit-val" style="opacity:.75">{{ (t.valor_centavos + t.acrescimo_centavos)|brl }}{% if t.acrescimo_centavos %}<div style="font-size:.66rem;font-weight:400;color:var(--txt-mut)">conta {{ t.valor_centavos|brl }}</div>{% endif %}</div>
       <div class="tit-acoes">
+        {#- o recibo, só em dinheiro que ENTROU: numa conta a pagar quem emite é o
+           fornecedor. Gerar de novo mantém o número (ver finance/recibo.py). -#}
+        {% if t.tipo=='receber' %}<form method="post" action="/painel/empresa/titulo/{{ t.id }}/recibo"><button class="tit-rcb" title="{{ 'gerar de novo: mesmo número, texto atualizado' if (recibos_mapa or {}).get(t.id) else 'gerar o recibo deste recebimento' }}" style="color:var(--verde-claro)">{% if (recibos_mapa or {}).get(t.id) %}🧾 recibo {{ (recibos_mapa or {}).get(t.id) }}{% else %}📄 recibo{% endif %}</button></form>{% endif %}
         {% if t.lancamento_id %}
         <a href="/painel/financeiro" class="mut" style="font-size:.72rem;text-decoration:none"
            title="a baixa lançou no livro-caixa: pra desfazer, apague o lançamento no financeiro">no caixa ↗</a>
@@ -11296,6 +11410,30 @@ def painel_empresa(request: Request):
     except Exception:  # noqa: BLE001
         log.warning("planejamento da semana falhou", exc_info=True)
         planej = None
+    # O RECIBO (pedido 1, 322). Duas faixas de passagem, lidas uma vez da sessão:
+    # `emp_recebido` logo depois da baixa de uma conta a receber (o botão "gerar
+    # recibo"), e `emp_recibo` depois de gerar (abrir / copiar / mandar).
+    # Tolerante como o planejamento: sem a tabela, a aba abre sem o recibo.
+    from finance import recibo as _rb
+    from finance import recebido_diferente as _rd
+    recibos_mapa = _rb.mapa(pool, conta[0])
+    # o painel da diferença (pedido 9): onde cada conta a receber pode abater um
+    # crédito, o crédito que já entrou e não abateu nada, e o porquê de cada
+    # valor mexido. As três tolerantes à base sem a 323.
+    alvos_credito = _rd.alvos_por_titulo(pool, conta[0])
+    creditos_pendentes = _rd.creditos_pendentes(pool, conta[0])
+    ajustes = _rd.ajustes_por_titulo(pool, conta[0])
+    recebido_flash = request.session.pop("emp_recebido", None)
+    recibo_flash = None
+    _rcb = request.session.pop("emp_recibo", None)
+    if _rcb:
+        try:
+            recibo_flash = _rb.do_titulo(pool, conta[0], int(_rcb))
+            if recibo_flash:
+                recibo_flash["titulo_id"] = int(_rcb)
+                recibo_flash["pode_mandar"] = bool(_rb.lead_do_titulo(pool, conta[0], int(_rcb)))
+        except Exception:  # noqa: BLE001
+            log.warning("recibo: não deu pra montar a faixa", exc_info=True)
     # Os PAGOS numa seção à parte, recolhida. A tela mostrava só 'aberto', então título
     # baixado sumia do app inteiro — e o que tinha sido baixado por engano (ou cujo
     # lançamento foi apagado no financeiro) ficava preso pra sempre, sem caminho nenhum.
@@ -11361,6 +11499,10 @@ def painel_empresa(request: Request):
                    n_aguardando=sum(1 for t in titulos
                                     if t["tipo"] == "pagar"
                                     and t.get("aprovacao") == "aguardando"),
+                   recibos_mapa=recibos_mapa, recebido_flash=recebido_flash,
+                   alvos_credito=alvos_credito, creditos_pendentes=creditos_pendentes,
+                   ajustes=ajustes,
+                   recibo_flash=recibo_flash,
                    emp_aviso=request.session.pop("emp_aviso", None))
 
 
@@ -12015,7 +12157,9 @@ def empresa_centro_desativar(request: Request, centro_id: int, ativo: str = Form
 
 @router.post("/painel/empresa/titulo/{titulo_id}/baixa")
 def empresa_titulo_baixa(request: Request, titulo_id: int,
-                         pago_em: str = Form(""), acrescimo: str = Form("")):
+                         pago_em: str = Form(""), acrescimo: str = Form(""),
+                         recebido: str = Form(""), destino: str = Form(""),
+                         alvo_id: str = Form("")):
     """Fecha a conta e lança no caixa. Agora com a DATA e o ACRÉSCIMO (197).
 
     Os dois são opcionais de propósito: formulário antigo, link salvo ou chamada
@@ -12033,12 +12177,98 @@ def empresa_titulo_baixa(request: Request, titulo_id: int,
         quando = _date.fromisoformat(pago_em) if pago_em.strip() else None
     except ValueError:
         quando = None
-    r = emp.dar_baixa_titulo(pool, conta[0], titulo_id, data_pagto=quando,
-                             membro_id=request.session.get("membro_id"),
-                             acrescimo_centavos=_acrescimo_para_centavos(acrescimo))
+    if not recebido.strip():
+        r = emp.dar_baixa_titulo(pool, conta[0], titulo_id, data_pagto=quando,
+                                 membro_id=request.session.get("membro_id"),
+                                 acrescimo_centavos=_acrescimo_para_centavos(acrescimo))
+    else:
+        # CONTA A RECEBER: o formulário diz quanto ENTROU, e a diferença (se
+        # houver) vai pra onde o gestor escolheu — pedido 9, 23/09/2026. Sem
+        # escolha, `baixar` recusa e nada muda.
+        from finance import recebido_diferente as rd
+        r = rd.baixar(pool, conta[0], titulo_id, _reais_para_centavos(recebido),
+                      destino=(destino or "").strip(),
+                      alvo_id=int(alvo_id) if alvo_id.strip().isdigit() else None,
+                      data_pagto=quando, membro_id=request.session.get("membro_id"))
+        if r.get("ok") and r.get("restante_id"):
+            request.session["emp_aviso"] = ("Baixa feita. O que faltou virou uma conta "
+                                            "nova, no mesmo vencimento — está na lista.")
     if not r.get("ok"):
         request.session["emp_aviso"] = r.get("erro") or "Não consegui dar baixa."
+        return RedirectResponse("/painel/empresa#titulos", status_code=303)
+    # DINHEIRO QUE ENTROU ganha a faixa com o botão do recibo (pedido 1). Conta a
+    # pagar não: recibo ali é do fornecedor.
+    try:
+        with pool.connection() as c:
+            t = c.execute(
+                "select tipo, valor_centavos + coalesce(acrescimo_centavos,0), pago_em "
+                "from titulos where id=%s and conta_id=%s", (titulo_id, conta[0])).fetchone()
+        if t and t[0] == "receber":
+            request.session["emp_recebido"] = {
+                "titulo_id": titulo_id, "valor_centavos": int(t[1]),
+                "data": t[2].strftime("%d/%m/%Y") if t[2] else ""}
+            return RedirectResponse("/painel/empresa#rcb-recebido", status_code=303)
+    except Exception:  # noqa: BLE001 — a baixa já está feita; a faixa é conveniência
+        log.warning("baixa: não deu pra montar a faixa do recibo", exc_info=True)
     return RedirectResponse("/painel/empresa#titulos", status_code=303)
+
+
+@router.post("/painel/empresa/titulo/{titulo_id}/credito")
+def empresa_titulo_credito(request: Request, titulo_id: int, alvo_id: str = Form("")):
+    """Abate o crédito de uma parcela JÁ baixada por mais do que o combinado —
+    o caso do orçamento nº 23. O valor do crédito sai do servidor
+    (`creditos_pendentes`), nunca do formulário."""
+    from finance import recebido_diferente as rd
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    r = rd.abater_credito_pendente(pool, conta[0], titulo_id,
+                                   int(alvo_id) if alvo_id.strip().isdigit() else 0,
+                                   membro_id=request.session.get("membro_id"))
+    request.session["emp_aviso"] = ("Crédito abatido ✓ — a parcela escolhida já mostra o valor novo."
+                                    if r.get("ok") else r.get("erro") or "Não consegui abater.")
+    return RedirectResponse("/painel/empresa#titulos", status_code=303)
+
+
+@router.post("/painel/empresa/titulo/{titulo_id}/recibo")
+def empresa_titulo_recibo(request: Request, titulo_id: int):
+    """Gera (ou gera de novo) o recibo de uma conta a receber já recebida.
+
+    Mesmo portão do "dar baixa": quem pode receber o dinheiro na tela pode dar o
+    papel dele. Gerar de novo mantém o número e o link (ver finance/recibo.py)."""
+    from finance import recibo as rb
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    r = rb.emitir(pool, conta[0], titulo_id, membro_id=request.session.get("membro_id"))
+    if not r.get("ok"):
+        request.session["emp_aviso"] = r.get("erro") or "Não consegui gerar o recibo."
+        return RedirectResponse("/painel/empresa#titulos", status_code=303)
+    request.session["emp_recibo"] = titulo_id
+    return RedirectResponse("/painel/empresa#rcb-nasceu", status_code=303)
+
+
+@router.post("/painel/empresa/titulo/{titulo_id}/recibo/mandar")
+def empresa_titulo_recibo_mandar(request: Request, titulo_id: int):
+    """Manda o link do recibo pro WhatsApp do cliente, pelo canal que a conta tem
+    ligado — QR, Cloud API ou Twilio, os três caminhos distintos de sempre, e sem
+    tocar em conexão nenhuma (ver `recibo.mandar`)."""
+    from finance import recibo as rb
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    try:
+        r = rb.mandar(pool, conta[0], request.session.get("membro_id"), titulo_id)
+    except Exception:  # noqa: BLE001
+        log.warning("recibo: envio falhou", exc_info=True)
+        r = {"ok": False, "erro": "O envio falhou. Copie o link e mande por onde preferir."}
+    request.session["emp_aviso"] = ("Recibo enviado pro WhatsApp do cliente ✓" if r.get("ok")
+                                    else "Não mandei o recibo: " + str(r.get("erro") or ""))
+    request.session["emp_recibo"] = titulo_id
+    return RedirectResponse("/painel/empresa#rcb-nasceu", status_code=303)
 
 
 @router.post("/painel/empresa/titulo/{titulo_id}/conciliar")

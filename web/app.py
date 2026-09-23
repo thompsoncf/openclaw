@@ -133,6 +133,8 @@ from web.proposta import router as proposta_router
 # o contrato tem página e link PRÓPRIOS (/contrato/<token>) — não é bloco da folha
 from web.contrato_publico import router as contrato_pub_router
 from web.aditivo_publico import router as aditivo_pub_router
+# o recibo de conta a receber (/recibo/<token>), sem login — ver finance/recibo.py
+from web.recibo_publico import router as recibo_pub_router
 @app.middleware("http")
 async def _marca_conta_da_requisicao(request: Request, call_next):
     """PASSO A do plano de RLS: anuncia de quem é a requisição (ver db/tenant.py).
@@ -310,6 +312,7 @@ app.include_router(apolices_router)
 app.include_router(proposta_router)
 app.include_router(contrato_pub_router)
 app.include_router(aditivo_pub_router)
+app.include_router(recibo_pub_router)
 
 
 @app.on_event("startup")

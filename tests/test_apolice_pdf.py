@@ -1082,15 +1082,16 @@ def test_o_valor_embaixo_do_rotulo_e_o_valor_dele():
                      (298.2, 126.9, "CPF/CNPJ"),
                      (17.6, 143.9, "CLAUDIA FERNANDA DO SOCORRO NUNES"),
                      (298.2, 143.9, "372.584.513-15"))
-    assert pares["nome do segurado"] == "CLAUDIA FERNANDA DO SOCORRO NUNES"
-    assert pares["cpf/cnpj"] == "372.584.513-15"
+    # o desenho devolve CANDIDATOS (direita, baixo) — ver `pares_do_desenho`
+    assert pares["nome do segurado"] == ["CLAUDIA FERNANDA DO SOCORRO NUNES"]
+    assert pares["cpf/cnpj"] == ["372.584.513-15"]
 
 
 def test_o_pareamento_e_por_sobreposicao_e_nao_por_x_igual():
     """Dinheiro vem alinhado à direita, embaixo de um rótulo alinhado à esquerda."""
     pares = _desenho((40.0, 100.0, "Prêmio Líquido (R$)"),
                      (95.0, 118.0, "266,03"))
-    assert pares["premio liquido"] == "266,03"
+    assert pares["premio liquido"] == ["266,03"]
 
 
 def test_empate_de_sobreposicao_nao_vira_dado():
@@ -1317,3 +1318,111 @@ def test_havendo_total_a_checagem_exata_continua_sendo_a_que_vale():
                 "premio_centavos": 1}
     ap._checar(L)
     assert L.checagens[0][0] == "soma das parcelas = total" and L.checagens[0][1] is True
+
+
+# ══════════ O VALOR À DIREITA DO RÓTULO (23/09/2026) ══════════
+#
+# O dono: "acho que você não tá lendo direito os PDF… tá lendo a descrição e não
+# tá lendo dentro". Tinha razão. A Capa de Frota do Bradesco saía com 3 campos, e
+# o papel tem nome, CNPJ, endereço, e-mail, telefone, vigência, prêmio, IOF,
+# total e parcelas — tudo legível, tudo no formato mais comum de formulário:
+#
+#   y=162  "Nome:"       x=26→50     "LION MINING MINERADORA LTDA"   x=56→198
+#   y=174  "CPF/CNPJ:"   x=26→68     "32.900.127/0001-53"            x=93→166
+#
+# O leitor por desenho (#809) só olhava a caixa DE BAIXO, porque nasceu da Yelum.
+# Faltava a metade que olha DO LADO.
+
+
+def test_o_valor_a_direita_na_mesma_linha_e_o_valor_dele():
+    pares = _desenho((26.0, 162.0, "Nome:", 24.0),
+                     (56.0, 162.0, "LION MINING MINERADORA LTDA", 142.0))
+    assert pares["nome"] == ["LION MINING MINERADORA LTDA"]
+
+
+def test_a_varredura_para_na_coluna_seguinte_do_formulario():
+    """O Bradesco tem duas colunas: "Endereço:" não pode engolir "Apólice:"."""
+    pares = _desenho((26.0, 222.0, "Endereço:", 37.0),
+                     (93.0, 222.0, "COMUNIDADE ASSENTAMENTO RESIDENCIA", 185.0),
+                     (322.0, 222.0, "Apólice:", 29.0))
+    assert pares["endereco"] == ["COMUNIDADE ASSENTAMENTO RESIDENCIA"]
+
+
+def test_rotulo_sem_valor_nao_alcanca_o_rotulo_da_outra_coluna():
+    """"Tel. Comercial:" está vazio no papel; o vizinho da direita é "CPD:"."""
+    pares = _desenho((26.0, 270.0, "Tel. Comercial:", 58.0),
+                     (322.0, 270.0, "CPD:", 20.0))
+    assert "tel comercial" not in pares
+
+
+def test_o_telefone_partido_em_duas_caixas_e_juntado():
+    """O Bradesco imprime "(88)" e "98126-5379" em caixas separadas; só as duas
+    juntas são um telefone."""
+    pares = _desenho((26.0, 294.0, "Tel. Celular:", 48.0),
+                     (93.0, 294.0, "(88)", 14.0),
+                     (126.0, 294.0, "98126-5379", 43.0))
+    assert pares["tel celular"] == ["(88) 98126-5379"]
+
+
+def test_o_iof_curto_fica_longe_da_coluna_do_valor_e_ainda_e_lido():
+    """"IOF:" termina em x=41.9 e o valor começa em x=111 — 69pt de vão."""
+    pares = _desenho((26.0, 393.0, "IOF:", 15.9), (111.0, 393.0, "1.095,07", 31.8))
+    assert pares["iof"] == ["1.095,07"]
+
+
+def test_quem_escolhe_entre_direita_e_baixo_e_o_formato_do_campo():
+    """A Yelum põe os rótulos de dinheiro lado a lado, com os valores embaixo:
+    o vizinho da direita de "Prêmio Líquido (R$)" é outro rótulo que eu não
+    conheço. A prova de formato do campo descarta ele e fica com o de baixo."""
+    pares = _desenho((17.0, 100.0, "Prêmio Líquido (R$)", 80.0),
+                     (120.0, 100.0, "Adic. Franc (R$)", 70.0),
+                     (17.0, 117.0, "266,03", 40.0),
+                     (120.0, 117.0, "0,00", 30.0))
+    v, _tr = ap._do_desenho(pares, ("Prêmio líquido",), "premio_centavos")
+    assert v == "266,03"
+
+
+# ── rótulo curto é caixa inteira no desenho, e prefixo no texto ──────────────
+
+
+def test_rotulo_curto_so_vale_no_desenho():
+    """Pôr "Total" na lista do TEXTO trocou o total do Bradesco pelo IOF: o texto
+    daquele papel sai fora de ordem, e "TOTAL:" alcançou o número errado."""
+    assert "Total" not in ap._SINONIMOS_DINHEIRO["total_centavos"]
+    assert "Total" in ap._DINHEIRO_DESENHO["total_centavos"]
+
+
+def test_o_titulo_de_uma_cobertura_nao_vira_o_premio_da_apolice():
+    """Na Tokio, "Prêmio Líquido" é também o título da primeira cobertura, com
+    R$ 2.605,86 embaixo; o prêmio da apólice é o de "Prêmio Líquido total"."""
+    texto = ("Prêmio Líquido\nColisão, Incêndio e Roubo/Furto\n"
+             "Valor Referenciado (VMR)\nR$ 2.605,86\n"
+             "Prêmio Líquido total\nR$ 3.276,64\n")
+    v, _tr = ap._dinheiro_rotulado(texto, ap._SINONIMOS_DINHEIRO["premio_centavos"])
+    assert v == 327664
+
+
+def test_a_leitura_de_linha_unica_nao_atravessa_linha():
+    v, _tr = ap._dinheiro_rotulado("TOTAL:\n1.095,07\n", ("TOTAL",), solta=False)
+    assert v is None
+
+
+# ── CNPJ não se valida com regra de CPF ──────────────────────────────────────
+
+
+def test_cnpj_e_validado_como_cnpj():
+    """O segurado da Capa de Frota é uma mineradora. `valida_cpf` num CNPJ
+    reprovava um documento certo."""
+    L = ap.Leitura()
+    L.campos = {"cpf": "32900127000153"}
+    ap._checar(L)
+    nome, ok, _det = L.checagens[0]
+    assert nome == "CNPJ: dígito verificador" and ok is True
+    assert not any("não passa" in a for a in L.avisos)
+
+
+def test_cpf_continua_validado_como_cpf():
+    L = ap.Leitura()
+    L.campos = {"cpf": "70541485334"}
+    ap._checar(L)
+    assert L.checagens[0][0] == "CPF: dígito verificador" and L.checagens[0][1] is True

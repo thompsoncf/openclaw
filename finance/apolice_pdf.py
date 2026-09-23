@@ -780,14 +780,66 @@ def _todos_os_rotulos() -> frozenset:
 
 #: quanto o valor pode estar abaixo do rótulo, em pontos de PDF
 _ABAIXO = 26.0
+#: quanto ele pode estar À DIREITA. Medido na Capa de Frota do Bradesco: os vãos
+#: rótulo→valor vão de 3pt ("E-mail:") a 69pt ("IOF:", que é curto e por isso fica
+#: longe da coluna do valor). O primeiro par ERRADO daquele formulário
+#: ("Tel. Comercial:" alcançando a coluna da direita) está a 237pt — e já é barrado
+#: antes, por `_cara_de_rotulo`. O vão é a segunda trava, não a primeira.
+_ADIANTE = 90.0
 #: duas caixas na mesma faixa horizontal
 _MESMA_FAIXA = 2.0
 #: texto comprido demais é parágrafo, não valor de campo
 _VALOR_MAX = 120
 
 
+def _cara_de_rotulo(txt: str, proibidos) -> bool:
+    """Esta caixa é rótulo de outra coisa, e não um valor?
+
+    Duas provas: termina em dois-pontos, ou é um rótulo que este módulo conhece.
+    É o que faz a varredura para de andar pra direita ao encontrar a coluna
+    seguinte do formulário."""
+    return txt.strip().endswith(":") or _chave_rotulo(txt) in proibidos
+
+
+def _a_direita(faixa, i, proibidos) -> str | None:
+    """O valor que está À DIREITA do rótulo, na MESMA linha.
+
+    A metade que faltava. `pares_do_desenho` nasceu (#809) olhando a Yelum, onde o
+    rótulo fica EM CIMA do valor, e eu generalizei cedo demais: a Capa de Frota do
+    Bradesco é a forma mais comum de formulário — rótulo à esquerda, valor à
+    direita, na mesma linha —, e o leitor não enxergava nada dela. O achatamento
+    pra texto embaralha a ordem (sai "CEP:", "CPF/CNPJ:", "Tipo Cliente:", e só
+    depois os três valores), então nem "Rótulo: valor" numa linha existe pra ler.
+
+    JUNTA as caixas seguintes enquanto elas forem valor: o telefone daquele papel
+    vem partido em "(88)" e "98126-5379", e só as duas juntas são um telefone.
+    Para na primeira caixa com cara de rótulo — a coluna da direita do formulário
+    — ou num vão maior que `_ADIANTE`.
+    """
+    _y, _x0, x1, _y1, _rot = faixa[i]
+    pedacos, borda = [], x1
+    for (_ya, xa, xb, _yb, txt) in faixa[i + 1:]:
+        if xa - borda > _ADIANTE or _cara_de_rotulo(txt, proibidos):
+            break
+        pedacos.append(txt)
+        borda = xb
+    return " ".join(pedacos) if pedacos else None
+
+
 def pares_do_desenho(doc) -> dict:
-    """{rótulo → valor} lidos pela POSIÇÃO, pareando cada caixa com a de baixo.
+    """{rótulo → [candidatos]} lidos pela POSIÇÃO: a caixa à DIREITA e a de baixo.
+
+    DOIS CANDIDATOS, não um. A da direita vem primeiro na lista porque é a forma
+    mais comum de formulário, mas nenhuma das duas posições é certa sempre — e
+    escolher pela posição foi o que quebrou a Yelum quando a regra da direita
+    nasceu: lá os rótulos de dinheiro ficam lado a lado numa faixa
+    ("Prêmio Líquido (R$)  Adic. Franc (R$)  IOF (R$)…") com os valores na faixa
+    de baixo, e o vizinho da direita não é rótulo conhecido nem termina em
+    dois-pontos, então passava como se fosse o valor.
+
+    Quem decide entre os dois é a PROVA DE FORMATO do campo (`_tem_a_cara`), em
+    `_do_desenho`. O desenho oferece; o campo escolhe. É mais honesto que
+    qualquer regra posicional, porque a prova sabe o que aquele campo tem que ser.
 
     O primeiro par de cada rótulo vence: rótulo de cabeçalho se repete página a
     página, e a primeira ocorrência é a do corpo do documento.
@@ -815,29 +867,32 @@ def pares_do_desenho(doc) -> dict:
                 faixas[-1].append(cx)
             else:
                 faixas.append([cx])
-        for i, faixa in enumerate(faixas[:-1]):
-            baixo = faixas[i + 1]
-            if baixo[0][0] - max(c[3] for c in faixa) > _ABAIXO:
-                continue
-            for (_y0, x0, x1, _y1, rot) in faixa:
+        for i, faixa in enumerate(faixas):
+            baixo = faixas[i + 1] if i + 1 < len(faixas) else None
+            if baixo is not None and baixo[0][0] - max(c[3] for c in faixa) > _ABAIXO:
+                baixo = None
+            for j, (_y0, x0, x1, _y1, rot) in enumerate(faixa):
                 chave = _chave_rotulo(rot)
                 if not chave or chave in pares:
                     continue
-                melhor = segunda = 0.0
-                valor = None
-                for c in baixo:
-                    ov = min(x1, c[2]) - max(x0, c[1])
-                    if ov <= 0:
-                        continue
-                    if ov > melhor:
-                        melhor, segunda, valor = ov, melhor, c[4]
-                    elif ov > segunda:
-                        segunda = ov
-                if valor is None or melhor <= segunda:
-                    continue          # empate é ambiguidade, e ambiguidade não vira dado
-                if len(valor) > _VALOR_MAX or _chave_rotulo(valor) in proibidos:
-                    continue
-                pares[chave] = valor
+                cands = [_a_direita(faixa, j, proibidos)]
+                if baixo is not None:
+                    melhor = segunda = 0.0
+                    abaixo = None
+                    for c in baixo:
+                        ov = min(x1, c[2]) - max(x0, c[1])
+                        if ov <= 0:
+                            continue
+                        if ov > melhor:
+                            melhor, segunda, abaixo = ov, melhor, c[4]
+                        elif ov > segunda:
+                            segunda = ov
+                    # empate é ambiguidade, e ambiguidade não vira dado
+                    cands.append(abaixo if melhor > segunda else None)
+                bons = [v for v in cands if v and len(v) <= _VALOR_MAX
+                        and not _cara_de_rotulo(v, proibidos)]
+                if bons:
+                    pares[chave] = bons
     return pares
 
 
@@ -884,6 +939,11 @@ _FORMATOS = {
     "parcelas":        lambda v: re.search(r"\d", v) is not None,
     "dia_vencimento":  lambda v: re.search(r"\d", v) is not None,
 }
+#: dinheiro é a mesma prova pros três campos: tem que HAVER um número com
+#: centavos. Sem isto a arbitragem entre o vizinho da direita e o de baixo não
+#: funciona pra dinheiro, e "Adic. Franc (R$)" passava como valor do prêmio.
+for _k in ("premio_centavos", "iof_centavos", "total_centavos", "franquia_centavos"):
+    _FORMATOS[_k] = lambda v: _dinheiro(v) is not None
 
 
 def _tem_a_cara(chave: str, bruto: str) -> bool:
@@ -893,12 +953,16 @@ def _tem_a_cara(chave: str, bruto: str) -> bool:
     return True if prova is None else bool(prova(bruto))
 
 
-def _do_desenho(pares: dict, rotulos: tuple[str, ...]):
-    """O primeiro dos sinônimos que o desenho da página souber responder."""
+def _do_desenho(pares: dict, rotulos: tuple[str, ...], chave: str = ""):
+    """O primeiro candidato do desenho que TEM A CARA do campo pedido.
+
+    `chave` é o campo de destino: sem ela, vale o primeiro candidato; com ela, a
+    prova de formato arbitra entre o vizinho da direita e o de baixo.
+    """
     for r in rotulos or ():
-        v = (pares or {}).get(_chave_rotulo(r))
-        if v:
-            return v, f"{r}\n{v}"
+        for v in (pares or {}).get(_chave_rotulo(r)) or ():
+            if not chave or _tem_a_cara(chave, v):
+                return v, f"{r}\n{v}"
     return None, None
 
 
@@ -920,8 +984,11 @@ _SINONIMOS = {
                         "Código na Tabela de Referência"),
     "cep_pernoite":    ("CEP Pernoite", "CEP do local onde o veículo pernoita",
                         "CEP de pernoite"),
-    "dia_vencimento":  ("Vencimento da 1ª parcela", "Dia de vencimento", "Vencimento"),
-    "parcelas":        ("Nº de parcela", "Nº de parcelas", "Parcelas", "Quantidade de parcelas"),
+    # "Melhor Dia Pgto." e "Quant. Parcelas" são da Capa de Frota do Bradesco
+    "dia_vencimento":  ("Vencimento da 1ª parcela", "Dia de vencimento", "Vencimento",
+                        "Melhor Dia Pgto."),
+    "parcelas":        ("Nº de parcela", "Nº de parcelas", "Parcelas",
+                        "Quantidade de parcelas", "Quant. Parcelas"),
 }
 
 #: A VIGÊNCIA, em tabela como os outros — o leitor por desenho precisa da lista.
@@ -975,6 +1042,23 @@ _SINONIMOS_DINHEIRO = {
                         "Prêmio Total do Seguro", "Valor Total"),
 }
 
+#: RÓTULO CURTO SÓ VALE NO DESENHO, e esta separação custou dois números errados.
+#:
+#: No desenho, o rótulo é uma CAIXA INTEIRA: "TOTAL:" é a caixa "TOTAL:", e casar
+#: com ela é casar com aquele campo. No texto achatado o mesmo "Total" é um
+#: PREFIXO que pega qualquer linha que comece assim.
+#:
+#: Medido em 23/09/2026, quando eu tinha posto os dois na mesma lista:
+#:   * Capa de Frota (Bradesco): o texto sai fora de ordem e "TOTAL:" alcançou o
+#:     número do IOF — total virou R$ 1.095,07 em vez de R$ 15.933,46;
+#:   * Tokio Marine: "Prêmio Líquido" é também o TÍTULO da primeira cobertura, e
+#:     o prêmio virou R$ 2.605,86, o de uma cobertura só, em vez dos R$ 3.276,64
+#:     de "Prêmio Líquido total".
+_DINHEIRO_DESENHO = {
+    "premio_centavos": ("Líquido",),      # "Líquido(A+B+C)" da Capa de Frota
+    "total_centavos":  ("Total",),        # "TOTAL:" da Capa de Frota
+}
+
 
 def _primeiro_rotulo(texto: str, rotulos: tuple[str, ...]):
     """O primeiro rótulo da lista que existir no papel. (valor, trecho) ou (None, None)."""
@@ -985,11 +1069,15 @@ def _primeiro_rotulo(texto: str, rotulos: tuple[str, ...]):
     return None, None
 
 
-def _dinheiro_rotulado(texto: str, rotulos: tuple[str, ...]):
+def _dinheiro_rotulado(texto: str, rotulos: tuple[str, ...], solta: bool = True):
     """O valor em dinheiro depois do rótulo, com dois-pontos OU na linha de baixo.
 
     As duas formas aparecem nos três layouts medidos: a Mapfre escreve
     "Prêmio líquido: 2.613,01" e a Porto escreve "Prêmio líquido\nR$ 4.567,46".
+
+    `solta=False` exige o valor na MESMA linha do rótulo. É o modo sem
+    ambiguidade, pra usar antes do desenho: num formulário cujo texto sai
+    embaralhado, "a linha de baixo" não é vizinha de nada.
     """
     for r in rotulos:
         # `[^\n]{0,60}?` porque o rótulo pode carregar um parêntese antes do valor:
@@ -1006,9 +1094,10 @@ def _dinheiro_rotulado(texto: str, rotulos: tuple[str, ...]):
         # só perdia o prêmio, o IOF e o total de uma apólice inteira. Duas
         # quebras no máximo, e entre elas só espaço ou "R$": o teto é o que
         # impede o rótulo de alcançar um número de outro bloco.
-        m = re.search(r"^[ \t]*" + re.escape(r)
-                      + r"[^\n]{0,60}?[ \t]*:?[ \t]*\n?[ \t]*(?:R\$)?[ \t]*\n?[ \t]*R?\$? ?"
-                      r"(\d{1,3}(?:\.\d{3})*,\d{2})", texto, re.M | re.I)
+        vao = (r"[ \t]*:?[ \t]*\n?[ \t]*(?:R\$)?[ \t]*\n?[ \t]*R?\$? ?" if solta
+               else r"[ \t]*:[ \t]*R?\$? ?")
+        m = re.search(r"^[ \t]*" + re.escape(r) + r"[^\n]{0,60}?" + vao
+                      + r"(\d{1,3}(?:\.\d{3})*,\d{2})", texto, re.M | re.I)
         if m:
             return _dinheiro(m.group(1)), m.group(0).strip()
     return None, None
@@ -1062,9 +1151,7 @@ def _generico(texto: str, L: Leitura, pares: dict | None = None) -> None:
         if not _tem_a_cara(chave, v):
             v, tr = (None, None)
         if v is None and desenho:
-            v, tr = _do_desenho(pares, rotulos)
-            if not _tem_a_cara(chave, v):
-                v, tr = (None, None)
+            v, tr = _do_desenho(pares, rotulos, chave)
         val = conv(v) if v is not None else None
         if val is None:
             L.nao_achou.append(chave)
@@ -1133,9 +1220,15 @@ def _generico(texto: str, L: Leitura, pares: dict | None = None) -> None:
     pega("cep_pernoite", _SINONIMOS["cep_pernoite"], conv=lambda v: _digitos(v) or None)
 
     for chave, rotulos in _SINONIMOS_DINHEIRO.items():
+        # O TEXTO PRIMEIRO, com os rótulos específicos; o DESENHO depois, com os
+        # específicos MAIS os curtos de `_DINHEIRO_DESENHO`. Ver o comentário
+        # daquela tabela: rótulo curto é caixa inteira no desenho e prefixo no
+        # texto, e tratá-los igual trocou o total do Bradesco pelo IOF e o prêmio
+        # da Tokio pelo de uma cobertura só.
         v, tr = _dinheiro_rotulado(texto, rotulos)
         if v is None:
-            bruto, tr = _do_desenho(pares, rotulos)
+            bruto, tr = _do_desenho(
+                pares, rotulos + _DINHEIRO_DESENHO.get(chave, ()), chave)
             v = _dinheiro(bruto)
         if v is None:
             L.nao_achou.append(chave)
@@ -1235,11 +1328,19 @@ def _checar(L: Leitura) -> None:
                 f"parcelas ({soma/100:,.2f}). Um dos dois está errado — confira os "
                 "dois no PDF antes de salvar.")
     if c.get("cpf"):
+        # CNPJ NÃO SE VALIDA COM REGRA DE CPF. O campo guarda os dois (o segurado
+        # pode ser empresa: a Capa de Frota do Bradesco é de uma mineradora), e
+        # rodar `valida_cpf` num CNPJ reprovava um documento correto — o leitor
+        # dizendo que o dado está errado quando o errado era a conferência.
         from finance import validadoc
-        ok = validadoc.valida_cpf(c["cpf"])
-        L.checagens.append(("CPF: dígito verificador", ok, c["cpf"][:3] + "…" + c["cpf"][-2:]))
+        e_cnpj = len(c["cpf"]) == 14
+        nome_doc = "CNPJ" if e_cnpj else "CPF"
+        ok = validadoc.valida_cnpj(c["cpf"]) if e_cnpj else validadoc.valida_cpf(c["cpf"])
+        L.checagens.append((f"{nome_doc}: dígito verificador", ok,
+                            c["cpf"][:3] + "…" + c["cpf"][-2:]))
         if not ok:
-            L.avisos.append("O CPF lido não passa no dígito verificador — confira antes de salvar.")
+            L.avisos.append(f"O {nome_doc} lido não passa no dígito verificador — "
+                            "confira antes de salvar.")
     vi, vf = c.get("vigencia_inicio"), c.get("vigencia_fim")
     if vi and vf:
         ok = vf > vi
@@ -1387,7 +1488,10 @@ def tipo_do_documento(texto: str) -> str:
 #:      sem caixa fixa: Yelum, Tokio Marine e Zurich saíam com três campos
 #:  5 — o tipo do papel (apólice, proposta, endosso, cotação) e a conferência das
 #:      parcelas contra o prêmio quando não há total
-VERSAO = 5
+#:  6 — o desenho olha À DIREITA na mesma linha, não só embaixo; o candidato é
+#:      escolhido pela prova de formato; CNPJ validado como CNPJ. A Capa de Frota
+#:      do Bradesco saía com 3 campos e sai com 15
+VERSAO = 6
 
 
 def ler_texto(texto: str, paginas: int = 0, proibidos: tuple[str, ...] = (),

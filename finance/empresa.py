@@ -339,6 +339,126 @@ def acrescimo_do_pagamento(titulo: dict, lanc: dict) -> int | None:
     return sobra
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# A CLASSIFICAÇÃO do título (migração 317): categoria, plano de contas e centro
+# de custo. Pedido do dono em 23/09/2026 — "no lançamento do contas a pagar já
+# colocar o centro de custo e plano de contas e categoria".
+#
+# Medido na Prime no mesmo dia: das 20 despesas de setembro nascidas de conta a
+# pagar, 20 tinham plano (classificadas À MÃO depois, cobradas pelo aviso "a
+# classificar") e 1 tinha centro. A porta do extrato perguntava; a do título não.
+# ─────────────────────────────────────────────────────────────────────────
+def categorias_titulo(tipo: str, atual: str | None = None) -> list[str]:
+    """As categorias que a tela oferece pra um título, na ordem da tela.
+
+    O padrão de cada tipo vem PRIMEIRO porque é o que o título sempre recebeu sem
+    ninguém escolher ("Fornecedores" nas 13 a pagar da Prime) — mudar a primeira
+    opção mudaria a categoria de quem simplesmente não mexe no campo.
+
+    `atual` entra no fim se não estiver na lista: um título antigo com categoria
+    fora do vocabulário de hoje não pode ter a categoria trocada calado só porque
+    alguém abriu a edição pra corrigir o valor."""
+    from .models import CATEGORIAS_DESPESA, CATEGORIAS_RECEITA
+    if tipo == "receber":
+        base = [CAT_VENDAS, "Serviços"] + list(CATEGORIAS_RECEITA)
+    else:
+        base = [CAT_FORNECEDORES] + list(CATEGORIAS_DESPESA)
+    vistas, out = set(), []
+    for c in base + ([atual] if atual else []):
+        if c and c not in vistas:
+            vistas.add(c)
+            out.append(c)
+    return out
+
+
+# O que muda de uma ocorrência pra outra da MESMA conta e por isso não serve pra
+# reconhecê-la: o mês, o número da parcela ou da quinzena, o ano.
+_MESES = {"janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho",
+          "agosto", "setembro", "outubro", "novembro", "dezembro",
+          "jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out",
+          "nov", "dez"}
+_VAZIAS_DESC = {"de", "da", "do", "das", "dos", "e", "a", "o", "em", "no", "na",
+                "para", "por", "com", "ref", "referente"}
+
+
+def forma_da_descricao(descricao) -> frozenset:
+    """As palavras que dizem QUE CONTA É, sem as que dizem QUAL OCORRÊNCIA.
+
+    "1 QUINZENA SETEMBRO/26 JAQUELINE" e "2 QUINZENA AGOSTO/26 JAQUELINE (Pago em
+    espécie por Dr. Manoel)" são a mesma conta em meses diferentes; "DIÁRIA
+    SUPORTE EVENTO" do mesmo fornecedor é outra. Sem mês, número e ano, a primeira
+    vira {quinzena, jaqueline} e a diária, {diaria, suporte, evento} — e é isso
+    que impede a memória de sugerir pra quinzena o plano da diária."""
+    t = _sem_acento(descricao)
+    palavras = set()
+    for p in "".join(ch if ch.isalnum() else " " for ch in t).split():
+        if p in _MESES or p in _VAZIAS_DESC or len(p) < 2:
+            continue
+        if any(ch.isdigit() for ch in p):       # 26, 2026, 4/6, 1a, 2ª…
+            continue
+        palavras.add(p)
+    return frozenset(palavras)
+
+
+def _mesma_forma(a: frozenset, b: frozenset) -> bool:
+    """Uma contém a outra — e nenhuma é vazia. "Contém" e não "igual" porque o
+    dono anota coisas na descrição ("pago em espécie por Dr. Manoel") e a anotação
+    não faz a conta virar outra."""
+    return bool(a) and bool(b) and (a <= b or b <= a)
+
+
+def memoria_do_fornecedor(pool, conta_id: int, contraparte: str, descricao: str = "",
+                          tipo: str = "pagar") -> dict | None:
+    """Como este fornecedor foi classificado da última vez, pra ESTE tipo de conta.
+
+    Casa por FORNECEDOR + FORMA DA DESCRIÇÃO, e não só por fornecedor. Medido na
+    Prime em 23/09/2026: a Jaqueline Duarte tem quinzena (plano 3.1.02) e diária
+    de evento (5.1.09). Casando só pelo nome, a memória sugeriria pra quinzena o
+    plano da diária — e sugestão errada com cara de lembrança é pior que campo
+    vazio, porque ninguém desconfia dela. Com a forma: 5 das 13 contas abertas
+    recebem o plano certo, nenhuma recebe o errado.
+
+    Lê primeiro a classificação do PRÓPRIO título (a partir da 317) e, sem ela, a
+    do lançamento que a baixa dele gerou — que é onde o dono classificava à mão até
+    aqui. Devolve só o que tiver; campo que a memória não sabe volta None, e a
+    tela deixa vazio em vez de chutar.
+    """
+    cp = (contraparte or "").strip()
+    if not cp:
+        return None
+    alvo = forma_da_descricao(descricao) if (descricao or "").strip() else None
+    with pool.connection() as c:
+        rows = c.execute(
+            """select t.descricao, t.categoria,
+                      coalesce(t.plano_conta_id, l.plano_conta_id),
+                      coalesce(t.centro_custo_id, l.centro_custo_id),
+                      coalesce(t.pago_em, t.vencimento)
+                 from titulos t
+                 left join lancamentos l on l.id = t.lancamento_id and l.conta_id = t.conta_id
+                where t.conta_id = %s and t.tipo = %s and t.status <> 'cancelado'
+                  and lower(btrim(t.contraparte)) = lower(btrim(%s))
+                  and (t.plano_conta_id is not null or t.centro_custo_id is not null
+                       or l.plano_conta_id is not null or l.centro_custo_id is not null)
+                order by coalesce(t.pago_em, t.vencimento) desc, t.id desc
+                limit 50""",
+            (conta_id, tipo, cp)).fetchall()
+    for desc, cat, plano, centro, _quando in rows:
+        if alvo is not None and not _mesma_forma(alvo, forma_da_descricao(desc)):
+            continue
+        return {"categoria": cat or None, "plano_conta_id": plano,
+                "centro_custo_id": centro, "de": desc}
+    return None
+
+
+def _classificacao_valida(pool, conta_id: int, plano_conta_id, centro_custo_id):
+    """Defesa no servidor: plano habilitado pra conta, centro ATIVO e da conta.
+    O que não passar vira None — a conta entra sem aquela classificação, igual
+    ao lançamento do agente ("nada quebra"), em vez de a conta inteira falhar."""
+    from . import plano_contas as _pc
+    return (_pc.plano_conta_valido(pool, conta_id, plano_conta_id),
+            _pc.centro_custo_valido(pool, conta_id, centro_custo_id))
+
+
 def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
                  valor_centavos: int, vencimento: date,
                  contraparte: str = "", categoria: str = "",
@@ -347,7 +467,9 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
                  valor_variavel: bool = False,
                  criado_por: int | None = None,
                  cliente_id: int | None = None,
-                 precisa_aprovacao: bool | None = None) -> dict:
+                 precisa_aprovacao: bool | None = None,
+                 plano_conta_id=None,
+                 centro_custo_id=None) -> dict:
     """Cria um título aberto. tipo: 'pagar' | 'receber'. cliente_id LIGA o título
     a um cliente da base (honorário/venda a prazo aparece na ficha dele).
 
@@ -390,23 +512,37 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
     if precisa_aprovacao is None:
         precisa_aprovacao = (tipo == "pagar")
     aprov = "aguardando" if precisa_aprovacao else "autorizado"
+    # A CLASSIFICAÇÃO (317) só vai pro INSERT quando veio. Não é economia de
+    # coluna: as portas que não sabem classificar (o PDV, o fiado, o agente)
+    # continuam gravando exatamente o que gravavam, e uma instalação sem a 317
+    # aplicada continua criando título.
+    cols = ["conta_id", "tipo", "descricao", "contraparte", "valor_centavos",
+            "vencimento", "categoria", "recorrente", "periodicidade",
+            "valor_variavel", "criado_por", "cliente_id", "aprovacao"]
+    vals = [conta_id, tipo, (descricao or "").strip(), (contraparte or "").strip(),
+            int(valor_centavos), vencimento, categoria, bool(recorrente),
+            periodicidade, valor_variavel, criado_por, cli_id, aprov]
+    plano_ok = centro_ok = None
+    if plano_conta_id or centro_custo_id:
+        plano_ok, centro_ok = _classificacao_valida(pool, conta_id, plano_conta_id,
+                                                    centro_custo_id)
+        if plano_ok:
+            cols.append("plano_conta_id"); vals.append(plano_ok)
+        if centro_ok:
+            cols.append("centro_custo_id"); vals.append(centro_ok)
     with pool.connection() as c:
         r = c.execute(
-            """insert into titulos
-                 (conta_id, tipo, descricao, contraparte, valor_centavos,
-                  vencimento, categoria, recorrente, periodicidade,
-                  valor_variavel, criado_por, cliente_id, aprovacao)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
-            (conta_id, tipo, (descricao or "").strip(), (contraparte or "").strip(),
-             int(valor_centavos), vencimento, categoria, bool(recorrente),
-             periodicidade, valor_variavel, criado_por, cli_id, aprov),
+            f"insert into titulos ({', '.join(cols)}) "
+            f"values ({', '.join(['%s'] * len(cols))}) returning id",
+            vals,
         ).fetchone()
         c.commit()
     return {"id": r[0], "tipo": tipo, "descricao": descricao,
             "valor_centavos": int(valor_centavos), "vencimento": vencimento,
             "status": "aberto", "recorrente": bool(recorrente),
             "periodicidade": periodicidade, "valor_variavel": valor_variavel,
-            "cliente_id": cli_id, "aprovacao": aprov}
+            "cliente_id": cli_id, "aprovacao": aprov,
+            "plano_conta_id": plano_ok, "centro_custo_id": centro_ok}
 
 
 def listar_titulos(pool, conta_id: int, status: str = "aberto",
@@ -428,12 +564,17 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
                        t.aprovacao, t.aprovacao_motivo, t.pago_sem_autorizacao,
                        coalesce(nullif(quem.nome,''), quem.email, '') as criado_nome,
                        coalesce(nullif(dono.nome,''), dono.email, '') as aprovado_nome,
-                       t.aprovado_em
+                       t.aprovado_em,
+                       t.plano_conta_id, pc.codigo, pc.nome,
+                       t.centro_custo_id, cc.nome
                   from titulos t
                   left join clientes cl on cl.id = t.cliente_id
                   left join pessoas p on p.id = cl.pessoa_id
                   left join membros quem on quem.id = t.criado_por
                   left join membros dono on dono.id = t.aprovado_por
+                  left join plano_contas pc on pc.id = t.plano_conta_id
+                  left join centros_custo cc on cc.id = t.centro_custo_id
+                                             and cc.conta_id = t.conta_id
                  where {cond}
                  order by {ordem} limit %s""",
             (*args, limite),
@@ -477,6 +618,11 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
             # tela concordem sobre o que é "sem fornecedor".
             "sem_fornecedor": (r[1] == "pagar" and not (r[3] or "").strip()
                                and not r[15]),
+            # A CLASSIFICAÇÃO (317). O código e o nome vêm prontos pra que a
+            # linha diga "5.1.10 · DESPESA FIXA" sem a tela ter que cruzar ids.
+            "plano_conta_id": r[23], "plano_codigo": r[24] or "",
+            "plano_nome": r[25] or "",
+            "centro_custo_id": r[26], "centro_nome": r[27] or "",
         })
     return out
 
@@ -639,7 +785,8 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                 where id=%s and conta_id=%s and status='aberto'
              returning tipo, descricao, contraparte, valor_centavos, categoria,
                        recorrente, vencimento, criado_por, pago_sem_autorizacao,
-                       aprovacao, periodicidade, valor_variavel""",
+                       aprovacao, periodicidade, valor_variavel,
+                       plano_conta_id, centro_custo_id""",
             (data_pagto, acrescimo_centavos, titulo_id, conta_id),
         ).fetchone()
         if not t:
@@ -658,7 +805,13 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                           categoria=t[4] or (CAT_FORNECEDORES if t[0] == "pagar"
                                              else CAT_VENDAS),
                           descricao=f"{t[1]}{quem}", data=data_pagto,
-                          origem="titulo", natureza="empresa")
+                          origem="titulo", natureza="empresa",
+                          # A CLASSIFICAÇÃO DO TÍTULO VAI JUNTO (317). Até aqui o
+                          # lançamento nascia sem nenhuma, e o dono classificava
+                          # de novo, à mão, na lista do Financeiro — na Prime,
+                          # 20 de 20 em setembro com plano e 1 de 20 com centro,
+                          # porque só o plano tinha aviso cobrando.
+                          plano_conta_id=t[12], centro_custo_id=t[13])
         # A quem o lançamento pertence: a QUEM ORIGINOU o título (titulos.criado_por),
         # não a quem clicou em "pago". Antes ia o `membro_id` da baixa — então a
         # comissão da venda ia parar em quem deu baixa (quase sempre o dono, ou
@@ -730,13 +883,17 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                     # perguntar em fevereiro, senão a fila de conferência vira uma
                     # cobrança mensal do que já foi respondido — e fila que repete
                     # pergunta respondida é fila que alguém desliga.
+                    # plano e centro vão junto pelo mesmo motivo: o aluguel
+                    # classificado em janeiro não volta sem classe em fevereiro.
                     """insert into titulos
                          (conta_id, tipo, descricao, contraparte, valor_centavos,
                           vencimento, categoria, recorrente, periodicidade,
-                          valor_variavel, criado_por, aprovacao)
-                       values (%s,%s,%s,%s,%s,%s,%s,true,%s,%s,%s,%s) returning id""",
+                          valor_variavel, criado_por, aprovacao,
+                          plano_conta_id, centro_custo_id)
+                       values (%s,%s,%s,%s,%s,%s,%s,true,%s,%s,%s,%s,%s,%s)
+                       returning id""",
                     (conta_id, t[0], t[1], t[2], prox_valor, prox, t[4], t[10],
-                     bool(t[11]), t[7], t[9]),
+                     bool(t[11]), t[7], t[9], t[12], t[13]),
                 ).fetchone()
                 proximo_id = r[0]
         c.commit()
@@ -1177,6 +1334,22 @@ def conciliar_titulo(pool, conta_id: int, titulo_id: int, lancamento_id: int) ->
         if not feito:
             return {"ok": False, "erro": "Essa conta acabou de mudar de estado. "
                                          "Recarregue a tela."}
+        # A CLASSIFICAÇÃO DO TÍTULO CHEGA AO LANÇAMENTO (317) — mas SÓ ONDE ELE
+        # NÃO TEM. O pagamento que já está no caixa pode ter sido classificado à
+        # mão por alguém que olhou o comprovante, e essa escolha vale mais que a
+        # do cadastro da conta, feita dias antes. `coalesce` preenche o vazio e
+        # não toca no resto. A categoria fica de fora pelo mesmo motivo: todo
+        # lançamento já nasce com uma.
+        c.execute(
+            """update lancamentos l
+                  set plano_conta_id  = coalesce(l.plano_conta_id,  t.plano_conta_id),
+                      centro_custo_id = coalesce(l.centro_custo_id, t.centro_custo_id)
+                 from titulos t
+                where l.id = %s and l.conta_id = %s
+                  and t.id = %s and t.conta_id = l.conta_id
+                  and ((l.plano_conta_id is null and t.plano_conta_id is not null)
+                    or (l.centro_custo_id is null and t.centro_custo_id is not null))""",
+            (lancamento_id, conta_id, titulo_id))
         c.commit()
     return {"ok": True, "titulo_id": titulo_id, "lancamento_id": lancamento_id,
             "descricao": titulo["descricao"], "pago_em": lanc["data"],
@@ -1246,7 +1419,10 @@ def editar_titulo(pool, conta_id: int, titulo_id: int,
                   descricao: str | None = None,
                   valor_centavos: int | None = None,
                   contraparte: str | None = None,
-                  cliente_id: int | None = None) -> bool:
+                  cliente_id: int | None = None,
+                  categoria: str | None = None,
+                  plano_conta_id=None,
+                  centro_custo_id=None) -> bool:
     """Corrige descrição, valor e/ou FORNECEDOR de um título. NÃO mexe em
     vencimento nem tipo. Multi-tenant: só o título DESTA conta. Passa só o que
     quer mudar; campo None é ignorado. Descrição vazia é ignorada (não apaga);
@@ -1279,6 +1455,30 @@ def editar_titulo(pool, conta_id: int, titulo_id: int,
         sets.append("contraparte=%s"); args.append(contraparte.strip()[:200])
     if cliente_id is not None:
         sets.append("cliente_id=%s"); args.append(int(cliente_id) or None)
+    # A CLASSIFICAÇÃO (317). Mesma convenção do fornecedor: None é "não mexe", e
+    # vazio/zero APAGA — tirar o centro errado é correção legítima. O que vier
+    # preenchido e não passar na validação (plano desligado, centro inativo ou de
+    # outra conta) é IGNORADO, e não gravado como vazio: um id adulterado no
+    # formulário não pode servir pra apagar a classificação de ninguém.
+    if categoria is not None and categoria.strip():
+        with pool.connection() as c:
+            r = c.execute("select tipo, categoria from titulos where id=%s and conta_id=%s",
+                          (titulo_id, conta_id)).fetchone()
+        if r and categoria.strip() in categorias_titulo(r[0], r[1]):
+            sets.append("categoria=%s"); args.append(categoria.strip())
+    if plano_conta_id is not None or centro_custo_id is not None:
+        plano_ok, centro_ok = _classificacao_valida(
+            pool, conta_id, plano_conta_id or None, centro_custo_id or None)
+        if plano_conta_id is not None:
+            if not plano_conta_id:
+                sets.append("plano_conta_id=null")
+            elif plano_ok:
+                sets.append("plano_conta_id=%s"); args.append(plano_ok)
+        if centro_custo_id is not None:
+            if not centro_custo_id:
+                sets.append("centro_custo_id=null")
+            elif centro_ok:
+                sets.append("centro_custo_id=%s"); args.append(centro_ok)
     if not sets:
         return False
     with pool.connection() as c:

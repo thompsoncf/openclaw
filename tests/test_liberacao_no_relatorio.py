@@ -42,11 +42,18 @@ create table pessoas (id bigserial primary key, nome text);
 create table clientes (id bigserial primary key, dono_id bigint, pessoa_id bigint,
   nome text);
 create table lancamentos (
+  plano_conta_id bigint, centro_custo_id bigint,
   id bigserial primary key, conta_id bigint not null, tipo text not null,
   valor_centavos bigint not null, categoria text not null,
   descricao text not null default '', data date not null,
   origem text not null default 'manual', natureza text);
+create table if not exists plano_contas (id bigserial primary key, codigo text,
+  nome text, grupo int, natureza text, ordem int not null default 0);
+create table if not exists centros_custo (id bigserial primary key,
+  conta_id bigint, nome text, ativo boolean not null default true,
+  ordem int not null default 0);
 create table titulos (
+  plano_conta_id bigint, centro_custo_id bigint,
   id bigserial primary key, conta_id bigint, tipo text, descricao text,
   contraparte text, valor_centavos bigint, vencimento date, status text,
   recorrente boolean default false, periodicidade text, valor_variavel boolean not null default false, acrescimo_centavos int not null default 0, lancamento_acrescimo_id bigint, categoria text, cobranca_link_url text,

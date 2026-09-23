@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZAQ — Proposta de serviço</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* TOKENS — cópia de web/tema.py (_TOKENS). A fonte da verdade é o tema.py. */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;
+  --body:"Inter",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--body);max-width:1100px;margin:0 auto;
+  padding:34px 16px 100px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.8rem;font-weight:700;line-height:1.15}
+h2{font-size:1.2rem;font-weight:700;margin-bottom:.2rem}
+code{font-family:var(--mono);font-size:.82em;background:var(--bg-2);padding:.1rem .35rem;border-radius:4px;color:var(--text-dim)}
+.sub{color:var(--text-dim);margin-top:.5rem;max-width:80ch}
+.sec{margin-top:48px}
+.num{font-family:var(--mono);font-size:.72rem;color:var(--neon);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--text-dim);font-size:.92rem;max-width:80ch;margin-top:.4rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);padding:.7rem .9rem;border-radius:0 8px 8px 0;
+  font-size:.86rem;margin-top:1rem;color:var(--text-dim);max-width:84ch}
+.nota b{color:var(--text)}
+.nota.amb{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)} .nota.amb b{color:var(--ambar)}
+
+/* ---------- lista dos defeitos ---------- */
+.prob{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin-top:1.1rem}
+.pb{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:12px;padding:14px 15px}
+.pb .n{font:700 .68rem var(--mono);color:var(--coral);letter-spacing:.08em;text-transform:uppercase}
+.pb h3{font-size:1rem;margin:.25rem 0 .35rem}
+.pb p{font-size:.84rem;color:var(--text-dim)}
+.pb p b{color:var(--text)}
+.pb .ag{margin-top:.55rem;font-size:.8rem;color:var(--neon)}
+
+/* ---------- a folha do cliente (papel) ---------- */
+.papel-wrap{margin-top:1.2rem;background:#EEE9DD;border-radius:14px;padding:18px 14px}
+.folha{max-width:794px;margin:0 auto;color:#14213D;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.fbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.fbar .who{font-size:12.5px;color:#5A6678}
+.fbar .dl{background:#14213D;color:#F4F1EA;border:0;border-radius:9px;padding:9px 16px;font-size:13px;font-weight:600}
+.pg{background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 20px 50px -25px rgba(20,33,61,.4)}
+.hd{background:#14213D;color:#F4F1EA;padding:26px 34px;display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+.hdl{display:flex;align-items:flex-start;gap:14px;flex:1;min-width:0}
+.hdl>div{min-width:0;overflow-wrap:anywhere}
+.lgo{background:#fff;border-radius:8px;padding:6px 10px;display:inline-flex;align-items:center;flex:0 0 auto;
+  font:800 20px/1 var(--display);color:#14213D;letter-spacing:-.03em;height:58px}
+.lgo i{font-style:normal;color:#12b981}
+.hd .lg{font-size:22px;font-weight:600}
+.hd .sub2{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#9FA8BC;margin-top:4px}
+.hd .emit{font-size:10.5px;color:#B5BDCD;line-height:1.65;margin-top:8px}
+.hd .mt{text-align:right;font-size:11px;color:#9FA8BC;white-space:nowrap;flex:0 0 auto}
+.hd .mt b{display:block;color:#E0B458;font-size:10px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px}
+.hd .mt .val{color:#E0B458}
+.bd{padding:24px 34px 34px}
+.eb{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#B8862E;font-weight:600;margin:20px 0 8px}
+.eb:first-child{margin-top:0}
+.partes{display:grid;grid-template-columns:1fr;gap:10px}
+.cli{background:#FBFAF7;border:1px solid #ECE7DC;border-radius:9px;padding:12px 15px;font-size:13px;line-height:1.6;color:#3A4254}
+.cli b.nm{font-size:15px;color:#14213D}
+.cli .k{color:#8A8475;font-size:11.5px}
+.cli .falta{color:#B4453C;font-size:11.5px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:2px 18px;margin-top:6px}
+/* itens */
+table{width:100%;border-collapse:collapse}
+th{font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:#9FA8BC;background:#14213D;padding:8px 11px;text-align:left}
+th.r,td.r{text-align:right}
+td{padding:12px 11px;border-bottom:1px solid #F0EBE0;font-size:13px;vertical-align:top}
+td.n{width:26px;color:#14213D;font-weight:600}
+.item-l{display:flex;gap:11px;align-items:flex-start}
+.selo{width:40px;height:40px;flex:0 0 40px;border:1px solid #E6DCC6;border-radius:9px;display:inline-flex;
+  align-items:center;justify-content:center;color:#B8862E;background:#FDFBF6}
+.selo svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.inc{list-style:none;margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:2px 14px}
+.inc li{font-size:11.5px;color:#5A6678;line-height:1.45;padding-left:15px;position:relative}
+.inc li::before{content:"";position:absolute;left:1px;top:5px;width:7px;height:4px;border-left:1.6px solid #1F7A4D;border-bottom:1.6px solid #1F7A4D;transform:rotate(-45deg)}
+.inc li.obs{color:#8A6A2A;grid-column:1/-1}
+.inc li.obs::before{border:0;content:"!";transform:none;top:0;left:3px;font-weight:700;color:#B8862E;font-size:11px}
+td.q{font-family:var(--mono);white-space:nowrap;text-align:right;width:118px}
+.risc{display:block;font-size:11px;color:#8A8475;text-decoration:line-through}
+.liq{display:block;font-weight:700;font-size:14px;color:#14213D}
+.pm{font-size:10px;color:#8A8475;font-weight:400;font-family:system-ui,sans-serif}
+.dtag{display:inline-block;margin-top:3px;font-size:10px;font-weight:700;color:#0b7a56;background:#EAF6EF;border-radius:5px;padding:1px 6px;font-family:system-ui,sans-serif}
+/* resumo */
+.subs{margin-top:14px;border:1px solid #ECE7DC;border-radius:9px;overflow:hidden}
+.sub-cat{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;color:#5A6678;padding:7px 13px;border-bottom:1px solid #F5F1E8}
+.sub-cat:last-child{border-bottom:0}
+.sub-cat b{font-family:var(--mono);color:#14213D;white-space:nowrap}
+.sub-cat.desconto,.sub-cat.desconto b{color:#0b7a56}
+.fin{margin-top:12px;background:#14213D;border-radius:12px;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.fin .l{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#E0B458;font-weight:600}
+.fin .l small{display:block;letter-spacing:0;text-transform:none;color:#9FA8BC;font-weight:400;font-size:11.5px;margin-top:3px}
+.fin .v{font-family:var(--mono);font-size:26px;font-weight:700;color:#FBFAF7}
+.fin .v span{font-size:13px;color:#9FA8BC;font-weight:500}
+.formas{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.fm{border:1px solid #ECE7DC;border-radius:11px;padding:12px 14px;font-size:12px;color:#5A6678;line-height:1.5}
+.fm .t{font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:#8A8475}
+.fm .v{font-family:var(--mono);font-size:18px;font-weight:700;color:#14213D;margin:3px 0 2px}
+.fm.eco{border-color:#C6E4D2;background:#F4FAF6}
+.fm.eco .t{color:#1F7A4D}
+.cond{background:#FBFAF7;border:1px solid #ECE7DC;border-radius:9px;padding:11px 14px;font-size:12px;color:#5A6678;line-height:1.75}
+.cond div{padding-left:14px;position:relative}
+.cond div::before{content:"•";position:absolute;left:2px;color:#B8862E}
+.sign{margin-top:16px;background:#0e2a1f;border:1px solid #1c5c40;border-radius:12px;padding:18px 20px;color:#eafff5}
+.sign h3{font-size:15px;margin-bottom:4px;color:#7EE7B8;font-family:system-ui,sans-serif;letter-spacing:0}
+.sign p{font-size:12.5px;color:#a9d9c4;line-height:1.5}
+.sign .passos{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.sign .passos span{font-size:11px;padding:3px 9px;border-radius:20px;border:1px solid #2a6b4c;color:#cdece0}
+.sign .passos span.on{background:#12b981;color:#04140d;border-color:#12b981;font-weight:700}
+
+/* marcadores "o que mudou" em cima da folha */
+.mk{position:relative}
+.hd.mk::after{top:10px;right:10px;box-shadow:none}
+.subs.mk{overflow:visible}
+.nw{white-space:nowrap}
+.mk::after{content:attr(data-n);position:absolute;top:-9px;right:-9px;width:20px;height:20px;border-radius:50%;
+  background:#12b981;color:#04150C;font:700 .68rem/20px var(--mono);text-align:center;z-index:2;box-shadow:0 0 0 3px #EEE9DD}
+
+/* ---------- editor ---------- */
+.ed{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:16px;margin-top:1rem;overflow-x:auto}
+.ad-wrap{display:grid;grid-template-columns:1fr;gap:16px;margin-top:1rem}
+.ad{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+.ad>.t{padding:.45rem .85rem;font-size:.72rem;font-family:var(--mono);letter-spacing:.05em;text-transform:uppercase;border-bottom:1px solid var(--line)}
+.ad.ruim>.t{background:var(--coral-fundo);color:var(--coral);border-bottom-color:var(--coral-borda)}
+.ad.bom>.t{background:var(--neon-fundo);color:var(--neon);border-bottom-color:var(--neon-borda)}
+.ad>.c{padding:14px 16px;overflow-x:auto}
+.row{display:grid;grid-template-columns:minmax(0,1fr) 96px 96px 150px 130px;gap:.7rem;align-items:end;min-width:620px}
+.nm b{display:block;font-size:.95rem}
+.nm small{color:var(--text-dim);font-size:.76rem}
+.fld .l{font-size:.64rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:.2rem}
+.box{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:.5rem .6rem;font-family:var(--mono);font-size:.86rem;text-align:right}
+.dpar{display:flex;align-items:center;gap:4px;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:.3rem .35rem .3rem .6rem}
+.dpar .v{flex:1;font-family:var(--mono);font-size:.86rem;text-align:right}
+.dpar .tg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.dpar .tg i{font-style:normal;font-size:.68rem;padding:.2rem .4rem;color:var(--text-dim)}
+.dpar .tg i.on{background:var(--neon);color:var(--sobre-verde);font-weight:700}
+.res{font-family:var(--mono);font-size:.86rem;text-align:right;padding-bottom:.45rem}
+.res.bad{color:var(--coral)} .res.ok{color:var(--neon)}
+.res small{display:block;font-size:.66rem;color:var(--text-dim);font-family:var(--body)}
+.tot-ed{display:flex;justify-content:flex-end;gap:1.4rem;flex-wrap:wrap;margin-top:.9rem;padding-top:.8rem;border-top:1px solid var(--line);font-size:.86rem;color:var(--text-dim)}
+.tot-ed b{font-family:var(--mono);color:var(--text);font-size:1rem}
+.tot-ed b.bad{color:var(--coral)} .tot-ed b.ok{color:var(--neon)}
+
+/* ---------- ícones ---------- */
+.ic-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:1rem}
+.ic{border:1px solid var(--line);background:var(--surface);border-radius:11px;padding:12px;display:flex;gap:10px;align-items:center}
+.ic .s{width:40px;height:40px;flex:0 0 40px;border-radius:9px;border:1px solid #E6DCC6;background:#FDFBF6;color:#B8862E;display:flex;align-items:center;justify-content:center}
+.ic .s svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ic b{display:block;font-size:.84rem}
+.ic small{color:var(--text-dim);font-size:.72rem;line-height:1.35;display:block}
+.ic.usa{border-color:var(--neon-borda)}
+.ic.usa b::after{content:" · HLED";color:var(--neon);font-weight:500;font-size:.72rem}
+
+/* ---------- perguntas ---------- */
+.qs{counter-reset:q;margin-top:1rem;display:grid;gap:10px}
+.pq{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:12px;padding:13px 15px;font-size:.9rem}
+.pq::before{counter-increment:q;content:counter(q);display:inline-block;width:22px;height:22px;border-radius:50%;background:var(--ambar);color:#1a1205;
+  font:700 .72rem/22px var(--mono);text-align:center;margin-right:.5rem}
+.pq b{color:var(--ambar)}
+.pq p{color:var(--text-dim);font-size:.84rem;margin-top:.35rem}
+
+@media (max-width:640px){
+  h1{font-size:1.45rem}
+  .hd{flex-wrap:wrap;padding:20px 18px}
+  .hdl{flex-wrap:wrap}
+  .hd .mt{text-align:left;white-space:normal;flex:1 1 100%}
+  .bd{padding:18px 16px 24px}
+  .grid2,.inc,.formas{grid-template-columns:1fr}
+  table,tbody,tr,td{display:block;width:auto}
+  tr:first-child{display:none}
+  tr{padding:10px 0;border-bottom:1px solid #F0EBE0}
+  td{border:0;padding:0}
+  td.n{display:none}
+  td.q{text-align:left;width:auto;margin-top:8px;padding-left:51px}
+  .papel-wrap{padding:10px 6px}
+}
+</style>
+</head>
+<body>
+
+<div class="num">Mockup · ZAQ (conta 3) · recorrente</div>
+<h1>A proposta de serviço, com cara de documento</h1>
+<p class="sub">Medido na proposta nº 10, a da <b>HLED</b>, feita em 23/09/2026: quatro serviços, desconto em cada um, sem implantação.
+A folha do evento (Prime) já tinha logo com os dados da empresa, ícone por item, desconto riscado e plano de pagamento. A folha do recorrente não tinha nada disso.
+Aqui a proposta nova usa a mesma linguagem, com o vocabulário de quem vende mensalidade.</p>
+
+<!-- ================================================================== 1 -->
+<div class="sec">
+  <div class="num">1 · O que saiu errado na HLED</div>
+  <h2>Cinco defeitos, medidos na proposta nº 10</h2>
+  <div class="prob">
+    <div class="pb"><div class="n">① Contratada</div><h3>A empresa aparecia com o nome do dono</h3>
+      <p>O cabeçalho dizia <b>"Thompson Cavalcante Fernandes"</b>, e não ZAQ - SISTEMAS IAs. Não havia razão social, CNPJ, endereço, telefone nem e-mail. Todos esses dados já estão cadastrados em Empresa.</p>
+      <div class="ag">→ nome fantasia + os dados da empresa, como na Prime</div></div>
+    <div class="pb"><div class="n">② Contratante</div><h3>O cliente em uma linha</h3>
+      <p>Saía só "HLED · heitor · telefone · segmento". O <b>CNPJ 20.353.161/0001-76</b>, o e-mail e a cidade estavam gravados, mas não apareciam na folha.</p>
+      <div class="ag">→ bloco do contratante completo</div></div>
+    <div class="pb"><div class="n">③ Desconto</div><h3>O desconto de cada item não aparecia</h3>
+      <p>A tabela mostrava <b>R$ 1.500 · R$ 1.000 · R$ 2.200 · R$ 1.000</b>, os valores cheios, sem riscado. O cliente não via o desconto que ganhou.</p>
+      <div class="ag">→ cheio riscado + o valor com desconto, como na Prime</div></div>
+    <div class="pb"><div class="n">④ Valor mensal</div><h3>A mensalidade final errada</h3>
+      <p>A caixa "Mensalidade" mostrava <b>R$ 5.700</b>, o valor bruto. O total do 1º ano mostrava <b>R$ 65.699</b>, que já tinha desconto. Os dois números não batiam. E o valor combinado, <b>R$ 3.000/mês</b>, não aparecia em nenhum lugar (ver item 3 abaixo).</p>
+      <div class="ag">→ "Investimento mensal R$ 3.000" em destaque</div></div>
+    <div class="pb"><div class="n">⑤ Ícones</div><h3>Sem ícone nenhum</h3>
+      <p>Os ícones foram desenhados só para festa (buffet, DJ, salão). O serviço recorrente ficava sem selo.</p>
+      <div class="ag">→ jogo de ícones próprio do recorrente</div></div>
+  </div>
+</div>
+
+<!-- ================================================================== 2 -->
+<div class="sec">
+  <div class="num">2 · A folha que o cliente recebe</div>
+  <h2>Proposta comercial nº 10: HLED</h2>
+  <p class="lede">Com os números reais da proposta. As bolinhas verdes marcam o que mudou.</p>
+
+  <div class="papel-wrap"><div class="folha">
+    <div class="fbar"><span class="who">🔒 Proposta enviada por <b>ZAQ - SISTEMAS IAs</b> · válida até 08/10/2026</span><span class="dl">⬇ Baixar PDF</span></div>
+    <div class="pg">
+      <div class="hd mk" data-n="1">
+        <div class="hdl">
+          <span class="lgo">ZAQ<i>.</i></span>
+          <div>
+            <div class="lg">ZAQ - SISTEMAS IAs</div>
+            <div class="sub2">Proposta comercial</div>
+            <div class="emit">T CAVALCANTE FERNANDES LTDA · <span class="nw">CNPJ 50.379.520/0001-25</span><br>
+              Rua Veterinário Bugyja Britto, 1229 · Horto · Teresina/PI · <span class="nw">CEP 64052-410</span><br>
+              (86) 98188-5930 · opapay@me.com<br>
+              Responsável: Thompson Cavalcante Fernandes</div>
+          </div>
+        </div>
+        <div class="mt"><b>Proposta comercial</b>Nº 10<br>Emitida em 23/09/2026<br><span class="val">Válida até 08/10/2026</span></div>
+      </div>
+
+      <div class="bd">
+        <div class="eb">Contratante</div>
+        <div class="cli mk" data-n="2">
+          <b class="nm">HLED</b> · <span class="nw">CNPJ 20.353.161/0001-76</span><br>
+          <span class="k">Segmento:</span> Comércio varejista de material elétrico
+          <div class="grid2">
+            <div><span class="k">A/C</span> Heitor</div>
+            <div><span class="k">WhatsApp</span> (86) 8166-3346</div>
+            <div><span class="k">E-mail</span> heitor_vilela9@hotmail.com</div>
+            <div><span class="k">Cidade</span> Teresina/PI</div>
+          </div>
+        </div>
+
+        <div class="eb">Serviços contratados</div>
+        <table class="mk" data-n="3">
+          <tr><th style="width:26px">#</th><th>Serviço</th><th class="r" style="width:118px">Mensal</th></tr>
+          <tr><td class="n">1</td>
+            <td><div class="item-l"><span class="selo"><svg viewBox="0 0 24 24"><path d="M3 10v4h3l6 4V6L6 10z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a7.5 7.5 0 0 1 0 11"/></svg></span>
+              <div><b>Gestão de Tráfego Pago</b>
+                <ul class="inc"><li>Campanhas no Meta Ads (Facebook e Instagram) e no Google Ads</li><li>Criação e configuração das campanhas</li><li>Públicos e segmentações</li><li>Monitoramento e otimização dos anúncios</li><li>Análise de métricas e resultados</li><li>Ajustes estratégicos de desempenho</li>
+                  <li class="obs">Verba de anúncios não inclusa: paga pelo cliente direto às plataformas</li></ul></div></div></td>
+            <td class="q"><span class="risc">R$ 2.200</span><span class="liq">R$ 1.000 <span class="pm">/mês</span></span><span class="dtag">−R$ 1.200</span></td></tr>
+          <tr><td class="n">2</td>
+            <td><div class="item-l"><span class="selo"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="16" rx="2"/><path d="M3.5 9h17"/><path d="M8 2.8v3.4"/><path d="M16 2.8v3.4"/><path d="M7.5 13h3"/><path d="M13.5 13h3"/><path d="M7.5 16.5h3"/></svg></span>
+              <div><b>Organização e Gestão das Redes Sociais</b>
+                <ul class="inc"><li>Organização do perfil e da identidade</li><li>Planejamento de conteúdo</li><li>Calendário editorial</li><li>Temas e formatos de publicação</li><li>Otimização da apresentação do perfil</li></ul></div></div></td>
+            <td class="q"><span class="risc">R$ 1.000</span><span class="liq">R$ 500 <span class="pm">/mês</span></span><span class="dtag">−R$ 500</span></td></tr>
+          <tr><td class="n">3</td>
+            <td><div class="item-l"><span class="selo"><svg viewBox="0 0 24 24"><rect x="2.8" y="6.5" width="13" height="11" rx="2"/><path d="m15.8 10.5 5.4-3v9l-5.4-3"/><circle cx="9.3" cy="12" r="2.2"/></svg></span>
+              <div><b>Criação de Conteúdo</b>
+                <ul class="inc"><li>3 Reels por semana (cerca de 12 por mês)</li><li>Roteirização dos conteúdos</li><li>Ideias e pautas</li><li>Direcionamento estratégico dos vídeos</li><li>Edição dos Reels</li><li>Legendas e chamadas para ação (CTA)</li></ul></div></div></td>
+            <td class="q"><span class="risc">R$ 1.500</span><span class="liq">R$ 1.000 <span class="pm">/mês</span></span><span class="dtag">−R$ 500</span></td></tr>
+          <tr><td class="n">4</td>
+            <td><div class="item-l"><span class="selo"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.8"/><circle cx="12" cy="12" r="1.2"/><path d="m12 12 7-7"/><path d="M17 3.5V7h3.5"/></svg></span>
+              <div><b>Estratégia e Acompanhamento</b>
+                <ul class="inc"><li>Planejamento mensal</li><li>Análise dos resultados</li><li>Conteúdos e campanhas de melhor desempenho</li><li>Ajustes estratégicos durante o mês</li><li>Relatório dos principais indicadores</li></ul></div></div></td>
+            <td class="q"><span class="risc">R$ 1.000</span><span class="liq">R$ 500 <span class="pm">/mês</span></span><span class="dtag">−R$ 500</span></td></tr>
+        </table>
+
+        <div class="subs mk" data-n="4">
+          <div class="sub-cat"><span>Mensalidade de tabela (4 serviços)</span><b>R$ 5.700,00</b></div>
+          <div class="sub-cat desconto"><span>Desconto nos serviços</span><b>− R$ 2.700,00</b></div>
+        </div>
+        <div class="fin">
+          <div class="l">Investimento mensal<small>Sem taxa de implantação · 12 meses: R$ 36.000,00</small></div>
+          <div class="v">R$ 3.000,00 <span>/mês</span></div>
+        </div>
+
+        <div class="eb">Forma de pagamento</div>
+        <div class="formas">
+          <div class="fm"><div class="t">Mensal</div><div class="v">R$ 3.000,00</div>todo mês, no dia que o cliente escolher ao assinar</div>
+          <div class="fm eco"><div class="t">Anual à vista · −15%</div><div class="v">R$ 30.600,00</div>os 12 meses de uma vez: economia de R$ 5.400,00</div>
+        </div>
+
+        <div class="eb">Condições</div>
+        <div class="cond mk" data-n="5">
+          <div><b>Sem fidelidade:</b> o cancelamento é feito com aviso prévio de 30 dias.</div>
+          <div>Reajuste anual pelo salário mínimo vigente.</div>
+          <div>Suporte 24 horas, sem custo adicional.</div>
+          <div>Verba de anúncios (Meta e Google) não inclusa: paga pelo cliente direto às plataformas.</div>
+          <div>Depois da aprovação, o contrato de prestação de serviços é enviado para assinatura eletrônica.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sign">
+      <h3>✍️ Aprovar proposta</h3>
+      <p>Ao aprovar, você aceita os serviços e os valores acima. Em seguida chega o contrato para você assinar, e só depois da assinatura a primeira mensalidade é gerada.</p>
+      <div class="passos"><span class="on">1 · Aprovar a proposta</span><span>2 · Assinar o contrato</span><span>3 · Início</span></div>
+    </div>
+  </div></div>
+
+  <div class="nota"><b>O que muda em cada bolinha:</b>
+    ① o nome e os dados da empresa saem de Empresa, os mesmos da folha da Prime ·
+    ② o contratante com CNPJ, contato, e-mail e cidade ·
+    ③ cada serviço com ícone, o que está incluso em lista (e não mais num parágrafo corrido), o valor cheio riscado e o valor com desconto por mês ·
+    ④ a conta fecha: tabela − desconto = <b>R$ 3.000/mês</b>, o número em destaque ·
+    ⑤ as condições vêm dos "números da casa" do contrato, então proposta e contrato dizem a mesma coisa.</div>
+  <div class="nota amb"><b>Endereço da HLED:</b> não foi preenchido. Na proposta isso não faz falta, mas o contrato exige endereço. O "Buscar" do CNPJ, no card do Cliente, já preenche o endereço sozinho.</div>
+</div>
+
+<!-- ================================================================== 3 -->
+<div class="sec">
+  <div class="num">3 · O desconto no editor</div>
+  <h2>R$ 500 de desconto viravam R$ 41,67 por mês</h2>
+  <p class="lede">A causa do item ④. Hoje, no recorrente, o desconto em R$ de um item é tratado como desconto <b>sobre o ano inteiro daquele item</b>: R$ 500 ÷ 12 meses = R$ 41,67 por mês.
+  Por isso a mensalidade gravada foi R$ 5.474,99, e não R$ 3.000. Quem digita "R$ 500" no desconto de uma mensalidade quer dizer <b>R$ 500 por mês</b>.</p>
+
+  <div class="ad-wrap">
+    <div class="ad ruim"><div class="t">Hoje · o que foi gravado na HLED</div><div class="c">
+      <div class="row">
+        <div class="nm"><b>Criação de Conteúdo</b><small>3 Reels por semana…</small></div>
+        <div class="fld"><div class="l">Setup</div><div class="box">0</div></div>
+        <div class="fld"><div class="l">Mensal</div><div class="box">1.500</div></div>
+        <div class="fld"><div class="l">Desconto</div><div class="dpar"><span class="v">500</span><span class="tg"><i>%</i><i class="on">R$</i></span></div></div>
+        <div class="res bad">R$ 1.458,33<small>por mês (−R$ 41,67)</small></div>
+      </div>
+      <div class="tot-ed"><span>Mensalidade <b class="bad">R$ 5.474,99</b></span><span>Total 1º ano <b>R$ 65.699,88</b></span></div>
+    </div></div>
+    <div class="ad bom"><div class="t">Proposta · R$ no recorrente é por mês</div><div class="c">
+      <div class="row">
+        <div class="nm"><b>Criação de Conteúdo</b><small>3 Reels por semana…</small></div>
+        <div class="fld"><div class="l">Setup</div><div class="box">0</div></div>
+        <div class="fld"><div class="l">Mensal</div><div class="box">1.500</div></div>
+        <div class="fld"><div class="l">Desconto</div><div class="dpar"><span class="v">500</span><span class="tg"><i>%</i><i class="on">R$/mês</i></span></div></div>
+        <div class="res ok">R$ 1.000,00<small>por mês (−R$ 500)</small></div>
+      </div>
+      <div class="tot-ed"><span>Mensalidade <b class="ok">R$ 3.000,00</b></span><span>12 meses <b>R$ 36.000,00</b></span></div>
+    </div></div>
+  </div>
+  <div class="nota"><b>O que muda:</b> no recorrente, o botão "R$" passa a se chamar <b>"R$/mês"</b> e tira aquele valor da mensalidade.
+  O desconto em <b>%</b> continua igual: cai na implantação e na mensalidade na mesma proporção.
+  Se o serviço tiver implantação e você quiser dar desconto só nela, isso seria um segundo campo (pergunta 1).
+  <b>As propostas já salvas não mudam de valor:</b> a HLED continua gravada como está até alguém abrir e salvar de novo. E a Prime (evento) não muda nada.</div>
+</div>
+
+<!-- ================================================================== 4 -->
+<div class="sec">
+  <div class="num">4 · Os ícones do recorrente</div>
+  <h2>Um jogo próprio, escolhido pelo nome do serviço</h2>
+  <p class="lede">Mesma técnica dos ícones da Prime: desenho de traço, que imprime nítido, sai em preto e branco e não depende de foto.
+  O ícone é escolhido sozinho pelo nome do serviço, e no catálogo dá para trocar com um clique. Nada de buffet ou DJ aparece para quem vende mensalidade.</p>
+  <div class="ic-grid">
+    <div class="ic usa"><span class="s"><svg viewBox="0 0 24 24"><path d="M3 10v4h3l6 4V6L6 10z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a7.5 7.5 0 0 1 0 11"/></svg></span><div><b>Anúncios</b><small>tráfego, campanha, ads</small></div></div>
+    <div class="ic usa"><span class="s"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="16" rx="2"/><path d="M3.5 9h17"/><path d="M8 2.8v3.4"/><path d="M16 2.8v3.4"/><path d="M7.5 13h3"/><path d="M13.5 13h3"/><path d="M7.5 16.5h3"/></svg></span><div><b>Redes sociais</b><small>perfil, calendário, social</small></div></div>
+    <div class="ic usa"><span class="s"><svg viewBox="0 0 24 24"><rect x="2.8" y="6.5" width="13" height="11" rx="2"/><path d="m15.8 10.5 5.4-3v9l-5.4-3"/><circle cx="9.3" cy="12" r="2.2"/></svg></span><div><b>Conteúdo / vídeo</b><small>reels, conteúdo, vídeo</small></div></div>
+    <div class="ic usa"><span class="s"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.8"/><circle cx="12" cy="12" r="1.2"/><path d="m12 12 7-7"/><path d="M17 3.5V7h3.5"/></svg></span><div><b>Estratégia</b><small>estratégia, planejamento</small></div></div>
+    <div class="ic"><span class="s"><svg viewBox="0 0 24 24"><rect x="5" y="7.5" width="14" height="11" rx="3"/><path d="M12 7.5V4.5"/><circle cx="12" cy="3.6" r="1"/><circle cx="9.3" cy="12.5" r="1.1"/><circle cx="14.7" cy="12.5" r="1.1"/><path d="M9.5 15.6h5"/><path d="M5 12.5H3"/><path d="M21 12.5h-2"/></svg></span><div><b>Agente de IA</b><small>agente, atendimento, IA</small></div></div>
+    <div class="ic"><span class="s"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></svg></span><div><b>Automação</b><small>automação, processos, RPA</small></div></div>
+    <div class="ic"><span class="s"><svg viewBox="0 0 24 24"><path d="M3.5 4.5h17l-6.5 8v6l-4 2v-8z"/></svg></span><div><b>Funil / CRM</b><small>CRM, leads, SDR</small></div></div>
+    <div class="ic"><span class="s"><svg viewBox="0 0 24 24"><path d="M4 20.5h16"/><rect x="5.5" y="12" width="3" height="6" rx=".6"/><rect x="10.5" y="8" width="3" height="10" rx=".6"/><rect x="15.5" y="4.5" width="3" height="13.5" rx=".6"/></svg></span><div><b>Relatório / BI</b><small>BI, dashboard, indicadores</small></div></div>
+    <div class="ic"><span class="s"><svg viewBox="0 0 24 24"><path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z"/><path d="M14 3.5v5h5"/><path d="M8.5 13h7M8.5 16.5h5"/></svg></span><div><b>Documentos</b><small>documentos, contratos</small></div></div>
+    <div class="ic"><span class="s"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h3l1.5 4.5-2 1.5a11 11 0 0 0 5.5 5.5l1.5-2 4.5 1.5v3a2 2 0 0 1-2 2A16 16 0 0 1 4.5 5.5a2 2 0 0 1 2-2z"/></svg></span><div><b>Voz / ligação</b><small>voz, ligação, telefone</small></div></div>
+    <div class="ic"><span class="s"><svg viewBox="0 0 24 24"><path d="m8.5 8-4 4 4 4"/><path d="m15.5 8 4 4-4 4"/><path d="m13.5 5-3 14"/></svg></span><div><b>Sistema sob medida</b><small>sistema, software, site</small></div></div>
+    <div class="ic"><span class="s"><svg viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg></span><div><b>Outros</b><small>quando nada casa: nunca fica sem selo</small></div></div>
+  </div>
+</div>
+
+<!-- ================================================================== 5 -->
+<div class="sec">
+  <div class="num">5 · O que não muda</div>
+  <h2>A Prime continua exatamente igual</h2>
+  <p class="lede">Tudo acima vale só para o recorrente (ZAQ e as outras contas de mensalidade). A folha do evento, os ícones de festa e o desconto do evento não mudam.
+  Também não muda o fluxo: primeiro a proposta, depois o contrato, e a cobrança só depois da assinatura.</p>
+</div>
+
+<!-- ================================================================== 6 -->
+<div class="sec">
+  <div class="num">6 · Antes de construir</div>
+  <h2>Quatro perguntas</h2>
+  <div class="qs">
+    <div class="pq"><b>Desconto em R$ = por mês?</b> No recorrente, "R$ 500" de desconto num serviço quer dizer <b>R$ 500 a menos por mês</b>?
+      <p>Recomendo que sim. Se o serviço tiver implantação, o desconto em % continua valendo para as duas partes.</p></div>
+    <div class="pq"><b>Mostrar as duas formas de pagamento?</b> A proposta mostra o <b>mensal (R$ 3.000)</b> e o <b>anual à vista (R$ 30.600)</b> lado a lado, como no mockup, ou só a forma que você marcou no editor?
+      <p>Recomendo as duas: o cliente vê a economia e decide. Aí a escolha passaria a ser feita por ele, na hora de assinar.</p></div>
+    <div class="pq"><b>Condições automáticas?</b> O bloco "Condições" sai sozinho dos números do contrato (sem fidelidade, 30 dias, reajuste, suporte), mais a observação da verba de anúncios?
+      <p>Recomendo que sim, para a proposta nunca prometer uma coisa e o contrato dizer outra.</p></div>
+    <div class="pq"><b>O contrato ganha o mesmo cabeçalho?</b> A folha do contrato passa a abrir com a mesma logo, os dados da ZAQ e os dados da HLED?
+      <p>Recomendo que sim: é o mesmo documento, em duas etapas.</p></div>
+  </div>
+</div>
+
+</body>
+</html>

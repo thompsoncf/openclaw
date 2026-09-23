@@ -597,7 +597,18 @@ def carregar_modelo(pool, conta_id: int, modo: str | None = None) -> dict:
     `modo` escolhe o modelo padrão e os números da casa (locação × serviço); sem
     ele, sai do nicho da conta. `pedir_assinatura` é a chave do recorrente (311),
     lida à parte pra uma base sem a coluna não derrubar o contrato da Prime."""
-    modo = modo or modo_da_conta(pool, conta_id)
+    if not modo:
+        # TOLERANTE aqui, e só aqui: até a 311 esta função nem olhava o nicho, e
+        # quem chama (a folha do contrato, o aditivo) não pode cair porque o
+        # nicho não pôde ser lido. Sem nicho, o de sempre — o de locação. As
+        # portas que decidem se NASCE contrato (`conta_tem_contrato`) continuam
+        # sem esta tolerância.
+        try:
+            modo = modo_da_conta(pool, conta_id)
+        except Exception as e:  # noqa: BLE001
+            _log.warning("modelo da conta %s: não deu pra ler o nicho (%s: %s) — "
+                         "segue o de locação", conta_id, type(e).__name__, e)
+            modo = MODO_LOCACAO
     pedir = pede_assinatura_servico(pool, conta_id) if modo == MODO_SERVICO else True
     with pool.connection() as c:
         r = c.execute(

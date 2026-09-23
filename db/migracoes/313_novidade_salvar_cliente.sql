@@ -7,6 +7,8 @@
 --     Ele grava a proposta com o cliente — mesmo antes de escolher os serviços —
 --     e fecha o formulário no cartão do cliente. A proposta fica no funil como
 --     rascunho.
+--   * No recorrente, o cliente da proposta passa a entrar na aba Clientes, como
+--     já entrava no evento. Antes ele ficava só dentro da proposta.
 --
 -- POR QUE. Em 23/09/2026 o dono cadastrou um cliente na proposta da ZAQ (conta 3)
 -- e não achou onde salvar: o único jeito era o "Salvar no funil", lá embaixo no
@@ -37,6 +39,8 @@ COMO FUNCIONA
 Em Serviços, abra uma proposta (ou clique em "+ Nova proposta"). No card "Cliente", ao cadastrar um cliente novo ou ao clicar em "Ver dados", o formulário agora termina com o botão "Salvar cliente".
 
 Ele grava a proposta com o cliente, mesmo que você ainda não tenha escolhido nenhum serviço. A proposta fica no funil como rascunho, e você pode continuar montando agora ou depois.
+
+O cliente também entra na sua aba Clientes. Se ele já estiver lá, nada é apagado nem trocado: só os dados que faltavam são completados.
 
 O QUE NÃO MUDA
 

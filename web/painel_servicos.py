@@ -911,21 +911,25 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
         return JSONResponse({"erro": "proposta não encontrada ou já fechada"}, status_code=400)
     # o cliente do orçamento entra na base de Clientes. Falhar aqui não pode
     # derrubar o orçamento, que é o que o vendedor está tentando salvar.
+    # NOS DOIS MODOS. Era só no evento; no recorrente o cliente ficava preso na
+    # proposta e não aparecia na aba Clientes. Pedido do dono em 23/09/2026, na
+    # ZAQ ("sim" a "quer que o cliente entre em Clientes, como na Prime?").
+    # `criar_cliente` só preenche o que está vazio: salvar de novo não estraga o
+    # cadastro. Contrato: `completar_do_cadastro` só tapa buraco, o orçamento vence.
     cliente_id = None
-    if modo == "evento":
-        try:
-            cliente_id = _espelhar_cliente(get_pool(), conta[0], dados)
-            # o VÍNCULO é o que faz a folha reler o cadastro depois: sem ele, o
-            # texto copiado aqui congelaria pra sempre e corrigir na aba
-            # Clientes não mudaria nada.
-            if cliente_id:
-                with get_pool().connection() as c:
-                    c.execute("update orcamentos set cliente_id=%s "
-                              "where id=%s and conta_id=%s",
-                              (cliente_id, oid, conta[0]))
-                    c.commit()
-        except Exception:  # noqa: BLE001
-            cliente_id = None
+    try:
+        cliente_id = _espelhar_cliente(get_pool(), conta[0], dados)
+        # o VÍNCULO é o que faz a folha reler o cadastro depois: sem ele, o
+        # texto copiado aqui congelaria pra sempre e corrigir na aba
+        # Clientes não mudaria nada.
+        if cliente_id:
+            with get_pool().connection() as c:
+                c.execute("update orcamentos set cliente_id=%s "
+                          "where id=%s and conta_id=%s",
+                          (cliente_id, oid, conta[0]))
+                c.commit()
+    except Exception:  # noqa: BLE001
+        cliente_id = None
     # CAMINHO DE VOLTA da reabertura: a assinatura foi desfeita, então a data na
     # agenda precisa acompanhar. Fora da transação de propósito — o que não pode se
     # perder é a edição; se a agenda falhar, a proposta editada continua salva e o

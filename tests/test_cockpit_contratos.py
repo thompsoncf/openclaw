@@ -93,6 +93,9 @@ def _prime(c):
     ct(orc("Rescindido", str(jac)), 999900, agora - timedelta(hours=1), status="rescindido")
     ct(orc("Aditivo", str(jac)), 888800, agora - timedelta(hours=1), substitui=1)
     lead("Aberto", thi, status="proposta")
+    o_velho = orc("Bianca de agosto", str(thi))      # assinado há 40 dias: fora da semana e do mês
+    lead("Bianca de agosto", thi, o_velho)
+    ct(o_velho, 150000, agora - timedelta(days=40))
     c.commit()
     return conta, dono, jac, thi
 
@@ -100,11 +103,14 @@ def _prime(c):
 def test_visao_conta_contratos_assinados(pool):
     with pool.connection() as c:
         conta, *_ = _prime(c)
-    k = cd.visao(pool, conta, "semana")["kpis"]
+    v = cd.visao(pool, conta, "semana")
+    k = v["kpis"]
     assert k["por_contrato"] is True
     assert k["ganhos"] == 3 and k["ganhos_rs"] == "R$ 10 mil"
-    # conversão continua ganhos ÷ leads novos (4 leads na semana)
-    assert k["conversao"] == 75
+    # conversão continua ganhos ÷ leads novos (5 leads na semana)
+    assert k["conversao"] == 60
+    # o funil diz o MESMO número do KPI na etapa do contrato
+    assert next(f for f in v["funil"] if f["chave"] == "ganho")["n"] == k["ganhos"]
 
 
 def test_funil_soma_o_contrato_sem_lead_e_diz_quantos(pool):
@@ -112,7 +118,9 @@ def test_funil_soma_o_contrato_sem_lead_e_diz_quantos(pool):
         conta, *_ = _prime(c)
     fun = {f["chave"]: f for f in cd.visao(pool, conta, "semana")["funil"]}
     g = fun["ganho"]
-    assert g["n"] == 4                      # 3 leads ganhos + 1 contrato sem lead
+    # a etapa segue o PERÍODO, como o KPI (24/09/2026): os 3 contratos da semana,
+    # com e sem lead — e não o de 40 dias atrás nem o lead "ganho" sem contrato
+    assert g["n"] == 3 and g["valor"] == "R$ 10.000"
     assert g["sem_lead"] == 1 and g["sem_lead_nomes"] == ["Josinalva"]
     assert fun["perdido"]["sem_lead"] == 0 and fun["proposta"]["sem_lead"] == 0
 

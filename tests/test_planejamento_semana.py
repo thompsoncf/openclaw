@@ -279,8 +279,10 @@ def _pl(**kw):
 
 
 def _card(html):
+    # Desde 24/09/2026 (aba Empresa reorganizada) o card mora na coluna do lado,
+    # DEPOIS das contas: quem vem a seguir na página é o DRE.
     i = html.index('id="planejamento"')
-    return html[i:html.index('id="titulos"', i)]
+    return html[i:html.index('id="dre"', i)]
 
 
 def test_sem_saldo_o_card_pede_o_saldo_e_nao_inventa_sobra():

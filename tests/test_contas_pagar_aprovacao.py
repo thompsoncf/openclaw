@@ -504,9 +504,21 @@ def test_so_quem_tem_gerir_ve_os_botoes_de_decisao():
     # blocos: liberar e recusar só existem no de baixo, e param de aparecer no que
     # já foi decidido. O que este teste guarda é o `pode_liberar` — sem ele, quem
     # não é dono veria botão que o servidor recusa.
-    for guarda in ("pode_liberar and t.tipo=='pagar' and t.aprovacao!='autorizado'",
+    #
+    # Em 24/09/2026 os botões passaram a mostrar o próximo passo de cada conta, e
+    # as duas condições viraram as variáveis `_decide` (liberar/recusar) e `_reve`
+    # (liberar a recusada). A guarda é a mesma: ambas passam por `pode_liberar`.
+    for guarda in ("set _decide = pode_decidir and pode_liberar and t.tipo == 'pagar'"
+                   " and t.aprovacao == 'aguardando'",
+                   "set _reve = pode_decidir and pode_liberar and t.tipo == 'pagar'"
+                   " and t.aprovacao == 'recusado'",
                    "pode_liberar and t.aprovacao=='aguardando'"):
         assert guarda in portal._EMPRESA, guarda
+    i = portal._EMPRESA.index("{% macro tit_linha")
+    macro = portal._EMPRESA[i:portal._EMPRESA.index("{% endmacro %}", i)]
+    # os botões de decidir só moram dentro dos dois ramos guardados
+    assert macro.count('value="recusado"') == 1
+    assert macro.index('value="recusado"') > macro.index("{% elif _decide %}")
 
 
 def test_a_rota_de_decisao_barra_quem_nao_e_dono():

@@ -130,6 +130,9 @@ def pool():
         # segundo de um nicho só). Mesmo motivo da 184 e da 243 — e é por isto
         # que a paridade banco × Python não deixa ninguém esquecer a migração.
         c.execute((BASE / "251_novidade_nicho_suplementos.sql").read_text(encoding="utf-8"))
+        # 338 amplia pela quarta vez, com `empresa` — o segundo portão de CONTA
+        # (quem tem a aba Empresa). Mesmo motivo das anteriores.
+        c.execute((BASE / "338_novidade_empresa_reorganizada.sql").read_text(encoding="utf-8"))
         for slug in ("eventos", "consultoria", "hortifruti"):
             c.execute("insert into nichos (nome, slug) values (%s,%s)", (slug, slug))
         c.execute("""insert into contas (id, nome, nicho_id, criado_em) values

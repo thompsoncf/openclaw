@@ -351,7 +351,8 @@ def test_o_quadro_do_gestor_aparece_com_a_lista_de_um_toque():
              "sugestao": "eventual"}]
     html = _empresa(quadro_tipo=[_mes(2026, 9)], quadro_sem_tipo={(2026, 9): pend})
     i = html.index('id="despesas-por-tipo"')
-    q = html[i:html.index('id="titulos"', i)]
+    # desde 24/09/2026 o quadro fica ao lado do DRE, e depois dele vem a folha
+    q = html[i:html.index('id="folha"', i)]
     assert "8% do valor com tipo" in q and "R$ 47.536,14" in q
     assert "1 de setembro sem tipo — classificar agora" in q
     assert 'class="sug" data-tipo="eventual"' in q

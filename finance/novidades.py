@@ -128,6 +128,26 @@ def _canal_proprio(pool, conta_id: int) -> bool:
         return False
 
 
+def _empresa(pool, conta_id: int) -> bool:
+    """A conta tem a aba Empresa (o módulo PJ).
+
+    Nasceu com o aviso da aba reorganizada (24/09/2026, migração 338). Nenhum
+    portão de nicho descrevia o alcance: a aba é a mesma pros três perfis, mas
+    só existe pra quem tem o módulo — 'todos' avisaria de uma tela que parte da
+    base nem tem. O portão é o MESMO da rota (`empresa.modulo_pj_ativo`), pra
+    que o aviso e a tela nunca discordem sobre quem vê o quê.
+
+    Falha fechada, como o do canal: sem saber, o aviso não sai.
+    """
+    try:
+        from finance import empresa as emp
+        return bool(emp.modulo_pj_ativo(pool, conta_id))
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra ver o módulo Empresa da conta %s: %s: %s",
+                     conta_id, type(e).__name__, e)
+        return False
+
+
 # O REGISTRO. Cada chave aponta pro portão que já decide quem vê a funcionalidade.
 # Acrescentar um público aqui EXIGE mexer no check da migração — e um teste
 # compara as duas listas, pra deriva virar falha em vez de surpresa.
@@ -151,6 +171,7 @@ PUBLICOS_NICHO = {
 
 PUBLICOS_CONTA = {
     "canal_proprio": _canal_proprio,
+    "empresa": _empresa,
 }
 
 # A lista completa — é ela que o check da migração espelha.

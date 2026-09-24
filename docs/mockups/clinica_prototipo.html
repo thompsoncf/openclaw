@@ -202,12 +202,104 @@ main{padding:calc(var(--faixa) + 16px) 22px 60px 238px;max-width:calc(var(--pag)
 .kbcol.agenda h4::after{content:"= agenda";font-size:.62rem;color:var(--neon);font-weight:500;margin-left:auto;margin-right:.4rem}
 
 /* ---------- roteiro ---------- */
-.cid{display:grid;grid-template-columns:1fr 150px 90px auto;align-items:center;gap:.9rem;background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:.7rem .85rem;margin-bottom:.5rem}
-.cid .nm{font-weight:600;font-size:.95rem}
-.cid .nm small{display:block;font-weight:400;color:var(--txt-mut);font-size:.74rem}
-.cid .qt{text-align:right;font-family:var(--display);font-size:1.5rem;font-weight:600;line-height:1}
-.cid .qt small{display:block;font-family:var(--body);font-size:.64rem;color:var(--txt-mut);font-weight:400}
-.q-quente{color:var(--coral)}.q-morno{color:var(--ambar)}.q-frio{color:var(--txt-mut)}
+.rt-kpi{text-align:left;color:var(--txt);font:inherit;cursor:pointer;width:100%}
+.rt-kpi:hover,.rt-kpi.on{border-color:var(--neon-borda)}
+.rt-kpi.on{background:var(--neon-fundo)}
+.rt-aviso{display:flex;gap:.6rem;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--coral-fundo);border:1px solid var(--coral-borda);color:#F5B3AE;border-radius:10px;padding:.5rem .7rem;font-size:.84rem;margin-bottom:.4rem}
+.rt-aviso b{color:#FFD2CE}
+.rt-mes{margin:.7rem 0 .35rem -1.55rem;font-size:.64rem;letter-spacing:.14em;color:var(--txt-mut);font-weight:700}
+.rt-ant{margin:-.2rem 0 .3rem}
+.tl .it.r::before{border-color:var(--coral);background:var(--coral-fundo)}
+.rt-v{background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.5rem .65rem;cursor:pointer}
+.rt-v:hover{border-color:var(--neon-borda)}
+.rt-v.g{border-color:var(--neon-borda)}.rt-v.a{border-color:var(--ambar-borda)}.rt-v.r{border-color:var(--coral-borda);background:var(--coral-fundo)}
+.rt-v.sug{border-style:dashed;background:transparent}.rt-v.x{opacity:.6}.rt-v.feita{opacity:.85}
+.rt-v .t1{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;font-weight:600;font-size:.88rem}
+.rt-v .t2{font-size:.78rem;color:var(--txt-mut);margin-top:.2rem;line-height:1.5}
+.rt-v .t2 b{color:var(--txt)}
+.rt-leg{display:flex;gap:.4rem .8rem;flex-wrap:wrap;font-size:.72rem;color:var(--txt-mut);margin-top:.5rem}
+.rt-faixa{display:grid;grid-template-columns:34px repeat(7,minmax(92px,1fr));gap:4px;margin-bottom:.7rem;min-width:min-content}
+.rt-fc{display:block;text-align:left;font:inherit;min-height:48px;border-radius:7px;border:1px solid var(--borda);background:var(--card-2);color:var(--txt);font-size:.7rem;padding:4px 6px;line-height:1.25;overflow:hidden}
+button.rt-fc{cursor:pointer}
+.rt-fc b{display:block;font-family:var(--mono);font-size:.64rem;color:var(--txt-mut);font-weight:500}
+.rt-fc small{display:block;font-size:.6rem;color:var(--txt-mut)}
+.rt-fc.g{border-color:var(--neon-borda);background:var(--neon-fundo)}.rt-fc.a{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.rt-fc.r{border-color:var(--coral-borda);background:var(--coral-fundo)}.rt-fc.sug{border-style:dashed;border-color:var(--neon-borda);background:transparent}
+.rt-fc.vazio{color:var(--text-faint);background:transparent}.rt-fc.x{opacity:.5;text-decoration:line-through}.rt-fc.pas{opacity:.55}
+.rt-ref{background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.55rem .7rem;font-size:.8rem;line-height:1.55;color:var(--txt-mut);margin-bottom:.6rem}
+.rt-ref b{color:var(--txt)}
+.rt-cids{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem}
+.rt-cid{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:.7rem .8rem;cursor:pointer;min-width:0}
+.rt-cid:hover{border-color:var(--neon-borda)}
+.rt-cid .l1{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.rt-cid .nm{font-weight:600;font-size:1rem;font-family:var(--display)}
+.rt-cid .l2,.rt-cid .l3{font-size:.84rem;margin-top:.3rem;line-height:1.45}
+.rt-cid .l3 small{display:block;font-size:.72rem;color:var(--txt-mut);margin-top:.1rem}
+.rt-cid .l4{font-size:.74rem;color:var(--txt-mut);margin-top:.35rem;line-height:1.45}
+.rt-cid .big{font-family:var(--display);font-weight:600;font-size:1.15rem}
+.rt-cid .acoes{margin-top:.5rem}
+.rt-hl{color:var(--neon);font-weight:700}
+.rt-selo{font-size:.62rem;font-weight:700;letter-spacing:.06em;border-radius:5px;padding:1px 6px;border:1px solid;white-space:nowrap;font-family:var(--body)}
+.rt-selo.vale{color:var(--neon);border-color:var(--neon-borda);background:var(--neon-fundo)}
+.rt-selo.ja{color:#6CC4F0;border-color:var(--azul-borda);background:var(--azul-fundo)}
+.rt-selo.ainda{color:var(--ambar);border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.rt-selo.nao{color:#F08A83;border-color:var(--coral-borda);background:var(--coral-fundo)}
+.rt-org{display:flex;height:5px;border-radius:99px;overflow:hidden;background:var(--card-2);margin:.4rem 0 .1rem}
+.rt-org i{display:block;height:100%}
+.rt-sem{font-size:.76rem;color:var(--text-faint);border:1px dashed var(--borda);border-radius:9px;padding:.4rem .6rem;margin-top:.6rem}
+.rt-como{margin-top:1rem}
+.rt-como summary{cursor:pointer;font-size:.95rem;list-style:none}
+.rt-como summary::-webkit-details-marker{display:none}
+.rt-como summary::after{content:" ›";color:var(--txt-mut)}
+.rt-como[open] summary{margin-bottom:.7rem}
+.rt-como-g{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem}
+.rt-como-g>div{background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.55rem .6rem;font-size:.78rem;color:var(--txt-mut);line-height:1.5}
+.rt-como-g b{color:var(--txt)}
+.rt-p{display:flex;gap:.5rem;align-items:center;padding:.4rem 0;border-top:1px solid var(--borda);font-size:.82rem}
+.rt-p small{display:block;color:var(--txt-mut);font-size:.72rem;line-height:1.35}
+.rt-custo{display:grid;grid-template-columns:minmax(0,1fr) 108px;gap:.5rem;align-items:center;font-size:.8rem;color:var(--txt-mut);margin:.25rem 0}
+.rt-custo .inp{min-height:32px;padding:.3rem .5rem;text-align:right}
+.rt-bl{border:1px solid var(--borda);border-radius:12px;padding:.7rem .8rem;margin-top:.8rem;background:var(--card-2)}
+.rt-bl h4{margin:0 0 .55rem;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-mut);font-family:var(--body);font-weight:600}
+.rt-bl .linha span:last-child{text-align:right}
+.rt-ck{display:grid;grid-template-columns:24px minmax(0,1fr);gap:.5rem;padding:.5rem 0;border-top:1px solid var(--borda);font-size:.84rem}
+.rt-ck .ic{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.72rem;border:1px solid var(--ambar-borda);color:var(--ambar);background:var(--ambar-fundo)}
+.rt-ck .ic.ok{border-color:var(--neon-borda);color:var(--neon);background:var(--neon-fundo)}
+.rt-opt{text-align:left;border-radius:10px;line-height:1.3;padding:.3rem .6rem}
+.rt-opt small{display:block;font-size:.68rem;color:var(--txt-mut);font-weight:400}
+.opt.rt-nao{opacity:.55;text-decoration:line-through}
+.rt-pergunta{background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:9px;padding:.5rem .6rem;font-size:.8rem;color:#F4D29A;margin-top:.5rem}
+.rt-regras{font-size:.78rem;color:var(--txt-mut);line-height:1.6;background:var(--bg);border:1px solid var(--borda);border-radius:9px;padding:.5rem .6rem;margin-top:.4rem}
+.rt-regras b{color:var(--txt)}
+.rt-rod{font-size:.8rem;color:var(--txt-mut);line-height:1.5;margin-bottom:.35rem}
+.rt-rod b{color:var(--txt)}
+.rt-pe{position:sticky;bottom:0;z-index:2;margin:1rem -1.1rem -2rem;padding:.65rem 1.1rem .9rem;background:var(--card);border-top:1px solid var(--neon-borda);box-shadow:0 -10px 24px rgba(0,0,0,.35)}
+.rt-pe-n{display:flex;gap:.3rem .8rem;flex-wrap:wrap;align-items:center;font-size:.8rem;color:var(--txt-mut)}
+.rt-pe-n b{color:var(--txt);font-family:var(--mono)}
+.rt-sub{display:block;font-size:.72rem;color:var(--text-faint)}
+.rt-falta{font-size:.74rem;color:var(--ambar);margin-top:.35rem}
+.btn[disabled]{opacity:.45;cursor:not-allowed;filter:grayscale(.4)}
+.gav.larga{width:min(640px,100%)}
+.rt-sobra{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem .6rem;background:var(--neon-fundo);border:1px solid var(--neon-borda);border-radius:12px;padding:.6rem .8rem;margin-bottom:.7rem}
+.rt-sobra b{font-family:var(--display);font-size:1.9rem;font-weight:600;color:var(--neon);line-height:1}
+.rt-sobra>span:not(.fonte):not(.mut){font-size:.82rem;color:var(--txt)}
+.rt-fech{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:1rem}
+.rt-fech h4{margin:0 0 .4rem;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-mut);font-weight:600}
+.rt-fr{display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.35rem 0;border-top:1px solid var(--borda);font-size:.8rem}
+.rt-fr small{display:block;color:var(--txt-mut);font-size:.7rem}
+.rt-fr .seg button{padding:.2rem .5rem;font-size:.72rem}
+.modal:has(.rt-fech){width:min(820px,94vw)}
+.fonte.amigo.ex{color:#8AB4F8;border-color:#2B4A7A}
+.fonte.zap.ex{color:var(--neon);border-color:var(--neon-borda)}
+@media (max-width:900px){
+  .rt-cids,.rt-fech{grid-template-columns:1fr}
+  .rt-como-g{grid-template-columns:1fr 1fr}
+  .rt-so-pc{display:none}
+  .gav.larga{width:100%}
+  .rt-dia .vagas{grid-template-columns:repeat(4,minmax(0,1fr));gap:.3rem}
+  .rt-dia .vg{padding:.3rem .35rem}
+}
+@media (max-width:480px){.rt-como-g{grid-template-columns:1fr}}
 .vagas{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:.4rem}
 .vg{background:var(--bg);border:1.5px solid #2a3a31;border-radius:9px;padding:.4rem .5rem;font-size:.78rem;transition:all .3s}
 .vg b{font-family:var(--mono);display:block}
@@ -216,6 +308,13 @@ main{padding:calc(var(--faixa) + 16px) 22px 60px 238px;max-width:calc(var(--pag)
 .vg.cheia small{color:var(--neon)}
 .vg.resp{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
 .vg.resp small{color:var(--ambar)}
+button.vg{font:inherit;color:var(--txt);text-align:left;width:100%;cursor:pointer;min-width:0}
+.vg.conv{border-color:var(--azul-borda);background:var(--azul-fundo);border-style:dashed}
+.vg.conv small{color:#6CC4F0}
+.vg.segu{background:repeating-linear-gradient(135deg,#10241A,#10241A 6px,#0E1512 6px,#0E1512 12px);border-color:#46F58A;border-style:dashed}
+.vg.segu small{color:var(--neon-bright)}
+.vg.ok{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.vg.ok small{color:var(--neon)}
 .rank{display:flex;align-items:center;gap:.6rem;background:var(--card-2);border:1px solid var(--borda);border-radius:9px;padding:.45rem .6rem;margin-bottom:.35rem;font-size:.82rem}
 .rank .p{width:22px;height:22px;border-radius:50%;background:var(--card);border:1px solid var(--borda);display:flex;align-items:center;justify-content:center;font-size:.72rem;color:var(--txt-mut)}
 .rank .n{flex:1}
@@ -253,8 +352,6 @@ main{padding:calc(var(--faixa) + 16px) 22px 60px 238px;max-width:calc(var(--pag)
   main{padding:calc(var(--faixa) + 12px) 12px calc(76px + env(safe-area-inset-bottom,0px))}
   .kpis{grid-template-columns:repeat(2,1fr)}
   .grid2,.grid3{grid-template-columns:1fr}
-  .cid{grid-template-columns:1fr auto}
-  .cid .bar,.cid .mb{display:none}
   .mobnav{display:flex}
   /* faixa: só ícone + controles curtos; o roteiro abre num painel */
   .proto{padding:0 .5rem;gap:.35rem}
@@ -506,17 +603,73 @@ let EV = [
   {id:13,p:'brenda',h:'09:00',d:1,pac:'Carlos Mendes',tipo:'Vacina',st:'agendado',org:'Já é paciente'},
 ];
 let FUNIL = {
-  'Novo':[{n:'Marina Lopes',s:'Instagram · "quanto é a consulta?"',t:[['agente respondeu em 40 s','g']]},{n:'Tiago Reis',s:'Indicação da Carla',t:[['parado desde ontem','r']]},{n:'Fernanda Luz',s:'Google · depilação a laser',t:[['Codó · fila da cidade','b']]}],
+  'Novo':[{n:'Marina Lopes',s:'Instagram · "quanto é a consulta?"',t:[['agente respondeu em 40 s','g']]},{n:'Tiago Reis',s:'Indicação da Carla',t:[['parado desde ontem','r']]},{n:'Fernanda Luz',s:'Google · consulta',t:[['Codó · fila da cidade','b']]}],
   'Recebeu o preço':[{n:'Sônia Pires',s:'Consulta · R$ 500 · há 1 dia',t:[['lembrete com horários hoje 10h','a']]},{n:'Renata Dias',s:'Consulta · R$ 500 · há 6 dias',t:[['sem resposta','r'],['2º toque enviado','']]},{n:'Márcio Luz',s:'Consulta · R$ 500 · há 13 dias',t:[['nunca chamado de novo','r']]},{n:'Joice Prado',s:'Consulta · R$ 500 · há 1 dia',t:[['respondeu: "vou ver e te falo"','a']]}],
   'Voltar a chamar':[{n:'Joana Prado',s:'Consulta',t:[['faltou 16/09 · remarcar','r']]},{n:'Heitor Lima',s:'Consulta social',t:[['esfriando','a']]}],
   'Consulta agendada':[{n:'Marcos Teixeira',s:'Consulta · Dr. Manoel',t:[['qua 09:30 · segurado','a']]},{n:'Paula Viana',s:'Procedimento estético',t:[['qui 13:30','']]},{n:'Beatriz Souza',s:'Avaliação · Juliana',t:[['qua 15:00','']]}],
   'Plano de tratamento':[{n:'Rogério Alves',s:'Botox · R$ 1.600',t:[['proposta há 3 dias','a']]},{n:'Bianca Lemos',s:'Laser 10 sessões · R$ 2.400',t:[['vence amanhã','r']]},{n:'Fernando Sá',s:'Criolipólise · 4 sessões · R$ 3.200',t:[['visualizou hoje','']]},{n:'Denise Rocha',s:'Botox (hiperidrose) · R$ 1.800',t:[['respondeu: "vou ver e te aviso"','a'],['há 2 dias','']]}],
 };
-const CIDADES = [
-  {n:'Bacabal',esp:31,ult:47,via:'2h',q:'quente'},{n:'Codó',esp:23,ult:62,via:'2h30',q:'quente'},
-  {n:'Lago da Pedra',esp:14,ult:21,via:'1h',q:'morno'},{n:'Timbiras',esp:6,ult:null,via:'1h40',q:'frio'},
-  {n:'Vitorino Freire',esp:4,ult:95,via:'1h50',q:'frio'},{n:'Poção de Pedras',esp:3,ult:120,via:'40 min',q:'frio'},
+/* ===== ROTEIRO · dados (a tela está na seção 3 · ROTEIRO)
+   Fonte de cada número (vira etiqueta na tela): real = RX_WA (WhatsApp 24/08–23/09:
+   só 1 conversa de paciente citou uma cidade do roteiro, Codó) · Amigo (no protótipo,
+   valor de exemplo) · conta do Zaq · exemplo. Consulta R$ 500 é real; o resto, exemplo.
+   Configurar › Locais lê naFila(c). ===== */
+const REAL_GRADE='Hoje só a sede tem horário do Dr. Manoel no Amigo'; // real · nenhuma das 9 cidades tem grade lá
+const CHANCE={ret:.70,ped:.75,fal:.30,sum:.25};  // exemplo · o Zaq troca pela medida depois de 2–3 viagens
+const ORIGEM={ret:['Retorno vencido','esperando','var(--azul)'],ped:['Pediu no WhatsApp','esperando','var(--neon)'],
+              fal:['Faltou','convidar','var(--ambar)'],sum:['Sumido há 90+ dias','convidar','#5E6F66']};
+const TURNO={qui:{nome:'quinta',txt:'08:00–17:00 · almoço 12–13',vagas:16,h:9},sab:{nome:'sábado',txt:'08:00–12:00',vagas:8,h:4}};
+const SEDE={ // Dr. Manoel em Pedreiras
+  semana(){const e=EV.filter(x=>x.p==='manoel'&&x.dia<=4&&!['cancelou','faltou'].includes(x.st));
+    return {valor:e.reduce((s,x)=>s+tipo(x.tipo)[4],0),horas:5*HORAS.length/2}},  // conta do Zaq na Agenda: 13.070 em 35 h (semana a 60%, não "dia cheio")
+  hora(){const s=SEDE.semana();return Math.round(s.valor/s.horas)},              // 373
+  qui:{dia:1300,hora:186},  // exemplo · média de quintas COM o aviso de vaga que abriu enchendo a sede
+  sab:{dia:0,hora:0},       // a sede não abre sábado para ele
+};
+const PISO_SAB=1000;        // exemplo · o mínimo que precisa sobrar para valer gastar um sábado (a clínica decide)
+const CUSTO_TXT={comb:'Combustível',sala:'Sala',comida:'Comida',diaria:'Diária de quem vai junto'};
+const CIDADES=[ // place = unidade do Amigo ligada em Configurar › Locais · visitas: Amigo (exemplo) · via/custo/fila: exemplo
+  {n:'Bacabal',place:'Bacabal',via:2,viaTxt:'2h',ult:'qui 06/08',turno:'qui',sug:'qui 15/10',visitas:['qui 06/08','qui 18/06','qui 30/04'],
+    custo:{comb:220,sala:300,comida:180,diaria:200},fila:{ret:6,ped:5,fal:4,sum:16}},
+  {n:'Codó',place:'Codó',via:2.5,viaTxt:'2h30',ult:'qui 23/07',turno:'qui',sug:'qui 29/10',visitas:['qui 23/07','qui 28/05','qui 02/04'],
+    custo:{comb:280,sala:300,comida:220,diaria:250},fila:{ret:3,ped:8,fal:2,sum:10}},
+  {n:'Lago da Pedra',place:'Lago da Pedra',via:1,viaTxt:'1h',ult:'sáb 12/09',turno:'sab',fixa:'sábado a cada 15 dias',
+    visitas:['sáb 12/09','sáb 29/08','sáb 15/08','sáb 01/08','sáb 20/06','sáb 06/06'],
+    custo:{comb:110,sala:150,comida:60,diaria:100},fila:{ret:3,ped:3,fal:1,sum:7},
+    fora:[{nome:'Heloísa D.',motivo:'manutenção do laser vencida · é com a Juliana, que atende só em Pedreiras',acao:'o agente oferece a sede'}]},
+  {n:'Timbiras',place:'Timbiras',via:5/3,viaTxt:'1h40',ult:null,turno:'sab',sug:'sáb 17/10',visitas:[],
+    custo:{comb:230,sala:250,comida:150,diaria:150},fila:{ret:0,ped:6,fal:0,sum:0}},
+  {n:'Vitorino Freire',place:'Vitorino Freire',via:11/6,viaTxt:'1h50',ult:'sáb 13/06',turno:'sab',visitas:['sáb 13/06','sáb 18/04'],
+    custo:{comb:250,sala:250,comida:170,diaria:150},fila:{ret:1,ped:1,fal:0,sum:2}},
+  {n:'Poção de Pedras',place:'Poção de Pedras',via:2/3,viaTxt:'40 min',ult:'sáb 30/05',turno:'sab',visitas:['sáb 30/05','sáb 04/04'],
+    custo:{comb:80,sala:150,comida:60,diaria:60},fila:{ret:1,ped:0,fal:0,sum:2}},
+  {n:'Igarapé Grande',place:'Igarapé Grande',via:.5,viaTxt:'30 min',ult:null,fila:{ret:0,ped:0,fal:0,sum:0}},
+  {n:'Paulo Ramos',place:'Paulo Ramos',via:5/3,viaTxt:'1h40',ult:null,fila:{ret:0,ped:0,fal:0,sum:0}},
+  {n:'Esperantinópolis',place:'Esperantinópolis',via:1,viaTxt:'1h',ult:null,fila:{ret:0,ped:0,fal:0,sum:0}},
+]; // exemplo · fila 81 = 37 esperando (ret 14 + ped 23) + 44 para convidar (fal 7 + sum 37)
+   // "pediu no WhatsApp" 23 = exemplo de 6 meses com o agente ligado (~4/mês); o real de hoje está em RX_WA.cidades
+const rtSoma=o=>Object.values(o).reduce((a,b)=>a+b,0);
+const naFila=c=>rtSoma(c.fila);
+const esperando=c=>c.fila.ret+c.fila.ped;
+const convidar=c=>c.fila.fal+c.fila.sum;
+const devemVir=c=>Math.floor(Object.entries(c.fila).reduce((s,[k,n])=>s+n*CHANCE[k],0)+1e-9); // 13·11·6·4·1·1 = 36
+const temConta=c=>!!c.custo&&naFila(c)>0; // Igarapé Grande, Paulo Ramos e Esperantinópolis: sem conta
+
+let VIAGENS=[ // Amigo (datas, quem veio/faltou por unidade) + conta do Zaq (custo lançado) · valores de exemplo
+  {id:'cod-2307',c:'Codó',dt:'qui 23/07',st:'fechada',vagas:16,marc:12,atend:11,falt:1,sai:1050,horas:14,
+    itens:[['Consulta',8,4000],['Testes alérgicos',1,180],['Retorno',2,0]]},                                 // 4.180
+  {id:'bac-0608',c:'Bacabal',dt:'qui 06/08',st:'fechada',vagas:16,marc:14,atend:13,falt:1,sai:900,horas:13,
+    itens:[['Consulta',7,3500],['Procedimento estético',1,800],['Testes alérgicos',3,540],['Retorno',2,0]]},   // 4.840
+  {id:'lag-1209',c:'Lago da Pedra',dt:'sáb 12/09',st:'fechada',vagas:8,marc:6,atend:6,falt:0,sai:420,horas:6,
+    itens:[['Consulta',3,1500],['Procedimento clínico',1,450],['Retorno',2,0]]},                              // 1.950
+  {id:'lag-2609',c:'Lago da Pedra',dt:'sáb 26/09',st:'marcada',vagas:8,amigo:'ok',sala:'ok',ev:{p:'manoel',dia:5}}, // lido da Agenda (EV)
+  {id:'lag-1010',c:'Lago da Pedra',dt:'sáb 10/10',st:'marcada',vagas:8,marc:0,amigo:'falta',sala:'ok'},
+  {id:'bac-1510',c:'Bacabal',dt:'qui 15/10',st:'sugerida'},
+  {id:'lag-2410',c:'Lago da Pedra',dt:'sáb 24/10',st:'conflito',motivo:'bloqueio de 24/10 · congresso (Configurar › Grade)',alt:'sáb 31/10'},
+  {id:'cod-2910',c:'Codó',dt:'qui 29/10',st:'sugerida'},
+  {id:'lag-0711',c:'Lago da Pedra',dt:'sáb 07/11',st:'marcada',vagas:8,marc:0,amigo:'falta',sala:'ok'},
 ];
+const entrou=v=>(v.itens||[]).reduce((s,[,,r])=>s+r,0);
 
 /* =================================================================
    MENU · PAPÉIS · MODO APRESENTAÇÃO · FAIXA DO PROTÓTIPO
@@ -549,7 +702,7 @@ const DEMO=[
   ['conversas','Conversas','paciente separado de conversa interna'],
   ['agenda','Agenda','o dia de cada profissional; toque num horário'],
   ['funil','Funil','do "quanto custa?" ao pós-venda'],
-  ['roteiro','Roteiro','quem espera o médico em cada cidade'],
+  ['roteiro','Roteiro','as viagens do médico: marcado, fila e se vale ir'],
   ['vagas','Vagas','cancelou, o horário é oferecido na hora'],
   ['pacientes','Pacientes','a ficha: conversa, dinheiro e próximos passos'],
   ['planos','Tratamentos','a consulta vira tratamento'],
@@ -625,7 +778,7 @@ const $ = s=>document.querySelector(s);
 const brl = v=>'R$ '+v.toLocaleString('pt-BR');
 function toast(t,x,amb){const e=document.createElement('div');e.className='toast'+(amb?' a':'');e.innerHTML=`<b>${t}</b>${x||''}`;simplificar(e);$('#toasts').appendChild(e);setTimeout(()=>e.remove(),5200)}
 const X_FECHAR='<button class="fechar" onclick="fecharTudo()" aria-label="Fechar" title="Fechar (Esc)">✕</button>';
-function abrirGav(h){const g=$('#gav');g.innerHTML=X_FECHAR+h;g.scrollTop=0;g.classList.add('on');$('#veu').classList.add('on');simplificar(g)}
+function abrirGav(h){const g=$('#gav');g.classList.remove('larga');g.innerHTML=X_FECHAR+h;g.scrollTop=0;g.classList.add('on');$('#veu').classList.add('on');simplificar(g)}
 function abrirModal(h){const m=$('#modal');m.innerHTML=X_FECHAR+h;m.scrollTop=0;m.classList.add('on');$('#veu').classList.add('on');simplificar(m)}
 function fecharTudo(){$('#gav').classList.remove('on');$('#modal').classList.remove('on');$('#veu').classList.remove('on');if(document.body&&document.body.classList)document.body.classList.remove('menu-on')}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){fecharTudo();fecharDemo()}});
@@ -754,7 +907,7 @@ function telaAgenda(){
   <div class="ag-top"><button class="btn sec min">‹</button><span class="dia">${AG_VISTA==='dia'?'Quarta, 23 de setembro':'Semana de 21 a 26 de setembro'}</span><button class="btn sec min">›</button>
     <div class="seg" style="margin-left:.5rem"><button class="${AG_VISTA==='dia'?'on':''}" onclick="AG_VISTA='dia';render()">Dia</button><button class="${AG_VISTA==='semana'?'on':''}" onclick="AG_VISTA='semana';render()">Semana</button></div>
     ${seloAmigo()}
-    ${AG_VISTA==='dia'?`<select class="inp" style="width:auto;min-height:32px;padding:.2rem .5rem;margin-left:auto"><option>Local: Espaço Pelle · Pedreiras</option><option>Bacabal · qui 15/10</option></select>`:''}</div>`;
+    ${AG_VISTA==='dia'?`<select class="inp" style="width:auto;min-height:32px;padding:.2rem .5rem;margin-left:auto"><option>Local: Espaço Pelle · Pedreiras</option>${rtLocaisAgenda().map(x=>`<option>${x}</option>`).join('')}</select>`:''}</div>`;
   if(AG_VISTA==='semana') return h+telaSemana()+legenda()+agUmaSo();
   h += `<div class="kpis">
     <div class="kpi ok"><b>${Math.round(100*hoje.filter(e=>!['cancelou','faltou'].includes(e.st)).reduce((s,e)=>s+e.d,0)/PROF.reduce((s,p)=>s+HORAS.filter(x=>atende(p.id,HOJE,x)).length,0))}%</b><span>ocupação do dia (3 profissionais) ${rxF('ex')}</span></div>
@@ -1176,69 +1329,743 @@ function abrirLead(col,i){const c=FUNIL[col][i];if(!c)return;
   <div class="acoes">${e?`<button class="btn" onclick="abrirEv(${e.id})">Ver o horário</button>`:''}<button class="btn ${e?'sec':''}" onclick="ir('agenda')">Ver na agenda</button><button class="btn sec">Assumir conversa</button></div>`)}
 
 /* =================================================================
-   3 · ROTEIRO
+   3 · ROTEIRO — as viagens do Dr. Manoel: o que está marcado, onde tem
+   gente, se vale ir e quanto sobrou. Os dados (CIDADES, VIAGENS, conta)
+   ficam no topo, junto com os outros dados.
+   - Real: RX_WA.cidades (só 1 conversa de paciente citou uma cidade do
+     roteiro, com o agente desligado) e REAL_GRADE (só a sede tem grade do
+     médico no Amigo). Todo o resto é exemplo e leva etiqueta.
+   - Integração (só aqui, nunca na tela): o Zaq lê o Amigo a cada poucos
+     minutos (sem webhook): horários livres por médico, unidade e data
+     (available-dates), e atendimentos por unidade (place_id) e data com o
+     status DONE/MISSED (veio/faltou). Grava: POST /attendances (depois de
+     conferir o horário de novo), confirmado, chegou, cancelado. NÃO cria nem
+     bloqueia horário: a recepção cria o dia na unidade da cidade e bloqueia
+     Pedreiras no Amigo; o Zaq só confere ("Conferir").
+   - DIA_ABERTO = id da viagem aberta (VIAGENS) na tela do dia. A animação
+     usa um timer só (VG_TIMER) e guarda o passo em v.k: ao voltar, a tela
+     mostra o estado salvo na viagem.
    ================================================================= */
-let DIA_ABERTO=null;
-function telaRoteiro(){
-  if(DIA_ABERTO) return telaDiaViagem();
-  return `<div class="pg-h"><div><h1>Roteiro</h1><div class="sub">Onde tem gente esperando o médico. Ordenado por quem espera, não por ordem alfabética.</div></div>
-  <button class="btn sec">📍 Ver no mapa</button></div>
-  <div class="kpis"><div class="kpi ruim"><b>81</b><span>pessoas esperando em outras cidades</span></div><div class="kpi"><b>6</b><span>cidades com fila</span></div><div class="kpi ok"><b>R$ 438/h</b><span>rendeu a última viagem (Bacabal)</span></div><div class="kpi"><b>R$ 210/h</b><span>rende a sede</span></div></div>
-  ${CIDADES.map((c,i)=>`<div class="cid"><div class="nm">${c.n}<small>${c.ult?'última visita há '+c.ult+' dias':'nunca visitada pelo Zaq'} · ${c.via} de viagem</small></div>
-    <div class="mb"><div class="bar"><i class="${c.q==='quente'?'r':c.q==='morno'?'a':''}" style="width:${Math.min(100,c.esp*3)}%"></i></div></div>
-    <div class="qt q-${c.q}">${c.esp}<small>esperando</small></div>
-    <button class="btn ${i<2?'':'sec'} min" onclick="abrirData('${c.n}',${c.esp})">Abrir data</button></div>`).join('')}
-  <div class="hint">🧭 <b>De onde vem essa fila, sem ninguém digitar:</b> quem escreve "quando o doutor vem a Codó?" entra na fila de Codó. Quem pediu horário e sumiu porque não tinha data, também. Quando a data abre, o agente chama essa fila em ordem.</div>`;
+let DIA_ABERTO=null, RT_FILTRO=null, RT_ORD='mais', RT_ANT=false, RT_CAB='quem', RT_MAIS=false, RT_COMO=null;
+let RT_MOTIVO='Chuva ou estrada', RT_TURNO={}, RT_GAV=null;
+let ABRIR=null;     // o rascunho da gaveta "Abrir data"
+let VG=[];          // os horários da viagem aberta: {h, st:'livre'|'conv'|'seg'|'ok', p}
+let VG_TIMER=null;  // um timer só: encher() limpa antes de começar e para quando a pessoa sai
+let FECH=null;      // o rascunho do "Fechar o dia"
+const RT_HOJE=new Date(2026,8,23);
+const RT_SEM=['dom','seg','ter','qua','qui','sex','sáb'], RT_SEM_LONGO={qui:'quinta',sáb:'sábado',sex:'sexta',qua:'quarta',ter:'terça',seg:'segunda',dom:'domingo'};
+const RT_MESES=['JANEIRO','FEVEREIRO','MARÇO','ABRIL','MAIO','JUNHO','JULHO','AGOSTO','SETEMBRO','OUTUBRO','NOVEMBRO','DEZEMBRO'];
+const RT_BLOQ=['sáb 24/10']; // exemplo · bloqueio do Configurar (congresso)
+const rtData=s=>{const m=String(s||'').match(/(\d\d)\/(\d\d)/);return m?new Date(2026,+m[2]-1,+m[1]):null};
+const rtDM=d=>String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');
+const rtFmt=d=>RT_SEM[d.getDay()]+' '+rtDM(d);
+const rtMais=(s,n)=>{const d=rtData(s);d.setDate(d.getDate()+n);return rtFmt(d)};
+const rtDias=s=>Math.round((RT_HOJE-rtData(s))/864e5);
+const rtLongo=dt=>{const [a,b]=String(dt).split(' ');return (RT_SEM_LONGO[a]||a)+', '+b};
+const quintaDepois=min=>{const d=new Date(min);while(d.getDay()!==4)d.setDate(d.getDate()+1);return d};
+const quintaAntesDe=prazo=>{const d=new Date(prazo);d.setDate(d.getDate()-1);while(d.getDay()!==4)d.setDate(d.getDate()-1);return d};
+const sabAntesDe=prazo=>{const d=new Date(prazo);d.setDate(d.getDate()-1);while(d.getDay()!==6)d.setDate(d.getDate()-1);return d};
+const rtCid=n=>CIDADES.find(c=>c.n===n);
+const rtV=id=>VIAGENS.find(v=>v.id===id);
+const rtTurnoDe=dt=>String(dt).startsWith('sáb')?'sab':'qui';
+const rtOrdDt=(a,b)=>rtData(a.dt)-rtData(b.dt);
+const rtFechadas=c=>VIAGENS.filter(v=>v.st==='fechada'&&(!c||v.c===c.n)).sort(rtOrdDt);
+const rtUlt=c=>{const f=rtFechadas(c);return f.length?f[f.length-1].dt:c.ult};
+const ticketMedio=()=>{const f=rtFechadas();return Math.round(f.reduce((s,v)=>s+entrou(v),0)/f.reduce((s,v)=>s+v.atend,0))}; // 10.970 / 30 = 366
+const ticketDe=c=>{const f=rtFechadas(c);const u=f[f.length-1];return u?Math.round(entrou(u)/u.atend):ticketMedio()};  // Bacabal 372 · Codó 380 · Lago 325
+const rtHa=dt=>{const d=rtDias(dt);return d<0?'na simulação':d===0?'hoje':'há '+d+' dias'};
+const rtBRL=v=>(v<0?'−':'')+brl(r10(Math.abs(v)));
+const rtHoras=h=>{const a=Math.floor(h+1e-9),m=Math.round((h-a)*60);return m?a+'h'+String(m).padStart(2,'0'):a+' h'};
+const rtId=(c,dt)=>c.normalize('NFD').replace(/[^A-Za-z]/g,'').slice(0,3).toLowerCase()+'-'+dt.replace(/\D/g,'');
+/* etiquetas de fonte desta tela */
+const rtF=k=>k==='real'?rxF('wa'):k==='ex'?rxF('ex'):k==='merc'?rxF('merc'):k==='amigo'?rxF('amigo')
+  :k==='am'?'<span class="fonte amigo ex" style="margin-left:0">Amigo · exemplo</span>'
+  :k==='zq'?'<span class="fonte zap ex" style="margin-left:0">conta do Zaq · exemplo</span>':'';
+
+/* A CONTA de uma cidade (cartão, aba "A conta" e rodapé do Abrir data) */
+function conta(c,turno){
+  if(!c||!c.custo)return null; turno=turno||c.turno||'qui';
+  const t=TURNO[turno], dv=devemVir({fila:rtFilaEf(c)}), n=Math.min(t.vagas,dv), tk=ticketDe(c);
+  const entra=n*tk, sai=rtSoma(c.custo), sobra=entra-sai, horas=t.h+2*c.via;
+  const ficar=SEDE[turno].dia, piso=turno==='sab'?PISO_SAB:ficar;
+  return {turno,n,dv,ficamNaFila:dv-n,tk,entra,sai,sobra,horas,porHora:Math.round(sobra/horas),aMais:sobra-ficar,piso,
+    vale:sobra>=Math.max(piso,1),valeAPartirDe:Math.ceil((sai+piso)/tk)};
 }
-function abrirData(c,n){
-  abrirModal(`<h2>Abrir data · ${c}</h2><div class="mut" style="font-size:.84rem;margin-bottom:.7rem">${n} pessoas na fila da cidade</div>
-  <div class="grid2"><div>
-    <div class="field"><label>Dia</label><input class="inp" value="qui, 15/10/2026"></div>
-    <div class="field"><label>Horário</label><input class="inp" value="08:00 – 17:00 (almoço 12–13)"></div>
-    <div class="field"><label>Local</label><input class="inp" value="Clínica parceira · Rua ..., Centro"></div>
-    <div class="field"><label>Atendimentos</label><div class="opts"><button class="opt on" onclick="sel(this,1)">Consulta</button><button class="opt on" onclick="sel(this,1)">Retorno</button><button class="opt on" onclick="sel(this,1)">Testes alérgicos</button><button class="opt" onclick="sel(this,1)">Cirurgia</button></div></div>
-    <div class="field"><label>Sinal por Pix</label><div class="opts"><button class="opt on" onclick="sel(this)">R$ 50, vira crédito</button><button class="opt" onclick="sel(this)">Sem sinal</button></div></div>
-  </div><div>
-    <div class="field"><label>Quem o agente chama, em ordem</label>
-      <div class="rank"><span class="p">1</span><span class="n">Retornos vencidos<small>o médico pediu e a data passou</small></span><span class="q">7</span></div>
-      <div class="rank"><span class="p">2</span><span class="n">Fila da cidade<small>pediu ${c} e nunca foi atendido</small></span><span class="q">${n-12}</span></div>
-      <div class="rank"><span class="p">3</span><span class="n">Faltou na última visita<small>segunda chance, com sinal</small></span><span class="q">5</span></div>
-      <div class="faint" style="font-size:.74rem">Fora: quem pediu para não receber mensagem e quem já tem horário.</div></div>
-    <div class="linha"><span>Vagas</span><span class="num">16 de 30 min</span></div>
-    <div class="linha"><span>Custo previsto</span><span class="num">R$ 900</span></div>
-  </div></div>
-  <div class="hint" style="border-color:var(--ambar-borda);color:#F4D29A">⚠️ O aviso só sai com <b>data e local confirmados</b>. Viagem avisada e cancelada queima a clínica na cidade inteira.</div>
-  <div class="acoes"><button class="btn" onclick="DIA_ABERTO={c:'${c}',n:${n}};fecharTudo();render();encher()">Abrir e avisar os ${n}</button><button class="btn sec" onclick="fecharTudo();toast('Data aberta sem aviso','Ninguém foi avisado ainda. Você pode avisar quando confirmar a sala.')">Abrir sem avisar</button></div>`)}
-let VG=[];
-function telaDiaViagem(){
-  const d=DIA_ABERTO; const cheias=VG.filter(v=>v.st==='cheia').length;
-  return `<div class="pg-h"><div><h1>${d.c} · qui 15/10</h1><div class="sub">Dia de viagem aberto agora · o agente está chamando a fila em ordem</div></div><button class="btn sec" onclick="DIA_ABERTO=null;render()">‹ Voltar ao roteiro</button></div>
-  <div class="grid2"><div class="card"><h3><span id="vg-n">${cheias}</span> de 16 vagas <span class="mut" style="font-weight:400;font-size:.8rem">· <span id="vg-r">${VG.filter(v=>v.st==='resp').length}</span> respondendo</span></h3>
-    <div class="bar" style="height:11px;margin-bottom:.7rem"><i id="vg-bar" style="width:${cheias/16*100}%"></i></div>
-    <div class="vagas" id="vagas">${VG.map(v=>`<div class="vg ${v.st}"><b>${v.h}</b><small>${v.st==='cheia'?v.q:v.st==='resp'?'respondendo…':'livre'}</small></div>`).join('')}</div></div>
-  <div class="card"><h3>Como está enchendo</h3><table class="tb" id="vg-org"></table>
-    <div class="hint">Quem não conseguir vaga <b>continua na fila</b> e é o primeiro da próxima data em ${d.c}.</div></div></div>
-  <div class="card"><h3>Previsão da viagem</h3><div class="grid3">
-    <div><div class="mut" style="font-size:.76rem">Receita se encher</div><div style="font-size:1.3rem;font-family:var(--display)">R$ 8.000</div></div>
-    <div><div class="mut" style="font-size:.76rem">Custo (combustível, sala, hospedagem)</div><div style="font-size:1.3rem;font-family:var(--display)">R$ 900</div></div>
-    <div><div class="mut" style="font-size:.76rem">Cada vaga vazia custa</div><div style="font-size:1.3rem;font-family:var(--display);color:var(--coral)">R$ 500</div></div></div></div>`;
+// conferido: Bacabal/qui 13 · 4.836 · 900 · 3.936 · 13 h · 303/h · +2.636 · a partir de 6 | Bacabal/sáb 8 · 2.976 · 2.076 · 260/h · 5 ficam
+//            Codó/qui 11 · 4.180 · 1.050 · 3.130 · 14 h · 224/h · +1.830 · a partir de 7 | Lago/sáb 6 · 1.950 · 420 · 1.530 · 255/h
+//            Timbiras/sáb 4 · 1.464 · 780 · 684 · 93/h · a partir de 5 | Vitorino −454 | Poção +16 · 3/h
+const VEREDITO=c=>{if(c.fixa)return 'JÁ VAI';const k=conta(c);if(!k)return 'NÃO VALE';
+  return k.vale?'VALE':(k.sobra>0&&k.valeAPartirDe-k.n<=1)?'AINDA NÃO':'NÃO VALE'};
+const RT_CURTO={ret:'retorno vencido',ped:'pediu no WhatsApp',fal:'faltou antes',sum:'sumido'};
+const RT_SELO={'VALE':'vale','JÁ VAI':'ja','AINDA NÃO':'ainda','NÃO VALE':'nao','ABERTA':'ja'};
+/* a data sugerida de uma cidade: a que está na linha do tempo, senão a da cidade, senão
+   a 1ª quinta com 3 semanas de folga */
+function rtSugDe(c){const v=VIAGENS.find(x=>x.c===c.n&&x.st==='sugerida');if(v)return v.dt;if(c.sug)return c.sug;
+  const d=new Date(RT_HOJE);d.setDate(d.getDate()+21);return rtFmt(quintaDepois(d))}
+const rtAtiva=v=>!['trocada','cancelada','pulada'].includes(v.st);
+const rtProxDe=c=>VIAGENS.filter(v=>v.c===c.n&&['marcada','aberta'].includes(v.st)&&rtData(v.dt)>=RT_HOJE).sort(rtOrdDt);
+/* ocupação de uma viagem: lida da Agenda (v.ev), da simulação (v.plano) ou só o número */
+function rtOcup(v){
+  if(v.ev){const hs=HORAS.filter(h=>atende(v.ev.p,v.ev.dia,h)), evs=EV.filter(e=>e.p===v.ev.p&&e.dia===v.ev.dia&&rxVivo(e)).sort((a,b)=>a.h<b.h?-1:1);
+    const livres=hs.filter(h=>!evs.some(e=>cobre(e,h)));
+    return {vagas:hs.length,marc:hs.length-livres.length,valor:evs.reduce((s,e)=>s+tipo(e.tipo)[4],0),seg:evs.filter(e=>e.st==='segurado').length,
+      sinal:evs.filter(e=>e.st==='sinal').length,livres,evs,hs}}
+  if(v.plano){const g=rtVg(v);return {vagas:g.length,marc:g.filter(x=>x.st==='ok'||x.st==='seg').length,seg:g.filter(x=>x.st==='seg').length,sinal:0,
+    livres:g.filter(x=>x.st==='livre'||x.st==='conv').map(x=>x.h),valor:null}}
+  return {vagas:v.vagas||TURNO[rtTurnoDe(v.dt)].vagas,marc:v.marc||0,seg:0,sinal:0,livres:[],valor:null};
+}
+/* as datas que aparecem no seletor de Local da Agenda: só o que já existe no Amigo */
+const rtLocaisAgenda=()=>VIAGENS.filter(v=>['marcada','aberta'].includes(v.st)&&v.amigo==='ok'&&rtData(v.dt)>=RT_HOJE).sort(rtOrdDt).map(v=>v.c+' · '+v.dt);
+
+/* A FILA de uma cidade: primeiro nome e inicial, origem, desde quando e de onde veio.
+   Guarda só nome, telefone, cidade, origem, data e o link da conversa; nunca a frase
+   da pessoa nem motivo de saúde. Nomes de exemplo, sempre os mesmos. */
+const RT_NOMES=['Antônia','Sebastião','Francisca','José','Benedita','Joaquim','Raimunda','Domingos','Luzia','Gonçalo','Conceição','Pedro','Marlene','Edivaldo',
+  'Socorro','Valdemar','Ivone','Cícero','Lucineide','Osmar','Nazaré','Jonas','Dalva','Ribamar','Graça','Firmino','Lindalva','Nonato','Cleide','Hélio','Zuleide','Neide','Elza','Josias'];
+const RT_INI='SCLMRBAPFDNGTV';
+const RT_ESP={'Bacabal':{ped:['Antônia S.'],sum:[['Raimundo C.','qui 30/04']]},
+  'Codó':{pedUlt:['Número novo (99) 9····-··17','ontem']},
+  'Lago da Pedra':{ret:['Raimunda S.'],ped:['Rosa L.','Antônio R.'],sum:[['Luzia R.',null]]}};
+/* c.pessoas é a lista (gerada uma vez a partir de c.fila); quem marca ou fica com um livre
+   sai dela, quem falta volta. c.aVencer: retornos de 30 dias da última viagem, que vencem
+   antes da próxima data (entram na conta e na 1ª rodada, mas ainda não estão "esperando"). */
+function rtPessoas(c){const f=c.fila;
+  if(!c.pessoas||Object.keys(ORIGEM).some(o=>c.pessoas.filter(p=>p.org===o).length!==f[o]))c.pessoas=rtGerar(c);
+  return c.pessoas}
+const rtFila=c=>(c.aVencer||[]).concat(rtPessoas(c));
+const rtFilaEf=c=>{const f={...c.fila};f.ret+=(c.aVencer||[]).length;return f};
+const RT_ORG_ORD=['ret','ped','fal','sum'];
+function rtSync(c){const f={ret:0,ped:0,fal:0,sum:0};
+  c.pessoas.sort((a,b)=>RT_ORG_ORD.indexOf(a.org)-RT_ORG_ORD.indexOf(b.org));c.pessoas.forEach(p=>f[p.org]++);Object.assign(c.fila,f)}
+function rtGerar(c){
+  const fila=c.fila, out=[], seed=CIDADES.indexOf(c)*11+3, esp=RT_ESP[c.n]||{}, vis=c.visitas||[];
+  let k=0; const nome=()=>{const i=seed+k++;return RT_NOMES[(i*7)%RT_NOMES.length]+' '+RT_INI[(i*5+seed)%RT_INI.length]+'.'};
+  const vRet=vis.find(v=>rtDias(v)>=30), vSum=vis.filter(v=>rtDias(v)>=90);
+  for(let i=0;i<fila.ret;i++) out.push({org:'ret',nome:(esp.ret||[])[i]||nome(),desde:vRet?'atendido '+vRet+' · retorno venceu '+rtMais(vRet,30):'retorno vencido',f:'Amigo'});
+  for(let i=0;i<fila.ped;i++){
+    if(esp.pedUlt&&i===fila.ped-1){out.push({org:'ped',nome:esp.pedUlt[0],desde:'pediu '+esp.pedUlt[1],f:'WhatsApp',conv:6});continue}
+    const d=new Date(RT_HOJE);d.setDate(d.getDate()-(3+(fila.ped-1-i)*8));
+    out.push({org:'ped',nome:(esp.ped||[])[i]||nome(),desde:'pediu em '+rtDM(d),f:'WhatsApp'})}
+  for(let i=0;i<fila.fal;i++) out.push({org:'fal',nome:nome(),desde:vis.length?'faltou em '+vis[i%vis.length]:'faltou',f:'Amigo'});
+  for(let i=0;i<fila.sum;i++){const e=(esp.sum||[])[i];const v=(e&&e[1])||vSum[i%Math.max(1,vSum.length)];
+    out.push({org:'sum',nome:e?e[0]:nome(),desde:v?'sumido desde '+v+', há '+rtDias(v)+' dias':'sumido há 90+ dias',f:'Amigo'})}
+  return out;
+}
+const rtEsc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+const rtPrim=n=>/^Número/.test(n)?'':n.split(' ')[0];
+
+/* roda uma vez, logo depois de gerarSemana(): sem mexer no sorteio, só troca a cirurgia
+   do sábado (Lago da Pedra) por consulta, que cabe no mesmo horário. O procedimento estético viaja e fica. */
+function rtPreparar(){EV.filter(e=>e.p==='manoel'&&e.dia===5&&e.tipo==='Cirurgia dermatológica').forEach(e=>{e.tipo='Consulta'})}
+
+/* =========== a tela =========== */
+function rtFiltrar(k){RT_FILTRO=RT_FILTRO===k?null:k;render();rxIr('rt-cidades')}
+function telaRoteiro(){
+  const va=DIA_ABERTO&&rtV(DIA_ABERTO);
+  if(va&&va.st==='aberta') return telaDiaViagem();
+  DIA_ABERTO=null;
+  const W=RX_WA, cs=CIDADES.filter(temConta);
+  const tEsp=CIDADES.reduce((s,c)=>s+esperando(c),0), tConv=CIDADES.reduce((s,c)=>s+convidar(c),0), tVir=cs.reduce((s,c)=>s+devemVir(c),0);
+  const prox=VIAGENS.filter(v=>['marcada','aberta'].includes(v.st)&&rtData(v.dt)>=RT_HOJE).sort(rtOrdDt)[0];
+  const po=prox&&rtOcup(prox);
+  const nc=W.cidades.conversas;
+  let h=`<div class="pg-h"><div><h1>Roteiro</h1><div class="sub">As viagens do Dr. Manoel: o que está marcado, onde tem gente, se vale ir e quanto sobrou.</div></div></div>
+  <div class="acha rt-real" style="margin-top:0">${rtF('real')} De 24/08 a 23/09, só <b>${hjPl(nc,'conversa de paciente citou','conversas de paciente citaram')} uma cidade do roteiro (${W.cidades.quais})</b>. O agente estava desligado e ${nc===1?'ela não virou':'elas não viraram'} fila. ${REAL_GRADE}. <b>O resto da tela é exemplo</b> de como fica com o agente ligado e o Amigo conectado.</div>
+  <div class="kpis" style="margin-top:.8rem">
+    <button class="kpi rt-kpi ${RT_FILTRO==='esperando'?'on':''}" onclick="rtFiltrar('esperando')"><b>${tEsp}</b><span>esperando o médico: pediram no WhatsApp ou têm retorno vencido ${rtF('ex')}</span></button>
+    <button class="kpi rt-kpi ${RT_FILTRO==='convidar'?'on':''}" onclick="rtFiltrar('convidar')"><b>${tConv}</b><span>para convidar: faltaram ou sumiram há 90+ dias ${rtF('ex')}</span></button>
+    <div class="kpi"><b>~${tVir}</b><span>devem vir se forem chamados · estimativa ${rtF('zq')}</span></div>
+    ${prox?`<button class="kpi rt-kpi" onclick="abrirViagem('${prox.id}')"><b style="font-size:1.05rem;line-height:1.35">${prox.dt} · ${prox.c}</b><span>próxima viagem · ${po.marc} de ${po.vagas} horários ${rtF('am')}</span></button>`:'<div class="kpi"><b>—</b><span>nenhuma viagem marcada</span></div>'}
+  </div>
+  ${VIAGENS.filter(v=>v.st==='conflito').map(v=>`<div class="rt-aviso"><span>⚠️ <b>${v.dt} (${v.c})</b> cai no bloqueio do congresso ${rtF('ex')}</span><button class="btn coral min" onclick="abrirConflito('${v.id}')">Resolver</button></div>`).join('')}`;
+
+  /* 1 · viagens do mês */
+  const ant=VIAGENS.filter(v=>rtAtiva(v)&&rtData(v.dt)<RT_HOJE).sort(rtOrdDt), fut=VIAGENS.filter(v=>v.st!=='trocada'&&rtData(v.dt)>=RT_HOJE).sort(rtOrdDt);
+  h+=`<h2 class="rx-h" id="rt-viagens">Viagens ${rtF('am')}</h2><div class="rx-q">O que já está marcado e o que falta resolver?</div>${rtFaixaSemanas()}
+  <div class="card"><div class="tl">
+    <button class="hj-mais rt-ant" onclick="RT_ANT=!RT_ANT;render()">${RT_ANT?'▾':'▸'} Viagens anteriores · ${ant.length}</button>
+    ${RT_ANT?ant.map(rtItem).join(''):''}
+    <div class="hoje">● HOJE · QUA 23/09</div>`;
+  let mes=-1;
+  fut.forEach(v=>{const m=rtData(v.dt).getMonth();if(m!==mes){mes=m;h+=`<div class="rt-mes">${RT_MESES[m]}</div>`}h+=rtItem(v)});
+  h+=`</div>
+    <div class="rt-leg"><span><span class="dot" style="background:var(--neon)"></span>pronta: dia no Amigo, sala e gente</span><span><span class="dot" style="background:var(--ambar)"></span>falta algo, e a tela diz o quê</span><span><span class="dot" style="background:var(--coral)"></span>conflito</span><span><span class="dot" style="border:1px dashed var(--txt-mut);background:none"></span>sugestão do Zaq, ainda não aberta</span></div>
+    <div class="faint" style="font-size:.76rem;margin-top:.35rem">O Zaq sugere a 1ª quinta com 3 semanas de folga (tempo de alugar a sala e avisar), no máximo 1 quinta de viagem a cada 2 semanas, e antes de vencerem os retornos da última viagem. ${rtF('zq')}</div></div>`;
+
+  /* 2 · cidades */
+  const ss=SEDE.semana();
+  let lista=cs.slice();
+  if(RT_FILTRO==='esperando') lista=lista.filter(c=>esperando(c)>0).sort((a,b)=>esperando(b)-esperando(a));
+  else if(RT_FILTRO==='convidar') lista=lista.filter(c=>convidar(c)>0).sort((a,b)=>convidar(b)-convidar(a));
+  else if(RT_ORD==='esp') lista.sort((a,b)=>esperando(b)-esperando(a)||naFila(b)-naFila(a));
+  else lista.sort((a,b)=>conta(b).aMais-conta(a).aMais);
+  const sem=CIDADES.filter(c=>!temConta(c));
+  h+=`<h2 class="rx-h" id="rt-cidades">Cidades: quem espera e se vale ir ${rtF('ex')}</h2><div class="rx-q">Onde tem gente, e quanto sobra a mais do que ficar em Pedreiras naquele dia?</div>
+  <div class="rt-ref">Se ele fica em Pedreiras: <b>uma quinta rende ~${brl(SEDE.qui.dia)} (${brl(SEDE.qui.hora)}/h)</b> ${rtF('ex')}; a semana toda, <b>${brl(SEDE.hora())}/h</b> (${brl(ss.valor)} marcados em ${ss.horas} h, de seg a sex, na Agenda) ${rtF('zq')}; no sábado a sede não abre para ele.
+    <div class="faint" style="margin-top:.25rem">A quinta é o dia de viajar. Nas quintas sem viagem, o aviso de vaga que abriu enche Pedreiras (daí os ~${brl(SEDE.qui.dia)}); 1 quinta a cada 2 semanas é de viagem.</div></div>
+  <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.2rem 0 .6rem">
+    ${RT_FILTRO?`<button class="chip a" style="cursor:pointer" onclick="rtFiltrar('${RT_FILTRO}')">Mostrando: ${RT_FILTRO==='esperando'?'esperando o médico':'para convidar'} ✕</button>`
+      :`<span class="mut" style="font-size:.76rem">Ordenar por</span><div class="seg"><button class="${RT_ORD==='mais'?'on':''}" onclick="RT_ORD='mais';render()">a mais que ficar</button><button class="${RT_ORD==='esp'?'on':''}" onclick="RT_ORD='esp';render()">esperando</button></div>`}
+  </div>
+  <div class="rt-cids">${lista.map(rtCard).join('')||'<div class="mut">Ninguém nessa lista.</div>'}</div>
+  ${sem.length?`<div class="rt-sem">${sem.map(c=>c.n).join(', ')} · ${sem.some(c=>naFila(c))?'sem conta ainda':'ninguém esperando'}</div>`:''}
+  <div class="faint" style="font-size:.76rem;margin-top:.5rem;line-height:1.5">Em Pedreiras, aluguel e equipe são pagos de qualquer jeito. Na viagem, combustível, sala, comida e a diária de quem vai junto só existem porque ele foi. Custos e chances são exemplo: a clínica ainda não passou os valores reais. A consulta de R$ 500 é real. ${rtF('ex')}</div>`;
+
+  /* 3 · como a fila se forma */
+  const aberto=RT_COMO===null?!(typeof window!=='undefined'&&window.innerWidth<=900):RT_COMO;
+  h+=`<details class="card rt-como" ${aberto?'open':''} ontoggle="RT_COMO=this.open"><summary><b>Como a fila se forma sozinha</b> <span class="mut" style="font-size:.78rem">· 3 entradas e 1 saída</span></summary>${rtComoFila()}</details>`;
+  return h;
+}
+
+/* faixa de 7 semanas (só no computador): quintas e sábados */
+function rtFaixaSemanas(){
+  const seg0=new Date(2026,8,21), sem=[];
+  for(let w=0;w<7;w++){const d=new Date(seg0);d.setDate(d.getDate()+7*w);sem.push(d)}
+  let h=`<div class="rt-so-pc"><div style="overflow-x:auto"><div class="rt-faixa"><div></div>${sem.map(d=>`<div class="rx-hd">semana de ${rtDM(d)}</div>`).join('')}`;
+  [['qui',3],['sáb',5]].forEach(([nm,off])=>{
+    h+=`<div class="rx-dl">${nm}</div>`;
+    sem.forEach(d0=>{const d=new Date(d0);d.setDate(d.getDate()+off);const dt=rtFmt(d);
+      const v=VIAGENS.find(x=>x.dt===dt&&x.st!=='trocada'), pas=d<RT_HOJE?' pas':'';
+      if(v){const k=rtClasse(v);h+=`<button class="rt-fc ${k}${pas}" onclick="abrirViagem('${v.id}')"><b>${rtDM(d)}</b>${v.c}<small>${rtRotulo(v)}</small></button>`}
+      else if(RT_BLOQ.includes(dt)) h+=`<div class="rt-fc r${pas}"><b>${rtDM(d)}</b>bloqueado</div>`;
+      else h+=`<div class="rt-fc vazio${pas}"><b>${rtDM(d)}</b>${nm==='qui'?'Pedreiras':'—'}</div>`});
+  });
+  return h+`</div></div></div>`;
+}
+const rtClasse=v=>v.st==='fechada'?'feita':v.st==='conflito'?'r':v.st==='sugerida'?'sug':['cancelada','pulada'].includes(v.st)?'x'
+  :v.st==='rascunho'||(v.st==='marcada'&&v.amigo!=='ok')?'a':'g';
+const rtRotulo=v=>({fechada:'fechada',conflito:'conflito',sugerida:'sugerida',cancelada:'cancelada',pulada:'pulada',rascunho:'rascunho',aberta:'aberta'})[v.st]
+  ||(v.amigo!=='ok'?'falta no Amigo':'pronta');
+
+/* um item da linha do tempo */
+function rtItem(v){
+  const c=rtCid(v.c), k=rtClasse(v), pas=rtData(v.dt)<RT_HOJE;
+  const pare='event.stopPropagation();';
+  let t2='', bt='', chips='';
+  if(v.st==='fechada'){const s=entrou(v)-v.sai;if(!pas)chips='<span class="chip">fechada na simulação</span>';
+    t2=`sobraram <b>${rtBRL(s)}</b> · ${brl(Math.round(s/v.horas))}/h · ${v.atend} atendidos${v.falt?' · '+hjPl(v.falt,'falta','faltas'):''} ${rtF('am')}`}
+  else if(v.st==='marcada'){const o=rtOcup(v), t=TURNO[rtTurnoDe(v.dt)];
+    chips=(v.amigo==='ok'?'<span class="chip g">no Amigo ✓</span>':v.amigo==='conferindo'?'<span class="chip a">⏳ conferindo no Amigo…</span>':'<span class="chip a">falta criar o dia no Amigo</span>')
+      +(v.sala==='ok'?'<span class="chip g">sala ✓</span>':'<span class="chip a">sala a confirmar</span>');
+    if(v.ev) t2=`${t.txt.split(' ·')[0]} · <b>${o.marc} de ${o.vagas}</b> · ${brl(o.valor)} marcados${o.seg?' · '+hjPl(o.seg,'segurado esperando a recepção','segurados esperando a recepção'):''}${o.sinal?' · '+o.sinal+' aguardando sinal':''} · ${o.livres.length?(o.livres.length>1?'livres ':'livre ')+o.livres.join(' e '):'cheio'} ${rtF('am')}`;
+    else t2=`<b>${o.marc} de ${o.vagas}</b> · ${v.amigo==='ok'?'o dia já existe no Amigo: dá para chamar a fila':'o agente só chama a fila depois que o dia existir no Amigo'} ${rtF('am')}`;
+    if(v.ev&&o.livres.length) bt=`<button class="btn min" onclick="${pare}rtOferecer('${v.id}')">Oferecer à fila de ${v.c}</button>`;
+    else if(!v.ev&&v.amigo==='falta') bt=`<button class="btn sec min" onclick="${pare}rtConferirViagem('${v.id}')">Já criei · conferir</button>`;
+    else if(!v.ev&&v.amigo==='ok') bt=`<button class="btn min" onclick="${pare}rtChamarFila('${v.id}')">Chamar a fila de ${v.c}</button>`}
+  else if(v.st==='sugerida'){const kk=conta(c,rtTurnoDe(v.dt));
+    t2=`sugerida pelo Zaq · ~${kk.n} devem vir · sobram <b>${rtBRL(kk.sobra)}</b>${kk.turno==='qui'?' · '+rtBRL(Math.abs(kk.aMais))+(kk.aMais>=0?' a mais':' a menos')+' que ficar em Pedreiras':''}${v.motivo?' · '+v.motivo:''} ${rtF('zq')}`;
+    bt=`<button class="btn sec min" onclick="${pare}abrirData('${v.c}','${v.dt}')">Abrir data</button>`}
+  else if(v.st==='rascunho'){const f=v.abrir?faltaParaAbrir(v.abrir):[];
+    chips='<span class="chip a">rascunho · ninguém foi chamado</span>'; t2=f.length?'falta: '+f.join(' · '):'pronta para abrir';
+    bt=`<button class="btn sec min" onclick="${pare}abrirData('${v.c}','${v.dt}')">Continuar</button>`}
+  else if(v.st==='conflito'){chips='<span class="chip r">cai no congresso (bloqueio do Configurar)</span>';
+    t2=`${v.motivo} ${rtF('ex')}`;
+    bt=`<button class="btn sec min" onclick="${pare}rtConflito('${v.id}','passar')">Passar para ${v.alt}</button><button class="btn sec min" onclick="${pare}rtConflito('${v.id}','pular')">Pular esta</button>`}
+  else if(v.st==='aberta'){const o=rtOcup(v);chips='<span class="chip g">aberta · o agente está chamando a fila</span>';
+    t2=`<b>${o.marc} de ${o.vagas}</b>${o.seg?' · '+o.seg+' com Pix pendente':''} · ${o.livres.length} livres ${rtF('am')}`;
+    bt=`<button class="btn min" onclick="${pare}abrirViagem('${v.id}')">Ver o dia</button>`}
+  else if(v.st==='cancelada'){chips='<span class="chip r">cancelada</span>';t2=`motivo: ${String(v.motivo||'').toLowerCase()} · todos voltaram ao topo da fila`}
+  else if(v.st==='pulada'){chips='<span class="chip">pulada</span>';t2=`a fila de ${v.c} foi avisada de que a próxima é ${v.prox||'a data seguinte'}`}
+  return `<div class="it ${k==='g'||k==='feita'?'g':k==='a'?'a':k==='r'?'r':''}"><div class="rt-v ${k}" role="button" tabindex="0" onclick="abrirViagem('${v.id}')">
+    <div class="t1"><span class="num">${v.dt}</span><span>${v.c}</span>${chips}</div><div class="t2">${t2}</div>${bt?`<div class="acoes" style="margin-top:.35rem">${bt}</div>`:''}</div></div>`;
+}
+
+/* um cartão de cidade: 3 linhas no celular (quem, quantos vêm, quanto sobra) */
+function rtCard(c){
+  const k=conta(c), ab=VIAGENS.find(v=>v.c===c.n&&v.st==='aberta'), vd=ab?'ABERTA':VEREDITO(c), ult=rtUlt(c), f=c.fila, tot=naFila(c)||1;
+  const hl=o=>RT_FILTRO===o?' class="rt-hl"':'';
+  const barra=`<div class="rt-org" title="${Object.keys(ORIGEM).map(o=>ORIGEM[o][0]+' '+f[o]).join(' · ')}">${Object.keys(ORIGEM).map(o=>f[o]?`<i style="width:${100*f[o]/tot}%;background:${ORIGEM[o][2]}"></i>`:'').join('')}</div>`;
+  let nota='', bt='';
+  if(ab){nota=`${ab.dt} aberta · o agente está chamando a fila`;bt=`<button class="btn min" onclick="event.stopPropagation();abrirViagem('${ab.id}')">Ver o dia ${ab.dt}</button>`}
+  else if(vd==='VALE'){const s=rtSugDe(c);nota=`a partir do ${k.valeAPartirDe}º paciente já vale`;bt=`<button class="btn min" onclick="event.stopPropagation();abrirData('${c.n}','${s}')">Abrir ${s}</button>`}
+  else if(vd==='JÁ VAI'){const px=rtProxDe(c), o=px[0]&&rtOcup(px[0]);
+    nota=`${c.fixa}${o?` · cabem ${o.livres.length} em ${px[0].dt.split(' ')[1]} e o resto ${px[1]?'em '+px[1].dt.split(' ')[1]:'na próxima'}`:''}`;
+    if(px[0]&&o.livres.length&&px[0].ev) bt=`<button class="btn min" onclick="event.stopPropagation();rtOferecer('${px[0].id}')">Oferecer à fila</button>`}
+  else if(vd==='AINDA NÃO') nota=k.turno==='sab'?`para gastar um sábado precisa sobrar ${brl(PISO_SAB)}: vale a partir de ${k.valeAPartirDe} pacientes, falta ~${k.valeAPartirDe-k.n}`
+    :`para render mais que a quinta em Pedreiras, vale a partir de ${k.valeAPartirDe} pacientes: falta ~${k.valeAPartirDe-k.n}`;
+  else nota=c.via<1?`fica a ${c.viaTxt}: o agente oferece Pedreiras`:'o agente oferece Pedreiras ou a data aberta mais perto';
+  const qui=k.turno==='qui';
+  return `<div class="rt-cid" role="button" tabindex="0" onclick="abrirCidade('${c.n}')">
+    <div class="l1"><span class="nm">${c.n}</span><span class="rt-selo ${RT_SELO[vd]}">${vd}</span><span class="chip">${c.fixa?'sábado':TURNO[k.turno].nome}</span><span class="faint" style="margin-left:auto;font-size:.72rem">${c.viaTxt} de estrada</span></div>${barra}
+    <div class="l2"><span${hl('esperando')}>${esperando(c)} esperando</span> + <span${hl('convidar')}>${convidar(c)} para convidar</span> ${(c.aVencer||[]).length?` + ${c.aVencer.length} retornos que vencem em ${c.aVencerEm}`:''} → <b>~${k.n} devem vir</b>${k.ficamNaFila>0?` <span class="faint">(${k.ficamNaFila} ficam para a próxima)</span>`:''}</div>
+    <div class="l3">${k.sobra>=0?'sobram':'falta'} <b class="big" style="${k.sobra<0?'color:#F08A83':''}">${k.sobra>=0?rtBRL(k.sobra):rtBRL(-k.sobra)}</b>${qui?` · <b>${rtBRL(k.aMais)}</b> ${k.aMais>=0?'a mais':'a menos'} que ficar`:''} ${rtF('zq')}
+      <small>entram ${k.n} × ${brl(k.tk)} = ${brl(r10(k.entra))}, saem ${brl(k.sai)} · ${brl(k.porHora)}/h em ${rtHoras(k.horas)}, com a estrada${qui?' (quinta em Pedreiras: '+brl(SEDE.qui.hora)+'/h)':''}</small></div>
+    <div class="l4">${nota} · ${ult?'última visita '+ult+', '+rtHa(ult):'nunca houve atendimento lá no Amigo'}</div>
+    ${bt?`<div class="acoes">${bt}</div>`:''}
+  </div>`;
+}
+
+/* 3 · como a fila se forma (curto; no celular fica recolhido) */
+function rtComoFila(){
+  const ret=CIDADES.reduce((s,c)=>s+c.fila.ret,0), AM=RX_AMIGO, cod=rtCid('Codó');
+  return `<div class="rt-como-g">
+    <div><b>1 · WhatsApp</b> ${rtF('ex')}<br>Quando a pessoa pergunta pelo médico em outra cidade, ou diz que não pode vir a Pedreiras, o agente <b>primeiro oferece Pedreiras</b> (a quinta está vazia). Se ela prefere esperar, pergunta: “Posso te avisar quando ele abrir data em Codó?”. Só o “sim” põe a pessoa na fila, e esse sim é a autorização. O agente reconhece as 9 cidades cadastradas em Configurar › Locais, cada uma ligada a uma unidade do Amigo.</div>
+    <div><b>2 · Amigo, uma vez por noite</b> ${rtF('am')}<br>Pelos atendimentos de cada unidade: retorno vencido (só do que o Dr. Manoel faz em viagem), faltou na última visita, sumido há 90+ dias. A cidade é a do cadastro no Amigo; se não tiver, a da unidade do último atendimento.</div>
+    <div><b>3 · Quem não coube</b> ${rtF('ex')}<br>Quem não coube na última data volta com prioridade para a próxima.</div>
+    <div><b>Sai da fila</b><br>Quem marcou (lido do Amigo), quem respondeu SAIR ou quem ficou 180 dias sem responder. A fila guarda nome, telefone, cidade, origem, data e o link da conversa. <b>Nunca a frase da pessoa, nem motivo de saúde.</b></div>
+  </div>
+  <div class="grid2" style="margin-top:.7rem"><div>
+    <div class="mut" style="font-size:.74rem;margin-bottom:.3rem">Conversa de exemplo (a mesma de Conversas) ${rtF('ex')}</div>
+    ${rtZapCodo(cod)}</div>
+    <div><div class="acha" style="margin-top:0"><b>Por que a fila nasce do calendário.</b> O retorno é em 30 dias e a viagem volta em 45 a 60: quem é atendido na viagem vence o retorno antes de o médico voltar. Na fila de exemplo, ${ret} retornos vencidos são de pacientes atendidos nas cidades ${rtF('ex')}. Por isso o Zaq sugere a próxima data <b>antes</b> do prazo.</div>
+    <div class="faint" style="font-size:.76rem;margin-top:.45rem">No Amigo, em ${AM.lido}, havia ${AM.retornos} retornos pedidos e ${AM.retornosChamados} chamados ${rtF('amigo')}. Quantos são de pacientes de viagem só dá para saber com a integração ligada.</div>
+    <div class="hint"><b>Pergunta para a clínica:</b> retorno de quem foi atendido na viagem vale até a próxima data na cidade, e não 30 dias?</div></div></div>`;
+}
+function rtZapCodo(c){const n=c?naFila(c):23;
+  return `<div class="zap" style="max-width:none"><div class="b eu">bom dia, o doutor atende em Codó?<div class="h">(99) 9····-··17</div></div>
+    <div class="b">Bom dia! Ainda não tem data em Codó. Ele atende em Pedreiras na quinta (24/09) às 9h, se quiser. Ou posso te avisar quando ele abrir um dia aí?<div class="h">agente</div></div>
+    <div class="b eu">pode avisar<div class="h">paciente</div></div><div class="sis">→ fila de Codó · ${n}º · pediu no WhatsApp</div></div>`}
+
+/* =========== gaveta da cidade: quem espera · a conta =========== */
+function abrirCidade(n){
+  const c=rtCid(n);if(!c)return;RT_GAV={t:'cid',n};
+  if(!temConta(c)) return abrirGav(`<div class="mut" style="font-size:.76rem">Cidade do roteiro</div><h2>${c.n}</h2><div class="mut" style="font-size:.84rem;margin-top:.4rem">Ninguém esperando por enquanto. Quando alguém pedir o médico em ${c.n} no WhatsApp, o agente oferece Pedreiras e, se a pessoa preferir esperar, põe na fila daqui.</div>
+    <div class="acoes"><button class="btn sec" onclick="abrirPorNaFila('${c.n}')">+ pôr na fila</button></div>`);
+  const ab=VIAGENS.find(v=>v.c===c.n&&v.st==='aberta'), vd=ab?'ABERTA':VEREDITO(c);
+  let h=`<div class="mut" style="font-size:.76rem">${c.viaTxt} de estrada · ${c.fixa||TURNO[c.turno].nome}</div><h2>${c.n} <span class="rt-selo ${RT_SELO[vd]}" style="vertical-align:3px">${vd}</span></h2>
+  <div class="tabs" style="margin-top:.5rem"><button class="${RT_CAB==='quem'?'on':''}" onclick="RT_CAB='quem';abrirCidade('${c.n}')">Quem espera · ${naFila(c)}</button><button class="${RT_CAB==='conta'?'on':''}" onclick="RT_CAB='conta';abrirCidade('${c.n}')">A conta</button></div>`;
+  h+=RT_CAB==='conta'?rtAbaConta(c):rtAbaQuem(c);
+  abrirGav(h);
+}
+function rtAbaQuem(c){
+  const L=rtFila(c), max=12, vis=RT_MAIS?L:L.slice(0,max);
+  let h=`<div class="hj-tags" style="margin-bottom:.5rem">${Object.keys(ORIGEM).map(o=>`<span class="chip"><span class="dot" style="background:${ORIGEM[o][2]};margin-right:2px"></span>${ORIGEM[o][0]} · ${c.fila[o]}</span>`).join('')}${(c.aVencer||[]).length?`<span class="chip b">Retorno que vence em ${c.aVencerEm} · ${c.aVencer.length}</span>`:''}</div>
+  <div class="faint" style="font-size:.74rem">Esperando o médico: retorno vencido e pediu no WhatsApp. Para convidar: faltou e sumido. Nomes de exemplo ${rtF('ex')}</div>`;
+  h+=vis.map((p,i)=>`<div class="rt-p"><span class="num faint" style="width:22px">${i+1}</span><span style="flex:1;min-width:0"><b>${p.nome}</b><small>${ORIGEM[p.org][0]} · ${p.desde}</small></span><span class="via ${p.f==='Amigo'?'am':p.f==='WhatsApp'?'ag':'rc'}">${p.f}</span></div>`).join('');
+  if(L.length>max) h+=`<button class="hj-mais" onclick="RT_MAIS=!RT_MAIS;abrirCidade('${c.n}')">${RT_MAIS?'mostrar menos':'+ ver todos os '+L.length}</button>`;
+  if(c.fora) h+=`<div class="sec"><h4>Fora da viagem</h4>${c.fora.map(x=>`<div class="rt-p"><span style="flex:1"><b>${x.nome}</b><small>${x.motivo} → ${x.acao}</small></span><span class="chip">Pedreiras</span></div>`).join('')}</div>`;
+  if(c.n==='Codó') h+=`<div class="sec"><h4>Como a última pessoa entrou</h4>${rtZapCodo(c)}</div>`;
+  h+=`<div class="sec"><h4>Chance de vir, por origem ${rtF('ex')}</h4><div class="hj-tags">${Object.keys(CHANCE).map(o=>`<span class="chip">${RT_CURTO[o]} ${Math.round(CHANCE[o]*100)}%</span>`).join('')}</div>
+    <div class="faint" style="font-size:.74rem;margin-top:.3rem">Com essas chances, ~${devemVir(c)} devem vir. O Zaq troca pela medida real depois de 2 ou 3 viagens.</div></div>
+  <div class="acoes"><button class="btn sec" onclick="abrirPorNaFila('${c.n}')">+ pôr na fila</button></div>`;
+  return h;
+}
+function rtAbaConta(c){
+  const tn=RT_TURNO[c.n]||c.turno, k=conta(c,tn), outro=tn==='qui'?'sab':'qui', k2=conta(c,outro);
+  const comp=tn==='qui'?`Se ele fica em Pedreiras, a quinta rende ~${brl(SEDE.qui.dia)} ${rtF('ex')}: sobram <b>${rtBRL(k.aMais)}</b> ${k.aMais>=0?'a mais':'a menos'} indo a ${c.n}.`
+    :`No sábado a sede não abre para ele: tudo que sobra é a mais. Para valer gastar um sábado, precisa sobrar ${brl(PISO_SAB)} ${rtF('ex')}.`;
+  const ganha=(k.aMais>=k2.aMais)?tn:outro;
+  const hist=rtFechadas(c);
+  return `<div class="field"><label>Dia da semana</label><div class="opts">${['qui','sab'].map(t=>`<button class="opt ${tn===t?'on':''}" onclick="rtTurno('${c.n}','${t}')">${TURNO[t].nome} · ${TURNO[t].vagas} horários</button>`).join('')}</div></div>
+  <div class="tot-box">
+    <div class="linha"><span>Entram: ${k.n} pacientes × ${brl(k.tk)}</span><span class="num">${brl(r10(k.entra))}</span></div>
+    <div class="faint" style="font-size:.72rem;margin:-.1rem 0 .35rem">${ticketDe(c)===ticketMedio()&&!rtFechadas(c).length?'média por paciente das viagens fechadas (retorno é R$ 0)':'média por paciente da última viagem aqui (retorno é R$ 0)'} ${rtF('am')}</div>
+    ${Object.keys(CUSTO_TXT).map(x=>`<div class="rt-custo"><label for="rt-c-${x}">${CUSTO_TXT[x]}</label><input class="inp num" id="rt-c-${x}" type="number" min="0" step="10" value="${c.custo[x]}" onchange="rtCusto('${c.n}','${x}',this.value)"></div>`).join('')}
+    <div class="linha"><span>Saem</span><span class="num">${brl(k.sai)}</span></div>
+    <div class="linha" style="border-top:1px solid var(--borda);margin-top:.3rem;padding-top:.4rem"><span><b>Sobram</b></span><span class="big" style="${k.sobra<0?'color:#F08A83':''}">${rtBRL(k.sobra)}</span></div>
+    <div class="mut" style="font-size:.78rem">${brl(k.porHora)}/h em ${rtHoras(k.horas)} (${TURNO[tn].h} h atendendo + ${rtHoras(2*c.via)} de estrada, ida e volta) ${rtF('zq')}</div>
+  </div>
+  <div class="hint">${comp} ${k.vale?`Vale a partir do ${k.valeAPartirDe}º paciente.`:`Vale a partir de ${k.valeAPartirDe} pacientes; hoje devem vir ~${k.n}.`}${k.ficamNaFila>0?` Cabem ${TURNO[tn].vagas}: ${k.ficamNaFila} ficam na fila para a próxima.`:''}<br>
+    <b>${TURNO[ganha].nome[0].toUpperCase()+TURNO[ganha].nome.slice(1)} ganha:</b> na ${TURNO.qui.nome}, ${rtBRL(conta(c,'qui').aMais)} a mais que ficar; no ${TURNO.sab.nome}, ${rtBRL(conta(c,'sab').sobra)}.</div>
+  <div class="faint" style="font-size:.74rem;margin-top:.4rem">Mudar um custo vira o padrão de ${c.n} e refaz o cartão. Custos de exemplo ${rtF('ex')}</div>
+  ${hist.length?`<div class="sec"><h4>Viagens fechadas aqui</h4><div style="overflow-x:auto"><table class="tb"><tr><th>Data</th><th class="r">Entrou</th><th class="r">Saiu</th><th class="r">Sobrou</th><th class="r">Por hora</th></tr>
+    ${hist.map(v=>`<tr style="cursor:pointer" onclick="abrirFechamento('${v.id}')"><td class="num">${v.dt}</td><td class="r num">${brl(entrou(v))}</td><td class="r num">${brl(v.sai)}</td><td class="r num">${brl(entrou(v)-v.sai)}</td><td class="r num">${brl(Math.round((entrou(v)-v.sai)/v.horas))}</td></tr>`).join('')}</table></div></div>`:''}`;
+}
+function rtTurno(n,t){RT_TURNO[n]=t;rtRegav(()=>abrirCidade(n))}
+function rtCusto(n,k,val){const c=rtCid(n);if(!c)return;c.custo[k]=Math.max(0,Math.round(+val||0));render();rtRegav(()=>abrirCidade(n));
+  toast('Custo de '+n+' atualizado','A conta e o cartão foram refeitos. Vira o padrão das próximas viagens a '+n+' (só nesta sessão).')}
+/* reabre a gaveta sem voltar ao topo */
+function rtRegav(f){const g=$('#gav'), y=g?g.scrollTop:0;f();const g2=$('#gav');if(g2)g2.scrollTop=y}
+function abrirPorNaFila(n){
+  abrirModal(`<h2>Pôr na fila da cidade</h2><div class="mut" style="font-size:.84rem;margin-bottom:.7rem">Para quem pediu no balcão ou por telefone. Só com o “sim” da pessoa para receber o aviso.</div>
+  <div class="field"><label>Nome</label><input class="inp" id="rt-pn-nome" placeholder="Nome completo"></div>
+  <div class="field"><label>Celular (WhatsApp)</label><input class="inp" id="rt-pn-tel" placeholder="(99) 9 ····-····" inputmode="tel"></div>
+  <div class="field"><label>Cidade</label><select class="inp" id="rt-pn-cid">${CIDADES.map(c=>`<option ${c.n===n?'selected':''}>${c.n}</option>`).join('')}</select></div>
+  <div class="field"><label>Origem</label><div class="opts"><button class="opt on" onclick="sel(this)">Pediu (balcão ou telefone)</button><button class="opt" onclick="sel(this)">Retorno vencido</button></div></div>
+  <div class="faint" style="font-size:.74rem">Fica guardado: nome, telefone, cidade, origem e data. Sem motivo de saúde.</div>
+  <div class="acoes"><button class="btn" onclick="rtPorNaFilaOk()">Pôr na fila</button><button class="btn sec" onclick="fecharTudo()">Cancelar</button></div>`)}
+function rtPorNaFilaOk(){const el=document.getElementById('rt-pn-cid'), nm=document.getElementById('rt-pn-nome');
+  const c=rtCid(el&&el.value)||CIDADES[0], nome=(nm&&nm.value&&String(nm.value).trim())||'A pessoa';
+  const pr=nome.split(' ');rtPessoas(c).push({org:'ped',nome:pr[0]+(pr[1]?' '+pr[pr.length-1][0]+'.':''),desde:'pediu em 23/09 · balcão',f:'recepção'});rtSync(c);fecharTudo();render();
+  toast('Na fila de '+c.n,nome+' recebe o aviso quando a data abrir. A fila de '+c.n+' agora tem '+naFila(c)+' · só nesta sessão (protótipo).')}
+
+/* =========== a gaveta de uma viagem marcada (e os atalhos) =========== */
+function abrirViagem(id){
+  const v=rtV(id);if(!v)return;
+  if(v.st==='sugerida'||v.st==='rascunho') return abrirData(v.c,v.dt);
+  if(v.st==='aberta'){DIA_ABERTO=id;if(ROTA!=='roteiro')return ir('roteiro');fecharTudo();render();window.scrollTo(0,0);return}
+  if(v.st==='fechada') return abrirFechamento(id);
+  if(v.st==='conflito') return abrirConflito(id);
+  RT_GAV={t:'v',id};
+  const o=rtOcup(v), t=TURNO[rtTurnoDe(v.dt)];
+  let h=`<div class="mut" style="font-size:.76rem">${v.st==='marcada'?'Viagem marcada':v.st==='cancelada'?'Viagem cancelada':'Viagem pulada'} · ${t.txt}</div><h2>${v.c} · ${v.dt}</h2>`;
+  if(v.st!=='marcada') return abrirGav(h+`<div class="mut" style="font-size:.84rem;margin-top:.4rem">${v.st==='cancelada'?'Motivo: '+v.motivo+'. Todos voltaram ao topo da fila de '+v.c+'.':'A fila de '+v.c+' foi avisada de que a próxima é '+(v.prox||'a data seguinte')+'.'}</div>`);
+  h+=`<div class="hj-tags" style="margin:.4rem 0 .5rem">${v.amigo==='ok'?'<span class="chip g">dia no Amigo ✓</span>':v.amigo==='conferindo'?'<span class="chip a">⏳ conferindo no Amigo…</span>':'<span class="chip a">falta criar o dia no Amigo</span>'}<span class="chip ${v.sala==='ok'?'g':'a'}">sala ${v.sala==='ok'?'✓':'a confirmar'}</span>${rtF('am')}</div>
+  <div style="font-size:.9rem"><b>${o.marc} de ${o.vagas} horários</b>${o.valor?' · '+brl(o.valor)+' marcados pela tabela':''}</div>`;
+  if(v.ev){
+    h+=`<div class="sec"><h4>Horários</h4>${o.hs.map(hr=>{const e=o.evs.find(x=>x.h===hr), cob=o.evs.find(x=>cobre(x,hr)&&x.h!==hr);
+      if(cob)return '';
+      if(!e)return `<div class="rt-p"><span class="num" style="width:44px">${hr}</span><span style="flex:1" class="faint">livre</span></div>`;
+      const st=e.st==='segurado'?'<span class="chip a">segurado · esperando a recepção</span>':e.st==='sinal'?'<span class="chip" style="color:var(--roxo)">aguardando sinal até '+e.prazo+'</span>':'<span class="chip '+(e.st==='confirmado'?'g':'')+'">'+ST[e.st]+'</span>';
+      return `<div class="rt-p" style="cursor:pointer" onclick="abrirEv(${e.id})"><span class="num" style="width:44px">${hr}</span><span style="flex:1;min-width:0"><b>${e.pac}</b><small>${e.tipo} · ${brl(tipo(e.tipo)[4])}${e.credito?' · sinal pago':''}</small></span>${st}</div>`}).join('')}</div>
+    <div class="faint" style="font-size:.74rem;margin-top:.3rem">Lido da Agenda (sábado do Dr. Manoel). Cirurgia não viaja: precisa de estrutura.</div>`;
+  }
+  const falta=[v.amigo!=='ok'&&'criar o dia no Amigo (unidade '+v.c+')',v.sala!=='ok'&&'confirmar a sala',o.livres.length&&hjPl(o.livres.length,'horário livre','horários livres')+(o.livres.length<=3?' ('+o.livres.join(', ')+')':'')].filter(Boolean);
+  h+=`<div class="sec"><h4>O que falta</h4><div style="font-size:.84rem">${falta.length?falta.map(x=>'• '+x).join('<br>'):'Nada: está pronta.'}</div>
+    ${v.amigo!=='ok'?`<div class="faint" style="font-size:.76rem;margin-top:.3rem">O Zaq lê a agenda do Amigo, mas não cria horário: a recepção cria o dia do Dr. Manoel na unidade ${v.c} e toca em Conferir. O agente só chama a fila depois que o dia existir.</div>`:''}</div>
+  <div class="acoes">${v.amigo==='falta'?`<button class="btn" onclick="rtConferirViagem('${v.id}')">Já criei · conferir no Amigo</button>`:''}
+    ${v.ev&&o.livres.length?`<button class="btn" onclick="rtOferecer('${v.id}')">Oferecer à fila de ${v.c}</button>`:''}
+    ${!v.ev&&v.amigo==='ok'?`<button class="btn" onclick="rtChamarFila('${v.id}')">Chamar a fila de ${v.c}</button>`:''}
+    ${v.ev?`<button class="btn sec" onclick="AG_PROF='manoel';AG_VISTA='semana';ir('agenda')">Ver na Agenda</button>`:''}
+    <button class="btn coral" onclick="abrirCancelar('${v.id}')">Cancelar viagem</button></div>`;
+  abrirGav(h);
+}
+function rtOferecer(id){const v=rtV(id);if(!v)return;const o=rtOcup(v), c=rtCid(v.c);
+  if(!o.livres.length)return toast('Sem horário livre',v.c+' · '+v.dt+' está cheia.');
+  v.ofereceu=true;
+  toast('Oferecendo '+o.livres.join(' e ')+' · '+v.c+' '+v.dt,'Só para a fila de '+v.c+' ('+naFila(c)+' pessoas), 3 por vez; o primeiro que responder 1 leva. No dia de viagem é o contrário de Pedreiras: ninguém de outra cidade recebe · nada foi enviado (protótipo)')}
+function rtConferirViagem(id){const v=rtV(id);if(!v||v.amigo==='ok')return;v.amigo='conferindo';rtRefazer();
+  setTimeout(()=>{v.amigo='ok';rtRefazer();toast('Conferido no Amigo · '+v.c+' '+v.dt,'O dia existe na unidade '+v.c+'. Agora dá para chamar a fila, e a data aparece no seletor de Local da Agenda.')},1500)}
+/* depois de uma mudança: refaz a tela e, se a gaveta da viagem/cidade estiver aberta, ela também */
+function rtRefazer(){if(ROTA==='roteiro')render();const g=$('#gav');
+  if(RT_GAV&&g&&g.classList&&g.classList.contains('on')){if(RT_GAV.t==='v')rtRegav(()=>abrirViagem(RT_GAV.id));else if(RT_GAV.t==='cid')rtRegav(()=>abrirCidade(RT_GAV.n));else if(RT_GAV.t==='abrir'&&ABRIR)rtGavAbrir(true)}}
+function rtChamarFila(id){const v=rtV(id);if(!v||v.amigo!=='ok')return;rtIniciar(v);
+  toast('Fila chamada · '+v.c+' '+v.dt,'1ª rodada agora: retornos vencidos e quem pediu. Uma mensagem a cada ~2 min · nada foi enviado (protótipo)')}
+
+/* conflito com o bloqueio do Configurar */
+function abrirConflito(id){const v=rtV(id);if(!v)return;const c=rtCid(v.c);
+  const prox=VIAGENS.filter(x=>x.c===v.c&&x!==v&&rtAtiva(x)&&rtData(x.dt)>rtData(v.dt)).sort(rtOrdDt)[0];
+  abrirModal(`<h2>${v.dt} · ${v.c} cai no bloqueio</h2><div class="mut" style="font-size:.84rem;margin-bottom:.7rem">${v.motivo}. A grade quinzenal de ${v.c} gerou esta data, mas o médico está bloqueado nesse dia. ${rtF('ex')}</div>
+  <div class="hj-regra" style="grid-template-columns:1fr 1fr"><div><b>Passar para ${v.alt}</b>Ninguém marcado ainda. Se houver, o agente remarca um por um e pede confirmação, e o sinal vai junto. Depois é só criar o dia ${v.alt.split(' ')[1]} no Amigo.</div>
+    <div><b>Pular esta</b>O agente avisa a fila de ${v.c} (${naFila(c)} pessoas) de que a próxima é ${prox?prox.dt:'a seguinte'}.</div></div>
+  <div class="acoes"><button class="btn" onclick="rtConflito('${v.id}','passar')">Passar para ${v.alt}</button><button class="btn sec" onclick="rtConflito('${v.id}','pular')">Pular esta</button></div>`)}
+function rtConflito(id,a){const v=rtV(id);if(!v||v.st!=='conflito')return;
+  const prox=VIAGENS.filter(x=>x.c===v.c&&x!==v&&rtAtiva(x)&&rtData(x.dt)>rtData(v.dt)).sort(rtOrdDt)[0];
+  if(a==='passar'){const de=v.dt;Object.assign(v,{dt:v.alt,st:'marcada',vagas:8,marc:0,amigo:'falta',sala:'ok',de});
+    toast('Passou de '+de+' para '+v.dt,'Ninguém estava marcado, então ninguém foi remarcado. Falta criar o dia '+v.dt.split(' ')[1]+' do Dr. Manoel na unidade '+v.c+' no Amigo.')}
+  else{v.st='pulada';v.prox=prox?prox.dt:null;
+    toast('Pulada · '+v.c+' '+v.dt,'O agente avisa a fila de '+v.c+' de que a próxima é '+(prox?prox.dt:'a data seguinte')+' · nada foi enviado (protótipo)')}
+  fecharTudo();render()}
+
+/* =========== 4 · ABRIR DATA (4 blocos e uma trava) =========== */
+const faltaParaAbrir=a=>[a.checks.amigoDia!=='ok'&&'dia no Amigo',a.checks.sedeFechada!=='ok'&&'Pedreiras fechada',!a.checks.sala&&'sala confirmada',
+  a.tipos['Testes alérgicos']==='on'&&!a.testesOnde&&'onde é a retirada do teste'].filter(Boolean); // “Abrir e chamar a fila” só acende com []
+const RT_TIPOS=[['Consulta','Consulta · R$ 500'],['Retorno','Retorno'],['Procedimento clínico','Procedimento clínico'],['Procedimento estético','Procedimento estético'],['Testes alérgicos','Testes alérgicos'],['Cirurgia dermatológica','Cirurgia']];
+function abrirData(n,dt){
+  const c=rtCid(n);if(!c)return;
+  if(!temConta(c)){RT_GAV=null;return abrirGav(`<div class="mut" style="font-size:.76rem">Abrir data</div><h2>${c.n}</h2><div class="mut" style="font-size:.84rem;margin-top:.4rem">Ninguém na fila de ${c.n} ainda. Abrir uma data aqui é viajar sem ninguém para chamar.</div><div class="acoes"><button class="btn sec" onclick="ir('roteiro')">Ver o Roteiro</button></div>`)}
+  if(typeof dt!=='string'||!rtData(dt)) dt=rtSugDe(c);
+  const v=VIAGENS.find(x=>x.c===n&&x.dt===dt&&['sugerida','rascunho'].includes(x.st));
+  if(v&&v.abrir) ABRIR=JSON.parse(JSON.stringify(v.abrir));
+  else{const tn=rtTurnoDe(dt);
+    ABRIR={c:n,dt,base:dt,turno:tn,checks:{amigoDia:'falta',sedeFechada:tn==='sab'?'ok':'falta',sala:false},sala:{nome:'',end:'',contato:''},
+      tipos:{'Consulta':'on','Retorno':'on','Procedimento clínico':'on','Procedimento estético':'on','Testes alérgicos':'aviso','Cirurgia dermatológica':'nao'},
+      testesOnde:null,equipe:'Auxiliar (recepção)',sinal:true,custo:{...c.custo}}}
+  rtGavAbrir(false);
+}
+/* os dias que dá para escolher: a sugerida, uma semana depois e o outro dia da semana,
+   sem cair em bloqueio nem em data que já tem viagem */
+function rtOpcoesDia(a){
+  const ocup=dt=>RT_BLOQ.includes(dt)||VIAGENS.some(v=>v.dt===dt&&rtAtiva(v)&&v.st!=='sugerida'&&!(v.c===a.c));
+  const out=[a.base], add=(dt,passo)=>{let d=dt,i=0;while(ocup(d)&&i<6){d=rtMais(d,passo);i++}if(!out.includes(d))out.push(d)};
+  add(rtMais(a.base,7),7);
+  add(rtTurnoDe(a.base)==='qui'?rtMais(a.base,2):rtMais(a.base,-2),7);
+  if(!out.includes(a.dt))out.push(a.dt);
+  return out;
+}
+function rtGavAbrir(manter){
+  const a=ABRIR;if(!a)return; RT_GAV={t:'abrir'};
+  const c0=rtCid(a.c), c={...c0,custo:a.custo}, k=conta(c,a.turno), t=TURNO[a.turno], f=rtFilaEf(c0), dd=a.dt.split(' ')[1];
+  const falta=faltaParaAbrir(a), L=rtFila(c0), p1=L.find(p=>p.org==='ped'&&rtPrim(p.nome))||L[0], nome1=p1?rtPrim(p1.nome)||'Antônia':'Antônia';
+  const ck=(key,tit,falt,ok)=>{const s=a.checks[key];return `<div class="rt-ck"><span class="ic ${s}">${s==='ok'?'✓':s==='conferindo'?'⏳':'⚠'}</span><div><b>${tit}</b><div class="mut" style="font-size:.78rem;margin-top:.1rem">${s==='ok'?ok:s==='conferindo'?'Conferindo no Amigo…':falt}</div>${s==='falta'?`<button class="btn sec min" style="margin-top:.35rem" onclick="rtConferir('${key}')">Conferir</button>`:''}</div></div>`};
+  const sinal=a.sinal, prev=VIAGENS.filter(v=>v.c===a.c&&v.st==='fechada').sort(rtOrdDt).pop();
+  const opcoes=rtOpcoesDia(a).map(dt=>{const tn=rtTurnoDe(dt),kk=conta(c,tn);
+    const sub=tn==='qui'?`sobram ${rtBRL(kk.sobra)}, ${rtBRL(kk.aMais)} a mais que ficar`:`só de manhã, ${TURNO.sab.vagas} horários; sobram ${rtBRL(kk.sobra)}${kk.ficamNaFila>0?' e '+kk.ficamNaFila+' ficam na fila':''}`;
+    return `<button class="opt rt-opt ${a.dt===dt?'on':''}" onclick="rtDia('${dt}')"><b>${dt}</b>${dt===a.base?' · padrão':''}<small>${sub}</small></button>`}).join('');
+  const temTestes=a.tipos['Testes alérgicos']==='on';
+  let h=`<div class="mut" style="font-size:.76rem">Abrir data · só dono e gestor</div><h2>${a.c} · ${a.dt}</h2>
+  <div class="mut" style="font-size:.84rem">${naFila(c0)} na fila${(c0.aVencer||[]).length?' + '+c0.aVencer.length+' retornos que vencem em '+c0.aVencerEm:''}, ~${k.n} devem vir ${rtF('zq')}</div>
+
+  <div class="rt-bl"><h4>1 · Quando e onde</h4>
+    <div class="field"><label>Dia</label><div class="opts">${opcoes}</div>
+      <div class="faint" style="font-size:.72rem;margin-top:.3rem">Padrão: a 1ª ${TURNO[rtTurnoDe(a.base)].nome} com 3 semanas de folga, tempo de alugar a sala e avisar.</div></div>
+    <div class="linha"><span>Horário</span><span>${t.txt} → ${t.vagas} horários de 30 min</span></div>
+    <div class="linha"><span>Unidade do Amigo</span><span>${c0.place} ✓ <span class="faint">(ligada em Configurar › Locais)</span></span></div>
+    <div class="field" style="margin-top:.5rem"><label>Sala</label>
+      <input class="inp" placeholder="Nome do espaço" value="${rtEsc(a.sala.nome)}" oninput="ABRIR.sala.nome=this.value" style="margin-bottom:.35rem">
+      <input class="inp" placeholder="Endereço" value="${rtEsc(a.sala.end)}" oninput="ABRIR.sala.end=this.value" style="margin-bottom:.35rem">
+      <input class="inp" placeholder="Contato do dono do espaço" value="${rtEsc(a.sala.contato)}" oninput="ABRIR.sala.contato=this.value"></div>
+    <div class="rt-custo"><label>Aluguel da sala (entra no custo)</label><input class="inp num" type="number" min="0" step="10" value="${a.custo.sala}" onchange="ABRIR.custo.sala=Math.max(0,+this.value||0);rtGavAbrir(true)"></div>
+    <div class="chk" onclick="ABRIR.checks.sala=!ABRIR.checks.sala;rtGavAbrir(true)"><i class="${a.checks.sala?'':'off'}">✓</i><span>Sala confirmada com o dono do espaço<small>sem isso, ninguém é chamado: viagem avisada e cancelada queima a clínica na cidade</small></span></div>
+    <div class="rt-custo" style="margin-top:.4rem"><label>Quem vai junto: ${a.equipe} · diária</label><input class="inp num" type="number" min="0" step="10" value="${a.custo.diaria}" onchange="ABRIR.custo.diaria=Math.max(0,+this.value||0);rtGavAbrir(true)"></div>
+    <div class="faint" style="font-size:.72rem">É ela quem marca “Chegou” e cobra no dia.</div></div>
+
+  <div class="rt-bl"><h4>2 · Conferir no Amigo</h4>
+    <div class="faint" style="font-size:.76rem;margin-bottom:.2rem">O Zaq lê a agenda do Amigo, mas não cria nem bloqueia horário.</div>
+    ${ck('amigoDia',`Dr. Manoel em ${a.c} em ${dd}`,`Ainda não existe. Crie no Amigo o horário dele na unidade ${c0.place}, em ${dd}, ${a.turno==='qui'?'das 08 às 17':'das 08 às 12'}, e toque em Conferir.`,`${t.vagas} horários livres na unidade ${c0.place}.`)}
+    ${a.turno==='qui'?ck('sedeFechada',`Pedreiras fechada para ele em ${dd}`,'Bloqueie a agenda da sede nesse dia no Amigo. Senão a recepção ou o agendamento on-line marca gente em Pedreiras.','Nenhum horário livre dele na sede nesse dia.')
+      :`<div class="rt-ck"><span class="ic ok">✓</span><div><b>Pedreiras</b><div class="mut" style="font-size:.78rem">No sábado a sede não abre para ele: nada a bloquear.</div></div></div>`}
+    <div class="faint" style="font-size:.72rem;margin-top:.3rem">Antes de ligar: a clínica confirma com o Amigo se a chave de integração funciona sem o AmigoBot. <a style="color:var(--neon);cursor:pointer" onclick="CF_ABA='locais';ir('config')">Configurar ›</a></div></div>
+
+  <div class="rt-bl"><h4>3 · O que ele atende lá e o sinal</h4>
+    <div class="opts">${RT_TIPOS.map(([tp,rot])=>{const s=a.tipos[tp];return `<button class="opt ${s==='on'?'on':''} ${s==='nao'?'rt-nao':''}" onclick="rtTipo('${tp}')">${rot} ${s==='on'?'✓':s==='nao'?'✗':'⚠'}</button>`}).join('')}</div>
+    ${temTestes?`<div class="rt-pergunta"><b>Onde é a retirada do teste?</b> Ela é 48 h depois, e em 48 h o médico já não está em ${a.c}.<div class="opts" style="margin-top:.35rem">${['Em Pedreiras','Na sala de '+a.c+', com a auxiliar'].map(o=>`<button class="opt ${a.testesOnde===o?'on':''}" onclick="ABRIR.testesOnde=this.dataset.o;rtGavAbrir(true)" data-o="${o}">${o}</button>`).join('')}</div>${a.testesOnde?`<div class="faint" style="font-size:.72rem;margin-top:.3rem">O agente avisa antes de marcar: “a retirada é ${a.testesOnde.toLowerCase()}, 48 h depois”.</div>`:''}</div>`
+      :`<div class="faint" style="font-size:.74rem;margin-top:.35rem">Testes alérgicos ⚠: a retirada é 48 h depois. Só ligue se a clínica disser onde ela acontece. Cirurgia ✗: precisa de estrutura. Vacina e Coleta CIMLAB não aparecem, porque só o Dr. Manoel viaja.</div>`}
+    <div class="field" style="margin-top:.6rem"><label>Sinal por Pix ${rtF('ex')}</label><div class="opts"><button class="opt ${sinal?'on':''}" onclick="ABRIR.sinal=true;rtGavAbrir(true)">R$ 50, vira desconto</button><button class="opt ${sinal?'':'on'}" onclick="ABRIR.sinal=false;rtGavAbrir(true)">Sem sinal</button></div></div>
+    ${sinal?`<div class="rt-regras">Em nome do <b>Centro Dermatológico Dr. Manoel Soares</b>. O agente só pede <b>depois</b> que a pessoa escolhe o horário. No dia ela paga ${brl(500-50)}. Vale para consulta e procedimento; retorno não paga sinal, a não ser que a pessoa já tenha faltado. Prazo de 24 h; depois disso o horário volta para a fila.<br>
+      <b>Faltou sem avisar:</b> a clínica fica com o sinal. <b>Avisou com 24 h:</b> o sinal passa para a próxima data. <b>A clínica cancelou:</b> devolve no Pix no mesmo dia.</div>`:''}
+    <div class="faint" style="font-size:.76rem;margin-top:.4rem">${prev?`Na última viagem a ${a.c}, sem sinal, faltou ${prev.falt} de ${prev.marc} ${rtF('am')}.`:''} No mercado, cobrar sinal reduz a falta em cerca de ${RX_MERC.sinalCorta}% ${rtF('merc')} <span class="faint">(referência, não garantia)</span>.
+      <b>${sinal?'Com sinal: a previsão cai para menos de 1 falta.':'Sem sinal: previsão de 1 falta, como na última viagem.'}</b></div></div>
+
+  <div class="rt-bl"><h4>4 · Quem o agente chama e a mensagem</h4>
+    <div class="rt-rod"><b>1ª rodada, agora:</b> ${f.ret} retornos vencidos + ${f.ped} que pediram = ${f.ret+f.ped}.</div>
+    <div class="rt-rod"><b>2ª rodada, 24 h depois, de 5 em 5 até encher:</b> primeiro os ${f.fal} que faltaram${sinal?' (com sinal)':''}, depois os ${f.sum} sumidos, do mais recente ao mais antigo. Sumido só recebe se não pediu SAIR e tem “Novidades” ligado no cadastro.</div>
+    <div class="rt-rod">Para quando os ${t.vagas} horários enchem, e quem não coube fica com prioridade. As mensagens saem espaçadas (1 a cada ~2 min), para o número da clínica não ser bloqueado. Ficam de fora: quem pediu SAIR, quem já tem horário e quem mora em Pedreiras.</div>
+    <div class="zap" style="max-width:none;margin-top:.5rem"><div class="sis">1ª mensagem · sem Pix</div>
+      <div class="b">Oi, ${nome1}! Aqui é do Centro Dermatológico Dr. Manoel Soares. O Dr. Manoel vai atender em ${a.c} na ${rtLongo(a.dt)}, ${a.sala.nome||a.sala.end?'na '+rtEsc([a.sala.nome,a.sala.end].filter(Boolean).join(', ')):'na [sala, endereço]'}. Você pediu para ser avisada 🙂 Quer um horário? Tenho 9h30 ou 14h${a.turno==='sab'?'':''}. Para não receber mais, responda SAIR.<div class="h">agente</div></div>
+      <div class="b eu">9h30<div class="h">paciente</div></div>
+      ${sinal?`<div class="b">Segurei 9h30 para você até amanhã às 18h. Para confirmar, o sinal é R$ 50 no Pix, em nome de Centro Dermatológico Dr. Manoel Soares. Ele vira desconto: no dia você paga ${brl(450)}.<div class="h">agente</div></div>`
+        :`<div class="b">Reservei 9h30 para você. A recepção confirma em instantes e eu te aviso aqui.<div class="h">agente</div></div>`}
+      <div class="sis">pessoa nova: antes${sinal?' do Pix':''}, o agente pede nome completo e data de nascimento (sem isso não dá para cadastrar no Amigo)</div></div>
+    <div class="zap" style="max-width:none;margin-top:.4rem"><div class="sis">para retorno · sem Pix</div><div class="b">Seu retorno com o Dr. Manoel pode ser em ${a.c}, ${dd}. Quer 9h30 ou 14h? Responda com o horário, e 1 para confirmar.<div class="h">agente</div></div></div></div>
+
+  <div class="rt-pe"><div class="rt-pe-n"><span>entram <b>${rtBRL(k.entra)}</b></span><span>saem <b>${brl(k.sai)}</b></span><span>sobram <b style="color:var(--neon)">${rtBRL(k.sobra)}</b></span>${a.turno==='qui'?`<span><b>${rtBRL(k.aMais)}</b> a mais que ficar em Pedreiras</span>`:''}<span>vale a partir do ${k.valeAPartirDe}º paciente</span> ${rtF('zq')}</div>
+    <div class="acoes" style="margin-top:.45rem"><button class="btn" ${falta.length?'disabled':''} onclick="rtAbrirOk()">Abrir e chamar a fila</button><button class="btn sec" onclick="rtGuardar()">Guardar sem chamar</button></div>
+    ${falta.length?`<div class="rt-falta">falta: ${falta.join(' · ')}</div>`:''}</div>`;
+  const y=manter&&$('#gav')?$('#gav').scrollTop:0;
+  abrirGav(h);const g=$('#gav');if(g){g.classList.add('larga');if(manter)g.scrollTop=y}
+}
+function rtDia(dt){const a=ABRIR;if(!a)return;const tn=rtTurnoDe(dt);a.dt=dt;a.turno=tn;a.checks.amigoDia='falta';a.checks.sedeFechada=tn==='sab'?'ok':'falta';rtGavAbrir(true)}
+function rtTipo(tp){const a=ABRIR;if(!a)return;const s=a.tipos[tp];
+  if(s==='nao')return toast('Cirurgia não viaja','Precisa de estrutura que a sala da cidade não tem. Fica em Pedreiras.',true);
+  a.tipos[tp]=s==='on'?(tp==='Testes alérgicos'?'aviso':'off'):'on';if(tp==='Testes alérgicos'&&a.tipos[tp]!=='on')a.testesOnde=null;rtGavAbrir(true)}
+function rtConferir(key){const a=ABRIR;if(!a||a.checks[key]!=='falta')return;a.checks[key]='conferindo';rtGavAbrir(true);
+  setTimeout(()=>{if(ABRIR!==a)return;a.checks[key]='ok';const g=$('#gav');if(g&&g.classList&&g.classList.contains('on')&&RT_GAV&&RT_GAV.t==='abrir')rtGavAbrir(true)},1500)}
+function rtGuardar(){const a=ABRIR;if(!a)return;
+  let v=VIAGENS.find(x=>x.c===a.c&&x.dt===a.dt&&['sugerida','rascunho'].includes(x.st));
+  if(!v){v={id:rtId(a.c,a.dt),c:a.c,dt:a.dt};VIAGENS.push(v)}
+  VIAGENS.filter(x=>x!==v&&x.c===a.c&&x.st==='sugerida').forEach(x=>x.st='trocada');
+  Object.assign(v,{st:'rascunho',abrir:JSON.parse(JSON.stringify(a))});
+  fecharTudo();render();toast('Rascunho guardado · '+a.c+' '+a.dt,'Ninguém foi chamado. A data aparece em âmbar na linha do tempo, dizendo o que falta.')}
+function rtAbrirOk(){const a=ABRIR;if(!a||faltaParaAbrir(a).length)return;
+  const c=rtCid(a.c);Object.assign(c.custo,a.custo); // aluguel e diária digitados viram o padrão da cidade
+  let v=VIAGENS.find(x=>x.c===a.c&&x.dt===a.dt&&['sugerida','rascunho'].includes(x.st));
+  if(!v){v={id:rtId(a.c,a.dt),c:a.c,dt:a.dt};VIAGENS.push(v)}
+  VIAGENS.filter(x=>x!==v&&x.c===a.c&&x.st==='sugerida').forEach(x=>x.st='trocada');
+  Object.assign(v,{amigo:'ok',sala:'ok',abrir:JSON.parse(JSON.stringify(a)),sinal:a.sinal});
+  ABRIR=null;rtIniciar(v);
+  toast('Data aberta · '+v.c+' '+v.dt,'1ª rodada agora: '+(c.fila.ret+c.fila.ped)+' mensagens ('+c.fila.ret+' retornos + '+c.fila.ped+' que pediram), uma a cada ~2 min. A data já aparece na Agenda › Local · nada foi enviado (protótipo)')}
+/* abre o dia (sugerida, rascunho ou marcada) e começa a simulação */
+function rtIniciar(v){const c=rtCid(v.c), tn=rtTurnoDe(v.dt);
+  const fe=rtFilaEf(c);Object.assign(v,{st:'aberta',turno:tn,vagas:TURNO[tn].vagas,filaAntes:fe,pessoasAntes:rtFila(c).slice(),filaCid:{...c.fila},k:0,simFim:false,sinal:v.sinal!==false,rodada1:fe.ret+fe.ped});
+  rtPlano(v);DIA_ABERTO=v.id;ir('roteiro');encher()}
+
+/* =========== 5 · O DIA DE VIAGEM ENCHENDO (simulação: 2 dias em ~10 s) =========== */
+const RT_ORD16=[0,2,4,1,3,8,10,5,12,9,11,13,6,7,14,15], RT_ORD8=[0,2,1,4,3,5,6,7];
+const rtHorasDia=tn=>tn==='sab'?HORAS.filter(h=>h<'12:00'):['08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30'];
+/* quem vem, em que horário e em que passo da animação. Quantos vêm de cada origem:
+   as chances da fila (maior resto), somando devemVir. Bacabal: ret 4 · ped 4 · fal 1 · sum 4 = 13 */
+function rtPlano(v){
+  const f=v.filaAntes, hs=rtHorasDia(v.turno), n=Math.min(hs.length,devemVir({fila:f})), q={};let tot=0;
+  const exp=Object.keys(CHANCE).map(k=>[k,f[k]*CHANCE[k]]);exp.forEach(([k,x])=>{q[k]=Math.floor(x+1e-9);tot+=q[k]});
+  exp.slice().sort((a,b)=>(b[1]-Math.floor(b[1]))-(a[1]-Math.floor(a[1]))).forEach(([k])=>{if(tot<n&&q[k]<f[k]){q[k]++;tot++}});
+  for(const k of ['sum','fal','ped','ret'])while(tot>n&&q[k]>0){q[k]--;tot--}
+  const L=v.pessoasAntes, pega=o=>L.filter(p=>p.org===o).slice(0,q[o]);
+  const r1=pega('ret').concat(pega('ped')), r2=pega('fal').concat(pega('sum')), ord=hs.length===16?RT_ORD16:RT_ORD8, P=[];
+  const semSinal=v.sinal===false;
+  r1.forEach((p,i)=>{const inv=Math.floor(i*3/Math.max(1,r1.length));P.push({...p,src:p,inv,res:inv+2+(i%2)})});
+  r2.forEach((p,j)=>{const inv=8+Math.floor(j/5)*3;P.push({...p,src:p,inv,res:inv+2+(j%2)})});
+  P.forEach((p,i)=>{p.i=ord[i];p.h=hs[ord[i]];p.isento=p.org==='ret'&&!semSinal;p.tipo=p.org==='ret'?'Retorno':'Consulta'});
+  const pagam=P.filter(p=>!p.isento).sort((a,b)=>a.res-b.res||a.i-b.i);pagam.slice(-Math.min(2,pagam.length)).forEach(p=>p.pend=true);
+  v.hs=hs;v.plano=P;v.fim=Math.max(0,...P.map(p=>p.isento?p.res:p.res+2))+1;v.q=q;
+}
+/* o estado de cada horário no passo v.k */
+function rtVg(v){const k=v.k||0;
+  return (v.hs||[]).map((h,i)=>{const p=(v.plano||[]).find(x=>x.i===i);
+    if(!p||k<p.inv)return {h,st:'livre',p:null};
+    if(k<p.res)return {h,st:'conv',p};
+    if(p.isento)return {h,st:'ok',p};
+    return {h,st:(p.pend||k<p.res+2)?'seg':'ok',p}})}
+function rtContar(g){const o={ok:0,seg:0,conv:0,livre:0,okRet:0,okPago:0,org:{ret:0,ped:0,fal:0,sum:0}};
+  g.forEach(x=>{o[x.st]++;if(x.st==='ok'){if(x.p.isento)o.okRet++;else o.okPago++}if(x.st==='ok'||x.st==='seg')o.org[x.p.org]++});return o}
+const RT_VG={livre:['','livre'],conv:['conv','convidado'],seg:['segu','segurado · Pix'],ok:['ok','confirmado']};
+function rtVgHtml(g){return g.map((x,i)=>`<button class="vg rt-vg ${RT_VG[x.st][0]}" onclick="abrirHorarioViagem(${i})"><b>${x.h}</b><small>${x.p&&x.st!=='conv'?x.p.nome:RT_VG[x.st][1]}</small></button>`).join('')}
+function rtDiaRotulo(v){return (v.k||0)>=v.fim?'fim da simulação':(v.k||0)<8?'dia 1 · 1ª rodada':'dia 2 · 2ª rodada, de 5 em 5'}
+function rtComoEncheu(v,g){
+  const n=rtContar(g), oc=n.ok+n.seg, c=rtCid(v.c), fim=(v.k||0)>=v.fim, tk=ticketDe(c), prev=devemVir({fila:v.filaAntes});
+  const org=Object.keys(ORIGEM).filter(o=>n.org[o]).map(o=>`${RT_CURTO[o]} ${n.org[o]}`).join(' · ');
+  return `<h3>Como está enchendo ${rtF('ex')}</h3>
+    <div class="linha"><span>Confirmados no Amigo${n.ok?`<small class="rt-sub">${n.okRet} retornos sem sinal + ${n.okPago} ${v.sinal===false?'sem sinal':'sinais pagos = '+brl(50*n.okPago)}</small>`:''}</span><span class="num">${n.ok}</span></div>
+    <div class="linha"><span>Segurados, Pix pendente${n.seg&&fim?'<small class="rt-sub">o Pix vence hoje às 18h</small>':''}</span><span class="num">${n.seg}</span></div>
+    <div class="linha"><span>Convidados, esperando resposta</span><span class="num">${n.conv}</span></div>
+    <div class="linha"><span>Livres</span><span class="num">${n.livre}</span></div>
+    <div style="font-size:.82rem;margin-top:.45rem">${oc?`<b>Como encheu:</b> ${org} = ${oc}${fim?`, igual à previsão (~${prev} devem vir)`:''}.`:'Ainda ninguém respondeu.'}</div>
+    ${fim?`<div style="font-size:.82rem;margin-top:.3rem">Fila que sobra em ${v.c}: <b>${naFila(c)}</b>, com prioridade na próxima data.</div>`:''}
+    <div style="font-size:.82rem;margin-top:.3rem">Cada horário vazio: ~${brl(tk)} a menos (média por paciente da última viagem) ${rtF('am')}</div>`;
+}
+/* atualiza só a grade e os contadores durante a animação */
+function rtPintarDia(){const v=rtV(DIA_ABERTO);if(!v)return;const g=rtVg(v);VG=g;const n=rtContar(g);
+  const set=(id,f)=>{const e=document.getElementById(id);if(e)f(e)};
+  set('rt-vagas',e=>e.innerHTML=rtVgHtml(g));set('rt-n',e=>e.textContent=n.ok+n.seg);set('rt-lbl',e=>e.textContent=rtDiaRotulo(v));
+  set('rt-bar',e=>e.style.width=(100*(n.ok+n.seg)/g.length)+'%');set('rt-encheu',e=>e.innerHTML=rtComoEncheu(v,g));
 }
 function encher(){
-  const hs=['08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30'];
-  const qs=['Retorno vencido','Fila da cidade','Retorno vencido','Fila da cidade','Faltou antes','Fila da cidade','Retorno vencido','Indicação'];
-  VG=hs.map(h=>({h,st:'',q:''}));render();
-  let k=0, t=null; const ordem=[0,2,1,4,6,3,8,5,10,7,12,9,11];
-  t=setInterval(()=>{
-    if(ROTA!=='roteiro'||!DIA_ABERTO){clearInterval(t);return}
-    if(k<ordem.length){const v=VG[ordem[k]];v.st='resp';if(k>0){const a=VG[ordem[k-1]];a.st='cheia';a.q=qs[(k-1)%qs.length]}k++}
-    else{VG.filter(v=>v.st==='resp').forEach(v=>{v.st='cheia';v.q='Fila da cidade'});clearInterval(t);toast('Bacabal · 13 de 16 vagas em 2 dias','3 horários ainda livres. Amanhã o agente chama a próxima leva (quem é de cidades vizinhas).')}
-    const cheias=VG.filter(v=>v.st==='cheia').length;
-    $('#vagas').innerHTML=VG.map(v=>`<div class="vg ${v.st}"><b>${v.h}</b><small>${v.st==='cheia'?v.q:v.st==='resp'?'respondendo…':'livre'}</small></div>`).join('');
-    $('#vg-n').textContent=cheias;$('#vg-r').textContent=VG.filter(v=>v.st==='resp').length;$('#vg-bar').style.width=(cheias/16*100)+'%';
-    const org={};VG.filter(v=>v.st==='cheia').forEach(v=>org[v.q]=(org[v.q]||0)+1);
-    $('#vg-org').innerHTML='<tr><th>Origem</th><th class="r">Vagas</th></tr>'+Object.entries(org).map(([o,n])=>`<tr><td>${o}</td><td class="r num">${n}</td></tr>`).join('');
+  clearInterval(VG_TIMER);VG_TIMER=null;
+  const v=rtV(DIA_ABERTO);if(!v||v.st!=='aberta'||!v.plano)return;
+  if((v.k||0)>=v.fim){rtPintarDia();return}
+  VG_TIMER=setInterval(()=>{
+    if(ROTA!=='roteiro'||DIA_ABERTO!==v.id||v.st!=='aberta'){clearInterval(VG_TIMER);VG_TIMER=null;return}
+    v.k=(v.k||0)+1;
+    if(v.k>=v.fim){clearInterval(VG_TIMER);VG_TIMER=null;rtFimSim(v);render();
+      const n=rtContar(rtVg(v));
+      toast(v.c+' · '+(n.ok+n.seg)+' de '+v.hs.length+' em 2 dias (simulação)',hjPl(n.livre,'horário livre','horários livres')+'. '+(n.seg?n.seg+' com Pix vencendo hoje às 18h. ':'')+'O agente continua de 5 em 5, só com a fila de '+v.c+'.');return}
+    rtPintarDia();
   },650);
+  rtPintarDia();
 }
+/* fim da simulação: quem marcou sai da fila da cidade */
+function rtFimSim(v){if(v.simFim)return;v.simFim=true;v.k=v.fim;const c=rtCid(v.c), foi=new Set(v.plano.map(p=>p.src));
+  c.aVencer=(c.aVencer||[]).filter(p=>!foi.has(p));c.pessoas=rtPessoas(c).filter(p=>!foi.has(p));rtSync(c)}
+function telaDiaViagem(){
+  const v=rtV(DIA_ABERTO), c=rtCid(v.c), g=rtVg(v), n=rtContar(g), oc=n.ok+n.seg, fim=(v.k||0)>=v.fim, qui=v.turno==='qui';
+  VG=g;
+  const r2=(v.k||0)>=8;
+  return `<div class="pg-h"><div><h1>${v.c} · ${v.dt}</h1><div class="sub">Aberta · o agente chama a fila de ${v.c} · simulação: nada sai de verdade</div></div><button class="btn sec" onclick="DIA_ABERTO=null;render()">‹ Roteiro</button></div>
+  <div class="hj-tags" style="margin-bottom:.8rem"><span class="chip g">dia no Amigo ✓</span>${qui?'<span class="chip g">Pedreiras fechada ✓</span>':''}<span class="chip g">sala ✓</span><span class="chip g">1ª rodada enviada (${v.rodada1})</span><span class="chip ${r2?'g':''}">2ª rodada ${r2?'enviada, de 5 em 5':'amanhã'}</span>${v.sinal===false?'<span class="chip">sem sinal</span>':'<span class="chip b">sinal R$ 50</span>'}</div>
+  <div class="grid2 rt-dia"><div class="card"><h3><span id="rt-n">${oc}</span> de ${g.length} horários <span class="mut" style="font-weight:400;font-size:.8rem">· <span id="rt-lbl">${rtDiaRotulo(v)}</span></span> ${rtF('ex')}</h3>
+    <div class="bar" style="height:11px;margin-bottom:.7rem"><i id="rt-bar" style="width:${100*oc/g.length}%"></i></div>
+    <div class="vagas" id="rt-vagas">${rtVgHtml(g)}</div>
+    <div class="rt-leg" style="margin-top:.5rem"><span><span class="dot" style="border:1px solid #2a3a31;background:var(--bg)"></span>livre</span><span><span class="dot" style="background:var(--azul)"></span>convidado</span><span><span class="dot" style="background:repeating-linear-gradient(135deg,#46F58A,#46F58A 2px,#0E1512 2px,#0E1512 4px)"></span>segurado, Pix pendente</span><span><span class="dot" style="background:var(--neon)"></span>confirmado no Amigo</span></div>
+    ${!fim&&!VG_TIMER?`<div class="acoes"><button class="btn min" onclick="encher()">▶ Continuar a simulação</button></div>`:''}
+    <div class="faint" style="font-size:.72rem;margin-top:.4rem">Toque num horário para ver quem é.</div></div>
+  <div class="card" id="rt-encheu">${rtComoEncheu(v,g)}</div></div>
+  <div class="card"><h3>Regra do dia de viagem</h3><div style="font-size:.84rem;line-height:1.55">${v.sinal===false?'Sem sinal, a recepção confere cada segurado, como em Pedreiras.':'<b>O sinal pago confirma sozinho</b> (em Pedreiras, a recepção confere cada segurado).'} Antes de criar o atendimento, <b>o Zaq confere o horário de novo no Amigo</b>. Se alguém marcou direto lá, o agente pede desculpa, oferece o próximo horário livre e o sinal vai junto.</div>
+    <div class="faint" style="font-size:.78rem;margin-top:.5rem;line-height:1.5">Depois de aberto: 7 dias antes, confirmação (1 confirma, 2 remarca). Na véspera, endereço e “no dia você paga ${brl(450)}”. No dia, a auxiliar abre a Agenda com Local “${v.c} · ${v.dt}”, marca Chegou e cobra pela Lista do dia. Se alguém cancelar, o horário volta em minutos, só para a fila de ${v.c}.</div>
+    <div class="acoes">${n.livre?`<button class="btn" onclick="rtOferecerLivres('${v.id}')">Oferecer os ${n.livre} livres à fila de ${v.c}</button>`:''}<button class="btn sec" onclick="abrirListaDia('${v.id}')">Lista do dia</button><button class="btn sec" onclick="AG_VISTA='dia';ir('agenda')">Ver na Agenda</button><button class="btn sec" onclick="abrirFechar('${v.id}')">Simular o dia → fechar a conta</button><button class="btn coral" onclick="abrirCancelar('${v.id}')">Cancelar viagem</button></div></div>`;
+}
+function abrirHorarioViagem(i){const v=rtV(DIA_ABERTO);if(!v)return;const x=rtVg(v)[i];if(!x)return;
+  RT_GAV=null;
+  if(!x.p||x.st==='livre') return abrirGav(`<div class="mut" style="font-size:.76rem">${v.c} · ${v.dt}</div><h2>${x.h} · livre</h2><div class="mut" style="font-size:.84rem;margin-top:.4rem">O Zaq oferece este horário só à fila de ${v.c}. No dia de viagem é o contrário de Pedreiras: ninguém de outra cidade recebe.</div>
+    <div class="acoes"><button class="btn" onclick="fecharTudo();rtOferecerLivres('${v.id}')">Oferecer à fila de ${v.c}</button></div>`);
+  const p=x.p, sinal=p.isento?'isento (retorno)':x.st==='ok'?'pago · R$ 50 no Pix':x.st==='seg'?'pendente · vence em 24 h':'—';
+  abrirGav(`<div class="mut" style="font-size:.76rem">${v.c} · ${v.dt} · ${x.h}</div><h2>${p.nome}</h2><div class="mut" style="font-size:.84rem">${ORIGEM[p.org][0]} · ${p.desde}</div>
+    <div class="sec"><div class="linha"><span>Estado</span><span>${RT_VG[x.st][1]}</span></div>
+    <div class="linha"><span>Tipo</span><span>${p.tipo}</span></div>
+    <div class="linha"><span>Sinal</span><span>${sinal}</span></div>
+    <div class="linha"><span>No Amigo</span><span>${x.st==='ok'?'<span style="color:var(--neon)">✓ atendimento criado na unidade '+v.c+'</span>':'ainda não · só depois de confirmar'}</span></div>
+    <div class="linha"><span>No balcão</span><span>${p.isento?'retorno: não cobra':x.st==='ok'?'cobrar '+brl(450):'cobrar '+brl(500)+' se o Pix não cair'}</span></div></div>
+    <div class="sec"><h4>Conversa</h4><div class="zap" style="max-width:none"><div class="b">Oi, ${rtPrim(p.nome)||'tudo bem'}! O Dr. Manoel vai atender em ${v.c} na ${rtLongo(v.dt)}. ${p.org==='ret'?'Seu retorno pode ser lá.':'Quer um horário?'} Tenho ${hjH(x.h)}.<div class="h">agente</div></div>
+      ${x.st!=='conv'?`<div class="b eu">${p.isento?'1':hjH(x.h)}<div class="h">paciente</div></div>`:'<div class="sis">esperando resposta</div>'}
+      ${x.st==='seg'?`<div class="b">Segurei ${hjH(x.h)} para você até amanhã às 18h. O sinal é R$ 50 no Pix e vira desconto.<div class="h">agente</div></div>`:''}
+      ${x.st==='ok'?`<div class="sis">${p.isento?'confirmou com 1':'Pix de R$ 50 recebido'} · o Zaq conferiu o horário de novo e criou no Amigo</div><div class="b">Prontinho!! ✅ Seu agendamento foi realizado 🤝 ${rtLongo(v.dt)}, ${hjH(x.h)}, em ${v.c}.<div class="h">automática</div></div>`:''}</div>
+    <div class="faint" style="font-size:.72rem;margin-top:.3rem">Conversa de exemplo. A fila guarda só o link dela.</div></div>`)}
+function rtOferecerLivres(id){const v=rtV(id);if(!v)return;const g=rtVg(v), liv=g.filter(x=>x.st==='livre').map(x=>x.h);
+  if(!liv.length)return toast('Nenhum horário livre',v.c+' · '+v.dt+' está cheia.');
+  v.ofereceu=true;const c=rtCid(v.c);
+  toast('Oferecendo '+liv.join(', ').replace(/, ([^,]*)$/,' e $1'),'Só para a fila de '+v.c+' ('+naFila(c)+' pessoas), 3 por vez; o primeiro que responder leva. Nada foi enviado (protótipo).')}
+function abrirListaDia(id){const v=rtV(id);if(!v)return;const g=rtVg(v).filter(x=>x.st==='ok'||x.st==='seg');
+  abrirModal(`<h2>Lista do dia · ${v.c} · ${v.dt}</h2><div class="mut" style="font-size:.84rem;margin-bottom:.6rem">Para a auxiliar que vai junto: marca Chegou e cobra. Sinal pago vira desconto.</div>
+  <div style="overflow-x:auto"><table class="tb"><tr><th>Hora</th><th>Nome</th><th>Tipo</th><th>No balcão</th></tr>
+  ${g.map(x=>`<tr><td class="num">${x.h}</td><td>${x.p.nome}</td><td>${x.p.tipo}</td><td>${x.p.isento?'<span class="mut">retorno: não cobra</span>':x.st==='ok'?'cobrar <b>'+brl(450)+'</b>':'<span style="color:var(--ambar)">Pix pendente: '+brl(500)+' se não cair</span>'}</td></tr>`).join('')||'<tr><td colspan="4" class="mut">Ninguém marcado ainda.</td></tr>'}</table></div>
+  <div class="faint" style="font-size:.74rem;margin-top:.5rem">No dia, a mesma lista aparece na Agenda com Local “${v.c} · ${v.dt}”.</div>
+  <div class="acoes"><button class="btn sec" onclick="fecharTudo()">Fechar</button></div>`)}
+
+/* =========== cancelar uma viagem (chuva, estrada, doença) =========== */
+function rtCancelResumo(v){
+  if(v.plano){const g=rtVg(v), n=rtContar(g), pag=g.filter(x=>x.st==='ok'&&!x.p.isento).length;return {ok:n.ok,seg:n.seg,conv:n.conv,pagos:pag,pend:n.seg,marc:n.ok+n.seg,p1:(g.find(x=>x.p)||{}).p}}
+  if(v.ev){const o=rtOcup(v);return {ok:o.evs.filter(e=>!['segurado','sinal'].includes(e.st)).length,seg:o.seg,conv:0,pagos:o.evs.filter(e=>e.credito).length,pend:o.sinal,marc:o.evs.length,p1:o.evs[0]&&{nome:o.evs[0].pac}}}
+  return {ok:0,seg:0,conv:0,pagos:0,pend:0,marc:0,p1:null};
+}
+function abrirCancelar(id){const v=rtV(id);if(!v)return;const r=rtCancelResumo(v), c=rtCid(v.c), qui=rtTurnoDe(v.dt)==='qui';
+  const nome=r.p1?rtPrim(r.p1.nome):'';
+  abrirModal(`<h2>Cancelar a viagem · ${v.c} · ${v.dt}</h2><div class="mut" style="font-size:.84rem;margin-bottom:.7rem">Só dono e gestor. Chuva, estrada, doença: acontece. O que o Zaq faz:</div>
+  <div class="field"><label>Motivo (vai na mensagem)</label><div class="opts">${['Chuva ou estrada','Doença','A sala não deu certo','Outro'].map(m=>`<button class="opt ${RT_MOTIVO===m?'on':''}" onclick="RT_MOTIVO=this.dataset.m;abrirCancelar('${id}')" data-m="${m}">${m}</button>`).join('')}</div></div>
+  <div class="rt-regras">${r.marc?`• ${r.ok?hjPl(r.ok,'confirmado','confirmados'):''}${r.ok&&r.seg?' e ':''}${r.seg?hjPl(r.seg,'segurado','segurados'):''} recebem mensagem com o motivo${r.conv?'; os '+r.conv+' convidados também':''}.<br>
+    ${r.pagos?`• Os ${hjPl(r.pagos,'sinal pago','sinais pagos')} (${brl(50*r.pagos)}) são devolvidos no Pix hoje.<br>`:''}${r.pend?`• ${hjPl(r.pend,'Pix pendente é cancelado','Pix pendentes são cancelados')}.<br>`:''}
+    • Os atendimentos são cancelados no Amigo (o Zaq grava “cancelado”).<br>`:`• Ninguém marcado ainda.<br>`}
+    • Todos voltam ao topo da fila de ${v.c} e são os primeiros a saber da nova data.<br>
+    • A data sai do seletor de Local da Agenda.${qui?`<br>• <b>Lembrete:</b> libere a agenda de Pedreiras nesse dia no Amigo. O Zaq não desbloqueia horário.`:''}</div>
+  ${r.marc?`<div class="zap" style="max-width:none;margin-top:.6rem"><div class="b">Oi${nome?', '+nome:''}! Aqui é do Centro Dermatológico Dr. Manoel Soares. Infelizmente o Dr. Manoel não vai poder atender em ${v.c} na ${rtLongo(v.dt)} (${RT_MOTIVO==='Outro'?'imprevisto':RT_MOTIVO.toLowerCase()}). ${r.pagos?'Seu sinal de R$ 50 volta no Pix hoje. ':''}Você continua no topo da lista e é a primeira a saber da nova data 🙏<div class="h">agente · prévia</div></div></div>`:''}
+  <div class="acoes"><button class="btn coral" onclick="rtCancelarOk('${id}')">Cancelar a viagem</button><button class="btn sec" onclick="fecharTudo()">Voltar</button></div>`)}
+function rtCancelarOk(id){const v=rtV(id);if(!v)return;const r=rtCancelResumo(v), c=rtCid(v.c);
+  if(v.plano){clearInterval(VG_TIMER);VG_TIMER=null;const tem=new Set(rtFila(c));c.aVencer=c.aVencer||[];
+    v.plano.forEach(p=>{if(tem.has(p.src))return;if(p.src.aVencer)c.aVencer.unshift(p.src);else c.pessoas.unshift(p.src)});rtSync(c)}
+  if(v.ev)EV.filter(e=>e.p===v.ev.p&&e.dia===v.ev.dia&&rxVivo(e)).forEach(e=>{e.st='cancelou'});
+  v.st='cancelada';v.motivo=RT_MOTIVO;if(DIA_ABERTO===id)DIA_ABERTO=null;
+  fecharTudo();render();
+  toast('Viagem cancelada · '+v.c+' '+v.dt,(r.marc?r.marc+' pessoas avisadas com o motivo'+(r.pagos?', '+brl(50*r.pagos)+' de sinal devolvidos no Pix':'')+', atendimentos cancelados no Amigo. ':'')+'Todos voltaram ao topo da fila de '+v.c+' · nada foi enviado (protótipo)',true)}
+
+/* =========== 6 · FECHAR A VIAGEM (a conta do dia) =========== */
+function abrirFechar(id){const v=rtV(id);if(!v||!v.plano)return;
+  if((v.k||0)<v.fim){clearInterval(VG_TIMER);VG_TIMER=null;rtFimSim(v)}
+  const g=rtVg(v), testes=v.abrir&&v.abrir.tipos&&v.abrir.tipos['Testes alérgicos']==='on';
+  /* lido do Amigo (simulado): os da fila + 2 da fila que ficaram com os livres (um procedimento de 60 min) */
+  const L=g.filter(x=>x.p).map(x=>({h:x.h,nome:x.p.nome,org:x.p.org,tipo:x.p.tipo,sinal:!x.p.isento,veio:true,src:x.p.src}));
+  let nt=0;L.forEach(x=>{if(x.org!=='ret'&&testes&&nt<2){x.tipo='Testes alérgicos';nt++}});
+  const liv=g.filter(x=>!x.p).map(x=>x.h), usados=new Set(v.plano.map(p=>p.src)), extra=v.pessoasAntes.filter(p=>p.org==='sum'&&!usados.has(p));
+  if(liv.length>=3&&v.turno==='qui'){L.push({h:liv[0],nome:(extra[0]||{nome:'Paciente da fila'}).nome,org:'sum',tipo:'Consulta',sinal:true,veio:true,extra:true,src:extra[0]});
+    L.push({h:liv[1]+'–17:00',nome:(extra[1]||{nome:'Paciente da fila'}).nome,org:'sum',tipo:'Procedimento estético',sinal:true,veio:true,extra:true,src:extra[1]})}
+  const rets=L.filter(x=>x.org==='ret');if(rets.length)rets[rets.length-1].veio=false;
+  L.sort((a,b)=>a.h<b.h?-1:1);
+  FECH={id,linhas:L,custo:{...(v.abrir&&v.abrir.custo||rtCid(v.c).custo)},desc:0};
+  rtFechRender(false)}
+function rtFechConta(){const v=rtV(FECH.id), c=rtCid(v.c), L=FECH.linhas, veio=L.filter(x=>x.veio), falt=L.filter(x=>!x.veio);
+  const it={};veio.forEach(x=>{const p=tipo(x.tipo)[4];it[x.tipo]=it[x.tipo]||[x.tipo,0,0];it[x.tipo][1]++;it[x.tipo][2]+=p});
+  const itens=Object.values(it).sort((a,b)=>b[2]-a[2]||b[1]-a[1]);
+  const retido=falt.filter(x=>x.sinal).length;if(retido)itens.push(['Sinal de quem faltou (fica com a clínica)',retido,50*retido]);
+  if(FECH.desc)itens.push(['Desconto dado no dia',1,-FECH.desc]);
+  const ent=itens.reduce((s,x)=>s+x[2],0), sinais=50*L.filter(x=>x.sinal).length, cobrado=ent-sinais, sai=rtSoma(FECH.custo), sobra=ent-sai;
+  const horas=TURNO[v.turno].h+2*c.via, ant=rtFechadas(c).filter(x=>x.id!==v.id).pop();
+  return {v,c,L,veio,falt,itens,ent,sinais,cobrado,sai,sobra,horas,porHora:Math.round(sobra/horas),aMais:sobra-SEDE[v.turno].dia,ant,antSobra:ant?entrou(ant)-ant.sai:null,
+    consultas:veio.filter(x=>tipo(x.tipo)[3]==='30 dias').length};
+}
+function rtFechRender(manter){const k=rtFechConta(), v=k.v, dd=v.dt.split(' ')[1];
+  const y=manter&&$('#modal')?$('#modal').scrollTop:0;
+  abrirModal(`<h2>Fechar o dia · ${v.c} · ${v.dt}</h2><div class="mut" style="font-size:.84rem;margin-bottom:.6rem">No dia seguinte, o Zaq lê do Amigo quem veio e quem faltou na unidade ${v.c} em ${dd} e monta a conta. Confira e digite os custos reais. ${rtF('am')}</div>
+  <div class="rt-sobra"><span class="mut" style="font-size:.76rem">Sobraram</span><b>${rtBRL(k.sobra)}</b><span>${brl(k.porHora)}/h em ${rtHoras(k.horas)} · ${v.turno==='qui'?rtBRL(k.aMais)+' a mais que ficar em Pedreiras':'sábado: a sede não abre'}${k.ant?' · '+rtBRL(k.sobra-k.antSobra)+' '+(k.sobra>=k.antSobra?'a mais':'a menos')+' que a viagem de '+k.ant.dt.split(' ')[1]:''}</span> ${rtF('zq')}</div>
+  <div class="rt-fech">
+    <div><h4>Quem veio · lido do Amigo</h4>
+      <div class="faint" style="font-size:.74rem;margin-bottom:.3rem">${k.L.length} marcados em ${v.hs.length} horários · ${k.veio.length} vieram · ${k.falt.length} ${k.falt.length===1?'faltou':'faltaram'}. Se alguém ficar sem status no Amigo, aparece aqui para marcar.</div>
+      ${k.L.map((x,i)=>`<div class="rt-fr"><span><b class="num">${x.h}</b> ${x.nome}<small>${x.tipo}${x.sinal?' · sinal pago':' · sem sinal'}${x.extra?' · ficou com um livre':''}</small></span><span class="seg"><button class="${x.veio?'on':''}" onclick="FECH.linhas[${i}].veio=true;rtFechRender(true)">veio</button><button class="${x.veio?'':'on'}" onclick="FECH.linhas[${i}].veio=false;rtFechRender(true)">faltou</button></span></div>`).join('')}</div>
+    <div><h4>Entrou, pela tabela de preços</h4>
+      ${k.itens.map(([t,n,r])=>`<div class="linha"><span>${n>1||t==='Retorno'?n+' × ':''}${t}</span><span class="num">${r<0?'−'+brl(-r):brl(r)}</span></div>`).join('')}
+      <div class="rt-custo"><label>Desconto dado no dia (corrija se deu)</label><input class="inp num" type="number" min="0" step="10" value="${FECH.desc}" onchange="FECH.desc=Math.max(0,+this.value||0);rtFechRender(true)"></div>
+      <div class="linha" style="border-top:1px solid var(--borda);padding-top:.35rem"><span><b>Entrou</b></span><span class="num"><b>${brl(k.ent)}</b></span></div>
+      <div class="faint" style="font-size:.74rem">Desse total, ${brl(k.sinais)} já tinham entrado como sinal (${k.sinais/50} × R$ 50); no dia a auxiliar cobrou ${brl(k.cobrado)}.</div>
+      <h4 style="margin-top:.8rem">Saiu</h4>
+      ${Object.keys(CUSTO_TXT).map(x=>`<div class="rt-custo"><label>${CUSTO_TXT[x]}</label><input class="inp num" type="number" min="0" step="10" value="${FECH.custo[x]}" onchange="FECH.custo['${x}']=Math.max(0,+this.value||0);rtFechRender(true)"></div>`).join('')}
+      <div class="linha" style="border-top:1px solid var(--borda);padding-top:.35rem"><span><b>Saiu</b></span><span class="num"><b>${brl(k.sai)}</b></span></div>
+      <div class="faint" style="font-size:.74rem">Vai para o Caixa com a etiqueta “Viagem · ${v.c} ${dd}”. Custos de exemplo ${rtF('ex')}</div></div></div>
+  <div class="faint" style="font-size:.76rem;margin-top:.5rem">${k.falt.length<=2?hjPl(k.falt.length,'falta','faltas')+' em '+k.L.length+' é pouco para concluir. ':''}O Zaq compara com e sem sinal depois de 5 viagens.</div>
+  <div class="acoes"><button class="btn" onclick="rtFecharOk()">Lançar no Caixa e fechar</button><button class="btn sec" onclick="fecharTudo()">Voltar</button></div>`);
+  const m=$('#modal');if(m&&manter)m.scrollTop=y}
+function rtFecharOk(){if(!FECH)return;const k=rtFechConta(), v=k.v, c=k.c, dd=v.dt.split(' ')[1];
+  Object.assign(v,{st:'fechada',itens:k.itens,marc:k.L.length,atend:k.veio.length,falt:k.falt.length,sai:k.sai,horas:k.horas,custo:{...FECH.custo},linhas:k.L,fechou:true,filaDepoisAbrir:naFila(c)});
+  Object.assign(c.custo,FECH.custo);
+  /* quem ficou com os livres saiu da fila; quem faltou volta para ela (como "faltou") */
+  const ext=new Set(k.L.filter(x=>x.extra&&x.src).map(x=>x.src));c.pessoas=rtPessoas(c).filter(p=>!ext.has(p));
+  (c.aVencer||[]).forEach(p=>c.pessoas.push(p));c.aVencer=[];
+  k.falt.forEach(x=>c.pessoas.push({org:'fal',nome:x.nome,desde:'faltou em '+v.dt,f:'Amigo'}));rtSync(c);
+  k.falt.forEach(x=>FUNIL['Voltar a chamar'].unshift({n:x.nome,s:x.tipo+' · '+v.c+' '+dd,t:[['faltou '+dd+' · remarcar','r']]}));
+  /* próxima data: antes de vencerem os retornos de 30 dias desta viagem */
+  if(k.consultas){const prazo=rtData(v.dt);prazo.setDate(prazo.getDate()+30);
+    const nd=rtFmt(v.turno==='sab'?sabAntesDe(prazo):quintaAntesDe(prazo));
+    c.aVencer=k.veio.filter(x=>tipo(x.tipo)[3]==='30 dias').map(x=>({org:'ret',nome:x.nome,desde:'atendido '+v.dt+' · retorno vence '+rtFmt(prazo),f:'Amigo',aVencer:true}));c.aVencerEm=rtFmt(prazo);
+    if(!VIAGENS.some(x=>x.c===c.n&&x.dt===nd&&rtAtiva(x))){VIAGENS.push({id:rtId(c.n,nd),c:c.n,dt:nd,st:'sugerida',motivo:`antes de vencerem os ${k.consultas} retornos (${rtFmt(prazo)})`});c.sug=nd;v.proxSug=nd;v.prazoRet=rtFmt(prazo)}}
+  FECH=null;DIA_ABERTO=null;fecharTudo();render();abrirFechamento(v.id);
+  toast('Viagem fechada · '+v.c+' '+v.dt,'4 despesas ('+brl(k.sai)+') lançadas no Caixa com a etiqueta “Viagem · '+v.c+' '+dd+'”'+(k.falt.length?'; a falta foi para Voltar a chamar':'')+' · nada foi salvo (protótipo)')}
+function abrirFechamento(id){const v=rtV(id);if(!v||v.st!=='fechada')return;const c=rtCid(v.c), ent=entrou(v), s=ent-v.sai, dd=v.dt.split(' ')[1];
+  RT_GAV=null;
+  const ant=rtFechadas(c).filter(x=>rtData(x.dt)<rtData(v.dt)).pop(), qui=rtTurnoDe(v.dt)==='qui';
+  const cus=v.custo||(rtSoma(c.custo)===v.sai?c.custo:null);
+  abrirGav(`<div class="mut" style="font-size:.76rem">Fechamento da viagem ${rtF('am')}</div><h2>${v.c} · ${v.dt}</h2>
+  <div class="rt-sobra" style="margin-top:.5rem"><span class="mut" style="font-size:.76rem">Sobraram</span><b>${rtBRL(s)}</b><span>${brl(Math.round(s/v.horas))}/h em ${rtHoras(v.horas)}${qui?' · '+rtBRL(s-SEDE.qui.dia)+' a mais que ficar em Pedreiras':''}${ant?' · '+rtBRL(s-(entrou(ant)-ant.sai))+' '+(s>=entrou(ant)-ant.sai?'a mais':'a menos')+' que '+ant.dt.split(' ')[1]:''}</span></div>
+  <div class="sec"><h4>Entrou · ${v.atend} atendidos${v.falt?', '+v.falt+' '+(v.falt===1?'falta':'faltas'):''}</h4>${v.itens.map(([t,n,r])=>`<div class="linha"><span>${n} × ${t}</span><span class="num">${r<0?'−'+brl(-r):brl(r)}</span></div>`).join('')}
+    <div class="linha" style="border-top:1px solid var(--borda)"><span><b>Entrou</b></span><span class="num"><b>${brl(ent)}</b></span></div>
+    <div class="faint" style="font-size:.72rem">Pela tabela de preços; a integração do Amigo traz atendimento e status, não pagamento.</div></div>
+  <div class="sec"><h4>Saiu</h4>${cus?Object.keys(CUSTO_TXT).map(x=>`<div class="linha"><span>${CUSTO_TXT[x]}</span><span class="num">${brl(cus[x])}</span></div>`).join(''):''}
+    <div class="linha" style="border-top:1px solid var(--borda)"><span><b>Saiu</b></span><span class="num"><b>${brl(v.sai)}</b></span></div></div>
+  ${v.fechou?`<div class="sec"><h4>O que acontece sozinho depois</h4><div style="font-size:.82rem;line-height:1.55">
+    ${v.falt?`• ${hjPl(v.falt,'falta vai','faltas vão')} para Voltar a chamar (“faltou, remarcar”) e ${v.falt===1?'volta':'voltam'} à fila de ${v.c}.<br>`:''}
+    ${v.proxSug?`• Os retornos de 30 dias vencem em ${v.prazoRet}: o Zaq sugere a próxima ${v.c} na <b>${v.proxSug}</b>, antes do prazo.<br>`:''}
+    • A fila de ${v.c} fica em <b>${naFila(c)}</b> (eram ${naFila({fila:v.filaAntes||c.fila})} antes de abrir).</div>
+    <div class="acoes">${v.falt?`<button class="btn sec min" onclick="FU_FASE='venda';ir('funil')">Ver a falta no Funil</button>`:''}</div></div>`:''}
+  <div class="sec"><h4>Todas as viagens, com a mesma conta ${rtF('am')}</h4>${rtTabelaViagens()}</div>
+  <div class="acoes"><button class="btn sec" onclick="ir('raiox');rxIr('rx-viagens')">Ver no Raio-X</button></div>`)}
+function rtTabelaViagens(){const f=rtFechadas();
+  return `<div style="overflow-x:auto"><table class="tb"><tr><th>Viagem</th><th class="r">Entrou</th><th class="r">Saiu</th><th class="r">Sobrou</th><th class="r">Por hora</th></tr>
+  ${f.map(v=>`<tr><td>${v.c} <span class="faint num">${v.dt.split(' ')[1]}</span></td><td class="r num">${brl(entrou(v))}</td><td class="r num">${brl(v.sai)}</td><td class="r num">${brl(entrou(v)-v.sai)}</td><td class="r num">${brl(Math.round((entrou(v)-v.sai)/v.horas))}</td></tr>`).join('')}
+  <tr><td class="mut">Dr. Manoel em Pedreiras</td><td colspan="3" class="r mut">${brl(SEDE.hora())}/h na semana · quinta ~${brl(SEDE.qui.dia)}</td><td class="r num">${brl(SEDE.qui.hora)}</td></tr></table></div>`}
 
 /* =================================================================
    4 · VAGAS LIBERADAS (motor de ocupação)
@@ -1255,7 +2082,7 @@ function telaVagas(){
     ${v.st==='preenchida'?'<span class="chip g">preenchida ✓</span>':'<span class="chip a">oferecendo · vale por '+(20-v.min)+' min</span>'}</div>
     <div class="mut" style="font-size:.78rem;margin:.2rem 0 .6rem">${v.porque?v.porque+' · há':'cancelou há'} ${v.min||'1'} min${v.resp?' · '+v.resp:''}</div>
     ${v.of.map((o,k)=>`<div class="rank"><span class="p">${k+1}</span><span class="n">${o[0]}<small>${o[1]}</small></span><span class="q">${o[2]}</span></div>`).join('')}
-    <div class="faint" style="font-size:.74rem;margin-top:.3rem">Fora: quem precisa de mais tempo que o buraco, quem é de outra cidade, quem já tem horário esta semana, quem pediu para não receber mensagem.</div>
+    <div class="faint" style="font-size:.74rem;margin-top:.3rem">Fora: quem precisa de mais tempo que o buraco, quem é de outra cidade (no dia de viagem é o contrário: o horário vai só para a fila daquela cidade), quem já tem horário esta semana, quem pediu para não receber mensagem.</div>
     ${v.st==='oferecendo'?`<div class="acoes"><button class="btn min" onclick="hjVaga(${i})">Simular: alguém respondeu</button></div>`:''}
   </div>`).join('')}
   <div class="grid2"><div class="card"><h3>A mensagem</h3><div class="zap"><div class="b">Oi, Carlos! Abriu uma vaga com o Dr. Manoel <b>hoje às 10h</b> no Espaço Pelle. Quer ficar com ela?<br>Responda <b>1</b> para confirmar. É por ordem de resposta, e vale pelos próximos 20 minutos 🙂<div class="h">10:04</div></div><div class="b eu">1<div class="h">10:07</div></div><div class="b">Confirmado! Hoje às 10h, Rua Óscar Galvão, 38. Até já 😊<div class="h">10:07</div></div></div></div>
@@ -1275,7 +2102,7 @@ const PACS=[
   {n:'Marta Silva',id:29,cid:'Pedreiras',ult:'21/07',prox:'—',sit:[['pacote parado há 64 dias','r'],['parcela atrasada','r']],val:'R$ 2.100',seg:['tratamento','atrasadas']},
   {n:'Carlos Mendes',id:62,cid:'Pedreiras',ult:'10/08',prox:'—',sit:[['retorno vencido há 12 dias','a']],val:'R$ 500',seg:['retorno']},
   {n:'Heloísa Dias',id:51,cid:'Lago da Pedra',ult:'12/03',prox:'—',sit:[['manutenção vencida','a']],val:'R$ 1.760',seg:['retorno']},
-  {n:'Raimundo Costa',id:58,cid:'Bacabal',ult:'02/05',prox:'fila de Bacabal',sit:[['sumido há 144 dias','r']],val:'R$ 500',seg:['sumidos']},
+  {n:'Raimundo Costa',id:58,cid:'Bacabal',ult:'30/04',prox:'fila de Bacabal',sit:[['sumido há 146 dias','r']],val:'R$ 500',seg:['sumidos']},
   {n:'Sônia Pires',id:47,cid:'Pedreiras',ult:'—',prox:'—',sit:[['recebeu o preço há 1 dia','a']],val:'—',seg:[]},
 ];
 function telaPacientes(){
@@ -1657,6 +2484,7 @@ const RX_WA={ // real, conta 39, 24/08–23/09, medido 24/09
   sab:{n:4,sem24:3},
   preco:{receberam:13, marcaram:3, marcouMin:[0,55,200], parados:[1,1,6,13,21,23,23,24,24,28], nuncaChamados:7, sumiram:4, ateOPrecoMin:21},
   temas:{agendar:36, preco:22, confirmar:7},
+  cidades:{conversas:1, quais:'Codó'}, // conversas de paciente que citaram uma cidade do roteiro (Raio-X e Roteiro leem daqui)
 };
 /* real, Amigo da clínica lido à mão em 22/09 (a tela Hoje lê daqui) */
 const RX_AMIGO={lido:'22/09', retornos:18, retornosChamados:0, consultas:5, confirmadas:0, vencidos:58, abaixoMin:13, orcamentos:1};
@@ -1827,7 +2655,10 @@ function telaRaio(){
     <div style="font-size:.8rem;margin-top:.8rem">${B.faltas.length} faltas em ${B.passados} atendimentos até ontem (${B.passados?Math.round(100*B.faltas.length/B.passados):0}%) = ${rxBRL(B.faltasR)} · seg e ter tiveram ${B.vaziosPass} meias-horas vazias, ${B.faltasMeias} delas por falta</div>
     <div class="acha">${acha}</div>
     <div class="rx-conta" style="margin-top:.6rem">ocupação = meias-horas marcadas ÷ meias-horas em que cada um atende na grade da Agenda (Manoel 08:00–12:00 e 13:30–16:30, sáb 08–12 em Lago da Pedra; Juliana 08:00–12:00 e 13:30–16:00; Brenda ter–qui 08:00–12:00). Falta e cancelamento contam como vazio; segurado e aguardando sinal contam como marcado. É a mesma conta da Agenda › Semana.</div>
-    <div style="margin-top:.6rem;font-size:.8rem"><a style="color:var(--neon);cursor:pointer" onclick="ir('roteiro')">Viagens e fila por cidade: Roteiro ›</a> <span class="mut">· no mês, só 1 conversa de paciente citou uma cidade do roteiro (Codó)</span> ${rxF('wa')}</div>
+    <div id="rx-viagens" style="margin-top:.9rem;font-size:.84rem"><b>Viagens: quanto sobrou em cada uma</b> <span class="mut" style="font-size:.74rem">(a mesma conta do Roteiro, com a estrada)</span> ${rxF('ex')}</div>
+    ${rtTabelaViagens()}
+    <div class="acha">${(()=>{const c=rtCid('Bacabal'),k=conta(c,'qui');return `<b>Bacabal numa quinta:</b> sobram ${rtBRL(k.sobra)}, ${rtBRL(k.aMais)} a mais que ficar em Pedreiras (~${brl(SEDE.qui.dia)} numa quinta).`})()}</div>
+    <div style="margin-top:.6rem;font-size:.8rem"><a style="color:var(--neon);cursor:pointer" onclick="ir('roteiro')">Viagens e fila por cidade: Roteiro ›</a> <span class="mut">· no mês, só ${hjPl(RX_WA.cidades.conversas,'conversa de paciente citou','conversas de paciente citaram')} uma cidade do roteiro (${RX_WA.cidades.quais})</span> ${rxF('wa')}</div>
   </div></div>`;
 
   /* 5 e 6 · recepção (real) e parado no Amigo */
@@ -1940,16 +2771,16 @@ function telaConfig(){
   if(CF_ABA==='tipos') h+=`<div class="card"><table class="tb"><tr><th>Tipo</th><th class="r">Duração</th><th>Categoria</th><th>Volta em</th><th class="r">Preço particular</th></tr>
     ${TIPOS.map(t=>`<tr><td><span class="dot" style="background:${t[5]}"></span>${t[0]}</td><td class="r num">${t[1]} min</td><td><span class="chip">${t[2]}</span></td><td>${t[3]}</td><td class="r num">${t[4]?brl(t[4]):'—'}</td></tr>`).join('')}</table>
     <div class="hint">A <b>categoria</b> é o que move o funil (consulta finalizada → pergunta do plano). O <b>preço</b> é o que o agente responde quando perguntam "quanto custa". A consulta é <b>R$ 500</b> (é o que a recepção passa no WhatsApp); os outros preços são ilustrativos — falta a tabela real.<br>Não migraram: "Legado", "Retorno Dr. Manoel" e "Retorno Juliana" (viraram um "Retorno" só) e "Alergoshop" (é venda de produto, vai para o Caixa).</div></div>`;
-  if(CF_ABA==='locais') h+=`<div class="card"><table class="tb"><tr><th>Local</th><th>Endereço</th><th>Tipo</th><th class="r">Fila</th></tr>
-    ${LOCAIS.map(l=>{const c=CIDADES.find(x=>x.n===l[0]);return `<tr><td>${l[0]}</td><td class="mut">${l[1]}</td><td><span class="chip ${l[2]==='sede'?'g':'b'}">${l[2]}</span></td><td class="r num">${c?c.esp:'—'}</td></tr>`}).join('')}</table>
+  if(CF_ABA==='locais') h+=`<div class="card"><table class="tb"><tr><th>Local</th><th>Endereço</th><th>Tipo</th><th>Unidade no Amigo</th><th class="r">Fila ${rxF('ex')}</th></tr>
+    ${LOCAIS.map(l=>{const c=CIDADES.find(x=>x.n===l[0]);return `<tr><td>${l[0]}</td><td class="mut">${l[1]}</td><td><span class="chip ${l[2]==='sede'?'g':'b'}">${l[2]}</span></td><td>${l[2]==='sede'?'✓ ligada':c?'✓ '+c.place:'—'}</td><td class="r num">${c?naFila(c):'—'}</td></tr>`}).join('')}</table>
     <div class="hint">No Amigo eram 17 "unidades". <b>Local é só onde a pessoa vai estar</b>, com endereço para a mensagem de confirmação. "Vacina", "Pacotes antes de 01/12/2025" e "Permuta Manoel" não são lugar: viraram tipo de atendimento ou ficam no Amigo.</div></div>`;
   if(CF_ABA==='grade') h+=`<div class="card"><h3>Dr. Manoel</h3><table class="tb"><tr><th>Quando</th><th>Horário</th><th>Local</th><th>Repete</th><th>Encaixes</th></tr>
     <tr><td>Seg a Sex</td><td class="num">08:00–12:00 e 13:30–16:30</td><td>Espaço Pelle</td><td>toda semana</td><td>2 por dia</td></tr>
     <tr><td>Sábado</td><td class="num">08:00–12:00</td><td>Lago da Pedra</td><td>a cada 15 dias</td><td>—</td></tr>
-    <tr><td>3ª quinta do mês</td><td class="num">08:00–17:00</td><td>Bacabal</td><td>mensal</td><td>—</td></tr>
-    <tr><td style="color:var(--coral)">24/10</td><td>dia todo</td><td style="color:var(--coral)">bloqueado · congresso</td><td>exceção</td><td>—</td></tr></table>
+    <tr><td>Quando o Roteiro abrir</td><td class="num">08:00–17:00</td><td>Bacabal, Codó…</td><td>por data (próxima sugerida: qui 15/10)</td><td>—</td></tr>
+    <tr><td style="color:var(--coral)">24/10</td><td>dia todo</td><td style="color:var(--coral)">bloqueado · congresso · cai no sábado de Lago da Pedra</td><td>exceção</td><td>—</td></tr></table>
     <div class="acoes"><button class="btn sec min">+ horário</button><button class="btn sec min">+ exceção</button><button class="btn sec min">Bloquear agenda</button></div>
-    <div class="hint">No Amigo, só a grade da sede estava ativa. Os dias em cidades aqui são <b>exemplo</b> — é a pergunta que falta a clínica responder.</div></div>`;
+    <div class="hint">Hoje (real) só a sede tem grade no Amigo. O sábado em Lago da Pedra é <b>exemplo</b> de como fica depois que a recepção criar lá; as outras cidades não têm dia fixo: a data é aberta pelo Roteiro.</div></div>`;
   return h;
 }
 
@@ -1975,7 +2806,7 @@ const HJ_NOITE_AGENTE=5; // exemplo: quantas mensagens o agente respondeu de noi
 const HJ_NOITE=[ // exemplo: chegaram de noite e o agente passou para a recepção
   {n:'Rogério Alves',t:'consegue fazer o botox por 1.400?',q:'ter 21:12',por:'pediu desconto: quem decide é a clínica',r:'Bom dia, Rogério! No Pix à vista consigo 5%: o botox fica R$ 1.520. Quer que eu já separe um horário com o Dr. Manoel?'},
   {n:'Heitor Lima',t:'queria falar com uma pessoa, não com robô',q:'ter 22:40',por:'pediu para falar com a recepção',r:'Bom dia, Heitor! Aqui é a recepção do Centro Dermatológico. Em que posso te ajudar?'},
-  {n:'Número novo (99) 9····-··17',t:'bom dia, o doutor atende em Codó?',q:'qua 06:48',por:'número novo: confirme que é paciente e o agente segue',r:'Bom dia! Ainda não temos data em Codó. Posso pôr você na lista de Codó e avisar assim que abrir? 🙂',cv:6},
+  {n:'Número novo (99) 9····-··17',t:'bom dia, o doutor atende em Codó?',q:'qua 06:48',por:'número novo: confirme que é paciente e o agente segue',r:'Bom dia! Ainda não temos data em Codó. O Dr. Manoel atende em Pedreiras na quinta (24/09), se quiser. Ou posso pôr você na lista de Codó e avisar assim que ele abrir um dia aí? 🙂',cv:6},
 ];
 const HJ_RET=[['Carlos Mendes',12],['Josué Almeida',9],['Rosângela Sá',7],['Benedito Lima',5],['Irene Castro',3]]; // exemplo: os 5 mais atrasados dos retornos pedidos
 const HJ_PIX=[ // exemplo
@@ -1988,7 +2819,7 @@ const HJ_CAND={
   manoel:[['Carlos Mendes','retorno vencido há 12 dias',96,'Retorno'],['Márcio Luz','recebeu o preço há 13 dias',81,'Consulta'],['Heitor Lima','pediu "o mais cedo possível"',71,'Consulta'],['Renata Dias','recebeu o preço há 6 dias',66,'Consulta']],
   juliana:[['Marta Silva','pacote parado há 64 dias',90,'Sessão de pacote'],['Joana Prado','peeling atrasado 6 dias',85,'Sessão de pacote'],['Paula Viana','procedimento estético em aberto',64,'Procedimento estético'],['Clara Nunes','sessão de laser liberada',60,'Sessão de pacote']],
   brenda:[['Tiago Rocha','retirada do teste alérgico',88,'Retirada teste alérgico'],['Carlos Mendes','vacina: 2ª dose',75,'Vacina'],['Heitor Lima','pediu "o mais cedo possível"',60,'Testes alérgicos'],['Rita Alves','vacina em atraso',55,'Vacina']],
-  viagem:[['Heloísa Dias','mora em Lago da Pedra',92,'Consulta'],['Rosa Lima','fila de Lago da Pedra',80,'Consulta'],['Antônio Reis','fila de Lago da Pedra',77,'Consulta'],['Luzia Ramos','fila de Lago da Pedra',70,'Consulta']],
+  viagem:[['Raimunda Sousa','retorno vencido · fila de Lago da Pedra',92,'Retorno'],['Rosa Lima','fila de Lago da Pedra',80,'Consulta'],['Antônio Reis','fila de Lago da Pedra',77,'Consulta'],['Luzia Ramos','fila de Lago da Pedra',70,'Consulta']],
 };
 const hjOrd=(a,b)=>a.dia-b.dia||(a.h<b.h?-1:a.h>b.h?1:0);
 const hjQuando=e=>(e.dia===HOJE?'hoje':e.dia===HOJE+1?'amanhã':e.dia===HOJE-1?'ontem':rxDia(e.dia))+' '+e.h;
@@ -2271,6 +3102,7 @@ function render(){
 }
 ROTA=(location.hash||'#hoje').slice(1)||'hoje';
 gerarSemana();
+rtPreparar(); // Roteiro: cirurgia não viaja; o sábado em Lago da Pedra troca só ela por consulta
 hjPreparar(); // Hoje: confirmação de amanhã ainda não saiu + horários aguardando sinal
 agOrigem();   // Agenda: quem marcou cada atendimento (Amigo, agente ou aqui)
 menu();render();

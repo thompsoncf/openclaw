@@ -4287,7 +4287,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   .qtd-it .d{flex:1 1 180px;min-width:0;overflow-wrap:anywhere}
   .qtd-it .d i{display:block;font-style:normal;font-size:.7rem;color:var(--txt-mut)}
   .qtd-it .bts{display:flex;gap:.3rem;flex-wrap:wrap}
-  .qtd-it button{width:auto;min-height:0;border:1px solid #2f2f31;border-radius:999px;padding:.24rem .65rem;font-size:.74rem;background:none;color:var(--txt-mut);cursor:pointer}
+  .qtd-it button{width:auto;min-height:0;margin:0;border:1px solid #2f2f31;border-radius:999px;padding:.24rem .65rem;font-size:.74rem;background:none;color:var(--txt-mut);cursor:pointer}
   .qtd-it button.sug{border-style:dashed;border-color:#1E4A3A;color:var(--verde-claro)}
   .qtd-it button.on{border-style:solid;border-color:#1E4A3A;background:#10241A;color:var(--verde-claro);font-weight:600}
   .qtd-it.feito{opacity:.55}
@@ -4305,7 +4305,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     {% set _pend = (quadro_sem_tipo or {}).get((m.ano, m.mes)) or [] %}
     {% if _pend %}
     <details class="qtd-cls">
-      <summary>{{ _pend|length }} de {{ m.rotulo.split('/')[0]|lower }} sem tipo — classificar agora ▾</summary>
+      <summary>{{ _pend|length }} de {{ m.rotulo.split('/')[0]|lower }} sem tipo — classificar agora</summary>
       {% for l in _pend %}
       <div class="qtd-it" id="qtd-{{ l.id }}">
         <span class="d">{{ l.descricao|e }} — {{ l.valor_centavos|brl }}<i>{{ l.data.strftime('%d/%m') }}{% if l.plano %} · {{ l.plano|e }}{% endif %}{% if l.centro %} · centro {{ l.centro|e }}{% endif %}{% if l.sugestao %} · sugerido: {{ TIPO_DESPESA_ROTULO[l.sugestao] }}{% endif %}</i></span>

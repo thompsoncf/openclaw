@@ -378,12 +378,16 @@ b,strong{font-weight:600}
 
 /* ---------- funil ---------- */
 .fr{display:flex;align-items:center;gap:.6rem;padding:.42rem 0}
-.fr .nm{width:88px;flex-shrink:0;font-size:.82rem;color:var(--text-dim)}
+.fr .nm{width:96px;flex-shrink:0;font-size:.8rem;color:var(--text-dim);line-height:1.15}
 .fr .bar{flex:1;height:14px;border-radius:7px;background:var(--bg-2);border:1px solid var(--line);overflow:hidden}
 .fr .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--neon-deep),var(--neon))}
 .fr .qt{width:74px;text-align:right;flex-shrink:0;font-size:.78rem}
 .fr .qt b{font-family:var(--mono)}
-.fr .qt small{display:block;color:var(--text-faint);font-size:.68rem}
+.fr .qt small{display:block;color:var(--neon);font-size:.66rem;white-space:nowrap}
+.fr .qt{min-width:74px;width:auto}
+.fr.fech .bar i{background:linear-gradient(90deg,#1f7a45,#3fbf6f)}
+.fr.perd .nm,.fr.perd .qt b{color:var(--text-faint)}
+.fr.perd .bar i{background:#3a3f45}
 
 /* ---------- atenção ---------- */
 .aten{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin:0 1.1rem .9rem}
@@ -393,6 +397,43 @@ b,strong{font-weight:600}
 .at.hot{border-color:#5a2b2b;background:#241313}.at.hot .n{color:var(--coral)}
 .at.warn{border-color:#5a4520;background:#241c0f}.at.warn .n{color:var(--ambar)}
 .at.info{border-color:#1b3a4a;background:#0d1b23}.at.info .n{color:var(--azul)}
+
+/* ---------- visão: período, leads por dia, barras (24/09/2026) ---------- */
+.perpainel{margin:-.3rem 1.1rem .9rem;background:var(--surface);border:1px solid var(--line);
+  border-radius:14px;padding:.7rem .8rem}
+.perpainel .atalhos{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.6rem}
+.perpainel .atalhos a{font-size:.76rem;padding:.3rem .65rem;border-radius:999px;
+  border:1px solid var(--line);color:var(--text-dim)}
+.perpainel form{display:flex;gap:.4rem;align-items:flex-end;flex-wrap:wrap}
+.perpainel label{display:flex;flex-direction:column;font-size:.7rem;color:var(--text-faint);gap:.15rem;flex:1;min-width:120px}
+.perpainel input{background:var(--bg-2);border:1px solid var(--line);border-radius:10px;color:var(--text);
+  padding:.45rem .5rem;font:inherit;font-size:.85rem}
+.perpainel button{background:var(--neon);color:var(--ink);border:0;border-radius:10px;
+  padding:.5rem 1rem;font:inherit;font-weight:700;cursor:pointer}
+.dias{display:grid;gap:2px;align-items:end;height:96px}
+.dias .d{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}
+.dias .d b{font-family:var(--mono);font-size:.56rem;color:var(--text-dim);margin-bottom:2px}
+.dias .d i{width:100%;display:block;border-radius:3px 3px 0 0;min-height:2px;
+  background:linear-gradient(0deg,var(--neon-deep),var(--neon))}
+.dias .d.fds i{background:#2c4a3a}
+.dias .d.ult i{background:var(--neon);box-shadow:0 0 10px rgba(37,211,102,.35)}
+.rotd{display:grid;gap:2px;text-align:center;font-size:.52rem;line-height:1.2;color:var(--text-faint);margin-top:3px}
+.rotd .fds{opacity:.6}
+.linhas{font-size:.78rem;margin-top:.55rem}
+.linhas div{display:flex;justify-content:space-between;gap:.6rem;padding:.3rem 0;border-top:1px solid var(--line)}
+.linhas span{color:var(--text-dim)}
+.linhas b{font-family:var(--mono);text-align:right}
+.linhas b.amb{color:var(--ambar)}
+.hb{font-size:.76rem}
+.hb div{display:grid;grid-template-columns:104px 1fr 30px;gap:.45rem;align-items:center;padding:.18rem 0}
+.hb span{color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hb i{display:block;height:8px;border-radius:99px;background:linear-gradient(90deg,var(--neon-deep),var(--neon))}
+.hb i.ci,.hb i.apagado{background:#3a3f45}
+.hb i.alerta{background:var(--ambar)}
+.hb b{font-family:var(--mono);text-align:right}
+.alerta{margin-top:.6rem;background:#241c0f;border:1px solid #5a4520;color:#f0cf85;border-radius:11px;
+  padding:.55rem .65rem;font-size:.74rem;line-height:1.4}
+.eyebrow .lidos{color:var(--text-faint);letter-spacing:.04em;text-transform:none}
 
 /* ---------- pódio + placar ---------- */
 /* pódio: os itens ESTICAM na altura da linha e empurram o conteúdo pro fim
@@ -6566,26 +6607,147 @@ def _lead_gestor(request: Request, conta_id: int, lead_id: int, saida_wa: bool =
 
 
 # ================================================================== GESTOR
+def _dono_periodo(request: Request) -> tuple[str, str, str, bool]:
+    """(p, de, ate, abrir) da Visão, lembrados na sessão.
+
+    A escolha fica guardada como fica a da Fila: voltar pra tela devolve o mesmo
+    recorte. O "Período" sem datas na URL reaproveita as últimas escolhidas — quem
+    olhou "1 a 15 de setembro" e foi ver o Placar volta pro mesmo 1 a 15."""
+    q = request.query_params
+    sess = request.session
+    p = q.get("p") or sess.get("ck_vis_p") or "semana"
+    if p not in cd.PERIODOS:
+        p = "semana"
+    de, ate = q.get("de") or "", q.get("ate") or ""
+    if p == "periodo" and not (de and ate):
+        de, ate = sess.get("ck_vis_de") or "", sess.get("ck_vis_ate") or ""
+    esc = cd.periodo_escolhido(de, ate) if p == "periodo" else None
+    abrir = bool(q.get("abrir")) or (p == "periodo" and not esc)
+    sess["ck_vis_p"] = p
+    if esc:
+        de, ate = esc[0].isoformat(), esc[1].isoformat()
+        sess["ck_vis_de"], sess["ck_vis_ate"] = de, ate
+    return p, de, ate, abrir
+
+
+def _painel_periodo(de: str, ate: str) -> str:
+    """Os atalhos e as duas datas do "Período". GET simples: funciona sem JS e o
+    <input type=date> abre o calendário do próprio celular."""
+    from datetime import datetime, timedelta
+    hoje = datetime.now(cd._brt()).date()
+    ontem = hoje - timedelta(days=1)
+    ini_mes = hoje.replace(day=1)
+    fim_passado = ini_mes - timedelta(days=1)
+    atalhos = [("Ontem", ontem, ontem),
+               ("Últimos 7 dias", hoje - timedelta(days=6), hoje),
+               ("Últimos 30 dias", hoje - timedelta(days=29), hoje),
+               ("Mês passado", fim_passado.replace(day=1), fim_passado)]
+    at = "".join(f"<a href='{_BASE}?p=periodo&de={a.isoformat()}&ate={b.isoformat()}'>{esc(r)}</a>"
+                 for r, a, b in atalhos)
+    v_de = de or (hoje - timedelta(days=6)).isoformat()
+    v_ate = ate or hoje.isoformat()
+    return ("<div class=perpainel><div class=atalhos>" + at + "</div>"
+            f"<form method=get action='{_BASE}'><input type=hidden name=p value=periodo>"
+            f"<label>de<input type=date name=de value='{esc(v_de)}' max='{hoje.isoformat()}'></label>"
+            f"<label>até<input type=date name=ate value='{esc(v_ate)}' max='{hoje.isoformat()}'></label>"
+            "<button>Ver</button></form></div>")
+
+
+def _barras_h(itens: list[dict]) -> str:
+    """Barras horizontais de uma linha: rótulo, barra, número."""
+    return "<div class=hb>" + "".join(
+        f"<div><span>{esc(i['rotulo'])}</span>"
+        f"<i class='{esc(i.get('tom') or ('ci' if i.get('resto') or i.get('fds') else ''))}' "
+        f"style='width:{int(i['pct'])}%'></i><b>{int(i['n'])}</b></div>" for i in itens) + "</div>"
+
+
 def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
-    periodo = request.query_params.get("p", "semana")
-    if periodo not in ("hoje", "semana", "mes"):
-        periodo = "semana"
-    v = cd.visao(get_pool(), conta_id, periodo)
+    from finance import vendas as _vendas
+    periodo, de, ate, abrir = _dono_periodo(request)
+    pool = get_pool()
+    v = cd.visao(pool, conta_id, periodo, de, ate)
     k = v["kpis"]
     conv = f"{k['conversao']}%" if k["conversao"] is not None else "—"
 
     def seg(key, lab):
         return f"<a class='{'on' if periodo == key else ''}' href='{_BASE}?p={key}'>{lab}</a>"
 
+    esc_per = cd.periodo_escolhido(de, ate) if periodo == "periodo" else None
+    rot_per = (cd.rotulo_periodo(*esc_per) if esc_per else "Período") + " ▾"
+    pilula_per = (f"<a class='{'on' if periodo == 'periodo' else ''}' "
+                  f"href='{_BASE}?p=periodo&abrir=1'>{esc(rot_per)}</a>")
+
     funil = "".join(
-        f"<div class=fr><span class=nm>{esc(f['rotulo'])}</span>"
+        f"<div class='fr {esc(f['tipo'])}'><span class=nm>{esc(f['rotulo'])}</span>"
         f"<span class=bar><i style='width:{f['pct']}%'></i></span>"
-        f"<span class=qt><b>{f['n']}</b><small>{esc(f['valor'])}</small></span></div>"
+        f"<span class=qt><b>{f['n']}</b>"
+        + (f"<small>{esc(f['valor'])}" + (f" · {f['n_orc']} prop." if f["n_orc"] else "") + "</small>"
+           if f["valor"] else "")
+        + "</span></div>"
         for f in v["funil"])
     a = v["atencao"]
+
+    # --- os blocos novos (24/09/2026): o que a gestão de tráfego pergunta --------
+    blocos = ""
+    try:
+        mv = cd.movimento(pool, conta_id, periodo, de, ate)
+        barras = "".join(
+            f"<div class='d{' fds' if x['fds'] else ''}{' ult' if x['ultimo'] else ''}'>"
+            f"<b>{x['n']}</b><i style='height:{x['pct']}%'></i></div>" for x in mv["dias"])
+        rotulos = "".join(f"<span class='{'fds' if x['fds'] else ''}'>{x['dia']}<br>{x['num']}</span>"
+                          for x in mv["dias"])
+        n = len(mv["dias"])
+        blocos += (
+            "<div class=eyebrow>Leads por dia</div>"
+            f"<div class=bloco><div class=card>"
+            f"<div class=dias style='grid-template-columns:repeat({n},1fr)'>{barras}</div>"
+            f"<div class=rotd style='grid-template-columns:repeat({n},1fr)'>{rotulos}</div>"
+            "<div class=linhas>"
+            f"<div><span>{n} dias</span><b>{mv['total']} leads · {mv['media']} por dia</b></div>"
+            f"<div><span>1ª resposta (mediana)</span><b>{esc(_vendas.duracao_curta(mv['resposta_min']))}</b></div>"
+            f"<div><span>Nunca respondidos</span><b>{mv['sem_resposta']}</b></div>"
+            "</div></div></div>")
+        qc = cd.quando_chegam(pool, conta_id, periodo, de, ate)
+        if qc["total"]:
+            t = qc["turnos"]
+            alerta = ""
+            if qc["fora"] and qc["espera_fora_min"] is not None:
+                alerta = (f"<div class=alerta><b>{qc['fora']} leads ({qc['fora_pct']}%)</b> chegaram fora do "
+                          f"expediente e esperaram <b>{esc(_vendas.duracao_curta(qc['espera_fora_min']))}</b> "
+                          "pela 1ª resposta."
+                          + (f" Dentro do horário: <b>{esc(_vendas.duracao_curta(qc['espera_dentro_min']))}</b>."
+                             if qc["espera_dentro_min"] is not None else "") + "</div>")
+            blocos += (
+                f"<div class=eyebrow>Quando chegam · {qc['dias_janela']} dias</div>"
+                "<div class=bloco><div class=card>" + _barras_h(qc["por_dia"])
+                + "<div class=linhas><div><span>Manhã · tarde · noite</span>"
+                f"<b>{t['manha']} · {t['tarde']} · {t['noite']}</b></div></div>" + alerta + "</div></div>")
+        oq = cd.o_que_pedem(pool, conta_id, periodo, de, ate)
+        if oq:
+            linhas = "".join(f"<div><span>{esc(r)}</span><b>{esc(val)}</b></div>" for r, val in oq["linhas"])
+            if oq["sem"]:
+                linhas += f"<div><span>{esc(oq['sem_rotulo'])}</span><b class=amb>{oq['sem']}</b></div>"
+            blocos += (f"<div class=eyebrow>O que pedem · {oq['dias_janela']} dias</div>"
+                       "<div class=bloco><div class=card>" + _barras_h(oq["itens"])
+                       + (f"<div class=linhas>{linhas}</div>" if linhas else "") + "</div></div>")
+        pq = cd.por_que_perdemos(pool, conta_id, periodo, de, ate)
+        if pq:
+            nota = ""
+            if pq["nao_cliente"]:
+                nota = (f"<div class=alerta><b>{pq['nao_cliente']} de {pq['total']}</b> não eram clientes: "
+                        "vaga, fornecedor, doação, ou pedido de algo que a casa não vende.</div>")
+            lidos = (f" <span class=lidos>💬 {pq['lidos']} lido{'s' if pq['lidos'] != 1 else ''} das conversas</span>"
+                     if pq["lidos"] else "")
+            blocos += (f"<div class=eyebrow>Por que perdemos · {pq['dias_janela']} dias{lidos}</div>"
+                       "<div class=bloco><div class=card>" + _barras_h(pq["itens"]) + nota + "</div></div>")
+    except Exception:  # noqa: BLE001 — bloco de análise nunca derruba a tela do gestor
+        _log.warning("visão: blocos de análise falharam na conta %s", conta_id, exc_info=True)
+
     corpo = (
                _hdr_dono(conta_id, "Equipe", "acompanhe o time")
-             + f"<div class=scroll><div class=seg>{seg('hoje','Hoje')}{seg('semana','Semana')}{seg('mes','Mês')}</div>"
+             + f"<div class=scroll><div class=seg>{seg('hoje','Hoje')}{seg('semana','Semana')}"
+               f"{seg('mes','Mês')}{pilula_per}</div>"
+             + (_painel_periodo(de, ate) if abrir else "")
              + "<div class=kpis>"
              + f"<div class='kpi hero'><div class=v>{esc(k['ganhos_rs'])}</div><div class=l>Fechado no período</div>"
                f"<div class=d>{k['ganhos']} negócio(s) · {conv} de conversão</div></div>"
@@ -6604,6 +6766,7 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
              + f"<div class='at warn'><div class=n>{a['quentes']}</div><div class=t>quentes sem contato hoje</div></div>"
              + f"<div class='at info'><div class=n>{a['propostas']}</div><div class=t>propostas aguardando</div></div>"
              + f"<div class='at info'><div class=n>{a['visitas']}</div><div class=t>visitas hoje</div></div></div>"
+             + blocos
              + "</div>" + _abas_dono("visao"))
     return _page("Equipe", corpo)
 

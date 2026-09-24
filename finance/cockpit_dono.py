@@ -9,7 +9,7 @@ orcamentos/eventos_agenda). Sem tabela nova.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from finance import funil_regua as _fr
 
@@ -26,9 +26,63 @@ def _brt():
     return ag.BRT
 
 
-def _range(periodo: str):
-    """(início, fim) do período em BRT. hoje / semana / mês."""
+#: As pílulas da Visão. 'periodo' é a quarta, com as datas que o gestor escolher —
+#: o nome é do dono (24/09/2026), entre "Escolher", "Período" e "Personalizado".
+PERIODOS = ("hoje", "semana", "mes", "periodo")
+
+#: Até onde o período escolhido pode ir. Um ano cobre "o que aconteceu no ano
+#: passado"; mais que isso é relatório, não painel de celular.
+PERIODO_MAX_DIAS = 366
+
+
+def periodo_escolhido(de, ate) -> tuple[date, date] | None:
+    """As duas datas do período escolhido, validadas. None se não dá pra usar.
+
+    Aceita 'AAAA-MM-DD' (o <input type=date> manda assim) ou `date`. Invertidas são
+    DESINVERTIDAS em vez de recusadas: quem pôs 30 no "de" e 1 no "até" quis o mês
+    inteiro, e uma tela de erro no celular por isso é pior que adivinhar certo."""
+    def _d(v):
+        if isinstance(v, date):
+            return v
+        try:
+            return date.fromisoformat(str(v or "").strip()[:10])
+        except ValueError:
+            return None
+    a, b = _d(de), _d(ate)
+    if not a or not b:
+        return None
+    if a > b:
+        a, b = b, a
+    if (b - a).days > PERIODO_MAX_DIAS:
+        a = b - timedelta(days=PERIODO_MAX_DIAS)
+    return a, b
+
+
+_MESES_CURTOS = ("jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez")
+_DIAS_CURTOS = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
+
+
+def rotulo_periodo(de: date, ate: date) -> str:
+    """'10–23 set', '28 ago – 3 set', '15 dez 2025 – 10 jan'. É o que a pílula
+    'Período' mostra depois de escolhida: o nome some e vira a resposta."""
+    if de == ate:
+        return f"{de.day} {_MESES_CURTOS[de.month - 1]}"
+    ano_de = f" {de.year}" if de.year != ate.year else ""
+    if de.month == ate.month and de.year == ate.year:
+        return f"{de.day}–{ate.day} {_MESES_CURTOS[ate.month - 1]}"
+    return f"{de.day} {_MESES_CURTOS[de.month - 1]}{ano_de} – {ate.day} {_MESES_CURTOS[ate.month - 1]}"
+
+
+def _range(periodo: str, de=None, ate=None):
+    """(início, fim) do período em BRT. hoje / semana / mês / período escolhido."""
     now = datetime.now(_brt())
+    if periodo == "periodo":
+        esc = periodo_escolhido(de, ate)
+        if esc:
+            ini = datetime(esc[0].year, esc[0].month, esc[0].day, tzinfo=_brt())
+            fim = datetime(esc[1].year, esc[1].month, esc[1].day, tzinfo=_brt()) + timedelta(days=1)
+            return ini, min(fim, now + timedelta(minutes=1))
+        periodo = "semana"     # datas ilegíveis: a semana, que é o padrão da tela
     if periodo == "hoje":
         ini = now.replace(hour=0, minute=0, second=0, microsecond=0)
     elif periodo == "mes":
@@ -95,8 +149,8 @@ def _e_gerencia(papel: str) -> bool:
 
 
 # ------------------------------------------------------------------ VISÃO
-def visao(pool, conta_id: int, periodo: str = "semana") -> dict:
-    ini, fim = _range(periodo)
+def visao(pool, conta_id: int, periodo: str = "semana", de=None, ate=None) -> dict:
+    ini, fim = _range(periodo, de, ate)
     with pool.connection() as c:
         novos = c.execute("select count(*) from prospeccao where conta_id=%s and coalesce(estagio,'lead')='lead' "
                           "and criado_em>=%s and criado_em<%s", (conta_id, ini, fim)).fetchone()[0]
@@ -117,24 +171,7 @@ def visao(pool, conta_id: int, periodo: str = "semana") -> dict:
                          "and atualizado_em>=%s and atualizado_em<%s", (conta_id, ini, fim)).fetchone()[0]
         ganhos, ganhos_c = int(g[0] or 0), int(g[1] or 0)
         conv = round(100 * ganhos / (ganhos + perd)) if (ganhos + perd) else None
-        # O FUNIL DO TIME, com as etapas e os nomes DA CONTA (ver `_etapas_conta`).
-        # A lista era fixa em quatro chaves e quatro rótulos de fábrica: na Prime o
-        # gestor lia "Qualificado" onde o painel diz "Agendado Visita", "Proposta"
-        # onde diz "Negociação", e "ORCAMENTO ASSINADO" não aparecia em lugar
-        # nenhum. Mesmo defeito que a aba Leads corrigiu em 17/09/2026, na mesma
-        # tela, por uma constante esquecida aqui.
-        etapas = [(ch, rot) for ch, rot in _etapas_conta(c, conta_id)
-                  if ch not in ("ganho", "perdido")] or _ETAPAS_FUNIL
-        por_etapa = dict(c.execute(
-            "select p.status, count(*) from prospeccao p "
-            " where p.conta_id=%s and coalesce(p.estagio,'lead')='lead' group by p.status",
-            (conta_id,)).fetchall())
-        valor_etapa = dict(c.execute(
-            "select p.status, coalesce(sum(" + _VALOR_FECHADO + "),0) from prospeccao p "
-            " where p.conta_id=%s and coalesce(p.estagio,'lead')='lead' group by p.status",
-            (conta_id,)).fetchall())
-        funil = [{"rotulo": rot, "n": int(por_etapa.get(ch) or 0),
-                  "valor": _reais(valor_etapa.get(ch) or 0)} for ch, rot in etapas]
+        funil = _funil(c, conta_id)
         maxn = max([f["n"] for f in funil] + [1])
         for f in funil:
             f["pct"] = round(100 * f["n"] / maxn)
@@ -161,6 +198,350 @@ def visao(pool, conta_id: int, periodo: str = "semana") -> dict:
         "funil": funil,
         "atencao": {"parados": parados, "quentes": quentes, "propostas": propostas, "visitas": visitas},
     }
+
+
+def _funil(c, conta_id: int) -> list[dict]:
+    """O funil do time, com as MESMAS colunas do quadro do painel.
+
+    Pedido do dono em 24/09/2026: "tem uma coluna que tem na web e não tem no
+    cockpit". O conserto do dia anterior tinha trazido os nomes da conta, mas ainda
+    tirava ganho e perdido — e na Prime isso é o CONTRATO ASSINADO (9) e o Perdido
+    (38), justamente as duas pontas do fim. Agora a regra é a do quadro: todas as
+    etapas da conta, na ordem dela, menos as marcadas "sai do quadro". O Perdido
+    vem marcado pra tela desenhar apagado — quem olha o funil precisa ver o
+    vazamento, mas ele não compete com o que está vivo.
+
+    O R$ SÓ ONDE HÁ ORÇAMENTO OU CONTRATO (mesmo pedido): "valores só precisam
+    aparecer em orçamentos e contratos, fora isso não — os dados dos leads mesmo,
+    com quantidade". A regra é pelo DADO e não pelo nome da etapa: a etapa mostra
+    R$ quando os leads dela têm orçamento, e quantos têm. Assim vale pra qualquer
+    conta, com qualquer nome. No Perdido não mostra — dinheiro que não entrou não é
+    número de funil.
+    """
+    try:
+        with c.transaction():
+            etapas = c.execute(
+                """select chave, coalesce(nullif(rotulo,''), chave), coalesce(fase,'venda')
+                     from funil_etapas where conta_id=%s and not coalesce(sai_do_quadro,false)
+                    order by ordem, id""", (conta_id,)).fetchall()
+    except Exception:  # noqa: BLE001 — base sem 238/fase: o jeito antigo
+        etapas = []
+    if not etapas:
+        etapas = [(ch, rot, "venda") for ch, rot in _ETAPAS_FUNIL]
+    linhas = c.execute(
+        """select p.status, count(*),
+                  count(*) filter (where o.id is not null),
+                  coalesce(sum(coalesce(o.primeiro_ano_centavos, o.setup_centavos, 0)), 0)
+             from prospeccao p
+             left join orcamentos o on o.id = p.orcamento_id and o.conta_id = p.conta_id
+            where p.conta_id=%s and p.estagio = 'lead'
+            group by p.status""", (conta_id,)).fetchall()
+    por = {r[0]: (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)) for r in linhas}
+    out = []
+    for chave, rot, fase in etapas:
+        n, n_orc, cent = por.get(chave, (0, 0, 0))
+        perdido = chave == "perdido"
+        fechado = (fase in ("fechamento", "pos") and not perdido) or chave == "ganho"
+        mostra_rs = bool(n_orc and cent and not perdido)
+        out.append({"chave": chave, "rotulo": rot, "n": n,
+                    "tipo": "perd" if perdido else ("fech" if fechado else ""),
+                    "valor": _reais_cheio(cent) if mostra_rs else "",
+                    # "18 prop." só onde nem todo lead tem orçamento — no contrato
+                    # assinado todos têm, e repetir o número só enche a linha
+                    "n_orc": n_orc if (mostra_rs and n_orc < n) else 0})
+    return out
+
+
+def _reais_cheio(centavos) -> str:
+    """'R$ 148.050' — o valor inteiro, com ponto de milhar. No funil o número
+    exato importa (é a proposta na mesa); o 'R$ 148 mil' do KPI é pra bater o olho."""
+    v = int(centavos or 0) // 100
+    return "R$ " + f"{v:,}".replace(",", ".")
+
+
+# ------------------------------------------------------------------ O MOVIMENTO
+# Os quatro blocos abaixo nasceram do mesmo pedido (24/09/2026): o dono vai dar
+# acesso à gestão de tráfego, e a Visão tinha o placar do vendedor mas nada do que a
+# agência pergunta — o anúncio está trazendo gente? a gente atende? o que pedem? por
+# que não fecha? Tudo só leitura, e escopado pela conta.
+
+#: Janela mínima dos blocos de análise. "Quando chegam" num período de hoje, com
+#: três leads distribuídos por dia da semana, é ruído com cara de dado.
+JANELA_MINIMA_DIAS = 30
+#: Quantas barras o "leads por dia" tem no mínimo e no máximo.
+DIAS_MIN, DIAS_MAX = 14, 31
+
+
+def _janela_minima(ini, fim, dias: int):
+    return min(ini, fim - timedelta(days=dias)), fim
+
+
+def _dia_br(dt) -> date:
+    return dt.astimezone(_brt()).date()
+
+
+def _cfg_janela(c, conta_id: int) -> dict:
+    """A janela de atendimento da conta, SÓ LENDO. `funil_regua.config` semeia a
+    linha na primeira leitura — aqui não: uma tela de consulta não escreve."""
+    cfg = dict(_fr._PADRAO)
+    try:
+        with c.transaction():
+            r = c.execute("select janela_dias, janela_abre, janela_fecha from funil_regua where conta_id=%s",
+                          (conta_id,)).fetchone()
+        if r:
+            for k, v in zip(("janela_dias", "janela_abre", "janela_fecha"), r):
+                if v is not None:
+                    cfg[k] = v
+    except Exception:  # noqa: BLE001
+        pass
+    return cfg
+
+
+def _entradas(c, conta_id: int, ini, fim) -> list[tuple]:
+    """(criado_em, primeira mensagem nossa) de cada lead que entrou no período."""
+    return c.execute(
+        """select p.criado_em,
+                  (select min(m.criado_em) from conversas cv join mensagens m on m.conversa_id = cv.id
+                    where cv.prospeccao_id = p.id and cv.conta_id = p.conta_id and m.direcao = 'out')
+             from prospeccao p
+            where p.conta_id=%s and p.criado_em >= %s and p.criado_em < %s""",
+        (conta_id, ini, fim)).fetchall()
+
+
+def _mediana(xs):
+    xs = sorted(xs)
+    if not xs:
+        return None
+    m = len(xs) // 2
+    return xs[m] if len(xs) % 2 else (xs[m - 1] + xs[m]) / 2
+
+
+def movimento(pool, conta_id: int, periodo: str = "semana", de=None, ate=None) -> dict:
+    """Leads por dia (com o dia da semana e a data em cada barra), a 1ª resposta e
+    quem ficou sem resposta nenhuma.
+
+    As barras cobrem o período escolhido, com piso de 14 dias e teto de 31: "hoje"
+    com uma barra só não mostra nada, e um ano inteiro em barras de 3 pixels também
+    não. O fim de semana vem marcado — é ele que explica os buracos (na Prime:
+    sábado 19 teve 4 leads, domingo 20 teve 1, segunda voltou pra 16).
+    """
+    ini, fim = _range(periodo, de, ate)
+    ultimo = _dia_br(fim - timedelta(minutes=2))
+    primeiro = max(_dia_br(ini), ultimo - timedelta(days=DIAS_MAX - 1))
+    if (ultimo - primeiro).days + 1 < DIAS_MIN:
+        primeiro = ultimo - timedelta(days=DIAS_MIN - 1)
+    a = datetime(primeiro.year, primeiro.month, primeiro.day, tzinfo=_brt())
+    with pool.connection() as c:
+        linhas = _entradas(c, conta_id, a, fim)
+    cont: dict = {}
+    esperas, sem = [], 0
+    for criado, prim in linhas:
+        d = _dia_br(criado)
+        cont[d] = cont.get(d, 0) + 1
+        if prim:
+            esperas.append((prim - criado).total_seconds() / 60)
+        else:
+            sem += 1
+    dias = []
+    d = primeiro
+    while d <= ultimo:
+        dias.append({"data": d, "n": cont.get(d, 0), "dia": _DIAS_CURTOS[d.weekday()],
+                     "num": d.day, "fds": d.weekday() >= 5, "ultimo": d == ultimo})
+        d += timedelta(days=1)
+    maxn = max([x["n"] for x in dias] + [1])
+    for x in dias:
+        x["pct"] = max(2, round(100 * x["n"] / maxn)) if x["n"] else 2
+    total = sum(x["n"] for x in dias)
+    med = _mediana(esperas)
+    return {"dias": dias, "total": total, "media": round(total / len(dias)) if dias else 0,
+            "resposta_min": round(med) if med is not None else None, "sem_resposta": sem,
+            "de": primeiro, "ate": ultimo}
+
+
+def quando_chegam(pool, conta_id: int, periodo: str = "semana", de=None, ate=None) -> dict:
+    """Por dia da semana e por turno — e o achado mais caro: quem chega FORA do
+    expediente da conta espera quanto pela primeira resposta.
+
+    Medido na Prime em 24/09/2026: 78 de 310 leads (25%) chegaram à noite ou no
+    domingo e esperaram 7h40 (mediana) pela 1ª resposta; dentro do horário, 37 min.
+    É anúncio pago esperando a noite inteira. O expediente é o da CONTA (a mesma
+    janela da régua), não um 8h–18h fixo no código.
+    """
+    ini, fim = _janela_minima(*_range(periodo, de, ate), JANELA_MINIMA_DIAS)
+    with pool.connection() as c:
+        cfg = _cfg_janela(c, conta_id)
+        linhas = _entradas(c, conta_id, ini, fim)
+    por_dia = [0] * 7
+    turnos = {"manha": 0, "tarde": 0, "noite": 0, "madrugada": 0}
+    fora, esp_fora, esp_dentro = 0, [], []
+    for criado, prim in linhas:
+        loc = criado.astimezone(_brt())
+        por_dia[loc.weekday()] += 1
+        h = loc.hour
+        turnos["madrugada" if h < 6 else "manha" if h < 12 else "tarde" if h < 18 else "noite"] += 1
+        # `dentro_da_janela` recebe o instante em UTC e converte ele mesmo — é a
+        # mesma função que decide se a régua pode cobrar alguém agora
+        dentro = _fr.dentro_da_janela(criado.astimezone(timezone.utc), cfg)
+        espera = (prim - criado).total_seconds() / 60 if prim else None
+        if not dentro:
+            fora += 1
+            if espera is not None:
+                esp_fora.append(espera)
+        elif espera is not None:
+            esp_dentro.append(espera)
+    total = len(linhas)
+    maxd = max(por_dia + [1])
+    mf, md = _mediana(esp_fora), _mediana(esp_dentro)
+    return {
+        "total": total, "dias_janela": (fim - ini).days,
+        "por_dia": [{"dia": nome, "rotulo": nome, "n": n, "pct": round(100 * n / maxd), "fds": i >= 5}
+                    for i, (nome, n) in enumerate(zip(("Segunda", "Terça", "Quarta", "Quinta",
+                                                       "Sexta", "Sábado", "Domingo"), por_dia))],
+        "turnos": turnos,
+        "fora": fora, "fora_pct": round(100 * fora / total) if total else 0,
+        "espera_fora_min": round(mf) if mf is not None else None,
+        "espera_dentro_min": round(md) if md is not None else None,
+    }
+
+
+def _faixa_convidados(n) -> str | None:
+    if not n:
+        return None
+    return "até 50" if n < 50 else "50–99" if n < 100 else "100–199" if n < 200 else "200+"
+
+
+def o_que_pedem(pool, conta_id: int, periodo: str = "semana", de=None, ate=None) -> dict | None:
+    """O que os leads do período pedem, NO VOCABULÁRIO DO NICHO (regra 6).
+
+    Quem vende festa: tipo de festa, mês do evento e tamanho. Quem vende serviço por
+    mensalidade: segmento e porte da empresa. Produto não tem funil — sem bloco.
+    Nenhum nicho vê o do outro: a ZAQ não vê "casamento", a Prime não vê "porte".
+    Devolve None quando não há nada a dizer (o bloco some).
+    """
+    ini, fim = _janela_minima(*_range(periodo, de, ate), JANELA_MINIMA_DIAS)
+    with pool.connection() as c:
+        perfil = _fr.perfil_da_conta(c, conta_id)
+        if perfil == "produto":
+            return None
+        if perfil == "eventos":
+            linhas = c.execute(
+                """select lower(nullif(trim(evento_tipo),'')), evento_em, evento_convidados
+                     from prospeccao where conta_id=%s and criado_em>=%s and criado_em<%s""",
+                (conta_id, ini, fim)).fetchall()
+        else:
+            linhas = c.execute(
+                """select nullif(trim(segmento),''), null, nullif(trim(porte),'')
+                     from prospeccao where conta_id=%s and criado_em>=%s and criado_em<%s""",
+                (conta_id, ini, fim)).fetchall()
+    total = len(linhas)
+    if not total:
+        return None
+    tipos: dict = {}
+    sem_tipo = 0
+    for t, _em, _cv in linhas:
+        if t:
+            tipos[t] = tipos.get(t, 0) + 1
+        else:
+            sem_tipo += 1
+    if not tipos:
+        return None
+    ordem = sorted(tipos.items(), key=lambda x: -x[1])
+    top, resto = ordem[:4], sum(n for _t, n in ordem[4:])
+    maxn = max(n for _t, n in top)
+    itens = [{"rotulo": t[:1].upper() + t[1:], "n": n, "pct": round(100 * n / maxn)} for t, n in top]
+    if resto:
+        itens.append({"rotulo": "Outros", "n": resto, "pct": round(100 * resto / maxn), "resto": True})
+    linhas_txt = []
+    hoje = datetime.now(_brt()).date()
+    if perfil == "eventos":
+        meses: dict = {}
+        faixas: dict = {}
+        for _t, em, cv in linhas:
+            if em and em >= hoje.replace(day=1):
+                k = (em.year, em.month)
+                meses[k] = meses.get(k, 0) + 1
+            f = _faixa_convidados(cv)
+            if f:
+                faixas[f] = faixas.get(f, 0) + 1
+        if meses:
+            m3 = sorted(meses.items(), key=lambda x: -x[1])[:3]
+            linhas_txt.append(("Meses mais pedidos",
+                               " · ".join(f"{_MESES_CURTOS[m - 1]} {n}" for (_y, m), n in m3)))
+        if faixas:
+            f2 = sorted(faixas.items(), key=lambda x: -x[1])[:2]
+            linhas_txt.append(("Convidados", " · ".join(f"{f}: {n}" for f, n in f2)))
+        titulo_sem = "Sem tipo de festa"
+    else:
+        portes: dict = {}
+        for _s, _em, po in linhas:
+            if po:
+                portes[po] = portes.get(po, 0) + 1
+        if portes:
+            p3 = sorted(portes.items(), key=lambda x: -x[1])[:3]
+            linhas_txt.append(("Porte", " · ".join(f"{p} {n}" for p, n in p3)))
+        titulo_sem = "Sem segmento"
+    return {"perfil": perfil, "total": total, "itens": itens, "linhas": linhas_txt,
+            "sem": sem_tipo, "sem_rotulo": titulo_sem, "dias_janela": (fim - ini).days}
+
+
+#: Motivos que o vendedor marca e que NÃO dizem nada: aí a leitura da conversa vale.
+_MOTIVO_VAZIO = ("", "outro")
+
+
+def por_que_perdemos(pool, conta_id: int, periodo: str = "semana", de=None, ate=None) -> dict | None:
+    """Por que os leads do período foram perdidos — o vendedor primeiro, a conversa
+    onde ele não disse nada.
+
+    O motivo de cada lead é o que o VENDEDOR marcou; quando ele não marcou (ou
+    marcou "Outro"), vale o que `finance.motivo_lido` leu na conversa (selo 💬 lido).
+    Os dois usam a MESMA lista de motivos da conta, então somam na mesma linha.
+    Lead ainda não lido fica em "Ainda não lido" — nunca some da conta.
+    """
+    from finance import motivo_lido as _ml
+    ini, fim = _janela_minima(*_range(periodo, de, ate), JANELA_MINIMA_DIAS)
+    with pool.connection() as c:
+        perfil = _fr.perfil_da_conta(c, conta_id)
+        if perfil == "produto":
+            return None
+        rot = _ml.rotulos(c, conta_id, perfil)
+        try:
+            with c.transaction():
+                linhas = c.execute(
+                    """select coalesce(perda_motivo,''), perda_lida
+                         from prospeccao
+                        where conta_id=%s and status='perdido'
+                          and coalesce(perda_em, atualizado_em) >= %s
+                          and coalesce(perda_em, atualizado_em) < %s""",
+                    (conta_id, ini, fim)).fetchall()
+        except Exception:  # noqa: BLE001 — base sem a 328: só o que o vendedor marcou
+            linhas = [(r[0], None) for r in c.execute(
+                """select coalesce(perda_motivo,'') from prospeccao
+                    where conta_id=%s and status='perdido'
+                      and atualizado_em >= %s and atualizado_em < %s""",
+                (conta_id, ini, fim)).fetchall()]
+    if not linhas:
+        return None
+    cont: dict = {}
+    lidos = 0
+    for marcado, lido in linhas:
+        if marcado not in _MOTIVO_VAZIO:
+            chave = marcado
+        elif lido:
+            chave, lidos = lido, lidos + 1
+        else:
+            chave = marcado or "_nao_lido"
+        cont[chave] = cont.get(chave, 0) + 1
+    ordem = sorted(cont.items(), key=lambda x: (x[0] in ("_nao_lido", "outro", "sem_conversa"), -x[1]))
+    maxn = max(cont.values())
+    itens = [{"chave": ch, "rotulo": ("Ainda não lido" if ch == "_nao_lido" else rot.get(ch)
+                                      or ch.replace("_", " ").capitalize()),
+              "n": n, "pct": round(100 * n / maxn),
+              "tom": ("apagado" if ch in ("_nao_lido", "outro", "sem_conversa", "nao_era_cliente")
+                      else "alerta" if ch in ("achou_caro", "nao_respondeu", "sumiu_apos_proposta") else "")}
+             for ch, n in ordem]
+    return {"total": len(linhas), "itens": itens, "lidos": lidos,
+            "nao_cliente": cont.get("nao_era_cliente", 0), "perfil": perfil,
+            "dias_janela": (fim - ini).days}
 
 
 # ------------------------------------------------------------------ PLACAR

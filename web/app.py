@@ -481,6 +481,18 @@ def _iniciar_poller_email() -> None:
                 log.info("poller: ciclo #%d — esteira falhou: %s: %s",
                          ciclo, type(e).__name__, e)
             try:
+                # Por que perdemos, LIDO DA CONVERSA (migração 328): até 5 leads
+                # perdidos por passada. Escreve só nas colunas perda_lida*, nunca no
+                # motivo do vendedor. Desliga com MOTIVO_LIDO=off.
+                from finance import motivo_lido as _ml
+                _l = _ml.rodar(pool)
+                if _l["lidos"] or _l["falhas"]:
+                    log.info("poller: ciclo #%d — motivo lido: %d lido(s), %d falha(s)",
+                             ciclo, _l["lidos"], _l["falhas"])
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — motivo lido falhou: %s: %s",
+                         ciclo, type(e).__name__, e)
+            try:
                 # O Perdido automático: o lead que passou do prazo da etapa E levou
                 # os toques sem responder sai do quadro sozinho, com motivo. Nunca
                 # fecha quem está esperando resposta NOSSA. Inerte por padrão.

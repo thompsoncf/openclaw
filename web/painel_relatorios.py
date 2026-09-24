@@ -896,9 +896,12 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
     where = ["c.conta_id=%s", "c.substitui_id is null"]
     params: list = [conta_id]
     if periodo != "todos":
-        # a data em BRT, como o cockpit: assinado às 22h de 30/09 é setembro
-        col = ("(c.assinado_em at time zone 'America/Sao_Paulo')::date" if data_por == "assinatura"
-               else "c.criado_em::date")
+        # a data em BRT, como o cockpit: assinado às 22h de 30/09 é setembro. O que
+        # AINDA NÃO FOI ASSINADO não tem data de assinatura e vale pela criação —
+        # sem isso "Aguardando assinatura" e "Prontos, não enviados" ficavam
+        # sempre em zero na visão padrão, e o dono perdia os pendentes do mês.
+        col = ("(coalesce(c.assinado_em, c.criado_em) at time zone 'America/Sao_Paulo')::date"
+               if data_por == "assinatura" else "c.criado_em::date")
         where.append(f"{col} >= %s and {col} <= %s")
         params += [ini, fim]
     if vendedor_sel:
@@ -1004,7 +1007,9 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
             "vendedor_sel": str(vendedor_sel or ""), "busca_sel": busca or "",
             "datas_por": CT_DATA_POR, "data_por_sel": data_por,
         },
-        "periodo_label": "assinados no período" if data_por == "assinatura" else "criados no período",
+        "periodo_label": (None if periodo == "todos"
+                          else "período pela assinatura" if data_por == "assinatura"
+                          else "período pela criação"),
     }
 
 

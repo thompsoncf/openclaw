@@ -277,6 +277,30 @@ def test_o_email_do_vendedor_nao_compara_com_colega(pool, cena):
     assert "Você fechou 1 contrato" in do_vend
 
 
+def test_o_contrato_sem_lead_conta_pra_quem_fez_o_orcamento(pool, cena):
+    """A capa e o bloco por vendedor contam o MESMO contrato (24/09/2026). Na Prime,
+    Josinalva e Viviane assinaram direto pelo orçamento, sem lead: a capa dizia 3
+    contratos na semana e a Jacqueline, dona dos dois, aparecia aqui com 0."""
+    with pool.connection() as c:
+        o = c.execute("""insert into orcamentos (conta_id, criado_por, cliente, status,
+                             primeiro_ano_centavos, criado_em)
+                         values (%s,%s,'Josinalva','fechado',500000,%s) returning id""",
+                      (cena["conta"], str(cena["v2"]), _dt(10))).fetchone()[0]
+        c.execute("""insert into contratos (conta_id, orcamento_id, status, valor_centavos,
+                         enviado_em, assinado_em, criado_em)
+                     values (%s,%s,'assinado',500000,%s,%s,%s)""",
+                  (cena["conta"], o, _dt(10), _dt(11), _dt(10)))
+        c.commit()
+    d = rs.montar(pool, cena["conta"], AGORA)
+    assert int(d["placar"]["contratos"]) == 2
+    por = {v["primeiro"]: v for v in d["extras"]["por_vendedor"]}
+    assert por["Jacqueline"]["fechou"] == 1 and por["Jacqueline"]["valor"] == 500000
+    assert por["Pedro"]["fechou"] == 1 and por["Pedro"]["valor"] == 750000
+    assert sum(v["fechou"] for v in por.values()) == int(d["placar"]["contratos"])
+    do_vend = rsh.corpo(d, "vendedor", nome="Jacqueline", membro_id=cena["v2"])
+    assert "Você fechou 1 contrato" in do_vend
+
+
 def test_o_email_e_claro_e_sem_bloco_style(pool, cena):
     """Cliente de e-mail descarta `<style>` no topo e reescreve fundo no modo
     escuro. Tudo inline, e fundo branco."""

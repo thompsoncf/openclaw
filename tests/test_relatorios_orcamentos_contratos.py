@@ -410,28 +410,53 @@ def test_contratos_metrica_separa_pronto_de_aguardando(pool, cen):
 def _cenario_datas(pool, cen):
     from datetime import datetime, timezone
     agora = datetime.now(timezone.utc)
+    # criado há 70 dias e assinado agora: é venda DESTE mês
     velho = _contrato(pool, cen["conta"], _orc(pool, cen["conta"], cliente="Criado antes"),
                       status="assinado", valor=300000, assinado_em=agora)
+    # criado agora e ainda sem assinatura: é pendente DESTE mês
     _contrato(pool, cen["conta"], _orc(pool, cen["conta"], cliente="Ainda sem assinar"), valor=100000)
+    # criado há 70 dias e ainda sem assinatura: não é deste mês por nenhuma das datas
+    antigo = _contrato(pool, cen["conta"], _orc(pool, cen["conta"], cliente="Pendente antigo"), valor=50000)
     with pool.connection() as c:
-        c.execute("update contratos set criado_em = now() - interval '70 days' where id=%s", (velho,))
+        c.execute("update contratos set criado_em = now() - interval '70 days' where id = any(%s)",
+                  ([velho, antigo],))
         c.commit()
+
+
+def _met(dados):
+    return {k: v.replace("\xa0", " ") for k, v in dados["metricas"]}
 
 
 def test_contratos_por_padrao_recortam_pela_assinatura(pool, cen):
     _cenario_datas(pool, cen)
     dados = rel._dados_contratos(pool, cen["conta"], "mes", "", "", "")
-    assert [l["cliente"] for l in dados["linhas"]] == ["Criado antes"]
+    assert sorted(l["cliente"] for l in dados["linhas"]) == ["Ainda sem assinar", "Criado antes"]
     assert dados["filtro_extra"]["data_por_sel"] == "assinatura"
-    assert dados["periodo_label"] == "assinados no período"
-    assert ("Assinados", "1 · R$ 3.000,00") in [(k, v.replace("\xa0", " ")) for k, v in dados["metricas"]]
+    assert dados["periodo_label"] == "período pela assinatura"
+    assert _met(dados)["Assinados"] == "1 · R$ 3.000,00"
+
+
+def test_pela_assinatura_o_pendente_do_mes_continua_na_tela(pool, cen):
+    # o que não foi assinado vale pela criação: sem isto "Prontos, não enviados"
+    # e o filtro Enviado ficavam sempre vazios na visão padrão
+    _cenario_datas(pool, cen)
+    dados = rel._dados_contratos(pool, cen["conta"], "mes", "", "", "")
+    assert _met(dados)["Prontos, não enviados"] == "1 · R$ 1.000,00"
+    dados = rel._dados_contratos(pool, cen["conta"], "mes", "enviado", "", "")
+    assert [l["cliente"] for l in dados["linhas"]] == ["Ainda sem assinar"]
 
 
 def test_contratos_pela_criacao_mostram_o_criado_no_periodo(pool, cen):
     _cenario_datas(pool, cen)
     dados = rel._dados_contratos(pool, cen["conta"], "mes", "", "", "", data_por="criacao")
     assert [l["cliente"] for l in dados["linhas"]] == ["Ainda sem assinar"]
-    assert dados["periodo_label"] == "criados no período"
+    assert dados["periodo_label"] == "período pela criação"
+
+
+def test_em_todo_o_periodo_nao_ha_rotulo_de_data(pool, cen):
+    _cenario_datas(pool, cen)
+    dados = rel._dados_contratos(pool, cen["conta"], "todos", "", "", "")
+    assert len(dados["linhas"]) == 3 and dados["periodo_label"] is None
 
 
 def test_data_por_invalido_cai_na_assinatura(pool, cen):

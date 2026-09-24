@@ -125,6 +125,38 @@ h2{font-size:1.2rem;font-weight:700;margin-bottom:.2rem}
 .cel .lin .lix{position:absolute;right:0;top:.8rem;margin:0}
 .cel .lin.cob::before{left:-14px}
 
+/* ================= escolher o serviço ================= */
+.h-br{display:grid;grid-template-columns:42px 1fr 90px 16px 16px;gap:.55rem;align-items:center;padding:.5rem 0;border-bottom:1px solid var(--line)}
+.h-tog{width:42px;height:48px;border-radius:50%;background:#2a3550;position:relative}
+.h-tog::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff}
+.h-tog.on{background:var(--neon)} .h-tog.on::after{left:21px}
+.h-br b{font-size:1rem;font-weight:800;color:#cfd8d3;display:block} .h-br small{font-size:.76rem;color:var(--text-dim)}
+.h-val{border:1px solid var(--line);border-radius:7px;height:58px;display:flex;align-items:center;justify-content:flex-end;gap:.4rem;padding:0 .5rem;font-size:.85rem}
+.h-val s{text-decoration:none;font-size:.58rem;color:var(--text-dim)}
+.h-pil{width:16px;height:46px;border:1px solid var(--line);border-radius:99px;font-size:.55rem;display:flex;align-items:center;justify-content:center;color:var(--text-dim)}
+.br{display:grid;grid-template-columns:40px minmax(0,1fr) 150px 68px;gap:.7rem;align-items:center;padding:.6rem .2rem;border-bottom:1px solid var(--line-2);position:relative}
+.br:last-child{border-bottom:0}
+.br:hover{background:rgba(255,255,255,.018)}
+.sw{width:38px;height:22px;border-radius:99px;background:#243029;position:relative;border:1px solid var(--line)}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#9aa9a0;transition:left .15s}
+.sw.on{background:var(--neon);border-color:var(--neon)} .sw.on::after{left:19px;background:#fff}
+.br .val{text-align:right;font-family:var(--mono);font-size:.86rem}
+.br .val i{font-style:normal;font-family:var(--body);font-size:.6rem;letter-spacing:.07em;text-transform:uppercase;color:var(--text-faint);display:block}
+.br .acs{display:flex;gap:.3rem;justify-content:flex-end}
+.ib{width:30px;height:30px;border-radius:8px;border:1px solid var(--line);color:var(--text-faint);display:flex;align-items:center;justify-content:center;font-size:.8rem}
+.br.on .tx b{color:var(--text)}
+.br .chip{display:inline-block;font-size:.62rem;font-weight:600;color:var(--neon-claro);background:var(--neon-fundo);border:1px solid var(--neon-borda);border-radius:99px;padding:0 .45rem;margin-left:.4rem;vertical-align:middle;letter-spacing:.02em}
+.drop{border:1px solid var(--line);background:var(--bg-2);border-radius:12px;overflow:hidden;max-width:760px}
+.dp{display:grid;grid-template-columns:32px minmax(0,1fr) auto auto;gap:.65rem;align-items:center;padding:.55rem .8rem;border-bottom:1px solid var(--line-2)}
+.dp:last-child{border-bottom:0}
+.dp.sel{background:var(--neon-fraco)}
+.dp .ic{width:32px;height:32px;flex-basis:32px}
+.dp .pr{font-family:var(--mono);font-size:.84rem;color:var(--neon-claro);white-space:nowrap}
+.dp .ad{font-size:.72rem;font-weight:600;border:1px solid var(--line);border-radius:99px;padding:.15rem .6rem;color:var(--text-dim);white-space:nowrap}
+.dp .ad.ok{border-color:var(--neon-borda);color:var(--neon-claro)}
+.h-drop{border:1px solid var(--line);border-radius:10px;padding:.55rem .8rem;display:flex;justify-content:space-between;font-size:.85rem;max-width:760px}
+.h-drop span{color:var(--neon-claro)}
+
 @media (max-width:900px){
   .scroll{overflow-x:auto}
   .scroll>.card{min-width:880px}
@@ -222,7 +254,50 @@ Muda só o acabamento: as pílulas inteiras, as caixas alinhadas e mais baixas, 
 </div>
 
 <div class="sec">
-  <div class="num">3 · No celular</div>
+  <div class="num">4 · Escolher o serviço</div>
+  <h2>A lista "ver todos" e a busca pra adicionar</h2>
+
+  <span class="rot r">Hoje · lista "ver os 40 serviços"</span>
+  <div class="scroll"><div class="card">
+    <div class="h-br"><span class="h-tog"></span><div><b>BOLO</b><small>3 andares</small></div><div class="h-val"><s>VALOR</s>800</div><span class="h-pil">✎</span><span class="h-pil">⊘</span></div>
+    <div class="h-br"><span class="h-tog"></span><div><b>DJ</b><small>5 horas de som</small></div><div class="h-val"><s>VALOR</s>1500</div><span class="h-pil">✎</span><span class="h-pil">⊘</span></div>
+    <div class="h-br" style="border-bottom:0"><span class="h-tog on"></span><div><b>LOCAÇÃO COZINHA</b><small>Uso exclusivo da área da cozinha.</small></div><div class="h-val"><s>VALOR</s>1500</div><span class="h-pil">✎</span><span class="h-pil">⊘</span></div>
+  </div></div>
+
+  <span class="rot b">Ajustado</span>
+  <div class="scroll"><div class="card">
+    <div class="br"><span class="sw"></span>
+      <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3.4 20.6h17.2"/><path d="M4.8 20.6v-7.4h14.4v7.4"/><path d="M12 9.6V7.4"/><circle cx="12" cy="6.1" r="1"/></svg></span><div class="tx"><b>BOLO</b><small>3 andares</small></div></div>
+      <div class="val"><i>Valor</i>R$ 800,00</div>
+      <div class="acs"><span class="ib" title="Editar serviço">✎</span><span class="ib" title="Inativar serviço">⊘</span></div></div>
+    <div class="br"><span class="sw"></span>
+      <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><path d="M4 14.5v-2.6a8 8 0 0 1 16 0v2.6"/><rect x="2.2" y="13" width="4.2" height="7" rx="1.7"/><rect x="17.6" y="13" width="4.2" height="7" rx="1.7"/></svg></span><div class="tx"><b>DJ</b><small>5 horas de som</small></div></div>
+      <div class="val"><i>Valor</i>R$ 1.500,00</div>
+      <div class="acs"><span class="ib">✎</span><span class="ib">⊘</span></div></div>
+    <div class="br on"><span class="sw on"></span>
+      <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3.6 10.4h16.8v3.2a6 6 0 0 1-6 6h-4.8a6 6 0 0 1-6-6z"/><path d="M9.4 7.6c0-1.6 1-1.6 1-3.2"/><path d="M13.6 7.6c0-1.6 1-1.6 1-3.2"/></svg></span><div class="tx"><b>LOCAÇÃO COZINHA <span class="chip">na proposta</span></b><small>Uso exclusivo da área da cozinha.</small></div></div>
+      <div class="val"><i>Valor</i>R$ 1.500,00</div>
+      <div class="acs"><span class="ib">✎</span><span class="ib">⊘</span></div></div>
+  </div></div>
+
+  <span class="rot r">Hoje · busca "pra adicionar"</span>
+  <div class="h-drop">BOLO <span>R$ 800,00</span></div>
+  <span class="rot b">Ajustado</span>
+  <div class="drop">
+    <div class="dp"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3.4 20.6h17.2"/><path d="M4.8 20.6v-7.4h14.4v7.4"/><path d="M12 9.6V7.4"/><circle cx="12" cy="6.1" r="1"/></svg></span><div class="tx"><b>BOLO</b><small>3 andares</small></div><span class="pr">R$ 800,00</span><span class="ad">+ adicionar</span></div>
+    <div class="dp sel"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3.6 10.4h16.8v3.2a6 6 0 0 1-6 6h-4.8a6 6 0 0 1-6-6z"/></svg></span><div class="tx"><b>LOCAÇÃO COZINHA</b><small>Uso exclusivo da área da cozinha.</small></div><span class="pr">R$ 1.500,00</span><span class="ad ok">✓ na proposta</span></div>
+  </div>
+
+  <ul class="lista">
+    <li data-n="6"><span><b>O interruptor de selecionar.</b> Hoje ele é esticado para 48px de altura (a mesma regra geral dos botões) e vira uma bola deformada, com a bolinha fora do lugar. Volta a ser um interruptor de 38 × 22, alinhado com o nome.</span></li>
+    <li data-n="7"><span><b>✎ e ⊘ alinhados.</b> Hoje viram pílulas altas e finas; passam a ser dois botões quadrados de 30px, lado a lado, no fim da linha.</span></li>
+    <li data-n="8"><span><b>Valor em reais.</b> "VALOR 1500" dentro de uma caixa vira "R$ 1.500,00", só texto (a caixa parecia um campo editável, e não é).</span></li>
+    <li data-n="9"><span><b>A lista mostra o que já está na proposta.</b> Cada serviço ganha o ícone. O que já foi escolhido fica com o interruptor verde e o selo "na proposta", tanto na lista quanto na busca, e a busca ganha a descrição e o "+ adicionar".</span></li>
+  </ul>
+</div>
+
+<div class="sec">
+  <div class="num">5 · No celular</div>
   <h2>A mesma linha, empilhada</h2>
   <div class="cel">
     <div class="lin cob">

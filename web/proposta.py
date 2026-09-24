@@ -537,8 +537,9 @@ def _linhas_evento(d: dict) -> list[dict]:
     linhas = []
     for i, it in enumerate(d["itens"], 1):
         qtd = int(it.get("qtd") or 1) or 1
-        total = int(it.get("setup") or 0)
-        unit = int(it.get("unitario") or 0) or (total // qtd if qtd else total)
+        # CENTAVOS desde 24/09/2026: o item aceita R$ 1.397,50 e `int()` cortava
+        total_c = dsc.centavos(it.get("setup"))
+        unit_c = dsc.centavos(it.get("unitario")) or (total_c // qtd if qtd else total_c)
         # ÍCONE no lugar da foto: serviço não tem embalagem pra fotografar, e a
         # foto sumia na impressão sem fundo. O ícone sai do que o vendedor fixou
         # no catálogo ou, quando não fixou, do nome/categoria do item — nunca
@@ -546,7 +547,7 @@ def _linhas_evento(d: dict) -> list[dict]:
         # DESCONTO DA LINHA: o cliente vê o cheio riscado e o que ele paga. Desconto
         # que o cliente não vê não vende — e some da conta dele sem explicação.
         liq = dsc.liquido_do_item(it)
-        d_cent = (total * 100) - liq["setup"]
+        d_cent = total_c - liq["setup"]
         # INCLUSO NO PACOTE não é desconto. Era impresso como "R$ 4.000 riscado,
         # R$ 0,00" — o cliente lia um abatimento de quatro mil que ninguém deu, e
         # o vendedor perdia a frase que ele de fato quer dizer: isto vem junto.
@@ -554,14 +555,14 @@ def _linhas_evento(d: dict) -> list[dict]:
         # campo de desconto estava sendo usado pra dizer exatamente isso.
         incluso = dsc.eh_incluso(it)
         linhas.append({"n": i, "nome": it.get("nome") or "", "desc": it.get("desc") or "",
-                       "qtd": qtd, "unit": _num(unit * 100),
+                       "qtd": qtd, "unit": _num(unit_c),
                        "incluso": incluso,
                        "subtotal": _num(liq["setup"]),
                        # o valor de tabela continua à vista quando é incluso: é o
                        # que mostra o tamanho do que veio junto. Mas sem a tarja
                        # de riscado, que é linguagem de desconto.
-                       "cheio": _num(total * 100) if (d_cent > 0 and not incluso) else "",
-                       "tabela": _num(total * 100) if incluso else "",
+                       "cheio": _num(total_c) if (d_cent > 0 and not incluso) else "",
+                       "tabela": _num(total_c) if incluso else "",
                        "desconto": _brl(d_cent) if (d_cent > 0 and not incluso) else "",
                        "desconto_pct": (f"{liq['pct']:.0f}%".replace(".0", "")
                                         if (d_cent > 0 and not incluso) else ""),
@@ -663,8 +664,8 @@ def _folha_recorrente(d: dict, pool) -> dict:
         if not isinstance(it, dict):
             continue
         liq = dsc.liquido_do_item(it)
-        s_b = max(0, int(it.get("setup") or 0)) * 100
-        m_b = max(0, int(it.get("mensal") or 0)) * 100
+        s_b = max(0, dsc.centavos(it.get("setup")))
+        m_b = max(0, dsc.centavos(it.get("mensal")))
         tem_setup = tem_setup or s_b > 0
         linhas.append({
             "n": i, "nome": it.get("nome") or "",

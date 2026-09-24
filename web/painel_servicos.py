@@ -453,9 +453,11 @@ def painel_servicos_catalogo(request: Request):
     itens = [{
         "id": s["id"], "slug": s["slug"], "nome": s["nome"],
         "descricao": s["descricao"],
-        "setup": round(s["setup_centavos"] / 100),
-        "mensal": round(s["mensal_centavos"] / 100),
-        "custo": round(s["custo_centavos"] / 100),
+        # com centavos: o catálogo sempre guardou centavos, e a tela arredondava
+        # (R$ 1.397,50 aparecia R$ 1.398)
+        "setup": (s["setup_centavos"] or 0) / 100,
+        "mensal": (s["mensal_centavos"] or 0) / 100,
+        "custo": (s["custo_centavos"] or 0) / 100,
         "categoria": s["categoria"], "foto_url": s["foto_url"],
         # `icone` é o que o vendedor fixou (pode ser vazio); `icone_svg` é o que
         # a tela desenha — já resolvido pelo nome/categoria quando não fixaram.
@@ -482,9 +484,9 @@ class ServicoIn(BaseModel):
     id: int | None = None
     nome: str = ""
     descricao: str = ""
-    setup: int = 0     # REAIS
-    mensal: int = 0    # REAIS
-    custo: int = 0     # REAIS
+    setup: float = 0   # REAIS, com centavos (o catálogo guarda centavos)
+    mensal: float = 0  # REAIS
+    custo: float = 0   # REAIS
     categoria: str = ""    # agrupa no orçamento de evento (subtotal por categoria)
     foto_url: str = ""     # legado: catálogo antigo que subiu foto
     icone: str = ""        # chave do ícone; vazio = deduzido do nome/categoria
@@ -497,9 +499,9 @@ def painel_servicos_catalogo_salvar(request: Request, dados: ServicoIn):
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
     r = scat.salvar(get_pool(), conta[0], id=dados.id, nome=dados.nome,
                     descricao=dados.descricao,
-                    setup_centavos=int(dados.setup or 0) * 100,
-                    mensal_centavos=int(dados.mensal or 0) * 100,
-                    custo_centavos=int(dados.custo or 0) * 100,
+                    setup_centavos=dsc.centavos(dados.setup),
+                    mensal_centavos=dsc.centavos(dados.mensal),
+                    custo_centavos=dsc.centavos(dados.custo),
                     categoria=dados.categoria, foto_url=dados.foto_url,
                     icone=dados.icone)
     if not r.get("ok"):
@@ -668,13 +670,29 @@ def painel_servicos_sugerir(request: Request, dados: SugerirIn):
         return JSONResponse({"erro": "falha ao gerar"}, status_code=500)
 
 
+def _reais2(v) -> float | int:
+    """Reais com no máximo duas casas; inteiro quando não há centavos.
+
+    Inteiro quando dá, de propósito: o JSON do item continua `1500` (e não
+    `1500.0`) pra todo valor redondo — as propostas de hoje não mudam de forma
+    nenhuma, e quem lê o item com `int()` segue lendo o mesmo número."""
+    try:
+        c = int(round(float(v or 0) * 100))
+    except (TypeError, ValueError):
+        return 0
+    return c // 100 if c % 100 == 0 else c / 100
+
+
 class ItemIn(BaseModel):
     nome: str = ""
     desc: str = ""
-    setup: int = 0            # total da linha em REAIS (qtd × unitário)
-    mensal: int = 0
+    # REAIS com até duas casas desde 24/09/2026 ("sim aceitar centavos", dono).
+    # Eram `int`, e o pydantic recusava 1397.5 — o que faria a tela nova falhar
+    # ao salvar qualquer valor quebrado.
+    setup: float = 0          # total da linha em REAIS (qtd × unitário)
+    mensal: float = 0
     qtd: int = 1              # evento: quantidade contratada
-    unitario: int = 0         # evento: valor unitário em REAIS
+    unitario: float = 0       # evento: valor unitário em REAIS
     categoria: str = ""       # evento: agrupa e soma por categoria na folha
     icone: str = ""           # evento: selo do item na folha (vazio = deduzido)
     # DESCONTO DA LINHA. Fica aqui, no snapshot do item, e não em coluna: `itens`
@@ -683,7 +701,7 @@ class ItemIn(BaseModel):
     # que a 162 tirou dos títulos.
     # `desc_val` e não `desc`: `desc` já é a DESCRIÇÃO do item, logo acima.
     desc_tipo: str = "pct"    # 'pct' | 'valor'
-    desc_val: int = 0         # % ou REAIS, conforme desc_tipo
+    desc_val: float = 0       # % ou REAIS, conforme desc_tipo
     # recorrente: o R$ é POR MÊS (finance.desconto.por_mes). Só vale com 'valor'.
     desc_mes: bool = False
 
@@ -737,16 +755,16 @@ class SalvarIn(BaseModel):
     parcelas: list[ParcelaIn] = []      # modo evento: plano de pagamento
     escopo: str = ""
     canal: str = ""
-    setup: int = 0            # em REAIS, BRUTO (antes de qualquer desconto)
-    mensal: int = 0           # em REAIS, bruto
+    setup: float = 0          # em REAIS, BRUTO (antes de qualquer desconto)
+    mensal: float = 0         # em REAIS, bruto
     # o líquido NÃO vem mais da tela: o servidor recalcula com finance.desconto.
     # Continua no modelo porque a tela ainda o manda, e ignorá-lo em silêncio é
     # melhor que quebrar o payload de uma aba aberta durante o deploy.
-    primeiro_ano: int = 0     # IGNORADO — derivado no servidor
+    primeiro_ano: float = 0   # IGNORADO — derivado no servidor
     n_modulos: int = 0
     desconto_tipo: str = "pct"    # 'pct' | 'valor' — desconto do TOTAL
     desconto_pct: float = 0       # 0–100
-    desconto_valor: int = 0       # em REAIS
+    desconto_valor: float = 0     # em REAIS (com centavos)
     # recorrente: o botão "Pagamento anual (-15%)". Só existia na tela — reabrir a
     # proposta trazia ele desligado e o próximo Salvar mudava o preço (311).
     anual: bool = False
@@ -767,11 +785,11 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     itens = []
     for it in (dados.itens or [])[:50]:
         linha = {"nome": (it.nome or "")[:120], "desc": (it.desc or "")[:2000],
-                 "setup": int(it.setup or 0), "mensal": int(it.mensal or 0),
-                 "qtd": max(1, int(it.qtd or 1)), "unitario": int(it.unitario or 0),
+                 "setup": _reais2(it.setup), "mensal": _reais2(it.mensal),
+                 "qtd": max(1, int(it.qtd or 1)), "unitario": _reais2(it.unitario),
                  "categoria": (it.categoria or "")[:60], "icone": (it.icone or "")[:30],
                  "desc_tipo": "valor" if (it.desc_tipo or "") == "valor" else "pct",
-                 "desc_val": max(0, int(it.desc_val or 0))}
+                 "desc_val": max(0, _reais2(it.desc_val))}
         # R$ POR MÊS só existe no recorrente (finance.desconto.por_mes). A marca só
         # entra quando vale, pra item de evento e desconto em % saírem iguais aos
         # de sempre.
@@ -791,10 +809,10 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     #
     # `extra_*` é o que o modo recorrente soma FORA das linhas: recebe o desconto
     # do total (está no subtotal) e não recebe desconto por item (não é item).
-    bruto_setup = max(0, int(dados.setup or 0)) * 100
-    bruto_mensal = max(0, int(dados.mensal or 0)) * 100
-    itens_setup = sum(max(0, int(i["setup"] or 0)) for i in itens) * 100
-    itens_mensal = sum(max(0, int(i["mensal"] or 0)) for i in itens) * 100
+    bruto_setup = max(0, dsc.centavos(dados.setup))
+    bruto_mensal = max(0, dsc.centavos(dados.mensal))
+    itens_setup = sum(max(0, dsc.centavos(i["setup"])) for i in itens)
+    itens_mensal = sum(max(0, dsc.centavos(i["mensal"])) for i in itens)
     # O PAGAMENTO ANUAL (311). A tela que conhece o campo `anual` manda a
     # mensalidade CHEIA, e o -15% é aplicado aqui, na mesma ordem da tela (depois
     # do desconto da linha, antes do desconto no total). Aba antiga aberta
@@ -806,7 +824,7 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
         itens,
         tipo="valor" if (dados.desconto_tipo or "") == "valor" else "pct",
         pct=max(0.0, float(dados.desconto_pct or 0)),
-        valor=max(0, int(dados.desconto_valor or 0)) * 100,
+        valor=max(0, dsc.centavos(dados.desconto_valor)),
         extra_setup=max(0, bruto_setup - itens_setup),
         extra_mensal=max(0, bruto_mensal - itens_mensal),
         fator_mensal=fator_mensal,
@@ -836,7 +854,7 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
             tot["total"], int(dados.n_modulos),
             "valor" if (dados.desconto_tipo or "") == "valor" else "pct",
             max(0.0, min(100.0, float(dados.desconto_pct or 0))),
-            max(0, int(dados.desconto_valor or 0)) * 100)
+            max(0, dsc.centavos(dados.desconto_valor)))
     pool = get_pool()
     reabriu = None
     # CONTRATO ASSINADO NÃO SE EDITA POR BAIXO. Documento congelado, com aceite e
@@ -1402,7 +1420,7 @@ def painel_servicos_item(request: Request, orc_id: int):
         # não pode zerar em silêncio o que foi negociado.
         "desconto_tipo": r[27] or "pct",
         "desconto_pct": float(r[28] or 0),
-        "desconto_valor": round(int(r[29] or 0) / 100),
+        "desconto_valor": _reais2(int(r[29] or 0) / 100),
         # QUANDO ESTA PROPOSTA FOI GERADA. A folha do cliente sempre disse
         # ("Emitido em"); quem vende, não — nem no funil nem aqui no editor. E é
         # quem vende que precisa saber se aquilo ainda está de pé.
@@ -2231,8 +2249,8 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
    o desconto caía numa coluna de 84px e invadia o ✎/🗑, e o nome era espremido
    até quebrar no meio da palavra ("Atendimen"). O Modo margem acrescenta a
    coluna do custo em vez de reaproveitar uma que já estava ocupada. */
-.oc-mod.rec{grid-template-columns:minmax(0,1fr) 96px 96px 138px auto}
-.sv-wrap.oc-margin .oc-mod.rec{grid-template-columns:minmax(0,1fr) 96px 96px 88px 138px auto}
+.oc-mod.rec{grid-template-columns:minmax(0,1fr) 112px 120px 184px auto}
+.sv-wrap.oc-margin .oc-mod.rec{grid-template-columns:minmax(0,1fr) 112px 120px 104px 184px auto}
 .oc-mod.rec .oc-nome b{display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 /* celular: a linha do serviço vira duas — nome em cima (com a foto e o
    toggle), números embaixo. Em grade de 6 colunas num telefone os campos caem
@@ -2697,6 +2715,50 @@ _CSS_CRU = r""".sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizin
   .fn-aba{flex:1 1 auto; justify-content:center}
   .oc-cob{width:112px}
 }
+
+/* ================= VALORES E PÍLULAS (24/09/2026) =================
+   Mockup docs/mockups/zaq_servicos_valores_pilulas.html, aprovado pelo dono pros
+   DOIS nichos: dinheiro com R$ e centavos em todo campo, e uma pílula só. */
+/* o campo de dinheiro: R$ fixo à esquerda, valor com centavos à direita */
+.oc-rsin{display:flex; align-items:center; gap:.3rem; min-width:0}
+.oc-rs{font-style:normal; font-size:.72rem; color:var(--txt-mut); flex:none}
+.oc-rsin input{flex:1; min-width:0}
+/* o alternador %|R$ DENTRO do campo: segmento de 22px, não um botão verde ao lado */
+.sv-wrap .oc-dpar{align-items:center; gap:.3rem; border:1px solid var(--borda); border-radius:8px;
+  background:var(--bg); padding:0 .25rem 0 .5rem}
+.sv-wrap .oc-dpar > input{border:0; background:transparent; border-radius:0; padding:.4rem 0; min-width:0}
+.sv-wrap .oc-dpar > input:focus{outline:none}
+.sv-wrap .oc-dpar[data-tipo="pct"] .oc-rs{display:none}
+.sv-wrap .oc-dtog{flex:none; height:22px; border:1px solid var(--borda); border-radius:6px; align-self:center}
+.sv-wrap .oc-dtog button{height:100%; min-width:0; padding:0 .42rem; font-size:.64rem; background:transparent;
+  color:var(--txt-mut); font-weight:600}
+.sv-wrap .oc-dtog button.on{background:#10241d; color:var(--verde-claro)}
+.oc-desc-col .oc-dpar{border:0; padding:0; background:transparent}
+/* a lixeira: ícone discreto, fica vermelho só quando o mouse passa */
+.sv-wrap .oc-rm{border-color:transparent; background:transparent; color:var(--txt-mut)}
+.sv-wrap .oc-rm:hover{border-color:var(--coral-borda,#5A2B2B); color:var(--verm,#E0574F); background:transparent}
+/* A PÍLULA ÚNICA: mesma altura, borda e texto em todo botão-pílula da tela */
+.sv-wrap .oc-pill{min-height:30px; padding:.25rem .8rem; font-size:.8rem; line-height:1.2;
+  display:inline-flex; align-items:center; gap:.3rem}
+/* o "anual à vista" é liga/desliga: interruptor, não ↻/✓ */
+.sv-wrap #oc-anual{min-height:40px; border-radius:11px}
+.oc-sw{width:34px; height:20px; border-radius:99px; background:#243029; position:relative; flex:none}
+.oc-sw::after{content:""; position:absolute; top:3px; left:3px; width:14px; height:14px; border-radius:50%;
+  background:#9aa9a0; transition:left .15s}
+#oc-anual[data-on="1"] .oc-sw{background:var(--verde)}
+#oc-anual[data-on="1"] .oc-sw::after{left:17px; background:#fff}
+/* `min-height:0`: o CSS global do painel dá `button{min-height:48px}`, e era ele
+   que empurrava o % | R$/mês pra fora do segmento de 22px */
+.sv-wrap .oc-dtog button{white-space:nowrap; line-height:1; width:auto; margin:0; min-height:0}
+/* as linhas do resumo: o valor nunca quebra, e o rótulo encolhe primeiro */
+.oc-ll{gap:.6rem}
+.oc-ll span{min-width:0}
+.oc-ll b{white-space:nowrap; font-size:1rem}
+/* as pílulas dos parâmetros e o passo de integrações: a mesma altura da pílula */
+.sv-wrap .oc-seg button{min-height:30px; padding:.25rem .75rem; font-size:.8rem; border-radius:99px; line-height:1.2}
+.sv-wrap .oc-step button{height:30px; width:30px; min-height:0; border-radius:99px; font-size:.95rem}
+/* o número grande do recorrente: a mensalidade, com o "/mês" pequeno ao lado */
+.oc-total .oc-per{font-size:.8rem; font-weight:500; color:var(--txt-mut)}
 """
 
 _CSS = f'<link rel="stylesheet" href="{_estaticos.registrar("servicos.css", _CSS_CRU)}">'
@@ -2760,9 +2822,24 @@ _JS_PAREAR_CRU = r"""window.ZAQ_PAREAR = function (mods, itens, catalogo) {
 _JS_CRU = r"""(function(){
   var SERVICO_AVULSO = window.SERVICO_AVULSO;
   var INFRA={compartilhada:{s:0,m:0},dedicada:{s:1500,m:800},onpremise:{s:6000,m:1500}};
-  function fmt(n){return 'R$ '+Math.round(n||0).toLocaleString('pt-BR');}
+  // DINHEIRO COM CENTAVOS (24/09/2026, dono: "sim aceitar centavos", pros dois
+  // nichos). `fmt` escreve R$ 1.397,50; `dinTxt` o mesmo sem o cifrão, pro campo.
+  function r2(n){return Math.round((+n||0)*100)/100;}
+  function dinTxt(n){return r2(n).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
+  function fmt(n){return 'R$ '+dinTxt(n);}
+  // Lê o que está no campo: "1.397,50", "1397,5", "1.500" (milhar) e também o
+  // número cru que o próprio JS pôs lá ("1397.5" — um ponto com 1 ou 2 casas no
+  // fim é decimal; com 3, é milhar). Nunca negativo.
+  function lerReais(s){
+    s=String(s==null?'':s).replace(/[^\d,.]/g,'');
+    if(!s) return 0;
+    if(s.indexOf(',')>=0) s=s.replace(/\./g,'').replace(',','.');
+    else if(!/^\d+\.\d{1,2}$/.test(s)) s=s.replace(/\./g,'');
+    var v=parseFloat(s);
+    return isFinite(v)?Math.max(0,r2(v)):0;
+  }
   function rows(){return [].slice.call(document.querySelectorAll('.oc-mod'));}
-  function num(el){return parseInt(((el&&el.value)||'0').replace(/\D/g,''),10)||0;}
+  function num(el){return lerReais(el&&el.value);}
   function seg(g){var b=document.querySelector('[data-grupo="'+g+'"].on'); return b?b.getAttribute('data-val'):'';}
   var WRAP=document.querySelector('.sv-wrap');
 
@@ -2815,7 +2892,7 @@ _JS_CRU = r"""(function(){
     // BRUTO e LÍQUIDO andam juntos: o resumo mostra o líquido, mas é o BRUTO que
     // vai no payload — o servidor refaz a conta do desconto, e receber o já
     // descontado faria ele descontar de novo.
-    var setup=0,mensal=0,modMensal=0,custo=0,mods=0,descItens=0;
+    var setup=0,mensal=0,modMensal=0,custo=0,mods=0,descItens=0,descItensMes=0;
     var setupBruto=0,mensalBruto=0;
     // INCLUSO NO PACOTE sai por fora: não soma no total e não é desconto. É a
     // conta que o resumo passa a mostrar no lugar de "Economia de R$ 14.850"
@@ -2838,6 +2915,7 @@ _JS_CRU = r"""(function(){
         var sb=sbTodo, mb=num(r.querySelector('.oc-mensal'));
         var lq=liqLinha(r, sb, mb), sl=lq.s, ml=lq.m;
         descItens+=(sb-sl)+(mb-ml)*12;
+        descItensMes+=(mb-ml);        // o resumo do recorrente fala POR MÊS
         setupBruto+=sb; mensalBruto+=mb;
         setup+=sl;
         mensal+=ml; modMensal+=ml;
@@ -2870,7 +2948,13 @@ _JS_CRU = r"""(function(){
     var sub=setup+mensalEf*12;
     var dFim=descFinal(sub), ano1=sub-dFim;
     var margem=modMensal-custo, margemPct=modMensal>0?Math.round(margem/modMensal*100):0;
+    // A MENSALIDADE QUE O CLIENTE PAGA: o desconto no total cai proporcional nas
+    // duas pontas (finance/desconto.totais), então a mensal final é a mensal
+    // efetiva na mesma proporção em que o total caiu.
+    var mensalFinal=sub>0?mensalEf*(ano1/sub):mensalEf;
     return {setup:setup,mensal:mensalEf,mensalCheio:mensal,ano1:ano1,margem:margem,
+            mensalFinal:mensalFinal,setupFinal:(sub>0?setup*(ano1/sub):setup),
+            descItensMes:descItensMes,mensalTabela:mensalBruto,
             margemPct:margemPct,mods:mods,anual:anual,subtotal:sub,
             descItens:descItens,descFim:dFim,economia:descItens+dFim,
             inclusos:inclusos,inclusoValor:inclusoValor,cobrados:mods-inclusos,
@@ -2906,9 +2990,19 @@ _JS_CRU = r"""(function(){
       // de baixo seria ruído.
       el.innerHTML=(sl<sb?'<span class="oc-sub-risc">'+fmt(sb)+'</span>':'')+fmt(sl);
     });
-    document.getElementById('oc-r-setup').textContent=fmt(c.setup);
+    // RECORRENTE (24/09/2026, pergunta 3 do mockup): o número grande é o que o
+    // cliente paga POR MÊS; implantação sem valor vira "sem taxa". No evento
+    // nada muda — o número grande continua sendo o total.
+    var elSetup=document.getElementById('oc-r-setup');
+    elSetup.textContent=(!SERVICO_AVULSO&&!(c.setup>0))?'sem taxa':fmt(SERVICO_AVULSO?c.setup:c.setupFinal);
     var elMensal=document.getElementById('oc-r-mensal');
-    if(elMensal)elMensal.textContent=fmt(c.mensal);
+    if(elMensal)elMensal.textContent=c.anual?fmt(c.mensalFinal*12):fmt(c.mensalFinal);
+    var rotM=document.getElementById('oc-r-mensal-rot');
+    if(rotM)rotM.textContent=c.anual?'Anual à vista (12 meses)':'Investimento mensal';
+    var perM=document.getElementById('oc-r-mensal-per');
+    if(perM)perM.style.display=c.anual?'none':'';
+    var elTab=document.getElementById('oc-r-tabela');
+    if(elTab)elTab.textContent=fmt(c.mensalTabela);
     document.getElementById('oc-r-ano').textContent=fmt(c.ano1);
     document.getElementById('oc-r-margem').textContent=fmt(c.margem)+' · '+c.margemPct+'%';
     // as três linhas do desconto: só aparecem quando existem, pra o resumo de quem
@@ -2918,7 +3012,14 @@ _JS_CRU = r"""(function(){
       l.style.display=val>0?'flex':'none';
       if(val>0) document.getElementById(id).textContent='− '+fmt(val);
     }
-    mostra('oc-r-descitens-l','oc-r-descitens',c.descItens||0);
+    if(SERVICO_AVULSO) mostra('oc-r-descitens-l','oc-r-descitens',c.descItens||0);
+    else {
+      // o desconto dos serviços POR MÊS: "R$ 32.400" (o do ano) lia como um
+      // desconto de 32 mil numa proposta de R$ 3.000/mês (HLED, 23/09/2026)
+      mostra('oc-r-descitens-l','oc-r-descitens',c.descItensMes||0);
+      var di=document.getElementById('oc-r-descitens');
+      if(di&&(c.descItensMes||0)>0) di.textContent='− '+fmt(c.descItensMes)+'/mês';
+    }
     mostra('oc-r-descfim-l','oc-r-descfim',c.descFim||0);
     var subL=document.getElementById('oc-r-sub-l');
     if(subL){
@@ -2927,8 +3028,8 @@ _JS_CRU = r"""(function(){
       if(temDesc) document.getElementById('oc-r-sub').textContent=fmt(c.subtotal||0);
     }
     var eco=document.getElementById('oc-r-eco');
-    if((c.economia||0)>0){eco.style.display='block'; eco.textContent='Economia de '+fmt(c.economia);}
-    else if(!SERVICO_AVULSO&&c.anual){eco.style.display='block'; eco.textContent='Economia de '+fmt(c.mensalCheio*12*0.15)+' no ano';}
+    if(SERVICO_AVULSO&&(c.economia||0)>0){eco.style.display='block'; eco.textContent='Economia de '+fmt(c.economia);}
+    else if(!SERVICO_AVULSO&&c.anual){eco.style.display='block'; eco.textContent='Economia de '+fmt(c.mensalFinal/0.85*12*0.15)+' no ano';}
     else eco.style.display='none';
     // O QUE VEM JUNTO NO PACOTE, dito com a palavra certa. Fica fora do total de
     // propósito: é o que separa "nove itens inclusos, R$ 13.850 de tabela" de
@@ -2948,13 +3049,14 @@ _JS_CRU = r"""(function(){
     // lugares somando por conta própria seriam dois números.
     var bt=document.getElementById('barra-total');
     if(bt){
-      bt.textContent=fmt(c.ano1);
+      // recorrente: a barra mostra a mensalidade (o número grande do resumo)
+      bt.textContent=SERVICO_AVULSO?fmt(c.ano1):(c.anual?fmt(c.mensalFinal*12):fmt(c.mensalFinal)+'/mês');
       var leg=document.getElementById('barra-leg');
       // a legenda fala a língua de cada nicho: no evento, o que é cobrado e o
       // que vem no pacote; no recorrente, quantos serviços e a mensalidade.
       if(leg) leg.textContent=SERVICO_AVULSO
         ? (c.cobrados||0)+' cobrados'+((c.inclusos||0)?' · '+c.inclusos+' inclusos':'')
-        : (c.mods||0)+(c.mods===1?' serviço':' serviços')+' · '+fmt(c.mensal)+'/mês'+(c.anual?' · anual':'');
+        : (c.mods||0)+(c.mods===1?' serviço':' serviços')+' · 1º ano '+fmt(c.ano1)+(c.anual?' · anual à vista':'');
     }
     // mudou item/desconto -> o plano de pagamento pode ter deixado de fechar
     if(SERVICO_AVULSO) pintaParcelas();
@@ -2972,6 +3074,9 @@ _JS_CRU = r"""(function(){
     par.querySelectorAll('.oc-dtog button').forEach(function(x){
       x.classList.toggle('on',x===b);
     });
+    // trocou pra R$: o número ganha os centavos; trocou pra %: fica sem eles
+    var inp=par.querySelector('input');
+    if(inp) inp.value=(b.getAttribute('data-t')==='valor')?dinTxt(num(inp)):String(r2(num(inp))).replace('.',',');
     pinta();
   });
   var zerar=document.getElementById('oc-desc-zerar');
@@ -3021,11 +3126,16 @@ _JS_CRU = r"""(function(){
   // resumo ao lado escreve, e "MENSAL 1200" numa caixa estreita já foi lido
   // como 120. Só ao SAIR do campo (formatar enquanto digita pularia o cursor),
   // e `num()` descarta o ponto na leitura, então a conta não muda.
+  // Desde 24/09/2026 vale nos DOIS nichos e escreve os CENTAVOS ("1.500,00"):
+  // implantação, mensal, valor unitário, custo e o desconto quando é em R$.
   function milhar(root){
-    if(SERVICO_AVULSO) return;
-    (root||MODS).querySelectorAll('.oc-mod.rec .oc-setup,.oc-mod.rec .oc-mensal,.oc-mod.rec .oc-custo').forEach(function(i){
+    (root||MODS).querySelectorAll('.oc-mod .oc-setup,.oc-mod .oc-mensal,.oc-mod .oc-custo,.oc-mod .oc-desc').forEach(function(i){
       if(document.activeElement===i) return;
-      i.value=num(i).toLocaleString('pt-BR');
+      if(i.classList.contains('oc-desc')){
+        var par=i.closest('.oc-dpar');
+        if(!par||par.getAttribute('data-tipo')!=='valor') return;   // % fica como digitou
+      }
+      i.value=dinTxt(num(i));
     });
   }
   MODS.addEventListener('focusout',function(){ milhar(); });
@@ -3060,7 +3170,8 @@ _JS_CRU = r"""(function(){
       var on=b.getAttribute('data-on')==='1';
       b.setAttribute('data-on',on?'0':'1');
       b.classList.toggle('on',!on);
-      var mk=document.getElementById('oc-anual-mk'); if(b.id==='oc-anual'&&mk) mk.textContent=on?'↻':'✓';
+      // o "anual" virou interruptor (24/09/2026): quem desenha ligado/desligado é
+      // o CSS pelo data-on do botão — o ↻/✓ de texto saiu.
       pinta();
     });
   });
@@ -3337,11 +3448,15 @@ _JS_CRU = r"""(function(){
     var par=document.querySelector('.oc-dpar-tot');
     return (par&&par.getAttribute('data-tipo')==='valor')?'valor':'pct';
   }
+  // o campo de dinheiro da linha: R$ fixo à esquerda e o valor com centavos
+  function campoRS(cls,v){
+    return '<div class="oc-rsin"><i class="oc-rs">R$</i><input class="'+cls+'" inputmode="decimal" value="'+dinTxt(v)+'"></div>';
+  }
   function celDesc(tipo,val){
     var t=(tipo==='valor')?'valor':'pct';
     return '<div class="oc-num oc-desc-col"><span>Desconto</span>'
-      +'<div class="oc-dpar" data-tipo="'+t+'">'
-      +'<input class="oc-desc" inputmode="numeric" value="'+(parseInt(val,10)||0)+'">'
+      +'<div class="oc-dpar" data-tipo="'+t+'"><i class="oc-rs">R$</i>'
+      +'<input class="oc-desc" inputmode="decimal" value="'+(t==='valor'?dinTxt(val):String(r2(val)).replace('.',','))+'">'
       +'<span class="oc-dtog">'
       +'<button type="button" data-t="pct" class="'+(t==='pct'?'on':'')+'">%</button>'
       +'<button type="button" data-t="valor" class="'+(t==='valor'?'on':'')+'"'
@@ -3379,8 +3494,8 @@ _JS_CRU = r"""(function(){
       +(s.categoria?'<div class="oc-cat">'+ec(s.categoria)+'</div>':'')
       +'<b>'+ec(s.nome)+'</b>'+selo+'<div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div></div>'
       +'<div class="oc-num"><span>Qtd</span><input class="oc-qtd" inputmode="numeric" value="1"></div>'
-      +'<div class="oc-num"><span>Vr. unit.</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
-      +'<div class="oc-num oc-custo-col"><span>Custo</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
+      +'<div class="oc-num"><span>Vr. unit.</span>'+campoRS('oc-setup',s.setup)+'</div>'
+      +'<div class="oc-num oc-custo-col"><span>Custo</span>'+campoRS('oc-custo',s.custo)+'</div>'
       +celDesc(s.desc_tipo,s.desc_val)
       +'<div class="oc-sub"><span>Subtotal</span><b class="oc-sub-v'+(inc?' incl':'')+'">'
         +(inc?'Incluso':fmt(s.setup))+'</b></div>'
@@ -3398,9 +3513,9 @@ _JS_CRU = r"""(function(){
     var thumb=s.icone_svg?'<div class="svc-thumb">'+s.icone_svg+'</div>':'';
     return '<div class="oc-nome oc-nome-linha">'+thumb+'<div style="min-width:0"><b title="'+ec(s.nome)+'">'+ec(s.nome)+'</b>'+selo
       +'<div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div></div>'
-      +'<div class="oc-num"><span>Setup</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
-      +'<div class="oc-num"><span>Mensal</span><input class="oc-mensal" inputmode="numeric" value="'+s.mensal+'"></div>'
-      +'<div class="oc-num oc-custo-col"><span>Custo/mês</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
+      +'<div class="oc-num"><span>Implantação</span>'+campoRS('oc-setup',s.setup)+'</div>'
+      +'<div class="oc-num"><span>Mensal</span>'+campoRS('oc-mensal',s.mensal)+'</div>'
+      +'<div class="oc-num oc-custo-col"><span>Custo/mês</span>'+campoRS('oc-custo',s.custo)+'</div>'
       +celDesc(s.desc_tipo,s.desc_val)
       +'<div class="oc-rowacts"><button class="oc-ic oc-rm" type="button" title="Remover da proposta">🗑</button></div>';
   }
@@ -3657,9 +3772,9 @@ _JS_CRU = r"""(function(){
     if(ico){ico.value=s.icone||''; svcIconeSugerido='outros'; svcPintarIcones(); svcSugerirIcone();}
     document.getElementById('svc-nome').value=s.nome||'';
     document.getElementById('svc-desc').value=s.descricao||'';
-    document.getElementById('svc-setup').value=s.setup||0;
-    document.getElementById('svc-mensal').value=s.mensal||0;
-    document.getElementById('svc-custo').value=s.custo||0;
+    document.getElementById('svc-setup').value=dinTxt(s.setup||0);
+    document.getElementById('svc-mensal').value=dinTxt(s.mensal||0);
+    document.getElementById('svc-custo').value=dinTxt(s.custo||0);
     document.getElementById('svc-msg').textContent='';
     document.getElementById('oc-svc-form').style.display='block';
     document.getElementById('svc-nome').focus();
@@ -3863,7 +3978,7 @@ _JS_CRU = r"""(function(){
       // antigo, um relatório. Ver finance/desconto.eh_incluso.
       var incl=r.getAttribute('data-incluso')==='1';
       return {nome:r.getAttribute('data-nome'),desc:r.getAttribute('data-desc')||'',
-              setup:u*q,mensal:num(r.querySelector('.oc-mensal')),qtd:q,unitario:u,
+              setup:r2(u*q),mensal:num(r.querySelector('.oc-mensal')),qtd:q,unitario:u,
               categoria:cat.categoria||'',icone:cat.icone||'',
               incluso:incl,
               desc_tipo:incl?'pct':(par?(par.getAttribute('data-tipo')||'pct'):'pct'),
@@ -3871,7 +3986,7 @@ _JS_CRU = r"""(function(){
               desc_mes:porMes(r)};
     });
     var escEl=document.getElementById('oc-escopo-out');
-    return {id:EDIT_ID,lead_id:LEAD_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}).filter(function(id){return id.indexOf('orfao:')!==0;}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setupBruto),mensal:Math.round(SERVICO_AVULSO?c.mensalBruto:c.mensalBrutoCheio),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods,desconto_tipo:descTipoTot(),desconto_pct:(descTipoTot()==='pct'?num(document.getElementById('oc-desconto')):0),desconto_valor:(descTipoTot()==='valor'?num(document.getElementById('oc-desconto')):0),anual:!!c.anual};
+    return {id:EDIT_ID,lead_id:LEAD_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}).filter(function(id){return id.indexOf('orfao:')!==0;}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:r2(c.setupBruto),mensal:r2(SERVICO_AVULSO?c.mensalBruto:c.mensalBrutoCheio),primeiro_ano:r2(c.ano1),n_modulos:c.mods,desconto_tipo:descTipoTot(),desconto_pct:(descTipoTot()==='pct'?num(document.getElementById('oc-desconto')):0),desconto_valor:(descTipoTot()==='valor'?num(document.getElementById('oc-desconto')):0),anual:!!c.anual};
   }
   function salvarProposta(cb){
     zapFetch('/painel/servicos/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(coletarBody())}).then(function(d){if(!d){if(cb)cb(null);return;}if(d&&d.id){EDIT_ID=d.id;} if(cb)cb(d);});
@@ -4019,7 +4134,7 @@ _JS_CRU = r"""(function(){
   function marcaAnual(on){
     var b=document.getElementById('oc-anual'); if(!b) return;
     b.setAttribute('data-on',on?'1':'0'); b.classList.toggle('on',on);
-    var mk=document.getElementById('oc-anual-mk'); if(mk) mk.textContent=on?'✓':'↻';
+    // ligado/desligado é desenhado pelo CSS a partir do data-on (interruptor)
   }
   function novo(){
     EDIT_ID=null;
@@ -4090,7 +4205,7 @@ _JS_CRU = r"""(function(){
         dtPar.querySelectorAll('.oc-dtog button').forEach(function(x){
           x.classList.toggle('on',x.getAttribute('data-t')===dt);
         });
-        setv('oc-desconto', String(dt==='valor'?(d.desconto_valor||0):(d.desconto_pct||0)));
+        setv('oc-desconto', dt==='valor'?dinTxt(d.desconto_valor||0):String(d.desconto_pct||0).replace('.',','));
       }
       milhar();
       marcaAnual(!!d.anual);
@@ -5420,9 +5535,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           </div>
         </div>
         <div style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end">
-          <div class="oc-field" style="margin-bottom:0"><label>{{ 'Valor (R$)' if servico_avulso else 'Setup (R$)' }}</label><input id="svc-setup" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
-          <div class="oc-field" style="margin-bottom:0{% if servico_avulso %};display:none{% endif %}"><label>Mensal (R$)</label><input id="svc-mensal" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
-          <div class="oc-field" style="margin-bottom:0"><label>Custo (R$)</label><input id="svc-custo" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
+          <div class="oc-field" style="margin-bottom:0"><label>{{ 'Valor (R$)' if servico_avulso else 'Implantação (R$)' }}</label><input id="svc-setup" class="oc-inp" inputmode="decimal" value="0,00" style="text-align:right; max-width:120px"></div>
+          <div class="oc-field" style="margin-bottom:0{% if servico_avulso %};display:none{% endif %}"><label>Mensal (R$)</label><input id="svc-mensal" class="oc-inp" inputmode="decimal" value="0,00" style="text-align:right; max-width:120px"></div>
+          <div class="oc-field" style="margin-bottom:0"><label>Custo (R$)</label><input id="svc-custo" class="oc-inp" inputmode="decimal" value="0,00" style="text-align:right; max-width:120px"></div>
           <div style="flex:1; display:flex; gap:.4rem; justify-content:flex-end">
             <button id="svc-salvar" class="oc-btn-g" type="button" style="border:0; border-radius:8px; padding:.5rem 1rem; font-weight:600; cursor:pointer">Salvar</button>
             <button id="svc-cancelar" class="oc-pill" type="button">Cancelar</button>
@@ -5554,10 +5669,20 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div class="oc-ledger">
     <div class="card" style="margin:0">
       <div class="mut" style="font-size:.78rem; letter-spacing:.1em; text-transform:uppercase; color:var(--verde-claro)">Resumo · ao vivo</div>
-      <div class="oc-ll"><span class="mut">Investimento inicial</span><b id="oc-r-setup">R$ 0</b></div>
-      {% if not servico_avulso %}<div class="oc-ll"><span class="mut">Mensalidade</span><b id="oc-r-mensal" style="color:var(--verde-claro)">R$ 0</b></div>{% endif %}
-      <div class="oc-ll" id="oc-r-margem-l" style="display:none"><span class="mut">{{ 'Margem' if servico_avulso else 'Margem/mês' }}</span><b id="oc-r-margem" style="color:var(--verde-claro); font-size:.95rem">-</b></div>
-      <div class="oc-total"><div class="mut" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color:var(--verde-claro)">{{ 'Total' if servico_avulso else 'Total 1º ano' }}</div><div class="v" id="oc-r-ano">R$ 0</div><div class="mut" id="oc-r-eco" style="display:none; font-size:.8rem; color:var(--verde-claro); margin-top:.3rem"></div></div>
+      {% if servico_avulso %}
+      <div class="oc-ll"><span class="mut">Investimento inicial</span><b id="oc-r-setup">R$ 0,00</b></div>
+      <div class="oc-ll" id="oc-r-margem-l" style="display:none"><span class="mut">Margem</span><b id="oc-r-margem" style="color:var(--verde-claro); font-size:.95rem">-</b></div>
+      <div class="oc-total"><div class="mut" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color:var(--verde-claro)">Total</div><div class="v" id="oc-r-ano">R$ 0,00</div><div class="mut" id="oc-r-eco" style="display:none; font-size:.8rem; color:var(--verde-claro); margin-top:.3rem"></div></div>
+      {% else %}
+      {# RECORRENTE (24/09/2026, mockup zaq_servicos_valores_pilulas): o número
+         grande é o que o cliente paga POR MÊS — é o que se negocia e o que a
+         folha do cliente destaca. O 1º ano vira uma linha. No evento, nada muda:
+         lá o número grande continua sendo o total ("só valor mesmo", dono). #}
+      <div class="oc-total"><div class="mut" id="oc-r-mensal-rot" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color:var(--verde-claro)">Investimento mensal</div>
+        <div class="v"><span id="oc-r-mensal">R$ 0,00</span><span id="oc-r-mensal-per" class="oc-per"> /mês</span></div>
+        <div class="mut" id="oc-r-eco" style="display:none; font-size:.8rem; color:var(--verde-claro); margin-top:.3rem"></div></div>
+      <div class="oc-ll"><span class="mut">Mensalidade de tabela</span><b id="oc-r-tabela">R$ 0,00</b></div>
+      {% endif %}
       {% if servico_avulso %}
       {# O QUE VEM JUNTO. Fora do total de propósito: é o que separa "nove itens
          inclusos, R$ 13.850 de tabela" de "Economia de R$ 14.850" — que era o
@@ -5567,16 +5692,21 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         <p>Não entra no total. Na folha do cliente cada um sai marcado <b style="color:var(--verde-claro)">Incluso</b>, com o valor de tabela ao lado.</p>
       </div>
       {% endif %}
-      <div class="oc-ll oc-dline" id="oc-r-descitens-l" style="display:none"><span class="mut">Descontos por item</span><b id="oc-r-descitens">R$ 0</b></div>
-      <div class="oc-ll" id="oc-r-sub-l" style="display:none"><span class="mut">Subtotal com descontos</span><b id="oc-r-sub">R$ 0</b></div>
-      <div class="oc-ll oc-dline" id="oc-r-descfim-l" style="display:none"><span class="mut">Desconto no total</span><b id="oc-r-descfim">R$ 0</b></div>
+      <div class="oc-ll oc-dline" id="oc-r-descitens-l" style="display:none"><span class="mut">{{ 'Descontos por item' if servico_avulso else 'Desconto nos serviços' }}</span><b id="oc-r-descitens">R$ 0,00</b></div>
+      <div class="oc-ll" id="oc-r-sub-l" style="display:none"><span class="mut">Subtotal com descontos</span><b id="oc-r-sub">R$ 0,00</b></div>
+      <div class="oc-ll oc-dline" id="oc-r-descfim-l" style="display:none"><span class="mut">Desconto no total</span><b id="oc-r-descfim">R$ 0,00</b></div>
+      {% if not servico_avulso %}
+      <div class="oc-ll"><span class="mut">Implantação</span><b id="oc-r-setup">sem taxa</b></div>
+      <div class="oc-ll"><span class="mut">Total 1º ano</span><b id="oc-r-ano">R$ 0,00</b></div>
+      <div class="oc-ll" id="oc-r-margem-l" style="display:none"><span class="mut">Margem/mês</span><b id="oc-r-margem" style="color:var(--verde-claro); font-size:.95rem">-</b></div>
+      {% endif %}
       <!-- o desconto do TOTAL vale nos dois modos: consultoria e advocacia vendem
            por orçamento igual, e só não tinham desconto porque ele morava dentro
            do jsonb do evento. -->
       <div class="oc-field" style="margin-top:.7rem; margin-bottom:0">
         <label class="mut" style="font-size:.76rem">Desconto no total</label>
         <div class="oc-dpar oc-dpar-tot" data-tipo="pct">
-          <input id="oc-desconto" class="oc-inp oc-desc-inp" inputmode="numeric" value="0">
+          <i class="oc-rs">R$</i><input id="oc-desconto" class="oc-inp oc-desc-inp" inputmode="decimal" value="0">
           <span class="oc-dtog">
             <button type="button" data-t="pct" class="on">%</button>
             <button type="button" data-t="valor">R$</button>
@@ -5585,7 +5715,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         <button id="oc-desc-zerar" class="oc-dzero" type="button">zerar desconto</button>
       </div>
       {% if not servico_avulso %}
-      <button id="oc-anual" class="oc-pill" data-on="0" type="button" style="width:100%; margin-top:.7rem; text-align:left; display:flex; justify-content:space-between; align-items:center">Pagamento anual à vista (-15%) <span id="oc-anual-mk">↻</span></button>
+      <button id="oc-anual" class="oc-pill" data-on="0" type="button" style="width:100%; margin-top:.7rem; text-align:left; display:flex; justify-content:space-between; align-items:center">Pagamento anual à vista (−15%) <span id="oc-anual-mk" class="oc-sw" aria-hidden="true"></span></button>
       {% endif %}
       <button id="oc-gerar" class="oc-btn oc-btn-g">Gerar proposta</button>
       <button id="oc-salvar" class="oc-btn oc-btn-o">Salvar no funil</button>
@@ -5622,7 +5752,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
    editor; no desktop o Resumo grudado à direita continua sendo o que manda. #}
 <div class="oc-barra" id="oc-barra">
   <div class="vl">
-    <div class="rot">{{ 'Total' if servico_avulso else 'Total 1º ano' }}</div>
+    <div class="rot">{{ 'Total' if servico_avulso else 'Investimento mensal' }}</div>
     <div class="num" id="barra-total">R$ 0</div>
     <div class="leg" id="barra-leg"></div>
   </div>

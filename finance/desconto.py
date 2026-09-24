@@ -45,6 +45,21 @@ def _int(v) -> int:
         return 0
 
 
+def centavos(reais) -> int:
+    """Valor em REAIS vindo do item (1397, 1397.5, "1397.50") em CENTAVOS.
+
+    O item guarda reais — é o retrato da linha como a tela mostra. Até 24/09/2026
+    eram reais INTEIROS e a conta fazia `int(round(v)) * 100`, o que jogava fora
+    os centavos: um serviço de R$ 1.397,50 virava R$ 1.398. O dono pediu centavos
+    ("sim aceitar centavos"), e a conversão passa a arredondar no CENTAVO. Pra
+    valor inteiro o resultado é idêntico ao de antes — nenhuma proposta já salva
+    muda de número."""
+    try:
+        return int(round(float(reais or 0) * 100))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _pct(v) -> float:
     try:
         return float(v or 0)
@@ -119,8 +134,8 @@ def contribuicao(item) -> int:
     Evento: só o valor da linha (qtd × unitário já vem somado em `setup`).
     Recorrente: setup + mensalidade × 12, que é como a tela monta o `ano1`.
     """
-    return max(0, _int(item.get("setup")) * 100) + \
-        max(0, _int(item.get("mensal")) * 100) * MESES_ANO1
+    return max(0, centavos(item.get("setup"))) + \
+        max(0, centavos(item.get("mensal"))) * MESES_ANO1
 
 
 def por_mes(item) -> bool:
@@ -156,11 +171,11 @@ def percentual_do_item(item) -> float:
     if por_mes(item):
         # o equivalente, só pra quem quiser ler um percentual: a conta de verdade
         # do por-mês está em `liquido_do_item`
-        mensal = max(0, _int(item.get("mensal"))) * 100
-        reais = min(mensal, max(0, _int(item.get("desc_val"))) * 100) * MESES_ANO1
+        mensal = max(0, centavos(item.get("mensal")))
+        reais = min(mensal, max(0, centavos(item.get("desc_val")))) * MESES_ANO1
         return min(100.0, 100.0 * reais / base)
     # digitado em reais: vira o percentual equivalente da contribuição da linha
-    reais = max(0, _int(item.get("desc_val"))) * 100
+    reais = max(0, centavos(item.get("desc_val")))
     return min(100.0, 100.0 * reais / base)
 
 
@@ -169,13 +184,13 @@ def liquido_do_item(item) -> dict:
     quanto foi descontado. Devolve os dois separados porque é assim que o
     financeiro precisa deles."""
     p = percentual_do_item(item)
-    setup = max(0, _int(item.get("setup"))) * 100
-    mensal = max(0, _int(item.get("mensal"))) * 100
+    setup = max(0, centavos(item.get("setup")))
+    mensal = max(0, centavos(item.get("mensal")))
     if por_mes(item):
         # R$ por mês: sai inteiro da mensalidade (nunca abaixo de zero) e a
         # implantação fica cheia — ver `por_mes`.
         setup_liq = setup
-        mensal_liq = max(0, mensal - max(0, _int(item.get("desc_val"))) * 100)
+        mensal_liq = max(0, mensal - max(0, centavos(item.get("desc_val"))))
     else:
         setup_liq = int(round(setup * (100.0 - p) / 100.0))
         mensal_liq = int(round(mensal * (100.0 - p) / 100.0))
@@ -198,15 +213,15 @@ def somar_itens(itens) -> dict:
     for it in (itens or []):
         if not isinstance(it, dict):
             continue
-        b_s += max(0, _int(it.get("setup"))) * 100
-        b_m += max(0, _int(it.get("mensal"))) * 100
+        b_s += max(0, centavos(it.get("setup")))
+        b_m += max(0, centavos(it.get("mensal")))
         liq = liquido_do_item(it)
         l_s += liq["setup"]
         l_m += liq["mensal"]
         if eh_incluso(it):
             n_inc += 1
-            inc_s += max(0, _int(it.get("setup"))) * 100
-            inc_m += max(0, _int(it.get("mensal"))) * 100
+            inc_s += max(0, centavos(it.get("setup")))
+            inc_m += max(0, centavos(it.get("mensal")))
     return {"bruto_setup": b_s, "bruto_mensal": b_m,
             "setup": l_s, "mensal": l_m,
             "desconto_setup": b_s - l_s, "desconto_mensal": b_m - l_m,
@@ -298,8 +313,8 @@ def formas_recorrente(itens, *, setup_centavos=0, mensal_centavos=0, anual=False
     (as doze mensalidades), mais o que o cliente economiza no anual.
     """
     lista = [it for it in (itens or []) if isinstance(it, dict)]
-    itens_setup = sum(max(0, _int(i.get("setup"))) for i in lista) * 100
-    itens_mensal = sum(max(0, _int(i.get("mensal"))) for i in lista) * 100
+    itens_setup = sum(max(0, centavos(i.get("setup"))) for i in lista)
+    itens_mensal = sum(max(0, centavos(i.get("mensal"))) for i in lista)
     mensal_cheio = max(0, _int(mensal_centavos))
     if anual:
         mensal_cheio = int(round(mensal_cheio / FATOR_ANUAL))

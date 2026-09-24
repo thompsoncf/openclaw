@@ -2160,24 +2160,32 @@ def _sanear_itens(itens, *, com_desconto: bool = False) -> list[dict]:
     refeita aqui — a tela já mandou a conta pronta e refazê-la criaria um segundo
     número pra mesma coisa.
     """
+    from finance.desconto import centavos as _cent
+
+    def _r2(v):
+        # REAIS com até duas casas (24/09/2026: "sim aceitar centavos"); inteiro
+        # quando é redondo, pra item de hoje sair idêntico ao de ontem
+        c = max(0, _cent(v))
+        return c // 100 if c % 100 == 0 else c / 100
+
     out = []
     for it in (itens or [])[:50]:
         nome = (str(it.get("nome") or "")).strip()[:120]
         if not nome:
             continue
-        setup = max(0, int(it.get("setup") or 0))
+        setup = _r2(it.get("setup"))
         qtd = max(1, int(it.get("qtd") or 1))
         linha = {"nome": nome, "desc": (str(it.get("desc") or "")).strip()[:200],
                  "setup": setup,
-                 "mensal": max(0, int(it.get("mensal") or 0)),
+                 "mensal": _r2(it.get("mensal")),
                  "qtd": qtd,
                  # sem unitário explícito, deduz do total — é a mesma conta que a
                  # folha do cliente já fazia sozinha pra propostas antigas.
-                 "unitario": max(0, int(it.get("unitario") or 0)) or (setup // qtd),
+                 "unitario": _r2(it.get("unitario")) or _r2(_cent(setup) // qtd / 100),
                  "categoria": (str(it.get("categoria") or "")).strip()[:60]}
         if com_desconto:
             linha["desc_tipo"] = "valor" if (it.get("desc_tipo") or "") == "valor" else "pct"
-            linha["desc_val"] = max(0, int(it.get("desc_val") or 0))
+            linha["desc_val"] = _r2(it.get("desc_val"))
         out.append(linha)
     return out
 
@@ -2711,8 +2719,8 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens,
             pass
     # setup/mensal continuam sendo o BRUTO, como no painel: eles são o preço de
     # tabela do que foi escolhido. O que o desconto muda é `primeiro_ano_centavos`.
-    setup_c = sum(x["setup"] for x in linhas) * 100
-    mensal_c = sum(x["mensal"] for x in linhas) * 100
+    setup_c = sum(_dsc.centavos(x["setup"]) for x in linhas)
+    mensal_c = sum(_dsc.centavos(x["mensal"]) for x in linhas)
     tot = _dsc.totais(linhas, tipo=dsc_final["tipo"], pct=dsc_final["pct"],
                       valor=dsc_final["valor"] * 100)
     with pool.connection() as c:

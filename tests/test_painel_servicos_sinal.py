@@ -1617,3 +1617,35 @@ def test_no_evento_a_marca_do_por_mes_nao_entra(cliente):
         itens = cx.execute("select itens from orcamentos where id=%s",
                            (r.json()["id"],)).fetchone()[0]
     assert "desc_mes" not in itens[0]
+
+
+# ------------------------------------------------ centavos (24/09/2026)
+
+def test_o_salvar_aceita_centavos_e_grava_no_centavo(cliente):
+    """Até aqui o campo era `int` e o pydantic recusava R$ 1.397,50."""
+    with cliente.pool.connection() as cx:
+        cx.execute("update contas set nicho_id=null where id=%s", (CONTA,))  # → recorrente
+        cx.commit()
+    r = cliente.post("/painel/servicos/salvar",
+                     json={"empresa": "HLED", "modulos": [], "mensal": 1397.5,
+                           "itens": [{"nome": "Conteúdo", "setup": 0, "mensal": 1397.5,
+                                      "desc_tipo": "valor", "desc_val": 97.5,
+                                      "desc_mes": True}]})
+    assert r.status_code == 200, r.text
+    with cliente.pool.connection() as cx:
+        itens, bruto, ano1 = cx.execute(
+            "select itens, mensal_centavos, primeiro_ano_centavos from orcamentos "
+            "where id=%s", (r.json()["id"],)).fetchone()
+    assert itens[0]["mensal"] == 1397.5 and itens[0]["desc_val"] == 97.5
+    assert bruto == 139750 and ano1 == 130000 * 12
+
+
+def test_o_catalogo_guarda_e_devolve_os_centavos(cliente):
+    r = cliente.post("/painel/servicos/catalogo/salvar",
+                     json={"nome": "Criação de Conteúdo", "mensal": 1397.5, "setup": 0})
+    assert r.status_code == 200, r.text
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select mensal_centavos from servicos_catalogo where id=%s",
+                          (r.json()["id"],)).fetchone()[0] == 139750
+    itens = cliente.get("/painel/servicos/catalogo").json()["itens"]
+    assert next(i for i in itens if i["nome"] == "Criação de Conteúdo")["mensal"] == 1397.5

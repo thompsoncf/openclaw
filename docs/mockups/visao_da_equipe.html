@@ -1,0 +1,387 @@
+<title>Visão da Equipe</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #f5f4f1; --card: #fff; --linha: #e4e1da; --texto: #23211d; --fraco: #6b675e;
+    --teal: #0f7d73; --teal-fraco: #e2f0ee; --amarelo: #a07000; --amarelo-fraco: #fdf2da;
+    --vermelho: #a8352b; --vermelho-fraco: #fbe8e5; --azul: #2f5fa8; --azul-fraco: #e7eefa;
+    --tela: #101014; --tela-card: #1b1b21; --tela-linha: #2c2c34; --tela-txt: #f2f1ee;
+    --tela-fraco: #9a978f;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg: #171614; --card: #201e1b; --linha: #35322c; --texto: #ece9e2; --fraco: #9d988c;
+    --teal: #4fc0b3; --teal-fraco: #12302d; --amarelo: #e0b85c; --amarelo-fraco: #332a13;
+    --vermelho: #e58a7e; --vermelho-fraco: #351d19; --azul: #86aeea; --azul-fraco: #17233a;
+  } }
+  :root[data-theme="dark"] {
+    --bg: #171614; --card: #201e1b; --linha: #35322c; --texto: #ece9e2; --fraco: #9d988c;
+    --teal: #4fc0b3; --teal-fraco: #12302d; --amarelo: #e0b85c; --amarelo-fraco: #332a13;
+    --vermelho: #e58a7e; --vermelho-fraco: #351d19; --azul: #86aeea; --azul-fraco: #17233a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--texto); font-size: 15px; line-height: 1.55;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 30px 16px 70px; }
+  h1 { font-size: clamp(23px, 5vw, 32px); margin: 0 0 6px; letter-spacing: -.02em; line-height: 1.15; }
+  .sub { color: var(--fraco); margin: 0 0 4px; max-width: 64ch; }
+  h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--fraco);
+    margin: 38px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--linha); }
+  .duas { display: grid; gap: 18px; grid-template-columns: 320px 1fr; align-items: start; }
+  @media (max-width: 860px) { .duas { grid-template-columns: 1fr; } }
+
+  /* ---------- o celular ---------- */
+  .fone { background: var(--tela); border-radius: 26px; padding: 12px 10px 16px; color: var(--tela-txt);
+    box-shadow: 0 16px 40px rgba(0,0,0,.24); position: sticky; top: 18px; }
+  .fone .topo { display: flex; align-items: center; gap: 8px; padding: 4px 8px 12px; }
+  .fone .topo b { font-size: 16px; }
+  .fone .topo span { color: var(--tela-fraco); font-size: 12px; }
+  .seg { display: flex; gap: 5px; padding: 0 6px 12px; flex-wrap: wrap; }
+  .seg a { font-size: 12.5px; padding: 5px 11px; border-radius: 999px; background: var(--tela-card);
+    color: var(--tela-fraco); text-decoration: none; border: 1px solid var(--tela-linha); white-space: nowrap; }
+  .seg a.on { background: #0f7d73; color: #fff; border-color: #0f7d73; font-weight: 600; }
+  .seg a.novo { border-style: dashed; border-color: #4fc0b3; color: #4fc0b3; }
+  .kpi { background: var(--tela-card); border: 1px solid var(--tela-linha); border-radius: 14px;
+    padding: 12px 13px; margin: 0 6px 8px; }
+  .kpi .v { font-size: 25px; font-weight: 700; letter-spacing: -.02em; }
+  .kpi.hero .v { color: #6fe0cf; }
+  .kpi .l { font-size: 12.5px; color: var(--tela-fraco); }
+  .kpi .d { font-size: 11.5px; color: var(--tela-fraco); margin-top: 3px; opacity: .85; }
+  .eyebrow { font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em; color: var(--tela-fraco);
+    margin: 14px 8px 7px; }
+  .bloco { background: var(--tela-card); border: 1px solid var(--tela-linha); border-radius: 14px;
+    margin: 0 6px; padding: 11px 12px; }
+  .fr { display: grid; grid-template-columns: 1fr 58px auto; gap: 8px; align-items: center;
+    padding: 6px 0; border-bottom: 1px solid var(--tela-linha); font-size: 13px; }
+  .fr:last-child { border-bottom: none; }
+  .fr .nm { color: var(--tela-txt); }
+  .fr .bar { background: #2c2c34; border-radius: 999px; height: 6px; overflow: hidden; }
+  .fr .bar i { display: block; height: 100%; background: #0f7d73; }
+  .fr .qt { text-align: right; white-space: nowrap; }
+  .fr .qt b { font-size: 14px; }
+  .fr .qt small { display: block; font-size: 10.5px; color: #6fe0cf; }
+  .fr.fech .bar i { background: #3f9d5a; }
+  .fr.perd .nm, .fr.perd .qt b { color: var(--tela-fraco); }
+  .fr.perd .bar i { background: #6b6b74; }
+  .aten { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 0 6px; }
+  .at { background: var(--tela-card); border: 1px solid var(--tela-linha); border-radius: 13px; padding: 10px 11px; }
+  .at .n { font-size: 20px; font-weight: 700; }
+  .at .t { font-size: 11.5px; color: var(--tela-fraco); line-height: 1.35; }
+  .at.hot .n { color: #e58a7e; } .at.warn .n { color: #e0b85c; } .at.info .n { color: #86aeea; }
+  .spark { display: flex; align-items: flex-end; gap: 3px; height: 46px; margin: 8px 0 4px; }
+  .spark i { flex: 1; background: #0f7d73; border-radius: 2px 2px 0 0; min-height: 2px; display: block; }
+  .spark i.hoje { background: #6fe0cf; }
+  .dias { display: grid; grid-template-columns: repeat(14, 1fr); gap: 2px; align-items: end;
+    height: 92px; margin: 10px 0 2px; }
+  .dias .d { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .dias .d b { font-size: 9px; color: #cfcdc7; margin-bottom: 2px; font-weight: 600; }
+  .dias .d i { width: 100%; background: #0f7d73; border-radius: 2px 2px 0 0; min-height: 2px; display: block; }
+  .dias .d.fds i { background: #3b5f5a; }
+  .dias .d.ontem i { background: #6fe0cf; }
+  .rot { display: grid; grid-template-columns: repeat(14, 1fr); gap: 2px; text-align: center;
+    font-size: 8.5px; color: #9a978f; line-height: 1.2; }
+  .rot span.fds { color: #6f6c66; }
+  .hb { font-size: 12px; }
+  .hb div { display: grid; grid-template-columns: 92px 1fr 30px; gap: 7px; align-items: center; padding: 3px 0; }
+  .hb span { color: #9a978f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hb i { display: block; height: 7px; border-radius: 99px; background: #0f7d73; }
+  .hb i.am { background: #b88a2e; } .hb i.ci { background: #55555e; }
+  .hb b { text-align: right; }
+  .alerta { background: #33280f; border: 1px solid #5a4617; color: #f0cf85; border-radius: 11px;
+    padding: 9px 10px; font-size: 12px; line-height: 1.4; margin-top: 8px; }
+  .lido { font-size: 10px; color: #6fe0cf; margin-left: 4px; }
+  .linhas { font-size: 12.5px; }
+  .linhas div { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0;
+    border-bottom: 1px solid var(--tela-linha); }
+  .linhas div:last-child { border-bottom: none; }
+  .linhas span { color: var(--tela-fraco); }
+  .tabs { display: flex; gap: 4px; margin: 14px 6px 0; }
+  .tabs a { flex: 1; text-align: center; font-size: 10.5px; padding: 7px 0; border-radius: 10px;
+    background: var(--tela-card); color: var(--tela-fraco); text-decoration: none; border: 1px solid var(--tela-linha); }
+  .tabs a.on { color: #6fe0cf; border-color: #0f7d73; }
+
+  /* ---------- o texto ---------- */
+  .card { background: var(--card); border: 1px solid var(--linha); border-radius: 14px; padding: 17px; }
+  .card + .card { margin-top: 14px; }
+  .card h3 { margin: 0 0 4px; font-size: 16.5px; }
+  .card h3 .selo { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    padding: 2px 7px; border-radius: 999px; margin-left: 7px; vertical-align: 2px; }
+  .selo.novo { background: var(--teal-fraco); color: var(--teal); }
+  .selo.perg { background: var(--amarelo-fraco); color: var(--amarelo); }
+  .selo.risco { background: var(--vermelho-fraco); color: var(--vermelho); }
+  .card p { margin: 6px 0 0; color: var(--fraco); font-size: 14px; }
+  .card p b, .card li b { color: var(--texto); }
+  ul { margin: 8px 0 0; padding-left: 18px; font-size: 14px; color: var(--fraco); }
+  li { margin-bottom: 5px; }
+  .rolar { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 9px; border-bottom: 1px solid var(--linha); vertical-align: top; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--fraco); }
+  tr:last-child td { border-bottom: none; }
+  td.n { text-align: right; white-space: nowrap; }
+  .rs { color: var(--teal); font-weight: 600; }
+  .nada { color: var(--fraco); }
+  .nota { border-left: 3px solid var(--amarelo); background: var(--amarelo-fraco); border-radius: 0 10px 10px 0;
+    padding: 12px 14px; margin-top: 14px; font-size: 13.8px; }
+  .nota.risco { border-left-color: var(--vermelho); background: var(--vermelho-fraco); }
+  .nota b { color: inherit; }
+  footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--linha); color: var(--fraco); font-size: 13px; }
+</style>
+
+<div class="wrap">
+  <h1>Visão da Equipe — o que eu mudaria</h1>
+  <p class="sub">Mockup pra aprovar antes de mexer. Os números são da Prime, medidos agora no banco.
+    À esquerda a tela como ficaria no celular; à direita o porquê de cada parte.</p>
+
+  <div class="duas">
+    <div class="fone">
+      <div class="topo"><b>Equipe</b><span>acompanhe o time</span></div>
+      <div class="seg">
+        <a>Hoje</a><a class="on">Semana</a><a>Mês</a><a class="novo">Escolher ▾</a>
+      </div>
+
+      <div class="kpi hero">
+        <div class="v">R$ 55 mil</div>
+        <div class="l">Fechado no período</div>
+        <div class="d">8 negócios · 31% de conversão</div>
+      </div>
+      <div class="kpi"><div class="v">77</div><div class="l">Leads novos</div><div class="d">no período</div></div>
+      <div class="kpi"><div class="v">423</div><div class="l">Na carteira</div><div class="d">1 c/ IA · 422 c/ vendedor</div></div>
+
+      <div class="eyebrow">Funil do time</div>
+      <div class="bloco">
+        <div class="fr"><span class="nm">Novo</span><span class="bar"><i style="width:2%"></i></span><span class="qt"><b>0</b></span></div>
+        <div class="fr"><span class="nm">Contatado</span><span class="bar"><i style="width:100%"></i></span><span class="qt"><b>252</b></span></div>
+        <div class="fr"><span class="nm">Agendado Visita</span><span class="bar"><i style="width:4%"></i></span><span class="qt"><b>11</b></span></div>
+        <div class="fr"><span class="nm">Negociação</span><span class="bar"><i style="width:63%"></i></span><span class="qt"><b>160</b><small>R$ 148 mil · 18 prop.</small></span></div>
+        <div class="fr"><span class="nm">ORCAMENTO ASSINADO</span><span class="bar"><i style="width:2%"></i></span><span class="qt"><b>0</b></span></div>
+        <div class="fr fech"><span class="nm">CONTRATO ASSINADO</span><span class="bar"><i style="width:4%"></i></span><span class="qt"><b>9</b><small>R$ 56.990</small></span></div>
+        <div class="fr perd"><span class="nm">Perdido</span><span class="bar"><i style="width:15%"></i></span><span class="qt"><b>38</b></span></div>
+      </div>
+
+      <div class="eyebrow">Precisa de atenção</div>
+      <div class="aten">
+        <div class="at hot"><div class="n">303</div><div class="t">parados há +3 dias</div></div>
+        <div class="at warn"><div class="n">37</div><div class="t">quentes sem contato hoje</div></div>
+        <div class="at info"><div class="n">6</div><div class="t">propostas aguardando</div></div>
+        <div class="at info"><div class="n">1</div><div class="t">visitas hoje</div></div>
+      </div>
+
+      <div class="eyebrow">Leads por dia <span style="color:#4fc0b3">· novo</span></div>
+      <div class="bloco">
+        <div class="dias">
+          <div class="d"><b>12</b><i style="height:46%"></i></div>
+          <div class="d"><b>11</b><i style="height:42%"></i></div>
+          <div class="d fds"><b>3</b><i style="height:12%"></i></div>
+          <div class="d fds"><b>8</b><i style="height:31%"></i></div>
+          <div class="d"><b>16</b><i style="height:62%"></i></div>
+          <div class="d"><b>11</b><i style="height:42%"></i></div>
+          <div class="d"><b>16</b><i style="height:62%"></i></div>
+          <div class="d"><b>4</b><i style="height:15%"></i></div>
+          <div class="d"><b>10</b><i style="height:38%"></i></div>
+          <div class="d fds"><b>4</b><i style="height:15%"></i></div>
+          <div class="d fds"><b>1</b><i style="height:4%"></i></div>
+          <div class="d"><b>16</b><i style="height:62%"></i></div>
+          <div class="d"><b>14</b><i style="height:54%"></i></div>
+          <div class="d ontem"><b>26</b><i style="height:100%"></i></div>
+        </div>
+        <div class="rot">
+          <span>qui<br>10</span><span>sex<br>11</span><span class="fds">sáb<br>12</span><span class="fds">dom<br>13</span>
+          <span>seg<br>14</span><span>ter<br>15</span><span>qua<br>16</span><span>qui<br>17</span>
+          <span>sex<br>18</span><span class="fds">sáb<br>19</span><span class="fds">dom<br>20</span><span>seg<br>21</span>
+          <span>ter<br>22</span><span>qua<br>23</span>
+        </div>
+        <div class="linhas" style="margin-top:8px">
+          <div><span>14 dias</span><b>152 leads · 11 por dia</b></div>
+          <div><span>1ª resposta (mediana)</span><b>40 min</b></div>
+          <div><span>Nunca respondidos</span><b>2</b></div>
+        </div>
+      </div>
+
+      <div class="eyebrow">Quando chegam · 30 dias</div>
+      <div class="bloco">
+        <div class="hb">
+          <div><span>Segunda</span><i style="width:88%"></i><b>56</b></div>
+          <div><span>Terça</span><i style="width:80%"></i><b>51</b></div>
+          <div><span>Quarta</span><i style="width:100%"></i><b>64</b></div>
+          <div><span>Quinta</span><i style="width:63%"></i><b>40</b></div>
+          <div><span>Sexta</span><i style="width:66%"></i><b>42</b></div>
+          <div><span>Sábado</span><i class="ci" style="width:48%"></i><b>31</b></div>
+          <div><span>Domingo</span><i class="ci" style="width:41%"></i><b>26</b></div>
+        </div>
+        <div class="linhas" style="margin-top:6px">
+          <div><span>Manhã · tarde · noite</span><b>81 · 162 · 60</b></div>
+        </div>
+        <div class="alerta"><b>78 leads (25%)</b> chegaram fora do expediente e esperaram
+          <b>7h40</b> pela 1ª resposta. Dentro do horário: <b>37 min</b>.</div>
+      </div>
+
+      <div class="eyebrow">O que pedem · 30 dias</div>
+      <div class="bloco">
+        <div class="hb">
+          <div><span>Casamento</span><i style="width:100%"></i><b>74</b></div>
+          <div><span>Aniversário</span><i style="width:51%"></i><b>38</b></div>
+          <div><span>15 anos</span><i style="width:38%"></i><b>28</b></div>
+          <div><span>Formatura</span><i style="width:27%"></i><b>20</b></div>
+          <div><span>Outros</span><i class="ci" style="width:14%"></i><b>10</b></div>
+        </div>
+        <div class="linhas" style="margin-top:6px">
+          <div><span>Meses mais pedidos</span><b>dez 21 · out 19 · fev 15</b></div>
+          <div><span>Convidados</span><b>50–99: 47 · 100–199: 46</b></div>
+          <div><span>Sem tipo informado</span><b style="color:#e0b85c">140</b></div>
+        </div>
+      </div>
+
+      <div class="eyebrow">Por que perdemos <span class="lido">💬 lido das conversas</span></div>
+      <div class="bloco">
+        <div class="hb">
+          <div><span>Parou de responder</span><i class="am" style="width:100%"></i><b>9</b></div>
+          <div><span>Data indisponível</span><i style="width:89%"></i><b>8</b></div>
+          <div><span>Não era cliente</span><i class="ci" style="width:56%"></i><b>5</b></div>
+          <div><span>Queria outra coisa</span><i class="ci" style="width:56%"></i><b>5</b></div>
+          <div><span>Preço</span><i class="am" style="width:56%"></i><b>5</b></div>
+          <div><span>Fechou com outro</span><i style="width:33%"></i><b>3</b></div>
+          <div><span>Outros</span><i class="ci" style="width:33%"></i><b>3</b></div>
+        </div>
+        <div class="alerta"><b>10 dos 38</b> nem queriam festa: vaga de emprego, fornecedor,
+          aluguel de copo e cadeira, pedido de doação.</div>
+      </div>
+
+      <div class="tabs"><a class="on">Visão</a><a>Placar</a><a>Leads</a><a>Atividade</a></div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h3>1. O funil ganha as colunas que faltavam <span class="selo novo">seu pedido</span></h3>
+        <p>O painel tem sete colunas; o app mostrava cinco. Faltavam justamente as duas pontas do fim:
+          <b>CONTRATO ASSINADO</b> (9 leads) e <b>Perdido</b> (38). Agora a lista é a mesma do quadro, na mesma ordem.</p>
+        <div class="nota">O <b>Perdido</b> entra em cinza, e não some: quem olha o funil precisa ver o vazamento.
+          Se você preferir sem ele, tiro numa linha.</div>
+      </div>
+
+      <div class="card">
+        <h3>2. R$ só onde existe orçamento ou contrato</h3>
+        <p>Como você pediu: nas etapas de prospecção aparece só a <b>quantidade de leads</b>. O dinheiro aparece
+          onde ele existe de verdade — proposta na mesa e contrato assinado.</p>
+        <div class="rolar">
+          <table>
+            <thead><tr><th>Etapa</th><th class="n">Leads</th><th class="n">O que mostra</th></tr></thead>
+            <tbody>
+              <tr><td>Novo</td><td class="n">0</td><td class="n nada">só a quantidade</td></tr>
+              <tr><td>Contatado</td><td class="n">252</td><td class="n nada">só a quantidade</td></tr>
+              <tr><td>Agendado Visita</td><td class="n">11</td><td class="n nada">só a quantidade</td></tr>
+              <tr><td>Negociação</td><td class="n">160</td><td class="n"><span class="rs">R$ 148.050</span><br><small class="nada">18 com proposta</small></td></tr>
+              <tr><td>ORCAMENTO ASSINADO</td><td class="n">0</td><td class="n nada">—</td></tr>
+              <tr><td>CONTRATO ASSINADO</td><td class="n">9</td><td class="n"><span class="rs">R$ 56.990</span></td></tr>
+              <tr><td>Perdido</td><td class="n">38</td><td class="n nada">só a quantidade</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>A regra é automática, não uma lista de nomes: <b>a etapa mostra R$ quando os leads dela têm orçamento</b>.
+          Assim vale pra qualquer conta, com qualquer nome de etapa.</p>
+      </div>
+
+      <div class="card">
+        <h3>3. A pílula nova: “Escolher” <span class="selo perg">seu nome, sua escolha</span></h3>
+        <p>Pensei no nome pra caber no celular ao lado de Hoje · Semana · Mês. <b>“Escolher”</b> é o que eu
+          recomendo: é verbo, cabe em qualquer tela, e depois de escolher ela mostra o período —
+          <b>“1–15 set ▾”</b> —, então o nome some e vira a resposta.</p>
+        <ul>
+          <li><b>Escolher</b> — curto, e vira a data escolhida. É o meu voto.</li>
+          <li><b>Período</b> — mais formal, mas as outras três também são período.</li>
+          <li><b>Personalizado</b> — o nome que todo mundo usa, e o que menos cabe.</li>
+        </ul>
+        <p>Com atalhos dentro: ontem, últimos 7, últimos 30, mês passado — e as duas datas quando quiser exato.
+          A escolha fica guardada como a de hoje, então voltar na tela devolve o mesmo recorte.</p>
+      </div>
+
+      <div class="card">
+        <h3>4. Leads por dia, com o dia e a data <span class="selo novo">seu pedido</span></h3>
+        <p>Cada barra tem o número em cima e <b>o dia da semana e a data</b> embaixo. O fim de semana fica num
+          tom mais apagado, pra se ver de relance — e ele explica os buracos: <b>sábado 19 teve 4 e domingo 20
+          teve 1</b>, e na segunda voltou pra 16. Ontem, quarta 23, foi o recorde: <b>26</b>.</p>
+        <p>Embaixo, o que a agência mais pergunta: média por dia (<b>11</b>), 1ª resposta (<b>40 min</b>)
+          e quantos ficaram sem resposta (<b>2</b>).</p>
+      </div>
+
+      <div class="card">
+        <h3>5. Quando chegam — e o achado mais caro <span class="selo novo">dado novo</span></h3>
+        <p>Por dia da semana: <b>quarta é o pico (64)</b>, segunda e terça vêm logo atrás, fim de semana cai pela
+          metade. Por turno, <b>metade chega à tarde</b> (162 de 310).</p>
+        <div class="nota risco"><b>1 em cada 4 leads chega fora do expediente</b> (78 de 310, à noite ou no
+          domingo) e espera <b>7h40</b> pela primeira resposta. Os que chegam dentro do horário esperam <b>37 min</b>.
+          Isso é dinheiro de anúncio parado a noite inteira. Dá pra resolver de dois jeitos, e o número aqui mostra
+          qual funciona: <b>a agência pausa o anúncio à noite</b>, ou <b>a IA responde fora do horário</b>
+          (hoje está ligada em 1 lead de 423).</div>
+      </div>
+
+      <div class="card">
+        <h3>6. O que pedem — no vocabulário do nicho</h3>
+        <p>Pra quem vende festa, o que importa é o tipo, o mês e o tamanho: <b>casamento 74</b>, aniversário 38,
+          15 anos 28, formatura 20; <b>dezembro, outubro e fevereiro</b> são os meses mais pedidos; e o grosso é de
+          <b>50 a 199 convidados</b>. É o que a agência precisa pra escrever o anúncio certo pro mês certo.</p>
+        <p>Este bloco segue o nicho da conta (regra 6): a Prime vê festa; a ZAQ, que vende serviço por
+          mensalidade, veria segmento e porte da empresa no lugar. Nenhum dos dois vê o do outro.</p>
+        <div class="nota"><b>140 dos 310 leads estão sem tipo de festa</b> — a conversa não chegou lá, ou ninguém
+          anotou. Com o mesmo leitor do item 7, dá pra preencher boa parte sozinho.</div>
+      </div>
+
+      <div class="card">
+        <h3>7. Por que perdemos — lido das conversas <span class="selo novo">seu pedido</span></h3>
+        <p>Li as conversas dos 38 leads perdidos da Prime e comparei com o motivo que o vendedor marcou:</p>
+        <div class="rolar">
+          <table>
+            <thead><tr><th>Motivo</th><th class="n">O vendedor marcou</th><th class="n">A conversa diz</th></tr></thead>
+            <tbody>
+              <tr><td>Parou de responder</td><td class="n">6</td><td class="n"><b>9</b></td></tr>
+              <tr><td>Data indisponível</td><td class="n">6</td><td class="n"><b>8</b></td></tr>
+              <tr><td>Preço</td><td class="n nada">0</td><td class="n"><b>5</b></td></tr>
+              <tr><td>Não era cliente (vaga, fornecedor, doação)</td><td class="n nada">—</td><td class="n"><b>5</b></td></tr>
+              <tr><td>Queria outra coisa (copo, cadeira, auditório)</td><td class="n">1</td><td class="n"><b>5</b></td></tr>
+              <tr><td>Fechou com outro</td><td class="n">2</td><td class="n"><b>3</b></td></tr>
+              <tr><td>Outros / sem conversa</td><td class="n">5</td><td class="n">3</td></tr>
+              <tr><td><b>Sem motivo nenhum</b></td><td class="n"><b style="color:var(--vermelho)">18</b></td><td class="n">0</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Três coisas que só a conversa mostra:</p>
+        <ul>
+          <li><b>Preço nunca foi marcado, e aparece em 5</b> — "é quase 10 mil só o espaço?", "algo simples, mas em conta".</li>
+          <li><b>10 dos 38 nem queriam festa.</b> Isso é qualidade de lead: a agência está pagando por
+            currículo e por pedido de copo alugado. É o número mais útil pra ela ajustar o público.</li>
+          <li><b>Um foi dado como perdido enquanto dizia que ia voltar</b> ("vou ver com a diretoria e hoje te
+            retorno"). O leitor pega esse também.</li>
+        </ul>
+        <p><b>Como funcionaria:</b> quando o lead vai pra Perdido, a IA lê o fim da conversa e anota um motivo
+          marcado <b>💬 lido</b> — o mesmo selo que a data da festa já usa quando vem da conversa. O vendedor pode
+          corrigir; o que ele escreve vale mais. A agência vê só as contagens, <b>nunca o texto do cliente</b>.</p>
+      </div>
+
+      <div class="card">
+        <h3>8. Antes de dar o acesso <span class="selo risco">preciso da sua decisão</span></h3>
+        <p>Hoje só existem três papéis: dono, gestor e vendedor. Pra a agência ver a Visão, ela entraria
+          como <b>gestor</b> — e gestor abre a conversa de qualquer cliente, a fila inteira, e pode reatribuir lead.</p>
+        <p>Minha proposta: um papel <b>só-leitura</b> (chamaria de <b>Marketing</b>) que vê a Visão e os números
+          por origem, e <b>não abre conversa de cliente</b>. São algumas horas de trabalho e resolve isso de vez,
+          pra essa agência e pras próximas.</p>
+        <div class="nota risco">Se preferir liberar como gestor agora e fazer o papel depois, tudo bem —
+          mas é bom saber o que está sendo aberto: a conversa do cliente com a empresa.</div>
+      </div>
+
+      <div class="card">
+        <h3>Conferi se está tudo no lugar</h3>
+        <p>Bati cada número da tela contra o banco. Os três blocos de cima estão certos depois do conserto de
+          ontem. O que continua torto não é a tela, é o funil se mexendo sozinho:</p>
+        <ul>
+          <li>em 18/09 um ajuste automático moveu <b>111 leads de Contatado para Negociação</b> de uma vez —
+            por isso “Negociação 160” não são 160 negociações de verdade, e só 18 têm proposta;</li>
+          <li>na semana, <b>59 leads</b> foram dados como perdidos sozinhos por “sem resposta” e <b>62 voltaram</b>
+            sozinhos pra Contatado.</li>
+        </ul>
+        <p>Isso é decisão sua sobre a automação, não conserto de tela — e é a próxima conversa que eu sugiro.</p>
+      </div>
+    </div>
+  </div>
+
+  <footer>Mockup de 24/09/2026 · números da Prime Eventos (conta 34), lidos em produção sem escrever nada.</footer>
+</div>

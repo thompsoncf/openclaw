@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Aba Empresa reorganizada</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap">
+<style>
+:root{
+  --bg:#eef2ef; --card:#ffffff; --linha:#d9e1dc; --texto:#16201a; --fraco:#5a6a61;
+  --acento:#0c8a47; --acento-fraco:#dff1e6; --alerta:#9a5b00; --alerta-fraco:#fbefd9;
+  --ruim:#a8352b; --ruim-fraco:#fae6e3;
+  /* a tela do app é sempre escura: são as cores do próprio ZAQ */
+  --a-bg:#0A0F0C; --a-bg2:#0E1512; --a-card:#121A16; --a-linha:#1E2A23; --a-txt:#EAF2ED;
+  --a-mut:#8FA197; --a-faint:#5E6F66; --a-verde:#25D366; --a-verde-cl:#46F58A; --a-sobre:#04150C;
+  --a-neon-f:#10241A; --a-neon-b:#1E4A3A; --a-amb:#E0A32E; --a-amb-f:#241C0F; --a-amb-b:#5A4520;
+  --a-cor:#E0574F; --a-cor-f:#241313; --a-cor-b:#5A2B2B; --a-roxo:#B3A7EA;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --bg:#0f1512; --card:#161e1a; --linha:#27332c; --texto:#e6eee9; --fraco:#98a79e;
+  --acento:#4fd18a; --acento-fraco:#123022; --alerta:#e7b85a; --alerta-fraco:#30260f;
+  --ruim:#ec8e82; --ruim-fraco:#361c18;
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0f1512; --card:#161e1a; --linha:#27332c; --texto:#e6eee9; --fraco:#98a79e;
+  --acento:#4fd18a; --acento-fraco:#123022; --alerta:#e7b85a; --alerta-fraco:#30260f;
+  --ruim:#ec8e82; --ruim-fraco:#361c18;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--texto);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:16px;padding-block:32px 80px}
+h1{font-family:var(--display);font-size:clamp(26px,5vw,38px);line-height:1.1;letter-spacing:-.02em;margin:0 0 10px;text-wrap:balance}
+.sub{color:var(--fraco);max-width:68ch;margin:0}
+h2{font-family:var(--display);font-size:22px;letter-spacing:-.01em;margin:46px 0 6px;text-wrap:balance}
+h2 + .sub{margin-bottom:16px}
+.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--acento);font-weight:600;margin:0 0 8px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---------- o que atrapalha ---------- */
+.probs{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin-top:16px}
+.prob{background:var(--card);border:1px solid var(--linha);border-radius:12px;padding:14px 16px}
+.prob b{display:block;font-size:15px;margin-bottom:3px}
+.prob span{color:var(--fraco);font-size:14px}
+.prob .med{font-family:var(--mono);font-size:13px;color:var(--ruim);display:block;margin-top:6px}
+
+/* ---------- moldura do PC (sempre 1240 de largura, encolhe pra caber) ---------- */
+.pc-caixa{overflow-x:auto;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.22);border:1px solid var(--linha)}
+.pc{width:1240px;background:var(--a-bg);color:var(--a-txt);font-family:var(--body);font-size:14px;display:grid;grid-template-columns:190px 1fr}
+.lat{border-right:1px solid var(--a-linha);padding:16px 10px;background:var(--a-bg2);font-size:13px;color:var(--a-mut)}
+.lat .logo{color:var(--a-txt);font-weight:700;font-size:17px;margin:0 8px 16px}
+.lat .logo i{color:var(--a-verde);font-style:normal}
+.lat p{margin:14px 8px 4px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--a-faint)}
+.lat a{display:block;padding:6px 8px;border-radius:7px;color:inherit;text-decoration:none}
+.lat a.on{background:var(--a-neon-f);color:var(--a-verde)}
+.pag{padding:20px 26px 30px;min-width:0}
+
+/* peças do app */
+.a-card{background:var(--a-card);border:1px solid var(--a-linha);border-radius:14px;padding:16px 18px}
+.cab{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.cab h3{font-family:var(--display);font-size:22px;margin:0}
+.cab .quem{color:var(--a-mut);font-size:13px}
+.cab .quem a{color:var(--a-verde);text-decoration:none}
+.selo-pj{margin-left:auto;font-size:11px;font-weight:600;color:var(--a-verde);background:var(--a-neon-f);border:1px solid var(--a-neon-b);border-radius:999px;padding:3px 10px}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+.tile{display:block;text-decoration:none;color:inherit;background:var(--a-bg2);border:1px solid var(--a-linha);border-radius:11px;padding:11px 13px}
+.tile .r{font-size:11.5px;color:var(--a-mut)}
+.tile .v{font-family:var(--mono);font-size:19px;font-weight:600;margin:2px 0 1px;font-variant-numeric:tabular-nums}
+.tile .d{font-size:11.5px;color:var(--a-mut)}
+.tile .d b{font-weight:600}
+.cor{color:var(--a-cor)} .amb{color:var(--a-amb)} .ver{color:var(--a-verde-cl)} .mut{color:var(--a-mut)}
+.pend{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center}
+.pend .r{font-size:11.5px;color:var(--a-faint);margin-right:2px}
+.chipp{font-size:12px;border-radius:999px;padding:3px 10px;text-decoration:none;border:1px solid var(--a-amb-b);background:var(--a-amb-f);color:#f0dca6;white-space:nowrap}
+.chipp.cz{border-color:var(--a-linha);background:var(--a-bg2);color:var(--a-mut)}
+.nav{display:flex;gap:4px;margin:22px 0 18px;padding:6px;border:1px solid var(--a-linha);border-radius:11px;background:rgba(10,15,12,.92);overflow-x:auto}
+.nav a{font-size:12.5px;padding:5px 12px;border-radius:8px;color:var(--a-mut);text-decoration:none;white-space:nowrap}
+.nav a.on{background:var(--a-neon-f);color:var(--a-verde)}
+.nav a small{font-family:var(--mono);color:var(--a-faint);margin-left:3px}
+.nav .fixo{margin-left:auto;font-size:11px;color:var(--a-faint);align-self:center;padding-right:6px;white-space:nowrap}
+
+.grade{display:grid;grid-template-columns:1fr 300px;gap:14px;align-items:start}
+.grade2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px;align-items:start}
+.lado{display:grid;gap:14px}
+.sec-t{display:flex;align-items:baseline;gap:10px;margin:0 0 10px;flex-wrap:wrap}
+.sec-t h4{font-size:15.5px;margin:0;font-weight:700}
+.sec-t span{font-size:12px;color:var(--a-mut)}
+.sec-t .dir{margin-left:auto}
+
+/* formulário novo */
+.nf{border:1px solid var(--a-linha);border-radius:12px;padding:12px;background:var(--a-bg2)}
+.nf-l{display:grid;gap:8px;align-items:end}
+.nf-l + .nf-l{margin-top:9px}
+.l1{grid-template-columns:auto 1fr 120px 150px}
+.l2{grid-template-columns:1.2fr 1fr 1.3fr 1fr}
+.fld{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--a-mut);min-width:0}
+.inp{background:var(--a-bg);border:1px solid #26332b;border-radius:8px;padding:8px 10px;font-size:13px;color:var(--a-txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:36px;display:flex;align-items:center;gap:6px}
+.inp.ph{color:var(--a-faint)}
+.inp.sel::after{content:"▾";margin-left:auto;color:var(--a-mut);font-size:11px}
+.inp.foco{border-color:var(--a-verde)}
+.tog{display:inline-flex;border:1px solid #26332b;border-radius:8px;overflow:hidden;min-height:36px}
+.tog span{padding:8px 12px;font-size:13px;color:var(--a-mut);white-space:nowrap}
+.tog span.on{background:#2a1512;color:#f2a79f;font-weight:600}
+.tog span.on.rc{background:var(--a-neon-f);color:var(--a-verde-cl)}
+.l3{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-top:10px}
+.l3 .rot{font-size:11px;color:var(--a-mut)}
+.cht{display:inline-flex;gap:5px}
+.cht span{border:1px solid #2f2f31;border-radius:999px;padding:4px 11px;font-size:12px;color:var(--a-mut)}
+.cht span.on{border-color:var(--a-neon-b);background:var(--a-neon-f);color:var(--a-verde-cl);font-weight:600}
+.mini{font-size:12.5px;color:var(--a-txt);display:inline-flex;gap:6px;align-items:center}
+.mini .inp{min-height:30px;padding:4px 8px;font-size:12px}
+.ck{width:14px;height:14px;border:1px solid #3a4a40;border-radius:3px;display:inline-block;flex:0 0 auto}
+.ck.on{background:var(--a-verde);border-color:var(--a-verde)}
+.btn-add{margin-left:auto;background:var(--a-verde);color:var(--a-sobre);border-radius:8px;padding:9px 16px;font-weight:700;font-size:13px;white-space:nowrap}
+.dica-m{font-size:11.5px;color:#9fe8c9;margin-top:7px}
+
+/* pílulas e lista */
+.pills{display:flex;gap:6px;margin:14px 0 10px}
+.pills a{flex:1;text-align:center;font-size:12px;padding:6px 8px;border-radius:9px;border:1px solid var(--a-linha);background:var(--a-bg2);color:var(--a-mut);text-decoration:none;white-space:nowrap}
+.pills a b{font-family:var(--mono);color:var(--a-txt);margin-right:4px}
+.pills a.atr{border-color:var(--a-cor-b);background:#1C0F0F;color:#c98a85}.pills a.atr b{color:var(--a-cor)}
+.pills a.on{background:var(--a-amb-f);border-color:var(--a-amb-b);color:#f0dca6}.pills a.on b{color:#f0dca6}
+.bloco{border:1px solid var(--a-amb-b);border-radius:11px;overflow:visible}
+.bcab{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:9px 12px;background:var(--a-amb-f);border-bottom:1px solid var(--a-amb-b);border-radius:11px 11px 0 0}
+.bcab .t{font-weight:700;color:#f0dca6;font-size:13.5px}
+.bcab .s{font-family:var(--mono);font-size:12px;color:var(--a-mut)}
+.bcab .acts{margin-left:auto;display:flex;gap:8px;align-items:center;font-size:12px}
+.bcab .lib{background:var(--a-verde);color:var(--a-sobre);border-radius:7px;padding:4px 10px;font-weight:700;white-space:nowrap}
+.bcab a{color:var(--a-verde-cl);text-decoration:none;white-space:nowrap}
+.lin{display:grid;grid-template-columns:18px 1fr 104px auto;gap:10px;align-items:center;padding:8px 12px;border-top:1px solid var(--a-linha);position:relative}
+.bloco .lin:first-of-type{border-top:0}
+.lin .desc{min-width:0}
+.lin .desc div{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lin .desc small{font-size:11.5px;color:var(--a-mut);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lin .val{font-family:var(--mono);font-weight:600;text-align:right;color:#e07a5f;font-variant-numeric:tabular-nums}
+.lin .qd{font-size:11.5px;text-align:right;white-space:nowrap}
+.bts{display:flex;gap:5px}
+.b{border:1px solid #2f2f31;border-radius:7px;padding:4px 9px;font-size:12px;white-space:nowrap;color:var(--a-txt)}
+.b.v{color:var(--a-verde-cl);border-color:var(--a-neon-b)}
+.b.m{color:var(--a-mut);padding:4px 8px;letter-spacing:.08em}
+.b.m.on{border-color:var(--a-verde);color:var(--a-txt)}
+.menu{position:absolute;right:12px;top:40px;z-index:3;background:#16211b;border:1px solid #2c3a32;border-radius:10px;padding:6px;width:220px;box-shadow:0 12px 30px rgba(0,0,0,.5);font-size:12.5px}
+.menu div{padding:7px 9px;border-radius:6px;display:flex;gap:8px;align-items:center}
+.menu div + div{border-top:1px solid #213029}
+.menu .x{color:#e8a39b}
+.menu .inp{min-height:26px;padding:2px 8px;font-size:12px;flex:1}
+.mais{padding:9px 12px;border-top:1px solid var(--a-linha);font-size:12px;color:var(--a-mut);text-align:center}
+.pagos{margin-top:10px;font-size:12.5px;color:var(--a-mut);padding:8px 2px}
+
+/* lateral */
+.cx{display:grid;gap:5px;font-size:13px}
+.cx div{display:flex;justify-content:space-between;gap:8px}
+.cx .num{font-size:13px}
+.cx .tot{border-top:1px solid var(--a-linha);padding-top:7px;margin-top:3px;font-weight:700}
+.cx small{color:var(--a-faint);font-size:11px}
+.lk{font-size:12px;color:var(--a-verde-cl);text-decoration:none}
+.cli{display:grid;gap:0;font-size:13px}
+.cli div{display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--a-linha)}
+.cli div:first-child{border-top:0}
+.cli small{color:var(--a-faint);font-size:11px}
+.cli .num{color:var(--a-verde-cl)}
+.dre{display:grid;font-size:13px}
+.dre div{display:flex;justify-content:space-between;padding:4px 0;border-top:1px solid #17221c;gap:10px}
+.dre div.st{font-weight:700;border-top-color:var(--a-linha)}
+.dre .num{font-size:12.5px}
+.dre .cls{background:var(--a-amb-f);border-radius:6px;padding:5px 7px;margin:3px 0;border:1px solid var(--a-amb-b)}
+.tp{display:grid;gap:6px;font-size:13px}
+.barra{height:8px;border-radius:99px;background:var(--a-amb-f);display:flex;overflow:hidden;margin:4px 0 8px}
+.tp div.l{display:flex;justify-content:space-between}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.fecha{display:flex;align-items:center;gap:12px;padding:12px 16px;margin-top:14px}
+.fecha b{font-size:14px}
+.fecha span{font-size:12.5px;color:var(--a-mut)}
+.fecha .dir{margin-left:auto;font-size:12.5px;color:var(--a-verde-cl)}
+.conf{margin-top:14px;padding:0;overflow:hidden}
+.conf .h{padding:12px 16px;border-bottom:1px solid var(--a-linha);font-weight:700;font-size:14px}
+.conf .h span{font-weight:400;color:var(--a-mut);font-size:12.5px;margin-left:6px}
+.conf .r{display:flex;gap:10px;align-items:center;padding:10px 16px;border-top:1px solid var(--a-linha);font-size:13px}
+.conf .r:first-of-type{border-top:0}
+.conf .r span{color:var(--a-mut);font-size:12px}
+.conf .r i{margin-left:auto;font-style:normal;color:var(--a-mut)}
+
+.b.x{color:#e8a39b}
+.abre{grid-column:1/-1;background:var(--a-bg2);border:1px solid #26332b;border-radius:10px;padding:10px 12px;display:grid;gap:10px;margin-top:4px}
+.ab-g{display:grid;gap:6px}
+.ab-f{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;border-top:1px solid var(--a-linha);padding-top:9px}
+.ab-r{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--a-faint)}
+.ab-c{display:grid;gap:6px}
+.ab-c .inp{min-height:30px;padding:4px 8px;font-size:12px}
+.ab-d{font-size:12px;color:var(--a-mut);margin-left:auto}
+.ab-d u{color:var(--a-txt)}
+.est{display:grid;gap:0;font-size:13px}
+.est div{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:8px 2px;border-top:1px solid var(--a-linha)}
+.est div:first-child{border-top:0}
+.est small{display:block;color:var(--a-faint);font-size:11px}
+.est .bts{justify-content:flex-end;flex-wrap:wrap}
+/* marcações do mockup (o que é novo) */
+.novo{outline:2px dashed #7cc4ff;outline-offset:3px;border-radius:12px;position:relative}
+.nota{position:absolute;top:-11px;right:10px;background:#7cc4ff;color:#07203a;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:99px;letter-spacing:.02em;z-index:2;white-space:nowrap}
+.legenda{display:flex;gap:10px;align-items:center;font-size:13px;color:var(--fraco);margin:10px 0 0}
+.legenda i{width:22px;height:12px;border:2px dashed #3d9be0;border-radius:4px;display:inline-block}
+
+/* antes × depois */
+.ad{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:860px){.ad{grid-template-columns:1fr}}
+.ad figure{margin:0;background:var(--card);border:1px solid var(--linha);border-radius:12px;padding:12px}
+.ad figcaption{font-size:13px;font-weight:600;margin-bottom:8px;display:flex;gap:8px;align-items:center}
+.tag{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-radius:99px;padding:2px 8px}
+.tag.a{background:var(--ruim-fraco);color:var(--ruim)} .tag.d{background:var(--acento-fraco);color:var(--acento)}
+.tela{background:var(--a-bg);color:var(--a-txt);border-radius:10px;padding:12px;font-size:13px;overflow:hidden}
+.ad ul{margin:10px 0 0;padding-left:18px;font-size:13.5px;color:var(--fraco)}
+.ad li + li{margin-top:3px}
+
+/* antes: réplica fiel do problema */
+.velho{display:grid;grid-template-columns:52px 1.3fr .8fr 1fr .8fr auto;gap:6px;align-items:end}
+.velho .inp{padding:7px 6px;font-size:12px;min-height:32px}
+.velho .btn-add{margin:0;padding:8px 9px}
+.vtipo{display:grid;grid-template-columns:120px auto;align-items:center;margin-top:10px;font-size:11.5px;color:var(--a-mut)}
+.vtipo .cht{flex-direction:column;align-items:center;gap:4px}
+.linv{padding:8px 0;border-top:1px solid var(--a-linha)}
+.linv .t{display:flex;justify-content:space-between;gap:8px}
+.linv .bts{flex-wrap:wrap;margin-top:8px}
+
+/* celulares */
+.fones{display:flex;gap:22px;flex-wrap:wrap;justify-content:center}
+.fone{width:330px;max-width:100%;background:#050806;border-radius:30px;padding:10px;box-shadow:0 18px 44px rgba(0,0,0,.28)}
+.fone .scr{background:var(--a-bg);border-radius:22px;padding:12px 10px 16px;color:var(--a-txt);font-size:13px;min-height:560px}
+.fone-leg{text-align:center;font-size:13px;color:var(--fraco);margin-top:8px}
+.fone .tiles{grid-template-columns:1fr 1fr;gap:7px;margin-top:10px}
+.fone .tile{padding:9px 10px}
+.fone .tile .v{font-size:16px}
+.fone .cab h3{font-size:19px}
+.fone .nav{margin:10px 0}
+.fone .pills{overflow-x:auto;gap:5px}
+.fone .pills a{flex:0 0 auto}
+.flin{padding:9px 10px;border-top:1px solid var(--a-linha)}
+.flin .t{display:flex;gap:8px;align-items:baseline}
+.flin .t div{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.flin .t .val{font-family:var(--mono);font-weight:600;color:#e07a5f}
+.flin small{display:block;font-size:11.5px;color:var(--a-mut);margin:2px 0 7px}
+.flin .bts .b{padding:6px 11px}
+.nova-btn{display:block;text-align:center;background:var(--a-verde);color:var(--a-sobre);border-radius:10px;padding:10px;font-weight:700;margin:4px 0 0}
+.fone .nf-l{grid-template-columns:1fr}
+.fone .l1b{grid-template-columns:1fr 1fr}
+
+/* listas do texto */
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.lista{background:var(--card);border:1px solid var(--linha);border-radius:12px;padding:14px 18px}
+.lista h3{font-size:15px;margin:0 0 6px}
+.lista ul{margin:0;padding-left:18px;font-size:14px;color:var(--fraco)}
+.lista li + li{margin-top:4px}
+.lista li b{color:var(--texto);font-weight:600}
+.dec{counter-reset:d;display:grid;gap:10px}
+.dec div{background:var(--card);border:1px solid var(--linha);border-radius:12px;padding:12px 16px 12px 52px;position:relative}
+.dec div::before{counter-increment:d;content:counter(d);position:absolute;left:16px;top:12px;width:24px;height:24px;border-radius:50%;background:var(--acento-fraco);color:var(--acento);font-weight:700;font-size:13px;display:grid;place-items:center}
+.dec b{display:block}
+.dec span{color:var(--fraco);font-size:14px}
+.zaq{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+@media (max-width:760px){.zaq{grid-template-columns:1fr 1fr}}
+.rod{margin-top:40px;color:var(--fraco);font-size:13px}
+</style>
+</head><body>
+
+<div class="wrap">
+  <p class="eyebrow">Mockup · versão 2, com os botões da conta refeitos</p>
+  <h1>A aba Empresa, reorganizada</h1>
+  <p class="sub">Tudo que a aba faz hoje continua lá. Muda a ordem, a largura e o tamanho de cada peça, pra que o que você usa todo dia (as contas a pagar e receber) apareça primeiro, e a configuração vá pro fim. Números da Prime Eventos de hoje, 24/09, lidos de produção.</p>
+
+  <h2>O que atrapalha hoje</h2>
+  <p class="sub">Medido na tela de verdade, renderizada com os dados da Prime.</p>
+  <div class="probs">
+    <div class="prob"><b>A página é comprida demais</b><span>Pra chegar nas contas é preciso passar por 8 blocos antes.</span><span class="med">6.410 px no PC · 8.705 px no celular</span></div>
+    <div class="prob"><b>Metade da tela fica vazia no PC</b><span>Os cartões param em 720 px, numa área de 1.225 px.</span><span class="med">coluna de 720 px · 505 px sobrando</span></div>
+    <div class="prob"><b>Configuração em cima, dia a dia embaixo</b><span>Plano de contas, avisos e centros de custo abrem a página. Títulos a pagar e receber é a 9ª seção.</span><span class="med">contas = 9º bloco de 11</span></div>
+    <div class="prob"><b>O formulário corta os campos</b><span>"A p", "Ex: Aluguel do p", "opciona". O "+ Add" vem antes de categoria e plano, e os chips de tipo ficam empilhados.</span><span class="med">6 colunas espremidas numa linha</span></div>
+    <div class="prob"><b>Cada conta ocupa um bloco inteiro</b><span>6 botões por conta, numa segunda linha. No celular, uma conta enche a tela.</span><span class="med">~110 px por conta no PC</span></div>
+    <div class="prob"><b>Listas que não precisam estar abertas</b><span>A carteira lista todos os 14 clientes, e a folha abre um formulário vazio (a Prime não tem funcionário cadastrado).</span><span class="med">14 linhas + formulário vazio</span></div>
+  </div>
+
+  <h2>A proposta no computador</h2>
+  <p class="sub">Um resumo no topo com os quatro números que decidem o dia, uma barra pra pular de seção, e duas colunas: as contas à esquerda, o caixa e os clientes à direita.</p>
+  <p class="legenda"><i></i> tracejado azul = peça nova ou que mudou de lugar</p>
+  <div class="pc-caixa" id="pc-caixa" style="margin-top:12px">
+   <div class="pc" id="pc">
+    <nav class="lat">
+      <div class="logo"><i>z</i> zaq</div>
+      <p>Principal</p><a>Caixa</a><a>Produtos</a><a>Clientes/Fornecedores</a><a>Financeiro</a>
+      <p>Loja</p><a>Serviços</a><a>Prospecção</a><a>Agenda</a><a class="on">Empresa</a><a>Relatórios</a><a>Raio-X</a><a>Equipe</a>
+      <p>Sistema</p><a>Novidades</a>
+    </nav>
+    <main class="pag">
+      <!-- cabeçalho com resumo -->
+      <div class="a-card novo"><span class="nota">resumo no topo</span>
+        <div class="cab"><h3>🏢 Empresa</h3><span class="quem">Prime Eventos · CNPJ 00.000.000/0001-00 · <a>editar dados ›</a></span><span class="selo-pj">Módulo PJ ativo</span></div>
+        <div class="tiles">
+          <a class="tile"><div class="r">A pagar · 12 contas</div><div class="v">R$ 20.358,08</div><div class="d cor"><b>6 atrasadas</b> · R$ 15.585,32</div></a>
+          <a class="tile"><div class="r">A receber · 30 contas</div><div class="v ver">R$ 54.386,01</div><div class="d"><span class="amb"><b>1 vencida</b></span> · R$ 1.200,00</div></a>
+          <a class="tile"><div class="r">Caixa da semana · falta</div><div class="v cor">R$ 13.587,20</div><div class="d">saldo R$ 6.770,87 · informado hoje</div></a>
+          <a class="tile"><div class="r">Resultado de setembro</div><div class="v cor">−R$ 7.541,94</div><div class="d">entrou R$ 44.248 · saiu R$ 51.790</div></a>
+        </div>
+        <div class="pend"><span class="r">Pendências:</span>
+          <a class="chipp">⏳ 11 esperando sua liberação</a>
+          <a class="chipp">17 lançamentos sem conta contábil</a>
+          <a class="chipp">41 despesas sem tipo · 59% do valor</a>
+        </div>
+      </div>
+
+      <div class="nav novo"><span class="nota">barra que acompanha a rolagem</span>
+        <a class="on">Contas <small>42</small></a><a>Caixa</a><a>Resultado</a><a>Clientes</a><a>Equipe</a><a>Configurações</a><span class="fixo">fica presa no topo ao rolar</span>
+      </div>
+
+      <div class="grade">
+        <!-- coluna principal: contas -->
+        <section class="a-card">
+          <div class="sec-t"><h4>Contas a pagar e receber</h4><span>nova conta · 42 em aberto</span></div>
+          <div class="nf novo"><span class="nota">formulário em 3 linhas, nada cortado</span>
+            <div class="nf-l l1">
+              <div class="fld">Tipo<div class="tog"><span class="on">A pagar</span><span>A receber</span></div></div>
+              <div class="fld">Descrição<div class="inp ph">Ex: Aluguel do ponto</div></div>
+              <div class="fld">Valor R$<div class="inp ph">0,00</div></div>
+              <div class="fld">Vencimento<div class="inp ph">dd/mm/aaaa 📅</div></div>
+            </div>
+            <div class="nf-l l2">
+              <div class="fld">Fornecedor<div class="inp ph">opcional · liga à ficha dele</div></div>
+              <div class="fld">Categoria<div class="inp sel">Fornecedores</div></div>
+              <div class="fld">Plano de contas<div class="inp sel foco">4.1.06 Fardamentos</div></div>
+              <div class="fld">Centro de custo<div class="inp sel">— sem —</div></div>
+            </div>
+            <div class="l3">
+              <span class="rot">Tipo</span><span class="cht"><span>Fixa</span><span class="on">Eventual</span><span>Investimento</span></span>
+              <span class="mini">🔁 Repete <span class="inp sel">não repete</span></span>
+              <span class="btn-add">+ Adicionar conta</span>
+            </div>
+          </div>
+
+          <div class="pills">
+            <a class="atr"><b>7</b>Atrasadas</a><a class="on"><b>12</b>Esperando liberação</a><a><b>30</b>A receber</a><a><b>42</b>Tudo</a>
+          </div>
+
+          <div class="bloco novo"><span class="nota">liberar em lote dentro do bloco</span>
+            <div class="bcab"><span class="t">⏳ Esperando liberação</span><span class="s">12 · R$ 20.358,08</span>
+              <span class="acts"><span class="mini"><span class="ck"></span> marcar todas</span><span class="lib">✓ liberar marcadas</span><a>pelo relatório →</a></span></div>
+            <div class="lin"><span class="ck"></span><div class="desc"><div>ENERGIA SOLAR <span class="mut">· Nordeste Energia Solar</span></div><small><span class="cor">05/09 · 19 dias atrasada</span> · Fornecedores · aguardando você</small></div><span class="val">R$ 2.877,77</span><span class="bts"><span class="b v">✓ liberar</span><span class="b x">✕ recusar</span><span class="b m">▾</span></span></div>
+            <div class="lin"><span class="ck"></span><div class="desc"><div>1 QUINZENA SETEMBRO/26 JAQUELINE</div><small><span class="cor">15/09 · 9 dias atrasada</span> · Fornecedores · aguardando você</small></div><span class="val">R$ 1.621,00</span><span class="bts"><span class="b v">✓ liberar</span><span class="b x">✕ recusar</span><span class="b m on">▴</span></span>
+              <div class="abre">
+                <div class="ab-g"><span class="ab-r">Editar</span>
+                  <div class="ab-c" style="grid-template-columns:2fr 1fr 1.4fr"><span class="inp">1 QUINZENA SETEMBRO/26 JAQUELINE</span><span class="inp">1.621,00</span><span class="inp ph">fornecedor</span></div>
+                  <div class="ab-c" style="grid-template-columns:1fr 1.3fr 1fr 1fr auto"><span class="inp sel">Fornecedores</span><span class="inp sel">plano: — sem —</span><span class="inp sel">centro: — sem —</span><span class="inp sel">tipo: — sem —</span><span class="b v">salvar</span></div></div>
+                <div class="ab-g ab-f"><span class="ab-r">Repete</span><span class="inp sel" style="min-height:28px;padding:3px 8px">🔁 a cada 15 dias</span><span class="mini"><span class="ck"></span> 💧 o valor muda</span>
+                  <span class="ab-d">Pagar antes de liberar? <u>dar baixa</u></span><span class="b x">🗑 apagar conta</span></div>
+              </div>
+            </div>
+            <div class="lin"><span class="ck"></span><div class="desc"><div>1 QUINZENA SETEMBRO/26 INSIGHT <span class="mut">· Insight Assessoria</span></div><small><span class="cor">15/09 · 9 dias atrasada</span> · Fornecedores · aguardando você</small></div><span class="val">R$ 810,50</span><span class="bts"><span class="b v">✓ liberar</span><span class="b x">✕ recusar</span><span class="b m">▾</span></span></div>
+            <div class="lin"><span class="ck"></span><div class="desc"><div>BANCO DO NORDESTE</div><small><span class="cor">15/09 · 9 dias atrasada</span> · Fornecedores · aguardando você</small></div><span class="val">R$ 2.400,00</span><span class="bts"><span class="b v">✓ liberar</span><span class="b x">✕ recusar</span><span class="b m">▾</span></span></div>
+            <div class="lin"><span class="ck"></span><div class="desc"><div>ZARB CONSULTORIA <span class="mut">· Zarb Assessoria</span></div><small><span class="cor">15/09 · 9 dias atrasada</span> · Fornecedores · aguardando você</small></div><span class="val">R$ 2.200,00</span><span class="bts"><span class="b v">✓ liberar</span><span class="b x">✕ recusar</span><span class="b m">▾</span></span></div>
+            <div class="lin"><span class="ck"></span><div class="desc"><div>CARTÃO DE CRÉDITO <span class="mut">· Cartão Sicoob</span></div><small><span class="cor">22/09 · 2 dias atrasada</span> · Fornecedores · aguardando você</small></div><span class="val">R$ 5.676,05</span><span class="bts"><span class="b v">✓ liberar</span><span class="b x">✕ recusar</span><span class="b m">▾</span></span></div>
+            <div class="lin"><span class="ck"></span><div class="desc"><div>EMPRESA DE SEGURANÇA <span class="mut">· Security</span></div><small><span class="amb">vence amanhã, 25/09</span> · Fornecedores · aguardando você</small></div><span class="val">R$ 251,90</span><span class="bts"><span class="b v">✓ liberar</span><span class="b x">✕ recusar</span><span class="b m">▾</span></span></div>
+            <div class="lin"><span class="ck"></span><div class="desc"><div>IPTU 2026 4/6 <span class="mut">· Prefeitura de Teresina</span></div><small><span class="mut">vence 30/09</span> · Fornecedores · aguardando você</small></div><span class="val">R$ 1.160,85</span><span class="bts"><span class="b v">✓ liberar</span><span class="b x">✕ recusar</span><span class="b m">▾</span></span></div>
+            <div class="mais">+ 4 contas (as quinzenas de 30/09 e 1 recusada)</div>
+          </div>
+          <div class="pagos">▸ Pagas e recebidas (64) — recolhido, como hoje</div>
+        </section>
+
+        <!-- coluna lateral -->
+        <aside class="lado">
+          <section class="a-card novo"><span class="nota">sobe pro lado das contas</span>
+            <div class="sec-t"><h4>Caixa da semana</h4><a class="lk dir">atualizar saldo</a></div>
+            <div class="cx">
+              <div><span>Saldo nos bancos<br><small>Sicoob R$ 2.656,37 · Inter R$ 4.114,50 · hoje</small></span><span class="num">R$ 6.770,87</span></div>
+              <div><span class="cor">− Atrasadas (6)</span><span class="num cor">R$ 15.585,32</span></div>
+              <div><span class="amb">− Vencem em 7 dias (5)</span><span class="num amb">R$ 4.772,75</span></div>
+              <div class="tot"><span>Falta pra cobrir a semana</span><span class="num cor">R$ 13.587,20</span></div>
+            </div>
+          </section>
+          <section class="a-card novo"><span class="nota">só os 5 maiores</span>
+            <div class="sec-t"><h4>👥 Clientes · a receber</h4><span class="dir num ver">R$ 54.386,01</span></div>
+            <div class="cli">
+              <div><span>Larissa R. <small>· 7 contas</small></span><span class="num">R$ 6.600,00</span></div>
+              <div><span>Maria C. <small>· 5 contas</small></span><span class="num">R$ 5.710,00</span></div>
+              <div><span>Beatriz <small>· 2 contas</small></span><span class="num">R$ 5.500,00</span></div>
+              <div><span>Denise D. <small>· 1 conta</small></span><span class="num">R$ 5.321,44</span></div>
+              <div><span>Claudia M. <small>· 2 contas</small></span><span class="num">R$ 5.250,00</span></div>
+            </div>
+            <a class="lk">ver os 14 clientes →</a>
+          </section>
+        </aside>
+      </div>
+
+      <!-- resultado: duas colunas -->
+      <div class="grade2">
+        <section class="a-card">
+          <div class="sec-t"><h4>Resultado de setembro (DRE)</h4><span class="dir">09/2026</span></div>
+          <div class="dre">
+            <div><span>Receita Operacional Bruta</span><span class="num">R$ 28.081,19</span></div>
+            <div><span class="mut">(−) Deduções da Receita</span><span class="num">R$ −3.858,94</span></div>
+            <div class="st"><span>= Receita Líquida</span><span class="num ver">R$ 24.222,25</span></div>
+            <div><span class="mut">(−) Custos (CMV / CSP)</span><span class="num">R$ −4.621,00</span></div>
+            <div class="st"><span>= Lucro Bruto</span><span class="num ver">R$ 19.601,25</span></div>
+            <div><span class="mut">(−) Despesas com Pessoal</span><span class="num">R$ −4.845,39</span></div>
+            <div><span class="mut">(−) Despesas Operacionais</span><span class="num cor">R$ −27.009,70</span></div>
+            <div><span class="mut">(−) Despesas Financeiras</span><span class="num">R$ −62,33</span></div>
+            <div><span class="mut">(−) Não Operacional / Investimentos</span><span class="num">R$ −650,00</span></div>
+            <div class="cls novo"><span class="nota">abre o painel ali mesmo</span><span class="amb">A classificar · 17 lançamentos → classificar</span><span class="num amb">R$ 5.424,23</span></div>
+            <div class="st"><span>= Resultado do Mês</span><span class="num cor">R$ −7.541,94 · −17,0%</span></div>
+          </div>
+          <div style="margin-top:8px;font-size:12px" class="mut">▸ Ver por centro de custo · baixar planilha (09/2026) ↓</div>
+        </section>
+        <section class="a-card">
+          <div class="sec-t"><h4>Despesas por tipo</h4><span class="dir">setembro · R$ 51.790,13</span></div>
+          <div class="barra"><span style="width:28.7%;background:#6aa9ff"></span><span style="width:3.3%;background:var(--a-roxo)"></span><span style="width:9.4%;background:var(--a-verde)"></span><span style="width:58.6%;background:var(--a-amb)"></span></div>
+          <div class="tp">
+            <div class="l"><span><i class="dot" style="background:#6aa9ff"></i>Fixa · 14</span><span class="num">R$ 14.865,92</span></div>
+            <div class="l"><span><i class="dot" style="background:var(--a-roxo)"></i>Eventual · 7</span><span class="num">R$ 1.707,90</span></div>
+            <div class="l"><span><i class="dot" style="background:var(--a-verde)"></i>Investimento · 9</span><span class="num">R$ 4.883,21</span></div>
+            <div class="l amb"><span><i class="dot" style="background:var(--a-amb)"></i>Sem tipo · 41</span><span class="num">R$ 30.333,10</span></div>
+            <a class="lk amb" style="color:var(--a-amb)">▸ 41 de setembro sem tipo — classificar agora</a>
+          </div>
+        </section>
+      </div>
+
+      <div class="a-card fecha novo"><span class="nota">vazia = uma linha só</span><b>Equipe e folha</b><span>nenhum funcionário cadastrado · folha de 09/2026: R$ 0,00</span><span class="dir">+ cadastrar funcionário</span></div>
+
+      <div class="a-card conf novo"><span class="nota">configurações juntas, no fim</span>
+        <div class="h">⚙️ Configurações da empresa<span>o que você arruma uma vez e raramente mexe</span></div>
+        <div class="r">📋 <b>Plano de Contas</b><span>padrão do sistema — você liga/desliga o que usa</span><i>▾</i></div>
+        <div class="r">🎯 <b>Centros de Custo</b><span>13 ativos</span><i>▾</i></div>
+        <div class="r">✨ <b>Avisos do sistema</b><span>o que a sua equipe vê quando algo muda</span><i>▾</i></div>
+      </div>
+    </main>
+   </div>
+  </div>
+
+  <h2>O formulário, de perto</h2>
+  <p class="sub">É o do seu print. Os mesmos campos, com os mesmos nomes, na ordem em que se preenche: o que é a conta, de quem é e como classificar. O botão fica no fim, depois de tudo.</p>
+  <div class="ad">
+    <figure><figcaption><span class="tag a">hoje</span> 6 colunas numa linha só</figcaption>
+      <div class="tela">
+        <div class="velho">
+          <div class="fld">Tipo<div class="inp">A p ▾</div></div>
+          <div class="fld">Descrição<div class="inp ph">Ex: Aluguel do p</div></div>
+          <div class="fld">Valor R$<div class="inp ph">0,00</div></div>
+          <div class="fld">Vencimento<div class="inp ph">dd/mm/aaaa</div></div>
+          <div class="fld">Fornecedor<div class="inp ph">opciona</div></div>
+          <span class="btn-add">+ Add</span>
+        </div>
+        <div class="l3" style="margin-top:12px"><span class="mini">🔁 Repete <span class="inp sel">não repete</span></span><span class="mini"><span class="ck"></span> 💧 o valor muda todo mês</span></div>
+        <div class="mut" style="font-size:11px;margin-top:6px">Marcado, quando você der baixa a próxima já nasce sozinha.</div>
+        <div class="nf-l l2" style="margin-top:10px;grid-template-columns:1fr 1fr 1fr"><div class="fld">Categoria<div class="inp sel">Fornecedores</div></div><div class="fld">Plano de contas<div class="inp sel">4.1.06 Fardam…</div></div><div class="fld">Centro de custo<div class="inp sel">— sem —</div></div></div>
+        <div class="vtipo"><span>Tipo de despesa</span><span class="cht"><span>Fixa</span><span>Eventual</span><span>Investimento</span></span></div>
+        <div class="mini" style="margin-top:12px;color:var(--a-mut)"><span class="ck"></span> Vincule um cliente ou fornecedor pra o título aparecer na ficha dele.</div>
+      </div>
+      <ul><li>"A pagar" vira "A p", e a descrição e o fornecedor cortam o exemplo.</li><li>O "+ Add" fica antes de categoria, plano e centro: dá pra salvar sem ter visto a classificação.</li><li>Os chips de tipo ficam empilhados e soltos no meio.</li><li>A caixinha "Vincule um cliente…" não marca nada: é uma dica com cara de campo.</li></ul>
+    </figure>
+    <figure><figcaption><span class="tag d">proposta</span> 3 linhas, nada cortado</figcaption>
+      <div class="tela">
+        <div class="nf" style="padding:10px">
+          <div class="nf-l" style="grid-template-columns:auto 1fr"><div class="fld">Tipo<div class="tog"><span class="on">A pagar</span><span>A receber</span></div></div><div class="fld">Descrição<div class="inp ph">Ex: Aluguel do ponto</div></div></div>
+          <div class="nf-l" style="grid-template-columns:1fr 1fr 1.2fr"><div class="fld">Valor R$<div class="inp ph">0,00</div></div><div class="fld">Vencimento<div class="inp ph">dd/mm/aaaa</div></div><div class="fld">Fornecedor<div class="inp ph">opcional · liga à ficha</div></div></div>
+          <div class="nf-l" style="grid-template-columns:1fr 1.3fr 1fr"><div class="fld">Categoria<div class="inp sel">Fornecedores</div></div><div class="fld">Plano de contas<div class="inp sel">4.1.06 Fardamentos</div></div><div class="fld">Centro de custo<div class="inp sel">— sem —</div></div></div>
+          <div class="l3"><span class="rot">Tipo</span><span class="cht"><span>Fixa</span><span>Eventual</span><span>Investimento</span></span><span class="mini">🔁 <span class="inp sel">não repete</span></span><span class="btn-add">+ Adicionar conta</span></div>
+        </div>
+      </div>
+      <ul><li><b>A pagar / A receber</b> vira um botão de duas partes. Troca o rótulo pra Cliente e a categoria como hoje.</li><li>O "o valor muda todo mês" e a explicação só aparecem depois que você escolhe um ritmo em Repete.</li><li>A dica de vincular vai pra dentro do campo Fornecedor. A caixinha falsa sai.</li><li>No PC largo o formulário cabe em 3 linhas (como no mockup de cima). Aqui, em meia tela, fica em 4.</li></ul>
+    </figure>
+  </div>
+
+  <h2>Cada conta mostra o próximo passo dela</h2>
+  <p class="sub">Em vez de 6 botões iguais em toda conta, cada uma mostra só o que dá pra fazer com ela agora. O resto (editar, repetir, apagar) abre embaixo quando você toca na conta. Não vai nada pra menu escondido: aberta, a conta mostra tudo com nome.</p>
+  <div class="ad">
+    <figure><figcaption><span class="tag d">proposta</span> os botões mudam com a situação da conta</figcaption>
+      <div class="tela"><div class="est">
+        <div><span>Esperando liberação<small>quando quem olha é o dono</small></span><span class="bts"><span class="b v">✓ liberar</span><span class="b x">✕ recusar</span><span class="b m">▾</span></span></div>
+        <div><span>Esperando liberação<small>quando quem olha é outra pessoa</small></span><span class="bts"><span class="b">dar baixa</span><span class="b m">▾</span></span></div>
+        <div><span>Liberada, pode pagar</span><span class="bts"><span class="b v">dar baixa ✓</span><span class="b m">▾</span></span></div>
+        <div><span>O pagamento já está no caixa<small>o sistema achou um só igual</small></span><span class="bts"><span class="b v">✓ já foi paga — 10/08</span><span class="b">dar baixa</span><span class="b m">▾</span></span></div>
+        <div><span>A receber</span><span class="bts"><span class="b v">dar baixa ✓</span><span class="b" style="color:#c99536">cobrar</span><span class="b m">▾</span></span></div>
+        <div><span>Repete e o valor ainda não chegou</span><span class="bts"><span class="b" style="color:var(--a-amb);border-color:var(--a-amb-b)">✎ pôr o valor</span><span class="b m">▾</span></span></div>
+      </div></div>
+      <ul><li>No máximo 2 botões por conta, e o verde é sempre o passo seguinte.</li><li>O dono decide (liberar ou recusar) sem rolar. Quem não é dono segue podendo dar baixa, com o aviso de hoje.</li><li>Quando o caixa já tem o pagamento, "já foi paga" vem primeiro, porque "dar baixa" lançaria a despesa duas vezes.</li></ul>
+    </figure>
+    <figure><figcaption><span class="tag d">proposta</span> tocando na conta, ela abre</figcaption>
+      <div class="tela" style="padding:0">
+        <div class="lin" style="grid-template-columns:18px 1fr auto auto;border-top:0"><span class="ck"></span><div class="desc"><div>1 QUINZENA SETEMBRO/26 JAQUELINE</div><small class="cor">15/09 · 9 dias atrasada · aguardando você</small></div><span class="val">R$ 1.621,00</span><span class="bts"><span class="b v">✓ liberar</span><span class="b x">✕ recusar</span><span class="b m on">▴</span></span>
+          <div class="abre">
+            <div class="ab-g"><span class="ab-r">Editar</span>
+              <div class="ab-c" style="grid-template-columns:2fr 1fr"><span class="inp">1 QUINZENA SETEMBRO/26 JAQUELINE</span><span class="inp">1.621,00</span></div>
+              <div class="ab-c" style="grid-template-columns:1fr 1fr"><span class="inp ph">fornecedor</span><span class="inp sel">Fornecedores</span></div>
+              <div class="ab-c" style="grid-template-columns:1fr 1fr 1fr"><span class="inp sel">plano</span><span class="inp sel">centro</span><span class="inp sel">tipo</span></div>
+              <div style="text-align:right"><span class="b v">salvar</span></div></div>
+            <div class="ab-g ab-f"><span class="ab-r">Repete</span><span class="inp sel" style="min-height:28px;padding:3px 8px">🔁 a cada 15 dias</span><span class="mini"><span class="ck"></span> 💧 o valor muda</span></div>
+            <div class="ab-g ab-f"><span class="ab-d" style="margin-left:0">Pagar antes de liberar? <u>dar baixa</u></span><span class="b x" style="margin-left:auto">🗑 apagar conta</span></div>
+          </div>
+        </div>
+      </div>
+      <ul><li>Tudo que hoje é botão solto está aqui, com nome: editar (descrição, valor, fornecedor, categoria, plano, centro, tipo), repetir e apagar.</li><li>Apagar fica no fim, longe dos botões do dia a dia, e continua pedindo confirmação.</li><li>Os selos (🔁 quinzenal, falta o valor, sem fornecedor) e a classificação continuam na linha fechada.</li><li>O painel da baixa (data, multa e juros sugeridos) abre embaixo da conta, igual a hoje.</li></ul>
+    </figure>
+  </div>
+
+  <h2>No celular</h2>
+  <p class="sub">Uma coluna só, na mesma ordem: resumo, contas, caixa, resultado, clientes, equipe e configurações. O formulário fica fechado atrás de "+ Nova conta", pra lista aparecer logo.</p>
+  <div class="fones">
+    <div>
+      <div class="fone"><div class="scr">
+        <div class="cab"><h3>🏢 Empresa</h3><span class="selo-pj">PJ ativo</span></div>
+        <div class="tiles">
+          <div class="tile"><div class="r">A pagar</div><div class="v">R$ 20.358</div><div class="d cor">6 atrasadas</div></div>
+          <div class="tile"><div class="r">A receber</div><div class="v ver">R$ 54.386</div><div class="d amb">1 vencida</div></div>
+          <div class="tile"><div class="r">Caixa da semana</div><div class="v cor">falta 13.587</div><div class="d">saldo de hoje</div></div>
+          <div class="tile"><div class="r">Setembro</div><div class="v cor">−R$ 7.542</div><div class="d">resultado</div></div>
+        </div>
+        <div class="pend"><a class="chipp">⏳ 11 pra liberar</a><a class="chipp">17 sem conta</a><a class="chipp">41 sem tipo</a></div>
+        <div class="nav"><a class="on">Contas</a><a>Caixa</a><a>Resultado</a><a>Clientes</a><a>Equipe</a></div>
+        <a class="nova-btn">+ Nova conta</a>
+        <div class="pills"><a class="atr"><b>7</b>Atrasadas</a><a class="on"><b>12</b>Liberação</a><a><b>30</b>Receber</a><a><b>42</b>Tudo</a></div>
+        <div class="bloco">
+          <div class="bcab"><span class="t">⏳ Esperando liberação</span><span class="s">12 · R$ 20.358</span><span class="acts"><span class="lib">✓ liberar marcadas</span></span></div>
+          <div class="flin"><div class="t"><span class="ck"></span><div>ENERGIA SOLAR</div><span class="val">R$ 2.877,77</span></div><small class="cor">05/09 · 19 dias atrasada · Nordeste Energia Solar</small><div class="bts"><span class="b v">✓ liberar</span><span class="b x">✕ recusar</span><span class="b m">▾</span></div></div>
+          <div class="flin"><div class="t"><span class="ck"></span><div>1 QUINZENA SETEMBRO/26 JAQUELINE</div><span class="val">R$ 1.621,00</span></div><small class="cor">15/09 · 9 dias atrasada</small><div class="bts"><span class="b v">✓ liberar</span><span class="b x">✕ recusar</span><span class="b m">▾</span></div></div>
+          <div class="flin"><div class="t"><span class="ck"></span><div>BANCO DO NORDESTE</div><span class="val">R$ 2.400,00</span></div><small class="cor">15/09 · 9 dias atrasada</small><div class="bts"><span class="b v">✓ liberar</span><span class="b x">✕ recusar</span><span class="b m">▾</span></div></div>
+        </div>
+      </div></div>
+      <p class="fone-leg">A lista: 3 contas por tela em vez de 1</p>
+    </div>
+    <div>
+      <div class="fone"><div class="scr">
+        <div class="sec-t"><h4>Nova conta</h4><span class="dir lk">fechar ✕</span></div>
+        <div class="nf">
+          <div class="nf-l"><div class="fld">Tipo<div class="tog" style="display:flex"><span class="on" style="flex:1;text-align:center">A pagar</span><span style="flex:1;text-align:center">A receber</span></div></div></div>
+          <div class="nf-l"><div class="fld">Descrição<div class="inp ph">Ex: Aluguel do ponto</div></div></div>
+          <div class="nf-l l1b"><div class="fld">Valor R$<div class="inp ph">0,00</div></div><div class="fld">Vencimento<div class="inp ph">dd/mm/aaaa</div></div></div>
+          <div class="nf-l"><div class="fld">Fornecedor<div class="inp ph">opcional · liga à ficha dele</div></div></div>
+          <div class="nf-l l1b"><div class="fld">Categoria<div class="inp sel">Fornecedores</div></div><div class="fld">Centro de custo<div class="inp sel">— sem —</div></div></div>
+          <div class="nf-l"><div class="fld">Plano de contas<div class="inp sel">4.1.06 Fardamentos</div></div></div>
+          <div class="l3"><span class="rot">Tipo</span><span class="cht"><span>Fixa</span><span>Eventual</span><span>Invest.</span></span></div>
+          <div class="l3"><span class="mini">🔁 Repete <span class="inp sel">não repete</span></span></div>
+          <a class="nova-btn" style="margin-top:12px">+ Adicionar conta</a>
+        </div>
+      </div></div>
+      <p class="fone-leg">"+ Nova conta" aberto: o botão de salvar é o último</p>
+    </div>
+  </div>
+
+  <h2>Conferido na ZAQ também</h2>
+  <p class="sub">A aba Empresa é financeira e igual pros três perfis (eventos, recorrente e produto): nada nela fala de festa. O layout novo não traz vocabulário de nicho. O rótulo de "a receber" continua vindo do nicho, como hoje. Na ZAQ (conta 3), o mesmo topo fica assim:</p>
+  <div class="tela" style="border-radius:12px;padding:14px">
+    <div class="zaq">
+      <div class="tile"><div class="r">A pagar · 2 contas</div><div class="v">R$ 2.750,00</div><div class="d cor"><b>2 atrasadas</b></div></div>
+      <div class="tile"><div class="r">A receber · 2 contas</div><div class="v ver">R$ 12.410,00</div><div class="d amb"><b>2 vencidas</b></div></div>
+      <div class="tile"><div class="r">Caixa da semana</div><div class="v mut" style="font-size:15px">informe o saldo</div><div class="d">sem saldo não há sobra</div></div>
+      <div class="tile"><div class="r">Resultado de setembro</div><div class="v ver">+R$ 956,61</div><div class="d">entrou R$ 8.556 · saiu R$ 7.599</div></div>
+    </div>
+    <div class="pend"><span class="r">Pendências:</span><a class="chipp">14 lançamentos sem conta contábil</a><a class="chipp">10 despesas sem tipo · 100% do valor</a></div>
+  </div>
+  <div class="cols" style="margin-top:12px">
+    <div class="lista"><h3>O que se ajusta sozinho em cada conta</h3><ul>
+      <li><b>Pendência zerada some.</b> A ZAQ não tem conta esperando liberação, então esse chip não aparece.</li>
+      <li><b>Sem centro de custo</b> (ZAQ tem 0), o campo não aparece no formulário, como já é hoje.</li>
+      <li><b>Equipe com gente abre inteira.</b> A ZAQ tem 1 funcionário, então a folha aparece aberta. Na Prime, vazia, vira uma linha.</li>
+      <li><b>Sem saldo informado</b>, o cartão do caixa pede o saldo em vez de mostrar um rombo que ninguém mediu.</li>
+    </ul></div>
+    <div class="lista"><h3>O que não muda</h3><ul>
+      <li>Todos os campos do formulário, com os mesmos nomes, e a memória que preenche plano, centro e tipo.</li>
+      <li>Liberar em lote, liberar, recusar com motivo, dar baixa com multa e juros, "já foi paga", repetir, editar e apagar.</li>
+      <li>Cobrar e link Pix, recibo, crédito e diferença no recebimento, pagas e recebidas recolhidas.</li>
+      <li>DRE por centro, planilha do contador, classificar sem tipo, painel "a classificar", plano, centros, avisos e folha.</li>
+      <li>Endereços e rotas. A largura nova é uma classe só desta tela (como a dos Relatórios). As outras 8 telas continuam em 720 px.</li>
+    </ul></div>
+  </div>
+
+  <h2>O que você decidiu</h2>
+  <div class="dec">
+    <div><b>Duas colunas no PC: sim, se couber bem</b><span>As duas colunas só entram quando a tela tem largura pra elas. Em notebook estreito fica uma coluna só, como no celular, sem espremer nada.</span></div>
+    <div><b>Formulário aberto no PC e fechado no celular: sim</b><span>No celular fica atrás de "+ Nova conta".</span></div>
+    <div><b>Botões de cada conta: melhorado (acima)</b><span>No lugar do menu ⋯, cada conta mostra o próximo passo dela, e abre ao tocar. Falta o seu OK nesta parte.</span></div>
+    <div><b>Configurações no fim: sim</b><span>Plano de contas, centros e avisos juntos. "Lançamentos a classificar" vai pra dentro da DRE e fica nas pendências.</span></div>
+  </div>
+  <p class="rod">Aprovando, o PR leva junto o aviso da mudança (Novidades), pra quem tem o módulo Empresa. Números lidos de produção em 24/09/2026, só leitura. Nomes de clientes abreviados.</p>
+</div>
+
+<script>
+(function(){
+  var caixa=document.getElementById('pc-caixa'), pc=document.getElementById('pc');
+  function ajusta(){
+    var w=caixa.clientWidth; if(!w) return;
+    var z=Math.min(1,w/1240);
+    pc.style.zoom = z;
+  }
+  ajusta(); window.addEventListener('resize',ajusta);
+})();
+</script>
+</body></html>

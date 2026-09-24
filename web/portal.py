@@ -3937,21 +3937,138 @@ _VENDA_DETALHE = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _EMPRESA = """{% extends "base" %}{% block conteudo %}
-<div class="card larga">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
-    <div><h2 style="margin:0">🏢 Empresa</h2>
-      <div class="mut" style="font-size:.82rem">{{ empresa_nome }}{% if empresa_doc %} · CNPJ {{ empresa_doc }}{% endif %}<a href="/painel/empresa/dados" style="color:var(--verde-claro);font-size:.72rem;margin-left:.4rem;text-decoration:none">editar dados ›</a></div></div>
-    <span style="background:#15301f;color:var(--verde-claro);font-size:.72rem;font-weight:600;padding:.25rem .7rem;border-radius:14px;border:1px solid var(--verde)44">Módulo PJ ativo</span>
+<style>
+  /* A ABA EMPRESA EM DUAS COLUNAS (24/09/2026, docs/mockups/empresa_layout.html).
+     A largura extra é desta tela só, como a `.rel-full` dos Relatórios: o
+     `.card.larga` compartilhado continua em 720 px (test_relatorios_largura).
+     As duas colunas entram por CONTAINER QUERY, não pela largura da janela: o
+     que conta é o espaço que sobra depois do menu lateral. Decisão do dono:
+     "pode ser, se couber com o ajuste bom" — sem espaço, fica uma coluna só. */
+  .emp-full{width:calc(100% - 2rem);max-width:1240px;margin:1.5rem auto;box-sizing:border-box;container-type:inline-size}
+  .emp-full .card.larga{max-width:none;width:100%;margin:0 0 .9rem;padding:1.3rem 1.4rem}
+  .emp-grade,.emp-par{display:grid;grid-template-columns:minmax(0,1fr);column-gap:.9rem;align-items:start}
+  .emp-col{min-width:0}
+  @container (min-width:1020px){
+    .emp-grade{grid-template-columns:minmax(0,1fr) 330px}
+    .emp-grade.sem-lado{grid-template-columns:minmax(0,1fr)}
+    .emp-par{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+    .emp-par.so-um{grid-template-columns:minmax(0,1fr)}
+  }
+  @media (max-width:760px){.emp-full .card.larga{padding:1.1rem 1rem}}
+  .emp-full [id]{scroll-margin-top:4.2rem}
+  .emp-cab{display:flex;align-items:center;gap:.3rem .8rem;flex-wrap:wrap}
+  .emp-cab h2{margin:0}
+  .emp-quem{font-size:.82rem}
+  .emp-quem a{color:var(--verde-claro);font-size:.76rem;text-decoration:none;white-space:nowrap}
+  .emp-selo{margin-left:auto;background:#15301f;color:var(--verde-claro);font-size:.72rem;font-weight:600;padding:.25rem .7rem;border-radius:14px;border:1px solid var(--verde)44}
+  .emp-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.6rem;margin-top:1rem}
+  @media (max-width:560px){.emp-tiles{grid-template-columns:1fr 1fr}.emp-tile{padding:.6rem .65rem}.emp-tile .v{font-size:.95rem}}
+  .emp-tile{display:flex;flex-direction:column;gap:.1rem;min-width:0;padding:.7rem .85rem;border:1px solid var(--borda);border-radius:11px;background:var(--card-2);color:var(--txt);text-decoration:none}
+  .emp-tile:hover{border-color:#2f4439}
+  .emp-tile .r{font-size:.72rem;color:var(--txt-mut)}
+  .emp-tile .v{font-family:var(--mono);font-size:1.12rem;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .emp-tile .d{font-size:.72rem;color:var(--txt-mut)}
+  .emp-tile .ruim{color:#E0574F}
+  .emp-tile .aviso{color:#f0c05a}
+  .emp-tile .bom{color:var(--verde-claro)}
+  .emp-tile .v.mut{font-family:var(--body);font-size:.95rem;color:var(--txt-mut)}
+  .emp-pend{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.75rem;font-size:.72rem;color:var(--txt-mut)}
+  .emp-pend a{font-size:.76rem;border:1px solid #5A4520;background:#241C0F;color:#f0dca6;border-radius:999px;padding:.2rem .65rem;text-decoration:none;white-space:nowrap}
+  .emp-nav{position:sticky;top:0;z-index:30;display:flex;gap:.25rem;overflow-x:auto;margin:0 0 .9rem;padding:.35rem;border:1px solid var(--borda);border-radius:11px;background:var(--bg);scrollbar-width:none}
+  .emp-nav::-webkit-scrollbar{display:none}
+  .emp-nav a{font-size:.8rem;padding:.35rem .8rem;border-radius:8px;color:var(--txt-mut);text-decoration:none;white-space:nowrap}
+  .emp-nav a.on{background:#10241A;color:var(--verde-claro)}
+  .emp-nav small{font-family:var(--mono);color:var(--text-faint);margin-left:.25rem}
+  /* configurações: os três recolhíveis viram linhas de UM cartão, no fim */
+  .emp-full .card.larga.emp-conf{padding:0;overflow:hidden}
+  .emp-conf-h{padding:1rem 1.4rem;font-weight:620;border-bottom:1px solid var(--borda)}
+  .emp-conf-h span{font-weight:400;color:var(--txt-mut);font-size:.76rem;margin-left:.3rem}
+  .emp-full .emp-conf>details.card.larga{margin:0;border:0;border-radius:0;border-top:1px solid var(--borda);background:none;padding:.9rem 1.4rem}
+  .emp-full .emp-conf>details.card.larga:first-of-type{border-top:0}
+  /* forms de adicionar (título/funcionário): colapsam no mobile pra não vazar */
+  @media (max-width:560px){
+    .emp-form{grid-template-columns:1fr 1fr !important}
+    .emp-form>button[type=submit]{grid-column:1 / -1}
+  }
+</style>
+{% set _MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'] %}
+<div class="emp-full">
+<div class="card larga emp-topo">
+  <div class="emp-cab">
+    <h2>🏢 Empresa</h2>
+    <span class="mut emp-quem">{{ empresa_nome }}{% if empresa_doc %} · CNPJ {{ empresa_doc }}{% endif %} · <a href="/painel/empresa/dados">editar dados ›</a></span>
+    <span class="emp-selo">Módulo PJ ativo</span>
   </div>
-
-  <style>
-    /* forms de adicionar (título/funcionário): colapsam no mobile pra não vazar */
-    @media (max-width:560px){
-      .emp-form{grid-template-columns:1fr 1fr !important}
-      .emp-form>button[type=submit]{grid-column:1 / -1}
-    }
-  </style>
+  {#- O RESUMO: quatro números que já existem mais abaixo, pela mesma regra
+     (ver `_empresa_resumo`). Cada cartão leva pra seção de onde veio. -#}
+  {% if resumo %}
+  <div class="emp-tiles">
+    <a class="emp-tile" href="#titulos" onclick="empVerAtrasadas()">
+      <span class="r">A pagar · {{ resumo.pagar_n }} conta{{ 's' if resumo.pagar_n != 1 }}</span>
+      <b class="v">{{ resumo.pagar_centavos|brl }}</b>
+      {% if resumo.pagar_atr_n %}<span class="d ruim"><b>{{ resumo.pagar_atr_n }} atrasada{{ 's' if resumo.pagar_atr_n != 1 }}</b> · {{ resumo.pagar_atr_centavos|brl }}</span>
+      {% else %}<span class="d">nenhuma atrasada</span>{% endif %}
+    </a>
+    <a class="emp-tile" href="{{ '#carteira' if carteira and carteira.n_titulos else '#titulos' }}">
+      <span class="r">{{ rotulo_receber or 'A receber' }} · {{ resumo.receber_n }} conta{{ 's' if resumo.receber_n != 1 }}</span>
+      <b class="v bom">{{ resumo.receber_centavos|brl }}</b>
+      {% if resumo.receber_atr_n %}<span class="d"><b class="aviso">{{ resumo.receber_atr_n }} vencida{{ 's' if resumo.receber_atr_n != 1 }}</b> · {{ resumo.receber_atr_centavos|brl }}</span>
+      {% else %}<span class="d">nenhuma vencida</span>{% endif %}
+    </a>
+    {% if resumo.tem_planej %}
+    <a class="emp-tile" href="#planejamento">
+      {% if resumo.sobra_centavos is none %}
+      <span class="r">Caixa da semana</span>
+      <b class="v mut">informe o saldo</b>
+      <span class="d">sem saldo não dá pra saber a sobra</span>
+      {% elif resumo.sobra_centavos < 0 %}
+      <span class="r">Caixa da semana · falta</span>
+      <b class="v ruim">{{ (-resumo.sobra_centavos)|brl }}</b>
+      <span class="d">saldo {{ resumo.saldo_centavos|brl }}{% if resumo.saldo_velho %} · <span class="aviso">desatualizado</span>{% endif %}</span>
+      {% else %}
+      <span class="r">Caixa da semana · sobra</span>
+      <b class="v bom">{{ resumo.sobra_centavos|brl }}</b>
+      <span class="d">saldo {{ resumo.saldo_centavos|brl }}{% if resumo.saldo_velho %} · <span class="aviso">desatualizado</span>{% endif %}</span>
+      {% endif %}
+    </a>
+    {% endif %}
+    <a class="emp-tile" href="#dre">
+      <span class="r">Resultado de {{ _MESES[dre.mes - 1] }}</span>
+      <b class="v {{ 'bom' if resumo.resultado_centavos >= 0 else 'ruim' }}">{{ resumo.resultado_centavos|brl }}</b>
+      <span class="d">entrou {{ resumo.receitas_centavos|brl }} · saiu {{ resumo.despesas_centavos|brl }}</span>
+    </a>
+  </div>
+  {% if resumo.pendencias %}
+  <div class="emp-pend"><span>Pendências:</span>{% for p in resumo.pendencias %}<a href="{{ p.href }}">{{ p.texto }}</a>{% endfor %}</div>
+  {% endif %}
+  {% endif %}
 </div>
+
+{#- A BARRA DAS SEÇÕES: presa no topo ao rolar. Só lista seção que existe. -#}
+<nav class="emp-nav" id="emp-nav" aria-label="seções da aba Empresa">
+  <a href="#titulos" class="on">Contas <small>{{ titulos|length }}</small></a>
+  {% if planej %}<a href="#planejamento">Caixa</a>{% endif %}
+  <a href="#dre">Resultado</a>
+  {% if carteira and carteira.n_titulos %}<a href="#carteira">Clientes</a>{% endif %}
+  <a href="#folha">Equipe</a>
+  <a href="#config">Configurações</a>
+</nav>
+<script>
+(function(){
+  // âncora que aponta pra um recolhível (a classificar, folha, plano...) abre ele
+  function abrir(h){ var el=null; try{ el=document.querySelector(h); }catch(e){ return; }
+    if(el && el.tagName==='DETAILS') el.open=true; }
+  document.addEventListener('click', function(e){
+    var a=e.target.closest && e.target.closest('.emp-full a[href^="#"]');
+    if(!a) return; var h=a.getAttribute('href'); if(h.length>1) abrir(h);
+    if(a.parentNode && a.parentNode.id==='emp-nav'){
+      [].forEach.call(a.parentNode.querySelectorAll('a'), function(x){ x.classList.toggle('on', x===a); });
+    }
+  });
+  if(location.hash) abrir(location.hash);
+})();
+function empVerAtrasadas(){ var p=document.querySelector('.tit-filtro a.atr'); if(p && window.titFiltroClicar) titFiltroClicar(p); }
+</script>
 
 {# O bloco "Visão do negócio" (dash_bloco) NÃO entra aqui: ele já é a tela do /painel,
    e ter os mesmos KPIs/funil/fluxo nos dois lugares era pura duplicação. O financeiro
@@ -4002,339 +4119,10 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   .dre-centro th:first-child,.dre-centro td:first-child{text-align:left}
 </style>
 
-<details class="card larga sec-pc" id="plano-contas">
-  <summary><span>📋 Plano de Contas <span class="mut" style="font-weight:400;font-size:.76rem">· padrão do sistema — você liga/desliga o que usa</span></span><span class="chev">▾</span></summary>
-  <div class="sec-body">
-    {% for g in plano_arvore %}
-    <div class="pc-grp"><span class="pc-gcode">{{ g.grupo }}</span><span class="pc-gname">{{ g.nome }}</span><span class="pc-gmeta">{{ g.n_ativas }}/{{ g.n_total }} ativas</span></div>
-    {% for c in g.contas %}
-    <div class="pc-acc{% if not c.habilitada %} off{% endif %}">
-      <span class="pc-code">{{ c.codigo }}</span>
-      <span class="pc-name">{{ c.nome }}</span>
-      <span class="pc-tag {{ c.natureza }}">{{ 'Receita' if c.natureza=='receita' else 'Despesa' }}</span>
-      <form method="post" action="/painel/empresa/plano-contas/habilitar" style="margin:0">
-        <input type="hidden" name="plano_conta_id" value="{{ c.id }}">
-        <input type="hidden" name="ativa" value="{{ '0' if c.habilitada else '1' }}">
-        <button type="submit" class="pc-sw{% if c.habilitada %} on{% endif %}" title="{{ 'desligar' if c.habilitada else 'ligar' }}"><span class="knob"></span></button>
-      </form>
-    </div>
-    {% endfor %}
-    {% endfor %}
-    <div class="mut" style="font-size:.72rem;margin-top:.7rem">A árvore é do sistema (a mesma pra todas as contas). No lançamento só aparecem as contas ligadas.</div>
-  </div>
-</details>
-
-<details class="card larga sec-pc" id="avisos">
-  <summary><span>✨ Avisos do sistema <span class="mut" style="font-weight:400;font-size:.76rem">· o que a sua equipe vê quando algo muda</span></span><span class="chev">▾</span></summary>
-  <div class="sec-body">
-    <div class="pc-acc{% if not avisos_na_fila %} off{% endif %}" style="align-items:flex-start">
-      <span class="pc-name" style="flex:1">
-        <b>Avisar a equipe na Fila</b>
-        <span class="mut" style="display:block;font-size:.78rem;margin-top:.15rem">
-          Mostra a faixa de novidade no topo da Fila dos vendedores, com o que mudou
-          no sistema. Só avisos dos últimos {{ dias_na_faixa }} dias — o que passa do
-          prazo para de interromper.
-        </span>
-      </span>
-      <form method="post" action="/painel/empresa/avisos-na-fila" style="margin:0">
-        <input type="hidden" name="ligado" value="{{ '0' if avisos_na_fila else '1' }}">
-        <button type="submit" class="pc-sw{% if avisos_na_fila %} on{% endif %}" title="{{ 'desligar' if avisos_na_fila else 'ligar' }}"><span class="knob"></span></button>
-      </form>
-    </div>
-    <div class="mut" style="font-size:.72rem;margin-top:.7rem">
-      Desligado, <b>nada é apagado</b>: os avisos continuam na tela Novidades do
-      Perfil de cada vendedor e continuam contando como não lidos. O que some é só
-      a interrupção no meio do trabalho.
-    </div>
-  </div>
-</details>
-
-<details class="card larga sec-pc" id="centros-custo">
-  <summary><span>🎯 Centros de Custo <span class="mut" style="font-weight:400;font-size:.76rem">· seus (unidade, filial, projeto) — opcional no lançamento</span></span><span class="chev">▾</span></summary>
-  <div class="sec-body">
-    <form method="post" action="/painel/empresa/centro-custo" class="cc-form">
-      <input name="nome" required placeholder="Nome (ex: Unidade Centro)">
-      <input name="descricao" placeholder="Descrição (opcional)">
-      <button type="submit">+ Novo centro</button>
-    </form>
-    {% if centros %}
-    {% for c in centros %}
-    <div class="cc-item{% if not c.ativo %} off{% endif %}">
-      <div class="cc-info"><b>{{ c.nome }}</b>{% if c.descricao %} <span class="mut">· {{ c.descricao }}</span>{% endif %}{% if not c.ativo %} <span class="mut">(inativo)</span>{% endif %}</div>
-      <div class="cc-acoes">
-        <button type="button" onclick="ccEditToggle(this)" class="cc-btn" style="color:#8a938a">editar ✎</button>
-        {% if c.ativo %}<form method="post" action="/painel/empresa/centro-custo/{{ c.id }}/desativar" style="margin:0"><input type="hidden" name="ativo" value="0"><button class="cc-btn" style="color:#c98080">desativar</button></form>
-        {% else %}<form method="post" action="/painel/empresa/centro-custo/{{ c.id }}/desativar" style="margin:0"><input type="hidden" name="ativo" value="1"><button class="cc-btn" style="color:var(--verde-claro)">reativar</button></form>{% endif %}
-      </div>
-      <form method="post" action="/painel/empresa/centro-custo" class="cc-edit" style="display:none">
-        <input type="hidden" name="centro_id" value="{{ c.id }}">
-        <input name="nome" value="{{ c.nome }}" required placeholder="nome">
-        <input name="descricao" value="{{ c.descricao }}" placeholder="descrição">
-        <button type="submit" style="background:var(--verde);color:var(--sobre-verde);border:0">salvar</button>
-        <button type="button" onclick="ccEditToggle(this)" style="color:#8a938a">cancelar</button>
-      </form>
-    </div>
-    {% endfor %}
-    {% else %}<div class="mut" style="font-size:.85rem">Nenhum centro ainda. Crie acima (unidade, filial, projeto, evento…).</div>{% endif %}
-  </div>
-  <script>
-  function ccEditToggle(btn){var it=btn.closest('.cc-item');var ed=it.querySelector('.cc-edit');ed.style.display=(ed.style.display==='none'||!ed.style.display)?'flex':'none';}
-  </script>
-</details>
-
-{% if a_classificar %}
-<style>
-  .ac-card{border-color:#f0c05a44}
-  .ac-item{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;padding:.7rem 0;border-top:1px solid var(--card-2)}
-  .ac-item:first-of-type{border-top:none}
-  .ac-info{flex:1 1 190px;min-width:0}
-  .ac-info .d{font-size:.9rem}
-  .ac-info .m{font-size:.7rem;color:var(--txt-mut);margin-top:2px}
-  .ac-sel{background:var(--bg);border:1px solid #2a3a33;border-radius:7px;color:var(--txt);font-size:.75rem;padding:.28rem .5rem;font-family:inherit;outline:none;max-width:180px}
-  .ac-sel:focus{border-color:var(--verde)}
-  .ac-sel.miss{border-color:#f0c05a66}
-  .ac-sel.done{border-color:var(--verde-claro)}
-  .ac-ok{color:var(--verde-claro);font-weight:600;font-size:.75rem;white-space:nowrap}
-</style>
-<details class="card larga sec-pc ac-card" id="a-classificar">
-  <summary><span id="ac-titulo" style="color:#f0c05a"><span id="ac-rotulo">⚠️ Lançamentos a classificar</span> <span id="ac-count">({{ a_classificar|length }})</span>
-    <span id="ac-sub" class="mut" style="font-weight:400;font-size:.76rem">· sem conta contábil — fora da DRE</span></span><span class="chev">▾</span></summary>
-  <div class="sec-body">
-  <p class="mut" style="font-size:.75rem;margin:0 0 .6rem">Escolha a conta contábil (e o centro, se quiser) — some daqui e entra na DRE na hora.</p>
-  <div id="ac-list">
-    {% for l in a_classificar %}
-    <div class="ac-item" id="ac-row-{{ l.id }}">
-      <div class="ac-info"><div class="d">{{ l.descricao or l.categoria }}</div>
-        <div class="m">{{ l.data.strftime('%d/%m') }} · {{ l.categoria }} · {{ '−' if l.tipo=='despesa' else '+' }} {{ brl(l.valor) }}</div></div>
-      <select class="ac-sel miss" onchange="acPlano(this, {{ l.id }})" title="conta contábil">
-        <option value="">— conta contábil —</option>
-        {% for g in plano_opcoes %}<optgroup label="{{ g.grupo }} · {{ g.nome }}">{% for c in g.contas %}<option value="{{ c.id }}">{{ c.codigo }} {{ c.nome }}</option>{% endfor %}</optgroup>{% endfor %}
-      </select>
-      {% if centros_ativos %}<select class="ac-sel" onchange="acCentro(this, {{ l.id }})" title="centro de custo (opcional)">
-        <option value="">— centro —</option>
-        {% for c in centros_ativos %}<option value="{{ c.id }}" {% if l.centro_custo_id==c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
-      </select>{% endif %}
-    </div>
-    {% endfor %}
-  </div>
-  <div id="ac-done" style="display:none;color:var(--verde-claro);font-weight:600;padding:.5rem 0">✓ Tudo classificado — a DRE está completa!</div>
-  <script>
-  function acPlano(sel, id){
-    zapFetch('/painel/lancamento/plano-conta', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&plano_conta_id='+encodeURIComponent(sel.value)}).then(function(d){if(!d)return;
-        if(d.ok && sel.value){
-          var row=document.getElementById('ac-row-'+id);
-          if(row && !row.dataset.done){ row.dataset.done='1';
-            row.style.transition='opacity .3s'; row.style.opacity='.45';
-            var b=document.createElement('span'); b.className='ac-ok'; b.textContent='✓ classificado'; row.appendChild(b);
-            var cnt=document.getElementById('ac-count');
-            var n=Math.max(0,(parseInt(cnt.textContent.replace(/\\D/g,''))||1)-1);
-            cnt.textContent='('+n+')';
-            if(n===0){ document.getElementById('ac-list').style.display='none'; document.getElementById('ac-done').style.display='block';
-              // a seção é recolhível: o "✓" do corpo some de vista se o dono fechar. O
-              // aviso mora no RESUMO, então é ele que precisa deixar de gritar aqui.
-              // Troca só o RÓTULO e esconde a contagem — apagar o título inteiro levaria
-              // junto o #ac-count que este mesmo bloco lê a cada classificação.
-              document.getElementById('ac-rotulo').textContent='✓ Tudo classificado';
-              cnt.style.display='none';
-              document.getElementById('ac-sub').style.display='none';
-              document.getElementById('ac-titulo').style.color='var(--verde-claro)';
-              document.getElementById('a-classificar').classList.remove('ac-card');
-            }
-          }
-        }
-      });
-  }
-  function acCentro(sel, id){
-    zapFetch('/painel/lancamento/centro-custo', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&centro_custo_id='+encodeURIComponent(sel.value)}).then(function(d){if(!d)return; if(d.ok){ sel.classList.remove('miss'); sel.classList.add('done'); } });
-  }
-  </script>
-  </div>
-</details>
-{% endif %}
-
-<div class="card larga" id="dre">
-  <div style="display:flex;justify-content:space-between"><strong>DRE do mês</strong>
-    <span class="mut" style="font-size:.72rem">{{ '%02d'|format(dre.mes) }}/{{ dre.ano }}</span></div>
-  {% if dre.estrutura and dre.estrutura.linhas %}
-  <table class="dre-tbl" style="width:100%;margin-top:.6rem;font-size:.86rem">
-    {% for l in dre.estrutura.linhas %}
-    <tr class="dre-{{ l.tipo }}">
-      <td class="{% if l.tipo=='grupo' %}mut{% endif %}">{{ l.nome }}{% if l.n %} <span class="mut" style="font-size:.7rem">({{ l.n }} lanç.)</span>{% endif %}</td>
-      <td style="text-align:right;font-variant-numeric:tabular-nums;{% if l.valor_centavos < 0 %}color:#e07a5f{% elif l.tipo in ('subtotal','total') %}color:var(--verde-claro){% endif %}">{{ l.valor_centavos|brl }}{% if l.margem_pct is defined %} · {{ l.margem_pct }}%{% endif %}</td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% else %}
-  <table style="width:100%;margin-top:.6rem;font-size:.9rem">
-    <tr><td class="mut">Receitas</td><td style="text-align:right;color:var(--verde-claro)">{{ dre.receitas_centavos|brl }}</td></tr>
-    <tr><td class="mut">(−) Despesas</td><td style="text-align:right">{{ dre.despesas_centavos|brl }}</td></tr>
-    <tr style="border-top:1px solid var(--borda)"><td style="font-weight:600">Resultado</td>
-      <td style="text-align:right;font-weight:600;color:{{ 'var(--verde-claro)' if dre.resultado_centavos>=0 else '#e07a5f' }}">{{ dre.resultado_centavos|brl }} · {{ dre.margem_pct }}%</td></tr>
-  </table>
-  {% endif %}
-
-  {% if dre_centro and dre_centro.centros %}
-  <details class="dre-centro">
-    <summary>Ver por centro de custo</summary>
-    <div style="overflow-x:auto">
-    <table>
-      <tr><th>Conta</th>{% for col in dre_centro.centros %}<th>{{ col.nome }}</th>{% endfor %}<th>Total</th></tr>
-      {% for l in dre_centro.linhas %}
-      <tr class="dre-{{ l.tipo }}"><td>{{ l.nome }}</td>
-        {% for col in dre_centro.centros %}<td style="text-align:right">{{ l.por_centro[col.key]|brl }}</td>{% endfor %}
-        <td style="text-align:right;font-weight:600">{{ l.total_centavos|brl }}</td></tr>
-      {% endfor %}
-    </table></div>
-  </details>
-  {% endif %}
-
-  {% if dre.a_definir_n %}
-  <div style="background:#2b2416;border:1px solid #f0c05a44;border-radius:8px;padding:.55rem .9rem;margin-top:.7rem;color:#f0c05a;font-size:.78rem;line-height:1.35">
-    ⚠️ <b>{{ dre.a_definir_centavos|brl }}</b> em <b>{{ dre.a_definir_n }}</b> lançamento(s) ainda a classificar <b>não entraram</b> neste DRE.
-    <a href="/painel/financeiro?mes={{ dre.mes }}&natureza=a_definir" style="color:#f0c05a;text-decoration:underline">classificar agora →</a>
-  </div>
-  {% endif %}
-
-  <div class="mut" style="font-size:.75rem;margin-top:.8rem">Relatório do contador: <a href="/painel/empresa/contador.csv?ano={{ dre.ano }}&mes={{ dre.mes }}" style="color:var(--verde-claro)">baixar planilha ({{ '%02d'|format(dre.mes) }}/{{ dre.ano }}) ↓</a></div>
-</div>
-
-{#- O PLANEJAMENTO DA SEMANA — etapa A do pedido 3 do dono (23/09/2026: "open
-   finance — saldo da conta para planejamento de contas a pagar"). O saldo é
-   DIGITADO por ele, banco a banco; os números das contas são os mesmos da pílula
-   "⚠️ Atrasadas" logo abaixo (ver finance/saldo_informado.py). Sem saldo não há
-   sobra: a linha diz "informe", em vez de calcular um rombo contra zero. -#}
-{% if planej %}
-<style>
-  .plj-l{display:flex;justify-content:space-between;align-items:baseline;gap:.6rem;padding:.3rem 0;font-size:.88rem}
-  .plj-l span i{display:block;font-style:normal;font-size:.7rem;color:var(--txt-mut)}
-  .plj-l b{font-family:var(--mono);font-weight:600;white-space:nowrap}
-  .plj-l.ruim b,.plj-l.ruim span{color:#e07a5f}
-  .plj-l.aviso b,.plj-l.aviso span{color:#f0c05a}
-  .plj-l.tot{border-top:1px solid var(--borda);margin-top:.3rem;padding-top:.55rem;font-weight:600}
-  .plj-l.tot.bom b{color:var(--verde-claro)}
-  .plj-l .falta{color:var(--txt-mut);font-weight:400}
-  .plj-dica{margin:.5rem 0 0;font-size:.8rem;color:#f0c05a;line-height:1.4}
-  .plj-bancos{margin-top:.8rem;border-top:1px dashed var(--borda);padding-top:.6rem;display:flex;flex-direction:column;gap:.4rem}
-  .plj-banco{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .6rem;font-size:.8rem;margin:0}
-  .plj-banco .nome{font-weight:600;min-width:7rem}
-  .plj-banco .idade{flex:1 1 9rem;color:var(--txt-mut);font-size:.72rem}
-  .plj-banco.velho .idade{color:#f0c05a}
-  .plj-banco.velho .nome{color:var(--txt-mut)}
-  .plj-banco input{width:auto;flex:0 1 9rem;min-width:0;font-size:.8rem;padding:.3rem .45rem}
-  .plj-banco button{width:auto;background:none;border:1px solid var(--borda);border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;color:var(--txt)}
-  .plj-banco button.pr{border-color:#1E4A3A;color:var(--verde-claro)}
-  .plj-banco button.tira{color:#c98080}
-  .plj-banco.novo input[name=banco]{flex:1 1 9rem}
-</style>
-<div class="card larga" id="planejamento">
-  <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.3rem">
-    <strong>Planejamento da semana</strong>
-    <span class="mut" style="font-size:.72rem">o saldo é o que você informa · as contas vêm dos títulos abaixo</span></div>
-  <div style="margin-top:.5rem">
-    <div class="plj-l"><span>Saldo nos bancos{% if planej.saldos %}<i>{{ planej.saldos|length }} banco{{ 's' if planej.saldos|length != 1 }}{% if planej.algum_velho %} · algum saldo está desatualizado{% endif %}</i>{% endif %}</span>
-      <b>{% if planej.saldo_centavos is not none %}{{ planej.saldo_centavos|brl }}{% else %}<span class="falta">— informe abaixo</span>{% endif %}</b></div>
-    <div class="plj-l ruim"><span>− Atrasadas<i>{{ planej.n_atrasadas }} conta{{ 's' if planej.n_atrasadas != 1 }} a pagar</i></span><b>{{ planej.atrasadas_centavos|brl }}</b></div>
-    <div class="plj-l aviso"><span>− A vencer em {{ planej.dias }} dias<i>{{ planej.n_a_vencer }} conta{{ 's' if planej.n_a_vencer != 1 }} a pagar</i></span><b>{{ planej.a_vencer_centavos|brl }}</b></div>
-    <div class="plj-l tot{% if planej.sobra_centavos is not none %}{{ ' ruim' if planej.sobra_centavos < 0 else ' bom' }}{% endif %}"><span>Sobra depois de tudo</span>
-      <b>{% if planej.sobra_centavos is not none %}{{ '− ' if planej.sobra_centavos < 0 }}{{ (planej.sobra_centavos if planej.sobra_centavos >= 0 else -planej.sobra_centavos)|brl }}{% else %}<span class="falta">precisa do saldo</span>{% endif %}</b></div>
-  </div>
-  {% if planej.sobra_centavos is not none and planej.sobra_centavos < 0 %}
-  <p class="plj-dica">Falta {{ (-planej.sobra_centavos)|brl }} pra cobrir a semana.{% if planej.n_receber_vencidas %} Você tem {{ planej.n_receber_vencidas }} conta{{ 's' if planej.n_receber_vencidas != 1 }} a receber vencida{{ 's' if planej.n_receber_vencidas != 1 }}, somando {{ planej.receber_vencidas_centavos|brl }}{% if planej.cobrar_cobre %} — cobrar cobre a diferença{% endif %}.{% endif %}</p>
-  {% endif %}
-  <div class="plj-bancos">
-    {% for s in planej.saldos %}
-    <form method="post" action="/painel/empresa/saldo" class="plj-banco{{ ' velho' if s.velho }}">
-      <input type="hidden" name="banco" value="{{ s.banco|e }}">
-      <span class="nome">{{ s.banco|e }}</span>
-      <span class="idade">{% if s.dias <= 0 %}informado hoje, {{ s.informado_em.strftime('%H:%M') }}{% elif s.dias == 1 %}informado ontem{% else %}informado há {{ s.dias }} dias{% endif %}{% if s.velho %} — atualize{% endif %}</span>
-      <input name="valor" inputmode="decimal" value="{{ (s.valor_centavos/100)|n2 }}" aria-label="saldo do {{ s.banco|e }}">
-      <button class="pr">atualizar</button>
-      <button class="tira" formaction="/painel/empresa/saldo/arquivar" data-msg="Tirar {{ s.banco|e }} da soma? O histórico dele fica guardado, e informar de novo traz ele de volta." onclick="return confirm(this.dataset.msg)">tirar ✕</button>
-    </form>
-    {% endfor %}
-    <form method="post" action="/painel/empresa/saldo" class="plj-banco novo">
-      <input name="banco" required maxlength="60" placeholder="{{ 'Outro banco' if planej.saldos else 'Banco (ex: Sicoob)' }}">
-      <input name="valor" required inputmode="decimal" placeholder="saldo R$ (pode ser negativo)">
-      <button class="pr">+ informar</button>
-    </form>
-  </div>
-</div>
-{% endif %}
-
-{#- DESPESAS POR TIPO — o quadro do gestor (325). Fixa, eventual e investimento
-   separados do centro de custo, por correção do dono em 24/09/2026: "tem que
-   ser separado para ter maior clareza no relatório do gestor". Setembro/2026
-   abriu com 91% do valor sem tipo na Prime, então o quadro traz junto a lista
-   pra classificar com um toque — um relatório que abre vazio não ajuda ninguém.
-   A sugestão vem do mesmo fornecedor/descrição e é só sugestão: o toque grava. -#}
-{% if quadro_tipo and quadro_tipo|selectattr('total')|list %}
-<style>
-  .qtd-mes{margin-top:.7rem}
-  .qtd-cab{display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap;font-size:.84rem}
-  .qtd-cab .pct{font-family:var(--mono);font-size:.74rem;color:var(--txt-mut)}
-  .qtd-cab .pct.baixo{color:#f0c05a}
-  .qtd-barra{display:flex;height:10px;border-radius:999px;overflow:hidden;background:var(--card-2,#1b1b1d);margin:.35rem 0 .2rem}
-  .qtd-barra span{display:block;height:100%}
-  .qtd-l{display:flex;justify-content:space-between;gap:.5rem;padding:.28rem 0;border-bottom:1px solid var(--borda);font-size:.8rem}
-  .qtd-l:last-of-type{border-bottom:0}
-  .qtd-l b{font-family:var(--mono);font-weight:500;white-space:nowrap}
-  .qtd-l .pt{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;margin-right:.4rem}
-  .qtd-l i{font-style:normal;color:var(--txt-mut);font-size:.72rem}
-  .qtd-l.sem,.qtd-l.sem b{color:#f0c05a}
-  .qtd-cls{margin-top:.35rem}
-  .qtd-cls summary{cursor:pointer;font-size:.78rem;color:#f0c05a}
-  .qtd-it{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.35rem .6rem;padding:.4rem 0;border-bottom:1px solid var(--borda);font-size:.78rem}
-  .qtd-it .d{flex:1 1 180px;min-width:0;overflow-wrap:anywhere}
-  .qtd-it .d i{display:block;font-style:normal;font-size:.7rem;color:var(--txt-mut)}
-  .qtd-it .bts{display:flex;gap:.3rem;flex-wrap:wrap}
-  .qtd-it button{width:auto;min-height:0;margin:0;border:1px solid #2f2f31;border-radius:999px;padding:.24rem .65rem;font-size:.74rem;background:none;color:var(--txt-mut);cursor:pointer}
-  .qtd-it button.sug{border-style:dashed;border-color:#1E4A3A;color:var(--verde-claro)}
-  .qtd-it button.on{border-style:solid;border-color:#1E4A3A;background:#10241A;color:var(--verde-claro);font-weight:600}
-  .qtd-it.feito{opacity:.55}
-</style>
-<div class="card larga" id="despesas-por-tipo">
-  <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.3rem">
-    <strong>Despesas por tipo</strong>
-    <span class="mut" style="font-size:.72rem">fixa · eventual · investimento — separado do centro de custo</span></div>
-  {% for m in quadro_tipo if m.total %}
-  <div class="qtd-mes">
-    <div class="qtd-cab"><b>{{ m.rotulo }}</b><span class="pct{{ ' baixo' if m.pct_com_tipo < 50 }}">{{ m.total|brl }} · {{ m.pct_com_tipo }}% do valor com tipo</span></div>
-    <div class="qtd-barra">{% for x in m.por_tipo %}{% if x.centavos %}<span style="width:{{ (100 * x.centavos / m.total)|round(1) }}%;background:{{ TIPO_DESPESA_COR[x.tipo] }}"></span>{% endif %}{% endfor %}{% if m.sem.centavos %}<span style="width:{{ (100 * m.sem.centavos / m.total)|round(1) }}%;background:#f0c05a"></span>{% endif %}</div>
-    {% for x in m.por_tipo %}<div class="qtd-l"><span><span class="pt" style="background:{{ TIPO_DESPESA_COR[x.tipo] }}"></span>{{ x.rotulo }} <i>· {{ x.n }}</i></span><b>{{ x.centavos|brl }}</b></div>{% endfor %}
-    {% if m.sem.n %}<div class="qtd-l sem"><span><span class="pt" style="background:#f0c05a"></span>Sem tipo <i>· {{ m.sem.n }}</i></span><b>{{ m.sem.centavos|brl }}</b></div>{% endif %}
-    {% set _pend = (quadro_sem_tipo or {}).get((m.ano, m.mes)) or [] %}
-    {% if _pend %}
-    <details class="qtd-cls">
-      <summary>{{ _pend|length }} de {{ m.rotulo.split('/')[0]|lower }} sem tipo — classificar agora</summary>
-      {% for l in _pend %}
-      <div class="qtd-it" id="qtd-{{ l.id }}">
-        <span class="d">{{ l.descricao|e }} — {{ l.valor_centavos|brl }}<i>{{ l.data.strftime('%d/%m') }}{% if l.plano %} · {{ l.plano|e }}{% endif %}{% if l.centro %} · centro {{ l.centro|e }}{% endif %}{% if l.sugestao %} · sugerido: {{ TIPO_DESPESA_ROTULO[l.sugestao] }}{% endif %}</i></span>
-        <span class="bts">{% for tp in TIPOS_DESPESA %}<button type="button" class="{{ 'sug' if l.sugestao == tp }}" data-tipo="{{ tp }}" onclick="qtdTipo(this, {{ l.id }})">{{ TIPO_DESPESA_ROTULO[tp] }}</button>{% endfor %}</span>
-      </div>
-      {% endfor %}
-    </details>
-    {% endif %}
-  </div>
-  {% endfor %}
-  <script>
-  // um toque grava (a mesma rota do Financeiro); a sugestão só destaca
-  function qtdTipo(btn, id){
-    var lin = document.getElementById('qtd-' + id);
-    lin.querySelectorAll('button').forEach(function(b){ b.disabled = true; });
-    zapFetch('/painel/lancamento/tipo-despesa', {method:'POST',
-      headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      body:'lancamento_id=' + id + '&tipo_despesa=' + encodeURIComponent(btn.dataset.tipo)})
-    .then(function(d){
-      lin.querySelectorAll('button').forEach(function(b){ b.disabled = false; b.classList.remove('on'); });
-      if(d && d.ok){ btn.classList.add('on'); lin.classList.add('feito'); }
-    });
-  }
-  </script>
-</div>
-{% endif %}
-
+<div class="emp-grade{% if not planej and not (carteira and carteira.n_titulos) %} sem-lado{% endif %}">
+<div class="emp-col">
 <div class="card larga">
-  <div style="display:flex;justify-content:space-between;align-items:center" id="titulos"><strong>Títulos a pagar e receber</strong>
+  <div style="display:flex;justify-content:space-between;align-items:center" id="titulos"><strong>Contas a pagar e receber</strong>
     {% if n_aguardando %}<span class="selo esp">{{ n_aguardando }} esperando liberação</span>{% endif %}</div>
   {% if emp_aviso %}<div class="ok" style="margin:.5rem 0">{{ emp_aviso }}</div>{% endif %}
   {#- O RECIBO (pedido 1): "quando der baixa abre um botão pra nascer o recibo".
@@ -4377,7 +4165,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .tit-lote button{background:var(--verde);color:var(--sobre-verde);border:0;
       border-radius:7px;padding:.34rem .8rem;font-size:.78rem;font-weight:600;
       cursor:pointer;width:auto}
-    .tit-ck{width:auto;margin:0 .3rem 0 0;accent-color:var(--verde)}
+    .tit-ck{width:auto;margin:0 .45rem 0 0;accent-color:var(--verde);display:inline-block;vertical-align:-2px;min-height:0;height:auto}
     /* Os três blocos. A cor da borda e do cabeçalho é o que separa de longe:
        verde é "pode pagar", âmbar é "ainda depende de você". */
     .tit-bloco{border:1px solid var(--borda);border-radius:11px;overflow:hidden;
@@ -4393,39 +4181,43 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .tit-bloco.esp .tit-bt{color:#f0dca6}
     .tit-bs{font-size:.76rem;color:var(--txt-mut);font-variant-numeric:tabular-nums}
     .tit-bd{font-size:.74rem;color:var(--txt-mut);flex:1 1 100%}
+    .tit-blote{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .7rem;font-size:.76rem}
+    .tit-blote label{display:inline-flex;align-items:center;gap:.3rem;cursor:pointer;margin:0;color:var(--txt)}
+    .tit-blote input{width:auto;margin:0;accent-color:var(--verde)}
+    .tit-blote button{min-height:0;height:auto;margin:0;width:auto;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:7px;padding:.3rem .75rem;font-size:.76rem;font-weight:700;cursor:pointer}
+    .tit-blote a{color:var(--verde-claro);text-decoration:none;white-space:nowrap}
     /* dentro do bloco a linha não precisa da borda de cima da primeira */
     .tit-bloco .tit-lin{padding:.6rem .8rem}
     .tit-bloco .tit-lin:first-of-type{border-top:0}
   </style>
-  <form method="post" action="/painel/empresa/titulo" class="emp-form" style="display:grid;grid-template-columns:1fr 2fr 1fr 1fr 1.4fr auto;gap:.5rem;margin:.7rem 0;align-items:end">
-    <label style="font-size:.72rem;color:#8a938a">Tipo<select name="tipo" onchange="titTipoTroca(this)" style="width:100%">
-      <option value="pagar">A pagar</option><option value="receber">A receber</option></select></label>
-    <label style="font-size:.72rem;color:#8a938a">Descrição<input name="descricao" required placeholder="Ex: Aluguel do ponto" style="width:100%"></label>
-    <label style="font-size:.72rem;color:#8a938a">Valor R$<input name="valor" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
-    <label style="font-size:.72rem;color:#8a938a">Vencimento<input name="vencimento" type="date" required style="width:100%"></label>
+  {#- O FORMULÁRIO EM TRÊS LINHAS (24/09/2026, mockup docs/mockups/empresa_layout.html).
+     Era uma grade de 6 colunas numa linha só, e no notebook cortava tudo: o Tipo
+     virava "A p", a descrição "Ex: Aluguel do p", o fornecedor "opciona" — e o
+     "+ Add" vinha ANTES de categoria, plano e centro, dando pra salvar sem ver a
+     classificação. Agora é a ordem em que se preenche: o que é a conta, de quem
+     é e como classificar; o botão é o último. Nenhum campo mudou de nome.
+
+     No celular o formulário nasce FECHADO atrás de "+ Nova conta" (decisão do
+     dono, 24/09): aberto, ele ocupava a tela inteira antes da primeira conta.
+     Sem JavaScript fica aberto — fechar é conveniência, não pode esconder nada. -#}
+  <details class="tit-nova" id="tit-nova" open>
+  <summary class="tit-nova-bt"><span class="fechado">+ Nova conta</span><span class="aberto">✕ fechar</span></summary>
+  <form method="post" action="/painel/empresa/titulo" class="tit-nova-f">
+    <div class="tn-l tn-l1">
+      <div class="tn-tipo" role="radiogroup" aria-label="tipo da conta"><span class="tn-rot">Tipo</span>
+        <span class="tn-tog"><label><input type="radio" name="tipo" value="pagar" checked onchange="titTipoTroca(this)"><span>A pagar</span></label><label><input type="radio" name="tipo" value="receber" onchange="titTipoTroca(this)"><span>A receber</span></label></span></div>
+      <label>Descrição<input name="descricao" required placeholder="Ex: Aluguel do ponto"></label>
+      <label>Valor R$<input name="valor" required inputmode="decimal" placeholder="0,00"></label>
+      <label>Vencimento<input name="vencimento" type="date" required></label>
+    </div>
+    <div class="tn-l tn-l2">
     {# o campo troca de rótulo com o Tipo: "A pagar" pede FORNECEDOR, "A receber" pede
        CLIENTE — cada datalist sugere só quem tem aquele papel marcado no cadastro.
        Antes o campo dizia sempre "Cliente", mesmo numa dívida a pagar, e o nome
-       digitado ali nem chegava a ser salvo (só ligava em título a receber). #}
-    <label id="tit-cli-lbl" style="font-size:.72rem;color:#8a938a" title="opcional — liga o título à ficha do fornecedor">Fornecedor<input name="cliente" id="tit-cli-input" list="tit-forn-dl" placeholder="opcional" style="width:100%"></label>
-    <button type="submit" style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
-    {# A REPETIÇÃO, que nunca teve porta. O campo `recorrente` existe desde a
-       053 e a baixa já cria a conta seguinte sozinha — mas nenhuma tela sabia
-       ligá-lo, e por isso 0 de 39 títulos da Prime estavam marcados. Fica na
-       linha de baixo, e não numa sexta coluna, porque são duas perguntas
-       (ritmo e valor) e a grade de cima já está no limite no notebook. #}
-    <div class="tit-rep-nova">
-      <label>🔁 Repete
-        <select name="periodicidade">
-          <option value="">não repete</option>
-          <option value="quinzenal">a cada 15 dias</option>
-          <option value="mensal">todo mês</option>
-          <option value="anual">todo ano</option>
-        </select></label>
-      <label title="a próxima nasce sem valor, esperando o boleto — água, luz, cartão, impostos">
-        <input type="checkbox" name="valor_variavel" style="width:auto"> 💧 o valor muda todo mês</label>
-      <span class="mut">Marcado, quando você der baixa a próxima já nasce sozinha.</span>
-    </div>
+       digitado ali nem chegava a ser salvo (só ligava em título a receber).
+       A dica "vincule pra aparecer na ficha" era uma caixinha desligada logo
+       abaixo, com cara de campo; mora aqui, no próprio campo. #}
+    <label id="tit-cli-lbl" title="opcional — liga o título à ficha do fornecedor">Fornecedor<input name="cliente" id="tit-cli-input" list="tit-forn-dl" placeholder="opcional · liga à ficha"></label>
     {#- A CLASSIFICAÇÃO (migração 317) — pedido do dono em 23/09/2026: "no
        lançamento do contas a pagar já colocar o centro de custo e plano de
        contas e categoria". Os três são OPCIONAIS: quem nunca usou continua não
@@ -4453,6 +4245,9 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
           <option value="">— sem —</option>
           {% for c in centros_ativos %}<option value="{{ c.id }}">{{ c.nome|e }}</option>{% endfor %}
         </select></label>{% endif %}
+    </div>
+    </div>
+    <div class="tn-l3">
       {#- O TIPO (325) — fixa, eventual, investimento —, separado do centro por
          correção do dono em 24/09/2026. Três botões, opcional, só em conta a
          PAGAR: dinheiro entrando não é "despesa fixa". -#}
@@ -4460,28 +4255,90 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         <span class="rot">Tipo de despesa</span>
         <span class="chips">{% for tp in TIPOS_DESPESA %}<label class="chip-td"><input type="radio" name="tipo_despesa" value="{{ tp }}"><span>{{ TIPO_DESPESA_ROTULO[tp] }}</span></label>{% endfor %}</span>
       </div>
-      <span class="mut" id="tit-mem-dica"></span>
+      {# A REPETIÇÃO, que nunca teve porta. O campo `recorrente` existe desde a
+         053 e a baixa já cria a conta seguinte sozinha — mas nenhuma tela sabia
+         ligá-lo, e por isso 0 de 39 títulos da Prime estavam marcados. O "valor
+         muda" só aparece depois de escolher um ritmo: sem repetição ele não
+         significa nada, e antes ficava solto na tela pedindo decisão. #}
+      <div class="tit-rep-nova">
+        <label>🔁 Repete
+          <select name="periodicidade" id="tit-rep-sel" onchange="titRepTroca(this)">
+            <option value="">não repete</option>
+            <option value="quinzenal">a cada 15 dias</option>
+            <option value="mensal">todo mês</option>
+            <option value="anual">todo ano</option>
+          </select></label>
+        <label id="tit-rep-var" hidden title="a próxima nasce sem valor, esperando o boleto — água, luz, cartão, impostos. Quando você der baixa, a próxima já nasce sozinha.">
+          <input type="checkbox" name="valor_variavel"> 💧 o valor muda todo mês</label>
+      </div>
+      <button type="submit" class="tn-add">+ Adicionar conta</button>
     </div>
+    <span class="mut" id="tit-mem-dica"></span>
   </form>
+  </details>
   <style>
-    .tit-rep-nova{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;font-size:.76rem;color:#8a938a}
-    .tit-rep-nova label{display:flex;align-items:center;gap:.35rem;color:var(--txt)}
-    .tit-rep-nova select{font-size:.76rem;padding:.2rem .35rem;width:auto}
-    .tit-rep-nova .mut{font-size:.72rem}
-    .tit-classe-nova{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:flex-end;gap:.4rem .8rem;font-size:.72rem;color:#8a938a}
-    .tit-classe-nova label{display:flex;flex-direction:column;gap:.15rem;flex:1 1 170px;min-width:0}
-    .tit-classe-nova select{width:100%;font-size:.78rem;padding:.3rem .4rem}
+    .tit-nova{margin:.8rem 0 .4rem}
+    .tit-nova-bt{display:none;list-style:none;cursor:pointer;text-align:center;font-weight:700;border-radius:10px;padding:.6rem;background:var(--verde);color:var(--sobre-verde)}
+    .tit-nova-bt::-webkit-details-marker{display:none}
+    .tit-nova-bt .aberto{display:none}
+    .tit-nova[open]>.tit-nova-bt{background:none;color:var(--txt-mut);border:1px solid var(--borda);font-weight:500;padding:.4rem;margin-bottom:.6rem}
+    .tit-nova[open]>.tit-nova-bt .aberto{display:inline}
+    .tit-nova[open]>.tit-nova-bt .fechado{display:none}
+    @media (max-width:700px){.tit-nova-bt{display:block}}
+    .tit-nova-f{border:1px solid var(--borda);border-radius:12px;padding:.75rem;background:var(--card-2);display:flex;flex-direction:column;gap:.6rem}
+    .tit-nova-f label{display:flex;flex-direction:column;gap:.2rem;font-size:.72rem;color:#8a938a;min-width:0;margin:0}
+    .tit-nova-f input:not([type=radio]):not([type=checkbox]),.tit-nova-f .tn-l select{width:100%;min-width:0;margin:0;height:2.5rem;min-height:0;box-sizing:border-box;padding:.4rem .6rem;font-size:.86rem}
+    .tn-l{display:grid;gap:.5rem;align-items:end}
+    .tn-l1{grid-template-columns:auto minmax(0,2fr) minmax(0,.8fr) minmax(0,1fr)}
+    .tn-l2{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+    .tn-l2 .tit-classe-nova{display:contents}
+    .tn-tipo{display:flex;flex-direction:column;gap:.2rem}
+    .tn-rot{font-size:.72rem;color:#8a938a}
+    .tn-tog{display:inline-flex;border:1px solid #2f3a33;border-radius:8px;overflow:hidden}
+    .tn-tog label{flex-direction:row;cursor:pointer}
+    .tn-tog input{position:absolute;opacity:0;width:1px;height:1px;min-height:0;pointer-events:none}
+    .tn-tog span{display:block;padding:0 .8rem;line-height:2.4rem;font-size:.84rem;color:var(--txt-mut);white-space:nowrap}
+    .tn-tog input:checked+span{background:#2a1512;color:#f2a79f;font-weight:600}
+    .tn-tog input[value=receber]:checked+span{background:#10241A;color:var(--verde-claro)}
+    .tn-tog input:focus-visible+span{outline:2px solid var(--verde-claro);outline-offset:-2px}
+    .tn-l3{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem}
+    .tn-add{margin-left:auto;width:auto;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.6rem 1.1rem;font-weight:700;cursor:pointer;white-space:nowrap}
+    #tit-mem-dica{font-size:.7rem;color:#9fe8c9;min-height:0}
+    #tit-mem-dica:empty{display:none}
     .tit-classe-nova select.lembrado{border-color:#1E4A3A;background:#10241A}
-    .tit-classe-nova .mut{flex:1 1 100%;font-size:.7rem;color:#9fe8c9;min-height:1em}
-    .tit-tipo-d{flex:1 1 100%;display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .6rem}
+    .tit-rep-nova{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;font-size:.76rem;color:#8a938a}
+    .tit-rep-nova label{flex-direction:row!important;align-items:center;gap:.35rem!important;color:var(--txt)!important;font-size:.78rem!important}
+    .tit-rep-nova label[hidden]{display:none}
+    .tit-rep-nova select{font-size:.78rem;padding:.25rem .4rem;width:auto!important;height:auto;min-height:0;margin:0}
+    .tit-rep-nova input[type=checkbox]{width:auto}
+    .tit-tipo-d{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .6rem}
+    .tit-tipo-d .rot{font-size:.72rem;color:#8a938a}
     .tit-tipo-d .chips{display:flex;flex-wrap:wrap;gap:.35rem}
-    .chip-td{display:inline-flex;align-items:center;cursor:pointer;margin:0}
+    .chip-td{display:inline-flex!important;flex-direction:row!important;align-items:center;cursor:pointer;margin:0}
     .chip-td input{position:absolute;opacity:0;width:1px;height:1px;min-height:0;pointer-events:none}
     .chip-td span{border:1px solid #2f2f31;border-radius:999px;padding:.28rem .75rem;font-size:.76rem;color:var(--txt-mut)}
     .chip-td input:checked+span{border-color:#1E4A3A;background:#10241A;color:var(--verde-claro);font-weight:600}
     .chip-td input:focus-visible+span{outline:2px solid var(--verde-claro);outline-offset:1px}
     .tit-tipo-d.lembrado .chip-td input:checked+span{border-style:dashed}
+    @media (max-width:700px){
+      .tn-l1{grid-template-columns:1fr 1fr}
+      .tn-tipo,.tn-l1>label:nth-of-type(1){grid-column:1/-1}
+      .tn-tog{display:flex}.tn-tog label{flex:1}.tn-tog span{text-align:center}
+      .tn-l2{grid-template-columns:1fr 1fr}
+      #tit-cli-lbl{grid-column:1/-1}
+      .tn-add{flex:1 1 100%;margin-left:0}
+    }
   </style>
+  <script>
+  // fechado no celular; no computador fica aberto (a barra só aparece no celular)
+  (function(){ var d=document.getElementById('tit-nova');
+    if(d && window.matchMedia && matchMedia('(max-width:700px)').matches) d.open=false; })();
+  function titRepTroca(sel){
+    var v=document.getElementById('tit-rep-var'); if(!v) return;
+    v.hidden = !sel.value;
+    if(!sel.value){ var c=v.querySelector('input'); if(c) c.checked=false; }
+  }
+  </script>
   <datalist id="tit-cli-dl">{% for c in clientes_lista or [] %}<option value="{{ c.nome }}">{% endfor %}</datalist>
   <datalist id="tit-forn-dl">{% for c in fornecedores_lista or [] %}<option value="{{ c.nome }}">{% endfor %}</datalist>
   <script>
@@ -4559,7 +4416,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   // escolher na mão tira o verde: a partir dali o campo é da pessoa
   document.addEventListener('change', function(e){
     var el = e.target;
-    if(el && el.closest && el.closest('.tit-classe-nova')){
+    if(el && el.closest && (el.closest('.tit-classe-nova') || el.closest('#tit-tipo-d'))){
       el.classList.remove('lembrado'); el.dataset.daPessoa = '1';
       var grupo = el.closest('.tit-tipo-d');
       if(grupo){ grupo.classList.remove('lembrado'); grupo.dataset.daPessoa = '1'; }
@@ -4572,7 +4429,6 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     f.form.descricao.addEventListener('change', titMemoria);
   })();
   </script>
-  <label style="font-size:.72rem;color:#8a938a;display:flex;gap:.4rem;align-items:center;margin-bottom:.6rem"><input type="checkbox" form="_nada" disabled style="width:auto"> <span class="mut">Vincule um cliente ou fornecedor pra o título aparecer na ficha dele.</span></label>
   {% if titulos %}
   <style>
     /* a separação de verdade entre uma conta e a próxima: var(--card-2) é quase
@@ -4585,7 +4441,26 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .tit-classe select{flex:1 1 150px;min-width:0;font-size:.74rem;padding:.25rem .35rem}
     .tit-cls{color:#9fb8ad}
     .tit-val{flex:0 0 auto;margin-left:auto;text-align:right;white-space:nowrap;font-weight:600;font-variant-numeric:tabular-nums}
-    .tit-acoes{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.15rem}
+    /* os botões ficam NA linha da conta (no máximo dois + o ▾); em tela
+       estreita descem sozinhos pra baixo da descrição */
+    .tit-acoes{flex:0 0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:.35rem}
+    .tit-mais-bt{color:var(--txt-mut)!important;padding:.28rem .55rem!important}
+    .tit-acoes button,.tit-acoes a{min-height:0;height:auto;margin:0;line-height:1.3}
+    .tit-acoes form{margin:0}
+    .tit-mais{flex:1 1 100%;display:flex;flex-direction:column;gap:.45rem;margin-top:.25rem;
+      background:var(--card-2);border:1px solid #26332b;border-radius:10px;padding:.6rem .7rem}
+    .tit-mais[hidden]{display:none}
+    .tit-mais .tit-edit{display:flex;margin-top:0}
+    .tit-mais button,.tit-mais select,.tit-mais input{min-height:0;height:auto;margin:0}
+    .tit-mais .tit-edit input,.tit-mais .tit-classe select{padding:.35rem .5rem;font-size:.8rem}
+    .tm-r{font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint)}
+    .tm-f{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .9rem;border-top:1px solid var(--borda);padding-top:.5rem}
+    .tm-f form{display:inline;margin:0}
+    .tm-d{font-size:.76rem;color:var(--txt-mut)}
+    .tm-f button{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;color:var(--txt)}
+    .tm-f .tm-apaga{color:#c98080}
+    .tm-f form:last-child{margin-left:auto}
+    @media (max-width:700px){.tit-acoes{flex:1 1 100%}}
     .tit-acoes button,.tit-acoes a{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;text-decoration:none}
     .tit-acoes form{display:inline;margin:0}
     .tit-rep{display:inline-flex!important;align-items:center;gap:.35rem;font-size:.75rem;color:var(--txt-mut)}
@@ -4615,18 +4490,12 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .tit-bx-tot{font-size:.82rem;font-weight:600;font-variant-numeric:tabular-nums;color:#f0dca6;align-self:center}
     .selo.jur{border:1px solid #5A2B2B;background:#241313;color:#E0A32E}
   </style>
-  <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid var(--card-2)"><span>Título</span><span>Valor</span></div>
   {% if pode_liberar and n_aguardando %}
   {# LOTE. Não é conveniência: ligar a liberação numa empresa que já tem 30
      títulos custaria 30 cliques no primeiro dia, e controle que dá trabalho no
      dia 1 é controle que alguém desliga no dia 2. #}
   <form method="post" action="/painel/empresa/titulo/aprovacao" id="tit-lote-form">
     <input type="hidden" name="decisao" value="autorizado">
-    <div class="tit-lote">⏳ <b>{{ n_aguardando }}</b> conta{{ 's' if n_aguardando != 1 }}
-      esperando você, no bloco de baixo. Marque e libere de uma vez —
-      <b>liberar não paga</b>, autoriza:
-      <button type="submit">✓ liberar as marcadas</button>
-      <a href="/painel/relatorios?tipo=contas_pagar" style="color:var(--verde-claro);font-size:.78rem">ou libere olhando o relatório →</a></div>
   </form>
   {% endif %}
   {#- O FILTRO. Antes eram os três blocos empilhados e sempre abertos — pedido
@@ -4716,6 +4585,23 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
        propósito — o boleto da água ainda não chegou. -#}
     {% if t.valor_centavos %}<div class="tit-val" style="color:{{ '#e07a5f' if t.tipo=='pagar' else 'var(--verde-claro)' }}">{{ t.valor_centavos|brl }}</div>
     {% else %}<div class="tit-val" style="color:#f0c05a;font-weight:500" title="esta conta repete a data, não o valor">— informar</div>{% endif %}
+    {#- OS BOTÕES DA CONTA MOSTRAM O PRÓXIMO PASSO DELA (24/09/2026, mockup
+       docs/mockups/empresa_layout.html, seção "Cada conta mostra o próximo passo
+       dela"). Eram seis botões iguais em toda conta — dar baixa, liberar,
+       recusar, repete, editar, apagar — numa segunda linha que dobrava a altura
+       da lista. O dono pediu pra melhorar o "menu ⋯" do primeiro desenho, e a
+       resposta foi não esconder nada num menu: à vista fica só o que dá pra
+       fazer com ESTA conta agora (no máximo dois), e o resto abre embaixo, com
+       nome, no ▾.
+         * esperando o dono, e quem olha é o dono: liberar / recusar;
+         * recusada, pro dono: liberar (voltar atrás);
+         * sem valor: pôr o valor;
+         * o resto: dar baixa — e, se o caixa já tem o pagamento, "já foi paga"
+           vem PRIMEIRO, porque a baixa lançaria a despesa outra vez.
+       "Dar baixa" continua existindo em TODA conta com valor ("só avisa, não
+       trava", 03/09/2026): na que espera o dono, mora no painel do ▾. -#}
+    {%- set _decide = pode_decidir and pode_liberar and t.tipo == 'pagar' and t.aprovacao == 'aguardando' -%}
+    {%- set _reve = pode_decidir and pode_liberar and t.tipo == 'pagar' and t.aprovacao == 'recusado' -%}
     <div class="tit-acoes">
       {# A BAIXA NÃO TRAVA — decisão do dono em 03/09/2026 ("só avisa, não
          trava"). O confirm é o aviso, e o que dá peso a ele é a marca
@@ -4729,11 +4615,26 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
          boleto pago em atraso custa mais que a face, e quem paga na sexta e
          registra na segunda tem uma data pra informar. Custa um clique a mais;
          em troca, o caixa passa a bater com o banco. -#}
-      {% if t.valor_centavos %}
-      <button type="button" onclick="titBaixaToggle(this)" style="color:var(--verde-claro)">dar baixa ✓</button>
-      {% else %}
+      {% if not t.valor_centavos %}
       <button type="button" onclick="titEditToggle(this,'valor')" style="color:#f0c05a;border-color:#5A4520">✎ pôr o valor</button>
-      {% endif %}
+      {% elif _decide %}
+      <form method="post" action="/painel/empresa/titulo/aprovacao">
+        <input type="hidden" name="titulo_id" value="{{ t.id }}">
+        <input type="hidden" name="decisao" value="autorizado">
+        <button style="color:var(--verde-claro);border-color:#1E4A3A">✓ liberar</button></form>
+      <form method="post" action="/painel/empresa/titulo/aprovacao"
+            onsubmit="var m=prompt('Por que está recusando? (o motivo vai pra quem lançou)');
+                      if(m===null)return false; this.motivo.value=m; return true">
+        <input type="hidden" name="titulo_id" value="{{ t.id }}">
+        <input type="hidden" name="decisao" value="recusado">
+        <input type="hidden" name="motivo" value="">
+        <button style="color:#c98080">✕ recusar</button></form>
+      {% elif _reve %}
+      <form method="post" action="/painel/empresa/titulo/aprovacao">
+        <input type="hidden" name="titulo_id" value="{{ t.id }}">
+        <input type="hidden" name="decisao" value="autorizado">
+        <button style="color:var(--verde-claro);border-color:#1E4A3A">✓ liberar</button></form>
+      {% else %}
       {#- "JÁ FOI PAGA": liga esta conta a um pagamento que JÁ ESTÁ no caixa, em
          vez de lançar um novo. Veio do relatório em 04/09/2026, junto com a
          decisão do dono de concentrar pagamento aqui.
@@ -4759,37 +4660,10 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         <button style="color:var(--verde-claro);border-color:#1E4A3A"
           title="{{ t.conciliar.titulo|e }}">✓ já foi paga — {{ t.conciliar.resumo }}</button></form>
       {% endif %}
-      {% if pode_decidir and pode_liberar and t.tipo=='pagar' and t.aprovacao!='autorizado' %}
-      <form method="post" action="/painel/empresa/titulo/aprovacao">
-        <input type="hidden" name="titulo_id" value="{{ t.id }}">
-        <input type="hidden" name="decisao" value="autorizado">
-        <button style="color:var(--verde-claro);border-color:#1E4A3A">✓ liberar</button></form>
-      {% endif %}
-      {% if pode_decidir and pode_liberar and t.tipo=='pagar' and t.aprovacao=='aguardando' %}
-      <form method="post" action="/painel/empresa/titulo/aprovacao"
-            onsubmit="var m=prompt('Por que está recusando? (o motivo vai pra quem lançou)');
-                      if(m===null)return false; this.motivo.value=m; return true">
-        <input type="hidden" name="titulo_id" value="{{ t.id }}">
-        <input type="hidden" name="decisao" value="recusado">
-        <input type="hidden" name="motivo" value="">
-        <button style="color:#c98080">✕ recusar</button></form>
-      {% endif %}
+      <button type="button" onclick="titBaixaToggle(this)"{% if not t.conciliar %} style="color:var(--verde-claro)"{% endif %}>dar baixa ✓</button>
       {% if t.tipo=='receber' %}{% if t.cobranca_link_url %}<a href="{{ t.cobranca_link_url }}" target="_blank" style="color:#c99536">link Pix ↗</a>{% else %}<form method="post" action="/painel/empresa/titulo/{{ t.id }}/cobrar"><button style="color:#c99536">cobrar via Pix →</button></form>{% endif %}{% endif %}
-      {#- O CONTROLE DA REPETIÇÃO. É um `select` e não um botão de liga-desliga
-         porque a pergunta tem três respostas, não duas — e a quinzenal é o maior
-         bloco da Prime (12 das 33 contas abertas), então "todo mês" sozinho não
-         serviria. Grava no `change` pra não pedir um segundo clique de "salvar";
-         a caixa do valor variável vai no MESMO formulário, então ela viaja junto
-         e os dois campos entram no mesmo update (ver `definir_recorrencia`). -#}
-      <form method="post" action="/painel/empresa/titulo/{{ t.id }}/recorrencia" class="tit-rep">
-        <select name="periodicidade" onchange="this.form.submit()" title="esta conta repete?">
-          <option value=""{{ ' selected' if not t.periodicidade }}>🔁 não repete</option>
-          {% for chave, rotulo in RITMOS %}<option value="{{ chave }}"{{ ' selected' if t.periodicidade == chave }}>🔁 {{ rotulo }}</option>{% endfor %}
-        </select>
-        {% if t.periodicidade %}<label title="a próxima nasce sem valor, esperando o boleto"><input type="checkbox" name="valor_variavel" onchange="this.form.submit()"{{ ' checked' if t.valor_variavel }}> 💧 valor muda</label>{% endif %}
-      </form>
-      <button type="button" onclick="titEditToggle(this)" title="editar descrição e/ou valor" style="color:#8a938a">editar ✎</button>
-      <form method="post" action="/painel/empresa/titulo/{{ t.id }}/apagar" onsubmit="return confirm('Apagar este título? (só some da lista; não mexe em nada já pago)')"><button title="apagar título" style="color:#c98080">apagar ✕</button></form>
+      {% endif %}
+      <button type="button" class="tit-mais-bt" onclick="titMais(this)" aria-expanded="false" title="editar, repetir, apagar">▾</button>
     </div>
     {#- O PAINEL DA BAIXA. Nasce fechado e com a sugestão já preenchida: a regra
        da casa (multa 2% + juros de mora 1% ao mês, cláusula 3.4 do contrato da
@@ -4838,8 +4712,12 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       <button type="button" onclick="titBaixaToggle(this)" style="color:#8a938a">cancelar</button>
     </form>
     {% endif %}
+    {#- O PAINEL DO ▾: o que se faz de vez em quando, com nome. Apagar fica no
+       fim, longe dos botões do dia a dia, e continua pedindo confirmação. -#}
+    <div class="tit-mais" hidden>
+      <span class="tm-r">Editar</span>
     {# edição INLINE (descrição + valor juntos, cada um independente) — evita o vaivém de prompts #}
-    <form method="post" action="/painel/empresa/titulo/{{ t.id }}/descricao" class="tit-edit" style="display:none">
+    <form method="post" action="/painel/empresa/titulo/{{ t.id }}/descricao" class="tit-edit">
       <input name="descricao" value="{{ t.descricao }}" placeholder="descrição" style="flex:2 1 140px;min-width:0">
       <input name="valor" value="{{ (t.valor_centavos/100)|n2 }}" inputmode="decimal" placeholder="valor R$" style="flex:1 1 80px;min-width:0">
       {# O FORNECEDOR, que faltava. Antes daqui o editar tinha dois campos e quem
@@ -4885,8 +4763,39 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         </select>{% endif %}
       </div>
       <button style="background:var(--verde);color:var(--sobre-verde);border:0">salvar</button>
-      <button type="button" onclick="titEditToggle(this)" style="color:#8a938a">cancelar</button>
+      <button type="button" onclick="titMais(this)" style="color:#8a938a">fechar</button>
     </form>
+      <div class="tm-f">
+        <span class="tm-r">Repete</span>
+      {#- O CONTROLE DA REPETIÇÃO. É um `select` e não um botão de liga-desliga
+         porque a pergunta tem três respostas, não duas — e a quinzenal é o maior
+         bloco da Prime (12 das 33 contas abertas), então "todo mês" sozinho não
+         serviria. Grava no `change` pra não pedir um segundo clique de "salvar";
+         a caixa do valor variável vai no MESMO formulário, então ela viaja junto
+         e os dois campos entram no mesmo update (ver `definir_recorrencia`). -#}
+      <form method="post" action="/painel/empresa/titulo/{{ t.id }}/recorrencia" class="tit-rep">
+        <select name="periodicidade" onchange="this.form.submit()" title="esta conta repete?">
+          <option value=""{{ ' selected' if not t.periodicidade }}>🔁 não repete</option>
+          {% for chave, rotulo in RITMOS %}<option value="{{ chave }}"{{ ' selected' if t.periodicidade == chave }}>🔁 {{ rotulo }}</option>{% endfor %}
+        </select>
+        {% if t.periodicidade %}<label title="a próxima nasce sem valor, esperando o boleto"><input type="checkbox" name="valor_variavel" onchange="this.form.submit()"{{ ' checked' if t.valor_variavel }}> 💧 valor muda</label>{% endif %}
+      </form>
+        {% if t.valor_centavos and (_decide or _reve) %}<span class="tm-d">Pagar {{ 'antes de liberar' if _decide else 'mesmo recusada' }}? <button type="button" onclick="titBaixaToggle(this)">dar baixa ✓</button></span>{% endif %}
+        {% if t.valor_centavos and (_decide or _reve) and t.conciliar %}
+      {#- o texto vai por `data-confirmar` e NÃO por `onsubmit="confirm({{...|tojson}})"`:
+         o tojson do Jinja não escapa aspas, e esta frase carrega a DESCRIÇÃO do
+         título, que é texto do usuário. Foi assim que o atributo saiu quebrado no
+         #598. Com `|e` a escapagem do HTML vale, e quem lê é o ouvinte delegado
+         no fim deste bloco. #}
+      <form method="post" action="/painel/empresa/titulo/{{ t.id }}/conciliar"
+            data-confirmar="{{ t.conciliar.confirmar|e }}">
+        <input type="hidden" name="lancamento_id" value="{{ t.conciliar.lancamento_id }}">
+        <button style="color:var(--verde-claro);border-color:#1E4A3A"
+          title="{{ t.conciliar.titulo|e }}">✓ já foi paga — {{ t.conciliar.resumo }}</button></form>
+      {% endif %}
+      <form method="post" action="/painel/empresa/titulo/{{ t.id }}/apagar" onsubmit="return confirm('Apagar este título? (só some da lista; não mexe em nada já pago)')"><button title="apagar título" class="tm-apaga">🗑 apagar conta</button></form>
+      </div>
+    </div>
   </div>
 {% endmacro %}
 
@@ -4917,7 +4826,14 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <div class="tit-bcab"><span class="tit-bt">{{ bloco.titulo }}</span>
       <span class="tit-bs bs-tudo">{{ bloco.itens|length }} · {{ bloco.centavos|brl }}</span>
       <span class="tit-bs bs-atr">{{ bloco.n_atrasadas or 0 }} atrasada{{ 's' if (bloco.n_atrasadas or 0) != 1 }} · {{ (bloco.atrasadas_centavos or 0)|brl }}</span>
-      {% if bloco.dica %}<span class="tit-bd">{{ bloco.dica }}</span>{% endif %}</div>
+      {#- O LOTE mora no cabeçalho do bloco que ele libera (era uma faixa à parte,
+         acima das pílulas, repetindo a contagem do bloco). Liberar NÃO paga:
+         autoriza — o botão diz "liberar", e o título do botão explica. -#}
+      {% if bloco.decide and pode_liberar and n_aguardando %}<span class="tit-blote">
+        <label title="marca todas as contas esperando você"><input type="checkbox" onchange="titMarcaTodas(this)"> marcar todas</label>
+        <button type="submit" form="tit-lote-form" title="liberar não paga: autoriza o pagamento das contas marcadas">✓ liberar marcadas</button>
+        <a href="/painel/relatorios?tipo=contas_pagar">pelo relatório →</a></span>{% endif %}
+      {% if bloco.dica and not (bloco.decide and pode_liberar and n_aguardando) %}<span class="tit-bd">{{ bloco.dica }}</span>{% endif %}</div>
     {% for t in bloco.itens %}{{ tit_linha(t, bloco.decide) }}{% endfor %}
   </div>
   {% endif %}{% endfor %}
@@ -4943,15 +4859,26 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         : ((!alvo || b.id === alvo) ? '' : 'none');
     });
   }
-  function titEditToggle(btn, campo){
+  function titMarcaTodas(ck){
+    var b = ck.closest('.tit-bloco'); if(!b) return;
+    b.querySelectorAll('.tit-ck').forEach(function(c){ if(c.closest('.tit-lin').offsetParent !== null) c.checked = ck.checked; });
+  }
+  function titMais(btn, abrir){
     var lin = btn.closest('.tit-lin');
-    var f = lin ? lin.querySelector('.tit-edit') : null;
-    if(!f) return;
-    var aberto = f.style.display === 'flex';
-    f.style.display = aberto ? 'none' : 'flex';
-    // `campo` existe pro "pôr o valor": abrir o editor com o cursor na descrição
-    // faria a pessoa dar um Tab pra chegar onde ela clicou pra ir.
-    if(!aberto){ var d = f.querySelector('input[name=' + (campo || 'descricao') + ']'); if(d) d.focus(); }
+    var p = lin ? lin.querySelector('.tit-mais') : null;
+    if(!p) return false;
+    var vai = (abrir === undefined) ? p.hidden : abrir;
+    p.hidden = !vai;
+    var bt = lin.querySelector('.tit-mais-bt');
+    if(bt){ bt.setAttribute('aria-expanded', vai ? 'true' : 'false'); bt.textContent = vai ? '▴' : '▾'; }
+    return vai;
+  }
+  function titEditToggle(btn, campo){
+    // o editar mora no painel do ▾; `campo` existe pro "pôr o valor": abrir com o
+    // cursor na descrição faria a pessoa dar um Tab pra chegar onde clicou pra ir.
+    if(!titMais(btn)) return;
+    var f = btn.closest('.tit-lin').querySelector('.tit-edit');
+    var d = f && f.querySelector('input[name=' + (campo || 'descricao') + ']'); if(d) d.focus();
   }
   function titBaixaToggle(btn){
     var lin = btn.closest('.tit-lin');
@@ -5093,8 +5020,83 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   {% endif %}
 </div>
 
+</div>
+<div class="emp-col emp-lado">
+{#- O PLANEJAMENTO DA SEMANA — etapa A do pedido 3 do dono (23/09/2026: "open
+   finance — saldo da conta para planejamento de contas a pagar"). O saldo é
+   DIGITADO por ele, banco a banco; os números das contas são os mesmos da pílula
+   "⚠️ Atrasadas" logo abaixo (ver finance/saldo_informado.py). Sem saldo não há
+   sobra: a linha diz "informe", em vez de calcular um rombo contra zero. -#}
+{% if planej %}
+<style>
+  .plj-l{display:flex;justify-content:space-between;align-items:baseline;gap:.6rem;padding:.3rem 0;font-size:.88rem}
+  .plj-l span i{display:block;font-style:normal;font-size:.7rem;color:var(--txt-mut)}
+  .plj-l b{font-family:var(--mono);font-weight:600;white-space:nowrap}
+  .plj-l.ruim b,.plj-l.ruim span{color:#e07a5f}
+  .plj-l.aviso b,.plj-l.aviso span{color:#f0c05a}
+  .plj-l.tot{border-top:1px solid var(--borda);margin-top:.3rem;padding-top:.55rem;font-weight:600}
+  .plj-l.tot.bom b{color:var(--verde-claro)}
+  .plj-l .falta{color:var(--txt-mut);font-weight:400}
+  .plj-dica{margin:.5rem 0 0;font-size:.8rem;color:#f0c05a;line-height:1.4}
+  .plj-bancos{margin-top:.8rem;border-top:1px dashed var(--borda);padding-top:.6rem;display:flex;flex-direction:column;gap:.4rem}
+  .plj-banco{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .6rem;font-size:.8rem;margin:0}
+  .plj-banco .nome{font-weight:600;min-width:7rem}
+  .plj-banco .idade{flex:1 1 9rem;color:var(--txt-mut);font-size:.72rem}
+  .plj-banco.velho .idade{color:#f0c05a}
+  .plj-banco.velho .nome{color:var(--txt-mut)}
+  .plj-banco input{width:auto;flex:0 1 9rem;min-width:0;font-size:.8rem;padding:.3rem .45rem}
+  .plj-banco button{width:auto;background:none;border:1px solid var(--borda);border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;color:var(--txt)}
+  .plj-banco button.pr{border-color:#1E4A3A;color:var(--verde-claro)}
+  .plj-banco button.tira{color:#c98080}
+  .plj-banco.novo input[name=banco]{flex:1 1 9rem}
+  .plj-edita{margin-top:.7rem}
+  .plj-edita>summary{cursor:pointer;color:var(--verde-claro);font-size:.78rem}
+  .plj-banco input,.plj-banco button{min-height:0;height:auto;margin:0}
+  .plj-banco input{padding:.32rem .45rem}
+</style>
+<div class="card larga" id="planejamento">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.3rem">
+    <strong>Planejamento da semana</strong>
+    <span class="mut" style="font-size:.72rem">o saldo é o que você informa · as contas vêm dos títulos a pagar</span></div>
+  <div style="margin-top:.5rem">
+    <div class="plj-l"><span>Saldo nos bancos{% if planej.saldos %}<i>{{ planej.saldos|length }} banco{{ 's' if planej.saldos|length != 1 }}{% if planej.algum_velho %} · algum saldo está desatualizado{% endif %}</i>{% endif %}</span>
+      <b>{% if planej.saldo_centavos is not none %}{{ planej.saldo_centavos|brl }}{% else %}<span class="falta">— informe abaixo</span>{% endif %}</b></div>
+    <div class="plj-l ruim"><span>− Atrasadas<i>{{ planej.n_atrasadas }} conta{{ 's' if planej.n_atrasadas != 1 }} a pagar</i></span><b>{{ planej.atrasadas_centavos|brl }}</b></div>
+    <div class="plj-l aviso"><span>− A vencer em {{ planej.dias }} dias<i>{{ planej.n_a_vencer }} conta{{ 's' if planej.n_a_vencer != 1 }} a pagar</i></span><b>{{ planej.a_vencer_centavos|brl }}</b></div>
+    <div class="plj-l tot{% if planej.sobra_centavos is not none %}{{ ' ruim' if planej.sobra_centavos < 0 else ' bom' }}{% endif %}"><span>Sobra depois de tudo</span>
+      <b>{% if planej.sobra_centavos is not none %}{{ '− ' if planej.sobra_centavos < 0 }}{{ (planej.sobra_centavos if planej.sobra_centavos >= 0 else -planej.sobra_centavos)|brl }}{% else %}<span class="falta">precisa do saldo</span>{% endif %}</b></div>
+  </div>
+  {% if planej.sobra_centavos is not none and planej.sobra_centavos < 0 %}
+  <p class="plj-dica">Falta {{ (-planej.sobra_centavos)|brl }} pra cobrir a semana.{% if planej.n_receber_vencidas %} Você tem {{ planej.n_receber_vencidas }} conta{{ 's' if planej.n_receber_vencidas != 1 }} a receber vencida{{ 's' if planej.n_receber_vencidas != 1 }}, somando {{ planej.receber_vencidas_centavos|brl }}{% if planej.cobrar_cobre %} — cobrar cobre a diferença{% endif %}.{% endif %}</p>
+  {% endif %}
+  {#- Os bancos, pra atualizar o saldo, ficam recolhidos quando está tudo em dia:
+     a conta cabe na coluna do lado e o formulário por banco era a metade dela.
+     Abre sozinho quando falta saldo ou algum está velho — é quando pede ação. -#}
+  <details class="plj-edita"{% if not planej.saldos or planej.algum_velho %} open{% endif %}>
+  <summary>{% if planej.saldos %}atualizar saldo · {{ planej.saldos|length }} banco{{ 's' if planej.saldos|length != 1 }}{% else %}informar o saldo{% endif %}</summary>
+  <div class="plj-bancos">
+    {% for s in planej.saldos %}
+    <form method="post" action="/painel/empresa/saldo" class="plj-banco{{ ' velho' if s.velho }}">
+      <input type="hidden" name="banco" value="{{ s.banco|e }}">
+      <span class="nome">{{ s.banco|e }}</span>
+      <span class="idade">{% if s.dias <= 0 %}informado hoje, {{ s.informado_em.strftime('%H:%M') }}{% elif s.dias == 1 %}informado ontem{% else %}informado há {{ s.dias }} dias{% endif %}{% if s.velho %} — atualize{% endif %}</span>
+      <input name="valor" inputmode="decimal" value="{{ (s.valor_centavos/100)|n2 }}" aria-label="saldo do {{ s.banco|e }}">
+      <button class="pr">atualizar</button>
+      <button class="tira" formaction="/painel/empresa/saldo/arquivar" data-msg="Tirar {{ s.banco|e }} da soma? O histórico dele fica guardado, e informar de novo traz ele de volta." onclick="return confirm(this.dataset.msg)">tirar ✕</button>
+    </form>
+    {% endfor %}
+    <form method="post" action="/painel/empresa/saldo" class="plj-banco novo">
+      <input name="banco" required maxlength="60" placeholder="{{ 'Outro banco' if planej.saldos else 'Banco (ex: Sicoob)' }}">
+      <input name="valor" required inputmode="decimal" placeholder="saldo R$ (pode ser negativo)">
+      <button class="pr">+ informar</button>
+    </form>
+  </div>
+  </details>
+</div>
+{% endif %}
+
 {% if carteira and carteira.n_titulos %}
-<div class="card larga">
+<div class="card larga" id="carteira">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem">
     <strong>👥 Carteira de clientes</strong>
     <span class="mut" style="font-size:.72rem">{{ (rotulo_receber or 'A receber') }} em aberto: <b style="color:var(--verde-claro)">{{ carteira.total_centavos|brl }}</b>{% if carteira.atrasado_centavos %} · <b style="color:#f0c05a">{{ carteira.atrasado_centavos|brl }} atrasado</b>{% endif %}</span>
@@ -5102,22 +5104,224 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   <style>
     .cart-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.3rem .8rem;padding:.6rem 0;border-top:1px solid var(--card-2)}
     .cart-nome{flex:1 1 160px;min-width:0;font-size:.9rem}
+    .cart-mais>summary{cursor:pointer;color:var(--verde-claro);font-size:.78rem;padding:.55rem 0 .1rem;border-top:1px solid var(--card-2)}
     .cart-val{margin-left:auto;text-align:right;white-space:nowrap;font-weight:600;font-variant-numeric:tabular-nums}
   </style>
   <div style="margin-top:.6rem">
-    {% for c in carteira.clientes %}<div class="cart-lin">
+    {#- Só os cinco maiores à vista: a carteira mora na coluna do lado e, inteira,
+       empurrava a página (14 clientes na Prime em 24/09/2026). O resto abre. -#}
+    {% macro cart_lin(c) %}<div class="cart-lin">
       <div class="cart-nome">{% if c.cliente_id %}<a href="/painel/clientes/{{ c.cliente_id }}" style="color:var(--txt);text-decoration:none">👤 {{ c.nome }}</a>{% else %}<span class="mut">{{ c.nome }}</span>{% endif %}
         <span class="mut" style="font-size:.7rem">· {{ c.n }} título(s){% if c.atrasado %} · <span style="color:#f0c05a">⚠ {{ c.atrasado_centavos|brl }} atrasado</span>{% endif %}</span></div>
       <div class="cart-val" style="color:{{ '#f0c05a' if c.atrasado else 'var(--verde-claro)' }}">{{ c.total_centavos|brl }}</div>
-    </div>{% endfor %}
+    </div>{% endmacro %}
+    {% for c in carteira.clientes[:5] %}{{ cart_lin(c) }}{% endfor %}
+    {% if carteira.clientes|length > 5 %}<details class="cart-mais"><summary>ver os {{ carteira.clientes|length }} clientes</summary>
+    {% for c in carteira.clientes[5:] %}{{ cart_lin(c) }}{% endfor %}</details>{% endif %}
   </div>
   <div class="mut" style="font-size:.7rem;margin-top:.6rem">Vem dos títulos <b>a receber</b> ligados a cada cliente. Cobre pelo botão na ficha do cliente.</div>
 </div>
 {% endif %}
 
-<div class="card larga">
-  <div style="display:flex;justify-content:space-between;align-items:center"><strong>Equipe e folha</strong>
-    <span class="mut" style="font-size:.72rem">folha de {{ '%02d'|format(dre.mes) }}/{{ dre.ano }}: <b style="color:#e07a5f">{{ folha.total_a_pagar_centavos|brl }}</b> · FGTS do mês {{ folha.total_fgts_centavos|brl }} · custo real ≈ {{ folha.custo_real_total_centavos|brl }}</span></div>
+</div>
+</div>
+<div class="emp-par{% if not (quadro_tipo and quadro_tipo|selectattr('total')|list) %} so-um{% endif %}">
+<div class="emp-col">
+<div class="card larga" id="dre">
+  <div style="display:flex;justify-content:space-between"><strong>DRE do mês</strong>
+    <span class="mut" style="font-size:.72rem">{{ '%02d'|format(dre.mes) }}/{{ dre.ano }}</span></div>
+  {% if dre.estrutura and dre.estrutura.linhas %}
+  <table class="dre-tbl" style="width:100%;margin-top:.6rem;font-size:.86rem">
+    {% for l in dre.estrutura.linhas %}
+    <tr class="dre-{{ l.tipo }}">
+      <td class="{% if l.tipo=='grupo' %}mut{% endif %}">{{ l.nome }}{% if l.n %} <span class="mut" style="font-size:.7rem">({{ l.n }} lanç.)</span>{% if a_classificar %} <a href="#a-classificar" style="color:#f0c05a;font-size:.74rem;white-space:nowrap">classificar →</a>{% endif %}{% endif %}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums;{% if l.valor_centavos < 0 %}color:#e07a5f{% elif l.tipo in ('subtotal','total') %}color:var(--verde-claro){% endif %}">{{ l.valor_centavos|brl }}{% if l.margem_pct is defined %} · {{ l.margem_pct }}%{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <table style="width:100%;margin-top:.6rem;font-size:.9rem">
+    <tr><td class="mut">Receitas</td><td style="text-align:right;color:var(--verde-claro)">{{ dre.receitas_centavos|brl }}</td></tr>
+    <tr><td class="mut">(−) Despesas</td><td style="text-align:right">{{ dre.despesas_centavos|brl }}</td></tr>
+    <tr style="border-top:1px solid var(--borda)"><td style="font-weight:600">Resultado</td>
+      <td style="text-align:right;font-weight:600;color:{{ 'var(--verde-claro)' if dre.resultado_centavos>=0 else '#e07a5f' }}">{{ dre.resultado_centavos|brl }} · {{ dre.margem_pct }}%</td></tr>
+  </table>
+  {% endif %}
+
+  {% if dre_centro and dre_centro.centros %}
+  <details class="dre-centro">
+    <summary>Ver por centro de custo</summary>
+    <div style="overflow-x:auto">
+    <table>
+      <tr><th>Conta</th>{% for col in dre_centro.centros %}<th>{{ col.nome }}</th>{% endfor %}<th>Total</th></tr>
+      {% for l in dre_centro.linhas %}
+      <tr class="dre-{{ l.tipo }}"><td>{{ l.nome }}</td>
+        {% for col in dre_centro.centros %}<td style="text-align:right">{{ l.por_centro[col.key]|brl }}</td>{% endfor %}
+        <td style="text-align:right;font-weight:600">{{ l.total_centavos|brl }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </details>
+  {% endif %}
+
+  {% if dre.a_definir_n %}
+  <div style="background:#2b2416;border:1px solid #f0c05a44;border-radius:8px;padding:.55rem .9rem;margin-top:.7rem;color:#f0c05a;font-size:.78rem;line-height:1.35">
+    ⚠️ <b>{{ dre.a_definir_centavos|brl }}</b> em <b>{{ dre.a_definir_n }}</b> lançamento(s) ainda a classificar <b>não entraram</b> neste DRE.
+    <a href="/painel/financeiro?mes={{ dre.mes }}&natureza=a_definir" style="color:#f0c05a;text-decoration:underline">classificar agora →</a>
+  </div>
+  {% endif %}
+
+  <div class="mut" style="font-size:.75rem;margin-top:.8rem">Relatório do contador: <a href="/painel/empresa/contador.csv?ano={{ dre.ano }}&mes={{ dre.mes }}" style="color:var(--verde-claro)">baixar planilha ({{ '%02d'|format(dre.mes) }}/{{ dre.ano }}) ↓</a></div>
+</div>
+
+{% if a_classificar %}
+<style>
+  .ac-card{border-color:#f0c05a44}
+  .ac-item{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;padding:.7rem 0;border-top:1px solid var(--card-2)}
+  .ac-item:first-of-type{border-top:none}
+  .ac-info{flex:1 1 190px;min-width:0}
+  .ac-info .d{font-size:.9rem}
+  .ac-info .m{font-size:.7rem;color:var(--txt-mut);margin-top:2px}
+  .ac-sel{background:var(--bg);border:1px solid #2a3a33;border-radius:7px;color:var(--txt);font-size:.75rem;padding:.28rem .5rem;font-family:inherit;outline:none;max-width:180px}
+  .ac-sel:focus{border-color:var(--verde)}
+  .ac-sel.miss{border-color:#f0c05a66}
+  .ac-sel.done{border-color:var(--verde-claro)}
+  .ac-ok{color:var(--verde-claro);font-weight:600;font-size:.75rem;white-space:nowrap}
+</style>
+<details class="card larga sec-pc ac-card" id="a-classificar">
+  <summary><span id="ac-titulo" style="color:#f0c05a"><span id="ac-rotulo">⚠️ Lançamentos a classificar</span> <span id="ac-count">({{ a_classificar|length }})</span>
+    <span id="ac-sub" class="mut" style="font-weight:400;font-size:.76rem">· sem conta contábil — fora da DRE</span></span><span class="chev">▾</span></summary>
+  <div class="sec-body">
+  <p class="mut" style="font-size:.75rem;margin:0 0 .6rem">Escolha a conta contábil (e o centro, se quiser) — some daqui e entra na DRE na hora.</p>
+  <div id="ac-list">
+    {% for l in a_classificar %}
+    <div class="ac-item" id="ac-row-{{ l.id }}">
+      <div class="ac-info"><div class="d">{{ l.descricao or l.categoria }}</div>
+        <div class="m">{{ l.data.strftime('%d/%m') }} · {{ l.categoria }} · {{ '−' if l.tipo=='despesa' else '+' }} {{ brl(l.valor) }}</div></div>
+      <select class="ac-sel miss" onchange="acPlano(this, {{ l.id }})" title="conta contábil">
+        <option value="">— conta contábil —</option>
+        {% for g in plano_opcoes %}<optgroup label="{{ g.grupo }} · {{ g.nome }}">{% for c in g.contas %}<option value="{{ c.id }}">{{ c.codigo }} {{ c.nome }}</option>{% endfor %}</optgroup>{% endfor %}
+      </select>
+      {% if centros_ativos %}<select class="ac-sel" onchange="acCentro(this, {{ l.id }})" title="centro de custo (opcional)">
+        <option value="">— centro —</option>
+        {% for c in centros_ativos %}<option value="{{ c.id }}" {% if l.centro_custo_id==c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
+      </select>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <div id="ac-done" style="display:none;color:var(--verde-claro);font-weight:600;padding:.5rem 0">✓ Tudo classificado — a DRE está completa!</div>
+  <script>
+  function acPlano(sel, id){
+    zapFetch('/painel/lancamento/plano-conta', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&plano_conta_id='+encodeURIComponent(sel.value)}).then(function(d){if(!d)return;
+        if(d.ok && sel.value){
+          var row=document.getElementById('ac-row-'+id);
+          if(row && !row.dataset.done){ row.dataset.done='1';
+            row.style.transition='opacity .3s'; row.style.opacity='.45';
+            var b=document.createElement('span'); b.className='ac-ok'; b.textContent='✓ classificado'; row.appendChild(b);
+            var cnt=document.getElementById('ac-count');
+            var n=Math.max(0,(parseInt(cnt.textContent.replace(/\\D/g,''))||1)-1);
+            cnt.textContent='('+n+')';
+            if(n===0){ document.getElementById('ac-list').style.display='none'; document.getElementById('ac-done').style.display='block';
+              // a seção é recolhível: o "✓" do corpo some de vista se o dono fechar. O
+              // aviso mora no RESUMO, então é ele que precisa deixar de gritar aqui.
+              // Troca só o RÓTULO e esconde a contagem — apagar o título inteiro levaria
+              // junto o #ac-count que este mesmo bloco lê a cada classificação.
+              document.getElementById('ac-rotulo').textContent='✓ Tudo classificado';
+              cnt.style.display='none';
+              document.getElementById('ac-sub').style.display='none';
+              document.getElementById('ac-titulo').style.color='var(--verde-claro)';
+              document.getElementById('a-classificar').classList.remove('ac-card');
+            }
+          }
+        }
+      });
+  }
+  function acCentro(sel, id){
+    zapFetch('/painel/lancamento/centro-custo', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&centro_custo_id='+encodeURIComponent(sel.value)}).then(function(d){if(!d)return; if(d.ok){ sel.classList.remove('miss'); sel.classList.add('done'); } });
+  }
+  </script>
+  </div>
+</details>
+{% endif %}
+
+</div>
+<div class="emp-col">
+{#- DESPESAS POR TIPO — o quadro do gestor (325). Fixa, eventual e investimento
+   separados do centro de custo, por correção do dono em 24/09/2026: "tem que
+   ser separado para ter maior clareza no relatório do gestor". Setembro/2026
+   abriu com 91% do valor sem tipo na Prime, então o quadro traz junto a lista
+   pra classificar com um toque — um relatório que abre vazio não ajuda ninguém.
+   A sugestão vem do mesmo fornecedor/descrição e é só sugestão: o toque grava. -#}
+{% if quadro_tipo and quadro_tipo|selectattr('total')|list %}
+<style>
+  .qtd-mes{margin-top:.7rem}
+  .qtd-cab{display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap;font-size:.84rem}
+  .qtd-cab .pct{font-family:var(--mono);font-size:.74rem;color:var(--txt-mut)}
+  .qtd-cab .pct.baixo{color:#f0c05a}
+  .qtd-barra{display:flex;height:10px;border-radius:999px;overflow:hidden;background:var(--card-2,#1b1b1d);margin:.35rem 0 .2rem}
+  .qtd-barra span{display:block;height:100%}
+  .qtd-l{display:flex;justify-content:space-between;gap:.5rem;padding:.28rem 0;border-bottom:1px solid var(--borda);font-size:.8rem}
+  .qtd-l:last-of-type{border-bottom:0}
+  .qtd-l b{font-family:var(--mono);font-weight:500;white-space:nowrap}
+  .qtd-l .pt{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;margin-right:.4rem}
+  .qtd-l i{font-style:normal;color:var(--txt-mut);font-size:.72rem}
+  .qtd-l.sem,.qtd-l.sem b{color:#f0c05a}
+  .qtd-cls{margin-top:.35rem}
+  .qtd-cls summary{cursor:pointer;font-size:.78rem;color:#f0c05a}
+  .qtd-it{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.35rem .6rem;padding:.4rem 0;border-bottom:1px solid var(--borda);font-size:.78rem}
+  .qtd-it .d{flex:1 1 180px;min-width:0;overflow-wrap:anywhere}
+  .qtd-it .d i{display:block;font-style:normal;font-size:.7rem;color:var(--txt-mut)}
+  .qtd-it .bts{display:flex;gap:.3rem;flex-wrap:wrap}
+  .qtd-it button{width:auto;min-height:0;margin:0;border:1px solid #2f2f31;border-radius:999px;padding:.24rem .65rem;font-size:.74rem;background:none;color:var(--txt-mut);cursor:pointer}
+  .qtd-it button.sug{border-style:dashed;border-color:#1E4A3A;color:var(--verde-claro)}
+  .qtd-it button.on{border-style:solid;border-color:#1E4A3A;background:#10241A;color:var(--verde-claro);font-weight:600}
+  .qtd-it.feito{opacity:.55}
+</style>
+<div class="card larga" id="despesas-por-tipo">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.3rem">
+    <strong>Despesas por tipo</strong>
+    <span class="mut" style="font-size:.72rem">fixa · eventual · investimento — separado do centro de custo</span></div>
+  {% for m in quadro_tipo if m.total %}
+  <div class="qtd-mes">
+    <div class="qtd-cab"><b>{{ m.rotulo }}</b><span class="pct{{ ' baixo' if m.pct_com_tipo < 50 }}">{{ m.total|brl }} · {{ m.pct_com_tipo }}% do valor com tipo</span></div>
+    <div class="qtd-barra">{% for x in m.por_tipo %}{% if x.centavos %}<span style="width:{{ (100 * x.centavos / m.total)|round(1) }}%;background:{{ TIPO_DESPESA_COR[x.tipo] }}"></span>{% endif %}{% endfor %}{% if m.sem.centavos %}<span style="width:{{ (100 * m.sem.centavos / m.total)|round(1) }}%;background:#f0c05a"></span>{% endif %}</div>
+    {% for x in m.por_tipo %}<div class="qtd-l"><span><span class="pt" style="background:{{ TIPO_DESPESA_COR[x.tipo] }}"></span>{{ x.rotulo }} <i>· {{ x.n }}</i></span><b>{{ x.centavos|brl }}</b></div>{% endfor %}
+    {% if m.sem.n %}<div class="qtd-l sem"><span><span class="pt" style="background:#f0c05a"></span>Sem tipo <i>· {{ m.sem.n }}</i></span><b>{{ m.sem.centavos|brl }}</b></div>{% endif %}
+    {% set _pend = (quadro_sem_tipo or {}).get((m.ano, m.mes)) or [] %}
+    {% if _pend %}
+    <details class="qtd-cls">
+      <summary>{{ _pend|length }} de {{ m.rotulo.split('/')[0]|lower }} sem tipo — classificar agora</summary>
+      {% for l in _pend %}
+      <div class="qtd-it" id="qtd-{{ l.id }}">
+        <span class="d">{{ l.descricao|e }} — {{ l.valor_centavos|brl }}<i>{{ l.data.strftime('%d/%m') }}{% if l.plano %} · {{ l.plano|e }}{% endif %}{% if l.centro %} · centro {{ l.centro|e }}{% endif %}{% if l.sugestao %} · sugerido: {{ TIPO_DESPESA_ROTULO[l.sugestao] }}{% endif %}</i></span>
+        <span class="bts">{% for tp in TIPOS_DESPESA %}<button type="button" class="{{ 'sug' if l.sugestao == tp }}" data-tipo="{{ tp }}" onclick="qtdTipo(this, {{ l.id }})">{{ TIPO_DESPESA_ROTULO[tp] }}</button>{% endfor %}</span>
+      </div>
+      {% endfor %}
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+  <script>
+  // um toque grava (a mesma rota do Financeiro); a sugestão só destaca
+  function qtdTipo(btn, id){
+    var lin = document.getElementById('qtd-' + id);
+    lin.querySelectorAll('button').forEach(function(b){ b.disabled = true; });
+    zapFetch('/painel/lancamento/tipo-despesa', {method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'lancamento_id=' + id + '&tipo_despesa=' + encodeURIComponent(btn.dataset.tipo)})
+    .then(function(d){
+      lin.querySelectorAll('button').forEach(function(b){ b.disabled = false; b.classList.remove('on'); });
+      if(d && d.ok){ btn.classList.add('on'); lin.classList.add('feito'); }
+    });
+  }
+  </script>
+</div>
+{% endif %}
+
+</div>
+</div>
+<details class="card larga sec-pc" id="folha"{% if folha.itens or erro %} open{% endif %}>
+  <summary><span><strong>Equipe e folha</strong>
+    {% if folha.itens %}<span class="mut" style="font-size:.72rem">folha de {{ '%02d'|format(dre.mes) }}/{{ dre.ano }}: <b style="color:#e07a5f">{{ folha.total_a_pagar_centavos|brl }}</b> · FGTS do mês {{ folha.total_fgts_centavos|brl }} · custo real ≈ {{ folha.custo_real_total_centavos|brl }}</span>{% else %}<span class="mut" style="font-size:.76rem;font-weight:400">· nenhum funcionário cadastrado</span>{% endif %}</span><span class="chev">▾</span></summary>
   {# recusa do excluir (e qualquer outro aviso da aba) — fora do {% if folha.itens %}
      de propósito: excluir o último funcionário esvazia a lista, e a mensagem
      explicando por que a exclusão NÃO aconteceu não pode sumir junto. #}
@@ -5339,6 +5543,90 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   <form method="post" action="/painel/empresa/folha/pagar" style="margin-top:.8rem"><button style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:6px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Pagar folha inteira ✓</button></form>
   {% else %}<div class="mut" style="font-size:.85rem">Nenhum funcionário cadastrado. Adicione acima.</div>{% endif %}
   <div class="mut" style="font-size:.72rem;margin-top:.7rem">ℹ️ Controle gerencial de pessoal — a folha oficial (eSocial, guias, holerite) segue com seu contador, que recebe tudo no relatório mensal.</div>
+</details>
+<section class="card larga emp-conf" id="config">
+  <div class="emp-conf-h">⚙️ Configurações da empresa<span>o que se arruma uma vez e raramente se mexe</span></div>
+<details class="card larga sec-pc" id="plano-contas">
+  <summary><span>📋 Plano de Contas <span class="mut" style="font-weight:400;font-size:.76rem">· padrão do sistema — você liga/desliga o que usa</span></span><span class="chev">▾</span></summary>
+  <div class="sec-body">
+    {% for g in plano_arvore %}
+    <div class="pc-grp"><span class="pc-gcode">{{ g.grupo }}</span><span class="pc-gname">{{ g.nome }}</span><span class="pc-gmeta">{{ g.n_ativas }}/{{ g.n_total }} ativas</span></div>
+    {% for c in g.contas %}
+    <div class="pc-acc{% if not c.habilitada %} off{% endif %}">
+      <span class="pc-code">{{ c.codigo }}</span>
+      <span class="pc-name">{{ c.nome }}</span>
+      <span class="pc-tag {{ c.natureza }}">{{ 'Receita' if c.natureza=='receita' else 'Despesa' }}</span>
+      <form method="post" action="/painel/empresa/plano-contas/habilitar" style="margin:0">
+        <input type="hidden" name="plano_conta_id" value="{{ c.id }}">
+        <input type="hidden" name="ativa" value="{{ '0' if c.habilitada else '1' }}">
+        <button type="submit" class="pc-sw{% if c.habilitada %} on{% endif %}" title="{{ 'desligar' if c.habilitada else 'ligar' }}"><span class="knob"></span></button>
+      </form>
+    </div>
+    {% endfor %}
+    {% endfor %}
+    <div class="mut" style="font-size:.72rem;margin-top:.7rem">A árvore é do sistema (a mesma pra todas as contas). No lançamento só aparecem as contas ligadas.</div>
+  </div>
+</details>
+
+<details class="card larga sec-pc" id="centros-custo">
+  <summary><span>🎯 Centros de Custo <span class="mut" style="font-weight:400;font-size:.76rem">· seus (unidade, filial, projeto) — opcional no lançamento</span></span><span class="chev">▾</span></summary>
+  <div class="sec-body">
+    <form method="post" action="/painel/empresa/centro-custo" class="cc-form">
+      <input name="nome" required placeholder="Nome (ex: Unidade Centro)">
+      <input name="descricao" placeholder="Descrição (opcional)">
+      <button type="submit">+ Novo centro</button>
+    </form>
+    {% if centros %}
+    {% for c in centros %}
+    <div class="cc-item{% if not c.ativo %} off{% endif %}">
+      <div class="cc-info"><b>{{ c.nome }}</b>{% if c.descricao %} <span class="mut">· {{ c.descricao }}</span>{% endif %}{% if not c.ativo %} <span class="mut">(inativo)</span>{% endif %}</div>
+      <div class="cc-acoes">
+        <button type="button" onclick="ccEditToggle(this)" class="cc-btn" style="color:#8a938a">editar ✎</button>
+        {% if c.ativo %}<form method="post" action="/painel/empresa/centro-custo/{{ c.id }}/desativar" style="margin:0"><input type="hidden" name="ativo" value="0"><button class="cc-btn" style="color:#c98080">desativar</button></form>
+        {% else %}<form method="post" action="/painel/empresa/centro-custo/{{ c.id }}/desativar" style="margin:0"><input type="hidden" name="ativo" value="1"><button class="cc-btn" style="color:var(--verde-claro)">reativar</button></form>{% endif %}
+      </div>
+      <form method="post" action="/painel/empresa/centro-custo" class="cc-edit" style="display:none">
+        <input type="hidden" name="centro_id" value="{{ c.id }}">
+        <input name="nome" value="{{ c.nome }}" required placeholder="nome">
+        <input name="descricao" value="{{ c.descricao }}" placeholder="descrição">
+        <button type="submit" style="background:var(--verde);color:var(--sobre-verde);border:0">salvar</button>
+        <button type="button" onclick="ccEditToggle(this)" style="color:#8a938a">cancelar</button>
+      </form>
+    </div>
+    {% endfor %}
+    {% else %}<div class="mut" style="font-size:.85rem">Nenhum centro ainda. Crie acima (unidade, filial, projeto, evento…).</div>{% endif %}
+  </div>
+  <script>
+  function ccEditToggle(btn){var it=btn.closest('.cc-item');var ed=it.querySelector('.cc-edit');ed.style.display=(ed.style.display==='none'||!ed.style.display)?'flex':'none';}
+  </script>
+</details>
+
+<details class="card larga sec-pc" id="avisos">
+  <summary><span>✨ Avisos do sistema <span class="mut" style="font-weight:400;font-size:.76rem">· o que a sua equipe vê quando algo muda</span></span><span class="chev">▾</span></summary>
+  <div class="sec-body">
+    <div class="pc-acc{% if not avisos_na_fila %} off{% endif %}" style="align-items:flex-start">
+      <span class="pc-name" style="flex:1">
+        <b>Avisar a equipe na Fila</b>
+        <span class="mut" style="display:block;font-size:.78rem;margin-top:.15rem">
+          Mostra a faixa de novidade no topo da Fila dos vendedores, com o que mudou
+          no sistema. Só avisos dos últimos {{ dias_na_faixa }} dias — o que passa do
+          prazo para de interromper.
+        </span>
+      </span>
+      <form method="post" action="/painel/empresa/avisos-na-fila" style="margin:0">
+        <input type="hidden" name="ligado" value="{{ '0' if avisos_na_fila else '1' }}">
+        <button type="submit" class="pc-sw{% if avisos_na_fila %} on{% endif %}" title="{{ 'desligar' if avisos_na_fila else 'ligar' }}"><span class="knob"></span></button>
+      </form>
+    </div>
+    <div class="mut" style="font-size:.72rem;margin-top:.7rem">
+      Desligado, <b>nada é apagado</b>: os avisos continuam na tela Novidades do
+      Perfil de cada vendedor e continuam contando como não lidos. O que some é só
+      a interrupção no meio do trabalho.
+    </div>
+  </div>
+</details>
+
+</section>
 </div>
 {% endblock %}"""
 
@@ -11417,6 +11705,69 @@ def _lente_atrasadas(tit_blocos: list[dict]) -> dict:
     return {"n": n, "centavos": centavos}
 
 
+def _empresa_resumo(titulos: list[dict], planej: dict | None, dre: dict,
+                    n_a_classificar: int, quadro_tipo: list[dict] | None,
+                    n_aguardando: int, pode_liberar: bool) -> dict:
+    """O TOPO DA ABA EMPRESA: os quatro números que decidem o dia e as pendências.
+
+    Pedido do dono em 24/09/2026 ("vamos dar uma atenção pro layout da aba
+    empresas"), mockup aprovado em docs/mockups/empresa_layout.html. Antes a aba
+    abria com Plano de Contas, Avisos e Centros de Custo — configuração que se
+    mexe uma vez — e as contas a pagar eram o 9º bloco de 11.
+
+    NENHUM NÚMERO NOVO. Cada cartão repete um número que a própria aba já mostra
+    mais abaixo, pela MESMA regra, pra que o topo e a seção nunca discordem:
+      * "atrasadas" é a da pílula ⚠️ Atrasadas (`_lente_atrasadas`): só A PAGAR;
+      * o caixa é o do Planejamento da semana, com `sobra` None sem saldo
+        informado (o cartão pede o saldo em vez de anunciar um rombo contra zero);
+      * o resultado é o do DRE do mês.
+
+    Pendência zerada NÃO entra: chip "0 esperando" é ruído, e a lista vazia é o
+    sinal de que não falta nada. Pura, pra o teste exercitar sem banco.
+    """
+    def _soma(itens):
+        return sum(int(t.get("valor_centavos") or 0) for t in itens)
+
+    pagar = [t for t in titulos if t.get("tipo") == "pagar"]
+    receber = [t for t in titulos if t.get("tipo") != "pagar"]
+    pagar_atr = [t for t in pagar if t.get("atrasado")]
+    receber_atr = [t for t in receber if t.get("atrasado")]
+    pend = []
+    if n_aguardando:
+        pend.append({
+            "texto": (f"⏳ {n_aguardando} esperando sua liberação" if pode_liberar
+                      else f"⏳ {n_aguardando} esperando o dono liberar"),
+            "href": "#titulos"})
+    if n_a_classificar:
+        pend.append({"texto": f"{n_a_classificar} lançamento"
+                              f"{'s' if n_a_classificar != 1 else ''} sem conta contábil",
+                     "href": "#a-classificar"})
+    if dre.get("a_definir_n"):
+        n = int(dre["a_definir_n"])
+        pend.append({"texto": f"{n} lançamento{'s' if n != 1 else ''} fora da DRE",
+                     "href": f"/painel/financeiro?mes={dre['mes']}&natureza=a_definir"})
+    mes_tipo = (quadro_tipo or [None])[-1]
+    if mes_tipo and mes_tipo.get("sem", {}).get("n") and mes_tipo.get("total"):
+        n = int(mes_tipo["sem"]["n"])
+        pct = round(100 * mes_tipo["sem"]["centavos"] / mes_tipo["total"])
+        pend.append({"texto": f"{n} despesa{'s' if n != 1 else ''} sem tipo · {pct}% do valor",
+                     "href": "#despesas-por-tipo"})
+    return {
+        "pagar_n": len(pagar), "pagar_centavos": _soma(pagar),
+        "pagar_atr_n": len(pagar_atr), "pagar_atr_centavos": _soma(pagar_atr),
+        "receber_n": len(receber), "receber_centavos": _soma(receber),
+        "receber_atr_n": len(receber_atr), "receber_atr_centavos": _soma(receber_atr),
+        "saldo_centavos": (planej or {}).get("saldo_centavos"),
+        "sobra_centavos": (planej or {}).get("sobra_centavos"),
+        "saldo_velho": bool((planej or {}).get("algum_velho")),
+        "tem_planej": planej is not None,
+        "resultado_centavos": int(dre.get("resultado_centavos") or 0),
+        "receitas_centavos": int(dre.get("receitas_centavos") or 0),
+        "despesas_centavos": int(dre.get("despesas_centavos") or 0),
+        "pendencias": pend,
+    }
+
+
 @router.get("/painel/empresa", response_class=HTMLResponse)
 def painel_empresa(request: Request):
     """Visão geral do módulo Empresa (PJ). Só pra conta com o módulo ativo."""
@@ -11559,6 +11910,13 @@ def painel_empresa(request: Request):
     except Exception:  # noqa: BLE001
         log.warning("quadro de despesas por tipo falhou", exc_info=True)
         quadro_tipo, quadro_sem_tipo = None, {}
+    # O TOPO DA ABA (24/09/2026): os quatro números e as pendências, pela mesma
+    # regra das seções de onde vêm — ver `_empresa_resumo`.
+    pode_liberar = _so_o_dono(request, conta[0])
+    n_aguardando = sum(1 for t in titulos
+                       if t["tipo"] == "pagar" and t.get("aprovacao") == "aguardando")
+    resumo = _empresa_resumo(titulos, planej, dre, len(a_classificar or []),
+                             quadro_tipo, n_aguardando, pode_liberar)
     from finance import recibo as _rb
     from finance import recebido_diferente as _rd
     recibos_mapa = _rb.mapa(pool, conta[0])
@@ -11640,16 +11998,15 @@ def painel_empresa(request: Request):
                    # SÓ O DONO LIBERA conta a pagar (capacidade `gerir`). Até
                    # 03/09/2026 esta tela não olhava papel nenhum: quem entrava,
                    # lançava e dava baixa em tudo.
-                   pode_liberar=_so_o_dono(request, conta[0]),
-                   n_aguardando=sum(1 for t in titulos
-                                    if t["tipo"] == "pagar"
-                                    and t.get("aprovacao") == "aguardando"),
+                   pode_liberar=pode_liberar,
+                   n_aguardando=n_aguardando,
                    recibos_mapa=recibos_mapa, recebido_flash=recebido_flash,
                    alvos_credito=alvos_credito, creditos_pendentes=creditos_pendentes,
                    quadro_tipo=quadro_tipo, quadro_sem_tipo=quadro_sem_tipo,
                    ajustes=ajustes,
                    recibo_flash=recibo_flash,
-                   emp_aviso=request.session.pop("emp_aviso", None))
+                   emp_aviso=request.session.pop("emp_aviso", None),
+                   resumo=resumo)
 
 
 @router.get("/painel/produtos")

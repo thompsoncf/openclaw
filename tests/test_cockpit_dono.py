@@ -45,7 +45,8 @@ def pool():
         mig = Path(__file__).resolve().parents[1] / "db" / "migracoes"
         for nome in ("209_raio_x_dono.sql", "213_perda_motivo_por_perfil.sql",
                      "235_motivos_de_perda_da_conta.sql",
-                     "328_perda_lida_da_conversa.sql"):
+                     "254_funil_semeado_de.sql",
+                     "328_perda_lida_da_conversa.sql", "331_perda_lida_detalhe.sql"):
             c.execute((mig / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -688,14 +689,18 @@ def test_a_tela_da_visao_desenha_tudo(pool, monkeypatch):
         conta, v1, ab, an = _prime(c, "Tela")
         _lead(c, conta, v1, "contatado", evento_tipo="casamento")
         _lead(c, conta, v1, "perdido", perda_lida="nao_era_cliente", perda_em=datetime.now(timezone.utc))
-    req = _Req(p="periodo", de="2026-09-10", ate="2026-09-23")
+    # o período termina HOJE: com datas fixas, o lead criado "agora" cai fora da
+    # janela no dia seguinte, e o teste passaria a falhar sozinho (24/09/2026)
+    hoje = datetime.now(cd._brt()).date()
+    de, ate = hoje - timedelta(days=13), hoje
+    req = _Req(p="periodo", de=de.isoformat(), ate=ate.isoformat())
     html = pc._dono_visao(req, conta).body.decode()
-    assert "10–23 set ▾" in html                            # a pílula vira o período
+    assert cd.rotulo_periodo(de, ate) + " ▾" in html        # a pílula vira o período
     assert "CONTRATO ASSINADO" in html and "Perdido" in html
     for bloco in ("Leads por dia", "Quando chegam", "Por que perdemos"):
         assert bloco in html, bloco
     assert "Na carteira" in html and "Em atendimento" not in html
-    assert req.session["ck_vis_p"] == "periodo" and req.session["ck_vis_de"] == "2026-09-10"
+    assert req.session["ck_vis_p"] == "periodo" and req.session["ck_vis_de"] == de.isoformat()
 
 
 def test_o_periodo_sem_datas_abre_o_painel_de_escolha(pool, monkeypatch):
@@ -710,3 +715,244 @@ def test_o_periodo_sem_datas_abre_o_painel_de_escolha(pool, monkeypatch):
     assert html.count("type=date") == 2
     for atalho in ("Ontem", "Últimos 7 dias", "Últimos 30 dias", "Mês passado"):
         assert atalho not in html, atalho
+
+
+# ======================================================= a leitura v2 (331, 24/09/2026)
+
+def test_a_leitura_diz_onde_parou_e_o_que_queria_quem_nao_era_cliente(monkeypatch):
+    motivos = [("nao_respondeu", "Não respondeu"), ("outro", "Outro")]
+    monkeypatch.setattr(ml, "_perguntar", lambda s, p: '{"motivo":"nao_era_cliente","trecho":"vcs contratam?",'
+                                                       '"parou":"antes_do_preco","quem":"emprego"}')
+    r = ml.ler(motivos, [("in", "vcs contratam?")])
+    assert r == {"motivo": "nao_era_cliente", "trecho": "vcs contratam?", "parou": "antes_do_preco",
+                 "quem": "emprego"}
+    # "quem" só vale pra quem não era cliente; chave inventada vira vazio
+    monkeypatch.setattr(ml, "_perguntar", lambda s, p: '{"motivo":"nao_respondeu","parou":"no_meio","quem":"emprego"}')
+    r = ml.ler(motivos, [("in", "oi")])
+    assert r["parou"] == "" and r["quem"] == ""
+    # a forma antiga continua: (motivo, trecho)
+    assert ml.classificar(motivos, [("in", "oi")]) == ("nao_respondeu", "")
+
+
+def test_o_prompt_pede_o_ponto_e_o_que_a_pessoa_queria():
+    system, _ = ml._prompt([("outro", "Outro")], [("in", "oi")], "eventos")
+    for chave in ("antes_do_preco", "depois_do_preco", "depois_da_proposta", "emprego", "fornecedor"):
+        assert chave in system, chave
+
+
+def test_o_lido_na_versao_1_e_relido_uma_vez_depois_de_uma_hora(pool, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "teste")
+    with pool.connection() as c:
+        conta, v1, ab, an = _prime(c, "Versao")
+        lid = _lead(c, conta, v1, "perdido", perda_em=datetime.now(timezone.utc) - timedelta(days=3),
+                    perda_lida="nao_respondeu", perda_lida_versao=1,
+                    perda_lida_em=datetime.now(timezone.utc) - timedelta(hours=2))
+        _conversa_do_lead(c, conta, lid, [("out", "O valor é R$ 9.800"), ("in", "vou ver")])
+    monkeypatch.setattr(ml, "_perguntar", lambda s, p: '{"motivo":"nao_respondeu","parou":"depois_do_preco"}')
+    ml.rodar(pool, limite=50)
+    with pool.connection() as c:
+        r = c.execute("select perda_lida, perda_lida_parou, perda_lida_versao from prospeccao where id=%s",
+                      (lid,)).fetchone()
+    assert r == ("nao_respondeu", "depois_do_preco", ml.VERSAO)
+    chamou = []
+    monkeypatch.setattr(ml, "_perguntar", lambda s, p: chamou.append(1) or '{"motivo":"outro"}')
+    ml.rodar(pool, limite=50)
+    with pool.connection() as c:
+        assert c.execute("select perda_lida from prospeccao where id=%s", (lid,)).fetchone()[0] == "nao_respondeu"
+
+
+# ======================================================= por que perdemos, com link
+
+def test_cada_motivo_abre_os_leads_dele_com_a_frase_e_quem_marcou(pool):
+    agora = datetime.now(timezone.utc)
+    with pool.connection() as c:
+        conta, v1, ab, an = _prime(c, "Lista")
+        a = _lead(c, conta, v1, "perdido", contato="Ana", evento_tipo="casamento", evento_convidados=80,
+                  evento_em=date(2026, 11, 19), perda_motivo="data_indisponivel", perda_em=agora,
+                  perda_lida="data_indisponivel", perda_lida_trecho="Só dá certo mesmo dia 19")
+        b = _lead(c, conta, v1, "perdido", contato="Bia", evento_em=date(2027, 1, 23), perda_em=agora,
+                  perda_lida="data_indisponivel", perda_lida_trecho="só falta a data")
+        _lead(c, conta, v1, "perdido", contato="Caio", perda_motivo="achou_caro", perda_em=agora)
+    lst = cd.perdidos(pool, conta, "data_indisponivel", "mes")
+    assert lst["total"] == 2 and {i["nome"] for i in lst["itens"]} == {"Ana", "Bia"}
+    por_nome = {i["nome"]: i for i in lst["itens"]}
+    assert por_nome["Ana"]["lido"] is False and por_nome["Bia"]["lido"] is True
+    assert por_nome["Ana"]["trecho"] == "Só dá certo mesmo dia 19"
+    assert por_nome["Ana"]["sub"] == "Casamento · 80 convidados"
+    # a agenda de procura: as datas que pediram, com o dia da semana
+    chips = lst["datas"]["chips"]
+    assert [(x["dia"], x["data"]) for x in chips] == [("qui", date(2026, 11, 19)), ("sáb", date(2027, 1, 23))]
+    assert lst["datas"]["usa_lista"] is False       # sem "festas por dia", sem lista de espera
+    assert a and b
+
+
+def test_a_lista_bate_com_o_numero_da_linha(pool):
+    """O número do "Por que perdemos" e o tamanho da lista que ele abre saem da
+    MESMA regra — se divergirem, o gestor perde a confiança nos dois."""
+    agora = datetime.now(timezone.utc)
+    with pool.connection() as c:
+        conta, v1, ab, an = _prime(c, "Bate")
+        for _ in range(3):
+            _lead(c, conta, v1, "perdido", perda_motivo="outro", perda_lida="achou_caro", perda_em=agora)
+        _lead(c, conta, v1, "perdido", perda_motivo="achou_caro", perda_em=agora)
+        _lead(c, conta, v1, "perdido", perda_em=agora)          # ainda não lido
+    pq = {i["chave"]: i["n"] for i in cd.por_que_perdemos(pool, conta, "mes")["itens"]}
+    for chave, n in pq.items():
+        assert cd.perdidos(pool, conta, chave, "mes")["total"] == n, chave
+
+
+def test_quem_nao_vende_festa_nao_ve_agenda_de_datas(pool):
+    """Regra 6: a agenda de procura é de quem vende data."""
+    with pool.connection() as c:
+        conta, *_ = _seed(c, "Consultoria")
+        _lead(c, conta, None, "perdido", evento_em=date(2026, 12, 5), perda_motivo="data_indisponivel",
+              perda_em=datetime.now(timezone.utc))
+    lst = cd.perdidos(pool, conta, "data_indisponivel", "mes")
+    assert lst["perfil"] != "eventos" and lst["datas"] is None
+
+
+def test_o_gestor_corrige_o_motivo_lido(pool):
+    with pool.connection() as c:
+        conta, v1, ab, an = _prime(c, "Corrige")
+        lid = _lead(c, conta, v1, "perdido", perda_lida="achou_caro", perda_em=datetime.now(timezone.utc))
+    assert cd.corrigir_motivo(pool, conta, lid, "inventado", 7) is False     # só motivo da lista
+    assert cd.corrigir_motivo(pool, conta, lid, "fechou_concorrente", 7) is True
+    with pool.connection() as c:
+        r = c.execute("select perda_motivo, perda_lida, perda_corrigida_por from prospeccao where id=%s",
+                      (lid,)).fetchone()
+    assert r == ("fechou_concorrente", "achou_caro", 7)      # a leitura fica como registro
+    # lead que voltou pro funil não ganha motivo de perda
+    with pool.connection() as c:
+        c.execute("update prospeccao set status='contatado' where id=%s", (lid,))
+        c.commit()
+    assert cd.corrigir_motivo(pool, conta, lid, "achou_caro", 7) is False
+    # nem de outra conta
+    with pool.connection() as c:
+        outra, *_ = _seed(c, "Outra")
+    assert cd.corrigir_motivo(pool, outra, lid, "achou_caro", 7) is False
+
+
+def test_a_lista_de_espera_conta_o_perdido_que_a_leitura_achou(pool, monkeypatch):
+    """O cliente que disse "só falta a data" e ficou sem motivo marcado também é
+    avisado quando a data abrir — antes, só o motivo do vendedor valia."""
+    from finance import lista_espera as le
+    with pool.connection() as c:
+        conta, v1, ab, an = _prime(c, "Espera")
+        lido = _lead(c, conta, v1, "perdido", perda_lida="data_indisponivel")
+        marcado = _lead(c, conta, v1, "perdido", perda_motivo="data_indisponivel", perda_lida="achou_caro")
+        outro = _lead(c, conta, v1, "perdido", perda_motivo="achou_caro", perda_lida="data_indisponivel")
+    assert le._perdido_pela_data(pool, conta, lido) is True
+    assert le._perdido_pela_data(pool, conta, marcado) is True        # o do vendedor vale mais
+    assert le._perdido_pela_data(pool, conta, outro) is False
+    assert le._perdido_pela_data(pool, conta + 999, lido) is False     # nunca de outra conta
+
+
+# ======================================================= anúncios
+
+def _anuncios_schema(c):
+    c.execute("alter table orcamentos add column if not exists sinal_pago_em timestamptz")
+    c.commit()
+
+
+def _lead_de_anuncio(c, conta, vend, codigo, status="contatado", criado=None, **kw):
+    lid = _lead(c, conta, vend, status, origem_codigo=codigo, **kw)
+    if criado:
+        c.execute("update prospeccao set criado_em=%s where id=%s", (criado, lid))
+    c.execute("insert into conversas (conta_id, prospeccao_id, canal, criado_em) values (%s,%s,'whatsapp',%s)",
+              (conta, lid, criado or datetime.now(timezone.utc)))
+    c.commit()
+    return lid
+
+
+def test_por_anuncio_quem_nao_era_cliente_e_quem_chegou_fora_do_horario(pool):
+    from finance import origens as og
+    br = timezone(timedelta(hours=-3))
+    terca_10h = datetime(2026, 9, 22, 10, 0, tzinfo=br)
+    terca_23h = datetime(2026, 9, 22, 23, 0, tzinfo=br)
+    with pool.connection() as c:
+        _anuncios_schema(c)
+        conta, v1, ab, an = _prime(c, "Anuncios")
+        _lead_de_anuncio(c, conta, v1, "ANIV-01", "perdido", terca_23h, perda_lida="nao_era_cliente",
+                         perda_lida_quem="emprego", evento_tipo="aniversário", evento_convidados=40)
+        _lead_de_anuncio(c, conta, v1, "ANIV-01", "perdido", terca_10h, perda_motivo="data_indisponivel")
+        _lead_de_anuncio(c, conta, v1, "ANIV-01", "contatado", terca_10h, evento_tipo="aniversário")
+        _lead_de_anuncio(c, conta, v1, None, "contatado", terca_10h)
+    det = og.detalhes_por_codigo(pool, conta, date(2026, 9, 1), date(2026, 9, 30), "eventos")
+    x = det["ANIV-01"]
+    assert x["leads"] == 3 and x["nao_cliente"] == 1 and x["nao_cliente_pct"] == 33
+    assert x["fora"] == 1 and x["fora_pct"] == 33           # 23h de terça: fora das 8h–19h
+    assert {i["chave"]: i["n"] for i in x["perdemos"]} == {"nao_era_cliente": 1, "data_indisponivel": 1}
+    assert [i["rotulo"] for i in x["quem"]] == ["Procurava emprego"]
+    assert x["pedem"].startswith("Aniversário 2")
+    assert det[None]["leads"] == 1                          # a faixa "sem código"
+
+
+def test_a_aba_anuncios_desenha_os_cartoes_e_linka_o_porque(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    monkeypatch.setattr(pc, "_hdr_dono", lambda *a, **k: "")
+    agora = datetime.now(timezone.utc)
+    with pool.connection() as c:
+        _anuncios_schema(c)
+        conta, v1, ab, an = _prime(c, "AbaAnuncios")
+        _lead_de_anuncio(c, conta, v1, "CAS-VID-01", "perdido", agora, perda_lida="nao_era_cliente")
+        _lead_de_anuncio(c, conta, v1, "CAS-VID-01", "contatado", agora)
+    req = _Req(p="mes")
+    req.session.update(conta_id=conta, papel="dono")
+    html = pc.cockpit_anuncios(req).body.decode()
+    assert "CAS-VID-01" in html and "1 não era cliente · 50%" in html
+    assert "/cockpit/perdidos?motivo=nao_era_cliente" in html and "codigo=CAS-VID-01" in html
+    assert "data-aba=anuncios" in html                       # a aba nova, acesa
+
+
+def test_a_tela_de_perdidos_abre_e_so_corrige_o_que_foi_lido(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    monkeypatch.setattr(pc, "_hdr_dono", lambda *a, **k: "")
+    agora = datetime.now(timezone.utc)
+    with pool.connection() as c:
+        conta, v1, ab, an = _prime(c, "TelaPerdidos")
+        _lead(c, conta, v1, "perdido", contato="Lida", perda_lida="achou_caro",
+              perda_lida_trecho="é quase 10 mil?", perda_lida_parou="depois_do_preco", perda_em=agora)
+        _lead(c, conta, v1, "perdido", contato="Marcada", perda_motivo="achou_caro", perda_em=agora)
+
+    class _U:
+        path, query = "/cockpit/perdidos", "motivo=achou_caro"
+    req = _Req(p="mes")
+    req.session.update(conta_id=conta, papel="gestor")
+    req.url = _U()
+    html = pc.cockpit_perdidos(req, motivo="achou_caro").body.decode()
+    assert "“é quase 10 mil?”" in html and "Parou depois do preço" in html
+    assert html.count("corrigir o motivo") == 1              # só o lido
+    assert "Abrir conversa" in html
+
+
+def test_a_visao_linka_cada_motivo(pool, monkeypatch):
+    from web import painel_cockpit as pc
+    monkeypatch.setattr(pc, "get_pool", lambda: pool)
+    monkeypatch.setattr(pc, "_hdr_dono", lambda *a, **k: "")
+    with pool.connection() as c:
+        conta, v1, ab, an = _prime(c, "VisaoLink")
+        _lead(c, conta, v1, "perdido", perda_lida="achou_caro", perda_em=datetime.now(timezone.utc))
+    html = pc._dono_visao(_Req(p="mes"), conta).body.decode()
+    assert "/cockpit/perdidos?motivo=achou_caro&amp;p=mes" in html or "/cockpit/perdidos?motivo=achou_caro&p=mes" in html
+
+
+def test_a_lista_do_anuncio_bate_com_a_barra_dele(pool):
+    """Mesma regra do teste da Visão, agora dentro de um anúncio: a barra e a lista
+    que ela abre saem do mesmo universo (conversa aberta no período)."""
+    from finance import origens as og
+    agora = datetime.now(timezone.utc)
+    with pool.connection() as c:
+        _anuncios_schema(c)
+        conta, v1, ab, an = _prime(c, "BateAnuncio")
+        for _ in range(3):
+            _lead_de_anuncio(c, conta, v1, "FORM-01", "perdido", agora, perda_lida="nao_era_cliente")
+        _lead_de_anuncio(c, conta, v1, "FORM-01", "perdido", agora, perda_motivo="achou_caro")
+        _lead_de_anuncio(c, conta, v1, None, "perdido", agora, perda_lida="nao_era_cliente")
+    ini, fim = cd._range("mes")
+    det = og.detalhes_por_codigo(pool, conta, cd._dia_br(ini), cd._dia_br(fim - timedelta(minutes=1)), "eventos")
+    for codigo, x in det.items():
+        for barra in x["perdemos"]:
+            lst = cd.perdidos(pool, conta, barra["chave"], "mes", codigo=codigo or "")
+            assert lst["total"] == barra["n"], (codigo, barra["chave"])

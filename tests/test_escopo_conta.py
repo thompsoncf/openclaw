@@ -306,7 +306,6 @@ BASELINE: set[str] = {
     "finance/janela.py:catalogo_produtos",
     "finance/janela.py:cesta_semana",
     "finance/lista_espera.py:lista_espera_data",
-    "finance/lista_espera.py:prospeccao",
     "finance/livro_caixa.py:lancamentos",
     "finance/livro_caixa.py:parcelas_cartao",
     "finance/livro_caixa.py:precos_observados",

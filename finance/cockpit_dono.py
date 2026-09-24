@@ -9,9 +9,12 @@ orcamentos/eventos_agenda). Sem tabela nova.
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta, timezone
 
 from finance import funil_regua as _fr
+
+_log_cd = logging.getLogger("finance.cockpit_dono")
 
 # O painel do dono conta venda pela FASE da etapa, não pelo literal 'ganho' — senão
 # o lead que anda pra uma etapa de pós-venda sai do "ganhos do mês" como se a venda
@@ -542,6 +545,195 @@ def por_que_perdemos(pool, conta_id: int, periodo: str = "semana", de=None, ate=
     return {"total": len(linhas), "itens": itens, "lidos": lidos,
             "nao_cliente": cont.get("nao_era_cliente", 0), "perfil": perfil,
             "dias_janela": (fim - ini).days}
+
+
+#: O motivo que vale pra cada lead perdido, na MESMA precedência do
+#: `por_que_perdemos`: o do vendedor; onde ele não disse nada (ou disse "Outro"),
+#: o que a conversa disse; e, sem nenhum dos dois, "Ainda não lido".
+_MOTIVO_EFETIVO = """(case when coalesce(p.perda_motivo,'') not in ('','outro') then p.perda_motivo
+                          when p.perda_lida is not null then p.perda_lida
+                          when coalesce(p.perda_motivo,'') <> '' then p.perda_motivo
+                          else '_nao_lido' end)"""
+
+
+def _sub_do_lead(perfil: str, tipo, convidados, segmento, porte) -> str:
+    """A linha de baixo do nome, no vocabulário do nicho (regra 6)."""
+    if perfil == "eventos":
+        partes = [(tipo or "").strip().capitalize() or "Evento"]
+        if convidados:
+            partes.append(f"{int(convidados)} convidados")
+        return " · ".join(partes)
+    return " · ".join(x for x in ((segmento or "").strip(), (porte or "").strip()) if x)
+
+
+def perdidos(pool, conta_id: int, motivo: str, periodo: str = "semana", de=None, ate=None,
+             codigo: str | None = None) -> dict | None:
+    """Os leads perdidos por UM motivo — o que abre ao tocar numa linha do "Por que
+    perdemos". Pedido do dono em 24/09/2026: "colocar o link com por que perdemos
+    o lead".
+
+    Duas portas, duas janelas:
+      * da Visão (`codigo` None): a MESMA janela do bloco, pela data da perda — o
+        número da linha e o tamanho da lista batem;
+      * da aba Anúncios (`codigo` = o código, ou "" pro "sem código"): os leads que
+        AQUELE anúncio trouxe no período, pela data de entrada.
+
+    Cada lead vem com a frase do cliente (quando a leitura achou uma), quem decidiu
+    o motivo (a equipe ou 💬 a leitura), em que ponto a conversa parou e, pra quem
+    não era cliente, o que a pessoa queria. Motivo "data indisponível" em conta de
+    festa traz também as DATAS que pediram — a agenda de procura."""
+    from finance import motivo_lido as _ml
+    motivo = (motivo or "").strip()
+    if not motivo:
+        return None
+    if codigo is None:
+        ini, fim = _janela_minima(*_range(periodo, de, ate), JANELA_MINIMA_DIAS)
+        filtro = "and coalesce(p.perda_em, p.atualizado_em) >= %s and coalesce(p.perda_em, p.atualizado_em) < %s"
+        args: tuple = (ini, fim)
+    else:
+        # o MESMO universo da aba Anúncios (`origens.detalhes_por_codigo`): lead com
+        # conversa de WhatsApp aberta no período, em dia de Brasília. Assim a barra
+        # "Não era cliente 3" abre uma lista de 3, e não de 2 ou 4.
+        ini, fim = _range(periodo, de, ate)
+        filtro = ("and exists (select 1 from conversas cv where cv.prospeccao_id = p.id "
+                  "and cv.conta_id = p.conta_id and cv.canal = 'whatsapp' "
+                  "and (cv.criado_em at time zone 'America/Sao_Paulo')::date between %s and %s) "
+                  "and coalesce(nullif(btrim(p.origem_codigo), ''), '') = %s")
+        args = (_dia_br(ini), _dia_br(fim - timedelta(minutes=1)), (codigo or "").strip())
+    with pool.connection() as c:
+        perfil = _fr.perfil_da_conta(c, conta_id)
+        if perfil == "produto":
+            return None
+        rot = _ml.rotulos(c, conta_id, perfil)
+        opcoes = _ml.motivos_da_conta(c, conta_id, perfil)
+        try:
+            with c.transaction():
+                linhas = c.execute(
+                    f"""select p.id, coalesce(nullif(p.contato,''), nullif(p.empresa,''), 'lead'),
+                               p.evento_tipo, p.evento_convidados, p.segmento, p.porte, p.evento_em,
+                               p.perda_lida_trecho,
+                               coalesce(p.perda_motivo,'') not in ('','outro') as da_equipe,
+                               p.perda_corrigida_em is not null as corrigido,
+                               p.perda_lida_parou, p.perda_lida_quem,
+                               coalesce(p.perda_em, p.atualizado_em),
+                               coalesce(nullif(m.nome,''), '')
+                          from prospeccao p
+                          left join membros m on m.id = p.vendedor_id and m.conta_id = p.conta_id
+                         where p.conta_id=%s and p.status='perdido' {filtro}
+                           and {_MOTIVO_EFETIVO} = %s
+                         order by coalesce(p.perda_em, p.atualizado_em) desc
+                         limit 200""", (conta_id, *args, motivo)).fetchall()
+        except Exception:  # noqa: BLE001 — base sem a 328/331: lista vazia, tela de pé
+            _log_cd.warning("perdidos: consulta falhou na conta %s", conta_id, exc_info=True)
+            linhas = []
+    itens = []
+    for (lid, nome, tipo, conv, seg, porte, em, trecho, da_equipe, corrigido,
+         parou, quem, perdido, vend) in linhas:
+        itens.append({
+            "id": lid, "nome": nome, "sub": _sub_do_lead(perfil, tipo, conv, seg, porte),
+            "evento_em": em, "dia": _DIAS_CURTOS[em.weekday()] if em else "",
+            "trecho": trecho or "", "lido": not da_equipe, "corrigido": bool(corrigido),
+            "parou": _ml.PAROU.get(parou or "", ""), "quem": _ml.QUEM.get(quem or "", ""),
+            "perdido_em": _dia_br(perdido) if perdido else None, "vendedor": vend,
+        })
+    rotulo = ("Ainda não lido" if motivo == "_nao_lido" else rot.get(motivo)
+              or motivo.replace("_", " ").capitalize())
+    out = {"motivo": motivo, "rotulo": rotulo, "total": len(itens), "itens": itens,
+           "perfil": perfil, "opcoes": opcoes, "datas": None,
+           "de": _dia_br(ini), "ate": _dia_br(fim - timedelta(minutes=1))}
+    # o resumo do detalhe: em que ponto pararam e, de quem não era cliente, o que queria
+    out["parou"] = _contagem(i["parou"] for i in itens)
+    out["quem"] = _contagem(i["quem"] for i in itens)
+    if motivo == "data_indisponivel" and perfil == "eventos":
+        out["datas"] = _datas_procuradas(pool, conta_id, itens)
+    return out
+
+
+def _contagem(rotulos) -> list[tuple[str, int]]:
+    cont: dict = {}
+    for r in rotulos:
+        if r:
+            cont[r] = cont.get(r, 0) + 1
+    return sorted(cont.items(), key=lambda x: -x[1])
+
+
+def _datas_procuradas(pool, conta_id: int, itens: list[dict]) -> dict | None:
+    """As datas que pediram e a casa não tinha — a agenda de procura.
+
+    Medido na Prime (1 a 23/09/2026): data indisponível foi o motivo nº 1, 7 de 23,
+    e os 7 disseram a data; 4 eram sábado e 3 caíam entre 28/11 e 19/12. É demanda
+    que existe e a casa não atendeu: serve pro preço, pra oferecer segunda data e pro
+    tráfego não puxar datas já tomadas.
+
+    Quando a conta usa a lista de espera (`contas.festas_por_dia`), cada data diz se
+    continua tomada ou se ABRIU — e quem esperava por ela é avisado pela própria lista.
+    """
+    from finance import lista_espera as _le
+    datas = sorted({i["evento_em"] for i in itens if i["evento_em"]})
+    if not datas:
+        return None
+    hoje = datetime.now(_brt()).date()
+    limite = _le.festas_por_dia(pool, conta_id)
+    ocup: dict = {}
+    if limite is not None:
+        futuras = [d for d in datas if d >= hoje]
+        if futuras:
+            try:
+                with pool.connection() as c:
+                    ocup = _le._ocupacao(c, conta_id, min(futuras), max(futuras))
+            except Exception:  # noqa: BLE001
+                ocup = {}
+    chips = []
+    for d in datas:
+        passou = d < hoje
+        situacao = None
+        if limite is not None and not passou:
+            situacao = "tomada" if ocup.get(d, 0) >= limite else "abriu"
+        chips.append({"data": d, "dia": _DIAS_CURTOS[d.weekday()], "passou": passou,
+                      "situacao": situacao})
+    por_dia: dict = {}
+    por_mes: dict = {}
+    for d in datas:
+        por_dia[d.weekday()] = por_dia.get(d.weekday(), 0) + 1
+        por_mes[(d.year, d.month)] = por_mes.get((d.year, d.month), 0) + 1
+    wd, n_wd = max(por_dia.items(), key=lambda x: (x[1], x[0]))
+    (ano, mes), n_mes = max(por_mes.items(), key=lambda x: (x[1], -x[0][0], -x[0][1]))
+    resumo = []
+    if n_wd > 1:
+        resumo.append(f"{n_wd} das {len(datas)} eram {_DIAS_LONGOS[wd]}")
+    if n_mes > 1:
+        resumo.append(f"{_MESES_CURTOS[mes - 1]}: {n_mes} pedidos")
+    return {"chips": chips, "resumo": " · ".join(resumo), "usa_lista": limite is not None,
+            "abriram": sum(1 for x in chips if x["situacao"] == "abriu")}
+
+
+_DIAS_LONGOS = ("segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo")
+
+
+def corrigir_motivo(pool, conta_id: int, lead_id: int, motivo: str,
+                    membro_id: int | None = None) -> bool:
+    """O gestor corrige o motivo que a leitura da conversa deu. Aprovado pelo dono
+    em 24/09/2026 ("o gestor pode corrigir o motivo? — sim").
+
+    A correção grava em `perda_motivo`, e daí vale como se a equipe tivesse
+    marcado: o número da tela deixa de depender da leitura errada. `perda_lida`
+    fica como estava — é o registro do que a leitura disse. Só aceita motivo da
+    lista da conta, e só em lead que continua perdido."""
+    motivo = (motivo or "").strip()
+    with pool.connection() as c:
+        perfil = _fr.perfil_da_conta(c, conta_id)
+        from finance import funil_perda as _fp
+        validos = {m["chave"] for m in _fp.motivos(c, conta_id, perfil)}
+        if motivo not in validos:
+            return False
+        r = c.execute(
+            """update prospeccao set perda_motivo=%s, perda_corrigida_por=%s,
+                      perda_corrigida_em=now()
+                where id=%s and conta_id=%s and status='perdido'""",
+            (motivo, membro_id, lead_id, conta_id))
+        ok = bool(r.rowcount)
+        c.commit()
+    return ok
 
 
 # ------------------------------------------------------------------ PLACAR

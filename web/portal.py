@@ -429,7 +429,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
       NÃO alcança Prospecção: o convidado da agência, que entra por convite, cai
       aqui como página inicial e não tem mais nada. Sem esta linha ele fica com o
       menu vazio na única tela que tem. -#}
-  {% if tem_pj and caps.origens and not caps.vendas and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Origens') }}{% endif %}
+  {% if tem_pj and caps.origens and not caps.vendas and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Anúncios') }}{% endif %}
   {# Renovações (finance/apolices): a carteira de apólices e o relógio da vigência.
      Regra 6 — só existe pra corretora de seguros, e some em todo o resto. #}
   {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'seguros' %}{{ navi('renovacoes','/painel/renovacoes','agenda','Renovações') }}{% endif %}
@@ -483,7 +483,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
       NÃO alcança Prospecção: o convidado da agência, que entra por convite, cai
       aqui como página inicial e não tem mais nada. Sem esta linha ele fica com o
       menu vazio na única tela que tem. -#}
-  {% if tem_pj and caps.origens and not caps.vendas and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Origens') }}{% endif %}
+  {% if tem_pj and caps.origens and not caps.vendas and raio_x_perfil and raio_x_perfil.aplica %}{{ navi('origens','/painel/origens','relatorios','Anúncios') }}{% endif %}
   {# Renovações (finance/apolices): a carteira de apólices e o relógio da vigência.
      Regra 6 — só existe pra corretora de seguros, e some em todo o resto. #}
   {% if tem_pj and caps.vendas and raio_x_perfil and raio_x_perfil.chave == 'seguros' %}{{ navi('renovacoes','/painel/renovacoes','agenda','Renovações') }}{% endif %}

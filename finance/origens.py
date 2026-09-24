@@ -65,8 +65,10 @@ with conv as (
         on o.id = p.orcamento_id and o.conta_id = p.conta_id
      where cv.conta_id = %(conta)s
        and cv.canal = 'whatsapp'
-       and cv.criado_em::date >= %(ini)s
-       and cv.criado_em::date <= %(fim)s
+       -- o dia é o de BRASÍLIA: `criado_em::date` cortava no dia de Londres, e
+       -- a conversa das 21h às 24h caía no dia seguinte (24/09/2026)
+       and (cv.criado_em at time zone 'America/Sao_Paulo')::date >= %(ini)s
+       and (cv.criado_em at time zone 'America/Sao_Paulo')::date <= %(fim)s
 )
 select codigo,
        count(*)                                                          as conversas,
@@ -186,3 +188,128 @@ def dados_origens(pool, conta_id: int, ini, fim, compromisso: str = "visita") ->
         # como faltou — e sem dizer quantos são, a taxa acima parece firme.
         "cobertura": {"sem_desfecho": sem_desfecho, "ja_passou": ja_passou},
     }
+
+
+# ------------------------------------------------------------------ o porquê, por anúncio
+#
+# Pedido do dono em 24/09/2026, ao aprovar o mockup da aba Anúncios: por criativo,
+# QUEM NÃO ERA CLIENTE e QUEM CHEGOU FORA DO HORÁRIO, e o porquê de cada perda. É o
+# que o tráfego ajusta: o anúncio que traz currículo e fornecedor pra um espaço de
+# festa gasta verba com quem nunca vai comprar.
+#
+# O universo é o MESMO da tabela acima (conversa de WhatsApp aberta no período), só
+# que contado por LEAD: um cliente que abriu duas conversas é uma pessoa só no "não
+# era cliente". Só contagens — nome, telefone e frase de cliente não saem daqui,
+# porque esta tela é a da agência.
+
+_SQL_LEADS = """
+select distinct on (p.id)
+       nullif(btrim(coalesce(p.origem_codigo, '')), '') as codigo,
+       p.id, p.criado_em, p.status,
+       case when coalesce(p.perda_motivo,'') not in ('','outro') then p.perda_motivo
+            when p.perda_lida is not null then p.perda_lida
+            when coalesce(p.perda_motivo,'') <> '' then p.perda_motivo
+            else '_nao_lido' end as motivo,
+       p.perda_lida_quem,
+       lower(nullif(btrim(p.evento_tipo), '')), p.evento_convidados,
+       nullif(btrim(p.segmento), ''), nullif(btrim(p.porte), '')
+  from conversas cv
+  join prospeccao p on p.id = cv.prospeccao_id and p.conta_id = cv.conta_id
+ where cv.conta_id = %(conta)s
+   and cv.canal = 'whatsapp'
+   and (cv.criado_em at time zone 'America/Sao_Paulo')::date >= %(ini)s
+   and (cv.criado_em at time zone 'America/Sao_Paulo')::date <= %(fim)s
+ order by p.id
+"""
+
+#: motivos que NÃO são venda perdida: o lead nunca foi venda. Ficam cinza na barra.
+_NAO_VENDA = ("nao_era_cliente", "sem_conversa", "_nao_lido", "outro")
+
+
+def _turno(h: int) -> str:
+    return "madrugada" if h < 6 else "manha" if h < 12 else "tarde" if h < 18 else "noite"
+
+
+def _barras(cont: dict, rotulos: dict, cinza=()) -> list[dict]:
+    if not cont:
+        return []
+    maxn = max(cont.values())
+    return [{"chave": k, "rotulo": rotulos.get(k) or k.replace("_", " ").capitalize(),
+             "n": n, "pct": round(100 * n / maxn), "cinza": k in cinza}
+            for k, n in sorted(cont.items(), key=lambda x: (x[0] in cinza, -x[1]))]
+
+
+def detalhes_por_codigo(pool, conta_id: int, ini, fim, perfil: str = "eventos") -> dict:
+    """{codigo: detalhe} — `None` é a faixa "sem código". Cada detalhe:
+
+        leads, nao_cliente, nao_cliente_pct, fora, fora_pct,
+        perdemos  [{chave, rotulo, n, pct, cinza}]   o motivo que vale, por lead perdido
+        quem      [{...}]                             de quem não era cliente, o que queria
+        pedem     str                                 no vocabulário do nicho (regra 6)
+        turnos    {manha, tarde, noite, madrugada}
+
+    `perfil` decide o vocabulário do "o que pedem": festa pra quem vende festa,
+    segmento e porte pra quem vende serviço."""
+    from finance import cockpit_dono as _cd
+    from finance import funil_regua as _fr
+    from finance import motivo_lido as _ml
+    from datetime import timezone as _tz
+    args = {"conta": conta_id, "ini": ini, "fim": fim}
+    with pool.connection() as c:
+        try:
+            with c.transaction():
+                rows = c.execute(_SQL_LEADS, args).fetchall()
+        except Exception:  # noqa: BLE001 — base sem a 328/331: sem o porquê, a tabela fica
+            return {}
+        cfg = _cd._cfg_janela(c, conta_id)
+        rot = _ml.rotulos(c, conta_id, perfil)
+    grupos: dict = {}
+    for codigo, _lid, criado, status, motivo, quem, tipo, conv, seg, porte in rows:
+        g = grupos.setdefault(codigo, {"leads": 0, "nao_cliente": 0, "fora": 0,
+                                       "_perd": {}, "_quem": {}, "_tipo": {}, "_ate100": [0, 0],
+                                       "_seg": {}, "_porte": {},
+                                       "turnos": {"manha": 0, "tarde": 0, "noite": 0, "madrugada": 0}})
+        g["leads"] += 1
+        if criado:
+            g["turnos"][_turno(criado.astimezone(_cd._brt()).hour)] += 1
+            if not _fr.dentro_da_janela(criado.astimezone(_tz.utc), cfg):
+                g["fora"] += 1
+        if status == "perdido":
+            g["_perd"][motivo] = g["_perd"].get(motivo, 0) + 1
+            if motivo == "nao_era_cliente":
+                g["nao_cliente"] += 1
+                if quem:
+                    g["_quem"][quem] = g["_quem"].get(quem, 0) + 1
+        if tipo:
+            g["_tipo"][tipo] = g["_tipo"].get(tipo, 0) + 1
+        if conv:
+            g["_ate100"][1] += 1
+            if conv <= 100:
+                g["_ate100"][0] += 1
+        if seg:
+            g["_seg"][seg] = g["_seg"].get(seg, 0) + 1
+        if porte:
+            g["_porte"][porte] = g["_porte"].get(porte, 0) + 1
+    out = {}
+    for codigo, g in grupos.items():
+        n = g["leads"]
+        if perfil == "eventos":
+            tipos = sorted(g["_tipo"].items(), key=lambda x: -x[1])[:3]
+            partes = [f"{t[:1].upper() + t[1:]} {k}" for t, k in tipos]
+            if g["_ate100"][1]:
+                partes.append(f"até 100 convidados: {g['_ate100'][0]} de {g['_ate100'][1]}")
+        else:
+            segs = sorted(g["_seg"].items(), key=lambda x: -x[1])[:3]
+            portes = sorted(g["_porte"].items(), key=lambda x: -x[1])[:2]
+            partes = [f"{s} {k}" for s, k in segs] + [f"porte {p} {k}" for p, k in portes]
+        out[codigo] = {
+            "leads": n,
+            "nao_cliente": g["nao_cliente"],
+            "nao_cliente_pct": round(100 * g["nao_cliente"] / n) if n else 0,
+            "fora": g["fora"], "fora_pct": round(100 * g["fora"] / n) if n else 0,
+            "perdemos": _barras(g["_perd"], {**rot, "_nao_lido": "Ainda não lido"}, _NAO_VENDA),
+            "quem": _barras(g["_quem"], _ml.QUEM),
+            "pedem": " · ".join(partes),
+            "turnos": g["turnos"],
+        }
+    return out

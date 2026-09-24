@@ -991,14 +991,18 @@ def test_gestor_tem_como_sair_pela_barra():
     # e a aba certa acende: antes `_abas_dono("perfil")` não casava com nada da
     # lista, então a barra inteira ficava apagada
     assert pc._abas_dono("perfil").count("<a class=on") == 1
-    for tela in ("visao", "placar", "leads", "orcamentos", "ativ", "perfil"):
+    for tela in ("visao", "placar", "leads", "orcamentos", "anuncios", "ativ", "perfil"):
         assert pc._abas_dono(tela).count("<a class=on") == 1, tela
 
     # o vendedor não herda a aba do gestor: são barras diferentes
     assert pc._abas_vend("fila").count("<a") == 5
     # 7 desde a agenda compartilhada: a aba Agenda entrou pro dono/gestor (medido
     # em 390px: ~55px por aba e o maior rótulo ocupa ~46px — cabe numa linha).
-    assert pc._abas_dono("visao").count("<a") == 7
+    # 8 desde a aba Anúncios (24/09/2026): ~48px por aba, e a barra da gestão usa
+    # rótulo menor (`.tabs.oito`) pra "Propostas", "Anúncios" e "Atividade" não
+    # encostarem um no outro.
+    assert pc._abas_dono("visao").count("<a") == 8
+    assert "tabs oito" in pc._abas_dono("visao") and "oito" not in pc._abas_vend("fila")
 
 
 def test_total_pendentes_soma_a_carteira_e_ignora_fechados(pool):

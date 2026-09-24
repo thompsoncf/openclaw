@@ -44,6 +44,8 @@ import html as _html
 import json as _json_mod
 import logging as _logging
 import os as _os
+from datetime import timedelta
+from urllib.parse import urlencode as _urlencode
 
 from fastapi import APIRouter, Body, Form, Request
 from starlette.background import BackgroundTask
@@ -431,6 +433,77 @@ b,strong{font-weight:600}
 .alerta{margin-top:.6rem;background:#241c0f;border:1px solid #5a4520;color:#f0cf85;border-radius:11px;
   padding:.55rem .65rem;font-size:.74rem;line-height:1.4}
 .eyebrow .lidos{color:var(--text-faint);letter-spacing:.04em;text-transform:none}
+/* "Por que perdemos" com link (24/09/2026): cada motivo abre os leads dele */
+.hb a{display:grid;grid-template-columns:104px 1fr 30px 10px;gap:.45rem;align-items:center;padding:.3rem 0;
+  color:inherit;text-decoration:none;border-top:1px solid var(--line)}
+.hb a:first-child{border-top:0}
+.hb a span{color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hb a b{font-family:var(--mono);text-align:right}
+.hb a em{font-style:normal;color:var(--neon);font-size:.85rem;line-height:1}
+.hb a:active{background:var(--neon-fraco)}
+
+/* ---------- aba Anúncios (24/09/2026) ---------- */
+.faixas{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin:0 1.1rem}
+.fx{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:.6rem .7rem}
+.fx .r{font-size:.62rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint)}
+.fx .v{font-family:var(--mono);font-size:1.25rem;font-weight:700;white-space:nowrap}
+.fx .n{font-size:.68rem;color:var(--text-faint)}
+.fx.dest{background:var(--neon-fraco);border-color:var(--neon-deep)}.fx.dest .v{color:var(--neon)}
+.ads{margin:0 1.1rem}
+.ad{background:var(--surface);border:1px solid var(--line);border-radius:14px;margin-bottom:.5rem}
+.ad>summary{list-style:none;padding:.65rem .75rem;cursor:pointer}
+.ad>summary::-webkit-details-marker{display:none}
+.ad.ruim{border-color:#6b3530}
+.ad .l1{display:flex;justify-content:space-between;align-items:center;gap:.5rem}
+.cod{font-family:var(--mono);font-size:.74rem;background:var(--neon-fraco);color:var(--neon);
+  border:1px solid var(--neon-deep);border-radius:5px;padding:.05rem .4rem}
+.cod.sem{background:transparent;color:var(--ambar);border-color:#5a4520;font-style:italic;font-family:inherit}
+.ad .rs{font-family:var(--mono);font-size:.8rem;font-weight:700;color:var(--neon);white-space:nowrap}
+.ad .rs.zero{color:var(--text-faint);font-weight:500}
+.ad .l2{font-size:.74rem;color:var(--text-dim);margin-top:.3rem}
+.ad .l2 b{color:var(--text);font-weight:600}
+.an-chips{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.45rem}
+.an-chip{font-size:.64rem;padding:.12rem .5rem;border-radius:999px;border:1px solid var(--line);color:var(--text-dim);white-space:nowrap}
+.an-chip.ruim{background:#2e1715;border-color:#6b3530;color:#f0a79c}
+.an-chip.am{background:#241c0f;border-color:#5a4520;color:#f0cf85}
+.ad .abre{border-top:1px solid var(--line);padding:.55rem .75rem .7rem}
+.ad .abre .t{font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-faint);margin:.55rem 0 .3rem}
+.ad .abre .t:first-child{margin-top:0}
+.mini{font-size:.74rem;color:var(--text-dim);line-height:1.45}
+.mini b{color:var(--text)}
+.vazio-ad{margin:0 1.1rem;background:var(--surface);border:1px dashed var(--line);border-radius:14px;
+  padding:1rem;font-size:.8rem;color:var(--text-dim);line-height:1.5}
+.vazio-ad code{font-family:var(--mono);font-size:.72rem;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:5px;padding:.05rem .35rem;color:var(--text)}
+
+/* ---------- lista de perdidos por motivo (24/09/2026) ---------- */
+.pd-tit{padding:0 1.1rem;font-size:1.05rem;font-weight:700}
+.pd-tit small{display:block;font-size:.72rem;color:var(--text-faint);font-weight:400;margin-top:.1rem}
+.datas{display:flex;flex-wrap:wrap;gap:.3rem}
+.dt{font-family:var(--mono);font-size:.72rem;padding:.2rem .45rem;border-radius:8px;background:#241c0f;
+  border:1px solid #5a4520;color:#f0cf85}
+.dt.passou{opacity:.45}
+.dt.abriu{background:var(--neon-fraco);border-color:var(--neon-deep);color:var(--neon)}
+.pl{background:var(--surface);border:1px solid var(--line);border-radius:13px;margin:0 1.1rem .5rem;padding:.6rem .7rem}
+.pl .l1{display:flex;justify-content:space-between;gap:.5rem;font-size:.84rem}
+.pl .l1 b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl .l1 span{color:var(--text-faint);font-size:.7rem;white-space:nowrap}
+.pl .sub{font-size:.72rem;color:var(--text-dim);margin-top:.1rem}
+.pl .fala{font-size:.78rem;color:var(--text);margin-top:.4rem;padding-left:.55rem;border-left:2px solid var(--neon-deep)}
+.pl .l3{display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin-top:.45rem;
+  font-size:.66rem;color:var(--text-faint);flex-wrap:wrap}
+.pl .l3 a.conv{color:var(--neon);font-size:.74rem;white-space:nowrap}
+.pd-marca{font-size:.6rem;padding:.05rem .4rem;border-radius:999px;border:1px solid var(--line)}
+.pd-marca.ia{color:var(--neon);border-color:var(--neon-deep)}
+.pl details{margin-top:.4rem}
+.pl details summary{font-size:.7rem;color:var(--text-dim);text-decoration:underline;cursor:pointer;list-style:none}
+.pl details summary::-webkit-details-marker{display:none}
+.pl form{display:flex;gap:.35rem;margin-top:.4rem}
+.pl select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);border-radius:9px;color:var(--text);
+  padding:.35rem .4rem;font:inherit;font-size:.78rem}
+.pl form button{background:var(--neon);color:var(--ink);border:0;border-radius:9px;padding:.35rem .7rem;
+  font:inherit;font-size:.76rem;font-weight:700}
+.an-dica{margin:.4rem 1.1rem 0;font-size:.7rem;color:var(--text-faint);line-height:1.4}
 
 /* ---------- pódio + placar ---------- */
 /* pódio: os itens ESTICAM na altura da linha e empurram o conteúdo pro fim
@@ -1041,6 +1114,10 @@ button,.btn,.act,.tabs a,.pil,.opt,.lead,.linha,.acoes a{touch-action:manipulati
 .tabs a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:.5rem 0 .45rem;
   color:var(--text-faint);font-size:.62rem;position:relative}
 .tabs a.on{color:var(--neon)}
+/* A barra da gestão tem OITO abas desde a Anúncios (24/09/2026). Medido em 390 px:
+   "Propostas", "Anúncios" e "Atividade" encostavam um no outro com .62rem; com
+   .56rem sobra ar entre eles. A barra do vendedor (cinco abas) fica como estava. */
+.tabs.oito a{font-size:.56rem;letter-spacing:-.01em}
 /* O toque tinha eco em card (.lead:active) e em nada mais: tocar numa aba não
    mudava um pixel até a página nova chegar, e em 4G isso é meio segundo de app
    que parece morto. Isto responde em 0 ms, sem rede e sem JS. */
@@ -1342,6 +1419,9 @@ _ICONES = (
     '<circle cx="4.5" cy="6" r="1.3"/><circle cx="4.5" cy="12" r="1.3"/>'
     '<circle cx="4.5" cy="18" r="1.3"/></symbol>'
     '<symbol id="i-ativ" viewBox="0 0 24 24"><path d="M13 2.5L5.5 13.5H11L10 21.5L18.5 10.5H13z"/></symbol>'
+    # anúncios: um megafone
+    '<symbol id="i-anuncios" viewBox="0 0 24 24"><path d="M3.5 10v4h3l7 4V6l-7 4z"/>'
+    '<path d="M6.5 14l1.2 5h2.3l-1-4.4M17 9.5a3.5 3.5 0 010 5M19.5 7a7 7 0 010 10"/></symbol>'
     '<symbol id="i-volta" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>'
     '<symbol id="i-ligar" viewBox="0 0 24 24"><path d="M6.5 3.5h3l1.5 4-2 1.5a12 12 0 006 6l1.5-2 4 1.5v3'
     'a2 2 0 01-2.2 2A17 17 0 014.5 5.7 2 2 0 016.5 3.5z"/></symbol>'
@@ -1828,7 +1908,8 @@ def _hdr(titulo: str, sub: str = "", *, voltar: str = "", direita: str = "",
             + (f"<small>{esc(sub)}</small>" if sub else "") + f"</div>{direita}</div>")
 
 
-def _abas(itens, ativo: str, selos: dict | None = None, verdes: tuple = ("perfil",)) -> str:
+def _abas(itens, ativo: str, selos: dict | None = None, verdes: tuple = ("perfil",),
+          barra: str = "") -> str:
     """Barra de abas. É o que faltava no app do vendedor — ele tinha uma tela só.
 
     O selo da Fila é vermelho (cliente esperando); o do Perfil é verde (aviso por
@@ -1846,7 +1927,7 @@ def _abas(itens, ativo: str, selos: dict | None = None, verdes: tuple = ("perfil
                 f"{n if n < 10 else '9+'}</span>") if n else ""
         out.append(f"<a{on} data-aba={chave} href='{esc(href)}'>{_ic(icone)}{selo}"
                    f"<span>{esc(rotulo)}</span></a>")
-    return "<div class=tabs>" + "".join(out) + "</div>"
+    return (f"<div class='tabs {barra}'>" if barra else "<div class=tabs>") + "".join(out) + "</div>"
 
 
 def _abas_vend(ativo: str, pend: int = 0, novas: int = 0, raiox: int = 0) -> str:
@@ -2026,8 +2107,10 @@ def _abas_dono(ativo: str) -> str:
                   ("placar", "placar", "Placar", f"{_BASE}/equipe/placar"),
                   ("leads", "leads", "Leads", f"{_BASE}/equipe/leads"),
                   ("orcamentos", "orc", "Propostas", f"{_BASE}/orcamentos"),
+                  # Anúncios (24/09/2026): de qual anúncio veio cada lead, e o porquê
+                  ("anuncios", "anuncios", "Anúncios", f"{_BASE}/anuncios"),
                   ("ativ", "ativ", "Atividade", f"{_BASE}/equipe/atividade"),
-                  ("perfil", "perfil", "Perfil", f"{_BASE}/perfil")], ativo)
+                  ("perfil", "perfil", "Perfil", f"{_BASE}/perfil")], ativo, barra="oito")
 
 
 def _hdr_dono(conta_id: int, titulo: str, sub: str = "", voltar: str = "") -> str:
@@ -6627,7 +6710,7 @@ def _dono_periodo(request: Request) -> tuple[str, str, str, bool]:
     return p, de, ate, abrir
 
 
-def _painel_periodo(de: str, ate: str) -> str:
+def _painel_periodo(de: str, ate: str, acao: str = _BASE) -> str:
     """As duas datas do "Período". GET simples: funciona sem JS e o
     <input type=date> abre o calendário do próprio celular.
 
@@ -6639,18 +6722,23 @@ def _painel_periodo(de: str, ate: str) -> str:
     v_de = de or (hoje - timedelta(days=6)).isoformat()
     v_ate = ate or hoje.isoformat()
     return ("<div class=perpainel>"
-            f"<form method=get action='{_BASE}'><input type=hidden name=p value=periodo>"
+            f"<form method=get action='{esc(acao)}'><input type=hidden name=p value=periodo>"
             f"<label>de<input type=date name=de value='{esc(v_de)}' max='{hoje.isoformat()}'></label>"
             f"<label>até<input type=date name=ate value='{esc(v_ate)}' max='{hoje.isoformat()}'></label>"
             "<button>Ver</button></form></div>")
 
 
 def _barras_h(itens: list[dict]) -> str:
-    """Barras horizontais de uma linha: rótulo, barra, número."""
-    return "<div class=hb>" + "".join(
-        f"<div><span>{esc(i['rotulo'])}</span>"
-        f"<i class='{esc(i.get('tom') or ('ci' if i.get('resto') or i.get('fds') else ''))}' "
-        f"style='width:{int(i['pct'])}%'></i><b>{int(i['n'])}</b></div>" for i in itens) + "</div>"
+    """Barras horizontais de uma linha: rótulo, barra, número. Item com `href` vira
+    link — é assim que cada motivo do "Por que perdemos" abre os leads dele."""
+    def _uma(i):
+        tom = esc(i.get('tom') or ('ci' if i.get('resto') or i.get('fds') or i.get('cinza') else ''))
+        miolo = (f"<span>{esc(i['rotulo'])}</span><i class='{tom}' style='width:{int(i['pct'])}%'></i>"
+                 f"<b>{int(i['n'])}</b>")
+        if i.get("href"):
+            return f"<a href='{esc(i['href'])}'>{miolo}<em>›</em></a>"
+        return f"<div>{miolo}</div>"
+    return "<div class=hb>" + "".join(_uma(i) for i in itens) + "</div>"
 
 
 def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
@@ -6724,6 +6812,8 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
                        + (f"<div class=linhas>{linhas}</div>" if linhas else "") + "</div></div>")
         pq = cd.por_que_perdemos(pool, conta_id, periodo, de, ate)
         if pq:
+            for it in pq["itens"]:
+                it["href"] = _href_perdidos(it["chave"], periodo, de, ate)
             nota = ""
             if pq["nao_cliente"]:
                 nota = (f"<div class=alerta><b>{pq['nao_cliente']} de {pq['total']}</b> não eram clientes: "
@@ -6761,6 +6851,230 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
              + blocos
              + "</div>" + _abas_dono("visao"))
     return _page("Equipe", corpo)
+
+
+def _href_perdidos(motivo: str, periodo: str, de: str, ate: str, codigo: str | None = None) -> str:
+    q = {"motivo": motivo, "p": periodo}
+    if periodo == "periodo" and de and ate:
+        q.update(de=de, ate=ate)
+    if codigo is not None:
+        q["codigo"] = codigo or "_sem"
+    return f"{_BASE}/perdidos?" + _urlencode(q)
+
+
+def _seg_periodo(base: str, periodo: str, de: str, ate: str) -> str:
+    """As pílulas Hoje · Semana · Mês · Período, apontando pra `base`."""
+    def seg(key, lab):
+        return f"<a class='{'on' if periodo == key else ''}' href='{base}?p={key}'>{lab}</a>"
+    esc_per = cd.periodo_escolhido(de, ate) if periodo == "periodo" else None
+    rot = (cd.rotulo_periodo(*esc_per) if esc_per else "Período") + " ▾"
+    return (f"<div class=seg>{seg('hoje', 'Hoje')}{seg('semana', 'Semana')}{seg('mes', 'Mês')}"
+            f"<a class='{'on' if periodo == 'periodo' else ''}' href='{base}?p=periodo&abrir=1'>"
+            f"{esc(rot)}</a></div>")
+
+
+# ================================================================== anúncios
+# A aba Anúncios do app do gestor (24/09/2026). É a tela Origens do painel
+# (/painel/origens) no celular, com o porquê de cada anúncio: quem não era
+# cliente, quem chegou fora do horário, por que perdemos, o que pedem, quando
+# chegam. O dono escolheu o nome "Anúncios" e pediu no gestor E no computador.
+@router.get("/cockpit/anuncios", response_class=HTMLResponse)
+def cockpit_anuncios(request: Request):
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse(_BASE, status_code=303)
+    conta_id = g[0]
+    from finance import origens as _og
+    from finance import raio_x_perfil as _rxp
+    pool = get_pool()
+    perfil = _rxp.perfil_da_conta(pool, conta_id)
+    if not perfil["aplica"]:
+        # regra 6: quem vende produto não tem funil, e não tem de onde veio o lead
+        return RedirectResponse(_BASE, status_code=303)
+    periodo, de, ate, abrir = _dono_periodo(request)
+    ini, fim = cd._range(periodo, de, ate)
+    ini_d, fim_d = cd._dia_br(ini), cd._dia_br(fim - timedelta(minutes=1))
+    comp = perfil["vocab"]["compromissos"]
+    try:
+        d = _og.dados_origens(pool, conta_id, ini_d, fim_d, compromisso=perfil["vocab"]["compromisso"])
+        det = _og.detalhes_por_codigo(pool, conta_id, ini_d, fim_d, perfil["chave"])
+    except Exception:  # noqa: BLE001
+        _log.warning("anúncios: leitura falhou na conta %s", conta_id, exc_info=True)
+        d, det = None, {}
+    base = f"{_BASE}/anuncios"
+    topo = (_hdr_dono(conta_id, "Anúncios", "de qual anúncio veio cada lead")
+            + "<div class=scroll>" + _seg_periodo(base, periodo, de, ate)
+            + (_painel_periodo(de, ate, base) if abrir else ""))
+    if d is None:
+        return _page("Anúncios", topo + "<div class=vazio-ad>Não consegui ler os anúncios agora. "
+                     "Tente de novo em instantes.</div></div>" + _abas_dono("anuncios"))
+    com = d["resumo"]["com_codigo"]
+    nao_cli = sum(v["nao_cliente"] for k, v in det.items() if k)
+    fx = (
+        "<div class=faixas>"
+        f"<div class='fx dest'><div class=r>com código</div><div class=v>{com}</div>"
+        "<div class=n>conversas de anúncio</div></div>"
+        f"<div class=fx><div class=r>sem código</div><div class=v>{d['resumo']['sem_codigo']}</div>"
+        "<div class=n>orgânico e afins</div></div>"
+        f"<div class=fx><div class=r>não era cliente</div><div class=v>{nao_cli}</div>"
+        f"<div class=n>{(str(round(100 * nao_cli / com)) + '% ') if com else ''}dos de anúncio</div></div>"
+        f"<div class=fx><div class=r>faturamento</div><div class=v>{esc(cd._reais_cheio(d['faturamento_centavos']))}</div>"
+        "<div class=n>de anúncio</div></div></div>")
+
+    def _abre(x: dict, codigo: str | None) -> str:
+        perd = [dict(i, href=_href_perdidos(i["chave"], periodo, de, ate, codigo or ""))
+                for i in x["perdemos"]]
+        t = x["turnos"]
+        return (
+            "<div class=abre>"
+            "<div class=t>Por que perdemos</div>"
+            + (_barras_h(perd) if perd else "<div class=mini>Nenhum perdido ainda.</div>")
+            + "<div class=t>Quem não era cliente</div>"
+            + (_barras_h(x["quem"]) if x["quem"] else
+               f"<div class=mini>{'Ainda sem leitura do que queriam.' if x['nao_cliente'] else 'Nenhum.'}</div>")
+            + f"<div class=t>O que pedem</div><div class=mini>{esc(x['pedem'] or 'Ninguém disse ainda.')}</div>"
+            + "<div class=t>Quando chegam</div>"
+            f"<div class=mini>Manhã <b>{t['manha']}</b> · tarde <b>{t['tarde']}</b> · noite <b>{t['noite']}</b>"
+            f" · madrugada <b>{t['madrugada']}</b></div></div>")
+
+    def _chips(x: dict | None) -> str:
+        if not x:
+            return ""
+        nc = x["nao_cliente"]
+        # vermelho a partir de 10%: na Prime, 1 a 23/09, a casa ficou em 2% dos leads
+        cls_nc = "an-chip ruim" if nc and x["nao_cliente_pct"] >= 10 else "an-chip"
+        txt_nc = ("nenhum não-cliente" if not nc else
+                  f"1 não era cliente · {x['nao_cliente_pct']}%" if nc == 1 else
+                  f"{nc} não eram clientes · {x['nao_cliente_pct']}%")
+        cls_f = "an-chip am" if x["fora_pct"] >= 30 else "an-chip"
+        return (f"<div class=an-chips><span class='{cls_nc}'>{esc(txt_nc)}</span>"
+                f"<span class='{cls_f}'>{x['fora_pct']}% fora do horário</span></div>")
+
+    cards = ""
+    for l in d["linhas"]:
+        x = det.get(l["codigo"])
+        rs = (f"<span class=rs>{esc(cd._reais_cheio(l['faturamento_centavos']))}</span>"
+              if l["faturamento_centavos"] else "<span class='rs zero'>sem venda</span>")
+        ruim = " ruim" if x and x["nao_cliente"] and x["nao_cliente_pct"] >= 10 else ""
+        cards += (
+            f"<details class='ad{ruim}'><summary><div class=l1><span class=cod>{esc(l['codigo'])}</span>{rs}</div>"
+            f"<div class=l2><b>{l['conversas']}</b> conversa{'s' if l['conversas'] != 1 else ''}"
+            f" · <b>{l['marcaram']}</b> {esc(comp)}"
+            f" · <b>{l['vendas']}</b> venda{'s' if l['vendas'] != 1 else ''}"
+            f" · resp. {esc(_vendas_mod().duracao_curta(l['resposta_mediana_min']))}</div>"
+            + _chips(x) + "</summary>" + (_abre(x, l["codigo"]) if x else "") + "</details>")
+    sem = d["sem_codigo"]
+    if sem:
+        x = det.get(None)
+        cards += (
+            f"<details class=ad><summary><div class=l1><span class='cod sem'>sem código</span>"
+            f"<span class='rs zero'>{sem['conversas']} conversa{'s' if sem['conversas'] != 1 else ''}</span></div>"
+            f"<div class=l2><b>{sem['marcaram']}</b> {esc(comp)} · <b>{sem['vendas']}</b> "
+            f"venda{'s' if sem['vendas'] != 1 else ''}</div>" + _chips(x) + "</summary>"
+            + (_abre(x, None) if x else "") + "</details>")
+    vazio = ""
+    if not com:
+        vazio = ("<div class=vazio-ad><b>Nenhum lead chegou com código de anúncio neste período.</b><br>"
+                 "O código vai na mensagem pronta do anúncio, entre colchetes e com cerquilha: "
+                 "<code>Olá! Quero saber sobre o espaço. [#CAS-01]</code>. Um por criativo; "
+                 "o app descobre os novos sozinho. Enquanto isso, o <b>sem código</b> abaixo mostra "
+                 "o porquê de todo mundo.</div><div style='height:.6rem'></div>")
+    corpo = (topo + fx + "<div class=eyebrow>Por anúncio</div>" + vazio
+             + f"<div class=ads>{cards}</div>"
+             + "<div class=an-dica>“Sem código” junta indicação e Google com quem veio do anúncio e "
+               "apagou o texto antes de enviar.</div></div>" + _abas_dono("anuncios"))
+    return _page("Anúncios", corpo)
+
+
+def _vendas_mod():
+    from finance import vendas as _v
+    return _v
+
+
+# ================================================================== perdidos por motivo
+@router.get("/cockpit/perdidos", response_class=HTMLResponse)
+def cockpit_perdidos(request: Request, motivo: str = "", codigo: str | None = None):
+    """Os leads perdidos por um motivo — o que abre ao tocar numa linha do "Por que
+    perdemos" (Visão, ou dentro de um anúncio). Pedido do dono em 24/09/2026."""
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse(_BASE, status_code=303)
+    conta_id = g[0]
+    periodo, de, ate, _abrir = _dono_periodo(request)
+    cod = None if codigo is None else ("" if codigo == "_sem" else codigo)
+    pool = get_pool()
+    lst = cd.perdidos(pool, conta_id, motivo, periodo, de, ate, codigo=cod)
+    volta = _BASE if cod is None else f"{_BASE}/anuncios"
+    if not lst:
+        return RedirectResponse(volta, status_code=303)
+    de_onde = ("" if cod is None else (" · sem código" if cod == "" else f" · anúncio {cod}"))
+    rot_per = f"{lst['de']:%d/%m} a {lst['ate']:%d/%m}"
+    partes = [f"<div class=pd-tit>{esc(lst['rotulo'])} · {lst['total']} lead{'s' if lst['total'] != 1 else ''}"
+              f"<small>perdidos de {rot_per}{esc(de_onde)}</small></div>"]
+    dt = lst["datas"]
+    if dt:
+        chips = "".join(
+            f"<span class='dt{' passou' if c['passou'] else ''}{' abriu' if c['situacao'] == 'abriu' else ''}'>"
+            f"{c['dia']} <b>{c['data']:%d/%m}</b>{' · abriu' if c['situacao'] == 'abriu' else ''}</span>"
+            for c in dt["chips"])
+        nota = ""
+        if dt["usa_lista"]:
+            nota = ("<div class=mini style='margin-top:.45rem'>Quem pediu uma data que abrir é avisado "
+                    "sozinho pela lista de espera.</div>")
+        else:
+            nota = ("<div class=mini style='margin-top:.45rem'>Pra ser avisado quando uma dessas datas abrir, "
+                    "preencha <b>Festas por dia</b> em Empresa, no painel.</div>")
+        partes.append("<div class=eyebrow>Datas que pediram e não tínhamos</div>"
+                      f"<div class=bloco><div class=card><div class=datas>{chips}</div>"
+                      + (f"<div class=mini style='margin-top:.45rem'>{esc(dt['resumo'])}</div>" if dt["resumo"] else "")
+                      + nota + "</div></div>")
+    if lst["parou"] or lst["quem"]:
+        linhas = "".join(f"<div><span>{esc(r)}</span><b>{n}</b></div>" for r, n in lst["quem"] + lst["parou"])
+        partes.append("<div class=eyebrow>Resumo 💬 das conversas</div>"
+                      f"<div class=bloco><div class=card><div class=linhas style='margin-top:0'>{linhas}</div></div></div>")
+    partes.append("<div class=eyebrow>Os leads</div>")
+    aqui = str(request.url.path) + ("?" + str(request.url.query) if request.url.query else "")
+    opcoes = "".join(f"<option value='{esc(ch)}'>{esc(rot)}</option>" for ch, rot in lst["opcoes"])
+    for i in lst["itens"]:
+        quando = (f"{i['dia']} {i['evento_em']:%d/%m}" if i["evento_em"] and lst["perfil"] == "eventos"
+                  else (f"perdido {i['perdido_em']:%d/%m}" if i["perdido_em"] else ""))
+        marca = ("<span class='pd-marca ia'>💬 lido</span>" if i["lido"]
+                 else f"<span class=pd-marca>{'corrigido' if i['corrigido'] else 'equipe'}</span>")
+        extra = " · ".join(x for x in (i["quem"], i["parou"], i["vendedor"]) if x)
+        corrigir = ""
+        if i["lido"] and opcoes:
+            corrigir = (f"<details><summary>corrigir o motivo</summary>"
+                        f"<form method=post action='{_BASE}/perdidos/{i['id']}/motivo'>"
+                        f"<input type=hidden name=volta value='{esc(aqui)}'>"
+                        f"<select name=motivo aria-label='Motivo certo'>{opcoes}</select>"
+                        "<button>Salvar</button></form></details>")
+        partes.append(
+            f"<div class=pl><div class=l1><b>{esc(i['nome'])}</b><span>{esc(quando)}</span></div>"
+            + (f"<div class=sub>{esc(i['sub'])}</div>" if i["sub"] else "")
+            + (f"<div class=fala>“{esc(i['trecho'])}”</div>" if i["trecho"] else "")
+            + f"<div class=l3><span>{marca}{(' · ' + esc(extra)) if extra else ''}</span>"
+              f"<a class=conv href='{_BASE}/lead/{i['id']}'>Abrir conversa ›</a></div>"
+            + corrigir + "</div>")
+    if not lst["itens"]:
+        partes.append("<div class=vazio-ad>Nenhum lead perdido por esse motivo no período.</div>")
+    corpo = (_hdr_dono(conta_id, "Por que perdemos", lst["rotulo"], voltar=volta)
+             + "<div class=scroll>" + _flash(request) + "".join(partes) + "<div style='height:1rem'></div></div>"
+             + _abas_dono("visao" if cod is None else "anuncios"))
+    return _page("Perdidos", corpo)
+
+
+@router.post("/cockpit/perdidos/{lead_id}/motivo")
+def cockpit_corrigir_motivo(request: Request, lead_id: int, motivo: str = Form(""), volta: str = Form("")):
+    """O gestor corrige o motivo que a leitura deu (aprovado pelo dono, 24/09/2026)."""
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse(_BASE, status_code=303)
+    ok = cd.corrigir_motivo(get_pool(), g[0], lead_id, motivo, g[1])
+    request.session["ck_ok" if ok else "ck_err"] = ("Motivo corrigido ✓" if ok
+                                                    else "Não consegui corrigir esse motivo.")
+    # só volta pra dentro da própria lista: nada de redirecionar pra endereço de fora
+    destino = volta if volta.startswith(f"{_BASE}/perdidos") else _BASE
+    return RedirectResponse(destino, status_code=303)
 
 
 @router.get("/cockpit/equipe/placar", response_class=HTMLResponse)

@@ -322,3 +322,48 @@ def test_o_convidado_nao_ve_barra_de_abas(cliente):
     # sem caminho nenhum — mora em `test_menu_bate_com_o_gate.py`, que renderiza
     # o menu de verdade. Aqui a conta vem mockada e o menu sai vazio pra todo
     # papel, então cobrar isso neste arquivo seria cobrar do fixture.
+
+
+# ------------------------------------------- o porquê de cada anúncio (24/09/2026)
+
+def _colunas_do_porque(c):
+    """As colunas que o porquê lê (perda 235, leitura 328/331, festa 198)."""
+    c.execute("""alter table prospeccao
+                   add column if not exists perda_motivo text, add column if not exists perda_lida text,
+                   add column if not exists perda_lida_quem text, add column if not exists perda_lida_trecho text,
+                   add column if not exists evento_tipo text, add column if not exists evento_convidados int,
+                   add column if not exists segmento text, add column if not exists porte text""")
+
+
+def test_cada_anuncio_mostra_quem_nao_era_cliente_e_abre_o_porque(cliente):
+    with cliente.pool.connection() as c:
+        _colunas_do_porque(c)
+        a = _lead(c, "ANIV-01", texto="vocês estão contratando?")
+        _lead(c, "ANIV-01")
+        c.execute("update prospeccao set status='perdido', perda_lida='nao_era_cliente', "
+                  "perda_lida_quem='emprego', perda_lida_trecho='vocês estão contratando?' where id=%s", (a,))
+        c.commit()
+    html = cliente.get("/painel/origens").text
+    assert "<th>Não era cliente</th>" in html and "<th>Fora do horário</th>" in html
+    assert "1 · 50%" in html                                 # 1 de 2 leads do anúncio
+    assert "Procurava emprego" in html                        # abre embaixo da linha
+    assert 'data-abre="og-1"' in html and 'id="og-1"' in html
+    # a agência vê só contagem: a frase do cliente não sai na página
+    assert "contratando" not in html
+
+
+def test_a_tela_se_chama_anuncios(cliente):
+    """O nome escolhido pelo dono em 24/09/2026. A rota continua /painel/origens:
+    link salvo e favorito da agência não quebram."""
+    assert ">Anúncios</h2>" in cliente.get("/painel/origens").text
+
+
+def test_o_porque_escapa_o_que_vem_do_banco(cliente):
+    """O tipo de festa sai da conversa do cliente, e este template não escapa sozinho."""
+    with cliente.pool.connection() as c:
+        _colunas_do_porque(c)
+        a = _lead(c, "ANIV-01")
+        c.execute("update prospeccao set evento_tipo='<script>x</script>' where id=%s", (a,))
+        c.commit()
+    html = cliente.get("/painel/origens").text
+    assert "<script>x</script>" not in html and "&lt;script&gt;" in html

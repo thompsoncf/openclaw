@@ -401,9 +401,6 @@ b,strong{font-weight:600}
 /* ---------- visão: período, leads por dia, barras (24/09/2026) ---------- */
 .perpainel{margin:-.3rem 1.1rem .9rem;background:var(--surface);border:1px solid var(--line);
   border-radius:14px;padding:.7rem .8rem}
-.perpainel .atalhos{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.6rem}
-.perpainel .atalhos a{font-size:.76rem;padding:.3rem .65rem;border-radius:999px;
-  border:1px solid var(--line);color:var(--text-dim)}
 .perpainel form{display:flex;gap:.4rem;align-items:flex-end;flex-wrap:wrap}
 .perpainel label{display:flex;flex-direction:column;font-size:.7rem;color:var(--text-faint);gap:.15rem;flex:1;min-width:120px}
 .perpainel input{background:var(--bg-2);border:1px solid var(--line);border-radius:10px;color:var(--text);
@@ -6631,22 +6628,17 @@ def _dono_periodo(request: Request) -> tuple[str, str, str, bool]:
 
 
 def _painel_periodo(de: str, ate: str) -> str:
-    """Os atalhos e as duas datas do "Período". GET simples: funciona sem JS e o
-    <input type=date> abre o calendário do próprio celular."""
+    """As duas datas do "Período". GET simples: funciona sem JS e o
+    <input type=date> abre o calendário do próprio celular.
+
+    Sem atalhos (ontem, 7 dias, 30 dias, mês passado): o dono tirou em 24/09/2026 —
+    "sem necessidade, só deixa as datas mesmo com calendário". Hoje · Semana · Mês
+    já estão nas pílulas; o Período é pra escolher dia."""
     from datetime import datetime, timedelta
     hoje = datetime.now(cd._brt()).date()
-    ontem = hoje - timedelta(days=1)
-    ini_mes = hoje.replace(day=1)
-    fim_passado = ini_mes - timedelta(days=1)
-    atalhos = [("Ontem", ontem, ontem),
-               ("Últimos 7 dias", hoje - timedelta(days=6), hoje),
-               ("Últimos 30 dias", hoje - timedelta(days=29), hoje),
-               ("Mês passado", fim_passado.replace(day=1), fim_passado)]
-    at = "".join(f"<a href='{_BASE}?p=periodo&de={a.isoformat()}&ate={b.isoformat()}'>{esc(r)}</a>"
-                 for r, a, b in atalhos)
     v_de = de or (hoje - timedelta(days=6)).isoformat()
     v_ate = ate or hoje.isoformat()
-    return ("<div class=perpainel><div class=atalhos>" + at + "</div>"
+    return ("<div class=perpainel>"
             f"<form method=get action='{_BASE}'><input type=hidden name=p value=periodo>"
             f"<label>de<input type=date name=de value='{esc(v_de)}' max='{hoje.isoformat()}'></label>"
             f"<label>até<input type=date name=ate value='{esc(v_ate)}' max='{hoje.isoformat()}'></label>"

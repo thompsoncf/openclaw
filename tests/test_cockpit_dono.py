@@ -705,4 +705,8 @@ def test_o_periodo_sem_datas_abre_o_painel_de_escolha(pool, monkeypatch):
     with pool.connection() as c:
         conta, v1, ab, an = _prime(c, "Painel")
     html = pc._dono_visao(_Req(p="periodo"), conta).body.decode()
-    assert "class=perpainel" in html and "Últimos 30 dias" in html and "Mês passado" in html
+    assert "class=perpainel" in html
+    # Só as duas datas, com o calendário do celular: os atalhos saíram a pedido do dono.
+    assert html.count("type=date") == 2
+    for atalho in ("Ontem", "Últimos 7 dias", "Últimos 30 dias", "Mês passado"):
+        assert atalho not in html, atalho

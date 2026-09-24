@@ -3607,6 +3607,7 @@ def remuneracao(pool, conta_id: int, membro_id: int, periodo: str = "mes") -> di
         "fechado_centavos": int((linha or {}).get("rs_centavos") or 0),
         "ganhos": int((linha or {}).get("ganhos") or 0),
         "conversao": (linha or {}).get("conversao") or "—",
+        "recebidos": int((linha or {}).get("recebidos") or 0),
         "resp": (linha or {}).get("resp") or "—",
         "fila": int((linha or {}).get("fila") or 0),
         "posicao": posicao, "total_equipe": len(ordem),

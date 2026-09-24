@@ -127,6 +127,23 @@ _VALOR_FECHADO = """coalesce(
            from orcamentos o where o.id = p.orcamento_id and o.conta_id = p.conta_id),
         p.valor_estimado_centavos, 0)"""
 
+#: QUANDO A VENDA FECHOU. Até 24/09/2026 o mês do ganho era o de `atualizado_em` —
+#: a ÚLTIMA ALTERAÇÃO do lead —, e qualquer edição na ficha ou a automação do funil
+#: empurrava uma venda de agosto pra setembro. Agora é a última vez que o lead
+#: ENTROU no fechamento vindo de fora dele (histórico em `funil_movimentos`). Quais
+#: etapas são fechamento é a `fase` do funil DA CONTA (na Prime, só CONTRATO
+#: ASSINADO; ORCAMENTO ASSINADO é fase de venda). Andar entre duas etapas de
+#: fechamento (contrato -> pós-venda) não muda a data, e o lead que voltou pro funil
+#: e fechou de novo vale pelo último fechamento. Lead sem histórico (anterior à
+#: 177) cai no `atualizado_em`, como era.
+_FECHOU_EM = ("coalesce((select max(fm.criado_em) from funil_movimentos fm "
+              "where fm.prospeccao_id = p.id and fm.conta_id = p.conta_id "
+              "and fm.para in " + _fr.sql_fechadas("p") + " "
+              "and coalesce(fm.de, '') not in " + _fr.sql_fechadas("p") + "), p.atualizado_em)")
+
+#: QUANDO FOI PERDIDO: a data da perda (235), e só na falta dela a última alteração.
+_PERDEU_EM = "coalesce(p.perda_em, p.atualizado_em)"
+
 #: QUANDO FALAMOS COM ESTE LEAD PELA ÚLTIMA VEZ. `ultimo_contato_em` só é escrito
 #: por quem move o lead na mão no painel: na Prime ele está preenchido em 34 dos
 #: 423 leads abertos, e por isso "parados há +3 dias" virava "cadastrados há mais
@@ -168,12 +185,15 @@ def visao(pool, conta_id: int, periodo: str = "semana", de=None, ate=None) -> di
         com_ia, com_vend = int(atend[0] or 0), int(atend[1] or 0)
         g = c.execute("select count(*), coalesce(sum(" + _VALOR_FECHADO + "),0) from prospeccao p "
                       "where p.conta_id=%s and p.status in " + _fr.sql_fechadas("p")
-                      + " and p.atualizado_em>=%s and p.atualizado_em<%s",
+                      + " and " + _FECHOU_EM + ">=%s and " + _FECHOU_EM + "<%s",
                       (conta_id, ini, fim)).fetchone()
-        perd = c.execute("select count(*) from prospeccao where conta_id=%s and status='perdido' "
-                         "and atualizado_em>=%s and atualizado_em<%s", (conta_id, ini, fim)).fetchone()[0]
         ganhos, ganhos_c = int(g[0] or 0), int(g[1] or 0)
-        conv = round(100 * ganhos / (ganhos + perd)) if (ganhos + perd) else None
+        # CONVERSÃO = fechados ÷ leads novos do período (aprovado pelo dono em
+        # 24/09/2026). Antes era fechados ÷ (fechados + perdidos): o lead em aberto
+        # não entrava, e o número media quanto se marca como perdido, não quanto se
+        # vende — na Prime, três vendedores com 3 contratos em ~73 leads apareciam
+        # com 13%, 60% e 75%.
+        conv = round(100 * ganhos / novos) if novos else None
         funil = _funil(c, conta_id)
         maxn = max([f["n"] for f in funil] + [1])
         for f in funil:
@@ -768,12 +788,19 @@ def placar(pool, conta_id: int, periodo: str = "mes") -> list[dict]:
                 "and " + _ABERTO_P, (conta_id, mid)).fetchone()[0]
             g = c.execute("select count(*), coalesce(sum(" + _VALOR_FECHADO + "),0) from prospeccao p "
                           "where p.conta_id=%s and p.vendedor_id=%s and p.status in " + _fr.sql_fechadas("p")
-                          + " and p.atualizado_em>=%s and p.atualizado_em<%s",
+                          + " and " + _FECHOU_EM + ">=%s and " + _FECHOU_EM + "<%s",
                           (conta_id, mid, ini, fim)).fetchone()
-            perd = c.execute("select count(*) from prospeccao where conta_id=%s and vendedor_id=%s and status='perdido' "
-                             "and atualizado_em>=%s and atualizado_em<%s", (conta_id, mid, ini, fim)).fetchone()[0]
+            perd = c.execute("select count(*) from prospeccao p where p.conta_id=%s and p.vendedor_id=%s "
+                             "and p.status='perdido' and " + _PERDEU_EM + ">=%s and " + _PERDEU_EM + "<%s",
+                             (conta_id, mid, ini, fim)).fetchone()[0]
+            # os leads que ELE recebeu no período, e quantos deles seguem em aberto
+            rec = c.execute("select count(*), count(*) filter (where " + _ABERTO_P + ") from prospeccao p "
+                            "where p.conta_id=%s and p.vendedor_id=%s and coalesce(p.estagio,'lead')='lead' "
+                            "and p.criado_em>=%s and p.criado_em<%s", (conta_id, mid, ini, fim)).fetchone()
             ganhos, rs_c = int(g[0] or 0), int(g[1] or 0)
-            conv = round(100 * ganhos / (ganhos + perd)) if (ganhos + perd) else None
+            recebidos, abertos_rec = int(rec[0] or 0), int(rec[1] or 0)
+            # fechados ÷ leads recebidos (24/09/2026) — ver a nota na `visao`
+            conv = round(100 * ganhos / recebidos) if recebidos else None
             resp = c.execute(
                 """select avg(extract(epoch from (fo.po - cv.criado_em))/60) from conversas cv
                      join lateral (select min(criado_em) po from mensagens
@@ -784,6 +811,7 @@ def placar(pool, conta_id: int, periodo: str = "mes") -> list[dict]:
                 "id": mid, "nome": nome, "pausado": bool(pausado),
                 "fila": fila, "atendendo": atend, "ganhos": ganhos, "rs_centavos": rs_c, "rs": _reais(rs_c),
                 "conversao": (f"{conv}%" if conv is not None else "—"),
+                "recebidos": recebidos, "perdidos": int(perd or 0), "abertos_recebidos": abertos_rec,
                 "resp": (f"{round(resp)} min" if resp else "—"),
             })
     out.sort(key=lambda x: (x["rs_centavos"], x["ganhos"], x["fila"]), reverse=True)
@@ -812,6 +840,8 @@ def vendedor(pool, conta_id: int, membro_id: int) -> dict | None:
     return {"id": membro_id, "nome": m[0], "pausado": bool(m[1]), "papel": m[2],
             "fila": base.get("fila", len(leads)), "ganhos": base.get("ganhos", 0),
             "rs": base.get("rs", "R$ 0"), "conversao": base.get("conversao", "—"),
+            "recebidos": base.get("recebidos", 0), "perdidos": base.get("perdidos", 0),
+            "abertos_recebidos": base.get("abertos_recebidos", 0),
             "resp": base.get("resp", "—"), "leads": leads}
 
 

@@ -7489,6 +7489,15 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
       <span>até</span><input type="date" name="ate" value="{{ ate }}">
     </span>
     {% endif %}
+    {% if dados.filtro_extra and dados.filtro_extra.datas_por %}
+    {# Contratos: o período recorta pela assinatura (a data da venda, a mesma do
+       cockpit) ou pela criação. Links, como a espécie: cada um é uma URL. #}
+    <span style="display:inline-flex;align-items:center;gap:.4rem;white-space:nowrap"><span class="mut">período pela</span>
+    <span class="rel-esp">{% for v, rot in dados.filtro_extra.datas_por %}<a
+      href="/painel/relatorios?tipo={{ tipo }}&periodo={{ periodo }}&data_por={{ v }}&status={{ dados.filtro_extra.status_sel }}&vendedor={{ dados.filtro_extra.vendedor_sel }}&q={{ dados.filtro_extra.busca_sel|urlencode }}{% if de %}&de={{ de }}{% endif %}{% if ate %}&ate={{ ate }}{% endif %}"
+      class="{{ 'on' if v==dados.filtro_extra.data_por_sel }}">{{ rot }}</a>{% endfor %}</span></span>
+    <input type="hidden" name="data_por" value="{{ dados.filtro_extra.data_por_sel }}">
+    {% endif %}
     {% if dados.filtro_extra %}
     {# O MESMO parâmetro `status` serve os dois: nas abas de orçamento/contrato ele
        corta por situação; em Leads do chip, por chip. Quem manda é a aba, que
@@ -7531,7 +7540,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
        template (ver o comentário da linha da ação), daí o `|e`. #}
     {% else %}<span class="mut">{{ (dados.periodo_label or 'período')|e }}: {{ periodo_rotulo }}</span>{% endif %}
     <span style="flex:1"></span>
-    <a class="rel-pdf" href="/painel/relatorios/pdf?tipo={{ tipo }}&periodo={{ periodo }}{% if dados.filtro_extra %}&status={{ dados.filtro_extra.chip_sel if dados.filtro_extra.chips else dados.filtro_extra.status_sel }}&vendedor={{ dados.filtro_extra.vendedor_sel }}&q={{ dados.filtro_extra.busca_sel|urlencode }}{% if dados.filtro_extra.especies %}&especie={{ dados.filtro_extra.especie_sel }}{% endif %}{% endif %}{% if de %}&de={{ de }}{% endif %}{% if ate %}&ate={{ ate }}{% endif %}" target="_blank" rel="noopener">🖨️ Exportar PDF</a>
+    <a class="rel-pdf" href="/painel/relatorios/pdf?tipo={{ tipo }}&periodo={{ periodo }}{% if dados.filtro_extra %}&status={{ dados.filtro_extra.chip_sel if dados.filtro_extra.chips else dados.filtro_extra.status_sel }}&vendedor={{ dados.filtro_extra.vendedor_sel }}&q={{ dados.filtro_extra.busca_sel|urlencode }}{% if dados.filtro_extra.especies %}&especie={{ dados.filtro_extra.especie_sel }}{% endif %}{% if dados.filtro_extra.datas_por %}&data_por={{ dados.filtro_extra.data_por_sel }}{% endif %}{% endif %}{% if de %}&de={{ de }}{% endif %}{% if ate %}&ate={{ ate }}{% endif %}" target="_blank" rel="noopener">🖨️ Exportar PDF</a>
   </form>
 
   <div class="rel-metricas">

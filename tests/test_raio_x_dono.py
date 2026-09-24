@@ -72,14 +72,14 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now());
-create table orcamentos (id bigserial primary key, cliente text, empresa text, numero int,
+create table orcamentos (id bigserial primary key, criado_por text, cliente text, empresa text, numero int,
   cliente_id bigint, status text default 'rascunho',
   primeiro_ano_centavos bigint default 0, mensal_centavos bigint default 0, setup_centavos bigint default 0,
   itens jsonb, criado_em timestamptz default now(), aprovada_em timestamptz, aprovada_por text,
   sinal_pago_em timestamptz);
 -- ver o comentário gêmeo em tests/test_raio_x.py
 create table clientes (id bigserial primary key, conta_id bigint, nome text);
-create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
+create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint, substitui_id bigint,
   status text default 'enviado', valor_centavos bigint, assinado_em timestamptz,
   numero int, enviado_em timestamptz, criado_em timestamptz default now());
 create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
@@ -832,3 +832,69 @@ def test_parado_em_casa_nao_aparece_em_quem_nao_tem_contrato(pool, zaq, monkeypa
 
     html = bytes(prx.painel_raio_x(_req()).body).decode("utf-8")
     assert "parado em casa" not in html.lower()
+
+
+# ------------------------------------------------------------------ o contrato é a venda (24/09/2026)
+#
+# Na Prime, setembro tinha 10 contratos assinados e o Raio-X dizia 8: os dois
+# feitos direto pelo orçamento, sem lead (Josinalva e Viviane), não entravam,
+# porque o contrato só chegava ao placar por `join prospeccao`. O vendedor do
+# contrato é quem fez o orçamento — a régua do cockpit e do relatório.
+
+@pytest.fixture(scope="module")
+def sem_lead(pool):
+    with pool.connection() as c:
+        conta = c.execute("insert into contas (nome, nome_fantasia) values ('Prime 2','Prime 2') returning id").fetchone()[0]
+        j = c.execute("insert into membros (conta_id, nome) values (%s,'Jacqueline') returning id", (conta,)).fetchone()[0]
+        p = c.execute("insert into membros (conta_id, nome) values (%s,'Pedro') returning id", (conta,)).fetchone()[0]
+
+        def orc(criado_por, nome="x"):
+            return c.execute("insert into orcamentos (cliente, criado_por, status, primeiro_ano_centavos, criado_em) "
+                             "values (%s,%s,'fechado',1,%s) returning id", (nome, criado_por, _dt(1, 9, 9))).fetchone()[0]
+
+        def ct(o, valor, quando, status="assinado", substitui=None):
+            c.execute("insert into contratos (conta_id, orcamento_id, status, valor_centavos, assinado_em, substitui_id) "
+                      "values (%s,%s,%s,%s,%s,%s)", (conta, o, status, valor, quando, substitui))
+
+        # com lead do Pedro, orçamento sem autor numérico → vale o vendedor do lead
+        lead = c.execute("insert into prospeccao (conta_id, vendedor_id, contato, status, evento_tipo, criado_em) "
+                         "values (%s,%s,'Bianca','ganho','Casamento',%s) returning id", (conta, p, _dt(1, 9, 9))).fetchone()[0]
+        o1 = orc("dono", "Bianca")
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (o1, lead))
+        ct(o1, 300000, _dt(3, 9, 10))
+        # SEM lead, orçamento feito pela Jacqueline
+        ct(orc(str(j), "Josinalva"), 200000, _dt(4, 9, 10))
+        # não contam: rescindido, aditivo (substitui outro) e assinado em agosto
+        ct(orc(str(j)), 999900, _dt(4, 9, 11), status="rescindido")
+        ct(orc(str(j)), 888800, _dt(4, 9, 12), substitui=1)
+        ct(orc(str(j)), 777700, _dt(28, 8, 10))
+        c.commit()
+    return {"conta": conta, "j": j, "p": p}
+
+
+def test_contrato_sem_lead_entra_no_placar_do_raio_x(pool, sem_lead):
+    d = rxd.dono(pool, sem_lead["conta"], _f(), AGORA, perfil=EVENTOS)
+    assert d["placar"]["contratos"] == 2 and d["placar"]["contratos_valor"] == 500000
+    # 25 a 31/08 é o período anterior: o de 28/08 aparece lá, e só ele
+    assert d["anterior"]["contratos"] == 1 and d["anterior"]["contratos_valor"] == 777700
+
+
+def test_filtro_de_vendedor_no_raio_x_segue_quem_fez_o_orcamento(pool, sem_lead):
+    d = rxd.dono(pool, sem_lead["conta"], _f(vendedor=str(sem_lead["j"])), AGORA, perfil=EVENTOS)
+    assert d["placar"]["contratos"] == 1 and d["placar"]["contratos_valor"] == 200000
+    d = rxd.dono(pool, sem_lead["conta"], _f(vendedor=str(sem_lead["p"])), AGORA, perfil=EVENTOS)
+    assert d["placar"]["contratos"] == 1 and d["placar"]["contratos_valor"] == 300000
+
+
+def test_filtro_do_lead_deixa_de_fora_o_contrato_sem_lead(pool, sem_lead):
+    # não se sabe o tipo de festa de um contrato sem lead: ele não entra em "Casamento"
+    d = rxd.dono(pool, sem_lead["conta"], _f(tipo="Casamento"), AGORA, perfil=EVENTOS)
+    assert d["placar"]["contratos"] == 1 and d["placar"]["contratos_valor"] == 300000
+
+
+def test_linha_do_vendedor_no_raio_x_traz_o_contrato_sem_lead(pool, sem_lead):
+    d = rxd.dono(pool, sem_lead["conta"], _f(), AGORA, perfil=EVENTOS)
+    por = {v["primeiro_nome"]: v["semana"] for v in d["vendedores"]}
+    assert [x["nome"] for x in por["Jacqueline"]["contratos"]] == ["Josinalva"]
+    assert por["Jacqueline"]["contratos_valor"] == 200000
+    assert [x["nome"] for x in por["Pedro"]["contratos"]] == ["Bianca"]

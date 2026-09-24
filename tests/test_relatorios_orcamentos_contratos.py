@@ -399,3 +399,48 @@ def test_contratos_metrica_separa_pronto_de_aguardando(pool, cen):
     assert metricas["Assinados"].startswith("1 ")
     # o total geral continua somando os quatro grupos — nada se perde na separação
     assert metricas["Total geral"] == "R$ 3.000,00"
+
+
+# ------------------------------------------------------------------ período pela assinatura (24/09/2026)
+#
+# Setembro na Prime mostrava 8 contratos, e 10 foram assinados no mês: os nº 2 e
+# 4 foram criados em agosto. O período passa a recortar pela ASSINATURA (a data da
+# venda, a mesma do cockpit), com a criação a um clique.
+
+def _cenario_datas(pool, cen):
+    from datetime import datetime, timezone
+    agora = datetime.now(timezone.utc)
+    velho = _contrato(pool, cen["conta"], _orc(pool, cen["conta"], cliente="Criado antes"),
+                      status="assinado", valor=300000, assinado_em=agora)
+    _contrato(pool, cen["conta"], _orc(pool, cen["conta"], cliente="Ainda sem assinar"), valor=100000)
+    with pool.connection() as c:
+        c.execute("update contratos set criado_em = now() - interval '70 days' where id=%s", (velho,))
+        c.commit()
+
+
+def test_contratos_por_padrao_recortam_pela_assinatura(pool, cen):
+    _cenario_datas(pool, cen)
+    dados = rel._dados_contratos(pool, cen["conta"], "mes", "", "", "")
+    assert [l["cliente"] for l in dados["linhas"]] == ["Criado antes"]
+    assert dados["filtro_extra"]["data_por_sel"] == "assinatura"
+    assert dados["periodo_label"] == "assinados no período"
+    assert ("Assinados", "1 · R$ 3.000,00") in [(k, v.replace("\xa0", " ")) for k, v in dados["metricas"]]
+
+
+def test_contratos_pela_criacao_mostram_o_criado_no_periodo(pool, cen):
+    _cenario_datas(pool, cen)
+    dados = rel._dados_contratos(pool, cen["conta"], "mes", "", "", "", data_por="criacao")
+    assert [l["cliente"] for l in dados["linhas"]] == ["Ainda sem assinar"]
+    assert dados["periodo_label"] == "criados no período"
+
+
+def test_data_por_invalido_cai_na_assinatura(pool, cen):
+    _cenario_datas(pool, cen)
+    dados = rel._dados_contratos(pool, cen["conta"], "mes", "", "", "", data_por="xpto")
+    assert dados["filtro_extra"]["data_por_sel"] == "assinatura"
+
+
+def test_a_aba_repassa_o_data_por(pool, cen):
+    _cenario_datas(pool, cen)
+    dados = rel.TIPOS["contratos"]["montar"](pool, cen["conta"], "mes", data_por="criacao")
+    assert dados["filtro_extra"]["data_por_sel"] == "criacao"

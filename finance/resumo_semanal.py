@@ -54,6 +54,8 @@ import logging
 import re
 from datetime import date, datetime, timedelta, timezone
 
+from finance import cockpit_dono as _cd
+
 _log = logging.getLogger(__name__)
 
 #: -3h fixo, como o resto do painel. O país não tem horário de verão desde 2019.
@@ -268,14 +270,21 @@ def _extras(pool, conta_id: int, ini: datetime, fim: datetime, agora: datetime) 
                              where p.vendedor_id = m.id and e.tipo='empresa' and e.tipo_evento is null
                                and coalesce(e.status,'ativo')='ativo' and e.desfecho='realizado'
                                and e.inicio >= %s and e.inicio < %s),
+                           -- OS CONTRATOS DELE pela régua do Raio-X e do cockpit
+                           -- (24/09/2026): contrato vivo, com ou sem lead, de quem fez
+                           -- o orçamento. Com o join antigo por lead, a capa dizia "3
+                           -- contratos" e a Jacqueline, dona de 2 deles, aparecia aqui
+                           -- com 0 — os dois foram feitos direto pelo orçamento.
                            (select count(*) from contratos c
-                              join orcamentos o on o.id = c.orcamento_id
-                              join prospeccao p on p.orcamento_id = o.id
-                             where p.vendedor_id = m.id and c.assinado_em >= %s and c.assinado_em < %s),
+                              left join orcamentos o on o.id = c.orcamento_id
+                             where c.conta_id = m.conta_id and """ + _cd.SQL_CT_VIVO + """
+                               and """ + _cd.SQL_CT_VENDEDOR + """ = m.id
+                               and c.assinado_em >= %s and c.assinado_em < %s),
                            (select coalesce(sum(c.valor_centavos),0) from contratos c
-                              join orcamentos o on o.id = c.orcamento_id
-                              join prospeccao p on p.orcamento_id = o.id
-                             where p.vendedor_id = m.id and c.assinado_em >= %s and c.assinado_em < %s),
+                              left join orcamentos o on o.id = c.orcamento_id
+                             where c.conta_id = m.conta_id and """ + _cd.SQL_CT_VIVO + """
+                               and """ + _cd.SQL_CT_VENDEDOR + """ = m.id
+                               and c.assinado_em >= %s and c.assinado_em < %s),
                            (select count(*) from prospeccao p
                              where p.vendedor_id = m.id and p.status not in ('ganho','perdido'))
                       from membros m

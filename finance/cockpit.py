@@ -3610,5 +3610,9 @@ def remuneracao(pool, conta_id: int, membro_id: int, periodo: str = "mes") -> di
         "recebidos": int((linha or {}).get("recebidos") or 0),
         "resp": (linha or {}).get("resp") or "—",
         "fila": int((linha or {}).get("fila") or 0),
+        # conta que trabalha com contrato: o "fechado" são os CONTRATOS ASSINADOS
+        # dele (24/09/2026, ver cockpit_dono.SQL_CT_VIVO), não a previsão do funil
+        "por_contrato": bool((linha or {}).get("por_contrato")),
+        "sem_lead": int((linha or {}).get("sem_lead") or 0),
         "posicao": posicao, "total_equipe": len(ordem),
     }

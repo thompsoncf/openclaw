@@ -876,17 +876,38 @@ def _aditivos_vigentes(pool, conta_id, contrato_ids) -> dict:
     return {r[0]: {"ordem": r[1], "valor": r[2]} for r in rows}
 
 
-def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -> dict:
+def _brt(dt):
+    """O instante no fuso de Brasília (a sessão do banco devolve em UTC)."""
+    return dt.astimezone(_ag.BRT) if hasattr(dt, "astimezone") and getattr(dt, "tzinfo", None) else dt
+
+
+#: POR QUAL DATA o período recorta os contratos. Pedido do dono em 24/09/2026
+#: (mockup docs/mockups/prime_cockpit_contratos.html): o relatório só filtrava pela
+#: CRIAÇÃO, e "Setembro" na Prime mostrava 8 contratos quando 10 foram assinados no
+#: mês — dois criados em agosto ficavam de fora. A assinatura é a data da venda, a
+#: mesma do cockpit; a criação continua a um clique.
+CT_DATA_POR = [("assinatura", "Assinatura"), ("criacao", "Criação")]
+
+
+def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
+                     data_por: str = "assinatura") -> dict:
     """TODOS os contratos vivos (sem os substituídos por aditivo — mesma trava de
     `finance/contrato.por_orcamento`). Vendedor vem do orçamento de origem: o
     contrato quase nunca grava `criado_por` (ver finance/contrato.py). Cliente
     também vem do orçamento de origem, com a mesma regra `empresa or cliente`
     de `_dados_orcamentos` — mesmo formulário, mesma confusão de campo."""
     ini, fim = _intervalo(periodo)
+    data_por = data_por if data_por in dict(CT_DATA_POR) else "assinatura"
     where = ["c.conta_id=%s", "c.substitui_id is null"]
     params: list = [conta_id]
     if periodo != "todos":
-        where.append("c.criado_em::date >= %s and c.criado_em::date <= %s")
+        # a data em BRT, como o cockpit: assinado às 22h de 30/09 é setembro. O que
+        # AINDA NÃO FOI ASSINADO não tem data de assinatura e vale pela criação —
+        # sem isso "Aguardando assinatura" e "Prontos, não enviados" ficavam
+        # sempre em zero na visão padrão, e o dono perdia os pendentes do mês.
+        col = ("(coalesce(c.assinado_em, c.criado_em) at time zone 'America/Sao_Paulo')::date"
+               if data_por == "assinatura" else "(c.criado_em at time zone 'America/Sao_Paulo')::date")
+        where.append(f"{col} >= %s and {col} <= %s")
         params += [ini, fim]
     if vendedor_sel:
         where.append("o.criado_por = %s")
@@ -961,11 +982,14 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -
         vig = vigentes.get(r[10])
         linhas.append({
             "numero": r[0], "cliente": r[1], "status": rotulo, "status_cor": cor,
-            "criado_em": _fmt(r[3]), "assinado_em": _fmt(r[4]),
+            # em BRT, o mesmo fuso do corte: a sessão do banco é UTC, e o nº 7 da
+            # Prime (assinado 08/09 às 21h27) aparecia "09/09" num relatório que o
+            # conta em 08/09
+            "criado_em": _fmt(_brt(r[3])), "assinado_em": _fmt(_brt(r[4])),
             "vendedor": r[5],
             "valor_centavos": int((vig or {}).get("valor") or r[6] or 0),
             "aditivo": f"{vig['ordem']}º" if vig else "—",
-            "enviado_em": _fmt(r[8]),
+            "enviado_em": _fmt(_brt(r[8])),
             "orcamento": f"nº {r[9]}" if r[9] else "—",
             "acao_href": f"/contrato/{r[7]}" if r[7] else None,
         })
@@ -989,7 +1013,11 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca) -
             "status_opcoes": CT_STATUS_OPCOES, "status_sel": status_sel,
             "vendedores": _vendedores_da_conta(pool, conta_id),
             "vendedor_sel": str(vendedor_sel or ""), "busca_sel": busca or "",
+            "datas_por": CT_DATA_POR, "data_por_sel": data_por,
         },
+        "periodo_label": (None if periodo == "todos"
+                          else "período pela assinatura" if data_por == "assinatura"
+                          else "período pela criação"),
     }
 
 
@@ -1836,7 +1864,8 @@ TIPOS = {
     "orcamentos": {"label": "Orçamentos", "montar": lambda pool, cid, per, **f: _dados_orcamentos(
         pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
     "contratos": {"label": "Contratos", "montar": lambda pool, cid, per, **f: _dados_contratos(
-        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""))},
+        pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""),
+        data_por=f.get("data_por") or "assinatura")},
     "agenda": {"label": "Agenda", "montar": lambda pool, cid, per, **f: _dados_agenda(
         pool, cid, per, f.get("status", ""), f.get("vendedor", ""), f.get("q", ""),
         especie=f.get("especie", ""), de=f.get("de"), ate=f.get("ate"))},
@@ -1865,13 +1894,13 @@ def _rotulo_periodo(tipo: str, periodo: str, de, ate) -> str:
 
 def _contexto(conta_id: int, tipo: str, periodo: str, status: str = "",
               vendedor: str = "", q: str = "", especie: str = "", de: str = "",
-              ate: str = ""):
+              ate: str = "", data_por: str = ""):
     tipo = tipo if tipo in TIPOS else "vendas"
     validos = {v for v, _ in periodos_da_aba(tipo)}
     periodo = periodo if periodo in validos else "mes"
     dados = TIPOS[tipo]["montar"](get_pool(), conta_id, periodo, status=status,
                                   vendedor=vendedor, q=q, especie=especie,
-                                  de=de, ate=ate)
+                                  de=de, ate=ate, data_por=data_por)
     return tipo, periodo, dados
 
 
@@ -2001,12 +2030,13 @@ def painel_agenda_cliente_salvar(request: Request, evento_id: int,
 @router.get("/painel/relatorios", response_class=HTMLResponse)
 def painel_relatorios(request: Request, tipo: str = "vendas", periodo: str = "mes",
                       status: str = "", vendedor: str = "", q: str = "",
-                      especie: str = "", de: str = "", ate: str = ""):
+                      especie: str = "", de: str = "", ate: str = "",
+                      data_por: str = ""):
     conta, redir = _pode_ver(request)
     if redir is not None:
         return redir
     tipo, periodo, dados = _contexto(conta[0], tipo, periodo, status, vendedor, q,
-                                     especie, de, ate)
+                                     especie, de, ate, data_por)
     # A caixa de liberar só existe pra QUEM LIBERA. `financeiro` (o gate desta
     # tela) deixa ver e conciliar; liberar conta a pagar é `gerir`, que no modelo
     # de papéis já é exclusivo do dono. Sem este corte, o gerente veria caixa e
@@ -2029,13 +2059,14 @@ def painel_relatorios(request: Request, tipo: str = "vendas", periodo: str = "me
 @router.get("/painel/relatorios/pdf", response_class=HTMLResponse)
 def painel_relatorios_pdf(request: Request, tipo: str = "vendas", periodo: str = "mes",
                           status: str = "", vendedor: str = "", q: str = "",
-                          especie: str = "", de: str = "", ate: str = ""):
+                          especie: str = "", de: str = "", ate: str = "",
+                          data_por: str = ""):
     conta, redir = _pode_ver(request)
     if redir is not None:
         return redir
     pool = get_pool()
     tipo, periodo, dados = _contexto(conta[0], tipo, periodo, status, vendedor, q,
-                                     especie, de, ate)
+                                     especie, de, ate, data_por)
     from datetime import datetime
     return HTMLResponse(_env.get_template("relatorio_pdf").render(
         dados=dados, tipo=tipo, periodo=periodo,

@@ -44,14 +44,14 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now());
-create table orcamentos (id bigserial primary key, cliente text, empresa text, numero int,
+create table orcamentos (id bigserial primary key, criado_por text, cliente text, empresa text, numero int,
   cliente_id bigint, status text default 'rascunho',
   primeiro_ano_centavos bigint default 0, criado_em timestamptz default now(),
   aprovada_em timestamptz, aprovada_por text, sinal_pago_em timestamptz);
 -- o CADASTRO do cliente: primeiro degrau de `vendas.nome_do_orcamento`, e por isso
 -- o Raio-X faz left join nela pra montar o nome de cada linha.
 create table clientes (id bigserial primary key, conta_id bigint, nome text);
-create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
+create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint, substitui_id bigint,
   status text default 'enviado', valor_centavos bigint, assinado_em timestamptz,
   numero int, enviado_em timestamptz, criado_em timestamptz default now());
 create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,

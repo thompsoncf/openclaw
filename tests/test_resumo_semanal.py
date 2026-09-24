@@ -84,11 +84,14 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   perda_motivo text, temperatura text, segmento text, origem text,
   whatsapp text, telefone text,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
-create table orcamentos (id bigserial primary key, conta_id bigint, cliente text,
+create table orcamentos (id bigserial primary key, conta_id bigint, criado_por text, cliente text,
   status text default 'rascunho', setup_centavos bigint default 0, mensal_centavos bigint default 0,
   primeiro_ano_centavos bigint, sinal_centavos int, sinal_pago_em timestamptz,
   aprovada_em timestamptz, criado_em timestamptz default now());
 create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
+  -- o contrato VIVO (sem aditivo por cima) e o autor do orçamento: o placar do
+  -- Raio-X conta a venda pelo contrato assinado desde 24/09/2026 e lê os dois
+  substitui_id bigint,
   status text default 'enviado', valor_centavos bigint default 0,
   enviado_em timestamptz, assinado_em timestamptz, criado_em timestamptz default now());
 create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
@@ -271,6 +274,30 @@ def test_o_email_do_vendedor_nao_compara_com_colega(pool, cena):
     assert "Jacqueline" not in do_vend
     assert "Sua semana, Pedro" in do_vend
     # e abre pelo que ele FEZ: o contrato dele
+    assert "Você fechou 1 contrato" in do_vend
+
+
+def test_o_contrato_sem_lead_conta_pra_quem_fez_o_orcamento(pool, cena):
+    """A capa e o bloco por vendedor contam o MESMO contrato (24/09/2026). Na Prime,
+    Josinalva e Viviane assinaram direto pelo orçamento, sem lead: a capa dizia 3
+    contratos na semana e a Jacqueline, dona dos dois, aparecia aqui com 0."""
+    with pool.connection() as c:
+        o = c.execute("""insert into orcamentos (conta_id, criado_por, cliente, status,
+                             primeiro_ano_centavos, criado_em)
+                         values (%s,%s,'Josinalva','fechado',500000,%s) returning id""",
+                      (cena["conta"], str(cena["v2"]), _dt(10))).fetchone()[0]
+        c.execute("""insert into contratos (conta_id, orcamento_id, status, valor_centavos,
+                         enviado_em, assinado_em, criado_em)
+                     values (%s,%s,'assinado',500000,%s,%s,%s)""",
+                  (cena["conta"], o, _dt(10), _dt(11), _dt(10)))
+        c.commit()
+    d = rs.montar(pool, cena["conta"], AGORA)
+    assert int(d["placar"]["contratos"]) == 2
+    por = {v["primeiro"]: v for v in d["extras"]["por_vendedor"]}
+    assert por["Jacqueline"]["fechou"] == 1 and por["Jacqueline"]["valor"] == 500000
+    assert por["Pedro"]["fechou"] == 1 and por["Pedro"]["valor"] == 750000
+    assert sum(v["fechou"] for v in por.values()) == int(d["placar"]["contratos"])
+    do_vend = rsh.corpo(d, "vendedor", nome="Jacqueline", membro_id=cena["v2"])
     assert "Você fechou 1 contrato" in do_vend
 
 

@@ -7467,9 +7467,9 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     {# Links, e não radio: cada espécie é uma URL própria, que o dono pode salvar
        nos favoritos ("as visitas deste mês") e mandar por WhatsApp pra equipe. #}
     <span class="rel-esp">{% for v, rot in dados.filtro_extra.especies %}<a
-      href="/painel/relatorios?tipo={{ tipo }}&periodo={{ periodo }}&especie={{ v }}{% if de %}&de={{ de }}{% endif %}{% if ate %}&ate={{ ate }}{% endif %}"
+      href="/painel/relatorios?tipo={{ tipo }}&periodo={{ periodo }}&especie={{ v }}{% if de %}&de={{ de|urlencode }}{% endif %}{% if ate %}&ate={{ ate|urlencode }}{% endif %}"
       class="{{ 'on' if v==dados.filtro_extra.especie_sel }}">{{ rot }}</a>{% endfor %}</span>
-    <input type="hidden" name="especie" value="{{ dados.filtro_extra.especie_sel }}">
+    <input type="hidden" name="especie" value="{{ dados.filtro_extra.especie_sel|e }}">
     {% endif %}
     {# Escolher "Período específico" NÃO envia o formulário: enviaria com as
        duas datas vazias e o resultado voltaria como mês corrente, parecendo que
@@ -7485,9 +7485,18 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
        aparelho brasileiro e manda AAAA-MM-DD no formulário; quem formata é ele. #}
     {% if tem_periodo_livre %}
     <span class="rel-datas" id="rel-datas" {% if periodo != 'personalizado' %}style="display:none"{% endif %}>
-      <span>de</span><input type="date" name="de" value="{{ de }}">
-      <span>até</span><input type="date" name="ate" value="{{ ate }}">
+      <span>de</span><input type="date" name="de" value="{{ de|e }}">
+      <span>até</span><input type="date" name="ate" value="{{ ate|e }}">
     </span>
+    {% endif %}
+    {% if dados.filtro_extra and dados.filtro_extra.datas_por %}
+    {# Contratos: o período recorta pela assinatura (a data da venda, a mesma do
+       cockpit) ou pela criação. Links, como a espécie: cada um é uma URL. #}
+    <span style="display:inline-flex;align-items:center;gap:.4rem;white-space:nowrap"><span class="mut">período pela</span>
+    <span class="rel-esp">{% for v, rot in dados.filtro_extra.datas_por %}<a
+      href="/painel/relatorios?tipo={{ tipo }}&periodo={{ periodo }}&data_por={{ v }}&status={{ dados.filtro_extra.status_sel|urlencode }}&vendedor={{ dados.filtro_extra.vendedor_sel|urlencode }}&q={{ dados.filtro_extra.busca_sel|urlencode }}{% if de %}&de={{ de|urlencode }}{% endif %}{% if ate %}&ate={{ ate|urlencode }}{% endif %}"
+      class="{{ 'on' if v==dados.filtro_extra.data_por_sel }}">{{ rot }}</a>{% endfor %}</span></span>
+    <input type="hidden" name="data_por" value="{{ dados.filtro_extra.data_por_sel }}">
     {% endif %}
     {% if dados.filtro_extra %}
     {# O MESMO parâmetro `status` serve os dois: nas abas de orçamento/contrato ele
@@ -7510,7 +7519,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
       {% for vid, vnome in dados.filtro_extra.vendedores %}<option value="{{ vid }}"
         {% if vid|string==dados.filtro_extra.vendedor_sel %}selected{% endif %}>{{ vnome }}</option>{% endfor %}
     </select>
-    <input type="search" name="q" value="{{ dados.filtro_extra.busca_sel }}" placeholder="🔎 buscar {{ 'lead' if dados.filtro_extra.chips is defined and dados.filtro_extra.chips else 'cliente' }}…">
+    <input type="search" name="q" value="{{ dados.filtro_extra.busca_sel|e }}" placeholder="🔎 buscar {{ 'lead' if dados.filtro_extra.chips is defined and dados.filtro_extra.chips else 'cliente' }}…">
     <button type="submit" class="rel-filtrar">Filtrar</button>
     {% if dados.filtro_extra.sem_tipo %}<span class="mut" title="Festa cadastrada sem escolher o tipo — conta no total, mas fica de fora da conta por tipo">⚠ {{ dados.filtro_extra.sem_tipo }} sem tipo</span>{% endif %}
     {% endif %}
@@ -7531,7 +7540,7 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
        template (ver o comentário da linha da ação), daí o `|e`. #}
     {% else %}<span class="mut">{{ (dados.periodo_label or 'período')|e }}: {{ periodo_rotulo }}</span>{% endif %}
     <span style="flex:1"></span>
-    <a class="rel-pdf" href="/painel/relatorios/pdf?tipo={{ tipo }}&periodo={{ periodo }}{% if dados.filtro_extra %}&status={{ dados.filtro_extra.chip_sel if dados.filtro_extra.chips else dados.filtro_extra.status_sel }}&vendedor={{ dados.filtro_extra.vendedor_sel }}&q={{ dados.filtro_extra.busca_sel|urlencode }}{% if dados.filtro_extra.especies %}&especie={{ dados.filtro_extra.especie_sel }}{% endif %}{% endif %}{% if de %}&de={{ de }}{% endif %}{% if ate %}&ate={{ ate }}{% endif %}" target="_blank" rel="noopener">🖨️ Exportar PDF</a>
+    <a class="rel-pdf" href="/painel/relatorios/pdf?tipo={{ tipo }}&periodo={{ periodo }}{% if dados.filtro_extra %}&status={{ (dados.filtro_extra.chip_sel if dados.filtro_extra.chips else dados.filtro_extra.status_sel)|urlencode }}&vendedor={{ dados.filtro_extra.vendedor_sel|urlencode }}&q={{ dados.filtro_extra.busca_sel|urlencode }}{% if dados.filtro_extra.especies %}&especie={{ dados.filtro_extra.especie_sel|urlencode }}{% endif %}{% if dados.filtro_extra.datas_por %}&data_por={{ dados.filtro_extra.data_por_sel }}{% endif %}{% endif %}{% if de %}&de={{ de|urlencode }}{% endif %}{% if ate %}&ate={{ ate|urlencode }}{% endif %}" target="_blank" rel="noopener">🖨️ Exportar PDF</a>
   </form>
 
   <div class="rel-metricas">

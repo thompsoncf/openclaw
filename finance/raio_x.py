@@ -32,6 +32,8 @@ import statistics
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from finance.cockpit_dono import SQL_CT_VENDEDOR, SQL_CT_VIVO
+
 _log = logging.getLogger("finance.raio_x")
 _TZ = ZoneInfo("America/Sao_Paulo")
 
@@ -306,12 +308,20 @@ def sua_semana(pool, conta_id: int, membro_id: int, ini: datetime, fim: datetime
                       and m.direcao = 'out' and m.criado_em > coalesce(in_.ult_in, '2000-01-01')) = 1
              order by ult limit 8""",
             (conta_id, membro_id, list(ABERTOS), fim)).fetchall()
+        # OS CONTRATOS DELE, pela mesma régua do cockpit e do relatório (24/09/2026):
+        # o vendedor é quem fez o orçamento (na falta, o do lead), e conta o contrato
+        # feito direto pelo orçamento, SEM lead — na Prime eram 2 dos 10 de setembro,
+        # e o Raio-X dizia 8. O lead entra só pro nome, e só um (LATERAL), pra que
+        # orçamento ligado a dois leads não conte o contrato duas vezes.
         assinados = c.execute(f"""
             select {_SQL_NOME.format(o='o')}, c.valor_centavos, c.assinado_em
-              from contratos c join orcamentos o on o.id = c.orcamento_id
-              join prospeccao p on p.orcamento_id = o.id
+              from contratos c
+              left join orcamentos o on o.id = c.orcamento_id
+              left join lateral (select p0.contato, p0.empresa from prospeccao p0
+                                  where p0.orcamento_id = c.orcamento_id and p0.conta_id = c.conta_id
+                                  order by p0.id limit 1) p on true
               {_SQL_NOME_JOIN.format(o='o')}
-             where c.conta_id = %s and p.vendedor_id = %s and c.status = 'assinado'
+             where c.conta_id = %s and {SQL_CT_VIVO} and {SQL_CT_VENDEDOR} = %s
                and c.assinado_em >= %s and c.assinado_em < %s
              order by c.assinado_em desc""", (conta_id, membro_id, ini, fim)).fetchall()
         # OS DOIS DOCUMENTOS, e de quem é a bola. O bloco trazia só "aprovado há N

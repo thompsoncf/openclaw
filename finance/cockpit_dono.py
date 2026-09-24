@@ -164,6 +164,55 @@ _FALAMOS_EM = "coalesce(" + _FALOU + ", p.criado_em)"
 _FALAMOS_OU_NUNCA = "coalesce(" + _FALOU + ", timestamptz 'epoch')"
 
 
+#: A VENDA É O CONTRATO ASSINADO — na conta que trabalha com contrato (aprovado
+#: pelo dono em 24/09/2026, mockup docs/mockups/prime_cockpit_contratos.html). O
+#: lead no "CONTRATO ASSINADO" dizia 9 na Prime quando os contratos eram 11: dois
+#: foram feitos direto pelo orçamento, sem lead, e o cockpit não os via. E a data
+#: da venda é a da ASSINATURA, que está no próprio contrato — não a de quando
+#: alguém arrastou o cartão. Vivo = não substituído por aditivo nem rescindido.
+SQL_CT_VIVO = ("c.substitui_id is null and c.assinado_em is not null "
+                "and c.status in ('assinado','cumprido')")
+
+#: O VENDEDOR DO CONTRATO é quem criou o orçamento (`criado_por`, id do membro ou
+#: a palavra 'dono'); na falta, o vendedor do lead. É o que o relatório de
+#: Contratos já mostra — o cockpit e o relatório passam a dizer o mesmo nome.
+SQL_CT_VENDEDOR = """coalesce(
+        case when o.criado_por ~ '^[0-9]+$' then o.criado_por::bigint end,
+        (select p.vendedor_id from prospeccao p
+          where p.orcamento_id = c.orcamento_id and p.conta_id = c.conta_id
+          order by p.id limit 1))"""
+
+SQL_CT_TEM_LEAD = """(c.orcamento_id is not null and exists (
+        select 1 from prospeccao p
+         where p.orcamento_id = c.orcamento_id and p.conta_id = c.conta_id))"""
+
+
+def _usa_contrato(c, conta_id: int) -> bool:
+    """A conta já assinou algum contrato? Só aí o cockpit conta venda pelo
+    contrato — conta que fecha sem contrato segue pelo lead, como sempre foi.
+    Base sem a tabela (164) cai no jeito antigo."""
+    try:
+        with c.transaction():
+            r = c.execute("select exists(select 1 from contratos c where c.conta_id=%s and "
+                          + SQL_CT_VIVO + ")", (conta_id,)).fetchone()
+        return bool(r and r[0])
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _contratos_por_vendedor(c, conta_id: int, ini, fim) -> dict:
+    """{membro_id | None: (contratos, centavos, sem_lead)} dos contratos
+    assinados no período."""
+    rows = c.execute(
+        "select v.mid, count(*), coalesce(sum(v.valor),0), count(*) filter (where not v.tem_lead) "
+        "from (select coalesce(c.valor_centavos,0) valor, " + SQL_CT_VENDEDOR + " mid, "
+        + SQL_CT_TEM_LEAD + " tem_lead "
+        "from contratos c left join orcamentos o on o.id=c.orcamento_id and o.conta_id=c.conta_id "
+        "where c.conta_id=%s and " + SQL_CT_VIVO + " and c.assinado_em>=%s and c.assinado_em<%s) v "
+        "group by v.mid", (conta_id, ini, fim)).fetchall()
+    return {r[0]: (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)) for r in rows}
+
+
 def _e_gerencia(papel: str) -> bool:
     return (papel or "") in ("dono", "gestor")
 
@@ -183,18 +232,23 @@ def visao(pool, conta_id: int, periodo: str = "semana", de=None, ate=None) -> di
                 where p.conta_id=%s and coalesce(p.estagio,'lead')='lead' and """ + _ABERTO_P + """
                   and p.vendedor_id is not null""", (conta_id,)).fetchone()
         com_ia, com_vend = int(atend[0] or 0), int(atend[1] or 0)
-        g = c.execute("select count(*), coalesce(sum(" + _VALOR_FECHADO + "),0) from prospeccao p "
-                      "where p.conta_id=%s and p.status in " + _fr.sql_fechadas("p")
-                      + " and " + _FECHOU_EM + ">=%s and " + _FECHOU_EM + "<%s",
-                      (conta_id, ini, fim)).fetchone()
-        ganhos, ganhos_c = int(g[0] or 0), int(g[1] or 0)
+        por_contrato = _usa_contrato(c, conta_id)
+        if por_contrato:
+            cts = _contratos_por_vendedor(c, conta_id, ini, fim).values()
+            ganhos, ganhos_c = sum(v[0] for v in cts), sum(v[1] for v in cts)
+        else:
+            g = c.execute("select count(*), coalesce(sum(" + _VALOR_FECHADO + "),0) from prospeccao p "
+                          "where p.conta_id=%s and p.status in " + _fr.sql_fechadas("p")
+                          + " and " + _FECHOU_EM + ">=%s and " + _FECHOU_EM + "<%s",
+                          (conta_id, ini, fim)).fetchone()
+            ganhos, ganhos_c = int(g[0] or 0), int(g[1] or 0)
         # CONVERSÃO = fechados ÷ leads novos do período (aprovado pelo dono em
         # 24/09/2026). Antes era fechados ÷ (fechados + perdidos): o lead em aberto
         # não entrava, e o número media quanto se marca como perdido, não quanto se
         # vende — na Prime, três vendedores com 3 contratos em ~73 leads apareciam
         # com 13%, 60% e 75%.
         conv = round(100 * ganhos / novos) if novos else None
-        funil = _funil(c, conta_id)
+        funil = _funil(c, conta_id, por_contrato)
         maxn = max([f["n"] for f in funil] + [1])
         for f in funil:
             f["pct"] = round(100 * f["n"] / maxn)
@@ -217,13 +271,14 @@ def visao(pool, conta_id: int, periodo: str = "semana", de=None, ate=None) -> di
              agora.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))).fetchone()[0]
     return {
         "kpis": {"novos": novos, "com_ia": com_ia, "com_vend": com_vend,
-                 "ganhos": ganhos, "ganhos_rs": _reais(ganhos_c), "conversao": conv},
+                 "ganhos": ganhos, "ganhos_rs": _reais(ganhos_c), "conversao": conv,
+                 "por_contrato": por_contrato},
         "funil": funil,
         "atencao": {"parados": parados, "quentes": quentes, "propostas": propostas, "visitas": visitas},
     }
 
 
-def _funil(c, conta_id: int) -> list[dict]:
+def _funil(c, conta_id: int, por_contrato: bool = False) -> list[dict]:
     """O funil do time, com as MESMAS colunas do quadro do painel.
 
     Pedido do dono em 24/09/2026: "tem uma coluna que tem na web e não tem no
@@ -260,9 +315,25 @@ def _funil(c, conta_id: int) -> list[dict]:
             where p.conta_id=%s and p.estagio = 'lead'
             group by p.status""", (conta_id,)).fetchall()
     por = {r[0]: (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)) for r in linhas}
+    # CONTRATO SEM LEAD (24/09/2026): o contrato fechado direto pelo orçamento não
+    # tem cartão no quadro, mas é venda. Entra na primeira etapa de fechamento, com
+    # a nota dizendo quantos — o funil bate com o relatório de Contratos.
+    sem_lead, nomes_sem_lead = (0, 0), []
+    if por_contrato:
+        rs = c.execute("select coalesce(c.valor_centavos,0), coalesce(nullif(o.empresa,''), nullif(o.cliente,''), '') "
+                       "from contratos c left join orcamentos o on o.id=c.orcamento_id and o.conta_id=c.conta_id "
+                       "where c.conta_id=%s and " + SQL_CT_VIVO + " and not " + SQL_CT_TEM_LEAD
+                       + " order by c.assinado_em", (conta_id,)).fetchall()
+        sem_lead = (len(rs), sum(int(x[0] or 0) for x in rs))
+        nomes_sem_lead = [_primeiro(x[1]) for x in rs if x[1]]
+    alvo = next((ch for ch, _r, fa in etapas if ch == "ganho"), None) or next(
+        (ch for ch, _r, fa in etapas if fa == "fechamento" and ch != "perdido"), None)
     out = []
     for chave, rot, fase in etapas:
         n, n_orc, cent = por.get(chave, (0, 0, 0))
+        extra = sem_lead[0] if (chave == alvo and sem_lead[0]) else 0
+        if extra:
+            n, n_orc, cent = n + extra, n_orc + extra, cent + sem_lead[1]
         perdido = chave == "perdido"
         fechado = (fase in ("fechamento", "pos") and not perdido) or chave == "ganho"
         mostra_rs = bool(n_orc and cent and not perdido)
@@ -271,7 +342,9 @@ def _funil(c, conta_id: int) -> list[dict]:
                     "valor": _reais_cheio(cent) if mostra_rs else "",
                     # "18 prop." só onde nem todo lead tem orçamento — no contrato
                     # assinado todos têm, e repetir o número só enche a linha
-                    "n_orc": n_orc if (mostra_rs and n_orc < n) else 0})
+                    "n_orc": n_orc if (mostra_rs and n_orc < n) else 0,
+                    "sem_lead": extra,
+                    "sem_lead_nomes": nomes_sem_lead[:3] if extra and len(nomes_sem_lead) <= 3 else []})
     return out
 
 
@@ -778,6 +851,9 @@ def placar(pool, conta_id: int, periodo: str = "mes") -> list[dict]:
             "select id, coalesce(nullif(nome,''), email), coalesce(cockpit_pausado,false) "
             "from membros where conta_id=%s and ativo and papel in ('vendedor','gestor','dono') order by id",
             (conta_id,)).fetchall()
+        # conta com contrato: o placar é por CONTRATO ASSINADO no período, e o
+        # vendedor é quem fez o orçamento (ver SQL_CT_VENDEDOR)
+        cts = _contratos_por_vendedor(c, conta_id, ini, fim) if _usa_contrato(c, conta_id) else None
         for mid, nome, pausado in membros:
             fila = c.execute("select count(*) from prospeccao where conta_id=%s and vendedor_id=%s "
                              "and coalesce(estagio,'lead')='lead' and " + _ABERTO_T,
@@ -798,6 +874,9 @@ def placar(pool, conta_id: int, periodo: str = "mes") -> list[dict]:
                             "where p.conta_id=%s and p.vendedor_id=%s and coalesce(p.estagio,'lead')='lead' "
                             "and p.criado_em>=%s and p.criado_em<%s", (conta_id, mid, ini, fim)).fetchone()
             ganhos, rs_c = int(g[0] or 0), int(g[1] or 0)
+            sem_lead = 0
+            if cts is not None:
+                ganhos, rs_c, sem_lead = cts.get(mid, (0, 0, 0))
             recebidos, abertos_rec = int(rec[0] or 0), int(rec[1] or 0)
             # fechados ÷ leads recebidos (24/09/2026) — ver a nota na `visao`
             conv = round(100 * ganhos / recebidos) if recebidos else None
@@ -810,6 +889,7 @@ def placar(pool, conta_id: int, periodo: str = "mes") -> list[dict]:
             out.append({
                 "id": mid, "nome": nome, "pausado": bool(pausado),
                 "fila": fila, "atendendo": atend, "ganhos": ganhos, "rs_centavos": rs_c, "rs": _reais(rs_c),
+                "por_contrato": cts is not None, "sem_lead": sem_lead,
                 "conversao": (f"{conv}%" if conv is not None else "—"),
                 "recebidos": recebidos, "perdidos": int(perd or 0), "abertos_recebidos": abertos_rec,
                 "resp": (f"{round(resp)} min" if resp else "—"),
@@ -842,6 +922,7 @@ def vendedor(pool, conta_id: int, membro_id: int) -> dict | None:
             "rs": base.get("rs", "R$ 0"), "conversao": base.get("conversao", "—"),
             "recebidos": base.get("recebidos", 0), "perdidos": base.get("perdidos", 0),
             "abertos_recebidos": base.get("abertos_recebidos", 0),
+            "por_contrato": base.get("por_contrato", False), "sem_lead": base.get("sem_lead", 0),
             "resp": base.get("resp", "—"), "leads": leads}
 
 

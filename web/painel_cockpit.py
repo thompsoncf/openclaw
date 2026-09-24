@@ -387,6 +387,8 @@ b,strong{font-weight:600}
 .fr .qt b{font-family:var(--mono)}
 .fr .qt small{display:block;color:var(--neon);font-size:.66rem;white-space:nowrap}
 .fr .qt{min-width:74px;width:auto}
+.fr{flex-wrap:wrap}
+.fr .sl{flex-basis:100%;color:var(--text-faint);font-size:.68rem;margin-top:-.15rem}
 .fr.fech .bar i{background:linear-gradient(90deg,#1f7a45,#3fbf6f)}
 .fr.perd .nm,.fr.perd .qt b{color:var(--text-faint)}
 .fr.perd .bar i{background:#3a3f45}
@@ -516,6 +518,7 @@ b,strong{font-weight:600}
 .pod .av{margin-bottom:.4rem;box-shadow:none}
 .pod .nm{font-size:.78rem;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pod .rs{font-family:var(--mono);font-weight:700;font-size:.82rem;color:var(--neon)}
+.pod .ct{font-size:.66rem;color:var(--text-faint);text-align:center;line-height:1.25}
 .pod .base{width:100%;margin-top:.5rem;border-radius:10px 10px 0 0;background:var(--surface);
   border:1px solid var(--line);border-bottom:0;display:grid;place-items:center;
   font-family:var(--display);font-weight:800;font-size:.9rem;color:var(--text-faint)}
@@ -3326,18 +3329,28 @@ def _bloco_dinheiro(r: dict) -> str:
              + "<div class=kpis>"
              + f"<div class=kpi><div class=v>{esc(_brl(r['recebido_centavos']))}</div>"
                f"<div class=l>Recebido</div><div class=d>{r['n_vendas']} pagamento(s) no período</div></div>"
-             + f"<div class=kpi><div class=v>{esc(_brl(r['fechado_centavos']))}</div>"
-               f"<div class=l>No funil</div><div class=d>{r['ganhos']} ganho(s) · previsão</div></div>"
+             + (f"<div class=kpi><div class=v>{esc(_brl(r['fechado_centavos']))}</div>"
+                f"<div class=l>Contratos assinados</div><div class=d>{r['ganhos']} contrato(s)"
+                + (f" · {r['sem_lead']} sem lead" if r.get("sem_lead") else "") + "</div></div>"
+                if r.get("por_contrato") else
+                f"<div class=kpi><div class=v>{esc(_brl(r['fechado_centavos']))}</div>"
+                f"<div class=l>No funil</div><div class=d>{r['ganhos']} ganho(s) · previsão</div></div>")
              + "</div>"
              + "<div class=fonte><b>Comissão sai do recebido</b> — quando o cliente paga, seja "
                "no caixa ou na baixa do título. É a mesma conta do relatório do dono, então os "
-               "dois números batem.<br>O <b>funil</b> é o valor que você estimou nos leads que "
-               "marcou como ganho: serve pra você acompanhar o que vem, e não entra na comissão "
-               "enquanto o contrato não for fechado e pago.</div>"
+               "dois números batem.<br>"
+             + ("Os <b>contratos assinados</b> são os seus no período, pelo valor da assinatura "
+                "— contando os que você fez direto pelo orçamento. Entram na comissão quando o "
+                "cliente paga.</div>"
+                if r.get("por_contrato") else
+                "O <b>funil</b> é o valor que você estimou nos leads que "
+                "marcou como ganho: serve pra você acompanhar o que vem, e não entra na comissão "
+                "enquanto o contrato não for fechado e pago.</div>")
              + "<div class=eyebrow>Seu ritmo</div>"
              + "<div class=kpis>"
              + f"<div class=kpi><div class=v>{esc(r['conversao'])}</div><div class=l>Conversão</div>"
-               f"<div class=d>{r.get('ganhos', 0)} fechado(s) de {r.get('recebidos', 0)} leads recebidos</div></div>"
+               f"<div class=d>{r.get('ganhos', 0)} {'contrato(s)' if r.get('por_contrato') else 'fechado(s)'}"
+               f" de {r.get('recebidos', 0)} leads recebidos</div></div>"
              + f"<div class=kpi><div class=v>{r['fila']}</div><div class=l>Na fila</div>"
                "<div class=d>leads abertos com você</div></div>"
              + f"<div class=kpi><div class=v>{esc(r['resp'])}</div><div class=l>Resposta</div>"
@@ -6763,7 +6776,12 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
         f"<span class=qt><b>{f['n']}</b>"
         + (f"<small>{esc(f['valor'])}" + (f" · {f['n_orc']} prop." if f["n_orc"] else "") + "</small>"
            if f["valor"] else "")
-        + "</span></div>"
+        + "</span>"
+        # contrato fechado direto pelo orçamento, sem cartão no quadro (24/09/2026)
+        + (f"<small class=sl>inclui {f['sem_lead']} contrato(s) feito(s) sem lead"
+           + (" (" + esc(", ".join(f["sem_lead_nomes"])) + ")" if f.get("sem_lead_nomes") else "")
+           + "</small>" if f.get("sem_lead") else "")
+        + "</div>"
         for f in v["funil"])
     a = v["atencao"]
 
@@ -6831,8 +6849,11 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
                f"{seg('mes','Mês')}{pilula_per}</div>"
              + (_painel_periodo(de, ate) if abrir else "")
              + "<div class=kpis>"
-             + f"<div class='kpi hero'><div class=v>{esc(k['ganhos_rs'])}</div><div class=l>Fechado no período</div>"
-               f"<div class=d>{k['ganhos']} negócio(s) · {conv} de conversão"
+             + f"<div class='kpi hero'><div class=v>{esc(k['ganhos_rs'])}</div>"
+               + ("<div class=l>Contratos assinados no período</div>" if k.get("por_contrato")
+                  else "<div class=l>Fechado no período</div>")
+               + f"<div class=d>{k['ganhos']} {'contrato(s)' if k.get('por_contrato') else 'negócio(s)'}"
+               f" · {conv} de conversão"
                + (f" ({k['ganhos']} de {k['novos']} leads)" if k["novos"] else "") + "</div></div>"
              + f"<div class=kpi><div class=v>{k['novos']}</div><div class=l>Leads novos</div>"
                "<div class=d>no período</div></div>"
@@ -7100,7 +7121,11 @@ def cockpit_placar(request: Request):
                 f"<span class=av>{esc(v['nome'][:1].upper())}</span>"
                 f"<div class=nm>{esc(v['nome'].split(' ')[0])}</div>"
                 f"<div class=rs>{esc(v['rs'])}</div>"
-                f"<div class=base>{idx + 1}º</div></a>")
+                # quantos contratos, e quantos deles sem lead (24/09/2026)
+                + (f"<div class=ct>{v['ganhos']} contrato(s)"
+                   + (f"<br>+{v['sem_lead']} sem lead" if v.get("sem_lead") else "") + "</div>"
+                   if v.get("por_contrato") else "")
+                + f"<div class=base>{idx + 1}º</div></a>")
         podio = "<div class=podio>" + "".join(blocos) + "</div>"
 
     resto = lista[3:] if podio else lista
@@ -7112,9 +7137,11 @@ def cockpit_placar(request: Request):
         f"<span>{v['fila']} na carteira</span><span>{v.get('perdidos', 0)} perdido(s) no mês</span>"
         f"<span>{esc(v['resp'])}</span>"
         + ("<span class=pausado>pausado</span>" if v["pausado"] else "")
+        + (f"<span>+{v['sem_lead']} contrato(s) sem lead</span>" if v.get("sem_lead") else "")
         + f"</div></div><div class=rt><span class=g>{esc(v['rs'])}</span>"
           # conversão = fechados ÷ leads recebidos (24/09/2026); o "de N" diz a base
-          f"<small>{v['ganhos']} fechado(s) · {esc(v['conversao'])} de {v.get('recebidos', 0)}</small></div></a>"
+          f"<small>{v['ganhos']} {'contrato(s)' if v.get('por_contrato') else 'fechado(s)'}"
+          f" · {esc(v['conversao'])} de {v.get('recebidos', 0)}</small></div></a>"
         for i, v in enumerate(resto))
 
     if not lista:
@@ -7124,7 +7151,8 @@ def cockpit_placar(request: Request):
         miolo = podio + linhas
 
     corpo = (
-               _hdr_dono(g[0], "Placar", "este mês, por R$ fechado")
+               _hdr_dono(g[0], "Placar", "este mês, por contrato assinado"
+                         if lista and lista[0].get("por_contrato") else "este mês, por R$ fechado")
              + f"<div class=scroll>{miolo}</div>" + _abas_dono("placar"))
     return _page("Placar", corpo)
 
@@ -7238,7 +7266,8 @@ def cockpit_vendedor(request: Request, membro_id: int):
              + _flash(request)
              + "<div class=scroll><div class=kpis style='margin-top:.9rem'>"
              + f"<div class='kpi hero'><div class=v>{esc(v['rs'])}</div><div class=l>Fechado no mês</div>"
-               f"<div class=d>{v['ganhos']} negócio(s)</div></div>"
+               f"<div class=d>{v['ganhos']} {'contrato(s) assinado(s)' if v.get('por_contrato') else 'negócio(s)'}"
+               + (f" · {v['sem_lead']} sem lead" if v.get("sem_lead") else "") + "</div></div>"
              + f"<div class=kpi><div class=v>{esc(v['conversao'])}</div><div class=l>Conversão</div>"
                f"<div class=d>{v['ganhos']} fechado(s) de {v.get('recebidos', 0)} leads recebidos</div></div>"
              + f"<div class=kpi><div class=v>{v['fila']}</div><div class=l>Na fila</div>"

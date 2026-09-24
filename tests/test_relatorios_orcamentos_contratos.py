@@ -9,6 +9,7 @@ APARECENDO TODOS"), mais um botão de imprimir por linha reaproveitando as
 páginas públicas que orçamento e contrato já têm.
 """
 import os
+import re
 from datetime import date, timedelta
 
 import pytest
@@ -399,3 +400,125 @@ def test_contratos_metrica_separa_pronto_de_aguardando(pool, cen):
     assert metricas["Assinados"].startswith("1 ")
     # o total geral continua somando os quatro grupos — nada se perde na separação
     assert metricas["Total geral"] == "R$ 3.000,00"
+
+
+# ------------------------------------------------------------------ período pela assinatura (24/09/2026)
+#
+# Setembro na Prime mostrava 8 contratos, e 10 foram assinados no mês: os nº 2 e
+# 4 foram criados em agosto. O período passa a recortar pela ASSINATURA (a data da
+# venda, a mesma do cockpit), com a criação a um clique.
+
+def _cenario_datas(pool, cen):
+    from datetime import datetime, time
+    from zoneinfo import ZoneInfo
+    # MEIO-DIA de hoje em Brasília (15h UTC): a mesma data nos dois fusos. Com
+    # "agora", o teste quebrava na virada do mês — no CI (UTC), à 01h do dia 1º a
+    # data em Brasília ainda é o mês anterior.
+    hoje = datetime.combine(date.today(), time(12), ZoneInfo("America/Sao_Paulo"))
+    # criado há 70 dias e assinado hoje: é venda DESTE mês
+    velho = _contrato(pool, cen["conta"], _orc(pool, cen["conta"], cliente="Criado antes"),
+                      status="assinado", valor=300000, assinado_em=hoje)
+    # criado hoje e ainda sem assinatura: é pendente DESTE mês
+    novo = _contrato(pool, cen["conta"], _orc(pool, cen["conta"], cliente="Ainda sem assinar"), valor=100000)
+    # criado há 70 dias e ainda sem assinatura: não é deste mês por nenhuma das datas
+    antigo = _contrato(pool, cen["conta"], _orc(pool, cen["conta"], cliente="Pendente antigo"), valor=50000)
+    with pool.connection() as c:
+        c.execute("update contratos set criado_em = %s where id = %s", (hoje, novo))
+        c.execute("update contratos set criado_em = %s - interval '70 days' where id = any(%s)",
+                  (hoje, [velho, antigo]))
+        c.commit()
+
+
+def _met(dados):
+    return {k: v.replace("\xa0", " ") for k, v in dados["metricas"]}
+
+
+def test_contratos_por_padrao_recortam_pela_assinatura(pool, cen):
+    _cenario_datas(pool, cen)
+    dados = rel._dados_contratos(pool, cen["conta"], "mes", "", "", "")
+    assert sorted(l["cliente"] for l in dados["linhas"]) == ["Ainda sem assinar", "Criado antes"]
+    assert dados["filtro_extra"]["data_por_sel"] == "assinatura"
+    assert dados["periodo_label"] == "período pela assinatura"
+    assert _met(dados)["Assinados"] == "1 · R$ 3.000,00"
+
+
+def test_pela_assinatura_o_pendente_do_mes_continua_na_tela(pool, cen):
+    # o que não foi assinado vale pela criação: sem isto "Prontos, não enviados"
+    # e o filtro Enviado ficavam sempre vazios na visão padrão
+    _cenario_datas(pool, cen)
+    dados = rel._dados_contratos(pool, cen["conta"], "mes", "", "", "")
+    assert _met(dados)["Prontos, não enviados"] == "1 · R$ 1.000,00"
+    dados = rel._dados_contratos(pool, cen["conta"], "mes", "enviado", "", "")
+    assert [l["cliente"] for l in dados["linhas"]] == ["Ainda sem assinar"]
+
+
+def test_contratos_pela_criacao_mostram_o_criado_no_periodo(pool, cen):
+    _cenario_datas(pool, cen)
+    dados = rel._dados_contratos(pool, cen["conta"], "mes", "", "", "", data_por="criacao")
+    assert [l["cliente"] for l in dados["linhas"]] == ["Ainda sem assinar"]
+    assert dados["periodo_label"] == "período pela criação"
+
+
+def test_em_todo_o_periodo_nao_ha_rotulo_de_data(pool, cen):
+    _cenario_datas(pool, cen)
+    dados = rel._dados_contratos(pool, cen["conta"], "todos", "", "", "")
+    assert len(dados["linhas"]) == 3 and dados["periodo_label"] is None
+
+
+def test_data_por_invalido_cai_na_assinatura(pool, cen):
+    _cenario_datas(pool, cen)
+    dados = rel._dados_contratos(pool, cen["conta"], "mes", "", "", "", data_por="xpto")
+    assert dados["filtro_extra"]["data_por_sel"] == "assinatura"
+
+
+def test_a_aba_repassa_o_data_por(pool, cen):
+    _cenario_datas(pool, cen)
+    dados = rel.TIPOS["contratos"]["montar"](pool, cen["conta"], "mes", data_por="criacao")
+    assert dados["filtro_extra"]["data_por_sel"] == "criacao"
+
+
+# ------------------------------------------------------------------ a tela (revisão do #830)
+
+_MAL = '"><img src=x onerror=alert(1)>'
+
+
+def _html_contratos(**fx):
+    from web.portal import _env
+    filtro = {"status_opcoes": rel.CT_STATUS_OPCOES, "status_sel": "", "vendedores": [(1, "Pedro")],
+              "vendedor_sel": "", "busca_sel": "", "datas_por": rel.CT_DATA_POR,
+              "data_por_sel": "assinatura"}
+    filtro.update(fx.pop("filtro", {}))
+    dados = {"label": "Contratos", "mock": False, "colunas": [rel._col("cliente", "Cliente")],
+             "linhas": [], "col_total": None, "total_centavos": 0, "metricas": [],
+             "filtro_extra": filtro, "periodo_label": "período pela assinatura"}
+    return _env.get_template("relatorios").render(
+        dados=dados, tipo="contratos", periodo="mes", periodo_rotulo="Este mês",
+        tipos=rel.TIPOS, periodos=rel.PERIODOS, conta=(1, "pj", "X"),
+        caps={"financeiro": True, "vendas": True, "gerir": True}, tem_pj=True,
+        papel="dono", request=None, **fx)
+
+
+def test_o_alternador_mostra_as_duas_datas_e_marca_a_escolhida():
+    html = _html_contratos()
+    assert "período pela" in html
+    assert re.search(r'data_por=assinatura[^"]*"\s+class="on"', html)
+    assert 'name="data_por" value="assinatura"' in html
+    pdf = re.search(r'<a class="rel-pdf" href="([^"]*)"', html).group(1)
+    assert "&data_por=assinatura" in pdf                                # o PDF leva junto
+
+
+def test_filtro_vindo_da_url_nao_vira_html_na_tela():
+    # o template tem autoescape desligado: status, vendedor, busca e datas vêm
+    # crus da URL e entram em href e value — tudo tem que sair escapado
+    html = _html_contratos(filtro={"status_sel": _MAL, "vendedor_sel": _MAL, "busca_sel": _MAL},
+                           de=_MAL, ate=_MAL)
+    assert "<img src=x" not in html
+
+
+def test_a_data_do_contrato_sai_em_brasilia(pool, cen):
+    from datetime import datetime, timezone
+    # 00h27 UTC de 09/09 é 21h27 de 08/09 em Brasília — o nº 7 da Prime
+    _contrato(pool, cen["conta"], _orc(pool, cen["conta"], cliente="Sete"), status="assinado",
+              assinado_em=datetime(2026, 9, 9, 0, 27, tzinfo=timezone.utc))
+    dados = rel._dados_contratos(pool, cen["conta"], "todos", "", "", "")
+    assert dados["linhas"][0]["assinado_em"] == "08/09/2026"

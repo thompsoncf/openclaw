@@ -31,6 +31,8 @@ from finance.raio_x import (_TZ, ABERTOS, META_PRIMEIRA_MIN, _anterior, _mediana
 
 _log = logging.getLogger("finance.raio_x_dono")
 
+from finance.cockpit_dono import SQL_CT_VENDEDOR, SQL_CT_VIVO  # noqa: E402
+
 from finance.raio_x_perfil import (MOTIVOS_TODOS, PORTES, chave_porte, familia_segmento, familias,  # noqa: F401
                                    perfil_da_conta, regex_da_familia, regex_do_porte, rotulo_motivo)
 
@@ -199,6 +201,27 @@ def _where(f: dict) -> tuple[str, list]:
     return sql, vals
 
 
+def _where_contrato(f: dict) -> tuple[str, list]:
+    """Os mesmos filtros, mas sobre `contratos c` (24/09/2026).
+
+    O contrato entrava no Raio-X por `join prospeccao` — o que feito direto pelo
+    orçamento, sem lead, não existia: na Prime, setembro dizia 8 contratos e eram
+    10. Agora o contrato é a base. O vendedor é o do contrato (quem fez o
+    orçamento; na falta, o do lead — a régua do cockpit). Os filtros que são do
+    LEAD (tipo de festa, origem, segmento...) viram "tem um lead assim": aí o
+    contrato sem lead fica de fora, e é o certo — não se sabe o tipo da festa dele.
+    """
+    conds, vals = [], []
+    w_lead, wv_lead = _where({**f, "vendedor": None})
+    if w_lead:
+        conds.append("exists (select 1 from prospeccao p where p.orcamento_id = c.orcamento_id "
+                     "and p.conta_id = c.conta_id" + w_lead + ")")
+        vals += wv_lead
+    if f.get("vendedor"):
+        conds.append(SQL_CT_VENDEDOR + " = %s"); vals.append(f["vendedor"])
+    return ((" and " + " and ".join(conds)) if conds else ""), vals
+
+
 def _faixa_hora(dt: datetime) -> str:
     b = dt.astimezone(_TZ)
     if b.weekday() >= 5:
@@ -208,7 +231,7 @@ def _faixa_hora(dt: datetime) -> str:
 
 # ---------------------------------------------------------------- o placar
 
-def _placar(c, conta_id: int, w: str, wv: list, ini, fim, agora) -> dict:
+def _placar(c, conta_id: int, w: str, wv: list, ini, fim, agora, wc: str = "", wcv: list | None = None) -> dict:
     leads, com_data, sem_tipo = c.execute(f"""
         select count(*), count(*) filter (where p.evento_em is not null),
                count(*) filter (where coalesce(p.evento_tipo, '') = '')
@@ -246,10 +269,9 @@ def _placar(c, conta_id: int, w: str, wv: list, ini, fim, agora) -> dict:
         [conta_id, ini, fim, *wv]).fetchone()
     contratos, valor_ctr, mensal_ctr = c.execute(f"""
         select count(*), coalesce(sum(c.valor_centavos), 0), coalesce(sum(o.mensal_centavos), 0)
-          from contratos c join orcamentos o on o.id = c.orcamento_id
-          join prospeccao p on p.orcamento_id = o.id
-         where c.conta_id = %s and c.status = 'assinado' and c.assinado_em >= %s and c.assinado_em < %s{w}""",
-        [conta_id, ini, fim, *wv]).fetchone()
+          from contratos c left join orcamentos o on o.id = c.orcamento_id
+         where c.conta_id = %s and {SQL_CT_VIVO} and c.assinado_em >= %s and c.assinado_em < %s{wc}""",
+        [conta_id, ini, fim, *(wcv or [])]).fetchone()
     sem_assinar = c.execute(f"""
         select count(*) from orcamentos o join prospeccao p on p.orcamento_id = o.id
          where p.conta_id = %s and o.aprovada_em is not null{w}
@@ -423,7 +445,7 @@ def _tipos_ticket(c, conta_id, w, wv, ini, fim) -> list[dict]:
     return out
 
 
-def _ciclo(c, conta_id, w, wv, ini, fim) -> dict:
+def _ciclo(c, conta_id, w, wv, ini, fim, wc: str = "", wcv: list | None = None) -> dict:
     lp = c.execute(f"""
         select coalesce(m.nome, '—'), extract(epoch from o.criado_em - p.criado_em) / 86400
           from orcamentos o join prospeccao p on p.orcamento_id = o.id
@@ -433,9 +455,8 @@ def _ciclo(c, conta_id, w, wv, ini, fim) -> dict:
     pc = c.execute(f"""
         select extract(epoch from c.assinado_em - o.criado_em) / 86400
           from contratos c join orcamentos o on o.id = c.orcamento_id
-          join prospeccao p on p.orcamento_id = o.id
-         where c.conta_id = %s and c.status = 'assinado' and c.assinado_em >= %s and c.assinado_em < %s{w}""",
-        [conta_id, ini, fim, *wv]).fetchall()
+         where c.conta_id = %s and {SQL_CT_VIVO} and c.assinado_em >= %s and c.assinado_em < %s{wc}""",
+        [conta_id, ini, fim, *(wcv or [])]).fetchall()
     por_vend: dict[str, list[float]] = {}
     for nome, d in lp:
         por_vend.setdefault(nome, []).append(max(0.0, float(d)))
@@ -470,7 +491,8 @@ def _perdas(c, conta_id, w, wv, ini, fim, motivos=MOTIVOS_TODOS) -> dict:
 
 # ---------------------------------------------------------------- os blocos do recorrente
 
-def _proposto_x_fechado(c, conta_id, w, wv, ini, fim, coluna: str) -> list[dict]:
+def _proposto_x_fechado(c, conta_id, w, wv, ini, fim, coluna: str,
+                        wc: str = "", wcv: list | None = None) -> list[dict]:
     """Proposto × fechado por mês, somando UMA coluna de valor do orçamento.
 
     A coluna é escolhida pelo PERFIL e nunca vem de fora: `mensal_centavos` pra
@@ -487,9 +509,8 @@ def _proposto_x_fechado(c, conta_id, w, wv, ini, fim, coluna: str) -> list[dict]
     fech = dict(c.execute(f"""
         select to_char(c.assinado_em at time zone 'America/Sao_Paulo', 'YYYY-MM'), coalesce(sum(o.{coluna}), 0)
           from contratos c join orcamentos o on o.id = c.orcamento_id
-          join prospeccao p on p.orcamento_id = o.id
-         where c.conta_id = %s and c.status = 'assinado' and c.assinado_em >= %s and c.assinado_em < %s{w}
-         group by 1""", [conta_id, ini, fim, *wv]).fetchall())
+         where c.conta_id = %s and {SQL_CT_VIVO} and c.assinado_em >= %s and c.assinado_em < %s{wc}
+         group by 1""", [conta_id, ini, fim, *(wcv or [])]).fetchall())
     meses = []
     m = ini.date().replace(day=1)
     while m < fim.date():
@@ -499,19 +520,19 @@ def _proposto_x_fechado(c, conta_id, w, wv, ini, fim, coluna: str) -> list[dict]
     return meses
 
 
-def _mrr(c, conta_id, w, wv, ini, fim) -> list[dict]:
+def _mrr(c, conta_id, w, wv, ini, fim, wc: str = "", wcv: list | None = None) -> list[dict]:
     """Mensalidade proposta × fechada, por mês do período (MRR novo)."""
-    return _proposto_x_fechado(c, conta_id, w, wv, ini, fim, "mensal_centavos")
+    return _proposto_x_fechado(c, conta_id, w, wv, ini, fim, "mensal_centavos", wc, wcv)
 
 
-def _comissao(c, conta_id, w, wv, ini, fim) -> list[dict]:
+def _comissao(c, conta_id, w, wv, ini, fim, wc: str = "", wcv: list | None = None) -> list[dict]:
     """O mesmo recorte pra corretora: valor único proposto × fechado, por mês.
 
     Um contrato assinado aqui é uma apólice emitida, e o que interessa ao dono é
     quanto ela vale — o `setup_centavos` do orçamento. A tela rotula sem "/mês",
     que é a diferença visível pra quem vinha vendo o bloco de mensalidade.
     """
-    return _proposto_x_fechado(c, conta_id, w, wv, ini, fim, "setup_centavos")
+    return _proposto_x_fechado(c, conta_id, w, wv, ini, fim, "setup_centavos", wc, wcv)
 
 
 def _segmentos(c, conta_id, w, wv, ini, fim) -> list[dict]:
@@ -569,21 +590,22 @@ def dono(pool, conta_id: int, f: dict, agora: datetime | None = None, perfil: di
     ini, fim, rot = janela_f(f, a)
     ant_ini, ant_fim = _anterior(ini, fim)
     w, wv = _where(f)
+    wc, wcv = _where_contrato(f)
     blocos = set(perfil.get("blocos") or ())
     out = {"ini": ini, "fim": fim, "rotulo": rot, "filtros": f, "perfil": perfil, "placar": None, "anterior": None,
            "demanda_agenda": None, "dia_festa": None, "tipos": None, "ciclo": None, "perdas": None,
            "mrr": None, "comissao": None, "segmentos": None, "servicos": None,
            "vendedores": [], "confianca": None}
-    todos = (("placar", lambda: _placar(c, conta_id, w, wv, ini, fim, a)),
-             ("anterior", lambda: _placar(c, conta_id, w, wv, ant_ini, ant_fim, a)),
+    todos = (("placar", lambda: _placar(c, conta_id, w, wv, ini, fim, a, wc, wcv)),
+             ("anterior", lambda: _placar(c, conta_id, w, wv, ant_ini, ant_fim, a, wc, wcv)),
              ("demanda_agenda", lambda: _demanda_agenda(c, conta_id, w, wv, a.date())),
              ("dia_festa", lambda: _dia_festa(c, conta_id, w, wv, ini, fim)),
              ("tipos", lambda: _tipos_ticket(c, conta_id, w, wv, ini, fim)),
-             ("mrr", lambda: _mrr(c, conta_id, w, wv, ini, fim)),
-             ("comissao", lambda: _comissao(c, conta_id, w, wv, ini, fim)),
+             ("mrr", lambda: _mrr(c, conta_id, w, wv, ini, fim, wc, wcv)),
+             ("comissao", lambda: _comissao(c, conta_id, w, wv, ini, fim, wc, wcv)),
              ("segmentos", lambda: _segmentos(c, conta_id, w, wv, ini, fim)),
              ("servicos", lambda: _servicos(c, conta_id, w, wv, ini, fim)),
-             ("ciclo", lambda: _ciclo(c, conta_id, w, wv, ini, fim)),
+             ("ciclo", lambda: _ciclo(c, conta_id, w, wv, ini, fim, wc, wcv)),
              ("perdas", lambda: _perdas(c, conta_id, w, wv, ini, fim, perfil.get("motivos") or MOTIVOS_TODOS)))
     with pool.connection() as c:
         for k, fn in todos:

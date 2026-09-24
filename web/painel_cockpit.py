@@ -388,6 +388,15 @@ b,strong{font-weight:600}
 .fr .qt small{display:block;color:var(--neon);font-size:.66rem;white-space:nowrap}
 .fr .qt{min-width:74px;width:auto}
 .fr{flex-wrap:wrap}
+.kpis.dv .kpi.hero .v{font-size:1.3rem}
+.dv-det{margin:.5rem 0 .2rem;font-size:.8rem;color:var(--text-dim)}
+.dv-det summary{cursor:pointer;list-style:none;padding:.4rem 0}
+.dv-det summary::-webkit-details-marker{display:none}
+.dv-det summary b{color:var(--text)}
+.dv-g{margin-top:.5rem}
+.dv-g b{display:block;font:500 .62rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint);margin-bottom:.15rem}
+.dv-g .chip{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:.05rem .5rem;margin:.12rem .1rem;font-size:.74rem}
+.dv-g .chip.amb{color:var(--ambar)}
 .fr .sl{flex-basis:100%;color:var(--text-faint);font-size:.68rem;margin-top:-.15rem}
 .fr.fech .bar i{background:linear-gradient(90deg,#1f7a45,#3fbf6f)}
 .fr.perd .nm,.fr.perd .qt b{color:var(--text-faint)}
@@ -6864,6 +6873,7 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
                f"<div class=d>{k['com_ia']} c/ IA · {k['com_vend']} c/ vendedor</div></div></div>"
              + "<div class=eyebrow>Funil do time</div>"
              + f"<div class=bloco><div class=card>{funil}</div></div>"
+             + _bloco_da_visita(pool, conta_id, periodo, de, ate)
              + "<div class=eyebrow>Precisa de atenção</div>"
              + "<div class=aten>"
              + f"<div class='at hot'><div class=n>{a['parados']}</div><div class=t>parados há +3 dias</div></div>"
@@ -6873,6 +6883,59 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
              + blocos
              + "</div>" + _abas_dono("visao"))
     return _page("Equipe", corpo)
+
+
+def _bloco_da_visita(pool, conta_id: int, periodo: str, de, ate) -> str:
+    """DA VISITA AO CONTRATO na Visão (24/09/2026, docs/mockups/prime_visita_ao_contrato.html):
+    os quatro degraus do Raio-X do dono, no período escolhido, e os clientes de
+    cada ponta num toque. Só a gestão vê a Visão — o vendedor não vê a lista dos
+    colegas. Some em conta de produto e onde o perfil não tem o bloco (§6); se a
+    conta falhar, some sem derrubar a tela."""
+    try:
+        from finance import raio_x_dono as rxd
+        perfil = rxd.perfil_da_conta(pool, conta_id)
+        if not perfil.get("aplica") or "da_visita" not in (perfil.get("blocos") or ()):
+            return ""
+        ini, fim = cd._range(periodo, de, ate)
+        with pool.connection() as c:
+            dv = rxd.da_visita(c, conta_id, {}, ini, fim)
+    except Exception as e:  # noqa: BLE001
+        _log.warning("cockpit: da visita ao contrato da conta %s: %s: %s", conta_id, type(e).__name__, e)
+        return ""
+    voc = perfil["vocab"]
+    comp, comps = voc["compromisso"], voc["compromissos"]
+    pct = f" · {dv['vis_orc_pct']}% viram orçamento" if dv["vis_orc_pct"] is not None else ""
+
+    def _st(l, v, d, fim=False):
+        return (f"<div class='kpi{' hero' if fim else ''}'><div class=v>{v}</div>"
+                f"<div class=l>{esc(l)}</div><div class=d>{d}</div></div>")
+
+    def _chips(nomes):
+        return "".join(f"<span class=chip>{esc(n)}</span>" for n in nomes)
+
+    lista = ""
+    if dv["em_jogo"]:
+        lista += (f"<div class=dv-g><b>Com orçamento, sem contrato ainda · {len(dv['em_jogo'])}</b>"
+                  + "".join(f"<span class='chip amb'>{esc(i['nome'])} · {esc(_brl(i['valor_centavos']))}</span>"
+                            for i in dv["em_jogo"]) + "</div>")
+    if dv["sem_orcamento"]:
+        lista += (f"<div class=dv-g><b>{esc(comps.capitalize())} sem orçamento ainda · {len(dv['sem_orcamento'])}</b>"
+                  + _chips(dv["sem_orcamento"]) + "</div>")
+    if dv["assinaram"]:
+        lista += (f"<div class=dv-g><b>{esc(comps.capitalize())} que viraram contrato · {len(dv['assinaram'])}</b>"
+                  + _chips(dv["assinaram"]) + "</div>")
+    resumo = (f"{len(dv['em_jogo'])} com orçamento e sem contrato · "
+              f"<b>{esc(_brl(dv['em_jogo_valor']))} em jogo</b>" if dv["em_jogo"]
+              else "Ver os clientes de cada degrau")
+    return ("<div class=eyebrow>Da " + esc(comp) + " ao contrato</div>"
+            + "<div class='kpis dv'>"
+            + _st(comps.capitalize(), dv["visitas"], f"{dv['marcadas']} marcada(s){pct}")
+            + _st("Orçamentos", dv["vis_orc"], esc(_brl(dv["vis_orc_valor"])))
+            + _st(voc.get("proposta_aceita", "propostas aceitas").capitalize(), dv["prop_ass"],
+                  esc(_brl(dv["prop_ass_valor"])))
+            + _st("Contratos", dv["contratos"], esc(_brl(dv["contratos_valor"])), fim=True)
+            + "</div>"
+            + (f"<details class=dv-det><summary>{resumo} ›</summary>{lista}</details>" if lista else ""))
 
 
 def _href_perdidos(motivo: str, periodo: str, de: str, ate: str, codigo: str | None = None) -> str:

@@ -72,7 +72,7 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now());
-create table orcamentos (id bigserial primary key, criado_por text, cliente text, empresa text, numero int,
+create table orcamentos (id bigserial primary key, conta_id bigint, criado_por text, cliente text, empresa text, numero int,
   cliente_id bigint, status text default 'rascunho',
   primeiro_ano_centavos bigint default 0, mensal_centavos bigint default 0, setup_centavos bigint default 0,
   itens jsonb, criado_em timestamptz default now(), aprovada_em timestamptz, aprovada_por text,
@@ -898,3 +898,116 @@ def test_linha_do_vendedor_no_raio_x_traz_o_contrato_sem_lead(pool, sem_lead):
     assert [x["nome"] for x in por["Jacqueline"]["contratos"]] == ["Josinalva"]
     assert por["Jacqueline"]["contratos_valor"] == 200000
     assert [x["nome"] for x in por["Pedro"]["contratos"]] == ["Bianca"]
+
+
+
+# ------------------------------------------------------------------ da visita ao contrato (24/09/2026)
+#
+# Pedido do dono: "comparativo de contratos assinados x propostas assinadas,
+# conversão de visitas em orçamentos, e pegar os clientes pra comparar".
+# Mockup: docs/mockups/prime_visita_ao_contrato.html.
+
+@pytest.fixture(scope="module")
+def visita(pool):
+    with pool.connection() as c:
+        conta = c.execute("insert into contas (nome, nome_fantasia) values ('Prime 3','Prime 3') returning id").fetchone()[0]
+        j = c.execute("insert into membros (conta_id, nome) values (%s,'Jacqueline') returning id", (conta,)).fetchone()[0]
+        p = c.execute("insert into membros (conta_id, nome) values (%s,'Pedro') returning id", (conta,)).fetchone()[0]
+
+        def lead(nome, vend):
+            return c.execute("insert into prospeccao (conta_id, vendedor_id, contato, status, criado_em) "
+                             "values (%s,%s,%s,'proposta',%s) returning id", (conta, vend, nome, _dt(1, 9, 9))).fetchone()[0]
+
+        def visita_(lid, dia, desfecho="realizado"):
+            c.execute("insert into eventos_agenda (conta_id, prospeccao_id, titulo, inicio, desfecho) "
+                      "values (%s,%s,'Visita',%s,%s)", (conta, lid, _dt(dia, 9, 15), desfecho))
+
+        def orc(lid, nome, valor, criado_por, aprovada=None):
+            o = c.execute("insert into orcamentos (conta_id, cliente, criado_por, status, primeiro_ano_centavos, aprovada_em) "
+                          "values (%s,%s,%s,'enviado',%s,%s) returning id", (conta, nome, criado_por, valor, aprovada)).fetchone()[0]
+            if lid:
+                c.execute("update prospeccao set orcamento_id=%s where id=%s", (o, lid))
+            return o
+
+        def ct(o, valor, quando, numero):
+            c.execute("insert into contratos (conta_id, orcamento_id, status, valor_centavos, assinado_em, numero) "
+                      "values (%s,%s,'assinado',%s,%s,%s)", (conta, o, valor, quando, numero))
+
+        # Ana (Pedro): visitou, orçamento da Jacqueline, aceitou 02/09, contrato 03/09
+        a = lead("Ana", p); visita_(a, 1)
+        ct(orc(a, "Ana", 500000, str(j), aprovada=_dt(2, 9, 10)), 500000, _dt(3, 9, 10), 1)
+        # Bia (Pedro): visitou, tem orçamento, sem contrato — em jogo
+        b = lead("Bia", p); visita_(b, 2)
+        orc(b, "Bia", 300000, str(p))
+        # Caio (Jacqueline): visitou, sem orçamento
+        cc = lead("Caio", j); visita_(cc, 3)
+        # Dora (Jacqueline): visita marcada, sem desfecho — conta em "marcadas"
+        d = lead("Dora", j); visita_(d, 4, desfecho=None)
+        # Eva: sem lead, proposta aceita em AGOSTO, contrato em setembro
+        ct(orc(None, "Eva", 200000, str(j), aprovada=_dt(20, 8, 10)), 200000, _dt(4, 9, 11), 2)
+        c.commit()
+    return {"conta": conta, "j": j, "p": p}
+
+
+def test_os_quatro_degraus_do_periodo(pool, visita):
+    d = rxd.dono(pool, visita["conta"], _f(), AGORA, perfil=EVENTOS)
+    dv = d["da_visita"]
+    assert dv["marcadas"] == 4 and dv["visitas"] == 3
+    assert dv["vis_orc"] == 2 and dv["vis_orc_valor"] == 800000 and dv["vis_orc_pct"] == 67
+    assert dv["prop_ass"] == 1 and dv["prop_ass_valor"] == 500000 and dv["prop_ass_com_contrato"] == 1
+    assert dv["contratos"] == 2 and dv["contratos_valor"] == 700000
+    # a Eva aceitou a proposta em agosto: é o contrato que "sobra" sobre as propostas
+    assert dv["contratos_de_antes"] == 1
+
+
+def test_os_clientes_de_cada_ponta(pool, visita):
+    dv = rxd.dono(pool, visita["conta"], _f(), AGORA, perfil=EVENTOS)["da_visita"]
+    assert dv["sem_orcamento"] == ["Caio"]
+    assert dv["em_jogo"] == [{"nome": "Bia", "valor_centavos": 300000}] and dv["em_jogo_valor"] == 300000
+    assert dv["assinaram"] == ["Ana"]
+    por = {l["nome"]: l for l in dv["linhas"]}
+    assert por["Ana"]["espera"] == 1 and not por["Ana"]["proposta_antes"]
+    assert por["Eva"]["espera"] == 15 and por["Eva"]["proposta_antes"]
+
+
+def test_por_vendedor_cada_degrau_pela_sua_regua(pool, visita):
+    dv = rxd.dono(pool, visita["conta"], _f(), AGORA, perfil=EVENTOS)["da_visita"]
+    j, p = dv["por_vendedor"][visita["j"]], dv["por_vendedor"][visita["p"]]
+    # a visita é do vendedor do LEAD; proposta e contrato, de quem fez o orçamento
+    assert (p["visitas"], p["vis_orc"], p["prop_ass"], p["contratos"]) == (2, 2, 0, 0)
+    assert (j["visitas"], j["vis_orc"], j["prop_ass"], j["contratos"], j["contratos_valor"]) == (1, 0, 1, 2, 700000)
+
+
+def test_filtro_de_vendedor_no_bloco(pool, visita):
+    dv = rxd.dono(pool, visita["conta"], _f(vendedor=str(visita["p"])), AGORA, perfil=EVENTOS)["da_visita"]
+    assert dv["visitas"] == 2 and dv["prop_ass"] == 0 and dv["contratos"] == 0
+
+
+def test_o_bloco_existe_onde_ha_funil_e_some_no_produto():
+    for nicho in ("eventos", "consultoria", None):
+        assert "da_visita" in rxp.perfil(nicho)["blocos"]
+    assert "da_visita" not in rxp._PERFIS["produto"]["blocos"]         # produto não tem funil
+    assert rxp.perfil("eventos")["vocab"]["proposta_aceita"] == "propostas assinadas"
+    assert rxp.perfil("consultoria")["vocab"]["proposta_aceita"] == "propostas aceitas"
+
+
+def test_a_tela_mostra_da_visita_ao_contrato(pool, visita, monkeypatch):
+    import web.painel_raio_x as prx
+    from web import portal
+    monkeypatch.setattr(prx, "conta_logada", lambda req: (visita["conta"], "pj", "Prime"))
+    monkeypatch.setattr(prx, "get_pool", lambda: pool)
+    monkeypatch.setattr(rxd, "agora_brt", lambda agora=None: AGORA)
+    monkeypatch.setattr(rxd, "perfil_da_conta", lambda pool, conta_id: EVENTOS)
+
+    def fake_render(nome, request, **ctx):
+        from fastapi.responses import HTMLResponse
+        tpl = portal._env.get_template(nome)
+        return HTMLResponse("".join(tpl.blocks["conteudo"](tpl.new_context(dict(ctx, request=request)))))
+    monkeypatch.setattr(prx, "_render", fake_render)
+    html = bytes(prx.painel_raio_x(_req()).body).decode("utf-8")
+    assert "Da visita ao contrato" in html and "Propostas assinadas" in html
+    assert "Viraram orçamento" in html and "67% das visitas" in html
+    assert "Com orçamento, sem contrato ainda · 1" in html and "Bia" in html
+    assert "Total do time" in html
+    # a Eva aceitou em agosto: a nota explica por que os contratos passam das propostas
+    assert "1 contrato do período veio de proposta aceita antes dele" in html

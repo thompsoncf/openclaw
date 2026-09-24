@@ -45,6 +45,28 @@ def _delta_txt(d: dict | None, menor_melhor: bool = False, unidade: str = "") ->
     return ("ok" if melhor else "ruim"), txt + " vs. anterior"
 
 
+def _linhas_da_visita(d: dict, vendedores) -> list[dict]:
+    """As linhas por vendedor do bloco "Da visita ao contrato", com os leads da
+    tabela de cima. O que não é de nenhum vendedor ativo (o orçamento feito pelo
+    dono, o lead sem vendedor) entra numa linha "Outros" — assim a soma das
+    linhas bate com o total do time."""
+    dv = d.get("da_visita")
+    if not dv:
+        return []
+    por = dict(dv.get("por_vendedor") or {})
+    leads = {v["id"]: v["semana"].get("leads", 0) for v in (d.get("vendedores") or [])}
+    out = []
+    for vid, nome in vendedores:
+        x = por.pop(vid, {})
+        out.append({"nome": nome, "leads": leads.get(vid, 0), **{k: x.get(k, 0) for k in
+                    ("visitas", "vis_orc", "prop_ass", "contratos", "contratos_valor")}})
+    resto = {k: sum(x.get(k, 0) for x in por.values())
+             for k in ("visitas", "vis_orc", "prop_ass", "contratos", "contratos_valor")}
+    if any(resto.values()):
+        out.append({"nome": "Outros (dono, sem vendedor)", "leads": None, **resto})
+    return out
+
+
 @router.get("/painel/raio-x", response_class=HTMLResponse)
 def painel_raio_x(request: Request):
     conta, redir = _pode_ver(request)
@@ -80,6 +102,7 @@ def painel_raio_x(request: Request):
         meses.append((m.strftime("%Y-%m"), f"{rxd._MESES[m.month - 1]}/{m:%y}"))
         m = (m.replace(day=28) + timedelta(days=4)).replace(day=1)
     quente = [m["rotulo"] for m in (d["demanda_agenda"] or []) if m["pedindo"] > m["agenda"]]
+    dv_linhas = _linhas_da_visita(d, vendedores)
     # as UFs e os serviços que existem nesta conta, pros selects do recorrente
     ufs, servicos = [], []
     if "uf" in perfil["filtros"] or "servico" in perfil["filtros"]:
@@ -94,6 +117,7 @@ def painel_raio_x(request: Request):
     return _render("raio_x", request, titulo="Raio-X", secao_ativa="raio_x", perfil=perfil, raio_x_perfil=perfil,
                    ufs=ufs, servicos=servicos, familias=rxd.familias(), portes=[(k, r) for k, r, _ in rxd.PORTES],
                    d=d, f=f, p=p, comp=comp, vendedores=vendedores, meses=meses, quente=quente,
+                   dv_linhas=dv_linhas,
                    rxd=rxd, brl=_brl, fmt_min=rxd.fmt_min,
                    confianca_txt=(rxd.texto_confianca(d["confianca"]) if d["confianca"] else ""),
                    maximo=max)
@@ -163,6 +187,21 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
 .rx-vend .ok{color:var(--neon-bright)}.rx-vend .amb{color:var(--ambar)}.rx-vend .ruim{color:var(--coral)}
 .rx-vend .n{text-align:right}
 .rx-tab{overflow-x:auto}
+/* da visita ao contrato (24/09/2026) */
+.rx-dv{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem}
+@media (max-width:900px){.rx-dv{grid-template-columns:repeat(2,1fr)}}
+.rx-dv .st{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:.7rem .8rem;display:flex;flex-direction:column;gap:.15rem}
+.rx-dv .st.fim{border-color:var(--neon-border,var(--line));background:var(--neon-bg,var(--surface))}
+.rx-dv .l{font:500 .62rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint)}
+.rx-dv b{font:700 1.4rem var(--mono)}
+.rx-dv em{font-style:normal;font-size:.76rem;color:var(--text-dim)}
+.rx-dv .ok{color:var(--neon-bright)}
+.rx-dv-nota{font-size:.8rem;color:var(--text-dim)}
+.rx-dv-cli .grp{margin-top:.4rem}
+.rx-dv-cli h4{font:500 .62rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint);margin:0 0 .2rem}
+.rx-dv-cli .chip{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:.05rem .5rem;margin:.12rem .1rem;font-size:.74rem;color:var(--text-dim)}
+.rx-dv-cli .chip.ok{color:var(--neon-bright)} .rx-dv-cli .chip.amb{color:var(--ambar)}
+.rx-vend tr.tot td{font-weight:700;border-top:1px solid var(--line)}
 .rx-dado{border:1px solid var(--azul-borda);background:var(--azul-fundo);border-radius:10px;padding:.55rem .7rem;font:400 .7rem/1.5 var(--mono);color:var(--azul)}
 .rx-ey{font:500 .66rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);margin:.2rem 0 -.4rem}
 
@@ -315,6 +354,62 @@ _RAIO_X_TPL = r"""{% extends "base" %}{% block conteudo %}
   </div>
   {% else %}
   <div class="rx-dado">Não deu pra montar o placar agora. Tenta de novo em instantes.</div>
+  {% endif %}
+
+  {# DA VISITA AO CONTRATO (24/09/2026, docs/mockups/prime_visita_ao_contrato.html):
+     quatro degraus do mesmo período, cada um pela sua data, e os clientes de cada
+     ponta. O vocabulário é do perfil (§6): visita/propostas assinadas na festa,
+     reunião/propostas aceitas no recorrente. #}
+  {% set dv = d.da_visita %}
+  {% if dv and 'da_visita' in perfil.blocos %}
+  <div class="rx-ey">Da {{ perfil.vocab.compromisso }} ao contrato · {{ d.rotulo }}</div>
+  <div class="rx-dv">
+    <div class="st"><span class="l">{{ perfil.vocab.compromissos|capitalize }} realizadas</span><b>{{ dv.visitas }}</b>
+      <em>{{ dv.marcadas }} marcada{{ 's' if dv.marcadas != 1 }}</em></div>
+    <div class="st"><span class="l">Viraram orçamento</span><b>{{ dv.vis_orc }}</b>
+      <em>{{ brl(dv.vis_orc_valor) }}{% if dv.vis_orc_pct is not none %} · <span class="ok">{{ dv.vis_orc_pct }}% das {{ perfil.vocab.compromissos }}</span>{% endif %}</em></div>
+    <div class="st"><span class="l">{{ perfil.vocab.proposta_aceita|capitalize }}</span><b>{{ dv.prop_ass }}</b>
+      <em>{{ brl(dv.prop_ass_valor) }}</em></div>
+    <div class="st fim"><span class="l">Contratos assinados</span><b>{{ dv.contratos }}</b>
+      <em>{{ brl(dv.contratos_valor) }}{% if dv.prop_ass %} · <span class="ok">{{ dv.prop_ass_com_contrato }} de {{ dv.prop_ass }} propostas</span>{% endif %}</em></div>
+  </div>
+  {% if dv.contratos_de_antes %}
+  <div class="rx-dv-nota">{{ dv.contratos_de_antes }} contrato{{ 's' if dv.contratos_de_antes != 1 }} do período {{ 'vieram' if dv.contratos_de_antes != 1 else 'veio' }} de proposta aceita antes dele — por isso os contratos passam das propostas.</div>
+  {% endif %}
+  <div class="rx-dv-cli">
+    {% if dv.sem_orcamento %}<div class="grp"><h4>{{ perfil.vocab.compromissos|capitalize }} sem orçamento ainda · {{ dv.sem_orcamento|length }}</h4>
+      {% for n in dv.sem_orcamento %}<span class="chip">{{ n }}</span>{% endfor %}</div>{% endif %}
+    {% if dv.em_jogo %}<div class="grp"><h4>Com orçamento, sem contrato ainda · {{ dv.em_jogo|length }} · {{ brl(dv.em_jogo_valor) }} em jogo</h4>
+      {% for i in dv.em_jogo %}<span class="chip amb">{{ i.nome }} · {{ brl(i.valor_centavos) }}</span>{% endfor %}</div>{% endif %}
+    {% if dv.assinaram %}<div class="grp"><h4>{{ perfil.vocab.compromissos|capitalize }} que viraram contrato · {{ dv.assinaram|length }}</h4>
+      {% for n in dv.assinaram %}<span class="chip ok">{{ n }}</span>{% endfor %}</div>{% endif %}
+  </div>
+  {% if dv.linhas %}
+  <div class="rx-tab"><table class="rx-vend">
+    <tr><th>Contrato</th><th>Cliente</th><th>Proposta aceita</th><th>Contrato assinado</th><th class="n">Espera</th><th class="n">Valor</th></tr>
+    {% for l in dv.linhas %}
+    <tr><td>nº {{ l.numero }}</td><td>{{ l.nome }}</td>
+      <td class="{{ 'amb' if l.proposta_antes }}">{{ l.proposta_em.strftime('%d/%m') if l.proposta_em else '—' }}</td>
+      <td>{{ l.contrato_em.strftime('%d/%m') if l.contrato_em else '—' }}</td>
+      <td class="n {{ 'ok' if l.espera is not none and l.espera <= 2 else 'amb' if l.espera is not none and l.espera <= 14 else 'ruim' if l.espera is not none else '' }}">{{ (l.espera ~ ' d') if l.espera is not none else '—' }}</td>
+      <td class="n">{{ brl(l.valor_centavos) }}</td></tr>
+    {% endfor %}
+    <tr class="tot"><td></td><td>{{ dv.contratos }} contrato{{ 's' if dv.contratos != 1 }}</td><td>{{ dv.prop_ass }} no período</td><td>{{ dv.contratos }} no período</td>
+      <td class="n">{% if dv.espera_mediana is not none %}mediana {{ dv.espera_mediana|round|int }} d{% endif %}</td><td class="n">{{ brl(dv.contratos_valor) }}</td></tr>
+  </table></div>
+  {% endif %}
+  {% if dv_linhas %}
+  <div class="rx-tab"><table class="rx-vend">
+    <tr><th>Vendedor</th><th class="n">Leads</th><th class="n">{{ perfil.vocab.compromissos|capitalize }}</th><th class="n">Orçamentos</th><th class="n">{{ perfil.vocab.proposta_aceita|capitalize }}</th><th class="n">Contratos</th><th class="n">Valor</th></tr>
+    {% for x in dv_linhas %}
+    <tr><td><b>{{ x.nome }}</b></td><td class="n">{{ x.leads if x.leads is not none else '—' }}</td><td class="n">{{ x.visitas }}</td>
+      <td class="n {{ 'ruim' if x.visitas and not x.vis_orc }}">{{ x.vis_orc }}</td><td class="n">{{ x.prop_ass }}</td>
+      <td class="n">{{ x.contratos }}</td><td class="n">{{ brl(x.contratos_valor) }}</td></tr>
+    {% endfor %}
+    <tr class="tot"><td>Total do time</td><td class="n">{{ p.leads if p else '—' }}</td><td class="n">{{ dv.visitas }}</td><td class="n">{{ dv.vis_orc }}</td>
+      <td class="n">{{ dv.prop_ass }}</td><td class="n">{{ dv.contratos }}</td><td class="n">{{ brl(dv.contratos_valor) }}</td></tr>
+  </table></div>
+  {% endif %}
   {% endif %}
 
   {% if d.vendedores %}

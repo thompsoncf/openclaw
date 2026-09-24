@@ -248,7 +248,7 @@ def visao(pool, conta_id: int, periodo: str = "semana", de=None, ate=None) -> di
         # vende — na Prime, três vendedores com 3 contratos em ~73 leads apareciam
         # com 13%, 60% e 75%.
         conv = round(100 * ganhos / novos) if novos else None
-        funil = _funil(c, conta_id, por_contrato)
+        funil = _funil(c, conta_id, por_contrato, ini, fim)
         maxn = max([f["n"] for f in funil] + [1])
         for f in funil:
             f["pct"] = round(100 * f["n"] / maxn)
@@ -278,7 +278,7 @@ def visao(pool, conta_id: int, periodo: str = "semana", de=None, ate=None) -> di
     }
 
 
-def _funil(c, conta_id: int, por_contrato: bool = False) -> list[dict]:
+def _funil(c, conta_id: int, por_contrato: bool = False, ini=None, fim=None) -> list[dict]:
     """O funil do time, com as MESMAS colunas do quadro do painel.
 
     Pedido do dono em 24/09/2026: "tem uma coluna que tem na web e não tem no
@@ -318,22 +318,34 @@ def _funil(c, conta_id: int, por_contrato: bool = False) -> list[dict]:
     # CONTRATO SEM LEAD (24/09/2026): o contrato fechado direto pelo orçamento não
     # tem cartão no quadro, mas é venda. Entra na primeira etapa de fechamento, com
     # a nota dizendo quantos — o funil bate com o relatório de Contratos.
-    sem_lead, nomes_sem_lead = (0, 0), []
+    # A ETAPA DO CONTRATO ASSINADO SEGUE O PERÍODO (pedido do dono em 24/09/2026):
+    # o funil mostrava 11 · R$ 66.990 — todos os contratos desde sempre — logo
+    # abaixo do KPI "Contratos assinados no período" com 10 · R$ 65.490, e a
+    # diferença (a Bianca, assinada em 29/08) parecia erro. Agora a etapa conta os
+    # contratos assinados NO PERÍODO, com e sem lead, pelo valor da assinatura —
+    # o mesmo número do KPI. As outras etapas continuam a foto de agora.
+    ct = None
     if por_contrato:
-        rs = c.execute("select coalesce(c.valor_centavos,0), coalesce(nullif(o.empresa,''), nullif(o.cliente,''), '') "
+        filtro, args = "", [conta_id]
+        if ini is not None and fim is not None:
+            filtro, args = " and c.assinado_em>=%s and c.assinado_em<%s", [conta_id, ini, fim]
+        rs = c.execute("select coalesce(c.valor_centavos,0), " + SQL_CT_TEM_LEAD + ", "
+                       "coalesce(nullif(o.empresa,''), nullif(o.cliente,''), '') "
                        "from contratos c left join orcamentos o on o.id=c.orcamento_id and o.conta_id=c.conta_id "
-                       "where c.conta_id=%s and " + SQL_CT_VIVO + " and not " + SQL_CT_TEM_LEAD
-                       + " order by c.assinado_em", (conta_id,)).fetchall()
-        sem_lead = (len(rs), sum(int(x[0] or 0) for x in rs))
-        nomes_sem_lead = [_primeiro(x[1]) for x in rs if x[1]]
+                       "where c.conta_id=%s and " + SQL_CT_VIVO + filtro + " order by c.assinado_em",
+                       args).fetchall()
+        sem = [x for x in rs if not x[1]]
+        ct = {"n": len(rs), "cent": sum(int(x[0] or 0) for x in rs), "sem_lead": len(sem),
+              "nomes": [_primeiro(x[2]) for x in sem if x[2]]}
     alvo = next((ch for ch, _r, fa in etapas if ch == "ganho"), None) or next(
         (ch for ch, _r, fa in etapas if fa == "fechamento" and ch != "perdido"), None)
     out = []
     for chave, rot, fase in etapas:
         n, n_orc, cent = por.get(chave, (0, 0, 0))
-        extra = sem_lead[0] if (chave == alvo and sem_lead[0]) else 0
-        if extra:
-            n, n_orc, cent = n + extra, n_orc + extra, cent + sem_lead[1]
+        extra, nomes = 0, []
+        if ct is not None and chave == alvo:
+            n, n_orc, cent = ct["n"], ct["n"], ct["cent"]
+            extra, nomes = ct["sem_lead"], ct["nomes"]
         perdido = chave == "perdido"
         fechado = (fase in ("fechamento", "pos") and not perdido) or chave == "ganho"
         mostra_rs = bool(n_orc and cent and not perdido)
@@ -344,7 +356,7 @@ def _funil(c, conta_id: int, por_contrato: bool = False) -> list[dict]:
                     # assinado todos têm, e repetir o número só enche a linha
                     "n_orc": n_orc if (mostra_rs and n_orc < n) else 0,
                     "sem_lead": extra,
-                    "sem_lead_nomes": nomes_sem_lead[:3] if extra and len(nomes_sem_lead) <= 3 else []})
+                    "sem_lead_nomes": nomes[:3] if extra and len(nomes) <= 3 else []})
     return out
 
 

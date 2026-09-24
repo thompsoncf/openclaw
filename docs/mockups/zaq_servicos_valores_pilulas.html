@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serviços — valores e pílulas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* TOKENS — cópia de web/tema.py (_TOKENS). A fonte da verdade é o tema.py. */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-claro:#4ADE80; --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;
+  --body:"Inter",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--body);max-width:1180px;margin:0 auto;
+  padding:34px 16px 100px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.8rem;font-weight:700;line-height:1.15}
+h2{font-size:1.2rem;font-weight:700;margin-bottom:.2rem}
+.sub{color:var(--text-dim);margin-top:.5rem;max-width:82ch}
+.sec{margin-top:48px}
+.num{font-family:var(--mono);font-size:.72rem;color:var(--neon);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--text-dim);font-size:.92rem;max-width:82ch;margin-top:.4rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);padding:.7rem .9rem;border-radius:0 8px 8px 0;
+  font-size:.86rem;margin-top:1rem;color:var(--text-dim);max-width:86ch}
+.nota b{color:var(--text)}
+.nota.amb{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)} .nota.amb b{color:var(--ambar)}
+.mono{font-family:var(--mono)}
+
+/* ---------- problemas ---------- */
+.prob{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:1.1rem}
+.pb{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:12px;padding:13px 15px}
+.pb .n{font:700 .68rem var(--mono);color:var(--coral);letter-spacing:.08em;text-transform:uppercase}
+.pb h3{font-size:.98rem;margin:.25rem 0 .35rem}
+.pb p{font-size:.84rem;color:var(--text-dim)}
+.pb p b{color:var(--text)}
+.pb .ag{margin-top:.5rem;font-size:.8rem;color:var(--neon)}
+
+/* ---------- a tela ---------- */
+.tela{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;margin-top:1.1rem;align-items:start}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:20px}
+.cab{display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.8rem}
+.cab h3{font-size:1.05rem}
+.chips{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center}
+/* A PÍLULA ÚNICA: 30px de altura, borda fina, texto .78rem. Todas as pílulas da
+   tela passam a ser esta — antes eram quatro tamanhos diferentes. */
+.pl{display:inline-flex;align-items:center;gap:.3rem;height:30px;padding:0 .75rem;border-radius:99px;border:1px solid var(--line);
+  background:var(--bg-2);color:var(--text);font-size:.78rem;white-space:nowrap}
+.pl.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-claro)}
+.pl.cont{color:var(--text-dim)} .pl.cont b{color:var(--text)}
+.busca{border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:.6rem .8rem;color:var(--text-faint);font-size:.86rem;margin-bottom:.4rem}
+
+.lin{display:grid;grid-template-columns:minmax(0,1fr) 118px 118px 182px 30px;gap:.6rem;align-items:start;padding:.8rem 0;border-bottom:1px solid var(--line)}
+.lin:last-of-type{border-bottom:0}
+.nm{display:flex;gap:.6rem;align-items:center;min-width:0;padding-top:.9rem}
+.ic{width:34px;height:34px;flex:0 0 34px;border-radius:8px;border:1px solid var(--line);background:var(--bg-2);color:var(--neon-claro);display:flex;align-items:center;justify-content:center}
+.ic svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.nm b{display:block;font-size:.92rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nm small{display:block;color:var(--text-dim);font-size:.74rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fld .l{font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:.22rem}
+/* o campo de dinheiro: R$ fixo à esquerda, valor com centavos à direita */
+.din{display:flex;align-items:center;gap:.3rem;height:38px;border:1px solid var(--line);background:var(--bg);border-radius:9px;padding:0 .6rem}
+.din i{font-style:normal;color:var(--text-faint);font-size:.74rem}
+.din span{flex:1;text-align:right;font-family:var(--mono);font-size:.86rem}
+.din .seg{flex:none;font-family:var(--body)}
+.din.zero span{color:var(--text-faint)}
+.din.desc{padding-right:.25rem}
+/* o alternador: segmento de 24px DENTRO do campo, não um botão verde do lado */
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;flex:none}
+.seg i{font-style:normal;font-size:.66rem;padding:.12rem .38rem;color:var(--text-dim);line-height:1.5}
+.seg i.on{background:var(--neon-fundo);color:var(--neon-claro);font-weight:700}
+.res{font-size:.72rem;color:var(--neon-claro);text-align:right;margin-top:.25rem;font-family:var(--mono)}
+.lix{width:30px;height:30px;margin-top:1.05rem;border-radius:8px;border:1px solid transparent;color:var(--text-faint);display:flex;align-items:center;justify-content:center}
+.lix svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.lix:hover{border-color:var(--coral-borda);color:var(--coral)}
+
+/* resumo */
+.rs .t{font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;color:var(--neon);font-family:var(--mono);margin-bottom:.7rem}
+.hero{background:var(--neon-fundo);border:1px solid var(--neon-borda);border-radius:12px;padding:14px 16px}
+.hero .l{font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--neon-claro)}
+.hero .v{font-family:var(--mono);font-size:1.5rem;white-space:nowrap;font-weight:700;color:var(--neon-claro);line-height:1.2;margin-top:.2rem}
+.hero .v small{font-size:.8rem;color:var(--text-dim);font-weight:500}
+.ll{display:flex;justify-content:space-between;gap:.6rem;font-size:.84rem;color:var(--text-dim);padding:.5rem 0;border-bottom:1px solid var(--line)}
+.ll b{font-family:var(--mono);color:var(--text);font-weight:600;white-space:nowrap}
+.ll.d b{color:var(--neon-claro)}
+.ll.fr b{color:var(--text-dim);font-weight:500}
+.dt{margin-top:.9rem}
+.dt .l{font-size:.74rem;color:var(--text-dim);margin-bottom:.25rem}
+.anual{display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin-top:.8rem;border:1px solid var(--line);border-radius:11px;padding:.55rem .75rem;font-size:.8rem}
+.anual b{font-family:var(--mono);font-size:.84rem}
+.sw{width:34px;height:20px;border-radius:99px;background:#243029;position:relative;flex:none}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#9aa9a0}
+.btn{display:block;text-align:center;border-radius:11px;padding:.7rem;font-weight:700;font-size:.9rem;margin-top:.7rem}
+.btn.g{background:var(--neon);color:var(--sobre-verde)}
+.btn.o{border:1px solid var(--line)}
+
+/* antes / depois pequeno */
+.ad{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:1rem}
+.adc{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+.adc>.t{padding:.4rem .8rem;font:600 .7rem var(--mono);letter-spacing:.05em;text-transform:uppercase;border-bottom:1px solid var(--line)}
+.adc.r>.t{background:var(--coral-fundo);color:var(--coral)} .adc.b>.t{background:var(--neon-fundo);color:var(--neon)}
+.adc>.c{padding:14px;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
+/* reprodução das pílulas de hoje */
+.v-seg{display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--line);border-radius:9px;padding:.3rem .3rem .3rem .6rem;height:62px;background:var(--bg)}
+.v-seg .x{font-family:var(--mono);font-size:.84rem}
+.v-seg .p{font-size:.72rem;color:var(--text-dim)}
+.v-seg .g{background:var(--neon);color:var(--sobre-verde);font-weight:700;font-size:.72rem;border-radius:8px;padding:.95rem .6rem}
+.v-lix{width:16px;height:46px;border-radius:99px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:.6rem}
+.v-pl{border:1px solid var(--line);border-radius:99px;padding:.7rem 1rem;font-size:.8rem}
+.v-pl2{border:1px solid var(--line);border-radius:10px;padding:.9rem 1rem;font-size:.8rem}
+
+/* perguntas */
+.qs{counter-reset:q;margin-top:1rem;display:grid;gap:10px}
+.pq{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:12px;padding:13px 15px;font-size:.9rem}
+.pq::before{counter-increment:q;content:counter(q);display:inline-block;width:22px;height:22px;border-radius:50%;background:var(--ambar);color:#1a1205;
+  font:700 .72rem/22px var(--mono);text-align:center;margin-right:.5rem}
+.pq b{color:var(--ambar)}
+.pq p{color:var(--text-dim);font-size:.84rem;margin-top:.35rem}
+
+/* celular */
+.cel{max-width:380px;margin:1rem auto 0;border:1px solid var(--line);border-radius:22px;padding:14px;background:var(--bg)}
+.cel .lin{grid-template-columns:1fr 1fr;gap:.5rem}
+.cel .lin .nm{grid-column:1/-1;padding-top:0}
+.cel .lin .fld.dsc{grid-column:1/-1}
+.cel .lin .lix{position:absolute;right:0;top:.55rem;margin:0}
+.cel .lin{position:relative}
+.cel .nm{padding-right:34px}
+.barra{display:flex;align-items:center;gap:.5rem;border-top:1px solid var(--line);margin-top:.6rem;padding-top:.7rem}
+.barra .v{flex:1}
+.barra .v .l{font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;color:var(--neon)}
+.barra .v b{display:block;font-family:var(--mono);font-size:1.15rem;color:var(--neon-claro)}
+.barra .v small{font-size:.7rem;color:var(--text-dim)}
+.barra .bt{height:34px;padding:0 .9rem;border-radius:99px;font-size:.8rem;font-weight:700;display:flex;align-items:center}
+.barra .bt.o{border:1px solid var(--line)} .barra .bt.g{background:var(--neon);color:var(--sobre-verde)}
+
+@media (max-width:900px){
+  .tela{grid-template-columns:1fr}
+  .lin{grid-template-columns:1fr 1fr;gap:.5rem}
+  .lin .nm{grid-column:1/-1;padding-top:0;padding-right:34px}
+  .lin .fld.dsc{grid-column:1/-1}
+  .lin{position:relative}
+  .lin .lix{position:absolute;right:0;top:.55rem;margin:0}
+  .ad{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<div class="num">Mockup · Serviços · ZAQ (conta 3) · recorrente</div>
+<h1>Valores em reais com centavos, e uma pílula só</h1>
+<p class="sub">Desenhado com os números reais da proposta da <b>HLED</b> (nº 10): quatro serviços, mensalidade de tabela R$ 5.700, desconto de R$ 2.700/mês e mensalidade final de <b>R$ 3.000</b>.</p>
+
+<div class="nota amb"><b>Antes de tudo: o print que você mandou é a tela ANTIGA.</b>
+O botão "Pagamento anual (-15%)" sem o "à vista", o interruptor em cada linha e o "MENSAL 12(" cortado só existiam antes das mudanças de ontem.
+O Render publicou tudo, e o que está no ar agora é a tela da seção 1 abaixo. Pelo jeito a aba estava aberta desde antes da publicação.
+Recarregue com <b>Ctrl + Shift + R</b>. Mesmo recarregada, a tela ainda tem os problemas abaixo.</div>
+
+<!-- ================================================================== 1 -->
+<div class="sec">
+  <div class="num">1 · O que está no ar hoje (medido)</div>
+  <h2>Cinco coisas que confundem quem lê o valor</h2>
+  <div class="prob">
+    <div class="pb"><div class="n">① Sem R$ e sem centavos</div><h3>"1.500" e "0"</h3>
+      <p>Os campos mostram só o número, sem <b>R$</b> e sem <b>,00</b>. Os totais cortam os centavos: um serviço de R$ 1.397,50 viraria "R$ 1.398".</p>
+      <div class="ag">→ R$ fixo no campo, sempre com os centavos</div></div>
+    <div class="pb"><div class="n">② Desconto sem milhar</div><h3>"1200" no desconto</h3>
+      <p>O campo de desconto não ganhou o ponto de milhar dos outros: "1200" ao lado de "2.200".</p>
+      <div class="ag">→ o mesmo formato em todo campo de dinheiro</div></div>
+    <div class="pb"><div class="n">③ Ano misturado com mês</div><h3>"Descontos por item R$ 32.400"</h3>
+      <p>O resumo mostra o desconto <b>do ano</b> (R$ 2.700 × 12) e diz "Economia de R$ 32.400". Parece que o desconto foi de 32 mil. E o rótulo cola no número: "item— R$".</p>
+      <div class="ag">→ desconto por mês, ao lado da mensalidade</div></div>
+    <div class="pb"><div class="n">④ O número que importa está pequeno</div><h3>R$ 3.000 numa linha</h3>
+      <p>O destaque verde é o "Total 1º ano". Quem vende mensalidade negocia o <b>valor por mês</b>, que fica numa linha comum. E "Investimento inicial R$ 0" ocupa espaço sem dizer nada.</p>
+      <div class="ag">→ "Investimento mensal" em destaque; sem implantação, some</div></div>
+    <div class="pb"><div class="n">⑤ Pílulas de quatro tamanhos</div><h3>O "R$/mês" gigante</h3>
+      <p>O alternador % | R$/mês é um botão verde de 44px ao lado do campo. A lixeira é uma pílula alta e fina. "Modo margem", "Adicionar", "Pagamento anual" e os parâmetros têm cada um uma altura.</p>
+      <div class="ag">→ uma pílula de 30px; o alternador vai para dentro do campo</div></div>
+  </div>
+</div>
+
+<!-- ================================================================== 2 -->
+<div class="sec">
+  <div class="num">2 · A tela proposta</div>
+  <h2>A proposta da HLED no editor</h2>
+  <p class="lede">A mesma ordem e os mesmos botões da tela de hoje. Mudam o formato dos valores, o resumo e o tamanho das pílulas.</p>
+
+  <div class="tela">
+    <div class="card">
+      <div class="cab"><h3>Meus serviços</h3>
+        <div class="chips"><span class="pl cont"><b>4</b>&nbsp;de 5 na proposta</span><span class="pl">+ Adicionar serviço</span><span class="pl">Modo margem</span></div></div>
+      <div class="busca">🔍 Buscar serviço pra adicionar…</div>
+
+      <div class="lin">
+        <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><rect x="2.8" y="6.5" width="13" height="11" rx="2"/><path d="m15.8 10.5 5.4-3v9l-5.4-3"/><circle cx="9.3" cy="12" r="2.2"/></svg></span><div style="min-width:0"><b>Criação de Conteúdo</b><small>3 Reels por semana · Roteirização</small></div></div>
+        <div class="fld"><div class="l">Implantação</div><div class="din zero"><i>R$</i><span>0,00</span></div></div>
+        <div class="fld"><div class="l">Mensal</div><div class="din"><i>R$</i><span>1.500,00</span></div></div>
+        <div class="fld dsc"><div class="l">Desconto</div><div class="din desc"><i>R$</i><span>500,00</span><span class="seg"><i>%</i><i class="on">R$/mês</i></span></div><div class="res">= R$ 1.000,00/mês</div></div>
+        <div class="lix" title="Tirar da proposta"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l1 13h9l1-13"/></svg></div>
+      </div>
+      <div class="lin">
+        <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.8"/><circle cx="12" cy="12" r="1.2"/><path d="m12 12 7-7"/></svg></span><div style="min-width:0"><b>Estratégia e Acompanhamento</b><small>Planejamento mensal · Análise dos resultados</small></div></div>
+        <div class="fld"><div class="l">Implantação</div><div class="din zero"><i>R$</i><span>0,00</span></div></div>
+        <div class="fld"><div class="l">Mensal</div><div class="din"><i>R$</i><span>1.000,00</span></div></div>
+        <div class="fld dsc"><div class="l">Desconto</div><div class="din desc"><i>R$</i><span>500,00</span><span class="seg"><i>%</i><i class="on">R$/mês</i></span></div><div class="res">= R$ 500,00/mês</div></div>
+        <div class="lix"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l1 13h9l1-13"/></svg></div>
+      </div>
+      <div class="lin">
+        <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 10v4h3l6 4V6L6 10z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a7.5 7.5 0 0 1 0 11"/></svg></span><div style="min-width:0"><b>Gestão de Tráfego Pago</b><small>Meta Ads · Google Ads · Criação e configuração</small></div></div>
+        <div class="fld"><div class="l">Implantação</div><div class="din zero"><i>R$</i><span>0,00</span></div></div>
+        <div class="fld"><div class="l">Mensal</div><div class="din"><i>R$</i><span>2.200,00</span></div></div>
+        <div class="fld dsc"><div class="l">Desconto</div><div class="din desc"><i>R$</i><span>1.200,00</span><span class="seg"><i>%</i><i class="on">R$/mês</i></span></div><div class="res">= R$ 1.000,00/mês</div></div>
+        <div class="lix"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l1 13h9l1-13"/></svg></div>
+      </div>
+      <div class="lin">
+        <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="16" rx="2"/><path d="M3.5 9h17"/><path d="M8 2.8v3.4"/><path d="M16 2.8v3.4"/><path d="M7.5 13h3"/><path d="M13.5 13h3"/></svg></span><div style="min-width:0"><b>Organização e Gestão das Redes Sociais</b><small>Organização do perfil · Calendário editorial</small></div></div>
+        <div class="fld"><div class="l">Implantação</div><div class="din zero"><i>R$</i><span>0,00</span></div></div>
+        <div class="fld"><div class="l">Mensal</div><div class="din"><i>R$</i><span>1.000,00</span></div></div>
+        <div class="fld dsc"><div class="l">Desconto</div><div class="din desc"><i>R$</i><span>500,00</span><span class="seg"><i>%</i><i class="on">R$/mês</i></span></div><div class="res">= R$ 500,00/mês</div></div>
+        <div class="lix"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l1 13h9l1-13"/></svg></div>
+      </div>
+    </div>
+
+    <div class="card rs">
+      <div class="t">Resumo · ao vivo</div>
+      <div class="hero"><div class="l">Investimento mensal</div><div class="v">R$ 3.000,00 <small>/mês</small></div></div>
+      <div class="ll"><span>Mensalidade de tabela</span><b>R$ 5.700,00</b></div>
+      <div class="ll d"><span>Desconto nos serviços</span><b>− R$ 2.700,00/mês</b></div>
+      <div class="ll fr"><span>Implantação</span><b>sem taxa</b></div>
+      <div class="ll fr"><span>12 meses</span><b>R$ 36.000,00</b></div>
+      <div class="dt"><div class="l">Desconto no total</div><div class="din desc"><i>R$</i><span>0,00</span><span class="seg"><i class="on">%</i><i>R$</i></span></div></div>
+      <div class="anual"><span>Anual à vista (−15%)<br><b>R$ 30.600,00</b></span><span class="sw"></span></div>
+      <span class="btn g">Gerar proposta</span>
+      <span class="btn o">Salvar no funil</span>
+    </div>
+  </div>
+
+  <div class="nota"><b>Os números são os da HLED, e a conta fecha:</b> 1.000 + 500 + 1.000 + 500 = <b>R$ 3.000,00/mês</b>; tabela R$ 5.700,00 − desconto R$ 2.700,00 = R$ 3.000,00; 12 meses = R$ 36.000,00; anual à vista = R$ 36.000,00 − 15% = R$ 30.600,00.
+  O desconto aparece <b>por mês</b>, que é como você negocia. "Implantação" só vira linha forte quando algum serviço tem implantação.</div>
+</div>
+
+<!-- ================================================================== 3 -->
+<div class="sec">
+  <div class="num">3 · As pílulas, lado a lado</div>
+  <h2>Hoje × proposta</h2>
+  <div class="ad">
+    <div class="adc r"><div class="t">Hoje</div><div class="c">
+      <span class="v-seg"><span class="x">1200</span><span class="p">%</span><span class="g">R$/mês</span></span>
+      <span class="v-lix">🗑</span>
+      <span class="v-pl">+ Adicionar serviço</span>
+      <span class="v-pl2">Pagamento anual à vista (-15%) ↻</span>
+    </div></div>
+    <div class="adc b"><div class="t">Proposta</div><div class="c">
+      <span class="din desc" style="width:190px"><i>R$</i><span>1.200,00</span><span class="seg"><i>%</i><i class="on">R$/mês</i></span></span>
+      <span class="lix" style="margin:0"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l1 13h9l1-13"/></svg></span>
+      <span class="pl">+ Adicionar serviço</span>
+      <span class="anual" style="margin:0;width:230px"><span>Anual à vista (−15%)</span><span class="sw"></span></span>
+    </div></div>
+  </div>
+  <div class="nota"><b>A regra nova:</b> toda pílula tem 30px de altura, a mesma borda e o mesmo texto.
+  O alternador % | R$/mês vai para <b>dentro</b> do campo, pequeno. A lixeira vira um ícone discreto que fica vermelho quando o mouse passa.
+  O "anual à vista" vira um interruptor, porque é liga/desliga, e mostra o valor do ano.</div>
+</div>
+
+<!-- ================================================================== 4 -->
+<div class="sec">
+  <div class="num">4 · No celular</div>
+  <h2>A mesma linha, empilhada</h2>
+  <div class="cel">
+    <div class="lin">
+      <div class="nm"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 10v4h3l6 4V6L6 10z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a7.5 7.5 0 0 1 0 11"/></svg></span><div style="min-width:0"><b>Gestão de Tráfego Pago</b><small>Meta Ads · Google Ads</small></div></div>
+      <div class="fld"><div class="l">Implantação</div><div class="din zero"><i>R$</i><span>0,00</span></div></div>
+      <div class="fld"><div class="l">Mensal</div><div class="din"><i>R$</i><span>2.200,00</span></div></div>
+      <div class="fld dsc"><div class="l">Desconto</div><div class="din desc"><i>R$</i><span>1.200,00</span><span class="seg"><i>%</i><i class="on">R$/mês</i></span></div><div class="res">= R$ 1.000,00/mês</div></div>
+      <div class="lix"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l1 13h9l1-13"/></svg></div>
+    </div>
+    <div class="barra"><div class="v"><div class="l">Investimento mensal</div><b>R$ 3.000,00</b><small>4 serviços · 12 meses R$ 36.000,00</small></div>
+      <span class="bt o">Salvar</span><span class="bt g">Gerar</span></div>
+  </div>
+  <div class="nota">A barra fixa do celular hoje mostra "Total 1º ano R$ 36.000". Passa a mostrar a <b>mensalidade</b>, com os 12 meses embaixo.</div>
+</div>
+
+<!-- ================================================================== 5 -->
+<div class="sec">
+  <div class="num">5 · Antes de construir</div>
+  <h2>Três perguntas</h2>
+  <div class="qs">
+    <div class="pq"><b>Centavos nos campos?</b> Dá para digitar centavos (R$ 1.397,50) nos campos de implantação, mensal e desconto, ou só reais inteiros, mostrando sempre ",00"?
+      <p>Recomendo aceitar centavos. Hoje o sistema guarda os valores da proposta em reais inteiros, então isso muda a gravação: um serviço de R$ 1.397,50 viraria R$ 1.398. As propostas já salvas continuam com os mesmos valores.</p></div>
+    <div class="pq"><b>Vale para a Prime também?</b> O formato "R$ 1.500,00" e a pílula única valem também para a tela da Prime (eventos)?
+      <p>Recomendo que sim: dinheiro com centavos e pílula do mesmo tamanho não são coisa de nicho. O que é de festa (Cobrar × Incluso, qtd × unitário) continua só lá.</p></div>
+    <div class="pq"><b>Destaque na mensalidade?</b> O número grande do resumo passa a ser o <b>Investimento mensal</b>, e o "Total 1º ano" vira uma linha "12 meses"?
+      <p>Recomendo que sim: é o que o cliente paga todo mês, e é o mesmo destaque da proposta que ele recebe.</p></div>
+  </div>
+</div>
+
+</body>
+</html>

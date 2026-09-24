@@ -374,3 +374,53 @@ def test_sem_aceite_nao_grava_a_forma(pool):
     _proposta(pool)
     _cliente().post(f"/proposta/{TOKEN}/assinar", data={"nome": "Heitor", "forma": "anual"})
     assert _estado(pool)[0] is False
+
+
+# ================================================================ 7. centavos (24/09/2026)
+# "ajustar as casas decimais pra pessoas verem valores em reais corretos" e
+# "sim aceitar centavos" (dono). O item guarda reais; agora com até duas casas.
+
+def test_centavos_arredonda_no_centavo_e_nao_no_real():
+    assert dsc.centavos(1397.5) == 139750
+    assert dsc.centavos("1397.50") == 139750
+    assert dsc.centavos(1500) == 150000 and dsc.centavos(None) == 0
+    it = {"setup": 0, "mensal": 1397.5, "desc_tipo": "valor", "desc_val": 97.5,
+          "desc_mes": True}
+    assert dsc.liquido_do_item(it)["mensal"] == 130000
+
+
+def test_valor_inteiro_sai_identico_ao_de_antes():
+    """Regra 0: nenhuma proposta já salva muda de número por causa dos centavos."""
+    it = {"setup": 4500, "mensal": 1200, "desc_tipo": "pct", "desc_val": 10}
+    assert dsc.liquido_do_item(it) == {
+        "pct": 10.0, "setup": 405000, "mensal": 108000, "desconto_setup": 45000,
+        "desconto_mensal": 12000, "desconto": 45000 + 12000 * 12}
+    assert ps._reais2(1500) == 1500 and isinstance(ps._reais2(1500.0), int)
+    assert ps._reais2(1397.5) == 1397.5 and ps._reais2("1397.504") == 1397.5
+
+
+def test_a_tela_le_e_escreve_centavos_nos_dois_nichos():
+    js = ps._JS_CRU
+    assert "function lerReais(s)" in js and "minimumFractionDigits:2" in js
+    assert "function num(el){return lerReais(el&&el.value);}" in js
+    # o formatador vale pros dois nichos (era só o recorrente)
+    corpo = js[js.index("function milhar(root)"):]
+    corpo = corpo[:corpo.index("\n  }\n")]
+    assert "if(SERVICO_AVULSO) return;" not in corpo
+    # o campo de dinheiro com R$ fixo nas duas linhas
+    assert js.count("campoRS('oc-setup'") == 2
+
+
+def test_o_resumo_do_recorrente_destaca_a_mensalidade_e_o_do_evento_o_total():
+    def tela(avulso):
+        return ps._env.get_template("servicos").render(
+            empresa_nome="X", tem_pj=True, vende_servico=True, servico_avulso=avulso,
+            pode_contrato=True, ve_todos=True, tipo_padrao="pj",
+            tipos_evento=["Casamento"] if avulso else [], tipos_contrato=[],
+            local_padrao="", icones_paleta=ics.paleta("evento" if avulso else "recorrente"))
+    rec, ev = tela(False), tela(True)
+    tot_rec = rec.split('class="oc-total"', 1)[1][:400]
+    assert "Investimento mensal" in tot_rec and 'id="oc-r-mensal"' in tot_rec
+    assert "Mensalidade de tabela" in rec and "Desconto nos serviços" in rec
+    tot_ev = ev.split('class="oc-total"', 1)[1][:400]
+    assert ">Total<" in tot_ev and "Investimento mensal" not in ev

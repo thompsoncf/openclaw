@@ -137,9 +137,11 @@ def test_a_linha_do_recorrente_tem_uma_coluna_por_caixa():
     """nome | setup | mensal | desconto | 🗑 — e o custo entra como coluna NOVA
     no Modo margem, em vez de ocupar uma que já tinha dono."""
     css = ps._CSS_CRU
-    assert ".oc-mod.rec{grid-template-columns:minmax(0,1fr) 96px 96px 138px auto}" in css
+    # larguras de 24/09/2026: com "R$" e centavos nos campos ("R$ 1.500,00") e o
+    # alternador % | R$/mês dentro do desconto, as colunas cresceram
+    assert ".oc-mod.rec{grid-template-columns:minmax(0,1fr) 112px 120px 184px auto}" in css
     assert (".sv-wrap.oc-margin .oc-mod.rec{grid-template-columns:"
-            "minmax(0,1fr) 96px 96px 88px 138px auto}") in css
+            "minmax(0,1fr) 112px 120px 104px 184px auto}") in css
     js = ps._JS_CRU
     corpo = js[js.index("function buildRowRec(s)"):]
     corpo = corpo[:corpo.index("function renderCatalogoAvulso")]

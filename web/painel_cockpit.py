@@ -4463,12 +4463,13 @@ def cockpit_orcamento(request: Request, orc_id: int):
         return RedirectResponse(f"{_BASE}/orcamentos", status_code=303)
 
     def _linha_item(it):
-        setup, mensal = int(it.get("setup") or 0), int(it.get("mensal") or 0)
+        from finance.desconto import centavos as _cent   # reais com centavos (24/09)
+        setup, mensal = _cent(it.get("setup")), _cent(it.get("mensal"))
         partes = []
         if setup:
-            partes.append(_brl(setup * 100))
+            partes.append(_brl(setup))
         if mensal:
-            partes.append(_brl(mensal * 100) + "/mês")
+            partes.append(_brl(mensal) + "/mês")
         return ("<div class=ficha-l><span>" + esc(it.get("nome", "")) + "</span><b>"
                 + esc(" + ".join(partes) or "—") + "</b></div>")
 

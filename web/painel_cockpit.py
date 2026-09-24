@@ -3337,7 +3337,7 @@ def _bloco_dinheiro(r: dict) -> str:
              + "<div class=eyebrow>Seu ritmo</div>"
              + "<div class=kpis>"
              + f"<div class=kpi><div class=v>{esc(r['conversao'])}</div><div class=l>Conversão</div>"
-               "<div class=d>ganhos vs. perdidos</div></div>"
+               f"<div class=d>{r.get('ganhos', 0)} fechado(s) de {r.get('recebidos', 0)} leads recebidos</div></div>"
              + f"<div class=kpi><div class=v>{r['fila']}</div><div class=l>Na fila</div>"
                "<div class=d>leads abertos com você</div></div>"
              + f"<div class=kpi><div class=v>{esc(r['resp'])}</div><div class=l>Resposta</div>"
@@ -6832,7 +6832,8 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
              + (_painel_periodo(de, ate) if abrir else "")
              + "<div class=kpis>"
              + f"<div class='kpi hero'><div class=v>{esc(k['ganhos_rs'])}</div><div class=l>Fechado no período</div>"
-               f"<div class=d>{k['ganhos']} negócio(s) · {conv} de conversão</div></div>"
+               f"<div class=d>{k['ganhos']} negócio(s) · {conv} de conversão"
+               + (f" ({k['ganhos']} de {k['novos']} leads)" if k["novos"] else "") + "</div></div>"
              + f"<div class=kpi><div class=v>{k['novos']}</div><div class=l>Leads novos</div>"
                "<div class=d>no período</div></div>"
              # "Em atendimento" dizia 423 na Prime — a carteira aberta inteira, com
@@ -7108,10 +7109,12 @@ def cockpit_placar(request: Request):
         f"<span class=rk>{i + (4 if podio else 1)}</span>"
         f"<span class='av mudo'>{esc(v['nome'][:1].upper())}</span>"
         f"<div class=mid><b>{esc(v['nome'])}</b><div class=sub>"
-        f"<span>{v['fila']} na fila</span><span>{v['atendendo']} atend.</span><span>{esc(v['resp'])}</span>"
+        f"<span>{v['fila']} na carteira</span><span>{v.get('perdidos', 0)} perdido(s) no mês</span>"
+        f"<span>{esc(v['resp'])}</span>"
         + ("<span class=pausado>pausado</span>" if v["pausado"] else "")
         + f"</div></div><div class=rt><span class=g>{esc(v['rs'])}</span>"
-          f"<small>{v['ganhos']} ganhos · {esc(v['conversao'])}</small></div></a>"
+          # conversão = fechados ÷ leads recebidos (24/09/2026); o "de N" diz a base
+          f"<small>{v['ganhos']} fechado(s) · {esc(v['conversao'])} de {v.get('recebidos', 0)}</small></div></a>"
         for i, v in enumerate(resto))
 
     if not lista:
@@ -7236,10 +7239,22 @@ def cockpit_vendedor(request: Request, membro_id: int):
              + "<div class=scroll><div class=kpis style='margin-top:.9rem'>"
              + f"<div class='kpi hero'><div class=v>{esc(v['rs'])}</div><div class=l>Fechado no mês</div>"
                f"<div class=d>{v['ganhos']} negócio(s)</div></div>"
-             + f"<div class=kpi><div class=v>{esc(v['conversao'])}</div><div class=l>Conversão</div></div>"
-             + f"<div class=kpi><div class=v>{v['fila']}</div><div class=l>Na fila</div></div>"
+             + f"<div class=kpi><div class=v>{esc(v['conversao'])}</div><div class=l>Conversão</div>"
+               f"<div class=d>{v['ganhos']} fechado(s) de {v.get('recebidos', 0)} leads recebidos</div></div>"
+             + f"<div class=kpi><div class=v>{v['fila']}</div><div class=l>Na fila</div>"
+               "<div class=d>leads abertos com ele</div></div>"
              + f"<div class=kpi><div class=v>{esc(v['resp'])}</div><div class=l>Resposta</div>"
                "<div class=d>média de 30 dias</div></div></div>"
+             # "O mês dele" (24/09/2026): o que a conversão sozinha não mostra — com a
+             # régua nova os vendedores podem empatar, e a diferença é quanto cada um
+             # fecha o ciclo (perde) e quanto deixa em aberto
+             + "<div class=eyebrow>O mês dele</div>"
+             + "<div class=bloco><div class=card><div class=linhas style='margin-top:0'>"
+               f"<div><span>Leads recebidos</span><b>{v.get('recebidos', 0)}</b></div>"
+               f"<div><span>Fechados</span><b>{v['ganhos']}</b></div>"
+               f"<div><span>Perdidos</span><b>{v.get('perdidos', 0)}</b></div>"
+               f"<div><span>Dos {v.get('recebidos', 0)} recebidos, ainda em aberto</span>"
+               f"<b class=amb>{v.get('abertos_recebidos', 0)}</b></div></div></div></div>"
              + f"<div class=bloco>{pausar}</div>"
              + "<div class=eyebrow>Leads abertos com ele</div>"
              + (leads or "<div class=fonte>Nenhum lead aberto.</div>")

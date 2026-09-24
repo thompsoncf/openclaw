@@ -83,7 +83,8 @@ def test_visao(pool):
         conta, dono, v1, v2, ab, an = _seed(c)
     v = cd.visao(pool, conta, "mes")
     k = v["kpis"]
-    assert k["ganhos"] == 1 and k["ganhos_rs"] == "R$ 8 mil" and k["conversao"] == 100
+    # conversão = fechados ÷ leads novos do período: 1 ganho de 3 leads (24/09/2026)
+    assert k["ganhos"] == 1 and k["ganhos_rs"] == "R$ 8 mil" and k["conversao"] == 33
     assert k["com_vend"] == 1 and k["com_ia"] == 1          # Bodas c/ vendedor, Aniversário c/ IA
     fun = {f["rotulo"]: f["n"] for f in v["funil"]}
     assert fun["Novo"] == 1 and fun["Contatado"] == 1 and fun["Qualificado"] == 0   # ganho não entra no funil
@@ -100,7 +101,8 @@ def test_placar_ordena_por_rs(pool):
     carlos = next(x for x in lista if x["nome"] == "Carlos")
     ana = next(x for x in lista if x["nome"] == "Ana")
     assert carlos["ganhos"] == 1 and carlos["rs"] == "R$ 8 mil" and carlos["fila"] == 1
-    assert carlos["conversao"] == "100%" and carlos["atendendo"] == 1
+    # 1 fechado dos 2 leads que ele recebeu no mês — e não 100% "dos decididos"
+    assert carlos["conversao"] == "50%" and carlos["recebidos"] == 2 and carlos["atendendo"] == 1
     assert ana["pausado"] is True and ana["ganhos"] == 0
 
 
@@ -956,3 +958,74 @@ def test_a_lista_do_anuncio_bate_com_a_barra_dele(pool):
         for barra in x["perdemos"]:
             lst = cd.perdidos(pool, conta, barra["chave"], "mes", codigo=codigo or "")
             assert lst["total"] == barra["n"], (codigo, barra["chave"])
+
+
+# ======================================================= a conversão do vendedor (24/09/2026)
+
+def test_a_conversao_e_fechados_sobre_leads_recebidos_e_nao_sobre_os_decididos(pool):
+    """Na Prime, três vendedores com 3 contratos em ~73 leads apareciam com 13%, 60%
+    e 75% — o número media quanto cada um marcava como perdido. Aqui: os dois
+    vendem 1 em 4; um marca 3 perdidos, o outro deixa tudo em aberto."""
+    with pool.connection() as c:
+        conta, dono, v1, v2, ab, an = _seed(c, "Regua")
+        c.execute("delete from prospeccao where conta_id=%s", (conta,))
+        c.commit()
+        agora = datetime.now(timezone.utc)
+        for vend, perdidos in ((v1, 3), (v2, 0)):
+            _lead(c, conta, vend, "ganho")
+            for i in range(3):
+                _lead(c, conta, vend, "perdido" if i < perdidos else "contatado", perda_em=agora)
+    p = {x["nome"]: x for x in cd.placar(pool, conta)}
+    assert p["Carlos"]["conversao"] == p["Ana"]["conversao"] == "25%"
+    assert (p["Carlos"]["perdidos"], p["Carlos"]["abertos_recebidos"]) == (3, 0)
+    assert (p["Ana"]["perdidos"], p["Ana"]["abertos_recebidos"]) == (0, 3)
+    assert cd.visao(pool, conta, "mes")["kpis"]["conversao"] == 25
+
+
+def test_a_venda_conta_no_mes_em_que_fechou_e_nao_na_ultima_alteracao(pool):
+    agora = datetime.now(timezone.utc)
+    mes_passado = cd._range("mes")[0] - timedelta(days=5)
+    with pool.connection() as c:
+        conta, dono, v1, v2, ab, an = _seed(c, "DataVenda")
+        c.execute("delete from prospeccao where conta_id=%s", (conta,))
+        c.commit()
+        velho = _lead(c, conta, v1, "ganho")
+        c.execute("insert into funil_movimentos (conta_id, prospeccao_id, de, para, criado_em) "
+                  "values (%s,%s,'proposta','ganho',%s)", (conta, velho, mes_passado))
+        # editado hoje (a automação, uma ficha salva): antes isso o trazia pro mês
+        c.execute("update prospeccao set atualizado_em=now() where id=%s", (velho,))
+        c.commit()
+    assert next(x for x in cd.placar(pool, conta) if x["nome"] == "Carlos")["ganhos"] == 0
+    assert cd.visao(pool, conta, "mes")["kpis"]["ganhos"] == 0
+    # voltou pro funil e fechou de novo HOJE: aí conta, pelo último fechamento
+    with pool.connection() as c:
+        c.execute("insert into funil_movimentos (conta_id, prospeccao_id, de, para, criado_em) "
+                  "values (%s,%s,'contatado','ganho',%s)", (conta, velho, agora))
+        c.commit()
+    assert next(x for x in cd.placar(pool, conta) if x["nome"] == "Carlos")["ganhos"] == 1
+
+
+def test_passar_de_uma_etapa_de_fechamento_pra_outra_nao_muda_a_data(pool):
+    """A venda é de quando o lead ENTROU no fechamento, não de quando trocou de
+    coluna dentro dele (ex.: contrato assinado -> pós-venda). Quais etapas são de
+    fechamento é a `fase` do funil da conta."""
+    mes_passado = cd._range("mes")[0] - timedelta(days=5)
+    with pool.connection() as c:
+        conta, v1, ab, an = _prime(c, "Ajuste")
+        c.execute("delete from prospeccao where conta_id=%s", (conta,))
+        c.execute("insert into funil_etapas (conta_id, chave, rotulo, ordem, fase) "
+                  "values (%s,'pos_venda','Evento feito',920,'pos')", (conta,))
+        c.commit()
+        lid = _lead(c, conta, v1, "pos_venda")
+        c.execute("insert into funil_movimentos (conta_id, prospeccao_id, de, para, criado_em) values "
+                  "(%s,%s,'proposta','ganho',%s), (%s,%s,'ganho','pos_venda',now())",
+                  (conta, lid, mes_passado, conta, lid))
+        c.commit()
+    assert cd.visao(pool, conta, "mes")["kpis"]["ganhos"] == 0
+
+
+def test_a_perda_conta_na_data_da_perda(pool):
+    with pool.connection() as c:
+        conta, dono, v1, v2, ab, an = _seed(c, "DataPerda")
+        _lead(c, conta, v1, "perdido", perda_em=cd._range("mes")[0] - timedelta(days=3))
+    assert next(x for x in cd.placar(pool, conta) if x["nome"] == "Carlos")["perdidos"] == 0

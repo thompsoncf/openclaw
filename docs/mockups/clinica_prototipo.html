@@ -86,8 +86,12 @@ main{padding:calc(var(--faixa) + 16px) 22px 60px 238px;max-width:calc(var(--pag)
 .faint{color:var(--text-faint)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:.9rem}
 .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:.9rem}
+.grid2>*,.grid3>*{min-width:0} /* coluna de grade não cresce além da tela por causa de texto que não quebra */
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem;margin-bottom:.9rem}
-.kpi{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:.7rem .85rem}
+.kpis.k3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.kpi{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:.7rem .85rem;min-width:0}
+/* atalho que rola até um título: o título para abaixo da faixa fixa do protótipo (:where não pesa, as regras próprias vencem) */
+:where(main [id]){scroll-margin-top:calc(var(--faixa) + 12px)}
 .kpi b{display:block;font-size:1.45rem;font-family:var(--display);font-weight:600}
 .kpi span{font-size:.74rem;color:var(--txt-mut)}
 .kpi.ruim b{color:var(--coral)}.kpi.ok b{color:var(--neon)}.kpi.amb b{color:var(--ambar)}
@@ -350,8 +354,10 @@ button.vg{font:inherit;color:var(--txt);text-align:left;width:100%;cursor:pointe
   .side{display:none}
   body.menu-on .side{display:flex;z-index:85;width:min(290px,86vw);box-shadow:10px 0 36px rgba(0,0,0,.55)}
   main{padding:calc(var(--faixa) + 12px) 12px calc(76px + env(safe-area-inset-bottom,0px))}
-  .kpis{grid-template-columns:repeat(2,1fr)}
+  .kpis,.kpis.k3{grid-template-columns:repeat(2,minmax(0,1fr))}
   .grid2,.grid3{grid-template-columns:1fr}
+  /* campo com fonte menor que 16px faz o iPhone dar zoom ao tocar */
+  .inp,select.inp,textarea.inp{font-size:16px}
   .mobnav{display:flex}
   /* faixa: só ícone + controles curtos; o roteiro abre num painel */
   .proto{padding:0 .5rem;gap:.35rem}
@@ -496,6 +502,7 @@ button.vg{font:inherit;color:var(--txt);text-align:left;width:100%;cursor:pointe
 .rx-acao .tt{font-weight:600;font-size:.92rem}
 .rx-acao .pz{font-family:var(--mono);font-size:.64rem;letter-spacing:.1em;color:var(--txt-mut)}
 .rx-acao .vl{font-family:var(--display);font-size:1.25rem;font-weight:600;text-align:right;white-space:nowrap}
+.rx-acao .rx-fim{display:flex;flex-direction:column;align-items:flex-end;gap:.35rem}
 .rx-acao.um{border-color:var(--neon-borda)}
 .rx-acao.feito .tt{text-decoration:line-through;opacity:.6}
 .rx-regua{position:relative;height:12px;border-radius:99px;background:var(--card-2);border:1px solid var(--borda);margin:1.6rem 0 1.4rem}
@@ -509,7 +516,9 @@ button.vg{font:inherit;color:var(--txt);text-align:left;width:100%;cursor:pointe
 .rx-lista .tx{font-size:.8rem;color:var(--txt-mut);padding-bottom:.6rem;border-bottom:1px solid var(--borda);margin-bottom:.4rem}
 .rx-lista .tx b{color:var(--txt);display:block;font-size:.86rem}
 .rx-conf{background:var(--azul-fundo);border:1px solid var(--azul-borda);border-radius:12px;padding:.8rem .9rem;font-family:var(--mono);font-size:.72rem;color:#9CCBE6;line-height:1.7;margin-top:1rem}
-@media(max-width:900px){.rx-mesa{grid-template-columns:1fr 1fr}.rx-mesa .rx-hero{grid-column:1/-1}.rx-acao{grid-template-columns:28px 1fr}.rx-acao .vl{text-align:left}.rx-acao .btn{grid-column:1/-1;width:100%;justify-content:center}}
+@media(max-width:900px){.rx-mesa{grid-template-columns:1fr 1fr}.rx-mesa .rx-hero{grid-column:1/-1}.rx-acao{grid-template-columns:28px minmax(0,1fr)}
+  .rx-acao .rx-fim{grid-column:1/-1;align-items:stretch}.rx-acao .rx-fim .vl{text-align:left}.rx-acao .rx-fim .btn{width:100%;justify-content:center}
+  .rx-lk{display:inline-flex;align-items:center;min-height:32px}}
 @media(max-width:480px){.rx-mesa{grid-template-columns:1fr}.rx-c{font-size:.64rem}.rx-hd{font-size:.56rem}}
 
 /* ---------- hoje ---------- */
@@ -542,7 +551,7 @@ button.vg{font:inherit;color:var(--txt);text-align:left;width:100%;cursor:pointe
 .hj-regra>div{background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.5rem .6rem;font-size:.78rem;color:var(--txt-mut);line-height:1.45}
 .hj-regra b{display:block;color:var(--txt);font-size:.82rem;margin-bottom:.15rem}
 .hj-b .zap{max-width:none}
-@media (max-width:900px){.hj-regra{grid-template-columns:1fr}.hj-it .hb{margin-left:0}.hj-so-pc{display:none}}
+@media (max-width:900px){.hj-regra{grid-template-columns:1fr}.hj-it .hb{margin-left:0}.hj-so-pc{display:none}.hj-res button{min-height:32px}}
 
 /* ---------- vagas ---------- */
 .vg-estado{display:flex;flex-wrap:wrap;gap:.25rem .8rem;align-items:center;font-size:.78rem;color:var(--txt-mut);background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.45rem .7rem;margin:0 0 .8rem;cursor:pointer}
@@ -624,6 +633,7 @@ button.vg{font:inherit;color:var(--txt);text-align:left;width:100%;cursor:pointe
   .vg-faixa{display:flex;align-items:center;gap:.5rem;justify-content:space-between;position:fixed;left:8px;right:8px;bottom:calc(58px + env(safe-area-inset-bottom,0px));z-index:59;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:#F4D29A;border-radius:10px;padding:.45rem .6rem;font-size:.8rem;box-shadow:0 8px 24px rgba(0,0,0,.45);cursor:pointer}
   .vg-faixa b{color:#FFE7B8}
   .vg-faixa-esp{height:56px}
+  .vg-estado button{min-height:32px;padding:.25rem .7rem}
 }
 
 /* ---------- configurar · clínica e agente ---------- */
@@ -710,6 +720,8 @@ button.vg{font:inherit;color:var(--txt);text-align:left;width:100%;cursor:pointe
 .cf-hj{display:flex;gap:.6rem;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--azul-fundo);border:1px solid var(--azul-borda);color:#9CCBE6;border-radius:10px;padding:.5rem .7rem;font-size:.82rem;margin:0 0 .7rem;line-height:1.5}
 .cf-hj b{color:#CFE8F7}.cf-hj>span{flex:1 1 240px;min-width:0}
 @media (max-width:900px){
+  /* no celular as 8 abas quebram em linhas (sem barra de rolagem escondida) e a barra deixa de grudar no topo */
+  .cf-tabs{flex-wrap:wrap;position:static}.cf-tabs .sep{display:none}
   .cf-ed{grid-template-columns:minmax(0,1fr)}
   .cf-tr.hd{display:none}
   .cf-tipos,.cf-locs{grid-template-columns:1fr;gap:.3rem}
@@ -820,8 +832,8 @@ let EV = [
   {id:4,p:'manoel',h:'09:30',d:1,pac:'Marcos Teixeira',tipo:'Consulta',st:'segurado',org:'Instagram',seg:true},
   {id:5,p:'manoel',h:'10:00',d:1,pac:'Joana Prado',tipo:'Consulta',st:'confirmado',org:'Google',conf:'pelo WhatsApp às 08:05, junto com a vaga das 11:00'},
   {id:6,p:'manoel',h:'11:00',d:2,pac:'Rita Alves',tipo:'Procedimento clínico',st:'confirmado',org:'Já é paciente'},
-  {id:7,p:'manoel',h:'14:00',d:1,pac:'Sônia Pires',tipo:'Consulta',st:'confirmado',org:'Indicação'},
-  {id:8,p:'juliana',h:'08:30',d:2,pac:'Ana Paula Rocha',tipo:'Sessão de pacote',st:'presente',org:'Já é paciente',pac_s:'Depilação a laser · 3/10'},
+  {id:7,p:'manoel',h:'14:00',d:1,pac:'Sônia Pires',tipo:'Consulta',st:'confirmado',org:'Já é paciente',conf:'pelo WhatsApp às 10:20 de ontem'}, // assinante, fez botox em 05/06: consulta de hoje antes da reaplicação
+  {id:8,p:'juliana',h:'08:30',d:2,pac:'Ana Paula Rocha',tipo:'Sessão de pacote',st:'presente',org:'Já é paciente',pac_s:'Depilação a laser · 1/10'}, // plano aceito em 12/09: hoje é a 1ª sessão
   {id:9,p:'juliana',h:'10:00',d:2,pac:'Lúcia Ferraz',tipo:'Sessão de pacote',st:'confirmado',org:'Já é paciente',pac_s:'Criolipólise · sessão 2 de 4'},
   {id:10,p:'juliana',h:'13:30',d:2,pac:'Paula Viana',tipo:'Procedimento estético',st:'agendado',org:'Instagram'},
   {id:11,p:'juliana',h:'15:00',d:1,pac:'Beatriz Souza',tipo:'Avaliação',st:'agendado',org:'Instagram'},
@@ -832,11 +844,12 @@ let EV = [
   {id:15,p:'juliana',h:'11:00',d:1,pac:'Joana Prado',tipo:'Sessão de pacote',st:'confirmado',org:'Vaga que abriu',via:'vaga',pac_s:'Peeling · sessão 2 de 3',conf:'respondeu 1 à vaga às 08:05',antes:'Débora Lins cancelou às 07:52',vaga:'v2'},
 ];
 let FUNIL = {
-  'Novo':[{n:'Tiago Reis',s:'Indicação da Carla',t:[['parado desde ontem','r'],['lista de espera · depois das 15h','b']]},{n:'Fernanda Luz',s:'Google · consulta',t:[['Codó · fila da cidade','b']]}],
-  'Recebeu o preço':[{n:'Marina Lopes',s:'Instagram · "quanto é a consulta?"',t:[['agente respondeu em 40 s · hoje 08:12','g'],['1ª rodada da vaga das 10:30','b']]},{n:'Renata Dias',s:'Consulta · R$ 500 · há 6 dias',t:[['sem resposta','r'],['2º toque enviado',''],['2ª rodada da vaga das 10:30 (se sair)','b']]},{n:'Márcio Luz',s:'Consulta · R$ 500 · há 13 dias',t:[['nunca chamado de novo','r'],['2ª rodada da vaga das 10:30 (se sair)','b']]},{n:'Joice Prado',s:'Consulta · R$ 500 · há 1 dia',t:[['respondeu: "vou ver e te falo"','a']]}],
+  'Novo':[{n:'Tiago Reis',s:'Indicação da Carla',t:[['parado desde ontem','r'],['lista de espera · depois das 15h','b']]},{n:'Fernanda Luz',s:'Google · consulta',t:[['sem resposta desde ontem','r']]}],
+  /* os dias desde o preço são os reais (RX_WA.preco.parados, medidos em 24/09) menos 1: aqui "hoje" é 23/09 */
+  'Recebeu o preço':[{n:'Marina Lopes',s:'Instagram · "quanto é a consulta?"',t:[['agente respondeu em 40 s · hoje 08:12','g'],['1ª rodada da vaga das 10:30','b']]},{n:'Renata Dias',s:'Consulta · R$ 500 · há 5 dias',t:[['sem resposta','r'],['2º toque enviado',''],['2ª rodada da vaga das 10:30 (se sair)','b']]},{n:'Márcio Luz',s:'Consulta · R$ 500 · há 12 dias',t:[['nunca chamado de novo','r'],['2ª rodada da vaga das 10:30 (se sair)','b']]},{n:'Joice Prado',s:'Consulta · R$ 500 · hoje',t:[['respondeu: "vou ver e te falo"','a']]}],
   'Voltar a chamar':[{n:'Heitor Lima',s:'Consulta social',t:[['esfriando','a'],['lista de espera · manhãs','b']]}],
-  'Consulta agendada':[{n:'Sônia Pires',s:'Consulta · Dr. Manoel',t:[['qua 14:00 · confirmado','g']]},{n:'Joana Prado',s:'Consulta · Dr. Manoel',t:[['qua 10:00 · remarcou a falta de 16/09','g'],['qua 11:00 · peeling · vaga','g']]},{n:'Marcos Teixeira',s:'Consulta · Dr. Manoel',t:[['qua 09:30 · segurado','a']]},{n:'Paula Viana',s:'Procedimento estético',t:[['qui 13:30','']]},{n:'Beatriz Souza',s:'Avaliação · Juliana',t:[['qua 15:00','']]}],
-  'Plano de tratamento':[{n:'Rogério Alves',s:'Botox · R$ 1.600',t:[['proposta há 3 dias','a']]},{n:'Bianca Lemos',s:'Laser 10 sessões · R$ 2.400',t:[['vence amanhã','r']]},{n:'Fernando Sá',s:'Criolipólise · 4 sessões · R$ 3.200',t:[['visualizou hoje','']]},{n:'Denise Rocha',s:'Botox (hiperidrose) · R$ 1.800',t:[['respondeu: "vou ver e te aviso"','a'],['há 2 dias','']]},{n:'Gilberto Nunes',s:'Cauterização química · 3 sessões · R$ 900',t:[['proposta enviada há 1 dia','']]}],
+  'Consulta agendada':[{n:'Sônia Pires',s:'Consulta · Dr. Manoel',t:[['qua 14:00 · confirmado','g']]},{n:'Joana Prado',s:'Consulta · Dr. Manoel',t:[['qua 10:00 · remarcou a falta de 16/09','g'],['qua 11:00 · peeling · vaga','g']]},{n:'Marcos Teixeira',s:'Consulta · Dr. Manoel',t:[['qua 09:30 · segurado','a']]},{n:'Paula Viana',s:'Procedimento estético · Juliana',t:[['qua 13:30','']]},{n:'Beatriz Souza',s:'Avaliação · Juliana',t:[['qua 15:00','']]}],
+  'Plano de tratamento':[{n:'Rogério Alves',s:'Botox · R$ 1.600',t:[['proposta há 3 dias','a']]},{n:'Bianca Lemos',s:'Laser 10 sessões · R$ 2.400',t:[['vence amanhã','r']]},{n:'Fernando Sá',s:'Criolipólise · 4 sessões · R$ 3.200',t:[['visualizou hoje','']]},{n:'Denise Rocha',s:'Botox · 2 áreas · R$ 1.800',t:[['respondeu: "vou ver e te aviso"','a'],['há 2 dias','']]},{n:'Gilberto Nunes',s:'Cauterização química · 3 sessões · R$ 900',t:[['proposta enviada há 1 dia','']]}],
 };
 /* ===== ROTEIRO · dados (a tela está na seção 3 · ROTEIRO)
    Fonte de cada número (vira etiqueta na tela): real = RX_WA (WhatsApp 24/08–23/09:
@@ -851,8 +864,11 @@ const TURNO={qui:{nome:'quinta',txt:'08:00–17:00 · almoço 12–13',vagas:16,
 const SEDE={ // Dr. Manoel em Pedreiras
   semana(){const e=EV.filter(x=>x.p==='manoel'&&x.dia<=4&&!['cancelou','faltou'].includes(x.st));
     return {valor:e.reduce((s,x)=>s+tipo(x.tipo)[4],0),horas:5*HORAS.length/2}},  // conta do Zaq na Agenda: 13.070 em 35 h (semana a 60%, não "dia cheio")
-  hora(){const s=SEDE.semana();return Math.round(s.valor/s.horas)},              // 373
-  qui:{dia:1300,hora:186},  // exemplo · média de quintas COM o aviso de vaga que abriu enchendo a sede
+  hora(){const s=SEDE.semana();return Math.round(s.valor/s.horas)},              // 388
+  /* ficar em Pedreiras numa quinta = um dia médio dele na sede, pela mesma conta da Agenda
+     (R$ 13.570 ÷ 5 ≈ R$ 2.710, R$ 388/h). Não é a quinta cheia: o Raio-X mostra quanto vale
+     cada horário vazio (média da meia-hora marcada), que é outra pergunta. */
+  get qui(){const s=SEDE.semana();return {dia:Math.round(s.valor/5/10)*10,hora:Math.round(s.valor/s.horas)}},
   sab:{dia:0,hora:0},       // a sede não abre sábado para ele
 };
 const PISO_SAB=1000;        // exemplo · o mínimo que precisa sobrar para valer gastar um sábado (a clínica decide)
@@ -964,7 +980,7 @@ function menu(){
       h+=`<button class="nav-i ${atual===id?'on':''}" onclick="ir('${id}')"><svg class="nav-ic"><use href="#ic-${ic}"/></svg><span>${lb}</span>${badge}${etiqueta}</button>`;
     }
   }
-  h+=`<div style="flex:1"></div><button class="nav-i"><svg class="nav-ic"><use href="#ic-sair"/></svg><span>Sair</span></button>`;
+  h+=`<div style="flex:1"></div><button class="nav-i" onclick="toast('Sair','No Zaq, este botão sai da conta e volta para a tela de entrada. Nesta demonstração, nada acontece.')"><svg class="nav-ic"><use href="#ic-sair"/></svg><span>Sair</span></button>`;
   s.innerHTML = h;
   const mob = document.getElementById('mobnav');
   mob.innerHTML = MOB_PRINC.filter(pode).map(id=>{const it=itemMenu(id);return `<button class="${atual===id?'on':''}" onclick="ir('${id}')"><svg class="nav-ic"><use href="#ic-${it[2]}"/></svg>${it[1]}${id==='vagas'&&emOferta()?`<span class="mob-b">${emOferta()}</span>`:''}</button>`}).join('')
@@ -999,6 +1015,12 @@ function trocarPapel(){if(!pode(ROTA))ROTA='hoje';fecharTudo();fecharDemo();menu
   toast(ehDono()?'Vendo como dono':'Vendo como recepção',ehDono()?'Todas as telas e os valores da clínica.':'Só Hoje, Conversas, Agenda, Vagas, Pacientes, Funil e Tratamentos. Sem Raio-X, Roteiro e faturamento da clínica; desconto até 10%.')}
 function abrirMenu(){document.body.classList.add('menu-on');$('#veu').classList.add('on')}
 function ir(r){ROTA=r;fecharTudo();fecharDemo();menu();render();window.scrollTo(0,0);location.hash=r}
+/* a rota que está no endereço: só as do menu e a ficha; o resto cai em Hoje */
+function rotaDoHash(){const r=String(location.hash||'').replace(/^#/,'').split(/[?&]/)[0];return r==='paciente'||itemMenu(r)?r:'hoje'}
+/* botão Voltar do celular ou do navegador: troca a tela junto com o endereço e fecha gaveta e modal */
+if(typeof window!=='undefined'&&window.addEventListener)window.addEventListener('hashchange',()=>{const r=rotaDoHash();
+  if(r===ROTA)return; // foi o próprio ir(): a gaveta que abriu logo depois (ir('roteiro');abrirCidade…) fica aberta
+  ROTA=r;fecharTudo();fecharDemo();menu();render();window.scrollTo(0,0)});
 
 /* =================================================================
    UTIL
@@ -1010,7 +1032,9 @@ const X_FECHAR='<button class="fechar" onclick="fecharTudo()" aria-label="Fechar
 function abrirGav(h){const g=$('#gav');g.classList.remove('larga');g.innerHTML=X_FECHAR+h;g.scrollTop=0;g.classList.add('on');$('#veu').classList.add('on');simplificar(g)}
 function abrirModal(h){const m=$('#modal');m.innerHTML=X_FECHAR+h;m.scrollTop=0;m.classList.add('on');$('#veu').classList.add('on');simplificar(m)}
 function fecharTudo(){$('#gav').classList.remove('on');$('#modal').classList.remove('on');$('#veu').classList.remove('on');if(document.body&&document.body.classList)document.body.classList.remove('menu-on')}
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){fecharTudo();fecharDemo()}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){fecharTudo();fecharDemo();return}
+  /* bloco com role="button": Enter e Espaço tocam nele, como num botão de verdade */
+  const t=e.target;if((e.key==='Enter'||e.key===' ')&&t&&t.getAttribute&&t.getAttribute('role')==='button'&&t.tagName!=='BUTTON'&&t.click){e.preventDefault();t.click()}});
 document.addEventListener('click',e=>{const p=document.getElementById('demoPan');if(p&&p.classList.contains('on')&&e.target&&e.target.closest&&!e.target.closest('#demoPan'))p.classList.remove('on')});
 /* Modo apresentação: troca jargão por palavra simples só no TEXTO visível
    (nunca em onclick/atributo, onde os nomes das colunas são chaves). */
@@ -1039,11 +1063,12 @@ function tipo(n){return TIPOS.find(t=>t[0]===n)||TIPOS[0]}
    ================================================================= */
 let CV_FILTRO='todas';
 let CONV=[
+  /* em ordem, da mais nova para a mais velha; "agora" é 08:50 (AGORA) */
   {id:1,n:'Joice Prado',t:'vou ver e te falo',q:'2 min',tipo:'paciente',et:'Recebeu o preço',ag:true,nl:1},
-  {id:2,n:'Sônia Pires',t:'[agente] Separei dois horários com o Dr. Manoel…',q:'10:02',tipo:'paciente',et:'Recebeu o preço',ag:true},
-  {id:3,n:'Matheus (contador)',t:'a nota de junho foi aquela?',q:'09:40',tipo:'interna',sub:'fornecedor',ag:false},
   {id:4,n:'Marcos Teixeira',t:'[agente] Reservei quarta às 9h30. A recepção confirma em instantes',q:'08:44',tipo:'paciente',et:'Consulta agendada',ag:true,ev:4}, // ev: a conversa segue o horário da Agenda (cvTexto)
   {id:5,n:'Recepção 2',t:'tem dinheiro em caixa pra pagar a água?',q:'08:31',tipo:'interna',sub:'equipe',ag:false},
+  {id:3,n:'Matheus (contador)',t:'a nota de junho foi aquela?',q:'08:12',tipo:'interna',sub:'fornecedor',ag:false},
+  {id:2,n:'Sônia Pires',t:'[agente] Confirmado! Até amanhã às 14h 🤝',q:'ontem',tipo:'paciente',et:'Consulta agendada',ag:true},
   {id:6,n:'Número novo (99) 9····-··17',t:'bom dia, o doutor atende em Codó?',q:'ontem',tipo:'sugerida',et:'Novo',ag:true,cid:'Codó'}, // cid: o agente respondeu e pôs na fila da cidade (rtZapCodo, a mesma conversa do Roteiro)
   {id:7,n:'Filtros Maranhão',t:'orçamento da manutenção do filtro',q:'ontem',tipo:'sugerida-interna',sub:'fornecedor',ag:false},
   {id:8,n:'Renata Dias',t:'[agente] Ainda quer marcar sua consulta?',q:'seg',tipo:'paciente',et:'Recebeu o preço',ag:true},
@@ -1060,9 +1085,9 @@ function telaConversas(){
   <div class="card" style="padding:.3rem .4rem">`;
   for(const c of vis){
     const interna=c.tipo.includes('interna'), sug=c.tipo.startsWith('sugerida');
-    const tag = interna
+    const et=cvEt(c), tag = interna
       ? `<span class="chip">${sug?'parece interna · ':''}interna · ${c.sub}</span>`
-      : `<span class="chip ${c.et==='Recebeu o preço'?'a':c.et==='Consulta agendada'?'g':''}">${sug?'parece paciente · ':''}${c.et}</span>`;
+      : `<span class="chip ${et==='Recebeu o preço'||et==='Voltar a chamar'?'a':et==='Consulta agendada'?'g':''}">${sug?'parece paciente · ':''}${et}</span>`;
     const badge = c.nl ? `<span style="display:inline-flex;margin-left:.3rem;background:var(--neon);color:var(--sobre-verde);border-radius:99px;font-size:.66rem;padding:0 6px;font-weight:700">${c.nl}</span>` : '';
     h+=`<div onclick="abrirConv(${c.id})" style="display:grid;grid-template-columns:36px 1fr auto;gap:.65rem;align-items:center;padding:.55rem .5rem;border-bottom:1px solid var(--borda);cursor:pointer;${interna?'opacity:.72':''}">
       <div style="width:36px;height:36px;border-radius:50%;background:${interna?'var(--card-2)':'var(--neon-fundo)'};border:1px solid ${interna?'var(--borda)':'var(--neon-borda)'};display:flex;align-items:center;justify-content:center;font-weight:700;color:${interna?'var(--txt-mut)':'var(--neon)'}">${c.n[0]}</div>
@@ -1075,26 +1100,38 @@ function telaConversas(){
   <div class="hint">🔕 <b>Conversa interna</b> (equipe, contador, fornecedor) não vira contato novo, não entra no funil e o agente nunca responde. O sistema <b>sugere</b> (contato salvo como equipe, ou conversa sem nenhuma pergunta de paciente) e a recepção confirma com um clique. No último mês, <b>${W.internas} das ${W.conversas} conversas</b> do número da clínica eram internas ${rxF('wa')}.</div>`;
 }
 /* última mensagem da conversa: se ela está ligada a um horário da Agenda (c.ev),
-   segue o estado dele (segurado → "Reservei…"; confirmado → "Prontinho!! ✅") */
+   segue o estado dele (segurado → "Reservei…"; marcado → "Prontinho!! ✅"; a recepção
+   recusou → "Esse horário não deu"). O Prontinho só sai depois que a recepção confirma. */
+const CV_MARCADO=['agendado','confirmado','presente','atendimento','finalizado'];
 function cvTexto(c){if(c.cid){const cc=rtCid(c.cid);return '[agente] '+rtFilaFrase(c.cid,cc?rtPosConv(cc,c.id):0).replace(/<[^>]+>/g,'')}
   const e=c.ev&&EV.find(x=>x.id===c.ev);if(!e)return c.t;
-  return e.st==='segurado'?'[agente] Reservei '+HJ_DIA_LONGO[e.dia]+' às '+hjH(e.h)+'. A recepção confirma em instantes':'[agente] Prontinho!! ✅ Seu agendamento foi realizado'}
+  if(e.st==='segurado')return '[agente] Reservei '+HJ_DIA_LONGO[e.dia]+' às '+hjH(e.h)+'. A recepção confirma em instantes';
+  if(CV_MARCADO.includes(e.st))return '[agente] Prontinho!! ✅ Seu agendamento foi realizado';
+  if(e.st==='faltou')return '[agente] Sentimos sua falta hoje. Quer marcar outro horário?';
+  return e.seg?'[agente] Cancelado. Quando quiser outro horário, é só me chamar 🙂':'[agente] Esse horário não deu 🙏 Posso te oferecer outro?'}
+/* a etiqueta da conversa segue o horário: recusado ou falta → Voltar a chamar */
+const cvEt=c=>{const e=c.ev&&EV.find(x=>x.id===c.ev);return e&&['cancelou','faltou'].includes(e.st)?'Voltar a chamar':c.et};
+/* o cartão do funil com o mesmo nome (a conversa inteira do paciente novo é a mesma do Funil) */
+const cvCartao=n=>{for(const col of ['Novo','Recebeu o preço','Voltar a chamar','Plano de tratamento']){const c=(FUNIL[col]||[]).find(k=>k.n===n);if(c)return [col,c]}return null};
 function abrirConv(id){
   const c=CONV.find(x=>x.id===id); const interna=c.tipo.includes('interna');
-  const tx=cvTexto(c), doAgente=tx.startsWith('[agente]'), ev=c.ev&&EV.find(x=>x.id===c.ev), cc=c.cid&&rtCid(c.cid);
+  const tx=cvTexto(c), doAgente=tx.startsWith('[agente]'), ev=c.ev&&EV.find(x=>x.id===c.ev), cc=c.cid&&rtCid(c.cid), fu=!interna&&!ev&&!cc&&cvCartao(c.n);
   const W=RX_WA;
-  abrirGav(`<div class="mut" style="font-size:.76rem">${interna?'Conversa interna · '+c.sub:'Paciente · '+c.et}</div><h2>${c.n}</h2>
-  <div class="zap" style="margin-top:.6rem">${cc?rtZapCodoMsgs(cc):ev?zapReserva(ev):`<div class="b ${doAgente?'':'eu'}">${tx.replace('[agente] ','')}<div class="h">${c.q}</div></div>`}</div>
+  abrirGav(`<div class="mut" style="font-size:.76rem">${interna?'Conversa interna · '+c.sub:'Paciente · '+cvEt(c)}</div><h2>${c.n}</h2>
+  <div class="zap" style="margin-top:.6rem">${cc?rtZapCodoMsgs(cc):ev?zapReserva(ev):fu?zapLead(fu[1],fu[0]):`<div class="b ${doAgente?'':'eu'}">${tx.replace('[agente] ','')}<div class="h">${c.q}</div></div>`}</div>
   ${cc?`<div class="hint" style="margin-top:.5rem">📍 O agente <b>primeiro ofereceu Pedreiras</b>; como a pessoa preferiu esperar, perguntou se podia avisar, e o “pode avisar” pôs a pessoa na fila de ${c.cid} ${rxF('ex')}. A fila guarda nome, telefone, cidade e o link desta conversa, nunca a frase.<br>
     No mês real, ${hjPl(W.cidades.conversas,'conversa de paciente citou','conversas de paciente citaram')} uma cidade do roteiro (${W.cidades.quais}) e não virou fila: o agente estava desligado ${rxF('wa')}.</div>
     <div class="acoes">${pode('roteiro')?`<button class="btn sec" onclick="RT_CAB='quem';ir('roteiro');abrirCidade('${c.cid}')">Ver a fila de ${c.cid} no Roteiro</button>`:''}</div>`:''}
   ${ev&&ev.st==='segurado'?`<div class="acoes"><button class="btn" onclick="hjConfirmar(${ev.id});abrirConv(${id})">Confirmar o horário</button><button class="btn sec" onclick="abrirEv(${ev.id})">Ver na Agenda</button></div>`:''}
+  ${fu?`<div class="acoes"><button class="btn sec" onclick="FU_FASE='venda';ir('funil')">Ver no Funil · ${fu[0]}</button></div>`:''}
   <div class="sec"><h4>Esta conversa é</h4><div class="acoes">
     <button class="btn ${interna?'sec':''}" onclick="marcarConv(${id},'paciente')">Paciente</button>
     <button class="btn ${interna?'':'sec'}" onclick="marcarConv(${id},'interna')">Interna (equipe / fornecedor)</button></div>
     <div class="faint" style="font-size:.76rem;margin-top:.4rem">${interna?'Não entra no funil e o agente não responde. Continua visível aqui para a equipe.':'Entra no funil e o agente pode responder e voltar a chamar.'}</div></div>
-  <div class="sec"><h4>Quem responde</h4><div class="acoes"><button class="btn sec">Eu assumo</button><button class="btn sec">Devolver ao agente</button>${interna?'':`<button class="btn sec" onclick="ir('funil')">Ver no funil</button>`}</div></div>`);
+  <div class="sec"><h4>Quem responde</h4><div class="acoes"><button class="btn sec" onclick="cvAssumir()">Eu assumo</button><button class="btn sec" onclick="cvDevolver()">Devolver ao agente</button>${interna?'':`<button class="btn sec" onclick="ir('funil')">Ver no funil</button>`}</div></div>`);
 }
+const cvAssumir=()=>toast('A recepção assumiu esta conversa','O agente sai dela até o fim do dia; “Devolver ao agente” traz de volta · nada foi enviado (protótipo)');
+const cvDevolver=()=>toast('Conversa devolvida ao agente','Ele volta a responder quando a recepção não responder em 5 min · nada foi enviado (protótipo)');
 function marcarConv(id,tipo){
   const c=CONV.find(x=>x.id===id); c.tipo=tipo;
   if(tipo==='interna'){c.sub=c.sub||'equipe';c.ag=false}else{c.et=c.et||'Novo';c.ag=true}
@@ -1138,10 +1175,10 @@ function telaAgenda(){
   const livres = (p)=>HORAS.filter(h=>atende(p,HOJE,h)&&!hoje.some(e=>e.p===p&&rxVivo(e)&&cobre(e,h))).length; // cancelado e falta não ocupam
   let h = `<div class="pg-h"><div><h1>Agenda</h1><div class="sub">Uma coluna por profissional · a mesma agenda do Amigo · clique num horário livre para agendar, num agendamento para mudar o status</div></div>
     <div style="display:flex;gap:.4rem;flex-wrap:wrap"><button class="btn sec" onclick="VG_ABA='hoje';ir(pode('vagas')?'vagas':'hoje')">⚡ ${vgRotuloAgenda()}</button><button class="btn" onclick="novoAg('manoel','13:30')">+ Agendar</button></div></div>
-  <div class="ag-top"><button class="btn sec min">‹</button><span class="dia">${AG_VISTA==='dia'?'Quarta, 23 de setembro':'Semana de 21 a 26 de setembro'}</span><button class="btn sec min">›</button>
+  <div class="ag-top"><button class="btn sec min" onclick="agSeta()" aria-label="Anterior">‹</button><span class="dia">${AG_VISTA==='dia'?'Quarta, 23 de setembro':'Semana de 21 a 26 de setembro'}</span><button class="btn sec min" onclick="agSeta()" aria-label="Próximo">›</button>
     <div class="seg" style="margin-left:.5rem"><button class="${AG_VISTA==='dia'?'on':''}" onclick="AG_VISTA='dia';render()">Dia</button><button class="${AG_VISTA==='semana'?'on':''}" onclick="AG_VISTA='semana';render()">Semana</button></div>
     ${seloAmigo()}
-    ${AG_VISTA==='dia'?`<select class="inp" style="width:auto;min-height:32px;padding:.2rem .5rem;margin-left:auto"><option>Local: Espaço Pelle · Pedreiras</option>${rtLocaisAgenda().map(x=>`<option>${x}</option>`).join('')}</select>`:''}</div>`;
+    ${AG_VISTA==='dia'?`<select class="inp" style="width:auto;min-height:32px;padding:.2rem .5rem;margin-left:auto" aria-label="Local" onchange="agLocal(this)"><option value="">Local: Espaço Pelle · Pedreiras</option>${rtLocaisAgenda().map(x=>`<option value="${rtEsc(x)}">${x}</option>`).join('')}</select>`:''}</div>`;
   if(AG_VISTA==='semana') return h+telaSemana()+legenda()+agUmaSo();
   h += `<div class="kpis">
     <div class="kpi ok"><b>${Math.round(100*hoje.filter(e=>!['cancelou','faltou'].includes(e.st)).reduce((s,e)=>s+e.d,0)/PROF.reduce((s,p)=>s+HORAS.filter(x=>atende(p.id,HOJE,x)).length,0))}%</b><span>ocupação do dia (3 profissionais) ${rxF('ex')}</span></div>
@@ -1176,7 +1213,15 @@ function telaAgenda(){
 /* a explicação de "uma agenda só", embaixo do dia e da semana */
 function agUmaSo(){return `<div class="hint">🔄 <b>Uma agenda só, a do Amigo.</b> O Zaq lê o Amigo a cada 2 minutos e grava nele. Marcou no Amigo? Aparece aqui com <i class="via am">Amigo</i>. O agente marcou pelo WhatsApp? Vai para o Amigo com <i class="via ag">agente</i>.<br>
   <b>Confirmado, Chegou e Cancelou</b>: aqui ou no Amigo, tanto faz, o Zaq grava lá. <b>Em atendimento, Finalizado e Faltou</b>: a recepção marca no Amigo, como já faz, e aqui atualiza sozinho.<br>
-  <span class="faint">Antes de ligar: a clínica confirma com o Amigo se a chave (token) de integração funciona sem o AmigoBot.</span></div>`}
+  <span class="faint">Antes de ligar: a clínica confirma com o Amigo se a chave de integração funciona sem o robô do Amigo (AmigoBot).</span></div>`}
+/* as setas de dia: o protótipo tem só a semana de 21 a 26/09 */
+const agSeta=()=>toast('Só esta semana no protótipo','A Agenda de exemplo vai de seg 21 a sáb 26/09. No Zaq, as setas andam um dia (ou uma semana) por vez.');
+/* o seletor de Local: data de viagem que já existe no Amigo mostra a lista daquele dia */
+function agLocal(sel){const val=sel&&sel.value;if(sel)sel.value='';if(!val)return;
+  const v=VIAGENS.find(x=>x.c+' · '+x.dt===val);if(!v)return;
+  if(v.plano)return abrirListaDia(v.id);
+  if(v.ev)return abrirViagem(v.id);
+  toast(val,'Ninguém marcado ainda nesse dia.')}
 function cobre(e,hr){const i=HORAS.indexOf(e.h),j=HORAS.indexOf(hr);return j>=i&&j<i+e.d}
 /* Os outros dias da semana, gerados dentro da grade de cada profissional.
    Fictício e determinístico: abre sempre igual. Quinta fica de propósito vazia
@@ -1184,8 +1229,12 @@ function cobre(e,hr){const i=HORAS.indexOf(e.h),j=HORAS.indexOf(hr);return j>=i&
 function gerarSemana(){
   EV.forEach(e=>{if(e.dia===undefined)e.dia=HOJE});
   const nomes=['Alice Moura','Bruno Castro','Cecília Reis','Diego Farias','Elaine Costa','Fábio Nunes','Gabriela Pinto','Hugo Martins','Iara Lopes','Jorge Batista','Kátia Mello','Leandro Sá','Mirela Dantas','Nilton Braga','Olga Freitas','Priscila Góes','Raul Mendes','Sabrina Luz','Téo Barros','Vera Campos'];
+  /* sábado do Dr. Manoel é em Lago da Pedra: quem marca lá mora lá (não é quem está na fila de Lago, que ainda espera, nem gente de Pedreiras) */
+  const lago=['Zilda Brandão','Edvaldo Serra','Nazaré Lobo','Joaquim Brito','Terezinha Maia','Francisco Paz','Marlene Rocha','Valdir Sousa'];
   const taxa={manoel:[.75,.8,0,.35,.6,.7],juliana:[.6,.55,0,.5,.45,0],brenda:[0,.7,0,.5,0,0]};
-  let s=7, id=1000, n=0;
+  let s=7, id=1000, n=0, nl=0;
+  /* a mesma pessoa não fica em dois lugares ao mesmo tempo: pula o nome se ela já tem horário que se sobrepõe */
+  const livre=(nm,dia,k,d)=>!EV.some(e=>e.pac===nm&&e.dia===dia&&rxVivo(e)&&(cobre(e,HORAS[k])||(d===2&&cobre(e,HORAS[k+1]))||HORAS.slice(k,k+d).includes(e.h)));
   const rnd=()=>{s=(s*9301+49297)%233280;return s/233280};
   for(const p of PROF){
     DIAS.forEach((_,dia)=>{
@@ -1202,7 +1251,10 @@ function gerarSemana(){
         if(dia<HOJE) st=rnd()<.1?'faltou':'finalizado';
         else if(dia===HOJE+1) st=rnd()<.7?'confirmado':(rnd()<.5?'segurado':'agendado');
         else st=rnd()<.15?'segurado':'agendado';
-        EV.push({id:id++,p:p.id,h:hr,d,dia,pac:nomes[n++%nomes.length],tipo:t,st,org:['Instagram','Indicação','Google','Já é paciente'][Math.floor(rnd()*4)]});
+        let pac=nomes[n++%nomes.length];
+        if(localDe(p.id,dia)!=='Espaço Pelle')pac=lago[nl++%lago.length];
+        else for(let k2=0;k2<nomes.length&&!livre(pac,dia,k,d);k2++)pac=nomes[n++%nomes.length];
+        EV.push({id:id++,p:p.id,h:hr,d,dia,pac,tipo:t,st,org:['Instagram','Indicação','Google','Já é paciente'][Math.floor(rnd()*4)]});
         if(d===2)k++;
       }
     });
@@ -1273,13 +1325,14 @@ function abrirEv(id){
   const quando=e.dia===HOJE?'hoje':e.dia===HOJE+1?'amanhã':rxDia(e.dia);
   let acoes='';
   if(e.st==='segurado') acoes=`<div class="hint" style="margin-top:0">⏳ <b>O agente segurou este horário</b> no WhatsApp${e.segH?' ('+e.segH+')':''} e disse ao paciente: “Reservei… a recepção confirma em instantes”.<br><span style="color:var(--neon)">✓ O Zaq já conferiu no Amigo que o horário está livre.</span> É só confirmar: o Zaq marca no Amigo e o paciente recebe, automático, “Prontinho!! ✅ Seu agendamento foi realizado”.</div>
-    <div class="acoes"><button class="btn" onclick="fecharTudo();hjConfirmar(${id})">Confirmar</button><button class="btn sec" onclick="mudar(${id},'cancelou','Horário devolvido','O agente vai oferecer outro horário ao paciente · nada foi enviado (protótipo)')">Não dá, oferecer outro</button><button class="btn sec" onclick="abrirZapEv(${id})">💬 Ver a conversa</button></div>`;
+    <div class="acoes"><button class="btn" onclick="fecharTudo();hjConfirmar(${id})">Confirmar</button><button class="btn sec" onclick="evNaoDa(${id})">Não dá, oferecer outro</button><button class="btn sec" onclick="abrirZapEv(${id})">💬 Ver a conversa</button></div>`;
   else if(e.st==='sinal') acoes=`<div class="hint" style="margin-top:0">💲 <b>Aguardando o sinal de R$ 50 no Pix até as ${e.prazo} de hoje</b> (${e.motivo}). Pago, vira crédito na consulta e o horário fica marcado. Se o Pix não cair até lá, o horário volta para a agenda e entra em Vagas.</div><div class="acoes"><button class="btn" onclick="hjSinal(${id},'pago')">Simular: Pix pago</button><button class="btn sec" onclick="hjSinal(${id},'venceu')">Simular: deu ${e.prazo} sem Pix</button><button class="btn sec" onclick="abrirSinal(${id})">Ver a mensagem</button></div>`;
-  else if(e.st==='agendado') acoes=`<div class="acoes"><button class="btn" onclick="mudar(${id},'confirmado','Confirmado · gravado no Amigo','${e.pac} · ${hjQuando(e)} com ${rxNome(e.p)}.')">Confirmar</button><button class="btn sec" onclick="toast('Confirmação enviada','“Oi, ${hjPrim(e.pac)}! Confirma ${e.tipo.toLowerCase()} ${quando} às ${hjH(e.h)} com ${hjCom(e.p)}? Responda 1 para confirmar ou 2 para remarcar.” · nada foi enviado (protótipo)')">Mandar confirmação</button><button class="btn coral" onclick="cancelar(${id})">Cancelou</button></div>
-    ${grava('Confirmar e Cancelou')}<div class="ag-nota">Cancelou: o horário vai para Vagas e já é oferecido a quem cabe nele.</div>`;
-  else if(e.st==='confirmado') acoes=`<div class="acoes"><button class="btn" onclick="mudar(${id},'presente','Chegou · gravado no Amigo','${hjPrim(e.pac)} está na recepção. No Amigo, ${quem} já vê “chegou”.')">Chegou</button><button class="btn sec" onclick="cancelar(${id})">Cancelou</button></div>
+  else if(e.st==='agendado') acoes=(e.seg?`<div class="hint" style="margin-top:0">✓ <b>Reserva aprovada${e.confH?' às '+e.confH:''}</b>: o Zaq marcou no Amigo e o paciente recebeu o “Prontinho!! ✅”. A confirmação de presença sai ${e.dia===HOJE+1?'hoje às 10h, com a de amanhã':'na véspera, às 10h'}.</div>`:'')
+    +`<div class="acoes">${e.seg?'':`<button class="btn" onclick="evMudar(${id},'confirmado')">Confirmou</button>`}<button class="btn sec" onclick="evMandarConf(${id})">Mandar confirmação</button><button class="btn coral" onclick="cancelar(${id})">Cancelou</button></div>
+    ${grava(e.seg?'Cancelou':'Confirmou e Cancelou')}<div class="ag-nota">Cancelou: o horário vai para Vagas e já é oferecido a quem cabe nele.</div>`;
+  else if(e.st==='confirmado') acoes=`<div class="acoes"><button class="btn" onclick="evMudar(${id},'presente')">Chegou</button><button class="btn sec" onclick="cancelar(${id})">Cancelou</button></div>
     ${grava('Chegou e Cancelou')}${doAmigo('Faltou',`<button class="btn coral min" onclick="faltou(${id})">Faltou</button>`)}`;
-  else if(e.st==='presente') acoes=doAmigo('Em atendimento',`<button class="btn sec" onclick="mudar(${id},'atendimento','Em atendimento · veio do Amigo','${Quem} chamou ${hjPrim(e.pac)}.')">Iniciar atendimento</button>`);
+  else if(e.st==='presente') acoes=doAmigo('Em atendimento',`<button class="btn sec" onclick="evMudar(${id},'atendimento')">Iniciar atendimento</button>`);
   else if(e.st==='atendimento') acoes=doAmigo('Finalizado',`<button class="btn" onclick="finalizar(${id})">Finalizar</button>`)
     +`<div class="ag-nota">Quando o Amigo avisa que acabou, o Zaq pergunta aqui só o que o Amigo não sabe: se houve proposta de tratamento, o retorno e onde a consulta foi paga.</div>`;
   else if(e.st==='finalizado') acoes=`<div class="mut" style="font-size:.82rem">Finalizado no Amigo às ${e.fimH||hmMais(e.h,30*e.d)}.${e.trat==='sim'?' Tratamento proposto: o card foi para Plano de tratamento.':e.trat==='nao'?' Sem tratamento proposto.':''}</div>`
@@ -1300,7 +1353,7 @@ function abrirEv(id){
       ${e.antes&&e.via==='vaga'?`<div class="linha"><span>Veio de vaga</span><span style="text-align:right">${e.antes}</span></div>`:''}
       ${e.credito?`<div class="linha"><span>Sinal pago no Pix</span><span style="color:var(--neon)">R$ ${e.credito} de crédito · paga ${brl(t[4]-e.credito)} no dia</span></div>`:''}
       ${e.pag&&PAG_NOME[e.pag]?`<div class="linha"><span>Pagamento</span><span style="color:var(--neon)">${PAG_NOME[e.pag]}</span></div>`:''}
-      <div class="acoes"><button class="btn sec min" onclick="ir('paciente')">Abrir ficha</button><button class="btn sec min" onclick="abrirZapEv(${id})">💬 Conversa</button></div></div>
+      <div class="acoes"><button class="btn sec min" onclick="fichaEv(${id})">Abrir ficha</button><button class="btn sec min" onclick="abrirZapEv(${id})">💬 Conversa</button></div></div>
     <div class="sec"><h4>O status e o Amigo</h4><div style="font-size:.8rem;line-height:1.6"><b>Aqui ou no Amigo</b> (o Zaq grava lá): Confirmado, Chegou, Cancelou.<br><b>Só no Amigo</b> (aqui atualiza sozinho): Em atendimento, Finalizado, Faltou.</div>
       <div class="faint" style="font-size:.74rem;margin-top:.25rem">O Amigo não avisa na hora: o Zaq lê a agenda dele a cada 2 minutos.</div></div>
     <div class="sec"><h4>O que acontece no funil</h4><div class="mut" style="font-size:.8rem;line-height:1.55">
@@ -1308,6 +1361,25 @@ function abrirEv(id){
     <div class="sec"><h4>Fica no Amigo</h4><div class="faint" style="font-size:.78rem">Prontuário, guia de convênio e nota fiscal deste atendimento continuam no Amigo. O Zaq não guarda diagnóstico.</div></div>`);
 }
 function mudar(id,st,t,x){const e=EV.find(v=>v.id===id);e.st=st;fecharTudo();render();toast(t,x||'')}
+/* os botões da gaveta passam só o id: o texto com o nome do paciente é montado aqui, fora do onclick
+   (nome com apóstrofo, como D'Ávila, quebrava o onclick) */
+function evMudar(id,st){const e=EV.find(x=>x.id===id);if(!e)return;const quem=e.p==='manoel'?'o médico':rxNome(e.p), Quem=quem[0].toUpperCase()+quem.slice(1);
+  const T={confirmado:['Confirmado · gravado no Amigo',e.pac+' · '+hjQuando(e)+' com '+rxNome(e.p)+'.'],
+    presente:['Chegou · gravado no Amigo',hjPrim(e.pac)+' está na recepção. No Amigo, '+quem+' já vê “chegou”.'],
+    atendimento:['Em atendimento · veio do Amigo',Quem+' chamou '+hjPrim(e.pac)+'.']}[st];
+  if(T)mudar(id,st,T[0],T[1])}
+/* a mensagem diz só palavra comum (consulta, retorno, sessão ou atendimento): o celular muitas vezes é da família */
+function evMandarConf(id){const e=EV.find(x=>x.id===id);if(!e)return;const quando=e.dia===HOJE?'hoje':e.dia===HOJE+1?'amanhã':rxDia(e.dia);
+  toast('Confirmação pronta para '+hjPrim(e.pac),'No Zaq, sairia no WhatsApp: “Oi, '+hjPrim(e.pac)+'! Confirma '+palavraMsg(e.tipo)+' '+quando+' às '+hjH(e.h)+' com '+hjCom(e.p)+'? Responda 1 para confirmar ou 2 para remarcar.” · nada foi enviado (protótipo)')}
+/* a recepção recusou o horário que o agente segurou: o cartão volta para Voltar a chamar */
+function evNaoDa(id){const e=EV.find(x=>x.id===id);if(!e)return;
+  const i=FUNIL['Consulta agendada'].findIndex(k=>k.n===e.pac);
+  if(i>=0){const k=FUNIL['Consulta agendada'].splice(i,1)[0];FUNIL['Voltar a chamar'].unshift({n:k.n,s:k.s,t:[['o horário segurado não deu · oferecer outro','a']]})}
+  mudar(id,'cancelou','Horário devolvido','No Zaq, o agente diria a '+hjPrim(e.pac)+' que esse horário não deu e ofereceria outro. O cartão voltou para Voltar a chamar · nada foi enviado (protótipo)')}
+/* a ficha completa do protótipo é só a da Lúcia: os outros avisam em vez de abrir a dela */
+function abrirFicha(n){if(n==='Lúcia Ferraz')return ir('paciente');
+  toast('No protótipo, a ficha completa é a da Lúcia Ferraz','A ficha de '+n+' teria a conversa, o dinheiro e os próximos passos. Para ver uma, abra a Lúcia em Pacientes.')}
+const fichaEv=id=>{const e=EV.find(x=>x.id===id);if(e)abrirFicha(e.pac)};
 function faltou(id){const e=EV.find(v=>v.id===id);e.st='faltou';fecharTudo();render();
   toast('Faltou (veio do Amigo) · voltou ao funil','Card de '+e.pac+' foi para Voltar a chamar com “faltou, remarcar”. O agente manda amanhã: “sentimos sua falta, quer remarcar?”. Não vira vaga: o horário já passou. Da próxima vez, o agente pede sinal de R$ 50 · nada foi enviado (protótipo)',true)}
 /* cancelou: o Zaq grava no Amigo e o horário vai para Vagas (vgAbrir acha quem cabe; no 1º mês, a recepção aprova) */
@@ -1323,7 +1395,7 @@ function cancelar(id){const e=EV.find(v=>v.id===id);if(!e)return;fecharTudo();
 /* a conversa de um horário (botão 💬 da gaveta) */
 function abrirZapEv(id){const e=EV.find(x=>x.id===id);if(!e)return;
   const wa=e.conf&&/WhatsApp/.test(e.conf);
-  const conf=wa?`<div class="sis">véspera · confirmação automática</div><div class="b">Oi, ${hjPrim(e.pac)}! Amanhã você tem ${e.tipo.toLowerCase()} às ${hjH(e.h)} com ${hjCom(e.p)}. Confirma? Responda <b>1</b> para confirmar ou <b>2</b> para remarcar.<div class="h">10:00 · agente</div></div><div class="b eu">1<div class="h">${(e.conf.match(/\d\d:\d\d/)||['10:12'])[0]}</div></div><div class="b">Confirmado! Até amanhã 🤝<div class="h">agente</div></div>`:'';
+  const conf=wa?`<div class="sis">véspera · confirmação automática</div><div class="b">Oi, ${hjPrim(e.pac)}! Amanhã você tem ${palavraMsg(e.tipo)} às ${hjH(e.h)} com ${hjCom(e.p)}. Confirma? Responda <b>1</b> para confirmar ou <b>2</b> para remarcar.<div class="h">10:00 · agente</div></div><div class="b eu">1<div class="h">${(e.conf.match(/\d\d:\d\d/)||['10:12'])[0]}</div></div><div class="b">Confirmado! Até amanhã 🤝<div class="h">agente</div></div>`:'';
   abrirGav(`<div class="mut" style="font-size:.76rem">Conversa · ${viaDe(e)[2]}</div><h2>${e.pac}</h2>
   <div class="zap" style="margin-top:.6rem;max-width:none">${e.via==='agente'||e.via==='vaga'?zapReserva(e):`<div class="sis">marcado pela recepção ${e.via==='amigo'?'no Amigo':'aqui no Zaq'} · sem conversa de agendamento no WhatsApp</div>`}${conf}</div>
   <div class="acoes">${e.st==='segurado'?`<button class="btn" onclick="hjConfirmar(${id});abrirZapEv(${id})">Confirmar o horário</button>`:''}<button class="btn sec" onclick="abrirEv(${id})">‹ Voltar ao horário</button></div>`)}
@@ -1362,12 +1434,18 @@ function zapReserva(e){
   h+=`<div class="b">Reservei <b>${d}, ${DIAS[e.dia][1]}, às ${hjH(e.h)}</b> com ${com} para você 🤝🏽<br>${fora?'A recepção confirma a partir das 8h e eu te aviso aqui.':'A recepção confirma em instantes e eu te aviso aqui.'}<div class="h">${t0}</div></div>
     <div class="sis">o Zaq conferiu no Amigo que o horário está livre · Agenda: segurado pelo agente</div>`;
   if(e.st==='segurado') h+=`<div class="sis" style="color:var(--ambar)">⏳ esperando a recepção confirmar</div>`;
+  else if(e.st==='cancelou'&&!e.seg) h+=`<div class="sis">a recepção não confirmou este horário · o Zaq não marcou no Amigo</div>
+    <div class="b">Esse horário não deu 🙏 Posso te oferecer outro? Tenho outros dias com ${com} esta semana.<div class="h">agente</div></div><div class="sis">→ funil: Voltar a chamar</div>`;
   else if(e.st!=='cancelou'){const tc=e.confH||(fora?'08:05':hmMais(t0,3));
     h+=`<div class="sis">${tc} · a recepção confirmou · o Zaq marcou no Amigo</div>
     <div class="b">Prontinho!! ✅ Seu agendamento foi realizado 🤝<br><b>${quando}</b> com ${com}, ${loc==='Espaço Pelle'?'na Rua Óscar Galvão, 38':'em '+loc}. Na véspera eu te mando um lembrete.<div class="h">${tc} · automática, depois da confirmação</div></div>
     <div class="sis">→ funil: Consulta agendada</div>`}
   return h;
 }
+/* o que vai no WhatsApp: nome de procedimento com palavra de saúde (botox, cauterização…) vira
+   "Procedimento", o mesmo filtro das mensagens automáticas (cfSaude). A tela da recepção mostra o nome. */
+const msgNome=n=>cfSaude(n).length?'Procedimento':n;
+const msgProc=s=>{const p=String(s).split(' · ');p[0]=msgNome(p[0]);return p.join(' · ')};
 /* a conversa de um card do funil que ainda não tem horário marcado pelo agente */
 function zapLead(c,col){
   const q=(c.s.match(/"([^"]+)"/)||[])[1];
@@ -1375,7 +1453,9 @@ function zapLead(c,col){
   if(col!=='Novo'){const of=rxOfertaPreco().slice(0,3);
     h+=`<div class="b">Olá! O Centro Dermatológico Dr. Manoel Soares agradece o seu contato 🤝🏽<br>A consulta com o Dr. Manoel Soares tem o investimento de <b>R$ 500,00</b>, nela você terá avaliação completa da sua pele. Formas de pagamento: Pix, espécie ou cartão.${of.length?'<br>Tenho estes horários:<br>'+of.map(([dd,hh])=>'• '+dd+' às '+hh).join('<br>')+'<br>Algum fica bom?':''}<div class="h">agente</div></div>
     <div class="sis">→ funil: Recebeu o preço</div>`}
-  if(col==='Plano de tratamento') h+=`<div class="sis">consulta com o Dr. Manoel · o médico propôs tratamento</div><div class="b">Oi, ${hjPrim(c.n)}! O Dr. Manoel montou seu plano 💚<div class="card-p">${c.s}</div>Quer que eu já separe os horários? É só responder <b>sim</b> 🙂<div class="h">agente</div></div>`;
+  if(col==='Plano de tratamento'){const ms=msgProc(c.s);
+    h+=`<div class="sis">consulta com o Dr. Manoel · o médico propôs tratamento</div><div class="b">Oi, ${hjPrim(c.n)}! O Dr. Manoel montou seu plano 💚<div class="card-p">${ms}</div>Quer que eu já separe os horários? É só responder <b>sim</b> 🙂<div class="h">agente</div></div>`
+    +(ms!==c.s?'<div class="sis">o nome do procedimento é palavra de saúde: no WhatsApp vai “procedimento”, e o nome fica na folha impressa</div>':'')}
   c.t.forEach(([x])=>{const m=x.match(/"([^"]+)"/);h+=m?`<div class="b eu">${m[1]}<div class="h">paciente</div></div>`:`<div class="sis">${x}</div>`});
   return h;
 }
@@ -1395,7 +1475,7 @@ function finalizar(id){const e=EV.find(v=>v.id===id);if(!e)return;
     <div class="faint" style="font-size:.74rem;margin-top:.25rem">Sim: você vai direto para a Nova proposta, já com ${e.pac}. O Zaq não anota diagnóstico nem queixa, só o que foi proposto e o preço.</div></div>
   <div class="field"><label>Retorno</label><div class="opts">${['Sem retorno','30 dias','60 dias','90 dias','6 meses'].map(x=>op('ret',x,x)).join('')}</div>
     <div class="faint" style="font-size:.74rem;margin-top:.25rem">Vem com o prazo do tipo "${e.tipo}"${t[3]!=='—'?' ('+t[3]+')':''}. 7 dias antes o agente pergunta o melhor dia.</div></div>
-  <div class="field"><label>Marcar o retorno agora, antes de sair (no mercado, quem já remarcou 2 vezes cancela 4%, contra 21%) ${rxF('merc')}</label><div class="opts">${['qua 21/10 · 09:00','qui 22/10 · 14:00','Deixar para o lembrete'].map(x=>op('marcar',x,x)).join('')}</div></div>
+  <div class="field"><label>Marcar o retorno agora, antes de sair: quem sai com o retorno marcado não depende de alguém lembrar de chamar</label><div class="opts">${['qua 21/10 · 09:00','qui 22/10 · 14:00','Deixar para o lembrete'].map(x=>op('marcar',x,x)).join('')}</div></div>
   <div class="field"><label>Produto do protocolo</label><div class="opts"><button class="opt on" onclick="sel(this,1)">Protetor FPS 60 · R$ 89</button><button class="opt" onclick="sel(this,1)">Sérum clareador · R$ 139</button></div></div>
   <div class="field"><label>Pagamento ${cons?'da consulta':'do atendimento'}${v?' · '+brl(resto)+(e.credito?' (R$ '+e.credito+' de sinal já pago no Pix)':''):''}</label>
     ${v?`<div class="opts">${op('pag','amigo','Recebido no Amigo')}${op('pag','pix','Pix')}${op('pag','dinheiro','Dinheiro')}${op('pag','cartao','Cartão')}</div>
@@ -1410,21 +1490,37 @@ function finOk(id){const e=EV.find(v=>v.id===id);if(!e)return;
     :'retorno marcado '+FIN.marcar.replace(' · ',' às ')+' (o Zaq criou no Amigo)';
   const pag=PAG_NOME[FIN.pag]?' · pagamento: '+PAG_NOME[FIN.pag]+(FIN.pag==='amigo'?', sem lançar de novo':', anotado na ficha'):'';
   fecharTudo();
-  if(FIN.trat==='sim'){propDe(e);PL_ABA='nova';ir('planos');
-    toast('Finalizado · '+e.pac,'Card foi para Plano de tratamento · '+ret+pag+'. Monte a proposta com o que '+(e.p==='manoel'?'o médico':rxNome(e.p))+' propôs.')}
+  if(FIN.trat==='sim'){propDe(e);funilPlano(e.pac);PL_ABA='nova';ir('planos');
+    toast('Finalizado · '+e.pac,'O cartão foi para Plano de tratamento no Funil · '+ret+pag+'. Monte a proposta com o que '+(e.p==='manoel'?'o médico':rxNome(e.p))+' propôs.')}
   else{render();toast('Finalizado · '+e.pac,ret[0].toUpperCase()+ret.slice(1)+pag+'.')}
 }
 function sel(b,multi){if(!multi)[...b.parentElement.children].forEach(x=>x.classList.remove('on'));b.classList.toggle('on',multi?undefined:true)}
+/* o paciente entra (ou anda) no Funil › Plano de tratamento: finalizar com proposta, Hoje › bloco 4 e o Enviar da proposta.
+   Sai das colunas de venda anteriores (Consulta agendada, Recebeu o preço…). */
+function funilPlano(n,pl,v){let k=null;
+  for(const col of Object.keys(FUNIL)){const i=FUNIL[col].findIndex(x=>x.n===n);if(i>=0){k=FUNIL[col].splice(i,1)[0];break}}
+  const s=pl?pl+(v?' · '+brl(v):''):(k&&k.s)||'Consulta · Dr. Manoel';
+  FUNIL['Plano de tratamento'].unshift({n,s,t:[pl?['proposta enviada agora','']:['proposta a montar','a']]})}
 
 /* NOVO AGENDAMENTO: busca no funil e nos pacientes; não achou, cadastra na hora só
    com nome e telefone. O Zaq cria o agendamento (e o paciente novo) no Amigo. */
-let NA_NOVO=false;
-function novoAg(p,hr,dia){const pr=PROF.find(x=>x.id===p); if(dia===undefined)dia=HOJE; const dl=DIAS[dia][0].toLowerCase()+' '+DIAS[dia][1].slice(0,2);
-  NA_NOVO=false; const emOf=vgOfertaEm(p,dia,hr);
+let NA_NOVO=false, NA_SEL=null;   // NA_SEL: o horário escolhido no modal ({dia,hr}); novoAgOk usa ele
+/* nome digitado: apóstrofo e aspas viram os tipográficos (D’Ávila), e < > saem. Assim o nome nunca quebra um onclick. */
+function nomeLimpo(s){return String(s==null?'':s).replace(/'/g,'’').replace(/"/g,'”').replace(/[<>]/g,'').replace(/\s+/g,' ').trim()}
+function novoAg(p,hr,dia){const pr=PROF.find(x=>x.id===p);if(!pr)return; if(dia===undefined)dia=HOJE;
+  /* sem horário, ou horário já ocupado (o Agendar da ficha): abre no primeiro livre desse profissional */
+  if(!hr||rxOcupa(p,dia,hr)){const f=primeirosLivres(p,1,dia)[0];if(f){dia=f.d;hr=f.h}}
+  NA_NOVO=false;NA_SEL={dia,hr};
+  const emOf=vgOfertaEm(p,dia,hr), dl=d=>DIAS[d][0].toLowerCase()+' '+DIAS[d][1].slice(0,2);
+  /* as outras opções são horários livres de verdade (a conta da Agenda), fora os que estão em oferta */
+  const alt=[];for(let d=dia;d<DIAS.length&&alt.length<3;d++){
+    const L=livresDe(p,d).filter(h=>!(d===dia&&h<=hr)&&!EM_OFERTA.some(o=>o.p===p&&o.dia===d&&o.h===h)&&!vgAtivaEm(p,d,h));
+    L.slice(0,d===dia?1:2).forEach(h=>{if(alt.length<3)alt.push([d,h])})}
+  const fu=cvCartao('Renata Dias');
   abrirModal(`<h2>Novo agendamento</h2><div class="mut" style="font-size:.84rem;margin-bottom:.7rem">Só o que a recepção preenche. O resto (fim, valor, local) se calcula.</div>
   <div class="grid2"><div>
     <div class="field"><label>Paciente</label>
-      <div id="na-busca"><input class="inp" id="na-pac" placeholder="🔍 nome ou telefone" value="Renata Dias"><div class="faint" style="font-size:.72rem;margin-top:.2rem">Achou no funil: contato novo do Instagram de ontem</div>
+      <div id="na-busca"><input class="inp" id="na-pac" placeholder="🔍 nome ou telefone" value="Renata Dias"><div class="faint" style="font-size:.72rem;margin-top:.2rem">${fu?'Achou no funil: '+fu[0]+' · '+fu[1].s:'Achou nos pacientes do Amigo'}</div>
         <button class="btn sec min" style="margin-top:.4rem" onclick="naNovo()">＋ Não achou? Cadastrar na hora</button></div>
       <div id="na-novo" style="display:none"><input class="inp" id="na-nome" placeholder="Nome completo" style="margin-bottom:.35rem"><input class="inp" id="na-tel" placeholder="Celular (WhatsApp) · (99) 9 ····-····" inputmode="tel">
         <div class="faint" style="font-size:.72rem;margin-top:.25rem">Só nome e telefone. O Zaq cria o paciente no Amigo junto com o agendamento; o resto a recepção completa no balcão, se precisar.</div></div></div>
@@ -1432,9 +1528,10 @@ function novoAg(p,hr,dia){const pr=PROF.find(x=>x.id===p); if(dia===undefined)di
     <div class="field"><label>Profissional</label><select class="inp"><option>${pr.nome}</option></select></div>
     <div class="field"><label>Como conheceu</label><div class="opts"><button class="opt on" onclick="sel(this)">Instagram</button><button class="opt" onclick="sel(this)">Indicação</button><button class="opt" onclick="sel(this)">Google</button><button class="opt" onclick="sel(this)">Já é paciente</button></div></div>
   </div><div>
-    <div class="field"><label>Horário</label><div class="opts"><button class="opt on" onclick="sel(this)">${dl} · ${hr}</button><button class="opt" onclick="sel(this)">qui 24 · 09:00</button><button class="opt" onclick="sel(this)">qui 24 · 14:30</button><button class="opt" onclick="sel(this)">sex 25 · 08:00</button></div></div>
-    <div class="linha"><span>Fim</span><span class="num">${HORAS[HORAS.indexOf(hr)+1]||'—'}</span></div>
-    <div class="linha"><span>Local</span><span>${localDe(p,dia)}</span></div>
+    <div class="field"><label>Horário</label><div class="opts">${[[dia,hr]].concat(alt).map(([d,h],i)=>`<button class="opt ${i?'':'on'}" onclick="naHora(this,'${p}',${d},'${h}')">${dl(d)} · ${h}</button>`).join('')}</div>
+      <div class="faint" style="font-size:.72rem;margin-top:.25rem">Só horários livres de ${pr.nome}, lidos da Agenda (o que está em oferta em Vagas não aparece).</div></div>
+    <div class="linha"><span>Fim</span><span class="num" id="na-fim">${hmMais(hr,30)}</span></div>
+    <div class="linha"><span>Local</span><span id="na-local">${localDe(p,dia)}</span></div>
     <div class="linha"><span>Valor</span><span>${p==='manoel'?'Consulta R$ 500 · particular · Pix, dinheiro ou cartão':'pela tabela do tipo escolhido'}</span></div>
     <div class="field" style="margin-top:.5rem"><label>Observação para a recepção</label><input class="inp"></div>
   </div></div>
@@ -1443,9 +1540,15 @@ function novoAg(p,hr,dia){const pr=PROF.find(x=>x.id===p); if(dia===undefined)di
   <div class="acoes"><button class="btn" onclick="novoAgOk('${p}','${hr}',${dia})">Agendar</button><button class="btn sec" onclick="fecharTudo()">Cancelar</button></div>
   <div class="hint">RG, raça, etnia, tipo sanguíneo, convênio e guia TISS <b>não aparecem aqui</b>: ficam no Amigo.</div>`)}
 function naNovo(){NA_NOVO=true;const a=document.getElementById('na-busca'),b=document.getElementById('na-novo');if(a)a.style.display='none';if(b)b.style.display='block';const n=document.getElementById('na-nome');if(n&&n.focus)n.focus()}
+function naHora(b,p,d,h){if(b)sel(b);NA_SEL={dia:d,hr:h};
+  const f=document.getElementById('na-fim'), l=document.getElementById('na-local');if(f)f.textContent=hmMais(h,30);if(l)l.textContent=localDe(p,d)}
 function novoAgOk(p,hr,dia){
+  if(NA_SEL){dia=NA_SEL.dia;hr=NA_SEL.hr}
   const val=id=>{const x=document.getElementById(id);return x&&x.value?String(x.value).trim():''};
-  const pac=NA_NOVO?(val('na-nome')||'Paciente novo'):(val('na-pac')||'Renata Dias');
+  const pac=nomeLimpo(NA_NOVO?(val('na-nome')||'Paciente novo'):(val('na-pac')||'Renata Dias'));
+  /* nunca grava por cima de outro paciente: o Zaq confere antes de salvar */
+  const ja=EV.find(e=>e.p===p&&e.dia===dia&&rxVivo(e)&&cobre(e,hr));
+  if(ja)return toast('Esse horário já tem '+ja.pac,rxDia(dia)+' '+hr+' com '+rxNome(p)+' está ocupado. Escolha outro horário livre.',true);
   const tp=TIPOS.some(t=>t[0]===val('na-tipo'))?val('na-tipo'):(PROF.find(x=>x.id===p).faz[0]);
   const k=HORAS.indexOf(hr), prox=HORAS[k+1];
   const d=tipo(tp)[1]>=60&&prox&&atende(p,dia,prox)&&!EV.some(e=>e.p===p&&e.dia===dia&&rxVivo(e)&&cobre(e,prox))?2:1;
@@ -1457,8 +1560,11 @@ function novoAgOk(p,hr,dia){
   const novo={p,h:hr,d,dia,pac,tipo:tp,st:'agendado',org:NA_NOVO?'Balcão':'Instagram',via:'recepcao'}, velho=EV.find(e=>e.p===p&&e.dia===dia&&e.h===hr&&e.st==='cancelou');
   if(velho){['segH','confH','trat','pag','vesp','credito','seg','prazo','motivo','conf','fimH','pac_s','antes','vaga','pedido'].forEach(k=>delete velho[k]);Object.assign(velho,novo)}
   else EV.push({id:Date.now(),...novo});
-  fecharTudo();menu();render();
-  toast('Agendado · '+dl+' '+hr,(NA_NOVO?pac+' foi cadastrado só com nome e telefone. ':'')+'O Zaq criou o agendamento'+(NA_NOVO?' e o paciente':'')+' no Amigo. O card foi para Consulta agendada no funil; a confirmação sai às 10h da véspera.'+(oferta?' A oferta desse horário em Vagas foi cancelada.':''))}
+  /* quem estava no funil vai para Consulta agendada; e sai da 2ª rodada das vagas em oferta */
+  const moveu=vgFunilAgendou(pac,DIAS[dia][0].toLowerCase()+' '+hr,tp+' · '+rxNome(p));
+  VAGAS.forEach(v=>{if(VG_ATIVA.includes(v.st))v.r2=(v.r2||[]).filter(x=>x!==pac)});
+  NA_SEL=null;fecharTudo();menu();render();
+  toast('Agendado · '+dl+' '+hr,(NA_NOVO?pac+' foi cadastrado só com nome e telefone. ':'')+'No Zaq, o agendamento'+(NA_NOVO?' e o paciente':'')+' seriam criados no Amigo na hora. '+(moveu?'O cartão de '+hjPrim(pac)+' foi para Consulta agendada no Funil. ':'')+'A confirmação sai às 10h da véspera.'+(oferta?' A oferta desse horário em Vagas foi cancelada.':'')+' · nada foi salvo (protótipo)')}
 
 /* =================================================================
    2 · FUNIL
@@ -1470,7 +1576,7 @@ function novoAgOk(p,hr,dia){
 const POS = {
   'Em tratamento':[
     {n:'Lúcia Ferraz',proc:'Criolipólise',ses:[1,4],prox:'hoje · 10:00',par:'1 de 4 parcelas pagas',al:null},
-    {n:'Ana Paula Rocha',proc:'Depilação a laser',ses:[2,10],prox:'hoje · 08:30',par:'4× no cartão',al:null},
+    {n:'Ana Paula Rocha',proc:'Depilação a laser',ses:[0,10],prox:'hoje · 08:30',par:'4× no cartão',al:null},
     {n:'Joana Prado',proc:'Peeling',ses:[1,3],prox:'hoje · 11:00',par:'pago no Pix',al:null},
     {n:'Clara Nunes',proc:'Cauterização',ses:[2,3],prox:'qui 01/10 · 09:00',par:'pago no Pix',al:null},
     {n:'Rita Alves',proc:'Peeling',ses:[0,3],prox:'seg 28/09',par:'pago no Pix',al:null},
@@ -1483,7 +1589,7 @@ const POS = {
     {n:'Paulo Mota',proc:'Procedimento clínico',fim:'20/09',av:['nota 6 · recepção avisada','r']},
   ],
   'Manutenção':[
-    {n:'Sônia Pires',proc:'Botox · reaplicação (4 meses)',vence:['em 12 dias','a'],st:'agente ofereceu 3 horários'},
+    {n:'Sônia Pires',proc:'Botox · reaplicação (4 meses)',vence:['em 12 dias','a'],st:'consulta hoje 14:00: o Dr. Manoel avalia'},
     {n:'Heloísa Dias',proc:'Laser · manutenção semestral',vence:['venceu há 5 dias','r'],st:'2º toque amanhã'},
     {n:'Vítor Ramos',proc:'Criolipólise · reavaliação (60 dias)',vence:['em 3 dias','a'],st:'agendou qui 09:00 → volta ao funil'},
   ],
@@ -1494,12 +1600,18 @@ const POS = {
 };
 let FU_FASE='tudo';
 /* cards que não cabem no quadro: a coluna soma a contagem real (RX_WA). Novo: 11 parados (real · Zaq);
-   Recebeu o preço: os 10 que não marcaram (real), os mais antigos de 21 a 28 dias (RX_WA.preco.parados) */
-const FUNIL_MAIS=(()=>{const W=RX_WA, P=W.preco, nN=W.novoParados-FUNIL['Novo'].length, nP=P.receberam-P.marcaram-FUNIL['Recebeu o preço'].length, ant=P.parados.slice(-nP);
-  return {'Novo':[nN,'+'+nN+' mais'],'Recebeu o preço':[nP,'+'+nP+' mais antigos · de '+ant[0]+' a '+ant[ant.length-1]+' dias']}})();
+   Recebeu o preço: os 10 que não marcaram (real), os mais antigos (RX_WA.preco.parados, medidos em 24/09:
+   aqui "hoje" é 23/09, então 1 dia a menos: de 20 a 27 dias) */
+const FUNIL_ANTIGOS=n=>{const a=RX_WA.preco.parados.slice(-n);return a.length?'de '+(a[0]-1)+' a '+(a[a.length-1]-1)+' dias':''};
+const FUNIL_MAIS=(()=>{const W=RX_WA, P=W.preco, nN=W.novoParados-FUNIL['Novo'].length, nP=P.receberam-P.marcaram-FUNIL['Recebeu o preço'].length;
+  return {'Novo':[nN,'+'+nN+' mais'],'Recebeu o preço':[nP,'+'+nP+' mais antigos · '+FUNIL_ANTIGOS(nP)]}})();
 const posEmTrat=()=>POS['Em tratamento'].length, posParados=()=>POS['Em tratamento'].filter(c=>c.al).length;
 const posIndicacao=()=>POS['Indicou'].reduce((s,c)=>s+(+String(c.rec).replace(/\D/g,'')||0),0);
-function cardVenda(col,c,i){return `<div class="kbcard" onclick="abrirLead('${col}',${i})"><div class="emp">${c.n}</div><div class="sub">${c.s}</div><div class="ft">${c.t.map(([x,k])=>`<span class="chip ${k}">${x}</span>`).join('')}</div></div>`}
+/* a etiqueta "segurado" do cartão segue o horário da Agenda: aprovado → marcado no Amigo */
+function fuChip(c,[x,k]){if(!/· segurado$/.test(x))return [x,k];
+  const e=EV.find(v=>v.pac===c.n&&v.dia>=HOJE&&v.via==='agente');if(!e||e.st==='segurado')return [x,k];
+  return rxVivo(e)?[x.replace('segurado','marcado no Amigo'),'g']:[x.replace('segurado','horário devolvido'),'r']}
+function cardVenda(col,c,i){return `<div class="kbcard" onclick="abrirLead('${col}',${i})"><div class="emp">${c.n}</div><div class="sub">${c.s}</div><div class="ft">${c.t.map(t=>fuChip(c,t)).map(([x,k])=>`<span class="chip ${k}">${x}</span>`).join('')}</div></div>`}
 function cardPos(col,c,i){
   let corpo='';
   if(col==='Em tratamento') corpo=`<div class="sub">${c.proc}</div>
@@ -1523,6 +1635,7 @@ function telaFunil(){
     : `<div class="kpis"><div class="kpi"><b>${W.preco.receberam} → ${W.preco.marcaram}</b><span>receberam o preço → agendaram (último mês) ${rxF('wa')}</span></div>${ehDono()
       ?`<div class="kpi ruim"><b>${brl(parados*RX_CONSULTA)}</b><span>em consultas paradas depois do preço (${parados} × ${brl(RX_CONSULTA)}) ${rxF('wa')}</span></div>`
       :`<div class="kpi ruim"><b>${parados}</b><span>pararam depois do preço · ${W.preco.nuncaChamados} nunca chamados de novo ${rxF('wa')}</span></div>`}<div class="kpi amb"><b>${W.novoParados}</b><span>contatos parados em Novo ${rxF('zaq')}</span></div><div class="kpi ok"><b>${W.com.med} min</b><span>mediana de resposta da recepção ${rxF('wa')}</span></div></div>`;
+  h+=`<div class="rx-leg" style="margin:0 0 .5rem">Contagem das colunas: ${venda?`Novo ${rxF('zaq')} · Recebeu o preço ${rxF('wa')} · as outras colunas`:'todas as colunas'} ${rxF('ex')}<span>· nomes de exemplo</span></div>`;
   h+=`<div class="kbrow">`;
   if(venda) for(const [col,cards] of Object.entries(FUNIL)){
     const ex=FUNIL_MAIS[col];
@@ -1537,7 +1650,7 @@ function telaFunil(){
     <div class="mut" style="font-size:.82rem;margin-bottom:.5rem">Medido no WhatsApp da clínica (24/08 a 23/09): de ${W.preco.receberam} pessoas que receberam o preço da consulta, ${W.preco.marcaram} agendaram. Das ${parados} que não agendaram, ${W.preco.nuncaChamados} nunca foram chamadas de novo. A recepção responde rápido — o que falta é voltar a falar. ${rxF('wa')}</div>
     <table class="tb"><tr><th>Quando</th><th>O agente manda</th></tr>
     <tr><td>Recebeu o preço</td><td>card entra em <span class="chip">Recebeu o preço</span> sozinho (o agente reconhece a mensagem de valor)</td></tr>
-    ${AGENTE.fu.map((f,i)=>`<tr><td>+${f.d} sem resposta</td><td>${f.on?'':'<span class="chip">desligado em Clínica e agente</span> '}${i===0?'o agente manda os horários livres do dia (todo agendamento real saiu no mesmo dia do preço): ':''}"${rtEsc(cfFill(f.t,cfFuVals('Sônia')))}"${f.fim?'; é o último toque: sem resposta, vai para <span class="chip r">Perdido</span> com o motivo "sumiu depois do preço"':''}</td></tr>`).join('')}
+    ${AGENTE.fu.map((f,i)=>`<tr><td>+${f.d} sem resposta</td><td>${f.on?'':'<span class="chip">desligado em Clínica e agente</span> '}${i===0?'o agente manda os horários livres do dia (todo agendamento real saiu no mesmo dia do preço): ':''}"${rtEsc(cfFill(f.t,cfFuVals('Renata')))}"${f.fim?'; é o último toque: sem resposta, vai para <span class="chip r">Perdido</span> com o motivo "sumiu depois do preço"':''}</td></tr>`).join('')}
     <tr><td>Respondeu "vou ver"</td><td>sai do automático e aparece para a recepção, com a frase dele no card</td></tr>
     </table></div>`;
   if(pos) h+=`<div class="card" style="margin-top:.9rem"><h3>O pós-venda anda sozinho</h3><table class="tb">
@@ -1555,10 +1668,10 @@ function telaFunil(){
 function abrirPos(col,i){const c=POS[col][i];
   const jornada=[['28/08','Chegou por indicação da Carla',''],['01/09','Consulta com Dr. Manoel',''],['01/09','Plano aceito · criolipólise 4 sessões · R$ 3.620','g'],['02/09','Sessão 1',''],['23/09','Sessão 2 · hoje às 10h','a'],['14/10','Sessão 3 · prevista',''],['04/11','Sessão 4 · prevista',''],['~jan/27','Reavaliação (60 dias após a última)','']];
   const acoes={
-    'Em tratamento':c.al?`<button class="btn" onclick="toast('Mensagem enviada','“Oi, ${c.n.split(' ')[0]}! Sua próxima sessão de ${c.proc.toLowerCase()} está liberada. Tenho ter 14h ou qui 9h, qual prefere?”')">Oferecer horário agora</button><button class="btn coral">Registrar desistência</button>`:`<button class="btn" onclick="ir('agenda')">Ver sessão na agenda</button>`,
-    'Concluído':`<button class="btn sec">Ver resposta da pesquisa</button>`,
-    'Manutenção':`<button class="btn" onclick="toast('Horários oferecidos','O agente mandou 3 horários para ${c.n.split(' ')[0]}.')">Oferecer horário</button>`,
-    'Indicou':`<button class="btn sec">Ver quem ele indicou</button>`,
+    'Em tratamento':c.al?`<button class="btn" onclick="posToast('${col}',${i},'oferecer')">Oferecer horário agora</button><button class="btn coral" onclick="posToast('${col}',${i},'desistiu')">Registrar desistência</button>`:`<button class="btn" onclick="ir('agenda')">Ver sessão na agenda</button>`,
+    'Concluído':`<button class="btn sec" onclick="posToast('${col}',${i},'pesquisa')">Ver resposta da pesquisa</button>`,
+    'Manutenção':`<button class="btn" onclick="posToast('${col}',${i},'oferecer')">Oferecer horário</button>`,
+    'Indicou':`<button class="btn sec" onclick="posToast('${col}',${i},'indicou')">Ver quem indicou</button>`,
   }[col];
   abrirGav(`<div class="mut" style="font-size:.76rem">${col}</div><h2>${c.n}</h2><div class="mut" style="font-size:.84rem">${c.proc||('indicou '+c.ind+' paciente(s)')}</div>
   <div class="acoes">${acoes}</div>
@@ -1568,8 +1681,15 @@ function abrirPos(col,i){const c=POS[col][i];
     <div class="linha"><span>Contratado até hoje</span><span class="num">R$ 4.269</span></div>
     <div class="linha"><span>Previsto nos próximos 12 meses (assinatura, reavaliação e produto)</span><span class="num">R$ 2.600</span></div>
     <div class="linha"><span>Trouxe por indicação</span><span class="num">R$ 500</span></div>
-    <div class="faint" style="font-size:.72rem">Os mesmos valores da ficha dela, em Pacientes.</div></div>
-  <div class="acoes"><button class="btn sec" onclick="ir('paciente')">Abrir ficha completa</button></div>`)}
+    <div class="faint dev" style="font-size:.72rem">Os mesmos valores da ficha dela, em Pacientes.</div></div>
+  <div class="acoes"><button class="btn sec" onclick="abrirFicha(POS['${col}'][${i}].n)">Abrir ficha completa</button></div>`)}
+/* os botões do pós-venda: o que aconteceria (nada sai no protótipo). A mensagem diz "sessão", nunca o procedimento. */
+function posToast(col,i,k){const c=(POS[col]||[])[i];if(!c)return;const p=hjPrim(c.n), hs=rxOfertaPreco().slice(1,3).map(([d,h])=>d.split(' ')[0]+' '+hjH(h)).join(' ou ')||'dois horários da semana';
+  const T={oferecer:['Horários prontos para '+p,'No Zaq, o agente mandaria: “Oi, '+p+'! Sua próxima sessão está liberada. Tenho '+hs+', qual prefere?” · nada foi enviado (protótipo)'],
+    desistiu:['Desistência de '+p,'No Zaq, você escolheria o motivo (preço, resultado, mudou de cidade…) e as sessões que sobraram ficariam registradas para acerto · nada foi salvo (protótipo)'],
+    pesquisa:['Pesquisa de '+p,c.av?'Resposta: '+c.av[0]+'. No Zaq, abre a conversa com a nota e o comentário.':'Ainda sem resposta.'],
+    indicou:['Quem '+p+' indicou','No Zaq, abre a lista das '+c.ind+' pessoas indicadas, com o que cada uma já fez na clínica.']}[k];
+  if(T)toast(T[0],T[1])}
 /* a conversa do card: se o agente marcou um horário para essa pessoa, é a conversa
    da reserva (zapReserva: "Reservei… a recepção confirma em instantes" e, depois que a
    recepção confirma, o "Prontinho!! ✅" automático); senão, a conversa até onde o card está */
@@ -1579,9 +1699,13 @@ function abrirLead(col,i){const c=FUNIL[col][i];if(!c)return;
   <div class="sec"><h4>Conversa · agente do WhatsApp</h4>
   <div class="zap">${e?zapReserva(e):zapLead(c,col)}</div>
   ${e&&e.st==='segurado'?`<div class="acoes"><button class="btn" onclick="hjConfirmar(${e.id});abrirLead('${col}',${i})">Confirmar o horário</button><span class="faint" style="font-size:.74rem;align-self:center">o Zaq já conferiu no Amigo que está livre</span></div>`:''}
-  <div class="hint" style="margin-top:.5rem">📝 Os textos são os que a recepção já usa (a saudação, "investimento de R$ 500,00", "Prontinho!! ✅"). O agente só <b>reserva</b>: o "Prontinho!! ✅" sai sozinho quando a recepção confirma. É o modo padrão; em Configurar › WhatsApp e agente dá para passar a marcar direto no Amigo.<br>O que muda: <b>não pede foto do RG nem endereço</b> pelo WhatsApp, só nome e nascimento. Documento é dado sensível, e o Amigo cadastra o paciente só com o nome; o RG pode ser conferido no balcão.</div></div>
+  <div class="hint" style="margin-top:.5rem">📝 Os textos são os que a recepção já usa (a saudação, "investimento de R$ 500,00", "Prontinho!! ✅"). ${agDireto()
+    ?'Modo atual: <b>marca direto no Amigo</b> a consulta do Dr. Manoel na sede (escolhido em Configurar › WhatsApp e agente); o resto continua segurado, e o "Prontinho!! ✅" sai quando a recepção confirma.'
+    :'O agente só <b>reserva</b>: o "Prontinho!! ✅" sai sozinho quando a recepção confirma. É o modo padrão; em Configurar › WhatsApp e agente dá para passar a marcar direto no Amigo.'}<br>O que muda: <b>não pede foto do RG nem endereço</b> pelo WhatsApp, só nome e nascimento. Para marcar, documento não é necessário, e fica mais seguro conferido no balcão; o Amigo cadastra o paciente só com o nome. Dado sensível é o de saúde (queixa, diagnóstico, foto de pele): esse o agente não pede nem comenta.</div></div>
   <div class="sec"><h4>O agente nunca</h4><div class="faint" style="font-size:.78rem">indica tratamento · fala de sintoma · diz se o convênio cobre · confirma horário antes da recepção · responde conversa marcada como interna (equipe, fornecedor)</div></div>
-  <div class="acoes">${e?`<button class="btn" onclick="abrirEv(${e.id})">Ver o horário</button>`:''}<button class="btn ${e?'sec':''}" onclick="ir('agenda')">Ver na agenda</button><button class="btn sec">Assumir conversa</button></div>`)}
+  <div class="acoes">${e?`<button class="btn" onclick="abrirEv(${e.id})">Ver o horário</button>`:''}<button class="btn ${e?'sec':''}" onclick="ir('agenda')">Ver na agenda</button><button class="btn sec" onclick="cvAssumir()">Assumir conversa</button></div>`)}
+/* o modo "marca direto no Amigo" só vale com o Amigo conectado (Configurar › WhatsApp e agente) */
+const agDireto=()=>AGENTE.marca==='direto'&&AMIGO.conectado;
 
 /* =================================================================
    3 · ROTEIRO — as viagens do Dr. Manoel: o que está marcado, onde tem
@@ -1617,6 +1741,7 @@ const rtFmt=d=>RT_SEM[d.getDay()]+' '+rtDM(d);
 const rtMais=(s,n)=>{const d=rtData(s);d.setDate(d.getDate()+n);return rtFmt(d)};
 const rtDias=s=>Math.round((RT_HOJE-rtData(s))/864e5);
 const rtLongo=dt=>{const [a,b]=String(dt).split(' ');return (RT_SEM_LONGO[a]||a)+', '+b};
+const rtNoDia=dt=>{const l=rtLongo(dt);return (/^(sábado|domingo)/.test(l)?'no ':'na ')+l};   // "no sábado, 26/09" · "na quinta, 15/10"
 const quintaDepois=min=>{const d=new Date(min);while(d.getDay()!==4)d.setDate(d.getDate()+1);return d};
 const quintaAntesDe=prazo=>{const d=new Date(prazo);d.setDate(d.getDate()-1);while(d.getDay()!==4)d.setDate(d.getDate()-1);return d};
 const sabAntesDe=prazo=>{const d=new Date(prazo);d.setDate(d.getDate()-1);while(d.getDay()!==6)d.setDate(d.getDate()-1);return d};
@@ -1629,7 +1754,7 @@ const rtUlt=c=>{const f=rtFechadas(c);return f.length?f[f.length-1].dt:c.ult};
 const ticketMedio=()=>{const f=rtFechadas();return Math.round(f.reduce((s,v)=>s+entrou(v),0)/f.reduce((s,v)=>s+v.atend,0))}; // 10.970 / 30 = 366
 const ticketDe=c=>{const f=rtFechadas(c);const u=f[f.length-1];return u?Math.round(entrou(u)/u.atend):ticketMedio()};  // Bacabal 372 · Codó 380 · Lago 325
 const rtHa=dt=>{const d=rtDias(dt);return d<0?'na simulação':d===0?'hoje':'há '+d+' dias'};
-const rtBRL=v=>(v<0?'−':'')+brl(r10(Math.abs(v)));
+const rtBRL=v=>(v<0?'−':'')+brl(Math.round(Math.abs(v)));   // sem arredondar para dezena: a conta na tela fecha (13 × R$ 372 = R$ 4.836)
 const rtHoras=h=>{const a=Math.floor(h+1e-9),m=Math.round((h-a)*60);return m?a+'h'+String(m).padStart(2,'0'):a+' h'};
 const rtId=(c,dt)=>c.normalize('NFD').replace(/[^A-Za-z]/g,'').slice(0,3).toLowerCase()+'-'+dt.replace(/\D/g,'');
 /* etiquetas de fonte desta tela */
@@ -1646,8 +1771,9 @@ function conta(c,turno){
   return {turno,n,dv,ficamNaFila:dv-n,tk,entra,sai,sobra,horas,porHora:Math.round(sobra/horas),aMais:sobra-ficar,piso,
     vale:sobra>=Math.max(piso,1),valeAPartirDe:Math.ceil((sai+piso)/tk)};
 }
-// conferido: Bacabal/qui 13 · 4.836 · 900 · 3.936 · 13 h · 303/h · +2.636 · a partir de 6 | Bacabal/sáb 8 · 2.976 · 2.076 · 260/h · 5 ficam
-//            Codó/qui 11 · 4.180 · 1.050 · 3.130 · 14 h · 224/h · +1.830 · a partir de 7 | Lago/sáb 6 · 1.950 · 420 · 1.530 · 255/h
+// conferido (ficar em Pedreiras = R$ 2.710, um dia médio dele na Agenda):
+//            Bacabal/qui 13 · 4.836 · 900 · 3.936 · 13 h · 303/h · +1.226 · a partir de 10 | Bacabal/sáb 8 · 2.976 · 2.076 · 260/h · 5 ficam
+//            Codó/qui 11 · 4.180 · 1.050 · 3.130 · 14 h · 224/h · +420 · a partir de 10 | Lago/sáb 6 · 1.950 · 420 · 1.530 · 255/h
 //            Timbiras/sáb 4 · 1.464 · 780 · 684 · 93/h · a partir de 5 | Vitorino −454 | Poção +16 · 3/h
 const VEREDITO=c=>{if(c.fixa)return 'JÁ VAI';const k=conta(c);if(!k)return 'NÃO VALE';
   return k.vale?'VALE':(k.sobra>0&&k.valeAPartirDe-k.n<=1)?'AINDA NÃO':'NÃO VALE'};
@@ -1701,7 +1827,10 @@ function rtGerar(c){
     if(esp.pedUlt&&i===fila.ped-1){out.push({org:'ped',nome:esp.pedUlt[0],desde:'pediu '+esp.pedUlt[1],f:'WhatsApp',conv:6});continue}
     const d=new Date(RT_HOJE);d.setDate(d.getDate()-(3+(fila.ped-1-i)*8));
     out.push({org:'ped',nome:(esp.ped||[])[i]||nome(),desde:'pediu em '+rtDM(d),f:'WhatsApp'})}
-  for(let i=0;i<fila.fal;i++) out.push({org:'fal',nome:nome(),desde:vis.length?'faltou em '+vis[i%vis.length]:'faltou',f:'Amigo'});
+  /* quem faltou: numa viagem fechada, no máximo as faltas que o fechamento registrou (VIAGENS.falt); o resto, em visitas sem fechamento */
+  const cap={};vis.forEach(v=>{const f=VIAGENS.find(x=>x.c===c.n&&x.dt===v&&x.st==='fechada');cap[v]=f?f.falt:Infinity});
+  for(let i=0,j=0;i<fila.fal;i++){let v=null;for(let t=0;t<vis.length;t++){const w=vis[(j+t)%vis.length];if(cap[w]>0){v=w;cap[w]--;j=(j+t+1)%vis.length;break}}
+    out.push({org:'fal',nome:nome(),desde:v?'faltou em '+v:'faltou',f:'Amigo'})}
   for(let i=0;i<fila.sum;i++){const e=(esp.sum||[])[i];const v=(e&&e[1])||vSum[i%Math.max(1,vSum.length)];
     out.push({org:'sum',nome:e?e[0]:nome(),desde:v?'sumido desde '+v+', há '+rtDias(v)+' dias':'sumido há 90+ dias',f:'Amigo'})}
   return out;
@@ -1756,8 +1885,8 @@ function telaRoteiro(){
   else lista.sort((a,b)=>conta(b).aMais-conta(a).aMais);
   const sem=CIDADES.filter(c=>!temConta(c));
   h+=`<h2 class="rx-h" id="rt-cidades">Cidades: quem espera e se vale ir ${rtF('ex')}</h2><div class="rx-q">Onde tem gente, e quanto sobra a mais do que ficar em Pedreiras naquele dia?</div>
-  <div class="rt-ref">Se ele fica em Pedreiras: <b>uma quinta rende ~${brl(SEDE.qui.dia)} (${brl(SEDE.qui.hora)}/h)</b> ${rtF('ex')}; a semana toda, <b>${brl(SEDE.hora())}/h</b> (${brl(ss.valor)} marcados em ${ss.horas} h, de seg a sex, na Agenda) ${rtF('zq')}; no sábado a sede não abre para ele.
-    <div class="faint" style="margin-top:.25rem">A quinta é o dia de viajar. Nas quintas sem viagem, o aviso de vaga que abriu enche Pedreiras (daí os ~${brl(SEDE.qui.dia)}); 1 quinta a cada 2 semanas é de viagem.</div></div>
+  <div class="rt-ref">Se ele fica em Pedreiras: <b>um dia rende ~${brl(SEDE.qui.dia)} (${brl(SEDE.qui.hora)}/h)</b>, a média dele na Agenda: ${brl(ss.valor)} marcados em ${ss.horas} h, de seg a sex, ÷ 5 dias ${rtF('zq')}. No sábado a sede não abre para ele.
+    <div class="faint" style="margin-top:.25rem">A conta compara com um dia médio, não com a quinta cheia: encher os horários vazios de uma quinta vale mais (o Raio-X mostra quanto vale cada horário vazio). A quinta é o dia de viajar: 1 a cada 2 semanas.</div></div>
   <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.2rem 0 .6rem">
     ${RT_FILTRO?`<button class="chip a" style="cursor:pointer" onclick="rtFiltrar('${RT_FILTRO}')">Mostrando: ${RT_FILTRO==='esperando'?'esperando o médico':'para convidar'} ✕</button>`
       :`<span class="mut" style="font-size:.76rem">Ordenar por</span><div class="seg"><button class="${RT_ORD==='mais'?'on':''}" onclick="RT_ORD='mais';render()">a mais que ficar</button><button class="${RT_ORD==='esp'?'on':''}" onclick="RT_ORD='esp';render()">esperando</button></div>`}
@@ -1837,14 +1966,14 @@ function rtCard(c){
     nota=`${c.fixa}${o?` · cabem ${o.livres.length} em ${px[0].dt.split(' ')[1]} e o resto ${px[1]?'em '+px[1].dt.split(' ')[1]:'na próxima'}`:''}`;
     if(px[0]&&o.livres.length&&px[0].ev) bt=`<button class="btn min" onclick="event.stopPropagation();rtOferecer('${px[0].id}')">Oferecer à fila</button>`}
   else if(vd==='AINDA NÃO') nota=k.turno==='sab'?`para gastar um sábado precisa sobrar ${brl(PISO_SAB)}: vale a partir de ${k.valeAPartirDe} pacientes, falta ~${k.valeAPartirDe-k.n}`
-    :`para render mais que a quinta em Pedreiras, vale a partir de ${k.valeAPartirDe} pacientes: falta ~${k.valeAPartirDe-k.n}`;
+    :`para render mais que um dia em Pedreiras, vale a partir de ${k.valeAPartirDe} pacientes: falta ~${k.valeAPartirDe-k.n}`;
   else nota=c.via<1?`fica a ${c.viaTxt}: o agente oferece Pedreiras`:'o agente oferece Pedreiras ou a data aberta mais perto';
   const qui=k.turno==='qui';
   return `<div class="rt-cid" role="button" tabindex="0" onclick="abrirCidade('${c.n}')">
     <div class="l1"><span class="nm">${c.n}</span><span class="rt-selo ${RT_SELO[vd]}">${vd}</span><span class="chip">${c.fixa?'sábado':TURNO[k.turno].nome}</span><span class="faint" style="margin-left:auto;font-size:.72rem">${c.viaTxt} de estrada</span></div>${barra}
     <div class="l2"><span${hl('esperando')}>${esperando(c)} esperando</span> + <span${hl('convidar')}>${convidar(c)} para convidar</span> ${(c.aVencer||[]).length?` + ${c.aVencer.length} retornos que vencem em ${c.aVencerEm}`:''} → <b>~${k.n} devem vir</b>${k.ficamNaFila>0?` <span class="faint">(${k.ficamNaFila} ficam para a próxima)</span>`:''}</div>
     <div class="l3">${k.sobra>=0?'sobram':'falta'} <b class="big" style="${k.sobra<0?'color:#F08A83':''}">${k.sobra>=0?rtBRL(k.sobra):rtBRL(-k.sobra)}</b>${qui?` · <b>${rtBRL(k.aMais)}</b> ${k.aMais>=0?'a mais':'a menos'} que ficar`:''} ${rtF('zq')}
-      <small>entram ${k.n} × ${brl(k.tk)} = ${brl(r10(k.entra))}, saem ${brl(k.sai)} · ${brl(k.porHora)}/h em ${rtHoras(k.horas)}, com a estrada${qui?' (quinta em Pedreiras: '+brl(SEDE.qui.hora)+'/h)':''}</small></div>
+      <small>entram ${k.n} × ${brl(k.tk)} = ${brl(k.entra)}, saem ${brl(k.sai)} · ${brl(k.porHora)}/h em ${rtHoras(k.horas)}, com a estrada${qui?' (um dia em Pedreiras: '+brl(SEDE.qui.hora)+'/h)':''}</small></div>
     <div class="l4">${nota} · ${ult?'última visita '+ult+', '+rtHa(ult):'nunca houve atendimento lá no Amigo'}</div>
     ${bt?`<div class="acoes">${bt}</div>`:''}
   </div>`;
@@ -1860,7 +1989,7 @@ function rtComoFila(){
     <div><b>Sai da fila</b><br>Quem marcou (lido do Amigo), quem respondeu SAIR ou quem ficou 180 dias sem responder. A fila guarda nome, telefone, cidade, origem, data e o link da conversa. <b>Nunca a frase da pessoa, nem motivo de saúde.</b></div>
   </div>
   <div class="grid2" style="margin-top:.7rem"><div>
-    <div class="mut" style="font-size:.74rem;margin-bottom:.3rem">Conversa de exemplo (a mesma de Conversas) ${rtF('ex')}</div>
+    <div class="mut" style="font-size:.74rem;margin-bottom:.3rem">Conversa de exemplo<span class="dev"> (a mesma de Conversas)</span> ${rtF('ex')}</div>
     ${rtZapCodo(cod)}</div>
     <div><div class="acha" style="margin-top:0"><b>Por que a fila nasce do calendário.</b> O retorno é em 30 dias e a viagem volta em 45 a 60: quem é atendido na viagem vence o retorno antes de o médico voltar. Na fila de exemplo, ${ret} retornos vencidos são de pacientes atendidos nas cidades ${rtF('ex')}. Por isso o Zaq sugere a próxima data <b>antes</b> do prazo.</div>
     <div class="faint" style="font-size:.76rem;margin-top:.45rem">No Amigo, em ${AM.lido}, havia ${AM.retornos} retornos pedidos e ${AM.retornosChamados} chamados ${rtF('amigo')}. Quantos são de pacientes de viagem só dá para saber com a integração ligada.</div>
@@ -1872,12 +2001,12 @@ function rtComoFila(){
 const RT_CONV_CODO=6;
 function rtPosConv(c,conv){const L=rtFila(c), i=L.findIndex(p=>p.conv===conv);return i>=0?i+1:esperando(c)+1}
 const rtFilaFrase=(cid,pos)=>`Combinado! Você é o <b>nº ${pos}</b> na lista de quem espera o Dr. Manoel em ${cid}. Quando ele abrir data aí, eu te aviso por aqui 🙂 Para não receber mais, responda SAIR.`;
-function rtZapCodoMsgs(c){const pos=c?rtPosConv(c,RT_CONV_CODO):12, tot=c?naFila(c):23;
+function rtZapCodoMsgs(c){const pos=c?rtPosConv(c,RT_CONV_CODO):11, esp=c?esperando(c):11;
   return `<div class="b eu">bom dia, o doutor atende em Codó?<div class="h">ontem 07:12 · (99) 9····-··17</div></div>
     <div class="b">Bom dia! Ainda não tem data em Codó. Ele atende em Pedreiras na quinta (24/09) às 9h, se quiser. Ou posso te avisar quando ele abrir um dia aí?<div class="h">07:12 · agente</div></div>
     <div class="b eu">pode avisar<div class="h">07:15</div></div>
     <div class="b">${rtFilaFrase('Codó',pos)}<div class="h">07:15 · agente</div></div>
-    <div class="sis">→ fila de Codó · nº ${pos} de ${tot} · pediu no WhatsApp</div>`}
+    <div class="sis">→ fila de Codó · nº ${pos} de ${esp} que esperam o médico · pediu no WhatsApp</div>`}
 function rtZapCodo(c){return `<div class="zap" style="max-width:none">${rtZapCodoMsgs(c)}</div>`}
 
 /* =========== gaveta da cidade: quem espera · a conta =========== */
@@ -1887,18 +2016,18 @@ function abrirCidade(n){
     <div class="acoes"><button class="btn sec" onclick="abrirPorNaFila('${c.n}')">+ pôr na fila</button></div>`);
   const ab=VIAGENS.find(v=>v.c===c.n&&v.st==='aberta'), vd=ab?'ABERTA':VEREDITO(c);
   let h=`<div class="mut" style="font-size:.76rem">${c.viaTxt} de estrada · ${c.fixa||TURNO[c.turno].nome}</div><h2>${c.n} <span class="rt-selo ${RT_SELO[vd]}" style="vertical-align:3px">${vd}</span></h2>
-  <div class="tabs" style="margin-top:.5rem"><button class="${RT_CAB==='quem'?'on':''}" onclick="RT_CAB='quem';abrirCidade('${c.n}')">Quem espera · ${naFila(c)}</button><button class="${RT_CAB==='conta'?'on':''}" onclick="RT_CAB='conta';abrirCidade('${c.n}')">A conta</button></div>`;
+  <div class="tabs" style="margin-top:.5rem"><button class="${RT_CAB==='quem'?'on':''}" onclick="RT_CAB='quem';abrirCidade('${c.n}')">Na fila · ${naFila(c)}</button><button class="${RT_CAB==='conta'?'on':''}" onclick="RT_CAB='conta';abrirCidade('${c.n}')">A conta</button></div>`;
   h+=RT_CAB==='conta'?rtAbaConta(c):rtAbaQuem(c);
   abrirGav(h);
 }
 function rtAbaQuem(c){
   const L=rtFila(c), max=12, vis=RT_MAIS?L:L.slice(0,max);
   let h=`<div class="hj-tags" style="margin-bottom:.5rem">${Object.keys(ORIGEM).map(o=>`<span class="chip"><span class="dot" style="background:${ORIGEM[o][2]};margin-right:2px"></span>${ORIGEM[o][0]} · ${c.fila[o]}</span>`).join('')}${(c.aVencer||[]).length?`<span class="chip b">Retorno que vence em ${c.aVencerEm} · ${c.aVencer.length}</span>`:''}</div>
-  <div class="faint" style="font-size:.74rem">Esperando o médico: retorno vencido e pediu no WhatsApp. Para convidar: faltou e sumido. Nomes de exemplo ${rtF('ex')}</div>`;
+  <div class="faint" style="font-size:.74rem">Na fila: ${esperando(c)} esperando o médico (retorno vencido e pediu no WhatsApp) e ${convidar(c)} para convidar (faltou e sumido). Nomes de exemplo ${rtF('ex')}</div>`;
   h+=vis.map((p,i)=>`<div class="rt-p"><span class="num faint" style="width:22px">${i+1}</span><span style="flex:1;min-width:0"><b>${p.nome}</b><small>${ORIGEM[p.org][0]} · ${p.desde}</small></span><span class="via ${p.f==='Amigo'?'am':p.f==='WhatsApp'?'ag':'rc'}">${p.f}</span></div>`).join('');
   if(L.length>max) h+=`<button class="hj-mais" onclick="RT_MAIS=!RT_MAIS;abrirCidade('${c.n}')">${RT_MAIS?'mostrar menos':'+ ver todos os '+L.length}</button>`;
   if(c.fora) h+=`<div class="sec"><h4>Fora da viagem</h4>${c.fora.map(x=>`<div class="rt-p"><span style="flex:1"><b>${x.nome}</b><small>${x.motivo} → ${x.acao}</small></span><span class="chip">Pedreiras</span></div>`).join('')}</div>`;
-  if(c.n==='Codó'&&L.some(p=>p.conv===RT_CONV_CODO)) h+=`<div class="sec"><h4>Como o nº ${rtPosConv(c,RT_CONV_CODO)} entrou · a mesma conversa de Conversas</h4>${rtZapCodo(c)}</div>`;
+  if(c.n==='Codó'&&L.some(p=>p.conv===RT_CONV_CODO)) h+=`<div class="sec"><h4>Como o nº ${rtPosConv(c,RT_CONV_CODO)} entrou<span class="dev"> · a mesma conversa de Conversas</span></h4>${rtZapCodo(c)}</div>`;
   h+=`<div class="sec"><h4>Chance de vir, por origem ${rtF('ex')}</h4><div class="hj-tags">${Object.keys(CHANCE).map(o=>`<span class="chip">${RT_CURTO[o]} ${Math.round(CHANCE[o]*100)}%</span>`).join('')}</div>
     <div class="faint" style="font-size:.74rem;margin-top:.3rem">Com essas chances, ~${devemVir(c)} devem vir. O Zaq troca pela medida real depois de 2 ou 3 viagens.</div></div>
   <div class="acoes"><button class="btn sec" onclick="abrirPorNaFila('${c.n}')">+ pôr na fila</button></div>`;
@@ -1906,13 +2035,13 @@ function rtAbaQuem(c){
 }
 function rtAbaConta(c){
   const tn=RT_TURNO[c.n]||c.turno, k=conta(c,tn), outro=tn==='qui'?'sab':'qui', k2=conta(c,outro);
-  const comp=tn==='qui'?`Se ele fica em Pedreiras, a quinta rende ~${brl(SEDE.qui.dia)} ${rtF('ex')}: sobram <b>${rtBRL(k.aMais)}</b> ${k.aMais>=0?'a mais':'a menos'} indo a ${c.n}.`
+  const comp=tn==='qui'?`Se ele fica em Pedreiras, um dia rende ~${brl(SEDE.qui.dia)}, a média dele na Agenda ${rtF('zq')}: sobram <b>${rtBRL(k.aMais)}</b> ${k.aMais>=0?'a mais':'a menos'} indo a ${c.n}.`
     :`No sábado a sede não abre para ele: tudo que sobra é a mais. Para valer gastar um sábado, precisa sobrar ${brl(PISO_SAB)} ${rtF('ex')}.`;
   const ganha=(k.aMais>=k2.aMais)?tn:outro;
   const hist=rtFechadas(c);
   return `<div class="field"><label>Dia da semana</label><div class="opts">${['qui','sab'].map(t=>`<button class="opt ${tn===t?'on':''}" onclick="rtTurno('${c.n}','${t}')">${TURNO[t].nome} · ${TURNO[t].vagas} horários</button>`).join('')}</div></div>
   <div class="tot-box">
-    <div class="linha"><span>Entram: ${k.n} pacientes × ${brl(k.tk)}</span><span class="num">${brl(r10(k.entra))}</span></div>
+    <div class="linha"><span>Entram: ${k.n} pacientes × ${brl(k.tk)}</span><span class="num">${brl(k.entra)}</span></div>
     <div class="faint" style="font-size:.72rem;margin:-.1rem 0 .35rem">${ticketDe(c)===ticketMedio()&&!rtFechadas(c).length?'média por paciente das viagens fechadas (retorno é R$ 0)':'média por paciente da última viagem aqui (retorno é R$ 0)'} ${rtF('am')}</div>
     ${Object.keys(CUSTO_TXT).map(x=>`<div class="rt-custo"><label for="rt-c-${x}">${CUSTO_TXT[x]}</label><input class="inp num" id="rt-c-${x}" type="number" min="0" step="10" value="${c.custo[x]}" onchange="rtCusto('${c.n}','${x}',this.value)"></div>`).join('')}
     <div class="linha"><span>Saem</span><span class="num">${brl(k.sai)}</span></div>
@@ -2031,6 +2160,9 @@ function rtGavAbrir(manter){
   const a=ABRIR;if(!a)return; RT_GAV={t:'abrir'};
   const c0=rtCid(a.c), c={...c0,custo:a.custo}, k=conta(c,a.turno), t=TURNO[a.turno], f=rtFilaEf(c0), dd=a.dt.split(' ')[1];
   const falta=faltaParaAbrir(a), L=rtFila(c0), p1=L.find(p=>p.org==='ped'&&rtPrim(p.nome))||L[0], nome1=p1?rtPrim(p1.nome)||'Antônia':'Antônia';
+  const pr=L.find(p=>p.org==='ret'&&rtPrim(p.nome)), nomeR=pr?rtPrim(pr.nome):'Raimunda';
+  /* dois horários que existem no turno: sábado só tem manhã (08–12) */
+  const hs2=a.turno==='sab'?['09:30','11:00']:['09:30','14:00'], hsTxt=hjH(hs2[0])+' ou '+hjH(hs2[1]);
   const ck=(key,tit,falt,ok)=>{const s=a.checks[key];return `<div class="rt-ck"><span class="ic ${s}">${s==='ok'?'✓':s==='conferindo'?'⏳':'⚠'}</span><div><b>${tit}</b><div class="mut" style="font-size:.78rem;margin-top:.1rem">${s==='ok'?ok:s==='conferindo'?'Conferindo no Amigo…':falt}</div>${s==='falta'?`<button class="btn sec min" style="margin-top:.35rem" onclick="rtConferir('${key}')">Conferir</button>`:''}</div></div>`};
   const sinal=a.sinal, prev=VIAGENS.filter(v=>v.c===a.c&&v.st==='fechada').sort(rtOrdDt).pop();
   const opcoes=rtOpcoesDia(a).map(dt=>{const tn=rtTurnoDe(dt),kk=conta(c,tn);
@@ -2059,7 +2191,7 @@ function rtGavAbrir(manter){
     ${ck('amigoDia',`Dr. Manoel em ${a.c} em ${dd}`,`Ainda não existe. Crie no Amigo o horário dele na unidade ${c0.place}, em ${dd}, ${a.turno==='qui'?'das 08 às 17':'das 08 às 12'}, e toque em Conferir.`,`${t.vagas} horários livres na unidade ${c0.place}.`)}
     ${a.turno==='qui'?ck('sedeFechada',`Pedreiras fechada para ele em ${dd}`,'Bloqueie a agenda da sede nesse dia no Amigo. Senão a recepção ou o agendamento on-line marca gente em Pedreiras.','Nenhum horário livre dele na sede nesse dia.')
       :`<div class="rt-ck"><span class="ic ok">✓</span><div><b>Pedreiras</b><div class="mut" style="font-size:.78rem">No sábado a sede não abre para ele: nada a bloquear.</div></div></div>`}
-    <div class="faint" style="font-size:.72rem;margin-top:.3rem">Antes de ligar: a clínica confirma com o Amigo se a chave de integração funciona sem o AmigoBot. <a style="color:var(--neon);cursor:pointer" onclick="CF_ABA='locais';ir('config')">Configurar ›</a></div></div>
+    <div class="faint" style="font-size:.72rem;margin-top:.3rem">Antes de ligar: a clínica confirma com o Amigo se a chave de integração funciona sem o robô do Amigo (AmigoBot). <a style="color:var(--neon);cursor:pointer" onclick="CF_ABA='locais';ir('config')">Configurar ›</a></div></div>
 
   <div class="rt-bl"><h4>3 · O que ele atende lá e o sinal</h4>
     <div class="opts">${RT_TIPOS.map(([tp,rot])=>{const s=a.tipos[tp];return `<button class="opt ${s==='on'?'on':''} ${s==='nao'?'rt-nao':''}" onclick="rtTipo('${tp}')">${rot} ${s==='on'?'✓':s==='nao'?'✗':'⚠'}</button>`}).join('')}</div>
@@ -2069,19 +2201,19 @@ function rtGavAbrir(manter){
     ${sinal?`<div class="rt-regras">Em nome do <b>Centro Dermatológico Dr. Manoel Soares</b>. O agente só pede <b>depois</b> que a pessoa escolhe o horário. No dia ela paga ${brl(500-50)}. Vale para consulta e procedimento; retorno não paga sinal, a não ser que a pessoa já tenha faltado. Prazo de 24 h; depois disso o horário volta para a fila.<br>
       <b>Faltou sem avisar:</b> a clínica fica com o sinal. <b>Avisou com 24 h:</b> o sinal passa para a próxima data. <b>A clínica cancelou:</b> devolve no Pix no mesmo dia.</div>`:''}
     <div class="faint" style="font-size:.76rem;margin-top:.4rem">${prev?`Na última viagem a ${a.c}, sem sinal, faltou ${prev.falt} de ${prev.marc} ${rtF('am')}.`:''} No mercado, cobrar sinal reduz a falta em cerca de ${RX_MERC.sinalCorta}% ${rtF('merc')} <span class="faint">(referência, não garantia)</span>.
-      <b>${sinal?'Com sinal: a previsão cai para menos de 1 falta.':'Sem sinal: previsão de 1 falta, como na última viagem.'}</b></div></div>
+      <b>${sinal?'Com sinal, a clínica mede a diferença depois de 5 viagens.':'Sem sinal, a referência é a última viagem.'}</b></div></div>
 
   <div class="rt-bl"><h4>4 · Quem o agente chama e a mensagem</h4>
     <div class="rt-rod"><b>1ª rodada, agora:</b> ${f.ret} retornos vencidos + ${f.ped} que pediram = ${f.ret+f.ped}.</div>
     <div class="rt-rod"><b>2ª rodada, 24 h depois, de 5 em 5 até encher:</b> primeiro os ${f.fal} que faltaram${sinal?' (com sinal)':''}, depois os ${f.sum} sumidos, do mais recente ao mais antigo. Sumido só recebe se não pediu SAIR e tem “Novidades” ligado no cadastro.</div>
     <div class="rt-rod">Para quando os ${t.vagas} horários enchem, e quem não coube fica com prioridade. As mensagens saem espaçadas (1 a cada ~2 min), para o número da clínica não ser bloqueado. Ficam de fora: quem pediu SAIR, quem já tem horário e quem mora em Pedreiras.</div>
     <div class="zap" style="max-width:none;margin-top:.5rem"><div class="sis">1ª mensagem · sem Pix</div>
-      <div class="b">Oi, ${nome1}! Aqui é do Centro Dermatológico Dr. Manoel Soares. O Dr. Manoel vai atender em ${a.c} na ${rtLongo(a.dt)}, ${a.sala.nome||a.sala.end?'na '+rtEsc([a.sala.nome,a.sala.end].filter(Boolean).join(', ')):'na [sala, endereço]'}. Você pediu para ser avisada 🙂 Quer um horário? Tenho 9h30 ou 14h${a.turno==='sab'?'':''}. Para não receber mais, responda SAIR.<div class="h">agente</div></div>
+      <div class="b">Oi, ${nome1}! Aqui é do Centro Dermatológico Dr. Manoel Soares. O Dr. Manoel vai atender em ${a.c} ${rtNoDia(a.dt)}, ${a.sala.nome||a.sala.end?'na '+rtEsc([a.sala.nome,a.sala.end].filter(Boolean).join(', ')):'na [sala, endereço]'}. Você pediu para receber o aviso 🙂 Quer um horário? Tenho ${hsTxt}. Para não receber mais, responda SAIR.<div class="h">agente</div></div>
       <div class="b eu">9h30<div class="h">paciente</div></div>
       ${sinal?`<div class="b">Segurei 9h30 para você até amanhã às 18h. Para confirmar, o sinal é R$ 50 no Pix, em nome de Centro Dermatológico Dr. Manoel Soares. Ele vira desconto: no dia você paga ${brl(450)}.<div class="h">agente</div></div>`
         :`<div class="b">Reservei 9h30 para você. A recepção confirma em instantes e eu te aviso aqui.<div class="h">agente</div></div>`}
       <div class="sis">pessoa nova: antes${sinal?' do Pix':''}, o agente pede nome completo e data de nascimento (sem isso não dá para cadastrar no Amigo)</div></div>
-    <div class="zap" style="max-width:none;margin-top:.4rem"><div class="sis">para retorno · sem Pix</div><div class="b">Seu retorno com o Dr. Manoel pode ser em ${a.c}, ${dd}. Quer 9h30 ou 14h? Responda com o horário, e 1 para confirmar.<div class="h">agente</div></div></div></div>
+    <div class="zap" style="max-width:none;margin-top:.4rem"><div class="sis">para retorno · sem Pix</div><div class="b">Oi, ${nomeR}! Aqui é do Centro Dermatológico Dr. Manoel Soares. Seu retorno pode ser em ${a.c}, ${rtLongo(a.dt)}. Tenho ${hsTxt}: responda com o horário que prefere. Para não receber mais, responda SAIR.<div class="h">agente</div></div></div></div>
 
   <div class="rt-pe"><div class="rt-pe-n"><span>entram <b>${rtBRL(k.entra)}</b></span><span>saem <b>${brl(k.sai)}</b></span><span>sobram <b style="color:var(--neon)">${rtBRL(k.sobra)}</b></span>${a.turno==='qui'?`<span><b>${rtBRL(k.aMais)}</b> a mais que ficar em Pedreiras</span>`:''}<span>vale a partir do ${k.valeAPartirDe}º paciente</span> ${rtF('zq')}</div>
     <div class="acoes" style="margin-top:.45rem"><button class="btn" ${falta.length?'disabled':''} onclick="rtAbrirOk()">Abrir e chamar a fila</button><button class="btn sec" onclick="rtGuardar()">Guardar sem chamar</button></div>
@@ -2195,7 +2327,7 @@ function telaDiaViagem(){
   <div class="card" id="rt-encheu">${rtComoEncheu(v,g)}</div></div>
   <div class="card"><h3>Regra do dia de viagem</h3><div style="font-size:.84rem;line-height:1.55">${v.sinal===false?'Sem sinal, a recepção confere cada segurado, como em Pedreiras.':'<b>O sinal pago confirma sozinho</b> (em Pedreiras, a recepção confere cada segurado).'} Antes de criar o atendimento, <b>o Zaq confere o horário de novo no Amigo</b>. Se alguém marcou direto lá, o agente pede desculpa, oferece o próximo horário livre e o sinal vai junto.</div>
     <div class="faint" style="font-size:.78rem;margin-top:.5rem;line-height:1.5">Depois de aberto: 7 dias antes, confirmação (1 confirma, 2 remarca). Na véspera, endereço e “no dia você paga ${brl(450)}”. No dia, a auxiliar abre a Agenda com Local “${v.c} · ${v.dt}”, marca Chegou e cobra pela Lista do dia. Se alguém cancelar, o horário volta em minutos, só para a fila de ${v.c}.</div>
-    <div class="acoes">${n.livre?`<button class="btn" onclick="rtOferecerLivres('${v.id}')">Oferecer os ${n.livre} livres à fila de ${v.c}</button>`:''}<button class="btn sec" onclick="abrirListaDia('${v.id}')">Lista do dia</button><button class="btn sec" onclick="AG_VISTA='dia';ir('agenda')">Ver na Agenda</button><button class="btn sec" onclick="abrirFechar('${v.id}')">Simular o dia → fechar a conta</button><button class="btn coral" onclick="abrirCancelar('${v.id}')">Cancelar viagem</button></div></div>`;
+    <div class="acoes">${n.livre?`<button class="btn" onclick="rtOferecerLivres('${v.id}')">Oferecer os ${n.livre} livres à fila de ${v.c}</button>`:''}<button class="btn sec" onclick="abrirListaDia('${v.id}')">Lista do dia</button><button class="btn sec" onclick="abrirFechar('${v.id}')">Simular o dia → fechar a conta</button><button class="btn coral" onclick="abrirCancelar('${v.id}')">Cancelar viagem</button></div></div>`;
 }
 function abrirHorarioViagem(i){const v=rtV(DIA_ABERTO);if(!v)return;const x=rtVg(v)[i];if(!x)return;
   RT_GAV=null;
@@ -2208,9 +2340,9 @@ function abrirHorarioViagem(i){const v=rtV(DIA_ABERTO);if(!v)return;const x=rtVg
     <div class="linha"><span>Sinal</span><span>${sinal}</span></div>
     <div class="linha"><span>No Amigo</span><span>${x.st==='ok'?'<span style="color:var(--neon)">✓ atendimento criado na unidade '+v.c+'</span>':'ainda não · só depois de confirmar'}</span></div>
     <div class="linha"><span>No balcão</span><span>${p.isento?'retorno: não cobra':x.st==='ok'?'cobrar '+brl(450):'cobrar '+brl(500)+' se o Pix não cair'}</span></div></div>
-    <div class="sec"><h4>Conversa</h4><div class="zap" style="max-width:none"><div class="b">Oi, ${rtPrim(p.nome)||'tudo bem'}! O Dr. Manoel vai atender em ${v.c} na ${rtLongo(v.dt)}. ${p.org==='ret'?'Seu retorno pode ser lá.':'Quer um horário?'} Tenho ${hjH(x.h)}.<div class="h">agente</div></div>
+    <div class="sec"><h4>Conversa</h4><div class="zap" style="max-width:none"><div class="b">Oi, ${rtPrim(p.nome)||'tudo bem'}! Aqui é do Centro Dermatológico Dr. Manoel Soares. O Dr. Manoel vai atender em ${v.c} ${rtNoDia(v.dt)}. ${p.org==='ret'?'Seu retorno pode ser lá.':'Quer um horário?'} Tenho ${hjH(x.h)}. Para não receber mais, responda SAIR.<div class="h">agente</div></div>
       ${x.st!=='conv'?`<div class="b eu">${p.isento?'1':hjH(x.h)}<div class="h">paciente</div></div>`:'<div class="sis">esperando resposta</div>'}
-      ${x.st==='seg'?`<div class="b">Segurei ${hjH(x.h)} para você até amanhã às 18h. O sinal é R$ 50 no Pix e vira desconto.<div class="h">agente</div></div>`:''}
+      ${x.st==='seg'?`<div class="b">Segurei ${hjH(x.h)} para você até amanhã às 18h. Para confirmar, o sinal é R$ 50 no Pix, em nome de Centro Dermatológico Dr. Manoel Soares, e vira desconto no dia. Confira o nome antes de pagar: a clínica só cobra por este número.<div class="card-p">Pix copia e cola · R$ 50,00 · Centro Dermatológico Dr. Manoel Soares</div><div class="h">agente</div></div>`:''}
       ${x.st==='ok'?`<div class="sis">${p.isento?'confirmou com 1':'Pix de R$ 50 recebido'} · o Zaq conferiu o horário de novo e criou no Amigo</div><div class="b">Prontinho!! ✅ Seu agendamento foi realizado 🤝 ${rtLongo(v.dt)}, ${hjH(x.h)}, em ${v.c}.<div class="h">automática</div></div>`:''}</div>
     <div class="faint" style="font-size:.72rem;margin-top:.3rem">Conversa de exemplo. A fila guarda só o link dela.</div></div>`)}
 function rtOferecerLivres(id){const v=rtV(id);if(!v)return;const g=rtVg(v), liv=g.filter(x=>x.st==='livre').map(x=>x.h);
@@ -2239,7 +2371,7 @@ function abrirCancelar(id){const v=rtV(id);if(!v)return;const r=rtCancelResumo(v
     • Os atendimentos são cancelados no Amigo (o Zaq grava “cancelado”).<br>`:`• Ninguém marcado ainda.<br>`}
     • Todos voltam ao topo da fila de ${v.c} e são os primeiros a saber da nova data.<br>
     • A data sai do seletor de Local da Agenda.${qui?`<br>• <b>Lembrete:</b> libere a agenda de Pedreiras nesse dia no Amigo. O Zaq não desbloqueia horário.`:''}</div>
-  ${r.marc?`<div class="zap" style="max-width:none;margin-top:.6rem"><div class="b">Oi${nome?', '+nome:''}! Aqui é do Centro Dermatológico Dr. Manoel Soares. Infelizmente o Dr. Manoel não vai poder atender em ${v.c} na ${rtLongo(v.dt)} (${RT_MOTIVO==='Outro'?'imprevisto':RT_MOTIVO.toLowerCase()}). ${r.pagos?'Seu sinal de R$ 50 volta no Pix hoje. ':''}Você continua no topo da lista e é a primeira a saber da nova data 🙏<div class="h">agente · prévia</div></div></div>`:''}
+  ${r.marc?`<div class="zap" style="max-width:none;margin-top:.6rem"><div class="b">Oi${nome?', '+nome:''}! Aqui é do Centro Dermatológico Dr. Manoel Soares. Infelizmente o Dr. Manoel não vai poder atender em ${v.c} ${rtNoDia(v.dt)} (${RT_MOTIVO==='Outro'?'imprevisto':RT_MOTIVO.toLowerCase()}). ${r.pagos?'Seu sinal de R$ 50 volta no Pix hoje. ':''}Você continua no topo da lista e fica sabendo primeiro da nova data 🙏<div class="h">agente · prévia</div></div></div>`:''}
   <div class="acoes"><button class="btn coral" onclick="rtCancelarOk('${id}')">Cancelar a viagem</button><button class="btn sec" onclick="fecharTudo()">Voltar</button></div>`)}
 function rtCancelarOk(id){const v=rtV(id);if(!v)return;const r=rtCancelResumo(v), c=rtCid(v.c);
   if(v.plano){clearInterval(VG_TIMER);VG_TIMER=null;const tem=new Set(rtFila(c));c.aVencer=c.aVencer||[];
@@ -2329,7 +2461,7 @@ function abrirFechamento(id){const v=rtV(id);if(!v||v.st!=='fechada')return;cons
 function rtTabelaViagens(){const f=rtFechadas();
   return `<div style="overflow-x:auto"><table class="tb"><tr><th>Viagem</th><th class="r">Entrou</th><th class="r">Saiu</th><th class="r">Sobrou</th><th class="r">Por hora</th></tr>
   ${f.map(v=>`<tr><td>${v.c} <span class="faint num">${v.dt.split(' ')[1]}</span></td><td class="r num">${brl(entrou(v))}</td><td class="r num">${brl(v.sai)}</td><td class="r num">${brl(entrou(v)-v.sai)}</td><td class="r num">${brl(Math.round((entrou(v)-v.sai)/v.horas))}</td></tr>`).join('')}
-  <tr><td class="mut">Dr. Manoel em Pedreiras</td><td colspan="3" class="r mut">${brl(SEDE.hora())}/h na semana · quinta ~${brl(SEDE.qui.dia)}</td><td class="r num">${brl(SEDE.qui.hora)}</td></tr></table></div>`}
+  <tr><td class="mut">Dr. Manoel em Pedreiras</td><td colspan="3" class="r mut">um dia médio na Agenda ~${brl(SEDE.qui.dia)}, sem estrada</td><td class="r num">${brl(SEDE.qui.hora)}</td></tr></table></div>`}
 
 /* =================================================================
    4 · VAGAS LIBERADAS — horário que abre, ou que ninguém marcou, vai
@@ -2374,16 +2506,15 @@ const PESSOAS={
  'Heitor Lima':    {p:'manoel',tipo:'Consulta social',g:'pediu',por:'pediu “o mais cedo possível” (19/09)',turno:'manhã'},
  'Marina Lopes':   {p:'manoel',tipo:'Consulta',g:'pediu',por:'perguntou “tem vaga essa semana?” hoje às 08:12'},
  'Carlos Mendes':  {p:'manoel',tipo:'Retorno',g:'retorno',por:'retorno vencido há 12 dias',ult:'12/08',turno:'manhã',rapido:1},
- 'Renata Dias':    {p:'manoel',tipo:'Consulta',g:'preco',por:'recebeu o preço há 6 dias · o último toque do funil é amanhã'},
- 'Márcio Luz':     {p:'manoel',tipo:'Consulta',g:'preco',por:'recebeu o preço há 13 dias · nunca foi chamado de novo'},
- 'Sônia Pires':    {p:'manoel',tipo:'Consulta',g:'preco',por:'recebeu o preço ontem'},
- 'Joice Prado':    {p:'manoel',tipo:'Consulta',g:'preco',por:'recebeu o preço ontem',vouVer:1},
+ 'Renata Dias':    {p:'manoel',tipo:'Consulta',g:'preco',por:'recebeu o preço há 5 dias · o último toque do funil é em 2 dias'},
+ 'Márcio Luz':     {p:'manoel',tipo:'Consulta',g:'preco',por:'recebeu o preço há 12 dias · nunca foi chamado de novo'},
+ 'Joice Prado':    {p:'manoel',tipo:'Consulta',g:'preco',por:'recebeu o preço hoje cedo',vouVer:1},
  'Rogério Alves':  {p:'manoel',tipo:'Procedimento estético',rot:'botox',g:'preco',por:'proposta de botox há 3 dias',negocia:1},
  'Tiago Reis':     {p:'manoel',tipo:'Consulta',g:'pediu',por:'lista de espera: “só consigo depois das 3” (22/09)',depois:'15:00'},
  'Gabriela Pinto': {p:'manoel',tipo:'Consulta',g:'antecipa',por:'lista de espera: “se abrir antes me avisa” (21/09)',antecipa:{dia:4,h:'16:00'}},
  'Raimundo Costa': {p:'manoel',tipo:'Consulta',g:'retorno',fila:'Bacabal'},
  'Joana Prado':    {p:'juliana',tipo:'Sessão de pacote',rot:'peeling',g:'pago',por:'peeling: sessão 2 de 3 atrasada 6 dias',intervalo:21,faltou:'16/09'},
- 'Ana Paula Rocha':{p:'juliana',tipo:'Sessão de pacote',rot:'depilação a laser',g:'pago',por:'depilação a laser: sessão 3 de 10',intervalo:30},
+ 'Ana Paula Rocha':{p:'juliana',tipo:'Sessão de pacote',rot:'depilação a laser',g:'pago',por:'depilação a laser: sessão 1 de 10 hoje',intervalo:30},
  'Rita Alves':     {p:'juliana',tipo:'Sessão de pacote',rot:'limpeza de pele',g:'pago',por:'assinante: limpeza de setembro sem usar'},
  'Heloísa Dias':   {p:'juliana',tipo:'Procedimento estético',rot:'manutenção do laser',dur:30,valor:240,g:'retorno',por:'manutenção de laser vencida há 5 dias',longe:'Lago da Pedra, a 1h',turno:'tarde'},
  'Marta Silva':    {p:'juliana',tipo:'Sessão de pacote',rot:'laser',g:'pago',por:'laser parado há 64 dias',parcela:1},
@@ -2437,8 +2568,9 @@ let ESPERA=[
  {n:'Gabriela Pinto',quer:'antecipar a consulta de sex 25/09 16:00',serve:'antes de sexta, com 1 dia de aviso',desde:'21/09',frase:'se abrir antes me avisa',ofertas:[]},
  {n:'Tiago Reis',quer:'Consulta · Dr. Manoel',serve:'só depois das 15h',desde:'22/09',frase:'só consigo depois das 3',ofertas:[],obs:'indicação da Carla'},
 ];
-/* o convite da semana: quem esfriou. 7 nunca chamados é real (RX_WA): o Márcio (Funil) e os 6 mais antigos (21 a 28 dias). Nomes de exemplo. */
-const VG_PRECO7=[['Márcio Luz','10/09'],['Flávia Nery','02/09'],['Evandro Pacheco','31/08'],['Daniela Frota','31/08'],['Cláudio Rego','30/08'],['Bruna Teles','30/08'],['Aline Queiroz','26/08']];
+/* o convite da semana: quem esfriou. 7 nunca chamados é real (RX_WA): o Márcio (Funil) e os 6 mais antigos.
+   Os dias são os medidos em 24/09 (13, 21, 23, 23, 24, 24 e 28) contados de 23/09, o "hoje" do protótipo. Nomes de exemplo. */
+const VG_PRECO7=[['Márcio Luz','11/09'],['Flávia Nery','03/09'],['Evandro Pacheco','01/09'],['Daniela Frota','01/09'],['Cláudio Rego','31/08'],['Bruna Teles','31/08'],['Aline Queiroz','27/08']];
 const VG_RET_MAIS=[['Nair Fontes',2],['Wilson Paiva',2],['Odete Lins',1]]; // exemplo · depois dos 5 mais atrasados de Hoje (HJ_RET)
 /* as mensagens (editáveis em Regras): só profissional, dia, hora e local */
 let VG_MSG={
@@ -2475,7 +2607,7 @@ function vgFora(n,v){const x=PESSOAS[n];if(!x||x.p!==v.p)return null;
   if(x.fila)return R('mora em '+x.fila+' · está na fila da cidade, no Roteiro');
   if(x.tipo==='Cirurgia dermatológica')return R('cirurgia: só a recepção oferece');
   if(dur>(v.dur||30))return R((x.rot||x.tipo.toLowerCase())+' precisa de '+dur+' min',0,'dur');
-  if(x.vouVer)return R('disse “vou ver” há 2 h · fica com você','voce');
+  if(x.vouVer)return R('disse “vou ver” há poucos minutos · fica com você','voce');
   if(x.negocia)return R('pediu desconto ontem à noite · fica com você','voce');
   if(x.parcela)return CF_PARCELA?R('parcela atrasada: só depois do Pix (regra ligada em Configurar)',0,'parcela'):R('parcela atrasada · você decide','voce');
   if(x.depois&&v.h<=x.depois)return R('só depois das '+hjH(x.depois),0,'depois');
@@ -2499,13 +2631,14 @@ const vgGrupo=(n,v)=>{const x=PESSOAS[n];if(!x)return 'fila';const g=x.g;return 
 function vgCandidatos(v){const t=v.h<'12:00'?'manhã':'tarde', o=vgOrdem();
   return Object.keys(PESSOAS).filter(n=>(vgFora(n,v)||{}).k==='cabe')
     .sort((a,b)=>o.indexOf(vgGrupo(a,v))-o.indexOf(vgGrupo(b,v))||(PESSOAS[b].turno===t)-(PESSOAS[a].turno===t)||(PESSOAS[b].rapido||0)-(PESSOAS[a].rapido||0))}
-/* quem já recebeu mensagem automática hoje (ou está guardado para a 2ª rodada): 1 por pessoa por dia */
-function vgMsgHoje(){const s=new Set();
+/* quem já recebeu mensagem automática hoje (ou está guardado para a 2ª rodada): 1 por pessoa por dia.
+   semRet: sem contar os retornos de Hoje (é assim que Hoje decide quem dos retornos fica para amanhã) */
+function vgMsgHoje(semRet){const s=new Set();
   VAGAS.forEach(v=>{if(v.envio)(v.r1||[]).forEach(([n])=>s.add(n));if(v.st==='oferecendo')(v.r2||[]).forEach(n=>s.add(n))});
   EM_OFERTA.forEach(o=>s.add(o.pac));
   if(QUINTA)QUINTA.conv.forEach(n=>s.add(n));
   Object.values(VG_FEITO).forEach(a=>(a||[]).forEach(n=>s.add(n)));
-  if(typeof HJ_RET_OK!=='undefined'&&HJ_RET_OK)HJ_RET.forEach(([n])=>s.add(n));
+  if(!semRet&&typeof HJ_RET_OK!=='undefined'&&HJ_RET_OK)hjRetLista().vao.forEach(([n])=>s.add(n));
   return s}
 /* quem não foi chamado para um horário, e por quê (a linha recolhida "Não chamou") */
 function vgNaoChamou(v){const ch=new Set([...(v.r1||[]).map(r=>r[0]),...(v.r2||[])]), ja=vgMsgHoje(), out=[];
@@ -2609,7 +2742,7 @@ function vgEnviar(id,quieto){const v=VAGAS.find(x=>x.id===id);if(!v||v.st!=='apr
   Object.assign(v,{st:'oferecendo',aprov:AGORA,envio:AGORA,ate:hhmm(ate)});v.r1=v.r1.map(([p])=>[p,'✓ enviada']);MOTOR.usadasHoje+=n;
   if(quieto)return;
   fecharTudo();menu();render();
-  toast('Oferta enviada · '+vgQuando(v)+' '+v.h,(tirou.length?vgNomes(tirou)+' já '+(tirou.length>1?'receberam':'recebeu')+' mensagem hoje e ficou de fora. ':'')+'1ª rodada para '+vgNomes(v.r1.map(r=>r[0]))+', válida até '+v.ate+'. Se ninguém responder 1, a 2ª rodada sai sozinha'+(v.r2.length?' ('+vgNomes(v.r2)+')':'')+'. Hoje: '+MOTOR.usadasHoje+' de '+MOTOR.tetoDia+' · nada foi enviado (protótipo)')}
+  toast('Oferta aprovada · '+vgQuando(v)+' '+v.h,(tirou.length?vgNomes(tirou)+' já '+(tirou.length>1?'receberam':'recebeu')+' mensagem hoje e ficou de fora. ':'')+'1ª rodada para '+vgNomes(v.r1.map(r=>r[0]))+', válida até '+v.ate+'. Se ninguém responder 1, a 2ª rodada sai sozinha'+(v.r2.length?' ('+vgNomes(v.r2)+')':'')+'. Hoje: '+MOTOR.usadasHoje+' de '+MOTOR.tetoDia+' · nada foi enviado (protótipo)')}
 /* alguém respondeu 1: o Zaq confere no Amigo, cadastra (se for paciente nova) e cria o atendimento */
 function responder(id,n,hora){const v=VAGAS.find(x=>x.id===id);if(!v||v.st!=='oferecendo')return;
   const e=EV.find(x=>x.id===v.ev), x=PESSOAS[n]||{tipo:'Consulta',g:'fila',por:'fila de '+v.fila};
@@ -2629,9 +2762,9 @@ function responder(id,n,hora){const v=VAGAS.find(x=>x.id===id);if(!v||v.st!=='of
     +(nova?'; como é paciente nova, o agente pediu nome completo e data de nascimento e segurou o horário por 10 min, e o Zaq a cadastrou no Amigo':'')
     +' e criou o atendimento. A 2ª rodada não sai. Quem responder depois recebe: “'+vgAlternativa(v.p)+'” · nada foi enviado (protótipo)')}
 /* quem marcou sai das colunas de venda do funil e vai para Consulta agendada */
-function vgFunilAgendou(n,chip){
+function vgFunilAgendou(n,chip,s){
   for(const c of Object.keys(FUNIL)){if(c==='Consulta agendada')continue;const i=FUNIL[c].findIndex(k=>k.n===n);
-    if(i>=0){const k=FUNIL[c].splice(i,1)[0];FUNIL['Consulta agendada'].unshift({n,s:((PESSOAS[n]||{}).tipo||k.s.split(' · ')[0])+' · Dr. Manoel',t:[[chip,'g']]});return true}}
+    if(i>=0){const k=FUNIL[c].splice(i,1)[0];FUNIL['Consulta agendada'].unshift({n,s:s||((PESSOAS[n]||{}).tipo||k.s.split(' · ')[0])+' · Dr. Manoel',t:[[chip,'g']]});return true}}
   return false}
 function vgParar(id){const v=VAGAS.find(x=>x.id===id);if(!v||!VG_ATIVA.includes(v.st))return;const antes=v.st;v.st='parada';
   fecharTudo();menu();render();
@@ -2655,7 +2788,7 @@ function vgOferecer(n,dia,h,quieto){const x=PESSOAS[n];if(!x)return false;
   const q=ESPERA.find(y=>y.n===n);if(q)q.ofertas.push([AGORA,vgQuandoDia(dia)+' '+h,'esperando resposta']);
   if(quieto)return true;
   fecharTudo();menu();render();
-  toast('Oferta enviada · '+hjPrim(n),'“'+vgMsgTxt('oferta',vgMsgDados(hjPrim(n),x.p,dia,h))+'” · Hoje: '+MOTOR.usadasHoje+' de '+MOTOR.tetoDia+' · nada foi enviado (protótipo)');return true}
+  toast('Oferta aprovada · '+hjPrim(n),'No Zaq, sairia: “'+vgMsgTxt('oferta',vgMsgDados(hjPrim(n),x.p,dia,h))+'” · Hoje: '+MOTOR.usadasHoje+' de '+MOTOR.tetoDia+' · nada foi enviado (protótipo)');return true}
 function abrirVgOferecer(n,dia,h){const x=PESSOAS[n];if(!x)return;
   abrirModal(`<h2>Oferecer ${vgQuandoDia(dia)} ${h} ${/a$/.test(hjPrim(n))?'à':'ao'} ${hjPrim(n)}</h2><div class="mut" style="font-size:.84rem;margin-bottom:.6rem">${x.por} · ${vgValTxt(n)}</div>
   <div class="zap" style="max-width:none"><div class="b">${vgMsgTxt('oferta',vgMsgDados(hjPrim(n),x.p,dia,h))}<div class="h">agente · prévia</div></div></div>
@@ -2750,7 +2883,7 @@ function vgQuintaFim(){const Q=QUINTA;if(!Q||Q.done)return;Q.done=true;Q.k=Q.fim
       if(a){a.st='cancelou';a.antes='antecipou para '+rxDia(Q.d)+' '+x.h;abriu.push(rxDia(a.dia)+' '+a.h)}semR.push(hjPrim(x.n)+' (só antecipou)')}
     else if(tipo(x.tipo)[4]){novas++;rs+=tipo(x.tipo)[4]}else semR.push(hjPrim(x.n)+' ('+x.tipo.toLowerCase()+')');
     if(!vgFunilAgendou(x.n,rxDia(Q.d)+' '+x.h+' · vaga')&&Q.antes==='preco'&&!pes){const m=FUNIL_MAIS['Recebeu o preço'];
-      if(m&&m[0]>0){m[0]--;m[1]='+'+m[0]+' mais antigos · de 21 a 28 dias'}FUNIL['Consulta agendada'].unshift({n:x.n,s:'Consulta · Dr. Manoel',t:[[rxDia(Q.d)+' '+x.h+' · vaga','g']]})}});
+      if(m&&m[0]>0){m[0]--;m[1]='+'+m[0]+' mais antigos · '+FUNIL_ANTIGOS(m[0])}FUNIL['Consulta agendada'].unshift({n:x.n,s:'Consulta · Dr. Manoel',t:[[rxDia(Q.d)+' '+x.h+' · vaga','g']]})}});
   const c=rxCel(Q.p,Q.d,'dia');menu();if(ROTA==='vagas')render();
   toast(HJ_DIA_LONGO[Q.d][0].toUpperCase()+HJ_DIA_LONGO[Q.d].slice(1)+': '+c.oc+' de '+c.ab+' ('+c.pct+'%) · '+hjPl(c.livres.length,'livre','livres'),
     'Era '+Q.antesPct+'%. '+(novas?hjPl(novas,'consulta nova','consultas novas')+': +'+brl(rs)+' previstos. ':'')+(semR.length?vgNomes(semR)+' não '+(semR.length>1?'contam':'conta')+' R$. ':'')
@@ -2876,13 +3009,13 @@ function telaVagas(){
   let h=`<div class="pg-h"><div><h1>Vagas liberadas</h1><div class="sub">Horário que abre, ou que ninguém marcou, vai para quem cabe nele. Fica com quem responder primeiro.</div></div></div>
   <div class="vg-estado" role="button" tabindex="0" onclick="VG_ABA='regras';render();rxIr('vg-modo')">
     <span><span style="color:${MOTOR.modo==='aprova'?'var(--ambar)':'var(--neon)'}">●</span> <b>${MOTOR.modo==='aprova'?'Recepção aprova cada envio':'Automático: o Zaq manda sozinho'}</b></span>
-    <span>Amigo lido às ${MOTOR.amigo} (a cada 2 min) <button onclick="event.stopPropagation();toast('Nada novo no Amigo','Nenhum cancelamento nem horário novo desde ${MOTOR.amigo}.')">ler agora</button></span>
+    <span>Amigo lido às ${MOTOR.amigo} (a cada 2 min) <button onclick="event.stopPropagation();toast('Nada novo no Amigo','Nenhum cancelamento nem horário novo desde ${MOTOR.amigo} (exemplo).')">ler agora</button></span>
     <span>mensagens automáticas hoje: <b>${MOTOR.usadasHoje} de ${MOTOR.tetoDia}</b></span><span>qua 23/09, ${AGORA}</span>${rxF('ex')}</div>
   <div class="kpis">
     <button class="kpi amb vg-k" onclick="VG_ABA='hoje';render();rxIr('vg-${a0?a0.id:'encher'}')"><b>${ativ.length}</b><span>em oferta agora${a0?' · '+vgResumo(a0):''}</span> ${rxF('ex')}</button>
     <button class="kpi vg-k" onclick="VG_ABA='hoje';render();rxIr('vg-encher')"><b>${livresFut}</b><span>horários livres de amanhã a sábado${qui?' · '+qui.livres.length+' '+(qui.d===HOJE+1?'na quinta':'em '+rxDia(qui.d))+' do Dr. Manoel':''}</span> ${rtF('am')}</button>
     <button class="kpi ok vg-k" onclick="VG_ABA='hist';render()"><b>${dono?brl(pl.rs):pl.feitas}</b><span>${dono?'entraram por vaga em setembro':'atendimentos entraram por vaga em setembro'}</span> ${rxF('ex')}<small>${pl.mix}</small></button>
-    <button class="kpi vg-k" onclick="VG_ABA='hist';render()"><b>${pl.feitas} de ${pl.total}</b><span>vagas preenchidas em setembro</span> ${rxF('ex')}<small>ligando um a um, clínicas preenchem ~${RX_MERC.ligando}% ${rxF('merc')}</small></button>
+    <button class="kpi vg-k" onclick="VG_ABA='hist';render()"><b>${pl.feitas} de ${pl.total}</b><span>vagas preenchidas em setembro</span> ${rxF('ex')}<small class="dev">referência de mercado (ligando um a um, ~${RX_MERC.ligando}%) escondida até confirmar a fonte</small></button>
   </div>
   <div class="tabs"><button class="${VG_ABA==='hoje'?'on':''}" onclick="VG_ABA='hoje';VG_FOCO=null;render()">Hoje e semana</button><button class="${VG_ABA==='espera'?'on':''}" onclick="VG_ABA='espera';VG_FOCO=null;render()">Lista de espera · ${ESPERA.length}</button><button class="${VG_ABA==='hist'?'on':''}" onclick="VG_ABA='hist';VG_FOCO=null;render()">Histórico</button><button class="${VG_ABA==='regras'?'on':''}" onclick="VG_ABA='regras';VG_FOCO=null;render()">Regras</button></div>`;
   h+=VG_ABA==='espera'?vgAbaEspera(sug):VG_ABA==='hist'?vgAbaHist():VG_ABA==='regras'?vgAbaRegras():vgAbaHoje(B,sug);
@@ -2949,7 +3082,7 @@ function vgLinhaDia(b,sug){const W=RX_WA, nome=rxNome(b.p), foco=VG_FOCO===b.key
     <div class="faint" style="font-size:.72rem">${hjPl(b.livres.length,'livre','livres')}${b.d===HOJE?' daqui para a frente':''}${VAGAS.some(v=>v.p===b.p&&v.dia===b.d&&VG_ATIVA.includes(v.st))?' · fora os que estão em oferta lá em cima':''}</div>`;
   let q='';
   if(b.viagem){const c=rtCid(b.local), prox=VIAGENS.filter(x=>x.c===b.local&&['marcada','aberta'].includes(x.st)&&rtData(x.dt)>rtData(DIAS[b.d][1])).sort(rtOrdDt)[0];
-    q+=`<div class="vg-q1"><span>Quem cabe: <b>a fila de ${b.local}</b> no Roteiro, ${b.fila} esperando ${rtF('ex')}</span></div>
+    q+=`<div class="vg-q1"><span>Quem cabe: <b>a fila de ${b.local}</b> no Roteiro, ${b.fila} na fila (${c?esperando(c):0} esperando o médico, ${c?convidar(c):0} para convidar) ${rtF('ex')}</span></div>
       <div class="faint" style="font-size:.74rem">Dia de viagem é o contrário da sede: o horário vai só para a fila daquela cidade.${b.fila>b.livres.length?' Os outros '+(b.fila-b.livres.length)+' continuam na fila'+(prox?' para '+prox.dt+' lá':'')+'.':''}</div>`}
   b.oferta.forEach(o=>{q+=`<div class="vg-q1"><span><b>${o.pac}</b> <span class="chip ${VG_GRUPO[PESSOAS[o.pac].g][1]}">${VG_GRUPO[PESSOAS[o.pac].g][0]}</span> · <span class="num">${o.h}</span> · <span class="chip a">em oferta desde ${o.envio}, esperando resposta</span></span></div>`});
   b.cabe.forEach(s=>{const x=PESSOAS[s.n], aqui=EV.find(e=>e.pac===s.n&&e.dia===HOJE&&rxVivo(e)), tr=trav(s.h);
@@ -3041,7 +3174,7 @@ function vgAbaRegras(){const dono=ehDono(), W=RX_WA, porDia=Math.round(W.convers
     <div class="vg-reg"><span>Até quando vale</span><span>a oferta de hoje para de valer 1 h antes do horário; o convite para outro dia vale até as 18h</span></div>
     <div class="vg-reg"><span>Envio</span><span>seg–sex 08:00–18:00 · sáb 08:00–12:00. Convites saem quando você aprova, fora dos picos da recepção (${W.picos.join(' e ')}) ${rxF('wa')}</span></div>
     <div class="vg-reg"><span>Teto</span><span>1 mensagem automática por pessoa por dia, somando funil, lembretes e vagas (a oferta ocupa o toque do funil daquele dia) · 2 ofertas de vaga por pessoa por semana · ${MOTOR.tetoDia} por dia na clínica · hoje: <b>${MOTOR.usadasHoje} de ${MOTOR.tetoDia}</b></span></div>
-    <div class="vg-txt">Por que o teto: o número teve ${W.conversas} conversas no mês ${rxF('wa')}, umas ${porDia} por dia útil. ${MOTOR.tetoDia} num dia já é ${vezes} vezes o normal, e mais que isso aumenta o risco de o WhatsApp bloquear o número (ele está conectado por QR Code). Pela API oficial, convite para quem não falou nas últimas 24h precisa de modelo aprovado pela Meta. Continuar uma conversa (por exemplo, depois de um “2”) não conta.</div></div>
+    <div class="vg-txt">Por que o teto: o número teve ${W.conversas} conversas no mês ${rxF('wa')}, umas ${porDia} por dia útil. ${MOTOR.tetoDia} num dia já é ${vezes} vezes o normal, e mais que isso aumenta o risco de o WhatsApp bloquear o número (ele está conectado pelo QR Code, como o WhatsApp Web). No WhatsApp oficial, mensagem para quem não escreveu nas últimas 24h precisa de texto aprovado antes. Continuar uma conversa (por exemplo, depois de um “2”) não conta.</div></div>
 
   <div class="card" id="vg-regra-sinal"><h3>Sinal</h3><div class="vg-txt">Quem faltou nos últimos 60 dias só fica com vaga de consulta pagando <b>R$ 50 no Pix</b>, que vira crédito (igual ao Roteiro). Sessão já paga não pede sinal. No mercado, o sinal reduz as faltas em cerca de ${RX_MERC.sinalCorta}% ${rxF('merc')} <span class="faint">referência, não garantia</span>.</div></div>
 
@@ -3062,16 +3195,32 @@ function vgAbaRegras(){const dono=ehDono(), W=RX_WA, porDia=Math.round(W.convers
    foto clínica e exame ficam no Amigo; atendimentos e cadastro vêm de lá pela API.
    ================================================================= */
 let PS_SEG='todos';
+/* ult e prox são o que veio antes desta semana; psUlt e psProx leem a Agenda (EV) primeiro,
+   para a lista bater com Agenda e Hoje. Em tratamento = os 7 de Tratamentos › Pacotes; retorno = os 5 de Hoje + manutenção. */
 const PACS=[
-  {n:'Lúcia Ferraz',id:36,cid:'Pedreiras',ult:'hoje',prox:'hoje 09:00 · retorno',sit:[['em tratamento','g'],['assinante','b']],val:'R$ 4.269',seg:['tratamento','assinantes','aniversario'],ex:true},
-  {n:'Ana Paula Rocha',id:33,cid:'Pedreiras',ult:'hoje',prox:'hoje 08:30 · sessão 3 de 10',sit:[['em tratamento','g']],val:'R$ 2.400',seg:['tratamento','aniversario']},
+  {n:'Lúcia Ferraz',id:36,cid:'Pedreiras',ult:'02/09',prox:'—',sit:[['em tratamento','g'],['assinante','b']],val:'R$ 4.269',seg:['tratamento','assinantes','aniversario'],ex:true},
+  {n:'Ana Paula Rocha',id:33,cid:'Pedreiras',ult:'12/09',prox:'—',sit:[['em tratamento','g']],val:'R$ 2.400',seg:['tratamento','aniversario']},
+  {n:'Joana Prado',id:27,cid:'Pedreiras',ult:'26/08',prox:'—',sit:[['em tratamento','g'],['faltou em 16/09','a']],val:'R$ 1.050',seg:['tratamento']},
+  {n:'Rita Alves',id:48,cid:'Pedreiras',ult:'18/09',prox:'—',sit:[['em tratamento','g'],['assinante','b']],val:'R$ 2.650',seg:['tratamento','assinantes']},
+  {n:'Clara Nunes',id:39,cid:'Pedreiras',ult:'16/09',prox:'qui 01/10',sit:[['em tratamento','g']],val:'R$ 1.400',seg:['tratamento']},
+  {n:'Fábio Mendes',id:45,cid:'Pedreiras',ult:'08/09',prox:'ter 29/09',sit:[['em tratamento','g'],['parcela vence hoje','a']],val:'R$ 3.700',seg:['tratamento']},
   {n:'Carla Menezes',id:44,cid:'Pedreiras',ult:'18/09',prox:'—',sit:[['indicou 3 ⭐','g'],['assinante','b']],val:'R$ 3.180',seg:['assinantes']},
+  {n:'Sônia Pires',id:47,cid:'Pedreiras',ult:'05/06',prox:'—',sit:[['assinante','b'],['cobrança falhou','r']],val:'R$ 2.100',seg:['assinantes']},
   {n:'Marta Silva',id:29,cid:'Pedreiras',ult:'21/07',prox:'—',sit:[['pacote parado há 64 dias','r'],['parcela atrasada','r']],val:'R$ 2.100',seg:['tratamento','atrasadas']},
   {n:'Carlos Mendes',id:62,cid:'Pedreiras',ult:'12/08',prox:'—',sit:[['retorno vencido há 12 dias','a']],val:'R$ 500',seg:['retorno']},
+  {n:'Josué Almeida',id:54,cid:'Pedreiras',ult:'15/08',prox:'—',sit:[['retorno vencido há 9 dias','a']],val:'R$ 500',seg:['retorno']},
+  {n:'Rosângela Sá',id:41,cid:'Pedreiras',ult:'17/08',prox:'—',sit:[['retorno vencido há 7 dias','a']],val:'R$ 500',seg:['retorno']},
+  {n:'Benedito Lima',id:67,cid:'Pedreiras',ult:'19/08',prox:'—',sit:[['retorno vencido há 5 dias','a']],val:'R$ 950',seg:['retorno']},
+  {n:'Irene Castro',id:52,cid:'Pedreiras',ult:'21/08',prox:'—',sit:[['retorno vencido há 3 dias','a']],val:'R$ 500',seg:['retorno']},
   {n:'Heloísa Dias',id:51,cid:'Lago da Pedra',ult:'18/03',prox:'—',sit:[['manutenção vencida','a']],val:'R$ 1.760',seg:['retorno']},
   {n:'Raimundo Costa',id:58,cid:'Bacabal',ult:'30/04',prox:'fila de Bacabal',sit:[['sumido há 146 dias','r']],val:'R$ 500',seg:['sumidos']},
-  {n:'Sônia Pires',id:47,cid:'Pedreiras',ult:'—',prox:'—',sit:[['recebeu o preço há 1 dia','a']],val:'—',seg:[]},
 ];
+const psDia=e=>e.dia===HOJE?'hoje':e.dia===HOJE-1?'ontem':rxDia(e.dia);
+/* última visita: o último atendimento finalizado na Agenda desta semana; senão, o de antes */
+function psUlt(x){const e=EV.filter(v=>v.pac===x.n&&v.st==='finalizado').sort(hjOrd).pop();return e?psDia(e):x.ult}
+/* próximo: o primeiro atendimento que ainda vai acontecer (ou está acontecendo) na Agenda */
+function psProx(x){const e=EV.filter(v=>v.pac===x.n&&rxVivo(v)&&v.st!=='finalizado'&&v.dia>=HOJE).sort(hjOrd)[0];
+  return e?hjQuando(e)+' · '+(e.pac_s||e.tipo.toLowerCase())+(e.st==='presente'?' · chegou':e.st==='atendimento'?' · em atendimento':''):x.prox}
 function telaPacientes(){
   const segs=[['todos','Todos'],['tratamento','Em tratamento'],['retorno','Retorno ou manutenção vencida'],['atrasadas','Parcela atrasada'],['aniversario','Aniversário este mês'],['sumidos','Sumidos há 90+ dias'],['assinantes','Assinantes']];
   const vis=PACS.filter(x=>PS_SEG==='todos'||x.seg.includes(PS_SEG)), AM=RX_AMIGO;
@@ -3080,18 +3229,19 @@ function telaPacientes(){
   let h=`<div class="pg-h"><div><h1>Pacientes</h1><div class="sub">Cadastro e atendimentos vêm do Amigo; o Zaq junta conversa, dinheiro e o que fazer com cada um.</div></div>
   <button class="btn" onclick="novoAg('manoel','13:30')">+ Agendar</button></div>
   <div class="kpis"><div class="kpi"><b>1.284</b><span>pacientes no Amigo · o número real aparece ao conectar ${rxF('ex')}</span></div><div class="kpi ok"><b>${posEmTrat()}</b><span>em tratamento agora · ${posParados()} parado ${rxF('ex')}</span></div><div class="kpi amb"><b>${AM.retornos}</b><span>retornos pedidos no Amigo · ${AM.retornosChamados} chamados ${rxF('amigo')}</span></div><div class="kpi ruim"><b>${brl(vAtras)}</b><span>em ${hjPl(atras.length,'parcela atrasada','parcelas atrasadas')} · a recepção cobra em Hoje ${rxF('ex')}</span></div></div>
-  <div class="faint" style="font-size:.74rem;margin:-.4rem 0 .6rem">A lista abaixo é de exemplo: ${PACS.length} pacientes, para mostrar a tela.</div>
-  <input class="inp" placeholder="🔍 Buscar por nome, telefone ou CPF" style="margin-bottom:.6rem">
+  <div class="faint" style="font-size:.74rem;margin:-.4rem 0 .6rem">A lista abaixo é de exemplo: ${PACS.length} pacientes, para mostrar a tela. Última visita e próximo horário vêm da Agenda.</div>
+  <input class="inp" placeholder="🔍 Buscar por nome ou telefone" aria-label="Buscar paciente" style="margin-bottom:.6rem">
   <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.7rem">${segs.map(([k,l])=>`<button class="opt ${PS_SEG===k?'on':''}" onclick="PS_SEG='${k}';render()">${l}${k==='todos'?'':' · '+PACS.filter(x=>x.seg.includes(k)).length}</button>`).join('')}</div>
+  ${PS_SEG==='retorno'?`<div class="faint" style="font-size:.74rem;margin:-.3rem 0 .6rem">No Amigo são ${AM.retornos} retornos pedidos ${rxF('amigo')}. Aqui, de exemplo: os ${HJ_RET.length} mais atrasados, que Hoje chama primeiro, e uma manutenção vencida.</div>`:''}
   <div class="card" style="padding:.2rem .3rem"><div class="ps-row hd"><span>Paciente</span><span>Última visita</span><span>Próximo</span><span>Situação</span><span style="text-align:right">Valor</span></div>`;
   for(const x of vis){
     h+=`<div class="ps-row" onclick="${x.ex?"ir('paciente')":"toast('No protótipo, a ficha completa é a da Lúcia Ferraz','É a primeira da lista.')"}">
       <span class="nm">${x.n}<small>${x.id} anos · ${x.cid}${x.ex?' · <span style="color:var(--neon)">abrir ficha de exemplo</span>':''}</small></span>
-      <span class="mut">${x.ult}</span><span class="mut">${x.prox}</span>
+      <span class="mut">${psUlt(x)}</span><span class="mut">${psProx(x)}</span>
       <span style="display:flex;gap:.25rem;flex-wrap:wrap">${x.sit.map(([t,k])=>`<span class="chip ${k}">${t}</span>`).join('')}</span>
       <span class="num" style="text-align:right">${x.val}</span></div>`;
   }
-  return h+`</div><div class="hint">Cada filtro é uma lista de trabalho: <b>Retorno vencido</b> e <b>Sumidos</b> alimentam as vagas que abrem e o roteiro; <b>Parcela atrasada</b> vira cobrança por Pix; <b>Aniversário</b> vem da API do Amigo e o agente manda a mensagem no dia.</div>`;
+  return h+`</div><div class="hint">Cada filtro é uma lista de trabalho: <b>Retorno vencido</b> e <b>Sumidos</b> alimentam as vagas que abrem e o roteiro; <b>Parcela atrasada</b> vira cobrança por Pix; <b>Aniversário</b> vem do Amigo e o agente manda a mensagem no dia.</div>`;
 }
 
 let PC_ABA='resumo', TL_F='tudo';
@@ -3115,6 +3265,14 @@ const TL=[
   {q:'28/08',t:'conversa',x:'Chegou pelo WhatsApp, indicada por Carla Menezes · recebeu o preço',f:'WhatsApp',k:''},
 ];
 let CONSENT={lembretes:true,vagas:true,promo:true,pesquisa:false};
+/* botões da ficha: dizem o que aconteceria no Zaq; nada sai no protótipo */
+const pcPix=()=>toast('Pix da 2ª parcela pronto · R$ 905','No Zaq, o link sairia no WhatsApp da Lúcia, em nome de Centro Dermatológico Dr. Manoel Soares · nada foi enviado (protótipo)');
+function pcModelo(k){const pl=primeirosLivres('juliana',3,HOJE+1).map(x=>rxDia(x.d).split(' ')[0]+' '+hjH(x.h)).join(', ').replace(/, ([^,]*)$/,' ou $1');
+  const T={horarios:['Horários livres para a Lúcia','No Zaq, o texto entraria na conversa: “Tenho '+(pl||'horários esta semana')+' com a Juliana. Qual fica melhor?” · você revisa e manda · nada foi enviado (protótipo)'],
+    sessao:['Lembrete de sessão','No Zaq, entraria o texto de Configurar › Mensagens: “Sua sessão 3 de 4 já está liberada…” · você revisa e manda · nada foi enviado (protótipo)'],
+    pesquisa:CONSENT.pesquisa?['Pesquisa de satisfação','No Zaq, entraria a pergunta de 0 a 10 do pós-venda · você revisa e manda · nada foi enviado (protótipo)']
+      :['Pesquisa de satisfação','A Lúcia ainda não autorizou pesquisa (aba Cadastro e consentimento): no Zaq, o modelo fica bloqueado até ela autorizar.']}[k];
+  if(T)toast(T[0],T[1])}
 function telaPaciente(){
   const abas=[['resumo','Resumo'],['linha','Linha do tempo'],['conversa','Conversa'],['financeiro','Financeiro'],['cadastro','Cadastro e consentimento']];
   let h=`<button class="btn sec min" onclick="ir('pacientes')" style="margin-bottom:.6rem">‹ Pacientes</button>
@@ -3122,7 +3280,7 @@ function telaPaciente(){
     <div><h1>Lúcia Ferraz</h1>
       <div class="mut" style="font-size:.84rem">36 anos · Pedreiras · <span class="num">(99) 9····-··42</span> · paciente desde 01/09/2026</div>
       <div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.4rem"><span class="chip g">em tratamento</span><span class="chip b">assinante Pele em dia</span><span class="chip">indicada por Carla Menezes</span><span class="chip g">indicou 1 ⭐</span><span class="chip">0 faltas · confirma sempre</span></div></div>
-    <div class="acts"><button class="btn" onclick="novoAg('juliana','14:00',3)">Agendar</button><button class="btn sec" onclick="PC_ABA='conversa';render()">💬 WhatsApp</button><button class="btn sec" onclick="toast('Pix enviado','Link da 2ª parcela (R$ 905) mandado no WhatsApp da Lúcia.')">Cobrar Pix</button><button class="btn sec" onclick="propDe(EV.find(x=>x.id===3));PL_ABA='nova';ir('planos')">Nova proposta</button></div></div>
+    <div class="acts"><button class="btn" onclick="novoAg('juliana')">Agendar</button><button class="btn sec" onclick="PC_ABA='conversa';render()">💬 WhatsApp</button><button class="btn sec" onclick="pcPix()">Cobrar Pix</button><button class="btn sec" onclick="propDe(EV.find(x=>x.id===3));PL_ABA='nova';ir('planos')">Nova proposta</button></div></div>
   <div class="sync">🔄 Cadastro e atendimentos sincronizados com o Amigo há 2 min · prontuário, exames e fotos clínicas ficam no Amigo · ficha de exemplo ${rxF('ex')}</div>
   <div class="alertas">
     <div class="al g"><span class="ic">📅</span><span><b>Hoje: retorno às 9h e sessão 2 às 10h</b>os dois confirmados pelo WhatsApp</span></div>
@@ -3139,14 +3297,14 @@ function telaPaciente(){
       <div class="ses"><i class="ok">1</i><i class="nx">2</i><i>3</i><i>4</i></div>
       <div style="font-size:.84rem">1 feita · <b style="color:var(--ambar)">2ª hoje às 10h</b> · depois 14/10 e 04/11</div>
       <div class="mut" style="font-size:.78rem;margin-top:.3rem">Protocolo domiciliar (2 produtos) entregue em 01/09 · reavaliação prevista ~jan/2027</div>
-      <div class="acoes"><button class="btn min" onclick="ir('agenda')">Ver na agenda</button><button class="btn sec min" onclick="toast('3ª sessão reservada','qua 14/10 às 10:00 com Juliana · direto na agenda do Amigo')">Marcar a 3ª agora</button></div></div>
+      <div class="acoes"><button class="btn min" onclick="ir('agenda')">Ver na agenda</button><button class="btn sec min" onclick="toast('3ª sessão: qua 14/10 às 10:00 com a Juliana','No Zaq, o horário seria criado na agenda do Amigo e a Lúcia receberia a confirmação · nada foi salvo nem enviado (protótipo)')">Marcar a 3ª agora</button></div></div>
     <div class="card"><h3>Dinheiro ${rxF('ex')}</h3>
       <div class="linha"><span>Contratado</span><span class="num">R$ 4.269</span></div>
       <div class="linha"><span>Pago</span><span class="num" style="color:var(--neon)">R$ 1.554</span></div>
       <div class="linha"><span>A receber · 3 parcelas de R$ 905</span><span class="num">R$ 2.715</span></div>
       <div class="linha"><span>Crédito disponível (indicação)</span><span class="num" style="color:var(--neon)">R$ 50</span></div>
       <div class="linha"><span>Paga melhor por</span><span>Pix</span></div>
-      <div class="acoes"><button class="btn min" onclick="toast('Pix enviado','Link da 2ª parcela (R$ 905) mandado no WhatsApp da Lúcia.')">Mandar Pix da 2ª parcela</button><button class="btn sec min" onclick="PC_ABA='financeiro';render()">Ver tudo</button></div></div>
+      <div class="acoes"><button class="btn min" onclick="pcPix()">Mandar Pix da 2ª parcela</button><button class="btn sec min" onclick="PC_ABA='financeiro';render()">Ver tudo</button></div></div>
     <div class="card"><h3>Valor da paciente ${rxF('ex')}</h3>
       <div class="linha"><span>Contratado até hoje</span><span class="num">R$ 4.269</span></div>
       <div class="linha"><span>Previsto nos próximos 12 meses</span><span class="num">R$ 2.600</span></div>
@@ -3174,7 +3332,7 @@ function telaPaciente(){
       const fc=e.f==='Amigo'?'amigo':e.f==='WhatsApp'?'zap':'';
       h+=`<div class="it ${e.k} ${e.fut?'fut':''}"><span class="quando">${e.q}</span>${e.x}<span class="fonte ${fc}">${e.f}</span></div>`;
     }
-    h+=`</div></div><div class="hint">A linha do tempo junta três fontes: <span class="fonte amigo">Amigo</span> (atendimentos e status, pela API), <span class="fonte zap">WhatsApp</span> (conversa) e <span class="fonte">Zaq</span> (plano, pagamento, indicação). O que está apagado ainda vai acontecer, e o sistema já sabe.</div>`;
+    h+=`</div></div><div class="hint">A linha do tempo junta três fontes: <span class="fonte amigo">Amigo</span> (atendimentos e status, pela integração), <span class="fonte zap">WhatsApp</span> (conversa) e <span class="fonte">Zaq</span> (plano, pagamento, indicação). O que está apagado ainda vai acontecer, e o sistema já sabe.</div>`;
   }
 
   if(PC_ABA==='conversa') h+=`<div class="grid2"><div class="card"><h3>WhatsApp · últimas mensagens</h3>
@@ -3190,12 +3348,12 @@ function telaPaciente(){
     <div class="card"><h3>Responder</h3>
       <div class="nota-rec faint">Escreva uma mensagem…</div>
       <div class="field" style="margin-top:.6rem"><label>Modelos</label><div class="opts">
-        <button class="opt" onclick="toast('Horários enviados','qui 9h, sex 8h30 ou ter 10h com Juliana')">Horários livres</button>
-        <button class="opt" onclick="toast('Pix enviado','Link da 2ª parcela (R$ 905)')">Link do Pix</button>
-        <button class="opt">Lembrete de sessão</button>
-        <button class="opt">Pesquisa de satisfação</button></div></div>
+        <button class="opt" onclick="pcModelo('horarios')">Horários livres</button>
+        <button class="opt" onclick="pcPix()">Link do Pix</button>
+        <button class="opt" onclick="pcModelo('sessao')">Lembrete de sessão</button>
+        <button class="opt" onclick="pcModelo('pesquisa')">Pesquisa de satisfação</button></div></div>
       <div class="linha" style="margin-top:.5rem"><span>Agente nesta conversa</span><span class="chip g">ativo</span></div>
-      <div class="acoes"><button class="btn sec min">Eu assumo</button><button class="btn sec min" onclick="ir('conversas')">Ver todas as conversas</button></div></div></div>`;
+      <div class="acoes"><button class="btn sec min" onclick="cvAssumir()">Eu assumo</button><button class="btn sec min" onclick="ir('conversas')">Ver todas as conversas</button></div></div></div>`;
 
   if(PC_ABA==='financeiro') h+=`<div class="kpis"><div class="kpi"><b>R$ 4.269</b><span>contratado ${rxF('ex')}</span></div><div class="kpi ok"><b>R$ 1.554</b><span>pago ${rxF('ex')}</span></div><div class="kpi amb"><b>R$ 2.715</b><span>a receber ${rxF('ex')}</span></div><div class="kpi ok"><b>R$ 50</b><span>crédito de indicação ${rxF('ex')}</span></div></div>
     <div class="card"><div style="overflow-x:auto"><table class="tb"><tr><th>Data</th><th>O quê</th><th>Forma</th><th class="r">Valor</th><th>Situação</th></tr>
@@ -3207,7 +3365,7 @@ function telaPaciente(){
       <tr><td class="num">01/09</td><td>Entrada do plano de criolipólise</td><td>Pix</td><td class="r num">905</td><td><span class="chip g">pago</span></td></tr>
       <tr><td class="num">01/09</td><td>Consulta · Dr. Manoel</td><td>Pix</td><td class="r num">500</td><td><span class="chip g">pago</span></td></tr>
     </table></div>
-    <div class="acoes"><button class="btn min" onclick="toast('Pix enviado','Link da 2ª parcela (R$ 905) mandado no WhatsApp.')">Mandar Pix da próxima</button><button class="btn sec min">Registrar pagamento</button><button class="btn sec min" onclick="toast('Crédito aplicado','R$ 50 abatidos da 2ª parcela: fica R$ 855.')">Usar os R$ 50 de crédito</button></div>
+    <div class="acoes"><button class="btn min" onclick="pcPix()">Mandar Pix da próxima</button><button class="btn sec min" onclick="toast('Registrar pagamento','No Zaq, você escolheria a parcela, a forma (Pix, dinheiro ou cartão) e a data, e ela sairia de “a receber” · nada foi salvo (protótipo)')">Registrar pagamento</button><button class="btn sec min" onclick="toast('Crédito de R$ 50 na 2ª parcela','No Zaq, a 2ª parcela cairia para R$ 855 e o link de Pix sairia com esse valor · nada foi salvo (protótipo)')">Usar os R$ 50 de crédito</button></div>
     <div class="hint">A nota fiscal continua saindo no Amigo. Aqui fica o que a clínica precisa para cobrar: o que venceu, o que vai vencer e o link de Pix pronto.</div></div>`;
 
   if(PC_ABA==='cadastro') h+=`<div class="grid2"><div class="card"><h3>Cadastro</h3>
@@ -3215,7 +3373,6 @@ function telaPaciente(){
       <div class="field"><label>Data de nascimento</label><input class="inp" value="12/10/1989"></div>
       <div class="field"><label>Celular (WhatsApp)</label><input class="inp" value="(99) 9····-··42"></div>
       <div class="field"><label>Cidade</label><input class="inp" value="Pedreiras"></div>
-      <div class="field"><label>CPF · opcional</label><input class="inp" placeholder="não informado"></div>
       <div class="field"><label>Como conheceu</label><input class="inp" value="Indicação · Carla Menezes"></div>
       <div class="linha"><span>No Amigo</span><span class="chip b">vinculada · sincronizada</span></div></div>
     <div class="card"><h3>O que ela autorizou</h3>
@@ -3224,7 +3381,7 @@ function telaPaciente(){
       <div class="chk" onclick="CONSENT.promo=!CONSENT.promo;render()"><i class="${CONSENT.promo?'':'off'}">✓</i><span>Novidades e promoções da clínica<small>desde 10/09, ao assinar o plano</small></span></div>
       <div class="chk" onclick="CONSENT.pesquisa=!CONSENT.pesquisa;render()"><i class="${CONSENT.pesquisa?'':'off'}">✓</i><span>Pesquisa de satisfação depois do tratamento<small>ainda não perguntado</small></span></div>
       <div class="faint" style="font-size:.74rem;margin-top:.5rem">Se ela responder PARAR, só os avisos de horário livre desligam. Se responder SAIR, tudo desliga e o agente para de mandar mensagem automática.</div>
-      <div class="acoes"><button class="btn sec min">Exportar dados dela</button><button class="btn sec min">Pedido de exclusão</button></div></div></div>
+      <div class="acoes"><button class="btn sec min" onclick="toast('Exportar dados da Lúcia','No Zaq, sairia um arquivo com o que o Zaq guarda dela: nome, celular, nascimento, horários, pagamentos e o que ela autorizou. Prontuário não entra: fica no Amigo · nada foi gerado (protótipo)')">Exportar dados dela</button><button class="btn sec min" onclick="toast('Pedido de exclusão','No Zaq, você registraria o pedido e o Zaq apagaria o que é dele (cadastro, conversa guardada, pagamentos lançados aqui). O prontuário segue a regra do Amigo e da clínica · nada foi apagado (protótipo)')">Pedido de exclusão</button></div></div></div>
     <div class="card" style="border-style:dashed"><h3>O que não fica no Zaq</h3>
       <div class="mut" style="font-size:.84rem">Prontuário, diagnóstico, queixa, receita, exames, fotos clínicas e documento (RG). Tudo isso continua no Amigo. O Zaq guarda o mínimo para marcar, confirmar, cobrar e trazer de volta.</div></div>`;
   return h;
@@ -3241,7 +3398,7 @@ const PROCS={
   'Criolipólise':{ses:4,int:21,preco:800,man:'reavaliação em 60 dias',prof:'Juliana'},
   'Depilação a laser':{ses:10,int:30,preco:240,man:'manutenção a cada 6 meses',prof:'Juliana'},
   'Botox (lift)':{ses:1,int:0,preco:1600,man:'reaplicação em 4 meses',prof:'Dr. Manoel'},
-  'Botox (hiperidrose)':{ses:1,int:0,preco:1800,man:'reaplicação em 6 meses',prof:'Dr. Manoel'},
+  'Botox · 2 áreas':{ses:1,int:0,preco:1800,man:'reaplicação em 6 meses',prof:'Dr. Manoel'},   // nome de procedimento, nunca o diagnóstico
   'Ácido hialurônico (ampola)':{ses:1,int:0,preco:1400,man:'avaliação em 30 dias',prof:'Dr. Manoel'},
   'Bioplastia':{ses:1,int:0,preco:2200,man:'avaliação em 30 dias',prof:'Dr. Manoel'},
   'Cauterização química':{ses:3,int:15,preco:300,man:'avaliação da eficácia em 30 dias',prof:'Dr. Manoel'},
@@ -3254,8 +3411,8 @@ const brl2=v=>'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:v%1?2:0,maxi
 /* ---- propostas (quadro) ----
    As abertas (Enviada, Visualizada, Negociando) são os mesmos cards de Funil › Plano de tratamento. */
 const PROPS={
-  'Enviada':[{n:'Gilberto Nunes',pl:'Cauterização química · 3 sessões',v:900,d:'há 1 dia',fu:['D+1 hoje às 10h','']}],
-  'Visualizada':[{n:'Fernando Sá',pl:'Criolipólise · 4 sessões',v:3200,d:'visualizou hoje',fu:['D+1 amanhã','']},{n:'Rogério Alves',pl:'Botox (lift)',v:1600,d:'há 3 dias',fu:['lembrete D+3 enviado','a']},{n:'Denise Rocha',pl:'Botox (hiperidrose)',v:1800,d:'há 2 dias',fu:['disse “vou ver” · com a recepção','a']}],
+  'Enviada':[{n:'Gilberto Nunes',pl:'Cauterização química · 3 sessões',v:900,d:'há 1 dia',fu:['lembrete hoje às 10h','']}],
+  'Visualizada':[{n:'Fernando Sá',pl:'Criolipólise · 4 sessões',v:3200,d:'visualizou hoje',fu:['lembrete amanhã','']},{n:'Rogério Alves',pl:'Botox (lift)',v:1600,d:'há 3 dias',fu:['2º lembrete já foi','a']},{n:'Denise Rocha',pl:'Botox · 2 áreas',v:1800,d:'há 2 dias',fu:['disse “vou ver” · com a recepção','a']}],
   'Negociando':[{n:'Bianca Lemos',pl:'Depilação a laser · 10 sessões',v:2400,d:'vence amanhã',fu:['pediu 6× no cartão','a']}],
   'Aceita':[{n:'Lúcia Ferraz',pl:'Criolipólise + protocolo',v:3620,d:'01/09',fu:['entrada + 3 no Pix','g']},{n:'Rita Alves',pl:'Botox (lift)',v:1600,d:'05/09',fu:['Pix à vista','g']},{n:'Ana Paula Rocha',pl:'Depilação a laser · 10',v:2400,d:'12/09',fu:['4× cartão','g']}],
   'Perdida':[{n:'Paulo Nunes',pl:'Bioplastia',v:2200,d:'14/09',fu:['achou caro','r']},{n:'Tereza Luz',pl:'Peeling · 3 sessões',v:1050,d:'10/09',fu:['sumiu depois da proposta','r']}],
@@ -3275,7 +3432,7 @@ function telaPlanos(){
   let h=`<div class="pg-h"><div><h1>Tratamentos</h1><div class="sub">Propostas, pacotes, tabela de preços e assinaturas: onde a consulta de R$ 500 vira tratamento, e o paciente volta para todas as sessões.</div></div><button class="btn" onclick="PL_ABA='nova';render()">+ Nova proposta</button></div>
   ${ehDono()
     ?`<div class="kpis"><div class="kpi amb"><b>${brl(aberto)}</b><span>em ${hjPl(nAbertas,'proposta aberta','propostas abertas')} ${rxF('ex')}</span></div>${kTaxa}<div class="kpi"><b>${brl(medio)}</b><span>valor médio do plano aceito ${rxF('ex')}</span></div><div class="kpi ruim"><b>${brl(dev)}</b><span>em sessões vendidas e ainda não feitas ${rxF('ex')}</span></div></div>`
-    :`<div class="kpis"><div class="kpi amb"><b>${nAbertas}</b><span>propostas abertas ${rxF('ex')}</span></div>${kTaxa}<div class="kpi"><b>${aFazer}</b><span>sessões vendidas e ainda não feitas ${rxF('ex')}</span></div><div class="kpi ruim"><b>${SESS.filter(x=>x.st!=='dia').length}</b><span>pacotes atrasados ou parados ${rxF('ex')}</span></div></div>`}${abasPlanos()}`;
+    :`<div class="kpis"><div class="kpi amb"><b>${nAbertas}</b><span>propostas abertas ${rxF('ex')}</span></div>${kTaxa}<div class="kpi"><b>${aFazer}</b><span>sessões vendidas e ainda não feitas ${rxF('ex')}</span></div><div class="kpi ruim"><b>${SESS.filter(x=>['atrasado','parado'].includes(x.st)).length}</b><span>pacotes atrasados ou parados ${rxF('ex')}</span></div></div>`}${abasPlanos()}`;
   if(PL_ABA==='propostas') h+=telaPropostas();
   if(PL_ABA==='nova') h+=telaNovaProposta();
   if(PL_ABA==='pacotes') h+=telaPacotes();
@@ -3315,7 +3472,7 @@ function abrirProp(col,i){const x=PROPS[col][i];
     ${col==='Aceita'?'<div class="it g"><span class="quando">aceita</span>Pagamento confirmado · sessões viraram saldo</div>':''}
     ${col==='Perdida'?'<div class="it"><span class="quando">perdida</span>Motivo: '+x.fu[0]+'</div>':''}
   </div></div>
-  ${aberta?`<div class="acoes"><button class="btn" onclick="toast('Condição ajustada','6× de R$ 400 no cartão · proposta reenviada')">Ajustar condição</button><button class="btn sec" onclick="toast('Marcada como aceita','O paciente foi para Em tratamento e as sessões viraram saldo.')">Marcar aceita</button><button class="btn coral">Perdida</button></div>`:''}`)}
+  ${aberta?`<div class="acoes"><button class="btn" onclick="toast('Nova condição: 6× de R$ 400 no cartão','No Zaq, a proposta sairia de novo no WhatsApp com a condição nova · nada foi enviado (protótipo)')">Ajustar condição</button><button class="btn sec" onclick="toast('Marcar como aceita','No Zaq, o paciente iria para Em tratamento e as sessões virariam saldo · nada foi salvo (protótipo)')">Marcar aceita</button><button class="btn coral" onclick="toast('Marcar como perdida','No Zaq, você escolheria o motivo (achou caro, sumiu, preferiu outro lugar…); o motivo entra em “Por que perdemos no mês” · nada foi salvo (protótipo)')">Perdida</button></div>`:''}`)}
 
 /* ---- nova proposta (montador que calcula) ---- */
 let PROP={pac:'Fernando Sá',itens:[['Criolipólise',4]],prods:{'Gel pós-procedimento':true,'Protetor FPS 60':true},pag:'pix',desc:8,parc:4,val:7};
@@ -3367,6 +3524,12 @@ function abrirImprimirProp(){const t=propTotais(), quem=!PROP.prof||PROP.prof===
   <div class="acoes pr-sai"><button class="btn" onclick="imprimirProp()">🖨 Imprimir</button><button class="btn sec" onclick="fecharTudo()">Voltar</button></div>
   <div class="faint pr-sai" style="font-size:.74rem;margin-top:.4rem">Sai só a folha, sem o menu. Valores de exemplo, menos a consulta · nada é salvo (protótipo).</div>`)}
 function imprimirProp(){if(typeof window!=='undefined'&&typeof window.print==='function')window.print();else toast('Impressão','Neste navegador, use o menu Imprimir.')}
+/* Enviar: a proposta entra em Propostas › Enviada e o cartão anda para Funil › Plano de tratamento (os mesmos cartões) */
+function propEnviar(){if(!PROP.itens.length)return;const t=propTotais(), v=PROP.pag==='pix'?t.liq:t.bruto, pl=PROP.itens.map(([n,q])=>n+(q>1?' · '+q+' sessões':'')).join(' + ');
+  PROPS['Enviada'].unshift({n:PROP.pac,pl,v,d:'agora',fu:['lembrete amanhã','']});funilPlano(PROP.pac,pl,v);PL_ABA='propostas';render();
+  toast('Proposta de '+PROP.pac+' pronta · '+brl(v),'No Zaq, sairia no WhatsApp agora, e o lembrete amanhã às 10h. O cartão foi para Plano de tratamento no Funil · nada foi enviado (protótipo)')}
+const propPedirAprov=()=>toast('Pedido de aprovação · desconto de '+PROP.desc+'%','No Zaq, o dono receberia o pedido no WhatsApp; a proposta de '+PROP.pac+' sairia quando ele aprovar · nada foi enviado (protótipo)',true);
+const propRascunho=()=>toast('Rascunho da proposta de '+PROP.pac,'No Zaq, a proposta ficaria aqui até você enviar · nada foi salvo (protótipo)');
 function telaNovaProposta(){
   const t=propTotais();
   const aprov=PROP.pag==='pix'&&PROP.desc>10&&!ehDono(); // teto de 10% vale para a recepção; o dono aprova
@@ -3394,12 +3557,13 @@ function telaNovaProposta(){
       ${t.desc?`<div class="linha"><span>Desconto Pix</span><span class="num" style="color:var(--neon)">− ${brl(t.desc)}</span></div>`:''}
       <div class="linha" style="border-top:1px solid var(--borda);margin-top:.3rem;padding-top:.4rem"><span>O paciente paga</span><span class="big">${brl(PROP.pag==='pix'?t.liq:t.bruto)}</span></div>
       <div class="mut" style="font-size:.78rem">${cond}</div></div>
-    <div class="acoes">${!PROP.itens.length?`<button class="btn" onclick="toast('Falta o procedimento','Escolha na lista o que foi proposto antes de enviar.',true)">Enviar no WhatsApp</button>`:aprov?`<button class="btn amb" onclick="toast('Pedido de aprovação enviado','O dono recebe no WhatsApp: desconto de ${PROP.desc}% para ${PROP.pac}. A proposta sai quando ele aprovar.',true)">Pedir aprovação do dono</button>`:`<button class="btn" onclick="PROPS['Enviada'].unshift({n:PROP.pac,pl:PROP.itens.map(([n,q])=>n+(q>1?' · '+q+' sessões':'')).join(' + '),v:${PROP.pag==='pix'?t.liq:t.bruto},d:'agora',fu:['D+1 amanhã','']});PL_ABA='propostas';render();toast('Proposta enviada no WhatsApp','${PROP.pac} recebeu a proposta. O card foi para Plano de tratamento; lembrete D+1 amanhã às 10h.')">Enviar no WhatsApp</button>`}<button class="btn sec" onclick="abrirImprimirProp()">🖨 Imprimir</button><button class="btn sec" onclick="toast('Rascunho guardado','A proposta de ${PROP.pac} fica aqui até você enviar · nada foi salvo (protótipo)')">Salvar rascunho</button></div>
-    <div class="hint">⚖️ A proposta diz <b>o que será feito, quantas sessões e o preço</b>. Nunca promete resultado nem mostra foto de outra pessoa. O termo de consentimento do procedimento continua sendo assinado no SignBox do Amigo.</div></div>
+    <div class="acoes">${!PROP.itens.length?`<button class="btn" onclick="toast('Falta o procedimento','Escolha na lista o que foi proposto antes de enviar.',true)">Enviar no WhatsApp</button>`:aprov?`<button class="btn amb" onclick="propPedirAprov()">Pedir aprovação do dono</button>`:`<button class="btn" onclick="propEnviar()">Enviar no WhatsApp</button>`}<button class="btn sec" onclick="abrirImprimirProp()">🖨 Imprimir</button><button class="btn sec" onclick="propRascunho()">Salvar rascunho</button></div>
+    <div class="hint">⚖️ A proposta diz <b>o que será feito, quantas sessões e o preço</b>. Nunca promete resultado nem mostra foto de outra pessoa. O termo de consentimento do procedimento continua sendo assinado na assinatura digital do Amigo.</div></div>
   <div><div class="card"><h3>Como o paciente recebe</h3><div class="zap" style="max-width:none"><div class="b">Oi, ${PROP.pac.split(' ')[0]}! ${!PROP.prof||PROP.prof==='Dr. Manoel'?'O Dr. Manoel':'A '+PROP.prof} montou seu plano 💚
-    <div class="card-p">${PROP.itens.map(([n,q])=>`<b>${n}</b>${q>1?' · '+q+' sessões':''} · ${brl(PROCS[n].preco*q)}`).join('<br>')}${t.prod?`<br><b>Protocolo em casa</b> · ${brl(t.prod)}`:''}
+    <div class="card-p">${PROP.itens.map(([n,q])=>`<b>${msgNome(n)}</b>${q>1?' · '+q+' sessões':''} · ${brl(PROCS[n].preco*q)}`).join('<br>')}${t.prod?`<br><b>Protocolo em casa</b> · ${brl(t.prod)}`:''}
     <hr style="border:0;border-top:1px solid #2a3942;margin:.35rem 0">${cond.replace(/<\/?b>/g,'')}<br><span style="color:#8696a0">válida por ${PROP.val} dias</span></div>
-    Quer que eu já separe os horários? É só responder <b>sim</b> 🙂<div class="h">agora</div></div></div></div>
+    Quer que eu já separe os horários? É só responder <b>sim</b> 🙂<div class="h">agora</div></div></div>
+    ${PROP.itens.some(([n])=>msgNome(n)!==n)?`<div class="faint" style="font-size:.74rem;margin-top:.4rem">${PROP.itens.filter(([n])=>msgNome(n)!==n).map(([n])=>n).join(', ')}: é palavra de saúde, então no WhatsApp vai “Procedimento”. O nome fica na folha impressa. No interior, o celular muitas vezes é da família.</div>`:''}</div>
     <div class="card"><h3>Sessões, se aceitar hoje</h3><div class="mut" style="font-size:.8rem;margin-bottom:.35rem">Datas sugeridas pelo intervalo de cada procedimento, a partir do primeiro horário livre (qua 30/09):</div>
     <div style="display:flex;flex-wrap:wrap;gap:.3rem">${datasSessoes().map(d=>`<span class="chip">${d}</span>`).join('')}</div>
     <div class="faint" style="font-size:.74rem;margin-top:.4rem">Ao aceitar, as sessões viram saldo e a primeira já é oferecida no WhatsApp.</div></div></div></div>`;
@@ -3409,7 +3573,7 @@ function telaNovaProposta(){
 let PK_F='todos';
 const SESS=[
   {pac:'Lúcia Ferraz',p:'Criolipólise',v:4,f:1,prox:'hoje 10:00',vence:'03/2027',st:'dia'},
-  {pac:'Ana Paula Rocha',p:'Depilação a laser',v:10,f:2,prox:'hoje 08:30',vence:'12/2026',st:'vencendo'},
+  {pac:'Ana Paula Rocha',p:'Depilação a laser',v:10,f:0,prox:'hoje 08:30',vence:'09/2027',st:'dia',nota:'plano aceito em 12/09 · hoje é a 1ª sessão'},
   {pac:'Clara Nunes',p:'Cauterização química',v:3,f:2,prox:'qui 01/10',vence:'05/2027',st:'dia'},
   {pac:'Joana Prado',p:'Peeling',v:3,f:1,prox:'hoje 11:00',vence:'01/2027',st:'dia',nota:'veio de uma vaga que abriu (estava 6 dias atrasada)'},
   {pac:'Marta Silva',p:'Depilação a laser',v:10,f:4,prox:null,vence:'01/2027',st:'parado',nota:'sem sessão há 64 dias · parcela atrasada'},
@@ -3433,7 +3597,7 @@ function telaPacotes(){
   <div class="card"><div style="overflow-x:auto"><table class="tb"><tr><th>Paciente</th><th>Pacote</th><th>Sessões</th><th>Próxima</th><th>Vale até</th><th>Situação</th><th></th></tr>
     ${vis.map(x=>`<tr><td>${x.pac}</td><td>${x.p}</td><td><div style="display:flex;align-items:center;gap:.4rem"><div class="bar" style="width:80px"><i class="${x.st==='parado'?'r':x.st==='dia'?'':'a'}" style="width:${100*x.f/x.v}%"></i></div><span class="num">${x.f}/${x.v}</span></div></td><td>${x.prox||'<span class="faint">sem data</span>'}</td><td class="num">${x.vence}</td>
       <td><span class="chip ${PK_ST[x.st][1]}">${PK_ST[x.st][0]}</span>${x.nota?`<div class="faint" style="font-size:.7rem;margin-top:.15rem">${x.nota}</div>`:''}</td>
-      <td>${x.st==='dia'?'':x.st==='vencendo'?`<button class="btn sec min" onclick="toast('Oferecido','O agente mandou 3 horários e avisou que o pacote vale até 12/2026.')">Acelerar</button>`:`<button class="btn min" onclick="toast('Horários oferecidos','O agente mandou 3 horários para ${x.pac.split(' ')[0]}.')">Oferecer horário</button>`}</td></tr>`).join('')}
+      <td>${x.st==='dia'?'':x.st==='vencendo'?`<button class="btn sec min" onclick="toast('Acelerar as sessões','No Zaq, o agente mandaria 3 horários e avisaria que o pacote vale até ${x.vence} · nada foi enviado (protótipo)')">Acelerar</button>`:`<button class="btn min" onclick="toast('Horários para ${x.pac.split(' ')[0]}','No Zaq, o agente mandaria 3 horários livres (a mensagem diz “sessão”, não o procedimento) · nada foi enviado (protótipo)')">Oferecer horário</button>`}</td></tr>`).join('')}
   </table></div></div>`;
 }
 
@@ -3448,13 +3612,13 @@ const ASS=[
 function telaAssinaturas(){
   return `<div class="kpis">${ehDono()?`<div class="kpi ok"><b>R$ 2.682</b><span>entram todo mês · 18 assinantes ${rxF('ex')}</span></div>`:`<div class="kpi ok"><b>18</b><span>assinantes ${rxF('ex')}</span></div>`}<div class="kpi"><b>72%</b><span>usaram a limpeza do mês ${rxF('ex')}</span></div><div class="kpi ruim"><b>2</b><span>cobranças que falharam ${rxF('ex')}</span></div><div class="kpi amb"><b>1</b><span>cancelou este mês ${rxF('ex')}</span></div></div>
   <div class="grid2"><div class="card"><h3>Pele em dia · R$ 149/mês</h3><div class="mut" style="font-size:.84rem">1 limpeza de pele por mês · 15% em procedimentos · 10% em produtos · prioridade nas vagas liberadas</div>
-    <div class="acoes"><button class="btn sec min">Editar plano</button><button class="btn sec min">Ver os 18</button></div></div>
+    <div class="acoes"><button class="btn sec min" onclick="toast('Editar o Pele em dia','No Zaq, você mudaria o preço e o que entra no plano; quem já assina continua no preço antigo até renovar · nada foi salvo (protótipo)')">Editar plano</button><button class="btn sec min" onclick="toast('Os 18 assinantes','No protótipo, a lista ao lado mostra 5 de exemplo. No Zaq, abre a lista inteira, com a situação de cada cobrança.')">Ver os 18</button></div></div>
     <div class="card" style="border-style:dashed"><h3>Manutenção anual · 12× R$ 249 <span class="chip">rascunho</span></h3><div class="mut" style="font-size:.84rem">2 aplicações de botox por ano + avaliações + 10% em produtos</div>
-    <div class="acoes"><button class="btn min" onclick="toast('Plano lançado','Manutenção anual já pode ser oferecida pelo agente e na ficha.')">Lançar plano</button></div></div></div>
+    <div class="acoes"><button class="btn min" onclick="toast('Lançar a Manutenção anual','No Zaq, o plano passaria a aparecer na ficha e o agente poderia oferecer a quem faz botox · nada foi salvo (protótipo)')">Lançar plano</button></div></div></div>
   <div class="grid2"><div class="card"><h3>Assinantes</h3>${ASS.map(a=>`<div class="rank"><span class="n">${a.n}<small>desde ${a.desde}${a.uso?' · '+a.uso:''}</small></span><span class="chip ${a.st[1]}">${a.st[0]}</span></div>`).join('')}</div>
     <div class="card"><h3>Para oferecer ${rxF('ex')}</h3><div class="mut" style="font-size:.82rem;margin-bottom:.4rem">Vieram 3 ou mais vezes no ano e não assinam:</div>
-    ${[['Fábio Mendes','4 visitas · R$ 3.700 no ano'],['Ana Paula Rocha','3 visitas · R$ 2.400 no ano'],['Clara Nunes','3 visitas · R$ 1.400 no ano']].map(([n,d])=>`<div class="rank"><span class="n">${n}<small>${d}</small></span><button class="btn min" onclick="toast('Oferta enviada','O agente ofereceu o Pele em dia para ${n.split(' ')[0]}.')">Oferecer</button></div>`).join('')}
-    <div class="hint">Cobrança recorrente no cartão ou Pix pelo Asaas, o mesmo motor que já cobra assinaturas no Zaq. Cobrança que falha vira link de Pix no WhatsApp no mesmo dia.</div></div></div>`;
+    ${[['Fábio Mendes','4 visitas · R$ 3.700 no ano'],['Ana Paula Rocha','3 visitas · R$ 2.400 no ano'],['Clara Nunes','3 visitas · R$ 1.400 no ano']].map(([n,d])=>`<div class="rank"><span class="n">${n}<small>${d}</small></span><button class="btn min" onclick="toast('Oferecer o Pele em dia a ${n.split(' ')[0]}','No Zaq, o agente mandaria a oferta do plano no WhatsApp · nada foi enviado (protótipo)')">Oferecer</button></div>`).join('')}
+    <div class="hint">Cobrança todo mês no cartão ou no Pix, pela mesma cobrança automática que o Zaq já usa nas assinaturas. Cobrança que falha vira link de Pix no WhatsApp no mesmo dia.</div></div></div>`;
 }
 
 /* ---- tabela de procedimentos ---- */
@@ -3464,7 +3628,7 @@ function telaTabela(){
     <tr><td>Consulta · Dr. Manoel</td><td class="r num">1</td><td>—</td><td class="r num">R$ 500</td><td class="r num">—</td><td>retorno em 30 dias</td><td>Dr. Manoel</td></tr>
     ${Object.entries(PROCS).map(([n,x])=>`<tr><td>${n}</td><td class="r num">${x.ses}</td><td>${x.int?'a cada '+x.int+' dias':'—'}</td><td class="r num">${brl(x.preco)}</td><td class="r num">${x.ses>1?brl(x.preco*x.ses):'—'}</td><td>${x.man}</td><td>${x.prof}</td></tr>`).join('')}
   </table></div>
-  <div class="acoes"><button class="btn sec min">+ Procedimento</button><button class="btn sec min">Importar do Amigo</button></div>
+  <div class="acoes"><button class="btn sec min" onclick="toast('Novo procedimento','No Zaq, você daria nome, sessões, intervalo, preço e prazo de manutenção; ele passa a aparecer na proposta · nada foi salvo (protótipo)')">+ Procedimento</button><button class="btn sec min" onclick="toast('Importar do Amigo','No Zaq, vêm os nomes das categorias do Amigo; o preço a clínica confere aqui antes de valer · nada foi importado (protótipo)')">Importar do Amigo</button></div>
   <div class="hint">Esta tabela alimenta tudo: a <b>proposta</b> sai dela, o <b>saldo de sessões</b> usa o intervalo, o <b>pós-venda</b> usa o prazo de manutenção e o <b>agente</b> responde o preço. Os nomes vêm das categorias que a clínica já usa no Amigo; só a consulta (R$ 500) tem preço real, os outros são exemplo até a clínica passar a tabela.</div></div>`;
 }
 
@@ -3549,7 +3713,7 @@ function telaRaio(){
       <div class="mut" style="font-size:.74rem">Perdido esta semana em faltas</div>
       <div class="rx-med" style="color:#F08A83">${rxBRL(A.faltasR)}</div>
       <div class="rx-conta">${A.faltas.length} faltas: ${A.faltas.map(e=>tipo(e.tipo)[4]).join(' + ')}${A.faltas.some(e=>!tipo(e.tipo)[4])?' (sessão já paga)':''}</div>
-      <div style="margin-top:.4rem">${rxF('ex')} <a style="font-size:.72rem;color:var(--neon);cursor:pointer" onclick="event.stopPropagation();rxIr('rx-a4')">remarcar → 4</a></div><div class="faint dev" style="font-size:.68rem;margin-top:.2rem">no produto: status "faltou" do Amigo</div>
+      <div style="margin-top:.4rem">${rxF('ex')} <a class="rx-lk" style="font-size:.72rem;color:var(--neon);cursor:pointer" onclick="event.stopPropagation();rxIr('rx-a4')">remarcar → 4</a></div><div class="faint dev" style="font-size:.68rem;margin-top:.2rem">no produto: status "faltou" do Amigo</div>
     </div>
   </div>
   <div style="display:flex;gap:.35rem;flex-wrap:wrap;align-items:center;margin-top:.6rem;font-size:.76rem"><span class="mut">Fora da conta em R$, mas parado:</span>
@@ -3562,7 +3726,7 @@ function telaRaio(){
   const acao=(k,n,prazo,tit,conta,fonte,valor,botao,exs,extra)=>`<div id="rx-${k}" class="card rx-acao ${n===1?'um':''} ${exs?'rx-exs':''} ${RX_FEITO[k]?'feito':''}">
     <span class="n">${n}</span>
     <div><div class="pz">${prazo}</div><div class="tt">${tit}</div><div class="rx-conta" style="margin:.2rem 0 .3rem">${conta}</div>${rxF(fonte)}${RX_FEITO[k]?' <span class="chip g">✓ feito · só nesta sessão</span>':''}${extra||''}</div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:.35rem"><span class="vl">${valor}</span>${botao}</div></div>`;
+    <div class="rx-fim"><span class="vl">${valor}</span>${botao}</div></div>`;
   const oferta=rxCel(top.p,top.d,'dia');
   h+=`<h2 class="rx-h">Faça esta semana</h2><div class="rx-q">O que eu faço agora, e quanto isso vale?</div>`;
   h+=acao('a1',1,'HOJE',`Chamar de novo os ${nPar} que receberam o preço e não marcaram`,`${nPar} × consulta de ${rxBRL(RX_CONSULTA)} · comece pelos ${PR.nuncaChamados} que nunca foram chamados · quem marca, marca no mesmo dia`,'wa',rxBRL(vPar),`<button class="btn min" onclick="abrirOferta('preco')">💬 Ver a mensagem</button>`);
@@ -3627,7 +3791,7 @@ function telaRaio(){
       <span class="mk" style="left:${B.pct}%;background:var(--ambar)"></span><span class="lb dn" style="left:${B.pct}%"><b style="color:var(--ambar)">${prof?prof.nome:'agenda de exemplo'} ${B.pct}%</b></span>
       <span class="mk" style="left:${RX_MERC.topOcup}%;background:var(--roxo)"></span><span class="lb up" style="left:${RX_MERC.topOcup}%">top 10%: ${RX_MERC.topOcup}%</span>
     </div>
-    <div class="rx-conta">${rxF('merc')} mercado = med spa (Zenoti, 2026), outro tipo de clínica: serve de régua, não de meta</div>
+    <div class="rx-conta">${rxF('merc')} mercado = clínicas de estética (pesquisa de 2026), outro tipo de clínica: serve de régua, não de meta<span class="dev"> · fonte: Zenoti, med spa</span></div>
 
     <div style="margin-top:.8rem;font-size:.84rem"><b>Quanto vale meia-hora</b> <span class="mut" style="font-size:.74rem">(tabela, esta semana, só a sede)</span>
       <span style="cursor:pointer;color:var(--txt-mut)" title="Média: soma do preço de tabela do que foi marcado ÷ meias-horas marcadas" onclick="toast('Como é a média','Soma do preço de tabela do que foi marcado (sem falta nem cancelamento) ÷ meias-horas marcadas. Consulta R$ 500; retorno, avaliação e sessão de pacote já paga R$ 0.')">ⓘ</span>
@@ -3649,8 +3813,8 @@ function telaRaio(){
     <div class="rx-conta" style="margin-top:.6rem">ocupação = meias-horas marcadas ÷ meias-horas em que cada um atende na grade da Agenda (Manoel 08:00–12:00 e 13:30–16:30, sáb 08–12 em Lago da Pedra; Juliana 08:00–12:00 e 13:30–16:00; Brenda ter–qui 08:00–12:00). Falta e cancelamento contam como vazio; segurado e aguardando sinal contam como marcado. É a mesma conta da Agenda › Semana.</div>
     <div id="rx-viagens" style="margin-top:.9rem;font-size:.84rem"><b>Viagens: quanto sobrou em cada uma</b> <span class="mut" style="font-size:.74rem">(a mesma conta do Roteiro, com a estrada)</span> ${rxF('ex')}</div>
     ${rtTabelaViagens()}
-    <div class="acha">${(()=>{const c=rtCid('Bacabal'),k=conta(c,'qui');return `<b>Bacabal numa quinta:</b> sobram ${rtBRL(k.sobra)}, ${rtBRL(k.aMais)} a mais que ficar em Pedreiras (~${brl(SEDE.qui.dia)} numa quinta).`})()}</div>
-    <div style="margin-top:.6rem;font-size:.8rem"><a style="color:var(--neon);cursor:pointer" onclick="ir('roteiro')">Viagens e fila por cidade: Roteiro ›</a> <span class="mut">· no mês, só ${hjPl(RX_WA.cidades.conversas,'conversa de paciente citou','conversas de paciente citaram')} uma cidade do roteiro (${RX_WA.cidades.quais})</span> ${rxF('wa')}</div>
+    <div class="acha">${(()=>{const c=rtCid('Bacabal'),k=conta(c,'qui');return `<b>Bacabal numa quinta:</b> sobram ${rtBRL(k.sobra)}, ${rtBRL(k.aMais)} ${k.aMais>=0?'a mais':'a menos'} que ficar em Pedreiras (~${brl(SEDE.qui.dia)}, um dia médio dele na Agenda).`})()}</div>
+    <div style="margin-top:.6rem;font-size:.8rem"><a class="rx-lk" style="color:var(--neon);cursor:pointer" onclick="ir('roteiro')">Viagens e fila por cidade: Roteiro ›</a> <span class="mut">· no mês, só ${hjPl(RX_WA.cidades.conversas,'conversa de paciente citou','conversas de paciente citaram')} uma cidade do roteiro (${RX_WA.cidades.quais})</span> ${rxF('wa')}</div>
   </div></div>`;
 
   /* 5 e 6 · recepção (real) e parado no Amigo */
@@ -3659,7 +3823,7 @@ function telaRaio(){
   h+=`<div class="grid2" style="margin-top:1.2rem"><div>
     <h2 class="rx-h" style="margin-top:0">Recepção no WhatsApp ${rxF('wa')}</h2><div class="rx-q">A recepção atende bem? Em que momento o paciente fica esperando?</div>
     <div class="card">
-      <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
+      <div class="kpis k3">
         <div class="kpi ok"><b>${W.com.med} min</b><span>mediana da 1ª resposta ${rxF('wa')}</span></div>
         <div class="kpi amb"><b>${pct5}%</b><span>${W.com.ate5} de ${W.com.n} em até 5 min · ${W.com.ate1h} (${pct1h}%) em até 1h ${rxF('wa')}</span></div>
         <div class="kpi ruim"><b>${W.tot.sem24}</b><span>vezes mais de 24h sem resposta · ${W.tot.nunca} nunca respondidas ${rxF('wa')}</span></div>
@@ -3676,9 +3840,9 @@ function telaRaio(){
     <div>
     <h2 class="rx-h" style="margin-top:0">Parado no Amigo ${rxF('amigo')}</h2><div class="rx-q">O que já está registrado no Amigo e ninguém está olhando?</div>
     <div class="card"><div class="rx-lista">
-      <span class="nb" style="color:var(--coral)">${AM.retornos}</span><div class="tx"><b>retornos pedidos · ${AM.retornosChamados} chamados</b>O médico pediu a volta e ninguém chamou. Fica fora da conta em R$ porque o retorno não é cobrado. <a style="color:var(--neon);cursor:pointer" onclick="PS_SEG='retorno';ir('pacientes')">ver a lista ›</a></div>
+      <span class="nb" style="color:var(--coral)">${AM.retornos}</span><div class="tx"><b>retornos pedidos · ${AM.retornosChamados} chamados</b>O médico pediu a volta e ninguém chamou. Fica fora da conta em R$ porque o retorno não é cobrado. <a class="rx-lk" style="color:var(--neon);cursor:pointer" onclick="PS_SEG='retorno';ir('pacientes')">ver a lista ›</a></div>
       <span class="nb" style="color:var(--coral)">${AM.confirmadas}/${AM.consultas}</span><div class="tx"><b>consultas confirmadas</b>Consultas de 22 e 23/09, lidas em ${AM.lido}: retrato de antes do Zaq. Na Agenda de exemplo, com o Zaq confirmando, hoje estão ${doDia(HOJE).filter(e=>e.st==='confirmado').length} de ${doDia(HOJE).filter(e=>!['finalizado','cancelou','faltou'].includes(e.st)).length}.</div>
-      <span class="nb" style="color:var(--ambar)">${AM.orcamentos}</span><div class="tx"><b>${AM.orcamentos===1?'orçamento lançado':'orçamentos lançados'} no mês</b>Plano que não é escrito, ninguém cobra. A tela Tratamentos mostra como fica com o Zaq registrando (exemplo). <a style="color:var(--neon);cursor:pointer" onclick="PL_ABA='propostas';ir('planos')">ver ›</a></div>
+      <span class="nb" style="color:var(--ambar)">${AM.orcamentos}</span><div class="tx"><b>${AM.orcamentos===1?'orçamento lançado':'orçamentos lançados'} no mês</b>Plano que não é escrito, ninguém cobra. A tela Tratamentos mostra como fica com o Zaq registrando (exemplo). <a class="rx-lk" style="color:var(--neon);cursor:pointer" onclick="PL_ABA='propostas';ir('planos')">ver ›</a></div>
       <span class="nb" style="color:var(--ambar)">${AM.vencidos}</span><div class="tx"><b>itens de estoque vencidos · ${AM.abaixoMin} abaixo do mínimo</b>Sem R$: pode ser baixa que ninguém lançou. Conferir no Amigo.</div>
       <span class="nb" style="color:var(--ambar)">—</span><div class="tx" style="border-bottom:0"><b>agendamento on-line e robô: não configurados</b>O paciente só marca falando com alguém.</div>
     </div>
@@ -3690,9 +3854,9 @@ function telaRaio(){
     · "Sem resposta" = o paciente escreveu e o número da clínica não respondeu em 24h. Conta cada vez que o paciente escreve, não cada conversa.<br>
     · Domingo e 07/09 não têm nenhuma mensagem: o número fica desligado nesses dias?<br>
     · Preço e agendamento são reconhecidos pelo texto padrão da recepção.<br>
-    · Amigo lido à mão em 22/09. A integração ainda não está ligada: o Amigo tem integração para horários livres, criar, confirmar, cancelar e status (o Zaq lê a cada poucos minutos); falta a clínica confirmar com o Amigo se a chave (token) funciona sem o AmigoBot.<br>
-    · A agenda, as faltas e o valor da meia-hora são exemplo (a mesma agenda da tela Agenda), até ligar a API do Amigo (horários livres e status de comparecimento).<br>
-    · Mercado: Zenoti, med spa, 2026. É régua, não meta nem promessa.<br>
+    · Amigo lido à mão em 22/09. A integração ainda não está ligada: o Amigo tem integração para horários livres, criar, confirmar, cancelar e status (o Zaq lê a cada poucos minutos); falta a clínica confirmar com o Amigo se a chave de integração funciona sem o robô do Amigo (AmigoBot).<br>
+    · A agenda, as faltas e o valor da meia-hora são exemplo<span class="dev"> (a mesma agenda da tela Agenda)</span>, até ligar a integração com o Amigo (horários livres e quem veio ou faltou).<br>
+    · Mercado: pesquisa de 2026 com clínicas de estética<span class="dev"> (Zenoti, med spa)</span>. É régua, não meta nem promessa.<br>
     · O Zaq não guarda diagnóstico, prontuário, foto nem documento.</div></div>`;
   return h;
 }
@@ -3713,7 +3877,7 @@ function abrirConta(k){
     <div class="sec"><h4>Os ${c.livres.length} horários livres</h4><div style="display:flex;gap:.3rem;flex-wrap:wrap">${c.livres.map(x=>`<span class="chip">${x}</span>`).join('')}</div></div>
     <div class="sec"><div class="linha"><span>Horários livres</span><span class="num">${c.livres.length}</span></div>
     <div class="linha"><span>× média por meia-hora do ${rxNome(t.p)}</span><span class="num">${rxBRL(A.vmh[t.p])}</span></div>
-    <div class="faint" style="font-size:.76rem;margin-top:.3rem">A média é o que ele fatura por meia-hora marcada na sede nesta semana, pela tabela (${rxBRL(ev.reduce((s,e)=>s+tipo(e.tipo)[4],0))} ÷ ${ev.reduce((s,e)=>s+e.d,0)}). É uma média: mistura consulta (R$ 500), procedimento, cirurgia e retorno (R$ 0). Se o dia for preenchido com consulta, cada meia-hora vale R$ 500; com retorno, R$ 0.</div> ${rxF('ex')}</div>
+    <div class="faint" style="font-size:.76rem;margin-top:.3rem">A média é o que ele fatura por meia-hora marcada na sede nesta semana, pela tabela (${rxBRL(ev.reduce((s,e)=>s+tipo(e.tipo)[4],0))} ÷ ${ev.reduce((s,e)=>s+e.d,0)}). É uma média: mistura consulta (R$ 500), procedimento, cirurgia e retorno (R$ 0). Se o dia for preenchido com consulta, cada meia-hora vale R$ 500; com retorno, R$ 0. É o teto de encher o que está vazio: um dia médio dele na Agenda rende ~${rxBRL(SEDE.qui.dia)}, a base que o Roteiro usa para “ficar em Pedreiras”.</div> ${rxF('ex')}</div>
     <div class="acoes"><button class="btn" onclick="abrirCelula('${t.p}',${t.d},'dia')">Ver os ${c.livres.length} horários</button><button class="btn sec" onclick="AG_PROF='${t.p}';AG_VISTA='semana';ir('agenda')">Abrir na Agenda</button></div>`); }
   if(k==='faltas') return abrirGav(`<div class="mut" style="font-size:.76rem">Faltas desta semana · exemplo</div><h2>${rxBRL(A.faltasR)}</h2>
     <div class="sec">${A.faltas.map(e=>`<div class="rank"><span class="n">${rxDia(e.dia)} · ${e.h} · ${rxNome(e.p)}<small>${e.tipo} · ${e.pac}</small></span><span class="num">${tipo(e.tipo)[4]?rxBRL(tipo(e.tipo)[4]):'R$ 0 (já paga)'}</span></div>
@@ -3890,11 +4054,11 @@ const AGENTE={modo:'ligado',responde:'5min',marca:'segura',sabado:'agente',avisa
     ['horarios','Oferecer 3 horários livres na sede, lidos do Amigo na hora',true],['marcar','Marcar consulta, avaliação, retorno e sessão de pacote',true],
     ['remarcar','Remarcar e cancelar a pedido do paciente (a vaga vai para Vagas)',true],['fila','Pôr na fila da cidade quem pede outra cidade',true],
     ['endereco','Mandar o endereço e como chegar',true],['sinal','Pedir sinal no Pix só quando a data da cidade tiver sinal',true],['precoProc','Dizer preço de procedimento',false]],
-  nunca:['indicar tratamento ou procedimento','falar de sintoma, diagnóstico ou remédio','comentar foto de pele (e o Zaq não guarda a foto)',
+  nunca:['indicar tratamento ou procedimento','falar de sintoma, diagnóstico ou remédio','comentar foto de pele (e o Zaq não copia a foto para ficha, funil ou fila)',
     'dizer se o convênio cobre','pedir RG, foto, CPF ou endereço','dar desconto','prometer resultado ou mandar antes e depois',
     'marcar encaixe','responder conversa interna ou grupo','fingir que é uma pessoa'],
   nuncaPq:['Quem indica é o médico, na consulta.','É dado de saúde: o agente passa para a recepção.',
-    'Foto de pele é dado de saúde. O agente não comenta e o Zaq não guarda: passa para a recepção.','Depende do plano de cada um: a recepção confere.',
+    'Foto de pele é dado de saúde. O agente não comenta, e ela fica só na conversa do WhatsApp: o Zaq não copia para ficha, funil ou fila. Passa para a recepção.','Depende do plano de cada um: a recepção confere.',
     'Para marcar bastam nome e nascimento. Documento se confere no balcão.','Desconto é decisão da clínica (a recepção dá até 10%).',
     'Resultado depende de cada pessoa: a clínica não promete, e o agente também não.','Encaixe só a recepção marca: ela sabe se cabe no dia do médico.',
     'Equipe, fornecedor e grupo não são paciente.','Se perguntarem, ele diz que é o assistente virtual da clínica.'],
@@ -4063,7 +4227,7 @@ function cfAbaResumo(){const W=RX_WA, AM=RX_AMIGO, P=cfPassos(), ok=P.filter(p=>
   <h2 class="rx-h">Por que ligar</h2><div class="rx-q">WhatsApp de 24/08 a 23/09, medido em 24/09 · Amigo lido à mão em 22/09</div>
   <div class="kpis">
     <div class="kpi ruim"><b>${W.tot.sem24}</b><span>vezes o paciente ficou mais de 24h sem resposta · ${W.tot.nunca} nunca respondidas</span> ${rxF('wa')}</div>
-    <div class="kpi amb"><b>${W.preco.nuncaChamados} de ${parados}</b><span>receberam o preço, não marcaram e nunca foram chamados de novo · ${brl(parados*500)} parados</span> ${rxF('wa')}</div>
+    <div class="kpi amb"><b>${W.preco.nuncaChamados} de ${parados}</b><span>receberam o preço, não marcaram e nunca foram chamados de novo · ${brl(parados*RX_CONSULTA)} parados</span> ${rxF('wa')}</div>
     <div class="kpi ruim"><b>${AM.confirmadas} de ${AM.consultas}</b><span>consultas confirmadas no Amigo</span> ${rxF('amigo')}</div>
     <div class="kpi amb"><b>${AM.retornos}</b><span>retornos pedidos pelo médico · ${AM.retornosChamados} chamados</span> ${rxF('amigo')}</div></div>`;
   return h}
@@ -4094,8 +4258,13 @@ function cfAbaAmigo(){const am=AMIGO.conectado, ver=am||CF_SIM, S=AMIGO.sim, dif
     <div class="acoes"><button class="btn sec min" onclick="CF_ABA='grade';cfAba()">Ver na Grade</button></div></div>
   <div class="card"><h3>Se o Amigo cair</h3><div class="cf-txt">O agente para de oferecer horário, diz “a recepção já te responde”, e nada se perde: o que ficou pendente sobe quando o Amigo voltar.</div>
     <div class="cf-sub">Últimos problemas ${rxF('ex')}</div>${AMIGO.problemas.map(([q,t])=>`<div class="cf-li"><span><b class="num">${q}</b><small>${t}</small></span></div>`).join('')}</div>
-  <details class="card rt-como"><summary><b>Para o suporte</b> <span class="mut" style="font-size:.78rem">· a lista da integração do Amigo</span></summary><div class="rx-conf" style="margin-top:0">${AMIGO.tecnico}</div></details>`;
+  <div class="card"><h3>Para o suporte do Amigo</h3><div class="cf-txt">A lista do que o Zaq lê e grava no Amigo, em termos técnicos, para a clínica mandar ao suporte junto com a pergunta da chave.</div>
+    <div class="acoes"><button class="btn sec min" onclick="cfCopiarSuporte()">Copiar a lista para o suporte</button></div></div>
+  <details class="card rt-como dev"><summary><b>Lista técnica</b> <span class="mut" style="font-size:.78rem">· a integração do Amigo</span></summary><div class="rx-conf" style="margin-top:0">${AMIGO.tecnico}</div></details>`;
   return h}
+function cfCopiarSuporte(){const t=AMIGO.tecnico.replace(/<br>/g,'\n');
+  try{if(typeof navigator!=='undefined'&&navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).catch(()=>{})}catch(e){}
+  toast('Lista copiada','É só colar na conversa com o suporte do Amigo. Vai o que o Zaq lê e grava lá, e as duas perguntas: se a chave funciona sem o robô do Amigo e se o paciente novo é criado junto com o agendamento.')}
 
 /* ---- aba 3 · WhatsApp e agente ---- */
 function cfAbaAgente(){const W=RX_WA, A=AGENTE, pct5=Math.round(100*W.com.ate5/W.com.n), f0=W.faixas[0], p0=Math.round(100*f0[2]/f0[1]), sex=(W.dias.find(d=>d[0]==='sex')||[0,0,0,0])[3];
@@ -4140,17 +4309,17 @@ function cfAbaAgente(){const W=RX_WA, A=AGENTE, pct5=Math.round(100*W.com.ate5/W
       <div class="cf-ns" id="cf-fr-ns">${ns?'● texto não salvo':''}</div>
       ${CF_AVISO.fr?cfAvisoSaude('fr'):''}
       <div class="acoes"><button class="btn" onclick="cfFrasesSalvar()">Salvar texto</button><button class="btn sec" onclick="cfFrasesPadrao()">Voltar ao texto padrão</button></div></div>
-    <div><span class="cf-lb">Prévia ao vivo · a mesma oferta do Raio-X ${rxF('ex')}</span><div class="zap" id="cf-fr-prev" style="max-width:none">${cfFrasesPrevia()}</div></div></div>
+    <div><span class="cf-lb">Prévia ao vivo<span class="dev"> · a mesma oferta do Raio-X</span> ${rxF('ex')}</span><div class="zap" id="cf-fr-prev" style="max-width:none">${cfFrasesPrevia()}</div></div></div>
     <div class="cf-sub">Para marcar, pede só</div>
     <div class="cf-li"><span>Nome completo</span><span class="cf-lk">🔒</span></div><div class="cf-li"><span>Data de nascimento</span><span class="cf-lk">🔒</span></div>
-    <div class="hint">Hoje a recepção pede foto do RG e endereço no WhatsApp ${rxF('wa')}. O agente não pede: documento é dado sensível, e o RG é conferido no balcão.</div></div>`;
+    <div class="hint">Hoje a recepção pede foto do RG e endereço no WhatsApp ${rxF('wa')}. O agente não pede: para marcar, documento não é necessário, e fica mais seguro conferido no balcão. Dado sensível é o de saúde (queixa, diagnóstico, foto de pele): esse o agente não pede nem comenta.</div></div>`;
   /* 4 · depois do preço */
   h+=`<div class="card" id="cf-ag-preco"><h3>Voltar a chamar depois do preço</h3>
     <div class="cf-txt">Todo agendamento real saiu no mesmo dia do preço, em até ${(m=>Math.floor(m/60)+'h'+String(m%60).padStart(2,'0'))(Math.max(...W.preco.marcouMin))} ${rxF('wa')}. Depois disso, ninguém voltou sozinho. A mesma sequência aparece no Funil.</div>
     ${A.fu.map((f,i)=>`<div class="cf-li"><span><b>+${f.d}</b>${f.fim?' · sem resposta, vai para Perdido com o motivo “sumiu depois do preço”':''}<small>“${rtEsc(cfFill(f.t,fv))}”</small></span><span class="cf-bts"><button class="btn sec min" onclick="abrirCfFu(${i})">Editar</button>${cfSw(f.on,`cfFuOn(${i})`)}</span></div>`).join('')}
     <div class="cf-li"><span>Respondeu “vou ver”<small>sai do automático e vai para a recepção, com a frase da pessoa</small></span><span class="cf-lk">🔒</span></div>
     <div class="cf-li"><span>${A.antes.t}<small>${W.preco.nuncaChamados} pessoas receberam o preço no último mês e nunca foram chamadas de novo ${rxF('wa')}</small></span>${cfSw(A.antes.on,'cfAntes()')}</div>
-    <div class="faint" style="margin-top:.45rem;font-size:.76rem">Agora: ${rp.length+mais} em “Recebeu o preço” (${rp.length} recentes + ${mais} de 21 a 28 dias)${vv.length?', '+vv.length+' com a recepção ('+vgNomes(vv.map(c=>c.n))+')':''} ${rxF('ex')} · <a class="cf-a" onclick="FU_FASE='venda';ir('funil')">ver no Funil</a></div></div>`;
+    <div class="faint" style="margin-top:.45rem;font-size:.76rem">Agora: ${rp.length+mais} em “Recebeu o preço” (${rp.length} recentes + ${mais} ${FUNIL_ANTIGOS(mais)})${vv.length?', '+vv.length+' com a recepção ('+vgNomes(vv.map(c=>c.n))+')':''} ${rxF('ex')} · <a class="cf-a" onclick="FU_FASE='venda';ir('funil')">ver no Funil</a></div></div>`;
   /* 5 · limites e SAIR */
   h+=`<div class="card" id="cf-ag-lim"><h3>Limites e SAIR</h3>
     <div class="cf-li" style="border-top:0"><span>No máximo 1 mensagem automática por dia para cada paciente<small>somando voltar a chamar, lembretes, aniversário, vaga que abriu e aviso de cidade. Responder quem escreveu não conta.</small></span><span class="cf-lk">🔒</span></div>
@@ -4541,7 +4710,7 @@ function cfChatResponder(txt){const s=cfNorm(txt), F=k=>rtEsc(AGENTE.frases[k]),
   if(/urgen|emergen|inchou|inchad|sangr|falta de ar|respirar/.test(s)){ag('Isso precisa de atendimento agora: procure o pronto atendimento mais perto. Já avisei a recepção 🙏');sis('→ recepção avisada na hora · o agente não orienta tratamento');st.etapa='recepcao';return}
   if(/pessoa|atendente|humano|robo|falar com alguem/.test(s))return recep('Claro! Já chamei a recepção, ela te responde aqui 🙂','pediu para falar com alguém');
   if(/mancha|coca|coceira|acne|espinha|remedio|pomada|ferida|verruga|caroco|queda de cabelo|o que pode ser|sintoma|diagnost|foto/.test(s))
-    return recep('Sobre isso, quem pode te orientar é o Dr. Manoel, na consulta 🙂 Já chamei a recepção para te ajudar.','pergunta de saúde (o agente não fala de sintoma, e o Zaq não guarda a mensagem nem a foto)');
+    return recep('Sobre isso, quem pode te orientar é o Dr. Manoel, na consulta 🙂 Já chamei a recepção para te ajudar.','pergunta de saúde (o agente não fala de sintoma; a mensagem fica só nesta conversa do WhatsApp: o Zaq não copia para ficha, funil ou fila)');
   if(/desconto|mais barato|convenio|plano de saude|unimed|hapvida/.test(s))return recep('Isso quem vê é a recepção. Já chamei, ela te responde aqui 🙂','desconto ou convênio');
   if(st.etapa==='cidade'&&/^(sim|pode|quero|avisa|pode avisar)/.test(s)){const c=st.cid||'a cidade', cc=rtCid(c), pos=cc?esperando(cc)+1:null;
     ag('Combinado!'+(pos?' Você é o <b>nº '+pos+'</b> na lista de quem espera o Dr. Manoel em '+c+'.':'')+' Te aviso aqui assim que tiver data e endereço certos 🙂');
@@ -4549,8 +4718,8 @@ function cfChatResponder(txt){const s=cfNorm(txt), F=k=>rtEsc(AGENTE.frases[k]),
   const cid=CIDADES.find(c=>s.includes(cfNorm(c.n)));
   if(cid){const L=LOCAIS.find(l=>l[0]===cid.n), end=L&&L[1]!=='a confirmar', px=rtProxDe(cid)[0], sede=of.find(x=>x[0]!==rxDia(HOJE))||of[0];st.cid=cid.n;st.etapa='cidade';
     if(!pd('quando'))return recep('Vou pedir para a recepção te responder sobre '+cid.n+' 🙂','pergunta de cidade');
-    if(px&&end&&px.amigo==='ok'){ag(`Tem sim! O Dr. Manoel atende em ${cid.n} na ${rtLongo(px.dt)}, em ${rtEsc(L[1])}. Quer que eu veja um horário?`);sis('→ em cidade, o agente marca só consulta e retorno, sempre segurado');return}
-    ag(`${px?`Ele vai a ${cid.n} na ${rtLongo(px.dt)}, mas o endereço ainda vai ser confirmado.`:`Ainda não tem data em ${cid.n}.`} Ele atende em Pedreiras de segunda a sexta${sede?` (tenho ${HJ_DIA_LONGO[DIAS.findIndex((_,i)=>rxDia(i)===sede[0])]} às ${hjH(sede[1])})`:''}. Ou posso te avisar quando ${px?'estiver tudo certo':'ele abrir um dia aí'}?`);
+    if(px&&end&&px.amigo==='ok'){ag(`Tem sim! O Dr. Manoel atende em ${cid.n} ${rtNoDia(px.dt)}, em ${rtEsc(L[1])}. Quer que eu veja um horário?`);sis('→ em cidade, o agente marca só consulta e retorno, sempre segurado');return}
+    ag(`${px?`Ele vai a ${cid.n} ${rtNoDia(px.dt)}, mas o endereço ainda vai ser confirmado.`:`Ainda não tem data em ${cid.n}.`} Ele atende em Pedreiras de segunda a sexta${sede?` (tenho ${HJ_DIA_LONGO[DIAS.findIndex((_,i)=>rxDia(i)===sede[0])]} às ${hjH(sede[1])})`:''}. Ou posso te avisar quando ${px?'estiver tudo certo':'ele abrir um dia aí'}?`);
     sis('→ se disser sim: fila de '+cid.n+', no Roteiro · sem data e endereço confirmados, o agente não marca na cidade');return}
   if(/botox|laser|peeling|limpeza|criolipolise|preenchimento|procedimento|depilacao|cauterizacao|bioplastia/.test(s)){ag(F('procedimento'));st.etapa='inicio';return}
   if(st.etapa==='ofereceu'&&/(\d{1,2}\s*(h|:)|\bqua|\bqui|\bsex|\bseg|\bter|hoje|amanha|primeir|pode ser|esse|essa|quero)/.test(s)){
@@ -4866,7 +5035,8 @@ function render(){
   m.innerHTML = !pode(ROTA)?telaSoDono():T[ROTA]?T[ROTA]():telaExistente(nomes[ROTA]||ROTA);
   simplificar(m);
 }
-ROTA=(location.hash||'#hoje').slice(1)||'hoje';
+if(/apresenta/.test(String(location.hash||'')+String(location.search||'')))APRESENTA=true; // link para a clínica: …#hoje?apresenta abre no modo apresentação
+ROTA=rotaDoHash();
 gerarSemana();
 rtPreparar(); // Roteiro: cirurgia não viaja; o sábado em Lago da Pedra troca só ela por consulta
 cfPreparar(); // Configurar: o agente só segura o que ele marca (AG_MARCA), e só na sede

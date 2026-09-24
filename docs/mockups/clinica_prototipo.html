@@ -523,6 +523,88 @@ button.vg{font:inherit;color:var(--txt);text-align:left;width:100%;cursor:pointe
 .hj-regra b{display:block;color:var(--txt);font-size:.82rem;margin-bottom:.15rem}
 .hj-b .zap{max-width:none}
 @media (max-width:900px){.hj-regra{grid-template-columns:1fr}.hj-it .hb{margin-left:0}.hj-so-pc{display:none}}
+
+/* ---------- vagas ---------- */
+.vg-estado{display:flex;flex-wrap:wrap;gap:.25rem .8rem;align-items:center;font-size:.78rem;color:var(--txt-mut);background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.45rem .7rem;margin:0 0 .8rem;cursor:pointer}
+.vg-estado b{color:var(--txt)}
+.vg-estado button{background:none;border:1px solid var(--borda);border-radius:99px;color:var(--neon);font-size:.7rem;padding:0 .5rem;margin-left:.2rem}
+.kpi.vg-k{cursor:pointer;text-align:left;font:inherit;color:var(--txt);width:100%}
+.kpi.vg-k:hover{border-color:var(--neon-borda)}
+.kpi small{display:block;font-size:.68rem;color:var(--text-faint);margin-top:.2rem;line-height:1.35}
+.vg-card,.vg-dia{scroll-margin-top:calc(var(--faixa) + 12px)}
+.vg-card.amb{border-color:var(--ambar-borda)}.vg-card.ok{border-color:var(--neon-borda)}.vg-card.cinza{border-style:dashed}
+.vg-dia.foco{box-shadow:0 0 0 2px var(--neon)}.vg-dia.vg-dest{border-color:var(--ambar-borda)}
+.vg-t{display:flex;gap:.35rem .6rem;align-items:center;flex-wrap:wrap}
+.card .vg-t h3{margin:0;font-size:.98rem}
+.vg-t .chip{white-space:normal}
+.vg-ctx{font-size:.78rem;color:var(--txt-mut);margin:.35rem 0 .45rem;line-height:1.5;overflow-wrap:anywhere}
+.vg-sub{font-size:.66rem;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-mut);font-weight:600;margin:.7rem 0 .3rem}
+.vg-p{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:.15rem .55rem;align-items:center;background:var(--card-2);border:1px solid var(--borda);border-radius:9px;padding:.45rem .6rem;margin-bottom:.35rem;font-size:.82rem;cursor:pointer}
+.vg-p:hover{border-color:var(--neon-borda)}
+.vg-p .vg-i{width:22px;height:22px;border-radius:50%;background:var(--card);border:1px solid var(--borda);display:flex;align-items:center;justify-content:center;font-size:.72rem;color:var(--txt-mut)}
+.vg-p .vg-n{min-width:0;display:flex;flex-wrap:wrap;gap:.3rem;align-items:center}
+.vg-p .vg-st{font-size:.74rem;color:var(--txt-mut);text-align:right}
+.vg-p .vg-por{grid-column:2/-1;font-size:.74rem;color:var(--txt-mut);line-height:1.4}
+.vg-nao{margin:.2rem 0 .3rem}
+.vg-nc{display:flex;gap:.4rem;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:.8rem;padding:.3rem 0;border-top:1px solid var(--borda)}
+.vg-barra{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.6rem;align-items:center;margin:.45rem 0;font-size:.76rem;color:var(--txt-mut)}
+.vg-hs{display:flex;flex-wrap:wrap;gap:.3rem;margin:.35rem 0 .2rem}
+.vg-h{font-family:var(--mono);font-size:.74rem;border:1px solid var(--neon-borda);color:var(--neon);background:var(--neon-fundo);border-radius:7px;padding:.14rem .45rem;text-align:center;line-height:1.25}
+.vg-h.trava{border-color:var(--ambar-borda);color:var(--ambar);background:var(--ambar-fundo)}
+.vg-h small{display:block;font-family:var(--body);font-size:.58rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vg-quem{margin-top:.5rem}
+.vg-q1{display:flex;gap:.4rem .6rem;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:.8rem;padding:.4rem 0;border-top:1px solid var(--borda);line-height:1.45}
+.vg-q1>span{flex:1 1 220px;min-width:0}
+.vg-q1 .chip{white-space:normal}
+.vg-meta{font-size:.76rem;color:var(--txt-mut);margin-top:.4rem;line-height:1.5}
+.vg-meta b{color:var(--txt)}
+.vagas .vg.marc{opacity:.5}
+.vg-trava{border-color:var(--ambar-borda)!important;color:var(--ambar)!important;background:var(--ambar-fundo)!important;cursor:not-allowed}
+.opt[disabled]{cursor:not-allowed;opacity:.7}
+.vg-tr{display:grid;gap:.5rem;align-items:start;padding:.55rem .55rem;border-bottom:1px solid var(--borda);font-size:.8rem;cursor:pointer;line-height:1.45}
+.vg-tr:last-child{border-bottom:0}
+.vg-tr:hover{background:var(--card-2)}
+.vg-tr.hd{cursor:default;font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;color:var(--txt-mut);font-weight:600}
+.vg-tr.hd:hover{background:none}
+.vg-tr>span{min-width:0;overflow-wrap:anywhere}
+.vg-tr small{display:block;font-size:.7rem}
+.vg-esp{grid-template-columns:1.1fr 1.2fr 1fr .5fr 1.1fr 1.6fr}
+.vg-hi{grid-template-columns:.9fr 1.2fr 1.1fr 1.9fr .5fr .6fr}
+.vg-hi .vg-rs{text-align:right}
+.vg-hi.perd .vg-rs{color:#F08A83}
+.vg-rot{display:none}
+.vg-so-mob{display:none}
+.vg-tot{font-size:.86rem;margin-top:.7rem}
+.vg-txt{font-size:.8rem;color:var(--txt-mut);line-height:1.6;margin-top:.45rem}
+.vg-txt b{color:var(--txt)}
+.vg-ol{margin:.5rem 0 0;padding-left:1.2rem;font-size:.82rem;line-height:1.6}
+.vg-ol li{margin-bottom:.3rem}
+.vg-reg{display:grid;grid-template-columns:170px minmax(0,1fr);gap:.6rem;align-items:center;padding:.45rem 0;border-top:1px solid var(--borda);font-size:.8rem}
+.vg-reg>span:first-child{color:var(--txt-mut)}
+.vg-mot{display:flex;justify-content:space-between;gap:.6rem;align-items:flex-start;font-size:.84rem;padding:.3rem 0;border-bottom:1px solid var(--borda);line-height:1.45}
+.vg-mot .fonte{flex:0 0 auto}
+.ev .vg-selo,.vg-selo{display:inline-block;max-width:100%;color:var(--ambar);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+.ag .c .ag-of{position:absolute;left:8px;bottom:4px;font-size:.62rem;color:var(--ambar);pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:calc(100% - 12px)}
+.mobnav button{position:relative}
+.mob-b{position:absolute;top:2px;left:calc(50% + 5px);min-width:15px;height:15px;border-radius:99px;background:var(--ambar);color:#1d1406;font-size:.58rem;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.vg-faixa{display:none}
+@media (max-width:900px){
+  .vg-q.vagas{grid-template-columns:repeat(4,minmax(0,1fr));gap:.3rem}
+  .vg-q .vg{padding:.3rem .35rem}
+  .vg-hs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+  .vg-tr{grid-template-columns:1fr!important;gap:.15rem}
+  .vg-tr.hd{display:none}
+  .vg-rot{display:inline}
+  .vg-hi .vg-rs{text-align:left}
+  .vg-velho{display:none}
+  .vg-todas .vg-velho{display:grid}
+  .vg-so-mob{display:inline-block}
+  .vg-reg{grid-template-columns:1fr;gap:.25rem}
+  .vg-p .vg-st{grid-column:2/-1;text-align:left}
+  .vg-faixa{display:flex;align-items:center;gap:.5rem;justify-content:space-between;position:fixed;left:8px;right:8px;bottom:calc(58px + env(safe-area-inset-bottom,0px));z-index:59;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:#F4D29A;border-radius:10px;padding:.45rem .6rem;font-size:.8rem;box-shadow:0 8px 24px rgba(0,0,0,.45);cursor:pointer}
+  .vg-faixa b{color:#FFE7B8}
+  .vg-faixa-esp{height:56px}
+}
 </style></head><body>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
@@ -568,8 +650,8 @@ button.vg{font:inherit;color:var(--txt);text-align:left;width:100%;cursor:pointe
    ================================================================= */
 const PROF = [
   {id:'manoel', nome:'Dr. Manoel', esp:'Dermatologia', cor:'#25D366', login:false, grade:'Seg–Sex 08:00–12:00 e 13:30–16:30 · Espaço Pelle · sáb em Lago da Pedra', faz:['Consulta','Retorno','Procedimento clínico','Procedimento estético','Cirurgia dermatológica','Testes alérgicos']},
-  {id:'juliana', nome:'Juliana', esp:'Fisioterapia dermatofuncional', cor:'#229ED9', login:true, grade:'Seg–Sex 08:00–12:00 e 13:30–16:00 · Espaço Pelle', faz:['Procedimento estético','Sessão de pacote','Avaliação']},
-  {id:'brenda', nome:'Brenda', esp:'Enfermagem (a confirmar)', cor:'#C9A3E0', login:true, grade:'Ter a Qui 08:00–12:00 · Espaço Pelle', faz:['Vacina','Testes alérgicos','Coleta CIMLAB']},
+  {id:'juliana', nome:'Juliana', esp:'Fisioterapia dermatofuncional', cor:'#229ED9', login:true, grade:'Seg–Sex 08:00–12:00 e 13:30–16:00 · Espaço Pelle · grade a confirmar (não tem no Amigo)', faz:['Procedimento estético','Sessão de pacote','Avaliação']},
+  {id:'brenda', nome:'Brenda', esp:'Função a confirmar', cor:'#C9A3E0', login:true, grade:'Ter a Qui 08:00–12:00 · Espaço Pelle', faz:['Vacina','Testes alérgicos','Coleta CIMLAB']},
 ];
 const TIPOS = [
   ['Consulta',30,'consulta','30 dias',500,'#25D366'],['Consulta social',30,'consulta','—',0,'#25D366'],
@@ -592,7 +674,7 @@ let EV = [
   {id:2,p:'manoel',h:'08:30',d:1,pac:'Pedro Santana',tipo:'Consulta',st:'atendimento',org:'Instagram'},
   {id:3,p:'manoel',h:'09:00',d:1,pac:'Lúcia Ferraz',tipo:'Retorno',st:'confirmado',org:'Já é paciente',conf:'pelo WhatsApp às 10:12 de ontem'},
   {id:4,p:'manoel',h:'09:30',d:1,pac:'Marcos Teixeira',tipo:'Consulta',st:'segurado',org:'Instagram',seg:true},
-  {id:5,p:'manoel',h:'10:00',d:1,pac:'Joana Prado',tipo:'Consulta',st:'agendado',org:'Google'},
+  {id:5,p:'manoel',h:'10:00',d:1,pac:'Joana Prado',tipo:'Consulta',st:'confirmado',org:'Google',conf:'pelo WhatsApp às 08:05, junto com a vaga das 11:00'},
   {id:6,p:'manoel',h:'11:00',d:2,pac:'Rita Alves',tipo:'Procedimento clínico',st:'confirmado',org:'Já é paciente'},
   {id:7,p:'manoel',h:'14:00',d:1,pac:'Sônia Pires',tipo:'Consulta',st:'confirmado',org:'Indicação'},
   {id:8,p:'juliana',h:'08:30',d:2,pac:'Ana Paula Rocha',tipo:'Sessão de pacote',st:'presente',org:'Já é paciente',pac_s:'Depilação a laser · 3/10'},
@@ -601,12 +683,15 @@ let EV = [
   {id:11,p:'juliana',h:'15:00',d:1,pac:'Beatriz Souza',tipo:'Avaliação',st:'agendado',org:'Instagram'},
   {id:12,p:'brenda',h:'08:00',d:1,pac:'Tiago Rocha',tipo:'Testes alérgicos',st:'confirmado',org:'Indicação'},
   {id:13,p:'brenda',h:'09:00',d:1,pac:'Carlos Mendes',tipo:'Vacina',st:'agendado',org:'Já é paciente'},
+  /* Vagas (seção 4): o 10:30 cancelado está em oferta (v1); o 11:00 da Juliana abriu às 07:52 e a Joana ficou (v2) */
+  {id:14,p:'manoel',h:'10:30',d:1,pac:'Ivone Castro',tipo:'Consulta',st:'cancelou',org:'Google',vaga:'v1'},
+  {id:15,p:'juliana',h:'11:00',d:1,pac:'Joana Prado',tipo:'Sessão de pacote',st:'confirmado',org:'Vaga que abriu',via:'vaga',pac_s:'Peeling · sessão 2 de 3',conf:'respondeu 1 à vaga às 08:05',antes:'Débora Lins cancelou às 07:52',vaga:'v2'},
 ];
 let FUNIL = {
-  'Novo':[{n:'Marina Lopes',s:'Instagram · "quanto é a consulta?"',t:[['agente respondeu em 40 s','g']]},{n:'Tiago Reis',s:'Indicação da Carla',t:[['parado desde ontem','r']]},{n:'Fernanda Luz',s:'Google · consulta',t:[['Codó · fila da cidade','b']]}],
-  'Recebeu o preço':[{n:'Sônia Pires',s:'Consulta · R$ 500 · há 1 dia',t:[['lembrete com horários hoje 10h','a']]},{n:'Renata Dias',s:'Consulta · R$ 500 · há 6 dias',t:[['sem resposta','r'],['2º toque enviado','']]},{n:'Márcio Luz',s:'Consulta · R$ 500 · há 13 dias',t:[['nunca chamado de novo','r']]},{n:'Joice Prado',s:'Consulta · R$ 500 · há 1 dia',t:[['respondeu: "vou ver e te falo"','a']]}],
-  'Voltar a chamar':[{n:'Joana Prado',s:'Consulta',t:[['faltou 16/09 · remarcar','r']]},{n:'Heitor Lima',s:'Consulta social',t:[['esfriando','a']]}],
-  'Consulta agendada':[{n:'Marcos Teixeira',s:'Consulta · Dr. Manoel',t:[['qua 09:30 · segurado','a']]},{n:'Paula Viana',s:'Procedimento estético',t:[['qui 13:30','']]},{n:'Beatriz Souza',s:'Avaliação · Juliana',t:[['qua 15:00','']]}],
+  'Novo':[{n:'Tiago Reis',s:'Indicação da Carla',t:[['parado desde ontem','r'],['lista de espera · depois das 15h','b']]},{n:'Fernanda Luz',s:'Google · consulta',t:[['Codó · fila da cidade','b']]}],
+  'Recebeu o preço':[{n:'Marina Lopes',s:'Instagram · "quanto é a consulta?"',t:[['agente respondeu em 40 s · hoje 08:12','g'],['1ª rodada da vaga das 10:30','b']]},{n:'Renata Dias',s:'Consulta · R$ 500 · há 6 dias',t:[['sem resposta','r'],['2º toque enviado',''],['2ª rodada da vaga das 10:30 (se sair)','b']]},{n:'Márcio Luz',s:'Consulta · R$ 500 · há 13 dias',t:[['nunca chamado de novo','r'],['2ª rodada da vaga das 10:30 (se sair)','b']]},{n:'Joice Prado',s:'Consulta · R$ 500 · há 1 dia',t:[['respondeu: "vou ver e te falo"','a']]}],
+  'Voltar a chamar':[{n:'Heitor Lima',s:'Consulta social',t:[['esfriando','a'],['lista de espera · manhãs','b']]}],
+  'Consulta agendada':[{n:'Sônia Pires',s:'Consulta · Dr. Manoel',t:[['qua 14:00 · confirmado','g']]},{n:'Joana Prado',s:'Consulta · Dr. Manoel',t:[['qua 10:00 · remarcou a falta de 16/09','g'],['qua 11:00 · peeling · vaga','g']]},{n:'Marcos Teixeira',s:'Consulta · Dr. Manoel',t:[['qua 09:30 · segurado','a']]},{n:'Paula Viana',s:'Procedimento estético',t:[['qui 13:30','']]},{n:'Beatriz Souza',s:'Avaliação · Juliana',t:[['qua 15:00','']]}],
   'Plano de tratamento':[{n:'Rogério Alves',s:'Botox · R$ 1.600',t:[['proposta há 3 dias','a']]},{n:'Bianca Lemos',s:'Laser 10 sessões · R$ 2.400',t:[['vence amanhã','r']]},{n:'Fernando Sá',s:'Criolipólise · 4 sessões · R$ 3.200',t:[['visualizou hoje','']]},{n:'Denise Rocha',s:'Botox (hiperidrose) · R$ 1.800',t:[['respondeu: "vou ver e te aviso"','a'],['há 2 dias','']]}],
 };
 /* ===== ROTEIRO · dados (a tela está na seção 3 · ROTEIRO)
@@ -694,8 +779,8 @@ const MENU = [
     ['relatorios','Relatórios','relatorios'],['equipe','Equipe','equipe'],['novidades','Novidades','novidades'],
   ]},
 ];
-const MOB_PRINC=['hoje','conversas','agenda','pacientes','funil']; // barra de baixo do celular (+ "Mais")
-const DA_RECEPCAO=['hoje','conversas','agenda','pacientes','paciente','funil','planos'];
+const MOB_PRINC=['hoje','conversas','agenda','vagas','pacientes','funil']; // barra de baixo do celular (+ "Mais")
+const DA_RECEPCAO=['hoje','conversas','agenda','vagas','pacientes','paciente','funil','planos'];
 /* roteiro de demonstração: [rota, nome, o que mostrar] */
 const DEMO=[
   ['hoje','Hoje','o que fazer primeiro ao abrir o sistema'],
@@ -703,7 +788,7 @@ const DEMO=[
   ['agenda','Agenda','o dia de cada profissional; toque num horário'],
   ['funil','Funil','do "quanto custa?" ao pós-venda'],
   ['roteiro','Roteiro','as viagens do médico: marcado, fila e se vale ir'],
-  ['vagas','Vagas','cancelou, o horário é oferecido na hora'],
+  ['vagas','Vagas','horário que abre vai para quem cabe nele'],
   ['pacientes','Pacientes','a ficha: conversa, dinheiro e próximos passos'],
   ['planos','Tratamentos','a consulta vira tratamento'],
   ['raiox','Raio-X','o dinheiro parado e o que fazer esta semana'],
@@ -731,14 +816,14 @@ function menu(){
     if(!aberto)continue;
     for(const [id,lb,ic,flag] of vis){
       const etiqueta = flag==='novo'?'<span class="novo dev">novo</span>':flag==='muda'?'<span class="novo dev" style="background:var(--azul)">muda</span>':'';
-      const badge = id==='vagas'?`<span class="nvb amb">${VAGAS.length}</span>`:id==='novidades'?'<span class="nvb">1</span>':'';
+      const badge = id==='vagas'?(emOferta()?`<span class="nvb amb">${emOferta()}</span>`:''):id==='novidades'?'<span class="nvb">1</span>':'';
       h+=`<button class="nav-i ${atual===id?'on':''}" onclick="ir('${id}')"><svg class="nav-ic"><use href="#ic-${ic}"/></svg><span>${lb}</span>${badge}${etiqueta}</button>`;
     }
   }
   h+=`<div style="flex:1"></div><button class="nav-i"><svg class="nav-ic"><use href="#ic-sair"/></svg><span>Sair</span></button>`;
   s.innerHTML = h;
   const mob = document.getElementById('mobnav');
-  mob.innerHTML = MOB_PRINC.filter(pode).map(id=>{const it=itemMenu(id);return `<button class="${atual===id?'on':''}" onclick="ir('${id}')"><svg class="nav-ic"><use href="#ic-${it[2]}"/></svg>${it[1]}</button>`}).join('')
+  mob.innerHTML = MOB_PRINC.filter(pode).map(id=>{const it=itemMenu(id);return `<button class="${atual===id?'on':''}" onclick="ir('${id}')"><svg class="nav-ic"><use href="#ic-${it[2]}"/></svg>${it[1]}${id==='vagas'&&emOferta()?`<span class="mob-b">${emOferta()}</span>`:''}</button>`}).join('')
     + `<button class="${MOB_PRINC.includes(atual)?'':'on'}" onclick="abrirMenu()" aria-label="Mais telas"><svg class="nav-ic"><use href="#ic-mais"/></svg>Mais</button>`;
   faixa();
 }
@@ -767,7 +852,7 @@ function fecharDemo(){const p=document.getElementById('demoPan');if(p)p.classLis
 function alternarApresentacao(){APRESENTA=!APRESENTA;menu();render();
   toast(APRESENTA?'Modo apresentação ligado':'Modo apresentação desligado',APRESENTA?'Notas internas escondidas e termos técnicos trocados por palavras simples.':'As notas internas do protótipo voltaram.')}
 function trocarPapel(){if(!pode(ROTA))ROTA='hoje';fecharTudo();fecharDemo();menu();render();location.hash=ROTA;
-  toast(ehDono()?'Vendo como dono':'Vendo como recepção',ehDono()?'Todas as telas e os valores da clínica.':'Só Hoje, Conversas, Agenda, Pacientes, Funil e Tratamentos. Sem Raio-X, Roteiro e faturamento da clínica; desconto até 10%.')}
+  toast(ehDono()?'Vendo como dono':'Vendo como recepção',ehDono()?'Todas as telas e os valores da clínica.':'Só Hoje, Conversas, Agenda, Vagas, Pacientes, Funil e Tratamentos. Sem Raio-X, Roteiro e faturamento da clínica; desconto até 10%.')}
 function abrirMenu(){document.body.classList.add('menu-on');$('#veu').classList.add('on')}
 function ir(r){ROTA=r;fecharTudo();fecharDemo();menu();render();window.scrollTo(0,0);location.hash=r}
 
@@ -881,7 +966,7 @@ function marcarConv(id,tipo){
 let AG_VISTA='dia', AG_PROF='manoel';
 const AM_SYNC='há 2 min';
 const seloAmigo=()=>`<span class="selo-am" title="O Zaq lê a agenda do Amigo a cada 2 minutos e grava nele confirmado, chegou e cancelado">🔄 Amigo · atualizado ${AM_SYNC}</span>`;
-const VIA={amigo:['am','Amigo','veio do Amigo · a recepção marcou lá'],agente:['ag','agente','marcado pelo agente no WhatsApp'],recepcao:['rc','aqui','marcado aqui pela recepção · já está no Amigo']};
+const VIA={amigo:['am','Amigo','veio do Amigo · a recepção marcou lá'],agente:['ag','agente','marcado pelo agente no WhatsApp'],recepcao:['rc','aqui','marcado aqui pela recepção · já está no Amigo'],vaga:['ag','vaga','veio de um horário que abriu (Vagas) · o Zaq criou no Amigo']};
 const viaDe=e=>VIA[e.via]||VIA.amigo;
 const viaPill=e=>{const v=viaDe(e);return `<i class="via ${v[0]}" title="${v[2]}">${v[1]}</i>`};
 function agOrigem(){EV.forEach(e=>{if(e.via)return;
@@ -900,10 +985,9 @@ function localDe(p,dia){return p==='manoel'&&dia===5?'Lago da Pedra':'Espaço Pe
 const doDia = dia => EV.filter(e=>e.dia===dia);
 function telaAgenda(){
   const hoje = doDia(HOJE);
-  const livres = (p)=>HORAS.filter(h=>atende(p,HOJE,h)&&!hoje.some(e=>e.p===p&&cobre(e,h))).length;
-  const nVagas = VAGAS.filter(v=>(v.quando||'Hoje')==='Hoje').length;
+  const livres = (p)=>HORAS.filter(h=>atende(p,HOJE,h)&&!hoje.some(e=>e.p===p&&rxVivo(e)&&cobre(e,h))).length; // cancelado e falta não ocupam
   let h = `<div class="pg-h"><div><h1>Agenda</h1><div class="sub">Uma coluna por profissional · a mesma agenda do Amigo · clique num horário livre para agendar, num agendamento para mudar o status</div></div>
-    <div style="display:flex;gap:.4rem;flex-wrap:wrap"><button class="btn sec" onclick="ir(pode('vagas')?'vagas':'hoje')">⚡ ${hjPl(nVagas,'vaga liberada','vagas liberadas')} hoje</button><button class="btn" onclick="novoAg('manoel','10:30')">+ Agendar</button></div></div>
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap"><button class="btn sec" onclick="VG_ABA='hoje';ir(pode('vagas')?'vagas':'hoje')">⚡ ${vgRotuloAgenda()}</button><button class="btn" onclick="novoAg('manoel','13:30')">+ Agendar</button></div></div>
   <div class="ag-top"><button class="btn sec min">‹</button><span class="dia">${AG_VISTA==='dia'?'Quarta, 23 de setembro':'Semana de 21 a 26 de setembro'}</span><button class="btn sec min">›</button>
     <div class="seg" style="margin-left:.5rem"><button class="${AG_VISTA==='dia'?'on':''}" onclick="AG_VISTA='dia';render()">Dia</button><button class="${AG_VISTA==='semana'?'on':''}" onclick="AG_VISTA='semana';render()">Semana</button></div>
     ${seloAmigo()}
@@ -931,9 +1015,9 @@ function telaAgenda(){
       if(fora&&!e){h+=`<div class="c off${fm(p)}"></div>`;continue}
       if(e){
         const alt = 44*e.d-6;
-        h+=`<div class="c${fm(p)}"><div class="ev s-${e.st}" style="height:${alt}px" onclick="abrirEv(${e.id})"><b>${e.pac}</b><span class="t">${viaPill(e)}${e.tipo}${e.pac_s?' · '+e.pac_s:''}</span><span class="t">${e.st==='segurado'?'⏳ segurado pelo agente':e.st==='sinal'?'💲 sinal até '+e.prazo:ST[e.st]}</span></div></div>`;
+        h+=`<div class="c${fm(p)}"><div class="ev s-${e.st}" style="height:${alt}px" onclick="abrirEv(${e.id})"><b>${e.pac}</b><span class="t">${viaPill(e)}${e.tipo}${e.pac_s?' · '+e.pac_s:''}</span><span class="t">${vgSelo(e)||(e.st==='segurado'?'⏳ segurado pelo agente':e.st==='sinal'?'💲 sinal até '+e.prazo:ST[e.st])}</span></div></div>`;
       } else if(coberto){h+=`<div class="c${fm(p)}"></div>`}
-      else h+=`<div class="c livre${fm(p)}" onclick="novoAg('${p.id}','${hr}')"></div>`;
+      else h+=`<div class="c livre${fm(p)}" onclick="novoAg('${p.id}','${hr}')">${vgAgLivre(p.id,HOJE,hr)}</div>`;
     }
   }
   return h+`</div></div>${agUmaSo()}
@@ -1009,14 +1093,14 @@ function telaSemana(){
       const coberto = evs.find(x=>x.dia===i&&cobre(x,hr)&&x.h!==hr);
       if(!atende(p.id,i,hr)&&!e){h+=`<div class="c off"></div>`;return}
       if(e){
-        h+=`<div class="c"><div class="ev s-${e.st}" style="height:${44*e.d-6}px" onclick="abrirEv(${e.id})"><b>${e.pac}</b><span class="t">${viaPill(e)}${e.st==='segurado'?'⏳ segurado':e.st==='sinal'?'💲 sinal até '+e.prazo:e.tipo}</span></div></div>`;
+        h+=`<div class="c"><div class="ev s-${e.st}" style="height:${44*e.d-6}px" onclick="abrirEv(${e.id})"><b>${e.pac}</b><span class="t">${viaPill(e)}${vgSelo(e)||(e.st==='segurado'?'⏳ segurado':e.st==='sinal'?'💲 sinal até '+e.prazo:e.tipo)}</span></div></div>`;
       } else if(coberto){h+=`<div class="c"></div>`}
       else if(i<HOJE){h+=`<div class="c" style="background:#0c120f"></div>`}
-      else h+=`<div class="c livre" onclick="novoAg('${p.id}','${hr}',${i})"></div>`;
+      else h+=`<div class="c livre" onclick="novoAg('${p.id}','${hr}',${i})">${vgAgLivre(p.id,i,hr)}</div>`;
     });
   }
   h+=`</div></div>`;
-  h+= piorDia&&piorDia[1]<50 ? `<div class="hint">⚡ <b>${DIAS[piorDia[0]][0]} ${DIAS[piorDia[0]][1]} está em ${piorDia[1]}%.</b> O Zaq já pode oferecer esses horários para quem tem retorno vencido ou plano parado com ${p.nome}. <button class="btn min" style="margin-left:.4rem" onclick="ir('vagas')">Ver quem chamar</button></div>`
+  h+= piorDia&&piorDia[1]<50 ? `<div class="hint">⚡ <b>${DIAS[piorDia[0]][0]} ${DIAS[piorDia[0]][1]} está em ${piorDia[1]}%.</b> O Zaq já pode oferecer esses horários para quem tem retorno vencido ou plano parado com ${p.nome}. <button class="btn min" style="margin-left:.4rem" onclick="VG_FOCO='${p.id}-${piorDia[0]}';VG_ABA='hoje';ir(pode('vagas')?'vagas':'hoje');rxIr('vg-${p.id}-${piorDia[0]}')">Ver quem chamar</button></div>`
     : `<div class="hint">A semana de ${p.nome} está bem preenchida. Dias passados aparecem mais escuros; clique num horário livre para agendar.</div>`;
   if(p.id==='manoel') h+=`<div class="hint">📍 Sábado ele atende em <b>Lago da Pedra</b> (grade quinzenal). A coluna mostra o local de cada dia — é assim que a agenda itinerante aparece para a recepção.</div>`;
   return h;
@@ -1052,8 +1136,8 @@ function abrirEv(id){
     +(t[2]==='consulta'&&!e.trat?`<div class="field" style="margin-top:.5rem"><label>${Quem} propôs tratamento?</label><div class="acoes" style="margin-top:0"><button class="btn min" onclick="fecharTudo();hjTrat(${id},'sim')">Sim, montar proposta</button><button class="btn sec min" onclick="fecharTudo();hjTrat(${id},'nao')">Não</button></div></div>`:'')
     +(e.trat==='sim'?`<div class="acoes"><button class="btn sec min" onclick="PL_ABA='propostas';ir('planos')">Ver propostas</button></div>`:'');
   else if(e.st==='faltou') acoes=`<div class="mut" style="font-size:.82rem">O Amigo marcou falta. O card voltou para Voltar a chamar, com “faltou, remarcar”.</div><div class="acoes"><button class="btn sec min" onclick="toast('Nada foi enviado (protótipo)','No produto, o agente oferece 3 horários livres e você aprova antes.')">Oferecer novo horário</button></div>`;
-  else if(e.st==='cancelou'){const vg=VAGAS.some(x=>x.ev===e.id);
-    acoes=`<div class="mut" style="font-size:.82rem">Cancelado, e o Zaq gravou no Amigo.${vg?' O horário foi para Vagas.':' O horário ficou livre.'}</div>${vg&&pode('vagas')?`<div class="acoes"><button class="btn sec min" onclick="ir('vagas')">Ver Vagas</button></div>`:''}`}
+  else if(e.st==='cancelou'){const vg=e.vaga&&VAGAS.find(x=>x.id===e.vaga), ainda=e.dia>HOJE||(e.dia===HOJE&&e.h>AGORA);
+    acoes=`<div class="mut" style="font-size:.82rem">Cancelado, e o Zaq gravou no Amigo. ${vg?vgStatusFrase(vg):ainda?'O horário ficou livre e está em Vagas › Ainda dá para encher.':'O horário ficou livre.'}</div><div class="acoes">${pode('vagas')&&ainda?`<button class="btn sec min" onclick="VG_ABA='hoje';ir('vagas')">Ver em Vagas</button>`:''}${ainda?`<button class="btn sec min" onclick="novoAg('${e.p}','${e.h}',${e.dia})">Marcar à mão</button>`:''}</div>`}
   abrirGav(`<div class="mut" style="font-size:.76rem">${DIAS[e.dia][0]} ${DIAS[e.dia][1]} · ${e.h} · ${30*e.d} min · ${p.nome} · ${localDe(e.p,e.dia)}</div>
     <h2>${e.pac}</h2><div class="mut" style="font-size:.84rem">${e.tipo}${e.pac_s?' · <b style="color:var(--ambar)">'+e.pac_s+'</b>':''}</div>
     <div class="hj-tags" style="margin-top:.45rem"><span class="chip ${v[0]==='ag'?'g':v[0]==='am'?'b':''}" style="white-space:normal">${v[0]==='ag'?'💬':v[0]==='am'?'📋':'✎'} ${v[2]}${e.via==='agente'&&e.segH?' · '+e.segH:''}</span>${seloAmigo()}</div>
@@ -1063,6 +1147,7 @@ function abrirEv(id){
       <div class="linha"><span>Como conheceu</span><span>${e.org}</span></div>
       <div class="linha"><span>Valor</span><span>${t[4]?brl(t[4])+' · particular':'incluso'}</span></div>
       ${e.conf?`<div class="linha"><span>Confirmou</span><span style="color:var(--neon)">${e.conf}</span></div>`:''}
+      ${e.antes&&e.via==='vaga'?`<div class="linha"><span>Veio de vaga</span><span style="text-align:right">${e.antes}</span></div>`:''}
       ${e.credito?`<div class="linha"><span>Sinal pago no Pix</span><span style="color:var(--neon)">R$ ${e.credito} de crédito · paga ${brl(t[4]-e.credito)} no dia</span></div>`:''}
       ${e.pag&&PAG_NOME[e.pag]?`<div class="linha"><span>Pagamento</span><span style="color:var(--neon)">${PAG_NOME[e.pag]}</span></div>`:''}
       <div class="acoes"><button class="btn sec min" onclick="ir('paciente')">Abrir ficha</button><button class="btn sec min" onclick="abrirZapEv(${id})">💬 Conversa</button></div></div>
@@ -1074,19 +1159,23 @@ function abrirEv(id){
 }
 function mudar(id,st,t,x){const e=EV.find(v=>v.id===id);e.st=st;fecharTudo();render();toast(t,x||'')}
 function faltou(id){const e=EV.find(v=>v.id===id);e.st='faltou';fecharTudo();render();
-  toast('Faltou (veio do Amigo) · voltou ao funil','Card de '+e.pac+' foi para Voltar a chamar com “faltou, remarcar”. O agente manda amanhã: “sentimos sua falta, quer remarcar?” · nada foi enviado (protótipo)',true)}
-/* cancelou: o Zaq grava no Amigo e o horário vira vaga do MESMO profissional (hjLiberar) */
-function cancelar(id){const e=EV.find(v=>v.id===id);if(!e)return;
-  hjLiberar(e,hjPrim(e.pac)+' cancelou');fecharTudo();menu();render();
-  const v=VAGAS[0];
-  toast('⚡ Vaga liberada · '+(v.quando||'Hoje')+' '+e.h+' · '+v.prof,'O Zaq gravou “cancelado” no Amigo e já ofereceu o horário a '+v.of.map(o=>hjPrim(o[0])).join(', ')+', que cabem nele. Primeiro que responder leva · nada foi enviado (protótipo)',true)}
+  toast('Faltou (veio do Amigo) · voltou ao funil','Card de '+e.pac+' foi para Voltar a chamar com “faltou, remarcar”. O agente manda amanhã: “sentimos sua falta, quer remarcar?”. Não vira vaga: o horário já passou. Da próxima vez, o agente pede sinal de R$ 50 · nada foi enviado (protótipo)',true)}
+/* cancelou: o Zaq grava no Amigo e o horário vai para Vagas (vgAbrir acha quem cabe; no 1º mês, a recepção aprova) */
+function cancelar(id){const e=EV.find(v=>v.id===id);if(!e)return;fecharTudo();
+  const v=vgAbrir(e,hjPrim(e.pac)+' cancelou às '+AGORA);menu();render();
+  const q=vgQuandoDia(e.dia)+' '+e.h+' · '+rxNome(e.p);
+  if(!v)return toast('Cancelado · gravado no Amigo','O horário já passou: não vira vaga.');
+  toast('⚡ Horário liberado · '+q,({curta:'Falta menos de 1 h: mensagem não daria tempo. Em Vagas aparece quem já está na clínica, para você oferecer no balcão.',
+    'sem-gente':'Ninguém da lista cabe nele agora. Ele entrou em Vagas › Ainda dá para encher.',
+    aprovar:hjPl(v.r1.length,'pessoa cabe','pessoas cabem')+' ('+vgNomes(v.r1.map(r=>r[0]))+'). Aprove o envio em Vagas.',
+    oferecendo:'Oferta enviada para '+vgNomes(v.r1.map(r=>r[0]))+', válida até '+v.ate+'.'})[v.st]+' O Zaq gravou “cancelado” no Amigo · nada foi enviado (protótipo)',true)}
 
 /* a conversa de um horário (botão 💬 da gaveta) */
 function abrirZapEv(id){const e=EV.find(x=>x.id===id);if(!e)return;
   const wa=e.conf&&/WhatsApp/.test(e.conf);
   const conf=wa?`<div class="sis">véspera · confirmação automática</div><div class="b">Oi, ${hjPrim(e.pac)}! Amanhã você tem ${e.tipo.toLowerCase()} às ${hjH(e.h)} com ${hjCom(e.p)}. Confirma? Responda <b>1</b> para confirmar ou <b>2</b> para remarcar.<div class="h">10:00 · agente</div></div><div class="b eu">1<div class="h">${(e.conf.match(/\d\d:\d\d/)||['10:12'])[0]}</div></div><div class="b">Confirmado! Até amanhã 🤝<div class="h">agente</div></div>`:'';
   abrirGav(`<div class="mut" style="font-size:.76rem">Conversa · ${viaDe(e)[2]}</div><h2>${e.pac}</h2>
-  <div class="zap" style="margin-top:.6rem;max-width:none">${e.via==='agente'?zapReserva(e):`<div class="sis">marcado pela recepção ${e.via==='amigo'?'no Amigo':'aqui no Zaq'} · sem conversa de agendamento no WhatsApp</div>`}${conf}</div>
+  <div class="zap" style="margin-top:.6rem;max-width:none">${e.via==='agente'||e.via==='vaga'?zapReserva(e):`<div class="sis">marcado pela recepção ${e.via==='amigo'?'no Amigo':'aqui no Zaq'} · sem conversa de agendamento no WhatsApp</div>`}${conf}</div>
   <div class="acoes">${e.st==='segurado'?`<button class="btn" onclick="hjConfirmar(${id});abrirZapEv(${id})">Confirmar o horário</button>`:''}<button class="btn sec" onclick="abrirEv(${id})">‹ Voltar ao horário</button></div>`)}
 
 /* ---- a conversa em que o agente marca (modo padrão: segurar, e a recepção confirma) ----
@@ -1099,8 +1188,11 @@ function zapReserva(e){
   const cons=tipo(e.tipo)[0]==='Consulta', com=hjCom(e.p), loc=localDe(e.p,e.dia);
   const de={Instagram:'veio do Instagram',Google:'veio do Google','Indicação':'veio por indicação','Já é paciente':'já é paciente','Vaga que abriu':'respondeu a uma vaga que abriu'}[e.org];
   let h=`<div class="sis">Centro Dermatológico Dr. Manoel Soares${de?' · '+de:''}</div>`;
-  if(e.org==='Vaga que abriu') return h+`<div class="b">Oi, ${hjPrim(e.pac)}! Abriu uma vaga com ${com} <b>${d} às ${hjH(e.h)}</b>. Quer ficar com ela? Responda <b>1</b> para confirmar. É por ordem de resposta 🙂<div class="h">agente</div></div>
-    <div class="b eu">1<div class="h">paciente</div></div><div class="b">Confirmado! ${D} às ${hjH(e.h)}, ${loc==='Espaço Pelle'?'Rua Óscar Galvão, 38':loc}. Até lá 😊<div class="h">agente</div></div><div class="sis">o Zaq marcou no Amigo</div>`;
+  if(e.org==='Vaga que abriu'){const v=e.vaga&&VAGAS.find(x=>x.id===e.vaga); // a mesma mensagem de Vagas (VG_MSG)
+    return h+`<div class="b">${vgMsgTxt('oferta',vgMsgDados(hjPrim(e.pac),e.p,e.dia,e.h,v&&v.ate))}<div class="h">${v&&v.envio?v.envio+' · ':''}agente</div></div>
+    <div class="b eu">1<div class="h">${v&&v.resp||'paciente'}</div></div><div class="sis">o Zaq conferiu no Amigo que ${e.h} seguia livre</div>`
+    +(v&&v.nova?`<div class="b">Que bom! Para finalizar, só preciso do seu <b>nome completo</b> e <b>data de nascimento</b> 📝 Seguro o horário por 10 min.<div class="h">agente</div></div><div class="b eu">${e.pac}, 04/07/1994<div class="h">paciente</div></div><div class="sis">o Zaq cadastrou a paciente no Amigo</div>`:'')
+    +`<div class="sis">o Zaq criou o atendimento no Amigo</div><div class="b">Prontinho!! ✅ Seu agendamento foi realizado 🤝<br><b>${quando}</b> com ${com}, ${loc==='Espaço Pelle'?'na Rua Óscar Galvão, 38':'em '+loc}.<div class="h">automática</div></div>`}
   const sinal=e.st==='sinal'||e.credito;
   h+=cons
     ?`<div class="b eu">oi, quanto é a consulta com o dermatologista? tem vaga essa semana?<div class="h">${hmMais(t0,-3)}</div></div>
@@ -1178,7 +1270,7 @@ function sel(b,multi){if(!multi)[...b.parentElement.children].forEach(x=>x.class
    com nome e telefone. O Zaq cria o agendamento (e o paciente novo) no Amigo. */
 let NA_NOVO=false;
 function novoAg(p,hr,dia){const pr=PROF.find(x=>x.id===p); if(dia===undefined)dia=HOJE; const dl=DIAS[dia][0].toLowerCase()+' '+DIAS[dia][1].slice(0,2);
-  NA_NOVO=false;
+  NA_NOVO=false; const emOf=vgOfertaEm(p,dia,hr);
   abrirModal(`<h2>Novo agendamento</h2><div class="mut" style="font-size:.84rem;margin-bottom:.7rem">Só o que a recepção preenche. O resto (fim, valor, local) se calcula.</div>
   <div class="grid2"><div>
     <div class="field"><label>Paciente</label>
@@ -1196,6 +1288,7 @@ function novoAg(p,hr,dia){const pr=PROF.find(x=>x.id===p); if(dia===undefined)di
     <div class="linha"><span>Valor</span><span>${p==='manoel'?'Consulta R$ 500 · particular · Pix, dinheiro ou cartão':'pela tabela do tipo escolhido'}</span></div>
     <div class="field" style="margin-top:.5rem"><label>Observação para a recepção</label><input class="inp"></div>
   </div></div>
+  ${emOf?`<div class="hint" style="border-color:var(--ambar-borda);color:#F4D29A">⚡ ${emOf}. Marcar aqui cancela a oferta.</div>`:''}
   <div class="hint" style="border-color:#2B4A7A;color:#9CC0F5">🔄 <b>Também é criado no Amigo</b>, na hora: é uma agenda só. Se alguém marcou este horário no Amigo agora há pouco, o Zaq avisa antes de salvar.</div>
   <div class="acoes"><button class="btn" onclick="novoAgOk('${p}','${hr}',${dia})">Agendar</button><button class="btn sec" onclick="fecharTudo()">Cancelar</button></div>
   <div class="hint">RG, raça, etnia, tipo sanguíneo, convênio e guia TISS <b>não aparecem aqui</b>: ficam no Amigo.</div>`)}
@@ -1207,9 +1300,15 @@ function novoAgOk(p,hr,dia){
   const k=HORAS.indexOf(hr), prox=HORAS[k+1];
   const d=tipo(tp)[1]>=60&&prox&&atende(p,dia,prox)&&!EV.some(e=>e.p===p&&e.dia===dia&&rxVivo(e)&&cobre(e,prox))?2:1;
   const dl=DIAS[dia][0].toLowerCase()+' '+DIAS[dia][1].slice(0,2);
-  EV.push({id:Date.now(),p,h:hr,d,dia,pac,tipo:tp,st:'agendado',org:NA_NOVO?'Balcão':'Instagram',via:'recepcao'});
-  fecharTudo();render();
-  toast('Agendado · '+dl+' '+hr,(NA_NOVO?pac+' foi cadastrado só com nome e telefone. ':'')+'O Zaq criou o agendamento'+(NA_NOVO?' e o paciente':'')+' no Amigo. O card foi para Consulta agendada no funil; a confirmação sai às 10h da véspera.')}
+  /* horário em oferta (Vagas): marcar à mão cancela a oferta; o cancelado que estava ali dá lugar ao novo */
+  const vga=vgAtivaEm(p,dia,hr), iof=EM_OFERTA.findIndex(o=>o.p===p&&o.dia===dia&&o.h===hr), oferta=vga||iof>=0;
+  if(vga)Object.assign(vga,{st:'mao',quem:pac});
+  if(iof>=0)EM_OFERTA.splice(iof,1);
+  const novo={p,h:hr,d,dia,pac,tipo:tp,st:'agendado',org:NA_NOVO?'Balcão':'Instagram',via:'recepcao'}, velho=EV.find(e=>e.p===p&&e.dia===dia&&e.h===hr&&e.st==='cancelou');
+  if(velho){['segH','confH','trat','pag','vesp','credito','seg','prazo','motivo','conf','fimH','pac_s','antes','vaga','pedido'].forEach(k=>delete velho[k]);Object.assign(velho,novo)}
+  else EV.push({id:Date.now(),...novo});
+  fecharTudo();menu();render();
+  toast('Agendado · '+dl+' '+hr,(NA_NOVO?pac+' foi cadastrado só com nome e telefone. ':'')+'O Zaq criou o agendamento'+(NA_NOVO?' e o paciente':'')+' no Amigo. O card foi para Consulta agendada no funil; a confirmação sai às 10h da véspera.'+(oferta?' A oferta desse horário em Vagas foi cancelada.':''))}
 
 /* =================================================================
    2 · FUNIL
@@ -1221,7 +1320,7 @@ const POS = {
   'Em tratamento':[
     {n:'Lúcia Ferraz',proc:'Criolipólise',ses:[1,4],prox:'hoje · 10:00',par:'1 de 4 parcelas pagas',al:null},
     {n:'Ana Paula Rocha',proc:'Depilação a laser',ses:[3,10],prox:'hoje · 08:30',par:'pago à vista',al:null},
-    {n:'Clara Nunes',proc:'Cauterização',ses:[2,3],prox:'qua 01/10 · 09:00',par:'pago no Pix',al:null},
+    {n:'Clara Nunes',proc:'Cauterização',ses:[2,3],prox:'qui 01/10 · 09:00',par:'pago no Pix',al:null},
     {n:'Marta Silva',proc:'Depilação a laser',ses:[4,10],prox:null,par:'3 de 6 parcelas pagas',al:'sem sessão há 64 dias'},
   ],
   'Concluído':[
@@ -1241,7 +1340,7 @@ const POS = {
 };
 let FU_FASE='tudo';
 /* cards que não cabem no quadro (a contagem é a real da clínica) */
-const FUNIL_MAIS={'Novo':[8,'+8 mais'],'Recebeu o preço':[6,'+6 mais antigos · de 21 a 28 dias']};
+const FUNIL_MAIS={'Novo':[9,'+9 mais'],'Recebeu o preço':[6,'+6 mais antigos · de 21 a 28 dias']};
 function cardVenda(col,c,i){return `<div class="kbcard" onclick="abrirLead('${col}',${i})"><div class="emp">${c.n}</div><div class="sub">${c.s}</div><div class="ft">${c.t.map(([x,k])=>`<span class="chip ${k}">${x}</span>`).join('')}</div></div>`}
 function cardPos(col,c,i){
   let corpo='';
@@ -1319,7 +1418,7 @@ function abrirPos(col,i){const c=POS[col][i];
    da reserva (zapReserva: "Reservei… a recepção confirma em instantes" e, depois que a
    recepção confirma, o "Prontinho!! ✅" automático); senão, a conversa até onde o card está */
 function abrirLead(col,i){const c=FUNIL[col][i];if(!c)return;
-  const e=EV.find(x=>x.pac===c.n&&x.dia>=HOJE&&x.via==='agente'&&!['cancelou','faltou'].includes(x.st));
+  const e=EV.find(x=>x.pac===c.n&&x.dia>=HOJE&&(x.via==='agente'||x.via==='vaga')&&!['cancelou','faltou'].includes(x.st));
   abrirGav(`<div class="mut" style="font-size:.76rem">${col}</div><h2>${c.n}</h2><div class="mut" style="font-size:.84rem">${c.s}</div>
   <div class="sec"><h4>Conversa · agente do WhatsApp</h4>
   <div class="zap">${e?zapReserva(e):zapLead(c,col)}</div>
@@ -2068,26 +2167,729 @@ function rtTabelaViagens(){const f=rtFechadas();
   <tr><td class="mut">Dr. Manoel em Pedreiras</td><td colspan="3" class="r mut">${brl(SEDE.hora())}/h na semana · quinta ~${brl(SEDE.qui.dia)}</td><td class="r num">${brl(SEDE.qui.hora)}</td></tr></table></div>`}
 
 /* =================================================================
-   4 · VAGAS LIBERADAS (motor de ocupação)
+   4 · VAGAS LIBERADAS — horário que abre, ou que ninguém marcou, vai
+   para quem cabe nele. Fica com quem responder primeiro.
+   - Horário livre de verdade = a mesma conta da Agenda (EV, atende,
+     rxCel). VAGAS são os horários que ABRIRAM (cancelou, remarcou,
+     sinal não pago): cancelar() e hjLiberar() passam por vgAbrir().
+   - EM_OFERTA: horário livre oferecido a UMA pessoa (lista de espera,
+     fila da cidade). Fica travado: o agente não oferece a mais ninguém
+     e a Agenda mostra "em oferta".
+   - Quem vem antes: grupos em ordem, como no Roteiro (sem pontos).
+   - Oferta do mesmo dia: quem pediu, quem já vem, tratamento pago e
+     quem está no funil há até 14 dias (PESSOAS). Quem esfriou recebe
+     o convite da semana, com 1 dia de aviso (VG_PRECO7, HJ_RET).
+   - Real: RX_WA (84 conversas, 13 → 3, 7 nunca chamados, 25 sem
+     resposta, picos) e RX_AMIGO (18 retornos). O resto é exemplo: o
+     agente está desligado na conta real e o Zaq ainda não rodou lá.
+   - Nada envia mensagem nem salva.
    ================================================================= */
+const AGORA='08:50';                                  // o relógio do protótipo (o mesmo de Hoje): qua 23/09, HOJE=2
+const minu=h=>+h.slice(0,2)*60+ +h.slice(3,5);
+const hhmm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+const vgAntecede=v=>v.dia===HOJE?minu(v.h)-minu(AGORA):(v.dia-HOJE)*1440;  // minutos de aviso
+const VG_ATIVA=['oferecendo','aprovar','curta'];      // o que conta no badge (emOferta)
+let VG_ABA='hoje', VG_FOCO=null, VG_HF='todas', VG_HTODAS=false, VG_ABRE={}, VG_PARAR_VER=false, VG_CONV_OFF=[], VG_FEITO={};
+let VG_SEQ=100, VG_EVID=3000, VG_QT=null, QUINTA=null;
+let MOTOR={modo:'aprova',                             // 'aprova' (padrão do 1º mês) | 'auto'
+  antes:'preco',                                      // a chave de Regras: 'preco' | 'retorno'
+  porVez:3, rodada2:5, validade:20, avisoMin:60, tetoDia:20,
+  usadasHoje:4,                                       // Joana (v2) + a 1ª rodada das 10:30; continuar conversa não conta
+  amigo:hhmm(minu(AGORA)-2),                          // a Agenda diz "atualizado há 2 min"
+  pararam:['Luzia Ramos','Otília Sena'],              // responderam PARAR (nomes de exemplo)
+  confirmado:{juliana:false, brenda:false, lago:false}}; // grade sem Amigo e endereço "a confirmar": sem isso o convite não sai
+
+/* quem vem antes: grupos em ordem, como no Roteiro */
+const VG_GRUPO={pediu:['Pediu horário','b'],vem:['Já vem nesse dia','g'],pago:['Tratamento pago parado','g'],
+  preco:['Recebeu o preço','a'],retorno:['Retorno vencido',''],antecipa:['Só quer antecipar','']};
+const vgOrdem=()=>['pediu','vem','pago',...(MOTOR.antes==='preco'?['preco','retorno']:['retorno','preco']),'antecipa'];
+const VG_FONTE_G={pediu:'WhatsApp',vem:'Agenda · Amigo',pago:'Tratamentos',preco:'Funil · WhatsApp',retorno:'Amigo + regra do Zaq',antecipa:'WhatsApp · Agenda'};
+/* as pessoas que o Zaq conhece pela agenda, pelo funil e pela conversa. Nada de prontuário. Exemplo. */
+const PESSOAS={
+ 'Heitor Lima':    {p:'manoel',tipo:'Consulta social',g:'pediu',por:'pediu “o mais cedo possível” (19/09)',turno:'manhã'},
+ 'Marina Lopes':   {p:'manoel',tipo:'Consulta',g:'pediu',por:'perguntou “tem vaga essa semana?” hoje às 08:12'},
+ 'Carlos Mendes':  {p:'manoel',tipo:'Retorno',g:'retorno',por:'retorno vencido há 12 dias',ult:'12/08',turno:'manhã',rapido:1},
+ 'Renata Dias':    {p:'manoel',tipo:'Consulta',g:'preco',por:'recebeu o preço há 6 dias · o último toque do funil é amanhã'},
+ 'Márcio Luz':     {p:'manoel',tipo:'Consulta',g:'preco',por:'recebeu o preço há 13 dias · nunca foi chamado de novo'},
+ 'Sônia Pires':    {p:'manoel',tipo:'Consulta',g:'preco',por:'recebeu o preço ontem'},
+ 'Joice Prado':    {p:'manoel',tipo:'Consulta',g:'preco',por:'recebeu o preço ontem',vouVer:1},
+ 'Rogério Alves':  {p:'manoel',tipo:'Procedimento estético',rot:'botox',g:'preco',por:'proposta de botox há 3 dias',negocia:1},
+ 'Tiago Reis':     {p:'manoel',tipo:'Consulta',g:'pediu',por:'lista de espera: “só consigo depois das 3” (22/09)',depois:'15:00'},
+ 'Gabriela Pinto': {p:'manoel',tipo:'Consulta',g:'antecipa',por:'lista de espera: “se abrir antes me avisa” (21/09)',antecipa:{dia:4,h:'16:00'}},
+ 'Raimundo Costa': {p:'manoel',tipo:'Consulta',g:'retorno',fila:'Bacabal'},
+ 'Joana Prado':    {p:'juliana',tipo:'Sessão de pacote',rot:'peeling',g:'pago',por:'peeling: sessão 2 de 3 atrasada 6 dias',intervalo:21,faltou:'16/09'},
+ 'Ana Paula Rocha':{p:'juliana',tipo:'Sessão de pacote',rot:'depilação a laser',g:'pago',por:'depilação a laser: sessão 3 de 10',intervalo:30},
+ 'Rita Alves':     {p:'juliana',tipo:'Sessão de pacote',rot:'limpeza de pele',g:'pago',por:'assinante: limpeza de setembro sem usar'},
+ 'Heloísa Dias':   {p:'juliana',tipo:'Procedimento estético',rot:'manutenção do laser',dur:30,valor:240,g:'retorno',por:'manutenção de laser vencida há 5 dias',longe:'Lago da Pedra, a 1h',turno:'tarde'},
+ 'Marta Silva':    {p:'juliana',tipo:'Sessão de pacote',rot:'laser',g:'pago',por:'laser parado há 64 dias',parcela:1},
+};
+const vgDurDe=n=>{const x=PESSOAS[n];return x?(x.dur||tipo(x.tipo)[1]):30};
+const vgValorDe=n=>{const x=PESSOAS[n];if(!x)return 500;return x.antecipa||x.g==='pago'?0:(x.valor!=null?x.valor:tipo(x.tipo)[4])};
+function vgValTxt(n){const x=PESSOAS[n];if(!x)return 'consulta '+brl(500);const v=vgValorDe(n);
+  return x.g==='pago'?'sessão já paga · R$ 0':x.antecipa?'só antecipa · R$ 0':v?(x.rot||x.tipo.toLowerCase())+' '+brl(v):x.tipo.toLowerCase()+' · sem cobrança'}
+
+/* os horários que abriram hoje. v1: o 10:30 da Ivone (em oferta). v2: o 11:00 da Débora (a Joana ficou). */
 let VAGAS=[
-  {h:'10:00',prof:'Dr. Manoel',tipo:'30 min',min:4,st:'oferecendo',of:[['Carlos Mendes','retorno vencido há 12 dias',96],['Rogério Alves','plano de botox parado há 3 dias',84],['Heitor Lima','pediu "o mais cedo possível"',71]],resp:null},
-  {h:'14:30',prof:'Juliana',tipo:'60 min',min:38,st:'preenchida',of:[['Clara Nunes','sessão de laser liberada',92],['Ana Paula Rocha','próxima sessão sugerida',88],['Paula Viana','procedimento estético em aberto',64]],resp:'Clara Nunes respondeu "1" em 6 min'},
+ {id:'v1',ev:14,dia:2,h:'10:30',p:'manoel',dur:30,tipo:'Consulta',local:'Espaço Pelle',st:'oferecendo',
+  abriu:'Ivone Castro cancelou pelo WhatsApp às 08:38 · a recepção marcou no Amigo',lib:'08:38',aprov:'08:39',envio:'08:39',ate:'08:59',
+  r1:[['Heitor Lima','respondeu 2 às 08:47 → ofereci qui 09:00',{r:'2',h:'08:47',seg:'Sem problema, Heitor! Tenho amanhã, quinta (24/09), às 9h com o Dr. Manoel. Quer? Responda 1 para ficar com ele.'}],
+      ['Marina Lopes','✓✓ entregue'],['Carlos Mendes','✓✓ lida 08:41']],
+  r2:['Renata Dias','Márcio Luz']},
+ {id:'v2',ev:15,dia:2,h:'11:00',p:'juliana',dur:30,tipo:'Sessão de pacote',local:'Espaço Pelle',st:'preenchida',
+  abriu:'Débora Lins cancelou às 07:52',lib:'07:52',aprov:'07:55',aprovTxt:'você aprovou às 07:55, e a oferta esperou as 08:00 para sair',envio:'08:00',ate:'08:20',
+  r1:[['Joana Prado','respondeu 1 às 08:05',{r:'1',h:'08:05'}]],r2:[],quem:'Joana Prado',resp:'08:05',min:5,
+  obs:'sessão 2 de 3 do peeling, 6 dias atrasada · R$ 0: a sessão já estava paga, por isso não pediu sinal, mesmo ela tendo faltado em 16/09'},
 ];
+/* horário livre oferecido a uma pessoa: travado até ela responder */
+let EM_OFERTA=[{p:'manoel',dia:3,h:'09:00',pac:'Heitor Lima',envio:'08:47',conversa:true}]; // continuou a conversa do "2": não conta no teto
+function emOferta(){return VAGAS.filter(v=>VG_ATIVA.includes(v.st)).length}   // badge do menu, da barra do celular e botão da Agenda
+
+/* histórico de setembro — EXEMPLO: o Zaq ainda não rodou na clínica. Com o Amigo ligado, vem dos cancelamentos reais. */
+let HIST=[   // em ordem de data; a tabela mostra o mais novo em cima
+ {q:'02/09 qua',h:'10:00',p:'manoel',tipo:'Consulta',abriu:'cancelou na véspera, pelo WhatsApp',quem:'Luana Brito',por:'recebeu o preço há 4 dias',min:4,v:500,g:'preco'},
+ {q:'04/09 sex',h:'08:30',p:'manoel',tipo:'Retorno',abriu:'respondeu 2 na confirmação da véspera',quem:'Sebastião Nunes',por:'retorno vencido há 20 dias',min:6,v:0,g:'retorno'},
+ {q:'08/09 ter',h:'15:30',p:'manoel',tipo:'Consulta',abriu:'cancelou de manhã',quem:'Edna Portela',por:'recebeu o preço ontem',min:7,v:500,g:'preco'},
+ {q:'09/09 qua',h:'11:00',p:'manoel',tipo:'Procedimento clínico',abriu:'cancelou na véspera (60 min)',quem:'Rosa Almeida',por:'lista de espera',min:12,v:450,g:'pediu'},
+ {q:'10/09 qui',h:'09:30',p:'manoel',tipo:'Consulta',abriu:'não pagou o sinal até as 18h',quem:'Mônica Freire',por:'lista de espera',min:3,v:500,g:'pediu'},
+ {q:'11/09 sex',h:'14:00',p:'juliana',tipo:'Procedimento estético',abriu:'cancelou pelo WhatsApp (60 min)',quem:'Patrícia Moura',por:'recebeu o preço há 5 dias',min:8,v:800,g:'preco'},
+ {q:'12/09 sáb',h:'10:30',p:'manoel',local:'Lago da Pedra',tipo:'Consulta',abriu:'cancelou na véspera',quem:null,por:'a fila de Lago da Pedra ainda não entrava nas vagas',v:500,regra:'fila'},
+ {q:'16/09 qua',h:'09:30',p:'manoel',tipo:'Procedimento clínico',abriu:'respondeu 2 na confirmação da véspera',quem:'Clara Nunes',por:'sessão 2 de cauterização, já paga · a próxima, qui 01/10, respeita os 15 dias',min:9,v:0,g:'pago'},
+ {q:'18/09 sex',h:'09:00',p:'manoel',tipo:'Consulta',abriu:'cancelou pelo WhatsApp',quem:'Valéria Cunha',por:'recebeu o preço há 2 dias',min:5,v:500,g:'preco'},
+ {q:'22/09 ter',h:'14:00',p:'manoel',tipo:'Consulta',abriu:'cancelou às 13:20',quem:null,por:'40 min de aviso: ninguém chegaria a tempo',v:500,regra:'balcao'},
+ {q:'23/09 qua',h:'11:00',p:'juliana',tipo:'Sessão de pacote',abriu:'Débora Lins cancelou às 07:52',quem:'Joana Prado',por:'peeling 6 dias atrasado · já vinha às 10h',min:5,v:0,g:'pago'},
+];
+function vgPlacar(){const ok=HIST.filter(h=>h.quem), m=ok.map(h=>h.min).sort((a,b)=>a-b), k=m.length, perd=HIST.filter(h=>!h.quem);
+  const por={}; ok.filter(h=>h.v).forEach(h=>{por[h.tipo]=(por[h.tipo]||0)+1});
+  const NM={'Consulta':['consulta','consultas'],'Procedimento clínico':['procedimento clínico','procedimentos clínicos'],'Procedimento estético':['estético','estéticos']};
+  const mix=Object.entries(por).sort((a,b)=>b[1]-a[1]).map(([t,n])=>n+' '+(NM[t]?NM[t][n===1?0:1]:t.toLowerCase())).join(', ')
+    +' · '+ok.filter(h=>!h.v).length+' sem cobrança (retorno ou sessão já paga)';
+  return {feitas:ok.length,total:HIST.length,rs:ok.reduce((s,h)=>s+h.v,0),perdidas:perd.length,perdido:perd.reduce((s,h)=>s+h.v,0),
+    mediana:k?(k%2?m[(k-1)/2]:Math.round((m[k/2-1]+m[k/2])/2)):0,mix}}   // 9 de 11 · R$ 3.250 · R$ 1.000 perdidos · 6 min
+
+/* lista de espera: só quem tem restrição (a semana do Dr. Manoel tem horário sobrando) · exemplo */
+let ESPERA=[
+ {n:'Heitor Lima',quer:'Consulta social · Dr. Manoel',serve:'manhãs',desde:'19/09',frase:'o mais cedo possível',ofertas:[['08:39','hoje 10:30','respondeu 2'],['08:47','qui 09:00','esperando resposta']]},
+ {n:'Gabriela Pinto',quer:'antecipar a consulta de sex 25/09 16:00',serve:'antes de sexta, com 1 dia de aviso',desde:'21/09',frase:'se abrir antes me avisa',ofertas:[]},
+ {n:'Tiago Reis',quer:'Consulta · Dr. Manoel',serve:'só depois das 15h',desde:'22/09',frase:'só consigo depois das 3',ofertas:[],obs:'indicação da Carla'},
+];
+/* o convite da semana: quem esfriou. 7 nunca chamados é real (RX_WA): o Márcio (Funil) e os 6 mais antigos (21 a 28 dias). Nomes de exemplo. */
+const VG_PRECO7=[['Márcio Luz','10/09'],['Flávia Nery','02/09'],['Evandro Pacheco','31/08'],['Daniela Frota','31/08'],['Cláudio Rego','30/08'],['Bruna Teles','30/08'],['Aline Queiroz','26/08']];
+const VG_RET_MAIS=[['Nair Fontes',2],['Wilson Paiva',2],['Odete Lins',1]]; // exemplo · depois dos 5 mais atrasados de Hoje (HJ_RET)
+/* as mensagens (editáveis em Regras): só profissional, dia, hora e local */
+let VG_MSG={
+ oferta:'Oi, {nome}! Abriu um horário com {profissional} {dia} às {hora}, no {local}. Quer? Responda 1 para ficar com ele ou 2 se não puder. Vale até {validade} e fica com quem responder primeiro 🙂 Para não receber avisos de horário, responda PARAR.',
+ convite:'Oi, {nome}! Abriram horários com {profissional} {dia} às {horas}. Algum fica bom? {preco}Se não quiser receber avisos de horário, responda PARAR.',
+ jafoi:'Poxa, esse horário acabou de ser preenchido 🙏 Se quiser, tenho {dia} às {horas} com {profissional}.'};
+const VG_MSG_PADRAO={...VG_MSG};
+const VG_PROIBIDO=['botox','peeling','laser','limpeza','criolipólise','depilação','cauterização','bioplastia','ácido','preenchimento','procedimento','cirurgia','sessão','pacote','retorno vencido','vacina','teste','diagnóstico','tratamento'];
+
+/* ---------------- a conta: horário livre, quem cabe ---------------- */
+const vgQuandoDia=d=>d===HOJE?'hoje':d===HOJE+1?'amanhã':rxDia(d);
+const vgQuando=v=>{const q=vgQuandoDia(v.dia);return q[0].toUpperCase()+q.slice(1)};
+const vgCurto=n=>{const p=String(n).split(' ');return ['Ana','Maria','João'].includes(p[0])&&p.length>2?p[0]+' '+p[1]:p[0]};
+const vgParou=n=>MOTOR.pararam.some(x=>x===n||(x.split(' ')[0]===String(n).split(' ')[0]&&(String(n).split(' ')[1]||'')[0]===(x.split(' ')[1]||'')[0]));
+const vgNomes=a=>{a=a.map(vgCurto);return a.length>1?a.slice(0,-1).join(', ')+' e '+a[a.length-1]:a[0]||''};
+const vgAtivaEm=(p,d,h)=>VAGAS.find(v=>v.p===p&&v.dia===d&&v.h===h&&VG_ATIVA.includes(v.st));
+const vgCobre=(e,h,dur)=>minu(e.h)<minu(h)+dur&&minu(h)<minu(e.h)+30*e.d;
+/* livres de verdade (a conta da Agenda), de agora em diante, fora os que já estão em oferta como vaga */
+function vgLivres(p,d){return HORAS.filter(h=>atende(p,d,h)&&(d>HOJE||h>AGORA)&&!rxOcupa(p,d,h)&&!vgAtivaEm(p,d,h))}
+/* quantos minutos seguidos estão livres a partir de h (o almoço corta) */
+function vgDurLivre(p,d,h){const i0=HORAS.indexOf(h);let m=0;
+  for(let i=i0;i>=0&&i<HORAS.length;i++){const x=HORAS[i];
+    if(i>i0&&minu(x)-minu(HORAS[i-1])>30)break;
+    if(!atende(p,d,x)||rxOcupa(p,d,x))break;
+    if(i>i0&&(vgAtivaEm(p,d,x)||EM_OFERTA.some(o=>o.p===p&&o.dia===d&&o.h===x)))break;
+    m+=30}
+  return m}
+/* '' não existe: devolve {k:'cabe'} · {k:'voce',t} (fica com a recepção) · {k:'fora',t} · null (outro profissional) */
+function vgFora(n,v){const x=PESSOAS[n];if(!x||x.p!==v.p)return null;
+  const R=(t,k,c)=>({t,k:k||'fora',c}), dur=vgDurDe(n);   // c: a restrição da pessoa (aparece em “Fora” na linha do dia)
+  const outros=EV.filter(e=>e.pac===n&&rxVivo(e)&&!(v.id&&e.vaga===v.id));
+  if(MOTOR.pararam.includes(n))return R('pediu PARAR: não recebe aviso de vaga');
+  if(EV.some(e=>e.pac===n&&e.st==='cancelou'&&e.dia>=HOJE&&!(v.id&&e.vaga===v.id)&&!/^antecipou/.test(e.antes||'')))return R('cancelou hoje: o agente oferece remarcar na conversa dela');
+  if(x.fila)return R('mora em '+x.fila+' · está na fila da cidade, no Roteiro');
+  if(x.tipo==='Cirurgia dermatológica')return R('cirurgia: só a recepção oferece');
+  if(dur>(v.dur||30))return R((x.rot||x.tipo.toLowerCase())+' precisa de '+dur+' min',0,'dur');
+  if(x.vouVer)return R('disse “vou ver” há 2 h · fica com você','voce');
+  if(x.negocia)return R('pediu desconto ontem à noite · fica com você','voce');
+  if(x.parcela)return R('parcela atrasada · você decide','voce');
+  if(x.depois&&v.h<=x.depois)return R('só depois das '+hjH(x.depois),0,'depois');
+  if(x.longe&&vgAntecede(v)<1440)return R('mora em '+x.longe+' · só com 1 dia de aviso',0,'longe');
+  if(x.antecipa&&vgAntecede(v)<1440)return R('quer antecipar · só com 1 dia de aviso',0,'antecipa');
+  if(x.antecipa&&v.dia>=x.antecipa.dia)return R('quer antecipar: só serve antes de '+rxDia(x.antecipa.dia),0,'antecipa');
+  const mesmo=outros.find(e=>e.dia===v.dia&&e.p===v.p);
+  if(mesmo&&!x.antecipa)return R('já tem horário com '+hjCom(v.p)+' nesse dia ('+mesmo.h+')');
+  const junto=outros.find(e=>e.dia===v.dia&&vgCobre(e,v.h,dur));
+  if(junto)return R('está com '+hjCom(junto.p)+' das '+junto.h+' às '+hmMais(junto.h,30*junto.d));
+  const ses=outros.filter(e=>e.p===v.p&&e.dia<v.dia).map(e=>e.dia).pop();
+  if(x.intervalo&&ses!==undefined&&v.dia-ses<x.intervalo)return R('fez sessão '+(ses===HOJE?'hoje':rxDia(ses))+' · intervalo de '+x.intervalo+' dias',0,'intervalo');
+  const futuro=outros.find(e=>e.p===v.p&&e.dia>=HOJE&&e.dia!==v.dia);
+  if(futuro&&!x.antecipa)return R('já tem horário com '+hjCom(v.p)+' '+vgQuandoDia(futuro.dia)+' às '+futuro.h);
+  return {t:'',k:'cabe'}}
+/* o atendimento que a pessoa já tem colado neste horário (junta as duas idas) */
+function vgColado(n,s){const es=EV.filter(o=>o.pac===n&&o.dia===s.dia&&rxVivo(o)), e=es.find(o=>hmMais(o.h,30*o.d)===s.h)||es.find(o=>hmMais(s.h,30)===o.h);
+  return e?(hmMais(e.h,30*e.d)===s.h?'logo depois':'logo antes')+' '+(tipo(e.tipo)[2]==='exame'?'dos '+e.tipo.toLowerCase():'do atendimento')+' dela com '+hjCom(e.p)+' às '+e.h:''}
+const vgVem=(n,v)=>EV.some(e=>e.pac===n&&e.dia===v.dia&&rxVivo(e)&&!(v.id&&e.vaga===v.id));
+const vgGrupo=(n,v)=>{const x=PESSOAS[n];if(!x)return 'fila';const g=x.g;return g==='pediu'||g==='antecipa'?g:vgVem(n,v)?'vem':g};
+function vgCandidatos(v){const t=v.h<'12:00'?'manhã':'tarde', o=vgOrdem();
+  return Object.keys(PESSOAS).filter(n=>(vgFora(n,v)||{}).k==='cabe')
+    .sort((a,b)=>o.indexOf(vgGrupo(a,v))-o.indexOf(vgGrupo(b,v))||(PESSOAS[b].turno===t)-(PESSOAS[a].turno===t)||(PESSOAS[b].rapido||0)-(PESSOAS[a].rapido||0))}
+/* quem já recebeu mensagem automática hoje (ou está guardado para a 2ª rodada): 1 por pessoa por dia */
+function vgMsgHoje(){const s=new Set();
+  VAGAS.forEach(v=>{if(v.envio)(v.r1||[]).forEach(([n])=>s.add(n));if(v.st==='oferecendo')(v.r2||[]).forEach(n=>s.add(n))});
+  EM_OFERTA.forEach(o=>s.add(o.pac));
+  if(QUINTA)QUINTA.conv.forEach(n=>s.add(n));
+  Object.values(VG_FEITO).forEach(a=>(a||[]).forEach(n=>s.add(n)));
+  if(typeof HJ_RET_OK!=='undefined'&&HJ_RET_OK)HJ_RET.forEach(([n])=>s.add(n));
+  return s}
+/* quem não foi chamado para um horário, e por quê (a linha recolhida "Não chamou") */
+function vgNaoChamou(v){const ch=new Set([...(v.r1||[]).map(r=>r[0]),...(v.r2||[])]), ja=vgMsgHoje(), out=[];
+  if(v.fila){const c=rtCid(v.fila);return (c?rtFila(c).map(x=>x.nome):[]).filter(n=>!ch.has(n)&&vgParou(n)).map(n=>({n,t:'pediu PARAR: não recebe aviso de vaga',k:'fora'}))}
+  Object.keys(PESSOAS).forEach(n=>{if(ch.has(n))return;const f=vgFora(n,v);if(!f)return;
+    out.push(f.k==='cabe'?{n,t:ja.has(n)?'já recebeu uma mensagem automática hoje':'fica para a próxima rodada',k:'fora'}:{n,...f})});
+  MOTOR.pararam.filter(n=>!PESSOAS[n]).forEach(n=>out.push({n,t:'pediu PARAR',k:'fora'}));
+  return out}
+/* o melhor horário livre para uma pessoa. Tratamento pago e retorno: o dia mais vazio, com 1 dia de aviso.
+   Quem já vem à clínica: colado no atendimento que ela já tem (junta as duas idas). tom = horários já sugeridos. */
+function vgMelhor(n,tom){const x=PESSOAS[n];if(!x||x.fila||MOTOR.pararam.includes(n))return null;tom=tom||[];
+  const ops=[];
+  for(let d=HOJE;d<DIAS.length;d++){if(localDe(x.p,d)!=='Espaço Pelle')continue;
+    for(const h of vgLivres(x.p,d)){if(tom.includes(x.p+d+h)||EM_OFERTA.some(o=>o.p===x.p&&o.dia===d&&o.h===h))continue;
+      const v={p:x.p,dia:d,h,dur:vgDurLivre(x.p,d,h)},f=vgFora(n,v);if(f&&f.k==='cabe')ops.push(v)}}
+  if(!ops.length)return null;
+  const turno=v=>!x.turno||(x.turno==='manhã')===(v.h<'12:00');
+  if(x.g==='pago'||x.g==='retorno'){const pct=d=>rxCel(x.p,d,'dia').pct, com=ops.filter(v=>vgAntecede(v)>=1440), L=com.length?com:ops;
+    return L.sort((a,b)=>pct(a.dia)-pct(b.dia)||a.dia-b.dia||turno(b)-turno(a)||(a.h<b.h?-1:1))[0]}
+  const tem=v=>EV.filter(e=>e.pac===n&&e.dia===v.dia&&rxVivo(e));
+  const cola=ops.find(v=>tem(v).some(e=>hmMais(e.h,30*e.d)===v.h))||ops.find(v=>tem(v).some(e=>hmMais(v.h,30)===e.h));
+  return cola||ops.find(turno)||ops[0]}
+/* sugestões de "Ainda dá para encher": quem tem um pedido (pediu, antecipa, pago, retorno). Recebeu o preço vai no convite. */
+function vgSugestoes(){const ja=vgMsgHoje(), tom=[], out=[];
+  for(const n of Object.keys(PESSOAS)){const x=PESSOAS[n];
+    if(ja.has(n)||!['pediu','antecipa','pago','retorno'].includes(x.g))continue;
+    const m=vgMelhor(n,tom);if(m){tom.push(m.p+m.dia+m.h);out.push({n,p:m.p,dia:m.dia,h:m.h})}}
+  return out}
+function vgTravadoEm(p,d,h,sug){const o=EM_OFERTA.find(x=>x.p===p&&x.dia===d&&x.h===h);if(o)return {n:o.pac,t:'em oferta, esperando resposta',k:'of'};
+  const s=(sug||[]).find(x=>x.p===p&&x.dia===d&&x.h===h);return s?{n:s.n,t:'sugestão: falta você aprovar',k:'sug'}:null}
+/* o dia do convite da semana: o do Dr. Manoel com mais horário sobrando, na sede */
+function vgConviteDia(){if(QUINTA)return {p:QUINTA.p,d:QUINTA.d};let m=null;
+  for(let d=HOJE+1;d<DIAS.length;d++){if(localDe('manoel',d)!=='Espaço Pelle')continue;const n=vgLivres('manoel',d).length;if(n&&(!m||n>m.n))m={p:'manoel',d,n}}
+  return m}
+function vgConviteLista(){const ja=vgMsgHoje(), base=MOTOR.antes==='preco'
+    ?VG_PRECO7.map(([n,dt])=>({n,info:'recebeu o preço em '+dt+' · há '+rtDias(dt)+' dias'}))
+    :HJ_RET.concat(VG_RET_MAIS).map(([n,d])=>({n,info:'retorno vencido há '+d+' dias'}));
+  const lista=[],fora=[];
+  base.forEach(o=>{const r2=VAGAS.find(v=>v.st==='oferecendo'&&(v.r2||[]).includes(o.n));
+    if(MOTOR.pararam.includes(o.n))fora.push({...o,t:'pediu PARAR'});
+    else if(r2)fora.push({...o,t:'está na 2ª rodada das '+r2.h+': se ela sair, fica para amanhã'});
+    else if(ja.has(o.n))fora.push({...o,t:'já recebeu mensagem automática hoje: fica para amanhã'});
+    else if(EV.some(e=>e.pac===o.n&&e.dia>=HOJE&&rxVivo(e)&&e.p==='manoel'))fora.push({...o,t:'já tem horário marcado'});
+    else if(lista.length<7)lista.push(o)});
+  return {lista,fora}}
+const vgTaxa=()=>RX_WA.preco.marcaram/RX_WA.preco.receberam;     // real: 3 de 13 marcaram depois do preço
+/* "Ainda dá para encher": cada dia × profissional com horário livre, e quem cabe nele */
+function vgBuracos(sug){sug=sug||vgSugestoes();const ja=vgMsgHoje(), conv=vgConviteDia(), out=[];
+  for(const p of PROF)for(let d=HOJE;d<DIAS.length;d++){
+    if(!HORAS.some(h=>atende(p.id,d,h)))continue;
+    const livres=vgLivres(p.id,d), q=QUINTA&&QUINTA.p===p.id&&QUINTA.d===d;
+    if(!livres.length&&!q)continue;
+    const c=rxCel(p.id,d,'dia'), local=localDe(p.id,d), viagem=local!=='Espaço Pelle', cid=viagem?rtCid(local):null;
+    out.push({key:p.id+'-'+d,p:p.id,d,pct:c.pct,oc:c.oc,tot:c.ab,livres,local,viagem,fila:cid?naFila(cid):0,
+      cabe:sug.filter(s=>s.p===p.id&&s.dia===d),oferta:viagem?[]:EM_OFERTA.filter(o=>o.p===p.id&&o.dia===d&&PESSOAS[o.pac]),conv:!!conv&&conv.p===p.id&&conv.d===d,voce:[],fora:[]})}
+  /* com você e fora: na 1ª linha com gente de cada profissional */
+  for(const p of PROF){const r=out.find(b=>b.p===p.id&&!b.viagem&&(b.cabe.length||b.conv||b.oferta.length));if(!r)continue;const h0=r.livres[0]||'08:00';
+    for(const n of Object.keys(PESSOAS)){const x=PESSOAS[n];
+      if(x.p!==p.id||x.fila||MOTOR.pararam.includes(n)||sug.some(s=>s.n===n)||!['pediu','antecipa','pago','retorno'].includes(x.g))continue;
+      const f=vgFora(n,{p:p.id,dia:r.d,h:h0,dur:vgDurLivre(p.id,r.d,h0)||30});
+      if(f&&f.k==='voce')r.voce.push({n,t:f.t});else if(f&&f.k==='fora'&&f.c&&!EM_OFERTA.some(o=>o.pac===n))r.fora.push({n,t:f.t})}}
+  out.forEach(b=>b.pool=!!(b.cabe.length||b.oferta.length||b.conv||(b.viagem&&b.fila)||b.voce.length));
+  return out.sort((a,b)=>(b.pool-a.pool)||a.d-b.d||PROF.findIndex(x=>x.id===a.p)-PROF.findIndex(x=>x.id===b.p))}
+
+/* ---------------- as mensagens ---------------- */
+const vgDiaMsg=d=>d===HOJE?'hoje':(d===HOJE+1?'amanhã, ':'')+HJ_DIA_LONGO[d]+' ('+DIAS[d][1]+'),';
+function vgLocalMsg(p,d){const l=localDe(p,d), L=LOCAIS.find(x=>x[0]===l);
+  return l==='Espaço Pelle'?'Espaço Pelle (Rua Óscar Galvão, 38)':l+(L&&L[1]!=='a confirmar'?' ('+L[1]+')':'')}
+const vgMsgDados=(nome,p,d,h,ate)=>({nome,profissional:hjCom(p),dia:vgDiaMsg(d),hora:hjH(h),local:vgLocalMsg(p,d),validade:ate||hhmm(minu(AGORA)+MOTOR.validade)});
+const vgHoras=a=>{a=a.map(hjH);return a.length>1?a.slice(0,-1).join(', ')+' ou '+a[a.length-1]:a[0]||''};
+function vgMsgTxt(k,o){return VG_MSG[k].replace(/\{(\w+)\}/g,(_,t)=>o[t]!=null?o[t]:'{'+t+'}').replace(/\s{2,}/g,' ').replace(/,\s*,/g,',').trim()}
+/* a alternativa de quem chega depois: os 2 primeiros livres de amanhã (de preferência depois das 9h) */
+function vgAlternativa(p){const d=HOJE+1, L=vgLivres(p,d).filter(h=>!EM_OFERTA.some(o=>o.p===p&&o.dia===d&&o.h===h)), a=L.filter(h=>h>='09:00').concat(L.filter(h=>h<'09:00'));
+  return vgMsgTxt('jafoi',{dia:vgDiaMsg(d),horas:vgHoras(a.slice(0,2)),profissional:hjCom(p)})}
+
+/* ---------------- o motor: abrir, aprovar, responder, oferecer, convidar ---------------- */
+/* um horário abriu (cancelou, remarcou, sinal não pago): acha quem cabe e deixa pronto para aprovar */
+function vgAbrir(e,porque){e.st='cancelou';
+  if(e.dia<HOJE||(e.dia===HOJE&&e.h<=AGORA))return null;              // já passou: não vira vaga
+  const local=localDe(e.p,e.dia), v={id:'v'+(++VG_SEQ),ev:e.id,dia:e.dia,h:e.h,p:e.p,tipo:e.tipo,local,abriu:porque,lib:AGORA,r1:[],r2:[]};
+  v.dur=vgDurLivre(e.p,e.dia,e.h)||30;
+  if(local!=='Espaço Pelle'){const c=rtCid(local), ja=vgMsgHoje(), L=c?rtFila(c).map(x=>x.nome).filter(n=>!vgParou(n)&&!ja.has(n)):[];v.fila=local;   // dia de viagem: só a fila daquela cidade
+    v.r1=L.slice(0,MOTOR.porVez).map(n=>[n,'pronta para enviar']);v.r2=L.slice(MOTOR.porVez,MOTOR.porVez+MOTOR.rodada2)}
+  else{const ja=vgMsgHoje(), c=vgCandidatos(v).filter(n=>n!==e.pac&&!ja.has(n));   // 1 mensagem automática por pessoa por dia
+    v.r1=c.slice(0,MOTOR.porVez).map(n=>[n,'pronta para enviar']);v.r2=c.slice(MOTOR.porVez,MOTOR.porVez+MOTOR.rodada2)}
+  v.st=vgAntecede(v)<MOTOR.avisoMin?'curta':!v.r1.length?'sem-gente':'aprovar';
+  if(v.st==='sem-gente')return v;                                      // não entra em VAGAS: vai para "Ainda dá para encher"
+  if(v.st==='curta')v.balcao=EV.filter(o=>o.dia===HOJE&&['presente','atendimento'].includes(o.st)&&o.p!==v.p).map(o=>o.pac+' ('+ST[o.st].toLowerCase()+')');
+  e.vaga=v.id;VAGAS.unshift(v);
+  if(MOTOR.modo==='auto'&&v.st==='aprovar'){v.auto=true;vgEnviar(v.id,true)}
+  return v}
+/* "Aprovar e mandar": a 1ª rodada sai agora; a 2ª sai sozinha se ninguém responder 1 */
+function vgEnviar(id,quieto){const v=VAGAS.find(x=>x.id===id);if(!v||v.st!=='aprovar')return;
+  if(v.fila&&!MOTOR.confirmado.lago)return toast('Falta confirmar o endereço','A oferta de '+v.fila+' só sai com data e local confirmados (regra do Roteiro).',true);
+  const ja=vgMsgHoje(), tirou=v.r1.filter(([p])=>ja.has(p)).map(([p])=>p);
+  if(tirou.length){v.r1=v.r1.filter(([p])=>!ja.has(p));v.r2=v.r2.filter(p=>!ja.has(p));while(v.r1.length<MOTOR.porVez&&v.r2.length)v.r1.push([v.r2.shift(),'pronta para enviar'])}
+  if(!v.r1.length){v.st='parada';fecharTudo();menu();render();return toast('Ninguém para mandar',vgNomes(tirou)+' já '+(tirou.length>1?'receberam':'recebeu')+' mensagem automática hoje. O horário ficou livre e entrou em “Ainda dá para encher”.',true)}
+  const n=v.r1.length;
+  if(MOTOR.usadasHoje+n>MOTOR.tetoDia)return toast('Teto do dia','Hoje já saíram '+MOTOR.usadasHoje+' de '+MOTOR.tetoDia+' mensagens automáticas. Esta sai amanhã às 08:00.',true);
+  const ate=v.dia===HOJE?Math.min(minu(AGORA)+MOTOR.validade,minu(v.h)-60):minu(AGORA)+MOTOR.validade;
+  Object.assign(v,{st:'oferecendo',aprov:AGORA,envio:AGORA,ate:hhmm(ate)});v.r1=v.r1.map(([p])=>[p,'✓ enviada']);MOTOR.usadasHoje+=n;
+  if(quieto)return;
+  fecharTudo();menu();render();
+  toast('Oferta enviada · '+vgQuando(v)+' '+v.h,(tirou.length?vgNomes(tirou)+' já '+(tirou.length>1?'receberam':'recebeu')+' mensagem hoje e ficou de fora. ':'')+'1ª rodada para '+vgNomes(v.r1.map(r=>r[0]))+', válida até '+v.ate+'. Se ninguém responder 1, a 2ª rodada sai sozinha'+(v.r2.length?' ('+vgNomes(v.r2)+')':'')+'. Hoje: '+MOTOR.usadasHoje+' de '+MOTOR.tetoDia+' · nada foi enviado (protótipo)')}
+/* alguém respondeu 1: o Zaq confere no Amigo, cadastra (se for paciente nova) e cria o atendimento */
+function responder(id,n,hora){const v=VAGAS.find(x=>x.id===id);if(!v||v.st!=='oferecendo')return;
+  const e=EV.find(x=>x.id===v.ev), x=PESSOAS[n]||{tipo:'Consulta',g:'fila',por:'fila de '+v.fila};
+  hora=hora||hhmm(Math.max(minu(AGORA)+1,minu(v.envio)+3));
+  if(EV.some(o=>o!==e&&o.p===v.p&&o.dia===v.dia&&rxVivo(o)&&cobre(o,v.h))){v.st='mao';
+    menu();render();return toast('Esse já foi',hjPrim(n)+' recebe: “'+vgAlternativa(v.p)+'”',true)}
+  const nova=!PACS.some(p=>p.n===n)&&!EV.some(o=>o.pac===n&&o!==e), dur=vgDurDe(n);
+  Object.assign(v,{st:'preenchida',quem:n,resp:hora,min:minu(hora)-minu(v.envio),nova});
+  const r=v.r1.find(y=>y[0]===n);if(r){r[1]='respondeu 1 às '+hora;r[2]={r:'1',h:hora}}
+  if(e){['segH','confH','trat','pag','vesp','credito','seg','prazo','motivo','conf','fimH','pac_s','pedido'].forEach(k=>delete e[k]);
+    Object.assign(e,{pac:n,st:'confirmado',tipo:x.tipo,d:Math.max(1,Math.min(v.dur/30,Math.ceil(dur/30))),via:'vaga',org:'Vaga que abriu',conf:'respondeu 1 à vaga às '+hora,antes:v.abriu,vaga:v.id})}
+  HIST.push({q:DIAS[v.dia][1]+' '+DIAS[v.dia][0].toLowerCase(),h:v.h,p:v.p,tipo:x.tipo,abriu:v.abriu,quem:n,por:x.por,min:v.min,v:vgValorDe(n),g:x.g});
+  vgFunilAgendou(n,vgQuandoDia(v.dia)+' '+v.h+' · vaga');
+  Object.values(FUNIL).forEach(cs=>cs.forEach(k=>{k.t=k.t.filter(([t])=>!t.includes('rodada da vaga das '+v.h))}));
+  menu();render();
+  toast('Vaga preenchida em '+v.min+' min · '+n,hjPrim(n)+' respondeu 1 às '+hora+'. O Zaq conferiu no Amigo que '+v.h+' seguia livre'
+    +(nova?'; como é paciente nova, o agente pediu nome completo e data de nascimento e segurou o horário por 10 min, e o Zaq a cadastrou no Amigo':'')
+    +' e criou o atendimento. A 2ª rodada não sai. Quem responder depois recebe: “'+vgAlternativa(v.p)+'” · nada foi enviado (protótipo)')}
+/* quem marcou sai das colunas de venda do funil e vai para Consulta agendada */
+function vgFunilAgendou(n,chip){
+  for(const c of Object.keys(FUNIL)){if(c==='Consulta agendada')continue;const i=FUNIL[c].findIndex(k=>k.n===n);
+    if(i>=0){const k=FUNIL[c].splice(i,1)[0];FUNIL['Consulta agendada'].unshift({n,s:((PESSOAS[n]||{}).tipo||k.s.split(' · ')[0])+' · Dr. Manoel',t:[[chip,'g']]});return true}}
+  return false}
+function vgParar(id){const v=VAGAS.find(x=>x.id===id);if(!v||!VG_ATIVA.includes(v.st))return;const antes=v.st;v.st='parada';
+  fecharTudo();menu();render();
+  toast('Parado · '+vgQuando(v)+' '+v.h,(antes==='oferecendo'?'A 2ª rodada não sai. Quem responder 1 recebe: “esse horário não está mais disponível 🙏”. ':'Nenhuma mensagem saiu. ')+'O horário ficou livre e entrou em “Ainda dá para encher”.')}
+function vgTirar(id,n){const v=VAGAS.find(x=>x.id===id);if(!v)return;const eraR1=v.r1.some(r=>r[0]===n);
+  v.r1=v.r1.filter(r=>r[0]!==n);v.r2=(v.r2||[]).filter(x=>x!==n);
+  if(eraR1&&v.st==='aprovar'&&v.r2.length)v.r1.push([v.r2.shift(),'pronta para enviar']);
+  if(v.st==='aprovar'&&!v.r1.length)v.st='parada';
+  fecharTudo();menu();render();
+  toast('Tirado deste horário · '+n,eraR1&&v.envio?'A oferta já tinha saído. Se responder 1, recebe: “'+vgAlternativa(v.p)+'”':'Não recebe a oferta das '+v.h+'.')}
+function vgNaoMandar(n){if(!MOTOR.pararam.includes(n))MOTOR.pararam.push(n);
+  VAGAS.forEach(v=>{if(VG_ATIVA.includes(v.st))v.r2=(v.r2||[]).filter(x=>x!==n)});
+  fecharTudo();render();toast('Não recebe mais aviso de vaga · '+n,'Na ficha, “Avisos de horário livre” ficou desligado. Lembretes de consulta continuam.')}
+function vgEuMesma(id,n){const v=VAGAS.find(x=>x.id===id);if(!v)return;
+  toast('Mensagem pronta para '+hjPrim(n),'“'+vgMsgTxt('oferta',vgMsgDados(hjPrim(n),v.p,v.dia,v.h,v.ate))+'” · você manda da conversa dela, que continua com você · nada foi enviado (protótipo)')}
+/* oferecer um horário livre a uma pessoa (lista de espera, "Ainda dá para encher") */
+function vgOferecer(n,dia,h,quieto){const x=PESSOAS[n];if(!x)return false;
+  if(EM_OFERTA.some(o=>o.p===x.p&&o.dia===dia&&o.h===h)){if(!quieto)toast('Esse horário já está em oferta','Espere a resposta ou pare a oferta antes.',true);return false}
+  if(MOTOR.usadasHoje+1>MOTOR.tetoDia){toast('Teto do dia','Hoje já saíram '+MOTOR.usadasHoje+' de '+MOTOR.tetoDia+' mensagens automáticas. Esta sai amanhã às 08:00.',true);return false}
+  MOTOR.usadasHoje++;EM_OFERTA.push({p:x.p,dia,h,pac:n,envio:AGORA});
+  const q=ESPERA.find(y=>y.n===n);if(q)q.ofertas.push([AGORA,vgQuandoDia(dia)+' '+h,'esperando resposta']);
+  if(quieto)return true;
+  fecharTudo();menu();render();
+  toast('Oferta enviada · '+hjPrim(n),'“'+vgMsgTxt('oferta',vgMsgDados(hjPrim(n),x.p,dia,h))+'” · Hoje: '+MOTOR.usadasHoje+' de '+MOTOR.tetoDia+' · nada foi enviado (protótipo)');return true}
+function abrirVgOferecer(n,dia,h){const x=PESSOAS[n];if(!x)return;
+  abrirModal(`<h2>Oferecer ${vgQuandoDia(dia)} ${h} ${/a$/.test(hjPrim(n))?'à':'ao'} ${hjPrim(n)}</h2><div class="mut" style="font-size:.84rem;margin-bottom:.6rem">${x.por} · ${vgValTxt(n)}</div>
+  <div class="zap" style="max-width:none"><div class="b">${vgMsgTxt('oferta',vgMsgDados(hjPrim(n),x.p,dia,h))}<div class="h">agente · prévia</div></div></div>
+  <div class="linha" style="margin-top:.6rem"><span>Mensagens automáticas hoje</span><span class="num">${MOTOR.usadasHoje} → ${MOTOR.usadasHoje+1} de ${MOTOR.tetoDia}</span></div>
+  <div class="faint" style="font-size:.76rem;margin-top:.3rem">Enquanto ${hjPrim(n)} não responde, o horário fica travado: o agente não oferece a mais ninguém e a Agenda mostra “em oferta”.</div>
+  <div class="acoes"><button class="btn" onclick="vgOferecer('${n}',${dia},'${h}')">Aprovar e mandar</button><button class="btn sec" onclick="fecharTudo()">Cancelar</button></div>`)}
+/* confirmar a grade de quem não tem grade no Amigo, e convidar quem cabe */
+function abrirVgGrade(key){const b=vgBuracos().find(x=>x.key===key);if(!b)return toast('Nada para confirmar','Esse dia não tem mais horário livre.');
+  const hs=HORAS.filter(h=>atende(b.p,b.d,h)), ini=hs[0], fim=hmMais(hs[hs.length-1],30), manha=hs.filter(h=>h<'12:00'), tarde=hs.filter(h=>h>='12:00');
+  const nomes=b.cabe.map(s=>s.n);
+  abrirModal(`<h2>A ${rxNome(b.p)} atende ${HJ_DIA_LONGO[b.d]}, das ${ini} às ${fim}?</h2>
+  <div class="mut" style="font-size:.84rem;margin-bottom:.6rem">${manha.length&&tarde.length?'Com almoço das '+hmMais(manha[manha.length-1],30)+' às '+tarde[0]+'. ':''}Ela não tem grade no Amigo: a do Zaq é exemplo. Sem confirmar, o Zaq não oferece horário em que ela pode não estar.</div>
+  ${nomes.length?`<div class="linha"><span>Depois de confirmar, vão</span><span style="text-align:right">${b.cabe.map(s=>hjPrim(s.n)+' · '+s.h).join(' · ')}</span></div>`:''}
+  <div class="acoes"><button class="btn" onclick="vgGradeOk('${key}')">Sim, atende${nomes.length?' · convidar '+vgNomes(nomes):''}</button><button class="btn sec" onclick="CF_ABA='grade';ir('config')">Não, corrigir a grade</button></div>`)}
+function vgGradeOk(key){const b=vgBuracos().find(x=>x.key===key);if(!b)return;MOTOR.confirmado[b.p]=true;
+  const foi=b.cabe.filter(s=>vgOferecer(s.n,s.dia,s.h,true)).map(s=>s.n);VG_FEITO[key]=foi;
+  fecharTudo();menu();render();
+  toast('Grade da '+rxNome(b.p)+' confirmada',(foi.length?'Oferta para '+b.cabe.filter(s=>foi.includes(s.n)).map(s=>hjPrim(s.n)+' ('+s.h+')').join(' e ')+'. ':'')+'Vale para os próximos horários dela. Hoje: '+MOTOR.usadasHoje+' de '+MOTOR.tetoDia+' · nada foi enviado (protótipo)')}
+/* dia de viagem: endereço confirmado e a fila da cidade, um por horário */
+function abrirVgEndereco(key){
+  abrirModal(`<h2>Endereço em Lago da Pedra</h2><div class="mut" style="font-size:.84rem;margin-bottom:.6rem">Regra do Roteiro: o aviso só sai com data e local confirmados. O endereço vai na mensagem. Hoje está “a confirmar” em Configurar › Locais.</div>
+  <div class="field"><label>Endereço da sala</label><input class="inp" id="vg-end" placeholder="Rua, número · ponto de referência"></div>
+  <div class="acoes"><button class="btn" onclick="vgEnderecoOk('${key||''}')">Confirmar${key?' e chamar a fila':''}</button><button class="btn sec" onclick="CF_ABA='locais';ir('config')">Abrir Configurar › Locais</button></div>`)}
+function vgEnderecoOk(key){const el=document.getElementById('vg-end'), t=el&&el.value?String(el.value).trim():'';
+  if(!t)return toast('Falta o endereço','Escreva o endereço da sala: ele vai na mensagem.',true);
+  const L=LOCAIS.find(x=>x[0]==='Lago da Pedra');if(L)L[1]=t+' · Lago da Pedra';MOTOR.confirmado.lago=true;fecharTudo();
+  if(key)return vgChamarFila(key);
+  render();toast('Endereço confirmado','Lago da Pedra: '+t+'. Já aparece em Configurar › Locais.')}
+function vgChamarFila(key){const b=vgBuracos().find(x=>x.key===key);if(!b||!b.viagem)return;
+  if(!MOTOR.confirmado.lago)return abrirVgEndereco(key);
+  const c=rtCid(b.local), L=rtFila(c).map(x=>x.nome).filter(n=>!vgMsgHoje().has(n)&&!vgParou(n)).slice(0,b.livres.length);
+  if(!L.length)return toast('Ninguém na fila','A fila de '+b.local+' está vazia.');
+  if(MOTOR.usadasHoje+L.length>MOTOR.tetoDia)return toast('Teto do dia','Passaria de '+MOTOR.tetoDia+'. O que sobrar sai amanhã às 08:00.',true);
+  MOTOR.usadasHoje+=L.length;L.forEach((n,i)=>EM_OFERTA.push({p:b.p,dia:b.d,h:b.livres[i],pac:n,envio:AGORA,fila:b.local}));VG_FEITO[key]=L;
+  const vi=VIAGENS.find(x=>x.ev&&x.ev.p===b.p&&x.ev.dia===b.d);if(vi)vi.ofereceu=true;
+  const prox=VIAGENS.filter(x=>x.c===b.local&&['marcada','aberta'].includes(x.st)&&rtData(x.dt)>rtData(DIAS[b.d][1])).sort(rtOrdDt)[0];
+  fecharTudo();menu();render();
+  toast('Chamando a fila de '+b.local,L.map((n,i)=>b.livres[i]+' → '+n).join(' · ')+' (um por horário). Os outros '+(b.fila-L.length)+' continuam na fila'+(prox?' para '+prox.dt:'')+' · nada foi enviado (protótipo)')}
+
+/* o convite da semana (o maior buraco): um convite por pessoa, com os horários marcados */
+function vgConvSlot(h){const i=VG_CONV_OFF.indexOf(h);if(i>=0)VG_CONV_OFF.splice(i,1);else VG_CONV_OFF.push(h);abrirVgConvite()}
+function vgAntes(k,modal){MOTOR.antes=k;if(modal)abrirVgConvite();else render();
+  toast(k==='preco'?'Quem recebeu o preço vem antes':'Quem tem retorno vencido vem antes',k==='preco'
+    ?'O convite de quinta vai para os que receberam o preço e nunca foram chamados de novo (consulta, R$ 500 cada). Na oferta do dia, “recebeu o preço” passa na frente de “retorno vencido”.'
+    :'O convite de quinta vai para os retornos mais atrasados (o retorno não é cobrado). Na oferta do dia, “retorno vencido” passa na frente de “recebeu o preço”.')}
+function abrirVgConvite(){const b=vgBuracos().find(x=>x.conv);
+  if(!b||QUINTA)return toast(QUINTA?'O convite já saiu':'Sem horário para convidar',QUINTA?'Acompanhe em “Ainda dá para encher”.':'Nenhum dia do Dr. Manoel tem horário sobrando.');
+  const sug=vgSugestoes(), trav=b.livres.filter(h=>vgTravadoEm(b.p,b.d,h,sug)), abertos=b.livres.filter(h=>!trav.includes(h)), sel=abertos.filter(h=>!VG_CONV_OFF.includes(h));
+  const {lista,fora}=vgConviteLista(), pre=MOTOR.antes==='preco', n0=lista[0]?hjPrim(lista[0].n):'Aline';
+  const k=Math.max(1,Math.round(lista.length*vgTaxa()));
+  abrirModal(`<h2>Convidar para ${vgQuandoDia(b.d)}, ${rxDia(b.d)} · ${rxNome(b.p)}</h2>
+  <div class="mut" style="font-size:.84rem;margin-bottom:.6rem">Um convite por pessoa, com os horários marcados. Fica com quem responder primeiro; quem chega depois recebe outra opção.</div>
+  <div class="field"><label>Horários do convite (toque para tirar)</label><div class="opts">${abertos.map(h=>`<button class="opt ${sel.includes(h)?'on':''}" onclick="vgConvSlot('${h}')">${h}</button>`).join('')}
+    ${trav.map(h=>{const t=vgTravadoEm(b.p,b.d,h,sug);return `<button class="opt vg-trava" disabled title="${t.t}">${h} · ${hjPrim(t.n)}</button>`}).join('')}</div>
+    <div class="faint" style="font-size:.72rem;margin-top:.25rem">Em âmbar e travados: já oferecidos a uma pessoa (ou sugeridos). O agente não oferece o mesmo horário duas vezes.</div></div>
+  <div class="field"><label>Quem vem antes</label><div class="opts"><button class="opt ${pre?'on':''}" onclick="vgAntes('preco',1)">Quem recebeu o preço</button><button class="opt ${pre?'':'on'}" onclick="vgAntes('retorno',1)">Quem tem retorno vencido</button></div></div>
+  <div class="field"><label>Vão receber · ${lista.length} ${pre?rxF('wa'):rxF('amigo')} <span class="faint">nomes de exemplo</span></label>
+    ${lista.map(o=>`<div class="rt-p"><span style="flex:1;min-width:0"><b>${o.n}</b><small>${o.info}</small></span></div>`).join('')||'<div class="mut">Ninguém para convidar hoje.</div>'}
+    ${fora.length?`<div class="faint" style="font-size:.74rem;margin-top:.35rem">Ficam de fora: ${fora.map(o=>o.n+' ('+o.t+')').join(' · ')}</div>`:''}</div>
+  <div class="zap" style="max-width:none"><div class="b">${vgMsgTxt('convite',{nome:n0,profissional:hjCom(b.p),dia:vgDiaMsg(b.d),horas:vgHoras(sel.filter(h=>h>='09:00').concat(sel.filter(h=>h<'09:00')).slice(0,3).sort()),preco:pre?'A consulta é R$ 500, no Pix, dinheiro ou cartão 😊 ':''})}<div class="h">agente · prévia</div></div></div>
+  <div class="hint">${hjPl(lista.length,'mensagem','mensagens')}: hoje fica <b>${MOTOR.usadasHoje+lista.length} de ${MOTOR.tetoDia}</b> · quem já recebeu mensagem automática hoje fica para amanhã. Saem uma a cada ~2 min, fora dos picos da recepção (${RX_WA.picos.join(' e ')}) ${rxF('wa')}.<br>
+    Meta modesta: se ${k} de ${lista.length} marcarem, é a taxa do mês (${RX_WA.preco.marcaram} de ${RX_WA.preco.receberam} marcaram depois do preço) ${rxF('wa')}.</div>
+  <div class="acoes"><button class="btn" ${lista.length&&sel.length?'':'disabled'} onclick="convidarQuinta()">Aprovar e mandar agora</button><button class="btn sec" onclick="fecharTudo()">Cancelar</button></div>`)}
+function convidarQuinta(){const b=vgBuracos().find(x=>x.conv);if(!b||QUINTA)return;
+  const sug=vgSugestoes(), hs=b.livres.filter(h=>!vgTravadoEm(b.p,b.d,h,sug)&&!VG_CONV_OFF.includes(h)), L=vgConviteLista().lista.map(o=>o.n);
+  if(!hs.length||!L.length)return toast('Nada para mandar','Marque pelo menos um horário e tenha alguém na lista.',true);
+  if(MOTOR.usadasHoje+L.length>MOTOR.tetoDia)return toast('Teto do dia','Passaria de '+MOTOR.tetoDia+'. O que sobrar sai amanhã às 08:00.',true);
+  MOTOR.usadasHoje+=L.length;fecharTudo();
+  const k=Math.max(1,Math.round(L.length*vgTaxa())), pref=hs.filter(h=>h>='09:00').concat(hs.filter(h=>h<'09:00')), plano=[];
+  EM_OFERTA.filter(o=>o.p===b.p&&o.dia===b.d&&PESSOAS[o.pac]).forEach((o,i)=>plano.push({h:o.h,n:o.pac,tipo:PESSOAS[o.pac].tipo,res:2+i,of:1}));
+  L.slice(0,k).forEach((n,i)=>{if(pref[i])plano.push({h:pref[i],n,tipo:MOTOR.antes==='preco'?'Consulta':'Retorno',res:4+2*i})});
+  QUINTA={p:b.p,d:b.d,antes:MOTOR.antes,conv:L,hs,plano,k:0,antesPct:b.pct,fim:Math.max(...plano.map(x=>x.res),0)+1};
+  clearInterval(VG_QT);VG_QT=setInterval(vgQuintaPasso,650);render();
+  toast('Convite aprovado · '+hjPl(L.length,'mensagem','mensagens'),'Saem uma a cada ~2 min. Hoje fica '+MOTOR.usadasHoje+' de '+MOTOR.tetoDia+' · nada foi enviado (protótipo)')}
+function vgQuintaGrade(){const Q=QUINTA;if(!Q)return '';
+  return HORAS.filter(h=>atende(Q.p,Q.d,h)).map(h=>{const x=Q.plano.find(y=>y.h===h);
+    if(x&&(x.of||Q.k>=x.res-1)){const st=Q.k>=x.res?'ok':'resp';return `<div class="vg ${st}"><b>${h}</b><small>${st==='ok'?x.n:x.of&&Q.k<x.res-1?hjPrim(x.n)+' · esperando':'respondendo…'}</small></div>`}
+    if(Q.hs.includes(h))return `<div class="vg conv"><b>${h}</b><small>convidado</small></div>`;
+    if(rxOcupa(Q.p,Q.d,h)){const e=EV.find(o=>o.p===Q.p&&o.dia===Q.d&&rxVivo(o)&&cobre(o,h));return `<div class="vg marc"><b>${h}</b><small>${e?e.pac:'marcado'}</small></div>`}
+    return `<div class="vg"><b>${h}</b><small>livre</small></div>`}).join('')}
+function vgQuintaPasso(){const Q=QUINTA;if(!Q||Q.done){clearInterval(VG_QT);VG_QT=null;return}
+  Q.k++;if(Q.k>=Q.fim)return vgQuintaFim();
+  const g=document.getElementById('vg-qgrade');if(ROTA==='vagas'&&g)g.innerHTML=vgQuintaGrade()}
+/* fim do convite: quem respondeu vira atendimento no Amigo; quem antecipou libera o horário antigo */
+function vgQuintaFim(){const Q=QUINTA;if(!Q||Q.done)return;Q.done=true;Q.k=Q.fim;clearInterval(VG_QT);VG_QT=null;
+  let novas=0, rs=0;const semR=[], abriu=[];
+  Q.plano.forEach(x=>{const pes=PESSOAS[x.n];
+    EV.push({id:++VG_EVID,p:Q.p,h:x.h,d:1,dia:Q.d,pac:x.n,tipo:x.tipo,st:'confirmado',org:'Vaga que abriu',via:'vaga',conf:'respondeu 1 ao convite de '+rxDia(Q.d),antes:x.of?'estava na lista de espera':'convite da semana'});
+    const i=EM_OFERTA.findIndex(o=>o.pac===x.n&&o.dia===Q.d&&o.h===x.h);if(i>=0)EM_OFERTA.splice(i,1);
+    const j=ESPERA.findIndex(q=>q.n===x.n);if(j>=0)ESPERA.splice(j,1);
+    if(pes&&pes.antecipa){const a=EV.find(e=>e.pac===x.n&&e.p===Q.p&&e.dia===pes.antecipa.dia&&e.h===pes.antecipa.h&&rxVivo(e));
+      if(a){a.st='cancelou';a.antes='antecipou para '+rxDia(Q.d)+' '+x.h;abriu.push(rxDia(a.dia)+' '+a.h)}semR.push(hjPrim(x.n)+' (só antecipou)')}
+    else if(tipo(x.tipo)[4]){novas++;rs+=tipo(x.tipo)[4]}else semR.push(hjPrim(x.n)+' ('+x.tipo.toLowerCase()+')');
+    if(!vgFunilAgendou(x.n,rxDia(Q.d)+' '+x.h+' · vaga')&&Q.antes==='preco'&&!pes){const m=FUNIL_MAIS['Recebeu o preço'];
+      if(m&&m[0]>0){m[0]--;m[1]='+'+m[0]+' mais antigos · de 21 a 28 dias'}FUNIL['Consulta agendada'].unshift({n:x.n,s:'Consulta · Dr. Manoel',t:[[rxDia(Q.d)+' '+x.h+' · vaga','g']]})}});
+  const c=rxCel(Q.p,Q.d,'dia');menu();if(ROTA==='vagas')render();
+  toast(HJ_DIA_LONGO[Q.d][0].toUpperCase()+HJ_DIA_LONGO[Q.d].slice(1)+': '+c.oc+' de '+c.ab+' ('+c.pct+'%) · '+hjPl(c.livres.length,'livre','livres'),
+    'Era '+Q.antesPct+'%. '+(novas?hjPl(novas,'consulta nova','consultas novas')+': +'+brl(rs)+' previstos. ':'')+(semR.length?vgNomes(semR)+' não '+(semR.length>1?'contam':'conta')+' R$. ':'')
+    +(abriu.length?'A '+abriu.join(' e ')+' abriu e entrou em “Ainda dá para encher”. ':'')+'Simulação · nada foi enviado (protótipo)')}
+
+/* ---------------- gavetas ---------------- */
+function abrirVgPessoa(id,n){const v=VAGAS.find(x=>x.id===id);if(!v)return;const x=PESSOAS[n];
+  const r=(v.r1||[]).find(y=>y[0]===n), na2=(v.r2||[]).includes(n), ficou=v.quem===n;
+  const tit=ficou?'Por que '+hjPrim(n)+' ficou com o horário':r?'Por que '+hjPrim(n)+' está na 1ª rodada':na2?'Por que '+hjPrim(n)+' está na 2ª rodada':'Por que '+hjPrim(n)+' não foi chamado';
+  const F=t=>`<span class="fonte" style="margin-left:0">${t}</span>`, mot=[];
+  if(!x)mot.push(['está na fila de '+v.fila+', no Roteiro (esperando o médico na cidade)','Roteiro']);
+  else{const g=ficou?(v.dia===HOJE&&EV.some(e=>e.pac===n&&e.dia===v.dia&&rxVivo(e)&&e.vaga!==v.id)?'vem':x.g):vgGrupo(n,v);
+    mot.push(['<b>'+VG_GRUPO[g][0]+'</b> · o grupo '+(vgOrdem().indexOf(g)+1)+' de '+vgOrdem().length+' em “Quem vem antes”','regra do Zaq']);
+    if(x.por&&!x.ult)mot.push([x.por,VG_FONTE_G[x.g]]);
+    EV.filter(e=>e.pac===n&&e.dia===v.dia&&rxVivo(e)&&e.vaga!==v.id).forEach(e=>mot.push(['já vem '+vgQuandoDia(e.dia)+' às '+hjH(e.h)+' com '+hjCom(e.p),'Agenda · Amigo']));
+    if(x.ult){const ven=rtData(x.ult);ven.setDate(ven.getDate()+30);mot.push(['retorno vencido há '+Math.round((RT_HOJE-ven)/864e5)+' dias: consulta em '+x.ult+' + retorno de 30 dias','Amigo + regra do Zaq'])}
+    if(x.turno)mot.push(['prefere '+x.turno,'Zaq · das conversas']);
+    if(x.rapido)mot.push(['costuma responder em ~5 min','WhatsApp']);
+    const f=vgFora(n,v);
+    if(f&&f.k!=='cabe'&&!ficou&&!r&&!na2)mot.push(['<b>não entrou:</b> '+f.t,'Agenda · regra do Zaq']);
+    else mot.push([(x.rot||x.tipo.toLowerCase())+' leva '+vgDurDe(n)+' min; o horário tem '+v.dur+' min','Agenda']);
+    mot.push([vgValTxt(n),'tabela']);
+    if(x.faltou)mot.push(['faltou em '+x.faltou+': '+(vgValorDe(n)?'só fica com vaga pagando o sinal de R$ 50':'a sessão já está paga, então não pede sinal'),'Agenda · regra do sinal'])}
+  let z='';
+  if(r&&v.envio){z=`<div class="b">${vgMsgTxt('oferta',vgMsgDados(hjPrim(n),v.p,v.dia,v.h,v.ate))}<div class="h">${v.envio} · agente</div></div>`;const R=r[2];
+    if(R){z+=`<div class="b eu">${R.r}<div class="h">${R.h}</div></div>`;
+      if(R.seg)z+=`<div class="b">${R.seg}<div class="h">${R.h} · agente</div></div>`;
+      if(R.r==='1')z+=`<div class="sis">o Zaq conferiu no Amigo que ${v.h} seguia livre</div>${v.nova?'<div class="sis">paciente nova: o agente pediu nome completo e nascimento e segurou 10 min · o Zaq cadastrou no Amigo</div>':''}<div class="b">Prontinho!! ✅ Seu agendamento foi realizado 🤝<div class="h">automática</div></div>`}
+    else z+=`<div class="sis">${r[1]}</div>`}
+  else if(r)z=`<div class="sis">pronta para enviar: sai quando você aprovar</div>`;
+  else if(na2)z=`<div class="sis">sai ${v.ate?'às '+v.ate:'20 min depois da 1ª'} se ninguém da 1ª rodada responder 1</div>`;
+  const ativo=VG_ATIVA.includes(v.st)&&(r||na2);
+  abrirGav(`<div class="mut" style="font-size:.76rem">${vgQuando(v)} ${v.h} · ${rxNome(v.p)} · ${v.local}</div><h2>${tit}</h2>
+  <div class="sec">${mot.map(([t,f])=>`<div class="vg-mot"><span>${t}</span>${F(f)}</div>`).join('')}</div>
+  ${z?`<div class="sec"><h4>A mensagem</h4><div class="zap" style="max-width:none">${z}</div></div>`:''}
+  <div class="acoes">${ativo?`<button class="btn sec" onclick="vgTirar('${v.id}','${n}')">Tirar deste horário</button>`:''}${x?`<button class="btn sec" onclick="vgNaoMandar('${n}')">Não mandar mais avisos de vaga</button>`:''}<button class="btn sec" onclick="toast('No protótipo, a ficha completa é a da Lúcia Ferraz','A ficha de ${n} teria a conversa, o dinheiro e os próximos passos.')">Abrir ficha</button></div>
+  <div class="hint">🔒 O Zaq lê agenda, conversa e funil. Não lê prontuário. A mensagem só diz profissional, dia, hora e local.</div>`)}
+function abrirVgEspera(i){const q=ESPERA[i];if(!q)return;const x=PESSOAS[q.n]||{}, sug=vgSugestoes().find(s=>s.n===q.n), of=EM_OFERTA.filter(o=>o.pac===q.n);
+  abrirGav(`<div class="mut" style="font-size:.76rem">Lista de espera · desde ${q.desde}</div><h2>${q.n}</h2><div class="mut" style="font-size:.84rem">${q.quer} · serve: ${q.serve}${q.obs?' · '+q.obs:''}</div>
+  <div class="zap" style="margin-top:.6rem;max-width:none"><div class="b eu">${q.frase}<div class="h">${q.desde} · paciente</div></div><div class="b">Posso te avisar se abrir um horário assim?<div class="h">agente</div></div><div class="b eu">pode sim<div class="h">paciente</div></div><div class="sis">→ lista de espera · só entra quem diz sim</div></div>
+  <div class="sec"><h4>Ofertas feitas</h4>${q.ofertas.length?q.ofertas.map(o=>`<div class="linha"><span class="num">23/09 ${o[0]}</span><span>${o[1]} → ${o[2]}</span></div>`).join(''):'<div class="mut" style="font-size:.82rem">Nenhuma ainda.</div>'}</div>
+  <div class="acoes">${of.length?`<span class="chip a">${vgQuandoDia(of[0].dia)} ${of[0].h} em oferta, esperando</span>`:sug?`<button class="btn" onclick="abrirVgOferecer('${q.n}',${sug.dia},'${sug.h}')">${x.antecipa?'Antecipar para':'Oferecer'} ${vgQuandoDia(sug.dia)} ${sug.h}</button>`:'<span class="mut" style="font-size:.8rem">Nenhum horário livre serve agora.</span>'}
+    <button class="btn sec" onclick="vgTirarEspera(${i})">Tirar da lista</button></div>
+  <div class="faint" style="font-size:.76rem;margin-top:.6rem">Sai da lista quando marca, quando responde PARAR ou depois de 30 dias; no 15º dia, o agente pergunta se ainda quer. A lista guarda a frase do horário, nunca motivo de saúde.</div>`)}
+function vgTirarEspera(i){const q=ESPERA[i];if(!q)return;ESPERA.splice(i,1);fecharTudo();render();toast('Saiu da lista · '+q.n,'Não recebe mais oferta de horário por esta lista.')}
+function abrirVgPorNaLista(){
+  abrirModal(`<h2>Pôr na lista de espera</h2><div class="mut" style="font-size:.84rem;margin-bottom:.7rem">Só para quem tem restrição de dia ou horário, e só com o “sim” da pessoa para receber o aviso.</div>
+  <div class="field"><label>Paciente</label><input class="inp" id="vg-pn-nome" placeholder="🔍 nome ou telefone"></div>
+  <div class="grid2"><div class="field"><label>Profissional</label><select class="inp" id="vg-pn-prof">${PROF.map(p=>`<option value="${p.id}">${p.nome}</option>`).join('')}</select></div>
+    <div class="field"><label>Tipo</label><select class="inp" id="vg-pn-tipo">${['Consulta','Retorno','Procedimento clínico','Sessão de pacote'].map(t=>`<option>${t}</option>`).join('')}</select></div></div>
+  <div class="field"><label>O que serve</label><div class="opts"><button class="opt on" onclick="sel(this)">Manhãs</button><button class="opt" onclick="sel(this)">Tardes</button><button class="opt" onclick="sel(this)">Só depois das 15h</button><button class="opt" onclick="sel(this)">Qualquer horário</button><button class="opt" onclick="sel(this)">Quer antecipar</button></div></div>
+  <div class="field"><label>Até quando</label><div class="opts"><button class="opt" onclick="sel(this)">15 dias</button><button class="opt on" onclick="sel(this)">30 dias</button><button class="opt" onclick="sel(this)">60 dias</button></div></div>
+  <div class="acoes"><button class="btn" onclick="vgPorNaListaOk()">Pôr na lista</button><button class="btn sec" onclick="fecharTudo()">Cancelar</button></div>`)}
+function vgPorNaListaOk(){const g=id=>{const e=document.getElementById(id);return e&&e.value?String(e.value).trim():''};
+  const n=g('vg-pn-nome')||'Paciente novo', p=PROF.find(x=>x.id===g('vg-pn-prof'))||PROF[0];
+  ESPERA.push({n,quer:(g('vg-pn-tipo')||'Consulta')+' · '+p.nome,serve:'o que a recepção marcou',desde:'23/09',frase:'pediu no balcão',ofertas:[]});
+  fecharTudo();render();toast('Na lista de espera · '+n,'Quando abrir um horário que serve, o Zaq oferece na hora (com a sua aprovação no 1º mês) · só nesta sessão (protótipo).')}
+function abrirVgHist(i){const x=HIST[i];if(!x)return;const dono=ehDono(), nome=rxNome(x.p);
+  const pas=[[x.q+' '+x.h,'Abriu: '+x.abriu]];
+  if(x.quem){pas.push(['1ª rodada','o Zaq ofereceu a quem cabia no horário, na ordem de “Quem vem antes”']);
+    pas.push(['em '+x.min+' min',x.quem+' respondeu 1 · '+x.por]);
+    pas.push(['no Amigo','o Zaq conferiu que o horário seguia livre e criou o atendimento'])}
+  else pas.push(['ninguém',x.por]);
+  const vazio=x.q.startsWith('22/09')&&!rxOcupa(x.p,1,x.h);
+  const REG={fila:['Dia de viagem: o horário vai só para a fila daquela cidade','já ligada','vg-regra-fila'],balcao:['Menos de 1 h de aviso: a recepção oferece no balcão, para quem já está na clínica','já ligada','vg-regra-balcao']}[x.regra];
+  abrirGav(`<div class="mut" style="font-size:.76rem">Histórico · exemplo ${rxF('ex')}</div><h2>${x.q} ${x.h} · ${nome}${x.local?' em '+x.local:''}</h2><div class="mut" style="font-size:.84rem">${x.tipo}${dono?' · '+(x.quem?'entrou '+brl(x.v):'perdido '+brl(x.v)):''}</div>
+  <div class="sec"><div class="tl">${pas.map(([q,t],k)=>`<div class="it ${x.quem&&k===pas.length-1?'g':!x.quem&&k===pas.length-1?'r':''}"><span class="quando">${q}</span>${t}</div>`).join('')}</div></div>
+  ${REG?`<div class="sec"><h4>A regra que teria salvado</h4><div style="font-size:.84rem">${REG[0]} <span class="chip g">${REG[1]}</span></div><div class="acoes"><button class="btn sec min" onclick="VG_ABA='regras';fecharTudo();render();rxIr('${REG[2]}')">Ver a regra</button></div></div>`:''}
+  ${vazio?'<div class="faint" style="font-size:.76rem">Na Agenda, ter 22/09 às '+x.h+' ficou vazio.</div>':''}
+  ${dono&&x.quem?`<div class="faint" style="font-size:.76rem;margin-top:.4rem">R$: conta o valor do atendimento só quando a pessoa não tinha horário marcado. Antecipação e sessão já paga contam R$ 0.</div>`:''}`)}
+function abrirVgAuto(){
+  abrirModal(`<h2>Passar para o automático?</h2><div class="mut" style="font-size:.86rem;line-height:1.55">O Zaq vai mandar ofertas sem você aprovar. Continua respeitando o teto (${MOTOR.tetoDia} por dia, 1 por pessoa por dia), os horários de envio e a regra de nunca citar procedimento. Você acompanha em Vagas e em Hoje.</div>
+  <div class="acoes"><button class="btn" onclick="vgModo('auto')">Passar para o automático</button><button class="btn sec" onclick="fecharTudo()">Continuar aprovando</button></div>`)}
+function vgModo(m){if(!ehDono())return toast('Só o dono muda o modo','Fale com o dono da clínica.',true);MOTOR.modo=m;fecharTudo();render();
+  toast(m==='auto'?'Modo automático':'Modo recepção aprova',m==='auto'?'As próximas ofertas saem sozinhas. As que já esperam aprovação continuam esperando você.':'Cada horário novo espera você aprovar; a 2ª rodada sai sozinha.')}
+function vgRegra(k,val){MOTOR[k]=val;render();toast('Vale para os próximos horários',(k==='porVez'?val+' pessoas por rodada':'cada rodada vale '+val+' min')+'. As ofertas que já saíram não mudam.')}
+function abrirVgMsg(k){const nome={oferta:'Oferta de hoje',convite:'Convite da semana',jafoi:'Já foi preenchido'}[k];if(!nome)return;
+  abrirModal(`<h2>Editar · ${nome}</h2><div class="mut" style="font-size:.84rem;margin-bottom:.5rem">Variáveis: {nome} {profissional} {dia} {hora} {horas} {local} {validade} {preco}. A mensagem só diz profissional, dia, hora e local.</div>
+  <textarea class="inp" id="vg-msg-ta" rows="6" style="min-height:130px;resize:vertical">${rtEsc(VG_MSG[k])}</textarea>
+  <div class="acoes"><button class="btn" onclick="vgMsgSalvar('${k}')">Salvar</button><button class="btn sec" onclick="VG_MSG['${k}']=VG_MSG_PADRAO['${k}'];fecharTudo();render()">Voltar ao padrão</button><button class="btn sec" onclick="fecharTudo()">Cancelar</button></div>`)}
+function vgMsgSalvar(k){const el=document.getElementById('vg-msg-ta'), t=el&&el.value?String(el.value).trim():'';
+  if(!t)return toast('Mensagem vazia','Escreva a mensagem antes de salvar.',true);
+  const achou=VG_PROIBIDO.filter(w=>t.toLowerCase().includes(w));
+  if(achou.length)return toast('Não salvou: tem '+achou.map(w=>'“'+w+'”').join(', '),'A mensagem só diz profissional, dia, hora e local. No interior, o celular muitas vezes é da família.',true);
+  if(k!=='jafoi'&&!/PARAR/.test(t))return toast('Falta o PARAR','Todo aviso de horário ensina a responder PARAR para não receber mais.',true);
+  VG_MSG[k]=t;fecharTudo();render();toast('Mensagem salva','Vale para os próximos horários (só nesta sessão).')}
+
+/* ---------------- o que as outras telas mostram de Vagas (Agenda, Hoje, novo agendamento) ---------------- */
+function vgSimular(v){const r=v.r1.find(x=>!/respondeu 2/.test(x[1]));return r?[r[0],hhmm(Math.max(minu(AGORA)+1,minu(v.envio)+3))]:null}
+function vgStatusFrase(v){const nomes=vgNomes(v.r1.map(r=>r[0]));
+  return {oferecendo:'O horário foi para Vagas e está em oferta até '+v.ate+' (1ª rodada: '+nomes+').',
+    aprovar:'O horário foi para Vagas: '+hjPl(v.r1.length,'pessoa cabe','pessoas cabem')+' ('+nomes+') e a oferta espera você aprovar.',
+    curta:'O horário foi para Vagas, mas falta menos de 1 h: ofereça no balcão.',
+    parada:'O horário foi para Vagas, e a oferta foi parada: ficou livre.',
+    preenchida:'O horário foi para Vagas e ficou com '+v.quem+'.',mao:'O horário foi para Vagas e foi marcado à mão.',
+    'sem-gente':'O horário ficou livre: ninguém da lista cabe nele agora (Vagas › Ainda dá para encher).'}[v.st]||''}
+/* o selo na célula do horário cancelado (Agenda) */
+function vgSelo(e){if(e.st!=='cancelou'||!e.vaga)return '';const v=VAGAS.find(x=>x.id===e.vaga);if(!v)return '';
+  const t={oferecendo:'⚡ em oferta até '+v.ate,aprovar:'⚡ espera você aprovar',curta:'⚡ ofereça no balcão'}[v.st];
+  return t?`<i class="vg-selo">${t}</i>`:''}
+/* horário livre oferecido a uma pessoa: a Agenda mostra "em oferta" e não deixa prometer duas vezes */
+function vgAgLivre(p,d,h){const o=EM_OFERTA.find(x=>x.p===p&&x.dia===d&&x.h===h);return o?`<span class="ag-of">⚡ em oferta · ${hjPrim(o.pac)}</span>`:''}
+function vgOfertaEm(p,d,h){const v=vgAtivaEm(p,d,h);
+  if(v)return v.st==='oferecendo'?'Esse horário está em oferta até '+v.ate+' ('+vgNomes(v.r1.map(r=>r[0]))+')':v.st==='aprovar'?'Esse horário está em Vagas, esperando você aprovar a oferta':'Esse horário está em Vagas: ofereça no balcão';
+  const o=EM_OFERTA.find(x=>x.p===p&&x.dia===d&&x.h===h);return o?'Esse horário está oferecido a '+o.pac+', esperando resposta':''}
+function vgRotuloAgenda(){const a=emOferta(), p=VAGAS.filter(v=>v.dia===HOJE&&['preenchida','mao'].includes(v.st)).length;
+  return a||p?[a?a+' em oferta':'',p?hjPl(p,'preenchida','preenchidas'):''].filter(Boolean).join(' · ')+' hoje':'Vagas'}
+/* Hoje › bloco 6 */
+function vgResumoHoje(v){const n=vgNomes(v.r1.map(r=>r[0]));
+  return {oferecendo:`em oferta até ${v.ate} · 1ª rodada: ${n} · ${v.abriu}`,aprovar:`<span style="color:var(--ambar)">esperando você aprovar</span> · cabem: ${n} · ${v.abriu}`,
+    curta:`<span style="color:var(--ambar)">menos de 1 h: ofereça no balcão</span> · ${v.abriu}`,preenchida:`<span style="color:var(--neon)">preenchida ✓</span> · ${v.quem} respondeu 1 em ${v.min} min`,
+    mao:`<span style="color:var(--neon)">marcada à mão ✓</span>${v.quem?' · '+v.quem:''}`,parada:'parada · o horário ficou livre'}[v.st]||''}
+function vgBotaoHoje(v){if(v.st==='oferecendo'){const s=vgSimular(v);return s?`<button class="btn sec min" onclick="responder('${v.id}','${s[0]}','${s[1]}')">Simular: ${hjPrim(s[0])} respondeu 1</button>`:''}
+  if(v.st==='aprovar')return `<button class="btn min" onclick="vgEnviar('${v.id}')">Aprovar e mandar</button>`;
+  if(v.st==='curta')return `<button class="btn sec min" onclick="VG_ABA='hoje';ir('vagas')">Quem está aqui</button>`;
+  return ''}
+
+/* ---------------- a tela ---------------- */
+function vgResumo(v){return v.st==='oferecendo'?v.h+' com '+hjCom(v.p)+', até '+v.ate:v.st==='aprovar'?vgQuandoDia(v.dia)+' '+v.h+': esperando você aprovar':vgQuandoDia(v.dia)+' '+v.h+': ofereça no balcão'}
 function telaVagas(){
-  return `<div class="pg-h"><div><h1>Vagas liberadas</h1><div class="sub">Cancelou? Em minutos o horário é oferecido para quem cabe nele. Primeiro que responder leva.</div></div></div>
-  <div class="kpis"><div class="kpi ok"><b>9 de 11</b><span>vagas preenchidas este mês</span></div><div class="kpi"><b>7 min</b><span>tempo médio até preencher</span></div><div class="kpi ok"><b>R$ 2.650</b><span>que teriam ficado na mesa</span></div><div class="kpi amb"><b>${VAGAS.filter(v=>v.st==='oferecendo').length}</b><span>oferecendo agora</span></div></div>
-  ${VAGAS.map((v,i)=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:.6rem;flex-wrap:wrap;align-items:baseline">
-    <h3 style="margin:0">${v.quando||'Hoje'} ${v.h} · ${v.prof} · ${v.tipo}</h3>
-    ${v.st==='preenchida'?'<span class="chip g">preenchida ✓</span>':'<span class="chip a">oferecendo · vale por '+(20-v.min)+' min</span>'}</div>
-    <div class="mut" style="font-size:.78rem;margin:.2rem 0 .6rem">${v.porque?v.porque+' · há':'cancelou há'} ${v.min||'1'} min${v.resp?' · '+v.resp:''}</div>
-    ${v.of.map((o,k)=>`<div class="rank"><span class="p">${k+1}</span><span class="n">${o[0]}<small>${o[1]}</small></span><span class="q">${o[2]}</span></div>`).join('')}
-    <div class="faint" style="font-size:.74rem;margin-top:.3rem">Fora: quem precisa de mais tempo que o buraco, quem é de outra cidade (no dia de viagem é o contrário: o horário vai só para a fila daquela cidade), quem já tem horário esta semana, quem pediu para não receber mensagem.</div>
-    ${v.st==='oferecendo'?`<div class="acoes"><button class="btn min" onclick="hjVaga(${i})">Simular: alguém respondeu</button></div>`:''}
-  </div>`).join('')}
-  <div class="grid2"><div class="card"><h3>A mensagem</h3><div class="zap"><div class="b">Oi, Carlos! Abriu uma vaga com o Dr. Manoel <b>hoje às 10h</b> no Espaço Pelle. Quer ficar com ela?<br>Responda <b>1</b> para confirmar. É por ordem de resposta, e vale pelos próximos 20 minutos 🙂<div class="h">10:04</div></div><div class="b eu">1<div class="h">10:07</div></div><div class="b">Confirmado! Hoje às 10h, Rua Óscar Galvão, 38. Até já 😊<div class="h">10:07</div></div></div></div>
-  <div class="card"><h3>Regras</h3><div class="mut" style="font-size:.84rem;line-height:1.7">• Oferta para 3 ao mesmo tempo, vale 20 min<br>• Sem resposta: próxima leva de 5<br>• Nunca promete o mesmo horário duas vezes<br>• Horário comercial e teto por dia<br>• Quem respondeu depois recebe "já foi, te aviso na próxima"</div></div></div>`;
+  const dono=ehDono(), pl=vgPlacar(), sug=vgSugestoes(), B=vgBuracos(sug), fut=B.filter(b=>b.d>HOJE);
+  const livresFut=fut.reduce((s,b)=>s+b.livres.length,0), qui=fut.find(b=>b.conv), ativ=VAGAS.filter(v=>VG_ATIVA.includes(v.st)), a0=ativ[0];
+  let h=`<div class="pg-h"><div><h1>Vagas liberadas</h1><div class="sub">Horário que abre, ou que ninguém marcou, vai para quem cabe nele. Fica com quem responder primeiro.</div></div></div>
+  <div class="vg-estado" role="button" tabindex="0" onclick="VG_ABA='regras';render();rxIr('vg-modo')">
+    <span><span style="color:${MOTOR.modo==='aprova'?'var(--ambar)':'var(--neon)'}">●</span> <b>${MOTOR.modo==='aprova'?'Recepção aprova cada envio':'Automático: o Zaq manda sozinho'}</b></span>
+    <span>Amigo lido às ${MOTOR.amigo} (a cada 2 min) <button onclick="event.stopPropagation();toast('Nada novo no Amigo','Nenhum cancelamento nem horário novo desde ${MOTOR.amigo}.')">ler agora</button></span>
+    <span>mensagens automáticas hoje: <b>${MOTOR.usadasHoje} de ${MOTOR.tetoDia}</b></span><span>qua 23/09, ${AGORA}</span>${rxF('ex')}</div>
+  <div class="kpis">
+    <button class="kpi amb vg-k" onclick="VG_ABA='hoje';render();rxIr('vg-${a0?a0.id:'encher'}')"><b>${ativ.length}</b><span>em oferta agora${a0?' · '+vgResumo(a0):''}</span> ${rxF('ex')}</button>
+    <button class="kpi vg-k" onclick="VG_ABA='hoje';render();rxIr('vg-encher')"><b>${livresFut}</b><span>horários livres de amanhã a sábado${qui?' · '+qui.livres.length+' '+(qui.d===HOJE+1?'na quinta':'em '+rxDia(qui.d))+' do Dr. Manoel':''}</span> ${rtF('am')}</button>
+    <button class="kpi ok vg-k" onclick="VG_ABA='hist';render()"><b>${dono?brl(pl.rs):pl.feitas}</b><span>${dono?'entraram por vaga em setembro':'atendimentos entraram por vaga em setembro'}</span> ${rxF('ex')}<small>${pl.mix}</small></button>
+    <button class="kpi vg-k" onclick="VG_ABA='hist';render()"><b>${pl.feitas} de ${pl.total}</b><span>vagas preenchidas em setembro</span> ${rxF('ex')}<small>ligando um a um, clínicas preenchem ~${RX_MERC.ligando}% ${rxF('merc')}</small></button>
+  </div>
+  <div class="tabs"><button class="${VG_ABA==='hoje'?'on':''}" onclick="VG_ABA='hoje';VG_FOCO=null;render()">Hoje e semana</button><button class="${VG_ABA==='espera'?'on':''}" onclick="VG_ABA='espera';VG_FOCO=null;render()">Lista de espera · ${ESPERA.length}</button><button class="${VG_ABA==='hist'?'on':''}" onclick="VG_ABA='hist';VG_FOCO=null;render()">Histórico</button><button class="${VG_ABA==='regras'?'on':''}" onclick="VG_ABA='regras';VG_FOCO=null;render()">Regras</button></div>`;
+  h+=VG_ABA==='espera'?vgAbaEspera(sug):VG_ABA==='hist'?vgAbaHist():VG_ABA==='regras'?vgAbaRegras():vgAbaHoje(B,sug);
+  const ap=VAGAS.find(v=>v.st==='aprovar');
+  if(ap)h+=`<div class="vg-faixa" role="button" tabindex="0" onclick="VG_ABA='hoje';render();rxIr('vg-${ap.id}')"><span>⚡ <b>${vgQuandoDia(ap.dia)} ${ap.h}</b> liberou · ${hjPl(ap.r1.length,'cabe','cabem')}</span><button class="btn min" onclick="event.stopPropagation();vgEnviar('${ap.id}')">Aprovar</button></div><div class="vg-faixa-esp"></div>`;
+  return h}
+
+/* aba 1 · hoje e semana: em oferta agora + ainda dá para encher */
+function vgAbaHoje(B,sug){const ord={curta:0,aprovar:1,oferecendo:2,preenchida:3,mao:4,parada:5};
+  const vs=VAGAS.slice().sort((a,b)=>ord[a.st]-ord[b.st]||a.dia-b.dia||(a.h<b.h?-1:1));
+  let h=`<h2 class="rx-h" style="margin-top:.2rem">Em oferta agora ${rxF('ex')}</h2><div class="rx-q">Horário que abriu hoje: quem o Zaq chamou, em que ordem e por quê.</div>`;
+  h+=vs.length?vs.map(vgCard).join(''):`<div class="card mut">Nenhum horário abriu hoje.</div>`;
+  const com=B.filter(b=>b.pool), sem=B.filter(b=>!b.pool);
+  h+=`<h2 class="rx-h" id="vg-encher">Ainda dá para encher ${rtF('am')}</h2><div class="rx-q">Horários que ninguém marcou, de hoje a sábado: a mesma conta da Agenda › Semana.</div>`;
+  h+=com.map(b=>vgLinhaDia(b,sug)).join('')||'<div class="card mut">Ninguém cabe nos horários livres agora.</div>';
+  if(sem.length){const por={};sem.forEach(b=>{(por[b.p]=por[b.p]||[]).push(b)});
+    h+=`<div class="rt-sem">Sem ninguém que caiba agora: ${Object.entries(por).map(([p,bs])=>`<b>${rxNome(p)}</b> ${bs.map(b=>vgQuandoDia(b.d)+' '+b.pct+'% ('+hjPl(b.livres.length,'livre','livres')+')').join(', ')}${p==='manoel'&&com.some(b=>b.conv)?', que entra como 2ª opção do convite':''}`).join(' · ')}.
+      ${por.brenda?' Ninguém está pedindo os atendimentos da Brenda, e a função dela ainda está a confirmar.':''} O Zaq não inventa procura.</div>`}
+  return h}
+function vgCard(v){
+  const cls={oferecendo:'amb',aprovar:'amb',curta:'cinza',preenchida:'ok',mao:'ok',parada:'cinza'}[v.st], falta=v.ate?Math.max(0,minu(v.ate)-minu(AGORA)):0;
+  const chip={oferecendo:`<span class="chip a">em oferta · até ${v.ate} (faltam ${falta} min)</span>`,aprovar:'<span class="chip a">esperando você aprovar</span>',curta:'<span class="chip">menos de 1 h de aviso</span>',
+    preenchida:`<span class="chip g">preenchida em ${v.min} min · ${v.quem}</span>`,mao:`<span class="chip g">marcada à mão${v.quem?' · '+v.quem:''}</span>`,parada:'<span class="chip">parada · ficou livre</span>'}[v.st];
+  const pes=[...v.r1.map(r=>r[0]),...(v.r2||[])].filter(n=>PESSOAS[n]&&vgValorDe(n)), max=pes.length?Math.max(...pes.map(vgValorDe)):0;
+  const ctx=[v.abriu];
+  if(v.aprov)ctx.push(v.aprovTxt||(v.auto?'saiu sozinha às '+v.envio+' (automático)':'você aprovou às '+v.aprov));
+  if(['oferecendo','aprovar'].includes(v.st)&&max)ctx.push('vale '+brl(max)+' se ficar com quem vai pagar ('+vgNomes(pes.filter(n=>vgValorDe(n)===max))+')');
+  if(v.st==='preenchida'&&v.r1.length===1&&!v.r2.length){const nc=vgNaoChamou(v).filter(x=>PESSOAS[x.n]);if(nc.length)ctx.push('foi só para '+(/a$/.test(hjPrim(v.quem))?'a ':'o ')+hjPrim(v.quem)+', a única pessoa que cabia ('+nc.map(x=>vgCurto(x.n)+': '+x.t).join('; ')+')')}
+  if(v.st==='preenchida')ctx.push(hjPrim(v.quem)+' respondeu 1 às '+v.resp+(v.nova?' · paciente nova: cadastrada no Amigo':''));
+  if(v.obs)ctx.push(v.obs);
+  let h=`<div class="card vg-card ${cls}" id="vg-${v.id}"><div class="vg-t"><h3>${vgQuando(v)} ${v.h} · ${rxNome(v.p)} · ${v.dur} min · ${v.local}</h3>${chip}${v.fila&&!MOTOR.confirmado.lago?'<span class="chip">endereço a confirmar</span>':''}</div>
+    <div class="vg-ctx">${ctx.join(' · ')}</div>`;
+  if(['oferecendo','aprovar'].includes(v.st)){
+    h+=`<div class="vg-sub">1ª rodada · ${v.envio?'enviada às '+v.envio:'pronta, esperando você'}</div>`+v.r1.map((r,i)=>vgLinha(v,r[0],i+1,r[1])).join('');
+    if(v.r2.length)h+=`<div class="vg-sub">2ª rodada · ${v.envio?'sai sozinha às '+v.ate+' se ninguém responder 1, sem nova aprovação':'sai sozinha 20 min depois da 1ª, se ninguém responder 1'}</div>`+v.r2.map((n,i)=>vgLinha(v,n,v.r1.length+i+1,'espera a 1ª rodada')).join('');
+    const nc=vgNaoChamou(v);
+    if(nc.length)h+=`<button class="hj-mais" onclick="VG_ABRE['${v.id}']=!VG_ABRE['${v.id}'];render()">${VG_ABRE[v.id]?'▾':'▸'} Não chamou · ${nc.length}</button>`
+      +(VG_ABRE[v.id]?`<div class="vg-nao">${nc.map(x=>`<div class="vg-nc"><span><b>${x.n}</b> <span class="mut">${x.t}</span></span>${x.k==='voce'?`<button class="btn sec min" onclick="vgEuMesma('${v.id}','${x.n}')">Oferecer eu mesma</button>`:''}</div>`).join('')}</div>`:'')}
+  if(v.st==='curta')h+=`<div class="hint" style="margin-top:.2rem">⏱ <b>Ofereça no balcão.</b> Falta menos de 1 h: mensagem não daria tempo. Na clínica agora: ${v.balcao&&v.balcao.length?v.balcao.join(', '):'ninguém'}.</div>`;
+  const sim=v.st==='oferecendo'?v.r1.find(r=>!/respondeu 2/.test(r[1])):null;
+  const bts=v.st==='oferecendo'?(sim?`<button class="btn min" onclick="responder('${v.id}','${sim[0]}','${hhmm(Math.max(minu(AGORA)+1,minu(v.envio)+3))}')">Simular: ${hjPrim(sim[0])} respondeu 1</button>`:'')
+      +`<button class="btn sec min" onclick="novoAg('${v.p}','${v.h}',${v.dia})">Marcar à mão</button><button class="btn sec min" onclick="vgParar('${v.id}')">Parar e deixar livre</button>`
+    :v.st==='aprovar'?`<button class="btn min" onclick="vgEnviar('${v.id}')">Aprovar e mandar</button><button class="btn sec min" onclick="novoAg('${v.p}','${v.h}',${v.dia})">Marcar à mão</button><button class="btn sec min" onclick="vgParar('${v.id}')">Deixar livre</button>`
+    :v.st==='curta'?`<button class="btn min" onclick="novoAg('${v.p}','${v.h}',${v.dia})">Marcar à mão</button><button class="btn sec min" onclick="vgParar('${v.id}')">Deixar livre</button>`
+    :`${v.quem&&v.st==='preenchida'?`<button class="btn sec min" onclick="abrirVgPessoa('${v.id}','${v.quem}')">Por que ${hjPrim(v.quem)}</button>`:''}<button class="btn sec min" onclick="AG_PROF='${v.p}';AG_VISTA='dia';ir('agenda')">Ver na Agenda</button>`;
+  return h+`<div class="acoes">${bts}</div></div>`}
+function vgPorLinha(n,v){const x=PESSOAS[n];if(!x)return 'na fila de '+v.fila;
+  if(vgGrupo(n,v)==='vem'){const e=EV.filter(o=>o.pac===n&&o.dia===v.dia&&rxVivo(o)&&!(v.id&&o.vaga===v.id))[0];return 'vem '+(e?'às '+hjH(e.h)+' com '+hjCom(e.p):'nesse dia')+' · '+x.por}
+  return x.por+(x.turno?' · prefere '+x.turno:'')}
+function vgLinha(v,n,i,st){const x=PESSOAS[n], g=x?vgGrupo(n,v):'fila', G=x?VG_GRUPO[g]:['Fila de '+v.fila,'b'];
+  return `<div class="vg-p" role="button" tabindex="0" onclick="abrirVgPessoa('${v.id}','${n}')"><span class="vg-i">${i}</span><span class="vg-n"><b>${n}</b> <span class="chip ${G[1]}">${G[0]}</span></span><span class="vg-st">${st}</span><span class="vg-por">${vgPorLinha(n,v)} · ${vgValTxt(n)}</span></div>`}
+/* uma linha de "Ainda dá para encher" */
+function vgLinhaDia(b,sug){const W=RX_WA, nome=rxNome(b.p), foco=VG_FOCO===b.key, grade=b.p!=='manoel'&&!MOTOR.confirmado[b.p], feito=VG_FEITO[b.key];
+  const tit=(b.d===HOJE?'Hoje, ':b.d===HOJE+1?'Amanhã, ':'')+rxDia(b.d);
+  let h=`<div class="card vg-dia ${foco?'foco':''} ${b.conv&&!QUINTA?'vg-dest':''}" id="vg-${b.key}"><div class="vg-t"><h3>${tit[0].toUpperCase()+tit.slice(1)} · ${nome} · ${b.local}</h3>
+    ${b.conv&&!QUINTA?'<span class="chip a">maior buraco da semana</span>':''}${grade?'<span class="chip">grade a confirmar</span>':''}${b.viagem&&!MOTOR.confirmado.lago?'<span class="chip">endereço a confirmar</span>':''}</div>
+    <div class="vg-barra"><div class="bar"><i class="${b.pct<40?'r':b.pct<60?'a':''}" style="width:${b.pct}%"></i></div><span class="num">${b.pct}% · ${b.oc} de ${b.tot}</span></div>`;
+  if(QUINTA&&b.conv){const Q=QUINTA, ok=Q.plano.filter(x=>Q.k>=x.res);
+    h+=`<div class="vagas vg-q" id="vg-qgrade">${vgQuintaGrade()}</div>
+      <div class="vg-ctx" style="margin-top:.5rem">${Q.done?'✓ ':''}Convite às ${AGORA} para ${hjPl(Q.conv.length,'pessoa','pessoas')} (${Q.antes==='preco'?'receberam o preço':'retornos mais atrasados'}) · ${Q.done?hjPl(ok.length,'marcou','marcaram')+': '+vgNomes(ok.map(x=>x.n)):'respondendo…'} · era ${Q.antesPct}%</div>`;
 }
+  const trav=x=>vgTravadoEm(b.p,b.d,x,sug);
+  if(!(QUINTA&&b.conv))h+=`<div class="vg-hs">${b.livres.map(x=>{const t=trav(x);return t?`<span class="vg-h trava" title="${hjPrim(t.n)}: ${t.t}">${x}<small>${hjPrim(t.n)}</small></span>`:`<span class="vg-h">${x}</span>`}).join('')}</div>
+    <div class="faint" style="font-size:.72rem">${hjPl(b.livres.length,'livre','livres')}${b.d===HOJE?' daqui para a frente':''}${VAGAS.some(v=>v.p===b.p&&v.dia===b.d&&VG_ATIVA.includes(v.st))?' · fora os que estão em oferta lá em cima':''}</div>`;
+  let q='';
+  if(b.viagem){const c=rtCid(b.local), prox=VIAGENS.filter(x=>x.c===b.local&&['marcada','aberta'].includes(x.st)&&rtData(x.dt)>rtData(DIAS[b.d][1])).sort(rtOrdDt)[0];
+    q+=`<div class="vg-q1"><span>Quem cabe: <b>a fila de ${b.local}</b> no Roteiro, ${b.fila} esperando ${rtF('ex')}</span></div>
+      <div class="faint" style="font-size:.74rem">Dia de viagem é o contrário da sede: o horário vai só para a fila daquela cidade.${b.fila>b.livres.length?' Os outros '+(b.fila-b.livres.length)+' continuam na fila'+(prox?' para '+prox.dt+' lá':'')+'.':''}</div>`}
+  b.oferta.forEach(o=>{q+=`<div class="vg-q1"><span><b>${o.pac}</b> <span class="chip ${VG_GRUPO[PESSOAS[o.pac].g][1]}">${VG_GRUPO[PESSOAS[o.pac].g][0]}</span> · <span class="num">${o.h}</span> · <span class="chip a">em oferta desde ${o.envio}, esperando resposta</span></span></div>`});
+  b.cabe.forEach(s=>{const x=PESSOAS[s.n], aqui=EV.find(e=>e.pac===s.n&&e.dia===HOJE&&rxVivo(e)), tr=trav(s.h);
+    const extra=[x.por,s.dia>HOJE&&aqui?'está aqui hoje às '+hjH(aqui.h)+': dá para oferecer no balcão':'',x.longe?'mora em '+x.longe+': com '+(s.dia-HOJE)+' dias de aviso, dá':'',
+      vgColado(s.n,s),x.antecipa?'se vier, a '+rxDia(x.antecipa.dia)+' '+x.antecipa.h+' abre':''].filter(Boolean).join(' · ');
+    q+=`<div class="vg-q1"><span><b>${s.n}</b> <span class="chip ${VG_GRUPO[x.g][1]}">${VG_GRUPO[x.g][0]}</span> · <span class="num">${s.h}</span> <span class="mut">· ${extra}</span></span>
+      ${!grade&&!feito?`<button class="btn min" onclick="abrirVgOferecer('${s.n}',${s.dia},'${s.h}')">Oferecer ${s.h} ${/a$/.test(hjPrim(s.n))?'à':'ao'} ${hjPrim(s.n)}</button>`:''}${tr&&tr.k==='of'?'<span class="chip a">em oferta</span>':''}</div>`});
+  if(b.conv&&!QUINTA){const {lista}=vgConviteLista();
+    q+=`<div class="vg-q1"><span><b>${W.preco.nuncaChamados}</b> receberam o preço no último mês e nunca foram chamados de novo ${rxF('wa')} <span class="faint">nomes de exemplo</span></span></div>
+      <div class="vg-q1"><span><b>${RX_AMIGO.retornos}</b> retornos pedidos no Amigo, nenhum chamado ${rxF('amigo')}</span></div>`;
+    const tv=b.livres.map(trav).filter(Boolean), k=Math.max(1,Math.round(lista.length*vgTaxa())), meta=b.oc+tv.length+k, ant=tv.find(t=>PESSOAS[t.n]&&PESSOAS[t.n].antecipa);
+    q+=`<div class="acoes"><button class="btn min" ${lista.length?'':'disabled'} onclick="abrirVgConvite()">Convidar ${lista.length} · ${MOTOR.antes==='preco'?'receberam o preço':'retornos mais atrasados'}</button>
+      <span class="faint" style="font-size:.74rem;align-self:center">a ordem muda em Regras › Quem vem antes</span></div>
+      <div class="vg-meta">Meta: ${tv.length?vgNomes(tv.map(t=>t.n))+' + ':''}${k} ${k===1?'convidado':'convidados'} = <b>${meta} de ${b.tot} (${Math.round(100*meta/b.tot)}%)</b>, na taxa do mês (${W.preco.marcaram} de ${W.preco.receberam} marcaram depois do preço) ${rxF('wa')}${ant?' · se a '+hjPrim(ant.n)+' vier, a '+rxDia(PESSOAS[ant.n].antecipa.dia)+' '+PESSOAS[ant.n].antecipa.h+' abre':''} · ${MOTOR.antes==='preco'?'cada consulta nova: R$ 500':'retorno: sem cobrança'}</div>`}
+  if(b.voce.length)q+=`<div class="vg-q1"><span><b>Com você:</b> ${b.voce.map(x=>x.n+' <span class="mut">('+x.t+')</span>').join(' · ')}</span></div>`;
+  if(b.fora.length)q+=`<div class="vg-q1 faint"><span><b>Fora:</b> ${b.fora.map(x=>x.n+' ('+x.t+')').join(' · ')}</span></div>`;
+  VAGAS.filter(v=>v.p===b.p&&v.dia===b.d&&v.st==='oferecendo'&&(v.r2||[]).length).forEach(v=>{q+=`<div class="faint" style="font-size:.74rem">${vgNomes(v.r2)} ${v.r2.length>1?'estão':'está'} na 2ª rodada das ${v.h} (sai às ${v.ate} se ninguém responder 1); se ela não sair, ${v.r2.length>1?'entram':'entra'} aqui.</div>`});
+  if(grade&&b.cabe.length&&!feito)q+=`<div class="acoes"><button class="btn min" onclick="abrirVgGrade('${b.key}')">Confirmar a grade e convidar ${vgNomes(b.cabe.map(s=>s.n))}</button></div>
+    <div class="vg-meta">Se ${vgNomes(b.cabe.map(s=>s.n))} ${b.cabe.length>1?'aceitarem':'aceitar'}: <b>${b.oc+b.cabe.length} de ${b.tot} (${Math.round(100*(b.oc+b.cabe.length)/b.tot)}%)</b> ${rxF('ex')}</div>`;
+  if(b.viagem){const vi=VIAGENS.find(x=>x.ev&&x.ev.p===b.p&&x.ev.dia===b.d);
+    q+=feito?`<div class="hj-feito">✓ Oferecido à fila: ${feito.map((n,i)=>b.livres[i]?n+' ('+b.livres[i]+')':n).join(' · ')}</div>`
+      :vi&&vi.ofereceu?`<div class="hj-feito">✓ O Roteiro já ofereceu esses horários à fila de ${b.local}.</div>`
+      :`<div class="acoes"><button class="btn min" onclick="${MOTOR.confirmado.lago?`vgChamarFila('${b.key}')`:`abrirVgEndereco('${b.key}')`}">${MOTOR.confirmado.lago?'Chamar':'Confirmar endereço e chamar'} ${b.livres.length} (um por horário)</button></div>`}
+  return h+`<div class="vg-quem">${q}</div></div>`}
+
+/* aba 2 · lista de espera */
+function vgAbaEspera(sug){const W=RX_WA, c=DIAS.map((_,d)=>rxCel('manoel',d,'dia')), ab=c.reduce((s,x)=>s+x.ab,0), oc=c.reduce((s,x)=>s+x.oc,0), liv=c.reduce((s,x,d)=>d<HOJE?s:s+x.ab-x.oc,0);
+  let h=`<div class="hint" style="margin-top:0">A semana do Dr. Manoel está em <b>${Math.round(100*oc/ab)}%</b>, com ${liv} horários livres de hoje a sábado ${rtF('am')}: ninguém precisa esperar vaga. Esta lista é para quem tem restrição (só de manhã, só depois das 15h, quer antecipar). Quando abre um horário que serve, o Zaq oferece na hora.</div>
+  <div class="card" style="padding:.3rem .4rem;margin-top:.8rem"><div class="vg-tr vg-esp hd"><span>Quem</span><span>Quer</span><span>Serve</span><span>Desde</span><span>Frase</span><span>Situação</span></div>`;
+  ESPERA.forEach((q,i)=>{const of=EM_OFERTA.filter(o=>o.pac===q.n), s=sug.find(x=>x.n===q.n), x=PESSOAS[q.n]||{};
+    const hist=q.ofertas.filter(o=>o[2]!=='esperando resposta').map(o=>o[1]+': '+o[2]);
+    const sit=[...hist,...of.map(o=>vgQuandoDia(o.dia)+' '+o.h+' em oferta, esperando')];
+    if(!of.length&&s){const c=vgColado(q.n,s);sit.push('cabe '+vgQuandoDia(s.dia)+' '+s.h+(c?' ('+c+')':'')+' · falta você aprovar')}
+    if(!sit.length)sit.push('esperando um horário que sirva');
+    h+=`<div class="vg-tr vg-esp" role="button" tabindex="0" onclick="abrirVgEspera(${i})"><span><b>${q.n}</b>${q.obs?`<small class="mut">${q.obs}</small>`:''}</span><span>${q.quer}</span><span><span class="vg-rot">Serve: </span>${q.serve}</span><span class="num"><span class="vg-rot">Desde </span>${q.desde}</span><span class="mut">“${q.frase}”</span>
+      <span>${sit.join(' · ')}${!of.length&&s?` <button class="btn min" style="margin-top:.25rem" onclick="event.stopPropagation();abrirVgOferecer('${q.n}',${s.dia},'${s.h}')">${x.antecipa?'Antecipar':'Oferecer'} ${s.h}</button>`:''}</span></div>`});
+  h+=`${ESPERA.length?'':'<div class="mut" style="padding:.6rem">Ninguém na lista.</div>'}</div>
+  <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap"><button class="btn sec" onclick="abrirVgPorNaLista()">+ Pôr na lista</button><span class="faint" style="font-size:.76rem">${hjPl(ESPERA.length,'pessoa','pessoas')} na lista ${rxF('ex')}</span></div>
+  <div class="hint">A <b>Marina</b> não entra: “tem vaga essa semana?” se responde na hora, com horário. Pedido de outra cidade vai para a fila da cidade, no Roteiro: no último mês, ${hjPl(W.cidades.conversas,'conversa de paciente citou','conversas de paciente citaram')} uma cidade do roteiro (${W.cidades.quais}) ${rxF('wa')}.</div>
+  <div class="hint"><b>Como a pessoa entra:</b> quando alguém escreve “o mais cedo possível”, “se abrir antes me avisa” ou “só consigo depois das 3”, o agente pergunta “Posso te avisar se abrir um horário assim?”, ou a recepção pergunta com um toque. Só entra quem diz sim. <b>Sai</b> quando marca, quando responde PARAR ou depois de 30 dias; no 15º dia, o agente pergunta se ainda quer.</div>`;
+  return h}
+
+/* aba 3 · histórico de setembro */
+function vgAbaHist(){const pl=vgPlacar(), dono=ehDono();
+  const F=VG_HF, L=HIST.map((x,i)=>({...x,i})).reverse().filter(x=>F==='todas'||(F==='preenchidas'&&x.quem)||(F==='perdidas'&&!x.quem)||x.p===F);
+  const org={}, lbl={preco:'recebeu o preço',pediu:'pediu horário (lista de espera ou “tem vaga?”)',fila:'fila da cidade (Roteiro)',outro:'retorno ou sessão já paga'};
+  HIST.filter(x=>x.quem).forEach(x=>{const k=['preco','pediu','fila'].includes(x.g)?x.g:'outro';org[k]=org[k]||[0,0];org[k][0]++;org[k][1]+=x.v});
+  const faltas=EV.filter(e=>e.st==='faltou').length;
+  let h=`<div class="acha" style="margin-top:0">${rxF('ex')} <b>Exemplo: o Zaq ainda não rodou na clínica.</b> Quando o Amigo estiver ligado, esta aba começa com os cancelamentos e faltas reais de setembro.</div>
+  <div class="vg-tot"><b>${pl.feitas} de ${pl.total}</b> preenchidas${dono?` · <b>${brl(pl.rs)}</b> entraram`:''} · mediana de <b>${pl.mediana} min</b> · <b>${pl.perdidas}</b> perdidas${dono?` (${brl(pl.perdido)} em consultas)`:''} ${rxF('ex')}</div>
+  <div class="opts" style="margin:.6rem 0">${[['todas','Todas'],['preenchidas','Preenchidas'],['perdidas','Perdidas'],['manoel','Dr. Manoel'],['juliana','Juliana']].map(([k,l])=>`<button class="opt ${F===k?'on':''}" onclick="VG_HF='${k}';render()">${l}</button>`).join('')}</div>
+  <div class="card ${VG_HTODAS?'vg-todas':''}" style="padding:.3rem .4rem"><div class="vg-tr vg-hi hd"><span>Quando</span><span>Horário</span><span>Por que abriu</span><span>Quem ficou e por quê</span><span>Tempo</span>${dono?'<span style="text-align:right">R$</span>':''}</div>
+  ${L.map((x,k)=>`<div class="vg-tr vg-hi ${k>=5?'vg-velho':''} ${x.quem?'':'perd'}" role="button" tabindex="0" onclick="abrirVgHist(${x.i})"><span class="num">${x.q} ${x.h}</span><span>${rxNome(x.p)}${x.local?' em '+x.local:''} · ${x.tipo.toLowerCase()}</span><span class="mut">${x.abriu}</span>
+    <span>${x.quem?`<b>${x.quem}</b> <span class="mut">· ${x.por}</span>`:`<span class="chip r">perdida</span> <span class="mut">${x.por}</span>`}</span><span class="num">${x.quem?x.min+' min':'—'}</span>${dono?`<span class="num vg-rs">${x.quem?brl(x.v):'−'+brl(x.v)}</span>`:''}</div>`).join('')||'<div class="mut" style="padding:.6rem">Nada neste filtro.</div>'}
+  ${L.length>5&&!VG_HTODAS?`<button class="hj-mais vg-so-mob" onclick="VG_HTODAS=true;render()">ver todas (${L.length})</button>`:''}</div>
+  <div class="card"><h3>De onde veio quem ficou</h3>${['preco','pediu','fila','outro'].filter(k=>org[k]).map(k=>`<div class="linha"><span>${lbl[k]}</span><span class="num">${org[k][0]}${dono?' · '+brl(org[k][1]):''}</span></div>`).join('')}
+    <div class="faint" style="font-size:.76rem;margin-top:.4rem"><b>Regra do R$:</b> conta o valor do atendimento só quando a pessoa não tinha horário marcado. Antecipação e sessão já paga contam R$ 0. Por isso o nome é “entrou por vaga”: com a agenda sobrando, quem recebeu o preço podia marcar em outro horário livre.</div></div>
+  <div class="hint">Cancelamento é a menor parte do horário vazio: o grosso é horário que nunca foi marcado (a aba Hoje e semana e o Raio-X mostram onde). <a style="color:var(--neon);cursor:pointer" onclick="ir('raiox')">Raio-X ›</a></div>
+  <div class="hint"><b>Falta não vira vaga:</b> quando o Amigo marca “faltou”, o horário já passou. Vai para “voltar a chamar” (remarcar) e liga o sinal da próxima vez. Esta semana foram ${hjPl(faltas,'falta','faltas')} na Agenda ${rtF('am')}.</div>`;
+  return h}
+
+/* aba 4 · regras: quem entra, em que ordem e como manda */
+function vgAbaRegras(){const dono=ehDono(), W=RX_WA, porDia=Math.round(W.conversas/21), vezes=Math.round(MOTOR.tetoDia/porDia), pre=MOTOR.antes==='preco';
+  const op=(t,on,cl,dis)=>`<button class="opt ${on?'on':''}" onclick="${cl}" ${dis?'disabled':''}>${t}</button>`;
+  const ex={nome:'Carlos',profissional:'o Dr. Manoel',dia:'hoje',hora:'10h30',local:'Espaço Pelle (Rua Óscar Galvão, 38)',validade:'08:59'};
+  return `<div class="card" id="vg-modo"><h3>Modo</h3><div class="opts">${op('Recepção aprova',MOTOR.modo==='aprova',"vgModo('aprova')",!dono)}${op('Automático',MOTOR.modo==='auto','abrirVgAuto()',!dono)}</div>
+    <div class="vg-txt"><b>Recepção aprova:</b> o Zaq escolhe quem cabe e escreve; você aprova uma vez por horário, e a 2ª rodada sai sozinha. É o padrão no 1º mês, porque oferta é mensagem que o paciente não pediu e porque hoje o agente da clínica está desligado na conta real ${rxF('wa')}.${dono?'':' <b>Só o dono muda o modo.</b>'}</div></div>
+
+  <div class="card"><h3>Quem vem antes</h3><div class="mut" style="font-size:.8rem">Em grupos, na mesma ordem do Roteiro. Sem pontos: a tela diz em uma frase por que chamou cada pessoa.</div>
+    <ol class="vg-ol"><li><b>Pediu horário e ainda não marcou</b> (lista de espera ou “tem vaga?”)</li><li><b>Já vem à clínica nesse dia</b>: junta as duas idas</li>
+      <li><b>Tratamento já pago parado</b>: sessão de pacote atrasada, limpeza da assinatura sem usar (é a “prioridade nas vagas” do Pele em dia)</li>
+      <li><b>${pre?'Recebeu o preço':'Retorno vencido'}</b>, depois <b>${pre?'retorno vencido':'recebeu o preço'}</b><div class="opts" style="margin-top:.3rem">${op('Quem recebeu o preço antes',pre,"vgAntes('preco')")}${op('Quem tem retorno vencido antes',!pre,"vgAntes('retorno')")}</div></li>
+      <li><b>Só quer antecipar</b>: por último e só com 1 dia de aviso, porque troca um buraco por outro</li></ol>
+    <div class="vg-txt">Empate: prefere esse turno; depois, quem costuma responder rápido.<br>Oferta do mesmo dia: quem pediu, quem já vem, tratamento pago e quem está no funil há até 14 dias. Quem esfriou (preço há mais tempo, retorno vencido) recebe convite com 1 dia de aviso, como o de quinta.</div></div>
+
+  <div class="card"><h3>Quem nunca recebe</h3><ul class="vg-ol">
+    <li>Outro profissional, ou atendimento que não cabe no tempo (60 min num buraco de 30)</li><li>Intervalo do pacote que ainda não passou</li>
+    <li>Quem já tem horário com esse profissional no dia, ou está em outro atendimento na mesma hora</li>
+    <li id="vg-regra-fila">Quem mora longe: outra cidade só com 1 dia de aviso e até 1h de viagem. Pedido de outra cidade vai para a fila do Roteiro; em dia de viagem, o horário vai só para a fila daquela cidade <span class="chip g">já ligada</span></li>
+    <li>Quem disse “vou ver” nas últimas 24h (fica com você) ou tem parcela atrasada (você decide)</li>
+    <li>Quem pediu PARAR ou SAIR, ou está com os lembretes desligados na ficha</li><li>Cirurgia dermatológica: só a recepção oferece</li></ul>
+    <button class="hj-mais" onclick="VG_PARAR_VER=!VG_PARAR_VER;render()">${VG_PARAR_VER?'▾':'▸'} Ver quem pediu PARAR (${MOTOR.pararam.length})</button>${VG_PARAR_VER?`<div class="vg-txt">${MOTOR.pararam.join(' · ')} <span class="faint">(nomes de exemplo)</span></div>`:''}</div>
+
+  <div class="card"><h3>Como manda</h3>
+    <div class="vg-reg"><span>Pessoas por rodada</span><div class="opts">${[2,3,5].map(n=>op(n,MOTOR.porVez===n,`vgRegra('porVez',${n})`)).join('')}</div></div>
+    <div class="vg-reg"><span>Validade de cada rodada</span><div class="opts">${[15,20,30].map(n=>op(n+' min',MOTOR.validade===n,`vgRegra('validade',${n})`)).join('')}</div></div>
+    <div class="vg-reg"><span>2ª rodada</span><span>até ${MOTOR.rodada2} pessoas, sai sozinha</span></div>
+    <div class="vg-reg" id="vg-regra-balcao"><span>Aviso mínimo</span><span>1 h: com menos, o horário vai para você oferecer no balcão <span class="chip g">já ligada</span></span></div>
+    <div class="vg-reg"><span>Até quando vale</span><span>a oferta de hoje para de valer 1 h antes do horário; o convite para outro dia vale até as 18h</span></div>
+    <div class="vg-reg"><span>Envio</span><span>seg–sex 08:00–18:00 · sáb 08:00–12:00. Convites saem quando você aprova, fora dos picos da recepção (${W.picos.join(' e ')}) ${rxF('wa')}</span></div>
+    <div class="vg-reg"><span>Teto</span><span>1 mensagem automática por pessoa por dia, somando funil, lembretes e vagas (a oferta ocupa o toque do funil daquele dia) · 2 ofertas de vaga por pessoa por semana · ${MOTOR.tetoDia} por dia na clínica · hoje: <b>${MOTOR.usadasHoje} de ${MOTOR.tetoDia}</b></span></div>
+    <div class="vg-txt">Por que o teto: o número teve ${W.conversas} conversas no mês ${rxF('wa')}, umas ${porDia} por dia útil. ${MOTOR.tetoDia} num dia já é ${vezes} vezes o normal, e mais que isso aumenta o risco de o WhatsApp bloquear o número (ele está conectado por QR Code). Pela API oficial, convite para quem não falou nas últimas 24h precisa de modelo aprovado pela Meta. Continuar uma conversa (por exemplo, depois de um “2”) não conta.</div></div>
+
+  <div class="card" id="vg-regra-sinal"><h3>Sinal</h3><div class="vg-txt">Quem faltou nos últimos 60 dias só fica com vaga de consulta pagando <b>R$ 50 no Pix</b>, que vira crédito (igual ao Roteiro). Sessão já paga não pede sinal. No mercado, o sinal reduz as faltas em cerca de ${RX_MERC.sinalCorta}% ${rxF('merc')} <span class="faint">referência, não garantia</span>.</div></div>
+
+  <div class="card"><h3>Nunca promete o mesmo horário duas vezes</h3><div class="vg-txt">Enquanto o horário está em oferta, ele aparece como “em oferta” na Agenda do Zaq, e o agente não o oferece a mais ninguém. O Amigo não tem como reservar horário, então, quando alguém diz 1, o Zaq confere no Amigo na hora. Se a recepção marcou por lá, a pessoa recebe “acabou de ser preenchido” e outra opção.<br>
+    Paciente nova: o agente pede nome completo e data de nascimento e segura o horário por 10 min até cadastrar no Amigo.<br>
+    Resposta que não é 1 nem 2 vai na hora para você e aparece em Conversas: no mês, ${W.tot.sem24} vezes o paciente ficou mais de 24h sem resposta ${rxF('wa')}.</div></div>
+
+  <div class="card"><h3>Mensagens</h3><div class="grid3">
+    <div><div class="vg-sub" style="margin-top:0">Oferta de hoje</div><div class="zap" style="max-width:none"><div class="b">${vgMsgTxt('oferta',ex)}<div class="h">08:39</div></div></div><button class="btn sec min" style="margin-top:.4rem" onclick="abrirVgMsg('oferta')">Editar</button></div>
+    <div><div class="vg-sub" style="margin-top:0">Convite da semana</div><div class="zap" style="max-width:none"><div class="b">${vgMsgTxt('convite',{nome:'Aline',profissional:'o Dr. Manoel',dia:'amanhã, quinta (24/09),',horas:'9h30, 10h ou 14h30',preco:'A consulta é R$ 500, no Pix, dinheiro ou cartão 😊 '})}<div class="h">agente</div></div></div><button class="btn sec min" style="margin-top:.4rem" onclick="abrirVgMsg('convite')">Editar</button></div>
+    <div><div class="vg-sub" style="margin-top:0">Já foi preenchido</div><div class="zap" style="max-width:none"><div class="b">${vgAlternativa('manoel')}<div class="h">agente</div></div></div><button class="btn sec min" style="margin-top:.4rem" onclick="abrirVgMsg('jafoi')">Editar</button></div></div>
+    <div class="hint"><b>Regra fixa:</b> a mensagem só diz profissional, dia, hora e local. Nunca o procedimento, o pacote nem “retorno vencido”: no interior, o celular muitas vezes é da família. Todo aviso ensina a responder PARAR.</div></div>
+  <div class="rx-conf">🔒 O Zaq lê agenda (Amigo), conversa (WhatsApp), funil e pacotes (Zaq). Não lê prontuário, diagnóstico nem foto.</div>`}
 
 /* =================================================================
    5 · PACIENTES (lista) e a FICHA
@@ -2100,8 +2902,8 @@ const PACS=[
   {n:'Ana Paula Rocha',id:33,cid:'Pedreiras',ult:'hoje',prox:'hoje 08:30 · sessão 3 de 10',sit:[['em tratamento','g']],val:'R$ 2.400',seg:['tratamento','aniversario']},
   {n:'Carla Menezes',id:44,cid:'Pedreiras',ult:'18/09',prox:'—',sit:[['indicou 3 ⭐','g'],['assinante','b']],val:'R$ 3.180',seg:['assinantes']},
   {n:'Marta Silva',id:29,cid:'Pedreiras',ult:'21/07',prox:'—',sit:[['pacote parado há 64 dias','r'],['parcela atrasada','r']],val:'R$ 2.100',seg:['tratamento','atrasadas']},
-  {n:'Carlos Mendes',id:62,cid:'Pedreiras',ult:'10/08',prox:'—',sit:[['retorno vencido há 12 dias','a']],val:'R$ 500',seg:['retorno']},
-  {n:'Heloísa Dias',id:51,cid:'Lago da Pedra',ult:'12/03',prox:'—',sit:[['manutenção vencida','a']],val:'R$ 1.760',seg:['retorno']},
+  {n:'Carlos Mendes',id:62,cid:'Pedreiras',ult:'12/08',prox:'—',sit:[['retorno vencido há 12 dias','a']],val:'R$ 500',seg:['retorno']},
+  {n:'Heloísa Dias',id:51,cid:'Lago da Pedra',ult:'18/03',prox:'—',sit:[['manutenção vencida','a']],val:'R$ 1.760',seg:['retorno']},
   {n:'Raimundo Costa',id:58,cid:'Bacabal',ult:'30/04',prox:'fila de Bacabal',sit:[['sumido há 146 dias','r']],val:'R$ 500',seg:['sumidos']},
   {n:'Sônia Pires',id:47,cid:'Pedreiras',ult:'—',prox:'—',sit:[['recebeu o preço há 1 dia','a']],val:'—',seg:[]},
 ];
@@ -2109,7 +2911,7 @@ function telaPacientes(){
   const segs=[['todos','Todos'],['tratamento','Em tratamento'],['retorno','Retorno ou manutenção vencida'],['atrasadas','Parcela atrasada'],['aniversario','Aniversário este mês'],['sumidos','Sumidos há 90+ dias'],['assinantes','Assinantes']];
   const vis=PACS.filter(x=>PS_SEG==='todos'||x.seg.includes(PS_SEG));
   let h=`<div class="pg-h"><div><h1>Pacientes</h1><div class="sub">Cadastro e atendimentos vêm do Amigo; o Zaq junta conversa, dinheiro e o que fazer com cada um.</div></div>
-  <button class="btn" onclick="novoAg('manoel','10:30')">+ Agendar</button></div>
+  <button class="btn" onclick="novoAg('manoel','13:30')">+ Agendar</button></div>
   <div class="kpis"><div class="kpi"><b>1.284</b><span>pacientes sincronizados do Amigo (ilustrativo)</span></div><div class="kpi ok"><b>37</b><span>em tratamento agora</span></div><div class="kpi amb"><b>18</b><span>retornos pedidos no Amigo, nenhum chamado (real, 22/09)</span></div><div class="kpi ruim"><b>R$ 6.300</b><span>em parcelas atrasadas</span></div></div>
   <input class="inp" placeholder="🔍 Buscar por nome, telefone ou CPF" style="margin-bottom:.6rem">
   <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.7rem">${segs.map(([k,l])=>`<button class="opt ${PS_SEG===k?'on':''}" onclick="PS_SEG='${k}';render()">${l}${k==='todos'?'':' · '+PACS.filter(x=>x.seg.includes(k)).length}</button>`).join('')}</div>
@@ -2144,7 +2946,7 @@ const TL=[
   {q:'28/08',t:'conversa',x:'Agendou a consulta com o agente em 3 minutos de conversa',f:'WhatsApp',k:''},
   {q:'28/08',t:'conversa',x:'Chegou pelo WhatsApp, indicada por Carla Menezes · recebeu o preço',f:'WhatsApp',k:''},
 ];
-let CONSENT={lembretes:true,promo:true,pesquisa:false};
+let CONSENT={lembretes:true,vagas:true,promo:true,pesquisa:false};
 function telaPaciente(){
   const abas=[['resumo','Resumo'],['linha','Linha do tempo'],['conversa','Conversa'],['financeiro','Financeiro'],['cadastro','Cadastro e consentimento']];
   let h=`<button class="btn sec min" onclick="ir('pacientes')" style="margin-bottom:.6rem">‹ Pacientes</button>
@@ -2169,7 +2971,7 @@ function telaPaciente(){
       <div class="ses"><i class="ok">1</i><i class="nx">2</i><i>3</i><i>4</i></div>
       <div style="font-size:.84rem">1 feita · <b style="color:var(--ambar)">2ª hoje às 10h</b> · depois 14/10 e 04/11</div>
       <div class="mut" style="font-size:.78rem;margin-top:.3rem">Protocolo domiciliar (2 produtos) entregue em 01/09 · reavaliação prevista ~jan/2027</div>
-      <div class="acoes"><button class="btn min" onclick="ir('agenda')">Ver na agenda</button><button class="btn sec min" onclick="toast('3ª sessão reservada','ter 14/10 às 10:00 com Juliana · direto na agenda do Amigo')">Marcar a 3ª agora</button></div></div>
+      <div class="acoes"><button class="btn min" onclick="ir('agenda')">Ver na agenda</button><button class="btn sec min" onclick="toast('3ª sessão reservada','qua 14/10 às 10:00 com Juliana · direto na agenda do Amigo')">Marcar a 3ª agora</button></div></div>
     <div class="card"><h3>Dinheiro</h3>
       <div class="linha"><span>Contratado</span><span class="num">R$ 4.269</span></div>
       <div class="linha"><span>Pago</span><span class="num" style="color:var(--neon)">R$ 1.554</span></div>
@@ -2250,9 +3052,10 @@ function telaPaciente(){
       <div class="linha"><span>No Amigo</span><span class="chip b">vinculada · sincronizada</span></div></div>
     <div class="card"><h3>O que ela autorizou</h3>
       <div class="chk" onclick="CONSENT.lembretes=!CONSENT.lembretes;render()"><i class="${CONSENT.lembretes?'':'off'}">✓</i><span>Lembretes de consulta, sessão e pagamento pelo WhatsApp<small>desde 28/08, na primeira conversa</small></span></div>
+      <div class="chk" onclick="CONSENT.vagas=!CONSENT.vagas;render()"><i class="${CONSENT.vagas?'':'off'}">✓</i><span>Avisos de horário livre (vagas)<small>desde 28/08 · desliga se ela responder PARAR</small></span></div>
       <div class="chk" onclick="CONSENT.promo=!CONSENT.promo;render()"><i class="${CONSENT.promo?'':'off'}">✓</i><span>Novidades e promoções da clínica<small>desde 10/09, ao assinar o plano</small></span></div>
       <div class="chk" onclick="CONSENT.pesquisa=!CONSENT.pesquisa;render()"><i class="${CONSENT.pesquisa?'':'off'}">✓</i><span>Pesquisa de satisfação depois do tratamento<small>ainda não perguntado</small></span></div>
-      <div class="faint" style="font-size:.74rem;margin-top:.5rem">Se ela responder SAIR, os três desligam sozinhos e o agente para de mandar mensagem automática.</div>
+      <div class="faint" style="font-size:.74rem;margin-top:.5rem">Se ela responder PARAR, só os avisos de horário livre desligam. Se responder SAIR, tudo desliga e o agente para de mandar mensagem automática.</div>
       <div class="acoes"><button class="btn sec min">Exportar dados dela</button><button class="btn sec min">Pedido de exclusão</button></div></div></div>
     <div class="card" style="border-style:dashed"><h3>O que não fica no Zaq</h3>
       <div class="mut" style="font-size:.84rem">Prontuário, diagnóstico, queixa, receita, exames, fotos clínicas e documento (RG). Tudo isso continua no Amigo. O Zaq guarda o mínimo para marcar, confirmar, cobrar e trazer de volta.</div></div>`;
@@ -2400,7 +3203,7 @@ function telaNovaProposta(){
     <div class="card-p">${PROP.itens.map(([n,q])=>`<b>${n}</b>${q>1?' · '+q+' sessões':''} · ${brl(PROCS[n].preco*q)}`).join('<br>')}${t.prod?`<br><b>Protocolo em casa</b> · ${brl(t.prod)}`:''}
     <hr style="border:0;border-top:1px solid #2a3942;margin:.35rem 0">${cond.replace(/<\/?b>/g,'')}<br><span style="color:#8696a0">válida por ${PROP.val} dias</span></div>
     Quer que eu já separe os horários? É só responder <b>sim</b> 🙂<div class="h">agora</div></div></div></div>
-    <div class="card"><h3>Sessões, se aceitar hoje</h3><div class="mut" style="font-size:.8rem;margin-bottom:.35rem">Datas sugeridas pelo intervalo de cada procedimento, a partir do primeiro horário livre (ter 30/09):</div>
+    <div class="card"><h3>Sessões, se aceitar hoje</h3><div class="mut" style="font-size:.8rem;margin-bottom:.35rem">Datas sugeridas pelo intervalo de cada procedimento, a partir do primeiro horário livre (qua 30/09):</div>
     <div style="display:flex;flex-wrap:wrap;gap:.3rem">${datasSessoes().map(d=>`<span class="chip">${d}</span>`).join('')}</div>
     <div class="faint" style="font-size:.74rem;margin-top:.4rem">Ao aceitar, as sessões viram saldo e a primeira já é oferecida no WhatsApp.</div></div></div></div>`;
 }
@@ -2410,11 +3213,11 @@ let PK_F='todos';
 const SESS=[
   {pac:'Lúcia Ferraz',p:'Criolipólise',v:4,f:1,prox:'hoje 10:00',vence:'03/2027',st:'dia'},
   {pac:'Ana Paula Rocha',p:'Depilação a laser',v:10,f:2,prox:'hoje 08:30',vence:'12/2026',st:'vencendo'},
-  {pac:'Clara Nunes',p:'Cauterização química',v:3,f:2,prox:'qua 01/10',vence:'05/2027',st:'dia'},
-  {pac:'Joana Prado',p:'Peeling',v:3,f:1,prox:null,vence:'01/2027',st:'atrasado',nota:'devia ter voltado há 6 dias'},
+  {pac:'Clara Nunes',p:'Cauterização química',v:3,f:2,prox:'qui 01/10',vence:'05/2027',st:'dia'},
+  {pac:'Joana Prado',p:'Peeling',v:3,f:1,prox:'hoje 11:00',vence:'01/2027',st:'dia',nota:'veio de uma vaga que abriu (estava 6 dias atrasada)'},
   {pac:'Marta Silva',p:'Depilação a laser',v:10,f:4,prox:null,vence:'01/2027',st:'parado',nota:'sem sessão há 64 dias · parcela atrasada'},
-  {pac:'Rita Alves',p:'Peeling',v:3,f:0,prox:'sex 26/09',vence:'09/2027',st:'dia'},
-  {pac:'Fábio Mendes',p:'Criolipólise',v:4,f:3,prox:'seg 29/09',vence:'02/2027',st:'dia'},
+  {pac:'Rita Alves',p:'Peeling',v:3,f:0,prox:'seg 28/09',vence:'09/2027',st:'dia'},
+  {pac:'Fábio Mendes',p:'Criolipólise',v:4,f:3,prox:'ter 29/09',vence:'02/2027',st:'dia'},
 ];
 const PK_ST={dia:['em dia','g'],atrasado:['atrasado para marcar','a'],parado:['parado · risco','r'],vencendo:['vence com sessões sobrando','a']};
 function telaPacotes(){
@@ -2484,11 +3287,12 @@ const RX_WA={ // real, conta 39, 24/08–23/09, medido 24/09
   sab:{n:4,sem24:3},
   preco:{receberam:13, marcaram:3, marcouMin:[0,55,200], parados:[1,1,6,13,21,23,23,24,24,28], nuncaChamados:7, sumiram:4, ateOPrecoMin:21},
   temas:{agendar:36, preco:22, confirmar:7},
-  cidades:{conversas:1, quais:'Codó'}, // conversas de paciente que citaram uma cidade do roteiro (Raio-X e Roteiro leem daqui)
+  cidades:{conversas:1, quais:'Codó'},
+  picos:['ter 10h','qua 14h'], // picos de mensagem (Conversas mostra o mesmo); Vagas manda convite fora deles // conversas de paciente que citaram uma cidade do roteiro (Raio-X e Roteiro leem daqui)
 };
 /* real, Amigo da clínica lido à mão em 22/09 (a tela Hoje lê daqui) */
 const RX_AMIGO={lido:'22/09', retornos:18, retornosChamados:0, consultas:5, confirmadas:0, vencidos:58, abaixoMin:13, orcamentos:1};
-const RX_MERC={medOcup:38, topOcup:80, sinalCorta:55};
+const RX_MERC={medOcup:38, topOcup:80, sinalCorta:55, ligando:15}; // ligando: referência de mercado de Vagas (preencher cancelamento ligando um a um), fonte a confirmar
 const RX_TURNO={manha:h=>h<'12:00',tarde:h=>h>='12:00',dia:()=>true};
 const RX_TURNO_NOME={manha:'manhã',tarde:'tarde',dia:'dia inteiro'};
 const rxVivo=e=>!['cancelou','faltou'].includes(e.st);
@@ -2814,13 +3618,6 @@ const HJ_PIX=[ // exemplo
   {n:'Sônia Pires',o:'assinatura Pele em dia',v:149,q:'cartão recusado',k:'r',nota:'link de Pix mandado ontem, ainda não pago'},
   {n:'Marta Silva',o:'parcela do pacote de depilação a laser',v:350,q:'atrasada desde 18/09',k:'r',nota:'2º lembrete hoje · pacote parado há 64 dias'},
 ];
-/* quem pode ficar com uma vaga que abriu: [nome, por quê, nota, tipo que marca] */
-const HJ_CAND={
-  manoel:[['Carlos Mendes','retorno vencido há 12 dias',96,'Retorno'],['Márcio Luz','recebeu o preço há 13 dias',81,'Consulta'],['Heitor Lima','pediu "o mais cedo possível"',71,'Consulta'],['Renata Dias','recebeu o preço há 6 dias',66,'Consulta']],
-  juliana:[['Marta Silva','pacote parado há 64 dias',90,'Sessão de pacote'],['Joana Prado','peeling atrasado 6 dias',85,'Sessão de pacote'],['Paula Viana','procedimento estético em aberto',64,'Procedimento estético'],['Clara Nunes','sessão de laser liberada',60,'Sessão de pacote']],
-  brenda:[['Tiago Rocha','retirada do teste alérgico',88,'Retirada teste alérgico'],['Carlos Mendes','vacina: 2ª dose',75,'Vacina'],['Heitor Lima','pediu "o mais cedo possível"',60,'Testes alérgicos'],['Rita Alves','vacina em atraso',55,'Vacina']],
-  viagem:[['Raimunda Sousa','retorno vencido · fila de Lago da Pedra',92,'Retorno'],['Rosa Lima','fila de Lago da Pedra',80,'Consulta'],['Antônio Reis','fila de Lago da Pedra',77,'Consulta'],['Luzia Ramos','fila de Lago da Pedra',70,'Consulta']],
-};
 const hjOrd=(a,b)=>a.dia-b.dia||(a.h<b.h?-1:a.h>b.h?1:0);
 const hjQuando=e=>(e.dia===HOJE?'hoje':e.dia===HOJE+1?'amanhã':e.dia===HOJE-1?'ontem':rxDia(e.dia))+' '+e.h;
 const hjH=h=>{const [a,b]=h.split(':');return (+a)+'h'+(b==='00'?'':b)};
@@ -2837,32 +3634,14 @@ function hjPreparar(){
   /* quando o agente segurou cada horário */
   const hs=['ter 21:48','qua 07:31','ter 19:12','qua 08:02','ter 18:40','qua 06:55','ter 20:26'];let k=0;
   EV.filter(e=>e.st==='segurado').sort(hjOrd).forEach(e=>{e.segH=e.id===4?'hoje 08:44':hs[k++%hs.length]});
-  /* a vaga de hoje que já estava em Vagas (10h, Dr. Manoel, "cancelou há 4 min") é o horário
-     de quem estava na Agenda nesse horário: assim Agenda, Vagas e Hoje contam a mesma história */
-  VAGAS.filter(v=>!v.ev&&v.st==='oferecendo'&&(v.quando||'Hoje')==='Hoje').forEach(v=>{
-    const e=EV.find(x=>x.dia===HOJE&&x.h===v.h&&rxNome(x.p)===v.prof&&x.st==='agendado');
-    if(e){e.st='cancelou';v.ev=e.id;v.porque=hjPrim(e.pac)+' cancelou'}});
   /* dois horários de exemplo aguardando sinal por Pix (conta como ocupado) */
   const s1=hjLivre('manoel',HOJE+1,'14:00'), s2=hjLivre('manoel',5,'08:00');
   if(s1&&!EV.some(e=>e.id===2001))EV.push({id:2001,p:'manoel',h:s1,d:1,dia:HOJE+1,pac:'Kelly Brito',tipo:'Consulta',st:'sinal',org:'Instagram',prazo:'18h',motivo:'faltou em 02/09 sem avisar',pedido:'08:20'});
   if(s2&&!EV.some(e=>e.id===2002))EV.push({id:2002,p:'manoel',h:s2,d:1,dia:5,pac:'Francisca Araújo',tipo:'Consulta',st:'sinal',org:'Indicação',prazo:'18h',motivo:'dia de viagem, em Lago da Pedra',pedido:'08:35'});
 }
 
-/* uma vaga abriu (remarcou ou não pagou o sinal): entra em VAGAS já oferecida */
-function hjLiberar(e,porque){
-  const viagem=localDe(e.p,e.dia)!=='Espaço Pelle';
-  e.st='cancelou';
-  VAGAS.unshift({h:e.h,quando:e.dia===HOJE?'Hoje':DIAS[e.dia][0]+' '+DIAS[e.dia][1],prof:rxNome(e.p),tipo:30*e.d+' min',min:0,st:'oferecendo',
-    of:(viagem?HJ_CAND.viagem:(HJ_CAND[e.p]||HJ_CAND.manoel)).filter(x=>x[0]!==e.pac).slice(0,3).map(x=>x.slice()),resp:null,porque,ev:e.id});
-}
-function hjVaga(i){const v=VAGAS[i];if(!v||v.st!=='oferecendo')return;
-  const nome=v.of[0][0], tp=v.of[0][3]||(Object.values(HJ_CAND).reduce((a,b)=>a.concat(b),[]).find(x=>x[0]===nome)||[])[3];
-  v.st='preenchida';v.resp=nome+' respondeu 1 em 3 min';
-  const e=v.ev&&EV.find(x=>x.id===v.ev);
-  if(e&&e.st==='cancelou'){Object.assign(e,{pac:nome,tipo:tp||e.tipo,st:'confirmado',conf:'respondeu 1 à vaga que abriu',org:'Vaga que abriu',via:'agente'});delete e.segH;delete e.confH;delete e.trat;delete e.pag;delete e.vesp;delete e.credito;delete e.seg;delete e.prazo;delete e.motivo}
-  render();
-  toast('Vaga preenchida · '+(v.quando||'Hoje')+' '+v.h,nome+' ficou com o horário'+(e?', que já aparece confirmado na Agenda':'')+'. Os outros receberam: "já foi preenchida, te aviso na próxima 🙏" · nada foi enviado (protótipo)');
-}
+/* uma vaga abriu (remarcou ou não pagou o sinal): vai para Vagas pelo mesmo caminho do cancelar() */
+function hjLiberar(e,porque){return vgAbrir(e,porque)}
 
 /* 1 · mensagens da noite */
 function abrirNoite(i){const x=HJ_NOITE[i];if(!x)return;
@@ -2892,9 +3671,9 @@ function hjConfirmou(id){const e=EV.find(x=>x.id===id);if(!e||e.st!=='agendado')
 function hjRemarcar(id){const e=EV.find(x=>x.id===id);if(!e||e.st==='cancelou')return null;
   const of=[e.dia+1,e.dia+2,e.dia+3].filter(d=>d<DIAS.length&&localDe(e.p,d)===localDe(e.p,e.dia)).map(d=>{const l=rxCel(e.p,d,'dia').livres[0];return l?rxDia(d)+' às '+l:null}).filter(Boolean).slice(0,2);
   const r={pac:e.pac,dia:e.dia,q:hjQuando(e),prof:rxNome(e.p),of:of.length?of.join(' ou '):'horários da semana que vem'};
-  HJ_REM.push(r);hjLiberar(e,hjPrim(e.pac)+' pediu para remarcar');return r}
+  HJ_REM.push(r);r.vaga=hjLiberar(e,hjPrim(e.pac)+' pediu para remarcar');return r}
 function hjRemarcarBtn(id){const r=hjRemarcar(id);if(!r)return;render();
-  toast('↺ '+r.pac+' vai remarcar','O agente ofereceu '+r.of+'. O horário de '+r.q+' com '+r.prof+' foi para Vagas e já está sendo oferecido · nada foi enviado (protótipo)',true)}
+  toast('↺ '+r.pac+' vai remarcar','O agente ofereceu '+r.of+'. '+(r.vaga&&r.vaga.st!=='sem-gente'?vgStatusFrase(r.vaga).replace('O horário','O horário de '+r.q+' com '+r.prof):'O horário de '+r.q+' com '+r.prof+' ficou livre e entrou em Vagas › Ainda dá para encher.')+' · nada foi enviado (protótipo)',true)}
 function abrirLote(){
   const alvo=EV.filter(e=>e.dia===HOJE+1&&e.st==='agendado').sort(hjOrd), e=alvo[0];
   abrirModal(`<h2>Confirmação de amanhã · sai às 10h</h2><div class="mut" style="font-size:.84rem;margin-bottom:.6rem">Uma mensagem para cada atendimento de qui 24/09 que ainda não confirmou (${alvo.length}).</div>
@@ -2996,17 +3775,17 @@ function telaHoje(){
   const nLigar=hjSem.length+(HJ_LOTE?amSem.length:0);
   const fins=EV.filter(e=>e.st==='finalizado'&&(e.dia===HOJE||e.dia===HOJE-1)&&tipo(e.tipo)[2]==='consulta'&&!e.trat).sort((a,b)=>b.dia-a.dia||(a.h<b.h?-1:1));
   const vv=[];Object.entries(FUNIL).forEach(([col,cs])=>cs.forEach((c,i)=>{const t=c.t.find(([x])=>/vou ver/i.test(x));if(t&&!c.hjFeito)vv.push({col,i,c,fr:hjFrase(t[0])})}));
-  const vagasOf=VAGAS.filter(v=>v.st==='oferecendo').length;
+  const vagasOf=emOferta(), vgPend=VAGAS.filter(v=>['aprovar','curta'].includes(v.st)).length; // em oferta · esperando a recepção
   const nRet=HJ_RET_OK?0:HJ_RET.length;
   const sinais=EV.filter(e=>e.st==='sinal').sort(hjOrd);
   const pix=HJ_PIX.map((x,i)=>[x,i]).filter(([x])=>!x.pago);
 
   /* topo: data + uma linha de resumo (o bloco 6 é o agente trabalhando: só acompanhar) */
   const B=[[1,noite.length,'mensagem da noite','mensagens da noite'],[2,segs.length,'horário segurado','horários segurados'],[3,nLigar,'sem resposta à confirmação','sem resposta à confirmação'],
-    [4,fins.length,'finalizado sem resposta','finalizados sem resposta'],[5,vv.length,'disse "vou ver"','disseram "vou ver"'],[6,vagasOf,'vaga sendo oferecida','vagas sendo oferecidas'],
+    [4,fins.length,'finalizado sem resposta','finalizados sem resposta'],[5,vv.length,'disse "vou ver"','disseram "vou ver"'],[6,vagasOf,'vaga em oferta','vagas em oferta'],
     [7,nRet,'retorno a chamar','retornos a chamar'],[8,sinais.length+pix.length,'Pix vencendo','Pix vencendo']];
   const lb=b=>b[1]+' '+(b[1]===1?b[2]:b[3]);
-  const tot=B.filter(b=>b[0]!==6).reduce((s,b)=>s+b[1],0), prim=B.find(b=>b[0]!==6&&b[1]);
+  const tot=B.filter(b=>b[0]!==6).reduce((s,b)=>s+b[1],0)+vgPend, prim=B.find(b=>b[0]!==6&&b[1])||(vgPend?B[5]:undefined); // vaga só conta quando espera a recepção aprovar
   let h=`<div class="pg-h"><div><h1>Hoje</h1><div class="sub">Quarta, 23 de setembro de 2026 · agora ${hjAgora} · o que fazer primeiro, em ordem</div></div>
     <button class="btn sec hj-so-pc" onclick="CV_FILTRO='pacientes';ir('conversas')">💬 Conversas</button></div>
   <div class="hj-top">${tot?`<b>${hjPl(tot,'coisa','coisas')} para resolver hoje.</b> Primeiro: ${lb(prim)}.`:'<b>Tudo em dia.</b> Nada esperando a recepção agora.'}${HJ_LOTE?'':' A confirmação de amanhã sai sozinha às 10h.'}</div>
@@ -3054,12 +3833,10 @@ function telaHoje(){
     +`<div class="faint" style="font-size:.74rem;margin-top:.45rem">No último mês, ${W.preco.receberam-W.preco.marcaram} pessoas pararam depois do preço e ${W.preco.nuncaChamados} nunca foram chamadas de novo. ${rxF('wa')}</div>
     <div class="acoes"><button class="btn sec min" onclick="FU_FASE='venda';ir('funil')">Ver no Funil</button></div>`);
 
-  /* 6 · vagas que abriram hoje (o agente oferece; a recepção acompanha) */
-  h+=bloco(6,vagasOf,cab(6,'Vagas que abriram, sendo oferecidas',vagasOf,'Cancelou, pediu para remarcar ou não pagou o sinal: o horário é oferecido a 3 pessoas que cabem nele, e o primeiro que responder 1 leva. Aqui você só acompanha.',rxF('ex'))
-    +(VAGAS.length?VAGAS.map((v,i)=>it((v.quando||'hoje').toLowerCase()+' '+v.h,`${v.prof} · ${v.tipo}`,
-        v.st==='oferecendo'?`oferecida a ${v.of.map(o=>hjPrim(o[0])).join(', ')}${v.porque?' · '+v.porque:''}`:`<span style="color:var(--neon)">preenchida ✓</span>${v.resp?' · '+v.resp:''}`,
-        v.st==='oferecendo'?`<button class="btn sec min" onclick="hjVaga(${i})">Simular: alguém respondeu</button>`:'')).join(''):feito('Nenhuma vaga aberta hoje.'))
-    +(pode('vagas')?`<div class="acoes"><button class="btn sec min" onclick="ir('vagas')">Ver Vagas</button></div>`:''));
+  /* 6 · vagas que abriram (Vagas: o Zaq acha quem cabe; no 1º mês a recepção aprova) */
+  h+=bloco(6,vagasOf,cab(6,'Vagas que abriram',vagasOf,'Cancelou, pediu para remarcar ou não pagou o sinal: o Zaq acha quem cabe no horário. No 1º mês, a recepção aprova cada horário antes de a oferta sair; o primeiro que responder 1 fica com ele.',rxF('ex'))
+    +(VAGAS.length?VAGAS.map(v=>it(vgQuandoDia(v.dia)+' '+v.h,`${rxNome(v.p)} · ${v.local}`,vgResumoHoje(v),vgBotaoHoje(v))).join(''):feito('Nenhum horário abriu hoje.'))
+    +(pode('vagas')?`<div class="acoes"><button class="btn sec min" onclick="VG_ABA='hoje';ir('vagas')">Ver Vagas</button></div>`:''));
 
   /* 7 · retornos a chamar hoje (dos pedidos no Amigo) */
   h+=bloco(7,nRet,cab(7,'Retornos a chamar hoje',nRet,`O médico pediu a volta e ninguém chamou: no Amigo, ${AM.retornos} retornos pedidos e ${AM.retornosChamados} chamados. Hoje vão os ${HJ_RET.length} mais atrasados; o resto, nos próximos dias.`,rxF('amigo')+rxF('ex'))
@@ -3090,7 +3867,7 @@ function telaExistente(n){return `<div class="pg-h"><div><h1>${n}</h1><div class
 /* ver como recepção: tela do dono mostra este aviso em vez do conteúdo */
 function telaSoDono(){const it=itemMenu(ROTA==='paciente'?'pacientes':ROTA);
   return `<div class="pg-h"><div><h1>${it?it[1]:'Esta tela'}</h1><div class="sub">Visível só para o dono.</div></div></div>
-  <div class="card"><div class="mut" style="font-size:.86rem;line-height:1.55">Você está vendo como <b style="color:var(--txt)">recepção</b>. Raio-X, Roteiro, Vagas, configuração e os valores de faturamento da clínica ficam com o dono. A recepção trabalha em Hoje, Conversas, Agenda, Pacientes, Funil e Tratamentos, com desconto até 10%.</div>
+  <div class="card"><div class="mut" style="font-size:.86rem;line-height:1.55">Você está vendo como <b style="color:var(--txt)">recepção</b>. Raio-X, Roteiro, configuração e os valores de faturamento da clínica ficam com o dono. A recepção trabalha em Hoje, Conversas, Agenda, Vagas, Pacientes, Funil e Tratamentos, com desconto até 10%.</div>
   <div class="acoes"><button class="btn" onclick="ir('hoje')">Ir para Hoje</button><button class="btn sec" onclick="VER_COMO='dono';trocarPapel()">Ver como dono</button></div></div>`}
 
 function render(){

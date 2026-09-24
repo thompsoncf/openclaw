@@ -289,15 +289,20 @@ class LivroCaixa:
                 lanc.duplicado = True
                 return lanc
         # SQL do insert (reutilizado com conexão própria OU externa)
-        _sql = """insert into lancamentos
+        # o TIPO de despesa (325) só entra no insert quando veio: as portas que
+        # não sabem dele gravam exatamente o que sempre gravaram
+        _tipo_d = getattr(lanc, "tipo_despesa", None)
+        _extra_col, _extra_val = ((", tipo_despesa", ",%s") if _tipo_d else ("", ""))
+        _sql = f"""insert into lancamentos
                    (conta_id, membro_id, tipo, valor_centavos, categoria, descricao,
                     data, pagamento, forma_pagamento, origem, comprovante, chave,
-                    natureza, plano_conta_id, centro_custo_id)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id"""
+                    natureza, plano_conta_id, centro_custo_id{_extra_col})
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s{_extra_val}) returning id"""
         _args = (self.conta_id, self.membro_id, lanc.tipo.value, lanc.valor_centavos,
                  lanc.categoria, lanc.descricao, lanc.data, lanc.pagamento,
                  lanc.forma_pagamento, lanc.origem, lanc.comprovante, chave_final,
-                 lanc.natureza, lanc.plano_conta_id, lanc.centro_custo_id)
+                 lanc.natureza, lanc.plano_conta_id, lanc.centro_custo_id) \
+            + ((_tipo_d,) if _tipo_d else ())
 
         # conn EXTERNO: o chamador controla a transação (NÃO commita aqui). Serve pra
         # operações que precisam ser atômicas com outros inserts (ex.: pagar_folha,
@@ -579,26 +584,20 @@ class LivroCaixa:
         total["saldo"] = total["anterior"] + total["receitas"] - total["despesas"]
         return {"total": total, **blocos}
 
-    def despesas_empresa_por_centro(self, ano: int, mes: int,
-                                    membro_id: int | None = None) -> dict:
-        """As despesas de EMPRESA do mês, por centro de custo — e o que ficou sem.
+    def despesas_empresa_por_tipo(self, ano: int, mes: int,
+                                  membro_id: int | None = None) -> dict:
+        """As despesas de EMPRESA do mês, por TIPO — fixa, eventual, investimento.
 
-        Pedido 2 do dono em 23/09/2026: "um card com 3 tipos de despesas — fixa,
-        eventual, investimento". Os três já existiam como CENTROS DE CUSTO da
-        Prime, criados por ele; o que faltava era o card mostrar.
+        Pedido 2 do dono (23/09/2026): "um card com 3 tipos de despesas". A
+        primeira versão (#820) quebrava por centro de custo, porque a Prime tinha
+        esses três nomes na lista de centros; o dono corrigiu em 24/09/2026 —
+        "não é centro de custo, tem que ser separado". A coluna agora é própria
+        (migração 325), e o centro volta a ser só a área.
 
-        Só EMPRESA, e não o total do mês: centro de custo é classificação de
-        empresa (o gasto pessoal não tem), e assim a soma desta quebra fecha com
-        a linha "Empresa" que fica logo acima dela no card — em vez de parecer que
-        falta dinheiro.
-
-        `sem_centro` é devolvido À PARTE e nunca some: é a linha que mostra o
-        tamanho do que escapou da classificação. Em 23/09/2026 era a maior de
-        todas — e esconder isso deixaria a soma dos centros parecer o total.
-
-        Só LEITURA. Nenhum centro é criado nem alterado ("não mexer em centro de
-        custos", regra do dono no mesmo dia).
+        Só EMPRESA, pra a soma fechar com a linha "Empresa" logo acima no card.
+        `sem_tipo` vem À PARTE e nunca some: é o tamanho do que falta classificar.
         """
+        from finance.tipo_despesa import TIPOS
         cond = "l.conta_id = %s"
         base: list = [self.conta_id]
         if membro_id is not None:
@@ -606,19 +605,31 @@ class LivroCaixa:
         ini, prox = _intervalo_mes(ano, mes)
         with self.pool.connection() as conn:
             rows = conn.execute(
-                f"""select cc.nome, coalesce(sum(l.valor_centavos), 0)
+                f"""select l.tipo_despesa, coalesce(sum(l.valor_centavos), 0)
                       from lancamentos l
-                      left join centros_custo cc on cc.id = l.centro_custo_id
-                                                 and cc.conta_id = l.conta_id
                      where {cond} and l.tipo = 'despesa' and l.natureza = 'empresa'
                        and l.data >= %s and l.data < %s
-                     group by cc.nome""",
+                     group by l.tipo_despesa""",
                 base + [ini, prox]).fetchall()
-        centros = sorted(((n, int(v)) for n, v in rows if n and v),
-                         key=lambda x: (-x[1], x[0]))
-        sem = sum(int(v) for n, v in rows if not n)
-        return {"centros": centros, "sem_centro": sem,
-                "total": sum(v for _, v in centros) + sem}
+        por = {t: 0 for t in TIPOS}
+        sem = 0
+        for t, v in rows:
+            if t in por:
+                por[t] += int(v)
+            else:
+                sem += int(v)
+        return {"tipos": [(t, por[t]) for t in TIPOS], "sem_tipo": sem,
+                "total": sum(por.values()) + sem}
+
+    def definir_tipo_despesa(self, lancamento_id: int, tipo: str | None) -> bool:
+        """Define (ou limpa, com None) o tipo de UM lançamento desta conta."""
+        from finance.tipo_despesa import normalizar
+        with self.pool.connection() as conn:
+            cur = conn.execute(
+                "update lancamentos set tipo_despesa = %s where id = %s and conta_id = %s",
+                (normalizar(tipo), lancamento_id, self.conta_id))
+            conn.commit()
+            return cur.rowcount > 0
 
     def despesas_por_categoria(self, ano: int, mes: int, membro_id: int | None = None,
                                natureza: str | None = None) -> list[tuple[str, int]]:
@@ -895,13 +906,15 @@ class LivroCaixa:
             rows = conn.execute(
                 f"""select l.id, l.data, l.descricao, l.categoria, l.tipo, l.valor_centavos,
                           l.origem, coalesce(m.nome, '-') as quem, l.natureza,
-                          l.forma_pagamento, l.plano_conta_id, l.centro_custo_id
+                          l.forma_pagamento, l.plano_conta_id, l.centro_custo_id,
+                          to_jsonb(l)->>'tipo_despesa'
                     from lancamentos l left join membros m on m.id = l.membro_id
                     where {cond} order by l.data desc, l.id desc limit %s""",
                 params + [limite]).fetchall()
         return [{"id": r[0], "data": r[1], "descricao": r[2], "categoria": r[3], "tipo": r[4],
                  "valor": int(r[5]), "origem": r[6], "quem": r[7], "natureza": r[8],
-                 "forma_pagamento": r[9], "plano_conta_id": r[10], "centro_custo_id": r[11]}
+                 "forma_pagamento": r[9], "plano_conta_id": r[10], "centro_custo_id": r[11],
+                 "tipo_despesa": r[12]}
                 for r in rows]
 
     def raiox_por_departamento(self, ano: int | None = None, mes: int | None = None,
@@ -1366,7 +1379,8 @@ class LivroCaixa:
             rows = conn.execute(
                 """select l.id, l.data, l.descricao, l.categoria, l.tipo, l.valor_centavos,
                           l.origem, coalesce(m.nome, '-') as quem, l.natureza,
-                          l.forma_pagamento, l.plano_conta_id, l.centro_custo_id
+                          l.forma_pagamento, l.plano_conta_id, l.centro_custo_id,
+                          to_jsonb(l)->>'tipo_despesa'
                     from lancamentos l left join membros m on m.id = l.membro_id
                     where l.conta_id = %s and l.descricao ilike %s
                     order by l.data desc, l.id desc limit %s""",
@@ -1374,7 +1388,8 @@ class LivroCaixa:
             ).fetchall()
         return [{"id": r[0], "data": r[1], "descricao": r[2], "categoria": r[3], "tipo": r[4],
                  "valor": int(r[5]), "origem": r[6], "quem": r[7], "natureza": r[8],
-                 "forma_pagamento": r[9], "plano_conta_id": r[10], "centro_custo_id": r[11]}
+                 "forma_pagamento": r[9], "plano_conta_id": r[10], "centro_custo_id": r[11],
+                 "tipo_despesa": r[12]}
                 for r in rows]
 
     def buscar_itens(self, termo: str, dias: int = 60) -> tuple[list[dict], int]:

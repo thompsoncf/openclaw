@@ -47,7 +47,8 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql",
               "196_titulo_recorrencia.sql",
               "197_titulo_acrescimo.sql",
               "317_titulo_classificacao.sql",
-              "320_saldo_bancario_informado.sql")
+              "320_saldo_bancario_informado.sql",
+              "325_tipo_despesa.sql")
 
 CONTA, OUTRA = 631, 632
 HOJE = date.today()
@@ -94,62 +95,67 @@ def _limpa(pool):
     yield
 
 
-# ═══════════════════════════════════════════ a quebra por centro
+# ═══════════════════════════════════════════ a quebra por TIPO
+#
+# A 1ª versão (#820) quebrava por centro de custo; o dono corrigiu em 24/09/2026 —
+# "fixa, eventual, investimento não é centro de custo" (migração 325). A quebra
+# agora lê `tipo_despesa`, e o centro não entra nela.
 
-def _despesa(pool, valor, natureza="empresa", centro=None, quando=None, tipo=Tipo.DESPESA,
-             conta=CONTA):
+def _despesa(pool, valor, natureza="empresa", tipo_d=None, quando=None, tipo=Tipo.DESPESA,
+             conta=CONTA, centro=None):
     lanc = Lancamento(tipo=tipo, valor_centavos=valor, categoria="Servicos",
                       descricao=f"gasto {valor}", data=quando or HOJE, origem="foto",
-                      natureza=natureza, centro_custo_id=centro)
+                      natureza=natureza, centro_custo_id=centro, tipo_despesa=tipo_d)
     LivroCaixa(pool, conta).adicionar(lanc, forcar=True)
 
 
 def test_a_quebra_soma_so_empresa_e_fecha_com_a_linha_empresa(pool):
     from finance import plano_contas as pc
-    fixa = pc.criar_centro(pool, CONTA, "DESPESA FIXA")["id"]
-    inv = pc.criar_centro(pool, CONTA, "INVESTIMENTO")["id"]
-    _despesa(pool, 150000, centro=fixa)
-    _despesa(pool, 50000, centro=fixa)
-    _despesa(pool, 300000, centro=inv)
-    _despesa(pool, 70000)                                   # empresa sem centro
-    _despesa(pool, 99900, natureza="pessoal")               # não entra
+    area = pc.criar_centro(pool, CONTA, "BUFFET")["id"]
+    _despesa(pool, 150000, tipo_d="fixa")
+    _despesa(pool, 50000, tipo_d="fixa", centro=area)       # o centro não muda o tipo
+    _despesa(pool, 300000, tipo_d="investimento")
+    _despesa(pool, 70000, centro=area)                      # empresa sem tipo
+    _despesa(pool, 99900, natureza="pessoal", tipo_d="fixa")  # não entra
     _despesa(pool, 12300, natureza=None)                    # a definir: não entra
-    _despesa(pool, 500000, centro=fixa, tipo=Tipo.RECEITA)  # receita: não entra
-    _despesa(pool, 44400, centro=fixa, quando=HOJE - timedelta(days=45))  # outro mês
-    _despesa(pool, 88800, centro=None, conta=OUTRA)                     # outra conta
-    q = LivroCaixa(pool, CONTA).despesas_empresa_por_centro(HOJE.year, HOJE.month)
-    assert q["centros"] == [("INVESTIMENTO", 300000), ("DESPESA FIXA", 200000)]
-    assert q["sem_centro"] == 70000 and q["total"] == 570000
+    _despesa(pool, 44400, tipo_d="fixa", quando=HOJE - timedelta(days=45))  # outro mês
+    _despesa(pool, 88800, tipo_d="fixa", conta=OUTRA)                        # outra conta
+    q = LivroCaixa(pool, CONTA).despesas_empresa_por_tipo(HOJE.year, HOJE.month)
+    assert q["tipos"] == [("fixa", 200000), ("eventual", 0), ("investimento", 300000)]
+    assert q["sem_tipo"] == 70000 and q["total"] == 570000
     empresa = LivroCaixa(pool, CONTA).resumo_mes_quebra(HOJE.year, HOJE.month)["empresa"]
     assert q["total"] == empresa["despesas"], "a quebra tem que fechar com a linha Empresa"
 
 
-def test_o_card_mostra_a_quebra_com_o_sem_centro_em_ambar():
+def test_o_card_mostra_a_quebra_por_tipo_com_o_sem_tipo_em_ambar():
     from tests.test_financeiro_layout import _desenha
-    html = _desenha(quebra_centro={"centros": [("DESPESA FIXA", 1540838),
-                                               ("INVESTIMENTO", 591913)],
-                                   "sem_centro": 750000, "total": 2882751})
-    i = html.index('class="fin-quebra fin-quebra-cc"')
+    html = _desenha(quebra_tipo={"tipos": [("fixa", 1540838), ("eventual", 393300),
+                                           ("investimento", 591913)],
+                                 "sem_tipo": 750000, "total": 3276051})
+    i = html.index('class="fin-quebra fin-quebra-cc fin-quebra-tipo"')
     bloco = html[i:html.index("</div>\n</div>", i)]
-    assert "Empresa por centro" in bloco
-    assert bloco.index("DESPESA FIXA") < bloco.index("INVESTIMENTO") < bloco.index("Sem centro")
-    assert "var(--ambar)" in bloco[bloco.index("Sem centro") - 200:]
+    assert "Empresa por tipo" in bloco and "centro" not in bloco.lower()
+    assert bloco.index("Fixa") < bloco.index("Eventual") < bloco.index("Investimento") \
+        < bloco.index("Sem tipo")
+    assert "15.408,38" in bloco
+    assert "var(--ambar)" in bloco[bloco.index("Sem tipo") - 200:]
 
 
 def test_sem_quebra_o_card_fica_como_era():
     from tests.test_financeiro_layout import _desenha
-    marca = 'class="fin-quebra fin-quebra-cc"'
+    marca = 'class="fin-quebra fin-quebra-cc fin-quebra-tipo"'
     assert marca not in _desenha()
-    assert marca not in _desenha(quebra_centro={"centros": [], "sem_centro": 0,
-                                                          "total": 0})
+    assert marca not in _desenha(quebra_tipo={"tipos": [], "sem_tipo": 0, "total": 0})
 
 
-def test_tudo_sem_centro_ainda_aparece_e_diz_que_e_tudo():
-    """Setembro da Prime em 23/09 de manhã: 69 despesas, nenhuma com centro. O
-    card não pode esconder isso — é justamente o que ele existe pra mostrar."""
+def test_tudo_sem_tipo_ainda_aparece():
+    """Setembro da Prime em 24/09: 91% do valor sem tipo. O card não pode
+    esconder isso — é justamente o que ele existe pra mostrar."""
     from tests.test_financeiro_layout import _desenha
-    html = _desenha(quebra_centro={"centros": [], "sem_centro": 5090391, "total": 5090391})
-    assert "Sem centro" in html and "50.903,91" in html
+    html = _desenha(quebra_tipo={"tipos": [("fixa", 0), ("eventual", 0),
+                                           ("investimento", 0)],
+                                 "sem_tipo": 5090391, "total": 5090391})
+    assert "Sem tipo" in html and "50.903,91" in html
 
 
 # ═══════════════════════════════════════════ o saldo informado

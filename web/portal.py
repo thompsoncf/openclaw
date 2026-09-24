@@ -1127,14 +1127,14 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <div><span class="rot"><span class="pt" style="background:var(--azul)"></span>Empresa</span><span class="val nowrap">{{ (quebra.despesas.empresa/100)|n2 }}</span></div>
 <div><span class="rot"><span class="pt" style="background:var(--txt-mut)"></span>Pessoal</span><span class="val nowrap">{{ (quebra.despesas.pessoal/100)|n2 }}</span></div>
 <div{% if quebra.despesas.a_definir %} style="color:var(--ambar)"{% endif %}><span class="rot"{% if quebra.despesas.a_definir %} style="color:var(--ambar)"{% endif %}><span class="pt" style="background:var(--ambar)"></span>A definir</span><span class="val nowrap">{{ (quebra.despesas.a_definir/100)|n2 }}</span></div>
-</div>{% endif %}{#- EMPRESA POR CENTRO (pedido 2, 23/09/2026 — "fixa, eventual,
-   investimento", que o dono já tinha criado como centros de custo). Quebra a
-   linha "Empresa" de cima, e só ela: é por isso que soma com ela. "Sem centro"
-   em âmbar e SEMPRE que existir — é o tamanho do que escapou, e sem ela a
-   soma dos centros pareceria o total. -#}{% if quebra_centro and quebra_centro.total %}<div class="fin-quebra fin-quebra-cc" title="as despesas de EMPRESA do mês, por centro de custo">
-<div class="cc-tit"><span class="rot">Empresa por centro</span><span class="val nowrap">{{ (quebra_centro.total/100)|n2 }}</span></div>
-{% for nome, v in quebra_centro.centros %}<div><span class="rot"><span class="pt" style="background:var(--verde-claro)"></span>{{ nome|e }}</span><span class="val nowrap">{{ (v/100)|n2 }}</span></div>
-{% endfor %}{% if quebra_centro.sem_centro %}<div style="color:var(--ambar)"><span class="rot" style="color:var(--ambar)"><span class="pt" style="background:var(--ambar)"></span>Sem centro</span><span class="val nowrap">{{ (quebra_centro.sem_centro/100)|n2 }}</span></div>{% endif %}
+</div>{% endif %}{#- EMPRESA POR TIPO (pedido 2: "fixa, eventual, investimento").
+   A 1ª versão quebrava por centro de custo; o dono corrigiu em 24/09/2026 — "não
+   é centro de custo, tem que ser separado" (migração 325). Quebra a linha
+   "Empresa" de cima, e só ela: é por isso que soma com ela. "Sem tipo" em âmbar
+   e SEMPRE que existir — é o tamanho do que falta classificar. -#}{% if quebra_tipo and quebra_tipo.total %}<div class="fin-quebra fin-quebra-cc fin-quebra-tipo" title="as despesas de EMPRESA do mês, por tipo">
+<div class="cc-tit"><span class="rot">Empresa por tipo</span><span class="val nowrap">{{ (quebra_tipo.total/100)|n2 }}</span></div>
+{% for tp, v in quebra_tipo.tipos %}<div><span class="rot"><span class="pt" style="background:{{ TIPO_DESPESA_COR[tp] }}"></span>{{ TIPO_DESPESA_ROTULO[tp] }}</span><span class="val nowrap">{{ (v/100)|n2 }}</span></div>
+{% endfor %}{% if quebra_tipo.sem_tipo %}<div style="color:var(--ambar)"><span class="rot" style="color:var(--ambar)"><span class="pt" style="background:var(--ambar)"></span>Sem tipo</span><span class="val nowrap">{{ (quebra_tipo.sem_tipo/100)|n2 }}</span></div>{% endif %}
 </div>{% endif %}</div>
 </div>
 
@@ -1270,6 +1270,11 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% if centros_custo %}<select class="cc-edit" data-id="{{ l.id }}" onchange="centroMudou(this)" title="centro de custo (opcional)" style="background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.72rem;padding:.18rem .4rem;max-width:130px">
 <option value="">— centro —</option>
 {% for c in centros_custo %}<option value="{{ c.id }}" {% if l.centro_custo_id==c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
+</select>{% endif %}
+{#- o TIPO (325): terceira pergunta, separada do centro — só em despesa -#}
+{% if l.tipo == 'despesa' %}<select class="td-edit" data-id="{{ l.id }}" onchange="tipoDespesaMudou(this)" title="tipo de despesa (opcional)" style="background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.72rem;padding:.18rem .4rem;max-width:120px">
+<option value="">— tipo —</option>
+{% for tp in TIPOS_DESPESA %}<option value="{{ tp }}" {% if l.tipo_despesa==tp %}selected{% endif %}>{{ TIPO_DESPESA_ROTULO[tp] }}</option>{% endfor %}
 </select>{% endif %}
 <span class="apply-cat" data-id="{{ l.id }}" onclick="aplicarLote(this)" title="usar essa conta em todos os lançamentos de empresa deste mês com a mesma categoria" style="font-size:.66rem;color:var(--verde-claro);cursor:pointer;text-decoration:underline;text-underline-offset:2px;align-self:center">aplicar a todos iguais</span>
 </div>
@@ -1624,6 +1629,11 @@ function planoMudou(sel){
         if(sel.value && dot){ dot.remove(); }
       }
     });
+}
+function tipoDespesaMudou(sel){
+  var id = sel.getAttribute('data-id');
+  sel.disabled = true;
+  zapFetch('/painel/lancamento/tipo-despesa', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&tipo_despesa='+encodeURIComponent(sel.value)}).then(function(d){ sel.disabled=false; if(d && d.ok){ sel.style.borderColor='var(--verde-claro)'; } });
 }
 function centroMudou(sel){
   var id = sel.getAttribute('data-id');
@@ -4251,6 +4261,78 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endif %}
 
+{#- DESPESAS POR TIPO — o quadro do gestor (325). Fixa, eventual e investimento
+   separados do centro de custo, por correção do dono em 24/09/2026: "tem que
+   ser separado para ter maior clareza no relatório do gestor". Setembro/2026
+   abriu com 91% do valor sem tipo na Prime, então o quadro traz junto a lista
+   pra classificar com um toque — um relatório que abre vazio não ajuda ninguém.
+   A sugestão vem do mesmo fornecedor/descrição e é só sugestão: o toque grava. -#}
+{% if quadro_tipo and quadro_tipo|selectattr('total')|list %}
+<style>
+  .qtd-mes{margin-top:.7rem}
+  .qtd-cab{display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap;font-size:.84rem}
+  .qtd-cab .pct{font-family:var(--mono);font-size:.74rem;color:var(--txt-mut)}
+  .qtd-cab .pct.baixo{color:#f0c05a}
+  .qtd-barra{display:flex;height:10px;border-radius:999px;overflow:hidden;background:var(--card-2,#1b1b1d);margin:.35rem 0 .2rem}
+  .qtd-barra span{display:block;height:100%}
+  .qtd-l{display:flex;justify-content:space-between;gap:.5rem;padding:.28rem 0;border-bottom:1px solid var(--borda);font-size:.8rem}
+  .qtd-l:last-of-type{border-bottom:0}
+  .qtd-l b{font-family:var(--mono);font-weight:500;white-space:nowrap}
+  .qtd-l .pt{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;margin-right:.4rem}
+  .qtd-l i{font-style:normal;color:var(--txt-mut);font-size:.72rem}
+  .qtd-l.sem,.qtd-l.sem b{color:#f0c05a}
+  .qtd-cls{margin-top:.35rem}
+  .qtd-cls summary{cursor:pointer;font-size:.78rem;color:#f0c05a}
+  .qtd-it{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.35rem .6rem;padding:.4rem 0;border-bottom:1px solid var(--borda);font-size:.78rem}
+  .qtd-it .d{flex:1 1 180px;min-width:0;overflow-wrap:anywhere}
+  .qtd-it .d i{display:block;font-style:normal;font-size:.7rem;color:var(--txt-mut)}
+  .qtd-it .bts{display:flex;gap:.3rem;flex-wrap:wrap}
+  .qtd-it button{width:auto;min-height:0;border:1px solid #2f2f31;border-radius:999px;padding:.24rem .65rem;font-size:.74rem;background:none;color:var(--txt-mut);cursor:pointer}
+  .qtd-it button.sug{border-style:dashed;border-color:#1E4A3A;color:var(--verde-claro)}
+  .qtd-it button.on{border-style:solid;border-color:#1E4A3A;background:#10241A;color:var(--verde-claro);font-weight:600}
+  .qtd-it.feito{opacity:.55}
+</style>
+<div class="card larga" id="despesas-por-tipo">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.3rem">
+    <strong>Despesas por tipo</strong>
+    <span class="mut" style="font-size:.72rem">fixa · eventual · investimento — separado do centro de custo</span></div>
+  {% for m in quadro_tipo if m.total %}
+  <div class="qtd-mes">
+    <div class="qtd-cab"><b>{{ m.rotulo }}</b><span class="pct{{ ' baixo' if m.pct_com_tipo < 50 }}">{{ m.total|brl }} · {{ m.pct_com_tipo }}% do valor com tipo</span></div>
+    <div class="qtd-barra">{% for x in m.por_tipo %}{% if x.centavos %}<span style="width:{{ (100 * x.centavos / m.total)|round(1) }}%;background:{{ TIPO_DESPESA_COR[x.tipo] }}"></span>{% endif %}{% endfor %}{% if m.sem.centavos %}<span style="width:{{ (100 * m.sem.centavos / m.total)|round(1) }}%;background:#f0c05a"></span>{% endif %}</div>
+    {% for x in m.por_tipo %}<div class="qtd-l"><span><span class="pt" style="background:{{ TIPO_DESPESA_COR[x.tipo] }}"></span>{{ x.rotulo }} <i>· {{ x.n }}</i></span><b>{{ x.centavos|brl }}</b></div>{% endfor %}
+    {% if m.sem.n %}<div class="qtd-l sem"><span><span class="pt" style="background:#f0c05a"></span>Sem tipo <i>· {{ m.sem.n }}</i></span><b>{{ m.sem.centavos|brl }}</b></div>{% endif %}
+    {% set _pend = (quadro_sem_tipo or {}).get((m.ano, m.mes)) or [] %}
+    {% if _pend %}
+    <details class="qtd-cls">
+      <summary>{{ _pend|length }} de {{ m.rotulo.split('/')[0]|lower }} sem tipo — classificar agora ▾</summary>
+      {% for l in _pend %}
+      <div class="qtd-it" id="qtd-{{ l.id }}">
+        <span class="d">{{ l.descricao|e }} — {{ l.valor_centavos|brl }}<i>{{ l.data.strftime('%d/%m') }}{% if l.plano %} · {{ l.plano|e }}{% endif %}{% if l.centro %} · centro {{ l.centro|e }}{% endif %}{% if l.sugestao %} · sugerido: {{ TIPO_DESPESA_ROTULO[l.sugestao] }}{% endif %}</i></span>
+        <span class="bts">{% for tp in TIPOS_DESPESA %}<button type="button" class="{{ 'sug' if l.sugestao == tp }}" data-tipo="{{ tp }}" onclick="qtdTipo(this, {{ l.id }})">{{ TIPO_DESPESA_ROTULO[tp] }}</button>{% endfor %}</span>
+      </div>
+      {% endfor %}
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+  <script>
+  // um toque grava (a mesma rota do Financeiro); a sugestão só destaca
+  function qtdTipo(btn, id){
+    var lin = document.getElementById('qtd-' + id);
+    lin.querySelectorAll('button').forEach(function(b){ b.disabled = true; });
+    zapFetch('/painel/lancamento/tipo-despesa', {method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'lancamento_id=' + id + '&tipo_despesa=' + encodeURIComponent(btn.dataset.tipo)})
+    .then(function(d){
+      lin.querySelectorAll('button').forEach(function(b){ b.disabled = false; b.classList.remove('on'); });
+      if(d && d.ok){ btn.classList.add('on'); lin.classList.add('feito'); }
+    });
+  }
+  </script>
+</div>
+{% endif %}
+
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center" id="titulos"><strong>Títulos a pagar e receber</strong>
     {% if n_aguardando %}<span class="selo esp">{{ n_aguardando }} esperando liberação</span>{% endif %}</div>
@@ -4371,6 +4453,13 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
           <option value="">— sem —</option>
           {% for c in centros_ativos %}<option value="{{ c.id }}">{{ c.nome|e }}</option>{% endfor %}
         </select></label>{% endif %}
+      {#- O TIPO (325) — fixa, eventual, investimento —, separado do centro por
+         correção do dono em 24/09/2026. Três botões, opcional, só em conta a
+         PAGAR: dinheiro entrando não é "despesa fixa". -#}
+      <div class="tit-tipo-d" id="tit-tipo-d" role="radiogroup" aria-label="tipo de despesa">
+        <span class="rot">Tipo de despesa</span>
+        <span class="chips">{% for tp in TIPOS_DESPESA %}<label class="chip-td"><input type="radio" name="tipo_despesa" value="{{ tp }}"><span>{{ TIPO_DESPESA_ROTULO[tp] }}</span></label>{% endfor %}</span>
+      </div>
       <span class="mut" id="tit-mem-dica"></span>
     </div>
   </form>
@@ -4384,6 +4473,14 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .tit-classe-nova select{width:100%;font-size:.78rem;padding:.3rem .4rem}
     .tit-classe-nova select.lembrado{border-color:#1E4A3A;background:#10241A}
     .tit-classe-nova .mut{flex:1 1 100%;font-size:.7rem;color:#9fe8c9;min-height:1em}
+    .tit-tipo-d{flex:1 1 100%;display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .6rem}
+    .tit-tipo-d .chips{display:flex;flex-wrap:wrap;gap:.35rem}
+    .chip-td{display:inline-flex;align-items:center;cursor:pointer;margin:0}
+    .chip-td input{position:absolute;opacity:0;width:1px;height:1px;min-height:0;pointer-events:none}
+    .chip-td span{border:1px solid #2f2f31;border-radius:999px;padding:.28rem .75rem;font-size:.76rem;color:var(--txt-mut)}
+    .chip-td input:checked+span{border-color:#1E4A3A;background:#10241A;color:var(--verde-claro);font-weight:600}
+    .chip-td input:focus-visible+span{outline:2px solid var(--verde-claro);outline-offset:1px}
+    .tit-tipo-d.lembrado .chip-td input:checked+span{border-style:dashed}
   </style>
   <datalist id="tit-cli-dl">{% for c in clientes_lista or [] %}<option value="{{ c.nome }}">{% endfor %}</datalist>
   <datalist id="tit-forn-dl">{% for c in fornecedores_lista or [] %}<option value="{{ c.nome }}">{% endfor %}</datalist>
@@ -4399,6 +4496,10 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     var cp = document.getElementById('tit-cat-pagar'), cr = document.getElementById('tit-cat-receber');
     if(cp && cr){ cp.disabled = !pagar; cp.style.display = pagar ? '' : 'none';
                   cr.disabled = pagar;  cr.style.display = pagar ? 'none' : ''; }
+    // o TIPO de despesa só vale pra conta a pagar; desligado, não vai no POST
+    var td = document.getElementById('tit-tipo-d');
+    if(td){ td.style.display = pagar ? '' : 'none';
+            td.querySelectorAll('input').forEach(function(r){ r.disabled = !pagar; if(!pagar) r.checked = false; }); }
     titMemoria();
   }
   // A MEMÓRIA DO FORNECEDOR. Pergunta ao servidor como este fornecedor foi
@@ -4427,6 +4528,11 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         var sel = document.getElementById(id);
         if(sel && sel.classList.contains('lembrado')){ sel.selectedIndex = 0; sel.classList.remove('lembrado'); }
       });
+      var td = document.getElementById('tit-tipo-d');
+      if(td && td.classList.contains('lembrado')){
+        td.querySelectorAll('input').forEach(function(r){ r.checked = false; });
+        td.classList.remove('lembrado');
+      }
       function poe(id, v){
         var sel = document.getElementById(id);
         if(!sel || sel.disabled || v === null || v === undefined || v === '') return;
@@ -4441,6 +4547,11 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         poe('tit-plano', m.plano_conta_id);
         poe('tit-centro', m.centro_custo_id);
         poe(form.tipo.value === 'pagar' ? 'tit-cat-pagar' : 'tit-cat-receber', m.categoria);
+        // o TIPO, pela mesma regra: só se a pessoa não escolheu
+        if(td && m.tipo_despesa && !td.dataset.daPessoa && form.tipo.value === 'pagar'){
+          var r = td.querySelector('input[value="' + m.tipo_despesa + '"]');
+          if(r && !r.disabled){ r.checked = true; td.classList.add('lembrado'); usou = true; }
+        }
       }
       if(dica) dica.textContent = usou ? ('Preenchido como da última vez: “' + m.de + '”. Confira.') : '';
     });
@@ -4450,6 +4561,8 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     var el = e.target;
     if(el && el.closest && el.closest('.tit-classe-nova')){
       el.classList.remove('lembrado'); el.dataset.daPessoa = '1';
+      var grupo = el.closest('.tit-tipo-d');
+      if(grupo){ grupo.classList.remove('lembrado'); grupo.dataset.daPessoa = '1'; }
     }
   });
   (function(){
@@ -4596,7 +4709,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       nasceu (ou foi barrada pela trava de duplicata), e repetir a promessa ali
       seria anunciar uma segunda. -#}{% if t.proxima %} · <span style="color:#9b8fd6" title="nasce sozinha quando você der baixa nesta">próxima: {{ t.proxima.strftime('%d/%m') }}</span>{% endif %}{#- a CLASSIFICAÇÃO (317), quando existe. Quando não existe, nada: um
       "sem centro" em 13 linhas seria parede, e o lugar de pôr é o editar ✎. -#}{% if t.plano_codigo or t.centro_nome %} · <span class="tit-cls" title="classificação — vai junto pro caixa na baixa">{% if t.plano_codigo %}{{ t.plano_codigo|e }} {{ t.plano_nome|e }}{% endif %}{% if t.plano_codigo and t.centro_nome %} · {% endif %}{% if t.centro_nome %}{{ t.centro_nome|e }}{% endif %}</span>{% endif %}{#- o PORQUÊ de um valor mexido pelo painel da diferença (323): sem isto,
-      "por que outubro é R$ 1.067 e não R$ 1.142?" não teria resposta na tela. -#}{% set _aj = (ajustes or {}).get(t.id) %}{% if _aj and _aj.tipo == 'abatimento' %} · <span class="selo jur" title="valor combinado: {{ _aj.antes|brl }}">− {{ (_aj.antes - _aj.depois)|brl }} de crédito abatido</span>{% elif _aj and _aj.tipo == 'restante' %} · <span class="selo jur">o que faltou de um recebimento</span>{% endif %}</div>
+      "por que outubro é R$ 1.067 e não R$ 1.142?" não teria resposta na tela. -#}{% if t.tipo_despesa %} · <span class="tit-cls" style="color:{{ TIPO_DESPESA_COR[t.tipo_despesa] }}">{{ TIPO_DESPESA_ROTULO[t.tipo_despesa] }}</span>{% endif %}{% set _aj = (ajustes or {}).get(t.id) %}{% if _aj and _aj.tipo == 'abatimento' %} · <span class="selo jur" title="valor combinado: {{ _aj.antes|brl }}">− {{ (_aj.antes - _aj.depois)|brl }} de crédito abatido</span>{% elif _aj and _aj.tipo == 'restante' %} · <span class="selo jur">o que faltou de um recebimento</span>{% endif %}</div>
     </div>
     {#- R$ 0,00 seria mentira de dois jeitos: diz que a conta é de graça e some
        na soma da lista. A conta de valor variável (196) nasce sem valor de
@@ -4765,6 +4878,10 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
           {% for c in centros_ativos %}<option value="{{ c.id }}"{{ ' selected' if c.id == t.centro_custo_id }}>{{ c.nome|e }}</option>{% endfor %}
           {#- mesmo cuidado pro centro DESATIVADO depois de escolhido -#}
           {% if t.centro_custo_id and t.centro_custo_id not in (centros_ativos|map(attribute='id')|list) %}<option value="{{ t.centro_custo_id }}" selected>{{ t.centro_nome|e }} (inativo)</option>{% endif %}
+        </select>{% endif %}
+        {% if t.tipo == 'pagar' %}<input type="hidden" name="tem_tipo" value="1"><select name="tipo_despesa" title="tipo de despesa">
+          <option value="">tipo: — sem —</option>
+          {% for tp in TIPOS_DESPESA %}<option value="{{ tp }}"{{ ' selected' if t.tipo_despesa == tp }}>{{ TIPO_DESPESA_ROTULO[tp] }}</option>{% endfor %}
         </select>{% endif %}
       </div>
       <button style="background:var(--verde);color:var(--sobre-verde);border:0">salvar</button>
@@ -7919,6 +8036,12 @@ _env.filters["dia"] = _dia_br
 from finance.models import canonizar_categoria, categorias_de
 _env.globals["canon"] = lambda c, t="despesa": canonizar_categoria(c, t)
 _env.globals["categorias_de"] = categorias_de
+# o TIPO de despesa (325): rótulo e cor, iguais em toda tela que o mostra
+from finance.tipo_despesa import ROTULOS as _TIPO_ROT, TIPOS as _TIPOS_D  # noqa: E402
+_env.globals["TIPOS_DESPESA"] = _TIPOS_D
+_env.globals["TIPO_DESPESA_ROTULO"] = _TIPO_ROT
+_env.globals["TIPO_DESPESA_COR"] = {"fixa": "#7bb8e6", "eventual": "#C9A3E0",
+                                    "investimento": "var(--verde-claro)"}
 # rotulo amigavel da forma de pagamento (canonica -> texto + icone). '' = sem info.
 _FORMA_PAG_LABEL = {
     "pix": "Pix", "debito": "Débito", "credito": "Crédito",
@@ -11414,6 +11537,19 @@ def painel_empresa(request: Request):
     # `emp_recebido` logo depois da baixa de uma conta a receber (o botão "gerar
     # recibo"), e `emp_recibo` depois de gerar (abrir / copiar / mandar).
     # Tolerante como o planejamento: sem a tabela, a aba abre sem o recibo.
+    # DESPESAS POR TIPO (325): o quadro do gestor, os dois últimos meses, e o que
+    # falta classificar em cada um. Tolerante: sem a 325, a aba abre sem ele.
+    quadro_tipo, quadro_sem_tipo = None, {}
+    try:
+        from finance import tipo_despesa as _td
+        quadro_tipo = _td.por_mes(pool, conta[0], meses=2)
+        for _m in quadro_tipo:
+            if _m["sem"]["n"]:
+                quadro_sem_tipo[(_m["ano"], _m["mes"])] = _td.sem_tipo(
+                    pool, conta[0], _m["ano"], _m["mes"])
+    except Exception:  # noqa: BLE001
+        log.warning("quadro de despesas por tipo falhou", exc_info=True)
+        quadro_tipo, quadro_sem_tipo = None, {}
     from finance import recibo as _rb
     from finance import recebido_diferente as _rd
     recibos_mapa = _rb.mapa(pool, conta[0])
@@ -11501,6 +11637,7 @@ def painel_empresa(request: Request):
                                     and t.get("aprovacao") == "aguardando"),
                    recibos_mapa=recibos_mapa, recebido_flash=recebido_flash,
                    alvos_credito=alvos_credito, creditos_pendentes=creditos_pendentes,
+                   quadro_tipo=quadro_tipo, quadro_sem_tipo=quadro_sem_tipo,
                    ajustes=ajustes,
                    recibo_flash=recibo_flash,
                    emp_aviso=request.session.pop("emp_aviso", None))
@@ -11955,7 +12092,8 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
                          valor_variavel: str = Form(""),
                          categoria: str = Form(""),
                          plano_conta_id: str = Form(""),
-                         centro_custo_id: str = Form("")):
+                         centro_custo_id: str = Form(""),
+                         tipo_despesa: str = Form("")):
     from finance import empresa as emp, clientes as cli
     g = _guard_pj(request)
     if not g:
@@ -12022,7 +12160,8 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
                              valor_variavel=varia, criado_por=membro_id,
                              cliente_id=cli_id,
                              plano_conta_id=plano_conta_id.strip() or None,
-                             centro_custo_id=centro_custo_id.strip() or None)
+                             centro_custo_id=centro_custo_id.strip() or None,
+                             tipo_despesa=tipo_despesa.strip() or None)
         except Exception:
             pass
     return RedirectResponse("/painel/empresa", status_code=303)
@@ -12363,7 +12502,8 @@ def empresa_titulo_descricao(request: Request, titulo_id: int,
                              cliente: str = Form(""), tem_cliente: str = Form(""),
                              categoria: str = Form(""), plano_conta_id: str = Form(""),
                              centro_custo_id: str = Form(""), tem_classe: str = Form(""),
-                             tem_plano: str = Form(""), tem_centro: str = Form("")):
+                             tem_plano: str = Form(""), tem_centro: str = Form(""),
+                             tipo_despesa: str = Form(""), tem_tipo: str = Form("")):
     """Edita descrição, valor e/ou FORNECEDOR. valor vazio = não mexe no valor.
 
     O FORNECEDOR só entrou aqui em 03/09/2026, e a falta dele era o buraco que o
@@ -12399,18 +12539,21 @@ def empresa_titulo_descricao(request: Request, titulo_id: int,
     # A CLASSIFICAÇÃO (317). Só entra quando o formulário a trouxe — form antigo
     # aberto numa aba de antes do deploy não pode apagar o centro de ninguém.
     # Dentro dela, "" é "— sem —" e APAGA (mesma regra do fornecedor).
-    cat = plano = centro = None
+    cat = plano = centro = tipo_d = None
     if tem_classe in ("1", "on", "true"):
         cat = categoria.strip() or None
         plano = plano_conta_id.strip() if tem_plano else None
         centro = centro_custo_id.strip() if tem_centro else None
+        # o TIPO (325), com o mesmo marcador de presença: só mexe se o campo
+        # estava no formulário, e aí "" apaga
+        tipo_d = tipo_despesa.strip() if tem_tipo else None
     if (nova_desc is not None or novo_val is not None or nova_cp is not None
             or tem_classe in ("1", "on", "true")):
         emp.editar_titulo(pool, conta[0], titulo_id,
                           descricao=nova_desc, valor_centavos=novo_val,
                           contraparte=nova_cp, cliente_id=cli_id,
                           categoria=cat, plano_conta_id=plano,
-                          centro_custo_id=centro)
+                          centro_custo_id=centro, tipo_despesa=tipo_d)
     return RedirectResponse("/painel/empresa", status_code=303)
 
 
@@ -12773,7 +12916,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         maior_rec = 0
         n_a_definir = 0
         quebra = None
-        quebra_centro = None
+        quebra_tipo = None
     else:
         # natureza (pessoal/empresa/a_definir) só filtra em conta PJ; PF ignora
         nat = natureza if (eh_pj and natureza in ("pessoal", "empresa", "a_definir")) else None
@@ -12790,21 +12933,17 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
             }
         else:
             resumo = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza=nat)
-        # A QUEBRA POR CENTRO (pedido 2 do dono, 23/09/2026: "fixa, eventual,
-        # investimento" — que já existiam como centros de custo dele). Só PJ, só
-        # quando a conta TEM centro, e só com o filtro em "tudo" ou "empresa":
-        # ela quebra as despesas de EMPRESA, e noutro filtro a soma dela não
-        # fecharia com o número grande do card.
-        quebra_centro = None
+        # A QUEBRA POR TIPO (pedido 2: "fixa, eventual, investimento"; separada
+        # do centro de custo por correção do dono em 24/09/2026 — migração 325).
+        # Só PJ e só com o filtro em "tudo" ou "empresa": ela quebra as despesas
+        # de EMPRESA, e noutro filtro a soma não fecharia com o número do card.
+        quebra_tipo = None
         if eh_pj and nat in (None, "empresa") and not _sem_conta:
             try:
-                from finance import plano_contas as _pc_q
-                if _pc_q.listar_centros(pool, conta[0]):
-                    quebra_centro = livro.despesas_empresa_por_centro(
-                        ano_sel, mes_num, membro_sel)
+                quebra_tipo = livro.despesas_empresa_por_tipo(ano_sel, mes_num, membro_sel)
             except Exception:  # noqa: BLE001 — a quebra nunca derruba o Financeiro
-                log.warning("quebra por centro falhou", exc_info=True)
-                quebra_centro = None
+                log.warning("quebra por tipo falhou", exc_info=True)
+                quebra_tipo = None
         categorias = livro.despesas_por_categoria(ano_sel, mes_num, membro_sel, natureza=nat)
         maior_cat = max((v for _, v in categorias), default=0)
         _rec = livro.receitas_em_dois_blocos(ano_sel, mes_num, membro_sel, natureza=nat)
@@ -12880,7 +13019,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
                    natureza_sel=(natureza if eh_pj else ""),
                    sem_conta_sel=_sem_conta, n_sem_conta=n_sem_conta,
                    n_a_definir=n_a_definir,
-                   quebra=quebra, quebra_centro=quebra_centro,
+                   quebra=quebra, quebra_tipo=quebra_tipo,
                    prev_cartao=prev_cartao,
                    eh_pj=eh_pj,
                    plano_opcoes=plano_opcoes, centros_custo=centros_custo,
@@ -13213,6 +13352,20 @@ def definir_centro_custo_lancamento(request: Request,
     pool = get_pool()
     cid = pc.centro_custo_valido(pool, conta[0], centro_custo_id)
     ok = LivroCaixa(pool, conta[0]).definir_centro_custo(lancamento_id, cid)
+    return JSONResponse({"ok": bool(ok)})
+
+
+@router.post("/painel/lancamento/tipo-despesa")
+def definir_tipo_despesa_lancamento(request: Request,
+                                    lancamento_id: int = Form(...),
+                                    tipo_despesa: str = Form("")):
+    """Define o TIPO de um lançamento — fixa | eventual | investimento — ou limpa
+    (vazio). Migração 325. O que não for um dos três vira vazio, nunca erro."""
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance.livro_caixa import LivroCaixa
+    ok = LivroCaixa(get_pool(), conta[0]).definir_tipo_despesa(lancamento_id, tipo_despesa)
     return JSONResponse({"ok": bool(ok)})
 
 

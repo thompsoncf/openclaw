@@ -63,13 +63,18 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         # Conta contábil (plano) e centro de custo: SÓ empresa. Resolve o código/
         # nome que o agente escolheu; se não bater ou não estiver habilitado, fica
         # None (o gasto entra igual, só sem classificar — nada quebra).
-        plano_conta_id = centro_custo_id = None
+        plano_conta_id = centro_custo_id = tipo_d = None
         if _nat == "empresa":
             from . import plano_contas as _pc
             plano_conta_id = _pc.id_por_codigo(livro.pool, livro.conta_id,
                                                entrada.get("plano_conta"))
             centro_custo_id = _pc.centro_por_nome(livro.pool, livro.conta_id,
                                                   entrada.get("centro_custo"))
+            # o TIPO (325) — fixa, eventual, investimento — é pergunta própria,
+            # separada do centro (correção do dono em 24/09/2026). Só despesa.
+            if tipo == Tipo.DESPESA:
+                from .tipo_despesa import normalizar as _norm_tipo
+                tipo_d = _norm_tipo(entrada.get("tipo_despesa"))
 
         lanc = Lancamento.criar(
             tipo=tipo,
@@ -83,6 +88,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             natureza=_nat,
             plano_conta_id=plano_conta_id,
             centro_custo_id=centro_custo_id,
+            tipo_despesa=tipo_d,
         )
         # `forcar` vem do agente quando o usuario CONFIRMOU que sao dois pagamentos
         # diferentes. Sem ele ligado aqui, a mensagem logo abaixo mandaria o agente
@@ -117,6 +123,8 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             cc_txt = f" · conta contábil {str(entrada.get('plano_conta')).strip().split()[0]}"
             if centro_custo_id:
                 cc_txt += f", centro {entrada.get('centro_custo')}"
+        if tipo_d:
+            cc_txt += f" · tipo {tipo_d}"
         return (f"{rotulo} registrada: {formatar_brl(salvo.valor_centavos)} em "
                 f"{salvo.categoria}{forma_txt}{cc_txt} "
                 f"({salvo.data.strftime('%d/%m/%Y')}). id={salvo.id}{proposta}")
@@ -149,6 +157,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             if not contas:
                 return ""
             centros = _centros_propostos(_emp, contas)
+            tipos = _tipos_propostos(_emp, contas)
         except Exception:  # noqa: BLE001 — a pergunta nunca derruba o registro
             return ""
         linhas = []
@@ -159,13 +168,17 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                    f"(fica como multa e juros)" if t.get("acrescimo_centavos") else "")
             cen = centros.get(t["id"])
             cen_txt = f" · centro proposto: {cen}" if cen else ""
+            tp = tipos.get(t["id"])
+            if tp:
+                cen_txt += f" · tipo proposto: {tp}"
             linhas.append(f"- titulo_id={t['id']} · {t['descricao']}{quem} · "
                           f"{formatar_brl(t['valor_centavos'])} · vence {venc}{acr}{cen_txt}")
         if len(contas) == 1:
             pergunta = (
                 "PERGUNTE ao usuario, NESTA MESMA resposta, se este pagamento quita "
                 "essa conta (diga a descricao, o valor e o vencimento dela"
-                + (" e o centro proposto" if centros else "") + "). ")
+                + (" e o centro proposto" if centros else "")
+                + (" e o tipo proposto" if tipos else "") + "). ")
         else:
             pergunta = (
                 f"Sao {len(contas)} contas que podem ser este pagamento: liste TODAS "
@@ -175,8 +188,8 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             f"(lancamento_id={lancamento_id}):\n" + "\n".join(linhas) + "\n"
             + pergunta
             + "SO' se ele confirmar, chame quitar_conta_com_pagamento com o titulo_id "
-              "e este lancamento_id (e o centro_custo proposto, se ele nao disser "
-              "outro). Se disser que nao, ou mudar de assunto, NAO faca nada: a conta "
+              "e este lancamento_id (e o centro_custo e o tipo_despesa propostos, se "
+              "ele nao disser outros). Se disser que nao, ou mudar de assunto, NAO faca nada: a conta "
               "continua aberta. NUNCA quite sem a resposta dele, e NUNCA use "
               "dar_baixa_titulo pra esta conta — o dinheiro ja' esta' no caixa e a "
               "baixa lancaria a despesa DUAS vezes.")
@@ -197,6 +210,27 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                 cid = m and m.get("centro_custo_id")
             if cid and cid in nomes:
                 out[t["id"]] = nomes[cid]
+        return out
+
+    def _tipos_propostos(_emp, contas) -> dict:
+        """{titulo_id: tipo} — o TIPO da própria conta (325) ou, sem ele, o que a
+        memória do fornecedor lembra. Só conta a pagar tem tipo de despesa."""
+        out = {}
+        for t in contas:
+            if t.get("tipo") != "pagar":
+                continue
+            with livro.pool.connection() as c:
+                r = c.execute("select to_jsonb(t)->>'tipo_despesa' from titulos t "
+                              "where id=%s and conta_id=%s",
+                              (t["id"], livro.conta_id)).fetchone()
+            tp = r[0] if r else None
+            if not tp:
+                m = _emp.memoria_do_fornecedor(livro.pool, livro.conta_id,
+                                               t.get("contraparte") or "",
+                                               t.get("descricao") or "", "pagar")
+                tp = m and m.get("tipo_despesa")
+            if tp:
+                out[t["id"]] = tp
         return out
 
     def lancar_despesa(entrada: dict) -> str:
@@ -516,7 +550,8 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     "origem": {"type": "string", "enum": ["manual", "foto"]},
                     "natureza": {"type": "string", "enum": ["pessoal", "empresa"], "description": "só para conta PJ que mistura pessoal e empresa: se a pessoa já disse que foi pessoal ou da empresa, passe aqui na hora do registro (evita 2º passo)"},
                     "plano_conta": {"type": "string", "description": "SÓ quando natureza=empresa: código da conta contábil do plano (ex: '5.1.03'). Escolha a mais adequada à categoria/descrição pra já entrar na DRE certa. Se não souber os códigos habilitados desta conta, chame a ferramenta plano_de_contas. Se não tiver certeza, deixe vazio (a pessoa classifica depois)."},
-                    "centro_custo": {"type": "string", "description": "SÓ quando natureza=empresa: o nome EXATO de um dos CENTROS DE CUSTO listados no MODO EMPRESA, quando a pessoa disser qual é ('foi investimento' -> o centro INVESTIMENTO). Não escolha por conta própria: na dúvida, deixe vazio. Opcional."},
+                    "centro_custo": {"type": "string", "description": "SÓ quando natureza=empresa: o nome EXATO de um dos CENTROS DE CUSTO listados no MODO EMPRESA — a ÁREA do negócio (ex: Buffet) — quando a pessoa disser qual é. Fixa/eventual/investimento NÃO é centro. Não escolha por conta própria: na dúvida, deixe vazio. Opcional."},
+                    "tipo_despesa": {"type": "string", "enum": ["fixa", "eventual", "investimento"], "description": "SÓ quando natureza=empresa: o TIPO do gasto, quando a pessoa disser ('foi investimento' -> investimento; 'é conta fixa' -> fixa; 'foi eventual' -> eventual). É separado do centro de custo. Não escolha por conta própria: na dúvida, deixe vazio. Opcional."},
                     "forcar": {"type": "boolean", "description": "SÓ depois de a ferramenta ter respondido 'NAO registrei — ja existe um lancamento igual' E de a pessoa CONFIRMAR que é outro pagamento. Aí sim mande forcar: true pra registrar os dois. Nunca mande por conta própria: é assim que o mesmo dinheiro entra duas vezes."},
                 },
                 "required": ["valor", "categoria"],
@@ -537,7 +572,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     "origem": {"type": "string", "enum": ["manual", "foto"]},
                     "natureza": {"type": "string", "enum": ["pessoal", "empresa"], "description": "só para conta PJ que mistura pessoal e empresa: se a pessoa já disse que foi pessoal ou da empresa, passe aqui na hora do registro (evita 2º passo)"},
                     "plano_conta": {"type": "string", "description": "SÓ quando natureza=empresa: código da conta contábil do plano (ex: '5.1.03'). Escolha a mais adequada à categoria/descrição pra já entrar na DRE certa. Se não souber os códigos habilitados desta conta, chame a ferramenta plano_de_contas. Se não tiver certeza, deixe vazio (a pessoa classifica depois)."},
-                    "centro_custo": {"type": "string", "description": "SÓ quando natureza=empresa: o nome EXATO de um dos CENTROS DE CUSTO listados no MODO EMPRESA, quando a pessoa disser qual é ('foi investimento' -> o centro INVESTIMENTO). Não escolha por conta própria: na dúvida, deixe vazio. Opcional."},
+                    "centro_custo": {"type": "string", "description": "SÓ quando natureza=empresa: o nome EXATO de um dos CENTROS DE CUSTO listados no MODO EMPRESA — a ÁREA do negócio (ex: Buffet) — quando a pessoa disser qual é. Fixa/eventual/investimento NÃO é centro. Não escolha por conta própria: na dúvida, deixe vazio. Opcional."},
                     "forcar": {"type": "boolean", "description": "SÓ depois de a ferramenta ter respondido 'NAO registrei — ja existe um lancamento igual' E de a pessoa CONFIRMAR que é outro pagamento. Aí sim mande forcar: true pra registrar os dois. Nunca mande por conta própria: é assim que o mesmo dinheiro entra duas vezes."},
                 },
                 "required": ["valor", "categoria"],

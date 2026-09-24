@@ -290,6 +290,9 @@ def test_a_persona_da_empresa_traz_os_centros_e_a_regra(pool):
     from finance.tools_pj import bloco_persona_pj
     pc.criar_centro(pool, CONTA, "INVESTIMENTO")
     p = bloco_persona_pj(pool, CONTA, "Prime Eventos")
-    assert "CENTROS DE CUSTO desta empresa: INVESTIMENTO." in p
+    assert "CENTROS DE CUSTO desta empresa (a ÁREA do negócio): INVESTIMENTO." in p
+    # e mesmo com um centro chamado INVESTIMENTO, "foi investimento" é TIPO (325)
+    assert "'foi investimento' -> tipo_despesa=investimento" in p
+    assert "NUNCA ponha isso em centro_custo" in p
     assert "COMPROVANTE QUE QUITA CONTA" in p
     assert "dar_baixa_titulo o lançaria DUAS vezes" in p

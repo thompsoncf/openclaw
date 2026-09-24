@@ -1,0 +1,1611 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Zaq · Clínica (protótipo)</title>
+<style>
+:root{
+  color-scheme:dark;
+  --bg:#0A0F0C;--bg-2:#0E1512;--surface:#121A16;--line:#1E2A23;
+  --text:#EAF2ED;--text-dim:#8FA197;--text-faint:#5E6F66;
+  --neon:#25D366;--neon-bright:#46F58A;--neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10);--neon-borda:#1E4A3A;--neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E;--coral:#E0574F;--azul:#229ED9;--roxo:#C9A3E0;
+  --ambar-borda:#5A4520;--ambar-fundo:#241C0F;--coral-borda:#5A2B2B;--coral-fundo:#241313;
+  --azul-borda:#1B3A4A;--azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --pag:1180px;
+  --card:var(--surface);--card-2:var(--bg-2);--borda:var(--line);--txt:var(--text);--txt-mut:var(--text-dim);--verde:var(--neon);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--body);background:var(--bg);color:var(--txt);-webkit-font-smoothing:antialiased;font-size:14px}
+h1,h2,h3,h4,.logo{font-family:var(--display);letter-spacing:-.02em}
+button{font:inherit;cursor:pointer}
+a{color:inherit}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---------- faixa do protótipo ---------- */
+.proto{position:fixed;top:0;left:0;right:0;z-index:90;background:#241C0F;border-bottom:1px solid var(--ambar-borda);color:#F4D29A;font-size:.74rem;padding:.3rem .8rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+.proto b{color:#FFE7B8}
+.proto .tour{margin-left:auto;display:flex;gap:.3rem;flex-wrap:wrap}
+.proto .tour button{background:#3A2C12;border:1px solid var(--ambar-borda);color:#F4D29A;border-radius:99px;padding:.1rem .55rem;font-size:.7rem}
+
+/* ---------- menu lateral (cópia do painel) ---------- */
+.side{position:fixed;left:0;top:28px;bottom:0;width:216px;background:var(--card);border-right:1px solid var(--borda);padding:1rem .7rem;overflow-y:auto;z-index:40;display:flex;flex-direction:column}
+.side-logo{font-weight:600;color:var(--txt);font-size:1.1rem;padding:.2rem .6rem .3rem;display:flex;align-items:center;gap:.5rem;font-family:var(--display)}
+.side-conta{font-size:.72rem;color:var(--txt-mut);padding:0 .6rem .7rem;line-height:1.3}
+.side-grp{font-size:.66rem;text-transform:uppercase;letter-spacing:.5px;color:#6a6a66;padding:.7rem .6rem .25rem}
+.nav-i{display:flex;align-items:center;gap:.65rem;padding:.5rem .6rem;border-radius:8px;color:var(--txt-mut);text-decoration:none;font-size:.88rem;cursor:pointer;border:0;background:none;width:100%;text-align:left}
+.nav-i:hover{background:var(--card-2);color:var(--txt)}
+.nav-i.on{background:rgba(29,158,117,.16);color:var(--neon)}
+.nav-ic{width:19px;height:19px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.nav-i .novo{margin-left:auto;font-size:.56rem;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--sobre-verde);background:var(--neon);border-radius:99px;padding:1px 6px}
+.nav-i .nvb{margin-left:auto;background:var(--neon);color:var(--sobre-verde);border-radius:999px;min-width:18px;height:18px;padding:0 5px;font-size:.7rem;font-weight:600;display:inline-flex;align-items:center;justify-content:center}
+.nav-i .nvb.amb{background:var(--ambar)}
+
+/* ---------- área ---------- */
+main{padding:46px 22px 60px 238px;max-width:calc(var(--pag) + 260px)}
+.pg-h{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin:0 0 1rem}
+.pg-h h1{font-size:1.45rem;font-weight:600;margin:0}
+.pg-h .sub{color:var(--txt-mut);font-size:.84rem;margin-top:.15rem}
+.btn{display:inline-flex;align-items:center;gap:.35rem;background:var(--neon);color:var(--sobre-verde);border:0;border-radius:8px;padding:.5rem .85rem;font-weight:600;font-size:.84rem;min-height:36px}
+.btn:hover{background:var(--neon-bright)}
+.btn.sec{background:var(--card-2);color:var(--txt);border:1px solid var(--borda);font-weight:500}
+.btn.sec:hover{border-color:var(--neon-borda)}
+.btn.min{padding:.28rem .6rem;min-height:28px;font-size:.76rem}
+.btn.coral{background:var(--coral-fundo);color:#F5B3AE;border:1px solid var(--coral-borda)}
+.btn.amb{background:var(--ambar-fundo);color:#F4D29A;border:1px solid var(--ambar-borda)}
+.seg{display:inline-flex;background:var(--card-2);border:1px solid var(--borda);border-radius:9px;padding:2px}
+.seg button{background:none;border:0;color:var(--txt-mut);padding:.3rem .7rem;border-radius:7px;font-size:.8rem}
+.seg button.on{background:var(--card);color:var(--txt);box-shadow:0 0 0 1px var(--borda)}
+.card{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:1rem 1.1rem;margin-bottom:.9rem}
+.card h3{margin:0 0 .6rem;font-size:1rem;font-weight:600}
+.mut{color:var(--txt-mut)}
+.faint{color:var(--text-faint)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:.9rem}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:.9rem}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem;margin-bottom:.9rem}
+.kpi{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:.7rem .85rem}
+.kpi b{display:block;font-size:1.45rem;font-family:var(--display);font-weight:600}
+.kpi span{font-size:.74rem;color:var(--txt-mut)}
+.kpi.ruim b{color:var(--coral)}.kpi.ok b{color:var(--neon)}.kpi.amb b{color:var(--ambar)}
+.chip{display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;border-radius:99px;padding:1px 8px;border:1px solid var(--borda);color:var(--txt-mut);background:var(--card-2);white-space:nowrap}
+.chip.g{border-color:var(--neon-borda);color:var(--neon);background:var(--neon-fundo)}
+.chip.a{border-color:var(--ambar-borda);color:var(--ambar);background:var(--ambar-fundo)}
+.chip.r{border-color:var(--coral-borda);color:#F08A83;background:var(--coral-fundo)}
+.chip.b{border-color:var(--azul-borda);color:#6CC4F0;background:var(--azul-fundo)}
+.tb{width:100%;border-collapse:collapse;font-size:.84rem}
+.tb th{text-align:left;font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;color:var(--txt-mut);font-weight:600;padding:.45rem .55rem;border-bottom:1px solid var(--borda)}
+.tb td{padding:.55rem .55rem;border-bottom:1px solid var(--borda);vertical-align:middle}
+.tb tr:last-child td{border-bottom:0}
+.tb td.r{text-align:right}
+.dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;vertical-align:0}
+.tabs{display:flex;gap:.3rem;border-bottom:1px solid var(--borda);margin-bottom:.9rem;flex-wrap:wrap}
+.tabs button{background:none;border:0;border-bottom:2px solid transparent;color:var(--txt-mut);padding:.5rem .75rem;font-size:.86rem;margin-bottom:-1px}
+.tabs button.on{color:var(--txt);border-bottom-color:var(--neon)}
+.bar{height:8px;border-radius:99px;background:var(--card-2);overflow:hidden;border:1px solid var(--borda)}
+.bar i{display:block;height:100%;background:var(--neon);transition:width .5s}
+.bar i.a{background:var(--ambar)}.bar i.r{background:var(--coral)}
+.field{margin-bottom:.6rem}
+.field label{display:block;font-size:.72rem;color:var(--txt-mut);margin-bottom:.2rem}
+.inp{width:100%;background:var(--bg);border:1px solid #2a3a31;border-radius:8px;padding:.5rem .65rem;color:var(--txt);font-size:.88rem;min-height:38px}
+.opts{display:flex;flex-wrap:wrap;gap:.3rem}
+.opt{background:var(--bg);border:1.5px solid #2a3a31;color:var(--txt-mut);border-radius:99px;padding:.22rem .7rem;font-size:.78rem}
+.opt.on{border-color:var(--neon-borda);color:var(--neon);background:var(--neon-fundo)}
+.hint{background:var(--card-2);border:1px dashed var(--borda);border-radius:10px;padding:.55rem .7rem;font-size:.78rem;color:var(--txt-mut);margin-top:.6rem}
+.hint b{color:var(--txt)}
+
+/* ---------- agenda ---------- */
+.ag-top{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.8rem}
+.ag-top .dia{font-family:var(--display);font-size:1.05rem;font-weight:600;margin:0 .4rem}
+.ag-leg{display:flex;gap:.7rem;flex-wrap:wrap;font-size:.72rem;color:var(--txt-mut);margin:.2rem 0 .7rem}
+.ag{display:grid;grid-template-columns:56px repeat(3,minmax(180px,1fr));border:1px solid var(--borda);border-radius:12px;overflow:hidden;background:var(--card-2)}
+.ag .h{background:var(--card);padding:.5rem .6rem;border-left:1px solid var(--borda);border-bottom:1px solid var(--borda);font-weight:600;font-size:.84rem;position:sticky;top:28px;z-index:2}
+.ag .h small{display:block;font-weight:400;color:var(--txt-mut);font-size:.7rem}
+.ag .h .oc{float:right;font-family:var(--mono);font-size:.72rem;color:var(--neon)}
+.ag .hr{font-family:var(--mono);font-size:.68rem;color:var(--text-faint);padding:.25rem .4rem;border-bottom:1px solid #16201b;height:44px}
+.ag .c{border-left:1px solid var(--borda);border-bottom:1px solid #16201b;height:44px;padding:3px 5px;position:relative}
+.ag .c.off{background:repeating-linear-gradient(45deg,#0c120f,#0c120f 6px,#0A0F0C 6px,#0A0F0C 12px)}
+.ag .c.livre{cursor:pointer}
+.ag .c.livre:hover{background:var(--neon-fundo)}
+.ag .c.livre:hover::after{content:"+ agendar";position:absolute;left:8px;top:12px;font-size:.7rem;color:var(--neon)}
+.ev{position:absolute;left:5px;right:5px;top:3px;border-radius:8px;padding:4px 7px;font-size:.72rem;line-height:1.25;overflow:hidden;border-left:3px solid;cursor:pointer;z-index:1}
+.ev b{display:block;font-size:.76rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ev .t{color:var(--txt-mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.ev:hover{filter:brightness(1.15)}
+.s-agendado{background:#16211c;border-color:#8FA197}
+.s-confirmado{background:#10241A;border-color:#25D366}
+.s-presente{background:#0D1B23;border-color:#229ED9}
+.s-atendimento{background:#241C0F;border-color:#E0A32E}
+.s-finalizado{background:#121614;border-color:#3a4a41;color:#7d8c84}
+.s-faltou{background:#241313;border-color:#E0574F}
+.s-cancelou{background:#1a1414;border-color:#5A2B2B;color:#a07a77;text-decoration:line-through}
+.s-segurado{background:repeating-linear-gradient(135deg,#10241A,#10241A 6px,#0E1512 6px,#0E1512 12px);border-color:#46F58A;border-style:dashed}
+
+/* ---------- gaveta ---------- */
+.veu{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80;display:none}
+.veu.on{display:block}
+.gav{position:fixed;top:28px;right:0;bottom:0;width:min(440px,100%);background:var(--card);border-left:1px solid var(--borda);z-index:81;transform:translateX(100%);transition:transform .22s;overflow-y:auto;padding:1rem 1.1rem 2rem}
+.gav.on{transform:none}
+.gav .fechar{float:right;background:none;border:0;color:var(--txt-mut);font-size:1.2rem}
+.gav h2{font-size:1.15rem;margin:.1rem 0 .15rem}
+.gav .sec{border-top:1px solid var(--borda);margin-top:.8rem;padding-top:.8rem}
+.gav .sec h4{margin:0 0 .45rem;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-mut);font-family:var(--body);font-weight:600}
+.linha{display:flex;justify-content:space-between;gap:.6rem;font-size:.84rem;padding:.2rem 0}
+.linha span:first-child{color:var(--txt-mut)}
+.passos{display:flex;gap:4px;margin:.5rem 0 .2rem;flex-wrap:wrap}
+.passos i{font-style:normal;font-size:.66rem;padding:2px 7px;border-radius:99px;border:1px solid var(--borda);color:var(--text-faint)}
+.passos i.feito{color:var(--neon);border-color:var(--neon-borda);background:var(--neon-fundo)}
+.passos i.agora{color:var(--sobre-verde);background:var(--neon);border-color:var(--neon);font-weight:700}
+.acoes{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.5rem}
+.ses{display:flex;gap:5px;flex-wrap:wrap;margin:.3rem 0}
+.ses i{width:28px;height:28px;border-radius:7px;border:1.5px solid var(--borda);display:flex;align-items:center;justify-content:center;font-size:.72rem;font-style:normal;color:var(--text-faint)}
+.ses i.ok{background:var(--neon-fundo);border-color:var(--neon-borda);color:var(--neon)}
+.ses i.nx{border-color:var(--ambar);color:var(--ambar)}
+
+/* ---------- funil (cópia do kanban de Prospecção) ---------- */
+.kbrow{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(200px,1fr);gap:.6rem;overflow-x:auto;padding-bottom:.4rem}
+.kbcol{display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--borda);border-radius:14px;padding:.7rem;min-height:300px}
+.kbcol h4{margin:0 0 .55rem;font-size:.85rem;display:flex;align-items:center;justify-content:space-between;font-family:var(--body);font-weight:600}
+.kbcnt{background:var(--card-2);border:1px solid var(--borda);border-radius:999px;padding:.02rem .5rem;font-size:.72rem;color:var(--txt-mut)}
+.kbdrop{display:flex;flex-direction:column;gap:.5rem}
+.kbcard{background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.6rem .65rem;cursor:pointer;transition:border-color .15s}
+.kbcard:hover{border-color:var(--neon)}
+.kbcard .emp{font-size:.88rem;font-weight:600}
+.kbcard .sub{color:var(--txt-mut);font-size:.74rem;margin-top:.22rem}
+.kbcard .ft{display:flex;gap:.3rem;margin-top:.42rem;flex-wrap:wrap}
+.kbcol.agenda{border-color:var(--neon-borda)}
+.kbcol.agenda h4::after{content:"= agenda";font-size:.62rem;color:var(--neon);font-weight:500;margin-left:auto;margin-right:.4rem}
+
+/* ---------- roteiro ---------- */
+.cid{display:grid;grid-template-columns:1fr 150px 90px auto;align-items:center;gap:.9rem;background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:.7rem .85rem;margin-bottom:.5rem}
+.cid .nm{font-weight:600;font-size:.95rem}
+.cid .nm small{display:block;font-weight:400;color:var(--txt-mut);font-size:.74rem}
+.cid .qt{text-align:right;font-family:var(--display);font-size:1.5rem;font-weight:600;line-height:1}
+.cid .qt small{display:block;font-family:var(--body);font-size:.64rem;color:var(--txt-mut);font-weight:400}
+.q-quente{color:var(--coral)}.q-morno{color:var(--ambar)}.q-frio{color:var(--txt-mut)}
+.vagas{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:.4rem}
+.vg{background:var(--bg);border:1.5px solid #2a3a31;border-radius:9px;padding:.4rem .5rem;font-size:.78rem;transition:all .3s}
+.vg b{font-family:var(--mono);display:block}
+.vg small{color:var(--txt-mut);font-size:.66rem;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vg.cheia{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.vg.cheia small{color:var(--neon)}
+.vg.resp{border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.vg.resp small{color:var(--ambar)}
+.rank{display:flex;align-items:center;gap:.6rem;background:var(--card-2);border:1px solid var(--borda);border-radius:9px;padding:.45rem .6rem;margin-bottom:.35rem;font-size:.82rem}
+.rank .p{width:22px;height:22px;border-radius:50%;background:var(--card);border:1px solid var(--borda);display:flex;align-items:center;justify-content:center;font-size:.72rem;color:var(--txt-mut)}
+.rank .n{flex:1}
+.rank .n small{display:block;color:var(--txt-mut);font-size:.72rem}
+.rank .q{font-family:var(--mono);font-weight:700;color:var(--neon)}
+
+/* ---------- whatsapp ---------- */
+.zap{background:#0b141a;border:1px solid #1f2c33;border-radius:12px;padding:.7rem;max-width:420px}
+.zap .b{background:#202c33;color:#e9edef;border-radius:8px;padding:.45rem .6rem;margin:0 2.2rem .45rem 0;font-size:.82rem;line-height:1.45}
+.zap .b.eu{background:#005c4b;margin:0 0 .45rem 2.2rem}
+.zap .b .h{font-size:.64rem;color:#8696a0;text-align:right;margin-top:2px}
+.zap .sis{text-align:center;font-size:.68rem;color:#8696a0;background:#182229;border-radius:6px;padding:.15rem .5rem;margin:.2rem auto .5rem;width:max-content;max-width:100%}
+.zap .card-p{background:#111b21;border:1px solid #2a3942;border-radius:8px;padding:.45rem .55rem;margin:.35rem 0;font-size:.78rem}
+
+/* ---------- toast ---------- */
+.toasts{position:fixed;right:16px;bottom:16px;z-index:95;display:flex;flex-direction:column;gap:.4rem;max-width:360px}
+.toast{background:var(--card);border:1px solid var(--neon-borda);border-left:3px solid var(--neon);border-radius:10px;padding:.6rem .75rem;font-size:.82rem;box-shadow:0 8px 24px rgba(0,0,0,.4);animation:sobe .25s}
+.toast.a{border-color:var(--ambar-borda);border-left-color:var(--ambar)}
+.toast b{display:block;margin-bottom:.1rem}
+@keyframes sobe{from{transform:translateY(10px);opacity:0}}
+
+/* ---------- modal ---------- */
+.modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.97);width:min(560px,94vw);max-height:88vh;overflow-y:auto;background:var(--card);border:1px solid var(--borda);border-radius:16px;padding:1.1rem 1.2rem;z-index:82;display:none}
+.modal.on{display:block;transform:translate(-50%,-50%)}
+.modal h2{margin:0 0 .2rem;font-size:1.15rem}
+
+@media (max-width:900px){
+  .side{display:none}
+  main{padding:44px 12px 60px}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .grid2,.grid3{grid-template-columns:1fr}
+  .cid{grid-template-columns:1fr auto}
+  .cid .bar,.cid .mb{display:none}
+  .mobnav{display:flex}
+}
+.mobnav{display:none;position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--borda);z-index:60;overflow-x:auto}
+.mobnav button{flex:1;background:none;border:0;color:var(--txt-mut);font-size:.62rem;padding:.45rem .3rem;display:flex;flex-direction:column;align-items:center;gap:2px;min-width:64px}
+.mobnav button.on{color:var(--neon)}
+
+/* ---------- ficha do paciente ---------- */
+.pc-top{display:grid;grid-template-columns:64px 1fr auto;gap:1rem;align-items:center;margin-bottom:.8rem}
+.av-g{width:64px;height:64px;border-radius:50%;background:var(--neon-fundo);border:2px solid var(--neon-borda);display:flex;align-items:center;justify-content:center;font-family:var(--display);font-size:1.35rem;color:var(--neon);font-weight:700}
+.pc-top h1{font-size:1.45rem;font-weight:600;margin:0}
+.pc-top .acts{display:flex;gap:.4rem;flex-wrap:wrap;justify-content:flex-end}
+.sync{font-size:.72rem;color:var(--text-faint);margin:.1rem 0 .8rem}
+.alertas{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.5rem;margin-bottom:.9rem}
+.al{background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.55rem .7rem;font-size:.78rem;display:flex;gap:.55rem;align-items:flex-start;color:var(--txt-mut)}
+.al .ic{font-size:1rem;line-height:1.2}
+.al b{display:block;font-size:.84rem;color:var(--txt);font-weight:600}
+.al.a{border-color:var(--ambar-borda)} .al.g{border-color:var(--neon-borda)} .al.b{border-color:var(--azul-borda)}
+.tl{position:relative;border-left:2px solid var(--borda);margin-left:.5rem;padding-left:1rem}
+.tl .it{position:relative;padding:.3rem 0 .6rem .2rem;font-size:.84rem}
+.tl .it::before{content:"";position:absolute;left:-1.42rem;top:.55rem;width:11px;height:11px;border-radius:50%;background:var(--card);border:2px solid #2a3a31}
+.tl .it.g::before{border-color:var(--neon);background:var(--neon-fundo)}
+.tl .it.a::before{border-color:var(--ambar);background:var(--ambar-fundo)}
+.tl .it.fut{opacity:.62}
+.tl .it.fut::before{border-style:dashed}
+.tl .hoje{margin:.2rem 0 .6rem -1.55rem;font-size:.64rem;letter-spacing:.14em;color:var(--neon);font-weight:700}
+.tl .quando{font-family:var(--mono);font-size:.7rem;color:var(--text-faint);display:block}
+.fonte{font-size:.6rem;border-radius:4px;padding:0 5px;border:1px solid var(--borda);color:var(--txt-mut);margin-left:.35rem;vertical-align:1px;white-space:nowrap}
+.fonte.amigo{border-color:#2B4A7A;color:#8AB4F8}
+.fonte.zap{border-color:var(--neon-borda);color:var(--neon)}
+.chk{display:flex;gap:.6rem;align-items:flex-start;padding:.5rem 0;border-bottom:1px solid var(--borda);font-size:.84rem;cursor:pointer}
+.chk:last-child{border-bottom:0}
+.chk i{font-style:normal;width:18px;height:18px;border-radius:5px;border:1.5px solid var(--neon-borda);background:var(--neon-fundo);color:var(--neon);display:inline-flex;align-items:center;justify-content:center;font-size:.7rem;flex:0 0 auto;margin-top:1px}
+.chk i.off{background:var(--bg);border-color:#2a3a31;color:transparent}
+.chk small{display:block;color:var(--txt-mut);font-size:.74rem}
+.nota-rec{background:var(--bg);border:1px solid #2a3a31;border-radius:8px;padding:.55rem .65rem;font-size:.84rem;min-height:56px}
+.ps-row{display:grid;grid-template-columns:1.6fr .9fr 1.1fr 1.6fr .8fr;gap:.6rem;align-items:center;padding:.55rem .6rem;border-bottom:1px solid var(--borda);font-size:.84rem;cursor:pointer}
+.ps-row:hover{background:var(--card-2)}
+.ps-row.hd{cursor:default;font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;color:var(--txt-mut);font-weight:600}
+.ps-row.hd:hover{background:none}
+.ps-row .nm{font-weight:600}
+.ps-row .nm small{display:block;font-weight:400;color:var(--txt-mut);font-size:.72rem}
+@media (max-width:900px){
+  .pc-top{grid-template-columns:48px 1fr}.pc-top .acts{grid-column:1/-1;justify-content:flex-start}
+  .av-g{width:48px;height:48px;font-size:1.05rem}
+  .ps-row{grid-template-columns:1fr auto}.ps-row>:nth-child(2),.ps-row>:nth-child(3),.ps-row>:nth-child(4){display:none}
+}
+
+/* ---------- planos e pacotes ---------- */
+.pbrd{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(190px,1fr);gap:.6rem;overflow-x:auto;padding-bottom:.4rem}
+.pcol{background:var(--bg);border:1px solid var(--borda);border-radius:14px;padding:.65rem;min-height:200px}
+.pcol h4{margin:0 0 .15rem;font-size:.84rem;font-family:var(--body);font-weight:600;display:flex;justify-content:space-between}
+.pcol .tot{font-family:var(--mono);font-size:.72rem;color:var(--txt-mut);margin-bottom:.5rem}
+.pcol.ok{border-color:var(--neon-borda)} .pcol.no{opacity:.8}
+.pcard{background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.55rem .6rem;margin-bottom:.45rem;cursor:pointer}
+.pcard:hover{border-color:var(--neon)}
+.pcard .nm{font-weight:600;font-size:.86rem}
+.pcard .pl{color:var(--txt-mut);font-size:.74rem;margin:.1rem 0 .3rem}
+.pcard .vl{font-family:var(--mono);font-weight:700;font-size:.9rem}
+.itm{display:grid;grid-template-columns:1fr auto auto;gap:.5rem;align-items:center;background:var(--card-2);border:1px solid var(--borda);border-radius:9px;padding:.45rem .55rem;margin-bottom:.35rem;font-size:.84rem}
+.itm small{display:block;color:var(--txt-mut);font-size:.72rem}
+.qtd{display:inline-flex;align-items:center;border:1px solid var(--borda);border-radius:7px;overflow:hidden}
+.qtd button{background:var(--bg);border:0;color:var(--txt);width:26px;height:26px}
+.qtd span{min-width:26px;text-align:center;font-family:var(--mono);font-size:.8rem}
+.xbt{background:none;border:0;color:var(--text-faint);font-size:1rem}
+.tot-box{background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-top:.6rem}
+.tot-box .big{font-family:var(--display);font-size:1.5rem;font-weight:600}
+.saude{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+@media (max-width:900px){.itm{grid-template-columns:1fr auto}.itm .qtd{grid-column:1}}
+
+/* ---------- raio-x ---------- */
+.fonte.ex{border-style:dashed;color:var(--text-faint)}
+.fonte.merc{border-color:#4A3A5A;color:var(--roxo)}
+.acha{background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:10px;padding:.55rem .7rem;font-size:.8rem;color:#F4D29A;margin-top:.7rem;line-height:1.5}
+.acha b{color:#FFE7B8}
+.rx-h{font-size:1.05rem;font-weight:600;margin:1.4rem 0 .15rem;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.rx-q,.rx-conta{font-family:var(--mono);font-size:.72rem;color:var(--txt-mut)}
+.rx-q{margin:0 0 .7rem;color:var(--text-faint)}
+.rx-leg{display:flex;gap:.3rem;flex-wrap:wrap;align-items:center;margin:.35rem 0 .2rem;font-size:.72rem;color:var(--txt-mut)}
+.rx-mesa{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:.7rem}
+.rx-mesa .card{margin:0;cursor:pointer}
+.rx-hero{border-color:var(--coral-borda)}
+.rx-hero .big{font-family:var(--display);font-size:2.4rem;font-weight:600;color:var(--coral);line-height:1;margin:.15rem 0 .25rem}
+.rx-med{font-family:var(--display);font-size:1.6rem;font-weight:600;line-height:1.1;margin:.1rem 0 .2rem}
+.rx-ex{background:repeating-linear-gradient(135deg,var(--surface),var(--surface) 8px,var(--bg-2) 8px,var(--bg-2) 16px);border-style:dashed}
+.rx-so-real .rx-ex,.rx-so-real .rx-exs{opacity:.35;filter:grayscale(.6)}
+.rx-heat{display:grid;grid-template-columns:52px repeat(var(--cols),minmax(0,1fr));gap:3px}
+.rx-hd{font-size:.62rem;color:var(--txt-mut);text-align:center;line-height:1.2;align-self:end;padding-bottom:2px}
+.rx-dl{font-size:.7rem;color:var(--txt-mut);display:flex;flex-direction:column;justify-content:center;line-height:1.15}
+.rx-dl small{font-size:.58rem;color:var(--text-faint)}
+.rx-c{height:40px;border-radius:6px;border:1px solid var(--borda);background:var(--card-2);font-family:var(--mono);font-size:.72rem;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;cursor:pointer;color:var(--txt);line-height:1.1}
+.rx-c small{font-size:.55rem;opacity:.8}
+.rx-c.v{background:var(--neon-fundo);border-color:var(--neon-borda);color:var(--neon)}
+.rx-c.a{background:var(--ambar-fundo);border-color:var(--ambar-borda);color:var(--ambar)}
+.rx-c.r{background:var(--coral-fundo);border-color:var(--coral-borda);color:#F08A83}
+.rx-c.off{background:repeating-linear-gradient(45deg,#0c120f,#0c120f 6px,#0A0F0C 6px,#0A0F0C 12px);cursor:default;color:var(--text-faint)}
+.rx-c.pass{opacity:.6}
+.rx-c.hoje{box-shadow:0 0 0 2px var(--neon)}
+.rx-c.nc{cursor:default}
+.rx-c .sg,.rx-c .fl{position:absolute;top:3px;width:6px;height:6px;border-radius:50%}
+.rx-c .sg{right:3px;background:var(--ambar)}
+.rx-c .fl{left:3px;background:var(--coral)}
+.rx-tl{position:relative;height:64px;border-bottom:1px solid var(--borda);margin-top:.4rem}
+.rx-tl .zona{position:absolute;left:0;top:0;bottom:0;width:20%;background:var(--neon-fundo);border-right:1px dashed var(--neon-borda);border-radius:6px 0 0 0}
+.rx-tl i{position:absolute;width:11px;height:11px;border-radius:50%;transform:translateX(-50%);cursor:pointer;border:0;padding:0}
+.rx-tl i.g{background:var(--neon)} .rx-tl i.r{background:var(--coral)}
+.rx-tlx{position:relative;height:16px;font-family:var(--mono);font-size:.62rem;color:var(--text-faint)}
+.rx-tlx span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.rx-acao{display:grid;grid-template-columns:28px 1fr auto;gap:.7rem;align-items:center;margin-bottom:.6rem}
+.rx-acao .n{width:28px;height:28px;border-radius:50%;border:1px solid var(--borda);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.8rem;color:var(--txt-mut)}
+.rx-acao .tt{font-weight:600;font-size:.92rem}
+.rx-acao .pz{font-family:var(--mono);font-size:.64rem;letter-spacing:.1em;color:var(--txt-mut)}
+.rx-acao .vl{font-family:var(--display);font-size:1.25rem;font-weight:600;text-align:right;white-space:nowrap}
+.rx-acao.um{border-color:var(--neon-borda)}
+.rx-acao.feito .tt{text-decoration:line-through;opacity:.6}
+.rx-regua{position:relative;height:12px;border-radius:99px;background:var(--card-2);border:1px solid var(--borda);margin:1.6rem 0 1.4rem}
+.rx-regua .mk{position:absolute;top:-4px;width:3px;height:18px;border-radius:2px;transform:translateX(-50%)}
+.rx-regua .lb{position:absolute;transform:translateX(-50%);font-size:.66rem;white-space:nowrap;color:var(--txt-mut)}
+.rx-regua .lb.up{top:-1.25rem} .rx-regua .lb.dn{top:1.05rem}
+.rx-seg{display:flex;height:14px;border-radius:99px;overflow:hidden;background:var(--card-2);border:1px solid var(--borda)}
+.rx-seg i{display:block;height:100%}
+.rx-lista{display:grid;grid-template-columns:auto 1fr;gap:.2rem .7rem;align-items:start}
+.rx-lista .nb{font-family:var(--display);font-size:1.4rem;font-weight:600;line-height:1;text-align:right}
+.rx-lista .tx{font-size:.8rem;color:var(--txt-mut);padding-bottom:.6rem;border-bottom:1px solid var(--borda);margin-bottom:.4rem}
+.rx-lista .tx b{color:var(--txt);display:block;font-size:.86rem}
+.rx-conf{background:var(--azul-fundo);border:1px solid var(--azul-borda);border-radius:12px;padding:.8rem .9rem;font-family:var(--mono);font-size:.72rem;color:#9CCBE6;line-height:1.7;margin-top:1rem}
+@media(max-width:900px){.rx-mesa{grid-template-columns:1fr 1fr}.rx-mesa .rx-hero{grid-column:1/-1}.rx-acao{grid-template-columns:28px 1fr}.rx-acao .vl{text-align:left}.rx-acao .btn{grid-column:1/-1;width:100%;justify-content:center}}
+@media(max-width:480px){.rx-mesa{grid-template-columns:1fr}.rx-c{font-size:.64rem}.rx-hd{font-size:.56rem}}
+</style></head><body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="ic-caixa" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol>
+<symbol id="ic-produtos" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol>
+<symbol id="ic-clientes" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 6a3 3 0 010 6"/></symbol>
+<symbol id="ic-financeiro" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 15l3-4 3 2 4-6"/></symbol>
+<symbol id="ic-empresa" viewBox="0 0 24 24"><path d="M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5"/></symbol>
+<symbol id="ic-prospeccao" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol>
+<symbol id="ic-agenda" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/></symbol>
+<symbol id="ic-relatorios" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 17v-5M12.5 17V7M17 17v-8"/></symbol>
+<symbol id="ic-novidades" viewBox="0 0 24 24"><path d="M18 8.5a6 6 0 10-12 0c0 6.5-2.5 6.5-2.5 8.5h17c0-2-2.5-2-2.5-8.5"/><path d="M10.2 20.5a2.2 2.2 0 003.6 0"/></symbol>
+<symbol id="ic-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+<symbol id="ic-mapa" viewBox="0 0 24 24"><path d="M9 4l-5 2v14l5-2 6 2 5-2V4l-5 2z"/><path d="M9 4v14M15 6v14"/></symbol>
+<symbol id="ic-raio" viewBox="0 0 24 24"><path d="M13 3L5 13h6l-1 8 8-10h-6z"/></symbol>
+<symbol id="ic-pacote" viewBox="0 0 24 24"><rect x="3.5" y="7" width="17" height="13" rx="2"/><path d="M3.5 11h17M12 7v13M8 7c-2-3 2-5 4 0M16 7c2-3-2-5-4 0"/></symbol>
+<symbol id="ic-medico" viewBox="0 0 24 24"><circle cx="12" cy="7" r="3.5"/><path d="M5 21c0-4 3-6.5 7-6.5s7 2.5 7 6.5"/><path d="M12 14.5v3M10.5 16h3"/></symbol>
+<symbol id="ic-zap" viewBox="0 0 24 24"><path d="M4 20l1.3-3.8A8 8 0 1112 20a8 8 0 01-3.9-1z"/></symbol>
+</defs></svg>
+
+<div class="proto"><span>🧪 <b>Protótipo</b> da clínica no Zaq · dados fictícios · nada é salvo</span>
+  <span class="tour"><span style="opacity:.8">Roteiro de demonstração:</span>
+    <button onclick="ir('conversas')">0 · Conversas</button>
+    <button onclick="ir('agenda')">1 · Agenda</button>
+    <button onclick="ir('funil')">2 · Funil</button>
+    <button onclick="ir('roteiro')">3 · Roteiro</button>
+    <button onclick="ir('vagas')">4 · Vagas</button>
+    <button onclick="ir('pacientes')">5 · Pacientes</button>
+    <button onclick="ir('planos')">6 · Planos</button>
+    <button onclick="ir('raiox')">7 · Raio-X</button>
+    <button onclick="ir('config')">8 · Configurar</button>
+  </span></div>
+
+<nav class="side" id="side"></nav>
+<main id="main"></main>
+<nav class="mobnav" id="mobnav"></nav>
+
+<div class="veu" id="veu" onclick="fecharTudo()"></div>
+<aside class="gav" id="gav"></aside>
+<div class="modal" id="modal"></div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* =================================================================
+   DADOS FICTÍCIOS — a estrutura é a real (profissionais, tipos e locais
+   vieram do Amigo da Espaço Pelle); pacientes, valores e números não.
+   ================================================================= */
+const PROF = [
+  {id:'manoel', nome:'Dr. Manoel', esp:'Dermatologia', cor:'#25D366', login:false, grade:'Seg–Sex 08:00–12:00 e 13:30–16:30 · Espaço Pelle · sáb em Lago da Pedra', faz:['Consulta','Retorno','Procedimento clínico','Procedimento estético','Cirurgia dermatológica','Testes alérgicos']},
+  {id:'juliana', nome:'Juliana', esp:'Fisioterapia dermatofuncional', cor:'#229ED9', login:true, grade:'Seg–Sex 08:00–12:00 e 13:30–16:00 · Espaço Pelle', faz:['Procedimento estético','Sessão de pacote','Avaliação']},
+  {id:'brenda', nome:'Brenda', esp:'Enfermagem (a confirmar)', cor:'#C9A3E0', login:true, grade:'Ter a Qui 08:00–12:00 · Espaço Pelle', faz:['Vacina','Testes alérgicos','Coleta CIMLAB']},
+];
+const TIPOS = [
+  ['Consulta',30,'consulta','30 dias',500,'#25D366'],['Consulta social',30,'consulta','—',0,'#25D366'],
+  ['Avaliação',30,'consulta','—',0,'#46F58A'],['Retorno',30,'retorno','—',0,'#8FA197'],
+  ['Procedimento clínico',60,'procedimento','—',450,'#E0A32E'],['Procedimento estético',60,'procedimento','—',800,'#E0574F'],
+  ['Cirurgia dermatológica',45,'cirurgia','—',1200,'#C9A3E0'],['Testes alérgicos',15,'exame','—',180,'#229ED9'],
+  ['Retirada teste alérgico',15,'retorno','—',0,'#229ED9'],['Coleta CIMLAB',15,'exame','—',0,'#229ED9'],
+  ['Vacina',30,'procedimento','—',150,'#8FE3B8'],['Sessão de pacote',30,'sessão','—',0,'#8FE3B8'],
+];
+const LOCAIS = [
+  ['Espaço Pelle','Rua Óscar Galvão, 38 · Pedreiras','sede'],['Bacabal','a confirmar','viagem'],['Codó','a confirmar','viagem'],
+  ['Lago da Pedra','a confirmar','viagem'],['Timbiras','a confirmar','viagem'],['Vitorino Freire','a confirmar','viagem'],
+  ['Poção de Pedras','a confirmar','viagem'],['Igarapé Grande','a confirmar','viagem'],['Paulo Ramos','a confirmar','viagem'],['Esperantinópolis','a confirmar','viagem'],
+];
+const HORAS = ['08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','13:30','14:00','14:30','15:00','15:30','16:00'];
+const ST = {agendado:'Agendado',segurado:'Segurado pelo agente',confirmado:'Confirmado',presente:'Presente',atendimento:'Em atendimento',finalizado:'Finalizado',faltou:'Faltou',cancelou:'Cancelou'};
+const FLUXO = ['agendado','confirmado','presente','atendimento','finalizado'];
+let EV = [
+  {id:1,p:'manoel',h:'08:00',d:1,pac:'Carla Menezes',tipo:'Consulta',st:'finalizado',org:'Indicação'},
+  {id:2,p:'manoel',h:'08:30',d:1,pac:'Pedro Santana',tipo:'Consulta',st:'atendimento',org:'Instagram'},
+  {id:3,p:'manoel',h:'09:00',d:1,pac:'Lúcia Ferraz',tipo:'Retorno',st:'confirmado',org:'Já é paciente',conf:'pelo WhatsApp às 10:12 de ontem'},
+  {id:4,p:'manoel',h:'09:30',d:1,pac:'Marcos Teixeira',tipo:'Consulta',st:'segurado',org:'Instagram',seg:true},
+  {id:5,p:'manoel',h:'10:00',d:1,pac:'Joana Prado',tipo:'Consulta',st:'agendado',org:'Google'},
+  {id:6,p:'manoel',h:'11:00',d:2,pac:'Rita Alves',tipo:'Procedimento clínico',st:'confirmado',org:'Já é paciente'},
+  {id:7,p:'manoel',h:'14:00',d:1,pac:'Sônia Pires',tipo:'Consulta',st:'confirmado',org:'Indicação'},
+  {id:8,p:'juliana',h:'08:30',d:2,pac:'Ana Paula Rocha',tipo:'Sessão de pacote',st:'presente',org:'Já é paciente',pac_s:'Depilação a laser · 3/10'},
+  {id:9,p:'juliana',h:'10:00',d:2,pac:'Lúcia Ferraz',tipo:'Sessão de pacote',st:'confirmado',org:'Já é paciente',pac_s:'Criolipólise · sessão 2 de 4'},
+  {id:10,p:'juliana',h:'13:30',d:2,pac:'Paula Viana',tipo:'Procedimento estético',st:'agendado',org:'Instagram'},
+  {id:11,p:'juliana',h:'15:00',d:1,pac:'Beatriz Souza',tipo:'Avaliação',st:'agendado',org:'Instagram'},
+  {id:12,p:'brenda',h:'08:00',d:1,pac:'Tiago Rocha',tipo:'Testes alérgicos',st:'confirmado',org:'Indicação'},
+  {id:13,p:'brenda',h:'09:00',d:1,pac:'Carlos Mendes',tipo:'Vacina',st:'agendado',org:'Já é paciente'},
+];
+let FUNIL = {
+  'Novo':[{n:'Marina Lopes',s:'Instagram · "quanto é a consulta?"',t:[['agente respondeu em 40 s','g']]},{n:'Tiago Reis',s:'Indicação da Carla',t:[['parado desde ontem','r']]},{n:'Fernanda Luz',s:'Google · depilação a laser',t:[['Codó · fila da cidade','b']]}],
+  'Recebeu o preço':[{n:'Sônia Pires',s:'Consulta · R$ 500 · há 1 dia',t:[['lembrete com horários hoje 10h','a']]},{n:'Renata Dias',s:'Consulta · R$ 500 · há 6 dias',t:[['sem resposta','r'],['2º toque enviado','']]},{n:'Márcio Luz',s:'Consulta · R$ 500 · há 13 dias',t:[['nunca chamado de novo','r']]},{n:'Joice Prado',s:'Consulta · R$ 500 · há 1 dia',t:[['respondeu: "vou ver e te falo"','a']]}],
+  'Follow-up':[{n:'Joana Prado',s:'Consulta',t:[['faltou 16/09 · remarcar','r']]},{n:'Heitor Lima',s:'Consulta social',t:[['esfriando','a']]}],
+  'Consulta agendada':[{n:'Marcos Teixeira',s:'Consulta · Dr. Manoel',t:[['qua 09:30 · segurado','a']]},{n:'Paula Viana',s:'Procedimento estético',t:[['qui 13:30','']]},{n:'Beatriz Souza',s:'Avaliação · Juliana',t:[['qua 15:00','']]}],
+  'Plano de tratamento':[{n:'Rogério Alves',s:'Botox · R$ 1.600',t:[['proposta há 3 dias','a']]},{n:'Bianca Lemos',s:'Laser 10 sessões · R$ 2.400',t:[['vence amanhã','r']]},{n:'Fernando Sá',s:'Criolipólise · 4 sessões · R$ 3.200',t:[['visualizou hoje','']]}],
+};
+const CIDADES = [
+  {n:'Bacabal',esp:31,ult:47,via:'2h',q:'quente'},{n:'Codó',esp:23,ult:62,via:'2h30',q:'quente'},
+  {n:'Lago da Pedra',esp:14,ult:21,via:'1h',q:'morno'},{n:'Timbiras',esp:6,ult:null,via:'1h40',q:'frio'},
+  {n:'Vitorino Freire',esp:4,ult:95,via:'1h50',q:'frio'},{n:'Poção de Pedras',esp:3,ult:120,via:'40 min',q:'frio'},
+];
+
+/* =================================================================
+   MENU (cópia do painel, com o que muda para clínica)
+   ================================================================= */
+const MENU = [
+  ['Principal'],
+  ['caixa','Caixa','caixa'],['produtos','Produtos','produtos'],['pacientes','Pacientes','clientes'],['financeiro','Financeiro','financeiro'],
+  ['Clínica'],
+  ['conversas','Conversas','zap','novo'],['agenda','Agenda','agenda','novo-layout'],['funil','Prospecção','prospeccao'],['roteiro','Roteiro','mapa','novo'],
+  ['vagas','Vagas liberadas','raio','novo'],['planos','Planos e pacotes','pacote','novo'],['raiox','Raio-X','relatorios'],
+  ['empresa','Empresa','empresa'],['relatorios','Relatórios','relatorios'],
+  ['Configurar'],
+  ['config','Profissionais e horários','medico','novo'],['equipe','Equipe','clientes'],
+  ['Sistema'],['novidades','Novidades','novidades'],
+];
+let ROTA = 'agenda';
+function menu(){
+  const s = document.getElementById('side');
+  let h = `<div class="side-logo"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</div>
+  <div class="side-conta">Espaço Pelle Clínica Dermatológica<br><span class="faint">dono</span></div>`;
+  for(const m of MENU){
+    if(m.length===1){h+=`<div class="side-grp">${m[0]}</div>`;continue}
+    const [id,lb,ic,flag] = m;
+    const extra = flag==='novo'?'<span class="novo">novo</span>':flag==='novo-layout'?'<span class="novo" style="background:var(--azul)">muda</span>':
+      id==='vagas'?'':'';
+    const badge = id==='vagas'?'<span class="nvb amb">2</span>':id==='novidades'?'<span class="nvb">1</span>':'';
+    h+=`<button class="nav-i ${ROTA===id||(ROTA==='paciente'&&id==='pacientes')?'on':''}" onclick="ir('${id}')"><svg class="nav-ic"><use href="#ic-${ic}"/></svg><span>${lb}</span>${badge||extra}</button>`;
+  }
+  h+=`<div style="flex:1"></div><button class="nav-i"><svg class="nav-ic"><use href="#ic-sair"/></svg><span>Sair</span></button>`;
+  s.innerHTML = h;
+  const mob = document.getElementById('mobnav');
+  mob.innerHTML = [['conversas','Conversas','zap'],['agenda','Agenda','agenda'],['funil','Funil','prospeccao'],['roteiro','Roteiro','mapa'],['pacientes','Pacientes','clientes'],['planos','Planos','pacote'],['raiox','Raio-X','relatorios'],['config','Config.','medico']]
+    .map(([id,lb,ic])=>`<button class="${ROTA===id?'on':''}" onclick="ir('${id}')"><svg class="nav-ic"><use href="#ic-${ic}"/></svg>${lb}</button>`).join('');
+}
+function ir(r){ROTA=r;fecharTudo();menu();render();window.scrollTo(0,0);location.hash=r}
+
+/* =================================================================
+   UTIL
+   ================================================================= */
+const $ = s=>document.querySelector(s);
+const brl = v=>'R$ '+v.toLocaleString('pt-BR');
+function toast(t,x,amb){const e=document.createElement('div');e.className='toast'+(amb?' a':'');e.innerHTML=`<b>${t}</b>${x||''}`;$('#toasts').appendChild(e);setTimeout(()=>e.remove(),5200)}
+function abrirGav(h){$('#gav').innerHTML='<button class="fechar" onclick="fecharTudo()">✕</button>'+h;$('#gav').classList.add('on');$('#veu').classList.add('on')}
+function abrirModal(h){$('#modal').innerHTML=h;$('#modal').classList.add('on');$('#veu').classList.add('on')}
+function fecharTudo(){$('#gav').classList.remove('on');$('#modal').classList.remove('on');$('#veu').classList.remove('on')}
+function tipo(n){return TIPOS.find(t=>t[0]===n)||TIPOS[0]}
+
+/* =================================================================
+   0 · CONVERSAS — o WhatsApp da clínica, separando paciente de conversa interna
+   Os números do topo são REAIS (24/08 a 23/09); as linhas são fictícias.
+   ================================================================= */
+let CV_FILTRO='todas';
+let CONV=[
+  {id:1,n:'Joice Prado',t:'vou ver e te falo',q:'2 min',tipo:'paciente',et:'Recebeu o preço',ag:true,nl:1},
+  {id:2,n:'Sônia Pires',t:'[agente] Separei dois horários com o Dr. Manoel…',q:'10:02',tipo:'paciente',et:'Recebeu o preço',ag:true},
+  {id:3,n:'Matheus (contador)',t:'a nota de junho foi aquela?',q:'09:40',tipo:'interna',sub:'fornecedor',ag:false},
+  {id:4,n:'Marcos Teixeira',t:'[agente] Prontinho!! ✅ Seu agendamento foi realizado',q:'08:44',tipo:'paciente',et:'Consulta agendada',ag:true},
+  {id:5,n:'Recepção 2',t:'tem dinheiro em caixa pra pagar a água?',q:'08:31',tipo:'interna',sub:'equipe',ag:false},
+  {id:6,n:'Número novo (99) 9····-··17',t:'bom dia, o doutor atende em Codó?',q:'ontem',tipo:'sugerida',et:'Novo',ag:true,nl:1},
+  {id:7,n:'Filtros Maranhão',t:'orçamento da manutenção do filtro',q:'ontem',tipo:'sugerida-interna',sub:'fornecedor',ag:false},
+  {id:8,n:'Renata Dias',t:'[agente] Ainda quer marcar sua avaliação?',q:'seg',tipo:'paciente',et:'Recebeu o preço',ag:true},
+];
+function telaConversas(){
+  const f=CV_FILTRO;
+  const vis=CONV.filter(c=>f==='todas'||(f==='pacientes'&&!c.tipo.includes('interna'))||(f==='internas'&&c.tipo.includes('interna'))||(f==='revisar'&&c.tipo.startsWith('sugerida')));
+  const rev=CONV.filter(c=>c.tipo.startsWith('sugerida')).length;
+  let h=`<div class="pg-h"><div><h1>Conversas</h1><div class="sub">WhatsApp da clínica · <b>Centro Dermatológico Dr. Manoel Soares</b> · <span style="color:var(--neon)">● conectado</span></div></div>
+  <button class="btn sec">Agente: ligado para pacientes</button></div>
+  <div class="kpis"><div class="kpi"><b>57 · 27</b><span>conversas de paciente · internas (último mês, real)</span></div><div class="kpi ok"><b>2 min</b><span>mediana de resposta no horário comercial (real)</span></div><div class="kpi amb"><b>25</b><span>vezes mais de 24h sem resposta · 16 nunca respondidas (real)</span></div><div class="kpi"><b>ter 10h</b><span>pico de mensagens · qua 14h em 2º (real)</span></div></div>
+  <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.7rem">${[['todas','Todas'],['pacientes','Pacientes'],['internas','Internas'],['revisar','Para revisar · '+rev]].map(([k,l])=>`<button class="opt ${f===k?'on':''}" onclick="CV_FILTRO='${k}';render()">${l}</button>`).join('')}</div>
+  <div class="card" style="padding:.3rem .4rem">`;
+  for(const c of vis){
+    const interna=c.tipo.includes('interna'), sug=c.tipo.startsWith('sugerida');
+    const tag = interna
+      ? `<span class="chip">${sug?'parece interna · ':''}interna · ${c.sub}</span>`
+      : `<span class="chip ${c.et==='Recebeu o preço'?'a':c.et==='Consulta agendada'?'g':''}">${sug?'parece paciente · ':''}${c.et}</span>`;
+    const badge = c.nl ? `<span style="display:inline-flex;margin-left:.3rem;background:var(--neon);color:var(--sobre-verde);border-radius:99px;font-size:.66rem;padding:0 6px;font-weight:700">${c.nl}</span>` : '';
+    h+=`<div onclick="abrirConv(${c.id})" style="display:grid;grid-template-columns:36px 1fr auto;gap:.65rem;align-items:center;padding:.55rem .5rem;border-bottom:1px solid var(--borda);cursor:pointer;${interna?'opacity:.72':''}">
+      <div style="width:36px;height:36px;border-radius:50%;background:${interna?'var(--card-2)':'var(--neon-fundo)'};border:1px solid ${interna?'var(--borda)':'var(--neon-borda)'};display:flex;align-items:center;justify-content:center;font-weight:700;color:${interna?'var(--txt-mut)':'var(--neon)'}">${c.n[0]}</div>
+      <div style="min-width:0"><div style="font-weight:600;font-size:.88rem">${c.n}${badge}</div>
+        <div class="mut" style="font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.t}</div>
+        <div style="margin-top:.25rem;display:flex;gap:.25rem;flex-wrap:wrap">${tag}${interna?'<span class="chip">🔕 agente não responde</span>':(c.ag?'<span class="chip g">agente ativo</span>':'')}${sug?'<span class="chip b">confirme com um clique</span>':''}</div></div>
+      <div class="faint num" style="font-size:.72rem">${c.q}</div></div>`;
+  }
+  return h+`</div>
+  <div class="hint">🔕 <b>Conversa interna</b> (equipe, contador, fornecedor) não vira lead, não entra no funil e o agente nunca responde. O sistema <b>sugere</b> (contato salvo como equipe, ou conversa sem nenhuma pergunta de paciente) e a recepção confirma com um clique. No último mês, <b>27 das 84 conversas</b> do número da clínica eram internas.</div>`;
+}
+function abrirConv(id){
+  const c=CONV.find(x=>x.id===id); const interna=c.tipo.includes('interna');
+  const doAgente=c.t.startsWith('[agente]');
+  abrirGav(`<div class="mut" style="font-size:.76rem">${interna?'Conversa interna · '+c.sub:'Paciente · '+c.et}</div><h2>${c.n}</h2>
+  <div class="zap" style="margin-top:.6rem"><div class="b ${doAgente?'':'eu'}">${c.t.replace('[agente] ','')}<div class="h">${c.q}</div></div></div>
+  <div class="sec"><h4>Esta conversa é</h4><div class="acoes">
+    <button class="btn ${interna?'sec':''}" onclick="marcarConv(${id},'paciente')">Paciente</button>
+    <button class="btn ${interna?'':'sec'}" onclick="marcarConv(${id},'interna')">Interna (equipe / fornecedor)</button></div>
+    <div class="faint" style="font-size:.76rem;margin-top:.4rem">${interna?'Não entra no funil e o agente não responde. Continua visível aqui para a equipe.':'Entra no funil e o agente pode responder e fazer o follow-up.'}</div></div>
+  <div class="sec"><h4>Quem responde</h4><div class="acoes"><button class="btn sec">Eu assumo</button><button class="btn sec">Devolver ao agente</button>${interna?'':`<button class="btn sec" onclick="ir('funil')">Ver no funil</button>`}</div></div>`);
+}
+function marcarConv(id,tipo){
+  const c=CONV.find(x=>x.id===id); c.tipo=tipo;
+  if(tipo==='interna'){c.sub=c.sub||'equipe';c.ag=false}else{c.et=c.et||'Novo';c.ag=true}
+  fecharTudo();render();
+  toast(tipo==='interna'?'Marcada como interna':'Marcada como paciente', tipo==='interna'?'O agente não vai responder e ela não entra no funil.':'Entrou no funil em '+c.et+'. O agente pode responder.');
+}
+
+/* =================================================================
+   1 · AGENDA
+   ================================================================= */
+let AG_VISTA='dia', AG_PROF='manoel';
+/* a semana: Seg 21 a Sáb 26; hoje é quarta (índice 2) */
+const DIAS=[['Seg','21/09'],['Ter','22/09'],['Qua','23/09'],['Qui','24/09'],['Sex','25/09'],['Sáb','26/09']];
+const HOJE=2;
+/* a grade de cada profissional — é o que a tela Configurar › Grade define */
+function atende(p,dia,hr){
+  if(p==='manoel') return dia<=4 || (dia===5 && hr<'12:00');
+  if(p==='juliana') return dia<=4 && hr<'16:00';
+  if(p==='brenda') return dia>=1 && dia<=3 && hr<'12:00';
+  return false;
+}
+function localDe(p,dia){return p==='manoel'&&dia===5?'Lago da Pedra':'Espaço Pelle'}
+const doDia = dia => EV.filter(e=>e.dia===dia);
+function telaAgenda(){
+  const hoje = doDia(HOJE);
+  const livres = (p)=>HORAS.filter(h=>atende(p,HOJE,h)&&!hoje.some(e=>e.p===p&&cobre(e,h))).length;
+  let h = `<div class="pg-h"><div><h1>Agenda</h1><div class="sub">Uma coluna por profissional · clique num horário livre para agendar, num agendamento para mudar o status</div></div>
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap"><button class="btn sec" onclick="ir('vagas')">⚡ 2 vagas liberadas hoje</button><button class="btn" onclick="novoAg('manoel','10:30')">+ Agendar</button></div></div>
+  <div class="ag-top"><button class="btn sec min">‹</button><span class="dia">${AG_VISTA==='dia'?'Quarta, 23 de setembro':'Semana de 21 a 26 de setembro'}</span><button class="btn sec min">›</button>
+    <div class="seg" style="margin-left:.5rem"><button class="${AG_VISTA==='dia'?'on':''}" onclick="AG_VISTA='dia';render()">Dia</button><button class="${AG_VISTA==='semana'?'on':''}" onclick="AG_VISTA='semana';render()">Semana</button></div>
+    ${AG_VISTA==='dia'?`<select class="inp" style="width:auto;min-height:32px;padding:.2rem .5rem;margin-left:auto"><option>Local: Espaço Pelle · Pedreiras</option><option>Bacabal · qui 15/10</option></select>`:''}</div>`;
+  if(AG_VISTA==='semana') return h+telaSemana()+legenda();
+  h += `<div class="kpis">
+    <div class="kpi ok"><b>${Math.round(100*hoje.filter(e=>!['cancelou','faltou'].includes(e.st)).reduce((s,e)=>s+e.d,0)/PROF.reduce((s,p)=>s+HORAS.filter(x=>atende(p.id,HOJE,x)).length,0))}%</b><span>ocupação do dia (3 profissionais)</span></div>
+    <div class="kpi"><b>${hoje.filter(e=>e.st==='confirmado').length} de ${hoje.filter(e=>!['finalizado','cancelou','faltou'].includes(e.st)).length}</b><span>confirmados pelo WhatsApp</span></div>
+    <div class="kpi amb"><b>${hoje.filter(e=>e.st==='segurado').length}</b><span>segurados pelo agente, esperando você</span></div>
+    <div class="kpi ruim"><b>${hoje.filter(e=>e.st==='faltou').length}</b><span>faltas hoje</span></div>
+  </div>${legenda()}`;
+  h += `<div style="overflow-x:auto"><div class="ag"><div class="h" style="border-left:0"></div>`;
+  for(const p of PROF){h+=`<div class="h" style="cursor:pointer" onclick="AG_PROF='${p.id}';AG_VISTA='semana';render()" title="ver a semana de ${p.nome}"><span class="dot" style="background:${p.cor}"></span>${p.nome}<span class="oc">${livres(p.id)} livres</span><small>${p.esp} · Espaço Pelle · <u>ver semana</u></small></div>`}
+  for(const hr of HORAS){
+    h+=`<div class="hr">${hr}</div>`;
+    for(const p of PROF){
+      const e = hoje.find(x=>x.p===p.id&&x.h===hr);
+      const coberto = hoje.find(x=>x.p===p.id&&cobre(x,hr)&&x.h!==hr);
+      const fora = !atende(p.id,HOJE,hr);
+      if(fora&&!e){h+=`<div class="c off"></div>`;continue}
+      if(e){
+        const alt = 44*e.d-6;
+        h+=`<div class="c"><div class="ev s-${e.st}" style="height:${alt}px" onclick="abrirEv(${e.id})"><b>${e.pac}</b><span class="t">${e.tipo}${e.pac_s?' · '+e.pac_s:''}</span><span class="t">${e.st==='segurado'?'⏳ segurado pelo agente':ST[e.st]}${e.org==='Instagram'&&e.st!=='finalizado'?' · 📷 Instagram':''}</span></div></div>`;
+      } else if(coberto){h+=`<div class="c"></div>`}
+      else h+=`<div class="c livre" onclick="novoAg('${p.id}','${hr}')"></div>`;
+    }
+  }
+  return h+`</div></div>
+  <div class="hint">💡 <b>O que muda para a clínica:</b> hoje a agenda do Zaq é de festa (visão de mês). Para clínica ela vira o dia por profissional, com os mesmos sete status do Amigo — e cada status move o funil sozinho.</div>`;
+}
+function cobre(e,hr){const i=HORAS.indexOf(e.h),j=HORAS.indexOf(hr);return j>=i&&j<i+e.d}
+/* Os outros dias da semana, gerados dentro da grade de cada profissional.
+   Fictício e determinístico: abre sempre igual. Quinta fica de propósito vazia
+   para o Dr. Manoel, que é o "buraco" que o motor de ocupação vai atacar. */
+function gerarSemana(){
+  EV.forEach(e=>{if(e.dia===undefined)e.dia=HOJE});
+  const nomes=['Alice Moura','Bruno Castro','Cecília Reis','Diego Farias','Elaine Costa','Fábio Nunes','Gabriela Pinto','Hugo Martins','Iara Lopes','Jorge Batista','Kátia Mello','Leandro Sá','Mirela Dantas','Nilton Braga','Olga Freitas','Priscila Góes','Raul Mendes','Sabrina Luz','Téo Barros','Vera Campos'];
+  const taxa={manoel:[.75,.8,0,.35,.6,.7],juliana:[.6,.55,0,.5,.45,0],brenda:[0,.7,0,.5,0,0]};
+  let s=7, id=1000, n=0;
+  const rnd=()=>{s=(s*9301+49297)%233280;return s/233280};
+  for(const p of PROF){
+    DIAS.forEach((_,dia)=>{
+      if(dia===HOJE)return;
+      for(let k=0;k<HORAS.length;k++){
+        const hr=HORAS[k];
+        if(!atende(p.id,dia,hr))continue;
+        if(EV.some(e=>e.p===p.id&&e.dia===dia&&cobre(e,hr)))continue;
+        if(rnd()>taxa[p.id][dia])continue;
+        const tipos=p.faz.filter(t=>tipo(t)[1]<=60);
+        const t=tipos[Math.floor(rnd()*tipos.length)];
+        const d=tipo(t)[1]>=60&&k+1<HORAS.length&&atende(p.id,dia,HORAS[k+1])?2:1;
+        let st;
+        if(dia<HOJE) st=rnd()<.1?'faltou':'finalizado';
+        else if(dia===HOJE+1) st=rnd()<.7?'confirmado':(rnd()<.5?'segurado':'agendado');
+        else st=rnd()<.15?'segurado':'agendado';
+        EV.push({id:id++,p:p.id,h:hr,d,dia,pac:nomes[n++%nomes.length],tipo:t,st,org:['Instagram','Indicação','Google','Já é paciente'][Math.floor(rnd()*4)]});
+        if(d===2)k++;
+      }
+    });
+  }
+}
+function legenda(){return `<div class="ag-leg">${Object.entries({agendado:'#8FA197',segurado:'#46F58A',confirmado:'#25D366',presente:'#229ED9',atendimento:'#E0A32E',finalizado:'#3a4a41',faltou:'#E0574F'}).map(([k,c])=>`<span><span class="dot" style="background:${c}"></span>${ST[k]}</span>`).join('')}<span><span class="dot" style="background:repeating-linear-gradient(45deg,#1b2620,#1b2620 2px,#0A0F0C 2px,#0A0F0C 4px)"></span>fora da grade</span></div>`}
+/* A SEMANA INTEIRA DE UM PROFISSIONAL: dias nas colunas, horários nas linhas */
+function telaSemana(){
+  const p = PROF.find(x=>x.id===AG_PROF);
+  const evs = EV.filter(e=>e.p===p.id);
+  const abertos = d=>HORAS.filter(h=>atende(p.id,d,h)).length;
+  const ocupados = d=>evs.filter(e=>e.dia===d&&!['cancelou','faltou'].includes(e.st)).reduce((s,e)=>s+e.d,0);
+  const pct = d=>abertos(d)?Math.round(100*ocupados(d)/abertos(d)):null;
+  const totA = DIAS.reduce((s,_,d)=>s+abertos(d),0), totO = DIAS.reduce((s,_,d)=>s+ocupados(d),0);
+  const futuros = evs.filter(e=>e.dia>=HOJE);
+  const livresFut = DIAS.reduce((s,_,d)=>d<HOJE?s:s+abertos(d)-ocupados(d),0);
+  const piorDia = DIAS.map((_,d)=>[d,pct(d)]).filter(([d,v])=>d>HOJE&&v!==null).sort((a,b)=>a[1]-b[1])[0];
+  let h = `<div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.8rem">${PROF.map(x=>`<button class="opt ${x.id===p.id?'on':''}" onclick="AG_PROF='${x.id}';render()"><span class="dot" style="background:${x.cor}"></span>${x.nome} · ${x.esp}</button>`).join('')}</div>
+  <div class="kpis">
+    <div class="kpi ${totO/totA>=.6?'ok':'amb'}"><b>${Math.round(100*totO/totA)}%</b><span>ocupação da semana de ${p.nome}</span></div>
+    <div class="kpi"><b>${livresFut}</b><span>horários livres daqui até sábado</span></div>
+    <div class="kpi"><b>${futuros.filter(e=>e.st==='confirmado').length} de ${futuros.filter(e=>!['finalizado','cancelou','faltou'].includes(e.st)).length}</b><span>confirmados, de hoje em diante</span></div>
+    <div class="kpi ruim"><b>${evs.filter(e=>e.st==='faltou').length}</b><span>faltas na semana</span></div>
+  </div>
+  <div style="overflow-x:auto"><div class="ag" style="grid-template-columns:56px repeat(6,minmax(128px,1fr))"><div class="h" style="border-left:0"></div>`;
+  DIAS.forEach(([d,dt],i)=>{
+    const v=pct(i);
+    h+=`<div class="h" style="${i===HOJE?'box-shadow:inset 0 -2px 0 var(--neon)':''}">${d} ${dt.slice(0,2)}${i===HOJE?' <span class="chip g" style="font-size:.6rem;padding:0 6px">hoje</span>':''}
+      <span class="oc" style="color:${v===null?'var(--text-faint)':v<40?'var(--coral)':v<60?'var(--ambar)':'var(--neon)'}">${v===null?'—':v+'%'}</span>
+      <small>${v===null?'não atende':localDe(p.id,i)}</small>
+      ${v!==null?`<div class="bar" style="height:4px;margin-top:4px"><i class="${v<40?'r':v<60?'a':''}" style="width:${v}%"></i></div>`:''}</div>`;
+  });
+  for(const hr of HORAS){
+    h+=`<div class="hr">${hr}</div>`;
+    DIAS.forEach((_,i)=>{
+      const e = evs.find(x=>x.dia===i&&x.h===hr);
+      const coberto = evs.find(x=>x.dia===i&&cobre(x,hr)&&x.h!==hr);
+      if(!atende(p.id,i,hr)&&!e){h+=`<div class="c off"></div>`;return}
+      if(e){
+        h+=`<div class="c"><div class="ev s-${e.st}" style="height:${44*e.d-6}px" onclick="abrirEv(${e.id})"><b>${e.pac}</b><span class="t">${e.st==='segurado'?'⏳ segurado':e.tipo}</span></div></div>`;
+      } else if(coberto){h+=`<div class="c"></div>`}
+      else if(i<HOJE){h+=`<div class="c" style="background:#0c120f"></div>`}
+      else h+=`<div class="c livre" onclick="novoAg('${p.id}','${hr}',${i})"></div>`;
+    });
+  }
+  h+=`</div></div>`;
+  h+= piorDia&&piorDia[1]<50 ? `<div class="hint">⚡ <b>${DIAS[piorDia[0]][0]} ${DIAS[piorDia[0]][1]} está em ${piorDia[1]}%.</b> O motor de ocupação já pode oferecer esses horários para quem tem retorno vencido ou plano parado com ${p.nome}. <button class="btn min" style="margin-left:.4rem" onclick="ir('vagas')">Ver quem chamar</button></div>`
+    : `<div class="hint">A semana de ${p.nome} está bem preenchida. Dias passados aparecem mais escuros; clique num horário livre para agendar.</div>`;
+  if(p.id==='manoel') h+=`<div class="hint">📍 Sábado ele atende em <b>Lago da Pedra</b> (grade quinzenal). A coluna mostra o local de cada dia — é assim que a agenda itinerante aparece para a recepção.</div>`;
+  return h;
+}
+function abrirEv(id){
+  const e=EV.find(x=>x.id===id); const p=PROF.find(x=>x.id===e.p); const t=tipo(e.tipo);
+  const i=FLUXO.indexOf(e.st==='segurado'?'agendado':e.st);
+  const passos = FLUXO.map((s,k)=>`<i class="${k<i?'feito':k===i?'agora':''}">${ST[s]}</i>`).join('');
+  let acoes='';
+  if(e.st==='segurado') acoes=`<div class="hint" style="margin-top:0">⏳ <b>O agente segurou este horário</b> numa conversa de WhatsApp às 08:44. Confira se está livre no Amigo e confirme — só então o paciente recebe "está confirmado".</div><div class="acoes"><button class="btn" onclick="mudar(${id},'agendado','Confirmado para o paciente','O agente avisou: "Pronto, quarta às 9h30 com o Dr. Manoel ✅"')">Confirmar marcação</button><button class="btn sec" onclick="mudar(${id},'cancelou','Horário devolvido','O agente vai oferecer outro horário ao paciente')">Não cabe, oferecer outro</button></div>`;
+  else if(e.st==='agendado') acoes=`<div class="acoes"><button class="btn" onclick="mudar(${id},'confirmado','Confirmado')">Confirmar</button><button class="btn sec" onclick="toast('Confirmação enviada','"Oi, ${e.pac.split(' ')[0]}! Confirma sua consulta amanhã às ${e.h}? Responda 1 para confirmar ou 2 para remarcar."')">Mandar confirmação</button><button class="btn coral" onclick="cancelar(${id})">Cancelou</button></div>`;
+  else if(e.st==='confirmado') acoes=`<div class="acoes"><button class="btn" onclick="mudar(${id},'presente','Paciente chegou')">Chegou</button><button class="btn coral" onclick="faltou(${id})">Faltou</button><button class="btn sec" onclick="cancelar(${id})">Cancelou</button></div>`;
+  else if(e.st==='presente') acoes=`<div class="acoes"><button class="btn" onclick="mudar(${id},'atendimento','Atendimento iniciado')">Iniciar atendimento</button></div>`;
+  else if(e.st==='atendimento') acoes=`<div class="acoes"><button class="btn" onclick="finalizar(${id})">Finalizar</button></div>`;
+  else if(e.st==='finalizado') acoes=`<div class="mut" style="font-size:.82rem">Atendimento finalizado às 08:31.</div>`;
+  abrirGav(`<div class="mut" style="font-size:.76rem">${DIAS[e.dia][0]} ${DIAS[e.dia][1]} · ${e.h} · ${30*e.d} min · ${p.nome} · ${localDe(e.p,e.dia)}</div>
+    <h2>${e.pac}</h2><div class="mut" style="font-size:.84rem">${e.tipo}${e.pac_s?' · <b style="color:var(--ambar)">'+e.pac_s+'</b>':''}</div>
+    <div class="passos">${passos}</div>${acoes}
+    <div class="sec"><h4>Paciente</h4>
+      <div class="linha"><span>Telefone</span><span class="num">(99) 9····-··42</span></div>
+      <div class="linha"><span>Como conheceu</span><span>${e.org}</span></div>
+      <div class="linha"><span>Valor</span><span>${t[4]?brl(t[4])+' · particular':'incluso'}</span></div>
+      ${e.conf?`<div class="linha"><span>Confirmou</span><span style="color:var(--neon)">${e.conf}</span></div>`:''}
+      <div class="acoes"><button class="btn sec min" onclick="ir('paciente')">Abrir ficha</button><button class="btn sec min">💬 Conversa</button></div></div>
+    <div class="sec"><h4>O que acontece no funil</h4><div class="mut" style="font-size:.8rem;line-height:1.55">
+      Agendar → card vai para <b>Consulta agendada</b>. Faltou → volta para <b>Follow-up</b> com "remarcar". Finalizou com tratamento proposto → <b>Plano de tratamento</b>.</div></div>
+    <div class="sec"><h4>Fica no Amigo</h4><div class="faint" style="font-size:.78rem">Prontuário, guia de convênio e nota fiscal deste atendimento continuam no Amigo. O Zaq não guarda diagnóstico.</div></div>`);
+}
+function mudar(id,st,t,x){const e=EV.find(v=>v.id===id);e.st=st;fecharTudo();render();toast(t,x||'')}
+function faltou(id){const e=EV.find(v=>v.id===id);e.st='faltou';fecharTudo();render();
+  toast('Faltou · voltou ao funil','Card de '+e.pac+' foi para Follow-up com "faltou, remarcar". O agente manda amanhã: "sentimos sua falta, quer remarcar?"',true)}
+function cancelar(id){const e=EV.find(v=>v.id===id);e.st='cancelou';fecharTudo();render();
+  toast('⚡ Vaga liberada · '+e.h,'O motor já ofereceu para 3 pessoas que cabem nela (retorno vencido, plano parado, pediu "o mais cedo possível"). Primeiro que responder leva.',true);
+  VAGAS.unshift({h:e.h,prof:'Dr. Manoel',tipo:'30 min',min:0,st:'oferecendo',of:[['Carlos Mendes','retorno vencido há 12 dias',96],['Rogério Alves','plano de botox parado há 3 dias',84],['Heitor Lima','pediu "o mais cedo possível"',71]],resp:null})}
+function finalizar(id){const e=EV.find(v=>v.id===id);
+  abrirModal(`<h2>Finalizar · ${e.pac}</h2><div class="mut" style="font-size:.84rem;margin-bottom:.8rem">Duas perguntas de um clique. É o único momento em que a recepção alimenta o funil à mão.</div>
+  <div class="field"><label>O médico propôs tratamento?</label><div class="opts" id="f-trat"><button class="opt" onclick="sel(this)">Não</button><button class="opt on" onclick="sel(this)">Sim, vou montar a proposta</button></div></div>
+  <div class="field"><label>Retorno</label><div class="opts"><button class="opt" onclick="sel(this)">Sem retorno</button><button class="opt on" onclick="sel(this)">30 dias</button><button class="opt" onclick="sel(this)">60 dias</button><button class="opt" onclick="sel(this)">90 dias</button><button class="opt" onclick="sel(this)">6 meses</button></div>
+    <div class="faint" style="font-size:.74rem;margin-top:.25rem">Vem marcado com o prazo do tipo "Consulta" (30 dias). 7 dias antes o agente pergunta o melhor dia.</div></div>
+  <div class="field"><label>Marcar agora, antes de sair (no mercado, quem já remarcou 2 vezes cancela 4%, contra 21%)</label><div class="opts"><button class="opt" onclick="sel(this)">qua 21/10 · 09:00</button><button class="opt on" onclick="sel(this)">qui 22/10 · 14:00</button><button class="opt" onclick="sel(this)">Deixar para o lembrete</button></div></div>
+  <div class="field"><label>Produto do protocolo</label><div class="opts"><button class="opt on" onclick="sel(this,1)">Protetor FPS 60 · R$ 89</button><button class="opt" onclick="sel(this,1)">Sérum clareador · R$ 139</button></div></div>
+  <div class="acoes" style="margin-top:.9rem"><button class="btn" onclick="mudar(${id},'finalizado','Finalizado','Retorno em 30 dias agendado para qui 22/10 14:00 · protetor lançado no caixa · card foi para Plano de tratamento');setTimeout(()=>ir('planos'),900)">Finalizar e montar proposta</button><button class="btn sec" onclick="fecharTudo()">Voltar</button></div>`)}
+function sel(b,multi){if(!multi)[...b.parentElement.children].forEach(x=>x.classList.remove('on'));b.classList.toggle('on',multi?undefined:true)}
+function novoAg(p,hr,dia){const pr=PROF.find(x=>x.id===p); if(dia===undefined)dia=HOJE; const dl=DIAS[dia][0].toLowerCase()+' '+DIAS[dia][1].slice(0,2);
+  abrirModal(`<h2>Novo agendamento</h2><div class="mut" style="font-size:.84rem;margin-bottom:.7rem">Só o que a recepção preenche. O resto (fim, valor, local) se calcula.</div>
+  <div class="grid2"><div>
+    <div class="field"><label>Paciente</label><input class="inp" placeholder="🔍 nome ou telefone" value="Renata Dias"><div class="faint" style="font-size:.72rem;margin-top:.2rem">Achou no funil: lead do Instagram de ontem</div></div>
+    <div class="field"><label>Tipo de atendimento</label><select class="inp"><option>Consulta · 30 min · R$ 500</option><option>Retorno · 30 min</option><option>Procedimento estético · 60 min</option></select></div>
+    <div class="field"><label>Profissional</label><select class="inp"><option>${pr.nome}</option></select></div>
+    <div class="field"><label>Como conheceu</label><div class="opts"><button class="opt on" onclick="sel(this)">Instagram</button><button class="opt" onclick="sel(this)">Indicação</button><button class="opt" onclick="sel(this)">Google</button><button class="opt" onclick="sel(this)">Já é paciente</button></div></div>
+  </div><div>
+    <div class="field"><label>Horário</label><div class="opts"><button class="opt on" onclick="sel(this)">${dl} · ${hr}</button><button class="opt" onclick="sel(this)">qui 24 · 09:00</button><button class="opt" onclick="sel(this)">qui 24 · 14:30</button><button class="opt" onclick="sel(this)">sex 25 · 08:00</button></div></div>
+    <div class="linha"><span>Fim</span><span class="num">${HORAS[HORAS.indexOf(hr)+1]||'—'}</span></div>
+    <div class="linha"><span>Local</span><span>Espaço Pelle</span></div>
+    <div class="linha"><span>Valor</span><span>R$ 500 · particular · Pix, dinheiro ou cartão</span></div>
+    <div class="field" style="margin-top:.5rem"><label>Observação para a recepção</label><input class="inp"></div>
+  </div></div>
+  <div class="acoes"><button class="btn" onclick="EV.push({id:Date.now(),p:'${p}',h:'${hr}',d:1,dia:${dia},pac:'Renata Dias',tipo:'Consulta',st:'agendado',org:'Instagram'});fecharTudo();render();toast('Agendado · ${dl} ${hr}','Card de Renata Dias foi para Consulta agendada no funil. Confirmação sai amanhã às 10h.')">Agendar</button><button class="btn sec" onclick="fecharTudo()">Cancelar</button></div>
+  <div class="hint">RG, raça, etnia, tipo sanguíneo, convênio e guia TISS <b>não aparecem aqui</b>: ficam no Amigo.</div>`)}
+
+/* =================================================================
+   2 · FUNIL
+   ================================================================= */
+/* O PÓS-VENDA: o que acontece depois que o paciente fecha. Cada coluna anda
+   sozinha, lida da agenda do Amigo (sessão finalizada), do pagamento e do prazo
+   de manutenção do procedimento. */
+const POS = {
+  'Em tratamento':[
+    {n:'Lúcia Ferraz',proc:'Criolipólise',ses:[1,4],prox:'hoje · 10:00',par:'1 de 4 parcelas pagas',al:null},
+    {n:'Ana Paula Rocha',proc:'Depilação a laser',ses:[3,10],prox:'hoje · 08:30',par:'pago à vista',al:null},
+    {n:'Clara Nunes',proc:'Cauterização',ses:[2,3],prox:'qua 01/10 · 09:00',par:'pago no Pix',al:null},
+    {n:'Marta Silva',proc:'Depilação a laser',ses:[4,10],prox:null,par:'3 de 6 parcelas pagas',al:'sem sessão há 64 dias'},
+  ],
+  'Concluído':[
+    {n:'Rita Alves',proc:'Botox (lift)',fim:'18/09',av:['avaliou 5★ no Google','g']},
+    {n:'Fábio Costa',proc:'Cauterização · 3 sessões',fim:'12/09',av:['pesquisa enviada','']},
+    {n:'Paulo Mota',proc:'Procedimento clínico',fim:'20/09',av:['nota 6 · recepção avisada','r']},
+  ],
+  'Manutenção':[
+    {n:'Sônia Pires',proc:'Botox · reaplicação (4 meses)',vence:['em 12 dias','a'],st:'agente ofereceu 3 horários'},
+    {n:'Heloísa Dias',proc:'Laser · manutenção semestral',vence:['venceu há 5 dias','r'],st:'2º toque amanhã'},
+    {n:'Vítor Ramos',proc:'Criolipólise · reavaliação (60 dias)',vence:['em 3 dias','a'],st:'agendou qui 09:00 → volta ao funil'},
+  ],
+  'Indicou':[
+    {n:'Carla Menezes',ind:3,rec:'R$ 2.450',cred:'R$ 150 de crédito'},
+    {n:'Lúcia Ferraz',ind:1,rec:'R$ 500',cred:'R$ 50 de crédito'},
+  ],
+};
+let FU_FASE='tudo';
+/* cards que não cabem no quadro (a contagem é a real da clínica) */
+const FUNIL_MAIS={'Novo':[8,'+8 mais'],'Recebeu o preço':[6,'+6 mais antigos · de 21 a 28 dias']};
+function cardVenda(col,c,i){return `<div class="kbcard" onclick="abrirLead('${col}',${i})"><div class="emp">${c.n}</div><div class="sub">${c.s}</div><div class="ft">${c.t.map(([x,k])=>`<span class="chip ${k}">${x}</span>`).join('')}</div></div>`}
+function cardPos(col,c,i){
+  let corpo='';
+  if(col==='Em tratamento') corpo=`<div class="sub">${c.proc}</div>
+    <div style="display:flex;align-items:center;gap:.4rem;margin-top:.35rem"><div class="bar" style="flex:1;height:6px"><i class="${c.al?'r':''}" style="width:${100*c.ses[0]/c.ses[1]}%"></i></div><span class="num" style="font-size:.72rem">${c.ses[0]}/${c.ses[1]}</span></div>
+    <div class="ft">${c.al?`<span class="chip r">${c.al}</span>`:`<span class="chip g">próxima ${c.prox}</span>`}<span class="chip">${c.par}</span></div>`;
+  if(col==='Concluído') corpo=`<div class="sub">${c.proc} · terminou ${c.fim}</div><div class="ft"><span class="chip ${c.av[1]}">${c.av[0]}</span></div>`;
+  if(col==='Manutenção') corpo=`<div class="sub">${c.proc}</div><div class="ft"><span class="chip ${c.vence[1]}">${c.vence[0]}</span><span class="chip">${c.st}</span></div>`;
+  if(col==='Indicou') corpo=`<div class="sub">trouxe ${c.ind} paciente${c.ind>1?'s':''} · ${c.rec} em consultas</div><div class="ft"><span class="chip g">⭐ ${c.cred}</span></div>`;
+  return `<div class="kbcard" onclick="abrirPos('${col}',${i})"><div class="emp">${c.n}</div>${corpo}</div>`;
+}
+function telaFunil(){
+  const venda = FU_FASE!=='pos', pos = FU_FASE!=='venda';
+  let h=`<div class="pg-h"><div><h1>Prospecção</h1><div class="sub">A jornada inteira do paciente: do primeiro "quanto custa?" até voltar para a manutenção e indicar alguém.</div></div>
+  <div class="seg">${[['tudo','Jornada inteira'],['venda','Venda'],['pos','Pós-venda']].map(([k,l])=>`<button class="${FU_FASE===k?'on':''}" onclick="FU_FASE='${k}';render()">${l}</button>`).join('')}</div></div>`;
+  h+= FU_FASE==='pos'
+    ? `<div class="kpis"><div class="kpi"><b>4</b><span>em tratamento · 1 parado</span></div><div class="kpi ok"><b>3</b><span>concluíram este mês</span></div><div class="kpi amb"><b>3</b><span>manutenção vencendo</span></div><div class="kpi ok"><b>R$ 2.700</b><span>vieram de indicação</span></div></div>`
+    : `<div class="kpis"><div class="kpi"><b>13 → 3</b><span>receberam o preço → agendaram (último mês, real)</span></div><div class="kpi ruim"><b>R$ 5.000</b><span>em consultas paradas depois do preço</span></div><div class="kpi amb"><b>11</b><span>leads parados em Novo (real)</span></div><div class="kpi ok"><b>2 min</b><span>mediana de resposta da recepção (real)</span></div></div>`;
+  h+=`<div class="kbrow">`;
+  if(venda) for(const [col,cards] of Object.entries(FUNIL)){
+    const ex=FUNIL_MAIS[col];
+    h+=`<div class="kbcol ${col==='Consulta agendada'?'agenda':''}"><h4>${col}<span class="kbcnt">${cards.length+(ex?ex[0]:0)}</span></h4><div class="kbdrop">${cards.map((c,i)=>cardVenda(col,c,i)).join('')}${ex?`<div class="kbempty" style="opacity:.8">${ex[1]}</div>`:''}</div></div>`;
+  }
+  if(venda&&pos) h+=`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.4rem;min-width:44px;color:var(--neon);font-size:.7rem;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;transform:rotate(180deg);border-left:1px dashed var(--neon-borda);border-right:1px dashed var(--neon-borda);border-radius:10px;background:var(--neon-fundo)">FECHOU ✓ · COMEÇA O PÓS-VENDA</div>`;
+  if(pos) for(const [col,cards] of Object.entries(POS)){
+    h+=`<div class="kbcol" style="background:#0b120e"><h4>${col}<span class="kbcnt">${cards.length}</span></h4><div class="kbdrop">${cards.map((c,i)=>cardPos(col,c,i)).join('')}</div></div>`;
+  }
+  h+=`</div>`;
+  if(venda) h+=`<div class="card" style="margin-top:.9rem"><h3>Depois do preço, ninguém fica para trás</h3>
+    <div class="mut" style="font-size:.82rem;margin-bottom:.5rem">Medido no WhatsApp da clínica (24/08 a 23/09): de 13 pessoas que receberam o preço da consulta, 3 agendaram. Das 10 que não agendaram, 7 nunca foram chamadas de novo. A recepção responde rápido — o que falta é voltar a falar.</div>
+    <table class="tb"><tr><th>Quando</th><th>O agente manda</th></tr>
+    <tr><td>Recebeu o preço</td><td>card entra em <span class="chip">Recebeu o preço</span> sozinho (o agente reconhece a mensagem de valor)</td></tr>
+    <tr><td>+3 h sem resposta</td><td>o agente manda os horários livres do dia (todo agendamento real saiu no mesmo dia do preço)</td></tr>
+    <tr><td>+1 dia sem resposta</td><td>"Oi, Sônia! Separei dois horários com o Dr. Manoel: qui 9h ou sex 14h. Algum fica bom? 😊"</td></tr>
+    <tr><td>+3 dias</td><td>"Ainda quer marcar sua avaliação? Se preferir outro dia, é só me dizer."</td></tr>
+    <tr><td>+7 dias</td><td>último toque; sem resposta, vai para <span class="chip r">Perdido</span> com o motivo "sumiu depois do preço"</td></tr>
+    <tr><td>Respondeu "vou ver"</td><td>sai do automático e aparece para a recepção, com a frase dele no card</td></tr>
+    </table></div>`;
+  if(pos) h+=`<div class="card" style="margin-top:.9rem"><h3>O pós-venda anda sozinho</h3><table class="tb">
+    <tr><th>Quando</th><th>O card vai para</th><th>E o sistema</th></tr>
+    <tr><td>Pagamento do plano aprovado</td><td><span class="chip">Em tratamento</span></td><td>abre o saldo de sessões e oferece a 1ª sessão</td></tr>
+    <tr><td>Passou o intervalo e não marcou a próxima</td><td><span class="chip">Em tratamento</span> + alerta</td><td>agente oferece horário; com 45 dias parado, avisa a recepção</td></tr>
+    <tr><td>Última sessão finalizada no Amigo</td><td><span class="chip">Concluído</span></td><td>no dia seguinte, pergunta como foi (nota de 0 a 10). Nota alta → pede avaliação no Google; nota baixa → avisa a recepção, sem pedir avaliação</td></tr>
+    <tr><td>Chegou o prazo de manutenção do procedimento</td><td><span class="chip">Manutenção</span></td><td>15 dias antes, o agente oferece horário (botox 4 meses, laser 6 meses, criolipólise 60 dias)</td></tr>
+    <tr><td>Agendou a manutenção</td><td><span class="chip g">volta para Consulta agendada</span></td><td>o ciclo recomeça: é a recompra</td></tr>
+    <tr><td>Alguém que ele indicou agendou</td><td><span class="chip">Indicou</span></td><td>crédito de recompensa na ficha de quem indicou</td></tr>
+    <tr><td>Desistiu no meio do tratamento</td><td><span class="chip r">sai do quadro</span></td><td>com motivo (preço, resultado, mudou de cidade…) e as sessões que restaram ficam registradas para acerto</td></tr>
+  </table></div>`;
+  return h;
+}
+function abrirPos(col,i){const c=POS[col][i];
+  const jornada=[['28/08','Chegou por indicação da Carla',''],['01/09','Consulta com Dr. Manoel',''],['01/09','Plano aceito · criolipólise 4 sessões · R$ 3.620','g'],['02/09','Sessão 1',''],['23/09','Sessão 2 · hoje às 10h','a'],['14/10','Sessão 3 · prevista',''],['04/11','Sessão 4 · prevista',''],['~jan/27','Reavaliação (60 dias após a última)','']];
+  const acoes={
+    'Em tratamento':c.al?`<button class="btn" onclick="toast('Mensagem enviada','“Oi, ${c.n.split(' ')[0]}! Sua próxima sessão de ${c.proc.toLowerCase()} está liberada. Tenho ter 14h ou qui 9h, qual prefere?”')">Oferecer horário agora</button><button class="btn coral">Registrar desistência</button>`:`<button class="btn" onclick="ir('agenda')">Ver sessão na agenda</button>`,
+    'Concluído':`<button class="btn sec">Ver resposta da pesquisa</button>`,
+    'Manutenção':`<button class="btn" onclick="toast('Horários oferecidos','O agente mandou 3 horários para ${c.n.split(' ')[0]}.')">Oferecer horário</button>`,
+    'Indicou':`<button class="btn sec">Ver quem ele indicou</button>`,
+  }[col];
+  abrirGav(`<div class="mut" style="font-size:.76rem">${col}</div><h2>${c.n}</h2><div class="mut" style="font-size:.84rem">${c.proc||('indicou '+c.ind+' paciente(s)')}</div>
+  <div class="acoes">${acoes}</div>
+  <div class="sec"><h4>A jornada ${c.n==='Lúcia Ferraz'?'':'(exemplo: Lúcia Ferraz)'}</h4>
+    ${jornada.map(([d,t,k])=>`<div style="display:grid;grid-template-columns:62px 14px 1fr;gap:.4rem;align-items:start;font-size:.82rem;padding:.18rem 0"><span class="num faint">${d}</span><span style="width:10px;height:10px;border-radius:50%;margin-top:4px;background:${k==='g'?'var(--neon)':k==='a'?'var(--ambar)':'var(--line)'};border:1px solid var(--neon-borda)"></span><span>${t}</span></div>`).join('')}</div>
+  <div class="sec"><h4>Valor do paciente</h4>
+    <div class="linha"><span>Gasto até hoje</span><span class="num">R$ 4.130</span></div>
+    <div class="linha"><span>Previsto no ano (manutenção + produto)</span><span class="num">R$ 1.900</span></div>
+    <div class="linha"><span>Trouxe de indicação</span><span class="num">R$ 500</span></div></div>
+  <div class="acoes"><button class="btn sec" onclick="ir('paciente')">Abrir ficha completa</button></div>`)}
+function abrirLead(col,i){const c=FUNIL[col][i];
+  abrirGav(`<div class="mut" style="font-size:.76rem">${col}</div><h2>${c.n}</h2><div class="mut" style="font-size:.84rem">${c.s}</div>
+  <div class="sec"><h4>Conversa · agente do WhatsApp</h4>
+  <div class="zap">
+    <div class="sis">Centro Dermatológico Dr. Manoel Soares · veio do Instagram</div>
+    <div class="b eu">oi, quanto é a consulta com o dermatologista? tem vaga essa semana?<div class="h">08:41</div></div>
+    <div class="b">Olá! O Centro Dermatológico Dr. Manoel Soares agradece o seu contato 🤝🏽<br>A consulta com o Dr. Manoel Soares tem o investimento de <b>R$ 500,00</b>, nela você terá avaliação completa da sua pele. Formas de pagamento: Pix, espécie ou cartão.<br>Tenho estes horários:<br>• qua 23/09 às 10:30<br>• qui 24/09 às 09:00<br>• sex 25/09 às 08:00<br>Algum fica bom?<div class="h">08:41</div></div>
+    <div class="sis">→ funil: Recebeu o preço</div>
+    <div class="b eu">quarta 9h30 da?<div class="h">08:43</div></div>
+    <div class="b">Dá sim! Para finalizar, só preciso do seu <b>nome completo</b> e <b>data de nascimento</b> 📝<div class="h">08:43</div></div>
+    <div class="b eu">Marcos Teixeira, 12/03/1990<div class="h">08:44</div></div>
+    <div class="b">Prontinho!! ✅ Seu agendamento foi realizado 🤝<br><b>Quarta, 23/09, às 9h30</b> com o Dr. Manoel, na Rua Óscar Galvão, 38. Na véspera eu te mando um lembrete.<div class="h">08:44</div></div>
+    <div class="sis">→ agenda: marcado · → funil: Consulta agendada</div>
+  </div>
+  <div class="hint" style="margin-top:.5rem">📝 Os textos são os que a recepção já usa (a saudação, "investimento de R$ 500,00", "Prontinho!! ✅"). O que muda: <b>não pede foto do RG nem endereço</b> pelo WhatsApp, só nome e nascimento. Documento é dado sensível, e o Amigo cadastra o paciente só com o nome; o RG pode ser conferido no balcão.</div></div>
+  <div class="sec"><h4>O agente nunca</h4><div class="faint" style="font-size:.78rem">indica tratamento · fala de sintoma · diz se o convênio cobre · responde conversa marcada como interna (equipe, fornecedor)</div></div>
+  <div class="acoes"><button class="btn" onclick="ir('agenda')">Ver na agenda</button><button class="btn sec">Assumir conversa</button></div>`)}
+
+/* =================================================================
+   3 · ROTEIRO
+   ================================================================= */
+let DIA_ABERTO=null;
+function telaRoteiro(){
+  if(DIA_ABERTO) return telaDiaViagem();
+  return `<div class="pg-h"><div><h1>Roteiro</h1><div class="sub">Onde tem gente esperando o médico. Ordenado por quem espera, não por ordem alfabética.</div></div>
+  <button class="btn sec">📍 Ver no mapa</button></div>
+  <div class="kpis"><div class="kpi ruim"><b>81</b><span>pessoas esperando em outras cidades</span></div><div class="kpi"><b>6</b><span>cidades com fila</span></div><div class="kpi ok"><b>R$ 438/h</b><span>rendeu a última viagem (Bacabal)</span></div><div class="kpi"><b>R$ 210/h</b><span>rende a sede</span></div></div>
+  ${CIDADES.map((c,i)=>`<div class="cid"><div class="nm">${c.n}<small>${c.ult?'última visita há '+c.ult+' dias':'nunca visitada pelo Zaq'} · ${c.via} de viagem</small></div>
+    <div class="mb"><div class="bar"><i class="${c.q==='quente'?'r':c.q==='morno'?'a':''}" style="width:${Math.min(100,c.esp*3)}%"></i></div></div>
+    <div class="qt q-${c.q}">${c.esp}<small>esperando</small></div>
+    <button class="btn ${i<2?'':'sec'} min" onclick="abrirData('${c.n}',${c.esp})">Abrir data</button></div>`).join('')}
+  <div class="hint">🧭 <b>De onde vem essa fila, sem ninguém digitar:</b> quem escreve "quando o doutor vem a Codó?" entra na fila de Codó. Quem pediu horário e sumiu porque não tinha data, também. Quando a data abre, o agente chama essa fila em ordem.</div>`;
+}
+function abrirData(c,n){
+  abrirModal(`<h2>Abrir data · ${c}</h2><div class="mut" style="font-size:.84rem;margin-bottom:.7rem">${n} pessoas na fila da cidade</div>
+  <div class="grid2"><div>
+    <div class="field"><label>Dia</label><input class="inp" value="qui, 15/10/2026"></div>
+    <div class="field"><label>Horário</label><input class="inp" value="08:00 – 17:00 (almoço 12–13)"></div>
+    <div class="field"><label>Local</label><input class="inp" value="Clínica parceira · Rua ..., Centro"></div>
+    <div class="field"><label>Atendimentos</label><div class="opts"><button class="opt on" onclick="sel(this,1)">Consulta</button><button class="opt on" onclick="sel(this,1)">Retorno</button><button class="opt on" onclick="sel(this,1)">Testes alérgicos</button><button class="opt" onclick="sel(this,1)">Cirurgia</button></div></div>
+    <div class="field"><label>Sinal por Pix</label><div class="opts"><button class="opt on" onclick="sel(this)">R$ 50, vira crédito</button><button class="opt" onclick="sel(this)">Sem sinal</button></div></div>
+  </div><div>
+    <div class="field"><label>Quem o agente chama, em ordem</label>
+      <div class="rank"><span class="p">1</span><span class="n">Retornos vencidos<small>o médico pediu e a data passou</small></span><span class="q">7</span></div>
+      <div class="rank"><span class="p">2</span><span class="n">Fila da cidade<small>pediu ${c} e nunca foi atendido</small></span><span class="q">${n-12}</span></div>
+      <div class="rank"><span class="p">3</span><span class="n">Faltou na última visita<small>segunda chance, com sinal</small></span><span class="q">5</span></div>
+      <div class="faint" style="font-size:.74rem">Fora: quem pediu para não receber mensagem e quem já tem horário.</div></div>
+    <div class="linha"><span>Vagas</span><span class="num">16 de 30 min</span></div>
+    <div class="linha"><span>Custo previsto</span><span class="num">R$ 900</span></div>
+  </div></div>
+  <div class="hint" style="border-color:var(--ambar-borda);color:#F4D29A">⚠️ O aviso só sai com <b>data e local confirmados</b>. Viagem avisada e cancelada queima a clínica na cidade inteira.</div>
+  <div class="acoes"><button class="btn" onclick="DIA_ABERTO={c:'${c}',n:${n}};fecharTudo();render();encher()">Abrir e avisar os ${n}</button><button class="btn sec" onclick="fecharTudo();toast('Data aberta sem aviso','Ninguém foi avisado ainda. Você pode avisar quando confirmar a sala.')">Abrir sem avisar</button></div>`)}
+let VG=[];
+function telaDiaViagem(){
+  const d=DIA_ABERTO; const cheias=VG.filter(v=>v.st==='cheia').length;
+  return `<div class="pg-h"><div><h1>${d.c} · qui 15/10</h1><div class="sub">Dia de viagem aberto agora · o agente está chamando a fila em ordem</div></div><button class="btn sec" onclick="DIA_ABERTO=null;render()">‹ Voltar ao roteiro</button></div>
+  <div class="grid2"><div class="card"><h3><span id="vg-n">${cheias}</span> de 16 vagas <span class="mut" style="font-weight:400;font-size:.8rem">· <span id="vg-r">${VG.filter(v=>v.st==='resp').length}</span> respondendo</span></h3>
+    <div class="bar" style="height:11px;margin-bottom:.7rem"><i id="vg-bar" style="width:${cheias/16*100}%"></i></div>
+    <div class="vagas" id="vagas">${VG.map(v=>`<div class="vg ${v.st}"><b>${v.h}</b><small>${v.st==='cheia'?v.q:v.st==='resp'?'respondendo…':'livre'}</small></div>`).join('')}</div></div>
+  <div class="card"><h3>Como está enchendo</h3><table class="tb" id="vg-org"></table>
+    <div class="hint">Quem não conseguir vaga <b>continua na fila</b> e é o primeiro da próxima data em ${d.c}.</div></div></div>
+  <div class="card"><h3>Previsão da viagem</h3><div class="grid3">
+    <div><div class="mut" style="font-size:.76rem">Receita se encher</div><div style="font-size:1.3rem;font-family:var(--display)">R$ 8.000</div></div>
+    <div><div class="mut" style="font-size:.76rem">Custo (combustível, sala, hospedagem)</div><div style="font-size:1.3rem;font-family:var(--display)">R$ 900</div></div>
+    <div><div class="mut" style="font-size:.76rem">Cada vaga vazia custa</div><div style="font-size:1.3rem;font-family:var(--display);color:var(--coral)">R$ 500</div></div></div></div>`;
+}
+function encher(){
+  const hs=['08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30'];
+  const qs=['Retorno vencido','Fila da cidade','Retorno vencido','Fila da cidade','Faltou antes','Fila da cidade','Retorno vencido','Indicação'];
+  VG=hs.map(h=>({h,st:'',q:''}));render();
+  let k=0, t=null; const ordem=[0,2,1,4,6,3,8,5,10,7,12,9,11];
+  t=setInterval(()=>{
+    if(ROTA!=='roteiro'||!DIA_ABERTO){clearInterval(t);return}
+    if(k<ordem.length){const v=VG[ordem[k]];v.st='resp';if(k>0){const a=VG[ordem[k-1]];a.st='cheia';a.q=qs[(k-1)%qs.length]}k++}
+    else{VG.filter(v=>v.st==='resp').forEach(v=>{v.st='cheia';v.q='Fila da cidade'});clearInterval(t);toast('Bacabal · 13 de 16 vagas em 2 dias','3 horários ainda livres. Amanhã o agente chama a próxima leva (quem é de cidades vizinhas).')}
+    const cheias=VG.filter(v=>v.st==='cheia').length;
+    $('#vagas').innerHTML=VG.map(v=>`<div class="vg ${v.st}"><b>${v.h}</b><small>${v.st==='cheia'?v.q:v.st==='resp'?'respondendo…':'livre'}</small></div>`).join('');
+    $('#vg-n').textContent=cheias;$('#vg-r').textContent=VG.filter(v=>v.st==='resp').length;$('#vg-bar').style.width=(cheias/16*100)+'%';
+    const org={};VG.filter(v=>v.st==='cheia').forEach(v=>org[v.q]=(org[v.q]||0)+1);
+    $('#vg-org').innerHTML='<tr><th>Origem</th><th class="r">Vagas</th></tr>'+Object.entries(org).map(([o,n])=>`<tr><td>${o}</td><td class="r num">${n}</td></tr>`).join('');
+  },650);
+}
+
+/* =================================================================
+   4 · VAGAS LIBERADAS (motor de ocupação)
+   ================================================================= */
+let VAGAS=[
+  {h:'10:00',prof:'Dr. Manoel',tipo:'30 min',min:4,st:'oferecendo',of:[['Carlos Mendes','retorno vencido há 12 dias',96],['Rogério Alves','plano de botox parado há 3 dias',84],['Heitor Lima','pediu "o mais cedo possível"',71]],resp:null},
+  {h:'14:30',prof:'Juliana',tipo:'60 min',min:38,st:'preenchida',of:[['Clara Nunes','sessão de laser liberada',92],['Ana Paula Rocha','próxima sessão sugerida',88],['Paula Viana','procedimento estético em aberto',64]],resp:'Clara Nunes respondeu "1" em 6 min'},
+];
+function telaVagas(){
+  return `<div class="pg-h"><div><h1>Vagas liberadas</h1><div class="sub">Cancelou? Em minutos o horário é oferecido para quem cabe nele. Primeiro que responder leva.</div></div></div>
+  <div class="kpis"><div class="kpi ok"><b>9 de 11</b><span>vagas preenchidas este mês</span></div><div class="kpi"><b>7 min</b><span>tempo médio até preencher</span></div><div class="kpi ok"><b>R$ 2.650</b><span>que teriam ficado na mesa</span></div><div class="kpi amb"><b>${VAGAS.filter(v=>v.st==='oferecendo').length}</b><span>oferecendo agora</span></div></div>
+  ${VAGAS.map((v,i)=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:.6rem;flex-wrap:wrap;align-items:baseline">
+    <h3 style="margin:0">Hoje ${v.h} · ${v.prof} · ${v.tipo}</h3>
+    ${v.st==='preenchida'?'<span class="chip g">preenchida ✓</span>':'<span class="chip a">oferecendo · vale por '+(20-v.min)+' min</span>'}</div>
+    <div class="mut" style="font-size:.78rem;margin:.2rem 0 .6rem">cancelou há ${v.min||'1'} min${v.resp?' · '+v.resp:''}</div>
+    ${v.of.map((o,k)=>`<div class="rank"><span class="p">${k+1}</span><span class="n">${o[0]}<small>${o[1]}</small></span><span class="q">${o[2]}</span></div>`).join('')}
+    <div class="faint" style="font-size:.74rem;margin-top:.3rem">Fora: quem precisa de mais tempo que o buraco, quem é de outra cidade, quem já tem horário esta semana, quem pediu para não receber mensagem.</div>
+    ${v.st==='oferecendo'?`<div class="acoes"><button class="btn min" onclick="VAGAS[${i}].st='preenchida';VAGAS[${i}].resp='Carlos Mendes respondeu 1 em 3 min';render();toast('Vaga preenchida','Carlos Mendes confirmou. Os outros dois receberam: "já foi preenchida, te aviso na próxima 🙏"')">Simular: alguém respondeu</button></div>`:''}
+  </div>`).join('')}
+  <div class="grid2"><div class="card"><h3>A mensagem</h3><div class="zap"><div class="b">Oi, Carlos! Abriu uma vaga com o Dr. Manoel <b>hoje às 10h</b> no Espaço Pelle. Quer ficar com ela?<br>Responda <b>1</b> para confirmar. É por ordem de resposta, e vale pelos próximos 20 minutos 🙂<div class="h">10:04</div></div><div class="b eu">1<div class="h">10:07</div></div><div class="b">Confirmado! Hoje às 10h, Rua Óscar Galvão, 38. Até já 😊<div class="h">10:07</div></div></div></div>
+  <div class="card"><h3>Regras</h3><div class="mut" style="font-size:.84rem;line-height:1.7">• Oferta para 3 ao mesmo tempo, vale 20 min<br>• Sem resposta: próxima leva de 5<br>• Nunca promete o mesmo horário duas vezes<br>• Horário comercial e teto por dia<br>• Quem respondeu depois recebe "já foi, te aviso na próxima"</div></div></div>`;
+}
+
+/* =================================================================
+   5 · PACIENTES (lista) e a FICHA
+   A ficha do Zaq é a do RELACIONAMENTO e do DINHEIRO. Prontuário, diagnóstico,
+   foto clínica e exame ficam no Amigo; atendimentos e cadastro vêm de lá pela API.
+   ================================================================= */
+let PS_SEG='todos';
+const PACS=[
+  {n:'Lúcia Ferraz',id:36,cid:'Pedreiras',ult:'hoje',prox:'hoje 09:00 · retorno',sit:[['em tratamento','g'],['assinante','b']],val:'R$ 4.269',seg:['tratamento','assinantes','aniversario'],ex:true},
+  {n:'Ana Paula Rocha',id:33,cid:'Pedreiras',ult:'hoje',prox:'hoje 08:30 · sessão 3 de 10',sit:[['em tratamento','g']],val:'R$ 2.400',seg:['tratamento','aniversario']},
+  {n:'Carla Menezes',id:44,cid:'Pedreiras',ult:'18/09',prox:'—',sit:[['indicou 3 ⭐','g'],['assinante','b']],val:'R$ 3.180',seg:['assinantes']},
+  {n:'Marta Silva',id:29,cid:'Pedreiras',ult:'21/07',prox:'—',sit:[['pacote parado há 64 dias','r'],['parcela atrasada','r']],val:'R$ 2.100',seg:['tratamento','atrasadas']},
+  {n:'Carlos Mendes',id:62,cid:'Pedreiras',ult:'10/08',prox:'—',sit:[['retorno vencido há 12 dias','a']],val:'R$ 500',seg:['retorno']},
+  {n:'Heloísa Dias',id:51,cid:'Lago da Pedra',ult:'12/03',prox:'—',sit:[['manutenção vencida','a']],val:'R$ 1.760',seg:['retorno']},
+  {n:'Raimundo Costa',id:58,cid:'Bacabal',ult:'02/05',prox:'fila de Bacabal',sit:[['sumido há 144 dias','r']],val:'R$ 500',seg:['sumidos']},
+  {n:'Sônia Pires',id:47,cid:'Pedreiras',ult:'—',prox:'—',sit:[['recebeu o preço há 1 dia','a']],val:'—',seg:[]},
+];
+function telaPacientes(){
+  const segs=[['todos','Todos'],['tratamento','Em tratamento'],['retorno','Retorno ou manutenção vencida'],['atrasadas','Parcela atrasada'],['aniversario','Aniversário este mês'],['sumidos','Sumidos há 90+ dias'],['assinantes','Assinantes']];
+  const vis=PACS.filter(x=>PS_SEG==='todos'||x.seg.includes(PS_SEG));
+  let h=`<div class="pg-h"><div><h1>Pacientes</h1><div class="sub">Cadastro e atendimentos vêm do Amigo; o Zaq junta conversa, dinheiro e o que fazer com cada um.</div></div>
+  <button class="btn" onclick="novoAg('manoel','10:30')">+ Agendar</button></div>
+  <div class="kpis"><div class="kpi"><b>1.284</b><span>pacientes sincronizados do Amigo (ilustrativo)</span></div><div class="kpi ok"><b>37</b><span>em tratamento agora</span></div><div class="kpi amb"><b>18</b><span>retornos pedidos no Amigo, nenhum chamado (real, 22/09)</span></div><div class="kpi ruim"><b>R$ 6.300</b><span>em parcelas atrasadas</span></div></div>
+  <input class="inp" placeholder="🔍 Buscar por nome, telefone ou CPF" style="margin-bottom:.6rem">
+  <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.7rem">${segs.map(([k,l])=>`<button class="opt ${PS_SEG===k?'on':''}" onclick="PS_SEG='${k}';render()">${l}${k==='todos'?'':' · '+PACS.filter(x=>x.seg.includes(k)).length}</button>`).join('')}</div>
+  <div class="card" style="padding:.2rem .3rem"><div class="ps-row hd"><span>Paciente</span><span>Última visita</span><span>Próximo</span><span>Situação</span><span style="text-align:right">Valor</span></div>`;
+  for(const x of vis){
+    h+=`<div class="ps-row" onclick="${x.ex?"ir('paciente')":"toast('No protótipo, a ficha completa é a da Lúcia Ferraz','É a primeira da lista.')"}">
+      <span class="nm">${x.n}<small>${x.id} anos · ${x.cid}${x.ex?' · <span style="color:var(--neon)">abrir ficha de exemplo</span>':''}</small></span>
+      <span class="mut">${x.ult}</span><span class="mut">${x.prox}</span>
+      <span style="display:flex;gap:.25rem;flex-wrap:wrap">${x.sit.map(([t,k])=>`<span class="chip ${k}">${t}</span>`).join('')}</span>
+      <span class="num" style="text-align:right">${x.val}</span></div>`;
+  }
+  return h+`</div><div class="hint">Cada filtro é uma lista de trabalho: <b>Retorno vencido</b> e <b>Sumidos</b> alimentam o motor de vagas e o roteiro; <b>Parcela atrasada</b> vira cobrança por Pix; <b>Aniversário</b> vem da API do Amigo e o agente manda a mensagem no dia.</div>`;
+}
+
+let PC_ABA='resumo', TL_F='tudo';
+const TL=[
+  {q:'04/11',t:'tratamento',x:'Sessão 4 de criolipólise · prevista',f:'Zaq',k:'',fut:1},
+  {q:'14/10',t:'agenda',x:'Sessão 3 de criolipólise · prevista · o lembrete sai 13/10',f:'Zaq',k:'',fut:1},
+  {q:'12/10',t:'relac',x:'Aniversário · mensagem do agente já pronta',f:'Amigo',k:'',fut:1},
+  {q:'10/10',t:'dinheiro',x:'Assinatura Pele em dia · R$ 149 · cobrança automática',f:'Zaq',k:'',fut:1},
+  {q:'01/10',t:'dinheiro',x:'2ª parcela do plano · R$ 905 · o link de Pix sai 28/09',f:'Zaq',k:'a',fut:1},
+  {hoje:1},
+  {q:'23/09 10:00',t:'agenda',x:'Sessão 2 de criolipólise · Juliana · confirmado',f:'Amigo',k:'g'},
+  {q:'23/09 09:00',t:'agenda',x:'Retorno · Dr. Manoel · confirmado',f:'Amigo',k:'g'},
+  {q:'22/09 10:12',t:'conversa',x:'Confirmou os dois horários de hoje pelo WhatsApp: "confirmo sim 😊"',f:'WhatsApp',k:''},
+  {q:'15/09',t:'relac',x:'Indicou Rafaela Souza, que agendou consulta · crédito de R$ 50',f:'Zaq',k:'g'},
+  {q:'10/09',t:'dinheiro',x:'Assinou Pele em dia · R$ 149/mês · 1ª cobrança paga no cartão',f:'Zaq',k:'g'},
+  {q:'02/09',t:'tratamento',x:'Sessão 1 de criolipólise · Juliana · finalizado',f:'Amigo',k:''},
+  {q:'01/09',t:'dinheiro',x:'Entrada do plano · R$ 905 · Pix',f:'Zaq',k:'g'},
+  {q:'01/09',t:'tratamento',x:'Plano aceito · criolipólise 4 sessões + protocolo domiciliar · R$ 3.620 · entrada + 3 no Pix',f:'Zaq',k:'g'},
+  {q:'01/09',t:'agenda',x:'Consulta · Dr. Manoel · finalizado · R$ 500 no Pix',f:'Amigo',k:''},
+  {q:'28/08',t:'conversa',x:'Agendou a consulta com o agente em 3 minutos de conversa',f:'WhatsApp',k:''},
+  {q:'28/08',t:'conversa',x:'Chegou pelo WhatsApp, indicada por Carla Menezes · recebeu o preço',f:'WhatsApp',k:''},
+];
+let CONSENT={lembretes:true,promo:true,pesquisa:false};
+function telaPaciente(){
+  const abas=[['resumo','Resumo'],['linha','Linha do tempo'],['conversa','Conversa'],['financeiro','Financeiro'],['cadastro','Cadastro e consentimento']];
+  let h=`<button class="btn sec min" onclick="ir('pacientes')" style="margin-bottom:.6rem">‹ Pacientes</button>
+  <div class="pc-top"><div class="av-g">LF</div>
+    <div><h1>Lúcia Ferraz</h1>
+      <div class="mut" style="font-size:.84rem">36 anos · Pedreiras · <span class="num">(99) 9····-··42</span> · paciente desde 01/09/2026</div>
+      <div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.4rem"><span class="chip g">em tratamento</span><span class="chip b">assinante Pele em dia</span><span class="chip">indicada por Carla Menezes</span><span class="chip g">indicou 1 ⭐</span><span class="chip">0 faltas · confirma sempre</span></div></div>
+    <div class="acts"><button class="btn" onclick="novoAg('juliana','14:00',3)">Agendar</button><button class="btn sec" onclick="PC_ABA='conversa';render()">💬 WhatsApp</button><button class="btn sec" onclick="toast('Pix enviado','Link da 2ª parcela (R$ 905) mandado no WhatsApp da Lúcia.')">Cobrar Pix</button><button class="btn sec" onclick="PL_ABA='nova';ir('planos')">Nova proposta</button></div></div>
+  <div class="sync">🔄 Cadastro e atendimentos sincronizados com o Amigo há 2 min · prontuário, exames e fotos clínicas ficam no Amigo</div>
+  <div class="alertas">
+    <div class="al g"><span class="ic">📅</span><span><b>Hoje: retorno às 9h e sessão 2 às 10h</b>os dois confirmados pelo WhatsApp</span></div>
+    <div class="al a"><span class="ic">💳</span><span><b>2ª parcela vence 01/10</b>R$ 905 · o link de Pix sai sozinho em 28/09</span></div>
+    <div class="al b"><span class="ic">🎂</span><span><b>Aniversário em 12/10</b>a mensagem do agente já está pronta</span></div>
+    <div class="al"><span class="ic">🧴</span><span><b>Protetor deve acabar ~31/10</b>o agente pergunta e oferece reposição</span></div>
+  </div>
+  <div class="tabs">${abas.map(([k,l])=>`<button class="${PC_ABA===k?'on':''}" onclick="PC_ABA='${k}';render()">${l}</button>`).join('')}</div>`;
+
+  if(PC_ABA==='resumo') h+=`<div class="grid2">
+    <div class="card"><h3>Tratamento</h3>
+      <div style="font-weight:600">Criolipólise · pacote de 4 sessões</div>
+      <div class="mut" style="font-size:.78rem">comprado 01/09 · válido até 01/03/2027 · a cada 21 dias · com Juliana</div>
+      <div class="ses"><i class="ok">1</i><i class="nx">2</i><i>3</i><i>4</i></div>
+      <div style="font-size:.84rem">1 feita · <b style="color:var(--ambar)">2ª hoje às 10h</b> · depois 14/10 e 04/11</div>
+      <div class="mut" style="font-size:.78rem;margin-top:.3rem">Protocolo domiciliar (2 produtos) entregue em 01/09 · reavaliação prevista ~jan/2027</div>
+      <div class="acoes"><button class="btn min" onclick="ir('agenda')">Ver na agenda</button><button class="btn sec min" onclick="toast('3ª sessão reservada','ter 14/10 às 10:00 com Juliana · direto na agenda do Amigo')">Marcar a 3ª agora</button></div></div>
+    <div class="card"><h3>Dinheiro</h3>
+      <div class="linha"><span>Contratado</span><span class="num">R$ 4.269</span></div>
+      <div class="linha"><span>Pago</span><span class="num" style="color:var(--neon)">R$ 1.554</span></div>
+      <div class="linha"><span>A receber · 3 parcelas de R$ 905</span><span class="num">R$ 2.715</span></div>
+      <div class="linha"><span>Crédito disponível (indicação)</span><span class="num" style="color:var(--neon)">R$ 50</span></div>
+      <div class="linha"><span>Paga melhor por</span><span>Pix</span></div>
+      <div class="acoes"><button class="btn min" onclick="toast('Pix enviado','Link da 2ª parcela (R$ 905) mandado no WhatsApp da Lúcia.')">Mandar Pix da 2ª parcela</button><button class="btn sec min" onclick="PC_ABA='financeiro';render()">Ver tudo</button></div></div>
+    <div class="card"><h3>Valor da paciente</h3>
+      <div class="linha"><span>Contratado até hoje</span><span class="num">R$ 4.269</span></div>
+      <div class="linha"><span>Previsto nos próximos 12 meses</span><span class="num">R$ 2.600</span></div>
+      <div class="faint" style="font-size:.74rem;margin:-.1rem 0 .3rem">assinatura + reavaliação + reposição de produto</div>
+      <div class="linha"><span>Trouxe por indicação</span><span class="num">R$ 500</span></div>
+      <div class="bar" style="margin:.5rem 0 .3rem"><i style="width:92%"></i></div>
+      <div class="mut" style="font-size:.76rem">Entre as <b style="color:var(--neon)">10% que mais valem</b> para a clínica</div></div>
+    <div class="card"><h3>Como ela gosta de ser atendida</h3>
+      <div class="linha"><span>Melhor horário</span><span>manhã, antes das 11h</span></div>
+      <div class="linha"><span>Responde em</span><span>~6 min, por texto</span></div>
+      <div class="linha"><span>Lembretes</span><span>confirmou 3 de 3</span></div>
+      <div class="linha"><span>Prefere</span><span>Juliana nas sessões</span></div>
+      <div class="faint" style="font-size:.74rem;margin-top:.3rem">Tirado das conversas e da agenda. O agente usa isso para oferecer horário.</div></div>
+  </div>
+  <div class="card"><h3>Observações da recepção</h3>
+    <div class="nota-rec">Prefere horário antes das 11h por causa do trabalho. Gosta de receber o Pix no dia anterior ao vencimento.</div>
+    <div class="faint" style="font-size:.74rem;margin-top:.4rem">🔒 Não escreva diagnóstico, queixa ou remédio aqui: isso é prontuário e fica no Amigo. Se aparecer uma dessas palavras, o sistema avisa antes de salvar.</div></div>`;
+
+  if(PC_ABA==='linha'){
+    const fs=[['tudo','Tudo'],['agenda','Agenda'],['tratamento','Tratamento'],['dinheiro','Dinheiro'],['conversa','Conversa'],['relac','Relacionamento']];
+    h+=`<div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.8rem">${fs.map(([k,l])=>`<button class="opt ${TL_F===k?'on':''}" onclick="TL_F='${k}';render()">${l}</button>`).join('')}</div><div class="card"><div class="tl">`;
+    for(const e of TL){
+      if(e.hoje){h+=`<div class="hoje">● HOJE · QUA 23/09</div>`;continue}
+      if(TL_F!=='tudo'&&e.t!==TL_F)continue;
+      const fc=e.f==='Amigo'?'amigo':e.f==='WhatsApp'?'zap':'';
+      h+=`<div class="it ${e.k} ${e.fut?'fut':''}"><span class="quando">${e.q}</span>${e.x}<span class="fonte ${fc}">${e.f}</span></div>`;
+    }
+    h+=`</div></div><div class="hint">A linha do tempo junta três fontes: <span class="fonte amigo">Amigo</span> (atendimentos e status, pela API), <span class="fonte zap">WhatsApp</span> (conversa) e <span class="fonte">Zaq</span> (plano, pagamento, indicação). O que está apagado ainda vai acontecer, e o sistema já sabe.</div>`;
+  }
+
+  if(PC_ABA==='conversa') h+=`<div class="grid2"><div class="card"><h3>WhatsApp · últimas mensagens</h3>
+    <div class="zap" style="max-width:none">
+      <div class="sis">15/09</div>
+      <div class="b">Lúcia, a Rafaela agendou a consulta dela! Obrigada pela indicação 💚 Você ganhou <b>R$ 50 de crédito</b> para usar na clínica.<div class="h">11:20 · agente</div></div>
+      <div class="b eu">aaah que bom! 🥰<div class="h">11:31</div></div>
+      <div class="sis">22/09</div>
+      <div class="b">Oi, Lúcia! Amanhã você tem <b>retorno às 9h</b> com o Dr. Manoel e a <b>sessão 2 de criolipólise às 10h</b> com a Juliana. Confirma? Responda 1 para confirmar ou 2 para remarcar.<div class="h">10:00 · agente</div></div>
+      <div class="b eu">confirmo sim 😊<div class="h">10:12</div></div>
+      <div class="b">Confirmado! Até amanhã 🤝<div class="h">10:12 · agente</div></div>
+    </div></div>
+    <div class="card"><h3>Responder</h3>
+      <div class="nota-rec faint">Escreva uma mensagem…</div>
+      <div class="field" style="margin-top:.6rem"><label>Modelos</label><div class="opts">
+        <button class="opt" onclick="toast('Horários enviados','qui 9h, sex 8h30 ou ter 10h com Juliana')">Horários livres</button>
+        <button class="opt" onclick="toast('Pix enviado','Link da 2ª parcela (R$ 905)')">Link do Pix</button>
+        <button class="opt">Lembrete de sessão</button>
+        <button class="opt">Pesquisa de satisfação</button></div></div>
+      <div class="linha" style="margin-top:.5rem"><span>Agente nesta conversa</span><span class="chip g">ativo</span></div>
+      <div class="acoes"><button class="btn sec min">Eu assumo</button><button class="btn sec min" onclick="ir('conversas')">Ver todas as conversas</button></div></div></div>`;
+
+  if(PC_ABA==='financeiro') h+=`<div class="kpis"><div class="kpi"><b>R$ 4.269</b><span>contratado</span></div><div class="kpi ok"><b>R$ 1.554</b><span>pago</span></div><div class="kpi amb"><b>R$ 2.715</b><span>a receber</span></div><div class="kpi ok"><b>R$ 50</b><span>crédito de indicação</span></div></div>
+    <div class="card"><div style="overflow-x:auto"><table class="tb"><tr><th>Data</th><th>O quê</th><th>Forma</th><th class="r">Valor</th><th>Situação</th></tr>
+      <tr><td class="num">01/12</td><td>4ª parcela do plano</td><td>Pix</td><td class="r num">905</td><td><span class="chip">a vencer</span></td></tr>
+      <tr><td class="num">01/11</td><td>3ª parcela do plano</td><td>Pix</td><td class="r num">905</td><td><span class="chip">a vencer</span></td></tr>
+      <tr><td class="num">10/10</td><td>Assinatura Pele em dia</td><td>cartão</td><td class="r num">149</td><td><span class="chip">cobrança automática</span></td></tr>
+      <tr><td class="num">01/10</td><td>2ª parcela do plano</td><td>Pix</td><td class="r num">905</td><td><span class="chip a">vence em 8 dias · Pix sai 28/09</span></td></tr>
+      <tr><td class="num">10/09</td><td>Assinatura Pele em dia</td><td>cartão</td><td class="r num">149</td><td><span class="chip g">pago</span></td></tr>
+      <tr><td class="num">01/09</td><td>Entrada do plano de criolipólise</td><td>Pix</td><td class="r num">905</td><td><span class="chip g">pago</span></td></tr>
+      <tr><td class="num">01/09</td><td>Consulta · Dr. Manoel</td><td>Pix</td><td class="r num">500</td><td><span class="chip g">pago</span></td></tr>
+    </table></div>
+    <div class="acoes"><button class="btn min" onclick="toast('Pix enviado','Link da 2ª parcela (R$ 905) mandado no WhatsApp.')">Mandar Pix da próxima</button><button class="btn sec min">Registrar pagamento</button><button class="btn sec min" onclick="toast('Crédito aplicado','R$ 50 abatidos da 2ª parcela: fica R$ 855.')">Usar os R$ 50 de crédito</button></div>
+    <div class="hint">A nota fiscal continua saindo no Amigo. Aqui fica o que a clínica precisa para cobrar: o que venceu, o que vai vencer e o link de Pix pronto.</div></div>`;
+
+  if(PC_ABA==='cadastro') h+=`<div class="grid2"><div class="card"><h3>Cadastro</h3>
+      <div class="field"><label>Nome completo</label><input class="inp" value="Lúcia Ferraz"></div>
+      <div class="field"><label>Data de nascimento</label><input class="inp" value="12/10/1989"></div>
+      <div class="field"><label>Celular (WhatsApp)</label><input class="inp" value="(99) 9····-··42"></div>
+      <div class="field"><label>Cidade</label><input class="inp" value="Pedreiras"></div>
+      <div class="field"><label>CPF · opcional</label><input class="inp" placeholder="não informado"></div>
+      <div class="field"><label>Como conheceu</label><input class="inp" value="Indicação · Carla Menezes"></div>
+      <div class="linha"><span>No Amigo</span><span class="chip b">vinculada · sincronizada</span></div></div>
+    <div class="card"><h3>O que ela autorizou</h3>
+      <div class="chk" onclick="CONSENT.lembretes=!CONSENT.lembretes;render()"><i class="${CONSENT.lembretes?'':'off'}">✓</i><span>Lembretes de consulta, sessão e pagamento pelo WhatsApp<small>desde 28/08, na primeira conversa</small></span></div>
+      <div class="chk" onclick="CONSENT.promo=!CONSENT.promo;render()"><i class="${CONSENT.promo?'':'off'}">✓</i><span>Novidades e promoções da clínica<small>desde 10/09, ao assinar o plano</small></span></div>
+      <div class="chk" onclick="CONSENT.pesquisa=!CONSENT.pesquisa;render()"><i class="${CONSENT.pesquisa?'':'off'}">✓</i><span>Pesquisa de satisfação depois do tratamento<small>ainda não perguntado</small></span></div>
+      <div class="faint" style="font-size:.74rem;margin-top:.5rem">Se ela responder SAIR, os três desligam sozinhos e o agente para de mandar mensagem automática.</div>
+      <div class="acoes"><button class="btn sec min">Exportar dados dela</button><button class="btn sec min">Pedido de exclusão</button></div></div></div>
+    <div class="card" style="border-style:dashed"><h3>O que não fica no Zaq</h3>
+      <div class="mut" style="font-size:.84rem">Prontuário, diagnóstico, queixa, receita, exames, fotos clínicas e documento (RG). Tudo isso continua no Amigo. O Zaq guarda o mínimo para marcar, confirmar, cobrar e trazer de volta.</div></div>`;
+  return h;
+}
+
+/* =================================================================
+   6 · PLANOS E PACOTES
+   A tabela de procedimentos é a base de tudo: a proposta sai dela, o saldo de
+   sessões usa o intervalo, e o pós-venda usa o prazo de manutenção.
+   Preços ilustrativos (só a consulta, R$ 500, é real).
+   ================================================================= */
+let PL_ABA='propostas';
+const PROCS={
+  'Criolipólise':{ses:4,int:21,preco:800,man:'reavaliação em 60 dias',prof:'Juliana'},
+  'Depilação a laser':{ses:10,int:30,preco:240,man:'manutenção a cada 6 meses',prof:'Juliana'},
+  'Botox (lift)':{ses:1,int:0,preco:1600,man:'reaplicação em 4 meses',prof:'Dr. Manoel'},
+  'Botox (hiperidrose)':{ses:1,int:0,preco:1800,man:'reaplicação em 6 meses',prof:'Dr. Manoel'},
+  'Ácido hialurônico (ampola)':{ses:1,int:0,preco:1400,man:'avaliação em 30 dias',prof:'Dr. Manoel'},
+  'Bioplastia':{ses:1,int:0,preco:2200,man:'avaliação em 30 dias',prof:'Dr. Manoel'},
+  'Cauterização química':{ses:3,int:15,preco:300,man:'avaliação da eficácia em 30 dias',prof:'Dr. Manoel'},
+  'Peeling':{ses:3,int:21,preco:350,man:'manutenção em 3 meses',prof:'Juliana'},
+  'Limpeza de pele':{ses:1,int:0,preco:180,man:'mensal (entra na assinatura)',prof:'Juliana'},
+};
+const PRODS={'Gel pós-procedimento':95,'Protetor FPS 60':89,'Sérum clareador':139,'Hidratante reparador':110};
+const brl2=v=>'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2});
+
+/* ---- propostas (quadro) ---- */
+const PROPS={
+  'Enviada':[{n:'Fábio Costa',pl:'Cauterização química · 3 sessões',v:900,d:'há 1 dia',fu:['D+1 hoje às 10h','']}],
+  'Visualizada':[{n:'Fernando Sá',pl:'Criolipólise · 4 sessões',v:3200,d:'visualizou hoje',fu:['D+1 amanhã','']},{n:'Rogério Alves',pl:'Botox (lift)',v:1600,d:'há 3 dias',fu:['lembrete D+3 enviado','a']}],
+  'Negociando':[{n:'Bianca Lemos',pl:'Depilação a laser · 10 sessões',v:2400,d:'vence amanhã',fu:['pediu 6× no cartão','a']}],
+  'Aceita':[{n:'Lúcia Ferraz',pl:'Criolipólise + protocolo',v:3620,d:'01/09',fu:['entrada + 3 no Pix','g']},{n:'Rita Alves',pl:'Botox (lift)',v:1600,d:'05/09',fu:['Pix à vista','g']},{n:'Ana Paula Rocha',pl:'Depilação a laser · 10',v:2400,d:'12/09',fu:['4× cartão','g']}],
+  'Perdida':[{n:'Paulo Nunes',pl:'Bioplastia',v:2200,d:'14/09',fu:['achou caro','r']},{n:'Tereza Luz',pl:'Peeling · 3 sessões',v:1050,d:'10/09',fu:['sumiu depois da proposta','r']}],
+};
+function abasPlanos(){
+  return `<div class="tabs">${[['propostas','Propostas'],['nova','Nova proposta'],['pacotes','Pacotes e sessões'],['assinaturas','Assinaturas'],['tabela','Tabela de procedimentos']].map(([k,l])=>`<button class="${PL_ABA===k?'on':''}" onclick="PL_ABA='${k}';render()">${l}</button>`).join('')}</div>`;
+}
+function telaPlanos(){
+  const aberto=['Enviada','Visualizada','Negociando'].reduce((s,c)=>s+PROPS[c].reduce((a,x)=>a+x.v,0),0);
+  const dev=SESS.reduce((s,x)=>s+(x.v-x.f)*PROCS[x.p].preco,0);
+  let h=`<div class="pg-h"><div><h1>Planos e pacotes</h1><div class="sub">Onde a consulta de R$ 500 vira tratamento, e o paciente volta para todas as sessões.</div></div><button class="btn" onclick="PL_ABA='nova';render()">+ Nova proposta</button></div>
+  <div class="kpis"><div class="kpi amb"><b>${brl(aberto)}</b><span>em propostas abertas</span></div><div class="kpi ok"><b>41%</b><span>das propostas viram tratamento</span></div><div class="kpi"><b>R$ 2.480</b><span>ticket médio do plano</span></div><div class="kpi ruim"><b>${brl(dev)}</b><span>em sessões vendidas e ainda não feitas</span></div></div>${abasPlanos()}`;
+  if(PL_ABA==='propostas') h+=telaPropostas();
+  if(PL_ABA==='nova') h+=telaNovaProposta();
+  if(PL_ABA==='pacotes') h+=telaPacotes();
+  if(PL_ABA==='assinaturas') h+=telaAssinaturas();
+  if(PL_ABA==='tabela') h+=telaTabela();
+  return h;
+}
+function telaPropostas(){
+  let h=`<div class="pbrd">`;
+  for(const [col,cs] of Object.entries(PROPS)){
+    const tot=cs.reduce((a,x)=>a+x.v,0);
+    h+=`<div class="pcol ${col==='Aceita'?'ok':col==='Perdida'?'no':''}"><h4>${col}<span class="kbcnt">${cs.length}</span></h4><div class="tot">${brl(tot)}${col==='Aceita'||col==='Perdida'?' · no mês':''}</div>`+
+      cs.map((x,i)=>`<div class="pcard" onclick="abrirProp('${col}',${i})"><div class="nm">${x.n}</div><div class="pl">${x.pl} · ${x.d}</div><div style="display:flex;justify-content:space-between;align-items:center;gap:.3rem;flex-wrap:wrap"><span class="vl">${brl(x.v)}</span><span class="chip ${x.fu[1]}">${x.fu[0]}</span></div></div>`).join('')+`</div>`;
+  }
+  return h+`</div>
+  <div class="grid2" style="margin-top:.9rem"><div class="card"><h3>A proposta se cobra sozinha</h3><table class="tb">
+    <tr><td>Enviada</td><td>o card aparece aqui e no funil em <span class="chip">Plano de tratamento</span></td></tr>
+    <tr><td>+1 dia</td><td>"Viu a proposta? Posso separar os horários das sessões?"</td></tr>
+    <tr><td>+3 dias</td><td>lembrete com o parcelamento</td></tr>
+    <tr><td>1 dia antes de vencer</td><td>avisa a recepção, que decide se estende</td></tr>
+    <tr><td>Perdida</td><td>sai com motivo; o motivo alimenta o Raio-X</td></tr></table></div>
+  <div class="card"><h3>Por que perdemos no mês</h3>
+    ${[['Achou caro',3],['Sumiu depois da proposta',2],['Vai fazer depois',1],['Fez em outra clínica',1]].map(([m,n])=>`<div style="margin-bottom:.45rem"><div class="linha"><span>${m}</span><span class="num">${n}</span></div><div class="bar"><i class="r" style="width:${n*30}%"></i></div></div>`).join('')}
+    <div class="hint">"Achou caro" 3 vezes: vale oferecer entrada + parcelas no Pix antes de dar desconto.</div></div></div>`;
+}
+function abrirProp(col,i){const x=PROPS[col][i];
+  const aberta=['Enviada','Visualizada','Negociando'].includes(col);
+  abrirGav(`<div class="mut" style="font-size:.76rem">Proposta · ${col}</div><h2>${x.n}</h2><div class="mut" style="font-size:.84rem">${x.pl}</div>
+  <div style="font-family:var(--display);font-size:1.5rem;margin:.4rem 0">${brl(x.v)}</div>
+  <div class="sec"><h4>O que aconteceu</h4><div class="tl">
+    <div class="it"><span class="quando">20/09 16:40</span>Proposta enviada no WhatsApp</div>
+    <div class="it ${col!=='Enviada'?'g':''}"><span class="quando">20/09 18:02</span>${col==='Enviada'?'Ainda não abriu':'Abriu a proposta'}</div>
+    <div class="it"><span class="quando">21/09 10:00</span>Agente: "Viu a proposta? Posso separar os horários?"</div>
+    ${col==='Negociando'?'<div class="it a"><span class="quando">22/09 09:15</span>Paciente: "dá pra fazer em 6 vezes?"</div>':''}
+    ${col==='Aceita'?'<div class="it g"><span class="quando">aceita</span>Pagamento confirmado · sessões viraram saldo</div>':''}
+    ${col==='Perdida'?'<div class="it"><span class="quando">perdida</span>Motivo: '+x.fu[0]+'</div>':''}
+  </div></div>
+  ${aberta?`<div class="acoes"><button class="btn" onclick="toast('Condição ajustada','6× de R$ 400 no cartão · proposta reenviada')">Ajustar condição</button><button class="btn sec" onclick="toast('Marcada como aceita','O paciente foi para Em tratamento e as sessões viraram saldo.')">Marcar aceita</button><button class="btn coral">Perdida</button></div>`:''}`)}
+
+/* ---- nova proposta (montador que calcula) ---- */
+let PROP={pac:'Fernando Sá',itens:[['Criolipólise',4]],prods:{'Gel pós-procedimento':true,'Protetor FPS 60':true},pag:'pix',desc:8,parc:4,val:7};
+function propTotais(){
+  const proc=PROP.itens.reduce((s,[n,q])=>s+PROCS[n].preco*q,0);
+  const prod=Object.entries(PROP.prods).filter(([,on])=>on).reduce((s,[n])=>s+PRODS[n],0);
+  const bruto=proc+prod;
+  const desc=PROP.pag==='pix'?Math.round(bruto*PROP.desc/100):0;
+  const liq=bruto-desc;
+  return {proc,prod,bruto,desc,liq};
+}
+function datasSessoes(){
+  const base=new Date(2026,8,30); const out=[];
+  PROP.itens.forEach(([n,q])=>{const pr=PROCS[n];for(let i=0;i<q;i++){const d=new Date(base);d.setDate(d.getDate()+i*(pr.int||0));out.push(n.split(' ')[0]+' '+(i+1)+': '+d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}))}});
+  return out.slice(0,8);
+}
+function telaNovaProposta(){
+  const t=propTotais();
+  const aprov=PROP.pag==='pix'&&PROP.desc>10;
+  const cond = PROP.pag==='pix'?`À vista no Pix: <b>${brl(t.liq)}</b> (−${PROP.desc}%)`
+    : PROP.pag==='cartao'?`${PROP.parc}× de <b>${brl2(Math.round(t.bruto/PROP.parc*100)/100)}</b> no cartão, sem juros`
+    : `Entrada de <b>${brl2(Math.round(t.bruto/(PROP.parc)*100)/100)}</b> + ${PROP.parc-1}× no Pix`;
+  const livres=Object.keys(PROCS).filter(n=>!PROP.itens.some(([x])=>x===n));
+  return `<div class="grid2"><div class="card"><h3>Proposta · ${PROP.pac}</h3>
+    <div class="mut" style="font-size:.78rem;margin:-.3rem 0 .6rem">a partir da consulta de 22/09 com Dr. Manoel</div>
+    <div class="field"><label>O que o médico propôs</label>
+      ${PROP.itens.map(([n,q],i)=>`<div class="itm"><span>${n}<small>${PROCS[n].int?'a cada '+PROCS[n].int+' dias · ':''}${brl(PROCS[n].preco)} por sessão · ${PROCS[n].prof}</small></span>
+        <span class="qtd"><button onclick="PROP.itens[${i}][1]=Math.max(1,PROP.itens[${i}][1]-1);render()">−</button><span>${q}</span><button onclick="PROP.itens[${i}][1]++;render()">+</button></span>
+        <span style="display:flex;align-items:center;gap:.3rem"><span class="num">${brl(PROCS[n].preco*q)}</span><button class="xbt" onclick="PROP.itens.splice(${i},1);render()" title="tirar">✕</button></span></div>`).join('')}
+      <select class="inp" onchange="if(this.value){PROP.itens.push([this.value,PROCS[this.value].ses]);render()}"><option value="">+ procedimento da tabela…</option>${livres.map(n=>`<option>${n}</option>`).join('')}</select></div>
+    <div class="field"><label>Produtos do protocolo em casa</label><div class="opts">${Object.entries(PRODS).map(([n,v])=>`<button class="opt ${PROP.prods[n]?'on':''}" onclick="PROP.prods['${n}']=!PROP.prods['${n}'];render()">${n} · ${brl(v)}</button>`).join('')}</div></div>
+    <div class="field"><label>Como o paciente pode pagar</label><div class="opts">
+      <button class="opt ${PROP.pag==='pix'?'on':''}" onclick="PROP.pag='pix';render()">Pix à vista</button>
+      <button class="opt ${PROP.pag==='cartao'?'on':''}" onclick="PROP.pag='cartao';PROP.parc=Math.min(PROP.parc,6);render()">Cartão sem juros</button>
+      <button class="opt ${PROP.pag==='entrada'?'on':''}" onclick="PROP.pag='entrada';render()">Entrada + parcelas no Pix</button></div></div>
+    ${PROP.pag==='pix'?`<div class="field"><label>Desconto no Pix · seu teto é 10%</label><div class="opts">${[0,5,8,12].map(d=>`<button class="opt ${PROP.desc===d?'on':''}" onclick="PROP.desc=${d};render()">${d}%${d>10?' · pede aprovação':''}</button>`).join('')}</div></div>`
+      :`<div class="field"><label>Parcelas</label><div class="opts">${[2,3,4,5,6].map(n=>`<button class="opt ${PROP.parc===n?'on':''}" onclick="PROP.parc=${n};render()">${n}×</button>`).join('')}</div></div>`}
+    <div class="field"><label>Validade</label><div class="opts">${[3,7,15].map(d=>`<button class="opt ${PROP.val===d?'on':''}" onclick="PROP.val=${d};render()">${d} dias</button>`).join('')}</div></div>
+    <div class="tot-box">
+      <div class="linha"><span>Procedimentos</span><span class="num">${brl(t.proc)}</span></div>
+      <div class="linha"><span>Produtos</span><span class="num">${brl(t.prod)}</span></div>
+      ${t.desc?`<div class="linha"><span>Desconto Pix</span><span class="num" style="color:var(--neon)">− ${brl(t.desc)}</span></div>`:''}
+      <div class="linha" style="border-top:1px solid var(--borda);margin-top:.3rem;padding-top:.4rem"><span>O paciente paga</span><span class="big">${brl(PROP.pag==='pix'?t.liq:t.bruto)}</span></div>
+      <div class="mut" style="font-size:.78rem">${cond}</div></div>
+    <div class="acoes">${aprov?`<button class="btn amb" onclick="toast('Pedido de aprovação enviado','O dono recebe no WhatsApp: desconto de ${PROP.desc}% para ${PROP.pac}. A proposta sai quando ele aprovar.',true)">Pedir aprovação do dono</button>`:`<button class="btn" onclick="PROPS['Enviada'].unshift({n:PROP.pac,pl:PROP.itens.map(([n,q])=>n+(q>1?' · '+q+' sessões':'')).join(' + '),v:${PROP.pag==='pix'?t.liq:t.bruto},d:'agora',fu:['D+1 amanhã','']});PL_ABA='propostas';render();toast('Proposta enviada no WhatsApp','${PROP.pac} recebeu a proposta. O card foi para Plano de tratamento; lembrete D+1 amanhã às 10h.')">Enviar no WhatsApp</button>`}<button class="btn sec">Salvar rascunho</button></div>
+    <div class="hint">⚖️ A proposta diz <b>o que será feito, quantas sessões e o preço</b>. Nunca promete resultado nem mostra foto de outra pessoa. O termo de consentimento do procedimento continua sendo assinado no SignBox do Amigo.</div></div>
+  <div><div class="card"><h3>Como o paciente recebe</h3><div class="zap" style="max-width:none"><div class="b">Oi, ${PROP.pac.split(' ')[0]}! O Dr. Manoel montou seu plano 💚
+    <div class="card-p">${PROP.itens.map(([n,q])=>`<b>${n}</b>${q>1?' · '+q+' sessões':''} · ${brl(PROCS[n].preco*q)}`).join('<br>')}${t.prod?`<br><b>Protocolo em casa</b> · ${brl(t.prod)}`:''}
+    <hr style="border:0;border-top:1px solid #2a3942;margin:.35rem 0">${cond.replace(/<\/?b>/g,'')}<br><span style="color:#8696a0">válida por ${PROP.val} dias</span></div>
+    Quer que eu já separe os horários? É só responder <b>sim</b> 🙂<div class="h">agora</div></div></div></div>
+    <div class="card"><h3>Sessões, se aceitar hoje</h3><div class="mut" style="font-size:.8rem;margin-bottom:.35rem">Datas sugeridas pelo intervalo de cada procedimento, a partir do primeiro horário livre (ter 30/09):</div>
+    <div style="display:flex;flex-wrap:wrap;gap:.3rem">${datasSessoes().map(d=>`<span class="chip">${d}</span>`).join('')}</div>
+    <div class="faint" style="font-size:.74rem;margin-top:.4rem">Ao aceitar, as sessões viram saldo e a primeira já é oferecida no WhatsApp.</div></div></div></div>`;
+}
+
+/* ---- pacotes e sessões ---- */
+let PK_F='todos';
+const SESS=[
+  {pac:'Lúcia Ferraz',p:'Criolipólise',v:4,f:1,prox:'hoje 10:00',vence:'03/2027',st:'dia'},
+  {pac:'Ana Paula Rocha',p:'Depilação a laser',v:10,f:2,prox:'hoje 08:30',vence:'12/2026',st:'vencendo'},
+  {pac:'Clara Nunes',p:'Cauterização química',v:3,f:2,prox:'qua 01/10',vence:'05/2027',st:'dia'},
+  {pac:'Joana Prado',p:'Peeling',v:3,f:1,prox:null,vence:'01/2027',st:'atrasado',nota:'devia ter voltado há 6 dias'},
+  {pac:'Marta Silva',p:'Depilação a laser',v:10,f:4,prox:null,vence:'01/2027',st:'parado',nota:'sem sessão há 64 dias · parcela atrasada'},
+  {pac:'Rita Alves',p:'Peeling',v:3,f:0,prox:'sex 26/09',vence:'09/2027',st:'dia'},
+  {pac:'Fábio Mendes',p:'Criolipólise',v:4,f:3,prox:'seg 29/09',vence:'02/2027',st:'dia'},
+];
+const PK_ST={dia:['em dia','g'],atrasado:['atrasado para marcar','a'],parado:['parado · risco','r'],vencendo:['vence com sessões sobrando','a']};
+function telaPacotes(){
+  const vend=SESS.reduce((s,x)=>s+x.v,0), feit=SESS.reduce((s,x)=>s+x.f,0);
+  const dev=SESS.reduce((s,x)=>s+(x.v-x.f)*PROCS[x.p].preco,0);
+  const porProc={}; SESS.forEach(x=>{const o=porProc[x.p]=porProc[x.p]||{v:0,f:0};o.v+=x.v;o.f+=x.f});
+  const vis=SESS.filter(x=>PK_F==='todos'||x.st===PK_F);
+  return `<div class="grid2"><div class="card"><h3>O que a clínica deve em atendimento</h3>
+    <div style="display:flex;gap:1.2rem;flex-wrap:wrap;margin-bottom:.5rem"><div><div class="mut" style="font-size:.74rem">vendidas</div><div class="num" style="font-size:1.3rem">${vend}</div></div><div><div class="mut" style="font-size:.74rem">feitas</div><div class="num" style="font-size:1.3rem">${feit}</div></div><div><div class="mut" style="font-size:.74rem">a fazer</div><div class="num" style="font-size:1.3rem;color:var(--ambar)">${vend-feit}</div></div><div><div class="mut" style="font-size:.74rem">em reais</div><div class="num" style="font-size:1.3rem;color:var(--coral)">${brl(dev)}</div></div></div>
+    <div class="bar" style="height:10px"><i style="width:${100*feit/vend}%"></i></div>
+    <div class="hint">Dinheiro que entrou, mas ainda não é lucro: é atendimento devido. Paciente que some com pacote pela metade vira pedido de reembolso.</div></div>
+  <div class="card"><h3>Por procedimento</h3><table class="tb"><tr><th>Procedimento</th><th class="r">Feitas</th><th class="r">A fazer</th><th class="r">Em reais</th></tr>
+    ${Object.entries(porProc).map(([n,o])=>`<tr><td>${n}</td><td class="r num">${o.f}/${o.v}</td><td class="r num">${o.v-o.f}</td><td class="r num">${brl((o.v-o.f)*PROCS[n].preco)}</td></tr>`).join('')}</table></div></div>
+  <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.6rem">${[['todos','Todos'],['dia','Em dia'],['atrasado','Atrasado para marcar'],['parado','Parado · risco'],['vencendo','Vencendo com sobra']].map(([k,l])=>`<button class="opt ${PK_F===k?'on':''}" onclick="PK_F='${k}';render()">${l}${k==='todos'?'':' · '+SESS.filter(x=>x.st===k).length}</button>`).join('')}</div>
+  <div class="card"><div style="overflow-x:auto"><table class="tb"><tr><th>Paciente</th><th>Pacote</th><th>Sessões</th><th>Próxima</th><th>Vale até</th><th>Situação</th><th></th></tr>
+    ${vis.map(x=>`<tr><td>${x.pac}</td><td>${x.p}</td><td><div style="display:flex;align-items:center;gap:.4rem"><div class="bar" style="width:80px"><i class="${x.st==='parado'?'r':x.st==='dia'?'':'a'}" style="width:${100*x.f/x.v}%"></i></div><span class="num">${x.f}/${x.v}</span></div></td><td>${x.prox||'<span class="faint">sem data</span>'}</td><td class="num">${x.vence}</td>
+      <td><span class="chip ${PK_ST[x.st][1]}">${PK_ST[x.st][0]}</span>${x.nota?`<div class="faint" style="font-size:.7rem;margin-top:.15rem">${x.nota}</div>`:''}</td>
+      <td>${x.st==='dia'?'':x.st==='vencendo'?`<button class="btn sec min" onclick="toast('Oferecido','O agente mandou 3 horários e avisou que o pacote vale até 12/2026.')">Acelerar</button>`:`<button class="btn min" onclick="toast('Horários oferecidos','O agente mandou 3 horários para ${x.pac.split(' ')[0]}.')">Oferecer horário</button>`}</td></tr>`).join('')}
+  </table></div></div>`;
+}
+
+/* ---- assinaturas ---- */
+const ASS=[
+  {n:'Lúcia Ferraz',desde:'10/09',st:['ativa','g'],uso:'limpeza de setembro: marcada'},
+  {n:'Carla Menezes',desde:'03/07',st:['ativa','g'],uso:'limpeza de setembro: usada'},
+  {n:'Sônia Pires',desde:'15/08',st:['cobrança falhou','r'],uso:'cartão recusado · link Pix enviado'},
+  {n:'Rita Alves',desde:'22/07',st:['ativa','g'],uso:'limpeza de setembro: não usou · lembrete amanhã'},
+  {n:'Eduarda Paz',desde:'02/06',st:['cancelou','']},
+];
+function telaAssinaturas(){
+  return `<div class="kpis"><div class="kpi ok"><b>R$ 2.682</b><span>entram todo mês · 18 assinantes</span></div><div class="kpi"><b>72%</b><span>usaram a limpeza do mês</span></div><div class="kpi ruim"><b>2</b><span>cobranças que falharam</span></div><div class="kpi amb"><b>1</b><span>cancelou este mês</span></div></div>
+  <div class="grid2"><div class="card"><h3>Pele em dia · R$ 149/mês</h3><div class="mut" style="font-size:.84rem">1 limpeza de pele por mês · 15% em procedimentos · 10% em produtos · prioridade nas vagas liberadas</div>
+    <div class="acoes"><button class="btn sec min">Editar plano</button><button class="btn sec min">Ver os 18</button></div></div>
+    <div class="card" style="border-style:dashed"><h3>Manutenção anual · 12× R$ 249 <span class="chip">rascunho</span></h3><div class="mut" style="font-size:.84rem">2 aplicações de botox por ano + avaliações + 10% em produtos</div>
+    <div class="acoes"><button class="btn min" onclick="toast('Plano lançado','Manutenção anual já pode ser oferecida pelo agente e na ficha.')">Lançar plano</button></div></div></div>
+  <div class="grid2"><div class="card"><h3>Assinantes</h3>${ASS.map(a=>`<div class="rank"><span class="n">${a.n}<small>desde ${a.desde}${a.uso?' · '+a.uso:''}</small></span><span class="chip ${a.st[1]}">${a.st[0]}</span></div>`).join('')}</div>
+    <div class="card"><h3>Para oferecer</h3><div class="mut" style="font-size:.82rem;margin-bottom:.4rem">Vieram 3 ou mais vezes no ano e não assinam:</div>
+    ${[['Sônia Pires','4 visitas · R$ 960 no ano'],['Carlos Mendes','3 visitas · R$ 1.500 no ano'],['Rita Alves','3 visitas · R$ 1.350 no ano']].map(([n,d])=>`<div class="rank"><span class="n">${n}<small>${d}</small></span><button class="btn min" onclick="toast('Oferta enviada','O agente ofereceu o Pele em dia para ${n.split(' ')[0]}.')">Oferecer</button></div>`).join('')}
+    <div class="hint">Cobrança recorrente no cartão ou Pix pelo Asaas, o mesmo motor que já cobra assinaturas no Zaq. Cobrança que falha vira link de Pix no WhatsApp no mesmo dia.</div></div></div>`;
+}
+
+/* ---- tabela de procedimentos ---- */
+function telaTabela(){
+  return `<div class="card"><div style="overflow-x:auto"><table class="tb"><tr><th>Procedimento</th><th class="r">Sessões</th><th>Intervalo</th><th class="r">Preço/sessão</th><th class="r">Pacote</th><th>Volta para manutenção</th><th>Com</th></tr>
+    <tr><td>Consulta · Dr. Manoel</td><td class="r num">1</td><td>—</td><td class="r num">R$ 500</td><td class="r num">—</td><td>retorno em 30 dias</td><td>Dr. Manoel</td></tr>
+    ${Object.entries(PROCS).map(([n,x])=>`<tr><td>${n}</td><td class="r num">${x.ses}</td><td>${x.int?'a cada '+x.int+' dias':'—'}</td><td class="r num">${brl(x.preco)}</td><td class="r num">${x.ses>1?brl(x.preco*x.ses):'—'}</td><td>${x.man}</td><td>${x.prof}</td></tr>`).join('')}
+  </table></div>
+  <div class="acoes"><button class="btn sec min">+ Procedimento</button><button class="btn sec min">Importar do Amigo</button></div>
+  <div class="hint">Esta tabela alimenta tudo: a <b>proposta</b> sai dela, o <b>saldo de sessões</b> usa o intervalo, o <b>pós-venda</b> usa o prazo de manutenção e o <b>agente</b> responde o preço. Os nomes vêm das categorias que a clínica já usa no Amigo; só a consulta (R$ 500) tem preço real, os outros são exemplo até a clínica passar a tabela.</div></div>`;
+}
+
+/* =================================================================
+   7 · RAIO-X — "o dinheiro parado e o que fazer esta semana"
+   Toda conta de agenda é calculada na hora a partir de EV (a mesma da tela
+   Agenda). Os números de WhatsApp e do Amigo são REAIS e fixos (medição de
+   24/09 e leitura de 22/09). Nada aqui envia mensagem nem salva.
+   ================================================================= */
+let RX_REAL=false, RX_PROF='todos', RX_FEITO={};
+const RX_FONTE={wa:['real · WhatsApp','zap'],zaq:['real · Zaq','zap'],amigo:['Amigo · 22/09','amigo'],ex:['exemplo','ex'],merc:['mercado','merc']};
+const rxF=k=>`<span class="fonte ${RX_FONTE[k][1]}" style="margin-left:0">${RX_FONTE[k][0]}</span>`;
+const RX_WA={ // real, conta 39, 24/08–23/09, medido 24/09
+  conversas:84, paciente:57, internas:27, msgs:1750, recebidas:886, deInternas:481,
+  com:{n:234, med:2, ate5:142, ate1h:195, sem24:22, nunca:15},
+  tot:{n:245, sem24:25, nunca:16},
+  faixas:[['08–10h',39,18,6],['10–12h',73,46,5],['12–14h',38,23,2],['14–16h',40,28,4],['16–18h',44,27,5]],
+  dias:[['seg',42,30,1.4],['ter',50,31,1.8],['qua',63,38,1.2],['qui',48,28,3.2],['sex',31,15,5.0]],
+  sab:{n:4,sem24:3},
+  preco:{receberam:13, marcaram:3, marcouMin:[0,55,200], parados:[1,1,6,13,21,23,23,24,24,28], nuncaChamados:7, sumiram:4, ateOPrecoMin:21},
+  temas:{agendar:36, preco:22, confirmar:7},
+};
+const RX_MERC={medOcup:38, topOcup:80};
+const RX_TURNO={manha:h=>h<'12:00',tarde:h=>h>='12:00',dia:()=>true};
+const RX_TURNO_NOME={manha:'manhã',tarde:'tarde',dia:'dia inteiro'};
+const rxVivo=e=>!['cancelou','faltou'].includes(e.st);
+const rxOcupa=(p,d,h)=>EV.some(e=>e.p===p&&e.dia===d&&rxVivo(e)&&cobre(e,h));
+const r10=v=>Math.round(v/10)*10;
+const rxNome=id=>PROF.find(x=>x.id===id).nome;
+const rxDia=d=>DIAS[d][0].toLowerCase()+' '+DIAS[d][1];
+const rxBRL=v=>'R$ '+Math.round(v).toLocaleString('pt-BR');
+function rxCel(p,d,t){
+  const ab=HORAS.filter(h=>RX_TURNO[t](h)&&atende(p,d,h)), livres=ab.filter(h=>!rxOcupa(p,d,h));
+  const evs=EV.filter(e=>e.p===p&&e.dia===d&&RX_TURNO[t](e.h)).sort((a,b)=>a.h<b.h?-1:1);
+  return {ab:ab.length, oc:ab.length-livres.length, livres, pct:ab.length?Math.round(100*(ab.length-livres.length)/ab.length):null,
+    seg:evs.filter(e=>e.st==='segurado').length, faltas:evs.filter(e=>e.st==='faltou'), evs, passou:d<HOJE, hoje:d===HOJE, local:localDe(p,d)};
+}
+function rxAgenda(pf){
+  const ps=PROF.filter(p=>pf==='todos'||p.id===pf).map(p=>p.id);
+  const soma=f=>ps.reduce((s,p)=>s+DIAS.reduce((a,_,d)=>a+f(p,d),0),0);
+  const ab=soma((p,d)=>rxCel(p,d,'dia').ab), oc=soma((p,d)=>rxCel(p,d,'dia').oc);
+  const livres={}; ps.forEach(p=>livres[p]=DIAS.reduce((a,_,d)=>d<HOJE?a:a+rxCel(p,d,'dia').livres.length,0));
+  const vmh={}; PROF.forEach(p=>{const ev=EV.filter(e=>e.p===p.id&&rxVivo(e)&&localDe(e.p,e.dia)==='Espaço Pelle');
+    const m=ev.reduce((s,e)=>s+e.d,0); vmh[p.id]=m?ev.reduce((s,e)=>s+tipo(e.tipo)[4],0)/m:0});
+  const buracos=[]; ps.forEach(p=>DIAS.forEach((_,d)=>{if(d<HOJE||localDe(p,d)!=='Espaço Pelle')return;
+    const n=rxCel(p,d,'dia').livres.length; if(n)buracos.push({p,d,n,v:r10(n*vmh[p])})})); buracos.sort((a,b)=>b.v-a.v);
+  const faltas=EV.filter(e=>ps.includes(e.p)&&e.st==='faltou').sort((a,b)=>a.dia-b.dia||(a.h<b.h?-1:1));
+  return {ab,oc,pct:ab?Math.round(100*oc/ab):0,livres,livresTot:Object.values(livres).reduce((a,b)=>a+b,0),vmh,buracos,
+    faltas,faltasR:faltas.reduce((s,e)=>s+tipo(e.tipo)[4],0),faltasMeias:faltas.reduce((s,e)=>s+e.d,0),
+    passados:EV.filter(e=>ps.includes(e.p)&&e.dia<HOJE).length, seg:EV.filter(e=>ps.includes(e.p)&&e.st==='segurado').length,
+    vaziosPass:soma((p,d)=>d<HOJE?rxCel(p,d,'dia').livres.length:0)};
+}
+function rxOfertaPreco(){ // 1º horário livre do Dr. Manoel: hoje à tarde, amanhã e depois
+  return [[HOJE,'tarde'],[HOJE+1,'dia'],[HOJE+2,'dia']].map(([d,t])=>[rxDia(d),rxCel('manoel',d,t).livres[0]]).filter(x=>x[1]);
+}
+function rxIr(id){const e=document.getElementById(id); if(e&&e.scrollIntoView)e.scrollIntoView({behavior:'smooth',block:'start'})}
+function rxFeito(k){RX_FEITO[k]=true;fecharTudo();render()}
+function rxCor(pct){return pct===null?'off':pct<40?'r':pct<60?'a':'v'}
+
+function telaRaio(){
+  const A=rxAgenda('todos'), B=rxAgenda(RX_PROF);
+  const top=A.buracos[0];
+  const W=RX_WA;
+  let h=`<div class="${RX_REAL?'rx-so-real':''}">
+  <div class="pg-h"><div><h1>Raio-X</h1><div class="sub">A recepção responde rápido (${W.com.med} min de mediana). O dinheiro fica parado depois do preço: 10 pessoas pediram e ninguém voltou a chamar.</div></div>
+    <button class="opt ${RX_REAL?'on':''}" onclick="RX_REAL=!RX_REAL;render()">${RX_REAL?'✓ ':''}Só o que é real</button></div>
+  <div class="rx-conta">WhatsApp real · 24/08 a 23/09 · medido em 24/09 &nbsp;|&nbsp; Amigo · lido em 22/09 &nbsp;|&nbsp; Agenda de exemplo · 21 a 26/09</div>
+  <div class="rx-leg">${rxF('wa')}${rxF('zaq')}${rxF('amigo')}${rxF('ex')}${rxF('merc')}<span>Todo número desta tela leva uma dessas etiquetas.</span></div>
+  ${RX_REAL?'<div class="hint">Apagado: agenda de exemplo. Aceso: o que veio do WhatsApp da clínica e do Amigo.</div>':''}`;
+
+  /* 1 · na mesa agora */
+  h+=`<h2 class="rx-h">Na mesa agora</h2><div class="rx-q">Quanto está parado agora, e onde?</div>
+  <div class="rx-mesa">
+    <div class="card rx-hero" onclick="abrirConta('preco')">
+      <div class="mut" style="font-size:.74rem">Parado agora, medido</div>
+      <div class="big">R$ 5.000</div>
+      <div style="font-size:.88rem">em consultas que pararam depois do preço</div>
+      <div class="rx-conta" style="margin:.4rem 0">10 pessoas pediram o preço e não marcaram × consulta de R$ 500 · 7 nunca foram chamadas de novo</div>
+      <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">${rxF('wa')}<span class="faint" style="font-size:.7rem">medido em 24/09</span>
+        <button class="btn sec min" style="margin-left:auto" onclick="event.stopPropagation();rxIr('rx-a1')">O que fazer → 1</button></div>
+    </div>
+    <div class="card rx-ex" onclick="abrirConta('vazio')">
+      <div class="mut" style="font-size:.74rem">Horário vazio ${top.d===HOJE+1?'amanhã':rxDia(top.d)}</div>
+      <div class="rx-med" style="color:var(--ambar)">≈ ${rxBRL(top.v)}</div>
+      <div class="rx-conta">${rxNome(top.p)} · ${rxDia(top.d)} · ${top.n} meias-horas livres × ${rxBRL(A.vmh[top.p])}</div>
+      <div style="margin-top:.4rem">${rxF('ex')}</div><div class="faint" style="font-size:.68rem;margin-top:.2rem">no produto: horários livres do Amigo</div>
+    </div>
+    <div class="card rx-ex" onclick="abrirConta('faltas')">
+      <div class="mut" style="font-size:.74rem">Perdido esta semana em faltas</div>
+      <div class="rx-med" style="color:#F08A83">${rxBRL(A.faltasR)}</div>
+      <div class="rx-conta">${A.faltas.length} faltas: ${A.faltas.map(e=>tipo(e.tipo)[4]).join(' + ')}${A.faltas.some(e=>!tipo(e.tipo)[4])?' (sessão já paga)':''}</div>
+      <div style="margin-top:.4rem">${rxF('ex')} <a style="font-size:.72rem;color:var(--neon);cursor:pointer" onclick="event.stopPropagation();rxIr('rx-a4')">remarcar → 4</a></div><div class="faint" style="font-size:.68rem;margin-top:.2rem">no produto: status "faltou" do Amigo</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:.35rem;flex-wrap:wrap;align-items:center;margin-top:.6rem;font-size:.76rem"><span class="mut">Fora da conta em R$, mas parado:</span>
+    <span class="chip r">18 retornos pedidos, 0 chamados</span>${rxF('amigo')}
+    <span class="chip a">11 contatos parados em Novo</span>${rxF('zaq')}
+    <span class="chip a">${W.tot.nunca} vezes o paciente nunca teve resposta</span>${rxF('wa')}</div>
+  <div class="rx-conta" style="margin-top:.45rem">Os três valores não se somam: R$ 5.000 é real e de 30 dias; os outros dois vêm da agenda de exemplo desta semana e podem ocupar o mesmo horário que os 10 do preço. Não é previsão de faturamento.</div>`;
+
+  /* 2 · faça esta semana */
+  const acao=(k,n,prazo,tit,conta,fonte,valor,botao,exs,extra)=>`<div id="rx-${k}" class="card rx-acao ${n===1?'um':''} ${exs?'rx-exs':''} ${RX_FEITO[k]?'feito':''}">
+    <span class="n">${n}</span>
+    <div><div class="pz">${prazo}</div><div class="tt">${tit}</div><div class="rx-conta" style="margin:.2rem 0 .3rem">${conta}</div>${rxF(fonte)}${RX_FEITO[k]?' <span class="chip g">✓ feito · só nesta sessão</span>':''}${extra||''}</div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:.35rem"><span class="vl">${valor}</span>${botao}</div></div>`;
+  const oferta=rxCel(top.p,top.d,'dia');
+  h+=`<h2 class="rx-h">Faça esta semana</h2><div class="rx-q">O que eu faço agora, e quanto isso vale?</div>`;
+  h+=acao('a1',1,'HOJE','Chamar de novo os 10 que pediram o preço e não marcaram','10 × consulta de R$ 500 · comece pelos 7 que nunca foram chamados · quem marca, marca no mesmo dia','wa','R$ 5.000',`<button class="btn min" onclick="abrirOferta('preco')">💬 Ver a mensagem</button>`);
+  h+=acao('a2',2,'HOJE','Chamar os 18 retornos que o médico pediu','18 pedidos · 0 chamados (lido em 22/09) · o retorno não é cobrado; use os horários que sobrarem depois das consultas','amigo','<span class="mut" style="font-size:.9rem">sem R$</span>',`<button class="btn min" onclick="PS_SEG='retorno';ir('pacientes')">Ver a lista</button>`);
+  h+=acao('a3',3,top.d===HOJE+1?'AMANHÃ':'ESTA SEMANA',`Oferecer os ${oferta.livres.length} horários livres de ${rxDia(top.d)} do ${rxNome(top.p)}`,`${oferta.livres.length} meias-horas × ${rxBRL(A.vmh[top.p])} (média dele na semana) · consulta vale R$ 500, retorno R$ 0 · se os 10 do preço marcarem nesse dia, é o mesmo horário: não some com a ação 1`,'ex','≈ '+rxBRL(top.v),`<button class="btn min" onclick="abrirCelula('${top.p}',${top.d},'dia')">⚡ Ver os ${oferta.livres.length} horários</button>`,true);
+  h+=acao('a4',4,'ESTA SEMANA',`Remarcar as ${A.faltas.length} faltas da semana`,`${A.faltas.filter(e=>tipo(e.tipo)[4]).length} eram procedimento (${A.faltas.filter(e=>tipo(e.tipo)[4]).map(e=>tipo(e.tipo)[4]).join(' + ')})${A.faltas.some(e=>!tipo(e.tipo)[4])?' e '+A.faltas.filter(e=>!tipo(e.tipo)[4]).length+' sessão de pacote já paga':''}`,'ex',rxBRL(A.faltasR),`<button class="btn min" onclick="abrirConta('faltas')">Ver as ${A.faltas.length}</button>`,true,
+    `<div class="faint" style="font-size:.72rem;margin-top:.35rem">Para as próximas: as viagens já pedem sinal de R$ 50 no Pix, que vira crédito. No mercado, o sinal corta cerca de 55% das faltas ${rxF('merc')} <span class="faint">referência, não garantia</span></div>`);
+  h+=`<div class="card" style="background:var(--card-2)"><div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-bottom:.3rem"><b style="font-size:.9rem">Uma decisão que o dado já responde</b>${rxF('wa')}</div>
+    <div style="font-size:.84rem"><b>Sábado na sede: ainda não abrir.</b> No mês, só ${W.sab.n} pacientes escreveram no sábado, e ${W.sab.sem24} ficaram sem resposta em 24h. Domingo teve 0 mensagens. A procura é pouca, mas ninguém responde no sábado: ligue o agente no sábado e olhe de novo em 30 dias.</div></div>`;
+
+  /* 3 · depois do preço */
+  const P=W.preco; const cont={};
+  const pos=(x)=>{cont[x]=(cont[x]||0)+1;return 6+(cont[x]-1)*14};
+  h+=`<h2 class="rx-h">Depois do preço ${rxF('wa')}<span class="faint" style="font-size:.7rem;font-weight:400">medido em 24/09</span></h2><div class="rx-q">Onde a venda da consulta se perde, e até quando ainda dá para salvar?</div>
+  <div class="card"><div style="font-size:1.05rem"><b>${P.receberam} receberam o preço → ${P.marcaram} marcaram</b> <span class="mut">(${Math.round(100*P.marcaram/P.receberam)}%)</span></div>
+    <div class="rx-tl"><div class="zona"></div>
+      ${P.marcouMin.map(m=>{const x=(m/240*18).toFixed(1);return `<i class="g" style="left:${x}%;top:${pos('g'+x)}px" title="marcou ${m} min depois" onclick="toast('Marcou ${m<60?m+' min':Math.floor(m/60)+'h'+String(m%60).padStart(2,'0')} depois do preço','no mesmo dia')"></i>`}).join('')}
+      ${P.parados.map(d=>{const x=(20+d/28*78).toFixed(1);return `<i class="r" style="left:${x}%;top:${pos('r'+x)}px" title="${d} dias desde o preço" onclick="toast('Preço enviado há ${d} dia${d>1?'s':''}','contado em 24/09 · consulta R$ 500 · não marcou')"></i>`}).join('')}
+    </div>
+    <div class="rx-tlx"><span style="left:10%">mesmo dia</span><span style="left:39.5%">1 sem</span><span style="left:59%">2 sem</span><span style="left:78.5%">3 sem</span><span style="left:96%">4 sem</span></div>
+    <div style="display:flex;gap:.8rem;flex-wrap:wrap;font-size:.72rem;color:var(--txt-mut);margin-top:.3rem"><span><span class="dot" style="background:var(--neon);border-radius:50%"></span>marcou</span><span><span class="dot" style="background:var(--coral);border-radius:50%"></span>não marcou (cada ponto é uma pessoa, sem nome)</span></div>
+    <div class="rx-conta" style="margin-top:.6rem">${P.nuncaChamados} dos 10 nunca foram chamados de novo · ${P.sumiram} sumiram logo depois do preço (os grupos se cruzam) · da 1ª mensagem ao preço: ${P.ateOPrecoMin} min (mediana) · quem marcou, marcou em até 3h20 (mediana de 55 min)</div>
+    <div class="acha"><b>Todo agendamento saiu no mesmo dia do preço</b>, em até 3h20. Depois disso, nenhum dos 10 voltou sozinho. Um toque 3h depois do preço e outro no dia seguinte: é aí que está o dinheiro.</div>
+    <div class="acoes"><button class="btn sec min" onclick="FU_FASE='venda';ir('funil')">Ver os 10 no Funil ›</button><button class="btn sec min" onclick="FU_FASE='venda';ir('funil')">Ver a sequência de toques ›</button></div>
+    <div class="rx-conta" style="margin-top:.6rem">Sobre o que escrevem: agendar ${W.temas.agendar} conversas · preço ${W.temas.preco} · confirmar ou remarcar ${W.temas.confirmar}. Das ${W.temas.preco} que falaram de preço, ${P.receberam} receberam o valor no texto padrão da recepção. Quem marcou por telefone ou no balcão não aparece, então os ${Math.round(100*P.marcaram/P.receberam)}% podem estar abaixo do real.</div></div>`;
+
+  /* 4 · agenda: onde sobra horário */
+  const cols = RX_PROF==='todos'
+    ? [['manoel','manha','Manoel','manhã'],['manoel','tarde','Manoel','tarde'],['juliana','manha','Juliana','manhã'],['juliana','tarde','Juliana','tarde'],['brenda','manha','Brenda','manhã'],['*','dia','Clínica','dia']]
+    : [[RX_PROF,'manha',rxNome(RX_PROF),'manhã'],[RX_PROF,'tarde',rxNome(RX_PROF),'tarde'],[RX_PROF,'dia',rxNome(RX_PROF),'dia']];
+  const celula=(p,d,t)=>{
+    if(p==='*'){ const cs=PROF.map(x=>rxCel(x.id,d,'dia')); const ab=cs.reduce((s,c)=>s+c.ab,0), oc=cs.reduce((s,c)=>s+c.oc,0);
+      const pct=ab?Math.round(100*oc/ab):null; return `<div class="rx-c nc ${rxCor(pct)} ${d<HOJE?'pass':''} ${d===HOJE?'hoje':''}">${pct===null?'—':pct+'%'}${d<HOJE?'<small>passou</small>':''}</div>`; }
+    const c=rxCel(p,d,t);
+    if(c.pct===null) return `<div class="rx-c off">—</div>`;
+    return `<button class="rx-c ${rxCor(c.pct)} ${c.passou?'pass':''} ${c.hoje?'hoje':''}" onclick="abrirCelula('${p}',${d},'${t}')" title="${rxNome(p)} · ${rxDia(d)} · ${RX_TURNO_NOME[t]}">${c.seg?'<span class="sg"></span>':''}${c.faltas.length?'<span class="fl"></span>':''}${c.pct}%${c.local!=='Espaço Pelle'?'<small>'+c.local.split(' ')[0]+'</small>':c.passou?'<small>passou</small>':''}</button>`;
+  };
+  const prof=RX_PROF==='todos'?null:PROF.find(x=>x.id===RX_PROF);
+  const b0=B.buracos[0];
+  const acha = RX_PROF==='todos'
+    ? (()=>{const q=rxCel('manoel',3,'dia'), j=rxCel('juliana',4,'tarde'); return `<b>O horário vazio que custa é o do médico.</b> A ${rxDia(3)} do Dr. Manoel está em ${q.pct}% (${q.oc} de ${q.ab}): ${q.livres.length} meias-horas livres, ≈ ${rxBRL(r10(q.livres.length*A.vmh.manoel))} pela média dele. A Juliana sobra na sexta à tarde (${j.oc} de ${j.ab}).`})()
+    : (b0? (()=>{const c=rxCel(RX_PROF,b0.d,'dia'); return `<b>O buraco de ${prof.nome} é ${rxDia(b0.d)}:</b> ${c.oc} de ${c.ab} (${c.pct}%), ${b0.n} livres, ≈ ${rxBRL(b0.v)}.`})() : `A semana de ${prof.nome} está cheia.`);
+  const segs=PROF.filter(x=>RX_PROF==='todos'||x.id===RX_PROF);
+  const escala=Math.max(B.livresTot,39);
+  h+=`<div class="rx-exs"><h2 class="rx-h">Agenda: onde sobra horário ${rxF('ex')}</h2><div class="rx-q">Quais horários estão vazios, de quem são e quanto vale cada um?</div>
+  <div class="card">
+    <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.8rem">${[{id:'todos',nome:'Todos',cor:'var(--txt-mut)'}].concat(PROF).map(x=>`<button class="opt ${RX_PROF===x.id?'on':''}" onclick="RX_PROF='${x.id}';render()"><span class="dot" style="background:${x.cor}"></span>${x.nome}</button>`).join('')}</div>
+    <div class="kpis">
+      <div class="kpi ${B.pct>=60?'ok':'amb'}"><b>${B.pct}%</b><span>ocupada na semana (${B.oc} de ${B.ab})</span></div>
+      <div class="kpi"><b>${B.livresTot}</b><span>livres de hoje a sábado${RX_PROF==='todos'?' ('+PROF.map(x=>x.nome.replace('Dr. ','')+' '+B.livres[x.id]).join(' · ')+')':''}</span></div>
+      <div class="kpi amb"><b>${B.seg}</b><span>só seguradas pelo agente</span></div>
+      <div class="kpi ruim"><b>${B.faltas.length}</b><span>faltas · ${rxBRL(B.faltasR)}</span></div>
+    </div>
+    <div style="overflow-x:auto"><div class="rx-heat" style="--cols:${cols.length}">
+      <div></div>${cols.map(c=>`<div class="rx-hd">${c[2].replace('Dr. ','')}<br>${c[3]}</div>`).join('')}
+      ${DIAS.map((dd,d)=>`<div class="rx-dl">${dd[0]} ${dd[1].slice(0,2)}${d===HOJE?'<small>hoje</small>':''}</div>${cols.map(c=>celula(c[0],d,c[1])).join('')}`).join('')}
+    </div></div>
+    <div style="display:flex;gap:.8rem;flex-wrap:wrap;font-size:.7rem;color:var(--txt-mut);margin-top:.45rem"><span><span class="dot" style="background:var(--coral)"></span>abaixo de 40%</span><span><span class="dot" style="background:var(--ambar)"></span>40 a 59%</span><span><span class="dot" style="background:var(--neon)"></span>60% ou mais</span><span>● âmbar no canto: tem horário só segurado</span><span>● coral no canto: teve falta</span><span>toque numa célula para ver os horários</span></div>
+
+    <div class="rx-regua">
+      <span class="mk" style="left:${RX_MERC.medOcup}%;background:var(--roxo)"></span><span class="lb up" style="left:${RX_MERC.medOcup}%">mediana ${RX_MERC.medOcup}%</span>
+      <span class="mk" style="left:${B.pct}%;background:var(--ambar)"></span><span class="lb dn" style="left:${B.pct}%"><b style="color:var(--ambar)">${prof?prof.nome:'agenda de exemplo'} ${B.pct}%</b></span>
+      <span class="mk" style="left:${RX_MERC.topOcup}%;background:var(--roxo)"></span><span class="lb up" style="left:${RX_MERC.topOcup}%">top 10%: ${RX_MERC.topOcup}%</span>
+    </div>
+    <div class="rx-conta">${rxF('merc')} mercado = med spa (Zenoti, 2026), outro tipo de clínica: serve de régua, não de meta</div>
+
+    <div style="margin-top:.8rem;font-size:.84rem"><b>Quanto vale meia-hora</b> <span class="mut" style="font-size:.74rem">(tabela, esta semana, só a sede)</span>
+      <span style="cursor:pointer;color:var(--txt-mut)" title="Média: soma do preço de tabela do que foi marcado ÷ meias-horas marcadas" onclick="toast('Como é a média','Soma do preço de tabela do que foi marcado (sem falta nem cancelamento) ÷ meias-horas marcadas. Consulta R$ 500; retorno, avaliação e sessão de pacote já paga R$ 0.')">ⓘ</span>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.3rem">${PROF.slice().sort((a,b)=>A.vmh[b.id]-A.vmh[a.id]).map(x=>`<span class="chip ${RX_PROF===x.id?'g':''}"><span class="dot" style="background:${x.cor}"></span>${x.nome} ${rxBRL(A.vmh[x.id])}</span>`).join('')}</div></div>
+
+    <div style="margin-top:.9rem;font-size:.84rem"><b>Os 3 buracos mais caros</b> <span class="mut" style="font-size:.74rem">(de hoje a sábado, na sede)</span></div>
+    ${B.buracos.slice(0,3).map((b,i)=>`<div class="rank" style="cursor:pointer" onclick="abrirCelula('${b.p}',${b.d},'dia')"><span class="p">${i+1}</span><span class="n">${rxDia(b.d)}${b.d===HOJE?' (hoje)':''} · ${rxNome(b.p)}<small>${b.n} meias-horas livres</small></span><span style="font-family:var(--display);font-weight:600">≈ ${rxBRL(b.v)}</span></div>`).join('')||'<div class="mut">Nenhum horário livre na sede até sábado.</div>'}
+
+    <div style="margin-top:.9rem;font-size:.84rem"><b>Horários livres × quem pode ocupar</b></div>
+    <div style="font-size:.74rem;color:var(--txt-mut);margin:.3rem 0 .2rem">Livres de hoje a sábado: ${B.livresTot} ${rxF('ex')}</div>
+    <div class="rx-seg" style="width:${100*B.livresTot/escala}%">${segs.map(x=>`<i style="width:${B.livresTot?100*B.livres[x.id]/B.livresTot:0}%;background:${x.cor}" title="${x.nome}: ${B.livres[x.id]}"></i>`).join('')}</div>
+    <div style="font-size:.74rem;color:var(--txt-mut);margin:.5rem 0 .2rem">Quem pode ocupar: 39</div>
+    <div class="rx-seg" style="width:${100*39/escala}%"><i style="width:${100*10/39}%;background:var(--neon)" title="10 pediram o preço"></i><i style="width:${100*18/39}%;background:var(--azul)" title="18 retornos"></i><i style="width:${100*11/39}%;background:var(--ambar)" title="11 em Novo"></i></div>
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap;font-size:.7rem;color:var(--txt-mut);margin-top:.35rem;align-items:center"><span><span class="dot" style="background:var(--neon)"></span>10 pediram o preço (consulta)</span>${rxF('wa')}<span><span class="dot" style="background:var(--azul)"></span>18 retornos pedidos (R$ 0)</span>${rxF('amigo')}<span><span class="dot" style="background:var(--ambar)"></span>11 em Novo</span>${rxF('zaq')}</div>
+    <div class="rx-conta" style="margin-top:.3rem">a mesma pessoa pode estar em duas listas · consulta primeiro; retorno nos horários que sobrarem</div>
+
+    <div style="font-size:.8rem;margin-top:.8rem">${B.faltas.length} faltas em ${B.passados} atendimentos até ontem (${B.passados?Math.round(100*B.faltas.length/B.passados):0}%) = ${rxBRL(B.faltasR)} · seg e ter tiveram ${B.vaziosPass} meias-horas vazias, ${B.faltasMeias} delas por falta</div>
+    <div class="acha">${acha}</div>
+    <div class="rx-conta" style="margin-top:.6rem">ocupação = meias-horas marcadas ÷ meias-horas em que cada um atende na grade da Agenda (Manoel 08:00–12:00 e 13:30–16:30, sáb 08–12 em Lago da Pedra; Juliana 08:00–12:00 e 13:30–16:00; Brenda ter–qui 08:00–12:00). Falta e cancelamento contam como vazio; segurado conta como marcado. É a mesma conta da Agenda › Semana.</div>
+    <div style="margin-top:.6rem;font-size:.8rem"><a style="color:var(--neon);cursor:pointer" onclick="ir('roteiro')">Viagens e fila por cidade: Roteiro ›</a> <span class="mut">· no mês, só 1 conversa de paciente citou uma cidade do roteiro (Codó)</span> ${rxF('wa')}</div>
+  </div></div>`;
+
+  /* 5 e 6 · recepção (real) e parado no Amigo */
+  const pct5=Math.round(100*W.com.ate5/W.com.n), pct1h=Math.round(100*W.com.ate1h/W.com.n);
+  const corP=v=>v>=70?'':v>=50?'a':'r';
+  h+=`<div class="grid2" style="margin-top:1.2rem"><div>
+    <h2 class="rx-h" style="margin-top:0">Recepção no WhatsApp ${rxF('wa')}</h2><div class="rx-q">A recepção atende bem? Em que momento o paciente fica esperando?</div>
+    <div class="card">
+      <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
+        <div class="kpi ok"><b>${W.com.med} min</b><span>mediana da 1ª resposta</span></div>
+        <div class="kpi amb"><b>${pct5}%</b><span>${W.com.ate5} de ${W.com.n} em até 5 min · ${W.com.ate1h} (${pct1h}%) em até 1h</span></div>
+        <div class="kpi ruim"><b>${W.tot.sem24}</b><span>vezes mais de 24h sem resposta · ${W.tot.nunca} nunca respondidas</span></div>
+      </div>
+      <div class="rx-conta" style="margin-bottom:.5rem">horário comercial = seg–sex, 8h–18h · base: ${W.com.n} vezes em que o paciente escreveu</div>
+      <div style="font-size:.78rem;margin-bottom:.3rem"><b>% respondido em até 5 min, por faixa</b> <span class="mut">· à direita: sem resposta em 24h</span></div>
+      ${W.faixas.map(([f,n,a5,s24])=>{const v=Math.round(100*a5/n);return `<div style="display:grid;grid-template-columns:56px 1fr 88px;gap:.5rem;align-items:center;font-size:.76rem;margin-bottom:.3rem"><span class="num">${f}</span><div class="bar"><i class="${corP(v)}" style="width:${v}%"></i></div><span class="num" style="text-align:right">${a5}/${n} ${v}% · ${s24}</span></div>`}).join('')}
+      <div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.5rem">${W.dias.map(([d,n,a5,med])=>{const v=Math.round(100*a5/n);return `<span class="chip ${corP(v)==='r'?'r':corP(v)==='a'?'a':'g'}">${d} ${v}% · ${String(med).replace('.',',')} min</span>`}).join('')}<span class="chip r">sáb: ${W.sab.sem24} de ${W.sab.n} sem resposta</span><span class="chip">dom: 0 mensagens</span></div>
+      <div class="rx-conta" style="margin-top:.5rem">${W.internas} das ${W.conversas} conversas são internas (equipe, fornecedor, banco) e trazem ${W.deInternas} das ${W.recebidas} mensagens recebidas (${Math.round(100*W.deInternas/W.recebidas)}%) · 15 de 60 conversas de paciente perguntam se o doutor atende hoje ou quando vem</div>
+      <div class="acha"><b>O almoço não é o furo; a abertura do dia é.</b> Das 8h às 10h, só 18 de 39 (46%) saem em até 5 min e 6 ficam sem resposta: é a fila da noite. Sexta é o dia mais lento (mediana de 5 min).</div>
+      <div class="acoes"><button class="btn sec min" onclick="CV_FILTRO='pacientes';ir('conversas')">Ver as conversas ›</button></div>
+    </div></div>
+    <div>
+    <h2 class="rx-h" style="margin-top:0">Parado no Amigo ${rxF('amigo')}</h2><div class="rx-q">O que já está registrado no Amigo e ninguém está olhando?</div>
+    <div class="card"><div class="rx-lista">
+      <span class="nb" style="color:var(--coral)">18</span><div class="tx"><b>retornos pedidos · 0 chamados</b>O médico pediu a volta e ninguém chamou. Fica fora da conta em R$ porque o retorno não é cobrado. <a style="color:var(--neon);cursor:pointer" onclick="PS_SEG='retorno';ir('pacientes')">ver a lista ›</a></div>
+      <span class="nb" style="color:var(--coral)">0/5</span><div class="tx"><b>consultas confirmadas</b>Consultas de 22 e 23/09, lidas em 22/09: retrato de antes do Zaq. Na Agenda de exemplo, com o Zaq confirmando, hoje estão ${doDia(HOJE).filter(e=>e.st==='confirmado').length} de ${doDia(HOJE).filter(e=>!['finalizado','cancelou','faltou'].includes(e.st)).length}.</div>
+      <span class="nb" style="color:var(--ambar)">1</span><div class="tx"><b>orçamento lançado no mês</b>Plano que não é escrito, ninguém cobra. A tela Planos mostra como fica com o Zaq registrando (exemplo). <a style="color:var(--neon);cursor:pointer" onclick="PL_ABA='propostas';ir('planos')">ver ›</a></div>
+      <span class="nb" style="color:var(--ambar)">58</span><div class="tx"><b>itens de estoque vencidos · 13 abaixo do mínimo</b>Sem R$: pode ser baixa que ninguém lançou. Conferir no Amigo.</div>
+      <span class="nb" style="color:var(--ambar)">—</span><div class="tx" style="border-bottom:0"><b>agendamento on-line e robô: não configurados</b>O paciente só marca falando com alguém.</div>
+    </div>
+    <div class="acha"><b>18 retornos pedidos e nenhum chamado.</b> É a lista mais fácil: o paciente já conhece o doutor.</div></div></div></div>`;
+
+  /* 7 · confiança do dado */
+  h+=`<div class="rx-conf">📡 <b>Confiança do dado</b><br>
+    · WhatsApp real de 24/08 a 23/09, medido em 24/09: ${W.conversas} conversas (${W.paciente} de paciente; as ${W.internas} internas ficam fora da conta) e ${W.msgs.toLocaleString('pt-BR')} mensagens.<br>
+    · "Sem resposta" = o paciente escreveu e o número da clínica não respondeu em 24h. Conta cada vez que o paciente escreve, não cada conversa.<br>
+    · Domingo e 07/09 não têm nenhuma mensagem: o número fica desligado nesses dias?<br>
+    · Preço e agendamento são reconhecidos pelo texto padrão da recepção.<br>
+    · Amigo lido à mão em 22/09. A integração ainda não existe.<br>
+    · A agenda, as faltas e o valor da meia-hora são exemplo (a mesma agenda da tela Agenda), até ligar a API do Amigo (horários livres e status de comparecimento).<br>
+    · Mercado: Zenoti, med spa, 2026. É régua, não meta nem promessa.<br>
+    · O Zaq não guarda diagnóstico, prontuário, foto nem documento.</div></div>`;
+  return h;
+}
+
+function abrirConta(k){
+  const A=rxAgenda('todos');
+  if(k==='preco') return abrirGav(`<div class="mut" style="font-size:.76rem">Como chegamos em</div><h2>R$ 5.000</h2>
+    <div class="sec"><div class="linha"><span>Receberam o preço (texto padrão "investimento de R$…")</span><span class="num">13</span></div>
+    <div class="linha"><span>Marcaram ("Prontinho… agendamento foi")</span><span class="num">3</span></div>
+    <div class="linha"><span>Não marcaram</span><span class="num">10</span></div>
+    <div class="linha"><span>× consulta</span><span class="num">R$ 500</span></div>
+    <div class="linha" style="border-top:1px solid var(--borda);padding-top:.4rem"><span><b>Parado</b></span><span class="num"><b>R$ 5.000</b></span></div></div>
+    <div class="sec"><div class="faint" style="font-size:.78rem">Medido no WhatsApp da clínica de 24/08 a 23/09, em 24/09. Quem marcou por telefone ou no balcão não aparece aqui.</div> ${rxF('wa')}</div>
+    <div class="acoes"><button class="btn" onclick="FU_FASE='venda';ir('funil')">Ver no Funil</button></div>`);
+  if(k==='vazio'){ const t=A.buracos[0], c=rxCel(t.p,t.d,'dia'); const ev=EV.filter(e=>e.p===t.p&&rxVivo(e)&&localDe(e.p,e.dia)==='Espaço Pelle');
+    return abrirGav(`<div class="mut" style="font-size:.76rem">Como chegamos em</div><h2>≈ ${rxBRL(t.v)}</h2><div class="mut" style="font-size:.84rem">${rxNome(t.p)} · ${rxDia(t.d)}</div>
+    <div class="sec"><h4>Os ${c.livres.length} horários livres</h4><div style="display:flex;gap:.3rem;flex-wrap:wrap">${c.livres.map(x=>`<span class="chip">${x}</span>`).join('')}</div></div>
+    <div class="sec"><div class="linha"><span>Horários livres</span><span class="num">${c.livres.length}</span></div>
+    <div class="linha"><span>× média por meia-hora do ${rxNome(t.p)}</span><span class="num">${rxBRL(A.vmh[t.p])}</span></div>
+    <div class="faint" style="font-size:.76rem;margin-top:.3rem">A média é o que ele fatura por meia-hora marcada na sede nesta semana, pela tabela (${rxBRL(ev.reduce((s,e)=>s+tipo(e.tipo)[4],0))} ÷ ${ev.reduce((s,e)=>s+e.d,0)}). É uma média: mistura consulta (R$ 500), procedimento, cirurgia e retorno (R$ 0). Se o dia for preenchido com consulta, cada meia-hora vale R$ 500; com retorno, R$ 0.</div> ${rxF('ex')}</div>
+    <div class="acoes"><button class="btn" onclick="abrirCelula('${t.p}',${t.d},'dia')">Ver os ${c.livres.length} horários</button><button class="btn sec" onclick="AG_PROF='${t.p}';AG_VISTA='semana';ir('agenda')">Abrir na Agenda</button></div>`); }
+  if(k==='faltas') return abrirGav(`<div class="mut" style="font-size:.76rem">Faltas desta semana · exemplo</div><h2>${rxBRL(A.faltasR)}</h2>
+    <div class="sec">${A.faltas.map(e=>`<div class="rank"><span class="n">${rxDia(e.dia)} · ${e.h} · ${rxNome(e.p)}<small>${e.tipo} · ${e.pac}</small></span><span class="num">${tipo(e.tipo)[4]?rxBRL(tipo(e.tipo)[4]):'R$ 0 (já paga)'}</span></div>
+      <div style="margin:-.15rem 0 .5rem"><button class="btn sec min" onclick="toast('Nada foi enviado (protótipo)','No produto, o agente oferece 3 horários livres e você aprova antes.')">Oferecer novo horário</button></div>`).join('')||'<div class="mut">Nenhuma falta esta semana.</div>'}</div>
+    <div class="sec">${rxF('ex')} <span class="faint" style="font-size:.74rem">no produto: status "faltou" que o Amigo devolve pela API</span></div>`);
+}
+function abrirCelula(p,d,t){
+  const c=rxCel(p,d,t), A=rxAgenda('todos');
+  const med=A.vmh[p];
+  let h=`<div class="mut" style="font-size:.76rem">${c.local}${c.passou?' · já passou':c.hoje?' · hoje':''}</div><h2>${rxNome(p)} · ${rxDia(d)} · ${RX_TURNO_NOME[t]}</h2>
+    <div style="font-size:.86rem">${c.oc} de ${c.ab} meias-horas marcadas (${c.pct}%)</div>`;
+  if(c.passou){
+    h+=`<div class="sec"><h4>O que aconteceu</h4>${c.evs.map(e=>`<div class="linha"><span>${e.h} · ${e.tipo}</span><span class="chip ${e.st==='faltou'?'r':''}">${ST[e.st]}${e.st==='faltou'?' · '+(tipo(e.tipo)[4]?rxBRL(tipo(e.tipo)[4]):'já paga'):''}</span></div>`).join('')||'<div class="mut">Nada marcado.</div>'}
+      <div class="linha" style="margin-top:.3rem"><span>Ficaram vazias</span><span class="num">${c.livres.length}</span></div></div>`;
+  } else {
+    h+=`<div class="sec"><h4>Livres</h4><div style="display:flex;gap:.3rem;flex-wrap:wrap">${c.livres.map(x=>`<span class="chip g">${x}</span>`).join('')||'<span class="mut">nenhum</span>'}</div></div>
+    <div class="sec"><h4>Marcados</h4>${c.evs.map(e=>`<div class="linha"><span>${e.h} · ${e.tipo}</span><span class="chip ${e.st==='segurado'?'a':e.st==='faltou'?'r':''}">${e.st==='segurado'?'só segurado':ST[e.st]}</span></div>`).join('')||'<div class="mut">Nada marcado.</div>'}</div>
+    <div class="sec"><div style="font-size:.84rem">≈ ${rxBRL(r10(c.livres.length*med))} pela média ${p==='manoel'?'do Dr. Manoel':'de '+rxNome(p)} (${rxBRL(med)} a meia-hora)${p==='manoel'?' · em consulta, cada meia-hora vale R$ 500; em retorno, R$ 0':''}</div> ${rxF('ex')}</div>
+    <div class="acoes"><button class="btn sec" onclick="AG_PROF='${p}';AG_VISTA='semana';ir('agenda')">Abrir na Agenda</button>${c.livres.length?`<button class="btn" onclick="abrirOferta('vazio','${p}',${d},'${t}')">Oferecer estes horários</button>`:''}</div>`;
+  }
+  abrirGav(h);
+}
+function abrirOferta(tp,p,d,t){
+  let horarios, para, chave;
+  if(tp==='preco'){ horarios=rxOfertaPreco().map(([dd,hh])=>dd+' às '+hh); para='10 pessoas (nomes no Funil), começando pelas 7 nunca chamadas. Só quem autorizou mensagem.'; chave='a1'; }
+  else { const c=rxCel(p,d,t); horarios=c.livres.slice(0,3).map(hh=>rxDia(d)+' às '+hh); para='primeiro os 10 que pediram o preço (consulta), depois os 18 retornos · só quem autorizou mensagem.'; chave='a3'; }
+  const txt = tp==='preco'
+    ? `Oi! Aqui é do Centro Dermatológico Dr. Manoel Soares 🤝🏽 Você perguntou sobre a consulta com o Dr. Manoel (R$ 500). Ainda tenho horário: ${horarios.join(', ').replace(/, ([^,]*)$/,' ou $1')}. Algum fica bom?`
+    : `Oi! Aqui é do Centro Dermatológico Dr. Manoel Soares 🤝🏽 Abriram horários com ${p==='manoel'?'o Dr. Manoel':rxNome(p)}: ${horarios.join(', ').replace(/, ([^,]*)$/,' ou $1')}. Quer que eu reserve um para você?`;
+  abrirModal(`<h2>Prévia da mensagem</h2><div class="mut" style="font-size:.84rem;margin-bottom:.6rem">Nada sai sem a sua aprovação.</div>
+    <div class="zap" style="max-width:none"><div class="b">${txt}<div class="h">agente</div></div></div>
+    <div class="linha" style="margin-top:.6rem"><span>Vai para</span><span style="text-align:right;max-width:70%">${para}</span></div>
+    <div class="acoes"><button class="btn" onclick="rxFeito('${chave}');toast('Aprovado · nada foi enviado','Protótipo: no produto, o agente manda um por um, só depois da sua aprovação.')">Aprovar</button><button class="btn sec" onclick="toast('Editar texto','No produto, o texto fica editável aqui antes de aprovar.')">Editar texto</button>${tp==='preco'?`<button class="btn sec" onclick="FU_FASE='venda';ir('funil')">Ver os 10 no Funil</button>`:''}</div>`);
+}
+
+/* =================================================================
+   8 · CONFIGURAR (profissionais, tipos, locais, grade)
+   ================================================================= */
+let CF_ABA='prof';
+function telaConfig(){
+  const abas=`<div class="tabs">${[['prof','Profissionais'],['tipos','Tipos de atendimento'],['locais','Locais'],['grade','Grade de horário']].map(([k,l])=>`<button class="${CF_ABA===k?'on':''}" onclick="CF_ABA='${k}';render()">${l}</button>`).join('')}</div>`;
+  let h=`<div class="pg-h"><div><h1>Profissionais e horários</h1><div class="sub">A base de tudo. Importado do Amigo da clínica: 17 tipos, 5 executantes, 17 unidades — arrumados.</div></div></div>${abas}`;
+  if(CF_ABA==='prof') h+=`${PROF.map(p=>`<div class="card" style="display:grid;grid-template-columns:44px 1fr auto;gap:.8rem;align-items:center">
+    <div style="width:44px;height:44px;border-radius:50%;background:${p.cor};color:var(--sobre-verde);display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--display);font-size:1.1rem">${p.nome.replace('Dr. ','')[0]}</div>
+    <div><div style="font-weight:600">${p.nome} <span class="mut" style="font-weight:400;font-size:.82rem">· ${p.esp}</span></div><div class="mut" style="font-size:.78rem">${p.grade}</div>
+      <div style="margin-top:.35rem;display:flex;gap:.25rem;flex-wrap:wrap">${p.faz.map(f=>`<span class="chip">${f}</span>`).join('')}</div></div>
+    <div style="text-align:right"><span class="chip ${p.login?'b':''}">${p.login?'tem login':'sem login · só agenda'}</span><br><button class="btn sec min" style="margin-top:.4rem">Editar</button></div></div>`).join('')}
+    <div class="card" style="border-style:dashed"><div class="mut" style="font-size:.84rem"><b style="color:var(--txt)">CIMLAB não entra aqui:</b> é laboratório, não gente. Virou o tipo "Coleta CIMLAB".<br><b style="color:var(--txt)">Cristiane:</b> estava no Amigo sem grade. Função a confirmar com a clínica.</div></div>`;
+  if(CF_ABA==='tipos') h+=`<div class="card"><table class="tb"><tr><th>Tipo</th><th class="r">Duração</th><th>Categoria</th><th>Volta em</th><th class="r">Preço particular</th></tr>
+    ${TIPOS.map(t=>`<tr><td><span class="dot" style="background:${t[5]}"></span>${t[0]}</td><td class="r num">${t[1]} min</td><td><span class="chip">${t[2]}</span></td><td>${t[3]}</td><td class="r num">${t[4]?brl(t[4]):'—'}</td></tr>`).join('')}</table>
+    <div class="hint">A <b>categoria</b> é o que move o funil (consulta finalizada → pergunta do plano). O <b>preço</b> é o que o agente responde quando perguntam "quanto custa". A consulta é <b>R$ 500</b> (é o que a recepção passa no WhatsApp); os outros preços são ilustrativos — falta a tabela real.<br>Não migraram: "Legado", "Retorno Dr. Manoel" e "Retorno Juliana" (viraram um "Retorno" só) e "Alergoshop" (é venda de produto, vai para o Caixa).</div></div>`;
+  if(CF_ABA==='locais') h+=`<div class="card"><table class="tb"><tr><th>Local</th><th>Endereço</th><th>Tipo</th><th class="r">Fila</th></tr>
+    ${LOCAIS.map(l=>{const c=CIDADES.find(x=>x.n===l[0]);return `<tr><td>${l[0]}</td><td class="mut">${l[1]}</td><td><span class="chip ${l[2]==='sede'?'g':'b'}">${l[2]}</span></td><td class="r num">${c?c.esp:'—'}</td></tr>`}).join('')}</table>
+    <div class="hint">No Amigo eram 17 "unidades". <b>Local é só onde a pessoa vai estar</b>, com endereço para a mensagem de confirmação. "Vacina", "Pacotes antes de 01/12/2025" e "Permuta Manoel" não são lugar: viraram tipo de atendimento ou ficam no Amigo.</div></div>`;
+  if(CF_ABA==='grade') h+=`<div class="card"><h3>Dr. Manoel</h3><table class="tb"><tr><th>Quando</th><th>Horário</th><th>Local</th><th>Repete</th><th>Encaixes</th></tr>
+    <tr><td>Seg a Sex</td><td class="num">08:00–12:00 e 13:30–16:30</td><td>Espaço Pelle</td><td>toda semana</td><td>2 por dia</td></tr>
+    <tr><td>Sábado</td><td class="num">08:00–12:00</td><td>Lago da Pedra</td><td>a cada 15 dias</td><td>—</td></tr>
+    <tr><td>3ª quinta do mês</td><td class="num">08:00–17:00</td><td>Bacabal</td><td>mensal</td><td>—</td></tr>
+    <tr><td style="color:var(--coral)">24/10</td><td>dia todo</td><td style="color:var(--coral)">bloqueado · congresso</td><td>exceção</td><td>—</td></tr></table>
+    <div class="acoes"><button class="btn sec min">+ horário</button><button class="btn sec min">+ exceção</button><button class="btn sec min">Bloquear agenda</button></div>
+    <div class="hint">No Amigo, só a grade da sede estava ativa. Os dias em cidades aqui são <b>exemplo</b> — é a pergunta que falta a clínica responder.</div></div>`;
+  return h;
+}
+
+/* =================================================================
+   telas que existem hoje (só para o menu não quebrar)
+   ================================================================= */
+function telaExistente(n){return `<div class="pg-h"><div><h1>${n}</h1><div class="sub">Tela que já existe no Zaq e não muda neste projeto.</div></div></div>
+  <div class="card"><div class="mut">No protótipo, as telas novas estão no menu com a etiqueta <span class="chip g">novo</span>, e a agenda com <span class="chip b">muda</span>.</div>
+  <div class="acoes"><button class="btn" onclick="ir('agenda')">Ir para a Agenda</button></div></div>`}
+
+function render(){
+  const T={conversas:telaConversas,agenda:telaAgenda,pacientes:telaPacientes,funil:telaFunil,roteiro:telaRoteiro,vagas:telaVagas,paciente:telaPaciente,planos:telaPlanos,raiox:telaRaio,config:telaConfig};
+  const nomes={caixa:'Caixa',produtos:'Produtos',financeiro:'Financeiro',empresa:'Empresa',relatorios:'Relatórios',equipe:'Equipe',novidades:'Novidades'};
+  $('#main').innerHTML = T[ROTA]?T[ROTA]():telaExistente(nomes[ROTA]||ROTA);
+}
+ROTA=(location.hash||'#agenda').slice(1)||'agenda';
+gerarSemana();
+menu();render();
+</script>
+</body></html>

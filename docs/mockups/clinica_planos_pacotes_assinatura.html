@@ -1,0 +1,305 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Planos, pacotes e assinatura</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:900px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:34px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+.tw{overflow-x:auto;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+.big{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem;margin-bottom:14px}
+.big div{background:#fff;border:1px solid #E3DDD0;border-radius:10px;padding:10px 12px}
+.big b{display:block;font-size:1.45rem;line-height:1.2}
+.big span{font-size:11.5px;color:#8A8475}
+/* painel escuro */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC;overflow-x:auto}
+.pn .top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.pn .tt{font-size:1.05rem;font-weight:700}
+.pn .mut{color:#7B8A99;font-size:.78rem}
+.pn .lbl{color:#7B8A99;font-size:.64rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin:.55rem 0 .2rem}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.35rem .55rem;font-size:.82rem;color:#DDE4EC;display:inline-block;min-width:130px}
+.pn .chip{display:inline-block;background:#0B1219;border:1.5px solid #2A3947;border-radius:16px;padding:3px 11px;font-size:.74rem;color:#B4B2A9;margin:0 4px 5px 0}
+.pn .chip.on{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .bt{display:inline-block;background:#1E6B4E;color:#fff;border-radius:7px;padding:.3rem .65rem;font-size:.76rem;font-weight:600;margin:.35rem .3rem 0 0}
+.pn .bt.sec{background:#22303C;color:#DDE4EC}
+.pn .box{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.65rem .75rem;margin-bottom:.5rem}
+.pn .grid2{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.pn table{background:#16212C;border-color:#22303C;color:#DDE4EC}
+.pn th{background:#121B24;color:#7B8A99;border-color:#22303C}
+.pn td{border-color:#22303C}
+.ses{display:flex;gap:5px;flex-wrap:wrap;margin-top:.35rem}
+.ses i{width:26px;height:26px;border-radius:7px;border:1.5px solid #2A3947;display:flex;align-items:center;justify-content:center;font-size:.7rem;font-style:normal;color:#7B8A99}
+.ses i.ok{background:#12281F;border-color:#2C6E52;color:#7EE7B8}
+.ses i.next{border-color:#F4C766;color:#F4C766}
+.lin{display:flex;align-items:center;gap:8px;background:#16212C;border:1px solid #22303C;border-radius:8px;padding:.4rem .55rem;margin-bottom:.35rem;font-size:.78rem}
+.lin .nm{flex:1;min-width:0}
+.lin .nm small{display:block;color:#7B8A99;font-size:.7rem}
+.lin .vl{font-weight:700;white-space:nowrap}
+.tag{display:inline-block;font-size:.64rem;border-radius:99px;padding:1px 8px;border:1px solid #2A3947;color:#B4B2A9}
+.tag.g{border-color:#2C6E52;color:#7EE7B8;background:#12281F}
+.tag.y{border-color:#6B5320;color:#F4C766;background:#261E0E}
+.tag.r{border-color:#6E2E2A;color:#ff8a80;background:#2A1715}
+/* zap */
+.zap{background:#E9DFD4;border-radius:12px;padding:12px;max-width:430px;margin:0 auto 14px}
+.zap .b{background:#fff;border-radius:8px;padding:7px 10px;margin:0 30px 8px 0;font-size:13px;line-height:1.5;box-shadow:0 1px 0 rgba(0,0,0,.08)}
+.zap .b.eu{background:#D9FDD3;margin:0 0 8px 30px}
+.zap .h{font-size:10.5px;color:#667;text-align:right;margin-top:2px}
+.zap .sis{text-align:center;font-size:11px;color:#5A6678;background:#F5EFE6;border-radius:6px;padding:3px 8px;margin:4px auto 8px;width:max-content;max-width:100%}
+.zap .card{border:1px solid #E3DDD0;border-radius:8px;padding:8px 10px;margin-top:6px;background:#FBFAF7;font-size:12.5px}
+@media (max-width:640px){.pn .grid2{grid-template-columns:1fr}.big{grid-template-columns:repeat(2,1fr)}}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.pn,.q,table,.zap{break-inside:avoid}}
+</style></head><body><div class="wrap">
+
+<h1>Clínica no Zaq, parte 3: plano de tratamento, pacote e assinatura</h1>
+<p class="lead">
+Mockup para aprovação. Nada no banco, nenhum código mudou. A parte 1 deu médicos, agenda e funil; a parte 2, a
+agenda itinerante e o motor que enche o dia. Esta parte trata do <b>ticket</b>: transformar uma consulta de
+R$ 250 em um tratamento de R$ 3.200, fazer a pessoa voltar para as seis sessões e criar receita que entra
+todo mês. Dados da clínica lidos no Amigo em 22/09/2026; pacientes e valores das telas são fictícios.
+</p>
+
+<h2><span class="n">01</span>Por que esta parte vale mais que as outras</h2>
+<div class="big">
+  <div><b>2,2×</b><span>o ticket médio do top 10% contra a mediana do setor</span></div>
+  <div><b>1,9×</b><span>receita de clínicas com assinatura, contra as sem</span></div>
+  <div><b>21% → 4%</b><span>cancelamento cai quando o paciente já remarcou 2 vezes</span></div>
+  <div><b>+21%</b><span>receita com programa de fidelidade/recompra</span></div>
+</div>
+<div class="tw"><table>
+<tr><th>O que a clínica tem hoje</th><th>O que isso diz</th></tr>
+<tr><td><b>1 orçamento em setembro</b>, R$ 2.000, "em aberto" (lido no Amigo)</td><td>Procedimento caro está sendo combinado de boca. Não existe proposta para acompanhar, nem cobrança da decisão</td></tr>
+<tr><td>O Amigo tem "créditos de procedimentos" e relatórios de <b>orçamentos fechados, em aberto e créditos disponíveis</b></td><td>A ferramenta existe e não é usada. O buraco não é de sistema, é de rotina</td></tr>
+<tr><td>Há uma unidade "PACOTES ANTES DE 01/12/2025" e um tipo "Retorno sessão pacote fechado antes de 01/12/25 depilação"</td><td>A clínica <b>já vende pacote</b>, e controla por gambiarra: virou "unidade" no sistema para não se perder</td></tr>
+<tr><td>Dermocosmético é vendido (há tipo "Alergoshop" e produtos no estoque, com 58 itens vencidos)</td><td>Produto é receita fácil e está sendo perdido na prateleira</td></tr>
+</table></div>
+
+<h2><span class="n">02</span>Os quatro jeitos de a clínica ganhar dinheiro</h2>
+<div class="tw"><table>
+<tr><th>Produto</th><th>Exemplo</th><th>Como o Zaq trata</th><th>Já temos?</th></tr>
+<tr><td><b>Avulso</b></td><td>consulta, cauterização</td><td>venda no PDV, recebimento no caixa</td><td>sim</td></tr>
+<tr><td><b>Plano de tratamento</b></td><td>criolipólise, 4 sessões, R$ 3.200 em 4×</td><td>proposta → aceite → parcelas a receber → sessões marcadas</td><td>orçamento existe; falta a parte de sessões</td></tr>
+<tr><td><b>Pacote com saldo</b></td><td>10 sessões de laser, usadas ao longo do ano</td><td>crédito de sessões que baixa a cada atendimento</td><td><b>não</b></td></tr>
+<tr><td><b>Assinatura</b></td><td>R$ 149/mês: 1 limpeza + 15% em procedimentos + 1 produto</td><td>cobrança recorrente automática</td><td>o motor existe (Asaas), falta o plano da clínica</td></tr>
+</table></div>
+<div class="bom">
+<b>O pulo do gato é o terceiro e o quarto.</b> Avulso é o que todo mundo faz. Pacote com saldo transforma uma
+venda em <b>dez visitas</b> — e cada visita é uma chance de vender produto e o próximo tratamento. Assinatura é o
+que faz dezembro não depender de dezembro.
+</div>
+
+<h2><span class="n">03</span>O plano de tratamento</h2>
+<div class="sub">Da consulta à proposta, em dois minutos, sem sair do WhatsApp</div>
+<div class="pn">
+  <div class="top"><span class="tt">Plano de tratamento · Lúcia F.</span><span class="mut">a partir da consulta de 23/09 · <i>ilustrativo</i></span></div>
+  <div class="grid2">
+    <div class="box">
+      <span class="lbl">O que o médico propôs</span>
+      <div class="lin"><span class="nm">Criolipólise<small>4 sessões · 60 min cada</small></span><span class="vl">R$ 3.200</span></div>
+      <div class="lin"><span class="nm">Protocolo domiciliar<small>2 produtos</small></span><span class="vl">R$ 420</span></div>
+      <span class="lbl">Desconto</span>
+      <span class="chip on">à vista no Pix −8%</span><span class="chip">sem desconto</span>
+      <div class="mut" style="margin-top:.3rem">Teto de desconto do vendedor: 10% (o resto pede aprovação)</div>
+    </div>
+    <div class="box">
+      <span class="lbl">Como o paciente paga</span>
+      <div class="lin"><span class="nm">Pix à vista<small>R$ 3.330 com desconto</small></span><span class="tag g">recomendado</span></div>
+      <div class="lin"><span class="nm">4× no cartão<small>R$ 905/mês</small></span><span class="tag">sem juros</span></div>
+      <div class="lin"><span class="nm">Entrada + 3 parcelas<small>R$ 900 + 3× R$ 906</small></span><span class="tag">boleto/Pix</span></div>
+      <span class="lbl">Validade da proposta</span><span class="inp">7 dias</span>
+      <div><span class="bt">Enviar no WhatsApp</span><span class="bt sec">Imprimir</span></div>
+    </div>
+  </div>
+  <div class="box">
+    <span class="lbl">Depois de enviado, sozinho</span>
+    <div class="mut">D+1 “viu a proposta?” · D+3 lembrete com o parcelamento · D+7 vence: avisa a recepção antes de expirar.
+    Se o paciente responde, o card sai do automático e vai para a pessoa.</div>
+  </div>
+</div>
+<div class="zap">
+  <div class="sis">WhatsApp · a proposta chega assim</div>
+  <div class="b">Oi, Lúcia! O Dr. Manoel montou seu plano 💚
+    <div class="card"><b>Criolipólise · 4 sessões</b><br>R$ 3.200<br>
+    <b>Protocolo domiciliar</b> · R$ 420<br>
+    <hr style="border:0;border-top:1px solid #E3DDD0;margin:6px 0">
+    À vista no Pix: <b>R$ 3.330</b> (−8%)<br>Ou 4× de R$ 905 no cartão</div>
+    Quer que eu já separe os horários das 4 sessões? Responda <b>1</b> para o Pix ou <b>2</b> para o cartão.<div class="h">14:20</div></div>
+  <div class="b eu">2<div class="h">14:31</div></div>
+  <div class="b">Perfeito! Te mando o link do cartão. Assim que o pagamento entrar, eu já reservo a 1ª sessão — tenho <b>ter 30/09 às 14h</b> ou <b>qui 02/10 às 9h</b>.<div class="h">14:31</div></div>
+  <div class="sis">→ funil: card vai de “Plano de tratamento” para “Fechado”<br>→ 4 parcelas a receber · 4 sessões viram saldo</div>
+</div>
+<div class="alerta">
+<b>O agente não decide o tratamento.</b> Ele monta a proposta <b>do que o médico marcou</b>, explica preço e
+parcelamento, e cobra a decisão. Não sugere procedimento, não diz que "fica bom para o seu caso" e não responde
+dúvida clínica — é a mesma regra que já está na persona do nicho, em produção.
+</div>
+
+<h2><span class="n">04</span>Pacote com saldo de sessões</h2>
+<div class="sub">O que a clínica hoje controla criando "unidade" no sistema</div>
+<div class="pn">
+  <div class="top"><span class="tt">Lúcia F. · Criolipólise</span><span class="mut">comprado em 23/09 · válido até 23/03/2027</span></div>
+  <div class="grid2">
+    <div class="box">
+      <span class="lbl">Sessões</span>
+      <div class="ses"><i class="ok">1</i><i class="ok">2</i><i class="next">3</i><i>4</i></div>
+      <div class="mut" style="margin-top:.4rem"><b style="color:#DDE4EC">2 usadas · 2 a usar</b> · próxima sugerida: <b style="color:#F4C766">14/10</b> (intervalo de 21 dias)</div>
+      <span class="bt">Marcar a 3ª sessão</span>
+    </div>
+    <div class="box">
+      <span class="lbl">Pagamento</span>
+      <div class="lin"><span class="nm">1ª parcela<small>23/09</small></span><span class="tag g">paga</span></div>
+      <div class="lin"><span class="nm">2ª parcela<small>23/10</small></span><span class="tag">a vencer</span></div>
+      <div class="mut">Sessão só é marcada com parcela em dia — <b>regra da clínica</b>, ligada ou desligada nas configurações.</div>
+    </div>
+  </div>
+</div>
+<div class="tw"><table>
+<tr><th>Momento</th><th>O que o sistema faz sozinho</th></tr>
+<tr><td>Atendimento <b>finalizado</b></td><td>baixa uma sessão do saldo e <b>oferece marcar a próxima ali</b> — é o 21% → 4%</td></tr>
+<tr><td>Passou o intervalo e não marcou</td><td>mensagem: "sua 3ª sessão está liberada, tenho terça às 14h"</td></tr>
+<tr><td>Faltam 60 dias para vencer com saldo</td><td>avisa o paciente e coloca na tela da recepção</td></tr>
+<tr><td>Parcela atrasou</td><td>cobrança por Pix e aviso na hora de marcar</td></tr>
+</table></div>
+<div class="perigo">
+<b>Sessão vendida e não usada é passivo, não lucro.</b> O dinheiro entrou, mas o atendimento ainda é devido —
+e paciente que "some com pacote pela metade" vira reclamação e pedido de reembolso. Por isso o painel tem
+<b>sessões vendidas × consumidas</b>, e o alerta de pacote parado. É um número que nenhum concorrente mostra
+para o dono.
+</div>
+
+<h2><span class="n">05</span>Assinatura da clínica</h2>
+<div class="sub">O que faz o faturamento não depender do movimento do mês</div>
+<div class="pn">
+  <div class="top"><span class="tt">Planos</span><span class="mut">cobrança automática · <i>valores ilustrativos</i></span></div>
+  <div class="grid2">
+    <div class="box">
+      <div style="font-size:1rem;font-weight:700">Pele em dia · R$ 149/mês</div>
+      <div class="mut" style="margin:.3rem 0">1 limpeza de pele por mês · 15% em procedimentos · 10% em produtos · prioridade na fila de vagas</div>
+      <span class="lbl">Assinantes</span><div style="font-size:1.3rem;font-weight:700">18 <span style="font-size:.8rem;font-weight:400;color:#7B8A99">· R$ 2.682/mês</span></div>
+    </div>
+    <div class="box">
+      <div style="font-size:1rem;font-weight:700">Manutenção anual · 12× R$ 249</div>
+      <div class="mut" style="margin:.3rem 0">2 aplicações por ano + avaliações + desconto em produto</div>
+      <span class="lbl">Como entra</span>
+      <div class="mut">A recepção oferece no fim do atendimento, ou o agente oferece a quem já veio 3 vezes no ano — <b>a conta que o próprio sistema faz</b>.</div>
+    </div>
+  </div>
+  <div class="box"><b style="color:#7EE7B8">Receita recorrente: R$ 2.682/mês</b> <span class="mut">· entra no dia 10, com ou sem movimento na agenda</span></div>
+</div>
+<div class="nota">
+<b>Reuso quase pronto:</b> <code>finance/assinaturas.py</code> + <code>asaas</code> já criam assinatura com cobrança
+recorrente e link de pagamento (é o que a cesta de fornecedor usa). O que muda é o <b>que</b> o plano dá:
+em vez de produto entregue, <b>benefício na clínica</b> — sessão inclusa, desconto e prioridade na fila da parte 2.
+</div>
+
+<h2><span class="n">06</span>Produto junto do atendimento</h2>
+<div class="sub">O dermocosmético que já está na prateleira</div>
+<div class="tw"><table>
+<tr><th>Gatilho</th><th>O que acontece</th><th>Por quê</th></tr>
+<tr><td>Fim do atendimento</td><td>a tela sugere os produtos do protocolo do paciente</td><td>o melhor momento de venda é com ele na frente</td></tr>
+<tr><td>Produto tem duração (ex.: protetor de 60 dias)</td><td>na data prevista, o agente pergunta se acabou e oferece reposição</td><td>recompra é a receita mais barata que existe</td></tr>
+<tr><td>Item perto do vencimento no estoque</td><td>entra como sugestão de venda antes de virar perda</td><td>a clínica tem <b>58 itens vencidos</b> hoje</td></tr>
+<tr><td>Assinante</td><td>preço com desconto aplicado sozinho</td><td>o plano precisa ser sentido para valer a pena</td></tr>
+</table></div>
+
+<h2><span class="n">07</span>O painel do dono</h2>
+<div class="pn">
+  <div class="top"><span class="tt">Raio-X · setembro</span><span class="mut"><i>números ilustrativos</i></span></div>
+  <div class="tw" style="margin:0"><table>
+    <tr><th>Indicador</th><th class="num">Mês</th><th>Leitura</th></tr>
+    <tr><td>Ticket médio por atendimento</td><td class="num">R$ 318</td><td>consulta pura puxa para baixo; plano puxa para cima</td></tr>
+    <tr><td>Consultas que viraram proposta</td><td class="num">22%</td><td>de cada 10 consultas, 2 saem com plano</td></tr>
+    <tr><td>Propostas fechadas</td><td class="num">41%</td><td>o follow-up age aqui</td></tr>
+    <tr><td>Sessões vendidas × consumidas</td><td class="num">86 × 61</td><td><b>25 sessões devidas</b> — passivo e risco de reembolso</td></tr>
+    <tr><td>Receita de assinatura</td><td class="num">R$ 2.682</td><td>entra com ou sem movimento</td></tr>
+    <tr><td>Produto por atendimento</td><td class="num">R$ 27</td><td>abaixo do que a prateleira permite</td></tr>
+    <tr><td>Receita por hora do médico</td><td class="num">R$ 210</td><td>compara com o dia de viagem (parte 2)</td></tr>
+  </table></div>
+</div>
+
+<h2><span class="n">08</span>Riscos e limites</h2>
+<div class="perigo">
+<b>· Nada de promessa de resultado.</b> A proposta descreve o que será feito, quantas sessões e o preço. Não
+diz "você vai perder X cm" nem mostra foto de outra pessoa como se fosse a previsão do caso. Isso é regra de
+publicidade médica, e é o tipo de coisa que gera processo no conselho.
+<br><b>· Preço e desconto têm dono.</b> Teto por papel: a recepção dá até o limite; acima disso o dono aprova.
+<br><b>· A proposta não é prontuário.</b> Vai o nome do procedimento e o valor, nunca diagnóstico ou queixa.
+<br><b>· Venda com parcela em aberto.</b> A regra "sessão só com parcela em dia" é da clínica: nasce desligada,
+e quem liga é o dono.
+<br><b>· Reembolso de pacote.</b> Se o paciente desiste no meio, é preciso saber quanto foi usado — por isso o
+saldo e o histórico de consumo ficam registrados, com data.
+</div>
+
+<h2><span class="n">09</span>O que reaproveita e o que é novo</h2>
+<div class="tw"><table>
+<tr><th>Peça</th><th>Já existe</th><th>O que falta</th></tr>
+<tr><td>Proposta com status e follow-up</td><td><code>orcamentos</code> (rascunho → enviado → negociando → fechado/perdido) + funil</td><td>formato de plano: procedimento com nº de sessões e intervalo</td></tr>
+<tr><td>Parcelas a receber e cobrança Pix</td><td>títulos, <code>asaas</code></td><td>ligar as parcelas ao pacote</td></tr>
+<tr><td>Assinatura com cobrança recorrente</td><td><code>finance/assinaturas.py</code></td><td>plano com benefício (sessão inclusa, desconto, prioridade)</td></tr>
+<tr><td>Venda de produto e estoque</td><td>PDV/carrinho, catálogo</td><td>sugestão no fim do atendimento e recompra por duração</td></tr>
+<tr><td><b>Saldo de sessões</b> (crédito, consumo, validade)</td><td><b>não existe</b></td><td>é o coração desta parte</td></tr>
+<tr><td><b>Sessões vendidas × consumidas</b> no Raio-X</td><td><b>não existe</b></td><td>o número que ninguém mostra</td></tr>
+</table></div>
+
+<h2><span class="n">10</span>Decisões da clínica</h2>
+<div class="q"><div class="qt">A. Quais pacotes ela vende hoje, com quantas sessões e qual intervalo?</div>
+<div class="qo">Depilação a laser e criolipólise aparecem no Amigo. Preciso da lista real com preço, nº de sessões e intervalo entre elas.</div></div>
+<div class="q"><div class="qt">B. Pacote vence?</div>
+<div class="qo"><span class="rec">Recomendo: 12 meses</span>, avisando o paciente 60 dias antes. Sem validade, o passivo fica para sempre.</div></div>
+<div class="q"><div class="qt">C. Marca sessão com parcela atrasada?</div>
+<div class="qo"><span class="rec">Recomendo: nasce desligado</span> — cobrar antes por mensagem resolve quase sempre, sem criar climão na recepção.</div></div>
+<div class="q"><div class="qt">D. Vale a pena ter assinatura, e com o quê dentro?</div>
+<div class="qo">É a maior alavanca de receita previsível do setor. Sugiro começar com <b>um</b> plano simples, de limpeza mensal mais desconto.</div></div>
+<div class="q"><div class="qt">E. Quem pode dar desconto, e até quanto?</div>
+<div class="qo">Sem teto, o desconto vira o preço.</div></div>
+
+<h2><span class="n">11</span>O plano</h2>
+<div class="tw"><table>
+<tr><th class="num">#</th><th>Passo</th><th>Entrega</th></tr>
+<tr><td class="num">1</td><td>Plano de tratamento: proposta com procedimentos, sessões, desconto, parcelamento e envio no WhatsApp</td><td>a consulta passa a sair com proposta</td></tr>
+<tr><td class="num">2</td><td>Follow-up automático da proposta (D+1, D+3, D+7) e validade</td><td>a decisão é cobrada sem ninguém lembrar</td></tr>
+<tr><td class="num">3</td><td>Saldo de sessões: crédito, consumo ao finalizar, validade e "marcar a próxima" em um toque</td><td>o paciente volta as 4 vezes</td></tr>
+<tr><td class="num">4</td><td>Assinatura da clínica com cobrança recorrente</td><td>receita que entra todo dia 10</td></tr>
+<tr><td class="num">5</td><td>Produto no fim do atendimento + recompra por duração + queima de estoque a vencer</td><td>ticket maior e menos perda</td></tr>
+<tr><td class="num">6</td><td>Raio-X: ticket, consulta→proposta→fechada, sessões devidas, receita recorrente, produto por atendimento</td><td>o dono enxerga o negócio, não só o caixa</td></tr>
+</table></div>
+<div class="nota">
+<b>Fora da clínica:</b> saldo de sessões serve a salão (pacote de escova), academia, estúdio de pilates,
+lava-jato com plano mensal e oficina com revisão contratada. Assinatura serve a qualquer conta que queira
+receita previsível. As três partes juntas formam um produto de clínica que não existe no mercado brasileiro:
+agenda que se move, cadeira que se enche e paciente que volta.
+</div>
+
+<div class="ftr">
+Clínica lida no Amigo App em 22/09/2026, só leitura, sem copiar dado de paciente: orçamentos (1 em setembro,
+R$ 2.000 em aberto), relatórios de orçamentos e créditos, tipos de atendimento e unidades que revelam o controle
+de pacote, estoque com 58 itens vencidos. Números de mercado: Zenoti 2026 Beauty and Wellness Benchmark
+(ticket do top 10% × mediana; cancelamento 21% × 4%), Med Spa Benchmarks 2026 (assinatura 1,9×; fidelidade
++21%). Nosso lado: <code>orcamentos</code>, <code>finance/assinaturas.py</code>, <code>finance/asaas.py</code>,
+<code>finance/carrinho.py</code>, <code>finance/servicos_catalogo.py</code>, <code>finance/follow_up.py</code>.
+</div>
+</div></body></html>

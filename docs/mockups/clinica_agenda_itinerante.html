@@ -1,0 +1,340 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agenda itinerante</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EFEBE3;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14213D;padding:26px 16px}
+.wrap{max-width:900px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px}
+.lead{font-size:14px;color:#5A6678;margin:0 0 24px;line-height:1.65}
+h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#B8862E;font-weight:700;margin:34px 0 4px;padding-top:18px;border-top:2px solid #DCD5C6}
+h2 .n{color:#C9BFA8;margin-right:8px}
+.sub{font-size:17px;font-weight:600;margin:0 0 13px}
+p{margin:0 0 12px}
+.nota{background:#FBFAF7;border:1px solid #ECE7DC;border-left:3px solid #B8862E;border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:13px;line-height:1.65}
+.nota b{color:#14213D}
+.alerta{background:#FFF6E8;border:1px solid #F0DDBA;border-left:3px solid #D9932B;border-radius:8px;padding:11px 14px;font-size:13px;color:#7A4E0C;margin-bottom:13px;line-height:1.65}
+.alerta b{color:#5C3A06}
+.perigo{background:#FDECEA;border:1px solid #F5C6C0;border-left:3px solid #B4453C;border-radius:8px;padding:12px 14px;font-size:13px;color:#8C332C;margin-bottom:13px;line-height:1.65}
+.perigo b{color:#6E241E}
+.bom{background:#E8F5EE;border:1px solid #BFE3D0;border-left:3px solid #1c7a4f;border-radius:8px;padding:11px 14px;font-size:13px;color:#155c3b;margin-bottom:13px;line-height:1.65}
+.bom b{color:#0e3d27}
+.tw{overflow-x:auto;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #E3DDD0;border-radius:10px;overflow:hidden}
+th{background:#F6F3EC;text-align:left;padding:8px 11px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:700;border-bottom:1px solid #E3DDD0}
+td{padding:8px 11px;border-bottom:1px solid #F0ECE3;vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+code{background:#F2EFE7;border:1px solid #E3DDD0;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#14213D}
+.q{background:#fff;border:1px solid #E3DDD0;border-left:3px solid #14213D;border-radius:8px;padding:13px 16px;margin-bottom:12px}
+.q .qt{font-weight:700;font-size:14.5px;margin-bottom:5px}
+.q .qo{font-size:13px;color:#3B4757;line-height:1.65}
+.rec{color:#1c7a4f;font-weight:700}
+.ftr{margin-top:30px;padding-top:13px;border-top:2px solid #DCD5C6;font-size:11.5px;color:#8A8475;line-height:1.6}
+.dot{display:inline-block;width:10px;height:10px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+.big{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem;margin-bottom:14px}
+.big div{background:#fff;border:1px solid #E3DDD0;border-radius:10px;padding:10px 12px}
+.big b{display:block;font-size:1.5rem;line-height:1.2}
+.big span{font-size:11.5px;color:#8A8475}
+
+/* painel escuro */
+.pn{background:#0F1720;border:1px solid #22303C;border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#DDE4EC;overflow-x:auto}
+.pn .top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.pn .tt{font-size:1.05rem;font-weight:700}
+.pn .mut{color:#7B8A99;font-size:.78rem}
+.pn .lbl{color:#7B8A99;font-size:.64rem;text-transform:uppercase;letter-spacing:.1em;display:block;margin:.55rem 0 .2rem}
+.pn .inp{background:#0B1219;border:1px solid #2A3947;border-radius:7px;padding:.35rem .55rem;font-size:.82rem;color:#DDE4EC;display:inline-block;min-width:130px}
+.pn .chip{display:inline-block;background:#0B1219;border:1.5px solid #2A3947;border-radius:16px;padding:3px 11px;font-size:.74rem;color:#B4B2A9;margin:0 4px 5px 0}
+.pn .chip.on{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.pn .bt{display:inline-block;background:#1E6B4E;color:#fff;border-radius:7px;padding:.3rem .65rem;font-size:.76rem;font-weight:600;margin:.35rem .3rem 0 0}
+.pn .bt.sec{background:#22303C;color:#DDE4EC}
+.pn .box{background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.65rem .75rem;margin-bottom:.5rem}
+.pn .grid2{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.pn table{background:#16212C;border-color:#22303C;color:#DDE4EC}
+.pn th{background:#121B24;color:#7B8A99;border-color:#22303C}
+.pn td{border-color:#22303C}
+.cid{display:flex;align-items:center;gap:10px;background:#16212C;border:1px solid #22303C;border-radius:10px;padding:.55rem .7rem;margin-bottom:.4rem}
+.cid .nm{flex:1;min-width:0;font-size:.88rem;font-weight:600}
+.cid .nm small{display:block;font-weight:400;color:#7B8A99;font-size:.72rem}
+.cid .qt{text-align:right;font-size:1.3rem;font-weight:700;line-height:1;white-space:nowrap}
+.cid .qt small{display:block;font-size:.62rem;font-weight:400;color:#7B8A99;margin-top:2px}
+.quente{color:#ff8a80}.morno{color:#F4C766}.frio{color:#7B8A99}
+.barra{height:7px;border-radius:99px;background:#22303C;overflow:hidden;margin-top:4px}
+.barra i{display:block;height:100%;background:#7EE7B8}
+.vagas{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.35rem}
+.vg{background:#0B1219;border:1.5px solid #2A3947;border-radius:7px;padding:.25rem .5rem;font-size:.72rem;min-width:62px;text-align:center}
+.vg.ok{border-color:#2C6E52;background:#12281F;color:#7EE7B8}
+.vg.res{border-color:#6B5320;background:#261E0E;color:#F4C766}
+.vg small{display:block;font-size:.6rem;color:#7B8A99}
+.rank{display:flex;align-items:center;gap:8px;background:#16212C;border:1px solid #22303C;border-radius:8px;padding:.4rem .55rem;margin-bottom:.35rem;font-size:.78rem}
+.rank .pos{width:20px;text-align:center;color:#7B8A99;font-weight:700}
+.rank .nm{flex:1;min-width:0}
+.rank .nm small{display:block;color:#7B8A99;font-size:.7rem}
+.rank .sc{font-weight:700;color:#7EE7B8;white-space:nowrap}
+/* zap */
+.zap{background:#E9DFD4;border-radius:12px;padding:12px;max-width:430px;margin:0 auto 14px}
+.zap .b{background:#fff;border-radius:8px;padding:7px 10px;margin:0 30px 8px 0;font-size:13px;line-height:1.5;box-shadow:0 1px 0 rgba(0,0,0,.08)}
+.zap .b.eu{background:#D9FDD3;margin:0 0 8px 30px}
+.zap .h{font-size:10.5px;color:#667;text-align:right;margin-top:2px}
+.zap .sis{text-align:center;font-size:11px;color:#5A6678;background:#F5EFE6;border-radius:6px;padding:3px 8px;margin:4px auto 8px;width:max-content;max-width:100%}
+@media (max-width:640px){.pn .grid2{grid-template-columns:1fr}.big{grid-template-columns:repeat(2,1fr)}}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}@page{size:A4;margin:12mm}
+  h2{break-after:avoid}.pn,.q,table,.zap{break-inside:avoid}}
+</style></head><body><div class="wrap">
+
+<h1>Clínica no Zaq, parte 2: a agenda itinerante</h1>
+<p class="lead">
+Mockup para aprovação. Nada no banco, nenhum código mudou. A parte 1 desenhou médicos, agenda e funil. Esta
+desenha o que <b>nenhum sistema do mundo faz</b>, porque lá fora clínica é ponto fixo: o médico que <b>viaja</b>. A
+Espaço Pelle tem 17 unidades cadastradas no Amigo e metade são cidades. Junto vem o motor que enche o dia —
+lista de espera por cidade, buraco preenchido em minutos e sinal por Pix. Pacientes e números das telas são
+fictícios; o que é real está marcado.
+</p>
+
+<h2><span class="n">01</span>Por que esta é a aposta</h2>
+<div class="big">
+  <div><b>38%</b><span>ocupação da mediana do setor; o top 10% fica em <b>80%</b></span></div>
+  <div><b>21% → 4%</b><span>queda no cancelamento quando o paciente já remarcou 2 vezes</span></div>
+  <div><b>~55%</b><span>menos falta quando há sinal; 72% dos pacientes topam pagar</span></div>
+  <div><b>95% × 15%</b><span>horário cancelado que volta a ser vendido: automático × na mão</span></div>
+</div>
+<div class="bom">
+<b>O que nos diferencia não é "IA que agenda no WhatsApp"</b> — Clinia, ClínicaBot, agendacare, Cloudia e o
+próprio iClinic (com aviso de probabilidade de falta) já vendem isso no Brasil. <b>É a agenda que se move.</b>
+Zenoti, Pabau e Aesthetic Record foram desenhados para clínica com endereço fixo: a "unidade" é um prédio, não
+um dia de viagem. Quem atende em nove cidades do Maranhão não tem software no mundo que ajude.
+</div>
+<div class="tw"><table>
+<tr><th>O que a Espaço Pelle tem hoje (lido no Amigo, 22/09/2026)</th><th>O que isso custa</th></tr>
+<tr><td>17 unidades; cerca de <b>9 são cidades</b> (Bacabal, Codó, Lago da Pedra, Timbiras, Vitorino Freire, Poção de Pedras, Igarapé Grande, Paulo Ramos, Esperantinópolis)</td><td>São dias de viagem, e <b>nenhum tem grade de horário cadastrada</b>: a agenda só existe no Espaço Pelle</td></tr>
+<tr><td>1 profissional com grade ativa</td><td>O dia do médico é o produto. Cada hora vazia é a mais cara da clínica</td></tr>
+<tr><td>5 consultas hoje e amanhã, <b>0 confirmadas</b>; 18 retornos pedidos, <b>0 contatados</b></td><td>Ninguém está enchendo o dia; a lista existe e não vira ligação</td></tr>
+</table></div>
+
+<h2><span class="n">02</span>O roteiro: onde tem gente esperando</h2>
+<div class="sub">A fila deixa de ser uma lista e vira um mapa</div>
+<p>Toda vez que alguém pede atendimento numa cidade e não marca — porque o médico só vai lá de vez em quando —
+essa pessoa entra na <b>fila daquela cidade</b>. O dono abre a tela e vê onde a demanda represou.</p>
+
+<div class="pn">
+  <div class="top"><span class="tt">Roteiro · onde tem gente esperando</span><span class="mut">últimos 90 dias · <i>números ilustrativos</i></span></div>
+  <div class="cid"><div class="nm">Bacabal <small>última visita há 47 dias · 2h de viagem</small><div class="barra"><i style="width:86%"></i></div></div><div class="qt quente">31<small>esperando</small></div><span class="bt">Abrir data</span></div>
+  <div class="cid"><div class="nm">Codó <small>última visita há 62 dias · 2h30</small><div class="barra"><i style="width:64%"></i></div></div><div class="qt quente">23<small>esperando</small></div><span class="bt">Abrir data</span></div>
+  <div class="cid"><div class="nm">Lago da Pedra <small>última visita há 21 dias · 1h</small><div class="barra"><i style="width:39%"></i></div></div><div class="qt morno">14<small>esperando</small></div><span class="bt sec">Abrir data</span></div>
+  <div class="cid"><div class="nm">Timbiras <small>nunca visitada pelo Zaq · 1h40</small><div class="barra"><i style="width:17%"></i></div></div><div class="qt frio">6<small>esperando</small></div><span class="bt sec">Abrir data</span></div>
+  <div class="cid"><div class="nm">Vitorino Freire <small>última visita há 90+ dias</small><div class="barra"><i style="width:11%"></i></div></div><div class="qt frio">4<small>esperando</small></div><span class="bt sec">Abrir data</span></div>
+  <div class="mut" style="margin-top:.5rem">Ordenado por <b>gente esperando</b>, não por ordem alfabética: a tela responde “para onde eu vou agora?”.</div>
+</div>
+<div class="nota">
+<b>De onde vem essa fila, sem ninguém digitar:</b> do próprio WhatsApp. Quem escreve "quando o doutor vem a Codó?"
+entra na fila de Codó. Quem pediu horário e sumiu porque não tinha data entra também. É o que o módulo
+<code>lista_espera</code> já faz hoje com <b>data</b> na Prime Eventos ("quem queria um dia já vendido é avisado
+quando ele abre") — aqui a chave deixa de ser a data e passa a ser a <b>cidade</b>.
+</div>
+
+<h2><span class="n">03</span>Abrir o dia: a caravana se enche sozinha</h2>
+<div class="sub">Da decisão de viajar até o dia cheio, sem a recepção ligar para 31 pessoas</div>
+<div class="pn">
+  <div class="top"><span class="tt">Abrir data · Bacabal</span><span class="mut">31 na fila</span></div>
+  <div class="grid2">
+    <div class="box">
+      <span class="lbl">Dia</span><span class="inp">qui, 15/10/2026</span>
+      <span class="lbl">Horário</span><span class="inp">08:00 – 17:00</span>
+      <span class="lbl">Profissional</span><span class="inp">Dr. Manoel ▾</span>
+      <span class="lbl">Local</span><span class="inp">a confirmar ▾</span>
+      <span class="lbl">Atendimentos do dia</span>
+      <span class="chip on">Consulta</span><span class="chip on">Retorno</span><span class="chip on">Testes alérgicos</span><span class="chip">Cirurgia</span>
+      <div class="mut" style="margin-top:.4rem">18 vagas de 30 min (com 1h de almoço)</div>
+    </div>
+    <div class="box">
+      <span class="lbl">Quem o agente vai chamar, em ordem</span>
+      <div class="rank"><span class="pos">1</span><span class="nm">Retornos vencidos <small>o médico pediu para voltar e a data passou</small></span><span class="sc">7</span></div>
+      <div class="rank"><span class="pos">2</span><span class="nm">Quem pediu Bacabal e nunca foi atendido <small>fila da cidade</small></span><span class="sc">19</span></div>
+      <div class="rank"><span class="pos">3</span><span class="nm">Faltou na última visita <small>segunda chance, com sinal</small></span><span class="sc">5</span></div>
+      <div class="mut" style="margin-top:.4rem">Fora da lista: quem pediu para não ser incomodado e quem já tem horário marcado.</div>
+      <div><span class="bt">Abrir e avisar os 31</span><span class="bt sec">Abrir sem avisar</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="pn">
+  <div class="top"><span class="tt">Bacabal · qui 15/10</span><span class="mut">aberto há 2 dias · <i>ilustrativo</i></span></div>
+  <div class="grid2">
+    <div class="box">
+      <div style="font-size:1.6rem;font-weight:700">13 <span style="font-size:.9rem;font-weight:400;color:#7B8A99">de 18 vagas</span></div>
+      <div class="barra" style="height:10px"><i style="width:72%"></i></div>
+      <div class="vagas">
+        <span class="vg ok">08:00<small>cheia</small></span><span class="vg ok">08:30<small>cheia</small></span><span class="vg res">09:00<small>sinal</small></span>
+        <span class="vg ok">09:30<small>cheia</small></span><span class="vg">10:00<small>livre</small></span><span class="vg ok">10:30<small>cheia</small></span>
+        <span class="vg">11:00<small>livre</small></span><span class="vg ok">11:30<small>cheia</small></span>
+      </div>
+      <div class="mut" style="margin-top:.5rem">5 livres · <b style="color:#F4C766">3 pessoas ainda respondendo</b></div>
+    </div>
+    <div class="box">
+      <span class="lbl">Como encheu</span>
+      <div class="tw" style="margin:0"><table>
+        <tr><th>Origem</th><th class="num">Vagas</th></tr>
+        <tr><td>Retorno vencido</td><td class="num">6</td></tr>
+        <tr><td>Fila da cidade</td><td class="num">5</td></tr>
+        <tr><td>Indicação de quem foi avisado</td><td class="num">2</td></tr>
+      </table></div>
+      <div class="mut">Quem não conseguiu vaga <b>continua na fila</b> e é o primeiro da próxima data.</div>
+    </div>
+  </div>
+</div>
+<div class="alerta">
+<b>A regra que evita vergonha:</b> o aviso só sai quando o dia está confirmado (local e horário). Avisar 31
+pessoas e depois desmarcar a viagem queima a clínica na cidade inteira — e cidade pequena é boca a boca.
+Por isso existe o "abrir sem avisar", para quando a data ainda depende de confirmar a sala.
+</div>
+
+<h2><span class="n">04</span>O motor de ocupação: buraco na agenda</h2>
+<div class="sub">Cancelou às 10h; às 10h04 o horário já foi oferecido a quem cabe nele</div>
+<p>Vale para a clínica fixa e para o dia de viagem, onde é ainda mais caro: o médico está a 2h de casa e a
+cadeira fica vazia.</p>
+<div class="pn">
+  <div class="top"><span class="tt">Vaga liberada · hoje 10:00 · 30 min · Espaço Pelle</span><span class="mut">cancelou há 4 min</span></div>
+  <div class="box">
+    <span class="lbl">Quem o agente chamou, e por quê</span>
+    <div class="rank"><span class="pos">1</span><span class="nm">Retorno vencido, mora em Pedreiras, consulta de 30 min <small>cabe no buraco · já respondeu em minutos antes</small></span><span class="sc">92</span></div>
+    <div class="rank"><span class="pos">2</span><span class="nm">Plano de tratamento parado há 5 dias <small>vir à clínica destrava a decisão</small></span><span class="sc">81</span></div>
+    <div class="rank"><span class="pos">3</span><span class="nm">Pediu "o mais cedo possível" ontem <small>fila de espera por data</small></span><span class="sc">74</span></div>
+    <div class="mut" style="margin-top:.45rem"><b>Fica de fora:</b> quem precisa de 60 min (não cabe), quem é de outra cidade (não chega a tempo), quem já tem horário essa semana e quem pediu para não receber mensagem.</div>
+  </div>
+  <div class="box">
+    <span class="lbl">Como a oferta sai</span>
+    <div class="mut">Os três recebem <b>ao mesmo tempo</b>, com validade de 20 minutos e a regra escrita: <b>é do primeiro que responder</b>. Ninguém promete o mesmo horário duas vezes — quem responde depois recebe na hora “já foi preenchido, te aviso na próxima”.</div>
+    <div class="mut" style="margin-top:.35rem">Sem resposta em 20 min, a segunda leva vai para mais 5 pessoas.</div>
+  </div>
+</div>
+<div class="zap">
+  <div class="sis">WhatsApp da clínica · vaga liberada</div>
+  <div class="b">Oi, Renata! Abriu uma vaga com o Dr. Manoel <b>hoje às 10h</b>, aqui no Espaço Pelle. Quer ficar com ela?<br>
+  Responda <b>1</b> para confirmar. É por ordem de resposta, e ela vale pelos próximos 20 minutos 🙂<div class="h">10:04</div></div>
+  <div class="b eu">1<div class="h">10:06</div></div>
+  <div class="b">Confirmado! Hoje às 10h, Rua Óscar Galvão, 38. Até já 😊<div class="h">10:06</div></div>
+</div>
+
+<h2><span class="n">05</span>Sinal por Pix: quem some, some antes</h2>
+<div class="sub">O sinal não é para punir: é para separar quem vai vir</div>
+<div class="tw"><table>
+<tr><th>Situação</th><th>O que o sistema pede</th><th>Por quê</th></tr>
+<tr><td>Consulta comum, paciente conhecido</td><td>nada</td><td>Atrito à toa derruba agendamento</td></tr>
+<tr><td><b>Dia de viagem</b> (Bacabal, Codó…)</td><td>sinal pequeno, vira crédito</td><td>A vaga é escassa e a viagem tem custo fixo: falta ali dói o dobro</td></tr>
+<tr><td>Procedimento caro ou 60 min</td><td>sinal proporcional</td><td>Uma hora vazia vale mais que três consultas</td></tr>
+<tr><td>Paciente que já faltou 2 vezes</td><td>sinal ou vaga de encaixe</td><td>Histórico, não julgamento: é o que o setor chama de risco de falta</td></tr>
+</table></div>
+<div class="bom">
+<b>O sinal já existe no Zaq:</b> o link de pagamento do Asaas (<code>asaas.criar_link_pagamento</code>) é o mesmo
+que a assinatura usa. O que entra é <b>o sinal virar crédito</b> no atendimento e a vaga ficar <b>segurada até o
+pagamento</b>, com prazo — exatamente a pré-reserva que a agenda de festas já faz hoje (<code>pre_reservado</code>).
+</div>
+
+<h2><span class="n">06</span>A conta da viagem</h2>
+<div class="sub">A pergunta que nenhum sistema responde: essa cidade vale a pena?</div>
+<div class="pn">
+  <div class="top"><span class="tt">Bacabal · qui 15/10</span><span class="mut">fechamento do dia · <i>ilustrativo</i></span></div>
+  <div class="tw" style="margin:0"><table>
+    <tr><th>Entrou</th><th class="num">R$</th><th>Saiu</th><th class="num">R$</th></tr>
+    <tr><td>13 consultas</td><td class="num">3.250</td><td>Combustível e pedágio</td><td class="num">380</td></tr>
+    <tr><td>2 procedimentos</td><td class="num">1.400</td><td>Aluguel da sala</td><td class="num">300</td></tr>
+    <tr><td>Produtos vendidos</td><td class="num">190</td><td>Hospedagem e alimentação</td><td class="num">220</td></tr>
+    <tr><td><b>Total</b></td><td class="num"><b>4.840</b></td><td><b>Total</b></td><td class="num"><b>900</b></td></tr>
+  </table></div>
+  <div class="box" style="margin-top:.6rem">
+    <b style="color:#7EE7B8">Sobrou R$ 3.940 no dia, com 13 de 18 vagas.</b>
+    <div class="mut">Cheio, seriam ~R$ 5.400. Cada vaga vazia em Bacabal custou <b>R$ 250</b>.</div>
+    <div class="mut" style="margin-top:.3rem">Comparando: Espaço Pelle rende R$ 210/hora; Bacabal rendeu R$ 438/hora — <b>vale voltar</b>, e antes.</div>
+  </div>
+</div>
+<div class="nota">
+<b>Isso é a nossa casa.</b> Receita, custo e categoria já são o coração do Zaq; o que falta é <b>carimbar o
+lançamento com o dia de viagem</b>. Nenhum concorrente de clínica junta agenda e caixa nesse nível — eles
+faturam convênio, não medem o lucro de um dia.
+</div>
+
+<h2><span class="n">07</span>O agente, no WhatsApp</h2>
+<div class="zap">
+  <div class="sis">Paciente de Codó, fora do dia de viagem</div>
+  <div class="b eu">bom dia, o doutor vai atender em codó esse mês?<div class="h">07:52</div></div>
+  <div class="b">Bom dia! No momento não tenho data marcada em <b>Codó</b> 😕<br>Posso te avisar assim que o Dr. Manoel abrir um dia aí? Você é o <b>24º</b> pedindo Codó — quando junta gente, ele programa a viagem.<div class="h">07:52</div></div>
+  <div class="b eu">pode sim<div class="h">07:55</div></div>
+  <div class="b">Anotado 🙌 Se preferir não esperar, ele atende aqui em Pedreiras <b>amanhã às 9h</b> ou <b>sexta às 8h</b>. Quer uma dessas?<div class="h">07:55</div></div>
+  <div class="sis">→ entra na fila de Codó (24) · continua no funil</div>
+</div>
+<div class="zap">
+  <div class="sis">Três semanas depois, quando a data abre</div>
+  <div class="b">Oi! O Dr. Manoel vai atender em <b>Codó no dia 29/10</b> 🎉<br>Reservei uma vaga no seu nome às <b>9h30</b>. Confirma com <b>1</b>, ou responda <b>2</b> para escolher outro horário. Se não puder, é só dizer que eu libero para outra pessoa.<div class="h">09:10</div></div>
+  <div class="b eu">1<div class="h">09:18</div></div>
+  <div class="b">Pronto! 29/10 às 9h30, em Codó. Uma semana antes eu te mando o endereço e confirmo 🙂<div class="h">09:18</div></div>
+</div>
+<div class="nota">
+<b>O detalhe que faz a mensagem funcionar:</b> ela chega dizendo <b>"reservei uma vaga no seu nome"</b>, não "temos
+vagas". Quem recebe não precisa decidir nem escolher: só confirmar. E quem responde não consegue, ouve na hora
+que ficou para a próxima data, sem ficar no vácuo.
+</div>
+
+<h2><span class="n">08</span>O que reaproveita e o que é novo</h2>
+<div class="tw"><table>
+<tr><th>Peça</th><th>Já existe?</th><th>O que muda</th></tr>
+<tr><td>Fila de espera com aviso quando abre</td><td><code>finance/lista_espera.py</code> (Prime Eventos)</td><td>A chave passa a ser <b>cidade</b>, além de data</td></tr>
+<tr><td>Disparo para uma lista, com teto e passos</td><td><code>finance/campanhas_motor.py</code></td><td>Público = fila da cidade; para quando as vagas acabam</td></tr>
+<tr><td>Segurar vaga esperando pagamento</td><td>agenda: <code>pre_reservado</code> + <code>pre_reserva_ate</code></td><td>Vira sinal de consulta, com crédito</td></tr>
+<tr><td>Link de pagamento Pix</td><td><code>finance/asaas.py</code></td><td>Valor do sinal por tipo de atendimento</td></tr>
+<tr><td>Cobrar quem não respondeu</td><td><code>finance/follow_up.py</code>, temperatura</td><td>Aplicado ao convite de vaga, com validade curta</td></tr>
+<tr><td>Receita e custo por categoria</td><td>lançamentos, Raio-X</td><td>Carimbo de <b>dia de viagem</b> para fechar a conta</td></tr>
+<tr><td><b>Roteiro por cidade</b>, ocupação do dia, ranking de quem chamar</td><td><b>não existe</b></td><td>É o que se constrói</td></tr>
+</table></div>
+
+<h2><span class="n">09</span>Os riscos</h2>
+<div class="perigo">
+<b>1. Prometer vaga que não existe.</b> Se a recepção marcar no Amigo e o agente marcar no Zaq, dois pacientes
+viajam para o mesmo horário. Enquanto a agenda não for uma só (caminho C da parte 1), <b>o agente segura, a
+recepção confirma</b> — e a mensagem diz "reservei", nunca "está confirmado", até a recepção confirmar.
+<br><b>2. Cidade pequena não perdoa.</b> Viagem avisada e cancelada vira assunto na cidade. Aviso só com data
+confirmada.
+<br><b>3. Mensagem demais.</b> Teto por dia, horário comercial, "não quero receber" respeitado para sempre, e
+quem pediu para não ser incomodado nunca entra na lista — a clínica inclusive já tem essa marcação no Amigo
+("paciente não tem necessidade de retornar").
+<br><b>4. Dado de saúde.</b> A fila guarda cidade, telefone e o que a pessoa pediu em palavras dela. Nada de
+diagnóstico, e a mensagem nunca diz o motivo clínico.
+</div>
+
+<h2><span class="n">10</span>Decisões da clínica</h2>
+<div class="q"><div class="qt">A. Em que cidades o médico realmente atende hoje, e com que frequência?</div>
+<div class="qo">No Amigo são 9 cidades cadastradas e <b>nenhuma com grade</b>. Sem isso o roteiro é chute.</div></div>
+<div class="q"><div class="qt">B. Vamos cobrar sinal? Em quais casos?</div>
+<div class="qo"><span class="rec">Recomendo: só em dia de viagem e procedimento longo</span>, começando pequeno, como crédito.</div></div>
+<div class="q"><div class="qt">C. Quantas vagas por dia de viagem, e quanto tempo o convite fica de pé?</div>
+<div class="qo"><span class="rec">Recomendo: 20 minutos</span> para vaga de hoje e <b>24 horas</b> para vaga de uma data futura.</div></div>
+<div class="q"><div class="qt">D. Quem pode abrir uma data de viagem?</div>
+<div class="qo">Só dono e gestor. É uma mensagem para dezenas de pessoas de uma vez.</div></div>
+<div class="q"><div class="qt">E. A clínica sabe o custo de uma viagem?</div>
+<div class="qo">Combustível, sala e hospedagem. Sem isso a conta do dia fica só com a receita, que é meia verdade.</div></div>
+
+<h2><span class="n">11</span>O plano</h2>
+<div class="tw"><table>
+<tr><th class="num">#</th><th>Passo</th><th>Entrega</th></tr>
+<tr><td class="num">1</td><td>Cidade no cadastro do paciente e do lead + fila por cidade (o agente pergunta e anota)</td><td>o mapa de demanda começa a encher no primeiro dia</td></tr>
+<tr><td class="num">2</td><td>Tela do roteiro: cidades por gente esperando, com "abrir data"</td><td>o dono decide para onde ir com número</td></tr>
+<tr><td class="num">3</td><td>Abrir data → vagas do dia + convite em ordem, com validade e "primeiro que responder"</td><td>a caravana se enche sozinha</td></tr>
+<tr><td class="num">4</td><td>Motor de buraco na agenda (cancelou → oferece em minutos)</td><td>vale também para o dia a dia da clínica fixa</td></tr>
+<tr><td class="num">5</td><td>Sinal por Pix com crédito e vaga segurada</td><td>menos falta onde ela custa mais</td></tr>
+<tr><td class="num">6</td><td>Conta da viagem no Raio-X: receita, custo e vaga vazia por cidade</td><td>a tela que vende o Zaq numa demonstração</td></tr>
+</table></div>
+<div class="nota">
+<b>Fora da clínica:</b> o mesmo motor serve a qualquer negócio que <b>leva o atendimento até o cliente</b> —
+veterinário de fazenda, técnico de manutenção, dentista de convênio itinerante, barbeiro que atende em duas
+cidades. E o "buraco na agenda" serve a todo mundo que tem hora marcada.
+</div>
+
+<div class="ftr">
+Dados da clínica lidos no Amigo App em 22/09/2026, só leitura, sem copiar dado de paciente. Números de mercado:
+Zenoti 2026 Beauty and Wellness Benchmark (ocupação 38% × 80%; cancelamento 21% × 4%; IA em agendamento),
+Med Spa Benchmarks 2026, estatísticas de sinal/depósito 2026 (−55% de falta; 72% topam) e casos de
+preenchimento automático de cancelamento (até 95% × 15% na mão). Concorrentes citados: Zenoti, Pabau,
+Aesthetic Record, PatientNow, iClinic, Feegow, Clinia, ClínicaBot, agendacare, Cloudia. Nosso lado:
+<code>finance/lista_espera.py</code>, <code>finance/campanhas_motor.py</code>, <code>finance/asaas.py</code>,
+<code>finance/follow_up.py</code>, agenda com <code>pre_reservado</code>.
+</div>
+</div></body></html>

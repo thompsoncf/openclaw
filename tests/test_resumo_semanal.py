@@ -84,11 +84,14 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   perda_motivo text, temperatura text, segmento text, origem text,
   whatsapp text, telefone text,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
-create table orcamentos (id bigserial primary key, conta_id bigint, cliente text,
+create table orcamentos (id bigserial primary key, conta_id bigint, criado_por text, cliente text,
   status text default 'rascunho', setup_centavos bigint default 0, mensal_centavos bigint default 0,
   primeiro_ano_centavos bigint, sinal_centavos int, sinal_pago_em timestamptz,
   aprovada_em timestamptz, criado_em timestamptz default now());
 create table contratos (id bigserial primary key, conta_id bigint, orcamento_id bigint,
+  -- o contrato VIVO (sem aditivo por cima) e o autor do orçamento: o placar do
+  -- Raio-X conta a venda pelo contrato assinado desde 24/09/2026 e lê os dois
+  substitui_id bigint,
   status text default 'enviado', valor_centavos bigint default 0,
   enviado_em timestamptz, assinado_em timestamptz, criado_em timestamptz default now());
 create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,

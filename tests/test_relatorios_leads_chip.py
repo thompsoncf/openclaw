@@ -599,7 +599,10 @@ def test_esta_aba_diz_que_o_periodo_e_a_entrada_do_lead(pool, cen):
 
 
 def test_so_esta_aba_declara_rotulo_de_periodo():
-    """A mudança é DESTA aba, não das nove.
+    """A mudança é DESTA aba, não das nove — e, desde 24/09/2026, também da de
+    Contratos, que passou a recortar pela ASSINATURA (ou pela criação, no
+    alternador) e diz qual das duas ("assinados no período"). Ver
+    tests/test_relatorios_orcamentos_contratos.py.
 
     Lido da fonte porque as outras abas pedem tabelas que este arquivo não cria
     (`eventos_agenda`, `titulos`, `contratos`), e subir o schema inteiro só pra
@@ -608,8 +611,9 @@ def test_so_esta_aba_declara_rotulo_de_periodo():
     outro lado: sem a chave, o template escreve "período:".
     """
     import inspect
-    fonte = inspect.getsource(rel)
-    assert fonte.count('"periodo_label"') == 1, (
+    assert '"periodo_label"' in inspect.getsource(rel._dados_leads_chip)
+    assert '"periodo_label"' in inspect.getsource(rel._dados_contratos)
+    assert inspect.getsource(rel).count('"periodo_label"') == 2, (
         "outra aba passou a declarar periodo_label — se for de propósito, "
         "atualize este teste e o do template")
 

@@ -117,7 +117,12 @@ def test_funil_soma_o_contrato_sem_lead_e_diz_quantos(pool):
     assert fun["perdido"]["sem_lead"] == 0 and fun["proposta"]["sem_lead"] == 0
 
 
-def test_placar_da_o_contrato_a_quem_fez_o_orcamento(pool):
+def test_placar_da_o_contrato_a_quem_fez_o_orcamento(pool, monkeypatch):
+    # o placar é "este mês": no dia 1º antes das 3h, os contratos de "3 horas atrás"
+    # cairiam no mês anterior. A janela de 7 dias tira o relógio do teste.
+    agora = datetime.now(cd._brt())
+    monkeypatch.setattr(cd, "_range", lambda periodo="semana", de=None, ate=None:
+                        (agora - timedelta(days=7), agora + timedelta(minutes=1)))
     with pool.connection() as c:
         conta, dono, jac, thi = _prime(c)
     lista = cd.placar(pool, conta)
@@ -141,3 +146,27 @@ def test_conta_sem_contrato_segue_pelo_lead(pool):
     k = cd.visao(pool, conta, "semana")["kpis"]
     assert k["por_contrato"] is False and k["ganhos"] == 1 and k["ganhos_rs"] == "R$ 4 mil"
     assert cd.placar(pool, conta)[0]["por_contrato"] is False
+
+
+def _r(**kw):
+    base = {"recebido_centavos": 0, "n_vendas": 0, "comissao_pct": None, "comissao_centavos": None,
+            "fechado_centavos": 700000, "ganhos": 2, "conversao": "3%", "recebidos": 70,
+            "resp": "—", "fila": 4, "posicao": 1, "total_equipe": 3}
+    base.update(kw)
+    return base
+
+
+def test_o_bloco_de_dinheiro_do_vendedor_fala_de_contrato_na_conta_com_contrato():
+    # o número agora é o de CONTRATOS ASSINADOS — "ganho(s) · previsão" mentiria
+    from web import painel_cockpit as pc
+    html = pc._bloco_dinheiro(_r(por_contrato=True, sem_lead=1))
+    assert "Contratos assinados" in html and "2 contrato(s) · 1 sem lead" in html
+    assert "previsão" not in html and "No funil" not in html
+    assert "2 contrato(s) de 70 leads recebidos" in html
+
+
+def test_o_bloco_de_dinheiro_sem_contrato_segue_como_era():
+    from web import painel_cockpit as pc
+    html = pc._bloco_dinheiro(_r())
+    assert "No funil" in html and "2 ganho(s) · previsão" in html
+    assert "2 fechado(s) de 70 leads recebidos" in html

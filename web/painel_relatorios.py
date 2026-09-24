@@ -876,6 +876,11 @@ def _aditivos_vigentes(pool, conta_id, contrato_ids) -> dict:
     return {r[0]: {"ordem": r[1], "valor": r[2]} for r in rows}
 
 
+def _brt(dt):
+    """O instante no fuso de Brasília (a sessão do banco devolve em UTC)."""
+    return dt.astimezone(_ag.BRT) if hasattr(dt, "astimezone") and getattr(dt, "tzinfo", None) else dt
+
+
 #: POR QUAL DATA o período recorta os contratos. Pedido do dono em 24/09/2026
 #: (mockup docs/mockups/prime_cockpit_contratos.html): o relatório só filtrava pela
 #: CRIAÇÃO, e "Setembro" na Prime mostrava 8 contratos quando 10 foram assinados no
@@ -901,7 +906,7 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
         # sem isso "Aguardando assinatura" e "Prontos, não enviados" ficavam
         # sempre em zero na visão padrão, e o dono perdia os pendentes do mês.
         col = ("(coalesce(c.assinado_em, c.criado_em) at time zone 'America/Sao_Paulo')::date"
-               if data_por == "assinatura" else "c.criado_em::date")
+               if data_por == "assinatura" else "(c.criado_em at time zone 'America/Sao_Paulo')::date")
         where.append(f"{col} >= %s and {col} <= %s")
         params += [ini, fim]
     if vendedor_sel:
@@ -977,11 +982,14 @@ def _dados_contratos(pool, conta_id, periodo, status_sel, vendedor_sel, busca,
         vig = vigentes.get(r[10])
         linhas.append({
             "numero": r[0], "cliente": r[1], "status": rotulo, "status_cor": cor,
-            "criado_em": _fmt(r[3]), "assinado_em": _fmt(r[4]),
+            # em BRT, o mesmo fuso do corte: a sessão do banco é UTC, e o nº 7 da
+            # Prime (assinado 08/09 às 21h27) aparecia "09/09" num relatório que o
+            # conta em 08/09
+            "criado_em": _fmt(_brt(r[3])), "assinado_em": _fmt(_brt(r[4])),
             "vendedor": r[5],
             "valor_centavos": int((vig or {}).get("valor") or r[6] or 0),
             "aditivo": f"{vig['ordem']}º" if vig else "—",
-            "enviado_em": _fmt(r[8]),
+            "enviado_em": _fmt(_brt(r[8])),
             "orcamento": f"nº {r[9]}" if r[9] else "—",
             "acao_href": f"/contrato/{r[7]}" if r[7] else None,
         })

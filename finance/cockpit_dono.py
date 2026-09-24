@@ -18,7 +18,6 @@ from finance import funil_regua as _fr
 # tivesse sido desfeita (ver finance/funil_regua.sql_fechadas).
 _ABERTO_P = "p.status not in " + _fr.sql_encerradas("p")
 _ABERTO_T = "status not in " + _fr.sql_encerradas("prospeccao")
-_FECHADO_T = "status in " + _fr.sql_fechadas("prospeccao")
 _ENCERRADO_P = "p.status in " + _fr.sql_encerradas("p")
 
 
@@ -50,8 +49,45 @@ def _reais(centavos) -> str:
     return f"R$ {v}"
 
 
+#: O último recurso, quando a conta não tem funil lido do banco. NÃO é a lista do
+#: funil de ninguém: as etapas de verdade saem de `_etapas_conta`.
 _ETAPAS_FUNIL = [("novo", "Novo"), ("contatado", "Contatado"),
                  ("qualificado", "Qualificado"), ("proposta", "Proposta")]
+
+#: QUANTO VALE UM LEAD FECHADO. `valor_estimado_centavos` é o palpite que o
+#: vendedor digita na ficha — e está ZERADO na base inteira (ver a nota do
+#: relatório de leads em web/painel_relatorios e a do portal). Somando só ele, o
+#: cockpit do gestor da Prime mostrava "Fechado no período: R$ 0" com oito
+#: contratos assinados na semana, cada um com orçamento e títulos gerados.
+#:
+#: O valor certo é o do ORÇAMENTO, pela mesma fórmula que gera os títulos
+#: (`coalesce(primeiro_ano_centavos, setup_centavos)` — ver finance/cockpit ao
+#: fechar contrato e finance/agenda). Assim a tela do gestor diz o mesmo que o
+#: contas a receber. O palpite fica como último recurso, pra conta que trabalha
+#: sem orçamento.
+_VALOR_FECHADO = """coalesce(
+        (select coalesce(o.primeiro_ano_centavos, o.setup_centavos)
+           from orcamentos o where o.id = p.orcamento_id and o.conta_id = p.conta_id),
+        p.valor_estimado_centavos, 0)"""
+
+#: QUANDO FALAMOS COM ESTE LEAD PELA ÚLTIMA VEZ. `ultimo_contato_em` só é escrito
+#: por quem move o lead na mão no painel: na Prime ele está preenchido em 34 dos
+#: 423 leads abertos, e por isso "parados há +3 dias" virava "cadastrados há mais
+#: de 3 dias" — 363 leads, dos quais 118 tinham recebido mensagem nossa nos
+#: últimos três dias. A mensagem que saiu é o fato; o campo é o complemento.
+_FALOU = """greatest(
+        p.ultimo_contato_em,
+        (select max(m.criado_em) from conversas cv join mensagens m on m.conversa_id = cv.id
+          where cv.prospeccao_id = p.id and cv.conta_id = p.conta_id and m.direcao = 'out'))"""
+
+#: "Parado" cai na ENTRADA do lead quando nunca falamos com ele: quem entrou hoje
+#: e ainda não foi atendido não é um lead parado há três dias.
+_FALAMOS_EM = "coalesce(" + _FALOU + ", p.criado_em)"
+
+#: "Sem contato hoje" NÃO usa a entrada: lead que chegou hoje e ninguém falou é
+#: exatamente o caso que o alerta existe pra pegar. Sem contato nenhum, a data é o
+#: começo dos tempos — sempre menor que hoje.
+_FALAMOS_OU_NUNCA = "coalesce(" + _FALOU + ", timestamptz 'epoch')"
 
 
 def _e_gerencia(papel: str) -> bool:
@@ -73,33 +109,44 @@ def visao(pool, conta_id: int, periodo: str = "semana") -> dict:
                 where p.conta_id=%s and coalesce(p.estagio,'lead')='lead' and """ + _ABERTO_P + """
                   and p.vendedor_id is not null""", (conta_id,)).fetchone()
         com_ia, com_vend = int(atend[0] or 0), int(atend[1] or 0)
-        g = c.execute("select count(*), coalesce(sum(valor_estimado_centavos),0) from prospeccao "
-                      "where conta_id=%s and " + _FECHADO_T + " and atualizado_em>=%s and atualizado_em<%s",
+        g = c.execute("select count(*), coalesce(sum(" + _VALOR_FECHADO + "),0) from prospeccao p "
+                      "where p.conta_id=%s and p.status in " + _fr.sql_fechadas("p")
+                      + " and p.atualizado_em>=%s and p.atualizado_em<%s",
                       (conta_id, ini, fim)).fetchone()
         perd = c.execute("select count(*) from prospeccao where conta_id=%s and status='perdido' "
                          "and atualizado_em>=%s and atualizado_em<%s", (conta_id, ini, fim)).fetchone()[0]
         ganhos, ganhos_c = int(g[0] or 0), int(g[1] or 0)
         conv = round(100 * ganhos / (ganhos + perd)) if (ganhos + perd) else None
-        # funil do time
-        funil = []
-        for chave, rot in _ETAPAS_FUNIL:
-            r = c.execute("select count(*), coalesce(sum(valor_estimado_centavos),0) from prospeccao "
-                          "where conta_id=%s and coalesce(estagio,'lead')='lead' and status=%s",
-                          (conta_id, chave)).fetchone()
-            funil.append({"rotulo": rot, "n": int(r[0] or 0), "valor": _reais(r[1])})
+        # O FUNIL DO TIME, com as etapas e os nomes DA CONTA (ver `_etapas_conta`).
+        # A lista era fixa em quatro chaves e quatro rótulos de fábrica: na Prime o
+        # gestor lia "Qualificado" onde o painel diz "Agendado Visita", "Proposta"
+        # onde diz "Negociação", e "ORCAMENTO ASSINADO" não aparecia em lugar
+        # nenhum. Mesmo defeito que a aba Leads corrigiu em 17/09/2026, na mesma
+        # tela, por uma constante esquecida aqui.
+        etapas = [(ch, rot) for ch, rot in _etapas_conta(c, conta_id)
+                  if ch not in ("ganho", "perdido")] or _ETAPAS_FUNIL
+        por_etapa = dict(c.execute(
+            "select p.status, count(*) from prospeccao p "
+            " where p.conta_id=%s and coalesce(p.estagio,'lead')='lead' group by p.status",
+            (conta_id,)).fetchall())
+        valor_etapa = dict(c.execute(
+            "select p.status, coalesce(sum(" + _VALOR_FECHADO + "),0) from prospeccao p "
+            " where p.conta_id=%s and coalesce(p.estagio,'lead')='lead' group by p.status",
+            (conta_id,)).fetchall())
+        funil = [{"rotulo": rot, "n": int(por_etapa.get(ch) or 0),
+                  "valor": _reais(valor_etapa.get(ch) or 0)} for ch, rot in etapas]
         maxn = max([f["n"] for f in funil] + [1])
         for f in funil:
             f["pct"] = round(100 * f["n"] / maxn)
         # precisa de atenção
         agora = datetime.now(_brt())
         parados = c.execute(
-            "select count(*) from prospeccao where conta_id=%s and coalesce(estagio,'lead')='lead' "
-            "and " + _ABERTO_T + " and coalesce(ultimo_contato_em, criado_em) < %s",
+            "select count(*) from prospeccao p where p.conta_id=%s and coalesce(p.estagio,'lead')='lead' "
+            "and " + _ABERTO_P + " and " + _FALAMOS_EM + " < %s",
             (conta_id, agora - timedelta(days=3))).fetchone()[0]
         quentes = c.execute(
-            "select count(*) from prospeccao where conta_id=%s and coalesce(estagio,'lead')='lead' "
-            "and " + _ABERTO_T + " and temperatura='quente' "
-            "and (ultimo_contato_em is null or ultimo_contato_em < %s)",
+            "select count(*) from prospeccao p where p.conta_id=%s and coalesce(p.estagio,'lead')='lead' "
+            "and " + _ABERTO_P + " and p.temperatura='quente' and " + _FALAMOS_OU_NUNCA + " < %s",
             (conta_id, agora.replace(hour=0, minute=0, second=0, microsecond=0))).fetchone()[0]
         propostas = c.execute("select count(*) from orcamentos where conta_id=%s and status='enviado'",
                               (conta_id,)).fetchone()[0]
@@ -146,8 +193,9 @@ def placar(pool, conta_id: int, periodo: str = "mes") -> list[dict]:
                 "select count(*) from conversas cv join prospeccao p on p.id=cv.prospeccao_id "
                 "where cv.conta_id=%s and cv.responsavel_membro_id=%s and not coalesce(cv.agente_ativo,true) "
                 "and " + _ABERTO_P, (conta_id, mid)).fetchone()[0]
-            g = c.execute("select count(*), coalesce(sum(valor_estimado_centavos),0) from prospeccao "
-                          "where conta_id=%s and vendedor_id=%s and " + _FECHADO_T + " and atualizado_em>=%s and atualizado_em<%s",
+            g = c.execute("select count(*), coalesce(sum(" + _VALOR_FECHADO + "),0) from prospeccao p "
+                          "where p.conta_id=%s and p.vendedor_id=%s and p.status in " + _fr.sql_fechadas("p")
+                          + " and p.atualizado_em>=%s and p.atualizado_em<%s",
                           (conta_id, mid, ini, fim)).fetchone()
             perd = c.execute("select count(*) from prospeccao where conta_id=%s and vendedor_id=%s and status='perdido' "
                              "and atualizado_em>=%s and atualizado_em<%s", (conta_id, mid, ini, fim)).fetchone()[0]
@@ -199,7 +247,7 @@ def atividade(pool, conta_id: int, limite: int = 25) -> list[dict]:
     itens = []
     with pool.connection() as c:
         for emp, status, val, quando, nome in c.execute(
-                """select p.empresa, p.status, p.valor_estimado_centavos, p.atualizado_em,
+                """select p.empresa, p.status, """ + _VALOR_FECHADO + """, p.atualizado_em,
                           coalesce(nullif(m.nome,''), m.email, '—')
                      from prospeccao p left join membros m on m.id=p.vendedor_id
                     where p.conta_id=%s and """ + _ENCERRADO_P + """

@@ -489,6 +489,136 @@ def _perdas(c, conta_id, w, wv, ini, fim, motivos=MOTIVOS_TODOS) -> dict:
     return {"itens": itens, "sem_motivo": cont.get("", 0), "total": sum(cont.values())}
 
 
+# ---------------------------------------------------------------- da visita ao contrato
+
+#: A VISITA QUE ACONTECEU (o mesmo recorte do placar): compromisso de empresa,
+#: sem tipo de festa, ativo, com desfecho "realizado".
+_VISITA_OK = ("e.tipo = 'empresa' and e.tipo_evento is null and coalesce(e.status, 'ativo') = 'ativo' "
+              "and e.desfecho = 'realizado'")
+
+#: O vendedor do orçamento: quem o fez; na falta, o vendedor do lead. É a régua
+#: de SQL_CT_VENDEDOR, só que pra quem ainda não tem contrato.
+_ORC_VENDEDOR = """coalesce(
+        case when o.criado_por ~ '^[0-9]+$' then o.criado_por::bigint end,
+        (select p.vendedor_id from prospeccao p
+          where p.orcamento_id = o.id and p.conta_id = o.conta_id order by p.id limit 1))"""
+
+
+def _where_orcamento(f: dict) -> tuple[str, list]:
+    """Os filtros sobre `orcamentos o`, como `_where_contrato` faz com o contrato:
+    vendedor é quem fez o orçamento, e os filtros do lead viram "tem um lead assim"."""
+    conds, vals = [], []
+    w_lead, wv_lead = _where({**f, "vendedor": None})
+    if w_lead:
+        conds.append("exists (select 1 from prospeccao p where p.orcamento_id = o.id "
+                     "and p.conta_id = o.conta_id" + w_lead + ")")
+        vals += wv_lead
+    if f.get("vendedor"):
+        conds.append(_ORC_VENDEDOR + " = %s"); vals.append(f["vendedor"])
+    return ((" and " + " and ".join(conds)) if conds else ""), vals
+
+
+def _dia(dt):
+    return dt.astimezone(_TZ).date() if dt else None
+
+
+def da_visita(c, conta_id: int, f: dict, ini, fim) -> dict:
+    """DA VISITA AO CONTRATO (pedido do dono em 24/09/2026, mockup
+    docs/mockups/prime_visita_ao_contrato.html): quatro degraus do MESMO período,
+    cada um pela sua data — a visita pelo dia em que aconteceu, o orçamento de quem
+    visitou, a proposta pelo dia em que o cliente aceitou (`aprovada_em`) e o
+    contrato pelo dia da assinatura — e os clientes de cada ponta.
+
+    A conversão da visita (resposta do dono): a visita REALIZADA no período, e se
+    aquele lead tem orçamento, feito antes ou depois dela."""
+    w, wv = _where(f)
+    wc, wcv = _where_contrato(f)
+    wo, wov = _where_orcamento(f)
+    marcadas = c.execute(f"""
+        select count(distinct p.id) from prospeccao p
+         where p.conta_id = %s and exists (
+               select 1 from eventos_agenda e where e.prospeccao_id = p.id and e.conta_id = p.conta_id
+                  and e.tipo = 'empresa' and e.tipo_evento is null and coalesce(e.status, 'ativo') = 'ativo'
+                  and e.inicio >= %s and e.inicio < least(%s, now())){w}""",
+        [conta_id, ini, fim, *wv]).fetchone()[0]
+    vis = c.execute(f"""
+        select p.id, coalesce(nullif(p.empresa, ''), nullif(p.contato, ''), 'Lead'), p.vendedor_id,
+               p.orcamento_id, coalesce(o.primeiro_ano_centavos, o.setup_centavos, 0),
+               exists (select 1 from contratos c where c.orcamento_id = p.orcamento_id
+                          and c.conta_id = p.conta_id and {SQL_CT_VIVO})
+          from prospeccao p left join orcamentos o on o.id = p.orcamento_id
+         where p.conta_id = %s and exists (
+               select 1 from eventos_agenda e where e.prospeccao_id = p.id and e.conta_id = p.conta_id
+                  and {_VISITA_OK} and e.inicio >= %s and e.inicio < %s){w}
+         order by p.id""", [conta_id, ini, fim, *wv]).fetchall()
+    prop = c.execute(f"""
+        select o.id, {_ORC_VENDEDOR}, coalesce(o.primeiro_ano_centavos, o.setup_centavos, 0),
+               exists (select 1 from contratos c where c.orcamento_id = o.id
+                          and c.conta_id = o.conta_id and {SQL_CT_VIVO})
+          from orcamentos o
+         where o.conta_id = %s and o.aprovada_em >= %s and o.aprovada_em < %s{wo}""",
+        [conta_id, ini, fim, *wov]).fetchall()
+    cts = c.execute(f"""
+        select c.numero, coalesce(nullif(o.empresa, ''), nullif(o.cliente, ''), 'Contrato'),
+               o.aprovada_em, c.assinado_em, coalesce(c.valor_centavos, 0), {SQL_CT_VENDEDOR}
+          from contratos c left join orcamentos o on o.id = c.orcamento_id
+         where c.conta_id = %s and {SQL_CT_VIVO}
+           and c.assinado_em >= %s and c.assinado_em < %s{wc}
+         order by c.assinado_em""", [conta_id, ini, fim, *wcv]).fetchall()
+
+    linhas = []
+    for num, nome, prop_em, ct_em, valor, _mid in cts:
+        dp, dc = _dia(prop_em), _dia(ct_em)
+        linhas.append({"numero": num, "nome": nome, "proposta_em": dp, "contrato_em": dc,
+                       "espera": (max(0, (dc - dp).days) if dp and dc else None),
+                       "valor_centavos": int(valor or 0),
+                       # a proposta foi aceita ANTES do período: é o contrato que
+                       # "sobra" quando os contratos passam das propostas do mês
+                       "proposta_antes": bool(dp and dp < ini.astimezone(_TZ).date())})
+    esperas = [x["espera"] for x in linhas if x["espera"] is not None]
+
+    com_orc = [v for v in vis if v[3]]
+    # por vendedor: a MESMA régua de cada degrau (visita pelo lead dele; proposta e
+    # contrato por quem fez o orçamento)
+    por: dict = {}
+
+    def _v(mid):
+        return por.setdefault(mid, {"visitas": 0, "vis_orc": 0, "prop_ass": 0, "prop_ass_valor": 0,
+                                    "contratos": 0, "contratos_valor": 0})
+    for v in vis:
+        _v(v[2])["visitas"] += 1
+        if v[3]:
+            _v(v[2])["vis_orc"] += 1
+    for _oid, mid, valor, _ct in prop:
+        _v(mid)["prop_ass"] += 1
+        _v(mid)["prop_ass_valor"] += int(valor or 0)
+    for *_x, valor, mid in cts:
+        _v(mid)["contratos"] += 1
+        _v(mid)["contratos_valor"] += int(valor or 0)
+
+    return {
+        "marcadas": int(marcadas or 0),
+        "visitas": len(vis),
+        "vis_orc": len(com_orc),
+        "vis_orc_valor": sum(int(v[4] or 0) for v in com_orc),
+        "vis_orc_pct": (round(100 * len(com_orc) / len(vis)) if vis else None),
+        "prop_ass": len(prop),
+        "prop_ass_valor": sum(int(x[2] or 0) for x in prop),
+        "prop_ass_com_contrato": sum(1 for x in prop if x[3]),
+        "contratos": len(cts),
+        "contratos_valor": sum(int(x[4] or 0) for x in cts),
+        "contratos_de_antes": sum(1 for x in linhas if x["proposta_antes"]),
+        # os clientes de cada ponta
+        "sem_orcamento": [v[1] for v in vis if not v[3]],
+        "em_jogo": [{"nome": v[1], "valor_centavos": int(v[4] or 0)} for v in com_orc if not v[5]],
+        "em_jogo_valor": sum(int(v[4] or 0) for v in com_orc if not v[5]),
+        "assinaram": [v[1] for v in com_orc if v[5]],
+        "linhas": linhas,
+        "espera_mediana": _mediana(esperas),
+        "por_vendedor": por,
+    }
+
+
 # ---------------------------------------------------------------- os blocos do recorrente
 
 def _proposto_x_fechado(c, conta_id, w, wv, ini, fim, coluna: str,
@@ -594,7 +724,7 @@ def dono(pool, conta_id: int, f: dict, agora: datetime | None = None, perfil: di
     blocos = set(perfil.get("blocos") or ())
     out = {"ini": ini, "fim": fim, "rotulo": rot, "filtros": f, "perfil": perfil, "placar": None, "anterior": None,
            "demanda_agenda": None, "dia_festa": None, "tipos": None, "ciclo": None, "perdas": None,
-           "mrr": None, "comissao": None, "segmentos": None, "servicos": None,
+           "mrr": None, "comissao": None, "segmentos": None, "servicos": None, "da_visita": None,
            "vendedores": [], "confianca": None}
     todos = (("placar", lambda: _placar(c, conta_id, w, wv, ini, fim, a, wc, wcv)),
              ("anterior", lambda: _placar(c, conta_id, w, wv, ant_ini, ant_fim, a, wc, wcv)),
@@ -606,7 +736,8 @@ def dono(pool, conta_id: int, f: dict, agora: datetime | None = None, perfil: di
              ("segmentos", lambda: _segmentos(c, conta_id, w, wv, ini, fim)),
              ("servicos", lambda: _servicos(c, conta_id, w, wv, ini, fim)),
              ("ciclo", lambda: _ciclo(c, conta_id, w, wv, ini, fim, wc, wcv)),
-             ("perdas", lambda: _perdas(c, conta_id, w, wv, ini, fim, perfil.get("motivos") or MOTIVOS_TODOS)))
+             ("perdas", lambda: _perdas(c, conta_id, w, wv, ini, fim, perfil.get("motivos") or MOTIVOS_TODOS)),
+             ("da_visita", lambda: da_visita(c, conta_id, f, ini, fim)))
     with pool.connection() as c:
         for k, fn in todos:
             if k not in ("placar", "anterior") and k not in blocos:

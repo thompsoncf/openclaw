@@ -129,18 +129,18 @@ _PERFIS = {
         "chave": "eventos", "rotulo": "eventos",
         "vocab": {"data": True, "compromisso": "visita", "compromissos": "visitas",
                   "compromisso_kpi": "visitas que aconteceram", "pedido": "festa",
-                  "oferta": "item"},
+                  "oferta": "item", "proposta_aceita": "propostas assinadas"},
         "filtros": ("periodo", "vendedor", "tipo", "mes", "dia", "conv", "origem", "hora"),
-        "blocos": ("demanda_agenda", "dia_festa", "tipos", "ciclo", "perdas", "hora"),
+        "blocos": ("da_visita", "demanda_agenda", "dia_festa", "tipos", "ciclo", "perdas", "hora"),
         "faixas": ("data_abriu", "pergunta", "festa", "proposta", "toque", "visita"),
     },
     "recorrente": {
         "chave": "recorrente", "rotulo": "serviço recorrente",
         "vocab": {"data": False, "compromisso": "reunião", "compromissos": "reuniões",
                   "compromisso_kpi": "reuniões que aconteceram", "pedido": "serviço",
-                  "oferta": "serviço"},
+                  "oferta": "serviço", "proposta_aceita": "propostas aceitas"},
         "filtros": ("periodo", "vendedor", "segmento", "porte", "uf", "servico", "origem", "hora"),
-        "blocos": ("mrr", "segmentos", "servicos", "reunioes", "ciclo", "perdas", "hora"),
+        "blocos": ("da_visita", "mrr", "segmentos", "servicos", "reunioes", "ciclo", "perdas", "hora"),
         "faixas": ("pergunta", "proposta", "toque", "visita"),
     },
     # CORRETORA DE SEGUROS (nicho `seguros`, migração 242). Nasceu de uma medição
@@ -159,13 +159,13 @@ _PERFIS = {
         # `data` é False: apólice tem vigência, não data reservada esperando sinal.
         "vocab": {"data": False, "compromisso": "cotação", "compromissos": "cotações",
                   "compromisso_kpi": "cotações que aconteceram", "pedido": "apólice",
-                  "oferta": "ramo"},
+                  "oferta": "ramo", "proposta_aceita": "propostas aceitas"},
         "filtros": ("periodo", "vendedor", "segmento", "porte", "uf", "servico", "origem", "hora"),
         # `comissao` no lugar de `mrr`, e a MESMA chave `reunioes` do recorrente: o
         # bloco lê tudo de `vocab`, então trocar a chave só criaria um segundo
         # bloco idêntico. Chave é o que o código guarda, rótulo é o que se lê —
         # a mesma razão pela qual a etapa "Agendado Visita" se chama `qualificado`.
-        "blocos": ("comissao", "segmentos", "servicos", "reunioes", "ciclo", "perdas", "hora"),
+        "blocos": ("da_visita", "comissao", "segmentos", "servicos", "reunioes", "ciclo", "perdas", "hora"),
         "faixas": ("pergunta", "proposta", "toque", "visita"),
     },
     # CLÍNICA (nicho `clinica`, migração 309). A primeira foi a Espaço Pelle,
@@ -185,16 +185,16 @@ _PERFIS = {
         "chave": "clinica", "rotulo": "clínica",
         "vocab": {"data": False, "compromisso": "avaliação", "compromissos": "avaliações",
                   "compromisso_kpi": "avaliações que aconteceram", "pedido": "tratamento",
-                  "oferta": "procedimento"},
+                  "oferta": "procedimento", "proposta_aceita": "propostas aceitas"},
         "filtros": ("periodo", "vendedor", "servico", "origem", "hora"),
-        "blocos": ("servicos", "reunioes", "ciclo", "perdas", "hora"),
+        "blocos": ("da_visita", "servicos", "reunioes", "ciclo", "perdas", "hora"),
         "faixas": ("pergunta", "proposta", "toque", "visita"),
     },
     "produto": {
         "chave": "produto", "rotulo": "produto",
         "vocab": {"data": False, "compromisso": "compromisso", "compromissos": "compromissos",
                   "compromisso_kpi": "compromissos que aconteceram", "pedido": "pedido",
-                  "oferta": "item"},
+                  "oferta": "item", "proposta_aceita": "propostas aceitas"},
         "filtros": (), "blocos": (), "faixas": (),
     },
 }

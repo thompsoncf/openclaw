@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Da visita ao contrato</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* TOKENS — cópia de web/tema.py (_TOKENS). A fonte da verdade é o tema.py. */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23; --line-2:#18211B;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-claro:#4ADE80; --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;
+  --body:"Inter",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--body);max-width:1120px;margin:0 auto;
+  padding:34px 16px 100px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.8rem;font-weight:700;line-height:1.15}
+h2{font-size:1.2rem;font-weight:700;margin-bottom:.2rem}
+.sub{color:var(--text-dim);margin-top:.5rem;max-width:84ch}
+.sec{margin-top:46px}
+.num{font-family:var(--mono);font-size:.72rem;color:var(--neon);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--text-dim);font-size:.92rem;max-width:84ch;margin-top:.4rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);padding:.7rem .9rem;border-radius:0 8px 8px 0;
+  font-size:.86rem;margin-top:1rem;color:var(--text-dim);max-width:88ch}
+.nota b{color:var(--text)}
+.nota.amb{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)} .nota.amb b{color:var(--ambar)}
+.mono{font-family:var(--mono)}
+
+/* tabela da verdade */
+.tb{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+.tb th{font-size:.64rem;letter-spacing:.07em;text-transform:uppercase;color:var(--text-faint);text-align:left;padding:.45rem .6rem;border-bottom:1px solid var(--line)}
+.tb td{padding:.55rem .6rem;border-bottom:1px solid var(--line-2)}
+.tb td.r,.tb th.r{text-align:right}
+.ok{color:var(--neon-claro)} .ruim{color:var(--coral)} .med{color:var(--ambar)}
+.tbw{overflow-x:auto}
+
+/* celulares lado a lado */
+.par{display:grid;grid-template-columns:repeat(2,minmax(0,360px));gap:28px;justify-content:center;margin-top:1.2rem}
+.rot{display:inline-block;font:600 .7rem var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:.25rem .6rem;border-radius:6px;margin-bottom:.5rem}
+.rot.r{background:var(--coral-fundo);color:var(--coral)} .rot.b{background:var(--neon-fundo);color:var(--neon)}
+.cel{border:1px solid var(--line);border-radius:26px;background:var(--bg-2);padding:16px 14px}
+.hd{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.7rem}
+.hd b{font-family:var(--display);font-size:1.15rem}
+.hd span{font-size:.72rem;color:var(--text-faint)}
+.seg{display:flex;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:99px;padding:3px;margin-bottom:.8rem}
+.seg a{flex:1;text-align:center;font-size:.74rem;padding:.3rem 0;border-radius:99px;color:var(--text-dim)}
+.seg a.on{background:var(--neon-fundo);color:var(--neon-claro);font-weight:600}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:.7rem .8rem}
+.kpi.hero{grid-column:1/-1;background:var(--neon-fundo);border-color:var(--neon-borda)}
+.kpi .v{font-family:var(--mono);font-size:1.25rem;font-weight:700}
+.kpi.hero .v{font-size:1.7rem;color:var(--neon-claro)}
+.kpi .l{font-size:.72rem;color:var(--text-dim)}
+.kpi .d{font-size:.7rem;color:var(--text-faint);margin-top:.15rem}
+.kpi .d b{color:var(--text-dim)}
+.eb{font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint);margin:.9rem 0 .4rem}
+.fun{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:.6rem .8rem}
+.fl{display:grid;grid-template-columns:1fr auto;gap:.2rem .6rem;align-items:center;padding:.3rem 0}
+.fl .t{font-size:.76rem;color:var(--text-dim)}
+.fl .n{font-family:var(--mono);font-size:.82rem;text-align:right}
+.fl .bar{grid-column:1/-1;height:5px;border-radius:99px;background:var(--line)}
+.fl .bar i{display:block;height:100%;border-radius:99px;background:var(--neon)}
+.fl.perd .bar i{background:#3a4a41}
+.fl small{grid-column:1/-1;font-size:.66rem;color:var(--ambar)}
+.lin{display:flex;align-items:center;gap:.6rem;padding:.55rem .2rem;border-bottom:1px solid var(--line-2)}
+.lin:last-child{border-bottom:0}
+.rk{width:18px;font-family:var(--mono);font-size:.74rem;color:var(--text-faint)}
+.av{width:30px;height:30px;border-radius:50%;background:var(--neon-fundo);color:var(--neon-claro);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex:none}
+.lin .mid{flex:1;min-width:0}
+.lin .mid b{font-size:.84rem;display:block}
+.lin .mid small{font-size:.68rem;color:var(--text-faint)}
+.lin .rt{text-align:right}
+.lin .rt b{font-family:var(--mono);color:var(--neon-claro);font-size:.9rem}
+.lin .rt small{display:block;font-size:.66rem;color:var(--text-faint)}
+.mud{font-size:.66rem;color:var(--ambar)}
+
+/* relatório (computador) */
+.rel{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:16px;margin-top:.5rem;overflow-x:auto}
+.filt{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.8rem}
+.pl{display:inline-flex;align-items:center;height:30px;padding:0 .75rem;border-radius:99px;border:1px solid var(--line);background:var(--bg-2);font-size:.78rem;color:var(--text-dim)}
+.pl.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-claro);font-weight:600}
+.sw2{display:inline-flex;border:1px solid var(--line);border-radius:99px;overflow:hidden;height:30px}
+.sw2 i{font-style:normal;font-size:.76rem;display:flex;align-items:center;padding:0 .75rem;color:var(--text-dim)}
+.sw2 i.on{background:var(--neon);color:var(--sobre-verde);font-weight:700}
+.mets{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:8px;margin-bottom:.8rem;min-width:640px}
+.met{border:1px solid var(--line);border-radius:10px;padding:.55rem .7rem;background:var(--bg-2)}
+.met .l{font-size:.66rem;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em}
+.met .v{font-family:var(--mono);font-size:.95rem;font-weight:700}
+.rt2{width:100%;border-collapse:collapse;font-size:.8rem;min-width:640px}
+.rt2 th{font-size:.6rem;letter-spacing:.07em;text-transform:uppercase;color:var(--text-faint);text-align:left;padding:.35rem .5rem;border-bottom:1px solid var(--line)}
+.rt2 td{padding:.42rem .5rem;border-bottom:1px solid var(--line-2)}
+.rt2 td.r,.rt2 th.r{text-align:right;font-family:var(--mono)}
+.rt2 tr.novo td{background:rgba(224,163,46,.07)}
+.tag{font-size:.64rem;border-radius:99px;padding:.05rem .45rem;border:1px solid var(--neon-borda);color:var(--neon-claro)}
+
+.qs{counter-reset:q;margin-top:1rem;display:grid;gap:10px}
+.pq{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:12px;padding:13px 15px;font-size:.9rem}
+.pq::before{counter-increment:q;content:counter(q);display:inline-block;width:22px;height:22px;border-radius:50%;background:var(--ambar);color:#1a1205;
+  font:700 .72rem/22px var(--mono);text-align:center;margin-right:.5rem}
+.pq b{color:var(--ambar)}
+.pq p{color:var(--text-dim);font-size:.84rem;margin-top:.35rem}
+
+@media (max-width:780px){ .par{grid-template-columns:minmax(0,360px)} }
+
+.fun4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:1rem}
+.st{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:.8rem .9rem;position:relative}
+.st .l{font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint)}
+.st .v{font-family:var(--mono);font-weight:700;font-size:1.5rem;margin-top:.2rem}
+.st .r{font-family:var(--mono);font-size:.78rem;color:var(--text-dim)}
+.st .pc{position:absolute;right:-9px;top:50%;transform:translate(50%,-50%);z-index:2;background:var(--neon-fundo);color:var(--neon-claro);
+  border:1px solid var(--neon-borda);border-radius:99px;font:700 .68rem var(--mono);padding:.15rem .4rem;white-space:nowrap}
+.st:last-child .pc{display:none}
+.st.fim{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.lst{margin-top:.6rem;font-size:.8rem;color:var(--text-dim);line-height:1.6}
+.lst b{color:var(--text);font-weight:600}
+.chip{display:inline-block;background:var(--bg-2);border:1px solid var(--line);border-radius:99px;padding:.05rem .5rem;margin:.12rem .1rem;font-size:.74rem;color:var(--text-dim)}
+.chip.ok{border-color:var(--neon-borda);color:var(--neon-claro)} .chip.med{border-color:var(--ambar-borda);color:var(--ambar)}
+.grp{margin-top:.9rem}
+.grp h4{font:600 .7rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint);margin-bottom:.2rem}
+.tot td{font-weight:700;border-top:1px solid var(--line);color:var(--text)}
+.mini4{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:.6rem}
+.mini4 .st .v{font-size:1.15rem}
+.pgt{counter-reset:q;margin-top:1rem}
+.pgt li{list-style:none;counter-increment:q;padding:.55rem .7rem .55rem 2.2rem;position:relative;border:1px solid var(--line);border-radius:10px;margin-top:.5rem;font-size:.9rem;background:var(--surface)}
+.pgt li::before{content:counter(q);position:absolute;left:.7rem;top:.55rem;font:700 .8rem var(--mono);color:var(--neon)}
+@media (max-width:760px){.fun4{grid-template-columns:1fr 1fr}.st .pc{display:none}.par{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<h1>Da visita ao contrato — Raio-X e Cockpit</h1>
+<p class="sub">Pedido do dono em 24/09: "colocar o valor total no Raio-X, um comparativo de contratos assinados × propostas assinadas, a conversão de visitas em orçamentos, e se puder pegar os clientes pra comparar — e isso também no cockpit da gestão". Números reais da Prime (conta 34), setembro, só leitura.</p>
+
+<div class="sec"><div class="num">1 · A régua de setembro</div>
+<h2>Quatro degraus, do mesmo período</h2>
+<p class="lede">Cada degrau conta pela sua própria data dentro do mês: visita pelo dia da visita, orçamento pelo dia em que foi feito, proposta assinada pelo dia em que o cliente aceitou (<span class="mono">aprovada_em</span>), contrato pelo dia da assinatura.</p>
+<div class="fun4">
+  <div class="st"><div class="l">Visitas realizadas</div><div class="v">15</div><div class="r">18 marcadas</div></div>
+  <div class="st"><div class="l">Viraram orçamento</div><div class="v">5</div><div class="r">R$ 39.325 · <span class="ok">33% das visitas</span></div></div>
+  <div class="st"><div class="l">Propostas assinadas</div><div class="v">9</div><div class="r">R$ 58.400</div></div>
+  <div class="st fim"><div class="l">Contratos assinados</div><div class="v">10</div><div class="r">R$ 65.490 · <span class="ok">9 de 9 propostas</span></div></div>
+</div>
+<div class="nota"><b>Por que 9 propostas e 10 contratos?</b> As 9 propostas aceitas em setembro viraram contrato, todas. O 10º contrato é da <b>Josiany</b>: ela aceitou a proposta em <b>22/08</b> e o contrato só foi assinado em <b>14/09</b> — 23 dias. O comparativo mostra isso, cliente por cliente.</div>
+</div>
+
+<div class="sec"><div class="num">2 · Os clientes de cada degrau</div>
+<h2>Quem está em cada ponta — o "pegar os clientes pra comparar"</h2>
+<p class="lede">Cada número abre a lista, com o mesmo toque que o Raio-X já usa nas outras colunas. Verde = chegou ao contrato; âmbar = parou no caminho.</p>
+<div class="grp"><h4>Visitaram e ainda não têm orçamento · 10</h4>
+<div class="lst"><span class="chip">Laynne</span><span class="chip">Anna Almeida</span><span class="chip">Jessica Neonanda</span><span class="chip">Maysa Carneiro</span><span class="chip">Aline</span><span class="chip">Laís Targa</span><span class="chip">Anne Oliveira</span><span class="chip">Iasminne Pinheiro</span><span class="chip">Juelane</span><span class="chip">Andressa</span></div></div>
+<div class="grp"><h4>Visitaram, têm orçamento, sem contrato ainda · 4 · R$ 34.325 em jogo</h4>
+<div class="lst"><span class="chip med">Agna Luíza · R$ 7.750</span><span class="chip med">Laryssa Veras · R$ 7.500</span><span class="chip med">Shirley Cristina · R$ 10.500</span><span class="chip med">Elsinha · R$ 8.575</span></div></div>
+<div class="grp"><h4>Visitaram e assinaram · 1</h4>
+<div class="lst"><span class="chip ok">Rône Rodrigues · R$ 5.000 · visita → contrato em 2 dias</span></div></div>
+<div class="tbw"><table class="tb">
+  <tr><th>Contrato</th><th>Cliente</th><th>Proposta assinada</th><th>Contrato assinado</th><th class="r">Espera</th><th class="r">Valor</th></tr>
+  <tr><td class="mono">nº 5</td><td>Claudia Maria</td><td>02/09</td><td>02/09</td><td class="r ok">0 d</td><td class="r mono">R$ 7.750</td></tr>
+  <tr><td class="mono">nº 4</td><td>Beatriz do Carmo</td><td>08/09</td><td>08/09</td><td class="r ok">0 d</td><td class="r mono">R$ 7.500</td></tr>
+  <tr><td class="mono">nº 7</td><td>Renata Costa</td><td>08/09</td><td>08/09</td><td class="r ok">0 d</td><td class="r mono">R$ 5.000</td></tr>
+  <tr><td class="mono">nº 6</td><td>Kelma Costa</td><td>05/09</td><td>08/09</td><td class="r">3 d</td><td class="r mono">R$ 6.500</td></tr>
+  <tr><td class="mono">nº 2</td><td>Josiany Rayra</td><td class="med">22/08</td><td>14/09</td><td class="r ruim">23 d</td><td class="r mono">R$ 7.090</td></tr>
+  <tr><td class="mono">nº 9</td><td>Larissa Rakel</td><td>15/09</td><td>15/09</td><td class="r ok">0 d</td><td class="r mono">R$ 8.600</td></tr>
+  <tr><td class="mono">nº 10</td><td>Rone Rodrigues</td><td>17/09</td><td>18/09</td><td class="r ok">1 d</td><td class="r mono">R$ 5.000</td></tr>
+  <tr><td class="mono">nº 8</td><td>Maria Carolina</td><td>09/09</td><td>21/09</td><td class="r med">12 d</td><td class="r mono">R$ 8.050</td></tr>
+  <tr><td class="mono">nº 11</td><td>Josinalva Costa</td><td>20/09</td><td>21/09</td><td class="r ok">1 d</td><td class="r mono">R$ 5.000</td></tr>
+  <tr><td class="mono">nº 12</td><td>Viviane Alves</td><td>20/09</td><td>21/09</td><td class="r ok">1 d</td><td class="r mono">R$ 5.000</td></tr>
+  <tr class="tot"><td></td><td>10 contratos</td><td>9 no mês</td><td>10 no mês</td><td class="r">mediana 1 d</td><td class="r mono">R$ 65.490</td></tr>
+</table></div>
+</div>
+
+<div class="sec"><div class="num">3 · O valor total no Raio-X</div>
+<h2>Linha de total na tabela por vendedor</h2>
+<p class="lede">A tabela "Por vendedor" hoje não soma. Entra uma linha final com o total do time — leads, propostas, contratos e <b>R$</b> — e a coluna de contratos passa a mostrar o valor de cada um.</p>
+<div class="tbw"><table class="tb">
+  <tr><th>Vendedor</th><th class="r">Leads</th><th class="r">Visitas</th><th class="r">Orçamentos</th><th class="r">Prop. assinadas</th><th class="r">Contratos</th><th class="r">Valor</th></tr>
+  <tr><td>JACQUELINE PRIME</td><td class="r">75</td><td class="r">8</td><td class="r">3</td><td class="r">5</td><td class="r">5</td><td class="r mono">R$ 29.250</td></tr>
+  <tr><td>THIAGO PINHEIRO</td><td class="r">72</td><td class="r">5</td><td class="r ruim">0</td><td class="r">2</td><td class="r">3</td><td class="r mono">R$ 23.740</td></tr>
+  <tr><td>PEDRO YAN PRIME</td><td class="r">73</td><td class="r">2</td><td class="r">2</td><td class="r">2</td><td class="r">2</td><td class="r mono">R$ 12.500</td></tr>
+  <tr class="tot"><td>Total do time</td><td class="r">220</td><td class="r">15</td><td class="r">5</td><td class="r">9</td><td class="r">10</td><td class="r mono">R$ 65.490</td></tr>
+</table></div>
+<div class="nota amb"><b>O Thiago fez 5 visitas e nenhuma virou orçamento</b> no mês — é o tipo de coisa que a linha por vendedor deixa ver. Nenhum dos 3 contratos dele veio de uma visita feita em setembro.</div>
+</div>
+
+<div class="sec"><div class="num">4 · No Cockpit da gestão (Visão)</div>
+<h2>Um bloco "Da visita ao contrato" logo abaixo do funil</h2>
+<p class="lede">No celular, os quatro degraus em dois pares, com a taxa entre eles. Tocar no bloco abre a mesma lista de clientes da seção 2. Segue o período escolhido (Hoje · Semana · Mês · Período).</p>
+<div class="par"><div>
+  <div class="cel">
+    <div class="hd"><b>Equipe</b><span>acompanhe o time</span></div>
+    <div class="seg"><a>Hoje</a><a>Semana</a><a class="on">Mês</a><a>Período ▾</a></div>
+    <div class="num" style="margin-top:.4rem">Da visita ao contrato</div>
+    <div class="mini4">
+      <div class="st"><div class="l">Visitas</div><div class="v">15</div><div class="r">33% viram orçamento</div></div>
+      <div class="st"><div class="l">Orçamentos</div><div class="v">5</div><div class="r">R$ 39.325</div></div>
+      <div class="st"><div class="l">Propostas assinadas</div><div class="v">9</div><div class="r">R$ 58.400</div></div>
+      <div class="st fim"><div class="l">Contratos</div><div class="v">10</div><div class="r">R$ 65.490</div></div>
+    </div>
+    <div class="lst" style="margin-top:.7rem">4 visitaram, têm orçamento e ainda não assinaram · <b>R$ 34.325 em jogo</b> ›</div>
+  </div></div>
+</div>
+</div>
+
+<div class="sec"><div class="num">5 · Pra aprovar</div>
+<ol class="pgt">
+  <li><b>"Valor total"</b> é a linha de total do time na tabela por vendedor, com o R$ (seção 3)? Ou você pensou noutro total?</li>
+  <li><b>Conversão de visitas:</b> conta a visita <b>realizada</b> no período e se aquele lead tem orçamento (feito antes ou depois da visita). Serve?</li>
+  <li><b>Nichos (§6):</b> na ZAQ (recorrente) o degrau vira "Reuniões → Orçamentos → Propostas aceitas → Contratos"; em conta de produto o bloco não aparece. Pode ser assim?</li>
+  <li>No Cockpit, só <b>dono e gestor</b> veem o bloco (o vendedor não vê a lista dos colegas). Ok?</li>
+</ol>
+</div>
+</body></html>

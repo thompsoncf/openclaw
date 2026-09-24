@@ -280,12 +280,17 @@ class Lancamento:
     # Ambos podem ser None (retrocompatível com a categoria livre).
     plano_conta_id: int | None = None
     centro_custo_id: int | None = None
+    # O TIPO do gasto (325): 'fixa' | 'eventual' | 'investimento' | None. É uma
+    # terceira pergunta, separada do plano (o que é) e do centro (de qual área)
+    # — correção do dono em 24/09/2026. Ver finance/tipo_despesa.py.
+    tipo_despesa: str | None = None
     id: int | None = None
 
     @classmethod
     def criar(cls, tipo, valor_reais, categoria, descricao="", data=None,
               pagamento="", forma_pagamento="", origem="manual", comprovante="",
-              natureza=None, plano_conta_id=None, centro_custo_id=None):
+              natureza=None, plano_conta_id=None, centro_custo_id=None,
+              tipo_despesa=None):
         tipo = Tipo(tipo)
         return cls(
             tipo=tipo,
@@ -300,4 +305,5 @@ class Lancamento:
             natureza=natureza,
             plano_conta_id=plano_conta_id,
             centro_custo_id=centro_custo_id,
+            tipo_despesa=tipo_despesa,
         )

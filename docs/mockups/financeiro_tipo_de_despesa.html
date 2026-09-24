@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tipo de despesa — separado do centro de custo</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --surface-2:#182219; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --ambar:#E0A32E; --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral:#E0574F; --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul:#7bb8e6; --azul-fundo:#122029; --azul-borda:#1f3a4d; --roxo:#C9A3E0;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:Inter,system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-wrap:anywhere}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;text-wrap:balance;margin:0}
+code{font-family:var(--mono);font-size:.85em;color:var(--roxo)}
+b{font-weight:600}
+.wrap{max-width:1060px;margin:0 auto;padding:2.4rem 1rem 5rem;display:flex;flex-direction:column;gap:2.2rem}
+.k{font-family:var(--mono);font-size:.68rem;color:var(--neon);letter-spacing:.08em;margin-bottom:.35rem;text-transform:uppercase}
+.head h1{font-size:clamp(1.5rem,4.4vw,2.2rem);margin:.3rem 0 .6rem}
+.head p{color:var(--text-dim);max-width:76ch;margin:0 0 .5rem}
+.head p b{color:var(--text)}
+
+.item{border:1px solid var(--line);border-radius:16px;background:var(--bg-2);padding:1rem 1.05rem;display:flex;flex-direction:column;gap:.8rem;scroll-margin-top:1rem}
+.item>header{display:flex;gap:.65rem;align-items:flex-start;flex-wrap:wrap}
+.item .num{font:700 1rem/1 var(--display);color:var(--bg);background:var(--neon);border-radius:9px;
+  min-width:34px;height:32px;padding:0 .4rem;display:flex;align-items:center;justify-content:center;flex:none}
+.item h2{font-size:1.08rem;flex:1 1 300px;min-width:0}
+.item .voce{display:block;font:400 .74rem/1.4 var(--body);color:var(--neon-bright);margin-top:.25rem}
+.bl{display:flex;flex-direction:column;gap:.3rem}
+.bl>h4{font:600 .66rem/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--text-faint)}
+.bl>p{margin:0;font-size:.87rem;color:var(--text-dim)}
+.bl>p b{color:var(--text)}
+.bl.prop>h4{color:var(--azul)} .bl.risco>h4{color:var(--coral)}
+
+.medida{border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:12px;padding:.75rem .9rem;display:flex;flex-direction:column;gap:.6rem}
+.medida h4{font:600 .66rem/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:#F0A9A2}
+.medida .nums{display:grid;grid-template-columns:repeat(4,1fr);gap:.45rem}
+@media (max-width:740px){.medida .nums{grid-template-columns:repeat(2,1fr)}}
+.medida .n{border:1px solid var(--coral-borda);border-radius:9px;background:#1C0F0F;padding:.5rem .55rem}
+.medida .n b{display:block;font:600 1.3rem/1 var(--display);color:var(--coral);font-variant-numeric:tabular-nums}
+.medida .n span{display:block;font-size:.63rem;color:var(--text-dim);margin-top:.28rem;line-height:1.35}
+.medida p{margin:0;font-size:.83rem;color:#EED6D3}.medida p b{color:#fff}
+.medida.verde{border-color:var(--neon-borda);background:var(--neon-fundo)}
+.medida.verde h4{color:var(--neon-bright)}
+.medida.verde .n{border-color:var(--neon-borda);background:#0C1A12}
+.medida.verde .n b{color:var(--neon-bright)}
+.medida.verde p{color:#CFE7D8}
+
+.tabwrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table.t{width:100%;border-collapse:collapse;font-size:.79rem;min-width:560px}
+table.t th{font:500 .6rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);text-align:left;padding:.5rem .65rem;border-bottom:1px solid var(--line)}
+table.t td{padding:.5rem .65rem;border-bottom:1px solid var(--line);color:var(--text-dim);vertical-align:top}
+table.t tr:last-child td{border-bottom:none}
+table.t td:first-child{color:var(--text);font-weight:500}
+table.t td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mono{font-family:var(--mono);font-size:.76rem}
+.ruim{color:var(--coral)} .bom{color:var(--neon-bright)} .aviso{color:var(--ambar)} .inf{color:var(--azul)}
+
+.grade2{display:grid;grid-template-columns:1fr 1fr;gap:.85rem;align-items:start}
+@media (max-width:860px){.grade2{grid-template-columns:1fr}}
+.cx{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:.75rem .85rem;display:flex;flex-direction:column;gap:.5rem}
+.cx>h4{font-size:.85rem}
+.cx .nota{font-size:.78rem;color:var(--text-dim);margin:0}
+.cx .nota b{color:var(--text)}
+
+.tela{border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden}
+.tela .tt{padding:.45rem .75rem;border-bottom:1px solid var(--line);font:500 .68rem var(--mono);
+  letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint);background:var(--bg-2)}
+.tela .tc{padding:.75rem}
+
+/* pílulas da aba Empresa */
+.pils{display:flex;flex-wrap:wrap;gap:.35rem}
+.pil{flex:1 1 auto;min-width:96px;text-align:center;padding:.45rem .55rem;border-radius:9px;
+  border:1px solid var(--line);background:var(--surface-2);color:var(--text-dim);font-size:.74rem;line-height:1.3}
+.pil b{display:block;font-family:var(--mono);font-size:.84rem;color:var(--text)}
+.pil.on{background:var(--ambar-fundo);border-color:var(--ambar-borda);color:#f0dca6}
+.pil.on b{color:#f0dca6}
+.pil.novo{background:var(--coral-fundo);border-color:var(--coral);color:#F0A9A2}
+.pil.novo b{color:var(--coral)}
+
+.linha{display:flex;gap:.55rem;align-items:center;padding:.45rem .1rem;border-bottom:1px solid var(--line);font-size:.79rem}
+.linha:last-child{border-bottom:none}
+.linha .d{flex:1 1 auto;min-width:0}
+.linha .d i{display:block;font-style:normal;font-size:.69rem;color:var(--text-faint);margin-top:.1rem}
+.linha .v{font-family:var(--mono);white-space:nowrap;font-variant-numeric:tabular-nums}
+.bt{display:inline-flex;align-items:center;gap:.3rem;border-radius:8px;padding:.3rem .65rem;font-size:.76rem;
+  border:1px solid var(--line);background:var(--bg-2);color:var(--text-dim);white-space:nowrap}
+.bt.pr{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright)}
+.bt.am{border-color:var(--ambar-borda);background:var(--ambar-fundo);color:var(--ambar)}
+
+.zap{border:1px solid var(--line);border-radius:14px;background:#0B1410;padding:.75rem;display:flex;flex-direction:column;gap:.4rem}
+.bolha{border-radius:12px;padding:.5rem .7rem;font-size:.79rem;max-width:90%;line-height:1.45}
+.bolha.dele{background:var(--surface-2);align-self:flex-start;border-bottom-left-radius:4px}
+.bolha.zaq{background:#0F3024;align-self:flex-end;border-bottom-right-radius:4px;color:#DFF3E7}
+.bolha .bts{display:flex;gap:.3rem;margin-top:.45rem;flex-wrap:wrap}
+.bolha .bts .bt{font-size:.71rem;padding:.24rem .5rem}
+
+.papel{background:#fff;color:#111;border-radius:8px;padding:.9rem 1rem;font-family:Arial,Helvetica,sans-serif;font-size:.76rem;line-height:1.5}
+.papel .cab{display:flex;justify-content:space-between;gap:.7rem;border-bottom:2px solid #000;padding-bottom:.45rem;margin-bottom:.6rem;flex-wrap:wrap}
+.papel .cab .e{font-weight:700;font-size:.92rem}
+.papel .cab .e small{display:block;font-weight:400;font-size:.64rem;color:#444}
+.papel .cab .n{text-align:right;font-size:.66rem;color:#333;white-space:nowrap}
+.papel .cab .n b{display:block;font-size:.9rem;color:#111}
+.papel .val{font-size:1.1rem;font-weight:700;margin:.45rem 0 .15rem}
+.papel .ext{font-size:.7rem;color:#333;font-style:italic;margin-bottom:.6rem}
+.papel .ass{margin-top:1.2rem;border-top:1px solid #000;padding-top:.25rem;font-size:.66rem;color:#333;max-width:250px}
+.papel .rod{margin-top:.7rem;padding-top:.45rem;border-top:1px dashed #bbb;font-size:.64rem;color:#555}
+
+.dec{border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:12px;padding:.7rem .85rem}
+.dec h4{font:600 .66rem/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--ambar);margin-bottom:.35rem}
+.dec p{margin:0;font-size:.84rem;color:#F2E2C4}
+.dec p b{color:#fff}
+.dec p+p{margin-top:.4rem}
+
+.ordem{border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:16px;padding:1rem}
+.ordem h2{font-size:1.12rem;color:var(--neon-bright);margin-bottom:.4rem}
+.ordem>p{color:#CFE7D8;margin:.2rem 0 0;font-size:.86rem}
+.pr{border:1px solid var(--neon-borda);border-radius:11px;background:#0C1A12;padding:.65rem .8rem;margin-top:.6rem}
+.pr h3{font-size:.92rem;color:#fff;display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap}
+.pr h3 em{font-style:normal;font:500 .64rem var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--neon)}
+.pr p{margin:.3rem 0 0;font-size:.82rem;color:#9FC2AC}
+.pr p b{color:#DFF3E7}
+hr.sep{border:0;border-top:1px solid var(--line);margin:0}
+
+.chips{display:flex;gap:.35rem;flex-wrap:wrap}
+.chip{border:1px solid var(--line);border-radius:999px;padding:.3rem .75rem;font-size:.78rem;color:var(--text-dim);background:var(--surface-2)}
+.chip.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--neon-bright);font-weight:600}
+.chip.fx{border-color:#1f3a4d;color:var(--azul)} .chip.ev{border-color:#4a3a5a;color:var(--roxo)} .chip.iv{border-color:var(--neon-borda);color:var(--neon-bright)}
+.lin{display:flex;justify-content:space-between;gap:.6rem;align-items:center;padding:.38rem 0;border-bottom:1px solid var(--line);font-size:.82rem}
+.lin:last-child{border-bottom:none}
+.lin .v{font-family:var(--mono);white-space:nowrap}
+.pt{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;margin-right:.45rem}
+.barra{display:flex;height:12px;border-radius:999px;overflow:hidden;background:var(--surface-2);margin:.35rem 0 .15rem}
+.barra span{display:block;height:100%}
+.campo{display:flex;flex-direction:column;gap:.25rem;font-size:.76rem;color:var(--text-dim)}
+.campo .in{border:1px solid var(--line);border-radius:8px;padding:.42rem .55rem;color:var(--text);background:var(--bg);font-size:.8rem}
+.dec{border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:12px;padding:.75rem .9rem}
+.dec h4{font:600 .66rem/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--neon-bright);margin-bottom:.4rem}
+.dec p{margin:0;font-size:.85rem;color:#CFE7D8}
+.cls{display:flex;justify-content:space-between;gap:.5rem;align-items:center;flex-wrap:wrap;padding:.45rem 0;border-bottom:1px solid var(--line);font-size:.8rem}
+.cls .d{flex:1 1 180px;min-width:0}
+.cls .d i{display:block;font-style:normal;font-size:.7rem;color:var(--text-faint)}
+</style>
+</head>
+<body><div class="wrap">
+
+<header class="head">
+  <div class="k">Mockup · para aprovação · 24/09/2026</div>
+  <h1>Tipo de despesa: separado do centro de custo</h1>
+  <p>Você disse: <b>"fixa, eventual, investimento não é centro de custo, tem que ser separado para ter maior clareza no relatório do gestor"</b>. E escolheu a <b>opção A</b>: o que já foi classificado vira tipo, e o centro fica como está.</p>
+  <p>Toda despesa passa a responder <b>três perguntas diferentes</b>, cada uma no seu campo. Nenhum centro de custo é criado, renomeado, desativado ou apagado.</p>
+</header>
+
+<section class="item">
+  <header><span class="num">1</span><h2>Os três campos, cada um com uma pergunta</h2></header>
+  <div class="tabwrap"><table class="t">
+    <tr><th>Campo</th><th>Pergunta</th><th>Exemplo na Prime</th><th>Hoje</th></tr>
+    <tr><td>Plano de contas</td><td>O que é o gasto?</td><td>5.1.09 Diaristas</td><td class="bom">já existe</td></tr>
+    <tr><td>Centro de custo</td><td>De qual área do negócio?</td><td>Buffet · Locação Espaço · Despesa com Evento</td><td class="bom">já existe, <b>sem mudança</b></td></tr>
+    <tr><td>Tipo de despesa</td><td>Que tipo de gasto?</td><td><span class="chip fx">Fixa</span> <span class="chip ev">Eventual</span> <span class="chip iv">Investimento</span></td><td class="inf">novo</td></tr>
+  </table></div>
+  <div class="medida">
+    <h4>Por que misturar dava errado — medido na Prime</h4>
+    <div class="nums">
+      <div class="n"><b>51</b><span>despesas com "DESPESA FIXA / EVENTUAL / INVESTIMENTO" no campo de centro</span></div>
+      <div class="n"><b>5</b><span>com um centro de área de verdade (Despesa com Evento)</span></div>
+      <div class="n"><b>0</b><span>com Buffet, Locação Espaço, Suítes, Mobiliário ou Utensílios</span></div>
+      <div class="n"><b>3</b><span>tipos diferentes pro mesmo plano "Diaristas": fixa, eventual e investimento</span></div>
+    </div>
+    <p>Como era um campo só, quem marcava "fixa" <b>não conseguia</b> dizer de qual área foi. Separados, a mesma despesa diz as duas coisas: "Diarista · Buffet · Eventual".</p>
+  </div>
+</section>
+
+<section class="item">
+  <header><span class="num">2</span><h2>No lançamento e na conta a pagar: três botões</h2></header>
+  <div class="grade2">
+    <div class="tela"><div class="tt">Empresa · nova conta a pagar (e Financeiro · novo lançamento)</div>
+      <div class="tc" style="display:flex;flex-direction:column;gap:.55rem">
+        <div class="campo">Fornecedor<span class="in">MARIA DIARISTA</span></div>
+        <div class="campo">Tipo de despesa
+          <div class="chips"><span class="chip">Fixa</span><span class="chip on">Eventual</span><span class="chip">Investimento</span></div></div>
+        <div class="grade2" style="gap:.5rem">
+          <div class="campo">Plano de contas<span class="in">5.1.09 Diaristas</span></div>
+          <div class="campo">Centro de custo<span class="in">BUFFET</span></div>
+        </div>
+        <p style="margin:0;font-size:.72rem;color:var(--neon-bright)">lembrado da última conta desse fornecedor: Eventual · 5.1.09 · Buffet</p>
+      </div></div>
+    <div class="cx">
+      <h4>Como funciona</h4>
+      <p class="nota"><b>Opcional</b>, como o plano e o centro: ninguém é travado por não escolher.</p>
+      <p class="nota">A <b>memória do fornecedor</b> (entrega 2) passa a lembrar o tipo também.</p>
+      <p class="nota">A <b>baixa</b> leva o tipo pro caixa, junto com o plano e o centro.</p>
+      <p class="nota">No <b>WhatsApp</b>, "foi investimento" vira o <b>tipo</b> Investimento — e não mais o centro, como a entrega 3 fazia. É o conserto do que eu misturei.</p>
+    </div>
+  </div>
+</section>
+
+<section class="item">
+  <header><span class="num">3</span><h2>O quadro do gestor — aba Empresa</h2></header>
+  <div class="tela"><div class="tt">Empresa · Despesas por tipo</div>
+    <div class="tc" style="display:flex;flex-direction:column;gap:.8rem">
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:.82rem"><b>Agosto/2026</b><span class="mono">R$ 32.772,17 · 77% do valor com tipo</span></div>
+        <div class="barra"><span style="width:47%;background:var(--azul)"></span><span style="width:12%;background:var(--roxo)"></span><span style="width:18%;background:var(--neon)"></span><span style="width:23%;background:var(--ambar)"></span></div>
+        <div class="lin"><span><span class="pt" style="background:var(--azul)"></span>Fixa <span class="mut" style="color:var(--text-faint)">· 23</span></span><span class="v">R$ 15.408,38</span></div>
+        <div class="lin"><span><span class="pt" style="background:var(--roxo)"></span>Eventual <span style="color:var(--text-faint)">· 9</span></span><span class="v">R$ 3.933,00</span></div>
+        <div class="lin"><span><span class="pt" style="background:var(--neon)"></span>Investimento <span style="color:var(--text-faint)">· 9</span></span><span class="v">R$ 5.919,13</span></div>
+        <div class="lin aviso"><span><span class="pt" style="background:var(--ambar)"></span>Sem tipo · 17</span><span class="v">R$ 7.511,66</span></div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:.82rem"><b>Setembro/2026</b><span class="mono aviso">R$ 51.790,13 · só 8% do valor com tipo</span></div>
+        <div class="barra"><span style="width:1%;background:var(--azul)"></span><span style="width:1%;background:var(--roxo)"></span><span style="width:7%;background:var(--neon)"></span><span style="width:91%;background:var(--ambar)"></span></div>
+        <div class="lin"><span><span class="pt" style="background:var(--azul)"></span>Fixa · 2</span><span class="v">R$ 483,81</span></div>
+        <div class="lin"><span><span class="pt" style="background:var(--roxo)"></span>Eventual · 2</span><span class="v">R$ 307,90</span></div>
+        <div class="lin"><span><span class="pt" style="background:var(--neon)"></span>Investimento · 6</span><span class="v">R$ 3.462,28</span></div>
+        <div class="lin aviso"><span><span class="pt" style="background:var(--ambar)"></span>Sem tipo · 61</span><span class="v">R$ 47.536,14</span></div>
+      </div>
+      <p style="margin:0;font-size:.74rem;color:var(--text-faint)">Os números acima são os REAIS da Prime, já com a opção A aplicada (os 51 copiados pro tipo).</p>
+    </div></div>
+  <div class="medida verde">
+    <h4>O problema que o quadro mostra — e resolve na mesma tela</h4>
+    <p>Setembro está com <b>91% do valor sem tipo</b> (61 de 71 despesas). Um relatório que abre assim não ajuda o gestor. Por isso o quadro vem com a lista pra classificar <b>com um toque</b>: cada linha tem os três botões, e o toque já grava.</p>
+  </div>
+  <div class="tela"><div class="tt">Empresa · Despesas por tipo · "61 de setembro sem tipo — classificar agora ▾"</div>
+    <div class="tc">
+      <div class="cls"><span class="d">MARIA DIARISTA — R$ 150,00<i>18/09 · 5.1.09 Diaristas · lembrado: Eventual</i></span>
+        <span class="chips"><span class="chip">Fixa</span><span class="chip on">Eventual</span><span class="chip">Investimento</span></span></div>
+      <div class="cls"><span class="d">EQUATORIAL ENERGIA — R$ 2.795,36<i>15/09 · 5.1.02 Água, Luz, Internet</i></span>
+        <span class="chips"><span class="chip">Fixa</span><span class="chip">Eventual</span><span class="chip">Investimento</span></span></div>
+      <div class="cls"><span class="d">SOM E LUZ PRO — R$ 2.555,00<i>12/09 · 5.1.10 Terceirizados · centro DESPESA COM EVENTO</i></span>
+        <span class="chips"><span class="chip">Fixa</span><span class="chip">Eventual</span><span class="chip">Investimento</span></span></div>
+      <p style="margin:.5rem 0 0;font-size:.72rem;color:var(--text-faint)">Quando o fornecedor já teve tipo, ele vem sugerido (ainda não gravado — o toque confirma). Nomes e valores ilustrativos.</p>
+    </div></div>
+</section>
+
+<section class="item">
+  <header><span class="num">4</span><h2>No Financeiro, o card de Despesas</h2></header>
+  <div class="grade2">
+    <div class="tela"><div class="tt">Financeiro · card Despesas · setembro</div>
+      <div class="tc">
+        <div class="lin"><span><span class="pt" style="background:var(--azul)"></span>Empresa</span><span class="v">R$ 51.790,13</span></div>
+        <div class="lin"><span><span class="pt" style="background:var(--text-faint)"></span>Pessoal</span><span class="v">…</span></div>
+        <div style="font:500 .62rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint);margin:.55rem 0 .1rem">Empresa por tipo</div>
+        <div class="lin"><span>Fixa</span><span class="v">R$ 483,81</span></div>
+        <div class="lin"><span>Eventual</span><span class="v">R$ 307,90</span></div>
+        <div class="lin"><span>Investimento</span><span class="v">R$ 3.462,28</span></div>
+        <div class="lin aviso"><span>Sem tipo</span><span class="v">R$ 47.536,14</span></div>
+      </div></div>
+    <div class="cx">
+      <h4>Troca o que eu fiz na entrega 4</h4>
+      <p class="nota">O "Empresa por centro" da entrega 4 era, na prática, a lista fixa/eventual/investimento disfarçada de centro. Ele vira <b>"Empresa por tipo"</b>.</p>
+      <p class="nota">A visão <b>por centro de custo</b> continua onde sempre esteve: no DRE por centro da aba Empresa. Cada relatório responde uma pergunta.</p>
+    </div>
+  </div>
+</section>
+
+<section class="item">
+  <header><span class="num">5</span><h2>A opção A, exatamente</h2></header>
+  <div class="dec"><h4>O que acontece com os 51 já classificados</h4>
+    <p>Cada despesa (e conta a pagar) com o centro "DESPESA FIXA", "DESPESA EVENTUAL" ou "INVESTIMENTO" <b>ganha o tipo correspondente</b>. O centro <b>fica como está</b> — nada é apagado nem trocado. Só se preenche o tipo quando ele está vazio, então rodar duas vezes não muda nada.</p>
+    <p style="margin-top:.45rem">Depois, se o dono quiser, ele mesmo desativa esses três centros na tela de centros de custo e passa a usar os de área (Buffet, Locação…). <b>Eu não mexo neles.</b></p>
+  </div>
+</section>
+
+<section class="item">
+  <header><span class="num">6</span><h2>Vale pra quem</h2></header>
+  <p class="bl" style="margin:0;font-size:.87rem;color:var(--text-dim)">Fixa, eventual e investimento servem pra toda empresa que tem o módulo Empresa — não é assunto de nicho. O aviso nas Novidades vai pra dono e gestor. O vendedor não vê nada disso.</p>
+</section>
+
+</div></body></html>

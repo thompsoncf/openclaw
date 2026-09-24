@@ -432,21 +432,26 @@ def memoria_do_fornecedor(pool, conta_id: int, contraparte: str, descricao: str 
             """select t.descricao, t.categoria,
                       coalesce(t.plano_conta_id, l.plano_conta_id),
                       coalesce(t.centro_custo_id, l.centro_custo_id),
-                      coalesce(t.pago_em, t.vencimento)
+                      coalesce(t.pago_em, t.vencimento),
+                      -- o TIPO (325) lido pelo jsonb da linha: base sem a 325
+                      -- continua lembrando o resto
+                      coalesce(to_jsonb(t)->>'tipo_despesa', to_jsonb(l)->>'tipo_despesa')
                  from titulos t
                  left join lancamentos l on l.id = t.lancamento_id and l.conta_id = t.conta_id
                 where t.conta_id = %s and t.tipo = %s and t.status <> 'cancelado'
                   and lower(btrim(t.contraparte)) = lower(btrim(%s))
                   and (t.plano_conta_id is not null or t.centro_custo_id is not null
-                       or l.plano_conta_id is not null or l.centro_custo_id is not null)
+                       or l.plano_conta_id is not null or l.centro_custo_id is not null
+                       or to_jsonb(t)->>'tipo_despesa' is not null
+                       or to_jsonb(l)->>'tipo_despesa' is not null)
                 order by coalesce(t.pago_em, t.vencimento) desc, t.id desc
                 limit 50""",
             (conta_id, tipo, cp)).fetchall()
-    for desc, cat, plano, centro, _quando in rows:
+    for desc, cat, plano, centro, _quando, tipo_d in rows:
         if alvo is not None and not _mesma_forma(alvo, forma_da_descricao(desc)):
             continue
         return {"categoria": cat or None, "plano_conta_id": plano,
-                "centro_custo_id": centro, "de": desc}
+                "centro_custo_id": centro, "tipo_despesa": tipo_d, "de": desc}
     return None
 
 
@@ -469,7 +474,8 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
                  cliente_id: int | None = None,
                  precisa_aprovacao: bool | None = None,
                  plano_conta_id=None,
-                 centro_custo_id=None) -> dict:
+                 centro_custo_id=None,
+                 tipo_despesa=None) -> dict:
     """Cria um título aberto. tipo: 'pagar' | 'receber'. cliente_id LIGA o título
     a um cliente da base (honorário/venda a prazo aparece na ficha dele).
 
@@ -530,6 +536,11 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
             cols.append("plano_conta_id"); vals.append(plano_ok)
         if centro_ok:
             cols.append("centro_custo_id"); vals.append(centro_ok)
+    # o TIPO (325), pelo mesmo motivo: só quando veio, e só se for um dos três
+    from .tipo_despesa import normalizar as _norm_tipo
+    tipo_ok = _norm_tipo(tipo_despesa) if tipo == "pagar" else None
+    if tipo_ok:
+        cols.append("tipo_despesa"); vals.append(tipo_ok)
     with pool.connection() as c:
         r = c.execute(
             f"insert into titulos ({', '.join(cols)}) "
@@ -542,7 +553,8 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
             "status": "aberto", "recorrente": bool(recorrente),
             "periodicidade": periodicidade, "valor_variavel": valor_variavel,
             "cliente_id": cli_id, "aprovacao": aprov,
-            "plano_conta_id": plano_ok, "centro_custo_id": centro_ok}
+            "plano_conta_id": plano_ok, "centro_custo_id": centro_ok,
+            "tipo_despesa": tipo_ok}
 
 
 def listar_titulos(pool, conta_id: int, status: str = "aberto",
@@ -566,7 +578,8 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
                        coalesce(nullif(dono.nome,''), dono.email, '') as aprovado_nome,
                        t.aprovado_em,
                        t.plano_conta_id, pc.codigo, pc.nome,
-                       t.centro_custo_id, cc.nome
+                       t.centro_custo_id, cc.nome,
+                       to_jsonb(t)->>'tipo_despesa'
                   from titulos t
                   left join clientes cl on cl.id = t.cliente_id
                   left join pessoas p on p.id = cl.pessoa_id
@@ -623,6 +636,8 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
             "plano_conta_id": r[23], "plano_codigo": r[24] or "",
             "plano_nome": r[25] or "",
             "centro_custo_id": r[26], "centro_nome": r[27] or "",
+            # o TIPO (325): fixa | eventual | investimento | None
+            "tipo_despesa": r[28],
         })
     return out
 
@@ -793,7 +808,8 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
              returning tipo, descricao, contraparte, valor_centavos, categoria,
                        recorrente, vencimento, criado_por, pago_sem_autorizacao,
                        aprovacao, periodicidade, valor_variavel,
-                       plano_conta_id, centro_custo_id""",
+                       plano_conta_id, centro_custo_id,
+                       to_jsonb(titulos)->>'tipo_despesa'""",
             (data_pagto, acrescimo_centavos, titulo_id, conta_id),
         ).fetchone()
         if not t:
@@ -818,7 +834,9 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                           # de novo, à mão, na lista do Financeiro — na Prime,
                           # 20 de 20 em setembro com plano e 1 de 20 com centro,
                           # porque só o plano tinha aviso cobrando.
-                          plano_conta_id=t[12], centro_custo_id=t[13])
+                          plano_conta_id=t[12], centro_custo_id=t[13],
+                          # e o TIPO (325), a terceira pergunta
+                          tipo_despesa=t[14])
         # A quem o lançamento pertence: a QUEM ORIGINOU o título (titulos.criado_por),
         # não a quem clicou em "pago". Antes ia o `membro_id` da baixa — então a
         # comissão da venda ia parar em quem deu baixa (quase sempre o dono, ou
@@ -903,6 +921,9 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                      bool(t[11]), t[7], t[9], t[12], t[13]),
                 ).fetchone()
                 proximo_id = r[0]
+                if t[14]:   # o tipo repete junto: o aluguel fixo continua fixo
+                    c.execute("update titulos set tipo_despesa=%s where id=%s",
+                              (t[14], proximo_id))
         if conn is None:
             c.commit()
     return {"ok": True, "lancamento_id": salvo.id, "proximo_titulo_id": proximo_id,
@@ -1431,6 +1452,19 @@ def conciliar_titulo(pool, conta_id: int, titulo_id: int, lancamento_id: int) ->
                   and ((l.plano_conta_id is null and t.plano_conta_id is not null)
                     or (l.centro_custo_id is null and t.centro_custo_id is not null))""",
             (lancamento_id, conta_id, titulo_id))
+        # o TIPO (325), pela mesma regra do vazio. Num savepoint: base sem a 325
+        # (esquema de teste antigo) segue conciliando igual.
+        try:
+            with c.transaction():
+                c.execute(
+                    """update lancamentos l set tipo_despesa = t.tipo_despesa
+                         from titulos t
+                        where l.id = %s and l.conta_id = %s
+                          and t.id = %s and t.conta_id = l.conta_id
+                          and l.tipo_despesa is null and t.tipo_despesa is not null""",
+                    (lancamento_id, conta_id, titulo_id))
+        except Exception:  # noqa: BLE001
+            pass
         c.commit()
     return {"ok": True, "titulo_id": titulo_id, "lancamento_id": lancamento_id,
             "descricao": titulo["descricao"], "pago_em": lanc["data"],
@@ -1503,7 +1537,8 @@ def editar_titulo(pool, conta_id: int, titulo_id: int,
                   cliente_id: int | None = None,
                   categoria: str | None = None,
                   plano_conta_id=None,
-                  centro_custo_id=None) -> bool:
+                  centro_custo_id=None,
+                  tipo_despesa=None) -> bool:
     """Corrige descrição, valor e/ou FORNECEDOR de um título. NÃO mexe em
     vencimento nem tipo. Multi-tenant: só o título DESTA conta. Passa só o que
     quer mudar; campo None é ignorado. Descrição vazia é ignorada (não apaga);
@@ -1560,6 +1595,14 @@ def editar_titulo(pool, conta_id: int, titulo_id: int,
                 sets.append("centro_custo_id=null")
             elif centro_ok:
                 sets.append("centro_custo_id=%s"); args.append(centro_ok)
+    # o TIPO (325): None não mexe, vazio apaga, e o que não for um dos três é
+    # ignorado — igual ao centro
+    if tipo_despesa is not None:
+        from .tipo_despesa import normalizar as _norm_tipo
+        if not str(tipo_despesa).strip():
+            sets.append("tipo_despesa=null")
+        elif _norm_tipo(tipo_despesa):
+            sets.append("tipo_despesa=%s"); args.append(_norm_tipo(tipo_despesa))
     if not sets:
         return False
     with pool.connection() as c:

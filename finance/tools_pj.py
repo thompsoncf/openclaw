@@ -40,22 +40,29 @@ def bloco_persona_pj(pool, conta_id: int, empresa_nome: str = "") -> str:
     except Exception:
         res, funcs = {}, []
     nomes = ", ".join(f["nome"] for f in funcs[:8]) or "nenhum cadastrado"
-    # OS CENTROS DE CUSTO DA CONTA, com os nomes que o dono deu. Até 23/09/2026 o
-    # agente só aceitava centro "se a pessoa disser de qual unidade foi" e nunca
-    # sabia quais existiam — por isso "foi investimento" não virava INVESTIMENTO.
-    # Só LEITURA: nenhum centro é criado nem mexido daqui ("não mexer em centro
-    # de custos", regra do dono no mesmo dia).
+    # OS CENTROS DE CUSTO DA CONTA, com os nomes que o dono deu — o agente
+    # passou a conhecê-los em 23/09/2026. Só LEITURA: nenhum centro é criado nem
+    # mexido daqui ("não mexer em centro de custos", regra do dono no mesmo dia).
     try:
         from . import plano_contas as _pc
         centros = [c["nome"] for c in _pc.listar_centros(pool, conta_id)]
     except Exception:
         centros = []
     linha_centros = (
-        f"CENTROS DE CUSTO desta empresa: {', '.join(centros)}.\n"
+        f"CENTROS DE CUSTO desta empresa (a ÁREA do negócio): {', '.join(centros)}.\n"
         "  Ao registrar gasto/receita de EMPRESA, passe centro_custo com o nome EXATO\n"
-        "  de um deles QUANDO A PESSOA DISSER qual é ('foi investimento' -> o\n"
-        "  centro que tem esse nome). Não escolha por conta própria.\n"
+        "  de um deles QUANDO A PESSOA DISSER de qual área foi. Não escolha por conta\n"
+        "  própria.\n"
         if centros else "")
+    # O TIPO DE DESPESA (325) é pergunta PRÓPRIA, separada do centro — correção
+    # do dono em 24/09/2026: "fixa, eventual, investimento não é centro de custo".
+    # Mesmo que exista um centro chamado INVESTIMENTO, "foi investimento" vai no
+    # tipo, nunca no centro.
+    linha_centros += (
+        "TIPO DE DESPESA (fixa, eventual, investimento) é SEPARADO do centro:\n"
+        "  'foi investimento' -> tipo_despesa=investimento; 'é conta fixa' -> fixa;\n"
+        "  'foi eventual' -> eventual. NUNCA ponha isso em centro_custo, mesmo que\n"
+        "  exista um centro com esse nome. Só quando a pessoa disser.\n")
     a_pagar = formatar_brl(res.get("a_pagar_centavos", 0))
     a_receber = formatar_brl(res.get("a_receber_centavos", 0))
     atrasados = res.get("n_atrasados", 0)
@@ -93,7 +100,7 @@ COMPROVANTE QUE QUITA CONTA:
 - Quando o lancar_despesa/lancar_receita devolver "CONTA EM ABERTO QUE ESTE
   PAGAMENTO PODE QUITAR", faça a pergunta que ele pede NA MESMA resposta em que
   confirma o registro. Ex.: "Tem uma conta aberta que bate: Águas de Teresina,
-  R$ 86,22, venceu 21/09 — centro DESPESA FIXA. Esse pagamento quita ela?"
+  R$ 86,22, venceu 21/09 — tipo fixa. Esse pagamento quita ela?"
 - SÓ com o "sim" dele chame quitar_conta_com_pagamento (titulo_id e
   lancamento_id da pergunta). Com duas ou mais contas, ele escolhe QUAL.
 - "Não", silêncio ou outro assunto: não faça nada. A conta continua aberta e
@@ -258,6 +265,18 @@ def construir_ferramentas_pj(pool, conta_id: int,
                     c.commit()
                 if feito:
                     cen_txt = f" Centro de custo: {nome_centro}."
+        # e o TIPO (325), pela mesma regra do vazio
+        from .tipo_despesa import normalizar as _norm_tipo
+        tipo_d = _norm_tipo(e.get("tipo_despesa"))
+        if tipo_d:
+            with pool.connection() as c:
+                feito = c.execute(
+                    """update lancamentos set tipo_despesa=%s
+                        where id=%s and conta_id=%s and tipo_despesa is null
+                    returning id""", (tipo_d, lid, conta_id)).fetchone()
+                c.commit()
+            if feito:
+                cen_txt += f" Tipo: {tipo_d}."
         quando = r["pago_em"].strftime("%d/%m/%Y") if r.get("pago_em") else ""
         return (f"Conta quitada ✅ '{r['descricao']}' "
                 f"({formatar_brl(r['valor_centavos'])}), paga em {quando}. O "
@@ -453,6 +472,7 @@ def construir_ferramentas_pj(pool, conta_id: int,
                     "titulo_id": {"type": "integer", "description": "o titulo_id da pergunta"},
                     "lancamento_id": {"type": "integer", "description": "o lancamento_id da pergunta"},
                     "centro_custo": {"type": "string", "description": "o centro proposto na pergunta, ou outro que a pessoa disser; vazio se nenhum"},
+                    "tipo_despesa": {"type": "string", "enum": ["fixa", "eventual", "investimento"], "description": "o tipo proposto na pergunta, ou outro que a pessoa disser; vazio se nenhum"},
                 },
                 "required": ["titulo_id", "lancamento_id"],
             },
